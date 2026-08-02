@@ -1,0 +1,20 @@
+Name: '蜏株䬎', Comment: '프린터여백', Type: 0, Export Code: -3
+Name: '蜏株↘', Comment: '패치안내', Type: 0, Export Code: -3
+Name: '蜐株⪶', Comment: '진행상황', Type: 0, Export Code: -3
+Name: '蜐株ᴂ', Comment: 'POPUP메세지박스(표시하고 프로그램은 계속 가동)', Type: 0, Export Code: -3
+Name: '蜐株檄', Comment: '색상표', Type: 0, Export Code: -3
+Name: '竛橐紲', Comment: '색상표', Type: 0, Export Code: -3
+Name: '蜐株㯆', Comment: '파일다운로드', Type: 0, Export Code: -3
+Name: '蜒株ꍐꔴ̓', Comment: 'Print 미리보기Window(datastore)', Type: 0, Export Code: -3
+Name: '蜒株Ⲕ', Comment: '프린터찾기', Type: 0, Export Code: -3
+Name: '竛橐扮', Comment: '', Type: 0, Export Code: -3
+Name: 'ѿ桞䑮', Comment: 'Window관리', Type: 0, Export Code: -3
+Name: '蜔株ꛖ', Comment: '출력SETUP작업', Type: 0, Export Code: -3
+Name: '掴栶졢ꔌ̓', Comment: 'Print 미리보기Window', Type: 0, Export Code: -3
+Name: '槞淔', Comment: '로그인', Type: 0, Export Code: -3
+Name: '蜖株㏚', Comment: '프린터여백', Type: 0, Export Code: -3
+Name: 'Ҁ桞', Comment: 'DB테이블관리', Type: 0, Export Code: -3
+Name: '蜗株䷪', Comment: 'DB컬럼관리', Type: 0, Export Code: -3
+Name: '蜘株䗰', Comment: '우편번호조회_다음API', Type: 0, Export Code: -3
+Name: '竛橐嚄', Comment: '시그널타워램프제어', Type: 0, Export Code: -3
+Name: '竛橐䣜', Comment: '최신 모듈확인', Type: 0, Export Code: -3

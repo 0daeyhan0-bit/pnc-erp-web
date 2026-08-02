@@ -1,0 +1,103 @@
+import ctypes
+import os
+import glob
+import time
+import re
+
+pborca_dll = r"C:\Program Files (x86)\Sybase\Shared\PowerBuilder\pborc105.dll"
+orca = ctypes.WinDLL(pborca_dll)
+
+DIRPROC = ctypes.WINFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
+
+TYPE_EXT_MAP = {
+    0: "sra",
+    1: "srd",
+    2: "srf",
+    3: "srm",
+    4: "srq",
+    5: "srs",
+    6: "sru",
+    7: "srw",
+    8: "srp",
+    9: "srj",
+    10: "srp"
+}
+
+orca.PBORCA_SessionOpen.restype = ctypes.c_void_p
+orca.PBORCA_SessionOpen.argtypes = []
+orca.PBORCA_SessionClose.restype = None
+orca.PBORCA_SessionClose.argtypes = [ctypes.c_void_p]
+orca.PBORCA_SessionSetLibraryList.restype = ctypes.c_int
+orca.PBORCA_SessionSetLibraryList.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p), ctypes.c_int]
+orca.PBORCA_LibraryDirectory.restype = ctypes.c_int
+orca.PBORCA_LibraryDirectory.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int, DIRPROC, ctypes.c_void_p]
+orca.PBORCA_LibraryEntryExport.restype = ctypes.c_int
+orca.PBORCA_LibraryEntryExport.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int, ctypes.c_wchar_p, ctypes.c_int]
+
+def export_single_pbl_with_full_libs(pbl_path, all_pbls, base_out_dir):
+    pbl_name = os.path.basename(pbl_path)
+    lib_no_ext = os.path.splitext(pbl_name)[0]
+    out_dir = os.path.join(base_out_dir, lib_no_ext)
+    os.makedirs(out_dir, exist_ok=True)
+
+    entries = []
+
+    def dir_cb(p_info, p_user):
+        try:
+            raw = ctypes.string_at(p_info, 1024)
+            name = raw[784:1024].decode('utf-16-le', errors='ignore').split('\x00')[0].strip()
+            if name and re.match(r'^[a-zA-Z0-9_가-힣]+$', name):
+                entries.append(name)
+        except: pass
+
+    cb = DIRPROC(dir_cb)
+
+    h_session = orca.PBORCA_SessionOpen()
+    if not h_session:
+        return 0, 0
+
+    # MUST pass ALL PBLs to LibraryList so ORCA can resolve parent inherited classes!
+    lib_arr_type = ctypes.c_wchar_p * len(all_pbls)
+    lib_arr = lib_arr_type(*all_pbls)
+    orca.PBORCA_SessionSetLibraryList(h_session, lib_arr, len(all_pbls))
+
+    orca.PBORCA_LibraryDirectory(h_session, pbl_path, "", 0, cb, None)
+
+    unique_names = sorted(list(set(entries)))
+    success = 0
+
+    for name in unique_names:
+        for etype in range(11):
+            buf = ctypes.create_unicode_buffer(10 * 1024 * 1024)
+            res = orca.PBORCA_LibraryEntryExport(h_session, pbl_path, name, etype, buf, 10 * 1024 * 1024)
+            if res == 0:
+                ext = TYPE_EXT_MAP.get(etype, "srx")
+                safe_name = "".join([c if c.isalnum() or c in "._- " else "_" for c in name])
+                with open(os.path.join(out_dir, safe_name + "." + ext), "w", encoding="utf-8") as f:
+                    f.write(buf.value)
+                success += 1
+                break
+
+    orca.PBORCA_SessionClose(h_session)
+    return success, len(unique_names)
+
+def main():
+    src_dir = r"C:\Users\hdy56\OneDrive\바탕 화면\업무서류\ilshinERP__260415"
+    base_out_dir = r"c:\Users\hdy56\OneDrive\바탕 화면\파워빌드분석\src_extracted"
+    pbl_files = sorted(glob.glob(os.path.join(src_dir, "*.pbl")))
+
+    print("=== STARTING PERFECT 3586 OBJECT EXSTRUCTION ===")
+    total_exported = 0
+    total_found = 0
+
+    for i, pbl in enumerate(pbl_files, start=1):
+        succ, found = export_single_pbl_with_full_libs(pbl, pbl_files, base_out_dir)
+        total_exported += succ
+        total_found += found
+        print("[{}/{}] {} -> Found: {}, Exported: {}".format(i, len(pbl_files), os.path.basename(pbl), found, succ))
+
+    print("\nTOTAL PERFECT COMPLETED!")
+    print("Total Found Objects: {}, Total Exported Files: {}".format(total_found, total_exported))
+
+if __name__ == "__main__":
+    main()

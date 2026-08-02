@@ -1,0 +1,272 @@
+
+==========================================================================================
+[dbo.PR_M_ITEM] 컬럼 프로파일
+==========================================================================================
+  행수 = 24,093
+ pos                   컬럼             타입 null    채움    채움%  distinct                                                                                                    샘플(≤25)
+   1            ITEM_CODE  varchar(20.0)   NO 24093 100.0%     24093                                                                                                           
+   2            ITEM_DESC  varchar(50.0)   NO 24093 100.0%      3660                                                                                                           
+   3            ITEM_SPEC varchar(200.0)   NO 24093 100.0%      2642                                                                                                           
+   4           ITEM_GROUP  varchar(10.0)  YES 24065  99.9%        14                               | ACC1 | ACC2 | ACC4 | ACC5 | ACCA | ACCB | ACCC | ACCK | ACCR | ACCS | ACCT
+   5           DIAM_GUBUN   varchar(2.0)  YES 20727  86.0%         1                                                                                                           
+   6            ITEM_DIAM        numeric  YES 13659  56.7%        85                                                                                                           
+   7           ITEM_THICK        numeric  YES 13621  56.5%        49                                                                                                           
+   8          ITEM_LENGTH        numeric  YES 13479  55.9%      1714                                                                                                           
+   9          ITEM_WEIGHT        numeric  YES 13237  54.9%      2845                                                                                                           
+  10            ITEM_COST        numeric  YES 24057  99.9%         1                                                                                                     0.0000
+  11         IN_CUST_CODE  varchar(10.0)   NO 24093 100.0%       162                                                                                                           
+  12            WORK_CODE   varchar(4.0)   NO 24093 100.0%         5                                                                                       | ㅔ1 | P1 | P-1 | P2
+  13        ORG_WORK_CODE   varchar(4.0)  YES 20401  84.7%         1                                                                                                           
+  14            PROD_RATE       smallint  YES 24057  99.9%         5                                                                                    100 | 30 | 40 | 50 | 60
+  15          ITEM_LGROUP  varchar(10.0)   NO 24093 100.0%         8                                                                              |  절삭 | E | F | G | H | I | K
+  16          ITEM_SGROUP  varchar(10.0)   NO 24093 100.0%        13                                    |  110 ASSY | 110 | 120 | 130 | 210 | 220 | 230 | 310 | 910 | 991 | 992
+  17      SALE_CUST_CODE1  varchar(10.0)  YES 24057  99.9%         6                                                                        | 유진솔루션 | 제이에스 | 중앙정밀 | 토탈솔루션 | MTS
+  18         OBTAIN_GUBUN   varchar(1.0)  YES 20719  86.0%         2                                                                                                        | D
+  19           ITEM_CLASS   varchar(1.0)  YES 22885  95.0%        10                                                                        | A | B | D | J | K | L | P | R | T
+  20            PUR_GUBUN   varchar(1.0)  YES 20719  86.0%         3                                                                                                    | B | C
+  21                 UNIT   varchar(2.0)  YES 23537  97.7%         5                                                                                        | EA | KG | SH | ST
+  22     OTHER_ITEM_GUBUN  varchar(50.0)   NO 24093 100.0%         3                                                                                                | (신규) | 신규
+  23          TARIFF_RATE        numeric  YES 23920  99.3%         1                                                                                                       0.00
+  24          KITTING_MIN       smallint  YES 20672  85.8%         2                                                                                                      0 | 1
+  25       WELD_TABLE_QTY        tinyint  YES 20385  84.6%         1                                                                                                          0
+  26        WELD_POINT_IN        tinyint  YES 20672  85.8%         1                                                                                                          0
+  27       WELD_POINT_OUT        tinyint  YES 20672  85.8%         1                                                                                                          0
+  28     DLVY_EXCEPT_FLAG   varchar(1.0)  YES 23649  98.2%         3                                                                                                    | 0 | 1
+  29       SET_EXCEPT_DAY        tinyint  YES 23651  98.2%         2                                                                                                      0 | 3
+  30           W_ITEM_BIG  varchar(30.0)  YES  3603  15.0%         1                                                                                                          0
+  31        W_ITEM_MIDDLE  varchar(30.0)  YES 20672  85.8%         2                                                                                                        | 0
+  32         W_ITEM_SMALL  varchar(30.0)  YES   271   1.1%         1                                                                                                           
+  33            ITEM_SIZE  varchar(30.0)  YES   272   1.1%         2                                                                                                    | 492.9
+  34      ITEM_SIZE_LIMIT  varchar(30.0)  YES   272   1.1%         2                                                                                                        | 4
+  35           ITEM_SIZE1  varchar(30.0)  YES   272   1.1%         2                                                                                                    | 535.1
+  36     ITEM_SIZE_LIMIT1  varchar(30.0)  YES   272   1.1%         2                                                                                                        | 4
+  37           ITEM_SIEZ2  varchar(30.0)  YES   272   1.1%         2                                                                                                    | 602.5
+  38     ITEM_SIZE_LIMIT2  varchar(30.0)  YES   272   1.1%         2                                                                                                        | 4
+  39           VALVE_TYPE varchar(400.0)  YES   272   1.1%         2                                                                    | MJX62254001, MJX62254101, MJX65110301
+  40        ADD_ITEM_TYPE varchar(400.0)  YES   271   1.1%         1                                                                                                           
+  41             S_W_TYPE varchar(400.0)  YES   271   1.1%         1                                                                                                           
+  42             H_S_TYPE varchar(400.0)  YES   271   1.1%         1                                                                                                           
+  43             N_S_TYPE varchar(400.0)  YES   271   1.1%         1                                                                                                           
+  44        PROD_AVG_FLAG   varchar(1.0)  YES 20664  85.8%         3                                                                                                    | 0 | 1
+  45             PROD_TAG   varchar(1.0)  YES 24092 100.0%         3                                                                                                    | 0 | 2
+  46            PROD_TYPE   varchar(1.0)  YES 20660  85.8%         1                                                                                                           
+  47       SAFE_STOCK_MIN       smallint  YES 20661  85.8%         2                                                                                                      0 | 1
+  48       SAFE_STOCK_MAX       smallint  YES 20661  85.8%         2                                                                                                      0 | 1
+  49        MACHING_POINT            int  YES     0   0.0%         0                                                                                                           
+  50      SI_BANG_HISTORY varchar(200.0)  YES   259   1.1%         1                                                                                                           
+  51        FOUR_M_CHANGE varchar(200.0)  YES   259   1.1%         1                                                                                                           
+  52     QUALITY_MATERIAL varchar(200.0)  YES     0   0.0%         0                                                                                                           
+  53      ISSUE_ITEM_CODE   varchar(1.0)  YES     0   0.0%         0                                                                                                           
+  54        XRF_ITEM_CODE  varchar(50.0)  YES     0   0.0%         0                                                                                                           
+  55              REMARKS varchar(100.0)  YES 20401  84.7%         1                                                                                                       기존서버
+  56  AUTO_SALE_STOP_FLAG   varchar(1.0)  YES 20660  85.8%         2                                                                                                        | 0
+  57              ITEM_OD varchar(100.0)  YES   259   1.1%         1                                                                                                           
+  58              ITEM_ID varchar(100.0)  YES   259   1.1%         1                                                                                                           
+  59            LG_WEIGHT        numeric  YES     0   0.0%         0                                                                                                           
+  60         ST_APPLY_YMD   varchar(6.0)  YES   271   1.1%         1                                                                                                           
+  61           PROC_GUBUN   varchar(1.0)  YES 23908  99.2%         2                                                                                                        | 0
+  62       MULT_PROC_FLAG   varchar(1.0)  YES  3500  14.5%         2                                                                                                        | 0
+  63       MULT_PROC_RATE        numeric  YES  3497  14.5%         1                                                                                                       0.00
+  64             GC_GUBUN   varchar(1.0)  YES     0   0.0%         0                                                                                                           
+  65 EXCEPT_PULL_DAY_FLAG   varchar(1.0)  YES   259   1.1%         1                                                                                                           
+  66      EXCEPT_PULL_DAY       smallint  YES   259   1.1%         1                                                                                                          0
+  67          ITEM_RADIUS  varchar(20.0)  YES  3509  14.6%         8                                                                       | 12.5 | 15 | 20 | 25 | 30 | 40 | 50
+  68           ITEM_SIZE3  varchar(30.0)  YES   272   1.1%         1                                                                                                           
+  69     ITEM_SIZE_LIMIT3  varchar(30.0)  YES   271   1.1%         1                                                                                                           
+  70         ITEM_PIPE_ID        numeric  YES  3735  15.5%        56                                                                                                           
+  71          METAL_GUBUN  varchar(20.0)  YES 13539  56.2%         7                                                                            | 고강도 | AL | CU | FE | SS | STS
+  72       ITEM_PIPE_TYPE  varchar(20.0)  YES  3267  13.6%         7                                                                                   | C | H | L | LW | O | S
+  73   ITEM_PIPE_MATERIAL  varchar(20.0)  YES 24053  99.8%         3                                                                                                   | H | OL
+  74          ITEM_REMARK varchar(100.0)  YES     0   0.0%         0                                                                                                           
+  75           ITEM_SIZE4  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  76     ITEM_SIZE_LIMIT4  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  77           ITEM_SIZE5  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  78     ITEM_SIZE_LIMIT5  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  79           ITEM_SIZE6  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  80     ITEM_SIZE_LIMIT6  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  81           ITEM_SIZE7  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  82     ITEM_SIZE_LIMIT7  varchar(30.0)  YES   259   1.1%         1                                                                                                           
+  83        SILVER_SOLDER   varchar(2.0)  YES    26   0.1%         6                                                                                   | 01 | 02 | 03 | 05 | 06
+  84         SUB_MAT_FLAG   varchar(1.0)  YES 23955  99.4%         3                                                                                                    | 0 | 1
+  85      SUB_MAT_WH_CODE  varchar(10.0)  YES 23955  99.4%         3                                                                                            | P0003 | Q1000
+  86           COST_GUBUN  varchar(10.0)  YES  9634  40.0%         5                                                                                            | 1 | 2 | 3 | 5
+  87          ITEM_STATUS  varchar(10.0)  YES 23062  95.7%         7                                                                                    | 1 | 2 | 3 | 4 | 5 | 9
+  88            MAKE_TYPE  varchar(10.0)  YES 18977  78.8%         6                                                                                        | 1 | 2 | 3 | 4 | 5
+  89             JIG_CODE  varchar(20.0)  YES     0   0.0%         0                                                                                                           
+  90        JIG_KEEP_AREA  varchar(20.0)  YES  1986   8.2%       154                                                                                                           
+  91     SAGUB_STOCK_FLAG   varchar(1.0)  YES  1023   4.2%         3                                                                                                    | 0 | 1
+  92     STD_WON_MAT_FLAG   varchar(1.0)  YES    32   0.1%         1                                                                                                          1
+  93            PIPE_KIND   varchar(2.0)  YES  4531  18.8%         7                                                                                 |  1 | 1 | 3 | 4 | LW | PC
+  94       INSERT_USER_ID  varchar(20.0)  YES 24057  99.9%        43                                                                                                           
+  95      INSERT_DATETIME       datetime  YES 24093 100.0%     14826                                                                                                           
+  96            INSERT_IP  varchar(20.0)  YES 20719  86.0%         7  | 200.200.200.125 | 200.200.200.126 | 200.200.200.142 | 200.200.200.160 | 200.200.200.49 | 200.200.200.50
+  97      INSERT_COMPUTER  varchar(20.0)  YES 20719  86.0%         6                                                           | 개발-송민찬 | 목선화 | 자재-조재훈 | 해외지원 | DESKTOP-0K59VQ3
+  98        INSERT_WINDOW  varchar(30.0)  YES 20719  86.0%         3                                                                        | w_pr_master_015 | w_pr_master_090
+  99       UPDATE_USER_ID  varchar(20.0)  YES 24076  99.9%        71                                                                                                           
+ 100      UPDATE_DATETIME       datetime  YES 24093 100.0%     16356                                                                                                           
+ 101            UPDATE_IP  varchar(20.0)  YES 23271  96.6%        70                                                                                                           
+ 102      UPDATE_COMPUTER  varchar(20.0)  YES 23271  96.6%        43                                                                                                           
+ 103        UPDATE_WINDOW  varchar(30.0)  YES 23271  96.6%         4                                                        | w_cs_esti_010 | w_pr_master_015 | w_pr_master_090
+ 104       REAL_ITEM_DIAM        numeric  YES     0   0.0%         0                                                                                                           
+ 105      REAL_ITEM_THICK        numeric  YES     0   0.0%         0                                                                                                           
+ 106     REAL_ITEM_LENGTH        numeric  YES     0   0.0%         0                                                                                                           
+ 107     REAL_ITEM_WEIGHT        numeric  YES     0   0.0%         0                                                                                                           
+
+==========================================================================================
+[dbo.PR_M_ITEM_SUB] 컬럼 프로파일
+==========================================================================================
+  행수 = 70,965
+ pos              컬럼              타입 null    채움    채움%  distinct                                                                                                                                                              샘플(≤25)
+   1       ITEM_CODE   varchar(20.0)   NO 70965 100.0%     70965                                                                                                                                                                     
+   2       PACK_KIND   varchar(30.0)  YES  6229   8.8%       181                                                                                                                                                                     
+   3        PACK_QTY        smallint  YES  6317   8.9%        85                                                                                                                                                                     
+   4   CUST_PACK_QTY        smallint  YES     0   0.0%         0                                                                                                                                                                     
+   5     PROD_WORKER   varchar(10.0)  YES  5198   7.3%       283                                                                                                                                                                     
+   6     INSP_WORKER   varchar(10.0)  YES  5206   7.3%       297                                                                                                                                                                     
+   7         REMARKS  varchar(500.0)  YES  4816   6.8%       280                                                                                                                                                                     
+   8     ERR_REMARKS  varchar(500.0)  YES  1096   1.5%       310                                                                                                                                                                     
+   9       SALE_COST             int  YES   752   1.1%         3                                                                                                                                                      0 | 6517 | 7595
+  10        PUR_COST             int  YES  1838   2.6%        34                                                                                                                                                                     
+  11   STICKER_COLOR    varchar(1.0)  YES  1915   2.7%         3                                                                                                                                                              | 1 | 2
+  12     MAX_PUR_QTY             int  YES   747   1.1%         1                                                                                                                                                                    0
+  13     MIN_PUR_QTY        smallint  YES  3156   4.4%        74                                                                                                                                                                     
+  14  SAFE_STOCK_QTY        smallint  YES   756   1.1%         5                                                                                                                                               0 | 100 | 200 | 3 | 50
+  15   PUR_LEAD_TIME        smallint  YES  4338   6.1%        19                                                                                                                0 | 10 | 14 | 15 | 19 | 2 | 20 | 21 | 28 | 3 | 30 | 4
+  16        ERR_RATE         numeric  YES   747   1.1%         2                                                                                                                                                          0.00 | 1.00
+  17       PIPE_KIND    varchar(2.0)  YES  4732   6.7%         7                                                                                                                                           |  1 | 1 | 3 | 4 | LW | PC
+  18  LG_OBTAIN_FLAG    varchar(1.0)  YES  3143   4.4%         3                                                                                                                                                              | 0 | 1
+  19  DS_OBTAIN_FLAG    varchar(1.0)  YES   747   1.1%         2                                                                                                                                                                  | 0
+  20         RACK_NO   varchar(20.0)  YES 68101  96.0%       678                                                                                                                                                                     
+  21       INSP_FLAG    varchar(1.0)  YES 52317  73.7%         4                                                                                                                                                          | F | N | S
+  22      INSP_COUNT         tinyint  YES  5854   8.2%        32                                                                                                                                                                     
+  23         ZIG_QTY         tinyint  YES  1069   1.5%        10                                                                                                                              0 | 1 | 10 | 12 | 2 | 3 | 4 | 5 | 6 | 7
+  24  MAIN_MACH_CODE    varchar(4.0)  YES   747   1.1%         1                                                                                                                                                                     
+  25     ETC_REMARKS  varchar(200.0)  YES   825   1.2%        19    | (R22) | (R410) | . | 21.07.12 신규 출하 | 21.11.16 S→N 전환 | 5210ㅁ22409ㅊ, | 90010G(1.65)확인요 | 90010H(2.0)확인요 | 공용 | 도면 59003 현물 59006으로 연구소 문의 | 동박+STS 단차 1mm 이내일 것
+  26  PROD_STEP_MEMO  nvarchar(50.0)  YES  3657   5.2%      1205                                                                                                                                                                     
+  27 PROD_STEP_MEMO2 nvarchar(200.0)  YES  2519   3.5%       796                                                                                                                                                                     
+  28     QC_EXTERNAL     nchar(30.0)  YES     4   0.0%         4                                                                   | 1                              | 결함없을것                          | 이상 없을것                        
+  29     QC_MEASURE1   varchar(10.0)  YES   113   0.2%       100                                                                                                                                                                     
+  30     QC_MEASURE2   varchar(10.0)  YES    97   0.1%        86                                                                                                                                                                     
+  31     QC_MEASURE3   varchar(10.0)  YES    56   0.1%        51                                                                                                                                                                     
+  32     QC_MEASURE4   varchar(10.0)  YES     2   0.0%         2                                                                                                                                                            | 225±0.1
+  33       QC_ANGLE1   varchar(10.0)  YES     2   0.0%         2                                                                                                                                                                  | 1
+  34       QC_ANGLE2   varchar(10.0)  YES     1   0.0%         1                                                                                                                                                                     
+  35       QC_ANGLE3   varchar(10.0)  YES     2   0.0%         2                                                                                                                                                                  | 1
+  36        QC_VALVE   varchar(30.0)  YES    25   0.0%        15  | 3A02080E,58024 | 5220A90001R | 5220A90008H | 5220A90010H | 5410A20050Y | 6141A20050Y | 6600L000023 | 719713 | AJJ36719703 | AJJ36739716,AJJ36719715 | AJU36719701
+  37           QC_SW   varchar(30.0)  YES    10   0.0%         5                                                                                                                   | 20004X | 6501A20004X | 6510A20004X | EBF40271407
+  38       QC_ATTACH   varchar(30.0)  YES    37   0.1%        29                                                                                                                                                                     
+  39         QC_CAPI   varchar(30.0)  YES     0   0.0%         0                                                                                                                                                                     
+  40         QC_HOLD   varchar(30.0)  YES     0   0.0%         0                                                                                                                                                                     
+  41  QC_INSP_MEMBER   varchar(30.0)  YES     2   0.0%         1                                                                                                                                                                     
+  42    AQL_EXTERNAL   varchar(10.0)  YES     2   0.0%         2                                                                                                                                                            | S-1 2.5
+  43    AQL_MEASURE1   varchar(10.0)  YES     1   0.0%         1                                                                                                                                                              S-1 2.5
+  44    AQL_MEASURE2   varchar(10.0)  YES     1   0.0%         1                                                                                                                                                              S-1 2.5
+  45    AQL_MEASURE3   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  46    AQL_MEASURE4   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  47      AQL_ANGLE1   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  48      AQL_ANGLE2   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  49      AQL_ANGLE3   varchar(10.0)  YES     1   0.0%         1                                                                                                                                                                     
+  50       AQL_VALVE   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  51          AQL_SW   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  52      AQL_ATTACH   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  53        AQL_CAPI   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  54        AQL_HOLD   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  55         AQL_NUT   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  56      AQL_CVALVE   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  57      AQL_SLUDGE   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  58        AQL_PACK   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  59     AQL_CONFIRM   varchar(10.0)  YES     0   0.0%         0                                                                                                                                                                     
+  60  INSERT_USER_ID   varchar(20.0)  YES 19775  27.9%       115                                                                                                                                                                     
+  61 INSERT_DATETIME        datetime  YES 19775  27.9%     18651                                                                                                                                                                     
+  62       INSERT_IP   varchar(20.0)  YES 19719  27.8%       229                                                                                                                                                                     
+  63 INSERT_COMPUTER   varchar(20.0)  YES 19719  27.8%       227                                                                                                                                                                     
+  64   INSERT_WINDOW   varchar(30.0)  YES 19719  27.8%         2                                                                                                                                      w_cs_esti_010 | w_pr_master_090
+  65  UPDATE_USER_ID   varchar(20.0)  YES 26494  37.3%       138                                                                                                                                                                     
+  66 UPDATE_DATETIME        datetime  YES 26494  37.3%     26487                                                                                                                                                                     
+  67       UPDATE_IP   varchar(20.0)  YES 26494  37.3%       277                                                                                                                                                                     
+  68 UPDATE_COMPUTER   varchar(20.0)  YES 26494  37.3%       262                                                                                                                                                                     
+  69   UPDATE_WINDOW   varchar(30.0)  YES 26494  37.3%         2                                                                                                                                      w_cs_esti_010 | w_pr_master_090
+  70      TRANSIT_NO   varchar(20.0)  YES   675   1.0%        80                                                                                                                                                                     
+  71      change_div   varchar(20.0)  YES   565   0.8%         2                                                                                                                                                                  | 1
+
+==========================================================================================
+[dbo.PR_M_ITEM_HIS] 컬럼 프로파일
+==========================================================================================
+  행수 = 254
+ pos              컬럼            타입 null  채움    채움% distinct 샘플(≤25)
+   1        OLD_CODE varchar(20.0)   NO 254 100.0%                 
+   2        NEW_CODE varchar(20.0)   NO 254 100.0%                 
+   3 INSERT_DATETIME      datetime   NO 254 100.0%                 
+   4  INSERT_USER_ID varchar(20.0)  YES 254 100.0%                 
+
+==========================================================================================
+[dbo.PR_M_ITEM_BOM] 컬럼 프로파일
+==========================================================================================
+  행수 = 42,361
+ pos                  컬럼            타입 null    채움    채움% distinct 샘플(≤25)
+   1           ITEM_CODE varchar(20.0)   NO 42361 100.0%                 
+   2            MAT_CODE varchar(20.0)   NO 42361 100.0%                 
+   3             BOM_SEQ      smallint  YES 38841  91.7%                 
+   4      FROM_APPLY_YMD  varchar(6.0)   NO 42361 100.0%                 
+   5        TO_APPLY_YMD  varchar(6.0)  YES 42361 100.0%                 
+   6             USE_QTY         float  YES 42361 100.0%                 
+   7           bomOption  varchar(1.0)  YES     0   0.0%                 
+   8              bomLLC  varchar(1.0)  YES     0   0.0%                 
+   9               Wdate varchar(10.0)  YES  9448  22.3%                 
+  10         EXCEPT_FLAG  varchar(1.0)  YES 42361 100.0%                 
+  11          SAGUB_FLAG  varchar(1.0)  YES 42361 100.0%                 
+  12     SET_EXCEPT_FLAG  varchar(1.0)  YES 42361 100.0%                 
+  13           CUST_CODE varchar(10.0)  YES     0   0.0%                 
+  14        KITTING_FLAG  varchar(1.0)  YES 42361 100.0%                 
+  15       VIR_ITEM_FLAG  varchar(1.0)  YES 42349 100.0%                 
+  16          PROC_GUBUN  varchar(1.0)  YES 42361 100.0%                 
+  17    GAGONG_PROC_CODE varchar(10.0)  YES 42360 100.0%                 
+  18         S_WORK_CODE      smallint  YES 41434  97.8%                 
+  19 WH_GAGONG_PROC_CODE varchar(10.0)  YES 42360 100.0%                 
+  20 IN_GAGONG_PROC_CODE varchar(10.0)  YES 42353 100.0%                 
+  21 CS_CALC_EXCEPT_FLAG  varchar(1.0)  YES   358   0.8%                 
+  22     LME_EXCEPT_FLAG  varchar(1.0)  YES  2710   6.4%                 
+  23             REMARKS varchar(15.0)  YES 42361 100.0%                 
+  24      INSERT_USER_ID varchar(20.0)  YES 41119  97.1%                 
+  25     INSERT_DATETIME      datetime  YES 42361 100.0%                 
+  26           INSERT_IP varchar(20.0)  YES 42361 100.0%                 
+  27     INSERT_COMPUTER varchar(20.0)  YES 42361 100.0%                 
+  28       INSERT_WINDOW varchar(30.0)  YES 42361 100.0%                 
+  29      UPDATE_USER_ID varchar(20.0)  YES 42169  99.5%                 
+  30     UPDATE_DATETIME      datetime  YES 42361 100.0%                 
+  31           UPDATE_IP varchar(20.0)  YES 42361 100.0%                 
+  32     UPDATE_COMPUTER varchar(20.0)  YES 42361 100.0%                 
+  33       UPDATE_WINDOW varchar(30.0)  YES 42361 100.0%                 
+
+==========================================================================================
+[PARTNER_ERP_TEST3.nx.item] 컬럼 프로파일
+==========================================================================================
+  행수 = 24,094
+ pos          컬럼              타입 null    채움    채움% distinct 샘플(≤25)
+   1   item_code  nvarchar(30.0)   NO 24094 100.0%                 
+   2   item_name nvarchar(200.0)   NO 24094 100.0%                 
+   3   item_spec nvarchar(200.0)  YES 24093 100.0%                 
+   4   item_type  nvarchar(20.0)   NO 24094 100.0%                 
+   5      sgroup  nvarchar(10.0)  YES 24094 100.0%                 
+   6 metal_gubun  nvarchar(10.0)  YES 24094 100.0%                 
+   7   use_gubun  nvarchar(10.0)  YES     0   0.0%                 
+   8        diam         decimal  YES 24094 100.0%                 
+   9       thick         decimal  YES 24094 100.0%                 
+  10      length         decimal  YES 24094 100.0%                 
+  11  net_weight         decimal  YES 10692  44.4%                 
+  12        unit  nvarchar(10.0)   NO 24094 100.0%                 
+  13   make_type   nvarchar(2.0)  YES 24094 100.0%                 
+  14     in_cust  nvarchar(10.0)  YES 24094 100.0%                 
+  15 silver_flag             bit   NO 24094 100.0%                 
+  16      status  nvarchar(10.0)   NO 24094 100.0%                 
+  17  cost_gubun   nvarchar(2.0)  YES 24094 100.0%                 
+  18      lgroup  nvarchar(10.0)  YES 24094 100.0%                 
+  19  has_gagong             bit   NO 24094 100.0%                 
+
+==========================================================================================
+[코드마스터] 그룹별 건수 (CM_M_MASTER_DETAIL)
+==========================================================================================
+  코드마스터 조회 실패: Execution failed on sql 'SELECT master_code, COUNT(*) n
+        FROM CM_M_MASTER_DETAIL
+        WHERE master_code IN ('PR001','PR005','PR006','PR008','PR011','PR019','PR021','CM002')
+        GROUP BY master_code ORDER BY master_code': ('42S22', "[42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207) (SQLExecDirectW); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207); [42S22] [Microsoft][ODBC SQL Server Driver][SQL Server]열 이름 'master_code'이(가) 유효하지 않습니다. (207)")

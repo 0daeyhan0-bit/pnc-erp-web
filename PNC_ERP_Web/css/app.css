@@ -1,0 +1,224 @@
+/* ===== PNC ERP — ecount/더존 스타일 ===== */
+.tbl th .wd{font-size:10px;color:var(--muted);margin-left:3px;font-weight:400}
+:root{
+  --brand:#0b5cab; --brand-d:#084b8d; --accent:#2e6fd6;
+  --bg:#eef1f5; --panel:#fff; --line:#dfe3ea; --line-2:#eaedf2;
+  --txt:#1f2733; --muted:#7a8595; --head:#f5f7fa;
+  --ok:#16a34a; --warn:#e0a400; --danger:#dc2626; --info:#2563eb;
+  --radius:7px; --sb-w:236px;
+  font-family:"Malgun Gothic","맑은 고딕",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#app{height:100%}
+body{background:var(--bg);color:var(--txt);font-size:14px}
+button{font-family:inherit;cursor:pointer}
+.muted{color:var(--muted)}
+
+/* Header */
+.hd{height:52px;background:linear-gradient(180deg,var(--brand),var(--brand-d));color:#fff;
+  display:flex;align-items:center;justify-content:space-between;padding:0 16px;gap:16px;
+  box-shadow:0 2px 6px rgba(0,0,0,.15);z-index:20;position:relative}
+.hd-left{display:flex;align-items:center;gap:18px}
+.brand{font-size:20px;font-weight:800;letter-spacing:-.5px;display:flex;align-items:center;gap:7px}
+.brand-mark{background:#fff;color:var(--brand);width:26px;height:26px;border-radius:6px;
+  display:grid;place-items:center;font-size:16px;font-weight:900}
+.brand-sub{font-weight:400;opacity:.85;font-size:15px}
+.hd-company{background:rgba(255,255,255,.15);padding:5px 12px;border-radius:16px;font-size:12.5px;cursor:pointer}
+.hd-center{flex:1;max-width:460px}
+.gsearch{display:flex;align-items:center;background:#fff;border-radius:18px;padding:0 12px;height:34px}
+.gsearch .ic{opacity:.5;font-size:13px}
+.gsearch input{border:0;outline:0;flex:1;padding:0 8px;font-size:13px;background:transparent}
+.hd-right{display:flex;align-items:center;gap:14px}
+.hd-icon{cursor:pointer;font-size:16px;opacity:.9}
+.hd-user{display:flex;align-items:center;gap:7px;font-size:12.5px}
+.avatar{background:#fff;color:var(--brand);width:24px;height:24px;border-radius:50%;
+  display:grid;place-items:center;font-weight:700;font-size:11px}
+.hd-user .muted{color:rgba(255,255,255,.7)}
+
+/* Body layout */
+.body{display:flex;height:calc(100% - 52px)}
+
+/* Sidebar tree (collapsible) */
+.tree{padding:6px 0}
+.tree-leaf{display:flex;align-items:center;gap:8px;padding:8px 16px;font-size:14px;cursor:pointer;
+  color:#37414f;border-left:3px solid transparent}
+.tree-leaf:hover{background:#f2f6fc}
+.tree-leaf.active{background:#eaf2fd;border-left-color:var(--brand);color:var(--brand);font-weight:700}
+.tree-leaf .ic{width:16px;text-align:center;font-size:14px}
+.tree-leaf .badge{margin-left:auto;background:#eef1f5;color:var(--muted);font-size:10.5px;
+  padding:1px 7px;border-radius:9px;font-weight:600}
+.tree-folder{border-bottom:1px solid var(--line-2)}
+.tree-fhead{display:flex;align-items:center;gap:7px;padding:10px 14px;font-size:12.5px;font-weight:700;
+  color:#2b3542;cursor:pointer;user-select:none}
+.tree-fhead:hover{background:#eef3fa}
+.tree-fhead .arw{font-size:10px;color:var(--muted);transition:transform .15s;width:10px}
+.tree-fhead .ic{font-size:14px}
+.tree-children{overflow:hidden}
+.tree-children .tree-leaf{padding-left:36px;font-size:12.5px}
+.tree-folder.collapsed .tree-children{display:none}
+.tree-folder.collapsed .tree-fhead .arw{transform:rotate(-90deg)}
+
+/* Sidebar */
+.sb{width:var(--sb-w);background:var(--panel);border-right:1px solid var(--line);
+  overflow-y:auto;flex-shrink:0}
+.sb-grp-title{font-size:11px;font-weight:700;color:var(--muted);padding:14px 16px 6px;
+  letter-spacing:.5px;text-transform:uppercase}
+.sb-item{display:flex;align-items:center;gap:9px;padding:9px 16px;font-size:14px;cursor:pointer;
+  border-left:3px solid transparent;color:#37414f}
+.sb-item:hover{background:#f2f6fc}
+.sb-item.active{background:#eaf2fd;border-left-color:var(--brand);color:var(--brand);font-weight:700}
+.sb-item .ic{width:16px;text-align:center;font-size:14px}
+.sb-item .badge{margin-left:auto;background:#eef1f5;color:var(--muted);font-size:10.5px;
+  padding:1px 7px;border-radius:9px;font-weight:600}
+
+/* Workspace + Tabs */
+.ws{flex:1;display:flex;flex-direction:column;min-width:0}
+.tabbar{display:flex;flex-wrap:wrap;background:#e4e9f0;border-bottom:1px solid var(--line);min-height:36px;
+  align-items:flex-end;padding:2px 6px 0;gap:3px 3px;row-gap:2px;overflow:visible}
+.tab{display:flex;align-items:center;gap:8px;background:#f0f3f8;border:1px solid var(--line);
+  border-bottom:0;border-radius:6px 6px 0 0;padding:7px 13px;font-size:13.5px;cursor:pointer;
+  color:#4a5563;max-width:200px;white-space:nowrap}
+.tab.active{background:var(--panel);color:var(--brand);font-weight:700}
+.tab .x{opacity:.5;font-size:11px}.tab .x:hover{opacity:1;color:var(--danger)}
+.content{flex:1;overflow:hidden;padding:16px;min-height:0}
+
+/* Page */
+.page-title{font-size:18px;font-weight:800;margin-bottom:3px;display:flex;align-items:center;gap:9px}
+.page-sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:14px}
+.panel-h{padding:10px 14px;border-bottom:1px solid var(--line-2);font-weight:700;font-size:13px;
+  display:flex;align-items:center;gap:8px}
+.panel-b{padding:14px}
+
+/* Toolbar / filters */
+.toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:11px 13px;margin-bottom:12px}
+.toolbar label{font-size:13px;color:var(--muted);font-weight:600}
+.inp,.sel{height:34px;border:1px solid var(--line);border-radius:5px;padding:0 10px;font-size:14px;outline:0;background:#fff}
+.inp:focus,.sel:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(46,111,214,.12)}
+.inp{min-width:200px}
+/* UI규칙: 드롭다운(select) 폭은 글자크기에 맞게 — min-width 200 강제 해제, 내용폭으로 */
+select.inp,select.sel{min-width:0;width:auto}
+.btn{height:34px;padding:0 15px;border:0;border-radius:5px;background:var(--brand);color:#fff;font-weight:600;font-size:13.5px}
+.btn:hover{background:var(--brand-d)}
+.btn.ghost{background:#eef2f8;color:#3a4757}.btn.ghost:hover{background:#e2e8f2}
+.spacer{flex:1}
+
+/* Tables */
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
+/* 넓은 리포트 표: 내용폭으로 축소(빈공간 stretch 방지) → 한 페이지에 최대한 표시 */
+.tbl.fit{width:auto;min-width:0}
+.tbl th{background:var(--head);text-align:left;padding:6px 8px;font-weight:700;color:#48525f;
+  border-bottom:1px solid var(--line);position:sticky;top:0;white-space:nowrap}
+.tbl td{padding:5px 8px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover{background:#f4f8ff}
+.tbl tbody tr.sel{background:#eaf2fd}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl .center{text-align:center}
+/* 컬럼 분리선 (어디서 너비를 줄일지 표시) */
+.tbl th,.tbl td{border-right:1px solid var(--line-2);overflow:hidden}
+.tbl th{border-right-color:#c7ccd4}
+.tbl th:last-child,.tbl td:last-child{border-right:none}
+/* 컬럼 너비 조절 핸들 (모든 th) — 끝까지 밀면 폭 0으로 사라짐 */
+.tbl th{position:sticky}
+.col-resizer{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;user-select:none;z-index:2;border-right:2px solid transparent}
+.col-resizer:hover{border-right-color:#2f6fed}
+/* 규격 등 폭 큰 텍스트 컬럼: 말줄임 */
+.tbl th.wcap,.tbl td.wcap{max-width:110px;overflow:hidden;text-overflow:ellipsis}
+/* 긴 텍스트 컬럼 캡(거래처분류 폭): 이보다 커지는 컬럼만 이 크기로 제한 + 말줄임(드래그로 확장 가능) */
+.tbl th.cap,.tbl td.cap{max-width:86px;overflow:hidden;text-overflow:ellipsis}
+.tbl td.subtot-lbl,.tbl tr.subtot td.right,.tbl tr.grandtot td.right{text-align:right;padding-right:14px}
+/* 재고 강조 그룹 (수불장) */
+.tbl th.gstock,.tbl td.gstock{background:#f2f8f2}
+.tbl td.gstock.amt b{color:#1f7a3d}
+/* 마감 캘린더 */
+.cal{width:100%;border-collapse:collapse;table-layout:fixed}
+.cal th{background:var(--head);border:1px solid var(--line);padding:6px;font-size:12px;font-weight:700;color:#48525f}
+.cal td{border:1px solid var(--line-2);height:64px;vertical-align:top;padding:5px 6px;font-size:12px}
+.cal td.empty{background:#fafbfc}
+.cal .dn{font-weight:700;color:#48525f}
+.cal td.sun .dn{color:#c0392b}.cal td.sat .dn{color:#2f6fed}
+.cal td.closed{background:#e9f6ee}
+.cal td.closed .mk{display:inline-block;margin-top:8px;font-size:11px;font-weight:700;color:#1f7a3d}
+.cal td.open .mk{display:inline-block;margin-top:8px;font-size:11px;color:#c0392b}
+.cal td.today{outline:2px solid #2f6fed;outline-offset:-2px}
+.cal td.future{background:#fafbfc;color:#b7bfc9}
+.cal td[data-day]{cursor:pointer}.cal td[data-day]:hover{background:#eef4ff}
+/* 상태 배지 · 소형 버튼 (마감관리) */
+.badge{display:inline-block;padding:2px 9px;border-radius:11px;font-size:11.5px;font-weight:700}
+.b-green{background:#e3f4e8;color:#1f7a3d}
+.b-red{background:#fbe6e6;color:#c0392b}
+.btn.xs{padding:3px 9px;font-size:11.5px}
+/* 소계/총계 행 (집계표) */
+.tbl tr.subtot td{background:#eef3fb;font-weight:700;border-top:1px solid #c7d4e8;cursor:default}
+/* 총계 행: 스크롤해도 하단에 항상 고정 + 본문과 떨어진(화면 밖) footer 느낌 */
+.tbl tr.grandtot td{background:#cfe0f5;font-weight:800;cursor:default;
+  position:sticky;bottom:0;z-index:3;border-top:2px solid #7f9cc9;
+  box-shadow:0 -6px 10px -4px rgba(20,44,90,.28)}
+/* 총계 2줄: 수량줄(위) sticky로 금액줄 바로 위에 고정 */
+.tbl tr.grandtot.gtq td{bottom:28px;z-index:4;box-shadow:none;border-top:2px solid #7f9cc9;border-bottom:1px solid #b7c9e6}
+.famt{color:#1f7a3d;font-size:11px;font-weight:700}
+.tbl td .qty{font-weight:800}
+.tbl td.vat6{color:#c0392b}
+.grid-wrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:#fff}
+.rowcount{font-size:12.5px;color:var(--muted);margin:8px 2px 0}
+
+/* Badges */
+.bdg{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;line-height:1.5}
+.bdg.RAW{background:#fef3c7;color:#92600a}.bdg.SUB{background:#e0edff;color:#1d4ed8}
+.bdg.CON{background:#f3e8ff;color:#7c3aed}.bdg.S_ASSY{background:#dcfce7;color:#15803d}
+.bdg.PROD{background:#ffe4e6;color:#be123c}
+.bdg.sagub{background:#fee2e2;color:#b91c1c}
+.bdg.ok{background:#dcfce7;color:#15803d}.bdg.off{background:#f1f5f9;color:#94a3b8}
+.bdg.role{background:#e0edff;color:#1d4ed8;margin-right:4px}
+.bdg.role.v{background:#dcfce7;color:#15803d}
+
+/* Detail */
+.split{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
+@media(max-width:1100px){.split{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;font-size:12.5px}
+.kv dt{color:var(--muted);font-weight:600}
+.kv dd{font-weight:600}
+.detail-title{font-size:15px;font-weight:800}
+.detail-code{color:var(--muted);font-size:12px}
+.section-t{font-size:12px;font-weight:700;color:#48525f;margin:14px 0 7px;padding-bottom:5px;border-bottom:1px solid var(--line-2)}
+.empty{padding:26px;text-align:center;color:var(--muted);font-size:12.5px}
+
+/* Dashboard */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
+@media(max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;position:relative;overflow:hidden}
+.kpi .k-ic{position:absolute;right:10px;top:10px;font-size:22px;opacity:.16}
+.kpi .k-lbl{font-size:12px;color:var(--muted);font-weight:600}
+.kpi .k-val{font-size:24px;font-weight:800;margin-top:5px;color:var(--brand)}
+.kpi .k-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:1100px){.charts{grid-template-columns:1fr}}
+.bar-row{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:12.5px}
+.bar-row .lbl{width:120px;color:#3a4757;font-weight:600;text-align:right;flex-shrink:0}
+.bar-track{flex:1;background:#eef1f5;border-radius:6px;height:16px;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--brand));border-radius:6px}
+.bar-row .cnt{width:58px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.recon{background:#f0f9ff;border:1px solid #bae6fd;color:#075985;border-radius:6px;padding:9px 12px;font-size:12px;margin-top:10px}
+
+/* summary bar */
+.summary-bar{display:flex;gap:26px;flex-wrap:wrap;background:#eaf2fd;border:1px solid #cfe0f7;
+  border-radius:7px;padding:11px 18px;margin-bottom:12px}
+.summary-bar .s-item{display:flex;gap:8px;align-items:baseline;font-size:12.5px;color:#4a5563}
+.summary-bar .s-item b{color:var(--brand);font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
+.summary-bar .s-item.neg b{color:var(--danger)}
+.sum-box{background:#eaf2fd;border:1px solid #cfe0f7;border-radius:7px;padding:9px 14px;font-size:13px;color:#4a5563}
+.sum-box b{color:var(--brand);font-weight:800;font-variant-numeric:tabular-nums}
+.sum-box .k{color:#4a5563;font-size:12.5px}
+.urow:hover{background:#f2f6ff !important}
+
+/* toggle */
+.toggle-group{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;height:32px}
+.toggle-group button{border:0;background:#fff;padding:0 14px;font-size:12.5px;color:#4a5563;cursor:pointer}
+.toggle-group button.on{background:var(--brand);color:#fff;font-weight:700}
+.btn.xls{background:#1d7a44}.btn.xls:hover{background:#166335}
+
+/* misc */
+.qty{font-variant-numeric:tabular-nums}
+.tree-lvl{display:inline-block;width:14px}

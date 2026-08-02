@@ -1,0 +1,48 @@
+# ============================================================
+#  NEW_ERP_1 git 추적 제외 목록
+#  목적: 여러 세션 동시개발 시 "구현물 사라짐" 방지용 스냅샷 저장소.
+#        보호대상 = 손으로 짠 코드/문서(js·py·md·sql). 재생성 가능한 대용량/바이너리·정적자료는 제외.
+# ============================================================
+
+# --- 대용량 정적 참조자료 (세션이 편집 안 함, 재추출 가능) ---
+RPA/
+src_extracted/
+_migration/
+LG_FILES/
+LG_BOM_download/
+source_analysis_txt_full/
+source_analysis_txt/
+drawing_analysis/
+WEHAGO/
+_legacy_analysis/SP_DUMP/
+전체_소스코드*.txt
+
+# --- 생성물/데이터 (재생성 가능, 대용량) ---
+PNC_ERP_Web/js/data.js
+
+# --- 바이너리/압축 ---
+*.xlsx
+*.xls
+*.zip
+*.Zip
+*.pptx
+*.pbl
+*.exe
+*.7z
+*.png
+*.jpg
+
+# --- 캐시/로그/백업/손상본 ---
+__pycache__/
+*.pyc
+*.log
+*.bak
+*.bak_*
+*.monolith.bak
+*.corrupted_*
+chrome_profile/
+temp_profile/
+.deploy.lock
+
+# --- git 자동스냅샷 스크립트 로그 ---
+_git_snapshot.log

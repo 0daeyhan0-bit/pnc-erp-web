@@ -1,0 +1,385 @@
+<style>
+  :root{
+    --bg:#faf7f2; --surface:#ffffff; --surface-2:#f4eee5;
+    --ink:#1b242e; --ink-2:#48535f; --ink-3:#7b848d;
+    --line:#e8dfd2; --line-2:#dacfbd;
+    --copper:#a9612f; --copper-2:#8c4f26; --copper-soft:#f2e2d2;
+    --pos:#2c8757; --neg:#bd3a2a; --warn:#b3801f;
+    --pos-bg:#e7f3ec; --neg-bg:#fbe9e5; --warn-bg:#f8efd8;
+    --shadow:0 1px 2px rgba(40,25,10,.05),0 6px 20px rgba(40,25,10,.05);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#13171b; --surface:#1a2026; --surface-2:#222a31;
+      --ink:#e9e4dd; --ink-2:#aeb5bc; --ink-3:#7c848b;
+      --line:#2a323a; --line-2:#3a434c;
+      --copper:#cf8d58; --copper-2:#e3ac7b; --copper-soft:#38281c;
+      --pos:#49b581; --neg:#e26a5b; --warn:#d4a24b;
+      --pos-bg:#152720; --neg-bg:#2b1a17; --warn-bg:#2a2415;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#13171b; --surface:#1a2026; --surface-2:#222a31;
+    --ink:#e9e4dd; --ink-2:#aeb5bc; --ink-3:#7c848b;
+    --line:#2a323a; --line-2:#3a434c;
+    --copper:#cf8d58; --copper-2:#e3ac7b; --copper-soft:#38281c;
+    --pos:#49b581; --neg:#e26a5b; --warn:#d4a24b;
+    --pos-bg:#152720; --neg-bg:#2b1a17; --warn-bg:#2a2415;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.28);
+  }
+  :root[data-theme="light"]{
+    --bg:#faf7f2; --surface:#ffffff; --surface-2:#f4eee5;
+    --ink:#1b242e; --ink-2:#48535f; --ink-3:#7b848d;
+    --line:#e8dfd2; --line-2:#dacfbd;
+    --copper:#a9612f; --copper-2:#8c4f26; --copper-soft:#f2e2d2;
+    --pos:#2c8757; --neg:#bd3a2a; --warn:#b3801f;
+    --pos-bg:#e7f3ec; --neg-bg:#fbe9e5; --warn-bg:#f8efd8;
+    --shadow:0 1px 2px rgba(40,25,10,.05),0 6px 20px rgba(40,25,10,.05);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'Pretendard','Malgun Gothic',-apple-system,'Segoe UI',Roboto,'Apple SD Gothic Neo',sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+  }
+  .wrap{max-width:1120px; margin:0 auto; padding:0 22px 96px}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* ── header ── */
+  header.hero{padding:64px 0 40px; border-bottom:1px solid var(--line)}
+  .eyebrow{font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--copper); font-weight:700}
+  h1{font-size:clamp(28px,4.5vw,44px); line-height:1.12; margin:14px 0 10px; letter-spacing:-.02em; text-wrap:balance; font-weight:800}
+  .lede{font-size:clamp(16px,2.1vw,19px); color:var(--ink-2); max-width:66ch; margin:0}
+  .hero-meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:22px}
+  .chip{font-size:12.5px; font-weight:600; color:var(--ink-2); background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:5px 12px}
+  .chip b{color:var(--copper)}
+
+  section{margin-top:56px}
+  .sec-head{display:flex; align-items:baseline; gap:12px; margin-bottom:20px; flex-wrap:wrap}
+  .sec-num{font-size:13px; font-weight:800; color:var(--copper); font-variant-numeric:tabular-nums; letter-spacing:.04em}
+  h2{font-size:clamp(21px,3vw,27px); margin:0; letter-spacing:-.015em; font-weight:800}
+  .sec-sub{color:var(--ink-3); font-size:14.5px; margin:4px 0 0; width:100%}
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:22px; box-shadow:var(--shadow)}
+  .grid{display:grid; gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:760px){.g2,.g3{grid-template-columns:1fr}}
+
+  h3{font-size:16.5px; margin:0 0 8px; font-weight:750; letter-spacing:-.01em}
+  p{margin:0 0 10px}
+  p:last-child{margin-bottom:0}
+  .muted{color:var(--ink-2); font-size:14.5px}
+  small{color:var(--ink-3)}
+
+  /* pillars */
+  .pillar{border-left:4px solid var(--copper); position:relative}
+  .pillar.neg{border-left-color:var(--neg)}
+  .pillar.pos{border-left-color:var(--pos)}
+  .pill-tag{display:inline-block; font-size:11.5px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; padding:3px 9px; border-radius:6px; margin-bottom:10px}
+  .t-neg{background:var(--neg-bg); color:var(--neg)}
+  .t-pos{background:var(--pos-bg); color:var(--pos)}
+  .big-num{font-size:30px; font-weight:800; letter-spacing:-.02em; line-height:1}
+  .big-num.neg{color:var(--neg)} .big-num.pos{color:var(--pos)}
+
+  /* flow spine */
+  .flow-scroll{overflow-x:auto; padding:6px 2px 14px; margin:0 -4px}
+  .flow{display:flex; align-items:stretch; gap:0; min-width:820px}
+  .step{flex:1; min-width:104px; background:var(--surface); border:1px solid var(--line); border-radius:11px; padding:12px 12px 13px; position:relative; text-align:center}
+  .step + .step{margin-left:22px}
+  .step:not(:last-child)::after{content:"›"; position:absolute; right:-19px; top:50%; transform:translateY(-50%); color:var(--copper); font-size:22px; font-weight:800; line-height:1}
+  .step .k{font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--copper); font-weight:800}
+  .step .t{font-size:13.5px; font-weight:700; margin-top:5px; line-height:1.3}
+  .step .d{font-size:11.5px; color:var(--ink-3); margin-top:4px; line-height:1.35}
+
+  /* tables */
+  .tbl-scroll{overflow-x:auto}
+  table{border-collapse:collapse; width:100%; font-size:14px; min-width:440px}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line)}
+  th{font-size:12px; letter-spacing:.03em; text-transform:uppercase; color:var(--ink-3); font-weight:700; background:var(--surface-2)}
+  td.r,th.r{text-align:right; font-variant-numeric:tabular-nums}
+  tbody tr:last-child td{border-bottom:none}
+  .pos-t{color:var(--pos); font-weight:700} .neg-t{color:var(--neg); font-weight:700}
+
+  /* concept list */
+  ul.clean{list-style:none; padding:0; margin:8px 0 0}
+  ul.clean li{position:relative; padding-left:18px; margin:7px 0; font-size:14.5px; color:var(--ink-2)}
+  ul.clean li::before{content:""; position:absolute; left:2px; top:9px; width:6px; height:6px; border-radius:2px; background:var(--copper)}
+  ul.clean li b{color:var(--ink)}
+
+  .tag{display:inline-block; font-size:12px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--copper-soft); color:var(--copper-2); margin:2px 4px 2px 0}
+  .kpi{display:flex; gap:20px; flex-wrap:wrap}
+  .kpi .item{flex:1; min-width:120px}
+  .kpi .v{font-size:24px; font-weight:800; letter-spacing:-.02em; color:var(--copper)}
+  .kpi .l{font-size:12.5px; color:var(--ink-3); margin-top:2px}
+
+  /* control cards */
+  .ctrl{display:flex; gap:12px; align-items:flex-start}
+  .ctrl .n{flex:none; width:26px; height:26px; border-radius:8px; background:var(--copper); color:#fff; font-weight:800; font-size:13px; display:grid; place-items:center; margin-top:1px}
+
+  /* roadmap */
+  .phase{display:flex; gap:16px; align-items:flex-start; padding:16px 0; border-top:1px solid var(--line)}
+  .phase:first-child{border-top:none}
+  .ph-badge{flex:none; font-size:12px; font-weight:800; letter-spacing:.04em; padding:5px 11px; border-radius:8px; background:var(--surface-2); color:var(--ink-2); border:1px solid var(--line); white-space:nowrap; margin-top:2px}
+  .ph-badge.done{background:var(--pos-bg); color:var(--pos); border-color:transparent}
+  .ph-badge.now{background:var(--copper); color:#fff; border-color:transparent}
+  .ph-body h3{margin-bottom:3px}
+  .ph-body .muted{font-size:14px}
+
+  .callout{background:var(--copper-soft); border:1px solid var(--line-2); border-radius:12px; padding:16px 18px}
+  .callout.warn{background:var(--warn-bg); border-color:transparent}
+
+  .foot{margin-top:60px; padding-top:22px; border-top:1px solid var(--line); color:var(--ink-3); font-size:13px}
+  code{font-family:'SF Mono',ui-monospace,'Cascadia Code',Consolas,monospace; font-size:.9em; background:var(--surface-2); padding:1px 6px; border-radius:5px; color:var(--copper-2)}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">피앤씨인더스트리 · 차세대 ERP</div>
+  <h1>계획 · 조달 · 사급 · 정합 · 손익<br>통합 시스템 청사진</h1>
+  <p class="lede">LG전자 1차 협력사로서 겪는 두 개의 실제 손실 — <b>환율發 태국 적자</b>와 <b>월 30억+ 사급의 누수</b> — 를 잡기 위한 시스템. 통합 BOM · 조달 프로파일 · 원가엔진이 하나의 의사결정·정합 체계로 수렴한다.</p>
+  <div class="hero-meta">
+    <span class="chip">읽기 <b>라이브 PARTNER_ERP</b></span>
+    <span class="chip">쓰기 <b>PNC_NX 스키마</b></span>
+    <span class="chip">원가엔진 <b>실측 검증 12/12</b></span>
+    <span class="chip">동무게 <b>실증 완료</b></span>
+  </div>
+</header>
+
+<!-- 1. 두 기둥 -->
+<section>
+  <div class="sec-head"><span class="sec-num">01</span><h2>이 시스템을 짓는 두 개의 "왜"</h2>
+    <p class="sec-sub">기능이 아니라 손실이 출발점이다. 모든 설계는 이 둘로 환원된다.</p></div>
+  <div class="grid g2">
+    <div class="card pillar neg">
+      <span class="pill-tag t-neg">기둥 I · 환율 손익</span>
+      <h3>고환율 → 태국 조달이 적자</h3>
+      <p class="muted">작년부터 태국법인에서 부품을 대량 조달했으나, 환율 급등으로 태국 조달이 큰 적자로 전환. 현행 시스템은 태국 부품을 <b>마감 KRW로 고정 저장</b>해 환율 시뮬레이션 자체가 불가능하다.</p>
+      <div style="margin-top:14px; display:flex; align-items:baseline; gap:12px">
+        <span class="big-num neg">−737<span style="font-size:15px; font-weight:600">원/개</span></span>
+        <small>검증된 앵커 · AJR75563402 태국(F&amp;T) 경로 실원가 손익</small>
+      </div>
+      <p class="muted" style="margin-top:12px"><b>해법</b> — 경로별 손익을 금일 환율로 재평가해 "지금은 내수, 환율 내리면 태국" 을 정량 판단.</p>
+    </div>
+    <div class="card pillar" style="border-left-color:var(--warn)">
+      <span class="pill-tag" style="background:var(--warn-bg);color:var(--warn)">기둥 II · 사급 정합</span>
+      <h3>사급 누수 → 손실로 묻힘</h3>
+      <p class="muted">과거 <b>업체 입고수량 &gt; LG 리시빙 수량</b> gap이 재고관리 미흡으로 누락돼 전부 손실 반영. LG로부터 받는 사급, 업체로 불출하는 사급이 철저히 관리돼야 한다.</p>
+      <div class="kpi" style="margin-top:14px">
+        <div class="item"><div class="v">6~10억</div><div class="l">LG→PNC 원소재 사급 / 월</div></div>
+        <div class="item"><div class="v">20~25억</div><div class="l">LG→PNC 부품 사급 / 월 · 최대 노출</div></div>
+      </div>
+      <p class="muted" style="margin-top:12px"><b>해법</b> — 홉마다 수량·무게를 물리고, 초과입고 차단 + 자동 대사로 gap을 표면화(자동 손실반영 금지).</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2. End-to-end 흐름 -->
+<section>
+  <div class="sec-head"><span class="sec-num">02</span><h2>전체 흐름 — 하나의 연결된 체인</h2>
+    <p class="sec-sub">부서·문서의 경계마다 생기던 수기 재입력·대사를 없앤다. 계획이 발주가 되고, 발주가 사급·입고가 되고, 정산까지 같은 데이터가 상태만 바꿔 흐른다.</p></div>
+  <div class="flow-scroll">
+    <div class="flow">
+      <div class="step"><div class="k">수요</div><div class="t">LG 수요</div><div class="d">PO 1개월(내시)<br>계획 5일 확정</div></div>
+      <div class="step"><div class="k">계획</div><div class="t">자체 MPS</div><div class="d">업로드→생산계획</div></div>
+      <div class="step"><div class="k">전개</div><div class="t">MRP · 2 horizon</div><div class="d">BOM 전개·넷팅<br>가공5일/원소재1개월</div></div>
+      <div class="step"><div class="k">발주</div><div class="t">발주 확정</div><div class="d">프로파일 배분<br>(손익·환율 근거)</div></div>
+      <div class="step"><div class="k">사급</div><div class="t">사급 불출</div><div class="d">원소재·용접봉·부품</div></div>
+      <div class="step"><div class="k">가공</div><div class="t">협력사 생산</div><div class="d">BOM 생산처</div></div>
+      <div class="step"><div class="k">입고</div><div class="t">입고 · ASN</div><div class="d">모바일 출발/입고</div></div>
+      <div class="step"><div class="k">납품</div><div class="t">LG 리시빙</div><div class="d">정합 기준점</div></div>
+      <div class="step"><div class="k">정산</div><div class="t">월 마감</div><div class="d">중량정산·손익</div></div>
+    </div>
+  </div>
+  <p class="muted" style="margin-top:6px; font-size:13.5px"><small>사급 루프는 이 스파인에 겹쳐 흐른다 — <b>LG → PNC → 업체</b> 불출과, 입고·리시빙을 통한 되돌림 대사.</small></p>
+</section>
+
+<!-- 3. 조달 프로파일 -->
+<section>
+  <div class="sec-head"><span class="sec-num">03</span><h2>조달 프로파일 — 이 시스템의 심장</h2>
+    <p class="sec-sub">BOM(무엇으로)과 조달(누가·어디서)을 분리. 한 품목 = 1 BOM + 여러 프로파일. 프로파일만 갈아끼우면 원가·손익이 재계산된다.</p></div>
+  <div class="grid g2">
+    <div class="card">
+      <h3>프로파일 = 구매정책 컨테이너</h3>
+      <p class="muted">담당자가 프로파일을 만들 때 정책을 사전 지정한다.</p>
+      <ul class="clean">
+        <li><b>공급 구분</b> · 자체 / 유상사급 / 매입</li>
+        <li><b>거래처 · 리드타임 · 픽스</b> (절삭 3일 픽스, 리드 2~3일)</li>
+        <li><b>CAPA</b> — 개발 시 이미 아는 생산능력 = 분할 상한</li>
+        <li><b>배분 정책</b> — 기간별 배분율(단일 or 분할)</li>
+        <li><b>사급 여부</b> · 부품별 · <b>is_internal</b>(내부용 벤치마크)</li>
+      </ul>
+      <p class="muted" style="margin-top:12px"><small><b>일원화가 기본, 이원화는 예외.</b> 대부분 품목은 프로파일 1개 → 자동. 전략 품목만 담당자가 배분 결정(decision-by-exception).</small></p>
+    </div>
+    <div class="card">
+      <h3>발주 확정 화면 = 경로별 손익 비교</h3>
+      <p class="muted">MRP가 순소요를 뽑으면, 화면에서 경로별 손익·리드타임을 보고 배분한다. 태국 칸엔 <b>금일 환율 입력</b> → 즉시 재계산.</p>
+      <div class="tbl-scroll" style="margin-top:12px">
+        <table>
+          <thead><tr><th>경로 (AJR75563402)</th><th class="r">실원가</th><th class="r">손익</th><th class="r">리드</th></tr></thead>
+          <tbody>
+            <tr><td>내부용 <small>(기준)</small></td><td class="r num">4,015</td><td class="r"><small>벤치마크</small></td><td class="r">—</td></tr>
+            <tr><td>자체 은납</td><td class="r num">5,334</td><td class="r neg-t">−243</td><td class="r">—</td></tr>
+            <tr><td>명진</td><td class="r num">2,021</td><td class="r pos-t">+3,070</td><td class="r">3일</td></tr>
+            <tr><td>미래</td><td class="r num">−133</td><td class="r pos-t">+5,224</td><td class="r">3일</td></tr>
+            <tr><td>태국 F&amp;T <small>· 금일환율</small></td><td class="r num">4,559</td><td class="r pos-t">+532</td><td class="r">롱</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:10px; font-size:13px"><small>환율이 오르면 태국 칸 손익이 −로 뒤집혀 "내수 전환" 신호가 뜬다.</small></p>
+    </div>
+  </div>
+</section>
+
+<!-- 4. 가격 2트랙 -->
+<section>
+  <div class="sec-head"><span class="sec-num">04</span><h2>가격 2트랙 — 실적과 의사결정을 분리</h2>
+    <p class="sec-sub">원소재·태국 부품 모두 USD 원천이나 월 마감 때 KRW로 고정된다. 실적은 그 확정가로, 의사결정은 금일 환율로.</p></div>
+  <div class="grid g2">
+    <div class="card">
+      <span class="tag">실적 · 손익 평가</span>
+      <h3 style="margin-top:8px">월 마감 확정가 (locked)</h3>
+      <p class="muted">이미 선적·입고된 것의 실제 landed cost. BL 시점 환율로 고정 = 실현 손익 계산에 정확. <b>현행 방식 유지.</b></p>
+    </div>
+    <div class="card">
+      <span class="tag">운영 · 의사결정</span>
+      <h3 style="margin-top:8px">원단가 × 금일 환율</h3>
+      <p class="muted">USD 원단가를 보관하고, <b>변동 환율은 화면에서 사용자가 입력</b>(what-if). DB에 수시 환율을 넣지 않는다. → 지금/예상 환율의 손익을 즉시 시뮬레이션.</p>
+      <p class="muted" style="margin-top:8px; font-size:13px"><small>필수 요건 — 태국(해외) 프로파일에 <b>USD 원단가 보관</b>. 동단가는 성분(단가·환율)이 남아 자동 재구성.</small></p>
+    </div>
+  </div>
+</section>
+
+<!-- 5. 사급 관리 -->
+<section>
+  <div class="sec-head"><span class="sec-num">05</span><h2>사급 관리 — 양방향 · 관리강도 차등</h2>
+    <p class="sec-sub">전부 유상사급. 종류마다 정산 단위가 다르고, 손실 리스크에 따라 관리 강도를 품목별로 지정한다.</p></div>
+  <div class="grid g2">
+    <div class="card">
+      <h3>양방향 흐름</h3>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>방향</th><th>품목</th><th>단위</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="2"><b>LG → PNC</b></td><td>원소재(동)</td><td>무게(kg)</td></tr>
+            <tr><td>부품 <small>20~25억/월</small></td><td>개수(EA)</td></tr>
+            <tr><td rowspan="3"><b>PNC → 업체</b></td><td>원소재(동)</td><td>무게(kg)</td></tr>
+            <tr><td>용접봉 <small>고가</small></td><td>무게(kg)</td></tr>
+            <tr><td>부품 <small>예외적</small></td><td>개수(EA)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:10px; font-size:13px"><small>통일 모델 — <b>불출(실물) − 소비(입고 × BOM 역산) = 잔량/로스</b>, 월 마감 대사로 gap 표면화.</small></p>
+    </div>
+    <div class="card">
+      <h3>관리강도 = 품목별 지정 (단가 자동판정 아님)</h3>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>강도</th><th>대상</th><th>단위</th></tr></thead>
+          <tbody>
+            <tr><td><b>무게 정밀</b></td><td>동 원소재, 용접봉</td><td>kg</td></tr>
+            <tr><td><b>개수 정밀</b></td><td>황동너트, 사급 부품</td><td>EA</td></tr>
+            <tr><td>loose</td><td>볼트·너트·케이블타이</td><td>비추적</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:10px; font-size:13px"><small>황동너트(200~300원)는 단가는 낮아도 물량·누수 손실이 커 <b>개수 관리로 분리</b>. 용접봉은 고가라 자사구매여도 <b>무게 정밀</b>(기존 무게환산 로직 이식).</small></p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>동파이프 2축 <span class="tag" style="margin-left:6px">use_gubun</span></h3>
+    <div class="grid g2" style="margin-top:6px">
+      <div>
+        <p class="muted"><b>절삭용 · LG 유상사급</b><br>→ 사급 정합 루프(불출-소비-대사). BOM 동무게로 규격별 소비 역산. <span class="pos-t">실증 완료</span> — 제품별·규격별 그램 단위 계산.</p>
+      </div>
+      <div>
+        <p class="muted"><b>설치용 · PNC 자체구매</b><br>LG가 사급 공급을 안 함 → PNC 자금 직접 지출. <b>리시빙 기반 구매 적정성 검증</b>(설치제품 리시빙 × BOM 소요 = 필요량 vs 실구매량 → 과부족).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. 정합 4통제 -->
+<section>
+  <div class="sec-head"><span class="sec-num">06</span><h2>수량·사급 정합 — 4가지 통제</h2>
+    <p class="sec-sub">월 30억+ 사급이 걸린, 이 시스템에서 가장 큰 돈이 걸린 통제. gap은 자동으로 손실 처리하지 않고 반드시 원인을 추적한다.</p></div>
+  <div class="grid g2">
+    <div class="card"><div class="ctrl"><div class="n">1</div><div><h3>입고 = 발주(PO) 매칭</h3><p class="muted">발주 없는·초과 입고는 경고·차단(예외처리). 문제의 원천을 입구에서 막는다.</p></div></div></div>
+    <div class="card"><div class="ctrl"><div class="n">2</div><div><h3>업체 입고 ↔ LG 리시빙 대사</h3><p class="muted">gap 즉시 표면화. 자동 손실반영 금지 → 원인 추적 후 처리. <small>LG 리시빙은 PU-SCS 다운로드로 확보.</small></p></div></div></div>
+    <div class="card"><div class="ctrl"><div class="n">3</div><div><h3>동 무게 정합</h3><p class="muted">LG 수령 = Σ업체 불출 = Σ입고 소비(부품 × BOM 동무게) = 납품에 실린 동. 차이는 재고 or 로스로 명확히 귀속.</p></div></div></div>
+    <div class="card"><div class="ctrl"><div class="n">4</div><div><h3>단일 원장 · 4-way 매칭</h3><p class="muted">자재·생산·사급 재고를 한 원장에서(누락 0). 발주–입고–리시빙–계산서 4자 자동 매칭.</p></div></div></div>
+  </div>
+</section>
+
+<!-- 7. 이미 완료된 기반 -->
+<section>
+  <div class="sec-head"><span class="sec-num">07</span><h2>이미 완료된 기반</h2>
+    <p class="sec-sub">청사진이 공중에 떠 있지 않다. 데이터·엔진은 이미 실측 검증됐다.</p></div>
+  <div class="card">
+    <div class="kpi">
+      <div class="item"><div class="v">19+</div><div class="l">nx 통합 스키마 테이블<br>(PARTNER_ERP_TEST3)</div></div>
+      <div class="item"><div class="v">24,093</div><div class="l">품목 마이그 (BOM 42,249 · 단가 125,284 · 라우팅 166,266)</div></div>
+      <div class="item"><div class="v">12 / 12</div><div class="l">원가엔진 실원가·내부용·손익<br>생산 SP와 정확 일치</div></div>
+      <div class="item"><div class="v">40 / 40</div><div class="l">대량 검증 (±5원, 수용 반올림)</div></div>
+    </div>
+    <p class="muted" style="margin-top:16px; border-top:1px solid var(--line); padding-top:14px; font-size:13.5px"><small>라이브 PARTNER_ERP는 읽기전용으로 참조, 신 시스템 데이터는 별도 <code>PNC_NX</code> 스키마에 영속. 원가엔진은 nx 테이블만으로 구 구조 없이 원가·손익을 재현하며, 동파이프 소비무게는 규격별로 실증됐다.</small></p>
+  </div>
+</section>
+
+<!-- 8. 로드맵 -->
+<section>
+  <div class="sec-head"><span class="sec-num">08</span><h2>구축 로드맵 — 금액 노출 우선순위</h2>
+    <p class="sec-sub">가장 큰 돈이 걸린 곳부터. 두 기둥 모두 현행 데이터로 시작 가능한 read-only 분석이 있다.</p></div>
+
+  <div class="card">
+    <div class="phase">
+      <span class="ph-badge done">Phase 0 ✓</span>
+      <div class="ph-body"><h3>기반 — 완료</h3><p class="muted">nx 통합 스키마 · 라이브 마이그레이션 · 원가엔진 검증 · 동무게 실증.</p></div>
+    </div>
+    <div class="phase">
+      <span class="ph-badge now">Phase 1 · 착수</span>
+      <div class="ph-body"><h3>두 개의 Quick-Win (read-only, 즉시 가치)</h3>
+        <p class="muted"><b>A. 조달 손익 비교 화면</b> — 경로별 손익 + 금일 환율 what-if. 검증된 엔진 위에 얹으면 되고, 새 데이터가 거의 필요 없다. <b>환율 문제 직격.</b></p>
+        <p class="muted" style="margin-top:6px"><b>B. 수량·사급 정합 대사 리포트</b> — 업체 입고 vs LG 리시빙 vs 사급 불출 gap 표면화. <b>월 30억+ 노출 직격.</b></p>
+      </div>
+    </div>
+    <div class="phase">
+      <span class="ph-badge">Phase 2</span>
+      <div class="ph-body"><h3>조달 정식화</h3><p class="muted">프로파일 시드(현행 + 내부용 벤치마크) · 발주 확정(프로파일 배분) · 사급 불출 로직.</p></div>
+    </div>
+    <div class="phase">
+      <span class="ph-badge">Phase 3</span>
+      <div class="ph-body"><h3>실행 파이프</h3><p class="muted">LG 계획 업로드 → MPS → MRP 전개 → 발주 · 입고. 협력사 모바일 ASN/입고(전부서 실시간 공유).</p></div>
+    </div>
+    <div class="phase">
+      <span class="ph-badge">Phase 4</span>
+      <div class="ph-body"><h3>마감 · 정산</h3><p class="muted">하이브리드 중량정산 · 3/4-way 자동 매칭 · 계산서 정합 · 통합 마감.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 9. 열린 항목 -->
+<section>
+  <div class="sec-head"><span class="sec-num">09</span><h2>확정할 열린 항목</h2></div>
+  <div class="callout">
+    <ul class="clean" style="margin:0">
+      <li><b>use_gubun(절삭/설치)</b> populate — 동파이프 2축 분리 · 설치 파이프 검증의 열쇠</li>
+      <li><b>태국 USD 원단가</b> 확보 소스 — 금일환율 재평가 데이터</li>
+      <li><b>사급 불출 로직</b> 파라미터 — 커버 N일 · 트리거(주기/재고하한) · 안전재고</li>
+      <li><b>무게정산 조정</b> 부호·금액화 최종 확인 (불출 vs 소비 × 정한LME vs 실제LME)</li>
+      <li><b>부자재 품목별 리드타임</b> · 넷팅 안전재고 · 검토·확정 UX</li>
+    </ul>
+  </div>
+</section>
+
+<div class="foot">
+  피앤씨인더스트리 차세대 ERP · 계획–조달–사급–정합–손익 통합 모델 · 설계 청사진 v1<br>
+  <small>이 문서는 현업과의 설계 대화를 근거로 작성됐으며, 데이터·원가는 라이브 PARTNER_ERP 실측으로 검증됨.</small>
+</div>
+
+</div>

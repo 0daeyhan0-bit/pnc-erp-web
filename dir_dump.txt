@@ -1,0 +1,78 @@
+Name: '프린터여백', Type: 0, Size: 0
+Name: '패치안내', Type: 0, Size: 0
+Name: '진행상황', Type: 0, Size: 0
+Name: 'POPUP메세지박스(표시하고 프로그램은 계속 가동)', Type: 0, Size: 0
+Name: '색상표', Type: 0, Size: 0
+Name: '색상표', Type: 0, Size: 0
+Name: '파일다운로드', Type: 0, Size: 0
+Name: 'Print 미리보기Window(datastore)', Type: 0, Size: 0
+Name: '프린터찾기', Type: 0, Size: 0
+Name: '', Type: 0, Size: 0
+Name: 'Window관리', Type: 0, Size: 0
+Name: '출력SETUP작업', Type: 0, Size: 0
+Name: 'Print 미리보기Window', Type: 0, Size: 0
+Name: '로그인', Type: 0, Size: 0
+Name: '프린터여백', Type: 0, Size: 0
+Name: 'DB테이블관리', Type: 0, Size: 0
+Name: 'DB컬럼관리', Type: 0, Size: 0
+Name: '우편번호조회_다음API', Type: 0, Size: 0
+Name: '시그널타워램프제어', Type: 0, Size: 0
+Name: '최신 모듈확인', Type: 0, Size: 0
+Name: '색상표', Type: 0, Size: 0
+Name: 'COLUMN FORMAT 관리', Type: 0, Size: 0
+Name: '달력 선택', Type: 0, Size: 0
+Name: 'About Application', Type: 0, Size: 0
+Name: 'COLUMN FORMAT 관리', Type: 7274601, Size: 7536754
+Name: 'COLUMN FORMAT 관리', Type: 0, Size: 0
+Name: '항목명 언어별 관리', Type: 0, Size: 0
+Name: '최신 모듈확인', Type: 0, Size: 0
+Name: '비밀번호 변경', Type: 0, Size: 0
+Name: '비밀번호 등록', Type: 0, Size: 0
+Name: '', Type: 0, Size: 0
+Name: '우편번호조회', Type: 0, Size: 0
+Name: '메뉴생성', Type: 0, Size: 0
+Name: '로그인', Type: 0, Size: 0
+Name: '메뉴생성', Type: 0, Size: 0
+Name: '선택내역 저장위치', Type: 0, Size: 0
+Name: '화면 색깔 정의', Type: 0, Size: 0
+Name: 'Error Message 처리', Type: 0, Size: 0
+Name: '즐겨찾기-내역', Type: 0, Size: 0
+Name: 'Color 내역', Type: 0, Size: 0
+Name: 'Color Sample', Type: 0, Size: 0
+Name: '호출부서', Type: 0, Size: 0
+Name: '생산이상호출내역', Type: 0, Size: 0
+Name: '', Type: 0, Size: 0
+Name: '', Type: 0, Size: 0
+Name: '메뉴생성', Type: 0, Size: 0
+Name: 'COLUMN FORMAT관리-조건', Type: 0, Size: 0
+Name: '모듈별 내역', Type: 0, Size: 0
+Name: 'import용', Type: 0, Size: 0
+Name: '우편번호조회-list', Type: 0, Size: 0
+Name: '선택내역 저장위치', Type: 0, Size: 0
+Name: 'System별 Table내역추출', Type: 0, Size: 0
+Name: 'System별 Table종류', Type: 0, Size: 0
+Name: '(작업용)테이블정의서-테이블별', Type: 0, Size: 0
+Name: 'DB컬럼 내역추출', Type: 0, Size: 0
+Name: 'DB컬럼 설명등록', Type: 0, Size: 0
+Name: '항목명 언어별관리', Type: 0, Size: 0
+Name: '항목명 언어별관리-조건', Type: 0, Size: 0
+Name: 'DW COLUMN 정보추출', Type: 0, Size: 0
+Name: '항목명 언어별관리-편집', Type: 0, Size: 0
+Name: 'DW FILTER기능', Type: 0, Size: 0
+Name: '항목명 언어별관리-사용DW', Type: 0, Size: 0
+Name: '항목명 언어별관리-항목추출', Type: 0, Size: 0
+Name: 'DW COLUMN 정보 D/B에 저장', Type: 0, Size: 0
+Name: 'System별 Table종류', Type: 0, Size: 0
+Name: 'set DW style 작업용', Type: 0, Size: 0
+Name: 'Column별 Format 상세[작업용]', Type: 0, Size: 0
+Name: 'COLUMN FORMAT관리(전체)', Type: 0, Size: 0
+Name: 'COLUMN FORMAT관리', Type: 0, Size: 0
+Name: '실행모듈정보(필수)', Type: 0, Size: 0
+Name: '달력표시', Type: 0, Size: 0
+Name: '실행모듈정보(일반)', Type: 0, Size: 0
+Name: '달력MASTER 내역', Type: 0, Size: 0
+Name: 'DB컬럼 설명등록', Type: 0, Size: 0
+Name: 'WINDOW 개괄내역', Type: 0, Size: 0
+Name: 'WINDOW관리-조건', Type: 0, Size: 0
+Name: '파일업로드', Type: 0, Size: 0
+Name: 'Error Message 처리', Type: 0, Size: 0

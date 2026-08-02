@@ -1,0 +1,20 @@
+{
+  "_readme": "수정 등록부(Correction Registry): 레거시 버그를 nx에서 의도적으로 고친 항목만 여기 등록. 등록된 성분만 레거시와 다르게 허용(수정값과 비교), 나머지는 레거시 diff0 강제. 미등록 divergence=FAIL. 각 항목은 담당 승인 필수.",
+  "_schema": {
+    "<item_code>": {
+      "<grp>.<key>": {"legacy": 0, "corrected": 0, "reason": "", "approver": "", "date": "" }
+    }
+  },
+  "_note_grp_key": "grp=sil(실원가용)/nae(내부용), key=jae/gagong/ilban/unban/profit/silwon/lg/sonik/won/bu, 구조수정은 struct.itemset",
+
+  "_pending_bug_candidates": [
+    {"target": "AJR75563402-3-1 (이젠터)", "field": "make_type/구분", "legacy": "3=매입", "corrected": "2=유상사급",
+     "reason": "이젠터에 원소재 tag5 유상사급 출고(2026 36만개)+사급자식(3H02717A,5210) 있음 = 매입 오분류. 실측근거 sagub_by_supplier.py", "status": "담당승인대기"},
+    {"target": "AJR75563402-4-1 (미래) 등 국내 유상사급 서브", "field": "SAGUB_FLAG", "legacy": "0", "corrected": "1",
+     "reason": "국내 유상사급 업체인데 사급플래그 누락(명진/이젠터는 =1). 실측근거 sagub_by_supplier.py(미래 사급0)", "status": "담당승인대기"},
+    {"target": "용접봉 전품목(RAC)", "field": "소요량 소스", "legacy": "CS_M_ITEM_BOM 부자재줄(=포인트×1.5)", "corrected": "CS_T_ITEM_WELD 포인트 × 로스율1.5 파생(BOM줄 폐기)",
+     "reason": "용접봉이 BOM+포인트 이중관리(값은 ×1.5로 일치하나 어긋날 위험). 포인트 단일소스화. 실측근거 weld_costsource.py(3품목 정확 ×1.5)", "status": "담당승인대기"}
+  ],
+
+  "corrections": {}
+}
