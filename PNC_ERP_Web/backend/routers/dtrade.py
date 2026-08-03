@@ -1,0 +1,128 @@
+# -*- coding: utf-8 -*-
+"""dtrade 도메인 라우터 — app.py에서 분리. 공유헬퍼는 common.py."""
+import os, math, json, base64, time, hashlib, mimetypes
+from datetime import datetime, timedelta
+from urllib.parse import quote as _urlquote
+from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+
+router = APIRouter()
+
+# ============ 직거래 LME 월연동 판가 자동정본화 (w_tc_master_165/090 수작업 자동화) ============
+# 산식: 판가(월)=base_item_cost + 동소요량×(LME월 − base_LME). 직거래LME만 재계산, 사급정체는 base 고정.
+# 라이브 PR_M_ITEM_COST 읽기전용(대사). nx.dtrade_price(마스터)/dtrade_lme_index(월지수)/dtrade_price_ts(계산결과).
+@router.get("/api/dtrade/lme")
+def dtrade_lme():
+    """월별 직거래 LME index(원/kg)."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT apply_ym, lme_index FROM nx.dtrade_lme_index ORDER BY apply_ym DESC")
+        return {"rows": [{"apply_ym": r[0], "lme_index": float(r[1] or 0)} for r in cur.fetchall()]}
+    finally:
+        nx.close()
+
+@router.get("/api/dtrade/summary")
+def dtrade_summary():
+    """linkage별 대상 건수(직거래LME/사급정체) + 동소요량 src·사급자재 분포."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT ISNULL(linkage,''), COUNT(*), SUM(CASE WHEN qty_src='LG392' THEN 1 ELSE 0 END),
+              SUM(CASE WHEN qty_src='역산' THEN 1 ELSE 0 END), SUM(CAST(ISNULL(sagub_flag,0) AS int))
+            FROM nx.dtrade_price GROUP BY linkage""")
+        rows = [{"linkage": r[0], "cnt": r[1], "lg392": r[2], "inv": r[3], "sagub": r[4]} for r in cur.fetchall()]
+        return {"rows": rows}
+    finally:
+        nx.close()
+
+@router.post("/api/dtrade/recompute")
+def dtrade_recompute(payload: dict = Body(...)):
+    """월 판가 일괄 재계산(=w_tc_master_165 일괄등록 자동판). 직거래LME만: 판가=base+동소요량×(LME월−base_LME).
+    사급정체는 base 고정(판가 그대로, ts에 그대로 기록). nx.dtrade_price_ts upsert."""
+    ym = str(payload.get("ym", "")).strip()[:6]
+    if len(ym) != 6: raise HTTPException(400, "ym(YYYYMM) 필요")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT lme_index FROM nx.dtrade_lme_index WHERE apply_ym=?", ym)
+        r = cur.fetchone()
+        if not r: return {"ok": False, "errors": [f"{ym} LME index 없음 — LME인정가 탭에서 해당월 확보 필요"]}
+        lme = float(r[0] or 0)
+        cur.execute("DELETE FROM nx.dtrade_price_ts WHERE apply_ym=?", ym)
+        # 직거래LME: 재계산
+        cur.execute("""INSERT INTO nx.dtrade_price_ts(item_code,cust_code,cost_tag,apply_ym,lme_index,mat_cost_calc,item_cost,main_flag,remarks)
+            SELECT item_code,cust_code,cost_tag,?, ?, ROUND(dong_qty*?,2),
+                   ROUND(base_item_cost + dong_qty*(? - base_lme),2), main_flag, N'동가반영(직거래)'
+            FROM nx.dtrade_price WHERE linkage=N'직거래LME'""", ym, lme, lme, lme)
+        n_dir = cur.rowcount
+        # 사급정체: base 고정
+        cur.execute("""INSERT INTO nx.dtrade_price_ts(item_code,cust_code,cost_tag,apply_ym,lme_index,mat_cost_calc,item_cost,main_flag,remarks)
+            SELECT item_code,cust_code,cost_tag,?, NULL, NULL, base_item_cost, main_flag, N'사급정체(고정)'
+            FROM nx.dtrade_price WHERE linkage=N'사급정체'""", ym)
+        n_st = cur.rowcount
+        return {"ok": True, "ym": ym, "lme_index": lme, "직거래LME": n_dir, "사급정체": n_st}
+    finally:
+        nx.close()
+
+@router.get("/api/dtrade/list")
+def dtrade_list(ym: str = Query(""), linkage: str = Query(""), q: str = Query(""), limit: int = Query(300)):
+    """대상 목록 + (ym 지정시)계산 판가. linkage/품번 필터."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        w = ["1=1"]; p = []
+        if linkage.strip(): w.append("d.linkage=?"); p.append(linkage.strip())
+        if q.strip(): w.append("(d.item_code LIKE ? OR d.item_desc LIKE ?)"); p += [f"%{q.strip()}%"] * 2
+        cur.execute(f"""SELECT TOP {int(limit)} d.item_code,d.cust_code,d.cost_tag,d.linkage,d.dong_qty,d.qty_src,
+              d.base_ym,d.base_item_cost,d.base_lme,d.main_flag,ISNULL(d.item_desc,''),d.last_ymd,d.sagub_flag,
+              t.item_cost, t.mat_cost_calc
+            FROM nx.dtrade_price d LEFT JOIN nx.dtrade_price_ts t ON t.item_code=d.item_code AND t.cust_code=d.cust_code
+              AND t.cost_tag=d.cost_tag AND t.apply_ym=?
+            WHERE {' AND '.join(w)} ORDER BY d.linkage, d.item_code""", ym.strip(), *p)
+        cols = ["item_code", "cust_code", "cost_tag", "linkage", "dong_qty", "qty_src", "base_ym",
+                "base_item_cost", "base_lme", "main_flag", "item_desc", "last_ymd", "sagub_flag", "calc_item_cost", "calc_mat"]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k in ("dong_qty", "base_item_cost", "base_lme", "calc_item_cost", "calc_mat"):
+                r[k] = float(r[k]) if r[k] is not None else None
+        cur.execute("SELECT COUNT(*) FROM nx.dtrade_price d WHERE " + ' AND '.join(w), *p)
+        return {"rows": rows, "cnt": cur.fetchone()[0], "ym": ym}
+    finally:
+        nx.close()
+
+@router.get("/api/dtrade/compare")
+def dtrade_compare(ym: str = Query(...), batch_ymd: str = Query(...), tol: float = Query(5.0)):
+    """★라이브 대사: 우리 계산판가(ym) vs 라이브 PR_M_ITEM_COST 실판가(batch_ymd 배치) diff·일치율(±tol원).
+    직거래LME 대상만. 산식 재현 검증."""
+    ym = ym.strip()[:6]; batch = batch_ymd.strip()
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT t.item_code,t.cust_code,t.cost_tag,t.item_cost
+            FROM nx.dtrade_price_ts t JOIN nx.dtrade_price d ON d.item_code=t.item_code AND d.cust_code=t.cust_code AND d.cost_tag=t.cost_tag
+            WHERE t.apply_ym=? AND d.linkage=N'직거래LME'""", ym)
+        calc = {(r[0], str(r[1]).strip(), r[2]): float(r[3] or 0) for r in cur.fetchall()}
+    finally:
+        nx.close()
+    if not calc:
+        return {"ym": ym, "batch_ymd": batch, "cnt": 0, "msg": "재계산 결과 없음 — 먼저 recompute 실행"}
+    cn = _conn(); cur = cn.cursor()
+    try:
+        items = list({k[0] for k in calc})
+        live = {}
+        for i in range(0, len(items), 900):
+            ch = items[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT ITEM_CODE,ISNULL(CUST_CODE,''),COST_TAG,ITEM_COST FROM PR_M_ITEM_COST
+                WHERE COST_APPLY_YMD=? AND COST_TAG IN('E','S') AND ITEM_CODE IN ({ph})""", batch, *ch)
+            for r in cur.fetchall():
+                live[(r[0].strip(), str(r[1]).strip(), r[2])] = float(r[3] or 0)
+    finally:
+        cn.close()
+    matched = both = 0; diffs = []; samples = []
+    for k, cv in calc.items():
+        lv = live.get(k)
+        if lv is None: continue
+        both += 1; d = cv - lv; diffs.append(abs(d))
+        if abs(d) <= tol: matched += 1
+        elif len(samples) < 15: samples.append({"item": k[0], "cust": k[1], "tag": k[2], "calc": round(cv, 1), "live": round(lv, 1), "diff": round(d, 1)})
+    import statistics as _st
+    return {"ym": ym, "batch_ymd": batch, "tol": tol, "calc_cnt": len(calc), "live_matched_keys": both,
+            "within_tol": matched, "match_rate": round(matched / both * 100, 1) if both else 0,
+            "mean_abs_diff": round(_st.mean(diffs), 1) if diffs else 0,
+            "median_abs_diff": round(_st.median(diffs), 1) if diffs else 0, "mismatch_samples": samples}
