@@ -51,14 +51,28 @@ class NxCostEngine:
             r=self.cur.fetchone(); self._hdr[item]=r[0] if r else None
         return self._hdr[item]
 
+    def _weld_lines(self, item):
+        """용접봉(RAC)=공정종속 자재 → nx.proc_weld에서 주입(BOM 구성행 아님). use_qty·cs_calc_except·lme_except 보존 = 재배치 전과 동일.
+           proc_weld 미존재/미적재 시 빈=[] (그 경우 lines()가 bom_line RAC를 그대로 사용 → 하위호환)."""
+        if not hasattr(self,'_wlc'): self._wlc={}
+        if item not in self._wlc:
+            try:
+                self.cur.execute("""SELECT weld_item, use_qty, ISNULL(cs_calc_except,0), ISNULL(from_ymd,''), ISNULL(to_ymd,''), ISNULL(lme_except,0)
+                    FROM nx.proc_weld WHERE parent_item=? ORDER BY weld_item""", item)
+                self._wlc[item]=[(str(r[0]).strip(),float(r[1] or 0),bool(r[2]),str(r[3] or ''),str(r[4] or ''),bool(r[5])) for r in self.cur.fetchall()]
+            except Exception:
+                self._wlc[item]=[]
+        return self._wlc[item]
+
     def lines(self, item):
         bid=self.bom_id(item)
-        if bid is None: return []
+        wk=self._weld_lines(item)   # 용접봉=proc_weld 주입(공정종속). 아래 bom_line 읽기는 RAC 제외(중복방지)
+        if bid is None: return list(wk)
         if bid not in self._lines:
             self.cur.execute("""SELECT child_item,qty,cs_calc_except,from_ymd,to_ymd,ISNULL(lme_except,0)
-                FROM nx.bom_line WHERE bom_id=? ORDER BY seq""", bid)
+                FROM nx.bom_line WHERE bom_id=? AND child_item NOT LIKE 'RAC%' ORDER BY seq""", bid)
             self._lines[bid]=[(str(r[0]).strip(),float(r[1] or 0),bool(r[2]),str(r[3] or ''),str(r[4] or ''),bool(r[5])) for r in self.cur.fetchall()]
-        return self._lines[bid]
+        return self._lines[bid]+wk
 
     def _load_item(self, item):
         if item not in self._item:
