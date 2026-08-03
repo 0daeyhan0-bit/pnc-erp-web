@@ -235,3 +235,32 @@ def _custnm_map(cur, codes):
 def _kindmap(cur, kind):
     cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
     return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
+
+
+# ── 도메인간 공유(추출) ──
+def _dig4(s):
+    d = "".join(ch for ch in str(s or "") if ch.isdigit())
+    return d[2:6] if len(d) == 6 else d[:4]   # YYYYMM→YYMM, YYMM→그대로(방어적)
+
+# ── 도메인간 공유(추출) ──
+def _cur_ym():
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMM')"); return cur.fetchone()[0]
+    finally:
+        cn.close()
+
+# ── 도메인간 공유(추출) ──
+def _sale_win():
+    return "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
+
+
+# ── 도메인간 공유(문서저장/매출마감 SQL, app.py에서 이관) ──
+import os as _os, hashlib as _hashlib, mimetypes as _mimetypes
+from urllib.parse import quote as _urlquote
+DOC_STORAGE_PATH = _os.getenv("DOC_STORAGE_PATH", r"F:\NEW_ERP_FILES")   # 배포시 NAS 마운트로 교체
+_SALE_MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
+  SELECT CUST_CODE, format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') JUN_YYMM,
+    ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
+    ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
+  FROM CM_M_CUST A)"""

@@ -86,7 +86,8 @@ from routers import partmaster as _r_partmaster
 app.include_router(_r_partmaster.router)
 import weight_calc  # 무게정산(중량조정) 계산
 # 도메인간 공유헬퍼 — 로컬 def가 있으면 그게 shadow, 해당 도메인 라우터 이동 후엔 common판 사용(잔류 엔드포인트 보호)
-from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap
+from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win
+from common import _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _urlquote
 
 import re as _re_guard
 # ★라이브 PARTNER_ERP 쓰기 가드: DML(INSERT/UPDATE/DELETE/MERGE/TRUNCATE/DROP/ALTER/CREATE/GRANT/REVOKE) 첫키워드 거부.
