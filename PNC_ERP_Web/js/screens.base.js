@@ -63,7 +63,8 @@ SCREEN.lgbomview=(c)=>{
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
   const WK={DMZ:"DMZ(SAC)",DGZ:"DGZ(RAC)"};
   let st={q:"",werks:"",models:[],sel:null,modelnm:"",tree:[],msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
-  const doUpload=async(fileEl)=>{const f=fileEl.files&&fileEl.files[0];if(!f)return;
+  const doUpload=async(f)=>{if(!f)return;
+    if(!/\.(xlsx|xls)$/i.test(f.name||"")){st.upmsg="❌ 엑셀 파일(.xlsx/.xls)만 업로드할 수 있습니다";draw();return;}
     st.uploading=true;st.upmsg="";draw();
     try{const fd=new FormData();fd.append("file",f);
       const r=await fetch(`${API}/api/lgbom/upload`,{method:"POST",body:fd});
@@ -71,7 +72,7 @@ SCREEN.lgbomview=(c)=>{
       if(r.ok&&j.ok){st.upmsg=`✅ 업로드 완료 — ${won(j.rows)}행 · 모델 ${(j.models||[]).length}개 적재 (${(j.models||[]).join(", ").slice(0,70)})`;st.q=(j.models||[])[0]||st.q;st.uploading=false;await search();return;}
       else{st.upmsg="❌ 업로드 실패: "+(j.detail||("HTTP "+r.status));}
     }catch(e){st.upmsg="❌ 업로드 오류: "+e.message;}
-    st.uploading=false;fileEl.value="";draw();};
+    st.uploading=false;draw();};
   const search=async()=>{st.loading=true;st.sel=null;st.tree=[];draw();
     try{const r=await fetch(`${API}/api/lgbom/search?q=${encodeURIComponent(st.q)}&werks=${st.werks}`);
       const j=await r.json();st.models=j.rows||[];}catch(e){st.models=[];}
@@ -103,6 +104,7 @@ SCREEN.lgbomview=(c)=>{
        <label class="tl" style="margin-left:8px">공장</label><select class="inp" id="lb-wk"><option value="">전체</option><option value="DMZ" ${st.werks==="DMZ"?"selected":""}>DMZ(SAC)</option><option value="DGZ" ${st.werks==="DGZ"?"selected":""}>DGZ(RAC)</option></select>
        <button class="btn" id="lb-go">🔍 조회</button>
        <div class="spacer"></div>
+       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #8fb4d6;border-radius:8px;padding:6px 12px;background:#f4f9fe;color:#5a7597;font-size:12px;white-space:nowrap;cursor:pointer">📥 엑셀을 여기로 <b>드래그&드롭</b></span>
        <input type="file" id="lb-file" accept=".xlsx,.xls" style="display:none">
        <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 업로드중…':'📤 LG BOM 업로드'}</button>
      </div>
@@ -134,7 +136,12 @@ SCREEN.lgbomview=(c)=>{
     const g=id=>c.querySelector(id);
     const q=g("#lb-q");q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==="Enter")search();};
     g("#lb-wk").onchange=x=>st.werks=x.target.value;g("#lb-go").onclick=search;
-    const fe=g("#lb-file"),ub=g("#lb-upload");if(ub&&fe){ub.onclick=()=>fe.click();fe.onchange=()=>doUpload(fe);}
+    const fe=g("#lb-file"),ub=g("#lb-upload"),dz=g("#lb-drop");
+    if(ub&&fe){ub.onclick=()=>fe.click();fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value="";};}
+    if(dz&&fe){dz.onclick=()=>fe.click();
+      dz.ondragover=e=>{e.preventDefault();dz.style.background="#e3f0ff";dz.style.borderColor="#1c7c3a";dz.style.color="#1c7c3a";};
+      dz.ondragleave=()=>{dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";};
+      dz.ondrop=e=>{e.preventDefault();dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};}
     c.querySelectorAll("tr.rowsel").forEach(tr=>tr.onclick=()=>{const m=st.models.find(v=>v.model===tr.dataset.m&&v.werks===tr.dataset.w);if(m)openTree(m);});
     c.querySelectorAll("thead th").forEach(th=>{addResizer(th);const k=th.dataset.key;if(k){th.style.cursor="pointer";th.title="더블클릭 정렬·경계드래그 너비조절";th.ondblclick=()=>{st.msortDir=(st.msortKey===k&&st.msortDir===1)?-1:1;st.msortKey=k;draw();};}});
   };
