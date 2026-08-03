@@ -264,3 +264,20 @@ _SALE_MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
     ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
     ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
   FROM CM_M_CUST A)"""
+
+
+# ── 도메인간 공유(추출) ──
+def _valid_hhmm(s):
+    d = str(s or "").strip()
+    if not d: return True
+    return len(d) == 4 and d.isdigit() and int(d[:2]) < 24 and int(d[2:]) < 60
+
+
+# ── 도메인간 공유(추출) ──
+def _d(s):  # 'yyyy-mm-dd' → date str or None
+    s = str(s or "").strip()
+    return s[:10] if len(s) >= 10 and s[4] == '-' else None
+
+# -- 도메인간 공유 상수(품목 제작구분/성격) --
+_ITEM_MAKE = {"": "", "1": "자체생산", "2": "외주가공", "3": "매입", "4": "사급가공", "5": "외주완성"}
+_NATURE_ALL = ["1.원소재", "2.부자재/소모품", "3.사급자재", "4.가공품", "5.용접·조립품", "6.구매·부품"]

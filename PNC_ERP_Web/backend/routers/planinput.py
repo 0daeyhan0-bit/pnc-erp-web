@@ -2,7 +2,7 @@
 """생산계획추가입력(planinput)+준비재고조회(readystock) 도메인 라우터 — 수동 생산계획 CRUD·매트릭스.
    app.py에서 분리. 공유헬퍼는 common.py(_ITEM_WORK 포함)."""
 from datetime import datetime
-from fastapi import APIRouter, Query, Body
+from fastapi import APIRouter, Query, Body, HTTPException
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK
 
 router = APIRouter()

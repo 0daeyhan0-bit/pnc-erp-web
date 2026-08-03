@@ -6,6 +6,7 @@ from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
 
+from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod
 router = APIRouter()
 
 # ===================== 생산전표출력관리 (w_pr_input_468 등) — 전표/간판/라벨 조회·발행(nx)·인쇄 =====================
