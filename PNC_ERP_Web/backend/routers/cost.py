@@ -386,7 +386,8 @@ def cost_proc_save(payload: dict = Body(...)):
         if carrier and carrier not in wc: wc.append(carrier)
         if wc:
             ph = ",".join("?" * len(wc))
-            cur.execute(f"DELETE FROM nx.routing WHERE p_item=? AND item_code IN ({ph})", node, *wc)
+            # ★조립공정(proc<90)만 교체 — 91/92/93/98/99(일반율·운반·이윤율 overhead)는 보존(삭제금지)
+            cur.execute(f"DELETE FROM nx.routing WHERE p_item=? AND item_code IN ({ph}) AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node, *wc)
         seq = 0
         for pc, wq, uph, cg in keep:
             if pc in _ASSY_PROCS:
