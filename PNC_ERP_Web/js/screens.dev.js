@@ -933,13 +933,14 @@ SCREEN.unifybom=(c,ro)=>{
         work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
       // 용접봉 carrier별 = 조립 카탈로그 전체(해당 carrier 기존값 병합)
       const carriers=(j.carriers||[]).map(cr=>{const cur={};(cr.procs||[]).forEach(p=>cur[p.proc_code]=p);
-        return {weld_item:cr.weld_item,use_qty:cr.use_qty,rows:cat.filter(p=>p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
+        return {weld_item:cr.weld_item,use_qty:cr.use_qty,pipe_diam:cr.pipe_diam,unit_qty:cr.unit_qty,loss_factor:(cr.loss_factor==null?1.5:cr.loss_factor),meta_ok:cr.meta_ok,
+          rows:cat.filter(p=>p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
           work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
       naeProcD={node,pipe_diam:j.pipe_diam,own,carriers};
     }catch(e){naeProcD={node,own:[],carriers:[],error:e.message};}draw();};
   const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
     const pick=arr=>arr.filter(p=>(+p.work_qty)>0).map(p=>({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph,calc_gubun:p.calc_gubun||'3'}));
-    const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,procs:pick(cr.rows||[])}))};
+    const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,loss_factor:+cr.loss_factor||1.5,procs:pick(cr.rows||[])}))};
     try{const r=await fetch(`${API}/api/cost/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const j=await r.json();if(!j.ok){alert('공정 저장 실패');return;}
       const rc=(j.weld_recalc||[]).map(x=>`${x.carrier} 소요 ${x.use_qty}`).join(', ');
@@ -997,6 +998,7 @@ SCREEN.unifybom=(c,ro)=>{
     const rowsOf=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
     c.querySelectorAll('.pq').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].work_qty=+el.value||0;});
     c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].prod_uph=+el.value||0;});
+    c.querySelectorAll('.pl').forEach(el=>el.oninput=()=>{const cr=naeProcD&&naeProcD.carriers[+el.dataset.c];if(cr)cr.loss_factor=+el.value||1.5;});
   };
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
@@ -1005,8 +1007,13 @@ SCREEN.unifybom=(c,ro)=>{
          <td class="num"><input class="pu" data-sec="${sec}" data-i="${i}" type="number" step="any" value="${p.prod_uph||''}" style="width:66px"></td></tr>`).join('')||'<tr><td colspan=3 class="empty">공정 없음</td></tr>'}</tbody></table>`;
   const procEditPanel=()=>{
      if(!naeProcD) return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff;padding:10px" class="empty">공정 로딩…</div>`;
-     const carSecs=(naeProcD.carriers||[]).map((cr,k)=>`<div style="border-top:1px dashed #cfe0ff;margin-top:4px">`+
-        procSecTable(cr.rows,'c'+k,`🔗 용접봉 ${esc(cr.weld_item)} <span style="color:#8a94a6;font-weight:400">(조립: 용접·은납·체결·포장 · 소요량 ${(+cr.use_qty||0).toFixed(4)})</span>`,'#8e44ad')+`</div>`).join('');
+     const carSecs=(naeProcD.carriers||[]).map((cr,k)=>{
+        const mok=(+cr.meta_ok===1);
+        const badge=mok?`<span title="용접ST·배수 변경 시 소요량 자동재계산" style="color:#1c7c3a;font-size:10px">● 재계산 가능</span>`
+                       :`<span title="관경 정본(item_weld) 미매칭 — 소요량 정본 보존, 자동재계산 비활성(배수만 저장)" style="color:#b8860b;font-size:10px">▲ 소요량 정본보존</span>`;
+        const lfBox=`<span style="color:#8a94a6;font-size:10px">배수(로스)</span><input class="pl" data-c="${k}" type="number" step="0.1" min="0" value="${(+cr.loss_factor||1.5)}" style="width:52px" title="용접봉 소요량 = 용접ST × 원단위 × 배수. 레거시 기본 1.5">`;
+        return `<div style="border-top:1px dashed #cfe0ff;margin-top:4px">`+
+        procSecTable(cr.rows,'c'+k,`🔗 용접봉 ${esc(cr.weld_item)} <span style="color:#8a94a6;font-weight:400">(조립: 용접·은납·체결·포장 · 소요량 ${(+cr.use_qty||0).toFixed(4)} · 원단위 ${(+cr.unit_qty||0).toFixed(6)})</span> ${badge} ${lfBox}`,'#8e44ad')+`</div>`;}).join('');
      return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff">
      <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
        <span style="color:#8a94a6;font-size:10px">용접봉별 조립공정은 해당 용접봉에 귀속(carrier별 저장)</span>
