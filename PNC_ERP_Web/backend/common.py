@@ -168,3 +168,54 @@ _ITEM_WORK = {"": "", "P1": "용접", "P2": "가공", "D1": "직납"}
 def _ym(ymd):  # MAINT_YMD(YYMMDD/YYYYMMDD) → 마감월 YYMM. 공유: sales(마감잠금)·salemagam.
     y = str(ymd or "").strip()
     return y[:4] if len(y) >= 6 else ""
+
+
+# ── 도메인간 공유(app.py에서 추출) ──
+def _closed(cur, ymd):
+    cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", _ym(ymd))
+    r = cur.fetchone()
+    return bool(r and r[0])
+
+# ===================== ★Phase5: nx 재고 월마감 스냅샷 (STOCK_POINT별 기초→기말=기초+ΣMAINT) =====================
+# 기말 스냅샷=다음달 기초 연속성·마감후 파생 고정. 잠금=기존 nx.stock_close(ym) 플래그 재사용(옵션).
+# ★사고 재발방지: stock_ledger 무삭제. 재계산은 자기생성 근거키(ym+point)의 stock_close_snap만 갱신.
+
+# ── 도메인간 공유(app.py에서 추출) ──
+def _validate_alloc(profs):
+    """profs=[(af,at,alloc)] 활성 비내부 프로파일. 유효기간 겹치는 모든 구간에서 배분합=100% 강제.
+       단독(그 구간에 1개, alloc=None)은 암묵 100%. 반환: 위반 메시지 리스트(빈=정상)."""
+    FAR = "2099-12-31"
+    norm = [(af, at or FAR, alloc) for (af, at, alloc) in profs]
+    pts = sorted({p[0] for p in norm} | {p[1] for p in norm})
+    errs = []
+    for seg in pts:
+        cover = [al for (af, at, al) in norm if af <= seg <= at]
+        if not cover:
+            continue
+        if len(cover) == 1 and cover[0] is None:
+            continue  # 단독=암묵 100%
+        total = sum((al or 0) for al in cover)
+        if abs(total - 100.0) > 0.01:
+            errs.append(f"{seg} 시점 배분합 {total:g}% — 정확히 100%가 되어야 합니다 (활성 프로파일 {len(cover)}개)")
+    return list(dict.fromkeys(errs))
+
+# ── 도메인간 공유(app.py에서 추출) ──
+def _ensure_modelbom(cur):
+    cur.execute("""IF OBJECT_ID('nx.model_bom') IS NULL CREATE TABLE nx.model_bom(
+        MODEL_NO varchar(30) NOT NULL, C_ITEM_CODE varchar(20) NOT NULL, USE_QTY decimal(18,4) DEFAULT 1,
+        APPLY_FROM varchar(6) DEFAULT '000000', APPLY_TO varchar(6) DEFAULT '999999',
+        REMARKS varchar(100), INS_USER varchar(20), INS_DT datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_model_bom PRIMARY KEY(MODEL_NO,C_ITEM_CODE))""")
+
+# ── 도메인간 공유(app.py에서 추출) ──
+def _pur_src(win):
+    """확정입고(매입) 원천: 9/S/C/G/H(검사통과) + 수입(_C DIVISION=P). 금액 양수. win=마감기준 조건(mg 참조)."""
+    return f"""
+    SELECT A.CUST_CODE cc, A.MAT_CODE mat, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat
+     FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {win} AND A.MAINT_TAG IN ('9','S','C','G','H')
+       AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
+    UNION ALL
+    SELECT A.CUST_CODE, A.MAT_CODE, A.MAINT_COST, A.MAINT_YMD, A.MAINT_QTY, A.MAINT_AMT, ISNULL(A.TAXPAYERS,0)
+     FROM PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {win} AND A.DIVISION='P'"""
