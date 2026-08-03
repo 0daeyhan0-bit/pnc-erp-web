@@ -813,7 +813,7 @@ SCREEN.unifybom=(c,ro)=>{
   let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={};
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
   let codes={}, vlist=[];
-  let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
+  let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let silD=null, silFor='', silLoad=false, silView='company';
   const loadCodes=async()=>{try{const r=await fetch(`${API}/api/codes`);codes=await r.json();}catch(e){codes={};}};
   const COLS=[['child_item','품번','item'],['item_name','품명','text'],
@@ -920,16 +920,30 @@ SCREEN.unifybom=(c,ro)=>{
        <td class="bcap" title="${esc(r.name)}" style="max-width:200px">${esc(r.name)}</td><td class="center" style="color:#5a6b82">${esc(r.cost_gubun||'')}</td>
        <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td><td class="num" style="color:#1c6b3a">${M(r.mat)}</td><td class="num" style="color:#8a5a1a">${M(r.gag)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
   // ============ 내부원가 로드/그리기 ============
-  const loadNae=async(fresh)=>{if(!item)return;naeLoad=true;naeSel='';naeProcs=[];draw();
+  const loadNae=async(fresh)=>{if(!item)return;naeLoad=true;naeSel='';naeProcD=null;draw();
     try{const r=await fetch(`${API}/api/cost/nae?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(naeYmd)}&bom=nx${fresh?'&fresh=1':''}`);
       if(!r.ok)throw new Error('HTTP '+r.status);naeD=await r.json();naeFor=item;}
     catch(e){naeD={error:e.message};}naeLoad=false;draw();};
-  const loadNaeProc=async(node)=>{naeSel=node;naeProcs=[];draw();
-    try{const r=await fetch(`${API}/api/routing/get?item=${encodeURIComponent(node)}`);naeProcs=(await r.json()).procs||[];}catch(e){naeProcs=[];}draw();};
-  const saveNaeProc=async()=>{if(!naeSel)return;
-    const rows=naeProcs.filter(p=>(+p.work_qty)>0).map(p=>({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph}));
-    try{const r=await fetch(`${API}/api/routing/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:naeSel,rows})});
-      const j=await r.json();if(!j.ok){alert('공정 저장 실패');return;}naeSel='';alert(`공정 ${j.count}건 저장 · 재계산`);await loadNae(true);}catch(e){alert('저장 오류: '+e.message);}};
+  // ★carrier-aware 공정입력: /api/cost/proc/get → 가공(own) + 용접봉 carrier별 조립공정(용접/체결/포장). carrier별 in-place(통합/이동 금지).
+  const loadNaeProc=async(node)=>{naeSel=node;naeProcD=null;draw();
+    try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(node)}`);const j=await r.json();
+      const cat=j.catalog||[]; const own0={}; (j.own_procs||[]).forEach(p=>own0[p.proc_code]=p);
+      // 가공 own = 조립외 카탈로그 전체(기존값 병합)
+      const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
+        work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
+      // 용접봉 carrier별 = 조립 카탈로그 전체(해당 carrier 기존값 병합)
+      const carriers=(j.carriers||[]).map(cr=>{const cur={};(cr.procs||[]).forEach(p=>cur[p.proc_code]=p);
+        return {weld_item:cr.weld_item,use_qty:cr.use_qty,rows:cat.filter(p=>p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
+          work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
+      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers};
+    }catch(e){naeProcD={node,own:[],carriers:[],error:e.message};}draw();};
+  const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
+    const pick=arr=>arr.filter(p=>(+p.work_qty)>0).map(p=>({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph,calc_gubun:p.calc_gubun||'3'}));
+    const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,procs:pick(cr.rows||[])}))};
+    try{const r=await fetch(`${API}/api/cost/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const j=await r.json();if(!j.ok){alert('공정 저장 실패');return;}
+      const rc=(j.weld_recalc||[]).map(x=>`${x.carrier} 소요 ${x.use_qty}`).join(', ');
+      naeSel='';naeProcD=null;alert(`공정 저장(가공 ${j.own} · 용접봉 ${j.carriers}건) · 재계산${rc?'\n용접봉 소요량: '+rc:''}`);await loadNae(true);}catch(e){alert('저장 오류: '+e.message);}};
   const saveNaeMaster=async()=>{const rows=(naeD&&naeD.rows)||[];const qtyC=[];const specM={};const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
     rows.forEach(r=>{const e=naeEdits[r.code];if(!e)return;
       if(e.eqty!==undefined && r.parent && num(e.eqty)!==null && num(e.eqty)!==+r.qty) qtyC.push({parent:r.parent,child:r.code,qty:num(e.eqty)});
@@ -977,18 +991,30 @@ SCREEN.unifybom=(c,ro)=>{
     {const b=g('#nae-msave');if(b)b.onclick=saveNaeMaster;}
     c.querySelectorAll('.nae-qi').forEach(el=>el.oninput=()=>{const n=el.dataset.node;naeEdits[n]=naeEdits[n]||{};naeEdits[n].eqty=el.value;});
     c.querySelectorAll('.nae-mrow[data-node]').forEach(el=>el.onclick=e=>{if(e.target.classList.contains('nae-qi'))return;if(!naeEditM)loadNaeProc(el.dataset.node);});
-    {const x=g('#pm-close');if(x)x.onclick=()=>{naeSel='';drawNae();};}
+    {const x=g('#pm-close');if(x)x.onclick=()=>{naeSel='';naeProcD=null;drawNae();};}
     {const s=g('#pm-save');if(s)s.onclick=saveNaeProc;}
-    c.querySelectorAll('.pq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;naeProcs[i].work_qty=+el.value||0;});
-    c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;naeProcs[i].prod_uph=+el.value||0;});
+    // sec: 'own' | 'c0','c1'... (carrier index) · i: 행 인덱스
+    const rowsOf=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
+    c.querySelectorAll('.pq').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].work_qty=+el.value||0;});
+    c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].prod_uph=+el.value||0;});
   };
-  const procEditPanel=()=>`<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff">
+  const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
+     <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
+       <tbody>${(rows||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>
+         <td class="num"><input class="pq" data-sec="${sec}" data-i="${i}" type="number" step="any" value="${p.work_qty||''}" style="width:66px"></td>
+         <td class="num"><input class="pu" data-sec="${sec}" data-i="${i}" type="number" step="any" value="${p.prod_uph||''}" style="width:66px"></td></tr>`).join('')||'<tr><td colspan=3 class="empty">공정 없음</td></tr>'}</tbody></table>`;
+  const procEditPanel=()=>{
+     if(!naeProcD) return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff;padding:10px" class="empty">공정 로딩…</div>`;
+     const carSecs=(naeProcD.carriers||[]).map((cr,k)=>`<div style="border-top:1px dashed #cfe0ff;margin-top:4px">`+
+        procSecTable(cr.rows,'c'+k,`🔗 용접봉 ${esc(cr.weld_item)} <span style="color:#8a94a6;font-weight:400">(조립: 용접·은납·체결·포장 · 소요량 ${(+cr.use_qty||0).toFixed(4)})</span>`,'#8e44ad')+`</div>`).join('');
+     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff">
      <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
+       <span style="color:#8a94a6;font-size:10px">용접봉별 조립공정은 해당 용접봉에 귀속(carrier별 저장)</span>
        <div style="flex:1"></div><button class="btn" id="pm-save" style="background:#1c7c3a;color:#fff;padding:1px 8px">💾 등록</button><button class="btn ghost" id="pm-close" style="padding:1px 8px">✖</button></div>
-     <div class="grid-wrap" style="max-height:22vh;overflow:auto"><table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
-       <tbody>${(naeProcs||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>
-         <td class="num"><input class="pq" data-i="${i}" type="number" step="any" value="${p.work_qty||''}" style="width:66px"></td>
-         <td class="num"><input class="pu" data-i="${i}" type="number" step="any" value="${p.prod_uph||''}" style="width:66px"></td></tr>`).join('')||'<tr><td colspan=3 class="empty">공정 없음</td></tr>'}</tbody></table></div></div>`;
+     <div class="grid-wrap" style="max-height:34vh;overflow:auto">
+       ${procSecTable(naeProcD.own,'own','⚙ 가공공정 (자체)','#1c47a0')}
+       ${carSecs||''}
+     </div></div>`;};
   // ============ 실원가 로드/그리기 ============
   const loadSil=async(fresh)=>{if(!item)return;silLoad=true;draw();
     try{const r=await fetch(`${API}/api/cost/sil?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(naeYmd)}${fresh?'&fresh=1':''}`);
