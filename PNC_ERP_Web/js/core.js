@@ -175,7 +175,6 @@ const MODULES=[
    {id:'unifybom',ic:'🔀',nm:'품목 BOM관리'},
    {id:'delivery',ic:'📦',nm:'납품 포장/적재'},
    {id:'subvariant',ic:'🧩',nm:'조달경로 통합검토'},
-   {id:'routeapprove',ic:'🛡',nm:'조달후보 승인관리'},
    {id:'costanalysis',ic:'💹',nm:'품목별 원가분석'},
    {id:'costverify',ic:'🔬',nm:'원가엔진 검증(라이브)'},
    {id:'price',ic:'💰',nm:'품목단가 조회'},

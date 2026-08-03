@@ -317,99 +317,94 @@ _ASSY_PROCS = _PROC_WELD | _PROC_FASTEN | {"61", "83"}   # 용접·은납·체�
 
 @router.get("/api/cost/proc/get")
 def cost_proc_get(node: str = Query(..., description="공정 편집 대상 품목(어셈블리/SUB/부품)")):
-    """전 공정군(가공+용접+체결+포장) 편집목록. 가공=node own(p_item=''), 조립=용접봉 carrier(p_item=node) 합산."""
+    """전 공정군 편집목록. 가공=node own(p_item=''), 조립(용접/체결/포장)=용접봉 carrier별(p_item=node) **carrier별로 분리** 반환.
+       ★엔진은 carrier별로 독립 계상(다중경로 walk) → 절대 carrier 통합/이동 금지. 레거시 w_cs_esti_010의 용접봉 행별 편집과 동일 모델."""
     node = node.strip()
+    # 공정 카탈로그(코드→이름·정렬)
+    cat = {}
+    cn = _conn(); c2 = cn.cursor()
+    try:
+        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
+        for r in c2.fetchall():
+            pc = str(r[0]).strip()
+            cat[pc] = {"name": str(r[1]).strip(), "seq": int(r[2] or 0), "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS}
+    finally:
+        cn.close()
+    def _catrow(pc, wq, uph, cg):
+        m = cat.get(pc, {"name": pc, "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS})
+        return {"proc_code": pc, "name": m["name"], "group": m["group"], "is_assy": m["is_assy"],
+                "work_qty": wq, "prod_uph": uph, "calc_gubun": cg}
     nx = _nx(); cur = nx.cursor()
     try:
-        cur.execute("SELECT proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.routing WHERE item_code=? AND ISNULL(p_item,'')=''", node)
-        own = {str(r[0]).strip(): {"wq": float(r[1] or 0), "uph": float(r[2] or 0), "cg": (str(r[3]).strip() or "3")} for r in cur.fetchall()}
-        # ★엔진이 실제 walk하는 용접봉 carrier = proc_weld[node] 만(orphan routing 제외 → 가공비 정합)
+        # 가공(own): p_item='' 조립외 공정 (91/92/93/98/99 율 제외)
+        cur.execute("SELECT proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.routing WHERE item_code=? AND ISNULL(p_item,'')='' AND ISNULL(work_qty,0)>0 AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node)
+        own = [_catrow(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0), (str(r[3]).strip() or "3")) for r in cur.fetchall()]
+        own.sort(key=lambda x: cat.get(x["proc_code"], {}).get("seq", 999))
+        # 용접봉 carrier 목록(proc_weld). 각 carrier의 조립공정을 carrier별 분리 반환(통합 금지)
         carriers = []
         try:
-            cur.execute("SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item=?", node)
-            carriers = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+            cur.execute("SELECT weld_item, ISNULL(use_qty,0), ISNULL(pipe_diam,0) FROM nx.proc_weld WHERE parent_item=? ORDER BY use_qty DESC, weld_item", node)
+            cw = [(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall() if str(r[0]).strip()]
         except Exception:
-            carriers = []
-        assy = {}
-        if carriers:
-            ph = ",".join("?" * len(carriers))
-            cur.execute(f"""SELECT proc_code, SUM(work_qty), MAX(ISNULL(prod_uph,0)), MAX(ISNULL(calc_gubun,''))
-                FROM nx.routing WHERE p_item=? AND item_code IN ({ph}) AND ISNULL(work_qty,0)>0 GROUP BY proc_code""", node, *carriers)
-            assy = {str(r[0]).strip(): {"wq": float(r[1] or 0), "uph": float(r[2] or 0), "cg": (str(r[3]).strip() or "3")} for r in cur.fetchall()}
-        # 대표 carrier = proc_weld 소요량 최대(walked)
-        carrier = ""
-        if carriers:
-            cur.execute("SELECT TOP 1 weld_item FROM nx.proc_weld WHERE parent_item=? ORDER BY use_qty DESC, weld_item", node)
-            r = cur.fetchone(); carrier = str(r[0]).strip() if r else carriers[0]
-        # 관경(원단위 재계산용)
+            cw = []
+        for wi, uq, pd in cw:
+            cur.execute("SELECT proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.routing WHERE p_item=? AND item_code=? AND ISNULL(work_qty,0)>0 AND ISNULL(TRY_CONVERT(int,proc_code),99)<90 ORDER BY sort_seq,proc_code", node, wi)
+            aprocs = [_catrow(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0), (str(r[3]).strip() or "3")) for r in cur.fetchall()]
+            carriers.append({"weld_item": wi, "use_qty": uq, "pipe_diam": pd, "procs": aprocs})
         cur.execute("SELECT ISNULL(diam,0) FROM nx.item WHERE item_code=?", node)
         r = cur.fetchone(); pdiam = float(r[0] or 0) if r else 0.0
     finally:
         nx.close()
-    cn = _conn(); c2 = cn.cursor()
-    try:
-        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
-        procs = []
-        for r in c2.fetchall():
-            pc = str(r[0]).strip(); g = _proc_group(pc)
-            ex = (assy.get(pc) if pc in _ASSY_PROCS else own.get(pc)) or {}
-            procs.append({"proc_code": pc, "name": str(r[1]).strip(), "group": g, "is_assy": pc in _ASSY_PROCS,
-                          "work_qty": ex.get("wq", 0), "prod_uph": ex.get("uph", 0), "calc_gubun": ex.get("cg", "3")})
-    finally:
-        cn.close()
-    return {"node": node, "carrier": carrier, "pipe_diam": pdiam, "procs": procs,
-            "has_own": any(v["work_qty"] > 0 for v in procs if not v["is_assy"]),
-            "has_assy": any(v["work_qty"] > 0 for v in procs if v["is_assy"])}
+    # 카탈로그(추가용): 가공공정군 / 조립공정군 분리 목록
+    catalog = [dict(proc_code=pc, **{k: v for k, v in m.items() if k != "seq"}) for pc, m in sorted(cat.items(), key=lambda kv: kv[1]["seq"])]
+    return {"node": node, "pipe_diam": pdiam, "own_procs": own, "carriers": carriers, "catalog": catalog,
+            "has_own": bool(own), "has_carrier": bool(carriers)}
 
 @router.post("/api/cost/proc/save")
 def cost_proc_save(payload: dict = Body(...)):
-    """공정 지정 저장 — 가공=node own(p_item=''), 조립(용접/체결/포장)=용접봉 carrier(p_item=node). calc_gubun 보존.
-       ★용접/은납 ST 변경 시 proc_weld.use_qty(=Σ용접·은납ST×관경원단위×1.5) 자동 재계산. 단가는 미변경(마감때만)."""
+    """공정 지정 저장 — **carrier별 in-place**(이동/통합 금지). 가공=node own(p_item=''), 조립=각 용접봉 carrier(p_item=node).
+       율(91/92/93/98/99)·비대상 carrier·orphan routing 미개입. 용접/은납 ST 변경 시 해당 carrier proc_weld.use_qty(=ΣST×관경원단위×1.5) 재계산. 단가 미변경(마감때만)."""
     node = str(payload.get("node", "")).strip()
-    rows = payload.get("rows", []) or []
-    carrier = str(payload.get("carrier", "")).strip()
     if not node:
         raise HTTPException(400, "node 필요")
-    keep = [(str(r.get("proc_code", "")).strip(), float(r.get("work_qty") or 0), float(r.get("prod_uph") or 0),
-             (str(r.get("calc_gubun", "")).strip() or "3"))
-            for r in rows if str(r.get("proc_code", "")).strip() and float(r.get("work_qty") or 0) > 0]
-    assy_rows = [k for k in keep if k[0] in _ASSY_PROCS]
-    if assy_rows and not carrier:
-        raise HTTPException(400, "조립공정(용접/체결/포장) 저장하려면 용접봉(carrier)이 필요합니다 — 이 품목에 용접봉이 없습니다.")
+    own_rows = payload.get("own_procs", []) or []
+    carriers = payload.get("carriers", []) or []
+    def _clean(rows):
+        return [(str(r.get("proc_code", "")).strip(), float(r.get("work_qty") or 0), float(r.get("prod_uph") or 0),
+                 (str(r.get("calc_gubun", "")).strip() or "3"))
+                for r in rows if str(r.get("proc_code", "")).strip() and float(r.get("work_qty") or 0) > 0]
     nx = _nx(); cur = nx.cursor()
     try:
-        # 가공(own) 교체: item_code=node, p_item='' , proc<90
+        # 가공(own) 교체: item_code=node, p_item='', 조립외(proc<90, non-assy), 율 보존
+        own = [k for k in _clean(own_rows) if k[0] not in _ASSY_PROCS]
         cur.execute("DELETE FROM nx.routing WHERE item_code=? AND ISNULL(p_item,'')='' AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node)
-        # 조립 교체: p_item=node, ★엔진이 walk하는 용접봉(proc_weld) carrier만 정리 후 대표 carrier로 통합(orphan routing 미개입=가공비 정합)
-        cur.execute("SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item=?", node)
-        wc = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
-        if carrier and carrier not in wc: wc.append(carrier)
-        if wc:
-            ph = ",".join("?" * len(wc))
-            # ★조립공정(proc<90)만 교체 — 91/92/93/98/99(일반율·운반·이윤율 overhead)는 보존(삭제금지)
-            cur.execute(f"DELETE FROM nx.routing WHERE p_item=? AND item_code IN ({ph}) AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node, *wc)
         seq = 0
-        for pc, wq, uph, cg in keep:
-            if pc in _ASSY_PROCS:
-                cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES(?,?,?,?,?,?,?)",
-                            node, carrier, pc, wq, uph, cg, seq * 10)
-            else:
-                cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES('',?,?,?,?,?,?)",
-                            node, pc, wq, uph, cg, seq * 10)
+        for pc, wq, uph, cg in own:
+            if pc in _ASSY_PROCS: continue
+            cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES('',?,?,?,?,?,?)", node, pc, wq, uph, cg, seq * 10)
             seq += 1
-        # ★용접ST 변경 → proc_weld.use_qty 재계산(carrier): Σ(용접51+은납28 ST) × 관경 원단위 × 1.5
-        recalc = None
-        if carrier:
-            weld_st = sum(wq for pc, wq, uph, cg in keep if pc in _PROC_WELD)
+        # carrier별 조립공정 in-place 교체 — 각 carrier의 assy(proc<90)만 삭제·재삽입(율·비대상 carrier 불개입)
+        recalcs = []
+        for cinfo in carriers:
+            wi = str(cinfo.get("weld_item", "")).strip()
+            if not wi: continue
+            arows = [k for k in _clean(cinfo.get("procs", [])) if k[0] in _ASSY_PROCS]
+            cur.execute("DELETE FROM nx.routing WHERE p_item=? AND item_code=? AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node, wi)
+            s2 = 0
+            for pc, wq, uph, cg in arows:
+                cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES(?,?,?,?,?,?,?)", node, wi, pc, wq, uph, cg, s2 * 10)
+                s2 += 1
+            # 용접/은납 ST 변경 → 해당 carrier proc_weld.use_qty 재계산
+            weld_st = sum(wq for pc, wq, uph, cg in arows if pc in _PROC_WELD)
             cur.execute("SELECT ISNULL(diam,0) FROM nx.item WHERE item_code=?", node)
             r = cur.fetchone(); pdiam = float(r[0] or 0) if r else 0.0
             cur.execute("SELECT MIN(std_use_qty) FROM nx.weld_diam WHERE ABS(pipe_diam-?)<0.001", pdiam)
             r = cur.fetchone(); unit = float(r[0] or 0) if r and r[0] is not None else 0.0
             if weld_st > 0 and unit > 0:
-                recalc = round(weld_st * unit * 1.5, 6)
-                cur.execute("UPDATE nx.proc_weld SET use_qty=?, weld_st=?, unit_qty=?, pipe_diam=?, upd_dt=getdate() WHERE parent_item=? AND weld_item=?",
-                            recalc, weld_st, unit, pdiam, node, carrier)
+                rc = round(weld_st * unit * 1.5, 6)
+                cur.execute("UPDATE nx.proc_weld SET use_qty=?, weld_st=?, unit_qty=?, pipe_diam=?, upd_dt=getdate() WHERE parent_item=? AND weld_item=?", rc, weld_st, unit, pdiam, node, wi)
+                recalcs.append({"carrier": wi, "weld_st": weld_st, "use_qty": rc})
         _reset_cost_engine()
-        return {"ok": True, "count": seq, "assy": len(assy_rows), "carrier": carrier, "weld_use_qty_recalc": recalc}
+        return {"ok": True, "own": seq, "carriers": len(carriers), "weld_recalc": recalcs}
     finally:
         nx.close()
