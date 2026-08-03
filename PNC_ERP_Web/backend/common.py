@@ -219,3 +219,19 @@ def _pur_src(win):
     SELECT A.CUST_CODE, A.MAT_CODE, A.MAINT_COST, A.MAINT_YMD, A.MAINT_QTY, A.MAINT_AMT, ISNULL(A.TAXPAYERS,0)
      FROM PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.DIVISION='P'"""
+
+
+# ── 도메인간 공유(app.py에서 추출) ──
+def _custnm_map(cur, codes):
+    m = {}
+    codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
+    for i in range(0, len(codes), 900):
+        ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+        for r in cur.fetchall(): m[str(r[0]).strip()] = r[1]
+    return m
+
+# ── 도메인간 공유(app.py에서 추출) ──
+def _kindmap(cur, kind):
+    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
+    return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
