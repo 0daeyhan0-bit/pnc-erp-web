@@ -1,0 +1,1092 @@
+﻿parent_item,weld_item,item_name,use_qty,routing_st,reason,best_candidate
+5211A10305J-2-1,RAC30599301-1,5211A10305J-2-1,0.0141,13.0,c_수기override(exact쌍 값불일치),"5211A10305J-2-1/RAC30599301-1 unit=0.000729 diam=4.76 (rule=exact(self), exp=0.01421)"
+5211A10305J-S6-4,RAC30599301-1,사내 SUB,0.0141,13.0,c_수기override(exact쌍 값불일치),"5211A10305J-S6-4/RAC30599301-1 unit=0.000729 diam=4.76 (rule=exact(self), exp=0.01421)"
+AAB73230902-0,RAC30599301-1,SUB ASSY,0.0029,2.0,c_수기override(exact쌍 값불일치),"AAB73230902-0/RAC30599301-1 unit=0.0015 diam=6.35 (rule=exact(self), exp=0.0045)"
+AAB73230902-1,RAC30599301-1,SUB ASSY,0.0029,2.0,c_수기override(exact쌍 값불일치),"AAB73230902-1/RAC30599301-1 unit=0.0015 diam=6.35 (rule=exact(self), exp=0.0045)"
+AJJ75698803,RAC30599301-1,Supporter Assembly,0.0018,2.0,c_수기override(exact쌍 값불일치),"AJJ75698803/RAC30599301-1 unit=0.00345 diam=15.88 (rule=exact(self), exp=0.01035)"
+AJJ76559010,RAC30599301-1,Supporter Assembly,0.0087,4.0,c_수기override(exact쌍 값불일치),"AJJ76559010/RAC30599301-1 unit=0.00165 diam=6.35 (rule=exact(self), exp=0.0099)"
+AJJ76559011,RAC30599301-1,Supporter Assembly,0.0117,4.0,c_수기override(exact쌍 값불일치),"AJJ76559011/RAC30599301-1 unit=0.0017 diam=6.35 (rule=exact(self), exp=0.0102)"
+AJR30007604-SUB,RAC30599327,은납-SUB,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR30007604-SUB/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR30009003-SUB,RAC30599327,은납-SUB,0.0018,2.0,c_수기override(exact쌍 값불일치),"AJR30009003-SUB/RAC30599327 unit=0.0012 diam=15.88 (rule=exact(self), exp=0.0036)"
+AJR30027714,RAC30599301-1,"Tube Assembly,Reverse",0.1488,10.0,c_수기override(exact쌍 값불일치),"AJR30027714/RAC30599301-1 unit=0.003307 diam=22.0 (rule=exact(self), exp=0.0496)"
+AJR30029802,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0198,14.0,c_수기override(exact쌍 값불일치),"AJR30029802/RAC30599301-1 unit=0.0008 diam=7.94 (rule=exact(self), exp=0.0168)"
+AJR30030101,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.0186,13.0,c_수기override(exact쌍 값불일치),"AJR30030101/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.0156)"
+AJR30037109,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0144,8.0,c_수기override(exact쌍 값불일치),"AJR30037109/RAC30599301-1 unit=0.0013 diam=6.35 (rule=exact(self), exp=0.0156)"
+AJR30037110,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0144,8.0,c_수기override(exact쌍 값불일치),"AJR30037110/RAC30599301-1 unit=0.0013 diam=6.35 (rule=exact(self), exp=0.0156)"
+AJR30037111,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0144,8.0,c_수기override(exact쌍 값불일치),"AJR30037111/RAC30599301-1 unit=0.0013 diam=6.35 (rule=exact(self), exp=0.0156)"
+AJR30038301-S6-1,RAC30599301-1,사내 SUB,0.0093,2.0,c_수기override(exact쌍 값불일치),"AJR30038301-S6-1/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(self), exp=0.003)"
+AJR30079101,RAC30599301-1,"Tube Assembly, Expansion",0.0078,13.0,c_수기override(exact쌍 값불일치),"AJR30079101/RAC30599301-1 unit=0.000785 diam=4.76 (rule=exact(self), exp=0.0153)"
+AJR30086101,RAC30599301-1,"Tube Assembly, Expansion",0.0171,12.0,c_수기override(exact쌍 값불일치),"AJR30086101/RAC30599301-1 unit=0.00115 diam=12.7 (rule=exact(self), exp=0.0207)"
+AJR30086102,RAC30599301-1,"Tube Assembly, Expansion",0.0171,12.0,c_수기override(exact쌍 값불일치),"AJR30086102/RAC30599301-1 unit=0.00115 diam=12.7 (rule=exact(self), exp=0.0207)"
+AJR30087301,RAC30599301-1,"Tube Assembly,Reverse",0.0285,23.0,c_수기override(exact쌍 값불일치),"AJR30087301/RAC30599301-1 unit=0.000864 diam=6.35 (rule=exact(self), exp=0.0298)"
+AJR30105801,RAC30599301-1,Tube Assembly,0.0276,15.0,c_수기override(exact쌍 값불일치),"AJR30105801/RAC30599301-1 unit=0.00104 diam=15.88 (rule=exact(self), exp=0.0234)"
+AJR30106101,RAC30599301-1,"Tube Assembly, Expansion",0.0078,13.0,c_수기override(exact쌍 값불일치),"AJR30106101/RAC30599301-1 unit=0.000785 diam=4.76 (rule=exact(self), exp=0.0153)"
+AJR33796512,RAC30599301-1,"Tube Assembly,Capillary",0.003,2.0,c_수기override(exact쌍 값불일치),"AJR33796512/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.0024)"
+AJR33796513,RAC30599301-1,"Tube Assembly,Capillary",0.003,2.0,c_수기override(exact쌍 값불일치),"AJR33796513/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.0024)"
+AJR36388508,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0011,1.0,c_수기override(exact쌍 값불일치),"AJR36388508/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0012)"
+AJR36388510,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.00215,1.0,c_수기override(exact쌍 값불일치),"AJR36388510/RAC30599301-1 unit=0.0022 diam=19.05 (rule=exact(self), exp=0.0033)"
+AJR55707009-F&T-2,RAC30599327,태국 SUB,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR55707009-F&T-2/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR67734301,RAC30599327,1-way 표준화 전 제품,0.0018,2.0,c_수기override(exact쌍 값불일치),"AJR67734301/RAC30599327 unit=0.0012 diam=15.88 (rule=exact(self), exp=0.0036)"
+AJR73324406,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.0098,3.0,c_수기override(exact쌍 값불일치),"AJR73324406/RAC30599301-1 unit=0.0019 diam=15.88 (rule=exact(self), exp=0.00855)"
+AJR73663001-9-1,RAC30599301-1,SUB ASSY,0.00725,5.0,c_수기override(exact쌍 값불일치),"AJR73663001-9-1/RAC30599301-1 unit=0.00098 diam=12.7 (rule=exact(self), exp=0.00735)"
+AJR73663002-4-1,RAC30599301-1,AJR73663002-4-1,0.01123,5.0,c_수기override(exact쌍 값불일치),"AJR73663002-4-1/RAC30599301-1 unit=0.00096 diam=12.7 (rule=exact(self), exp=0.0072)"
+AJR73664801,RAC30599327,ADM75404602 내재화 SUB ASSY,0.0141,3.0,c_수기override(exact쌍 값불일치),"AJR73664801/RAC30599327 unit=0.0047 diam=28.0 (rule=exact(self), exp=0.02115)"
+AJR73724104,RAC30599327,판형 SUB,0.0071,2.0,c_수기override(exact쌍 값불일치),"AJR73724104/RAC30599327 unit=0.0047 diam=28.0 (rule=exact(self), exp=0.0141)"
+AJR73822509,RAC30599301-1,Tube Assembly,0.0034,3.0,c_수기override(exact쌍 값불일치),"AJR73822509/RAC30599301-1 unit=0.001867 diam=19.05 (rule=exact(self), exp=0.0084)"
+AJR73822512,RAC30599301-1,Tube Assembly,0.01,3.0,c_수기override(exact쌍 값불일치),"AJR73822512/RAC30599301-1 unit=0.001733 diam=19.05 (rule=exact(self), exp=0.0078)"
+AJR73822520,RAC30599301-1,Tube Assembly,0.01,3.0,c_수기override(exact쌍 값불일치),"AJR73822520/RAC30599301-1 unit=0.001733 diam=19.05 (rule=exact(self), exp=0.0078)"
+AJR73822522,RAC30599301-1,Tube Assembly,0.02,3.0,c_수기override(exact쌍 값불일치),"AJR73822522/RAC30599301-1 unit=0.001733 diam=19.05 (rule=exact(self), exp=0.0078)"
+AJR73822529,RAC30599301-1,Tube Assembly,0.02,3.0,c_수기override(exact쌍 값불일치),"AJR73822529/RAC30599301-1 unit=0.001733 diam=19.05 (rule=exact(self), exp=0.0078)"
+AJR73822530,RAC30599301-1,Tube Assembly,0.00496,3.0,c_수기override(exact쌍 값불일치),"AJR73822530/RAC30599301-1 unit=0.001733 diam=19.05 (rule=exact(self), exp=0.0078)"
+AJR73822536,RAC30599301-1,Tube Assembly,0.03335,3.0,c_수기override(exact쌍 값불일치),"AJR73822536/RAC30599301-1 unit=0.001733 diam=19.05 (rule=exact(self), exp=0.0078)"
+AJR73882504-S5-1,RAC30599301-1,사내 SUB,0.03293,24.0,c_수기override(exact쌍 값불일치),"AJR73882504-S5-1/RAC30599301-1 unit=0.000917 diam=6.35 (rule=exact(self), exp=0.033)"
+AJR73909902,RAC30599301-1,AJR73909902,0.0083,8.0,c_수기override(exact쌍 값불일치),"AJR73909902/RAC30599301-1 unit=0.00135 diam=19.05 (rule=exact(self), exp=0.0162)"
+AJR73944509,RAC30599301-1,"Tube Assembly,Reverse",0.0083,7.0,c_수기override(exact쌍 값불일치),"AJR73944509/RAC30599301-1 unit=0.001429 diam=19.05 (rule=exact(self), exp=0.015)"
+AJR73944516,RAC30599301-1,"Tube Assembly,Reverse",0.0109,6.0,c_수기override(exact쌍 값불일치),"AJR73944516/RAC30599301-1 unit=0.001533 diam=19.05 (rule=exact(self), exp=0.0138)"
+AJR73946113,RAC30599301-1,"Tube Assembly,Discharge",0.003,4.0,c_수기override(exact쌍 값불일치),"AJR73946113/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0048)"
+AJR73964609,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01294,13.0,c_수기override(exact쌍 값불일치),"AJR73964609/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(self), exp=0.0195)"
+AJR73964702,RAC30599301-1,AJR73964702,0.0035,5.0,c_수기override(exact쌍 값불일치),"AJR73964702/RAC30599301-1 unit=0.00076 diam=4.76 (rule=exact(self), exp=0.0057)"
+AJR73964902,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01015,10.0,c_수기override(exact쌍 값불일치),"AJR73964902/RAC30599301-1 unit=0.00102 diam=6.35 (rule=exact(self), exp=0.0153)"
+AJR73964905,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01015,9.0,c_수기override(exact쌍 값불일치),"AJR73964905/RAC30599301-1 unit=0.001089 diam=15.88 (rule=exact(self), exp=0.0147)"
+AJR73964906,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01015,9.0,c_수기override(exact쌍 값불일치),"AJR73964906/RAC30599301-1 unit=0.001067 diam=4.76 (rule=exact(self), exp=0.0144)"
+AJR73965102,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.00723,4.0,c_수기override(exact쌍 값불일치),"AJR73965102/RAC30599301-1 unit=0.002025 diam=6.35 (rule=exact(self), exp=0.01215)"
+AJR73981102,RAC30599301-1,Tube Assembly,0.00522,2.0,c_수기override(exact쌍 값불일치),"AJR73981102/RAC30599301-1 unit=0.001 diam=6.35 (rule=exact(self), exp=0.003)"
+AJR73981104,RAC30599301-1,Tube Assembly,0.00522,3.0,c_수기override(exact쌍 값불일치),"AJR73981104/RAC30599301-1 unit=0.0014 diam=6.35 (rule=exact(self), exp=0.0063)"
+AJR73981107,RAC30599301-1,Tube Assembly,0.0051,3.0,c_수기override(exact쌍 값불일치),"AJR73981107/RAC30599301-1 unit=0.0014 diam=6.35 (rule=exact(self), exp=0.0063)"
+AJR73981108,RAC30599301-1,Tube Assembly,0.00124,2.0,c_수기override(exact쌍 값불일치),"AJR73981108/RAC30599301-1 unit=0.0017 diam=15.88 (rule=exact(self), exp=0.0051)"
+AJR73984501,RAC30599301-1,SUB ASSY,0.0108,8.0,c_수기override(exact쌍 값불일치),"AJR73984501/RAC30599301-1 unit=0.00085 diam=6.35 (rule=exact(self), exp=0.0102)"
+AJR73988601,RAC30599301-1,"Tube Assembly, Condenser",0.0117,11.0,c_수기override(exact쌍 값불일치),"AJR73988601/RAC30599301-1 unit=0.000782 diam=6.35 (rule=exact(self), exp=0.0129)"
+AJR74064004,RAC30599301-1,"Tube Assembly,Reverse",0.01476,15.0,c_수기override(exact쌍 값불일치),"AJR74064004/RAC30599301-1 unit=0.000933 diam=9.52 (rule=exact(self), exp=0.021)"
+AJR74125301,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.00549,2.0,c_수기override(exact쌍 값불일치),"AJR74125301/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.0024)"
+AJR74162602,RAC30599301-1,Tube Assembly,0.0112,8.0,c_수기override(exact쌍 값불일치),"AJR74162602/RAC30599301-1 unit=0.00095 diam=9.52 (rule=exact(self), exp=0.0114)"
+AJR74206901,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0036,4.0,c_수기override(exact쌍 값불일치),"AJR74206901/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0048)"
+AJR74243206,RAC30599301-1,"Tube Assembly,Condenser(In)",0.0171,16.0,c_수기override(exact쌍 값불일치),"AJR74243206/RAC30599301-1 unit=0.000775 diam=5.0 (rule=exact(self), exp=0.0186)"
+AJR74263402,RAC30599301-1,"Tube Assembly, Connector",0.0048,5.0,c_수기override(exact쌍 값불일치),"AJR74263402/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.006)"
+AJR74282902,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01015,7.0,c_수기override(exact쌍 값불일치),"AJR74282902/RAC30599301-1 unit=0.000829 diam=6.35 (rule=exact(self), exp=0.0087)"
+AJR74283401,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00274,9.0,c_수기override(exact쌍 값불일치),"AJR74283401/RAC30599301-1 unit=0.000822 diam=6.35 (rule=exact(self), exp=0.0111)"
+AJR74286002,RAC30599301-1,"Tube Assembly,Suction(Indoor)",0.00165,2.0,c_수기override(exact쌍 값불일치),"AJR74286002/RAC30599301-1 unit=0.00115 diam=6.35 (rule=exact(self), exp=0.00345)"
+AJR74364809,RAC30599301-1,"Tube Assembly,Expansion",0.0126,8.0,c_수기override(exact쌍 값불일치),"AJR74364809/RAC30599301-1 unit=0.0009 diam=9.52 (rule=exact(self), exp=0.0108)"
+AJR74366603,RAC30599301-1,Tube Assembly,0.0132,3.0,c_수기override(exact쌍 값불일치),"AJR74366603/RAC30599301-1 unit=0.0014 diam=9.52 (rule=exact(self), exp=0.0063)"
+AJR74366605,RAC30599301-1,Tube Assembly,0.01,3.0,c_수기override(exact쌍 값불일치),"AJR74366605/RAC30599301-1 unit=0.0014 diam=9.52 (rule=exact(self), exp=0.0063)"
+AJR74424506,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0138,14.0,c_수기override(exact쌍 값불일치),"AJR74424506/RAC30599301-1 unit=0.000857 diam=6.35 (rule=exact(self), exp=0.018)"
+AJR74425403,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0111,14.0,c_수기override(exact쌍 값불일치),"AJR74425403/RAC30599301-1 unit=0.000871 diam=6.35 (rule=exact(self), exp=0.0183)"
+AJR74662702,RAC30599301-1,"Tube Assembly,Suction",0.00935,3.0,c_수기override(exact쌍 값불일치),"AJR74662702/RAC30599301-1 unit=0.003133 diam=22.0 (rule=exact(self), exp=0.0141)"
+AJR74683101,RAC30599301-1,"Tube Assembly,Reverse",0.03231,23.0,c_수기override(exact쌍 값불일치),"AJR74683101/RAC30599301-1 unit=0.001426 diam=9.52 (rule=exact(self), exp=0.0492)"
+AJR74683102,RAC30599301-1,"Tube Assembly,Reverse",0.03231,22.0,c_수기override(exact쌍 값불일치),"AJR74683102/RAC30599301-1 unit=0.001273 diam=9.52 (rule=exact(self), exp=0.042)"
+AJR74803545-12-1,RAC30599301-1,미래정밀 Sub,0.0081,6.0,c_수기override(exact쌍 값불일치),"AJR74803545-12-1/RAC30599301-1 unit=0.00108 diam=6.35 (rule=exact(self), exp=0.00972)"
+AJR74844312,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.0216,13.0,c_수기override(exact쌍 값불일치),"AJR74844312/RAC30599301-1 unit=0.001169 diam=9.52 (rule=exact(self), exp=0.0228)"
+AJR74844312-은납,RAC30599327,AJR74844312-SUB,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR74844312-은납/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR74844317,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR74844317/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR75183001-9-1,RAC30599301-1,AJR75183001-9-1,0.00563,5.0,c_수기override(exact쌍 값불일치),"AJR75183001-9-1/RAC30599301-1 unit=0.00076 diam=6.35 (rule=exact(self), exp=0.0057)"
+AJR75462802,RAC30599301-1,"Tube Assembly,Suction",0.0048,10.0,c_수기override(exact쌍 값불일치),"AJR75462802/RAC30599301-1 unit=0.00106 diam=12.7 (rule=exact(self), exp=0.0159)"
+AJR75563502-은납,RAC30599327,AJR75563502-SUB,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR75563502-은납/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR75563503-F&T-2,RAC30599327,태국 SUB,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR75563503-F&T-2/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR75702302,RAC30599301-1,"Tube Assembly,Condenser(In)",0.00225,3.0,c_수기override(exact쌍 값불일치),"AJR75702302/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0036)"
+AJR76363201-S3-1,RAC30599301-1,사내 SUB,0.00415,2.0,c_수기override(exact쌍 값불일치),"AJR76363201-S3-1/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.0024)"
+AJR76462708,RAC30599327,ADM74930502 SUB,0.0057,2.0,c_수기override(exact쌍 값불일치),"AJR76462708/RAC30599327 unit=0.0038 diam=25.4 (rule=exact(self), exp=0.0114)"
+AJR76462709,RAC30599327,ADM74930502 SUB,0.0197,8.0,c_수기override(exact쌍 값불일치),"AJR76462709/RAC30599327 unit=0.003275 diam=25.4 (rule=exact(self), exp=0.0393)"
+AJR76502605,RAC30599301-1,"Tube Assembly,Expansion",0.006,3.0,c_수기override(exact쌍 값불일치),"AJR76502605/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(self), exp=0.0036)"
+AJR76562802,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0057,2.0,c_수기override(exact쌍 값불일치),"AJR76562802/RAC30599301-1 unit=0.0022 diam=19.05 (rule=exact(self), exp=0.0066)"
+AJR76742308-SUB,RAC30599327,AJR76742308-은납,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR76742308-SUB/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR76742309-SUB,RAC30599327,AJR76742309-은납,0.0012,2.0,c_수기override(exact쌍 값불일치),"AJR76742309-SUB/RAC30599327 unit=0.0008 diam=6.35 (rule=exact(self), exp=0.0024)"
+AJR76823801,RAC30599301-1,"Tube Assembly,Connector",0.0099,1.0,c_수기override(exact쌍 값불일치),"AJR76823801/RAC30599301-1 unit=0.0028 diam=22.0 (rule=exact(self), exp=0.0042)"
+AJR77224506-S1-4,RAC30599301-1,사내 SUB,0.0072,4.0,c_수기override(exact쌍 값불일치),"AJR77224506-S1-4/RAC30599301-1 unit=0.0009 diam=9.52 (rule=exact(self), exp=0.0054)"
+AJR77224901,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.01583,4.0,c_수기override(exact쌍 값불일치),"AJR77224901/RAC30599301-1 unit=0.00265 diam=22.0 (rule=exact(self), exp=0.0159)"
+AJR77225301,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.02301,4.0,c_수기override(exact쌍 값불일치),"AJR77225301/RAC30599301-1 unit=0.003825 diam=28.0 (rule=exact(self), exp=0.02295)"
+AJR77225602,RAC30599301-1,"Tube Assembly,Reverse",0.0266,7.0,c_수기override(exact쌍 값불일치),"AJR77225602/RAC30599301-1 unit=0.003871 diam=28.0 (rule=exact(self), exp=0.04065)"
+AJR77225607,RAC30599301-1,"Tube Assembly,Reverse",0.0278,8.0,c_수기override(exact쌍 값불일치),"AJR77225607/RAC30599301-1 unit=0.003488 diam=28.0 (rule=exact(self), exp=0.04185)"
+5211A10305E-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+5211A10305J-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+5211A10424B,RAC30599327,5211A10424B,0.0016,2.0,e_item_weld에 부모전무,
+5211A10530B,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0104,12.0,e_item_weld에 부모전무,
+5211A19008J,RAC30599327,"Tube Assembly,Evaporator(In)",0.00418,6.0,e_item_weld에 부모전무,
+5211A19008K,RAC30599327,"Tube Assembly,Evaporator(In)",0.00418,6.0,e_item_weld에 부모전무,
+5211A20297H,RAC30599301-1,"Tube Assembly,Capillary",0.003,12.0,e_item_weld에 부모전무,
+5211A20297S,RAC30599301-1,"Tube Assembly,Capillary",0.0141,20.0,e_item_weld에 부모전무,
+5211A20356U,RAC30599301-1,"Tube Assembly,Capillary",0.00804,12.0,e_item_weld에 부모전무,
+5211A20459E,RAC30599327,"Tube Assembly,Discharge(Indoor)",0.0008,1.0,e_item_weld에 부모전무,
+5211A20459E,RAC30599301-1,"Tube Assembly,Discharge(Indoor)",0.0025,7.0,e_item_weld에 부모전무,
+5211A20459K,RAC30599327,"Tube Assembly,Discharge(Indoor)",0.00225,1.0,e_item_weld에 부모전무,
+5211A20459K-0-1,RAC30599301-1,사내 SUB,0.006,5.0,e_item_weld에 부모전무,
+5211A20459K-0-2,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+5211A20459K-0-3,RAC30599327,사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+5211A20459K-S3-1,RAC30599301-1,사내 SUB,0.006,5.0,e_item_weld에 부모전무,
+5211A20459K-S3-2,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+5211A20459K-S3-3,RAC30599327,사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+5211A20459L-S3-2,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+5211A20466N-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+5211A21788C,RAC30599301-1,5211A21788C,0.0041,5.0,e_item_weld에 부모전무,
+5211A21907C-1-1,RAC30599301-1,5211A21907C-1-1,0.0032,10.0,e_item_weld에 부모전무,
+5211A25726E,RAC30599327,"Tube Assembly,Suction(Outdoor)",0.0051,2.0,e_item_weld에 부모전무,
+5211A29904C,RAC30599301-1,5211A29904C,0.0023,3.0,e_item_weld에 부모전무,
+5211A29907A,RAC30599327,5211A29907A,0.0008,1.0,e_item_weld에 부모전무,
+5211A29907A,RAC30599301-1,5211A29907A,0.0083,11.0,e_item_weld에 부모전무,
+5425AP7108K,RAC30599301-1,"Tube Assembly,Capillary",0.0201,30.0,e_item_weld에 부모전무,
+5425AP7108R,RAC30599301-1,"Tube Assembly,Capillary",0.02085,31.0,e_item_weld에 부모전무,
+AAB73230902-3,RAC30599301-1,MTS SUB,0.0029,2.0,e_item_weld에 부모전무,
+ADM73210506,RAC30599328,판형 Assembly(알파라발),0.0171,4.0,e_item_weld에 부모전무,
+ADM73210508,RAC30599328,판형 Assembly(스웹),0.0171,4.0,e_item_weld에 부모전무,
+ADM73210510,RAC30599328,Exchanger Assembly,0.0172,4.0,e_item_weld에 부모전무,
+ADM73210511,RAC30599328,판형 Assembly(알파라발),0.0171,4.0,e_item_weld에 부모전무,
+ADM73210515,RAC30599328,판형 Assembly(동일),0.0171,4.0,e_item_weld에 부모전무,
+ADM74930503,RAC30599328,판형 열교환기,0.0171,4.0,e_item_weld에 부모전무,
+ADM74930506,RAC30599328,판형 열교환기(스웹),0.0171,4.0,e_item_weld에 부모전무,
+ADM74930507,RAC30599328,Exchanger Assembly,0.0171,4.0,e_item_weld에 부모전무,
+ADM74930511,RAC30599328,판형 Assembly(동일),0.0171,4.0,e_item_weld에 부모전무,
+AEG74589804,RAC30599328,히터탱크,0.00705,1.0,e_item_weld에 부모전무,
+AEG74589804(신창),RAC30599328,히터탱크,0.00705,1.0,e_item_weld에 부모전무,
+AEG74589806,RAC30599328,히터탱크,0.00705,1.0,e_item_weld에 부모전무,
+AFY74209501,RAC30599327,Muffler Assembly,0.003,2.0,e_item_weld에 부모전무,
+AJJ73679204,RAC30599327,SUB ASSY,0.0047,6.0,e_item_weld에 부모전무,
+AJJ73679204,RAC30599301-1,SUB ASSY,0.00937,11.0,e_item_weld에 부모전무,
+AJJ73679204-12-1,RAC30599301-1,SUB ASSY,0.0016,2.0,e_item_weld에 부모전무,
+AJJ73679204-14-1,RAC30599301-1,SUB ASSY,0.0016,2.0,e_item_weld에 부모전무,
+AJJ73799402,RAC30599301-1,Supporter Assembly,0.0086,9.0,e_item_weld에 부모전무,
+AJJ73898629,RAC30599301-1,Supporter Assembly,0.002,2.0,e_item_weld에 부모전무,
+AJJ74498301-S3-2,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJJ74498305-S3-2,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJJ74498305-S3-3,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJJ74498305-S3-4,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJJ74578314,RAC30599301-1,Supporter Assembly,0.00498,4.0,e_item_weld에 부모전무,
+AJJ74578316,RAC30599301-1,Supporter Assembly,0.0042,3.0,e_item_weld에 부모전무,
+AJJ74578326,RAC30599301-1,Supporter Assembly,0.0018,1.0,e_item_weld에 부모전무,
+AJJ74578326-S3-2,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJJ75358421,RAC30599301-1,Supporter Assembly,0.00795,2.0,e_item_weld에 부모전무,
+AJJ75358423,RAC30599301-1,Supporter Assembly,0.00795,2.0,e_item_weld에 부모전무,
+AJJ75918402,RAC30599301-1,Supporter Assembly,0.00158,2.0,e_item_weld에 부모전무,
+AJJ76238401,RAC30599301-1,Supporter Assembly,0.00499,6.0,e_item_weld에 부모전무,
+AJL74852201,RAC30599327,"Tank Assembly,Oil",0.0016,2.0,e_item_weld에 부모전무,
+AJL74852201,RAC30599301-1,"Tank Assembly,Oil",0.0016,2.0,e_item_weld에 부모전무,
+AJR30028405,RAC30599327,Tube Assembly,0.01125,2.0,e_item_weld에 부모전무,
+AJR30028409,RAC30599327,Tube Assembly,0.0099,2.0,e_item_weld에 부모전무,
+AJR30029602-S1-1,RAC30599327,사내 SUB,0.0024,3.0,e_item_weld에 부모전무,
+AJR30037101-J1,RAC30599327,지그1,0.0012,1.0,e_item_weld에 부모전무,
+AJR30055502-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR30069702-저압,RAC30599327,AJR30069702-SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR30069801-고압,RAC30599327,AJR30069801-SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR30077901-17-1,RAC30599301-1,유남 SUB,0.0062,5.0,e_item_weld에 부모전무,
+AJR30117301,RAC30599301-1,"Tube Assembly, Manifold(Outdoor)",0.0143,12.0,e_item_weld에 부모전무,
+AJR30118401,RAC30599301-1,"Tube Assembly, Connector",0.0024,2.0,e_item_weld에 부모전무,
+AJR31790102-S1-1,RAC30599327,사내 SUB,0.0036,2.0,e_item_weld에 부모전무,
+AJR32674704,RAC30599327,"Tube Assembly,Evaporator(In)",0.00922,13.0,e_item_weld에 부모전무,
+AJR32674707,RAC30599327,"Tube Assembly,Evaporator(In)",0.00568,8.0,e_item_weld에 부모전무,
+AJR32674708,RAC30599327,"Tube Assembly,Evaporator(In)",0.00568,8.0,e_item_weld에 부모전무,
+AJR32674713-S6-1,RAC30599327,은납 원대 사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR32883902-은납,RAC30599327,은납 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR32883906,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,e_item_weld에 부모전무,
+AJR32883906-3-1,RAC30599301-1,SUB ASSY,0.0108,13.0,e_item_weld에 부모전무,
+AJR32883908-은납,RAC30599327,AJR32883908-SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR33796502,RAC30599327,"Tube Assembly,Capillary",0.00083,1.0,e_item_weld에 부모전무,
+AJR33796506,RAC30599327,"Tube Assembly,Capillary",0.00922,9.0,e_item_weld에 부모전무,
+AJR34739807,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.004,5.0,e_item_weld에 부모전무,
+AJR34739818,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0089,10.0,e_item_weld에 부모전무,
+AJR34739819-3-1,RAC30599301-1,SUB ASSY,0.004,5.0,e_item_weld에 부모전무,
+AJR34909302,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.0177,26.0,e_item_weld에 부모전무,
+AJR36388615,RAC30599301-1,사내 SUB,0.0028,2.0,e_item_weld에 부모전무,
+AJR36388615-9-1,RAC30599301-1,AJR36388615-9-1,0.0017,2.0,e_item_weld에 부모전무,
+AJR36388615-9-2,RAC30599301-1,AJR36388615-9-2,0.0008,1.0,e_item_weld에 부모전무,
+AJR36479502,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.014,13.0,e_item_weld에 부모전무,
+AJR36479508,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.0046,6.0,e_item_weld에 부모전무,
+AJR36479508-1-1,RAC30599301-1,AJR36479508-1-1,0.00402,6.0,e_item_weld에 부모전무,
+AJR36541603-SUB1,RAC30599327,은납-SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR36738207,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.00282,5.0,e_item_weld에 부모전무,
+AJR36852201-은납,RAC30599327,은납 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR36852207,RAC30599327,1-way 표준화 제품,0.0024,3.0,e_item_weld에 부모전무,
+AJR36852208,RAC30599327,1-way 표준화 제품,0.0012,1.0,e_item_weld에 부모전무,
+AJR36904201,RAC30599301-1,AJR36904201,0.0016,2.0,e_item_weld에 부모전무,
+AJR37039702,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0033,1.0,e_item_weld에 부모전무,
+AJR37039706-S6-2,RAC30599327,사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR37048417,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0042,2.0,e_item_weld에 부모전무,
+AJR37048418,RAC30599301-1,AJR37048418,0.0029,2.0,e_item_weld에 부모전무,
+AJR37161107,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0011,3.0,e_item_weld에 부모전무,
+AJR52676202-S6-1,RAC30599327,사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR52737635,RAC30599301-1,AJR52737635,0.0012,1.0,e_item_weld에 부모전무,
+AJR55707101-14-1,RAC30599327,JS ENG SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR55707101-2-1,RAC30599327,외주 SUB,0.00284,4.0,e_item_weld에 부모전무,
+AJR55707101-2-1,RAC30599301-1,외주 SUB,0.0008,1.0,e_item_weld에 부모전무,
+AJR55707101-S6-1,RAC30599327,사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR55829101,RAC30599327,Tube Assembly,0.0282,6.0,e_item_weld에 부모전무,
+AJR55829102,RAC30599327,Tube Assembly,0.0282,6.0,e_item_weld에 부모전무,
+AJR65059803,RAC30599327,"Tube Assembly,Suction(Indoor)",0.0117,13.0,e_item_weld에 부모전무,
+AJR65059804,RAC30599327,"Tube Assembly,Suction(Indoor)",0.0117,13.0,e_item_weld에 부모전무,
+AJR65507704-S3-1,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR65507704-S3-2,RAC30599301-1,사내 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR67734302,RAC30599327,1-way 표준화 전 제품,0.0015,1.0,e_item_weld에 부모전무,
+AJR68019501-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR68019502-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR68019506-S6-1,RAC30599327,사내 SUB,0.0024,1.0,e_item_weld에 부모전무,
+AJR68019507-S6-1,RAC30599327,사내 SUB,0.0024,1.0,e_item_weld에 부모전무,
+AJR71429415,RAC30599301-1,"Tube Assembly,Reverse",0.005,4.0,e_item_weld에 부모전무,
+AJR71429439,RAC30599301-1,"Tube Assembly,Reverse",0.00505,5.0,e_item_weld에 부모전무,
+AJR71433348,RAC30599301-1,"Tube Assembly, Expansion",0.001,29.0,e_item_weld에 부모전무,
+AJR72914201-S6-2,RAC30599327,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR72914202-S6-2,RAC30599327,사내 SUB,0.0024,1.0,e_item_weld에 부모전무,
+AJR72919802,RAC30599301-1,"Tube Assembly,Connector",0.0008,1.0,e_item_weld에 부모전무,
+AJR72920407,RAC30599301-1,"Tube Assembly,Reverse",0.0019,1.0,e_item_weld에 부모전무,
+AJR72928103,RAC30599301-1,"Tube Assembly,Expansion",0.00658,12.0,e_item_weld에 부모전무,
+AJR72928103-1,RAC30599301-1,AJR72928103-1,0.0031,2.0,e_item_weld에 부모전무,
+AJR72928103-2,RAC30599301-1,AJR72928103-2,0.0046,3.0,e_item_weld에 부모전무,
+AJR72928401,RAC30599301-1,"Tube Assembly,Expansion",0.0285,32.0,e_item_weld에 부모전무,
+AJR72939901,RAC30599301-1,AJR72939901,0.0016,2.0,e_item_weld에 부모전무,
+AJR72946422,RAC30599301-1,Tube Assembly,0.011,5.0,e_item_weld에 부모전무,
+AJR73063201-S6-1,RAC30599327,사내 SUB,0.0057,6.0,e_item_weld에 부모전무,
+AJR73326616,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.01531,17.0,e_item_weld에 부모전무,
+AJR73326623,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.01595,18.0,e_item_weld에 부모전무,
+AJR73326631,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.021,16.0,e_item_weld에 부모전무,
+AJR73326650,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0058,29.0,e_item_weld에 부모전무,
+AJR73327007-은납,RAC30599327,은납 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR73343302,RAC30599301-1,AJR73343302,0.0008,1.0,e_item_weld에 부모전무,
+AJR73603201-S6-2,RAC30599327,사내 SUB,0.00285,3.0,e_item_weld에 부모전무,
+AJR73763001,RAC30599327,AJR73763001,0.0012,1.0,e_item_weld에 부모전무,
+AJR73763001,RAC30599301-1,AJR73763001,0.00402,6.0,e_item_weld에 부모전무,
+AJR73767413,RAC30599301-1,"Tube Assembly,Expansion",0.0042,5.0,e_item_weld에 부모전무,
+AJR73767817-3-1,RAC30599301-1,AJR73767817-3-1,0.0036,3.0,e_item_weld에 부모전무,
+AJR73768805-S6-4,RAC30599327,사내 SUB,0.00435,4.0,e_item_weld에 부모전무,
+AJR73786307-S3-1,RAC30599301-1,사내 SUB,0.0069,5.0,e_item_weld에 부모전무,
+AJR73787405,RAC30599301-1,"Tube Assembly,Condenser(In)",0.00417,5.0,e_item_weld에 부모전무,
+AJR73822504,RAC30599301-1,Tube Assembly,0.0012,4.0,e_item_weld에 부모전무,
+AJR73822507,RAC30599301-1,Tube Assembly,0.00496,4.0,e_item_weld에 부모전무,
+AJR73822513,RAC30599301-1,Tube Assembly,0.002,5.0,e_item_weld에 부모전무,
+AJR73822515,RAC30599301-1,Tube Assembly,0.00496,4.0,e_item_weld에 부모전무,
+AJR73822516,RAC30599301-1,Tube Assembly,0.00496,4.0,e_item_weld에 부모전무,
+AJR73822538,RAC30599301-1,Tube Assembly,0.03335,6.0,e_item_weld에 부모전무,
+AJR73882508,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.03462,29.0,e_item_weld에 부모전무,
+AJR73882540-1-2,RAC30599301-1,SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR73943301,RAC30599327,AJR73943301,0.0008,1.0,e_item_weld에 부모전무,
+AJR73943301,RAC30599301-1,AJR73943301,0.003,4.0,e_item_weld에 부모전무,
+AJR73943302,RAC30599301-1,AJR73943302,0.00375,5.0,e_item_weld에 부모전무,
+AJR73943302,RAC30599327,AJR73943302,0.00095,1.0,e_item_weld에 부모전무,
+AJR73944514,RAC30599301-1,"Tube Assembly,Reverse",0.0083,7.0,e_item_weld에 부모전무,
+AJR73944514-7-1,RAC30599301-1,AJR73944514-7-1,0.0042,3.0,e_item_weld에 부모전무,
+AJR73944901,RAC30599327,SUB ASSY,0.0012,1.0,e_item_weld에 부모전무,
+AJR73944901,RAC30599301-1,SUB ASSY,0.0015,2.0,e_item_weld에 부모전무,
+AJR73950304,RAC30599301-1,AJR73950304,0.0065,8.0,e_item_weld에 부모전무,
+AJR73950304-12-1,RAC30599301-1,SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR73950306,RAC30599327,SUB ASSY,0.0033,4.0,e_item_weld에 부모전무,
+AJR73950306,RAC30599301-1,SUB ASSY,0.0024,2.0,e_item_weld에 부모전무,
+AJR73950306-12-1,RAC30599301-1,SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR73950306-14-1,RAC30599301-1,SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR73964602-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR73964602-S3-2,RAC30599301-1,사내 SUB,0.0051,2.0,e_item_weld에 부모전무,
+AJR73964602-S3-3,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR73964602-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,e_item_weld에 부모전무,
+AJR73964602-S3-5,RAC30599301-1,사내 SUB,0.0081,7.0,e_item_weld에 부모전무,
+AJR73964607-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR73964607-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,e_item_weld에 부모전무,
+AJR73964607-S3-5,RAC30599301-1,사내 SUB,0.0057,5.0,e_item_weld에 부모전무,
+AJR73968605,RAC30599301-1,AJR73968605,0.0015,2.0,e_item_weld에 부모전무,
+AJR73972012,RAC30599301-1,"Tube Assembly,Connector",0.0008,1.0,e_item_weld에 부모전무,
+AJR73973702,RAC30599301-1,AJR73973702,0.00204,2.0,e_item_weld에 부모전무,
+AJR73980318-S1-3,RAC30599301-1,사내 SUB,0.0096,3.0,e_item_weld에 부모전무,
+AJR73984401,RAC30599327,SUB ASSY,0.004,6.0,e_item_weld에 부모전무,
+AJR73984401,RAC30599301-1,SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR73988107-9-1,RAC30599301-1,AJR73988107-9-1,0.00407,5.0,e_item_weld에 부모전무,
+AJR73988107-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR73988107-S3-2,RAC30599301-1,사내 SUB,0.0057,4.0,e_item_weld에 부모전무,
+AJR73988107-S3-3,RAC30599301-1,사내 SUB,0.0027,2.0,e_item_weld에 부모전무,
+AJR74149202,RAC30599301-1,"Tube Assembly,Expansion",0.0171,9.0,e_item_weld에 부모전무,
+AJR74149202-S1-3,RAC30599301-1,사내 SUB,0.0072,4.0,e_item_weld에 부모전무,
+AJR74149202-S1-4,RAC30599301-1,사내 SUB,0.0132,8.0,e_item_weld에 부모전무,
+AJR74149202-S1-5,RAC30599301-1,사내 SUB,0.00345,2.0,e_item_weld에 부모전무,
+AJR74149202-S1-6,RAC30599301-1,사내 SUB,0.00405,2.0,e_item_weld에 부모전무,
+AJR74162603,RAC30599301-1,Tube Assembly,0.0112,9.0,e_item_weld에 부모전무,
+AJR74169203,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.00477,6.0,e_item_weld에 부모전무,
+AJR74182305,RAC30599301-1,"Tube Assembly,Expansion",0.00615,3.0,e_item_weld에 부모전무,
+AJR74182305-S1-1,RAC30599301-1,사내 SUB,0.00675,3.0,e_item_weld에 부모전무,
+AJR74182305-S1-3,RAC30599301-1,사내 SUB,0.0036,2.0,e_item_weld에 부모전무,
+AJR74182305-S1-4,RAC30599301-1,사내 SUB,0.009,4.0,e_item_weld에 부모전무,
+AJR74182305-S1-5,RAC30599301-1,사내 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR74182305-S1-6,RAC30599301-1,사내 SUB,0.02055,10.0,e_item_weld에 부모전무,
+AJR74182602-S1-1,RAC30599327,사내 SUB,0.00165,1.0,e_item_weld에 부모전무,
+AJR74182602-S1-2,RAC30599301-1,사내 SUB,0.0213,2.0,e_item_weld에 부모전무,
+AJR74282301,RAC30599301-1,AJR74282301,0.0016,2.0,e_item_weld에 부모전무,
+AJR74291201,RAC30599301-1,AJR74291201,0.0041,5.0,e_item_weld에 부모전무,
+AJR74302405-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR74365101-S6-2,RAC30599327,사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR74424615,RAC30599301-1,SUB ASSY,0.00725,6.0,e_item_weld에 부모전무,
+AJR74465901-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR74465901-은납,RAC30599327,은납 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR74465903-S6-1,RAC30599327,사내 SUB,0.0024,3.0,e_item_weld에 부모전무,
+AJR74467103,RAC30599301-1,"Tube Assembly,Condenser(In)",0.0069,6.0,e_item_weld에 부모전무,
+AJR74523003,RAC30599301-1,AJR74523003,0.007,7.0,e_item_weld에 부모전무,
+AJR74524701,RAC30599301-1,Tube Assembly,0.00439,4.0,e_item_weld에 부모전무,
+AJR74524704,RAC30599301-1,Tube Assembly,0.005,6.0,e_item_weld에 부모전무,
+AJR74803001,RAC30599327,"Tube Assembly,Capillary",0.0008,1.0,e_item_weld에 부모전무,
+AJR74803517-R-1,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR74803517-R-2,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR74823002-S6-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR74843602,RAC30599301-1,"Tube Assembly,Expansion",0.004,4.0,e_item_weld에 부모전무,
+AJR74844309-은납,RAC30599327,AJR74844309-SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR74844310-은납,RAC30599327,AJR74844310-SUB,0.0036,1.0,e_item_weld에 부모전무,
+AJR74942531-R-1,RAC30599327,사내 고압 원대 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR74942531-R-2,RAC30599327,사내 저압 원대 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR74942548-R-1,RAC30599327,고압 원대 사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR74942548-R-2,RAC30599327,저압 원대 사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR74942615,RAC30599327,고압부 SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR74942615,RAC30599301-1,고압부 SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR74942615-4-1,RAC30599327,미래 SUB,0.00645,6.0,e_item_weld에 부모전무,
+AJR74942615-R-1,RAC30599327,AJR74942615-R-1,0.0093,6.0,e_item_weld에 부모전무,
+AJR74942623-R-1,RAC30599327,고압부  SUB,0.0042,4.0,e_item_weld에 부모전무,
+AJR74942709,RAC30599301-1,"Tube Assy, Evaporator(Out)",0.001,1.0,e_item_weld에 부모전무,
+AJR74942709-3-1,RAC30599301-1,SUB ASSY,0.00477,6.0,e_item_weld에 부모전무,
+AJR74942715,RAC30599327,AJR74942715,0.001,1.0,e_item_weld에 부모전무,
+AJR74942715,RAC30599301-1,AJR74942715,0.00539,1.0,e_item_weld에 부모전무,
+AJR74942715-3-1,RAC30599301-1,AJR74942715-3-1,0.00453,6.0,e_item_weld에 부모전무,
+AJR74982401,RAC30599301-1,Tube Assembly,0.002,1.0,e_item_weld에 부모전무,
+AJR74982402,RAC30599301-1,Tube Assembly,0.002,1.0,e_item_weld에 부모전무,
+AJR74984305-S3-1,RAC30599301-1,사내 SUB,0.02115,11.0,e_item_weld에 부모전무,
+AJR75062907-13-1,RAC30599327,엠케이 SUB,0.0078,7.0,e_item_weld에 부모전무,
+AJR75062907-13-1,RAC30599301-1,엠케이 SUB,0.00855,8.0,e_item_weld에 부모전무,
+AJR75103201-4-1,RAC30599301-1,SUB ASSY,0.00246,3.0,e_item_weld에 부모전무,
+AJR75103201-4-2,RAC30599301-1,SUB ASSY,0.0016,2.0,e_item_weld에 부모전무,
+AJR75103202,RAC30599301-1,SUB ASSY,0.0089,11.0,e_item_weld에 부모전무,
+AJR75103202-4-1,RAC30599301-1,SUB ASSY,0.00246,3.0,e_item_weld에 부모전무,
+AJR75104017,RAC30599301-1,"Tube Assembly, Expansion",0.0014,2.0,e_item_weld에 부모전무,
+AJR75104017-1-1,RAC30599301-1,SUB ASSY,0.0024,3.0,e_item_weld에 부모전무,
+AJR75142602-S6-2,RAC30599327,사내 SUB,0.003,2.0,e_item_weld에 부모전무,
+AJR75163204,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.001,1.0,e_item_weld에 부모전무,
+AJR75163204,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.00477,6.0,e_item_weld에 부모전무,
+AJR75183001,RAC30599327,AJR75183001,0.00125,1.0,e_item_weld에 부모전무,
+AJR75222301,RAC30599327,"Tube Assembly,Capillary",0.00501,7.0,e_item_weld에 부모전무,
+AJR75242801-R-1,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR75242807,RAC30599301-1,"Tube Assembly, Evaporator",0.0008,1.0,e_item_weld에 부모전무,
+AJR75242807,RAC30599327,"Tube Assembly, Evaporator",0.0008,1.0,e_item_weld에 부모전무,
+AJR75242811,RAC30599327,"Tube Assembly, Evaporator(In)",0.0011,1.0,e_item_weld에 부모전무,
+AJR75242811,RAC30599301-1,"Tube Assembly, Evaporator(In)",0.0011,1.0,e_item_weld에 부모전무,
+AJR75243001,RAC30599327,AJR75243001,0.0012,1.0,e_item_weld에 부모전무,
+AJR75243001,RAC30599301-1,AJR75243001,0.0036,4.0,e_item_weld에 부모전무,
+AJR75243008,RAC30599327,"Tube Assembly, Evaporator",0.0008,1.0,e_item_weld에 부모전무,
+AJR75243008,RAC30599301-1,"Tube Assembly, Evaporator",0.0008,4.0,e_item_weld에 부모전무,
+AJR75243013,RAC30599327,"Tube Assembly, Evaporator(Out)",0.0012,1.0,e_item_weld에 부모전무,
+AJR75243013,RAC30599301-1,"Tube Assembly, Evaporator(Out)",0.0012,1.0,e_item_weld에 부모전무,
+AJR75243105-R-2,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR75244301,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.00248,3.0,e_item_weld에 부모전무,
+AJR75462809-S3-2,RAC30599301-1,사내 SUB,0.0051,2.0,e_item_weld에 부모전무,
+AJR75462809-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,e_item_weld에 부모전무,
+AJR75463110,RAC30599301-1,"Tube Assembly,Expansion",0.0196,8.0,e_item_weld에 부모전무,
+AJR75482701,RAC30599327,"Tube Assembly,Distributor",0.001,1.0,e_item_weld에 부모전무,
+AJR75482701,RAC30599301-1,"Tube Assembly,Distributor",0.0008,1.0,e_item_weld에 부모전무,
+AJR75482701-2-1,RAC30599327,소신 SUB,0.0067,10.0,e_item_weld에 부모전무,
+AJR75482701-2-1,RAC30599301-1,소신 SUB,0.0105,13.0,e_item_weld에 부모전무,
+AJR75482702,RAC30599327,"Tube Assembly,Distributor",0.001,1.0,e_item_weld에 부모전무,
+AJR75482702,RAC30599301-1,"Tube Assembly,Distributor",0.0008,1.0,e_item_weld에 부모전무,
+AJR75482702-2-1,RAC30599327,AJR75482702-2-1,0.0067,10.0,e_item_weld에 부모전무,
+AJR75482702-2-1,RAC30599301-1,AJR75482702-2-1,0.0105,14.0,e_item_weld에 부모전무,
+AJR75483401,RAC30599301-1,"Tube Assembly,Expansion",0.0144,20.0,e_item_weld에 부모전무,
+AJR75483401-1-1,RAC30599301-1,중앙 SUB,0.002,2.0,e_item_weld에 부모전무,
+AJR75483603,RAC30599301-1,"Tube Assembly,Expansion",0.0033,4.0,e_item_weld에 부모전무,
+AJR75483603-3-1,RAC30599301-1,SUB용접,0.00249,3.0,e_item_weld에 부모전무,
+AJR75484604,RAC30599301-1,"Tube Assembly,Solenoide",0.006,7.0,e_item_weld에 부모전무,
+AJR75503601,RAC30599301-1,"Tube Assembly, Expansion",0.00204,2.0,e_item_weld에 부모전무,
+AJR75503602,RAC30599301-1,"Tube Assembly, Expansion",0.00102,2.0,e_item_weld에 부모전무,
+AJR75503702,RAC30599301-1,AJR75503702,0.002,2.0,e_item_weld에 부모전무,
+AJR75522802,RAC30599301-1,"Tube Assembly,Suction",0.00476,6.0,e_item_weld에 부모전무,
+AJR75523201,RAC30599327,AJR75523201,0.001,1.0,e_item_weld에 부모전무,
+AJR75523201,RAC30599301-1,AJR75523201,0.0015,1.0,e_item_weld에 부모전무,
+AJR75523501,RAC30599327,AJR75523501,0.0012,1.0,e_item_weld에 부모전무,
+AJR75523502,RAC30599327,AJR75523502,0.0018,1.0,e_item_weld에 부모전무,
+AJR75544203-S1-4,RAC30599301-1,사내 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR75544502,RAC30599301-1,AJR75544502,0.00248,2.0,e_item_weld에 부모전무,
+AJR75544503,RAC30599301-1,AJR75544503,0.00248,2.0,e_item_weld에 부모전무,
+AJR75544602,RAC30599301-1,AJR75544602,0.00332,4.0,e_item_weld에 부모전무,
+AJR75563602,RAC30599301-1,"Tube Assembly, Expansion",0.00204,2.0,e_item_weld에 부모전무,
+AJR75604102,RAC30599327,AJR75604102,0.001,1.0,e_item_weld에 부모전무,
+AJR75604801,RAC30599301-1,Tube Assembly,0.00294,7.0,e_item_weld에 부모전무,
+AJR75604804,RAC30599301-1,Tube Assembly,0.00728,7.0,e_item_weld에 부모전무,
+AJR75605801,RAC30599301-1,AJR75605801,0.003,2.0,e_item_weld에 부모전무,
+AJR75605801-1-1,RAC30599301-1,중앙 SUB,0.0008,1.0,e_item_weld에 부모전무,
+AJR75605801-1-2,RAC30599301-1,중앙 SUB,0.0008,1.0,e_item_weld에 부모전무,
+AJR75623501-S1-1,RAC30599301-1,사내 SUB,0.0033,2.0,e_item_weld에 부모전무,
+AJR75623501-S1-2,RAC30599301-1,사내 SUB,0.0012,2.0,e_item_weld에 부모전무,
+AJR75645606,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.003,4.0,e_item_weld에 부모전무,
+AJR75645801,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.00635,8.0,e_item_weld에 부모전무,
+AJR75662317,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0008,1.0,e_item_weld에 부모전무,
+AJR75662344,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0012,14.0,e_item_weld에 부모전무,
+AJR75662804,RAC30599327,"Tube Assembly, Condenser",0.00505,4.0,e_item_weld에 부모전무,
+AJR75662804,RAC30599301-1,"Tube Assembly, Condenser",0.0059,8.0,e_item_weld에 부모전무,
+AJR75683501,RAC30599301-1,AJR75683501,0.00415,5.0,e_item_weld에 부모전무,
+AJR75683601,RAC30599301-1,AJR75683601,0.00204,2.0,e_item_weld에 부모전무,
+AJR75687907,RAC30599327,Tube Assembly,0.0075,2.0,e_item_weld에 부모전무,
+AJR75709902,RAC30599301-1,"Tube Assembly, Expansion",0.0017,2.0,e_item_weld에 부모전무,
+AJR75710506,RAC30599301-1,Tube Assembly,0.00248,2.0,e_item_weld에 부모전무,
+AJR75711503,RAC30599301-1,"Tube Assembly,Reverse",0.00834,9.0,e_item_weld에 부모전무,
+AJR75711504,RAC30599301-1,"Tube Assembly,Reverse",0.00834,9.0,e_item_weld에 부모전무,
+AJR75743204,RAC30599301-1,"Tube Assembly,Condenser(In)",0.00375,5.0,e_item_weld에 부모전무,
+AJR75743301,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.0038,5.0,e_item_weld에 부모전무,
+AJR75743302,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.0017,2.0,e_item_weld에 부모전무,
+AJR75743302-1-1,RAC30599301-1,중앙 SUB,0.0008,1.0,e_item_weld에 부모전무,
+AJR75743302-1-2,RAC30599301-1,중앙 SUB,0.003,4.0,e_item_weld에 부모전무,
+AJR75744115,RAC30599301-1,대원 SUB,0.0025,3.0,e_item_weld에 부모전무,
+AJR75744116,RAC30599301-1,"Tube Assembly, Suciton",0.0028,3.0,e_item_weld에 부모전무,
+AJR75744116-4-1,RAC30599301-1,미래 SUB,0.0024,3.0,e_item_weld에 부모전무,
+AJR75744116-9-1,RAC30599301-1,SUB ASSY,0.0024,3.0,e_item_weld에 부모전무,
+AJR75744119,RAC30599301-1,AJR75744119,0.0045,4.0,e_item_weld에 부모전무,
+AJR75763103-1-1,RAC30599301-1,단가재협의필요함- c 센서삭제,0.0008,1.0,e_item_weld에 부모전무,
+AJR75763201-3-1,RAC30599301-1,SUB ASSY,0.0017,2.0,e_item_weld에 부모전무,
+AJR75763301,RAC30599301-1,"Tube Assembly, Capillary",0.00134,2.0,e_item_weld에 부모전무,
+AJR75763301-1-1,RAC30599301-1,SUB ASSY,0.0008,1.0,e_item_weld에 부모전무,
+AJR75784701,RAC30599301-1,"Tube Assembly,Reverse",0.00024,7.0,e_item_weld에 부모전무,
+AJR75786302-S6-2,RAC30599327,사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR75802501-S3-1,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR75918509-R1-1,RAC30599301-1,사내 SUB,0.0014,3.0,e_item_weld에 부모전무,
+AJR75923201,RAC30599301-1,"Tube Assembly,Suction",0.00605,5.0,e_item_weld에 부모전무,
+AJR75942501-R-1,RAC30599327,고압부 사내 SUB,0.0042,4.0,e_item_weld에 부모전무,
+AJR75942501-R-2,RAC30599327,고압부 원대 사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR75942501-R-3,RAC30599327,저압부 원대 사내 SUB,0.0015,1.0,e_item_weld에 부모전무,
+AJR75942502-R-1,RAC30599327,고압 황동 사내 SUB,0.00525,5.0,e_item_weld에 부모전무,
+AJR75942502-R-2,RAC30599327,고압 원대 사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR75942504-R-1,RAC30599327,저압부 사내 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR75983001,RAC30599301-1,"Tube Assembly,Reverse",0.01874,16.0,e_item_weld에 부모전무,
+AJR75983005,RAC30599301-1,"Tube Assembly,Reverse",0.01874,16.0,e_item_weld에 부모전무,
+AJR75983010,RAC30599301-1,"Tube Assembly,Reverse",0.01874,15.0,e_item_weld에 부모전무,
+AJR76322701,RAC30599301-1,"Tube Assembly,Solenoide",0.0034,4.0,e_item_weld에 부모전무,
+AJR76322701-1-1,RAC30599301-1,SUB ASSY,0.0024,3.0,e_item_weld에 부모전무,
+AJR76462721,RAC30599327,판형 SUB(STS),0.00705,1.0,e_item_weld에 부모전무,
+AJR76462721-IS,RAC30599328,외주 STS SUB,0.00945,3.0,e_item_weld에 부모전무,
+AJR76462722,RAC30599327,판형 SUB(STS),0.0012,1.0,e_item_weld에 부모전무,
+AJR76462723,RAC30599328,Tube Assembly,0.0057,1.0,e_item_weld에 부모전무,
+AJR76462723-IS,RAC30599328,외주 STS SUB,0.0057,1.0,e_item_weld에 부모전무,
+AJR76462725,RAC30599327,판형 SUB,0.0012,1.0,e_item_weld에 부모전무,
+AJR76462725-IS,RAC30599328,판형 STS SUB,0.0069,2.0,e_item_weld에 부모전무,
+AJR76462726,RAC30599327,판형 SUB,0.00705,1.0,e_item_weld에 부모전무,
+AJR76462726-IS,RAC30599328,판형 STS SUB,0.00885,2.0,e_item_weld에 부모전무,
+AJR76462728,RAC30599327,판형 SUB 부품,0.00705,1.0,e_item_weld에 부모전무,
+AJR76462731,RAC30599327,판형 SUB 부품,0.0018,1.0,e_item_weld에 부모전무,
+AJR76462734,RAC30599327,판형 SUB 부품,0.0018,1.0,e_item_weld에 부모전무,
+AJR76462735,RAC30599327,판형 SUB,0.00705,1.0,e_item_weld에 부모전무,
+AJR76462735-IS,RAC30599328,판형 STS SUB,0.00825,2.0,e_item_weld에 부모전무,
+AJR76502604-S3-1,RAC30599301-1,사내 SUB,0.0024,2.0,e_item_weld에 부모전무,
+AJR76523001,RAC30599301-1,"Tube Assembly,Reverse",0.0028,2.0,e_item_weld에 부모전무,
+AJR76523003,RAC30599301-1,"Tube Assembly,Reverse",0.0028,2.0,e_item_weld에 부모전무,
+AJR76523005,RAC30599301-1,"Tube Assembly,Reverse",0.0028,2.0,e_item_weld에 부모전무,
+AJR76523007,RAC30599301-1,"Tube Assembly,Reverse",0.0028,2.0,e_item_weld에 부모전무,
+AJR76523008,RAC30599301-1,"Tube Assembly,Reverse",0.0028,2.0,e_item_weld에 부모전무,
+AJR76543201,RAC30599301-1,"Tube Assembly,Reverse",0.0083,4.0,e_item_weld에 부모전무,
+AJR76543201-3-1,RAC30599301-1,SUB ASSY,0.0036,5.0,e_item_weld에 부모전무,
+AJR76562401,RAC30599301-1,"Tube Assembly,Reverse",0.0031,2.0,e_item_weld에 부모전무,
+AJR76562403,RAC30599301-1,"Tube Assembly,Reverse",0.0031,2.0,e_item_weld에 부모전무,
+AJR76562404,RAC30599301-1,"Tube Assembly,Reverse",0.0031,2.0,e_item_weld에 부모전무,
+AJR76582901,RAC30599327,고압부 SBU ASSY,0.0024,2.0,e_item_weld에 부모전무,
+AJR76582901-13-1,RAC30599327,SUB ASSY,0.00435,4.0,e_item_weld에 부모전무,
+AJR76583001,RAC30599327,저압부 SUB ASSY,0.0024,2.0,e_item_weld에 부모전무,
+AJR76583001-13-1,RAC30599327,SUB ASSY,0.00435,4.0,e_item_weld에 부모전무,
+AJR76742303-은납,RAC30599327,AJR76742303-SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR76742305-SUB,RAC30599327,은납-SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR76742306-은납,RAC30599327,은납 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR76823002-은납,RAC30599327,은납 SUB,0.0018,1.0,e_item_weld에 부모전무,
+AJR76823102-S2-1,RAC30599301-1,사내 SUB,0.00975,3.0,e_item_weld에 부모전무,
+AJR77022801,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0008,1.0,e_item_weld에 부모전무,
+AJR77022802,RAC30599301-1,"Tube Assembly,Discharge",0.0008,1.0,e_item_weld에 부모전무,
+AJR77164003,RAC30599327,"Tube Assembly,Connector",0.00125,1.0,e_item_weld에 부모전무,
+AJR77182405,RAC30599301-1,"Tube Assembly,Connector",0.0054,3.0,e_item_weld에 부모전무,
+AJR77182601,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.00248,1.0,e_item_weld에 부모전무,
+AJR77223101,RAC30599327,"Tube Assembly,Discharge",0.003,2.0,e_item_weld에 부모전무,
+AJR77223102,RAC30599327,"Tube Assembly,Discharge",0.003,2.0,e_item_weld에 부모전무,
+AJR77223106,RAC30599327,"Tube Assembly,Discharge",0.0024,2.0,e_item_weld에 부모전무,
+AJR77224504-S1-1,RAC30599301-1,사내 SUB,0.003,4.0,e_item_weld에 부모전무,
+AJR77224504-S1-2,RAC30599301-1,사내 SUB,0.0132,10.0,e_item_weld에 부모전무,
+AJR77224504-S1-3,RAC30599301-1,사내 SUB,0.0072,4.0,e_item_weld에 부모전무,
+AJR77224505-S1-2,RAC30599301-1,사내 SUB,0.0114,9.0,e_item_weld에 부모전무,
+AJR77224505-S1-3,RAC30599301-1,사내 SUB,0.0072,4.0,e_item_weld에 부모전무,
+AJR77224506-S1-2,RAC30599301-1,사내 SUB,0.0054,4.0,e_item_weld에 부모전무,
+AJR77224507-S1-2,RAC30599301-1,사내 SUB,0.006,4.0,e_item_weld에 부모전무,
+AJR77225305,RAC30599301-1,"Tube Assembly, Manifold(Outdoor)",0.0033,16.0,e_item_weld에 부모전무,
+AJR77225306,RAC30599301-1,"Tube Assembly, Manifold(Outdoor)",0.0033,16.0,e_item_weld에 부모전무,
+AJR77226304,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.048,7.0,e_item_weld에 부모전무,
+MJU63650911-3-1,RAC30599301-1,"Tube,Connector",0.00124,1.0,e_item_weld에 부모전무,
+스프링형-SUB3,RAC30599327,Ø6.35 X Ø15.88,0.0021,2.0,e_item_weld에 부모전무,
+스프링형-SUB4,RAC30599327,Ø9.52 X Ø15.88,0.0021,2.0,e_item_weld에 부모전무,
+3A00280E,RAC31704701,3A00280E,0.16,0.0,라우팅ST(51/28)없음→재계산불가,
+4849A20069M,RAC30599301-1,Accumulator Assembly,0.00274,0.0,라우팅ST(51/28)없음→재계산불가,
+4849A20069M-7-1,RAC30599301-1,4849A20069M-7-1,0.00274,0.0,라우팅ST(51/28)없음→재계산불가,
+5001A30010X,RAC31704701,Accessory Assembly,0.15,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A00011E,RAC30599301-1,"Tube Assembly,Reverse",0.01,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10305J-SUB,RAC30599327,은납-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10305T-은납,RAC30599327,은납-sub,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"5211A10305T/ALL unit=0.0012 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+5211A10487A,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.06135,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10487B,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0687,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10487C,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.03775,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10487D,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0151,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10487E,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.06115,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10570G,RAC30599301-1,"Tube Assembly,Capillary",0.01707,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10570H,RAC30599301-1,"Tube Assembly,Capillary",0.01707,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10688A,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.00874,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A11604C-은납,RAC30599327,은납-SUB,0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A12001A,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.01573,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A20133B,RAC30599301-1,"Tube Assembly,Capillary",0.00284,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A20459L-은납,RAC30599301-1,5211A20459L-SUB,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A21788A-3,RAC30599301-1,5211A21788A-3,0.00335,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A21789C,RAC30599301-1,"Tube Assembly,Tubing",0.00158,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A21812B-1-1,RAC30599301-1,5211A21812B-1-1,0.00495,0.0,라우팅ST(51/28)없음→재계산불가,"5211A21812B/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+5211A21904A,RAC30599301-1,"Tube Assembly,Connector",0.0003,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A21907C,RAC30599301-1,5211A21907C,0.0075,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A29904A,RAC30599301-1,5211A29904A,0.00142,0.0,라우팅ST(51/28)없음→재계산불가,
+5425AP7108C,RAC30599301-1,"Tube Assembly,Capillary",0.0201,0.0,라우팅ST(51/28)없음→재계산불가,
+AAA36923608,RAC31704701,Accessory Assembly,0.15,0.0,라우팅ST(51/28)없음→재계산불가,
+AAA36923611,RAC31704702,Accessory Assembly,0.075,0.0,라우팅ST(51/28)없음→재계산불가,
+AAA68954002,RAC31704701,Accessory Assembly,0.15,0.0,라우팅ST(51/28)없음→재계산불가,
+AAA68954002-1,RAC31704701,Accessory Assembly,0.15,0.0,라우팅ST(51/28)없음→재계산불가,
+AAB34431202,RAC30599301-1,Accumulator Assembly,0.00075,0.0,라우팅ST(51/28)없음→재계산불가,
+AAB73710401,RAC30599301-1,Accumulator Assembly,0.00923,0.0,라우팅ST(51/28)없음→재계산불가,
+AAB73710402,RAC30599301-1,Accumulator Assembly,0.00923,0.0,라우팅ST(51/28)없음→재계산불가,
+ADM73210510,RAC30599301-1,Exchanger Assembly,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+ADM74930506,RAC30599301-1,판형 열교환기(스웹),0.00249,0.0,라우팅ST(51/28)없음→재계산불가,
+AFY73689501,RAC30599301-1,AFY73689501,0.00075,0.0,라우팅ST(51/28)없음→재계산불가,
+AJJ32486325-9-1,RAC30599301-1,AJJ32486325-9-1,0.00874,0.0,라우팅ST(51/28)없음→재계산불가,
+AJJ32486326,RAC30599301-1,Supporter Assembly,0.00439,0.0,라우팅ST(51/28)없음→재계산불가,
+AJJ73799903,RAC30599301-1,Supporter Assembly,0.0043,0.0,라우팅ST(51/28)없음→재계산불가,
+AJJ73898618,RAC30599301-1,Supporter Assembly,0.00335,0.0,라우팅ST(51/28)없음→재계산불가,
+AJJ73898620,RAC30599301-1,Supporter Assembly,0.00335,0.0,라우팅ST(51/28)없음→재계산불가,
+AJJ73898621,RAC30599301-1,Supporter Assembly,0.00335,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30008101-SUB,RAC30599301-1,AJR30008101-고주파,0.0153,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30009401-SUB,RAC30599301-1,은납-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30009401-SUB/ALL unit=0.0008 diam=9.52 (rule=parent-agg(self), exp=NA)"
+AJR30011101-SUB,RAC30599301-1,AJR30011101-고주파,0.02145,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30011101/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30012012,RAC30599301-1,"Tube Assembly,Reverse",0.0132,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30012013,RAC30599301-1,"Tube Assembly,Reverse",0.0492,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027704-17-1,RAC30599301-1,유남정밀 Sub,0.0708,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30027704/RAC30599301-1 unit=0.0053 diam=31.75 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30027710-SUB1,RAC30599301-1,SUB,0.0153,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027710-SUB2,RAC30599301-1,SUB,0.0126,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027711-SUB,RAC30599301-1,고주파 SUB,0.0086,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027711-SUB1,RAC30599301-1,AJR30027711-SUB1 용접,0.0177,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027711-SUB2,RAC30599301-1,AJR30027711-SUB2 용접,0.0113,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027711-SUB3,RAC30599301-1,AJR30027711-SUB3 용접,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027712-SUB,RAC30599301-1,고주파 SUB,0.0086,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027712-SUB1,RAC30599301-1,AJR30027712-SUB1 용접,0.0336,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30027712-SUB2,RAC30599301-1,AJR30027712-SUB2 용접,0.0353,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30028405,RAC36134101,Tube Assembly,0.00066,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30028409,RAC36134101,Tube Assembly,0.00066,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30028411,RAC36134101,Tube Assembly,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30028411/ALL unit=0.0028 diam=22.0 (rule=parent-agg(self), exp=NA)"
+AJR30037101-J67,RAC30599301-1,지그6,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30038101-12-1,RAC30599301-1,대원 SUB,0.0153,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30038101/RAC30599301-1 unit=0.00095 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30038301-12-1,RAC30599301-1,대원 SUB,0.0075,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30038301/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30046402,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0357,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30046902,RAC35117409,"Tube Assembly, Manifold(Outdoor)",2.0,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30046902,RAC35117401,"Tube Assembly, Manifold(Outdoor)",12.0,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30051301-3-1,RAC30599301-1,이젠터 sub,0.0024,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30051301/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30055501-SUB,RAC30599327,은납-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30055501/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR30060701-16-1,RAC30599301-1,케이비 sub,0.0045,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30060701/RAC30599301-1 unit=0.00075 diam=5.0 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30077901-J&I,RAC30599327,태국 SUB,0.0015,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30077901-J&I/ALL unit=0.00084 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR30087001-4-1,RAC30599301-1,미래 Sub,0.0021,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30087001/RAC30599301-1 unit=0.000913 diam=15.88 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30089619-1-2(링),RAC30599301-1,중앙 Sub(+용접링),0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30100102,RAC30599301-1,"Tube Assembly, Capillary",0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30100102-은납,RAC30599327-1,은납 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30101601-20-1,RAC30599301-1,썬텍 SUB,0.012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30101601/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30105801,RAC30599327,Tube Assembly,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30105801/ALL unit=0.00104 diam=15.88 (rule=parent-agg(self), exp=NA)"
+AJR30106101,RAC30599327,"Tube Assembly, Expansion",0.0087,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30106101/ALL unit=0.000785 diam=4.76 (rule=parent-agg(self), exp=NA)"
+AJR30107702,RAC30599301-1,"Tube Assembly, Manifold(Indoor)",0.0114,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30114001-은납,RAC30599327-1,은납-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-A-S-1,RAC30599301-1,STS SUB Assy,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-A-S-2,RAC30599301-1,STS SUB Assy,0.003,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-A-S-3,RAC30599301-1,STS SUB Assy,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-A-S-5,RAC30599301-1,STS SUB Assy,0.0048,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-STS-1,RAC30599301-1,STS Sub Assy,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-STS-2,RAC30599301-1,STS Sub Assy,0.003,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-STS-3,RAC30599301-1,STS Sub Assy,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30125601-STS-5,RAC30599301-1,STS Sub Assy,0.0048,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30133601-SUB,RAC30599301-1,고주파 SUB,0.0225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30133603-12-1,RAC30599301-1,대원 sub,0.0084,0.0,라우팅ST(51/28)없음→재계산불가,"AJR30133603/RAC30599301-1 unit=0.002188 diam=22.0 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR30133603-SUB,RAC30599301-1,고주파 SUB,0.158,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30133701-A-S-2,RAC30599301-1,STS Sub Assy,0.05,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30133702-STS-1,RAC30599301-1,STS Sub Assy,1.0,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR30578502,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR31790102,RAC30599301-1,"Tube Assembly,Reverse",0.01597,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32564919,RAC30823003,"Tube Assembly,Return Bending",2.0,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32564920,RAC30823003,"Tube Assembly,Return Bending",2.0,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32674704-2-1,RAC30599301-1,AJR32674704-2-1,0.0023,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32674707-2-1,RAC30599301-1,AJR32674707-2-1,0.0023,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32674708-2-1,RAC30599301-1,AJR32674708-2-1,0.0023,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32674708-S6-1,RAC30599301-1,사내 SUB,0.0023,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR32846402,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0182,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR33664401,RAC30599301-1,"Tube Assembly,Capillary",0.00694,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR33796503-SUB,RAC30599327,체결 SUB,0.0024,0.0,라우팅ST(51/28)없음→재계산불가,"AJR33796503/ALL unit=0.0012 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR33796513-SUB,RAC30599327,사내 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR33796513/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR33796526,RAC30599301-1,"Tube Assembly, Capillary",0.003,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR33796526-은납,RAC30599327-1,은납 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR34407805-SUB,RAC30599327,은납-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,"AJR34407805/ALL unit=0.00118 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR34565405,RAC30599301-1,"Tube Assembly,Expansion",0.02,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR35724301,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.0156,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR35948517,RAC30599301-1,Tube Assembly,0.02,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR36852209-은납,RAC30599327,AJR36852209-SUB,0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR36852211,RAC30599301-1,"Tube Assembly, Manifold",0.0015,0.0,라우팅ST(51/28)없음→재계산불가,"AJR36852211/ALL unit=0.001 diam=12.7 (rule=parent-agg(self), exp=NA)"
+AJR36852706-12-1,RAC30599301-1,대원산업 Sub,0.0056,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR36904201-1,RAC30599301-1,AJR72937701하위 SUB,0.0016,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR52737625-4,RAC30599301-1,AJR52737625-4,0.00343,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR52737629,RAC30599301-1,AJR52737629,0.0047,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR53980903-3-1,RAC30599301-1,이젠터 SUB,0.0075,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR55707008-15-1,RAC30599301-1,도강월드텍 Sub,0.008,0.0,라우팅ST(51/28)없음→재계산불가,"AJR55707008/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR55707008-20-1,RAC30599301-1,썬텍 Sub,0.008,0.0,라우팅ST(51/28)없음→재계산불가,"AJR55707008/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR55707008-20-2,RAC30599301-1,썬텍 Sub,0.0024,0.0,라우팅ST(51/28)없음→재계산불가,"AJR55707008/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR55707008-3-1,RAC30599301-1,이젠터 Sub,0.0024,0.0,라우팅ST(51/28)없음→재계산불가,"AJR55707008/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR55707009-15-1,RAC30599301-1,도강월드텍 Sub,0.008,0.0,라우팅ST(51/28)없음→재계산불가,"AJR55707009/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR55829111-1,RAC30599301-1,Tube Assembly,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR55829111/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR55908804,RAC30599301-1,"Tube Assembly,Reverse",0.00412,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR71429409,RAC30599301-1,"Tube Assembly,Reverse",0.005,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR71429418,RAC30599301-1,"Tube Assembly,Reverse",0.005,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR71429427,RAC30599301-1,"Tube Assembly,Reverse",0.005,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR71429433,RAC30599301-1,"Tube Assembly,Reverse",0.0051,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR71429433-3-1,RAC30599301-1,AJR71429433-3-1,0.00332,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR71429434,RAC30599301-1,"Tube Assembly,Reverse",0.00804,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72586213,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72586221,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72586222,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72586225,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72942901-1,RAC30599301-1,AJR72937701 하위 SUB,0.009,0.0,라우팅ST(51/28)없음→재계산불가,"AJR72942901/RAC30599301-1 unit=0.0015 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR72945005,RAC30599301-1,"Tube Assembly,Discharge",0.0022,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72946403,RAC30599301-1,Tube Assembly,0.011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72946424,RAC30599301-1,Tube Assembly,0.011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR72950704-7,RAC30599301-1,AJR72950704-7,0.005,0.0,라우팅ST(51/28)없음→재계산불가,"AJR72950704/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR72962401,RAC30599301,"Tube Assembly,Solenoide",0.00697,0.0,라우팅ST(51/28)없음→재계산불가,"AJR72962401/RAC30599301* unit=0.000822 diam=9.52 (rule=weld-variant(self), exp=NA)"
+AJR73002902,RAC30599301,"Tube Assembly,Manifold(Outdoor)",0.00572,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73002902/RAC30599301* unit=0.000954 diam=6.35 (rule=weld-variant(self), exp=NA)"
+AJR73063202-SUB,RAC30599327,사내 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73063202/ALL unit=0.0011 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR73064602-1,RAC30599301-1,AJR73064602-1,0.009,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73069602-SUB,RAC30599327,사내 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73069602/ALL unit=0.0008 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR73182701-2-1,RAC30599301-1,AJR73182701-2-1,0.0022,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73182701/RAC30599301-1 unit=0.00105 diam=4.76 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73182701-3,RAC30599301-1,AJR73182701-3,0.0022,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73182701/RAC30599301-1 unit=0.00105 diam=4.76 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73324406-은납,RAC30599327,AJR73324406-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73324406/ALL unit=0.0019 diam=15.88 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR73327003-SUB,RAC30599327,사내 SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73327003/ALL unit=0.0017 diam=15.88 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR73343201-5-1,RAC30599301-1,AJR73343201-5-1,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73343201/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73343301-3-1,RAC30599301-1,AJR73343301-3-1,0.00233,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73343301/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73343302-5-1,RAC30599301-1,AJR73343302-5-1,0.02,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73343303-9-1,RAC30599301-1,AJR73343303-9-1,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73343303/RAC30599301-1 unit=0.0012 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73663002,RAC30599301,AJR73663002,0.00363,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73663002/RAC30599301* unit=0.001033 diam=15.88 (rule=weld-variant(self), exp=NA)"
+AJR73767514-1,RAC30599301-1,AJR73767514-1,0.74671,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73767514/RAC30599301-1 unit=0.001208 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73767821,RAC30599301,"Tube Assembly,Reverse",0.0741,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73767821/RAC30599301* unit=0.001795 diam=6.35 (rule=weld-variant(self), exp=NA)"
+AJR73803003-F&T,RAC30599301-1,태국 SUB,0.0075,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73882506,RAC32977302,"Tube Assembly,Manifold(Outdoor)",23.0,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73882506/ALL unit=0.003775 diam=28.0 (rule=parent-agg(self), exp=NA)"
+AJR73910201,RAC30599301-1,Tube Assembly,0.0024,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73944503-7-1,RAC30599301-1,AJR73944503-7-1,0.0083,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73944503/RAC30599301-1 unit=0.0019 diam=19.05 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73946114,RAC30599301-1,"Tube Assembly,Discharge",0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73947203,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73947203-4-1,RAC30599301-1,AJR73947203-4-1,0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73953306-1,RAC30599301-1,AJR73953306-1,0.00083,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73953309-1,RAC30599301-1,AJR73953309-1,0.00083,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73962606,RAC30599301-1,"Tube Assembly,Reverse",0.0047,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73964602,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73964607,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.01015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73964609,RAC30599301,"Tube Assembly,Discharge(Outdoor)",0.0038,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73964609/RAC30599301* unit=0.001 diam=9.52 (rule=weld-variant(self), exp=NA)"
+AJR73964902,RAC30599301,"Tube Assembly,Discharge(Outdoor)",0.0093,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73964902/RAC30599301* unit=0.00102 diam=6.35 (rule=weld-variant(self), exp=NA)"
+AJR73964905,RAC30599301,"Tube Assembly,Discharge(Outdoor)",0.0093,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73964905/RAC30599301* unit=0.001089 diam=15.88 (rule=weld-variant(self), exp=NA)"
+AJR73964906,RAC30599301,"Tube Assembly,Discharge(Outdoor)",0.0093,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73964906/RAC30599301* unit=0.001067 diam=4.76 (rule=weld-variant(self), exp=NA)"
+AJR73965102,RAC30599301,"Tube Assembly,Suction(Outdoor)",0.0073,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73965102/RAC30599301* unit=0.002025 diam=6.35 (rule=weld-variant(self), exp=NA)"
+AJR73965102,RAC30599327,"Tube Assembly,Suction(Outdoor)",0.0008,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73965102/ALL unit=0.002025 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR73965506-F&T,RAC30599301-1,태국 SUB,0.0357,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73965602-SUB,RAC30599301-1,AJR73965602-고주파,0.027,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73965701,RAC30599301,"Tube Assembly,Expansion",0.03585,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73965701/RAC30599301* unit=0.000826 diam=9.52 (rule=weld-variant(self), exp=NA)"
+AJR73967501-7,RAC30599301-1,AJR73967501-7,0.00923,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73967501/RAC30599301-1 unit=0.002133 diam=22.0 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73968602-3,RAC30599301-1,AJR73968602-3,0.00627,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73968603-1,RAC30599301-1,AJR73968603-1,0.0073,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73968605-3-1,RAC30599301-1,AJR73968605-3-1,0.00442,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73980305-3-1,RAC30599301-1,AJR73980305-3-1,0.02745,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73980305/RAC30599301-1 unit=0.003625 diam=22.0 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR73980323,RAC30599301,"Tube Assembly,Reverse",0.02735,0.0,라우팅ST(51/28)없음→재계산불가,"AJR73980323/RAC30599301* unit=0.001433 diam=9.52 (rule=weld-variant(self), exp=NA)"
+AJR73988106,RAC30599301-1,"Tube Assembly,Reverse",0.00539,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73988107,RAC30599301-1,"Tube Assembly,Reverse",0.0082,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR73988107-11-1,RAC30599301-1,AJR73988107-11-1,0.00407,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74062502,RAC30599301-1,Tube Assembly,0.02,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74107911-4-1,RAC30599301-1,AJR74107911-4-1,0.00155,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74107912,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74107914,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74107915,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74107918-4-1,RAC30599301-1,AJR74107918-4-1,0.00182,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74126004,RAC30599301-1,"Tube Assembly,Reverse",0.01907,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74229401-저압,RAC30599301-1,AJR74229401-SUB,0.0063,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74230603,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00102,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74283401,RAC30599301,"Tube Assembly,Discharge(Outdoor)",0.0058,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74283401/RAC30599301* unit=0.000822 diam=6.35 (rule=weld-variant(self), exp=NA)"
+AJR74290001-고압,RAC30599327,AJR74290001-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74302403-SUB,RAC30599327,사내 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74302403/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR74302405-SUB,RAC30599327,사내 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74364919-4-3(링X),RAC30599301-1,미래 Sub(용접링미포함),0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74364920-1-1(링),RAC30599301-1,중앙 Sub(+용접링),0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74364920/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR74364920-1-2(링),RAC30599301-1,중앙 Sub(+용접링),0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74364920/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR74364920-1-3(링),RAC30599301-1,중앙 Sub(+용접링),0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74364920/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR74364921-4-4(링X),RAC30599301-1,SUB ASSY,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74425401,RAC30599301,"Tube Assembly,Manifold(Outdoor)",0.0178,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74425401/RAC30599301* unit=0.000882 diam=6.35 (rule=weld-variant(self), exp=NA)"
+AJR74425405,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.0178,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74602703,RAC30599301-1,"Tube Assembly,Evaporator(In)",0.00083,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74662704,RAC30599327,"Tube Assembly,Suction",0.0126,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74802701,RAC30599301-1,"Tube Assembly,Connector",0.00083,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74803001,RAC30599301-1,"Tube Assembly,Capillary",0.0062,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74803002,RAC30599327,"Tube Assembly,Capillary",0.00083,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74803002/ALL unit=0.00076 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR74803521-16-1,RAC30599301-1,케이비 sub,0.0081,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74803521/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR74824301,RAC30599301-1,"Tube Assembly,Condenser(In)",0.004,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74843601-3,RAC30599301,AJR74843601-3,0.00375,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74843601/RAC30599301* unit=0.0011 diam=6.35 (rule=weld-variant(subvar/parent-norm), exp=NA)"
+AJR74844314-은납,RAC30599327-1,은납-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74862701,RAC30599301,"Tube Assembly,Condenser(In)",0.00525,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74923001-은납,RAC30599327,AJR74923001-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74923004-SUB,RAC30599327-1,은납-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74942611-12-1,RAC30599301,AJR74942611-12-1,0.00617,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74942617-고압,RAC30599327,AJR74942617-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74942623-고압,RAC30599327,AJR74942623-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74942627-고압,RAC30599327,AJR74942627-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74942632-고압,RAC30599327,AJR74942632-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74942632/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR74942709-저압,RAC30599327,AJR74942709-SUB,0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74942724-저압,RAC30599327,AJR74942724-SUB,0.0015,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74942724/ALL unit=0.001 diam=12.7 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR74942730-저압,RAC30599327,AJR74942730-SUB,0.0015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74944401,RAC30599301-1,"Tube Assembly,Tubing",0.61882,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74962901-SUB,RAC30599327,AJR74962901-은납,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74962907-SUB,RAC30599327-1,은납-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74963001-3-1,RAC30599301-1,이젠터 SUB,0.0087,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74963001/RAC30599301-1 unit=0.000829 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR74963003,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.0072,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74963003,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74964802,RAC30599301-1,"Tube Assembly,Reverse",0.0055,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74964804,RAC30599301-1,"Tube Assembly,Reverse",0.0097,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74964807,RAC30599301-1,"Tube Assembly,Reverse",0.0097,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74983903,RAC30599301-1,"Tube Assembly,Reverse",0.0108,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74984403-SUB3,RAC30599301-1,사내 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR74984403/RAC30599301-1 unit=0.0012 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR74985204,RAC30599301,"Tube Assembly, Expansion",0.0069,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74985401,RAC30599301-1,AJR74985401,0.00383,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR74985501,RAC30599301-1,"Tube Assembly,Condenser(In)",0.00402,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75002401,RAC30599301-1,"Tube Assembly,Capillary",0.00209,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75002402,RAC30599301-1,"Tube Assembly,Capillary",0.00209,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75022402,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.0072,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75022402-1,RAC30599301-1,AJR75022402-1,0.0072,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75023301,RAC30599301-1,"Tube Assembly, Connector",0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75023606,RAC30823003,"Tube Assembly,Return Bending",2.0,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75044203,RAC30599301-1,"Tube Assembly,Reverse",0.00919,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062907-19-1,RAC30599301-1,명진 SUB,0.0011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062907-19-2,RAC30599301-1,명진 SUB,0.0011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062907-19-3,RAC30599301-1,명진 SUB,0.0011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062907-19-4,RAC30599301-1,명진 SUB,0.0011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062907-19-5,RAC30599301-1,명진 SUB,0.0011,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062907-19-6,RAC30599301-1,명진 SUB,0.0035,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75062911-15-1,RAC30599301-1,도강월드텍 Sub,0.0225,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75062911/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75104701,RAC30599301-1,"Tube Assembly,Capillary",0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75104701-SUB,RAC30599301-1,AJR75104701-고주파,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75123701,RAC30599301-1,"Tube Assembly,Discharge(Outdoor)",0.00225,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75142601,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.00579,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75163201,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.00579,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75222406-5,RAC30599301-1,AJR75222406-5,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75222406/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75242801-고압,RAC30599327,AJR75242801-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75242802-9-1,RAC30599301-1,AJR75242802-9-1,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75242802/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75242814-은납,RAC30599327,AJR75242814-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75243002-1,RAC30599301-1,AJR75243002-1,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75243006-저압,RAC30599327,AJR75243006-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75243019-은납,RAC30599301-1,AJR75243019-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75245201,RAC30599301-1,"Tube Assembly,Manifold(Outdoor)",0.00803,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75302302,RAC30599301-1,"Tube Assembly,Capillary",0.00477,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75342401,RAC30599301-1,"Tube Assembly,Condenser(In)",0.004,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75462809,RAC30599301-1,"Tube Assembly,Suction",0.01001,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75463001-SUB1,RAC30599301-1,사내 SUB,0.0127,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75463001-SUB2,RAC30599301-1,사내 SUB,0.0127,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75463001-SUB3,RAC30599301-1,사내 SUB,0.0127,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75463302-4-1,RAC30599301,AJR75463302-4-1,0.03997,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75463302/RAC30599301* unit=0.0071 diam=28.0 (rule=weld-variant(subvar/parent-norm), exp=NA)"
+AJR75463302-4-2,RAC30599301,AJR75463302-4-2,0.03997,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75463302/RAC30599301* unit=0.0071 diam=28.0 (rule=weld-variant(subvar/parent-norm), exp=NA)"
+AJR75463302-4-3,RAC30599301,AJR75463302-4-3,0.03997,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75463302/RAC30599301* unit=0.0071 diam=28.0 (rule=weld-variant(subvar/parent-norm), exp=NA)"
+AJR75463302-4-4,RAC30599301,AJR75463302-4-4,0.03997,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75463302/RAC30599301* unit=0.0071 diam=28.0 (rule=weld-variant(subvar/parent-norm), exp=NA)"
+AJR75463302-4-5,RAC30599301,AJR75463302-4-5,0.03997,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75463302/RAC30599301* unit=0.0071 diam=28.0 (rule=weld-variant(subvar/parent-norm), exp=NA)"
+AJR75464702,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0025,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75464704-7,RAC30599301-1,AJR75464704-7,0.0025,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75482406,RAC30599301-1,"Tube Assembly,Capillary",0.00236,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75482702-SUB,RAC30599301-1,AJR75482701-고주파,0.0105,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75482702-SUB,RAC30599327,AJR75482701-고주파,0.0067,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75503701,RAC30599301-1,"Tube Assembly,Solenoide",0.00204,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75503704,RAC30599301-1,"Tube Assembly,Solenoide",0.00204,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75523501,RAC30599301-1,AJR75523501,0.00308,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75523502,RAC30599301-1,AJR75523502,0.00308,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75563401,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.0048,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75563401-은납,RAC30599327,AJR75563401-SUB,0.00125,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75563402-3-1,RAC30599301-1,AJR75563402-3-1,0.0048,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75563501-은납,RAC30599327,AJR75563501-SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75563501/ALL unit=0.0008 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=NA)"
+AJR75604102,RAC30599301-1,AJR75604102,0.00539,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75604703,RAC30599301-1,"Tube Assembly,Reverse",0.004,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75662308-12-1,RAC30599301-1,AJR75662308-12-1,0.00096,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75711401,RAC30599301-1,"Tube Assembly,Condenser(In)",0.00552,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75711501,RAC30599301-1,"Tube Assembly,Reverse",0.00834,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75723702,RAC30599301-1,"Tube Assembly, Expansion",0.00668,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75723702,RAC30599327,"Tube Assembly, Expansion",0.00083,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75727201,RAC30599301-1,"Tube Assembly,Condenser(Out)",0.00359,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75743201,RAC30599301-1,"Tube Assembly,Condenser(In)",0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75744140-12-1,RAC30599301-1,대원 SUB,0.0066,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75744140/RAC30599301-1 unit=0.00088 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75744140-17-1,RAC30599301-1,유남 sub,0.0066,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75744140/RAC30599301-1 unit=0.00088 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75744140-3-1,RAC30599301-1,"Tube Assembly, Suciton",0.0066,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75744140/RAC30599301-1 unit=0.00088 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75744401-SUB,RAC30599327-1,은납-sub,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75763801-F&T-1,RAC30599301-1,태국 SUB ASSY,0.0132,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75786302-S6-3,RAC30599301-1,사내 SUB,0.0084,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75827805-15-1,RAC30599301-1,도강 Sub,0.0056,0.0,라우팅ST(51/28)없음→재계산불가,"AJR75827805/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR75918509-SUB,RAC30599301-1,사내 SUB,0.0014,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR75983001-7-1,RAC30599301-1,MTS AJR75983001 SUB,0.00204,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR76462709,RAC36134101,ADM74930502 SUB,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462709/ALL unit=0.0031 diam=25.4 (rule=parent-agg(self), exp=NA)"
+AJR76462710,RAC36134101,ADM73210506 SUB,0.001,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462710/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462717,RAC36134101,Tube Assembly,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462717/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462718,RAC36134101,Tube Assembly,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462718/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462719,RAC36134101,Tube Assembly,0.001,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462719/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462727,RAC36134101,Tube Assembly,0.00066,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462727/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462729,RAC36134101,Tube Assembly,0.00066,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462729/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462732,RAC36134101,판형 SUB 부품,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462732/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462733,RAC36134101,판형 SUB 부품,0.002,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462733/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462734,RAC36134101,판형 SUB 부품,0.001,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR76462736,RAC36134101,판형 SUB,0.00066,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462736/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76462903,RAC36134101,판형 수배관 SUB,0.001,0.0,라우팅ST(51/28)없음→재계산불가,"AJR76462903/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR76463401J&I,RAC30599301-1,"Tube Assembly,Condenser(In)",0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR76602401-은납,RAC30599327,AJR76602401-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR76742312-SUB,RAC30599327-1,은납-SUB,0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77142502-15-1,RAC30599301-1,도강 SUB,0.0021,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77142502/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77142503-15-1,RAC30599301-1,도강 SUB,0.01545,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77142503/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77182602,RAC30599301-1,"Tube Assembly,Suction(Outdoor)",0.0018,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77187802,RAC30599328,"Tube Assembly,Condenser(Out)",0.0086,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77202902-19-1,RAC30599301-1,명진 SUB,0.0021,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77202902/RAC30599301-1 unit=0.001 diam=15.88 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77224005,RAC30599312,"Tube Assembly,Reverse",1.0,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77224005/ALL unit=0.001857 diam=22.0 (rule=parent-agg(self), exp=NA)"
+AJR77224008-20-1,RAC30599301-1,썬텍 SUB,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77224008/RAC30599301-1 unit=0.002767 diam=6.35 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77224009,RAC30599301-1,"Tube Assembly,Reverse",0.0186,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224009,RAC30599312,"Tube Assembly,Reverse",0.0126,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224009-20-1,RAC30599301-1,썬텍 SUB,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224009-7-1,RAC30599301-1,MTS SUB,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224009-SUB1,RAC30599301-1,AJR77224009-SUB1 용접,0.0036,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224010,RAC30599312,"Tube Assembly,Reverse",0.0159,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77224010/ALL unit=0.002767 diam=6.35 (rule=parent-agg(self), exp=NA)"
+AJR77224510-S1-1,RAC30599301-1,사내 SUB,0.003,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224510-S1-2,RAC30599301-1,사내 SUB,0.0114,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224510-S1-3,RAC30599301-1,사내 SUB,0.0072,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224512-S1-2,RAC30599301-1,사내 SUB,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224513-S1-2,RAC30599301-1,사내 SUB,0.003,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224516-S1-2,RAC30599301-1,사내 SUB,0.003,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224518-S1-2,RAC30599301-1,사내 SUB,0.006,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77224519-12-1,RAC30599301-1,대원 sub,0.0087,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77224519/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77224519-S1-1,RAC30599301-1,사내 SUB,0.003,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77224519/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77225602,RAC30599312,"Tube Assembly,Reverse",0.0141,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77225602/ALL unit=0.003871 diam=28.0 (rule=parent-agg(self), exp=NA)"
+AJR77225607,RAC30599312,"Tube Assembly,Reverse",0.0141,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77225607/ALL unit=0.003488 diam=28.0 (rule=parent-agg(self), exp=NA)"
+AJR77225609,RAC30599301-1,"Tube Assembly,Reverse",0.0266,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77225609,RAC30599312,"Tube Assembly,Reverse",0.0141,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77225609-20-1,RAC30599301-1,썬텍 SUB,0.015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77225609-7-1,RAC30599301-1,MTS SUB,0.015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77225609-SUB1,RAC30599301-1,AJR77225609-SUB1 용접,0.015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77225610,RAC30599312,"Tube Assembly,Reverse",0.0141,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77225610/ALL unit=0.003488 diam=28.0 (rule=parent-agg(self), exp=NA)"
+AJR77225610-SUB1,RAC30599301-1,AJR77225610-SUB 용,0.015,0.0,라우팅ST(51/28)없음→재계산불가,
+AJR77226303-4-1,RAC30599301-1,미래 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77226303/RAC30599301-1 unit=0.001078 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77226303-4-2,RAC30599301-1,미래 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77226303/RAC30599301-1 unit=0.001078 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77226303-4-3,RAC30599301-1,미래 SUB,0.0012,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77226303/RAC30599301-1 unit=0.001078 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77226303-4-4,RAC30599301-1,미래 SUB,0.0024,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77226303/RAC30599301-1 unit=0.001078 diam=9.52 (rule=exact(subvar/parent-norm), exp=NA)"
+AJR77263008-4-1,RAC30599301-1,미래 SUB,0.0017,0.0,라우팅ST(51/28)없음→재계산불가,"AJR77263008/RAC30599301-1 unit=0.0024 diam=22.0 (rule=exact(subvar/parent-norm), exp=NA)"
+기밀테스트지그 샘플,RAC30599301-1,세영하이테크,1.0,0.0,라우팅ST(51/28)없음→재계산불가,
+스프링형-SUB2,RAC30599327,Ø6.35 X Ø12.7,0.0021,0.0,라우팅ST(51/28)없음→재계산불가,
+5211A10305F-S6-1,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"5211A10305F/ALL unit=0.00135 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.00202)"
+5211A10305F-은납,RAC30599327,은납 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"5211A10305F/ALL unit=0.00135 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.00202)"
+5211A10305T-S6-1,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"5211A10305T/ALL unit=0.0012 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.0018)"
+5211A11604A,RAC30599327,"Tube Assembly, Connector",0.0033,1.0,부모존재_후보재현실패(관경/용접봉발산),"5211A11604A/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+5211A20230D,RAC30599327,"Tube Assembly, Evaporator (Out)",0.0015,2.0,부모존재_후보재현실패(관경/용접봉발산),"5211A20230D/ALL unit=0.0008 diam=7.94 (rule=parent-agg(self), exp=0.0024)"
+5211A21333E,RAC30599327,"Tube Assembly, Manifold (Indoor)",0.0033,1.0,부모존재_후보재현실패(관경/용접봉발산),"5211A21333E/ALL unit=0.0008 diam=9.52 (rule=parent-agg(self), exp=0.0012)"
+5211A21813B,RAC30599327,"Tube Assembly, Manifold",0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"5211A21813B/ALL unit=0.000714 diam=5.0 (rule=parent-agg(self), exp=0.00107)"
+5211A29912F,RAC30599327,5211A29912F,0.00975,9.0,부모존재_후보재현실패(관경/용접봉발산),"5211A29912F/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0108)"
+ADM72950706,RAC30599328,Exchanger Assembly,0.0342,8.0,부모존재_후보재현실패(관경/용접봉발산),"ADM72950706/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0096)"
+ADM75351201,RAC30599328,판형 열교환기,0.003,2.0,부모존재_후보재현실패(관경/용접봉발산),"ADM75351201/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJJ74578318-1-1,RAC30599301-1,SUB,0.00116,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJJ74578318/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0024)"
+AJJ74578318-1-2,RAC30599301-1,SUB,0.00083,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJJ74578318/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0012)"
+AJR30012001,RAC30599327,"Tube Assembly,Reverse",0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30012001/ALL unit=0.001413 diam=6.35 (rule=parent-agg(self), exp=0.00212)"
+AJR30028404,RAC30599327,Tube Assembly,0.0141,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30028404/ALL unit=0.0028 diam=22.0 (rule=parent-agg(self), exp=0.0084)"
+AJR30031801,RAC30599327,"Tube Assembly,Connector",0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30031801/ALL unit=0.000933 diam=6.35 (rule=parent-agg(self), exp=0.0014)"
+AJR30031804,RAC30599327,"Tube Assembly, Connector",0.0024,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30031804/ALL unit=0.000933 diam=6.35 (rule=parent-agg(self), exp=0.0042)"
+AJR30055201-J&I,RAC30599327,태국 SUB,0.003,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30055201-J&I/ALL unit=0.000886 diam=6.35 (rule=parent-agg(self), exp=0.00133)"
+AJR30055202-J&I,RAC30599327,태국 SUB,0.003,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30055202-J&I/ALL unit=0.000886 diam=6.35 (rule=parent-agg(self), exp=0.00133)"
+AJR30065902,RAC30599327,ADM75404604 내재화 SUB ASSY,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30065902/ALL unit=0.000933 diam=6.35 (rule=parent-agg(self), exp=0.0014)"
+AJR30077601-J&I,RAC30599327,태국 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30077601-J&I/ALL unit=0.000886 diam=6.35 (rule=parent-agg(self), exp=0.00133)"
+AJR30077602-J&I,RAC30599327,태국 SUB,0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30077602-J&I/ALL unit=0.000886 diam=6.35 (rule=parent-agg(self), exp=0.00133)"
+AJR30078001-J&I,RAC30599327,태국 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30078001-J&I/ALL unit=0.00074 diam=4.76 (rule=parent-agg(self), exp=0.00111)"
+AJR30079101,RAC30599327,"Tube Assembly, Expansion",0.0087,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30079101/ALL unit=0.000785 diam=4.76 (rule=parent-agg(self), exp=0.00118)"
+AJR30079501,RAC30599327,Tube Assembly,0.0036,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30079501/ALL unit=0.001022 diam=15.88 (rule=parent-agg(self), exp=0.00307)"
+AJR30359801,RAC30599327,"Tube Assembly, Evaporator",0.0108,15.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30359801/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.018)"
+AJR30360101,RAC30599327,"Tube Assembly,Tubing",0.0048,6.0,부모존재_후보재현실패(관경/용접봉발산),"AJR30360101/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0072)"
+AJR32674714-2-1,RAC30599327,AJR32674714-2-1,0.00568,8.0,부모존재_후보재현실패(관경/용접봉발산),"AJR32674714/ALL unit=0.0012 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.0144)"
+AJR32674714-S6-1,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR32674714/ALL unit=0.0012 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.0018)"
+AJR32883903,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR32883903/ALL unit=0.000844 diam=6.35 (rule=parent-agg(self), exp=0.00127)"
+AJR32883905,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR32883905/ALL unit=0.000836 diam=6.35 (rule=parent-agg(self), exp=0.00125)"
+AJR33796501,RAC30599327,"Tube Assembly,Capillary",0.00083,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR33796501/ALL unit=0.001019 diam=4.76 (rule=parent-agg(self), exp=0.00153)"
+AJR33796503-S6-1,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR33796503/ALL unit=0.0012 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.0018)"
+AJR33796512-12-1,RAC30599327,대원 SUB,0.00735,7.0,부모존재_후보재현실패(관경/용접봉발산),"AJR33796512-12-1/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0084)"
+AJR34407805,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.00285,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR34407805/ALL unit=0.00118 diam=6.35 (rule=parent-agg(self), exp=0.00177)"
+AJR34511805,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR34511805/ALL unit=0.000943 diam=6.35 (rule=parent-agg(self), exp=0.00141)"
+AJR34511807,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR34511807/ALL unit=0.000933 diam=6.35 (rule=parent-agg(self), exp=0.0014)"
+AJR34511808,RAC30599327,"Tube Assembly, Manifold",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR34511808/ALL unit=0.000923 diam=6.35 (rule=parent-agg(self), exp=0.00138)"
+AJR35744503,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR35744503/ALL unit=0.00084 diam=6.35 (rule=parent-agg(self), exp=0.00126)"
+AJR36388606-9-1,RAC30599301-1,진성 SUB,0.0017,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR36388606/RAC30599301-1 unit=0.0008 diam=7.94 (rule=exact(subvar/parent-norm), exp=0.0024)"
+AJR36388606-9-2,RAC30599301-1,진성 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR36388606/RAC30599301-1 unit=0.0008 diam=7.94 (rule=exact(subvar/parent-norm), exp=0.0012)"
+AJR36541603,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR36541603/ALL unit=0.000857 diam=6.35 (rule=parent-agg(self), exp=0.00129)"
+AJR36852209-J&I,RAC30599327,태국 SUB,0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR36852209-J&I/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR36852210-J&I,RAC30599327,태국 SUB,0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR36852210-J&I/ALL unit=0.00084 diam=6.35 (rule=parent-agg(self), exp=0.00126)"
+AJR36852706-J&I,RAC30599327,태국 SUB,0.0024,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR36852706-J&I/ALL unit=0.00074 diam=4.76 (rule=parent-agg(self), exp=0.00111)"
+AJR37039703-SUB,RAC30599327,은납-SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR37039703/ALL unit=0.0009 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.00135)"
+AJR37105401,RAC30599327,"Tube Assembly,Reverse",0.0024,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR37105401/ALL unit=0.001311 diam=9.52 (rule=parent-agg(self), exp=0.0059)"
+AJR52676201,RAC30599327,"Tube Assembly,Evaporator(Out)",0.0015,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR52676201/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR52676202-J&I,RAC30599327,태국 SUB,0.003,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR52676202-J&I/ALL unit=0.000829 diam=6.35 (rule=parent-agg(self), exp=0.00124)"
+AJR52676204,RAC30599327,"Tube Assembly,Evaporator(Out)",0.0015,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR52676204/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR52676207-J&I,RAC30599327,태국 SUB,0.003,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR52676207-J&I/ALL unit=0.000829 diam=6.35 (rule=parent-agg(self), exp=0.00124)"
+AJR55707001-J&I,RAC30599327,태국 SUB,0.0024,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR55707001-J&I/ALL unit=0.000763 diam=6.35 (rule=parent-agg(self), exp=0.00343)"
+AJR55707008-J&I-2,RAC30599327,태국 SUB,0.0024,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR55707008-J&I-2/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR55707101-J&I,RAC30599327,태국 SUB,0.003,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR55707101-J&I/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR65507705-0-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507705/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507705-14-1,RAC30599301-1,외주 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507705/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507705-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507705/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507708-14-1,RAC30599301-1,외주 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507708/RAC30599301-1 unit=0.00125 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00187)"
+AJR65507708-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507708/RAC30599301-1 unit=0.00125 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00187)"
+AJR65507710-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507710/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507711-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507711/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507713-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507713/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507716-14-1,RAC30599301-1,외주 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507716/RAC30599301-1 unit=0.001 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.0015)"
+AJR65507716-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507716/RAC30599301-1 unit=0.001 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.0015)"
+AJR65507720-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507720/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0015)"
+AJR65507720-S3-2,RAC30599301-1,사내 SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507720/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0015)"
+AJR65507726-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507726/RAC30599301-1 unit=0.0012 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0018)"
+AJR65507733-4-1,RAC30599301-1,미래 SUB,0.0042,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR65507733/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0045)"
+AJR72572908,RAC30599327,"Tube Assembly,Manifold(Outdoor)",0.0012,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR72572908/ALL unit=0.000847 diam=6.35 (rule=parent-agg(self), exp=0.00381)"
+AJR72961201,RAC30599327,"Tube Assembly,Expansion",0.0024,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR72961201/ALL unit=0.0014 diam=6.35 (rule=parent-agg(self), exp=0.0063)"
+AJR72961202,RAC30599327,"Tube Assembly,Expansion",0.0024,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR72961202/ALL unit=0.002275 diam=6.35 (rule=parent-agg(self), exp=0.01024)"
+AJR73062903,RAC30599327,"Tube Assembly,Distributor",0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73062903/ALL unit=0.000717 diam=4.76 (rule=parent-agg(self), exp=0.00108)"
+AJR73063202-S6-1,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73063202/ALL unit=0.0011 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.00165)"
+AJR73123103,RAC30599327,"Tube Assembly,Connector",0.0015,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73123103/ALL unit=0.001 diam=12.7 (rule=parent-agg(self), exp=0.0075)"
+AJR73222701,RAC30599327,"Tube Assembly,Reverse",0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73222701/ALL unit=0.001389 diam=9.52 (rule=parent-agg(self), exp=0.00208)"
+AJR73224001,RAC30599327,"Tube Assembly,Expansion",0.0123,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73224001/ALL unit=0.00075 diam=4.76 (rule=parent-agg(self), exp=0.01238)"
+AJR73324403-0-2,RAC30599327,사내 SUB,0.0033,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73324403-0-2/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR73324406-0-1,RAC30599327,사내 SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73324406/ALL unit=0.0019 diam=15.88 (rule=parent-agg(subvar/parent-norm), exp=0.00285)"
+AJR73324406-S3-4,RAC30599301-1,사내 SUB,0.0054,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73324406/RAC30599301-1 unit=0.0019 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00855)"
+AJR73327003-S6-1,RAC30599327,사내 SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73327003/ALL unit=0.0017 diam=15.88 (rule=parent-agg(subvar/parent-norm), exp=0.00255)"
+AJR73327003-은납,RAC30599327,은납 SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73327003/ALL unit=0.0017 diam=15.88 (rule=parent-agg(subvar/parent-norm), exp=0.00255)"
+AJR73343201-1-1,RAC30599301-1,SUB ASSY,0.002,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73343201/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.0024)"
+AJR73343201-1-1,RAC30599327,SUB ASSY,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73343201/ALL unit=0.0008 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.0012)"
+AJR73343201-4-1,RAC30599327,미래 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73343201/ALL unit=0.0008 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.0012)"
+AJR73664901,RAC30599327,ADM75404602 내재화 SUB ASSY,0.0141,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73664901/ALL unit=0.0008 diam=7.94 (rule=parent-agg(self), exp=0.0012)"
+AJR73724002,RAC30599327,"Tube Assembly,Condenser(In)",0.00705,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73724002/ALL unit=0.0038 diam=25.4 (rule=parent-agg(self), exp=0.0057)"
+AJR73724006,RAC30599327,"Tube Assembly, Condenser(In)",0.00885,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73724006/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0036)"
+AJR73724102,RAC30599327,ADM75404603 내재화 SUB ASSY,0.00705,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73724102/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR73767515-S1-9,RAC30599301-1,사내 SUB,0.0123,10.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73767515/RAC30599301-1 unit=0.001275 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.01913)"
+AJR73767811-S1-5,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73767811-S1-5/ALL unit=0.004225 diam=28.0 (rule=parent-agg(self), exp=0.00634)"
+AJR73767817-S1-5,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73767817-S1-5/ALL unit=0.004225 diam=28.0 (rule=parent-agg(self), exp=0.00634)"
+AJR73768803,RAC30599327,"Tube Assembly,Condenser(Out)",0.00435,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73768803/ALL unit=0.000867 diam=6.35 (rule=parent-agg(self), exp=0.0052)"
+AJR73768803-S6-4,RAC30599327,사내 SUB,0.00435,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73768803-S6-4/ALL unit=0.0008 diam=9.52 (rule=parent-agg(self), exp=0.0048)"
+AJR73915505-S3-1,RAC30599301-1,사내 SUB,0.0024,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915505/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.005)"
+AJR73915505-S3-2,RAC30599301-1,사내 SUB,0.0036,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915505/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.005)"
+AJR73915505-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915505/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0075)"
+AJR73915506-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915506/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0075)"
+AJR73915511-S3-1,RAC30599301-1,사내 SUB,0.0024,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915511/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.005)"
+AJR73915511-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915511/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0075)"
+AJR73915512-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915512/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0025)"
+AJR73915512-S3-2,RAC30599301-1,사내 SUB,0.0036,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915512/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.005)"
+AJR73915512-S3-3,RAC30599301-1,사내 SUB,0.0024,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915512/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.005)"
+AJR73915512-S3-4,RAC30599301-1,사내 SUB,0.0048,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73915512/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0075)"
+AJR73944509-7-1,RAC30599301-1,(AJR73944505-7-1대체),0.0083,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73944509/RAC30599301-1 unit=0.001429 diam=19.05 (rule=exact(subvar/parent-norm), exp=0.00643)"
+AJR73967516,RAC30599327,"Tube Assembly,Suction",0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73967516/ALL unit=0.001467 diam=6.35 (rule=parent-agg(self), exp=0.0022)"
+AJR73967516-7-1,RAC30599327,MTS SUB,0.0225,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73967516/ALL unit=0.001467 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.011)"
+AJR73967517,RAC30599327,Tube Assembly,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73967517/ALL unit=0.0013 diam=6.35 (rule=parent-agg(self), exp=0.00195)"
+AJR73967517-7-1,RAC30599327,MTS SUB,0.0225,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73967517/ALL unit=0.0013 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.00975)"
+AJR73980317,RAC30599327,"Tube Assembly,Reverse",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73980317/ALL unit=0.00312 diam=22.0 (rule=parent-agg(self), exp=0.00468)"
+AJR73980317-S1-5,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73980317-S1-5/ALL unit=0.00208 diam=22.0 (rule=parent-agg(self), exp=0.00312)"
+AJR73980318,RAC30599327,"Tube Assembly,Reverse",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73980318/ALL unit=0.00312 diam=22.0 (rule=parent-agg(self), exp=0.00468)"
+AJR73980318-S1-5,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73980318-S1-5/ALL unit=0.00208 diam=22.0 (rule=parent-agg(self), exp=0.00312)"
+AJR73980319-S1-5,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73980319-S1-5/ALL unit=0.00208 diam=22.0 (rule=parent-agg(self), exp=0.00312)"
+AJR73980324-S1-4,RAC30599327,사내 SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR73980324-S1-4/ALL unit=0.0011 diam=6.35 (rule=parent-agg(self), exp=0.00165)"
+AJR74364902-9-1,RAC30599301-1,미래정밀 Sub,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364902/RAC30599301-1 unit=0.001307 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00196)"
+AJR74364902-9-2,RAC30599301-1,미래정밀 Sub,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364902/RAC30599301-1 unit=0.001307 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00196)"
+AJR74364902-9-3,RAC30599301-1,미래정밀 Sub,0.0083,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364902/RAC30599301-1 unit=0.001307 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.02156)"
+AJR74364902-9-4,RAC30599301-1,미래정밀 Sub,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364902/RAC30599301-1 unit=0.001307 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00196)"
+AJR74364922-4-1,RAC30599301-1,미래 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364922/RAC30599301-1 unit=0.000893 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00134)"
+AJR74364922-4-2,RAC30599301-1,SUB ASSY,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364922/RAC30599301-1 unit=0.000893 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00134)"
+AJR74364922-4-3,RAC30599301-1,SUB ASSY,0.0083,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364922/RAC30599301-1 unit=0.000893 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.01474)"
+AJR74364922-4-4,RAC30599301-1,SUB ASSY,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74364922/RAC30599301-1 unit=0.000893 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00134)"
+AJR74365003-S1-2,RAC30599327,사내 SUB,0.0024,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365003-S1-2/ALL unit=0.00108 diam=6.35 (rule=parent-agg(self), exp=0.00486)"
+AJR74365010-S1-2,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365010-S1-2/ALL unit=0.00108 diam=6.35 (rule=parent-agg(self), exp=0.00162)"
+AJR74365011-S1-2,RAC30599327,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365011-S1-2/ALL unit=0.00108 diam=6.35 (rule=parent-agg(self), exp=0.00162)"
+AJR74365101,RAC30599327,"Tube Assembly, Distributor",0.0162,15.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365101/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.018)"
+AJR74365101-13-1,RAC30599327,SUB ASSY,0.0162,15.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365101-13-1/ALL unit=0.000788 diam=6.35 (rule=parent-agg(self), exp=0.01774)"
+AJR74365202-S3-1,RAC30599301-1,사내 SUB,0.0051,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365202/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.005)"
+AJR74365202-S3-2,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365202/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0025)"
+AJR74365202-S3-3,RAC30599301-1,사내 SUB,0.0033,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365202/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0075)"
+AJR74365202-S3-4,RAC30599301-1,사내 SUB,0.0015,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365202/RAC30599301-1 unit=0.001667 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0075)"
+AJR74365205-S3-1,RAC30599301-1,사내 SUB,0.0051,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365205/RAC30599301-1 unit=0.001767 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.0053)"
+AJR74365205-S3-2,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365205/RAC30599301-1 unit=0.001767 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00265)"
+AJR74365205-S3-3,RAC30599301-1,사내 SUB,0.0033,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74365205/RAC30599301-1 unit=0.001767 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00795)"
+AJR74424612-1-1,RAC30599301-1,중앙 SUB,0.0033,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74424612/RAC30599301-1 unit=0.00095 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.0057)"
+AJR74465905,RAC30599327,1-way 표준화 제품,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74465905/ALL unit=0.000733 diam=4.76 (rule=parent-agg(self), exp=0.0011)"
+AJR74465906,RAC30599327,1-way 표준화 제품,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74465906/ALL unit=0.000733 diam=4.76 (rule=parent-agg(self), exp=0.0011)"
+AJR74522901-1,RAC30599301-1,AJR74522901-1,0.01248,14.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74522901/RAC30599301-1 unit=0.000975 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.02048)"
+AJR74803513,RAC30599327,Condenser SUB,0.00435,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74803513/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0048)"
+AJR74803545-4-1,RAC30599301-1,미래정밀Sub,0.0081,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74803545/RAC30599301-1 unit=0.000956 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00717)"
+AJR74843702,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.003,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74843702/ALL unit=0.00124 diam=7.94 (rule=parent-agg(self), exp=0.00372)"
+AJR74844101,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74844101/ALL unit=0.000829 diam=6.35 (rule=parent-agg(self), exp=0.00124)"
+AJR74844102,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0027,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74844102/ALL unit=0.000833 diam=6.35 (rule=parent-agg(self), exp=0.0025)"
+AJR74844302,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.003,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74844302/ALL unit=0.001133 diam=6.35 (rule=parent-agg(self), exp=0.0034)"
+AJR74942623-2-1,RAC30599327,소신 SUB,0.0042,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74942623/ALL unit=0.0008 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.0048)"
+AJR74942627-4-1,RAC30599327,AJR74942617 sub,0.00335,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74942627/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.006)"
+AJR74942632-12-1,RAC30599327,대원 SUB,0.00645,6.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74942632/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.0072)"
+AJR74942632-2-1,RAC30599327,고압 황동  SUB,0.00525,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74942632/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.006)"
+AJR74942632-R-1,RAC30599327,고압 황동  SUB,0.00525,5.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74942632/ALL unit=0.0008 diam=9.52 (rule=parent-agg(subvar/parent-norm), exp=0.006)"
+AJR74942730-3-1,RAC30599301-1,SUB ASSY,0.00528,7.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74942730/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.0105)"
+AJR74943201,RAC30599301-1,"Tube Assembly,Manifold(Indoor)",0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74943201/ALL unit=0.0012 diam=15.88 (rule=parent-agg(self), exp=0.0018)"
+AJR74962906,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74962906/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR74983904-12-1,RAC30599301-1,대원 SUB,0.0141,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74983904/RAC30599301-1 unit=0.006725 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.02017)"
+AJR74983905-12-5,RAC30599301-1,대원 SUB,0.02565,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74983905/RAC30599301-1 unit=0.0085 diam=31.75 (rule=exact(subvar/parent-norm), exp=0.03825)"
+AJR74983910-12-1,RAC30599301-1,대원 SUB,0.0141,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74983910/RAC30599301-1 unit=0.0071 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.0213)"
+AJR74984303-1-4,RAC30599301-1,중앙 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74984303/RAC30599301-1 unit=0.0058 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.0087)"
+AJR74984303-13-3,RAC30599301-1,엠케이 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74984303/RAC30599301-1 unit=0.0058 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.0087)"
+AJR74984303-13-4,RAC30599301-1,엠케이 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74984303/RAC30599301-1 unit=0.0058 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.0087)"
+AJR74984304-13-1,RAC30599301-1,엠케이 SUB,0.0168,14.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74984304/RAC30599301-1 unit=0.0058 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.1218)"
+AJR74984305-13-1,RAC30599301-1,엠케이 SUB,0.02115,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR74984305/RAC30599301-1 unit=0.00615 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.10148)"
+AJR75062906-13-1,RAC30599327,엠케이 SUB,0.012,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75062906/ALL unit=0.001 diam=12.7 (rule=parent-agg(subvar/parent-norm), exp=0.0165)"
+AJR75062906-13-1,RAC30599301-1,엠케이 SUB,0.0117,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75062906/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.0165)"
+AJR75142604,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.001,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75142604/ALL unit=0.0013 diam=7.94 (rule=parent-agg(self), exp=0.00195)"
+AJR75183101,RAC30599327,AJR75183101,0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75183101/ALL unit=0.00075 diam=6.35 (rule=parent-agg(self), exp=0.00113)"
+AJR75243005,RAC30599327,사내 저압 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75243005/ALL unit=0.000725 diam=4.76 (rule=parent-agg(self), exp=0.00109)"
+AJR75462802-14-1,RAC30599301-1,JS ENG SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462802/RAC30599301-1 unit=0.00106 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.00159)"
+AJR75462802-14-2,RAC30599301-1,JS ENG SUB,0.0051,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462802/RAC30599301-1 unit=0.00106 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.00318)"
+AJR75462802-S3-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462802/RAC30599301-1 unit=0.00106 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.00159)"
+AJR75462802-S3-2,RAC30599301-1,사내 SUB,0.0051,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462802/RAC30599301-1 unit=0.00106 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.00318)"
+AJR75462802-S3-3,RAC30599301-1,사내 SUB,0.0027,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462802/RAC30599301-1 unit=0.00106 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.00318)"
+AJR75462803-S3-1,RAC30599301-1,사내 SUB,0.0012,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462803/RAC30599301-1 unit=0.0021 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.00945)"
+AJR75462803-S3-2,RAC30599301-1,사내 SUB,0.0051,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462803/RAC30599301-1 unit=0.0021 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0063)"
+AJR75462803-S3-3,RAC30599301-1,사내 SUB,0.0027,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462803/RAC30599301-1 unit=0.0021 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0063)"
+AJR75462803-S3-4,RAC30599301-1,사내 SUB,0.0078,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75462803/RAC30599301-1 unit=0.0021 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.00945)"
+AJR75463101-1-2,RAC30599301-1,중앙 SUB,0.002,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463101/RAC30599301-1 unit=0.0008 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0024)"
+AJR75463302-9-1,RAC30599301-1,진성 SUB,0.01735,21.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463302/RAC30599301-1 unit=0.0071 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.22365)"
+AJR75463302-9-2,RAC30599301-1,진성 SUB,0.01815,10.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463302/RAC30599301-1 unit=0.0071 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.1065)"
+AJR75463303-9-1,RAC30599301-1,진성 SUB,0.0166,20.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463303/RAC30599301-1 unit=0.003525 diam=22.0 (rule=exact(subvar/parent-norm), exp=0.10575)"
+AJR75463303-9-2,RAC30599301-1,진성 SUB,0.0153,10.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463303/RAC30599301-1 unit=0.003525 diam=22.0 (rule=exact(subvar/parent-norm), exp=0.05287)"
+AJR75463304-9-1,RAC30599301-1,AJR75463304-9-1,0.01735,21.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463304/RAC30599301-1 unit=0.0057 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.17955)"
+AJR75463304-9-2,RAC30599301-1,진성 SUB,0.01785,10.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463304/RAC30599301-1 unit=0.0057 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.0855)"
+AJR75463304-9-4,RAC30599301-1,AJR75463304-9-4,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75463304/RAC30599301-1 unit=0.0057 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.00855)"
+AJR75464301,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75464301/ALL unit=0.000829 diam=6.35 (rule=parent-agg(self), exp=0.00124)"
+AJR75483602-3-1,RAC30599301-1,SUB용접,0.0025,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483602/RAC30599301-1 unit=0.0011 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.00495)"
+AJR75483701-1-1,RAC30599301-1,AJR75483701-1-1,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483701/RAC30599301-1 unit=0.0047 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.00705)"
+AJR75483701-1-2,RAC30599301-1,AJR75483701-1-2,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483701/RAC30599301-1 unit=0.0047 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.00705)"
+AJR75483701-13-2,RAC30599301-1,AJR75483701-13-2,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483701/RAC30599301-1 unit=0.0047 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.00705)"
+AJR75483701-13-3,RAC30599301-1,엠케이 SUB,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483701/RAC30599301-1 unit=0.0047 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.00705)"
+AJR75483702-1-1,RAC30599301-1,AJR75483702-1-1,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483702/RAC30599301-1 unit=0.003525 diam=22.0 (rule=exact(subvar/parent-norm), exp=0.00529)"
+AJR75483702-1-2,RAC30599301-1,AJR75483702-1-2,0.0008,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75483702/RAC30599301-1 unit=0.003525 diam=22.0 (rule=exact(subvar/parent-norm), exp=0.00529)"
+AJR75544201-3-1,RAC30599301-1,이젠터 SUB,0.002,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75544201/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.003)"
+AJR75544201-4-1,RAC30599301-1,SUB 용접,0.00248,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75544201/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.003)"
+AJR75544223-4-1,RAC30599301-1,SUB ASSY,0.00248,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75544223/RAC30599301-1 unit=0.001483 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.00445)"
+AJR75544505-15-1,RAC30599301-1,SUB ASSY,0.0069,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75544505/RAC30599301-1 unit=0.0019 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00855)"
+AJR75563003,RAC30599327,Tube Assembly,0.01785,11.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75563003/ALL unit=0.001 diam=4.76 (rule=parent-agg(self), exp=0.0165)"
+AJR75563402-J&I,RAC30599327,태국 SUB,0.0015,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75563402-J&I/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR75563501-12-1,RAC30599301-1,대원 SUB,0.0021,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75563501/RAC30599301-1 unit=0.0008 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.0048)"
+AJR75563502-12-4,RAC30599327,대원 SUB,0.0033,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75563502/ALL unit=0.0008 diam=6.35 (rule=parent-agg(subvar/parent-norm), exp=0.0036)"
+AJR75625401-7-1,RAC30599327,AJR75625401-7-1,0.0002,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75625401/ALL unit=0.002233 diam=19.05 (rule=parent-agg(subvar/parent-norm), exp=0.0067)"
+AJR75724101-1-1,RAC30599301-1,중앙 SUB,0.002,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75724101/RAC30599301-1 unit=0.0013 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.0039)"
+AJR75747604,RAC30599327,고압부 SUB ASSY,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75747604/ALL unit=0.000733 diam=5.0 (rule=parent-agg(self), exp=0.0011)"
+AJR75802501-1-1,RAC30599301-1,중앙 SUB,0.0016,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75802501/RAC30599301-1 unit=0.0011 diam=6.35 (rule=exact(subvar/parent-norm), exp=0.0033)"
+AJR75802609,RAC30599327,Tube Assembly,0.0141,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR75802609/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR76166402-S5-1,RAC30599301-1,사내 SUB,0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76166402/RAC30599301-1 unit=0.0058 diam=28.0 (rule=exact(subvar/parent-norm), exp=0.0087)"
+AJR76462629,RAC30599327,Tube Assembly,0.0024,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462629/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR76462710,RAC30599327,ADM73210506 SUB,0.01185,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462710/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=0.0165)"
+AJR76462711,RAC30599327,ADM73210506 SUB,0.00885,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462711/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR76462717,RAC30599327,Tube Assembly,0.00885,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462717/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR76462718,RAC30599327,Tube Assembly,0.01185,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462718/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0048)"
+AJR76462719,RAC30599327,Tube Assembly,0.01185,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462719/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=0.0165)"
+AJR76462720,RAC30599327,Tube Assembly,0.00885,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462720/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR76462727,RAC30599327,Tube Assembly,0.0108,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462727/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0024)"
+AJR76462729,RAC30599327,Tube Assembly,0.0096,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462729/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0036)"
+AJR76462731-7-1,RAC30599327,MTS 판형 SUB,0.00705,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462731-7-1/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR76462732,RAC30599327,판형 SUB 부품,0.01185,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462732/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=0.0165)"
+AJR76462733,RAC30599327,판형 SUB 부품,0.01185,4.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462733/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=0.0165)"
+AJR76462734-7-1,RAC30599327,MTS SUB,0.00705,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462734-7-1/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR76462736,RAC30599327,판형 SUB,0.0042,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462736/ALL unit=0.0008 diam=6.35 (rule=parent-agg(self), exp=0.0012)"
+AJR76462903,RAC30599327,판형 수배관 SUB,0.00705,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462903/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=0.00413)"
+AJR76462903,RAC30599328,판형 수배관 SUB,0.0057,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76462903/ALL unit=0.00275 diam=6.35 (rule=parent-agg(self), exp=0.00413)"
+AJR76523009-7-1,RAC30599327,SUB ASSY,0.0036,3.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76523009/ALL unit=0.00092 diam=12.7 (rule=parent-agg(subvar/parent-norm), exp=0.00414)"
+AJR76545301-7-1,RAC30599301-1,MTS SUB,0.001,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76545301/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.0015)"
+AJR76742306,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.0012,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76742306/ALL unit=0.001167 diam=9.52 (rule=parent-agg(self), exp=0.00175)"
+AJR76823101-S1-2,RAC30599327,사내 SUB,0.00165,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76823101-S1-2/ALL unit=0.001143 diam=9.52 (rule=parent-agg(self), exp=0.00171)"
+AJR76902304-S1-2,RAC30599327,사내 SUB,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76902304-S1-2/ALL unit=0.00154 diam=6.35 (rule=parent-agg(self), exp=0.00231)"
+AJR76982501-12-2,RAC30599301-1,SUB ASSY,0.0036,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR76982501/RAC30599301-1 unit=0.00108 diam=15.88 (rule=exact(subvar/parent-norm), exp=0.00324)"
+AJR77167310-7-1,RAC30599327,MTS SUB,0.0024,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR77167310/ALL unit=0.00095 diam=12.7 (rule=parent-agg(subvar/parent-norm), exp=0.00285)"
+AJR77171201-15-1,RAC30599301-1,도강 SUB,0.0105,10.0,부모존재_후보재현실패(관경/용접봉발산),"AJR77171201/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.015)"
+AJR77171201-S6-2,RAC30599301-1,사내 SUB,0.0105,10.0,부모존재_후보재현실패(관경/용접봉발산),"AJR77171201/RAC30599301-1 unit=0.001 diam=12.7 (rule=exact(subvar/parent-norm), exp=0.015)"
+AJR77189104,RAC30599327,"Tube Assembly,Manifold(Indoor)",0.003,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR77189104/ALL unit=0.00085 diam=6.35 (rule=parent-agg(self), exp=0.00255)"
+AJR77224502-1-1,RAC30599301-1,중앙 SUB,0.0057,2.0,부모존재_후보재현실패(관경/용접봉발산),"AJR77224502/RAC30599301-1 unit=0.001 diam=9.52 (rule=exact(subvar/parent-norm), exp=0.003)"
+T-44PATH-MANI-SG,RAC30599327,배영주책임샘플,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"T-44PATH-MANI-SG/ALL unit=0.000867 diam=7.94 (rule=parent-agg(self), exp=0.0013)"
+T-88PATH-EXPANSION,RAC30599327,배영주책임샘플,0.0096,9.0,부모존재_후보재현실패(관경/용접봉발산),"T-88PATH-EXPANSION/ALL unit=0.000825 diam=9.52 (rule=parent-agg(self), exp=0.01114)"
+T-88PATH-MANI-SINGLE,RAC30599327,배영주책임샘플,0.0018,1.0,부모존재_후보재현실패(관경/용접봉발산),"T-88PATH-MANI-SINGLE/ALL unit=0.00094 diam=7.94 (rule=parent-agg(self), exp=0.00141)"
