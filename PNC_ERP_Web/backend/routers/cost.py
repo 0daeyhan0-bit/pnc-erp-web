@@ -343,14 +343,14 @@ def cost_proc_get(node: str = Query(..., description="공정 편집 대상 품�
         # 용접봉 carrier 목록(proc_weld). 각 carrier의 조립공정을 carrier별 분리 반환(통합 금지)
         carriers = []
         try:
-            cur.execute("SELECT weld_item, ISNULL(use_qty,0), ISNULL(pipe_diam,0) FROM nx.proc_weld WHERE parent_item=? ORDER BY use_qty DESC, weld_item", node)
-            cw = [(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall() if str(r[0]).strip()]
+            cur.execute("SELECT weld_item, ISNULL(use_qty,0), ISNULL(pipe_diam,0), ISNULL(unit_qty,0), ISNULL(loss_factor,1.5), ISNULL(meta_ok,0) FROM nx.proc_weld WHERE parent_item=? ORDER BY use_qty DESC, weld_item", node)
+            cw = [(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0), float(r[3] or 0), float(r[4] or 1.5), int(r[5] or 0)) for r in cur.fetchall() if str(r[0]).strip()]
         except Exception:
             cw = []
-        for wi, uq, pd in cw:
+        for wi, uq, pd, un, lf, mok in cw:
             cur.execute("SELECT proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.routing WHERE p_item=? AND item_code=? AND ISNULL(work_qty,0)>0 AND ISNULL(TRY_CONVERT(int,proc_code),99)<90 ORDER BY sort_seq,proc_code", node, wi)
             aprocs = [_catrow(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0), (str(r[3]).strip() or "3")) for r in cur.fetchall()]
-            carriers.append({"weld_item": wi, "use_qty": uq, "pipe_diam": pd, "procs": aprocs})
+            carriers.append({"weld_item": wi, "use_qty": uq, "pipe_diam": pd, "unit_qty": un, "loss_factor": lf, "meta_ok": mok, "procs": aprocs})
         cur.execute("SELECT ISNULL(diam,0) FROM nx.item WHERE item_code=?", node)
         r = cur.fetchone(); pdiam = float(r[0] or 0) if r else 0.0
     finally:
@@ -394,16 +394,25 @@ def cost_proc_save(payload: dict = Body(...)):
             for pc, wq, uph, cg in arows:
                 cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES(?,?,?,?,?,?,?)", node, wi, pc, wq, uph, cg, s2 * 10)
                 s2 += 1
-            # 용접/은납 ST 변경 → 해당 carrier proc_weld.use_qty 재계산
-            weld_st = sum(wq for pc, wq, uph, cg in arows if pc in _PROC_WELD)
-            cur.execute("SELECT ISNULL(diam,0) FROM nx.item WHERE item_code=?", node)
-            r = cur.fetchone(); pdiam = float(r[0] or 0) if r else 0.0
-            cur.execute("SELECT MIN(std_use_qty) FROM nx.weld_diam WHERE ABS(pipe_diam-?)<0.001", pdiam)
-            r = cur.fetchone(); unit = float(r[0] or 0) if r and r[0] is not None else 0.0
-            if weld_st > 0 and unit > 0:
-                rc = round(weld_st * unit * 1.5, 6)
-                cur.execute("UPDATE nx.proc_weld SET use_qty=?, weld_st=?, unit_qty=?, pipe_diam=?, upd_dt=getdate() WHERE parent_item=? AND weld_item=?", rc, weld_st, unit, pdiam, node, wi)
-                recalcs.append({"carrier": wi, "weld_st": weld_st, "use_qty": rc})
+            # 용접/은납 ST(51+28) 변경 → 해당 carrier proc_weld.use_qty 재계산 = ST × 원단위(unit_qty) × loss_factor(배수)
+            #   ★스토어드 메타(unit_qty·loss_factor) 사용 · meta_ok=1(재계산 신뢰) 且 ST 변경 시에만 갱신(무변경=정본 use_qty 불변, 드리프트 0)
+            #   loss_factor는 프론트에서 carrier별 수정 가능(배수 파라미터). 정본 산식=레거시 전역 1.5.
+            new_st = sum(wq for pc, wq, uph, cg in arows if pc in _PROC_WELD)
+            lf_in = cinfo.get("loss_factor", None)
+            cur.execute("SELECT ISNULL(unit_qty,0),ISNULL(weld_st,0),ISNULL(loss_factor,1.5),ISNULL(meta_ok,0),ISNULL(use_qty,0) FROM nx.proc_weld WHERE parent_item=? AND weld_item=?", node, wi)
+            r = cur.fetchone()
+            if r:
+                unit, cur_st, lf0, mok, use0 = float(r[0] or 0), float(r[1] or 0), float(r[2] or 1.5), int(r[3] or 0), float(r[4] or 0)
+                lf = float(lf_in) if (lf_in is not None and str(lf_in).strip() != "") else lf0
+                lf_changed = abs(lf - lf0) > 1e-9
+                st_changed = abs(new_st - cur_st) > 1e-9
+                if mok == 1 and unit > 0 and (st_changed or lf_changed):
+                    rc = round(new_st * unit * lf, 6)
+                    cur.execute("UPDATE nx.proc_weld SET use_qty=?, weld_st=?, loss_factor=?, upd_dt=getdate() WHERE parent_item=? AND weld_item=?", rc, new_st, lf, node, wi)
+                    recalcs.append({"carrier": wi, "weld_st": new_st, "loss_factor": lf, "use_qty": rc, "prev_use_qty": use0})
+                elif lf_changed and mok != 1:
+                    # 배수만 저장(재계산 불가 carrier — use_qty 정본 보존)
+                    cur.execute("UPDATE nx.proc_weld SET loss_factor=? WHERE parent_item=? AND weld_item=?", lf, node, wi)
         _reset_cost_engine()
         return {"ok": True, "own": seq, "carriers": len(carriers), "weld_recalc": recalcs}
     finally:
