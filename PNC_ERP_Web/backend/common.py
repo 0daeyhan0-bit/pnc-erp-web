@@ -164,3 +164,7 @@ def _d6(s):
 
 # 작업장코드 → 이름 (여러 도메인 공유: planinput·gagong·sourcing). app.py 원본과 동일.
 _ITEM_WORK = {"": "", "P1": "용접", "P2": "가공", "D1": "직납"}
+
+def _ym(ymd):  # MAINT_YMD(YYMMDD/YYYYMMDD) → 마감월 YYMM. 공유: sales(마감잠금)·salemagam.
+    y = str(ymd or "").strip()
+    return y[:4] if len(y) >= 6 else ""
