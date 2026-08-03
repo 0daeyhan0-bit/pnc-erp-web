@@ -8,8 +8,10 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 
 router = APIRouter()
 
-# ============ 원소재 마스터 + 5가격 통합 뷰 (nx.raw_material ↔ price_metal/price_item/price_lme_lg) ============
+# ============ 원소재 마스터 + 5가격 통합 뷰 (nx.raw_material ↔ price_metal/price_item/lg_lme_costtable) ============
 _MATCODE = {"구리": "CU", "고강도관": "고강도", "알루미늄": "AL", "STS": "STS"}
+# LG LME 인정가 = lg_lme_costtable 재료비(재질 대표구분). CU←L/W·고강도←고강도관. (구 price_lme_lg 빈테이블 통합제거)
+_LG_GUBUN = {"CU": "L/W", "고강도": "고강도관"}
 @router.get("/api/rawmat/list")
 def rawmat_list(q: str = Query(""), material: str = Query("")):
     """원소재 마스터(외경×두께×재질×조질) + 5가격: 시세·파트너(사급)·매입·매출·LG인증. 규격/재질/품번 조인."""
@@ -29,9 +31,11 @@ def rawmat_list(q: str = Query(""), material: str = Query("")):
         pmet = {}
         for r in cur.fetchall():
             pmet[(str(r[0]).strip(), float(r[1]) if r[1] is not None else None, float(r[2]) if r[2] is not None else None)] = (r[3], r[4])
-        # LG 인증가 (재질/월)
-        cur.execute("SELECT metal_gubun, lg_recog_price FROM nx.price_lme_lg pl WHERE apply_ym=(SELECT MAX(apply_ym) FROM nx.price_lme_lg x WHERE x.metal_gubun=pl.metal_gubun)")
-        plme = {str(r[0]).strip(): r[1] for r in cur.fetchall()}
+        # LG 인증가 = lg_lme_costtable 재료비(최신월, 재질 대표구분 L/W·고강도관) — 단일정본, 매월 자동반영
+        cur.execute("""SELECT gubun, MAX(jaeryo) FROM nx.lg_lme_costtable
+              WHERE apply_ym=(SELECT MAX(apply_ym) FROM nx.lg_lme_costtable) AND gubun IN ('L/W','고강도관') GROUP BY gubun""")
+        _g2m = {"L/W": "CU", "고강도관": "고강도"}
+        plme = {_g2m[str(r[0]).strip()]: r[1] for r in cur.fetchall() if str(r[0]).strip() in _g2m}
         # 품번별 최신 매입/사급/매출 (price_item)
         cur.execute("""SELECT item_code, price_type, price FROM nx.price_item pi
               WHERE apply_ymd=(SELECT MAX(apply_ymd) FROM nx.price_item x WHERE x.item_code=pi.item_code AND x.price_type=pi.price_type)""")
@@ -69,7 +73,7 @@ def rawmat_list(q: str = Query(""), material: str = Query("")):
 
 @router.get("/api/rawmat/prices")
 def rawmat_prices(raw_id: int = Query(...)):
-    """선택 원소재의 월별 단가 시계열: LG인증가(price_lme_lg)·LG사급가(rawmat_lg_sagub, 입력값 미입력=0)·현물가/협력사사급가(price_metal). 최신월 상단."""
+    """선택 원소재의 월별 단가 시계열: LG인증가(lg_lme_costtable 재료비)·LG사급가(rawmat_lg_sagub, 입력값 미입력=0)·현물가/협력사사급가(price_metal). 최신월 상단."""
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("SELECT material, outer_diam, thickness, temper, part_no FROM nx.raw_material WHERE raw_id=?", raw_id)
@@ -84,9 +88,11 @@ def rawmat_prices(raw_id: int = Query(...)):
             d = series.setdefault(str(ym).strip(), {})
             d["sise"] = float(sp) if sp is not None else None
             d["partner"] = float(pp) if pp is not None else None
-        cur.execute("SELECT apply_ym, lg_recog_price FROM nx.price_lme_lg WHERE metal_gubun=?", mg)
-        for ym, v in cur.fetchall():
-            series.setdefault(str(ym).strip(), {})["lg_recog"] = float(v) if v is not None else None
+        _lgg = _LG_GUBUN.get(mg)
+        if _lgg:
+            cur.execute("SELECT apply_ym, MAX(jaeryo) FROM nx.lg_lme_costtable WHERE gubun=? GROUP BY apply_ym", _lgg)
+            for ym, v in cur.fetchall():
+                series.setdefault(str(ym).strip(), {})["lg_recog"] = float(v) if v is not None else None
         cur.execute("SELECT apply_ym, price FROM nx.rawmat_lg_sagub WHERE raw_id=?", raw_id)
         for ym, v in cur.fetchall():
             series.setdefault(str(ym).strip(), {})["lg_sagub"] = float(v) if v is not None else 0
