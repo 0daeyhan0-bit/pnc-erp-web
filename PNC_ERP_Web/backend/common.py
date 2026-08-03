@@ -161,3 +161,6 @@ def _d6(s):
     d = ''.join(ch for ch in str(s or '') if ch.isdigit())
     if len(d) == 8: return d[2:8]      # yyyymmdd → yymmdd
     return d[-6:] if len(d) >= 6 else d
+
+# 작업장코드 → 이름 (여러 도메인 공유: planinput·gagong·sourcing). app.py 원본과 동일.
+_ITEM_WORK = {"": "", "P1": "용접", "P2": "가공", "D1": "직납"}
