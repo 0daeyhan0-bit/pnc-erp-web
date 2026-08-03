@@ -4,7 +4,7 @@
    _sale_close_lookup·_saleout_led·_lgsale_led·_next_yymm)는 이 도메인 로컬(블록내). 공유는 common.py."""
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed
 
 router = APIRouter()
 
