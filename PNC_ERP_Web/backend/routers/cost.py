@@ -308,3 +308,107 @@ def cost_regen(p: dict = Body(...)):
 @router.get("/api/cost/regen/status")
 def cost_regen_status():
     return _regen
+
+
+# ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================
+#  ★체결·포장·용접 조립공정 ST는 용접봉(RAC) carrier에 p_item=부모(node)로 저장(레거시 carrier 모델). 여기서 전 공정군 편집.
+#   가공공정 = item_code=node, p_item=''  /  조립공정 = item_code=용접봉, p_item=node. calc_gubun 보존. 단가는 마감때만(제외).
+_ASSY_PROCS = _PROC_WELD | _PROC_FASTEN | {"61", "83"}   # 용접·은납·체결계열·포장(=carrier 조립공정)
+
+@router.get("/api/cost/proc/get")
+def cost_proc_get(node: str = Query(..., description="공정 편집 대상 품목(어셈블리/SUB/부품)")):
+    """전 공정군(가공+용접+체결+포장) 편집목록. 가공=node own(p_item=''), 조립=용접봉 carrier(p_item=node) 합산."""
+    node = node.strip()
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.routing WHERE item_code=? AND ISNULL(p_item,'')=''", node)
+        own = {str(r[0]).strip(): {"wq": float(r[1] or 0), "uph": float(r[2] or 0), "cg": (str(r[3]).strip() or "3")} for r in cur.fetchall()}
+        # ★엔진이 실제 walk하는 용접봉 carrier = proc_weld[node] 만(orphan routing 제외 → 가공비 정합)
+        carriers = []
+        try:
+            cur.execute("SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item=?", node)
+            carriers = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+        except Exception:
+            carriers = []
+        assy = {}
+        if carriers:
+            ph = ",".join("?" * len(carriers))
+            cur.execute(f"""SELECT proc_code, SUM(work_qty), MAX(ISNULL(prod_uph,0)), MAX(ISNULL(calc_gubun,''))
+                FROM nx.routing WHERE p_item=? AND item_code IN ({ph}) AND ISNULL(work_qty,0)>0 GROUP BY proc_code""", node, *carriers)
+            assy = {str(r[0]).strip(): {"wq": float(r[1] or 0), "uph": float(r[2] or 0), "cg": (str(r[3]).strip() or "3")} for r in cur.fetchall()}
+        # 대표 carrier = proc_weld 소요량 최대(walked)
+        carrier = ""
+        if carriers:
+            cur.execute("SELECT TOP 1 weld_item FROM nx.proc_weld WHERE parent_item=? ORDER BY use_qty DESC, weld_item", node)
+            r = cur.fetchone(); carrier = str(r[0]).strip() if r else carriers[0]
+        # 관경(원단위 재계산용)
+        cur.execute("SELECT ISNULL(diam,0) FROM nx.item WHERE item_code=?", node)
+        r = cur.fetchone(); pdiam = float(r[0] or 0) if r else 0.0
+    finally:
+        nx.close()
+    cn = _conn(); c2 = cn.cursor()
+    try:
+        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
+        procs = []
+        for r in c2.fetchall():
+            pc = str(r[0]).strip(); g = _proc_group(pc)
+            ex = (assy.get(pc) if pc in _ASSY_PROCS else own.get(pc)) or {}
+            procs.append({"proc_code": pc, "name": str(r[1]).strip(), "group": g, "is_assy": pc in _ASSY_PROCS,
+                          "work_qty": ex.get("wq", 0), "prod_uph": ex.get("uph", 0), "calc_gubun": ex.get("cg", "3")})
+    finally:
+        cn.close()
+    return {"node": node, "carrier": carrier, "pipe_diam": pdiam, "procs": procs,
+            "has_own": any(v["work_qty"] > 0 for v in procs if not v["is_assy"]),
+            "has_assy": any(v["work_qty"] > 0 for v in procs if v["is_assy"])}
+
+@router.post("/api/cost/proc/save")
+def cost_proc_save(payload: dict = Body(...)):
+    """공정 지정 저장 — 가공=node own(p_item=''), 조립(용접/체결/포장)=용접봉 carrier(p_item=node). calc_gubun 보존.
+       ★용접/은납 ST 변경 시 proc_weld.use_qty(=Σ용접·은납ST×관경원단위×1.5) 자동 재계산. 단가는 미변경(마감때만)."""
+    node = str(payload.get("node", "")).strip()
+    rows = payload.get("rows", []) or []
+    carrier = str(payload.get("carrier", "")).strip()
+    if not node:
+        raise HTTPException(400, "node 필요")
+    keep = [(str(r.get("proc_code", "")).strip(), float(r.get("work_qty") or 0), float(r.get("prod_uph") or 0),
+             (str(r.get("calc_gubun", "")).strip() or "3"))
+            for r in rows if str(r.get("proc_code", "")).strip() and float(r.get("work_qty") or 0) > 0]
+    assy_rows = [k for k in keep if k[0] in _ASSY_PROCS]
+    if assy_rows and not carrier:
+        raise HTTPException(400, "조립공정(용접/체결/포장) 저장하려면 용접봉(carrier)이 필요합니다 — 이 품목에 용접봉이 없습니다.")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        # 가공(own) 교체: item_code=node, p_item='' , proc<90
+        cur.execute("DELETE FROM nx.routing WHERE item_code=? AND ISNULL(p_item,'')='' AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node)
+        # 조립 교체: p_item=node, ★엔진이 walk하는 용접봉(proc_weld) carrier만 정리 후 대표 carrier로 통합(orphan routing 미개입=가공비 정합)
+        cur.execute("SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item=?", node)
+        wc = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+        if carrier and carrier not in wc: wc.append(carrier)
+        if wc:
+            ph = ",".join("?" * len(wc))
+            cur.execute(f"DELETE FROM nx.routing WHERE p_item=? AND item_code IN ({ph})", node, *wc)
+        seq = 0
+        for pc, wq, uph, cg in keep:
+            if pc in _ASSY_PROCS:
+                cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES(?,?,?,?,?,?,?)",
+                            node, carrier, pc, wq, uph, cg, seq * 10)
+            else:
+                cur.execute("INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq) VALUES('',?,?,?,?,?,?)",
+                            node, pc, wq, uph, cg, seq * 10)
+            seq += 1
+        # ★용접ST 변경 → proc_weld.use_qty 재계산(carrier): Σ(용접51+은납28 ST) × 관경 원단위 × 1.5
+        recalc = None
+        if carrier:
+            weld_st = sum(wq for pc, wq, uph, cg in keep if pc in _PROC_WELD)
+            cur.execute("SELECT ISNULL(diam,0) FROM nx.item WHERE item_code=?", node)
+            r = cur.fetchone(); pdiam = float(r[0] or 0) if r else 0.0
+            cur.execute("SELECT MIN(std_use_qty) FROM nx.weld_diam WHERE ABS(pipe_diam-?)<0.001", pdiam)
+            r = cur.fetchone(); unit = float(r[0] or 0) if r and r[0] is not None else 0.0
+            if weld_st > 0 and unit > 0:
+                recalc = round(weld_st * unit * 1.5, 6)
+                cur.execute("UPDATE nx.proc_weld SET use_qty=?, weld_st=?, unit_qty=?, pipe_diam=?, upd_dt=getdate() WHERE parent_item=? AND weld_item=?",
+                            recalc, weld_st, unit, pdiam, node, carrier)
+        _reset_cost_engine()
+        return {"ok": True, "count": seq, "assy": len(assy_rows), "carrier": carrier, "weld_use_qty_recalc": recalc}
+    finally:
+        nx.close()
