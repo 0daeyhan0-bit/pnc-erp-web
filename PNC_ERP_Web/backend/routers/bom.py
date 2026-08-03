@@ -257,14 +257,25 @@ def bom_save(payload: dict = Body(...)):
             cur.execute("INSERT INTO nx.bom_header(item_code,version,apply_from,status) VALUES(?,1,'2000-01-01',N'확정')", item)
             cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
             bom_id = cur.fetchone()[0]
-        # 전체 교체
+        # 전체 교체 — ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 → nx.proc_weld로 라우팅(bom_line 제외)
         cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", bom_id)
-        for seq, ln in enumerate(lines, 1):
+        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+        seq = 0; nweld = 0
+        for ln in lines:
+            ch = str(ln.get("child_item", "")).strip()
+            if ch.upper().startswith("RAC"):   # 용접봉 → proc_weld(공정종속 자재)
+                cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
+                    VALUES(?,?,?,?,?,?,?,?,'W','bom_save')""",
+                    item, ch, ch.split('-')[0], float(ln.get("qty") or 0),
+                    _b(ln.get("cs_calc_except")), _b(ln.get("lme_except")),
+                    (ln.get("from_ymd") or None), (ln.get("to_ymd") or None))
+                nweld += 1; continue
+            seq += 1
             cur.execute("""INSERT INTO nx.bom_line
                 (bom_id,seq,child_item,qty,node_type,cs_calc_except,lme_except,sagub_default,is_optional,
                  from_ymd,to_ymd,except_flag,set_except,kitting,vir_item,proc_gubun,gagong_proc,s_work,wh_gagong,in_gagong,cust_code,remarks)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                bom_id, seq, str(ln.get("child_item", "")).strip(), float(ln.get("qty") or 0),
+                bom_id, seq, ch, float(ln.get("qty") or 0),
                 str(ln.get("node_type") or "부품"),
                 _b(ln.get("cs_calc_except")), _b(ln.get("lme_except")), _b(ln.get("sagub_default")), _b(ln.get("is_optional")),
                 (ln.get("from_ymd") or None), (ln.get("to_ymd") or None),
@@ -273,7 +284,7 @@ def bom_save(payload: dict = Body(...)):
                 (ln.get("wh_gagong") or None), (ln.get("in_gagong") or None), (ln.get("cust_code") or None),
                 (ln.get("remarks") or None))
         _reset_cost_engine()   # BOM 구성/소요량 변경 → 원가엔진 캐시 무효화
-        return {"ok": True, "count": len(lines), "bom_id": bom_id}
+        return {"ok": True, "count": seq, "weld": nweld, "bom_id": bom_id}
     finally:
         cn.close()
 
@@ -480,14 +491,26 @@ def bom_copy(payload: dict = Body(...)):
             cur.execute("INSERT INTO nx.bom_header(item_code,version,apply_from,status) VALUES(?,1,'2000-01-01',N'확정')", target)
             cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", target); bom_id = cur.fetchone()[0]
         cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", bom_id)
-        for seq, r in enumerate(rows, 1):
+        seq = 0; nweld = 0
+        for r in rows:
+            ch = str(r[0]).strip()
+            if ch.upper().startswith("RAC"):   # 용접봉 → proc_weld(공정종속)
+                cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
+                    VALUES(?,?,?,?,?,?,?,?,'W','bom_copy')""", target, ch, ch.split('-')[0], float(r[1] or 0), _b(r[3]), _b(r[4]), r[7], r[8])
+                nweld += 1; continue
+            seq += 1
             cur.execute("""INSERT INTO nx.bom_line
                 (bom_id,seq,child_item,qty,node_type,cs_calc_except,lme_except,sagub_default,is_optional,
                  from_ymd,to_ymd,except_flag,set_except,kitting,vir_item,proc_gubun,gagong_proc,s_work,wh_gagong,in_gagong,cust_code,remarks)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                bom_id, seq, r[0], float(r[1] or 0), r[2], _b(r[3]), _b(r[4]), _b(r[5]), _b(r[6]),
+                bom_id, seq, ch, float(r[1] or 0), r[2], _b(r[3]), _b(r[4]), _b(r[5]), _b(r[6]),
                 r[7], r[8], _b(r[9]), _b(r[10]), _b(r[11]), _b(r[12]), r[13], r[14], r[15], r[16], r[17], r[18], r[19])
-        return {"ok": True, "count": len(rows), "source_from": src, "warn": warn}
+        # 원본이 nx이면 source의 proc_weld(용접봉)도 target으로 복사
+        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=? AND src<>'bom_copy'", target)
+        cur.execute("""IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL
+            INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
+            SELECT ?,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,'W','bom_copy' FROM nx.proc_weld WHERE parent_item=?""", target, source)
+        return {"ok": True, "count": seq, "weld": nweld, "source_from": src, "warn": warn}
     finally:
         cn.close()
 

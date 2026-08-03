@@ -3,7 +3,7 @@
    app.py에서 분리. 공유헬퍼는 common.py에서 import."""
 import os
 from fastapi import APIRouter, Query, Body, HTTPException, Response
-from common import (_conn, _num, _run_sp, _shape, _get_cost_engine, _reset_cost_engine,
+from common import (_conn, _nx, _num, _run_sp, _shape, _get_cost_engine, _reset_cost_engine,
                     _COST_LOCK, SP_SIL, SP_NAE, _HERE, NxCostEngine)
 
 router = APIRouter()
