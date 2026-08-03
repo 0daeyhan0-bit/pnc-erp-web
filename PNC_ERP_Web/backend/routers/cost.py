@@ -313,7 +313,11 @@ def cost_regen_status():
 # ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================
 #  ★체결·포장·용접 조립공정 ST는 용접봉(RAC) carrier에 p_item=부모(node)로 저장(레거시 carrier 모델). 여기서 전 공정군 편집.
 #   가공공정 = item_code=node, p_item=''  /  조립공정 = item_code=용접봉, p_item=node. calc_gubun 보존. 단가는 마감때만(제외).
-_ASSY_PROCS = _PROC_WELD | _PROC_FASTEN | {"61", "83"}   # 용접·은납·체결계열·포장(=carrier 조립공정)
+_ASSY_PROCS = _PROC_WELD | _PROC_FASTEN | {"61", "83"}   # 용접·은납·체결계열·포장(대표 조립공정군, 라벨/추가용)
+def _lt90(code):
+    """율(91/92/93/98/99) 제외한 실공정(proc<90)인지 — carrier엔 조립공정 외 가공공정(예:53)도 귀속되므로 전체 보존 대상."""
+    try: return int(str(code).strip()) < 90
+    except Exception: return bool(str(code).strip())   # 비숫자 코드는 실공정으로 간주
 
 @router.get("/api/cost/proc/get")
 def cost_proc_get(node: str = Query(..., description="공정 편집 대상 품목(어셈블리/SUB/부품)")):
@@ -388,7 +392,8 @@ def cost_proc_save(payload: dict = Body(...)):
         for cinfo in carriers:
             wi = str(cinfo.get("weld_item", "")).strip()
             if not wi: continue
-            arows = [k for k in _clean(cinfo.get("procs", [])) if k[0] in _ASSY_PROCS]
+            # ★carrier의 proc<90 전체 보존(용접·은납·체결·포장 + 조립귀속 가공공정 예:53). 율(91+)만 불개입.
+            arows = [k for k in _clean(cinfo.get("procs", [])) if _lt90(k[0])]
             cur.execute("DELETE FROM nx.routing WHERE p_item=? AND item_code=? AND ISNULL(TRY_CONVERT(int,proc_code),99)<90", node, wi)
             s2 = 0
             for pc, wq, uph, cg in arows:

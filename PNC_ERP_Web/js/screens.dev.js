@@ -933,8 +933,11 @@ SCREEN.unifybom=(c,ro)=>{
         work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
       // 용접봉 carrier별 = 조립 카탈로그 전체(해당 carrier 기존값 병합)
       const carriers=(j.carriers||[]).map(cr=>{const cur={};(cr.procs||[]).forEach(p=>cur[p.proc_code]=p);
+        // 조립공정군(추가용) + ★carrier에 실재하는 비-assy 공정(예:53 가공)도 포함해 표시·보존(유실 방지)
+        const assy=cat.filter(p=>p.is_assy); const ac=new Set(assy.map(p=>p.proc_code));
+        const extra=(cr.procs||[]).filter(p=>!ac.has(p.proc_code));
         return {weld_item:cr.weld_item,use_qty:cr.use_qty,pipe_diam:cr.pipe_diam,unit_qty:cr.unit_qty,loss_factor:(cr.loss_factor==null?1.5:cr.loss_factor),meta_ok:cr.meta_ok,
-          rows:cat.filter(p=>p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
+          rows:assy.concat(extra).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
           work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
       naeProcD={node,pipe_diam:j.pipe_diam,own,carriers};
     }catch(e){naeProcD={node,own:[],carriers:[],error:e.message};}draw();};
