@@ -864,8 +864,10 @@ SCREEN.unifybom=(c,ro)=>{
   let newReg=null;              // {method} 모달 표시
   let isNew=false;             // 신규등록 편집 세션(저장시 마스터 생성)
   let weldRows=[];             // [{weld_item,pipe_diam,weld_qty}] 관경별 용접점
-  let weldDiams=[];            // weld_diam 마스터(관경·std_use·std_st)
-  const loadWeldDiams=async()=>{if(weldDiams.length)return;try{const r=await fetch(`${API}/api/weld/diam`);weldDiams=(await r.json()).rows||[];}catch(e){weldDiams=[];}};
+  // ★관경 마스터 상수 fallback(weld_diam 정본 14관경) — API 미로드/지연에도 매트릭스 항상 채워지게(빈칸 방지)
+  const WELD_DIAMS_DEFAULT=[{pipe_diam:4.76,std_use_qty:0.0007,std_st:10},{pipe_diam:5.00,std_use_qty:0.0007,std_st:10},{pipe_diam:6.35,std_use_qty:0.0008,std_st:10},{pipe_diam:7.94,std_use_qty:0.0008,std_st:10},{pipe_diam:9.52,std_use_qty:0.0008,std_st:10},{pipe_diam:12.70,std_use_qty:0.0010,std_st:15},{pipe_diam:15.88,std_use_qty:0.0012,std_st:15},{pipe_diam:19.05,std_use_qty:0.0022,std_st:23},{pipe_diam:22.00,std_use_qty:0.0028,std_st:23},{pipe_diam:25.40,std_use_qty:0.0038,std_st:29},{pipe_diam:28.00,std_use_qty:0.0047,std_st:29},{pipe_diam:31.75,std_use_qty:0.0057,std_st:29},{pipe_diam:34.90,std_use_qty:0.0066,std_st:29},{pipe_diam:38.10,std_use_qty:0.0076,std_st:29}];
+  let weldDiams=WELD_DIAMS_DEFAULT.slice();   // 기본값으로 시작(빈배열 방지)
+  const loadWeldDiams=async()=>{try{const r=await fetch(`${API}/api/weld/diam`);const rows=(await r.json()).rows||[];if(rows.length)weldDiams=rows;}catch(e){/* 실패시 기본값 유지 */}};
   const loadCodes=async()=>{try{const r=await fetch(`${API}/api/codes`);codes=await r.json();}catch(e){codes={};}};
   const COLS=[['child_item','품번','item'],['item_name','품명','text'],
     ['diam','외경','num'],['thick','두께','num'],['length','길이','num'],['metal_gubun','재질','sel:metal'],['net_weight','중량','num'],
@@ -1403,7 +1405,7 @@ SCREEN.unifybom=(c,ro)=>{
      .wm{border-collapse:collapse;table-layout:auto}
      .wm th,.wm td{border:1px solid #dde6f0;padding:1px 2px}
      .wm th.wm-vh{height:66px;width:26px;min-width:26px;max-width:26px;vertical-align:bottom;background:#eef3fb;padding:2px 0}
-     .wm th.wm-vh span{writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);white-space:nowrap;font-size:10px;font-weight:600;color:#40567a;display:inline-block;max-height:60px;overflow:hidden}
+     .wm th.wm-vh span{writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;font-size:10px;font-weight:600;color:#40567a;display:inline-block;max-height:62px;overflow:hidden;letter-spacing:-1px}
      .wm td input{border:1px solid #cfd9e6;border-radius:3px;padding:1px}
      .wm tbody td:first-child,.wm thead th:first-child{position:sticky;left:0;background:#f4f7fc;z-index:2}
      /* 레벨트리 컴팩트: 행높이 축소로 화면당 품번 최대 */
