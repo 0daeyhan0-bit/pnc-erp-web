@@ -1642,13 +1642,15 @@ SCREEN.coopquote=(host)=>{
              <label style="color:#33507d;font-weight:600" title="관경별 사급가 미입력 행에 적용되는 기본값(일괄)">기본사급가</label><input class="inp" id="be-sagub" type="number" step="any" value="${esc(be.sagub)}" style="width:84px;text-align:right">
              <label style="color:#33507d;font-weight:600">가공비(공정계산)</label><input class="inp" id="be-proc" type="number" step="any" value="${esc(be.proc)}" style="width:84px;min-width:0;text-align:right" title="공정×표준ST×임율 자동계산값 (수정가능)">
              <span style="color:#8aa0bd;font-size:11px">임율 ${nf(d.labor_rate)}</span>
+             <label style="color:#33507d;font-weight:600" title="사급가(판매단가) 기준월 — 이 월 이하 최신 판매단가로 재료비 계산">적용월</label><input class="inp" id="be-ym" type="month" value="${esc(be.ym||'')}" style="width:118px">
+             <span style="color:#c0392b;font-weight:700" title="현재 재료비 합계(적용월 기준)">재료비(현재) ${nf(d.total_mat||0)}</span>
              ${d.need_input?`<span style="color:#c0392b;font-weight:600">⚠ 스펙 입력필요 ${d.need_input}건</span>`:'<span style="color:#1c7c3a">스펙 완비</span>'}
            </div>
            <div style="overflow-x:auto">
            <table class="tbl fit" style="font-size:13px"><thead><tr>
              <th>품번</th><th>품명</th><th>역할</th><th class="num">소요량</th><th class="num" style="color:#8aa0bd">BOM규격</th>
              <th class="num" style="color:#1c7c3a">Φ</th><th class="num" style="color:#1c7c3a">T</th><th class="num" style="color:#1c7c3a">L</th>
-             <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num">매입가</th><th class="num" style="color:#b8791f" title="관경별 사급가(원/kg) — 직원 직접입력">사급가</th>
+             <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num">매입가</th><th class="num" style="color:#b8791f" title="관경별 사급가(원/kg) — 직원 직접입력">사급가</th><th class="num" style="color:#c0392b" title="사급부품=판매단가(사급가)·제작동관=소요중량×사급가·용접봉=소요×단가 (적용월 기준)">재료비<br><span style="font-weight:400;font-size:9px">(현재)</span></th>
              ${(d.proc_ops||[]).map(op=>`<th style="font-size:12px;color:#6a3fb0;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom" title="${esc(op)} 공정 횟수">${esc(op==='교/체'?'교체':op)}</th>`).join('')}
              <th style="color:#1c7c3a;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">가공비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">관리비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">운반비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">이윤</th><th class="num" style="color:#c0392b">합계</th></tr></thead>
            <tbody><tr style="background:#eaf1fc;font-weight:700">
@@ -1656,7 +1658,7 @@ SCREEN.coopquote=(host)=>{
                <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.name)}">${esc(d.name)}</td>
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#1c47a0;color:#fff">완제품</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
-               <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td><td class="num">-</td><td class="num" style="color:#c0392b;font-weight:700" id="be-tmat-root">${nf(d.total_mat||0)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
              ${d.rows.map(r=>{const isTube=r.role==='제작동관';const e=be.edits[r.code]||{};
              const dd=(e.diam!=null&&e.diam!=='')?e.diam:(r.coop_diam||'');const tt=(e.thick!=null&&e.thick!=='')?e.thick:(r.coop_thick||'');const ll=(e.length!=null&&e.length!=='')?e.length:(r.coop_length||'');
@@ -1674,6 +1676,7 @@ SCREEN.coopquote=(host)=>{
                <td class="num be-sw" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*r.cum_qty):'-'}</td>
                <td class="num">${r.pur_price!=null?nf(r.pur_price):'-'}</td>
                <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" placeholder="${esc(be.sagub||'')}" style="width:58px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="관경별 사급가(원/kg). 비우면 기본사급가 적용">`:'<span style="color:#c9d1dc">-</span>'}</td>
+               <td class="num" style="color:#c0392b;font-weight:700" title="현재 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${r.mat_now!=null?nf(r.mat_now):'-'}</td>
                ${(d.proc_ops||[]).map(op=>`<td class="num">${isTube?`<input class="be-pc" data-code="${esc(r.code)}" data-op="${esc(op)}" value="${(be.procEdits[r.code]&&be.procEdits[r.code][op]!=null&&be.procEdits[r.code][op]!=='')?be.procEdits[r.code][op]:(pr[op]||'')}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#6a3fb0;border:1px solid #e2e8f2;border-radius:3px">`:''}</td>`).join('')}
                <td class="num" style="color:#1c7c3a">${isTube?`<span class="be-rg" data-code="${esc(r.code)}">${nf(beRowGagong(r))}</span>`:'-'}</td>
                <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td>
@@ -1685,7 +1688,7 @@ SCREEN.coopquote=(host)=>{
                <td class="cap" style="color:#8a6d3b" title="견적서엔 칸이 없어 용접봉 줄에 넣었던 실제 조립작업 공정">서브ASSY 조립공정</td>
                <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:#fff3e0;color:#b8791f">조립공정</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
-               <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
                ${(d.proc_ops||[]).map(op=>`<td class="num"><input class="be-asmpc" data-op="${esc(op)}" value="${A.procs&&A.procs[op]?A.procs[op]:''}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#b8791f;border:1px solid #f0e0c0;border-radius:3px"></td>`).join('')}
                <td class="num"><input class="be-asm" data-f="gagong" value="${esc(A.gagong)}" style="width:50px;min-width:0;text-align:right;padding:1px 2px;font-size:12px;color:#1c7c3a;font-weight:700"></td>
                <td class="num"><input class="be-asm" data-f="mgmt" value="${esc(A.mgmt)}" style="width:50px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
@@ -1693,7 +1696,7 @@ SCREEN.coopquote=(host)=>{
                <td class="num"><input class="be-asm" data-f="profit" value="${esc(A.profit)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
                <td class="num" style="color:#c0392b;font-weight:700" id="be-asmtot">${nf(atot)}</td></tr>`;})():''}
              ${(d.sale_stored>0||d.part_sum>0)?`<tr style="background:#dbe9ff;font-weight:800;font-size:13px">
-               <td colspan="${13+(d.proc_ops||[]).length}" style="text-align:left;padding-left:10px;color:#1c47a0">견적가 합계 (하위부품 + 서브조립공정) = <span id="be-grandtot-l">${nf(grand)}</span>${d.sale_stored&&grand!==d.sale_stored?` <span style="color:#8aa0bd;font-weight:400">(원견적 ${nf(d.sale_stored)})</span>`:''}</td>
+               <td colspan="${14+(d.proc_ops||[]).length}" style="text-align:left;padding-left:10px;color:#1c47a0">견적가 합계 (하위부품 + 서브조립공정) = <span id="be-grandtot-l">${nf(grand)}</span>${d.sale_stored&&grand!==d.sale_stored?` <span style="color:#8aa0bd;font-weight:400">(원견적 ${nf(d.sale_stored)})</span>`:''}</td>
                <td class="num" style="color:#c0392b" id="be-grandtot">${nf(grand)}</td></tr>`:''}</tbody></table></div>
            <div style="margin-top:8px;background:#eef4ff;border:1px solid #cdddf5;border-radius:8px;padding:9px 14px;font-size:12px;display:flex;gap:12px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
              <span>소요중량 <b id="be-tsoyo" style="color:#1c6ec2">${nf4(soyo)}</b>kg</span>

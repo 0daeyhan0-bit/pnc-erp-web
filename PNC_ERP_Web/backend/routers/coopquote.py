@@ -534,6 +534,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     return {"item": item, "name": root.get("nm", ""), "already_quoted": quoted, "labor_rate": labor,
             "rows": rows, "count": len(rows), "need_input": need, "proc_ops": proc_ops, "rate": rate,
             "total_soyo_weight": total_soyo, "total_weld_cost": total_weld, "total_proc_cost": total_proc,
+            "total_mat": total_mat, "ym": ym4, "asof": asof, "vendor_code": vcode,
             "part_sum": round(part_sum), "assembly_proc": assembly_proc, "sale_stored": round(sale_stored),
             "assembly": assembly}
 

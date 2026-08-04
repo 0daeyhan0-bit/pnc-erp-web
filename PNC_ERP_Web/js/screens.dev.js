@@ -1719,8 +1719,8 @@ SCREEN.subvariant=(c)=>{
         <div style="padding:16px 18px;font-size:12.5px">
           <label style="font-weight:700;color:#33507d">대상 품번</label>
           <div style="margin:3px 0 10px"><b style="font-size:14px;color:#1c47a0">${esc(f.target)}</b> <span style="color:#5a6b82">${esc(nameOf(f.target)||st.routeTargetNm)}</span> <span style="color:#8aa0bd;font-size:11px">(현재 조달대상)</span></div>
-          <label style="font-weight:700;color:#33507d">후보명${REQ}</label>
-          <input class="inp nf" data-k="name" value="${esc(f.name||'')}" placeholder="예: 미래정밀 외주(유상사급)안" style="width:100%;box-sizing:border-box;margin:3px 0 12px">
+          <label style="font-weight:700;color:#33507d">후보명 <span style="color:#8aa0bd;font-weight:400">(자동 생성)</span></label>
+          <div style="margin:3px 0 12px;padding:8px 10px;border:1px solid #cfe0d0;border-radius:8px;background:#f3faf5;font-size:14px">생성될 후보: <b style="color:#1c7c3a">${esc(f.autoLabel||'')}</b> <span style="color:#8aa0bd;font-size:11px">현행 R01 다음으로 자동 채번 · base 품번은 불변(라벨만)</span></div>
           <label style="font-weight:700;color:#33507d">시작 방법</label>
           <div style="display:flex;flex-direction:column;gap:6px;margin:4px 0 6px">
             ${M('cur','현행 복사','실사용 BOM(현행)을 복제해 대안 시작')}
@@ -2029,12 +2029,14 @@ SCREEN.subvariant=(c)=>{
     c.querySelectorAll('.sv-mrow.sel').forEach(x=>x.classList.remove('sel'));if(el)el.classList.add('sel');
     st.rload=true;paintRoutes();await loadRoutes();st.rload=false;paintTree();paintRoutes();};
   // ---------- 신규 등록 ----------
+  const nextRouteNo=()=>{const stored=st.routes.filter(r=>+r.route_id>0);return (stored.length?Math.max(...stored.map(r=>+r.route_no||0)):1)+1;};  // 백엔드 ISNULL(MAX(route_no),1)+1 미러(현행=R01 다음)
   const openNew=(preMethod)=>{const baseline=st.routes.find(r=>r.baseline);
-    st.newForm={target:st.routeTarget,name:'',method:preMethod||'cur',source_route_id:(altRoutes()[0]||{}).route_id||0,
+    const nn=nextRouteNo(),autoLabel=`${st.routeTarget}_R${String(nn).padStart(2,'0')}`;
+    st.newForm={target:st.routeTarget,name:autoLabel,autoLabel,nextNo:nn,method:preMethod||'cur',source_route_id:(altRoutes()[0]||{}).route_id||0,
       copy_children:false,suffix:'',gubun:'',vendor_code:'',apply_from:'',current_flag:false,
       lgAvail:!!(baseline&&(baseline.lines||[]).length===0)};draw();};
   const doNewCreate=async()=>{const f=st.newForm;
-    if(!String(f.name||'').trim()){alert('후보명은 필수입니다');return;}
+    if(!f.name)f.name=f.autoLabel||`${st.routeTarget}_R${String(nextRouteNo()).padStart(2,'0')}`;  // 후보명 자동(수동입력 제거)
     try{
       if(f.method==='cur'||f.method==='copy'||f.method==='base'){
         const body={item_code:st.routeTarget,user:'웹사용자'};
