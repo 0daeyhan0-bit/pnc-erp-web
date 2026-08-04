@@ -111,6 +111,20 @@ def price_item(item: str = Query("")):
             d["apply_ymd"] = str(d.pop("COST_APPLY_YMD") or "")
             d["tag"] = str(d.pop("COST_TAG")).strip()
             rows.append(d)
+        # ★업로드된 사급가(nx.price_item vendor='LG', COSP)도 함께 표시 — 크로스DB
+        try:
+            cur.execute("""SELECT apply_ymd, price, ISNULL(currency,'KRW') FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE item_code=? AND price_type='매입' AND vendor_code='LG' ORDER BY apply_ymd DESC""", item)
+            for u in cur.fetchall():
+                cc = str(u[2] or "KRW").strip()
+                rows.append({"tag": "매입", "tag_nm": "사급가(업로드)", "cust": "LG", "cust_nm": "LG(COSP 업로드)",
+                             "apply_ymd": str(u[0] or ""), "curr": cc, "curr_nm": _CURR_NM.get(cc, cc),
+                             "main_flag": "", "main": 0, "mkt": "",
+                             "item_cost": float(u[1]) if u[1] is not None else 0.0, "mat_cost": 0.0,
+                             "proc_cost": 0.0, "other_cost": 0.0, "remarks": "COSP 업로드"})
+        except Exception:
+            pass
+        rows.sort(key=lambda d: (d.get("apply_ymd") or ""), reverse=True)   # 최신일자 우선(업로드분 병합)
         return {"item": item, "nm": nm, "spec": spec, "rows": rows, "cnt": len(rows)}
     finally:
         cn.close()
