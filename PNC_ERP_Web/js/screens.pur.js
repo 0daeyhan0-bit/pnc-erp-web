@@ -1696,7 +1696,7 @@ SCREEN.coopquote=(host)=>{
                <td class="num"><input class="be-asm" data-f="profit" value="${esc(A.profit)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
                <td class="num" style="color:#c0392b;font-weight:700" id="be-asmtot">${nf(atot)}</td></tr>`;})():''}
              ${(d.sale_stored>0||d.part_sum>0)?`<tr style="background:#dbe9ff;font-weight:800;font-size:13px">
-               <td colspan="${14+(d.proc_ops||[]).length}" style="text-align:left;padding-left:10px;color:#1c47a0">견적가 합계 (하위부품 + 서브조립공정) = <span id="be-grandtot-l">${nf(grand)}</span>${d.sale_stored&&grand!==d.sale_stored?` <span style="color:#8aa0bd;font-weight:400">(원견적 ${nf(d.sale_stored)})</span>`:''}</td>
+               <td colspan="${17+(d.proc_ops||[]).length}" style="text-align:left;padding-left:10px;color:#1c47a0">견적가 합계 (하위부품 + 서브조립공정) = <span id="be-grandtot-l">${nf(grand)}</span>${d.sale_stored&&grand!==d.sale_stored?` <span style="color:#8aa0bd;font-weight:400">(원견적 ${nf(d.sale_stored)})</span>`:''}</td>
                <td class="num" style="color:#c0392b" id="be-grandtot">${nf(grand)}</td></tr>`:''}</tbody></table></div>
            <div style="margin-top:8px;background:#eef4ff;border:1px solid #cdddf5;border-radius:8px;padding:9px 14px;font-size:12px;display:flex;gap:12px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
              <span>소요중량 <b id="be-tsoyo" style="color:#1c6ec2">${nf4(soyo)}</b>kg</span>

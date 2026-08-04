@@ -505,14 +505,20 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
     """품목의 조달경로 후보 목록. 경로1=현행(baseline, 실사용BOM 파생·읽기전용) 항상 포함. 경로2..=저장된 대안(nx.sourcing_route).
     for_profile=1: approve_flag=1(승인)만 편성가능; show_unapproved=0 이면 미승인 완전제외, =1 이면 미승인도 회색/읽기전용 포함."""
     item = item.strip()
+    import time as _t; _TM = {}; _t0 = _t.perf_counter()
+    def _mk(k):
+        nonlocal _t0; _TM[k] = round((_t.perf_counter()-_t0)*1000,1); _t0 = _t.perf_counter()
     nx = _nx(); cur = nx.cursor()
+    _mk("conn")
     try:
         _ensure_route_tbl(cur)
+        _mk("ensure_tbl")
         cur.execute("""SELECT r.route_id, r.route_no, ISNULL(r.route_name,''), ISNULL(r.vendor_code,''), ISNULL(r.gubun,''),
               r.current_flag, r.approve_flag, CONVERT(varchar(10),r.apply_from,23), ISNULL(r.note,''),
               ISNULL(r.reject_flag,0), ISNULL(r.reject_reason,'')
             FROM nx.sourcing_route r WHERE r.item_code=? ORDER BY r.route_no""", item)
         hdrs = cur.fetchall()
+        _mk("hdr_select")
         routes = []
         vcodes = set()
         for h in hdrs:
@@ -532,6 +538,7 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                            "gubun": h[4], "current_flag": bool(h[5]), "approve_flag": bool(h[6]), "apply_from": h[7],
                            "note": h[8], "reject_flag": bool(h[9]), "reject_reason": h[10], "baseline": False, "lines": lines})
         # 현행 baseline 합성(저장된 route_no=1 이 없을 때만) — 읽기전용·자동승인 기준선
+        _mk("route_lines")
         has_saved_current = any(r["current_flag"] or r["route_no"] == 1 for r in routes)
         if not has_saved_current:
             blines = _route_baseline_lines(item)
@@ -540,8 +547,10 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                               "gubun": "자체", "current_flag": True, "approve_flag": True, "apply_from": None,
                               "note": "레거시 실사용 BOM 파생(기준선·읽기전용). 대안은 [복사]로 생성.",
                               "reject_flag": False, "reject_reason": "", "baseline": True, "lines": blines})
+        _mk("baseline_synth")
         # 벤더 코드→이름
         vmap = _custnm_map(cur, vcodes)
+        _mk("custnm_map")
         for r in routes:
             r["vendor_name"] = vmap.get(r["vendor_code"], r["vendor_code"])
             for l in r["lines"]: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
@@ -554,8 +563,9 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                 return bool(show_unapproved)
             fr = [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
             routes = fr
+        _mk("tail")
         return {"item": item, "item_name": nm, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
-                "routes": routes}
+                "routes": routes, "_timing": _TM}
     finally:
         nx.close()
 
