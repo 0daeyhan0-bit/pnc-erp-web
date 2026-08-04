@@ -1061,7 +1061,7 @@ SCREEN.unifybom=(c,ro)=>{
        <tbody>${fm.normal.map(r=>row(r)).join('')}${fm.weldArr.map(r=>row(r,r.code)).join('')}</tbody>
        <tfoot><tr class="nae-foot"><td colspan="6" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td></tr></tfoot></table></div>`;};
   const procTable=(procList)=>{const sub=procList.reduce((s,p)=>s+(+p.amt||0),0);
-    return `<div class="grid-wrap" style="max-height:${naeSel?'26vh':'34vh'};overflow:auto"><table class="tbl bm-tbl">
+    return `<div class="grid-wrap" style="max-height:${naeSel?'16vh':'34vh'};overflow:auto"><table class="tbl bm-tbl">
        <thead><tr><th style="text-align:left">공정</th><th class="num">작업량</th><th class="num">내부UPH</th><th class="num">임율</th><th>계산구분</th><th class="num">가공비</th></tr></thead>
        <tbody>${procList.map(p=>`<tr><td style="text-align:left;white-space:nowrap"><b>${esc(p.name)}</b> <span style="color:#aab;font-size:10px">${esc(p.code)}</span>${p.group&&p.group!=='가공'?` <span class="nae-tg" style="color:#a8442a;border-color:#e6c0b3">${esc(p.group)}</span>`:''}</td>
          <td class="num">${M2(p.wq)}</td><td class="num">${M2(p.uph)}</td><td class="num">${p.cg==='3'?M(p.labor):'<span style=color:#c8d0dc>-</span>'}</td>
@@ -1196,7 +1196,7 @@ SCREEN.unifybom=(c,ro)=>{
         return `<div style="border-top:1px dashed #cfe0ff;margin-top:4px">`+
         procSecTable(cr.rows,'c'+k,`🔗 용접봉 ${esc(cr.weld_item)} <span style="color:#8a94a6;font-weight:400">(조립: 용접·은납·체결·포장 · 소요량 ${(+cr.use_qty||0).toFixed(4)} · 원단위 ${(+cr.unit_qty||0).toFixed(6)})</span> ${badge} ${lfBox}`,'#8e44ad')+`</div>`;}).join('');
      const assy=naeProcD.isAssy;
-     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff;display:flex;flex-direction:column;max-height:calc(100vh - 300px)">
+     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff;display:flex;flex-direction:column;max-height:calc(100vh - 430px);min-height:150px">
      <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:0 0 auto;position:sticky;top:0;background:#eef4ff;border-radius:8px 8px 0 0"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
        <span style="color:#8a94a6;font-size:10px">${assy?'제품/조립 레벨 — 가공+조립(용접·체결·포장) 입력':'부품 레벨 — 가공공정만'}</span>
        <div style="flex:1"></div><button class="btn" id="pm-save" style="background:#1c7c3a;color:#fff;padding:1px 8px">💾 등록</button><button class="btn ghost" id="pm-close" style="padding:1px 8px">✖</button></div>
