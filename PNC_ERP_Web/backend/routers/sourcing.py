@@ -569,8 +569,17 @@ def sourcing_route_copy(payload: dict = Body(...)):
     nx = _nx_tx(); cur = nx.cursor()   # 헤더+라인 원자적
     try:
         _ensure_route_tbl(cur)
+        src_kind = str(p.get("source", "")).strip()   # 'blank'=빈 후보 · 'base'=BASE BOM 평면 seed · (그외=기존 규칙)
         # 원본 라인 확보
-        if src_item:   # ★특정 품번의 현행 BOM을 seed로
+        if src_kind == 'blank':   # ★빈 상태(수동 구성 시작)
+            src_hdr = {"route_name": "빈 후보", "vendor_code": "", "gubun": "자체", "apply_from": None, "note": "빈 상태(수동 구성)"}
+            src_lines = []
+        elif src_kind == 'base' or (src_rid == 0 and not src_item):   # ★BASE BOM(현행 실사용 평면) seed → SUB 재구성 시작
+            src_hdr = {"route_name": "BASE BOM", "vendor_code": "", "gubun": "자체", "apply_from": None, "note": "BASE BOM(실사용 평면) 가져오기"}
+            bl = _route_baseline_lines(item)
+            src_lines = [[l["sort_seq"], l["child_item"], l["child_name"], l["qty"], l["gubun"], l["vendor_code"],
+                         l["is_rawmat"], l["diam"], l["thick"], l["len_val"], l["material"], l["spec"], l["note"]] for l in bl]
+        elif src_item:   # ★특정 품번의 현행 BOM을 seed로
             bl = _route_baseline_lines(src_item)
             if not bl: raise HTTPException(404, f"「{src_item}」의 현행 BOM 구성이 없습니다(품번 확인)")
             src_hdr = {"route_name": f"{src_item} 참조복사", "vendor_code": "", "gubun": "자체",
@@ -874,14 +883,28 @@ def sourcing_sub_create(payload: dict = Body(...)):
     rid = int(payload.get("route_id") or 0)
     line_ids = [int(x) for x in (payload.get("line_ids", []) or []) if str(x).strip().isdigit()]
     base_child = str(payload.get("base_child", "")).strip()
-    suffix = (str(payload.get("suffix", "") or "-SUB").strip())[:12]
+    suffix = (str(payload.get("suffix", "") or "").strip())[:12]   # 빈=자동 _S{nn}, 명시(-은납 등)=공정약칭 계승
     subname = str(payload.get("name", "")).strip()[:120]
     gubun = str(payload.get("gubun", "자체")).strip()[:20]
     if rid <= 0 or not line_ids: raise HTTPException(400, "route_id·line_ids 필요")
-    subcode = ((base_child + suffix)[:60]) if base_child else None
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
+        # ★SUB 채번: 명시 suffix 없으면 자동 _S{nn}(언더스코어·제로패딩2) — nx.item+라이브 _S\d 충돌검사→다음번호
+        if not suffix or suffix.upper() in ('_S', 'S', 'AUTO'):
+            mx = 0; import re as _re3
+            cur.execute("SELECT item_code FROM nx.item WHERE item_code LIKE ? ESCAPE '!'", base_child + '!_S%')
+            rowsn = [str(r[0]).strip() for r in cur.fetchall()]
+            try:
+                lc = _conn(); lcur = lc.cursor()
+                lcur.execute("SELECT ITEM_CODE FROM PR_M_ITEM WHERE ITEM_CODE LIKE ? ESCAPE '!'", base_child + '!_S%')
+                rowsn += [str(r[0]).strip() for r in lcur.fetchall()]; lc.close()
+            except Exception: pass
+            for cd in rowsn:
+                m = _re3.search(r'_S0*(\d+)$', cd)
+                if m: mx = max(mx, int(m.group(1)))
+            suffix = f"_S{mx+1:02d}"
+        subcode = ((base_child + suffix)[:60]) if base_child else None
         if subcode:
             cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", subcode)
             if not cur.fetchone():
