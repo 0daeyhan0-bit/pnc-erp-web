@@ -621,15 +621,33 @@ function priceHistView(host){
   };
   load();
 }
+/* 단가이력 매입/판매 분리 섹션(각 적용월 내림차순) — tag 1/매입=매입, E/S=판매 */
+function priceHistSections(rows){
+  const dcol=s=>{s=''+(s||'');return s.length===6?`${s.slice(0,2)}/${s.slice(2,4)}`:s;};
+  const tagColor=t=>t==='1'?'#1c47a0':(t==='E'?'#b12a2a':'#7a5c1c');
+  const isBuy=t=>{t=(''+(t||'')).trim();return t==='1'||t==='매입';};
+  const buy=rows.filter(r=>isBuy(r.tag)).slice().sort((a,b)=>(''+(b.apply_ymd||'')).localeCompare(''+(a.apply_ymd||'')));
+  const sale=rows.filter(r=>!isBuy(r.tag)).slice().sort((a,b)=>(''+(b.apply_ymd||'')).localeCompare(''+(a.apply_ymd||'')));
+  const tbl=(list)=>`<table class="tbl fit" style="font-size:11px"><thead><tr><th>단가구분</th><th>거래처</th><th class="center">적용월</th><th class="center">대표</th><th class="center">통화</th><th class="num">단가</th><th class="num">재료비</th><th class="num">가공비</th><th class="num">기타</th><th>비고</th></tr></thead>
+     <tbody>${list.map(r=>`<tr>
+       <td class="center"><span style="color:#fff;background:${tagColor((''+(r.tag||'')).trim())};padding:1px 6px;border-radius:8px;font-size:10px">${esc(r.tag_nm)}</span></td>
+       <td class="cap" title="${esc(r.cust_nm||r.cust)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.cust_nm||r.cust)||'-'}</td>
+       <td class="center">${dcol(r.apply_ymd)}</td><td class="center">${r.main?'<b style="color:#e0a020">★</b>':''}</td><td class="center">${esc(r.curr_nm)}</td>
+       <td class="num"><b>${won(r.item_cost)}</b></td><td class="num">${won(r.mat_cost)}</td><td class="num">${won(r.proc_cost)}</td><td class="num">${won(r.other_cost)}</td>
+       <td class="cap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td></tr>`).join('')}</tbody></table>`;
+  const sec=(title,color,list)=>`<div class="section-t" style="margin:6px 0 3px;font-weight:700;color:${color}">${title} <span class="muted" style="font-weight:400">(${list.length}건)</span></div>${list.length?tbl(list):'<div class="empty" style="padding:6px">없음</div>'}`;
+  return sec('🛒 매입단가','#1c47a0',buy)+sec('💹 판매단가 (수출/내수)','#b12a2a',sale);
+}
 /* 품목별 단가조회(기존) */
 /* 품목별 단가조회 — 라이브 PR_M_ITEM_COST (거래처별·적용월 시계열, 레거시 w_pr_master_150) */
 function priceItemView(c){
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',lg:'',sg:'',lgroups:[],sgroups:[],sel:'',det:null,loading:false};
+  const st={rows:[],cnt:0,q:'',lg:'',sg:'',cust:'',lgroups:[],sgroups:[],sel:'',det:null,loading:false};
+  let custT=null;
   const dcol=s=>{s=''+(s||'');return s.length===6?`${s.slice(0,2)}/${s.slice(2,4)}`:s;};
   const tagColor=t=>t==='1'?'#1c47a0':(t==='E'?'#b12a2a':'#7a5c1c');
   const load=async()=>{st.loading=true;draw();
-    try{const r=await fetch(`${API}/api/price/search?q=${encodeURIComponent(st.q)}&lgroup=${encodeURIComponent(st.lg)}&sgroup=${encodeURIComponent(st.sg)}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;if(j.lgroups)st.lgroups=j.lgroups;if(j.sgroups)st.sgroups=j.sgroups;}
+    try{const r=await fetch(`${API}/api/price/search?q=${encodeURIComponent(st.q)}&lgroup=${encodeURIComponent(st.lg)}&sgroup=${encodeURIComponent(st.sg)}&cust=${encodeURIComponent(st.cust)}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;if(j.lgroups)st.lgroups=j.lgroups;if(j.sgroups)st.sgroups=j.sgroups;}
     catch(e){st.rows=[];}
     st.loading=false;draw();};
   const loadDet=async(item)=>{st.sel=item;st.det=null;draw();
@@ -645,25 +663,26 @@ function priceItemView(c){
          <div class="toolbar" style="flex-wrap:wrap;gap:4px"><input class="inp" id="pi-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:130px">
            <select class="inp" id="pi-lg" style="width:auto"><option value="">대분류</option>${st.lgroups.map(o=>`<option value="${esc(o.code)}" ${st.lg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
            <select class="inp" id="pi-sg" style="width:auto"><option value="">소분류</option>${st.sgroups.map(o=>`<option value="${esc(o.code)}" ${st.sg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
+           <input class="inp" id="pi-cust" list="pi-custdl" autocomplete="off" value="${esc(st.cust)}" placeholder="거래처명/코드" style="width:120px"><datalist id="pi-custdl"></datalist>
+           ${st.cust?`<button class="btn ghost" id="pi-custx" title="거래처 필터 해제" style="padding:2px 6px">✖거래처</button>`:''}
            <button class="btn" id="pi-go">🔍</button><span class="rowcount">${won(st.cnt)}건${st.cnt>=1000?' (상한·검색/분류로 좁히세요)':''}</span></div>
          <div class="grid-wrap" id="pi-list" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit"><thead><tr><th>품번</th><th>품명</th><th>소분류</th><th class="num">단가건</th></tr></thead>
           <tbody>${st.loading?spinRow(4):(st.rows.length?st.rows.map(r=>`<tr class="pi-row ${st.sel===r.ITEM_CODE?'sel':''}" data-cd="${esc(r.ITEM_CODE)}" style="cursor:pointer"><td><b>${esc(r.ITEM_CODE)}</b></td><td class="cap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)}" style="max-width:100px;overflow:hidden;text-overflow:ellipsis">${esc(r.sg_nm||'')}</td><td class="num">${won(r.cnt)}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">품번/품명으로 검색</td></tr>`)}</tbody></table></div>
        </div>
        <div class="panel"><div class="panel-h">단가 이력 ${d?`— ${esc(d.item)} ${esc(d.nm)}`:''}</div>
-        <div class="panel-b" style="max-height:calc(100vh - 260px);overflow:auto">${!d?'<div class="empty">좌측에서 품번을 선택하세요.</div>':(d.rows&&d.rows.length?`
-         <table class="tbl fit" style="font-size:11px"><thead><tr><th>단가구분</th><th>거래처</th><th class="center">적용월</th><th class="center">대표</th><th class="center">통화</th><th class="num">단가</th><th class="num">재료비</th><th class="num">가공비</th><th class="num">기타</th><th>비고</th></tr></thead>
-          <tbody>${d.rows.map(r=>`<tr>
-            <td class="center"><span style="color:#fff;background:${tagColor(r.tag)};padding:1px 6px;border-radius:8px;font-size:10px">${esc(r.tag_nm)}</span></td>
-            <td class="cap" title="${esc(r.cust_nm||r.cust)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.cust_nm||r.cust)||'-'}</td>
-            <td class="center">${dcol(r.apply_ymd)}</td><td class="center">${r.main?'<b style="color:#e0a020">★</b>':''}</td><td class="center">${esc(r.curr_nm)}</td>
-            <td class="num"><b>${won(r.item_cost)}</b></td><td class="num">${won(r.mat_cost)}</td><td class="num">${won(r.proc_cost)}</td><td class="num">${won(r.other_cost)}</td>
-            <td class="cap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">단가 이력 없음</div>')}</div></div>
+        <div class="panel-b" style="max-height:calc(100vh - 260px);overflow:auto">${!d?'<div class="empty">좌측에서 품번을 선택하세요.</div>':(d.rows&&d.rows.length?priceHistSections(d.rows):'<div class="empty">단가 이력 없음</div>')}</div></div>
      </div>`;
     const g=id=>c.querySelector(id);
-    g('#pi-go').onclick=()=>{st.q=g('#pi-q').value;st.lg=g('#pi-lg').value;st.sg=g('#pi-sg').value;load();};
+    g('#pi-go').onclick=()=>{st.q=g('#pi-q').value;st.lg=g('#pi-lg').value;st.sg=g('#pi-sg').value;st.cust=g('#pi-cust').value.trim();load();};
     g('#pi-q').onkeyup=e=>{if(e.key==='Enter')g('#pi-go').click();};
+    g('#pi-cust').onkeyup=e=>{if(e.key==='Enter'){st.cust=g('#pi-cust').value.trim();g('#pi-go').click();}};
     g('#pi-lg').onchange=()=>{st.lg=g('#pi-lg').value;load();};
     g('#pi-sg').onchange=()=>{st.sg=g('#pi-sg').value;load();};
+    // 거래처 오토컴플리트(디바운스 서버검색 → datalist) + 필터해제
+    g('#pi-cust').oninput=e=>{const q=e.target.value.trim();clearTimeout(custT);if(q.length<1)return;
+      custT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);const vs=(await r.json()).rows||[];
+        const dl=g('#pi-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.code)}">${esc(x.name)}</option>`).join('');}catch(err){}},250);};
+    {const cx=g('#pi-custx');if(cx)cx.onclick=()=>{st.cust='';load();};}
     c.querySelectorAll('.pi-row').forEach(tr=>tr.onclick=()=>loadDet(tr.dataset.cd));
     attachResizers(c);
     const _g=c.querySelector('#pi-list'); if(_g&&_sc) _g.scrollTop=_sc;   // 스크롤 복원

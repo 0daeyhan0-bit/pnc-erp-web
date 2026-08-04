@@ -59,8 +59,8 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
 # ---------- 품목별 단가조회(라이브) — 레거시 w_pr_master_150: 거래처별·적용월 시계열 ----------
 _CURR_NM = {"KRW": "원화", "USD": "달러", "RMB": "위안", "EUR": "유로", "JPY": "엔"}
 @router.get("/api/price/search")
-def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query(""), limit: int = Query(1000)):
-    """단가보유 품목 검색(품번/품명 + 대/소분류 필터). 좌측 리스트. 분류 코드→이름."""
+def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query(""), cust: str = Query(""), limit: int = Query(1000)):
+    """단가보유 품목 검색(품번/품명 + 대/소분류 + 거래처 필터, AND). 좌측 리스트. 분류·거래처 코드→이름."""
     cn = _conn(); cur = cn.cursor()
     try:
         dLG = _kindmap(cur, "PR005"); dSG = _kindmap(cur, "PR006")
@@ -68,11 +68,19 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
         if q.strip(): w += " AND (i.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"; p += [f"%{q.strip()}%"] * 2
         if lgroup.strip(): w += " AND i.ITEM_LGROUP=?"; p.append(lgroup.strip())
         if sgroup.strip(): w += " AND i.ITEM_SGROUP=?"; p.append(sgroup.strip())
+        # 거래처 필터: 해당 거래처(코드=오토컴플리트값 / 명칭 LIKE) 단가가 있는 품목만 (AND)
+        cust_cond = "EXISTS(SELECT 1 FROM PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE"
+        if cust.strip():
+            cust_cond += " AND (x.CUST_CODE=? OR EXISTS(SELECT 1 FROM CM_M_CUST c WHERE c.CUST_CODE=x.CUST_CODE AND c.CUST_DESC LIKE ?))"
+            p2 = [cust.strip(), f"%{cust.strip()}%"]
+        else:
+            p2 = []
+        cust_cond += ")"
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),1000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
               ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, (SELECT COUNT(*) FROM PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE) cnt
             FROM PR_M_ITEM i
-            WHERE EXISTS(SELECT 1 FROM PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE){w}
-            ORDER BY i.ITEM_CODE""", *p)
+            WHERE {cust_cond}{w}
+            ORDER BY i.ITEM_CODE""", *(p2 + p))
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():
