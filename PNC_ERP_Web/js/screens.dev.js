@@ -881,6 +881,8 @@ SCREEN.unifybom=(c,ro)=>{
   const M=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const M2=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const q4=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:4});
+  const ymd2date=y=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';  // YYMMDD→date(달력)
+  const date2ymd=d=>d?d.slice(2).replace(/-/g,''):'';                                            // date→YYMMDD(백엔드 파라미터)
   const doSearch=async q=>{q=(q||'').trim();query=q;item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';
     if(!q){results=[];draw();return;}
     try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}`);results=(await r.json()).rows||[];msg='';}
@@ -1031,7 +1033,7 @@ SCREEN.unifybom=(c,ro)=>{
     draw();});};
   const naeToolbar=(rw)=>`<div class="toolbar" style="flex-wrap:wrap;gap:4px">
      <span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
-     <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="nae-ymd" value="${esc(naeYmd)}" placeholder="YYMMDD" style="width:80px">
+     <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="nae-ymd" type="date" value="${ymd2date(naeYmd)}" style="width:150px">
      <button class="btn" id="nae-go">🔍 조회</button><button class="btn ghost" id="nae-regen">🔄 재계산</button>
      ${rw}
      <div class="spacer"></div></div>`;
@@ -1226,7 +1228,7 @@ SCREEN.unifybom=(c,ro)=>{
      ${naeCss()}`;
     bindTabs();
     const g=id=>c.querySelector(id);
-    g('#nae-go').onclick=()=>{naeYmd=g('#nae-ymd').value.trim();loadNae();};
+    g('#nae-go').onclick=()=>{naeYmd=date2ymd(g('#nae-ymd').value)||naeYmd;loadNae();};
     g('#nae-regen').onclick=()=>loadNae(true);
     {const w=g('#nae-weld');if(w)w.onclick=()=>{showWeld=!showWeld;drawNae();};}
     // [조립공정] 툴바 버튼 제거 — 레벨0(제품) 행의 [등록/수정]이 동일 팝업(용접·포장·체결) 담당(중복 제거)
@@ -1416,12 +1418,12 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="page-title">🔀 품목 BOM관리 <span style="font-size:12px;color:var(--muted);font-weight:400">실원가(실제 조달·매입중단, 읽기전용)</span></div>
      ${tabbar('sil')}
      <div class="toolbar"><span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
-       <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="sil-ymd" value="${esc(naeYmd)}" style="width:80px">
+       <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="sil-ymd" type="date" value="${ymd2date(naeYmd)}" style="width:150px">
        <button class="btn" id="sil-go">🔍 조회</button><button class="btn ghost" id="sil-regen">🔄 재계산</button><div class="spacer"></div></div>
      ${content}${naeCss()}`;
     bindTabs();
     const g=id=>c.querySelector(id);
-    g('#sil-go').onclick=()=>{naeYmd=g('#sil-ymd').value.trim();loadSil();};
+    g('#sil-go').onclick=()=>{naeYmd=date2ymd(g('#sil-ymd').value)||naeYmd;loadSil();};
     g('#sil-regen').onclick=()=>loadSil(true);
     c.querySelectorAll('.sil-vb').forEach(el=>el.onclick=()=>{silView=el.dataset.v;drawSil();});
   };
