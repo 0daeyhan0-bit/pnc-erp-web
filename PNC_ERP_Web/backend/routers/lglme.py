@@ -40,7 +40,16 @@ def _lglme_jaeryo(gubun, h):
     return round(lme * fx / 1000, 2)
 
 def _lglme_gagong_won(gr, lme, fx):
-    """가공비(원) = (중국Price×mix_cn + 베트남Price×mix_vn)×fx/1000. 국가Price=가공비+프리미엄+물류+관세+내륙(USD)."""
+    """가공비(원) — 소싱모드별(관경/구분 하드코딩 X, 스펙별 calc_mode 설정, 승인 바뀌면 담당이 변경).
+      mix   = 중국30%+베트남70% (수입, L/W·고강도소구경)
+      china = 중국단가 고정(cn_fix USD×환율) — 직관&P/C(LG가 중국가로 강제픽스, 실소싱은 한국)
+      korea = 한국LS 가공비(kr_gagong, 원, 환율무관) — 수입불가/승인대기(고강도 대구경·Ø19.05 임시)
+    국가Price=가공비+프리미엄+물류+관세+내륙(USD)."""
+    mode = str(gr.get("calc_mode") or "mix")
+    if mode == "korea":
+        return round(float(gr.get("kr_gagong") or 0), 2)          # 한국 원화 고정
+    if mode == "china":
+        return round(float(gr.get("cn_fix") or 0) * fx / 1000, 2)  # 중국 USD 고정 × 환율
     vn = (gr["vn_gagong"] + gr["vn_prem"] + gr["vn_mul"]
           + (lme + gr["vn_gagong"] + gr["vn_mul"]) * gr["duty_vn"] + gr["vn_naeryuk"])
     cn = (gr["cn_gagong"] + gr["cn_prem"] + gr["cn_mul"]
@@ -161,12 +170,16 @@ def lglme_recompute(payload: dict = Body(...)):
         h = cur.fetchone()
         if not h: return {"ok": False, "errors": ["헤더(LME/환율)가 없습니다 — 먼저 저장하세요"]}
         H = {"cu_lme": h[0], "brass_lme": h[1], "cable_lme": h[2], "fx_now": h[3], "fx_prev": h[4], "premium": h[5], "surcharge": h[6]}
-        cur.execute("""SELECT gubun,diam,thick,vn_gagong,vn_prem,vn_mul,vn_naeryuk,cn_gagong,cn_prem,cn_mul,cn_naeryuk,duty_vn,duty_cn,mix_cn,mix_vn
-            FROM nx.lg_lme_gagong WHERE apply_ym=?""", ym)
+        cur.execute("""SELECT gubun,diam,thick,vn_gagong,vn_prem,vn_mul,vn_naeryuk,cn_gagong,cn_prem,cn_mul,cn_naeryuk,duty_vn,duty_cn,mix_cn,mix_vn,
+            ISNULL(calc_mode,'mix'),kr_gagong,cn_fix FROM nx.lg_lme_gagong WHERE apply_ym=?""", ym)
         gk = ["vn_gagong", "vn_prem", "vn_mul", "vn_naeryuk", "cn_gagong", "cn_prem", "cn_mul", "cn_naeryuk", "duty_vn", "duty_cn", "mix_cn", "mix_vn"]
         gmap = {}
         for r in cur.fetchall():
-            gmap[(str(r[0]).strip(), float(r[1]), float(r[2]))] = {k: float(r[3 + i] or 0) for i, k in enumerate(gk)}
+            d = {k: float(r[3 + i] or 0) for i, k in enumerate(gk)}
+            d["calc_mode"] = str(r[15] or "mix").strip()          # 소싱모드 mix/china/korea
+            d["kr_gagong"] = float(r[16]) if r[16] is not None else None
+            d["cn_fix"] = float(r[17]) if r[17] is not None else None
+            gmap[(str(r[0]).strip(), float(r[1]), float(r[2]))] = d
         cur.execute("SELECT id,gubun,diam,thick,jaeryo,gagong FROM nx.lg_lme_costtable WHERE apply_ym=?", ym)
         recs = cur.fetchall(); n = 0
         for cid, gub, diam, thick, ojae, ogag in recs:
