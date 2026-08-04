@@ -858,6 +858,7 @@ SCREEN.unifybom=(c,ro)=>{
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
   let codes={}, vlist=[];
   let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
+  let naeModal=false;   // 공정 수정 팝업(모달) 표시
   let silD=null, silFor='', silLoad=false, silView='company';
   // ★신규 BOM 등록 상태(방식①LG업로드 ②복사 ③새로) + 용접공정(관경별 횟수) 직원입력
   let newReg=null;              // {method} 모달 표시
