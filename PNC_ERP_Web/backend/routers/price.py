@@ -98,7 +98,7 @@ def price_item(item: str = Query("")):
               h.COST_APPLY_YMD, ISNULL(h.CURRENCY,'') curr, ISNULL(h.MAIN_FLAG,'') main_flag, ISNULL(h.MKT,'') mkt,
               h.ITEM_COST, h.MAT_COST, h.PROC_COST, h.OTHER_COST, ISNULL(h.REMARKS,'') remarks
             FROM PR_M_ITEM_COST h LEFT JOIN CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
-            WHERE h.ITEM_CODE=? ORDER BY h.COST_TAG, h.CUST_CODE, h.COST_APPLY_YMD DESC""", item)
+            WHERE h.ITEM_CODE=? ORDER BY h.COST_APPLY_YMD DESC, h.COST_TAG, h.CUST_CODE""", item)
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():
