@@ -1523,7 +1523,7 @@ SCREEN.coopquote=(host)=>{
         <th class="num" style="color:#a06010">가격조정<br><span style="font-weight:400;font-size:9px">(종전−판가)</span></th><th class="num" style="color:#1c7c3a">총가공비<br><span style="font-weight:400;font-size:9px">(종전−재료)</span></th>
         <th class="num" style="color:#8a6d3b">종전입고가<br><span style="font-weight:400;font-size:9px">(작년12월)</span></th><th class="num">현재입고가<br><span style="font-weight:400;font-size:9px">(최근실입고)</span></th>
         <th class="num" style="color:#1c47a0">판가(신)<br><span style="font-weight:400;font-size:9px">(사급인상반영)</span></th><th class="num">차이(신)<br><span style="font-weight:400;font-size:9px">(판가신−현재)</span></th>
-        <th class="num">차이<br><span style="font-weight:400;font-size:9px">(견적−현재)</span></th><th>최근납품</th><th>상태</th>${canEd?'<th style="width:40px">작업</th>':''}</tr></thead>
+        <th>최근납품</th><th>상태</th>${canEd?'<th style="width:40px">작업</th>':''}</tr></thead>
       <tbody>${st.loading?spinRow(canEd?20:18):(st.rows.length?st.rows.map((r,i)=>`<tr class="cq-row" data-idx="${i}" style="cursor:pointer">
         ${canEd?`<td class="center"><input type="checkbox" class="cq-chk" data-id="${r.quote_id}" ${st.sel.has(r.quote_id)?'checked':''} onclick="event.stopPropagation()"></td>`:''}
         <td style="font-weight:600;color:#1c47a0">${esc(r.vendor)}</td>
