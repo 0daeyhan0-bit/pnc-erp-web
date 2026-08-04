@@ -424,21 +424,47 @@ def cost_proc_save(payload: dict = Body(...)):
         nx.close()
 
 @router.get("/api/weld/get")
-def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 노드(제품/SUB)")):
-    """노드의 용접봉별 관경별 용접점수(nx.item_weld) 반환 — 내부원가 패널 조립공정(용접) 편집 프리로드."""
+def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 노드(제품/SUB)"),
+             roll: int = Query(1, description="1=제품 레벨 전노드(subtree) 롤업(평면모델·기본), 0=해당 노드 자체만")):
+    """노드의 용접봉별 관경별 용접점수(nx.item_weld) 반환 — 내부원가/BOM구성 조립공정(용접) 편집 프리로드.
+       roll=1(기본): node + nx.bom 하위 전노드 관경별 횟수 롤업(제품 레벨=전노드 합, 평면 모델 정합 = 소요량 0.0495 등).
+       ★프리로드/표시 전용. 저장(weld/save)은 노드 단위 — 제품 롤업 저장 분배는 별도 설계."""
     node = node.strip()
     nx = _nx(); cur = nx.cursor()
     try:
-        cur.execute("""SELECT weld_item, pipe_diam, ISNULL(weld_qty,0), ISNULL(use_qty,0)
-            FROM nx.item_weld WHERE item_code=? ORDER BY weld_item, pipe_diam""", node)
+        nodes = {node}
+        if roll:                                   # nx.bom 하위 전노드 수집(용접봉 RAC 제외한 구성 자식 전개)
+            frontier = [node]; seen = set()
+            while frontier:
+                batch = [x for x in frontier if x not in seen]
+                seen.update(batch); frontier = []
+                if not batch: break
+                ph = ",".join("?" * len(batch))
+                cur.execute(f"""SELECT DISTINCT bl.child_item FROM nx.bom_line bl
+                    JOIN nx.bom_header h ON h.bom_id=bl.bom_id
+                    WHERE h.item_code IN ({ph}) AND bl.child_item NOT LIKE 'RAC%'""", *batch)
+                for r in cur.fetchall():
+                    c = str(r[0]).strip()
+                    if c and c not in nodes: nodes.add(c); frontier.append(c)
+        nl = list(nodes); agg = {}
+        for i in range(0, len(nl), 900):
+            ch = nl[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT weld_item, pipe_diam, ISNULL(weld_qty,0), ISNULL(use_qty,0)
+                FROM nx.item_weld WHERE item_code IN ({ph})""", *ch)
+            for r in cur.fetchall():
+                wi = str(r[0]).strip(); d = round(float(r[1]), 2); k = (wi, d)
+                e = agg.get(k)
+                if e: e[0] += float(r[2]); e[1] += float(r[3])
+                else: agg[k] = [float(r[2]), float(r[3])]
         by = {}
-        for r in cur.fetchall():
-            wi = str(r[0]).strip()
-            by.setdefault(wi, []).append({"pipe_diam": float(r[1]), "weld_qty": float(r[2]), "use_qty": float(r[3])})
-        # 용접봉 후보(carrier=proc_weld) — item_weld 없어도 용접봉 코드 제시
-        cur.execute("SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item=?", node)
+        for (wi, d), (wq, uq) in agg.items():
+            by.setdefault(wi, []).append({"pipe_diam": d, "weld_qty": wq, "use_qty": round(uq, 6)})
+        for wi in by: by[wi].sort(key=lambda x: x["pipe_diam"])
+        ph2 = ",".join("?" * len(nl))
+        cur.execute(f"SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item IN ({ph2})", *nl)
         carriers = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
-        return {"node": node, "welds": [{"weld_item": k, "rows": v} for k, v in by.items()], "carriers": carriers}
+        return {"node": node, "rollup": bool(roll), "nodes": len(nl),
+                "welds": [{"weld_item": k, "rows": v} for k, v in by.items()], "carriers": carriers}
     finally:
         nx.close()
 

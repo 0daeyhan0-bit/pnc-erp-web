@@ -1045,7 +1045,7 @@ SCREEN.unifybom=(c,ro)=>{
       if(String(r.code).toUpperCase().startsWith('RAC')){const b=String(r.code).split('-')[0];
         const w=weld[b]||(weld[b]={code:b,name:r.name,metal:r.metal,diam:r.diam,thick:r.thick,won:r.won,qty:0,mat:0});
         w.qty+=(+r.qty||0);w.mat+=(+r.mat||0);}
-      else normal.push(r);});
+      else if(!isSub(r.code,r.haskids)) normal.push(r);});   // ★임의 SUB(SOCKET·20-1 등) 제외 — leaf 재료만
     return {normal:normal.sort((x,y)=>(+y.mat||0)-(+x.mat||0)),weldArr:Object.values(weld).sort((x,y)=>x.code<y.code?-1:1)};};
   const matTable=(a,rows,editable)=>{const fm=flatMat(rows);const jae=(+a.jae||0);
     const row=(r,weld)=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');const sel=naeSel===r.code;
@@ -1073,7 +1073,7 @@ SCREEN.unifybom=(c,ro)=>{
       const canEd=RW && (r.make_type==='1'||r.nproc||r.silver);
       const tag=canEd?'<span class="nae-tg" style="color:#2f6db3;border-color:#bcd">가공품</span>':'<span class="nae-tg" style="color:#8a97a8;border-color:#d5dde7">구매/부자재</span>';
       return `<tr class="nae-trow nae-mrow${sel?' sel':''}" data-node="${esc(r.code)}" style="cursor:pointer">
-        <td style="white-space:nowrap;text-align:left"><b>${esc(r.code)}</b>${r.silver?' <span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">은납</span>':''} ${tag}</td>
+        <td style="white-space:nowrap;text-align:left"><span style="color:#7a8aa0">1</span> <span style="color:#a9b8cc">└</span> <b>${esc(r.code)}</b>${r.silver?' <span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">은납</span>':''} ${tag}</td>
         <td class="bcap" title="${esc(r.name)}" style="max-width:200px;text-align:left">${esc(r.name)}</td>
         <td title="${esc(sp)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5a6b82">${esc(sp)}</td>
         <td class="center" style="color:#5a6b82">${esc(r.metal||'')}</td>
@@ -1082,19 +1082,26 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td>
         <td class="center">${canEd?`<button class="nae-edit-btn" data-node="${esc(r.code)}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button>`:''}</td></tr>`;};
     const weldRow=(r)=>`<tr class="nae-mrow" style="background:#fdf6f0">
-        <td style="white-space:nowrap;text-align:left"><b>${esc(r.code)}</b> <span class="nae-tg" style="color:#a8442a;border-color:#e6c0b3">용접봉(제품조립)</span></td>
+        <td style="white-space:nowrap;text-align:left"><span style="color:#7a8aa0">1</span> <b>${esc(r.code)}</b> <span class="nae-tg" style="color:#a8442a;border-color:#e6c0b3">용접봉(제품조립)</span></td>
         <td class="bcap" title="${esc(r.name)}" style="max-width:200px;text-align:left">${esc(r.name)}</td>
         <td style="color:#5a6b82">${r.diam?('Ø'+r.diam):''}</td><td class="center" style="color:#5a6b82">${esc(r.metal||'')}</td>
         <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td><td></td></tr>`;
+    // ★레벨0 제품 행 — 조립공정(용접 관경별·포장·체결) 입력 지점. [✎]=조립공정 팝업(node===item→isAssy)
+    const prodRow=`<tr class="nae-trow nae-mrow" data-node="${esc(item)}" style="background:#eef3fb;font-weight:700;cursor:pointer">
+        <td style="white-space:nowrap;text-align:left"><span style="color:#1c47a0">0</span> <b style="color:#1c47a0">${esc(item)}</b> <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span></td>
+        <td class="bcap" title="${esc(name)}" style="max-width:200px;text-align:left">${esc(name)}</td>
+        <td></td><td></td><td class="num">1</td><td></td>
+        <td class="num" style="color:#1c6b3a"><b>${M(a.jae)}</b></td><td class="num" style="color:#7a8aa0">100%</td>
+        <td class="center">${prodBtn}</td></tr>`;
     const weldBody=showWeld?fm.weldArr.map(weldRow).join(''):'';
-    const body=(fm.normal.map(matRow).join('')+weldBody)||'<tr><td colspan="9" class="empty">구성 없음 — 조회하세요</td></tr>';
+    const body=(prodRow+fm.normal.map(matRow).join('')+weldBody);
     const weldBtn=`<button class="btn ghost" id="nae-weld" style="padding:2px 9px;font-size:11px">${showWeld?'🔧 용접봉 숨기기':`🔧 용접봉 표시${fm.weldArr.length?' ('+fm.weldArr.length+')':''}`}</button>`;
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
-      <div class="summary-bar" style="flex:0 0 auto;flex-wrap:wrap"><div class="s-item"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <b>평면 재료표</b>(LG BOM수준·SUB해체) · 절삭부품 [✎]=가공공정 · 제품=조립공정</div><div style="flex:1"></div>${weldBtn} ${prodBtn}</div>
+      <div class="summary-bar" style="flex:0 0 auto;flex-wrap:wrap"><div class="s-item"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <b>평면 재료표</b>(레벨0 제품+레벨1 부품·SUB해체) · 레벨0[✎]=조립공정 · 절삭부품[✎]=가공공정</div><div style="flex:1"></div>${weldBtn}</div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
-        <thead><tr><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">가공</th></tr></thead>
+        <thead><tr><th style="text-align:left">품번(레벨)</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">등록/수정</th></tr></thead>
         <tbody>${body}</tbody>
         <tfoot><tr class="nae-foot"><td colspan="6" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td><td></td></tr></tfoot></table></div></div>`;};
   const procTable=(procList)=>{const sub=procList.reduce((s,p)=>s+(+p.amt||0),0);
