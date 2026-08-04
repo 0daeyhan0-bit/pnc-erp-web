@@ -2,10 +2,12 @@
 """무게정산(중량조정): 원소재/용접봉 = 출고중량(tag5) − 업체가공 입고중량 = 차액, ×(시세−사급가).
    [확정규칙 — 4월 담당자마감 실측대조]
      입고수량 = ERP 확정입고(9/S/C/G/H, 마감기준 창)  ← 유일 신뢰원천
-     원소재 단위중량 = ★nx.coop_copper_unit(동 원단위 마스터, 담당 파이프수불 정본·geom 99.9%검증) 우선
-                       (부품→Assy). 마스터에 없으면 CS_M_ITEM_BOM 재귀전개(_explode) 폴백
-     기하동중량 = π(D−T)·T·L·8.94/1e6 = (D−T)·T·L·0.02809·0.001 (동일상수)
-     용접봉    = _load_weld(레거시 정본) — 소요량식 확정 후 별도(현행 유지)
+     인정부품 = CS_M_ITEM_BOM 재귀전개(_explode), SAGUB_FLAG=1(사급) 제외 leaf 단품
+     중량     = 기하동중량 π(D−T)·T·L·8.94/1e6 = (D−T)·T·L·0.02809·0.001 (CU/고강도)
+     용접봉   = _load_weld(레거시 정본) — 소요량식 확정 후 별도
+   ※nx.coop_copper_unit(동 원단위 마스터, geom 99.9%검증) 통합은 보류:
+     Assy 마스터값이 '사급 포함'+변형정규화붕괴라 현행 '사급 제외' 규칙과 충돌 → 사급규칙 확정 후 통합.
+     _norm_code/_load_copper_master 헬퍼는 그때 사용(현재 미사용).
    매칭 Assy는 담당자수량과 ±5% 일치. 담당자 수기항목(전산에 없음)은 반영 안 함."""
 import sys, os, threading, math, re
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'New_ERP'))  # Projects\New_ERP
@@ -184,7 +186,6 @@ def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=
     """업체별 원소재/용접봉 출고·입고·차액·정산금액. ym=YYMM."""
     META, CH, COOPB, COOP_SET = _load_maps()
     WELD = _load_weld()
-    CU_PART, CU_ASSY = _load_copper_master()   # ★검증된 동 원단위 마스터(nx.coop_copper_unit) 우선
     memo = {}
     cn = _ro(); cur = cn.cursor()
     mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
@@ -211,14 +212,7 @@ def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=
     inr = {}; inw = {}
     for cc, mat, q in cur.fetchall():
         mk = str(mat).strip().upper()   # ★키 정규화(META/CH/COOPB/WELD 조회 일치)
-        nm = _norm_code(mk)
-        # ★원소재 소요중량 = 검증된 동 원단위 마스터(부품→Assy) 우선, 없으면 기존 _explode 폴백
-        if nm in CU_PART:
-            rk = CU_PART[nm]
-        elif nm in CU_ASSY:
-            rk = CU_ASSY[nm]
-        else:
-            rk, _wk = _explode(mk, META, CH, COOPB, COOP_SET, memo)
+        rk, _wk = _explode(mk, META, CH, COOPB, COOP_SET, memo)
         qf = float(q or 0)
         if rk: inr[cc] = inr.get(cc, 0.0) + rk * qf
         ws = WELD.get(mk, 0.0)          # 용접봉 소요 = 부품별(포인트×coop_rate) × 입고qty
