@@ -423,6 +423,16 @@ def cost_proc_save(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.get("/api/weld/diam")
+def weld_diam():
+    """관경별 표준소요량·표준공수 마스터(대표=silver_solder MIN='01'). 신규BOM 용접공정 입력·미리보기용."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT pipe_diam,MIN(std_use_qty),MIN(std_st) FROM nx.weld_diam GROUP BY pipe_diam ORDER BY pipe_diam")
+        return {"rows": [{"pipe_diam": float(r[0]), "std_use_qty": float(r[1] or 0), "std_st": float(r[2] or 0)} for r in cur.fetchall()]}
+    finally:
+        nx.close()
+
 @router.post("/api/weld/save")
 def weld_save(payload: dict = Body(...)):
     """용접 공정(관경별 횟수) 저장 → nx.item_weld 생성 + proc_weld 파생 + routing(51/28) 생성. 정본산식=_schema/WELD_PROC_TABLES_SPEC.md.

@@ -859,6 +859,12 @@ SCREEN.unifybom=(c,ro)=>{
   let codes={}, vlist=[];
   let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let silD=null, silFor='', silLoad=false, silView='company';
+  // ★신규 BOM 등록 상태(방식①LG업로드 ②복사 ③새로) + 용접공정(관경별 횟수) 직원입력
+  let newReg=null;              // {method} 모달 표시
+  let isNew=false;             // 신규등록 편집 세션(저장시 마스터 생성)
+  let weldRows=[];             // [{weld_item,pipe_diam,weld_qty}] 관경별 용접점
+  let weldDiams=[];            // weld_diam 마스터(관경·std_use·std_st)
+  const loadWeldDiams=async()=>{if(weldDiams.length)return;try{const r=await fetch(`${API}/api/weld/diam`);weldDiams=(await r.json()).rows||[];}catch(e){weldDiams=[];}};
   const loadCodes=async()=>{try{const r=await fetch(`${API}/api/codes`);codes=await r.json();}catch(e){codes={};}};
   const COLS=[['child_item','품번','item'],['item_name','품명','text'],
     ['diam','외경','num'],['thick','두께','num'],['length','길이','num'],['metal_gubun','재질','sel:metal'],['net_weight','중량','num'],
@@ -906,6 +912,97 @@ SCREEN.unifybom=(c,ro)=>{
       const j=await r.json(); if(!j.ok){alert('복사 실패: '+(j.error||(j.errors||[]).join('\n')));return;}
       alert(`복사 완료 — ${tgt} 에 ${j.count}구성 저장.${j.warn?'\n\n⚠ '+j.warn:''}`); load(tgt);
     }catch(e){alert('복사 오류: '+e.message);}};
+  // ============ 신규 BOM 등록 (방식 ①LG업로드 ②복사 ③새로) ============
+  const openNew=()=>{newReg={method:''};draw();};
+  const closeNew=()=>{newReg=null;draw();};
+  // 공통: 신규 편집 세션 진입(품번·구성·용접후보 세팅)
+  const enterNew=async(topItem,topName,newLines,weldCand)=>{
+    if(!codes.metal)await loadCodes(); await loadWeldDiams();
+    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null;
+    results=[]; tree=[]; treeMax=0; naeFor=''; silFor='';
+    lines=(newLines||[]).map(l=>({child_item:(l.child_item||'').toUpperCase(),item_name:l.item_name||'',spec:l.item_spec||'',
+      qty:(l.qty!=null?+l.qty:1),unit:l.unit||'EA',node_type:'부품',cs_calc_except:false,sagub_default:false,kitting:false,
+      set_except:false,vir_item:false,lme_except:false,gagong_proc:'',in_cust:'',cust_name:'',remarks:(l.supply_type?('LG:'+l.supply_type):'')}));
+    // 용접봉 후보 → 용접공정 행(관경·점수는 직원입력, 기본 빈행)
+    weldRows=[];
+    (weldCand||[]).forEach(w=>{weldRows.push({weld_item:(w.child_item||w.weld_item||'').toUpperCase(),pipe_diam:'',weld_qty:''});});
+    if(!weldRows.length) weldRows.push({weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''});
+    tab='bom'; draw();
+  };
+  // ①LG BOM 엑셀 업로드 → 파싱 → 구성 초안
+  const lgUpload=async(fileInput)=>{
+    const f=fileInput.files&&fileInput.files[0]; if(!f)return;
+    const fd=new FormData(); fd.append('file',f);
+    try{const r=await fetch(`${API}/api/lgbom/parse`,{method:'POST',body:fd});
+      const j=await r.json(); if(!j.ok){alert('LG BOM 파싱 실패: '+(j.detail||j.error||'형식확인'));return;}
+      alert(`LG BOM 파싱 — 상위 ${j.top_item} · 구성 ${j.lines.length} · 용접봉 ${j.weld_children.length} (총 ${j.total_rows}행)`);
+      enterNew(j.top_item, (j.lines[0]&&'')||'', j.lines, j.weld_children);
+    }catch(e){alert('업로드 오류: '+e.message);}
+  };
+  // ②기존 복사
+  const copyNew=async()=>{const src=(prompt('복사할 기존 품번(원본)을 입력','')||'').trim().toUpperCase();if(!src)return;
+    const tgt=(prompt(`「${src}」→ 새 품번(대상)을 입력`,'')||'').trim().toUpperCase();if(!tgt||tgt===src){alert('원본과 다른 새 품번 필요');return;}
+    try{const r=await fetch(`${API}/api/bom/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,target:tgt})});
+      const j=await r.json();if(!j.ok){alert('복사 실패: '+(j.error||(j.errors||[]).join('\n')));return;}
+      alert(`복사 완료 — ${tgt} 에 ${j.count}구성.${j.warn?'\n⚠ '+j.warn:''}`);newReg=null;isNew=false;load(tgt);
+    }catch(e){alert('복사 오류: '+e.message);}};
+  // ③완전 새로
+  const blankNew=async()=>{const it=(prompt('신규 품번을 입력(nx에만 저장)','')||'').trim().toUpperCase();if(!it)return;
+    const nm=(prompt('품명을 입력(선택)','')||'').trim();
+    enterNew(it,nm,[],[]);};
+  // 용접공정 패널(관경별 횟수, 실시간 미리보기)
+  const weldPreview=(w)=>{const d=weldDiams.find(x=>Math.abs(x.pipe_diam-(+w.pipe_diam||0))<0.01);
+    if(!d||!(+w.weld_qty>0))return {use:0,st:0};
+    return {use:d.std_use_qty*(+w.weld_qty)*1.5, st:d.std_st*(+w.weld_qty)};};
+  const weldPanel=()=>{
+    const byRod={}; weldRows.forEach(w=>{const k=w.weld_item||'(용접봉)';(byRod[k]=byRod[k]||[]).push(w);});
+    const opts=weldDiams.map(d=>`<option value="${d.pipe_diam}">${d.pipe_diam}φ (원단위 ${d.std_use_qty})</option>`).join('');
+    let totUse=0; weldRows.forEach(w=>{totUse+=weldPreview(w).use;});
+    return `<div style="border:1px solid #d6c3ea;border-radius:8px;margin-top:8px;background:#faf7ff">
+      <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <b style="color:#8e44ad">🔧 용접 공정 (관경별 용접점수 — 직원 입력)</b>
+        <span style="color:#8a94a6;font-size:11px">용접봉 소요량 = Σ(표준소요량×점수)×1.5 · 저장시 nx.item_weld+proc_weld+routing 파생</span>
+        <div style="flex:1"></div><b style="color:#8e44ad">Σ소요량 ${totUse.toFixed(5)}</b>
+        <button class="btn ghost" id="wl-add" style="padding:1px 8px">＋ 용접점</button></div>
+      <datalist id="wl-roddl"><option value="RAC30599301-1">1% 용접봉</option><option value="RAC30599327">3% 용접봉</option><option value="RAC30599303">BCUP</option></datalist>
+      <div class="grid-wrap" style="max-height:24vh;overflow:auto"><table class="tbl" style="font-size:11px">
+        <thead><tr><th>용접봉</th><th>관경</th><th class="num">점수</th><th class="num">소요량(미리보기)</th><th class="num">내부ST</th><th></th></tr></thead>
+        <tbody>${weldRows.map((w,i)=>{const pv=weldPreview(w);return `<tr>
+          <td><input class="wl-rod" data-i="${i}" list="wl-roddl" value="${esc(w.weld_item||'')}" style="width:120px" placeholder="RAC…"></td>
+          <td><select class="wl-d" data-i="${i}" style="width:130px"><option value="">-관경-</option>${opts.replace(`value="${w.pipe_diam}"`,`value="${w.pipe_diam}" selected`)}</select></td>
+          <td class="num"><input class="wl-q" data-i="${i}" type="number" step="1" min="0" value="${w.weld_qty}" style="width:52px"></td>
+          <td class="num">${pv.use?pv.use.toFixed(5):''}</td><td class="num">${pv.st||''}</td>
+          <td class="center"><span class="wl-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">＋용접점으로 추가</td></tr>'}</tbody></table></div></div>`;
+  };
+  const bindWeld=()=>{
+    const a=c.querySelector('#wl-add');if(a)a.onclick=()=>{weldRows.push({weld_item:(weldRows[weldRows.length-1]||{}).weld_item||'RAC30599301-1',pipe_diam:'',weld_qty:''});draw();};
+    c.querySelectorAll('.wl-rod').forEach(el=>el.oninput=()=>{weldRows[+el.dataset.i].weld_item=el.value.trim().toUpperCase();});
+    c.querySelectorAll('.wl-d').forEach(el=>el.onchange=()=>{weldRows[+el.dataset.i].pipe_diam=el.value;draw();});
+    c.querySelectorAll('.wl-q').forEach(el=>el.oninput=()=>{weldRows[+el.dataset.i].weld_qty=el.value;const t=el.closest('tr');if(t){const pv=weldPreview(weldRows[+el.dataset.i]);const tds=t.querySelectorAll('td');tds[3].textContent=pv.use?pv.use.toFixed(5):'';tds[4].textContent=pv.st||'';}});
+    c.querySelectorAll('.wl-del').forEach(el=>el.onclick=()=>{weldRows.splice(+el.dataset.i,1);draw();});
+  };
+  // 신규 저장: 마스터 + BOM(RAC자동라우팅) + 용접공정(관경별→파생)
+  const saveNew=async()=>{
+    if(!item){alert('품번 필요');return;}
+    const seen={},errs=[];
+    lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(ch&&ch===item)errs.push(`${i+1}행 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행 중복 ${ch}`);if(ch)seen[ch]=1;});
+    if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
+    // 1) 마스터(신규품번 포함 자식들)
+    const mrows=lines.filter(l=>(l.child_item||'').trim()).map(l=>({item_code:l.child_item,item_name:l.item_name,item_spec:l.spec,
+      metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,unit:l.unit,in_cust:l.in_cust,
+      sgroup:l.sgroup,lgroup:l.lgroup,make_type:l.make_type,cost_gubun:l.cost_gubun,status:l.status}));
+    try{if(mrows.length)await fetch(`${API}/api/item/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:mrows}));}catch(e){alert('마스터 저장 실패: '+e.message);return;}
+    // 2) BOM 구성(RAC는 백엔드가 proc_weld로 라우팅) — 신규품번 헤더 자동생성(target_name)
+    try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines})});
+      const j=await r.json();if(!j.ok){alert('BOM 저장 거부:\n'+(j.errors||[]).join('\n'));return;}}catch(e){alert('BOM 저장 실패: '+e.message);return;}
+    // 3) 용접공정(관경별 횟수) → item_weld+proc_weld+routing 파생 (용접봉별 그룹)
+    const grp={}; weldRows.forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
+    let wsum=0;
+    try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
+      const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
+    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)}`);
+    isNew=false; load(item);
+  };
   // ============ 탭바 ============
   // ★내부원가·실원가 탭은 개발 전용 — 품목 BOM 조회(RO)에서는 숨김(BOM구성만 노출)
   const tabbar=(act)=>`<div class="bm-tabs">
@@ -1154,6 +1251,7 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="toolbar">
        <label class="tl">품번</label><input class="inp" id="bm-q" value="${esc(query)}" placeholder="품번 일부 입력 후 조회" style="width:220px">
        <button class="btn" id="bm-search">🔍 검색</button>
+       ${(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="bm-new" style="background:#1c7c3a;color:#fff">＋ 신규 BOM 등록</button>`:''}
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
@@ -1162,6 +1260,20 @@ SCREEN.unifybom=(c,ro)=>{
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
      </div>
      <datalist id="bm-itemdl"></datalist><datalist id="bm-vendordl"></datalist>
+     ${newReg?`<div style="border:2px solid #1c7c3a;border-radius:10px;background:#f4fbf6;padding:12px;margin:8px 0">
+        <div style="display:flex;align-items:center;gap:8px"><b style="color:#1c7c3a;font-size:14px">＋ 신규 BOM 등록 — 방식 선택</b><div style="flex:1"></div><button class="btn ghost" id="nw-close">✖</button></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div style="flex:1;min-width:220px;border:1px solid #cfe0ff;border-radius:8px;padding:10px;background:#fff">
+            <b style="color:#1c47a0">① LG BOM 업로드</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">LG 발행 BOM 엑셀(다운로드본) 선택 → 파싱 → 구성 초안. 품번=LG 상위품번. 용접봉은 용접공정으로 분리.</div>
+            <input type="file" id="nw-lg" accept=".xlsx"></div>
+          <div style="flex:1;min-width:200px;border:1px solid #cfe0ff;border-radius:8px;padding:10px;background:#fff">
+            <b style="color:#1c47a0">② 기존 BOM 복사</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">유사 품번 복사 → 새 품번으로. proc_weld·routing 포함 복사 후 편집.</div>
+            <button class="btn" id="nw-copy">복사로 시작</button></div>
+          <div style="flex:1;min-width:200px;border:1px solid #cfe0ff;border-radius:8px;padding:10px;background:#fff">
+            <b style="color:#1c47a0">③ 완전 새로</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">빈 폼. 품번 직접입력 후 구성·용접공정 등록.</div>
+            <button class="btn" id="nw-blank">빈 폼으로 시작</button></div>
+        </div></div>`:''}
+     ${(editMode&&isNew)?`<div class="page-sub" style="color:#1c7c3a;font-weight:700">＋ 신규 등록 편집: 품번 <b>${esc(item)}</b> · ${esc(name||'(품명 미입력)')} — 구성 그리드 + 아래 용접공정 입력 후 [저장]</div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
@@ -1182,7 +1294,7 @@ SCREEN.unifybom=(c,ro)=>{
            <td class="center">${r.sag==='1'?'<span style="color:#b8860b;font-weight:700">사급</span>':''}</td>
            <td class="center">${r.se==='1'?'<span style="color:#c0392b">제외</span>':''}</td></tr>`;}).join('')||`<tr><td colspan="9" class="empty">구성 없음</td></tr>`}</tbody></table></div>`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
-       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>`):''}
+       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel():''}`):''}
      ${bomCss()}`;
     const qi=c.querySelector('#bm-q');
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
@@ -1192,12 +1304,19 @@ SCREEN.unifybom=(c,ro)=>{
     const tg=c.querySelector('#bm-tree');if(tg)tg.onclick=()=>{viewTree=!viewTree;draw();};
     const wl=c.querySelector('#bm-weld');if(wl)wl.onclick=()=>{showWeld=!showWeld;draw();};
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
+    // 신규등록 진입·모달·용접패널
+    {const nb=c.querySelector('#bm-new');if(nb)nb.onclick=openNew;}
+    {const x=c.querySelector('#nw-close');if(x)x.onclick=closeNew;}
+    {const lg=c.querySelector('#nw-lg');if(lg)lg.onchange=()=>lgUpload(lg);}
+    {const cy=c.querySelector('#nw-copy');if(cy)cy.onclick=copyNew;}
+    {const bl=c.querySelector('#nw-blank');if(bl)bl.onclick=blankNew;}
+    if(editMode&&isNew)bindWeld();
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
     const ed=c.querySelector('#bm-edit');if(ed)ed.onclick=()=>{editMode=true;viewTree=false;draw();};
-    const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{load(item);};
+    const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{if(isNew){isNew=false;item='';name='';lines=[];weldRows=[];editMode=false;draw();}else load(item);};
     const add=c.querySelector('#bm-add');if(add)add.onclick=addRow;
-    const sv=c.querySelector('#bm-save');if(sv)sv.onclick=save;
+    const sv=c.querySelector('#bm-save');if(sv)sv.onclick=(isNew?saveNew:save);
     const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>dlCSV(`BOM_${item}.csv`,['#',...COLS.map(x=>x[1])],lines.map((l,i)=>[i+1,...COLS.map(([k])=>l[k])]));
     c.querySelectorAll('.bm-del').forEach(el=>el.onclick=()=>{lines.splice(+el.dataset.i,1);draw();});
     c.querySelectorAll('.ce').forEach(el=>el.oninput=()=>{const i=+el.dataset.i,k=el.dataset.k;lines[i][k]=(el.type==='number')?(el.value===''?null:+el.value):el.value;});
