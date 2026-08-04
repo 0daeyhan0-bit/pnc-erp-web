@@ -435,13 +435,7 @@ class NxCostEngine:
         info=self._load_item(node)
         if info['cost_gubun']!='3' and self._expandable_nae(node, seen):
             return sum(self._value_node_nae(c, qty*q, ymd, ymcut, seen|{node}) for c,qty,cx,f,t,lx in self.lines(node) if not cx)
-        val=self._leaf_val_nae(node, info, q, ymd, ymcut)
-        # 내부원가=전공정자체: 전개되지 않는(외주/매입) leaf 노드도 우리가 용접한다고 가정 →
-        # 노드종속 용접봉(proc_weld) 재료를 가산. 전개 노드는 위 branch의 lines()에서 이미 주입됨.
-        if not self._is_weld(node):
-            for wi,uq,cx,f,t,lx in self._weld_lines(node):
-                if not cx: val += (self._weld_price(wi, ymd) or 0)*uq*q
-        return val
+        return self._leaf_val_nae(node, info, q, ymd, ymcut)
 
     def material_nae(self, item, ymd, mult=1.0):
         """내부용 재료비: 전개-all(직납/except만 정지), LME 없음."""
