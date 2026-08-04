@@ -26,77 +26,68 @@ class NxCostEngine:
         if self.own and self.cn: self.cn.close()
 
     def _prime_caches(self, item):
-        """★성능: 서브트리 전 노드의 item/routing/proc_weld/bom_header를 벌크(IN)로 로드해 per-node round-trip 제거.
+        """★성능: 서브트리 전 노드의 item/routing/proc_weld/bom_header를 **서버측 CTE-JOIN**으로 일괄 로드(클라 IN(N)은 드라이버 오버헤드 ~520ms/쿼리라 회피).
            채우는 캐시(_item·_pc·_rc·_wlc·_hdr)는 per-node 메서드와 동일 구조·동일 값 → 결과 불변(속도만).
            미프라임 노드는 기존 per-node 쿼리로 폴백(정확성 무손상). _reset 시 새 엔진=재프라임."""
+        return   # ★비활성화(2026-08-04): 다중경로/SUB 구조에서 캐시 프라임이 미묘한 중복 유발(43 baseline 59 이탈) → 정확성 위해 OFF.
+                 #   속도 최적화는 nx.routing 인덱스(ix_routing_item)로 대체(값 불변·seek). 아래 프라임 로직은 보존(추후 dedup 완성 후 재활성).
         if not hasattr(self, '_primed'): self._primed = set()
         if item in self._primed: return
         self._primed.add(item)
-        try:
-            codes = set([item])
-            self.cur.execute("""WITH t AS (
-                SELECT bl.child_item c FROM nx.bom_header h JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE h.item_code=?
-                UNION ALL
-                SELECT bl.child_item FROM t JOIN nx.bom_header h ON h.item_code=t.c JOIN nx.bom_line bl ON bl.bom_id=h.bom_id)
-                SELECT DISTINCT c FROM t OPTION(MAXRECURSION 60)""", item)
-            for r in self.cur.fetchall():
-                v = str(r[0]).strip()
-                if v: codes.add(v)
-        except Exception:
-            return   # CTE 실패(순환 등) → 프라임 스킵, per-node 폴백
         if not hasattr(self, '_wlc'): self._wlc = {}
         if not hasattr(self, '_pc'): self._pc = {}
         if not hasattr(self, '_rc'): self._rc = {}
-        clist = list(codes)
-        # proc_weld → _wlc + 용접봉(RAC) 코드 수집
-        for i in range(0, len(clist), 900):
-            ch = clist[i:i+900]; ph = ",".join("?" * len(ch))
-            self.cur.execute(f"""SELECT parent_item, weld_item, ISNULL(use_qty,0), ISNULL(cs_calc_except,0),
-                ISNULL(from_ymd,''), ISNULL(to_ymd,''), ISNULL(lme_except,0)
-                FROM nx.proc_weld WHERE parent_item IN ({ph}) ORDER BY parent_item, weld_item""", *ch)
+        # 서브트리(bom_line 재귀) + 용접봉(RAC) 코드 = allc. 각 테이블 CTE-JOIN(서버측)로 1쿼리씩.
+        CTE = ("WITH t AS (SELECT CAST(? AS varchar(30)) c "
+               "UNION ALL SELECT CAST(bl.child_item AS varchar(30)) FROM t "
+               "JOIN nx.bom_header h ON h.item_code=t.c JOIN nx.bom_line bl ON bl.bom_id=h.bom_id), "
+               "allc AS (SELECT c FROM t UNION SELECT CAST(pw.weld_item AS varchar(30)) FROM nx.proc_weld pw JOIN t ON pw.parent_item=t.c) ")
+        TAIL = " OPTION(MAXRECURSION 60)"
+        try:
+            self.cur.execute(CTE + "SELECT DISTINCT c FROM allc" + TAIL, item)
+            codes = set(str(r[0]).strip() for r in self.cur.fetchall() if str(r[0]).strip())
+            if not codes: return
+            # proc_weld
+            self.cur.execute(CTE + """SELECT pw.parent_item, pw.weld_item, ISNULL(pw.use_qty,0), ISNULL(pw.cs_calc_except,0),
+                ISNULL(pw.from_ymd,''), ISNULL(pw.to_ymd,''), ISNULL(pw.lme_except,0)
+                FROM nx.proc_weld pw JOIN allc s ON pw.parent_item=s.c ORDER BY pw.parent_item, pw.weld_item""" + TAIL, item)
             for r in self.cur.fetchall():
                 self._wlc.setdefault(str(r[0]).strip(), []).append(
                     (str(r[1]).strip(), float(r[2] or 0), bool(r[3]), str(r[4] or ''), str(r[5] or ''), bool(r[6])))
-        for c in codes:
-            if c not in self._wlc: self._wlc[c] = []
-        rac = set(w[0] for v in self._wlc.values() for w in v)
-        allc = codes | rac; al = list(allc)
-        # _item 벌크
-        for i in range(0, len(al), 900):
-            ch = al[i:i+900]; ph = ",".join("?" * len(ch))
-            self.cur.execute(f"""SELECT item_code, ISNULL(in_cust,''), ISNULL(make_type,''), ISNULL(cost_gubun,''),
-                ISNULL(metal_gubun,''), ISNULL(diam,0), ISNULL(thick,0), ISNULL(net_weight,0), ISNULL(has_gagong,0),
-                ISNULL(silver_flag,0), ISNULL(unit,''), ISNULL(lgroup,'') FROM nx.item WHERE item_code IN ({ph})""", *ch)
+            for c in codes:
+                if c not in self._wlc: self._wlc[c] = []
+            # item
+            self.cur.execute(CTE + """SELECT i.item_code, ISNULL(i.in_cust,''), ISNULL(i.make_type,''), ISNULL(i.cost_gubun,''),
+                ISNULL(i.metal_gubun,''), ISNULL(i.diam,0), ISNULL(i.thick,0), ISNULL(i.net_weight,0), ISNULL(i.has_gagong,0),
+                ISNULL(i.silver_flag,0), ISNULL(i.unit,''), ISNULL(i.lgroup,'') FROM nx.item i JOIN allc s ON i.item_code=s.c""" + TAIL, item)
             for r in self.cur.fetchall():
                 self._item[str(r[0]).strip()] = {'in_cust': r[1].strip(), 'make_type': r[2].strip(), 'cost_gubun': r[3].strip(),
                     'metal': r[4].strip(), 'diam': float(r[5] or 0), 'thick': float(r[6] or 0), 'wt': float(r[7] or 0),
                     'has_gagong': bool(r[8]), 'silver': bool(r[9]), 'unit': r[10].strip(), 'lgroup': r[11].strip()}
-        # routing 벌크 → _pc(공정, 91/92/93/98/99 제외) + _rc(91/92/93)
-        for c in allc: self._pc[c] = []
-        for i in range(0, len(al), 900):
-            ch = al[i:i+900]; ph = ",".join("?" * len(ch))
-            self.cur.execute(f"""SELECT item_code, proc_code, ISNULL(work_qty,0), ISNULL(prod_uph,0), ISNULL(calc_gubun,''), ISNULL(p_item,'')
-                FROM nx.routing WHERE item_code IN ({ph})""", *ch)
+            # routing → _pc(공정, 91/92/93/98/99 제외) + _rc(91/92/93)
+            for c in codes: self._pc[c] = []
+            self.cur.execute(CTE + """SELECT r.item_code, r.proc_code, ISNULL(r.work_qty,0), ISNULL(r.prod_uph,0), ISNULL(r.calc_gubun,''), ISNULL(r.p_item,'')
+                FROM nx.routing r JOIN allc s ON r.item_code=s.c""" + TAIL, item)
             for r in self.cur.fetchall():
                 code = str(r[0]).strip(); proc = str(r[1]); wq = float(r[2] or 0); uph = float(r[3] or 0)
                 cg = str(r[4] or '').strip(); pit = str(r[5] or '').strip()
                 if proc in ('91', '92', '93'):
                     self._rc.setdefault((code, proc), []).append((uph, wq, pit))
                 elif proc not in ('98', '99'):
-                    self._pc[code].append((proc, wq, uph, cg, pit))
-        for c in allc:
-            for pc in ('91', '92', '93'):
-                if (c, pc) not in self._rc: self._rc[(c, pc)] = []
-        # bom_header 벌크 → _hdr (max version)
-        best = {}
-        for i in range(0, len(al), 900):
-            ch = al[i:i+900]; ph = ",".join("?" * len(ch))
-            self.cur.execute(f"SELECT item_code, bom_id, ISNULL(version,1) FROM nx.bom_header WHERE item_code IN ({ph})", *ch)
+                    self._pc.setdefault(code, []).append((proc, wq, uph, cg, pit))
+            for c in codes:
+                for pc in ('91', '92', '93'):
+                    if (c, pc) not in self._rc: self._rc[(c, pc)] = []
+            # bom_header → _hdr (max version)
+            best = {}
+            self.cur.execute(CTE + "SELECT bh.item_code, bh.bom_id, ISNULL(bh.version,1) FROM nx.bom_header bh JOIN allc s ON bh.item_code=s.c" + TAIL, item)
             for r in self.cur.fetchall():
                 code = str(r[0]).strip(); ver = int(r[2] or 1)
                 if code not in best or ver > best[code][0]: best[code] = (ver, r[1])
-        for c in allc:
-            self._hdr[c] = best[c][1] if c in best else None
+            for c in codes:
+                self._hdr[c] = best[c][1] if c in best else None
+        except Exception:
+            return   # CTE 실패(순환 등) → 프라임 스킵, per-node 폴백(정확성 무손상)
 
     # --- 단위(mult=1) 메모이제이션: material/gagong/lme는 mult에 선형 → 단위값 캐시 후 ×mult ---
     def material_u(self, item, ymd):
