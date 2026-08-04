@@ -1748,6 +1748,38 @@ SCREEN.subvariant=(c)=>{
     <td class="num">${nfq(l.qty)}</td><td>${esc(l.gubun)}</td><td title="${esc(l.vendor_code)}">${esc(l.vendor_name||l.vendor_code||'')}</td>
     <td>${l.is_rawmat?`Ø${nfq(l.diam)}×${nfq(l.thick)}×${nfq(l.len_val)} · ${esc(l.material)}`:'<span style="color:#c3c9d4">-</span>'}</td>
     ${ed?`<td class="center"><button class="btn dl-e" data-lid="${l.line_id}" style="padding:1px 5px;font-size:10px">수정</button><button class="btn dl-d" data-lid="${l.line_id}" style="padding:1px 5px;font-size:10px">삭제</button></td>`:''}</tr>`;
+  // ===== STEP3: 후보 SUB 재구성·공정배치 패널 (drag=체크선택→SUB, 공정 배치, 공수합=BASE 게이트) =====
+  const loadRD=async(rid)=>{try{const r=await fetch(`${API}/api/sourcing/route/detail?route_id=${rid}`);st.rd=await r.json();st.rd.route_id=rid;st.rdProc=null;}catch(e){st.rd={route_id:rid,error:e.message};}draw();};
+  const _pmap={'28':'은납','51':'용접','52':'지그','53':'교정','54':'수몰','55':'부품부착','56':'에어','61':'포장','69':'너트','83':'포장'};
+  const subPanel=(R)=>{
+    const rd=(st.rd&&st.rd.route_id===R.route_id)?st.rd:null;
+    if(!rd) return `<div style="margin-top:10px;border-top:2px solid #e2e8f2;padding-top:8px"><button class="btn" id="sp-open" style="background:#8e44ad;color:#fff;padding:3px 12px">🧩 SUB 재구성 · 공정 배치 열기</button> <span style="color:#8aa0bd;font-size:11px">부품을 SUB로 묶고 공정(용접·포장 등) 배정 · 공수합=BASE 유지</span></div>`;
+    if(rd.error) return `<div style="margin-top:10px;color:#c0392b">SUB패널 오류: ${esc(rd.error)}</div>`;
+    const lines=rd.lines||[], subs=lines.filter(l=>l.node_kind==='SUB'), parts=lines.filter(l=>l.node_kind!=='SUB');
+    const flat=parts.filter(p=>!p.parent_line), memb=sid=>parts.filter(p=>p.parent_line===sid);
+    const bp=rd.base_procs||[], nodes=[{code:st.routeTarget,label:'제품 '+st.routeTarget}].concat(subs.map(s=>({code:(s.sub_item||s.child_item),label:'SUB '+(s.sub_item||s.child_item)})));
+    if(!st.rdProc||st.rdProc._rid!==R.route_id){st.rdProc={_rid:R.route_id};nodes.forEach(nd=>st.rdProc[nd.code]={});
+      const saved={};(rd.procs||[]).forEach(p=>{(saved[p.node_item]=saved[p.node_item]||{})[p.proc_code]=p.work_qty;});
+      if(rd.procs&&rd.procs.length){nodes.forEach(nd=>bp.forEach(p=>{st.rdProc[nd.code][p.proc_code]=(saved[nd.code]||{})[p.proc_code]||0;}));}
+      else{bp.forEach(p=>{st.rdProc[st.routeTarget][p.proc_code]=p.work_qty;});nodes.slice(1).forEach(nd=>bp.forEach(p=>{st.rdProc[nd.code][p.proc_code]=0;}));}}
+    let csum=0;nodes.forEach(nd=>bp.forEach(p=>{csum+=+((st.rdProc[nd.code]||{})[p.proc_code])||0;}));csum=Math.round(csum*100)/100;
+    const ok=Math.abs(csum-(rd.base_gongsu||0))<0.5;
+    const procGrid=`<div style="overflow:auto"><table class="tbl" style="font-size:11px"><thead><tr><th style="text-align:left">노드＼공정</th>${bp.map(p=>`<th class="num" title="${esc(p.proc_code)}">${esc(_pmap[p.proc_code]||p.proc_code)}</th>`).join('')}<th class="num">계</th></tr></thead>
+      <tbody>${nodes.map(nd=>{let ns=0;bp.forEach(p=>ns+=+((st.rdProc[nd.code]||{})[p.proc_code])||0);return `<tr><td style="text-align:left;white-space:nowrap"><b>${esc(nd.label)}</b></td>${bp.map(p=>`<td class="num"><input class="sp-pq" data-node="${esc(nd.code)}" data-proc="${esc(p.proc_code)}" type="number" min="0" step="any" value="${(st.rdProc[nd.code]||{})[p.proc_code]||''}" style="width:40px;text-align:center"></td>`).join('')}<td class="num"><b>${nfq(ns)}</b></td></tr>`;}).join('')}</tbody>
+      <tfoot><tr><td style="text-align:right;color:#8a94a6">BASE ${rd.base_gongsu} · 후보합</td>${bp.map(_=>'<td></td>').join('')}<td class="num" id="sp-sum" style="color:${ok?'#1c7c3a':'#c0392b'};font-weight:700">${nfq(csum)}</td></tr></tfoot></table></div>`;
+    return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
+      <div style="font-weight:700;color:#8e44ad">🧩 SUB 재구성 · 공정 배치 <span id="sp-gate" style="font-size:11px;font-weight:400;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(csum)} / BASE ${rd.base_gongsu} ${ok?'✔':'✖ 불일치(저장거부)'}</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+        <div style="flex:1;min-width:260px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
+          <div style="font-size:12px;font-weight:600;margin-bottom:3px">평면 부품 (체크 → SUB로 묶기)</div>
+          ${flat.map(p=>`<label style="display:block;font-size:12px"><input type="checkbox" class="sp-pick" data-lid="${p.line_id}"> ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span></label>`).join('')||'<div style="color:#8a94a6;font-size:11px">평면 부품 없음</div>'}
+          <button class="btn" id="sp-mksub" style="margin-top:6px;background:#8e44ad;color:#fff;padding:2px 10px">선택 → 신규 SUB</button>
+          ${subs.map(s=>`<div style="margin-top:6px;border-top:1px dashed #d6c3ea;padding-top:4px;font-size:12px"><b style="color:#8e44ad">▸ SUB ${esc(s.sub_item||s.child_item)}</b> <button class="btn sp-dis" data-sub="${s.line_id}" style="padding:0 6px;font-size:10px">해제</button>${memb(s.line_id).map(m=>`<div style="padding-left:14px;color:#5a6b82">└ ${esc(m.child_item)}</div>`).join('')}</div>`).join('')}
+        </div>
+        <div style="flex:2;min-width:340px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
+          <div style="font-size:12px;font-weight:600;margin-bottom:3px">공정 배치 (제품/SUB별 작업ST · 합계=BASE 유지)</div>
+          ${procGrid}
+          <button class="btn" id="sp-psave" style="margin-top:6px;background:#1c7c3a;color:#fff;padding:2px 10px">💾 공정 배치 저장</button></div></div></div>`;};
   const detailModal=()=>{const d=st.detail;if(!d)return '';const R=routeById(d.route_id);if(!R)return '';
     const ed=d.mode==='edit'&&canW&&!R.baseline, h=d.hdr||{};
     const hdrView=`<div style="color:#5a6b82;font-size:12.5px">구분 <b>${esc(R.gubun||'-')}</b>${R.vendor_code?` · 공급처 <b>${esc(R.vendor_name||R.vendor_code)}</b>`:''}${R.apply_from?` · 적용 ${esc(R.apply_from)}`:''}${R.note?` · ${esc(R.note)}`:''}</div>`;

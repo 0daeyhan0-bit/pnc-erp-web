@@ -834,11 +834,19 @@ def sourcing_route_detail(route_id: int = Query(...)):
                "gubun": h[4], "vendor_code": str(h[5]).strip(), "vendor_name": vmap.get(str(h[5]).strip(), str(h[5]).strip()),
                "approve_flag": bool(h[6]), "reject_flag": bool(h[7]), "reject_reason": h[8], "apply_from": h[9],
                "note": h[10], "ins_user": h[11]}
-        base_g = None
-        try: base_g = _base_gongsu(str(h[1]).strip())
-        except Exception: base_g = None
+        base_g = None; base_procs = []
+        try:
+            with _COST_LOCK:
+                try: pg = _get_cost_engine().proc_grid(str(h[1]).strip(), "260630")
+                except Exception: pg = _get_cost_engine(fresh=True).proc_grid(str(h[1]).strip(), "260630")
+            base_procs = [{"proc_code": k, "work_qty": round(float(v.get("wq", 0)), 2), "uph": float(v.get("uph", 0)), "cg": str(v.get("cg", ""))}
+                          for k, v in pg.items() if float(v.get("wq", 0)) > 0]
+            base_procs.sort(key=lambda x: x["proc_code"])
+            base_g = round(sum(p["work_qty"] for p in base_procs), 2)
+        except Exception:
+            base_g = None
         cand_g = round(sum(p["work_qty"] for p in procs), 2)
-        return {"header": hdr, "lines": lines, "procs": procs,
+        return {"header": hdr, "lines": lines, "procs": procs, "base_procs": base_procs,
                 "base_gongsu": base_g, "cand_gongsu": cand_g, "gate_ok": (base_g is None or abs(cand_g - base_g) < 0.5 or cand_g == 0)}
     finally:
         nx.close()
