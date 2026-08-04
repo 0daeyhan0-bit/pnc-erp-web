@@ -573,6 +573,20 @@ def bom_copy(payload: dict = Body(...)):
         cur.execute("""IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL
             INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
             SELECT ?,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,'W','bom_copy' FROM nx.proc_weld WHERE parent_item=?""", target, source)
+        # ★item_weld(용접 관경 detail) 복사 — 팝업 프리로드/재계산 정합
+        cur.execute("IF OBJECT_ID('nx.item_weld','U') IS NOT NULL DELETE FROM nx.item_weld WHERE item_code=?", target)
+        cur.execute("""IF OBJECT_ID('nx.item_weld','U') IS NOT NULL
+            INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty)
+            SELECT ?,weld_item,pipe_diam,weld_qty,use_qty FROM nx.item_weld WHERE item_code=?""", target, source)
+        # ★routing(공정=가공비) 복사 — 미복사 시 가공비 누락. ★제품 조립공정은 p_item=제품·item_code=RAC(용접봉carrier) 구조 →
+        #   item_code=source(제품자체 공정) OR p_item=source(용접/은납/체결 carrier공정) 둘 다 복사. source→target 치환(carrier코드는 유지).
+        cur.execute("IF OBJECT_ID('nx.routing','U') IS NOT NULL DELETE FROM nx.routing WHERE item_code=? OR p_item=?", target, target)
+        cur.execute("""IF OBJECT_ID('nx.routing','U') IS NOT NULL
+            INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+            SELECT CASE WHEN p_item=? THEN ? ELSE p_item END, CASE WHEN item_code=? THEN ? ELSE item_code END,
+                   proc_code,work_qty,prod_uph,calc_gubun,sort_seq
+            FROM nx.routing WHERE item_code=? OR p_item=?""", source, target, source, target, source, source)
+        _reset_cost_engine()   # ★신규 품번 → 엔진 캐시(_hasbom 등) 무효화(미호출 시 재료=0 발생)
         return {"ok": True, "count": seq, "weld": nweld, "source_from": src, "warn": warn}
     finally:
         cn.close()
