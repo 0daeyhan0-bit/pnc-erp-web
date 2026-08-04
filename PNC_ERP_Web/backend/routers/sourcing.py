@@ -589,8 +589,9 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                 return bool(show_unapproved)
             fr = [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
             routes = fr
+        next_no = _peek_route_no(cur, item)   # 단조증가 다음 번호(자동라벨 표시용)
         return {"item": item, "item_name": nm, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
-                "routes": routes}
+                "routes": routes, "next_route_no": next_no}
     finally:
         nx.close()
 
@@ -627,8 +628,7 @@ def sourcing_route_save(payload: dict = Body(...)):
                   rname, ven, gub, cur_f, apf, note, usr, int(rid))
             if cur.rowcount == 0: raise HTTPException(404, f"대상 없음(route_id={rid})")
             return {"ok": True, "route_id": int(rid), "mode": "update", "approve_reset": True}
-        cur.execute("SELECT ISNULL(MAX(route_no),1) FROM nx.sourcing_route WHERE item_code=?", item)
-        rno = int(cur.fetchone()[0]) + 1
+        rno = _next_route_no(cur, item)   # ★단조증가 채번(삭제해도 재사용 안 함)
         cur.execute("""INSERT INTO nx.sourcing_route(item_code,route_no,route_name,vendor_code,gubun,current_flag,
               approve_flag,apply_from,note,ins_user) OUTPUT INSERTED.route_id VALUES(?,?,?,?,?,?,0,?,?,?)""",
               item, rno, (rname or f"대안 {rno}"), ven, gub, cur_f, apf, note, usr)
@@ -687,8 +687,7 @@ def sourcing_route_copy(payload: dict = Body(...)):
             src_lines = [[l["sort_seq"], l["child_item"], l["child_name"], l["qty"], l["gubun"], l["vendor_code"],
                          l["is_rawmat"], l["diam"], l["thick"], l["len_val"], l["material"], l["spec"], l["note"]] for l in bl]
         # 새 route_no
-        cur.execute("SELECT ISNULL(MAX(route_no),1) FROM nx.sourcing_route WHERE item_code=?", item)
-        rno = int(cur.fetchone()[0]) + 1
+        rno = _next_route_no(cur, item)   # ★단조증가 채번(삭제해도 재사용 안 함)
         suffix = str(p.get("suffix", "") or f"-S{rno}").strip()[:8]
         cur.execute("""INSERT INTO nx.sourcing_route(item_code,route_no,route_name,vendor_code,gubun,current_flag,
               approve_flag,apply_from,note,ins_user) OUTPUT INSERTED.route_id VALUES(?,?,?,?,?,0,0,?,?,?)""",
@@ -719,7 +718,9 @@ def sourcing_route_copy(payload: dict = Body(...)):
 
 @router.post("/api/sourcing/route/delete")
 def sourcing_route_delete(payload: dict = Body(...)):
-    """경로 삭제(헤더+라인). 현행 baseline(route_id=0)은 삭제 불가. 근거키=route_id."""
+    """경로 삭제(헤더+라인+공정+용접). 현행 baseline(route_id=0)은 삭제 불가.
+       ★삭제 가드: 조달프로파일(nx.sourcing_profile)이 이 route_id를 업체매핑 중이면 거부(매핑 해제 후 삭제).
+       ★번호 단조증가: route_no는 삭제해도 route_seq에 high-water 유지 → 재사용 안 함. 근거키=route_id."""
     rid = int(payload.get("route_id") or 0)
     if rid <= 0: raise HTTPException(400, "현행(기준선)은 삭제할 수 없습니다 — 대안 경로만 삭제 가능")
     nx = _nx_tx(); cur = nx.cursor()
@@ -728,10 +729,21 @@ def sourcing_route_delete(payload: dict = Body(...)):
         cur.execute("SELECT current_flag FROM nx.sourcing_route WHERE route_id=?", rid)
         r = cur.fetchone()
         if not r: raise HTTPException(404, "대상 없음")
+        if int(r[0] or 0) == 1:
+            nx.rollback(); return {"ok": False, "guard": "CURRENT", "msg": "현행(실사용) 후보는 삭제할 수 없습니다."}
+        # 삭제 가드: 조달프로파일에서 사용(업체 매핑) 중이면 거부
+        cur.execute("SELECT COUNT(*) FROM nx.sourcing_profile WHERE route_id=?", rid)
+        nprof = int(cur.fetchone()[0] or 0)
+        if nprof > 0:
+            nx.rollback()
+            return {"ok": False, "guard": "IN_USE", "profiles": nprof,
+                    "msg": f"조달 프로파일에서 사용 중({nprof}개 업체 매핑) — 매핑 해제 후 삭제하세요."}
+        cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
+        cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route WHERE route_id=?", rid)
         nx.commit()
-        return {"ok": True, "deleted": rid}
+        return {"ok": True, "deleted": rid}   # route_no는 route_seq(high-water)에 남아 재사용 안 됨
     except Exception:
         nx.rollback(); raise
     finally:

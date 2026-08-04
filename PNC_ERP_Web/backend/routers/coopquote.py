@@ -563,6 +563,16 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             walk(ch, lvl+1, cq)
         seen.discard(code)
     walk(item, 1, 1.0)
+    # 용접봉 견적기준: BOM 용접봉코드가 견적과 달라 미매치인 행에 견적 용접봉 잔여액 균등배분(현BOM 소요 무시)
+    wr = [r for r in rows if r["role"] == "용접봉"]
+    if wr and weld_quote:
+        matched = {c for c in weld_quote if any(r["code"].upper() == c for r in wr)}
+        leftover = sum(m for c, m in weld_quote.items() if c not in matched)
+        un = [r for r in wr if r["code"].upper() not in weld_quote]
+        if un and leftover:
+            share = round(leftover / len(un))
+            for r in un:
+                r["weld_cost"] = share; r["mat_now"] = share
     need = sum(1 for r in rows if r["need_input"])
     total_soyo = round(sum(r["soyo_weight"] for r in rows if r["role"] == "제작동관"), 4)
     total_weld = round(sum(r["weld_cost"] for r in rows if r["role"] == "용접봉"))

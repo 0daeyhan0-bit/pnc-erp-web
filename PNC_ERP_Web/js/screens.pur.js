@@ -1447,7 +1447,7 @@ SCREEN.coopquote=(host)=>{
   const beProcCnt=(r,op)=>{const pe=st.bomedit.procEdits[r.code];if(pe&&pe[op]!=null&&pe[op]!=='')return +pe[op]||0;return (r.procs&&r.procs[op])||0;};
   const beRowGagong=(r)=>{const be=st.bomedit;if(r.role!=='제작동관'||!be.data)return 0;const rate=be.data.rate||{};const lab=be.data.labor_rate||6300;let t=0;
     (be.data.proc_ops||[]).forEach(op=>{const c=beProcCnt(r,op);const dv=rate[op];if(c&&dv)t+=(lab/dv)*c;});return Math.round(t*(r.cum_qty||0));};
-  const newBomEdit=()=>{st.bomedit={isNew:true,loading:false,vendor:st.vendor||'',grade:'일반CU',sagub:20000,proc:0,edits:{},procEdits:{},sagubEdits:{},data:null,assy:''};render();};
+  const newBomEdit=()=>{st.bomedit={isNew:true,loading:false,vendor:st.vendor||'',grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},data:null,assy:''};render();};
   const loadBomInto=async(item,salePrefill)=>{const be=st.bomedit;if(!be||!item.trim())return;
     be.assy=item.trim();be.loading=true;be.edits={};render();
     try{const res=await fetch(`${API}/api/coopquote/bom-form?item=${encodeURIComponent(item.trim())}&vendor=${encodeURIComponent(be.vendor||'')}&ym=${encodeURIComponent(be.ym||'')}`);const j=await res.json();be.data=j;
@@ -1459,7 +1459,7 @@ SCREEN.coopquote=(host)=>{
     }catch(e){be.data=null;}
     be.loading=false;render();};
   const openBomEdit=async(idx)=>{const r=st.rows[idx];if(!r)return;
-    st.bomedit={isNew:false,loading:true,vendor:r.vendor,grade:r.grade||'일반CU',sagub:r.sagub_price||20000,proc:Math.round(r.proc_cost||0),edits:{},procEdits:{},sagubEdits:{},data:null,assy:r.assy_code,
+    st.bomedit={isNew:false,loading:true,vendor:r.vendor,grade:r.grade||'일반CU',sagub:r.sagub_price||20000,proc:Math.round(r.proc_cost||0),ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},data:null,assy:r.assy_code,
       rowvals:{mat_cost:r.mat_cost||0,mat_raw:r.mat_raw||0,mat_weld:r.mat_weld||0,mat_part:r.mat_part||0,proc_cost:r.proc_cost||0,sale:r.sale_price||0}};render();
     await loadBomInto(r.assy_code, r.sale_price||0);};
   // 작업목록(직원입력)
@@ -1468,7 +1468,7 @@ SCREEN.coopquote=(host)=>{
     catch(e){st.worklist=[];}
     st.workLoading=false;render();};
   const openWork=async(assy,vendor)=>{if(!assy)return;
-    st.bomedit={isNew:false,loading:true,vendor:(vendor||st.vendor||'').trim(),grade:'일반CU',sagub:20000,proc:0,edits:{},procEdits:{},sagubEdits:{},data:null,assy:assy,rowvals:null,fromWork:true};render();
+    st.bomedit={isNew:false,loading:true,vendor:(vendor||st.vendor||'').trim(),grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},data:null,assy:assy,rowvals:null,fromWork:true};render();
     await loadBomInto(assy,null);};
   const saveBomEdit=async()=>{const be=st.bomedit;if(!be||!be.data)return;
     const specs=be.data.rows.filter(r=>r.role==='제작동관').map(r=>{const e=be.edits[r.code]||{};
@@ -1642,7 +1642,7 @@ SCREEN.coopquote=(host)=>{
              <label style="color:#33507d;font-weight:600" title="관경별 사급가 미입력 행에 적용되는 기본값(일괄)">기본사급가</label><input class="inp" id="be-sagub" type="number" step="any" value="${esc(be.sagub)}" style="width:84px;text-align:right">
              <label style="color:#33507d;font-weight:600">가공비(공정계산)</label><input class="inp" id="be-proc" type="number" step="any" value="${esc(be.proc)}" style="width:84px;min-width:0;text-align:right" title="공정×표준ST×임율 자동계산값 (수정가능)">
              <span style="color:#8aa0bd;font-size:11px">임율 ${nf(d.labor_rate)}</span>
-             <label style="color:#33507d;font-weight:600" title="사급가(판매단가) 기준월 — 이 월 이하 최신 판매단가로 재료비 계산">적용월</label><input class="inp" id="be-ym" type="month" value="${esc(be.ym||'')}" style="width:118px">
+             <span style="display:inline-flex;align-items:center;gap:5px;background:#fff3d6;border:1px solid #e8c877;border-radius:6px;padding:3px 8px"><label style="color:#8a5a00;font-weight:700" title="사급가(판매단가) 기준월 — 이 월 이하 최신 판매단가로 재료비 계산">📅 적용월</label><input class="inp" id="be-ym" type="month" value="${esc(be.ym||'')}" style="width:130px;font-weight:600"></span>
              <span style="color:#c0392b;font-weight:700" title="현재 재료비 합계(적용월 기준)">재료비(현재) ${nf(d.total_mat||0)}</span>
              ${d.need_input?`<span style="color:#c0392b;font-weight:600">⚠ 스펙 입력필요 ${d.need_input}건</span>`:'<span style="color:#1c7c3a">스펙 완비</span>'}
            </div>

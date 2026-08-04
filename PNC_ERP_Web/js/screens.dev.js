@@ -1662,7 +1662,7 @@ SCREEN.subvariant=(c)=>{
       if(j.error){st.matErr=j.error;st.mat=[];}else{st.mat=j.rows||[];if(!st.selNm)st.selNm=j.item||'';}}catch(e){st.matErr='내부원가 조회 실패';st.mat=[];}
     st.routeTarget=item;st.routeTargetNm=st.selNm;await loadRoutes();st.loading=false;draw();};
   const loadRoutes=async()=>{try{const r=await fetch(`${API}/api/sourcing/routes?item=${encodeURIComponent(st.routeTarget)}&show_unapproved=1&for_profile=0`);
-      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];}catch(e){st.routes=[];}};
+      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;}catch(e){st.routes=[];}};
   const vSearch=t=>{clearTimeout(st.acT);st.acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(t)}`);
       st.vopts=(await r.json()).rows||[];const dl=c.querySelector('#sv-vdl');if(dl)dl.innerHTML=st.vopts.map(v=>`<option value="${esc(v.code)}">${esc(v.code)} · ${esc(v.name)}</option>`).join('');}catch(e){}},180);};
   const routeById=id=>st.routes.find(r=>r.route_id===id)||(id===0?st.routes.find(r=>r.baseline):null);
@@ -2029,7 +2029,8 @@ SCREEN.subvariant=(c)=>{
     c.querySelectorAll('.sv-mrow.sel').forEach(x=>x.classList.remove('sel'));if(el)el.classList.add('sel');
     st.rload=true;paintRoutes();await loadRoutes();st.rload=false;paintTree();paintRoutes();};
   // ---------- 신규 등록 ----------
-  const nextRouteNo=()=>{const stored=st.routes.filter(r=>+r.route_id>0);return (stored.length?Math.max(...stored.map(r=>+r.route_no||0)):1)+1;};  // 백엔드 ISNULL(MAX(route_no),1)+1 미러(현행=R01 다음)
+  const nextRouteNo=()=>{if(st.nextNo)return st.nextNo;  // ★서버 단조증가 high-water(삭제해도 재사용안함) 미러
+    const stored=st.routes.filter(r=>+r.route_id>0);return (stored.length?Math.max(...stored.map(r=>+r.route_no||0)):1)+1;};  // 폴백
   const openNew=(preMethod)=>{const baseline=st.routes.find(r=>r.baseline);
     const nn=nextRouteNo(),autoLabel=`${st.routeTarget}_R${String(nn).padStart(2,'0')}`;
     st.newForm={target:st.routeTarget,name:autoLabel,autoLabel,nextNo:nn,method:preMethod||'cur',source_route_id:(altRoutes()[0]||{}).route_id||0,
@@ -2093,7 +2094,11 @@ SCREEN.subvariant=(c)=>{
       const j=await r.json();if(j.ok){st.msg=on?'✔ 승인 — 조달프로파일 후보로 노출됩니다':'승인 취소 — 프로파일에서 숨김';await loadRoutes();draw();}else alert('승인 실패');}catch(e){alert('승인 오류: '+e);}};
   const delRoute=async(rid)=>{if(!confirm('이 대안 후보(헤더+라인)를 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});
-      const j=await r.json();if(j.ok){st.msg='🗑 후보 삭제 완료';if(st.detail&&st.detail.route_id===rid)st.detail=null;await loadRoutes();draw();}else alert('삭제 실패: '+(j.detail||''));}catch(e){alert('삭제 오류: '+e);}};
+      const j=await r.json();
+      if(j.ok){st.msg='🗑 후보 삭제 완료';if(st.detail&&st.detail.route_id===rid)st.detail=null;await loadRoutes();draw();}
+      else if(j.guard==='IN_USE'){alert('⚠ 삭제 불가 — '+(j.msg||'조달 프로파일에서 사용 중입니다. 업체 매핑을 먼저 해제하세요.'));}
+      else if(j.guard==='CURRENT'){alert('⚠ '+(j.msg||'현행 후보는 삭제할 수 없습니다.'));}
+      else alert('삭제 실패: '+(j.detail||j.msg||''));}catch(e){alert('삭제 오류: '+e);}};
   const delLine=async(lid)=>{if(!confirm('이 라인을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/sourcing/line/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({line_id:lid,user:'웹사용자'})});
       const j=await r.json();if(j.ok){st.msg='🗑 라인 삭제 (후보 미승인 리셋)';await loadRoutes();draw();}else alert('삭제 실패: '+(j.detail||''));}catch(e){alert('삭제 오류: '+e);}};
