@@ -80,7 +80,11 @@ button{font-family:inherit;cursor:pointer}
   color:#4a5563;max-width:200px;white-space:nowrap}
 .tab.active{background:var(--panel);color:var(--brand);font-weight:700}
 .tab .x{opacity:.5;font-size:11px}.tab .x:hover{opacity:1;color:var(--danger)}
-.content{flex:1;overflow:hidden;padding:16px;min-height:0}
+/* ★전역 짤림 근본수정: content가 넘치면 자체 스크롤(기존 overflow:hidden은 뷰포트 밖 클립 원인). 상세패널/그리드 도달 보장 */
+.content{flex:1;overflow:auto;padding:16px;min-height:0}
+/* 공통 상세패널 내부 스크롤 유틸(화면 재사용): 부모가 height 확정일 때 패널 자체 스크롤 + 헤더 sticky */
+.pane-scroll{min-height:0;overflow-y:auto;overflow-x:hidden}
+.pane-sticky-head{position:sticky;top:0;z-index:3;background:#eef4ff}
 
 /* Page */
 .page-title{font-size:18px;font-weight:800;margin-bottom:3px;display:flex;align-items:center;gap:9px}
