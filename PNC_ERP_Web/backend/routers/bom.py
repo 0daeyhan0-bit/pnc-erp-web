@@ -440,6 +440,69 @@ async def lgbom_upload(file: UploadFile = File(...)):
     finally:
         cn.close()
 
+@router.post("/api/lgbom/parse")
+async def lgbom_parse(file: UploadFile = File(...)):
+    """방식① 신규BOM용 — LG BOM Explosion 엑셀 업로드→파싱→**구성 초안 반환(nx 미저장)**.
+       엑셀 헤더(실측): WERKS·MODEL·MATNR(부모)·IDNRK(자식)·OJTXP(품명)·CHI_SPECI(규격)·MENGE(수량)·MEINS(단위)·ETEXT(supply_type)·STUFE·POSNR·LOWEST_FLG·MATTY.
+       반환: top_item=MODEL, lines=MODEL 직속자식(STUFE=1), 용접봉(RAC*)은 is_weld=1 플래그(구성서 분리 유도). 저장은 프론트에서 /api/bom/save 별도."""
+    import io as _io
+    try:
+        import openpyxl
+    except Exception:
+        raise HTTPException(500, "openpyxl 미설치(서버)")
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
+    ws = wb.active
+    itr = ws.iter_rows(values_only=True)
+    try:
+        hdr = next(itr)
+    except StopIteration:
+        raise HTTPException(400, "빈 파일")
+    ix = {str(h or '').strip().upper(): i for i, h in enumerate(hdr)}
+    if not all(k in ix for k in ('MODEL', 'MATNR', 'IDNRK')):
+        raise HTTPException(400, "LG BOM 형식 아님 — 헤더에 MODEL·MATNR·IDNRK 필요")
+    def gv(r, n):
+        i = ix.get(n); v = r[i] if (i is not None and i < len(r)) else None
+        return None if v in (None, '') else v
+    def gs(r, n, ln=None):
+        v = gv(r, n); s = '' if v is None else str(v).strip(); return s[:ln] if ln else s
+    def gf(r, n):
+        try: return float(gv(r, n) or 0)
+        except Exception: return 0.0
+    def gi(r, n):
+        try: return int(float(gv(r, n) or 0))
+        except Exception: return 0
+    model = ''; werks = ''; rows = []
+    for r in itr:
+        if not r or not any(x not in (None, '') for x in r): continue
+        m = gs(r, 'MODEL')
+        if not m: continue
+        if not model: model = m; werks = gs(r, 'WERKS', 4)
+        rows.append({"stufe": gi(r, 'STUFE'), "parent": gs(r, 'MATNR', 30), "child": gs(r, 'IDNRK', 30),
+                     "name": gs(r, 'OJTXP', 150), "spec": gs(r, 'CHI_SPECI', 200), "qty": gf(r, 'MENGE'),
+                     "unit": gs(r, 'MEINS', 6), "supply_type": gs(r, 'ETEXT', 30), "lowest": gs(r, 'LOWEST_FLG', 1)})
+    wb.close()
+    if not model:
+        raise HTTPException(400, "데이터 행 없음")
+    # 직속자식(STUFE=1 또는 parent==model). 용접봉(RAC*)은 is_weld 분리
+    direct = [x for x in rows if x["stufe"] == 1 or x["parent"] == model]
+    if not direct:
+        direct = rows
+    lines, weld = [], []
+    seen = set()
+    for x in direct:
+        ch = x["child"]
+        if not ch or ch in seen: continue
+        seen.add(ch)
+        rec = {"child_item": ch, "item_name": x["name"], "item_spec": x["spec"], "qty": x["qty"],
+               "unit": x["unit"], "supply_type": x["supply_type"], "is_weld": 1 if ch.upper().startswith("RAC") else 0}
+        (weld if rec["is_weld"] else lines).append(rec)
+    return {"ok": True, "top_item": model, "werks": werks, "total_rows": len(rows),
+            "lines": lines, "weld_children": weld, "file": file.filename}
+
 @router.post("/api/bom/copy")
 def bom_copy(payload: dict = Body(...)):
     """BOM 복사(nx 전용): source의 직접자식 구성을 target으로 복제. source nx.bom_line 우선, 없으면 라이브 CS_M_ITEM_BOM 직접자식.

@@ -422,3 +422,69 @@ def cost_proc_save(payload: dict = Body(...)):
         return {"ok": True, "own": seq, "carriers": len(carriers), "weld_recalc": recalcs}
     finally:
         nx.close()
+
+@router.post("/api/weld/save")
+def weld_save(payload: dict = Body(...)):
+    """용접 공정(관경별 횟수) 저장 → nx.item_weld 생성 + proc_weld 파생 + routing(51/28) 생성. 정본산식=_schema/WELD_PROC_TABLES_SPEC.md.
+       payload: {node, weld_item, rows:[{pipe_diam, weld_qty}], loss_factor?(1.5), proc_code?('51'=용접/'28'=은납)}.
+       소요량=Σ(std_use[관경]×횟수)×loss_factor · 내부ST=Σ(std_st×횟수) · routing work_qty=Σ횟수, uph=Σ횟수×3600/내부ST.
+       스코프: (node, weld_item)만 교체(멱등). node 미존재시 안전하게 거절(BOM 먼저 저장). 단가 미변경."""
+    node = str(payload.get("node", "")).strip()
+    wi = str(payload.get("weld_item", "")).strip()
+    rows = payload.get("rows", []) or []
+    if not node or not wi:
+        raise HTTPException(400, "node·weld_item 필요")
+    proc_code = str(payload.get("proc_code", "51")).strip() or "51"
+    if proc_code not in _PROC_WELD:
+        raise HTTPException(400, "proc_code는 51(용접) 또는 28(은납)")
+    lf = payload.get("loss_factor", None)
+    lf = float(lf) if (lf is not None and str(lf).strip() != "") else 1.5
+    # 관경별 횟수 정리(중복관경 합산)
+    from collections import defaultdict as _dd
+    cnt = _dd(float)
+    for r in rows:
+        try:
+            d = round(float(r.get("pipe_diam") or 0), 2); q = float(r.get("weld_qty") or 0)
+        except Exception:
+            continue
+        if d > 0 and q > 0:
+            cnt[d] += q
+    nx = _nx(); cur = nx.cursor()
+    try:
+        # 표준값 마스터(대표=MIN=silver_solder '01')
+        cur.execute("SELECT pipe_diam,MIN(std_use_qty),MIN(std_st) FROM nx.weld_diam GROUP BY pipe_diam")
+        STDU = {}; STDS = {}
+        for r in cur.fetchall():
+            d = round(float(r[0]), 2); STDU[d] = float(r[1] or 0); STDS[d] = float(r[2] or 0)
+        bad = [d for d in cnt if d not in STDU]
+        if bad:
+            raise HTTPException(400, f"weld_diam에 없는 관경: {bad}")
+        sum_use = sum(STDU[d] * q for d, q in cnt.items())
+        sum_cnt = sum(cnt.values())
+        sum_st = sum(STDS[d] * q for d, q in cnt.items())
+        use_qty = round(sum_use * lf, 6)
+        unit = round(sum_use / sum_cnt, 8) if sum_cnt else 0.0
+        diam_rep = max(cnt.items(), key=lambda kv: kv[1])[0] if cnt else 0.0
+        uph = round(sum_cnt * 3600.0 / sum_st, 4) if sum_st > 0 else 0.0
+        # 1) item_weld 교체(스코프: node+weld_item)
+        cur.execute("DELETE FROM nx.item_weld WHERE item_code=? AND weld_item=?", node, wi)
+        for d, q in sorted(cnt.items()):
+            cur.execute("INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty) VALUES(?,?,?,?,?)",
+                        node, wi, d, q, round(STDU[d] * q, 6))
+        # 2) proc_weld 파생(스코프: node+weld_item)
+        cur.execute("DELETE FROM nx.proc_weld WHERE parent_item=? AND weld_item=?", node, wi)
+        if sum_cnt > 0:
+            cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,
+                  loss_factor,meta_ok,cs_calc_except,lme_except,tag,src,upd_dt)
+                VALUES(?,?,?,?,?,?,?,?,1,0,0,'W','weld_save',getdate())""",
+                node, wi, wi.split('-')[0], diam_rep, sum_cnt, unit, use_qty, lf)
+        # 3) routing 용접공정(51/28) 교체(스코프: node+weld_item, proc_code)
+        cur.execute("DELETE FROM nx.routing WHERE p_item=? AND item_code=? AND proc_code=?", node, wi, proc_code)
+        if sum_cnt > 0:
+            cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+                VALUES(?,?,?,?,?,'3',0)""", node, wi, proc_code, sum_cnt, uph)
+        _reset_cost_engine()
+        return {"ok": True, "node": node, "weld_item": wi, "diams": len(cnt), "total_points": sum_cnt,
+                "use_qty": use_qty, "unit_qty": unit, "inner_st": sum_st, "uph": uph, "loss_factor": lf}
+    finally:
+        nx.close()
