@@ -521,7 +521,7 @@ def bom_copy(payload: dict = Body(...)):
         if not cur.fetchone():
             cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", source)
             sr = cur.fetchone(); snm = (sr[0] if sr else "") or source
-            cur.execute("INSERT INTO nx.item(item_code,item_name) VALUES(?,?)", target, f"{snm} (복사:{source})")
+            cur.execute("INSERT INTO nx.item(item_code,item_name,item_type) VALUES(?,?,N'제품')", target, f"{snm} (복사:{source})")
             warn = f"대상 품번 {target} 신규 등록(품목마스터에서 속성 보완 필요)"
         # source 직접자식: nx.bom_line 우선
         cur.execute("""SELECT l.child_item,l.qty,l.node_type,l.cs_calc_except,l.lme_except,l.sagub_default,l.is_optional,
