@@ -72,16 +72,22 @@ def dtrade_list(ym: str = Query(""), linkage: str = Query(""), q: str = Query(""
         if q.strip(): w.append("(d.item_code LIKE ? OR d.item_desc LIKE ?)"); p += [f"%{q.strip()}%"] * 2
         cur.execute(f"""SELECT TOP {int(limit)} d.item_code,d.cust_code,d.cost_tag,d.linkage,d.dong_qty,d.qty_src,
               d.base_ym,d.base_item_cost,d.base_lme,d.main_flag,ISNULL(d.item_desc,''),d.last_ymd,d.sagub_flag,
-              t.item_cost, t.mat_cost_calc
+              t.item_cost, t.mat_cost_calc, lg.price, lg.created_ymd
             FROM nx.dtrade_price d LEFT JOIN nx.dtrade_price_ts t ON t.item_code=d.item_code AND t.cust_code=d.cust_code
               AND t.cost_tag=d.cost_tag AND t.apply_ym=?
+            LEFT JOIN (SELECT item_code, price, created_ymd,
+                 ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY created_ymd DESC) rn FROM nx.dtrade_lg_price) lg
+              ON lg.item_code=d.item_code AND lg.rn=1
             WHERE {' AND '.join(w)} ORDER BY d.linkage, d.item_code""", ym.strip(), *p)
         cols = ["item_code", "cust_code", "cost_tag", "linkage", "dong_qty", "qty_src", "base_ym",
-                "base_item_cost", "base_lme", "main_flag", "item_desc", "last_ymd", "sagub_flag", "calc_item_cost", "calc_mat"]
+                "base_item_cost", "base_lme", "main_flag", "item_desc", "last_ymd", "sagub_flag", "calc_item_cost", "calc_mat",
+                "lg_price", "lg_ymd"]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
-            for k in ("dong_qty", "base_item_cost", "base_lme", "calc_item_cost", "calc_mat"):
+            for k in ("dong_qty", "base_item_cost", "base_lme", "calc_item_cost", "calc_mat", "lg_price"):
                 r[k] = float(r[k]) if r[k] is not None else None
+            r["lg_diff"] = (round(r["calc_item_cost"] - r["lg_price"], 1)
+                            if (r["calc_item_cost"] is not None and r["lg_price"] is not None) else None)
         cur.execute("SELECT COUNT(*) FROM nx.dtrade_price d WHERE " + ' AND '.join(w), *p)
         return {"rows": rows, "cnt": cur.fetchone()[0], "ym": ym}
     finally:
@@ -126,3 +132,101 @@ def dtrade_compare(ym: str = Query(...), batch_ymd: str = Query(...), tol: float
             "within_tol": matched, "match_rate": round(matched / both * 100, 1) if both else 0,
             "mean_abs_diff": round(_st.mean(diffs), 1) if diffs else 0,
             "median_abs_diff": round(_st.median(diffs), 1) if diffs else 0, "mismatch_samples": samples}
+
+
+# ============ LG PO Price(판가 정본) 업로드 — 옵션A: LG 파일값=정본, LME계산=검증용 ============
+@router.post("/api/dtrade/po_upload")
+async def dtrade_po_upload(file: UploadFile = File(...)):
+    """LG PO Price 엑셀 업로드 → nx.dtrade_lg_price(정본) upsert.
+       품번=Material, 판가=Unit Price, 갱신회차=Created Date(YYMMDD), Start/End Date, MKT, 품명=Material Desc.
+       (품번,MKT,Created)별 dedup(Line 1·2 동일가). 최신 Created가 정본."""
+    import io as _io
+    try:
+        import openpyxl
+    except Exception:
+        raise HTTPException(500, "openpyxl 미설치(서버)")
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
+    ws = wb.active; itr = ws.iter_rows(values_only=True)
+    try:
+        hdr = next(itr)
+    except StopIteration:
+        raise HTTPException(400, "빈 파일")
+    ix = {str(h or '').strip().lower(): i for i, h in enumerate(hdr)}
+    if not all(k in ix for k in ('material', 'unit price', 'created date')):
+        raise HTTPException(400, "PO Price 형식 아님 — 헤더에 Material·Unit Price·Created Date 필요")
+    def gv(r, n):
+        i = ix.get(n); v = r[i] if (i is not None and i < len(r)) else None
+        return None if v in (None, '') else v
+    def _ymd6(dt):
+        if hasattr(dt, 'year'): return f"{dt.year % 100:02d}{dt.month:02d}{dt.day:02d}"
+        s = ''.join(ch for ch in str(dt) if ch.isdigit())
+        return s[2:8] if len(s) >= 8 else (s[-6:] if len(s) >= 6 else '')
+    def _ymd8(dt):
+        if hasattr(dt, 'year'): return f"{dt.year:04d}{dt.month:02d}{dt.day:02d}"
+        s = ''.join(ch for ch in str(dt) if ch.isdigit())
+        return s[:8] if len(s) >= 8 else ''
+    seen = {}
+    for r in itr:
+        if not r or not any(x not in (None, '') for x in r): continue
+        mat = str(gv(r, 'material') or '').strip()
+        if not mat: continue
+        try: price = float(gv(r, 'unit price') or 0)
+        except Exception: continue
+        cy = _ymd6(gv(r, 'created date'))
+        if not cy or price <= 0: continue
+        mkt = str(gv(r, 'mkt') or '').strip()[:4]
+        sy = _ymd6(gv(r, 'start date')); ey = _ymd8(gv(r, 'end date'))
+        desc = str(gv(r, 'material desc') or '')[:200]
+        seen[(mat, mkt, cy)] = (price, sy, ey, desc)     # Line 1·2 동일 dedup
+    wb.close()
+    if not seen:
+        raise HTTPException(400, "데이터 행 없음")
+    fn = (file.filename or '')[:200]
+    nx = _nx(); cur = nx.cursor()
+    try:
+        up = 0; items = set()
+        for (mat, mkt, cy), (price, sy, ey, desc) in seen.items():
+            cur.execute("""MERGE nx.dtrade_lg_price AS t
+              USING (SELECT ? item_code, ? mkt, ? created_ymd) s
+              ON t.item_code=s.item_code AND t.mkt=s.mkt AND t.created_ymd=s.created_ymd
+              WHEN MATCHED THEN UPDATE SET price=?, start_ymd=?, end_ymd=?, item_desc=?, src_file=?, upload_dt=GETDATE()
+              WHEN NOT MATCHED THEN INSERT(item_code,mkt,created_ymd,price,start_ymd,end_ymd,item_desc,src_file)
+                VALUES(?,?,?,?,?,?,?,?);""",
+                mat, mkt, cy, price, sy, ey, desc, fn, mat, mkt, cy, price, sy, ey, desc, fn)
+            up += 1; items.add(mat)
+        # 최신 회차 요약
+        cur.execute("SELECT COUNT(DISTINCT item_code), MAX(created_ymd) FROM nx.dtrade_lg_price")
+        tot, maxc = cur.fetchone()
+        return {"ok": True, "rows": up, "items": len(items), "file": fn,
+                "total_items": tot, "latest_created": maxc}
+    finally:
+        nx.close()
+
+
+@router.get("/api/dtrade/lg_compare")
+def dtrade_lg_compare(ym: str = Query(""), tol: float = Query(5.0)):
+    """계산판가(ym) vs LG확정판가(최신 회차) 일치율 — 옵션A 검증 요약."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT t.item_cost, lg.price
+            FROM nx.dtrade_price_ts t
+            JOIN nx.dtrade_price d ON d.item_code=t.item_code AND d.cust_code=t.cust_code AND d.cost_tag=t.cost_tag
+            JOIN (SELECT item_code, price, ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY created_ymd DESC) rn
+                  FROM nx.dtrade_lg_price) lg ON lg.item_code=t.item_code AND lg.rn=1
+            WHERE t.apply_ym=? AND d.linkage=N'직거래LME'""", ym.strip()[:6])
+        both = matched = 0; diffs = []
+        for calc, lg in cur.fetchall():
+            if calc is None or lg is None: continue
+            both += 1; dd = abs(float(calc) - float(lg)); diffs.append(dd)
+            if dd <= tol: matched += 1
+        import statistics as _st
+        return {"ym": ym, "compared": both, "within_tol": matched,
+                "match_rate": round(matched / both * 100, 1) if both else 0,
+                "mean_abs_diff": round(_st.mean(diffs), 1) if diffs else 0,
+                "over1pct": sum(1 for d in diffs if d > 0)}
+    finally:
+        nx.close()
