@@ -201,6 +201,11 @@ SCREEN.itembom=(c)=>{
   const metals=[...new Set(items.map(r=>r.metal))].filter(Boolean).sort();
   let msMetal=metals.includes('CU')?'CU':(metals[0]||''); const msShow=new Set(procs.map(p=>p.code)); let editMode=false;
   const fixed=[['item','P/N'],['nm','품명'],['sg','소분류'],['diam','외경'],['thick','두께'],['metal','재질'],['unit','단위']];
+  const API=API_BASE;
+  let itab='gagong', assyD=null, assyLoad=false, assyQ='';   // ★탭: 가공품 공정ST / ASSY 조립공정
+  const TAB=()=>{const t=(k,l)=>`<div class="it-tab" data-it="${k}" style="border:1px solid #d3ddec;border-bottom:none;background:${itab===k?'#fff':'#f1f5fb'};color:${itab===k?'#1c47a0':'#5a6b82'};padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0">${l}</div>`;
+    return `<div style="display:flex;gap:2px;margin:6px 0 2px;border-bottom:2px solid #d3ddec">${t('gagong','가공품 공정 ST')}${t('assy','ASSY 조립공정')}</div>`;};
+  const bindTab=()=>c.querySelectorAll('.it-tab').forEach(el=>el.onclick=()=>{itab=el.dataset.it;draw();});
   const startEdit=(td)=>{
     if(td.querySelector('input'))return;
     const ri=+td.dataset.ri, pc=td.dataset.pc, cur=(items[ri].wq&&items[ri].wq[pc])||0;
@@ -209,9 +214,10 @@ SCREEN.itembom=(c)=>{
     const done=s=>{ if(s){const nv=+el.value||0; items[ri].wq=items[ri].wq||{}; if(nv)items[ri].wq[pc]=nv; else delete items[ri].wq[pc]; td.innerHTML=nv?won(nv):'<span style="color:#cfd6e0">·</span>'; td.style.background='#fff7d6';} else td.innerHTML=cur?won(cur):'<span style="color:#cfd6e0">·</span>'; };
     el.onblur=()=>done(1); el.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();el.blur();}else if(e.key==='Escape'){el.onblur=null;done(0);}};
   };
-  const draw=()=>{
+  const drawGagong=()=>{
     c.innerHTML=`
-     <div class="page-title">📋 품목별 ST관리</div>
+     <div class="page-title">📋 품목별 공정관리 <span style="font-size:12px;color:var(--muted);font-weight:400">가공품 공정 ST</span></div>
+     ${TAB()}
      <div class="page-sub"><b>품목별 공정 ST(WORK_QTY)</b> 매트릭스 · 원본 <code>CS_T_ITEM_PROC</code> · ✔라이브 견적원가(w_cs_esti_010) WORK_QTY 일치검증 · ✎수정 시 숫자 클릭 편집</div>
      <div class="toolbar">
        <label class="tl">소재</label><select class="sel" id="msmetal">${metals.map(x=>`<option value="${esc(x)}" ${x===msMetal?'selected':''}>${esc(x)} ${esc(metalNM[x]||'')}</option>`).join('')}</select>
@@ -237,7 +243,38 @@ SCREEN.itembom=(c)=>{
       c.querySelector('#msrevert').onclick=()=>{if(confirm('원본(CS_T_ITEM_PROC)으로 되돌립니다. 임시저장분 삭제.')){localStorage.removeItem(lsm);items=loadMS();renderMS();}};
     } else if(c.querySelector('#msedit')){ c.querySelector('#msedit').onclick=()=>{editMode=true;draw();}; }
     renderMS();
+    bindTab();
   };
+  // ===== ASSY 조립공정 탭 — 제품(행) × 조립공정(열) · 소스 nx.routing(p_item=제품) = 내부원가 조립공정 팝업과 동일 =====
+  const loadAssy=async()=>{assyLoad=true;renderAssy();
+    try{const r=await fetch(`${API}/api/itemproc/assy?q=${encodeURIComponent(assyQ)}`);assyD=await r.json();}catch(e){assyD={error:e.message};}
+    assyLoad=false;renderAssy();};
+  const renderAssy=()=>{
+    const b=c.querySelector('#asbody');if(!b)return;
+    if(assyLoad){b.innerHTML='<div class="empty">조회 중…</div>';return;}
+    if(!assyD){b.innerHTML='<div class="empty">제품 P/N·품명으로 조회하세요 (조립공정 보유 제품).</div>';return;}
+    if(assyD.error){b.innerHTML=`<div class="page-sub" style="color:#c0392b">⚠ ${esc(assyD.error)}</div>`;return;}
+    const cols=assyD.cols||[],rows=assyD.rows||[];
+    const cnt=c.querySelector('#ascnt');if(cnt)cnt.textContent=`${rows.length}제품 · ${cols.length}조립공정${assyD.total_items>rows.length?` (전체 ${assyD.total_items} 중 상위 표시)`:''}`;
+    b.innerHTML=`<div class="grid-wrap" style="max-height:560px;overflow:auto"><table class="tbl fit">
+      <thead><tr><th style="text-align:left">P/N</th><th style="text-align:left">품명</th>${cols.map(cc=>`<th class="num" title="${esc(cc.name)} (${esc(cc.code)}·${esc(cc.group)})">${esc(cc.name)}</th>`).join('')}<th class="num" style="background:#eef4ff">합계</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td style="white-space:nowrap"><b>${esc(r.item)}</b></td><td class="cap" title="${esc(r.name)}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</td>${cols.map(cc=>{const v=r.wq[cc.code]||0;return `<td class="num">${v?won(v):'<span style="color:#cfd6e0">·</span>'}</td>`;}).join('')}<td class="num" style="font-weight:700;background:#f6f9ff">${won(r.total)}</td></tr>`).join('')||`<tr><td colspan="${cols.length+3}" class="empty">조립공정 보유 제품 없음</td></tr>`}</tbody></table></div>`;};
+  const drawAssy=()=>{
+    c.innerHTML=`
+     <div class="page-title">📋 품목별 공정관리 <span style="font-size:12px;color:var(--muted);font-weight:400">ASSY 조립공정 (nx.routing · 내부원가 조립공정 팝업과 동일 소스)</span></div>
+     ${TAB()}
+     <div class="page-sub">제품(ASSY) × 조립공정(용접·은납·체결·포장) ST(work_qty) 매트릭스 · 소스 <code>nx.routing</code>(p_item=제품) · 편집은 [품목 BOM관리 › 내부원가 › 제품 조립공정 팝업]</div>
+     <div class="toolbar"><input class="inp" id="asq" placeholder="제품 P/N·품명 검색" value="${esc(assyQ)}" style="width:260px"><button class="btn" id="asgo">🔍 조회</button>
+       <div class="spacer"></div><span class="rowcount" id="ascnt"></span></div>
+     <div id="asbody"></div>`;
+    bindTab();
+    const go=()=>{assyQ=(c.querySelector('#asq').value||'').trim();assyD=null;loadAssy();};
+    c.querySelector('#asgo').onclick=go;
+    c.querySelector('#asq').onkeyup=e=>{if(e.key==='Enter')go();};
+    renderAssy();
+    if(!assyD&&!assyLoad)loadAssy();
+  };
+  const draw=()=>{ if(itab==='gagong')drawGagong(); else drawAssy(); };
   draw();
 };
 
@@ -1322,13 +1359,14 @@ SCREEN.unifybom=(c,ro)=>{
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     let sWq=0;cols.forEach(cc=>sWq+=(+cc.wq||0));
-    const band=(sub)=>!sub.length?'':`<table class="tbl wm" style="font-size:11px;table-layout:fixed;width:100%;margin-bottom:6px">
-        <thead><tr><th style="text-align:left;width:58px">구분</th>${sub.map(cc=>`<th class="num" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px" title="${esc(cc.name)} · ${esc(cc.code)}">${esc(cc.name)}</th>`).join('')}</tr></thead>
+    const band=(sub)=>{if(!sub.length)return '';const bsum=sub.reduce((s,cc)=>s+(+cc.wq||0),0);
+      return `<table class="tbl wm" style="font-size:11px;table-layout:fixed;width:100%;margin-bottom:6px">
+        <thead><tr><th style="text-align:left;width:58px">구분</th>${sub.map(cc=>`<th class="num" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px" title="${esc(cc.name)} · ${esc(cc.code)}">${esc(cc.name)}</th>`).join('')}<th class="num" style="width:48px;background:#eef4ff">합계</th></tr></thead>
         <tbody>
-          <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}</tr>
-          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num" style="color:#5a6b82;font-variant-numeric:tabular-nums">${cc.uph?M2(cc.uph):''}</td>`).join('')}</tr>
-          <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${sub.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}</tr>
-        </tbody></table>`;
+          <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}<td class="num" style="font-weight:700;background:#f6f9ff;color:#1c47a0">${bsum?M2(bsum):''}</td></tr>
+          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num" style="color:#5a6b82;font-variant-numeric:tabular-nums">${cc.uph?M2(cc.uph):''}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
+          <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${sub.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
+        </tbody></table>`;};
     const _half=Math.ceil(cols.length/2);
     const procMatrix=`
       <div style="padding:4px 6px"><b style="color:#1c47a0">⚙ 공정별 (작업 ST 입력)</b> <span style="color:#8a94a6;font-size:11px">공정 2단 배치 · 작업ST 입력 / 내부UPH·임율 참조(읽기전용) · 작업ST 합계 <b style="color:#1c47a0">${M2(sWq)}</b></span></div>
