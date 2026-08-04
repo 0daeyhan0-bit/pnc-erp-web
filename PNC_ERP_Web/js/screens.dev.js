@@ -1820,8 +1820,8 @@ SCREEN.rawmat=(host)=>{
     const monsel=`<label class="tl">적용월</label><select class="sel" id="lg-ym">${L.months.map(m=>`<option value="${m.apply_ym}" ${L.ym===m.apply_ym?'selected':''}>${fmtYm(m.apply_ym)}${m.editable?' (편집)':''} · ${m.n_row}행</option>`).join('')}</select>`;
     const hdr=L.editable?`<div style="border:1px solid #cfe0ff;border-radius:8px;padding:10px 12px;margin:6px 0;background:#f4f8ff">
         <div style="font-weight:700;color:#1c47a0;margin-bottom:6px">적용 LME · 환율 · 직관 파라미터 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(입력 후 [저장·재계산] → 재료비/가공비/원재료가 갱신)</span></div>
-        <div style="display:grid;grid-template-columns:repeat(4,auto 1fr);gap:6px 8px;align-items:center;font-size:12px">
-          ${HF.map(([k,lb])=>`<label style="color:#33507d;font-weight:600;text-align:right;white-space:nowrap">${lb}${(k==='cu_lme'||k==='fx_now')?'<span style=color:#c0392b>*</span>':''}</label><input class="inp lgh" type="number" step="any" data-k="${k}" value="${r1(hv(k))}" ${ed?'':'readonly'} style="min-width:0" title="표시=소수1자리·저장=정밀">`).join('')}
+        <div style="display:grid;grid-template-columns:repeat(4,max-content 110px);gap:7px 14px;align-items:center;font-size:12px;justify-content:start">
+          ${HF.map(([k,lb])=>`<label style="color:#33507d;font-weight:600;text-align:right;white-space:nowrap">${lb}${(k==='cu_lme'||k==='fx_now')?'<span style=color:#c0392b>*</span>':''}</label><input class="inp lgh" type="number" step="any" data-k="${k}" value="${r1(hv(k))}" ${ed?'':'readonly'} style="width:110px" title="표시=소수1자리·저장=정밀">`).join('')}
         </div>
         ${ed?`<div style="margin-top:8px;text-align:right"><button class="btn" id="lg-hsave" style="background:#1c7c3a;color:#fff">💾 저장·재계산</button> <button class="btn ghost" id="lg-recalc">♻ 재계산</button></div>`:''}
       </div>`
