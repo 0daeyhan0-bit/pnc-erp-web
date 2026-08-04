@@ -4,18 +4,62 @@ SCREEN.price=(c)=>{
   let mode='item';
   const paint=()=>{
     c.innerHTML=`
-     <div class="page-title">💰 품목단가 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 · 전사 변동내역</span></div>
+     <div class="page-title">💰 품목단가 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 · 전사 변동내역 · 사급가 업로드</span></div>
      <div style="display:flex;gap:6px;margin:6px 0 2px">
        <button class="btn ${mode==='item'?'':'ghost'}" id="pm-item" style="${mode==='item'?'background:#1c47a0;color:#fff':''}">📇 품목별 단가조회</button>
        <button class="btn ${mode==='hist'?'':'ghost'}" id="pm-hist" style="${mode==='hist'?'background:#b12a2a;color:#fff':''}">🔴 전사 단가변동내역(라이브)</button>
+       <button class="btn ${mode==='sagub'?'':'ghost'}" id="pm-sagub" style="${mode==='sagub'?'background:#1c7c3a;color:#fff':''}">📤 사급가 업로드</button>
      </div>
      <div id="pr-host"></div>`;
     c.querySelector('#pm-item').onclick=()=>{if(mode!=='item'){mode='item';paint();}};
     c.querySelector('#pm-hist').onclick=()=>{if(mode!=='hist'){mode='hist';paint();}};
+    c.querySelector('#pm-sagub').onclick=()=>{if(mode!=='sagub'){mode='sagub';paint();}};
     const host=c.querySelector('#pr-host');
-    if(mode==='item') priceItemView(host); else priceHistView(host);
+    if(mode==='item') priceItemView(host); else if(mode==='hist') priceHistView(host); else priceSagubView(host);
   };
   paint();
+};
+
+/* 사급가(COSP Sales Price) 업로드 — LG 사급 부품가를 nx.price_item에 Start Date 반영 */
+const priceSagubView=(host)=>{
+  const API=API_BASE;
+  const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  let st={busy:false,msg:'',rows:[],q:''};
+  const load=async()=>{try{const r=await fetch(`${API}/api/price/sagub_list?q=${encodeURIComponent(st.q)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
+  const doUpload=async(f)=>{
+    if(!f)return;
+    if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
+    st.busy=true;st.msg='';draw();
+    try{const fd=new FormData();fd.append('file',f);
+      const r=await fetch(`${API}/api/price/sagub_upload`,{method:'POST',body:fd});
+      let j={};try{j=await r.json();}catch(e){}
+      if(r.ok&&j.ok){st.msg=`✅ 업로드 완료 — ${won(j.rows)}행 적재 · 품목 ${j.items}개${j.skipped?` · 스킵 ${j.skipped}건(nx 미등록 품번)`:''}`;st.busy=false;await load();return;}
+      else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
+    }catch(e){st.msg='❌ 오류: '+e.message;}
+    st.busy=false;draw();};
+  const draw=()=>{
+    host.innerHTML=`
+     <div class="page-sub">LG <b>COSP Sales Price</b>(사급 부품가) 엑셀 업로드 → 각 행의 <b>Start Date를 적용일</b>로 <code>nx.price_item</code>(vendor=LG)에 반영. 최신가는 적용일 기준 자동 적용. 헤더: <code>Material·Sales Price·Start Date</code></div>
+     <div id="sg-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:16px 18px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
+       <span style="font-size:20px">📤</span> <b>COSP Sales Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
+       <button class="btn" id="sg-pick" style="background:#1c7c3a;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
+       <input type="file" id="sg-file" accept=".xlsx,.xls" style="display:none">
+       <span style="margin-left:auto;color:#8aa0bd;font-size:11px">사업부별 파일 각각 올리면 됩니다</span>
+     </div>
+     ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
+     <div class="toolbar"><label class="tl">검색</label><input class="inp" id="sg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:200px"><button class="btn" id="sg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">업로드 사급가 ${st.rows.length}건</span></div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">적용일(Start)</th><th class="num">사급가</th><th class="center">통화</th></tr></thead>
+     <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:280px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="5" class="empty">업로드된 사급가 없음 — COSP 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
+    const g=id=>host.querySelector(id);
+    const fe=g('#sg-file'),drop=g('#sg-drop');
+    g('#sg-pick').onclick=()=>fe.click();
+    fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
+    drop.ondragover=e=>{e.preventDefault();drop.style.background='#e3f0ff';drop.style.borderColor='#1c7c3a';};
+    drop.ondragleave=()=>{drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';};
+    drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};
+    const q=g('#sg-q');q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==='Enter')load();};g('#sg-go').onclick=load;
+  };
+  draw();load();
 };
 
 SCREEN.devmaster=(c)=>{

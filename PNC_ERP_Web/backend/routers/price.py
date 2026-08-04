@@ -169,3 +169,86 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
                 "natures": [{"code": n, "nm": n} for n in _NATURE_ALL]}
     finally:
         cn.close()
+
+
+# ============ 사급가(COSP Sales Price) 업로드 — LG 사급 부품가를 nx.price_item에 Start Date 반영 upsert ============
+@router.post("/api/price/sagub_upload")
+async def price_sagub_upload(file: UploadFile = File(...)):
+    """COSP Sales Price 엑셀(LG 사급 부품가) 업로드. 각 행의 Start Date를 적용일(apply_ymd)로 nx.price_item에 upsert.
+       price_type='매입', vendor_code='LG'. 최신가는 as-of(적용일 최신)로 자동 반영. nx.item 미등록 품번은 스킵."""
+    import io as _io
+    try:
+        import openpyxl
+    except Exception:
+        raise HTTPException(500, "openpyxl 미설치(서버)")
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
+    ws = wb.active; itr = ws.iter_rows(values_only=True)
+    try:
+        hdr = next(itr)
+    except StopIteration:
+        raise HTTPException(400, "빈 파일")
+    ix = {str(h or '').strip().lower(): i for i, h in enumerate(hdr)}
+    if not all(k in ix for k in ('material', 'sales price', 'start date')):
+        raise HTTPException(400, "COSP 형식 아님 — 헤더에 Material·Sales Price·Start Date 필요")
+    def gv(r, n):
+        i = ix.get(n); v = r[i] if (i is not None and i < len(r)) else None
+        return None if v in (None, '') else v
+    def _ymd6(dt):
+        if hasattr(dt, 'year'): return f"{dt.year % 100:02d}{dt.month:02d}{dt.day:02d}"
+        s = ''.join(ch for ch in str(dt) if ch.isdigit())
+        return s[2:8] if len(s) >= 8 else (s[-6:] if len(s) >= 6 else '')
+    seen = {}
+    for r in itr:
+        if not r or not any(x not in (None, '') for x in r): continue
+        mat = str(gv(r, 'material') or '').strip()
+        if not mat: continue
+        try: price = float(gv(r, 'sales price') or 0)
+        except Exception: continue
+        ay = _ymd6(gv(r, 'start date'))
+        if not ay or price <= 0: continue
+        curc = (str(gv(r, 'curr') or 'KRW').strip()[:3] or 'KRW')
+        seen[(mat, ay)] = (price, curc)          # (품번,적용일)별 dedup(엑셀 중복행)
+    wb.close()
+    if not seen:
+        raise HTTPException(400, "데이터 행 없음")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        up = 0; skip = 0; items = set()
+        for (mat, ay), (price, curc) in seen.items():
+            try:
+                cur.execute("""MERGE nx.price_item AS t
+                  USING (SELECT ? item_code,'매입' price_type,'LG' vendor_code,? apply_ymd) s
+                  ON t.item_code=s.item_code AND t.price_type=s.price_type AND t.vendor_code=s.vendor_code AND t.apply_ymd=s.apply_ymd
+                  WHEN MATCHED THEN UPDATE SET price=?, currency=?
+                  WHEN NOT MATCHED THEN INSERT(item_code,price_type,vendor_code,currency,apply_ymd,price)
+                    VALUES(?,'매입','LG',?,?,?);""",
+                    mat, ay, price, curc, mat, curc, ay, price)
+                up += 1; items.add(mat)
+            except Exception:
+                skip += 1                        # nx.item 미등록(FK) 등 스킵
+        return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "file": file.filename}
+    finally:
+        nx.close()
+
+
+@router.get("/api/price/sagub_list")
+def price_sagub_list(q: str = Query("")):
+    """업로드된 사급가(nx.price_item vendor='LG') 품번별 최신값 목록."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        like = f"%{q.strip()}%"
+        cur.execute("""SELECT p.item_code, ISNULL(i.item_name,''), p.apply_ymd, p.price, p.currency
+            FROM nx.price_item p LEFT JOIN nx.item i ON i.item_code=p.item_code
+            WHERE p.price_type='매입' AND p.vendor_code='LG'
+              AND (?='' OR p.item_code LIKE ? OR i.item_name LIKE ?)
+              AND p.apply_ymd=(SELECT MAX(x.apply_ymd) FROM nx.price_item x
+                    WHERE x.item_code=p.item_code AND x.price_type='매입' AND x.vendor_code='LG')
+            ORDER BY p.item_code""", q.strip(), like, like)
+        rows = [{"item": r[0], "name": r[1], "apply_ymd": r[2], "price": float(r[3]), "currency": r[4]} for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
+    finally:
+        nx.close()
