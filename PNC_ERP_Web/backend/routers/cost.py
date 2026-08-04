@@ -423,6 +423,25 @@ def cost_proc_save(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.get("/api/weld/get")
+def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 노드(제품/SUB)")):
+    """노드의 용접봉별 관경별 용접점수(nx.item_weld) 반환 — 내부원가 패널 조립공정(용접) 편집 프리로드."""
+    node = node.strip()
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT weld_item, pipe_diam, ISNULL(weld_qty,0), ISNULL(use_qty,0)
+            FROM nx.item_weld WHERE item_code=? ORDER BY weld_item, pipe_diam""", node)
+        by = {}
+        for r in cur.fetchall():
+            wi = str(r[0]).strip()
+            by.setdefault(wi, []).append({"pipe_diam": float(r[1]), "weld_qty": float(r[2]), "use_qty": float(r[3])})
+        # 용접봉 후보(carrier=proc_weld) — item_weld 없어도 용접봉 코드 제시
+        cur.execute("SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item=?", node)
+        carriers = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+        return {"node": node, "welds": [{"weld_item": k, "rows": v} for k, v in by.items()], "carriers": carriers}
+    finally:
+        nx.close()
+
 @router.get("/api/weld/diam")
 def weld_diam():
     """관경별 표준소요량·표준공수 마스터(대표=silver_solder MIN='01'). 신규BOM 용접공정 입력·미리보기용."""

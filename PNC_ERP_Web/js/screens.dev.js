@@ -1080,6 +1080,12 @@ SCREEN.unifybom=(c,ro)=>{
     catch(e){naeD={error:e.message};}naeLoad=false;draw();};
   // ★carrier-aware 공정입력: /api/cost/proc/get → 가공(own) + 용접봉 carrier별 조립공정(용접/체결/포장). carrier별 in-place(통합/이동 금지).
   const loadNaeProc=async(node)=>{naeSel=node;naeProcD=null;draw();
+    await loadWeldDiams();
+    // 조립 용접(관경별) 프리로드 — 제품/SUB 레벨에서 용접점 편집용
+    let weldPoints=[], weldCarriers=[];
+    try{const wr=await fetch(`${API}/api/weld/get?node=${encodeURIComponent(node)}`);const wj=await wr.json();
+      (wj.welds||[]).forEach(w=>{(w.rows||[]).forEach(x=>weldPoints.push({weld_item:w.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));});
+      weldCarriers=wj.carriers||[];}catch(e){}
     try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(node)}`);const j=await r.json();
       const cat=j.catalog||[]; const own0={}; (j.own_procs||[]).forEach(p=>own0[p.proc_code]=p);
       // 가공 own = 조립외 카탈로그 전체(기존값 병합)
@@ -1093,15 +1099,26 @@ SCREEN.unifybom=(c,ro)=>{
         return {weld_item:cr.weld_item,use_qty:cr.use_qty,pipe_diam:cr.pipe_diam,unit_qty:cr.unit_qty,loss_factor:(cr.loss_factor==null?1.5:cr.loss_factor),meta_ok:cr.meta_ok,
           rows:assy.concat(extra).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
           work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
-      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers};
-    }catch(e){naeProcD={node,own:[],carriers:[],error:e.message};}draw();};
+      // 제품/SUB(=조립 노드) 판정: 용접봉 carrier 존재 or 최상위 품번(item)
+      const isAssy=(carriers.length>0)||(weldCarriers.length>0)||(node===item);
+      const defWeld=weldCarriers[0]||(carriers[0]&&carriers[0].weld_item)||'RAC30599301-1';
+      if(isAssy && !weldPoints.length) weldPoints.push({weld_item:defWeld,pipe_diam:'',weld_qty:''});
+      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers,isAssy,weldPoints};
+    }catch(e){naeProcD={node,own:[],carriers:[],isAssy:false,weldPoints:[],error:e.message};}draw();};
   const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
     const pick=arr=>arr.filter(p=>(+p.work_qty)>0).map(p=>({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph,calc_gubun:p.calc_gubun||'3'}));
     const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,loss_factor:+cr.loss_factor||1.5,procs:pick(cr.rows||[])}))};
     try{const r=await fetch(`${API}/api/cost/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const j=await r.json();if(!j.ok){alert('공정 저장 실패');return;}
+      // ★조립 용접(관경별) → /api/weld/save (용접봉별 그룹, node=제품). 관경/점수 입력분만 반영(용접봉별 전량교체)
+      let wmsg='';
+      if(naeProcD.isAssy){
+        const grp={};(naeProcD.weldPoints||[]).forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
+        for(const wi in grp){try{const wr=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:naeSel,weld_item:wi,rows:grp[wi]})});
+          const wj=await wr.json();if(wj.ok)wmsg+=`\n용접 ${wi}: 소요량 ${wj.use_qty} (${wj.total_points}점)`;}catch(e){}}
+      }
       const rc=(j.weld_recalc||[]).map(x=>`${x.carrier} 소요 ${x.use_qty}`).join(', ');
-      naeSel='';naeProcD=null;alert(`공정 저장(가공 ${j.own} · 용접봉 ${j.carriers}건) · 재계산${rc?'\n용접봉 소요량: '+rc:''}`);await loadNae(true);}catch(e){alert('저장 오류: '+e.message);}};
+      naeSel='';naeProcD=null;alert(`공정 저장(가공 ${j.own} · 용접봉 ${j.carriers}건) · 재계산${rc?'\n용접봉 소요량(ST): '+rc:''}${wmsg}`);await loadNae(true);}catch(e){alert('저장 오류: '+e.message);}};
   const saveNaeMaster=async()=>{const rows=(naeD&&naeD.rows)||[];const qtyC=[];const specM={};const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
     rows.forEach(r=>{const e=naeEdits[r.code];if(!e)return;
       if(e.eqty!==undefined && r.parent && num(e.eqty)!==null && num(e.eqty)!==+r.qty) qtyC.push({parent:r.parent,child:r.code,qty:num(e.eqty)});
@@ -1156,6 +1173,13 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelectorAll('.pq').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].work_qty=+el.value||0;});
     c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].prod_uph=+el.value||0;});
     c.querySelectorAll('.pl').forEach(el=>el.oninput=()=>{const cr=naeProcD&&naeProcD.carriers[+el.dataset.c];if(cr)cr.loss_factor=+el.value||1.5;});
+    // 조립 용접(관경별) 행 편집
+    const WP=()=>naeProcD&&naeProcD.weldPoints;
+    {const a=g('#nw-wadd');if(a)a.onclick=()=>{const wp=WP();if(wp){wp.push({weld_item:(wp[wp.length-1]||{}).weld_item||'RAC30599301-1',pipe_diam:'',weld_qty:''});drawNae();}};}
+    c.querySelectorAll('.nwr-rod').forEach(el=>el.oninput=()=>{const wp=WP();if(wp)wp[+el.dataset.i].weld_item=el.value.trim().toUpperCase();});
+    c.querySelectorAll('.nwr-d').forEach(el=>el.onchange=()=>{const wp=WP();if(wp){wp[+el.dataset.i].pipe_diam=el.value;drawNae();}});
+    c.querySelectorAll('.nwr-q').forEach(el=>el.oninput=()=>{const wp=WP();if(wp)wp[+el.dataset.i].weld_qty=el.value;});
+    c.querySelectorAll('.nwr-del').forEach(el=>el.onclick=()=>{const wp=WP();if(wp){wp.splice(+el.dataset.i,1);drawNae();}});
   };
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
@@ -1171,14 +1195,34 @@ SCREEN.unifybom=(c,ro)=>{
         const lfBox=`<span style="color:#8a94a6;font-size:10px">배수(로스)</span><input class="pl" data-c="${k}" type="number" step="0.1" min="0" value="${(+cr.loss_factor||1.5)}" style="width:52px" title="용접봉 소요량 = 용접ST × 원단위 × 배수. 레거시 기본 1.5">`;
         return `<div style="border-top:1px dashed #cfe0ff;margin-top:4px">`+
         procSecTable(cr.rows,'c'+k,`🔗 용접봉 ${esc(cr.weld_item)} <span style="color:#8a94a6;font-weight:400">(조립: 용접·은납·체결·포장 · 소요량 ${(+cr.use_qty||0).toFixed(4)} · 원단위 ${(+cr.unit_qty||0).toFixed(6)})</span> ${badge} ${lfBox}`,'#8e44ad')+`</div>`;}).join('');
-     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff">
-     <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
-       <span style="color:#8a94a6;font-size:10px">용접봉별 조립공정은 해당 용접봉에 귀속(carrier별 저장)</span>
+     const assy=naeProcD.isAssy;
+     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff;display:flex;flex-direction:column;max-height:calc(100vh - 300px)">
+     <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:0 0 auto;position:sticky;top:0;background:#eef4ff;border-radius:8px 8px 0 0"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
+       <span style="color:#8a94a6;font-size:10px">${assy?'제품/조립 레벨 — 가공+조립(용접·체결·포장) 입력':'부품 레벨 — 가공공정만'}</span>
        <div style="flex:1"></div><button class="btn" id="pm-save" style="background:#1c7c3a;color:#fff;padding:1px 8px">💾 등록</button><button class="btn ghost" id="pm-close" style="padding:1px 8px">✖</button></div>
-     <div class="grid-wrap" style="max-height:34vh;overflow:auto">
+     <div class="grid-wrap" style="flex:1 1 auto;min-height:120px;overflow-y:auto;overflow-x:hidden">
        ${procSecTable(naeProcD.own,'own','⚙ 가공공정 (자체)','#1c47a0')}
+       ${assy?naeWeldSection():''}
        ${carSecs||''}
      </div></div>`;};
+  // 조립 용접(관경별 점수 → 용접봉 소요량 자동파생, /api/weld/save) — 제품/SUB 레벨만
+  const naeWeldPrev=(w)=>{const d=weldDiams.find(x=>Math.abs(x.pipe_diam-(+w.pipe_diam||0))<0.01);
+    if(!d||!(+w.weld_qty>0))return{use:0,st:0};return{use:d.std_use_qty*(+w.weld_qty)*1.5,st:d.std_st*(+w.weld_qty)};};
+  const naeWeldSection=()=>{
+    const wp=naeProcD.weldPoints||[];const opts=weldDiams.map(d=>`<option value="${d.pipe_diam}">${d.pipe_diam}φ (${d.std_use_qty})</option>`).join('');
+    let tu=0;wp.forEach(w=>{tu+=naeWeldPrev(w).use;});
+    return `<div style="border-top:2px solid #d6c3ea;margin-top:4px;background:#faf7ff">
+      <div style="padding:4px 8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#8e44ad;font-size:11px">🔧 조립 공정 — 용접 (관경별 점수 → 용접봉 소요량 자동)</b>
+        <span style="color:#8a94a6;font-size:10px">소요량=Σ(표준소요량×점수)×1.5 · 제품 귀속</span><div style="flex:1"></div>
+        <b style="color:#8e44ad;font-size:11px">Σ소요량 ${tu.toFixed(5)}</b><button class="btn ghost" id="nw-wadd" style="padding:0 6px">＋점</button></div>
+      <datalist id="nw-wrod"><option value="RAC30599301-1">1% 용접봉</option><option value="RAC30599327">3% 용접봉</option><option value="RAC30599303">BCUP</option></datalist>
+      <table class="tbl" style="font-size:11px"><thead><tr><th>용접봉</th><th>관경</th><th class="num">점수</th><th class="num">소요량</th><th class="num">ST</th><th></th></tr></thead>
+      <tbody>${wp.map((w,i)=>{const pv=naeWeldPrev(w);return `<tr>
+        <td><input class="nwr-rod" data-i="${i}" list="nw-wrod" value="${esc(w.weld_item||'')}" style="width:118px"></td>
+        <td><select class="nwr-d" data-i="${i}" style="width:120px"><option value="">-관경-</option>${opts.replace(`value="${w.pipe_diam}"`,`value="${w.pipe_diam}" selected`)}</select></td>
+        <td class="num"><input class="nwr-q" data-i="${i}" type="number" step="1" min="0" value="${w.weld_qty}" style="width:50px"></td>
+        <td class="num">${pv.use?pv.use.toFixed(5):''}</td><td class="num">${pv.st||''}</td>
+        <td class="center"><span class="nwr-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">＋점 으로 용접점 추가</td></tr>'}</tbody></table></div>`;};
   // ============ 실원가 로드/그리기 ============
   const loadSil=async(fresh)=>{if(!item)return;silLoad=true;draw();
     try{const r=await fetch(`${API}/api/cost/sil?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(naeYmd)}${fresh?'&fresh=1':''}`);
