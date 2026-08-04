@@ -991,7 +991,7 @@ SCREEN.unifybom=(c,ro)=>{
     const mrows=lines.filter(l=>(l.child_item||'').trim()).map(l=>({item_code:l.child_item,item_name:l.item_name,item_spec:l.spec,
       metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,unit:l.unit,in_cust:l.in_cust,
       sgroup:l.sgroup,lgroup:l.lgroup,make_type:l.make_type,cost_gubun:l.cost_gubun,status:l.status}));
-    try{if(mrows.length)await fetch(`${API}/api/item/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:mrows}));}catch(e){alert('마스터 저장 실패: '+e.message);return;}
+    try{if(mrows.length)await fetch(`${API}/api/item/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:mrows})});}catch(e){alert('마스터 저장 실패: '+e.message);return;}
     // 2) BOM 구성(RAC는 백엔드가 proc_weld로 라우팅) — 신규품번 헤더 자동생성(target_name)
     try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines})});
       const j=await r.json();if(!j.ok){alert('BOM 저장 거부:\n'+(j.errors||[]).join('\n'));return;}}catch(e){alert('BOM 저장 실패: '+e.message);return;}

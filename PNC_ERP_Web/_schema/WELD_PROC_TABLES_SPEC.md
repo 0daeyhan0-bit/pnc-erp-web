@@ -171,4 +171,18 @@ nx.routing   (p_item=부모, item_code=용접봉, proc_code 51/28, work_qty=Σ�
 - 따라서 소요량을 쓰는 세션은 **현재 proc_weld.use_qty 가 정본(엔진 일치)** 이나, 향후 CS 정본 전환 시 값이 갱신될 수 있음을 인지할 것. 갭/불일치 목록: `_schema/procweld_nosource.csv`, `_schema/weld_conflict_371.csv`.
 
 ---
+
+## 10. ★이관 diff0 검증 결과 (2026-08-04)
+
+**요구사항**: 용접봉을 BOM→공정으로, 포장·체결도 공정으로 옮긴 재배치가 **원가 결과를 조금도 바꾸면 안 됨(무조건 diff0)**.
+
+**검증 방법**: SP 오라클(SP_실원가용)은 `db_client` 계정 **EXECUTE 권한 차단**(42000)이라 사용 불가 → **`costdata.js`(2026-07-23 nx엔진 스냅샷, 기준일260630, 589품번)를 "이동 전" 오라클로 사용**. 이 스냅샷은 proc_weld 생성(08-03)보다 앞서고, 엔진 하위호환 경로상 당시엔 용접봉을 `bom_line`(BOM)에서 읽어 재료비 포함 → 확실한 이동 전 기준. (검증 스크립트 `scratchpad/cost_move_diff0.py`)
+
+**결과**: 이동 영향 품목(용접526·포장516·체결524 ∩ 589 = **534품목**) **실원가·재료비·가공비 diff0 534/534 (100%)**. 총 실원가 67.4억 보존.
+- 재료비 전부 불변 → **용접봉 소요량 이관 정확**(용접 포인트 공수 재작업 불필요)
+- 가공비 불변 → **포장·체결 공정 이관 정확**
+
+★엔진 검증 시 오라클 대체: SP EXEC 막히면 `costdata.js`(이동 전 스냅샷) 또는 앱 `_conn`(ApplicationIntent=ReadOnly)로. 단 후자도 현재 pncind EXEC 거부됨.
+
+---
 관련: _harness/nx_cost_engine.py · _schema/group1_derive_40.csv · [[newerp-weld-cost-split]] [[newerp-coop-rawmat-settlement]]
