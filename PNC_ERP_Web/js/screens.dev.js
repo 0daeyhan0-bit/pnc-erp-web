@@ -1033,7 +1033,6 @@ SCREEN.unifybom=(c,ro)=>{
      <span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
      <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="nae-ymd" value="${esc(naeYmd)}" placeholder="YYMMDD" style="width:80px">
      <button class="btn" id="nae-go">🔍 조회</button><button class="btn ghost" id="nae-regen">🔄 재계산</button>
-     ${(item&&!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="nae-assy" style="background:#8e44ad;color:#fff" title="제품(최상위 ASSY) 조립공정 편집">🔧 조립공정(용접·포장·체결)</button>`:''}
      ${rw}
      <div class="spacer"></div></div>`;
   const sumbar=(a,tot,totlb)=>{const chip=(lb,v,cl)=>`<span class="nae-chip"><em>${lb}</em><b style="color:${cl||'#243244'}">${M(v)}</b></span>`;
@@ -1175,7 +1174,7 @@ SCREEN.unifybom=(c,ro)=>{
     const g=id=>c.querySelector(id);
     g('#nae-go').onclick=()=>{naeYmd=g('#nae-ymd').value.trim();loadNae();};
     g('#nae-regen').onclick=()=>loadNae(true);
-    {const b=g('#nae-assy');if(b)b.onclick=()=>{naeView='proc';loadNaeProc(item,true);};}  // 제품(레벨0) 조립공정 등록/수정 팝업 바로
+    // [조립공정] 툴바 버튼 제거 — 레벨0(제품) 행의 [등록/수정]이 동일 팝업(용접·포장·체결) 담당(중복 제거)
     c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=()=>{naeView=el.dataset.v;drawNae();});
     // 좌측 레벨트리: 행 클릭=우측 조회 / [등록/수정] 버튼=팝업
     c.querySelectorAll('.nae-trow[data-node]').forEach(el=>el.onclick=e=>{if(e.target.closest('.nae-edit-btn'))return;loadNaeProc(el.dataset.node,false);});
