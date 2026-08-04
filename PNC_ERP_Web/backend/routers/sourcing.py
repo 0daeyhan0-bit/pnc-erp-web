@@ -409,6 +409,11 @@ def _ensure_route_tbl(cur):
         rp_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
         proc_code NVARCHAR(10) NOT NULL, work_qty FLOAT DEFAULT 0, prod_uph FLOAT DEFAULT 0, calc_gubun NVARCHAR(4) NULL,
         ins_dt datetime DEFAULT getdate())""")
+    # ★#3 후보 노드별 관경 용접점(용접ST=가공비 / 용접봉 소요량=재료). 내부원가 관경별 용접 팝업 재사용
+    cur.execute("""IF OBJECT_ID('nx.sourcing_route_weld','U') IS NULL CREATE TABLE nx.sourcing_route_weld(
+        rw_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
+        weld_item NVARCHAR(60) NULL, pipe_diam FLOAT NULL, weld_qty FLOAT DEFAULT 0,
+        use_qty FLOAT DEFAULT 0, st FLOAT DEFAULT 0, ins_dt datetime DEFAULT getdate())""")
 
 def _base_gongsu(item, ymd="260630"):
     """BASE(기본BOM) 공수합 = 내부원가 proc_grid 전노드 work_qty 합. 후보 공수합 게이트 기준."""
@@ -855,7 +860,11 @@ def sourcing_route_detail(route_id: int = Query(...)):
         except Exception:
             base_g = None
         cand_g = round(sum(p["work_qty"] for p in procs), 2)
-        return {"header": hdr, "lines": lines, "procs": procs, "base_procs": base_procs,
+        # #3 노드별 관경 용접점(용접ST=가공비 / 용접봉 소요량=재료)
+        cur.execute("SELECT node_item,ISNULL(weld_item,''),ISNULL(pipe_diam,0),ISNULL(weld_qty,0),ISNULL(use_qty,0),ISNULL(st,0) FROM nx.sourcing_route_weld WHERE route_id=? ORDER BY node_item,rw_id", route_id)
+        welds = [{"node_item": str(r[0]).strip(), "weld_item": str(r[1]).strip(), "pipe_diam": float(r[2] or 0),
+                  "weld_qty": float(r[3] or 0), "use_qty": float(r[4] or 0), "st": float(r[5] or 0)} for r in cur.fetchall()]
+        return {"header": hdr, "lines": lines, "procs": procs, "base_procs": base_procs, "welds": welds,
                 "base_gongsu": base_g, "cand_gongsu": cand_g, "gate_ok": (base_g is None or abs(cand_g - base_g) < 0.5 or cand_g == 0)}
     finally:
         nx.close()
@@ -1111,6 +1120,45 @@ def sourcing_profile_save(payload: dict = Body(...)):
                 ins += 1
         nx.commit()
         return {"ok": True, "ins": ins, "upd": upd, "del": dele}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/weld/save")
+def sourcing_weld_save(payload: dict = Body(...)):
+    """#3 후보 노드별 관경 용접점 저장(내부원가 관경별 용접 팝업 재사용). 스코프=(route_id,node_item) 전체교체(멱등).
+       소요량=Σ(std_use[관경]×횟수)×loss(기본1.5)=용접봉 재료 · 내부ST=Σ(std_st×횟수)=용접 가공비.
+       ★공수합=BASE는 proc/save 게이트가 최종보증(여기선 ST 산출만·proc_grid 미변경). 근거키=route_id·node_item. 승인 리셋.
+       payload {route_id, node_item, loss_factor?, rows:[{weld_item,pipe_diam,weld_qty}]}."""
+    rid = int(payload.get("route_id") or 0)
+    node = str(payload.get("node_item", "")).strip()
+    loss = float(payload.get("loss_factor") or 1.5)
+    rows = payload.get("rows", []) or []
+    if rid <= 0 or not node: raise HTTPException(400, "route_id·node_item 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT 1 FROM nx.sourcing_route WHERE route_id=?", rid)
+        if not cur.fetchone(): raise HTTPException(404, "route 없음")
+        # 관경 표준(대표 MIN='01')
+        cur.execute("SELECT pipe_diam,MIN(std_use_qty),MIN(std_st) FROM nx.weld_diam GROUP BY pipe_diam")
+        std = {round(float(r[0]), 3): (float(r[1] or 0), float(r[2] or 0)) for r in cur.fetchall()}
+        cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", rid, node)
+        tot_use = tot_st = 0.0; n = 0
+        for r in rows:
+            pd = round(float(r.get("pipe_diam") or 0), 3); qty = float(r.get("weld_qty") or 0)
+            if pd <= 0 or qty <= 0: continue
+            su, ss = std.get(pd, (0.0, 0.0))
+            use = round(su * qty * loss, 4); st = round(ss * qty, 4)
+            tot_use += use; tot_st += st; n += 1
+            cur.execute("""INSERT INTO nx.sourcing_route_weld(route_id,node_item,weld_item,pipe_diam,weld_qty,use_qty,st)
+                VALUES(?,?,?,?,?,?,?)""", rid, node[:60], (str(r.get("weld_item", "") or "")[:60]), pd, qty, use, st)
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
+        nx.commit()
+        return {"ok": True, "node_item": node, "rows_saved": n, "total_use_qty": round(tot_use, 4), "total_st": round(tot_st, 2)}
     except HTTPException:
         nx.rollback(); raise
     except Exception:

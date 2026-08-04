@@ -35,31 +35,28 @@ def _incost(cur, assys):
                 out[k] = v
         elif k not in need:
             need.append(k)
+    # ★materialize된 nx.coop_incost 조회(사전계산). 라이브 window 대신 → 첫조회도 즉시.
+    #   (갱신: /api/coopquote/refresh-incost 또는 populate_incost.py)
     for i in range(0, len(need), 400):
         chunk = need[i:i + 400]
         if not chunk:
             continue
         inlist = "','".join(chunk)
-        cur.execute(f"""
-            WITH M AS (
-              SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) IC, MAINT_YMD, MAINT_COST,
-                ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(MAT_CODE))) ORDER BY MAINT_YMD DESC) rn_cur,
-                ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(MAT_CODE)))
-                   ORDER BY (CASE WHEN MAINT_YMD<='{_PREV_YMD}' THEN 0 ELSE 1 END), MAINT_YMD DESC) rn_prev
-              FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
-              WHERE MAINT_TAG='S' AND MAINT_QTY>0 AND MAINT_COST>0
-                AND UPPER(LTRIM(RTRIM(MAT_CODE))) IN ('{inlist}')
-            )
-            SELECT IC,
-              MAX(CASE WHEN rn_cur=1 THEN MAINT_COST END) cur_cost,
-              MAX(CASE WHEN rn_cur=1 THEN MAINT_YMD END) cur_ymd,
-              MAX(CASE WHEN rn_prev=1 AND MAINT_YMD<='{_PREV_YMD}' THEN MAINT_COST END) prev_cost
-            FROM M GROUP BY IC""")
-        for r in cur.fetchall():
-            out[str(r[0]).strip().upper()] = (
-                float(r[1] or 0),
-                (float(r[3]) if r[3] is not None else None),
-                str(r[2] or '').strip())
+        try:
+            cur.execute(f"SELECT code, cur_cost, prev_cost, cur_ymd FROM nx.coop_incost "
+                        f"WHERE UPPER(LTRIM(RTRIM(code))) IN ('{inlist}')")
+            for r in cur.fetchall():
+                k = str(r[0]).strip().upper()
+                v = ((float(r[1]), (float(r[2]) if r[2] is not None else None), str(r[3] or '').strip())
+                     if r[1] is not None else None)
+                _INCOST_CACHE[k] = v
+                if v is not None:
+                    out[k] = v
+        except Exception:
+            pass
+    for k in need:                      # 미존재 코드도 캐시(재조회 방지)
+        if k not in _INCOST_CACHE:
+            _INCOST_CACHE[k] = None
     return out
 
 

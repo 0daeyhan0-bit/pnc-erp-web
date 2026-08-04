@@ -1646,7 +1646,9 @@ SCREEN.subvariant=(c)=>{
   const st={q:'',slist:[],sel:null,selNm:'',searching:false,acT:null,ymd:'260630',
     mat:null,matErr:'',routeTarget:null,routeTargetNm:'',
     routes:[],gopts:[],lgopts:[],loading:false,rload:false,msg:'',
-    newForm:null,detail:null,lineForm:null,vopts:[]};
+    newForm:null,detail:null,lineForm:null,vopts:[],
+    weldDiams:[],weldEdit:null};   // #3 관경별 용접 팝업 재사용
+  const loadWeldDiams=async()=>{if(st.weldDiams.length)return;try{const r=await fetch(`${API}/api/weld/diam`);st.weldDiams=(await r.json()).rows||[];}catch(e){}};
   // ---------- 좌측 검색 ----------
   const search=async(auto)=>{st.searching=true;draw();
     try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(st.q)}`);st.slist=(await r.json()).rows||[];}
