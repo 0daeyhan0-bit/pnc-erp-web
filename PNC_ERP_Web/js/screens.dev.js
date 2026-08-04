@@ -929,15 +929,28 @@ SCREEN.unifybom=(c,ro)=>{
     if(!weldRows.length) weldRows.push({weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''});
     tab='bom'; draw();
   };
-  // ①LG BOM 엑셀 업로드 → 파싱 → 구성 초안
-  const lgUpload=async(fileInput)=>{
-    const f=fileInput.files&&fileInput.files[0]; if(!f)return;
-    const fd=new FormData(); fd.append('file',f);
-    try{const r=await fetch(`${API}/api/lgbom/parse`,{method:'POST',body:fd});
-      const j=await r.json(); if(!j.ok){alert('LG BOM 파싱 실패: '+(j.detail||j.error||'형식확인'));return;}
-      alert(`LG BOM 파싱 — 상위 ${j.top_item} · 구성 ${j.lines.length} · 용접봉 ${j.weld_children.length} (총 ${j.total_rows}행)`);
-      enterNew(j.top_item, (j.lines[0]&&'')||'', j.lines, j.weld_children);
-    }catch(e){alert('업로드 오류: '+e.message);}
+  // ①LG BOM 불러오기 — [기준정보›LG BOM관리]에 적재된 nx.lg_bom에서 모델 선택→tree 전개→구성 초안(파일 업로드 아님)
+  let lgAcT=null;
+  const lgAuto=(inp)=>{const q=inp.value.trim();clearTimeout(lgAcT);if(q.length<1)return;
+    lgAcT=setTimeout(async()=>{try{const wk=(c.querySelector('#nw-lgwk')||{}).value||'';
+      const r=await fetch(`${API}/api/lgbom/search?q=${encodeURIComponent(q)}&werks=${encodeURIComponent(wk)}`);
+      const rows=(await r.json()).rows||[];const dl=c.querySelector('#nw-lgdl');
+      if(dl)dl.innerHTML=rows.slice(0,40).map(x=>`<option value="${esc(x.model)}">${esc((x.modelnm||'').replace(/"/g,''))} · ${esc(x.werks)} · 구성${x.child_cnt}</option>`).join('');
+    }catch(e){}},220);};
+  const lgLoad=async(model,werks)=>{model=(model||'').trim().toUpperCase();if(!model){alert('LG 모델(상위품번)을 선택/입력하세요');return;}
+    try{const r=await fetch(`${API}/api/lgbom/tree?model=${encodeURIComponent(model)}&werks=${encodeURIComponent(werks||'')}`);
+      const j=await r.json();const rows=j.rows||[];
+      if(!rows.length){alert(`nx.lg_bom에 ${model} 없음 — [기준정보 › LG BOM관리]에서 먼저 업로드하세요.`);return;}
+      // 직속자식(parent_code==model, 없으면 stufe=1). RAC 용접봉 분리
+      let direct=rows.filter(x=>String(x.parent_code||'').trim()===model);
+      if(!direct.length) direct=rows.filter(x=>(+x.stufe===1));
+      const seen={},lines=[],weld=[];
+      direct.forEach(x=>{const ch=String(x.child_code||'').trim();if(!ch||seen[ch])return;seen[ch]=1;
+        const rec={child_item:ch,item_name:x.child_desc||x.nx_desc||'',item_spec:x.child_spec||'',qty:(x.qty!=null?+x.qty:1),unit:x.unit||'EA',supply_type:x.supply_type||''};
+        (ch.toUpperCase().startsWith('RAC')?weld:lines).push(rec);});
+      alert(`LG BOM 불러오기 — 상위 ${model} · 구성 ${lines.length} · 용접봉 ${weld.length} (전개 ${rows.length}행, nx.lg_bom)`);
+      enterNew(model, j.modelnm||'', lines, weld);
+    }catch(e){alert('LG BOM 불러오기 오류: '+e.message);}
   };
   // ②기존 복사
   const copyNew=async()=>{const src=(prompt('복사할 기존 품번(원본)을 입력','')||'').trim().toUpperCase();if(!src)return;
@@ -1263,9 +1276,12 @@ SCREEN.unifybom=(c,ro)=>{
      ${newReg?`<div style="border:2px solid #1c7c3a;border-radius:10px;background:#f4fbf6;padding:12px;margin:8px 0">
         <div style="display:flex;align-items:center;gap:8px"><b style="color:#1c7c3a;font-size:14px">＋ 신규 BOM 등록 — 방식 선택</b><div style="flex:1"></div><button class="btn ghost" id="nw-close">✖</button></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
-          <div style="flex:1;min-width:220px;border:1px solid #cfe0ff;border-radius:8px;padding:10px;background:#fff">
-            <b style="color:#1c47a0">① LG BOM 업로드</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">LG 발행 BOM 엑셀(다운로드본) 선택 → 파싱 → 구성 초안. 품번=LG 상위품번. 용접봉은 용접공정으로 분리.</div>
-            <input type="file" id="nw-lg" accept=".xlsx"></div>
+          <div style="flex:1;min-width:240px;border:1px solid #cfe0ff;border-radius:8px;padding:10px;background:#fff">
+            <b style="color:#1c47a0">① LG BOM 불러오기</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">[기준정보 › LG BOM관리]에 적재된 LG BOM(nx.lg_bom)에서 <b>모델 선택 → 전개 → 구성 초안</b>. 품번=LG 상위품번. 용접봉은 용접공정으로 분리.</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+              <select id="nw-lgwk" class="inp" style="width:auto"><option value="">전체</option><option value="DMZ">DMZ(SAC)</option><option value="DGZ">DGZ(RAC)</option></select>
+              <input id="nw-lgq" class="inp" list="nw-lgdl" autocomplete="off" placeholder="LG 모델/상위품번" style="width:150px"><datalist id="nw-lgdl"></datalist>
+              <button class="btn" id="nw-lgload" style="background:#1c47a0;color:#fff">불러오기</button></div></div>
           <div style="flex:1;min-width:200px;border:1px solid #cfe0ff;border-radius:8px;padding:10px;background:#fff">
             <b style="color:#1c47a0">② 기존 BOM 복사</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">유사 품번 복사 → 새 품번으로. proc_weld·routing 포함 복사 후 편집.</div>
             <button class="btn" id="nw-copy">복사로 시작</button></div>
@@ -1307,7 +1323,8 @@ SCREEN.unifybom=(c,ro)=>{
     // 신규등록 진입·모달·용접패널
     {const nb=c.querySelector('#bm-new');if(nb)nb.onclick=openNew;}
     {const x=c.querySelector('#nw-close');if(x)x.onclick=closeNew;}
-    {const lg=c.querySelector('#nw-lg');if(lg)lg.onchange=()=>lgUpload(lg);}
+    {const lq=c.querySelector('#nw-lgq');if(lq){lq.oninput=()=>lgAuto(lq);lq.onkeyup=e=>{if(e.key==='Enter')lgLoad(lq.value,(c.querySelector('#nw-lgwk')||{}).value);};}}
+    {const lb=c.querySelector('#nw-lgload');if(lb)lb.onclick=()=>lgLoad((c.querySelector('#nw-lgq')||{}).value,(c.querySelector('#nw-lgwk')||{}).value);}
     {const cy=c.querySelector('#nw-copy');if(cy)cy.onclick=copyNew;}
     {const bl=c.querySelector('#nw-blank');if(bl)bl.onclick=blankNew;}
     if(editMode&&isNew)bindWeld();
