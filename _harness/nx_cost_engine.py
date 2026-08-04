@@ -386,9 +386,11 @@ class NxCostEngine:
         return {'rows':rows,'agg':self.silwon(item,ymd)}
 
     def silwon_proc_grid(self, item, ymd):
-        """실원가 공정별 가공비 집계(사내노드만). Σamt=가공비(silwon.gagong). {proc_code:{wq,amt,uph,cg,labor}}."""
+        """실원가 공정별 집계. ★수량(wq)=내부원가와 동일(전 노드·외주 포함 — 조달후보 비교·표시 통일).
+           원가(amt)=자체노드(INNER_PROD)만(외주=매입가로 대체·공임 미계상). Σamt=silwon.gagong(원가 불변).
+           STEP B(2026-08-04): 외주 공정도 수량은 유지, 원가는 매입가. silwon() 원가엔진은 불변."""
         ym='20'+ymd[:4]; labor=self.labor_rate(ym)
-        agg={}
+        agg={}   # 원가 amt = 자체노드(INNER)만 (현행 로직 보존 = silwon.gagong 정합)
         def walk(node, cum_ea, parent, seen):
             info=self._load_item(node); cg0=info['cost_gubun']
             if self._inner_gagong(info):
@@ -399,8 +401,7 @@ class NxCostEngine:
                     elif cg=='8': amt=info['wt']*uph*wq
                     elif cg=='9': amt=uph*wq
                     else: amt=0.0
-                    a=agg.setdefault(proc,{'wq':0.0,'amt':0.0,'uph':uph,'cg':cg})
-                    a['wq']+=wq*cum_ea; a['amt']+=amt*cum_ea; a['uph']=uph; a['cg']=cg
+                    agg[proc]=agg.get(proc,0.0)+amt*cum_ea
             exp=(cg0!='3') and bool(self._expandable(node,info,seen))
             if exp:
                 for c,qty,cx,f,t,lx in self.lines(node):
@@ -408,7 +409,14 @@ class NxCostEngine:
                     cinfo=self._load_item(c); ea=qty if cinfo['unit']=='EA' else 1.0
                     walk(c, cum_ea*ea, node, seen|{node})
         walk(item,1.0,'',set())
-        return {p:{'wq':round(v['wq'],3),'amt':round(v['amt'],2),'uph':v['uph'],'cg':v['cg'],'labor':labor} for p,v in agg.items()}
+        # ★수량 wq = 내부원가(전노드) proc_grid — 실원가 공정/용접 수량 == 내부원가 수량. 원가 amt는 위 자체분.
+        naeg=self.proc_grid(item,ymd)
+        out={}
+        for proc,ng in naeg.items():
+            out[proc]={'wq':ng['wq'],'amt':round(agg.get(proc,0.0),2),'uph':ng['uph'],'cg':ng['cg'],'labor':labor}
+        for proc,amt in agg.items():   # 안전망: 자체 amt인데 naeg 미포함(이론상 없음)
+            if proc not in out: out[proc]={'wq':0.0,'amt':round(amt,2),'uph':0,'cg':'3','labor':labor}
+        return out
 
     # ===================== 내부용(내부원가) 모드 =====================
     # 내부용 = 전 공정을 우리가 한다고 가정: INNER_PROD 게이팅 없이 전 노드 전개+가공비 계상, LME 없음.
