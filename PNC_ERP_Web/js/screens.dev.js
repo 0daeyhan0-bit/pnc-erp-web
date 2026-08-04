@@ -1447,6 +1447,9 @@ SCREEN.unifybom=(c,ro)=>{
      .nae-tree .nae-edit-btn:hover{background:#7a379a}
    </style>`;
   const isW=nm=>(nm||'').indexOf('용접봉')>=0;
+  // ★임의 SUB(중간 조립노드) 식별 — 평면 BOM(bmFlat·naeFlatMat)에서 행 제외(leaf 재료만). 용접봉(RAC)은 isW로 별도처리(호출부에서 먼저 걸러짐).
+  // 규칙: haskids(자식보유) OR 품번 접미사(-SOCKET·-SUB·-은납·-AL·-숫자류[-20-1·-12-1·-S1-1 등]). 소분류120/자체제작SUB도 접미사로 포착.
+  const isSub=(code,haskids)=>!!haskids || /-(SOCKET|SUB|은납|AL|S?\d)/i.test(String(code||''));
   // ============ BOM구성 그리기 ============
   // ★BOM구성 평면(내부원가와 동일 구조): 레벨0 제품 + 레벨1 flat 부품(임의 SUB 해체). 용접봉 토글. 제품=조립공정·절삭부품=가공공정 편집.
   const bmFlat=()=>{
