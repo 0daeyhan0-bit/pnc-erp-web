@@ -1030,6 +1030,7 @@ SCREEN.unifybom=(c,ro)=>{
      <span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
      <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="nae-ymd" value="${esc(naeYmd)}" placeholder="YYMMDD" style="width:80px">
      <button class="btn" id="nae-go">🔍 조회</button><button class="btn ghost" id="nae-regen">🔄 재계산</button>
+     ${(item&&!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="nae-assy" style="background:#8e44ad;color:#fff" title="제품(최상위 ASSY) 조립공정 편집">🔧 조립공정(용접·포장·체결)</button>`:''}
      ${rw}
      <div class="spacer"></div></div>`;
   const sumbar=(a,tot,totlb)=>{const chip=(lb,v,cl)=>`<span class="nae-chip"><em>${lb}</em><b style="color:${cl||'#243244'}">${M(v)}</b></span>`;
@@ -1150,16 +1151,22 @@ SCREEN.unifybom=(c,ro)=>{
       else mid=companyTable(rows);
       content=`${sumbar(a,'naewon','내부원가')}${naeViewBar()}${mid}`;
     }
+    // ★.content{overflow:hidden} 이므로 여기서 flex컬럼 height:100% + 본문 flex:1 min-height:0 overflow:auto 로 자체 스크롤 확보(클립 방지)
     c.innerHTML=`
-     <div class="page-title">🔀 품목 BOM관리 <span style="font-size:12px;color:var(--muted);font-weight:400">내부원가(전공정 자체 가정, nx.bom)</span></div>
-     ${tabbar('nae')}
-     ${naeToolbar(procBtn)}
-     ${content}
+     <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+       <div style="flex:0 0 auto">
+         <div class="page-title">🔀 품목 BOM관리 <span style="font-size:12px;color:var(--muted);font-weight:400">내부원가(전공정 자체 가정, nx.bom)</span></div>
+         ${tabbar('nae')}
+         ${naeToolbar(procBtn)}
+       </div>
+       <div style="flex:1 1 auto;min-height:0;overflow:auto">${content}</div>
+     </div>
      ${naeCss()}`;
     bindTabs();
     const g=id=>c.querySelector(id);
     g('#nae-go').onclick=()=>{naeYmd=g('#nae-ymd').value.trim();loadNae();};
     g('#nae-regen').onclick=()=>loadNae(true);
+    {const b=g('#nae-assy');if(b)b.onclick=()=>{naeView='proc';loadNaeProc(item);};}
     c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=()=>{naeView=el.dataset.v;drawNae();});
     {const b=g('#nae-medit');if(b)b.onclick=()=>{naeEditM=true;naeEdits={};naeView='proc';drawNae();};}
     {const b=g('#nae-mcancel');if(b)b.onclick=()=>{naeEditM=false;naeEdits={};drawNae();};}
@@ -1196,11 +1203,11 @@ SCREEN.unifybom=(c,ro)=>{
         return `<div style="border-top:1px dashed #cfe0ff;margin-top:4px">`+
         procSecTable(cr.rows,'c'+k,`🔗 용접봉 ${esc(cr.weld_item)} <span style="color:#8a94a6;font-weight:400">(조립: 용접·은납·체결·포장 · 소요량 ${(+cr.use_qty||0).toFixed(4)} · 원단위 ${(+cr.unit_qty||0).toFixed(6)})</span> ${badge} ${lfBox}`,'#8e44ad')+`</div>`;}).join('');
      const assy=naeProcD.isAssy;
-     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff;display:flex;flex-direction:column;max-height:calc(100vh - 430px);min-height:150px">
-     <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:0 0 auto;position:sticky;top:0;background:#eef4ff;border-radius:8px 8px 0 0"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
+     return `<div style="border:1px solid #cfe0ff;border-radius:8px;margin-top:6px;background:#f7faff">
+     <div style="padding:6px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;position:sticky;top:0;z-index:3;background:#eef4ff;border-radius:8px 8px 0 0;border-bottom:1px solid #cfe0ff"><b style="color:#1c47a0">✎ 공정 지정 ${esc(naeSel)}</b>
        <span style="color:#8a94a6;font-size:10px">${assy?'제품/조립 레벨 — 가공+조립(용접·체결·포장) 입력':'부품 레벨 — 가공공정만'}</span>
        <div style="flex:1"></div><button class="btn" id="pm-save" style="background:#1c7c3a;color:#fff;padding:1px 8px">💾 등록</button><button class="btn ghost" id="pm-close" style="padding:1px 8px">✖</button></div>
-     <div class="grid-wrap" style="flex:1 1 auto;min-height:120px;overflow-y:auto;overflow-x:hidden">
+     <div style="padding:0 2px 6px">
        ${procSecTable(naeProcD.own,'own','⚙ 가공공정 (자체)','#1c47a0')}
        ${assy?naeWeldSection():''}
        ${carSecs||''}
