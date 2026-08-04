@@ -1541,7 +1541,6 @@ SCREEN.coopquote=(host)=>{
         <td class="num">${won(r.cur_incost)}</td>
         <td class="num" style="color:#1c47a0" title="종전입고가 + 원자재(동+사급부품)인상분">${r.new_price!=null?('<b>'+won(r.new_price)+'</b>'):'-'}</td>
         <td class="num" title="판가(신)−현재입고가 · ≈0=원소재만 정확인상 · 음수=과다 · 양수=부족">${r.diff_new!=null?('<b style="color:'+(Math.abs(r.diff_new)<Math.max(50,(r.prev_incost||0)*0.03)?'#1c7c3a':(r.diff_new<0?'#c0392b':'#1c47a0'))+'">'+won(r.diff_new)+'</b>'):'-'}</td>
-        <td class="num">${diffCol(r)}</td>
         <td class="center" style="font-size:10px;${r.last_in_ymd?'':'color:#c9d1dc'}">${r.last_in_ymd?('20'+r.last_in_ymd.slice(0,2)+'-'+r.last_in_ymd.slice(2,4)+'-'+r.last_in_ymd.slice(4,6)):'미납품'}</td>
         <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${r.status==='확정'?'#e3f5e9':'#eef2f7'};color:${r.status==='확정'?'#1c7c3a':'#5a6a80'}">${esc(r.status)}</span></td>
         ${canEd?`<td class="center"><button class="btn cq-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px" onclick="event.stopPropagation()">수정</button></td>`:''}</tr>`).join(''):`<tr><td colspan="${canEd?20:18}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
