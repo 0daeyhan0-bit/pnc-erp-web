@@ -95,6 +95,43 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             fin = r["sale_price"]
             r["final_quote"] = fin
             r["diff"] = (fin - r["cur_incost"]) if (r["cur_incost"] is not None) else None
+        # ── ★가격조정/총가공비/판가(신)/차이 + 사급부품 현재 매입가 재계산 ──
+        #   가격조정 = 종전입고가 − 판가(견적)  (견적 미갱신분)
+        #   총가공비 = 종전입고가 − 재료비(종전)  (가공+관리+운반+이윤+가격조정)
+        #   판가(신) = 종전입고가 + 원자재인상분(사급부품 현재−종전)  (= 재료비현재 + 총가공비)
+        #   차이     = 판가(신) − 현재입고가  (원소재만 잘 인상됐나)
+        assy_up = [r["assy_code"] for r in rows]
+        sagub_by_assy = {}; sagub_codes = set()
+        for i in range(0, len(assy_up), 400):
+            chunk = [str(a).replace("'", "").strip() for a in assy_up[i:i + 400] if a]
+            if not chunk:
+                continue
+            inlist = "','".join(c.upper() for c in chunk)
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), UPPER(LTRIM(RTRIM(part_code))), ISNULL(mat_cost,0)
+                FROM nx.coop_quote_part WHERE ptype=N'사급부품' AND UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')""")
+            for a, pc, mc in cur.fetchall():
+                a = str(a).strip(); pc = str(pc).strip()
+                sagub_by_assy.setdefault(a, []).append((pc, float(mc or 0))); sagub_codes.add(pc)
+        scost = _incost(cur, list(sagub_codes)) if sagub_codes else {}
+        for r in rows:
+            au = r["assy_code"].strip().upper()
+            prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
+            matc = r["mat_cost"]; matp = r["mat_part"]
+            r["price_adjust"] = (round(prev_in - r["sale_price"], 2) if prev_in is not None else None)
+            r["total_proc"] = (round(prev_in - matc, 2) if prev_in is not None else None)
+            splist = sagub_by_assy.get(au)
+            if splist:
+                sn = 0.0
+                for pc, mc in splist:
+                    sc = scost.get(pc)
+                    sn += mc * (sc[0] / sc[1]) if (sc and sc[0] and sc[1] and sc[1] > 0) else mc
+                r["sagub_now"] = round(sn, 2)
+            else:
+                r["sagub_now"] = matp
+            raw_up = r["sagub_now"] - matp
+            r["raw_up"] = round(raw_up, 2)
+            r["new_price"] = (round(prev_in + raw_up, 2) if prev_in is not None else None)
+            r["diff_new"] = (round(r["new_price"] - cur_in, 2) if (r["new_price"] is not None and cur_in is not None) else None)
         if active_only:
             cutoff = (datetime.now() - timedelta(days=120)).strftime('%y%m%d')
             rows = [r for r in rows if r.get("last_in_ymd") and r["last_in_ymd"] >= cutoff]
