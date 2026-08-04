@@ -25,6 +25,79 @@ class NxCostEngine:
     def close(self):
         if self.own and self.cn: self.cn.close()
 
+    def _prime_caches(self, item):
+        """★성능: 서브트리 전 노드의 item/routing/proc_weld/bom_header를 벌크(IN)로 로드해 per-node round-trip 제거.
+           채우는 캐시(_item·_pc·_rc·_wlc·_hdr)는 per-node 메서드와 동일 구조·동일 값 → 결과 불변(속도만).
+           미프라임 노드는 기존 per-node 쿼리로 폴백(정확성 무손상). _reset 시 새 엔진=재프라임."""
+        if not hasattr(self, '_primed'): self._primed = set()
+        if item in self._primed: return
+        self._primed.add(item)
+        try:
+            codes = set([item])
+            self.cur.execute("""WITH t AS (
+                SELECT bl.child_item c FROM nx.bom_header h JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE h.item_code=?
+                UNION ALL
+                SELECT bl.child_item FROM t JOIN nx.bom_header h ON h.item_code=t.c JOIN nx.bom_line bl ON bl.bom_id=h.bom_id)
+                SELECT DISTINCT c FROM t OPTION(MAXRECURSION 60)""", item)
+            for r in self.cur.fetchall():
+                v = str(r[0]).strip()
+                if v: codes.add(v)
+        except Exception:
+            return   # CTE 실패(순환 등) → 프라임 스킵, per-node 폴백
+        if not hasattr(self, '_wlc'): self._wlc = {}
+        if not hasattr(self, '_pc'): self._pc = {}
+        if not hasattr(self, '_rc'): self._rc = {}
+        clist = list(codes)
+        # proc_weld → _wlc + 용접봉(RAC) 코드 수집
+        for i in range(0, len(clist), 900):
+            ch = clist[i:i+900]; ph = ",".join("?" * len(ch))
+            self.cur.execute(f"""SELECT parent_item, weld_item, ISNULL(use_qty,0), ISNULL(cs_calc_except,0),
+                ISNULL(from_ymd,''), ISNULL(to_ymd,''), ISNULL(lme_except,0)
+                FROM nx.proc_weld WHERE parent_item IN ({ph}) ORDER BY parent_item, weld_item""", *ch)
+            for r in self.cur.fetchall():
+                self._wlc.setdefault(str(r[0]).strip(), []).append(
+                    (str(r[1]).strip(), float(r[2] or 0), bool(r[3]), str(r[4] or ''), str(r[5] or ''), bool(r[6])))
+        for c in codes:
+            if c not in self._wlc: self._wlc[c] = []
+        rac = set(w[0] for v in self._wlc.values() for w in v)
+        allc = codes | rac; al = list(allc)
+        # _item 벌크
+        for i in range(0, len(al), 900):
+            ch = al[i:i+900]; ph = ",".join("?" * len(ch))
+            self.cur.execute(f"""SELECT item_code, ISNULL(in_cust,''), ISNULL(make_type,''), ISNULL(cost_gubun,''),
+                ISNULL(metal_gubun,''), ISNULL(diam,0), ISNULL(thick,0), ISNULL(net_weight,0), ISNULL(has_gagong,0),
+                ISNULL(silver_flag,0), ISNULL(unit,''), ISNULL(lgroup,'') FROM nx.item WHERE item_code IN ({ph})""", *ch)
+            for r in self.cur.fetchall():
+                self._item[str(r[0]).strip()] = {'in_cust': r[1].strip(), 'make_type': r[2].strip(), 'cost_gubun': r[3].strip(),
+                    'metal': r[4].strip(), 'diam': float(r[5] or 0), 'thick': float(r[6] or 0), 'wt': float(r[7] or 0),
+                    'has_gagong': bool(r[8]), 'silver': bool(r[9]), 'unit': r[10].strip(), 'lgroup': r[11].strip()}
+        # routing 벌크 → _pc(공정, 91/92/93/98/99 제외) + _rc(91/92/93)
+        for c in allc: self._pc[c] = []
+        for i in range(0, len(al), 900):
+            ch = al[i:i+900]; ph = ",".join("?" * len(ch))
+            self.cur.execute(f"""SELECT item_code, proc_code, ISNULL(work_qty,0), ISNULL(prod_uph,0), ISNULL(calc_gubun,''), ISNULL(p_item,'')
+                FROM nx.routing WHERE item_code IN ({ph})""", *ch)
+            for r in self.cur.fetchall():
+                code = str(r[0]).strip(); proc = str(r[1]); wq = float(r[2] or 0); uph = float(r[3] or 0)
+                cg = str(r[4] or '').strip(); pit = str(r[5] or '').strip()
+                if proc in ('91', '92', '93'):
+                    self._rc.setdefault((code, proc), []).append((uph, wq, pit))
+                elif proc not in ('98', '99'):
+                    self._pc[code].append((proc, wq, uph, cg, pit))
+        for c in allc:
+            for pc in ('91', '92', '93'):
+                if (c, pc) not in self._rc: self._rc[(c, pc)] = []
+        # bom_header 벌크 → _hdr (max version)
+        best = {}
+        for i in range(0, len(al), 900):
+            ch = al[i:i+900]; ph = ",".join("?" * len(ch))
+            self.cur.execute(f"SELECT item_code, bom_id, ISNULL(version,1) FROM nx.bom_header WHERE item_code IN ({ph})", *ch)
+            for r in self.cur.fetchall():
+                code = str(r[0]).strip(); ver = int(r[2] or 1)
+                if code not in best or ver > best[code][0]: best[code] = (ver, r[1])
+        for c in allc:
+            self._hdr[c] = best[c][1] if c in best else None
+
     # --- 단위(mult=1) 메모이제이션: material/gagong/lme는 mult에 선형 → 단위값 캐시 후 ×mult ---
     def material_u(self, item, ymd):
         k=(item,ymd)
@@ -297,6 +370,7 @@ class NxCostEngine:
         return (max(cands,key=lambda c:c[0])[1] if cands else 0.0)
 
     def silwon(self, item, ymd):
+        self._prime_caches(item)
         """실원가 = 재료+가공+일반+운반+이윤. 손익 = LG판가 − 실원가."""
         jae=self.material_u(item,ymd); gag=self.gagong_u(item,ymd,'')
         ilban,unban,profit=self.overhead(item,ymd)
@@ -336,6 +410,7 @@ class NxCostEngine:
         return out
 
     def silwon_nodes(self, item, ymd):
+        self._prime_caches(item)
         """실원가 노드별 방출(그리드용). 현재 매핑된 BOM을 지정된 조달방식대로: 사내(INNER_PROD=1)+원소재(cg3)=소재단가×중량,
            그외(외주완성/구매)=매입단가, 가공비=사내노드만, LME 사급차액=구매 동부품별. Σ(mat+lme+gag)+overhead=silwon 정합."""
         ymcut='20'+ymd[:4]; ym=ymcut
@@ -386,6 +461,7 @@ class NxCostEngine:
         return {'rows':rows,'agg':self.silwon(item,ymd)}
 
     def silwon_proc_grid(self, item, ymd):
+        self._prime_caches(item)
         """실원가 공정별 집계. ★수량(wq)=내부원가와 동일(전 노드·외주 포함 — 조달후보 비교·표시 통일).
            원가(amt)=자체노드(INNER_PROD)만(외주=매입가로 대체·공임 미계상). Σamt=silwon.gagong(원가 불변).
            STEP B(2026-08-04): 외주 공정도 수량은 유지, 원가는 매입가. silwon() 원가엔진은 불변."""
@@ -520,6 +596,7 @@ class NxCostEngine:
         return (ilban,unban,profit)
 
     def naewon(self, item, ymd):
+        self._prime_caches(item)
         """내부원가 = 재료+가공+일반+운반+이윤 (LME 없음). 손익 = LG − 내부원가."""
         jae=self.material_nae_u(item,ymd); gag=self.gagong_nae_u(item,ymd,'')
         ilban,unban,profit=self.overhead_nae(item,ymd)
@@ -529,6 +606,7 @@ class NxCostEngine:
                 'naewon':nae,'lg':round(lg,2),'sonik':round(lg-nae,2)}
 
     def naewon_nodes(self, item, ymd):
+        self._prime_caches(item)
         """내부원가 노드별 방출(그리드용). 각 노드 재료비(mat)·가공비(gag) 기여 = 총액과 정합.
            재료=leaf에만 계상(누적qty), 가공=proc_amt×누적EA. overhead(일반/운반/이윤)는 agg 요약에만."""
         ymcut='20'+ymd[:4]; ym='20'+ymd[:4]
@@ -569,6 +647,7 @@ class NxCostEngine:
         return {'rows':rows,'agg':self.naewon(item,ymd)}
 
     def proc_grid(self, item, ymd):
+        self._prime_caches(item)
         """내부용 공정별 가공비 집계 (레거시 보기구분=공정 그리드). naewon_nodes와 동일 전개로
            proc_code별 작업량·가공비 합산 → Σamt ≈ 가공비(naewon.gagong) 정합.
            용접·은납·부품부착·포장 등 조립공정(용접봉 노드에 얹혀있던 가공비 포함)을 공정 종류별로 모음.
