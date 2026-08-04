@@ -2,15 +2,46 @@
 """무게정산(중량조정): 원소재/용접봉 = 출고중량(tag5) − 업체가공 입고중량 = 차액, ×(시세−사급가).
    [확정규칙 — 4월 담당자마감 실측대조]
      입고수량 = ERP 확정입고(9/S/C/G/H, 마감기준 창)  ← 유일 신뢰원천
-     인정부품 = CS_M_ITEM_BOM 재귀전개, SAGUB_FLAG=1(사급) 제외 leaf 단품
-     중량     = 기하동중량 π(D−T)·T·L·8.94/1e6 (CU/고강도, ITEM_WEIGHT 다수 0이라 기하식)
+     원소재 단위중량 = ★nx.coop_copper_unit(동 원단위 마스터, 담당 파이프수불 정본·geom 99.9%검증) 우선
+                       (부품→Assy). 마스터에 없으면 CS_M_ITEM_BOM 재귀전개(_explode) 폴백
+     기하동중량 = π(D−T)·T·L·8.94/1e6 = (D−T)·T·L·0.02809·0.001 (동일상수)
+     용접봉    = _load_weld(레거시 정본) — 소요량식 확정 후 별도(현행 유지)
    매칭 Assy는 담당자수량과 ±5% 일치. 담당자 수기항목(전산에 없음)은 반영 안 함."""
-import sys, os, threading, math
+import sys, os, threading, math, re
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'New_ERP'))  # Projects\New_ERP
 import pyodbc, db_client
 
 _lock = threading.Lock()
 _MAPS = None  # (META, CH) 캐시
+_CU_MASTER = None  # 동 원단위 마스터(nx.coop_copper_unit) 캐시: (부품dict, Assydict)
+_SUF = re.compile(r"-\d+(-\d+)?$")
+
+def _norm_code(c):
+    """동 원단위 마스터 키 정규화(적재 시 finalize_master와 동일 규칙)."""
+    c = re.sub(r"\s+", "", str(c).strip().upper())
+    c = re.sub(r"[\(\+].*$", "", c)      # (링/(마·+용접링 꼬리 제거
+    c = re.sub(r"번$|품\d+$", "", c)      # -2번 / 품7 제거
+    return _SUF.sub("", c).strip()
+
+def _load_copper_master():
+    """검증된 동 원단위 마스터(nx.coop_copper_unit) 로드 → (부품, Assy) dict. geom99.9%·담당수불 정본."""
+    global _CU_MASTER
+    if _CU_MASTER is not None:
+        return _CU_MASTER
+    with _lock:
+        if _CU_MASTER is not None:
+            return _CU_MASTER
+        part, assy = {}, {}
+        try:
+            tx = _tx(); tc = tx.cursor()
+            tc.execute("SELECT norm_code, kind, copper_unit_kg FROM nx.coop_copper_unit")
+            for nc, kind, kg in tc.fetchall():
+                (part if str(kind).strip() == '부품' else assy).setdefault(str(nc).strip().upper(), float(kg or 0))
+            tx.close()
+        except Exception:
+            pass
+        _CU_MASTER = (part, assy)
+        return _CU_MASTER
 
 def _ro():
     return pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}', readonly=True)
@@ -153,6 +184,7 @@ def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=
     """업체별 원소재/용접봉 출고·입고·차액·정산금액. ym=YYMM."""
     META, CH, COOPB, COOP_SET = _load_maps()
     WELD = _load_weld()
+    CU_PART, CU_ASSY = _load_copper_master()   # ★검증된 동 원단위 마스터(nx.coop_copper_unit) 우선
     memo = {}
     cn = _ro(); cur = cn.cursor()
     mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
@@ -179,7 +211,14 @@ def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=
     inr = {}; inw = {}
     for cc, mat, q in cur.fetchall():
         mk = str(mat).strip().upper()   # ★키 정규화(META/CH/COOPB/WELD 조회 일치)
-        rk, _wk = _explode(mk, META, CH, COOPB, COOP_SET, memo)
+        nm = _norm_code(mk)
+        # ★원소재 소요중량 = 검증된 동 원단위 마스터(부품→Assy) 우선, 없으면 기존 _explode 폴백
+        if nm in CU_PART:
+            rk = CU_PART[nm]
+        elif nm in CU_ASSY:
+            rk = CU_ASSY[nm]
+        else:
+            rk, _wk = _explode(mk, META, CH, COOPB, COOP_SET, memo)
         qf = float(q or 0)
         if rk: inr[cc] = inr.get(cc, 0.0) + rk * qf
         ws = WELD.get(mk, 0.0)          # 용접봉 소요 = 부품별(포인트×coop_rate) × 입고qty

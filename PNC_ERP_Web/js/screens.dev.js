@@ -1804,6 +1804,7 @@ SCREEN.subvariant=(c)=>{
             <th>하위품번</th><th>품명</th><th class="num">소요량</th><th>구분</th><th>공급처</th><th>소재(외경×두께×길이·재질)</th>${ed?'<th style="width:80px">작업</th>':''}</tr></thead>
             <tbody>${(R.lines||[]).length?R.lines.map(l=>lineRow(l,ed)).join(''):`<tr><td colspan="${ed?7:6}" class="empty">라인 없음${ed?' (➕ 라인추가)':''}</td></tr>`}</tbody></table></div>
           ${ed?`<button class="btn" id="dt-ladd" style="margin-top:6px;padding:2px 10px">➕ 라인추가</button>`:''}
+          ${ed?subPanel(R):''}
         </div>
         <div style="padding:12px 18px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
           <span>${R.baseline?`${canW?`<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:''}`
@@ -1895,7 +1896,26 @@ SCREEN.subvariant=(c)=>{
     c.querySelectorAll('.df').forEach(el=>{el.oninput=el.onchange=()=>{st.detail.hdr[el.dataset.k]=el.type==='checkbox'?el.checked:el.value;if(el.dataset.k==='vendor_code')vSearch(el.value);};});
     c.querySelectorAll('.dl-e').forEach(b=>b.onclick=()=>{const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);st.lineForm=Object.assign({route_id:st.detail.route_id},l);draw();});
     c.querySelectorAll('.dl-d').forEach(b=>b.onclick=()=>delLine(+b.dataset.lid));
-    {const b=c.querySelector('.pmodal-bg .sv-appr');if(b)b.onclick=()=>approve(+b.dataset.rid,b.dataset.on==='1');}};
+    {const b=c.querySelector('.pmodal-bg .sv-appr');if(b)b.onclick=()=>approve(+b.dataset.rid,b.dataset.on==='1');}
+    // ---- STEP3 SUB 재구성·공정배치 binds ----
+    const rid=st.detail.route_id;
+    {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
+    {const b=g('#sp-mksub');if(b)b.onclick=async()=>{const ids=[...c.querySelectorAll('.sp-pick:checked')].map(x=>+x.dataset.lid);
+      if(!ids.length){alert('묶을 부품을 체크하세요');return;}const sfx=(prompt('신규 SUB 접미사(예: -SUB1)','-SUB1')||'').trim();if(!sfx)return;
+      try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:sfx,name:st.routeTarget+sfx,gubun:'외주(유상사급)'})});
+        const j=await r.json();if(j.ok){st.rdProc=null;await loadRD(rid);}else alert('SUB 생성 실패');}catch(e){alert('오류: '+e.message);}};}
+    c.querySelectorAll('.sp-dis').forEach(el=>el.onclick=async()=>{if(!confirm('SUB 해제(하위부품 평면 복귀)?'))return;
+      try{const r=await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+el.dataset.sub})});
+        if((await r.json()).ok){st.rdProc=null;await loadRD(rid);}}catch(e){alert('오류: '+e.message);}});
+    c.querySelectorAll('.sp-pq').forEach(el=>el.oninput=()=>{const nd=el.dataset.node,pc=el.dataset.proc;(st.rdProc[nd]=st.rdProc[nd]||{})[pc]=+el.value||0;
+      // 실시간 합계·게이트 갱신(포커스 유지)
+      let s=0;Object.keys(st.rdProc).forEach(k=>{if(k==='_rid')return;Object.values(st.rdProc[k]).forEach(v=>s+=+v||0);});s=Math.round(s*100)/100;
+      const base=(st.rd&&st.rd.base_gongsu)||0,ok=Math.abs(s-base)<0.5;
+      const sm=g('#sp-sum');if(sm){sm.textContent=nfq(s);sm.style.color=ok?'#1c7c3a':'#c0392b';}
+      const gt=g('#sp-gate');if(gt){gt.textContent=`공수합 ${nfq(s)} / BASE ${base} ${ok?'✔':'✖ 불일치(저장거부)'}`;gt.style.color=ok?'#1c7c3a':'#c0392b';}});
+    {const b=g('#sp-psave');if(b)b.onclick=async()=>{const procs=[];Object.keys(st.rdProc).forEach(nd=>{if(nd==='_rid')return;Object.keys(st.rdProc[nd]).forEach(pc=>{const w=+st.rdProc[nd][pc]||0;if(w>0)procs.push({node_item:nd,proc_code:pc,work_qty:w});});});
+      try{const r=await fetch(`${API}/api/sourcing/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:st.routeTarget,ymd:'260630',procs})});
+        const j=await r.json();if(j.ok){alert(`공정 배치 저장 ✔ 공수합 ${j.cand_gongsu} = BASE ${j.base_gongsu}`);st.rdProc=null;await loadRD(rid);}else alert(`저장 거부: ${j.msg||('공수합 '+j.cand_gongsu+' ≠ BASE '+j.base_gongsu)}`);}catch(e){alert('오류: '+e.message);}};}};
   const bindLineModal=()=>{if(!st.lineForm)return;const g=id=>c.querySelector(id);
     g('#ln-x').onclick=g('#ln-cancel').onclick=()=>{st.lineForm=null;draw();};
     g('#ln-save').onclick=saveLine;g('#ln-child').onclick=newChild;
