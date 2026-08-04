@@ -1772,7 +1772,6 @@ SCREEN.coopquote=(host)=>{
         if(be.data.total_proc_cost>0)set('#be-reqrate',nf(Math.round((sale-mat)*be.data.labor_rate/be.data.total_proc_cost)));};
       const bv=g('#be-vendor');if(bv){bv.oninput=e=>be.vendor=e.target.value;bv.onchange=e=>{be.vendor=e.target.value;if(be.data&&be.assy)loadBomInto(be.assy,null);};}
       const bg=g('#be-grade');if(bg)bg.onchange=e=>be.grade=e.target.value;
-      const bym=g('#be-ym');if(bym)bym.onchange=e=>{be.ym=e.target.value;if(be.data&&be.assy)loadBomInto(be.assy,null);};
       const bsg=g('#be-sagub');if(bsg)bsg.oninput=e=>{be.sagub=e.target.value;host.querySelectorAll('.be-sg').forEach(i=>i.placeholder=e.target.value);upd();};
       host.querySelectorAll('.be-sg').forEach(inp=>inp.oninput=()=>{be.sagubEdits=be.sagubEdits||{};be.sagubEdits[inp.dataset.code]=inp.value;upd();});
       const bp=g('#be-proc');if(bp)bp.oninput=e=>{be.proc=e.target.value;upd();};
