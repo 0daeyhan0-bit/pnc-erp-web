@@ -184,6 +184,51 @@ def _nae_proc_grid(pg: dict):
     out.sort(key=lambda x: (x["seq"], x["code"]))
     return out
 
+# 조립공정 코드셋(가공 11~27·overhead 91~99 제외) = 용접/은납 + 체결계열 + 포장. 품목별 공정관리 'ASSY 조립공정' 탭용.
+_ASSY_PROC = _PROC_WELD | _PROC_FASTEN | {"61", "83", "53", "54", "56"}   # +교정·수몰검사·에어브로잉·포장
+
+@router.get("/api/itemproc/assy")
+def itemproc_assy(q: str = Query("", description="품번/품명 검색"), limit: int = Query(300)):
+    """제품(ASSY)별 조립공정 ST 매트릭스 — 소스 nx.routing(p_item=제품 · 조립공정코드 · work_qty).
+       ★내부원가 조립공정 팝업(/api/cost/proc/get carrier)·proc_grid와 동일 nx.routing 소스 → 값 일치. 조회 전용."""
+    q = q.strip()
+    codes_lit = ",".join("'" + c + "'" for c in sorted(_ASSY_PROC))
+    where = f"ISNULL(r.p_item,'')<>'' AND r.proc_code IN ({codes_lit}) AND ISNULL(r.work_qty,0)>0"
+    params = []
+    if q:
+        where += " AND (r.p_item LIKE ? OR i.item_name LIKE ?)"; params += ['%' + q + '%', '%' + q + '%']
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute(f"""SELECT r.p_item, ISNULL(i.item_name,''), r.proc_code, SUM(r.work_qty)
+            FROM nx.routing r LEFT JOIN nx.item i ON i.item_code=r.p_item
+            WHERE {where} GROUP BY r.p_item, i.item_name, r.proc_code""", *params)
+        mat = {}; nm = {}; used = set()
+        for r in cur.fetchall():
+            pi = str(r[0]).strip(); pc = str(r[2]).strip(); wq = float(r[3] or 0)
+            mat.setdefault(pi, {})[pc] = wq; nm[pi] = str(r[1] or '').strip(); used.add(pc)
+    finally:
+        nx.close()
+    # 공정명(CS_M_PROC)
+    pnames = {}
+    try:
+        cn = _conn(); c2 = cn.cursor()
+        try:
+            uc = list(used)
+            for i in range(0, len(uc), 900):
+                ch = uc[i:i+900]; ph = ",".join("?" * len(ch))
+                c2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,''), ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+                for r in c2.fetchall(): pnames[str(r[0]).strip()] = {"nm": str(r[1]).strip(), "seq": int(r[2] or 0)}
+        finally:
+            cn.close()
+    except Exception:
+        pnames = {}
+    cols = [{"code": c, "name": pnames.get(c, {}).get("nm", c), "group": _proc_group(c),
+             "seq": pnames.get(c, {}).get("seq", 999)} for c in used]
+    cols.sort(key=lambda x: (x["seq"], x["code"]))
+    rows = [{"item": pi, "name": nm.get(pi, ""), "wq": wqs, "total": round(sum(wqs.values()), 2)} for pi, wqs in mat.items()]
+    rows.sort(key=lambda x: x["item"])
+    return {"cols": cols, "rows": rows[:limit], "total_items": len(mat)}
+
 @router.get("/api/cost/lgcompare")
 def cost_lgcompare(ymd: str = Query('260630', description="단가기준일 YYMMDD"),
                    n: int = Query(20, description="샘플 개수")):
