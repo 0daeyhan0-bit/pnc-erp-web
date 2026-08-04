@@ -571,11 +571,12 @@ function priceHistView(host){
   const API=API_BASE;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={from:iso(new Date(T.getTime()-14*864e5)),to:iso(T),item:'',tag:'',changed:true};
+  let F={from:iso(new Date(T.getTime()-14*864e5)),to:iso(T),item:'',tag:'',lgroup:'',sgroup:'',cust:'',changed:true};
+  let vT=null;
   let data={rows:[],cnt:0,changed:0}, loading=false, msg='';
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(0,2)}/${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:(s||'');
   const load=async()=>{loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,item:F.item,tag:F.tag,changed:F.changed?'1':''});
+    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,item:F.item,tag:F.tag,lgroup:F.lgroup,sgroup:F.sgroup,cust:F.cust,changed:F.changed?'1':''});
     try{const r=await fetch(`${API}/api/price/history?${qs}`);data=await r.json();msg='';}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010';data={rows:[],cnt:0,changed:0};}
     loading=false;draw();};
@@ -587,7 +588,10 @@ function priceHistView(host){
      <div class="page-sub" style="margin:2px 0 6px">전사 단가변경 이력을 <b>적용일 내림차순</b>으로. 직전단가 대비 증감(Δ) 표시. 원본 <code>PR_M_ITEM_COST</code>(라이브·읽기전용) · 구분 1=매입·E=수출판매·S=내수판매</div>
      <div class="toolbar">
        <label class="tl">적용기간</label><input class="inp" type="date" id="ph-from" value="${F.from}"> ~ <input class="inp" type="date" id="ph-to" value="${F.to}">
-       <label class="tl">품번</label><input class="inp" id="ph-item" value="${esc(F.item)}" style="width:130px">
+       <label class="tl">품번</label><input class="inp" id="ph-item" value="${esc(F.item)}" style="width:110px">
+       <label class="tl">대분류</label><select class="inp" id="ph-lg" style="max-width:130px"><option value="">전체</option>${(data.lgroups||[]).map(o=>`<option value="${esc(o.code)}"${F.lgroup===o.code?' selected':''}>${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl">소분류</label><select class="inp" id="ph-sg" style="max-width:130px"><option value="">전체</option>${(data.sgroups||[]).map(o=>`<option value="${esc(o.code)}"${F.sgroup===o.code?' selected':''}>${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl">거래처</label><input class="inp" id="ph-cust" list="ph-custdl" autocomplete="off" value="${esc(F.cust)}" placeholder="거래처명/코드" style="width:120px"><datalist id="ph-custdl"></datalist>
        <label class="tl">구분</label><select class="inp" id="ph-tag"><option value="">전체</option><option value="1"${F.tag==='1'?' selected':''}>매입</option><option value="E"${F.tag==='E'?' selected':''}>판매(수출)</option><option value="S"${F.tag==='S'?' selected':''}>판매(내수)</option></select>
        <label class="tl" style="cursor:pointer"><input type="checkbox" id="ph-chg" ${F.changed?'checked':''}> 변동분만</label>
        <button class="btn" id="ph-search">🔍 조회</button>
@@ -607,8 +611,13 @@ function priceHistView(host){
         <td class="num">${dcell(r.delta)}</td><td class="num">${won(r.mat)}</td><td class="num">${won(r.procc)}</td>
         <td>${esc(r.usr)}</td><td class="center" style="color:#8aa0bd">${esc(r.idt)}</td></tr>`).join(''):`<tr><td colspan="14" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
-    g('#ph-search').onclick=()=>{F.from=g('#ph-from').value;F.to=g('#ph-to').value;F.item=g('#ph-item').value;F.tag=g('#ph-tag').value;F.changed=g('#ph-chg').checked;load();};
+    g('#ph-search').onclick=()=>{F.from=g('#ph-from').value;F.to=g('#ph-to').value;F.item=g('#ph-item').value;F.tag=g('#ph-tag').value;F.lgroup=g('#ph-lg').value;F.sgroup=g('#ph-sg').value;F.cust=g('#ph-cust').value.trim();F.changed=g('#ph-chg').checked;load();};
     g('#ph-item').onkeyup=e=>{if(e.key==='Enter')g('#ph-search').click();};
+    g('#ph-cust').onkeyup=e=>{if(e.key==='Enter')g('#ph-search').click();};
+    // 거래처 오토컴플리트(디바운스 서버검색 → datalist)
+    g('#ph-cust').oninput=e=>{const q=e.target.value.trim();clearTimeout(vT);if(q.length<1)return;
+      vT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);const vs=(await r.json()).rows||[];
+        const dl=g('#ph-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.code)}">${esc(x.name)}</option>`).join('');}catch(err){}},250);};
   };
   load();
 }

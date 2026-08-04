@@ -13,7 +13,8 @@ router = APIRouter()
 _COST_TAG = {"1": "매입", "E": "판매(수출)", "S": "판매(내수)"}
 @router.get("/api/price/history")
 def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str = Query(""),
-                  tag: str = Query(""), changed: str = Query("")):
+                  tag: str = Query(""), changed: str = Query(""),
+                  lgroup: str = Query(""), sgroup: str = Query(""), cust: str = Query("")):
     """전사 단가변동 피드: PR_M_ITEM_COST 적용일 내림차순 + 직전단가 대비 Δ(LAG). 라이브·읽기전용."""
     cn = _conn(); cur = cn.cursor()
     try:
@@ -22,6 +23,9 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
         if to_ymd:   w.append("H.apply_ymd<=?"); p.append(_d6(to_ymd))
         if item.strip(): w.append("H.item LIKE ?"); p.append(f"%{item.strip()}%")
         if tag.strip():  w.append("H.tag=?"); p.append(tag.strip())
+        if lgroup.strip(): w.append("i.ITEM_LGROUP=?"); p.append(lgroup.strip())
+        if sgroup.strip(): w.append("i.ITEM_SGROUP=?"); p.append(sgroup.strip())
+        if cust.strip(): w.append("(H.cust LIKE ? OR c.CUST_DESC LIKE ?)"); p += [f"%{cust.strip()}%"] * 2
         if changed == "1": w.append("H.prev IS NOT NULL AND H.cost<>H.prev")
         cur.execute(f"""WITH H AS (
             SELECT ITEM_CODE item, COST_TAG tag, ISNULL(CUST_CODE,'') cust, ISNULL(MKT,'') mkt,
@@ -44,8 +48,11 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
             r["delta"] = round(r["cost"] - r["prev"], 2) if (r["prev"] is not None and r["cost"] is not None) else None
             r["tag_nm"] = _COST_TAG.get(str(r["tag"]).strip(), str(r["tag"]))
             r["idt"] = str(r["idt"] or "")[:19]
+        dLG = _kindmap(cur, "PR005"); dSG = _kindmap(cur, "PR006")
         return {"rows": rows, "cnt": len(rows),
-                "changed": sum(1 for r in rows if r["delta"] not in (None, 0))}
+                "changed": sum(1 for r in rows if r["delta"] not in (None, 0)),
+                "lgroups": [{"code": k, "nm": v} for k, v in sorted(dLG.items())],
+                "sgroups": [{"code": k, "nm": v} for k, v in sorted(dSG.items())]}
     finally:
         cn.close()
 
