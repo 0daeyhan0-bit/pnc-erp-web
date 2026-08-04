@@ -1503,8 +1503,7 @@ SCREEN.coopquote=(host)=>{
        <button class="btn" id="cq-go">🔍 조회</button>
        <button class="btn" id="cq-active" title="최근 4개월 내 실제 납품(입고) 실적이 있는 품목만" style="${st.activeOnly?'background:#1c7c3a;color:#fff':'background:#eef2f7;color:#33507d'}">🚚 현재 납품 품목만 ${st.activeOnly?'ON':'OFF'}</button>
        <button class="btn" id="cq-work" title="직원 입력 작업목록(데이터문제+신규)" style="${st.workMode?'background:#6a3fb0;color:#fff':'background:#f0ecfa;color:#6a3fb0'}">📋 입력작업목록 ${st.workMode?'ON':''}</button>
-       ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>
-       <button class="btn" id="cq-recalc" style="background:#b8791f;color:#fff">🔄 사급가 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
+       ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
      </div>
@@ -1738,7 +1737,6 @@ SCREEN.coopquote=(host)=>{
     g('#cq-q').onkeyup=e=>{if(e.key==='Enter')g('#cq-go').click();};
     if(canEd){
       g('#cq-new').onclick=()=>newBomEdit();
-      g('#cq-recalc').onclick=()=>{st.recalc={price_normal:20000,price_high:22000,scope:st.sel.size?'ids':(st.vendor?'vendor':'all')};render();};
       host.querySelectorAll('.cq-chk').forEach(ch=>ch.onclick=(ev)=>{ev.stopPropagation();const id=+ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});
       host.querySelectorAll('.cq-edit').forEach(b=>b.onclick=(ev)=>{ev.stopPropagation();openBomEdit(+b.dataset.idx);});
     }
