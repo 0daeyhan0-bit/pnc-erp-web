@@ -1770,9 +1770,11 @@ SCREEN.subvariant=(c)=>{
       else{bp.forEach(p=>{st.rdProc[st.routeTarget][p.proc_code]=p.work_qty;});nodes.slice(1).forEach(nd=>bp.forEach(p=>{st.rdProc[nd.code][p.proc_code]=0;}));}}
     let csum=0;nodes.forEach(nd=>bp.forEach(p=>{csum+=+((st.rdProc[nd.code]||{})[p.proc_code])||0;}));csum=Math.round(csum*100)/100;
     const ok=Math.abs(csum-(rd.base_gongsu||0))<0.5;
-    const procGrid=`<div style="overflow:auto"><table class="tbl" style="font-size:11px"><thead><tr><th style="text-align:left">노드＼공정</th>${bp.map(p=>`<th class="num" title="${esc(p.proc_code)}">${esc(_pmap[p.proc_code]||p.proc_code)}</th>`).join('')}<th class="num">계</th></tr></thead>
-      <tbody>${nodes.map(nd=>{let ns=0;bp.forEach(p=>ns+=+((st.rdProc[nd.code]||{})[p.proc_code])||0);return `<tr><td style="text-align:left;white-space:nowrap"><b>${esc(nd.label)}</b></td>${bp.map(p=>`<td class="num"><input class="sp-pq" data-node="${esc(nd.code)}" data-proc="${esc(p.proc_code)}" type="number" min="0" step="any" value="${(st.rdProc[nd.code]||{})[p.proc_code]||''}" style="width:40px;text-align:center"></td>`).join('')}<td class="num"><b>${nfq(ns)}</b></td></tr>`;}).join('')}</tbody>
-      <tfoot><tr><td style="text-align:right;color:#8a94a6">BASE ${rd.base_gongsu} · 후보합</td>${bp.map(_=>'<td></td>').join('')}<td class="num" id="sp-sum" style="color:${ok?'#1c7c3a':'#c0392b'};font-weight:700">${nfq(csum)}</td></tr></tfoot></table></div>`;
+    const weldByNode={};(rd.welds||[]).forEach(w=>{const g=weldByNode[w.node_item]=weldByNode[w.node_item]||{st:0,use:0,n:0};g.st+=+w.st||0;g.use+=+w.use_qty||0;g.n++;});
+    const weldProc=(bp.find(p=>(_pmap[p.proc_code]||'').indexOf('용접')>=0)||{}).proc_code||'51';
+    const procGrid=`<div style="overflow:auto"><table class="tbl" style="font-size:11px"><thead><tr><th style="text-align:left">노드＼공정</th>${bp.map(p=>`<th class="num" title="${esc(p.proc_code)}">${esc(_pmap[p.proc_code]||p.proc_code)}</th>`).join('')}<th class="num">계</th><th></th></tr></thead>
+      <tbody>${nodes.map(nd=>{let ns=0;bp.forEach(p=>ns+=+((st.rdProc[nd.code]||{})[p.proc_code])||0);const wn=weldByNode[nd.code];return `<tr><td style="text-align:left;white-space:nowrap"><b>${esc(nd.label)}</b>${wn?` <span style="color:#8e44ad;font-size:10px" title="용접봉 소요량 ${q4(wn.use)}">🔧ST ${nfq(wn.st)}</span>`:''}</td>${bp.map(p=>`<td class="num"><input class="sp-pq" data-node="${esc(nd.code)}" data-proc="${esc(p.proc_code)}" type="number" min="0" step="any" value="${(st.rdProc[nd.code]||{})[p.proc_code]||''}" style="width:40px;text-align:center"></td>`).join('')}<td class="num"><b>${nfq(ns)}</b></td><td class="center"><button class="btn sp-weld" data-node="${esc(nd.code)}" data-label="${esc(nd.label)}" data-wproc="${esc(weldProc)}" style="padding:0 6px;font-size:10px;background:#8e44ad;color:#fff" title="관경별 용접점 팝업(내부원가 재사용) → 용접ST 산출·[용접]공정 적용">🔧용접</button></td></tr>`;}).join('')}</tbody>
+      <tfoot><tr><td style="text-align:right;color:#8a94a6">BASE ${rd.base_gongsu} · 후보합</td>${bp.map(_=>'<td></td>').join('')}<td class="num" id="sp-sum" style="color:${ok?'#1c7c3a':'#c0392b'};font-weight:700">${nfq(csum)}</td><td></td></tr></tfoot></table></div>`;
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
       <div style="font-weight:700;color:#8e44ad">🧩 SUB 재구성 · 공정 배치 <span id="sp-gate" style="font-size:11px;font-weight:400;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(csum)} / BASE ${rd.base_gongsu} ${ok?'✔':'✖ 불일치(저장거부)'}</span></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
@@ -1812,6 +1814,31 @@ SCREEN.subvariant=(c)=>{
       <button class="btn" id="rp-add" style="margin-top:6px;padding:2px 10px">➕ 업체추가</button>
       <button class="btn" id="rp-save" style="margin-top:6px;background:#1c7c3a;color:#fff;padding:2px 10px">💾 업체 매핑 저장</button>
       <datalist id="sv-vdl2"></datalist></div>`;};
+  // ---------- #3 관경별 용접 팝업(내부원가 재사용) — 노드별 용접점→용접ST(가공비)·용접봉 소요량(재료) ----------
+  const weldPrev=r=>{const d=st.weldDiams.find(x=>Math.abs(x.pipe_diam-(+r.pipe_diam||0))<0.01);if(!d||!(+r.weld_qty>0))return {use:0,st:0};return {use:d.std_use_qty*(+r.weld_qty)*1.5,st:d.std_st*(+r.weld_qty)};};
+  const weldModal=()=>{const w=st.weldEdit;if(!w)return '';
+    const opts=st.weldDiams.map(d=>`<option value="${d.pipe_diam}">${d.pipe_diam}φ (원단위 ${nfq(d.std_use_qty)} · ST ${nfq(d.std_st)})</option>`).join('');
+    let tUse=0,tSt=0;w.rows.forEach(r=>{const p=weldPrev(r);tUse+=p.use;tSt+=p.st;});tUse=Math.round(tUse*10000)/10000;tSt=Math.round(tSt*100)/100;
+    return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(30,20,50,.45);z-index:9995;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 10px">
+      <div style="background:#fff;border-radius:11px;width:640px;max-width:96vw;box-shadow:0 20px 60px rgba(30,10,55,.4)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#8e44ad;color:#fff;border-radius:11px 11px 0 0"><b>🔧 관경별 용접점 — ${esc(w.label)}</b><span id="wm-x" style="cursor:pointer;font-size:17px">✕</span></div>
+        <div style="padding:12px 16px">
+          <div style="color:#8a94a6;font-size:11px;margin-bottom:6px">용접봉 소요량 = Σ(원단위×점수)×1.5 <b>(재료)</b> · 용접ST = Σ(표준ST×점수) <b>(가공비)</b> — 내부원가 관경별 용접 팝업과 동일 표준(nx.weld_diam)</div>
+          <datalist id="wm-roddl"><option value="RAC30599301-1">1% 용접봉</option><option value="RAC30599327">3% 용접봉</option><option value="RAC30599303">BCUP</option></datalist>
+          <table class="tbl" style="font-size:11.5px"><thead><tr><th>용접봉</th><th>관경</th><th class="num">점수</th><th class="num">소요량</th><th class="num">ST</th><th style="width:34px"></th></tr></thead>
+          <tbody>${w.rows.map((r,i)=>{const pv=weldPrev(r);return `<tr>
+            <td><input class="wm-f" data-i="${i}" data-k="weld_item" list="wm-roddl" value="${esc(r.weld_item||'')}" style="width:120px" placeholder="RAC…"></td>
+            <td><select class="wm-f" data-i="${i}" data-k="pipe_diam" style="width:150px"><option value="">-관경-</option>${opts.replace(`value="${r.pipe_diam}"`,`value="${r.pipe_diam}" selected`)}</select></td>
+            <td class="num"><input class="wm-f" data-i="${i}" data-k="weld_qty" type="number" step="1" min="0" value="${r.weld_qty!=null&&r.weld_qty!==''?r.weld_qty:''}" style="width:52px;text-align:right"></td>
+            <td class="num">${q4(pv.use)}</td><td class="num">${nfq(pv.st)}</td>
+            <td class="center"><span class="wm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td></tr>`;}).join('')||'<tr><td colspan="6" class="empty">＋용접점으로 추가</td></tr>'}</tbody>
+          <tfoot><tr><td colspan="3" style="text-align:right;color:#8a94a6">합계</td><td class="num"><b>${q4(tUse)}</b></td><td class="num"><b>${nfq(tSt)}</b></td><td></td></tr></tfoot></table>
+          <button class="btn" id="wm-add" style="margin-top:6px;padding:1px 10px">＋ 용접점</button>
+        </div>
+        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
+          <span style="color:#8a94a6;font-size:11px">저장 시 용접봉 소요량(재료)·용접ST 기록 · 후보 미승인 리셋</span>
+          <span><button class="btn" id="wm-apply" style="background:#8e44ad;color:#fff">💾 저장 + ST ${nfq(tSt)} → [${esc(_pmap[w.wproc]||w.wproc)}]공정 적용</button> <button class="btn" id="wm-cancel">닫기</button></span></div>
+      </div></div>`;};
   const detailModal=()=>{const d=st.detail;if(!d)return '';const R=routeById(d.route_id);if(!R)return '';
     const ed=d.mode==='edit'&&canW&&!R.baseline, h=d.hdr||{};
     const hdrView=`<div style="color:#5a6b82;font-size:12.5px">구분 <b>${esc(R.gubun||'-')}</b>${R.vendor_code?` · 공급처 <b>${esc(R.vendor_name||R.vendor_code)}</b>`:''}${R.apply_from?` · 적용 ${esc(R.apply_from)}`:''}${R.note?` · ${esc(R.note)}`:''}</div>`;
@@ -1893,7 +1920,7 @@ SCREEN.subvariant=(c)=>{
       </div>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#1c7c3a">${esc(st.msg)}</div>`:''}
-     ${newModal()}${detailModal()}${lineModal()}
+     ${newModal()}${detailModal()}${lineModal()}${weldModal()}
      <style>.sv-row.sel{background:#e8f0ff}.sv-row:hover{background:#eef4ff}.sv-mrow:hover{background:#f4f8ff}.sv-mrow.sel{outline:2px solid #1c7c3a;outline-offset:-2px;background:#eafaef}.sv-card:hover{filter:brightness(.985);box-shadow:0 2px 8px rgba(30,45,70,.08)}</style>`;
     const g=id=>c.querySelector(id);
     g('#sv-search').onclick=()=>{st.q=g('#sv-q').value;search();};
@@ -1902,7 +1929,7 @@ SCREEN.subvariant=(c)=>{
     g('#sv-q').onchange=e=>{const v=e.target.value.trim();if(v&&st.slist.some(s=>s.item===v))open(v);};
     c.querySelectorAll('.sv-row').forEach(el=>el.onclick=()=>open(el.dataset.i));
     bindTree();bindBottom();
-    bindNewModal();bindDetailModal();bindLineModal();
+    bindNewModal();bindDetailModal();bindLineModal();bindWeldModal();
     fillDL();
   };
   const paintTree=()=>{const box=c.querySelector('#sv-tree');if(box){box.innerHTML=matTbl();bindTree();}};
@@ -1958,6 +1985,10 @@ SCREEN.subvariant=(c)=>{
     {const b=g('#sp-psave');if(b)b.onclick=async()=>{const procs=[];Object.keys(st.rdProc).forEach(nd=>{if(nd==='_rid')return;Object.keys(st.rdProc[nd]).forEach(pc=>{const w=+st.rdProc[nd][pc]||0;if(w>0)procs.push({node_item:nd,proc_code:pc,work_qty:w});});});
       try{const r=await fetch(`${API}/api/sourcing/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:st.routeTarget,ymd:'260630',procs})});
         const j=await r.json();if(j.ok){alert(`공정 배치 저장 ✔ 공수합 ${j.cand_gongsu} = BASE ${j.base_gongsu}`);st.rdProc=null;await loadRD(rid);}else alert(`저장 거부: ${j.msg||('공수합 '+j.cand_gongsu+' ≠ BASE '+j.base_gongsu)}`);}catch(e){alert('오류: '+e.message);}};}
+    // ---- #3 관경별 용접 팝업 열기(노드별) ----
+    c.querySelectorAll('.sp-weld').forEach(el=>el.onclick=async()=>{await loadWeldDiams();const node=el.dataset.node;
+      const ex=((st.rd&&st.rd.welds)||[]).filter(x=>x.node_item===node).map(x=>({weld_item:x.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));
+      st.weldEdit={node,label:el.dataset.label,wproc:el.dataset.wproc,rows:(ex.length?ex:[{weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''}])};draw();});
     // ---- #4 업체 매핑(조달프로파일) binds ----
     {const b=g('#rp-open');if(b)b.onclick=()=>loadRP(rid);}
     c.querySelectorAll('.rp-f').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k,row=(st.rp&&st.rp.rows)?st.rp.rows[i]:null;if(!row)return;
@@ -1976,6 +2007,21 @@ SCREEN.subvariant=(c)=>{
     g('#ln-x').onclick=g('#ln-cancel').onclick=()=>{st.lineForm=null;draw();};
     g('#ln-save').onclick=saveLine;g('#ln-child').onclick=newChild;
     c.querySelectorAll('.lf').forEach(el=>{el.oninput=el.onchange=()=>{const v=el.type==='checkbox'?el.checked:el.value;st.lineForm[el.dataset.k]=v;if(el.dataset.k==='is_rawmat')draw();if(el.dataset.k==='vendor_code')vSearch(el.value);};});};
+  // ---------- #3 용접 팝업 binds ----------
+  const bindWeldModal=()=>{if(!st.weldEdit)return;const w=st.weldEdit,g=id=>c.querySelector(id);
+    g('#wm-x').onclick=g('#wm-cancel').onclick=()=>{st.weldEdit=null;draw();};
+    {const b=g('#wm-add');if(b)b.onclick=()=>{w.rows.push({weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''});draw();};}
+    c.querySelectorAll('.wm-f').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(!w.rows[i])return;w.rows[i][k]=el.value;draw();};});
+    c.querySelectorAll('.wm-del').forEach(el=>el.onclick=()=>{w.rows.splice(+el.dataset.i,1);draw();});
+    {const b=g('#wm-apply');if(b)b.onclick=async()=>{const rid=st.detail.route_id;
+      const rows=w.rows.filter(r=>+r.pipe_diam>0&&+r.weld_qty>0);
+      try{const r=await fetch(`${API}/api/sourcing/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,node_item:w.node,loss_factor:1.5,rows})});
+        const j=await r.json();if(!j.ok){alert('용접점 저장 실패: '+(j.detail||JSON.stringify(j)));return;}
+        st.weldEdit=null;await loadRD(rid);  // welds 배지 갱신 + rdProc 재빌드(저장 procs 기준)
+        // 용접ST → 해당 노드 [용접]공정 셀 주입(재빌드 이후) · 공수합=BASE는 proc/save 게이트가 최종보증
+        (st.rdProc[w.node]=st.rdProc[w.node]||{})[w.wproc]=j.total_st;draw();
+        alert(`용접점 저장 ✔ 용접봉 소요량 ${q4(j.total_use_qty)} · 용접ST ${nfq(j.total_st)} → [${_pmap[w.wproc]||w.wproc}]공정 적용됨. 공수합=BASE 확인 후 '공정 배치 저장'하세요.`);
+      }catch(e){alert('오류: '+e.message);}};}};
   // ---------- 대상 선택(부분갱신) ----------
   const selectTarget=async(code,el)=>{
     if(!code||code===st.routeTarget)return;

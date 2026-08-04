@@ -60,6 +60,44 @@ def _incost(cur, assys):
     return out
 
 
+@router.post("/api/coopquote/refresh-incost")
+def coopquote_refresh_incost():
+    """nx.coop_incost 재계산(라이브 window). coop_quote/part 전 코드의 현재/종전 실입고가 갱신.
+       ~17초 소요(주기/버튼). 이후 목록조회는 이 테이블을 읽어 즉시."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""IF OBJECT_ID('nx.coop_incost') IS NULL
+          CREATE TABLE nx.coop_incost(code nvarchar(60) NOT NULL PRIMARY KEY, cur_cost decimal(18,4) NULL,
+            prev_cost decimal(18,4) NULL, cur_ymd nvarchar(6) NULL, upd_dt datetime NOT NULL DEFAULT(getdate()))""")
+        cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(code))) FROM (
+           SELECT assy_code code FROM nx.coop_quote
+           UNION SELECT part_code FROM nx.coop_quote_part WHERE part_code IS NOT NULL) t WHERE LTRIM(RTRIM(code))<>''""")
+        codes = [str(r[0]).strip() for r in cur.fetchall()]
+        res = {}
+        for i in range(0, len(codes), 400):
+            inlist = "','".join(c.replace("'", "") for c in codes[i:i + 400])
+            cur.execute(f"""WITH M AS (
+               SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) IC, MAINT_YMD, MAINT_COST,
+                 ROW_NUMBER() OVER(PARTITION BY UPPER(LTRIM(RTRIM(MAT_CODE))) ORDER BY MAINT_YMD DESC) rc,
+                 ROW_NUMBER() OVER(PARTITION BY UPPER(LTRIM(RTRIM(MAT_CODE))) ORDER BY (CASE WHEN MAINT_YMD<='{_PREV_YMD}' THEN 0 ELSE 1 END),MAINT_YMD DESC) rp
+               FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG='S' AND MAINT_QTY>0 AND MAINT_COST>0
+                 AND UPPER(LTRIM(RTRIM(MAT_CODE))) IN ('{inlist}'))
+             SELECT IC, MAX(CASE WHEN rc=1 THEN MAINT_COST END), MAX(CASE WHEN rc=1 THEN MAINT_YMD END),
+               MAX(CASE WHEN rp=1 AND MAINT_YMD<='{_PREV_YMD}' THEN MAINT_COST END) FROM M GROUP BY IC""")
+            for r in cur.fetchall():
+                res[str(r[0]).strip()] = (r[1], str(r[2] or '')[-6:], r[3])
+        cur.execute("TRUNCATE TABLE nx.coop_incost")
+        for code in codes:
+            v = res.get(code)
+            cur.execute("INSERT INTO nx.coop_incost(code,cur_cost,prev_cost,cur_ymd) VALUES(?,?,?,?)",
+                        code, (float(v[0]) if (v and v[0] is not None) else None),
+                        (float(v[2]) if (v and v[2] is not None) else None), (v[1] if v else None))
+        _INCOST_CACHE.clear()
+        return {"ok": True, "codes": len(codes), "with_cost": len(res)}
+    finally:
+        nx.close()
+
+
 @router.get("/api/coopquote/vendors")
 def coopquote_vendors():
     nx = _nx(); cur = nx.cursor()
