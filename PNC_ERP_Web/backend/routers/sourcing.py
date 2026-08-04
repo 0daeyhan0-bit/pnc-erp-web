@@ -401,6 +401,21 @@ def _ensure_route_tbl(cur):
     cur.execute("IF COL_LENGTH('nx.sourcing_route','reject_reason') IS NULL ALTER TABLE nx.sourcing_route ADD reject_reason NVARCHAR(200)")
     cur.execute("IF COL_LENGTH('nx.sourcing_route','reject_user') IS NULL ALTER TABLE nx.sourcing_route ADD reject_user NVARCHAR(30)")
     cur.execute("IF COL_LENGTH('nx.sourcing_route','reject_dt') IS NULL ALTER TABLE nx.sourcing_route ADD reject_dt datetime")
+    # ★후보 SUB 계층(멱등) + 후보별 공정배치 테이블
+    cur.execute("IF COL_LENGTH('nx.sourcing_route_line','node_kind') IS NULL ALTER TABLE nx.sourcing_route_line ADD node_kind NVARCHAR(10) NOT NULL DEFAULT 'PART'")
+    cur.execute("IF COL_LENGTH('nx.sourcing_route_line','parent_line') IS NULL ALTER TABLE nx.sourcing_route_line ADD parent_line INT NULL")
+    cur.execute("IF COL_LENGTH('nx.sourcing_route_line','sub_item') IS NULL ALTER TABLE nx.sourcing_route_line ADD sub_item NVARCHAR(60) NULL")
+    cur.execute("""IF OBJECT_ID('nx.sourcing_route_proc','U') IS NULL CREATE TABLE nx.sourcing_route_proc(
+        rp_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
+        proc_code NVARCHAR(10) NOT NULL, work_qty FLOAT DEFAULT 0, prod_uph FLOAT DEFAULT 0, calc_gubun NVARCHAR(4) NULL,
+        ins_dt datetime DEFAULT getdate())""")
+
+def _base_gongsu(item, ymd="260630"):
+    """BASE(기본BOM) 공수합 = 내부원가 proc_grid 전노드 work_qty 합. 후보 공수합 게이트 기준."""
+    with _COST_LOCK:
+        try: pg = _get_cost_engine().proc_grid(item, ymd)
+        except Exception: pg = _get_cost_engine(fresh=True).proc_grid(item, ymd)
+    return round(sum(float(v.get("wq", 0)) for v in pg.values()), 2)
 
 def _route_baseline_lines(item):
     """현행(baseline) 경로 라인 = 대상(item)의 실사용 BOM 직하위(level1). 구분: 사급/제작/매입, 공급처=IN_CUST, 치수 보강.
@@ -798,7 +813,8 @@ def sourcing_route_detail(route_id: int = Query(...)):
         h = cur.fetchone()
         if not h: raise HTTPException(404, "대상 없음")
         cur.execute("""SELECT line_id,sort_seq,ISNULL(child_item,''),ISNULL(child_name,''),qty,ISNULL(gubun,''),
-              ISNULL(vendor_code,''),is_rawmat,diam,thick,len_val,ISNULL(material,''),ISNULL(spec,'')
+              ISNULL(vendor_code,''),is_rawmat,diam,thick,len_val,ISNULL(material,''),ISNULL(spec,''),
+              ISNULL(node_kind,'PART'),parent_line,ISNULL(sub_item,'')
             FROM nx.sourcing_route_line WHERE route_id=? ORDER BY sort_seq,line_id""", route_id)
         lines = []; vcodes = {str(h[5]).strip()}
         for l in cur.fetchall():
@@ -806,14 +822,24 @@ def sourcing_route_detail(route_id: int = Query(...)):
             lines.append({"line_id": int(l[0]), "child_item": l[2], "child_name": l[3], "qty": float(l[4] or 0),
                           "gubun": l[5], "vendor_code": str(l[6]).strip(), "is_rawmat": int(l[7] or 0),
                           "diam": float(l[8] or 0), "thick": float(l[9] or 0), "len_val": float(l[10] or 0),
-                          "material": l[11], "spec": l[12]})
+                          "material": l[11], "spec": l[12],
+                          "node_kind": str(l[13] or 'PART'), "parent_line": (int(l[14]) if l[14] is not None else None), "sub_item": str(l[15] or '')})
         vmap = _custnm_map(cur, vcodes)
         for l in lines: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
+        # 후보별 공정배치(route_proc) + BASE 공수합(게이트 기준)
+        cur.execute("SELECT node_item,proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.sourcing_route_proc WHERE route_id=?", route_id)
+        procs = [{"node_item": str(r[0]).strip(), "proc_code": str(r[1]).strip(), "work_qty": float(r[2] or 0),
+                  "prod_uph": float(r[3] or 0), "calc_gubun": str(r[4] or '')} for r in cur.fetchall()]
         hdr = {"route_id": int(h[0]), "item_code": str(h[1]).strip(), "route_no": int(h[2]), "route_name": h[3],
                "gubun": h[4], "vendor_code": str(h[5]).strip(), "vendor_name": vmap.get(str(h[5]).strip(), str(h[5]).strip()),
                "approve_flag": bool(h[6]), "reject_flag": bool(h[7]), "reject_reason": h[8], "apply_from": h[9],
                "note": h[10], "ins_user": h[11]}
-        return {"header": hdr, "lines": lines}
+        base_g = None
+        try: base_g = _base_gongsu(str(h[1]).strip())
+        except Exception: base_g = None
+        cand_g = round(sum(p["work_qty"] for p in procs), 2)
+        return {"header": hdr, "lines": lines, "procs": procs,
+                "base_gongsu": base_g, "cand_gongsu": cand_g, "gate_ok": (base_g is None or abs(cand_g - base_g) < 0.5 or cand_g == 0)}
     finally:
         nx.close()
 
@@ -829,6 +855,97 @@ def sourcing_route_approve_bulk(payload: dict = Body(...)):
         ph = ",".join("?" * len(ids))
         cur.execute(f"UPDATE nx.sourcing_route SET approve_flag=1, reject_flag=0, reject_reason=NULL, upd_user=?, upd_dt=getdate() WHERE route_id IN ({ph})", usr, *ids)
         return {"ok": True, "approved": cur.rowcount}
+    finally:
+        nx.close()
+
+# ===================== 후보 SUB 재구성(드래그드롭·공정재배치) =====================
+@router.post("/api/sourcing/sub/create")
+def sourcing_sub_create(payload: dict = Body(...)):
+    """후보 안에서 선택 부품(line_ids)을 신규 SUB로 묶기. SUB 채번(base_child+suffix)→nx.item 최소등록,
+       SUB행(node_kind='SUB') 생성 + 선택부품 parent_line=SUB.line_id. 근거키=route_id·line_ids. 승인 리셋."""
+    rid = int(payload.get("route_id") or 0)
+    line_ids = [int(x) for x in (payload.get("line_ids", []) or []) if str(x).strip().isdigit()]
+    base_child = str(payload.get("base_child", "")).strip()
+    suffix = (str(payload.get("suffix", "") or "-SUB").strip())[:12]
+    subname = str(payload.get("name", "")).strip()[:120]
+    gubun = str(payload.get("gubun", "자체")).strip()[:20]
+    if rid <= 0 or not line_ids: raise HTTPException(400, "route_id·line_ids 필요")
+    subcode = ((base_child + suffix)[:60]) if base_child else None
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        if subcode:
+            cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", subcode)
+            if not cur.fetchone():
+                cur.execute("INSERT INTO nx.item(item_code,item_name,item_type) VALUES(?,?,N'제품')", subcode, subname or subcode)
+        cur.execute("SELECT ISNULL(MAX(sort_seq),0)+1 FROM nx.sourcing_route_line WHERE route_id=?", rid); sq = int(cur.fetchone()[0])
+        cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,node_kind,sub_item)
+            OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,?,'SUB',?)""", rid, sq, subcode, (subname or subcode), gubun, subcode)
+        subline = int(cur.fetchone()[0])
+        ph = ",".join("?" * len(line_ids))
+        cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, node_kind='PART' WHERE route_id=? AND line_id IN ({ph})", subline, rid, *line_ids)
+        moved = cur.rowcount
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
+        nx.commit()
+        return {"ok": True, "sub_line": subline, "sub_item": subcode, "moved": moved}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/sub/dissolve")
+def sourcing_sub_dissolve(payload: dict = Body(...)):
+    """SUB 해제 — 하위부품 parent_line=NULL 복귀(평면), SUB행 삭제. 근거키=route_id·sub_line. 승인 리셋."""
+    rid = int(payload.get("route_id") or 0); subline = int(payload.get("sub_line") or 0)
+    if rid <= 0 or subline <= 0: raise HTTPException(400, "route_id·sub_line 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("UPDATE nx.sourcing_route_line SET parent_line=NULL WHERE route_id=? AND parent_line=?", rid, subline)
+        freed = cur.rowcount
+        cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, subline)
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
+        nx.commit()
+        return {"ok": True, "freed": freed}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/proc/save")
+def sourcing_proc_save(payload: dict = Body(...)):
+    """후보별 공정배치 저장(nx.sourcing_route_proc 전체교체). ★게이트: Σ(후보 work_qty 전노드) == BASE 공수합(내부원가 proc_grid) diff0.
+       불일치 시 저장거부(공수합 보존 강제). BASE nx.routing은 불변. 근거키=route_id. 승인 리셋."""
+    rid = int(payload.get("route_id") or 0)
+    item = str(payload.get("item_code", "")).strip()
+    ymd = str(payload.get("ymd", "260630")).strip() or "260630"
+    procs = payload.get("procs", []) or []
+    if rid <= 0 or not item: raise HTTPException(400, "route_id·item_code 필요")
+    csum = round(sum(float(p.get("work_qty") or 0) for p in procs), 2)
+    try: base = _base_gongsu(item, ymd)
+    except Exception as e: raise HTTPException(500, f"BASE 공수합 계산오류: {e}")
+    if abs(csum - base) > 0.5:
+        return {"ok": False, "gate": "FAIL", "cand_gongsu": csum, "base_gongsu": base,
+                "msg": f"공수합 불일치 — 후보 {csum} ≠ BASE {base}. 저장 거부(공수합=BASE 보존 필수)."}
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT 1 FROM nx.sourcing_route WHERE route_id=?", rid)
+        if not cur.fetchone(): raise HTTPException(404, "route 없음")
+        cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
+        n = 0
+        for p in procs:
+            wq = float(p.get("work_qty") or 0)
+            if wq <= 0: continue
+            cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
+                VALUES(?,?,?,?,?,?)""", rid, str(p.get("node_item", "")).strip()[:60], str(p.get("proc_code", "")).strip()[:10],
+                wq, float(p.get("prod_uph") or 0), (str(p.get("calc_gubun", "") or "")[:4]))
+            n += 1
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
+        nx.commit()
+        return {"ok": True, "gate": "PASS", "cand_gongsu": csum, "base_gongsu": base, "saved": n}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 
