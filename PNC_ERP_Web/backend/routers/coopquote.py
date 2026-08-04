@@ -311,14 +311,23 @@ def coopquote_recalc(payload: dict = Body(...)):
         nx.close()
 
 
+_VENDOR2CODE = {'대원산업': '2148', '미래정밀': '2096', '명진산업': '2306', '중앙정밀': '2048',
+                '이젠터': '2068', '케이비': '2266', '세광산업': '2142', '썬텍코리아': '233', '썬텍': '233'}
+
 @router.get("/api/coopquote/bom-form")
-def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendor: str = Query("")):
+def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendor: str = Query(""),
+                       ym: str = Query("", description="적용월 YYMM|YYYYMM(사급가=판매단가 as-of)")):
     """견적 입력폼용: 현 BOM(CS_M_ITEM_BOM) 구성 전개 + 부품별 역할/스펙/매입가/공정 프리필.
        구성=현BOM 정본(고정). 직원은 '제작동관'의 협력사 스펙(외경/두께/길이)만 채우면 됨.
+       ★재료비: 사급부품=판매단가(사급가·해당협력사·적용월기준) · 제작동관=소요중량×사급가 · 용접봉=소요×단가.
        공정=coop_part_proc(견적 유래), 가공비=Σ(임율/표준ST_공정)×횟수×소요량."""
     import math
     vendor = vendor.strip()
     item = item.strip()
+    vcode = _VENDOR2CODE.get(vendor, "")
+    ym6 = "".join(ch for ch in str(ym or "") if ch.isdigit())
+    ym4 = ym6[2:6] if len(ym6) == 6 else (ym6[:4] if len(ym6) >= 4 else "")   # YYMM
+    asof = (ym4 + "31") if ym4 else "991231"   # 적용월 이하 최신 판매단가
     cn = _conn(); cur = cn.cursor()
     try:
         # 1) BOM 재귀전개 (현행)
@@ -361,6 +370,21 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 SELECT ic, ITEM_COST FROM C WHERE rn=1""")
             for r in cur.fetchall():
                 pur[str(r[0]).strip().upper()] = float(r[1] or 0)
+        # 3b) 사급가 = 판매단가(COST_TAG='S' 내수 · 해당 협력사 · 적용월 이하 대표최신)
+        sale_asof = {}
+        if vcode:
+            for i in range(0, len(nl), 900):
+                chunk = [c.replace("'", "") for c in nl[i:i+900]]; inl = "','".join(chunk)
+                cur.execute(f"""WITH S AS (
+                      SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
+                        ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
+                          ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
+                      FROM PR_M_ITEM_COST
+                      WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
+                        AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                    SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
+                for r in cur.fetchall():
+                    sale_asof[str(r[0]).strip().upper()] = float(r[1] or 0)
     finally:
         cn.close()
     # 4) 협력사 스펙 프리필(coop_raw_spec) + 기존 견적여부
@@ -470,7 +494,21 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             gp_piece = gagong_piece(ch) if role == "제작동관" else 0
             proc_cost = round(gp_piece * cq) if role == "제작동관" else 0
             pt = partmap.get(ch.upper())   # 저장 합계(엑셀 AQ)
+            # ★재료비(현재/적용월): 사급=판매단가(사급가)×소요 · 매입부품=매입가×소요 · 제작동관=소요중량×사급가 · 용접봉=소요×단가
+            sp_sale = sale_asof.get(ch.upper())
+            if role == "용접봉":
+                mat_now = weld_cost
+            elif role == "사급":
+                mat_now = round(sp_sale * cq) if sp_sale else (round(pt["mat"]) if pt else (round(pp * cq) if pp else 0))
+            elif role == "매입부품":
+                mat_now = round(pp * cq) if pp else (round(pt["mat"]) if pt else 0)
+            elif role == "제작동관":
+                sgr = (cs.get("sagub", 0) if cs else 0) or 0
+                mat_now = round(uw * cq * sgr) if (uw and sgr) else (round(pt["mat"]) if pt else 0)
+            else:
+                mat_now = (round(pt["mat"]) if pt else 0)
             rows.append({
+                "mat_now": mat_now, "sale_price": (round(sp_sale) if sp_sale else None),
                 "part_total": (round(pt["total"]) if pt else None),
                 "part_mat": (round(pt["mat"]) if pt else None),
                 "level": lvl, "code": ch, "name": ci.get("nm", ""), "role": role,
@@ -489,6 +527,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     total_soyo = round(sum(r["soyo_weight"] for r in rows if r["role"] == "제작동관"), 4)
     total_weld = round(sum(r["weld_cost"] for r in rows if r["role"] == "용접봉"))
     total_proc = round(sum(r["proc_cost"] for r in rows if r["role"] == "제작동관"))
+    total_mat = round(sum((r["mat_now"] or 0) for r in rows))   # ★재료비 합계(적용월 기준)
     # 공정 컬럼 고정(엑셀 전체 공정 순서) — 품번마다 변동하지 않음
     proc_ops = ['컷팅','면취','벤딩','CNC','딤플','벌징','원교정','피어싱','압착','T뽑기','후레아','축확관','실링','망삽입','막음','코킹','세척','용접','부삽입','교/체','수몰검사','포장']
     root = info.get(item, {})
