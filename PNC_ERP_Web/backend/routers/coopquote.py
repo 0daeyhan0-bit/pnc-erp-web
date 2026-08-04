@@ -438,11 +438,15 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         quoted = ncur.fetchone()[0] > 0
         # 저장 부품 합계(엑셀 AQ) — bottom-up 합산 표시용
         partmap = {}; part_sum = 0.0; sale_stored = 0.0
+        weld_quote = {}   # 견적 용접봉 재료비 {code: mat}. 현 BOM(우리기준) 무시, 견적기준 사용
         try:
             ncur.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), part_total, mat_cost, proc_cost, ISNULL(ptype,'') FROM nx.coop_quote_part WHERE assy_code=?", item)
             for r in ncur.fetchall():
                 pt = float(r[1] or 0); part_sum += pt
-                partmap[str(r[0]).strip().upper()] = {"total": pt, "mat": float(r[2] or 0), "proc": float(r[3] or 0)}
+                code_u = str(r[0]).strip().upper()
+                partmap[code_u] = {"total": pt, "mat": float(r[2] or 0), "proc": float(r[3] or 0)}
+                if "용접" in str(r[4] or ""):
+                    weld_quote[code_u] = float(r[2] or 0)
             ncur.execute("SELECT ISNULL(sale_price,0) FROM nx.coop_quote WHERE assy_code=?", item)
             rr = ncur.fetchone()
             if rr: sale_stored = float(rr[0] or 0)
@@ -524,8 +528,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 uw = geom(ci["diam"], ci["thick"], ci["length"]); src = "LG참고"
             need_input = (role == "제작동관" and not (cs and (cs["uw"] > 0 or (cs["diam"] and cs["thick"]))))
             pp = pur.get(ch.upper(), None)
-            # 용접봉 = 재료비 아님 → 공정(용접) 부자재비. 비용 = 단가 × 소요량
-            weld_cost = round(pp * cq) if (role == "용접봉" and pp) else 0
+            # 용접봉 재료비 = ★견적 기준(현 BOM 소요×단가 무시=우리기준). 코드매치분만; 미매치는 walk후 견적잔여 배분
+            weld_cost = round(weld_quote[ch.upper()]) if (role == "용접봉" and ch.upper() in weld_quote) else 0
             procs = procmap.get(ch.upper()) if role == "제작동관" else None
             gp_piece = gagong_piece(ch) if role == "제작동관" else 0
             proc_cost = round(gp_piece * cq) if role == "제작동관" else 0

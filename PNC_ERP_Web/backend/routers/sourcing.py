@@ -385,7 +385,11 @@ def subvariant_include(payload: dict = Body(...)):
 _ROUTE_GUBUN = ["자체", "매입", "외주유상", "외주무상"]          # 경로 헤더 구분
 _LINE_GUBUN = ["제작", "매입", "사급"]                            # 라인 구분
 
+_SCHEMA_READY = False   # ★속도: 스키마 멱등체크는 프로세스당 1회만(매 요청 11 메타 라운드트립 ~104ms 제거). 스키마는 런타임 불변.
 def _ensure_route_tbl(cur):
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
     cur.execute("""IF OBJECT_ID('nx.sourcing_route','U') IS NULL CREATE TABLE nx.sourcing_route(
         route_id INT IDENTITY(1,1) PRIMARY KEY, item_code NVARCHAR(60) NOT NULL, route_no INT NOT NULL,
         route_name NVARCHAR(80), vendor_code NVARCHAR(20), gubun NVARCHAR(20), current_flag BIT DEFAULT 0,
@@ -414,6 +418,28 @@ def _ensure_route_tbl(cur):
         rw_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
         weld_item NVARCHAR(60) NULL, pipe_diam FLOAT NULL, weld_qty FLOAT DEFAULT 0,
         use_qty FLOAT DEFAULT 0, st FLOAT DEFAULT 0, ins_dt datetime DEFAULT getdate())""")
+    # ★후보번호 단조증가(high-water-mark): 삭제해도 route_no 재사용 안 함. item별 마지막 채번번호.
+    cur.execute("""IF OBJECT_ID('nx.route_seq','U') IS NULL CREATE TABLE nx.route_seq(
+        item_code NVARCHAR(60) PRIMARY KEY, last_no INT NOT NULL DEFAULT 1)""")
+    _SCHEMA_READY = True
+
+def _peek_route_no(cur, item):
+    """다음 채번될 route_no(증가 없이 조회) = max(기존 route_no, route_seq.last_no, 1)+1. 표시(자동라벨)용."""
+    cur.execute("SELECT ISNULL(MAX(route_no),1) FROM nx.sourcing_route WHERE item_code=?", item)
+    mx = int(cur.fetchone()[0] or 1)
+    cur.execute("SELECT last_no FROM nx.route_seq WHERE item_code=?", item)
+    r = cur.fetchone(); seq = int(r[0]) if r else 1
+    return max(mx, seq, 1) + 1
+
+def _next_route_no(cur, item):
+    """route_no 원자적 채번(단조증가). high-water = max(기존MAX, seq.last_no) → +1, seq에 기록.
+       ★삭제 후 재생성해도 번호 되돌아가지 않음(R02 삭제→다음 R03)."""
+    new_no = _peek_route_no(cur, item)
+    cur.execute("""MERGE nx.route_seq AS t USING (SELECT ? AS item_code, ? AS last_no) AS s
+        ON t.item_code=s.item_code
+        WHEN MATCHED THEN UPDATE SET last_no=s.last_no
+        WHEN NOT MATCHED THEN INSERT(item_code,last_no) VALUES(s.item_code,s.last_no);""", item, new_no)
+    return new_no
 
 def _base_gongsu(item, ymd="260630"):
     """BASE(기본BOM) 공수합 = 내부원가 proc_grid 전노드 work_qty 합. 후보 공수합 게이트 기준."""
@@ -422,9 +448,17 @@ def _base_gongsu(item, ymd="260630"):
         except Exception: pg = _get_cost_engine(fresh=True).proc_grid(item, ymd)
     return round(sum(float(v.get("wq", 0)) for v in pg.values()), 2)
 
+_BASELINE_CACHE = {}   # ★속도: 현행 실사용 BOM(라이브RO)은 세션 중 불변 → (item)별 in-proc 캐시(TTL 120s). 조회 재호출(선택전환·생성후 재조회) 시 525ms 라이브쿼리 제거.
+_BASELINE_TTL = 120.0
 def _route_baseline_lines(item):
     """현행(baseline) 경로 라인 = 대상(item)의 실사용 BOM 직하위(level1). 구분: 사급/제작/매입, 공급처=IN_CUST, 치수 보강.
-    ★조달후보=SUB/조달대상 단위(하단): 대상별 현행 경로1 = 그 대상의 직하위 구성/공급처."""
+    ★조달후보=SUB/조달대상 단위(하단): 대상별 현행 경로1 = 그 대상의 직하위 구성/공급처.
+    ★캐시: 라이브RO(불변 참조데이터) TTL 120s — 정확성 무손상(원가/공수합과 무관·표시/seed용)."""
+    import time as _tt
+    key = item.strip()
+    hit = _BASELINE_CACHE.get(key)
+    if hit and (_tt.time() - hit[0]) < _BASELINE_TTL:
+        return [dict(l) for l in hit[1]]   # 방어복사(호출측 변형 격리)
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute("""SELECT LTRIM(RTRIM(b.MAT_CODE)) child, CAST(b.USE_QTY AS float) q, ISNULL(b.SAGUB_FLAG,'0') sag,
@@ -444,6 +478,7 @@ def _route_baseline_lines(item):
                         "gubun": gub, "vendor_code": str(r.cust).strip(), "vendor_name": r.custnm,
                         "is_rawmat": 1 if str(r.metal).strip() else 0, "diam": float(r.diam or 0), "thick": float(r.thick or 0),
                         "len_val": float(r.len or 0), "material": str(r.metal).strip(), "spec": "", "note": ""})
+        _BASELINE_CACHE[key] = (_tt.time(), [dict(l) for l in out])
         return out
     finally:
         cn.close()
@@ -505,20 +540,14 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
     """품목의 조달경로 후보 목록. 경로1=현행(baseline, 실사용BOM 파생·읽기전용) 항상 포함. 경로2..=저장된 대안(nx.sourcing_route).
     for_profile=1: approve_flag=1(승인)만 편성가능; show_unapproved=0 이면 미승인 완전제외, =1 이면 미승인도 회색/읽기전용 포함."""
     item = item.strip()
-    import time as _t; _TM = {}; _t0 = _t.perf_counter()
-    def _mk(k):
-        nonlocal _t0; _TM[k] = round((_t.perf_counter()-_t0)*1000,1); _t0 = _t.perf_counter()
     nx = _nx(); cur = nx.cursor()
-    _mk("conn")
     try:
         _ensure_route_tbl(cur)
-        _mk("ensure_tbl")
         cur.execute("""SELECT r.route_id, r.route_no, ISNULL(r.route_name,''), ISNULL(r.vendor_code,''), ISNULL(r.gubun,''),
               r.current_flag, r.approve_flag, CONVERT(varchar(10),r.apply_from,23), ISNULL(r.note,''),
               ISNULL(r.reject_flag,0), ISNULL(r.reject_reason,'')
             FROM nx.sourcing_route r WHERE r.item_code=? ORDER BY r.route_no""", item)
         hdrs = cur.fetchall()
-        _mk("hdr_select")
         routes = []
         vcodes = set()
         for h in hdrs:
@@ -538,7 +567,6 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                            "gubun": h[4], "current_flag": bool(h[5]), "approve_flag": bool(h[6]), "apply_from": h[7],
                            "note": h[8], "reject_flag": bool(h[9]), "reject_reason": h[10], "baseline": False, "lines": lines})
         # 현행 baseline 합성(저장된 route_no=1 이 없을 때만) — 읽기전용·자동승인 기준선
-        _mk("route_lines")
         has_saved_current = any(r["current_flag"] or r["route_no"] == 1 for r in routes)
         if not has_saved_current:
             blines = _route_baseline_lines(item)
@@ -547,10 +575,8 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                               "gubun": "자체", "current_flag": True, "approve_flag": True, "apply_from": None,
                               "note": "레거시 실사용 BOM 파생(기준선·읽기전용). 대안은 [복사]로 생성.",
                               "reject_flag": False, "reject_reason": "", "baseline": True, "lines": blines})
-        _mk("baseline_synth")
         # 벤더 코드→이름
         vmap = _custnm_map(cur, vcodes)
-        _mk("custnm_map")
         for r in routes:
             r["vendor_name"] = vmap.get(r["vendor_code"], r["vendor_code"])
             for l in r["lines"]: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
@@ -563,9 +589,8 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
                 return bool(show_unapproved)
             fr = [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
             routes = fr
-        _mk("tail")
         return {"item": item, "item_name": nm, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
-                "routes": routes, "_timing": _TM}
+                "routes": routes}
     finally:
         nx.close()
 
