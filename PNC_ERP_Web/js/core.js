@@ -681,7 +681,8 @@ function priceItemView(c){
     // 거래처 오토컴플리트(디바운스 서버검색 → datalist) + 필터해제
     g('#pi-cust').oninput=e=>{const q=e.target.value.trim();clearTimeout(custT);if(q.length<1)return;
       custT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);const vs=(await r.json()).rows||[];
-        const dl=g('#pi-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.code)}">${esc(x.name)}</option>`).join('');}catch(err){}},250);};
+        // ★거래처명 기준 표시(코드는 보조): option value=이름, 라벨에 코드
+        const dl=g('#pi-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.name)}">${esc(x.name)} (${esc(x.code)})</option>`).join('');}catch(err){}},250);};
     {const cx=g('#pi-custx');if(cx)cx.onclick=()=>{st.cust='';load();};}
     c.querySelectorAll('.pi-row').forEach(tr=>tr.onclick=()=>loadDet(tr.dataset.cd));
     attachResizers(c);
