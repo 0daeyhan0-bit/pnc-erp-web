@@ -186,23 +186,29 @@ async def dtrade_po_upload(file: UploadFile = File(...)):
     if not seen:
         raise HTTPException(400, "데이터 행 없음")
     fn = (file.filename or '')[:200]
-    nx = _nx(); cur = nx.cursor()
+    data = [(mat, mkt, cy, price, (sy or None), (ey or None), desc, fn)
+            for (mat, mkt, cy), (price, sy, ey, desc) in seen.items()]
+    nx = _nx_tx(); cur = nx.cursor()          # 트랜잭션 1회 커밋(멱등, 배치)
     try:
-        up = 0; items = set()
-        for (mat, mkt, cy), (price, sy, ey, desc) in seen.items():
-            cur.execute("""MERGE nx.dtrade_lg_price AS t
-              USING (SELECT ? item_code, ? mkt, ? created_ymd) s
+        cur.execute("""CREATE TABLE #stg(item_code varchar(30), mkt varchar(4), created_ymd char(6),
+            price decimal(18,4), start_ymd char(6), end_ymd char(8), item_desc nvarchar(200), src_file nvarchar(200))""")
+        cur.fast_executemany = True
+        cur.executemany("INSERT INTO #stg VALUES(?,?,?,?,?,?,?,?)", data)
+        cur.execute("""MERGE nx.dtrade_lg_price AS t USING #stg AS s
               ON t.item_code=s.item_code AND t.mkt=s.mkt AND t.created_ymd=s.created_ymd
-              WHEN MATCHED THEN UPDATE SET price=?, start_ymd=?, end_ymd=?, item_desc=?, src_file=?, upload_dt=GETDATE()
+              WHEN MATCHED THEN UPDATE SET price=s.price, start_ymd=s.start_ymd, end_ymd=s.end_ymd,
+                   item_desc=s.item_desc, src_file=s.src_file, upload_dt=GETDATE()
               WHEN NOT MATCHED THEN INSERT(item_code,mkt,created_ymd,price,start_ymd,end_ymd,item_desc,src_file)
-                VALUES(?,?,?,?,?,?,?,?);""",
-                mat, mkt, cy, price, sy, ey, desc, fn, mat, mkt, cy, price, sy, ey, desc, fn)
-            up += 1; items.add(mat)
-        # 최신 회차 요약
+                VALUES(s.item_code,s.mkt,s.created_ymd,s.price,s.start_ymd,s.end_ymd,s.item_desc,s.src_file);""")
         cur.execute("SELECT COUNT(DISTINCT item_code), MAX(created_ymd) FROM nx.dtrade_lg_price")
         tot, maxc = cur.fetchone()
-        return {"ok": True, "rows": up, "items": len(items), "file": fn,
+        nx.commit()
+        return {"ok": True, "rows": len(data), "items": len({d[0] for d in data}), "file": fn,
                 "total_items": tot, "latest_created": maxc}
+    except Exception as e:
+        try: nx.rollback()
+        except Exception: pass
+        raise HTTPException(500, f"업로드 저장 실패: {str(e)[:160]}")
     finally:
         nx.close()
 

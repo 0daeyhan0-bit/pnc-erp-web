@@ -1982,7 +1982,7 @@ SCREEN.dtradeprice=(host)=>{
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:1});
   const q4=v=>(v==null)?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
   const fy=y=>{y=''+(y||'');return y.length>=6?`${y.slice(0,4)}-${y.slice(4,6)}`:y;};
-  const st={months:[],ym:'',batch:'260709',summary:[],rows:[],cnt:0,linkage:'직거래LME',q:'',cmp:null,msg:'',loading:false};
+  const st={months:[],ym:'',batch:'260709',summary:[],rows:[],cnt:0,linkage:'직거래LME',q:'',cmp:null,msg:'',loading:false,uploading:false,upmsg:''};
   const loadInit=async()=>{
     try{const r=await fetch(`${API}/api/dtrade/lme`);st.months=(await r.json()).rows||[];if(!st.ym&&st.months.length)st.ym=st.months[0].apply_ym;}catch(e){}
     try{const s=await fetch(`${API}/api/dtrade/summary`);st.summary=(await s.json()).rows||[];}catch(e){}
@@ -1999,6 +1999,17 @@ SCREEN.dtradeprice=(host)=>{
     try{const r=await fetch(`${API}/api/dtrade/compare?ym=${encodeURIComponent(st.ym)}&batch_ymd=${encodeURIComponent(st.batch)}`);
       st.cmp=await r.json();st.msg='';}catch(e){st.msg='대사 오류: '+e;}
     draw();};
+  const doUpload=async(f)=>{                       // LG PO Price 업로드(정본)
+    if(!f)return;
+    if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.upmsg='❌ 엑셀(.xlsx/.xls)만 가능';draw();return;}
+    st.uploading=true;st.upmsg='';draw();
+    try{const fd=new FormData();fd.append('file',f);
+      const r=await fetch(`${API}/api/dtrade/po_upload`,{method:'POST',body:fd});
+      let j={};try{j=await r.json();}catch(e){}
+      if(r.ok&&j.ok){st.upmsg=`✅ ${won(j.rows)}행 · 품목 ${won(j.items)} · 누적 ${won(j.total_items)} (최신회차 ${j.latest_created})`;st.uploading=false;await load();return;}
+      else st.upmsg='❌ '+(j.detail||('HTTP '+r.status));
+    }catch(e){st.upmsg='❌ '+e.message;}
+    st.uploading=false;draw();};
   const draw=()=>{
     const sumMap={};st.summary.forEach(s=>sumMap[s.linkage]=s);
     const dir=sumMap['직거래LME']||{},stl=sumMap['사급정체']||{};
@@ -2010,6 +2021,13 @@ SCREEN.dtradeprice=(host)=>{
        <span style="background:#1c47a0;color:#fff;border-radius:8px;padding:3px 12px;font-size:12px">직거래LME <b>${won(dir.cnt||0)}</b> <span style="opacity:.8">(LG392 ${dir.lg392||0}·역산 ${dir.inv||0})</span></span>
        <span style="background:#8090a5;color:#fff;border-radius:8px;padding:3px 12px;font-size:12px">사급정체(제외) <b>${won(stl.cnt||0)}</b></span>
      </div>
+     ${canW?`<div id="dt-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:9px 14px;background:#f4f9fe;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0;font-size:12px">
+       <span style="font-size:18px">📤</span><b>LG PO Price 엑셀</b>을 드래그&드롭 또는
+       <button class="btn" id="dt-pick" style="background:#1c47a0;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 처리중…':'📁 파일 선택'}</button>
+       <input type="file" id="dt-file" accept=".xlsx,.xls" style="display:none">
+       <span style="color:#5a6b82">→ 최신 Created 회차가 <b>LG확정판가(정본)</b>. LME 계산판가는 검증용.</span>
+       ${st.upmsg?`<span style="margin-left:auto;font-weight:600;color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(st.upmsg)}</span>`:''}
+     </div>`:''}
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">적용월</label><select class="sel" id="dt-ym">${st.months.map(m=>`<option value="${m.apply_ym}" ${st.ym===m.apply_ym?'selected':''}>${fy(m.apply_ym)} · LME ${won(m.lme_index)}</option>`).join('')}</select>
        <label class="tl">구분</label><select class="sel" id="dt-lk"><option value="직거래LME" ${st.linkage==='직거래LME'?'selected':''}>직거래LME</option><option value="사급정체" ${st.linkage==='사급정체'?'selected':''}>사급정체</option><option value="" ${st.linkage===''?'selected':''}>전체</option></select>
@@ -2023,10 +2041,10 @@ SCREEN.dtradeprice=(host)=>{
      ${c&&c.calc_cnt!=null?`<div style="border:1px solid ${c.match_rate>=90?'#bfe6cd':'#f0dca8'};background:${c.match_rate>=90?'#eafaef':'#fff7e6'};border-radius:8px;padding:8px 12px;margin:4px 0;font-size:13px">
        <b>라이브 대사</b> (계산 ${fy(c.ym)} vs 라이브 배치 ${esc(c.batch_ymd)}, ±${c.tol}원): 매칭키 ${won(c.live_matched_keys)} · <b style="color:${c.match_rate>=90?'#1c7c3a':'#c0392b'};font-size:15px">일치율 ${c.match_rate}%</b> · 평균오차 ${c.mean_abs_diff} · 중앙 ${c.median_abs_diff}
        ${(c.mismatch_samples||[]).length?`<div style="margin-top:4px;font-size:11px;color:#8a5a1a">불일치 표본: ${c.mismatch_samples.slice(0,6).map(s=>`${esc(s.item)}(계산 ${s.calc}/라이브 ${s.live}/Δ${s.diff})`).join(', ')}</div>`:''}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <div class="grid-wrap" style="max-height:calc(100vh - 390px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
         <th>품번</th><th>품명</th><th>거래처</th><th class="center">구분</th><th class="center">연동</th><th class="num">동소요량</th><th class="center">src</th><th class="center">주거래</th>
-        <th class="num">기준판가</th><th class="num">기준LME</th><th class="num">계산판가(${fy(st.ym)})</th><th class="center">사급자재</th></tr></thead>
+        <th class="num">기준판가</th><th class="num">기준LME</th><th class="num">계산판가(${fy(st.ym)})</th><th class="num">LG확정판가</th><th class="num">차이</th><th class="center">사급자재</th></tr></thead>
       <tbody>${st.loading?spinRow(12):(st.rows.length?st.rows.map(r=>`<tr>
         <td><b>${esc(r.item_code)}</b></td><td class="bcap" title="${esc(r.item_desc)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.item_desc)}</td>
         <td>${esc(r.cust_code)}</td><td class="center">${esc(r.cost_tag)}</td>
@@ -2035,13 +2053,21 @@ SCREEN.dtradeprice=(host)=>{
         <td class="center">${r.main_flag==='1'?'★':''}</td>
         <td class="num">${won(r.base_item_cost)}</td><td class="num" style="color:#8aa0bd">${won(r.base_lme)}</td>
         <td class="num" style="font-weight:700;color:#1c6b3a">${won(r.calc_item_cost)}</td>
-        <td class="center">${r.sagub_flag?'<span style="color:#b8860b">사급</span>':''}</td></tr>`).join(''):`<tr><td colspan="12" class="empty">대상 없음 (재계산으로 계산판가 생성)</td></tr>`)}</tbody></table></div>`;
+        <td class="num" style="font-weight:700;color:#1c47a0">${won(r.lg_price)}</td>
+        <td class="num" style="color:${r.lg_diff==null?'#c9d1dc':(Math.abs(r.lg_diff)<1?'#1c7c3a':'#c0392b')}">${r.lg_diff==null?'-':(r.lg_diff>0?'+':'')+won(r.lg_diff)}</td>
+        <td class="center">${r.sagub_flag?'<span style="color:#b8860b">사급</span>':''}</td></tr>`).join(''):`<tr><td colspan="14" class="empty">대상 없음 (재계산으로 계산판가 생성)</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#dt-go').onclick=()=>{st.ym=g('#dt-ym').value;st.linkage=g('#dt-lk').value;st.q=g('#dt-q').value;st.batch=g('#dt-batch').value;load();};
     g('#dt-ym').onchange=()=>{st.ym=g('#dt-ym').value;load();};
     g('#dt-q').onkeyup=e=>{if(e.key==='Enter')g('#dt-go').click();};
     {const b=g('#dt-recalc');if(b)b.onclick=()=>{st.ym=g('#dt-ym').value;recompute();};}
     g('#dt-cmp').onclick=()=>{st.ym=g('#dt-ym').value;st.batch=g('#dt-batch').value;compare();};
+    {const drop=g('#dt-drop');if(drop){const fe=g('#dt-file');
+      g('#dt-pick').onclick=()=>fe.click();
+      fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
+      drop.ondragover=e=>{e.preventDefault();drop.style.background='#e3f0ff';drop.style.borderColor='#1c47a0';};
+      drop.ondragleave=()=>{drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';};
+      drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};}}
   };
   loadInit();
 };
