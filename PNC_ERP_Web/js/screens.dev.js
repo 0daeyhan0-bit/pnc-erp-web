@@ -1458,42 +1458,11 @@ SCREEN.unifybom=(c,ro)=>{
   // 규칙: haskids(자식보유) OR 품번 접미사(-SOCKET·-SUB·-은납·-AL·-숫자류[-20-1·-12-1·-S1-1 등]). 소분류120/자체제작SUB도 접미사로 포착.
   const isSub=(code,haskids)=>!!haskids || /-(SOCKET|SUB|은납|AL|S?\d)/i.test(String(code||''));
   // ============ BOM구성 그리기 ============
-  // ★BOM구성 평면(내부원가와 동일 구조): 레벨0 제품 + 레벨1 flat 부품(임의 SUB 해체). 용접봉 토글. 제품=조립공정·절삭부품=가공공정 편집.
+  // ★BOM구성 평면 = 내부원가(naeFlatMat)와 완전 동일 렌더. 같은 데이터소스(naeD)·같은 분류(가공품/구매·부자재/은납)·SUB제외·레벨0/1·조립공정 팝업 공유.
+  // (이전 tree기반 자체분류는 gp/sw 오분류·SUB잔존 버그 → naeD 공유로 교체. 원가컬럼 포함 동일.)
   const bmFlat=()=>{
-    const RW=(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')));
-    const cumByLvl={0:1}; const leaves=[]; let weldN=0;
-    (tree||[]).forEach(r=>{
-      const cum=(r.level===0)?1:((cumByLvl[r.level-1]||1)*(+r.qty||0)); cumByLvl[r.level]=cum;
-      if(r.level===0)return;                 // 제품=헤더
-      if(r.haskids)return;                   // SUB(조립노드)=해체(행 제거) → 하위 leaf가 평면화
-      const weld=isW(r.nm); if(weld){weldN++; if(!showWeld)return;}
-      leaves.push(Object.assign({},r,{cum,weld}));});
-    const prod=(tree||[]).find(r=>r.level===0)||{nm:name};
-    const prodBtn=RW?`<button class="nae-edit-btn" data-node="${esc(item)}" title="제품 조립공정(용접 관경별·포장·체결)" style="padding:2px 9px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:4px;cursor:pointer">✎ 조립공정(용접·포장·체결)</button>`:'';
-    const weldBtn=`<button class="btn ghost" id="bm-weld2" style="padding:2px 9px;font-size:11px">${showWeld?'🔧 용접봉 숨기기':`🔧 용접봉 표시${weldN?' ('+weldN+')':''}`}</button>`;
-    const hrow=`<tr style="background:#eef3fb;font-weight:700">
-       <td class="center" style="color:#1c47a0">0</td>
-       <td style="text-align:left;white-space:nowrap"><b style="color:#1c47a0">${esc(item)}</b> <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span></td>
-       <td class="bcap" style="text-align:left;max-width:220px" title="${esc(prod.nm||name)}">${esc(prod.nm||name)}</td>
-       <td colspan="5"></td><td class="center">${prodBtn}</td></tr>`;
-    const row=r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')+(r.length?'×'+r.length:'')):(r.spec||'');
-      const ed=RW && !r.weld && !!(String(r.gp||'').trim()||String(r.sw||'').trim());   // 투입공정 보유=가공품
-      const tag=r.weld?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">용접봉</span>':(ed?'<span class="nae-tg" style="color:#2f6db3;border-color:#bcd">가공품</span>':'<span class="nae-tg" style="color:#8a97a8;border-color:#d5dde7">구매/부자재</span>');
-      return `<tr style="background:${r.weld?'#f3eefa':'#fff'}">
-        <td class="center" style="color:#7a8aa0">1</td>
-        <td style="padding-left:20px;text-align:left;white-space:nowrap"><span style="color:#a9b8cc">└ </span><b>${esc(r.code)}</b> ${tag}</td>
-        <td class="bcap" title="${esc(r.nm)}" style="max-width:220px;text-align:left">${esc(r.nm)}</td>
-        <td class="center" style="color:#5a6b82">${esc(sp)}</td>
-        <td class="num">${(+r.cum).toLocaleString('ko-KR',{maximumFractionDigits:4})}</td>
-        <td class="bcap" title="${esc(r.custnm||'')}" style="max-width:120px">${esc(r.custnm||'')}</td>
-        <td class="center" style="color:#5a6b82">${esc(procMap[r.sw]||r.sw||procMap[r.gp]||r.gp||'')}</td>
-        <td class="center">${r.sag==='1'?'<span style="color:#b8860b;font-weight:700">사급</span>':''}${r.se==='1'?' <span style="color:#c0392b">세트제외</span>':''}</td>
-        <td class="center">${ed?`<button class="nae-edit-btn" data-node="${esc(r.code)}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button>`:''}</td></tr>`;};
-    return `<div class="toolbar" style="gap:6px"><span style="color:#5a6b82;font-size:12px">레벨0 제품 + 레벨1 flat(SUB 해체) · 제품 [✎]=조립공정(용접·포장·체결) · 절삭부품 [✎]=가공공정</span><div class="spacer"></div>${weldBtn}</div>
-     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl bm-tbl">
-      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th>매입처(현행)</th><th>투입공정</th><th>사급/세트</th><th class="center">등록/수정</th></tr></thead>
-      <tbody>${hrow}${leaves.map(row).join('')||'<tr><td colspan="9" class="empty">구성 없음</td></tr>'}</tbody></table></div>
-     ${naeModal?naeProcModal():''}`;};
+    if(naeFor!==item||!naeD||naeD.error) return `<div class="empty">${naeD&&naeD.error?('⚠ '+esc(naeD.error)):'계산 중… (BOM구성 평면 = 내부원가와 동일 데이터 로딩)'}</div>`;
+    return naeFlatMat(naeD.agg||{}, naeD.rows||[], naeD.procs||[])+(naeModal?naeProcModal():'');};
   const drawBom=()=>{
     const cell=(l,i,col)=>{const[k,,t]=col,v=l[k];const isSel=t.indexOf('sel:')===0,grp=isSel?t.slice(4):'';
       if(!editMode||t==='ro'){
@@ -1557,7 +1526,7 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelectorAll('.bm-r').forEach(el=>el.onclick=()=>{navStack=[];load(el.dataset.it);});
     const tg=c.querySelector('#bm-tree');if(tg)tg.onclick=()=>{viewTree=!viewTree;draw();};
     const wl=c.querySelector('#bm-weld');if(wl)wl.onclick=()=>{showWeld=!showWeld;draw();};
-    {const w2=c.querySelector('#bm-weld2');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}
+    {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
     // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
     if(naeModal)wireProcModal();
@@ -1614,6 +1583,8 @@ SCREEN.unifybom=(c,ro)=>{
   const draw=()=>{
     if(tab==='nae'){ if(item&&naeFor!==item&&!naeLoad){loadNae();return;} drawNae(); return; }
     if(tab==='sil'){ if(item&&silFor!==item&&!silLoad){loadSil();return;} drawSil(); return; }
+    // BOM구성 평면(viewTree)=내부원가(naeD) 공유 렌더 → naeD 없으면 로드(단일레벨/편집 그리드는 tree/lines 사용)
+    if(item&&viewTree&&!editMode&&naeFor!==item&&!naeLoad){ loadNae(); return; }
     drawBom();
   };
   draw();
