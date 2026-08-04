@@ -445,7 +445,7 @@ class NxCostEngine:
         meta={}
         for i in range(0,len(codes),900):
             ch=codes[i:i+900]; ph=','.join('?'*len(ch))
-            self.cur.execute(f"SELECT item_code, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(unit,'') FROM nx.item WHERE item_code IN ({ph})", *ch)
+            self.cur.execute("SELECT i.item_code, ISNULL(i.item_name,''), ISNULL(i.item_spec,''), ISNULL(i.unit,'') FROM nx.item i JOIN STRING_SPLIT(?,',') s ON i.item_code=s.value", ",".join(ch))  # ★IN(N) 드라이버 오버헤드(520ms) 회피=STRING_SPLIT 단일파라미터(표시전용·원가무관)
             for r in self.cur.fetchall(): meta[r[0]]={'nm':r[1],'spec':r[2],'unit':r[3]}
         for r in rows:
             d=meta.get(r['code'],{}); r['name']=d.get('nm',''); r['spec']=d.get('spec',''); r['unit']=d.get('unit','')
@@ -631,7 +631,7 @@ class NxCostEngine:
         meta={}
         for i in range(0,len(codes),900):
             ch=codes[i:i+900]; ph=','.join('?'*len(ch))
-            self.cur.execute(f"SELECT item_code, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(unit,'') FROM nx.item WHERE item_code IN ({ph})", *ch)
+            self.cur.execute("SELECT i.item_code, ISNULL(i.item_name,''), ISNULL(i.item_spec,''), ISNULL(i.unit,'') FROM nx.item i JOIN STRING_SPLIT(?,',') s ON i.item_code=s.value", ",".join(ch))  # ★IN(N) 드라이버 오버헤드(520ms) 회피=STRING_SPLIT 단일파라미터(표시전용·원가무관)
             for r in self.cur.fetchall(): meta[r[0]]={'nm':r[1],'spec':r[2],'unit':r[3]}
         for r in rows:
             d=meta.get(r['code'],{}); r['name']=d.get('nm',''); r['spec']=d.get('spec',''); r['unit']=d.get('unit','')
@@ -759,7 +759,7 @@ class NxCostEngine:
         codes=list({r['code'] for r in rows}); meta={}
         for i in range(0,len(codes),900):
             ch=codes[i:i+900]; ph=",".join("?"*len(ch))
-            self.cur.execute(f"SELECT item_code, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(unit,'') FROM nx.item WHERE item_code IN ({ph})", *ch)
+            self.cur.execute("SELECT i.item_code, ISNULL(i.item_name,''), ISNULL(i.item_spec,''), ISNULL(i.unit,'') FROM nx.item i JOIN STRING_SPLIT(?,',') s ON i.item_code=s.value", ",".join(ch))  # ★IN(N) 드라이버 오버헤드(520ms) 회피=STRING_SPLIT 단일파라미터(표시전용·원가무관)
             for r in self.cur.fetchall(): meta[r[0]]={'nm':r[1],'spec':r[2],'unit':r[3]}
         for r in rows:
             d=meta.get(r['code'],{}); r['name']=d.get('nm',''); r['spec']=d.get('spec',''); r['unit']=d.get('unit','')
