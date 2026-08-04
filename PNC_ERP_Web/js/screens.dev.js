@@ -1689,7 +1689,7 @@ SCREEN.subvariant=(c)=>{
   const apBadge=r=>r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#c0392b;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">개발 미승인</span>';
   const card=r=>{const cur=r.current_flag||r.baseline;
     return `<div class="sv-card" data-rid="${r.route_id}" style="border:1px solid ${cur?'#bfe6cd':'#c9d3e0'};border-radius:8px;padding:8px 12px;margin-bottom:8px;background:${cur?'#eafaef':'#fff'};cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center" title="더블클릭: 상세${cur?' 보기':' 편집'}">
-      <span style="background:${cur?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700">후보 ${r.route_no}${cur?' · 현행':''}</span>
+      <span style="background:${cur?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700" title="후보 라벨(base 품번은 불변)">${esc(st.routeTarget)}_R${String(r.baseline?1:r.route_no).padStart(2,'0')}${cur?' · 현행':''}</span>
       <b style="color:#1c3a6e">${esc(r.route_name||(r.baseline?'현행(실사용 BOM)':''))}</b>
       <span style="color:#5a6b82;font-size:12px">구분 <b>${esc(r.gubun||'-')}</b>${r.vendor_code?` · 공급처 <b>${esc(r.vendor_name||r.vendor_code)}</b>`:''}${r.apply_from?` · 적용 ${esc(r.apply_from)}`:''} · 라인 ${(r.lines||[]).length}</span>
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':apBadge(r)}
@@ -1722,6 +1722,7 @@ SCREEN.subvariant=(c)=>{
           <label style="font-weight:700;color:#33507d">시작 방법</label>
           <div style="display:flex;flex-direction:column;gap:6px;margin:4px 0 6px">
             ${M('cur','현행 복사','실사용 BOM(현행)을 복제해 대안 시작')}
+            ${M('base','BASE BOM 가져오기','평면 BASE(실사용) 가져와 SUB 재구성 시작')}
             ${alts.length?M('copy','기존 후보 복사','다른 대안 후보를 복제'):''}
             ${M('blank','빈 상태(수동)','헤더만 만들고 라인은 상세에서 추가')}
             ${f.lgAvail?M('lg','LG BOM 불러오기','BOM 미등록 신규품목 — LG BOM(nx.lg_bom) 직하위 시딩'):''}
@@ -1795,7 +1796,7 @@ SCREEN.subvariant=(c)=>{
     return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px 10px">
       <div style="background:#fff;border-radius:12px;width:820px;max-width:97vw;box-shadow:0 20px 60px rgba(10,25,55,.4)">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${R.baseline?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:12px 12px 0 0">
-          <b>${R.baseline?'현행 조달경로 상세(보기)':'조달후보 상세 편집'} — ${esc(st.routeTarget)} / 후보 ${R.route_no}</b><span id="dt-x" style="cursor:pointer;font-size:17px">✕</span></div>
+          <b>${R.baseline?'현행 조달경로 상세(보기)':'조달후보 상세 편집'} — ${esc(st.routeTarget)}_R${String(R.baseline?1:R.route_no).padStart(2,'0')}${R.baseline?' (현행·base품번 불변)':''}</b><span id="dt-x" style="cursor:pointer;font-size:17px">✕</span></div>
         <div style="padding:14px 18px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><b style="color:#1c3a6e;font-size:14px">${esc(R.route_name||(R.baseline?'현행(실사용 BOM)':''))}</b>${R.baseline?'<span style="color:#8aa0bd;font-size:11px">기준선(읽기전용)</span>':apBadge(R)}</div>
           ${ed?hdrEdit:hdrView}
@@ -1901,8 +1902,9 @@ SCREEN.subvariant=(c)=>{
     const rid=st.detail.route_id;
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
     {const b=g('#sp-mksub');if(b)b.onclick=async()=>{const ids=[...c.querySelectorAll('.sp-pick:checked')].map(x=>+x.dataset.lid);
-      if(!ids.length){alert('묶을 부품을 체크하세요');return;}const sfx=(prompt('신규 SUB 접미사(예: -SUB1)','-SUB1')||'').trim();if(!sfx)return;
-      try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:sfx,name:st.routeTarget+sfx,gubun:'외주(유상사급)'})});
+      if(!ids.length){alert('묶을 부품을 체크하세요');return;}
+      const sfx=(prompt('SUB 접미사 (빈칸=자동 _S01·_S02… / 공정약칭 예 -은납)','')||'').trim();  // 빈=백엔드 자동 _S{nn}(충돌검사)
+      try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:sfx,name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
         const j=await r.json();if(j.ok){st.rdProc=null;await loadRD(rid);}else alert('SUB 생성 실패');}catch(e){alert('오류: '+e.message);}};}
     c.querySelectorAll('.sp-dis').forEach(el=>el.onclick=async()=>{if(!confirm('SUB 해제(하위부품 평면 복귀)?'))return;
       try{const r=await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+el.dataset.sub})});
@@ -1934,11 +1936,13 @@ SCREEN.subvariant=(c)=>{
   const doNewCreate=async()=>{const f=st.newForm;
     if(!String(f.name||'').trim()){alert('후보명은 필수입니다');return;}
     try{
-      if(f.method==='cur'||f.method==='copy'){
-        const src=f.method==='copy'?(+f.source_route_id||0):0;
-        const r=await fetch(`${API}/api/sourcing/route/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,source_route_id:src,copy_children:f.copy_children?1:0,suffix:f.suffix,user:'웹사용자'})});
+      if(f.method==='cur'||f.method==='copy'||f.method==='base'){
+        const body={item_code:st.routeTarget,user:'웹사용자'};
+        if(f.method==='base') body.source='base';                       // BASE BOM 평면 seed
+        else{ body.source_route_id=f.method==='copy'?(+f.source_route_id||0):0; body.copy_children=f.copy_children?1:0; body.suffix=f.suffix; }
+        const r=await fetch(`${API}/api/sourcing/route/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const j=await r.json();if(!j.ok){alert('생성 실패: '+(j.detail||JSON.stringify(j)));return;}
-        await afterCreate(j.route_id,f.name,`대안 후보 ${j.route_no} 생성 (라인 ${j.lines}${f.copy_children?', 채번 '+(j.copied_children||[]).length+'건':''})`);
+        await afterCreate(j.route_id,f.name,`${st.routeTarget}_R${String(j.route_no).padStart(2,'0')} 생성 (라인 ${j.lines})`);
       } else if(f.method==='blank'){
         const r=await fetch(`${API}/api/sourcing/route/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,route_name:f.name,gubun:f.gubun,vendor_code:f.vendor_code,apply_from:f.apply_from,current_flag:f.current_flag?1:0,user:'웹사용자'})});
         const j=await r.json();if(!j.ok){alert('생성 실패:\n'+(j.errors?j.errors.join('\n'):(j.detail||JSON.stringify(j))));return;}
