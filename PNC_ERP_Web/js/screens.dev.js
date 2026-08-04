@@ -1147,7 +1147,7 @@ SCREEN.unifybom=(c,ro)=>{
     else{
       const view=naeView;
       let mid='';
-      if(view==='proc') mid=`<div class="nae-2col" style="flex:1 1 auto;min-height:0">${naeLevelTree(a,rows)}${naeRightPanel(a,rows,prc)}</div>`;
+      if(view==='proc') mid=`<div class="nae-2col" style="flex:1 1 auto;min-height:0;height:100%;grid-template-rows:minmax(0,1fr);align-items:stretch">${naeLevelTree(a,rows)}${naeRightPanel(a,rows,prc)}</div>`;
       else if(view==='weld'){const wp=prc.filter(p=>p.group==='용접');mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${matTable(a,rows.filter(r=>String(r.code).toUpperCase().startsWith('RAC')||r.silver),false)}${procTable(wp)}</div>`;}
       else if(view==='fasten'){const fp=prc.filter(p=>p.group==='체결');mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${procTable(fp)}</div>`;}
       else mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${companyTable(rows)}</div>`;
