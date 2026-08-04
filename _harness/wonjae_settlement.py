@@ -1,85 +1,111 @@
 # -*- coding: utf-8 -*-
-"""원소재(동) 정산 엔진 — 협력사 확정입고의 동 소비를 geom×소요량×입고수량으로 산출.
-   정본: 소요량=BOM(PR_M_ITEM_BOM), 치수=PR_M_ITEM(Φ/T/L), geom공식(검증완료 ×0.02809).
-   진짜매입 판정 = COST_TAG='1' 매입단가 거래처=입고거래처.
-   담당 파이프 수불 자료의 '입고중량(KG)'을 재현/검증하는 것이 목표.
-
-   사용:
-     from wonjae_settlement import CopperSettlement
-     eng = CopperSettlement()
-     res = eng.by_vendor('2606' 형태의 yymm 아님 주의: '2606'=26년6월), custs=[...])
+"""원소재(동) 정산 엔진 v2 — 담당 수불 자료 정본 앵커.
+   설계(사용자 확정 방향):
+     - 부품 단위 동중량(geom) = 담당 파이프 수불 자료의 Φ/T/L에서 산출 (검증완료 ×0.02809, 파일중량 99.9%일치)
+       → BOM 재귀전개 폐기(과다전개 오류), 품목마스터 치수는 fallback
+     - 입고수량 = ERP 확정입고(진짜매입: COST_TAG='1' 매입단가 거래처=입고거래처)  ← 자동화
+     - 동 소비 = 부품 geom × ERP 입고수량, 협력사별 집계
+   수불 자료 위치: <프로젝트>\{4,5,6}월 파이프 수불 자료_대표님 전달 건.xlsx (매월 갱신)
 """
-import sys
+import os, re, sys
 sys.path.insert(0, r"d:\피앤씨인더스트리\100_AI_AGENT\Projects\NEW_ERP_1\_harness")
 from nx_cost_engine import _nx
+import openpyxl
 
-CU_DENSITY_K = 0.02809 * 0.001   # (π×8.94/1000)/1000, kg/mm³-length 계수 (검증: 파일중량 일치)
+BASE = r"d:\피앤씨인더스트리\100_AI_AGENT\Projects\NEW_ERP_1"
+CU_K = 0.02809 * 0.001
 COOP_CUST = {'2148':'대원산업','2096':'미래정밀','2306':'명진산업','2048':'중앙정밀','2068':'이젠터',
              '2266':'케이비','2142':'세광산업','233':'썬텍코리아','2028':'썬텍','2067':'MTS','2250':'수테크'}
+_CODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-\.]{4,}$")
+_SUF = re.compile(r"-\d+(-\d+)?$")
+
+def _norm(c):
+    c = re.sub(r"\s+", "", str(c).strip().upper())
+    c = re.sub(r"[\(\+].*$", "", c)            # (링/(마·+용접링 꼬리
+    c = re.sub(r"번$|품\d+$", "", c)            # 5998A20002A-2번 / MAA..품7
+    return _SUF.sub("", c).strip()
 
 def geom(d, t, l):
-    """동관 단위 중량(kg) = (Φ-T)×T×L×0.02809×0.001. 캐필러리(Φ<3)도 계산."""
-    try:
-        d, t, l = float(d), float(t), float(l)
-    except (TypeError, ValueError):
-        return 0.0
-    if d and t and l and t > 0 and d > t and l > 0:
-        return (d - t) * t * l * CU_DENSITY_K
-    return 0.0
+    try: d, t, l = float(d), float(t), float(l)
+    except (TypeError, ValueError): return 0.0
+    return (d - t) * t * l * CU_K if (d and t and l and t > 0 and d > t and l > 0) else 0.0
 
 
 class CopperSettlement:
-    def __init__(self):
-        self.cn = _nx(); self.cur = self.cn.cursor()
-        self.L = "PARTNER_ERP.dbo."
-        self._pur = None     # 매입단가 거래처 map
-        self._dim = {}       # 품목 치수 캐시
-        self._bom = {}       # Assy→[(child,useqty)] 캐시
+    def __init__(self, pipe_files=None):
+        self.cn = _nx(); self.cur = self.cn.cursor(); self.L = "PARTNER_ERP.dbo."
+        self._pur = None; self._dim = {}
+        self.ref = {}       # 부품 geom 정본: norm(code) -> geom(kg)
+        self.ref_raw = {}   # 원본코드 -> geom (표시용)
+        self.assy_ref = {}  # Assy 단위동중량 정본: norm(assy) -> Σ(부품 geom×소요)
+        files = pipe_files or [f"{m}월 파이프 수불 자료_대표님 전달 건.xlsx" for m in ("4", "5", "6")]
+        for fn in files:
+            p = os.path.join(BASE, fn)
+            if os.path.exists(p): self._load_pipe(p)
 
-    # 매입단가(COST_TAG='1') 거래처 map (진짜매입 판정)
+    def _load_pipe(self, path):
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        for sn in wb.sheetnames:
+            if sn == "MASTER": continue
+            rows = list(wb[sn].iter_rows(min_row=1, max_row=5000, values_only=True))
+            hdr = None; cm = {}
+            for i in range(min(8, len(rows))):
+                for j, v in enumerate(rows[i] or []):
+                    s = str(v or '')
+                    if '소요량' in s: cm['soyo'] = j; hdr = i
+                    if '외경' in s or s.strip() == 'Φ': cm['phi'] = j
+                    if s.strip() == 'T': cm['t'] = j
+                    if '길이' in s: cm['l'] = j
+                    if '하위' in s: cm['part'] = j
+                if hdr is not None and 'phi' in cm: break
+            if hdr is None or 'phi' not in cm: continue
+            pc = cm.get('part', cm['phi'] - 1); ac = cm.get('assy', max(0, cm['phi'] - 2)); sc = cm.get('soyo')
+            assy_acc = {}   # 이 시트 Assy별 Σ(부품 geom×소요)
+            for r in rows[hdr + 1:]:
+                if not r or pc >= len(r): continue
+                p = str(r[pc] or '').strip()
+                if not p or not _CODE.match(p): continue
+                g = geom(r[cm['phi']], r[cm.get('t', cm['phi']+1)], r[cm.get('l', cm['phi']+2)])
+                if g > 0:
+                    self.ref.setdefault(_norm(p), g)     # 부품 단위 geom (부품간 일관 검증완료)
+                    self.ref_raw.setdefault(p.upper(), g)
+                    a = str(r[ac] or '').strip() if ac < len(r) else ''
+                    if a and _CODE.match(a):
+                        try: so = float(r[sc]) if (sc is not None and sc < len(r) and r[sc] is not None) else 1.0
+                        except (TypeError, ValueError): so = 1.0
+                        assy_acc[_norm(a)] = assy_acc.get(_norm(a), 0.0) + g * (so or 1.0)
+            for a, tot in assy_acc.items():
+                self.assy_ref.setdefault(a, tot)          # 최초 파일/시트 값(전체 부품구성)
+        wb.close()
+
     def _purmap(self):
         if self._pur is None:
             self.cur.execute(f"SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) "
                              f"FROM {self.L}PR_M_ITEM_COST WHERE COST_TAG='1'")
             m = {}
-            for ic, cc in self.cur.fetchall():
-                m.setdefault(str(ic).strip(), set()).add(str(cc).strip())
+            for ic, cc in self.cur.fetchall(): m.setdefault(str(ic).strip(), set()).add(str(cc).strip())
             self._pur = m
         return self._pur
 
-    def _dims(self, code):
-        """품목 Φ/T/L (PR_M_ITEM). 캐시."""
+    def _master_geom(self, code):
         if code not in self._dim:
             self.cur.execute(f"SELECT ITEM_DIAM, ITEM_THICK, ITEM_LENGTH FROM {self.L}PR_M_ITEM "
                              f"WHERE LTRIM(RTRIM(ITEM_CODE))=?", code)
-            r = self.cur.fetchone()
-            self._dim[code] = (r[0], r[1], r[2]) if r else (None, None, None)
+            r = self.cur.fetchone(); self._dim[code] = geom(*r) if r else 0.0
         return self._dim[code]
 
-    def _children(self, code):
-        """Assy 직하위 [(child, use_qty)] (PR_M_ITEM_BOM, 유효일자 무시=최신구성). 캐시."""
-        if code not in self._bom:
-            self.cur.execute(f"SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(USE_QTY,1) "
-                             f"FROM {self.L}PR_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=?", code)
-            self._bom[code] = [(str(m).strip(), float(q or 1)) for m, q in self.cur.fetchall()]
-        return self._bom[code]
-
-    def unit_copper(self, code, _depth=0):
-        """품목 1개당 동 중량(kg). 단품=geom(자기치수). Assy=Σ(하위 unit_copper×소요). 재귀."""
-        d, t, l = self._dims(code)
-        g = geom(d, t, l)
-        if g > 0:               # 자기 치수 있으면 단품 동관
-            return g
-        if _depth > 6:
-            return 0.0
-        kids = self._children(code)
-        return sum(self.unit_copper(ch, _depth + 1) * q for ch, q in kids)
+    def unit_copper(self, code):
+        """1개당 동중량(kg). 1순위=수불 부품, 2순위=수불 Assy(Σ부품), 3순위=품목마스터. (source, geom)."""
+        n = _norm(code)
+        if code.upper() in self.ref_raw: return ("수불부품", self.ref_raw[code.upper()])
+        if n in self.ref: return ("수불부품~", self.ref[n])
+        if n in self.assy_ref: return ("수불Assy", self.assy_ref[n])
+        g = self._master_geom(code)
+        if g > 0: return ("마스터", g)
+        return ("치수없음", 0.0)
 
     def receipts(self, yymm, custs=None):
-        """해당 월(yymm='2606') 확정입고(진짜매입)만: (품목,거래처,입고수량합)."""
-        custs = list(custs or COOP_CUST.keys())
-        ph = ",".join("?" * len(custs))
-        ym = "26" + yymm[2:] if len(yymm) == 4 else yymm  # 방어
+        custs = list(custs or COOP_CUST.keys()); ph = ",".join("?" * len(custs))
         f, t = yymm + "01", yymm + "31"
         self.cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(A.MAT_CODE))) ic, LTRIM(RTRIM(A.CUST_CODE)) cc, SUM(A.MAINT_QTY) q
             FROM {self.L}PU_T_STOCK_MAINT A
@@ -90,21 +116,15 @@ class CopperSettlement:
         return [(str(r[0]).strip(), str(r[1]).strip(), float(r[2] or 0)) for r in self.cur.fetchall()]
 
     def by_vendor(self, yymm, custs=None, real_only=True):
-        """협력사별 동 소비(kg) 집계 + 품목 detail. 동소비=unit_copper×입고수량."""
-        pur = self._purmap()
-        agg = {}          # cc -> {copper, items, skipped_nonpur}
-        detail = []
+        pur = self._purmap(); agg = {}; detail = []
         for ic, cc, q in self.receipts(yymm, custs):
-            is_pur = cc in pur.get(ic, set())
-            if real_only and not is_pur:
-                a = agg.setdefault(cc, {"copper": 0.0, "items": 0, "nonpur": 0})
-                a["nonpur"] += 1
-                continue
-            uc = self.unit_copper(ic)
-            cop = uc * q
-            a = agg.setdefault(cc, {"copper": 0.0, "items": 0, "nonpur": 0})
+            if real_only and cc not in pur.get(ic, set()):
+                agg.setdefault(cc, {"copper":0.0,"items":0,"nonpur":0,"nodim":0})["nonpur"] += 1; continue
+            src, uc = self.unit_copper(ic); cop = uc * q
+            a = agg.setdefault(cc, {"copper":0.0,"items":0,"nonpur":0,"nodim":0})
             a["copper"] += cop; a["items"] += 1
-            detail.append((cc, ic, round(uc, 5), q, round(cop, 3), is_pur))
+            if uc == 0: a["nodim"] += 1
+            detail.append((cc, ic, src, round(uc, 5), q, round(cop, 3)))
         return agg, detail
 
     def close(self):
@@ -115,11 +135,13 @@ class CopperSettlement:
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     eng = CopperSettlement()
+    print(f"수불 정본: 부품 geom {len(eng.ref_raw)}개 · Assy {len(eng.assy_ref)}개 로드")
     agg, detail = eng.by_vendor("2606")
-    print("=== 26년 6월 협력사별 동 소비(kg) — 엔진 산출 ===")
+    print("\n=== 26년 6월 협력사별 동 소비(kg) — 수불정본 앵커 ===")
     for cc, a in sorted(agg.items(), key=lambda x: -x[1]["copper"]):
-        print(f"  {COOP_CUST.get(cc, cc):<10}({cc:<5}) 동소비 {a['copper']:>12,.1f}kg · 매입품목 {a['items']:>4} · 매입아님 {a['nonpur']:>4}")
-    print(f"\n품목 detail 표본 12:")
-    for cc, ic, uc, q, cop, isp in detail[:12]:
-        print(f"  {COOP_CUST.get(cc, cc):<8}{ic:<18} 단위동{uc:>8} ×수량{int(q):>6} = {cop:>10}kg")
+        print(f"  {COOP_CUST.get(cc,cc):<10}({cc:<5}) 동소비 {a['copper']:>11,.1f}kg · 매입 {a['items']:>4} · 매입아님 {a['nonpur']:>4} · 치수없음 {a['nodim']:>3}")
+    # source 분포
+    from collections import Counter
+    sc = Counter(d[2] for d in detail)
+    print("\n단위동 출처:", dict(sc))
     eng.close()
