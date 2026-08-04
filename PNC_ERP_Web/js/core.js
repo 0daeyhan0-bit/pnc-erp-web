@@ -177,7 +177,7 @@ const MODULES=[
    {id:'subvariant',ic:'🧩',nm:'조달경로 통합검토'},
    {id:'costanalysis',ic:'💹',nm:'품목별 원가분석'},
    {id:'costverify',ic:'🔬',nm:'원가엔진 검증(라이브)'},
-   {id:'price',ic:'💰',nm:'품목단가 조회'},
+   {id:'price',ic:'💰',nm:'품목단가 관리'},
    {id:'dtradeprice',ic:'🔁',nm:'직거래 LME 판가연동'},
  ]},
  {id:'mgmt',nm:'경영',ic:'📊',subs:[
