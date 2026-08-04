@@ -1831,7 +1831,7 @@ SCREEN.rawmat=(host)=>{
        ${canW&&L.editable?`<button class="btn" id="lg-copy">📋 전월 복사로 신규월</button>`:''}
        <div class="spacer"></div>${L.msg?`<span style="color:${L.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-size:12px">${esc(L.msg)}</span>`:''}<span class="rowcount">${won(L.rows.length)}행</span></div>
      ${hdr}
-     <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       ${L.loading?spinRow(1):`<table class="tbl fit" style="font-size:11.5px"><thead><tr>
         <th style="width:78px">구분</th><th class="num" style="width:52px">외경</th><th class="num" style="width:46px">두께</th><th style="width:96px">P/No</th><th class="num" style="width:92px">재료비</th><th class="num" style="width:88px">가공비</th><th class="num" style="width:96px">원재료가</th>${ed?'<th class="center" style="width:70px">가공비편집</th>':''}<th></th></tr></thead>
       <tbody>${L.rows.length?L.rows.map(r=>`<tr>
