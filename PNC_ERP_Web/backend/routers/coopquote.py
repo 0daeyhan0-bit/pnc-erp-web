@@ -13,14 +13,30 @@ router = APIRouter()
 #        판가 = 원소재비 + 가공비 → 사급가 변경 시 원소재비만 재계산, 가공비 유지
 #        현재 입고가 = PR_M_ITEM_COST.ITEM_COST (라이브, 최신 COST_APPLY_YMD)
 _PREV_YMD = "251231"   # 종전입고가 기준일: 작년 12월 이하 최신 실입고
+_INCOST_CACHE = {}     # code(upper) -> (cur_cost, prev_cost, cur_ymd) | None(미존재). 10분 TTL
+_INCOST_TS = [0.0]
 def _incost(cur, assys):
     """assy_code 리스트 → 실제 입고가(PU_T_STOCK_MAINT TAG='S' 협력사 납품 실거래).
        {assy_upper: (현재입고가=최근 MAINT_COST, 종전입고가=<=251231 최근, 최근납품일 yymmdd)}."""
     out = {}
     if not assys:
         return out
-    for i in range(0, len(assys), 400):
-        chunk = [str(a).replace("'", "").strip().upper() for a in assys[i:i + 400] if a]
+    now = time.time()
+    if now - _INCOST_TS[0] > 600:       # 10분 TTL
+        _INCOST_CACHE.clear(); _INCOST_TS[0] = now
+    need = []
+    for a in assys:
+        if not a:
+            continue
+        k = str(a).replace("'", "").strip().upper()
+        if k in _INCOST_CACHE:
+            v = _INCOST_CACHE[k]
+            if v is not None:
+                out[k] = v
+        elif k not in need:
+            need.append(k)
+    for i in range(0, len(need), 400):
+        chunk = need[i:i + 400]
         if not chunk:
             continue
         inlist = "','".join(chunk)
@@ -113,12 +129,26 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                 a = str(a).strip(); pc = str(pc).strip()
                 sagub_by_assy.setdefault(a, []).append((pc, float(mc or 0))); sagub_codes.add(pc)
         scost = _incost(cur, list(sagub_codes)) if sagub_codes else {}
+        # 현재 원소재 사급가(등급별): nx.mat_price_month 원소재 우선, 없으면 일반20000/고강도22000
+        cur_sagub = {"일반CU": 20000.0, "고강도CU": 22000.0}
+        try:
+            cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 ORDER BY apply_ym DESC")
+            mp = cur.fetchone()
+            if mp and mp[0]:
+                cur_sagub["일반CU"] = float(mp[0]); cur_sagub["고강도CU"] = round(float(mp[0]) * 1.1, 0)
+        except Exception:
+            pass
         for r in rows:
             au = r["assy_code"].strip().upper()
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
-            matc = r["mat_cost"]; matp = r["mat_part"]
+            matc = r["mat_cost"]; matp = r["mat_part"]; matr = r["mat_raw"]; sg = r["sagub_price"]
             r["price_adjust"] = (round(prev_in - r["sale_price"], 2) if prev_in is not None else None)
             r["total_proc"] = (round(prev_in - matc, 2) if prev_in is not None else None)
+            # 원재료(동) 현재 = mat_raw × (현재사급가/견적사급가)
+            csg = cur_sagub.get(r["grade"], sg)
+            raw_now = (matr * (csg / sg) if (sg and sg > 0) else matr)
+            r["raw_now"] = round(raw_now, 2)
+            # 사급부품 현재 = Σ(part.mat_cost × 현재/종전 입고단가비)
             splist = sagub_by_assy.get(au)
             if splist:
                 sn = 0.0
@@ -128,8 +158,10 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                 r["sagub_now"] = round(sn, 2)
             else:
                 r["sagub_now"] = matp
-            raw_up = r["sagub_now"] - matp
+            # 원자재 인상분 = (원재료현재−mat_raw) + (사급부품현재−mat_part)
+            raw_up = (raw_now - matr) + (r["sagub_now"] - matp)
             r["raw_up"] = round(raw_up, 2)
+            r["mat_now"] = round(raw_now + r["mat_weld"] + r["sagub_now"], 2)   # 재료비(현재)
             r["new_price"] = (round(prev_in + raw_up, 2) if prev_in is not None else None)
             r["diff_new"] = (round(r["new_price"] - cur_in, 2) if (r["new_price"] is not None and cur_in is not None) else None)
         if active_only:

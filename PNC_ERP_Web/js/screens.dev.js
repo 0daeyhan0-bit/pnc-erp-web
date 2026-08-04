@@ -1751,6 +1751,9 @@ SCREEN.subvariant=(c)=>{
     ${ed?`<td class="center"><button class="btn dl-e" data-lid="${l.line_id}" style="padding:1px 5px;font-size:10px">수정</button><button class="btn dl-d" data-lid="${l.line_id}" style="padding:1px 5px;font-size:10px">삭제</button></td>`:''}</tr>`;
   // ===== STEP3: 후보 SUB 재구성·공정배치 패널 (drag=체크선택→SUB, 공정 배치, 공수합=BASE 게이트) =====
   const loadRD=async(rid)=>{try{const r=await fetch(`${API}/api/sourcing/route/detail?route_id=${rid}`);st.rd=await r.json();st.rd.route_id=rid;st.rdProc=null;}catch(e){st.rd={route_id:rid,error:e.message};}draw();};
+  const loadRP=async(rid)=>{try{const r=await fetch(`${API}/api/sourcing/profile/list?route_id=${rid}`);const j=await r.json();st.rp={route_id:rid,rows:(j.rows||[]),header:j.header||{}};}catch(e){st.rp={route_id:rid,error:e.message};}draw();};
+  const vSearch2=t=>{clearTimeout(st.acT2);st.acT2=setTimeout(async()=>{try{const r=await fetch(`${API}/api/sourcing/vendors?q=${encodeURIComponent(t)}`);
+    const dl=c.querySelector('#sv-vdl2');if(dl)dl.innerHTML=((await r.json()).rows||[]).map(v=>`<option value="${esc(v.code)}">${esc(v.code)} · ${esc(v.name)}${v.role?' ('+esc(v.role)+')':''}</option>`).join('');}catch(e){}},180);};
   const _pmap={'28':'은납','51':'용접','52':'지그','53':'교정','54':'수몰','55':'부품부착','56':'에어','61':'포장','69':'너트','83':'포장'};
   const subPanel=(R)=>{
     const rd=(st.rd&&st.rd.route_id===R.route_id)?st.rd:null;
@@ -1783,6 +1786,30 @@ SCREEN.subvariant=(c)=>{
           <div style="font-size:12px;font-weight:600;margin-bottom:3px">공정 배치 (제품/SUB별 작업ST · 합계=BASE 유지)</div>
           ${procGrid}
           <button class="btn" id="sp-psave" style="margin-top:6px;background:#1c7c3a;color:#fff;padding:2px 10px">💾 공정 배치 저장</button></div></div></div>`;};
+  // ---------- #4 업체 매핑(조달프로파일) — 승인 후보(구조)에 업체·배분%·유효기간 (2계층) ----------
+  const profPanel=(R)=>{
+    const rp=(st.rp&&st.rp.route_id===R.route_id)?st.rp:null;
+    if(!rp) return `<div style="margin-top:10px;border-top:2px solid #cfe0d0;padding-top:8px"><button class="btn" id="rp-open" style="background:#1c7c3a;color:#fff;padding:3px 12px">🏭 업체 매핑(조달프로파일) 열기</button> <span style="color:#8aa0bd;font-size:11px">승인 후보(구조)에 <b>업체·배분%·유효기간</b> 지정 · 활성 배분합=100% 강제</span></div>`;
+    if(rp.error) return `<div style="margin-top:10px;color:#c0392b">업체매핑 오류: ${esc(rp.error)}</div>`;
+    const rows=rp.rows||[];
+    const act=rows.filter(r=>!r._delete&&r.is_active&&r.alloc_ratio!=null&&r.alloc_ratio!==''&&!r.is_internal);
+    const sum=Math.round(act.reduce((a,r)=>a+(+r.alloc_ratio||0),0)*100)/100;
+    const ok=act.length===0||Math.abs(sum-100)<0.01;
+    return `<div style="margin-top:10px;border-top:2px solid #b9dcc4;padding-top:8px">
+      <div style="font-weight:700;color:#1c7c3a">🏭 업체 매핑(조달프로파일) <span id="rp-gate" style="font-size:11px;font-weight:400;color:${ok?'#1c7c3a':'#c0392b'}">활성 배분합 ${nfq(sum)}% ${ok?'✔':'✖ 100% 아님(저장거부)'}</span> <span style="color:#8a94a6;font-size:11px;font-weight:400">이 후보(구조)를 실제로 제작·조달하는 업체와 배분비율</span></div>
+      <div style="overflow:auto;margin-top:6px"><table class="tbl" style="font-size:11.5px"><thead><tr>
+        <th>업체</th><th class="num">배분%</th><th>유효 시작</th><th>유효 종료</th><th class="center">활성</th><th class="center">LME</th><th style="width:40px"></th></tr></thead>
+        <tbody>${rows.map((r,i)=>r._delete?'':`<tr>
+          <td><input class="rp-f" data-i="${i}" data-k="vendor_code" list="sv-vdl2" value="${esc(r.vendor_code||'')}" style="width:120px" placeholder="업체코드">${r.vendor_name?` <span style="color:#8a94a6;font-size:10px">${esc(r.vendor_name)}</span>`:''}</td>
+          <td class="num"><input class="rp-f" data-i="${i}" data-k="alloc_ratio" type="number" step="any" min="0" max="100" value="${r.alloc_ratio!=null?r.alloc_ratio:''}" style="width:56px;text-align:right"></td>
+          <td><input class="rp-f" data-i="${i}" data-k="apply_from" type="date" value="${esc(r.apply_from||'')}"></td>
+          <td><input class="rp-f" data-i="${i}" data-k="apply_to" type="date" value="${esc(r.apply_to||'')}"></td>
+          <td class="center"><input class="rp-f" data-i="${i}" data-k="is_active" type="checkbox" ${r.is_active?'checked':''}></td>
+          <td class="center"><input class="rp-f" data-i="${i}" data-k="lme_flag" type="checkbox" ${r.lme_flag?'checked':''}></td>
+          <td class="center"><button class="btn rp-del" data-i="${i}" style="padding:0 6px;font-size:10px;color:#c0392b">✕</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">업체 매핑 없음 (➕ 업체추가)</td></tr>'}</tbody></table></div>
+      <button class="btn" id="rp-add" style="margin-top:6px;padding:2px 10px">➕ 업체추가</button>
+      <button class="btn" id="rp-save" style="margin-top:6px;background:#1c7c3a;color:#fff;padding:2px 10px">💾 업체 매핑 저장</button>
+      <datalist id="sv-vdl2"></datalist></div>`;};
   const detailModal=()=>{const d=st.detail;if(!d)return '';const R=routeById(d.route_id);if(!R)return '';
     const ed=d.mode==='edit'&&canW&&!R.baseline, h=d.hdr||{};
     const hdrView=`<div style="color:#5a6b82;font-size:12.5px">구분 <b>${esc(R.gubun||'-')}</b>${R.vendor_code?` · 공급처 <b>${esc(R.vendor_name||R.vendor_code)}</b>`:''}${R.apply_from?` · 적용 ${esc(R.apply_from)}`:''}${R.note?` · ${esc(R.note)}`:''}</div>`;
@@ -1808,6 +1835,7 @@ SCREEN.subvariant=(c)=>{
             <tbody>${(R.lines||[]).length?R.lines.map(l=>lineRow(l,ed)).join(''):`<tr><td colspan="${ed?7:6}" class="empty">라인 없음${ed?' (➕ 라인추가)':''}</td></tr>`}</tbody></table></div>
           ${ed?`<button class="btn" id="dt-ladd" style="margin-top:6px;padding:2px 10px">➕ 라인추가</button>`:''}
           ${ed?subPanel(R):''}
+          ${(canW&&!R.baseline&&R.approve_flag)?profPanel(R):(!R.baseline&&R.approve_flag?'':(!R.baseline?'<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체 매핑은 <b>승인(개발)</b> 후 가능합니다 — 승인하면 이 후보(구조)에 업체·배분%를 지정할 수 있습니다.</div>':''))}
         </div>
         <div style="padding:12px 18px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
           <span>${R.baseline?`${canW?`<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:''}`
@@ -1927,7 +1955,21 @@ SCREEN.subvariant=(c)=>{
       const gt=g('#sp-gate');if(gt){gt.textContent=`공수합 ${nfq(s)} / BASE ${base} ${ok?'✔':'✖ 불일치(저장거부)'}`;gt.style.color=ok?'#1c7c3a':'#c0392b';}});
     {const b=g('#sp-psave');if(b)b.onclick=async()=>{const procs=[];Object.keys(st.rdProc).forEach(nd=>{if(nd==='_rid')return;Object.keys(st.rdProc[nd]).forEach(pc=>{const w=+st.rdProc[nd][pc]||0;if(w>0)procs.push({node_item:nd,proc_code:pc,work_qty:w});});});
       try{const r=await fetch(`${API}/api/sourcing/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:st.routeTarget,ymd:'260630',procs})});
-        const j=await r.json();if(j.ok){alert(`공정 배치 저장 ✔ 공수합 ${j.cand_gongsu} = BASE ${j.base_gongsu}`);st.rdProc=null;await loadRD(rid);}else alert(`저장 거부: ${j.msg||('공수합 '+j.cand_gongsu+' ≠ BASE '+j.base_gongsu)}`);}catch(e){alert('오류: '+e.message);}};}};
+        const j=await r.json();if(j.ok){alert(`공정 배치 저장 ✔ 공수합 ${j.cand_gongsu} = BASE ${j.base_gongsu}`);st.rdProc=null;await loadRD(rid);}else alert(`저장 거부: ${j.msg||('공수합 '+j.cand_gongsu+' ≠ BASE '+j.base_gongsu)}`);}catch(e){alert('오류: '+e.message);}};}
+    // ---- #4 업체 매핑(조달프로파일) binds ----
+    {const b=g('#rp-open');if(b)b.onclick=()=>loadRP(rid);}
+    c.querySelectorAll('.rp-f').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k,row=(st.rp&&st.rp.rows)?st.rp.rows[i]:null;if(!row)return;
+      row[k]=el.type==='checkbox'?el.checked:el.value;if(k==='vendor_code')vSearch2(el.value);
+      const act=st.rp.rows.filter(r=>!r._delete&&r.is_active&&r.alloc_ratio!=null&&r.alloc_ratio!==''&&!r.is_internal);
+      const sum=Math.round(act.reduce((a,r)=>a+(+r.alloc_ratio||0),0)*100)/100,ok=act.length===0||Math.abs(sum-100)<0.01;
+      const gt=g('#rp-gate');if(gt){gt.textContent=`활성 배분합 ${nfq(sum)}% ${ok?'✔':'✖ 100% 아님(저장거부)'}`;gt.style.color=ok?'#1c7c3a':'#c0392b';}};});
+    {const b=g('#rp-add');if(b)b.onclick=()=>{st.rp.rows.push({profile_id:0,vendor_code:'',vendor_name:'',alloc_ratio:null,apply_from:'',apply_to:'',is_active:true,lme_flag:false,is_internal:false});draw();};}
+    c.querySelectorAll('.rp-del').forEach(el=>el.onclick=()=>{const i=+el.dataset.i,row=st.rp.rows[i];if(!row)return;if(row.profile_id)row._delete=true;else st.rp.rows.splice(i,1);draw();});
+    {const b=g('#rp-save');if(b)b.onclick=async()=>{try{const r=await fetch(`${API}/api/sourcing/profile/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,rows:st.rp.rows})});
+      const j=await r.json();if(j.ok){alert(`업체 매핑 저장 ✔ (추가 ${j.ins} · 수정 ${j.upd} · 삭제 ${j.del})`);await loadRP(rid);}
+      else if(j.gate==='NOT_APPROVED')alert('승인된 후보만 업체 매핑 가능합니다. 먼저 승인하세요.');
+      else if(j.gate==='ALLOC'||j.errors)alert('배분 검증 실패:\n'+((j.errors||['활성 배분합이 100%가 아닙니다']).join('\n')));
+      else alert('저장 실패: '+(j.detail||JSON.stringify(j)));}catch(e){alert('오류: '+e.message);}};}};
   const bindLineModal=()=>{if(!st.lineForm)return;const g=id=>c.querySelector(id);
     g('#ln-x').onclick=g('#ln-cancel').onclick=()=>{st.lineForm=null;draw();};
     g('#ln-save').onclick=saveLine;g('#ln-child').onclick=newChild;

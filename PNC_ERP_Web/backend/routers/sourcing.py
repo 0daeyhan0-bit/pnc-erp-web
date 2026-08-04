@@ -1007,6 +1007,117 @@ def sourcing_proc_save(payload: dict = Body(...)):
     finally:
         nx.close()
 
+# ============ #4 후보(구조) ↔ 업체(조달프로파일) 매핑: 2계층 =============
+# 후보 = 공정/구조 단위(sourcing_route). 업체 = 승인후보에 nx.sourcing_profile(route_id)로 vendor·배분%·유효기간 매핑.
+@router.get("/api/sourcing/vendors")
+def sourcing_vendors(q: str = Query("")):
+    """업체 매핑용 거래처 픽커(외주·매입). nx.cust에서 code+name(간소)."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        w = ["(outside_flag=1 OR in_flag=1)"]; p = []
+        if q.strip(): w.append("(cust_code LIKE ? OR cust_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2
+        cur.execute(f"SELECT TOP 50 cust_code,cust_name,outside_flag,in_flag FROM nx.cust WHERE {' AND '.join(w)} AND use_flag=1 ORDER BY cust_name", *p)
+        return {"rows": [{"code": str(r[0]).strip(), "name": str(r[1] or "").strip(),
+                          "role": ("외주" if r[2] else "") + ("·매입" if r[3] else "")} for r in cur.fetchall()]}
+    finally:
+        nx.close()
+
+@router.get("/api/sourcing/profile/list")
+def sourcing_profile_list(route_id: int = Query(0)):
+    """승인후보(route_id)에 매핑된 업체(조달프로파일) 목록. route 헤더(승인여부·품번) 동봉."""
+    if route_id <= 0: raise HTTPException(400, "route_id 필요")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT item_code, route_no, route_name, approve_flag, current_flag FROM nx.sourcing_route WHERE route_id=?", route_id)
+        h = cur.fetchone()
+        if not h: raise HTTPException(404, "route 없음")
+        hdr = {"route_id": route_id, "item_code": str(h[0]).strip(), "route_no": h[1],
+               "route_name": str(h[2] or "").strip(), "approve_flag": int(h[3] or 0), "current_flag": int(h[4] or 0)}
+        cur.execute("""SELECT p.profile_id,p.vendor_code,ISNULL(c.cust_name,'') vn,p.supply_gubun,p.lme_flag,
+              CONVERT(varchar(10),p.apply_from,23),CONVERT(varchar(10),p.apply_to,23),p.is_active,p.is_internal,p.alloc_ratio,p.priority
+            FROM nx.sourcing_profile p LEFT JOIN nx.cust c ON c.cust_code=p.vendor_code
+            WHERE p.route_id=? ORDER BY p.priority, p.profile_id""", route_id)
+        rows = [{"profile_id": r[0], "vendor_code": str(r[1] or "").strip(), "vendor_name": str(r[2] or "").strip(),
+                 "supply_gubun": str(r[3] or "").strip(), "lme_flag": int(r[4] or 0),
+                 "apply_from": r[5], "apply_to": r[6], "is_active": int(r[7] or 0),
+                 "is_internal": int(r[8] or 0), "alloc_ratio": (float(r[9]) if r[9] is not None else None),
+                 "priority": r[10]} for r in cur.fetchall()]
+        # 활성·배분 합(참고)
+        act = [(x["apply_from"] or "2000-01-01", x["apply_to"], x["alloc_ratio"]) for x in rows
+               if x["is_active"] and not x["is_internal"] and x["alloc_ratio"] is not None]
+        alloc_errs = _validate_alloc(act) if act else []
+        return {"header": hdr, "rows": rows, "alloc_ok": (len(alloc_errs) == 0), "alloc_errs": alloc_errs}
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/profile/save")
+def sourcing_profile_save(payload: dict = Body(...)):
+    """승인후보(route_id)에 업체 매핑 저장(upsert+delete). ★게이트: route는 승인(approve_flag=1)이어야 매핑 가능.
+       활성·배분% 입력행은 유효기간 겹치는 구간마다 배분합=100% 강제(_validate_alloc). 위반시 미기록.
+       근거키=route_id·profile_id. rows[] {profile_id(0=신규),vendor_code,supply_gubun,lme_flag,apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,_delete}."""
+    rid = int(payload.get("route_id") or 0)
+    rows = payload.get("rows", []) or []
+    if rid <= 0: raise HTTPException(400, "route_id 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT item_code, approve_flag FROM nx.sourcing_route WHERE route_id=?", rid)
+        h = cur.fetchone()
+        if not h: raise HTTPException(404, "route 없음")
+        item = str(h[0]).strip()
+        if int(h[1] or 0) != 1:
+            return {"ok": False, "gate": "NOT_APPROVED", "msg": "승인된 후보만 업체 매핑 가능(먼저 승인하세요)."}
+        # 정규화 + 배분검증(활성·비내부·배분% 입력 대상)
+        norm = []; act = []
+        for r in rows:
+            if r.get("_delete"):
+                pid = int(r.get("profile_id") or 0)
+                if pid > 0: norm.append(("del", pid, None))
+                continue
+            vc = str(r.get("vendor_code", "")).strip()
+            if not vc: continue  # 업체 없는 행 스킵
+            pid = int(r.get("profile_id") or 0)
+            sg = (str(r.get("supply_gubun", "") or "2")[:4]) or "2"
+            lme = 1 if r.get("lme_flag") else 0
+            af = _d(r.get("apply_from")) or "2000-01-01"
+            at = _d(r.get("apply_to"))
+            iact = 1 if r.get("is_active") else 0
+            iint = 1 if r.get("is_internal") else 0
+            ratio = r.get("alloc_ratio"); ratio = float(ratio) if (ratio not in (None, "", "null")) else None
+            prio = r.get("priority"); prio = int(prio) if (prio not in (None, "", "null")) else None
+            norm.append((pid, vc, sg, lme, af, at, iact, iint, ratio, prio))
+            if iact and not iint and ratio is not None:
+                act.append((af, at, ratio))
+        errs = _validate_alloc(act) if act else []
+        if errs:
+            nx.rollback()
+            return {"ok": False, "gate": "ALLOC", "errors": list(dict.fromkeys(errs))}
+        ins = upd = dele = 0
+        for rec in norm:
+            if rec[0] == "del":
+                cur.execute("DELETE FROM nx.sourcing_profile WHERE profile_id=? AND route_id=?", rec[1], rid)
+                dele += cur.rowcount; continue
+            (pid, vc, sg, lme, af, at, iact, iint, ratio, prio) = rec
+            if pid > 0:
+                cur.execute("""UPDATE nx.sourcing_profile SET vendor_code=?,supply_gubun=?,lme_flag=?,apply_from=?,apply_to=?,
+                      is_active=?,is_internal=?,alloc_ratio=?,priority=? WHERE profile_id=? AND route_id=?""",
+                    vc, sg, lme, af, at, iact, iint, ratio, prio, pid, rid)
+                upd += cur.rowcount
+            else:
+                cur.execute("""INSERT INTO nx.sourcing_profile(item_code,profile_name,supply_gubun,vendor_code,lme_flag,
+                      apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,route_id)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    item, (vc + " 매핑")[:100], sg, vc, lme, af, at, iact, iint, ratio, prio, rid)
+                ins += 1
+        nx.commit()
+        return {"ok": True, "ins": ins, "upd": upd, "del": dele}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 @router.post("/api/sourcing/route/reject")
 def sourcing_route_reject(payload: dict = Body(...)):
     """반려(개발): approve_flag=0 유지 + reject_flag=1 + 사유 기록. 조달프로파일 미노출. 근거키=route_id."""
