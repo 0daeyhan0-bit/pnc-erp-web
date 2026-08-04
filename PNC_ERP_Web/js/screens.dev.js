@@ -1207,10 +1207,10 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="bcap" title="${esc(r.nm)}" style="max-width:190px;overflow:hidden;text-overflow:ellipsis;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
         <td class="num">${q4(r.qty)}</td>
-        <td class="center"><button class="btn xs nae-edit-btn" data-node="${esc(r.code)}" data-level="${r.level}" style="padding:0 7px;background:#8e44ad;color:#fff">등록/수정</button></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">구성 없음 — 조회하세요</td></tr>';
+        <td class="center"><button class="nae-edit-btn" data-node="${esc(r.code)}" data-level="${r.level}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">구성 없음 — 조회하세요</td></tr>';
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
-      <div class="summary-bar" style="flex:0 0 auto"><div class="s-item"><b>BOM 레벨트리</b> · 레벨0=제품 / 레벨1+=부품 · 행클릭=우측조회 · <b>[등록/수정]</b>=공정입력 팝업</div></div>
-      <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl">
+      <div class="summary-bar" style="flex:0 0 auto"><div class="s-item"><b>BOM 레벨트리</b> · 레벨0=제품 / 레벨1+=부품 · 행클릭=우측조회 · <b>[✎]</b>=공정입력 팝업</div></div>
+      <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
         <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th class="center">등록/수정</th></tr></thead>
         <tbody>${body}</tbody></table></div></div>`;};
   // 공정 롤업 테이블(내부 max-height cap 없음 — 우측 flex 그리드가 높이 담당)
@@ -1255,21 +1255,22 @@ SCREEN.unifybom=(c,ro)=>{
     // (상) 관경별 용접 매트릭스 — 관경=컬럼, 용접봉 종류=상단 드롭다운 1개
     const wTypes=[...new Set([...(naeProcD.weldTypes||[]),'RAC30599301-1','RAC30599327','RAC30599328','RAC30599303'])];
     const wLabel=w=>({'RAC30599301-1':'1% 용접봉','RAC30599327':'3% 용접봉','RAC30599328':'30% BAG','RAC30599303':'BCUP'}[w]||w);
+    // ★레거시 스샷 구조: [용접(라벨)][합계][관경 14열(가로 숫자)]. 소요량 합계=Σstd×횟수(표시), BOM/저장은 ×1.5(내부)
+    const fmtU=v=>{if(!v)return '';const s=(+v).toFixed(5);return s.replace(/0+$/,'').replace(/\.$/,'');};  // 스샷처럼 뒤 0 제거
     const weldMatrix=!isAssy?'':`
       <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;flex-wrap:wrap">
         <b style="color:#8e44ad">🔧 관경별 용접</b>
         <span style="color:#8a94a6;font-size:11px">용접봉 종류(노드당 1개)</span>
         <select id="wm-type" style="font-size:12px">${wTypes.map(w=>`<option value="${esc(w)}" ${w===naeProcD.weldItem?'selected':''}>${esc(w)} · ${esc(wLabel(w))}</option>`).join('')}</select>
-        <span style="color:#8a94a6;font-size:11px">각 관경 아래 <b>용접횟수</b>만 입력 → 소요량·내부ST 자동</span>
-        <div style="flex:1"></div><b style="color:#8e44ad">Σ소요량 ${(sUse*1.5).toFixed(5)} · 내부ST ${sSt} · 총점 ${sCnt}</b></div>
-      <div style="overflow-x:auto"><table class="tbl wm" style="font-size:11px">
-        <thead><tr><th style="text-align:left;min-width:70px">관경(φ)</th>${DIAMS.map(d=>vhdr(d.toFixed(2))).join('')}<th class="num">합계</th></tr></thead>
+        <span style="color:#8a94a6;font-size:11px">관경 아래 <b>용접횟수</b> 입력 → 소요량·내부ST 자동 (BOM반영 소요량=표시×1.5)</span></div>
+      <div style="overflow-x:auto"><table class="tbl wm wmw" style="font-size:11px">
+        <thead><tr><th style="text-align:left;min-width:56px">용접</th><th class="num" style="min-width:48px">합계</th>${DIAMS.map(d=>`<th class="num">${d.toFixed(2)}</th>`).join('')}</tr></thead>
         <tbody>
-          <tr><td style="text-align:left;color:#5a6b82">표준소요량</td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${(STU[d.toFixed(2)]||0)}</td>`).join('')}<td></td></tr>
-          <tr><td style="text-align:left;color:#5a6b82">표준공수</td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${(STS[d.toFixed(2)]||0)}</td>`).join('')}<td></td></tr>
-          <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">용접횟수</td>${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-q" data-diam="${k}" type="number" min="0" step="1" value="${cnt[k]||''}" style="width:34px;text-align:center"></td>`;}).join('')}<td class="num"><b>${sCnt}</b></td></tr>
-          <tr><td style="text-align:left;color:#1c6b3a">소요량</td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#1c6b3a">${q?((STU[k]||0)*q).toFixed(5):''}</td>`;}).join('')}<td class="num" style="color:#1c6b3a"><b>${(sUse*1.5).toFixed(5)}</b></td></tr>
-          <tr><td style="text-align:left;color:#8a5a1a">내부ST</td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#8a5a1a">${q?((STS[k]||0)*q):''}</td>`;}).join('')}<td class="num" style="color:#8a5a1a"><b>${sSt}</b></td></tr>
+          <tr><td style="text-align:left;color:#5a6b82">표준소요량</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${fmtU(STU[d.toFixed(2)]||0)}</td>`).join('')}</tr>
+          <tr><td style="text-align:left;color:#5a6b82">표준공수</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${(STS[d.toFixed(2)]||0)}</td>`).join('')}</tr>
+          <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">용접횟수</td><td class="num"><b>${sCnt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-q" data-diam="${k}" type="number" min="0" step="1" value="${cnt[k]||''}" style="width:32px;text-align:center"></td>`;}).join('')}</tr>
+          <tr style="background:#eef4ff"><td style="text-align:left;font-weight:700;color:#1c6b3a">소요량</td><td class="num" style="color:#1c6b3a"><b>${fmtU(sUse)}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#1c6b3a">${q?fmtU((STU[k]||0)*q):''}</td>`;}).join('')}</tr>
+          <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td><td class="num" style="color:#8a5a1a"><b>${sSt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#8a5a1a">${q?((STS[k]||0)*q):''}</td>`;}).join('')}</tr>
         </tbody></table></div>`;
     // (하) 공정별 매트릭스 — 공정=컬럼(세로헤더). 가공(own)+조립(carrier[0]) 통합
     const cols=[];
@@ -1405,6 +1406,9 @@ SCREEN.unifybom=(c,ro)=>{
      .wm th.wm-vh span{writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);white-space:nowrap;font-size:10px;font-weight:600;color:#40567a;display:inline-block;max-height:60px;overflow:hidden}
      .wm td input{border:1px solid #cfd9e6;border-radius:3px;padding:1px}
      .wm tbody td:first-child,.wm thead th:first-child{position:sticky;left:0;background:#f4f7fc;z-index:2}
+     /* 레벨트리 컴팩트: 행높이 축소로 화면당 품번 최대 */
+     .nae-tree td,.nae-tree th{padding:1px 5px;line-height:1.25;font-size:11px}
+     .nae-tree .nae-edit-btn:hover{background:#7a379a}
    </style>`;
   const isW=nm=>(nm||'').indexOf('용접봉')>=0;
   // ============ BOM구성 그리기 ============
