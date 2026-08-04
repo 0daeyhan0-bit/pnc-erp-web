@@ -1522,7 +1522,7 @@ SCREEN.coopquote=(host)=>{
         <th class="num" style="color:#1c6ec2">재료비</th><th class="num">재료비율</th><th class="num" style="color:#1c7c3a">가공비</th><th class="num">판가<br><span style="font-weight:400;font-size:9px">(최종견적가)</span></th>
         <th class="num" style="color:#a06010">가격조정<br><span style="font-weight:400;font-size:9px">(종전−판가)</span></th><th class="num" style="color:#1c7c3a">총가공비<br><span style="font-weight:400;font-size:9px">(종전−재료)</span></th>
         <th class="num" style="color:#8a6d3b">종전입고가<br><span style="font-weight:400;font-size:9px">(작년12월)</span></th><th class="num">현재입고가<br><span style="font-weight:400;font-size:9px">(최근실입고)</span></th>
-        <th class="num" style="color:#1c47a0">판가(신)<br><span style="font-weight:400;font-size:9px">(사급인상반영)</span></th><th class="num">차이(신)<br><span style="font-weight:400;font-size:9px">(판가신−현재)</span></th>
+        <th class="num" style="color:#1c47a0">판가(신)<br><span style="font-weight:400;font-size:9px">(사급인상반영)</span></th><th class="num">차이(신)<br><span style="font-weight:400;font-size:9px">(현재−판가신)</span></th>
         <th>최근납품</th><th>상태</th>${canEd?'<th style="width:40px">작업</th>':''}</tr></thead>
       <tbody>${st.loading?spinRow(canEd?19:17):(st.rows.length?st.rows.map((r,i)=>`<tr class="cq-row" data-idx="${i}" style="cursor:pointer">
         ${canEd?`<td class="center"><input type="checkbox" class="cq-chk" data-id="${r.quote_id}" ${st.sel.has(r.quote_id)?'checked':''} onclick="event.stopPropagation()"></td>`:''}
@@ -1540,7 +1540,7 @@ SCREEN.coopquote=(host)=>{
         <td class="num" style="color:#8a6d3b">${won(r.prev_incost)}</td>
         <td class="num">${won(r.cur_incost)}</td>
         <td class="num" style="color:#1c47a0" title="종전입고가 + 원자재(동+사급부품)인상분">${r.new_price!=null?('<b>'+won(r.new_price)+'</b>'):'-'}</td>
-        <td class="num" title="판가(신)−현재입고가 · ≈0=원소재만 정확인상 · 음수=과다 · 양수=부족">${r.diff_new!=null?('<b style="color:'+(Math.abs(r.diff_new)<Math.max(50,(r.prev_incost||0)*0.03)?'#1c7c3a':(r.diff_new<0?'#c0392b':'#1c47a0'))+'">'+won(r.diff_new)+'</b>'):'-'}</td>
+        <td class="num" title="현재입고가−판가(신) · ≈0=원소재만 정확인상 · 양수=현재입고가 과다(재견적 필요) · 음수=판가 여유">${r.diff_new!=null?('<b style="color:'+(Math.abs(r.diff_new)<Math.max(50,(r.prev_incost||0)*0.03)?'#1c7c3a':(r.diff_new>0?'#c0392b':'#1c47a0'))+'">'+won(r.diff_new)+'</b>'):'-'}</td>
         <td class="center" style="font-size:10px;${r.last_in_ymd?'':'color:#c9d1dc'}">${r.last_in_ymd?('20'+r.last_in_ymd.slice(0,2)+'-'+r.last_in_ymd.slice(2,4)+'-'+r.last_in_ymd.slice(4,6)):'미납품'}</td>
         <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${r.status==='확정'?'#e3f5e9':'#eef2f7'};color:${r.status==='확정'?'#1c7c3a':'#5a6a80'}">${esc(r.status)}</span></td>
         ${canEd?`<td class="center"><button class="btn cq-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px" onclick="event.stopPropagation()">수정</button></td>`:''}</tr>`).join(''):`<tr><td colspan="${canEd?19:17}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>

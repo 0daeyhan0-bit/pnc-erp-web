@@ -163,7 +163,35 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             for a, pc, mc in cur.fetchall():
                 a = str(a).strip(); pc = str(pc).strip()
                 sagub_by_assy.setdefault(a, []).append((pc, float(mc or 0))); sagub_codes.add(pc)
-        scost = _incost(cur, list(sagub_codes)) if sagub_codes else {}
+        # 사급부품 현재/종전 = 판매단가(=사급가, COST_TAG='S' · 협력사별 · 대표최신). ★매입가 아님(모달과 동일 기준)
+        #   현재=적용일<=991231 최신, 종전=적용일<=251231 최신
+        sale_cur = {}; sale_prev = {}   # (vcode, part_upper) -> 판매단가
+        vcodes = set()
+        for r in rows:
+            vc = _VENDOR2CODE.get(str(r["vendor"]).strip(), "")
+            if vc:
+                vcodes.add(vc)
+        if sagub_codes and vcodes:
+            lc = _conn(); lcur = lc.cursor()
+            try:
+                partlist = list(sagub_codes)
+                for vc in vcodes:
+                    for tgt, ymd in ((sale_cur, "991231"), (sale_prev, _PREV_YMD)):
+                        for i in range(0, len(partlist), 900):
+                            chunk = [c.replace("'", "") for c in partlist[i:i + 900]]
+                            inl = "','".join(chunk)
+                            lcur.execute(f"""WITH S AS (
+                                  SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
+                                    ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
+                                      ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
+                                  FROM PR_M_ITEM_COST
+                                  WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
+                                    AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                                SELECT ic, ITEM_COST FROM S WHERE rn=1""", vc, ymd)
+                            for rr in lcur.fetchall():
+                                tgt[(vc, str(rr[0]).strip().upper())] = float(rr[1] or 0)
+            finally:
+                lc.close()
         # 현재 원소재 사급가(등급별): nx.mat_price_month 원소재 우선, 없으면 일반20000/고강도22000
         cur_sagub = {"일반CU": 20000.0, "고강도CU": 22000.0}
         try:
@@ -177,28 +205,36 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             au = r["assy_code"].strip().upper()
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
             matc = r["mat_cost"]; matp = r["mat_part"]; matr = r["mat_raw"]; sg = r["sagub_price"]
-            r["price_adjust"] = (round(prev_in - r["sale_price"], 2) if prev_in is not None else None)
-            r["total_proc"] = (round(prev_in - matc, 2) if prev_in is not None else None)
+            # 기준가 base = max(종전입고가, 판가). 신규견적(판가>종전)은 판가를 베이스로 → 총가공비 음수 방지
+            base = prev_in if prev_in is not None else None
+            if base is None or (r["sale_price"] and r["sale_price"] > base):
+                base = r["sale_price"]
+            r["base_price"] = base
+            r["price_adjust"] = round(base - r["sale_price"], 2)
+            r["total_proc"] = round(base - matc, 2)
             # 원재료(동) 현재 = mat_raw × (현재사급가/견적사급가)
             csg = cur_sagub.get(r["grade"], sg)
             raw_now = (matr * (csg / sg) if (sg and sg > 0) else matr)
             r["raw_now"] = round(raw_now, 2)
-            # 사급부품 현재 = Σ(part.mat_cost × 현재/종전 입고단가비)
+            # 사급부품 현재/종전 = Σ 판매단가(사급가·협력사별·대표최신). 미조회분은 견적 mat_cost 폴백
+            vc = _VENDOR2CODE.get(str(r["vendor"]).strip(), "")
             splist = sagub_by_assy.get(au)
-            if splist:
-                sn = 0.0
+            if splist and vc:
+                sn = 0.0; sp = 0.0
                 for pc, mc in splist:
-                    sc = scost.get(pc)
-                    sn += mc * (sc[0] / sc[1]) if (sc and sc[0] and sc[1] and sc[1] > 0) else mc
-                r["sagub_now"] = round(sn, 2)
+                    cv = sale_cur.get((vc, pc)); pv = sale_prev.get((vc, pc))
+                    sn += cv if cv else mc
+                    sp += pv if pv else (cv if cv else mc)
+                r["sagub_now"] = round(sn, 2); sagub_prev = sp
             else:
-                r["sagub_now"] = matp
-            # 원자재 인상분 = (원재료현재−mat_raw) + (사급부품현재−mat_part)
-            raw_up = (raw_now - matr) + (r["sagub_now"] - matp)
+                r["sagub_now"] = matp; sagub_prev = matp
+            # 원자재 인상분 = (원재료현재−mat_raw) + (사급부품현재−사급부품종전)
+            raw_up = (raw_now - matr) + (r["sagub_now"] - sagub_prev)
             r["raw_up"] = round(raw_up, 2)
             r["mat_now"] = round(raw_now + r["mat_weld"] + r["sagub_now"], 2)   # 재료비(현재)
-            r["new_price"] = (round(prev_in + raw_up, 2) if prev_in is not None else None)
-            r["diff_new"] = (round(r["new_price"] - cur_in, 2) if (r["new_price"] is not None and cur_in is not None) else None)
+            r["new_price"] = (round(base + raw_up, 2) if base is not None else None)
+            # 차이(신) = 현재입고가 − 판가(신)  [= 현재 −(종전+재료인상폭+사급인상폭)]. 양수=현재입고가가 신판가보다 높음(재견적 필요)
+            r["diff_new"] = (round(cur_in - r["new_price"], 2) if (r["new_price"] is not None and cur_in is not None) else None)
         if active_only:
             cutoff = (datetime.now() - timedelta(days=120)).strftime('%y%m%d')
             rows = [r for r in rows if r.get("last_in_ymd") and r["last_in_ymd"] >= cutoff]

@@ -448,6 +448,49 @@ def _route_baseline_lines(item):
     finally:
         cn.close()
 
+def _base_flat_lines(item, ymd="260630"):
+    """BASE BOM seed = 내부원가 '평면 재료'(cost/nae flatMat와 동일: level>0·mat>0 leaf, 조립 SUB(은납 등) 해체).
+       ★현행복사와 달리: 구분=품목 성격(make_type='1'→제작 / 그외→매입), 공급처=공란(업체는 조달프로파일에서 배분).
+       용접봉(RAC*)=base코드로 그룹·매입. node_kind=PART. 재료표(사용자가 보는 값)와 동일 leaf 집합."""
+    with _COST_LOCK:
+        try: d = _get_cost_engine().naewon_nodes(item, ymd)
+        except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
+    rows = d.get("rows", []) if isinstance(d, dict) else []
+    normal = []; weld = {}
+    for r in rows:
+        if int(r.get("level", 0) or 0) <= 0: continue
+        if float(r.get("mat", 0) or 0) <= 0: continue        # 재료비 계상 leaf만(=flatMat)
+        code = str(r.get("code", "")).strip()
+        if not code: continue
+        if code.upper().startswith("RAC"):                    # 용접봉: base코드로 그룹
+            base = code.split("-")[0]
+            w = weld.get(base)
+            if not w:
+                w = weld[base] = {"code": base, "name": r.get("name") or base, "metal": str(r.get("metal", "") or "").strip(),
+                                  "diam": float(r.get("diam", 0) or 0), "thick": float(r.get("thick", 0) or 0), "qty": 0.0}
+            w["qty"] += float(r.get("qty", 0) or 0)
+        else:
+            normal.append(r)
+    out = []; sq = 0
+    for r in normal:
+        sq += 1
+        metal = str(r.get("metal", "") or "").strip()
+        # 제작/매입 판정 = 내부원가 cost_gubun: '3'(소재 절삭 제작, 예 MJU) → 제작 / '2'(매입단가) → 매입.
+        # (nx.item make_type는 이 데이터에서 신뢰불가: MJU='2'·부자재='3' 역전 → cost_gubun 사용)
+        gub = "제작" if str(r.get("cost_gubun", "") or "") == "3" else "매입"
+        out.append({"line_id": 0, "sort_seq": sq, "child_item": str(r.get("code", "")).strip(),
+                    "child_name": r.get("name") or "", "qty": float(r.get("qty", 0) or 0), "gubun": gub,
+                    "vendor_code": "", "vendor_name": "", "is_rawmat": 1 if metal else 0,
+                    "diam": float(r.get("diam", 0) or 0), "thick": float(r.get("thick", 0) or 0), "len_val": 0.0,
+                    "material": metal, "spec": str(r.get("spec", "") or ""), "note": ""})
+    for w in sorted(weld.values(), key=lambda x: x["code"]):
+        sq += 1
+        out.append({"line_id": 0, "sort_seq": sq, "child_item": w["code"], "child_name": w.get("name") or w["code"],
+                    "qty": float(w["qty"] or 0), "gubun": "매입", "vendor_code": "", "vendor_name": "",
+                    "is_rawmat": 1 if w["metal"] else 0, "diam": w["diam"], "thick": w["thick"], "len_val": 0.0,
+                    "material": w["metal"], "spec": "", "note": ""})
+    return out
+
 def _custnm_map(cur, codes):
     m = {}
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
@@ -579,9 +622,11 @@ def sourcing_route_copy(payload: dict = Body(...)):
         if src_kind == 'blank':   # ★빈 상태(수동 구성 시작)
             src_hdr = {"route_name": "빈 후보", "vendor_code": "", "gubun": "자체", "apply_from": None, "note": "빈 상태(수동 구성)"}
             src_lines = []
-        elif src_kind == 'base' or (src_rid == 0 and not src_item):   # ★BASE BOM(현행 실사용 평면) seed → SUB 재구성 시작
-            src_hdr = {"route_name": "BASE BOM", "vendor_code": "", "gubun": "자체", "apply_from": None, "note": "BASE BOM(실사용 평면) 가져오기"}
-            bl = _route_baseline_lines(item)
+        elif src_kind == 'base':   # ★BASE BOM(내부원가 평면 재료·조립SUB 해체) seed → SUB 재구성 시작. ≠현행복사
+            src_hdr = {"route_name": "BASE BOM", "vendor_code": "", "gubun": "자체", "apply_from": None,
+                       "note": "BASE BOM(내부원가 평면 재료·SUB 해체) 가져오기 — 구분=품목성격·공급처 공란"}
+            ymd = str(p.get("ymd", "260630")).strip() or "260630"
+            bl = _base_flat_lines(item, ymd)
             src_lines = [[l["sort_seq"], l["child_item"], l["child_name"], l["qty"], l["gubun"], l["vendor_code"],
                          l["is_rawmat"], l["diam"], l["thick"], l["len_val"], l["material"], l["spec"], l["note"]] for l in bl]
         elif src_item:   # ★특정 품번의 현행 BOM을 seed로
