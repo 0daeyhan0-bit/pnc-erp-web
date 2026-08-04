@@ -1772,10 +1772,12 @@ SCREEN.subvariant=(c)=>{
       <div style="font-weight:700;color:#8e44ad">🧩 SUB 재구성 · 공정 배치 <span id="sp-gate" style="font-size:11px;font-weight:400;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(csum)} / BASE ${rd.base_gongsu} ${ok?'✔':'✖ 불일치(저장거부)'}</span></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
         <div style="flex:1;min-width:260px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
-          <div style="font-size:12px;font-weight:600;margin-bottom:3px">평면 부품 (체크 → SUB로 묶기)</div>
-          ${flat.map(p=>`<label style="display:block;font-size:12px"><input type="checkbox" class="sp-pick" data-lid="${p.line_id}"> ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span></label>`).join('')||'<div style="color:#8a94a6;font-size:11px">평면 부품 없음</div>'}
+          <div style="font-size:12px;font-weight:600;margin-bottom:3px">평면 부품 <span style="color:#8a94a6;font-weight:400">(체크→SUB묶기 · 또는 드래그→SUB로 이동)</span></div>
+          <div class="sp-drop" data-sub="0" style="min-height:8px;border:1px dashed #cfd6e0;border-radius:6px;padding:4px;background:#fff">
+          ${flat.map(p=>`<label draggable="true" class="sp-drag" data-lid="${p.line_id}" style="display:block;font-size:12px;cursor:grab"><input type="checkbox" class="sp-pick" data-lid="${p.line_id}"> ⠿ ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span></label>`).join('')||'<div style="color:#8a94a6;font-size:11px">평면 부품 없음 (SUB에서 드롭하면 평면 복귀)</div>'}
+          </div>
           <button class="btn" id="sp-mksub" style="margin-top:6px;background:#8e44ad;color:#fff;padding:2px 10px">선택 → 신규 SUB</button>
-          ${subs.map(s=>`<div style="margin-top:6px;border-top:1px dashed #d6c3ea;padding-top:4px;font-size:12px"><b style="color:#8e44ad">▸ SUB ${esc(s.sub_item||s.child_item)}</b> <button class="btn sp-dis" data-sub="${s.line_id}" style="padding:0 6px;font-size:10px">해제</button>${memb(s.line_id).map(m=>`<div style="padding-left:14px;color:#5a6b82">└ ${esc(m.child_item)}</div>`).join('')}</div>`).join('')}
+          ${subs.map(s=>`<div class="sp-drop" data-sub="${s.line_id}" style="margin-top:6px;border:1px dashed #d6c3ea;border-radius:6px;padding:4px;font-size:12px;background:#fff"><b style="color:#8e44ad">▸ SUB ${esc(s.sub_item||s.child_item)}</b> <button class="btn sp-dis" data-sub="${s.line_id}" style="padding:0 6px;font-size:10px">해제</button> <span style="color:#8a94a6;font-size:10px">(여기로 드롭=이동)</span>${memb(s.line_id).map(m=>`<div draggable="true" class="sp-drag" data-lid="${m.line_id}" style="padding-left:14px;color:#5a6b82;cursor:grab">⠿ └ ${esc(m.child_item)}</div>`).join('')}</div>`).join('')}
         </div>
         <div style="flex:2;min-width:340px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
           <div style="font-size:12px;font-weight:600;margin-bottom:3px">공정 배치 (제품/SUB별 작업ST · 합계=BASE 유지)</div>
@@ -1906,6 +1908,14 @@ SCREEN.subvariant=(c)=>{
       const sfx=(prompt('SUB 접미사 (빈칸=자동 _S01·_S02… / 공정약칭 예 -은납)','')||'').trim();  // 빈=백엔드 자동 _S{nn}(충돌검사)
       try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:sfx,name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
         const j=await r.json();if(j.ok){st.rdProc=null;await loadRD(rid);}else alert('SUB 생성 실패');}catch(e){alert('오류: '+e.message);}};}
+    // 드래그앤드롭: 부품→SUB(또는 평면) 이동
+    c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});
+    c.querySelectorAll('.sp-drop').forEach(zone=>{
+      zone.ondragover=e=>{e.preventDefault();zone.style.background='#eef7ff';};
+      zone.ondragleave=()=>{zone.style.background='#fff';};
+      zone.ondrop=async e=>{e.preventDefault();zone.style.background='#fff';const lid=e.dataTransfer.getData('text/lid');if(!lid)return;
+        try{const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+zone.dataset.sub,line_ids:[+lid]})});
+          if((await r.json()).ok){st.rdProc=null;await loadRD(rid);}}catch(err){alert('이동 오류: '+err.message);}};});
     c.querySelectorAll('.sp-dis').forEach(el=>el.onclick=async()=>{if(!confirm('SUB 해제(하위부품 평면 복귀)?'))return;
       try{const r=await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+el.dataset.sub})});
         if((await r.json()).ok){st.rdProc=null;await loadRD(rid);}}catch(e){alert('오류: '+e.message);}});

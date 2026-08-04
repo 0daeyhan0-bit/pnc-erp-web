@@ -943,6 +943,33 @@ def sourcing_sub_dissolve(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.post("/api/sourcing/part/assign")
+def sourcing_part_assign(payload: dict = Body(...)):
+    """부품 라인을 SUB로 이동/평면복귀(드래그드롭). sub_line>0=해당 SUB 하위로, 0=평면(parent_line=NULL).
+       근거키=route_id·line_ids. 재료(구성)만 이동, 공정(route_proc)·공수합 불변. 승인 리셋."""
+    rid = int(payload.get("route_id") or 0)
+    sub_line = int(payload.get("sub_line") or 0)
+    line_ids = [int(x) for x in (payload.get("line_ids", []) or []) if str(x).strip().isdigit()]
+    if rid <= 0 or not line_ids: raise HTTPException(400, "route_id·line_ids 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        if sub_line > 0:   # 대상 SUB 유효성(같은 route·SUB)
+            cur.execute("SELECT 1 FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, sub_line)
+            if not cur.fetchone(): raise HTTPException(404, "대상 SUB 없음")
+            if sub_line in line_ids: raise HTTPException(400, "SUB 자신은 이동 불가")
+        ph = ",".join("?" * len(line_ids))
+        cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, node_kind='PART' WHERE route_id=? AND line_id IN ({ph}) AND node_kind<>'SUB'",
+                    (sub_line or None), rid, *line_ids)
+        moved = cur.rowcount
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
+        nx.commit()
+        return {"ok": True, "moved": moved, "to": (sub_line or "평면")}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 @router.post("/api/sourcing/proc/save")
 def sourcing_proc_save(payload: dict = Body(...)):
     """후보별 공정배치 저장(nx.sourcing_route_proc 전체교체). ★게이트: Σ(후보 work_qty 전노드) == BASE 공수합(내부원가 proc_grid) diff0.
