@@ -1103,9 +1103,13 @@ SCREEN.unifybom=(c,ro)=>{
           work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
       // 제품/SUB(=조립 노드) 판정: 용접봉 carrier 존재 or 최상위 품번(item)
       const isAssy=(carriers.length>0)||(weldCarriers.length>0)||(node===item);
-      const defWeld=weldCarriers[0]||(carriers[0]&&carriers[0].weld_item)||'RAC30599301-1';
-      if(isAssy && !weldPoints.length) weldPoints.push({weld_item:defWeld,pipe_diam:'',weld_qty:''});
-      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers,isAssy,weldPoints};
+      // ★용접봉 종류=노드당 1개(상단 드롭다운). 기존 종류들 목록 + 기본선택
+      const weldTypes=[...new Set([...weldCarriers, ...weldPoints.map(w=>w.weld_item)].filter(Boolean))];
+      const weldItem=weldTypes[0]||'RAC30599301-1';
+      // 선택 종류의 관경별 횟수 맵
+      const weldCounts={};
+      weldPoints.forEach(w=>{if(w.weld_item===weldItem && w.pipe_diam)weldCounts[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});
+      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers,isAssy,weldPoints,catalog:cat,weldTypes,weldItem,weldCounts};
       if(openModal)naeModal=true;
     }catch(e){naeProcD={node,own:[],carriers:[],isAssy:false,weldPoints:[],error:e.message};}draw();};
   const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
