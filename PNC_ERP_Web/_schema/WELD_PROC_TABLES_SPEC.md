@@ -186,3 +186,32 @@ nx.routing   (p_item=부모, item_code=용접봉, proc_code 51/28, work_qty=Σ�
 
 ---
 관련: _harness/nx_cost_engine.py · _schema/group1_derive_40.csv · [[newerp-weld-cost-split]] [[newerp-coop-rawmat-settlement]]
+
+
+---
+
+## 10. ★조달 후보군 일치 요건 (canonical 단일 집계 — 재계산 금지)
+
+> 사용자 확정 원칙: **용접봉 소요량 합 · 각 공정 합은 단일 원천에서만 집계**한다. 내부원가 화면(우측 합계·등록/수정 팝업)과 **조달 후보군(조달경로 통합검토/sourcing)**이 이 동일 집계를 **그대로 소비**해야 하며, 따로 재계산하면 안 된다(재계산=불일치 위험). 런타임은 **nx 테이블만**(레거시 CS_T_ITEM_WELD 런타임 참조 금지).
+
+### 10.1 canonical 집계 (단일 소스)
+| 항목 | 단일 원천(canonical) | 산식 |
+|---|---|---|
+| **용접봉 소요량(노드)** | **`nx.proc_weld.use_qty`** | = Σ_관경( `nx.weld_diam.std_use_qty` × `nx.item_weld.weld_qty` ) × `loss_factor`(1.5). weld/save가 이 값을 계산·저장 |
+| **용접 내부ST(노드)** | `nx.routing`(proc 51/28) | = Σ_관경( `nx.weld_diam.std_st` × 횟수 ). routing.work_qty=Σ횟수, prod_uph=Σ횟수×3600/내부ST |
+| **공정 작업ST(노드)** | `nx.routing`(proc<90, p_item=노드/carrier) | work_qty(공정별) |
+| **재료비/가공비(롤업)** | `_harness/nx_cost_engine.py`(NxCostEngine) | 엔진이 BOM 트리워크로 각 노드 proc_weld(재료)·routing(가공) 합산 |
+
+### 10.2 조인키·롤업
+- 노드키: `item_weld.item_code = proc_weld.parent_item = routing.p_item`(부모=제품/SUB). 용접봉: `*.weld_item = routing.item_code`(RAC).
+- **롤업**: 상위(제품) 총량 = 엔진이 하위 노드별 proc_weld/routing을 트리 전개하며 합산(노드별 자기 행 보유, 부모가 SUB를 중복저장하지 않음). 조달 후보군은 **엔진 출력(또는 /api/cost/nae·/api/cost/sil 결과)을 소비**할 것.
+
+### 10.3 소비 규칙 (다른 세션이 조달 후보군 만들 때)
+- 용접봉 총 소요량이 필요하면 → **`nx.proc_weld.use_qty` 직독**(또는 /api/weld/get의 관경별 → Σstd_use×횟수×1.5, 동일값). ★재계산·레거시참조 금지.
+- 공정 총량(ST) → `nx.routing`(또는 엔진 proc 결과) 직독.
+- 화면 표시 규칙: 팝업 관경별 "소요량" 행 = **Σ(std_use×횟수)**(표시, ×1.5 아님), **BOM/proc_weld 저장·원가·조달은 ×1.5**(내부). 표시와 저장 배수 구분 준수.
+
+### 10.4 검증 (2026-08-04 실측)
+- `weld/get Σ(std_use×횟수)×1.5 == nx.proc_weld.use_qty` — AJR30012009=0.0492·AJR73327007-은납=0.0018 **정확 일치**(단일소스 증명).
+- ∴ 내부원가 팝업 표시·proc_weld·엔진 재료비·조달 후보군이 모두 동일 nx 집계 참조 → **자동 일치**.
+- ※참고 데이터드리프트: 일부 노드는 `item_weld.weld_qty 합`(관경별 횟수, 재료 기준)과 `routing 용접 work_qty`(공정 ST 기준)가 소폭 상이(예 AJR30012009 14 vs 15, 이관 잔차). 재료비=proc_weld·가공비=routing 각각 nx 단일소스이므로 원가·조달 일치엔 영향 없음. 필요시 별도 동기화(입력시 weld/save가 routing도 갱신).

@@ -77,8 +77,9 @@ def _item_nature(cur, code, sgroup):
     sg = str(sgroup or "").strip()
     if sg in _NATURE_MAT:
         return _NATURE_MAT[sg], 1
+    # ★용접 존재판정=nx 용접테이블(nx.proc_weld) 런타임 기준 — 레거시 CS_T_ITEM_WELD 런타임 참조 제거(원칙: 런타임은 nx만)
     cur.execute("""SELECT
-        (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.CS_T_ITEM_WELD WHERE P_ITEM_CODE=?),
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0),
         (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE ITEM_CODE=?),
         (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?),
         (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE MAT_CODE=?)""", code, code, code, code)
