@@ -1317,20 +1317,22 @@ SCREEN.unifybom=(c,ro)=>{
           <tr style="background:#eef4ff"><td style="text-align:left;font-weight:700;color:#1c6b3a">소요량</td><td class="num" style="color:#1c6b3a"><b>${fmtU(sUse)}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#1c6b3a">${q?fmtU((STU[k]||0)*q):''}</td>`;}).join('')}</tr>
           <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td><td class="num" style="color:#8a5a1a"><b>${sSt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#8a5a1a">${q?((STS[k]||0)*q):''}</td>`;}).join('')}</tr>
         </tbody></table></div>`;
-    // (하) 공정별 매트릭스 — 공정=컬럼(세로헤더). 가공(own)+조립(carrier[0]) 통합
+    // (하) 공정별 — ★세로헤더 폐기 → 2단(band) 가로헤더. 작업ST=입력 / 내부UPH·임율=읽기전용 텍스트(스피너 제거, 값 전체표시·tabular-nums).
     const cols=[];
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     let sWq=0;cols.forEach(cc=>sWq+=(+cc.wq||0));
-    const procMatrix=`
-      <div style="padding:4px 6px"><b style="color:#1c47a0">⚙ 공정별 (작업 ST 입력)</b> <span style="color:#8a94a6;font-size:11px">공정 컬럼 아래 작업ST 입력 · UPH/임율 참조</span></div>
-      <div style="overflow-x:auto"><table class="tbl wm" style="font-size:11px">
-        <thead><tr><th style="text-align:left;min-width:70px">공정</th>${cols.map(cc=>vhdr(cc.name)).join('')}<th class="num">합계</th></tr></thead>
+    const band=(sub)=>!sub.length?'':`<table class="tbl wm" style="font-size:11px;table-layout:fixed;width:100%;margin-bottom:6px">
+        <thead><tr><th style="text-align:left;width:58px">구분</th>${sub.map(cc=>`<th class="num" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px" title="${esc(cc.name)} · ${esc(cc.code)}">${esc(cc.name)}</th>`).join('')}</tr></thead>
         <tbody>
-          <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${cols.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}<td class="num"><b>${M2(sWq)}</b></td></tr>
-          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${cols.map(cc=>`<td class="num" style="color:#8a94a6"><input class="pu" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" step="any" value="${cc.uph||''}" style="width:38px;text-align:center;color:#8a94a6"></td>`).join('')}<td></td></tr>
-          <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${cols.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}<td></td></tr>
-        </tbody></table></div>`;
+          <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}</tr>
+          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num" style="color:#5a6b82;font-variant-numeric:tabular-nums">${cc.uph?M2(cc.uph):''}</td>`).join('')}</tr>
+          <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${sub.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}</tr>
+        </tbody></table>`;
+    const _half=Math.ceil(cols.length/2);
+    const procMatrix=`
+      <div style="padding:4px 6px"><b style="color:#1c47a0">⚙ 공정별 (작업 ST 입력)</b> <span style="color:#8a94a6;font-size:11px">공정 2단 배치 · 작업ST 입력 / 내부UPH·임율 참조(읽기전용) · 작업ST 합계 <b style="color:#1c47a0">${M2(sWq)}</b></span></div>
+      <div style="padding:0 4px">${band(cols.slice(0,_half))}${band(cols.slice(_half))}</div>`;
     return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.4);z-index:50;display:flex;align-items:center;justify-content:center;padding:12px">
       <div style="background:#fff;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.3);width:98vw;max-width:1700px;max-height:94vh;display:flex;flex-direction:column">
         <div style="padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #dce4ee;flex:0 0 auto">
