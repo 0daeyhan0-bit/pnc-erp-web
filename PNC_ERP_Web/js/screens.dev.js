@@ -1088,9 +1088,11 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td><td></td></tr>`;
-    const body=(fm.normal.map(matRow).join('')+fm.weldArr.map(weldRow).join(''))||'<tr><td colspan="9" class="empty">구성 없음 — 조회하세요</td></tr>';
+    const weldBody=showWeld?fm.weldArr.map(weldRow).join(''):'';
+    const body=(fm.normal.map(matRow).join('')+weldBody)||'<tr><td colspan="9" class="empty">구성 없음 — 조회하세요</td></tr>';
+    const weldBtn=`<button class="btn ghost" id="nae-weld" style="padding:2px 9px;font-size:11px">${showWeld?'🔧 용접봉 숨기기':`🔧 용접봉 표시${fm.weldArr.length?' ('+fm.weldArr.length+')':''}`}</button>`;
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
-      <div class="summary-bar" style="flex:0 0 auto;flex-wrap:wrap"><div class="s-item"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <b>평면 재료표</b>(LG BOM수준·SUB해체) · 절삭부품 [✎]=가공공정 · 제품=조립공정</div><div style="flex:1"></div>${prodBtn}</div>
+      <div class="summary-bar" style="flex:0 0 auto;flex-wrap:wrap"><div class="s-item"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <b>평면 재료표</b>(LG BOM수준·SUB해체) · 절삭부품 [✎]=가공공정 · 제품=조립공정</div><div style="flex:1"></div>${weldBtn} ${prodBtn}</div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
         <thead><tr><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">가공</th></tr></thead>
         <tbody>${body}</tbody>
@@ -1206,6 +1208,7 @@ SCREEN.unifybom=(c,ro)=>{
     const g=id=>c.querySelector(id);
     g('#nae-go').onclick=()=>{naeYmd=g('#nae-ymd').value.trim();loadNae();};
     g('#nae-regen').onclick=()=>loadNae(true);
+    {const w=g('#nae-weld');if(w)w.onclick=()=>{showWeld=!showWeld;drawNae();};}
     // [조립공정] 툴바 버튼 제거 — 레벨0(제품) 행의 [등록/수정]이 동일 팝업(용접·포장·체결) 담당(중복 제거)
     c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=()=>{naeView=el.dataset.v;drawNae();});
     // 좌측 레벨트리: 행 클릭=우측 조회 / [등록/수정] 버튼=팝업
