@@ -1353,3 +1353,160 @@ def sourcing_route_reject(payload: dict = Body(...)):
         return {"ok": True, "route_id": rid}
     finally:
         nx.close()
+
+# ===================== ★재설계: 노드 스코프 공정저장 · SUB 중복검사 · 전체저장 검증 =====================
+def _node_procs_map(cur, route_id, node_item):
+    """노드(route_id,node_item)의 공정 맵 {proc_code: round(wq,2)} (wq>0만) — SUB 중복검사 서명용."""
+    cur.execute("SELECT proc_code, ISNULL(work_qty,0) FROM nx.sourcing_route_proc WHERE route_id=? AND node_item=?", route_id, node_item)
+    out = {}
+    for r in cur.fetchall():
+        wq = round(float(r[1] or 0), 2)
+        if wq > 0: out[str(r[0]).strip()] = wq
+    return out
+
+def _sub_members(cur, route_id, sub_line):
+    """SUB(sub_line) 직속 부품 child_item 셋(RAC 용접봉 제외)."""
+    cur.execute("SELECT ISNULL(child_item,'') FROM nx.sourcing_route_line WHERE route_id=? AND parent_line=? AND node_kind<>'SUB'", route_id, sub_line)
+    return frozenset(str(r[0]).strip() for r in cur.fetchall()
+                     if str(r[0]).strip() and not str(r[0]).upper().startswith("RAC"))
+
+@router.post("/api/sourcing/proc/node_save")
+def sourcing_proc_node_save(payload: dict = Body(...)):
+    """★노드 스코프 공정 저장 — (route_id, node_item)만 전체교체(다른 노드 불변). BASE 게이트 없음(전체저장 finalize에서 검증).
+       payload {route_id, node_item, procs:[{proc_code, work_qty, prod_uph, calc_gubun}]}. work_qty>0만. 승인 리셋.
+       ★용접ST(가공비)는 프론트가 용접공정(51) work_qty로 포함(관경별 용접 매트릭스 Σ표준ST×횟수). 용접봉 소요량(재료)은 weld/save 별도."""
+    rid = int(payload.get("route_id") or 0)
+    node = str(payload.get("node_item", "")).strip()
+    procs = payload.get("procs", []) or []
+    if rid <= 0 or not node: raise HTTPException(400, "route_id·node_item 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT 1 FROM nx.sourcing_route WHERE route_id=?", rid)
+        if not cur.fetchone(): raise HTTPException(404, "route 없음")
+        cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=? AND node_item=?", rid, node)
+        n = 0
+        for p in procs:
+            wq = float(p.get("work_qty") or 0)
+            if wq <= 0: continue
+            cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
+                VALUES(?,?,?,?,?,?)""", rid, node[:60], str(p.get("proc_code", "")).strip()[:10],
+                wq, float(p.get("prod_uph") or 0), (str(p.get("calc_gubun", "") or "")[:4]))
+            n += 1
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
+        nx.commit()
+        node_sum = round(sum(float(p.get("work_qty") or 0) for p in procs if float(p.get("work_qty") or 0) > 0), 2)
+        return {"ok": True, "node_item": node, "saved": n, "node_gongsu": node_sum}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.get("/api/sourcing/sub/match")
+def sourcing_sub_match(route_id: int = Query(...)):
+    """★신규 SUB 중복검사 — 이 후보의 각 SUB 노드(부품셋+공정공수)가 기존 SUB(다른 후보/이 후보 포함)와 동일한지.
+       동일 판정: 직속 부품 child_item 셋(RAC 제외) 일치 AND 공정 {proc_code:round(wq,2)} 일치.
+       반환 matches: [{sub_line, sub_item, member_count, match_code, match_route_id}] — 코드가 다른 동일 SUB만."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", route_id)
+        my_subs = [(int(r[0]), str(r[1]).strip()) for r in cur.fetchall()]
+        cur.execute("SELECT route_id, line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE node_kind='SUB'")
+        all_subs = [(int(r[0]), int(r[1]), str(r[2]).strip()) for r in cur.fetchall()]
+        matches = []
+        for (sline, scode) in my_subs:
+            mem = _sub_members(cur, route_id, sline)
+            if not mem: continue
+            prc = _node_procs_map(cur, route_id, scode) if scode else {}
+            for (rid2, lid2, scode2) in all_subs:
+                if lid2 == sline: continue
+                if not scode2 or scode2 == scode: continue   # 같은 코드 = 이미 동일(재사용 불필요)
+                if _sub_members(cur, rid2, lid2) != mem: continue
+                if _node_procs_map(cur, rid2, scode2) != prc: continue
+                matches.append({"sub_line": sline, "sub_item": scode, "member_count": len(mem),
+                                "match_code": scode2, "match_route_id": rid2})
+                break
+        return {"ok": True, "matches": matches}
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/route/finalize")
+def sourcing_route_finalize(payload: dict = Body(...)):
+    """★전체 저장 검증(순서) — (1)SUB 재사용 적용(reuse_map: {sub_line:기존코드}) (2)공수합=BASE diff0 (3)부품수=BASE 일치.
+       실패 시 거부(변경 롤백)+사유. commit=1·통과 시 확정(라인/공정은 증분저장돼 있어 reuse 반영·게이트 통과가 곧 확정).
+       payload {route_id, item_code, ymd?, reuse_map?{sub_line:code}, commit?}. RAC(용접봉)은 부품수/공수합에서 제외(공정종속)."""
+    rid = int(payload.get("route_id") or 0)
+    item = str(payload.get("item_code", "")).strip()
+    ymd = str(payload.get("ymd", "260630")).strip() or "260630"
+    reuse_map = payload.get("reuse_map", {}) or {}
+    commit = bool(payload.get("commit"))
+    if rid <= 0 or not item: raise HTTPException(400, "route_id·item_code 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT 1 FROM nx.sourcing_route WHERE route_id=?", rid)
+        if not cur.fetchone(): raise HTTPException(404, "route 없음")
+        errors = []
+        # (1) SUB 재사용 — 이 후보 SUB 라인 코드를 기존코드로 교체(라인·공정·용접 node_item 갱신)
+        reused = []
+        for k, newcode in (reuse_map.items() if isinstance(reuse_map, dict) else []):
+            try: sline = int(k)
+            except Exception: continue
+            newcode = str(newcode or "").strip()
+            if sline <= 0 or not newcode: continue
+            cur.execute("SELECT ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, sline)
+            r0 = cur.fetchone()
+            if not r0: continue
+            oldcode = str(r0[0]).strip()
+            if oldcode == newcode: continue
+            cur.execute("UPDATE nx.sourcing_route_line SET child_item=?, sub_item=?, child_name=? WHERE route_id=? AND line_id=?", newcode, newcode, newcode, rid, sline)
+            cur.execute("UPDATE nx.sourcing_route_proc SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, oldcode)
+            cur.execute("UPDATE nx.sourcing_route_weld SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, oldcode)
+            reused.append({"sub_line": sline, "old": oldcode, "new": newcode})
+        # (2) 공수합=BASE: Σ(part_cut BASE 자동귀속) + Σ(sourcing_route_proc 전노드 조립)
+        try: base = _base_gongsu(item, ymd)
+        except Exception as e: raise HTTPException(500, f"BASE 공수합 계산오류: {e}")
+        try:
+            pc, _asm, _bg = _panel_cut_asm(item, ymd)
+            cut_sum = round(sum(sum(d.values()) for d in pc.values()), 2)
+        except Exception:
+            cut_sum = 0.0
+        cur.execute("SELECT ISNULL(SUM(work_qty),0) FROM nx.sourcing_route_proc WHERE route_id=?", rid)
+        proc_sum = round(float(cur.fetchone()[0] or 0), 2)
+        cand = round(cut_sum + proc_sum, 2)
+        gongsu_ok = abs(cand - base) < 0.5
+        if not gongsu_ok:
+            errors.append(f"공수합 {cand} ≠ BASE {base} (절삭 {cut_sum} + 조립 {proc_sum}) — 차이 {round(cand - base, 2)}")
+        # (3) 부품수 = BASE 부품수 (RAC 제외)
+        try:
+            base_parts = frozenset(str(l["child_item"]).strip() for l in _base_flat_lines(item, ymd)
+                                   if l.get("child_item") and not str(l["child_item"]).upper().startswith("RAC"))
+        except Exception:
+            base_parts = frozenset()
+        cur.execute("SELECT ISNULL(child_item,'') FROM nx.sourcing_route_line WHERE route_id=? AND node_kind<>'SUB'", rid)
+        route_parts = frozenset(str(r[0]).strip() for r in cur.fetchall()
+                                if str(r[0]).strip() and not str(r[0]).upper().startswith("RAC"))
+        missing = sorted(base_parts - route_parts)
+        extra = sorted(route_parts - base_parts)
+        part_ok = (len(missing) == 0 and len(extra) == 0)
+        if not part_ok:
+            if missing: errors.append(f"미배치(BASE 有·후보 無) {len(missing)}건: {', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}")
+            if extra: errors.append(f"BASE에 없는 부품 {len(extra)}건: {', '.join(extra[:8])}{'…' if len(extra) > 8 else ''}")
+        ok = gongsu_ok and part_ok
+        if ok and commit:
+            cur.execute("UPDATE nx.sourcing_route SET upd_dt=getdate() WHERE route_id=?", rid)
+            nx.commit()
+        else:
+            nx.rollback()   # 검증전용(commit=0) 또는 실패 → reuse 변경 롤백
+        return {"ok": ok, "gongsu_ok": gongsu_ok, "part_ok": part_ok, "cand_gongsu": cand, "base_gongsu": base,
+                "cut_sum": cut_sum, "proc_sum": proc_sum, "base_part_count": len(base_parts), "route_part_count": len(route_parts),
+                "missing": missing, "extra": extra, "reused": reused, "committed": bool(ok and commit), "errors": errors}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
