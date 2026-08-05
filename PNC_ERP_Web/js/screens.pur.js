@@ -1870,7 +1870,7 @@ SCREEN.coopquote=(host)=>{
                <td class="num be-uw" data-code="${esc(r.code)}">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                <td class="num be-sw" data-code="${esc(r.code)}" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
                <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:'<span style="color:#c9d1dc">-</span>'}</td>
-               <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재(인상후) 재료비 · 아래 '전'=인상전(종전·작년12월) 재료비">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">`)}${r.mat_before!=null?`<div style="font-size:9px;color:#8a6d3b;font-weight:400" title="인상전(종전) 재료비">전 ${nf(r.mat_before)}</div>`:''}</td>
+               <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재(인상후) 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">`)}</td>
                <td class="num" style="color:#c0392b"><span class="be-ratio" data-code="${esc(r.code)}">${grey?'-':rratio+'%'}</span></td>
                <td class="num" style="color:#c0392b;font-weight:700"><span class="be-tot" data-code="${esc(r.code)}">${grey?'-':nf(rtot)}</span></td>
                ${(d.proc_ops||[]).map(op=>`<td class="num">${isTube?`<input class="be-pc" data-code="${esc(r.code)}" data-op="${esc(op)}" value="${(be.procEdits[r.code]&&be.procEdits[r.code][op]!=null&&be.procEdits[r.code][op]!=='')?be.procEdits[r.code][op]:(pr[op]||'')}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#6a3fb0;border:1px solid #e2e8f2;border-radius:3px">`:''}</td>`).join('')}
@@ -1907,6 +1907,43 @@ SCREEN.coopquote=(host)=>{
              <span>재료비 <b id="be-tmat" style="color:#1c6ec2">${nf(mat)}</b> <span style="font-size:10px;color:#8a6d3b" title="인상전(종전·작년12월) 재료비 총합">(인상전 ${nf(d.total_mat_before||0)})</span></span>
              <span style="color:#8aa0bd">+ 가공비 <b id="be-tgag" style="color:#1c7c3a">${nf(gagong)}</b>${curIn!=null?` + 조정 <b id="be-tadj" style="color:#a06010">${nf(adjust)}</b>`:''} =</span>
              <span>판가 <b id="be-tsale" style="font-size:14px">${nf(sale)}</b>${curIn!=null?'<span style="font-size:10px;color:#8aa0bd"> (현재입고가)</span>':''}</span></div>
+           <div style="margin-top:16px;overflow-x:auto">
+             <div style="font-size:12.5px;color:#8a6d3b;font-weight:700;margin-bottom:5px;padding:4px 10px;background:#f7f6f1;border-radius:6px;display:inline-block">📋 종전 견적 (인상전 · 종전사급가/작년12월 판매단가 기준 · <b>읽기전용</b>) — 위 현재 견적과 세부 비교</div>
+             <table class="tbl fit" style="font-size:13px;background:#faf9f4;border:1px solid #e6e0d0"><thead><tr>
+               <th>품번</th><th>품명</th><th>역할</th><th class="num">소요량</th><th class="num" style="color:#8aa0bd">BOM규격</th>
+               <th class="num" style="color:#1c7c3a">Φ</th><th class="num" style="color:#1c7c3a">T</th><th class="num" style="color:#1c7c3a">L</th>
+               <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num" style="color:#b8791f" title="종전 사급가(원/kg)">종전사급가</th>
+               <th class="num" style="color:#8a6d3b" title="인상전 재료비">재료비<br><span style="font-size:9px;font-weight:400">(인상전)</span></th><th class="num" style="color:#8a6d3b">재료비율</th><th class="num" style="color:#8a6d3b">합계</th>
+               ${(d.proc_ops||[]).map(op=>`<th style="font-size:12px;color:#6a3fb0;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">${esc(op==='교/체'?'교체':op)}</th>`).join('')}
+               <th style="color:#1c7c3a;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">가공비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">관리비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">운반비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">이윤</th></tr></thead>
+             <tbody><tr style="background:#f0efe9;font-weight:700">
+               <td style="font-family:monospace;font-size:13px;padding-left:6px">${esc(d.item)}</td>
+               <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.name)}">${esc(d.name)}</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#8a6d3b;color:#fff">완제품</span></td>
+               <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
+               <td class="num" style="color:#8a6d3b;font-weight:700">${nf(d.total_mat_before||0)}</td><td class="num">-</td><td class="num">-</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+             ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const uw=beUw(r);const ind=6+r.level*12;const pr=r.procs||{};
+               const rq=(r.cum_qty||0);const rmatB=(r.mat_before!=null?r.mat_before:0);const rgag=isTube?beRowGagong(r):0;const rtotB=rmatB+rgag;
+               const rratioB=rtotB>0?Math.round(rmatB/rtotB*100):(rmatB?100:0);const sagubPrev=(isTube&&uw&&rq)?Math.round(rmatB/(uw*rq)):null;const grey=r.in_quote===false;
+               return `<tr>
+                 <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
+                 <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
+                 <td>${beBadge(r.role)}</td>
+                 <td class="num">${nf4(rq)}</td>
+                 <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
+                 <td class="num" style="font-size:9px">${r.coop_diam||'-'}</td><td class="num" style="font-size:9px">${r.coop_thick||'-'}</td><td class="num" style="font-size:9px">${r.coop_length||'-'}</td>
+                 <td class="num">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
+                 <td class="num" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
+                 <td class="num" style="color:#b8791f;font-weight:600">${sagubPrev!=null?nf(sagubPrev):'-'}</td>
+                 <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}</td>
+                 <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
+                 <td class="num" style="color:#8a6d3b;font-weight:700">${grey?'-':nf(rtotB)}</td>
+                 ${(d.proc_ops||[]).map(op=>`<td class="num" style="font-size:11px;color:#6a3fb0">${(isTube&&pr[op])?pr[op]:''}</td>`).join('')}
+                 <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
+                 <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td></tr>`;}).join('')}
+             </tbody></table></div>
            `)}
          </div>
          <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
