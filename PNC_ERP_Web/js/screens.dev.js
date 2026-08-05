@@ -990,8 +990,8 @@ SCREEN.unifybom=(c,ro)=>{
       return `<option value="${rt.route_id}" ${rt.route_id===routeSel?'selected':''}>${esc(lbl)}</option>`;}).join('');
     const cur=routes.find(rt=>rt.route_id===routeSel);
     const desc=routeSel>0?`후보 R${cur?String(cur.route_no).padStart(2,'0'):''} 구조·실원가 보기 — 조달 업체는 <b>조달프로파일</b> 계층`:'현행(마스터 실사용 BOM) 보기';
-    return `<div class="cand-bar"><b style="color:#8e44ad;font-size:12px">🔀 조달경로</b>
-       <select class="cand-sel" data-tab="${tabn}" style="min-width:230px">${opts}</select>
+    return `<div class="cand-bar" style="display:flex;align-items:center;gap:8px;margin:6px 0;padding:5px 10px;background:#f6f2fb;border:1px solid #d6c3ea;border-radius:8px;flex-wrap:wrap"><b style="color:#8e44ad;font-size:12px">🔀 조달경로</b>
+       <select class="cand-sel" data-tab="${tabn}" style="min-width:230px;border:1px solid #cbb6e2;border-radius:5px;padding:3px 6px;font-size:12px;background:#fff">${opts}</select>
        <span style="color:#7a6a92;font-size:11px">${desc}</span>${routeSel>0?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">후보</span>':'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">현행</span>'}</div>`;};
   const loadRouteTree=async()=>{if(routeSel<=0){routeTree=null;return;}routeBusy=true;draw();
     try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}&route_id=${routeSel}`);routeTree=await r.json();routeTreeFor=routeSel;}
