@@ -1442,12 +1442,19 @@ SCREEN.coopquote=(host)=>{
     if(e!=null&&e!=='')return +e||0;
     if(r.coop_sagub&&+r.coop_sagub>0)return +r.coop_sagub;
     return +be.sagub||0;};
-  const beRaw=()=>{const be=st.bomedit;return (!be||!be.data)?0:Math.round(be.data.rows.filter(r=>r.role==='제작동관').reduce((s,r)=>s+beUw(r)*r.cum_qty*beRowSagub(r),0));};
+  const beRowQty=(r)=>{const be=st.bomedit;const e=be.qtyEdits&&be.qtyEdits[r.code];return (e!=null&&e!=='')?(+e||0):(r.cum_qty||0);};
+  // 행 재료비: 제작동관=소요중량×사급가(파생) · 그외=직접입력(matEdits) 또는 백엔드 mat_now
+  const beRowMat=(r)=>{const be=st.bomedit;
+    if(r.role==='제작동관')return Math.round(beUw(r)*beRowQty(r)*beRowSagub(r));
+    const e=be.matEdits&&be.matEdits[r.code];return (e!=null&&e!=='')?Math.round(+e||0):Math.round(r.mat_now||0);};
+  const beRowGag=(r)=>(r.role==='제작동관'?beRowGagong(r):0);   // 사급/용접봉=가공 없음
+  const beRowTot=(r)=>beRowMat(r)+beRowGag(r);                  // 합계=재료비+가공비 (사급=재료비)
+  const beRaw=()=>{const be=st.bomedit;return (!be||!be.data)?0:be.data.rows.filter(r=>r.role==='제작동관').reduce((s,r)=>s+beRowMat(r),0);};
   const beWeld=()=>{const be=st.bomedit;return (!be||!be.data)?0:Math.round(be.data.total_weld_cost||0);};
   const beProcCnt=(r,op)=>{const pe=st.bomedit.procEdits[r.code];if(pe&&pe[op]!=null&&pe[op]!=='')return +pe[op]||0;return (r.procs&&r.procs[op])||0;};
   const beRowGagong=(r)=>{const be=st.bomedit;if(r.role!=='제작동관'||!be.data)return 0;const rate=be.data.rate||{};const lab=be.data.labor_rate||6300;let t=0;
     (be.data.proc_ops||[]).forEach(op=>{const c=beProcCnt(r,op);const dv=rate[op];if(c&&dv)t+=(lab/dv)*c;});return Math.round(t*(r.cum_qty||0));};
-  const newBomEdit=()=>{st.bomedit={isNew:true,loading:false,vendor:st.vendor||'',grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},data:null,assy:''};render();};
+  const newBomEdit=()=>{st.bomedit={isNew:true,loading:false,vendor:st.vendor||'',grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},matEdits:{},qtyEdits:{},data:null,assy:''};render();};
   const loadBomInto=async(item,salePrefill)=>{const be=st.bomedit;if(!be||!item.trim())return;
     be.assy=item.trim();be.loading=true;be.edits={};render();
     try{const res=await fetch(`${API}/api/coopquote/bom-form?item=${encodeURIComponent(item.trim())}&vendor=${encodeURIComponent(be.vendor||'')}&ym=${encodeURIComponent(st.ym||'')}`);const j=await res.json();be.data=j;
@@ -1460,7 +1467,7 @@ SCREEN.coopquote=(host)=>{
     }catch(e){be.data=null;}
     be.loading=false;render();};
   const openBomEdit=async(idx)=>{const r=st.rows[idx];if(!r)return;
-    st.bomedit={isNew:false,loading:true,vendor:r.vendor,grade:r.grade||'일반CU',sagub:r.sagub_price||20000,proc:Math.round(r.proc_cost||0),ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},data:null,assy:r.assy_code,
+    st.bomedit={isNew:false,loading:true,vendor:r.vendor,grade:r.grade||'일반CU',sagub:r.sagub_price||20000,proc:Math.round(r.proc_cost||0),ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},matEdits:{},qtyEdits:{},data:null,assy:r.assy_code,
       rowvals:{mat_cost:r.mat_cost||0,mat_raw:r.mat_raw||0,mat_weld:r.mat_weld||0,mat_part:r.mat_part||0,proc_cost:r.proc_cost||0,sale:r.sale_price||0}};render();
     await loadBomInto(r.assy_code, r.sale_price||0);};
   // 작업목록(직원입력)
@@ -1469,7 +1476,7 @@ SCREEN.coopquote=(host)=>{
     catch(e){st.worklist=[];}
     st.workLoading=false;render();};
   const openWork=async(assy,vendor)=>{if(!assy)return;
-    st.bomedit={isNew:false,loading:true,vendor:(vendor||st.vendor||'').trim(),grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},data:null,assy:assy,rowvals:null,fromWork:true};render();
+    st.bomedit={isNew:false,loading:true,vendor:(vendor||st.vendor||'').trim(),grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},matEdits:{},qtyEdits:{},data:null,assy:assy,rowvals:null,fromWork:true};render();
     await loadBomInto(assy,null);};
   const saveBomEdit=async()=>{const be=st.bomedit;if(!be||!be.data)return;
     const specs=be.data.rows.filter(r=>r.role==='제작동관').map(r=>{const e=be.edits[r.code]||{};
@@ -1641,9 +1648,6 @@ SCREEN.coopquote=(host)=>{
          ${be.loading?'<div style="padding:40px;text-align:center;color:#8aa0bd">불러오는 중…</div>':(!d?(be.isNew?`<div style="padding:34px;text-align:center"><div style="margin-bottom:12px;color:#33507d;font-size:13px">품번을 입력하면 <b>현 BOM 구성</b>이 자동으로 펼쳐집니다.</div><input class="inp" id="be-newitem" placeholder="Assy 품번" style="width:230px;font-family:monospace" value="${esc(be.assy||'')}"> <button class="btn" id="be-load" style="background:#1c7c3a;color:#fff">🔍 BOM 불러오기</button></div>`:'<div style="padding:40px;text-align:center;color:#c0392b">BOM 조회 실패</div>'):`
            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:12px;background:#f4f8ff;border:1px solid #dbe6f7;border-radius:8px;padding:7px 12px">
              <label style="color:#33507d;font-weight:600">협력사</label><input class="inp" id="be-vendor" value="${esc(be.vendor)}" style="width:120px">
-             <label style="color:#33507d;font-weight:600">등급</label><select class="inp" id="be-grade" style="width:96px"><option value="일반CU" ${be.grade!=='고강도CU'?'selected':''}>일반CU</option><option value="고강도CU" ${be.grade==='고강도CU'?'selected':''}>고강도CU</option></select>
-             <label style="color:#33507d;font-weight:600" title="관경별 사급가 미입력 행에 적용되는 기본값(일괄)">기본사급가</label><input class="inp" id="be-sagub" type="number" step="any" value="${esc(be.sagub)}" style="width:84px;text-align:right">
-             <label style="color:#33507d;font-weight:600">가공비(공정계산)</label><input class="inp" id="be-proc" type="number" step="any" value="${esc(be.proc)}" style="width:84px;min-width:0;text-align:right" title="공정×표준ST×임율 자동계산값 (수정가능)">
              <span style="color:#8aa0bd;font-size:11px">임율 ${nf(d.labor_rate)}</span>
              <span style="display:inline-flex;align-items:center;gap:5px;background:#fff3d6;border:1px solid #e8c877;border-radius:6px;padding:3px 8px" title="적용월은 리스트 상단에서 전체 설정합니다(개별 변경 불가)"><label style="color:#8a5a00;font-weight:700">📅 적용월(전체)</label><b style="color:#8a5a00">${esc(st.ym||'-')}</b></span>
              <span style="color:#c0392b;font-weight:700" title="현재 재료비 합계(적용월 기준)">재료비(현재) ${nf(d.total_mat||0)}</span>
@@ -1653,16 +1657,18 @@ SCREEN.coopquote=(host)=>{
            <table class="tbl fit" style="font-size:13px"><thead><tr>
              <th>품번</th><th>품명</th><th>역할</th><th class="num">소요량</th><th class="num" style="color:#8aa0bd">BOM규격</th>
              <th class="num" style="color:#1c7c3a">Φ</th><th class="num" style="color:#1c7c3a">T</th><th class="num" style="color:#1c7c3a">L</th>
-             <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num">매입가</th><th class="num" style="color:#b8791f" title="관경별 사급가(원/kg) — 직원 직접입력">사급가</th><th class="num" style="color:#c0392b" title="사급부품=판매단가(사급가)·제작동관=소요중량×사급가·용접봉=소요×단가 (적용월 기준)">재료비<br><span style="font-weight:400;font-size:9px">(현재)</span></th>
+             <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num" style="color:#b8791f" title="사급가(원/kg)">사급가</th>
+             <th class="num" style="color:#c0392b" title="재료비(현재·적용월): 사급=판매단가·제작동관=소요중량×사급가·용접봉=소요×단가">재료비</th><th class="num" style="color:#c0392b" title="재료비/합계">재료비율</th><th class="num" style="color:#c0392b">합계</th>
              ${(d.proc_ops||[]).map(op=>`<th style="font-size:12px;color:#6a3fb0;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom" title="${esc(op)} 공정 횟수">${esc(op==='교/체'?'교체':op)}</th>`).join('')}
-             <th style="color:#1c7c3a;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">가공비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">관리비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">운반비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">이윤</th><th class="num" style="color:#c0392b">합계</th></tr></thead>
+             <th style="color:#1c7c3a;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">가공비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">관리비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">운반비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">이윤</th></tr></thead>
            <tbody><tr style="background:#eaf1fc;font-weight:700">
                <td style="font-family:monospace;font-size:13px;padding-left:6px">${esc(d.item)}</td>
                <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.name)}">${esc(d.name)}</td>
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#1c47a0;color:#fff">완제품</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
-               <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td><td class="num">-</td><td class="num" style="color:#c0392b;font-weight:700" id="be-tmat-root">${nf(d.total_mat||0)}</td>
-               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+               <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
+               <td class="num" style="color:#c0392b;font-weight:700" id="be-tmat-root">${nf(d.total_mat||0)}</td><td class="num">-</td><td class="num">-</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
              ${d.rows.map(r=>{const isTube=r.role==='제작동관';const e=be.edits[r.code]||{};
              const dd=(e.diam!=null&&e.diam!=='')?e.diam:(r.coop_diam||'');const tt=(e.thick!=null&&e.thick!=='')?e.thick:(r.coop_thick||'');const ll=(e.length!=null&&e.length!=='')?e.length:(r.coop_length||'');
              const uw=beUw(r);const need=isTube&&!(dd&&tt&&ll);const ind=6+r.level*12;const pr=r.procs||{};
