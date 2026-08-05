@@ -1308,14 +1308,14 @@ SCREEN.sourceprofile=(c)=>{
       const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 후보 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
       alert('저장 실패 — '+hint+':\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
     catch(e){alert('저장 실패: '+e);}};
-  // ===== 업체·단가 모달 — ★가격=공통(기본) + 업체별 예외(override), 업체=배분%만 =====
-  // 1) ASSY 매입단가=외주 SUB당 공통+업체예외 2) 사급 부품가=매입 부품당 공통+업체예외 (nx.sourcing_sub/sagub_price, vendor=''=공통)
-  // 3) 단품 매입=매입 마스터 자동(입력X·읽기전용). ★후보/계획 단가(정산 아님): nx만 저장. 정산 마스터 불변(마감때만).
-  let pm=null, pmAcT=null;   // pm={route,hdr,rows[](업체=배분%만),subs[],subChildren{},assy{},assyOv{},sagub{},sagubOv{},direct[],msg,loading}
+  // ===== 업체·단가 모달 — ★ASSY 매입단가=업체별(공통 없음), 사급 부품가=공통+업체예외, 업체=배분% =====
+  // ASSY 매입단가=외주 SUB×업체별(nx.item_price gubun=매입, vendor=지정 항상) · 사급 부품가=매입부품별 공통+업체예외(gubun=사급).
+  // 단품 매입=매입 마스터 자동(입력X). ★후보/계획 단가(정산 아님): nx만 저장. 정산 마스터 불변(마감때만).
+  let pm=null, pmAcT=null;   // pm={route,hdr,rows[](업체),subs[],subChildren{},assyV{}(업체×SUB ASSY),sagub{}(품목 공통),sagubOv{}(업체×품목 예외),direct[],msg,loading}
   const SG_OPTS=[['2','외주(유상사급)'],['1','자체'],['3','매입']];
-  const OK=(vc,key)=>`${vc}||${key}`;   // override 맵 키(업체||SUB/품목)
+  const OK=(vc,key)=>`${vc}||${key}`;   // 맵 키(업체||SUB/품목)
   const blankVRow=()=>({profile_id:0,vendor_code:'',vendor_name:'',supply_gubun:'2',alloc_ratio:null,apply_from:FROM0,apply_to:'',is_active:1,lme_flag:0,_delete:false});
-  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],subs:[],subChildren:{},assy:{},assyOv:{},sagub:{},sagubOv:{},direct:[],msg:'',loading:true};draw();
+  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],subs:[],subChildren:{},assyV:{},sagub:{},sagubOv:{},direct:[],msg:'',loading:true};draw();
     try{const res=await fetch(`${API}/api/sourcing/profile/list?route_id=${r.route_id}`);const j=await res.json();
       pm.hdr=j.header||null;
       pm.rows=(j.rows||[]).map(x=>({profile_id:x.profile_id,vendor_code:x.vendor_code||'',vendor_name:x.vendor_name||'',
@@ -1325,8 +1325,8 @@ SCREEN.sourceprofile=(c)=>{
     }catch(e){pm.msg='업체 목록 로드 실패';}
     try{const sr=await fetch(`${API}/api/sourcing/sub_price?route_id=${r.route_id}`);const sj=await sr.json();
       pm.subs=sj.subs||[];pm.direct=sj.direct_items||[];
-      (sj.prices||[]).forEach(p=>{pm.assy[p.sub_item]=(p.assy_price!=null?p.assy_price:null);
-        (p.overrides||[]).forEach(o=>{pm.assyOv[OK(o.vendor_code,p.sub_item)]=(o.assy_price!=null?o.assy_price:null);});});
+      // ★ASSY=업체별만(공통 무시). override 배열 = 업체별 값.
+      (sj.prices||[]).forEach(p=>{(p.overrides||[]).forEach(o=>{pm.assyV[OK(o.vendor_code,p.sub_item)]=(o.assy_price!=null?o.assy_price:null);});});
     }catch(e){}
     try{const gr=await fetch(`${API}/api/sourcing/sagub_price?route_id=${r.route_id}`);const gj=await gr.json();
       (gj.rows||[]).forEach(x=>{(pm.subChildren[x.sub_item]=pm.subChildren[x.sub_item]||[]).push(
@@ -1356,10 +1356,9 @@ SCREEN.sourceprofile=(c)=>{
       buy_price:null,sagub_price:null,_delete:!!r._delete}));
     const pf=v=>(v!==''&&v!=null)?parseFloat(v):null;
     const activeVc=pm.rows.filter(r=>!r._delete&&r.vendor_code).map(r=>r.vendor_code);
-    // ② ASSY 매입단가: 공통(vendor='') + 업체별 예외(override)
-    const arows=pm.subs.map(s=>({vendor_code:'',sub_item:s.sub_item,assy_price:pf(pm.assy[s.sub_item])}));
-    pm.subs.forEach(s=>activeVc.forEach(vc=>{const k=OK(vc,s.sub_item);if(k in pm.assyOv)arows.push({vendor_code:vc,sub_item:s.sub_item,assy_price:pf(pm.assyOv[k])});}));
-    // ③ 사급 부품가: 공통 + 업체별 예외(매입 부품만)
+    // ② ASSY 매입단가 = 업체별만(공통행 없음). vendor=지정 항상.
+    const arows=[];pm.subs.forEach(s=>activeVc.forEach(vc=>{const k=OK(vc,s.sub_item);if(k in pm.assyV)arows.push({vendor_code:vc,sub_item:s.sub_item,assy_price:pf(pm.assyV[k])});}));
+    // ③ 사급 부품가: 공통(vendor='') + 업체별 예외(매입 부품만)
     const grows=[];Object.keys(pm.subChildren).forEach(si=>pm.subChildren[si].filter(ch=>ch.is_purchase).forEach(ch=>{
       grows.push({vendor_code:'',item_code:ch.item_code,sagub_price:pf(pm.sagub[ch.item_code])});
       activeVc.forEach(vc=>{const k=OK(vc,ch.item_code);if(k in pm.sagubOv)grows.push({vendor_code:vc,item_code:ch.item_code,sagub_price:pf(pm.sagubOv[k])});});}));
