@@ -503,45 +503,29 @@ def _route_baseline_lines(item):
 
 def _base_flat_lines(item, ymd="260630"):
     """BASE BOM seed = 내부원가 '평면 재료'(cost/nae flatMat와 동일: level>0·mat>0 leaf, 조립 SUB(은납 등) 해체).
-       ★현행복사와 달리: 구분=품목 성격(make_type='1'→제작 / 그외→매입), 공급처=공란(업체는 조달프로파일에서 배분).
-       용접봉(RAC*)=base코드로 그룹·매입. node_kind=PART. 재료표(사용자가 보는 값)와 동일 leaf 집합."""
+       ★현행복사와 달리: 구분=품목 성격(cost_gubun='3'→제작 / 그외→매입), 공급처=공란(업체는 조달프로파일에서 배분).
+       ★용접봉(RAC*) 제외 — 공정종속 자재(용접 공정에서 파생), 조달 구성라인(재료)에 미표시. node_kind=PART."""
     with _COST_LOCK:
         try: d = _get_cost_engine().naewon_nodes(item, ymd)
         except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
     rows = d.get("rows", []) if isinstance(d, dict) else []
-    normal = []; weld = {}
+    out = []; sq = 0
     for r in rows:
         if int(r.get("level", 0) or 0) <= 0: continue
         if float(r.get("mat", 0) or 0) <= 0: continue        # 재료비 계상 leaf만(=flatMat)
         code = str(r.get("code", "")).strip()
         if not code: continue
-        if code.upper().startswith("RAC"):                    # 용접봉: base코드로 그룹
-            base = code.split("-")[0]
-            w = weld.get(base)
-            if not w:
-                w = weld[base] = {"code": base, "name": r.get("name") or base, "metal": str(r.get("metal", "") or "").strip(),
-                                  "diam": float(r.get("diam", 0) or 0), "thick": float(r.get("thick", 0) or 0), "qty": 0.0}
-            w["qty"] += float(r.get("qty", 0) or 0)
-        else:
-            normal.append(r)
-    out = []; sq = 0
-    for r in normal:
+        if code.upper().startswith("RAC"): continue          # ★용접봉 제외(공정종속 — 조달 구성라인 아님)
         sq += 1
         metal = str(r.get("metal", "") or "").strip()
         # 제작/매입 판정 = 내부원가 cost_gubun: '3'(소재 절삭 제작, 예 MJU) → 제작 / '2'(매입단가) → 매입.
         # (nx.item make_type는 이 데이터에서 신뢰불가: MJU='2'·부자재='3' 역전 → cost_gubun 사용)
         gub = "제작" if str(r.get("cost_gubun", "") or "") == "3" else "매입"
-        out.append({"line_id": 0, "sort_seq": sq, "child_item": str(r.get("code", "")).strip(),
+        out.append({"line_id": 0, "sort_seq": sq, "child_item": code,
                     "child_name": r.get("name") or "", "qty": float(r.get("qty", 0) or 0), "gubun": gub,
                     "vendor_code": "", "vendor_name": "", "is_rawmat": 1 if metal else 0,
                     "diam": float(r.get("diam", 0) or 0), "thick": float(r.get("thick", 0) or 0), "len_val": 0.0,
                     "material": metal, "spec": str(r.get("spec", "") or ""), "note": ""})
-    for w in sorted(weld.values(), key=lambda x: x["code"]):
-        sq += 1
-        out.append({"line_id": 0, "sort_seq": sq, "child_item": w["code"], "child_name": w.get("name") or w["code"],
-                    "qty": float(w["qty"] or 0), "gubun": "매입", "vendor_code": "", "vendor_name": "",
-                    "is_rawmat": 1 if w["metal"] else 0, "diam": w["diam"], "thick": w["thick"], "len_val": 0.0,
-                    "material": w["metal"], "spec": "", "note": ""})
     return out
 
 def _custnm_map(cur, codes):
@@ -777,8 +761,12 @@ def sourcing_route_approve(payload: dict = Body(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
+        cur.execute("SELECT item_code, route_no FROM nx.sourcing_route WHERE route_id=?", rid)
+        r0 = cur.fetchone()
+        if not r0: raise HTTPException(404, "대상 없음")
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=?, upd_user=?, upd_dt=getdate() WHERE route_id=?", ap, usr, rid)
-        if cur.rowcount == 0: raise HTTPException(404, "대상 없음")
+        if ap == 1:   # ★승인 시에만 route_seq high-water bump(그 번호 소진→재사용 금지). 미승인은 미변경(삭제 시 재사용).
+            _bump_approved_seq(cur, str(r0[0]).strip(), int(r0[1] or 0))
         return {"ok": True, "approve_flag": bool(ap)}
     finally:
         nx.close()

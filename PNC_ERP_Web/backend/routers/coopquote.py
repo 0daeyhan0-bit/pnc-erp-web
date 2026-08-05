@@ -434,8 +434,9 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             for r in ncur.fetchall():
                 pt = float(r[1] or 0); part_sum += pt
                 code_u = str(r[0]).strip().upper()
-                partmap[code_u] = {"total": pt, "mat": float(r[2] or 0), "proc": float(r[3] or 0)}
-                if "용접" in str(r[4] or ""):
+                ptype_q = str(r[4] or "").strip()
+                partmap[code_u] = {"total": pt, "mat": float(r[2] or 0), "proc": float(r[3] or 0), "ptype": ptype_q}
+                if "용접" in ptype_q:
                     weld_quote[code_u] = float(r[2] or 0)
             ncur.execute("SELECT ISNULL(sale_price,0) FROM nx.coop_quote WHERE assy_code=?", item)
             rr = ncur.fetchone()
@@ -567,7 +568,25 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     total_soyo = round(sum(r["soyo_weight"] for r in rows if r["role"] == "제작동관"), 4)
     total_weld = round(sum(r["weld_cost"] for r in rows if r["role"] == "용접봉"))
     total_proc = round(sum(r["proc_cost"] for r in rows if r["role"] == "제작동관"))
-    total_mat = round(sum((r["mat_now"] or 0) for r in rows))   # ★재료비 합계(적용월 기준)
+    # ★재료비 합계 = 견적 부품(coop_quote_part) 기준 = 리스트와 동일 로직(사급=대표판매단가 else 견적, 그외=견적).
+    #   BOM 전개행 전체합이 아님 → 견적이 SUB를 덩어리로 잡은 경우 하위전개 이중계상 방지.
+    if partmap:
+        total_mat = 0.0
+        for code_u, pinfo in partmap.items():
+            if pinfo.get("ptype") == "사급부품":
+                rep = sale_asof.get(code_u)   # 대표(MAIN_FLAG='1') 판매단가
+                total_mat += rep if rep else pinfo["mat"]
+            else:
+                total_mat += pinfo["mat"]
+        total_mat = round(total_mat)
+        _pmset = set(partmap.keys())
+        for r in rows:
+            r["in_quote"] = (str(r["code"]).strip().upper() in _pmset)
+    else:
+        # 신규견적(견적 부품 없음) → BOM 리프행 합(반제품 제외, 이중계상 방지)
+        total_mat = round(sum((r["mat_now"] or 0) for r in rows if not r["haskids"]))
+        for r in rows:
+            r["in_quote"] = (not r["haskids"])
     # 공정 컬럼 고정(엑셀 전체 공정 순서) — 품번마다 변동하지 않음
     proc_ops = ['컷팅','면취','벤딩','CNC','딤플','벌징','원교정','피어싱','압착','T뽑기','후레아','축확관','실링','망삽입','막음','코킹','세척','용접','부삽입','교/체','수몰검사','포장']
     root = info.get(item, {})
