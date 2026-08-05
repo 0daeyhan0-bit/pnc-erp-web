@@ -1311,6 +1311,7 @@ SCREEN.sourceprofile=(c)=>{
   // ===== 업체·단가 모달(후보 route_id별 업체분배 + 업체별 계획 매입/사급 단가) — nx.sourcing_profile =====
   // ★후보/계획 단가(정산 아님): sourcing 레이어(nx)에만 저장. 정산 매입/판매 단가(마스터)는 손대지 않음(마감 때만 수정).
   let pm=null, pmAcT=null;   // pm={route, hdr, rows[], msg, loading}
+  let sm=null;               // 중첩모달 sm={route_id, vendor_code, vendor_name, rows[], hdr, msg, loading} — 품목별 사급단가(계획)
   const SG_OPTS=[['2','외주(유상사급)'],['1','자체'],['3','매입']];
   const blankVRow=()=>({profile_id:0,vendor_code:'',vendor_name:'',supply_gubun:'2',alloc_ratio:null,apply_from:FROM0,apply_to:'',is_active:1,buy_price:null,sagub_price:null,lme_flag:0,_delete:false});
   const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],msg:'',loading:true};draw();
@@ -1360,7 +1361,7 @@ SCREEN.sourceprofile=(c)=>{
         <td><input class="inp pm-e" type="date" data-i="${i}" data-f="apply_from" value="${esc(r.apply_from||'')}" style="width:118px;min-width:0"></td>
         <td><input class="inp pm-e" type="date" data-i="${i}" data-f="apply_to" value="${esc(r.apply_to||'')}" title="비우면 무기한" style="width:118px;min-width:0"></td>
         <td class="num"><input class="inp pm-e num" type="number" step="1" data-i="${i}" data-f="buy_price" value="${r.buy_price==null?'':r.buy_price}" placeholder="계획" style="width:88px;min-width:0"></td>
-        <td class="num"><input class="inp pm-e num" type="number" step="1" data-i="${i}" data-f="sagub_price" value="${r.sagub_price==null?'':r.sagub_price}" placeholder="계획" style="width:88px;min-width:0"></td>
+        <td class="center">${r.vendor_code?`<button class="btn ghost pm-sagub" data-i="${i}" title="이 업체에 공급하는 사급 품목별 단가(계획)" style="padding:1px 8px;font-size:11px;color:#b8860b;border-color:#e6d29a">📋 사급품목 단가</button>`:`<span style="font-size:10px;color:#aab" title="업체 지정 후 사용">업체지정후</span>`}</td>
         <td class="center"><input type="checkbox" class="pm-e" data-i="${i}" data-f="is_active"${r.is_active?' checked':''}> <button class="btn ghost pm-del" data-i="${i}" title="삭제" style="padding:0 6px;color:#c0392b">✖</button></td>
       </tr>`).join('');
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
@@ -1375,7 +1376,7 @@ SCREEN.sourceprofile=(c)=>{
          ⚠️ 여기 입력하는 매입/사급 단가는 <b>후보/계획 단가(정산 아님)</b> — 후보 원가비교(R01 vs R02)용으로 <code>nx.sourcing_profile</code>(sourcing 레이어)에만 저장됩니다. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
        <div style="padding:6px 16px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${S.single?`활성 업체 ${S.n}개(단일 → 100% 자동)`:`활성 업체 ${S.n}개 배분합 ${S.sum}% ${ok?'✓':'(=100 필요)'}`}</div>
        <div style="padding:0 16px 8px;overflow:auto;max-height:52vh">
-         <table class="tbl" style="font-size:12px"><thead><tr><th>업체</th><th>공급구분</th><th class="num">배분%</th><th>유효시작</th><th>유효종료</th><th class="num">매입단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th><th class="num">사급단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th><th class="center">활성</th></tr></thead>
+         <table class="tbl" style="font-size:12px"><thead><tr><th>업체</th><th>공급구분</th><th class="num">배분%</th><th>유효시작</th><th>유효종료</th><th class="num">매입단가<br><span style="font-weight:400;font-size:10px">(계획·업체당1)</span></th><th class="center">사급단가<br><span style="font-weight:400;font-size:10px">(품목별)</span></th><th class="center">활성</th></tr></thead>
          <tbody>${rowsHtml||`<tr><td colspan="8" class="empty">업체를 추가하세요</td></tr>`}</tbody></table>
          <datalist id="pm-vdl"></datalist></div>
        <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">

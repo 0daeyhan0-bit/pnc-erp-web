@@ -1384,14 +1384,133 @@ def sourcing_plan_price(item: str = Query(...)):
                     "buy_price": (float(r[7]) if r[7] is not None else None),
                     "sagub_price": (float(r[8]) if r[8] is not None else None), "lme_flag": int(r[9] or 0)})
         vmap = _custnm_map(cur, vcodes)
-        out = []; n_vend = 0
+        # 업체별·품목별 사급단가(계획) — nx.sourcing_sagub_price ((route_id,vendor_code) 스코프). 사급단가는 업체당 다품목이라 별도 테이블.
+        _ensure_sagub_price_tbl(cur)
+        sagit = {}   # (route_id, vendor_code) -> [{item_code,item_name,sagub_price}]
+        if rids:
+            ph = ",".join("?" * len(rids))
+            cur.execute(f"""SELECT sp.route_id, sp.vendor_code, LTRIM(RTRIM(sp.item_code)), sp.sagub_price, ISNULL(it.item_name,'')
+                FROM nx.sourcing_sagub_price sp LEFT JOIN nx.item it ON it.item_code=sp.item_code
+                WHERE sp.route_id IN ({ph}) ORDER BY sp.route_id, sp.vendor_code, sp.item_code""", *rids)
+            for r in cur.fetchall():
+                key = (int(r[0]), str(r[1] or "").strip())
+                sagit.setdefault(key, []).append({"item_code": str(r[2]).strip(), "item_name": r[4],
+                    "sagub_price": (float(r[3]) if r[3] is not None else None)})
+        out = []; n_vend = 0; n_sagit = 0
         for h in hdrs:
             vs = vend.get(h["route_id"], [])
-            for v in vs: v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
+            for v in vs:
+                v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
+                v["sagub_items"] = sagit.get((h["route_id"], v["vendor_code"]), [])
+                n_sagit += len(v["sagub_items"])
             n_vend += len(vs)
             out.append({**h, "route_alloc": ralloc.get(h["route_id"]), "vendors": vs})
-        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend,
-                "note": "후보/계획 단가(정산 아님) — sourcing 레이어(nx.sourcing_profile). 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
+        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend, "n_sagub_item": n_sagit,
+                "note": "후보/계획 단가(정산 아님) — sourcing 레이어(nx.sourcing_profile + nx.sourcing_sagub_price 품목별). 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
+    finally:
+        nx.close()
+
+# ============ 업체별·품목별 사급단가(계획) — nx.sourcing_sagub_price ============
+# ★사급단가는 업체당 단일값 불가(그 업체에 공급하는 사급 품목이 여러 개) → 근거키 (route_id·vendor_code·item_code) 스코프.
+# ★품목 목록 = 후보(route_id)의 nx.sourcing_route_line 구성 품번(용접봉 RAC 제외). 자유추가 아님(R02 구조에 물린 품번만).
+# ★후보/계획 단가(정산 아님): nx에만 저장. 정산 마스터(PR_M_ITEM_COST 등)는 조회조차 미접근(마감 때만 수정 하드룰).
+_SAGUB_PRICE_READY = False
+def _ensure_sagub_price_tbl(cur):
+    """nx.sourcing_sagub_price 멱등 생성(프로세스당 1회). PK(route_id,vendor_code,item_code)=근거키."""
+    global _SAGUB_PRICE_READY
+    if _SAGUB_PRICE_READY:
+        return
+    cur.execute("""IF OBJECT_ID('nx.sourcing_sagub_price','U') IS NULL CREATE TABLE nx.sourcing_sagub_price(
+        route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL, item_code NVARCHAR(60) NOT NULL,
+        sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_sourcing_sagub_price PRIMARY KEY(route_id, vendor_code, item_code))""")
+    _SAGUB_PRICE_READY = True
+
+def _route_line_items(cur, route_id):
+    """후보(route_id)의 구성 품번(용접봉 RAC 제외) = 사급단가 매핑 대상. distinct child_item + 품명(route_line 우선, nx.item 보강)."""
+    cur.execute("""SELECT LTRIM(RTRIM(child_item)) ci, MAX(ISNULL(child_name,'')) nm, MIN(sort_seq) ss,
+          MAX(ISNULL(gubun,'')) gb, MAX(ISNULL(node_kind,'PART')) nk
+        FROM nx.sourcing_route_line
+        WHERE route_id=? AND ISNULL(child_item,'')<>''
+          AND UPPER(LTRIM(RTRIM(child_item))) NOT LIKE 'RAC%'
+        GROUP BY LTRIM(RTRIM(child_item)) ORDER BY MIN(sort_seq)""", route_id)
+    items = [{"item_code": r[0], "item_name": r[1], "sort_seq": int(r[2] or 0),
+              "gubun": r[3], "node_kind": r[4]} for r in cur.fetchall()]
+    blanks = [it["item_code"] for it in items if not it["item_name"]]
+    if blanks:
+        nm = {}
+        for i in range(0, len(blanks), 900):
+            ch = blanks[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(item_name,'') FROM nx.item WHERE item_code IN ({ph})", *ch)
+            for r in cur.fetchall(): nm[str(r[0]).strip()] = r[1]
+        for it in items:
+            if not it["item_name"]: it["item_name"] = nm.get(it["item_code"], "")
+    return items
+
+@router.get("/api/sourcing/sagub_price")
+def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Query("")):
+    """후보(route_id)의 구성 품번(용접봉 제외)별 사급단가(계획). vendor_code 지정 시 그 업체 스코프 저장값 병합.
+       품목 = nx.sourcing_route_line 구성 품번(자유추가 아님). 정산 마스터 미접근."""
+    if route_id <= 0: raise HTTPException(400, "route_id 필요")
+    vendor_code = vendor_code.strip()
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur); _ensure_sagub_price_tbl(cur)
+        cur.execute("SELECT item_code, ISNULL(route_no,0), ISNULL(route_name,''), approve_flag FROM nx.sourcing_route WHERE route_id=?", route_id)
+        h = cur.fetchone()
+        hdr = {"route_id": route_id, "item_code": (str(h[0]).strip() if h else ""),
+               "route_no": (int(h[1]) if h else 0), "route_name": (str(h[2]) if h else ""),
+               "approve_flag": (bool(h[3]) if h else False)}
+        items = _route_line_items(cur, route_id)
+        saved = {}
+        if vendor_code:
+            cur.execute("""SELECT LTRIM(RTRIM(item_code)), sagub_price FROM nx.sourcing_sagub_price
+                WHERE route_id=? AND vendor_code=?""", route_id, vendor_code)
+            saved = {str(r[0]).strip(): (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+        for it in items:
+            it["sagub_price"] = saved.get(it["item_code"])
+        n_priced = sum(1 for it in items if it["sagub_price"] is not None)
+        return {"header": hdr, "vendor_code": vendor_code, "rows": items, "n_item": len(items), "n_priced": n_priced,
+                "note": "후보/계획 사급단가(정산 아님) — nx.sourcing_sagub_price. 품목=이 후보(route_line) 구성 품번(용접봉 제외)."}
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/sagub_price/save")
+def sourcing_sagub_price_save(payload: dict = Body(...)):
+    """업체별·품목별 사급단가(계획) 저장. 근거키=(route_id·vendor_code·item_code) 스코프 upsert.
+       공란/None = 그 근거키 행 삭제(대량삭제 아님). route_line 밖 품번은 무시. 정산 마스터 미접근."""
+    rid = int(payload.get("route_id") or 0)
+    vc = str(payload.get("vendor_code", "")).strip()
+    rows = payload.get("rows", []) or []
+    if rid <= 0: raise HTTPException(400, "route_id 필요")
+    if not vc: raise HTTPException(400, "vendor_code 필요")
+    _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_sagub_price_tbl(cur)
+        valid = {it["item_code"] for it in _route_line_items(cur, rid)}   # 근거키 후보 = 이 route_line 구성 품번만
+        upsert = dele = skip = 0
+        for r in rows:
+            ic = str(r.get("item_code", "")).strip()
+            if not ic or ic not in valid:
+                skip += 1; continue
+            sp = _pfloat(r.get("sagub_price"))
+            if sp is None:   # 공란/삭제 = 근거키 스코프 1행만 제거
+                cur.execute("DELETE FROM nx.sourcing_sagub_price WHERE route_id=? AND vendor_code=? AND item_code=?", rid, vc, ic)
+                dele += cur.rowcount; continue
+            cur.execute("""MERGE nx.sourcing_sagub_price AS t
+                USING (SELECT ? AS route_id, ? AS vendor_code, ? AS item_code) AS s
+                ON t.route_id=s.route_id AND t.vendor_code=s.vendor_code AND t.item_code=s.item_code
+                WHEN MATCHED THEN UPDATE SET sagub_price=?, upd_dt=getdate()
+                WHEN NOT MATCHED THEN INSERT(route_id,vendor_code,item_code,sagub_price,upd_dt)
+                  VALUES(s.route_id,s.vendor_code,s.item_code,?,getdate());""", rid, vc, ic, sp, sp)
+            upsert += 1
+        nx.commit()
+        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 
