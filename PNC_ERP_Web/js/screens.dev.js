@@ -886,6 +886,87 @@ SCREEN.esticost=(c)=>{
   init();
 };
 
+/* ===== 공유 공정 팝업 렌더러(품목BOM관리 '내부원가' ↔ 조달후보 노드팝업 = 완전 동일 창) =====
+   ★두 화면이 같은 DOM/클래스/컬럼구성(관경 전체표 + 공정 2단 전체 그리드)을 쓰도록 모듈레벨 공유.
+   pd 캐노니컬 구조: {node, title?, subtitle?, isAssy, weldDiams:[{pipe_diam,std_use_qty,std_st}],
+                     weldItem, weldTypes:[], weldCounts:{diam2dp:count}, cols:[{name,code,sec,idx,uph,cg,wq}],
+                     infoBar?(상단 추가정보 HTML), footNote?}. 헬퍼는 esc(전역)만 의존(M2/CALCG/fmtU 자체내장). */
+const PROC_MODAL_HTML=(pd)=>{
+  if(!pd) return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.35);z-index:50;display:flex;align-items:center;justify-content:center"><div style="background:#fff;border-radius:10px;padding:20px" class="empty">공정 로딩…</div></div>`;
+  const CALCG={'3':'임율기반','8':'중량기반','9':'적용율','7':'세척'};
+  const M2=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const isAssy=pd.isAssy, node=pd.node;
+  const lvl=pd.subtitle||(isAssy?'제품/조립 — 관경별 용접 + 조립공정(용접·포장·체결)':'부품 — 가공공정');
+  const wd=pd.weldDiams||[];
+  const DIAMS=wd.map(d=>d.pipe_diam);
+  const STU={},STS={};wd.forEach(d=>{STU[d.pipe_diam.toFixed(2)]=d.std_use_qty;STS[d.pipe_diam.toFixed(2)]=d.std_st;});
+  const cnt=pd.weldCounts||{};
+  let sUse=0,sSt=0,sCnt=0;DIAMS.forEach(d=>{const k=d.toFixed(2),q=+cnt[k]||0;if(q){sUse+=(STU[k]||0)*q;sSt+=(STS[k]||0)*q;sCnt+=q;}});
+  const wTypes=[...new Set([...(pd.weldTypes||[]),'RAC30599301-1','RAC30599327','RAC30599328','RAC30599303'])];
+  const wLabel=w=>({'RAC30599301-1':'1% 용접봉','RAC30599327':'3% 용접봉','RAC30599328':'30% BAG','RAC30599303':'BCUP'}[w]||w);
+  const fmtU=v=>{if(!v)return '';const s=(+v).toFixed(5);return s.replace(/0+$/,'').replace(/\.$/,'');};
+  const weldMatrix=!isAssy?'':`
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;flex-wrap:wrap">
+        <b style="color:#8e44ad">🔧 관경별 용접</b>
+        <span style="color:#8a94a6;font-size:11px">용접봉 종류(노드당 1개)</span>
+        <select id="wm-type" style="font-size:12px">${wTypes.map(w=>`<option value="${esc(w)}" ${w===pd.weldItem?'selected':''}>${esc(w)} · ${esc(wLabel(w))}</option>`).join('')}</select>
+        <span style="color:#8a94a6;font-size:11px">관경 아래 <b>용접횟수</b> 입력 → 소요량·내부ST 자동 (BOM반영 소요량=표시×1.5)</span></div>
+      <div style="overflow-x:auto"><table class="tbl wm wmw" style="font-size:11px">
+        <thead><tr><th style="text-align:left;min-width:56px">용접</th><th class="num" style="min-width:48px">합계</th>${DIAMS.map(d=>`<th class="num">${d.toFixed(2)}</th>`).join('')}</tr></thead>
+        <tbody>
+          <tr><td style="text-align:left;color:#5a6b82">표준소요량</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${fmtU(STU[d.toFixed(2)]||0)}</td>`).join('')}</tr>
+          <tr><td style="text-align:left;color:#5a6b82">표준공수</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${(STS[d.toFixed(2)]||0)}</td>`).join('')}</tr>
+          <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">용접횟수</td><td class="num"><b>${sCnt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-q" data-diam="${k}" type="number" min="0" step="1" value="${cnt[k]||''}" style="width:32px;text-align:center"></td>`;}).join('')}</tr>
+          <tr style="background:#eef4ff"><td style="text-align:left;font-weight:700;color:#1c6b3a">소요량</td><td class="num" style="color:#1c6b3a"><b>${fmtU(sUse)}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#1c6b3a">${q?fmtU((STU[k]||0)*q):''}</td>`;}).join('')}</tr>
+          <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td><td class="num" style="color:#8a5a1a"><b>${sSt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#8a5a1a">${q?((STS[k]||0)*q):''}</td>`;}).join('')}</tr>
+        </tbody></table></div>`;
+  const cols=pd.cols||[];
+  let sWq=0;cols.forEach(cc=>sWq+=(+cc.wq||0));
+  const band=(sub)=>{if(!sub.length)return '';const bsum=sub.reduce((s,cc)=>s+(+cc.wq||0),0);
+    return `<table class="tbl wm" style="font-size:11px;table-layout:fixed;width:100%;margin-bottom:6px">
+        <thead><tr><th style="text-align:left;width:58px">구분</th>${sub.map(cc=>`<th class="num" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px" title="${esc(cc.name)} · ${esc(cc.code)}">${esc(cc.name)}</th>`).join('')}<th class="num" style="width:48px;background:#eef4ff">합계</th></tr></thead>
+        <tbody>
+          <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}<td class="num" style="font-weight:700;background:#f6f9ff;color:#1c47a0">${bsum?M2(bsum):''}</td></tr>
+          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num" style="color:#5a6b82;font-variant-numeric:tabular-nums">${cc.uph?M2(cc.uph):''}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
+          <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${sub.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
+        </tbody></table>`;};
+  const _half=Math.ceil(cols.length/2);
+  const procMatrix=`
+      <div style="padding:4px 6px"><b style="color:#1c47a0">⚙ 공정별 (작업 ST 입력)</b> <span style="color:#8a94a6;font-size:11px">공정 2단 배치 · 작업ST 입력 / 내부UPH·임율 참조(읽기전용) · 작업ST 합계 <b style="color:#1c47a0">${M2(sWq)}</b></span></div>
+      <div style="padding:0 4px">${band(cols.slice(0,_half))}${band(cols.slice(_half))}</div>`;
+  const title=pd.title!=null?pd.title:`✎ 공정 등록/수정 — ${esc(node)}`;
+  const foot=pd.footNote!=null?pd.footNote:'관경별 용접횟수→소요량(Σ표준소요량×횟수×1.5)·내부ST 자동 · 공정 작업ST 입력 · 단가 읽기전용(마감때만) · 저장시 재계산';
+  return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.4);z-index:50;display:flex;align-items:center;justify-content:center;padding:12px">
+      <div style="background:#fff;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.3);width:98vw;max-width:1700px;max-height:94vh;display:flex;flex-direction:column">
+        <div style="padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #dce4ee;flex:0 0 auto">
+          <b style="color:#1c47a0;font-size:15px">${title}</b><span style="color:#8a94a6;font-size:12px">${esc(lvl)}</span>
+          <div style="flex:1"></div><button class="btn" id="pm-save" style="background:#1c7c3a;color:#fff">💾 저장</button><button class="btn ghost" id="pm-close">✖ 닫기</button></div>
+        <div style="flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px">
+          ${pd.infoBar||''}
+          ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-bottom:10px">${weldMatrix}</div>`:''}
+          <div style="border:1px solid #cfe0ff;border-radius:8px;background:#f7faff">${procMatrix}</div>
+        </div>
+        <div style="padding:6px 14px;border-top:1px solid #dce4ee;color:#8aa0bd;font-size:11px;flex:0 0 auto">${esc(foot)}</div>
+      </div></div>`;};
+// 공유 공정 팝업 이벤트 바인딩 — 콜백으로 각 화면이 자기 상태에 write-back(닫기/저장/공정입력/용접횟수/용접봉종류).
+const PROC_MODAL_BIND=(c,cbs)=>{const g=id=>c.querySelector(id);
+  {const x=g('#pm-close');if(x)x.onclick=()=>cbs.onClose&&cbs.onClose();}
+  {const bg=g('#pm-backdrop');if(bg)bg.onclick=e=>{if(e.target===bg&&cbs.onClose)cbs.onClose();};}
+  {const s=g('#pm-save');if(s)s.onclick=()=>cbs.onSave&&cbs.onSave();}
+  c.querySelectorAll('.pq').forEach(el=>{el.oninput=()=>cbs.onProcInput&&cbs.onProcInput(el.dataset.sec,+el.dataset.i,el.value,el);
+    el.onchange=()=>cbs.onProcCommit&&cbs.onProcCommit(el.dataset.sec,+el.dataset.i,el.value,el);});
+  c.querySelectorAll('.wm-q').forEach(el=>el.oninput=()=>cbs.onWeldCount&&cbs.onWeldCount(el.dataset.diam,el.value,el));
+  {const ts=g('#wm-type');if(ts)ts.onchange=()=>cbs.onWeldType&&cbs.onWeldType(ts.value);}};
+// 공유 공정 팝업 CSS(관경/공정 매트릭스 .wm) — naeCss와 동일 규칙(subvariant 화면에 주입용).
+const PROC_MODAL_CSS=`<style>
+  .wm{border-collapse:collapse;table-layout:auto}
+  .wm th,.wm td{border:1px solid #dde6f0;padding:1px 2px}
+  .wm th.wm-vh{height:66px;width:26px;min-width:26px;max-width:26px;vertical-align:bottom;background:#eef3fb;padding:2px 0}
+  .wm th.wm-vh span{writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;font-size:10px;font-weight:600;color:#40567a;display:inline-block;max-height:62px;overflow:hidden;letter-spacing:-1px}
+  .wm td input{border:1px solid #cfd9e6;border-radius:3px;padding:1px}
+  .wm tbody td:first-child,.wm thead th:first-child{position:sticky;left:0;background:#f4f7fc;z-index:2}
+</style>`;
+
 /* ===== 품목 BOM관리 (SCREEN.unifybom) — 3탭: BOM구성 | 내부원가 | 실원가. nx · 백엔드 편집·저장 ===== */
 /* 내부원가=/api/cost/nae(naewon_nodes+proc_grid) · 실원가=/api/cost/sil(silwon_nodes) · 단가기준일(naeYmd). 단가는 마감때만(수정제외). */
 SCREEN.unifybom=(c,ro)=>{
@@ -1210,16 +1291,19 @@ SCREEN.unifybom=(c,ro)=>{
       naeModal=false;naeSel='';naeProcD=null;alert(`공정 저장(가공 ${j.own} · 용접봉 ${j.carriers}건) · 재계산${rc?'\n용접봉 소요량(ST): '+rc:''}${wmsg}`);
       naeFor='';if(tab==='bom'){await load(item);}else{await loadNae(true);}}catch(e){alert('저장 오류: '+e.message);}};
   // 공정입력 팝업(모달) 이벤트 바인딩 — 내부원가/BOM구성 탭 공유(close=draw()로 현재 탭 재렌더)
-  const wireProcModal=()=>{const g=id=>c.querySelector(id);
-    {const x=g('#pm-close');if(x)x.onclick=()=>{naeModal=false;draw();};}
-    {const bg=g('#pm-backdrop');if(bg)bg.onclick=e=>{if(e.target===bg){naeModal=false;draw();}};}
-    {const s=g('#pm-save');if(s)s.onclick=saveNaeProc;}
+  const wireProcModal=()=>{
     const rowsOf=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
-    c.querySelectorAll('.pq').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].work_qty=+el.value||0;});
-    c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf(el.dataset.sec);if(a)a[+el.dataset.i].prod_uph=+el.value||0;});
+    PROC_MODAL_BIND(c,{
+      onClose:()=>{naeModal=false;draw();},
+      onSave:saveNaeProc,
+      onProcInput:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].work_qty=+v||0;},   // 입력중 값만(재draw 없음=포커스 유지, 기존 동작 동일)
+      onWeldCount:(d,v)=>{if(!naeProcD)return;const val=+v||0;if(val>0)naeProcD.weldCounts[d]=val;else delete naeProcD.weldCounts[d];draw();},
+      onWeldType:(v)=>{if(!naeProcD)return;naeProcD.weldItem=v;const cnt={};(naeProcD.weldPoints||[]).forEach(w=>{if(w.weld_item===v&&w.pipe_diam)cnt[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});naeProcD.weldCounts=cnt;draw();},
+    });
+    // 레거시 procEditPanel 잔여(.pu/.pl) — 현재 모달엔 없어 no-op이나 보존(회귀 방지)
+    const rowsOf2=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
+    c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf2(el.dataset.sec);if(a&&a[+el.dataset.i])a[+el.dataset.i].prod_uph=+el.value||0;});
     c.querySelectorAll('.pl').forEach(el=>el.oninput=()=>{const cr=naeProcD&&naeProcD.carriers[+el.dataset.c];if(cr)cr.loss_factor=+el.value||1.5;});
-    c.querySelectorAll('.wm-q').forEach(el=>el.oninput=()=>{if(!naeProcD)return;const d=el.dataset.diam;const v=+el.value||0;if(v>0)naeProcD.weldCounts[d]=v;else delete naeProcD.weldCounts[d];draw();});
-    {const ts=g('#wm-type');if(ts)ts.onchange=()=>{if(!naeProcD)return;naeProcD.weldItem=ts.value;const cnt={};(naeProcD.weldPoints||[]).forEach(w=>{if(w.weld_item===ts.value&&w.pipe_diam)cnt[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});naeProcD.weldCounts=cnt;draw();};}
   };
   const saveNaeMaster=async()=>{const rows=(naeD&&naeD.rows)||[];const qtyC=[];const specM={};const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
     rows.forEach(r=>{const e=naeEdits[r.code];if(!e)return;
@@ -1324,64 +1408,15 @@ SCREEN.unifybom=(c,ro)=>{
         <div style="flex:1"></div><button class="btn" id="nae-right-edit" style="background:#8e44ad;color:#fff">✎ 등록/수정</button></div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto">${midT}</div></div>`;};
   // ===== 등록/수정 팝업(모달) — 레거시형 가로 매트릭스 2단(관경 컬럼 / 공정 컬럼, 세로헤더) =====
+  // ★공정 팝업 = 공유 렌더러(PROC_MODAL_HTML) 사용. naeProcD → 캐노니컬 pd(cols=own 가공 + carriers[0] 조립).
   const naeProcModal=()=>{
-    if(!naeProcD) return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.35);z-index:50;display:flex;align-items:center;justify-content:center"><div style="background:#fff;border-radius:10px;padding:20px" class="empty">공정 로딩…</div></div>`;
-    const isAssy=naeProcD.isAssy, node=naeProcD.node, isProd=(node===item);
+    if(!naeProcD) return PROC_MODAL_HTML(null);
+    const isAssy=naeProcD.isAssy, node=naeProcD.node;
     const lvl=isAssy?'제품/조립 — 관경별 용접 + 조립공정(용접·포장·체결)':'부품 — 가공공정';
-    const DIAMS=(weldDiams||[]).map(d=>d.pipe_diam);
-    const STU={},STS={};(weldDiams||[]).forEach(d=>{STU[d.pipe_diam.toFixed(2)]=d.std_use_qty;STS[d.pipe_diam.toFixed(2)]=d.std_st;});
-    const cnt=naeProcD.weldCounts||{};
-    // 합계
-    let sUse=0,sSt=0,sCnt=0;DIAMS.forEach(d=>{const k=d.toFixed(2),q=+cnt[k]||0;if(q){sUse+=(STU[k]||0)*q;sSt+=(STS[k]||0)*q;sCnt+=q;}});
-    const vhdr=t=>`<th class="wm-vh" title="${esc(t)}"><span>${esc(t)}</span></th>`;
-    // (상) 관경별 용접 매트릭스 — 관경=컬럼, 용접봉 종류=상단 드롭다운 1개
-    const wTypes=[...new Set([...(naeProcD.weldTypes||[]),'RAC30599301-1','RAC30599327','RAC30599328','RAC30599303'])];
-    const wLabel=w=>({'RAC30599301-1':'1% 용접봉','RAC30599327':'3% 용접봉','RAC30599328':'30% BAG','RAC30599303':'BCUP'}[w]||w);
-    // ★레거시 스샷 구조: [용접(라벨)][합계][관경 14열(가로 숫자)]. 소요량 합계=Σstd×횟수(표시), BOM/저장은 ×1.5(내부)
-    const fmtU=v=>{if(!v)return '';const s=(+v).toFixed(5);return s.replace(/0+$/,'').replace(/\.$/,'');};  // 스샷처럼 뒤 0 제거
-    const weldMatrix=!isAssy?'':`
-      <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;flex-wrap:wrap">
-        <b style="color:#8e44ad">🔧 관경별 용접</b>
-        <span style="color:#8a94a6;font-size:11px">용접봉 종류(노드당 1개)</span>
-        <select id="wm-type" style="font-size:12px">${wTypes.map(w=>`<option value="${esc(w)}" ${w===naeProcD.weldItem?'selected':''}>${esc(w)} · ${esc(wLabel(w))}</option>`).join('')}</select>
-        <span style="color:#8a94a6;font-size:11px">관경 아래 <b>용접횟수</b> 입력 → 소요량·내부ST 자동 (BOM반영 소요량=표시×1.5)</span></div>
-      <div style="overflow-x:auto"><table class="tbl wm wmw" style="font-size:11px">
-        <thead><tr><th style="text-align:left;min-width:56px">용접</th><th class="num" style="min-width:48px">합계</th>${DIAMS.map(d=>`<th class="num">${d.toFixed(2)}</th>`).join('')}</tr></thead>
-        <tbody>
-          <tr><td style="text-align:left;color:#5a6b82">표준소요량</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${fmtU(STU[d.toFixed(2)]||0)}</td>`).join('')}</tr>
-          <tr><td style="text-align:left;color:#5a6b82">표준공수</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${(STS[d.toFixed(2)]||0)}</td>`).join('')}</tr>
-          <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">용접횟수</td><td class="num"><b>${sCnt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-q" data-diam="${k}" type="number" min="0" step="1" value="${cnt[k]||''}" style="width:32px;text-align:center"></td>`;}).join('')}</tr>
-          <tr style="background:#eef4ff"><td style="text-align:left;font-weight:700;color:#1c6b3a">소요량</td><td class="num" style="color:#1c6b3a"><b>${fmtU(sUse)}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#1c6b3a">${q?fmtU((STU[k]||0)*q):''}</td>`;}).join('')}</tr>
-          <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td><td class="num" style="color:#8a5a1a"><b>${sSt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#8a5a1a">${q?((STS[k]||0)*q):''}</td>`;}).join('')}</tr>
-        </tbody></table></div>`;
-    // (하) 공정별 — ★세로헤더 폐기 → 2단(band) 가로헤더. 작업ST=입력 / 내부UPH·임율=읽기전용 텍스트(스피너 제거, 값 전체표시·tabular-nums).
     const cols=[];
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
-    let sWq=0;cols.forEach(cc=>sWq+=(+cc.wq||0));
-    const band=(sub)=>{if(!sub.length)return '';const bsum=sub.reduce((s,cc)=>s+(+cc.wq||0),0);
-      return `<table class="tbl wm" style="font-size:11px;table-layout:fixed;width:100%;margin-bottom:6px">
-        <thead><tr><th style="text-align:left;width:58px">구분</th>${sub.map(cc=>`<th class="num" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px" title="${esc(cc.name)} · ${esc(cc.code)}">${esc(cc.name)}</th>`).join('')}<th class="num" style="width:48px;background:#eef4ff">합계</th></tr></thead>
-        <tbody>
-          <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}<td class="num" style="font-weight:700;background:#f6f9ff;color:#1c47a0">${bsum?M2(bsum):''}</td></tr>
-          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num" style="color:#5a6b82;font-variant-numeric:tabular-nums">${cc.uph?M2(cc.uph):''}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
-          <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${sub.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
-        </tbody></table>`;};
-    const _half=Math.ceil(cols.length/2);
-    const procMatrix=`
-      <div style="padding:4px 6px"><b style="color:#1c47a0">⚙ 공정별 (작업 ST 입력)</b> <span style="color:#8a94a6;font-size:11px">공정 2단 배치 · 작업ST 입력 / 내부UPH·임율 참조(읽기전용) · 작업ST 합계 <b style="color:#1c47a0">${M2(sWq)}</b></span></div>
-      <div style="padding:0 4px">${band(cols.slice(0,_half))}${band(cols.slice(_half))}</div>`;
-    return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.4);z-index:50;display:flex;align-items:center;justify-content:center;padding:12px">
-      <div style="background:#fff;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.3);width:98vw;max-width:1700px;max-height:94vh;display:flex;flex-direction:column">
-        <div style="padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #dce4ee;flex:0 0 auto">
-          <b style="color:#1c47a0;font-size:15px">✎ 공정 등록/수정 — ${esc(node)}</b><span style="color:#8a94a6;font-size:12px">${lvl}</span>
-          <div style="flex:1"></div><button class="btn" id="pm-save" style="background:#1c7c3a;color:#fff">💾 저장</button><button class="btn ghost" id="pm-close">✖ 닫기</button></div>
-        <div style="flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:8px 10px">
-          ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-bottom:10px">${weldMatrix}</div>`:''}
-          <div style="border:1px solid #cfe0ff;border-radius:8px;background:#f7faff">${procMatrix}</div>
-        </div>
-        <div style="padding:6px 14px;border-top:1px solid #dce4ee;color:#8aa0bd;font-size:11px;flex:0 0 auto">관경별 용접횟수→소요량(Σ표준소요량×횟수×1.5)·내부ST 자동 · 공정 작업ST 입력 · 단가 읽기전용(마감때만) · 저장시 재계산</div>
-      </div></div>`;};
+    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,cols});};
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
        <tbody>${(rows||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>

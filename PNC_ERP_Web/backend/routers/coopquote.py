@@ -420,10 +420,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 cur.execute(f"""WITH S AS (
                       SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
                         ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
-                          ORDER BY COST_APPLY_YMD DESC) rn
+                          ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
                       FROM PR_M_ITEM_COST
                       WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                        AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND ISNULL(MAIN_FLAG,'0')='1'
+                        AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
                         AND COST_APPLY_YMD<=? AND ITEM_COST>0)
                     SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
                 for r in cur.fetchall():
@@ -621,9 +621,9 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                     for i in range(0, len(sneed), 900):
                         chunk = [c.replace("'", "") for c in sneed[i:i + 900]]; inl = "','".join(chunk)
                         lc2c.execute(f"""WITH S AS (SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
-                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE))) ORDER BY COST_APPLY_YMD DESC) rn
+                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE))) ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
                             FROM PR_M_ITEM_COST WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                            AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND ISNULL(MAIN_FLAG,'0')='1' AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                            AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST>0)
                             SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
                         for rr in lc2c.fetchall():
                             sale_q[str(rr[0]).strip().upper()] = float(rr[1] or 0)
