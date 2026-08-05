@@ -1424,26 +1424,29 @@ def sourcing_plan_price(item: str = Query(...)):
 # ★후보/계획 단가(정산 아님): nx에만 저장. 정산 마스터(PR_M_ITEM_COST 등)는 조회조차 미접근(마감 때만 수정 하드룰).
 _SAGUB_PRICE_READY = False
 def _ensure_sagub_price_tbl(cur):
-    """nx.sourcing_sagub_price 멱등 생성/마이그(프로세스당 1회). ★사급 부품가 = 매입 부품당 1개(업체 공통) → PK(route_id,item_code), vendor 제거.
-       구 스키마(vendor_code 포함)면 (route_id,item_code)당 MAX(price)로 축약 마이그레이션."""
+    """nx.sourcing_sagub_price 멱등 생성/마이그(프로세스당 1회). ★사급 부품가 = 공통(기본) + 업체별 예외(override).
+       vendor_code=''(공통·기본) / 지정=그 업체 override. PK(route_id,vendor_code,item_code). COALESCE(override,공통).
+       구 '공통전용'(route_id,item_code·vendor 없음) 스키마면 vendor_code='' 공통행으로 재구성 마이그."""
     global _SAGUB_PRICE_READY
     if _SAGUB_PRICE_READY:
         return
     oid = cur.execute("SELECT OBJECT_ID('nx.sourcing_sagub_price','U')").fetchone()[0]
     if oid is None:
         cur.execute("""CREATE TABLE nx.sourcing_sagub_price(
-            route_id INT NOT NULL, item_code NVARCHAR(60) NOT NULL, sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
-            CONSTRAINT PK_nx_sourcing_sagub_price PRIMARY KEY(route_id, item_code))""")
-    elif cur.execute("SELECT COL_LENGTH('nx.sourcing_sagub_price','vendor_code')").fetchone()[0] is not None:
+            route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL DEFAULT '', item_code NVARCHAR(60) NOT NULL,
+            sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sagub_price PRIMARY KEY(route_id, vendor_code, item_code))""")
+    elif cur.execute("SELECT COL_LENGTH('nx.sourcing_sagub_price','vendor_code')").fetchone()[0] is None:
         cur.execute("IF OBJECT_ID('nx.sourcing_sagub_price_new','U') IS NOT NULL DROP TABLE nx.sourcing_sagub_price_new")
         cur.execute("""CREATE TABLE nx.sourcing_sagub_price_new(
-            route_id INT NOT NULL, item_code NVARCHAR(60) NOT NULL, sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
-            CONSTRAINT PK_nx_sourcing_sagub_price_new PRIMARY KEY(route_id, item_code))""")
-        cur.execute("""INSERT INTO nx.sourcing_sagub_price_new(route_id,item_code,sagub_price,upd_dt)
-            SELECT route_id, LTRIM(RTRIM(item_code)), MAX(sagub_price), MAX(upd_dt)
-            FROM nx.sourcing_sagub_price WHERE sagub_price IS NOT NULL GROUP BY route_id, LTRIM(RTRIM(item_code))""")
+            route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL DEFAULT '', item_code NVARCHAR(60) NOT NULL,
+            sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sagub_price_new PRIMARY KEY(route_id, vendor_code, item_code))""")
+        cur.execute("""INSERT INTO nx.sourcing_sagub_price_new(route_id,vendor_code,item_code,sagub_price,upd_dt)
+            SELECT route_id, '', LTRIM(RTRIM(item_code)), sagub_price, upd_dt FROM nx.sourcing_sagub_price""")
         cur.execute("DROP TABLE nx.sourcing_sagub_price")
         cur.execute("EXEC sp_rename 'nx.sourcing_sagub_price_new','sourcing_sagub_price'")
+    # else: 이미 vendor_code 보유(override 가능 스키마) → 유지
     _SAGUB_PRICE_READY = True
 
 # ============ ★확정 3구분 모델 — 조달 프로파일 업체·단가는 "외주 SUB 중심" ============
@@ -1452,26 +1455,30 @@ def _ensure_sagub_price_tbl(cur):
 # 3) 단품 매입품(레벨1 직속 매입) = 입력칸 없음. 매입 마스터 자동조회(읽기전용). PR_M_ITEM_COST 미접근(마감때만 수정 하드룰).
 _SUB_PRICE_READY = False
 def _ensure_sub_price_tbl(cur):
-    """nx.sourcing_sub_price 멱등 생성/마이그(프로세스당 1회). ★ASSY 매입단가 = 외주 SUB당 1개(업체 공통) → PK(route_id,sub_item), vendor 제거.
-       구 스키마(vendor_code 포함)면 (route_id,sub_item)당 MAX(price)로 축약 마이그레이션."""
+    """nx.sourcing_sub_price 멱등 생성/마이그(프로세스당 1회). ★ASSY 매입단가 = 공통(기본) + 업체별 예외(override).
+       vendor_code=''(공통·기본) / 지정=그 업체 override. PK(route_id,vendor_code,sub_item). COALESCE(override,공통).
+       구 '공통전용'(route_id,sub_item·vendor 없음) 스키마면 vendor_code='' 공통행으로 재구성 마이그."""
     global _SUB_PRICE_READY
     if _SUB_PRICE_READY:
         return
     oid = cur.execute("SELECT OBJECT_ID('nx.sourcing_sub_price','U')").fetchone()[0]
     if oid is None:
         cur.execute("""CREATE TABLE nx.sourcing_sub_price(
-            route_id INT NOT NULL, sub_item NVARCHAR(60) NOT NULL, assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
-            CONSTRAINT PK_nx_sourcing_sub_price PRIMARY KEY(route_id, sub_item))""")
-    elif cur.execute("SELECT COL_LENGTH('nx.sourcing_sub_price','vendor_code')").fetchone()[0] is not None:
+            route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL DEFAULT '', sub_item NVARCHAR(60) NOT NULL,
+            assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sub_price PRIMARY KEY(route_id, vendor_code, sub_item))""")
+    elif cur.execute("SELECT COL_LENGTH('nx.sourcing_sub_price','vendor_code')").fetchone()[0] is None:
+        # 공통전용 → 공통+override 스키마(기존 공통행=vendor_code '')
         cur.execute("IF OBJECT_ID('nx.sourcing_sub_price_new','U') IS NOT NULL DROP TABLE nx.sourcing_sub_price_new")
         cur.execute("""CREATE TABLE nx.sourcing_sub_price_new(
-            route_id INT NOT NULL, sub_item NVARCHAR(60) NOT NULL, assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
-            CONSTRAINT PK_nx_sourcing_sub_price_new PRIMARY KEY(route_id, sub_item))""")
-        cur.execute("""INSERT INTO nx.sourcing_sub_price_new(route_id,sub_item,assy_price,upd_dt)
-            SELECT route_id, LTRIM(RTRIM(sub_item)), MAX(assy_price), MAX(upd_dt)
-            FROM nx.sourcing_sub_price WHERE assy_price IS NOT NULL GROUP BY route_id, LTRIM(RTRIM(sub_item))""")
+            route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL DEFAULT '', sub_item NVARCHAR(60) NOT NULL,
+            assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sub_price_new PRIMARY KEY(route_id, vendor_code, sub_item))""")
+        cur.execute("""INSERT INTO nx.sourcing_sub_price_new(route_id,vendor_code,sub_item,assy_price,upd_dt)
+            SELECT route_id, '', LTRIM(RTRIM(sub_item)), assy_price, upd_dt FROM nx.sourcing_sub_price""")
         cur.execute("DROP TABLE nx.sourcing_sub_price")
         cur.execute("EXEC sp_rename 'nx.sourcing_sub_price_new','sourcing_sub_price'")
+    # else: 이미 vendor_code 보유(override 가능 스키마) → 유지
     _SUB_PRICE_READY = True
 
 def _outsourced_subs(cur, route_id):
@@ -1571,24 +1578,34 @@ def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Quer
         subs = _outsourced_subs(cur, route_id)
         items = _sub_child_items(cur, route_id, subs)          # ★외주 SUB 하위 PART만
         direct = _direct_purchase_items(cur, route_id)         # 단품 매입(읽기전용 참고)
-        cur.execute("SELECT LTRIM(RTRIM(item_code)), sagub_price FROM nx.sourcing_sagub_price WHERE route_id=?", route_id)
-        saved = {str(r[0]).strip(): (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+        cur.execute("SELECT ISNULL(vendor_code,''), LTRIM(RTRIM(item_code)), sagub_price FROM nx.sourcing_sagub_price WHERE route_id=?", route_id)
+        common = {}; ov = {}   # common[item]=공통 · ov[item]=[{vendor_code,sagub_price}]
+        for r in cur.fetchall():
+            vc = str(r[0] or "").strip(); ic = str(r[1]).strip(); pr = (float(r[2]) if r[2] is not None else None)
+            if vc == "": common[ic] = pr
+            else: ov.setdefault(ic, []).append({"vendor_code": vc, "sagub_price": pr})
         for it in items:
-            it["sagub_price"] = saved.get(it["item_code"]) if it.get("is_purchase") else None   # 제작 부품은 사급단가 무의미(원가 자동)
+            if it.get("is_purchase"):
+                it["sagub_price"] = common.get(it["item_code"])           # 공통(기본)
+                it["overrides"] = ov.get(it["item_code"], [])             # 업체별 예외
+            else:
+                it["sagub_price"] = None; it["overrides"] = []            # 제작 부품은 사급단가 무의미(원가 자동)
         n_purchase = sum(1 for it in items if it.get("is_purchase"))
         n_priced = sum(1 for it in items if it["sagub_price"] is not None)
+        n_ov = sum(len(it["overrides"]) for it in items)
         return {"header": hdr, "rows": items,
                 "subs": [{"sub_item": s["sub_item"], "sub_name": s["sub_name"], "gubun": s["gubun"]} for s in subs],
                 "direct_items": direct, "n_item": len(items), "n_sub": len(subs), "n_direct": len(direct),
-                "n_purchase": n_purchase, "n_priced": n_priced,
-                "note": "후보/계획 사급 부품 가격(정산 아님, 업체 공통) — nx.sourcing_sagub_price PK(route_id,item_code). 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동·입력 대상 아님, 레벨1 직속·용접봉 제외)."}
+                "n_purchase": n_purchase, "n_priced": n_priced, "n_override": n_ov,
+                "note": "후보/계획 사급 부품 가격(정산 아님) — nx.sourcing_sagub_price. 공통(vendor='')+업체별 예외(override). COALESCE(override,공통). 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동, 레벨1 직속·용접봉 제외)."}
     finally:
         nx.close()
 
 @router.post("/api/sourcing/sagub_price/save")
 def sourcing_sagub_price_save(payload: dict = Body(...)):
-    """★사급 부품 가격(업체 공통) 저장. 근거키=(route_id·item_code) 스코프 upsert. vendor_code는 무시(하위호환).
-       공란/None = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 하위 '매입' 부품 밖은 무시(skip). 정산 마스터 미접근."""
+    """★사급 부품 가격 저장. 근거키=(route_id·vendor_code·item_code) 스코프 upsert. vendor_code=''(또는 생략)=공통(기본) / 지정=그 업체 예외(override).
+       공란/None price = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 하위 '매입' 부품 밖은 무시(skip). 정산 마스터 미접근.
+       payload {route_id, rows:[{vendor_code?, item_code, sagub_price}]}."""
     rid = int(payload.get("route_id") or 0)
     rows = payload.get("rows", []) or []
     if rid <= 0: raise HTTPException(400, "route_id 필요")
@@ -1600,18 +1617,19 @@ def sourcing_sagub_price_save(payload: dict = Body(...)):
         upsert = dele = skip = 0
         for r in rows:
             ic = str(r.get("item_code", "")).strip()
+            vc = str(r.get("vendor_code", "") or "").strip()   # ''=공통, 지정=업체 override
             if not ic or ic not in valid:
                 skip += 1; continue
             sp = _pfloat(r.get("sagub_price"))
-            if sp is None:   # 공란/삭제 = 근거키 스코프 1행만 제거
-                cur.execute("DELETE FROM nx.sourcing_sagub_price WHERE route_id=? AND item_code=?", rid, ic)
+            if sp is None:   # 공란/삭제 = 그 근거키(route·vendor·item) 1행만 제거
+                cur.execute("DELETE FROM nx.sourcing_sagub_price WHERE route_id=? AND vendor_code=? AND item_code=?", rid, vc, ic)
                 dele += cur.rowcount; continue
             cur.execute("""MERGE nx.sourcing_sagub_price AS t
-                USING (SELECT ? AS route_id, ? AS item_code) AS s
-                ON t.route_id=s.route_id AND t.item_code=s.item_code
+                USING (SELECT ? AS route_id, ? AS vendor_code, ? AS item_code) AS s
+                ON t.route_id=s.route_id AND t.vendor_code=s.vendor_code AND t.item_code=s.item_code
                 WHEN MATCHED THEN UPDATE SET sagub_price=?, upd_dt=getdate()
-                WHEN NOT MATCHED THEN INSERT(route_id,item_code,sagub_price,upd_dt)
-                  VALUES(s.route_id,s.item_code,?,getdate());""", rid, ic, sp, sp)
+                WHEN NOT MATCHED THEN INSERT(route_id,vendor_code,item_code,sagub_price,upd_dt)
+                  VALUES(s.route_id,s.vendor_code,s.item_code,?,getdate());""", rid, vc, ic, sp, sp)
             upsert += 1
         nx.commit()
         return {"ok": True, "upsert": upsert, "del": dele, "skip": skip}
