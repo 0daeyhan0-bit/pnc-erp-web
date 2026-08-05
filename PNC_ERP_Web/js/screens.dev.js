@@ -2108,7 +2108,9 @@ SCREEN.subvariant=(c)=>{
   const openDetail=(rid,mode,fresh)=>{const R=routeById(rid);if(!R)return;
     st.detail={route_id:rid,mode:(R.baseline?'view':mode||'edit'),fresh:!!fresh,
       hdr:{route_name:R.route_name||'',gubun:R.gubun||'',apply_from:R.apply_from||today(),note:R.note||''}};  // 유효일자 default=오늘·공급처/현행 제거
-    st.newForm=null;draw();};
+    st.newForm=null;st.rd=null;draw();
+    if(!R.baseline && st.detail.mode==='edit') loadRD(rid);   // 편집모드=좌/우 패널 기본 펼침(버튼 클릭 불필요)
+  };
   // 닫기(X/닫기): 신규 미커밋 드래프트면 "등록 취소?" confirm → 롤백. 커밋/재편집이면 일반 닫기.
   const closeDetail=async()=>{
     if(st.detail&&st.detail.fresh){

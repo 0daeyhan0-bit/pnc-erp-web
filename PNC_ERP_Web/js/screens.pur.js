@@ -1395,7 +1395,7 @@ SCREEN.sourceprofile=(c)=>{
 /* ===== 협력사견적: 견적(원소재비/가공비 분리) vs 현재 입고가 · 사급가 변경 시 판가 재계산 ===== */
 SCREEN.coopquote=(host)=>{
   const API=API_BASE;
-  const st={rows:[],cnt:0,vendor:'',q:'',vendors:[],loading:false,form:null,sel:new Set(),recalc:null,msg:'',activeOnly:false,detail:null,bomedit:null,workMode:false,worklist:[],workBy:{},workDone:0,workLoading:false,workType:''};
+  const st={rows:[],cnt:0,vendor:'',q:'',vendors:[],loading:false,form:null,sel:new Set(),recalc:null,msg:'',activeOnly:true,detail:null,bomedit:null,workMode:false,worklist:[],workBy:{},workDone:0,workLoading:false,workType:''};
   const loadParts=async(idx)=>{const r=st.rows[idx];if(!r)return;
     st.detail={assy:r.assy_code,vendor:r.vendor,rows:[],loading:true};render();
     try{const res=await fetch(`${API}/api/coopquote/parts?assy=${encodeURIComponent(r.assy_code)}&vendor=${encodeURIComponent(r.vendor)}`);
