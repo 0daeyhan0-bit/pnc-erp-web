@@ -144,7 +144,21 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
 - 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
 
-## ★ASSY=업체별(공통X)·사급=공통+예외·업체추가 버그수정 (2026-08-05, 사용자 피드백 3건)
+## ★모달 UI 4건 + 사급 제거 + 배분%정수 (2026-08-05, 사용자 피드백)
+조달 프로파일 업체·단가 모달(screens.pur.js only, 백엔드 무변경):
+1. **배분% 폭 확대**(width 52→**72px**, 헤더 "배분%(정수)") — 3자리+% 안 짤림.
+2. **유효시작/종료 폭 확대**(width 112→**154px**, min-width 150px) — date 안 짤림.
+3. **유효시작 기본=당일(today)**: `blankVRow.apply_from=isoToday()`(로컬 YYYY-MM-DD). 기존 FROM0(2026-07-01 고정) 대체. 신규 업체행=오늘.
+4. **사급 부품가 UI 전체 제거**(제외버튼 방식 취소): 모달에서 사급 공통 표·업체grid 사급예외 열·pm.sagub/subChildren/sagubOv 상태·sagub GET/save 호출·pm-sag/pm-sagov 핸들러 **전부 삭제**. 결과 모달=[업체 grid: 업체·공급구분·배분%·유효시작·유효종료·ASSY 매입단가(업체별)·활성·삭제] + [단품 매입품 읽기전용]. **사급 렌더 마커 0**(함수코드 기준, 주석/배너만 "사급=품목단가 관리에서" 안내).
+5. **배분%=정수만**: input step=1 min=0 max=100, onchange `Math.round`, pmSave `Math.round`, 로드 시 `Math.round`.
+- ★백엔드 nx.item_price gubun='사급'은 무변경(품목단가 관리 계속 사용) — 이 모달의 사급 호출만 제거.
+
+### 검증(e2e)
+- 서빙 JS: curly/brack 0·bt even. 마커(apply_from:isoToday()·Math.round alloc·width:72px·width:154px·pm-assyv·min="0" max="100"). 사급 함수코드(.pm-sag/pm.sagub/subChildren/sagubOv) **0**. index.html screens.pur.js?v=**260805s8**(core.js s7 유지).
+- ASSY 업체별 저장/조회 정상(명진17000·FONE19000·공통 null). 배분 60/40(정수) ok·110% gate ALLOC 거부. route/cost **5722.2 diff0=True**. master MD5 **6789628C…** 불변·쿼리0. openapi 325(엔드포인트 무변경). **품목단가 관리 회귀 없음**(sagub GET n_item=5·n_purchase=2 정상). 테스트데이터 item_price/profile 0 복귀.
+- ※ 브라우저 픽셀(폭/당일자/사급 없음/정수) 사용자 확인 미완(코드/서빙 마커 레벨).
+
+## ★ASSY=업체별(공통X)·사급=공통+예외·업체추가 버그수정 (2026-08-05, 사용자 피드백 3건) [사급은 위에서 제거됨]
 1. **ASSY 매입단가=업체별**(공통 필드 제거): 각 업체의 조립가가 달라 공통 개념 폐기. item_price(gubun='매입', **vendor 항상 지정**, '' 공통행 안 만듦). 저장/조회 모두 업체별.
 2. **사급 부품가=공통+업체예외 유지**(매입 부품만, 제작=원가자동·직속단품·용접봉 제외).
 3. **[➕업체추가] 버그수정**: 원인=신규 blank 업체행이 하단 표에만 생기고 SUB 블록 그리드엔 안 보여 '무반응' 체감. → **업체 grid를 SUB 블록 안으로**(모든 행 incl. blank 표시) + 버튼 **클래스 바인딩**(.pm-add, SUB별). 클릭 시 그리드에 새 업체행 즉시 표시.
