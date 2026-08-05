@@ -1368,70 +1368,53 @@ def sourcing_plan_price(item: str = Query(...)):
         ralloc = {int(r[0]): {"apply_from": r[1], "apply_to": r[2],
                               "is_active": (bool(r[3]) if r[3] is not None else None),
                               "alloc_ratio": (float(r[4]) if r[4] is not None else None)} for r in cur.fetchall()}
-        # 업체별 계획단가
+        # ★업체 = 배분%만(가격 없음). nx.sourcing_profile.
         rids = [h["route_id"] for h in hdrs]
         vend = {}; vcodes = set()
         if rids:
             ph = ",".join("?" * len(rids))
             cur.execute(f"""SELECT route_id, vendor_code, supply_gubun, is_active, alloc_ratio,
-                  CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23), buy_price, sagub_price, lme_flag
+                  CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23), lme_flag
                 FROM nx.sourcing_profile WHERE route_id IN ({ph}) ORDER BY priority, profile_id""", *rids)
             for r in cur.fetchall():
                 rid = int(r[0]); vc = str(r[1] or "").strip(); vcodes.add(vc)
                 vend.setdefault(rid, []).append({"vendor_code": vc, "supply_gubun": str(r[2] or "").strip(),
                     "is_active": int(r[3] or 0), "alloc_ratio": (float(r[4]) if r[4] is not None else None),
-                    "apply_from": r[5], "apply_to": r[6],
-                    "buy_price": (float(r[7]) if r[7] is not None else None),
-                    "sagub_price": (float(r[8]) if r[8] is not None else None), "lme_flag": int(r[9] or 0)})
-        # ★사급 부품 가격(외주 SUB 하위·품목별) — nx.sourcing_sagub_price ((route_id,vendor_code) 스코프).
+                    "apply_from": r[5], "apply_to": r[6], "lme_flag": int(r[7] or 0)})
+        # ★사급 부품 가격 = route당·품목당 1개(업체 공통) — nx.sourcing_sagub_price PK(route_id,item_code).
         _ensure_sagub_price_tbl(cur)
-        sagit = {}   # (route_id, vendor_code) -> [{item_code,item_name,sagub_price}]
+        sagit = {}   # route_id -> [{item_code,item_name,sagub_price}]
         if rids:
             ph = ",".join("?" * len(rids))
-            cur.execute(f"""SELECT sp.route_id, sp.vendor_code, LTRIM(RTRIM(sp.item_code)), sp.sagub_price, ISNULL(it.item_name,'')
+            cur.execute(f"""SELECT sp.route_id, LTRIM(RTRIM(sp.item_code)), sp.sagub_price, ISNULL(it.item_name,'')
                 FROM nx.sourcing_sagub_price sp LEFT JOIN nx.item it ON it.item_code=sp.item_code
-                WHERE sp.route_id IN ({ph}) ORDER BY sp.route_id, sp.vendor_code, sp.item_code""", *rids)
+                WHERE sp.route_id IN ({ph}) ORDER BY sp.route_id, sp.item_code""", *rids)
             for r in cur.fetchall():
-                key = (int(r[0]), str(r[1] or "").strip())
-                sagit.setdefault(key, []).append({"item_code": str(r[2]).strip(), "item_name": r[4],
-                    "sagub_price": (float(r[3]) if r[3] is not None else None)})
-        # ★ASSY 매입단가(외주 SUB 단위) — nx.sourcing_sub_price ((route_id,vendor_code) 스코프).
+                sagit.setdefault(int(r[0]), []).append({"item_code": str(r[1]).strip(), "item_name": r[3],
+                    "sagub_price": (float(r[2]) if r[2] is not None else None)})
+        # ★ASSY 매입단가 = route당·SUB당 1개(업체 공통) — nx.sourcing_sub_price PK(route_id,sub_item).
         _ensure_sub_price_tbl(cur)
-        assit = {}   # (route_id, vendor_code) -> [{sub_item,sub_name,assy_price}]
+        assit = {}   # route_id -> [{sub_item,sub_name,assy_price}]
         if rids:
             ph = ",".join("?" * len(rids))
-            cur.execute(f"""SELECT ap.route_id, ap.vendor_code, LTRIM(RTRIM(ap.sub_item)), ap.assy_price, ISNULL(it.item_name,'')
+            cur.execute(f"""SELECT ap.route_id, LTRIM(RTRIM(ap.sub_item)), ap.assy_price, ISNULL(it.item_name,'')
                 FROM nx.sourcing_sub_price ap LEFT JOIN nx.item it ON it.item_code=ap.sub_item
-                WHERE ap.route_id IN ({ph}) ORDER BY ap.route_id, ap.vendor_code, ap.sub_item""", *rids)
+                WHERE ap.route_id IN ({ph}) ORDER BY ap.route_id, ap.sub_item""", *rids)
             for r in cur.fetchall():
-                key = (int(r[0]), str(r[1] or "").strip())
-                assit.setdefault(key, []).append({"sub_item": str(r[2]).strip(), "sub_name": r[4],
-                    "assy_price": (float(r[3]) if r[3] is not None else None)})
-        # 업체 코드 이름 보강(profile 밖 업체도 표시)
-        vmap = _custnm_map(cur, vcodes | {k[1] for k in sagit.keys()} | {k[1] for k in assit.keys()})
+                assit.setdefault(int(r[0]), []).append({"sub_item": str(r[1]).strip(), "sub_name": r[3],
+                    "assy_price": (float(r[2]) if r[2] is not None else None)})
+        vmap = _custnm_map(cur, vcodes)
         out = []; n_vend = 0; n_sagit = 0; n_assit = 0
         for h in hdrs:
             vs = vend.get(h["route_id"], [])
-            seen = set()
-            for v in vs:
-                v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
-                v["sagub_items"] = sagit.get((h["route_id"], v["vendor_code"]), [])
-                v["assy_subs"] = assit.get((h["route_id"], v["vendor_code"]), [])
-                n_sagit += len(v["sagub_items"]); n_assit += len(v["assy_subs"]); seen.add(v["vendor_code"])
-            # profile에 없지만 ASSY/사급단가만 있는 업체 = 합성행(외주 SUB 중심)
-            extra = {kvc for (krid, kvc) in sagit if krid == h["route_id"]} | {kvc for (krid, kvc) in assit if krid == h["route_id"]}
-            for kvc in sorted(extra - seen):
-                sag_i = sagit.get((h["route_id"], kvc), []); asy_i = assit.get((h["route_id"], kvc), [])
-                vs.append({"vendor_code": kvc, "vendor_name": vmap.get(kvc, kvc), "supply_gubun": "2",
-                           "is_active": 0, "alloc_ratio": None, "apply_from": None, "apply_to": None,
-                           "buy_price": None, "sagub_price": None, "lme_flag": 0,
-                           "sagub_only": True, "sagub_items": sag_i, "assy_subs": asy_i})
-                n_sagit += len(sag_i); n_assit += len(asy_i); seen.add(kvc)
-            n_vend += len(vs)
-            out.append({**h, "route_alloc": ralloc.get(h["route_id"]), "vendors": vs})
+            for v in vs: v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
+            asy = assit.get(h["route_id"], []); sag = sagit.get(h["route_id"], [])
+            n_vend += len(vs); n_assit += len(asy); n_sagit += len(sag)
+            out.append({**h, "route_alloc": ralloc.get(h["route_id"]), "vendors": vs,
+                        "assy_subs": asy, "sagub_items": sag})   # ★가격=route 공통(업체 무관)
         return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend,
                 "n_sagub_item": n_sagit, "n_assy": n_assit,
-                "note": "후보/계획 단가(정산 아님) — 3구분: ASSY 매입단가(외주 SUB 단위·nx.sourcing_sub_price) + 사급 부품 가격(외주 SUB 하위 품목별·nx.sourcing_sagub_price). 단품 매입은 매입 마스터 자동(여기 미포함). 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
+                "note": "후보/계획 단가(정산 아님, 업체 공통) — 3구분: ASSY 매입단가(외주 SUB당 1개·nx.sourcing_sub_price) + 사급 부품 가격(매입 부품당 1개·nx.sourcing_sagub_price) + 업체=배분%만. 단품 매입은 매입 마스터 자동. 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
     finally:
         nx.close()
 
@@ -1441,14 +1424,26 @@ def sourcing_plan_price(item: str = Query(...)):
 # ★후보/계획 단가(정산 아님): nx에만 저장. 정산 마스터(PR_M_ITEM_COST 등)는 조회조차 미접근(마감 때만 수정 하드룰).
 _SAGUB_PRICE_READY = False
 def _ensure_sagub_price_tbl(cur):
-    """nx.sourcing_sagub_price 멱등 생성(프로세스당 1회). PK(route_id,vendor_code,item_code)=근거키."""
+    """nx.sourcing_sagub_price 멱등 생성/마이그(프로세스당 1회). ★사급 부품가 = 매입 부품당 1개(업체 공통) → PK(route_id,item_code), vendor 제거.
+       구 스키마(vendor_code 포함)면 (route_id,item_code)당 MAX(price)로 축약 마이그레이션."""
     global _SAGUB_PRICE_READY
     if _SAGUB_PRICE_READY:
         return
-    cur.execute("""IF OBJECT_ID('nx.sourcing_sagub_price','U') IS NULL CREATE TABLE nx.sourcing_sagub_price(
-        route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL, item_code NVARCHAR(60) NOT NULL,
-        sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
-        CONSTRAINT PK_nx_sourcing_sagub_price PRIMARY KEY(route_id, vendor_code, item_code))""")
+    oid = cur.execute("SELECT OBJECT_ID('nx.sourcing_sagub_price','U')").fetchone()[0]
+    if oid is None:
+        cur.execute("""CREATE TABLE nx.sourcing_sagub_price(
+            route_id INT NOT NULL, item_code NVARCHAR(60) NOT NULL, sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sagub_price PRIMARY KEY(route_id, item_code))""")
+    elif cur.execute("SELECT COL_LENGTH('nx.sourcing_sagub_price','vendor_code')").fetchone()[0] is not None:
+        cur.execute("IF OBJECT_ID('nx.sourcing_sagub_price_new','U') IS NOT NULL DROP TABLE nx.sourcing_sagub_price_new")
+        cur.execute("""CREATE TABLE nx.sourcing_sagub_price_new(
+            route_id INT NOT NULL, item_code NVARCHAR(60) NOT NULL, sagub_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sagub_price_new PRIMARY KEY(route_id, item_code))""")
+        cur.execute("""INSERT INTO nx.sourcing_sagub_price_new(route_id,item_code,sagub_price,upd_dt)
+            SELECT route_id, LTRIM(RTRIM(item_code)), MAX(sagub_price), MAX(upd_dt)
+            FROM nx.sourcing_sagub_price WHERE sagub_price IS NOT NULL GROUP BY route_id, LTRIM(RTRIM(item_code))""")
+        cur.execute("DROP TABLE nx.sourcing_sagub_price")
+        cur.execute("EXEC sp_rename 'nx.sourcing_sagub_price_new','sourcing_sagub_price'")
     _SAGUB_PRICE_READY = True
 
 # ============ ★확정 3구분 모델 — 조달 프로파일 업체·단가는 "외주 SUB 중심" ============
@@ -1457,14 +1452,26 @@ def _ensure_sagub_price_tbl(cur):
 # 3) 단품 매입품(레벨1 직속 매입) = 입력칸 없음. 매입 마스터 자동조회(읽기전용). PR_M_ITEM_COST 미접근(마감때만 수정 하드룰).
 _SUB_PRICE_READY = False
 def _ensure_sub_price_tbl(cur):
-    """nx.sourcing_sub_price 멱등 생성(프로세스당 1회). ASSY 매입단가 = 외주 SUB 단위. PK(route_id,vendor_code,sub_item)=근거키."""
+    """nx.sourcing_sub_price 멱등 생성/마이그(프로세스당 1회). ★ASSY 매입단가 = 외주 SUB당 1개(업체 공통) → PK(route_id,sub_item), vendor 제거.
+       구 스키마(vendor_code 포함)면 (route_id,sub_item)당 MAX(price)로 축약 마이그레이션."""
     global _SUB_PRICE_READY
     if _SUB_PRICE_READY:
         return
-    cur.execute("""IF OBJECT_ID('nx.sourcing_sub_price','U') IS NULL CREATE TABLE nx.sourcing_sub_price(
-        route_id INT NOT NULL, vendor_code NVARCHAR(20) NOT NULL, sub_item NVARCHAR(60) NOT NULL,
-        assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
-        CONSTRAINT PK_nx_sourcing_sub_price PRIMARY KEY(route_id, vendor_code, sub_item))""")
+    oid = cur.execute("SELECT OBJECT_ID('nx.sourcing_sub_price','U')").fetchone()[0]
+    if oid is None:
+        cur.execute("""CREATE TABLE nx.sourcing_sub_price(
+            route_id INT NOT NULL, sub_item NVARCHAR(60) NOT NULL, assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sub_price PRIMARY KEY(route_id, sub_item))""")
+    elif cur.execute("SELECT COL_LENGTH('nx.sourcing_sub_price','vendor_code')").fetchone()[0] is not None:
+        cur.execute("IF OBJECT_ID('nx.sourcing_sub_price_new','U') IS NOT NULL DROP TABLE nx.sourcing_sub_price_new")
+        cur.execute("""CREATE TABLE nx.sourcing_sub_price_new(
+            route_id INT NOT NULL, sub_item NVARCHAR(60) NOT NULL, assy_price FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+            CONSTRAINT PK_nx_sourcing_sub_price_new PRIMARY KEY(route_id, sub_item))""")
+        cur.execute("""INSERT INTO nx.sourcing_sub_price_new(route_id,sub_item,assy_price,upd_dt)
+            SELECT route_id, LTRIM(RTRIM(sub_item)), MAX(assy_price), MAX(upd_dt)
+            FROM nx.sourcing_sub_price WHERE assy_price IS NOT NULL GROUP BY route_id, LTRIM(RTRIM(sub_item))""")
+        cur.execute("DROP TABLE nx.sourcing_sub_price")
+        cur.execute("EXEC sp_rename 'nx.sourcing_sub_price_new','sourcing_sub_price'")
     _SUB_PRICE_READY = True
 
 def _outsourced_subs(cur, route_id):
@@ -1550,10 +1557,9 @@ def _route_line_items(cur, route_id):
 
 @router.get("/api/sourcing/sagub_price")
 def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Query("")):
-    """★사급 부품 가격 대상 = 외주 SUB의 하위 부품(PART)만(레벨1 직속 단품·용접봉 제외). vendor_code 지정 시 그 업체 스코프 저장값 병합.
+    """★사급 부품 가격 = 외주 SUB 하위 '매입' 부품당 1개(업체 공통). 근거키 (route_id·item_code). vendor_code는 무시(하위호환 파라미터).
        + subs(외주 SUB 목록) · direct_items(단품 매입=읽기전용 참고). 정산 마스터 미접근."""
     if route_id <= 0: raise HTTPException(400, "route_id 필요")
-    vendor_code = vendor_code.strip()
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur); _ensure_sagub_price_tbl(cur)
@@ -1565,32 +1571,27 @@ def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Quer
         subs = _outsourced_subs(cur, route_id)
         items = _sub_child_items(cur, route_id, subs)          # ★외주 SUB 하위 PART만
         direct = _direct_purchase_items(cur, route_id)         # 단품 매입(읽기전용 참고)
-        saved = {}
-        if vendor_code:
-            cur.execute("""SELECT LTRIM(RTRIM(item_code)), sagub_price FROM nx.sourcing_sagub_price
-                WHERE route_id=? AND vendor_code=?""", route_id, vendor_code)
-            saved = {str(r[0]).strip(): (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+        cur.execute("SELECT LTRIM(RTRIM(item_code)), sagub_price FROM nx.sourcing_sagub_price WHERE route_id=?", route_id)
+        saved = {str(r[0]).strip(): (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
         for it in items:
             it["sagub_price"] = saved.get(it["item_code"]) if it.get("is_purchase") else None   # 제작 부품은 사급단가 무의미(원가 자동)
         n_purchase = sum(1 for it in items if it.get("is_purchase"))
         n_priced = sum(1 for it in items if it["sagub_price"] is not None)
-        return {"header": hdr, "vendor_code": vendor_code, "rows": items,
+        return {"header": hdr, "rows": items,
                 "subs": [{"sub_item": s["sub_item"], "sub_name": s["sub_name"], "gubun": s["gubun"]} for s in subs],
                 "direct_items": direct, "n_item": len(items), "n_sub": len(subs), "n_direct": len(direct),
                 "n_purchase": n_purchase, "n_priced": n_priced,
-                "note": "후보/계획 사급 부품 가격(정산 아님) — nx.sourcing_sagub_price. 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동·입력 대상 아님, 레벨1 직속·용접봉 제외)."}
+                "note": "후보/계획 사급 부품 가격(정산 아님, 업체 공통) — nx.sourcing_sagub_price PK(route_id,item_code). 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동·입력 대상 아님, 레벨1 직속·용접봉 제외)."}
     finally:
         nx.close()
 
 @router.post("/api/sourcing/sagub_price/save")
 def sourcing_sagub_price_save(payload: dict = Body(...)):
-    """업체별·품목별 사급단가(계획) 저장. 근거키=(route_id·vendor_code·item_code) 스코프 upsert.
-       공란/None = 그 근거키 행 삭제(대량삭제 아님). route_line 밖 품번은 무시. 정산 마스터 미접근."""
+    """★사급 부품 가격(업체 공통) 저장. 근거키=(route_id·item_code) 스코프 upsert. vendor_code는 무시(하위호환).
+       공란/None = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 하위 '매입' 부품 밖은 무시(skip). 정산 마스터 미접근."""
     rid = int(payload.get("route_id") or 0)
-    vc = str(payload.get("vendor_code", "")).strip()
     rows = payload.get("rows", []) or []
     if rid <= 0: raise HTTPException(400, "route_id 필요")
-    if not vc: raise HTTPException(400, "vendor_code 필요")
     _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)
     nx = _nx_tx(); cur = nx.cursor()
     try:
@@ -1603,14 +1604,14 @@ def sourcing_sagub_price_save(payload: dict = Body(...)):
                 skip += 1; continue
             sp = _pfloat(r.get("sagub_price"))
             if sp is None:   # 공란/삭제 = 근거키 스코프 1행만 제거
-                cur.execute("DELETE FROM nx.sourcing_sagub_price WHERE route_id=? AND vendor_code=? AND item_code=?", rid, vc, ic)
+                cur.execute("DELETE FROM nx.sourcing_sagub_price WHERE route_id=? AND item_code=?", rid, ic)
                 dele += cur.rowcount; continue
             cur.execute("""MERGE nx.sourcing_sagub_price AS t
-                USING (SELECT ? AS route_id, ? AS vendor_code, ? AS item_code) AS s
-                ON t.route_id=s.route_id AND t.vendor_code=s.vendor_code AND t.item_code=s.item_code
+                USING (SELECT ? AS route_id, ? AS item_code) AS s
+                ON t.route_id=s.route_id AND t.item_code=s.item_code
                 WHEN MATCHED THEN UPDATE SET sagub_price=?, upd_dt=getdate()
-                WHEN NOT MATCHED THEN INSERT(route_id,vendor_code,item_code,sagub_price,upd_dt)
-                  VALUES(s.route_id,s.vendor_code,s.item_code,?,getdate());""", rid, vc, ic, sp, sp)
+                WHEN NOT MATCHED THEN INSERT(route_id,item_code,sagub_price,upd_dt)
+                  VALUES(s.route_id,s.item_code,?,getdate());""", rid, ic, sp, sp)
             upsert += 1
         nx.commit()
         return {"ok": True, "upsert": upsert, "del": dele, "skip": skip}
@@ -1621,15 +1622,13 @@ def sourcing_sagub_price_save(payload: dict = Body(...)):
     finally:
         nx.close()
 
-# ============ ★ASSY 매입단가(계획) — 외주 SUB 단위. nx.sourcing_sub_price ============
-# 벤더가 조립해 완성 SUB로 받는 값. 근거키 (route_id·vendor_code·sub_item) 스코프.
-# 대상 = 외주 SUB(_outsourced_subs). 후보/계획 단가(정산 아님): nx만 저장·정산 마스터 미접근.
+# ============ ★ASSY 매입단가(계획) — 외주 SUB당 1개(업체 공통). nx.sourcing_sub_price PK(route_id,sub_item) ============
+# 벤더가 조립해 완성 SUB로 받는 값. 가격은 업체 무관(공통), 업체는 배분%만. 후보/계획 단가(정산 아님): nx만 저장·정산 마스터 미접근.
 @router.get("/api/sourcing/sub_price")
 def sourcing_sub_price_get(route_id: int = Query(...), vendor_code: str = Query("")):
-    """후보(route_id)의 외주 SUB별 ASSY 매입단가(계획). subs(SUB 목록)+prices(업체×SUB 저장값, vendor_code 지정 시 그 업체만)
-       +direct_items(단품 매입=읽기전용 참고). 정산 마스터 미접근."""
+    """후보(route_id)의 외주 SUB별 ASSY 매입단가(계획·업체 공통). subs(SUB 목록)+prices(SUB당 1개)+direct_items(단품 매입=읽기전용).
+       vendor_code는 무시(하위호환 파라미터). 정산 마스터 미접근."""
     if route_id <= 0: raise HTTPException(400, "route_id 필요")
-    vendor_code = vendor_code.strip()
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur); _ensure_sub_price_tbl(cur)
@@ -1640,24 +1639,22 @@ def sourcing_sub_price_get(route_id: int = Query(...), vendor_code: str = Query(
                "approve_flag": (bool(h[3]) if h else False)}
         subs = _outsourced_subs(cur, route_id)
         direct = _direct_purchase_items(cur, route_id)
-        if vendor_code:
-            cur.execute("SELECT vendor_code, LTRIM(RTRIM(sub_item)), assy_price FROM nx.sourcing_sub_price WHERE route_id=? AND vendor_code=?", route_id, vendor_code)
-        else:
-            cur.execute("SELECT vendor_code, LTRIM(RTRIM(sub_item)), assy_price FROM nx.sourcing_sub_price WHERE route_id=?", route_id)
-        prices = [{"vendor_code": str(r[0] or "").strip(), "sub_item": str(r[1]).strip(),
-                   "assy_price": (float(r[2]) if r[2] is not None else None)} for r in cur.fetchall()]
-        return {"header": hdr, "vendor_code": vendor_code,
+        cur.execute("SELECT LTRIM(RTRIM(sub_item)), assy_price FROM nx.sourcing_sub_price WHERE route_id=?", route_id)
+        saved = {str(r[0]).strip(): (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
+        prices = [{"sub_item": s["sub_item"], "assy_price": saved.get(s["sub_item"])} for s in subs]
+        n_priced = sum(1 for p in prices if p["assy_price"] is not None)
+        return {"header": hdr,
                 "subs": [{"sub_item": s["sub_item"], "sub_name": s["sub_name"], "gubun": s["gubun"]} for s in subs],
-                "prices": prices, "direct_items": direct, "n_sub": len(subs), "n_priced": len(prices),
-                "note": "후보/계획 ASSY 매입단가(정산 아님) — nx.sourcing_sub_price. 대상=외주 SUB 단위(업체별)."}
+                "prices": prices, "direct_items": direct, "n_sub": len(subs), "n_priced": n_priced,
+                "note": "후보/계획 ASSY 매입단가(정산 아님, 업체 공통) — nx.sourcing_sub_price PK(route_id,sub_item). 대상=외주 SUB 단위."}
     finally:
         nx.close()
 
 @router.post("/api/sourcing/sub_price/save")
 def sourcing_sub_price_save(payload: dict = Body(...)):
-    """외주 SUB별 ASSY 매입단가(계획) 저장. 근거키=(route_id·vendor_code·sub_item) 스코프 upsert.
-       공란/None = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 밖 sub_item·업체 없는 행 무시. 정산 마스터 미접근.
-       payload {route_id, rows:[{vendor_code, sub_item, assy_price}]}."""
+    """★외주 SUB별 ASSY 매입단가(계획·업체 공통) 저장. 근거키=(route_id·sub_item) 스코프 upsert. vendor_code는 무시(하위호환).
+       공란/None = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 밖 sub_item 무시(skip). 정산 마스터 미접근.
+       payload {route_id, rows:[{sub_item, assy_price}]}."""
     rid = int(payload.get("route_id") or 0)
     rows = payload.get("rows", []) or []
     if rid <= 0: raise HTTPException(400, "route_id 필요")
@@ -1668,20 +1665,19 @@ def sourcing_sub_price_save(payload: dict = Body(...)):
         valid = {s["sub_item"] for s in _outsourced_subs(cur, rid)}   # 근거키 후보 = 외주 SUB만
         upsert = dele = skip = 0
         for r in rows:
-            vc = str(r.get("vendor_code", "")).strip()
             si = str(r.get("sub_item", "")).strip()
-            if not vc or not si or si not in valid:
+            if not si or si not in valid:
                 skip += 1; continue
             ap = _pfloat(r.get("assy_price"))
             if ap is None:   # 공란/삭제 = 근거키 스코프 1행만 제거
-                cur.execute("DELETE FROM nx.sourcing_sub_price WHERE route_id=? AND vendor_code=? AND sub_item=?", rid, vc, si)
+                cur.execute("DELETE FROM nx.sourcing_sub_price WHERE route_id=? AND sub_item=?", rid, si)
                 dele += cur.rowcount; continue
             cur.execute("""MERGE nx.sourcing_sub_price AS t
-                USING (SELECT ? AS route_id, ? AS vendor_code, ? AS sub_item) AS s
-                ON t.route_id=s.route_id AND t.vendor_code=s.vendor_code AND t.sub_item=s.sub_item
+                USING (SELECT ? AS route_id, ? AS sub_item) AS s
+                ON t.route_id=s.route_id AND t.sub_item=s.sub_item
                 WHEN MATCHED THEN UPDATE SET assy_price=?, upd_dt=getdate()
-                WHEN NOT MATCHED THEN INSERT(route_id,vendor_code,sub_item,assy_price,upd_dt)
-                  VALUES(s.route_id,s.vendor_code,s.sub_item,?,getdate());""", rid, vc, si, ap, ap)
+                WHEN NOT MATCHED THEN INSERT(route_id,sub_item,assy_price,upd_dt)
+                  VALUES(s.route_id,s.sub_item,?,getdate());""", rid, si, ap, ap)
             upsert += 1
         nx.commit()
         return {"ok": True, "upsert": upsert, "del": dele, "skip": skip}
