@@ -1682,7 +1682,7 @@ SCREEN.subvariant=(c)=>{
     mat:null,matErr:'',routeTarget:null,routeTargetNm:'',
     routes:[],gopts:[],lgopts:[],loading:false,rload:false,msg:'',
     newForm:null,detail:null,lineForm:null,vopts:[],
-    weldDiams:[],weldEdit:null,np:null};   // #3 관경별 용접 팝업 재사용 · np=노드 스코프 공정팝업
+    weldDiams:[],weldEdit:null,np:null,procCat:null,procCatFor:''};   // #3 관경별 용접 팝업 재사용 · np=노드 스코프 공정팝업 · procCat=전체 공정 카탈로그 캐시
   const loadWeldDiams=async()=>{if(st.weldDiams.length)return;try{const r=await fetch(`${API}/api/weld/diam`);st.weldDiams=(await r.json()).rows||[];}catch(e){}};
   // ---------- 좌측 검색 ----------
   const search=async(auto)=>{st.searching=true;draw();
@@ -1824,8 +1824,9 @@ SCREEN.subvariant=(c)=>{
       <button class="btn sp-ledit" draggable="false" data-lid="${p.line_id}" title="부품 라인 직접수정(BOM 구성과 동일 폼)" style="padding:0 5px;font-size:10px;color:#1c47a0">✎</button></div>`;};
     const nodeBox=(node,label,color,dsub,np2)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin-bottom:6px;background:#fff">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span>
-          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="margin-left:auto;padding:0 8px;font-size:10px;background:${color};color:#fff">수정</button></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span><div style="flex:1"></div>
+          ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff">🧩 해체</button>`:''}
+          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:0 8px;font-size:10px;background:${color};color:#fff">수정</button></div>
         ${np2.map(p=>`<div style="font-size:11.5px;padding:1px 0 1px 14px;color:#33507d">• ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 풀에서 드래그</div>'}
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
@@ -1846,48 +1847,27 @@ SCREEN.subvariant=(c)=>{
           <div class="sp-newsub" style="border:2px dashed #b9a0d8;border-radius:7px;padding:8px;text-align:center;color:#8e44ad;font-size:11.5px;background:#f6f0fc;cursor:copy">➕ 새 SUB로 묶기 — 여기로 부품을 드롭(레벨1 생성)</div>
         </div>
       </div></div>`;};
-  // ===== ★노드 스코프 공정 팝업(관경별 용접 + 공정별 작업ST) — 레벨0=ASSY값(없으면 BASE) / 신규SUB=빈값 =====
-  const npWeldPrev=r=>{const d=st.weldDiams.find(x=>Math.abs(x.pipe_diam-(+r.pipe_diam||0))<0.01);const lf=(st.np&&+st.np.loss)||1.5;if(!d||!(+r.weld_qty>0))return{use:0,st:0};return{use:d.std_use_qty*(+r.weld_qty)*lf,st:d.std_st*(+r.weld_qty)};};
-  const nodeProcModal=()=>{const np=st.np;if(!np)return '';const WG='용접';
-    let wUse=0,wSt=0;(np.weldRows||[]).forEach(r=>{const p=npWeldPrev(r);wUse+=p.use;wSt+=p.st;});wUse=Math.round(wUse*10000)/10000;wSt=Math.round(wSt*100)/100;
-    const hasWeld=(np.weldRows||[]).some(r=>+r.pipe_diam>0&&+r.weld_qty>0);
-    const cat=np.catalog||[];const weldCodes=cat.filter(p=>p.group===WG).map(p=>p.proc_code);
-    const procSt=code=>{if(weldCodes.includes(code)&&hasWeld)return code===weldCodes[0]?wSt:0;return +np.proc[code]||0;};
-    const cutSum=Math.round((np.cutRows||[]).reduce((a,x)=>a+(+x.wq||0),0)*100)/100;
-    let nodeAsm=0;cat.forEach(p=>nodeAsm+=procSt(p.proc_code));if(hasWeld&&!weldCodes.length)nodeAsm+=wSt;nodeAsm=Math.round(nodeAsm*100)/100;
+  // ===== ★노드 스코프 공정 팝업 = 품목BOM관리 '내부원가' 팝업과 완전 동일 창(PROC_MODAL_HTML 공유) =====
+  //   레벨0=ASSY값(없으면 BASE 조립 시드) / 신규SUB=빈값. cols=전체 공정(가공 own + 조립 assy) · 관경=전체.
+  //   상단 info(이 노드 공수/전체 공수합/BASE ±차이)만 추가(레이아웃 본체는 naeProcModal과 100% 동일).
+  const nodeProcModal=()=>{const np=st.np;if(!np)return '';
+    // 관경별 용접 소요량/ST(표시) — weldCounts × 표준(st.weldDiams)
+    const STS={},STU={};(st.weldDiams||[]).forEach(d=>{STS[d.pipe_diam.toFixed(2)]=d.std_st;STU[d.pipe_diam.toFixed(2)]=d.std_use_qty;});
+    let wSt=0;Object.keys(np.weldCounts||{}).forEach(k=>{const q=+np.weldCounts[k]||0;if(q>0)wSt+=(STS[k]||0)*q;});wSt=Math.round(wSt*100)/100;
+    // cols = own(가공) + assy(조립). naeProcModal과 동일 구성(sec='own'/'c0').
+    const cols=[];
+    (np.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
+    (np.assy||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
+    // 상단 info(추가): 이 노드 공수(절삭 자동귀속 + 조립 라이브) / 전체 공수합 / BASE ±차이
+    const cutSum=np.cutSum||0;
+    let nodeAsm=0;cols.forEach(cc=>nodeAsm+=+cc.wq||0);nodeAsm=Math.round(nodeAsm*100)/100;
     const nodeG=Math.round((cutSum+nodeAsm)*100)/100;
     const globalTotal=Math.round((np.otherTotal+cutSum+nodeAsm)*100)/100, gdiff=Math.round((globalTotal-np.base)*100)/100, gok=Math.abs(gdiff)<0.5;
-    const opts=st.weldDiams.map(d=>`<option value="${d.pipe_diam}">${d.pipe_diam}φ (원단위 ${nfq(d.std_use_qty)} · ST ${nfq(d.std_st)})</option>`).join('');
-    const wTypes=['RAC30599301-1','RAC30599327','RAC30599328','RAC30599303'];
-    const half=Math.ceil(cat.length/2);
-    const band=sub=>!sub.length?'':`<table class="tbl" style="font-size:11px;table-layout:fixed;width:100%;margin-bottom:4px"><thead><tr><th style="text-align:left;width:52px">공정</th>${sub.map(p=>`<th class="num" title="${esc(p.name)}·${esc(p.proc_code)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px">${esc(p.name)}</th>`).join('')}</tr></thead>
-      <tbody><tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(p=>{const w=weldCodes.includes(p.proc_code)&&hasWeld;return `<td class="num">${w?`<b style="color:#8e44ad" title="관경별 용접 자동">${nfq(wSt)}</b>`:`<input class="np-pq" data-code="${esc(p.proc_code)}" type="number" step="any" min="0" value="${np.proc[p.proc_code]!=null&&np.proc[p.proc_code]!==''?np.proc[p.proc_code]:''}" style="width:44px;text-align:center">`}</td>`;}).join('')}</tr>
-      <tr><td style="text-align:left;color:#8a94a6">그룹</td>${sub.map(p=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(p.group||'')}</td>`).join('')}</tr></tbody></table>`;
-    return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(30,20,50,.45);z-index:9996;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
-      <div style="background:#fff;border-radius:11px;width:760px;max-width:97vw;box-shadow:0 20px 60px rgba(30,10,55,.4)">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:${np.isAssy?'#1c47a0':'#8e44ad'};color:#fff;border-radius:11px 11px 0 0"><b>✎ 공정 등록/수정 — ${esc(np.label)}</b><span id="np-x" style="cursor:pointer;font-size:17px">✕</span></div>
-        <div style="padding:12px 16px">
-          <div style="font-size:11.5px;padding:5px 8px;background:#f4f7fc;border-radius:6px;margin-bottom:8px">이 노드 공수 <b style="color:#1c47a0">${nfq(nodeG)}</b> (절삭 ${nfq(cutSum)}+조립 ${nfq(nodeAsm)}) · 전체 공수합 <b style="color:${gok?'#1c7c3a':'#c0392b'}">${nfq(globalTotal)}</b> / BASE ${np.base} <span style="color:${gok?'#1c7c3a':'#c0392b'}">(${gdiff>0?'+':''}${nfq(gdiff)}${gok?' ✔':' ✖ 차감/추가 필요'})</span></div>
-          <div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;padding:6px;margin-bottom:8px">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px"><b style="color:#8e44ad">🔧 관경별 용접</b>
-              <select id="np-wtype" style="font-size:12px">${wTypes.map(w=>`<option value="${w}" ${w===np.weldItem?'selected':''}>${w}</option>`).join('')}</select>
-              <span style="color:#8a94a6;font-size:10px">배수(로스)</span><input id="np-loss" type="number" step="0.1" min="0" value="${np.loss}" style="width:52px">
-              <span style="color:#8a94a6;font-size:10px">소요량(재료) <b style="color:#1c6b3a">${q4(wUse)}</b> · 용접ST(가공비) <b style="color:#8e44ad">${nfq(wSt)}</b></span></div>
-            <table class="tbl" style="font-size:11px"><thead><tr><th>관경</th><th class="num">점수</th><th class="num">소요량</th><th class="num">ST</th><th></th></tr></thead>
-            <tbody>${(np.weldRows||[]).map((r,i)=>{const pv=npWeldPrev(r);return `<tr><td><select class="np-wf" data-i="${i}" data-k="pipe_diam" style="width:150px"><option value="">-관경-</option>${opts.replace(`value="${r.pipe_diam}"`,`value="${r.pipe_diam}" selected`)}</select></td>
-              <td class="num"><input class="np-wf" data-i="${i}" data-k="weld_qty" type="number" step="1" min="0" value="${r.weld_qty!=null&&r.weld_qty!==''?r.weld_qty:''}" style="width:50px;text-align:right"></td>
-              <td class="num">${q4(pv.use)}</td><td class="num">${nfq(pv.st)}</td><td class="center"><span class="np-wdel" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td></tr>`;}).join('')||'<tr><td colspan="5" class="empty">＋관경 추가(용접 없으면 비움)</td></tr>'}</tbody></table>
-            <button class="btn" id="np-wadd" style="margin-top:4px;padding:1px 9px">＋ 관경</button></div>
-          <div style="border:1px solid #cfe0ff;border-radius:8px;background:#f7faff;padding:6px">
-            <div style="font-weight:600;color:#1c47a0;margin-bottom:4px">⚙ 공정별 작업ST <span style="color:#8a94a6;font-weight:400">(용접=관경별 자동 · 나머지 직접입력 · 단가/UPH/임율은 마감때만 수정)</span></div>
-            ${cat.length?band(cat.slice(0,half))+band(cat.slice(half)):'<div class="empty" style="font-size:11px">조립 공정 카탈로그 없음</div>'}
-            ${(np.cutRows||[]).length?`<div style="font-size:10.5px;color:#b5651d;margin-top:4px">⚙ 절삭(부품 자동귀속·읽기전용): ${(np.cutRows||[]).map(x=>esc(x.name)+' '+nfq(x.wq)).join(', ')} = ${nfq(cutSum)}</div>`:''}
-          </div>
-        </div>
-        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
-          <span style="color:#8a94a6;font-size:11px">저장=이 노드 공정 기록(용접ST=가공비·용접봉 소요량=재료). 전체 공수합=BASE는 [전체 저장]에서 검증.</span>
-          <span><button class="btn" id="np-save" style="background:#1c7c3a;color:#fff">💾 저장</button> <button class="btn" id="np-cancel">닫기</button></span></div>
-      </div></div>`;};
+    const infoBar=`<div style="font-size:11.5px;padding:5px 8px;background:#f4f7fc;border-radius:6px;margin-bottom:8px">이 노드 공수 <b style="color:#1c47a0">${nfq(nodeG)}</b> (절삭 ${nfq(cutSum)}+조립 ${nfq(nodeAsm)}) · 전체 공수합 <b style="color:${gok?'#1c7c3a':'#c0392b'}">${nfq(globalTotal)}</b> / BASE ${np.base} <span style="color:${gok?'#1c7c3a':'#c0392b'}">(${gdiff>0?'+':''}${nfq(gdiff)}${gok?' ✔':' ✖ 차감/추가 필요'})</span>`
+      +(cutSum?` · <span style="color:#b5651d">⚙ 절삭(부품 자동귀속·읽기전용): ${(np.cutRows||[]).map(x=>esc(x.name)+' '+nfq(x.wq)).join(', ')} = ${nfq(cutSum)}</span>`:'')
+      +` · 🔧 용접ST(가공비) <b style="color:#8e44ad">${nfq(wSt)}</b> (용접공정 컬럼에 입력/시드된 값이 공수합에 반영)</div>`;
+    return PROC_MODAL_HTML({node:np.node,title:`✎ 공정 등록/수정 — ${esc(np.label)}`,subtitle:(np.isAssy?'제품/조립 — 관경별 용접 + 조립공정(용접·포장·체결)':'부품 — 가공공정'),
+      isAssy:np.isAssy,weldDiams:st.weldDiams,weldItem:np.weldItem,weldTypes:np.weldTypes,weldCounts:np.weldCounts,cols,infoBar});};
   // ---------- #4 업체 매핑(조달프로파일) — 승인 후보(구조)에 업체·배분%·유효기간 (2계층) ----------
   const profPanel=(R)=>{
     const rp=(st.rp&&st.rp.route_id===R.route_id)?st.rp:null;
@@ -2025,6 +2005,7 @@ SCREEN.subvariant=(c)=>{
      </div>
      ${st.msg?`<div class="page-sub" style="color:#1c7c3a">${esc(st.msg)}</div>`:''}
      ${newModal()}${detailModal()}${lineModal()}${weldModal()}${nodeProcModal()}
+     ${PROC_MODAL_CSS}
      <style>.sv-row.sel{background:#e8f0ff}.sv-row:hover{background:#eef4ff}.sv-mrow:hover{background:#f4f8ff}.sv-mrow.sel{outline:2px solid #1c7c3a;outline-offset:-2px;background:#eafaef}.sv-card:hover{filter:brightness(.985);box-shadow:0 2px 8px rgba(30,45,70,.08)}</style>`;
     const g=id=>c.querySelector(id);
     g('#sv-search').onclick=()=>{st.q=g('#sv-q').value;search();};
@@ -2090,6 +2071,12 @@ SCREEN.subvariant=(c)=>{
           const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+' 생성';await reloadPanel();}else alert('SUB 생성 실패');}catch(err){alert('SUB 생성 오류: '+err.message);}};}}
     // 노드 [수정] → 관경별 용접 + 공정별 작업ST 팝업(노드 스코프: 레벨0=ASSY값 / 신규SUB=빈값)
     c.querySelectorAll('.sp-nedit').forEach(b=>b.onclick=e=>{e.stopPropagation();openNodeProc(b.dataset.node,b.dataset.sub==='0');});
+    // [해체] SUB 노드 → 하위부품 ASSY 복귀 · 비종속 공정/용접 ASSY 이관(공수합 보존, 백엔드 sub/dissolve). 해체 후 패널 갱신.
+    c.querySelectorAll('.sp-ndissolve').forEach(b=>b.onclick=async e=>{e.stopPropagation();
+      if(!confirm('이 SUB를 해체합니다.\n하위부품은 ASSY(레벨0)로 복귀하고, SUB의 비종속 공정/용접은 ASSY로 이관되어 공수합이 보존됩니다. 계속?'))return;
+      try{const r=await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+b.dataset.sub})});
+        const j=await r.json();if(j.ok){st.msg=`SUB 해체 ✔ 부품 ${j.freed} 복귀 · 공정 이관 ${j.moved_proc} · 용접 이관 ${j.moved_weld}`;await reloadPanel();}
+        else alert('해체 실패: '+(j.detail||JSON.stringify(j)));}catch(err){alert('해체 오류: '+err.message);}});
     // 전체 저장 = ①신규SUB중복검사→재사용확인 ②공수합=BASE ③부품수 일치
     {const b=g('#sp-finalize');if(b)b.onclick=()=>finalizeRoute(rid);}
     // ---- #4 업체 매핑(조달프로파일) binds ----
@@ -2126,53 +2113,70 @@ SCREEN.subvariant=(c)=>{
         alert(`용접점 저장 ✔ 용접봉 소요량 ${q4(j.total_use_qty)} · 용접ST ${nfq(j.total_st)} → [${_pmap[w.wproc]||w.wproc}]공정 적용됨. 공수합=BASE 확인 후 '공정 배치 저장'하세요.`);
       }catch(e){alert('오류: '+e.message);}};}};
   // ---------- ★노드 스코프 공정 팝업 열기/저장 + 전체 저장(검증 3종) ----------
+  // 노드 팝업 열기 = naeProcD와 동일 구조(own 가공 + assy 조립)로 로드. 전체 공정 카탈로그는 /api/cost/proc/get 재사용(ASSY 기준 1회 캐시).
   const openNodeProc=async(node,isAssy)=>{await loadWeldDiams();const rd=st.rd||{};
-    const asm=rd.asm_procs||[];
-    const catalog=asm.map(a=>({proc_code:a.proc_code,name:a.name,group:a.group}));
+    // 전체 공정 카탈로그(가공 own + 조립 assy) — 내부원가 팝업과 동일 소스. uph/cg는 ASSY 라우팅 참조.
+    if(!st.procCat||st.procCatFor!==st.routeTarget){
+      let cat=[],ownV={},asmV={};
+      try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(st.routeTarget)}`);const j=await r.json();
+        cat=j.catalog||[];(j.own_procs||[]).forEach(p=>ownV[p.proc_code]=p);
+        const cr=(j.carriers||[])[0];((cr&&cr.procs)||[]).forEach(p=>asmV[p.proc_code]=p);
+      }catch(e){}
+      st.procCat={cat,ownV,asmV};st.procCatFor=st.routeTarget;}
+    const {cat,ownV,asmV}=st.procCat;
+    const ownCat=cat.filter(p=>!p.is_assy), asmCat=cat.filter(p=>p.is_assy);
+    // 프리필: 그 노드 저장값(sourcing_route_proc). 레벨0 ASSY & 미저장 → BASE 조립 시드. 신규 SUB → 빈값.
     const saved={};(rd.procs||[]).forEach(p=>{if(p.node_item===node)saved[p.proc_code]=+p.work_qty||0;});
     const hasSaved=Object.keys(saved).length>0;
-    const proc={};
-    if(isAssy&&!hasSaved){asm.forEach(a=>{if(+a.wq>0)proc[a.proc_code]=+a.wq;});}  // 레벨0 최초=BASE 조립값 시드
-    else{Object.assign(proc,saved);}                                                // 저장값(신규 SUB=빈값)
+    const seed={};if(isAssy&&!hasSaved){(rd.asm_procs||[]).forEach(a=>{if(+a.wq>0)seed[a.proc_code]=+a.wq;});}
+    const prefill=hasSaved?saved:(isAssy?seed:{});
+    // own(가공)/assy(조립) = naeProcD.own + carriers[0].rows 대응. wq=프리필, uph/cg=ASSY 라우팅 참조.
+    const own=ownCat.map(p=>{const v=ownV[p.proc_code]||{};return {proc_code:p.proc_code,name:p.name,group:p.group,work_qty:+prefill[p.proc_code]||0,prod_uph:+v.prod_uph||0,calc_gubun:v.calc_gubun||'3'};});
+    const assy=asmCat.map(p=>{const v=asmV[p.proc_code]||{};return {proc_code:p.proc_code,name:p.name,group:p.group,work_qty:+prefill[p.proc_code]||0,prod_uph:+v.prod_uph||0,calc_gubun:v.calc_gubun||'3'};});
+    // 관경별 용접(weldCounts) = 그 노드 저장 용접점(pipe_diam→count)
     const welds=(rd.welds||[]).filter(w=>w.node_item===node);
-    const weldRows=welds.map(w=>({weld_item:w.weld_item,pipe_diam:w.pipe_diam,weld_qty:w.weld_qty}));
+    const weldCounts={};welds.forEach(w=>{if(w.pipe_diam)weldCounts[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});
     const weldItem=(welds[0]&&welds[0].weld_item)||'RAC30599301-1';
+    const weldTypes=[...new Set(welds.map(w=>w.weld_item).filter(Boolean))];
+    // info(상단) 계산용: 이 노드 절삭 자동귀속 + 전역 기타합
     const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC');
     const lines=(rd.lines||[]).filter(l=>!RACX(l)),parts=lines.filter(l=>l.node_kind!=='SUB'),subs=lines.filter(l=>l.node_kind==='SUB');
     let nodeParts;if(isAssy){nodeParts=parts.filter(p=>!p.parent_line);}else{const s=subs.find(x=>(x.sub_item||x.child_item)===node);nodeParts=s?parts.filter(p=>p.parent_line===s.line_id):[];}
     const partCut=rd.part_cut||{},cutAgg={};
     nodeParts.forEach(p=>{(partCut[p.child_item]||[]).forEach(x=>{const a=cutAgg[x.proc_code]||(cutAgg[x.proc_code]={name:x.name,wq:0});a.wq+=+x.wq||0;});});
-    const cutRows=Object.keys(cutAgg).map(c=>({proc_code:c,name:cutAgg[c].name,wq:Math.round(cutAgg[c].wq*100)/100}));
+    const cutRows=Object.keys(cutAgg).map(k=>({proc_code:k,name:cutAgg[k].name,wq:Math.round(cutAgg[k].wq*100)/100}));
     let cutAll=0;Object.values(partCut).forEach(arr=>arr.forEach(x=>cutAll+=+x.wq||0));
     let procOther=0;(rd.procs||[]).forEach(p=>{if(p.node_item!==node)procOther+=+p.work_qty||0;});
     const thisCut=cutRows.reduce((a,x)=>a+x.wq,0);
     const otherTotal=Math.round((cutAll-thisCut+procOther)*100)/100;   // 전역합 = otherTotal + (이 노드 절삭 + 조립 라이브)
-    st.np={node,isAssy,label:(isAssy?'ASSY '+node+' (레벨0)':'SUB '+node),catalog,proc,weldRows,weldItem,loss:1.5,cutRows,otherTotal,base:rd.base_gongsu||0};
+    st.np={node,isAssy,label:(isAssy?'ASSY '+node+' (레벨0)':'SUB '+node),
+      own,assy,weldCounts,weldItem,weldTypes,loss:1.5,
+      cutRows,cutSum:Math.round(thisCut*100)/100,otherTotal,base:rd.base_gongsu||0};
     draw();};
   const saveNodeProc=async()=>{const np=st.np;if(!np||!st.rd)return;const rid=st.rd.route_id;
-    const wrows=(np.weldRows||[]).filter(r=>+r.pipe_diam>0&&+r.weld_qty>0);
-    let wSt=0;wrows.forEach(r=>{const d=st.weldDiams.find(x=>Math.abs(x.pipe_diam-(+r.pipe_diam||0))<0.01);if(d)wSt+=d.std_st*(+r.weld_qty);});wSt=Math.round(wSt*100)/100;
-    const hasWeld=wrows.length>0;
-    const cat=np.catalog||[],weldCodes=cat.filter(p=>p.group==='용접').map(p=>p.proc_code);
+    // 관경별 용접(재료) — weldCounts → 행. loss=1.5(내부원가 팝업과 동일).
+    const wrows=Object.keys(np.weldCounts||{}).filter(k=>+np.weldCounts[k]>0).map(k=>({weld_item:np.weldItem,pipe_diam:+k,weld_qty:+np.weldCounts[k]}));
+    // 공정(가공비) — own + assy 전 컬럼 work_qty>0. 용접ST(가공비)는 용접공정 컬럼(작업ST)에 입력/시드된 값(내부원가 팝업과 동일 모델).
     const procs=[];
-    cat.forEach(p=>{let w;if(weldCodes.includes(p.proc_code)){w=(p.proc_code===weldCodes[0])?(hasWeld?wSt:(+np.proc[p.proc_code]||0)):(hasWeld?0:(+np.proc[p.proc_code]||0));}else{w=+np.proc[p.proc_code]||0;}if(w>0)procs.push({proc_code:p.proc_code,work_qty:w});});
-    if(hasWeld&&!weldCodes.length)procs.push({proc_code:'51',work_qty:wSt});   // 카탈로그에 용접공정 없으면 51로
+    (np.own||[]).forEach(p=>{if(+p.work_qty>0)procs.push({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph||0,calc_gubun:p.calc_gubun||'3'});});
+    (np.assy||[]).forEach(p=>{if(+p.work_qty>0)procs.push({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph||0,calc_gubun:p.calc_gubun||'3'});});
     try{
-      await fetch(`${API}/api/sourcing/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,node_item:np.node,loss_factor:+np.loss||1.5,rows:wrows.map(r=>({weld_item:np.weldItem,pipe_diam:+r.pipe_diam,weld_qty:+r.weld_qty}))})});
+      await fetch(`${API}/api/sourcing/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,node_item:np.node,loss_factor:+np.loss||1.5,rows:wrows})});
       const r=await fetch(`${API}/api/sourcing/proc/node_save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,node_item:np.node,procs})});
       const j=await r.json();if(!j.ok){alert('공정 저장 실패: '+(j.detail||JSON.stringify(j)));return;}
-      st.np=null;st.msg=`공정 저장 ✔ ${np.label} 노드공수 ${nfq(j.node_gongsu)}${hasWeld?' (용접ST '+nfq(wSt)+')':''}`;await loadRD(rid);
+      st.np=null;st.msg=`공정 저장 ✔ ${np.label} 노드공수 ${nfq(j.node_gongsu)}`;await loadRD(rid);
     }catch(e){alert('저장 오류: '+e.message);}};
-  const bindNodeProc=()=>{if(!st.np)return;const np=st.np,g=id=>c.querySelector(id);
-    {const x=g('#np-x');if(x)x.onclick=()=>{st.np=null;draw();};}
-    {const b=g('#np-cancel');if(b)b.onclick=()=>{st.np=null;draw();};}
-    {const b=g('#np-save');if(b)b.onclick=saveNodeProc;}
-    {const t=g('#np-wtype');if(t)t.onchange=()=>{np.weldItem=t.value;};}
-    {const l=g('#np-loss');if(l)l.oninput=()=>{np.loss=+l.value||1.5;draw();};}
-    {const b=g('#np-wadd');if(b)b.onclick=()=>{np.weldRows.push({weld_item:np.weldItem,pipe_diam:'',weld_qty:''});draw();};}
-    c.querySelectorAll('.np-wf').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i;if(!np.weldRows[i])return;np.weldRows[i][el.dataset.k]=el.value;draw();};});
-    c.querySelectorAll('.np-wdel').forEach(el=>el.onclick=()=>{np.weldRows.splice(+el.dataset.i,1);draw();});
-    c.querySelectorAll('.np-pq').forEach(el=>{el.oninput=()=>{np.proc[el.dataset.code]=el.value;};el.onchange=()=>{np.proc[el.dataset.code]=el.value;draw();};});};   // 입력중=값만(포커스유지) · 확정시 draw(라이브합)
+  // 노드 팝업 바인딩 = 공유 PROC_MODAL_BIND. own/assy에 write-back(sec='own'/'c0'). 용접횟수→weldCounts.
+  const bindNodeProc=()=>{if(!st.np)return;const np=st.np;
+    const rowsOf=sec=>sec==='own'?np.own:np.assy;
+    PROC_MODAL_BIND(c,{
+      onClose:()=>{st.np=null;draw();},
+      onSave:saveNodeProc,
+      onProcInput:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].work_qty=+v||0;},   // 입력중 값만(포커스 유지)
+      onProcCommit:()=>draw(),                                                          // 확정(blur)시 상단 info 갱신
+      onWeldCount:(d,v)=>{const val=+v||0;if(val>0)np.weldCounts[d]=val;else delete np.weldCounts[d];draw();},
+      onWeldType:(v)=>{np.weldItem=v;},
+    });};
   const finalizeRoute=async(rid)=>{const item=st.routeTarget;
     try{
       const sm=await(await fetch(`${API}/api/sourcing/sub/match?route_id=${rid}`)).json();
