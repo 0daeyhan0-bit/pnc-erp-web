@@ -765,6 +765,8 @@ function priceItemView(c){
      const ps=c.querySelector('.pp-save');if(ps)ps.onclick=peSave;}
     c.querySelectorAll('.pe-assy').forEach(el=>el.onchange=()=>{if(st.planEdit){const s=st.planEdit.subs.find(x=>x.sub_item===el.dataset.si);if(s)s.assy=(el.value===''?null:el.value);}});
     c.querySelectorAll('.pe-sag').forEach(el=>el.onchange=()=>{if(st.planEdit){const x=st.planEdit.children.find(y=>y.item_code===el.dataset.ic);if(x)x.sagub=(el.value===''?null:el.value);}});
+    c.querySelectorAll('.pe-assyov').forEach(el=>el.onchange=()=>{if(st.planEdit)st.planEdit.assyOv[ovk(el.dataset.vc,el.dataset.si)]=(el.value===''?null:el.value);});
+    c.querySelectorAll('.pe-sagov').forEach(el=>el.onchange=()=>{if(st.planEdit)st.planEdit.sagubOv[ovk(el.dataset.vc,el.dataset.ic)]=(el.value===''?null:el.value);});
     attachResizers(c);
     const _g=c.querySelector('#pi-list'); if(_g&&_sc) _g.scrollTop=_sc;   // 스크롤 복원
   };

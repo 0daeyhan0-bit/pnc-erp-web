@@ -144,7 +144,33 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
 - 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
 
-## ★★가격=SUB/품목 공통(업체 무관) 재구성 + 품목단가 관리 편집 (2026-08-05, 사용자 운영현실)
+## ★★★공통 기본값 + 업체별 예외(override) (2026-08-05, 사용자 추가)
+가격은 일반적으로 업체 공통이나 **업체별로 다를 수 있어 예외(override) 분리 가능**해야 함. 모델=**공통 단가(기본)+업체별 예외**, 조회/계산 **COALESCE(override, 공통)**.
+
+### 스키마(멱등 마이그, vendor_code 재도입 = override 차원)
+- nx.sourcing_sub_price / nx.sourcing_sagub_price: **PK(route_id,vendor_code,sub_item|item_code)**, `vendor_code=''`=공통(기본)·지정=그 업체 override. `_ensure_*_tbl`가 '공통전용'(vendor 없음) 스키마 감지 시 기존행을 `vendor_code=''`로 재구성(멱등). ★_new 테이블 PK는 **무명(자동)** — 구 rename 잔재 PK명(PK_..._new) 충돌 회피(실제 사고 후 수정).
+- ASSY·사급 둘 다 override 지원. 사급은 매입 부품만(제작 skip) 유지.
+
+### 엔드포인트
+- sub_price/sagub_price GET: 각 SUB/품목에 `assy_price|sagub_price`(공통) + `overrides:[{vendor_code,price}]`. `n_override` 반환.
+- save: rows에 `vendor_code`(''=공통, 지정=override), 근거키 (route_id,vendor_code,sub/item). null=그 스코프 1행 삭제(override 삭제해도 공통 불변).
+- plan_price: route별 assy_subs/sagub_items에 공통+overrides 동봉, `n_override`.
+- route/cost: 무변경(NxCostEngine 마스터 실원가 diff0 유지, 계획단가 미반영 — 기존 결정).
+
+### 프론트
+- **screens.pur.js 모달**: SUB 블록 = ASSY 공통 1칸 + 사급 공통(매입 부품별) + **🔀 업체별 예외 grid**(행=활성 업체, 열=[ASSY 예외 | 각 매입부품 예외], placeholder=공통값, 비우면 공통). OK(vc,key) 맵. 저장=공통(vendor='')+override rows.
+- **core.js 품목단가 관리**: 계획단가 편집기에 공통 + 업체별 예외 열(pe-assyov·pe-sagov), 읽기뷰에 override 표시([업체:값]). ovk(vc,k) 맵. 동일 엔드포인트 → 양방향 동기화.
+
+### 검증(e2e R02 route_id 60, S07, 명진 2306)
+- ASSY 공통 18500 + 명진 override 17000 → GET 공통=18500·명진=17000 (**COALESCE: 명진→17000·타업체→18500**). 사급 공통 9100 + 명진 8500 동일 패턴.
+- plan_price n_override=2, assy_subs 공통+override 동봉.
+- **override 삭제**(공란) → 공통 18500 유지·override수=0(공통 불변).
+- **양방향 동기화**: 품목단가 관리 편집 형식(공통 16000+명진 15000) 저장 → 조달프로파일 GET 공통=16000·명진=15000.
+- route/cost silwon **5722.2 diff0=True**. master MD5 **6789628C…** 불변. sourcing.py PR_M_ITEM_COST 쿼리 0(주석 4). openapi 325. py_compile OK·재기동. JS curly/brack 0·bt even. 마커(pm-assyov·pm-sagov·OK·업체별예외 / pe-assyov·pe-sagov·ovk·COALESCE) 서빙 200. index.html ?v=260805s6.
+- 테스트데이터 정리: 공통+override+profile 삭제 → 전 0 복귀.
+- ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증). (드문 예외였던 업체별 상이가격 = 이번 override로 구현 완료.)
+
+## ★★가격=SUB/품목 공통(업체 무관) 재구성 + 품목단가 관리 편집 (2026-08-05, 사용자 운영현실) [override로 확장됨 — 위 참조]
 운영현실: 가격은 업체별로 동일(다른 경우 드묾). 업체는 공급능력 기준 **배분%**만 지정. → 가격을 **업체 단위가 아니라 SUB/품목 단위(업체 공통)** 로 전환. 또 계획단가를 **품목단가 관리에서도 편집**(양쪽 동일 nx 레이어 → 자동 동기화).
 
 ### 스키마 마이그레이션(vendor 제거, 멱등)
