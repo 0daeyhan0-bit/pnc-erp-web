@@ -642,7 +642,7 @@ function priceHistSections(rows){
 /* 품목별 단가조회 — 라이브 PR_M_ITEM_COST (거래처별·적용월 시계열, 레거시 w_pr_master_150) */
 function priceItemView(c){
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',lg:'',sg:'',cust:'',lgroups:[],sgroups:[],sel:'',det:null,plan:null,loading:false};
+  const st={rows:[],cnt:0,q:'',lg:'',sg:'',cust:'',lgroups:[],sgroups:[],sel:'',det:null,plan:null,planEdit:null,loading:false};
   let custT=null;
   const dcol=s=>{s=''+(s||'');return s.length===6?`${s.slice(0,2)}/${s.slice(2,4)}`:s;};
   const tagColor=t=>t==='1'?'#1c47a0':(t==='E'?'#b12a2a':'#7a5c1c');
@@ -652,31 +652,71 @@ function priceItemView(c){
     st.loading=false;draw();};
   const loadDet=async(item)=>{st.sel=item;st.det=null;st.plan=null;draw();
     try{st.det=await (await fetch(`${API}/api/price/item?item=`+encodeURIComponent(item))).json();}catch(e){}
-    // 조달후보 업체별 계획단가(후보/계획 단가 — 정산 아님, sourcing 레이어 읽기전용)
+    // 조달후보 계획단가(후보/계획 단가 — 정산 아님, sourcing 레이어). ★여기서도 편집 가능(조달 프로파일과 동일 nx 테이블)
+    st.planEdit=null;
     try{st.plan=await (await fetch(`${API}/api/sourcing/plan_price?item=`+encodeURIComponent(item))).json();}catch(e){st.plan=null;}
     draw();};
-  // 후보/계획 단가 섹션(읽기전용) — 정산 매입/판매 단가(마스터, 마감때만 수정)와 명확히 구분
+  // ★계획단가 편집(품목단가 관리에서도 입력) — 조달 프로파일과 동일 엔드포인트(sub_price/sagub_price, route/SUB/품목 공통 키) 재사용 → 자동 동기화
+  const peOpen=async(route_id)=>{st.planEdit={route_id,subs:[],children:[],direct:[],loading:true,saving:false,msg:''};draw();
+    try{const sr=await (await fetch(`${API}/api/sourcing/sub_price?route_id=${route_id}`)).json();
+      st.planEdit.subs=(sr.subs||[]).map(s=>({sub_item:s.sub_item,sub_name:s.sub_name||'',gubun:s.gubun||'',
+        assy:((sr.prices||[]).find(p=>p.sub_item===s.sub_item)||{}).assy_price}));
+      st.planEdit.direct=sr.direct_items||[];
+    }catch(e){}
+    try{const gr=await (await fetch(`${API}/api/sourcing/sagub_price?route_id=${route_id}`)).json();
+      st.planEdit.children=(gr.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',sub_item:x.sub_item||'',
+        gubun:x.gubun||'',is_purchase:!!x.is_purchase,sagub:(x.is_purchase&&x.sagub_price!=null?x.sagub_price:null)}));
+    }catch(e){}
+    st.planEdit.loading=false;draw();};
+  const peClose=()=>{st.planEdit=null;draw();};
+  const peSave=async()=>{const pe=st.planEdit;if(!pe)return;pe.saving=true;pe.msg='';draw();
+    const arows=pe.subs.map(s=>({sub_item:s.sub_item,assy_price:(s.assy!==''&&s.assy!=null)?parseFloat(s.assy):null}));
+    const grows=pe.children.filter(x=>x.is_purchase).map(x=>({item_code:x.item_code,sagub_price:(x.sagub!==''&&x.sagub!=null)?parseFloat(x.sagub):null}));
+    try{let a=0,g=0;
+      if(arows.length){const r=await (await fetch(`${API}/api/sourcing/sub_price/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:pe.route_id,rows:arows})})).json();if(r&&r.ok)a=(r.upsert||0);}
+      if(grows.length){const r=await (await fetch(`${API}/api/sourcing/sagub_price/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:pe.route_id,rows:grows})})).json();if(r&&r.ok)g=(r.upsert||0);}
+      st.planEdit=null;
+      try{st.plan=await (await fetch(`${API}/api/sourcing/plan_price?item=`+encodeURIComponent(st.sel))).json();}catch(e){}
+      draw();
+    }catch(e){pe.saving=false;pe.msg='❌ 저장 실패: '+e;draw();}};
+  // 후보/계획 단가 섹션 — 정산 매입/판매 단가(마스터, 마감때만 수정)와 명확히 구분. 계획단가는 여기서 편집 가능
   const planPriceSection=(pl)=>{
-    if(!pl||!pl.routes||!pl.routes.length)return '';
-    const rows=[];
-    pl.routes.forEach(rt=>{
+    const hdr=`<div class="section-t" style="color:#8a6d1c">🧭 조달후보 계획단가 <span class="muted" style="font-weight:400">(후보/계획 단가 — <b>정산 아님</b>, 여기서 편집 가능)</span></div>
+      <div style="font-size:11px;color:#8a6d1c;background:#fdf7e6;border:1px solid #f0e6c8;border-radius:6px;padding:5px 8px;margin-bottom:6px">가격은 <b>업체 무관(SUB/품목당 1개 공통)</b>: <b>ASSY 매입단가</b>(외주 SUB당 1)+<b>사급 부품가</b>(매입 부품당 1). 단품 매입품은 매입 마스터 자동. 업체는 배분%만. <b>계획단가(nx)</b>는 여기서 입력·저장(조달 프로파일과 자동 동기화). 위 <b>정산 매입/판매 단가</b>(마스터·마감때만 수정)와는 별개입니다.</div>`;
+    if(!pl||!pl.routes||!pl.routes.length)return hdr+`<div class="empty" style="font-size:12px">조달후보(승인 route) 없음 — [개발 › 조달경로 통합검토]에서 후보 생성·승인 후 여기/조달 프로파일에서 계획단가 입력</div>`;
+    const pe=st.planEdit;
+    const blocks=pl.routes.map(rt=>{
       const rlabel=`R${String(rt.route_no).padStart(2,'0')}${rt.current_flag?'·현행':''}`;
+      const editable=rt.approve_flag&&rt.route_id>0;
+      const editing=pe&&pe.route_id===rt.route_id;
+      const badge=`<span style="background:${rt.current_flag?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700">${esc(rlabel)}</span> <span style="font-size:12px;color:#556;font-weight:600">${esc(rt.route_name||'')}</span>`;
       const vs=(rt.vendors||[]).filter(v=>v.vendor_code);
-      if(!vs.length)return;
-      vs.forEach((v,i)=>rows.push(`<tr>
-        <td>${i===0?`<span style="background:${rt.current_flag?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700">${esc(rlabel)}</span> <span style="font-size:11px;color:#556">${esc(rt.route_name||'')}</span>`:''}</td>
-        <td>${esc(v.vendor_name||v.vendor_code)}</td>
-        <td class="center">${v.is_active?'<span style="color:#1c7c3a">✔</span>':'<span style="color:#aab">-</span>'}</td>
-        <td class="num">${v.alloc_ratio==null?'-':won(v.alloc_ratio)+'%'}</td>
-        <td style="text-align:left">${(v.assy_subs&&v.assy_subs.length)?v.assy_subs.map(a=>`<div style="font-size:11px;white-space:nowrap"><span style="color:#556">🧩 ${esc(a.sub_name||a.sub_item)}</span> <b>${a.assy_price==null?'-':won(a.assy_price)}</b></div>`).join(''):'<span style="color:#c9d1dc">-</span>'}</td>
-        <td style="text-align:left">${(v.sagub_items&&v.sagub_items.length)?v.sagub_items.map(si=>`<div style="font-size:11px;white-space:nowrap"><span style="color:#556">${esc(si.item_name||si.item_code)}</span> <b>${si.sagub_price==null?'-':won(si.sagub_price)}</b></div>`).join(''):(v.sagub_price==null?'<span style="color:#c9d1dc">-</span>':won(v.sagub_price))}</td>
-        <td class="center" style="font-size:11px;color:#778">${esc(v.apply_from||'')}${v.apply_to?'~'+esc(v.apply_to):''}</td></tr>`));
-    });
-    if(!rows.length)return `<div class="section-t" style="color:#8a6d1c">🧭 조달후보 업체별 계획단가 <span class="muted" style="font-weight:400">(정산 아님)</span></div><div class="empty" style="font-size:12px">지정된 후보 업체·계획단가 없음 — [조달 프로파일 › 업체·단가 지정]에서 입력</div>`;
-    return `<div class="section-t" style="color:#8a6d1c">🧭 조달후보 업체별 계획단가 <span class="muted" style="font-weight:400">(후보/계획 단가 — <b>정산 아님</b>)</span></div>
-      <div style="font-size:11px;color:#8a6d1c;background:#fdf7e6;border:1px solid #f0e6c8;border-radius:6px;padding:5px 8px;margin-bottom:5px">외주 SUB 중심 3구분: <b>ASSY 매입단가</b>(외주 SUB 단위)+<b>사급 부품 가격</b>(SUB 하위 부품별). 단품 매입품은 매입 마스터 자동. 후보 원가비교(R01 vs R02)용 계획단가(읽기전용), 위 <b>정산 매입/판매 단가</b>(마스터·마감때만 수정)와는 별개입니다.</div>
-      <table class="tbl"><thead><tr><th>조달후보</th><th>업체</th><th class="center">활성</th><th class="num">배분%</th><th>ASSY 매입단가(SUB·계획)</th><th>사급 부품 가격(SUB하위·계획)</th><th class="center">유효기간</th></tr></thead>
-      <tbody>${rows.join('')}</tbody></table>`;
+      const vendHtml=vs.length?`<div style="font-size:11px;color:#556;margin:2px 0 4px">업체 배분: ${vs.map(v=>`${esc(v.vendor_name||v.vendor_code)} <b>${v.alloc_ratio==null?'-':won(v.alloc_ratio)+'%'}</b>${v.is_active?'':' <span style="color:#aab">(비활성)</span>'}`).join(' · ')}</div>`:'<div style="font-size:11px;color:#aab;margin:2px 0 4px">지정 업체 없음</div>';
+      let body;
+      if(editing){
+        if(pe.loading)body='<div class="empty" style="font-size:12px">불러오는 중…</div>';
+        else{
+          const asy=pe.subs.length?`<table class="tbl" style="font-size:12px;margin:2px 0"><thead><tr><th>외주 SUB</th><th>품명</th><th class="num">ASSY 매입단가(계획)</th></tr></thead><tbody>${pe.subs.map(s=>`<tr><td><b>🧩 ${esc(s.sub_item)}</b></td><td class="cap" style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.sub_name)}">${esc(s.sub_name)}</td><td class="num"><input class="inp pe-assy num" data-si="${esc(s.sub_item)}" type="number" step="1" value="${s.assy==null?'':s.assy}" placeholder="계획" style="width:110px"></td></tr>`).join('')}</tbody></table>`:'';
+          const purch=pe.children.filter(x=>x.is_purchase);
+          const madeCnt=pe.children.length-purch.length;
+          const sag=purch.length?`<table class="tbl" style="font-size:12px;margin:2px 0"><thead><tr><th>사급 부품(매입)</th><th>품명</th><th class="num">사급 부품가(계획)</th></tr></thead><tbody>${purch.map(x=>`<tr><td><b>${esc(x.item_code)}</b> <span style="font-size:10px;color:#1c47a0">${esc(x.gubun)}</span></td><td class="cap" style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${esc(x.item_name)}">${esc(x.item_name)}</td><td class="num"><input class="inp pe-sag num" data-ic="${esc(x.item_code)}" type="number" step="1" value="${x.sagub==null?'':x.sagub}" placeholder="계획" style="width:110px"></td></tr>`).join('')}</tbody></table>`:'';
+          body=`${(pe.subs.length||purch.length)?'':'<div class="empty" style="font-size:12px">이 후보는 외주 SUB/매입 사급 부품이 없습니다(단품·제작만 — 매입 마스터/원가 자동).</div>'}
+            ${asy}${sag}${madeCnt>0?`<div style="font-size:11px;color:#8aa0bd">※ 제작(가공품) ${madeCnt}건은 원가 자동(입력 대상 아님).</div>`:''}
+            ${pe.msg?`<div style="font-size:12px;color:#c0392b;font-weight:600">${esc(pe.msg)}</div>`:''}
+            <div style="margin-top:4px;display:flex;gap:6px"><button class="btn pp-save" data-ri="${rt.route_id}" style="background:#8a6d1c;color:#fff" ${pe.saving?'disabled':''}>💾 계획단가 저장</button><button class="btn ghost pp-cancel">취소</button></div>`;
+        }
+      }else{
+        const asyR=(rt.assy_subs&&rt.assy_subs.length)?rt.assy_subs.map(a=>`<span style="font-size:11px;white-space:nowrap;margin-right:10px">🧩 ${esc(a.sub_name||a.sub_item)} <b>${a.assy_price==null?'-':won(a.assy_price)}</b></span>`).join(''):'';
+        const sagR=(rt.sagub_items&&rt.sagub_items.length)?rt.sagub_items.map(si=>`<span style="font-size:11px;white-space:nowrap;margin-right:10px">${esc(si.item_name||si.item_code)} <b>${si.sagub_price==null?'-':won(si.sagub_price)}</b></span>`).join(''):'';
+        body=`<div style="font-size:11px;margin:1px 0"><span style="color:#8a6d1c;font-weight:600">ASSY 매입단가:</span> ${asyR||'<span style="color:#c9d1dc">미입력</span>'}</div>
+          <div style="font-size:11px;margin:1px 0"><span style="color:#8a6d1c;font-weight:600">사급 부품가:</span> ${sagR||'<span style="color:#c9d1dc">미입력</span>'}</div>`;
+      }
+      return `<div style="border:1px solid #ece3c4;border-radius:8px;padding:6px 9px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">${badge}<span style="flex:1"></span>
+          ${editable?(editing?'':`<button class="btn ghost pp-edit" data-ri="${rt.route_id}" style="font-size:11px;padding:1px 8px;color:#8a6d1c;border-color:#e6d29a">✏ 계획단가 편집</button>`):`<span style="font-size:10px;color:#aab">${rt.route_id>0?'미승인(편집 불가)':'현행 baseline(합성·편집 불가)'}</span>`}</div>
+        ${vendHtml}${body}</div>`;
+    }).join('');
+    return hdr+blocks;
   };
   const draw=()=>{
     const _sc=(()=>{const g=c.querySelector('#pi-list');return g?g.scrollTop:0;})();   // 좌측 스크롤 보존
