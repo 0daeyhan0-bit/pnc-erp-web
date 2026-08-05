@@ -156,17 +156,18 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
         #   리스트 재료비 = 모달(bom-form)과 동일하게 coop_quote_part(per-part) 합으로 산출.
         #   coop_quote 집계값(mat_raw/mat_part)은 일부 Assy에서 부품 누락으로 깨져 있어 ★사용 안함.
         assy_up = [r["assy_code"] for r in rows]
-        parts_by_assy = {}; sagub_codes = set()   # assy_upper -> [(code, ptype, mat_cost)]
+        # ★모달 partmap과 동일하게 code별 dedup(seq 마지막). coop_quote_part 중복행(61 Assy) 대비 리스트=모달 정합
+        parts_by_assy = {}; sagub_codes = set()   # assy_upper -> {code: (ptype, mat_cost)}
         for i in range(0, len(assy_up), 400):
             chunk = [str(a).replace("'", "").strip() for a in assy_up[i:i + 400] if a]
             if not chunk:
                 continue
             inlist = "','".join(c.upper() for c in chunk)
             cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), UPPER(LTRIM(RTRIM(part_code))), ISNULL(ptype,''), ISNULL(mat_cost,0)
-                FROM nx.coop_quote_part WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')""")
+                FROM nx.coop_quote_part WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}') ORDER BY assy_code, seq""")
             for a, pc, pt, mc in cur.fetchall():
                 a = str(a).strip(); pc = str(pc).strip(); pt = str(pt).strip()
-                parts_by_assy.setdefault(a, []).append((pc, pt, float(mc or 0)))
+                parts_by_assy.setdefault(a, {})[pc] = (pt, float(mc or 0))
                 if pt == '사급부품':
                     sagub_codes.add(pc)
         # 사급부품 인상후 = ★대표(MAIN_FLAG='1') 판매단가(협력사별·적용월 이하 최신). 대표없으면 견적값 폴백(예 strainer=2959)
@@ -200,8 +201,8 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             parts = parts_by_assy.get(au)
             if parts:
                 mb = 0.0; ma = 0.0
-                for pc, pt, mc in parts:
-                    mb += mc                                     # 인상전 = 견적 per-part 그대로
+                for pc, (pt, mc) in parts.items():
+                    mb += mc                                     # 인상전 = 견적 per-part(dedup) 그대로
                     if pt == '사급부품':
                         rep = sale_rep.get((vc, pc)) if vc else None
                         ma += rep if rep else mc                 # 인상후 사급 = 대표판매단가, 없으면 견적
@@ -427,10 +428,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         ncur.execute("SELECT COUNT(*) FROM nx.coop_quote WHERE assy_code=?", item)
         quoted = ncur.fetchone()[0] > 0
         # 저장 부품 합계(엑셀 AQ) — bottom-up 합산 표시용
-        partmap = {}; part_sum = 0.0; sale_stored = 0.0
+        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0
         weld_quote = {}   # 견적 용접봉 재료비 {code: mat}. 현 BOM(우리기준) 무시, 견적기준 사용
         try:
-            ncur.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), part_total, mat_cost, proc_cost, ISNULL(ptype,'') FROM nx.coop_quote_part WHERE assy_code=?", item)
+            ncur.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), part_total, mat_cost, proc_cost, ISNULL(ptype,'') FROM nx.coop_quote_part WHERE assy_code=? ORDER BY seq", item)
             for r in ncur.fetchall():
                 pt = float(r[1] or 0); part_sum += pt
                 code_u = str(r[0]).strip().upper()
@@ -438,9 +439,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 partmap[code_u] = {"total": pt, "mat": float(r[2] or 0), "proc": float(r[3] or 0), "ptype": ptype_q}
                 if "용접" in ptype_q:
                     weld_quote[code_u] = float(r[2] or 0)
-            ncur.execute("SELECT ISNULL(sale_price,0) FROM nx.coop_quote WHERE assy_code=?", item)
+            ncur.execute("SELECT ISNULL(sale_price,0), ISNULL(mat_cost,0) FROM nx.coop_quote WHERE assy_code=?", item)
             rr = ncur.fetchone()
-            if rr: sale_stored = float(rr[0] or 0)
+            if rr:
+                sale_stored = float(rr[0] or 0); mat_stored = float(rr[1] or 0)
         except Exception:
             partmap = {}
         # 서브 조립 공정비 = 판가 − Σ하위부품합계 (견적서엔 용접봉줄에 넣었던 실제 조립작업 공정)
@@ -600,8 +602,13 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         _pmset = set(partmap.keys())
         for r in rows:
             r["in_quote"] = (str(r["code"]).strip().upper() in _pmset)
+    elif mat_stored > 0:
+        # 견적 헤더는 있으나 per-part 분해 없음 → 견적 재료비(헤더) 사용(리스트와 동일)
+        total_mat = round(mat_stored)
+        for r in rows:
+            r["in_quote"] = False
     else:
-        # 신규견적(견적 부품 없음) → BOM 리프행 합(반제품 제외, 이중계상 방지)
+        # 신규견적(견적 없음) → BOM 리프행 합(반제품 제외, 이중계상 방지)
         total_mat = round(sum((r["mat_now"] or 0) for r in rows if not r["haskids"]))
         for r in rows:
             r["in_quote"] = (not r["haskids"])

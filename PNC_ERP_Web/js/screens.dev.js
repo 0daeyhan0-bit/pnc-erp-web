@@ -1957,7 +1957,8 @@ SCREEN.subvariant=(c)=>{
     c.querySelectorAll('input[name=nrm]').forEach(rd=>rd.onchange=()=>{st.newForm.method=rd.value;draw();});
     c.querySelectorAll('.nf').forEach(el=>{el.oninput=el.onchange=()=>{st.newForm[el.dataset.k]=el.type==='checkbox'?el.checked:el.value;if(el.dataset.k==='vendor_code')vSearch(el.value);};});};
   const bindDetailModal=()=>{if(!st.detail)return;const R=routeById(st.detail.route_id);if(!R)return;const g=id=>c.querySelector(id);
-    g('#dt-x').onclick=g('#dt-close').onclick=()=>closeDetail();
+    {const x=g('#dt-x');if(x)x.onclick=()=>closeDetail();}                 // ✕(항상) — fresh는 dt-close 없음(취소/등록) → 개별 널가드(체이닝 금지)
+    {const b=g('#dt-close');if(b)b.onclick=()=>closeDetail();}
     {const b=g('#dt-cancel');if(b)b.onclick=()=>cancelDraft();}          // ✖ 취소 = 롤백+닫기
     {const b=g('#dt-register');if(b)b.onclick=()=>saveHdr(true);}         // ✔ 등록 = 커밋(fresh 해제)
     {const b=g('#dt-hsave2');if(b)b.onclick=()=>saveHdr(false);}          // 💾 저장(커밋된 후보 헤더 수정)
