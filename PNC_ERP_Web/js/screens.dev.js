@@ -1647,7 +1647,7 @@ SCREEN.subvariant=(c)=>{
     mat:null,matErr:'',routeTarget:null,routeTargetNm:'',
     routes:[],gopts:[],lgopts:[],loading:false,rload:false,msg:'',
     newForm:null,detail:null,lineForm:null,vopts:[],
-    weldDiams:[],weldEdit:null};   // #3 관경별 용접 팝업 재사용
+    weldDiams:[],weldEdit:null,np:null};   // #3 관경별 용접 팝업 재사용 · np=노드 스코프 공정팝업
   const loadWeldDiams=async()=>{if(st.weldDiams.length)return;try{const r=await fetch(`${API}/api/weld/diam`);st.weldDiams=(await r.json()).rows||[];}catch(e){}};
   // ---------- 좌측 검색 ----------
   const search=async(auto)=>{st.searching=true;draw();
@@ -2090,6 +2090,66 @@ SCREEN.subvariant=(c)=>{
         (st.rdProc[w.node]=st.rdProc[w.node]||{})[w.wproc]=j.total_st;draw();
         alert(`용접점 저장 ✔ 용접봉 소요량 ${q4(j.total_use_qty)} · 용접ST ${nfq(j.total_st)} → [${_pmap[w.wproc]||w.wproc}]공정 적용됨. 공수합=BASE 확인 후 '공정 배치 저장'하세요.`);
       }catch(e){alert('오류: '+e.message);}};}};
+  // ---------- ★노드 스코프 공정 팝업 열기/저장 + 전체 저장(검증 3종) ----------
+  const openNodeProc=async(node,isAssy)=>{await loadWeldDiams();const rd=st.rd||{};
+    const asm=rd.asm_procs||[];
+    const catalog=asm.map(a=>({proc_code:a.proc_code,name:a.name,group:a.group}));
+    const saved={};(rd.procs||[]).forEach(p=>{if(p.node_item===node)saved[p.proc_code]=+p.work_qty||0;});
+    const hasSaved=Object.keys(saved).length>0;
+    const proc={};
+    if(isAssy&&!hasSaved){asm.forEach(a=>{if(+a.wq>0)proc[a.proc_code]=+a.wq;});}  // 레벨0 최초=BASE 조립값 시드
+    else{Object.assign(proc,saved);}                                                // 저장값(신규 SUB=빈값)
+    const welds=(rd.welds||[]).filter(w=>w.node_item===node);
+    const weldRows=welds.map(w=>({weld_item:w.weld_item,pipe_diam:w.pipe_diam,weld_qty:w.weld_qty}));
+    const weldItem=(welds[0]&&welds[0].weld_item)||'RAC30599301-1';
+    const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC');
+    const lines=(rd.lines||[]).filter(l=>!RACX(l)),parts=lines.filter(l=>l.node_kind!=='SUB'),subs=lines.filter(l=>l.node_kind==='SUB');
+    let nodeParts;if(isAssy){nodeParts=parts.filter(p=>!p.parent_line);}else{const s=subs.find(x=>(x.sub_item||x.child_item)===node);nodeParts=s?parts.filter(p=>p.parent_line===s.line_id):[];}
+    const partCut=rd.part_cut||{},cutAgg={};
+    nodeParts.forEach(p=>{(partCut[p.child_item]||[]).forEach(x=>{const a=cutAgg[x.proc_code]||(cutAgg[x.proc_code]={name:x.name,wq:0});a.wq+=+x.wq||0;});});
+    const cutRows=Object.keys(cutAgg).map(c=>({proc_code:c,name:cutAgg[c].name,wq:Math.round(cutAgg[c].wq*100)/100}));
+    let cutAll=0;Object.values(partCut).forEach(arr=>arr.forEach(x=>cutAll+=+x.wq||0));
+    let procOther=0;(rd.procs||[]).forEach(p=>{if(p.node_item!==node)procOther+=+p.work_qty||0;});
+    const thisCut=cutRows.reduce((a,x)=>a+x.wq,0);
+    const otherTotal=Math.round((cutAll-thisCut+procOther)*100)/100;   // 전역합 = otherTotal + (이 노드 절삭 + 조립 라이브)
+    st.np={node,isAssy,label:(isAssy?'ASSY '+node+' (레벨0)':'SUB '+node),catalog,proc,weldRows,weldItem,loss:1.5,cutRows,otherTotal,base:rd.base_gongsu||0};
+    draw();};
+  const saveNodeProc=async()=>{const np=st.np;if(!np||!st.rd)return;const rid=st.rd.route_id;
+    const wrows=(np.weldRows||[]).filter(r=>+r.pipe_diam>0&&+r.weld_qty>0);
+    let wSt=0;wrows.forEach(r=>{const d=st.weldDiams.find(x=>Math.abs(x.pipe_diam-(+r.pipe_diam||0))<0.01);if(d)wSt+=d.std_st*(+r.weld_qty);});wSt=Math.round(wSt*100)/100;
+    const hasWeld=wrows.length>0;
+    const cat=np.catalog||[],weldCodes=cat.filter(p=>p.group==='용접').map(p=>p.proc_code);
+    const procs=[];
+    cat.forEach(p=>{let w;if(weldCodes.includes(p.proc_code)){w=(p.proc_code===weldCodes[0])?(hasWeld?wSt:(+np.proc[p.proc_code]||0)):(hasWeld?0:(+np.proc[p.proc_code]||0));}else{w=+np.proc[p.proc_code]||0;}if(w>0)procs.push({proc_code:p.proc_code,work_qty:w});});
+    if(hasWeld&&!weldCodes.length)procs.push({proc_code:'51',work_qty:wSt});   // 카탈로그에 용접공정 없으면 51로
+    try{
+      await fetch(`${API}/api/sourcing/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,node_item:np.node,loss_factor:+np.loss||1.5,rows:wrows.map(r=>({weld_item:np.weldItem,pipe_diam:+r.pipe_diam,weld_qty:+r.weld_qty}))})});
+      const r=await fetch(`${API}/api/sourcing/proc/node_save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,node_item:np.node,procs})});
+      const j=await r.json();if(!j.ok){alert('공정 저장 실패: '+(j.detail||JSON.stringify(j)));return;}
+      st.np=null;st.msg=`공정 저장 ✔ ${np.label} 노드공수 ${nfq(j.node_gongsu)}${hasWeld?' (용접ST '+nfq(wSt)+')':''}`;await loadRD(rid);
+    }catch(e){alert('저장 오류: '+e.message);}};
+  const bindNodeProc=()=>{if(!st.np)return;const np=st.np,g=id=>c.querySelector(id);
+    {const x=g('#np-x');if(x)x.onclick=()=>{st.np=null;draw();};}
+    {const b=g('#np-cancel');if(b)b.onclick=()=>{st.np=null;draw();};}
+    {const b=g('#np-save');if(b)b.onclick=saveNodeProc;}
+    {const t=g('#np-wtype');if(t)t.onchange=()=>{np.weldItem=t.value;};}
+    {const l=g('#np-loss');if(l)l.oninput=()=>{np.loss=+l.value||1.5;draw();};}
+    {const b=g('#np-wadd');if(b)b.onclick=()=>{np.weldRows.push({weld_item:np.weldItem,pipe_diam:'',weld_qty:''});draw();};}
+    c.querySelectorAll('.np-wf').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i;if(!np.weldRows[i])return;np.weldRows[i][el.dataset.k]=el.value;draw();};});
+    c.querySelectorAll('.np-wdel').forEach(el=>el.onclick=()=>{np.weldRows.splice(+el.dataset.i,1);draw();});
+    c.querySelectorAll('.np-pq').forEach(el=>{el.oninput=()=>{np.proc[el.dataset.code]=el.value;};el.onchange=()=>{np.proc[el.dataset.code]=el.value;draw();};});};   // 입력중=값만(포커스유지) · 확정시 draw(라이브합)
+  const finalizeRoute=async(rid)=>{const item=st.routeTarget;
+    try{
+      const sm=await(await fetch(`${API}/api/sourcing/sub/match?route_id=${rid}`)).json();
+      const reuse={};
+      for(const m of (sm.matches||[])){
+        if(confirm(`동일한 서브가 존재합니다(${m.match_code}).\n현재 SUB ${m.sub_item}(부품 ${m.member_count}종) 대신 그 서브를 사용하시겠습니까?`)) reuse[m.sub_line]=m.match_code;
+      }
+      const r=await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',reuse_map:reuse,commit:1})});
+      const j=await r.json();
+      if(j.ok){alert(`✅ 전체 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}`);await loadRD(rid);await loadRoutes();}
+      else{alert('❌ 저장 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));}
+    }catch(e){alert('전체 저장 오류: '+e.message);}};
   // ---------- 대상 선택(부분갱신) ----------
   const selectTarget=async(code,el)=>{
     if(!code||code===st.routeTarget)return;
