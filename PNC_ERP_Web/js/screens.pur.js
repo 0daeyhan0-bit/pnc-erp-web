@@ -1308,18 +1308,19 @@ SCREEN.sourceprofile=(c)=>{
       const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 후보 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
       alert('저장 실패 — '+hint+':\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
     catch(e){alert('저장 실패: '+e);}};
-  // ===== 업체·단가 모달 — ★ASSY 매입단가=업체별(공통 없음), 사급 부품가=공통+업체예외, 업체=배분% =====
-  // ASSY 매입단가=외주 SUB×업체별(nx.item_price gubun=매입, vendor=지정 항상) · 사급 부품가=매입부품별 공통+업체예외(gubun=사급).
-  // 단품 매입=매입 마스터 자동(입력X). ★후보/계획 단가(정산 아님): nx만 저장. 정산 마스터 불변(마감때만).
-  let pm=null, pmAcT=null;   // pm={route,hdr,rows[](업체),subs[],subChildren{},assyV{}(업체×SUB ASSY),sagub{}(품목 공통),sagubOv{}(업체×품목 예외),direct[],msg,loading}
+  // ===== 업체·단가 모달 — ★ASSY 매입단가=업체별(공통 없음), 업체=배분%(정수). 사급 부품가 UI 없음(이 모달 스코프 밖) =====
+  // ASSY 매입단가=외주 SUB×업체별(nx.item_price gubun=매입, vendor=지정 항상). 단품 매입=매입 마스터 자동(입력X). 사급 부품가=품목단가 관리에서(여기 아님).
+  // ★후보/계획 단가(정산 아님): nx만 저장. 정산 마스터 불변(마감때만).
+  const isoToday=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+  let pm=null, pmAcT=null;   // pm={route,hdr,rows[](업체),subs[],assyV{}(업체×SUB ASSY),direct[],msg,loading}
   const SG_OPTS=[['2','외주(유상사급)'],['1','자체'],['3','매입']];
-  const OK=(vc,key)=>`${vc}||${key}`;   // 맵 키(업체||SUB/품목)
-  const blankVRow=()=>({profile_id:0,vendor_code:'',vendor_name:'',supply_gubun:'2',alloc_ratio:null,apply_from:FROM0,apply_to:'',is_active:1,lme_flag:0,_delete:false});
-  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],subs:[],subChildren:{},assyV:{},sagub:{},sagubOv:{},direct:[],msg:'',loading:true};draw();
+  const OK=(vc,key)=>`${vc}||${key}`;   // 맵 키(업체||SUB)
+  const blankVRow=()=>({profile_id:0,vendor_code:'',vendor_name:'',supply_gubun:'2',alloc_ratio:null,apply_from:isoToday(),apply_to:'',is_active:1,lme_flag:0,_delete:false});
+  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],subs:[],assyV:{},direct:[],msg:'',loading:true};draw();
     try{const res=await fetch(`${API}/api/sourcing/profile/list?route_id=${r.route_id}`);const j=await res.json();
       pm.hdr=j.header||null;
       pm.rows=(j.rows||[]).map(x=>({profile_id:x.profile_id,vendor_code:x.vendor_code||'',vendor_name:x.vendor_name||'',
-        supply_gubun:x.supply_gubun||'2',alloc_ratio:(x.alloc_ratio!=null?x.alloc_ratio:null),
+        supply_gubun:x.supply_gubun||'2',alloc_ratio:(x.alloc_ratio!=null?Math.round(x.alloc_ratio):null),
         apply_from:x.apply_from||'',apply_to:x.apply_to||'',is_active:x.is_active?1:0,lme_flag:x.lme_flag?1:0,_delete:false}));
       if(!pm.rows.length)pm.rows=[blankVRow()];
     }catch(e){pm.msg='업체 목록 로드 실패';}
@@ -1327,12 +1328,6 @@ SCREEN.sourceprofile=(c)=>{
       pm.subs=sj.subs||[];pm.direct=sj.direct_items||[];
       // ★ASSY=업체별만(공통 무시). override 배열 = 업체별 값.
       (sj.prices||[]).forEach(p=>{(p.overrides||[]).forEach(o=>{pm.assyV[OK(o.vendor_code,p.sub_item)]=(o.assy_price!=null?o.assy_price:null);});});
-    }catch(e){}
-    try{const gr=await fetch(`${API}/api/sourcing/sagub_price?route_id=${r.route_id}`);const gj=await gr.json();
-      (gj.rows||[]).forEach(x=>{(pm.subChildren[x.sub_item]=pm.subChildren[x.sub_item]||[]).push(
-        {item_code:x.item_code,item_name:x.item_name||'',gubun:x.gubun||'',is_purchase:!!x.is_purchase});
-        if(x.is_purchase){pm.sagub[x.item_code]=(x.sagub_price!=null?x.sagub_price:null);
-          (x.overrides||[]).forEach(o=>{pm.sagubOv[OK(o.vendor_code,x.item_code)]=(o.sagub_price!=null?o.sagub_price:null);});}});
     }catch(e){}
     pm.loading=false;draw();};
   const pmClose=()=>{pm=null;draw();};
