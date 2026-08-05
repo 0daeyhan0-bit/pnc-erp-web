@@ -1383,7 +1383,6 @@ def sourcing_plan_price(item: str = Query(...)):
                     "apply_from": r[5], "apply_to": r[6],
                     "buy_price": (float(r[7]) if r[7] is not None else None),
                     "sagub_price": (float(r[8]) if r[8] is not None else None), "lme_flag": int(r[9] or 0)})
-        vmap = _custnm_map(cur, vcodes)
         # 업체별·품목별 사급단가(계획) — nx.sourcing_sagub_price ((route_id,vendor_code) 스코프). 사급단가는 업체당 다품목이라 별도 테이블.
         _ensure_sagub_price_tbl(cur)
         sagit = {}   # (route_id, vendor_code) -> [{item_code,item_name,sagub_price}]

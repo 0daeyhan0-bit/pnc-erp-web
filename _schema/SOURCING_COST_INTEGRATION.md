@@ -106,3 +106,34 @@ is_active BIT, alloc_ratio FLOAT NULL, upd_dt datetime, PK(item_code,route_id). 
 sum 150%(R01 100+R02 50 겹침)=gate ALLOC 거부 / 60+40=100 통과 / route_id=999999 활성=gate APPROVE 거부.
 py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/get·grpCard·procgroup/save·동일BOM구조)·신규마커존재. index.html screens.pur.js?v=260805ra.
 ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
+
+## 사급단가 = 업체당 단일 → 품목별 매핑(중첩모달) (2026-08-05)
+사용자 피드백: 사급단가는 우리가 그 업체에 공급하는 **사급 품목이 여러 개**라 업체당 단일 칸으로 표현 불가.
+→ 매입단가는 현행(업체당 1개, nx.sourcing_profile.buy_price) 유지, **사급단가는 [📋 사급품목 단가] 버튼 → 품목별 입력창(중첩모달)** 으로 분리.
+
+### 모델 nx.sourcing_sagub_price (멱등 _ensure_sagub_price_tbl)
+`route_id INT, vendor_code NVARCHAR(20), item_code NVARCHAR(60), sagub_price FLOAT NULL, upd_dt datetime, PK(route_id,vendor_code,item_code)`.
+- **근거키 = (route_id·vendor_code·item_code) 스코프** upsert(MERGE)·delete. 공란/None=그 근거키 1행만 삭제(대량삭제 아님).
+- **품목 목록 = 그 후보(route_id)의 nx.sourcing_route_line 구성 품번**(자유추가 아님). `_route_line_items()` = distinct child_item, **용접봉 RAC* 제외**, node_kind(PART/SUB) 포함, 품명 route_line 우선·nx.item 보강. route_line 밖 품번은 save 시 무시(skip).
+- 기존 nx.sourcing_profile.**sagub_price 단일 컬럼은 미사용 방치**(제거 안 함). buy_price는 유지.
+
+### 엔드포인트(sourcing.py, 신규 2)
+- **GET /api/sourcing/sagub_price?route_id=&vendor_code=** → 그 후보 구성 품번(용접봉 제외) + vendor 스코프 저장 사급단가 병합. `{header,vendor_code,rows[{item_code,item_name,node_kind,gubun,sagub_price}],n_item,n_priced}`.
+- **POST /api/sourcing/sagub_price/save** {route_id,vendor_code,rows:[{item_code,sagub_price}]} → 근거키 스코프 upsert/삭제. `{ok,upsert,del,skip}`.
+- plan_price 확장: 업체별 `sagub_items:[{item_code,item_name,sagub_price}]` 추가 + **profile에 없고 사급단가만 있는 업체=합성행(sagub_only=True)** 로도 표시. `n_sagub_item` 반환.
+
+### 프론트
+- **screens.pur.js**: pmOpen 업체행에서 **단일 사급입력칸 제거**(매입단가 칸 유지). 업체행에 [📋 사급품목 단가] 버튼(vendor_code 있을 때). 클릭→중첩모달(sagubModal, z-index 130) — 표(품번·품명·사급단가 계획), 품목은 route_line 기준(자유추가 없음), 공란=삭제, [저장]=sagub_price/save. "후보/계획 단가(정산 아님)" 배너 유지.
+- **core.js priceItemView**: 조달후보 업체별 계획단가 섹션의 사급단가 칸을 **품목별 목록(item_name+단가)** 으로 표시(읽기전용). 매입단가(업체당1)는 그대로. "정산 아님" 라벨 유지. 회귀 0.
+
+### 검증(e2e AJR75563402, route_id 60=R02, 명진산업 vendor 2306, localhost 8010)
+- **사급품목 창 품목 = R02 route_line 구성 품번 일치**: route/detail lines=**11**(10 PART + 1 SUB AJR75563402_S07), RAC=0. sagub_price GET n_item=**11**, RAC 포함=**False** → 정확 일치.
+- save 3품목(4A00742C 12300·5006AR4091H 12800·MJU64794201 15500)→upsert=3, GET n_priced=3 정확 반영.
+- 왕복(빈값 삭제·업데이트·대상외 무시): MJU64794201 null→del=1, 4A00742C 12999 update·5410A30279K 9900 add→upsert=2, ZZZ_NOT_IN_ROUTE→skip=1. GET n_priced=3(값 정확).
+- plan_price: n_sagub_item=3, 명진산업(2306) sagub_only=True 3품목 노출(priceItemView 반영).
+- **★마스터 불변 증거**: PR_M_ITEM_COST(AJR75563402 43행) MD5 저장 전=후 **D139A870A50BF1701B383A832AE19E78 동일(UNCHANGED)**. sourcing.py PR_M_ITEM_COST 쿼리=0(주석 3건뿐).
+- route/cost silwon=**5722.2 diff0=True**(회귀 0). openapi 321→**323**(신규 2). py_compile OK·health 200.
+- 서빙 JS 마커 확인(pm-sagub·sagubModal·smOpen·sagub_price GET/save·core sagub_items·품목별 헤더). JS 밸런스 curly/paren/brack 0·backtick even. index.html core.js?v=260805sg·screens.pur.js?v=260805sg.
+- 테스트데이터 정리: route60/vendor2306 사급단가 del=3(스코프), n_priced=0·n_item=11 복귀, plan_price n_sagub_item=0.
+- 제약 준수: localhost만·184 미배포·nx만 쓰기·한글 Edit(utf-8)·근거키 스코프.
+- ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
