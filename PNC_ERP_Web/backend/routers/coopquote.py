@@ -194,10 +194,24 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                             sale_rep[(vc, str(rr[0]).strip().upper())] = float(rr[1] or 0)
             finally:
                 lc.close()
+        # 인상후 원소재(동) 사급가(등급별·적용월 기준): nx.mat_price_month 원소재 apply_ym<=적용월 최신, 없으면 일반20000/고강도22000
+        cur_sagub = {"일반CU": 20000.0, "고강도CU": 22000.0}
+        try:
+            if ym4:
+                ym6f = ("20" + ym4) if len(ym4) == 4 else ym4
+                cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 AND apply_ym<=? ORDER BY apply_ym DESC", ym6f)
+            else:
+                cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 ORDER BY apply_ym DESC")
+            mp = cur.fetchone()
+            if mp and mp[0]:
+                cur_sagub["일반CU"] = float(mp[0]); cur_sagub["고강도CU"] = round(float(mp[0]) * 1.1, 0)
+        except Exception:
+            pass
         for r in rows:
             au = r["assy_code"].strip().upper()
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
             vc = _VENDOR2CODE.get(str(r["vendor"]).strip(), "")
+            sg = r["sagub_price"]; csg = cur_sagub.get(r["grade"], sg)   # 견적 동사급가 → 현재 동사급가
             parts = parts_by_assy.get(au)
             if parts:
                 mb = 0.0; ma = 0.0
@@ -206,8 +220,10 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                     if pt == '사급부품':
                         rep = sale_rep.get((vc, pc)) if vc else None
                         ma += rep if rep else mc                 # 인상후 사급 = 대표판매단가, 없으면 견적
+                    elif pt == '동관':
+                        ma += (mc * (csg / sg) if (sg and sg > 0) else mc)   # 인상후 동관 = 견적 × (현재사급가/견적사급가)
                     else:
-                        ma += mc                                 # 동관/용접봉 = 견적 유지
+                        ma += mc                                 # 용접봉/기타 = 견적 유지
                 mat_before = round(mb, 2); mat_after = round(ma, 2)
             else:
                 mat_before = round(r["mat_cost"], 2); mat_after = round(r["mat_cost"], 2)  # 하위부품 없음 폴백
@@ -428,7 +444,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         ncur.execute("SELECT COUNT(*) FROM nx.coop_quote WHERE assy_code=?", item)
         quoted = ncur.fetchone()[0] > 0
         # 저장 부품 합계(엑셀 AQ) — bottom-up 합산 표시용
-        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0
+        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0; grade_q = "일반CU"; sagub_q = 0.0
         quote_rows = []   # 원본 행(중복 포함) — 다회사용 부품 정확 합산용(sum-all)
         weld_quote = {}   # 견적 용접봉 재료비 {code: mat}. 현 BOM(우리기준) 무시, 견적기준 사용
         try:
@@ -441,12 +457,25 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 quote_rows.append((code_u, ptype_q, float(r[2] or 0)))
                 if "용접" in ptype_q:
                     weld_quote[code_u] = float(r[2] or 0)
-            ncur.execute("SELECT ISNULL(sale_price,0), ISNULL(mat_cost,0) FROM nx.coop_quote WHERE assy_code=?", item)
+            ncur.execute("SELECT ISNULL(sale_price,0), ISNULL(mat_cost,0), ISNULL(grade,N'일반CU'), ISNULL(sagub_price,0) FROM nx.coop_quote WHERE assy_code=?", item)
             rr = ncur.fetchone()
             if rr:
-                sale_stored = float(rr[0] or 0); mat_stored = float(rr[1] or 0)
+                sale_stored = float(rr[0] or 0); mat_stored = float(rr[1] or 0); grade_q = str(rr[2] or "일반CU").strip(); sagub_q = float(rr[3] or 0)
         except Exception:
             partmap = {}
+        # ★인상후(최신) 원소재 사급가(등급별·적용월 기준): 종전 견적사급가(예 7575) 대신 현재 사급가(20000/22000) 표시·계산
+        cur_sagub_val = 22000.0 if grade_q == "고강도CU" else 20000.0
+        try:
+            if ym4:
+                ym6f = ("20" + ym4) if len(ym4) == 4 else ym4
+                ncur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 AND apply_ym<=? ORDER BY apply_ym DESC", ym6f)
+            else:
+                ncur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 ORDER BY apply_ym DESC")
+            mpr = ncur.fetchone()
+            if mpr and mpr[0]:
+                base = float(mpr[0]); cur_sagub_val = round(base * 1.1, 0) if grade_q == "고강도CU" else base
+        except Exception:
+            pass
         # 서브 조립 공정비 = 판가 − Σ하위부품합계 (견적서엔 용접봉줄에 넣었던 실제 조립작업 공정)
         assembly_proc = round(sale_stored - part_sum) if (sale_stored and part_sum) else 0
         # 서브조립 상세(공정ST·가공비·관리/운반/이윤) from coop_assembly
@@ -531,6 +560,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             pt = partmap.get(ch.upper())   # 저장 합계(엑셀 AQ)
             # ★재료비(현재/적용월): 사급=판매단가(사급가)×소요 · 매입부품=매입가×소요 · 제작동관=소요중량×사급가 · 용접봉=소요×단가
             sp_sale = sale_asof.get(ch.upper())
+            eff_sagub = (cs.get("sagub", 0) if cs else 0)   # 표시용 사급가(제작동관은 현재 사급가로 대체)
             if role == "용접봉":
                 mat_now = weld_cost
             elif role == "사급":
@@ -538,8 +568,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             elif role == "매입부품":
                 mat_now = round(pp * cq) if pp else (round(pt["mat"]) if pt else 0)
             elif role == "제작동관":
-                sgr = (cs.get("sagub", 0) if cs else 0) or 0
-                mat_now = round(uw * cq * sgr) if (uw and sgr) else (round(pt["mat"]) if pt else 0)
+                # ★인상후: 종전 견적사급가 대신 현재 원소재 사급가(20000/22000). 협력사 스펙에 사급가 있으면 그걸 우선
+                sgr = (cs.get("sagub", 0) if cs else 0) or cur_sagub_val
+                eff_sagub = sgr
+                mat_now = round(uw * cq * sgr) if uw else (round(pt["mat"]) if pt else 0)
             else:
                 mat_now = (round(pt["mat"]) if pt else 0)
             rows.append({
@@ -550,7 +582,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 "use_qty": e["q"], "cum_qty": round(cq, 5), "sagub": e["sag"] == "1",
                 "lg_diam": ci.get("diam", 0), "lg_thick": ci.get("thick", 0), "lg_length": ci.get("length", 0),
                 "coop_diam": (cs["diam"] if cs else 0), "coop_thick": (cs["thick"] if cs else 0),
-                "coop_length": (cs["length"] if cs else 0), "coop_sagub": (cs.get("sagub", 0) if cs else 0),
+                "coop_length": (cs["length"] if cs else 0), "coop_sagub": eff_sagub,
                 "unit_weight": uw, "weight_src": src, "soyo_weight": round(uw*cq, 5),
                 "pur_price": pp, "weld_cost": weld_cost, "is_proc": role == "용접봉",
                 "procs": procs, "proc_cost": proc_cost,
@@ -598,6 +630,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             if ptype_q == "사급부품":
                 rep = sale_q.get(code_u)   # 대표(MAIN_FLAG='1') 판매단가
                 total_mat += rep if rep else mat
+            elif ptype_q == "동관":
+                total_mat += (mat * (cur_sagub_val / sagub_q) if (sagub_q and sagub_q > 0) else mat)   # 동관=현재 사급가 반영
             else:
                 total_mat += mat
         total_mat = round(total_mat)
@@ -621,6 +655,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             "rows": rows, "count": len(rows), "need_input": need, "proc_ops": proc_ops, "rate": rate,
             "total_soyo_weight": total_soyo, "total_weld_cost": total_weld, "total_proc_cost": total_proc,
             "total_mat": total_mat, "ym": ym4, "asof": asof, "vendor_code": vcode,
+            "cur_sagub": cur_sagub_val, "grade": grade_q,
             "part_sum": round(part_sum), "assembly_proc": assembly_proc, "sale_stored": round(sale_stored),
             "assembly": assembly}
 

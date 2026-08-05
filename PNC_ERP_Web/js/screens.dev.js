@@ -1784,7 +1784,7 @@ SCREEN.subvariant=(c)=>{
     const total=Math.round((cutSum+asmSum)*100)/100, base=rd.base_gongsu||0, ok=Math.abs(total-base)<0.5;
     const cutBadge=code=>{const arr=partCut[code];if(!arr||!arr.length)return '';const s=arr.reduce((a,x)=>a+(+x.wq||0),0);
       return ` <span title="절삭공정 자동귀속: ${esc(arr.map(x=>x.name+' '+nfq(x.wq)).join(', '))}" style="color:#b5651d;font-size:10px;border:1px solid #e6cfae;border-radius:3px;padding:0 4px">⚙${nfq(s)}</span>`;};
-    const partRow=(p,ind)=>`<div draggable="true" class="sp-drag sp-pdrop" data-lid="${p.line_id}" data-parent="${p.parent_line||0}" style="padding-left:${ind}px;font-size:12px;cursor:grab;padding-top:1px">⠿ ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`;
+    const partRow=(p,ind)=>`<div draggable="true" class="sp-drag sp-pdrop" data-lid="${p.line_id}" data-parent="${p.parent_line||0}" style="padding-left:${ind}px;font-size:12px;cursor:grab;padding-top:1px">⠿ ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}<button class="btn sp-ledit" draggable="false" data-lid="${p.line_id}" title="이 라인 직접 수정(BOM 구성과 동일 폼)" style="padding:0 5px;font-size:10px;margin-left:5px;color:#1c47a0">✎수정</button></div>`;
     const asmUI=`<table class="tbl" style="font-size:11.5px"><thead><tr><th style="text-align:left">조립 공정(비종속)</th><th class="num">공수</th><th style="min-width:150px">배치 노드</th></tr></thead>
       <tbody>${asmList.length?asmList.map(a=>`<tr><td style="text-align:left"><b>${esc(a.name)}</b> <span style="color:#8a94a6;font-size:10px">${esc(a.group)}</span></td><td class="num">${nfq(a.wq)}</td>
         <td><select class="sp-asm" data-proc="${esc(a.proc_code)}" style="width:100%">${nodeOpts.map(n=>`<option value="${esc(n.code)}" ${st.asmNode[a.proc_code]===n.code?'selected':''}>${esc(n.label)}</option>`).join('')}</select></td></tr>`).join(''):'<tr><td colspan="3" class="empty">조립 공정 없음</td></tr>'}</tbody></table>`;
@@ -1987,6 +1987,8 @@ SCREEN.subvariant=(c)=>{
     // ---- STEP3 SUB 재구성·공정배치 binds ----
     const rid=st.detail.route_id;
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
+    // 트리 노드 [✎수정] → BOM 구성과 동일한 직접입력 팝업(lineModal). 저장 시 패널 자동 갱신.
+    c.querySelectorAll('.sp-ledit').forEach(b=>b.onclick=e=>{e.stopPropagation();const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);if(l){st.lineForm=Object.assign({route_id:rid},l);draw();}});
     // 드래그: 부품→SUB존/풀(이동), 부품→부품(SUB 자동생성/추가). 이동 후 빈 SUB 자동소멸.
     const reloadPanel=async()=>{st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);};
     c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.stopPropagation();e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});
@@ -2133,7 +2135,7 @@ SCREEN.subvariant=(c)=>{
       alert('저장 실패:\n'+(j.errors?j.errors.join('\n'):(j.detail||JSON.stringify(j))));return false;}catch(e){alert('저장 오류: '+e);return false;}};
   const saveLine=async()=>{const f=st.lineForm;
     try{const r=await fetch(`${API}/api/sourcing/line/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({user:'웹사용자'},f))});
-      const j=await r.json();if(j.ok){st.msg='✅ 라인 저장 (후보 미승인 리셋)';st.lineForm=null;await loadRoutes();draw();}
+      const j=await r.json();if(j.ok){st.msg='✅ 라인 저장 (후보 미승인 리셋)';st.lineForm=null;await loadRoutes();if(st.rd&&st.detail&&st.rd.route_id===st.detail.route_id)await loadRD(st.rd.route_id);else draw();}
       else alert('저장 실패:\n'+(j.errors?j.errors.join('\n'):(j.detail||JSON.stringify(j))));}catch(e){alert('저장 오류: '+e);}};
   const newChild=async()=>{const f=st.lineForm;const base=(f.child_item||'').trim();
     if(!base){alert('원본 하위품번을 먼저 입력하세요');return;}
