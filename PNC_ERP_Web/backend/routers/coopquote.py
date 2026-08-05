@@ -152,31 +152,27 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             fin = r["sale_price"]
             r["final_quote"] = fin
             r["diff"] = (fin - r["cur_incost"]) if (r["cur_incost"] is not None) else None
-        # ── ★가격조정/총가공비/판가(신)/차이 + 사급부품 현재 매입가 재계산 ──
-        #   가격조정 = 종전입고가 − 판가(견적)  (견적 미갱신분)
-        #   총가공비 = 종전입고가 − 재료비(종전)  (가공+관리+운반+이윤+가격조정)
-        #   판가(신) = 종전입고가 + 원자재인상분(사급부품 현재−종전)  (= 재료비현재 + 총가공비)
-        #   차이     = 판가(신) − 현재입고가  (원소재만 잘 인상됐나)
+        # ── ★인상전(견적 per-part) vs 인상후(사급부품=대표판매단가, 동관/용접봉=견적) 재료비 ──
+        #   리스트 재료비 = 모달(bom-form)과 동일하게 coop_quote_part(per-part) 합으로 산출.
+        #   coop_quote 집계값(mat_raw/mat_part)은 일부 Assy에서 부품 누락으로 깨져 있어 ★사용 안함.
         assy_up = [r["assy_code"] for r in rows]
-        sagub_by_assy = {}; sagub_codes = set()
+        parts_by_assy = {}; sagub_codes = set()   # assy_upper -> [(code, ptype, mat_cost)]
         for i in range(0, len(assy_up), 400):
             chunk = [str(a).replace("'", "").strip() for a in assy_up[i:i + 400] if a]
             if not chunk:
                 continue
             inlist = "','".join(c.upper() for c in chunk)
-            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), UPPER(LTRIM(RTRIM(part_code))), ISNULL(mat_cost,0)
-                FROM nx.coop_quote_part WHERE ptype=N'사급부품' AND UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')""")
-            for a, pc, mc in cur.fetchall():
-                a = str(a).strip(); pc = str(pc).strip()
-                sagub_by_assy.setdefault(a, []).append((pc, float(mc or 0))); sagub_codes.add(pc)
-        # 사급부품 인상후 = 판매단가(=사급가, COST_TAG='S' · 협력사별 · 대표최신 · 적용월 이하). ★매입가 아님(모달과 동일)
-        #   인상전은 견적 원본(mat_cost) 사용 → 종전 판매단가 조회 불필요
-        sale_cur = {}   # (vcode, part_upper) -> 판매단가(적용월 기준)
-        vcodes = set()
-        for r in rows:
-            vc = _VENDOR2CODE.get(str(r["vendor"]).strip(), "")
-            if vc:
-                vcodes.add(vc)
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), UPPER(LTRIM(RTRIM(part_code))), ISNULL(ptype,''), ISNULL(mat_cost,0)
+                FROM nx.coop_quote_part WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')""")
+            for a, pc, pt, mc in cur.fetchall():
+                a = str(a).strip(); pc = str(pc).strip(); pt = str(pt).strip()
+                parts_by_assy.setdefault(a, []).append((pc, pt, float(mc or 0)))
+                if pt == '사급부품':
+                    sagub_codes.add(pc)
+        # 사급부품 인상후 = ★대표(MAIN_FLAG='1') 판매단가(협력사별·적용월 이하 최신). 대표없으면 견적값 폴백(예 strainer=2959)
+        sale_rep = {}   # (vcode, part_upper) -> 대표 판매단가
+        vcodes = set(_VENDOR2CODE.get(str(r["vendor"]).strip(), "") for r in rows)
+        vcodes.discard("")
         if sagub_codes and vcodes:
             lc = _conn(); lcur = lc.cursor()
             try:
@@ -187,51 +183,33 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                         inl = "','".join(chunk)
                         lcur.execute(f"""WITH S AS (
                               SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
-                                ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
-                                  ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
+                                ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE))) ORDER BY COST_APPLY_YMD DESC) rn
                               FROM PR_M_ITEM_COST
                               WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                                AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                                AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND ISNULL(MAIN_FLAG,'0')='1'
+                                AND COST_APPLY_YMD<=? AND ITEM_COST>0)
                             SELECT ic, ITEM_COST FROM S WHERE rn=1""", vc, asof_cur)
                         for rr in lcur.fetchall():
-                            sale_cur[(vc, str(rr[0]).strip().upper())] = float(rr[1] or 0)
+                            sale_rep[(vc, str(rr[0]).strip().upper())] = float(rr[1] or 0)
             finally:
                 lc.close()
-        # 인상후 원소재 사급가(등급별·적용월 기준): nx.mat_price_month 원소재 apply_ym<=적용월 최신, 없으면 일반20000/고강도22000
-        cur_sagub = {"일반CU": 20000.0, "고강도CU": 22000.0}
-        try:
-            if ym4:
-                ym6f = ("20" + ym4) if len(ym4) == 4 else ym4   # apply_ym이 YYYYMM 가정
-                cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 AND apply_ym<=? ORDER BY apply_ym DESC", ym6f)
-            else:
-                cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 ORDER BY apply_ym DESC")
-            mp = cur.fetchone()
-            if mp and mp[0]:
-                cur_sagub["일반CU"] = float(mp[0]); cur_sagub["고강도CU"] = round(float(mp[0]) * 1.1, 0)
-        except Exception:
-            pass
         for r in rows:
             au = r["assy_code"].strip().upper()
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
-            matp = r["mat_part"]; matr = r["mat_raw"]; sg = r["sagub_price"]; weld = r["mat_weld"]
-            matc = r["mat_cost"]   # 견적 원본 재료비(견적 당시 사급가 기준) = ★인상전
-            # 인상후 원재료(동) = mat_raw × (인상후사급가/견적사급가)
-            csg = cur_sagub.get(r["grade"], sg)
-            raw_after = (matr * (csg / sg) if (sg and sg > 0) else matr)
-            # 사급부품 인상후 = Σ 판매단가(사급가·협력사별·대표최신 as-of 적용월). 미조회분은 견적 mat_cost 폴백
             vc = _VENDOR2CODE.get(str(r["vendor"]).strip(), "")
-            splist = sagub_by_assy.get(au)
-            if splist and vc:
-                sn = 0.0
-                for pc, mc in splist:
-                    cv = sale_cur.get((vc, pc))
-                    sn += cv if cv else mc
-                sagub_after = round(sn, 2)
+            parts = parts_by_assy.get(au)
+            if parts:
+                mb = 0.0; ma = 0.0
+                for pc, pt, mc in parts:
+                    mb += mc                                     # 인상전 = 견적 per-part 그대로
+                    if pt == '사급부품':
+                        rep = sale_rep.get((vc, pc)) if vc else None
+                        ma += rep if rep else mc                 # 인상후 사급 = 대표판매단가, 없으면 견적
+                    else:
+                        ma += mc                                 # 동관/용접봉 = 견적 유지
+                mat_before = round(mb, 2); mat_after = round(ma, 2)
             else:
-                sagub_after = matp
-            # 재료비: 인상전=견적 원본 그대로 · 인상후=인상후동+용접봉(견적)+사급부품(판매단가 적용월)
-            mat_before = round(matc, 2)
-            mat_after = round(raw_after + weld + sagub_after, 2)
+                mat_before = round(r["mat_cost"], 2); mat_after = round(r["mat_cost"], 2)  # 하위부품 없음 폴백
             r["mat_before"] = mat_before; r["mat_after"] = mat_after
             r["mat_now"] = mat_after   # 모달 재료비(현재·인상후) 호환
             # 입고가 = 인상전 종전입고가 · 인상후 현재입고가
@@ -416,7 +394,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 SELECT ic, ITEM_COST FROM C WHERE rn=1""")
             for r in cur.fetchall():
                 pur[str(r[0]).strip().upper()] = float(r[1] or 0)
-        # 3b) 사급가 = 판매단가(COST_TAG='S' 내수 · 해당 협력사 · 적용월 이하 대표최신)
+        # 3b) 사급가 = 판매단가(COST_TAG='S' 내수 · 해당 협력사 · ★대표(MAIN_FLAG='1') 필수 · 적용월 이하 최신)
+        #     대표가 없으면 조회 안됨 → 상위 로직이 견적값(pt["mat"])으로 폴백. (예 strainer=견적 2959)
         sale_asof = {}
         if vcode:
             for i in range(0, len(nl), 900):
@@ -424,10 +403,11 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 cur.execute(f"""WITH S AS (
                       SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
                         ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
-                          ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
+                          ORDER BY COST_APPLY_YMD DESC) rn
                       FROM PR_M_ITEM_COST
                       WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                        AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                        AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND ISNULL(MAIN_FLAG,'0')='1'
+                        AND COST_APPLY_YMD<=? AND ITEM_COST>0)
                     SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
                 for r in cur.fetchall():
                     sale_asof[str(r[0]).strip().upper()] = float(r[1] or 0)

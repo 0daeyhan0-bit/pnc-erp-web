@@ -423,23 +423,41 @@ def _ensure_route_tbl(cur):
         item_code NVARCHAR(60) PRIMARY KEY, last_no INT NOT NULL DEFAULT 1)""")
     _SCHEMA_READY = True
 
-def _peek_route_no(cur, item):
-    """다음 채번될 route_no(증가 없이 조회) = max(기존 route_no, route_seq.last_no, 1)+1. 표시(자동라벨)용."""
-    cur.execute("SELECT ISNULL(MAX(route_no),1) FROM nx.sourcing_route WHERE item_code=?", item)
-    mx = int(cur.fetchone()[0] or 1)
+def _approved_hwm(cur, item):
+    """승인 후보 high-water-mark = max(현재 승인후보 route_no, route_seq.last_no, 1).
+       ★승인된 번호만 '소진'(재사용 금지). route_seq는 승인 시점에만 bump(생성 시 아님) → 미승인은 재사용 가능."""
+    cur.execute("SELECT ISNULL(MAX(route_no),0) FROM nx.sourcing_route WHERE item_code=? AND approve_flag=1", item)
+    live_appr = int(cur.fetchone()[0] or 0)
     cur.execute("SELECT last_no FROM nx.route_seq WHERE item_code=?", item)
-    r = cur.fetchone(); seq = int(r[0]) if r else 1
-    return max(mx, seq, 1) + 1
+    r = cur.fetchone(); seq = int(r[0]) if r else 0
+    return max(live_appr, seq, 1)
+
+def _peek_route_no(cur, item):
+    """다음 채번될 route_no(증가 없이 조회) = 승인hwm 초과 '최소 미사용' 번호.
+       미승인 후보 삭제 → 그 번호 즉시 재사용(빈자리 우선). 승인번호(≤hwm)는 소진되어 재사용 안 함. 표시(자동라벨)용."""
+    hwm = _approved_hwm(cur, item)
+    cur.execute("SELECT route_no FROM nx.sourcing_route WHERE item_code=?", item)
+    existing = {int(x[0]) for x in cur.fetchall()}
+    n = hwm + 1
+    while n in existing:   # 현존 후보(미승인 포함)와 충돌 회피
+        n += 1
+    return n
 
 def _next_route_no(cur, item):
-    """route_no 원자적 채번(단조증가). high-water = max(기존MAX, seq.last_no) → +1, seq에 기록.
-       ★삭제 후 재생성해도 번호 되돌아가지 않음(R02 삭제→다음 R03)."""
-    new_no = _peek_route_no(cur, item)
+    """route_no 채번 = 승인hwm 초과 최소 미사용 번호. ★생성 시 route_seq 미변경(승인 시에만 bump).
+       미승인 R02 삭제→다음 생성=R02(재사용). 승인 R02(hwm=2)→이후=R03(재사용 안 함)."""
+    return _peek_route_no(cur, item)
+
+def _bump_approved_seq(cur, item, route_no):
+    """승인 시 route_seq.last_no = max(기존, route_no)로 상향(승인번호 소진 확정)."""
+    cur.execute("SELECT last_no FROM nx.route_seq WHERE item_code=?", item)
+    r = cur.fetchone(); cur_hwm = int(r[0]) if r else 0
+    new_hwm = max(cur_hwm, int(route_no or 0))
     cur.execute("""MERGE nx.route_seq AS t USING (SELECT ? AS item_code, ? AS last_no) AS s
         ON t.item_code=s.item_code
         WHEN MATCHED THEN UPDATE SET last_no=s.last_no
-        WHEN NOT MATCHED THEN INSERT(item_code,last_no) VALUES(s.item_code,s.last_no);""", item, new_no)
-    return new_no
+        WHEN NOT MATCHED THEN INSERT(item_code,last_no) VALUES(s.item_code,s.last_no);""", item, new_hwm)
+    return new_hwm
 
 def _base_gongsu(item, ymd="260630"):
     """BASE(기본BOM) 공수합 = 내부원가 proc_grid 전노드 work_qty 합. 후보 공수합 게이트 기준."""
