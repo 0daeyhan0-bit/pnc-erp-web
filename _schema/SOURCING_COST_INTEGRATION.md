@@ -60,6 +60,36 @@
 item_code NVARCHAR(60), route_id INT, apply_from DATE NULL, apply_to DATE NULL,
 is_active BIT, alloc_ratio FLOAT NULL, upd_dt datetime, PK(item_code,route_id). route_id=0=현행 baseline(R01).
 
+## 업체·계획단가 모달 + 품목단가 관리 조회 (2026-08-05)
+승인 후보(R02…)에 **업체 다건 + 업체별 매입/사급 단가**를 입력하는 창(모달) 추가.
+
+### ★하드룰 준수(핵심)
+- 여기 입력하는 매입/사급 단가는 **후보/계획 단가(정산 아님)** — 후보 원가비교(R01 vs R02 손익)용.
+- **sourcing 레이어 nx.sourcing_profile 에만 저장.** 정산 단가 마스터 **PR_M_ITEM_COST 는 조회조차 안 함**(코드 grep: sourcing.py 내 PR_M_ITEM_COST 참조=주석 2건뿐, 쿼리 0). "자재 판매/매입 단가는 마감 때만 수정" 절대룰 준수.
+- 증거: e2e 저장 전/후 PR_M_ITEM_COST(AJR75563402 42행) 완전 동일(UNCHANGED=True).
+
+### 백엔드 컬럼 확장(멱등 _ensure_profile_price_cols)
+- nx.sourcing_profile ADD **buy_price FLOAT NULL**(매입단가·계획) + **sagub_price FLOAT NULL**(사급단가·계획). 프로세스당 1회 ALTER.
+- profile/list: buy_price·sagub_price 반환. profile/save: 두 필드 upsert(근거키 route_id·profile_id 스코프). 기존 게이트(NOT_APPROVED·ALLOC 100%) 유지.
+
+### 신규 조회 엔드포인트 GET /api/sourcing/plan_price?item=
+품목의 조달후보 업체별 계획단가(sourcing_profile buy_price/sagub_price + route_alloc 참고) **읽기전용** 반환. baseline(합성 R01, 업체매핑 불가) 제외. PR_M_ITEM_COST 미접근.
+
+### 프론트
+- **SCREEN.sourceprofile(screens.pur.js)**: 승인+route_id>0 후보 행에 [🏭 업체·단가] 버튼 → 모달(pmOpen). 업체 오토컴플리트(/api/sourcing/vendors)·공급구분·배분%·유효기간·활성 + **매입/사급 계획단가**. [➕업체추가] 다건. 배분합=100% 게이트 표시. 저장=profile/save. 노란 배너로 "후보/계획 단가(정산 아님)" 명시.
+- **품목단가 관리 priceItemView(core.js)**: 단가 이력(정산 마스터 PR_M_ITEM_COST 읽기) 아래에 **🧭 조달후보 업체별 계획단가** 읽기전용 섹션(planPriceSection, /api/sourcing/plan_price). "정산 아님" 라벨·노란 안내. 기존 동작 회귀 0.
+
+### route/cost 반영 여부(정직)
+- **미반영(별도 단계로 남김).** route/cost는 여전히 NxCostEngine 마스터 실원가(diff0 by construction) 반환 → **회귀 0**(앵커 silwon 5722.2, diff0=True 유지). 업체별 계획단가를 재료비/매입비에 배분가중 반영하면 diff0 게이트가 깨지므로, 저장·조회까지만 완료하고 원가 반영은 후속 과제.
+
+### 검증(e2e AJR75563402, R02=route_id 60, localhost 8010)
+- profile/save 2업체(FONE THAI 2337 60% buy 18500/sagub 12300 + (주)아이엠아이 2340 40% buy 19200/sagub 12800) → ins=2. profile/list 반영 확인(buy/sagub 정확).
+- 배분합 90%(60+30) → gate ALLOC 거부. 미승인 임시후보(route 62) → gate NOT_APPROVED 거부.
+- plan_price: R02 vendors=2(계획단가 노출). 임시후보 R03 vendors=0.
+- 마스터 PR_M_ITEM_COST 42행 저장전후 UNCHANGED=True. route/cost silwon=5722.2 diff0=True(회귀0).
+- py_compile OK·재기동 health 200·openapi 321(plan_price 신규). 서빙마커(pmOpen·buy_price·업체·단가 지정·planPriceSection·조달후보 업체별 계획단가) 확인. 테스트 데이터=route_id 60 스코프 삭제(0행 복귀), 임시 route 62 route/delete.
+- index.html: core.js?v=260805sc, screens.pur.js?v=260805sc.
+
 ### 엔드포인트(sourcing.py 끝 append)
 - GET /api/sourcing/route/alloc?item=&show_unapproved= → 승인 후보(_profile_routes, baseline R01 합성 포함)+저장 alloc 조인.
   저장 없으면 기본=현행(R01) 활성 100%. 미승인=readonly(회색). alloc_ok/alloc_errs 동봉(_validate_alloc).
