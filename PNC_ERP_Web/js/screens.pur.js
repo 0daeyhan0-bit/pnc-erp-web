@@ -1636,7 +1636,7 @@ SCREEN.coopquote=(host)=>{
          <div style="padding:10px 16px;border-top:1px solid #e2e8f2;text-align:right"><button class="btn" id="cq-dc">닫기</button></div>
        </div></div>`;})():''}
      ${be?(()=>{const d=be.data;const soyo=beSoyo();const raw=beRaw();const weld=beWeld();
-       const baseMat=d?d.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&!r.haskids).reduce((s,r)=>s+(r.mat_now||0),0):0;   // 인상후 부속품/용접봉(판매단가 반영)
+       const baseMat=d?d.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&!r.haskids).reduce((s,r)=>s+beRowMat(r),0):0;   // 부속품/용접봉(편집 재료비 반영)
        const mat=raw+baseMat;const proc=Math.round(+be.proc||0);const sale=mat+proc;
        const A0=be.asm||{gagong:(d&&d.assembly_proc)||0,mgmt:0,transport:0,profit:0};const asmTot=Math.round((+A0.gagong||0)+(+A0.mgmt||0)+(+A0.transport||0)+(+A0.profit||0));
        const grand=((d&&d.part_sum)||0)+asmTot;
@@ -1669,27 +1669,30 @@ SCREEN.coopquote=(host)=>{
                <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
                <td class="num" style="color:#c0392b;font-weight:700" id="be-tmat-root">${nf(d.total_mat||0)}</td><td class="num">-</td><td class="num">-</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
-             ${d.rows.map(r=>{const isTube=r.role==='제작동관';const e=be.edits[r.code]||{};
+             ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const e=be.edits[r.code]||{};
              const dd=(e.diam!=null&&e.diam!=='')?e.diam:(r.coop_diam||'');const tt=(e.thick!=null&&e.thick!=='')?e.thick:(r.coop_thick||'');const ll=(e.length!=null&&e.length!=='')?e.length:(r.coop_length||'');
              const uw=beUw(r);const need=isTube&&!(dd&&tt&&ll);const ind=6+r.level*12;const pr=r.procs||{};
+             const rq=beRowQty(r);const rmat=beRowMat(r);const rgag=beRowGag(r);const rtot=rmat+rgag;const rratio=rtot>0?Math.round(rmat/rtot*100):(rmat?100:0);
+             const grey=r.in_quote===false;const matEd=be.matEdits&&be.matEdits[r.code];const qtyEd=be.qtyEdits&&be.qtyEdits[r.code];
              return `<tr style="${need?'background:#fdf0f0':''}">
                <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
                <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
-               <td>${beBadge(r.role)}</td><td class="num">×${nf4(r.cum_qty)}</td>
+               <td>${beBadge(r.role)}</td>
+               <td class="num"><input class="be-qty inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(qtyEd!=null&&qtyEd!==''?qtyEd:(r.cum_qty||''))}" style="width:46px;min-width:0;text-align:right;padding:1px 2px"></td>
                <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
                ${isTube?`<td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="diam" value="${esc(dd)}" style="width:38px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_diam||''}"></td>
                  <td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="thick" value="${esc(tt)}" style="width:32px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_thick||''}"></td>
                  <td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="length" value="${esc(ll)}" style="width:40px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_length||''}"></td>`
                  :`<td class="num" style="font-size:9px">${dd||'-'}</td><td class="num" style="font-size:9px">${tt||'-'}</td><td class="num" style="font-size:9px">${ll||'-'}</td>`}
-               <td class="num be-uw">${uw?nf4(uw):(r.role==='용접봉'?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
-               <td class="num be-sw" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*r.cum_qty):'-'}</td>
-               <td class="num">${r.pur_price!=null?nf(r.pur_price):'-'}</td>
-               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" placeholder="${esc(be.sagub||'')}" style="width:58px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="관경별 사급가(원/kg). 비우면 기본사급가 적용">`:'<span style="color:#c9d1dc">-</span>'}</td>
-               <td class="num" style="${r.in_quote===false?'color:#c9d1dc;font-weight:400':'color:#c0392b;font-weight:700'}" title="${r.in_quote===false?'합계 비산입 (상위 견적 덩어리에 포함됨)':'현재 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)'}">${r.mat_now!=null?(r.in_quote===false?'('+nf(r.mat_now)+')':nf(r.mat_now)):'-'}</td>
+               <td class="num be-uw" data-code="${esc(r.code)}">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
+               <td class="num be-sw" data-code="${esc(r.code)}" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
+               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:'<span style="color:#c9d1dc">-</span>'}</td>
+               <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">`)}</td>
+               <td class="num" style="color:#c0392b"><span class="be-ratio" data-code="${esc(r.code)}">${grey?'-':rratio+'%'}</span></td>
+               <td class="num" style="color:#c0392b;font-weight:700"><span class="be-tot" data-code="${esc(r.code)}">${grey?'-':nf(rtot)}</span></td>
                ${(d.proc_ops||[]).map(op=>`<td class="num">${isTube?`<input class="be-pc" data-code="${esc(r.code)}" data-op="${esc(op)}" value="${(be.procEdits[r.code]&&be.procEdits[r.code][op]!=null&&be.procEdits[r.code][op]!=='')?be.procEdits[r.code][op]:(pr[op]||'')}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#6a3fb0;border:1px solid #e2e8f2;border-radius:3px">`:''}</td>`).join('')}
                <td class="num" style="color:#1c7c3a">${isTube?`<span class="be-rg" data-code="${esc(r.code)}">${nf(beRowGagong(r))}</span>`:'-'}</td>
-               <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td>
-               <td class="num" style="color:#c0392b;font-weight:700">${r.role==='용접봉'?nf(r.weld_cost)+'<span style="font-size:9px;color:#8a6d3b"> 재료</span>':(r.part_total!=null?nf(r.part_total):'<span style="color:#c9d1dc">-</span>')}</td></tr>`;}).join('')}
+               <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td></tr>`;}).join('')}
              ${(be.asm||d.assembly_proc>0)?(()=>{const A=be.asm||{procs:{},gagong:d.assembly_proc,mgmt:0,transport:0,profit:0,total:d.assembly_proc};
                const atot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
                return `<tr style="background:#fff8ec">
@@ -1697,13 +1700,13 @@ SCREEN.coopquote=(host)=>{
                <td class="cap" style="color:#8a6d3b" title="견적서엔 칸이 없어 용접봉 줄에 넣었던 실제 조립작업 공정">서브ASSY 조립공정</td>
                <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:#fff3e0;color:#b8791f">조립공정</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
-               <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#c0392b;font-weight:700" id="be-asmtot">${nf(atot)}</td>
                ${(d.proc_ops||[]).map(op=>`<td class="num"><input class="be-asmpc" data-op="${esc(op)}" value="${A.procs&&A.procs[op]?A.procs[op]:''}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#b8791f;border:1px solid #f0e0c0;border-radius:3px"></td>`).join('')}
                <td class="num"><input class="be-asm" data-f="gagong" value="${esc(A.gagong)}" style="width:50px;min-width:0;text-align:right;padding:1px 2px;font-size:12px;color:#1c7c3a;font-weight:700"></td>
                <td class="num"><input class="be-asm" data-f="mgmt" value="${esc(A.mgmt)}" style="width:50px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
                <td class="num"><input class="be-asm" data-f="transport" value="${esc(A.transport)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
-               <td class="num"><input class="be-asm" data-f="profit" value="${esc(A.profit)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
-               <td class="num" style="color:#c0392b;font-weight:700" id="be-asmtot">${nf(atot)}</td></tr>`;})():''}
+               <td class="num"><input class="be-asm" data-f="profit" value="${esc(A.profit)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td></tr>`;})():''}
              ${(d.sale_stored>0||d.part_sum>0)?`<tr style="background:#dbe9ff;font-weight:800;font-size:13px">
                <td colspan="${17+(d.proc_ops||[]).length}" style="text-align:left;padding-left:10px;color:#1c47a0">견적가 합계 (하위부품 + 서브조립공정) = <span id="be-grandtot-l">${nf(grand)}</span>${d.sale_stored&&grand!==d.sale_stored?` <span style="color:#8aa0bd;font-weight:400">(원견적 ${nf(d.sale_stored)})</span>`:''}</td>
                <td class="num" style="color:#c0392b" id="be-grandtot">${nf(grand)}</td></tr>`:''}</tbody></table></div>
@@ -1770,26 +1773,23 @@ SCREEN.coopquote=(host)=>{
       if(ni)ni.onkeyup=e=>{if(e.key==='Enter')loadBomInto(ni.value,null);};
       const bs=g('#be-save');if(bs)bs.onclick=saveBomEdit;
       const upd=()=>{const soyo=beSoyo();const raw=beRaw();
-        const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&!r.haskids).reduce((s,r)=>s+(r.mat_now||0),0);   // 인상후 부속품/용접봉(판매단가 반영)
+        const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&!r.haskids).reduce((s,r)=>s+beRowMat(r),0);   // 부속품/용접봉(편집 재료비 반영)
         const mat=raw+baseMat;const proc=Math.round(+be.proc||0);const sale=mat+proc;
         const set=(id,v)=>{const el=g(id);if(el)el.textContent=v;};
-        set('#be-tsoyo',nf4(soyo));set('#be-tsoyo2',nf4(soyo));set('#be-traw',nf(raw));set('#be-tbase',nf(baseMat));set('#be-tmat',nf(mat));set('#be-tsale',nf(sale));
+        set('#be-tsoyo',nf4(soyo));set('#be-tsoyo2',nf4(soyo));set('#be-traw',nf(raw));set('#be-tbase',nf(baseMat));set('#be-tmat',nf(mat));set('#be-tmat-root',nf(mat));set('#be-tsale',nf(sale));
         if(be.data.total_proc_cost>0)set('#be-reqrate',nf(Math.round((sale-mat)*be.data.labor_rate/be.data.total_proc_cost)));};
+      const beRefreshRow=(inp)=>{const code=inp.dataset.code;const r=be.data.rows.find(x=>x.code===code);if(!r)return;
+        const tr=inp.closest('tr');const uw=beUw(r);const rq=beRowQty(r);const rmat=beRowMat(r);const rgag=beRowGag(r);const rtot=rmat+rgag;const rratio=rtot>0?Math.round(rmat/rtot*100):(rmat?100:0);
+        const s=(cls,v)=>{const el=tr.querySelector('.'+cls);if(el)el.textContent=v;};
+        s('be-uw',uw?nf4(uw):(r.role==='용접봉'?'공정':'-'));s('be-sw',(r.role==='제작동관'&&uw)?nf4(uw*rq):'-');
+        s('be-rm',nf(rmat));s('be-ratio',rratio+'%');s('be-tot',nf(rtot));s('be-rg',nf(rgag));
+        tr.style.background=(r.role==='제작동관'&&!uw)?'#fdf0f0':'';upd();};
       const bv=g('#be-vendor');if(bv){bv.oninput=e=>be.vendor=e.target.value;bv.onchange=e=>{be.vendor=e.target.value;if(be.data&&be.assy)loadBomInto(be.assy,null);};}
-      const bg=g('#be-grade');if(bg)bg.onchange=e=>be.grade=e.target.value;
-      const bsg=g('#be-sagub');if(bsg)bsg.oninput=e=>{be.sagub=e.target.value;host.querySelectorAll('.be-sg').forEach(i=>i.placeholder=e.target.value);upd();};
-      host.querySelectorAll('.be-sg').forEach(inp=>inp.oninput=()=>{be.sagubEdits=be.sagubEdits||{};be.sagubEdits[inp.dataset.code]=inp.value;upd();});
-      const bp=g('#be-proc');if(bp)bp.oninput=e=>{be.proc=e.target.value;upd();};
-      host.querySelectorAll('.be-sp').forEach(inp=>inp.oninput=()=>{
-        const code=inp.dataset.code,fld=inp.dataset.f;be.edits[code]=be.edits[code]||{};be.edits[code][fld]=inp.value;
-        const tr=inp.closest('tr');const r=be.data.rows.find(x=>x.code===code);const uw=beUw(r);
-        const uwc=tr.querySelector('.be-uw'),swc=tr.querySelector('.be-sw');
-        if(uwc)uwc.textContent=uw?nf4(uw):'-';if(swc)swc.textContent=uw?nf4(uw*r.cum_qty):'-';
-        tr.style.background=uw?'':'#fdf0f0';upd();});
-      host.querySelectorAll('.be-pc').forEach(inp=>inp.oninput=()=>{
-        const code=inp.dataset.code,op=inp.dataset.op;be.procEdits[code]=be.procEdits[code]||{};be.procEdits[code][op]=inp.value;
-        const r=be.data.rows.find(x=>x.code===code);const rg=beRowGagong(r);
-        const span=inp.closest('tr').querySelector('.be-rg');if(span)span.textContent=nf(rg);});
+      host.querySelectorAll('.be-sg').forEach(inp=>inp.oninput=()=>{be.sagubEdits=be.sagubEdits||{};be.sagubEdits[inp.dataset.code]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-sp').forEach(inp=>inp.oninput=()=>{const code=inp.dataset.code,fld=inp.dataset.f;be.edits[code]=be.edits[code]||{};be.edits[code][fld]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-qty').forEach(inp=>inp.oninput=()=>{be.qtyEdits=be.qtyEdits||{};be.qtyEdits[inp.dataset.code]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-mat').forEach(inp=>inp.oninput=()=>{be.matEdits=be.matEdits||{};be.matEdits[inp.dataset.code]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-pc').forEach(inp=>inp.oninput=()=>{const code=inp.dataset.code,op=inp.dataset.op;be.procEdits[code]=be.procEdits[code]||{};be.procEdits[code][op]=inp.value;beRefreshRow(inp);});
       const asmUpd=()=>{if(!be.asm)return;const A=be.asm;const atot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
         const t=g('#be-asmtot');if(t)t.textContent=nf(atot);const grand=(be.data.part_sum||0)+atot;
         const gl=g('#be-grandtot-l'),gt=g('#be-grandtot');if(gl)gl.textContent=nf(grand);if(gt)gt.textContent=nf(grand);};
