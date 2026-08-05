@@ -1279,35 +1279,34 @@ SCREEN.sourceprofile=(c)=>{
   const today=iso(new Date()), CLOSE='2026-06-30', OPEN='2030-12-31', FROM0='2026-07-01';
   const baseOf=x=>{x=(x||'').trim().toUpperCase();const m=x.match(/^([A-Z]{2,4}\d+)/);return m?m[1]:x;};
   const nfq=v=>{v=Number(v||0);return v%1===0?v.toLocaleString('ko-KR'):v.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');};
-  let q='', slist=[], sel=null, selNm='', tree=null, tload=false, vdata=null, searching=false, msg='', acT=null, edit={}, ref=today;
-  let showUnappr=false, sroutes=[];   // 조달경로 후보(nx.sourcing_route) — 기본 승인분만, 토글 시 미승인 회색 표시(배정불가)
-  const loadSRoutes=async()=>{try{const r=await fetch(`${API}/api/sourcing/routes?item=${encodeURIComponent(sel)}&for_profile=1&show_unapproved=${showUnappr?1:0}`);const j=await r.json();sroutes=j.routes||[];}catch(e){sroutes=[];}};
+  let q='', slist=[], sel=null, selNm='', tree=null, tload=false, searching=false, msg='', acT=null, edit={}, ref=today;
+  let showUnappr=false, routes=[], allocErrs=[];   // 조달경로 후보(단일 소스 nx.sourcing_route) + 저장된 route 단위 배분(nx.route_alloc)
+  const loadAlloc=async()=>{try{const r=await fetch(`${API}/api/sourcing/route/alloc?item=${encodeURIComponent(sel)}&show_unapproved=${showUnappr?1:0}`);const j=await r.json();routes=j.routes||[];allocErrs=j.alloc_errs||[];}catch(e){routes=[];allocErrs=[];}};
   const search=async(auto)=>{searching=true;draw();
     try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}`);slist=(await r.json()).rows||[];}
     catch(e){slist=[];msg='검색 실패';}
     searching=false;draw();if(auto&&slist.length&&!sel)open(slist[0].item);};
   const fillDL=()=>{const dl=c.querySelector('#sp-dl');if(dl)dl.innerHTML=slist.slice(0,60).map(s=>`<option value="${esc(s.item)}">${esc((s.name||'').replace(/"/g,''))}</option>`).join('');};
   const ac=t=>{clearTimeout(acT);acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(t)}`);slist=(await r.json()).rows||[];fillDL();}catch(e){}},180);};
-  const open=async(item)=>{sel=item;selNm='';tree=null;vdata=null;tload=true;edit={};draw();
+  const open=async(item)=>{sel=item;selNm='';tree=null;tload=true;edit={};draw();
     try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}`);const j=await r.json();tree=j.rows||[];selNm=j.name||'';}catch(e){tree=[];}
-    try{const rv=await fetch(`${API}/api/subvariant/get?base=${encodeURIComponent(baseOf(item))}`);vdata=await rv.json();}catch(e){vdata=null;}
-    await loadSRoutes();
+    await loadAlloc();
     tload=false;draw();};
-  const curE=(vi,f,dflt)=>{const k=vi+'|'+f;return edit[k]!==undefined?edit[k]:dflt;};
-  const setE=(vi,f,v)=>{edit[vi+'|'+f]=v;};
-  const mfrom=m=>curE(m.variant,'apply_from',m.apply_from||'');
-  const mto=m=>curE(m.variant,'apply_to',m.apply_to||'');
-  const mact=m=>!!curE(m.variant,'is_active',(m.prof_active!=null?m.prof_active:m.real_current));
-  const malloc=m=>curE(m.variant,'alloc_ratio',(m.alloc_ratio!=null?m.alloc_ratio:''));
-  const validOn=(m,d)=>{const f=mfrom(m),t=mto(m);return mact(m)&&(!f||f<=d)&&(!t||d<=t);};
-  const gAlloc=g=>{const valid=(g.members||[]).filter(m=>validOn(m,ref));const withAl=valid.filter(m=>malloc(m)!==''&&malloc(m)!=null);const sum=Math.round(withAl.reduce((a,m)=>a+(parseFloat(malloc(m))||0),0)*100)/100;return {nValid:valid.length,sum,single:valid.length<=1};};
-  const autoset=()=>{(vdata&&vdata.groups||[]).forEach(g=>{const usedN=(g.members||[]).filter(m=>m.real_current).length;(g.members||[]).forEach(m=>{if(m.real_current){setE(m.variant,'is_active',true);if(!mfrom(m))setE(m.variant,'apply_from',FROM0);setE(m.variant,'apply_to',OPEN);if(g.multi&&usedN===1)setE(m.variant,'alloc_ratio',100);}else{setE(m.variant,'is_active',false);if(!mfrom(m))setE(m.variant,'apply_from','2026-01-01');setE(m.variant,'apply_to',CLOSE);setE(m.variant,'alloc_ratio','');}});});msg='현행 유지 + 비활성 후보 '+CLOSE+' 마감 자동설정. [저장]으로 확정.';draw();};
-  const save=async()=>{const rows=[];
-    (vdata&&vdata.groups||[]).forEach(g=>(g.members||[]).forEach(m=>{const valid=validOn(m,ref);const al=malloc(m);
-      rows.push({variant_item:m.variant,group_key:g.common_sub,is_new:false,vendor_code:m.vendor_code||'',vendor_name:m.vendor||'',apply_from:mfrom(m),apply_to:mto(m),is_active:mact(m)?1:0,alloc_ratio:(valid&&al!==''&&al!=null)?al:null});}));
-    try{const r=await fetch(`${API}/api/procgroup/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base:baseOf(sel),rows})});
+  const curE=(rid,f,dflt)=>{const k=rid+'|'+f;return edit[k]!==undefined?edit[k]:dflt;};
+  const setE=(rid,f,v)=>{edit[rid+'|'+f]=v;};
+  const rfrom=r=>curE(r.route_id,'apply_from',r.apply_from||'');
+  const rto=r=>curE(r.route_id,'apply_to',r.apply_to||'');
+  const ract=r=>!!curE(r.route_id,'is_active',!!r.is_active);
+  const ralloc=r=>curE(r.route_id,'alloc_ratio',(r.alloc_ratio!=null?r.alloc_ratio:''));
+  const validOn=(r,d)=>{const f=rfrom(r),t=rto(r);return ract(r)&&(!f||f<=d)&&(!t||d<=t);};
+  const aStat=()=>{const active=routes.filter(r=>ract(r)&&validOn(r,ref));const withAl=active.filter(r=>ralloc(r)!==''&&ralloc(r)!=null);const sum=Math.round(withAl.reduce((a,r)=>a+(parseFloat(ralloc(r))||0),0)*100)/100;return {n:active.length,sum,single:active.length<=1,withAl:withAl.length};};
+  const autoset=()=>{routes.forEach(r=>{const isCur=r.current_flag||r.route_no===1;if(isCur){setE(r.route_id,'is_active',true);if(!rfrom(r))setE(r.route_id,'apply_from',FROM0);setE(r.route_id,'apply_to',OPEN);setE(r.route_id,'alloc_ratio',100);}else{setE(r.route_id,'is_active',false);setE(r.route_id,'apply_to',CLOSE);setE(r.route_id,'alloc_ratio','');}});msg='현행(R01) 활성·100% + 나머지 후보 비활성 마감('+CLOSE+'). [저장]으로 확정.';draw();};
+  const save=async()=>{const rows=routes.filter(r=>!r.readonly).map(r=>{const al=ralloc(r);
+      return {route_id:r.route_id,apply_from:rfrom(r)||null,apply_to:rto(r)||null,is_active:ract(r)?1:0,alloc_ratio:(ract(r)&&al!==''&&al!=null)?parseFloat(al):null};});
+    try{const r=await fetch(`${API}/api/sourcing/route/alloc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:sel,rows})});
       const j=await r.json();if(j.ok){alert(`저장 완료 (${j.count}건)`);open(sel);return;}
-      alert('저장 실패 — 유효기간 겹치는 구간 배분합 100% 확인:\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
+      const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 후보 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
+      alert('저장 실패 — '+hint+':\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
     catch(e){alert('저장 실패: '+e);}};
   const opChip=op=>`<span style="display:inline-block;background:#eef3fb;border:1px solid #d3e0f0;border-radius:9px;padding:0 6px;margin:1px;font-size:10px;color:#33507a">${esc(op)}</span>`;
   const kindOf=n=>{if((n.nm||'').indexOf('용접봉')>=0)return{t:'용접봉',c:'#8e44ad'};if(n.haskids)return{t:'제작(SUB)',c:'#1c7c3a'};if(String(n.sag)==='1')return{t:'사급',c:'#b8860b'};return{t:'매입/구매',c:'#1c47a0'};};

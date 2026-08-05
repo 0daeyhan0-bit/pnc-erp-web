@@ -1635,3 +1635,133 @@ def sourcing_route_cost(route_id: int = Query(..., description="후보 route_id(
             "note": ("후보 원가 = 대상품목 실원가(NxCostEngine, 마스터와 동일 산식·diff0). "
                      "후보는 BOM구조·공정 재배치 계층 — 조달(업체·매입가·사급 배분)은 조달프로파일 계층에서 반영. "
                      "부품셋·공수합=BASE 보존(route/finalize 게이트)이므로 구조·조달 불변이면 실원가는 현행과 동일.")}
+
+
+# ===================== 조달 프로파일 = route 단위 배분(nx.route_alloc) =====================
+# ★계층 구분: 이 배분은 '후보(R01 현행 vs R02..) 간 배정' = route 단위(다른 계층).
+#   후보 '내부 업체분배'(vendor·배분%·유효기간)는 nx.sourcing_profile(위 profile/list·profile/save)로 별도.
+# 조달 프로파일 화면은 이 route_alloc 만 편집(단일 소스). 승인 후보(approve_flag=1, baseline=R01 자동승인)만 활성 허용.
+_ROUTE_ALLOC_READY = False
+def _ensure_route_alloc_tbl(cur):
+    global _ROUTE_ALLOC_READY
+    if _ROUTE_ALLOC_READY:
+        return
+    cur.execute("""IF OBJECT_ID('nx.route_alloc','U') IS NULL CREATE TABLE nx.route_alloc(
+        item_code NVARCHAR(60) NOT NULL, route_id INT NOT NULL, apply_from DATE NULL, apply_to DATE NULL,
+        is_active BIT DEFAULT 0, alloc_ratio FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_route_alloc PRIMARY KEY(item_code, route_id))""")
+    _ROUTE_ALLOC_READY = True
+
+def _profile_routes(cur, item, show_unapproved=1):
+    """조달 프로파일 편집용 승인 후보 목록(현행 R01 baseline 포함) — sourcing_routes(for_profile) 헤더 로직 재사용(라인 미조회, 경량).
+       반환: [{route_id, route_no, route_name, gubun, vendor_code, vendor_name, current_flag, approve_flag,
+               route_apply_from, reject_flag, baseline, readonly}]. approve_flag=0(미승인)은 show_unapproved=1 이면 회색(readonly)로 포함."""
+    _ensure_route_tbl(cur)
+    cur.execute("""SELECT r.route_id, r.route_no, ISNULL(r.route_name,''), ISNULL(r.vendor_code,''), ISNULL(r.gubun,''),
+          r.current_flag, r.approve_flag, CONVERT(varchar(10),r.apply_from,23), ISNULL(r.reject_flag,0)
+        FROM nx.sourcing_route r WHERE r.item_code=? ORDER BY r.route_no""", item)
+    routes = []; vcodes = set()
+    for h in cur.fetchall():
+        routes.append({"route_id": int(h[0]), "route_no": int(h[1]), "route_name": h[2],
+                       "vendor_code": str(h[3]).strip(), "gubun": h[4], "current_flag": bool(h[5]),
+                       "approve_flag": bool(h[6]), "route_apply_from": h[7], "reject_flag": bool(h[8]),
+                       "baseline": False})
+        vcodes.add(str(h[3]).strip())
+    # 현행 baseline 합성(저장된 route_no=1/현행이 없을 때만) — 읽기전용·자동승인 기준선(=조회 routes와 동일 규칙)
+    has_saved_current = any(r["current_flag"] or r["route_no"] == 1 for r in routes)
+    if not has_saved_current:
+        routes.insert(0, {"route_id": 0, "route_no": 1, "route_name": "현행(실사용 BOM)", "vendor_code": "",
+                          "gubun": "자체", "current_flag": True, "approve_flag": True, "route_apply_from": None,
+                          "reject_flag": False, "baseline": True})
+    vmap = _custnm_map(cur, vcodes)
+    for r in routes:
+        r["vendor_name"] = vmap.get(r["vendor_code"], r["vendor_code"])
+    def keep(r):
+        return True if r["approve_flag"] else bool(show_unapproved)
+    return [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
+
+@router.get("/api/sourcing/route/alloc")
+def sourcing_route_alloc_get(item: str = Query(...), show_unapproved: int = Query(1)):
+    """승인 조달경로 후보(R01 현행 + R02..) + 저장된 route 단위 배분(nx.route_alloc) 조인.
+       저장 없으면 기본=현행(R01/current) 활성 100%·나머지 비활성. 미승인 후보=회색(readonly, 활성 불가)."""
+    item = item.strip()
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_route_alloc_tbl(cur)
+        routes = _profile_routes(cur, item, show_unapproved)
+        cur.execute("""SELECT route_id, CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23),
+              is_active, alloc_ratio FROM nx.route_alloc WHERE item_code=?""", item)
+        saved = {int(r[0]): {"apply_from": r[1], "apply_to": r[2],
+                             "is_active": (bool(r[3]) if r[3] is not None else None),
+                             "alloc_ratio": (float(r[4]) if r[4] is not None else None)} for r in cur.fetchall()}
+        has_saved = len(saved) > 0
+        cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", item)
+        rr = cur.fetchone(); nm = rr[0] if rr else ""
+        out = []
+        for r in routes:
+            s = saved.get(r["route_id"])
+            if s is None:
+                is_cur = r["current_flag"] or r["route_no"] == 1
+                dflt_active = bool(is_cur) and not has_saved   # 저장 이력 없을 때만 현행 기본활성
+                s = {"apply_from": None, "apply_to": None, "is_active": dflt_active,
+                     "alloc_ratio": (100.0 if dflt_active else None)}
+            out.append({**r,
+                        "apply_from": s["apply_from"], "apply_to": s["apply_to"],
+                        "is_active": (bool(s["is_active"]) if s["is_active"] is not None else False),
+                        "alloc_ratio": s["alloc_ratio"]})
+        act = [(x["apply_from"] or "2000-01-01", x["apply_to"], x["alloc_ratio"])
+               for x in out if x["is_active"] and x["alloc_ratio"] is not None]
+        alloc_errs = _validate_alloc(act) if act else []
+        return {"item": item, "item_name": nm, "routes": out, "has_saved": has_saved,
+                "alloc_ok": (len(alloc_errs) == 0), "alloc_errs": alloc_errs}
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/route/alloc/save")
+def sourcing_route_alloc_save(payload: dict = Body(...)):
+    """route 단위 배분 저장. 검증: (1)승인 후보만 활성 허용(baseline R01 포함) (2)유효기간 겹치는 활성 배분합=100%
+       (활성 1개=단일이면 100 자동/생략 허용). upsert. 근거키=item_code·route_id 스코프(대량삭제 금지).
+       payload {item, rows:[{route_id, apply_from, apply_to, is_active, alloc_ratio}]}."""
+    item = str(payload.get("item", "")).strip()
+    rows = payload.get("rows", []) or []
+    if not item:
+        raise HTTPException(400, "item 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_alloc_tbl(cur)
+        approved = {r["route_id"]: r for r in _profile_routes(cur, item, show_unapproved=1)}
+        norm = []; act = []; errs = []
+        for r in rows:
+            try:
+                rid = int(r.get("route_id"))
+            except Exception:
+                continue
+            af = _d(r.get("apply_from")) or None
+            at = _d(r.get("apply_to")) or None
+            iact = 1 if r.get("is_active") else 0
+            ratio = r.get("alloc_ratio"); ratio = float(ratio) if (ratio not in (None, "", "null")) else None
+            if iact:   # 승인 후보만 활성 허용(미존재/미승인 거부)
+                info = approved.get(rid)
+                if info is None or not info["approve_flag"]:
+                    errs.append(f"route_id={rid}: 미승인/미존재 후보는 활성 배정 불가")
+                    continue
+            norm.append((rid, af, at, iact, ratio))
+            if iact and ratio is not None:
+                act.append((af or "2000-01-01", at, ratio))
+        if errs:
+            nx.rollback(); return {"ok": False, "gate": "APPROVE", "errors": list(dict.fromkeys(errs))}
+        alloc_errs = _validate_alloc(act) if act else []
+        if alloc_errs:
+            nx.rollback(); return {"ok": False, "gate": "ALLOC", "errors": list(dict.fromkeys(alloc_errs))}
+        for (rid, af, at, iact, ratio) in norm:   # 근거키 스코프 upsert(대량삭제 금지)
+            cur.execute("DELETE FROM nx.route_alloc WHERE item_code=? AND route_id=?", item, rid)
+            cur.execute("""INSERT INTO nx.route_alloc(item_code,route_id,apply_from,apply_to,is_active,alloc_ratio,upd_dt)
+                VALUES(?,?,?,?,?,?,getdate())""", item, rid, af, at, iact, ratio)
+        nx.commit()
+        return {"ok": True, "count": len(norm)}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
