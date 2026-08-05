@@ -1789,6 +1789,114 @@ def sourcing_sub_price_save(payload: dict = Body(...)):
     finally:
         nx.close()
 
+# ============ ★R01(현행) 품목별 발주업체·단가 (자동발주 근거) ============
+# 현행 BOM(CS_M_ITEM_BOM real=1)의 매입처(IN_CUST) 보유 품목 자동시드 + 마스터 매입단가(PR_M_ITEM_COST COST_TAG='1' as-of, 읽기전용)
+# + nx.order_vendor 발주업체 override. ★라이브 PR_M_ITEM_COST 조회만·불변. 품목→발주업체→단가 = 자동발주 근거.
+_MK_LABEL = {"": "", "1": "자체생산", "2": "외주가공", "3": "매입", "4": "사급가공", "5": "외주완성"}
+_ORDER_VENDOR_READY = False
+def _ensure_order_vendor_tbl(cur):
+    global _ORDER_VENDOR_READY
+    if _ORDER_VENDOR_READY:
+        return
+    cur.execute("""IF OBJECT_ID('nx.order_vendor','U') IS NULL CREATE TABLE nx.order_vendor(
+        item_code NVARCHAR(60) NOT NULL, vendor_code NVARCHAR(20) NULL, upd_dt datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_order_vendor PRIMARY KEY(item_code))""")
+    _ORDER_VENDOR_READY = True
+
+@router.get("/api/sourcing/current_order")
+def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
+    """★R01(현행) 품목별 발주업체·단가 = 자동발주 근거. 현행 BOM 매입처(IN_CUST) 보유 품목 자동시드 + 마스터 매입단가(as-of, 읽기전용)
+       + nx.order_vendor 발주업체 override. 라이브 PR_M_ITEM_COST 조회만·불변."""
+    item = item.strip()
+    if not item: raise HTTPException(400, "item 필요")
+    asof = _d6(ymd) if ymd else datetime.now().strftime("%y%m%d")
+    cn = _conn(); cur = cn.cursor()   # live PARTNER_ERP (읽기전용)
+    try:
+        cur.execute("""WITH tree AS (
+            SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, 1 lvl
+            FROM CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            UNION ALL
+            SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), t.lvl+1
+            FROM tree t JOIN CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            JOIN PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
+            WHERE t.lvl < 10)
+            SELECT c, SUM(q) qty FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
+        agg = {str(r[0]).strip(): float(r[1] or 0) for r in cur.fetchall()}
+        if not agg:
+            return {"item": item, "asof": asof, "rows": [], "n": 0, "note": "현행 BOM 구성 없음"}
+        codes = [c for c in agg if not c.upper().startswith("RAC")]   # 용접봉 제외
+        info = {}
+        for i in range(0, len(codes), 900):
+            ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT LTRIM(RTRIM(m.ITEM_CODE)), ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''), ISNULL(m.MAKE_TYPE,''),
+                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,'')
+                FROM PR_M_ITEM m LEFT JOIN CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                WHERE m.ITEM_CODE IN ({ph})""", *ch)
+            for r in cur.fetchall():
+                info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "mk": str(r[3]).strip(), "cust": str(r[4]).strip(), "custnm": r[5]}
+        # 발주 대상 = 현행 매입처(IN_CUST) 보유 품목
+        order_items = {c: agg[c] for c in codes if info.get(c, {}).get("cust")}
+        oc = list(order_items.keys())
+        price = {}
+        for i in range(0, len(oc), 900):
+            ch = oc[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
+                SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr, ISNULL(CUST_CODE,'') cust,
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)) ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC) rn
+                FROM PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=? AND LTRIM(RTRIM(ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+            for r in cur.fetchall():
+                price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
+    finally:
+        cn.close()
+    # nx 발주업체 override 병합
+    ov = {}; ovcust = {}
+    nx = _nx(); ncur = nx.cursor()
+    try:
+        _ensure_order_vendor_tbl(ncur)
+        for i in range(0, len(oc), 900):
+            ch = oc[i:i+900]; ph = ",".join("?" * len(ch))
+            ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(vendor_code,'') FROM nx.order_vendor WHERE item_code IN ({ph})", *ch)
+            for r in ncur.fetchall(): ov[str(r[0]).strip()] = str(r[1] or "").strip()
+        ovcust = _custnm_map(ncur, set(v for v in ov.values() if v))
+    finally:
+        nx.close()
+    rows = []
+    for c in sorted(oc, key=lambda x: (-order_items[x], x)):
+        ii = info.get(c, {}); pp = price.get(c, {})
+        cur_vc = ii.get("cust", ""); cur_vn = ii.get("custnm", "")
+        o_vc = ov.get(c, ""); eff_vc = o_vc or cur_vc
+        rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
+            "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
+            "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn,
+            "ovr_vendor_code": o_vc, "ovr_vendor_name": (ovcust.get(o_vc, o_vc) if o_vc else ""),
+            "eff_vendor_code": eff_vc, "eff_vendor_name": (ovcust.get(o_vc, o_vc) if o_vc else cur_vn),
+            "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")})
+    return {"item": item, "asof": asof, "rows": rows, "n": len(rows),
+            "note": "R01(현행) 발주 근거(읽기) — 현행 매입처(IN_CUST 자동시드)+마스터 매입단가(PR_M_ITEM_COST COST_TAG=매입 as-of·읽기전용)+nx.order_vendor override. 라이브 불변(조회만)."}
+
+@router.post("/api/sourcing/current_order/vendor")
+def sourcing_current_order_vendor(payload: dict = Body(...)):
+    """R01 발주업체 override 저장(근거키=item_code). vendor_code 공란=override 제거(레거시 매입처 복귀). 정산 마스터 미접근."""
+    item_code = str(payload.get("item_code", "")).strip()
+    vc = str(payload.get("vendor_code", "") or "").strip()
+    if not item_code: raise HTTPException(400, "item_code 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_order_vendor_tbl(cur)
+        if not vc:
+            cur.execute("DELETE FROM nx.order_vendor WHERE item_code=?", item_code)
+            nx.commit(); return {"ok": True, "item_code": item_code, "cleared": True}
+        cur.execute("""MERGE nx.order_vendor AS t USING (SELECT ? item_code) s ON t.item_code=s.item_code
+            WHEN MATCHED THEN UPDATE SET vendor_code=?, upd_dt=getdate()
+            WHEN NOT MATCHED THEN INSERT(item_code,vendor_code,upd_dt) VALUES(?,?,getdate());""", item_code, vc, item_code, vc)
+        nx.commit(); return {"ok": True, "item_code": item_code, "vendor_code": vc}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 @router.post("/api/sourcing/weld/save")
 def sourcing_weld_save(payload: dict = Body(...)):
     """#3 후보 노드별 관경 용접점 저장(내부원가 관경별 용접 팝업 재사용). 스코프=(route_id,node_item) 전체교체(멱등).
