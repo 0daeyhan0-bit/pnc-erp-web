@@ -1018,7 +1018,8 @@ def sourcing_route_detail(route_id: int = Query(...)):
             base_g = round(sum(p["work_qty"] for p in base_procs), 2)
         except Exception:
             base_g = None
-        cand_g = round(sum(p["work_qty"] for p in procs), 2)
+        proc_sum = round(sum(p["work_qty"] for p in procs), 2)   # 후보 배치 공정(조립·비종속) 합
+        cand_g = proc_sum   # ★I-2: 아래 절삭 자동귀속(cut_sum) 합산 후 재계산
         # #3 노드별 관경 용접점(용접ST=가공비 / 용접봉 소요량=재료)
         cur.execute("SELECT node_item,ISNULL(weld_item,''),ISNULL(pipe_diam,0),ISNULL(weld_qty,0),ISNULL(use_qty,0),ISNULL(st,0) FROM nx.sourcing_route_weld WHERE route_id=? ORDER BY node_item,rw_id", route_id)
         welds = [{"node_item": str(r[0]).strip(), "weld_item": str(r[1]).strip(), "pipe_diam": float(r[2] or 0),
@@ -1046,9 +1047,13 @@ def sourcing_route_detail(route_id: int = Query(...)):
             if base_g is None: base_g = bg2
         except Exception:
             pass
+        # ★I-2: cand_gongsu = cut_sum(절삭 자동귀속) + proc_sum(후보 배치 조립공정) → base_gongsu와 정합, gate_ok 정확.
+        cut_sum = round(sum(x["wq"] for v in part_cut.values() for x in v), 2)
+        cand_g = round(cut_sum + proc_sum, 2)
         return {"header": hdr, "lines": lines, "procs": procs, "base_procs": base_procs, "welds": welds,
                 "part_cut": part_cut, "asm_procs": asm_procs,
-                "base_gongsu": base_g, "cand_gongsu": cand_g, "gate_ok": (base_g is None or abs(cand_g - base_g) < 0.5 or cand_g == 0)}
+                "base_gongsu": base_g, "cand_gongsu": cand_g, "cut_sum": cut_sum, "proc_sum": proc_sum,
+                "gate_ok": (base_g is None or abs(cand_g - base_g) < 0.5 or cand_g == 0)}
     finally:
         nx.close()
 
@@ -1771,17 +1776,20 @@ def sourcing_sub_price_save(payload: dict = Body(...)):
     try:
         _ensure_route_tbl(cur); _ensure_item_price_tbl(cur)
         valid = {s["sub_item"] for s in _outsourced_subs(cur, rid)}   # 근거키 후보 = 외주 SUB만
-        upsert = dele = skip = 0
+        upsert = dele = skip = 0; commonclean = 0
         for r in rows:
             si = str(r.get("sub_item", "")).strip()
-            vc = str(r.get("vendor_code", "") or "").strip()   # ''=공통, 지정=업체 override
-            if not si or si not in valid:
+            vc = str(r.get("vendor_code", "") or "").strip()   # ★ASSY=업체별만. 공란(공통)은 금지(I-4).
+            if not si or si not in valid or not vc:   # ★vendor 없는 ASSY(공통행) 저장 금지
                 skip += 1; continue
+            # ★I-4: 잔여 공통(vendor='') ASSY행 정리 — ASSY는 업체별만 존재해야 함(가중평균 원가·조회 정합)
+            d = cur.execute("DELETE FROM nx.item_price WHERE item_code=? AND price_gubun=N'매입' AND vendor_code=''", si).rowcount
+            commonclean += (d or 0)
             n = _save_item_price(cur, "매입", apply_ym, si, vc, _pfloat(r.get("assy_price")))
             if n < 0: dele += -n
             else: upsert += n
         nx.commit()
-        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip, "apply_ym": apply_ym}
+        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip, "common_cleaned": commonclean, "apply_ym": apply_ym}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
@@ -2191,11 +2199,56 @@ def sourcing_route_cost(route_id: int = Query(..., description="후보 route_id(
                 cand, lme, sn, pg = _compute(_get_cost_engine(fresh=True))
             except Exception as e2:
                 raise HTTPException(500, f"nx엔진 오류: {e2}")
-    # 후보 원가 = 대상 실원가(마스터 동일 산식). LME 필드 명시.
-    cost = {"jae": cand["jae"], "gagong": cand["gagong"], "ilban": cand["ilban"], "unban": cand["unban"],
-            "profit": cand["profit"], "lme": round(lme, 2), "silwon": cand["silwon"], "lg": cand["lg"], "sonik": cand["sonik"]}
-    # 현행(R01) = 동일 대상 실원가(구조/조달 불변 기준선). diff = 후보 − 현행.
-    current = dict(cost)
+    # 마스터(현행 R01) 실원가 = diff0 앵커.
+    master = {"jae": cand["jae"], "gagong": cand["gagong"], "ilban": cand["ilban"], "unban": cand["unban"],
+              "profit": cand["profit"], "lme": round(lme, 2), "silwon": cand["silwon"], "lg": cand["lg"], "sonik": cand["sonik"]}
+    # ★I-1: 후보 외주 SUB에 ASSY 매입단가(nx.item_price gubun='매입', 업체별)가 있으면 그 SUB 원가를 배분% 가중평균 ASSY가로 치환.
+    #   치환 대상 마스터 노드 = 제품 base 동일 & 매입 leaf(mat>0)=외주완성 SUB. 없거나 ASSY 미입력이면 delta=0 → 마스터 diff0 유지(앵커 보존).
+    _pbase = lambda c: _re.split(r'[-_]', str(c or "").strip(), 1)[0]
+    prod_base = _pbase(item)
+    delta = 0.0; assy_applied = []
+    try:
+        cand_subs = [l for l in slines if l["node_kind"] == 'SUB' and ('외주' in (l["gubun"] or '') or '사급' in (l["gubun"] or ''))]
+        if cand_subs:
+            asof_ym = max(_price_ym(ymd), _price_ym(None))   # ★ASSY=계획단가(전향적) → 자재기준일 or 현재월 中 최신 as-of
+            nx2 = _nx(); c2 = nx2.cursor()
+            try:
+                _ensure_item_price_tbl(c2)
+                c2.execute("SELECT ISNULL(vendor_code,''), alloc_ratio FROM nx.sourcing_profile WHERE route_id=? AND ISNULL(is_active,0)=1 AND ISNULL(is_internal,0)=0", rid)
+                vends = [(str(r[0] or "").strip(), (float(r[1]) if r[1] is not None else None)) for r in c2.fetchall()]
+                sub_items = [(s["sub_item"] or s["child_item"]).strip() for s in cand_subs]
+                _, aov = _asof_prices(c2, "매입", sub_items, asof_ym)   # aov[sub]=[{vendor_code,price}] (ASSY=업체별)
+            finally:
+                nx2.close()
+            # 마스터 외주완성 SUB 노드(제품 base 동일·매입 leaf·mat>0)
+            master_out = [r for r in sn.get("rows", []) if _pbase(r.get("code")) == prod_base and str(r.get("code")).strip() != item
+                          and not r.get("haskids") and float(r.get("mat", 0) or 0) > 0]
+            master_out.sort(key=lambda r: str(r.get("code")))
+            for idx, s in enumerate(sorted(cand_subs, key=lambda x: (x["sub_item"] or x["child_item"]))):
+                sub = (s["sub_item"] or s["child_item"]).strip()
+                pmap = {o["vendor_code"]: o["price"] for o in aov.get(sub, []) if o.get("price") is not None}
+                if not pmap:
+                    continue   # ASSY 매입단가 없음 → 치환 안 함(엔진 롤업 유지)
+                num = den = 0.0
+                for vc, al in vends:
+                    if vc in pmap and al is not None: num += al * pmap[vc]; den += al
+                weighted = (num / den) if den > 0 else (sum(pmap.values()) / len(pmap))   # 활성·배분 있으면 가중, 없으면 단순평균
+                old_mat = float(master_out[idx]["mat"]) if idx < len(master_out) else 0.0
+                new_mat = round(weighted * float(s["qty"] or 1), 2)
+                delta += (new_mat - old_mat)
+                assy_applied.append({"sub_item": sub, "weighted_assy": round(weighted, 2),
+                                     "old_master_mat": round(old_mat, 2), "new_mat": new_mat,
+                                     "matched_master": (str(master_out[idx]["code"]).strip() if idx < len(master_out) else "")})
+    except Exception:
+        delta = 0.0; assy_applied = []
+    delta = round(delta, 2)
+    # 후보 원가 = 마스터 + ASSY 치환 delta(jae/silwon/sonik만 이동). delta=0이면 마스터 그대로(diff0).
+    cost = dict(master)
+    if abs(delta) >= 0.5:
+        cost["jae"] = round(master["jae"] + delta, 2)
+        cost["silwon"] = round(master["silwon"] + delta, 2)
+        cost["sonik"] = round((master.get("lg") or 0) - cost["silwon"], 2)
+    current = dict(master)   # 현행(R01) 대비
     diff = {k: round((cost.get(k, 0) or 0) - (current.get(k, 0) or 0), 2) for k in cost}
     # 공정 그리드(이름 매핑) — silwon_proc_grid
     pnm = _route_proc_names(list(pg.keys()) + [p["proc_code"] for p in sprocs])
@@ -2212,12 +2265,14 @@ def sourcing_route_cost(route_id: int = Query(..., description="후보 route_id(
     return {"route_id": rid, "route_no": route_no, "route_name": route_name, "item_code": item, "ymd": ymd,
             "approve_flag": approve_flag, "route_gubun": route_gubun,
             "cost": cost, "current": current, "diff": diff,
+            "assy_applied": assy_applied, "assy_delta": delta,
             "rows": sn.get("rows", []), "procs": procs,
             "structure": {"lines": slines, "n_sub": n_sub, "procs": sprocs, "welds": swelds},
             "diff0": all(abs(v) < 0.5 for v in diff.values()),
-            "note": ("후보 원가 = 대상품목 실원가(NxCostEngine, 마스터와 동일 산식·diff0). "
-                     "후보는 BOM구조·공정 재배치 계층 — 조달(업체·매입가·사급 배분)은 조달프로파일 계층에서 반영. "
-                     "부품셋·공수합=BASE 보존(route/finalize 게이트)이므로 구조·조달 불변이면 실원가는 현행과 동일.")}
+            "note": ("후보 원가 = 마스터 실원가(NxCostEngine) 기준 + 후보 외주 SUB ASSY 매입단가(입력분) 배분%가중 치환. "
+                     "ASSY 미입력 후보(R01 현행·BASE)는 마스터 실원가 그대로(diff0 앵커 보존). "
+                     "ASSY 입력된 외주 SUB만 그 SUB 원가가 가중평균 ASSY가로 치환되어 R01 대비 손익차 발생. "
+                     "나머지(매입/제작·가공/일반/운반/이윤)는 마스터 as-of 유지.")}
 
 
 # ===================== 조달 프로파일 = route 단위 배분(nx.route_alloc) =====================
