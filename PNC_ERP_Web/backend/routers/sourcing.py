@@ -488,7 +488,8 @@ def _route_baseline_lines(item):
             LEFT JOIN PR_M_ITEM m ON m.ITEM_CODE=b.MAT_CODE
             LEFT JOIN CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
             WHERE b.ITEM_CODE=? AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
-              AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' ORDER BY b.BOM_SEQ""", item.strip())
+              AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
+              AND b.MAT_CODE NOT LIKE 'RAC%' ORDER BY b.BOM_SEQ""", item.strip())
         out = []
         for i, r in enumerate(cur.fetchall(), 1):
             gub = "사급" if str(r.sag) == '1' else ("제작" if str(r.mk) == '1' else "매입")
@@ -598,10 +599,9 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
         nx.close()
 
 def _route_hdr_errors(p):
+    # ★공급처는 후보 헤더에서 받지 않음(업체=조달프로파일에서 배분, 2계층) → vendor 필수검증 제거.
     errs = []
     if not str(p.get("gubun", "")).strip(): errs.append("구분은 필수입니다")
-    if str(p.get("gubun", "")).strip() != "자체" and not str(p.get("vendor_code", "")).strip():
-        errs.append("공급처는 필수입니다(자체 제외)")
     if not str(p.get("apply_from", "")).strip(): errs.append("유효일자(적용시작)는 필수입니다")
     return errs
 

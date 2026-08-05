@@ -1761,7 +1761,8 @@ SCREEN.subvariant=(c)=>{
     const rd=(st.rd&&st.rd.route_id===R.route_id)?st.rd:null;
     if(!rd) return `<div style="margin-top:10px;border-top:2px solid #e2e8f2;padding-top:8px"><button class="btn" id="sp-open" style="background:#8e44ad;color:#fff;padding:3px 12px">🧩 SUB 재구성 · 공정 배치 열기</button> <span style="color:#8aa0bd;font-size:11px">부품을 SUB로 묶고 공정(용접·포장 등) 배정 · 공수합=BASE 유지</span></div>`;
     if(rd.error) return `<div style="margin-top:10px;color:#c0392b">SUB패널 오류: ${esc(rd.error)}</div>`;
-    const lines=rd.lines||[], subs=lines.filter(l=>l.node_kind==='SUB'), parts=lines.filter(l=>l.node_kind!=='SUB');
+    // ★용접봉(RAC%) 제외 — 공정종속 자재(우측 용접 공정으로만 다룸), 평면 부품/SUB 묶기 대상 아님
+    const lines=(rd.lines||[]).filter(l=>!String(l.child_item||'').toUpperCase().startsWith('RAC')), subs=lines.filter(l=>l.node_kind==='SUB'), parts=lines.filter(l=>l.node_kind!=='SUB');
     const flat=parts.filter(p=>!p.parent_line), memb=sid=>parts.filter(p=>p.parent_line===sid);
     const bp=rd.base_procs||[], nodes=[{code:st.routeTarget,label:'제품 '+st.routeTarget}].concat(subs.map(s=>({code:(s.sub_item||s.child_item),label:'SUB '+(s.sub_item||s.child_item)})));
     if(!st.rdProc||st.rdProc._rid!==R.route_id){st.rdProc={_rid:R.route_id};nodes.forEach(nd=>st.rdProc[nd.code]={});
@@ -1845,31 +1846,38 @@ SCREEN.subvariant=(c)=>{
     const hdrEdit=`<div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px 10px;align-items:center;font-size:12px;padding:10px 0;border-bottom:1px dashed #e2e8f2">
         <label style="text-align:right;color:#33507d;font-weight:600">경로명</label><input class="inp df" data-k="route_name" value="${esc(h.route_name||'')}">
         <label style="text-align:right;color:#33507d;font-weight:600">구분${REQ}</label><select class="inp df" data-k="gubun">${['',...st.gopts].map(o=>`<option value="${esc(o)}" ${String(o)===String(h.gubun||'')?'selected':''}>${o?esc(o):'(선택)'}</option>`).join('')}</select>
-        <label style="text-align:right;color:#33507d;font-weight:600">공급처${REQ}<span style="font-size:9px;color:#8aa0bd">(자체제외)</span></label><input class="inp df" list="sv-vdl" data-k="vendor_code" value="${esc(h.vendor_code||'')}" placeholder="거래처 검색">
         <label style="text-align:right;color:#33507d;font-weight:600">유효일자${REQ}</label><input class="inp df" type="date" data-k="apply_from" value="${esc(h.apply_from||'')}">
-        <label style="text-align:right;color:#33507d;font-weight:600">현행여부</label><label style="font-size:12px"><input type="checkbox" class="df" data-k="current_flag" ${h.current_flag?'checked':''}> 현행(실사용)</label>
         <label style="text-align:right;color:#33507d;font-weight:600">비고</label><input class="inp df" data-k="note" value="${esc(h.note||'')}">
-        <div></div><div><button class="btn" id="dt-hsave" style="background:#1b6ec2;color:#fff;padding:2px 10px">💾 헤더 저장</button> <span style="color:#c0392b;font-size:11px">${HINT}</span></div>
+        <div style="grid-column:1/-1;color:#8aa0bd;font-size:10.5px">업체(공급처)는 승인 후 <b>업체 매핑(조달프로파일)</b>에서 배분% 지정합니다 — 후보 헤더엔 지정하지 않습니다.</div>
       </div>`;
+    const fresh=ed&&!!d.fresh;   // 신규 미커밋 드래프트(가져오기로 방금 생성, [등록] 전) — 닫기=등록취소(롤백)
+    const footL=R.baseline
+      ? (canW?`<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:'')
+      : (fresh
+          ? '<span style="color:#8aa0bd;font-size:11px">[등록]해야 후보가 확정됩니다 · 닫기/취소 = 등록 취소</span>'
+          : (canW?`<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`:''));
+    const footR=R.baseline
+      ? `<button class="btn" id="dt-close">닫기</button>`
+      : (fresh
+          ? `<button class="btn" id="dt-cancel" style="color:#c0392b">✖ 취소</button> <button class="btn" id="dt-register" style="background:#1c7c3a;color:#fff">✔ 등록</button>`
+          : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`);
     return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px 10px">
-      <div style="background:#fff;border-radius:12px;width:820px;max-width:97vw;box-shadow:0 20px 60px rgba(10,25,55,.4)">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${R.baseline?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:12px 12px 0 0">
-          <b>${R.baseline?'현행 조달경로 상세(보기)':'조달후보 상세 편집'} — ${esc(st.routeTarget)}_R${String(R.baseline?1:R.route_no).padStart(2,'0')}${R.baseline?' (현행·base품번 불변)':''}</b><span id="dt-x" style="cursor:pointer;font-size:17px">✕</span></div>
-        <div style="padding:14px 18px">
+      <div style="background:#fff;border-radius:12px;width:820px;max-width:97vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
+        <div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${R.baseline?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:12px 12px 0 0">
+          <b>${R.baseline?'현행 조달경로 상세(보기)':(fresh?'조달후보 신규 등록':'조달후보 상세 편집')} — ${esc(st.routeTarget)}_R${String(R.baseline?1:R.route_no).padStart(2,'0')}${R.baseline?' (현행·base품번 불변)':''}</b><span id="dt-x" style="cursor:pointer;font-size:17px">✕</span></div>
+        <div style="flex:1 1 auto;overflow:auto;padding:14px 18px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><b style="color:#1c3a6e;font-size:14px">${esc(R.route_name||(R.baseline?'현행(실사용 BOM)':''))}</b>${R.baseline?'<span style="color:#8aa0bd;font-size:11px">기준선(읽기전용)</span>':apBadge(R)}</div>
           ${ed?hdrEdit:hdrView}
-          <div style="font-weight:700;color:#334;margin:10px 0 4px">구성 라인 (${(R.lines||[]).length})${ed?' <span style="font-size:11px;color:#8aa0bd;font-weight:400">하위품번·품명·소요량·구분·공급처·소재 — 필수*</span>':''}</div>
-          <div class="grid-wrap" style="max-height:44vh;overflow:auto"><table class="tbl" style="font-size:11.5px"><thead><tr>
+          <div style="font-weight:700;color:#334;margin:10px 0 4px">구성 라인 (${(R.lines||[]).length})${ed?' <span style="font-size:11px;color:#8aa0bd;font-weight:400">하위품번·품명·소요량·구분·소재 — 필수*</span>':''}</div>
+          <div class="grid-wrap" style="max-height:38vh;overflow:auto"><table class="tbl" style="font-size:11.5px"><thead><tr>
             <th>하위품번</th><th>품명</th><th class="num">소요량</th><th>구분</th><th>공급처</th><th>소재(외경×두께×길이·재질)</th>${ed?'<th style="width:80px">작업</th>':''}</tr></thead>
             <tbody>${(R.lines||[]).length?R.lines.map(l=>lineRow(l,ed)).join(''):`<tr><td colspan="${ed?7:6}" class="empty">라인 없음${ed?' (➕ 라인추가)':''}</td></tr>`}</tbody></table></div>
           ${ed?`<button class="btn" id="dt-ladd" style="margin-top:6px;padding:2px 10px">➕ 라인추가</button>`:''}
           ${ed?subPanel(R):''}
           ${(canW&&!R.baseline&&R.approve_flag)?profPanel(R):(!R.baseline&&R.approve_flag?'':(!R.baseline?'<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체 매핑은 <b>승인(개발)</b> 후 가능합니다 — 승인하면 이 후보(구조)에 업체·배분%를 지정할 수 있습니다.</div>':''))}
         </div>
-        <div style="padding:12px 18px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
-          <span>${R.baseline?`${canW?`<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:''}`
-            :(canW?`<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`:'')}</span>
-          <button class="btn" id="dt-close">닫기</button></div>
+        <div style="flex:0 0 auto;padding:12px 18px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:0 0 12px 12px">
+          <span>${footL}</span><span>${footR}</span></div>
       </div><datalist id="sv-vdl"></datalist></div>`;};
   // ---------- 라인 편집 모달(상세 위에) ----------
   const lineModal=()=>{const f=st.lineForm;if(!f)return '';const rm=!!f.is_rawmat;
@@ -1949,9 +1957,12 @@ SCREEN.subvariant=(c)=>{
     c.querySelectorAll('input[name=nrm]').forEach(rd=>rd.onchange=()=>{st.newForm.method=rd.value;draw();});
     c.querySelectorAll('.nf').forEach(el=>{el.oninput=el.onchange=()=>{st.newForm[el.dataset.k]=el.type==='checkbox'?el.checked:el.value;if(el.dataset.k==='vendor_code')vSearch(el.value);};});};
   const bindDetailModal=()=>{if(!st.detail)return;const R=routeById(st.detail.route_id);if(!R)return;const g=id=>c.querySelector(id);
-    g('#dt-x').onclick=g('#dt-close').onclick=()=>{st.detail=null;draw();};
+    g('#dt-x').onclick=g('#dt-close').onclick=()=>closeDetail();
+    {const b=g('#dt-cancel');if(b)b.onclick=()=>cancelDraft();}          // ✖ 취소 = 롤백+닫기
+    {const b=g('#dt-register');if(b)b.onclick=()=>saveHdr(true);}         // ✔ 등록 = 커밋(fresh 해제)
+    {const b=g('#dt-hsave2');if(b)b.onclick=()=>saveHdr(false);}          // 💾 저장(커밋된 후보 헤더 수정)
     {const b=g('#dt-newfromcur');if(b)b.onclick=()=>{st.detail=null;openNew('cur');};}
-    {const b=g('#dt-hsave');if(b)b.onclick=saveHdr;}
+    {const b=g('#dt-hsave');if(b)b.onclick=()=>saveHdr(false);}
     {const b=g('#dt-ladd');if(b)b.onclick=()=>{st.lineForm={route_id:st.detail.route_id,gubun:'',is_rawmat:0};draw();};}
     c.querySelectorAll('.df').forEach(el=>{el.oninput=el.onchange=()=>{st.detail.hdr[el.dataset.k]=el.type==='checkbox'?el.checked:el.value;if(el.dataset.k==='vendor_code')vSearch(el.value);};});
     c.querySelectorAll('.dl-e').forEach(b=>b.onclick=()=>{const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);st.lineForm=Object.assign({route_id:st.detail.route_id},l);draw();});
@@ -1962,8 +1973,8 @@ SCREEN.subvariant=(c)=>{
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
     {const b=g('#sp-mksub');if(b)b.onclick=async()=>{const ids=[...c.querySelectorAll('.sp-pick:checked')].map(x=>+x.dataset.lid);
       if(!ids.length){alert('묶을 부품을 체크하세요');return;}
-      const sfx=(prompt('SUB 접미사 (빈칸=자동 _S01·_S02… / 공정약칭 예 -은납)','')||'').trim();  // 빈=백엔드 자동 _S{nn}(충돌검사)
-      try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:sfx,name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
+      // ★접미사 자동 _S{nn}(백엔드 채번·충돌검사) — prompt 없이 바로 생성(라벨 _R{nn}과 일관)
+      try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
         const j=await r.json();if(j.ok){st.rdProc=null;await loadRD(rid);}else alert('SUB 생성 실패');}catch(e){alert('오류: '+e.message);}};}
     // 드래그앤드롭: 부품→SUB(또는 평면) 이동
     c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});

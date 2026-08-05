@@ -571,10 +571,28 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     # ★재료비 합계 = 견적 부품(coop_quote_part) 기준 = 리스트와 동일 로직(사급=대표판매단가 else 견적, 그외=견적).
     #   BOM 전개행 전체합이 아님 → 견적이 SUB를 덩어리로 잡은 경우 하위전개 이중계상 방지.
     if partmap:
+        # 견적 사급부품 대표판매단가 조회(BOM전개 밖 코드 포함) → 리스트 total과 정합
+        sale_q = dict(sale_asof)
+        if vcode:
+            sneed = [c for c, p in partmap.items() if p.get("ptype") == "사급부품" and c not in sale_q]
+            if sneed:
+                lc2 = _conn(); lc2c = lc2.cursor()
+                try:
+                    for i in range(0, len(sneed), 900):
+                        chunk = [c.replace("'", "") for c in sneed[i:i + 900]]; inl = "','".join(chunk)
+                        lc2c.execute(f"""WITH S AS (SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
+                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE))) ORDER BY COST_APPLY_YMD DESC) rn
+                            FROM PR_M_ITEM_COST WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
+                            AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND ISNULL(MAIN_FLAG,'0')='1' AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                            SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
+                        for rr in lc2c.fetchall():
+                            sale_q[str(rr[0]).strip().upper()] = float(rr[1] or 0)
+                finally:
+                    lc2.close()
         total_mat = 0.0
         for code_u, pinfo in partmap.items():
             if pinfo.get("ptype") == "사급부품":
-                rep = sale_asof.get(code_u)   # 대표(MAIN_FLAG='1') 판매단가
+                rep = sale_q.get(code_u)   # 대표(MAIN_FLAG='1') 판매단가
                 total_mat += rep if rep else pinfo["mat"]
             else:
                 total_mat += pinfo["mat"]
