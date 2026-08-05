@@ -750,6 +750,12 @@ function priceItemView(c){
         const dl=g('#pi-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.name)}">${esc(x.name)} (${esc(x.code)})</option>`).join('');}catch(err){}},250);};
     {const cx=g('#pi-custx');if(cx)cx.onclick=()=>{st.cust='';load();};}
     c.querySelectorAll('.pi-row').forEach(tr=>tr.onclick=()=>loadDet(tr.dataset.cd));
+    // 계획단가 편집 wiring(정산 이력은 읽기전용 유지, 계획단가=nx만 편집)
+    c.querySelectorAll('.pp-edit').forEach(el=>el.onclick=()=>peOpen(+el.dataset.ri));
+    {const pc=c.querySelector('.pp-cancel');if(pc)pc.onclick=peClose;
+     const ps=c.querySelector('.pp-save');if(ps)ps.onclick=peSave;}
+    c.querySelectorAll('.pe-assy').forEach(el=>el.onchange=()=>{if(st.planEdit){const s=st.planEdit.subs.find(x=>x.sub_item===el.dataset.si);if(s)s.assy=(el.value===''?null:el.value);}});
+    c.querySelectorAll('.pe-sag').forEach(el=>el.onchange=()=>{if(st.planEdit){const x=st.planEdit.children.find(y=>y.item_code===el.dataset.ic);if(x)x.sagub=(el.value===''?null:el.value);}});
     attachResizers(c);
     const _g=c.querySelector('#pi-list'); if(_g&&_sc) _g.scrollTop=_sc;   // 스크롤 복원
   };

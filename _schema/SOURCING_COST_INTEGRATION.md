@@ -144,7 +144,36 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
 - 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
 
-## ★확정 3구분 모델 — 업체·단가 = "외주 SUB 중심" (2026-08-05, 사용자 확정)
+## ★★가격=SUB/품목 공통(업체 무관) 재구성 + 품목단가 관리 편집 (2026-08-05, 사용자 운영현실)
+운영현실: 가격은 업체별로 동일(다른 경우 드묾). 업체는 공급능력 기준 **배분%**만 지정. → 가격을 **업체 단위가 아니라 SUB/품목 단위(업체 공통)** 로 전환. 또 계획단가를 **품목단가 관리에서도 편집**(양쪽 동일 nx 레이어 → 자동 동기화).
+
+### 스키마 마이그레이션(vendor 제거, 멱등)
+- **nx.sourcing_sub_price**: PK(route_id,vendor_code,sub_item) → **PK(route_id,sub_item)**. ASSY 매입단가=외주 SUB당 1개.
+- **nx.sourcing_sagub_price**: PK(route_id,vendor_code,item_code) → **PK(route_id,item_code)**. 사급 부품가=매입 부품당 1개.
+- `_ensure_*_tbl`가 구 스키마(vendor_code 존재) 감지 시 (route_id,키)당 MAX(price)로 축약 후 DROP/rename(멱등, 프로세스당 1회). 데이터=계획(dev·disposable).
+- **nx.sourcing_profile.buy_price/sagub_price 단일 컬럼**은 미사용 방치(제거 안 함). 업체는 배분%(alloc_ratio)만.
+
+### 엔드포인트(vendor 인자 제거·하위호환)
+- sub_price GET/save: `{route_id, rows:[{sub_item, assy_price}]}` 근거키(route_id,sub_item). sagub_price GET/save: `{route_id, rows:[{item_code, sagub_price}]}` 근거키(route_id,item_code). 둘 다 vendor_code 파라미터는 무시(하위호환). 사급=매입 부품만(제작 skip).
+- plan_price: 가격을 **route 레벨**(assy_subs·sagub_items)로 이동, vendors는 alloc/유효/활성만(가격 필드 제거). 합성 sagub_only 행 제거.
+
+### 프론트(가격 공통 + 인라인)
+- **screens.pur.js 업체·단가 모달**: ② 외주 SUB 블록마다 ASSY 매입단가 1칸(공통·data-si) + 사급 부품가 인라인 목록(매입 부품 data-ic, 제작=원가 자동 읽기전용) → ① 업체 목록=업체·공급구분·배분%·유효·활성(가격칸 없음). 중첩 사급모달(sm/sagubModal/AK) 제거. 저장=profile/save + sub_price/save(SUB공통) + sagub_price/save(품목공통).
+- **core.js priceItemView(품목단가 관리)**: "조달후보 계획단가" 섹션 **편집 가능**. 승인 route(route_id>0)마다 [✏ 계획단가 편집]→인라인 에디터(ASSY per SUB + 사급 per 매입부품, 제작 읽기전용)→[💾 계획단가 저장]=동일 sub_price/sagub_price 엔드포인트→plan_price 재조회. **정산 이력(PR_M_ITEM_COST)은 계속 읽기전용**(별도 섹션, /api/price/item), 계획단가(nx)만 편집. "정산 아님" 라벨.
+
+### (드문 예외) 특정 업체만 다른 가격 = 미구현(공통만). 필요 시 향후 (route,vendor,sub/item) override 테이블 추가.
+
+### 검증(e2e R02 route_id 60, S07, localhost 8010)
+- ASSY 공통: save S07=18500(vendor 없음)·ZZZ skip=1 → GET S07=18500. 사급 공통: 매입 5210A22409B=9100·3H02717A=8800 upsert=2 / 제작 MJU **skip=1**.
+- 업체 배분%만: 2337 60%+2340 40% → ok(ins=2). 90% → **gate ALLOC 거부**.
+- plan_price: **route 레벨** assy_subs=S07=18500·sagub_items=9100/8800, vendors=배분%만(가격 필드 없음, assy_subs on vendor=False).
+- **★양방향 동기화**: 품목단가관리 편집 경로(sub_price/save S07=**17000**·sagub_price/save 5210A22409B=**9500**) → 조달프로파일 GET·plan_price 모두 17000/9500 반영(동일 nx 레이어).
+- **★정산 마스터 불변**: PR_M_ITEM_COST(42행) 다회 저장 전후 MD5 **6789628C0261796DDD75C4C376034E46** 동일. sourcing.py PR_M_ITEM_COST 쿼리=**0**(주석 4). core.js PR_M_ITEM_COST=정산 이력 읽기전용 표시(무변경).
+- route/cost silwon **5722.2 diff0=True**(회귀 0). openapi **325**. py_compile OK·재기동 health 200. JS curly/brack 0·backtick even. 마커(pm-assy data-si·pm-sag·AK제거·sagubModal제거·core peOpen·pe-assy·pp-save·계획단가 편집). 서빙 200.
+- 테스트데이터 정리: sub_price/sagub_price/profile(route60) 삭제 → n_priced=0·profiles=0 복귀. index.html core.js?v=260805s5·screens.pur.js?v=260805s5.
+- ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
+
+## ★확정 3구분 모델 — 업체·단가 = "외주 SUB 중심" (2026-08-05, 사용자 확정) [초기안 — 위 '가격 공통' 재구성으로 대체됨]
 직전 "사급단가 품목별(route_line 전체 11품번)" 모델을 사용자 확정 3구분으로 재구성. 대상 스코프를 **외주 SUB 하위**로 좁히고 **ASSY 매입단가(외주 SUB 단위)** 개념 신설.
 
 ### 3구분(정의)
