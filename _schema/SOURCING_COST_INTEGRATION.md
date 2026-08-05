@@ -137,3 +137,39 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 테스트데이터 정리: route60/vendor2306 사급단가 del=3(스코프), n_priced=0·n_item=11 복귀, plan_price n_sagub_item=0.
 - 제약 준수: localhost만·184 미배포·nx만 쓰기·한글 Edit(utf-8)·근거키 스코프.
 - ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
+
+## ★확정 3구분 모델 — 업체·단가 = "외주 SUB 중심" (2026-08-05, 사용자 확정)
+직전 "사급단가 품목별(route_line 전체 11품번)" 모델을 사용자 확정 3구분으로 재구성. 대상 스코프를 **외주 SUB 하위**로 좁히고 **ASSY 매입단가(외주 SUB 단위)** 개념 신설.
+
+### 3구분(정의)
+1. **사급 부품 가격** = 유상사급으로 벤더에 넘기는 부품값. 대상 = **외주 SUB의 하위 부품(PART)**(parent_line이 외주 SUB인 자식). 품목별 입력. **레벨1 직속 단품 매입품 제외**·용접봉(RAC) 제외.
+2. **ASSY 매입단가** = 벤더가 조립해 완성 SUB로 받는 값. **외주 SUB 단위**로 입력(업체별). 근거키 (route_id·vendor_code·sub_item).
+3. **단품 매입품(레벨1 직속 매입)** = **입력칸 없음**. 매입 마스터 자동조회(읽기전용). PR_M_ITEM_COST 절대 미접근(마감 때만 수정 하드룰).
+즉 각 외주 SUB마다: 업체 + ASSY 매입단가 + 그 SUB 하위 부품별 사급 부품가격. 외주 SUB가 여러 개면 SUB마다 각각.
+
+### 외주 SUB 판별
+`node_kind='SUB' AND (gubun LIKE '%외주%' OR gubun LIKE '%사급%')`. (route 60 SUB `AJR75563402_S07` gubun="외주(유상사급)")
+
+### 백엔드(sourcing.py)
+- **신규 테이블 nx.sourcing_sub_price**(route_id·vendor_code·sub_item·assy_price, PK 3키, 멱등 `_ensure_sub_price_tbl`). ASSY 매입단가.
+- **신규 헬퍼**: `_outsourced_subs`(외주 SUB 목록) · `_sub_child_items`(외주 SUB 하위 PART=사급 대상, sub_item 첨부) · `_direct_purchase_items`(레벨1 직속 매입=읽기전용 참고) · `_fill_names`. 기존 `_route_line_items`는 미사용 방치(호출 0).
+- **sagub_price GET/save 스코프 축소**: 대상=`_sub_child_items`(외주 SUB 하위)만. GET에 subs·direct_items 추가. save valid set=SUB 하위만(레벨1 직속·용접봉 skip).
+- **sub_price GET/save 신규**: `/api/sourcing/sub_price`(subs+prices+direct_items) · `/api/sourcing/sub_price/save`({route_id,rows:[{vendor_code,sub_item,assy_price}]}, 근거키 스코프 upsert/삭제, 외주 SUB 밖·업체없음 skip).
+- **plan_price 확장**: 업체별 `assy_subs:[{sub_item,sub_name,assy_price}]`(nx.sourcing_sub_price) 추가 + n_assy. ASSY/사급만 있는 업체=합성행(sagub_only). buy_price 단일컬럼(nx.sourcing_profile.buy_price)은 미사용 방치(제거 안 함).
+
+### 프론트
+- **screens.pur.js pmOpen/vendorModal(외주 SUB 중심)**: ① 업체·배분(공통, 매입/사급 단일칸 제거) → ② 외주 SUB 블록마다(SUB 헤더 + 업체별 ASSY 매입단가 입력 + [📋 사급 부품 가격] 버튼=그 SUB 하위 부품) → ③ 단품 매입품(읽기전용·입력 없음). 외주 SUB 없으면 "외주 SUB 없음(단품·제작만)" 안내. 저장=profile/save(업체·배분)+sub_price/save(ASSY). 중첩 사급모달은 sub_item 스코프로 필터.
+- **core.js priceItemView planPriceSection**: ASSY 매입단가(SUB 단위)+사급 부품 가격(SUB 하위) 2열 읽기전용. "정산 아님" 유지.
+
+### 검증(e2e AJR75563402, route_id 60=R02, localhost 8010)
+- **사급 대상=외주 SUB 하위 5품번만**: sagub_price GET n_item=**5**(MJU64794201·202·302 제작 + 5210A22409B·3H02717A 매입), subs=**AJR75563402_S07**, direct_items=**5**(3A00375E·4A00742C·5006AR4091H·5410A30279K·4930A20053B), RAC 제외. (이전 11 → 5로 정확 축소)
+- **ASSY 매입단가 SUB 단위 왕복**: save(FONE THAI 2337 S07=18500) upsert=1, GET n_sub=1 n_priced=1(S07=18500). 대상외 sub_item·업체없음 skip=2.
+- **사급 부품 가격 스코프 강제**: save(MJU64794201=15500·3H02717A=8800 ok / 3A00375E=레벨1 직속 매입 → **skip=1**) upsert=2. 레벨1 직속·RAC 거부 확인.
+- **plan_price**: n_assy=1(S07=18500)·n_sagub_item=2 노출(priceItemView 반영).
+- 게이트: profile/save ALLOC(90%)→gate ALLOC 거부(유지). (NOT_APPROVED 게이트 코드 무변경)
+- **★마스터 불변 증거**: PR_M_ITEM_COST(AJR75563402 42행) 저장 여러 회 전후 MD5 **6789628C0261796DDD75C4C376034E46 동일**. sourcing.py PR_M_ITEM_COST 쿼리=**0**(주석 4건뿐).
+- route/cost silwon=**5722.2 diff0=True**(회귀 0). openapi 323→**325**(신규 2). py_compile OK·health 200.
+- 서빙 JS 마커(pm-assy·pm-sagub2·sub_price·AK=(vc,si)·외주 SUB 중심·단품 매입품 · core assy_subs). JS curly/brack 0·backtick even(paren 원시-3=문자열 리터럴 유래·기저값). index.html core.js?v=260805s3·screens.pur.js?v=260805s3.
+- 테스트데이터 정리: sub_price/sagub_price 스코프 삭제→n_priced=0·n_assy=0·n_sagub_item=0 복귀(외주 SUB 감지 n_sub=1·SUB 하위 n_item=5 유지).
+- 제약 준수: localhost만·184 미배포·nx만 쓰기·한글 Edit(utf-8)·근거키 스코프.
+- ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
