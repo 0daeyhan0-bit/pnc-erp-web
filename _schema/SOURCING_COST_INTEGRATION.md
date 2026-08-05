@@ -144,6 +144,24 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
 - 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
 
+## ★ASSY=업체별(공통X)·사급=공통+예외·업체추가 버그수정 (2026-08-05, 사용자 피드백 3건)
+1. **ASSY 매입단가=업체별**(공통 필드 제거): 각 업체의 조립가가 달라 공통 개념 폐기. item_price(gubun='매입', **vendor 항상 지정**, '' 공통행 안 만듦). 저장/조회 모두 업체별.
+2. **사급 부품가=공통+업체예외 유지**(매입 부품만, 제작=원가자동·직속단품·용접봉 제외).
+3. **[➕업체추가] 버그수정**: 원인=신규 blank 업체행이 하단 표에만 생기고 SUB 블록 그리드엔 안 보여 '무반응' 체감. → **업체 grid를 SUB 블록 안으로**(모든 행 incl. blank 표시) + 버튼 **클래스 바인딩**(.pm-add, SUB별). 클릭 시 그리드에 새 업체행 즉시 표시.
+
+### 레이아웃(screens.pur.js vendorModal 재구성)
+- 외주 SUB 블록: [사급 부품가(공통, 매입부품별)] + [업체 grid: 업체·공급구분·배분%·유효·**ASSY 매입단가(업체별)**·사급예외(매입부품별)·활성·삭제]. 상단 공통 ASSY 칸 제거. 외주 SUB 없으면 업체·배분만 표.
+- pm.assy(공통) 제거 → **pm.assyV[업체||SUB]**. pmSave ASSY=업체별 행만(vendor='' 없음). 사급 공통+예외 그대로.
+- **core.js 품목단가 관리도 동일**(orphan 방지): 편집기 ASSY 공통열 제거→업체별열만(pe-assyov), 읽기뷰 ASSY=업체별 표시. peSave ASSY 공통행 없음.
+
+### 검증(e2e R02 S07, item_price 실측)
+- ASSY **업체별**: 명진(2306)=17000·FONE THAI(2337)=19000 저장 → GET 공통=**null**·업체별 2건. item_price에 `AJR75563402_S07 2306 매입 17000`·`… 2337 매입 19000`(**vendor='' 공통행 없음**).
+- 사급 공통 9100 + 명진 예외 8500 유지(`5210A22409B (공통) 사급 9100`·`… 2306 사급 8500`).
+- plan_price: ASSY 공통 null·업체별 17000/19000, n_override=3.
+- 배분합 게이트: 60/40 ok·90% gate ALLOC 거부. route/cost silwon **5722.2 diff0=True**. **master MD5 6789628C… 불변**. 통합 nx.item_price 유지·PR_M_ITEM_COST 쿼리0.
+- JS curly/brack 0·bt even. 마커(pm-assyv·.pm-add·pm.assyV / core pe-assyov·ASSY업체별). 서빙 200. index.html ?v=**260805s7**. 테스트데이터 item_price rows=0 복귀.
+- ※ **[➕업체추가] 브라우저 클릭 사용자확인 미완**(코드/바인딩 레벨만 — 클래스 바인딩+blank행 그리드표시로 수정). 다중 외주 SUB 시 업체그리드 반복(배분%/업체 공유 편집, ASSY/사급예외 SUB별) — 통상 1 SUB라 무영향.
+
 ## ★★★★통합 단가 테이블 nx.item_price (2026-08-05, 사용자 통합 지시)
 흩어진 nx 단가(sub_price=ASSY매입·sagub_price=사급·profile 가격칸)를 **하나의 통합 테이블**로 합침. 레거시 PR_M_ITEM_COST 구조 계승.
 
