@@ -1346,12 +1346,12 @@ def sourcing_profile_save(payload: dict = Body(...)):
         nx.close()
 
 @router.get("/api/sourcing/plan_price")
-def sourcing_plan_price(item: str = Query(...)):
-    """★품목 단가 관리(조회) 연동 — 이 품목의 조달후보 업체별 **계획단가**(nx.sourcing_profile buy_price/sagub_price) 읽기전용.
-       정산 매입/판매 단가(PR_M_ITEM_COST 마스터)는 미접근 — 여기 값은 후보 원가비교용 '후보/계획 단가(정산 아님)'.
-       반환: routes[{route_id,route_no,route_name,gubun,approve_flag,current_flag,route_alloc{...},vendors[{vendor,alloc,buy_price,sagub_price,...}]}]."""
+def sourcing_plan_price(item: str = Query(...), ym: str = Query("")):
+    """★품목 단가 관리(조회) 연동 — 이 품목의 조달후보 계획단가(통합 nx.item_price: ASSY 매입·사급 부품, 공통+업체예외) as-of(기준월).
+       정산 매입/판매 단가(PR_M_ITEM_COST 마스터)는 미접근. 업체=배분%만(nx.sourcing_profile). ym=기준월(기본 현재월)."""
     item = item.strip()
     if not item: raise HTTPException(400, "item 필요")
+    asof = _price_ym(ym)
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
@@ -1381,33 +1381,28 @@ def sourcing_plan_price(item: str = Query(...)):
                 vend.setdefault(rid, []).append({"vendor_code": vc, "supply_gubun": str(r[2] or "").strip(),
                     "is_active": int(r[3] or 0), "alloc_ratio": (float(r[4]) if r[4] is not None else None),
                     "apply_from": r[5], "apply_to": r[6], "lme_flag": int(r[7] or 0)})
-        # ★사급 부품 가격 = 공통(기본)+업체별 예외(override) — nx.sourcing_sagub_price PK(route_id,vendor_code,item_code).
-        _ensure_sagub_price_tbl(cur)
-        ovcodes = set()
-        sag_common = {}; sag_ov = {}; sag_nm = {}   # (rid,item)->공통가 · (rid,item)->[{vendor,price}] · (rid,item)->품명
-        if rids:
-            ph = ",".join("?" * len(rids))
-            cur.execute(f"""SELECT sp.route_id, ISNULL(sp.vendor_code,''), LTRIM(RTRIM(sp.item_code)), sp.sagub_price, ISNULL(it.item_name,'')
-                FROM nx.sourcing_sagub_price sp LEFT JOIN nx.item it ON it.item_code=sp.item_code
-                WHERE sp.route_id IN ({ph}) ORDER BY sp.route_id, sp.item_code, sp.vendor_code""", *rids)
-            for r in cur.fetchall():
-                rid = int(r[0]); vc = str(r[1] or "").strip(); ic = str(r[2]).strip(); pr = (float(r[3]) if r[3] is not None else None)
-                sag_nm[(rid, ic)] = r[4]
-                if vc == "": sag_common[(rid, ic)] = pr
-                else: sag_ov.setdefault((rid, ic), []).append({"vendor_code": vc, "sagub_price": pr}); ovcodes.add(vc)
-        # ★ASSY 매입단가 = 공통(기본)+업체별 예외(override) — nx.sourcing_sub_price PK(route_id,vendor_code,sub_item).
-        _ensure_sub_price_tbl(cur)
-        asy_common = {}; asy_ov = {}; asy_nm = {}
-        if rids:
-            ph = ",".join("?" * len(rids))
-            cur.execute(f"""SELECT ap.route_id, ISNULL(ap.vendor_code,''), LTRIM(RTRIM(ap.sub_item)), ap.assy_price, ISNULL(it.item_name,'')
-                FROM nx.sourcing_sub_price ap LEFT JOIN nx.item it ON it.item_code=ap.sub_item
-                WHERE ap.route_id IN ({ph}) ORDER BY ap.route_id, ap.sub_item, ap.vendor_code""", *rids)
-            for r in cur.fetchall():
-                rid = int(r[0]); vc = str(r[1] or "").strip(); si = str(r[2]).strip(); pr = (float(r[3]) if r[3] is not None else None)
-                asy_nm[(rid, si)] = r[4]
-                if vc == "": asy_common[(rid, si)] = pr
-                else: asy_ov.setdefault((rid, si), []).append({"vendor_code": vc, "assy_price": pr}); ovcodes.add(vc)
+        # ★통합 단가(nx.item_price) as-of — 각 route의 외주 SUB(매입)·매입 사급부품(사급) 공통+업체예외.
+        _ensure_item_price_tbl(cur)
+        route_asy = {}; route_sag = {}; ovcodes = set()
+        for h in hdrs:
+            rid = h["route_id"]
+            subs = _outsourced_subs(cur, rid)
+            child = [it for it in _sub_child_items(cur, rid, subs) if it.get("is_purchase")]
+            ac, aov = _asof_prices(cur, "매입", [s["sub_item"] for s in subs], asof)
+            sc, sov = _asof_prices(cur, "사급", [x["item_code"] for x in child], asof)
+            asy = []
+            for s in subs:
+                ovs = aov.get(s["sub_item"], [])
+                asy.append({"sub_item": s["sub_item"], "sub_name": s["sub_name"], "assy_price": ac.get(s["sub_item"]),
+                            "overrides": [{"vendor_code": o["vendor_code"], "assy_price": o["price"]} for o in ovs]})
+                for o in ovs: ovcodes.add(o["vendor_code"])
+            sag = []
+            for x in child:
+                ovs = sov.get(x["item_code"], [])
+                sag.append({"item_code": x["item_code"], "item_name": x["item_name"], "sagub_price": sc.get(x["item_code"]),
+                            "overrides": [{"vendor_code": o["vendor_code"], "sagub_price": o["price"]} for o in ovs]})
+                for o in ovs: ovcodes.add(o["vendor_code"])
+            route_asy[rid] = asy; route_sag[rid] = sag
         vmap = _custnm_map(cur, vcodes | ovcodes)
         _vn = lambda c: vmap.get(c, c)
         out = []; n_vend = 0; n_sagit = 0; n_assit = 0; n_ov = 0
@@ -1415,22 +1410,17 @@ def sourcing_plan_price(item: str = Query(...)):
             rid = h["route_id"]
             vs = vend.get(rid, [])
             for v in vs: v["vendor_name"] = _vn(v["vendor_code"])
-            # assy_subs(공통+override) · sagub_items(공통+override)
-            asy = []
-            for (krid, si) in sorted(k for k in set(list(asy_common.keys()) + list(asy_ov.keys())) if k[0] == rid):
-                ovs = [{**o, "vendor_name": _vn(o["vendor_code"])} for o in asy_ov.get((rid, si), [])]
-                asy.append({"sub_item": si, "sub_name": asy_nm.get((rid, si), ""), "assy_price": asy_common.get((rid, si)), "overrides": ovs})
-                n_ov += len(ovs)
-            sag = []
-            for (krid, ic) in sorted(k for k in set(list(sag_common.keys()) + list(sag_ov.keys())) if k[0] == rid):
-                ovs = [{**o, "vendor_name": _vn(o["vendor_code"])} for o in sag_ov.get((rid, ic), [])]
-                sag.append({"item_code": ic, "item_name": sag_nm.get((rid, ic), ""), "sagub_price": sag_common.get((rid, ic)), "overrides": ovs})
-                n_ov += len(ovs)
+            asy = route_asy.get(rid, []); sag = route_sag.get(rid, [])
+            for a in asy:
+                for o in a["overrides"]: o["vendor_name"] = _vn(o["vendor_code"])
+            for sg in sag:
+                for o in sg["overrides"]: o["vendor_name"] = _vn(o["vendor_code"])
             n_vend += len(vs); n_assit += len(asy); n_sagit += len(sag)
+            n_ov += sum(len(a["overrides"]) for a in asy) + sum(len(x["overrides"]) for x in sag)
             out.append({**h, "route_alloc": ralloc.get(rid), "vendors": vs, "assy_subs": asy, "sagub_items": sag})
-        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend,
+        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend, "apply_ym": asof,
                 "n_sagub_item": n_sagit, "n_assy": n_assit, "n_override": n_ov,
-                "note": "후보/계획 단가(정산 아님) — ASSY 매입단가(외주 SUB)+사급 부품가(매입 부품): 각 공통(기본)+업체별 예외(override, COALESCE(override,공통)). 업체=배분%만. 단품 매입은 매입 마스터 자동. 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
+                "note": "후보/계획 단가(정산 아님) — 통합 nx.item_price(gubun 매입=ASSY·사급=부품) as-of. 공통(기본)+업체별 예외(override, COALESCE). 업체=배분%만. 단품 매입은 매입 마스터 자동. 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
     finally:
         nx.close()
 

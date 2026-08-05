@@ -144,7 +144,29 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
 - 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
 
-## ★★★공통 기본값 + 업체별 예외(override) (2026-08-05, 사용자 추가)
+## ★★★★통합 단가 테이블 nx.item_price (2026-08-05, 사용자 통합 지시)
+흩어진 nx 단가(sub_price=ASSY매입·sagub_price=사급·profile 가격칸)를 **하나의 통합 테이블**로 합침. 레거시 PR_M_ITEM_COST 구조 계승.
+
+### 테이블 nx.item_price (멱등)
+`item_code · vendor_code(''=공통/지정=업체예외) · price_gubun(매입/판매/사급) · apply_ym(YYMM 적용월) · price · currency · note · upd_dt`. **PK(item_code, vendor_code, price_gubun, apply_ym).** ★route_id 없음(가격=품목 속성, 여러 route가 같은 SUB/부품 공유). 레거시 PR_M_ITEM_COST와 동형(품목·거래처·구분·적용월).
+- **매핑**: ASSY 매입단가 → (item=SUB품번, gubun='매입'); 사급 부품가 → (item=부품, gubun='사급'); 공통=vendor_code '' / 예외=지정. **COALESCE(override,공통)** + **as-of**(apply_ym<=기준월 중 ROW_NUMBER 최신).
+- **이관(멱등 NOT MATCHED만)**: 기존 nx.sourcing_sub_price·sagub_price·profile.buy_price → item_price(apply_ym=현재월). **기존 테이블 방치(drop 안 함)**.
+
+### 백엔드(sourcing.py) — 헬퍼 + 엔드포인트 통합 재구성
+- `_ensure_item_price_tbl`(생성+이관), `_price_ym`(YYMM 정규화·기본 현재월), `_asof_prices(cur,gubun,items,asof_ym)`→(공통맵,override맵), `_save_item_price(cur,gubun,ym,item,vendor,price)`(upsert/삭제).
+- sub_price GET/save(gubun=매입)·sagub_price GET/save(gubun=사급)·plan_price 전부 **item_price 기준**으로 내부 전환. **외부 API 시그니처·응답 shape 유지**(assy_price/sagub_price/overrides 그대로) → 프론트 무변경. GET/save에 `ym`(기본 현재월) 추가. save는 값 바뀌면 새 apply_ym 행(시계열).
+- 배분%(nx.sourcing_profile)는 가격과 분리·그대로. route/cost 무변경(마스터 실원가 diff0). 프로파일 buy_price/sagub_price·기존 sub/sagub 테이블은 방치(이관 후 미사용).
+
+### 검증(e2e R02 route_id 60, 통합 테이블 실측)
+- **통합 테이블 실데이터**(nx.item_price 직접 덤프): `AJR75563402_S07 (공통) 매입 2608 18500` · `AJR75563402_S07 2306 매입 2608 17000` · `5210A22409B 2306 사급 2608 125` · `5210A22409B 2306 사급 2609 130` — 품목·거래처·구분·적용월·단가 한 테이블.
+- ASSY 공통 18500 / 명진 예외 17000 (COALESCE). 사급 명진 예외.
+- **★as-of 시계열**: 5210 명진 사급 8월=125·9월=130 → GET/plan_price ym=2608→125·ym=2609→130.
+- **양방향 동기화**: 품목단가관리 편집 형식(공통 9000+명진 8000) 저장 → 조달프로파일 GET 공통=9000·명진=8000.
+- plan_price 통합 as-of 반영(8월 명진 125·9월 130). route/cost silwon **5722.2 diff0=True**. **master MD5 6789628C… 불변**. sourcing.py PR_M_ITEM_COST 쿼리 **0**(주석 6). openapi 325(신규 엔드포인트 없음·기존 재사용). py_compile OK·재기동. 마이그 PK명충돌 없음(신규 테이블).
+- 테스트데이터 정리: item_price total rows=0 복귀. **프론트 JS 무변경**(응답 shape 호환) → ?v 유지(260805s6).
+- ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만). apply_ym 선택 UI 미노출(기본 현재월·as-of는 백엔드 제공, 후속 UI 과제).
+
+## ★★★공통 기본값 + 업체별 예외(override) (2026-08-05, 사용자 추가) [통합 테이블로 흡수됨 — 위 참조]
 가격은 일반적으로 업체 공통이나 **업체별로 다를 수 있어 예외(override) 분리 가능**해야 함. 모델=**공통 단가(기본)+업체별 예외**, 조회/계산 **COALESCE(override, 공통)**.
 
 ### 스키마(멱등 마이그, vendor_code 재도입 = override 차원)
