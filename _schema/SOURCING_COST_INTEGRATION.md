@@ -138,6 +138,12 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 제약 준수: localhost만·184 미배포·nx만 쓰기·한글 Edit(utf-8)·근거키 스코프.
 - ※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
 
+### ★사급단가 입력 = '매입' 부품만 (2026-08-05 사용자 수정)
+외주 SUB 하위 부품 中 **gubun='매입' 부품에만 사급단가 입력**. **제작(가공품·MJU 등)은 우리가 만들어 원가 자동 → 입력 대상 아님**(목록엔 맥락 유지로 "제작=원가 자동" 읽기전용 표기).
+- 백엔드: `_sub_child_items` 각 항목에 `is_purchase=('매입' in gubun)`. sagub_price/save valid set = 매입 부품만(제작·레벨1직속·RAC skip). GET은 제작 행 sagub_price=None·`n_purchase` 반환. plan_price는 테이블(매입만 저장)에서 유래 → 자동 매입만.
+- 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
+- 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
+
 ## ★확정 3구분 모델 — 업체·단가 = "외주 SUB 중심" (2026-08-05, 사용자 확정)
 직전 "사급단가 품목별(route_line 전체 11품번)" 모델을 사용자 확정 3구분으로 재구성. 대상 스코프를 **외주 SUB 하위**로 좁히고 **ASSY 매입단가(외주 SUB 단위)** 개념 신설.
 
