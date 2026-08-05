@@ -47,3 +47,32 @@
 - `js/screens.dev.js`: 후보 선택기·routeTreeTable·routeCostContent·loadRoutes/loadRouteTree/loadRouteCost·draw 분기.
 - `index.html`: `screens.dev.js?v=260805p`.
 - 제약 준수: localhost(8010)만·184 미배포·nx 읽기(route/cost·bom/tree route_id 조회전용, 쓰기 없음)·용접봉 엔진 그대로·엔진 무수정.
+
+## route 단위 배분(조달 프로파일 단일소스화, 2026-08-05)
+조달 프로파일 화면(SCREEN.sourceprofile)을 nx.sourcing_route 후보(R01 현행·R02…) **단일 소스**로 정리.
+레거시 "동일 BOM 구조" 그룹(subvariant/get·grpCard·procgroup/save) 프론트 제거. treeTbl(현재 BOM 참고)·show_unappr 토글 유지.
+
+### 계층 구분(중요)
+- **route_alloc(이번 신설)** = 후보(R01 vs R02…) **간** 배정. item당 route별 유효기간·활성·배분%.
+- sourcing_profile(기존) = 승인 후보 **내부** 업체분배(vendor·배분%). [개발 › 조달경로 통합검토]에 있음(다른 계층).
+
+### 모델 nx.route_alloc (멱등 _ensure_route_alloc_tbl)
+item_code NVARCHAR(60), route_id INT, apply_from DATE NULL, apply_to DATE NULL,
+is_active BIT, alloc_ratio FLOAT NULL, upd_dt datetime, PK(item_code,route_id). route_id=0=현행 baseline(R01).
+
+### 엔드포인트(sourcing.py 끝 append)
+- GET /api/sourcing/route/alloc?item=&show_unapproved= → 승인 후보(_profile_routes, baseline R01 합성 포함)+저장 alloc 조인.
+  저장 없으면 기본=현행(R01) 활성 100%. 미승인=readonly(회색). alloc_ok/alloc_errs 동봉(_validate_alloc).
+- POST /api/sourcing/route/alloc/save {item, rows:[{route_id,apply_from,apply_to,is_active,alloc_ratio}]}
+  게이트①승인 후보만 활성 허용(gate=APPROVE) ②유효기간 겹치는 활성 배분합=100%(gate=ALLOC, 단일=100 자동/생략).
+  근거키=item_code·route_id 스코프 upsert(대량삭제 금지).
+
+### 화면(js/screens.pur.js SCREEN.sourceprofile)
+편집행 = 경로(R01/R02…)·구분·공급처·승인·유효시작/종료·활성·배분%. edit state는 route_id키(data-ri).
+[🪄 현행유지·비활성마감]=R01 활성100%·나머지 비활성 마감. [💾 저장]=route/alloc/save. 실시간 배분합 표시.
+
+### 검증(e2e AJR75563402, localhost 8010)
+후보=R01(route_id=0 현행)+R02(route_id=60 승인). GET 기본 R01 활성100%→save(2건)→GET 반영.
+sum 150%(R01 100+R02 50 겹침)=gate ALLOC 거부 / 60+40=100 통과 / route_id=999999 활성=gate APPROVE 거부.
+py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/get·grpCard·procgroup/save·동일BOM구조)·신규마커존재. index.html screens.pur.js?v=260805ra.
+※ 브라우저 픽셀 사용자 확인 미완(코드/API 레벨만 검증).
