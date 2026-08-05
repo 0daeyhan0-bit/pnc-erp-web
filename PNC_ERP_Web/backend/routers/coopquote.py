@@ -152,81 +152,29 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             fin = r["sale_price"]
             r["final_quote"] = fin
             r["diff"] = (fin - r["cur_incost"]) if (r["cur_incost"] is not None) else None
-        # ── ★인상전(견적 per-part) vs 인상후(사급부품=대표판매단가, 동관/용접봉=견적) 재료비 ──
-        #   리스트 재료비 = 모달(bom-form)과 동일하게 coop_quote_part(per-part) 합으로 산출.
-        #   coop_quote 집계값(mat_raw/mat_part)은 일부 Assy에서 부품 누락으로 깨져 있어 ★사용 안함.
+        # ── ★인상전/인상후 재료비 = bom-form(BOM 소요량 정본) 배치계산 = nx.coop_matcost ──
+        #   리스트=모달 자동일치. 사급=판매단가×BOM소요(종전/최신)·동관=소요중량×사급가(종전/신규)·용접봉=소요×단가.
+        #   갱신: scratchpad/mat_matcost.py 또는 POST /api/coopquote/refresh-matcost
         assy_up = [r["assy_code"] for r in rows]
-        # coop_quote_part 원본행 전부 합산(sum-all). 다회사용 부품(용접봉 등 여러 위치)·SUB 덩어리 모두 정확
-        parts_by_assy = {}; sagub_codes = set()   # assy_upper -> [(code, ptype, mat_cost)]
+        matcost = {}   # assy_upper -> (mat_before, mat_after)
         for i in range(0, len(assy_up), 400):
             chunk = [str(a).replace("'", "").strip() for a in assy_up[i:i + 400] if a]
             if not chunk:
                 continue
             inlist = "','".join(c.upper() for c in chunk)
-            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), UPPER(LTRIM(RTRIM(part_code))), ISNULL(ptype,''), ISNULL(mat_cost,0)
-                FROM nx.coop_quote_part WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}') ORDER BY assy_code, seq""")
-            for a, pc, pt, mc in cur.fetchall():
-                a = str(a).strip(); pc = str(pc).strip(); pt = str(pt).strip()
-                parts_by_assy.setdefault(a, []).append((pc, pt, float(mc or 0)))
-                if pt == '사급부품':
-                    sagub_codes.add(pc)
-        # 사급부품 인상후 = ★대표(MAIN_FLAG='1') 판매단가(협력사별·적용월 이하 최신). 대표없으면 견적값 폴백(예 strainer=2959)
-        sale_rep = {}   # (vcode, part_upper) -> 대표 판매단가
-        vcodes = set(_VENDOR2CODE.get(str(r["vendor"]).strip(), "") for r in rows)
-        vcodes.discard("")
-        if sagub_codes and vcodes:
-            lc = _conn(); lcur = lc.cursor()
-            try:
-                partlist = list(sagub_codes)
-                for vc in vcodes:
-                    for i in range(0, len(partlist), 900):
-                        chunk = [c.replace("'", "") for c in partlist[i:i + 900]]
-                        inl = "','".join(chunk)
-                        lcur.execute(f"""WITH S AS (
-                              SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
-                                ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE))) ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
-                              FROM PR_M_ITEM_COST
-                              WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                                AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
-                                AND COST_APPLY_YMD<=? AND ITEM_COST>0)
-                            SELECT ic, ITEM_COST FROM S WHERE rn=1""", vc, asof_cur)
-                        for rr in lcur.fetchall():
-                            sale_rep[(vc, str(rr[0]).strip().upper())] = float(rr[1] or 0)
-            finally:
-                lc.close()
-        # 인상후 원소재(동) 사급가(등급별·적용월 기준): nx.mat_price_month 원소재 apply_ym<=적용월 최신, 없으면 일반20000/고강도22000
-        cur_sagub = {"일반CU": 20000.0, "고강도CU": 22000.0}
-        try:
-            if ym4:
-                ym6f = ("20" + ym4) if len(ym4) == 4 else ym4
-                cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 AND apply_ym<=? ORDER BY apply_ym DESC", ym6f)
-            else:
-                cur.execute("SELECT TOP 1 sagub_price FROM nx.mat_price_month WHERE category=N'원소재' AND sagub_price>0 ORDER BY apply_ym DESC")
-            mp = cur.fetchone()
-            if mp and mp[0]:
-                cur_sagub["일반CU"] = float(mp[0]); cur_sagub["고강도CU"] = round(float(mp[0]) * 1.1, 0)
-        except Exception:
-            pass
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), mat_before, mat_after
+                FROM nx.coop_matcost WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')""")
+            for a, mb, ma in cur.fetchall():
+                matcost[str(a).strip()] = ((float(mb) if mb is not None else None), (float(ma) if ma is not None else None))
         for r in rows:
             au = r["assy_code"].strip().upper()
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
-            vc = _VENDOR2CODE.get(str(r["vendor"]).strip(), "")
-            sg = r["sagub_price"]; csg = cur_sagub.get(r["grade"], sg)   # 견적 동사급가 → 현재 동사급가
-            parts = parts_by_assy.get(au)
-            if parts:
-                mb = 0.0; ma = 0.0
-                for pc, pt, mc in parts:
-                    mb += mc                                     # 인상전 = 견적 per-part(원본행 전부)
-                    if pt == '사급부품':
-                        rep = sale_rep.get((vc, pc)) if vc else None
-                        ma += rep if rep else mc                 # 인상후 사급 = 대표판매단가, 없으면 견적
-                    elif pt == '동관':
-                        ma += (mc * (csg / sg) if (sg and sg > 0) else mc)   # 인상후 동관 = 견적 × (현재사급가/견적사급가)
-                    else:
-                        ma += mc                                 # 용접봉/기타 = 견적 유지
-                mat_before = round(mb, 2); mat_after = round(ma, 2)
+            mc = matcost.get(au)
+            if mc and mc[1] is not None:
+                mat_before = round(mc[0], 2) if mc[0] is not None else round(r["mat_cost"], 2)
+                mat_after = round(mc[1], 2)
             else:
-                mat_before = round(r["mat_cost"], 2); mat_after = round(r["mat_cost"], 2)  # 하위부품 없음 폴백
+                mat_before = round(r["mat_cost"], 2); mat_after = round(r["mat_cost"], 2)  # 미계산 폴백(견적값)
             r["mat_before"] = mat_before; r["mat_after"] = mat_after
             r["mat_now"] = mat_after   # 모달 재료비(현재·인상후) 호환
             # 입고가 = 인상전 종전입고가 · 인상후 현재입고가
