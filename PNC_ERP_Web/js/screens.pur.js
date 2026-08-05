@@ -2185,3 +2185,112 @@ SCREEN.stockval=(c)=>{
   };
   load();
 };
+
+/* ===== 자동발주 (생산계획+주문 → MRP → 조달배분 → 업체별 PO 자동생성) — nx.auto_po ===== */
+/* 소요원천=정본 자재소요(nx.plan_part_mat 100%검증)+조달프로파일 오버레이(nx.plan_mat_source). 미리보기+확정 분리. 단가=마스터 매입단가(읽기전용). */
+SCREEN.autoorder=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const won=n=>'₩'+nf(n);
+  const canW=(typeof PERM!=='undefined')?PERM.canEdit('autoorder'):true;
+  const GB={'매입':'#1c47a0','유상사급':'#7a4ca0','외주가공':'#b8860b','외주완성':'#8a6d00','미지정':'#c0392b'};
+  let tab='preview', F={line:'',cr:'',vendor:'',item:'',gubun:'',ymd:''};
+  let pos=[], summary=null, loading=false, msg='', sel=new Set(), open=new Set();
+  let heads=[], detail=null, dpo='';
+  const loadPrev=async()=>{loading=true;msg='';draw();
+    const qs=new URLSearchParams({line:F.line,cr:F.cr,vendor:F.vendor,item:F.item,gubun:F.gubun,ymd:F.ymd});
+    try{const r=await fetch(`${API}/api/autoorder/preview?${qs}`);const j=await r.json();
+      pos=j.pos||[];summary=j.summary||null;sel=new Set(pos.filter(p=>!p.no_vendor).map(p=>p.vendor_code));}
+    catch(e){msg='백엔드 연결 실패';pos=[];summary=null;}
+    loading=false;draw();};
+  const loadList=async()=>{loading=true;msg='';draw();
+    try{const r=await fetch(`${API}/api/autoorder/list`);const j=await r.json();heads=j.rows||[];}
+    catch(e){msg='조회 실패';heads=[];}
+    loading=false;draw();};
+  const loadDetail=async(po)=>{dpo=po;detail=null;draw();
+    try{const r=await fetch(`${API}/api/autoorder/list?po_no=${encodeURIComponent(po)}`);const j=await r.json();detail=j.lines||[];}
+    catch(e){detail=[];}
+    draw();};
+  const confirm_=async()=>{
+    const vlist=[...sel];
+    if(!vlist.length){alert('확정할 발주업체를 선택하세요(미지정 업체는 확정 불가).');return;}
+    const totAmt=pos.filter(p=>sel.has(p.vendor_code)).reduce((s,p)=>s+p.total_amt,0);
+    const totLn=pos.filter(p=>sel.has(p.vendor_code)).reduce((s,p)=>s+p.line_count,0);
+    if(!confirm(`선택 업체 ${vlist.length}곳 · 라인 ${nf(totLn)} · 금액 ${won(totAmt)}\n자동발주(PO)를 생성합니다. (nx 저장 · 실제 외부발송 아님)\n순소요 = 소요 − 이미 확정된 발주. 진행할까요?`))return;
+    try{const r=await fetch(`${API}/api/autoorder/confirm`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({line:F.line,cr:F.cr,vendor:F.vendor,item:F.item,gubun:F.gubun,ymd:F.ymd,vendors:vlist,user:(typeof ME!=='undefined'?ME:'')})});
+      const j=await r.json();
+      if(j.ok){alert(`✅ 자동발주 생성 완료\n배치 ${j.batch}\nPO ${nf(j.po_count)}건 · 라인 ${nf(j.line_count)} · 금액 ${won(j.total_amt)}${j.skipped_novendor?('\n(발주업체 미지정 '+nf(j.skipped_novendor)+'라인 제외)'):''}`);loadPrev();}
+      else alert('확정 실패: '+(j.error||JSON.stringify(j)));}
+    catch(e){alert('확정 오류: '+e);}
+  };
+  const cancelPo=async(po)=>{if(!confirm(`${po} 발주를 취소(status=취소)합니다. 취소분은 재발주 가능.`))return;
+    try{const r=await fetch(`${API}/api/autoorder/cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po_no:po})});
+      const j=await r.json();if(j.ok){alert('취소 완료');loadList();}else alert('취소 실패');}catch(e){alert('오류 '+e);}};
+  const draw=()=>{
+    const gubOpts=['','매입','유상사급','외주가공','외주완성','미지정'].map(g=>`<option value="${g}"${F.gubun===g?' selected':''}>${g||'전체'}</option>`).join('');
+    const crOpts=[['','전체'],['C','C(SAC)'],['R','R(RAC)']].map(o=>`<option value="${o[0]}"${F.cr===o[0]?' selected':''}>${o[1]}</option>`).join('');
+    const bar=summary?`<span class="rowcount">업체 <b>${nf(summary.vendor_count)}</b> · 발주라인 <b>${nf(summary.line_count)}</b> · 수량 <b>${nf(summary.total_qty)}</b> · 금액 <b style="color:#1c7c3a">${won(summary.total_amt)}</b>${summary.novendor_lines?` · <span style="color:#c0392b">미지정 ${nf(summary.novendor_lines)}라인</span>`:''}</span>`:'';
+    const selAmt=pos.filter(p=>sel.has(p.vendor_code)).reduce((s,p)=>s+p.total_amt,0);
+    const cards=pos.map((p,pi)=>{
+      const isOpen=open.has(p.vendor_code||('__nv'+pi));
+      const ok=p.no_vendor?'':`<input type="checkbox" class="ao-sel" data-vc="${esc(p.vendor_code)}" ${sel.has(p.vendor_code)?'checked':''} style="transform:scale(1.15)">`;
+      const head=`<tr class="ao-head${p.no_vendor?' nv':''}" data-k="${esc(p.vendor_code||('__nv'+pi))}" style="cursor:pointer;background:${p.no_vendor?'#fdecec':'#eef4ff'};font-weight:600">
+        <td style="width:26px" onclick="event.stopPropagation()">${ok}</td>
+        <td>${isOpen?'▼':'▶'} <b>${esc(p.vendor_name)}</b> ${p.no_vendor?'':`<span style="color:#8aa0bd;font-size:11px">${esc(p.vendor_code)}</span>`}</td>
+        <td class="num">${nf(p.line_count)}</td><td class="num">${nf(p.total_qty)}</td><td class="num"><b>${won(p.total_amt)}</b></td></tr>`;
+      const body=isOpen?p.lines.map(l=>`<tr>
+        <td></td><td style="padding-left:18px"><b>${esc(l.item_code)}</b> <span class="bcap" title="${esc(l.item_name)}" style="color:#5a6a80">${esc(l.item_name)}</span>
+          <span style="color:${GB[l.supply_gubun]||'#333'};font-size:11px">·${esc(l.supply_gubun)}</span>${l.overridden?' <span style="color:#b8860b;font-size:10px" title="발주업체 override(R01)">◆override</span>':''}${l.no_price?' <span style="color:#c0392b;font-size:10px">단가없음</span>':''}</td>
+        <td class="num">${nf(l.order_qty)}${l.already_qty?`<span style="color:#8aa0bd;font-size:10px" title="이미 발주 차감">(−${nf(l.already_qty)})</span>`:''}</td>
+        <td class="num">${l.unit_price==null?'-':nf(l.unit_price)}</td><td class="num">${won(l.amt)}</td></tr>`).join(''):'';
+      return head+body;
+    }).join('');
+    const listBody=loading?`<tr><td colspan="8" class="empty">조회 중…</td></tr>`:(heads.length?heads.map(h=>`<tr class="ao-lrow" data-po="${esc(h.po_no)}" style="cursor:pointer">
+        <td><b>${esc(h.po_no)}</b></td><td>${esc(h.vendor_name)}</td><td><span style="color:${GB[h.supply_gubun]||'#333'}">${esc(h.supply_gubun)}</span></td>
+        <td class="center">${esc(h.po_ymd)}</td><td class="num">${nf(h.line_count)}</td><td class="num">${nf(h.total_qty)}</td><td class="num"><b>${won(h.total_amt)}</b></td>
+        <td class="center">${h.status==='취소'?'<span style="color:#c0392b">취소</span>':'<span style="color:#1c7c3a">확정</span>'}${(canW&&h.status!=='취소')?` <button class="btn ghost ao-cancel" data-po="${esc(h.po_no)}" style="font-size:10px;padding:1px 5px" onclick="event.stopPropagation()">취소</button>`:''}</td></tr>`).join(''):`<tr><td colspan="8" class="empty">${msg||'확정된 자동발주 없음 — [미리보기·확정] 탭에서 생성하세요.'}</td></tr>`);
+    c.innerHTML=`
+     <div class="page-title">🛒 자동발주 <span style="font-size:12px;color:var(--muted);font-weight:400">생산계획+주문 → 자재소요(MRP) → 조달배분 → 업체별 PO</span></div>
+     <div class="page-sub">정본 자재소요(<code>nx.plan_part_mat</code>, STEP5→6→7 100%검증) + 조달프로파일 오버레이(<code>nx.plan_mat_source</code>) → 업체별 순소요·단가·금액. 단가=마스터 매입단가(<code>PR_M_ITEM_COST</code> as-of·읽기전용). 순소요=소요−확정발주. 자체·용접봉 제외. PO=<code>nx.auto_po</code>(dev·외부발송 아님).</div>
+     <div id="ao-tabs" style="display:flex;gap:4px;padding:4px 0 0;border-bottom:2px solid #dce3ee;margin-bottom:8px">
+       ${[['preview','🧮 미리보기·확정'],['list','📋 발주조회']].map(t=>`<button class="btn ${tab===t[0]?'':'ghost'}" data-tab="${t[0]}" style="border-radius:8px 8px 0 0;${tab===t[0]?'background:#1c47a0;color:#fff':''}">${t[1]}</button>`).join('')}</div>
+     ${tab==='preview'?`
+     <div class="toolbar">
+       <label class="tl">라인</label><input class="inp" id="ao-line" value="${esc(F.line)}" placeholder="예 CG" style="width:70px" autocomplete="off">
+       <label class="tl">구분</label><select class="inp" id="ao-cr">${crOpts}</select>
+       <label class="tl">공급방식</label><select class="inp" id="ao-gubun">${gubOpts}</select>
+       <label class="tl">공급처</label><input class="inp" id="ao-vendor" value="${esc(F.vendor)}" placeholder="업체코드" style="width:80px" autocomplete="off">
+       <label class="tl">자재</label><input class="inp" id="ao-item" value="${esc(F.item)}" placeholder="자재코드/명" style="width:120px" autocomplete="off">
+       <label class="tl">기준일</label><input class="inp" id="ao-ymd" value="${esc(F.ymd)}" placeholder="YYMMDD(단가)" style="width:90px" autocomplete="off">
+       <button class="btn" id="ao-prev" style="background:#1c47a0;color:#fff">🧮 미리보기</button>
+       ${canW?`<button class="btn" id="ao-conf" style="background:#1c7c3a;color:#fff">✅ 선택 발주 확정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 발주 권한 없음</span>`}
+     </div>
+     <div class="toolbar" style="margin-top:2px">${bar}${sel.size?` · <span style="color:#1c7c3a">선택 ${nf(sel.size)}업체 ${won(selAmt)}</span>`:''}</div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl" style="font-size:12px"><thead><tr><th style="width:26px"></th><th>발주업체 / 자재</th><th class="num">발주수량</th><th class="num">단가</th><th class="num">금액</th></tr></thead>
+      <tbody>${loading?`<tr><td colspan="5" class="empty">산출 중…</td></tr>`:(pos.length?cards:`<tr><td colspan="5" class="empty">${msg||'미리보기를 실행하세요. (생산계획업로드 → 🧾자재소요·조달 편성이 선행되어야 함)'}</td></tr>`)}</tbody></table></div>`
+     :`
+     <div class="toolbar"><button class="btn" id="ao-lgo">🔄 새로고침</button>${detail!==null?`<button class="btn ghost" id="ao-back">◀ 목록</button> <span class="rowcount">PO <b>${esc(dpo)}</b> 명세</span>`:''}</div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 260px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      ${detail!==null?`<table class="tbl" style="font-size:12px"><thead><tr><th>자재</th><th>품명</th><th>공급방식</th><th class="num">소요</th><th class="num">기발주</th><th class="num">발주수량</th><th class="num">단가</th><th class="num">금액</th></tr></thead>
+       <tbody>${detail.length?detail.map(l=>`<tr><td><b>${esc(l.item_code)}</b></td><td class="bcap" title="${esc(l.item_name)}">${esc(l.item_name)}</td><td><span style="color:${GB[l.supply_gubun]||'#333'}">${esc(l.supply_gubun)}</span></td><td class="num">${nf(l.req_qty)}</td><td class="num">${nf(l.already_qty)}</td><td class="num"><b>${nf(l.order_qty)}</b></td><td class="num">${l.unit_price==null?'-':nf(l.unit_price)}</td><td class="num">${won(l.amt)}</td></tr>`).join(''):`<tr><td colspan="8" class="empty">라인 없음</td></tr>`}</tbody></table>`
+      :`<table class="tbl" style="font-size:12px"><thead><tr><th>PO번호</th><th>발주업체</th><th>공급방식</th><th>발주일</th><th class="num">라인</th><th class="num">수량</th><th class="num">금액</th><th>상태</th></tr></thead><tbody>${listBody}</tbody></table>`}</div>`}`;
+    const g=id=>c.querySelector(id);
+    c.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{if(tab!==b.dataset.tab){tab=b.dataset.tab;detail=null;if(tab==='list')loadList();else draw();}});
+    if(tab==='preview'){
+      const rd=()=>{F.line=g('#ao-line').value.trim();F.cr=g('#ao-cr').value;F.gubun=g('#ao-gubun').value;F.vendor=g('#ao-vendor').value.trim();F.item=g('#ao-item').value.trim();F.ymd=g('#ao-ymd').value.trim();};
+      g('#ao-prev').onclick=()=>{rd();loadPrev();};
+      if(g('#ao-conf'))g('#ao-conf').onclick=()=>{rd();confirm_();};
+      ['#ao-line','#ao-vendor','#ao-item','#ao-ymd'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter'){rd();loadPrev();}});
+      c.querySelectorAll('.ao-head').forEach(el=>el.onclick=()=>{const k=el.dataset.k;if(open.has(k))open.delete(k);else open.add(k);draw();});
+      c.querySelectorAll('.ao-sel').forEach(el=>el.onclick=e=>{e.stopPropagation();const vc=el.dataset.vc;if(el.checked)sel.add(vc);else sel.delete(vc);draw();});
+    }else{
+      if(g('#ao-lgo'))g('#ao-lgo').onclick=loadList;
+      if(g('#ao-back'))g('#ao-back').onclick=()=>{detail=null;draw();};
+      c.querySelectorAll('.ao-lrow').forEach(el=>el.onclick=()=>loadDetail(el.dataset.po));
+      c.querySelectorAll('.ao-cancel').forEach(el=>el.onclick=()=>cancelPo(el.dataset.po));
+    }
+  };
+  draw();
+};

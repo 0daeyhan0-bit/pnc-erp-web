@@ -114,6 +114,7 @@ const MODULES=[
    {id:'matprice',ic:'💲',nm:'원소재/용접봉 시세',hide:true},
    {id:'sourceprofile',ic:'🧭',nm:'조달 프로파일'},
    {id:'matsource',ic:'🧾',nm:'자재소요·조달 조회'},
+   {id:'autoorder',ic:'🛒',nm:'자동발주'},
    {sep:true},
    {id:'salemagam',ic:'🧾',nm:'자재매출마감'},
    {id:'purmagam',ic:'📥',nm:'자재매입마감'},
