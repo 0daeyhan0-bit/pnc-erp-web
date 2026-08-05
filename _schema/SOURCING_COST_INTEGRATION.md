@@ -2,6 +2,27 @@
 
 작성 2026-08-05 · 대상 화면 `SCREEN.unifybom`(품목 BOM관리) · 백엔드 `routers/bom.py`·`routers/sourcing.py` · 엔진 `_harness/nx_cost_engine.py`(NxCostEngine, **무수정 재사용**)
 
+## ★★후속점검 I-1~I-4 (2026-08-05) — route/cost 후보원가 반영 외
+### I-1 [핵심] route/cost에 후보 ASSY 매입단가 반영 (R01 diff0 앵커 유지·R02만 차이)
+- 규칙: 후보 외주 SUB(node_kind='SUB', gubun 외주/사급)에 **ASSY 매입단가**(nx.item_price gubun='매입', 업체별)가 있으면 그 SUB 원가를 **활성 profile 업체 배분% 가중평균 ASSY가**로 치환. 없으면 마스터 엔진 롤업 유지.
+- 치환 = 마스터 실원가 − 마스터 외주완성 SUB mat(제품 base 동일·매입 leaf) + 가중평균 ASSY(×qty). jae/silwon/sonik만 이동, 가공/일반/운반/이윤/LME는 마스터 as-of 유지.
+- **★diff0 앵커**: ASSY 미입력 후보(R01·BASE)는 마스터 실원가 **5722.2 그대로**(delta=0 → diff0=True). ASSY as-of = max(자재기준일, 현재월)(계획단가=전향적).
+- 반환 추가: `cost`(치환후)·`current`(마스터=R01)·`diff`·`assy_applied[{sub_item,weighted_assy,old_master_mat,new_mat,matched_master}]`·`assy_delta`. 프론트=screens.dev.js routeCostContent 기존 표(현행 R01 vs 후보 R02 성분별 diff+diff0 배지)가 **자동 반영**(JS 무변경).
+- 검증: R02 S07에 명진(2306,활성100%) ASSY **17000** 입력 → route/cost R02 **silwon 18269.2**(=5722.2+delta**12547**, S07 매칭 마스터 F&T mat **4453**→17000)·손익 R01 −694.2 vs R02 **−13241.2**·diff0=False. **ASSY 제거 시 5722.2 diff0=True 복원**. master MD5 6789628C… 불변(엔진 읽기전용).
+
+### I-2 [경] route/detail cand_gongsu 보정
+- `cand_gongsu = cut_sum(절삭 자동귀속) + proc_sum(후보 배치 조립공정)`. 반환에 cut_sum/proc_sum 추가. 검증 route60: base 43 = cut 27 + proc 16 → **cand 43 gate_ok=True**(기존 16만→False 오표기 수정).
+
+### I-3 [경] 하드룰 문구 정정 (마스터 불변 유지)
+- 이전 durable "sourcing.py PR_M_ITEM_COST 쿼리=0(주석뿐)"은 current_order 신설 이전 기준. **정정: 현재 sourcing.py는 current_order(R01 발주뷰)에서 PR_M_ITEM_COST를 SELECT 1건(읽기전용, COST_TAG='1' as-of)만 조회.** 하드룰 A1(라이브 정산 마스터 불변)은 **유지**(SELECT만·쓰기 0·MD5 6789628C… 불변). 그 외 저장은 전부 nx.
+
+### I-4 [경] ASSY 공통(vendor='') 잔재 제거
+- sub_price/save: **vendor 없는 ASSY(공통행) 저장 금지**(skip) + 저장 시 해당 SUB의 잔여 vendor='' 매입행 DELETE(common_cleaned). ASSY는 업체별만 존재. 검증: 공통 99999 skip=1·업체별 17000 저장·GET 공통=null. (사급은 이미 조달모달서 제거됨)
+
+### 공통 검증
+- master MD5 **6789628C0261796DDD75C4C376034E46** 불변·라이브 쓰기 0. openapi 327·py_compile OK·재기동 health200. route/cost 앵커 5722.2 diff0(ASSY 미입력). R02모달·품목단가관리·발주뷰·배분게이트 회귀 없음. 테스트데이터 item_price 0·profile 명진100% 유지. **프론트 JS 무변경(?v 유지 260805s9)** — routeCostContent 기존 표가 diff 자동 표시.
+
+
 ## 목적
 현행(R01) vs 조달후보(R02, 신규 SUB 포함) **구조·실원가를 나란히 비교**. 조달프로파일(업체 배분)은 이미 연동됨(무변경).
 후보 = **BOM구조/공정 재배치 계층**. 업체·매입가·사급배분 = **조달프로파일 계층**(nx.sourcing_profile). 2계층 분리(기존 설계 유지).
