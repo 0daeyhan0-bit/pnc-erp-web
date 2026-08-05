@@ -1325,7 +1325,7 @@ SCREEN.sourceprofile=(c)=>{
       if(!pm.rows.length)pm.rows=[blankVRow()];
     }catch(e){pm.msg='업체 목록 로드 실패';}
     pm.loading=false;draw();};
-  const pmClose=()=>{pm=null;draw();};
+  const pmClose=()=>{pm=null;sm=null;draw();};
   const pmAddRow=()=>{pm.rows.push(blankVRow());draw();};
   const pmDelRow=i=>{const r=pm.rows[i];if(!r)return;if(r.profile_id>0){r._delete=true;}else{pm.rows.splice(i,1);}draw();};
   const pmActive=()=>pm.rows.filter(r=>!r._delete&&r.is_active&&r.vendor_code);
@@ -1352,6 +1352,51 @@ SCREEN.sourceprofile=(c)=>{
       pm.msg='❌ 저장 실패 — '+hint+(j.errors?': '+j.errors.join(' / '):(j.msg?': '+j.msg:''));draw();}
     catch(e){pm.msg='❌ 저장 실패: '+e;draw();}};
   const nfp=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  // ===== 중첩모달: 품목별 사급단가(계획) — 그 업체 스코프. 품목=이 후보(route_line) 구성 품번(용접봉 제외, 자유추가 아님) =====
+  const smClose=()=>{sm=null;draw();};
+  const smOpen=async(vc,vn)=>{if(!vc){alert('먼저 업체를 지정하세요.');return;}
+    sm={route_id:pm.route.route_id,vendor_code:vc,vendor_name:vn||vc,rows:[],hdr:null,msg:'',loading:true};draw();
+    try{const res=await fetch(`${API}/api/sourcing/sagub_price?route_id=${pm.route.route_id}&vendor_code=${encodeURIComponent(vc)}`);const j=await res.json();
+      sm.hdr=j.header||null;
+      sm.rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',gubun:x.gubun||'',node_kind:x.node_kind||'PART',
+        sagub_price:(x.sagub_price!=null?x.sagub_price:null)}));
+    }catch(e){sm.msg='❌ 품목 로드 실패: '+e;}
+    sm.loading=false;draw();};
+  const smSave=async()=>{const vc=sm.vendor_code,vn=sm.vendor_name;
+    const rows=sm.rows.map(r=>({item_code:r.item_code,sagub_price:(r.sagub_price!==''&&r.sagub_price!=null)?parseFloat(r.sagub_price):null}));
+    try{const res=await fetch(`${API}/api/sourcing/sagub_price/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:sm.route_id,vendor_code:vc,rows})});
+      const j=await res.json();
+      if(j.ok){await smOpen(vc,vn);sm.msg=`✅ 저장 완료 (반영 ${j.upsert||0} · 삭제 ${j.del||0}${j.skip?' · 대상외 '+j.skip:''})`;draw();return;}
+      sm.msg='❌ 저장 실패: '+(j.msg||JSON.stringify(j));draw();}
+    catch(e){sm.msg='❌ 저장 실패: '+e;draw();}};
+  const sagubModal=()=>{if(!sm)return '';
+    const nP=sm.rows.filter(r=>r.sagub_price!=null&&r.sagub_price!=='').length;
+    const rowsHtml=sm.loading?`<tr><td colspan="3">${spinRow(1)}</td></tr>`:sm.rows.map((r,i)=>`
+      <tr>
+        <td style="white-space:nowrap"><b>${esc(r.item_code)}</b>${r.node_kind==='SUB'?' <span style="font-size:10px;color:#1c7c3a">(SUB)</span>':''}${r.gubun?` <span style="font-size:10px;color:#8aa0bd">${esc(r.gubun)}</span>`:''}</td>
+        <td class="bcap" style="max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.item_name)}">${esc(r.item_name)}</td>
+        <td class="num"><input class="inp sm-e num" type="number" step="1" data-i="${i}" data-f="sagub_price" value="${r.sagub_price==null?'':r.sagub_price}" placeholder="계획" style="width:110px;min-width:0" ${canW?'':'disabled'}></td>
+      </tr>`).join('');
+    return `<div class="wr-modal" style="position:fixed;inset:0;z-index:130;background:rgba(20,30,50,.5);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:40px 10px">
+      <div style="background:#fff;border-radius:10px;min-width:560px;max-width:92vw;box-shadow:0 8px 44px rgba(0,0,0,.32)">
+       <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
+         <span style="font-weight:700;font-size:15px;color:#b8860b">📋 사급품목 단가</span>
+         ${badge(pm.route)} <b style="color:#1c3a6e">${esc(sm.vendor_name||sm.vendor_code)}</b>
+         <span style="color:var(--muted);font-size:12px">${esc(sel)} · ${sm.rows.length}품목 · 입력 ${nP}</span>
+         <div class="spacer" style="flex:1"></div>
+         <button class="btn ghost" id="sm-x" style="font-size:16px">✖</button></div>
+       <div style="padding:8px 16px 4px;font-size:12px;color:#8a6d1c;background:#fdf7e6;border-bottom:1px solid #f0e6c8">
+         ⚠️ 사급단가는 <b>후보/계획 단가(정산 아님)</b> — 이 업체에 공급하는 사급 품목(이 후보 <code>route_line</code> 구성 품번·용접봉 제외)별로 <code>nx.sourcing_sagub_price</code>에 저장. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
+       <div style="padding:0 16px 8px;overflow:auto;max-height:56vh">
+         <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th class="num">사급단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th></tr></thead>
+         <tbody>${rowsHtml||`<tr><td colspan="3" class="empty">이 후보(route_line)에 구성 품번이 없습니다 — [개발 › 조달경로 통합검토]에서 구성하세요.</td></tr>`}</tbody></table></div>
+       <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">
+         <span style="font-size:11px;color:#8aa0bd">품목은 이 후보에 물린 구성 품번 기준(자유추가 아님). 공란=저장 시 해당 품목 단가 삭제.</span>
+         ${sm.msg?`<span style="font-size:12px;font-weight:600;color:${sm.msg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(sm.msg)}</span>`:''}
+         <div class="spacer" style="flex:1"></div>
+         <button class="btn ghost" id="sm-cancel">닫기</button>
+         ${canW?`<button class="btn" id="sm-save" style="background:#b8860b;color:#fff">💾 저장</button>`:''}</div>
+      </div></div>`;};
   const vendorModal=()=>{if(!pm)return '';const h=pm.hdr,S=pmStat(),ok=S.single||Math.abs(S.sum-100)<0.01;
     const rowsHtml=pm.loading?`<tr><td colspan="8">${spinRow(1)}</td></tr>`:pm.rows.map((r,i)=>r._delete?'':`
       <tr>
@@ -1373,7 +1418,7 @@ SCREEN.sourceprofile=(c)=>{
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="pm-x" style="font-size:16px">✖</button></div>
        <div style="padding:8px 16px 4px;font-size:12px;color:#8a6d1c;background:#fdf7e6;border-bottom:1px solid #f0e6c8">
-         ⚠️ 여기 입력하는 매입/사급 단가는 <b>후보/계획 단가(정산 아님)</b> — 후보 원가비교(R01 vs R02)용으로 <code>nx.sourcing_profile</code>(sourcing 레이어)에만 저장됩니다. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
+         ⚠️ 여기 입력하는 단가는 <b>후보/계획 단가(정산 아님)</b>. <b>매입단가=업체당 1개</b>(<code>nx.sourcing_profile</code>). <b>사급단가=[📋 사급품목 단가] 버튼</b>으로 이 업체에 공급하는 <b>품목별</b> 입력(<code>nx.sourcing_sagub_price</code>). 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
        <div style="padding:6px 16px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${S.single?`활성 업체 ${S.n}개(단일 → 100% 자동)`:`활성 업체 ${S.n}개 배분합 ${S.sum}% ${ok?'✓':'(=100 필요)'}`}</div>
        <div style="padding:0 16px 8px;overflow:auto;max-height:52vh">
          <table class="tbl" style="font-size:12px"><thead><tr><th>업체</th><th>공급구분</th><th class="num">배분%</th><th>유효시작</th><th>유효종료</th><th class="num">매입단가<br><span style="font-weight:400;font-size:10px">(계획·업체당1)</span></th><th class="center">사급단가<br><span style="font-weight:400;font-size:10px">(품목별)</span></th><th class="center">활성</th></tr></thead>
@@ -1391,6 +1436,10 @@ SCREEN.sourceprofile=(c)=>{
     const ad=g('#pm-add');if(ad)ad.onclick=pmAddRow;
     const sv=g('#pm-save');if(sv)sv.onclick=pmSave;
     c.querySelectorAll('.pm-del').forEach(el=>el.onclick=()=>pmDelRow(+el.dataset.i));
+    c.querySelectorAll('.pm-sagub').forEach(el=>el.onclick=()=>{const r=pm.rows[+el.dataset.i];if(r&&r.vendor_code)smOpen(r.vendor_code,r.vendor_name);else alert('먼저 업체를 지정하세요.');});
+    if(sm){const sx=g('#sm-x'),sc=g('#sm-cancel');if(sx)sx.onclick=smClose;if(sc)sc.onclick=smClose;
+      const ssv=g('#sm-save');if(ssv)ssv.onclick=smSave;
+      c.querySelectorAll('.sm-e').forEach(el=>{const i=+el.dataset.i;el.onchange=()=>{sm.rows[i].sagub_price=(el.value===''?null:el.value);};});}
     c.querySelectorAll('.pm-e').forEach(el=>{const i=+el.dataset.i,f=el.dataset.f;
       if(f==='vendor'){el.oninput=e=>pmVendorAC(e.target.value);el.onchange=e=>{pmResolveVendor(i,e.target.value);draw();};}
       else if(f==='is_active'){el.onchange=()=>{pm.rows[i].is_active=el.checked?1:0;draw();};}
@@ -1449,6 +1498,7 @@ SCREEN.sourceprofile=(c)=>{
      </div>
      ${msg?`<div class="page-sub" style="color:#1c7c3a">${esc(msg)}</div>`:''}
      ${vendorModal()}
+     ${sagubModal()}
      <style>.sp-row.sel{background:#e8f0ff}.sp-row:hover{background:#eef4ff}</style>`;
     const g=id=>c.querySelector(id);
     g('#sp-search').onclick=()=>{q=g('#sp-q').value;search();};

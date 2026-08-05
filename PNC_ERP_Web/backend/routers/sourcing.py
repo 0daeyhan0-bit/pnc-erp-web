@@ -1396,13 +1396,24 @@ def sourcing_plan_price(item: str = Query(...)):
                 key = (int(r[0]), str(r[1] or "").strip())
                 sagit.setdefault(key, []).append({"item_code": str(r[2]).strip(), "item_name": r[4],
                     "sagub_price": (float(r[3]) if r[3] is not None else None)})
+        # sagub 업체 코드 이름 보강(profile 밖 업체도 표시)
+        vmap = _custnm_map(cur, vcodes | {k[1] for k in sagit.keys()})
         out = []; n_vend = 0; n_sagit = 0
         for h in hdrs:
             vs = vend.get(h["route_id"], [])
+            seen = set()
             for v in vs:
                 v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
                 v["sagub_items"] = sagit.get((h["route_id"], v["vendor_code"]), [])
-                n_sagit += len(v["sagub_items"])
+                n_sagit += len(v["sagub_items"]); seen.add(v["vendor_code"])
+            # profile에 없지만 사급단가만 있는 업체 = 합성행(매입단가 없음, 사급품목만)
+            for (krid, kvc), items in sagit.items():
+                if krid != h["route_id"] or kvc in seen: continue
+                vs.append({"vendor_code": kvc, "vendor_name": vmap.get(kvc, kvc), "supply_gubun": "2",
+                           "is_active": 0, "alloc_ratio": None, "apply_from": None, "apply_to": None,
+                           "buy_price": None, "sagub_price": None, "lme_flag": 0,
+                           "sagub_only": True, "sagub_items": items})
+                n_sagit += len(items); seen.add(kvc)
             n_vend += len(vs)
             out.append({**h, "route_alloc": ralloc.get(h["route_id"]), "vendors": vs})
         return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend, "n_sagub_item": n_sagit,
