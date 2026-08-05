@@ -411,23 +411,24 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 SELECT ic, ITEM_COST FROM C WHERE rn=1""")
             for r in cur.fetchall():
                 pur[str(r[0]).strip().upper()] = float(r[1] or 0)
-        # 3b) 사급가 = 판매단가(COST_TAG='S' 내수 · 해당 협력사 · ★대표(MAIN_FLAG='1') 필수 · 적용월 이하 최신)
-        #     대표가 없으면 조회 안됨 → 상위 로직이 견적값(pt["mat"])으로 폴백. (예 strainer=견적 2959)
-        sale_asof = {}
+        # 3b) 판매단가(COST_TAG='S' 내수 · 해당 협력사 · 대표우선·날짜최신).
+        #     sale_asof=최신(인상후, 적용월 이하) · sale_prev=종전(인상전, 작년12월 이전=<=251130)
+        sale_asof = {}; sale_prev = {}
         if vcode:
-            for i in range(0, len(nl), 900):
-                chunk = [c.replace("'", "") for c in nl[i:i+900]]; inl = "','".join(chunk)
-                cur.execute(f"""WITH S AS (
-                      SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
-                        ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
-                          ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
-                      FROM PR_M_ITEM_COST
-                      WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                        AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
-                        AND COST_APPLY_YMD<=? AND ITEM_COST>0)
-                    SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
-                for r in cur.fetchall():
-                    sale_asof[str(r[0]).strip().upper()] = float(r[1] or 0)
+            for tgt, cut in ((sale_asof, asof), (sale_prev, "251130")):
+                for i in range(0, len(nl), 900):
+                    chunk = [c.replace("'", "") for c in nl[i:i+900]]; inl = "','".join(chunk)
+                    cur.execute(f"""WITH S AS (
+                          SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
+                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
+                              ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
+                          FROM PR_M_ITEM_COST
+                          WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
+                            AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
+                            AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                        SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, cut)
+                    for r in cur.fetchall():
+                        tgt[str(r[0]).strip().upper()] = float(r[1] or 0)
     finally:
         cn.close()
     # 4) 협력사 스펙 프리필(coop_raw_spec) + 기존 견적여부
@@ -578,8 +579,20 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 mat_now = round(uw * cq * sgr) if uw else (round(pt["mat"]) if pt else 0)
             else:
                 mat_now = (round(pt["mat"]) if pt else 0)
+            # ★인상전(종전·BOM소요 정본): 사급=종전판매단가×소요 · 동관=소요중량×종전사급가(견적) · 용접봉/매입=인상후와 동일
+            sp_prev = sale_prev.get(ch.upper())
+            if role == "용접봉":
+                mat_before = weld_cost
+            elif role == "사급":
+                mat_before = round(sp_prev * cq) if sp_prev else (round(pt["mat"]) if pt else (round(pp * cq) if pp else 0))
+            elif role == "매입부품":
+                mat_before = round(pp * cq) if pp else (round(pt["mat"]) if pt else 0)
+            elif role == "제작동관":
+                mat_before = round(uw * cq * sagub_q) if (uw and sagub_q > 0) else (round(pt["mat"]) if pt else 0)
+            else:
+                mat_before = (round(pt["mat"]) if pt else 0)
             rows.append({
-                "mat_now": mat_now, "sale_price": (round(sp_sale) if sp_sale else None),
+                "mat_now": mat_now, "mat_before": mat_before, "sale_price": (round(sp_sale) if sp_sale else None),
                 "part_total": (round(pt["total"]) if pt else None),
                 "part_mat": (round(pt["mat"]) if pt else None),
                 "level": lvl, "code": ch, "name": ci.get("nm", ""), "role": role,
@@ -603,54 +616,28 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         if un and leftover:
             share = round(leftover / len(un))
             for r in un:
-                r["weld_cost"] = share; r["mat_now"] = share
+                r["weld_cost"] = share; r["mat_now"] = share; r["mat_before"] = share   # 용접봉 인상전=인상후(단가 동일)
     need = sum(1 for r in rows if r["need_input"])
     total_soyo = round(sum(r["soyo_weight"] for r in rows if r["role"] == "제작동관"), 4)
     total_weld = round(sum(r["weld_cost"] for r in rows if r["role"] == "용접봉"))
     total_proc = round(sum(r["proc_cost"] for r in rows if r["role"] == "제작동관"))
-    # ★재료비 합계 = 견적 부품(coop_quote_part) 기준 = 리스트와 동일 로직(사급=대표판매단가 else 견적, 그외=견적).
-    #   BOM 전개행 전체합이 아님 → 견적이 SUB를 덩어리로 잡은 경우 하위전개 이중계상 방지.
+    # ★재료비 = BOM 소요량 정본: Σ in_quote 행 (인상후=mat_now, 인상전=mat_before). 소요×판매단가라 소요>1 정확.
+    #   in_quote: 견적 부품이거나 용접봉(leftover). 견적이 SUB를 덩어리로 잡으면 그 반제품 행이 대표(하위전개 in_quote=False로 제외).
+    _pmset = set(partmap.keys())
+    for r in rows:
+        r["in_quote"] = (str(r["code"]).strip().upper() in _pmset) or (r["role"] == "용접봉" and (r.get("weld_cost") or 0) > 0)
     if partmap:
-        # 견적 사급부품 대표판매단가 조회(BOM전개 밖 코드 포함) → 리스트 total과 정합
-        sale_q = dict(sale_asof)
-        if vcode:
-            sneed = [c for c, p in partmap.items() if p.get("ptype") == "사급부품" and c not in sale_q]
-            if sneed:
-                lc2 = _conn(); lc2c = lc2.cursor()
-                try:
-                    for i in range(0, len(sneed), 900):
-                        chunk = [c.replace("'", "") for c in sneed[i:i + 900]]; inl = "','".join(chunk)
-                        lc2c.execute(f"""WITH S AS (SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
-                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE))) ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
-                            FROM PR_M_ITEM_COST WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                            AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST>0)
-                            SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, asof)
-                        for rr in lc2c.fetchall():
-                            sale_q[str(rr[0]).strip().upper()] = float(rr[1] or 0)
-                finally:
-                    lc2.close()
-        total_mat = 0.0
-        for code_u, ptype_q, mat in quote_rows:   # ★원본행 전부(다회사용 정확 합산)
-            if ptype_q == "사급부품":
-                rep = sale_q.get(code_u)   # 대표(MAIN_FLAG='1') 판매단가
-                total_mat += rep if rep else mat
-            elif ptype_q == "동관":
-                total_mat += (mat * (cur_sagub_val / sagub_q) if (sagub_q and sagub_q > 0) else mat)   # 동관=현재 사급가 반영
-            else:
-                total_mat += mat
-        total_mat = round(total_mat)
-        _pmset = set(partmap.keys())
-        for r in rows:
-            # 견적 부품이거나, 용접봉(견적 용접봉값을 leftover로 받은 행) → 합계 산입(재료비 포함)
-            r["in_quote"] = (str(r["code"]).strip().upper() in _pmset) or (r["role"] == "용접봉" and (r.get("weld_cost") or 0) > 0)
+        total_mat = round(sum((r["mat_now"] or 0) for r in rows if r["in_quote"]))
+        total_mat_before = round(sum((r["mat_before"] or 0) for r in rows if r["in_quote"]))
     elif mat_stored > 0:
-        # 견적 헤더는 있으나 per-part 분해 없음 → 견적 재료비(헤더) 사용(리스트와 동일)
-        total_mat = round(mat_stored)
+        # 견적 헤더는 있으나 per-part 분해 없음 → 견적 재료비(헤더)
+        total_mat = round(mat_stored); total_mat_before = round(mat_stored)
         for r in rows:
             r["in_quote"] = False
     else:
         # 신규견적(견적 없음) → BOM 리프행 합(반제품 제외, 이중계상 방지)
         total_mat = round(sum((r["mat_now"] or 0) for r in rows if not r["haskids"]))
+        total_mat_before = round(sum((r["mat_before"] or 0) for r in rows if not r["haskids"]))
         for r in rows:
             r["in_quote"] = (not r["haskids"])
     # 공정 컬럼 고정(엑셀 전체 공정 순서) — 품번마다 변동하지 않음
@@ -659,7 +646,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     return {"item": item, "name": root.get("nm", ""), "already_quoted": quoted, "labor_rate": labor,
             "rows": rows, "count": len(rows), "need_input": need, "proc_ops": proc_ops, "rate": rate,
             "total_soyo_weight": total_soyo, "total_weld_cost": total_weld, "total_proc_cost": total_proc,
-            "total_mat": total_mat, "ym": ym4, "asof": asof, "vendor_code": vcode,
+            "total_mat": total_mat, "total_mat_before": total_mat_before, "ym": ym4, "asof": asof, "vendor_code": vcode,
             "cur_sagub": cur_sagub_val, "grade": grade_q, "cur_incost": cur_incost,
             "part_sum": round(part_sum), "assembly_proc": assembly_proc, "sale_stored": round(sale_stored),
             "assembly": assembly}
