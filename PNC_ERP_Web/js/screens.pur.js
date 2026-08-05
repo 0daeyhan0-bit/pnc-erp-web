@@ -1629,7 +1629,7 @@ SCREEN.coopquote=(host)=>{
          <div style="padding:10px 16px;border-top:1px solid #e2e8f2;text-align:right"><button class="btn" id="cq-dc">닫기</button></div>
        </div></div>`;})():''}
      ${be?(()=>{const d=be.data;const soyo=beSoyo();const raw=beRaw();const weld=beWeld();
-       const baseMat=be.rowvals?Math.max(0,(be.rowvals.mat_cost||0)-(be.rowvals.mat_raw||0)):(d?d.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&r.pur_price).reduce((s,r)=>s+Math.round(r.pur_price*r.cum_qty),0):0);
+       const baseMat=d?d.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&!r.haskids).reduce((s,r)=>s+(r.mat_now||0),0):0;   // 인상후 부속품/용접봉(판매단가 반영)
        const mat=raw+baseMat;const proc=Math.round(+be.proc||0);const sale=mat+proc;
        const A0=be.asm||{gagong:(d&&d.assembly_proc)||0,mgmt:0,transport:0,profit:0};const asmTot=Math.round((+A0.gagong||0)+(+A0.mgmt||0)+(+A0.transport||0)+(+A0.profit||0));
        const grand=((d&&d.part_sum)||0)+asmTot;
@@ -1764,7 +1764,7 @@ SCREEN.coopquote=(host)=>{
       if(ni)ni.onkeyup=e=>{if(e.key==='Enter')loadBomInto(ni.value,null);};
       const bs=g('#be-save');if(bs)bs.onclick=saveBomEdit;
       const upd=()=>{const soyo=beSoyo();const raw=beRaw();
-        const baseMat=be.rowvals?Math.max(0,(be.rowvals.mat_cost||0)-(be.rowvals.mat_raw||0)):(be.data.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&r.pur_price).reduce((s,r)=>s+Math.round(r.pur_price*r.cum_qty),0));
+        const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&!r.haskids).reduce((s,r)=>s+(r.mat_now||0),0);   // 인상후 부속품/용접봉(판매단가 반영)
         const mat=raw+baseMat;const proc=Math.round(+be.proc||0);const sale=mat+proc;
         const set=(id,v)=>{const el=g(id);if(el)el.textContent=v;};
         set('#be-tsoyo',nf4(soyo));set('#be-tsoyo2',nf4(soyo));set('#be-traw',nf(raw));set('#be-tbase',nf(baseMat));set('#be-tmat',nf(mat));set('#be-tsale',nf(sale));
