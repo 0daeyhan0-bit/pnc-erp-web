@@ -156,8 +156,8 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
         #   리스트 재료비 = 모달(bom-form)과 동일하게 coop_quote_part(per-part) 합으로 산출.
         #   coop_quote 집계값(mat_raw/mat_part)은 일부 Assy에서 부품 누락으로 깨져 있어 ★사용 안함.
         assy_up = [r["assy_code"] for r in rows]
-        # ★모달 partmap과 동일하게 code별 dedup(seq 마지막). coop_quote_part 중복행(61 Assy) 대비 리스트=모달 정합
-        parts_by_assy = {}; sagub_codes = set()   # assy_upper -> {code: (ptype, mat_cost)}
+        # coop_quote_part 원본행 전부 합산(sum-all). 다회사용 부품(용접봉 등 여러 위치)·SUB 덩어리 모두 정확
+        parts_by_assy = {}; sagub_codes = set()   # assy_upper -> [(code, ptype, mat_cost)]
         for i in range(0, len(assy_up), 400):
             chunk = [str(a).replace("'", "").strip() for a in assy_up[i:i + 400] if a]
             if not chunk:
@@ -167,7 +167,7 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                 FROM nx.coop_quote_part WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}') ORDER BY assy_code, seq""")
             for a, pc, pt, mc in cur.fetchall():
                 a = str(a).strip(); pc = str(pc).strip(); pt = str(pt).strip()
-                parts_by_assy.setdefault(a, {})[pc] = (pt, float(mc or 0))
+                parts_by_assy.setdefault(a, []).append((pc, pt, float(mc or 0)))
                 if pt == '사급부품':
                     sagub_codes.add(pc)
         # 사급부품 인상후 = ★대표(MAIN_FLAG='1') 판매단가(협력사별·적용월 이하 최신). 대표없으면 견적값 폴백(예 strainer=2959)
@@ -201,8 +201,8 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             parts = parts_by_assy.get(au)
             if parts:
                 mb = 0.0; ma = 0.0
-                for pc, (pt, mc) in parts.items():
-                    mb += mc                                     # 인상전 = 견적 per-part(dedup) 그대로
+                for pc, pt, mc in parts:
+                    mb += mc                                     # 인상전 = 견적 per-part(원본행 전부)
                     if pt == '사급부품':
                         rep = sale_rep.get((vc, pc)) if vc else None
                         ma += rep if rep else mc                 # 인상후 사급 = 대표판매단가, 없으면 견적
