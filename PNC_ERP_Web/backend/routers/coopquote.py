@@ -429,6 +429,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         quoted = ncur.fetchone()[0] > 0
         # 저장 부품 합계(엑셀 AQ) — bottom-up 합산 표시용
         partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0
+        quote_rows = []   # 원본 행(중복 포함) — 다회사용 부품 정확 합산용(sum-all)
         weld_quote = {}   # 견적 용접봉 재료비 {code: mat}. 현 BOM(우리기준) 무시, 견적기준 사용
         try:
             ncur.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), part_total, mat_cost, proc_cost, ISNULL(ptype,'') FROM nx.coop_quote_part WHERE assy_code=? ORDER BY seq", item)
@@ -437,6 +438,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 code_u = str(r[0]).strip().upper()
                 ptype_q = str(r[4] or "").strip()
                 partmap[code_u] = {"total": pt, "mat": float(r[2] or 0), "proc": float(r[3] or 0), "ptype": ptype_q}
+                quote_rows.append((code_u, ptype_q, float(r[2] or 0)))
                 if "용접" in ptype_q:
                     weld_quote[code_u] = float(r[2] or 0)
             ncur.execute("SELECT ISNULL(sale_price,0), ISNULL(mat_cost,0) FROM nx.coop_quote WHERE assy_code=?", item)
@@ -592,12 +594,12 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 finally:
                     lc2.close()
         total_mat = 0.0
-        for code_u, pinfo in partmap.items():
-            if pinfo.get("ptype") == "사급부품":
+        for code_u, ptype_q, mat in quote_rows:   # ★원본행 전부(다회사용 정확 합산)
+            if ptype_q == "사급부품":
                 rep = sale_q.get(code_u)   # 대표(MAIN_FLAG='1') 판매단가
-                total_mat += rep if rep else pinfo["mat"]
+                total_mat += rep if rep else mat
             else:
-                total_mat += pinfo["mat"]
+                total_mat += mat
         total_mat = round(total_mat)
         _pmset = set(partmap.keys())
         for r in rows:
