@@ -1371,25 +1371,27 @@ SCREEN.sourceprofile=(c)=>{
     try{const res=await fetch(`${API}/api/sourcing/sagub_price?route_id=${pm.route.route_id}&vendor_code=${encodeURIComponent(vc)}`);const j=await res.json();
       sm.hdr=j.header||null;
       let rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',gubun:x.gubun||'',node_kind:x.node_kind||'PART',sub_item:x.sub_item||'',
-        sagub_price:(x.sagub_price!=null?x.sagub_price:null)}));
+        is_purchase:!!x.is_purchase,sagub_price:(x.sagub_price!=null?x.sagub_price:null)}));
       if(si)rows=rows.filter(r=>r.sub_item===si);   // ★이 외주 SUB 하위 부품만
       sm.rows=rows;
     }catch(e){sm.msg='❌ 품목 로드 실패: '+e;}
     sm.loading=false;draw();};
   const smSave=async()=>{const vc=sm.vendor_code,vn=sm.vendor_name;
-    const rows=sm.rows.map(r=>({item_code:r.item_code,sagub_price:(r.sagub_price!==''&&r.sagub_price!=null)?parseFloat(r.sagub_price):null}));
+    // ★매입 부품만 대상(제작=원가 자동). 제작 행은 저장 payload 제외(백엔드도 skip)
+    const rows=sm.rows.filter(r=>r.is_purchase).map(r=>({item_code:r.item_code,sagub_price:(r.sagub_price!==''&&r.sagub_price!=null)?parseFloat(r.sagub_price):null}));
     try{const res=await fetch(`${API}/api/sourcing/sagub_price/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:sm.route_id,vendor_code:vc,rows})});
       const j=await res.json();
       if(j.ok){await smOpen(vc,vn);sm.msg=`✅ 저장 완료 (반영 ${j.upsert||0} · 삭제 ${j.del||0}${j.skip?' · 대상외 '+j.skip:''})`;draw();return;}
       sm.msg='❌ 저장 실패: '+(j.msg||JSON.stringify(j));draw();}
     catch(e){sm.msg='❌ 저장 실패: '+e;draw();}};
   const sagubModal=()=>{if(!sm)return '';
-    const nP=sm.rows.filter(r=>r.sagub_price!=null&&r.sagub_price!=='').length;
+    const nBuy=sm.rows.filter(r=>r.is_purchase).length;
+    const nP=sm.rows.filter(r=>r.is_purchase&&r.sagub_price!=null&&r.sagub_price!=='').length;
     const rowsHtml=sm.loading?`<tr><td colspan="3">${spinRow(1)}</td></tr>`:sm.rows.map((r,i)=>`
-      <tr>
-        <td style="white-space:nowrap"><b>${esc(r.item_code)}</b>${r.node_kind==='SUB'?' <span style="font-size:10px;color:#1c7c3a">(SUB)</span>':''}${r.gubun?` <span style="font-size:10px;color:#8aa0bd">${esc(r.gubun)}</span>`:''}</td>
+      <tr${r.is_purchase?'':' style="background:#f7f8fa"'}>
+        <td style="white-space:nowrap"><b>${esc(r.item_code)}</b>${r.gubun?` <span style="font-size:10px;color:${r.is_purchase?'#1c47a0':'#8aa0bd'}">${esc(r.gubun)}</span>`:''}</td>
         <td class="bcap" style="max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.item_name)}">${esc(r.item_name)}</td>
-        <td class="num"><input class="inp sm-e num" type="number" step="1" data-i="${i}" data-f="sagub_price" value="${r.sagub_price==null?'':r.sagub_price}" placeholder="계획" style="width:110px;min-width:0" ${canW?'':'disabled'}></td>
+        <td class="num">${r.is_purchase?`<input class="inp sm-e num" type="number" step="1" data-i="${i}" data-f="sagub_price" value="${r.sagub_price==null?'':r.sagub_price}" placeholder="계획" style="width:110px;min-width:0" ${canW?'':'disabled'}>`:`<span style="font-size:11px;color:#8aa0bd" title="제작(가공품)은 우리가 만들어 원가 자동 — 사급단가 입력 대상 아님">제작=원가 자동</span>`}</td>
       </tr>`).join('');
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:130;background:rgba(20,30,50,.5);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:40px 10px">
       <div style="background:#fff;border-radius:10px;min-width:560px;max-width:92vw;box-shadow:0 8px 44px rgba(0,0,0,.32)">
@@ -1397,11 +1399,11 @@ SCREEN.sourceprofile=(c)=>{
          <span style="font-weight:700;font-size:15px;color:#b8860b">📋 사급 부품 가격</span>
          ${badge(pm.route)} <b style="color:#1c3a6e">${esc(sm.vendor_name||sm.vendor_code)}</b>
          ${sm.sub_item?`<span style="font-size:11px;background:#fdf7e6;border:1px solid #e6d29a;color:#8a6d1c;border-radius:8px;padding:1px 7px">🧩 ${esc(sm.sub_item)}${sm.sub_name?' · '+esc(sm.sub_name):''}</span>`:''}
-         <span style="color:var(--muted);font-size:12px">${esc(sel)} · ${sm.rows.length}부품 · 입력 ${nP}</span>
+         <span style="color:var(--muted);font-size:12px">${esc(sel)} · 매입 ${nBuy}부품 · 입력 ${nP}${(sm.rows.length-nBuy)>0?` · 제작 ${sm.rows.length-nBuy}(원가자동)`:''}</span>
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="sm-x" style="font-size:16px">✖</button></div>
        <div style="padding:8px 16px 4px;font-size:12px;color:#8a6d1c;background:#fdf7e6;border-bottom:1px solid #f0e6c8">
-         ⚠️ 사급 부품 가격은 <b>후보/계획 단가(정산 아님)</b> — 이 <b>외주 SUB</b>에 물린 <b>하위 부품</b>(레벨1 직속 단품 매입·용접봉 제외)별로 <code>nx.sourcing_sagub_price</code>에 저장. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
+         ⚠️ 사급 부품 가격은 <b>후보/계획 단가(정산 아님)</b> — 이 <b>외주 SUB</b> 하위 <b>매입 부품만</b> 입력(제작=가공품은 우리가 만들어 원가 자동·입력 대상 아님). 레벨1 직속 단품·용접봉 제외. <code>nx.sourcing_sagub_price</code>에 저장. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
        <div style="padding:0 16px 8px;overflow:auto;max-height:56vh">
          <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th class="num">사급단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th></tr></thead>
          <tbody>${rowsHtml||`<tr><td colspan="3" class="empty">이 외주 SUB에 물린 하위 부품이 없습니다 — [개발 › 조달경로 통합검토]에서 구성하세요.</td></tr>`}</tbody></table></div>

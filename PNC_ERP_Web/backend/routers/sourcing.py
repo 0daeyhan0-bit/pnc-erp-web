@@ -1519,8 +1519,11 @@ def _sub_child_items(cur, route_id, subs=None):
     for r in cur.fetchall():
         pl = int(r[4]) if r[4] is not None else None
         s = submap.get(pl, {})
-        items.append({"item_code": r[0], "item_name": r[1], "sort_seq": int(r[2] or 0), "gubun": r[3],
-                      "node_kind": "PART", "sub_line": pl, "sub_item": s.get("sub_item", ""), "sub_name": s.get("sub_name", "")})
+        gb = r[3] or ""
+        # ★사급단가 입력 대상 = '매입' 부품만. 제작(가공품)은 우리가 만들어 원가 자동 → 입력 대상 아님(맥락 유지 위해 목록엔 남김).
+        items.append({"item_code": r[0], "item_name": r[1], "sort_seq": int(r[2] or 0), "gubun": gb,
+                      "node_kind": "PART", "is_purchase": ("매입" in gb), "sub_line": pl,
+                      "sub_item": s.get("sub_item", ""), "sub_name": s.get("sub_name", "")})
     return _fill_names(cur, items)
 
 def _direct_purchase_items(cur, route_id):
@@ -1568,12 +1571,14 @@ def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Quer
                 WHERE route_id=? AND vendor_code=?""", route_id, vendor_code)
             saved = {str(r[0]).strip(): (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
         for it in items:
-            it["sagub_price"] = saved.get(it["item_code"])
+            it["sagub_price"] = saved.get(it["item_code"]) if it.get("is_purchase") else None   # 제작 부품은 사급단가 무의미(원가 자동)
+        n_purchase = sum(1 for it in items if it.get("is_purchase"))
         n_priced = sum(1 for it in items if it["sagub_price"] is not None)
         return {"header": hdr, "vendor_code": vendor_code, "rows": items,
                 "subs": [{"sub_item": s["sub_item"], "sub_name": s["sub_name"], "gubun": s["gubun"]} for s in subs],
-                "direct_items": direct, "n_item": len(items), "n_sub": len(subs), "n_direct": len(direct), "n_priced": n_priced,
-                "note": "후보/계획 사급 부품 가격(정산 아님) — nx.sourcing_sagub_price. 대상=외주 SUB 하위 부품만(레벨1 직속 단품 매입 제외·용접봉 제외)."}
+                "direct_items": direct, "n_item": len(items), "n_sub": len(subs), "n_direct": len(direct),
+                "n_purchase": n_purchase, "n_priced": n_priced,
+                "note": "후보/계획 사급 부품 가격(정산 아님) — nx.sourcing_sagub_price. 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동·입력 대상 아님, 레벨1 직속·용접봉 제외)."}
     finally:
         nx.close()
 
@@ -1590,7 +1595,7 @@ def sourcing_sagub_price_save(payload: dict = Body(...)):
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_sagub_price_tbl(cur)
-        valid = {it["item_code"] for it in _sub_child_items(cur, rid)}   # ★근거키 후보 = 외주 SUB 하위 부품만(레벨1 직속 단품 제외)
+        valid = {it["item_code"] for it in _sub_child_items(cur, rid) if it.get("is_purchase")}   # ★근거키 후보 = 외주 SUB 하위 '매입' 부품만(제작=원가 자동·대상 아님, 레벨1 직속·용접봉 제외)
         upsert = dele = skip = 0
         for r in rows:
             ic = str(r.get("item_code", "")).strip()
