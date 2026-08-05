@@ -1228,26 +1228,43 @@ def sourcing_vendors(q: str = Query("")):
     finally:
         nx.close()
 
+# ★계획단가 컬럼(후보/계획 단가 — 정산 아님): sourcing 레이어(nx)에만 저장. 정산 마스터(PR_M_ITEM_COST)는 미접근.
+#   buy_price=업체별 매입단가(계획), sagub_price=업체별 사급단가(계획). 후보 원가비교(R01 vs R02)용 참조값.
+_PROF_PRICE_READY = False
+def _ensure_profile_price_cols(cur):
+    """nx.sourcing_profile 계획단가 컬럼 멱등 추가(프로세스당 1회). 근거키=route_id·profile_id 스코프 upsert에서 사용."""
+    global _PROF_PRICE_READY
+    if _PROF_PRICE_READY:
+        return
+    cur.execute("IF COL_LENGTH('nx.sourcing_profile','buy_price') IS NULL ALTER TABLE nx.sourcing_profile ADD buy_price FLOAT NULL")
+    cur.execute("IF COL_LENGTH('nx.sourcing_profile','sagub_price') IS NULL ALTER TABLE nx.sourcing_profile ADD sagub_price FLOAT NULL")
+    _PROF_PRICE_READY = True
+
 @router.get("/api/sourcing/profile/list")
 def sourcing_profile_list(route_id: int = Query(0)):
-    """승인후보(route_id)에 매핑된 업체(조달프로파일) 목록. route 헤더(승인여부·품번) 동봉."""
+    """승인후보(route_id)에 매핑된 업체(조달프로파일) 목록. route 헤더(승인여부·품번) 동봉.
+       업체별 buy_price(매입단가·계획)/sagub_price(사급단가·계획) 포함 — 후보/계획 단가(정산 아님, sourcing 레이어 전용)."""
     if route_id <= 0: raise HTTPException(400, "route_id 필요")
     nx = _nx(); cur = nx.cursor()
     try:
+        _ensure_profile_price_cols(cur)
         cur.execute("SELECT item_code, route_no, route_name, approve_flag, current_flag FROM nx.sourcing_route WHERE route_id=?", route_id)
         h = cur.fetchone()
         if not h: raise HTTPException(404, "route 없음")
         hdr = {"route_id": route_id, "item_code": str(h[0]).strip(), "route_no": h[1],
                "route_name": str(h[2] or "").strip(), "approve_flag": int(h[3] or 0), "current_flag": int(h[4] or 0)}
         cur.execute("""SELECT p.profile_id,p.vendor_code,ISNULL(c.cust_name,'') vn,p.supply_gubun,p.lme_flag,
-              CONVERT(varchar(10),p.apply_from,23),CONVERT(varchar(10),p.apply_to,23),p.is_active,p.is_internal,p.alloc_ratio,p.priority
+              CONVERT(varchar(10),p.apply_from,23),CONVERT(varchar(10),p.apply_to,23),p.is_active,p.is_internal,p.alloc_ratio,p.priority,
+              p.buy_price,p.sagub_price
             FROM nx.sourcing_profile p LEFT JOIN nx.cust c ON c.cust_code=p.vendor_code
             WHERE p.route_id=? ORDER BY p.priority, p.profile_id""", route_id)
         rows = [{"profile_id": r[0], "vendor_code": str(r[1] or "").strip(), "vendor_name": str(r[2] or "").strip(),
                  "supply_gubun": str(r[3] or "").strip(), "lme_flag": int(r[4] or 0),
                  "apply_from": r[5], "apply_to": r[6], "is_active": int(r[7] or 0),
                  "is_internal": int(r[8] or 0), "alloc_ratio": (float(r[9]) if r[9] is not None else None),
-                 "priority": r[10]} for r in cur.fetchall()]
+                 "priority": r[10],
+                 "buy_price": (float(r[11]) if r[11] is not None else None),
+                 "sagub_price": (float(r[12]) if r[12] is not None else None)} for r in cur.fetchall()]
         # 활성·배분 합(참고)
         act = [(x["apply_from"] or "2000-01-01", x["apply_to"], x["alloc_ratio"]) for x in rows
                if x["is_active"] and not x["is_internal"] and x["alloc_ratio"] is not None]
@@ -1267,6 +1284,7 @@ def sourcing_profile_save(payload: dict = Body(...)):
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
+        _ensure_profile_price_cols(cur)
         cur.execute("SELECT item_code, approve_flag FROM nx.sourcing_route WHERE route_id=?", rid)
         h = cur.fetchone()
         if not h: raise HTTPException(404, "route 없음")
@@ -1274,6 +1292,7 @@ def sourcing_profile_save(payload: dict = Body(...)):
         if int(h[1] or 0) != 1:
             return {"ok": False, "gate": "NOT_APPROVED", "msg": "승인된 후보만 업체 매핑 가능(먼저 승인하세요)."}
         # 정규화 + 배분검증(활성·비내부·배분% 입력 대상)
+        _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)   # 계획단가 파싱(공란=NULL)
         norm = []; act = []
         for r in rows:
             if r.get("_delete"):
@@ -1291,7 +1310,9 @@ def sourcing_profile_save(payload: dict = Body(...)):
             iint = 1 if r.get("is_internal") else 0
             ratio = r.get("alloc_ratio"); ratio = float(ratio) if (ratio not in (None, "", "null")) else None
             prio = r.get("priority"); prio = int(prio) if (prio not in (None, "", "null")) else None
-            norm.append((pid, vc, sg, lme, af, at, iact, iint, ratio, prio))
+            bp = _pfloat(r.get("buy_price"))       # 매입단가(계획·정산 아님)
+            sp = _pfloat(r.get("sagub_price"))     # 사급단가(계획·정산 아님)
+            norm.append((pid, vc, sg, lme, af, at, iact, iint, ratio, prio, bp, sp))
             if iact and not iint and ratio is not None:
                 act.append((af, at, ratio))
         errs = _validate_alloc(act) if act else []
@@ -1303,17 +1324,17 @@ def sourcing_profile_save(payload: dict = Body(...)):
             if rec[0] == "del":
                 cur.execute("DELETE FROM nx.sourcing_profile WHERE profile_id=? AND route_id=?", rec[1], rid)
                 dele += cur.rowcount; continue
-            (pid, vc, sg, lme, af, at, iact, iint, ratio, prio) = rec
+            (pid, vc, sg, lme, af, at, iact, iint, ratio, prio, bp, sp) = rec
             if pid > 0:
                 cur.execute("""UPDATE nx.sourcing_profile SET vendor_code=?,supply_gubun=?,lme_flag=?,apply_from=?,apply_to=?,
-                      is_active=?,is_internal=?,alloc_ratio=?,priority=? WHERE profile_id=? AND route_id=?""",
-                    vc, sg, lme, af, at, iact, iint, ratio, prio, pid, rid)
+                      is_active=?,is_internal=?,alloc_ratio=?,priority=?,buy_price=?,sagub_price=? WHERE profile_id=? AND route_id=?""",
+                    vc, sg, lme, af, at, iact, iint, ratio, prio, bp, sp, pid, rid)
                 upd += cur.rowcount
             else:
                 cur.execute("""INSERT INTO nx.sourcing_profile(item_code,profile_name,supply_gubun,vendor_code,lme_flag,
-                      apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,route_id)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    item, (vc + " 매핑")[:100], sg, vc, lme, af, at, iact, iint, ratio, prio, rid)
+                      apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,route_id,buy_price,sagub_price)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    item, (vc + " 매핑")[:100], sg, vc, lme, af, at, iact, iint, ratio, prio, rid, bp, sp)
                 ins += 1
         nx.commit()
         return {"ok": True, "ins": ins, "upd": upd, "del": dele}
@@ -1321,6 +1342,56 @@ def sourcing_profile_save(payload: dict = Body(...)):
         nx.rollback(); raise
     except Exception:
         nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.get("/api/sourcing/plan_price")
+def sourcing_plan_price(item: str = Query(...)):
+    """★품목 단가 관리(조회) 연동 — 이 품목의 조달후보 업체별 **계획단가**(nx.sourcing_profile buy_price/sagub_price) 읽기전용.
+       정산 매입/판매 단가(PR_M_ITEM_COST 마스터)는 미접근 — 여기 값은 후보 원가비교용 '후보/계획 단가(정산 아님)'.
+       반환: routes[{route_id,route_no,route_name,gubun,approve_flag,current_flag,route_alloc{...},vendors[{vendor,alloc,buy_price,sagub_price,...}]}]."""
+    item = item.strip()
+    if not item: raise HTTPException(400, "item 필요")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        _ensure_profile_price_cols(cur)
+        _ensure_route_alloc_tbl(cur)
+        # 이 품목의 저장된 후보(nx.sourcing_route) — 계획단가가 붙는 대상. baseline(합성)은 업체매핑 불가라 제외.
+        cur.execute("""SELECT route_id, route_no, ISNULL(route_name,''), ISNULL(gubun,''), approve_flag, current_flag
+            FROM nx.sourcing_route WHERE item_code=? ORDER BY route_no""", item)
+        hdrs = [{"route_id": int(r[0]), "route_no": int(r[1]), "route_name": r[2], "gubun": r[3],
+                 "approve_flag": bool(r[4]), "current_flag": bool(r[5])} for r in cur.fetchall()]
+        # route 단위 배분(참고)
+        cur.execute("""SELECT route_id, CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23), is_active, alloc_ratio
+            FROM nx.route_alloc WHERE item_code=?""", item)
+        ralloc = {int(r[0]): {"apply_from": r[1], "apply_to": r[2],
+                              "is_active": (bool(r[3]) if r[3] is not None else None),
+                              "alloc_ratio": (float(r[4]) if r[4] is not None else None)} for r in cur.fetchall()}
+        # 업체별 계획단가
+        rids = [h["route_id"] for h in hdrs]
+        vend = {}; vcodes = set()
+        if rids:
+            ph = ",".join("?" * len(rids))
+            cur.execute(f"""SELECT route_id, vendor_code, supply_gubun, is_active, alloc_ratio,
+                  CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23), buy_price, sagub_price, lme_flag
+                FROM nx.sourcing_profile WHERE route_id IN ({ph}) ORDER BY priority, profile_id""", *rids)
+            for r in cur.fetchall():
+                rid = int(r[0]); vc = str(r[1] or "").strip(); vcodes.add(vc)
+                vend.setdefault(rid, []).append({"vendor_code": vc, "supply_gubun": str(r[2] or "").strip(),
+                    "is_active": int(r[3] or 0), "alloc_ratio": (float(r[4]) if r[4] is not None else None),
+                    "apply_from": r[5], "apply_to": r[6],
+                    "buy_price": (float(r[7]) if r[7] is not None else None),
+                    "sagub_price": (float(r[8]) if r[8] is not None else None), "lme_flag": int(r[9] or 0)})
+        vmap = _custnm_map(cur, vcodes)
+        out = []; n_vend = 0
+        for h in hdrs:
+            vs = vend.get(h["route_id"], [])
+            for v in vs: v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
+            n_vend += len(vs)
+            out.append({**h, "route_alloc": ralloc.get(h["route_id"]), "vendors": vs})
+        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend,
+                "note": "후보/계획 단가(정산 아님) — sourcing 레이어(nx.sourcing_profile). 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
     finally:
         nx.close()
 

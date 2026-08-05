@@ -1308,13 +1308,102 @@ SCREEN.sourceprofile=(c)=>{
       const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 후보 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
       alert('저장 실패 — '+hint+':\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
     catch(e){alert('저장 실패: '+e);}};
+  // ===== 업체·단가 모달(후보 route_id별 업체분배 + 업체별 계획 매입/사급 단가) — nx.sourcing_profile =====
+  // ★후보/계획 단가(정산 아님): sourcing 레이어(nx)에만 저장. 정산 매입/판매 단가(마스터)는 손대지 않음(마감 때만 수정).
+  let pm=null, pmAcT=null;   // pm={route, hdr, rows[], msg, loading}
+  const SG_OPTS=[['2','외주(유상사급)'],['1','자체'],['3','매입']];
+  const blankVRow=()=>({profile_id:0,vendor_code:'',vendor_name:'',supply_gubun:'2',alloc_ratio:null,apply_from:FROM0,apply_to:'',is_active:1,buy_price:null,sagub_price:null,lme_flag:0,_delete:false});
+  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],msg:'',loading:true};draw();
+    try{const res=await fetch(`${API}/api/sourcing/profile/list?route_id=${r.route_id}`);const j=await res.json();
+      pm.hdr=j.header||null;
+      pm.rows=(j.rows||[]).map(x=>({profile_id:x.profile_id,vendor_code:x.vendor_code||'',vendor_name:x.vendor_name||'',
+        supply_gubun:x.supply_gubun||'2',alloc_ratio:(x.alloc_ratio!=null?x.alloc_ratio:null),
+        apply_from:x.apply_from||'',apply_to:x.apply_to||'',is_active:x.is_active?1:0,
+        buy_price:(x.buy_price!=null?x.buy_price:null),sagub_price:(x.sagub_price!=null?x.sagub_price:null),
+        lme_flag:x.lme_flag?1:0,_delete:false}));
+      if(!pm.rows.length)pm.rows=[blankVRow()];
+    }catch(e){pm.msg='업체 목록 로드 실패';}
+    pm.loading=false;draw();};
+  const pmClose=()=>{pm=null;draw();};
+  const pmAddRow=()=>{pm.rows.push(blankVRow());draw();};
+  const pmDelRow=i=>{const r=pm.rows[i];if(!r)return;if(r.profile_id>0){r._delete=true;}else{pm.rows.splice(i,1);}draw();};
+  const pmActive=()=>pm.rows.filter(r=>!r._delete&&r.is_active&&r.vendor_code);
+  const pmStat=()=>{const act=pmActive();const withAl=act.filter(r=>r.alloc_ratio!==''&&r.alloc_ratio!=null);
+    const sum=Math.round(withAl.reduce((a,r)=>a+(parseFloat(r.alloc_ratio)||0),0)*100)/100;
+    return {n:act.length,sum,single:act.length<=1,withAl:withAl.length};};
+  const pmVendorAC=(t)=>{clearTimeout(pmAcT);pmAcT=setTimeout(async()=>{
+    try{const r=await fetch(`${API}/api/sourcing/vendors?q=${encodeURIComponent(t)}`);const vs=(await r.json()).rows||[];
+      pm._vlist=vs;const dl=c.querySelector('#pm-vdl');if(dl)dl.innerHTML=vs.map(v=>`<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.code)})${v.role?' · '+esc(v.role):''}</option>`).join('');}catch(e){}},180);};
+  const pmResolveVendor=(idx,val)=>{const v=val.trim();const list=pm._vlist||[];
+    const hit=list.find(x=>x.name===v)||list.find(x=>x.code===v)||list.find(x=>(x.name||'').indexOf(v)>=0);
+    if(hit){pm.rows[idx].vendor_code=hit.code;pm.rows[idx].vendor_name=hit.name;}else{pm.rows[idx].vendor_name=v;}};
+  const pmSave=async()=>{
+    const rows=pm.rows.map(r=>({profile_id:r.profile_id||0,vendor_code:r.vendor_code||'',supply_gubun:r.supply_gubun||'2',
+      lme_flag:r.lme_flag?1:0,apply_from:r.apply_from||null,apply_to:r.apply_to||null,is_active:r.is_active?1:0,is_internal:0,
+      alloc_ratio:(r.is_active&&r.alloc_ratio!==''&&r.alloc_ratio!=null)?parseFloat(r.alloc_ratio):null,
+      buy_price:(r.buy_price!==''&&r.buy_price!=null)?parseFloat(r.buy_price):null,
+      sagub_price:(r.sagub_price!==''&&r.sagub_price!=null)?parseFloat(r.sagub_price):null,
+      _delete:!!r._delete}));
+    try{const res=await fetch(`${API}/api/sourcing/profile/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:pm.route.route_id,rows})});
+      const j=await res.json();
+      if(j.ok){pm.msg=`✅ 저장 완료 (추가 ${j.ins||0} · 수정 ${j.upd||0} · 삭제 ${j.del||0})`;await pmOpen(pm.route);return;}
+      const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 업체 배분합=100% 확인':(j.gate==='NOT_APPROVED'?'미승인 후보는 업체 지정 불가(개발 승인 필요)':'저장 거부');
+      pm.msg='❌ 저장 실패 — '+hint+(j.errors?': '+j.errors.join(' / '):(j.msg?': '+j.msg:''));draw();}
+    catch(e){pm.msg='❌ 저장 실패: '+e;draw();}};
+  const nfp=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const vendorModal=()=>{if(!pm)return '';const h=pm.hdr,S=pmStat(),ok=S.single||Math.abs(S.sum-100)<0.01;
+    const rowsHtml=pm.loading?`<tr><td colspan="8">${spinRow(1)}</td></tr>`:pm.rows.map((r,i)=>r._delete?'':`
+      <tr>
+        <td><input class="inp pm-e" list="pm-vdl" autocomplete="off" data-i="${i}" data-f="vendor" value="${esc(r.vendor_name||r.vendor_code||'')}" placeholder="업체명/코드" style="width:150px;min-width:0">${r.vendor_code?`<div style="font-size:10px;color:#8aa0bd">${esc(r.vendor_code)}</div>`:''}</td>
+        <td><select class="pm-e" data-i="${i}" data-f="supply_gubun">${SG_OPTS.map(([v,l])=>`<option value="${v}"${r.supply_gubun===v?' selected':''}>${l}</option>`).join('')}</select></td>
+        <td class="num"><input class="inp pm-e num" type="number" step="0.1" data-i="${i}" data-f="alloc_ratio" value="${r.alloc_ratio==null?'':r.alloc_ratio}" placeholder="—" style="width:56px;min-width:0"></td>
+        <td><input class="inp pm-e" type="date" data-i="${i}" data-f="apply_from" value="${esc(r.apply_from||'')}" style="width:118px;min-width:0"></td>
+        <td><input class="inp pm-e" type="date" data-i="${i}" data-f="apply_to" value="${esc(r.apply_to||'')}" title="비우면 무기한" style="width:118px;min-width:0"></td>
+        <td class="num"><input class="inp pm-e num" type="number" step="1" data-i="${i}" data-f="buy_price" value="${r.buy_price==null?'':r.buy_price}" placeholder="계획" style="width:88px;min-width:0"></td>
+        <td class="num"><input class="inp pm-e num" type="number" step="1" data-i="${i}" data-f="sagub_price" value="${r.sagub_price==null?'':r.sagub_price}" placeholder="계획" style="width:88px;min-width:0"></td>
+        <td class="center"><input type="checkbox" class="pm-e" data-i="${i}" data-f="is_active"${r.is_active?' checked':''}> <button class="btn ghost pm-del" data-i="${i}" title="삭제" style="padding:0 6px;color:#c0392b">✖</button></td>
+      </tr>`).join('');
+    return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
+      <div style="background:#fff;border-radius:10px;min-width:820px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+       <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
+         <span style="font-weight:700;font-size:15px;color:#1c3a6e">🏭 업체·단가 지정</span>
+         ${badge(pm.route)} <b style="color:#1c3a6e">${esc(pm.route.route_name||'')}</b>
+         <span style="color:var(--muted);font-size:12px">${esc(sel)} ${esc(selNm)}</span>
+         <div class="spacer" style="flex:1"></div>
+         <button class="btn ghost" id="pm-x" style="font-size:16px">✖</button></div>
+       <div style="padding:8px 16px 4px;font-size:12px;color:#8a6d1c;background:#fdf7e6;border-bottom:1px solid #f0e6c8">
+         ⚠️ 여기 입력하는 매입/사급 단가는 <b>후보/계획 단가(정산 아님)</b> — 후보 원가비교(R01 vs R02)용으로 <code>nx.sourcing_profile</code>(sourcing 레이어)에만 저장됩니다. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
+       <div style="padding:6px 16px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${S.single?`활성 업체 ${S.n}개(단일 → 100% 자동)`:`활성 업체 ${S.n}개 배분합 ${S.sum}% ${ok?'✓':'(=100 필요)'}`}</div>
+       <div style="padding:0 16px 8px;overflow:auto;max-height:52vh">
+         <table class="tbl" style="font-size:12px"><thead><tr><th>업체</th><th>공급구분</th><th class="num">배분%</th><th>유효시작</th><th>유효종료</th><th class="num">매입단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th><th class="num">사급단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th><th class="center">활성</th></tr></thead>
+         <tbody>${rowsHtml||`<tr><td colspan="8" class="empty">업체를 추가하세요</td></tr>`}</tbody></table>
+         <datalist id="pm-vdl"></datalist></div>
+       <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">
+         <button class="btn" id="pm-add">➕ 업체추가</button>
+         ${pm.msg?`<span style="font-size:12px;font-weight:600;color:${pm.msg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(pm.msg)}</span>`:''}
+         <div class="spacer" style="flex:1"></div>
+         <button class="btn ghost" id="pm-cancel">닫기</button>
+         ${canW?`<button class="btn" id="pm-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:''}</div>
+      </div></div>`;};
+  const wireModal=()=>{if(!pm)return;const g=id=>c.querySelector(id);
+    const x=g('#pm-x'),cn=g('#pm-cancel');if(x)x.onclick=pmClose;if(cn)cn.onclick=pmClose;
+    const ad=g('#pm-add');if(ad)ad.onclick=pmAddRow;
+    const sv=g('#pm-save');if(sv)sv.onclick=pmSave;
+    c.querySelectorAll('.pm-del').forEach(el=>el.onclick=()=>pmDelRow(+el.dataset.i));
+    c.querySelectorAll('.pm-e').forEach(el=>{const i=+el.dataset.i,f=el.dataset.f;
+      if(f==='vendor'){el.oninput=e=>pmVendorAC(e.target.value);el.onchange=e=>{pmResolveVendor(i,e.target.value);draw();};}
+      else if(f==='is_active'){el.onchange=()=>{pm.rows[i].is_active=el.checked?1:0;draw();};}
+      else if(f==='supply_gubun'){el.onchange=()=>{pm.rows[i].supply_gubun=el.value;};}
+      else if(f==='alloc_ratio'){el.onchange=()=>{pm.rows[i].alloc_ratio=(el.value===''?null:el.value);draw();};}
+      else{el.onchange=()=>{pm.rows[i][f]=(el.value===''?(f==='buy_price'||f==='sagub_price'?null:''):el.value);};}});};
   const kindOf=n=>{if((n.nm||'').indexOf('용접봉')>=0)return{t:'용접봉',c:'#8e44ad'};if(n.haskids)return{t:'제작(SUB)',c:'#1c7c3a'};if(String(n.sag)==='1')return{t:'사급',c:'#b8860b'};return{t:'매입/구매',c:'#1c47a0'};};
   const treeTbl=()=>{if(!tree)return '';if(!tree.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
     return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${tree.map(n=>{const k=kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${esc(n.custnm||'')}</td></tr>`;}).join('')}</tbody></table>`;};
   const badge=r=>{const on=r.current_flag;return `<span style="background:${on?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700">R${String(r.route_no).padStart(2,'0')}${on?' · 현행':''}</span>`;};
   const routeRow=r=>{const ro=r.readonly,valid=validOn(r,ref),al=ralloc(r);
+    const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 업체·단가 지정(현행 R01 baseline은 합성이라 불가)
     return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':((!valid)?'opacity:.6;':'')}">
-      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b></td>
+      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}</td>
       <td>${esc(r.gubun||'-')}</td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
       <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
@@ -1358,6 +1447,7 @@ SCREEN.sourceprofile=(c)=>{
       </div>
      </div>
      ${msg?`<div class="page-sub" style="color:#1c7c3a">${esc(msg)}</div>`:''}
+     ${vendorModal()}
      <style>.sp-row.sel{background:#e8f0ff}.sp-row:hover{background:#eef4ff}</style>`;
     const g=id=>c.querySelector(id);
     g('#sp-search').onclick=()=>{q=g('#sp-q').value;search();};
@@ -1370,6 +1460,8 @@ SCREEN.sourceprofile=(c)=>{
     const rf=g('#sp-ref');if(rf)rf.onchange=()=>{ref=rf.value;draw();};
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});
+    c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)pmOpen(r);});
+    wireModal();
     fillDL();
   };
   const init=async()=>{q='';await search();if(slist.length)open(slist[0].item);};
