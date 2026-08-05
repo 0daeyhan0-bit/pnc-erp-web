@@ -642,7 +642,7 @@ function priceHistSections(rows){
 /* 품목별 단가조회 — 라이브 PR_M_ITEM_COST (거래처별·적용월 시계열, 레거시 w_pr_master_150) */
 function priceItemView(c){
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',lg:'',sg:'',cust:'',lgroups:[],sgroups:[],sel:'',det:null,loading:false};
+  const st={rows:[],cnt:0,q:'',lg:'',sg:'',cust:'',lgroups:[],sgroups:[],sel:'',det:null,plan:null,loading:false};
   let custT=null;
   const dcol=s=>{s=''+(s||'');return s.length===6?`${s.slice(0,2)}/${s.slice(2,4)}`:s;};
   const tagColor=t=>t==='1'?'#1c47a0':(t==='E'?'#b12a2a':'#7a5c1c');
@@ -650,9 +650,34 @@ function priceItemView(c){
     try{const r=await fetch(`${API}/api/price/search?q=${encodeURIComponent(st.q)}&lgroup=${encodeURIComponent(st.lg)}&sgroup=${encodeURIComponent(st.sg)}&cust=${encodeURIComponent(st.cust)}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;if(j.lgroups)st.lgroups=j.lgroups;if(j.sgroups)st.sgroups=j.sgroups;}
     catch(e){st.rows=[];}
     st.loading=false;draw();};
-  const loadDet=async(item)=>{st.sel=item;st.det=null;draw();
+  const loadDet=async(item)=>{st.sel=item;st.det=null;st.plan=null;draw();
     try{st.det=await (await fetch(`${API}/api/price/item?item=`+encodeURIComponent(item))).json();}catch(e){}
+    // 조달후보 업체별 계획단가(후보/계획 단가 — 정산 아님, sourcing 레이어 읽기전용)
+    try{st.plan=await (await fetch(`${API}/api/sourcing/plan_price?item=`+encodeURIComponent(item))).json();}catch(e){st.plan=null;}
     draw();};
+  // 후보/계획 단가 섹션(읽기전용) — 정산 매입/판매 단가(마스터, 마감때만 수정)와 명확히 구분
+  const planPriceSection=(pl)=>{
+    if(!pl||!pl.routes||!pl.routes.length)return '';
+    const rows=[];
+    pl.routes.forEach(rt=>{
+      const rlabel=`R${String(rt.route_no).padStart(2,'0')}${rt.current_flag?'·현행':''}`;
+      const vs=(rt.vendors||[]).filter(v=>v.vendor_code);
+      if(!vs.length)return;
+      vs.forEach((v,i)=>rows.push(`<tr>
+        <td>${i===0?`<span style="background:${rt.current_flag?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 7px;font-size:11px;font-weight:700">${esc(rlabel)}</span> <span style="font-size:11px;color:#556">${esc(rt.route_name||'')}</span>`:''}</td>
+        <td>${esc(v.vendor_name||v.vendor_code)}</td>
+        <td class="center">${v.is_active?'<span style="color:#1c7c3a">✔</span>':'<span style="color:#aab">-</span>'}</td>
+        <td class="num">${v.alloc_ratio==null?'-':won(v.alloc_ratio)+'%'}</td>
+        <td class="num">${v.buy_price==null?'<span style="color:#c9d1dc">-</span>':won(v.buy_price)}</td>
+        <td class="num">${v.sagub_price==null?'<span style="color:#c9d1dc">-</span>':won(v.sagub_price)}</td>
+        <td class="center" style="font-size:11px;color:#778">${esc(v.apply_from||'')}${v.apply_to?'~'+esc(v.apply_to):''}</td></tr>`));
+    });
+    if(!rows.length)return `<div class="section-t" style="color:#8a6d1c">🧭 조달후보 업체별 계획단가 <span class="muted" style="font-weight:400">(정산 아님)</span></div><div class="empty" style="font-size:12px">지정된 후보 업체·계획단가 없음 — [조달 프로파일 › 업체·단가 지정]에서 입력</div>`;
+    return `<div class="section-t" style="color:#8a6d1c">🧭 조달후보 업체별 계획단가 <span class="muted" style="font-weight:400">(후보/계획 단가 — <b>정산 아님</b>)</span></div>
+      <div style="font-size:11px;color:#8a6d1c;background:#fdf7e6;border:1px solid #f0e6c8;border-radius:6px;padding:5px 8px;margin-bottom:5px">후보 원가비교(R01 vs R02)용 계획단가입니다(<code>nx.sourcing_profile</code>, 읽기전용). 위 <b>정산 매입/판매 단가</b>(마스터·마감때만 수정)와는 별개입니다.</div>
+      <table class="tbl"><thead><tr><th>조달후보</th><th>업체</th><th class="center">활성</th><th class="num">배분%</th><th class="num">매입단가(계획)</th><th class="num">사급단가(계획)</th><th class="center">유효기간</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table>`;
+  };
   const draw=()=>{
     const _sc=(()=>{const g=c.querySelector('#pi-list');return g?g.scrollTop:0;})();   // 좌측 스크롤 보존
     const d=st.det;
@@ -670,7 +695,7 @@ function priceItemView(c){
           <tbody>${st.loading?spinRow(4):(st.rows.length?st.rows.map(r=>`<tr class="pi-row ${st.sel===r.ITEM_CODE?'sel':''}" data-cd="${esc(r.ITEM_CODE)}" style="cursor:pointer"><td><b>${esc(r.ITEM_CODE)}</b></td><td class="cap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)}" style="max-width:100px;overflow:hidden;text-overflow:ellipsis">${esc(r.sg_nm||'')}</td><td class="num">${won(r.cnt)}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">품번/품명으로 검색</td></tr>`)}</tbody></table></div>
        </div>
        <div class="panel"><div class="panel-h">단가 이력 ${d?`— ${esc(d.item)} ${esc(d.nm)}`:''}</div>
-        <div class="panel-b" style="max-height:calc(100vh - 260px);overflow:auto">${!d?'<div class="empty">좌측에서 품번을 선택하세요.</div>':(d.rows&&d.rows.length?priceHistSections(d.rows):'<div class="empty">단가 이력 없음</div>')}</div></div>
+        <div class="panel-b" style="max-height:calc(100vh - 260px);overflow:auto">${!d?'<div class="empty">좌측에서 품번을 선택하세요.</div>':((d.rows&&d.rows.length?priceHistSections(d.rows):'<div class="empty">단가 이력 없음</div>')+planPriceSection(st.plan))}</div></div>
      </div>`;
     const g=id=>c.querySelector(id);
     g('#pi-go').onclick=()=>{st.q=g('#pi-q').value;st.lg=g('#pi-lg').value;st.sg=g('#pi-sg').value;st.cust=g('#pi-cust').value.trim();load();};
