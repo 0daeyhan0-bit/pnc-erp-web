@@ -144,6 +144,25 @@ py_compile OK·openapi 318→320(신규2)·서빙JS 레거시마커0(subvariant/
 - 프론트: 사급모달 매입 행만 입력칸, 제작 행은 "제작=원가 자동" 읽기전용. smSave는 매입 행만 전송. 헤더 "매입 N부품·입력 M·제작 K(원가자동)".
 - 검증(R02 S07 하위 5): n_purchase=**2**(5210A22409B·3H02717A=True) / 제작 3(MJU64794201·202·302=False). save(매입2 + 제작MJU1)→**upsert=2·skip=1**. plan_price 2337 sagub_items=매입 2건만. route/cost 5722.2 diff0=True·master MD5 6789628C… 불변·openapi 325. index.html core.js?v=260805s4·screens.pur.js?v=260805s4.
 
+## ★R01(현행) 발주업체·단가 = 자동발주 근거 (2026-08-05, 사용자 신규요구)
+R01(현행)도 조달 프로파일에서 업체 지정/확인 + 현재 납품업체 자동시드. 자동발주(품목→발주업체→단가) 근거 완결.
+
+### 백엔드(신규 2엔드포인트 · nx.order_vendor)
+- **GET /api/sourcing/current_order?item=&ymd=**: 현행 BOM(CS_M_ITEM_BOM real=1 전개=제작품만 하위전개·매입중단)의 **매입처(IN_CUST) 보유 품목 자동시드** + **마스터 매입단가**(PR_M_ITEM_COST COST_TAG='1' as-of, MAIN_FLAG·최신, **읽기전용**) + nx.order_vendor override. 용접봉 RAC 제외. 반환 rows[{item_code,item_name,qty(rolled),make_label,cur_vendor(현행 매입처),ovr_vendor,eff_vendor,master_price,price_apply}].
+- **POST /api/sourcing/current_order/vendor** {item_code,vendor_code}: 발주업체 override 저장(근거키=item_code). 공란=override 제거(현행 매입처 복귀). nx.order_vendor(item_code PK). **PR_M_ITEM_COST 조회만·불변**.
+- ★가격=마스터 매입단가 자동조회(읽기전용). 편집 없음(하드룰: 마감때만·라이브 불변). 계획단가 override는 nx(후속).
+
+### 프론트(screens.pur.js)
+- R01(현행) 행에 **[📦 발주업체·단가]** 버튼 추가(baseline route_id=0/route_no=1도 접근). R02의 [🏭 업체·단가]와 별개.
+- **orderModal(om)**: 품목별 표(품번·품명·소요량·**발주업체**[오토컴플리트·현행 매입처 자동채움]·**마스터 매입단가**[읽기전용·회색]·코드). 업체 변경 시 current_order/vendor 저장, 안 바꾸면 현행 매입처 그대로. 자동발주 근거로 노출.
+
+### 검증(e2e AJR75563402, 실측 — bom/tree custnm 일치)
+- current_order n=**5**: **금아금속(2059) 16.5 · 동주금속(2136) 687 · 삼진플라텍(2191) 19.2 · 그린산업(주)김해공장(2345) 108 · FONE THAI(2337) 4423**(외주완성 F&T SUB). **bom/tree custnm과 정확 일치**(용접봉 RAC30599301-1 제외). 코디네이터 예상 업체목록 일치.
+- 발주업체 override 왕복: 4930A20053B→명진(2306) eff=2306(현행 2059 유지)·매입단가 16.5 불변 → 해제 시 eff=2059 복귀.
+- **★마스터 불변**: PR_M_ITEM_COST MD5 **6789628C…** 조회 전후 불변(읽기전용 확인). sourcing.py 쓰기 쿼리 0(PR_M_ITEM_COST=SELECT만).
+- route/cost silwon **5722.2 diff0=True**. openapi 325→**327**(신규 2). py_compile OK·재기동. JS curly/brack 0·bt even. 마커(sp-order·orderModal·omOpen·wireOrder·current_order). 서빙 200. index.html ?v=**260805s9**. R02 모달·품목단가 관리 회귀 없음(sub_price n_sub=1·sagub n_item=5). 테스트데이터 order_vendor rows=0.
+- ※ 브라우저 픽셀(버튼·자동시드 표시·업체변경) 사용자 확인 미완. 용접봉(RAC)은 이 발주뷰 제외(공정종속·협력사정산 별도) — 코디네이터 예상목록과 일치. 소요량=BOM rolled(1개 제품 기준), MRP 소요량은 별도.
+
 ## ★모달 UI 4건 + 사급 제거 + 배분%정수 (2026-08-05, 사용자 피드백)
 조달 프로파일 업체·단가 모달(screens.pur.js only, 백엔드 무변경):
 1. **배분% 폭 확대**(width 52→**72px**, 헤더 "배분%(정수)") — 3자리+% 안 짤림.
