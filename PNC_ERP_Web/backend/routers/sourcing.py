@@ -1383,7 +1383,7 @@ def sourcing_plan_price(item: str = Query(...)):
                     "apply_from": r[5], "apply_to": r[6],
                     "buy_price": (float(r[7]) if r[7] is not None else None),
                     "sagub_price": (float(r[8]) if r[8] is not None else None), "lme_flag": int(r[9] or 0)})
-        # 업체별·품목별 사급단가(계획) — nx.sourcing_sagub_price ((route_id,vendor_code) 스코프). 사급단가는 업체당 다품목이라 별도 테이블.
+        # ★사급 부품 가격(외주 SUB 하위·품목별) — nx.sourcing_sagub_price ((route_id,vendor_code) 스코프).
         _ensure_sagub_price_tbl(cur)
         sagit = {}   # (route_id, vendor_code) -> [{item_code,item_name,sagub_price}]
         if rids:
@@ -1395,28 +1395,43 @@ def sourcing_plan_price(item: str = Query(...)):
                 key = (int(r[0]), str(r[1] or "").strip())
                 sagit.setdefault(key, []).append({"item_code": str(r[2]).strip(), "item_name": r[4],
                     "sagub_price": (float(r[3]) if r[3] is not None else None)})
-        # sagub 업체 코드 이름 보강(profile 밖 업체도 표시)
-        vmap = _custnm_map(cur, vcodes | {k[1] for k in sagit.keys()})
-        out = []; n_vend = 0; n_sagit = 0
+        # ★ASSY 매입단가(외주 SUB 단위) — nx.sourcing_sub_price ((route_id,vendor_code) 스코프).
+        _ensure_sub_price_tbl(cur)
+        assit = {}   # (route_id, vendor_code) -> [{sub_item,sub_name,assy_price}]
+        if rids:
+            ph = ",".join("?" * len(rids))
+            cur.execute(f"""SELECT ap.route_id, ap.vendor_code, LTRIM(RTRIM(ap.sub_item)), ap.assy_price, ISNULL(it.item_name,'')
+                FROM nx.sourcing_sub_price ap LEFT JOIN nx.item it ON it.item_code=ap.sub_item
+                WHERE ap.route_id IN ({ph}) ORDER BY ap.route_id, ap.vendor_code, ap.sub_item""", *rids)
+            for r in cur.fetchall():
+                key = (int(r[0]), str(r[1] or "").strip())
+                assit.setdefault(key, []).append({"sub_item": str(r[2]).strip(), "sub_name": r[4],
+                    "assy_price": (float(r[3]) if r[3] is not None else None)})
+        # 업체 코드 이름 보강(profile 밖 업체도 표시)
+        vmap = _custnm_map(cur, vcodes | {k[1] for k in sagit.keys()} | {k[1] for k in assit.keys()})
+        out = []; n_vend = 0; n_sagit = 0; n_assit = 0
         for h in hdrs:
             vs = vend.get(h["route_id"], [])
             seen = set()
             for v in vs:
                 v["vendor_name"] = vmap.get(v["vendor_code"], v["vendor_code"])
                 v["sagub_items"] = sagit.get((h["route_id"], v["vendor_code"]), [])
-                n_sagit += len(v["sagub_items"]); seen.add(v["vendor_code"])
-            # profile에 없지만 사급단가만 있는 업체 = 합성행(매입단가 없음, 사급품목만)
-            for (krid, kvc), items in sagit.items():
-                if krid != h["route_id"] or kvc in seen: continue
+                v["assy_subs"] = assit.get((h["route_id"], v["vendor_code"]), [])
+                n_sagit += len(v["sagub_items"]); n_assit += len(v["assy_subs"]); seen.add(v["vendor_code"])
+            # profile에 없지만 ASSY/사급단가만 있는 업체 = 합성행(외주 SUB 중심)
+            extra = {kvc for (krid, kvc) in sagit if krid == h["route_id"]} | {kvc for (krid, kvc) in assit if krid == h["route_id"]}
+            for kvc in sorted(extra - seen):
+                sag_i = sagit.get((h["route_id"], kvc), []); asy_i = assit.get((h["route_id"], kvc), [])
                 vs.append({"vendor_code": kvc, "vendor_name": vmap.get(kvc, kvc), "supply_gubun": "2",
                            "is_active": 0, "alloc_ratio": None, "apply_from": None, "apply_to": None,
                            "buy_price": None, "sagub_price": None, "lme_flag": 0,
-                           "sagub_only": True, "sagub_items": items})
-                n_sagit += len(items); seen.add(kvc)
+                           "sagub_only": True, "sagub_items": sag_i, "assy_subs": asy_i})
+                n_sagit += len(sag_i); n_assit += len(asy_i); seen.add(kvc)
             n_vend += len(vs)
             out.append({**h, "route_alloc": ralloc.get(h["route_id"]), "vendors": vs})
-        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend, "n_sagub_item": n_sagit,
-                "note": "후보/계획 단가(정산 아님) — sourcing 레이어(nx.sourcing_profile + nx.sourcing_sagub_price 품목별). 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
+        return {"item": item, "routes": out, "n_route": len(out), "n_vendor": n_vend,
+                "n_sagub_item": n_sagit, "n_assy": n_assit,
+                "note": "후보/계획 단가(정산 아님) — 3구분: ASSY 매입단가(외주 SUB 단위·nx.sourcing_sub_price) + 사급 부품 가격(외주 SUB 하위 품목별·nx.sourcing_sagub_price). 단품 매입은 매입 마스터 자동(여기 미포함). 정산 매입/판매 단가는 별도 마스터(마감 때만 수정)."}
     finally:
         nx.close()
 
