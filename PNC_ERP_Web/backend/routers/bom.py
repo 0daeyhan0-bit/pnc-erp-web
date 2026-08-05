@@ -139,11 +139,72 @@ def item_save(payload: dict = Body(...)):
     finally:
         nx.close()
 
+def _bom_tree_route(item, route_id):
+    """★조달후보(nx.sourcing_route_line 계층)를 마스터 bom/tree와 **동일한 트리 JSON 스키마**로 반환.
+       레벨0=제품 / 레벨1=최상위 라인(parent_line NULL) / 레벨2+=SUB 하위(parent_line 기반). node_kind='SUB'=haskids.
+       ★route_id>0 전용. route_id=0/미지정 경로는 절대 여기 오지 않음(마스터 완전 불변)."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT item_code, ISNULL(route_no,0), ISNULL(route_name,''), ISNULL(approve_flag,0) FROM nx.sourcing_route WHERE route_id=?", route_id)
+        h = cur.fetchone()
+        if not h:
+            raise HTTPException(404, f"조달후보 route_id={route_id} 없음")
+        ritem = str(h[0]).strip()
+        cur.execute("""SELECT line_id, ISNULL(sort_seq,0), ISNULL(child_item,''), ISNULL(child_name,''), qty,
+              ISNULL(gubun,''), ISNULL(vendor_code,''), ISNULL(is_rawmat,0), diam, thick, len_val, ISNULL(material,''),
+              ISNULL(spec,''), ISNULL(node_kind,'PART'), parent_line, ISNULL(sub_item,'')
+            FROM nx.sourcing_route_line WHERE route_id=? ORDER BY sort_seq, line_id""", route_id)
+        lines = []
+        for r in cur.fetchall():
+            lines.append({"line_id": int(r[0]), "seq": int(r[1] or 0), "code": str(r[2]).strip(), "nm": (r[3] or ""),
+                "qty": float(r[4] or 0), "gubun": str(r[5] or ""), "cust": str(r[6]).strip(), "is_rawmat": int(r[7] or 0),
+                "diam": float(r[8] or 0), "thick": float(r[9] or 0), "length": float(r[10] or 0),
+                "metal": str(r[11] or ""), "spec": str(r[12] or ""), "node_kind": str(r[13] or 'PART'),
+                "parent_line": (int(r[14]) if r[14] is not None else None), "sub_item": str(r[15] or '')})
+        # 벤더 코드→이름(라이브 CM_M_CUST, 크로스DB) + 제품명
+        vcodes = sorted({l["cust"] for l in lines if l["cust"]})
+        vmap = {}
+        for i in range(0, len(vcodes), 900):
+            ch = vcodes[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): vmap[str(rr[0]).strip()] = rr[1]
+        cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", ritem)
+        rr = cur.fetchone(); rootnm = rr[0] if rr else ""
+    finally:
+        nx.close()
+    kids = {}
+    for l in lines:
+        kids.setdefault(l["parent_line"], []).append(l)
+    for k in kids: kids[k].sort(key=lambda x: x["seq"])
+    out = [{"level": 0, "code": ritem, "nm": rootnm, "spec": "", "qty": 1, "cust": "", "custnm": "", "gubun": "제품",
+            "sag": "", "se": "", "kt": "", "vir": "", "ce": "", "le": "", "gp": "", "sw": "",
+            "metal": "", "diam": 0, "thick": 0, "length": 0, "haskids": bool(kids.get(None))}]
+    def emit(parent_line, lvl):
+        for l in kids.get(parent_line, []):
+            haskids = (l["node_kind"] == 'SUB') or bool(kids.get(l["line_id"]))
+            code = l["sub_item"] or l["code"]
+            gub = l["gubun"]
+            out.append({"level": lvl, "code": code, "nm": l["nm"], "spec": l["spec"], "qty": l["qty"],
+                "cust": l["cust"], "custnm": vmap.get(l["cust"], l["cust"]), "gubun": gub,
+                "sag": ("1" if ("사급" in gub) else ""), "se": "", "kt": "", "vir": "", "ce": "", "le": "",
+                "gp": "", "sw": "", "metal": l["metal"], "diam": l["diam"], "thick": l["thick"], "length": l["length"],
+                "haskids": haskids})
+            if haskids:
+                emit(l["line_id"], lvl + 1)
+    emit(None, 1)
+    maxlvl = max((r["level"] for r in out), default=0)
+    return {"item": item, "name": rootnm, "rows": out, "count": len(out) - 1, "maxlevel": maxlvl,
+            "route_id": route_id, "route_no": int(h[1]), "route_name": h[2], "is_route": True}
+
 @router.get("/api/bom/tree")
-def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, description="1=실사용전개(원가제외 스킵+제작품만 전개,매입중단)=실원가용 일치, 0=전체전개")):
+def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, description="1=실사용전개(원가제외 스킵+제작품만 전개,매입중단)=실원가용 일치, 0=전체전개"),
+             route_id: int = Query(0, description="0/미지정=마스터 실사용 BOM(완전불변), >0=조달후보(nx.sourcing_route_line) 구조를 동일스키마로 반환")):
     """다단계 BOM 트리(레벨별) — CS_M_ITEM_BOM 재귀전개. 매입처=컴포넌트 IN_CUST_CODE(현행 벤더).
-    real=1(기본): 견적원가조회(실원가용, SP_CS_견적서(BOM)) 전개와 일치 — CS_CALC_EXCEPT_FLAG='1'(원가제외=현행아닌 조달경로) 제외 + MAKE_TYPE='1'(제작/자체)만 하위전개, 매입/구매품(구매완제)은 전개중단."""
+    real=1(기본): 견적원가조회(실원가용, SP_CS_견적서(BOM)) 전개와 일치 — CS_CALC_EXCEPT_FLAG='1'(원가제외=현행아닌 조달경로) 제외 + MAKE_TYPE='1'(제작/자체)만 하위전개, 매입/구매품(구매완제)은 전개중단.
+    route_id>0: 조달후보 계층(nx.sourcing_route_line)을 동일 트리 스키마로 반환(마스터 미조회)."""
     item = item.strip()
+    if int(route_id or 0) > 0:
+        return _bom_tree_route(item, int(route_id))
     real = 1 if real is None else int(real)
     exc_a = "AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""      # 원가제외 라인 스킵
     exc_r = "AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""

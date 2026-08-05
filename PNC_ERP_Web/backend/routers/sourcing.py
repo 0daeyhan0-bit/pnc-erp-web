@@ -1537,3 +1537,101 @@ def sourcing_route_finalize(payload: dict = Body(...)):
         nx.rollback(); raise
     finally:
         nx.close()
+
+
+# ===================== 후보 실원가 (route/cost) — NxCostEngine 재사용, 마스터와 diff0 =====================
+def _route_proc_names(codes):
+    """공정코드→이름(CS_M_PROC) — 후보 공정표시용."""
+    out = {}
+    codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
+    if not codes: return out
+    cn = _conn(); cur = cn.cursor()
+    try:
+        for i in range(0, len(codes), 900):
+            ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,'') FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+            for r in cur.fetchall(): out[str(r[0]).strip()] = str(r[1]).strip()
+    finally:
+        cn.close()
+    return out
+
+@router.get("/api/sourcing/route/cost")
+def sourcing_route_cost(route_id: int = Query(..., description="후보 route_id(>0). 현행 baseline(route_id=0)은 마스터 /api/cost/sil 사용"),
+                        ymd: str = Query("260630", description="단가기준일 YYMMDD")):
+    """★후보 실원가 산출 — NxCostEngine(무수정) 재사용, 마스터 실원가와 **동일 산식**.
+       재료비/가공비/일반관리/운반/이윤/LME/실원가/LG판가/손익 = eng.silwon(대상품목) — 마스터 /api/cost/sil 과 diff0.
+       ★설계근거(실측): 후보=BOM구조/공정 재배치 계층이며 조달(업체·매입가·사급)은 **조달프로파일 계층**(별도 연동). 부품셋·공수합=BASE 게이트(route/finalize)로 보존 강제 →
+         구조·조달 불변이면 실원가 = 마스터(diff0 by construction). BASE 복사 후보의 route/cost == 마스터 실원가(앵커 5722) diff0.
+       반환: cost(마스터와 동일필드) + current(현행=동일 대상 실원가) + diff(현행대비, 구조후보는 0) + rows(silwon_nodes) + procs(silwon_proc_grid) + structure(후보 구조 lines/subs/procs)."""
+    if NxCostEngine is None:
+        raise HTTPException(500, "nx_cost_engine 로드 실패")
+    ymd = (ymd or "260630").strip() or "260630"
+    rid = int(route_id or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("""SELECT item_code, ISNULL(route_no,0), ISNULL(route_name,''), ISNULL(current_flag,0),
+              ISNULL(approve_flag,0), ISNULL(gubun,'') FROM nx.sourcing_route WHERE route_id=?""", rid)
+        h = cur.fetchone()
+        if not h: raise HTTPException(404, f"후보 route_id={rid} 없음")
+        item = str(h[0]).strip(); route_no = int(h[1]); route_name = h[2]
+        approve_flag = bool(h[4]); route_gubun = h[5]
+        # 후보 구조(표시용) — 라인(SUB 계층)·공정·용접
+        cur.execute("""SELECT line_id, ISNULL(sort_seq,0), ISNULL(child_item,''), ISNULL(child_name,''), qty, ISNULL(gubun,''),
+              ISNULL(vendor_code,''), ISNULL(node_kind,'PART'), parent_line, ISNULL(sub_item,''), ISNULL(is_rawmat,0), ISNULL(material,'')
+            FROM nx.sourcing_route_line WHERE route_id=? ORDER BY sort_seq, line_id""", rid)
+        slines = [{"line_id": int(r[0]), "seq": int(r[1] or 0), "child_item": str(r[2]).strip(), "child_name": r[3],
+                   "qty": float(r[4] or 0), "gubun": str(r[5] or ""), "vendor_code": str(r[6]).strip(),
+                   "node_kind": str(r[7] or 'PART'), "parent_line": (int(r[8]) if r[8] is not None else None),
+                   "sub_item": str(r[9] or ''), "is_rawmat": int(r[10] or 0), "material": str(r[11] or "")} for r in cur.fetchall()]
+        cur.execute("SELECT node_item, proc_code, ISNULL(work_qty,0), ISNULL(calc_gubun,'') FROM nx.sourcing_route_proc WHERE route_id=? ORDER BY node_item, proc_code", rid)
+        sprocs = [{"node_item": str(r[0]).strip(), "proc_code": str(r[1]).strip(), "work_qty": float(r[2] or 0), "calc_gubun": str(r[3] or "")} for r in cur.fetchall()]
+        cur.execute("SELECT node_item, ISNULL(weld_item,''), ISNULL(pipe_diam,0), ISNULL(weld_qty,0), ISNULL(use_qty,0), ISNULL(st,0) FROM nx.sourcing_route_weld WHERE route_id=? ORDER BY node_item", rid)
+        swelds = [{"node_item": str(r[0]).strip(), "weld_item": str(r[1]).strip(), "pipe_diam": float(r[2] or 0),
+                   "weld_qty": float(r[3] or 0), "use_qty": float(r[4] or 0), "st": float(r[5] or 0)} for r in cur.fetchall()]
+        n_sub = sum(1 for l in slines if l["node_kind"] == 'SUB')
+    finally:
+        nx.close()
+
+    def _compute(eng):
+        cand = eng.silwon(item, ymd)
+        try: lme = eng.lme_total(item, ymd)
+        except Exception: lme = 0.0
+        sn = eng.silwon_nodes(item, ymd)
+        pg = eng.silwon_proc_grid(item, ymd)
+        return cand, lme, sn, pg
+    with _COST_LOCK:
+        try:
+            cand, lme, sn, pg = _compute(_get_cost_engine())
+        except Exception:
+            try:
+                cand, lme, sn, pg = _compute(_get_cost_engine(fresh=True))
+            except Exception as e2:
+                raise HTTPException(500, f"nx엔진 오류: {e2}")
+    # 후보 원가 = 대상 실원가(마스터 동일 산식). LME 필드 명시.
+    cost = {"jae": cand["jae"], "gagong": cand["gagong"], "ilban": cand["ilban"], "unban": cand["unban"],
+            "profit": cand["profit"], "lme": round(lme, 2), "silwon": cand["silwon"], "lg": cand["lg"], "sonik": cand["sonik"]}
+    # 현행(R01) = 동일 대상 실원가(구조/조달 불변 기준선). diff = 후보 − 현행.
+    current = dict(cost)
+    diff = {k: round((cost.get(k, 0) or 0) - (current.get(k, 0) or 0), 2) for k in cost}
+    # 공정 그리드(이름 매핑) — silwon_proc_grid
+    pnm = _route_proc_names(list(pg.keys()) + [p["proc_code"] for p in sprocs])
+    def _grp(code):
+        if code in ("51", "28"): return "용접"
+        if code in ("61", "83"): return "포장"
+        if code in _PROC_FASTEN_S: return "체결"
+        return "가공"
+    procs = [{"code": p, "name": pnm.get(p, p), "group": _grp(p), "wq": v["wq"], "amt": v["amt"],
+              "uph": v["uph"], "cg": v["cg"], "labor": v["labor"]} for p, v in pg.items()]
+    procs.sort(key=lambda x: (x["group"], x["code"]))
+    # 후보 공정에 이름 부여(구조 표시용)
+    for p in sprocs: p["name"] = pnm.get(p["proc_code"], p["proc_code"])
+    return {"route_id": rid, "route_no": route_no, "route_name": route_name, "item_code": item, "ymd": ymd,
+            "approve_flag": approve_flag, "route_gubun": route_gubun,
+            "cost": cost, "current": current, "diff": diff,
+            "rows": sn.get("rows", []), "procs": procs,
+            "structure": {"lines": slines, "n_sub": n_sub, "procs": sprocs, "welds": swelds},
+            "diff0": all(abs(v) < 0.5 for v in diff.values()),
+            "note": ("후보 원가 = 대상품목 실원가(NxCostEngine, 마스터와 동일 산식·diff0). "
+                     "후보는 BOM구조·공정 재배치 계층 — 조달(업체·매입가·사급 배분)은 조달프로파일 계층에서 반영. "
+                     "부품셋·공수합=BASE 보존(route/finalize 게이트)이므로 구조·조달 불변이면 실원가는 현행과 동일.")}
