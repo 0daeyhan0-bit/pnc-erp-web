@@ -1105,18 +1105,32 @@ def sourcing_sub_create(payload: dict = Body(...)):
 
 @router.post("/api/sourcing/sub/dissolve")
 def sourcing_sub_dissolve(payload: dict = Body(...)):
-    """SUB 해제 — 하위부품 parent_line=NULL 복귀(평면), SUB행 삭제. 근거키=route_id·sub_line. 승인 리셋."""
+    """SUB 해제 — 하위부품 parent_line=NULL 복귀(평면), SUB행 삭제. SUB 노드에 붙은 비종속 공정/용접(node_item=SUB코드)은
+       ASSY(대상품번)로 이관해 공수합 보존(절삭은 node_item=부품코드라 부품 따라 자동유지). 근거키=route_id·sub_line. 승인 리셋."""
     rid = int(payload.get("route_id") or 0); subline = int(payload.get("sub_line") or 0)
     if rid <= 0 or subline <= 0: raise HTTPException(400, "route_id·sub_line 필요")
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
+        # SUB 아이템코드 + ASSY(대상품번) 확보(공정 이관용)
+        cur.execute("SELECT ISNULL(sub_item,child_item) FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, subline)
+        _r = cur.fetchone(); sub_code = (str(_r[0]).strip() if _r and _r[0] is not None else '')
+        cur.execute("SELECT item_code FROM nx.sourcing_route WHERE route_id=?", rid)
+        _r2 = cur.fetchone(); assy = (str(_r2[0]).strip() if _r2 and _r2[0] is not None else '')
+        # 하위부품 평면복귀
         cur.execute("UPDATE nx.sourcing_route_line SET parent_line=NULL WHERE route_id=? AND parent_line=?", rid, subline)
         freed = cur.rowcount
+        # SUB 노드 비종속 공정/용접 → ASSY 이관(공수합 보존). 절삭(node_item=부품코드)은 대상 아님.
+        moved_proc = moved_weld = 0
+        if sub_code and assy and sub_code != assy:
+            cur.execute("UPDATE nx.sourcing_route_proc SET node_item=? WHERE route_id=? AND node_item=?", assy, rid, sub_code)
+            moved_proc = cur.rowcount
+            cur.execute("UPDATE nx.sourcing_route_weld SET node_item=? WHERE route_id=? AND node_item=?", assy, rid, sub_code)
+            moved_weld = cur.rowcount
         cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, subline)
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
         nx.commit()
-        return {"ok": True, "freed": freed}
+        return {"ok": True, "freed": freed, "moved_proc": moved_proc, "moved_weld": moved_weld}
     except Exception:
         nx.rollback(); raise
     finally:
