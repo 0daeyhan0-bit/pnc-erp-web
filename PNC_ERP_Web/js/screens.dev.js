@@ -1753,6 +1753,13 @@ SCREEN.subvariant=(c)=>{
     ${ed?`<td class="center"><button class="btn dl-e" data-lid="${l.line_id}" style="padding:1px 5px;font-size:10px">수정</button><button class="btn dl-d" data-lid="${l.line_id}" style="padding:1px 5px;font-size:10px">삭제</button></td>`:''}</tr>`;
   // ===== STEP3: 후보 SUB 재구성·공정배치 패널 (drag=체크선택→SUB, 공정 배치, 공수합=BASE 게이트) =====
   const loadRD=async(rid)=>{try{const r=await fetch(`${API}/api/sourcing/route/detail?route_id=${rid}`);st.rd=await r.json();st.rd.route_id=rid;st.rdProc=null;}catch(e){st.rd={route_id:rid,error:e.message};}draw();};
+  // 빈 SUB 자동 소멸(하위부품 0개 SUB 삭제) — 드래그로 부품 다 빠지면 SUB 안 남김
+  const dissolveEmptySubs=async(rid)=>{const rd=st.rd;if(!rd||rd.route_id!==rid||!rd.lines)return;
+    const subs=rd.lines.filter(l=>l.node_kind==='SUB');
+    const empties=subs.filter(s=>!rd.lines.some(l=>l.parent_line===s.line_id));
+    if(!empties.length)return;
+    for(const s of empties){try{await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:s.line_id})});}catch(e){}}
+    st.rdProc=null;await loadRD(rid);};
   const loadRP=async(rid)=>{try{const r=await fetch(`${API}/api/sourcing/profile/list?route_id=${rid}`);const j=await r.json();st.rp={route_id:rid,rows:(j.rows||[]),header:j.header||{}};}catch(e){st.rp={route_id:rid,error:e.message};}draw();};
   const vSearch2=t=>{clearTimeout(st.acT2);st.acT2=setTimeout(async()=>{try{const r=await fetch(`${API}/api/sourcing/vendors?q=${encodeURIComponent(t)}`);
     const dl=c.querySelector('#sv-vdl2');if(dl)dl.innerHTML=((await r.json()).rows||[]).map(v=>`<option value="${esc(v.code)}">${esc(v.code)} · ${esc(v.name)}${v.role?' ('+esc(v.role)+')':''}</option>`).join('');}catch(e){}},180);};
@@ -1980,35 +1987,40 @@ SCREEN.subvariant=(c)=>{
     // ---- STEP3 SUB 재구성·공정배치 binds ----
     const rid=st.detail.route_id;
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
-    {const b=g('#sp-mksub');if(b)b.onclick=async()=>{const ids=[...c.querySelectorAll('.sp-pick:checked')].map(x=>+x.dataset.lid);
-      if(!ids.length){alert('묶을 부품을 체크하세요');return;}
-      // ★접미사 자동 _S{nn}(백엔드 채번·충돌검사) — prompt 없이 바로 생성(라벨 _R{nn}과 일관)
-      try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:ids,base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
-        const j=await r.json();if(j.ok){st.rdProc=null;await loadRD(rid);}else alert('SUB 생성 실패');}catch(e){alert('오류: '+e.message);}};}
-    // 드래그앤드롭: 부품→SUB(또는 평면) 이동
-    c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});
+    // 드래그: 부품→SUB존/풀(이동), 부품→부품(SUB 자동생성/추가). 이동 후 빈 SUB 자동소멸.
+    const reloadPanel=async()=>{st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);};
+    c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.stopPropagation();e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});
+    // 존(풀=data-sub0 / SUB=data-sub line_id)으로 드롭 = part/assign
     c.querySelectorAll('.sp-drop').forEach(zone=>{
       zone.ondragover=e=>{e.preventDefault();zone.style.background='#eef7ff';};
       zone.ondragleave=()=>{zone.style.background='#fff';};
       zone.ondrop=async e=>{e.preventDefault();zone.style.background='#fff';const lid=e.dataTransfer.getData('text/lid');if(!lid)return;
         try{const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+zone.dataset.sub,line_ids:[+lid]})});
-          if((await r.json()).ok){st.rdProc=null;await loadRD(rid);}}catch(err){alert('이동 오류: '+err.message);}};});
-    c.querySelectorAll('.sp-dis').forEach(el=>el.onclick=async()=>{if(!confirm('SUB 해제(하위부품 평면 복귀)?'))return;
-      try{const r=await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+el.dataset.sub})});
-        if((await r.json()).ok){st.rdProc=null;await loadRD(rid);}}catch(e){alert('오류: '+e.message);}});
-    c.querySelectorAll('.sp-pq').forEach(el=>el.oninput=()=>{const nd=el.dataset.node,pc=el.dataset.proc;(st.rdProc[nd]=st.rdProc[nd]||{})[pc]=+el.value||0;
-      // 실시간 합계·게이트 갱신(포커스 유지)
-      let s=0;Object.keys(st.rdProc).forEach(k=>{if(k==='_rid')return;Object.values(st.rdProc[k]).forEach(v=>s+=+v||0);});s=Math.round(s*100)/100;
-      const base=(st.rd&&st.rd.base_gongsu)||0,ok=Math.abs(s-base)<0.5;
-      const sm=g('#sp-sum');if(sm){sm.textContent=nfq(s);sm.style.color=ok?'#1c7c3a':'#c0392b';}
-      const gt=g('#sp-gate');if(gt){gt.textContent=`공수합 ${nfq(s)} / BASE ${base} ${ok?'✔':'✖ 불일치(저장거부)'}`;gt.style.color=ok?'#1c7c3a':'#c0392b';}});
-    {const b=g('#sp-psave');if(b)b.onclick=async()=>{const procs=[];Object.keys(st.rdProc).forEach(nd=>{if(nd==='_rid')return;Object.keys(st.rdProc[nd]).forEach(pc=>{const w=+st.rdProc[nd][pc]||0;if(w>0)procs.push({node_item:nd,proc_code:pc,work_qty:w});});});
+          if((await r.json()).ok)await reloadPanel();}catch(err){alert('이동 오류: '+err.message);}};});
+    // 부품 위로 드롭: 대상이 SUB하위면 그 SUB에 추가 / 대상이 레벨1이면 둘을 새 SUB로 묶기(자동 _S{nn})
+    c.querySelectorAll('.sp-pdrop').forEach(tp=>{
+      tp.ondragover=e=>{e.preventDefault();e.stopPropagation();tp.style.outline='2px solid #8e44ad';};
+      tp.ondragleave=()=>{tp.style.outline='';};
+      tp.ondrop=async e=>{e.preventDefault();e.stopPropagation();tp.style.outline='';
+        const drag=+e.dataTransfer.getData('text/lid'),tgt=+tp.dataset.lid,tpar=+tp.dataset.parent||0;
+        if(!drag||drag===tgt)return;
+        try{
+          if(tpar>0){ // 대상이 SUB(레벨2) 소속 → 같은 SUB로 이동
+            const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:tpar,line_ids:[drag]})});
+            if((await r.json()).ok)await reloadPanel();
+          } else { // 레벨1 부품 위 드롭 → 두 부품을 새 SUB로 묶기(백엔드 자동 _S{nn})
+            const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[tgt,drag],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
+            if((await r.json()).ok)await reloadPanel();
+          }
+        }catch(err){alert('SUB 묶기 오류: '+err.message);}};});
+    // 조립 공정 노드 배치(드롭다운) — 합 불변(노드만 변경). 상태만 갱신.
+    c.querySelectorAll('.sp-asm').forEach(el=>el.onchange=()=>{if(st.asmNode)st.asmNode[el.dataset.proc]=el.value;});
+    // 저장 = 절삭(부품 자동귀속) + 조립(배치노드) → proc/save 게이트 Σ=BASE
+    {const b=g('#sp-psave');if(b)b.onclick=async()=>{const rd=st.rd||{},procs=[];
+      const pc=rd.part_cut||{};Object.keys(pc).forEach(pt=>pc[pt].forEach(x=>{if(+x.wq>0)procs.push({node_item:pt,proc_code:x.proc_code,work_qty:+x.wq});}));
+      (rd.asm_procs||[]).forEach(a=>{if(+a.wq>0)procs.push({node_item:(st.asmNode&&st.asmNode[a.proc_code])||st.routeTarget,proc_code:a.proc_code,work_qty:+a.wq});});
       try{const r=await fetch(`${API}/api/sourcing/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:st.routeTarget,ymd:'260630',procs})});
-        const j=await r.json();if(j.ok){alert(`공정 배치 저장 ✔ 공수합 ${j.cand_gongsu} = BASE ${j.base_gongsu}`);st.rdProc=null;await loadRD(rid);}else alert(`저장 거부: ${j.msg||('공수합 '+j.cand_gongsu+' ≠ BASE '+j.base_gongsu)}`);}catch(e){alert('오류: '+e.message);}};}
-    // ---- #3 관경별 용접 팝업 열기(노드별) ----
-    c.querySelectorAll('.sp-weld').forEach(el=>el.onclick=async()=>{await loadWeldDiams();const node=el.dataset.node;
-      const ex=((st.rd&&st.rd.welds)||[]).filter(x=>x.node_item===node).map(x=>({weld_item:x.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));
-      st.weldEdit={node,label:el.dataset.label,wproc:el.dataset.wproc,rows:(ex.length?ex:[{weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''}])};draw();});
+        const j=await r.json();if(j.ok){alert(`공정 배치 저장 ✔ 공수합 ${j.cand_gongsu} = BASE ${j.base_gongsu} (절삭 자동귀속 + 조립 노드배치)`);await reloadPanel();}else alert(`저장 거부: ${j.msg||('공수합 '+j.cand_gongsu+' ≠ BASE '+j.base_gongsu)}`);}catch(e){alert('오류: '+e.message);}};}
     // ---- #4 업체 매핑(조달프로파일) binds ----
     {const b=g('#rp-open');if(b)b.onclick=()=>loadRP(rid);}
     c.querySelectorAll('.rp-f').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k,row=(st.rp&&st.rp.rows)?st.rp.rows[i]:null;if(!row)return;
