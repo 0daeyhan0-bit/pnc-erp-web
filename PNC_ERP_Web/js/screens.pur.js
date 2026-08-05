@@ -1826,8 +1826,8 @@ SCREEN.coopquote=(host)=>{
        return `<div class="wr-modal" style="position:fixed;inset:0;z-index:112;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 8px">
        <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.34);width:1340px;max-width:98vw">
          <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
-           <b>📝 ${be.isNew&&!d?'신규 견적':'견적 편집 — '+esc(be.assy)} <span style="font-weight:400;font-size:12px">${esc(d?d.name:'')}</span></b><span id="be-x" style="cursor:pointer;font-size:18px">✕</span></div>
-         <div style="padding:12px 16px;max-height:calc(100vh - 150px);overflow:auto">
+           <b>📝 ${be.isNew&&!d?'신규 견적':(be.viewMode?'견적 상세 — ':'견적 편집 — ')+esc(be.assy)} <span style="font-weight:400;font-size:12px">${esc(d?d.name:'')}</span>${(d&&be.viewMode)?'<span style="font-size:11px;margin-left:8px;background:#eef2fb;color:#1c47a0;padding:2px 8px;border-radius:8px">읽기전용</span>':''}</b><span id="be-x" style="cursor:pointer;font-size:18px">✕</span></div>
+         <div class="${be.viewMode?'be-view':''}" style="padding:12px 16px;max-height:calc(100vh - 150px);overflow:auto">
          ${be.loading?'<div style="padding:40px;text-align:center;color:#8aa0bd">불러오는 중…</div>':(!d?(be.isNew?`<div style="padding:34px;text-align:center"><div style="margin-bottom:12px;color:#33507d;font-size:13px">품번을 입력하면 <b>현 BOM 구성</b>이 자동으로 펼쳐집니다.</div><input class="inp" id="be-newitem" placeholder="Assy 품번" style="width:230px;font-family:monospace" value="${esc(be.assy||'')}"> <button class="btn" id="be-load" style="background:#1c7c3a;color:#fff">🔍 BOM 불러오기</button></div>`:'<div style="padding:40px;text-align:center;color:#c0392b">BOM 조회 실패</div>'):`
            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:12px;background:#f4f8ff;border:1px solid #dbe6f7;border-radius:8px;padding:7px 12px">
              <label style="color:#33507d;font-weight:600">협력사</label><input class="inp" id="be-vendor" value="${esc(be.vendor)}" style="width:120px">
@@ -1948,9 +1948,11 @@ SCREEN.coopquote=(host)=>{
          </div>
          <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
            <span style="color:#8aa0bd;font-size:11px">구성=현 BOM(고정) · 제작동관 협력사 스펙만 입력 · 용접봉=공정(재료비 제외)</span>
-           <span>${canEd?'<button class="btn" id="be-save" style="background:#1b6ec2;color:#fff">💾 저장</button> ':''}<button class="btn" id="be-cancel">닫기</button></span></div>
+           <span>${canEd?(be.viewMode?'<button class="btn" id="be-editmode" style="background:#1c7c3a;color:#fff">✏ 수정 (현재 견적)</button> ':'<button class="btn" id="be-save" style="background:#1b6ec2;color:#fff">💾 저장</button> '):''}<button class="btn" id="be-cancel">닫기</button></span></div>
        </div></div>`;})():''}
-     <style>#cq-tbl tbody tr:hover{background:#eef4ff}.cq-row.sel{background:#dbe9ff}</style>`;
+     <style>#cq-tbl tbody tr:hover{background:#eef4ff}.cq-row.sel{background:#dbe9ff}
+       .be-view input,.be-view select{border:none!important;background:transparent!important;box-shadow:none!important;pointer-events:none;padding:0!important;text-align:inherit;font:inherit;color:inherit;width:auto!important;min-width:0}
+       .be-view input.inp,.be-view .be-qty,.be-view .be-sp,.be-view .be-sg,.be-view .be-mat,.be-view .be-pc,.be-view .be-asm,.be-view .be-asmpc{cursor:default}</style>`;
     const g=id=>host.querySelector(id);
     g('#cq-go').onclick=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
     g('#cq-active').onclick=()=>{st.activeOnly=!st.activeOnly;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
@@ -2012,6 +2014,7 @@ SCREEN.coopquote=(host)=>{
       if(nl)nl.onclick=()=>{be.vendor=(g('#be-vendor')?g('#be-vendor').value:be.vendor);loadBomInto(ni.value,null);};
       if(ni)ni.onkeyup=e=>{if(e.key==='Enter')loadBomInto(ni.value,null);};
       const bs=g('#be-save');if(bs)bs.onclick=saveBomEdit;
+      const bem=g('#be-editmode');if(bem)bem.onclick=()=>{st.bomedit.viewMode=false;render();};
       const upd=()=>{const soyo=beSoyo();const raw=beRaw();
         const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0);
         const procTube=be.data.rows.filter(r=>r.role==='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowGag(r),0);
