@@ -1834,8 +1834,9 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
                 WHERE m.ITEM_CODE IN ({ph})""", *ch)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "mk": str(r[3]).strip(), "cust": str(r[4]).strip(), "custnm": r[5]}
-        # 발주 대상 = 현행 매입처(IN_CUST) 보유 품목
-        order_items = {c: agg[c] for c in codes if info.get(c, {}).get("cust")}
+        # ★발주 대상 = 현행 BOM 하위 품목 중 '제작(자체생산 MAKE_TYPE=1)' 제외 전부(매입/구매/외주가공/사급가공/외주완성).
+        #   용접봉 RAC는 이미 codes에서 제외. 매입처(IN_CUST) 없어도 포함(발주업체 빈칸=사용자 지정).
+        order_items = {c: agg[c] for c in codes if info.get(c, {}).get("mk", "") != "1"}
         oc = list(order_items.keys())
         price = {}
         for i in range(0, len(oc), 900):
