@@ -529,6 +529,54 @@ def _base_flat_lines(item, ymd="260630"):
                     "material": metal, "spec": str(r.get("spec", "") or ""), "note": ""})
     return out
 
+# ★#재설계 공정 분류: 절삭(가공품별 자동귀속) vs 조립(비종속 — 노드배치). 코드셋은 cost.py와 동일.
+_PROC_WELD_S = {"51", "28"}
+_PROC_FASTEN_S = {"55", "52", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "68", "23", "24", "25"}
+_PROC_PACK_S = {"61", "83"}
+_PROC_ETC_S = {"53", "54", "56"}   # 교정·수몰검사·에어브로잉
+def _proc_is_asm(code):
+    """비종속(조립) 공정 = 용접/체결/포장/검사 — 노드(ASSY/SUB)에 배치. 그외=절삭(가공품 자동귀속)."""
+    return code in _PROC_WELD_S or code in _PROC_FASTEN_S or code in _PROC_PACK_S or code in _PROC_ETC_S
+def _proc_group_s(code):
+    if code in _PROC_WELD_S: return "용접"
+    if code in _PROC_FASTEN_S: return "체결"
+    if code in _PROC_PACK_S: return "포장"
+    if code in _PROC_ETC_S: return "검사/기타"
+    return "절삭"
+
+def _panel_cut_asm(item, ymd="260630"):
+    """★SUB재구성·공정배치 패널 데이터 = proc_grid 동일 전개(공수합=BASE 보존)에 '노드 귀속'을 유지.
+       반환: (part_cut{부품:{proc:wq}}=절삭 자동귀속, asm{proc:wq}=조립 pool(비종속·노드배치), base_g).
+       ★Σ(part_cut)+Σ(asm) == base_gongsu(proc_grid 총합) diff0."""
+    ym = "20" + ymd[:4]
+    with _COST_LOCK:
+        eng = _get_cost_engine()
+        try: _ = eng.labor_rate(ym)
+        except Exception: eng = _get_cost_engine(fresh=True)
+        part_cut = {}; asm = {}
+        def walk(node, cum_ea, parent, seen):
+            info = eng._load_item(node); cg0 = info['cost_gubun']
+            db_item = parent if info['silver'] else ''
+            for proc, wq, uph, cg, pit in eng._procs(node):
+                if pit != db_item or wq == 0: continue
+                w = wq * cum_ea
+                if _proc_is_asm(str(proc)):
+                    asm[str(proc)] = asm.get(str(proc), 0.0) + w
+                else:
+                    d = part_cut.setdefault(node, {}); d[str(proc)] = d.get(str(proc), 0.0) + w
+            expandable = bool(eng._expandable_nae(node, seen)) if cg0 != '3' else False
+            if expandable:
+                for c, qty, cx, f, t, lx in eng.lines(node):
+                    if cx: continue
+                    cinfo = eng._load_item(c)
+                    ea = qty if cinfo['unit'] == 'EA' else 1.0
+                    walk(c, cum_ea * ea, node, seen | {node})
+        walk(item, 1.0, '', set())
+    part_cut = {k: {p: round(v, 3) for p, v in d.items()} for k, d in part_cut.items()}
+    asm = {p: round(v, 3) for p, v in asm.items()}
+    base_g = round(sum(sum(d.values()) for d in part_cut.values()) + sum(asm.values()), 2)
+    return part_cut, asm, base_g
+
 def _custnm_map(cur, codes):
     m = {}
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
@@ -962,7 +1010,31 @@ def sourcing_route_detail(route_id: int = Query(...)):
         cur.execute("SELECT node_item,ISNULL(weld_item,''),ISNULL(pipe_diam,0),ISNULL(weld_qty,0),ISNULL(use_qty,0),ISNULL(st,0) FROM nx.sourcing_route_weld WHERE route_id=? ORDER BY node_item,rw_id", route_id)
         welds = [{"node_item": str(r[0]).strip(), "weld_item": str(r[1]).strip(), "pipe_diam": float(r[2] or 0),
                   "weld_qty": float(r[3] or 0), "use_qty": float(r[4] or 0), "st": float(r[5] or 0)} for r in cur.fetchall()]
+        # ★재설계 패널: 절삭(부품별 자동귀속) + 조립(비종속 pool·노드배치). Σ=base_gongsu diff0.
+        part_cut = {}; asm_procs = []
+        try:
+            pc, asm, bg2 = _panel_cut_asm(str(h[1]).strip(), "260630")
+            pcodes = set(asm.keys()) | {p for d in pc.values() for p in d.keys()}
+            pnames = {}
+            if pcodes:
+                cur2 = _conn().cursor()
+                try:
+                    lst = sorted(pcodes)
+                    for i in range(0, len(lst), 900):
+                        ch = lst[i:i + 900]; ph = ",".join("?" * len(ch))
+                        cur2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,'') FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+                        for r in cur2.fetchall(): pnames[str(r[0]).strip()] = str(r[1]).strip()
+                finally: cur2.close()
+            part_cut = {pt: [{"proc_code": c, "name": pnames.get(c, c), "group": _proc_group_s(c), "wq": w}
+                             for c, w in sorted(d.items()) if w > 0] for pt, d in pc.items()}
+            part_cut = {pt: v for pt, v in part_cut.items() if v}   # wq>0 있는 부품만
+            asm_procs = [{"proc_code": c, "name": pnames.get(c, c), "group": _proc_group_s(c), "wq": w}
+                         for c, w in sorted(asm.items()) if w > 0]
+            if base_g is None: base_g = bg2
+        except Exception:
+            pass
         return {"header": hdr, "lines": lines, "procs": procs, "base_procs": base_procs, "welds": welds,
+                "part_cut": part_cut, "asm_procs": asm_procs,
                 "base_gongsu": base_g, "cand_gongsu": cand_g, "gate_ok": (base_g is None or abs(cand_g - base_g) < 0.5 or cand_g == 0)}
     finally:
         nx.close()
