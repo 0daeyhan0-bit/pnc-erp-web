@@ -758,9 +758,22 @@ def sourcing_route_copy(payload: dict = Body(...)):
             cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
                   vendor_code,is_rawmat,diam,thick,len_val,material,spec,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   nid, ln[0], child, ln[2], ln[3], ln[4], ln[5], ln[6], ln[7], ln[8], ln[9], ln[10], ln[11], ln[12])
+        # ★BASE 복사: 조립 공정(비종속=용접·지그·교정·부품부착·포장)을 ASSY 노드에 시드 → 신규 후보 공수합=BASE로 시작
+        # (절삭은 part_cut 자동귀속이라 시드 불필요). 이후 사용자가 SUB로 재배치·차감.
+        seeded_asm = 0
+        if src_kind == 'base':
+            try:
+                _pc, _asm, _bg = _panel_cut_asm(item, ymd)
+                for pc_code, wq in (_asm or {}).items():
+                    if wq and float(wq) != 0:
+                        cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
+                            VALUES(?,?,?,?,0,'')""", nid, item, str(pc_code).strip()[:10], float(wq))
+                        seeded_asm += 1
+            except Exception:
+                pass
         nx.commit()
         return {"ok": True, "route_id": nid, "route_no": rno, "lines": len(src_lines),
-                "copied_children": new_children, "suffix": suffix}
+                "copied_children": new_children, "suffix": suffix, "seeded_asm": seeded_asm}
     except Exception:
         nx.rollback(); raise
     finally:

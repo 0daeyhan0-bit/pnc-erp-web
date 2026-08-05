@@ -892,7 +892,7 @@ SCREEN.esticost=(c)=>{
                      weldItem, weldTypes:[], weldCounts:{diam2dp:count}, cols:[{name,code,sec,idx,uph,cg,wq}],
                      infoBar?(상단 추가정보 HTML), footNote?}. 헬퍼는 esc(전역)만 의존(M2/CALCG/fmtU 자체내장). */
 const PROC_MODAL_HTML=(pd)=>{
-  if(!pd) return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.35);z-index:50;display:flex;align-items:center;justify-content:center"><div style="background:#fff;border-radius:10px;padding:20px" class="empty">공정 로딩…</div></div>`;
+  if(!pd) return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.35);z-index:9996;display:flex;align-items:center;justify-content:center"><div style="background:#fff;border-radius:10px;padding:20px" class="empty">공정 로딩…</div></div>`;
   const CALCG={'3':'임율기반','8':'중량기반','9':'적용율','7':'세척'};
   const M2=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const isAssy=pd.isAssy, node=pd.node;
@@ -936,7 +936,7 @@ const PROC_MODAL_HTML=(pd)=>{
       <div style="padding:0 4px">${band(cols.slice(0,_half))}${band(cols.slice(_half))}</div>`;
   const title=pd.title!=null?pd.title:`✎ 공정 등록/수정 — ${esc(node)}`;
   const foot=pd.footNote!=null?pd.footNote:'관경별 용접횟수→소요량(Σ표준소요량×횟수×1.5)·내부ST 자동 · 공정 작업ST 입력 · 단가 읽기전용(마감때만) · 저장시 재계산';
-  return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.4);z-index:50;display:flex;align-items:center;justify-content:center;padding:12px">
+  return `<div id="pm-backdrop" style="position:fixed;inset:0;background:rgba(20,30,50,.4);z-index:9996;display:flex;align-items:center;justify-content:center;padding:12px">
       <div style="background:#fff;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.3);width:98vw;max-width:1700px;max-height:94vh;display:flex;flex-direction:column">
         <div style="padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #dce4ee;flex:0 0 auto">
           <b style="color:#1c47a0;font-size:15px">${title}</b><span style="color:#8a94a6;font-size:12px">${esc(lvl)}</span>
