@@ -1497,6 +1497,96 @@ def _ensure_sub_price_tbl(cur):
     # else: 이미 vendor_code 보유(override 가능 스키마) → 유지
     _SUB_PRICE_READY = True
 
+# ============ ★★통합 단가 테이블 nx.item_price (레거시 PR_M_ITEM_COST 계승) ============
+# 흩어진 nx 단가(sub_price=ASSY매입 · sagub_price=사급 · profile 가격칸)를 하나로 통합.
+# 컬럼: item_code · vendor_code(''=공통/지정=업체예외) · price_gubun(매입/판매/사급) · apply_ym(적용월 시계열) · price · currency · note.
+# COALESCE(업체 override, 공통) + as-of(기준일 이하 최근 apply_ym). ★nx만·정산 마스터 PR_M_ITEM_COST 불변.
+def _price_ym(ym=None):
+    """적용월 정규화 = 'YYMM'(2자리연+월). ymd(YYMMDD) 주면 앞 4자리, 없으면 현재월."""
+    s = str(ym or "").strip()
+    if len(s) >= 6: return s[:4]
+    if len(s) == 4: return s
+    from datetime import datetime as _dt
+    return _dt.now().strftime("%y%m")
+
+_ITEM_PRICE_READY = False
+def _ensure_item_price_tbl(cur):
+    """통합 단가 테이블 생성 + 기존 nx 단가 이관(멱등, NOT MATCHED만 — 재실행 안전·기존 방치)."""
+    global _ITEM_PRICE_READY
+    if _ITEM_PRICE_READY:
+        return
+    cur.execute("""IF OBJECT_ID('nx.item_price','U') IS NULL CREATE TABLE nx.item_price(
+        item_code NVARCHAR(60) NOT NULL, vendor_code NVARCHAR(20) NOT NULL DEFAULT '',
+        price_gubun NVARCHAR(10) NOT NULL, apply_ym NVARCHAR(6) NOT NULL,
+        price FLOAT NULL, currency NVARCHAR(8) NULL DEFAULT 'KRW', note NVARCHAR(200) NULL,
+        upd_dt datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_item_price PRIMARY KEY(item_code, vendor_code, price_gubun, apply_ym))""")
+    ym = _price_ym(None)
+    # 이관: sub_price(assy_price→매입) · sagub_price(→사급). 소스 중복키는 MAX로 dedup(멱등 NOT MATCHED).
+    if cur.execute("SELECT OBJECT_ID('nx.sourcing_sub_price','U')").fetchone()[0] is not None and \
+       cur.execute("SELECT COL_LENGTH('nx.sourcing_sub_price','vendor_code')").fetchone()[0] is not None:
+        cur.execute("""MERGE nx.item_price AS t
+            USING (SELECT item_code, vendor_code, N'매입' price_gubun, ? apply_ym, MAX(price) price FROM (
+                     SELECT LTRIM(RTRIM(sub_item)) item_code, ISNULL(vendor_code,'') vendor_code, assy_price price
+                     FROM nx.sourcing_sub_price WHERE assy_price IS NOT NULL) z GROUP BY item_code, vendor_code) AS s
+            ON t.item_code=s.item_code AND t.vendor_code=s.vendor_code AND t.price_gubun=s.price_gubun AND t.apply_ym=s.apply_ym
+            WHEN NOT MATCHED THEN INSERT(item_code,vendor_code,price_gubun,apply_ym,price,currency,note,upd_dt)
+              VALUES(s.item_code,s.vendor_code,s.price_gubun,s.apply_ym,s.price,'KRW',N'이관:sub_price',getdate());""", ym)
+    if cur.execute("SELECT OBJECT_ID('nx.sourcing_sagub_price','U')").fetchone()[0] is not None and \
+       cur.execute("SELECT COL_LENGTH('nx.sourcing_sagub_price','vendor_code')").fetchone()[0] is not None:
+        cur.execute("""MERGE nx.item_price AS t
+            USING (SELECT item_code, vendor_code, N'사급' price_gubun, ? apply_ym, MAX(price) price FROM (
+                     SELECT LTRIM(RTRIM(item_code)) item_code, ISNULL(vendor_code,'') vendor_code, sagub_price price
+                     FROM nx.sourcing_sagub_price WHERE sagub_price IS NOT NULL) z GROUP BY item_code, vendor_code) AS s
+            ON t.item_code=s.item_code AND t.vendor_code=s.vendor_code AND t.price_gubun=s.price_gubun AND t.apply_ym=s.apply_ym
+            WHEN NOT MATCHED THEN INSERT(item_code,vendor_code,price_gubun,apply_ym,price,currency,note,upd_dt)
+              VALUES(s.item_code,s.vendor_code,s.price_gubun,s.apply_ym,s.price,'KRW',N'이관:sagub_price',getdate());""", ym)
+    # profile 가격칸(buy_price→매입 · sagub_price→사급, item=profile.item_code) — 대부분 비어있음(방치본), 있으면 이관.
+    if cur.execute("SELECT COL_LENGTH('nx.sourcing_profile','buy_price')").fetchone()[0] is not None:
+        cur.execute("""MERGE nx.item_price AS t
+            USING (SELECT item_code, vendor_code, N'매입' price_gubun, ? apply_ym, MAX(price) price FROM (
+                     SELECT LTRIM(RTRIM(item_code)) item_code, ISNULL(vendor_code,'') vendor_code, buy_price price
+                     FROM nx.sourcing_profile WHERE buy_price IS NOT NULL AND ISNULL(vendor_code,'')<>'') z GROUP BY item_code, vendor_code) AS s
+            ON t.item_code=s.item_code AND t.vendor_code=s.vendor_code AND t.price_gubun=s.price_gubun AND t.apply_ym=s.apply_ym
+            WHEN NOT MATCHED THEN INSERT(item_code,vendor_code,price_gubun,apply_ym,price,currency,note,upd_dt)
+              VALUES(s.item_code,s.vendor_code,s.price_gubun,s.apply_ym,s.price,'KRW',N'이관:profile.buy',getdate());""", ym)
+    _ITEM_PRICE_READY = True
+
+def _asof_prices(cur, gubun, items, asof_ym):
+    """통합 테이블 as-of 조회: 각 (item,vendor)의 apply_ym<=기준월 중 최신. 반환 (common{item:price}, ov{item:[{vendor_code,price}]})."""
+    common = {}; ov = {}
+    items = sorted({str(i).strip() for i in items if str(i or "").strip()})
+    if not items:
+        return common, ov
+    for i in range(0, len(items), 900):
+        ch = items[i:i+900]; ph = ",".join("?" * len(ch))
+        cur.execute(f"""SELECT item_code, vendor_code, price FROM (
+            SELECT LTRIM(RTRIM(item_code)) item_code, ISNULL(vendor_code,'') vendor_code, price,
+                   ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(item_code)), ISNULL(vendor_code,'') ORDER BY apply_ym DESC) rn
+            FROM nx.item_price WHERE price_gubun=? AND apply_ym<=? AND LTRIM(RTRIM(item_code)) IN ({ph})
+        ) z WHERE rn=1""", gubun, asof_ym, *ch)
+        for r in cur.fetchall():
+            ic = str(r[0]).strip(); vc = str(r[1] or "").strip(); pr = (float(r[2]) if r[2] is not None else None)
+            if pr is None: continue
+            if vc == "": common[ic] = pr
+            else: ov.setdefault(ic, []).append({"vendor_code": vc, "price": pr})
+    return common, ov
+
+def _save_item_price(cur, gubun, apply_ym, item_code, vendor_code, price):
+    """통합 테이블 upsert/삭제(근거키 item·vendor·gubun·apply_ym 스코프). price None=그 근거키 1행 삭제."""
+    if price is None:
+        cur.execute("DELETE FROM nx.item_price WHERE item_code=? AND vendor_code=? AND price_gubun=? AND apply_ym=?",
+                    item_code, vendor_code, gubun, apply_ym)
+        return -cur.rowcount   # 삭제건(음수 표시)
+    cur.execute("""MERGE nx.item_price AS t
+        USING (SELECT ? AS item_code, ? AS vendor_code, ? AS price_gubun, ? AS apply_ym) AS s
+        ON t.item_code=s.item_code AND t.vendor_code=s.vendor_code AND t.price_gubun=s.price_gubun AND t.apply_ym=s.apply_ym
+        WHEN MATCHED THEN UPDATE SET price=?, upd_dt=getdate()
+        WHEN NOT MATCHED THEN INSERT(item_code,vendor_code,price_gubun,apply_ym,price,currency,upd_dt)
+          VALUES(s.item_code,s.vendor_code,s.price_gubun,s.apply_ym,?,'KRW',getdate());""",
+        item_code, vendor_code, gubun, apply_ym, price, price)
+    return 1
+
 def _outsourced_subs(cur, route_id):
     """후보(route_id)의 외주 SUB 노드 = node_kind='SUB' AND gubun에 '외주'/'사급' 포함. ASSY 매입단가 대상 단위."""
     cur.execute("""SELECT line_id, LTRIM(RTRIM(ISNULL(sub_item,child_item))) si, ISNULL(child_name,'') nm, ISNULL(gubun,'') gb, ISNULL(sort_seq,0) ss
@@ -1579,13 +1669,14 @@ def _route_line_items(cur, route_id):
     return _fill_names(cur, items)
 
 @router.get("/api/sourcing/sagub_price")
-def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Query("")):
-    """★사급 부품 가격 = 외주 SUB 하위 '매입' 부품당 1개(업체 공통). 근거키 (route_id·item_code). vendor_code는 무시(하위호환 파라미터).
-       + subs(외주 SUB 목록) · direct_items(단품 매입=읽기전용 참고). 정산 마스터 미접근."""
+def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Query(""), ym: str = Query("")):
+    """★사급 부품 가격 = 외주 SUB 하위 '매입' 부품(공통+업체예외) — 통합 nx.item_price(gubun='사급') as-of(기준월 이하 최근).
+       vendor_code는 무시(하위호환). ym=기준월(YYMM/YYMMDD, 기본 현재월). + subs · direct_items. 정산 마스터 미접근."""
     if route_id <= 0: raise HTTPException(400, "route_id 필요")
+    asof = _price_ym(ym)
     nx = _nx(); cur = nx.cursor()
     try:
-        _ensure_route_tbl(cur); _ensure_sagub_price_tbl(cur)
+        _ensure_route_tbl(cur); _ensure_item_price_tbl(cur)
         cur.execute("SELECT item_code, ISNULL(route_no,0), ISNULL(route_name,''), approve_flag FROM nx.sourcing_route WHERE route_id=?", route_id)
         h = cur.fetchone()
         hdr = {"route_id": route_id, "item_code": (str(h[0]).strip() if h else ""),
@@ -1594,61 +1685,50 @@ def sourcing_sagub_price_get(route_id: int = Query(...), vendor_code: str = Quer
         subs = _outsourced_subs(cur, route_id)
         items = _sub_child_items(cur, route_id, subs)          # ★외주 SUB 하위 PART만
         direct = _direct_purchase_items(cur, route_id)         # 단품 매입(읽기전용 참고)
-        cur.execute("SELECT ISNULL(vendor_code,''), LTRIM(RTRIM(item_code)), sagub_price FROM nx.sourcing_sagub_price WHERE route_id=?", route_id)
-        common = {}; ov = {}   # common[item]=공통 · ov[item]=[{vendor_code,sagub_price}]
-        for r in cur.fetchall():
-            vc = str(r[0] or "").strip(); ic = str(r[1]).strip(); pr = (float(r[2]) if r[2] is not None else None)
-            if vc == "": common[ic] = pr
-            else: ov.setdefault(ic, []).append({"vendor_code": vc, "sagub_price": pr})
+        common, ov = _asof_prices(cur, "사급", [it["item_code"] for it in items if it.get("is_purchase")], asof)
         for it in items:
             if it.get("is_purchase"):
-                it["sagub_price"] = common.get(it["item_code"])           # 공통(기본)
-                it["overrides"] = ov.get(it["item_code"], [])             # 업체별 예외
+                it["sagub_price"] = common.get(it["item_code"])                                              # 공통(기본)
+                it["overrides"] = [{"vendor_code": o["vendor_code"], "sagub_price": o["price"]} for o in ov.get(it["item_code"], [])]
             else:
                 it["sagub_price"] = None; it["overrides"] = []            # 제작 부품은 사급단가 무의미(원가 자동)
         n_purchase = sum(1 for it in items if it.get("is_purchase"))
         n_priced = sum(1 for it in items if it["sagub_price"] is not None)
         n_ov = sum(len(it["overrides"]) for it in items)
-        return {"header": hdr, "rows": items,
+        return {"header": hdr, "rows": items, "apply_ym": asof,
                 "subs": [{"sub_item": s["sub_item"], "sub_name": s["sub_name"], "gubun": s["gubun"]} for s in subs],
                 "direct_items": direct, "n_item": len(items), "n_sub": len(subs), "n_direct": len(direct),
                 "n_purchase": n_purchase, "n_priced": n_priced, "n_override": n_ov,
-                "note": "후보/계획 사급 부품 가격(정산 아님) — nx.sourcing_sagub_price. 공통(vendor='')+업체별 예외(override). COALESCE(override,공통). 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동, 레벨1 직속·용접봉 제외)."}
+                "note": "후보/계획 사급 부품 가격(정산 아님) — 통합 nx.item_price(gubun=사급, as-of). 공통(vendor='')+업체별 예외(override). COALESCE(override,공통). 대상=외주 SUB 하위 '매입' 부품만(제작=원가 자동, 레벨1 직속·용접봉 제외)."}
     finally:
         nx.close()
 
 @router.post("/api/sourcing/sagub_price/save")
 def sourcing_sagub_price_save(payload: dict = Body(...)):
-    """★사급 부품 가격 저장. 근거키=(route_id·vendor_code·item_code) 스코프 upsert. vendor_code=''(또는 생략)=공통(기본) / 지정=그 업체 예외(override).
-       공란/None price = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 하위 '매입' 부품 밖은 무시(skip). 정산 마스터 미접근.
-       payload {route_id, rows:[{vendor_code?, item_code, sagub_price}]}."""
+    """★사급 부품 가격 저장 → 통합 nx.item_price(gubun='사급'). 근거키=(item_code·vendor_code·apply_ym) 스코프 upsert.
+       vendor_code=''(또는 생략)=공통 / 지정=업체 예외. price None=그 근거키 1행 삭제. 외주 SUB 하위 '매입' 부품 밖 skip.
+       ym=적용월(기본 현재월). 값 바뀌면 새 월 행 추가(시계열). 정산 마스터 미접근.
+       payload {route_id, ym?, rows:[{vendor_code?, item_code, sagub_price}]}."""
     rid = int(payload.get("route_id") or 0)
     rows = payload.get("rows", []) or []
     if rid <= 0: raise HTTPException(400, "route_id 필요")
+    apply_ym = _price_ym(payload.get("ym"))
     _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)
     nx = _nx_tx(); cur = nx.cursor()
     try:
-        _ensure_sagub_price_tbl(cur)
-        valid = {it["item_code"] for it in _sub_child_items(cur, rid) if it.get("is_purchase")}   # ★근거키 후보 = 외주 SUB 하위 '매입' 부품만(제작=원가 자동·대상 아님, 레벨1 직속·용접봉 제외)
+        _ensure_item_price_tbl(cur)
+        valid = {it["item_code"] for it in _sub_child_items(cur, rid) if it.get("is_purchase")}   # ★근거키 후보 = 외주 SUB 하위 '매입' 부품만
         upsert = dele = skip = 0
         for r in rows:
             ic = str(r.get("item_code", "")).strip()
             vc = str(r.get("vendor_code", "") or "").strip()   # ''=공통, 지정=업체 override
             if not ic or ic not in valid:
                 skip += 1; continue
-            sp = _pfloat(r.get("sagub_price"))
-            if sp is None:   # 공란/삭제 = 그 근거키(route·vendor·item) 1행만 제거
-                cur.execute("DELETE FROM nx.sourcing_sagub_price WHERE route_id=? AND vendor_code=? AND item_code=?", rid, vc, ic)
-                dele += cur.rowcount; continue
-            cur.execute("""MERGE nx.sourcing_sagub_price AS t
-                USING (SELECT ? AS route_id, ? AS vendor_code, ? AS item_code) AS s
-                ON t.route_id=s.route_id AND t.vendor_code=s.vendor_code AND t.item_code=s.item_code
-                WHEN MATCHED THEN UPDATE SET sagub_price=?, upd_dt=getdate()
-                WHEN NOT MATCHED THEN INSERT(route_id,vendor_code,item_code,sagub_price,upd_dt)
-                  VALUES(s.route_id,s.vendor_code,s.item_code,?,getdate());""", rid, vc, ic, sp, sp)
-            upsert += 1
+            n = _save_item_price(cur, "사급", apply_ym, ic, vc, _pfloat(r.get("sagub_price")))
+            if n < 0: dele += -n
+            else: upsert += n
         nx.commit()
-        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip}
+        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip, "apply_ym": apply_ym}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
@@ -1659,13 +1739,14 @@ def sourcing_sagub_price_save(payload: dict = Body(...)):
 # ============ ★ASSY 매입단가(계획) — 외주 SUB당 1개(업체 공통). nx.sourcing_sub_price PK(route_id,sub_item) ============
 # 벤더가 조립해 완성 SUB로 받는 값. 가격은 업체 무관(공통), 업체는 배분%만. 후보/계획 단가(정산 아님): nx만 저장·정산 마스터 미접근.
 @router.get("/api/sourcing/sub_price")
-def sourcing_sub_price_get(route_id: int = Query(...), vendor_code: str = Query("")):
-    """후보(route_id)의 외주 SUB별 ASSY 매입단가(계획·업체 공통). subs(SUB 목록)+prices(SUB당 1개)+direct_items(단품 매입=읽기전용).
-       vendor_code는 무시(하위호환 파라미터). 정산 마스터 미접근."""
+def sourcing_sub_price_get(route_id: int = Query(...), vendor_code: str = Query(""), ym: str = Query("")):
+    """후보(route_id)의 외주 SUB별 ASSY 매입단가(공통+업체예외) — 통합 nx.item_price(gubun='매입') as-of. subs+prices+direct_items.
+       vendor_code는 무시(하위호환). ym=기준월(기본 현재월). 정산 마스터 미접근."""
     if route_id <= 0: raise HTTPException(400, "route_id 필요")
+    asof = _price_ym(ym)
     nx = _nx(); cur = nx.cursor()
     try:
-        _ensure_route_tbl(cur); _ensure_sub_price_tbl(cur)
+        _ensure_route_tbl(cur); _ensure_item_price_tbl(cur)
         cur.execute("SELECT item_code, ISNULL(route_no,0), ISNULL(route_name,''), approve_flag FROM nx.sourcing_route WHERE route_id=?", route_id)
         h = cur.fetchone()
         hdr = {"route_id": route_id, "item_code": (str(h[0]).strip() if h else ""),
@@ -1673,34 +1754,32 @@ def sourcing_sub_price_get(route_id: int = Query(...), vendor_code: str = Query(
                "approve_flag": (bool(h[3]) if h else False)}
         subs = _outsourced_subs(cur, route_id)
         direct = _direct_purchase_items(cur, route_id)
-        cur.execute("SELECT ISNULL(vendor_code,''), LTRIM(RTRIM(sub_item)), assy_price FROM nx.sourcing_sub_price WHERE route_id=?", route_id)
-        common = {}; ov = {}
-        for r in cur.fetchall():
-            vc = str(r[0] or "").strip(); si = str(r[1]).strip(); pr = (float(r[2]) if r[2] is not None else None)
-            if vc == "": common[si] = pr
-            else: ov.setdefault(si, []).append({"vendor_code": vc, "assy_price": pr})
-        prices = [{"sub_item": s["sub_item"], "assy_price": common.get(s["sub_item"]), "overrides": ov.get(s["sub_item"], [])} for s in subs]
+        common, ov = _asof_prices(cur, "매입", [s["sub_item"] for s in subs], asof)
+        prices = [{"sub_item": s["sub_item"], "assy_price": common.get(s["sub_item"]),
+                   "overrides": [{"vendor_code": o["vendor_code"], "assy_price": o["price"]} for o in ov.get(s["sub_item"], [])]} for s in subs]
         n_priced = sum(1 for p in prices if p["assy_price"] is not None)
         n_ov = sum(len(p["overrides"]) for p in prices)
-        return {"header": hdr,
+        return {"header": hdr, "apply_ym": asof,
                 "subs": [{"sub_item": s["sub_item"], "sub_name": s["sub_name"], "gubun": s["gubun"]} for s in subs],
                 "prices": prices, "direct_items": direct, "n_sub": len(subs), "n_priced": n_priced, "n_override": n_ov,
-                "note": "후보/계획 ASSY 매입단가(정산 아님) — nx.sourcing_sub_price. 공통(vendor='')+업체별 예외(override). COALESCE(override,공통). 대상=외주 SUB 단위."}
+                "note": "후보/계획 ASSY 매입단가(정산 아님) — 통합 nx.item_price(gubun=매입, as-of). 공통(vendor='')+업체별 예외(override). COALESCE(override,공통). 대상=외주 SUB 단위."}
     finally:
         nx.close()
 
 @router.post("/api/sourcing/sub_price/save")
 def sourcing_sub_price_save(payload: dict = Body(...)):
-    """★외주 SUB별 ASSY 매입단가 저장. 근거키=(route_id·vendor_code·sub_item) 스코프 upsert. vendor_code=''(또는 생략)=공통(기본) / 지정=그 업체 예외(override).
-       공란/None price = 그 근거키 행 삭제(대량삭제 아님). 외주 SUB 밖 sub_item 무시(skip). 정산 마스터 미접근.
-       payload {route_id, rows:[{vendor_code?, sub_item, assy_price}]}."""
+    """★외주 SUB별 ASSY 매입단가 저장 → 통합 nx.item_price(gubun='매입'). 근거키=(item_code(=sub_item)·vendor_code·apply_ym) 스코프 upsert.
+       vendor_code=''(또는 생략)=공통 / 지정=업체 예외. price None=그 근거키 1행 삭제. 외주 SUB 밖 sub_item skip.
+       ym=적용월(기본 현재월). 값 바뀌면 새 월 행 추가(시계열). 정산 마스터 미접근.
+       payload {route_id, ym?, rows:[{vendor_code?, sub_item, assy_price}]}."""
     rid = int(payload.get("route_id") or 0)
     rows = payload.get("rows", []) or []
     if rid <= 0: raise HTTPException(400, "route_id 필요")
+    apply_ym = _price_ym(payload.get("ym"))
     _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)
     nx = _nx_tx(); cur = nx.cursor()
     try:
-        _ensure_route_tbl(cur); _ensure_sub_price_tbl(cur)
+        _ensure_route_tbl(cur); _ensure_item_price_tbl(cur)
         valid = {s["sub_item"] for s in _outsourced_subs(cur, rid)}   # 근거키 후보 = 외주 SUB만
         upsert = dele = skip = 0
         for r in rows:
@@ -1708,19 +1787,11 @@ def sourcing_sub_price_save(payload: dict = Body(...)):
             vc = str(r.get("vendor_code", "") or "").strip()   # ''=공통, 지정=업체 override
             if not si or si not in valid:
                 skip += 1; continue
-            ap = _pfloat(r.get("assy_price"))
-            if ap is None:   # 공란/삭제 = 그 근거키(route·vendor·sub) 1행만 제거
-                cur.execute("DELETE FROM nx.sourcing_sub_price WHERE route_id=? AND vendor_code=? AND sub_item=?", rid, vc, si)
-                dele += cur.rowcount; continue
-            cur.execute("""MERGE nx.sourcing_sub_price AS t
-                USING (SELECT ? AS route_id, ? AS vendor_code, ? AS sub_item) AS s
-                ON t.route_id=s.route_id AND t.vendor_code=s.vendor_code AND t.sub_item=s.sub_item
-                WHEN MATCHED THEN UPDATE SET assy_price=?, upd_dt=getdate()
-                WHEN NOT MATCHED THEN INSERT(route_id,vendor_code,sub_item,assy_price,upd_dt)
-                  VALUES(s.route_id,s.vendor_code,s.sub_item,?,getdate());""", rid, vc, si, ap, ap)
-            upsert += 1
+            n = _save_item_price(cur, "매입", apply_ym, si, vc, _pfloat(r.get("assy_price")))
+            if n < 0: dele += -n
+            else: upsert += n
         nx.commit()
-        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip}
+        return {"ok": True, "upsert": upsert, "del": dele, "skip": skip, "apply_ym": apply_ym}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
