@@ -49,17 +49,37 @@
 
 ---
 
-## 3. 노드별 [수정] → 공정 등록/수정 팝업 (nodeProcModal · 노드 스코프)
+## 3. 노드별 [수정] → 공정 등록/수정 팝업 = 품목BOM관리 '내부원가' 팝업과 **완전 동일 창**
 
-- **노드 스코프 시드**:
-  - 레벨0(ASSY)에 저장 공정 없음 → **BASE 조립 pool(asm_procs) 시드**(전체 조립부하 표시 → SUB로 옮긴 만큼 여기서 차감).
-  - 저장 공정 있음 / 신규 SUB → **저장값(신규 SUB=빈값)**.
-- **관경별 용접**(내부원가 팝업 재사용): 용접봉 종류 1개 선택 + 관경별 점수 입력.
-  - 소요량(재료) = Σ(std_use_qty[관경]×점수)×loss(기본1.5, 수정가능).  ← nx.weld_diam 표준(MIN='01')
-  - 용접ST(가공비) = Σ(std_st[관경]×점수).  → 용접공정(group='용접', 보통 51) work_qty로 반영(readonly).
-- **공정별 작업ST**: 조립 공정 카탈로그(asm_procs) 2단(band) 배치. 용접=관경별 자동, 나머지 직접입력. 단가/UPH/임율은 읽기전용(마감때만). 절삭공정은 부품 자동귀속(읽기전용 참조).
-- **워크플로우 지원**: 팝업 상단에 "이 노드 공수 / 전체 공수합 N / BASE (±차이)" 항상 표시 → SUB에 입력 후 레벨0 팝업에서 그만큼 차감(총합 유지).
-- **저장**: `weld/save`(용접봉 소요량=재료·node 스코프 전체교체) + `proc/node_save`(조립ST=가공비, 용접ST 포함, node 스코프 전체교체). 승인 리셋. **BASE 게이트 없음**(전체저장에서 검증).
+> ★2026-08-05 재작업: 이전 축약 팝업(`nodeProcModal` 자체 렌더 — 관경 일부·조립공정만·+관경 행추가식)을 **제거**하고,
+> 품목BOM관리(SCREEN.unifybom)의 `naeProcModal`과 **같은 모듈레벨 공유 렌더러**를 쓰도록 통합. 두 화면 팝업이 코드·픽셀 동일.
+
+### 공유 렌더러 (js/screens.dev.js 모듈레벨, 양 SCREEN 클로저 밖)
+- `PROC_MODAL_HTML(pd)` — 팝업 본문 HTML. pd 캐노니컬:
+  `{node,title?,subtitle?,isAssy,weldDiams:[{pipe_diam,std_use_qty,std_st}],weldItem,weldTypes,weldCounts:{diam2dp:count},cols:[{name,code,sec,idx,uph,cg,wq}],infoBar?,footNote?}`.
+  헬퍼는 `esc`(전역)만 의존, `M2/CALCG/fmtU` 자체 내장. DOM/클래스/컬럼구성 = naeProcModal과 100% 동일.
+  - (상) **관경별 용접 매트릭스**: 전체 관경 컬럼(weld_diam **14**개: 4.76~38.10) 가로 나열. 행 5개 = 표준소요량/표준공수/**용접횟수(input .wm-q)**/소요량/내부ST. 용접봉종류 `#wm-type` select. 소요량=Σ(표준소요량×횟수)(표시, BOM반영 ×1.5), 내부ST=Σ(표준공수×횟수).
+  - (하) **공정별 (작업 ST 입력)**: 전체 공정 2단(band) 가로 그리드. cols=`own`(가공)+`assy`(조립). 행 = 구분/작업ST(input .pq data-sec/data-i)/내부UPH(ro)/임율·구분(ro).
+- `PROC_MODAL_BIND(c,{onClose,onSave,onProcInput,onProcCommit,onWeldCount,onWeldType})` — 이벤트 바인딩(콜백으로 각 화면이 자기 상태에 write-back).
+- `PROC_MODAL_CSS` — `.wm` 매트릭스 CSS(naeCss와 동일 규칙). subvariant draw에 주입(unifybom은 naeCss가 이미 포함).
+
+### 품목BOM관리(unifybom) 측
+- `naeProcModal()` = naeProcD → pd(cols=`own` 가공 + `carriers[0].rows` 조립, sec='own'/'c0') → `PROC_MODAL_HTML(pd)`.
+- `wireProcModal()` = `PROC_MODAL_BIND`(onProcInput→work_qty 세팅, onWeldCount→weldCounts+draw, onWeldType→weldPoints 재매핑) + 레거시 .pu/.pl(현재 no-op) 보존. **저장(cost/proc·weld/save) 동작 불변**.
+
+### 조달후보(subvariant) 측 — 데이터 어댑터
+- 전체 공정 카탈로그: **`GET /api/cost/proc/get?node=<ASSY>` 재사용**(ASSY 기준 1회 캐시 `st.procCat`). catalog→own(is_assy=false 24)+assy(is_assy=true 24). uph/cg는 ASSY 라우팅 참조(own_procs·carriers[0].procs).
+- **프리필**: 그 노드의 저장값(route/detail `procs` where node_item=node)을 proc_code로 own/assy에 매핑.
+  - 레벨0(ASSY)·미저장 → **BASE 조립 시드**(route/detail `asm_procs`).
+  - 신규 SUB → **빈값**.
+- 관경: `weldCounts` = 그 노드 저장 용접점(route/detail `welds` where node_item=node, pipe_diam→count). weldDiams=`st.weldDiams`(/api/weld/diam, 14).
+- 상단 **infoBar**(추가): "이 노드 공수(절삭 자동귀속+조립 라이브) / 전체 공수합 / BASE ±차이" + 절삭 부품자동귀속 목록 + 용접ST. **레이아웃 본체는 동일**, info만 스크롤영역 최상단에 삽입.
+- **저장**(그 노드만 교체): `weld/save`(weldCounts→행, loss 1.5) + `proc/node_save`(own+assy work_qty>0). BASE 게이트 없음(전체저장 finalize에서 검증). 승인 리셋. 저장 후 `loadRD`.
+- 용접ST(가공비)는 용접공정 컬럼의 작업ST(시드/입력값)로 공수합에 1회 반영(내부원가 팝업과 동일 모델). 용접봉 소요량(재료)은 weld/save 별도(공수합 미포함).
+
+### [해체] 버튼 (SUB 노드 전용, 2026-08-05 추가)
+- nodeBox 헤더에 `dsub>0`(=SUB)일 때만 `[🧩 해체]` 표시(레벨0 ASSY엔 없음).
+- confirm → `POST /api/sourcing/sub/dissolve {route_id,sub_line}` → reloadPanel. **백엔드는 기존 보강분**: 하위부품 parent_line=NULL(ASSY 복귀) + SUB 노드 비종속 공정/용접(node_item=SUB코드)을 ASSY로 이관(**공수합 보존**), 절삭은 부품 따라 자동유지.
 
 ---
 
@@ -93,6 +113,38 @@
 - 전역 공수합 = Σ(part_cut 전부, BASE·배치무관) + Σ(sourcing_route_proc 전노드).
 - 용접ST는 **sourcing_route_proc의 용접공정(51) work_qty로 1회만** 계상(관경별 용접 매트릭스 Σstd_st). 용접봉 소요량(재료)은 sourcing_route_weld에 별도(공수합 미포함).
 - part_cut은 sourcing_route_proc에 저장하지 않음(BASE 자동귀속·표시전용).
+
+---
+
+## 6b. 공유 팝업 통합 검증 (2026-08-05 재작업, localhost:8010, AJR75563402)
+
+- **JS 파싱**: esprima(ES2020 연산자 `??`/`?.` 다운레벨 후) `parseScript` PARSE_OK(275,470자) — 전체 문법 유효.
+- **동일성 대조(핵심)**: 두 화면 팝업이 **동일 `PROC_MODAL_HTML`** 호출.
+  - 관경 컬럼 = `/api/weld/diam` = **14** (4.76,5.00,6.35,7.94,9.52,12.70,15.88,19.05,22.00,25.40,28.00,31.75,34.90,38.10) — 양쪽 동일.
+  - 공정 컬럼 = `/api/cost/proc/get` catalog = **48**(own 가공 24 + assy 조립 24), 2단 band(24+24) — 양쪽 동일(unifybom=own+carriers[0].rows, subvariant=own+assy, 같은 catalog 소스).
+  - 용접 매트릭스 행 = 표준소요량/표준공수/용접횟수(input)/소요량/내부ST 5행 — 공유 렌더러라 구조 동일.
+- **축약본 마커 제거 확인**: 서빙 JS에 `np.catalog·np.proc·np.weldRows·npWeldPrev·np-pq·np-wf·np-wtype·np-loss·np-wadd·np-wdel·np-x` **0건**(grep). `nodeProcModal`은 얇은 어댑터로만 잔존(PROC_MODAL_HTML 호출).
+- **e2e**(route/copy base→detail→node popup 어댑터→weld/save→proc/node_save→detail→sub/create→sub/dissolve→finalize→cleanup):
+```
+[routes] existing=1 next_no=2
+[route/copy base] route_id=54 route_no=2 lines=10
+[detail] base_gongsu=43.0 asm_procs=5 part_cut_parts=3 route_parts=10 saved_procs=0
+[BASE split] 절삭27.0 + 조립16.0 = 43.0 (=base_gongsu)
+[node popup ASSY] cols=own24+assy24=48 · 관경14 · seed조립5건
+[weld/save ASSY 19.05×2] rows=1 use_qty(재료)=0.0066 st(가공비)=46.0
+[proc/node_save ASSY(BASE 조립 시드)] saved=5 node_gongsu=16.0
+[detail#2] saved_procs=5 welds=1 cand=16.0
+[sub/create 부품2] sub_item=AJR75563402_S05 moved=2
+[sub/dissolve] freed=2 moved_proc=0 moved_weld=0  (공수합 보존)
+[finalize commit] ok=True gongsu_ok=True part_ok=True cand=43.0=base=43.0 (cut27+proc16) parts=10/10 errs=[]
+[cleanup route/delete] {'ok':True,'deleted':54}
+```
+- **원가 회귀**: 내부원가 AJR75563402 jae(재료)=4014.74 · gagong=1653.59 · naewon=6068.33 · proc 공수합=43 — 앵커 불변(원가엔진/백엔드 무수정, 프론트 리팩터만).
+- **index.html** ?v=260805m → **260805n**. **백엔드 무변경**(openapi=317 유지). 어댑터는 기존 엔드포인트(cost/proc/get·route/detail·weld/save·proc/node_save·sub/dissolve)만 사용.
+
+미완/주의(재작업분):
+- 브라우저 실제 픽셀 렌더(두 팝업 나란히 눈 대조)·드래그는 **사용자 확인 필요**(구조·컬럼수·마커·파싱·백엔드 왕복은 자동검증 완료).
+- subvariant 팝업의 가공(own 24) 컬럼은 대개 0(절삭=부품 자동귀속). 사용자가 own에 값 입력 시 finalize 게이트(Σpart_cut+Σroute_proc=BASE)가 이중계상을 차단.
 
 ---
 
