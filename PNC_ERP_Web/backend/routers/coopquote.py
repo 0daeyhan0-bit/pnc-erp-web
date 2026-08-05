@@ -536,7 +536,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             elif role == "매입부품":
                 mat_before = round(pp * cq) if pp else (round(pt["mat"]) if pt else 0)
             elif role == "제작동관":
-                mat_before = round(uw * cq * sagub_q) if (uw and sagub_q > 0) else (round(pt["mat"]) if pt else 0)
+                # 종전 동관재료 = 견적값(소요중량×종전동사급가). coop_quote.sagub_price는 일부 오염(621 등)이라 안씀.
+                mat_before = round(pt["mat"]) if (pt and pt.get("mat")) else (round(uw * cq * sagub_q) if (uw and sagub_q > 0) else 0)
             else:
                 mat_before = (round(pt["mat"]) if pt else 0)
             rows.append({
