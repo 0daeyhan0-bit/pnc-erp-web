@@ -668,14 +668,14 @@ function priceItemView(c){
         <td>${esc(v.vendor_name||v.vendor_code)}</td>
         <td class="center">${v.is_active?'<span style="color:#1c7c3a">✔</span>':'<span style="color:#aab">-</span>'}</td>
         <td class="num">${v.alloc_ratio==null?'-':won(v.alloc_ratio)+'%'}</td>
-        <td class="num">${v.buy_price==null?'<span style="color:#c9d1dc">-</span>':won(v.buy_price)}</td>
+        <td style="text-align:left">${(v.assy_subs&&v.assy_subs.length)?v.assy_subs.map(a=>`<div style="font-size:11px;white-space:nowrap"><span style="color:#556">🧩 ${esc(a.sub_name||a.sub_item)}</span> <b>${a.assy_price==null?'-':won(a.assy_price)}</b></div>`).join(''):'<span style="color:#c9d1dc">-</span>'}</td>
         <td style="text-align:left">${(v.sagub_items&&v.sagub_items.length)?v.sagub_items.map(si=>`<div style="font-size:11px;white-space:nowrap"><span style="color:#556">${esc(si.item_name||si.item_code)}</span> <b>${si.sagub_price==null?'-':won(si.sagub_price)}</b></div>`).join(''):(v.sagub_price==null?'<span style="color:#c9d1dc">-</span>':won(v.sagub_price))}</td>
         <td class="center" style="font-size:11px;color:#778">${esc(v.apply_from||'')}${v.apply_to?'~'+esc(v.apply_to):''}</td></tr>`));
     });
     if(!rows.length)return `<div class="section-t" style="color:#8a6d1c">🧭 조달후보 업체별 계획단가 <span class="muted" style="font-weight:400">(정산 아님)</span></div><div class="empty" style="font-size:12px">지정된 후보 업체·계획단가 없음 — [조달 프로파일 › 업체·단가 지정]에서 입력</div>`;
     return `<div class="section-t" style="color:#8a6d1c">🧭 조달후보 업체별 계획단가 <span class="muted" style="font-weight:400">(후보/계획 단가 — <b>정산 아님</b>)</span></div>
-      <div style="font-size:11px;color:#8a6d1c;background:#fdf7e6;border:1px solid #f0e6c8;border-radius:6px;padding:5px 8px;margin-bottom:5px">후보 원가비교(R01 vs R02)용 계획단가입니다(<code>nx.sourcing_profile</code>, 읽기전용). 위 <b>정산 매입/판매 단가</b>(마스터·마감때만 수정)와는 별개입니다.</div>
-      <table class="tbl"><thead><tr><th>조달후보</th><th>업체</th><th class="center">활성</th><th class="num">배분%</th><th class="num">매입단가(계획)</th><th>사급단가(품목별·계획)</th><th class="center">유효기간</th></tr></thead>
+      <div style="font-size:11px;color:#8a6d1c;background:#fdf7e6;border:1px solid #f0e6c8;border-radius:6px;padding:5px 8px;margin-bottom:5px">외주 SUB 중심 3구분: <b>ASSY 매입단가</b>(외주 SUB 단위)+<b>사급 부품 가격</b>(SUB 하위 부품별). 단품 매입품은 매입 마스터 자동. 후보 원가비교(R01 vs R02)용 계획단가(읽기전용), 위 <b>정산 매입/판매 단가</b>(마스터·마감때만 수정)와는 별개입니다.</div>
+      <table class="tbl"><thead><tr><th>조달후보</th><th>업체</th><th class="center">활성</th><th class="num">배분%</th><th>ASSY 매입단가(SUB·계획)</th><th>사급 부품 가격(SUB하위·계획)</th><th class="center">유효기간</th></tr></thead>
       <tbody>${rows.join('')}</tbody></table>`;
   };
   const draw=()=>{

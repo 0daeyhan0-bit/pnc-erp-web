@@ -1308,22 +1308,27 @@ SCREEN.sourceprofile=(c)=>{
       const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 후보 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
       alert('저장 실패 — '+hint+':\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
     catch(e){alert('저장 실패: '+e);}};
-  // ===== 업체·단가 모달(후보 route_id별 업체분배 + 업체별 계획 매입/사급 단가) — nx.sourcing_profile =====
+  // ===== 업체·단가 모달 — ★확정 3구분 모델(외주 SUB 중심) — nx.sourcing_profile + sub_price + sagub_price =====
+  // 1) 사급 부품 가격=외주 SUB 하위 부품별(중첩모달) 2) ASSY 매입단가=외주 SUB 단위(업체별) 3) 단품 매입=매입 마스터 자동(입력X·읽기전용)
   // ★후보/계획 단가(정산 아님): sourcing 레이어(nx)에만 저장. 정산 매입/판매 단가(마스터)는 손대지 않음(마감 때만 수정).
-  let pm=null, pmAcT=null;   // pm={route, hdr, rows[], msg, loading}
-  let sm=null;               // 중첩모달 sm={route_id, vendor_code, vendor_name, rows[], hdr, msg, loading} — 품목별 사급단가(계획)
+  let pm=null, pmAcT=null;   // pm={route,hdr,rows[](업체),subs[],direct[],assy{},msg,loading}
+  let sm=null;               // 중첩모달 sm={route_id,vendor_code,vendor_name,sub_item,sub_name,rows[],hdr,msg,loading} — 외주 SUB 하위 부품별 사급단가(계획)
   const SG_OPTS=[['2','외주(유상사급)'],['1','자체'],['3','매입']];
+  const AK=(vc,si)=>`${vc}||${si}`;   // ASSY 매입단가 맵 키(업체×외주 SUB)
   const blankVRow=()=>({profile_id:0,vendor_code:'',vendor_name:'',supply_gubun:'2',alloc_ratio:null,apply_from:FROM0,apply_to:'',is_active:1,buy_price:null,sagub_price:null,lme_flag:0,_delete:false});
-  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],msg:'',loading:true};draw();
+  const pmOpen=async(r)=>{pm={route:r,hdr:null,rows:[],subs:[],direct:[],assy:{},msg:'',loading:true};draw();
     try{const res=await fetch(`${API}/api/sourcing/profile/list?route_id=${r.route_id}`);const j=await res.json();
       pm.hdr=j.header||null;
       pm.rows=(j.rows||[]).map(x=>({profile_id:x.profile_id,vendor_code:x.vendor_code||'',vendor_name:x.vendor_name||'',
         supply_gubun:x.supply_gubun||'2',alloc_ratio:(x.alloc_ratio!=null?x.alloc_ratio:null),
         apply_from:x.apply_from||'',apply_to:x.apply_to||'',is_active:x.is_active?1:0,
-        buy_price:(x.buy_price!=null?x.buy_price:null),sagub_price:(x.sagub_price!=null?x.sagub_price:null),
-        lme_flag:x.lme_flag?1:0,_delete:false}));
+        buy_price:null,sagub_price:null,lme_flag:x.lme_flag?1:0,_delete:false}));
       if(!pm.rows.length)pm.rows=[blankVRow()];
     }catch(e){pm.msg='업체 목록 로드 실패';}
+    try{const sr=await fetch(`${API}/api/sourcing/sub_price?route_id=${r.route_id}`);const sj=await sr.json();
+      pm.subs=sj.subs||[];pm.direct=sj.direct_items||[];
+      (sj.prices||[]).forEach(p=>{pm.assy[AK(p.vendor_code,p.sub_item)]=(p.assy_price!=null?p.assy_price:null);});
+    }catch(e){}
     pm.loading=false;draw();};
   const pmClose=()=>{pm=null;sm=null;draw();};
   const pmAddRow=()=>{pm.rows.push(blankVRow());draw();};
@@ -1339,27 +1344,36 @@ SCREEN.sourceprofile=(c)=>{
     const hit=list.find(x=>x.name===v)||list.find(x=>x.code===v)||list.find(x=>(x.name||'').indexOf(v)>=0);
     if(hit){pm.rows[idx].vendor_code=hit.code;pm.rows[idx].vendor_name=hit.name;}else{pm.rows[idx].vendor_name=v;}};
   const pmSave=async()=>{
+    // ① 업체·배분(공통) — 매입/사급 단가 단일칸은 미사용(null) 저장
     const rows=pm.rows.map(r=>({profile_id:r.profile_id||0,vendor_code:r.vendor_code||'',supply_gubun:r.supply_gubun||'2',
       lme_flag:r.lme_flag?1:0,apply_from:r.apply_from||null,apply_to:r.apply_to||null,is_active:r.is_active?1:0,is_internal:0,
       alloc_ratio:(r.is_active&&r.alloc_ratio!==''&&r.alloc_ratio!=null)?parseFloat(r.alloc_ratio):null,
-      buy_price:(r.buy_price!==''&&r.buy_price!=null)?parseFloat(r.buy_price):null,
-      sagub_price:(r.sagub_price!==''&&r.sagub_price!=null)?parseFloat(r.sagub_price):null,
-      _delete:!!r._delete}));
+      buy_price:null,sagub_price:null,_delete:!!r._delete}));
+    // ② ASSY 매입단가(외주 SUB 단위) — 지정 업체 × 외주 SUB
+    const arows=[];
+    pm.rows.filter(r=>!r._delete&&r.vendor_code).forEach(v=>pm.subs.forEach(s=>{
+      const val=pm.assy[AK(v.vendor_code,s.sub_item)];
+      arows.push({vendor_code:v.vendor_code,sub_item:s.sub_item,assy_price:(val!==''&&val!=null)?parseFloat(val):null});}));
     try{const res=await fetch(`${API}/api/sourcing/profile/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:pm.route.route_id,rows})});
       const j=await res.json();
-      if(j.ok){pm.msg=`✅ 저장 완료 (추가 ${j.ins||0} · 수정 ${j.upd||0} · 삭제 ${j.del||0})`;await pmOpen(pm.route);return;}
-      const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 업체 배분합=100% 확인':(j.gate==='NOT_APPROVED'?'미승인 후보는 업체 지정 불가(개발 승인 필요)':'저장 거부');
-      pm.msg='❌ 저장 실패 — '+hint+(j.errors?': '+j.errors.join(' / '):(j.msg?': '+j.msg:''));draw();}
+      if(!j.ok){const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 업체 배분합=100% 확인':(j.gate==='NOT_APPROVED'?'미승인 후보는 업체 지정 불가(개발 승인 필요)':'저장 거부');
+        pm.msg='❌ 저장 실패 — '+hint+(j.errors?': '+j.errors.join(' / '):(j.msg?': '+j.msg:''));draw();return;}
+      let amsg='';
+      if(pm.subs.length&&arows.length){const ar=await fetch(`${API}/api/sourcing/sub_price/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:pm.route.route_id,rows:arows})});
+        const aj=await ar.json();if(aj&&aj.ok)amsg=` · ASSY ${aj.upsert||0}반영/${aj.del||0}삭제`;}
+      pm.msg=`✅ 저장 완료 (업체 추가 ${j.ins||0} · 수정 ${j.upd||0} · 삭제 ${j.del||0}${amsg})`;await pmOpen(pm.route);return;}
     catch(e){pm.msg='❌ 저장 실패: '+e;draw();}};
   const nfp=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   // ===== 중첩모달: 품목별 사급단가(계획) — 그 업체 스코프. 품목=이 후보(route_line) 구성 품번(용접봉 제외, 자유추가 아님) =====
   const smClose=()=>{sm=null;draw();};
-  const smOpen=async(vc,vn)=>{if(!vc){alert('먼저 업체를 지정하세요.');return;}
-    sm={route_id:pm.route.route_id,vendor_code:vc,vendor_name:vn||vc,rows:[],hdr:null,msg:'',loading:true};draw();
+  const smOpen=async(vc,vn,si,sn)=>{if(!vc){alert('먼저 업체를 지정하세요.');return;}
+    sm={route_id:pm.route.route_id,vendor_code:vc,vendor_name:vn||vc,sub_item:si||'',sub_name:sn||'',rows:[],hdr:null,msg:'',loading:true};draw();
     try{const res=await fetch(`${API}/api/sourcing/sagub_price?route_id=${pm.route.route_id}&vendor_code=${encodeURIComponent(vc)}`);const j=await res.json();
       sm.hdr=j.header||null;
-      sm.rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',gubun:x.gubun||'',node_kind:x.node_kind||'PART',
+      let rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',gubun:x.gubun||'',node_kind:x.node_kind||'PART',sub_item:x.sub_item||'',
         sagub_price:(x.sagub_price!=null?x.sagub_price:null)}));
+      if(si)rows=rows.filter(r=>r.sub_item===si);   // ★이 외주 SUB 하위 부품만
+      sm.rows=rows;
     }catch(e){sm.msg='❌ 품목 로드 실패: '+e;}
     sm.loading=false;draw();};
   const smSave=async()=>{const vc=sm.vendor_code,vn=sm.vendor_name;
@@ -1380,50 +1394,74 @@ SCREEN.sourceprofile=(c)=>{
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:130;background:rgba(20,30,50,.5);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:40px 10px">
       <div style="background:#fff;border-radius:10px;min-width:560px;max-width:92vw;box-shadow:0 8px 44px rgba(0,0,0,.32)">
        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
-         <span style="font-weight:700;font-size:15px;color:#b8860b">📋 사급품목 단가</span>
+         <span style="font-weight:700;font-size:15px;color:#b8860b">📋 사급 부품 가격</span>
          ${badge(pm.route)} <b style="color:#1c3a6e">${esc(sm.vendor_name||sm.vendor_code)}</b>
-         <span style="color:var(--muted);font-size:12px">${esc(sel)} · ${sm.rows.length}품목 · 입력 ${nP}</span>
+         ${sm.sub_item?`<span style="font-size:11px;background:#fdf7e6;border:1px solid #e6d29a;color:#8a6d1c;border-radius:8px;padding:1px 7px">🧩 ${esc(sm.sub_item)}${sm.sub_name?' · '+esc(sm.sub_name):''}</span>`:''}
+         <span style="color:var(--muted);font-size:12px">${esc(sel)} · ${sm.rows.length}부품 · 입력 ${nP}</span>
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="sm-x" style="font-size:16px">✖</button></div>
        <div style="padding:8px 16px 4px;font-size:12px;color:#8a6d1c;background:#fdf7e6;border-bottom:1px solid #f0e6c8">
-         ⚠️ 사급단가는 <b>후보/계획 단가(정산 아님)</b> — 이 업체에 공급하는 사급 품목(이 후보 <code>route_line</code> 구성 품번·용접봉 제외)별로 <code>nx.sourcing_sagub_price</code>에 저장. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
+         ⚠️ 사급 부품 가격은 <b>후보/계획 단가(정산 아님)</b> — 이 <b>외주 SUB</b>에 물린 <b>하위 부품</b>(레벨1 직속 단품 매입·용접봉 제외)별로 <code>nx.sourcing_sagub_price</code>에 저장. 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
        <div style="padding:0 16px 8px;overflow:auto;max-height:56vh">
          <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th class="num">사급단가<br><span style="font-weight:400;font-size:10px">(계획)</span></th></tr></thead>
-         <tbody>${rowsHtml||`<tr><td colspan="3" class="empty">이 후보(route_line)에 구성 품번이 없습니다 — [개발 › 조달경로 통합검토]에서 구성하세요.</td></tr>`}</tbody></table></div>
+         <tbody>${rowsHtml||`<tr><td colspan="3" class="empty">이 외주 SUB에 물린 하위 부품이 없습니다 — [개발 › 조달경로 통합검토]에서 구성하세요.</td></tr>`}</tbody></table></div>
        <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">
-         <span style="font-size:11px;color:#8aa0bd">품목은 이 후보에 물린 구성 품번 기준(자유추가 아님). 공란=저장 시 해당 품목 단가 삭제.</span>
+         <span style="font-size:11px;color:#8aa0bd">대상은 이 외주 SUB의 하위 부품 기준(자유추가 아님). 공란=저장 시 해당 부품 단가 삭제.</span>
          ${sm.msg?`<span style="font-size:12px;font-weight:600;color:${sm.msg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(sm.msg)}</span>`:''}
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="sm-cancel">닫기</button>
          ${canW?`<button class="btn" id="sm-save" style="background:#b8860b;color:#fff">💾 저장</button>`:''}</div>
       </div></div>`;};
-  const vendorModal=()=>{if(!pm)return '';const h=pm.hdr,S=pmStat(),ok=S.single||Math.abs(S.sum-100)<0.01;
-    const rowsHtml=pm.loading?`<tr><td colspan="8">${spinRow(1)}</td></tr>`:pm.rows.map((r,i)=>r._delete?'':`
+  const vendorModal=()=>{if(!pm)return '';const S=pmStat(),ok=S.single||Math.abs(S.sum-100)<0.01;
+    // ① 업체·배분(공통)
+    const rowsHtml=pm.loading?`<tr><td colspan="7">${spinRow(1)}</td></tr>`:pm.rows.map((r,i)=>r._delete?'':`
       <tr>
         <td><input class="inp pm-e" list="pm-vdl" autocomplete="off" data-i="${i}" data-f="vendor" value="${esc(r.vendor_name||r.vendor_code||'')}" placeholder="업체명/코드" style="width:150px;min-width:0">${r.vendor_code?`<div style="font-size:10px;color:#8aa0bd">${esc(r.vendor_code)}</div>`:''}</td>
         <td><select class="pm-e" data-i="${i}" data-f="supply_gubun">${SG_OPTS.map(([v,l])=>`<option value="${v}"${r.supply_gubun===v?' selected':''}>${l}</option>`).join('')}</select></td>
         <td class="num"><input class="inp pm-e num" type="number" step="0.1" data-i="${i}" data-f="alloc_ratio" value="${r.alloc_ratio==null?'':r.alloc_ratio}" placeholder="—" style="width:56px;min-width:0"></td>
         <td><input class="inp pm-e" type="date" data-i="${i}" data-f="apply_from" value="${esc(r.apply_from||'')}" style="width:118px;min-width:0"></td>
         <td><input class="inp pm-e" type="date" data-i="${i}" data-f="apply_to" value="${esc(r.apply_to||'')}" title="비우면 무기한" style="width:118px;min-width:0"></td>
-        <td class="num"><input class="inp pm-e num" type="number" step="1" data-i="${i}" data-f="buy_price" value="${r.buy_price==null?'':r.buy_price}" placeholder="계획" style="width:88px;min-width:0"></td>
-        <td class="center">${r.vendor_code?`<button class="btn ghost pm-sagub" data-i="${i}" title="이 업체에 공급하는 사급 품목별 단가(계획)" style="padding:1px 8px;font-size:11px;color:#b8860b;border-color:#e6d29a">📋 사급품목 단가</button>`:`<span style="font-size:10px;color:#aab" title="업체 지정 후 사용">업체지정후</span>`}</td>
-        <td class="center"><input type="checkbox" class="pm-e" data-i="${i}" data-f="is_active"${r.is_active?' checked':''}> <button class="btn ghost pm-del" data-i="${i}" title="삭제" style="padding:0 6px;color:#c0392b">✖</button></td>
+        <td class="center"><input type="checkbox" class="pm-e" data-i="${i}" data-f="is_active"${r.is_active?' checked':''}></td>
+        <td class="center"><button class="btn ghost pm-del" data-i="${i}" title="삭제" style="padding:0 6px;color:#c0392b">✖</button></td>
       </tr>`).join('');
+    // ② ASSY 매입단가 + 사급 부품 가격 = 외주 SUB 단위(업체별)
+    const activeV=pm.rows.filter(r=>!r._delete&&r.vendor_code);
+    const subBlocks=pm.subs.map(s=>{
+      const arows=activeV.length?activeV.map(v=>{const val=pm.assy[AK(v.vendor_code,s.sub_item)];
+        return `<tr>
+          <td style="font-weight:600">${esc(v.vendor_name||v.vendor_code)}<div style="font-size:10px;color:#8aa0bd">${esc(v.vendor_code)}</div></td>
+          <td class="num"><input class="inp pm-assy num" data-vc="${esc(v.vendor_code)}" data-si="${esc(s.sub_item)}" type="number" step="1" value="${val==null?'':val}" placeholder="계획" style="width:100px;min-width:0" ${canW?'':'disabled'}></td>
+          <td class="center"><button class="btn ghost pm-sagub2" data-vc="${esc(v.vendor_code)}" data-vn="${esc(v.vendor_name||v.vendor_code)}" data-si="${esc(s.sub_item)}" data-sn="${esc(s.sub_name||'')}" title="이 SUB 하위 부품별 사급 부품 가격(계획)" style="padding:1px 8px;font-size:11px;color:#b8860b;border-color:#e6d29a">📋 사급 부품 가격</button></td>
+        </tr>`;}).join(''):`<tr><td colspan="3" class="empty">먼저 위에서 업체를 지정하세요.</td></tr>`;
+      return `<div style="margin-top:10px;border:1px solid #e6d29a;border-radius:8px;overflow:hidden">
+        <div style="padding:6px 10px;background:#fdf7e6;font-size:12px;font-weight:700;color:#8a6d1c">🧩 외주 SUB · <b>${esc(s.sub_item)}</b> <span style="font-weight:400;color:#556">${esc(s.sub_name||'')}</span> <span style="font-size:10px;color:#b8860b">${esc(s.gubun||'')}</span></div>
+        <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>업체</th><th class="num">ASSY 매입단가<br><span style="font-weight:400;font-size:10px">(계획·완성 SUB)</span></th><th class="center">사급 부품 가격<br><span style="font-weight:400;font-size:10px">(SUB 하위 부품별)</span></th></tr></thead>
+        <tbody>${arows}</tbody></table></div>`;}).join('');
+    const noSub=!pm.subs.length?`<div style="margin-top:10px;padding:8px 12px;background:#f4f6fb;border:1px dashed #c9d3e0;border-radius:8px;font-size:12px;color:#5a6b82">외주 SUB 없음(단품·제작만) — ASSY 매입단가·사급 부품 가격 대상 없음. 단품 매입은 매입 마스터/원가 자동조회.</div>`:'';
+    // ③ 단품 매입품(레벨1 직속 매입) = 입력 없음·읽기전용
+    const directBlock=pm.direct.length?`<div style="margin-top:12px">
+        <div style="font-size:12px;font-weight:700;color:#334;margin-bottom:3px">📦 단품 매입품 <span style="font-weight:400;font-size:11px;color:#8aa0bd">(레벨1 직속 매입 · 입력 없음 · 매입 마스터 자동조회·읽기전용)</span></div>
+        <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th>구분</th></tr></thead>
+        <tbody>${pm.direct.map(d=>`<tr><td><b>${esc(d.item_code)}</b></td><td class="bcap" style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.item_name)}">${esc(d.item_name)}</td><td style="color:#1c47a0">${esc(d.gubun||'매입')}</td></tr>`).join('')}</tbody></table></div>`:'';
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
-      <div style="background:#fff;border-radius:10px;min-width:820px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+      <div style="background:#fff;border-radius:10px;min-width:760px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
-         <span style="font-weight:700;font-size:15px;color:#1c3a6e">🏭 업체·단가 지정</span>
+         <span style="font-weight:700;font-size:15px;color:#1c3a6e">🏭 업체·단가 지정 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(외주 SUB 중심)</span></span>
          ${badge(pm.route)} <b style="color:#1c3a6e">${esc(pm.route.route_name||'')}</b>
          <span style="color:var(--muted);font-size:12px">${esc(sel)} ${esc(selNm)}</span>
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="pm-x" style="font-size:16px">✖</button></div>
        <div style="padding:8px 16px 4px;font-size:12px;color:#8a6d1c;background:#fdf7e6;border-bottom:1px solid #f0e6c8">
-         ⚠️ 여기 입력하는 단가는 <b>후보/계획 단가(정산 아님)</b>. <b>매입단가=업체당 1개</b>(<code>nx.sourcing_profile</code>). <b>사급단가=[📋 사급품목 단가] 버튼</b>으로 이 업체에 공급하는 <b>품목별</b> 입력(<code>nx.sourcing_sagub_price</code>). 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
-       <div style="padding:6px 16px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${S.single?`활성 업체 ${S.n}개(단일 → 100% 자동)`:`활성 업체 ${S.n}개 배분합 ${S.sum}% ${ok?'✓':'(=100 필요)'}`}</div>
-       <div style="padding:0 16px 8px;overflow:auto;max-height:52vh">
-         <table class="tbl" style="font-size:12px"><thead><tr><th>업체</th><th>공급구분</th><th class="num">배분%</th><th>유효시작</th><th>유효종료</th><th class="num">매입단가<br><span style="font-weight:400;font-size:10px">(계획·업체당1)</span></th><th class="center">사급단가<br><span style="font-weight:400;font-size:10px">(품목별)</span></th><th class="center">활성</th></tr></thead>
-         <tbody>${rowsHtml||`<tr><td colspan="8" class="empty">업체를 추가하세요</td></tr>`}</tbody></table>
-         <datalist id="pm-vdl"></datalist></div>
+         ⚠️ <b>후보/계획 단가(정산 아님)</b> · 3구분: ① <b>ASSY 매입단가</b>=외주 SUB 단위(완성 SUB 매입, <code>nx.sourcing_sub_price</code>) ② <b>사급 부품 가격</b>=외주 SUB 하위 부품별(<code>nx.sourcing_sagub_price</code>) ③ <b>단품 매입품</b>=매입 마스터 자동(입력 없음·읽기전용). 정산 매입/판매 단가(마감 때만 수정)는 변경되지 않습니다.</div>
+       <div style="padding:0 16px 12px;overflow:auto;max-height:66vh">
+         <div style="font-size:12px;font-weight:700;color:#334;margin:8px 0 3px">① 업체·배분 <span style="font-weight:400;font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">${S.single?`활성 ${S.n}개(단일 → 100% 자동)`:`활성 ${S.n}개 배분합 ${S.sum}% ${ok?'✓':'(=100 필요)'}`}</span></div>
+         <table class="tbl" style="font-size:12px"><thead><tr><th>업체</th><th>공급구분</th><th class="num">배분%</th><th>유효시작</th><th>유효종료</th><th class="center">활성</th><th class="center">삭제</th></tr></thead>
+         <tbody>${rowsHtml||`<tr><td colspan="7" class="empty">업체를 추가하세요</td></tr>`}</tbody></table>
+         <datalist id="pm-vdl"></datalist>
+         <div style="font-size:12px;font-weight:700;color:#334;margin:12px 0 0">② 외주 SUB — ASSY 매입단가 · 사급 부품 가격</div>
+         ${subBlocks}${noSub}
+         ${directBlock}
+       </div>
        <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">
          <button class="btn" id="pm-add">➕ 업체추가</button>
          ${pm.msg?`<span style="font-size:12px;font-weight:600;color:${pm.msg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(pm.msg)}</span>`:''}
@@ -1436,7 +1474,8 @@ SCREEN.sourceprofile=(c)=>{
     const ad=g('#pm-add');if(ad)ad.onclick=pmAddRow;
     const sv=g('#pm-save');if(sv)sv.onclick=pmSave;
     c.querySelectorAll('.pm-del').forEach(el=>el.onclick=()=>pmDelRow(+el.dataset.i));
-    c.querySelectorAll('.pm-sagub').forEach(el=>el.onclick=()=>{const r=pm.rows[+el.dataset.i];if(r&&r.vendor_code)smOpen(r.vendor_code,r.vendor_name);else alert('먼저 업체를 지정하세요.');});
+    c.querySelectorAll('.pm-assy').forEach(el=>el.onchange=()=>{pm.assy[AK(el.dataset.vc,el.dataset.si)]=(el.value===''?null:el.value);});
+    c.querySelectorAll('.pm-sagub2').forEach(el=>el.onclick=()=>{if(el.dataset.vc)smOpen(el.dataset.vc,el.dataset.vn,el.dataset.si,el.dataset.sn);else alert('먼저 업체를 지정하세요.');});
     if(sm){const sx=g('#sm-x'),sc=g('#sm-cancel');if(sx)sx.onclick=smClose;if(sc)sc.onclick=smClose;
       const ssv=g('#sm-save');if(ssv)ssv.onclick=smSave;
       c.querySelectorAll('.sm-e').forEach(el=>{const i=+el.dataset.i;el.onchange=()=>{sm.rows[i].sagub_price=(el.value===''?null:el.value);};});}
@@ -1445,7 +1484,7 @@ SCREEN.sourceprofile=(c)=>{
       else if(f==='is_active'){el.onchange=()=>{pm.rows[i].is_active=el.checked?1:0;draw();};}
       else if(f==='supply_gubun'){el.onchange=()=>{pm.rows[i].supply_gubun=el.value;};}
       else if(f==='alloc_ratio'){el.onchange=()=>{pm.rows[i].alloc_ratio=(el.value===''?null:el.value);draw();};}
-      else{el.onchange=()=>{pm.rows[i][f]=(el.value===''?(f==='buy_price'||f==='sagub_price'?null:''):el.value);};}});};
+      else{el.onchange=()=>{pm.rows[i][f]=(el.value===''?'':el.value);};}});};
   const kindOf=n=>{if((n.nm||'').indexOf('용접봉')>=0)return{t:'용접봉',c:'#8e44ad'};if(n.haskids)return{t:'제작(SUB)',c:'#1c7c3a'};if(String(n.sag)==='1')return{t:'사급',c:'#b8860b'};return{t:'매입/구매',c:'#1c47a0'};};
   const treeTbl=()=>{if(!tree)return '';if(!tree.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
     return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${tree.map(n=>{const k=kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${esc(n.custnm||'')}</td></tr>`;}).join('')}</tbody></table>`;};
