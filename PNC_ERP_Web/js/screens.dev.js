@@ -978,6 +978,69 @@ SCREEN.unifybom=(c,ro)=>{
   let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let naeModal=false;   // 공정 수정 팝업(모달) 표시
   let silD=null, silFor='', silLoad=false, silView='company';
+  // ★조달경로 후보 연동(현행 R01 + 승인 후보 R02..) — BOM구성·실원가 탭 공용 선택기. routeSel=0=현행(마스터), >0=후보 route_id.
+  let routes=[], routesFor='', routeSel=0, routeTree=null, routeTreeFor=-1, routeCost=null, routeCostFor=-1, routeBusy=false;
+  const loadRoutes=async()=>{if(!item)return;
+    try{const r=await fetch(`${API}/api/sourcing/routes?item=${encodeURIComponent(item)}&for_profile=1&show_unapproved=0`);
+      const j=await r.json();routes=(j.routes||[]);routesFor=item;}catch(e){routes=[];routesFor=item;}};
+  // 후보 선택기(현행+승인후보) — 두 탭 공용
+  const candSelector=(tabn)=>{
+    if(!routes.length) return '';
+    const opts=routes.map(rt=>{const lbl=rt.baseline?'현행 (실사용 BOM · R01)':`R${String(rt.route_no).padStart(2,'0')} ${rt.route_name||'대안'}${rt.approve_flag?'':' ·미승인'}`;
+      return `<option value="${rt.route_id}" ${rt.route_id===routeSel?'selected':''}>${esc(lbl)}</option>`;}).join('');
+    const cur=routes.find(rt=>rt.route_id===routeSel);
+    const desc=routeSel>0?`후보 R${cur?String(cur.route_no).padStart(2,'0'):''} 구조·실원가 보기 — 조달 업체는 <b>조달프로파일</b> 계층`:'현행(마스터 실사용 BOM) 보기';
+    return `<div class="cand-bar"><b style="color:#8e44ad;font-size:12px">🔀 조달경로</b>
+       <select class="cand-sel" data-tab="${tabn}" style="min-width:230px">${opts}</select>
+       <span style="color:#7a6a92;font-size:11px">${desc}</span>${routeSel>0?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">후보</span>':'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">현행</span>'}</div>`;};
+  const loadRouteTree=async()=>{if(routeSel<=0){routeTree=null;return;}routeBusy=true;draw();
+    try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}&route_id=${routeSel}`);routeTree=await r.json();routeTreeFor=routeSel;}
+    catch(e){routeTree={error:e.message};routeTreeFor=routeSel;}routeBusy=false;draw();};
+  const loadRouteCost=async()=>{if(routeSel<=0){routeCost=null;return;}routeBusy=true;draw();
+    try{const r=await fetch(`${API}/api/sourcing/route/cost?route_id=${routeSel}&ymd=${encodeURIComponent(naeYmd)}`);routeCost=await r.json();routeCostFor=routeSel;}
+    catch(e){routeCost={error:e.message};routeCostFor=routeSel;}routeBusy=false;draw();};
+  const bindCandSel=()=>{c.querySelectorAll('.cand-sel').forEach(el=>el.onchange=()=>{routeSel=+el.value;routeTreeFor=-1;routeCostFor=-1;draw();});};
+  // 후보 구조 트리(BOM구성 탭, routeSel>0) — bom/tree route_id 동일스키마
+  const routeTreeTable=()=>{
+    if(routeBusy||routeTreeFor!==routeSel) return `<div class="empty">후보 구조 로딩…</div>`;
+    if(!routeTree||routeTree.error) return `<div class="empty" style="color:#c0392b">⚠ ${esc((routeTree&&routeTree.error)||'후보 구조 로드 실패')}</div>`;
+    const rows=routeTree.rows||[];
+    const body=rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
+      const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
+      const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':(r.gubun?`<span class="nae-tg" style="color:#556;border-color:#ccc">${esc(r.gubun)}</span>`:''));
+      return `<tr style="background:${bg}"><td class="center">${r.level}</td>
+        <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag}</td>
+        <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
+        <td class="center" style="color:#5a6b82">${esc(sp)}</td>
+        <td class="num">${q4(r.qty)}</td>
+        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:130px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">후보 구성 없음</td></tr>';
+    return `<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#8e44ad">후보 R${String(routeTree.route_no).padStart(2,'0')}</b> ${esc(routeTree.route_name||'')} · 조달경로 구조(SUB 포함) · <span style="color:#8a94a6">공급처=조달프로파일</span></div></div>
+      <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto"><table class="tbl bm-tbl">
+      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th style="text-align:left">공급처</th></tr></thead>
+      <tbody>${body}</tbody></table></div>`;};
+  // 후보 실원가(실원가 탭, routeSel>0) — route/cost. 현행 대비 손익 diff.
+  const routeCostContent=()=>{
+    if(routeBusy||routeCostFor!==routeSel) return `<div class="empty">후보 실원가 계산 중…</div>`;
+    if(!routeCost||routeCost.error) return `<div class="page-sub" style="color:#c0392b">⚠ ${esc((routeCost&&routeCost.error)||'후보 원가 로드 실패')}</div>`;
+    const cc=routeCost.cost||{}, cur=routeCost.current||{}, rows=routeCost.rows||[], prc=routeCost.procs||[];
+    const cline=(lb,a,b)=>{const d=Math.round(((+a||0)-(+b||0))*100)/100;return `<tr><td style="text-align:left">${lb}</td><td class="num">${M(b)}</td><td class="num"><b>${M(a)}</b></td><td class="num" style="color:${d===0?'#8a94a6':(d<0?'#1c7c3a':'#c0392b')}">${d===0?'0':((d>0?'+':'')+M(d))}</td></tr>`;};
+    const cmp=`<div class="grid-wrap" style="max-height:30vh;overflow:auto;margin-top:6px"><table class="tbl bm-tbl">
+      <thead><tr><th style="text-align:left">성분</th><th class="num">현행(R01)</th><th class="num">후보 R${String(routeCost.route_no).padStart(2,'0')}</th><th class="num">차이(후보−현행)</th></tr></thead>
+      <tbody>${cline('재료비',cc.jae,cur.jae)}${cline('가공비',cc.gagong,cur.gagong)}${cline('LME차액',cc.lme,cur.lme)}${cline('일반관리',cc.ilban,cur.ilban)}${cline('운반비',cc.unban,cur.unban)}${cline('이윤',cc.profit,cur.profit)}
+        <tr class="nae-foot">${cline('실원가',cc.silwon,cur.silwon).replace(/<td/,'<td')}</tr>${cline('LG판가',cc.lg,cur.lg)}${cline('손익',cc.sonik,cur.sonik)}</tbody></table></div>`;
+    const rowsTbl=`<div class="grid-wrap" style="max-height:34vh;overflow:auto;margin-top:6px"><table class="tbl bm-tbl">
+      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>구분</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">LME</th><th class="num">가공비</th></tr></thead>
+      <tbody>${rows.map(r=>{const k=silKind(r);return `<tr style="background:${['#fff','#f6f9ff','#edf3ff','#e4edff','#dbe7ff'][Math.min(r.level,4)]}">
+        <td class="center">${r.level}</td><td style="padding-left:${8+r.level*16}px;white-space:nowrap">${r.level?'└ ':''}<b>${esc(r.code)}</b></td>
+        <td class="bcap" title="${esc(r.name)}" style="max-width:170px">${esc(r.name)}</td>
+        <td class="center"><span style="color:${k.c};font-weight:600;font-size:11px">${k.t}</span></td>
+        <td class="num">${r.won?M2(r.won):''}</td><td class="num" style="color:#1c6b3a">${M(r.mat)}</td>
+        <td class="num" style="color:#a8442a">${r.lme?M(r.lme):''}</td><td class="num" style="color:#8a5a1a">${M(r.gag)}</td></tr>`;}).join('')||'<tr><td colspan=8 class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
+    return `${sumbar(cc,'silwon','실원가')}
+      <div class="page-sub" style="margin-top:2px;color:#7a6a92">후보 <b>R${String(routeCost.route_no).padStart(2,'0')} ${esc(routeCost.route_name||'')}</b> · 실원가(NxCostEngine, 마스터와 동일 산식) ${routeCost.diff0?'<span class="nae-tg" style="color:#1c7c3a;border-color:#a9d9b9">현행과 diff0</span>':''}</div>
+      <div style="font-weight:700;color:#8e44ad;font-size:12px;margin-top:6px">현행 대비 비교</div>${cmp}
+      <div style="font-weight:700;color:#243244;font-size:12px;margin-top:6px">노드별 실원가</div>${rowsTbl}
+      <div class="page-sub" style="color:#8aa0bd;margin-top:4px">${esc(routeCost.note||'')}</div>`;};
   // ★신규 BOM 등록 상태(방식①LG업로드 ②복사 ③새로) + 용접공정(관경별 횟수) 직원입력
   let newReg=null;              // {method} 모달 표시
   let isNew=false;             // 신규등록 편집 세션(저장시 마스터 생성)
@@ -1012,6 +1075,8 @@ SCREEN.unifybom=(c,ro)=>{
     catch(e){msg='조회 실패: '+e.message;lines=[];}
     try{const tr=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(it)}`);const tj=await tr.json();tree=tj.rows||[];treeMax=tj.maxlevel||0;}
     catch(e){tree=[];treeMax=0;}
+    routeSel=0;routes=[];routesFor='';routeTree=null;routeTreeFor=-1;routeCost=null;routeCostFor=-1;   // ★품번 전환 → 후보선택 현행으로 리셋
+    loadRoutes();   // 조달경로 후보 목록(현행+승인후보) 비동기 로드
     if(enterEdit && !RO && (typeof PERM==='undefined'||PERM.canEdit('unifybom'))){editMode=true;viewTree=false;}
     loading=false;results=[];draw();};
   const save=async()=>{const seen={},errs=[];
@@ -1469,7 +1534,8 @@ SCREEN.unifybom=(c,ro)=>{
     const a=(silD&&silD.agg)||{},rows=(silD&&silD.rows)||[],prc=(silD&&silD.procs)||[];
     const V=[['company','업체'],['proc','공정'],['weld','용접'],['fasten','체결']];
     let content='';
-    if(silLoad) content=`<div class="empty">계산 중…</div>`;
+    if(routeSel>0){ content=routeCostContent(); }
+    else if(silLoad) content=`<div class="empty">계산 중…</div>`;
     else if(silD&&silD.error) content=`<div class="page-sub" style="color:#c0392b">⚠ ${esc(silD.error)}</div>`;
     else if(!silFor) content=`<div class="empty">품번을 조회하세요.</div>`;
     else{
@@ -1495,11 +1561,12 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="toolbar"><span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
        <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="sil-ymd" type="date" value="${ymd2date(naeYmd)}" style="width:150px">
        <button class="btn" id="sil-go">🔍 조회</button><button class="btn ghost" id="sil-regen">🔄 재계산</button><div class="spacer"></div></div>
+     ${candSelector('sil')}
      ${content}${naeCss()}`;
-    bindTabs();
+    bindTabs();bindCandSel();
     const g=id=>c.querySelector(id);
-    g('#sil-go').onclick=()=>{naeYmd=date2ymd(g('#sil-ymd').value)||naeYmd;loadSil();};
-    g('#sil-regen').onclick=()=>loadSil(true);
+    g('#sil-go').onclick=()=>{naeYmd=date2ymd(g('#sil-ymd').value)||naeYmd;routeCostFor=-1;if(routeSel>0)loadRouteCost();else loadSil();};
+    g('#sil-regen').onclick=()=>{if(routeSel>0){routeCostFor=-1;loadRouteCost();}else loadSil(true);};
     c.querySelectorAll('.sil-vb').forEach(el=>el.onclick=()=>{silView=el.dataset.v;drawSil();});
   };
   const naeCss=()=>`<style>
@@ -1529,6 +1596,8 @@ SCREEN.unifybom=(c,ro)=>{
      /* 레벨트리 컴팩트: 행높이 축소로 화면당 품번 최대 */
      .nae-tree td,.nae-tree th{padding:2px 6px;line-height:1.3;font-size:12.5px}
      .nae-tree .nae-edit-btn:hover{background:#7a379a}
+     .cand-bar{display:flex;align-items:center;gap:8px;margin:6px 0;padding:5px 10px;background:#f6f2fb;border:1px solid #d6c3ea;border-radius:8px;flex-wrap:wrap}
+     .cand-bar select{border:1px solid #cbb6e2;border-radius:5px;padding:3px 6px;font-size:12px;background:#fff}
    </style>`;
   const isW=nm=>(nm||'').indexOf('용접봉')>=0;
   // ★임의 SUB(중간 조립노드) 식별 — 평면 BOM(bmFlat·naeFlatMat)에서 행 제외(leaf 재료만). 용접봉(RAC)은 isW로 별도처리(호출부에서 먼저 걸러짐).
@@ -1591,8 +1660,9 @@ SCREEN.unifybom=(c,ro)=>{
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
+     ${item&&!loading&&viewTree&&!editMode?candSelector('bom'):''}
      ${item&&!loading?((viewTree&&!editMode)?`
-       ${bmFlat()}`
+       ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
        <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel():''}`):''}
      ${bomCss()}`;
@@ -1600,6 +1670,7 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
     qi.onkeyup=e=>{if(e.key==='Enter')doSearch(qi.value);};
     if(item)bindTabs();
+    bindCandSel();
     c.querySelectorAll('.bm-r').forEach(el=>el.onclick=()=>{navStack=[];load(el.dataset.it);});
     const tg=c.querySelector('#bm-tree');if(tg)tg.onclick=()=>{viewTree=!viewTree;draw();};
     const wl=c.querySelector('#bm-weld');if(wl)wl.onclick=()=>{showWeld=!showWeld;draw();};
@@ -1659,9 +1730,12 @@ SCREEN.unifybom=(c,ro)=>{
    </style>`;
   const draw=()=>{
     if(tab==='nae'){ if(item&&naeFor!==item&&!naeLoad){loadNae();return;} drawNae(); return; }
-    if(tab==='sil'){ if(item&&silFor!==item&&!silLoad){loadSil();return;} drawSil(); return; }
-    // BOM구성 평면(viewTree)=내부원가(naeD) 공유 렌더 → naeD 없으면 로드(단일레벨/편집 그리드는 tree/lines 사용)
-    if(item&&viewTree&&!editMode&&naeFor!==item&&!naeLoad){ loadNae(); return; }
+    if(tab==='sil'){ if(item&&silFor!==item&&!silLoad){loadSil();return;}
+      if(routeSel>0&&routeCostFor!==routeSel&&!routeBusy){ loadRouteCost(); return; } drawSil(); return; }
+    // 후보 선택 시 BOM구성 = 후보 구조 트리(route/tree) 로드
+    if(tab==='bom'&&routeSel>0&&viewTree&&!editMode&&routeTreeFor!==routeSel&&!routeBusy){ loadRouteTree(); return; }
+    // BOM구성 평면(viewTree, 현행)=내부원가(naeD) 공유 렌더 → naeD 없으면 로드(단일레벨/편집 그리드는 tree/lines 사용)
+    if(item&&viewTree&&!editMode&&routeSel===0&&naeFor!==item&&!naeLoad){ loadNae(); return; }
     drawBom();
   };
   draw();
