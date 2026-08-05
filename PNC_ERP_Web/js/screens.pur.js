@@ -1708,14 +1708,14 @@ SCREEN.coopquote=(host)=>{
       <table class="tbl fit" id="cq-tbl" style="font-size:11px"><thead>
         <tr>
         ${canEd?'<th rowspan="2" style="width:24px"></th>':''}
-        <th rowspan="2">협력사</th><th rowspan="2">품번(Assy)</th><th rowspan="2">품명</th><th rowspan="2">규격</th><th rowspan="2">등급</th>
+        <th rowspan="2" data-sort="vendor" style="cursor:pointer" title="더블클릭 정렬">협력사</th><th rowspan="2" data-sort="assy_code" style="cursor:pointer" title="더블클릭 정렬">품번(Assy)</th><th rowspan="2" data-sort="item_name" style="cursor:pointer" title="더블클릭 정렬">품명</th><th rowspan="2">규격</th><th rowspan="2">등급</th>
         <th colspan="4" class="center" style="background:#f0efe9;color:#8a6d3b;border-left:2px solid #d9d3c4">인상전 <span style="font-weight:400;font-size:9px">(종전·작년12월)</span></th>
         <th colspan="4" class="center" style="background:#eaf1fc;color:#1c47a0;border-left:2px solid #b9cdec">인상후 <span style="font-weight:400;font-size:9px">(적용월 기준)</span></th>
-        <th rowspan="2" class="num">차이(신)<br><span style="font-weight:400;font-size:9px">(인상후−인상전 총가공비)</span></th>
-        <th rowspan="2">최근납품</th><th rowspan="2">상태</th>${canEd?'<th rowspan="2" style="width:40px">작업</th>':''}</tr>
+        <th rowspan="2" class="num" data-sort="diff_new" style="cursor:pointer" title="더블클릭 정렬 — 손익 이상치 찾기">차이(신)<br><span style="font-weight:400;font-size:9px">(인상후−인상전 총가공비)</span></th>
+        <th rowspan="2" data-sort="last_in_ymd" style="cursor:pointer" title="더블클릭 정렬">최근납품</th><th rowspan="2">상태</th>${canEd?'<th rowspan="2" style="width:40px">작업</th>':''}</tr>
         <tr>
-        <th class="num" style="background:#f7f6f1;color:#1c6ec2;border-left:2px solid #d9d3c4">재료비</th><th class="num" style="background:#f7f6f1">재료비율</th><th class="num" style="background:#f7f6f1;color:#1c7c3a">총가공비</th><th class="num" style="background:#f7f6f1;color:#8a6d3b">입고가</th>
-        <th class="num" style="background:#f4f8ff;color:#1c6ec2;border-left:2px solid #b9cdec">재료비</th><th class="num" style="background:#f4f8ff">재료비율</th><th class="num" style="background:#f4f8ff;color:#1c7c3a">총가공비</th><th class="num" style="background:#f4f8ff;color:#8a6d3b">입고가</th></tr></thead>
+        <th class="num" data-sort="mat_before" style="background:#f7f6f1;color:#1c6ec2;border-left:2px solid #d9d3c4;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_before" style="background:#f7f6f1;cursor:pointer">재료비율</th><th class="num" data-sort="proc_before" style="background:#f7f6f1;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_before" style="background:#f7f6f1;color:#8a6d3b;cursor:pointer">입고가</th>
+        <th class="num" data-sort="mat_after" style="background:#f4f8ff;color:#1c6ec2;border-left:2px solid #b9cdec;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_after" style="background:#f4f8ff;cursor:pointer">재료비율</th><th class="num" data-sort="proc_after" style="background:#f4f8ff;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_after" style="background:#f4f8ff;color:#8a6d3b;cursor:pointer">입고가</th></tr></thead>
       <tbody>${st.loading?spinRow(canEd?18:16):(st.rows.length?st.rows.map((r,i)=>`<tr class="cq-row" data-idx="${i}">
         ${canEd?`<td class="center"><input type="checkbox" class="cq-chk" data-id="${r.quote_id}" ${st.sel.has(r.quote_id)?'checked':''} onclick="event.stopPropagation()"></td>`:''}
         <td style="font-weight:600;color:#1c47a0">${esc(r.vendor)}</td>
@@ -1870,7 +1870,7 @@ SCREEN.coopquote=(host)=>{
                <td class="num be-uw" data-code="${esc(r.code)}">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                <td class="num be-sw" data-code="${esc(r.code)}" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
                <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:'<span style="color:#c9d1dc">-</span>'}</td>
-               <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">`)}</td>
+               <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재(인상후) 재료비 · 아래 '전'=인상전(종전·작년12월) 재료비">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">`)}${r.mat_before!=null?`<div style="font-size:9px;color:#8a6d3b;font-weight:400" title="인상전(종전) 재료비">전 ${nf(r.mat_before)}</div>`:''}</td>
                <td class="num" style="color:#c0392b"><span class="be-ratio" data-code="${esc(r.code)}">${grey?'-':rratio+'%'}</span></td>
                <td class="num" style="color:#c0392b;font-weight:700"><span class="be-tot" data-code="${esc(r.code)}">${grey?'-':nf(rtot)}</span></td>
                ${(d.proc_ops||[]).map(op=>`<td class="num">${isTube?`<input class="be-pc" data-code="${esc(r.code)}" data-op="${esc(op)}" value="${(be.procEdits[r.code]&&be.procEdits[r.code][op]!=null&&be.procEdits[r.code][op]!=='')?be.procEdits[r.code][op]:(pr[op]||'')}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#6a3fb0;border:1px solid #e2e8f2;border-radius:3px">`:''}</td>`).join('')}
@@ -1904,7 +1904,7 @@ SCREEN.coopquote=(host)=>{
            <div style="margin-top:8px;background:#eef4ff;border:1px solid #cdddf5;border-radius:8px;padding:9px 14px;font-size:12px;display:flex;gap:12px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
              <span>소요중량 <b id="be-tsoyo" style="color:#1c6ec2">${nf4(soyo)}</b>kg</span>
              <span style="color:#8aa0bd">원소재비 <b id="be-traw" style="color:#1c6ec2">${nf(raw)}</b> +부속품/용접봉 <b id="be-tbase">${nf(baseMat)}</b> =</span>
-             <span>재료비 <b id="be-tmat" style="color:#1c6ec2">${nf(mat)}</b></span>
+             <span>재료비 <b id="be-tmat" style="color:#1c6ec2">${nf(mat)}</b> <span style="font-size:10px;color:#8a6d3b" title="인상전(종전·작년12월) 재료비 총합">(인상전 ${nf(d.total_mat_before||0)})</span></span>
              <span style="color:#8aa0bd">+ 가공비 <b id="be-tgag" style="color:#1c7c3a">${nf(gagong)}</b>${curIn!=null?` + 조정 <b id="be-tadj" style="color:#a06010">${nf(adjust)}</b>`:''} =</span>
              <span>판가 <b id="be-tsale" style="font-size:14px">${nf(sale)}</b>${curIn!=null?'<span style="font-size:10px;color:#8aa0bd"> (현재입고가)</span>':''}</span></div>
            `)}
@@ -1936,6 +1936,20 @@ SCREEN.coopquote=(host)=>{
     g('#cq-vendor').onchange=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
     {const cy=g('#cq-ym');if(cy)cy.onchange=()=>{st.ym=cy.value;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};}
     g('#cq-q').onkeyup=e=>{if(e.key==='Enter')g('#cq-go').click();};
+    // 메인 컬럼 더블클릭 정렬 (토글 asc/desc). 차이(신) 정렬=손익 이상치 찾기
+    host.querySelectorAll('#cq-tbl thead th[data-sort]').forEach(th=>th.ondblclick=()=>{
+      const k=th.dataset.sort;
+      st.sortDir=(st.sortKey===k&&st.sortDir==='asc')?'desc':'asc';
+      st.sortKey=k; const dir=st.sortDir==='asc'?1:-1;
+      const isNum=st.rows.some(r=>typeof r[k]==='number');
+      st.rows.sort((a,b)=>{
+        let x=a[k],y=b[k];
+        if(isNum){ x=(x==null?-Infinity:+x); y=(y==null?-Infinity:+y); return (x-y)*dir; }
+        return String(x==null?'':x).localeCompare(String(y==null?'':y))*dir;
+      });
+      render();
+    });
+    if(st.sortKey){const sth=host.querySelector(`#cq-tbl thead th[data-sort="${st.sortKey}"]`);if(sth)sth.insertAdjacentHTML('beforeend',`<span style="color:#c0392b">${st.sortDir==='asc'?' ▲':' ▼'}</span>`);}
     if(canEd){
       g('#cq-new').onclick=()=>newBomEdit();
       host.querySelectorAll('.cq-chk').forEach(ch=>ch.onclick=(ev)=>{ev.stopPropagation();const id=+ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});
