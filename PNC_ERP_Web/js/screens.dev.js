@@ -1657,7 +1657,7 @@ SCREEN.subvariant=(c)=>{
   const fillDL=()=>{const dl=c.querySelector('#sv-dl');if(dl)dl.innerHTML=st.slist.slice(0,60).map(s=>`<option value="${esc(s.item)}">${esc((s.name||'').replace(/"/g,''))}</option>`).join('');};
   const ac=t=>{clearTimeout(st.acT);st.acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(t)}`);st.slist=(await r.json()).rows||[];fillDL();}catch(e){}},180);};
   const nameOf=code=>{const m=(st.mat||[]).find(r=>String(r.code)===String(code));if(m)return m.name;const s=st.slist.find(x=>x.item===code);return s?s.name:'';};
-  const open=async(item)=>{st.sel=item;st.selNm=(st.slist.find(s=>s.item===item)||{}).name||'';st.mat=null;st.matErr='';st.routes=[];st.loading=true;st.newForm=st.detail=st.lineForm=null;draw();
+  const open=async(item)=>{await discardFreshSilent();st.sel=item;st.selNm=(st.slist.find(s=>s.item===item)||{}).name||'';st.mat=null;st.matErr='';st.routes=[];st.loading=true;st.newForm=st.detail=st.lineForm=null;draw();
     try{const r=await fetch(`${API}/api/cost/nae?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(st.ymd)}`);const j=await r.json();
       if(j.error){st.matErr=j.error;st.mat=[];}else{st.mat=j.rows||[];if(!st.selNm)st.selNm=j.item||'';}}catch(e){st.matErr='내부원가 조회 실패';st.mat=[];}
     st.routeTarget=item;st.routeTargetNm=st.selNm;await loadRoutes();st.loading=false;draw();};
@@ -2036,6 +2036,7 @@ SCREEN.subvariant=(c)=>{
   // ---------- 대상 선택(부분갱신) ----------
   const selectTarget=async(code,el)=>{
     if(!code||code===st.routeTarget)return;
+    await discardFreshSilent();   // 대상 전환 전 미커밋 드래프트 롤백(고아 방지)
     st.routeTarget=code;st.routeTargetNm=nameOf(code);st.detail=st.newForm=st.lineForm=null;
     c.querySelectorAll('.sv-mrow.sel').forEach(x=>x.classList.remove('sel'));if(el)el.classList.add('sel');
     st.rload=true;paintRoutes();await loadRoutes();st.rload=false;paintTree();paintRoutes();};
@@ -2067,8 +2068,8 @@ SCREEN.subvariant=(c)=>{
     }catch(e){alert('생성 오류: '+e);}};
   const afterCreate=async(rid,rename,msg)=>{
     // 복사본 채번명 대신 사용자가 입력한 후보명을 상세 편집 헤더에 프리필(저장 시 route/save로 확정)
-    st.newForm=null;st.msg='📋 '+msg+' — 미승인. 상세에서 후보명·헤더 편집 후 저장·승인하세요.';
-    await loadRoutes();openDetail(rid,'edit');
+    st.newForm=null;st.msg='📋 '+msg+' — 미커밋(드래프트). [등록]해야 확정, 닫기=등록 취소.';
+    await loadRoutes();openDetail(rid,'edit',true);   // fresh=true(미커밋 드래프트)
     if(rename&&st.detail){st.detail.hdr.route_name=rename;draw();}};
   const createFromLg=async(f)=>{
     const r=await fetch(`${API}/api/esticost/expand?item=${encodeURIComponent(st.routeTarget)}`);const j=await r.json();
@@ -2080,17 +2081,33 @@ SCREEN.subvariant=(c)=>{
     for(const x of rows){const g=(x.sagub_flag?'사급':(x.make_type==='1'?'제작':'매입'));
       const lr=await fetch(`${API}/api/sourcing/line/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,child_item:x.item_code,child_name:x.item_name||x.item_code,qty:(+x.unit_qty||1),gubun:g,vendor_code:x.in_cust||'',is_rawmat:x.metal_gubun?1:0,diam:(+x.diam||0),thick:(+x.thick||0),len_val:(+x.length||0),material:x.metal_gubun||'',user:'웹사용자'})});
       if((await lr.json()).ok)n++;}
-    st.newForm=null;st.msg=`🔀 LG BOM 시딩 후보 생성 (라인 ${n}) — 미승인. 상세에서 편집·승인.`;await loadRoutes();openDetail(rid,'edit');};
+    st.newForm=null;st.msg=`🔀 LG BOM 시딩 후보 생성 (라인 ${n}) — 미커밋. [등록]해야 확정.`;await loadRoutes();openDetail(rid,'edit',true);};
   // ---------- 상세 ----------
-  const openDetail=(rid,mode)=>{const R=routeById(rid);if(!R)return;
-    st.detail={route_id:rid,mode:(R.baseline?'view':mode||'edit'),
-      hdr:{route_name:R.route_name||'',gubun:R.gubun||'',vendor_code:R.vendor_code||'',apply_from:R.apply_from||'',current_flag:!!R.current_flag,note:R.note||''}};
+  const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+  const openDetail=(rid,mode,fresh)=>{const R=routeById(rid);if(!R)return;
+    st.detail={route_id:rid,mode:(R.baseline?'view':mode||'edit'),fresh:!!fresh,
+      hdr:{route_name:R.route_name||'',gubun:R.gubun||'',apply_from:R.apply_from||today(),note:R.note||''}};  // 유효일자 default=오늘·공급처/현행 제거
     st.newForm=null;draw();};
+  // 닫기(X/닫기): 신규 미커밋 드래프트면 "등록 취소?" confirm → 롤백. 커밋/재편집이면 일반 닫기.
+  const closeDetail=async()=>{
+    if(st.detail&&st.detail.fresh){
+      if(confirm('등록을 취소하시겠습니까?\n확인 시 이 후보는 등록되지 않습니다(삭제·번호 재사용).')) await cancelDraft();
+      return;   // 계속 = 모달 유지
+    }
+    st.detail=null;draw();};
+  // ✖ 취소 = 미커밋 드래프트 롤백(route 삭제)+닫기 → 고아 없음·다음 번호 재사용
+  const cancelDraft=async()=>{const rid=st.detail?st.detail.route_id:0;
+    if(rid>0){try{await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}
+    st.detail=null;st.msg='등록 취소 — 후보가 등록되지 않았습니다(번호 재사용).';await loadRoutes();draw();};
+  // 드래프트 방치 방지: 대상 전환/신규열기 전에 미커밋 드래프트 조용히 롤백
+  const discardFreshSilent=async()=>{if(st.detail&&st.detail.fresh){const rid=st.detail.route_id;st.detail=null;
+    try{await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}};
   // ---------- actions ----------
-  const saveHdr=async()=>{const h=st.detail.hdr;
-    try{const r=await fetch(`${API}/api/sourcing/route/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({item_code:st.routeTarget,route_id:st.detail.route_id,user:'웹사용자'},h,{current_flag:h.current_flag?1:0}))});
-      const j=await r.json();if(j.ok){st.msg='✅ 헤더 저장 (개발 미승인 리셋)';await loadRoutes();draw();}
-      else alert('저장 실패:\n'+(j.errors?j.errors.join('\n'):(j.detail||JSON.stringify(j))));}catch(e){alert('저장 오류: '+e);}};
+  const saveHdr=async(commit)=>{const h=st.detail.hdr;
+    try{const r=await fetch(`${API}/api/sourcing/route/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({item_code:st.routeTarget,route_id:st.detail.route_id,user:'웹사용자'},h))});
+      const j=await r.json();
+      if(j.ok){if(commit&&st.detail)st.detail.fresh=false;st.msg=commit?'✅ 후보 등록 완료 — 승인하면 조달프로파일에 노출됩니다':'✅ 헤더 저장 (개발 미승인 리셋)';await loadRoutes();draw();return true;}
+      alert('저장 실패:\n'+(j.errors?j.errors.join('\n'):(j.detail||JSON.stringify(j))));return false;}catch(e){alert('저장 오류: '+e);return false;}};
   const saveLine=async()=>{const f=st.lineForm;
     try{const r=await fetch(`${API}/api/sourcing/line/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({user:'웹사용자'},f))});
       const j=await r.json();if(j.ok){st.msg='✅ 라인 저장 (후보 미승인 리셋)';st.lineForm=null;await loadRoutes();draw();}
