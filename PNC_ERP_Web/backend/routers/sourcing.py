@@ -1834,9 +1834,18 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
                 WHERE m.ITEM_CODE IN ({ph})""", *ch)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "mk": str(r[3]).strip(), "cust": str(r[4]).strip(), "custnm": r[5]}
-        # ★발주 대상 = 현행 BOM 하위 품목 중 '제작(자체생산 MAKE_TYPE=1)' 제외 전부(매입/구매/외주가공/사급가공/외주완성).
-        #   용접봉 RAC는 이미 codes에서 제외. 매입처(IN_CUST) 없어도 포함(발주업체 빈칸=사용자 지정).
-        order_items = {c: agg[c] for c in codes if info.get(c, {}).get("mk", "") != "1"}
+        # ★발주 대상 = 현행 BOM 전개의 '리프'(우리가 받아오는 품목) 전부. 매입/외주/사급/외주완성 + 하위BOM없는 제작표기품(실제 수령).
+        #   제외 = 실제 전개된 제작 SUB(mk='1' AND 하위 BOM 존재 → 그 자식이 대상) · 용접봉 RAC(이미 codes 제외).
+        #   ★매입처(IN_CUST) 없어도 포함(발주업체 빈칸=사용자 지정). MAKE_TYPE 플래그 맹신 금지(리프 여부로 판정).
+        maker_parents = set()
+        mk1 = [c for c in codes if info.get(c, {}).get("mk", "") == "1"]
+        for i in range(0, len(mk1), 900):
+            ch = mk1[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM CS_M_ITEM_BOM
+                WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+                  AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
+            for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())
+        order_items = {c: agg[c] for c in codes if c not in maker_parents}
         oc = list(order_items.keys())
         price = {}
         for i in range(0, len(oc), 900):
