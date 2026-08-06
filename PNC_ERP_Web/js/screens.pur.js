@@ -1899,35 +1899,15 @@ SCREEN.coopquote=(host)=>{
                <td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700" id="be-adjgag">${nf(adjust)}</td><td class="num" style="color:#a06010;font-weight:700" id="be-adjust">${nf(adjust)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`:''}
-             <tr style="background:#dbe9ff;font-weight:800;font-size:13px">
-               <td colspan="11" style="text-align:left;padding-left:10px;color:#1c47a0">📊 합계 (재료비 + 가공비${curIn!=null?'[조정포함]':''} = ${curIn!=null?'현재입고가':'견적'}) <span id="be-grandtot-l" style="display:none">${nf(grand)}</span></td>
-               <td class="num" style="color:#1c6ec2" id="be-grandmat" title="재료비 합계">${nf(mat)}</td>
-               <td class="num" style="color:#5a6a80" title="전체 재료비율 = 재료비/판가">${sale>0?Math.round(mat/sale*100):0}%</td>
-               <td class="num" style="color:#1c7c3a" id="be-grandgag" title="가공비 합계 = 동관가공 + 조립 + 조정">${nf(gagong+(curIn!=null?adjust:0))}</td>
-               <td class="num" style="color:#c0392b" id="be-grandtot">${nf(grand)}</td>
-               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td></td><td></td><td></td><td></td></tr></tbody></table></div>
-           <div style="margin-top:8px;background:#eef4ff;border:1px solid #cdddf5;border-radius:8px;padding:9px 14px;font-size:12px;display:flex;gap:12px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
-             <span>소요중량 <b id="be-tsoyo" style="color:#1c6ec2">${nf4(soyo)}</b>kg</span>
-             <span style="color:#8aa0bd">원소재비 <b id="be-traw" style="color:#1c6ec2">${nf(raw)}</b> +부속품/용접봉 <b id="be-tbase">${nf(baseMat)}</b> =</span>
-             <span>재료비 <b id="be-tmat" style="color:#1c6ec2">${nf(mat)}</b> <span style="font-size:10px;color:#8a6d3b" title="인상전(종전·작년12월) 재료비 총합">(인상전 ${nf(d.total_mat_before||0)})</span></span>
-             <span style="color:#8aa0bd">+ 가공비 <b id="be-tgag" style="color:#1c7c3a">${nf(gagong)}</b>${curIn!=null?` + 조정 <b id="be-tadj" style="color:#a06010">${nf(adjust)}</b>`:''} =</span>
-             <span>판가 <b id="be-tsale" style="font-size:14px">${nf(sale)}</b>${curIn!=null?'<span style="font-size:10px;color:#8aa0bd"> (현재입고가)</span>':''}</span></div>
-           <div style="margin-top:16px;overflow-x:auto">
-             <div style="font-size:12.5px;color:#8a6d3b;font-weight:700;margin-bottom:5px;padding:4px 10px;background:#f7f6f1;border-radius:6px;display:inline-block">📋 종전 견적 (인상전 · 종전사급가/작년12월 판매단가 기준 · <b>읽기전용</b>) — 위 현재 견적과 세부 비교</div>
-             <table class="tbl fit" style="font-size:13px;background:#faf9f4;border:1px solid #e6e0d0"><thead><tr>
-               <th>품번</th><th>품명</th><th>역할</th><th class="num">소요량</th><th class="num" style="color:#8aa0bd">BOM규격</th>
-               <th class="num" style="color:#1c7c3a">Φ</th><th class="num" style="color:#1c7c3a">T</th><th class="num" style="color:#1c7c3a">L</th>
-               <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num" style="color:#b8791f" title="종전 사급가(원/kg)">종전사급가</th>
-               <th class="num" style="color:#8a6d3b" title="인상전 재료비">재료비<br><span style="font-size:9px;font-weight:400">(인상전)</span></th><th class="num" style="color:#8a6d3b">재료비율</th><th class="num" style="color:#8a6d3b">합계</th>
-               ${(d.proc_ops||[]).map(op=>`<th style="font-size:12px;color:#6a3fb0;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">${esc(op==='교/체'?'교체':op)}</th>`).join('')}
-               <th style="color:#1c7c3a;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">가공비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">관리비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">운반비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">이윤</th></tr></thead>
-             <tbody><tr style="background:#f0efe9;font-weight:700">
+             <tr><td colspan="${19+(d.proc_ops||[]).length}" style="height:0;border-top:3px solid #8a6d3b;padding:0"></td></tr>
+             <tr style="background:#f0efe9"><td colspan="${19+(d.proc_ops||[]).length}" style="text-align:left;padding:5px 10px;color:#8a6d3b;font-size:12px;font-weight:700">📋 종전 견적 (인상전 · 종전사급가/작년12월 판매단가 · 읽기전용)</td></tr>
+             <tr style="background:#faf9f4;font-weight:700">
                <td style="font-family:monospace;font-size:13px;padding-left:6px">${esc(d.item)}</td>
                <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.name)}">${esc(d.name)}</td>
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#8a6d3b;color:#fff">완제품</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
-               <td class="num" style="color:#8a6d3b;font-weight:700">${nf(d.total_mat_before||0)}</td><td class="num">-</td><td class="num">-</td>
+               <td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px">${nf(d.total_mat_before||0)}</td><td class="num" style="color:#5a6a80;font-weight:700">${((d.total_mat_before||0)+gagong+adjust)>0?Math.round((d.total_mat_before||0)/((d.total_mat_before||0)+gagong+adjust)*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800">${nf(gagong+adjust)}</td><td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px">${nf((d.total_mat_before||0)+gagong+adjust)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
              ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const uw=beUw(r);const ind=6+r.level*12;const pr=r.procs||{};
                const rq=(r.cum_qty||0);const rmatB=(r.mat_before!=null?r.mat_before:0);const rgag=isTube?beRowGagong(r):0;const rtotB=rmatB+rgag;
@@ -1944,6 +1924,7 @@ SCREEN.coopquote=(host)=>{
                  <td class="num" style="color:#b8791f;font-weight:600">${sagubPrev!=null?nf(sagubPrev):'-'}</td>
                  <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}</td>
                  <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
+                 <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
                  <td class="num" style="color:#8a6d3b;font-weight:700">${grey?'-':nf(rtotB)}</td>
                  ${(d.proc_ops||[]).map(op=>`<td class="num" style="font-size:11px;color:#6a3fb0">${(isTube&&pr[op])?pr[op]:''}</td>`).join('')}
                  <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
