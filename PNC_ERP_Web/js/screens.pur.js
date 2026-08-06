@@ -1704,19 +1704,23 @@ SCREEN.coopquote=(host)=>{
          <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${r.wtype==='신규'?'#fbe9d0':'#fdecec'};color:${r.wtype==='신규'?'#b8791f':'#c0392b'}">${esc(r.wtype)}</span></td>
          <td style="font-size:11px;color:#6a6a6a">${esc(r.reason)}</td><td class="num">${won(r.in_qty)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">작업목록 없음 (전부 완료)</td></tr>')}</tbody></table></div>`:''}
      <style>
-       #cq-tbl{width:max-content!important;table-layout:auto!important;border-collapse:collapse}
-       #cq-tbl th,#cq-tbl td{padding:1px 6px!important;white-space:nowrap;line-height:1.5}
+       #cq-tbl{width:max-content!important;table-layout:auto!important;border-collapse:separate!important;border-spacing:0}
+       #cq-tbl th,#cq-tbl td{padding:1px 6px!important;white-space:nowrap;line-height:1.35}
        #cq-tbl td.cap{white-space:normal}
+       /* 2줄 헤더 계단식 고정: 그룹행 top:0, 세부행 top=그룹행높이 (데이터 배어나옴 방지) */
+       #cq-tbl thead th{position:sticky;z-index:5}
+       #cq-tbl thead tr:first-child th{top:0;height:18px}
+       #cq-tbl thead tr:nth-child(2) th{top:18px}
      </style>
      <div class="grid-wrap" style="${st.workMode?'display:none;':''}max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" id="cq-tbl" style="font-size:11px"><thead>
         <tr>
         ${canEd?'<th rowspan="2" style="width:24px"></th>':''}
-        <th rowspan="2" data-sort="vendor" style="cursor:pointer" title="더블클릭 정렬">협력사</th><th rowspan="2" data-sort="assy_code" style="cursor:pointer" title="더블클릭 정렬">품번(Assy)</th><th rowspan="2" data-sort="item_name" style="cursor:pointer" title="더블클릭 정렬">품명</th><th rowspan="2">규격</th><th rowspan="2">등급</th>
+        <th rowspan="2" data-sort="vendor" style="cursor:pointer" title="더블클릭 정렬">협력사</th><th rowspan="2" data-sort="assy_code" style="cursor:pointer" title="더블클릭 정렬">품번(Assy)</th><th rowspan="2" data-sort="item_name" style="cursor:pointer" title="더블클릭 정렬">품명</th><th rowspan="2" data-sort="spec" style="cursor:pointer" title="더블클릭 정렬">규격</th><th rowspan="2" data-sort="grade" style="cursor:pointer" title="더블클릭 정렬">등급</th>
         <th colspan="4" class="center" style="background:#f0efe9;color:#8a6d3b;border-left:2px solid #d9d3c4">인상전 <span style="font-weight:400;font-size:9px">(종전·작년12월)</span></th>
         <th colspan="4" class="center" style="background:#eaf1fc;color:#1c47a0;border-left:2px solid #b9cdec">인상후 <span style="font-weight:400;font-size:9px">(적용월 기준)</span></th>
         <th rowspan="2" class="num" data-sort="diff_new" style="cursor:pointer" title="더블클릭 정렬 — 손익 이상치 찾기 · 인상후 총가공비 − 인상전 총가공비">가공비<br>차이</th>
-        <th rowspan="2" data-sort="last_in_ymd" style="cursor:pointer" title="더블클릭 정렬">최근납품</th><th rowspan="2">상태</th>${canEd?'<th rowspan="2" style="width:40px">작업</th>':''}</tr>
+        <th rowspan="2" data-sort="last_in_ymd" style="cursor:pointer" title="더블클릭 정렬">최근납품</th><th rowspan="2" data-sort="status" style="cursor:pointer" title="더블클릭 정렬">상태</th>${canEd?'<th rowspan="2" style="width:40px">작업</th>':''}</tr>
         <tr>
         <th class="num" data-sort="mat_before" style="background:#f7f6f1;color:#1c6ec2;border-left:2px solid #d9d3c4;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_before" style="background:#f7f6f1;cursor:pointer">재료비율</th><th class="num" data-sort="proc_before" style="background:#f7f6f1;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_before" style="background:#f7f6f1;color:#8a6d3b;cursor:pointer">입고가</th>
         <th class="num" data-sort="mat_after" style="background:#f4f8ff;color:#1c6ec2;border-left:2px solid #b9cdec;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_after" style="background:#f4f8ff;cursor:pointer">재료비율</th><th class="num" data-sort="proc_after" style="background:#f4f8ff;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_after" style="background:#f4f8ff;color:#8a6d3b;cursor:pointer">입고가</th></tr></thead>
