@@ -165,7 +165,8 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         wsel = ["mat_work_center_code=?", "plan_ymd<=?"]; wp = [cust, to_ymd]
         if item and item != "%":    wsel.append("assy_item_code LIKE ?"); wp.append(item)
         if matcode and matcode != "%": wsel.append("mat_code LIKE ?"); wp.append(matcode)
-        # 도번(ASSY) 계획그리드: (wo,swo,assy,plan_ymd) 배치별 MAX(plan_qty)=발주. 사급=mat_flag 2 존재.
+        # 도번(ASSY) 계획그리드: (wo,swo,assy,plan_ymd) 배치별 MAX(plan_qty). 사급=mat_flag 2 존재.
+        #   ★PART_MAT.plan_qty는 이미 회수율(CEILING×rate/100) 반영된 발주값(정상도번). SVC 소수도번만 raw(무시가능 4/44208).
         cur.execute(f"""SELECT work_order, split_work_order, assy_item_code, plan_ymd,
               MAX(CAST(plan_qty AS float)) pq, MAX(CAST(lot_qty AS float)) lot, MAX(CAST(use_qty AS float)) uq,
               MAX(ISNULL(line_no,'')) line, MAX(ISNULL(output_hm,'')) ohm, MAX(CASE WHEN mat_flag='2' THEN 1 ELSE 0 END) sg
@@ -185,7 +186,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
                      'sale': 0, 'assy_stock': 0, 'iset_stk': 0, 'ireq': 0, 'work_center': '', 'work_code': '', 'in_cust': '',
                      'model': '', 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
                 keyed[k] = g
-            q = int(float(r[4] or 0)); g['days'][bi] += q; g['plan'] += q
+            q = int(float(r[4] or 0)); g['days'][bi] += q; g['plan'] += q   # PART_MAT.plan_qty(회수율 baked)
             g['lot'] = max(g['lot'], float(r[5] or 0)); g['use'] = max(g['use'], float(r[6] or 1))
             if int(r[9] or 0): g['sagub'] = 1
         rows = list(keyed.values())
