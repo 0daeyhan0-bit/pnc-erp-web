@@ -408,7 +408,7 @@ SCREEN.deliv420=(c)=>{
     const CW=[28,86,38,96,120,400,38,48,48,48,48,46,46,46,74,74,54,54,54,54,54,38,52], DW=48;
     const totalW=CW.reduce((a,b)=>a+b,0)+dates.length*DW;
     const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}${dates.map(()=>`<col style="width:${DW}px">`).join('')}</colgroup>`;
-    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="6">${nf(data.cnt)}건</td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td class="num"><b>${nf(S.issued||0)}</b></td><td colspan="10"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
+    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="6">${nf(data.cnt)}건</td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td class="num"><b>${nf(S.issued||0)}</b></td><td colspan="11"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
      <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독 · 발행=nx</span></div>
      <div class="page-sub">완료된 도번 <b>체크 → 납품/포장/SERIAL/HEAT 입력 → [납품처리]</b>(발행은 <b>nx.deliv_issue</b>에만 기록, 라이브 미기록). 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 요청수량=계획−완료−발행분.
@@ -445,7 +445,7 @@ SCREEN.deliv420=(c)=>{
         <td><b>${esc(r.workcenter||'')}</b></td><td class="center">${esc(r.line||'')}</td>
         <td><b>${esc(r.assy)}</b></td>
         <td class="bcap" title="${esc(r.nm||'')} ${esc(r.spec||'')}" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
-        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
+        <td><div style="width:100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
         <td class="center">${r.sagub_list?'<span class="bdg sagub" style="font-size:10px" title="'+esc(r.sagub_list)+'">사급</span>':''}</td>
         <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.plan)}</td>
         <td class="num" style="color:#1c7c3a"><b>${nf(r.done)}</b></td>
