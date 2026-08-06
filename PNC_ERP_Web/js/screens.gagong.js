@@ -89,7 +89,7 @@ SCREEN.gagongplan4w=(c)=>{
     c.innerHTML=`
      <div class="page-title">📋 4주간 가공계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">도번×라인×작업처 · 자도번LIST 묶음</span></div>
      <div class="page-sub">레거시 4주간 원천(<code>PR_T_PLAN_PART_DTL_FOR_CUST</code>·당일생성 스냅샷) 직독. <b>도번=부품</b>·<b>자도번LIST=이 부품을 쓰는 부모 자도번들</b>. 첫 일자컬럼=당일이전 누적. 🔴 라이브
-       <span style="margin-left:8px;font-size:11px">날짜셀 색(완료≥계획): <span style="background:#ffee88;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#b2f2bb;padding:0 5px;border-radius:3px">키팅완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span></span></div>
+       <span style="margin-left:8px;font-size:11px">날짜셀 색(완료≥계획): <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span></div>
      <div class="toolbar">
        <label class="tl">기준일자</label><input class="inp" type="date" id="p4-from" value="${st.from}">
        <label class="tl">기간</label><select class="inp" id="p4-gigan" style="max-width:78px">${[7,14,21,31,42,60].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>

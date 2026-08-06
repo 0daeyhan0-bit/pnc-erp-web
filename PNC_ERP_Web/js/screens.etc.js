@@ -353,7 +353,7 @@ SCREEN.deliv420=(c)=>{
     const custOpts=custs.map(w=>`<option value="${esc(w.cc)}" ${F.cust===w.cc?'selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('');
     const FIX=16;
     const S=data.sum||{};
-    // 일자셀=완료/계획+색(가공4주간 동일): 출하완료 주황·생산완료(재고) 노랑·세트/입고대기 배분 녹
+    // 일자셀=완료/계획+색(가공4주간 동일 표준): 생산완료 노랑·출하완료 주황·키팅완료 녹
     const dcell=(r,d)=>{const pl=Number((r.days&&r.days[d])||0),dn=Number((r.donedays&&r.donedays[d])||0),bg=(r.colors&&r.colors[d])||'';if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
     const gPlan={},gDone={};rows.forEach(r=>dates.forEach(d=>{gPlan[d]=(gPlan[d]||0)+Number((r.days&&r.days[d])||0);gDone[d]=(gDone[d]||0)+Number((r.donedays&&r.donedays[d])||0);}));
@@ -361,7 +361,7 @@ SCREEN.deliv420=(c)=>{
     c.innerHTML=`
      <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독</span></div>
      <div class="page-sub">협력사 계획현황 기반. <b>완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분</b>(레거시 SP + 510창, 도번 공유풀). 요청수량 = 계획 − 완료. 납품수량 입력 후 발행/바코드는 <b>거래명세서 발행(바코드)</b> 화면(후속).
-       <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료(재고)</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">세트/입고대기 배분</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
+       <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
      <div class="toolbar">
        <label class="tl">협력사</label>
        <select class="inp" id="d4-cust" style="width:auto"><option value="">선택</option>${custOpts}</select>
@@ -717,7 +717,7 @@ SCREEN.partnerplan=(c)=>{
        <label class="tl">라인</label><input class="inp" id="pn-line" list="pnl-line" value="${esc(F.line)}" style="width:60px" placeholder="라인" autocomplete="off"><datalist id="pnl-line">${pnLineOpts}</datalist>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 자재수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}</span>
      </div>
-     ${frac?`<div class="page-sub" style="font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료(재고)</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">세트/입고대기 배분</span></div>`:''}
+     ${frac?`<div class="page-sub" style="font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${data.note?`<div class="page-sub" style="color:#b8860b">ℹ ${esc(data.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
