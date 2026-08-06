@@ -152,6 +152,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             g["lot"] = _qint(g["lot"]); g["reqq"] = _qint(g["reqq"]); g["matq"] = _qint(g["matq"])
             g["doneq"] = None   # ⚠ 완료수량: 레거시 라이브 실적조인 원천 미확정 → 담당확인(추측채움 금지)
             g["days"] = {k2: _qint(v2) for k2, v2 in g["days"].items()}; g["tot"] = _qint(g["tot"])
+            g.pop("parts", None)
         rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["assy"]))
         for i, g in enumerate(rows, 1): g["seq"] = i
         note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영). 완료수량=실적조인 원천 미확정(담당확인)."
