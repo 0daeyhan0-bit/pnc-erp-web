@@ -21,6 +21,7 @@ SCREEN.matinout=(c)=>{
     const pw=(c.querySelector('#partwh')?c.querySelector('#partwh').value:'IS0001')||'IS0001';
     const f6=iso2ymd(c.querySelector('#dfrom')?c.querySelector('#dfrom').value:'')||iso2ymd(m1Iso());
     const t6=iso2ymd(c.querySelector('#dto')?c.querySelector('#dto').value:'')||iso2ymd(todayIso());
+    curFrom=f6;curTo=t6;   // ★요청 기간을 먼저 반영 → 조회 실패(타임아웃)해도 날짜 안 되돌아감
     if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/matinout?from_ymd=${f6}&to_ymd=${t6}&source=nx`,{title:'자재입출고현황',onBack:()=>{source='live';load();}});}
     try{const r=await fetch(`${API}/api/live/matinout?from_ymd=${f6}&to_ymd=${t6}&stock_cust=${encodeURIComponent(sc)}&part_wh=${encodeURIComponent(pw)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();curFrom=j.from_ymd||f6;curTo=j.to_ymd||t6;stockAll=j.stock||[];moves=j.moves||[];
