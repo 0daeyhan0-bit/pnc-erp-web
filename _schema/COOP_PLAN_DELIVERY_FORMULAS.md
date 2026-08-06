@@ -53,9 +53,15 @@
 - 필요ST = `SUM(f_get_item_st_day(item,ymd)×prod_qty)/60`. (dw_pr_list_010_l2.srd)
 - **완료수량(§3)과 grain·목적 다름** — 처리량 vs 완제품 충족량. 두 화면 각각 유지.
 
-## 5. 미확보/후속
-- `w_pr_outside_410.srw`·`420.srw` 창 소스 미추출 → 형제창(510/530/020) + DW/SP로 복원(신뢰 높음). 정본 SP: `SP_PR_4주간계획현황_251126`(410), `SP_PR_4주간_가공계획현황_250703`(410_work).
-- `f_find_cust_mat_list2`/`f_find_cust_sagub_list`(자도번LIST·사급목록) 함수 본문 SP덤프에 없음 → 라이브 sys.sql_modules 추출 필요.
+## 5. 구현 확정 (2026-08-06 완료 — 라이브 실측)
+- **★라이브 PARTNER_ERP엔 SP·함수 없음**(SP 4개뿐, 246 덤프는 다른 스냅샷). 4주간 SP·당김함수·f_find_* 는 **nx(PARTNER_ERP_TEST3)에 배치돼 있음**.
+- **완료수량 엔진 = nx.dbo.[SP_PR_4주간계획현황_LIVE]** (신규 생성): `SP_PR_4주간계획현황_251126`을 전 테이블 `PARTNER_ERP.dbo.` 한정 = **라이브 직독**(cross-db SELECT, 쓰기0). 당김=`nx.dbo.f_reld_doosung_live`(라이브 HR_M_CALENDAR 읽음). mat_list=`PARTNER_ERP.dbo.PR_M_CUST_MAT_LIST` 인라인.
+  - SP는 `c_fin_qty=0` 방출 → **완료는 PowerBuilder 510창이 계산**. → `backend/routers/coopplan.py::_sim510()`로 이식: **재고=도번(cust,assy) 공유풀, 일자-major 순차배분**(여러 제번 나눠소진, 과다계상 방지). ue_set_dd_color(출하)→생산수량적용(ASSY재고풀)→요청계산→자재수량적용(세트+입고대기풀).
+  - 검증: base grid(계획·출하·ASSY재고·세트·입고대기)=라이브 raw 100%일치. 410 doneq ↔ 420 done 도번별 diff0.
+- **f_find_cust_mat_list2**(nx): 활성부=`SELECT MAX(mat_list) FROM PR_M_CUST_MAT_LIST WHERE ITEM_CODE,CUST_CODE`(BOM커서 로직은 dead code=배치 프리컴퓨트로 대체, `PR_M_CUST_MAT_LIST`가 매일 06시 갱신). SP는 `replace(...,'(1)','')` 적용.
+- **f_find_cust_sagub_list**(nx): 실시간 BOM 1~5단 전개, `PR_M_ITEM_BOM_SUB.SAGUB_FLAG='1'` mat 합산 `mat{qty}` 콤마조인. 레거시 SP는 성능상 주석처리(sagub_list=''). SP_LIVE도 동일(빈값).
+- 정본 SP: `SP_PR_4주간계획현황_251126`(410·420 공통), `SP_PR_4주간_가공계획현황_250703`(410_work).
+- 웹: 410=`/api/partner/planstatus?src=legacy`(PART_MAT + 완료수량 fulfillment), 420=`/api/partner/deliv420`(SP_LIVE 전 컬럼). 무거움(교차DB SP 2회) → `_FUT_CACHE` 180s.
 
 ## 6. 조달 프로파일 2계층 배분(추후 접목)
 - 협력사 계획현황 수량 = 소요량 × **후보간 배분(R01↔R02, nx.route_alloc)** × **후보내 업체 배분(nx.sourcing_profile)**. 레거시 매칭 검증 후 도입 예정.

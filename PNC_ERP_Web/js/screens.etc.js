@@ -328,6 +328,76 @@ SCREEN.setinreq=(c)=>{
   load();
 };
 
+/* 협력사 > 거래명세서 발행 (레거시 w_pr_outside_420) — 레거시 SP_LIVE 라이브 직독 + 510창 완료배분.
+   전 컬럼 동일(자도번작업처·자도번LIST·사급·LOT·계획·완료·요청·납품·출하실적·생산실적·세트재고·입고대기·ASSY재고·일자별).
+   완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 발행/바코드는 [거래명세서 발행(바코드)] 화면(후속). */
+SCREEN.deliv420=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const dcol=s=>(s&&(''+s).length===6)?`${+((''+s).slice(2,4))}/${+((''+s).slice(4,6))}`:s;
+  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  const T=new Date();
+  let F={cust:'',from:iso(T),days:5,deliv:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, msg='';
+  const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
+  const loadCusts=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);custs=(await r.json()).rows||[];}catch(e){custs=[];}};
+  const load=async()=>{
+    if(!F.cust){msg='협력사를 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
+    loading=true;msg='';draw();
+    const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf()});
+    try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();F.deliv={};}
+    catch(e){msg='백엔드 연결 실패';data={dates:[],rows:[],cnt:0,sum:{}};}
+    loading=false;draw();};
+  const draw=()=>{
+    const dates=data.dates||[], rows=data.rows||[];
+    const custOpts=custs.map(w=>`<option value="${esc(w.cc)}" ${F.cust===w.cc?'selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('');
+    const FIX=16;
+    const S=data.sum||{};
+    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td>${nf(data.cnt)}건</td><td colspan="4"></td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td colspan="6"></td>${dates.map(d=>`<td class="num"><b>${nf(rows.reduce((a,r)=>a+Number((r.days&&r.days[d])||0),0))}</b></td>`).join('')}</tr>`:'';
+    c.innerHTML=`
+     <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독</span></div>
+     <div class="page-sub">협력사 계획현황 기반. <b>완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분</b>(레거시 SP + 510창, 도번 공유풀). 요청수량 = 계획 − 완료. 납품수량 입력 후 발행/바코드는 <b>거래명세서 발행(바코드)</b> 화면(후속). ${data.note?'<br>ℹ '+esc(data.note):''}</div>
+     <div class="toolbar">
+       <label class="tl">협력사</label>
+       <select class="inp" id="d4-cust" style="width:auto"><option value="">선택</option>${custOpts}</select>
+       <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('d4-base',F.from)}
+       <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:42px;text-align:center">일
+       <button class="btn" id="d4-search">🔍 조회</button>
+       ${loading?'<span style="color:var(--muted)">조회중… (라이브 재고배분 계산, 최초 다소 소요)</span>':''}
+       <div class="spacer"></div><span class="rowcount">${nf(data.cnt||0)}건 · 완료합 <b>${nf(S.done||0)}</b> / 계획 ${nf(S.plan||0)}</span>
+     </div>
+     ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
+     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
+       <th class="num">SEQ</th><th>자도번작업처</th><th>도번</th><th>품명</th><th>자도번 LIST</th><th class="center">사급</th>
+       <th class="num">LOT수량</th><th class="num">계획수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th class="num" style="width:56px">납품수량</th>
+       <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="center">검사</th>
+       ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
+      <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r,i)=>`<tr>
+        <td class="num" style="color:#8aa0bd">${i+1}</td>
+        <td><b>${esc(r.workcenter||'')}</b></td>
+        <td><b>${esc(r.assy)}</b></td>
+        <td class="bcap" title="${esc(r.nm||'')} ${esc(r.spec||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
+        <td><div style="max-width:250px;max-height:44px;overflow-y:auto;white-space:normal;word-break:break-all;line-height:1.3" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
+        <td class="center">${r.sagub_list?'<span class="bdg sagub" style="font-size:10px" title="'+esc(r.sagub_list)+'">사급</span>':''}</td>
+        <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.plan)}</td>
+        <td class="num" style="color:#1c7c3a"><b>${nf(r.done)}</b></td>
+        <td class="num"><b>${nf(r.req)}</b></td>
+        <td class="num" style="background:#eafaea;width:56px"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv}" style="width:48px;text-align:right;background:#eafaea"></td>
+        <td class="num" style="color:#2e86de">${nf(r.sale)}</td><td class="num" style="color:#8e44ad">${nf(r.prod)}</td>
+        <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td>
+        <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
+        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
+    const g=id=>c.querySelector(id);
+    g('#d4-cust').onchange=e=>F.cust=e.target.value;
+    g('#d4-days').onchange=e=>{F.days=e.target.value;};
+    bindLegacyDate(c,'d4-base',()=>F.from,(v)=>{F.from=v;});
+    g('#d4-search').onclick=load;
+    c.querySelectorAll('.d4-dv').forEach(x=>x.oninput=e=>{F.deliv[e.target.dataset.k]=e.target.value;});
+    c.querySelectorAll('thead th').forEach(th=>addResizer(th));
+  };
+  loadCusts().then(draw);
+};
+
 /* 협력사 > 자재세트입고관리 (레거시 w_pu_stock_140) — SET바코드 스캔/장부입고 → 세트입고 실적 + 자도번 재고파생(TAG='S'). 반품포함. */
 SCREEN.setstock=(c)=>{
   const API=API_BASE;
@@ -646,7 +716,7 @@ SCREEN.partnerplan=(c)=>{
         <td><div style="max-width:280px;max-height:44px;overflow-y:auto;white-space:normal;word-break:break-all;line-height:1.3" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
         <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
         <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
-        <td class="num" style="color:#b8860b" title="완료수량: 레거시 라이브 실적조인 원천 미확정(담당확인)">${nn(r.doneq)}</td>
+        <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
         <td class="num">${nn(r.reqq)}</td>
         <td class="bcap" title="${esc(r.nm)} ${esc(r.spec)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
         ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`)}</tbody></table></div>`;
