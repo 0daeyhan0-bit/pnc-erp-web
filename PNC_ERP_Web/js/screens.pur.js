@@ -1938,7 +1938,9 @@ SCREEN.coopquote=(host)=>{
        </div></div>`;})():''}
      <style>#cq-tbl tbody tr:hover{background:#eef4ff}.cq-row.sel{background:#dbe9ff}
        .be-view input,.be-view select{border:none!important;background:transparent!important;box-shadow:none!important;pointer-events:none;padding:0!important;text-align:inherit;font:inherit;color:inherit;width:auto!important;min-width:0}
-       .be-view input.inp,.be-view .be-qty,.be-view .be-sp,.be-view .be-sg,.be-view .be-mat,.be-view .be-pc,.be-view .be-asm,.be-view .be-asmpc{cursor:default}</style>`;
+       .be-view input.inp,.be-view .be-qty,.be-view .be-sp,.be-view .be-sg,.be-view .be-mat,.be-view .be-pc,.be-view .be-asm,.be-view .be-asmpc{cursor:default}
+       .be-view table{width:auto!important}
+       .be-view td,.be-view th{padding:2px 9px!important;white-space:nowrap}</style>`;
     const g=id=>host.querySelector(id);
     g('#cq-go').onclick=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
     g('#cq-active').onclick=()=>{st.activeOnly=!st.activeOnly;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
