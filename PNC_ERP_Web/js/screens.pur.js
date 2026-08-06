@@ -1850,7 +1850,7 @@ SCREEN.coopquote=(host)=>{
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#1c47a0;color:#fff">완제품</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
-               <td class="num" style="color:#c0392b;font-weight:700" id="be-tmat-root">${nf(d.total_mat||0)}</td><td class="num">-</td><td class="num" style="color:#1c7c3a;font-weight:700" id="be-tgag-root">${nf(gagong)}</td><td class="num">-</td>
+               <td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tmat-root">${nf(mat)}</td><td class="num" style="color:#5a6a80;font-weight:700" id="be-tratio-root">${sale>0?Math.round(mat/sale*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800" id="be-tgag-root" title="가공비 합계 = 동관가공+조립+조정">${nf(gagong+adjust)}</td><td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tsale-root" title="판가(현재입고가)">${nf(sale)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
              ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const e=be.edits[r.code]||{};
              const dd=(e.diam!=null&&e.diam!=='')?e.diam:(r.coop_diam||'');const tt=(e.thick!=null&&e.thick!=='')?e.thick:(r.coop_thick||'');const ll=(e.length!=null&&e.length!=='')?e.length:(r.coop_length||'');
@@ -2029,7 +2029,8 @@ SCREEN.coopquote=(host)=>{
         const set=(id,v)=>{const el=g(id);if(el)el.textContent=v;};
         set('#be-tsoyo',nf4(soyo));set('#be-tsoyo2',nf4(soyo));set('#be-traw',nf(raw));set('#be-tbase',nf(baseMat));set('#be-tmat',nf(mat));set('#be-tmat-root',nf(mat));
         set('#be-tgag',nf(gagong));set('#be-tadj',nf(adjust));set('#be-adjust',nf(adjust));set('#be-adjgag',nf(adjust));set('#be-tsale',nf(sale));set('#be-grandtot',nf(sale));set('#be-grandtot-l',nf(sale));
-        set('#be-grandmat',nf(mat));set('#be-grandgag',nf(gagong+adjust));set('#be-tgag-root',nf(gagong));};
+        set('#be-grandmat',nf(mat));set('#be-grandgag',nf(gagong+adjust));set('#be-tgag-root',nf(gagong+adjust));
+        set('#be-tratio-root',(sale>0?Math.round(mat/sale*100):0)+'%');set('#be-tsale-root',nf(sale));};
       const beRefreshRow=(inp)=>{const code=inp.dataset.code;const r=be.data.rows.find(x=>x.code===code);if(!r)return;
         const tr=inp.closest('tr');const uw=beUw(r);const rq=beRowQty(r);const rmat=beRowMat(r);const rgag=beRowGag(r);const rtot=rmat+rgag;const rratio=rtot>0?Math.round(rmat/rtot*100):(rmat?100:0);
         const s=(cls,v)=>{const el=tr.querySelector('.'+cls);if(el)el.textContent=v;};
