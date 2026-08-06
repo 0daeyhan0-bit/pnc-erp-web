@@ -404,6 +404,10 @@ SCREEN.deliv420=(c)=>{
       return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
     const gPlan={},gDone={};rows.forEach(r=>dates.forEach(d=>{gPlan[d]=(gPlan[d]||0)+Number((r.days&&r.days[d])||0);gDone[d]=(gDone[d]||0)+Number((r.donedays&&r.donedays[d])||0);}));
     const chkn=rows.filter(r=>F.chk[r.assy]).length;
+    // ★table-layout:fixed + colgroup — 조회 후에도 컬럼폭 고정(auto 재계산 방지). CW=23개 고정컬럼 + 일자.
+    const CW=[28,86,38,96,120,400,38,48,48,48,48,46,46,46,74,74,54,54,54,54,54,38,52], DW=48;
+    const totalW=CW.reduce((a,b)=>a+b,0)+dates.length*DW;
+    const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}${dates.map(()=>`<col style="width:${DW}px">`).join('')}</colgroup>`;
     const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="6">${nf(data.cnt)}건</td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td class="num"><b>${nf(S.issued||0)}</b></td><td colspan="10"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
      <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독 · 발행=nx</span></div>
@@ -430,10 +434,10 @@ SCREEN.deliv420=(c)=>{
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
-       <th class="center"><input type="checkbox" id="d4-all"></th><th>자도번작업처</th><th class="center">Line</th><th>도번</th><th>품명</th><th style="min-width:400px;width:400px">자도번 LIST</th><th class="center">사급</th>
+      <table class="tbl" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
+       <th class="center"><input type="checkbox" id="d4-all"></th><th>자도번작업처</th><th class="center">Line</th><th>도번</th><th>품명</th><th>자도번 LIST</th><th class="center">사급</th>
        <th class="num">LOT</th><th class="num">계획</th><th class="num">완료</th><th class="num">요청</th><th class="num">발행</th>
-       <th class="num" style="width:44px;min-width:44px">납품</th><th class="num" style="width:44px;min-width:44px">포장</th><th style="width:72px;min-width:72px">SERIAL-NO</th><th style="width:72px;min-width:72px">HEAT-NO</th>
+       <th class="num">납품</th><th class="num">포장</th><th>SERIAL-NO</th><th>HEAT-NO</th>
        <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="num">ASSY재고</th><th class="center">검사</th><th class="center">상태</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r)=>{const ed=(r.status!=='90'&&Number(r.req)>0);const dv=(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv);const pk=(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack);return `<tr>
@@ -447,10 +451,10 @@ SCREEN.deliv420=(c)=>{
         <td class="num" style="color:#1c7c3a"><b>${nf(r.done)}</b></td>
         <td class="num"><b>${nf(r.req)}</b></td>
         <td class="num" style="color:#27ae60">${r.issued?nf(r.issued):''}</td>
-        <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${dv}" ${ed?'':'disabled'} style="width:38px;text-align:right;background:#eafaea;padding:1px 2px"></td>
-        <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-pk" data-k="${esc(r.assy)}" value="${pk}" ${ed?'':'disabled'} style="width:38px;text-align:right;background:#eafaea;padding:1px 2px"></td>
-        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-sn" data-k="${esc(r.assy)}" value="${esc(F.serial[r.assy]||'')}" ${ed?'':'disabled'} style="width:66px;background:#eafaea;padding:1px 2px"></td>
-        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-hn" data-k="${esc(r.assy)}" value="${esc(F.heat[r.assy]||'')}" ${ed?'':'disabled'} style="width:66px;background:#eafaea;padding:1px 2px"></td>
+        <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${dv}" ${ed?'':'disabled'} style="width:40px;min-width:0;height:24px;text-align:right;background:#eafaea;padding:1px 3px;font-size:11px"></td>
+        <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-pk" data-k="${esc(r.assy)}" value="${pk}" ${ed?'':'disabled'} style="width:40px;min-width:0;height:24px;text-align:right;background:#eafaea;padding:1px 3px;font-size:11px"></td>
+        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-sn" data-k="${esc(r.assy)}" value="${esc(F.serial[r.assy]||'')}" ${ed?'':'disabled'} style="width:70px;min-width:0;height:24px;background:#eafaea;padding:1px 3px;font-size:11px"></td>
+        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-hn" data-k="${esc(r.assy)}" value="${esc(F.heat[r.assy]||'')}" ${ed?'':'disabled'} style="width:70px;min-width:0;height:24px;background:#eafaea;padding:1px 3px;font-size:11px"></td>
         <td class="num" style="color:#2e86de">${nf(r.sale)}</td><td class="num" style="color:#8e44ad">${nf(r.prod)}</td>
         <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td><td class="num">${nf(r.assy_stock)}</td>
         <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
