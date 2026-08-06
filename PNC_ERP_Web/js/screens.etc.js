@@ -583,11 +583,11 @@ SCREEN.partnerplan=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={from:iso(T),to:iso(new Date(T.getTime()+27*864e5)),wc:'',part:'',assy:'',line:'',gubun:'외주'};
+  let F={from:iso(T),to:iso(new Date(T.getTime()+30*864e5)),wc:'',part:'',assy:'',line:'',gubun:'외주',src:'legacy'};
   let data={dates:[],rows:[],cnt:0,sum_qty:0,note:''}, wcs=[], loading=false, msg='';
-  const loadWc=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
+  const loadWc=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=${F.src}`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
   const load=async()=>{loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun});
+    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun,src:F.src});
     try{const r=await fetch(`${API}/api/partner/planstatus?${qs}`);data=await r.json();msg='';}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],cnt:0,sum_qty:0};}
     loading=false;draw();};
@@ -607,10 +607,14 @@ SCREEN.partnerplan=(c)=>{
     (data.rows||[]).forEach(r=>{gTot+=Number(r.tot||0);dates.forEach(d=>{gDay[d]=(gDay[d]||0)+Number((r.days&&r.days[d])||0);});});
     const grandRow=(data.rows&&data.rows.length)?`<tr class="grandtot"><td><b>합계</b></td><td colspan="6" class="center" style="color:#33507d">${nf(data.cnt)}건</td><td class="num"><b>${nf(gTot)}</b></td>${dates.map(d=>`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
-     <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">납품업체별 자도번 일자계획 (편성결과)</span></div>
-     <div class="page-sub">협력사계획 편성결과를 <b>납품업체(자도번작업처)</b>·제번·자도번 단위로 일자별 조회. 정본 <code>nx.plan_part_mat</code>(레거시 STEP5→6→7 충실이식) · 편성=생산계획업로드 → 🧾자재소요·조달 편성 (수량 100% 검증)</div>
+     <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 납품업체별 자도번 일자계획 (당김 반영)</span></div>
+     <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량. <b>자도번작업처(납품업체)</b>·제번·자도번 단위 일자별. 첫 일자컬럼=기준일 이전 누적. 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
      <div class="toolbar">
-       <label class="tl">계획기간</label><input class="inp" type="date" id="pn-from" value="${F.from}"> ~ <input class="inp" type="date" id="pn-to" value="${F.to}">
+       <label class="tl">소스</label>
+       <select class="inp" id="pn-src" style="width:auto">
+         <option value="legacy" ${F.src==='legacy'?'selected':''}>레거시 라이브 (당김반영)</option>
+         <option value="nx" ${F.src==='nx'?'selected':''}>우리편성 (nx)</option></select>
+       <label class="tl" style="margin-left:8px">계획기간</label><input class="inp" type="date" id="pn-from" value="${F.from}"> ~ <input class="inp" type="date" id="pn-to" value="${F.to}">
        <label class="tl">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="자도번작업처(거래처명 입력)" autocomplete="off" style="width:190px"><datalist id="pnl-wc">${wcOpts}</datalist>
        <button class="btn" id="pn-search">🔍 조회</button>
      </div>
@@ -628,11 +632,12 @@ SCREEN.partnerplan=(c)=>{
       <tbody>${loading?spinRow(8+dates.length):((data.rows&&data.rows.length)?(data.rows.map(r=>`<tr>
         <td><b>${esc(r.wcnm||r.wc)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.wo)}</td>
         <td class="bcap" title="${esc(r.model)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.model)}</td>
-        <td>${esc(r.assy)}</td><td><b>${esc(r.part)}</b></td>
+        <td>${esc(r.assy)}</td><td><b>${esc(r.part)}</b>${r.sagub?' <span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
         <td class="bcap" title="${esc(r.nm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td>
         <td class="num"><b>${nf(r.tot)}</b></td>
         ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${8+dates.length}" class="empty">편성 결과 없음 — 생산계획업로드 화면에서 <b>🔗협력사계획 편성</b>을 먼저 실행하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
+    const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(load);};
     g('#pn-search').onclick=()=>{F.from=g('#pn-from').value;F.to=g('#pn-to').value;const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||'';F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;load();};
     ['#pn-part','#pn-assy','#pn-line','#pn-wc'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();});
   };
