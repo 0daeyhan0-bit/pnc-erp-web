@@ -433,7 +433,7 @@ SCREEN.deliv420=(c)=>{
       <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
        <th class="center"><input type="checkbox" id="d4-all"></th><th>자도번작업처</th><th class="center">Line</th><th>도번</th><th>품명</th><th style="min-width:400px;width:400px">자도번 LIST</th><th class="center">사급</th>
        <th class="num">LOT</th><th class="num">계획</th><th class="num">완료</th><th class="num">요청</th><th class="num">발행</th>
-       <th class="num" style="width:52px">납품</th><th class="num" style="width:48px">포장</th><th style="width:80px">SERIAL-NO</th><th style="width:70px">HEAT-NO</th>
+       <th class="num" style="width:44px;min-width:44px">납품</th><th class="num" style="width:44px;min-width:44px">포장</th><th style="width:72px;min-width:72px">SERIAL-NO</th><th style="width:72px;min-width:72px">HEAT-NO</th>
        <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="num">ASSY재고</th><th class="center">검사</th><th class="center">상태</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r)=>{const ed=(r.status!=='90'&&Number(r.req)>0);const dv=(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv);const pk=(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack);return `<tr>
@@ -447,10 +447,10 @@ SCREEN.deliv420=(c)=>{
         <td class="num" style="color:#1c7c3a"><b>${nf(r.done)}</b></td>
         <td class="num"><b>${nf(r.req)}</b></td>
         <td class="num" style="color:#27ae60">${r.issued?nf(r.issued):''}</td>
-        <td class="num" style="background:#eafaea"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${dv}" ${ed?'':'disabled'} style="width:46px;text-align:right;background:#eafaea"></td>
-        <td class="num" style="background:#eafaea"><input class="inp d4-pk" data-k="${esc(r.assy)}" value="${pk}" ${ed?'':'disabled'} style="width:42px;text-align:right;background:#eafaea"></td>
-        <td style="background:#eafaea"><input class="inp d4-sn" data-k="${esc(r.assy)}" value="${esc(F.serial[r.assy]||'')}" ${ed?'':'disabled'} style="width:76px;background:#eafaea"></td>
-        <td style="background:#eafaea"><input class="inp d4-hn" data-k="${esc(r.assy)}" value="${esc(F.heat[r.assy]||'')}" ${ed?'':'disabled'} style="width:66px;background:#eafaea"></td>
+        <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${dv}" ${ed?'':'disabled'} style="width:38px;text-align:right;background:#eafaea;padding:1px 2px"></td>
+        <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-pk" data-k="${esc(r.assy)}" value="${pk}" ${ed?'':'disabled'} style="width:38px;text-align:right;background:#eafaea;padding:1px 2px"></td>
+        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-sn" data-k="${esc(r.assy)}" value="${esc(F.serial[r.assy]||'')}" ${ed?'':'disabled'} style="width:66px;background:#eafaea;padding:1px 2px"></td>
+        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-hn" data-k="${esc(r.assy)}" value="${esc(F.heat[r.assy]||'')}" ${ed?'':'disabled'} style="width:66px;background:#eafaea;padding:1px 2px"></td>
         <td class="num" style="color:#2e86de">${nf(r.sale)}</td><td class="num" style="color:#8e44ad">${nf(r.prod)}</td>
         <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td><td class="num">${nf(r.assy_stock)}</td>
         <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
