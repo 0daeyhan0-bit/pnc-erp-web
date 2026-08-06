@@ -122,7 +122,8 @@ const MODULES=[
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
    {id:'partnerplan',ic:'📋',nm:'협력사계획현황'},
-   {id:'setinreq',ic:'🧾',nm:'거래명세서 발행'},
+   {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
+   {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},
    {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
    {id:'modelbom',ic:'🧬',nm:'모델BOM 관리'},

@@ -160,6 +160,8 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         k = (r['swo'], r['assy'])
         pf, pi, pp = per_key.get(k, (0, 0, 0))
         per_key[k] = (pf + r['c_fin'], pi + r['c_input'], pp + r['plan'])
+    if len(_FUT_CACHE) > 40: _FUT_CACHE.clear()
+    _FUT_CACHE[ck] = (time.time(), per_key, rows)
     return per_key, rows
 
 def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
