@@ -174,7 +174,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             if not g:
                 g = {'wo': wo, 'swo': swo, 'assy': assy, 'cust': cust, 'line': str(r[7] or ''), 'output_hm': str(r[8] or ''),
                      'excel': 0, 'days': [0]*31, 'plan': 0, 'lot': 0.0, 'use': 1.0, 'over': 0, 'rate': 100.0,
-                     'sale': 0, 'assy_stock': 0, 'iset_stk': 0, 'ireq': 0, 'work_code': '', 'in_cust': '',
+                     'sale': 0, 'assy_stock': 0, 'iset_stk': 0, 'ireq': 0, 'work_center': '', 'work_code': '', 'in_cust': '',
                      'model': '', 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
                 keyed[k] = g
             q = int(float(r[4] or 0)); g['days'][bi] += q; g['plan'] += q

@@ -341,7 +341,8 @@ SCREEN.deliv420=(c)=>{
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   const loadCusts=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);custs=(await r.json()).rows||[];}catch(e){custs=[];}};
   const load=async()=>{
-    if(!F.cust){msg='협력사를 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
+    if(loading)return;                              // 중복요청 가드
+    if(!F.cust){msg='협력사(자도번작업처)를 먼저 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
     loading=true;msg='';draw();
     const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf()});
     try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();F.deliv={};}
@@ -657,7 +658,10 @@ SCREEN.partnerplan=(c)=>{
   let data={dates:[],rows:[],cnt:0,sum_qty:0,note:''}, wcs=[], loading=false, msg='';
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||31))-1);
   const loadWc=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=${F.src}`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
-  const load=async()=>{loading=true;draw();
+  const load=async()=>{
+    if(loading)return;                              // 중복요청 가드
+    if(!F.wc){msg='협력사(자도번작업처)를 먼저 선택하세요. (전체 조회는 무거워 협력사 지정 후 조회합니다)';data={dates:[],rows:[],cnt:0,sum_qty:0,note:''};draw();return;}
+    loading=true;msg='';draw();
     const qs=new URLSearchParams({from_ymd:F.from,to_ymd:toOf(),wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun,src:F.src});
     try{const r=await fetch(`${API}/api/partner/planstatus?${qs}`);data=await r.json();msg='';}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],cnt:0,sum_qty:0};}
@@ -722,12 +726,12 @@ SCREEN.partnerplan=(c)=>{
         ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     const syncInputs=()=>{const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||(wn?F.wc:'');F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;};
-    const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(load);};
+    const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};
     // 레거시 기준일자 위젯: 전일/익일/달력 → 자동 재조회
     bindLegacyDate(c,'pn-base',()=>F.from,(v)=>{F.from=v;syncInputs();load();});
     g('#pn-days').onchange=()=>{syncInputs();load();};
     g('#pn-search').onclick=()=>{syncInputs();load();};
     ['#pn-part','#pn-assy','#pn-line','#pn-wc'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
   };
-  loadWc().then(load);
+  loadWc().then(draw);   // ★자동 전체조회 금지 — 협력사 선택 후 [조회]
 };
