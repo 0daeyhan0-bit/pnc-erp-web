@@ -583,63 +583,81 @@ SCREEN.partnerplan=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={from:iso(T),to:iso(new Date(T.getTime()+30*864e5)),wc:'',part:'',assy:'',line:'',gubun:'외주',src:'legacy'};
+  let F={from:iso(T),days:31,wc:'',part:'',assy:'',line:'',gubun:'외주',src:'legacy'};
   let data={dates:[],rows:[],cnt:0,sum_qty:0,note:''}, wcs=[], loading=false, msg='';
+  const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||31))-1);
   const loadWc=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=${F.src}`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
   const load=async()=>{loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun,src:F.src});
+    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:toOf(),wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun,src:F.src});
     try{const r=await fetch(`${API}/api/partner/planstatus?${qs}`);data=await r.json();msg='';}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],cnt:0,sum_qty:0};}
     loading=false;draw();};
+  // 레거시 도번-level(자도번LIST) / nx 자도번-level 를 동일 컬럼으로 정규화
+  const norm=(r,i)=>({seq:r.seq||i+1, wc:r.wc, wcnm:r.wcnm||r.wc, line:r.line||'', workcenter:r.workcenter||'',
+     assy:r.assy||'', jado:r.part||'', sagub:!!r.sagub, lot:(r.lot!=null?r.lot:null),
+     matq:(r.matq!=null?r.matq:r.tot), doneq:(r.doneq!=null?r.doneq:null), reqq:(r.reqq!=null?r.reqq:null),
+     nm:r.nm||'', spec:r.spec||'', days:r.days||{}, tot:r.tot||0});
   const draw=()=>{
     const dates=data.dates||[];
-    // 규칙17: 로드된 rows에서 자도번(값→품명표시)·ASM도번·라인 datalist
-    const pnPart=new Map(),pnAssy=new Set(),pnLine=new Set();
-    (data.rows||[]).forEach(r=>{if(r.part&&!pnPart.has(r.part))pnPart.set(r.part,r.nm||'');if(r.assy)pnAssy.add(r.assy);if(r.line)pnLine.add(r.line);});
-    const pnPartOpts=[...pnPart].map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
-    const pnAssyOpts=[...pnAssy].map(v=>`<option value="${esc(v)}"></option>`).join('');
+    const rows=(data.rows||[]).map(norm);
+    const pnAssy=new Set(),pnLine=new Set(),pnPart=new Set();
+    rows.forEach(r=>{if(r.assy)pnAssy.add(r.assy);if(r.line)pnLine.add(r.line);if(r.jado)pnPart.add((r.jado||'').split('{')[0]);});
+    const pnAssyOpts=[...pnAssy].slice(0,400).map(v=>`<option value="${esc(v)}"></option>`).join('');
     const pnLineOpts=[...pnLine].map(v=>`<option value="${esc(v)}"></option>`).join('');
-    // 규칙1/17: 자도번작업처는 거래처명으로 입력·autocomplete (코드 숨김)
+    const pnPartOpts=[...pnPart].slice(0,400).map(v=>`<option value="${esc(v)}"></option>`).join('');
     const wcOpts=wcs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
     const wcName=(wcs.find(w=>w.cc===F.wc)||{}).nm||'';
-    // 규칙9: 합계(sticky) — 표시된 행 기준 계·일자별 총계
-    let gTot=0; const gDay={};
-    (data.rows||[]).forEach(r=>{gTot+=Number(r.tot||0);dates.forEach(d=>{gDay[d]=(gDay[d]||0)+Number((r.days&&r.days[d])||0);});});
-    const grandRow=(data.rows&&data.rows.length)?`<tr class="grandtot"><td><b>합계</b></td><td colspan="6" class="center" style="color:#33507d">${nf(data.cnt)}건</td><td class="num"><b>${nf(gTot)}</b></td>${dates.map(d=>`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`).join('')}</tr>`:'';
+    const nn=v=>(v==null?'-':nf(v));
+    // 합계행
+    const sMat=rows.reduce((a,r)=>a+Number(r.matq||0),0), sReq=rows.reduce((a,r)=>a+Number(r.reqq||0),0);
+    const gDay={}; rows.forEach(r=>dates.forEach(d=>{gDay[d]=(gDay[d]||0)+Number((r.days&&r.days[d])||0);}));
+    const FIX=12;
+    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td><td></td>${dates.map(d=>`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
-     <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 납품업체별 자도번 일자계획 (당김 반영)</span></div>
-     <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량. <b>자도번작업처(납품업체)</b>·제번·자도번 단위 일자별. 첫 일자컬럼=기준일 이전 누적. 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
+     <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 자도번작업처·도번·자도번LIST·일자별 (당김 반영)</span></div>
+     <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량 컬럼 동일(1:1 대조용). 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). 첫 일자컬럼=기준일 이전 누적. ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
      <div class="toolbar">
        <label class="tl">소스</label>
        <select class="inp" id="pn-src" style="width:auto">
          <option value="legacy" ${F.src==='legacy'?'selected':''}>레거시 라이브 (당김반영)</option>
          <option value="nx" ${F.src==='nx'?'selected':''}>우리편성 (nx)</option></select>
-       <label class="tl" style="margin-left:8px">계획기간</label><input class="inp" type="date" id="pn-from" value="${F.from}"> ~ <input class="inp" type="date" id="pn-to" value="${F.to}">
-       <label class="tl">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="자도번작업처(거래처명 입력)" autocomplete="off" style="width:190px"><datalist id="pnl-wc">${wcOpts}</datalist>
+       <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('pn-base',F.from)}
+       <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="pn-days" value="${esc(F.days)}" style="width:42px;text-align:center">일
+       <label class="tl" style="margin-left:8px">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명 입력" autocomplete="off" style="width:180px"><datalist id="pnl-wc">${wcOpts}</datalist>
        <button class="btn" id="pn-search">🔍 조회</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
-       <label class="tl">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:120px" placeholder="자도번/품명" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
-       <label class="tl">ASM도번</label><input class="inp" id="pn-assy" list="pnl-assy" value="${esc(F.assy)}" style="width:120px" placeholder="ASM도번 입력" autocomplete="off"><datalist id="pnl-assy">${pnAssyOpts}</datalist>
+       <label class="tl">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:120px" placeholder="자도번" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
+       <label class="tl">도번</label><input class="inp" id="pn-assy" list="pnl-assy" value="${esc(F.assy)}" style="width:120px" placeholder="도번(ASSY)" autocomplete="off"><datalist id="pnl-assy">${pnAssyOpts}</datalist>
        <label class="tl">라인</label><input class="inp" id="pn-line" list="pnl-line" value="${esc(F.line)}" style="width:60px" placeholder="라인" autocomplete="off"><datalist id="pnl-line">${pnLineOpts}</datalist>
-       <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 계획수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}</span>
+       <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 자재수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}</span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${data.note?`<div class="page-sub" style="color:#b8860b">ℹ ${esc(data.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px"><thead><tr>
-       <th>납품업체</th><th>라인</th><th>제번</th><th>모델</th><th>ASM도번</th><th>자도번</th><th>품명</th><th class="num">계</th>${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
-      <tbody>${loading?spinRow(8+dates.length):((data.rows&&data.rows.length)?(data.rows.map(r=>`<tr>
-        <td><b>${esc(r.wcnm||r.wc)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.wo)}</td>
-        <td class="bcap" title="${esc(r.model)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.model)}</td>
-        <td>${esc(r.assy)}</td><td><b>${esc(r.part)}</b>${r.sagub?' <span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
-        <td class="bcap" title="${esc(r.nm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td>
-        <td class="num"><b>${nf(r.tot)}</b></td>
-        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${8+dates.length}" class="empty">편성 결과 없음 — 생산계획업로드 화면에서 <b>🔗협력사계획 편성</b>을 먼저 실행하세요.</td></tr>`)}</tbody></table></div>`;
+      <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
+       <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th>자도번LIST</th><th class="center">사급</th>
+       <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th>품목정보</th>
+       ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
+      <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map(r=>`<tr>
+        <td class="num" style="color:#8aa0bd">${r.seq}</td>
+        <td><b>${esc(r.wcnm)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
+        <td><b>${esc(r.assy)}</b></td>
+        <td><div style="max-width:280px;max-height:44px;overflow-y:auto;white-space:normal;word-break:break-all;line-height:1.3" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
+        <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
+        <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
+        <td class="num" style="color:#b8860b" title="완료수량: 레거시 라이브 실적조인 원천 미확정(담당확인)">${nn(r.doneq)}</td>
+        <td class="num">${nn(r.reqq)}</td>
+        <td class="bcap" title="${esc(r.nm)} ${esc(r.spec)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
+        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
+    const syncInputs=()=>{const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||(wn?F.wc:'');F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;};
     const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(load);};
-    g('#pn-search').onclick=()=>{F.from=g('#pn-from').value;F.to=g('#pn-to').value;const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||'';F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;load();};
-    ['#pn-part','#pn-assy','#pn-line','#pn-wc'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();});
+    // 레거시 기준일자 위젯: 전일/익일/달력 → 자동 재조회
+    bindLegacyDate(c,'pn-base',()=>F.from,(v)=>{F.from=v;syncInputs();load();});
+    g('#pn-days').onchange=()=>{syncInputs();load();};
+    g('#pn-search').onclick=()=>{syncInputs();load();};
+    ['#pn-part','#pn-assy','#pn-line','#pn-wc'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
   };
   loadWc().then(load);
 };
