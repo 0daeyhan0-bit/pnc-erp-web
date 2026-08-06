@@ -489,6 +489,15 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
 
 
 # ================= 협력사 ②: 거래명세서 발행 조회 (w_pr_outside_420) — 레거시 SP_LIVE 동일 =================
+def _ensure_deliv_issue(cur):
+    """발행 기록 테이블(nx만·라이브 미기록). 레거시 PU_T_SET_INPUT_REQ 대응 신규 nx 테이블."""
+    cur.execute("""IF OBJECT_ID('nx.deliv_issue') IS NULL CREATE TABLE nx.deliv_issue(
+        issue_seq int IDENTITY(1,1) PRIMARY KEY,
+        issue_ymd varchar(6), barcode_no varchar(20), cust_code varchar(10), item_code varchar(20),
+        deliver_qty decimal(18,2) DEFAULT 0, pack_qty decimal(18,2) DEFAULT 0,
+        serial_no varchar(50), heat_no varchar(50), status varchar(2) DEFAULT '10',
+        ins_dt datetime DEFAULT getdate(), ins_user varchar(20))""")
+
 def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
     """레거시 dw_pr_outside_420_t1 동일 데이터: SP_LIVE(라이브 직독)+510창 완료배분 → 도번(cust,assy) 병합행.
        전 컬럼: 자도번작업처·자도번LIST·사급·LOT·계획·완료·요청·출하실적·생산실적·세트재고·입고대기·ASSY재고·일자별."""
@@ -501,11 +510,12 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         m = mg.get(k)
         if not m:
             m = {"cust": r["cust"], "assy": r["assy"], "work_center": r["work_center"], "work_code": r["work_code"],
-                 "in_cust": r["in_cust"], "model": r["model"], "mat_list": r["mat_list"], "sagub_list": r["sagub_list"],
+                 "in_cust": r["in_cust"], "line": r["line"], "model": r["model"], "mat_list": r["mat_list"], "sagub_list": r["sagub_list"],
                  "lot": 0, "plan": 0, "done": 0, "req": 0, "sale": 0, "prod": 0, "assy_stock": r["assy_stock"],
                  "iset_stk": r["iset_stk"], "ireq": r["ireq"], "input_mat": 0, "pack": 0, "insp": r["insp"],
                  "days": [0]*31, "dn": [0]*31, "tg": [0]*31, "swos": []}
             mg[k] = m
+        if r["line"] and not m["line"]: m["line"] = r["line"]
         m["lot"] = max(m["lot"], r["lot_qty"]); m["plan"] += r["plan"]; m["done"] += r["c_fin"]
         m["req"] += r["c_input"]; m["sale"] += r["sale"]; m["prod"] += r["prod"]
         m["pack"] = max(m["pack"], r["pack"])
@@ -542,6 +552,16 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             for rr in cur.fetchall(): wcnm.setdefault(str(rr[0]).strip(), rr[1])
     finally:
         cn.close()
+    # 발행분(nx.deliv_issue) 반영 — 발행완료 수량 차감·상태(라이브 미기록·nx만).
+    issued = {}
+    try:
+        nx = _nx(); nc = nx.cursor()
+        _ensure_deliv_issue(nc)
+        nc.execute("SELECT item_code, SUM(deliver_qty) FROM nx.deliv_issue WHERE cust_code=? AND status<>'99' GROUP BY item_code", cust)
+        for rr in nc.fetchall(): issued[str(rr[0]).strip()] = float(rr[1] or 0)
+        nx.close()
+    except Exception:
+        issued = {}
     out = []
     for m in merged:
         nm, spec = nmm.get(str(m["assy"]).strip(), ("", ""))
@@ -549,17 +569,21 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         dn = {ymd: _qint(m["dn"][i]) for i, ymd in enumerate(dates) if m["dn"][i]}
         cl = {ymd: _TAGCOLOR.get(m["tg"][i], '') for i, ymd in enumerate(dates) if m["days"][i]}
         wcc = m["work_code"] or m["in_cust"]
-        out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"],
+        iss = issued.get(str(m["assy"]).strip(), 0.0)
+        req0 = m["req"]; remain = max(0.0, req0 - iss)
+        out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"], "line": m["line"],
             "nm": nm, "spec": spec, "workcenter": m["work_center"] or wcnm.get(wcc, wcc),
             "mat_list": m["mat_list"], "sagub_list": m["sagub_list"], "lot": _qint(m["lot"]),
-            "plan": _qint(m["plan"]), "done": _qint(m["done"]), "req": _qint(m["req"]),
+            "plan": _qint(m["plan"]), "done": _qint(m["done"]), "req": _qint(remain), "req_org": _qint(req0),
+            "issued": _qint(iss), "status": ("90" if iss >= req0 and iss > 0 else ("10" if iss > 0 else "00")),
             "sale": _qint(m["sale"]), "prod": _qint(m["prod"]), "assy_stock": _qint(m["assy_stock"]),
             "iset_stk": _qint(m["iset_stk"]), "ireq": _qint(m["ireq"]), "input_mat": 0,
-            "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(m["req"]), "days": d, "donedays": dn, "colors": cl})
-    out.sort(key=lambda x: (x["workcenter"] or "", x["assy"]))
+            "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(remain), "days": d, "donedays": dn, "colors": cl})
+    out.sort(key=lambda x: (x["workcenter"] or "", x["line"] or "", x["assy"]))
     return {"dates": dates, "rows": out, "cnt": len(out),
             "sum": {"lot": _qint(sum(x["lot"] for x in out)), "plan": _qint(sum(x["plan"] for x in out)),
-                    "done": _qint(sum(x["done"] for x in out)), "req": _qint(sum(x["req"] for x in out))}}
+                    "done": _qint(sum(x["done"] for x in out)), "req": _qint(sum(x["req"] for x in out)),
+                    "issued": _qint(sum(x["issued"] for x in out))}}
 
 @router.get("/api/partner/deliv420")
 def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: str = Query(""),
@@ -591,3 +615,80 @@ def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: 
         return res
     except Exception as e:
         return {"dates": [], "rows": [], "cnt": 0, "note": f"⚠ 조회 오류: {str(e)[:150]}"}
+
+@router.post("/api/partner/deliv420/issue")
+def partner_deliv420_issue(body: dict = Body(...)):
+    """거래명세서 발행(납품처리) — ★nx.deliv_issue에만 기록(라이브 PU_T_SET_INPUT_REQ 미기록, 하드룰).
+       body={cust, from_ymd, to_ymd, items:[{assy, deliver_qty, pack_qty, serial_no, heat_no}], preview:0/1}.
+       검증: deliver_qty>요청수량(잔량) 차단·음수 차단. preview=1이면 검토용(무기록). 확정 시 바코드 채번·INSERT."""
+    cust = str(body.get("cust", "")).strip()
+    items = body.get("items", []) or []
+    preview = _b(body.get("preview", 0))
+    if not cust: return {"ok": False, "msg": "협력사를 선택하세요."}
+    if not items: return {"ok": False, "msg": "발행할 도번(완성분)을 선택하세요."}
+    # 잔여 요청수량 검증용 재조회(라이브, 읽기전용)
+    d6f = _d6(body.get("from_ymd", "")) or None
+    d6t = _d6(body.get("to_ymd", "")) or None
+    if not d6f or not d6t:
+        cn = _conn(); cur = cn.cursor()
+        try:
+            cur.execute("SELECT MIN(plan_ymd) FROM PR_T_PLAN_DTL WHERE plan_ymd>'000000'"); mn = cur.fetchone()[0]
+        finally: cn.close()
+        import datetime as _di
+        d6f = d6f or mn
+        d6t = d6t or (_di.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _di.timedelta(days=6)).strftime('%y%m%d')
+    res = _deliv420_rows(cust, d6f, d6t)
+    remain = {str(r["assy"]).strip(): float(r["req"] or 0) for r in res["rows"]}  # 잔여 요청(발행분 차감 후)
+    packmap = {str(r["assy"]).strip(): float(r["pack"] or 0) for r in res["rows"]}
+    plan = []; errs = []
+    for it in items:
+        a = str(it.get("assy", "")).strip()
+        try: q = float(it.get("deliver_qty", 0) or 0)
+        except Exception: q = 0.0
+        if not a: continue
+        if q < 0: errs.append(f"{a}: 납품수량 음수 불가"); continue
+        if q == 0: continue
+        rq = remain.get(a)
+        if rq is None: errs.append(f"{a}: 조회 결과에 없음(기준일/기간 확인)"); continue
+        if q > rq + 0.001: errs.append(f"{a}: 납품수량 {q:g} > 요청(잔량) {rq:g} 초과"); continue
+        plan.append({"assy": a, "deliver_qty": q,
+                     "pack_qty": float(it.get("pack_qty", packmap.get(a, 0)) or 0),
+                     "serial_no": str(it.get("serial_no", "") or "")[:50], "heat_no": str(it.get("heat_no", "") or "")[:50]})
+    if errs:
+        return {"ok": False, "msg": "발행 불가: " + " / ".join(errs[:8]), "errs": errs}
+    if not plan:
+        return {"ok": False, "msg": "발행할 유효 수량이 없습니다(납품수량 입력·잔량 확인)."}
+    if preview:
+        return {"ok": True, "preview": True, "count": len(plan),
+                "total_qty": _qint(sum(p["deliver_qty"] for p in plan)), "items": plan}
+    # 확정 발행: nx.deliv_issue INSERT (그룹 트랜잭션)
+    import datetime as _di2
+    ymd = _di2.date.today().strftime('%y%m%d')
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_deliv_issue(cur)
+        cur.execute("SELECT ISNULL(MAX(CAST(barcode_no AS int)),700000)+1 FROM nx.deliv_issue WHERE ISNUMERIC(barcode_no)=1")
+        bc = str(cur.fetchone()[0])
+        for p in plan:
+            cur.execute("""INSERT INTO nx.deliv_issue(issue_ymd, barcode_no, cust_code, item_code, deliver_qty, pack_qty, serial_no, heat_no, status, ins_user)
+                VALUES(?,?,?,?,?,?,?,?, '10', ?)""",
+                ymd, bc, cust, p["assy"], p["deliver_qty"], p["pack_qty"], p["serial_no"], p["heat_no"], str(body.get("user", "web")))
+        nx.commit()
+        return {"ok": True, "barcode": bc, "count": len(plan), "total_qty": _qint(sum(p["deliver_qty"] for p in plan))}
+    except Exception as e:
+        nx.rollback(); return {"ok": False, "msg": f"발행 오류(롤백): {str(e)[:150]}"}
+    finally:
+        nx.close()
+
+@router.post("/api/partner/deliv420/cancel")
+def partner_deliv420_cancel(body: dict = Body(...)):
+    """발행취소 — 해당 바코드 발행행 status='99'(nx만)."""
+    bc = str(body.get("barcode", "")).strip()
+    if not bc: return {"ok": False, "msg": "바코드가 필요합니다."}
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_deliv_issue(cur)
+        cur.execute("UPDATE nx.deliv_issue SET status='99' WHERE barcode_no=? AND status<>'99'", bc)
+        return {"ok": True, "cancelled": cur.rowcount}
+    finally:
+        nx.close()
