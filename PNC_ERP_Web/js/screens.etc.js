@@ -337,20 +337,26 @@ SCREEN.deliv420=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${+((''+s).slice(2,4))}/${+((''+s).slice(4,6))}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={cust:'',from:iso(T),days:5,deliv:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, msg='';
+  let F={cust:'',from:iso(T),days:5,item:'',part:'',deliv:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, msg='';
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   const loadCusts=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);custs=(await r.json()).rows||[];}catch(e){custs=[];}};
   const load=async()=>{
     if(loading)return;                              // 중복요청 가드
     if(!F.cust){msg='협력사(자도번작업처)를 먼저 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
     loading=true;msg='';draw();
-    const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf()});
+    const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),item:F.item,matcode:F.part});
     try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();F.deliv={};}
     catch(e){msg='백엔드 연결 실패';data={dates:[],rows:[],cnt:0,sum:{}};}
     loading=false;draw();};
   const draw=()=>{
     const dates=data.dates||[], rows=data.rows||[];
-    const custOpts=custs.map(w=>`<option value="${esc(w.cc)}" ${F.cust===w.cc?'selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('');
+    // 3개 필터 오토컴플리트 소스: 협력사(전체)·도번/자도번(선택 협력사 결과 스코프)
+    const custOpts=custs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
+    const custName=(custs.find(w=>w.cc===F.cust)||{}).nm||'';
+    const itS=new Map(); rows.forEach(r=>{if(r.assy&&!itS.has(r.assy))itS.set(r.assy,r.nm||'');});
+    const itemOpts=[...itS].slice(0,500).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
+    const ptS=new Set(); rows.forEach(r=>(r.mat_list||'').split(/[,\r\n]/).forEach(x=>{const m=x.split('{')[0].split('[')[0].trim();if(m)ptS.add(m);}));
+    const partOpts=[...ptS].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
     const FIX=16;
     const S=data.sum||{};
     // 일자셀=완료/계획+색(가공4주간 동일 표준): 생산완료 노랑·출하완료 주황·키팅완료 녹
@@ -363,13 +369,16 @@ SCREEN.deliv420=(c)=>{
      <div class="page-sub">협력사 계획현황 기반. <b>완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분</b>(레거시 SP + 510창, 도번 공유풀). 요청수량 = 계획 − 완료. 납품수량 입력 후 발행/바코드는 <b>거래명세서 발행(바코드)</b> 화면(후속).
        <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
      <div class="toolbar">
-       <label class="tl">협력사</label>
-       <select class="inp" id="d4-cust" style="width:auto"><option value="">선택</option>${custOpts}</select>
+       <label class="tl">협력사</label><input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명 입력" autocomplete="off" style="width:180px"><datalist id="d4l-cust">${custOpts}</datalist>
        <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('d4-base',F.from)}
        <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:42px;text-align:center">일
        <button class="btn" id="d4-search">🔍 조회</button>
        ${loading?'<span style="color:var(--muted)">조회중… (라이브 재고배분 계산, 최초 다소 소요)</span>':''}
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt||0)}건 · 완료합 <b>${nf(S.done||0)}</b> / 계획 ${nf(S.plan||0)}</span>
+     </div>
+     <div class="toolbar" style="margin-top:2px">
+       <label class="tl">도번</label><input class="inp" id="d4-item" list="d4l-item" value="${esc(F.item)}" style="width:140px" placeholder="도번(ASSY)/품명" autocomplete="off"><datalist id="d4l-item">${itemOpts}</datalist>
+       <label class="tl">자도번</label><input class="inp" id="d4-part" list="d4l-part" value="${esc(F.part)}" style="width:140px" placeholder="자도번" autocomplete="off"><datalist id="d4l-part">${partOpts}</datalist>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
@@ -394,10 +403,11 @@ SCREEN.deliv420=(c)=>{
         <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
         ${dates.map(d=>dcell(r,d)).join('')}</tr>`).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
-    g('#d4-cust').onchange=e=>F.cust=e.target.value;
-    g('#d4-days').onchange=e=>{F.days=e.target.value;};
+    const sync=()=>{const cn=g('#d4-cust').value.trim();F.cust=(custs.find(w=>(w.nm||w.cc)===cn)||{}).cc||(cn?F.cust:'');
+      F.days=g('#d4-days').value||5;F.item=g('#d4-item').value.trim();F.part=g('#d4-part').value.trim();};
     bindLegacyDate(c,'d4-base',()=>F.from,(v)=>{F.from=v;});
-    g('#d4-search').onclick=load;
+    g('#d4-search').onclick=()=>{sync();load();};
+    ['#d4-cust','#d4-item','#d4-part','#d4-days'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
     c.querySelectorAll('.d4-dv').forEach(x=>x.oninput=e=>{F.deliv[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('thead th').forEach(th=>addResizer(th));
   };
