@@ -369,7 +369,7 @@ SCREEN.deliv420=(c)=>{
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
-       <th class="num">SEQ</th><th>자도번작업처</th><th>도번</th><th>품명</th><th>자도번 LIST</th><th class="center">사급</th>
+       <th class="num">SEQ</th><th>자도번작업처</th><th>도번</th><th>품명</th><th style="min-width:400px;width:400px">자도번 LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">계획수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th class="num" style="width:56px">납품수량</th>
        <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="center">검사</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
@@ -378,7 +378,7 @@ SCREEN.deliv420=(c)=>{
         <td><b>${esc(r.workcenter||'')}</b></td>
         <td><b>${esc(r.assy)}</b></td>
         <td class="bcap" title="${esc(r.nm||'')} ${esc(r.spec||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
-        <td><div style="max-width:250px;max-height:44px;overflow-y:auto;white-space:normal;word-break:break-all;line-height:1.3" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
+        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
         <td class="center">${r.sagub_list?'<span class="bdg sagub" style="font-size:10px" title="'+esc(r.sagub_list)+'">사급</span>':''}</td>
         <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.plan)}</td>
         <td class="num" style="color:#1c7c3a"><b>${nf(r.done)}</b></td>
@@ -710,14 +710,14 @@ SCREEN.partnerplan=(c)=>{
      ${data.note?`<div class="page-sub" style="color:#b8860b">ℹ ${esc(data.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
-       <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th>자도번LIST</th><th class="center">사급</th>
+       <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th style="min-width:400px;width:400px">자도번LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th>품목정보</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map(r=>`<tr>
         <td class="num" style="color:#8aa0bd">${r.seq}</td>
         <td><b>${esc(r.wcnm)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
         <td><b>${esc(r.assy)}</b></td>
-        <td><div style="max-width:280px;max-height:44px;overflow-y:auto;white-space:normal;word-break:break-all;line-height:1.3" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
+        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
         <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
         <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
         <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
