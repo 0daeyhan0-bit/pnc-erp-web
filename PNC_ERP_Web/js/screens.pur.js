@@ -1929,6 +1929,23 @@ SCREEN.coopquote=(host)=>{
                  ${(d.proc_ops||[]).map(op=>`<td class="num" style="font-size:11px;color:#6a3fb0">${(isTube&&pr[op])?pr[op]:''}</td>`).join('')}
                  <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
                  <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td></tr>`;}).join('')}
+             ${(be.asm||d.assembly_proc>0)?(()=>{const A=be.asm||{gagong:d.assembly_proc,mgmt:0,transport:0,profit:0};const atot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
+               return `<tr style="background:#fff8ec">
+               <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#8a6d3b">(서브조립)</td>
+               <td class="cap" style="color:#8a6d3b">서브ASSY 조립공정</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fff3e0;color:#b8791f">조립공정</span></td>
+               <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#1c7c3a;font-weight:700">${nf(atot)}</td><td class="num" style="color:#8a6d3b;font-weight:700">${nf(atot)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`;})():''}
+             ${curIn!=null?`<tr style="background:#fef6e9">
+               <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#a06010">(가격조정)</td>
+               <td class="cap" style="color:#a06010">종전입고가 정합 조정</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fbe4cc;color:#a06010">조정</span></td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjust)}</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjust)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`:''}
              </tbody></table></div>
            `)}
          </div>
