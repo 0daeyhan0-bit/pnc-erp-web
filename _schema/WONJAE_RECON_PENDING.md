@@ -17,6 +17,14 @@
 | 9 | AJR75463302-9-7 | 9 | 10 | MJU64711801 uw coop 0.054 vs 파일 0.050 (8% 근소) | 근소 |
 | 10 | AJR75563502-12-1 | 0.7 | 0.3 | coop 누락 MJU64794404(6.35, 0.0096, 소량) | 소량 누락 |
 
+## 추가: 개당 소요량 BOM vs 파일 충돌 3건 (cmp_soyo_file.py, 소요검증 761/771=98.7% 중)
+| # | assy | part | coop(BOM)소요 | 파일소요 | 쟁점 |
+|---|---|---|---|---|---|
+| 11 | AJR77144207 | 5210A24677J | **8** | 1 | BOM 8개 vs 파일 1개 (파일 소요 누락 or BOM과다) |
+| 12 | AJR73324503 | MJU62267502 | **6** | 1 | 동상 |
+| 13 | AJR73952501-20-1 | MJU63208106 | 2 | 1 | 소량 |
+(참고: soyo 불일치 10건 중 7건은 realign2가 soyo=1로 둔 표시오류였고 무게보존 교정완료. 위 3건만 BOM 자체 충돌.)
+
 **참고**: 착시제거 대사(recon_clean.py) 총량 100.0%·개별±5% 96%(242/252). 위 10건이 나머지 4%.
-결정 후 도구: setuw.py(uw교정)·map_list.py sagub(동관→사급)·add_one.py(삽입)·fix_soyo_dbl.py(soyo).
+결정 후 도구: setuw.py(uw교정)·map_list.py sagub(동관→사급)·add_one.py(삽입)·fix_soyo_dbl.py(soyo)·cmp_soyo_file.py(소요검증).
 백업: nx.coop_quote_part_bak_260806_wonjae.
