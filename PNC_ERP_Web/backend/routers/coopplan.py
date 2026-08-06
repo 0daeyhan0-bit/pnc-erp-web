@@ -132,9 +132,16 @@ def _sim510(rows):
                         r['c_fin'] += give; r['c_input'] = max(0, r['c_input'] - give); pool -= give
     return rows
 
+_FUT_CACHE = {}  # (cust,from,to,item,matcode,workcode) -> (ts, per_key, rows). SP_LIVE 무거움(교차DB) → 단기 캐시.
+_FUT_TTL = 180
+
 def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
     """cust(협력사) 완료수량 산출: SP_LIVE(flag 1·2) → 중복제거 → _sim510.
        반환: (per_key, merged) — per_key[(swo,assy)]=(c_fin,c_input,plan); merged=도번(cust,assy) 병합행리스트."""
+    ck = (cust, from_ymd, to_ymd, item, matcode, workcode)
+    hit = _FUT_CACHE.get(ck)
+    if hit and (time.time() - hit[0]) < _FUT_TTL:
+        return hit[1], hit[2]
     nx = _nx(); cur = nx.cursor()
     try:
         seen = {}; rows = []
@@ -347,3 +354,104 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
         return {"dates": dates, "rows": rows, "cnt": len(rows), "sum_qty": sum(float(r["q"] or 0) for r in raw), "note": note}
     finally:
         nx.close()
+
+
+# ================= 협력사 ②: 거래명세서 발행 조회 (w_pr_outside_420) — 레거시 SP_LIVE 동일 =================
+def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
+    """레거시 dw_pr_outside_420_t1 동일 데이터: SP_LIVE(라이브 직독)+510창 완료배분 → 도번(cust,assy) 병합행.
+       전 컬럼: 자도번작업처·자도번LIST·사급·LOT·계획·완료·요청·출하실적·생산실적·세트재고·입고대기·ASSY재고·일자별."""
+    import datetime as _dt
+    per_key, rows = _fulfillment(cust, from_ymd, to_ymd, item, matcode)
+    # 도번(cust,assy) 병합 (레거시 모도번별 합치기)
+    mg = {}
+    for r in rows:
+        k = (r["cust"], r["assy"])
+        m = mg.get(k)
+        if not m:
+            m = {"cust": r["cust"], "assy": r["assy"], "work_center": r["work_center"], "work_code": r["work_code"],
+                 "in_cust": r["in_cust"], "model": r["model"], "mat_list": r["mat_list"], "sagub_list": r["sagub_list"],
+                 "lot": 0, "plan": 0, "done": 0, "req": 0, "sale": 0, "prod": 0, "assy_stock": r["assy_stock"],
+                 "iset_stk": r["iset_stk"], "ireq": r["ireq"], "input_mat": 0, "pack": 0, "insp": r["insp"],
+                 "days": [0]*31, "swos": []}
+            mg[k] = m
+        m["lot"] = max(m["lot"], r["lot_qty"]); m["plan"] += r["plan"]; m["done"] += r["c_fin"]
+        m["req"] += r["c_input"]; m["sale"] += r["sale"]; m["prod"] += r["prod"]
+        m["pack"] = max(m["pack"], r["pack"])
+        if r["mat_list"] and not m["mat_list"]: m["mat_list"] = r["mat_list"]
+        if r["sagub_list"] and not m["sagub_list"]: m["sagub_list"] = r["sagub_list"]
+        for i in range(31): m["days"][i] += r["days"][i]
+        m["swos"].append(r["swo"])
+    merged = list(mg.values())
+    # 일자 라벨(idx1=기준일 이전누적, idx i=from+(i-1) 캘린더). 표시범위=from..to.
+    def d2(s): return _dt.date(2000+int(s[:2]), int(s[2:4]), int(s[4:6]))
+    fb = d2(from_ymd); tb = d2(to_ymd)
+    ndays = min(31, (tb - fb).days + 1) if tb >= fb else 31
+    dates = [(fb + _dt.timedelta(days=i)).strftime('%y%m%d') for i in range(ndays)]
+    # 이름/규격/협력사명 배치조회(라이브)
+    cn = _conn(); cur = cn.cursor()
+    try:
+        assys = sorted({m["assy"] for m in merged if m["assy"]})
+        nmm = {}
+        for i in range(0, len(assys), 900):
+            ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2])
+        custnm = _custnm_map(cur, {cust})
+        wccodes = {m["work_code"] or m["in_cust"] for m in merged}
+        wcnm = {}
+        wcodes = sorted({c for c in wccodes if c})
+        for i in range(0, len(wcodes), 900):
+            ch = wcodes[i:i+900]; ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT WORK_CODE, WORK_DESC FROM PR_M_WORK WHERE WORK_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): wcnm[str(rr[0]).strip()] = rr[1]
+            cur.execute(f"SELECT CUST_CODE, CUST_DESC FROM CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): wcnm.setdefault(str(rr[0]).strip(), rr[1])
+    finally:
+        cn.close()
+    out = []
+    for m in merged:
+        nm, spec = nmm.get(str(m["assy"]).strip(), ("", ""))
+        d = {ymd: _qint(m["days"][i]) for i, ymd in enumerate(dates) if m["days"][i]}
+        wcc = m["work_code"] or m["in_cust"]
+        out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"],
+            "nm": nm, "spec": spec, "workcenter": m["work_center"] or wcnm.get(wcc, wcc),
+            "mat_list": m["mat_list"], "sagub_list": m["sagub_list"], "lot": _qint(m["lot"]),
+            "plan": _qint(m["plan"]), "done": _qint(m["done"]), "req": _qint(m["req"]),
+            "sale": _qint(m["sale"]), "prod": _qint(m["prod"]), "assy_stock": _qint(m["assy_stock"]),
+            "iset_stk": _qint(m["iset_stk"]), "ireq": _qint(m["ireq"]), "input_mat": 0,
+            "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(m["req"]), "days": d})
+    out.sort(key=lambda x: (x["workcenter"] or "", x["assy"]))
+    return {"dates": dates, "rows": out, "cnt": len(out),
+            "sum": {"lot": _qint(sum(x["lot"] for x in out)), "plan": _qint(sum(x["plan"] for x in out)),
+                    "done": _qint(sum(x["done"] for x in out)), "req": _qint(sum(x["req"] for x in out))}}
+
+@router.get("/api/partner/deliv420")
+def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: str = Query(""),
+                     item: str = Query(""), matcode: str = Query("")):
+    """거래명세서 발행 조회 — 레거시 w_pr_outside_420 동일(SP_LIVE 라이브 직독+510 완료배분).
+       cust=협력사코드(필수). from/to=기준일자~horizon. 완료수량=출하+완제품재고+세트/입고대기 재고배분."""
+    if not cust.strip():
+        return {"dates": [], "rows": [], "cnt": 0, "note": "협력사를 선택하세요."}
+    d6f = _d6(from_ymd) if from_ymd else None
+    d6t = _d6(to_ymd) if to_ymd else None
+    if not d6f or not d6t:
+        # 기본: 라이브 최소 계획일자 ~ +4근무일 horizon
+        cn = _conn(); cur = cn.cursor()
+        try:
+            cur.execute("SELECT MIN(plan_ymd) FROM PR_T_PLAN_DTL WHERE plan_ymd>'000000'")
+            mn = cur.fetchone()[0]
+        finally:
+            cn.close()
+        d6f = d6f or mn
+        if not d6t:
+            import datetime as _dt2
+            b = _dt2.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _dt2.timedelta(days=6)
+            d6t = b.strftime('%y%m%d')
+    it = f"%{item.strip()}%" if item.strip() else "%"
+    mc = f"%{matcode.strip()}%" if matcode.strip() else "%"
+    try:
+        res = _deliv420_rows(cust.strip(), d6f, d6t, it, mc)
+        res["note"] = f"레거시 거래명세서(w_pr_outside_420) 동일 · SP_LIVE 라이브 직독 · 완료=출하+완제품재고+세트/입고대기 재고배분(510창). 기준 {d6f}~{d6t}."
+        return res
+    except Exception as e:
+        return {"dates": [], "rows": [], "cnt": 0, "note": f"⚠ 조회 오류: {str(e)[:150]}"}
