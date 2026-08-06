@@ -2044,6 +2044,30 @@ const QC_YN=[{v:'0',t:'아니오'},{v:'1',t:'예'}];
 const QC_BIZ=[{v:'DGZ',t:'DGZ'},{v:'DMZ',t:'DMZ'}];
 const QC_PGREG=[{v:'내부용',t:'내부용'},{v:'보고용',t:'보고용'}];
 const _pgreg=v=>v==='1'?'전산':(v==='0'||v===''?'':esc(v));  // 레거시1/0 vs nx 내부용/보고용
+
+/* ===== 레거시 스타일 기준일자 위젯(재사용): ‹ YY/MM/DD › 📅 =====
+   여러 레거시 조회화면(pr_outside 계열 등) 공용. 표시=YY/MM/DD, 내부값=YYYY-MM-DD(기존 로직 호환).
+   사용: 1) HTML에 legacyDateHTML(id, isoValue) 삽입  2) draw 후 bindLegacyDate(container, id, ()=>현재iso, (newIso)=>{반영+재조회})
+   ‹/› = ±1일, 📅/날짜클릭 = 달력선택. onSet 콜백에서 값갱신+load() 하면 자동 재조회. */
+function _isoAddDays(iso,n){var d=new Date((iso||'')+'T00:00:00');if(isNaN(d.getTime()))return iso;d.setDate(d.getDate()+n);var p=function(x){return String(x).padStart(2,'0');};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
+function _isoToYYMMDD(iso){var s=(iso||'').split('-');return s.length===3?(s[0].slice(2)+'/'+s[1]+'/'+s[2]):(iso||'');}
+function legacyDateHTML(id,iso){
+  return '<span class="ldf" style="display:inline-flex;align-items:center;gap:0;border:1px solid var(--line-2,#c9d3e0);border-radius:6px;padding:0 1px;background:#fff;vertical-align:middle;height:26px">'
+    +'<button type="button" id="'+id+'-prev" title="전일" style="border:0;background:transparent;cursor:pointer;font-size:16px;line-height:1;padding:2px 7px;color:#33507d">‹</button>'
+    +'<span id="'+id+'-disp" title="클릭하면 달력" style="min-width:78px;text-align:center;font-family:monospace;font-size:13px;cursor:pointer;user-select:none">'+esc(_isoToYYMMDD(iso))+'</span>'
+    +'<button type="button" id="'+id+'-next" title="익일" style="border:0;background:transparent;cursor:pointer;font-size:16px;line-height:1;padding:2px 7px;color:#33507d">›</button>'
+    +'<label title="달력" style="cursor:pointer;position:relative;display:inline-flex;align-items:center;padding:0 4px">📅'
+      +'<input type="date" id="'+id+'-cal" value="'+esc(iso||'')+'" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer">'
+    +'</label></span>';
+}
+function bindLegacyDate(root,id,getIso,onSet){
+  var qy=function(s){return root.querySelector(s);};
+  var prev=qy('#'+id+'-prev'),next=qy('#'+id+'-next'),cal=qy('#'+id+'-cal'),disp=qy('#'+id+'-disp');
+  if(prev)prev.onclick=function(){onSet(_isoAddDays(getIso(),-1));};
+  if(next)next.onclick=function(){onSet(_isoAddDays(getIso(),1));};
+  if(cal)cal.onchange=function(e){if(e.target.value)onSet(e.target.value);};
+  if(disp)disp.onclick=function(){try{cal.showPicker();}catch(err){cal.focus();cal.click();}};
+}
 // 조회 그리드 전체 컬럼(레거시 순서, 전부 이름)
 const qcCols=[
   {h:'구분',k:'tag_nm',cls:'center'},

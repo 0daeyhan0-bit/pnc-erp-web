@@ -42,17 +42,20 @@ def partner_workcenters(src: str = Query("nx")):
     finally:
         nx.close()
 
+def _qint(v):
+    f = float(v or 0)
+    return int(f) if f == int(f) else round(f, 2)
+
 def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
     """★레거시 4주간 계획수량(w_pr_outside_410) 충실재현 — 라이브 PR_T_PLAN_PART_MAT 직독(읽기전용).
-       원천 dw_pr_outside_040_t1: PR_T_PLAN_PART_MAT, 일자매트릭스=part_plan_ymd(협력사 당김 CUST_MAINT_DAY 반영分),
-       값=part_plan_qty. 자도번(mat_code)별 그룹. 사급=mat_flag='2'. 당김은 협력사계획_생성 SP가 이미 baked(f_get_relative_work_day_doosung)."""
+       원천 dw_pr_outside_040_t1 계열. 행 grain=도번(자도번작업처×제번×라인×assy_item_code), 일자매트릭스=part_plan_ymd(협력사 당김 CUST_MAINT_DAY 반영), 값=part_plan_qty.
+       컬럼(레거시 동일): SEQ·자도번작업처·라인·작업처·도번·자도번LIST·사급·LOT수량·자재수량·완료수량·요청수량·품목정보·일자별.
+       당김은 협력사계획_생성 SP가 part_plan_ymd에 baked(f_get_relative_work_day_doosung). 완료수량=레거시 라이브 실적조인 원천 미확정(담당확인)."""
     cn = _conn(); cur = cn.cursor()
     try:
         w = ["1=1"]; p = []
         d6f = _d6(from_ymd) if from_ymd else None
         d6t = _d6(to_ymd) if to_ymd else None
-        # 일자매트릭스=part_plan_ymd(당김반영, 레거시 as_to_ymd 기준). 레거시 040_t1: part_plan_ymd<=as_to_ymd(하한없음),
-        # 첫 컬럼(기준일)=part_plan_ymd<=as_from_ymd 누적(과거 미착수분 포함).
         if d6t: w.append("pp.part_plan_ymd<=?"); p.append(d6t)
         if wc.strip():   w.append("pp.mat_work_center_code=?"); p.append(wc.strip())
         if part.strip(): w.append("pp.mat_code LIKE ?"); p.append(f"%{part.strip()}%")
@@ -60,62 +63,101 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         if line.strip(): w.append("pp.line_no=?"); p.append(line.strip())
         if gubun == "외주":   w.append("(pp.work_code IS NULL OR pp.work_code='')")   # 거래처(협력사)만
         elif gubun == "자체": w.append("pp.work_code>''")                              # 내부공정(P1/P2)
-        CAP = 8000
-        cur.execute(f"""SELECT TOP {CAP} pp.part_plan_ymd, pp.mat_work_center_code,
-              COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.mat_work_center_code) wcnm,
-              pp.split_work_order wo, pp.assy_item_code, pp.mat_code, ISNULL(i.ITEM_DESC,'') nm,
-              ISNULL(pp.line_no,'') line, MAX(pp.mat_flag) matflag,
-              SUM(CAST(pp.part_plan_qty AS float)) q
+        where = " AND ".join(w)
+        CAP_PARTS = 40000
+        # 부품(자도번) 레벨 raw → 파이썬에서 도번 단위 롤업(자도번LIST·일자매트릭스). 값=part_plan_qty(자재), 요청=plan_qty(발주).
+        cur.execute(f"""SELECT TOP {CAP_PARTS} pp.mat_work_center_code wc, pp.split_work_order wo, ISNULL(pp.line_no,'') line,
+              pp.assy_item_code assy, pp.mat_code mat, pp.mat_flag matflag,
+              CAST(pp.lot_qty AS float) lot, CAST(pp.plan_qty AS float) planq, CAST(pp.part_plan_qty AS float) partq,
+              pp.part_plan_ymd ppy
             FROM PR_T_PLAN_PART_MAT pp
-            LEFT JOIN PR_M_WORK w ON w.WORK_CODE=pp.mat_work_center_code
-            LEFT JOIN CM_M_CUST cu ON cu.CUST_CODE=pp.mat_work_center_code
-            LEFT JOIN PR_M_ITEM i ON i.ITEM_CODE=pp.mat_code
-            WHERE {' AND '.join(w)}
-            GROUP BY pp.part_plan_ymd, pp.mat_work_center_code, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.mat_work_center_code),
-              pp.split_work_order, pp.assy_item_code, pp.mat_code, i.ITEM_DESC, pp.line_no
-            ORDER BY wcnm, pp.split_work_order, pp.mat_code""", *p)
+            WHERE {where}
+            ORDER BY pp.mat_work_center_code, pp.split_work_order, pp.assy_item_code, pp.mat_code""", *p)
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
-        capped = len(raw) >= CAP
-        # 레거시 040_t1: 첫 컬럼=기준일(part_plan_ymd<=as_from_ymd 누적), 이후 기준일+1..기준일+30(캘린더일).
-        base = d6f or (min((r["part_plan_ymd"] for r in raw if r["part_plan_ymd"]), default=None))
+        capped = len(raw) >= CAP_PARTS
+        base = d6f or (min((r["ppy"] for r in raw if r["ppy"]), default=None))
         def _bucket(ppy):
             return base if (base and ppy and ppy <= base) else ppy
-        # 레거시 041_t1: 기준일 + 캘린더일 연속전개(빈 일자컬럼 포함). base..d6t 연속.
-        dates = sorted({_bucket(r["part_plan_ymd"]) for r in raw if r["part_plan_ymd"]})
+        # 기준일 + 캘린더일 연속전개(빈 일자컬럼 포함). base..d6t.
+        dates = {_bucket(r["ppy"]) for r in raw if r["ppy"]}
         if base and d6t:
             import datetime as _dt
             try:
                 cu = _dt.date(2000+int(base[:2]), int(base[2:4]), int(base[4:6]))
-                end = _dt.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))
-                allc = []
-                while cu <= end and len(allc) < 45:
-                    allc.append(cu.strftime('%y%m%d')); cu += _dt.timedelta(days=1)
-                dates = sorted(set(dates) | set(allc))
+                end = _dt.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6])); n = 0
+                while cu <= end and n < 45:
+                    dates.add(cu.strftime('%y%m%d')); cu += _dt.timedelta(days=1); n += 1
             except Exception:
                 pass
+        dates = sorted(dates)
+        # 도번(assy) 단위 롤업
         keyed = {}
         for r in raw:
-            k = (r["mat_work_center_code"], r["wo"], r["assy_item_code"], r["mat_code"])
+            k = (r["wc"], r["wo"], r["line"], r["assy"])
             g = keyed.get(k)
             if not g:
-                g = {"wc": r["mat_work_center_code"], "wcnm": r["wcnm"], "wo": r["wo"], "assy": r["assy_item_code"],
-                     "part": r["mat_code"], "nm": r["nm"], "line": r["line"], "model": "",
-                     "sagub": (str(r["matflag"] or "") == "2"), "days": {}, "tot": 0}
+                g = {"wc": r["wc"], "wo": r["wo"], "line": r["line"], "assy": r["assy"],
+                     "lot": 0.0, "reqq": 0.0, "matq": 0.0, "sagub": False, "parts": {}, "days": {}, "tot": 0.0}
                 keyed[k] = g
-            d = _bucket(r["part_plan_ymd"]); q = float(r["q"] or 0)
-            g["days"][d] = g["days"].get(d, 0) + q; g["tot"] += q
-        rows = sorted(keyed.values(), key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
-        # 헤더 총계는 CAP 무관 정확값(별도 집계). 그리드는 CAP까지만.
-        cur.execute(f"""SELECT SUM(CAST(part_plan_qty AS float)),
-              COUNT(*) FROM (SELECT part_plan_ymd, mat_work_center_code, split_work_order, assy_item_code, mat_code,
-                 SUM(CAST(part_plan_qty AS float)) part_plan_qty
-              FROM PR_T_PLAN_PART_MAT pp WHERE {' AND '.join(w)}
-              GROUP BY part_plan_ymd, mat_work_center_code, split_work_order, assy_item_code, mat_code) z""", *p)
-        _tot = cur.fetchone(); tot_qty = float(_tot[0] or 0); tot_cnt = int(_tot[1] or 0)
-        note = (f"⚠ 그리드는 상위 {CAP}행만 표시(총 {tot_cnt:,}행) — 자도번작업처/제번/자도번으로 좁히세요. " if capped else "") + \
-               "레거시 라이브(PR_T_PLAN_PART_MAT, 당김반영) 직독"
-        return {"dates": dates, "rows": rows, "cnt": (tot_cnt if capped else len(rows)),
-                "sum_qty": tot_qty, "note": note.strip()}
+            g["lot"] = max(g["lot"], float(r["lot"] or 0))
+            g["reqq"] = max(g["reqq"], float(r["planq"] or 0))   # 요청수량=발주(도번 order qty)
+            pq = float(r["partq"] or 0); g["matq"] += pq          # 자재수량=자도번 part_plan_qty 합
+            if str(r["matflag"] or "") == "2": g["sagub"] = True
+            mc = str(r["mat"] or "").strip()
+            if mc: g["parts"][mc] = g["parts"].get(mc, 0.0) + pq
+            d = _bucket(r["ppy"]); g["days"][d] = g["days"].get(d, 0.0) + pq; g["tot"] += pq
+        rows = list(keyed.values())
+        # 배치 이름조회: 자도번작업처(work/cust), 도번(assy) 마스터(작업처·품명·규격)
+        def _batch(codes, sql):
+            m = {}; codes = sorted({c for c in codes if c})
+            for i in range(0, len(codes), 900):
+                ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
+                cur.execute(sql.format(ph=ph), *ch)
+                for rr in cur.fetchall(): m[str(rr[0]).strip()] = rr
+            return m
+        wccodes = {g["wc"] for g in rows}; assycodes = {g["assy"] for g in rows}
+        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        # 도번 마스터(작업처=assy의 work/incust, 품명, 규격)
+        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0) FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})")
+        # assy 작업처 코드도 이름 필요 → 추가 조회
+        awc = {str(v[2]).strip() for v in assym.values() if str(v[2]).strip()}
+        aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
+        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        def nm_of(code):
+            c = str(code or "").strip()
+            if c in workm: return workm[c][1]
+            if c in custm: return custm[c][1]
+            if c in workm2: return workm2[c][1]
+            if c in custm2: return custm2[c][1]
+            return c
+        for g in rows:
+            g["wcnm"] = nm_of(g["wc"])
+            am = assym.get(str(g["assy"]).strip())
+            if am:
+                g["nm"] = am[1]
+                awcc = str(am[2]).strip(); aicc = str(am[3]).strip()
+                g["workcenter"] = nm_of(awcc) if awcc else (nm_of(aicc) if aicc else "")
+                spec = str(am[4]).strip()
+                if not spec:
+                    dd, tt, ll = float(am[5] or 0), float(am[6] or 0), float(am[7] or 0)
+                    if dd or tt or ll: spec = f"Ø{_qint(dd)}×{_qint(tt)}×{_qint(ll)}"
+                g["spec"] = spec
+            else:
+                g["nm"] = ""; g["workcenter"] = ""; g["spec"] = ""
+            items = sorted(g["parts"].items())
+            g["part"] = ", ".join(f"{mc}{{{_qint(q)}}}" for mc, q in items)  # 자도번LIST(도번{수량})
+            g["jcnt"] = len(items)
+            g["lot"] = _qint(g["lot"]); g["reqq"] = _qint(g["reqq"]); g["matq"] = _qint(g["matq"])
+            g["doneq"] = None   # ⚠ 완료수량: 레거시 라이브 실적조인 원천 미확정 → 담당확인(추측채움 금지)
+            g["days"] = {k2: _qint(v2) for k2, v2 in g["days"].items()}; g["tot"] = _qint(g["tot"])
+        rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["assy"]))
+        for i, g in enumerate(rows, 1): g["seq"] = i
+        note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영). 완료수량=실적조인 원천 미확정(담당확인)."
+        if capped: note = f"⚠ 부품 {CAP_PARTS:,}행 상한 — 자도번작업처/제번으로 좁히세요. " + note
+        return {"dates": dates, "rows": rows, "cnt": len(rows),
+                "sum_qty": _qint(sum(g["matq"] for g in rows)), "note": note}
     finally:
         cn.close()
 
