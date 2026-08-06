@@ -570,12 +570,41 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     total_soyo = round(sum(r["soyo_weight"] for r in rows if r["role"] == "제작동관"), 4)
     total_weld = round(sum(r["weld_cost"] for r in rows if r["role"] == "용접봉"))
     total_proc = round(sum(r["proc_cost"] for r in rows if r["role"] == "제작동관"))
-    # ★재료비 = BOM 소요량 정본: Σ in_quote 행 (인상후=mat_now, 인상전=mat_before). 소요×판매단가라 소요>1 정확.
-    #   in_quote: 견적 부품이거나 용접봉(leftover). 견적이 SUB를 덩어리로 잡으면 그 반제품 행이 대표(하위전개 in_quote=False로 제외).
+    # ★★ v3 재료비/분류 오버라이드 (coop_quote_part = 리스트·손익엔진과 동일). 있으면 우선.
+    #   프론트가 role별로 재료비를 재계산하므로 role도 v3로 교체(동관 오분류 → 사급부품 등).
+    _v3 = {}
+    try:
+        _nxc = _nx(); _nc = _nxc.cursor()
+        _nc.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), mat_before, mat_after, ptype_v2 FROM nx.coop_quote_part WHERE assy_code=?", item)
+        _v3 = {str(x[0]).strip(): ((float(x[1]) if x[1] is not None else None), (float(x[2]) if x[2] is not None else None), str(x[3] or '')) for x in _nc.fetchall()}
+        _nxc.close()
+    except Exception:
+        _v3 = {}
+    _ROLE = {'사급부품': '사급', '자작': '사급', '무상': '사급', '기존가': '사급', '매입부품': '매입부품',
+             '동관': '제작동관', '동관고강도': '제작동관', '용접봉': '용접봉'}
+    for r in rows:
+        _k = str(r["code"]).strip().upper()
+        if _k in _v3:
+            _mb, _ma, _pt = _v3[_k]
+            if _ma is not None:
+                r["mat_now"] = round(_ma)
+            if _mb is not None:
+                r["mat_before"] = round(_mb)
+            r["role_v3"] = _pt
+            _nr = _ROLE.get(_pt)
+            if _nr and _nr != r["role"]:
+                r["role"] = _nr   # v3 재분류 반영 → 프론트가 사급 경로로 mat_now 직접 사용
+    # ★재료비 = Σ in_quote 행. v3 있으면 v3 부품집합 기준.
     _pmset = set(partmap.keys())
     for r in rows:
-        r["in_quote"] = (str(r["code"]).strip().upper() in _pmset) or (r["role"] == "용접봉" and (r.get("weld_cost") or 0) > 0)
-    if partmap:
+        if _v3:
+            r["in_quote"] = (str(r["code"]).strip().upper() in _v3)
+        else:
+            r["in_quote"] = (str(r["code"]).strip().upper() in _pmset) or (r["role"] == "용접봉" and (r.get("weld_cost") or 0) > 0)
+    if _v3:
+        total_mat = round(sum(ma for (mb, ma, pt) in _v3.values() if ma is not None))
+        total_mat_before = round(sum(mb for (mb, ma, pt) in _v3.values() if mb is not None))
+    elif partmap:
         total_mat = round(sum((r["mat_now"] or 0) for r in rows if r["in_quote"]))
         total_mat_before = round(sum((r["mat_before"] or 0) for r in rows if r["in_quote"]))
     elif mat_stored > 0:
