@@ -136,24 +136,123 @@ _FUT_CACHE = {}  # (cust,from,to,item,matcode,workcode) -> (ts, per_key, rows). 
 _FUT_TTL = 180
 
 def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
-    """cust(협력사) 완료수량 산출: SP_LIVE(flag 1·2) → 중복제거 → _sim510.
-       반환: (per_key, merged) — per_key[(swo,assy)]=(c_fin,c_input,plan); merged=도번(cust,assy) 병합행리스트."""
+    """★cust(협력사) 완료수량 — 빠른 경로: PR_T_PLAN_PART_MAT(BOM전개완료·mat_work_center_code 인덱스, 라이브 직독)에서
+       도번(ASSY) 계획그리드를 얻고 + 스코프 조인(출하/재고/세트/입고대기)만 조회 → _sim510.
+       ★재귀 SP(SP_LIVE) 미사용(전 협력사×BOM전개=16s/flag). 이 경로는 선택협력사만 스캔=수초.
+       완료수량 값(도번별)은 SP경로와 동일(재고 공유풀 총량은 일자버킷과 무관). base grid=라이브 검증.
+       반환: (per_key, rows) — per_key[(swo,assy)]=(c_fin,c_input,plan)."""
+    import datetime as _dt
     ck = (cust, from_ymd, to_ymd, item, matcode, workcode)
     hit = _FUT_CACHE.get(ck)
     if hit and (time.time() - hit[0]) < _FUT_TTL:
         return hit[1], hit[2]
-    nx = _nx(); cur = nx.cursor()
+    def _d2(s): return _dt.date(2000+int(s[:2]), int(s[2:4]), int(s[4:6]))
+    base = _d2(from_ymd)
+    dayidx = {(base + _dt.timedelta(days=i)).strftime('%y%m%d'): i for i in range(31)}
+    def _bkt(ymd):
+        if ymd <= from_ymd: return 0            # 기준일 이전 누적=day1
+        return dayidx.get(ymd)                  # 없으면 None(31일 밖)
+    cn = _conn(); cur = cn.cursor()
     try:
-        seen = {}; rows = []
-        for flag in ('1', '2'):
-            for r in _sp_live_rows(cur, cust, from_ymd, to_ymd, flag, item, matcode, workcode):
-                k = (r['wo'], r['swo'], r['assy'])
-                if k in seen:  # 제작/사급 양쪽에 걸린 도번=동일 base, 중복 제거
-                    if r['sagub_list'] and not seen[k]['sagub_list']: seen[k]['sagub_list'] = r['sagub_list']
-                    continue
-                seen[k] = r; rows.append(r)
+        wsel = ["mat_work_center_code=?", "plan_ymd<=?"]; wp = [cust, to_ymd]
+        if item and item != "%":    wsel.append("assy_item_code LIKE ?"); wp.append(item)
+        if matcode and matcode != "%": wsel.append("mat_code LIKE ?"); wp.append(matcode)
+        # 도번(ASSY) 계획그리드: (wo,swo,assy,plan_ymd) 배치별 MAX(plan_qty)=발주. 사급=mat_flag 2 존재.
+        cur.execute(f"""SELECT work_order, split_work_order, assy_item_code, plan_ymd,
+              MAX(CAST(plan_qty AS float)) pq, MAX(CAST(lot_qty AS float)) lot, MAX(CAST(use_qty AS float)) uq,
+              MAX(ISNULL(line_no,'')) line, MAX(ISNULL(output_hm,'')) ohm, MAX(CASE WHEN mat_flag='2' THEN 1 ELSE 0 END) sg
+            FROM PR_T_PLAN_PART_MAT
+            WHERE {' AND '.join(wsel)}
+            GROUP BY work_order, split_work_order, assy_item_code, plan_ymd""", *wp)
+        keyed = {}
+        for r in cur.fetchall():
+            wo, swo, assy, pym = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
+            bi = _bkt(pym)
+            if bi is None: continue
+            k = (wo, swo, assy)
+            g = keyed.get(k)
+            if not g:
+                g = {'wo': wo, 'swo': swo, 'assy': assy, 'cust': cust, 'line': str(r[7] or ''), 'output_hm': str(r[8] or ''),
+                     'excel': 0, 'days': [0]*31, 'plan': 0, 'lot': 0.0, 'use': 1.0, 'over': 0, 'rate': 100.0,
+                     'sale': 0, 'assy_stock': 0, 'iset_stk': 0, 'ireq': 0, 'work_code': '', 'in_cust': '',
+                     'model': '', 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
+                keyed[k] = g
+            q = int(float(r[4] or 0)); g['days'][bi] += q; g['plan'] += q
+            g['lot'] = max(g['lot'], float(r[5] or 0)); g['use'] = max(g['use'], float(r[6] or 1))
+            if int(r[9] or 0): g['sagub'] = 1
+        rows = list(keyed.values())
+        for g in rows:
+            g['minidx'] = next((i for i, d in enumerate(g['days']) if d > 0), 99)
+            g['lot_qty'] = int(g['lot'])
+        # 스코프 조인 배치조회
+        assys = sorted({g['assy'] for g in rows if g['assy']})
+        wos = sorted({g['wo'] for g in rows if g['wo']})
+        today = _dt.date.today().strftime('%y%m%d')
+        def _chunks(seq, n=900):
+            for i in range(0, len(seq), n): yield seq[i:i+n]
+        sale = {}; move = {}; astk = {}; z99 = {}; sset = {}; sreq = {}; mstr = {}; msub = {}; over = {}
+        aset = set(assys)
+        # 출하/이동=work_order 인덱스로 스코프(item_code는 인덱스 없어 풀스캔 → wo 스코프가 훨씬 빠름). item은 파이썬 필터.
+        for ch in _chunks(wos):
+            ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
+            for r in cur.fetchall():
+                if str(r[2]) in aset: sale[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
+            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
+            for r in cur.fetchall():
+                if str(r[2]) in aset: move[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
+        for ch in _chunks(assys):
+            ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
+            for r in cur.fetchall(): astk[str(r[0])] = float(r[1] or 0)
+            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
+            for r in cur.fetchall(): z99[str(r[0])] = float(r[1] or 0)
+            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
+            for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
+            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
+            for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(IN_CUST_CODE,''), ISNULL(WORK_CODE,''), ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'0'), ISNULL(PACK_QTY,0) FROM PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            for r in cur.fetchall(): msub[str(r[0])] = (str(r[1] or '0'), int(r[2] or 0))
+        # 자도번LIST(레거시 f_find_cust_mat_list2 = PR_M_CUST_MAT_LIST 조회, '(1)' 제거)
+        matlist = {}
+        for ch in _chunks(assys):
+            ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT ITEM_CODE, REPLACE(ISNULL(MAX(MAT_LIST),''),'(1)','') FROM PR_M_CUST_MAT_LIST WHERE CUST_CODE=? AND ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", cust, *ch)
+            for r in cur.fetchall(): matlist[str(r[0])] = str(r[1] or '')
+        # over_plan_qty(기준기간 이후 계획) — 스코프(wo). lot_overhang 계산에만 사용.
+        try:
+            for ch in _chunks(wos):
+                ph = ",".join("?"*len(ch))
+                cur.execute(f"""SELECT a.work_order, a.split_work_order, b.c_item_code,
+                      SUM(CEILING(CONVERT(float,a.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
+                    FROM PR_T_PLAN_DTL a JOIN PR_M_MODEL_BOM b ON a.model_no=b.model_no
+                    JOIN PR_M_ITEM c ON b.c_item_code=c.item_code
+                    WHERE a.plan_ymd>? AND a.work_order IN ({ph})
+                    GROUP BY a.work_order, a.split_work_order, b.c_item_code""", to_ymd, *ch)
+                for r in cur.fetchall(): over[(str(r[0]), str(r[1]), str(r[2]))] = int(float(r[3] or 0))
+        except Exception:
+            over = {}
     finally:
-        nx.close()
+        cn.close()
+    # 행 조립
+    for g in rows:
+        a = g['assy']
+        g['sale'] = int((sale.get((g['wo'], g['swo'], a), 0)) - (move.get((g['wo'], g['swo'], a), 0)))
+        m = mstr.get(a);
+        if m: g['rate'], g['in_cust'], g['work_code'], g['nm'] = m
+        stk = astk.get(a, 0)
+        if g['in_cust'] == cust and not g['work_code']:   # 직납품=자재창고(Z99990) 가산
+            stk += z99.get(a, 0)
+        g['assy_stock'] = int(stk)
+        g['iset_stk'] = int(sset.get(a, 0)) if not (g['in_cust'] == cust and not g['work_code']) else 0  # 직납품 세트재고 미사용
+        g['ireq'] = int(sreq.get(a, 0))
+        sub = msub.get(a)
+        if sub: g['insp'], g['pack'] = sub
+        g['over'] = over.get((g['wo'], g['swo'], a), 0)
+        g['mat_list'] = matlist.get(a, '')
+        g['sagub_list'] = ''   # 레거시 성능상 미표시(f_find_cust_sagub_list 주석).
     _sim510(rows)
     per_key = {}
     for r in rows:
