@@ -85,26 +85,30 @@ def _sp_live_rows(cur, cust, from_ymd, to_ymd, flag, item="%", matcode="%", work
             'mat_list': str(G(r, 'mat_list') or ''), 'sagub_list': str(G(r, 'sagub_list') or '')})
     return out
 
+# 날짜셀 색상 = 가공-4주간(SCREEN.gagongplan4w)과 동일 규칙: 출하완료 주황·생산완료 노랑·재고배분 녹.
+_TAGCOLOR = {90: '#fac090', 70: '#ffff00', 50: '#669900'}
+
 def _sim510(rows):
     """레거시 w_pr_outside_510 창 배분 로직 이식 → 각 행에 c_fin(완료)·c_input(요청)·prod 세팅.
-       재고=도번(cust,assy) 공유풀, 일자-major 순차배분. (출하+완제품재고+세트/입고대기)."""
+       재고=도번(cust,assy) 공유풀, 일자-major 순차배분. (출하+완제품재고+세트/입고대기).
+       ★일자셀용: done_days[31](일자별 완료 배분량)·color_days[31](배분원천 색=가공4주간과 동일)."""
     from collections import defaultdict
     for r in rows:
-        pd = r['days']; iset = [0]*31
+        pd = r['days']; iset = [0]*31; dd = [0]*31; tg = [0]*31
         ll_lot = math.ceil(r['lot']*r['use']*r['rate']/100.0); allplan = r['plan']+r['over']
         if ll_lot < allplan: ll_lot = allplan
-        q = r['sale'] - (ll_lot - allplan)               # 지난계획 차감 후 출하 적용
+        q = r['sale'] - (ll_lot - allplan)               # 지난계획 차감 후 출하 적용 → 주황(90)
         for i in range(31):
             if q <= 0: break
             if pd[i] > 0:
-                if q >= pd[i]: iset[i] = pd[i]; q -= pd[i]
+                if q >= pd[i]: give = pd[i]; iset[i] = pd[i]; q -= pd[i]
                 else:
-                    if iset[i] < q: iset[i] = q
-                    q = 0
-        r['iset'] = iset; r['prod'] = 0
+                    give = max(0, q - iset[i]); iset[i] = max(iset[i], q); q = 0
+                if give > 0: dd[i] += give; tg[i] = max(tg[i], 90)
+        r['iset'] = iset; r['dd'] = dd; r['tg'] = tg; r['prod'] = 0
     g = defaultdict(list)
     for r in rows: g[(r['cust'], r['assy'])].append(r)
-    # 완제품재고(ASSY) 공유풀 배분
+    # 완제품재고(ASSY) 공유풀 배분 → 노랑(70)
     for k, rs in g.items():
         rs.sort(key=lambda r: (r['minidx'], r['line'], r['output_hm'], r['swo'], r['excel']))
         pool = max((r['assy_stock'] for r in rs), default=0)
@@ -114,10 +118,11 @@ def _sim510(rows):
                 if pool <= 0: break
                 need = r['days'][i] - r['iset'][i]
                 if need > 0:
-                    give = min(need, pool); r['prod'] += give; r['iset'][i] += give; pool -= give
+                    give = min(need, pool); r['prod'] += give; r['iset'][i] += give
+                    r['dd'][i] += give; r['tg'][i] = max(r['tg'][i], 70); pool -= give
     for r in rows:
         r['c_fin'] = r['prod'] + r['sale']; r['c_input'] = max(0, r['plan'] - r['c_fin'])
-    # 세트재고+입고대기 공유풀 배분(완료 가산·요청 차감)
+    # 세트재고+입고대기 공유풀 배분(완료 가산·요청 차감) → 녹(50)
     for k, rs in g.items():
         rs.sort(key=lambda r: (r['minidx'], r['line'], r['output_hm'], r['swo'], r['excel']))
         pool = max((r['iset_stk'] + r['ireq'] for r in rs), default=0)
@@ -129,7 +134,10 @@ def _sim510(rows):
                     need = r['days'][i] - r['iset'][i]
                     if need > 0:
                         give = min(need, pool); r['iset'][i] += give
-                        r['c_fin'] += give; r['c_input'] = max(0, r['c_input'] - give); pool -= give
+                        r['c_fin'] += give; r['c_input'] = max(0, r['c_input'] - give)
+                        r['dd'][i] += give; r['tg'][i] = max(r['tg'][i], 50); pool -= give
+    for r in rows:
+        r['done_days'] = r['dd']; r['color_days'] = [_TAGCOLOR.get(t, '') for t in r['tg']]
     return rows
 
 _FUT_CACHE = {}  # (cust,from,to,item,matcode,workcode) -> (ts, per_key, rows). SP_LIVE 무거움(교차DB) → 단기 캐시.
@@ -373,12 +381,27 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["assy"]))
         for i, g in enumerate(rows, 1): g["seq"] = i
         note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영)."
+        dates_out = dates; frac = False
         # ★완료수량(fulfillment): 협력사(외주) 지정 시 레거시 SP_LIVE + 510창 배분으로 실제값 채움.
-        #   요청수량=계획−완료. 재고=도번 공유풀(과다계상 방지). 자체(내부공정)/전체는 협력사 컨텍스트 없음→미표시.
+        #   요청수량=계획−완료. 재고=도번 공유풀(과다계상 방지). 일자셀=완료/계획+색(가공4주간 동일).
         if gubun == "외주" and wc.strip() and d6t:
             try:
+                import datetime as _dtp
                 fut_from = base or d6f or d6t
                 per_key, _m = _fulfillment(wc.strip(), fut_from, d6t)
+                fb = _dtp.date(2000+int(fut_from[:2]), int(fut_from[2:4]), int(fut_from[4:6]))
+                tb = _dtp.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))
+                ndays = min(31, (tb - fb).days + 1) if tb >= fb else 31
+                axis = [(fb + _dtp.timedelta(days=i)).strftime('%y%m%d') for i in range(ndays)]
+                # 도번(swo,assy)별 일자 plan/done/tag 집계
+                fmap = {}
+                for fr in _m:
+                    k = (str(fr["swo"]), str(fr["assy"]))
+                    e = fmap.get(k)
+                    if not e: e = {"pl": [0]*31, "dn": [0]*31, "tg": [0]*31}; fmap[k] = e
+                    for i in range(31):
+                        e["pl"][i] += fr["days"][i]; e["dn"][i] += fr["done_days"][i]
+                        if fr["tg"][i] > e["tg"][i]: e["tg"][i] = fr["tg"][i]
                 nmatch = 0
                 for g in rows:
                     hit = per_key.get((str(g["wo"]), str(g["assy"])))
@@ -386,14 +409,22 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                         cfin, cinp, pplan = hit
                         g["doneq"] = _qint(cfin); g["reqq"] = _qint(cinp); nmatch += 1
                     else:
-                        g["doneq"] = 0  # SP 결과에 없음=완료 0(요청=발주 유지)
-                note += f" 완료수량=출하+완제품재고+세트/입고대기 재고배분(레거시 SP_LIVE+510창, 매칭 {nmatch}/{len(rows)}건)."
+                        g["doneq"] = 0
+                    fm = fmap.get((str(g["wo"]), str(g["assy"])))
+                    if fm:
+                        g["days"] = {axis[i]: _qint(fm["pl"][i]) for i in range(ndays) if fm["pl"][i]}
+                        g["donedays"] = {axis[i]: _qint(fm["dn"][i]) for i in range(ndays) if fm["dn"][i]}
+                        g["colors"] = {axis[i]: _TAGCOLOR.get(fm["tg"][i], '') for i in range(ndays) if fm["pl"][i]}
+                    else:
+                        g["days"] = {}; g["donedays"] = {}; g["colors"] = {}
+                dates_out = axis; frac = True
+                note += f" 완료수량=출하+완제품재고+세트/입고대기 재고배분(레거시 SP+510창, 매칭 {nmatch}/{len(rows)}건). 일자셀=완료/계획+색."
             except Exception as e:
                 note += f" ⚠완료수량 계산 오류: {str(e)[:90]}"
         else:
             note += " 완료수량=협력사(외주) 지정 시 표시(레거시는 협력사별 화면)."
         if capped: note = f"⚠ 부품 {CAP_PARTS:,}행 상한 — 자도번작업처/제번으로 좁히세요. " + note
-        return {"dates": dates, "rows": rows, "cnt": len(rows),
+        return {"dates": dates_out, "rows": rows, "cnt": len(rows), "frac": frac,
                 "sum_qty": _qint(sum(g["matq"] for g in rows)), "note": note}
     finally:
         cn.close()
@@ -473,14 +504,16 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
                  "in_cust": r["in_cust"], "model": r["model"], "mat_list": r["mat_list"], "sagub_list": r["sagub_list"],
                  "lot": 0, "plan": 0, "done": 0, "req": 0, "sale": 0, "prod": 0, "assy_stock": r["assy_stock"],
                  "iset_stk": r["iset_stk"], "ireq": r["ireq"], "input_mat": 0, "pack": 0, "insp": r["insp"],
-                 "days": [0]*31, "swos": []}
+                 "days": [0]*31, "dn": [0]*31, "tg": [0]*31, "swos": []}
             mg[k] = m
         m["lot"] = max(m["lot"], r["lot_qty"]); m["plan"] += r["plan"]; m["done"] += r["c_fin"]
         m["req"] += r["c_input"]; m["sale"] += r["sale"]; m["prod"] += r["prod"]
         m["pack"] = max(m["pack"], r["pack"])
         if r["mat_list"] and not m["mat_list"]: m["mat_list"] = r["mat_list"]
         if r["sagub_list"] and not m["sagub_list"]: m["sagub_list"] = r["sagub_list"]
-        for i in range(31): m["days"][i] += r["days"][i]
+        for i in range(31):
+            m["days"][i] += r["days"][i]; m["dn"][i] += r["done_days"][i]
+            if r["tg"][i] > m["tg"][i]: m["tg"][i] = r["tg"][i]
         m["swos"].append(r["swo"])
     merged = list(mg.values())
     # 일자 라벨(idx1=기준일 이전누적, idx i=from+(i-1) 캘린더). 표시범위=from..to.
@@ -513,6 +546,8 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
     for m in merged:
         nm, spec = nmm.get(str(m["assy"]).strip(), ("", ""))
         d = {ymd: _qint(m["days"][i]) for i, ymd in enumerate(dates) if m["days"][i]}
+        dn = {ymd: _qint(m["dn"][i]) for i, ymd in enumerate(dates) if m["dn"][i]}
+        cl = {ymd: _TAGCOLOR.get(m["tg"][i], '') for i, ymd in enumerate(dates) if m["days"][i]}
         wcc = m["work_code"] or m["in_cust"]
         out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"],
             "nm": nm, "spec": spec, "workcenter": m["work_center"] or wcnm.get(wcc, wcc),
@@ -520,7 +555,7 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             "plan": _qint(m["plan"]), "done": _qint(m["done"]), "req": _qint(m["req"]),
             "sale": _qint(m["sale"]), "prod": _qint(m["prod"]), "assy_stock": _qint(m["assy_stock"]),
             "iset_stk": _qint(m["iset_stk"]), "ireq": _qint(m["ireq"]), "input_mat": 0,
-            "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(m["req"]), "days": d})
+            "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(m["req"]), "days": d, "donedays": dn, "colors": cl})
     out.sort(key=lambda x: (x["workcenter"] or "", x["assy"]))
     return {"dates": dates, "rows": out, "cnt": len(out),
             "sum": {"lot": _qint(sum(x["lot"] for x in out)), "plan": _qint(sum(x["plan"] for x in out)),
