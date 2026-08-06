@@ -329,15 +329,16 @@ SCREEN.setinreq=(c)=>{
 };
 
 /* 협력사 > 거래명세서 발행 (레거시 w_pr_outside_420) — 레거시 SP_LIVE 라이브 직독 + 510창 완료배분.
-   전 컬럼 동일(자도번작업처·자도번LIST·사급·LOT·계획·완료·요청·납품·출하실적·생산실적·세트재고·입고대기·ASSY재고·일자별).
-   완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 발행/바코드는 [거래명세서 발행(바코드)] 화면(후속). */
+   전 컬럼(Line No·자도번LIST·사급·LOT·계획·완료·요청·납품/포장/SERIAL/HEAT 입력·출하/생산실적·세트/입고대기/ASSY재고·일자별).
+   완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 발행=nx.deliv_issue 기록(라이브 미기록·하드룰). */
 SCREEN.deliv420=(c)=>{
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const dcol=s=>(s&&(''+s).length===6)?`${+((''+s).slice(2,4))}/${+((''+s).slice(4,6))}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={cust:'',from:iso(T),days:5,item:'',part:'',deliv:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, msg='';
+  const ST={"00":"요청","10":"발행","90":"발행완료"}, STC={"00":"#8aa0bd","10":"#2e86de","90":"#27ae60"};
+  let F={cust:'',from:iso(T),days:5,item:'',part:'',sort:'doban',deliv:{},pack:{},serial:{},heat:{},chk:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, busy=false, msg='';
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   const loadCusts=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);custs=(await r.json()).rows||[];}catch(e){custs=[];}};
   const load=async()=>{
@@ -345,70 +346,134 @@ SCREEN.deliv420=(c)=>{
     if(!F.cust){msg='협력사(자도번작업처)를 먼저 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
     loading=true;msg='';draw();
     const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),item:F.item,matcode:F.part});
-    try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();F.deliv={};}
+    try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();F.deliv={};F.pack={};F.serial={};F.heat={};F.chk={};}
     catch(e){msg='백엔드 연결 실패';data={dates:[],rows:[],cnt:0,sum:{}};}
     loading=false;draw();};
+  // 선택행(체크·납품수량>0) 수집
+  const collect=(rows)=>{const items=[];rows.forEach(r=>{if(F.chk[r.assy]){const dv=Number(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv)||0;
+    items.push({assy:r.assy,deliver_qty:dv,pack_qty:Number(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack)||0,serial_no:F.serial[r.assy]||'',heat_no:F.heat[r.assy]||''});}});return items;};
+  const issue=async(rows)=>{
+    if(busy)return; const items=collect(rows); if(!items.length)return alert('완성분(체크)을 선택하고 납품수량을 확인하세요.');
+    busy=true;
+    try{
+      const pv=await(await fetch(`${API}/api/partner/deliv420/issue`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),items,preview:1})})).json();
+      if(!pv.ok){alert(pv.msg||'발행 불가');return;}
+      if(!confirm(`발행 미리보기\n건수 ${pv.count} · 총 납품수량 ${nf(pv.total_qty)}\n\n확정 발행할까요? (nx.deliv_issue 기록 · 라이브 미기록)`))return;
+      const rr=await(await fetch(`${API}/api/partner/deliv420/issue`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),items,preview:0})})).json();
+      if(!rr.ok){alert(rr.msg||'발행 실패');return;}
+      alert(`발행 완료 · 바코드 ${rr.barcode} · ${rr.count}건 · 납품 ${nf(rr.total_qty)}\n(nx.deliv_issue 기록)`);
+      await load();
+    }catch(e){alert('발행 오류: '+e.message);}finally{busy=false;}
+  };
+  const cancelIssue=async()=>{const bc=prompt('발행취소할 바코드 번호를 입력하세요');if(!bc)return;
+    try{const rr=await(await fetch(`${API}/api/partner/deliv420/cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:bc.trim()})})).json();
+      alert(rr.ok?`취소 ${rr.cancelled}건`:(rr.msg||'실패'));await load();}catch(e){alert('오류: '+e.message);}};
+  // 인쇄 뷰(뼈대): 자재부품표 = 체크 도번의 자도번LIST / 빈양식 = 서식만
+  const printView=(rows,blank)=>{
+    const sel=blank?[]:rows.filter(r=>F.chk[r.assy]); if(!blank&&!sel.length)return alert('출력할 도번(체크)을 선택하세요.');
+    const custName=(custs.find(w=>w.cc===F.cust)||{}).nm||F.cust;
+    const body=blank?Array.from({length:15}).map((_,i)=>`<tr><td>${i+1}</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('')
+      :sel.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.assy)}</td><td class="l">${esc(r.nm||'')}</td><td class="l">${esc(r.mat_list||'')}</td><td class="r">${nf(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv)}</td><td>${esc(F.serial[r.assy]||'')}</td></tr>`).join('');
+    const w=window.open('','_blank','width=1000,height=800'); if(!w)return alert('팝업 차단됨 — 허용 후 다시 시도.');
+    w.document.write(`<html><head><title>${blank?'자재부품표(빈양식)':'자재부품표'} ${esc(custName)}</title><meta charset="utf-8">
+      <style>body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;margin:12px;font-size:12px}h2{text-align:center;letter-spacing:4px}
+      table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:3px 5px;text-align:center}.l{text-align:left}.r{text-align:right}
+      thead th{background:#eee}@media print{.np{display:none}}</style></head><body>
+      <div class="np" style="margin-bottom:8px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button></div>
+      <h2>자 재 부 품 표</h2><div style="margin:4px 0">협력사: ${esc(custName)} · 출력일: ${iso(new Date())}${blank?' · (빈양식)':''}</div>
+      <table><thead><tr><th>No</th><th>도번(ASSY)</th><th>품명</th><th>자도번 LIST</th><th>납품수량</th><th>SERIAL-NO</th></tr></thead><tbody>${body}</tbody></table>
+      </body></html>`); w.document.close();
+  };
   const draw=()=>{
-    const dates=data.dates||[], rows=data.rows||[];
-    // 3개 필터 오토컴플리트 소스: 협력사(전체)·도번/자도번(선택 협력사 결과 스코프)
+    const dates=data.dates||[];
+    let rows=(data.rows||[]).slice();
+    // 정렬 토글: 도번별 / 시간별(라인→도번)
+    if(F.sort==='time') rows.sort((a,b)=>String(a.line||'').localeCompare(String(b.line||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    else rows.sort((a,b)=>String(a.workcenter||'').localeCompare(String(b.workcenter||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
     const custOpts=custs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
     const custName=(custs.find(w=>w.cc===F.cust)||{}).nm||'';
     const itS=new Map(); rows.forEach(r=>{if(r.assy&&!itS.has(r.assy))itS.set(r.assy,r.nm||'');});
     const itemOpts=[...itS].slice(0,500).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     const ptS=new Set(); rows.forEach(r=>(r.mat_list||'').split(/[,\r\n]/).forEach(x=>{const m=x.split('{')[0].split('[')[0].trim();if(m)ptS.add(m);}));
     const partOpts=[...ptS].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
-    const FIX=16;
+    const FIX=23;
     const S=data.sum||{};
+    const badge=s=>`<span style="padding:1px 5px;border-radius:3px;font-size:10px;background:${STC[s]||'#8aa0bd'};color:#fff">${ST[s]||s}</span>`;
     // 일자셀=완료/계획+색(가공4주간 동일 표준): 생산완료 노랑·출하완료 주황·키팅완료 녹
     const dcell=(r,d)=>{const pl=Number((r.days&&r.days[d])||0),dn=Number((r.donedays&&r.donedays[d])||0),bg=(r.colors&&r.colors[d])||'';if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
     const gPlan={},gDone={};rows.forEach(r=>dates.forEach(d=>{gPlan[d]=(gPlan[d]||0)+Number((r.days&&r.days[d])||0);gDone[d]=(gDone[d]||0)+Number((r.donedays&&r.donedays[d])||0);}));
-    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td>${nf(data.cnt)}건</td><td colspan="4"></td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td colspan="6"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
+    const chkn=rows.filter(r=>F.chk[r.assy]).length;
+    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="6">${nf(data.cnt)}건</td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td class="num"><b>${nf(S.issued||0)}</b></td><td colspan="10"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
-     <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독</span></div>
-     <div class="page-sub">협력사 계획현황 기반. <b>완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분</b>(레거시 SP + 510창, 도번 공유풀). 요청수량 = 계획 − 완료. 납품수량 입력 후 발행/바코드는 <b>거래명세서 발행(바코드)</b> 화면(후속).
-       <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
+     <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독 · 발행=nx</span></div>
+     <div class="page-sub">완료된 도번 <b>체크 → 납품/포장/SERIAL/HEAT 입력 → [납품처리]</b>(발행은 <b>nx.deliv_issue</b>에만 기록, 라이브 미기록). 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 요청수량=계획−완료−발행분.
+       <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
      <div class="toolbar">
-       <label class="tl">협력사</label><input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명 입력" autocomplete="off" style="width:180px"><datalist id="d4l-cust">${custOpts}</datalist>
-       <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('d4-base',F.from)}
-       <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:42px;text-align:center">일
+       <label class="tl">협력사</label><input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명 입력" autocomplete="off" style="width:170px"><datalist id="d4l-cust">${custOpts}</datalist>
+       <label class="tl" style="margin-left:6px">기준일자</label>${legacyDateHTML('d4-base',F.from)}
+       <label class="tl" style="margin-left:6px">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:40px;text-align:center">일
        <button class="btn" id="d4-search">🔍 조회</button>
-       ${loading?'<span style="color:var(--muted)">조회중… (라이브 재고배분 계산, 최초 다소 소요)</span>':''}
-       <div class="spacer"></div><span class="rowcount">${nf(data.cnt||0)}건 · 완료합 <b>${nf(S.done||0)}</b> / 계획 ${nf(S.plan||0)}</span>
+       <button class="btn" id="d4-issue" style="background:#2e86de;color:#fff" ${busy?'disabled':''}>📦 납품처리 (${chkn})</button>
+       <button class="btn" id="d4-cancel">발행취소</button>
+       <button class="btn" id="d4-prt">🖨️ 자재부품표</button>
+       <button class="btn" id="d4-blank">빈양식</button>
+       <button class="btn" id="d4-sticker" title="스티커 설정/프린터 설정은 후속">🏷️ 스티커</button>
+       ${loading?'<span style="color:var(--muted)">조회중…</span>':''}
      </div>
      <div class="toolbar" style="margin-top:2px">
-       <label class="tl">도번</label><input class="inp" id="d4-item" list="d4l-item" value="${esc(F.item)}" style="width:140px" placeholder="도번(ASSY)/품명" autocomplete="off"><datalist id="d4l-item">${itemOpts}</datalist>
-       <label class="tl">자도번</label><input class="inp" id="d4-part" list="d4l-part" value="${esc(F.part)}" style="width:140px" placeholder="자도번" autocomplete="off"><datalist id="d4l-part">${partOpts}</datalist>
+       <label class="tl">도번</label><input class="inp" id="d4-item" list="d4l-item" value="${esc(F.item)}" style="width:130px" placeholder="도번(ASSY)/품명" autocomplete="off"><datalist id="d4l-item">${itemOpts}</datalist>
+       <label class="tl">자도번</label><input class="inp" id="d4-part" list="d4l-part" value="${esc(F.part)}" style="width:130px" placeholder="자도번" autocomplete="off"><datalist id="d4l-part">${partOpts}</datalist>
+       <label class="tl" style="margin-left:8px">정렬</label>
+       <select class="inp" id="d4-sort" style="width:auto"><option value="doban" ${F.sort==='doban'?'selected':''}>도번별</option><option value="time" ${F.sort==='time'?'selected':''}>시간별</option></select>
+       <div class="spacer"></div><span class="rowcount">${nf(data.cnt||0)}건 · 완료 <b>${nf(S.done||0)}</b>/계획 ${nf(S.plan||0)} · 발행 ${nf(S.issued||0)}</span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
-       <th class="num">SEQ</th><th>자도번작업처</th><th>도번</th><th>품명</th><th style="min-width:400px;width:400px">자도번 LIST</th><th class="center">사급</th>
-       <th class="num">LOT수량</th><th class="num">계획수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th class="num" style="width:56px">납품수량</th>
-       <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="center">검사</th>
+       <th class="center"><input type="checkbox" id="d4-all"></th><th>자도번작업처</th><th class="center">Line</th><th>도번</th><th>품명</th><th style="min-width:400px;width:400px">자도번 LIST</th><th class="center">사급</th>
+       <th class="num">LOT</th><th class="num">계획</th><th class="num">완료</th><th class="num">요청</th><th class="num">발행</th>
+       <th class="num" style="width:52px">납품</th><th class="num" style="width:48px">포장</th><th style="width:80px">SERIAL-NO</th><th style="width:70px">HEAT-NO</th>
+       <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="num">ASSY재고</th><th class="center">검사</th><th class="center">상태</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
-      <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r,i)=>`<tr>
-        <td class="num" style="color:#8aa0bd">${i+1}</td>
-        <td><b>${esc(r.workcenter||'')}</b></td>
+      <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r)=>{const ed=(r.status!=='90'&&Number(r.req)>0);const dv=(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv);const pk=(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack);return `<tr>
+        <td class="center"><input type="checkbox" class="d4-ck" data-k="${esc(r.assy)}" ${F.chk[r.assy]?'checked':''} ${ed?'':'disabled'}></td>
+        <td><b>${esc(r.workcenter||'')}</b></td><td class="center">${esc(r.line||'')}</td>
         <td><b>${esc(r.assy)}</b></td>
-        <td class="bcap" title="${esc(r.nm||'')} ${esc(r.spec||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
+        <td class="bcap" title="${esc(r.nm||'')} ${esc(r.spec||'')}" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
         <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
         <td class="center">${r.sagub_list?'<span class="bdg sagub" style="font-size:10px" title="'+esc(r.sagub_list)+'">사급</span>':''}</td>
         <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.plan)}</td>
         <td class="num" style="color:#1c7c3a"><b>${nf(r.done)}</b></td>
         <td class="num"><b>${nf(r.req)}</b></td>
-        <td class="num" style="background:#eafaea;width:56px"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv}" style="width:48px;text-align:right;background:#eafaea"></td>
+        <td class="num" style="color:#27ae60">${r.issued?nf(r.issued):''}</td>
+        <td class="num" style="background:#eafaea"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${dv}" ${ed?'':'disabled'} style="width:46px;text-align:right;background:#eafaea"></td>
+        <td class="num" style="background:#eafaea"><input class="inp d4-pk" data-k="${esc(r.assy)}" value="${pk}" ${ed?'':'disabled'} style="width:42px;text-align:right;background:#eafaea"></td>
+        <td style="background:#eafaea"><input class="inp d4-sn" data-k="${esc(r.assy)}" value="${esc(F.serial[r.assy]||'')}" ${ed?'':'disabled'} style="width:76px;background:#eafaea"></td>
+        <td style="background:#eafaea"><input class="inp d4-hn" data-k="${esc(r.assy)}" value="${esc(F.heat[r.assy]||'')}" ${ed?'':'disabled'} style="width:66px;background:#eafaea"></td>
         <td class="num" style="color:#2e86de">${nf(r.sale)}</td><td class="num" style="color:#8e44ad">${nf(r.prod)}</td>
-        <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td>
+        <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td><td class="num">${nf(r.assy_stock)}</td>
         <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
-        ${dates.map(d=>dcell(r,d)).join('')}</tr>`).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
+        <td class="center">${badge(r.status)}</td>
+        ${dates.map(d=>dcell(r,d)).join('')}</tr>`;}).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     const sync=()=>{const cn=g('#d4-cust').value.trim();F.cust=(custs.find(w=>(w.nm||w.cc)===cn)||{}).cc||(cn?F.cust:'');
       F.days=g('#d4-days').value||5;F.item=g('#d4-item').value.trim();F.part=g('#d4-part').value.trim();};
     bindLegacyDate(c,'d4-base',()=>F.from,(v)=>{F.from=v;});
     g('#d4-search').onclick=()=>{sync();load();};
     ['#d4-cust','#d4-item','#d4-part','#d4-days'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
+    g('#d4-sort').onchange=e=>{F.sort=e.target.value;draw();};
+    g('#d4-issue').onclick=()=>issue(rows);
+    g('#d4-cancel').onclick=cancelIssue;
+    g('#d4-prt').onclick=()=>printView(rows,false);
+    g('#d4-blank').onclick=()=>printView(rows,true);
+    g('#d4-sticker').onclick=()=>alert('스티커 설정/프린터 설정/스티커 인쇄는 후속 구현 예정(뼈대). 자재부품표/빈양식 인쇄는 동작합니다.');
+    const all=g('#d4-all');if(all)all.onclick=e=>{rows.forEach(r=>{if(r.status!=='90'&&Number(r.req)>0)F.chk[r.assy]=e.target.checked;});draw();};
+    c.querySelectorAll('.d4-ck').forEach(x=>x.onchange=e=>{F.chk[e.target.dataset.k]=e.target.checked;const b=g('#d4-issue');if(b)b.textContent=`📦 납품처리 (${rows.filter(r=>F.chk[r.assy]).length})`;});
     c.querySelectorAll('.d4-dv').forEach(x=>x.oninput=e=>{F.deliv[e.target.dataset.k]=e.target.value;});
+    c.querySelectorAll('.d4-pk').forEach(x=>x.oninput=e=>{F.pack[e.target.dataset.k]=e.target.value;});
+    c.querySelectorAll('.d4-sn').forEach(x=>x.oninput=e=>{F.serial[e.target.dataset.k]=e.target.value;});
+    c.querySelectorAll('.d4-hn').forEach(x=>x.oninput=e=>{F.heat[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('thead th').forEach(th=>addResizer(th));
   };
   loadCusts().then(draw);
