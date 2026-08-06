@@ -63,6 +63,13 @@
 - 정본 SP: `SP_PR_4주간계획현황_251126`(410·420 공통), `SP_PR_4주간_가공계획현황_250703`(410_work).
 - 웹: 410=`/api/partner/planstatus?src=legacy`(PART_MAT + 완료수량 fulfillment), 420=`/api/partner/deliv420`(SP_LIVE 전 컬럼). 무거움(교차DB SP 2회) → `_FUT_CACHE` 180s.
 
+## 5b. LOT수량 그레인·산식 (2026-08-06 실측대조 확정)
+- **410(협력사계획현황)=제번 그레인**: 행=(자도번작업처,split_work_order,line,도번). LOT=제번별 `MAX(lot_qty)`. 총합=Σ제번.
+- **420(거래명세서)=도번 병합 그레인**: 도번(cust,c_item_code)로 병합. LOT=**도번별 Σ제번**(레거시 510창 모도번합치기 `f_set_addnumber`=SUM, MAX 아님). → **410 총 LOT = 420 총 LOT**(둘 다 전 제번 lot 합).
+- 실측(협력사 2068, 260806~260905): 410 LOT=45,659·자재=104,469 = 레거시 410 완전일치. 420 LOT=45,659 = 레거시 420 완전일치. **완료 4,679·요청 39,639 동일**.
+- ★사용자가 본 9,073 vs 45,659 = (a)우리420 vs 레거시410(다른 화면·그레인) 비교 + (b)우리420 LOT이 도번 MAX였던 버그. **버그 수정=도번 SUM**(coopplan.py `_deliv420_rows` `m["lot"]+=`).
+- 계획 미세차(우리420 44,212 vs SP 44,208=4): **SVC도번 2건**(WO…SVC)만 PART_MAT.plan_qty=raw(회수율 미반영), SP는 CEILING×rate. 정상도번은 PART_MAT에 회수율 baked → 전역 rate 재적용 금지(이중할인). 0.009%, 무시.
+
 ## 6. 조달 프로파일 2계층 배분(추후 접목)
 - 협력사 계획현황 수량 = 소요량 × **후보간 배분(R01↔R02, nx.route_alloc)** × **후보내 업체 배분(nx.sourcing_profile)**. 레거시 매칭 검증 후 도입 예정.
 
