@@ -393,7 +393,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         ncur.execute("SELECT COUNT(*) FROM nx.coop_quote WHERE assy_code=?", item)
         quoted = ncur.fetchone()[0] > 0
         # 저장 부품 합계(엑셀 AQ) — bottom-up 합산 표시용
-        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0; grade_q = "일반CU"; sagub_q = 0.0; cur_incost = None
+        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0; grade_q = "일반CU"; sagub_q = 0.0; cur_incost = None; prev_incost = None
         quote_rows = []   # 원본 행(중복 포함) — 다회사용 부품 정확 합산용(sum-all)
         weld_quote = {}   # 견적 용접봉 재료비 {code: mat}. 현 BOM(우리기준) 무시, 견적기준 사용
         try:
@@ -410,10 +410,13 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             rr = ncur.fetchone()
             if rr:
                 sale_stored = float(rr[0] or 0); mat_stored = float(rr[1] or 0); grade_q = str(rr[2] or "일반CU").strip(); sagub_q = float(rr[3] or 0)
-            ncur.execute("SELECT cur_cost FROM nx.coop_incost WHERE UPPER(LTRIM(RTRIM(code)))=?", item.upper())
+            ncur.execute("SELECT cur_cost, prev_cost FROM nx.coop_incost WHERE UPPER(LTRIM(RTRIM(code)))=?", item.upper())
             _ic = ncur.fetchone()
-            if _ic and _ic[0] is not None:
-                cur_incost = float(_ic[0])
+            if _ic:
+                if _ic[0] is not None:
+                    cur_incost = float(_ic[0])
+                if _ic[1] is not None:
+                    prev_incost = float(_ic[1])
         except Exception:
             partmap = {}
         # ★인상후(최신) 원소재 사급가(등급별·적용월 기준): 종전 견적사급가(예 7575) 대신 현재 사급가(20000/22000) 표시·계산
@@ -625,7 +628,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             "rows": rows, "count": len(rows), "need_input": need, "proc_ops": proc_ops, "rate": rate,
             "total_soyo_weight": total_soyo, "total_weld_cost": total_weld, "total_proc_cost": total_proc,
             "total_mat": total_mat, "total_mat_before": total_mat_before, "ym": ym4, "asof": asof, "vendor_code": vcode,
-            "cur_sagub": cur_sagub_val, "grade": grade_q, "cur_incost": cur_incost,
+            "cur_sagub": cur_sagub_val, "grade": grade_q, "cur_incost": cur_incost, "prev_incost": prev_incost,
             "part_sum": round(part_sum), "assembly_proc": assembly_proc, "sale_stored": round(sale_stored),
             "assembly": assembly}
 

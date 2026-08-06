@@ -1820,8 +1820,12 @@ SCREEN.coopquote=(host)=>{
        const baseMat=d?d.rows.filter(r=>r.role!=='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0):0;   // 부속품/용접봉/반제품lump(편집 재료비 반영)
        const A0=be.asm||{gagong:(d&&d.assembly_proc)||0,mgmt:0,transport:0,profit:0};const asmTot=Math.round((+A0.gagong||0)+(+A0.mgmt||0)+(+A0.transport||0)+(+A0.profit||0));
        const procTube=d?d.rows.filter(r=>r.role==='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowGag(r),0):0;
-       const mat=raw+baseMat;const gagong=procTube+asmTot;const curIn=(d&&d.cur_incost!=null)?d.cur_incost:null;
-       const sale=(curIn!=null?curIn:(mat+gagong));const adjust=(curIn!=null?Math.round(curIn-mat-gagong):0);const proc=gagong;
+       const mat=raw+baseMat;const gagong=procTube+asmTot;const curIn=(d&&d.cur_incost!=null)?d.cur_incost:null;const prevIn=(d&&d.prev_incost!=null)?d.prev_incost:null;
+       // ★완제품 합계 = 백엔드 v3 총합. 총가공비 = 입고가 − 재료비 (리스트와 동일). 조정도 v3 재료비(totMat) 기준.
+       const totMat=d?Math.round(d.total_mat||0):0;const totMatB=d?Math.round(d.total_mat_before||0):0;
+       const sale=(curIn!=null?curIn:(totMat+gagong));const adjust=(curIn!=null?Math.round(curIn-totMat-gagong):0);const proc=gagong;
+       const totGag=(curIn!=null?Math.round(curIn-totMat):gagong);const totSale=(curIn!=null?Math.round(curIn):(totMat+gagong));
+       const totGagB=(prevIn!=null?Math.round(prevIn-totMatB):totGag);const totSaleB=(prevIn!=null?Math.round(prevIn):(totMatB+(totGagB||0)));const adjustB=(prevIn!=null?Math.round(prevIn-totMatB-gagong):adjust);
        const grand=sale;
        return `<div class="wr-modal" style="position:fixed;inset:0;z-index:112;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 8px">
        <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.34);width:1340px;max-width:98vw">
@@ -1850,7 +1854,7 @@ SCREEN.coopquote=(host)=>{
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#1c47a0;color:#fff">완제품</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
-               <td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tmat-root">${nf(mat)}</td><td class="num" style="color:#5a6a80;font-weight:700" id="be-tratio-root">${sale>0?Math.round(mat/sale*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800" id="be-tgag-root" title="가공비 합계 = 동관가공+조립+조정">${nf(gagong+adjust)}</td><td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tsale-root" title="판가(현재입고가)">${nf(sale)}</td>
+               <td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tmat-root">${nf(totMat)}</td><td class="num" style="color:#5a6a80;font-weight:700" id="be-tratio-root">${totSale>0?Math.round(totMat/totSale*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800" id="be-tgag-root" title="총가공비 = 현재입고가 − 재료비">${nf(totGag)}</td><td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tsale-root" title="판가(현재입고가)">${nf(totSale)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
              ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const e=be.edits[r.code]||{};
              const dd=(e.diam!=null&&e.diam!=='')?e.diam:(r.coop_diam||'');const tt=(e.thick!=null&&e.thick!=='')?e.thick:(r.coop_thick||'');const ll=(e.length!=null&&e.length!=='')?e.length:(r.coop_length||'');
@@ -1907,7 +1911,7 @@ SCREEN.coopquote=(host)=>{
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#8a6d3b;color:#fff">완제품</span></td>
                <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
-               <td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px">${nf(d.total_mat_before||0)}</td><td class="num" style="color:#5a6a80;font-weight:700">${((d.total_mat_before||0)+gagong+adjust)>0?Math.round((d.total_mat_before||0)/((d.total_mat_before||0)+gagong+adjust)*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800">${nf(gagong+adjust)}</td><td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px">${nf((d.total_mat_before||0)+gagong+adjust)}</td>
+               <td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px">${nf(totMatB)}</td><td class="num" style="color:#5a6a80;font-weight:700">${totSaleB>0?Math.round(totMatB/totSaleB*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800" title="종전 총가공비 = 종전입고가 − 종전재료비">${totGagB!=null?nf(totGagB):'-'}</td><td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px" title="종전 판가(종전입고가)">${totSaleB!=null?nf(totSaleB):'-'}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
              ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const uw=beUw(r);const ind=6+r.level*12;const pr=r.procs||{};
                const rq=(r.cum_qty||0);const rmatB=(r.mat_before!=null?r.mat_before:0);const rgag=isTube?beRowGagong(r):0;const rtotB=rmatB+rgag;
@@ -1938,13 +1942,13 @@ SCREEN.coopquote=(host)=>{
                <td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num">-</td><td class="num" style="color:#1c7c3a;font-weight:700">${nf(atot)}</td><td class="num" style="color:#8a6d3b;font-weight:700">${nf(atot)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`;})():''}
-             ${curIn!=null?`<tr style="background:#fef6e9">
+             ${prevIn!=null?`<tr style="background:#fef6e9">
                <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#a06010">(가격조정)</td>
                <td class="cap" style="color:#a06010">종전입고가 정합 조정</td>
                <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fbe4cc;color:#a06010">조정</span></td>
                <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
                <td class="num">-</td><td class="num">-</td><td class="num">-</td>
-               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjust)}</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjust)}</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjustB)}</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjustB)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`:''}
              </tbody></table></div>
            `)}
