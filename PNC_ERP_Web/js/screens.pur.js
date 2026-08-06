@@ -1691,7 +1691,6 @@ SCREEN.coopquote=(host)=>{
        <span style="display:inline-flex;align-items:center;gap:5px;background:#fff3d6;border:1px solid #e8c877;border-radius:6px;padding:2px 8px"><label style="color:#8a5a00;font-weight:700;font-size:12px" title="인상후 사급부품 판매단가·원소재 사급가 기준월 — 리스트 전체에 적용">📅 적용월(전체)</label><input class="inp" id="cq-ym" type="month" value="${esc(st.ym||'')}" style="width:130px;font-weight:600"></span>
        <button class="btn" id="cq-go">🔍 조회</button>
        <button class="btn" id="cq-active" title="최근 4개월 내 실제 납품(입고) 실적이 있는 품목만" style="${st.activeOnly?'background:#1c7c3a;color:#fff':'background:#eef2f7;color:#33507d'}">🚚 현재 납품 품목만 ${st.activeOnly?'ON':'OFF'}</button>
-       <button class="btn" id="cq-work" title="직원 입력 작업목록(데이터문제+신규)" style="${st.workMode?'background:#6a3fb0;color:#fff':'background:#f0ecfa;color:#6a3fb0'}">📋 입력작업목록 ${st.workMode?'ON':''}</button>
        ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
@@ -1704,6 +1703,11 @@ SCREEN.coopquote=(host)=>{
          <td style="font-family:monospace;font-size:12px">${esc(r.assy_code)}</td><td>${r.vendor?esc(r.vendor):'<span style="color:#c9d1dc">-</span>'}</td>
          <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${r.wtype==='신규'?'#fbe9d0':'#fdecec'};color:${r.wtype==='신규'?'#b8791f':'#c0392b'}">${esc(r.wtype)}</span></td>
          <td style="font-size:11px;color:#6a6a6a">${esc(r.reason)}</td><td class="num">${won(r.in_qty)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">작업목록 없음 (전부 완료)</td></tr>')}</tbody></table></div>`:''}
+     <style>
+       #cq-tbl{width:max-content!important;table-layout:auto!important;border-collapse:collapse}
+       #cq-tbl th,#cq-tbl td{padding:1px 6px!important;white-space:nowrap;line-height:1.5}
+       #cq-tbl td.cap{white-space:normal}
+     </style>
      <div class="grid-wrap" style="${st.workMode?'display:none;':''}max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" id="cq-tbl" style="font-size:11px"><thead>
         <tr>
@@ -1711,7 +1715,7 @@ SCREEN.coopquote=(host)=>{
         <th rowspan="2" data-sort="vendor" style="cursor:pointer" title="더블클릭 정렬">협력사</th><th rowspan="2" data-sort="assy_code" style="cursor:pointer" title="더블클릭 정렬">품번(Assy)</th><th rowspan="2" data-sort="item_name" style="cursor:pointer" title="더블클릭 정렬">품명</th><th rowspan="2">규격</th><th rowspan="2">등급</th>
         <th colspan="4" class="center" style="background:#f0efe9;color:#8a6d3b;border-left:2px solid #d9d3c4">인상전 <span style="font-weight:400;font-size:9px">(종전·작년12월)</span></th>
         <th colspan="4" class="center" style="background:#eaf1fc;color:#1c47a0;border-left:2px solid #b9cdec">인상후 <span style="font-weight:400;font-size:9px">(적용월 기준)</span></th>
-        <th rowspan="2" class="num" data-sort="diff_new" style="cursor:pointer" title="더블클릭 정렬 — 손익 이상치 찾기">차이(신)<br><span style="font-weight:400;font-size:9px">(인상후−인상전 총가공비)</span></th>
+        <th rowspan="2" class="num" data-sort="diff_new" style="cursor:pointer" title="더블클릭 정렬 — 손익 이상치 찾기 · 인상후 총가공비 − 인상전 총가공비">가공비<br>차이</th>
         <th rowspan="2" data-sort="last_in_ymd" style="cursor:pointer" title="더블클릭 정렬">최근납품</th><th rowspan="2">상태</th>${canEd?'<th rowspan="2" style="width:40px">작업</th>':''}</tr>
         <tr>
         <th class="num" data-sort="mat_before" style="background:#f7f6f1;color:#1c6ec2;border-left:2px solid #d9d3c4;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_before" style="background:#f7f6f1;cursor:pointer">재료비율</th><th class="num" data-sort="proc_before" style="background:#f7f6f1;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_before" style="background:#f7f6f1;color:#8a6d3b;cursor:pointer">입고가</th>

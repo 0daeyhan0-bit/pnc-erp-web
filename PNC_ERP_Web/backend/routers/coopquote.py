@@ -188,9 +188,12 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             # 재료비율 = 재료비 / 입고가
             r["ratio_before"] = (round(mat_before / prev_in * 100, 1) if (not is_new and prev_in and prev_in > 0) else None)
             r["ratio_after"] = (round(mat_after / cur_in * 100, 1) if (cur_in and cur_in > 0) else None)
-            # 차이(신) = 인상후 총가공비 − 인상전 총가공비 (신규는 비교 안 함)
-            r["diff_new"] = (round(r["proc_after"] - r["proc_before"], 2)
-                             if (r["proc_after"] is not None and r["proc_before"] is not None) else None)
+            # 가공비 차이 = 인상후 총가공비 − 인상전 총가공비 (신규는 인상전 없음 → 0)
+            if is_new:
+                r["diff_new"] = 0.0
+            else:
+                r["diff_new"] = (round(r["proc_after"] - r["proc_before"], 2)
+                                 if (r["proc_after"] is not None and r["proc_before"] is not None) else None)
         if active_only:
             cutoff = (datetime.now() - timedelta(days=120)).strftime('%y%m%d')
             rows = [r for r in rows if r.get("last_in_ymd") and r["last_in_ymd"] >= cutoff]
