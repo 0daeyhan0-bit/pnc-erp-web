@@ -1900,8 +1900,12 @@ SCREEN.coopquote=(host)=>{
                <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700" id="be-adjgag">${nf(adjust)}</td><td class="num" style="color:#a06010;font-weight:700" id="be-adjust">${nf(adjust)}</td>
                ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`:''}
              <tr style="background:#dbe9ff;font-weight:800;font-size:13px">
-               <td colspan="${17+(d.proc_ops||[]).length}" style="text-align:left;padding-left:10px;color:#1c47a0">판가 (재료비 + 가공비${curIn!=null?' + 조정':''} = ${curIn!=null?'현재입고가':'견적'}) = <span id="be-grandtot-l">${nf(grand)}</span></td>
-               <td class="num" style="color:#c0392b" id="be-grandtot">${nf(grand)}</td></tr></tbody></table></div>
+               <td colspan="11" style="text-align:left;padding-left:10px;color:#1c47a0">📊 합계 (재료비 + 가공비${curIn!=null?'[조정포함]':''} = ${curIn!=null?'현재입고가':'견적'}) <span id="be-grandtot-l" style="display:none">${nf(grand)}</span></td>
+               <td class="num" style="color:#1c6ec2" id="be-grandmat" title="재료비 합계">${nf(mat)}</td>
+               <td class="num" style="color:#5a6a80" title="전체 재료비율 = 재료비/판가">${sale>0?Math.round(mat/sale*100):0}%</td>
+               <td class="num" style="color:#1c7c3a" id="be-grandgag" title="가공비 합계 = 동관가공 + 조립 + 조정">${nf(gagong+(curIn!=null?adjust:0))}</td>
+               <td class="num" style="color:#c0392b" id="be-grandtot">${nf(grand)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td></td><td></td><td></td><td></td></tr></tbody></table></div>
            <div style="margin-top:8px;background:#eef4ff;border:1px solid #cdddf5;border-radius:8px;padding:9px 14px;font-size:12px;display:flex;gap:12px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
              <span>소요중량 <b id="be-tsoyo" style="color:#1c6ec2">${nf4(soyo)}</b>kg</span>
              <span style="color:#8aa0bd">원소재비 <b id="be-traw" style="color:#1c6ec2">${nf(raw)}</b> +부속품/용접봉 <b id="be-tbase">${nf(baseMat)}</b> =</span>
@@ -2024,7 +2028,8 @@ SCREEN.coopquote=(host)=>{
         const sale=(curIn!=null?curIn:(mat+gagong));const adjust=(curIn!=null?Math.round(curIn-mat-gagong):0);
         const set=(id,v)=>{const el=g(id);if(el)el.textContent=v;};
         set('#be-tsoyo',nf4(soyo));set('#be-tsoyo2',nf4(soyo));set('#be-traw',nf(raw));set('#be-tbase',nf(baseMat));set('#be-tmat',nf(mat));set('#be-tmat-root',nf(mat));
-        set('#be-tgag',nf(gagong));set('#be-tadj',nf(adjust));set('#be-adjust',nf(adjust));set('#be-tsale',nf(sale));set('#be-grandtot',nf(sale));set('#be-grandtot-l',nf(sale));};
+        set('#be-tgag',nf(gagong));set('#be-tadj',nf(adjust));set('#be-adjust',nf(adjust));set('#be-adjgag',nf(adjust));set('#be-tsale',nf(sale));set('#be-grandtot',nf(sale));set('#be-grandtot-l',nf(sale));
+        set('#be-grandmat',nf(mat));set('#be-grandgag',nf(gagong+adjust));set('#be-tgag-root',nf(gagong));};
       const beRefreshRow=(inp)=>{const code=inp.dataset.code;const r=be.data.rows.find(x=>x.code===code);if(!r)return;
         const tr=inp.closest('tr');const uw=beUw(r);const rq=beRowQty(r);const rmat=beRowMat(r);const rgag=beRowGag(r);const rtot=rmat+rgag;const rratio=rtot>0?Math.round(rmat/rtot*100):(rmat?100:0);
         const s=(cls,v)=>{const el=tr.querySelector('.'+cls);if(el)el.textContent=v;};
