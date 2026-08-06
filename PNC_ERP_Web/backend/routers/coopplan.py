@@ -46,6 +46,115 @@ def _qint(v):
     f = float(v or 0)
     return int(f) if f == int(f) else round(f, 2)
 
+# ================= ★완료수량(fulfillment) 엔진 — 레거시 SP + 510 창 충실이식 =================
+# 원천: nx.dbo.[SP_PR_4주간계획현황_LIVE](레거시 SP_PR_4주간계획현황_251126을 LIVE 읽기용으로 이식.
+#   PARTNER_ERP.dbo 로 전 테이블 한정=라이브 직독, 쓰기0. 당김 f_reld_doosung_live=라이브 HR_M_CALENDAR).
+# 완료수량 c_fin = 출하(sale) + 완제품재고 배분(prod, ASSY재고 공유풀) + 세트/입고대기 재고배분(공유풀).
+#   레거시 창(w_pr_outside_510.srw ue_set_dd_color/생산수량적용/자재수량적용) 로직을 파이썬 재현.
+#   ★재고는 c_item_code(도번) 단위 공유풀 — 여러 제번이 나눠 소진(과다계상 방지). 일자-major 배분.
+_SPL = "SP_PR_4주간계획현황_LIVE"
+
+def _sp_live_rows(cur, cust, from_ymd, to_ymd, flag, item="%", matcode="%", workcode="%"):
+    """SP_LIVE 1회 실행 → base grid 행 dict 리스트(라이브 직독)."""
+    cur.execute("SET NOCOUNT ON; EXEC dbo.[" + _SPL + "] ?,?,?,?,?,?,?",
+                from_ymd, to_ymd, flag, item, matcode, workcode, cust)
+    cols = rows = None
+    while True:
+        if cur.description:
+            cols = [c[0] for c in cur.description]; rows = cur.fetchall()
+        if not cur.nextset(): break
+    if not cols: return []
+    ix = {c: i for i, c in enumerate(cols)}
+    def G(r, c): return r[ix[c]] if c in ix else None
+    out = []
+    for r in rows:
+        days = [int(G(r, 'plan_qty_%02d' % i) or 0) for i in range(1, 32)]
+        minidx = next((i for i, d in enumerate(days) if d > 0), 99)
+        out.append({'wo': str(G(r, 'work_order') or ''), 'swo': str(G(r, 'split_work_order') or ''),
+            'assy': str(G(r, 'c_item_code') or ''), 'cust': str(G(r, 'mat_in_cust_code') or ''),
+            'line': str(G(r, 'line_no') or ''), 'output_hm': str(G(r, 'output_hm') or ''),
+            'excel': int(G(r, 'excel_seq') or 0), 'minidx': minidx,
+            'plan': int(G(r, 'plan_qty') or 0), 'days': days, 'over': int(G(r, 'over_plan_qty') or 0),
+            'lot': float(G(r, 'lot_qty') or 0), 'use': float(G(r, 'use_qty') or 1), 'rate': float(G(r, 'prod_rate') or 100),
+            'sale': int(G(r, 'sale_qty') or 0), 'assy_stock': int(G(r, 'assy_stock_qty') or 0),
+            'iset_stk': int(G(r, 'input_set_qty') or 0), 'ireq': int(G(r, 'input_req_qty') or 0),
+            'work_center': str(G(r, 'work_center') or ''), 'work_code': str(G(r, 'work_code') or ''),
+            'in_cust': str(G(r, 'in_cust_code') or ''),
+            'model': str(G(r, 'model_no') or ''), 'nm': '', 'lot_qty': int(G(r, 'lot_qty') or 0),
+            'insp': str(G(r, 'insp_flag') or '0'), 'pack': int(G(r, 'pack_qty') or 0),
+            'mat_list': str(G(r, 'mat_list') or ''), 'sagub_list': str(G(r, 'sagub_list') or '')})
+    return out
+
+def _sim510(rows):
+    """레거시 w_pr_outside_510 창 배분 로직 이식 → 각 행에 c_fin(완료)·c_input(요청)·prod 세팅.
+       재고=도번(cust,assy) 공유풀, 일자-major 순차배분. (출하+완제품재고+세트/입고대기)."""
+    from collections import defaultdict
+    for r in rows:
+        pd = r['days']; iset = [0]*31
+        ll_lot = math.ceil(r['lot']*r['use']*r['rate']/100.0); allplan = r['plan']+r['over']
+        if ll_lot < allplan: ll_lot = allplan
+        q = r['sale'] - (ll_lot - allplan)               # 지난계획 차감 후 출하 적용
+        for i in range(31):
+            if q <= 0: break
+            if pd[i] > 0:
+                if q >= pd[i]: iset[i] = pd[i]; q -= pd[i]
+                else:
+                    if iset[i] < q: iset[i] = q
+                    q = 0
+        r['iset'] = iset; r['prod'] = 0
+    g = defaultdict(list)
+    for r in rows: g[(r['cust'], r['assy'])].append(r)
+    # 완제품재고(ASSY) 공유풀 배분
+    for k, rs in g.items():
+        rs.sort(key=lambda r: (r['minidx'], r['line'], r['output_hm'], r['swo'], r['excel']))
+        pool = max((r['assy_stock'] for r in rs), default=0)
+        for i in range(31):
+            if pool <= 0: break
+            for r in rs:
+                if pool <= 0: break
+                need = r['days'][i] - r['iset'][i]
+                if need > 0:
+                    give = min(need, pool); r['prod'] += give; r['iset'][i] += give; pool -= give
+    for r in rows:
+        r['c_fin'] = r['prod'] + r['sale']; r['c_input'] = max(0, r['plan'] - r['c_fin'])
+    # 세트재고+입고대기 공유풀 배분(완료 가산·요청 차감)
+    for k, rs in g.items():
+        rs.sort(key=lambda r: (r['minidx'], r['line'], r['output_hm'], r['swo'], r['excel']))
+        pool = max((r['iset_stk'] + r['ireq'] for r in rs), default=0)
+        for i in range(31):
+            if pool <= 0: break
+            for r in rs:
+                if pool <= 0: break
+                if r['days'][i] > 0:
+                    need = r['days'][i] - r['iset'][i]
+                    if need > 0:
+                        give = min(need, pool); r['iset'][i] += give
+                        r['c_fin'] += give; r['c_input'] = max(0, r['c_input'] - give); pool -= give
+    return rows
+
+def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
+    """cust(협력사) 완료수량 산출: SP_LIVE(flag 1·2) → 중복제거 → _sim510.
+       반환: (per_key, merged) — per_key[(swo,assy)]=(c_fin,c_input,plan); merged=도번(cust,assy) 병합행리스트."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        seen = {}; rows = []
+        for flag in ('1', '2'):
+            for r in _sp_live_rows(cur, cust, from_ymd, to_ymd, flag, item, matcode, workcode):
+                k = (r['wo'], r['swo'], r['assy'])
+                if k in seen:  # 제작/사급 양쪽에 걸린 도번=동일 base, 중복 제거
+                    if r['sagub_list'] and not seen[k]['sagub_list']: seen[k]['sagub_list'] = r['sagub_list']
+                    continue
+                seen[k] = r; rows.append(r)
+    finally:
+        nx.close()
+    _sim510(rows)
+    per_key = {}
+    for r in rows:
+        k = (r['swo'], r['assy'])
+        pf, pi, pp = per_key.get(k, (0, 0, 0))
+        per_key[k] = (pf + r['c_fin'], pi + r['c_input'], pp + r['plan'])
+    return per_key, rows
+
 def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
     """★레거시 4주간 계획수량(w_pr_outside_410) 충실재현 — 라이브 PR_T_PLAN_PART_MAT 직독(읽기전용).
        원천 dw_pr_outside_040_t1 계열. 행 grain=도번(자도번작업처×제번×라인×assy_item_code), 일자매트릭스=part_plan_ymd(협력사 당김 CUST_MAINT_DAY 반영), 값=part_plan_qty.
@@ -155,7 +264,26 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             g.pop("parts", None)
         rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["assy"]))
         for i, g in enumerate(rows, 1): g["seq"] = i
-        note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영). 완료수량=실적조인 원천 미확정(담당확인)."
+        note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영)."
+        # ★완료수량(fulfillment): 협력사(외주) 지정 시 레거시 SP_LIVE + 510창 배분으로 실제값 채움.
+        #   요청수량=계획−완료. 재고=도번 공유풀(과다계상 방지). 자체(내부공정)/전체는 협력사 컨텍스트 없음→미표시.
+        if gubun == "외주" and wc.strip() and d6t:
+            try:
+                fut_from = base or d6f or d6t
+                per_key, _m = _fulfillment(wc.strip(), fut_from, d6t)
+                nmatch = 0
+                for g in rows:
+                    hit = per_key.get((str(g["wo"]), str(g["assy"])))
+                    if hit is not None:
+                        cfin, cinp, pplan = hit
+                        g["doneq"] = _qint(cfin); g["reqq"] = _qint(cinp); nmatch += 1
+                    else:
+                        g["doneq"] = 0  # SP 결과에 없음=완료 0(요청=발주 유지)
+                note += f" 완료수량=출하+완제품재고+세트/입고대기 재고배분(레거시 SP_LIVE+510창, 매칭 {nmatch}/{len(rows)}건)."
+            except Exception as e:
+                note += f" ⚠완료수량 계산 오류: {str(e)[:90]}"
+        else:
+            note += " 완료수량=협력사(외주) 지정 시 표시(레거시는 협력사별 화면)."
         if capped: note = f"⚠ 부품 {CAP_PARTS:,}행 상한 — 자도번작업처/제번으로 좁히세요. " + note
         return {"dates": dates, "rows": rows, "cnt": len(rows),
                 "sum_qty": _qint(sum(g["matq"] for g in rows)), "note": note}
