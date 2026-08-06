@@ -516,7 +516,8 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
                  "days": [0]*31, "dn": [0]*31, "tg": [0]*31, "swos": []}
             mg[k] = m
         if r["line"] and not m["line"]: m["line"] = r["line"]
-        m["lot"] = max(m["lot"], r["lot_qty"]); m["plan"] += r["plan"]; m["done"] += r["c_fin"]
+        # LOT수량=도번별 제번(split) 합(레거시 510 모도번 합치기 f_set_addnumber=SUM). MAX 아님.
+        m["lot"] += r["lot_qty"]; m["plan"] += r["plan"]; m["done"] += r["c_fin"]
         m["req"] += r["c_input"]; m["sale"] += r["sale"]; m["prod"] += r["prod"]
         m["pack"] = max(m["pack"], r["pack"])
         if r["mat_list"] and not m["mat_list"]: m["mat_list"] = r["mat_list"]
