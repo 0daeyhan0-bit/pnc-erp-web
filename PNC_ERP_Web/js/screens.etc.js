@@ -353,10 +353,15 @@ SCREEN.deliv420=(c)=>{
     const custOpts=custs.map(w=>`<option value="${esc(w.cc)}" ${F.cust===w.cc?'selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('');
     const FIX=16;
     const S=data.sum||{};
-    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td>${nf(data.cnt)}건</td><td colspan="4"></td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td colspan="6"></td>${dates.map(d=>`<td class="num"><b>${nf(rows.reduce((a,r)=>a+Number((r.days&&r.days[d])||0),0))}</b></td>`).join('')}</tr>`:'';
+    // 일자셀=완료/계획+색(가공4주간 동일): 출하완료 주황·생산완료(재고) 노랑·세트/입고대기 배분 녹
+    const dcell=(r,d)=>{const pl=Number((r.days&&r.days[d])||0),dn=Number((r.donedays&&r.donedays[d])||0),bg=(r.colors&&r.colors[d])||'';if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
+      return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
+    const gPlan={},gDone={};rows.forEach(r=>dates.forEach(d=>{gPlan[d]=(gPlan[d]||0)+Number((r.days&&r.days[d])||0);gDone[d]=(gDone[d]||0)+Number((r.donedays&&r.donedays[d])||0);}));
+    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td>${nf(data.cnt)}건</td><td colspan="4"></td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td colspan="6"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
      <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독</span></div>
-     <div class="page-sub">협력사 계획현황 기반. <b>완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분</b>(레거시 SP + 510창, 도번 공유풀). 요청수량 = 계획 − 완료. 납품수량 입력 후 발행/바코드는 <b>거래명세서 발행(바코드)</b> 화면(후속). ${data.note?'<br>ℹ '+esc(data.note):''}</div>
+     <div class="page-sub">협력사 계획현황 기반. <b>완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분</b>(레거시 SP + 510창, 도번 공유풀). 요청수량 = 계획 − 완료. 납품수량 입력 후 발행/바코드는 <b>거래명세서 발행(바코드)</b> 화면(후속).
+       <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료(재고)</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">세트/입고대기 배분</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
      <div class="toolbar">
        <label class="tl">협력사</label>
        <select class="inp" id="d4-cust" style="width:auto"><option value="">선택</option>${custOpts}</select>
@@ -387,7 +392,7 @@ SCREEN.deliv420=(c)=>{
         <td class="num" style="color:#2e86de">${nf(r.sale)}</td><td class="num" style="color:#8e44ad">${nf(r.prod)}</td>
         <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td>
         <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
-        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
+        ${dates.map(d=>dcell(r,d)).join('')}</tr>`).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     g('#d4-cust').onchange=e=>F.cust=e.target.value;
     g('#d4-days').onchange=e=>{F.days=e.target.value;};
@@ -670,7 +675,7 @@ SCREEN.partnerplan=(c)=>{
   const norm=(r,i)=>({seq:r.seq||i+1, wc:r.wc, wcnm:r.wcnm||r.wc, line:r.line||'', workcenter:r.workcenter||'',
      assy:r.assy||'', jado:r.part||'', sagub:!!r.sagub, lot:(r.lot!=null?r.lot:null),
      matq:(r.matq!=null?r.matq:r.tot), doneq:(r.doneq!=null?r.doneq:null), reqq:(r.reqq!=null?r.reqq:null),
-     nm:r.nm||'', spec:r.spec||'', days:r.days||{}, tot:r.tot||0});
+     nm:r.nm||'', spec:r.spec||'', days:r.days||{}, donedays:r.donedays||{}, colors:r.colors||{}, tot:r.tot||0});
   const draw=()=>{
     const dates=data.dates||[];
     const rows=(data.rows||[]).map(norm);
@@ -683,10 +688,16 @@ SCREEN.partnerplan=(c)=>{
     const wcName=(wcs.find(w=>w.cc===F.wc)||{}).nm||'';
     const nn=v=>(v==null?'-':nf(v));
     // 합계행
+    const frac=!!data.frac;   // 협력사 지정 시 일자셀=완료/계획+색(가공4주간 동일)
     const sMat=rows.reduce((a,r)=>a+Number(r.matq||0),0), sReq=rows.reduce((a,r)=>a+Number(r.reqq||0),0);
-    const gDay={}; rows.forEach(r=>dates.forEach(d=>{gDay[d]=(gDay[d]||0)+Number((r.days&&r.days[d])||0);}));
+    const gDay={},gDone={}; rows.forEach(r=>dates.forEach(d=>{gDay[d]=(gDay[d]||0)+Number((r.days&&r.days[d])||0);gDone[d]=(gDone[d]||0)+Number((r.donedays&&r.donedays[d])||0);}));
+    // 일자셀 렌더: frac=완료/계획+색, 아니면 계획수량
+    const dcell=(r,d)=>{const pl=Number((r.days&&r.days[d])||0);if(!frac)return `<td class="num"${pl?'':' style="color:#dfe6ef"'}>${pl?nf(pl):'·'}</td>`;
+      const dn=Number((r.donedays&&r.donedays[d])||0),bg=(r.colors&&r.colors[d])||'';if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
+      return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
     const FIX=12;
-    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td><td></td>${dates.map(d=>`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`).join('')}</tr>`:'';
+    const gcell=d=>frac?`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gDay[d]||0)}</b></td>`:`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`;
+    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td><td></td>${dates.map(d=>gcell(d)).join('')}</tr>`:'';
     c.innerHTML=`
      <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 자도번작업처·도번·자도번LIST·일자별 (당김 반영)</span></div>
      <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량 컬럼 동일(1:1 대조용). 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). 첫 일자컬럼=기준일 이전 누적. ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
@@ -706,6 +717,7 @@ SCREEN.partnerplan=(c)=>{
        <label class="tl">라인</label><input class="inp" id="pn-line" list="pnl-line" value="${esc(F.line)}" style="width:60px" placeholder="라인" autocomplete="off"><datalist id="pnl-line">${pnLineOpts}</datalist>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 자재수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}</span>
      </div>
+     ${frac?`<div class="page-sub" style="font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료(재고)</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">세트/입고대기 배분</span></div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${data.note?`<div class="page-sub" style="color:#b8860b">ℹ ${esc(data.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
@@ -723,7 +735,7 @@ SCREEN.partnerplan=(c)=>{
         <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
         <td class="num">${nn(r.reqq)}</td>
         <td class="bcap" title="${esc(r.nm)} ${esc(r.spec)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
-        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`)}</tbody></table></div>`;
+        ${dates.map(d=>dcell(r,d)).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     const syncInputs=()=>{const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||(wn?F.wc:'');F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;};
     const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};

@@ -1681,6 +1681,7 @@ SCREEN.coopquote=(host)=>{
     const diffCol=r=>{if(r.diff==null)return '<span style="color:#c9d1dc">-</span>';
       const c=r.diff>0?'#c0392b':(r.diff<0?'#1c6ec2':'#5a6a80');const s=r.diff>0?'▲':(r.diff<0?'▼':'');
       return `<b style="color:${c}">${s}${nf(Math.abs(r.diff))}</b>`;};
+    {const _pg=host.querySelector('#cq-grid'); if(_pg) st._scroll=_pg.scrollTop;}  // 재렌더 전 리스트 스크롤 보존
     host.innerHTML=`
      <div class="page-title">💱 협력사견적관리 <span style="font-size:12px;color:var(--muted);font-weight:400">하위부품 bottom-up 견적 vs 실입고가 · nx.coop_quote</span></div>
      <div class="page-sub">「협력 업체 견적 정리」 기반 <b>bottom-up</b>. <b style="color:#1c6ec2">재료비 = Σ하위부품(원소재·용접봉·부속품)</b>, <b style="color:#1c7c3a">가공비 = 판가−재료비</b>, <b>재료비율 = 재료비/판가</b>.
@@ -1712,7 +1713,7 @@ SCREEN.coopquote=(host)=>{
        #cq-tbl thead tr:first-child th{top:0;height:18px}
        #cq-tbl thead tr:nth-child(2) th{top:18px}
      </style>
-     <div class="grid-wrap" style="${st.workMode?'display:none;':''}max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <div class="grid-wrap" id="cq-grid" style="${st.workMode?'display:none;':''}max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" id="cq-tbl" style="font-size:11px"><thead>
         <tr>
         ${canEd?'<th rowspan="2" style="width:24px"></th>':''}
@@ -1992,6 +1993,7 @@ SCREEN.coopquote=(host)=>{
       const tag=(st.vendor||'전체')+(st.ym?'_'+st.ym:'')+(st.activeOnly?'_현재납품':'');
       dlCSV('협력사견적_'+tag+'.csv',hd,rows);};
     g('#cq-vendor').onchange=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
+    {const _g=host.querySelector('#cq-grid'); if(_g){ if(st._scroll!=null)_g.scrollTop=st._scroll; _g.onscroll=()=>{st._scroll=_g.scrollTop;}; }}  // 상세 열고닫아도 리스트 스크롤 유지
     {const cy=g('#cq-ym');if(cy)cy.onchange=()=>{st.ym=cy.value;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};}
     g('#cq-q').onkeyup=e=>{if(e.key==='Enter')g('#cq-go').click();};
     // 메인 컬럼 더블클릭 정렬 (토글 asc/desc). 차이(신) 정렬=손익 이상치 찾기
