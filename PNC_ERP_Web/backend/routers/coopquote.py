@@ -171,21 +171,24 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
             mc = matcost.get(au)
             if mc and mc[1] is not None:
-                mat_before = round(mc[0], 2) if mc[0] is not None else round(r["mat_cost"], 2)
                 mat_after = round(mc[1], 2)
+                # 인상전: 종전 데이터 없으면(신규 품목) None → 인상전·손익 비교 안 함
+                mat_before = round(mc[0], 2) if mc[0] is not None else None
             else:
-                mat_before = round(r["mat_cost"], 2); mat_after = round(r["mat_cost"], 2)  # 미계산 폴백(견적값)
+                mat_after = round(r["mat_cost"], 2); mat_before = round(r["mat_cost"], 2)  # 미계산 폴백(견적값)
+            is_new = (mat_before is None)   # 신규 품목(종전 견적 없음)
+            r["is_new"] = is_new
             r["mat_before"] = mat_before; r["mat_after"] = mat_after
             r["mat_now"] = mat_after   # 모달 재료비(현재·인상후) 호환
-            # 입고가 = 인상전 종전입고가 · 인상후 현재입고가
-            r["incost_before"] = prev_in; r["incost_after"] = cur_in
+            # 입고가 = 인상전 종전입고가 · 인상후 현재입고가 (신규는 인상전 숨김)
+            r["incost_before"] = (None if is_new else prev_in); r["incost_after"] = cur_in
             # 총가공비 = 입고가 − 재료비
-            r["proc_before"] = (round(prev_in - mat_before, 2) if prev_in is not None else None)
+            r["proc_before"] = (round(prev_in - mat_before, 2) if (prev_in is not None and not is_new) else None)
             r["proc_after"] = (round(cur_in - mat_after, 2) if cur_in is not None else None)
             # 재료비율 = 재료비 / 입고가
-            r["ratio_before"] = (round(mat_before / prev_in * 100, 1) if (prev_in and prev_in > 0) else None)
+            r["ratio_before"] = (round(mat_before / prev_in * 100, 1) if (not is_new and prev_in and prev_in > 0) else None)
             r["ratio_after"] = (round(mat_after / cur_in * 100, 1) if (cur_in and cur_in > 0) else None)
-            # 차이(신) = 인상후 총가공비 − 인상전 총가공비 (재료 인상이 입고가에 정상반영되면 ≈0)
+            # 차이(신) = 인상후 총가공비 − 인상전 총가공비 (신규는 비교 안 함)
             r["diff_new"] = (round(r["proc_after"] - r["proc_before"], 2)
                              if (r["proc_after"] is not None and r["proc_before"] is not None) else None)
         if active_only:

@@ -51,8 +51,8 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         w = ["1=1"]; p = []
         d6f = _d6(from_ymd) if from_ymd else None
         d6t = _d6(to_ymd) if to_ymd else None
-        # 일자매트릭스=part_plan_ymd(당김반영). 조회범위도 part_plan_ymd 기준(레거시 as_to_ymd).
-        if d6f: w.append("pp.part_plan_ymd>=?"); p.append(d6f)
+        # 일자매트릭스=part_plan_ymd(당김반영, 레거시 as_to_ymd 기준). 레거시 040_t1: part_plan_ymd<=as_to_ymd(하한없음),
+        # 첫 컬럼(기준일)=part_plan_ymd<=as_from_ymd 누적(과거 미착수분 포함).
         if d6t: w.append("pp.part_plan_ymd<=?"); p.append(d6t)
         if wc.strip():   w.append("pp.mat_work_center_code=?"); p.append(wc.strip())
         if part.strip(): w.append("pp.mat_code LIKE ?"); p.append(f"%{part.strip()}%")
@@ -60,7 +60,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         if line.strip(): w.append("pp.line_no=?"); p.append(line.strip())
         if gubun == "외주":   w.append("(pp.work_code IS NULL OR pp.work_code='')")   # 거래처(협력사)만
         elif gubun == "자체": w.append("pp.work_code>''")                              # 내부공정(P1/P2)
-        CAP = 6000
+        CAP = 8000
         cur.execute(f"""SELECT TOP {CAP} pp.part_plan_ymd, pp.mat_work_center_code,
               COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.mat_work_center_code) wcnm,
               pp.split_work_order wo, pp.assy_item_code, pp.mat_code, ISNULL(i.ITEM_DESC,'') nm,
@@ -76,7 +76,23 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             ORDER BY wcnm, pp.split_work_order, pp.mat_code""", *p)
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
         capped = len(raw) >= CAP
-        dates = sorted({r["part_plan_ymd"] for r in raw if r["part_plan_ymd"]})
+        # 레거시 040_t1: 첫 컬럼=기준일(part_plan_ymd<=as_from_ymd 누적), 이후 기준일+1..기준일+30(캘린더일).
+        base = d6f or (min((r["part_plan_ymd"] for r in raw if r["part_plan_ymd"]), default=None))
+        def _bucket(ppy):
+            return base if (base and ppy and ppy <= base) else ppy
+        # 레거시 041_t1: 기준일 + 캘린더일 연속전개(빈 일자컬럼 포함). base..d6t 연속.
+        dates = sorted({_bucket(r["part_plan_ymd"]) for r in raw if r["part_plan_ymd"]})
+        if base and d6t:
+            import datetime as _dt
+            try:
+                cu = _dt.date(2000+int(base[:2]), int(base[2:4]), int(base[4:6]))
+                end = _dt.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))
+                allc = []
+                while cu <= end and len(allc) < 45:
+                    allc.append(cu.strftime('%y%m%d')); cu += _dt.timedelta(days=1)
+                dates = sorted(set(dates) | set(allc))
+            except Exception:
+                pass
         keyed = {}
         for r in raw:
             k = (r["mat_work_center_code"], r["wo"], r["assy_item_code"], r["mat_code"])
@@ -86,12 +102,20 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                      "part": r["mat_code"], "nm": r["nm"], "line": r["line"], "model": "",
                      "sagub": (str(r["matflag"] or "") == "2"), "days": {}, "tot": 0}
                 keyed[k] = g
-            q = float(r["q"] or 0); g["days"][r["part_plan_ymd"]] = g["days"].get(r["part_plan_ymd"], 0) + q; g["tot"] += q
+            d = _bucket(r["part_plan_ymd"]); q = float(r["q"] or 0)
+            g["days"][d] = g["days"].get(d, 0) + q; g["tot"] += q
         rows = sorted(keyed.values(), key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
-        note = (f"⚠ 결과 상위 {CAP}건만 표시 — 자도번작업처/제번/자도번으로 좁히세요." if capped else "") + \
-               " · 레거시 라이브(PR_T_PLAN_PART_MAT, 당김반영) 직독"
-        return {"dates": dates, "rows": rows, "cnt": len(rows),
-                "sum_qty": sum(float(r["q"] or 0) for r in raw), "note": note.strip(" ·")}
+        # 헤더 총계는 CAP 무관 정확값(별도 집계). 그리드는 CAP까지만.
+        cur.execute(f"""SELECT SUM(CAST(part_plan_qty AS float)),
+              COUNT(*) FROM (SELECT part_plan_ymd, mat_work_center_code, split_work_order, assy_item_code, mat_code,
+                 SUM(CAST(part_plan_qty AS float)) part_plan_qty
+              FROM PR_T_PLAN_PART_MAT pp WHERE {' AND '.join(w)}
+              GROUP BY part_plan_ymd, mat_work_center_code, split_work_order, assy_item_code, mat_code) z""", *p)
+        _tot = cur.fetchone(); tot_qty = float(_tot[0] or 0); tot_cnt = int(_tot[1] or 0)
+        note = (f"⚠ 그리드는 상위 {CAP}행만 표시(총 {tot_cnt:,}행) — 자도번작업처/제번/자도번으로 좁히세요. " if capped else "") + \
+               "레거시 라이브(PR_T_PLAN_PART_MAT, 당김반영) 직독"
+        return {"dates": dates, "rows": rows, "cnt": (tot_cnt if capped else len(rows)),
+                "sum_qty": tot_qty, "note": note.strip()}
     finally:
         cn.close()
 
