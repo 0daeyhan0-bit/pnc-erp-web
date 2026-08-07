@@ -42,7 +42,7 @@ SCREEN.matinout=(c)=>{
      <label class="tl">조회기간</label><input type="date" class="inp" id="dfrom" value="${m1Iso()}" style="min-width:130px"> ~ <input type="date" class="inp" id="dto" value="${todayIso()}" style="min-width:130px">
      <label class="tl">재고창고</label><select class="sel" id="whcust"><option value="Z99990">피앤씨창고</option></select>
      <label class="tl">파트창고</label><select class="sel" id="partwh"><option value="IS0001">자재창고</option><option value="IS0002">부자재창고(미키팅)</option></select>
-     <input class="inp" id="q" placeholder="자도번/품명 입력"><input class="inp" id="qcust" placeholder="거래처 입력"><select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
+     <input class="inp" id="q" placeholder="자도번/품명 (Enter=서버조회)"><input class="inp" id="qcust" placeholder="거래처 입력"><select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -87,7 +87,7 @@ SCREEN.matinout=(c)=>{
   };
   c.querySelector('#go').onclick=()=>load();
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
-  c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();else renderLeft();};
+  c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')load();else renderLeft();};   // ★Enter=서버 스코프 조회(기간 무관 빠름), 그외=로드된 데이터 클라 필터
   c.querySelector('#qcust').onkeyup=()=>renderLeft();
   c.querySelector('#gubun').onchange=renderLeft;
   c.querySelector('#dfrom').onchange=()=>load();
@@ -1044,7 +1044,7 @@ SCREEN.manorder=(c)=>{
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">🛒 수동발주 <span style="font-size:12px;color:var(--muted);font-weight:400">매입처 선택 → 발주계산(추가발주 조정) + 협력사 일자별 계획 → 발주서</span></div>
-     <div class="page-sub">좌: 생산계획(월) 대비 현재고·기발주 반영 추가발주(직접 조정 가능) · 우: 그 매입처 협력사 일자별 계획(한달). 🔴 라이브 (계획 <code>PR_T_PLAN_ITEM_DTL</code>·편성 <code>nx.plan_part_mat</code>·재고 <code>PU_T_MONTH_STOCK_WH</code>)</div>
+     <div class="page-sub">좌: 생산계획(월) 대비 현재고·기발주 반영 추가발주(직접 조정 가능) · 우: 그 매입처 협력사 일자별 계획(한달). 조달 프로파일 배분(<code>nx.sourcing_profile</code>)·발주업체지정(<code>nx.order_vendor</code>)이 설정된 품목은 <b>이 매입처 몫</b>만 계상(미설정=현행 100%). 🔴 라이브 (계획 <code>PR_T_PLAN_ITEM_DTL</code>·재고 <code>PU_T_MONTH_STOCK_WH</code>)</div>
      <div class="toolbar">
        <label class="tl">매입처</label><input class="inp" id="mo-vq" value="${esc(vq)}" placeholder="업체명/코드 입력" style="width:200px"><button class="btn" id="mo-vsearch">🔍 검색</button>
        ${vendor?`<span style="margin-left:8px;font-weight:700;color:#1c47a0">✔ ${esc(vendor.nm)} (${esc(vendor.cc)})</span> <button class="btn ghost" id="mo-clear">✖ 변경</button>`:''}
@@ -1065,7 +1065,7 @@ SCREEN.manorder=(c)=>{
            <div class="grid-wrap" id="mo-lwrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
            <table class="tbl fit" id="mo-ltbl" style="font-size:12px"><thead><tr><th class="center" style="width:34px">No</th><th class="center" style="width:32px"><input type="checkbox" id="mo-all" checked title="전체선택"></th><th>품목</th><th>품명</th><th class="num" style="white-space:nowrap">계획수량<br><span style="color:#c0392b;font-size:10px" title="발주 리드타임 — 이 일수 이내 계획분은 발주로 못 바꾸므로 차감(기본 2주)">반영 <input class="inp" id="mo-lead" type="number" min="0" max="365" value="${lead}" style="width:36px;min-width:36px;text-align:right;padding:1px 3px;border-color:#c0392b;color:#c0392b">일</span></th><th class="num">기발주</th><th class="num">현재고</th><th class="num" style="white-space:nowrap">여유분<br><input class="inp" id="mo-buf" type="number" min="0" max="999" value="${buf}" style="width:40px;min-width:40px;text-align:right;padding:2px 4px">%</th><th class="num">추가발주</th></tr></thead>
            <tbody>${loading?spinRow(9):(items.length?items.map((it,i)=>{const a=ord(it);return `<tr><td class="center mut">${i+1}</td><td class="center"><input type="checkbox" class="mo-ck" data-ic="${esc(it.ic)}" ${a>0?'checked':''}></td><td><b>${esc(it.ic)}</b></td><td class="bcap" title="${esc(it.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm)}</td>
-             <td class="num" title="반영 ${lead}일치 계획 ${nf(adjPlan(it))} (월 전체계획 ${nf(it.plan_qty)})">${nf(adjPlan(it))}${adjPlan(it)!==(+it.plan_qty||0)?`<br><span style="color:#8aa0bd;font-size:10px">/${nf(it.plan_qty)}</span>`:''}</td><td class="num">${nf(it.po_qty)}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="color:#8aa0bd">${nf(bufQty(it))}</td>
+             <td class="num" title="반영 ${lead}일치 계획 ${nf(adjPlan(it))} (월 전체계획 ${nf(it.plan_qty)})${it.alloc_note?' · '+it.alloc_note:''}">${nf(adjPlan(it))}${adjPlan(it)!==(+it.plan_qty||0)?`<br><span style="color:#8aa0bd;font-size:10px">/${nf(it.plan_qty)}</span>`:''}${it.alloc_note?`<br><span style="color:#7a4ca0;font-size:10px" title="조달 프로파일 배분/발주업체지정 적용 — 이 매입처 몫만 계상">${esc(it.alloc_note)}</span>`:''}</td><td class="num">${nf(it.po_qty)}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="color:#8aa0bd">${nf(bufQty(it))}</td>
              <td class="num"><input class="mo-add" data-ic="${esc(it.ic)}" type="number" min="0" value="${a}" style="width:74px;text-align:right;font-weight:700;color:#1c7c3a"></td></tr>`;}).join(''):`<tr><td colspan="9" class="empty">품목 없음</td></tr>`)}</tbody></table></div>
          </div>
          <div style="flex:1;min-width:0">

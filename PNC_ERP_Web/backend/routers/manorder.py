@@ -36,8 +36,48 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
             from6, to6 = y + "01", y + "99"
         cur.execute("SELECT MAX(STOCK_YYMM) FROM PU_T_MONTH_STOCK_WH")
         smax = cur.fetchone()[0]
+        # ── 조달 프로파일 배분(후보내 업체 배분, nx.sourcing_profile) + 발주업체 지정(nx.order_vendor) 적용 ──
+        #   ★이 매입처(cc)의 발주 몫 = 소요 × 배분율. 배분 미설정/단일=100%(현행 그대로 → 회귀0).
+        #   배분 설정된 품목은 이 매입처 몫만 계상(다른 매입처 몫은 그 매입처 선택 시 계상).
+        #   route_alloc(후보간 R01/R02 배분)은 어떤 소요엔진(plan_mat_source·autoorder)에도 아직 미적용(_schema §6 '추후 도입')
+        #     → 정합 위해 여기서도 미곱함(곱하면 자동발주와 수량 불일치). sourcing_profile(업체) 계층만 적용.
+        wdate = f"20{from6[0:2]}-{from6[2:4]}-{from6[4:6]}"     # 배분 유효일자 판정(계획 윈도우 시작일)
+        prof = {}   # item -> [(vendor, ratio)] 활성·비내부·업체지정·유효
+        ovr = {}    # item -> vendor  (order_vendor 발주업체 지정 override)
+        nxn = _nx(); ncur = nxn.cursor()
+        try:
+            ncur.execute("""SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))), ISNULL(alloc_ratio,100),
+                  CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23)
+                FROM nx.sourcing_profile WHERE is_active=1 AND is_internal=0 AND ISNULL(vendor_code,'')<>''""")
+            for ic, vc, al, af, at in ncur.fetchall():
+                if af and af > wdate: continue
+                if at and at < wdate: continue
+                prof.setdefault(str(ic).strip(), []).append((str(vc).strip(), float(al or 0)))
+            try:
+                ncur.execute("IF OBJECT_ID('nx.order_vendor','U') IS NULL SELECT 1 WHERE 1=0")
+                ncur.execute("SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) FROM nx.order_vendor WHERE ISNULL(vendor_code,'')<>''")
+                for ic, vc in ncur.fetchall(): ovr[str(ic).strip()] = str(vc).strip()
+            except Exception:
+                pass
+        finally:
+            nxn.close()
+        def _share(ic):
+            """이 매입처(cc)의 배분율(0~100). override > 프로파일 > 현행100(미설정)."""
+            ic = str(ic).strip()
+            if ic in ovr:
+                return 100.0 if ovr[ic] == cc else 0.0
+            ps = prof.get(ic)
+            if ps:
+                return sum(r for (v, r) in ps if v == cc)   # cc 몫(cc 미포함이면 0 = 이 매입처 발주 아님)
+            return 100.0
+        # cc가 프로파일/override 대상인 품목(마스터 IN_CUST≠cc여도 노출) → 다중 매입처 커버
+        extra = sorted({ic for ic, ps in prof.items() if any(v == cc for (v, r) in ps)} |
+                       {ic for ic, v in ovr.items() if v == cc})
+        eph = ",".join("?" * len(extra)) if extra else ""
+        or_main = f" OR M.ITEM_CODE IN ({eph})" if extra else ""
+        or_itm = f" OR ITEM_CODE IN ({eph})" if extra else ""
         # 계획수량: 부품 접미사 제거한 부모 도번 기준(부모별 1회 집계 후 조인=고속). 기발주=PU_T_PURCHASE_DTL 미입고잔량.
-        cur.execute("""
+        cur.execute(f"""
           WITH PLANP AS (
             SELECT LEFT(C_ITEM_CODE, CASE WHEN CHARINDEX('-',C_ITEM_CODE)>0 THEN CHARINDEX('-',C_ITEM_CODE)-1 ELSE LEN(C_ITEM_CODE) END) parent, SUM(PLAN_QTY) pq
             FROM PR_T_PLAN_ITEM_DTL WHERE PLAN_YMD BETWEEN ? AND ?
@@ -50,23 +90,23 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
           LEFT JOIN (SELECT ITEM_CODE, SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0)) remain
              FROM PU_T_PURCHASE_DTL WHERE CUST_CODE=? AND ISNULL(IN_FINISH_FLAG,'N')<>'Y'
              GROUP BY ITEM_CODE HAVING SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0))>0) PO ON PO.ITEM_CODE=M.ITEM_CODE
-          WHERE M.IN_CUST_CODE=? AND ISNULL(M.ITEM_STATUS,'1') IN ('1','2')
-          ORDER BY ISNULL(PP.pq,0) DESC, M.ITEM_CODE""", from6, to6, smax, cc, cc)
+          WHERE (M.IN_CUST_CODE=?{or_main}) AND ISNULL(M.ITEM_STATUS,'1') IN ('1','2')
+          ORDER BY ISNULL(PP.pq,0) DESC, M.ITEM_CODE""", from6, to6, smax, cc, cc, *extra)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
             r["plan_qty"] = float(r["plan_qty"] or 0); r["stock_qty"] = float(r["stock_qty"] or 0)
             r["po_qty"] = float(r["po_qty"] or 0)  # 기발주 = PU_T_PURCHASE_DTL 미입고 발주잔량
         # ★우측 협력사 일자별 계획 = 좌측과 동일 소스(PR_T_PLAN_ITEM_DTL). 부모 도번별 PLAN_YMD 분포 → 일자별 합 = 좌측 계획수량.
-        cur.execute("""
+        cur.execute(f"""
           WITH ITM AS (SELECT DISTINCT LEFT(ITEM_CODE, CASE WHEN CHARINDEX('-',ITEM_CODE)>0 THEN CHARINDEX('-',ITEM_CODE)-1 ELSE LEN(ITEM_CODE) END) parent
-                       FROM PR_M_ITEM WHERE IN_CUST_CODE=? AND ISNULL(ITEM_STATUS,'1') IN ('1','2'))
+                       FROM PR_M_ITEM WHERE (IN_CUST_CODE=?{or_itm}) AND ISNULL(ITEM_STATUS,'1') IN ('1','2'))
           SELECT LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END) parent,
                  D.PLAN_YMD ymd, SUM(D.PLAN_QTY) pq
           FROM PR_T_PLAN_ITEM_DTL D
           JOIN ITM ON ITM.parent = LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END)
           WHERE D.PLAN_YMD BETWEEN ? AND ?
-          GROUP BY LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END), D.PLAN_YMD""", cc, from6, to6)
+          GROUP BY LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END), D.PLAN_YMD""", cc, *extra, from6, to6)
         daily = {}; dset = set()
         for pr, ymd, pq in cur.fetchall():
             ymd = str(ymd).strip(); dset.add(ymd)
@@ -74,8 +114,24 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         dates = sorted(dset)
         def _par(ic):
             ic = str(ic or ""); i = ic.find("-"); return ic[:i] if i > 0 else ic
+        # ── 이 매입처(cc) 배분율 적용: 계획수량·일자별을 이 매입처 몫으로 스케일(배분율<100=badge, 0=제외) ──
+        #   재고/기발주는 미스케일: po_qty는 이미 CUST_CODE=cc 스코프, stock_qty는 물리재고(업체분할 규칙 없음→현행유지).
+        out = []
         for r in rows:
             r["days"] = daily.get(_par(r["ic"]), {})
+            ratio = _share(r["ic"])
+            if ratio <= 0:
+                continue                        # 이 매입처 발주 아님(배분/발주업체지정에서 제외)
+            ic = str(r["ic"]).strip()
+            r["alloc_ratio"] = round(ratio, 4)
+            r["alloc_note"] = ("발주업체지정" if ic in ovr else
+                               (f"배분 {ratio:g}%" if (ratio != 100.0 or len(prof.get(ic, [])) > 1) else ""))
+            if ratio != 100.0:
+                f = ratio / 100.0
+                r["plan_qty"] = round(r["plan_qty"] * f, 3)
+                r["days"] = {d: round(q * f, 3) for d, q in (r["days"] or {}).items()}
+            out.append(r)
+        rows = out
         cn2 = _conn(); c2 = cn2.cursor()
         try:
             c2.execute("SELECT CUST_DESC FROM CM_M_CUST WHERE CUST_CODE=?", cc)
