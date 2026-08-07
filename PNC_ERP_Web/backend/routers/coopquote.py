@@ -179,6 +179,9 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             else:
                 mat_after = round(r["mat_cost"], 2); mat_before = round(r["mat_cost"], 2)  # 미계산 폴백(견적값)
             is_new = (mat_before is None)   # 신규 품목(종전 견적 없음)
+            # ★올해 납품 시작 품목(종전=가단가/초기가): 종전 가공비 음수(종전재료비>종전판가)면 인상전 무의미 → 숨김(신규 취급)
+            if not is_new and prev_in is not None and (prev_in - mat_before) < 0:
+                is_new = True
             r["is_new"] = is_new
             r["mat_before"] = mat_before; r["mat_after"] = mat_after
             r["mat_now"] = mat_after   # 모달 재료비(현재·인상후) 호환
