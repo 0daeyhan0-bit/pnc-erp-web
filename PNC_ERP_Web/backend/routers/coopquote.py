@@ -651,9 +651,11 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             b_t = _thick_std(b_d, rci.get("thick", 0), rci.get("metal", ""))
             b_uw = geom(b_d, b_t, b_l)
             b_sg = cur_sagub_val
+            b_pt = partmap.get(item.upper())   # 저장된 견적 재료비(종전=견적서 원소재비, 예 409)
+            b_mbef = (round(b_pt["mat"]) if (b_pt and b_pt.get("mat")) else (round(b_uw * sagub_q) if sagub_q > 0 else round(b_uw * b_sg)))
             rows.append({
-                "mat_now": round(b_uw * b_sg), "mat_before": (round(b_uw * sagub_q) if sagub_q > 0 else round(b_uw * b_sg)),
-                "sale_price": None, "part_total": None, "part_mat": None,
+                "mat_now": round(b_uw * b_sg), "mat_before": b_mbef,
+                "sale_price": None, "part_total": (round(b_pt["total"]) if (b_pt and b_pt.get("total")) else None), "part_mat": (round(b_pt["mat"]) if (b_pt and b_pt.get("mat")) else None),
                 "level": 1, "code": item, "name": rci.get("nm", ""), "role": "제작동관",
                 "use_qty": 1, "cum_qty": 1.0, "sagub": False,
                 "lg_diam": rci.get("diam", 0), "lg_thick": rci.get("thick", 0), "lg_length": rci.get("length", 0),
