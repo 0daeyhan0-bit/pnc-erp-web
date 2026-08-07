@@ -130,6 +130,8 @@ from routers import dtrade as _r_dtrade
 app.include_router(_r_dtrade.router)
 from routers import coopquote as _r_coopquote
 app.include_router(_r_coopquote.router)
+from routers import coopquote2 as _r_coopquote2
+app.include_router(_r_coopquote2.router)
 from routers import stockval as _r_stockval
 app.include_router(_r_stockval.router)
 from routers import basemaster as _r_basemaster
