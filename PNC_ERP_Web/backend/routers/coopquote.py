@@ -309,6 +309,16 @@ def coopquote_recalc(payload: dict = Body(...)):
 _VENDOR2CODE = {'대원산업': '2148', '미래정밀': '2096', '명진산업': '2306', '중앙정밀': '2048',
                 '이젠터': '2068', '케이비': '2266', '세광산업': '2142', '썬텍코리아': '233', '썬텍': '233'}
 
+# 관경(외경)별 협의 표준두께(견적서 실측). 고강도=BOM두께 예외, 소경(2.6/3.2=0.7·4.0=0.6)=높은값 통일.
+_THICK_STD = {2.6: 0.7, 3.2: 0.7, 4.0: 0.6, 4.75: 0.65, 4.76: 0.65, 5.0: 0.65, 6.35: 0.65, 7.0: 0.65,
+              7.94: 0.65, 9.52: 0.65, 12.7: 0.75, 15.88: 0.95, 19.05: 0.95, 22.2: 1.15, 22.22: 1.15,
+              25.4: 1.15, 28.0: 1.15, 31.75: 1.25}
+def _thick_std(diam, lg_thick, metal=""):
+    """협의 표준두께: 고강도는 BOM두께 그대로, 그외 관경 표준(미등록=BOM두께)."""
+    if metal == "고강도":
+        return lg_thick
+    return _THICK_STD.get(round(float(diam or 0), 2), lg_thick)
+
 @router.get("/api/coopquote/bom-form")
 def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendor: str = Query(""),
                        ym: str = Query("", description="적용월 YYMM|YYYYMM(사급가=판매단가 as-of)")):
@@ -493,8 +503,9 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         u = code.upper()
         if haskids: return "반제품"
         if u.startswith("RAC") or u.startswith("BCUP"): return "용접봉"
-        if sag == "1": return "사급"
+        # ★동 파이프(CU/고강도)는 조달방식 무관 항상 우리 동관 사급 → 사급플래그보다 우선
         if metal in ("CU", "고강도"): return "제작동관"
+        if sag == "1": return "사급"
         return "매입부품"
 
     rows = []; need = 0
@@ -508,11 +519,16 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             role = role_of(ch, e["sag"], ci.get("metal", ""), haskids)
             cq = cumq * e["q"]
             cs = coop.get(ch.upper()); uw = 0.0; src = ""
+            pf_d = pf_t = pf_l = 0.0   # 협의 프리필 치수(협력사스펙 없을 때 BOM+협의두께)
             if cs and (cs["uw"] > 0 or (cs["diam"] and cs["thick"] and cs["length"])):
                 uw = cs["uw"] if cs["uw"] > 0 else geom(cs["diam"], cs["thick"], cs["length"]); src = "협력사"
-            elif role == "제작동관" and ci.get("diam") and ci.get("thick") and ci.get("length"):
-                uw = geom(ci["diam"], ci["thick"], ci["length"]); src = "LG참고"
-            need_input = (role == "제작동관" and not (cs and (cs["uw"] > 0 or (cs["diam"] and cs["thick"]))))
+                pf_d, pf_t, pf_l = cs["diam"], cs["thick"], cs["length"]
+            elif role == "제작동관" and ci.get("diam") and ci.get("length"):
+                # ★협력사스펙 없어도 BOM 외경/길이 + 협의두께규칙으로 프리필(직원 편집 가능)
+                pf_d = ci["diam"]; pf_l = ci["length"]
+                pf_t = _thick_std(pf_d, ci.get("thick", 0), ci.get("metal", ""))
+                uw = geom(pf_d, pf_t, pf_l); src = "BOM+협의두께"
+            need_input = (role == "제작동관" and uw <= 0)
             pp = pur.get(ch.upper(), None)
             # 용접봉 재료비 = ★견적 기준(현 BOM 소요×단가 무시=우리기준). 코드매치분만; 미매치는 walk후 견적잔여 배분
             weld_cost = round(weld_quote[ch.upper()]) if (role == "용접봉" and ch.upper() in weld_quote) else 0
@@ -556,8 +572,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 "level": lvl, "code": ch, "name": ci.get("nm", ""), "role": role,
                 "use_qty": e["q"], "cum_qty": round(cq, 5), "sagub": e["sag"] == "1",
                 "lg_diam": ci.get("diam", 0), "lg_thick": ci.get("thick", 0), "lg_length": ci.get("length", 0),
-                "coop_diam": (cs["diam"] if cs else 0), "coop_thick": (cs["thick"] if cs else 0),
-                "coop_length": (cs["length"] if cs else 0), "coop_sagub": eff_sagub,
+                "coop_diam": (cs["diam"] if cs else pf_d), "coop_thick": (cs["thick"] if cs else pf_t),
+                "coop_length": (cs["length"] if cs else pf_l), "coop_sagub": eff_sagub,
                 "unit_weight": uw, "weight_src": src, "soyo_weight": round(uw*cq, 5),
                 "pur_price": pp, "weld_cost": weld_cost, "is_proc": role == "용접봉",
                 "procs": procs, "proc_cost": proc_cost,
