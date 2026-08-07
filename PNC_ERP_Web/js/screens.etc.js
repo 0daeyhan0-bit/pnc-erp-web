@@ -340,6 +340,15 @@ SCREEN.deliv420=(c)=>{
   const ST={"00":"요청","10":"발행","90":"발행완료"}, STC={"00":"#8aa0bd","10":"#2e86de","90":"#27ae60"};
   let F={cust:'',from:iso(T),days:5,item:'',part:'',sort:'doban',deliv:{},pack:{},serial:{},heat:{},chk:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, busy=false, msg='';
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
+  // ── 스티커/프린터 설정(localStorage 저장) — 레거시 스티커설정=라벨규격·프린터설정=프린터선택 대응 ──
+  const LBLKEY='deliv420_label';
+  const LBL=Object.assign({w:100,h:50,copies:1,printer:'(브라우저 인쇄 대화상자에서 선택)'},
+    (()=>{try{return JSON.parse(localStorage.getItem(LBLKEY)||'{}');}catch(e){return {};}})());
+  const saveLbl=()=>{try{localStorage.setItem(LBLKEY,JSON.stringify(LBL));}catch(e){}};
+  const fetchInvoice=async(bc)=>{
+    const r=await fetch(`${API}/api/partner/deliv420/invoice?barcode=${encodeURIComponent(bc)}`);
+    if(!r.ok){let m='발행 명세 조회 실패';try{m=(await r.json()).detail||m;}catch(e){}throw new Error(m);}
+    return r.json();};
   const loadCusts=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);custs=(await r.json()).rows||[];}catch(e){custs=[];}};
   const load=async()=>{
     if(loading)return;                              // 중복요청 가드
@@ -362,12 +371,113 @@ SCREEN.deliv420=(c)=>{
       const rr=await(await fetch(`${API}/api/partner/deliv420/issue`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),items,preview:0})})).json();
       if(!rr.ok){alert(rr.msg||'발행 실패');return;}
       alert(`발행 완료 · 바코드 ${rr.barcode} · ${rr.count}건 · 납품 ${nf(rr.total_qty)}\n(nx.deliv_issue 기록)`);
+      // ★발행 후 자동 팝업 — 거래명세표 + 스티커 라벨(레거시 ue_save 후 인쇄 흐름)
+      if(rr.barcode){try{const iv=await fetchInvoice(rr.barcode);openDelivInvoice(iv);openSticker(iv);}
+        catch(e){alert('발행은 완료됐으나 인쇄 팝업 실패: '+e.message+'\n[거래명세표]/[스티커] 버튼으로 발행번호 '+rr.barcode+' 재출력 가능합니다.');}}
       await load();
     }catch(e){alert('발행 오류: '+e.message);}finally{busy=false;}
   };
   const cancelIssue=async()=>{const bc=prompt('발행취소할 바코드 번호를 입력하세요');if(!bc)return;
     try{const rr=await(await fetch(`${API}/api/partner/deliv420/cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:bc.trim()})})).json();
       alert(rr.ok?`취소 ${rr.cancelled}건`:(rr.msg||'실패'));await load();}catch(e){alert('오류: '+e.message);}};
+  // ── 거래명세표 인쇄 (레거시 dw_pr_outside_020_p1 서식 · 공급자=협력사/공급받는자=당사 · SET바코드 Code39) ──
+  const openDelivInvoice=(iv)=>{
+    if(!iv||!iv.rows||!iv.rows.length)return alert('발행 명세가 없습니다.');
+    const bc=_barcodeDataURL(iv.code);          // Code39: *SET+발행번호*
+    const party=p=>`<table class="pt"><tr><td class="k">등록번호</td><td>${esc(p.biz)}</td></tr><tr><td class="k">상 호</td><td>${esc(p.nm)}</td></tr><tr><td class="k">대 표 자</td><td>${esc(p.owner)}</td></tr><tr><td class="k">주 소</td><td>${esc(p.addr)}</td></tr><tr><td class="k">업태/종목</td><td>${esc((p.btype||'')+(p.bkind?' / '+p.bkind:''))}</td></tr><tr><td class="k">TEL</td><td>${esc(p.tel)}</td></tr></table>`;
+    const items=iv.rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.doban)}</td><td class="l">${esc(x.nm)}</td><td class="l">${esc(x.spec)}</td><td class="r">${nf(x.qty)}</td><td>${esc(x.unit)}</td><td>${esc(x.serial)}</td><td>${esc(x.heat)}</td></tr>`).join('');
+    const copy=title=>`<div class="cp"><div class="tt">거 래 명 세 표</div><div class="sb">(${title} 보관용)</div>
+      <div class="mt"><span>발행일자 : ${esc(iv.ymd)}</span><span>발행번호 : ${esc(iv.barcode)}</span><span>PAGE:1/1</span></div>
+      <table class="pi"><tr><td class="vl">공급자</td><td>${party(iv.supplier)}</td><td class="vl">공급<br>받는자</td><td>${party(iv.buyer)}</td></tr></table>
+      <table class="it"><thead><tr><th>No.</th><th>도번(P/No.)</th><th>품명</th><th>규격</th><th>수량</th><th>단위</th><th>SERIAL-NO</th><th>HEAT-NO</th></tr></thead>
+      <tbody>${items}<tr class="tot"><td colspan="4" class="r">합 계</td><td class="r">${nf(iv.total)}</td><td colspan="3"></td></tr></tbody></table>
+      <div class="ft"><div class="bc"><img src="${bc}"><div class="bt">${esc(iv.barcode)}</div></div>
+        <table class="sp"><tr><td>인수자</td><td>담당자</td></tr><tr><td class="bx"></td><td class="bx"></td></tr></table></div></div>`;
+    const w=window.open('','_blank','width=1240,height=900');
+    if(!w)return alert('팝업 차단됨 — 팝업 허용 후 다시 시도하세요.');
+    w.document.write(`<html><head><title>거래명세표 ${esc(iv.barcode)}</title><meta charset="utf-8"><style>
+      body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;margin:8px;font-size:11px;color:#000}
+      .wrap{display:flex;gap:10px}.cp{flex:1;border:1.5px solid #000;padding:6px}
+      .tt{text-align:center;font-size:20px;font-weight:700;letter-spacing:5px}.sb{text-align:center;font-size:12px;margin:1px 0 3px}
+      .mt{display:flex;justify-content:space-between;font-size:11px;margin:2px 0}
+      table{border-collapse:collapse;width:100%}.pi td{border:1px solid #000;padding:1px 3px;vertical-align:middle}
+      .vl{width:16px;text-align:center;font-weight:700;background:#f2f2f2;font-size:10px;line-height:1.1}
+      .pt{border:none}.pt td{border:none;padding:1px 3px}.pt .k{width:60px;background:#f7f7f7;font-weight:600;white-space:nowrap}
+      .it th,.it td{border:1px solid #000;padding:2px 4px;text-align:center}.it .l{text-align:left}.it .r{text-align:right}
+      .it thead th{background:#eaeaea}.tot td{font-weight:700;background:#f7f7f7}
+      .ft{display:flex;justify-content:space-between;align-items:flex-end;margin-top:6px}
+      .bc img{height:56px;display:block}.bt{font-family:monospace;font-size:13px;font-weight:700;margin-top:2px}
+      .sp{width:210px}.sp td{border:1px solid #000;text-align:center;padding:2px}.sp .bx{height:40px}
+      @media print{.noprint{display:none}}</style></head>
+      <body><div class="noprint" style="margin-bottom:6px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button></div>
+      <div class="wrap">${copy('공급자')}${copy('공급받는자')}</div></body></html>`);
+    w.document.close();
+  };
+  // ── 스티커(라벨) 인쇄 — 도번당 1매(설정 매수만큼) · 필드: 거래처·발행일자·도번·품명·규격·수량·SERIAL·HEAT·발행번호 + Code39 바코드 ──
+  const openSticker=(iv)=>{
+    if(!iv||!iv.rows||!iv.rows.length)return alert('발행 명세가 없습니다.');
+    const bc=_barcodeDataURL(iv.code);
+    const cp=Math.max(1,Math.min(20,+LBL.copies||1));
+    const labels=[];iv.rows.forEach(x=>{for(let k=0;k<cp;k++)labels.push(x);});
+    const cell=x=>`<div class="lbl">
+      <div class="hd"><span class="cu">${esc(iv.custnm)}</span><span class="dt">${esc(iv.ymd)}</span></div>
+      <div class="do">${esc(x.doban)}</div>
+      <div class="nm" title="${esc(x.nm)}">${esc(x.nm)}${x.spec?' · '+esc(x.spec):''}</div>
+      <div class="rw"><span>수량 <b>${nf(x.qty)}</b> ${esc(x.unit)}</span><span>발행번호 ${esc(iv.raw)}</span></div>
+      <div class="rw"><span>SERIAL ${esc(x.serial||'-')}</span><span>HEAT ${esc(x.heat||'-')}</span></div>
+      <div class="bc"><img src="${bc}"><div class="bt">${esc(iv.barcode)}</div></div></div>`;
+    const w=window.open('','_blank','width=760,height=900');
+    if(!w)return alert('팝업 차단됨 — 팝업 허용 후 다시 시도하세요.');
+    w.document.write(`<html><head><title>스티커 ${esc(iv.barcode)} (${labels.length}매)</title><meta charset="utf-8"><style>
+      @page{size:${(+LBL.w||100)}mm ${(+LBL.h||50)}mm;margin:0}
+      body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;margin:0;color:#000;background:#e9edf3}
+      .lbl{width:${(+LBL.w||100)}mm;height:${(+LBL.h||50)}mm;box-sizing:border-box;padding:3mm;border:1px dashed #999;background:#fff;margin:6px auto;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden}
+      .hd{display:flex;justify-content:space-between;font-size:10px;font-weight:600;border-bottom:1px solid #000;padding-bottom:1px}
+      .do{font-size:17px;font-weight:800;letter-spacing:.5px;margin-top:1mm}
+      .nm{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .rw{display:flex;justify-content:space-between;font-size:10px;margin-top:.5mm}.rw b{font-size:12px}
+      .bc{text-align:center;margin-top:1mm}.bc img{height:12mm;max-width:100%}.bt{font-family:monospace;font-size:11px;font-weight:700}
+      @media print{.noprint{display:none}.lbl{border:none;margin:0;page-break-after:always}}</style></head>
+      <body><div class="noprint" style="text-align:center;padding:6px"><button onclick="window.print()">🖨️ 스티커 인쇄 (${labels.length}매 · ${(+LBL.w||100)}×${(+LBL.h||50)}mm)</button> <button onclick="window.close()">닫기</button> <span style="font-size:11px;color:#555">프린터: ${esc(LBL.printer)}</span></div>
+      ${labels.map(cell).join('')}</body></html>`);
+    w.document.close();
+  };
+  // ── 스티커설정(라벨규격·매수) / 프린터설정 — 경량 모달 ──
+  const closeModal=()=>{const m=document.getElementById('d4-modal');if(m)m.remove();};
+  const openModal=(html)=>{closeModal();const d=document.createElement('div');d.id='d4-modal';
+    d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center';
+    d.innerHTML=`<div style="background:#fff;border-radius:10px;padding:18px 20px;min-width:320px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:13px">${html}</div>`;
+    d.onclick=e=>{if(e.target===d)closeModal();};document.body.appendChild(d);return d;};
+  const openLabelSetup=()=>{
+    const d=openModal(`<div style="font-weight:700;font-size:15px;margin-bottom:10px">🏷️ 스티커 라벨 설정</div>
+      <label class="tl">라벨 규격</label>
+      <select id="ml-preset" class="inp" style="width:100%;margin:4px 0 10px">
+        <option value="">직접 입력</option><option value="100x50">100 × 50 mm</option><option value="100x30">100 × 30 mm</option>
+        <option value="90x40">90 × 40 mm</option><option value="70x40">70 × 40 mm</option><option value="60x40">60 × 40 mm</option></select>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div><label class="tl">가로(mm)</label><input id="ml-w" class="inp" value="${esc(LBL.w)}" style="width:80px;text-align:right"></div>
+        <div><label class="tl">세로(mm)</label><input id="ml-h" class="inp" value="${esc(LBL.h)}" style="width:80px;text-align:right"></div>
+        <div><label class="tl">도번당 매수</label><input id="ml-c" class="inp" value="${esc(LBL.copies)}" style="width:70px;text-align:right"></div></div>
+      <div style="text-align:right"><button class="btn" id="ml-cancel">취소</button> <button class="btn" id="ml-save" style="background:#2e86de;color:#fff">저장</button></div>`);
+    const q=id=>d.querySelector(id);
+    q('#ml-preset').onchange=e=>{const v=e.target.value;if(v){const [w,h]=v.split('x');q('#ml-w').value=w;q('#ml-h').value=h;}};
+    q('#ml-cancel').onclick=closeModal;
+    q('#ml-save').onclick=()=>{LBL.w=Math.max(20,+q('#ml-w').value||100);LBL.h=Math.max(15,+q('#ml-h').value||50);
+      LBL.copies=Math.max(1,Math.min(20,+q('#ml-c').value||1));saveLbl();closeModal();
+      alert(`스티커 라벨 설정 저장 — ${LBL.w}×${LBL.h}mm · 도번당 ${LBL.copies}매`);};
+  };
+  const openPrinterSetup=()=>{
+    const d=openModal(`<div style="font-weight:700;font-size:15px;margin-bottom:8px">🖨️ 프린터 설정</div>
+      <div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:10px">웹 환경에서는 실제 프린터 선택이 <b>브라우저 인쇄 대화상자</b>에서 이루어집니다(스티커=라벨 프린터, 거래명세표=일반 프린터 지정).<br>아래는 화면 표시용 프린터 이름입니다.</div>
+      <label class="tl">프린터 이름(표시용)</label><input id="mp-name" class="inp" value="${esc(LBL.printer)}" style="width:100%;margin:4px 0 12px">
+      <div style="text-align:right"><button class="btn" id="mp-cancel">취소</button> <button class="btn" id="mp-save" style="background:#2e86de;color:#fff">저장</button></div>`);
+    d.querySelector('#mp-cancel').onclick=closeModal;
+    d.querySelector('#mp-save').onclick=()=>{LBL.printer=d.querySelector('#mp-name').value.trim()||'(브라우저 인쇄 대화상자에서 선택)';saveLbl();closeModal();};
+  };
+  // 발행번호(바코드) 입력받아 거래명세표/스티커 재출력
+  const reprint=async(kind)=>{const bc=prompt('발행번호(바코드)를 입력하세요');if(!bc)return;
+    try{const iv=await fetchInvoice(bc.trim());(kind==='sticker'?openSticker:openDelivInvoice)(iv);}
+    catch(e){alert('출력 실패: '+e.message);}};
   // 인쇄 뷰(뼈대): 자재부품표 = 체크 도번의 자도번LIST / 빈양식 = 서식만
   const printView=(rows,blank)=>{
     const sel=blank?[]:rows.filter(r=>F.chk[r.assy]); if(!blank&&!sel.length)return alert('출력할 도번(체크)을 선택하세요.');
@@ -422,7 +532,10 @@ SCREEN.deliv420=(c)=>{
        <button class="btn" id="d4-cancel">발행취소</button>
        <button class="btn" id="d4-prt">🖨️ 자재부품표</button>
        <button class="btn" id="d4-blank">빈양식</button>
-       <button class="btn" id="d4-sticker" title="스티커 설정/프린터 설정은 후속">🏷️ 스티커</button>
+       <button class="btn" id="d4-invoice" title="발행번호로 거래명세표 재출력">🧾 거래명세표</button>
+       <button class="btn" id="d4-sticker" title="발행번호로 스티커(바코드) 재출력">🏷️ 스티커</button>
+       <button class="btn" id="d4-lblset" title="라벨 규격·매수 설정">⚙️ 스티커설정</button>
+       <button class="btn" id="d4-prnset" title="프린터 설정">🖨 프린터설정</button>
        ${loading?'<span style="color:var(--muted)">조회중…</span>':''}
      </div>
      <div class="toolbar" style="margin-top:2px">
@@ -471,7 +584,10 @@ SCREEN.deliv420=(c)=>{
     g('#d4-cancel').onclick=cancelIssue;
     g('#d4-prt').onclick=()=>printView(rows,false);
     g('#d4-blank').onclick=()=>printView(rows,true);
-    g('#d4-sticker').onclick=()=>alert('스티커 설정/프린터 설정/스티커 인쇄는 후속 구현 예정(뼈대). 자재부품표/빈양식 인쇄는 동작합니다.');
+    g('#d4-invoice').onclick=()=>reprint('invoice');
+    g('#d4-sticker').onclick=()=>reprint('sticker');
+    g('#d4-lblset').onclick=openLabelSetup;
+    g('#d4-prnset').onclick=openPrinterSetup;
     const all=g('#d4-all');if(all)all.onclick=e=>{rows.forEach(r=>{if(r.status!=='90'&&Number(r.req)>0)F.chk[r.assy]=e.target.checked;});draw();};
     c.querySelectorAll('.d4-ck').forEach(x=>x.onchange=e=>{F.chk[e.target.dataset.k]=e.target.checked;const b=g('#d4-issue');if(b)b.textContent=`📦 납품처리 (${rows.filter(r=>F.chk[r.assy]).length})`;});
     c.querySelectorAll('.d4-dv').forEach(x=>x.oninput=e=>{F.deliv[e.target.dataset.k]=e.target.value;});

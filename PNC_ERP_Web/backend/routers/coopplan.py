@@ -694,3 +694,70 @@ def partner_deliv420_cancel(body: dict = Body(...)):
         return {"ok": True, "cancelled": cur.rowcount}
     finally:
         nx.close()
+
+def _fmtbiz(b):
+    """사업자등록번호 000-00-00000 포맷."""
+    b = "".join(ch for ch in str(b or "") if ch.isdigit())
+    return f"{b[:3]}-{b[3:5]}-{b[5:]}" if len(b) == 10 else (str(b or "").strip())
+
+@router.get("/api/partner/deliv420/invoice")
+def partner_deliv420_invoice(barcode: str = Query(...)):
+    """거래명세표+스티커 데이터 — 하나의 발행바코드(nx.deliv_issue.barcode_no)에 묶인 도번 명세.
+       레거시 dw_pr_outside_020_p1(입고 거래명세표) 서식 동일: 공급자(협력사)/공급받는자(당사)+품목명세+SET바코드.
+       바코드=Code39, 값='SET'+발행번호(레거시 compute_105 동일). 스티커 라벨필드=도번·품명·수량·SERIAL·HEAT·발행번호·거래처·일자."""
+    import datetime as _dtv
+    bc = str(barcode).strip()
+    bcnum = "".join(ch for ch in bc if ch.isdigit())      # SET700001 · 700001 모두 허용
+    if not bcnum:
+        raise HTTPException(400, "발행번호(바코드)가 필요합니다.")
+    nx = _nx(); ncur = nx.cursor()
+    try:
+        _ensure_deliv_issue(ncur)
+        ncur.execute("""SELECT cust_code, item_code, deliver_qty, pack_qty, ISNULL(serial_no,''), ISNULL(heat_no,''), issue_ymd, status
+            FROM nx.deliv_issue WHERE barcode_no=? AND status<>'99' ORDER BY item_code""", bcnum)
+        drows = ncur.fetchall()
+    finally:
+        nx.close()
+    if not drows:
+        raise HTTPException(404, f"발행번호 {bc} 명세 없음(취소분 제외).")
+    cust = str(drows[0][0]).strip()
+    issue_ymd = str(drows[0][6] or "").strip()
+    ymd_disp = (f"20{issue_ymd[:2]}-{issue_ymd[2:4]}-{issue_ymd[4:6]}" if len(issue_ymd) == 6
+                else _dtv.date.today().strftime('%Y-%m-%d'))
+    cn = _conn(); cur = cn.cursor()
+    try:
+        # 공급자 = 협력사(cust) · 공급받는자 = 당사(CM_M_COMPANY)  ← 레거시 020_p1 배치와 동일
+        cur.execute("""SELECT ISNULL(BUSINESS_NO,''),ISNULL(CUST_DESC,''),ISNULL(OWNER_NAME,''),
+            LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,''),
+            ISNULL(BUSI_TYPE,''),ISNULL(BUSI_KIND,'') FROM CM_M_CUST WHERE CUST_CODE=?""", cust)
+        s = cur.fetchone() or ('',)*8
+        supplier = {"biz": _fmtbiz(s[0]), "nm": (s[1] or '').strip(), "owner": (s[2] or '').strip(),
+                    "addr": (s[3] or '').strip(), "tel": (s[4] or '').strip(), "fax": (s[5] or '').strip(),
+                    "btype": (s[6] or '').strip(), "bkind": (s[7] or '').strip()}
+        cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''),ISNULL(COMPANY_DESCK,''),ISNULL(OWNER_NAME,''),
+            LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,''),
+            ISNULL(BUSI_TYPE,''),ISNULL(BUSI_KIND,'') FROM CM_M_COMPANY""")
+        b = cur.fetchone() or ('',)*8
+        buyer = {"biz": _fmtbiz(b[0]), "nm": (b[1] or '').strip(), "owner": (b[2] or '').strip(),
+                 "addr": (b[3] or '').strip(), "tel": (b[4] or '').strip(), "fax": (b[5] or '').strip(),
+                 "btype": (b[6] or '').strip(), "bkind": (b[7] or '').strip()}
+        # 품목명/규격 배치조회(라이브)
+        assys = sorted({str(r[1]).strip() for r in drows if r[1]})
+        nmm = {}
+        for i in range(0, len(assys), 900):
+            ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(UNIT,'EA') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2], rr[3])
+    finally:
+        cn.close()
+    rows = []; tot = 0.0
+    for cc, item, dq, pk, sn, hn, iy, stt in drows:
+        item = str(item).strip()
+        nm, spec, unit = nmm.get(item, ("", "", "EA"))
+        q = float(dq or 0); tot += q
+        rows.append({"doban": item, "nm": (nm or '').strip(), "spec": (spec or '').strip(),
+                     "unit": (unit or 'EA').strip(), "qty": _qint(q), "pack": _qint(pk or 0),
+                     "serial": (sn or '').strip(), "heat": (hn or '').strip()})
+    return {"barcode": "SET" + bcnum, "raw": bcnum, "code": "SET" + bcnum, "ymd": ymd_disp,
+            "custnm": supplier["nm"] or cust, "cust": cust,
+            "supplier": supplier, "buyer": buyer, "rows": rows, "total": _qint(tot), "count": len(rows)}
