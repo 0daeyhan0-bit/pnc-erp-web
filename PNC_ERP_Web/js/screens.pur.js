@@ -2081,6 +2081,512 @@ SCREEN.coopquote=(host)=>{
   (async()=>{await loadVendors();load();})();
 };
 
+/* ===== 협력사견적관리2 (v2 테이블 · 단가구분/불출검증 분류) ===== */
+SCREEN.coopquote2=(host)=>{
+  const API=API_BASE;
+  const st={rows:[],cnt:0,vendor:'',q:'',vendors:[],loading:false,form:null,sel:new Set(),recalc:null,msg:'',filterMode:'active',detail:null,bomedit:null,workMode:false,worklist:[],workBy:{},workDone:0,workLoading:false,workType:''};
+  const loadParts=async(idx)=>{const r=st.rows[idx];if(!r)return;
+    st.detail={assy:r.assy_code,vendor:r.vendor,rows:[],loading:true};render();
+    try{const res=await fetch(`${API}/api/coopquote2/parts?assy=${encodeURIComponent(r.assy_code)}&vendor=${encodeURIComponent(r.vendor)}`);
+      const j=await res.json();st.detail.rows=j.rows||[];}catch(e){st.detail.rows=[];}
+    st.detail.loading=false;render();};
+  const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const won2=v=>(v==null||v==='')?'-':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const nf=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote'):true;
+  const loadVendors=async()=>{try{const r=await fetch(`${API}/api/coopquote2/vendors`);const j=await r.json();st.vendors=j.rows||[];}catch(e){}};
+  const load=async()=>{st.loading=true;if(!st.ym)st.ym=new Date().toISOString().slice(0,7);render();
+    try{const r=await fetch(`${API}/api/coopquote2/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.filterMode==='active'?1:0}&newonly=${st.filterMode==='new'?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
+      const j=await r.json();st.rows=j.rows||[];st.cnt=j.count||0;}
+    catch(e){st.rows=[];st.cnt=0;}
+    st.loading=false;render();};
+  // 모달(신규/수정) 실시간 미리보기
+  const matOf=f=>Math.round((+f.total_weight||0)*(+f.sagub_price||0));
+  const saleOf=f=>matOf(f)+Math.round(+f.proc_cost||0);
+  const save=async()=>{
+    const f=st.form;if(!f.vendor||!f.assy_code){alert('협력사·품번은 필수입니다.');return;}
+    try{const r=await fetch(`${API}/api/coopquote2/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)});
+      const j=await r.json();if(!j.ok)throw new Error(j.error||'save');st.form=null;st.msg='✔ 견적 저장 완료';await load();}
+    catch(e){alert('저장 실패: '+e.message);}};
+  const doRecalc=async()=>{
+    const rc=st.recalc;const pn=+rc.price_normal||0, ph=+rc.price_high||0;
+    if(pn<=0&&ph<=0){alert('일반CU 또는 고강도CU 사급가를 입력하세요.');return;}
+    const body={price_normal:pn,price_high:ph,scope:rc.scope};
+    if(rc.scope==='vendor')body.vendor=st.vendor;
+    if(rc.scope==='ids')body.ids=[...st.sel];
+    try{const r=await fetch(`${API}/api/coopquote2/recalc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json();if(!j.ok)throw new Error(j.error||'recalc');
+      const dt=j.detail||{};st.recalc=null;st.sel.clear();
+      st.msg=`✔ 재계산 완료 (가공비 유지) → 일반CU ${dt['일반CU']||0}건${pn?'('+nf(pn)+'원/kg)':''} · 고강도CU ${dt['고강도CU']||0}건${ph?'('+nf(ph)+'원/kg)':''}`;await load();}
+    catch(e){alert('재계산 실패: '+e.message);}};
+  // ===== BOM 견적 편집 모달 (하위부품 전체 한 번에) =====
+  const geom=(d,t,L)=>(d&&t&&L)?Math.PI*(d-t)*t*L*8.94/1e6:0;
+  const nf4=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:4});
+  const beUw=(r)=>{const be=st.bomedit;if(r.role==='반제품'||r.role==='용접봉')return 0;const e=be.edits[r.code];
+    if(e&&(e.diam||e.thick||e.length)){const d=+e.diam||r.coop_diam||r.lg_diam,t=+e.thick||r.coop_thick||r.lg_thick,L=+e.length||r.coop_length||r.lg_length;return geom(d,t,L);}
+    return r.unit_weight||0;};
+  const beSoyo=()=>{const be=st.bomedit;return (!be||!be.data)?0:be.data.rows.filter(r=>r.role==='제작동관').reduce((s,r)=>s+beUw(r)*r.cum_qty,0);};
+  // ★관경별 사급가: 행 입력값 → 저장된 관경별 → 헤더 기본 사급가 순
+  const beRowSagub=(r)=>{const be=st.bomedit;const e=be.sagubEdits&&be.sagubEdits[r.code];
+    if(e!=null&&e!=='')return +e||0;
+    if(r.coop_sagub&&+r.coop_sagub>0)return +r.coop_sagub;
+    return +be.sagub||0;};
+  const beRowQty=(r)=>{const be=st.bomedit;const e=be.qtyEdits&&be.qtyEdits[r.code];return (e!=null&&e!=='')?(+e||0):(r.cum_qty||0);};
+  // 행 재료비: 제작동관=소요중량×사급가(파생) · 그외=직접입력(matEdits) 또는 백엔드 mat_now
+  const beRowMat=(r)=>{const be=st.bomedit;
+    if(r.role==='제작동관')return Math.round(beUw(r)*beRowQty(r)*beRowSagub(r));
+    const e=be.matEdits&&be.matEdits[r.code];return (e!=null&&e!=='')?Math.round(+e||0):Math.round(r.mat_now||0);};
+  const beRowGag=(r)=>(r.role==='제작동관'?beRowGagong(r):0);   // 사급/용접봉=가공 없음
+  const beRowTot=(r)=>beRowMat(r)+beRowGag(r);                  // 합계=재료비+가공비 (사급=재료비)
+  const beRaw=()=>{const be=st.bomedit;return (!be||!be.data)?0:be.data.rows.filter(r=>r.role==='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0);};
+  const beWeld=()=>{const be=st.bomedit;return (!be||!be.data)?0:Math.round(be.data.total_weld_cost||0);};
+  const beProcCnt=(r,op)=>{const pe=st.bomedit.procEdits[r.code];if(pe&&pe[op]!=null&&pe[op]!=='')return +pe[op]||0;return (r.procs&&r.procs[op])||0;};
+  const beRowGagong=(r)=>{const be=st.bomedit;if(r.role!=='제작동관'||!be.data)return 0;const rate=be.data.rate||{};const lab=be.data.labor_rate||6300;let t=0;
+    (be.data.proc_ops||[]).forEach(op=>{const c=beProcCnt(r,op);const dv=rate[op];if(c&&dv)t+=(lab/dv)*c;});return Math.round(t*(r.cum_qty||0));};
+  const newBomEdit=()=>{st.bomedit={isNew:true,loading:false,vendor:st.vendor||'',grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},matEdits:{},qtyEdits:{},data:null,assy:''};render();};
+  const loadBomInto=async(item,salePrefill)=>{const be=st.bomedit;if(!be||!item.trim())return;
+    be.assy=item.trim();be.loading=true;be.edits={};render();
+    try{const res=await fetch(`${API}/api/coopquote2/bom-form?item=${encodeURIComponent(item.trim())}&vendor=${encodeURIComponent(be.vendor||'')}&ym=${encodeURIComponent(st.ym||'')}`);const j=await res.json();be.data=j;
+      if(j.cur_sagub)be.sagub=j.cur_sagub;   // 기본사급가=최신 원소재 사급가(종전 견적사급가 아님)
+      be.asm=j.assembly?JSON.parse(JSON.stringify(j.assembly)):null;   // 서브조립 편집용
+      if(be.asm){be.asm.gagong=Math.round((be.asm.total||0)-(be.asm.mgmt||0)-(be.asm.transport||0)-(be.asm.profit||0));}  // 합계=가공+관리+운반+이윤 정합(용접봉재료 포함)
+      // 신규(기존행 없음)만 공정기반 가공비로 프리필. 기존 견적은 저장 가공비 유지(조회창 일치)
+      if(!be.rowvals){const procAuto=Math.round(j.total_proc_cost||0)+Math.round(j.total_weld_cost||0);
+        be.proc=procAuto>0?procAuto:0;}
+    }catch(e){be.data=null;}
+    be.loading=false;render();};
+  const openBomEdit=async(idx)=>{const r=st.rows[idx];if(!r)return;
+    st.bomedit={isNew:false,viewMode:true,loading:true,vendor:r.vendor,grade:r.grade||'일반CU',sagub:r.sagub_price||20000,proc:Math.round(r.proc_cost||0),ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},matEdits:{},qtyEdits:{},data:null,assy:r.assy_code,
+      rowvals:{mat_cost:r.mat_cost||0,mat_raw:r.mat_raw||0,mat_weld:r.mat_weld||0,mat_part:r.mat_part||0,proc_cost:r.proc_cost||0,sale:r.sale_price||0}};render();
+    await loadBomInto(r.assy_code, r.sale_price||0);};
+  // 작업목록(직원입력)
+  const loadWork=async()=>{st.workLoading=true;render();
+    try{const r=await fetch(`${API}/api/coopquote2/worklist?wtype=${encodeURIComponent(st.workType)}`);const j=await r.json();st.worklist=j.rows||[];st.workBy=j.by_type||{};st.workDone=j.resolved||0;}
+    catch(e){st.worklist=[];}
+    st.workLoading=false;render();};
+  const openWork=async(assy,vendor)=>{if(!assy)return;
+    st.bomedit={isNew:false,loading:true,vendor:(vendor||st.vendor||'').trim(),grade:'일반CU',sagub:20000,proc:0,ym:new Date().toISOString().slice(0,7),edits:{},procEdits:{},sagubEdits:{},matEdits:{},qtyEdits:{},data:null,assy:assy,rowvals:null,fromWork:true};render();
+    await loadBomInto(assy,null);};
+  const saveBomEdit=async()=>{const be=st.bomedit;if(!be||!be.data)return;
+    const specs=be.data.rows.filter(r=>r.role==='제작동관').map(r=>{const e=be.edits[r.code]||{};
+      return {code:r.code,diam:(+e.diam||r.coop_diam||r.lg_diam),thick:(+e.thick||r.coop_thick||r.lg_thick),length:(+e.length||r.coop_length||r.lg_length),sagub:beRowSagub(r)};})
+      .filter(s=>s.diam&&s.thick&&s.length);
+    const baseMat=be.rowvals?Math.max(0,(be.rowvals.mat_cost||0)-(be.rowvals.mat_raw||0)):(be.data.rows.filter(r=>r.role!=='제작동관'&&r.role!=='반제품'&&r.pur_price).reduce((s,r)=>s+Math.round(r.pur_price*r.cum_qty),0));
+    // 공정 ST(제작동관, 편집반영) + 서브조립 공정/관리/운반/이윤
+    const procs=be.data.rows.filter(r=>r.role==='제작동관').map(r=>{const eff={};(be.data.proc_ops||[]).forEach(op=>{const c=beProcCnt(r,op);if(c>0)eff[op]=c;});return {code:r.code,ops:eff};});
+    const assembly=be.asm?{procs:be.asm.procs||{},gagong:Math.round(+be.asm.gagong||0),mgmt:Math.round(+be.asm.mgmt||0),transport:Math.round(+be.asm.transport||0),profit:Math.round(+be.asm.profit||0)}:null;
+    const body={item:be.data.item,vendor:be.vendor.trim(),grade:be.grade,sagub_price:+be.sagub||0,proc_cost:Math.round(+be.proc||0),base_mat:baseMat,item_name:be.data.name,specs,procs,assembly};
+    try{const r=await fetch(`${API}/api/coopquote2/bom-save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json();if(!j.ok)throw new Error(j.error||'save');
+      const wasWork=be.fromWork;st.bomedit=null;st.msg=`✔ 견적 저장 · 소요중량 ${nf4(j.total_soyo_weight)}kg · 원소재비 ${nf(j.mat_cost)} · 판가 ${nf(j.sale_price)}`;
+      if(wasWork){await loadWork();}else{await load();}}
+    catch(e){alert('저장 실패: '+e.message);}};
+  const beBadge=(role)=>{const M={'제작동관':['#e8f3ec','#1c7c3a'],'사급':['#eef2f7','#5a6a80'],'용접봉':['#fff3e0','#b8791f'],'매입부품':['#f0ecfa','#6a3fb0'],'반제품':['#e8eef7','#1c47a0']};
+    const c=M[role]||['#eee','#555'];return `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${c[0]};color:${c[1]};white-space:nowrap">${role}</span>`;};
+  const render=()=>{
+    const canEd=ed();
+    const modal=st.form, rc=st.recalc, f=st.form||{}, be=st.bomedit;
+    const diffCol=r=>{if(r.diff==null)return '<span style="color:#c9d1dc">-</span>';
+      const c=r.diff>0?'#c0392b':(r.diff<0?'#1c6ec2':'#5a6a80');const s=r.diff>0?'▲':(r.diff<0?'▼':'');
+      return `<b style="color:${c}">${s}${nf(Math.abs(r.diff))}</b>`;};
+    {const _pg=host.querySelector('#cq-grid'); if(_pg) st._scroll=_pg.scrollTop;}  // 재렌더 전 리스트 스크롤 보존
+    host.innerHTML=`
+     <div class="page-title">💱 협력사견적관리2 <span style="font-size:12px;color:var(--muted);font-weight:400">하위부품 bottom-up 견적 vs 실입고가 · nx.coop_quote</span></div>
+     <div class="page-sub">「협력 업체 견적 정리」 기반 <b>bottom-up</b>. <b style="color:#1c6ec2">재료비 = Σ하위부품(원소재·용접봉·부속품)</b>, <b style="color:#1c7c3a">가공비 = 판가−재료비</b>, <b>재료비율 = 재료비/판가</b>.
+       품번 행을 <b>클릭</b>하면 하위부품 3분류 상세가 열립니다. 입고가 = <b>실제 납품 거래가</b>(<code>PU_T_STOCK_MAINT</code>, 라이브) 종전(작년12월)·현재(최근). 🚚 토글=현재 납품품목만.</div>
+     <div class="toolbar" style="flex-wrap:wrap;gap:4px">
+       <label class="tl">협력사</label><select class="sel" id="cq-vendor"><option value="">전체</option>${st.vendors.map(v=>`<option value="${esc(v.vendor)}" ${st.vendor===v.vendor?'selected':''}>${esc(v.vendor)} (${v.n})</option>`).join('')}</select>
+       <input class="inp" id="cq-q" value="${esc(st.q)}" placeholder="품번/품명 검색" style="width:170px">
+       <span style="display:inline-flex;align-items:center;gap:5px;background:#fff3d6;border:1px solid #e8c877;border-radius:6px;padding:2px 8px"><label style="color:#8a5a00;font-weight:700;font-size:12px" title="인상후 사급부품 판매단가·원소재 사급가 기준월 — 리스트 전체에 적용">📅 적용월(전체)</label><input class="inp" id="cq-ym" type="month" value="${esc(st.ym||'')}" style="width:130px;font-weight:600"></span>
+       <button class="btn" id="cq-go">🔍 조회</button>
+       <select class="btn" id="cq-filter" title="목록 필터: 전체 / 최근4개월 납품실적 / 미승인(BOM 자동생성)" style="background:#eef2f7;color:#33507d;font-weight:600">
+         <option value="all"${st.filterMode==='all'?' selected':''}>📋 전체</option>
+         <option value="active"${st.filterMode==='active'?' selected':''}>🚚 현재 납품품목</option>
+         <option value="new"${st.filterMode==='new'?' selected':''}>🆕 미승인 견적</option>
+       </select>
+       ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
+       <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
+       <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
+     </div>
+     ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
+     ${st.workMode?`<div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid #d8cbee;border-radius:8px">
+       <div style="padding:9px 14px;background:#f4f0fb;font-size:13px;color:#4a3a6a;position:sticky;top:0;z-index:2">📋 <b>직원 입력 작업목록</b> — 데이터문제 <b style="color:#c0392b">${st.workBy['데이터문제']||0}</b> · 신규 <b style="color:#b8791f">${st.workBy['신규']||0}</b> · 완료 <b style="color:#1c7c3a">${st.workDone}</b> <span style="color:#8a7aa5">· 입고수량 큰 순 · 행 클릭 → 입력폼 → 저장 시 완료</span></div>
+       <table class="tbl fit" style="font-size:12.5px"><thead><tr><th>품번</th><th>협력사</th><th>유형</th><th>사유</th><th class="num">입고수량</th></tr></thead>
+       <tbody>${st.workLoading?spinRow(5):(st.worklist.length?st.worklist.map((r,i)=>`<tr class="cq-wrow" data-idx="${i}" style="cursor:pointer">
+         <td style="font-family:monospace;font-size:12px">${esc(r.assy_code)}</td><td>${r.vendor?esc(r.vendor):'<span style="color:#c9d1dc">-</span>'}</td>
+         <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${r.wtype==='신규'?'#fbe9d0':'#fdecec'};color:${r.wtype==='신규'?'#b8791f':'#c0392b'}">${esc(r.wtype)}</span></td>
+         <td style="font-size:11px;color:#6a6a6a">${esc(r.reason)}</td><td class="num">${won(r.in_qty)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">작업목록 없음 (전부 완료)</td></tr>')}</tbody></table></div>`:''}
+     <style>
+       #cq-tbl{width:max-content!important;table-layout:auto!important;border-collapse:separate!important;border-spacing:0}
+       #cq-tbl th,#cq-tbl td{padding:1px 6px!important;white-space:nowrap;line-height:1.35}
+       #cq-tbl td.cap{white-space:normal}
+       /* 2줄 헤더 계단식 고정: 그룹행 top:0, 세부행 top=그룹행높이 (데이터 배어나옴 방지) */
+       #cq-tbl thead th{position:sticky;z-index:5}
+       #cq-tbl thead tr:first-child th{top:0;height:18px}
+       #cq-tbl thead tr:nth-child(2) th{top:18px}
+     </style>
+     <div class="grid-wrap" id="cq-grid" style="${st.workMode?'display:none;':''}max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl fit" id="cq-tbl" style="font-size:11px"><thead>
+        <tr>
+        ${canEd?'<th rowspan="2" style="width:24px"></th>':''}
+        <th rowspan="2" data-sort="vendor" style="cursor:pointer" title="더블클릭 정렬">협력사</th><th rowspan="2" data-sort="assy_code" style="cursor:pointer" title="더블클릭 정렬">품번(Assy)</th><th rowspan="2" data-sort="item_name" style="cursor:pointer" title="더블클릭 정렬">품명</th><th rowspan="2" data-sort="spec" style="cursor:pointer" title="더블클릭 정렬">규격</th><th rowspan="2" data-sort="grade" style="cursor:pointer" title="더블클릭 정렬">등급</th>
+        <th colspan="4" class="center" style="background:#f0efe9;color:#8a6d3b;border-left:2px solid #d9d3c4">인상전 <span style="font-weight:400;font-size:9px">(종전·작년12월)</span></th>
+        <th colspan="4" class="center" style="background:#eaf1fc;color:#1c47a0;border-left:2px solid #b9cdec">인상후 <span style="font-weight:400;font-size:9px">(적용월 기준)</span></th>
+        <th rowspan="2" class="num" data-sort="diff_new" style="cursor:pointer" title="더블클릭 정렬 — 손익 이상치 찾기 · 인상후 총가공비 − 인상전 총가공비">가공비<br>차이</th>
+        <th rowspan="2" data-sort="last_in_ymd" style="cursor:pointer" title="더블클릭 정렬">최근납품</th><th rowspan="2" data-sort="status" style="cursor:pointer" title="더블클릭 정렬">상태</th>${canEd?'<th rowspan="2" style="width:40px">작업</th>':''}</tr>
+        <tr>
+        <th class="num" data-sort="mat_before" style="background:#f7f6f1;color:#1c6ec2;border-left:2px solid #d9d3c4;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_before" style="background:#f7f6f1;cursor:pointer">재료비율</th><th class="num" data-sort="proc_before" style="background:#f7f6f1;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_before" style="background:#f7f6f1;color:#8a6d3b;cursor:pointer">입고가</th>
+        <th class="num" data-sort="mat_after" style="background:#f4f8ff;color:#1c6ec2;border-left:2px solid #b9cdec;cursor:pointer" title="더블클릭 정렬">재료비</th><th class="num" data-sort="ratio_after" style="background:#f4f8ff;cursor:pointer">재료비율</th><th class="num" data-sort="proc_after" style="background:#f4f8ff;color:#1c7c3a;cursor:pointer">총가공비</th><th class="num" data-sort="incost_after" style="background:#f4f8ff;color:#8a6d3b;cursor:pointer">입고가</th></tr></thead>
+      <tbody>${st.loading?spinRow(canEd?18:16):(st.rows.length?st.rows.map((r,i)=>`<tr class="cq-row" data-idx="${i}">
+        ${canEd?`<td class="center"><input type="checkbox" class="cq-chk" data-id="${r.quote_id}" ${st.sel.has(r.quote_id)?'checked':''} onclick="event.stopPropagation()"></td>`:''}
+        <td style="font-weight:600;color:#1c47a0">${esc(r.vendor)}</td>
+        <td style="font-family:monospace;font-size:13px">${esc(r.assy_code)}</td>
+        <td class="cap" title="${esc(r.item_name)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.item_name)}</td>
+        <td style="font-size:10px">${esc(r.spec)}</td>
+        <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${r.grade==='고강도CU'?'#fbe9d0':'#e8eef7'};color:${r.grade==='고강도CU'?'#b8791f':'#1c47a0'};white-space:nowrap">${esc(r.grade||'일반CU')}</span></td>
+        <td class="num" style="color:#1c6ec2;background:#faf9f4;border-left:2px solid #e6e0d0" title="인상전 재료비 = 견적동 + 용접봉 + 사급부품(판매단가 작년12월)"><b>${r.mat_before!=null?won(r.mat_before):'-'}</b></td>
+        <td class="num" style="background:#faf9f4">${r.ratio_before!=null?r.ratio_before+'%':'-'}</td>
+        <td class="num" style="color:#1c7c3a;background:#faf9f4" title="인상전 총가공비 = 종전입고가 − 인상전 재료비">${r.proc_before!=null?won(r.proc_before):'-'}</td>
+        <td class="num" style="color:#8a6d3b;background:#faf9f4">${r.incost_before!=null?won(r.incost_before):'-'}</td>
+        <td class="num" style="color:#1c6ec2;background:#f7fbff;border-left:2px solid #cadcf3" title="인상후 재료비 = 인상후동(현재사급가) + 용접봉 + 사급부품(판매단가 적용월)"><b>${r.mat_after!=null?won(r.mat_after):'-'}</b></td>
+        <td class="num" style="background:#f7fbff">${r.ratio_after!=null?r.ratio_after+'%':'-'}</td>
+        <td class="num" style="color:#1c7c3a;background:#f7fbff" title="인상후 총가공비 = 현재입고가 − 인상후 재료비">${r.proc_after!=null?won(r.proc_after):'-'}</td>
+        <td class="num" style="color:#8a6d3b;background:#f7fbff">${r.incost_after!=null?won(r.incost_after):'-'}</td>
+        <td class="num" title="인상후 총가공비 − 인상전 총가공비 · ≈0=가공비 유지(정상, 재료인상만 반영) · 값이 크면 가공비 변동=검토">${r.diff_new!=null?('<b style="color:'+(Math.abs(r.diff_new)<Math.max(50,(r.incost_before||0)*0.03)?'#1c7c3a':'#c0392b')+'">'+won(r.diff_new)+'</b>'):'-'}</td>
+        <td class="center" style="font-size:10px;${r.last_in_ymd?'':'color:#c9d1dc'}">${r.last_in_ymd?('20'+r.last_in_ymd.slice(0,2)+'-'+r.last_in_ymd.slice(2,4)+'-'+r.last_in_ymd.slice(4,6)):'미납품'}</td>
+        <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${r.status==='확정'?'#e3f5e9':'#eef2f7'};color:${r.status==='확정'?'#1c7c3a':'#5a6a80'}">${esc(r.status)}</span></td>
+        ${canEd?`<td class="center"><button class="btn cq-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px;background:#eef2fb;color:#1c47a0" onclick="event.stopPropagation()">상세</button></td>`:''}</tr>`).join(''):`<tr><td colspan="${canEd?18:16}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
+     ${modal?`<div class="wr-modal" style="position:fixed;inset:0;z-index:110;background:rgba(20,30,50,.38);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
+       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:560px;max-width:97vw">
+         <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
+           <b>협력사견적 ${f.quote_id?'수정':'신규'}</b><span id="cq-x" style="cursor:pointer;font-size:17px">✕</span></div>
+         <div style="padding:14px 16px;max-height:calc(100vh - 170px);overflow:auto">
+           <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px 8px;align-items:center;font-size:12px">
+             <label style="color:#33507d;font-weight:600;text-align:right">협력사<span style="color:#c0392b">*</span></label><input class="inp cf" data-k="vendor" value="${esc(f.vendor||'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">품번<span style="color:#c0392b">*</span></label><input class="inp cf" data-k="assy_code" value="${esc(f.assy_code||'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">품명</label><input class="inp cf" data-k="item_name" value="${esc(f.item_name||'')}" style="grid-column:span 3">
+             <label style="color:#33507d;font-weight:600;text-align:right">규격</label><input class="inp cf" data-k="spec" value="${esc(f.spec||'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">등급</label><select class="inp cf" data-k="grade"><option value="일반CU" ${f.grade!=='고강도CU'?'selected':''}>일반CU</option><option value="고강도CU" ${f.grade==='고강도CU'?'selected':''}>고강도CU</option></select>
+             <label style="color:#33507d;font-weight:600;text-align:right">총중량(kg)</label><input class="inp cf" type="number" step="any" data-k="total_weight" value="${esc(f.total_weight||'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">사급가(원/kg)</label><input class="inp cf" type="number" step="any" data-k="sagub_price" value="${esc(f.sagub_price||'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">가공비(고정)</label><input class="inp cf" type="number" step="any" data-k="proc_cost" value="${esc(f.proc_cost||'')}">
+           </div>
+           <div style="margin-top:10px;background:#f4f8ff;border:1px solid #dbe6f7;border-radius:8px;padding:8px 12px;font-size:12px;display:flex;gap:18px;justify-content:center">
+             <span>원소재비 <b id="cq-pv-mat" style="color:#1c6ec2">${nf(matOf(f))}</b></span>
+             <span style="color:#8aa0bd">+</span>
+             <span>가공비 <b style="color:#1c7c3a">${nf(Math.round(+f.proc_cost||0))}</b></span>
+             <span style="color:#8aa0bd">=</span>
+             <span>판가 <b id="cq-pv-sale" style="font-size:14px">${nf(saleOf(f))}</b></span>
+           </div>
+           <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;font-size:12px;margin-top:10px">
+             <label style="color:#33507d;font-weight:600;text-align:right">견적가</label><input class="inp cf" type="number" step="any" data-k="quote_price" value="${esc(f.quote_price!=null?f.quote_price:'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">확정가</label><input class="inp cf" type="number" step="any" data-k="final_price" value="${esc(f.final_price!=null?f.final_price:'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">LG단가</label><input class="inp cf" type="number" step="any" data-k="lg_price" value="${esc(f.lg_price!=null?f.lg_price:'')}">
+             <label style="color:#33507d;font-weight:600;text-align:right">비고</label><input class="inp cf" data-k="remark" value="${esc(f.remark||'')}">
+           </div>
+         </div>
+         <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
+           <span style="color:#8aa0bd;font-size:11px">확정가 입력 시 상태=확정. 원소재비=총중량×사급가 자동.</span>
+           <span><button class="btn" id="cq-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="cq-cancel">닫기</button></span></div>
+       </div></div>`:''}
+     ${rc?`<div class="wr-modal" style="position:fixed;inset:0;z-index:111;background:rgba(20,30,50,.38);display:flex;align-items:flex-start;justify-content:center;padding:50px 10px">
+       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:480px;max-width:96vw">
+         <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#b8791f;color:#fff;border-radius:10px 10px 0 0">
+           <b>🔄 사급가 변경 → 판가 재계산</b><span id="cq-rx" style="cursor:pointer;font-size:17px">✕</span></div>
+         <div style="padding:16px">
+           <div style="font-size:12px;color:#5a6a80;margin-bottom:12px">새 사급가(원/kg)를 적용하면 각 견적의 <b style="color:#1c6ec2">원소재비 = 총중량 × 새 사급가</b>로 재계산되고 <b style="color:#1c7c3a">가공비는 그대로 유지</b>됩니다. 판가 = 새 원소재비 + 가공비. <b>등급별로 각각 입력</b>하며, 비우면 해당 등급은 건드리지 않습니다.</div>
+           <div style="display:grid;grid-template-columns:auto 1fr auto;gap:8px 10px;align-items:center;margin-bottom:12px">
+             <span style="font-size:12px;padding:2px 7px;border-radius:8px;background:#e8eef7;color:#1c47a0;font-weight:600">일반CU</span>
+             <input class="inp" id="cq-rc-pn" type="number" step="any" value="${esc(rc.price_normal!=null?rc.price_normal:20000)}" placeholder="일반CU 사급가" style="text-align:right;font-weight:700">
+             <span style="color:#8aa0bd;font-size:11px">원/kg</span>
+             <span style="font-size:12px;padding:2px 7px;border-radius:8px;background:#fbe9d0;color:#b8791f;font-weight:600">고강도CU</span>
+             <input class="inp" id="cq-rc-ph" type="number" step="any" value="${esc(rc.price_high!=null?rc.price_high:22000)}" placeholder="고강도CU 사급가" style="text-align:right;font-weight:700">
+             <span style="color:#8aa0bd;font-size:11px">원/kg</span>
+           </div>
+           <div style="font-size:12px;color:#33507d;font-weight:600;margin-bottom:6px">적용 범위 <span style="font-weight:400;color:#8aa0bd">(현재 화면: 일반 ${st.rows.filter(x=>x.grade!=='고강도CU').length} · 고강도 ${st.rows.filter(x=>x.grade==='고강도CU').length})</span></div>
+           <div style="display:flex;flex-direction:column;gap:6px;font-size:12px">
+             <label><input type="radio" name="cq-scope" value="all" ${rc.scope==='all'?'checked':''}> 전체 견적 (${won(st.cnt)}건 기준)</label>
+             <label><input type="radio" name="cq-scope" value="vendor" ${rc.scope==='vendor'?'checked':''} ${st.vendor?'':'disabled'}> 현재 협력사만 ${st.vendor?`(${esc(st.vendor)})`:'<span style="color:#c9d1dc">— 협력사 선택 필요</span>'}</label>
+             <label><input type="radio" name="cq-scope" value="ids" ${rc.scope==='ids'?'checked':''} ${st.sel.size?'':'disabled'}> 선택한 ${st.sel.size}건만</label>
+           </div>
+         </div>
+         <div style="padding:11px 16px;border-top:1px solid #e2e8f2;text-align:right">
+           <button class="btn" id="cq-rc-run" style="background:#b8791f;color:#fff">적용</button> <button class="btn" id="cq-rc-cancel">취소</button></div>
+       </div></div>`:''}
+     ${st.detail?(()=>{const d=st.detail;const T={'동관':{c:'#1c6ec2',n:'원소재(동관)'},'사급부품':{c:'#5a6a80',n:'부속품(사급)'},'용접봉':{c:'#b8791f',n:'용접봉'}};
+       const sub=(t)=>d.rows.filter(x=>x.ptype===t);const sum=(a,k)=>a.reduce((s,x)=>s+(+x[k]||0),0);
+       const tm=sum(d.rows,'mat_cost'),tp=sum(d.rows,'proc_cost'),tt=sum(d.rows,'part_total');
+       return `<div class="wr-modal" style="position:fixed;inset:0;z-index:112;background:rgba(20,30,50,.38);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
+       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:820px;max-width:98vw">
+         <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
+           <b>🧩 하위부품 구성 — ${esc(d.assy)} <span style="font-weight:400;font-size:12px">${esc(d.vendor)}</span></b><span id="cq-dx" style="cursor:pointer;font-size:17px">✕</span></div>
+         <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto">
+           ${d.loading?'<div style="padding:20px;color:#8aa0bd">불러오는 중…</div>':(d.rows.length?
+           ['동관','사급부품','용접봉'].filter(t=>sub(t).length).map(t=>`
+             <div style="font-weight:700;color:${T[t].c};margin:8px 0 4px">${T[t].n} <span style="font-weight:400;color:#8aa0bd;font-size:12px">${sub(t).length}개</span></div>
+             <table class="tbl" style="width:100%;font-size:11px;margin-bottom:6px"><thead><tr style="background:#f4f7fb">
+               <th style="text-align:left">단품</th><th style="text-align:left">품명</th><th>규격</th><th class="num">재료비</th><th class="num">가공비</th><th class="num">합계</th></tr></thead>
+             <tbody>${sub(t).map(x=>`<tr><td style="font-family:monospace;font-size:10px">${esc(x.part_code)}</td>
+               <td class="cap" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(x.part_name)}</td>
+               <td style="font-size:10px">${esc(x.spec)}</td><td class="num" style="color:#1c6ec2">${won(x.mat_cost)}</td>
+               <td class="num" style="color:#1c7c3a">${won(x.proc_cost)}</td><td class="num"><b>${won(x.part_total)}</b></td></tr>`).join('')}</tbody></table>`).join('')
+           :'<div style="padding:20px;color:#8aa0bd">하위부품 데이터 없음</div>')}
+           ${d.rows.length?`<div style="margin-top:10px;background:#f4f8ff;border:1px solid #dbe6f7;border-radius:8px;padding:8px 14px;font-size:13px;display:flex;gap:22px;justify-content:flex-end">
+             <span>재료비 <b style="color:#1c6ec2">${nf(tm)}</b></span><span>가공비 <b style="color:#1c7c3a">${nf(tp)}</b></span>
+             <span>합계 <b>${nf(tt)}</b></span></div>`:''}
+         </div>
+         <div style="padding:10px 16px;border-top:1px solid #e2e8f2;text-align:right"><button class="btn" id="cq-dc">닫기</button></div>
+       </div></div>`;})():''}
+     ${be?(()=>{const d=be.data;const soyo=beSoyo();const raw=beRaw();const weld=beWeld();
+       const baseMat=d?d.rows.filter(r=>r.role!=='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0):0;   // 부속품/용접봉/반제품lump(편집 재료비 반영)
+       const A0=be.asm||{gagong:(d&&d.assembly_proc)||0,mgmt:0,transport:0,profit:0};const asmTot=Math.round((+A0.gagong||0)+(+A0.mgmt||0)+(+A0.transport||0)+(+A0.profit||0));
+       const procTube=d?d.rows.filter(r=>r.role==='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowGag(r),0):0;
+       const mat=raw+baseMat;const gagong=procTube+asmTot;const curIn=(d&&d.cur_incost!=null)?d.cur_incost:null;const prevIn=(d&&d.prev_incost!=null)?d.prev_incost:null;
+       // ★완제품 합계 = 백엔드 v3 총합. 총가공비 = 입고가 − 재료비 (리스트와 동일). 조정도 v3 재료비(totMat) 기준.
+       const totMat=d?Math.round(d.total_mat||0):0;const totMatB=d?Math.round(d.total_mat_before||0):0;
+       const sale=(curIn!=null?curIn:(totMat+gagong));const adjust=(curIn!=null?Math.round(curIn-totMat-gagong):0);const proc=gagong;
+       const totGag=(curIn!=null?Math.round(curIn-totMat):gagong);const totSale=(curIn!=null?Math.round(curIn):(totMat+gagong));
+       const totGagB=(prevIn!=null?Math.round(prevIn-totMatB):totGag);const totSaleB=(prevIn!=null?Math.round(prevIn):(totMatB+(totGagB||0)));const adjustB=(prevIn!=null?Math.round(prevIn-totMatB-gagong):adjust);
+       const grand=sale;
+       return `<div class="wr-modal" style="position:fixed;inset:0;z-index:112;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 8px">
+       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.34);width:1340px;max-width:98vw">
+         <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
+           <b>📝 ${be.isNew&&!d?'신규 견적':(be.viewMode?'견적 상세 — ':'견적 편집 — ')+esc(be.assy)} <span style="font-weight:400;font-size:12px">${esc(d?d.name:'')}</span>${(d&&be.viewMode)?'<span style="font-size:11px;margin-left:8px;background:#eef2fb;color:#1c47a0;padding:2px 8px;border-radius:8px">읽기전용</span>':''}</b><span id="be-x" style="cursor:pointer;font-size:18px">✕</span></div>
+         <div class="${be.viewMode?'be-view':''}" style="padding:12px 16px;max-height:calc(100vh - 150px);overflow:auto">
+         ${be.loading?'<div style="padding:40px;text-align:center;color:#8aa0bd">불러오는 중…</div>':(!d?(be.isNew?`<div style="padding:34px;text-align:center"><div style="margin-bottom:12px;color:#33507d;font-size:13px">품번을 입력하면 <b>현 BOM 구성</b>이 자동으로 펼쳐집니다.</div><input class="inp" id="be-newitem" placeholder="Assy 품번" style="width:230px;font-family:monospace" value="${esc(be.assy||'')}"> <button class="btn" id="be-load" style="background:#1c7c3a;color:#fff">🔍 BOM 불러오기</button></div>`:'<div style="padding:40px;text-align:center;color:#c0392b">BOM 조회 실패</div>'):`
+           <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:12px;background:#f4f8ff;border:1px solid #dbe6f7;border-radius:8px;padding:7px 12px">
+             <label style="color:#33507d;font-weight:600">협력사</label><input class="inp" id="be-vendor" value="${esc(be.vendor)}" style="width:120px">
+             <span style="color:#8aa0bd;font-size:11px">임율 ${nf(d.labor_rate)}</span>
+             <span style="display:inline-flex;align-items:center;gap:5px;background:#fff3d6;border:1px solid #e8c877;border-radius:6px;padding:3px 8px" title="적용월은 리스트 상단에서 전체 설정합니다(개별 변경 불가)"><label style="color:#8a5a00;font-weight:700">📅 적용월(전체)</label><b style="color:#8a5a00">${esc(st.ym||'-')}</b></span>
+             <span style="color:#c0392b;font-weight:700" title="현재 재료비 합계(적용월 기준)">재료비(현재) ${nf(d.total_mat||0)}</span>
+             ${d.need_input?`<span style="color:#c0392b;font-weight:600">⚠ 스펙 입력필요 ${d.need_input}건</span>`:'<span style="color:#1c7c3a">스펙 완비</span>'}
+           </div>
+           <div style="overflow-x:auto">
+           <table class="tbl fit" style="font-size:13px"><thead><tr>
+             <th>품번</th><th>품명</th><th>역할</th><th class="num">소요량</th><th class="num" style="color:#8aa0bd">BOM규격</th>
+             <th class="num" style="color:#1c7c3a">Φ</th><th class="num" style="color:#1c7c3a">T</th><th class="num" style="color:#1c7c3a">L</th>
+             <th class="num">개당중량</th><th class="num" style="color:#1c6ec2">소요중량</th><th class="num" style="color:#b8791f" title="사급가(원/kg)">사급가</th>
+             <th class="num" style="color:#c0392b" title="재료비(현재·적용월): 사급=판매단가·제작동관=소요중량×사급가·용접봉=소요×단가">재료비</th><th class="num" style="color:#c0392b" title="재료비/합계">재료비율</th><th class="num" style="color:#1c7c3a" title="가공비 = 제작동관 가공 + 조립공정 + 조정">가공비</th><th class="num" style="color:#c0392b">합계</th>
+             ${(d.proc_ops||[]).map(op=>`<th style="font-size:12px;color:#6a3fb0;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom" title="${esc(op)} 공정 횟수">${esc(op==='교/체'?'교체':op)}</th>`).join('')}
+             <th style="color:#1c7c3a;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">가공비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">관리비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">운반비</th><th style="color:#8a6d3b;writing-mode:vertical-rl;text-orientation:upright;white-space:nowrap;padding:6px 2px;letter-spacing:-1px;vertical-align:bottom">이윤</th></tr></thead>
+           <tbody><tr style="background:#eaf1fc;font-weight:700">
+               <td style="font-family:monospace;font-size:13px;padding-left:6px">${esc(d.item)}</td>
+               <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.name)}">${esc(d.name)}</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#1c47a0;color:#fff">완제품</span></td>
+               <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num be-tsoyo2" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
+               <td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tmat-root">${nf(totMat)}</td><td class="num" style="color:#5a6a80;font-weight:700" id="be-tratio-root">${totSale>0?Math.round(totMat/totSale*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800" id="be-tgag-root" title="총가공비 = 현재입고가 − 재료비">${nf(totGag)}</td><td class="num" style="color:#c0392b;font-weight:800;font-size:14px" id="be-tsale-root" title="판가(현재입고가)">${nf(totSale)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+             ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const isPipe=(r.role!=='반제품'&&!isWeld&&(r.coop_diam||r.unit_weight||isTube));const e=be.edits[r.code]||{};
+             const dd=(e.diam!=null&&e.diam!=='')?e.diam:(r.coop_diam||'');const tt=(e.thick!=null&&e.thick!=='')?e.thick:(r.coop_thick||'');const ll=(e.length!=null&&e.length!=='')?e.length:(r.coop_length||'');
+             const uw=beUw(r);const need=isTube&&!(dd&&tt&&ll);const ind=6+r.level*12;const pr=r.procs||{};
+             const rq=beRowQty(r);const rmat=beRowMat(r);const rgag=beRowGag(r);const rtot=rmat+rgag;const rratio=rtot>0?Math.round(rmat/rtot*100):(rmat?100:0);
+             const grey=r.in_quote===false;const matEd=be.matEdits&&be.matEdits[r.code];const qtyEd=be.qtyEdits&&be.qtyEdits[r.code];
+             return `<tr style="${need?'background:#fdf0f0':''}">
+               <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
+               <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
+               <td>${(be.viewMode||r.haskids||r.role==='반제품')?beBadge(r.role):(()=>{const cur=(r.role_v3==='동관고강도')?'동관고강도':(r.role==='제작동관'?'제작동관':(r.role==='용접봉'?'용접봉':'사급'));return `<select class="be-role" data-code="${esc(r.code)}" style="font-size:10px;padding:1px 2px;border:1px solid #cbd5e6;border-radius:6px;background:#fffbe8">${['제작동관','동관고강도','사급','용접봉'].map(o=>`<option${cur===o?' selected':''}>${o}</option>`).join('')}</select>`;})()}</td>
+               <td class="num"><input class="be-qty inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(qtyEd!=null&&qtyEd!==''?qtyEd:(r.cum_qty||''))}" style="width:46px;min-width:0;text-align:right;padding:1px 2px"></td>
+               <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
+               ${isPipe?`<td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="diam" value="${esc(dd)}" style="width:38px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_diam||''}"></td>
+                 <td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="thick" value="${esc(tt)}" style="width:32px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_thick||''}"></td>
+                 <td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="length" value="${esc(ll)}" style="width:40px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_length||''}"></td>`
+                 :`<td class="num" style="font-size:9px">${dd||'-'}</td><td class="num" style="font-size:9px">${tt||'-'}</td><td class="num" style="font-size:9px">${ll||'-'}</td>`}
+               <td class="num be-uw" data-code="${esc(r.code)}">${(uw||r.unit_weight)?nf4(uw||r.unit_weight):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
+               <td class="num be-sw" data-code="${esc(r.code)}" style="color:#1c6ec2">${(uw||r.unit_weight)?nf4((uw||r.unit_weight)*rq):'-'}</td>
+               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:'<span style="color:#c9d1dc">-</span>'}</td>
+               <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재(인상후) 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">`)}</td>
+               <td class="num" style="color:#c0392b"><span class="be-ratio" data-code="${esc(r.code)}">${grey?'-':rratio+'%'}</span></td>
+               <td class="num" style="color:#1c7c3a"><span class="be-rg2" data-code="${esc(r.code)}">${isTube?nf(rgag):'-'}</span></td>
+               <td class="num" style="color:#c0392b;font-weight:700"><span class="be-tot" data-code="${esc(r.code)}">${grey?'-':nf(rtot)}</span></td>
+               ${(d.proc_ops||[]).map(op=>`<td class="num">${isTube?`<input class="be-pc" data-code="${esc(r.code)}" data-op="${esc(op)}" value="${(be.procEdits[r.code]&&be.procEdits[r.code][op]!=null&&be.procEdits[r.code][op]!=='')?be.procEdits[r.code][op]:(pr[op]||'')}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#6a3fb0;border:1px solid #e2e8f2;border-radius:3px">`:''}</td>`).join('')}
+               <td class="num" style="color:#1c7c3a">${isTube?`<span class="be-rg" data-code="${esc(r.code)}">${nf(beRowGagong(r))}</span>`:'-'}</td>
+               <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td></tr>`;}).join('')}
+             ${(be.asm||d.assembly_proc>0)?(()=>{const A=be.asm||{procs:{},gagong:d.assembly_proc,mgmt:0,transport:0,profit:0,total:d.assembly_proc};
+               const atot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
+               return `<tr style="background:#fff8ec">
+               <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#8a6d3b">(서브조립)</td>
+               <td class="cap" style="color:#8a6d3b" title="견적서엔 칸이 없어 용접봉 줄에 넣었던 실제 조립작업 공정">서브ASSY 조립공정</td>
+               <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:#fff3e0;color:#b8791f">조립공정</span></td>
+               <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#1c7c3a;font-weight:700" id="be-asmgag">${nf(atot)}</td><td class="num" style="color:#c0392b;font-weight:700" id="be-asmtot">${nf(atot)}</td>
+               ${(d.proc_ops||[]).map(op=>`<td class="num"><input class="be-asmpc" data-op="${esc(op)}" value="${A.procs&&A.procs[op]?A.procs[op]:''}" style="width:26px;min-width:0;text-align:center;padding:1px 1px;font-size:11px;color:#b8791f;border:1px solid #f0e0c0;border-radius:3px"></td>`).join('')}
+               <td class="num"><input class="be-asm" data-f="gagong" value="${esc(A.gagong)}" style="width:50px;min-width:0;text-align:right;padding:1px 2px;font-size:12px;color:#1c7c3a;font-weight:700"></td>
+               <td class="num"><input class="be-asm" data-f="mgmt" value="${esc(A.mgmt)}" style="width:50px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
+               <td class="num"><input class="be-asm" data-f="transport" value="${esc(A.transport)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td>
+               <td class="num"><input class="be-asm" data-f="profit" value="${esc(A.profit)}" style="width:44px;min-width:0;text-align:right;padding:1px 2px;font-size:12px"></td></tr>`;})():''}
+             ${curIn!=null?`<tr style="background:#fef6e9">
+               <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#a06010">(가격조정)</td>
+               <td class="cap" style="color:#a06010" title="판가(현재입고가) − 재료비 − 가공비">현재입고가 정합 조정</td>
+               <td><span style="font-size:11px;padding:1px 6px;border-radius:8px;background:#fbe4cc;color:#a06010">조정</span></td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700" id="be-adjgag">${nf(adjust)}</td><td class="num" style="color:#a06010;font-weight:700" id="be-adjust">${nf(adjust)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`:''}
+             <tr><td colspan="${19+(d.proc_ops||[]).length}" style="height:0;border-top:3px solid #8a6d3b;padding:0"></td></tr>
+             <tr style="background:#f0efe9"><td colspan="${19+(d.proc_ops||[]).length}" style="text-align:left;padding:5px 10px;color:#8a6d3b;font-size:12px;font-weight:700">📋 종전 견적 (인상전 · 종전사급가/작년12월 판매단가 · 읽기전용)</td></tr>
+             <tr style="background:#faf9f4;font-weight:700">
+               <td style="font-family:monospace;font-size:13px;padding-left:6px">${esc(d.item)}</td>
+               <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.name)}">${esc(d.name)}</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#8a6d3b;color:#fff">완제품</span></td>
+               <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num" style="color:#1c6ec2">${nf4(soyo)}</td><td class="num">-</td>
+               <td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px">${nf(totMatB)}</td><td class="num" style="color:#5a6a80;font-weight:700">${totSaleB>0?Math.round(totMatB/totSaleB*100):0}%</td><td class="num" style="color:#1c7c3a;font-weight:800" title="종전 총가공비 = 종전입고가 − 종전재료비">${totGagB!=null?nf(totGagB):'-'}</td><td class="num" style="color:#8a6d3b;font-weight:800;font-size:14px" title="종전 판가(종전입고가)">${totSaleB!=null?nf(totSaleB):'-'}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+             ${d.rows.map(r=>{const isTube=r.role==='제작동관';const isWeld=r.role==='용접봉';const uw=beUw(r);const ind=6+r.level*12;const pr=r.procs||{};
+               const rq=(r.cum_qty||0);const rmatB=(r.mat_before!=null?r.mat_before:0);const rgag=isTube?beRowGagong(r):0;const rtotB=rmatB+rgag;
+               const rratioB=rtotB>0?Math.round(rmatB/rtotB*100):(rmatB?100:0);const sagubPrev=(isTube&&uw&&rq)?Math.round(rmatB/(uw*rq)):null;const grey=r.in_quote===false;
+               return `<tr>
+                 <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
+                 <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
+                 <td>${beBadge(r.role)}</td>
+                 <td class="num">${nf4(rq)}</td>
+                 <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
+                 <td class="num" style="font-size:9px">${r.coop_diam||'-'}</td><td class="num" style="font-size:9px">${r.coop_thick||'-'}</td><td class="num" style="font-size:9px">${r.coop_length||'-'}</td>
+                 <td class="num">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
+                 <td class="num" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
+                 <td class="num" style="color:#b8791f;font-weight:600">${sagubPrev!=null?nf(sagubPrev):'-'}</td>
+                 <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}</td>
+                 <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
+                 <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
+                 <td class="num" style="color:#8a6d3b;font-weight:700">${grey?'-':nf(rtotB)}</td>
+                 ${(d.proc_ops||[]).map(op=>`<td class="num" style="font-size:11px;color:#6a3fb0">${(isTube&&pr[op])?pr[op]:''}</td>`).join('')}
+                 <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
+                 <td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td><td class="num" style="color:#c9d1dc">-</td></tr>`;}).join('')}
+             ${(be.asm||d.assembly_proc>0)?(()=>{const A=be.asm||{gagong:d.assembly_proc,mgmt:0,transport:0,profit:0};const atot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
+               return `<tr style="background:#fff8ec">
+               <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#8a6d3b">(서브조립)</td>
+               <td class="cap" style="color:#8a6d3b">서브ASSY 조립공정</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fff3e0;color:#b8791f">조립공정</span></td>
+               <td class="num">×1</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#1c7c3a;font-weight:700">${nf(atot)}</td><td class="num" style="color:#8a6d3b;font-weight:700">${nf(atot)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`;})():''}
+             ${prevIn!=null?`<tr style="background:#fef6e9">
+               <td style="font-family:monospace;font-size:12px;padding-left:18px;color:#a06010">(가격조정)</td>
+               <td class="cap" style="color:#a06010">종전입고가 정합 조정</td>
+               <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fbe4cc;color:#a06010">조정</span></td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num">-</td>
+               <td class="num">-</td><td class="num">-</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjustB)}</td><td class="num" style="color:#a06010;font-weight:700">${nf(adjustB)}</td>
+               ${(d.proc_ops||[]).map(()=>'<td></td>').join('')}<td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>`:''}
+             </tbody></table></div>
+           `)}
+         </div>
+         <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
+           <span style="color:#8aa0bd;font-size:11px">구성=현 BOM(고정) · 제작동관 협력사 스펙만 입력 · 용접봉=공정(재료비 제외)</span>
+           <span>${canEd?(be.viewMode?'<button class="btn" id="be-editmode" style="background:#1c7c3a;color:#fff">✏ 수정 (현재 견적)</button> ':'<button class="btn" id="be-save" style="background:#1b6ec2;color:#fff">💾 저장</button> '):''}<button class="btn" id="be-cancel">닫기</button></span></div>
+       </div></div>`;})():''}
+     <style>#cq-tbl tbody tr:hover{background:#eef4ff}.cq-row.sel{background:#dbe9ff}
+       .be-view input,.be-view select{border:none!important;background:transparent!important;box-shadow:none!important;pointer-events:none;padding:0!important;margin:0!important;text-align:inherit;font:inherit;color:inherit;width:auto!important;min-width:0;height:auto!important;line-height:1.2!important;vertical-align:middle}
+       .be-view input.inp,.be-view .be-qty,.be-view .be-sp,.be-view .be-sg,.be-view .be-mat,.be-view .be-pc,.be-view .be-asm,.be-view .be-asmpc{cursor:default}
+       .be-view table.fit{width:max-content!important;min-width:0!important;table-layout:auto!important;font-size:11px}
+       .be-view td,.be-view th{padding:0 6px!important;white-space:nowrap;line-height:1.6;height:auto!important;width:auto!important;min-width:0!important}
+       .be-view tr{height:auto!important}
+       .be-view input{max-width:56px!important}</style>`;
+    const g=id=>host.querySelector(id);
+    g('#cq-go').onclick=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
+    {const cf=g('#cq-filter');if(cf)cf.onchange=e=>{st.filterMode=e.target.value;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};}
+    {const gw=g('#cq-work');if(gw)gw.onclick=()=>{st.workMode=!st.workMode;st.msg='';if(st.workMode)loadWork();else render();};}
+    host.querySelectorAll('.cq-wrow').forEach(tr=>tr.onclick=()=>{const r=st.worklist[+tr.dataset.idx];if(r)openWork(r.assy_code,r.vendor);});
+    g('#cq-xls').onclick=()=>{
+      if(!st.rows.length){alert('다운로드할 데이터가 없습니다.');return;}
+      const hd=['협력사','품번(Assy)','품명','규격','등급',
+        '인상전_재료비','인상전_재료비율(%)','인상전_총가공비','인상전_입고가',
+        '인상후_재료비','인상후_재료비율(%)','인상후_총가공비','인상후_입고가',
+        '차이(신)=인상후−인상전 총가공비','최근납품','상태'];
+      const fy=y=>y?('20'+y.slice(0,2)+'-'+y.slice(2,4)+'-'+y.slice(4,6)):'';
+      const bl=v=>(v==null?'':v);
+      const rows=st.rows.map(r=>[r.vendor,r.assy_code,r.item_name,r.spec,r.grade||'일반CU',
+        bl(r.mat_before),bl(r.ratio_before),bl(r.proc_before),bl(r.incost_before),
+        bl(r.mat_after),bl(r.ratio_after),bl(r.proc_after),bl(r.incost_after),
+        bl(r.diff_new),fy(r.last_in_ymd),r.status]);
+      const tag=(st.vendor||'전체')+(st.ym?'_'+st.ym:'')+(st.filterMode==='active'?'_현재납품':(st.filterMode==='new'?'_미승인':''));
+      dlCSV('협력사견적_'+tag+'.csv',hd,rows);};
+    g('#cq-vendor').onchange=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
+    {const _g=host.querySelector('#cq-grid'); if(_g){ if(st._scroll!=null)_g.scrollTop=st._scroll; _g.onscroll=()=>{st._scroll=_g.scrollTop;}; }}  // 상세 열고닫아도 리스트 스크롤 유지
+    {const cy=g('#cq-ym');if(cy)cy.onchange=()=>{st.ym=cy.value;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};}
+    g('#cq-q').onkeyup=e=>{if(e.key==='Enter')g('#cq-go').click();};
+    // 메인 컬럼 더블클릭 정렬 (토글 asc/desc). 차이(신) 정렬=손익 이상치 찾기
+    host.querySelectorAll('#cq-tbl thead th[data-sort]').forEach(th=>th.ondblclick=()=>{
+      const k=th.dataset.sort;
+      st.sortDir=(st.sortKey===k&&st.sortDir==='asc')?'desc':'asc';
+      st.sortKey=k; const dir=st.sortDir==='asc'?1:-1;
+      const isNum=st.rows.some(r=>typeof r[k]==='number');
+      st.rows.sort((a,b)=>{
+        let x=a[k],y=b[k];
+        if(isNum){ x=(x==null?-Infinity:+x); y=(y==null?-Infinity:+y); return (x-y)*dir; }
+        return String(x==null?'':x).localeCompare(String(y==null?'':y))*dir;
+      });
+      render();
+    });
+    if(st.sortKey){const sth=host.querySelector(`#cq-tbl thead th[data-sort="${st.sortKey}"]`);if(sth)sth.insertAdjacentHTML('beforeend',`<span style="color:#c0392b">${st.sortDir==='asc'?' ▲':' ▼'}</span>`);}
+    if(canEd){
+      g('#cq-new').onclick=()=>newBomEdit();
+      host.querySelectorAll('.cq-chk').forEach(ch=>ch.onclick=(ev)=>{ev.stopPropagation();const id=+ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});
+      host.querySelectorAll('.cq-edit').forEach(b=>b.onclick=(ev)=>{ev.stopPropagation();openBomEdit(+b.dataset.idx);});
+    }
+    if(modal){
+      g('#cq-cancel').onclick=g('#cq-x').onclick=()=>{st.form=null;render();};
+      g('#cq-save').onclick=save;
+      host.querySelectorAll('.cf').forEach(el=>el.oninput=()=>{st.form[el.dataset.k]=el.value;
+        const pm=g('#cq-pv-mat'),ps=g('#cq-pv-sale');if(pm)pm.textContent=nf(matOf(st.form));if(ps)ps.textContent=nf(saleOf(st.form));});
+    }
+    if(rc){
+      g('#cq-rc-cancel').onclick=g('#cq-rx').onclick=()=>{st.recalc=null;render();};
+      g('#cq-rc-pn').oninput=e=>st.recalc.price_normal=e.target.value;
+      g('#cq-rc-ph').oninput=e=>st.recalc.price_high=e.target.value;
+      host.querySelectorAll('input[name=cq-scope]').forEach(r=>r.onchange=()=>{st.recalc.scope=r.value;});
+      g('#cq-rc-run').onclick=doRecalc;
+    }
+    if(be){
+      const close=()=>{st.bomedit=null;render();};
+      const bx=g('#be-x'),bc=g('#be-cancel');if(bx)bx.onclick=close;if(bc)bc.onclick=close;
+      const nl=g('#be-load'),ni=g('#be-newitem');
+      if(nl)nl.onclick=()=>{be.vendor=(g('#be-vendor')?g('#be-vendor').value:be.vendor);loadBomInto(ni.value,null);};
+      if(ni)ni.onkeyup=e=>{if(e.key==='Enter')loadBomInto(ni.value,null);};
+      const bs=g('#be-save');if(bs)bs.onclick=saveBomEdit;
+      const bem=g('#be-editmode');if(bem)bem.onclick=()=>{st.bomedit.viewMode=false;render();};
+      host.querySelectorAll('.be-role').forEach(sel=>sel.onchange=async()=>{const code=sel.dataset.code,role=sel.value;sel.disabled=true;
+        try{await fetch(`${API}/api/coopquote2/set-role`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assy:be.assy,part:code,role})});}catch(e){}
+        loadBomInto(be.assy,(be.rowvals?be.rowvals.sale:(be.data&&be.data.cur_incost!=null?be.data.cur_incost:null)));});
+      const upd=()=>{const soyo=beSoyo();const raw=beRaw();
+        const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0);
+        const procTube=be.data.rows.filter(r=>r.role==='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowGag(r),0);
+        const A=be.asm||{gagong:be.data.assembly_proc||0,mgmt:0,transport:0,profit:0};const asmTot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
+        const mat=raw+baseMat;const gagong=procTube+asmTot;const curIn=(be.data.cur_incost!=null)?be.data.cur_incost:null;
+        const sale=(curIn!=null?curIn:(mat+gagong));const adjust=(curIn!=null?Math.round(curIn-mat-gagong):0);
+        const set=(id,v)=>{const el=g(id);if(el)el.textContent=v;};
+        set('#be-tsoyo',nf4(soyo));set('#be-tsoyo2',nf4(soyo));set('#be-traw',nf(raw));set('#be-tbase',nf(baseMat));set('#be-tmat',nf(mat));set('#be-tmat-root',nf(mat));
+        set('#be-tgag',nf(gagong));set('#be-tadj',nf(adjust));set('#be-adjust',nf(adjust));set('#be-adjgag',nf(adjust));set('#be-tsale',nf(sale));set('#be-grandtot',nf(sale));set('#be-grandtot-l',nf(sale));
+        set('#be-grandmat',nf(mat));set('#be-grandgag',nf(gagong+adjust));set('#be-tgag-root',nf(gagong+adjust));
+        set('#be-tratio-root',(sale>0?Math.round(mat/sale*100):0)+'%');set('#be-tsale-root',nf(sale));};
+      const beRefreshRow=(inp)=>{const code=inp.dataset.code;const r=be.data.rows.find(x=>x.code===code);if(!r)return;
+        const tr=inp.closest('tr');const uw=beUw(r);const rq=beRowQty(r);const rmat=beRowMat(r);const rgag=beRowGag(r);const rtot=rmat+rgag;const rratio=rtot>0?Math.round(rmat/rtot*100):(rmat?100:0);
+        const s=(cls,v)=>{const el=tr.querySelector('.'+cls);if(el)el.textContent=v;};
+        s('be-uw',uw?nf4(uw):(r.role==='용접봉'?'공정':'-'));s('be-sw',uw?nf4(uw*rq):'-');
+        s('be-rm',nf(rmat));s('be-ratio',rratio+'%');s('be-tot',nf(rtot));s('be-rg',nf(rgag));
+        tr.style.background=(r.role==='제작동관'&&!uw)?'#fdf0f0':'';upd();};
+      const bv=g('#be-vendor');if(bv){bv.oninput=e=>be.vendor=e.target.value;bv.onchange=e=>{be.vendor=e.target.value;if(be.data&&be.assy)loadBomInto(be.assy,null);};}
+      host.querySelectorAll('.be-sg').forEach(inp=>inp.oninput=()=>{be.sagubEdits=be.sagubEdits||{};be.sagubEdits[inp.dataset.code]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-sp').forEach(inp=>inp.oninput=()=>{const code=inp.dataset.code,fld=inp.dataset.f;be.edits[code]=be.edits[code]||{};be.edits[code][fld]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-qty').forEach(inp=>inp.oninput=()=>{be.qtyEdits=be.qtyEdits||{};be.qtyEdits[inp.dataset.code]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-mat').forEach(inp=>inp.oninput=()=>{be.matEdits=be.matEdits||{};be.matEdits[inp.dataset.code]=inp.value;beRefreshRow(inp);});
+      host.querySelectorAll('.be-pc').forEach(inp=>inp.oninput=()=>{const code=inp.dataset.code,op=inp.dataset.op;be.procEdits[code]=be.procEdits[code]||{};be.procEdits[code][op]=inp.value;beRefreshRow(inp);});
+      const asmUpd=()=>{if(!be.asm)return;const A=be.asm;const atot=Math.round((+A.gagong||0)+(+A.mgmt||0)+(+A.transport||0)+(+A.profit||0));
+        const t=g('#be-asmtot');if(t)t.textContent=nf(atot);upd();};
+      host.querySelectorAll('.be-asm').forEach(inp=>inp.oninput=()=>{be.asm=be.asm||{procs:{},gagong:0,mgmt:0,transport:0,profit:0};be.asm[inp.dataset.f]=inp.value;asmUpd();});
+      host.querySelectorAll('.be-asmpc').forEach(inp=>inp.oninput=()=>{be.asm=be.asm||{procs:{},gagong:0,mgmt:0,transport:0,profit:0};be.asm.procs=be.asm.procs||{};be.asm.procs[inp.dataset.op]=inp.value;
+        const rate=be.data.rate||{};const lab=be.data.labor_rate||6300;let gg=0;
+        Object.keys(be.asm.procs).forEach(op=>{const c=+be.asm.procs[op]||0;const dv=rate[op];if(c&&dv)gg+=(lab/dv)*c;});
+        be.asm.gagong=Math.round(gg);const gi=host.querySelector('.be-asm[data-f="gagong"]');if(gi)gi.value=be.asm.gagong;asmUpd();});
+    }
+    attachResizers(host);
+  };
+  (async()=>{await loadVendors();load();})();
+};
+
 /* ===== 견적입력 (BOM 구성 자동 + 협력사 스펙만 채움) — /api/coopquote/bom-form·bom-save ===== */
 SCREEN.coopquoteinput=(host)=>{
   const API=API_BASE;
