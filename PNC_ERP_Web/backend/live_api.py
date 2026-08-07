@@ -402,7 +402,7 @@ def _prev_ym(ym):
     yy, mm = int(ym[:2]), int(ym[2:4])
     return f"{(yy-1):02d}12" if mm == 1 else f"{yy:02d}{(mm-1):02d}"
 
-def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001"):
+def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q=""):
     # ★레거시 dw_pu_stock_060_wh: 재고창고(stock_cust)·파트창고(part_wh) + 기간(from6~to6 YYMMDD).
     # 전기이월 = from6 직전월말 스냅샷 + from6 이전 무브. 기간 무브 = [from6, to6]. → 임의기간 재고 정확.
     sc = "".join(ch for ch in str(stock_cust or "Z99990") if ch.isalnum()) or "Z99990"
@@ -412,31 +412,47 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001"):
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     W = f"ISNULL(a.wh_cust_code,'Z99990')='{sc}' AND ISNULL(a.gagong_proc_code,'')='{pw}'"
     CUST = "ISNULL((SELECT cust_desc FROM cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
+    # ★품번(자도번/품명) 스코프: 입력 시 서버 WHERE로 밀어 해당 품목만 스캔(기간 무관 빠름).
+    #   자도번/품명을 pr_m_item에서 코드셋으로 해석 → 인덱스 seek(IN). 미해석시 mat_code LIKE 폴백.
+    #   CI 콜레이션 전제(코드 대소문자 무시). 미입력이면 빈 문자열 = 기존 전체조회 무변경.
+    MFmat = MFitem = ""
+    q = (q or "").strip()
+    if q:
+        qe = q.replace("'", "''")
+        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM pr_m_item WHERE item_code LIKE '%{qe}%' OR item_desc LIKE '%{qe}%'")
+        _codes = [r["c"] for r in _mr if r.get("c")]
+        if _codes:
+            _inl = ",".join("'" + c.replace("'", "''") + "'" for c in _codes)
+            MFmat = f" AND a.mat_code IN ({_inl})"
+            MFitem = f" AND a.item_code IN ({_inl})"
+        else:
+            MFmat = f" AND a.mat_code LIKE '%{qe}%'"
+            MFitem = f" AND a.item_code LIKE '%{qe}%'"
     LINES = f"""
  SELECT UPPER(a.mat_code) mat, a.maint_ymd ymd, a.maint_qty inq,CAST(0 AS decimal(18,4)) outq,CAST(0 AS decimal(18,4)) etc,CAST(0 AS decimal(18,4)) mv,
    CASE a.maint_tag WHEN '3' THEN '기초재고' WHEN '9' THEN '자재창고입고' WHEN 'C' THEN IIF(a.maint_qty>0,'가공이동입고','가공이동취소') WHEN 'G' THEN '축관입고' WHEN 'H' THEN '가공입고' WHEN 'S' THEN '세트입고' WHEN 'P' THEN '생산'+IIF(a.maint_qty<0,'취소','') WHEN 'R' THEN '반품' ELSE '' END div, {CUST} cust, a.work_order wo
-  FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND a.maint_qty<>0 AND {INSP} AND {W}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,0,'도입-구매',{CUST},a.work_order FROM pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='P'
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty*-1,0,0,0,'생산창고반품',{CUST},a.work_order FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('T') AND a.maint_qty<>0 AND {INSP} AND {W}
- UNION ALL SELECT UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,0,'자재창고입고','작업처 : 제조1팀',NULL FROM pu_t_cut_dtl a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND {W}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,0,'재고조정',{CUST},a.work_order FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='2' AND a.maint_qty<>0 AND {W}
- UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'' FROM PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'
- UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'' FROM PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'
+  FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,0,'도입-구매',{CUST},a.work_order FROM pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='P'{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty*-1,0,0,0,'생산창고반품',{CUST},a.work_order FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('T') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,0,'자재창고입고','작업처 : 제조1팀',NULL FROM pu_t_cut_dtl a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,0,'재고조정',{CUST},a.work_order FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='2' AND a.maint_qty<>0 AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'' FROM PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'{MFitem}
+ UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'' FROM PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,0,
    CASE a.maint_tag WHEN '1' THEN '불량' WHEN '4' THEN '생산사용'+IIF(a.maint_qty>0,'취소','') WHEN '5' THEN '협력업체판매' WHEN '6' THEN '일반간판출하' WHEN '8' THEN '라인무상공급' WHEN 'A' THEN '개발불출' WHEN 'B' THEN IIF(a.out_wh_gubun='1','생산창고출고','영업창고출고') WHEN 'J' THEN '출하'+IIF(a.maint_qty>0,'취소','') ELSE '' END,
    ISNULL((SELECT cust_desc FROM cm_m_cust m WHERE m.cust_code=a.cust_code AND a.cust_code<>'{sc}'),''), a.work_order
-  FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND a.maint_qty<>0 AND {W}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,0,'도입-판매',{CUST},a.work_order FROM pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='Q'
+  FROM pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND a.maint_qty<>0 AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,0,'도입-판매',{CUST},a.work_order FROM pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='Q'{MFmat}
 """
     BF = f"""
- SELECT UPPER(a.mat_code) mat, a.stock_qty sq FROM pu_t_month_stock_wh a WHERE a.stock_yymm='{pv}' AND a.cust_code='{sc}' AND ISNULL(a.gagong_proc_code,'')='{pw}'
- UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND {INSP} AND {W}
- UNION ALL SELECT UPPER(a.mat_code), IIF(a.division='Q',-a.maint_qty,a.maint_qty) FROM pu_t_stock_maint_c a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.wh_cust_code='{sc}' AND a.part_code='{pw}'
- UNION ALL SELECT UPPER(a.mat_code), a.maint_qty*-1 FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('T') AND {INSP} AND {W}
- UNION ALL SELECT UPPER(a.mat_code), a.cut_qty FROM pu_t_cut_dtl a WHERE a.cut_ymd>'{pv99}' AND a.cut_ymd<'{y01}' AND {W}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag='2' AND {W}
- UNION ALL SELECT UPPER(a.item_code), (CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END)+(CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END) FROM PU_T_STOCK_MOVE a WHERE a.move_ymd>'{pv99}' AND a.move_ymd<'{y01}' AND ('{sc}' IN (a.fr_cust_code,a.to_cust_code)) AND ('{pw}' IN (a.fr_gagong_proc_code,a.to_gagong_proc_code))
- UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND {W}
+ SELECT UPPER(a.mat_code) mat, a.stock_qty sq FROM pu_t_month_stock_wh a WHERE a.stock_yymm='{pv}' AND a.cust_code='{sc}' AND ISNULL(a.gagong_proc_code,'')='{pw}'{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND {INSP} AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), IIF(a.division='Q',-a.maint_qty,a.maint_qty) FROM pu_t_stock_maint_c a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.wh_cust_code='{sc}' AND a.part_code='{pw}'{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_qty*-1 FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('T') AND {INSP} AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.cut_qty FROM pu_t_cut_dtl a WHERE a.cut_ymd>'{pv99}' AND a.cut_ymd<'{y01}' AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag='2' AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.item_code), (CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END)+(CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END) FROM PU_T_STOCK_MOVE a WHERE a.move_ymd>'{pv99}' AND a.move_ymd<'{y01}' AND ('{sc}' IN (a.fr_cust_code,a.to_cust_code)) AND ('{pw}' IN (a.fr_gagong_proc_code,a.to_gagong_proc_code)){MFitem}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND {W}{MFmat}
 """
     _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo FROM ({LINES}) x")
     _c2, bfrows = _rows(f"SELECT mat, SUM(sq) bf FROM ({BF}) b GROUP BY mat")
@@ -459,16 +475,17 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001"):
     return stock, moves
 
 @live_router.get("/matinout")
-def matinout(from_ymd: str = Query(""), to_ymd: str = Query(""), stock_cust: str = Query("Z99990"), part_wh: str = Query("IS0001"), source: str = Query("live")):
-    """자재 입출고현황. 기본 source=live(현행 무변경). source=nx면 stock_ledger(MAT) 파생. 기간 from_ymd~to_ymd(YYMMDD)."""
+def matinout(from_ymd: str = Query(""), to_ymd: str = Query(""), stock_cust: str = Query("Z99990"), part_wh: str = Query("IS0001"), q: str = Query(""), source: str = Query("live")):
+    """자재 입출고현황. 기본 source=live(현행 무변경). source=nx면 stock_ledger(MAT) 파생. 기간 from_ymd~to_ymd(YYMMDD).
+    q(자도번/품명) 입력 시 서버 WHERE로 스코프 → 해당 품목만 조회(기간 길어도 빠름)."""
     to6 = _digits(to_ymd, 6) or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
     from6 = _digits(from_ymd, 6) or (to6[:4] + "01")
     if from6 > to6:
         from6, to6 = to6, from6
     if source == "nx":
         return _nx_screen("MAT", from6, to6)
-    stock, moves = _matinout(from6, to6, stock_cust, part_wh)
-    return {"from_ymd": from6, "to_ymd": to6, "stock": stock, "moves": moves, "stock_cust": stock_cust, "part_wh": part_wh}
+    stock, moves = _matinout(from6, to6, stock_cust, part_wh, q)
+    return {"from_ymd": from6, "to_ymd": to6, "stock": stock, "moves": moves, "stock_cust": stock_cust, "part_wh": part_wh, "q": q}
 
 # ================= 자재출고관리 (구매/자재, w_pu_stock_150 / dw_pu_stock_150) — 자재개별출고 조회 =================
 # ★레거시 정본: PU_T_STOCK_MAINT WHERE MAINT_TAG='B'(자재개별출고=파트출고/생산투입 이동전표) + 기간.
