@@ -12,7 +12,7 @@ router = APIRouter()
 #  모델: 원소재비 = total_weight(kg) × sagub_price(원/kg) · 가공비 고정
 #        판가 = 원소재비 + 가공비 → 사급가 변경 시 원소재비만 재계산, 가공비 유지
 #        현재 입고가 = PR_M_ITEM_COST.ITEM_COST (라이브, 최신 COST_APPLY_YMD)
-_PREV_YMD = "251231"   # 종전입고가 기준일: 작년 12월 이하 최신 실입고
+_PREV_YMD = "251130"   # 종전입고가 기준일: 25/11 이하 최신 실입고(12월 년말 가단가 제외)
 _INCOST_CACHE = {}     # code(upper) -> (cur_cost, prev_cost, cur_ymd) | None(미존재). 10분 TTL
 _INCOST_TS = [0.0]
 def _incost(cur, assys):
