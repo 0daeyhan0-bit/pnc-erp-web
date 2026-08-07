@@ -356,11 +356,12 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
             cur.execute(f"""SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(METAL_GUBUN,''),
-                  ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0)
+                  ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(IN_CUST_CODE,'')
                 FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *chunk)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "metal": str(r[3]).strip(),
-                    "diam": float(r[4] or 0), "thick": float(r[5] or 0), "length": float(r[6] or 0)}
+                    "diam": float(r[4] or 0), "thick": float(r[5] or 0), "length": float(r[6] or 0),
+                    "in_cust": str(r[7]).strip()}
         # 3) 매입가(PR_M_ITEM_COST 최신, 제이에스2228 제외, 매입TAG='1' 우선)
         pur = {}
         for i in range(0, len(nl), 900):
@@ -499,12 +500,16 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             if div and div > 0: tot += (labor / div) * cnt
         return tot
 
-    def role_of(code, sag, metal, haskids):
+    def role_of(code, sag, metal, haskids, in_cust=""):
         u = code.upper()
         if haskids: return "반제품"
         if u.startswith("RAC") or u.startswith("BCUP"): return "용접봉"
-        # ★동 파이프(CU/고강도)는 조달방식 무관 항상 우리 동관 사급 → 사급플래그보다 우선
-        if metal in ("CU", "고강도"): return "제작동관"
+        if metal in ("CU", "고강도"):
+            # ★동관 = assy 소유 협력사가 직접 가공(in_cust=owner/빈값)일 때만. 우리가 원소재 사급.
+            #   타 업체가 공급(in_cust≠owner, 예 대원 assy의 미래정밀·대경테크윈)=사급부품(SAGUB여도).
+            if (not in_cust) or (vcode and in_cust == vcode):
+                return "제작동관"
+            return "사급"
         if sag == "1": return "사급"
         return "매입부품"
 
@@ -516,7 +521,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         seen.add(code)
         for e in edges.get(code, []):
             ch = e["child"]; ci = info.get(ch, {}); haskids = ch in edges
-            role = role_of(ch, e["sag"], ci.get("metal", ""), haskids)
+            role = role_of(ch, e["sag"], ci.get("metal", ""), haskids, ci.get("in_cust", ""))
             cq = cumq * e["q"]
             cs = coop.get(ch.upper()); uw = 0.0; src = ""
             pf_d = pf_t = pf_l = 0.0   # 협의 프리필 치수(협력사스펙 없을 때 BOM+협의두께)
