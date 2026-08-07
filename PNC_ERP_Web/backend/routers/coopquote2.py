@@ -154,9 +154,9 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             fin = r["sale_price"]
             r["final_quote"] = fin
             r["diff"] = (fin - r["cur_incost"]) if (r["cur_incost"] is not None) else None
-        # ── ★인상전/인상후 재료비 = bom-form(BOM 소요량 정본) 배치계산 = nx.coop_matcost ──
-        #   리스트=모달 자동일치. 사급=판매단가×BOM소요(종전/최신)·동관=소요중량×사급가(종전/신규)·용접봉=소요×단가.
-        #   갱신: scratchpad/mat_matcost.py 또는 POST /api/coopquote2/refresh-matcost
+        # ── ★인상전/인상후 재료비 = coop_quote_part_v2(parts) 합계 (단일 진실원천) ──
+        #   인상전 = SUM(mat_before)(전부 NULL=신규 품목) · 인상후 = SUM(mat_after).
+        #   BOM/규칙 변경 시 로더(재적재)로 parts 갱신하면 자동 반영. 별도 캐시(coop_matcost) 안 씀.
         assy_up = [r["assy_code"] for r in rows]
         matcost = {}   # assy_upper -> (mat_before, mat_after)
         for i in range(0, len(assy_up), 400):
@@ -164,8 +164,10 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             if not chunk:
                 continue
             inlist = "','".join(c.upper() for c in chunk)
-            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), mat_before, mat_after
-                FROM nx.coop_matcost WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')""")
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), SUM(mat_before), SUM(ISNULL(mat_after,0))
+                FROM nx.coop_quote_part_v2 WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')
+                  AND ISNULL(is_active,1)=1 AND ISNULL(voided,0)=0
+                GROUP BY UPPER(LTRIM(RTRIM(assy_code)))""")
             for a, mb, ma in cur.fetchall():
                 matcost[str(a).strip()] = ((float(mb) if mb is not None else None), (float(ma) if ma is not None else None))
         for r in rows:
