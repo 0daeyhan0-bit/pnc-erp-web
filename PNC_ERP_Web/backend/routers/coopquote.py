@@ -109,7 +109,7 @@ def coopquote_vendors():
 
 
 @router.get("/api/coopquote/list")
-def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int = Query(0),
+def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int = Query(0), newonly: int = Query(0),
                    ym: str = Query("", description="적용월(전체적용) YYMM|YYYYMM — 인상후 판매단가/사급가 as-of")):
     """협력사 견적 목록 — 인상전(종전) vs 인상후(적용월) 재료비·총가공비·입고가 대비.
        총가공비 = 입고가 − 재료비. 차이(신) = 인상후 총가공비 − 인상전 총가공비.
@@ -126,6 +126,8 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
         if q.strip():
             where.append("(assy_code LIKE ? OR item_name LIKE ?)")
             args += [f"%{q.strip()}%", f"%{q.strip()}%"]
+        if newonly:
+            where.append("src LIKE 'BOM자동%'")   # 신규견적(BOM 자동생성분)
         cur.execute(f"""SELECT quote_id,vendor,assy_code,item_name,spec,total_weight,sagub_price,
             mat_cost,proc_cost,sale_price,quote_price,final_price,lg_price,currency,status,remark,
             CONVERT(varchar(19),ISNULL(upd_dt,reg_dt),120), ISNULL(grade,N'일반CU'), mat_ratio, ISNULL(fixed_mat,0),
@@ -267,7 +269,6 @@ def coopquote_set_role(payload: dict = Body(...)):
         cur.execute("SELECT ISNULL(sale_price,0) FROM nx.coop_quote WHERE assy_code=?", assy)
         sr = cur.fetchone(); sale = float(sr[0] or 0) if sr else 0
         proc = max(0, sale - mat_cost)
-        grade = "고강도CU" if mat_raw and cur.execute("SELECT COUNT(*) FROM nx.coop_quote_part WHERE assy_code=? AND ptype_v2=N'동관고강도'", assy) is None else None
         cur.execute("""UPDATE nx.coop_quote SET mat_cost=?, mat_raw=?, mat_weld=?, mat_part=?, total_weight=?, proc_cost=?, upd_dt=GETDATE()
             WHERE assy_code=?""", mat_cost, mat_raw, mat_weld, mat_part, tw, proc, assy)
         cur.execute("IF EXISTS(SELECT 1 FROM nx.coop_matcost WHERE assy_code=?) UPDATE nx.coop_matcost SET mat_after=? WHERE assy_code=? ELSE INSERT INTO nx.coop_matcost(assy_code,mat_before,mat_after) VALUES(?,NULL,?)", assy, mat_cost, assy, assy, mat_cost)

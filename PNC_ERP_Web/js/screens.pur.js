@@ -1578,7 +1578,7 @@ SCREEN.sourceprofile=(c)=>{
 /* ===== 협력사견적: 견적(원소재비/가공비 분리) vs 현재 입고가 · 사급가 변경 시 판가 재계산 ===== */
 SCREEN.coopquote=(host)=>{
   const API=API_BASE;
-  const st={rows:[],cnt:0,vendor:'',q:'',vendors:[],loading:false,form:null,sel:new Set(),recalc:null,msg:'',activeOnly:true,detail:null,bomedit:null,workMode:false,worklist:[],workBy:{},workDone:0,workLoading:false,workType:''};
+  const st={rows:[],cnt:0,vendor:'',q:'',vendors:[],loading:false,form:null,sel:new Set(),recalc:null,msg:'',filterMode:'active',detail:null,bomedit:null,workMode:false,worklist:[],workBy:{},workDone:0,workLoading:false,workType:''};
   const loadParts=async(idx)=>{const r=st.rows[idx];if(!r)return;
     st.detail={assy:r.assy_code,vendor:r.vendor,rows:[],loading:true};render();
     try{const res=await fetch(`${API}/api/coopquote/parts?assy=${encodeURIComponent(r.assy_code)}&vendor=${encodeURIComponent(r.vendor)}`);
@@ -1590,7 +1590,7 @@ SCREEN.coopquote=(host)=>{
   const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote'):true;
   const loadVendors=async()=>{try{const r=await fetch(`${API}/api/coopquote/vendors`);const j=await r.json();st.vendors=j.rows||[];}catch(e){}};
   const load=async()=>{st.loading=true;if(!st.ym)st.ym=new Date().toISOString().slice(0,7);render();
-    try{const r=await fetch(`${API}/api/coopquote/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.activeOnly?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
+    try{const r=await fetch(`${API}/api/coopquote/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.filterMode==='active'?1:0}&newonly=${st.filterMode==='new'?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
       const j=await r.json();st.rows=j.rows||[];st.cnt=j.count||0;}
     catch(e){st.rows=[];st.cnt=0;}
     st.loading=false;render();};
@@ -1693,7 +1693,11 @@ SCREEN.coopquote=(host)=>{
        <input class="inp" id="cq-q" value="${esc(st.q)}" placeholder="품번/품명 검색" style="width:170px">
        <span style="display:inline-flex;align-items:center;gap:5px;background:#fff3d6;border:1px solid #e8c877;border-radius:6px;padding:2px 8px"><label style="color:#8a5a00;font-weight:700;font-size:12px" title="인상후 사급부품 판매단가·원소재 사급가 기준월 — 리스트 전체에 적용">📅 적용월(전체)</label><input class="inp" id="cq-ym" type="month" value="${esc(st.ym||'')}" style="width:130px;font-weight:600"></span>
        <button class="btn" id="cq-go">🔍 조회</button>
-       <button class="btn" id="cq-active" title="최근 4개월 내 실제 납품(입고) 실적이 있는 품목만" style="${st.activeOnly?'background:#1c7c3a;color:#fff':'background:#eef2f7;color:#33507d'}">🚚 현재 납품 품목만 ${st.activeOnly?'ON':'OFF'}</button>
+       <select class="btn" id="cq-filter" title="목록 필터: 전체 / 최근4개월 납품실적 / 미승인(BOM 자동생성)" style="background:#eef2f7;color:#33507d;font-weight:600">
+         <option value="all"${st.filterMode==='all'?' selected':''}>📋 전체</option>
+         <option value="active"${st.filterMode==='active'?' selected':''}>🚚 현재 납품품목</option>
+         <option value="new"${st.filterMode==='new'?' selected':''}>🆕 미승인 견적</option>
+       </select>
        ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
@@ -1875,7 +1879,7 @@ SCREEN.coopquote=(host)=>{
              return `<tr style="${need?'background:#fdf0f0':''}">
                <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
                <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
-               <td>${beBadge(r.role)}</td>
+               <td>${(be.viewMode||r.haskids||r.role==='반제품')?beBadge(r.role):(()=>{const cur=(r.role_v3==='동관고강도')?'동관고강도':(r.role==='제작동관'?'제작동관':(r.role==='용접봉'?'용접봉':'사급'));return `<select class="be-role" data-code="${esc(r.code)}" style="font-size:10px;padding:1px 2px;border:1px solid #cbd5e6;border-radius:6px;background:#fffbe8">${['제작동관','동관고강도','사급','용접봉'].map(o=>`<option${cur===o?' selected':''}>${o}</option>`).join('')}</select>`;})()}</td>
                <td class="num"><input class="be-qty inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(qtyEd!=null&&qtyEd!==''?qtyEd:(r.cum_qty||''))}" style="width:46px;min-width:0;text-align:right;padding:1px 2px"></td>
                <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
                ${isTube?`<td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="diam" value="${esc(dd)}" style="width:38px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_diam||''}"></td>
@@ -1977,7 +1981,7 @@ SCREEN.coopquote=(host)=>{
        .be-view input{max-width:56px!important}</style>`;
     const g=id=>host.querySelector(id);
     g('#cq-go').onclick=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
-    g('#cq-active').onclick=()=>{st.activeOnly=!st.activeOnly;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
+    {const cf=g('#cq-filter');if(cf)cf.onchange=e=>{st.filterMode=e.target.value;st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};}
     {const gw=g('#cq-work');if(gw)gw.onclick=()=>{st.workMode=!st.workMode;st.msg='';if(st.workMode)loadWork();else render();};}
     host.querySelectorAll('.cq-wrow').forEach(tr=>tr.onclick=()=>{const r=st.worklist[+tr.dataset.idx];if(r)openWork(r.assy_code,r.vendor);});
     g('#cq-xls').onclick=()=>{
@@ -1992,7 +1996,7 @@ SCREEN.coopquote=(host)=>{
         bl(r.mat_before),bl(r.ratio_before),bl(r.proc_before),bl(r.incost_before),
         bl(r.mat_after),bl(r.ratio_after),bl(r.proc_after),bl(r.incost_after),
         bl(r.diff_new),fy(r.last_in_ymd),r.status]);
-      const tag=(st.vendor||'전체')+(st.ym?'_'+st.ym:'')+(st.activeOnly?'_현재납품':'');
+      const tag=(st.vendor||'전체')+(st.ym?'_'+st.ym:'')+(st.filterMode==='active'?'_현재납품':(st.filterMode==='new'?'_미승인':''));
       dlCSV('협력사견적_'+tag+'.csv',hd,rows);};
     g('#cq-vendor').onchange=()=>{st.vendor=g('#cq-vendor').value;st.q=g('#cq-q').value;st.msg='';load();};
     {const _g=host.querySelector('#cq-grid'); if(_g){ if(st._scroll!=null)_g.scrollTop=st._scroll; _g.onscroll=()=>{st._scroll=_g.scrollTop;}; }}  // 상세 열고닫아도 리스트 스크롤 유지
@@ -2038,6 +2042,9 @@ SCREEN.coopquote=(host)=>{
       if(ni)ni.onkeyup=e=>{if(e.key==='Enter')loadBomInto(ni.value,null);};
       const bs=g('#be-save');if(bs)bs.onclick=saveBomEdit;
       const bem=g('#be-editmode');if(bem)bem.onclick=()=>{st.bomedit.viewMode=false;render();};
+      host.querySelectorAll('.be-role').forEach(sel=>sel.onchange=async()=>{const code=sel.dataset.code,role=sel.value;sel.disabled=true;
+        try{await fetch(`${API}/api/coopquote/set-role`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assy:be.assy,part:code,role})});}catch(e){}
+        loadBomInto(be.assy,(be.rowvals?be.rowvals.sale:(be.data&&be.data.cur_incost!=null?be.data.cur_incost:null)));});
       const upd=()=>{const soyo=beSoyo();const raw=beRaw();
         const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0);
         const procTube=be.data.rows.filter(r=>r.role==='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowGag(r),0);
