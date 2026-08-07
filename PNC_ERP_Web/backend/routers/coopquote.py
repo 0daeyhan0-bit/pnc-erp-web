@@ -643,6 +643,25 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             walk(ch, lvl+1, cq)
         seen.discard(code)
     walk(item, 1, 1.0)
+    # ★바레 원소재(BOM 자식 0) = 품번 자체가 원소재(자작동관 등) → 자기자신을 제작동관 행으로(치수·개당중량·사급가 표시)
+    if not rows:
+        rci = info.get(item, {})
+        if rci.get("metal") in ("CU", "고강도") and rci.get("diam") and rci.get("length"):
+            b_d = rci["diam"]; b_l = rci["length"]
+            b_t = _thick_std(b_d, rci.get("thick", 0), rci.get("metal", ""))
+            b_uw = geom(b_d, b_t, b_l)
+            b_sg = cur_sagub_val
+            rows.append({
+                "mat_now": round(b_uw * b_sg), "mat_before": (round(b_uw * sagub_q) if sagub_q > 0 else round(b_uw * b_sg)),
+                "sale_price": None, "part_total": None, "part_mat": None,
+                "level": 1, "code": item, "name": rci.get("nm", ""), "role": "제작동관",
+                "use_qty": 1, "cum_qty": 1.0, "sagub": False,
+                "lg_diam": rci.get("diam", 0), "lg_thick": rci.get("thick", 0), "lg_length": rci.get("length", 0),
+                "coop_diam": b_d, "coop_thick": b_t, "coop_length": b_l, "coop_sagub": b_sg,
+                "unit_weight": b_uw, "weight_src": "BOM+협의두께(단품)", "soyo_weight": b_uw,
+                "pur_price": None, "weld_cost": 0, "is_proc": False,
+                "procs": None, "proc_cost": 0,
+                "need_input": False, "haskids": False})
     # 용접봉 견적기준: BOM 용접봉코드가 견적과 달라 미매치인 행에 견적 용접봉 잔여액 균등배분(현BOM 소요 무시)
     wr = [r for r in rows if r["role"] == "용접봉"]
     if wr and weld_quote:
