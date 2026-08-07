@@ -220,6 +220,62 @@ def coopquote_parts(assy: str = Query(...), vendor: str = Query("")):
         nx.close()
 
 
+@router.post("/api/coopquote/set-role")
+def coopquote_set_role(payload: dict = Body(...)):
+    """견적 편집: 부품 역할(ptype_v2) 수동 변경 + 재료비/헤더 재계산.
+       role: 제작동관/동관고강도/사급부품/용접봉. 동관=uw×소요×사급가(20000/22000)·사급부품=매입가×소요·용접봉=유지."""
+    assy = str(payload.get("assy") or "").strip()
+    part = str(payload.get("part") or "").strip()
+    role = str(payload.get("role") or "").strip()
+    R2PT = {"제작동관": "동관", "동관": "동관", "동관고강도": "동관고강도",
+            "사급": "사급부품", "사급부품": "사급부품", "매입부품": "사급부품", "용접봉": "용접봉"}
+    pt = R2PT.get(role)
+    if not assy or not part or not pt:
+        return {"ok": False, "error": "assy/part/role 필수"}
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT ISNULL(unit_wt,0), ISNULL(soyo,1), ISNULL(mat_cost,0) FROM nx.coop_quote_part WHERE assy_code=? AND UPPER(LTRIM(RTRIM(part_code)))=?", assy, part.upper())
+        row = cur.fetchone()
+        if not row:
+            return {"ok": False, "error": "부품 없음"}
+        uw = float(row[0] or 0); soyo = float(row[1] or 1); cur_mat = float(row[2] or 0)
+        if pt in ("동관", "동관고강도"):
+            sg = 22000 if pt == "동관고강도" else 20000
+            mat = round(uw * soyo * sg)
+        elif pt == "용접봉":
+            mat = round(cur_mat)   # 용접봉 재료비 유지
+        else:  # 사급부품 = 최신 매입가 × 소요
+            cn = _conn(); cc = cn.cursor()
+            cc.execute("""SELECT TOP 1 ITEM_COST FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
+                WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0
+                ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC""", part.upper())
+            pr = cc.fetchone(); cn.close()
+            pur = float(pr[0]) if (pr and pr[0]) else 0
+            mat = round(pur * soyo)
+            uw = None
+        cur.execute("""UPDATE nx.coop_quote_part SET ptype=?, ptype_v2=?, unit_wt=?, mat_cost=?, part_total=?, mat_after=?
+            WHERE assy_code=? AND UPPER(LTRIM(RTRIM(part_code)))=?""", pt, pt, uw, mat, mat, mat, assy, part.upper())
+        # 헤더 재계산: 동관/사급/용접 재료비 합
+        cur.execute("""SELECT SUM(CASE WHEN ptype_v2 IN(N'동관',N'동관고강도') THEN ISNULL(mat_cost,0) ELSE 0 END),
+                              SUM(CASE WHEN ptype_v2=N'용접봉' THEN ISNULL(mat_cost,0) ELSE 0 END),
+                              SUM(CASE WHEN ptype_v2 NOT IN(N'동관',N'동관고강도',N'용접봉') THEN ISNULL(mat_cost,0) ELSE 0 END),
+                              SUM(CASE WHEN ptype_v2 IN(N'동관',N'동관고강도') THEN ISNULL(unit_wt,0)*ISNULL(soyo,1) ELSE 0 END)
+                       FROM nx.coop_quote_part WHERE assy_code=?""", assy)
+        s = cur.fetchone()
+        mat_raw = float(s[0] or 0); mat_weld = float(s[1] or 0); mat_part = float(s[2] or 0); tw = float(s[3] or 0)
+        mat_cost = mat_raw + mat_weld + mat_part
+        cur.execute("SELECT ISNULL(sale_price,0) FROM nx.coop_quote WHERE assy_code=?", assy)
+        sr = cur.fetchone(); sale = float(sr[0] or 0) if sr else 0
+        proc = max(0, sale - mat_cost)
+        grade = "고강도CU" if mat_raw and cur.execute("SELECT COUNT(*) FROM nx.coop_quote_part WHERE assy_code=? AND ptype_v2=N'동관고강도'", assy) is None else None
+        cur.execute("""UPDATE nx.coop_quote SET mat_cost=?, mat_raw=?, mat_weld=?, mat_part=?, total_weight=?, proc_cost=?, upd_dt=GETDATE()
+            WHERE assy_code=?""", mat_cost, mat_raw, mat_weld, mat_part, tw, proc, assy)
+        cur.execute("IF EXISTS(SELECT 1 FROM nx.coop_matcost WHERE assy_code=?) UPDATE nx.coop_matcost SET mat_after=? WHERE assy_code=? ELSE INSERT INTO nx.coop_matcost(assy_code,mat_before,mat_after) VALUES(?,NULL,?)", assy, mat_cost, assy, assy, mat_cost)
+        return {"ok": True, "ptype_v2": pt, "row_mat": mat, "header_mat": mat_cost}
+    finally:
+        nx.close()
+
+
 @router.post("/api/coopquote/save")
 def coopquote_save(payload: dict = Body(...)):
     """신규/수정 견적 저장. 원소재비=total_weight×sagub_price, 판가=원소재비+가공비."""
