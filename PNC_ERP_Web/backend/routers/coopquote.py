@@ -585,8 +585,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             if cs and (cs["uw"] > 0 or (cs["diam"] and cs["thick"] and cs["length"])):
                 uw = cs["uw"] if cs["uw"] > 0 else geom(cs["diam"], cs["thick"], cs["length"]); src = "협력사"
                 pf_d, pf_t, pf_l = cs["diam"], cs["thick"], cs["length"]
-            elif role == "제작동관" and ci.get("diam") and ci.get("length"):
-                # ★협력사스펙 없어도 BOM 외경/길이 + 협의두께규칙으로 프리필(직원 편집 가능)
+            elif role != "반제품" and ci.get("metal") in ("CU", "고강도") and ci.get("diam") and ci.get("length"):
+                # ★모든 동 파이프(제작동관·사급 포함)에 BOM 외경/길이 + 협의두께규칙으로 치수·개당중량 프리필
                 pf_d = ci["diam"]; pf_l = ci["length"]
                 pf_t = _thick_std(pf_d, ci.get("thick", 0), ci.get("metal", ""))
                 uw = geom(pf_d, pf_t, pf_l); src = "BOM+협의두께"
