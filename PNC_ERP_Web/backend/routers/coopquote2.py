@@ -685,8 +685,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     _v3 = {}
     try:
         _nxc = _nx(); _nc = _nxc.cursor()
-        _nc.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), mat_before, mat_after, ptype_v2, ptype, spec, prev_sagub FROM nx.coop_quote_part_v2 WHERE assy_code=?", item)
-        _v3 = {str(x[0]).strip(): ((float(x[1]) if x[1] is not None else None), (float(x[2]) if x[2] is not None else None), str(x[3] or ''), str(x[4] or ''), str(x[5] or ''), (float(x[6]) if x[6] is not None else 0)) for x in _nc.fetchall()}
+        _nc.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), mat_before, mat_after, ptype_v2, ptype, spec, prev_sagub, unit_weight FROM nx.coop_quote_part_v2 WHERE assy_code=?", item)
+        _v3 = {str(x[0]).strip(): ((float(x[1]) if x[1] is not None else None), (float(x[2]) if x[2] is not None else None), str(x[3] or ''), str(x[4] or ''), str(x[5] or ''), (float(x[6]) if x[6] is not None else 0), (float(x[7]) if x[7] is not None else 0)) for x in _nc.fetchall()}
         _nxc.close()
     except Exception:
         _v3 = {}
@@ -697,7 +697,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     for r in rows:
         _k = str(r["code"]).strip().upper()
         if _k in _v3:
-            _mb, _ma, _pt, _pt2, _pt3, _psg = _v3[_k]
+            _mb, _ma, _pt, _pt2, _pt3, _psg, _puw = _v3[_k]
             if _ma is not None:
                 r["mat_now"] = round(_ma)
             r["mat_before"] = round(_mb) if _mb is not None else None   # v2가 공란이면 종전도 공란(인상후견적=인상전 불필요)
@@ -712,6 +712,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             # ★사급가 표시값: 수불=인상후사급가(20,000/22,000) · 용접봉=사급가(prev_sagub)
             if _pt == '수불':
                 r["coop_sagub"] = 22000 if ('고강도' in _pt2) else 20000
+                if _puw:   # ★개당중량=v2(BOM치수) 중량으로 덮어씀 (beUw가 unit_weight 그대로 반환하므로)
+                    r["unit_weight"] = _puw
                 if _pt3 and 'x' in _pt3.lower():   # spec="9.52x0.65x248" → 모달 치수를 BOM치수로 정합(견적치수 아님·규칙①)
                     try:
                         _sp = _pt3.lower().split('x')
@@ -728,8 +730,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         else:
             r["in_quote"] = (str(r["code"]).strip().upper() in _pmset) or (r["role"] == "용접봉" and (r.get("weld_cost") or 0) > 0)
     if _v3:
-        total_mat = round(sum(ma for (mb, ma, pt, pt2, pt3, psg) in _v3.values() if ma is not None))
-        total_mat_before = round(sum(mb for (mb, ma, pt, pt2, pt3, psg) in _v3.values() if mb is not None))
+        total_mat = round(sum(ma for (mb, ma, pt, pt2, pt3, psg, puw) in _v3.values() if ma is not None))
+        total_mat_before = round(sum(mb for (mb, ma, pt, pt2, pt3, psg, puw) in _v3.values() if mb is not None))
     elif partmap:
         total_mat = round(sum((r["mat_now"] or 0) for r in rows if r["in_quote"]))
         total_mat_before = round(sum((r["mat_before"] or 0) for r in rows if r["in_quote"]))
