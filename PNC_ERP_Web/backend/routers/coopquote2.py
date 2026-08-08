@@ -712,6 +712,12 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             # ★사급가 표시값: 수불=인상후사급가(20,000/22,000) · 용접봉=사급가(prev_sagub)
             if _pt == '수불':
                 r["coop_sagub"] = 22000 if ('고강도' in _pt2) else 20000
+                if _pt3 and 'x' in _pt3.lower():   # spec="9.52x0.65x248" → 모달 치수를 BOM치수로 정합(견적치수 아님·규칙①)
+                    try:
+                        _sp = _pt3.lower().split('x')
+                        r["coop_diam"] = float(_sp[0]); r["coop_thick"] = float(_sp[1]); r["coop_length"] = float(_sp[2])
+                    except Exception:
+                        pass
             elif _pt == '용접봉' and _psg:
                 r["coop_sagub"] = round(_psg)
     # ★재료비 = Σ in_quote 행. v3 있으면 v3 부품집합 기준.
