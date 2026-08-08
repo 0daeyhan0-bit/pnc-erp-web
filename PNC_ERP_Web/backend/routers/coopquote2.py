@@ -716,8 +716,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         else:
             r["in_quote"] = (str(r["code"]).strip().upper() in _pmset) or (r["role"] == "용접봉" and (r.get("weld_cost") or 0) > 0)
     if _v3:
-        total_mat = round(sum(ma for (mb, ma, pt) in _v3.values() if ma is not None))
-        total_mat_before = round(sum(mb for (mb, ma, pt) in _v3.values() if mb is not None))
+        total_mat = round(sum(ma for (mb, ma, pt, pt2) in _v3.values() if ma is not None))
+        total_mat_before = round(sum(mb for (mb, ma, pt, pt2) in _v3.values() if mb is not None))
     elif partmap:
         total_mat = round(sum((r["mat_now"] or 0) for r in rows if r["in_quote"]))
         total_mat_before = round(sum((r["mat_before"] or 0) for r in rows if r["in_quote"]))
