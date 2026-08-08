@@ -700,8 +700,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             _mb, _ma, _pt, _pt2, _pt3, _psg = _v3[_k]
             if _ma is not None:
                 r["mat_now"] = round(_ma)
-            if _mb is not None:
-                r["mat_before"] = round(_mb)
+            r["mat_before"] = round(_mb) if _mb is not None else None   # v2가 공란이면 종전도 공란(인상후견적=인상전 불필요)
             r["role_v3"] = _pt
             _nr = _ROLE.get(_pt)
             if _nr and _nr != r["role"]:
