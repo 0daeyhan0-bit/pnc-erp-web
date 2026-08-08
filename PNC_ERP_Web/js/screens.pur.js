@@ -1676,7 +1676,7 @@ SCREEN.coopquote=(host)=>{
       if(wasWork){await loadWork();}else{await load();}}
     catch(e){alert('저장 실패: '+e.message);}};
   const beBadge=(role)=>{const M={'제작동관':['#e8f3ec','#1c7c3a'],'사급':['#eef2f7','#5a6a80'],'용접봉':['#fff3e0','#b8791f'],'매입부품':['#f0ecfa','#6a3fb0'],'반제품':['#e8eef7','#1c47a0']};
-    const c=M[role]||['#eee','#555'];return `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${c[0]};color:${c[1]};white-space:nowrap">${role}</span>`;};
+    const key=(role&&role.indexOf('제작(')===0)?'제작동관':role;const c=M[key]||['#eee','#555'];return `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${c[0]};color:${c[1]};white-space:nowrap">${role}</span>`;};
   const render=()=>{
     const canEd=ed();
     const modal=st.form, rc=st.recalc, f=st.form||{}, be=st.bomedit;
@@ -1879,7 +1879,7 @@ SCREEN.coopquote=(host)=>{
              return `<tr style="${need?'background:#fdf0f0':''}">
                <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
                <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
-               <td>${(be.viewMode||r.haskids||r.role==='반제품')?beBadge(r.role):(()=>{const cur=(r.role_v3==='동관고강도')?'동관고강도':(r.role==='제작동관'?'제작동관':(r.role==='용접봉'?'용접봉':'사급'));return `<select class="be-role" data-code="${esc(r.code)}" style="font-size:10px;padding:1px 2px;border:1px solid #cbd5e6;border-radius:6px;background:#fffbe8">${['제작동관','동관고강도','사급','용접봉'].map(o=>`<option${cur===o?' selected':''}>${o}</option>`).join('')}</select>`;})()}</td>
+               <td>${(be.viewMode||r.haskids||r.role==='반제품')?beBadge(r.role_disp||r.role):(()=>{const cur=(r.role_v3==='동관고강도')?'동관고강도':(r.role==='제작동관'?'제작동관':(r.role==='용접봉'?'용접봉':'사급'));return `<select class="be-role" data-code="${esc(r.code)}" style="font-size:10px;padding:1px 2px;border:1px solid #cbd5e6;border-radius:6px;background:#fffbe8">${['제작동관','동관고강도','사급','용접봉'].map(o=>`<option${cur===o?' selected':''}>${o}</option>`).join('')}</select>`;})()}</td>
                <td class="num"><input class="be-qty inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(qtyEd!=null&&qtyEd!==''?qtyEd:(r.cum_qty||''))}" style="width:46px;min-width:0;text-align:right;padding:1px 2px"></td>
                <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
                ${isPipe?`<td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="diam" value="${esc(dd)}" style="width:38px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_diam||''}"></td>
@@ -1888,7 +1888,7 @@ SCREEN.coopquote=(host)=>{
                  :`<td class="num" style="font-size:9px">${dd||'-'}</td><td class="num" style="font-size:9px">${tt||'-'}</td><td class="num" style="font-size:9px">${ll||'-'}</td>`}
                <td class="num be-uw" data-code="${esc(r.code)}">${(uw||r.unit_weight)?nf4(uw||r.unit_weight):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                <td class="num be-sw" data-code="${esc(r.code)}" style="color:#1c6ec2">${(uw||r.unit_weight)?nf4((uw||r.unit_weight)*rq):'-'}</td>
-               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:'<span style="color:#c9d1dc">-</span>'}</td>
+               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:(isWeld&&r.coop_sagub>0?`<span style="color:#b8791f;font-size:11px" title="용접봉 사급가">${nf(r.coop_sagub)}</span>`:'<span style="color:#c9d1dc">-</span>')}</td>
                <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재(인상후) 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">${r.sale_note?'<div style="font-size:8px;color:#8aa0bd" title="판매단가 적용일(해당 업체)">'+esc(r.sale_note)+'</div>':''}`)}</td>
                <td class="num" style="color:#c0392b"><span class="be-ratio" data-code="${esc(r.code)}">${grey?'-':rratio+'%'}</span></td>
                <td class="num" style="color:#1c7c3a"><span class="be-rg2" data-code="${esc(r.code)}">${isTube?nf(rgag):'-'}</span></td>
@@ -2182,7 +2182,7 @@ SCREEN.coopquote2=(host)=>{
       if(wasWork){await loadWork();}else{await load();}}
     catch(e){alert('저장 실패: '+e.message);}};
   const beBadge=(role)=>{const M={'제작동관':['#e8f3ec','#1c7c3a'],'사급':['#eef2f7','#5a6a80'],'용접봉':['#fff3e0','#b8791f'],'매입부품':['#f0ecfa','#6a3fb0'],'반제품':['#e8eef7','#1c47a0']};
-    const c=M[role]||['#eee','#555'];return `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${c[0]};color:${c[1]};white-space:nowrap">${role}</span>`;};
+    const key=(role&&role.indexOf('제작(')===0)?'제작동관':role;const c=M[key]||['#eee','#555'];return `<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${c[0]};color:${c[1]};white-space:nowrap">${role}</span>`;};
   const render=()=>{
     const canEd=ed();
     const modal=st.form, rc=st.recalc, f=st.form||{}, be=st.bomedit;
@@ -2385,7 +2385,7 @@ SCREEN.coopquote2=(host)=>{
              return `<tr style="${need?'background:#fdf0f0':''}">
                <td style="font-family:monospace;font-size:12px;padding-left:${ind}px">${r.haskids?'▸':''}${esc(r.code)}</td>
                <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td>
-               <td>${(be.viewMode||r.haskids||r.role==='반제품')?beBadge(r.role):(()=>{const cur=(r.role_v3==='동관고강도')?'동관고강도':(r.role==='제작동관'?'제작동관':(r.role==='용접봉'?'용접봉':'사급'));return `<select class="be-role" data-code="${esc(r.code)}" style="font-size:10px;padding:1px 2px;border:1px solid #cbd5e6;border-radius:6px;background:#fffbe8">${['제작동관','동관고강도','사급','용접봉'].map(o=>`<option${cur===o?' selected':''}>${o}</option>`).join('')}</select>`;})()}</td>
+               <td>${(be.viewMode||r.haskids||r.role==='반제품')?beBadge(r.role_disp||r.role):(()=>{const cur=(r.role_v3==='동관고강도')?'동관고강도':(r.role==='제작동관'?'제작동관':(r.role==='용접봉'?'용접봉':'사급'));return `<select class="be-role" data-code="${esc(r.code)}" style="font-size:10px;padding:1px 2px;border:1px solid #cbd5e6;border-radius:6px;background:#fffbe8">${['제작동관','동관고강도','사급','용접봉'].map(o=>`<option${cur===o?' selected':''}>${o}</option>`).join('')}</select>`;})()}</td>
                <td class="num"><input class="be-qty inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(qtyEd!=null&&qtyEd!==''?qtyEd:(r.cum_qty||''))}" style="width:46px;min-width:0;text-align:right;padding:1px 2px"></td>
                <td class="num" style="color:#8aa0bd;font-size:11px">${r.lg_diam?('Φ'+r.lg_diam+'×'+r.lg_thick+'×'+r.lg_length):'-'}</td>
                ${isPipe?`<td class="num"><input class="be-sp inp" data-code="${esc(r.code)}" data-f="diam" value="${esc(dd)}" style="width:38px;min-width:0;text-align:right;padding:1px 2px;${need?'border-color:#c0392b':''}" placeholder="${r.lg_diam||''}"></td>
@@ -2394,7 +2394,7 @@ SCREEN.coopquote2=(host)=>{
                  :`<td class="num" style="font-size:9px">${dd||'-'}</td><td class="num" style="font-size:9px">${tt||'-'}</td><td class="num" style="font-size:9px">${ll||'-'}</td>`}
                <td class="num be-uw" data-code="${esc(r.code)}">${(uw||r.unit_weight)?nf4(uw||r.unit_weight):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                <td class="num be-sw" data-code="${esc(r.code)}" style="color:#1c6ec2">${(uw||r.unit_weight)?nf4((uw||r.unit_weight)*rq):'-'}</td>
-               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:'<span style="color:#c9d1dc">-</span>'}</td>
+               <td class="num">${isTube?`<input class="be-sg inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc((be.sagubEdits&&be.sagubEdits[r.code]!=null&&be.sagubEdits[r.code]!=='')?be.sagubEdits[r.code]:(r.coop_sagub>0?r.coop_sagub:''))}" style="width:60px;min-width:0;text-align:right;padding:1px 2px;color:#b8791f;font-weight:600" title="사급가(원/kg)">`:(isWeld&&r.coop_sagub>0?`<span style="color:#b8791f;font-size:11px" title="용접봉 사급가">${nf(r.coop_sagub)}</span>`:'<span style="color:#c9d1dc">-</span>')}</td>
                <td class="num" style="${grey?'color:#c9d1dc':'color:#c0392b;font-weight:700'}" title="현재(인상후) 재료비 (사급=판매단가·동관=소요중량×사급가·용접봉=소요×단가)">${grey?('('+nf(rmat)+')'):(isTube?`<span class="be-rm" data-code="${esc(r.code)}">${nf(rmat)}</span>`:`<input class="be-mat inp" data-code="${esc(r.code)}" type="number" step="any" value="${esc(matEd!=null&&matEd!==''?matEd:(r.mat_now||0))}" style="width:64px;min-width:0;text-align:right;padding:1px 2px;color:#c0392b;font-weight:700">${r.sale_note?'<div style="font-size:8px;color:#8aa0bd" title="판매단가 적용일(해당 업체)">'+esc(r.sale_note)+'</div>':''}`)}</td>
                <td class="num" style="color:#c0392b"><span class="be-ratio" data-code="${esc(r.code)}">${grey?'-':rratio+'%'}</span></td>
                <td class="num" style="color:#1c7c3a"><span class="be-rg2" data-code="${esc(r.code)}">${isTube?nf(rgag):'-'}</span></td>
