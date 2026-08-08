@@ -685,8 +685,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     _v3 = {}
     try:
         _nxc = _nx(); _nc = _nxc.cursor()
-        _nc.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), mat_before, mat_after, ptype_v2 FROM nx.coop_quote_part_v2 WHERE assy_code=?", item)
-        _v3 = {str(x[0]).strip(): ((float(x[1]) if x[1] is not None else None), (float(x[2]) if x[2] is not None else None), str(x[3] or '')) for x in _nc.fetchall()}
+        _nc.execute("SELECT UPPER(LTRIM(RTRIM(part_code))), mat_before, mat_after, ptype_v2, ptype FROM nx.coop_quote_part_v2 WHERE assy_code=?", item)
+        _v3 = {str(x[0]).strip(): ((float(x[1]) if x[1] is not None else None), (float(x[2]) if x[2] is not None else None), str(x[3] or ''), str(x[4] or '')) for x in _nc.fetchall()}
         _nxc.close()
     except Exception:
         _v3 = {}
@@ -697,7 +697,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
     for r in rows:
         _k = str(r["code"]).strip().upper()
         if _k in _v3:
-            _mb, _ma, _pt = _v3[_k]
+            _mb, _ma, _pt, _pt2 = _v3[_k]
             if _ma is not None:
                 r["mat_now"] = round(_ma)
             if _mb is not None:
@@ -706,6 +706,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             _nr = _ROLE.get(_pt)
             if _nr and _nr != r["role"]:
                 r["role"] = _nr   # v3 재분류 반영 → 프론트가 사급 경로로 mat_now 직접 사용
+            if _pt2.startswith("제작("):   # 제작(CU)/제작(고강도) 라벨 우선 표시
+                r["role"] = _pt2
     # ★재료비 = Σ in_quote 행. v3 있으면 v3 부품집합 기준.
     _pmset = set(partmap.keys())
     for r in rows:
