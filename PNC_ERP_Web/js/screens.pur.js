@@ -1697,6 +1697,7 @@ SCREEN.coopquote=(host)=>{
          <option value="all"${st.filterMode==='all'?' selected':''}>📋 전체</option>
          <option value="active"${st.filterMode==='active'?' selected':''}>🚚 현재 납품품목</option>
          <option value="new"${st.filterMode==='new'?' selected':''}>🆕 미승인 견적</option>
+         <option value="fix"${st.filterMode==='fix'?' selected':''}>⚠️ 보완필요(단가없음)</option>
        </select>
        ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
@@ -2096,7 +2097,7 @@ SCREEN.coopquote2=(host)=>{
   const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote'):true;
   const loadVendors=async()=>{try{const r=await fetch(`${API}/api/coopquote2/vendors`);const j=await r.json();st.vendors=j.rows||[];}catch(e){}};
   const load=async()=>{st.loading=true;if(!st.ym)st.ym=new Date().toISOString().slice(0,7);render();
-    try{const r=await fetch(`${API}/api/coopquote2/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.filterMode==='active'?1:0}&newonly=${st.filterMode==='new'?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
+    try{const r=await fetch(`${API}/api/coopquote2/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.filterMode==='active'?1:0}&newonly=${st.filterMode==='new'?1:0}&fixonly=${st.filterMode==='fix'?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
       const j=await r.json();st.rows=j.rows||[];st.cnt=j.count||0;}
     catch(e){st.rows=[];st.cnt=0;}
     st.loading=false;render();};
@@ -2203,6 +2204,7 @@ SCREEN.coopquote2=(host)=>{
          <option value="all"${st.filterMode==='all'?' selected':''}>📋 전체</option>
          <option value="active"${st.filterMode==='active'?' selected':''}>🚚 현재 납품품목</option>
          <option value="new"${st.filterMode==='new'?' selected':''}>🆕 미승인 견적</option>
+         <option value="fix"${st.filterMode==='fix'?' selected':''}>⚠️ 보완필요(단가없음)</option>
        </select>
        ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>

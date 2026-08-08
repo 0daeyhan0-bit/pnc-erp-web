@@ -110,6 +110,7 @@ def coopquote_vendors():
 
 @router.get("/api/coopquote2/list")
 def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int = Query(0), newonly: int = Query(0),
+                   fixonly: int = Query(0, description="1=보완필요(사급/용접봉 재료비 없음)만"),
                    ym: str = Query("", description="적용월(전체적용) YYMM|YYYYMM — 인상후 판매단가/사급가 as-of")):
     """협력사 견적 목록 — 인상전(종전) vs 인상후(적용월) 재료비·총가공비·입고가 대비.
        총가공비 = 입고가 − 재료비. 차이(신) = 인상후 총가공비 − 인상전 총가공비.
@@ -170,8 +171,21 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                 GROUP BY UPPER(LTRIM(RTRIM(assy_code)))""")
             for a, mb, ma in cur.fetchall():
                 matcost[str(a).strip()] = ((float(mb) if mb is not None else None), (float(ma) if ma is not None else None))
+        # ★보완필요: 사급/용접봉 재료비 없는 부품이 있는 SUB (단가 미등록/견적없음)
+        need_set = set()
+        for i in range(0, len(assy_up), 400):
+            chunk = [str(a).replace("'", "").strip() for a in assy_up[i:i + 400] if a]
+            if not chunk:
+                continue
+            inlist = "','".join(cc.upper() for cc in chunk)
+            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(assy_code))) FROM nx.coop_quote_part_v2
+                WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}') AND ptype_v2 IN (N'사급',N'사급받음',N'용접봉')
+                  AND (mat_after IS NULL OR mat_after=0) AND ISNULL(is_active,1)=1""")
+            for (a,) in cur.fetchall():
+                need_set.add(str(a).strip())
         for r in rows:
             au = r["assy_code"].strip().upper()
+            r["need_fix"] = (au in need_set)
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
             mc = matcost.get(au)
             if mc and mc[1] is not None:
@@ -201,6 +215,8 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
         if active_only:
             cutoff = (datetime.now() - timedelta(days=120)).strftime('%y%m%d')
             rows = [r for r in rows if r.get("last_in_ymd") and r["last_in_ymd"] >= cutoff]
+        if fixonly:
+            rows = [r for r in rows if r.get("need_fix")]
         return {"rows": rows, "count": len(rows), "active_only": bool(active_only)}
     finally:
         nx.close()
