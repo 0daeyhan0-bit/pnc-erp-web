@@ -179,8 +179,10 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
                 continue
             inlist = "','".join(cc.upper() for cc in chunk)
             cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(assy_code))) FROM nx.coop_quote_part_v2
-                WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}') AND ptype_v2 IN (N'사급',N'사급받음',N'용접봉',N'수불')
-                  AND (mat_after IS NULL OR mat_after=0) AND ISNULL(is_active,1)=1""")
+                WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}') AND ISNULL(is_active,1)=1 AND (
+                    (ptype_v2 IN (N'사급',N'사급받음',N'용접봉',N'수불') AND (mat_after IS NULL OR mat_after=0))
+                    OR (ptype_v2=N'용접봉' AND part_code NOT LIKE 'RAC%' AND part_code NOT LIKE '3H%')   -- 용접봉 오분류(잡자재910)
+                )""")
             for (a,) in cur.fetchall():
                 need_set.add(str(a).strip())
         for r in rows:

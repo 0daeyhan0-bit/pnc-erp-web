@@ -1697,7 +1697,7 @@ SCREEN.coopquote=(host)=>{
          <option value="all"${st.filterMode==='all'?' selected':''}>📋 전체</option>
          <option value="active"${st.filterMode==='active'?' selected':''}>🚚 현재 납품품목</option>
          <option value="new"${st.filterMode==='new'?' selected':''}>🆕 미승인 견적</option>
-         <option value="fix"${st.filterMode==='fix'?' selected':''}>⚠️ 보완필요(단가없음)</option>
+         <option value="fix"${st.filterMode==='fix'?' selected':''}>⚠️ 보완/확인 필요</option>
        </select>
        ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
@@ -2204,7 +2204,7 @@ SCREEN.coopquote2=(host)=>{
          <option value="all"${st.filterMode==='all'?' selected':''}>📋 전체</option>
          <option value="active"${st.filterMode==='active'?' selected':''}>🚚 현재 납품품목</option>
          <option value="new"${st.filterMode==='new'?' selected':''}>🆕 미승인 견적</option>
-         <option value="fix"${st.filterMode==='fix'?' selected':''}>⚠️ 보완필요(단가없음)</option>
+         <option value="fix"${st.filterMode==='fix'?' selected':''}>⚠️ 보완/확인 필요</option>
        </select>
        ${canEd?`<button class="btn" id="cq-new" style="background:#1c7c3a;color:#fff">➕ 신규견적</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <button class="btn xls" id="cq-xls">📥 엑셀 다운로드</button>
