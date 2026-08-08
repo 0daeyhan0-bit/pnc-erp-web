@@ -265,13 +265,14 @@ SCREEN.receiptdetail=(c)=>{
     itemcust: {label:'품목/업체별',  lead:ITEM.concat(['cnm','ct','chg','ymd','seq','ym']), sort:['mat','cc','ymd','seq'], g1:'mat',g2:'cc',l1:'품목계',l2:'업체계'},
   };
   const API=API_BASE;
-  let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live', curMq='';   // ★Phase5 데이터원(기본 라이브 무변경) + curMq=품번 검색어(조회 후 유지·서버 스코프)
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const dToInput=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
   const inYm=v=>(''+(v||'')).slice(2).replace('-',''), inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
   const load=async()=>{loading=true;msg='';draw();
-    try{const u=gijun==='close'?`${API}/api/live/receiptdetail?gijun=close`+(curYm?`&ym=${curYm}`:'')
-        :`${API}/api/live/receiptdetail?gijun=issue&dfrom=${curFrom}&dto=${curTo}`;
+    try{const qs=curMq?`&q=${encodeURIComponent(curMq)}`:'';   // ★품번 서버 스코프(미입력=전체·무변경)
+      const u=(gijun==='close'?`${API}/api/live/receiptdetail?gijun=close`+(curYm?`&ym=${curYm}`:'')
+        :`${API}/api/live/receiptdetail?gijun=issue&dfrom=${curFrom}&dto=${curTo}`)+qs;
       if(source==='nx'){loading=false;return nxDerivedView(c,u+'&source=nx',{title:'자재입고명세서',onBack:()=>{source='live';load();}});}
       const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
       pool=j.rows||[];if(gijun==='close')curYm=j.ym||curYm;else{curFrom=j.dfrom||curFrom;curTo=j.dto||curTo;}}
@@ -300,7 +301,7 @@ SCREEN.receiptdetail=(c)=>{
        <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}">${esc(sgN(x))}</option>`).join('')}</select>
        <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}">${esc(ctN(x))}</option>`).join('')}</select>
        <input class="inp" id="cq" placeholder="거래처코드/명">
-       <input class="inp" id="mq" placeholder="품번/품명/PART NO">
+       <input class="inp" id="mq" placeholder="품번/품명/PART NO (Enter=서버조회)" value="${esc(curMq)}">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -347,8 +348,9 @@ SCREEN.receiptdetail=(c)=>{
     const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=go;   // 날짜 변경 시에만 재조회
     const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=go;
     ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=render);
-    c.querySelector('#cq').onkeyup=e=>{if(e.key==='Enter')render();};c.querySelector('#mq').onkeyup=e=>{if(e.key==='Enter')render();};
-    c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';load();};
+    c.querySelector('#cq').onkeyup=e=>{if(e.key==='Enter')render();};
+    c.querySelector('#mq').onkeyup=e=>{curMq=e.target.value.trim();if(e.key==='Enter')load();else render();};   // ★품번: 유지(curMq)·Enter=서버 스코프 재조회(기간 무관 빠름)·그외=로드된 데이터 클라 필터
+    c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curMq='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h);
       const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,ym:r=>fmtYm(r.ym),cnm:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,diam:r=>r.diam,thick:r=>r.thick,length:r=>r.length,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt)};

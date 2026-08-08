@@ -313,7 +313,21 @@ def _MAGAM(ref_ym):
     ,ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM (nolock) WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ref_ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
   FROM CM_M_CUST (nolock) A )"""
 
-def _receiptdetail(dc, ref_ym):
+def _receiptdetail(dc, ref_ym, q=""):
+    # ★품번(자도번/품명) 스코프: 입력 시 서버 WHERE로 밀어 해당 품목만 스캔(기간 넓어도 인덱스 seek로 빠름).
+    #   자도번/품명을 pr_m_item에서 코드셋으로 해석 → IN(). 미해석시 MAT_CODE LIKE 폴백. CI 콜레이션 전제.
+    #   미입력이면 빈 문자열 = 기존 전체조회 무변경(회귀0). _matinout 동일 패턴.
+    MF = ""
+    q = (q or "").strip()
+    if q:
+        qe = q.replace("'", "''")
+        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM pr_m_item WHERE item_code LIKE '%{qe}%' OR item_desc LIKE '%{qe}%'")
+        _codes = [r["c"] for r in _mr if r.get("c")]
+        if _codes:
+            _inl = ",".join("'" + c.replace("'", "''") + "'" for c in _codes)
+            MF = f" AND A.MAT_CODE IN ({_inl})"
+        else:
+            MF = f" AND A.MAT_CODE LIKE '%{qe}%'"
     sql = f"""{_MAGAM(ref_ym)}
 SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct,
   A.MAT_CODE mat, M.ITEM_DESC nm, M.ITEM_SPEC spec, M.ITEM_DIAM diam, M.ITEM_THICK thick, M.ITEM_LENGTH length,
@@ -321,35 +335,36 @@ SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST
   A.MAINT_QTY qty, 'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost, A.MAINT_AMT amt, A.MAINT_AMT kamt, A.MAINT_VAT vat
  FROM PU_T_STOCK_MAINT (nolock) A JOIN pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('9','S','C','G','H')
-   AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
+   AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= '')){MF}
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
   A.MAT_CODE, M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_DIAM, M.ITEM_THICK, M.ITEM_LENGTH,
   M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
   A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, A.TAXPAYERS, 0
  FROM PU_T_STOCK_MAINT_C (nolock) A JOIN pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
- WHERE {dc} AND A.DIVISION IN ('P')"""
+ WHERE {dc} AND A.DIVISION IN ('P'){MF}"""
     _cols, rows = _rows(sql)
     return rows
 
 @live_router.get("/receiptdetail")
-def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Query(""), dto: str = Query(""), source: str = Query("live")):
-    """자재입고명세서. 기본 source=live(현행 무변경). source=nx면 stock_ledger(MAT) 파생(원장 재고, 명세shape 아님). gijun=close/issue."""
+def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Query(""), dto: str = Query(""), q: str = Query(""), source: str = Query("live")):
+    """자재입고명세서. 기본 source=live(현행 무변경). source=nx면 stock_ledger(MAT) 파생(원장 재고, 명세shape 아님). gijun=close/issue.
+    q(자도번/품명) 입력 시 서버 WHERE로 스코프 → 해당 품목만 조회(기간 넓어도 빠름). 미입력=전체(무변경)."""
     if gijun == "issue":
         f, t = _def_range(dfrom, dto)
         if source == "nx":
             r = _nx_screen("MAT", f, t); r["gijun"] = "issue"; return r
         ref = t[:4]
         dc = f"A.MAINT_YMD between '{f}' and '{t}'"
-        rows = _receiptdetail(dc, ref)
-        return {"gijun": "issue", "dfrom": f, "dto": t, "count": len(rows), "rows": rows}
+        rows = _receiptdetail(dc, ref, q)
+        return {"gijun": "issue", "dfrom": f, "dto": t, "count": len(rows), "rows": rows, "q": q}
     else:
         y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
         if source == "nx":
             r = _nx_screen("MAT", y + "01", y + "31"); r["gijun"] = "close"; r["ym"] = y; return r
         dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
-        rows = _receiptdetail(dc, y)
-        return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows}
+        rows = _receiptdetail(dc, y, q)
+        return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows, "q": q}
 
 # ================= 자재불출명세서 (구매/자재, dw_pu_input_130) — 라인단위 =================
 def _dispatchdetail(dc, ref_ym):
