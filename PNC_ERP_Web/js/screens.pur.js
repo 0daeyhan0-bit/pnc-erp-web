@@ -1737,7 +1737,7 @@ SCREEN.coopquote=(host)=>{
       <tbody>${st.loading?spinRow(canEd?18:16):(st.rows.length?st.rows.map((r,i)=>`<tr class="cq-row" data-idx="${i}">
         ${canEd?`<td class="center"><input type="checkbox" class="cq-chk" data-id="${r.quote_id}" ${st.sel.has(r.quote_id)?'checked':''} onclick="event.stopPropagation()"></td>`:''}
         <td style="font-weight:600;color:#1c47a0">${esc(r.vendor)}</td>
-        <td style="font-family:monospace;font-size:13px">${esc(r.assy_code)}</td>
+        <td style="font-family:monospace;font-size:13px">${esc(r.assy_code)}${r.switched?' <span title="과거 사급 → 현재 제작동관 전환" style="font-size:9px;padding:1px 4px;border-radius:8px;background:#f3e8ff;color:#7c3aed;font-family:sans-serif">🔄전환</span>':''}</td>
         <td class="cap" title="${esc(r.item_name)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.item_name)}</td>
         <td style="font-size:10px">${esc(r.spec)}</td>
         <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${r.grade==='고강도CU'?'#fbe9d0':'#e8eef7'};color:${r.grade==='고강도CU'?'#b8791f':'#1c47a0'};white-space:nowrap">${esc(r.grade||'일반CU')}</span></td>
@@ -2244,7 +2244,7 @@ SCREEN.coopquote2=(host)=>{
       <tbody>${st.loading?spinRow(canEd?18:16):(st.rows.length?st.rows.map((r,i)=>`<tr class="cq-row" data-idx="${i}">
         ${canEd?`<td class="center"><input type="checkbox" class="cq-chk" data-id="${r.quote_id}" ${st.sel.has(r.quote_id)?'checked':''} onclick="event.stopPropagation()"></td>`:''}
         <td style="font-weight:600;color:#1c47a0">${esc(r.vendor)}</td>
-        <td style="font-family:monospace;font-size:13px">${esc(r.assy_code)}</td>
+        <td style="font-family:monospace;font-size:13px">${esc(r.assy_code)}${r.switched?' <span title="과거 사급 → 현재 제작동관 전환" style="font-size:9px;padding:1px 4px;border-radius:8px;background:#f3e8ff;color:#7c3aed;font-family:sans-serif">🔄전환</span>':''}</td>
         <td class="cap" title="${esc(r.item_name)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.item_name)}</td>
         <td style="font-size:10px">${esc(r.spec)}</td>
         <td><span style="font-size:10px;padding:1px 5px;border-radius:8px;background:${r.grade==='고강도CU'?'#fbe9d0':'#e8eef7'};color:${r.grade==='고강도CU'?'#b8791f':'#1c47a0'};white-space:nowrap">${esc(r.grade||'일반CU')}</span></td>
