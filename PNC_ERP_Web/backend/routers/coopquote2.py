@@ -148,7 +148,9 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
         cost = _incost(cur, [r["assy_code"] for r in rows])
         for r in rows:
             c = cost.get(r["assy_code"].strip().upper())
-            r["cur_incost"] = (c[0] if (c and c[0]) else None)   # 현재 실입고가(최근 실거래)
+            # ★당월 입고가(lg_price=로더가 계산월 기준 저장) 우선 → 없으면 coop_incost 최근값
+            r["cur_incost"] = (r["lg_price"] if r.get("lg_price") else (c[0] if (c and c[0]) else None))
+            r["switched"] = int(r.get("fixed_mat") or 0)   # ★전환(과거 사급→현재 제작) 배지용
             r["prev_incost"] = c[1] if c else None               # 종전 실입고가(작년 12월 이하 최근)
             r["last_in_ymd"] = (c[2] if (c and c[2]) else None)  # 최근 납품일 yymmdd
             # 최종견적가 = 판가(sale_price = 재료비+가공비) 통합
