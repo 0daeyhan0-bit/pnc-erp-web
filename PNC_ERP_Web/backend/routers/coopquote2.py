@@ -435,12 +435,12 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
             cur.execute(f"""SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(METAL_GUBUN,''),
-                  ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(IN_CUST_CODE,'')
+                  ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(IN_CUST_CODE,''), ISNULL(COST_GUBUN,'')
                 FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *chunk)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "metal": str(r[3]).strip(),
                     "diam": float(r[4] or 0), "thick": float(r[5] or 0), "length": float(r[6] or 0),
-                    "in_cust": str(r[7]).strip()}
+                    "in_cust": str(r[7]).strip(), "cg": str(r[8]).strip()}
         # 3) 매입가(PR_M_ITEM_COST 최신, 제이에스2228 제외, 매입TAG='1' 우선)
         pur = {}
         for i in range(0, len(nl), 900):
@@ -599,7 +599,9 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         if code in seen: return
         seen.add(code)
         for e in edges.get(code, []):
-            ch = e["child"]; ci = info.get(ch, {}); haskids = ch in edges
+            ch = e["child"]; ci = info.get(ch, {})
+            # ★haskids=진짜 조립품만(cg∈1/2/3/5=leaf부품은 원소재 자식 있어도 전개 안 함=원소재2번 방지, 로더 bom()과 동일)
+            haskids = (ch in edges) and (ci.get("cg","") not in ('1','2','3','5'))
             role = role_of(ch, e["sag"], ci.get("metal", ""), haskids, ci.get("in_cust", ""))
             cq = cumq * e["q"]
             cs = coop.get(ch.upper()); uw = 0.0; src = ""
@@ -662,7 +664,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 "pur_price": pp, "weld_cost": weld_cost, "is_proc": role == "용접봉",
                 "procs": procs, "proc_cost": proc_cost,
                 "need_input": need_input, "haskids": haskids})
-            walk(ch, lvl+1, cq)
+            if haskids: walk(ch, lvl+1, cq)   # ★조립품만 하강(leaf부품의 원소재 자식 전개 안 함)
         seen.discard(code)
     walk(item, 1, 1.0)
     # ★바레 원소재(BOM 자식 0) = 품번 자체가 원소재(자작동관 등) → 자기자신을 제작동관 행으로(치수·개당중량·사급가 표시)
