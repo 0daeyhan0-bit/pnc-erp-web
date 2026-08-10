@@ -450,7 +450,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                     ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
                       ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC) rn
                   FROM PR_M_ITEM_COST
-                  WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
+                  WHERE ITEM_CODE IN ('{inl}')   -- 인덱스 시크(함수제거·CI콜레이션/trailing space 무시로 결과동일)
                     AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0)
                 SELECT ic, ITEM_COST FROM C WHERE rn=1""")
             for r in cur.fetchall():
@@ -467,7 +467,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                             ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
                               ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
                           FROM PR_M_ITEM_COST
-                          WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
+                          WHERE ITEM_CODE IN ('{inl}')   -- 인덱스 시크(함수제거·CI콜레이션/trailing space 무시로 결과동일)
                             AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
                             AND COST_APPLY_YMD<=? AND ITEM_COST>0)
                         SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, cut)
