@@ -68,7 +68,8 @@ def coopquote_refresh_incost():
     try:
         cur.execute("""IF OBJECT_ID('nx.coop_incost') IS NULL
           CREATE TABLE nx.coop_incost(code nvarchar(60) NOT NULL PRIMARY KEY, cur_cost decimal(18,4) NULL,
-            prev_cost decimal(18,4) NULL, cur_ymd nvarchar(6) NULL, upd_dt datetime NOT NULL DEFAULT(getdate()))""")
+            prev_cost decimal(18,4) NULL, cur_ymd nvarchar(6) NULL, prev_ymd nvarchar(6) NULL, upd_dt datetime NOT NULL DEFAULT(getdate()))""")
+        cur.execute("IF COL_LENGTH('nx.coop_incost','prev_ymd') IS NULL ALTER TABLE nx.coop_incost ADD prev_ymd nvarchar(6) NULL")   # 인상전 실납품일(기존 테이블 보강)
         cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(code))) FROM (
            SELECT assy_code code FROM nx.coop_quote_v2
            UNION SELECT part_code FROM nx.coop_quote_part_v2 WHERE part_code IS NOT NULL) t WHERE LTRIM(RTRIM(code))<>''""")
@@ -83,15 +84,17 @@ def coopquote_refresh_incost():
                FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG IN ('9','S','C','G','H') AND MAINT_QTY>0 AND MAINT_COST>0
                  AND UPPER(LTRIM(RTRIM(MAT_CODE))) IN ('{inlist}'))
              SELECT IC, MAX(CASE WHEN rc=1 THEN MAINT_COST END), MAX(CASE WHEN rc=1 THEN MAINT_YMD END),
-               MAX(CASE WHEN rp=1 AND MAINT_YMD<='{_PREV_YMD}' THEN MAINT_COST END) FROM M GROUP BY IC""")
+               MAX(CASE WHEN rp=1 AND MAINT_YMD<='{_PREV_YMD}' THEN MAINT_COST END),
+               MAX(CASE WHEN rp=1 AND MAINT_YMD<='{_PREV_YMD}' THEN MAINT_YMD END) FROM M GROUP BY IC""")
             for r in cur.fetchall():
-                res[str(r[0]).strip()] = (r[1], str(r[2] or '')[-6:], r[3])
+                res[str(r[0]).strip()] = (r[1], str(r[2] or '')[-6:], r[3], str(r[4] or '')[-6:])   # (cur_cost, cur_ymd, prev_cost, prev_ymd)
         cur.execute("TRUNCATE TABLE nx.coop_incost")
         for code in codes:
             v = res.get(code)
-            cur.execute("INSERT INTO nx.coop_incost(code,cur_cost,prev_cost,cur_ymd) VALUES(?,?,?,?)",
+            cur.execute("INSERT INTO nx.coop_incost(code,cur_cost,prev_cost,cur_ymd,prev_ymd) VALUES(?,?,?,?,?)",
                         code, (float(v[0]) if (v and v[0] is not None) else None),
-                        (float(v[2]) if (v and v[2] is not None) else None), (v[1] if v else None))
+                        (float(v[2]) if (v and v[2] is not None) else None), (v[1] if v else None),
+                        (v[3] if (v and v[3]) else None))
         _INCOST_CACHE.clear()
         return {"ok": True, "codes": len(codes), "with_cost": len(res)}
     finally:
@@ -489,7 +492,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         ncur.execute("SELECT COUNT(*) FROM nx.coop_quote_v2 WHERE assy_code=?", item)
         quoted = ncur.fetchone()[0] > 0
         # 저장 부품 합계(엑셀 AQ) — bottom-up 합산 표시용
-        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0; grade_q = "일반CU"; sagub_q = 0.0; cur_incost = None; prev_incost = None
+        partmap = {}; part_sum = 0.0; sale_stored = 0.0; mat_stored = 0.0; grade_q = "일반CU"; sagub_q = 0.0; cur_incost = None; prev_incost = None; cur_in_ymd = None; prev_in_ymd = None
         quote_rows = []   # 원본 행(중복 포함) — 다회사용 부품 정확 합산용(sum-all)
         weld_quote = {}   # 견적 용접봉 재료비 {code: mat}. 현 BOM(우리기준) 무시, 견적기준 사용
         try:
@@ -506,13 +509,15 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             rr = ncur.fetchone()
             if rr:
                 sale_stored = float(rr[0] or 0); mat_stored = float(rr[1] or 0); grade_q = str(rr[2] or "일반CU").strip(); sagub_q = float(rr[3] or 0)
-            ncur.execute("SELECT cur_cost, prev_cost FROM nx.coop_incost WHERE UPPER(LTRIM(RTRIM(code)))=?", item.upper())
+            ncur.execute("SELECT cur_cost, prev_cost, cur_ymd, prev_ymd FROM nx.coop_incost WHERE UPPER(LTRIM(RTRIM(code)))=?", item.upper())
             _ic = ncur.fetchone()
             if _ic:
                 if _ic[0] is not None:
                     cur_incost = float(_ic[0])
                 if _ic[1] is not None:
                     prev_incost = float(_ic[1])
+                cur_in_ymd = str(_ic[2]).strip() if _ic[2] else None    # 현재입고가 실납품일 YYMMDD
+                prev_in_ymd = str(_ic[3]).strip() if _ic[3] else None   # 종전입고가 실납품일 YYMMDD
         except Exception:
             partmap = {}
         # ★인상후(최신) 원소재 사급가(등급별·적용월 기준): 종전 견적사급가(예 7575) 대신 현재 사급가(20000/22000) 표시·계산
@@ -777,8 +782,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             "rows": rows, "count": len(rows), "need_input": need, "proc_ops": proc_ops, "rate": rate,
             "total_soyo_weight": total_soyo, "total_weld_cost": total_weld, "total_proc_cost": total_proc,
             "total_mat": total_mat, "total_mat_before": total_mat_before, "ym": ym4, "asof": asof, "vendor_code": vcode,
-            "asof_cur_label": ((ym4[:2] + "/" + ym4[2:4]) if len(ym4) >= 4 else "현재"),   # 인상후 합계 적용일(적용월)
-            "asof_prev_label": (_PREV_YMD[:2] + "/" + _PREV_YMD[2:4]),                       # 인상전 합계 적용일(종전 기준=25/11)
+            "asof_cur_label": ((cur_in_ymd[:2] + "/" + cur_in_ymd[2:4]) if (cur_in_ymd and len(cur_in_ymd) >= 4) else None),    # 인상후 합계(현재입고가) 실제 납품월
+            "asof_prev_label": ((prev_in_ymd[:2] + "/" + prev_in_ymd[2:4]) if (prev_in_ymd and len(prev_in_ymd) >= 4) else None),  # 인상전 합계(종전입고가) 실제 납품월
             "cur_sagub": cur_sagub_val, "grade": grade_q, "cur_incost": cur_incost, "prev_incost": prev_incost,
             "part_sum": round(part_sum), "assembly_proc": assembly_proc, "sale_stored": round(sale_stored),
             "assembly": assembly}
