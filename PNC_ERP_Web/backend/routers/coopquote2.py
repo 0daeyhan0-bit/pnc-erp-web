@@ -777,6 +777,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             "rows": rows, "count": len(rows), "need_input": need, "proc_ops": proc_ops, "rate": rate,
             "total_soyo_weight": total_soyo, "total_weld_cost": total_weld, "total_proc_cost": total_proc,
             "total_mat": total_mat, "total_mat_before": total_mat_before, "ym": ym4, "asof": asof, "vendor_code": vcode,
+            "asof_cur_label": ((ym4[:2] + "/" + ym4[2:4]) if len(ym4) >= 4 else "현재"),   # 인상후 합계 적용일(적용월)
+            "asof_prev_label": (_PREV_YMD[:2] + "/" + _PREV_YMD[2:4]),                       # 인상전 합계 적용일(종전 기준=25/11)
             "cur_sagub": cur_sagub_val, "grade": grade_q, "cur_incost": cur_incost, "prev_incost": prev_incost,
             "part_sum": round(part_sum), "assembly_proc": assembly_proc, "sale_stored": round(sale_stored),
             "assembly": assembly}
