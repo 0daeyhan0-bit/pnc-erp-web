@@ -727,8 +727,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 r["role"] = _nr   # v3 재분류 반영 (logic role) → 프론트 isTube 체크 유지
             if _pt2.startswith("제작("):   # 제작(CU)/제작(고강도) = 배지 표시용(role_disp), logic role은 제작동관 유지
                 r["role_disp"] = _pt2
-            if _pt3.startswith("적용:"):   # 사급 판매단가 적용일 → 프론트 표시("390 (적용:25/08)")
-                r["sale_note"] = _pt3
+            if _pt3.startswith("적용:"):   # 사급 판매단가 적용일 → "적용:현재|적용:종전" 분리(현재/종전 견적 각각 표시)
+                _ap = _pt3.split('|')
+                r["sale_note"] = _ap[0]
+                if len(_ap) > 1 and _ap[1].startswith("적용:"): r["sale_note_prev"] = _ap[1]
             # ★사급가 표시값: 수불=인상후사급가(20,000/22,000) · 용접봉=사급가(prev_sagub)
             if _pt == '수불':
                 r["coop_sagub"] = 22000 if ('고강도' in _pt2) else 20000
