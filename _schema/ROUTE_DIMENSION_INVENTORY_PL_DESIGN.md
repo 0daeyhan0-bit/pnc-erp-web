@@ -12,7 +12,8 @@
 1. **방향 타당(강한 실측 지지).** 레거시는 조달경로별 손익을 **접미사 품번 + 접미사 BOM 복제**로 표현하지만, **실측 결과 그 접미사 품번들은 대부분 재고·거래가 없는 "원가/BOM 전용 껍데기"** 다(§A). 즉 레거시조차 route별 **분리된 재고원장을 갖고 있지 않다**. route 손익차는 **원가계산 시점에 어느 접미사 BOM이 활성(EXCEPT_FLAG=0)이냐로** 만들어진다. → 접미사를 없애고 `(품번, route)` 를 **거래·원장의 차원**으로 두면 레거시가 하던 걸 **더 정확히·전품목 균일하게** 재현할 수 있다.
 2. **route는 이미 거래에 스탬프되어 있다.** 레거시 재고이동(PU_T_STOCK_MAINT)·nx.stock_ledger 는 행마다 **CUST_CODE(거래처)** 를 갖는다. 완제품 입고는 **공급 협력사 코드**로 들어온다(실측: AJR75563402 입고 137건이 명진2306, 7건이 이젠터2068). **거래처→route 매핑**만 있으면 route별 입고·재고·손익이 **접미사 없이** 산출된다. → 신규 설계는 stock_ledger·거래에 명시적 `ROUTE_ID` 컬럼을 추가(default=R01)하고, 발주 route 가 입고·kitting·WIP·완성까지 흐르게 스탬프한다.
 3. **공정 분담점은 route 후보 안에 이미 구현되어 있다.** `nx.sourcing_route_proc`(route×node×공정) + `sourcing_route_line`(node_kind SUB=외주경계) 가 "어느 공정까지 협력사, 어디부터 PNC"를 표현한다(실측 §C). 이걸 **입고 반제품 완료공정 = SUB 경계, kitting BOM = 남은 사내공정 자재, WIP = (품번,route,공정)** 로 연결한다.
-4. **이관 난이도: 재고 데이터는 낮음, 규칙/경계 판정은 중간.** 접미사 품번 5,971개 중 **재고이동 있는 건 소수(§A-4)**, route 변형 접미사는 대부분 **재고 0(껍데기)** → **이관할 재고잔액이 거의 없다**. `nx.sub_variant_map`(접미사→struct_group+vendor+is_current) 이 매핑 자산으로 존재. 기존 base 재고·거래는 **전부 R01 귀속** 후 거래처로 route 재분류(back-stamp).
+4. **운영(작동)방식 불변 = route 자동 흐름(§I).** route는 담당자가 매번 고르는 게 아니라 **발주 시 조달프로파일이 1회 자동확정(대부분 R01 default)** 후 입고→kitting→WIP→완성→출고까지 **거래 스탬프로 자동 승계**. 발주·입고·kitting·생산·출고 **7개 접점 전부 수동개입 0**, R01 default라 회귀0. **유일한 새 수동입력 = route별 공정담당 경계 마스터 1건**(그것도 R01은 현행 자동시드).
+5. **이관 난이도: 재고 데이터는 낮음, 규칙/경계 판정은 중간.** 접미사 품번 5,971개 중 **재고이동 있는 건 소수(§A-4)**, route 변형 접미사는 대부분 **재고 0(껍데기)** → **이관할 재고잔액이 거의 없다**. `nx.sub_variant_map`(접미사→struct_group+vendor+is_current) 이 매핑 자산으로 존재. 기존 base 재고·거래는 **전부 R01 귀속** 후 거래처로 route 재분류(back-stamp).
 
 ---
 
@@ -253,6 +254,99 @@ CREATE INDEX IX_stock_ledger_route ON nx.stock_ledger(STOCK_POINT, ITEM_CODE, RO
 - **거래처→route back-stamp = 중**: 매핑 다대일·소비배분·마감소급.
 - **운영(kitting/WIP) route별 = 중~높음**: route별 실사용 BOM 결선 + 백플러시 route 승계 + 공정담당 입력. 원가 diff0 게이트 필수.
 - **손익 route별 = 낮음**: route/cost 이미 구현·검증(diff0).
+
+---
+
+## H. ★kitting 최소변경 route 적용안 (재구축 금지 — 최소 배선)
+
+> 전제(사용자): "레거시 kitting은 잘 구현됨, 최소한만 바꾸고 싶다." → kitting 흐름·화면·판정 **전부 유지**하고 route(R01/R02) 구분만 얹는다.
+
+### H-1. 기존 kitting 로직 요약 (실측, 현재 코드 기준)
+현재 웹 준비실적처리(키팅)는 **BOM을 직접 전개하지 않는다**. "무엇을 kit할지"는 이미 상류에서 결정되어 온다.
+
+| 단계 | 파일·엔드포인트 | 하는 일 | BOM 전개? |
+|---|---|---|---|
+| kit 대상 결정(상류) | `compose_mat` (계획 파이프라인, plan STEP5→6→7) → **`nx.plan_part_mat`** | 자재소요 전개(레거시 `PR_M_ITEM_BOM` + `EXCEPT_FLAG<>'1'`=활성 BOM). 산출=(plan_ymd·work_order·assy·mat_code·part_plan_qty·mat_work_center). | **✅ 여기서 전개**(kitting 밖) |
+| 조달원 배분(상류) | `compose_mat` → **`nx.plan_mat_source`** | 각 (WORK_ORDER, MAT_CODE)에 **SUPPLY_GUBUN + VENDOR_CODE + SOURCE**(프로파일/BOM기본). = **route/공급처 이미 부착됨** | — |
+| kit 그리드 조회 | `routers/kitting.py` `/api/kitting/grid` | 계획 vs 준비/생산/ASSY재고 오버레이. `T_SUB_CTE`(pr_m_item_bom 재귀)는 **중간공정 파트재고 롤업 표시용**(kit 대상 결정 아님). | 표시용만 |
+| 준비필요 조회 | `routers/ready.py` `/api/ready/plan` | `nx.plan_part_mat`(소요) − `nx.stock_ledger RDY`(준비완료 SUM) = 준비필요. | ❌ |
+| **준비확인/취소** | `routers/ready.py` `/api/ready/register` (+ `kitting_cell_confirm/cancel`) | flag-only. `nx.stock_ledger`(STOCK_POINT='RDY', tag K1/K2) INSERT. 셀키=item·wo·gpc(파트)·plan_ymd. **자재 무차감.** | ❌ |
+| 실제 자재차감 | `routers/backflush.py` `_backflush_bom(nxc, root, cro)` | 생산실적 완성공정 1회, **`nx.bom` 단일 전개**(제작서브 전개·leaf 소비, 용접봉 공정종속). 현재 route 무관(암묵 R01). | **✅ 소비 전개 지점** |
+
+- **핵심**: kitting(ready/plan·register·grid)은 **전개 로직이 없다.** BOM 전개는 딱 **2곳** — 상류 `compose_mat`(kit 대상 산출)과 `_backflush_bom`(소비). kitting은 그 결과에 flag만 찍는다.
+
+### H-2. route는 이미 상류에 있다 (최소 배선의 근거)
+- `nx.plan_mat_source` 가 자재별 **VENDOR_CODE + SUPPLY_GUBUN**(유상사급/매입/자체/외주) 를 이미 보유(실측: `MJU65517924+용접링` 유상사급 2096, `MJC62721914` 매입 2201…). = route 식별자 사실상 존재.
+- 입고 반제품의 route = 입고 거래(setin/실입고)의 **CUST_CODE**(§A-4). → 준비재고(RDY)가 채워지는 실물의 route 도 입고에서 온다.
+- 따라서 **kitting 은 route를 "생성"할 필요 없이 "수신"만** 하면 된다.
+
+### H-3. 최소 변경점 (딱 이것만)
+kitting 자체에서 바뀌는 지점은 **2개**, 상류/소비에서 **2개**. kitting 흐름·화면·판정은 유지.
+
+| # | 위치 | 변경 | 규모 |
+|---|---|---|---|
+| **K1** | `nx.stock_ledger` | `ROUTE_ID int NULL` 컬럼(§B-3, 전 재고점 공유). 기존행=0(R01). | DDL 1건(공유) |
+| **K2** | `ready.py /api/ready/register` (+ cell_confirm) | RDY INSERT 에 **`ROUTE_ID` 1필드 추가**(payload 또는 plan행에서 수신). 없으면 0(R01). 나머지 로직 불변. | INSERT 1컬럼 |
+| **K3** | `ready.py /api/ready/plan` (+ kitting grid) | 준비필요 행에 route 표시·필터(선택). `nx.plan_mat_source`(vendor/gubun) 또는 `route_alloc` 조인해 ROUTE_ID 부여. **RDY SUM 대사도 ROUTE_ID 포함**(같은 자재 다른 route 분리 집계). | SELECT 조인 |
+| **K4**(소비) | `backflush.py _backflush_bom(root)` | route별 소비 BOM: `route_alloc` 활성후보 있으면 **`nx.sourcing_route_line`(그 route의 남은 사내공정 자재)** 전개, 없으면 현행 `nx.bom`(R01, 회귀0). | 분기 1개 |
+
+- **kit 대상(무엇을 준비)의 route화 = 상류 `compose_mat`** 가 이미 활성 EXCEPT_FLAG BOM(=현행 route)으로 전개하므로 **R01은 그대로 맞다**. 다중 route(R02) 편성 시에만 compose_mat 이 route_alloc 배분대로 `sourcing_route_line`(남은 사내공정 자재)을 전개하도록 확장(K4와 동일 원천 공유 → 준비/소비 자재셋 자동일치).
+- **"남은 사내공정 자재" 유도**: `nx.sourcing_route_proc` 의 SUB node(외주경계) 이후 = PNC 사내공정. 그 사내공정에 투입되는 `sourcing_route_line` PART 만 kit 대상(외주 완료분=입고 반제품이므로 kit 제외). route SUB 경계가 곧 kit 시작점.
+
+### H-4. 최소변경 가능성 판정
+- **판정: 가능(kitting 재구축 불필요).** kitting 3엔드포인트(plan/register/grid)는 전개 로직이 없어 **route 컬럼 수신·표시(K2·K3)만** 하면 된다 — 실질 변경 ≈ INSERT 1컬럼 + SELECT 조인.
+- route별 "무엇을 준비/소비"의 실제 분기는 **상류 compose_mat 과 backflush** 에 집중(K4 + compose_mat 확장) — **kitting 밖**이라 kitting 흐름은 무손상.
+- 단일 원천 원칙: 준비(compose_mat)와 소비(backflush)가 **같은 route BOM 원천(sourcing_route_line/route_proc)** 을 쓰면 자재셋 자동일치([[newerp-sourcing-profile]] "용접봉·공정 합 = 내부원가·조달후보 동일" 정합) → 준비=소비 diff0.
+
+### H-5. 리스크 (kitting 한정)
+- **route 미지정 자재**: plan_mat_source 없거나 후보 미승인 → **ROUTE_ID=0(R01) fallback**(현행과 동일, 회귀0).
+- **준비-소비 route 불일치**: 준비는 계획 route, 소비는 실제 생산 route. 상이하면 RDY 잔량이 상쇄 안 됨(−RDY가 다른 route +RDY 못 깎음). → 준비/소비를 **동일 ROUTE_ID 축으로 매칭**하거나, RDY 상쇄는 (item, wo) 단위로 route 무관 상쇄 후 route는 리포팅축으로만(결정 필요).
+- **컷오버 전 병행**: kitting flag는 nx 신규원장이라 라이브 무영향. ROUTE_ID 도입은 nx 내부 → 라이브 kitting 무손상.
+- **원가/재고 게이트**: K4(소비 BOM route화)는 diff0 게이트(오라클) 필수 — R01 경로 무변경(회귀0) 우선 확인.
+
+---
+
+## I. ★운영 무변경 원칙 (route 자동 흐름 · 사람 작동방식 불변)
+
+> 전제(사용자, 중요): kitting뿐 아니라 **운영(작동) 방식 자체가 크게 바뀌면 안 된다.** route는 담당자가 매번 고르는 게 아니라 **자동으로 결정·승계**된다. 담당자는 지금처럼 발주/입고/kitting/생산하고, 시스템이 뒤에서 route를 스탬프한다.
+
+### I-1. 원칙 3가지
+1. **route 자동 확정 1회(발주)**: 발주 시 조달 프로파일(`route_alloc` 활성후보 + `sourcing_profile` 배분)이 route를 확정한다. **대부분 R01 default**(현행 6,532 프로파일이 이미 활성100%·R01). 담당자 추가선택 없음.
+2. **이후 전 접점 자동 승계**: 확정된 route가 **입고 → kitting → 재공(WIP) → 완성 → 출고**까지 거래 스탬프로 자동 전파. 각 단계는 앞 단계의 ROUTE_ID를 읽어 이어붙일 뿐, 사람이 다시 안 고른다.
+3. **R01 default = 회귀0**: route를 아무도 안 건드리면 전부 R01 → 기존 화면·흐름·수량·원가가 **현행과 완전 동일**. route는 "있으면 갈리고 없으면 현행"인 **옵션 차원**.
+
+### I-2. 접점별 route 자동 유도/승계 (사람 개입 여부)
+| 접점 | route 자동 유도/승계 방식 | 사람 개입 |
+|---|---|---|
+| **발주(PO)** | `route_alloc`(item×유효기간 활성후보) → 단일이면 그 route, 다중이면 `alloc_ratio` 자동배분. 없으면 **R01**. 업체=`sourcing_profile`. | **없음**(자동확정). 다중후보 편성만 조달프로파일서 사전 1회 |
+| **입고(구매/가공/실입고140/세트)** | 발주 라인 ROUTE_ID **승계**. 발주 없는 직입고는 **CUST_CODE→route 매핑**으로 역유도(§A-4, 거래처=route). 무매핑=R01. | **없음**(입고 화면 그대로) |
+| **kitting(준비확인)** | 준비필요행(`plan_part_mat`/`plan_mat_source`)의 route 또는 입고 반제품 route **승계**(K2). 화면·클릭 동일. | **없음**(§H, flag만) |
+| **재공(WIP)/파트재고** | 이동·조정 시 원 재고행 ROUTE_ID **보존**(이동은 from/to 동일 route). | **없음** |
+| **생산실적(백플러시)** | 소비 대상 RDY/MAT 행의 ROUTE_ID **승계**, 생산품 +PRD/+ASY 동일 route 스탬프. 소비 BOM도 그 route(K4). | **없음**(바코드/실적 그대로) |
+| **완성/출고** | 완성품 재고행 route → 출하 −ASY 동일 route → **손익 매출 route 자동귀속**. | **없음** |
+| **마감/정산** | 거래 ROUTE_ID로 route별 집계(재고금액·손익). 유상사급 LME도 route종속 자동. | **없음**(집계축만 추가) |
+
+→ **7개 접점 전부 "없음"**. route는 발주 1회 자동확정 후 스탬프로만 흐른다.
+
+### I-3. 유일하게 허용되는 새 수동입력 = route별 공정담당 1회 마스터
+- **`nx.profile_process_split`**(현재 **0행**) 에 route별 **공정 외주/사내 경계**(어느 공정까지 협력사, 어디부터 PNC)를 **1회성 마스터로 설정**. 이게 kitting "남은 사내공정 자재"·백플러시 소비범위·입고 반제품 완료공정을 결정한다.
+- **R01은 현행 그대로 시드**(레거시 활성 BOM의 SUB 경계 = `sourcing_route_proc`/공정마스터에서 자동 유도) → R01 담당자는 **새 입력 0**. 신규 route(R02) 도입 시에만 그 route의 경계 1회 지정.
+- 그 외 새 수동단계 **없음**. (다중 route 배분 편성은 이미 존재하는 조달프로파일 화면의 기존 기능, 신규 아님.)
+
+### I-4. 사람 개입 최소화 요약 · B~H 재검토 결과
+| 새 입력/조작 | 필요 시점 | 최소화 방안 |
+|---|---|---|
+| route별 공정담당(경계) | 신규 route(R02) 도입 시 1회 | R01=현행 자동시드(입력0). `sourcing_route_proc` node 경계 자동 유도 |
+| 다중 route 배분비율 | 한 품목을 2개 이상 route로 동시 조달 시 | 기존 조달프로파일 화면(신규 화면 아님). 단일=자동100% |
+| 거래처→route 매핑표 | 이관 1회 + 신규 협력사 | `sub_variant_map` vendor 자동초안, 무매핑=R01 |
+| (그 외 발주·입고·kitting·생산·출고·마감) | — | **전부 자동 승계, 수동 0** |
+
+- **§B(차원)**: ROUTE_ID default=0 → 스탬프 안 되면 현행과 동일(회귀0). 자동 흐름의 토대.
+- **§C(공정분담/스탬프 흐름)**: I-2 표가 곧 자동 승계 경로. 발주 route→입고→kitting→WIP→완성 전파.
+- **§E(이관)**: 기존 데이터 R01 일괄귀속 → 과거 흐름 무변경. back-stamp만 거래처 유래 자동.
+- **§H(kitting)**: 이미 flag-only·전개없음 → route 수신만. 사람 작동방식 완전 불변.
+
+**결론**: route 도입으로 **담당자 일상 작동(발주·입고·kitting·생산·출고)은 하나도 안 바뀐다.** 신규 수동입력은 **route별 공정담당 경계 마스터 1건뿐**(그것도 R01은 자동시드). 사용자 요구("작동방식 큰 변경 없이") 충족.
 
 ---
 
