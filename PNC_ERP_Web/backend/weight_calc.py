@@ -9,7 +9,7 @@
      Assy 마스터값이 '사급 포함'+변형정규화붕괴라 현행 '사급 제외' 규칙과 충돌 → 사급규칙 확정 후 통합.
      _norm_code/_load_copper_master 헬퍼는 그때 사용(현재 미사용).
    매칭 Assy는 담당자수량과 ±5% 일치. 담당자 수기항목(전산에 없음)은 반영 안 함."""
-import sys, os, threading, math, re
+import sys, os, threading, math, re, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'New_ERP'))  # Projects\New_ERP
 import pyodbc, db_client
 
@@ -229,5 +229,92 @@ def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=
         res[cc] = {
             "raw_out": round(ro_, 1), "raw_in": round(ri, 1), "raw_diff": round(rdiff, 1), "raw_amt": ramt,
             "weld_out": round(wo, 3), "weld_in": round(wi, 3), "weld_diff": round(wdiff, 3), "weld_amt": wamt,
+        }
+    return res
+
+# ================= ★견적기준 무게정산(신규, compute()와 완전 독립) =================
+# 거래처코드(CUST) → coop_quote vendor명 (절삭 8개 협력사). 견적 소요는 이 업체만 적용.
+_COOP_CUST_VENDOR = {
+    '2142': '세광산업', '233': '썬텍코리아주식회사', '2148': '대원산업', '2096': '미래정밀',
+    '2306': '명진산업', '2068': '이젠터', '2266': '케이비', '2048': '중앙정밀',
+}
+_QUOTE_SOYO = None
+_QUOTE_TS = [0.0]
+def _load_quote_soyo():
+    """견적서(nx.coop_quote_part_v2) 소요 맵: (vendor, assy_upper) → (동소요중량, 용접봉소요).
+       동=ptype_v2='수불'(제작동관) Σsoyo_weight(kg) · 용접봉=ptype_v2='용접봉' Σsoyo. 10분 TTL."""
+    global _QUOTE_SOYO
+    now = time.time()
+    if _QUOTE_SOYO is not None and (now - _QUOTE_TS[0] < 600):
+        return _QUOTE_SOYO
+    qraw = {}; qweld = {}
+    tx = _tx(); tc = tx.cursor()
+    tc.execute("""SELECT vendor, UPPER(LTRIM(RTRIM(assy_code))), ISNULL(ptype_v2,''),
+        ISNULL(soyo_weight,0), ISNULL(soyo,0)
+        FROM nx.coop_quote_part_v2 WHERE ISNULL(is_active,1)=1 AND ISNULL(settle_exclude,0)=0""")
+    for v, assy, pt, sw, so in tc.fetchall():
+        v = str(v).strip()
+        if pt == '수불':
+            qraw[(v, assy)] = qraw.get((v, assy), 0.0) + float(sw or 0)
+        elif pt == '용접봉':
+            qweld[(v, assy)] = qweld.get((v, assy), 0.0) + float(so or 0)
+    tx.close()
+    _QUOTE_SOYO = (qraw, qweld); _QUOTE_TS[0] = now
+    return _QUOTE_SOYO
+
+def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=None):
+    """★견적기준 무게정산: 출고(tag5) − 견적서 소요(coop_quote_part_v2) = 차액.
+       원소재 소요 = Σ(완제품 입고수량 × 견적 동소요중량) · 용접봉 소요 = Σ(입고수량 × 견적 용접봉소요).
+       견적 없는 완제품 = 소요 0(compute()의 ITEM_WEIGHT master 폴백 안 함). 절삭 8개 협력사만.
+       compute()와 독립 — 기존 마스터기준 무게정산에 영향 없음."""
+    qraw, qweld = _load_quote_soyo()
+    cn = _ro(); cur = cn.cursor()
+    mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
+    # 원소재 출고: tag5 원소재(E/G 210 KG) — compute()와 동일
+    cur.execute(f"""{mg}
+      SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
+      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      WHERE A.MAINT_TAG='5' AND {win} AND M.ITEM_SGROUP='210' AND M.UNIT='KG' AND M.ITEM_LGROUP IN ('E','G')
+      GROUP BY A.CUST_CODE""")
+    out = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+    # 용접봉 출고(사급): tag5 용접봉 — compute()와 동일
+    cur.execute(f"""{mg}
+      SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
+      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      WHERE A.MAINT_TAG='5' AND {win} AND (A.MAT_CODE LIKE 'RAC%' OR M.ITEM_DESC LIKE '%용접봉%' OR M.ITEM_DESC LIKE '%Solder%')
+      GROUP BY A.CUST_CODE""")
+    wout = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+    # 입고(완제품) × 견적 소요 = 소요중량
+    cur.execute(f"""{mg}
+      SELECT A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))), SUM(A.MAINT_QTY)
+      FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      WHERE A.MAINT_TAG IN ('9','S','C','G','H') AND {win}
+      GROUP BY A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))) HAVING SUM(A.MAINT_QTY)>0""")
+    inr = {}; inw = {}; noq = {}
+    for cc, mat, q in cur.fetchall():
+        vendor = _COOP_CUST_VENDOR.get(str(cc).strip())
+        if not vendor:
+            continue
+        qf = float(q or 0)
+        rk = qraw.get((vendor, mat)); ws = qweld.get((vendor, mat))
+        if rk is not None:
+            inr[cc] = inr.get(cc, 0.0) + rk * qf
+        if ws is not None:
+            inw[cc] = inw.get(cc, 0.0) + ws * qf
+        if rk is None and ws is None:
+            noq[cc] = noq.get(cc, 0) + 1        # 견적없는 완제품(정보용)
+    cn.close()
+    res = {}
+    for cc in set(out) | set(inr) | set(inw) | set(wout):
+        ro_ = out.get(cc, 0.0); ri = inr.get(cc, 0.0)
+        wo = wout.get(cc, 0.0); wi = inw.get(cc, 0.0)
+        rdiff = ro_ - ri
+        ramt = round(rdiff * (real_raw - sagub_raw))
+        wdiff = wo - wi
+        wamt = round(wdiff * (real_weld - sagub_weld)) if (real_weld is not None) else 0
+        res[cc] = {
+            "raw_out": round(ro_, 1), "raw_in": round(ri, 1), "raw_diff": round(rdiff, 1), "raw_amt": ramt,
+            "weld_out": round(wo, 3), "weld_in": round(wi, 3), "weld_diff": round(wdiff, 3), "weld_amt": wamt,
+            "no_quote_items": noq.get(cc, 0),
         }
     return res
