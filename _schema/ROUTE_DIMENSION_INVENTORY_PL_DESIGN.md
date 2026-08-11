@@ -1,7 +1,10 @@
 # (품번, route) 차원 = 재고·손익·공정분담 설계 검증 + 이관 계획
 
 > 상태: **설계·검증 완료 → 단계별 구현 착수(승인)**. 작성 2026-08-12 (세션 02b63e35).
-> **★구현 로그**: **Phase-1(§B-3 DDL) 완료 2026-08-12** — `nx.stock_ledger`에 `ROUTE_ID int NULL` 추가 + 전 171,867행 R01(=0) 백필(NULL 0, 총량보존 PASS) + `IX_stock_ledger_route(STOCK_POINT,ITEM_CODE,ROUTE_ID) INCLUDE(MAINT_QTY,GAGONG_PROC_CODE,WORK_ORDER)` 생성. **회귀0**(아직 어떤 코드도 ROUTE_ID 미참조 = `=0`은 접미사 미도입과 동일, 롤백 안전). 스크립트 `scratchpad/r_phase1_ddl.py`.
+> **★구현 로그**:
+> - **Phase-1(§B-3 DDL) 완료 2026-08-12** — `nx.stock_ledger`에 `ROUTE_ID int NULL` 추가 + 전 171,867행 R01(=0) 백필(NULL 0, 총량보존 PASS) + `IX_stock_ledger_route(STOCK_POINT,ITEM_CODE,ROUTE_ID) INCLUDE(MAINT_QTY,GAGONG_PROC_CODE,WORK_ORDER)` 생성. **회귀0**(아직 어떤 코드도 ROUTE_ID 미참조 = `=0`은 접미사 미도입과 동일, 롤백 안전). 스크립트 `scratchpad/r_phase1_ddl.py`.
+> - **Phase-2(§E-2 back-stamp) 완료 2026-08-12** — 멱등 back-stamp 루틴 구축·실행(`scratchpad/r_phase2_backstamp.py`). 매핑원천=`sourcing_profile`(item+vendor+route_id>0, 유일매핑만·다대일 제외). 근거키(ITEM_CODE+CUST_CODE+ROUTE_ID=0) 스코프 UPDATE·수량 불변·삭제 0. **결과 대상 0행**(후보route 보유품목=AJR75563402 1개뿐인데 nx.stock_ledger에 그 완제품 세트입고(협력사 CUST_CODE) 행 없음 — 실입고는 라이브 PARTNER_ERP에만, nx는 자재 MAT 이관분 위주). **총량보존 PASS**. → **설계 §A-3 예측 일치(route변형 재고≈0)**. ★결론: **과거 back-stamp로 채울 재고 없음 → 실제 route 스탬프는 Phase-3 입고/생산 write 시점 forward-stamp가 담당**. back-stamp 루틴은 컷오버 후 재실행용 안전망으로 존치.
+> - **품번+라우팅 검색 헬퍼**: `scratchpad/r_routing_lookup.py <품번>` = nx.routing(내부원가 공정순서) + sourcing_route_proc(route별 공정·외주/사내 경계) + route_alloc(활성 route). 웹 화면화 가능.
 > **★결정 확정(3건, 사용자 2026-08-12)**: ①ROUTE_ID **명시 컬럼** 채택 ②외주/사내 경계 = **기존 조달프로파일(`sourcing_profile.is_internal`/`supply_gubun`) + routing(`sourcing_route_line.node_kind='SUB'`·`sourcing_route_proc` node경계)에서 자동 유도** → **`profile_process_split` 신규입력 불필요·폐기**(새 수동입력 0) ③은납/SUB 실물 스테이지 = **별도 품목 유지**.
 > 원칙: 라이브 `PARTNER_ERP` 읽기전용(본 문서 실측=전부 SELECT, 쓰기 0)·`nx` 분석만·실측 근거·추측 금지.
 > 목표: 손익·재고금액·공정운영(kitting/WIP)을 **조달경로(R0X)별**로 관리하되, 레거시처럼 **품번 접미사로 BOM/품번을 복제하지 않고** `(품번, route)` 를 **원장·거래·운영의 차원(dimension)** 으로 두는 설계를 검증하고 기존 데이터 이관 계획을 산출.
