@@ -144,3 +144,39 @@ JAI_COST = (COST_GUBUN='3' ? WON_MAT_COST×ITEM_WEIGHT×USE_QTY   -- 원소재(�
 ### F-4. ★스키마 드리프트 경고 (최종 이관 전 필독)
 - `_schema/unified_bom_schema_tsql.sql`은 **초기 19테이블 DDL만**(정본 아님). 실제 TEST3.nx엔 42테이블. bom_line 실컬럼(22)≠DDL초안(9). **ALTER/판단 전 라이브 nx introspect 필수**. [[newerp-web-backend-map]]
 
+---
+
+## G. ★★SUB 정규화 이관 (2026-08-12 확정 — 최종 이관 반드시 반영) — 정본 [[BOM_STRUCTURE_CANON]] §9
+
+> 우리가 LG 품번에 붙인 **접미사 변형(자도번/SUB)을 정규 SUB `품번_S{nn}`으로 정리**하는 이관. 정본 규칙은 `_schema/BOM_STRUCTURE_CANON.md` §9. 이관 스크립트가 이 규칙을 반드시 처리해야 함.
+
+### G-1. 대상 = LG 품번의 접미사 변형 전부 (ASSY + 개별부품 둘 다)
+- **ASSY 변형**: `AJR75563402-19-1`·`-F&T`, `AJR30012101-16-2`… (완제품 하위 서브)
+- **★개별부품 변형도 포함**: LG가 지정한 개별 품번(MJU… 등)에도 우리가 만든 변형 존재 — 예 `MJU65030906-6-1`. **ASSY만이 아니라 LG 품번 전반의 접미사 변형이 정규화 대상.**
+- 원천: `PR_M_ITEM`(접미사 품번)·`nx.sub_variant_map`(변형→struct 그룹)·`nx.bom.jadoban`·`PR_M_ITEM_BOM`(부모-자식).
+
+### G-2. ★이관 스코프 (사용자 확정) = 25.01~26.07 LG 입고 품번의 서브만
+- **범위 = 2025-01 ~ 2026-07 사이 LG에 입고(출하)된 품번의 서브만** 정규화. 전 역사 접미사(5,971변형) 전수 아님 — **활성 품번으로 한정**(이관 규모 축소·현행성 확보).
+- **과거 서브(그 창 밖)는 불러올 필요 없음**(굳이 정규화/적재 안 함).
+- **LG 입고 품번 원천 = 영업 › 출하실적현황(`SA_T_SALE_DTL`, 우리 출하=LG 입고)** — 화면 SCREEN 출하실적현황(라이브). 기간필터 2501~2607의 **도번(=출하 품번) distinct** 이 대상 품번집합. (LG 거래처 CUST 1010/1020/1030 필터 필요, SVC·국내 제외 검토) → 그 품번(+상위 ASSY)의 서브를 대상으로.
+- **SUB부터 먼저 정리**(개별부품 변형 정리는 그 다음 단계).
+
+**★실측 규모 (2026-08-12, SALE_YMD 250101~260731):**
+- 출하 품번 **2,147종**(라인 164,384). prefix=AJR 1,060(ASSY)·**MJU 312(개별부품 — MJU65030906식 변형 대상)**·AJJ 113·MJX 57·MEV 40…
+- **서브(접미사 변형) 보유 품번 = 736종 → 접미사 변형 총 2,400개**가 `품번_S{nn}` 정규화 대상. (전 역사 5,971변형이 아닌 **활성 2,400으로 한정** = 스코프 축소 확인)
+- **`nx.sub_variant_map` 현 커버 = base 103·common_sub 545·변형행 715** → **736 중 103만 매핑(약 14%), 나머지 ~633품번(~1,685변형) 확장 필요**. sub_variant_map을 이 스코프로 재생성/확장해야 함.
+- 원천 재현 쿼리: `SA_T_SALE_DTL`(SALE_YMD 6자리) distinct ITEM_CODE → `PR_M_ITEM LIKE base+'-%'` 접미사 변형. scratchpad/r_scope_size3.py.
+
+### G-3. 정규화 규칙 (BOM_STRUCTURE_CANON §9 요약)
+- **SUB = `품번_S{nn}`**, `nx.item`에 **is_lg=0 / item_source='INTERNAL_SUB'** 플래그로 등록(**새 LG 품번 0**, 마스터 LG 동기화 없음).
+- **자도번 → `품번_S{nn}` 정규화**: 같은 부품셋·다른 vendor 자도번들을 **한 `_S{nn}`으로 접고 vendor→ROUTE_ID**. 매핑 = **`nx.sub_alias`**(자도번→`_S{nn}`·route·vendor).
+- **공용 = 여러 LG 버전(예 AJR300121 01~08)이 같은 `품번_S{nn}` 참조 = 재고 1 pool**(버전 복제 아님, AJR74482401식).
+- **재고점 = (ITEM_CODE=`품번_S{nn}`, ROUTE_ID, STOCK_POINT)**. 협력사 SUB 입고=(`품번_S{nn}`,route,cust).
+- **SET 입고 re-key(setstock/receive 자도번→`_S{nn}`)는 추후**(이관 alias는 미리 준비).
+- ⚠기존 `sub/create`가 `nx.item`에 등록한 `_S{nn}` 7건 = 내부SUB 플래그로 정리 대상.
+
+### G-4. 검증 게이트
+- 원가 diff0(오라클 실원가용 SP) 유지 — SUB 재배선 후에도 재료비/실원가 불변.
+- 총량보존 — 자도번 재고 → `_S{nn}` 재고 이관 시 품목별 수량합 불변.
+- 커버리지 — 스코프(25.01~26.07 LG입고) 내 서브 100% 매핑(미매핑=담당 확인).
+
