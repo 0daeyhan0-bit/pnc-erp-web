@@ -12,7 +12,7 @@ router = APIRouter()
 # STEP5 nx.plan_item_dtl(LOT합산·모델→ASSY 유효일자, EXCEPT미적용) → STEP6 nx.plan_part_dtl(10레벨BOM+가공공정 공정전이)
 #  → STEP7 nx.plan_part_mat(사급중단 NOT EXISTS PART_DTL + 최하위집계 + charindex중복 + 용접봉sgroup910 제외=공정처리).
 # 검증: 설계2건(용접봉·체결SUB이중계상)제외시 웹 vs 레거시 PR_T_PLAN_PART_MAT 수량완전일치100%. [[newerp-plan-soyo-verify]]
-_P = "nx."   # ★nx 전환(2026-08-12): 파이프라인 STEP6/7 BOM/품목/가공 = nx 호환레이어(nx.PR_M_ITEM_BOM=단일BOM·nx.PR_M_ITEM·nx.PR_M_ITEM_PROC_GAGONG 등). r_compat_layer.py. 컷오버후 라이브 무의존.
+_P = "PARTNER_ERP.dbo."   # ★nx전환 롤백(2026-08-12): nx.bom_line(≈CS)≠PR_M_ITEM_BOM → soyo(nx.bom_line) 45%손실. 소요=PR정본. nx전환은 nx.PR_M_ITEM_BOM을 PR충실복제로 해야(단일BOM 아님). 전략확정 대기.
 
 @router.post("/api/plan/compose_mat")
 def plan_compose_mat(payload: dict = Body(...)):
