@@ -123,6 +123,32 @@ BOM: 품목 BOM관리·조달후보 통합검토·품목별 공정관리 / 재�
 
 ---
 
+## 9. ★재고 융합 설계안 (2026-08-12, 검토중 — 사용자 확정 대기)
+
+### 9-1. 실측: 현재 SUB 재고 grain = 자도번 (우리 `_S{nn}`과 분리)
+- `nx.stock_ledger` ITEM_CODE: **자도번(-N-N) 3,221행 / `_S{nn}` 0행**.
+- `nx.set_input_req_dtl.mat_code` = **자도번**(AJR30012101-16-2·16-3, AJR33796512-19-1…). set입고 명세 grain=자도번.
+- `_S{nn}`: sourcing_route_line(1종)+nx.item(7종)에만, **재고 0**.
+- `nx.bom` child: 자도번0·_S{nn}0 = **평면**(SUB는 소비단위 아님).
+- → 현재 SUB 재고/입고=자도번, 우리 `_S{nn}`=조달후보 구조 → **분리 상태. 융합=하나로.**
+
+### 9-2. 융합 모델: 정본 SUB 재고 식별자 = `품번_S{nn}` + ROUTE_ID
+- **재고점 = (ITEM_CODE=`품번_S{nn}`, ROUTE_ID=공급원, STOCK_POINT=반제품).**
+- 자도번은 정본 아님 — vendor를 코드에 박아 **정체성+공급원 혼재**(-16-2=케이비). 우리 모델은 `_S{nn}`(정체성)+ROUTE_ID(공급원) **분리**(접미사 폭발 제거).
+- **신규 자산 = alias `nx.sub_alias`**: (자도번 → base·`품번_S{nn}`·route_id·vendor). 이관+set입고 re-key의 단일 지점.
+
+### 9-3. 3결선 (set입고 최소변경)
+1. **SUB 재고 승격**: `품번_S{nn}` nx.item 등록(반제품) + stock_ledger ITEM_CODE 사용.
+2. **자도번↔`_S{nn}` 매핑**: nx.sub_alias. 초안=sub_variant_map(변형→struct)+nx.bom.jadoban, 확정=조달후보 `_S{nn}`.
+3. **route 관통**: `setstock/receive`(setin.py:174)가 자도번 입고 시 alias로 (`_S{nn}`,ROUTE_ID) 해석→원장 stamp. **협력사 화면(set_input_req_dtl)은 자도번 유지(최소변경), 원장만 정본 코드.** 이후 kitting/백플러시/마감/손익이 (`_S{nn}`,ROUTE_ID) 공유.
+
+### 9-4. 확정 필요 (사용자)
+1. 정본 SUB 재고 식별자 = **`_S{nn}`(자도번 아님)** — 맞는지.
+2. **공유 SUB**(여러 상위, 예 -16-2가 101/102/103): `품번_S{nn}` per-parent vs **독립 품번 승격**(AJR74482401식).
+3. **set입고 변경 범위**: 협력사엔 자도번 유지 + 원장만 `_S{nn}`(dual) vs 협력사도 `_S{nn}` 전환.
+
+---
+
 ## 8. 관련 정본 문서
 - **[[SOURCING_COST_INTEGRATION]]** — route/cost·bom/tree route_id·2계층·단가 통합(item_price)·업체/사급단가. **가장 핵심.**
 - **[[SOURCING_PANEL_REDESIGN]]** — 조달후보 SUB 재구성·공정 배치 패널·`_S{nn}` 채번·검증 3종.
