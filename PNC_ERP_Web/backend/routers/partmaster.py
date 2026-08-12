@@ -41,20 +41,20 @@ def partmaster_save(payload: dict = Body(...)):
     r = payload.get('row', {}); user = (payload.get('user') or '웹')[:20]
     code = (r.get('code') or '').strip()
     if not code: return {"ok": False, "detail": "파트코드 필수"}
-    cn = _conn(); cur = cn.cursor()
+    cn = _nx(); cur = cn.cursor()   # ★nx전환: 가공공정 마스터 편집=nx.PR_M_PROC_GAGONG 복제본에 쓰기
     try:
-        cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
+        cur.execute("SELECT COUNT(*) FROM nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
         exists = cur.fetchone()[0] > 0
         args = (r.get('nm', '') or '', (r.get('gubun', '') or '')[:1], (r.get('grp', '') or '')[:2], (r.get('wc', '') or '')[:4],
                 (r.get('wh', '') or '')[:10], int(r.get('sortkey') or 0), float(r.get('rate') or 0),
                 (r.get('ip', '') or '')[:30], int(r.get('rack') or 0), user)
         if exists:
-            cur.execute("""UPDATE PR_M_PROC_GAGONG SET GAGONG_PROC_DESC=?, GC_GUBUN=?, PART_GROUP_CODE=?, WORK_CODE=?,
+            cur.execute("""UPDATE nx.PR_M_PROC_GAGONG SET GAGONG_PROC_DESC=?, GC_GUBUN=?, PART_GROUP_CODE=?, WORK_CODE=?,
                   IN_CUST_CODE=?, SORT_KEY=?, PROD_RATE=?, WH_IP_ADDRESS=?, RACK_NUMBER=?,
                   UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
                 WHERE GAGONG_PROC_CODE=?""", *args, code)
         else:
-            cur.execute("""INSERT INTO PR_M_PROC_GAGONG(GAGONG_PROC_CODE, GAGONG_PROC_DESC, GC_GUBUN, PART_GROUP_CODE, WORK_CODE,
+            cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG(GAGONG_PROC_CODE, GAGONG_PROC_DESC, GC_GUBUN, PART_GROUP_CODE, WORK_CODE,
                   IN_CUST_CODE, SORT_KEY, PROD_RATE, WH_IP_ADDRESS, RACK_NUMBER, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,getdate(),'web_partmaster')""", code, *args)
         cn.commit()
@@ -68,9 +68,9 @@ def partmaster_save(payload: dict = Body(...)):
 def partmaster_delete(payload: dict = Body(...)):
     code = (payload.get('code') or '').strip()
     if not code: return {"ok": False, "detail": "코드 필수"}
-    cn = _conn(); cur = cn.cursor()
+    cn = _nx(); cur = cn.cursor()   # ★nx전환: 마스터 삭제=nx 복제본
     try:
-        cur.execute("DELETE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code); cn.commit()
+        cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code); cn.commit()
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:200]}
