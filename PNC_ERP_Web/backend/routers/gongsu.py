@@ -54,8 +54,8 @@ def gongsu_list(from_ymd: str = Query(""), to_ymd: str = Query(""), dept: str = 
               ISNULL(A.USER_ID,'') user_id, ISNULL(A.CUST_CODE,'') line, ISNULL(A.START_TIME,'') start_time,
               ISNULL(A.END_TIME,'') end_time, ISNULL(A.WORK_HR,0) work_hr, ISNULL(A.SUPPORT_LINE,'') support_line,
               ISNULL(A.SUPPORT_HR,0) support_hr, ISNULL(A.HR_CHECK_POINT,'0') hr_check, ISNULL(A.REMARKS,'') remarks
-            FROM HR_M_WORK_INFO A LEFT JOIN HR_M_DEPT D ON D.DEPT_CODE=A.DEPT_CODE
-              LEFT JOIN PR_M_PROC_GAGONG G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.DEPT_CODE COLLATE DATABASE_DEFAULT
+            FROM PARTNER_ERP_TEST3.nx.HR_M_WORK_INFO A LEFT JOIN PARTNER_ERP_TEST3.nx.HR_M_DEPT D ON D.DEPT_CODE=A.DEPT_CODE
+              LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG G ON G.GAGONG_PROC_CODE COLLATE DATABASE_DEFAULT=A.DEPT_CODE COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)} ORDER BY A.WORK_YMD DESC, A.DEPT_CODE, A.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]

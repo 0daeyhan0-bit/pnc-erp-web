@@ -37,7 +37,7 @@ def bom_get(item: str = Query(..., description="품번")):
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품목 {item} 없음")
-        cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP.dbo.PR_M_PROC_GAGONG
+        cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
                        WHERE ISNULL(GAGONG_PROC_CODE,'')<>'' ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         procs = [{"code": str(r[0]).strip(), "name": (str(r[1]).strip() if r[1] else str(r[0]).strip())} for r in cur.fetchall()]
         cur.execute("SELECT bom_id, version, status FROM nx.bom_header WHERE item_code=?", item)
@@ -56,7 +56,7 @@ def bom_get(item: str = Query(..., description="품번")):
             FROM nx.bom_line l
             LEFT JOIN nx.item ci ON ci.item_code = l.child_item
             LEFT JOIN nx.partner pv ON pv.partner_code = ci.in_cust
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST pc ON pc.CUST_CODE = ci.in_cust
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = ci.in_cust
             WHERE l.bom_id = ? ORDER BY l.seq""", bom_id)
         cols = [d[0] for d in cur.description]
         lines = []
@@ -81,7 +81,7 @@ def codes():
         out = {}
         for key, grp in _CODE_GROUPS.items():
             cur.execute("""SELECT LTRIM(RTRIM(DETAIL_CODE)), LTRIM(RTRIM(DETAIL_DESC))
-                FROM CM_M_MASTER_DETAIL WHERE KIND_CODE=? AND ISNULL(USE_FLAG,'1')='1'
+                FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=? AND ISNULL(USE_FLAG,'1')='1'
                 ORDER BY SORT_SEQ, DETAIL_CODE""", grp)
             out[key] = [{"code": r[0], "name": r[1]} for r in cur.fetchall()]
         out["make_type"] = [{"code": k, "name": v} for k, v in _ITEM_MAKE.items() if k]   # 통일: _ITEM_MAKE(품목조회 일치)
@@ -99,7 +99,7 @@ def item_vendorsearch(q: str = Query("")):
     cn = _nx(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute("""SELECT TOP 30 c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP.dbo.CM_M_CUST c
+        cur.execute("""SELECT TOP 30 c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c
             WHERE c.CUST_CODE LIKE ? OR c.CUST_DESC LIKE ? ORDER BY c.CUST_CODE""", like, like)
         return {"rows": [{"code": r[0], "name": r[1]} for r in cur.fetchall()]}
     finally:
@@ -166,7 +166,7 @@ def _bom_tree_route(item, route_id):
         vmap = {}
         for i in range(0, len(vcodes), 900):
             ch = vcodes[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): vmap[str(rr[0]).strip()] = rr[1]
         cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", ritem)
         rr = cur.fetchone(); rootnm = rr[0] if rr else ""
@@ -201,7 +201,7 @@ def _bom_tree_nx(item, real):
        real=1: cs_calc_except=0 + 라이브 PR_M_ITEM.MAKE_TYPE='1' 하위전개(현행 CS bom/tree와 동일 grain → 리프·수량 diff0).
        구조/수량=nx.bom_line, 상세(품명·매입처·치수)=라이브 PR_M_ITEM(자도번 코드 기준, 표시코드만 정규화)."""
     exc = "AND ISNULL(bl.cs_calc_except,0)=0" if real else ""
-    mk = "JOIN PARTNER_ERP.dbo.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""
+    mk = "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""
     cn = _nx(); cur = cn.cursor()
     try:
         cur.execute(f"""WITH tree AS (
@@ -239,7 +239,7 @@ def _bom_tree_nx(item, real):
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
                   ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                FROM PARTNER_ERP.dbo.PR_M_ITEM m LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
                 WHERE m.ITEM_CODE IN ({ph})""", *chunk)
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -289,7 +289,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
         return _bom_tree_nx(item, real)   # ★#1 이관: 단일 정규화 BOM(nx.bom_line). src=cs면 아래 현행 CS 전개(대조·롤백)
     exc_a = "AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""      # 원가제외 라인 스킵
     exc_r = "AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""
-    mk_gate = "JOIN PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
+    mk_gate = "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
     cn = _conn(); cur = cn.cursor()  # live PARTNER_ERP
     try:
         cur.execute(f"""WITH tree AS (
@@ -297,13 +297,13 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
                    ISNULL(SET_EXCEPT_FLAG,'') se, ISNULL(KITTING_FLAG,'') kt, ISNULL(VIR_ITEM_FLAG,'') vir,
                    ISNULL(CS_CALC_EXCEPT_FLAG,'') ce, ISNULL(LME_EXCEPT_FLAG,'') le,
                    ISNULL(GAGONG_PROC_CODE,'') gp, ISNULL(S_WORK_CODE,'') sw, ISNULL(BOM_SEQ,0) sq, 1 lvl
-            FROM CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' {exc_a}
+            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' {exc_a}
             UNION ALL
             SELECT b.ITEM_CODE, b.MAT_CODE, CAST(b.USE_QTY AS decimal(18,6)), ISNULL(b.SAGUB_FLAG,'0'),
                    ISNULL(b.SET_EXCEPT_FLAG,''), ISNULL(b.KITTING_FLAG,''), ISNULL(b.VIR_ITEM_FLAG,''),
                    ISNULL(b.CS_CALC_EXCEPT_FLAG,''), ISNULL(b.LME_EXCEPT_FLAG,''),
                    ISNULL(b.GAGONG_PROC_CODE,''), ISNULL(b.S_WORK_CODE,''), ISNULL(b.BOM_SEQ,0), t.lvl+1
-            FROM tree t JOIN CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' {exc_r}
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' {exc_r}
             {mk_gate}
             WHERE t.lvl < 8)
             SELECT p,c,q,sag,se,kt,vir,ce,le,gp,sw,sq,lvl FROM tree OPTION(MAXRECURSION 50)""", item)
@@ -325,7 +325,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
                 cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
                       ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                       ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                    FROM PR_M_ITEM m LEFT JOIN CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
                     WHERE m.ITEM_CODE IN ({ph})""", *chunk)
                 for r in cur.fetchall():
                     info[r[0]] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -489,7 +489,7 @@ def lgbom_search(q: str = Query(""), werks: str = Query(""), limit: int = Query(
         if werks: w.append("b.werks=?"); p.append(werks)
         cur.execute(f"""SELECT TOP {int(limit)} b.model, b.werks, MAX(b.parent_code) parent_code,
               MAX(ISNULL(pi.ITEM_DESC,'')) modelnm, COUNT(*) child_cnt, MAX(b.valid_from) valid_from
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON pi.ITEM_CODE=b.model
+            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.ITEM_CODE=b.model
             WHERE {' AND '.join(w)} GROUP BY b.model, b.werks ORDER BY b.model""", *p)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -506,12 +506,12 @@ def lgbom_tree(model: str = Query(...), werks: str = Query("")):
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
               b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.ITEM_DESC,'') nx_desc
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
+            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         # 최상위 parent(model) 정보
-        cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE=?", model)
+        cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", model)
         mn = cur.fetchone()
         return {"model": model, "modelnm": (mn[0] if mn else ""), "rows": rows}
     finally:
@@ -679,7 +679,7 @@ def bom_copy(payload: dict = Body(...)):
                 lcur.execute("""SELECT LTRIM(RTRIM(MAT_CODE)), CAST(USE_QTY AS decimal(18,6)), ISNULL(CS_CALC_EXCEPT_FLAG,''),
                        ISNULL(LME_EXCEPT_FLAG,''), ISNULL(SAGUB_FLAG,'0'), ISNULL(SET_EXCEPT_FLAG,''), ISNULL(KITTING_FLAG,''),
                        ISNULL(VIR_ITEM_FLAG,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(S_WORK_CODE,''), ISNULL(BOM_SEQ,0)
-                    FROM CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' ORDER BY BOM_SEQ""", source)
+                    FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' ORDER BY BOM_SEQ""", source)
                 lrows = lcur.fetchall()
             finally:
                 lc.close()
@@ -750,7 +750,7 @@ def routing_get(item: str = Query(...)):
     # 공정마스터(이름·정렬), proc_code<90(관리/운반/이윤 제외)
     cn = _conn(); c2 = cn.cursor()
     try:
-        c2.execute("SELECT PROC_CODE, PROC_DESC, ISNULL(SORT_SEQ,0), ISNULL(PROD_UPH,0) FROM CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0), PROC_CODE")
+        c2.execute("SELECT PROC_CODE, PROC_DESC, ISNULL(SORT_SEQ,0), ISNULL(PROD_UPH,0) FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0), PROC_CODE")
         procs = []
         for r in c2.fetchall():
             pc = str(r[0]).strip(); ex = cur_rows.get(pc, {})

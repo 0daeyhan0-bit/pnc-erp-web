@@ -41,7 +41,7 @@ def profile_get(item: str = Query(...)):
               CONVERT(varchar(10),sp.apply_to,23) apply_to, sp.is_active, sp.is_internal,
               sp.alloc_ratio, sp.priority
             FROM nx.sourcing_profile sp
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=sp.vendor_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=sp.vendor_code
             WHERE sp.item_code=? ORDER BY sp.is_internal DESC, sp.supply_gubun, sp.profile_id""", item)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]

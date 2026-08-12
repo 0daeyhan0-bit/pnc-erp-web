@@ -31,10 +31,10 @@ def partplan_list(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
               MAX(COALESCE(w.WORK_DESC, cu.CUST_DESC, '')) wcnm, MAX(ISNULL(i.ITEM_DESC,'')) nm,
               MAX(ISNULL(i.ITEM_DIAM,0)) diam, MAX(ISNULL(i.ITEM_THICK,0)) thick, MAX(ISNULL(i.ITEM_LENGTH,0)) length,
               MAX(p.CUM_USE_QTY) useq, SUM(p.PART_PLAN_QTY) pq
-            FROM PR_T_PLAN_PART_MAT p
-            LEFT JOIN PR_M_WORK w ON w.WORK_CODE=p.MAT_WORK_CENTER_CODE
-            LEFT JOIN CM_M_CUST cu ON cu.CUST_CODE=p.MAT_WORK_CENTER_CODE
-            LEFT JOIN PR_M_ITEM i ON i.ITEM_CODE=p.MAT_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT p
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=p.MAT_WORK_CENTER_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=p.MAT_WORK_CENTER_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=p.MAT_CODE
             WHERE {' AND '.join(w)}
             GROUP BY p.PART_PLAN_YMD, p.ASSY_ITEM_CODE, p.MAT_CODE, p.MAT_WORK_CENTER_CODE""", *pr)
         cols = [d[0] for d in cur.description]
@@ -62,9 +62,9 @@ def partplan_workcenters():
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute("""SELECT p.MAT_WORK_CENTER_CODE cc, COALESCE(w.WORK_DESC, cu.CUST_DESC, '') nm, COUNT(*) n
-            FROM PR_T_PLAN_PART_MAT p
-            LEFT JOIN PR_M_WORK w ON w.WORK_CODE=p.MAT_WORK_CENTER_CODE
-            LEFT JOIN CM_M_CUST cu ON cu.CUST_CODE=p.MAT_WORK_CENTER_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT p
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=p.MAT_WORK_CENTER_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=p.MAT_WORK_CENTER_CODE
             WHERE p.PART_PLAN_QTY>0 AND p.MAT_WORK_CENTER_CODE>''
             GROUP BY p.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, '')
             ORDER BY COUNT(*) DESC""")

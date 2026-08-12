@@ -25,7 +25,7 @@ def prodplan_status(from_ymd: str = Query(""), to_ymd: str = Query(""), line: st
         cur.execute(f"""SELECT PLAN_YMD, WORK_ORDER, MODEL_NO, LINE_NO, ISNULL(PLAN_QTY,0) PLAN_QTY,
               ISNULL(LOT_QTY,0) LOT_QTY, ISNULL(TOOLS_DESC,'') TOOLS_DESC, ISNULL(CR_FLAG,'') CR_FLAG,
               ISNULL(OUTPUT_HM,'') OUTPUT_HM
-            FROM SA_T_PLAN_DTL WHERE {' AND '.join(w)}""", *p)
+            FROM PARTNER_ERP_TEST3.nx.SA_T_PLAN_DTL WHERE {' AND '.join(w)}""", *p)
         cols = [d[0] for d in cur.description]
         raw = [dict(zip(cols, row)) for row in cur.fetchall()]
         dates = sorted({r["PLAN_YMD"] for r in raw})

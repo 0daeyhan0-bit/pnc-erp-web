@@ -114,7 +114,7 @@ def dtrade_compare(ym: str = Query(...), batch_ymd: str = Query(...), tol: float
         live = {}
         for i in range(0, len(items), 900):
             ch = items[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"""SELECT ITEM_CODE,ISNULL(CUST_CODE,''),COST_TAG,ITEM_COST FROM PR_M_ITEM_COST
+            cur.execute(f"""SELECT ITEM_CODE,ISNULL(CUST_CODE,''),COST_TAG,ITEM_COST FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
                 WHERE COST_APPLY_YMD=? AND COST_TAG IN('E','S') AND ITEM_CODE IN ({ph})""", batch, *ch)
             for r in cur.fetchall():
                 live[(r[0].strip(), str(r[1]).strip(), r[2])] = float(r[3] or 0)

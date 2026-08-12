@@ -16,7 +16,7 @@ def manorder_vendors(q: str = Query("")):
     try:
         like = f"%{q.strip()}%"
         cur.execute("""SELECT TOP 30 C.CUST_CODE, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct, COUNT(M.ITEM_CODE) items
-          FROM CM_M_CUST C JOIN PR_M_ITEM M ON M.IN_CUST_CODE=C.CUST_CODE AND ISNULL(M.ITEM_STATUS,'1') IN ('1','2')
+          FROM PARTNER_ERP_TEST3.nx.CM_M_CUST C JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON M.IN_CUST_CODE=C.CUST_CODE AND ISNULL(M.ITEM_STATUS,'1') IN ('1','2')
           WHERE (C.CUST_CODE LIKE ? OR C.CUST_DESC LIKE ?)
           GROUP BY C.CUST_CODE HAVING COUNT(M.ITEM_CODE)>0
           ORDER BY COUNT(M.ITEM_CODE) DESC""", like, like)
@@ -34,7 +34,7 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         y = _dig4(ym)
         if y:                       # 특정 월 지정 시 그 달 전체
             from6, to6 = y + "01", y + "99"
-        cur.execute("SELECT MAX(STOCK_YYMM) FROM PU_T_MONTH_STOCK_WH")
+        cur.execute("SELECT MAX(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH")
         smax = cur.fetchone()[0]
         # ── 조달 프로파일 배분(후보내 업체 배분, nx.sourcing_profile) + 발주업체 지정(nx.order_vendor) 적용 ──
         #   ★이 매입처(cc)의 발주 몫 = 소요 × 배분율. 배분 미설정/단일=100%(현행 그대로 → 회귀0).
@@ -80,15 +80,15 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         cur.execute(f"""
           WITH PLANP AS (
             SELECT LEFT(C_ITEM_CODE, CASE WHEN CHARINDEX('-',C_ITEM_CODE)>0 THEN CHARINDEX('-',C_ITEM_CODE)-1 ELSE LEN(C_ITEM_CODE) END) parent, SUM(PLAN_QTY) pq
-            FROM PR_T_PLAN_ITEM_DTL WHERE PLAN_YMD BETWEEN ? AND ?
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_ITEM_DTL WHERE PLAN_YMD BETWEEN ? AND ?
             GROUP BY LEFT(C_ITEM_CODE, CASE WHEN CHARINDEX('-',C_ITEM_CODE)>0 THEN CHARINDEX('-',C_ITEM_CODE)-1 ELSE LEN(C_ITEM_CODE) END))
           SELECT M.ITEM_CODE ic, M.ITEM_DESC nm, ISNULL(M.ITEM_SPEC,'') spec, ISNULL(M.UNIT,'EA') unit,
             ISNULL(PP.pq,0) plan_qty, ISNULL(S.sq,0) stock_qty, ISNULL(PO.remain,0) po_qty
-          FROM PR_M_ITEM M
+          FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM M
           LEFT JOIN PLANP PP ON PP.parent = LEFT(M.ITEM_CODE, CASE WHEN CHARINDEX('-',M.ITEM_CODE)>0 THEN CHARINDEX('-',M.ITEM_CODE)-1 ELSE LEN(M.ITEM_CODE) END)
-          LEFT JOIN (SELECT MAT_CODE, SUM(STOCK_QTY) sq FROM PU_T_MONTH_STOCK_WH WHERE STOCK_YYMM=? GROUP BY MAT_CODE) S ON S.MAT_CODE=M.ITEM_CODE
+          LEFT JOIN (SELECT MAT_CODE, SUM(STOCK_QTY) sq FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE STOCK_YYMM=? GROUP BY MAT_CODE) S ON S.MAT_CODE=M.ITEM_CODE
           LEFT JOIN (SELECT ITEM_CODE, SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0)) remain
-             FROM PU_T_PURCHASE_DTL WHERE CUST_CODE=? AND ISNULL(IN_FINISH_FLAG,'N')<>'Y'
+             FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL WHERE CUST_CODE=? AND ISNULL(IN_FINISH_FLAG,'N')<>'Y'
              GROUP BY ITEM_CODE HAVING SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0))>0) PO ON PO.ITEM_CODE=M.ITEM_CODE
           WHERE (M.IN_CUST_CODE=?{or_main}) AND ISNULL(M.ITEM_STATUS,'1') IN ('1','2')
           ORDER BY ISNULL(PP.pq,0) DESC, M.ITEM_CODE""", from6, to6, smax, cc, cc, *extra)
@@ -100,10 +100,10 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         # ★우측 협력사 일자별 계획 = 좌측과 동일 소스(PR_T_PLAN_ITEM_DTL). 부모 도번별 PLAN_YMD 분포 → 일자별 합 = 좌측 계획수량.
         cur.execute(f"""
           WITH ITM AS (SELECT DISTINCT LEFT(ITEM_CODE, CASE WHEN CHARINDEX('-',ITEM_CODE)>0 THEN CHARINDEX('-',ITEM_CODE)-1 ELSE LEN(ITEM_CODE) END) parent
-                       FROM PR_M_ITEM WHERE (IN_CUST_CODE=?{or_itm}) AND ISNULL(ITEM_STATUS,'1') IN ('1','2'))
+                       FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE (IN_CUST_CODE=?{or_itm}) AND ISNULL(ITEM_STATUS,'1') IN ('1','2'))
           SELECT LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END) parent,
                  D.PLAN_YMD ymd, SUM(D.PLAN_QTY) pq
-          FROM PR_T_PLAN_ITEM_DTL D
+          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_ITEM_DTL D
           JOIN ITM ON ITM.parent = LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END)
           WHERE D.PLAN_YMD BETWEEN ? AND ?
           GROUP BY LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END), D.PLAN_YMD""", cc, *extra, from6, to6)
@@ -134,7 +134,7 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         rows = out
         cn2 = _conn(); c2 = cn2.cursor()
         try:
-            c2.execute("SELECT CUST_DESC FROM CM_M_CUST WHERE CUST_CODE=?", cc)
+            c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", cc)
             rr = c2.fetchone(); nm = rr[0] if rr else cc
         finally:
             cn2.close()

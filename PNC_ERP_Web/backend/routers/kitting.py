@@ -38,11 +38,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             cur.execute("""
                 ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
                      SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
+                       FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
                       WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
                      UNION ALL
                      SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM CTE a JOIN pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
+                       FROM CTE a JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
                 )
                 SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
             for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
@@ -63,13 +63,13 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, ISNULL(ib.ITEM_DESC,'') nm,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd, SUM(CAST(a.PART_PLAN_QTY AS float)) pl
-            FROM PR_T_PLAN_PART_COPY a WITH(NOLOCK)
-            JOIN pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
-            JOIN pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
-            JOIN PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
-            LEFT JOIN PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
-            LEFT JOIN CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
-            LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+            JOIN PARTNER_ERP_TEST3.nx.pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
+            JOIN PARTNER_ERP_TEST3.nx.pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
+            JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
+            LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
               a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
@@ -107,11 +107,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         # ── 충당 소스 조회(라이브 직독, SP 소스와 동일) ──
         rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
         try:  # 준비재고: pu_t_ready_stock cust='Z99990', (proc_gubun=파트, item)
-            cur.execute("SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
+            cur.execute("SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
             for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
         except Exception: pass
         try:  # ASSY 현재고: sa_t_item_stock (item)
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
         except Exception: pass
         # ★중간공정 파트재고 롤업(SP #TEMP_MAT_STOCK T_SUB_CTE): 자재/생산/사급/스태커 재고 + 재귀BOM 도번고정 → tag70.
@@ -127,15 +127,15 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                     ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
                         SELECT s.mat_code, s.mat_code, s.mat_code,
                                CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
-                          FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM pr_t_mat_stock_wh WITH(NOLOCK)
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                          FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK)
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
                          GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
                         UNION ALL
                         SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
                                CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
-                          FROM T_SUB_CTE cb JOIN pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
+                          FROM T_SUB_CTE cb JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
                     )
                     SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
                 cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms GROUP BY mat_code")   # 자재+생산재고(item)
@@ -148,7 +148,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             wos = list({g["wo"] for g in rows if g["wo"]})
             for i in range(0, len(wos), 900):
                 ck = wos[i:i + 900]; ph = ",".join("?" * len(ck))
-                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
         except Exception: pass
         try:  # ★Phase1: nx 셀단위 준비 flag = 단일원장 nx.stock_ledger(STOCK_POINT='RDY') SUM. (item×wo×파트gpc×일자INPUT_YMD)
@@ -236,7 +236,7 @@ def _kit_cell_guard(item, wo, swo, gpc, ymd, qty, assy):
     try:
         cellm = _d6(ymd) if ymd else ''
         try:
-            cur.execute("SELECT ISNULL(MAX(stock_yymm),'0000') FROM pu_t_month_ready_stock")
+            cur.execute("SELECT ISNULL(MAX(stock_yymm),'0000') FROM PARTNER_ERP_TEST3.nx.pu_t_month_ready_stock")
             mclose = (cur.fetchone()[0] or '0000')
         except Exception:
             mclose = '0000'
@@ -244,7 +244,7 @@ def _kit_cell_guard(item, wo, swo, gpc, ymd, qty, assy):
             return (False, f"월마감({mclose}) 완료 일자 — 확인/취소 불가")
         if assy and qty > 0:   # 출하완료분 금지(sa_t_sale_dtl 미마감 출하 ≥ 셀잔량)
             try:
-                cur.execute("SELECT ISNULL(SUM(SALE_QTY),0) FROM SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?",
+                cur.execute("SELECT ISNULL(SUM(SALE_QTY),0) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?",
                             wo, (swo or ''), assy)
                 if float(cur.fetchone()[0] or 0) >= qty:
                     return (False, "출하완료분 — 키팅 확인 불가")

@@ -24,9 +24,9 @@ def cust_opts():
     """거래처 드롭다운 소스: 거래처구분(PR011)·사업자구분·역할·결제조건·은행(CM701)."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011' ORDER BY DETAIL_CODE")
+        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011' ORDER BY DETAIL_CODE")
         cust_type = [{"code": str(r[0]).strip(), "nm": str(r[1]).strip()} for r in cur.fetchall()]
-        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE='CM701' ORDER BY DETAIL_CODE")
+        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='CM701' ORDER BY DETAIL_CODE")
         banks = [{"code": str(r[0]).strip(), "nm": str(r[1]).strip()} for r in cur.fetchall()]
         return {"cust_type": cust_type,
                 "biztag": [{"code": k, "nm": v} for k, v in _BIZTAG.items()],
@@ -54,7 +54,7 @@ def cust_list(q: str = Query(""), use: str = Query(""), ctype: str = Query("")):
     nx = _nx(); cur = nx.cursor()
     try:
         cur2 = _conn().cursor()
-        cur2.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011'")
+        cur2.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011'")
         dec = {str(r[0]).strip(): str(r[1]).strip() for r in cur2.fetchall()}
         w = ["1=1"]; p = []
         if q.strip(): w.append("(cust_code LIKE ? OR cust_name LIKE ? OR owner_name LIKE ?)"); p += [f"%{q.strip()}%"] * 3

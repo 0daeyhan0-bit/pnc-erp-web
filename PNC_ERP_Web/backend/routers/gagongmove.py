@@ -26,10 +26,10 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
               ISNULL(pp.LINE_NO,'') line, COALESCE(cw.WORK_DESC, cc.CUST_DESC, pp.MAT_WORK_CENTER_CODE, '') dest,
               pp.MAT_CODE mat, pp.PART_PLAN_YMD ymd, MIN(ISNULL(pp.PART_OUTPUT_HM,'')) hm,
               SUM(CAST(pp.PART_PLAN_QTY AS float)) q
-            FROM PR_T_PLAN_PART_MAT pp
-            JOIN PR_M_ITEM ia ON ia.ITEM_CODE=pp.ASSY_ITEM_CODE
-            LEFT JOIN PR_M_WORK cw ON cw.WORK_CODE=pp.MAT_WORK_CENTER_CODE
-            LEFT JOIN CM_M_CUST cc ON cc.CUST_CODE=pp.MAT_WORK_CENTER_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
+            JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ia ON ia.ITEM_CODE=pp.ASSY_ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK cw ON cw.WORK_CODE=pp.MAT_WORK_CENTER_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=pp.MAT_WORK_CENTER_CODE
             WHERE {' AND '.join(w)}
             GROUP BY pp.ASSY_ITEM_CODE, ISNULL(ia.ITEM_DESC,''), pp.LINE_NO,
               COALESCE(cw.WORK_DESC, cc.CUST_DESC, pp.MAT_WORK_CENTER_CODE, ''), pp.MAT_CODE, pp.PART_PLAN_YMD
@@ -58,7 +58,7 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
         CH = 1000
         for i in range(0, len(matset), CH):
             ck = matset[i:i + CH]; ph = ",".join("?" * len(ck)); pr = list(ck)
-            q = f"SELECT MAT_CODE, SUM(CAST(MAINT_QTY AS float)) FROM PU_T_STOCK_MAINT_GAGONG_MOVE WHERE IN_CONFIRM_FLAG='1' AND MAT_CODE IN ({ph})"
+            q = f"SELECT MAT_CODE, SUM(CAST(MAINT_QTY AS float)) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE IN_CONFIRM_FLAG='1' AND MAT_CODE IN ({ph})"
             if d6a: q += " AND MAINT_YMD>=?"; pr.append(d6a)
             if d6b: q += " AND MAINT_YMD<=?"; pr.append(d6b)
             q += " GROUP BY MAT_CODE"

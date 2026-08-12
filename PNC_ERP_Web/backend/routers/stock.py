@@ -165,9 +165,9 @@ def matrecv_po_pending(cust: str = Query(""), item: str = Query(""), sheet: str 
               p.PUR_QTY, ISNULL(p.IN_QTY,0) in_qty, ISNULL(p.CANCEL_QTY,0) cancel_qty, ISNULL(nx.q,0) nx_in,
               ISNULL(p.PUR_COST,0) pur_cost, ISNULL(p.MAT_INSPECTION,'') insp,
               (p.PUR_QTY - ISNULL(p.IN_QTY,0) - ISNULL(p.CANCEL_QTY,0) - ISNULL(nx.q,0)) remain
-            FROM PARTNER_ERP.dbo.PU_T_PURCHASE_DTL p
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST cu ON cu.CUST_CODE=p.CUST_CODE
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON it.ITEM_CODE=p.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL p
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=p.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON it.ITEM_CODE=p.ITEM_CODE
             LEFT JOIN (SELECT PUR_YMD,PUR_SEQ,PUR_SEQ_ROW,SUM(MAINT_QTY) q FROM nx.stock_ledger
                        WHERE MAINT_TAG='9' AND ISNULL(PUR_YMD,'')<>'' GROUP BY PUR_YMD,PUR_SEQ,PUR_SEQ_ROW) nx
               ON nx.PUR_YMD{C}=p.PUR_YMD{C} AND nx.PUR_SEQ{C}=p.PUR_SEQ{C} AND nx.PUR_SEQ_ROW=p.PUR_SEQ_ROW
@@ -212,7 +212,7 @@ def matrecv_receive(payload: dict = Body(...)):
             if py and ps and prw is not None:  # 발주잔량 초과 가드
                 cur.execute("""SELECT (p.PUR_QTY-ISNULL(p.IN_QTY,0)-ISNULL(p.CANCEL_QTY,0)
                     -ISNULL((SELECT SUM(MAINT_QTY) FROM nx.stock_ledger WHERE MAINT_TAG='9' AND PUR_YMD=? AND PUR_SEQ=? AND PUR_SEQ_ROW=?),0))
-                    FROM PARTNER_ERP.dbo.PU_T_PURCHASE_DTL p WHERE p.PUR_YMD=? AND p.PUR_SEQ=? AND p.PUR_SEQ_ROW=?""",
+                    FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL p WHERE p.PUR_YMD=? AND p.PUR_SEQ=? AND p.PUR_SEQ_ROW=?""",
                     py, ps, int(prw), py, ps, int(prw))
                 rem = cur.fetchone()
                 remain = float(rem[0]) if rem and rem[0] is not None else None
@@ -256,8 +256,8 @@ def matrecv_gagong_pending(sheet: str = Query(""), item: str = Query("")):
         cur.execute(f"""SELECT TOP 500 g.MAINT_GROUP_SEQ, g.MAT_CODE, ISNULL(it.ITEM_DESC,'') nm, ISNULL(it.ITEM_SPEC,'') spec,
               ISNULL(it.UNIT,'') unit, g.ITEM_CODE upper_code, g.MAINT_QTY, g.GAGONG_PROC_CODE, g.TO_GAGONG_PROC_CODE,
               g.MAINT_YMD, ISNULL(nx.q,0) nx_in
-            FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_GAGONG_MOVE g
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON it.ITEM_CODE{C}=g.MAT_CODE{C}
+            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE g
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON it.ITEM_CODE{C}=g.MAT_CODE{C}
             LEFT JOIN (SELECT MAINT_GROUP_SEQ, SUM(MAINT_QTY) q FROM nx.stock_ledger WHERE MAINT_TAG='C' AND MAINT_GROUP_SEQ IS NOT NULL GROUP BY MAINT_GROUP_SEQ) nx
               ON nx.MAINT_GROUP_SEQ=g.MAINT_GROUP_SEQ
             WHERE {' AND '.join(w)}

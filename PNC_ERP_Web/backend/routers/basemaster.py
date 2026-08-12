@@ -27,7 +27,7 @@ def _basemaster_partner(q):
     """거래처MASTER(라이브 CM_M_CUST). 레거시 w_cm_master_055. 코드→이름: CUST_TYPE=PR011 거래처구분, 역할=IN/OUT/OUTSIDE 플래그."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011'")
+        cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011'")
         dec = {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall()}
         w = ""; p = []
         if q.strip():
@@ -39,7 +39,7 @@ def _basemaster_partner(q):
               ISNULL(FAX_NO,''), ISNULL(ADDRESS,''), ISNULL(DLVY_DAY,0), ISNULL(DLVY_DAY2,0),
               ISNULL(SET_IN_FLAG,'0'), ISNULL(SAGUB_OUT_FLAG,'0'), ISNULL(HEAT_LABEL_FLAG,'0'),
               ISNULL(USE_FLAG,'0'), ISNULL(REMARKS,'')
-            FROM CM_M_CUST WHERE CUST_CODE>''{w} ORDER BY CUST_CODE""", *p)
+            FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE>''{w} ORDER BY CUST_CODE""", *p)
         yn = lambda v: 'Y' if str(v).strip() == '1' else ''
         rows = []
         for r in cur.fetchall():

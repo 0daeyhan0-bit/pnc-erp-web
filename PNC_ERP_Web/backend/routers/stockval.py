@@ -17,13 +17,13 @@ def stockval_list(ym: str = Query(""), incust: str = Query("")):
     try:
         y = _dig4(ym)
         if not y:
-            cur.execute("SELECT MAX(STOCK_YYMM) FROM PU_T_MONTH_STOCK_WH"); y = cur.fetchone()[0]
-        cur.execute("SELECT DISTINCT TOP 24 STOCK_YYMM FROM PU_T_MONTH_STOCK_WH ORDER BY STOCK_YYMM DESC")
+            cur.execute("SELECT MAX(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH"); y = cur.fetchone()[0]
+        cur.execute("SELECT DISTINCT TOP 24 STOCK_YYMM FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH ORDER BY STOCK_YYMM DESC")
         months = [r[0] for r in cur.fetchall()]
         if incust.strip():
             cur.execute("""SELECT TOP 5000 W.MAT_CODE mat, ISNULL(M.ITEM_DESC,'') nm, ISNULL(M.ITEM_SPEC,'') spec,
                   ISNULL(M.UNIT,'') unit, SUM(W.STOCK_QTY) qty, MAX(W.STOCK_COST) cost, SUM(W.STOCK_AMT) amt
-                FROM PU_T_MONTH_STOCK_WH W JOIN PR_M_ITEM M ON M.ITEM_CODE=W.MAT_CODE
+                FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH W JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON M.ITEM_CODE=W.MAT_CODE
                 WHERE W.STOCK_YYMM=? AND ISNULL(M.IN_CUST_CODE,'')=?
                 GROUP BY W.MAT_CODE, M.ITEM_DESC, M.ITEM_SPEC, M.UNIT HAVING SUM(W.STOCK_QTY)<>0
                 ORDER BY SUM(W.STOCK_AMT) DESC""", y, incust.strip())
@@ -35,8 +35,8 @@ def stockval_list(ym: str = Query(""), incust: str = Query("")):
                     "rows": rows, "cnt": len(rows), "sum_amt": sum(r["amt"] for r in rows)}
         cur.execute("""SELECT ISNULL(M.IN_CUST_CODE,'') incust, MAX(ISNULL(C.CUST_DESC,'')) nm,
               COUNT(DISTINCT W.MAT_CODE) items, SUM(W.STOCK_QTY) qty, SUM(W.STOCK_AMT) amt
-            FROM PU_T_MONTH_STOCK_WH W JOIN PR_M_ITEM M ON M.ITEM_CODE=W.MAT_CODE
-            LEFT JOIN CM_M_CUST C ON C.CUST_CODE=M.IN_CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH W JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON M.ITEM_CODE=W.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON C.CUST_CODE=M.IN_CUST_CODE
             WHERE W.STOCK_YYMM=? GROUP BY M.IN_CUST_CODE HAVING SUM(W.STOCK_AMT)<>0
             ORDER BY SUM(W.STOCK_AMT) DESC""", y)
         cols = [d[0] for d in cur.description]

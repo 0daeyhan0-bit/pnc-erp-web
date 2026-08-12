@@ -24,10 +24,10 @@ def modelbom_search(q: str = Query(""), by: str = Query("model")):
     try:
         like = f"%{q.strip()}%"
         if by == "item":
-            cur.execute("""SELECT TOP 100 C_ITEM_CODE cd, COUNT(DISTINCT MODEL_NO) n FROM PR_M_MODEL_BOM
+            cur.execute("""SELECT TOP 100 C_ITEM_CODE cd, COUNT(DISTINCT MODEL_NO) n FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM
                 WHERE C_ITEM_CODE LIKE ? GROUP BY C_ITEM_CODE ORDER BY C_ITEM_CODE""", like)
             return {"by": "item", "rows": [{"code": r[0], "n": r[1]} for r in cur.fetchall()]}
-        cur.execute("""SELECT TOP 100 MODEL_NO cd, COUNT(*) n FROM PR_M_MODEL_BOM
+        cur.execute("""SELECT TOP 100 MODEL_NO cd, COUNT(*) n FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM
             WHERE MODEL_NO LIKE ? GROUP BY MODEL_NO ORDER BY MODEL_NO""", like)
         return {"by": "model", "rows": [{"code": r[0], "n": r[1]} for r in cur.fetchall()]}
     finally:
@@ -41,12 +41,12 @@ def modelbom_get(model: str = Query(""), item: str = Query("")):
         _ensure_modelbom(cur)
         if item.strip():  # 역방향
             cur.execute("""SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, CONVERT(varchar,MAKE_YMD), CONVERT(varchar,TO_APPLY_YMD), 'live'
-                  FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM WHERE C_ITEM_CODE=?
+                  FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WHERE C_ITEM_CODE=?
                 UNION ALL SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, APPLY_FROM, APPLY_TO, 'nx' FROM nx.model_bom WHERE C_ITEM_CODE=?
                 ORDER BY 1""", item.strip(), item.strip())
         else:
             cur.execute("""SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, CONVERT(varchar,MAKE_YMD), CONVERT(varchar,TO_APPLY_YMD), 'live'
-                  FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM WHERE MODEL_NO=?
+                  FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WHERE MODEL_NO=?
                 UNION ALL SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, APPLY_FROM, APPLY_TO, 'nx' FROM nx.model_bom WHERE MODEL_NO=?
                 ORDER BY 2""", model.strip(), model.strip())
         rows = []
@@ -59,7 +59,7 @@ def modelbom_get(model: str = Query(""), item: str = Query("")):
         if codes:
             for i in range(0, len(codes), 900):
                 ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-                cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(IN_CUST_CODE,''), LTRIM(RTRIM(ISNULL(WORK_CODE,''))) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+                cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(IN_CUST_CODE,''), LTRIM(RTRIM(ISNULL(WORK_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
                 for x in cur.fetchall(): nm[x[0]] = {"nm": x[1], "wc": (x[3] if x[3] else x[2])}
         for r in rows:
             info = nm.get(r["item"], {}); r["nm"] = info.get("nm", ""); r["wc"] = info.get("wc", "")

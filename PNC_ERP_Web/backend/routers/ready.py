@@ -41,7 +41,7 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
         nm = {}; pl = [x for x in parts if x]
         for i in range(0, len(pl), 900):
             ch = pl[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         for x in rows: x["nm"] = nm.get(x["item_code"], "")
         return {"rows": rows, "cnt": len(rows)}

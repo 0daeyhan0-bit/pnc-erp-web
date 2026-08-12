@@ -26,13 +26,13 @@ def setin_list(cust: str = Query(""), fr: str = Query(""), to: str = Query(""), 
               ISNULL(h.deliver_qty,0) deliver_qty,
               STUFF((SELECT ','+d.mat_code FROM nx.set_input_req_dtl d WHERE d.sheet_no=h.sheet_no FOR XML PATH('')),1,1,'') jadolist
             FROM nx.set_input_req h
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=h.item_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=h.item_code
             WHERE {where} ORDER BY h.in_cust_code, h.input_ymd, h.sheet_no""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("""SELECT h.in_cust_code, MAX(ISNULL(c.CUST_DESC,'')) nm, COUNT(*) n
-            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
             WHERE h.remarks='PLAN_COMPOSE' GROUP BY h.in_cust_code ORDER BY COUNT(*) DESC""")
         custs = [{"code": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()]
         return {"rows": rows, "cnt": len(rows), "custs": custs}
@@ -45,7 +45,7 @@ def setin_detail(sheet: str = Query(...)):
     cn = _nx(); cur = cn.cursor()
     try:
         cur.execute("""SELECT d.line_no, d.mat_code, ISNULL(i.ITEM_DESC,'') matnm, d.use_qty, d.mat_qty, ISNULL(d.insp_flag,'0') insp_flag
-            FROM nx.set_input_req_dtl d LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=d.mat_code
+            FROM nx.set_input_req_dtl d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=d.mat_code
             WHERE d.sheet_no=? ORDER BY d.line_no""", sheet)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -105,17 +105,17 @@ def setin_invoice(barcode: str = Query(...)):
         cust = rc[0]
         cur.execute("""SELECT ISNULL(BUSINESS_NO,''),ISNULL(CUST_DESC,''),ISNULL(OWNER_NAME,''),
             LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,'')
-            FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE=?""", cust)
+            FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?""", cust)
         s = cur.fetchone() or ('',)*6
         supplier = {"biz": _fmtbiz(s[0]), "nm": (s[1] or '').strip(), "owner": (s[2] or '').strip(), "addr": (s[3] or '').strip(), "tel": (s[4] or '').strip(), "fax": (s[5] or '').strip()}
         cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''),ISNULL(COMPANY_DESCK,''),ISNULL(OWNER_NAME,''),
-            LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,'') FROM PARTNER_ERP.dbo.CM_M_COMPANY""")
+            LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),ISNULL(PHONE_NO,''),ISNULL(FAX_NO,'') FROM PARTNER_ERP_TEST3.nx.CM_M_COMPANY""")
         b = cur.fetchone() or ('',)*6
         buyer = {"biz": _fmtbiz(b[0]), "nm": (b[1] or '').strip(), "owner": (b[2] or '').strip(), "addr": (b[3] or '').strip(), "tel": (b[4] or '').strip(), "fax": (b[5] or '').strip()}
         cur.execute("""SELECT h.item_code doban, ISNULL(h.deliver_qty,h.input_req_qty) setqty,
               d.mat_code jado, ISNULL(i.ITEM_DESC,'') nm, d.use_qty, ISNULL(d.insp_flag,'0') insp
             FROM nx.set_input_req h JOIN nx.set_input_req_dtl d ON d.sheet_no=h.sheet_no
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=d.mat_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=d.mat_code
             WHERE h.barcode_no=? ORDER BY h.item_code, d.line_no""", barcode)
         rows = []; tot = 0.0; lastd = None
         for doban, setq, jado, nm, uq, insp in cur.fetchall():
@@ -143,8 +143,8 @@ def setstock_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""
               ISNULL(c.CUST_DESC,'') custnm, m.item_code, ISNULL(i.ITEM_DESC,'') itemnm, m.maint_qty, m.sheet_no,
               m.manual_sheet_no, m.status, ISNULL(m.derived_flag,'0') derived_flag, m.insert_datetime
             FROM nx.set_stock_maint m
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=m.cust_code
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=m.item_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=m.item_code
             WHERE {' AND '.join(w)} ORDER BY m.maint_ymd DESC, m.maint_seq DESC""", *p)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -160,8 +160,8 @@ def setstock_scan(barcode: str = Query(...)):
         cur.execute("""SELECT h.item_code, ISNULL(i.ITEM_DESC,'') itemnm, ISNULL(h.deliver_qty,h.input_req_qty) qty,
               h.in_cust_code, ISNULL(c.CUST_DESC,'') custnm, h.status, ISNULL(h.insp_flag,'0') insp,
               (SELECT COUNT(*) FROM nx.set_input_req_dtl d WHERE d.sheet_no=h.sheet_no) jcnt
-            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=h.item_code
+            FROM nx.set_input_req h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.in_cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=h.item_code
             WHERE h.barcode_no=? ORDER BY h.item_code""", bc)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]

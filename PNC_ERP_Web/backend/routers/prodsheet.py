@@ -22,7 +22,7 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str
     nx = _nx(); ncur = nx.cursor()
     try:
         jp = {}
-        cur.execute("SELECT ITEM_CODE, MAX(JP_PROC_METHOD) FROM PR_M_ITEM_PROC_GAGONG WHERE JP_PROC_METHOD IN ('J','G') GROUP BY ITEM_CODE")
+        cur.execute("SELECT ITEM_CODE, MAX(JP_PROC_METHOD) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE JP_PROC_METHOD IN ('J','G') GROUP BY ITEM_CODE")
         for r in cur.fetchall(): jp[str(r[0]).strip()] = str(r[1]).strip()
         w = ["1=1"]; p = []
         if from_ymd.strip(): w.append("pp.PLAN_YMD>=?"); p.append(d6(from_ymd))
@@ -46,7 +46,7 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str
         nm = {}; pl = [x for x in parts if x]
         for i in range(0, len(pl), 900):
             ch = pl[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         for x in rows:
             x["nm"] = nm.get(x["item_code"], "")
@@ -112,22 +112,22 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
             cn = _conn(); c2 = cn.cursor()
             try:
                 if bc.upper().startswith("GP") and bc[2:].isdigit():
-                    c2.execute("SELECT TOP 1 ITEM_CODE, PLAN_QTY, SHEET_NO FROM PR_T_INDI_SHEET2 WHERE BOX_NO=?", int(bc[2:]))
+                    c2.execute("SELECT TOP 1 ITEM_CODE, PLAN_QTY, SHEET_NO FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_SHEET2 WHERE BOX_NO=?", int(bc[2:]))
                     r = c2.fetchone()
                     if r: item, qty, sheet, kind, src = str(r[0]).strip(), float(r[1] or 0), int(r[2] or 0), "간판", "legacy"
                 if not item:
-                    c2.execute("SELECT TOP 1 ITEM_CODE, PRINT_QTY, SHEET_NO FROM PR_T_PRINT_STICKER WHERE QR_BARCODE_FROM=? OR QR_BARCODE_TO=?", bc, bc)
+                    c2.execute("SELECT TOP 1 ITEM_CODE, PRINT_QTY, SHEET_NO FROM PARTNER_ERP_TEST3.nx.PR_T_PRINT_STICKER WHERE QR_BARCODE_FROM=? OR QR_BARCODE_TO=?", bc, bc)
                     r = c2.fetchone()
                     if r: item, qty, sheet, kind, src = str(r[0]).strip(), float(r[1] or 0), int(r[2] or 0), "라벨", "legacy"
                 nm = ""
                 if item:
-                    c2.execute("SELECT ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE=?", item)
+                    c2.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
                     rr = c2.fetchone(); nm = rr[0] if rr else ""
             finally: cn.close()
         else:
             cn = _conn(); c2 = cn.cursor()
             try:
-                c2.execute("SELECT ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE=?", item)
+                c2.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
                 rr = c2.fetchone(); nm = rr[0] if rr else ""
             finally: cn.close()
         if not item:
@@ -214,7 +214,7 @@ def procbc_list(from_ymd: str = Query(""), to_ymd: str = Query(""), proc: str = 
         nm = {}; il = [x for x in items if x]
         for i in range(0, len(il), 900):
             ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-            c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in c2.fetchall(): nm[str(a).strip()] = b
         for x in rows: x["nm"] = nm.get(x["item_code"], "")
         return {"rows": rows, "cnt": len(rows)}

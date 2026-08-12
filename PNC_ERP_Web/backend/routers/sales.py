@@ -24,8 +24,8 @@ def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Quer
               ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code, ISNULL(i.ITEM_DESC,'') matnm,
               l.MAINT_QTY maint_qty, ISNULL(l.MAINT_COST,0) maint_cost, ISNULL(l.MAINT_AMT,0) maint_amt,
               ISNULL(l.REMARKS,'') remarks, ISNULL(l.INSERT_USER_ID,'') insert_user_id, l.INSERT_DATETIME insert_datetime
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=l.MAT_CODE
+            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ ASC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -34,7 +34,7 @@ def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Quer
             r["maint_qty"] = float(r["maint_qty"] or 0)
             r["insert_datetime"] = str(r["insert_datetime"] or "")[:19]
         cur.execute("""SELECT DISTINCT l.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM nx.stock_ledger l
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
             WHERE l.STOCK_POINT='SAG' AND l.CUST_CODE IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
@@ -113,15 +113,15 @@ def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = 
         cur.execute(f"""SELECT TOP {int(limit)} s.CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, s.MAT_CODE,
               ISNULL(i.ITEM_DESC,'') matnm, ISNULL(i.ITEM_CLASS,'') item_class, s.STOCK_QTY, s.REF_STOCK_QTY,
               ISNULL(s.UPDATE_USER_ID,'') upd_user, s.UPDATE_DATETIME upd_dt, ISNULL(s.UPDATE_WINDOW,'') upd_win
-            FROM PU_T_SAGUB_STOCK s
-            LEFT JOIN CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE
-            LEFT JOIN PR_M_ITEM i ON i.ITEM_CODE=s.MAT_CODE
+            FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=s.MAT_CODE
             {('WHERE '+' AND '.join(w)) if w else ''}
             ORDER BY custnm, s.MAT_CODE""", *p)
         cols = [d[0] for d in cur.description]
         rows = [{k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in zip(cols, r)} for r in cur.fetchall()]
-        cur.execute("""SELECT s.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM PU_T_SAGUB_STOCK s
-            LEFT JOIN CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE GROUP BY s.CUST_CODE, c.CUST_DESC ORDER BY 2""")
+        cur.execute("""SELECT s.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE GROUP BY s.CUST_CODE, c.CUST_DESC ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         totq = sum(float(r["STOCK_QTY"] or 0) for r in rows)
         return {"rows": rows, "custs": custs, "totqty": totq}
@@ -142,8 +142,8 @@ def sagub_stock_list(cust: str = Query(""), mat: str = Query(""), sign: str = Qu
         elif sign == "-1": hav = "HAVING SUM(l.MAINT_QTY)<0"
         cur.execute(f"""SELECT TOP {int(limit)} l.CUST_CODE cust_code, ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code,
               ISNULL(i.ITEM_DESC,'') matnm, SUM(l.MAINT_QTY) stock_qty, ISNULL(MAX(i.ITEM_CLASS),'A') item_class
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=l.MAT_CODE
+            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)}
             GROUP BY l.CUST_CODE, c.CUST_DESC, l.MAT_CODE, i.ITEM_DESC
             {hav} ORDER BY custnm, l.MAT_CODE""", *p)
@@ -154,7 +154,7 @@ def sagub_stock_list(cust: str = Query(""), mat: str = Query(""), sign: str = Qu
         if cls:  # J관리/A일반 필터(품목 ITEM_CLASS 기준)
             rows = [r for r in rows if (r.get("item_class") or "A") == cls]
         cur.execute("""SELECT DISTINCT l.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM nx.stock_ledger l
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
             WHERE l.STOCK_POINT='SAG' AND l.CUST_CODE IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
@@ -201,16 +201,16 @@ def sagub_output_list(cust: str = Query(""), mat: str = Query(""), fin: str = Qu
               r.req_qty, r.out_qty, ISNULL(r.finish_flag,'0') finish_flag, ISNULL(r.remarks,'') remarks,
               ISNULL(sg.stock_qty,0) sagub_stock, r.insert_user_id, r.insert_datetime
             FROM nx.sagub_output_req r
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=r.cust_code
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON pi.ITEM_CODE=r.item_code
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM mi ON mi.ITEM_CODE=r.mat_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.ITEM_CODE=r.item_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM mi ON mi.ITEM_CODE=r.mat_code
             LEFT JOIN (SELECT cust_code, mat_code, SUM(maint_qty) stock_qty FROM nx.sagub_maint GROUP BY cust_code, mat_code) sg
               ON sg.cust_code=r.cust_code AND sg.mat_code=r.mat_code
             {('WHERE '+' AND '.join(w)) if w else ''} ORDER BY r.req_ymd DESC, r.req_seq, r.mat_code""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         cur.execute("""SELECT DISTINCT r.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_output_req r
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=r.cust_code WHERE r.cust_code IS NOT NULL ORDER BY 2""")
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.cust_code WHERE r.cust_code IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
     finally:
@@ -277,7 +277,7 @@ def _sagub_move(cur, ymd, cust, mat, qty, wh, direction, remarks):
 
 def _pur_price(cur, item, cust, ymd):
     """구매단가 = PR_M_ITEM_COST 최신유효(cost_tag='1', 매입처). 유상 회수=매입입고 단가."""
-    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
+    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
         WHERE item_code=? AND cust_code=? AND cost_tag='1' AND cost_apply_ymd<=? ORDER BY cost_apply_ymd DESC""",
         item, cust, ymd)
     r = cur.fetchone()
@@ -458,7 +458,7 @@ def _sale_close_lookup(cur):
     try:
         cur.execute("""SELECT CUST_CODE, MAGAM_DAY FROM (
               SELECT CUST_CODE, MAGAM_DAY, ROW_NUMBER() OVER(PARTITION BY CUST_CODE ORDER BY APPLY_YYMM DESC) rn
-              FROM PARTNER_ERP.dbo.CM_M_CUST_MAGAM) t WHERE rn=1""")
+              FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM) t WHERE rn=1""")
         for r in cur.fetchall():
             magam[str(r[0]).strip()] = (str(r[1] or '31').strip() or '31')
     except Exception:
@@ -478,7 +478,7 @@ def _sale_close_lookup(cur):
 
 def _sagub_price(cur, item, cust, ymd):
     """사급단가 = f_get_item_cost(item,cust,'S',ymd) 정확이식: PR_M_ITEM_COST 최신유효(cost_tag='S')."""
-    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
+    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
         WHERE item_code=? AND cust_code=? AND cost_tag='S' AND cost_apply_ymd<=? ORDER BY cost_apply_ymd DESC""",
         item, cust, ymd)
     r = cur.fetchone()
@@ -549,8 +549,8 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
               ABS(ISNULL(m.maint_qty,0)) out_qty, ISNULL(m.maint_cost,0) cost, ISNULL(m.maint_amt,0) amt, ISNULL(m.maint_vat,0) vat,
               ISNULL(m.remarks,'') remarks, m.insert_user_id reg_user, m.upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt,
               m.work_order, m.split_work_order, NULL sale_ymd, NULL sale_hms, ISNULL(m.print_flag,'0') print_flag
-            FROM nx.saleout_maint m LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=m.cust_code
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=m.mat_code
+            FROM nx.saleout_maint m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=m.mat_code
             WHERE {' AND '.join(w)} ORDER BY m.maint_ymd DESC, m.sheet_no, m.maint_seq""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -559,7 +559,7 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
             r["gubun"] = "5"; r["gubunnm"] = _SALEOUT_GUBUN["5"]
             r["closed"] = 1 if is_closed(r.get("out_cust"), r.get("out_ymd")) else 0
         cur.execute("""SELECT DISTINCT m.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.saleout_maint m
-            LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.maint_tag='5' AND m.cust_code IS NOT NULL ORDER BY 2""")
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.maint_tag='5' AND m.cust_code IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         totqty = sum(float(r["out_qty"] or 0) for r in rows)
         totamt = sum(float(r["amt"] or 0) for r in rows); totvat = sum(float(r["vat"] or 0) for r in rows)
@@ -730,7 +730,7 @@ def lgsale_list(fr: str = Query(""), to: str = Query(""), wo: str = Query(""), i
               ISNULL(i.ITEM_DESC,'') itemnm, s.sale_ymd, s.sale_hms, s.sale_qty,
               ISNULL(s.songjang_print_flag,'0') print_flag, s.songjang_maint_ymd, s.songjang_maint_seq, s.sheet_no,
               ISNULL(s.remarks,'') remarks, s.insert_user_id, s.insert_datetime
-            FROM nx.sale_dtl s LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=s.item_code
+            FROM nx.sale_dtl s LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=s.item_code
             WHERE {' AND '.join(w)} ORDER BY s.sale_ymd DESC, s.sale_hms DESC, s.id DESC""", *p)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}

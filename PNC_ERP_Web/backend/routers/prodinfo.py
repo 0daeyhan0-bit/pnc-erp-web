@@ -14,7 +14,7 @@ router = APIRouter()
 #  조회 = 라이브 PARTNER_ERP ∪ nx(nx우선).  편집/저장 = PARTNER_ERP_TEST3.nx 만.
 #  원천/nx: PR_M_ITEM_ASSY_RT→nx.prodinfo_assy, PR_M_WORK_SINGLE→nx.prodinfo_single,
 #          PR_M_ITEM_PROC_GAGONG→nx.prodinfo_proc, PR_M_ITEM_ST→nx.prodinfo_item_st
-#  * _nx() 커넥션으로 크로스DB 조회(라이브는 PARTNER_ERP.dbo. 로 정규화, nx는 nx.).
+#  * _nx() 커넥션으로 크로스DB 조회(라이브는 PARTNER_ERP_TEST3.nx. 로 정규화, nx는 nx.).
 # ==================================================================================
 _JP_METHOD = {"J": "전표처리", "G": "가간판", "L": "라벨"}
 _PROC_GUBUN_ASSY = {"1": "용접", "2": "검사", "3": "조립", "21": "검사1", "31": "조립1"}
@@ -49,7 +49,7 @@ def prodinfo_search(q: str = Query("")):
         like = f"%{q.strip()}%"
         cur.execute("""SELECT TOP 60 ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''),
               ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(PROD_RATE,100)
-            FROM PARTNER_ERP.dbo.PR_M_ITEM
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM
             WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
         rows = [{"item": r[0], "name": r[1], "spec": r[2], "diam": float(r[3] or 0),
                  "thick": float(r[4] or 0), "length": float(r[5] or 0), "prod_rate": float(r[6] or 0)}
@@ -61,7 +61,7 @@ def prodinfo_search(q: str = Query("")):
 def _pi_proc_rows(cur, item, use_nx):
     """생산공정순서 행 조회(use_nx=True→nx.prodinfo_proc, False→레거시). 마스터 조인으로 표시명·회수율 포함."""
     src = ("nx.prodinfo_proc a" if use_nx
-           else "PARTNER_ERP.dbo.PR_M_ITEM_PROC_GAGONG a")
+           else "PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG a")
     C = (lambda c: c.lower()) if use_nx else (lambda c: c)  # nx는 소문자 컬럼
     cur.execute(f"""
         SELECT a.{C('PROC_SEQ')}, ISNULL(a.{C('WORK_CODE')},'') , ISNULL(a.{C('GAGONG_PROC_CODE')},''),
@@ -72,10 +72,10 @@ def _pi_proc_rows(cur, item, use_nx):
                ISNULL(w.WORK_DESC,''), ISNULL(g.GAGONG_PROC_DESC,''), ISNULL(s.WORK_DESC,''), ISNULL(m.MACH_DESC,''),
                ISNULL(g.PROD_RATE,0), ISNULL(w.PROD_RATE,0)
         FROM {src}
-        LEFT JOIN PARTNER_ERP.dbo.PR_M_WORK        w ON w.WORK_CODE        = a.{C('WORK_CODE')}
-        LEFT JOIN PARTNER_ERP.dbo.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE = a.{C('GAGONG_PROC_CODE')}
-        LEFT JOIN PARTNER_ERP.dbo.PR_M_WORK_SINGLE s ON s.S_WORK_CODE      = a.{C('S_WORK_CODE')}
-        LEFT JOIN PARTNER_ERP.dbo.QA_M_MACHINE     m ON m.MACH_CODE        = a.{C('MACH_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK        w ON w.WORK_CODE        = a.{C('WORK_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE = a.{C('GAGONG_PROC_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s ON s.S_WORK_CODE      = a.{C('S_WORK_CODE')}
+        LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE     m ON m.MACH_CODE        = a.{C('MACH_CODE')}
         WHERE a.{C('ITEM_CODE')}=? ORDER BY a.{C('PROC_SEQ')}""", item)
     out = []
     for r in cur.fetchall():
@@ -96,7 +96,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
     try:
         cur.execute("""SELECT ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0),
               ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(PROD_RATE,100), ISNULL(JIG_CODE,''), ISNULL(JIG_KEEP_AREA,'')
-            FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE=?""", item)
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?""", item)
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품번 {item} 없음")
@@ -111,8 +111,8 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
                    ISNULL(a.WELDING_GUBUN,0), ISNULL(a.SORT_SEQ,0),
                    ISNULL(nx.work_qty, rt.WORK_QTY) AS work_qty,
                    CASE WHEN nx.item_code IS NOT NULL THEN 1 ELSE 0 END nx_flag
-            FROM PARTNER_ERP.dbo.PR_M_WORK_ASSY a
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM_ASSY_RT rt ON rt.A_WORK_CODE=a.A_WORK_CODE AND rt.ITEM_CODE=?
+            FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_ASSY a
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_ASSY_RT rt ON rt.A_WORK_CODE=a.A_WORK_CODE AND rt.ITEM_CODE=?
             LEFT JOIN nx.prodinfo_assy nx ON nx.a_work_code=a.A_WORK_CODE AND nx.item_code=?
             {flt}
             ORDER BY a.SORT_SEQ, a.A_WORK_CODE""", item, item)
@@ -123,7 +123,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
                          "proc_gubun": pg, "proc_gubun_nm": _PROC_GUBUN_ASSY.get(pg, pg), "welding_gubun": int(r[4] or 0),
                          "sort_seq": int(r[5] or 0), "work_qty": (None if r[6] is None else float(r[6])),
                          "nx_flag": int(r[7])})
-        cur.execute("SELECT COUNT(*) FROM PARTNER_ERP.dbo.PR_M_WORK_ASSY")
+        cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_ASSY")
         assy_master_cnt = cur.fetchone()[0]
 
         # ── 패널② 단품(공정수) = 외경별 표준ST 매트릭스(전사 마스터, nx우선) ──
@@ -133,7 +133,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
                    ISNULL(s.GAGONG_PROC_CODE,''), ISNULL(s.HOUR_PAY,0), ISNULL(s.CUTTING_PROC_FLAG,''),
                    ISNULL(s.SUB_WELD_FLAG,''), ISNULL(s.SORT_SEQ,0),
                    CASE WHEN n.s_work_code IS NOT NULL THEN 1 ELSE 0 END, {stsel}
-            FROM PARTNER_ERP.dbo.PR_M_WORK_SINGLE s
+            FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s
             LEFT JOIN nx.prodinfo_single n ON n.s_work_code = s.S_WORK_CODE
             ORDER BY s.WORK_CODE, s.SORT_SEQ, s.S_WORK_CODE""")
         single = []
@@ -157,7 +157,7 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
               FROM nx.prodinfo_item_st WHERE item_code=?
             UNION ALL
             SELECT ISNULL(PROD_GUBUN,''), ISNULL(MEMBER_QTY,0), ISNULL(CAPA_QTY,0), 'legacy'
-              FROM PARTNER_ERP.dbo.PR_M_ITEM_ST
+              FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_ST
               WHERE ITEM_CODE=? AND ISNULL(PROD_GUBUN,'') NOT IN (SELECT prod_gubun FROM nx.prodinfo_item_st WHERE item_code=?)
             ORDER BY 1""", item, item, item)
         item_st = [{"prod_gubun": str(r[0]).strip(), "member_qty": int(r[1] or 0), "capa_qty": int(r[2] or 0),
@@ -166,11 +166,11 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
         # ── 하단 탭: 양산준비/지그(PR_M_ITEM_SUB 실측 후보 컬럼, 읽기전용 [재구성]) ──
         cur.execute("""SELECT ISNULL(PROD_STEP_MEMO,''), ISNULL(PROD_STEP_MEMO2,''), ISNULL(PROD_WORKER,''),
               ISNULL(INSP_WORKER,''), ISNULL(MAIN_MACH_CODE,''), ISNULL(ZIG_QTY,0), ISNULL(INSP_COUNT,0), ISNULL(ERR_RATE,0)
-            FROM PARTNER_ERP.dbo.PR_M_ITEM_SUB WHERE ITEM_CODE=?""", item)
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE=?""", item)
         sub = cur.fetchone()
         mach_nm = ""
         if sub and str(sub[4]).strip():
-            cur.execute("SELECT ISNULL(MACH_DESC,'') FROM PARTNER_ERP.dbo.QA_M_MACHINE WHERE MACH_CODE=?", str(sub[4]).strip())
+            cur.execute("SELECT ISNULL(MACH_DESC,'') FROM PARTNER_ERP_TEST3.nx.QA_M_MACHINE WHERE MACH_CODE=?", str(sub[4]).strip())
             mm = cur.fetchone(); mach_nm = str(mm[0]).strip() if mm else ""
         subd = ({"prod_step_memo": str(sub[0]), "prod_step_memo2": str(sub[1]), "prod_worker": str(sub[2]).strip(),
                  "insp_worker": str(sub[3]).strip(), "main_mach_code": str(sub[4]).strip(), "main_mach_nm": mach_nm,
@@ -214,24 +214,24 @@ def prodinfo_opts(work_code: str = Query("")):
     wc = work_code.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') FROM PARTNER_ERP.dbo.PR_M_WORK ORDER BY WORK_CODE")
+        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_WORK ORDER BY WORK_CODE")
         works = [{"code": str(r[0]).strip(), "name": str(r[1]).strip()} for r in cur.fetchall()]
         # 파트(PR_M_PROC_GAGONG) — work_code 포함(프론트 캐스케이드용)
         pw = "WHERE WORK_CODE=?" if wc else ""
-        cur.execute(f"""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP.dbo.PR_M_PROC_GAGONG
+        cur.execute(f"""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
             {pw} ORDER BY SORT_KEY, GAGONG_PROC_CODE""", *( [wc] if wc else [] ))
         parts = [{"code": str(r[0]).strip(), "name": str(r[1]).strip(), "work_code": str(r[2]).strip()} for r in cur.fetchall()]
         # 가공공정(PR_M_WORK_SINGLE, nx우선 명칭)
         cur.execute(f"""SELECT s.S_WORK_CODE, ISNULL(n.work_desc, s.WORK_DESC), ISNULL(s.WORK_CODE,'')
-            FROM PARTNER_ERP.dbo.PR_M_WORK_SINGLE s LEFT JOIN nx.prodinfo_single n ON n.s_work_code=s.S_WORK_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s LEFT JOIN nx.prodinfo_single n ON n.s_work_code=s.S_WORK_CODE
             {('WHERE s.WORK_CODE=?' if wc else '')} ORDER BY s.SORT_SEQ, s.S_WORK_CODE""", *( [wc] if wc else [] ))
         singles = [{"code": int(r[0]), "name": (str(r[1] or "").strip() or str(r[0])), "work_code": str(r[2]).strip()} for r in cur.fetchall()]
         # 설비(QA_M_MACHINE) — 작업처 지정 시 해당 작업처 + 미지정 설비 포함
         if wc:
-            cur.execute("""SELECT TOP 400 MACH_CODE, ISNULL(MACH_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP.dbo.QA_M_MACHINE
+            cur.execute("""SELECT TOP 400 MACH_CODE, ISNULL(MACH_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.QA_M_MACHINE
                 WHERE ISNULL(USE_FLAG,'1')='1' AND (ISNULL(WORK_CODE,'')='' OR WORK_CODE=?) ORDER BY MACH_DESC""", wc)
         else:
-            cur.execute("""SELECT TOP 400 MACH_CODE, ISNULL(MACH_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP.dbo.QA_M_MACHINE
+            cur.execute("""SELECT TOP 400 MACH_CODE, ISNULL(MACH_DESC,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.QA_M_MACHINE
                 WHERE ISNULL(USE_FLAG,'1')='1' ORDER BY MACH_DESC""")
         machs = [{"code": str(r[0]).strip(), "name": str(r[1]).strip(), "work_code": str(r[2]).strip()} for r in cur.fetchall()]
         return {"works": works, "parts": parts, "singles": singles, "machs": machs, "jp_methods": _JP_METHOD}
@@ -654,7 +654,7 @@ def _wcal_partnames():
     """PART_CODE→이름(PR_M_PROC_GAGONG), 이름 속 'PART'→'파트'."""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PR_M_PROC_GAGONG")
+        cur.execute("SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
         return {str(r[0]).strip(): str(r[1] or '').strip().replace('PART', '파트') for r in cur.fetchall()}
     finally:
         cn.close()

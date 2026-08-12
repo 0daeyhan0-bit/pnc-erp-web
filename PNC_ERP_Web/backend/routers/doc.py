@@ -59,12 +59,12 @@ def doc_list(item_code: str = Query("")):
         if item:
             cur.execute("""SELECT h.REV_YYMD, h.REV_NO, ISNULL(h.DRAWING_FILE,''), ISNULL(h.ISSUE_YYMD,''),
                   ISNULL(h.UPDATE_USER_ID,ISNULL(h.INSERT_USER_ID,'RPA')), ISNULL(h.UPDATE_DATETIME,h.INSERT_DATETIME)
-                FROM QA_T_SPEC_REV h WHERE (h.DRAWING_FILE LIKE ? OR h.ITEM_CODE LIKE ?) AND ISNULL(h.DRAWING_FILE,'')<>''
+                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV h WHERE (h.DRAWING_FILE LIKE ? OR h.ITEM_CODE LIKE ?) AND ISNULL(h.DRAWING_FILE,'')<>''
                 ORDER BY h.REV_YYMD DESC, h.REV_NO DESC""", like, like)
         else:
             cur.execute("""SELECT h.REV_YYMD, h.REV_NO, ISNULL(h.DRAWING_FILE,''), ISNULL(h.ISSUE_YYMD,''),
                   ISNULL(h.UPDATE_USER_ID,ISNULL(h.INSERT_USER_ID,'RPA')), ISNULL(h.UPDATE_DATETIME,h.INSERT_DATETIME)
-                FROM QA_T_SPEC_REV h WHERE ISNULL(h.DRAWING_FILE,'')<>'' ORDER BY h.REV_YYMD DESC, h.REV_NO DESC""")
+                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV h WHERE ISNULL(h.DRAWING_FILE,'')<>'' ORDER BY h.REV_YYMD DESC, h.REV_NO DESC""")
         for r in cur.fetchall():
             rows.append({"src": "spec", "key": f"{r[0]}|{r[1]}|2", "kind": "SPEC_DWG", "kind_nm": "시방도면",
                          "filename": r[2], "rev": f"{r[0]}/{r[1]}", "spec_no": f"{r[0]}-{r[1]}",
@@ -103,10 +103,10 @@ def doc_download(src: str = Query(...), key: str = Query(...), disp: str = Query
         ry, rn, tag = key.split("|")
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT ISNULL(DRAWING_FILE,''), ISNULL(SPECS_FILE,'') FROM QA_T_SPEC_REV WHERE REV_YYMD=? AND REV_NO=?", ry, int(rn))
+            cur.execute("SELECT ISNULL(DRAWING_FILE,''), ISNULL(SPECS_FILE,'') FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV WHERE REV_YYMD=? AND REV_NO=?", ry, int(rn))
             h = cur.fetchone()
             fname = ((h[0] if tag == '2' else h[1]) or f"{ry}_{rn}.pdf") if h else f"{ry}_{rn}.pdf"
-            cur.execute("SELECT FILE_BLOB FROM QA_T_SPEC_REV_BLOB WHERE REV_YYMD=? AND REV_NO=? AND FILE_TAG=? ORDER BY FILE_SEQ", ry, int(rn), tag)
+            cur.execute("SELECT FILE_BLOB FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV_BLOB WHERE REV_YYMD=? AND REV_NO=? AND FILE_TAG=? ORDER BY FILE_SEQ", ry, int(rn), tag)
             data = b"".join(bytes(x[0]) for x in cur.fetchall() if x[0] is not None)
         finally: cn.close()
     elif src == "sibang":   # 품목시방 PPT (DRAWING.PR_M_SIBANG, PR_M_DWG 쌍둥이 = 단일 blob)
@@ -122,10 +122,10 @@ def doc_download(src: str = Query(...), key: str = Query(...), disp: str = Query
         ic, ft = key.split("|", 1)
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT TOP 1 ISNULL(FILE_EXT,'') FROM PR_M_ITEM_BLOB WHERE ITEM_CODE=? AND FILE_TYPE=?", ic, ft)
+            cur.execute("SELECT TOP 1 ISNULL(FILE_EXT,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_BLOB WHERE ITEM_CODE=? AND FILE_TYPE=?", ic, ft)
             e = cur.fetchone(); ext = (e[0].strip() if e and e[0] else "dat")
             fname = f"{ic}_{ft}.{ext}"
-            cur.execute("SELECT MODULE_BLOB FROM PR_M_ITEM_BLOB WHERE ITEM_CODE=? AND FILE_TYPE=? ORDER BY MODULE_SEQ", ic, ft)
+            cur.execute("SELECT MODULE_BLOB FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_BLOB WHERE ITEM_CODE=? AND FILE_TYPE=? ORDER BY MODULE_SEQ", ic, ft)
             data = b"".join(bytes(x[0]) for x in cur.fetchall() if x[0] is not None)
         finally: cn.close()
     else:
@@ -224,7 +224,7 @@ def itemspec_list(item_code: str = Query("")):
         if item:
             cur.execute("""SELECT FILE_TYPE, MAX(ISNULL(FILE_EXT,'')), SUM(DATALENGTH(MODULE_BLOB)),
                   MAX(ISNULL(INSERT_USER_ID,'')), MAX(INSERT_DATETIME)
-                FROM PR_M_ITEM_BLOB WHERE ITEM_CODE=? GROUP BY FILE_TYPE ORDER BY FILE_TYPE""", item)
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_BLOB WHERE ITEM_CODE=? GROUP BY FILE_TYPE ORDER BY FILE_TYPE""", item)
             for r in cur.fetchall():
                 ft = str(r[0]).strip(); ext = (r[1].strip() if r[1] else "dat"); nm = pr010.get(ft, ft)
                 rows.append({"src": "itemblob", "key": f"{item}|{ft}", "atype": ft, "atype_nm": nm,
@@ -242,10 +242,10 @@ def qc_spec_files(rev_ymd: str = Query(""), rev_no: str = Query("")):
     if ry and rn.isdigit():
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT ISNULL(DRAWING_FILE,''), ISNULL(SPECS_FILE,'') FROM QA_T_SPEC_REV WHERE REV_YYMD=? AND REV_NO=?", ry, int(rn))
+            cur.execute("SELECT ISNULL(DRAWING_FILE,''), ISNULL(SPECS_FILE,'') FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV WHERE REV_YYMD=? AND REV_NO=?", ry, int(rn))
             h = cur.fetchone()
             for tag, kind, fn in [('2', '도면', (h[0] if h else '')), ('1', '시방서', (h[1] if h else ''))]:
-                cur.execute("SELECT SUM(DATALENGTH(FILE_BLOB)) FROM QA_T_SPEC_REV_BLOB WHERE REV_YYMD=? AND REV_NO=? AND FILE_TAG=?", ry, int(rn), tag)
+                cur.execute("SELECT SUM(DATALENGTH(FILE_BLOB)) FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV_BLOB WHERE REV_YYMD=? AND REV_NO=? AND FILE_TAG=?", ry, int(rn), tag)
                 sz = cur.fetchone()[0]
                 if sz:
                     out.append({"kind": kind, "src": "spec", "key": f"{ry}|{rn}|{tag}",

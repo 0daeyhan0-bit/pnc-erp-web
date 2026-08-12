@@ -23,9 +23,9 @@ def partmaster_list(q: str = Query(""), grp: str = Query("")):
               ISNULL(g.WORK_CODE,'') wc, ISNULL(w.WORK_DESC,'') wcnm, ISNULL(g.IN_CUST_CODE,'') wh, ISNULL(c.CUST_DESC,'') whnm,
               ISNULL(g.SORT_KEY,0) sortkey, ISNULL(g.PROD_RATE,0) rate, ISNULL(g.PART_GROUP_CODE,'') grp,
               ISNULL(g.WH_IP_ADDRESS,'') ip, ISNULL(g.RACK_NUMBER,0) rack, ISNULL(g.UPDATE_USER_ID,'') uid, g.UPDATE_DATETIME udt
-            FROM PR_M_PROC_GAGONG g
-            LEFT JOIN PR_M_WORK w ON w.WORK_CODE=g.WORK_CODE
-            LEFT JOIN CM_M_CUST c ON c.CUST_CODE=g.IN_CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=g.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=g.IN_CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY g.WORK_CODE, g.SORT_KEY, g.GAGONG_PROC_CODE""", *p)
         cols = [d[0] for d in cur.description]; rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
@@ -43,7 +43,7 @@ def partmaster_save(payload: dict = Body(...)):
     if not code: return {"ok": False, "detail": "파트코드 필수"}
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
+        cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
         exists = cur.fetchone()[0] > 0
         args = (r.get('nm', '') or '', (r.get('gubun', '') or '')[:1], (r.get('grp', '') or '')[:2], (r.get('wc', '') or '')[:4],
                 (r.get('wh', '') or '')[:10], int(r.get('sortkey') or 0), float(r.get('rate') or 0),
@@ -70,7 +70,7 @@ def partmaster_delete(payload: dict = Body(...)):
     if not code: return {"ok": False, "detail": "코드 필수"}
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("DELETE FROM PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code); cn.commit()
+        cur.execute("DELETE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code); cn.commit()
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:200]}
@@ -89,7 +89,7 @@ def partmaster_workers(part: str = Query(..., description="파트코드(GAGONG_P
         cur.execute("""SELECT ISNULL(WORKER_CODE,''), ISNULL(WORK_FLAG,''),
               ISNULL(INSERT_USER_ID,''), CONVERT(varchar(19),INSERT_DATETIME,120),
               ISNULL(UPDATE_USER_ID,''), CONVERT(varchar(19),UPDATE_DATETIME,120)
-            FROM PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=?
+            FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=?
             ORDER BY WORK_FLAG DESC, WORKER_CODE""", part)
         rows = [{"worker": str(r[0]).strip(), "real": str(r[1]).strip() == '1',
                  "ins_user": str(r[2] or '').strip(), "ins_dt": str(r[3] or '').strip(),

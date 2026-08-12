@@ -31,9 +31,9 @@ def scrap_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str = Qu
                   ISNULL(e.ITEM_DESC,'') item_desc, ISNULL(e.WORK_CODE,'') work, ISNULL(w.WORK_DESC,'') work_desc,
                   ISNULL(e.ERROR_MEMBER_NAME,'') worker, ISNULL(e.ERROR_ITEM,'') soje, ISNULL(e.ERROR_DESC,'') err_desc,
                   ISNULL(e.PROC_CODE,'') pcode, ISNULL(g.GAGONG_PROC_DESC,'') proc_desc, ISNULL(e.LOT_QTY,0) wt, ISNULL(e.INSERT_USER_ID,'') usr
-                FROM QA_T_RAW_ERROR e
-                LEFT JOIN PR_M_WORK w ON w.WORK_CODE=e.WORK_CODE
-                LEFT JOIN PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=e.PROC_CODE
+                FROM PARTNER_ERP_TEST3.nx.QA_T_RAW_ERROR e
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=e.WORK_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=e.PROC_CODE
                 WHERE {' AND '.join(w)} ORDER BY e.ERROR_YMD DESC, e.SEQ DESC""", *p)
             cols = [c[0] for c in cur.description]
             for r in cur.fetchall():
@@ -53,8 +53,8 @@ def scrap_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str = Qu
                   ISNULL(s.error_member_name,'') worker, ISNULL(s.error_item,'') soje, ISNULL(s.error_desc,'') err_desc,
                   ISNULL(s.proc_code,'') pcode, ISNULL(g.GAGONG_PROC_DESC,'') proc_desc, ISNULL(s.lot_qty,0) wt, ISNULL(s.insert_user_id,'') usr
                 FROM nx.scrap_raw s
-                LEFT JOIN PARTNER_ERP.dbo.PR_M_WORK w ON w.WORK_CODE=s.work_code
-                LEFT JOIN PARTNER_ERP.dbo.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=s.proc_code
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=s.work_code
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=s.proc_code
                 WHERE {' AND '.join(w)} ORDER BY s.error_ymd DESC, s.id DESC""", *p)
             cols = [c[0] for c in cur.description]
             for r in cur.fetchall():
@@ -147,7 +147,7 @@ def scrap_copy(payload: dict = Body(...)):
             c.execute("""SELECT ERROR_YMD,ISNULL(ERROR_TAG,''),ISNULL(ITEM_CODE,''),ISNULL(ITEM_DESC,''),ISNULL(WORK_CODE,''),
                   ISNULL(WORK_CUST_CODE,''),ISNULL(PROC_CODE,''),ISNULL(MACH_CODE,''),ISNULL(ERROR_MEMBER_NAME,''),
                   ISNULL(ERROR_ITEM,''),ISNULL(ERROR_DESC,''),ISNULL(LOT_QTY,0),ISNULL(ERROR_QTY,0)
-                FROM QA_T_RAW_ERROR WHERE SEQ=?""", int(rid[1:]))
+                FROM PARTNER_ERP_TEST3.nx.QA_T_RAW_ERROR WHERE SEQ=?""", int(rid[1:]))
             src = c.fetchone()
         finally: cn.close()
     elif rid.startswith("N"):

@@ -14,9 +14,9 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 						A.ORG_PLAN_YMD, A.ORG_OUTPUT_HM, A.ITEM_ORG_PLAN_YMD, A.ITEM_ORG_OUTPUT_HM, A.AVG_PLAN_FLAG, A.PROD_AVG_FLAG, A.PROD_TAG
 
-				FROM PR_T_PLAN_PART_DTL_FOR_CUST t WITH (NOLOCK)
+				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_DTL_FOR_CUST t WITH (NOLOCK)
 
-				join pr_t_plan_item_dtl a WITH (NOLOCK)   on a.plan_ymd = t.plan_ymd
+				join PARTNER_ERP_TEST3.nx.pr_t_plan_item_dtl a WITH (NOLOCK)   on a.plan_ymd = t.plan_ymd
 
 																		and a.work_order = t.work_order
 
@@ -24,7 +24,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 																		and a.c_item_code = t.item_code
 
-				join pr_m_item c  WITH (NOLOCK)				on a.c_item_code	= c.item_code
+				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK)				on a.c_item_code	= c.item_code
 
 			  WHERE a.c_item_code			like @@ITEM@@
 
@@ -44,9 +44,9 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 						A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_YMD, A.OUTPUT_HM, '0' AVG_PLAN_FLAG, '0' PROD_AVG_FLAG, A.PROD_TAG
 
-				FROM PR_T_PLAN_PART_DTL_FOR_CUST t WITH (NOLOCK)
+				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_DTL_FOR_CUST t WITH (NOLOCK)
 
-				join PR_T_PLAN_INPUT a  WITH (NOLOCK)     on a.plan_ymd = t.plan_ymd
+				join PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a  WITH (NOLOCK)     on a.plan_ymd = t.plan_ymd
 
 																		and a.work_order = t.work_order
 
@@ -54,7 +54,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 																		and a.item_code = t.item_code
 
-				join pr_m_item c WITH (NOLOCK) 				on a.item_code	= c.item_code
+				join PARTNER_ERP_TEST3.nx.pr_m_item c WITH (NOLOCK) 				on a.item_code	= c.item_code
 
 			  WHERE a.item_code		like @@ITEM@@
 
@@ -74,29 +74,9 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 						A.ORG_PLAN_YMD, A.ORG_OUTPUT_HM, A.ITEM_ORG_PLAN_YMD, A.ITEM_ORG_OUTPUT_HM, A.AVG_PLAN_FLAG, A.PROD_AVG_FLAG, A.PROD_TAG
 
-				FROM PR_T_PLAN_ITEM_DTL a WITH (NOLOCK)
+				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_ITEM_DTL a WITH (NOLOCK)
 
-				join pr_m_item c  WITH (NOLOCK) on a.C_ITEM_CODE	= c.item_code
-
-				WHERE A.PLAN_YMD		>= @@FROM@@
-
-				  AND C.IN_CUST_CODE > ''
-
-
-
-				UNION ALL
-
-
-
-				SELECT a.PLAN_YMD, A.WORK_ORDER, A.WORK_ORDER, A.ITEM_CODE, C.WORK_CODE, 1 USE_QTY, '' MODEL_NO, A.LINE_NO, '' CLS_YMD, 'A' AM_PM, a.OUTPUT_HM, 
-
-						A.PLAN_QTY, A.PLAN_QTY, '' REMARKS1, '' REMARKS2, 0 EXCEL_SEQ, '' TOOLS_DESC, 0 FROM_SEQ, 0 TO_SEQ, '0' CHANGE_DAY, '' CR_FLAG, 
-
-						A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_YMD, A.OUTPUT_HM, '0' AVG_PLAN_FLAG, '0' PROD_AVG_FLAG, A.PROD_TAG
-
-				FROM PR_T_PLAN_INPUT a WITH (NOLOCK)
-
-				join pr_m_item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
+				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK) on a.C_ITEM_CODE	= c.item_code
 
 				WHERE A.PLAN_YMD		>= @@FROM@@
 
@@ -114,9 +94,29 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 						A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_YMD, A.OUTPUT_HM, '0' AVG_PLAN_FLAG, '0' PROD_AVG_FLAG, A.PROD_TAG
 
-				FROM PR_T_PLAN_INPUT a WITH (NOLOCK)
+				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a WITH (NOLOCK)
 
-				join pr_m_item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
+				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
+
+				WHERE A.PLAN_YMD		>= @@FROM@@
+
+				  AND C.IN_CUST_CODE > ''
+
+
+
+				UNION ALL
+
+
+
+				SELECT a.PLAN_YMD, A.WORK_ORDER, A.WORK_ORDER, A.ITEM_CODE, C.WORK_CODE, 1 USE_QTY, '' MODEL_NO, A.LINE_NO, '' CLS_YMD, 'A' AM_PM, a.OUTPUT_HM, 
+
+						A.PLAN_QTY, A.PLAN_QTY, '' REMARKS1, '' REMARKS2, 0 EXCEL_SEQ, '' TOOLS_DESC, 0 FROM_SEQ, 0 TO_SEQ, '0' CHANGE_DAY, '' CR_FLAG, 
+
+						A.PLAN_YMD, A.OUTPUT_HM, A.PLAN_YMD, A.OUTPUT_HM, '0' AVG_PLAN_FLAG, '0' PROD_AVG_FLAG, A.PROD_TAG
+
+				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a WITH (NOLOCK)
+
+				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
 
 				WHERE A.PLAN_YMD		>= @@FROM@@
 
@@ -158,11 +158,11 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 									convert(varchar(500),'||' + case when c.work_code > '' then c.work_code else c.in_cust_code end + '|') as cum_in_cust_code,
 
-									isnull((select '2' from pr_m_mat where mat_code = a.c_item_code),'1') as mat_flag
+									isnull((select '2' from PARTNER_ERP_TEST3.nx.pr_m_mat where mat_code = a.c_item_code),'1') as mat_flag
 
 							FROM TEMP_PLAN a
 
-							join pr_m_item c 				on a.c_item_code	= c.item_code
+							join PARTNER_ERP_TEST3.nx.pr_m_item c 				on a.c_item_code	= c.item_code
 
 							WHERE a.plan_ymd 		<= convert(varchar,convert(datetime,@@TO@@) + 10,12)
 
@@ -196,13 +196,13 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 						convert(varchar(500),cb.cum_in_cust_code + '|' + case when m.work_code > '' then m.work_code else m.in_cust_code end + '|') as cum_in_cust_code,
 
-						isnull((select '2' from pr_m_mat where mat_code = b.mat_code),'1') as mat_flag
+						isnull((select '2' from PARTNER_ERP_TEST3.nx.pr_m_mat where mat_code = b.mat_code),'1') as mat_flag
 
 				FROM CTE_BOM cb
 
-				join pr_m_item_bom b			on cb.mat_code	= b.item_code
+				join PARTNER_ERP_TEST3.nx.pr_m_item_bom b			on cb.mat_code	= b.item_code
 
-				join pr_m_item m 				on b.mat_code 	= m.item_code
+				join PARTNER_ERP_TEST3.nx.pr_m_item m 				on b.mat_code 	= m.item_code
 
 				WHERE isnull(b.EXCEPT_FLAG,'0') = '0'
 
@@ -212,7 +212,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 
 
-	SELECT T.*, (select work_desc from pr_m_work where work_code=T.mat_work_code) as mat_work_desc FROM (
+	SELECT T.*, (select work_desc from PARTNER_ERP_TEST3.nx.pr_m_work where work_code=T.mat_work_code) as mat_work_desc FROM (
 
 			/*영업계획*/
 
@@ -234,11 +234,11 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 					a.c_item_code as c_item_code,
 
-					isnull((case when c.in_cust_code>'' then (select cust_desc from cm_m_cust WITH (NOLOCK) where cust_code=c.in_cust_code)
+					isnull((case when c.in_cust_code>'' then (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust WITH (NOLOCK) where cust_code=c.in_cust_code)
 
-																	else (select top 1 b1.gagong_proc_desc from pr_m_item_proc_gagong a1
+																	else (select top 1 b1.gagong_proc_desc from PARTNER_ERP_TEST3.nx.pr_m_item_proc_gagong a1
 
-																														join pr_m_proc_gagong b1 on a1.gagong_proc_code = b1.gagong_proc_code
+																														join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong b1 on a1.gagong_proc_code = b1.gagong_proc_code
 
 																														where a1.item_code = a.c_item_code
 
@@ -352,7 +352,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 					group by item_code, mat_code, mat_spec, work_code, in_cust_code, mat_work_center_code) m on a.c_item_code = m.item_code
 
-			join pr_m_item c 				on a.c_item_code	= c.item_code
+			join PARTNER_ERP_TEST3.nx.pr_m_item c 				on a.c_item_code	= c.item_code
 
 			where a.plan_ymd 		<= @@TO@@
 

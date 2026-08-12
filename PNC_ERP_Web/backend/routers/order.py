@@ -79,7 +79,7 @@ def order_list(from_ymd: str = Query(""), to_ymd: str = Query(""), need_from: st
         elif done == 'undone': w.append("r.REMAIN_QTY>0")
         cur.execute(f"""SELECT TOP 5000 r.ORDER_NO,r.ORDER_YMD,r.ITEM_CODE,ISNULL(i.ITEM_DESC,'') nm,
             r.ORDER_QTY,r.REMAIN_QTY,r.NEED_BY_YMD,r.NEED_BY_HM,r.WORK_ORDER,r.PS_ORDER,r.ITEM_COST,r.CR_FLAG,r.PO_TYPE
-          FROM nx.recv_dtl r LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE=r.ITEM_CODE
+          FROM nx.recv_dtl r LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=r.ITEM_CODE
           WHERE {' AND '.join(w)} ORDER BY r.ORDER_YMD DESC, r.ORDER_NO""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, row)) for row in cur.fetchall()]

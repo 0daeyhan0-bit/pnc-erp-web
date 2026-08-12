@@ -26,13 +26,13 @@ def gagong_bc_scan(barcode: str = Query("")):
         cur.execute("""SELECT ISNULL(ic.ASSY_ITEM_CODE,''), ISNULL(ic.MAT_CODE,''), ISNULL(ic.ITEM_CODE,''),
               ISNULL(ic.PLAN_QTY,0), ISNULL(ic.PROD_QTY,0), ISNULL(ic.PROD_FLAG,'0'),
               ISNULL(ic.WH_GAGONG_PROC_CODE,''), ISNULL(pg.GAGONG_PROC_DESC, ic.WH_GAGONG_PROC_CODE), ISNULL(im.ITEM_DESC,'')
-            FROM PR_T_INDI_CUTTING ic
-            LEFT JOIN PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
-            LEFT JOIN PR_M_ITEM im ON im.ITEM_CODE=ic.MAT_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING ic
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=ic.MAT_CODE
             WHERE ic.BOX_NO=?""", box)
         r = cur.fetchone()
         if not r: return {"ok": False, "msg": f"전표(바코드 {box})가 존재하지 않습니다."}
-        cur.execute("SELECT ISNULL(SUM(CAST(ISNULL(ERROR_QTY,0) AS int)),0), COUNT(*) FROM QA_T_ERROR WHERE BOX_NO=?", box)
+        cur.execute("SELECT ISNULL(SUM(CAST(ISNULL(ERROR_QTY,0) AS int)),0), COUNT(*) FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR WHERE BOX_NO=?", box)
         er = cur.fetchone(); err_qty = int(er[0] or 0); err_cnt = int(er[1] or 0)
         cur.execute("SELECT GOOD_QTY, BAD_QTY, ISNULL(REG_USER,''), CONVERT(varchar(19),REG_DATETIME,120) FROM PARTNER_ERP_TEST3.nx.gagong_barcode_result WHERE BOX_NO=?", box)
         nxr = cur.fetchone()
@@ -56,7 +56,7 @@ def gagong_bc_register(payload: dict = Body(...)):
     if good <= 0 and bad <= 0: return {"ok": False, "msg": "양품/불량 수량을 입력하세요."}
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT ISNULL(ASSY_ITEM_CODE,''), ISNULL(MAT_CODE,''), ISNULL(WH_GAGONG_PROC_CODE,''), ISNULL(PROD_FLAG,'0'), ISNULL(PLAN_QTY,0) FROM PR_T_INDI_CUTTING WHERE BOX_NO=?", box)
+        cur.execute("SELECT ISNULL(ASSY_ITEM_CODE,''), ISNULL(MAT_CODE,''), ISNULL(WH_GAGONG_PROC_CODE,''), ISNULL(PROD_FLAG,'0'), ISNULL(PLAN_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING WHERE BOX_NO=?", box)
         lr = cur.fetchone()
         if not lr: return {"ok": False, "msg": f"전표(바코드 {box}) 없음"}
         ymd = _d6(str(payload.get("ymd") or "")) or None

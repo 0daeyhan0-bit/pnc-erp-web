@@ -17,7 +17,7 @@ def wr_itemsearch(q: str = Query("")):
     try:
         like = f"%{q}%"
         cur.execute("""SELECT TOP 40 ITEM_CODE, ISNULL(ITEM_DESC,'') nm, ISNULL(ITEM_SGROUP,'') sg
-            FROM PR_M_ITEM WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
         return {"rows": [{"item": r[0], "nm": r[1], "sg": r[2]} for r in cur.fetchall()]}
     finally:
         cn.close()
@@ -27,7 +27,7 @@ def wr_works():
     """작업장 목록 (PR_M_WORK)"""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') nm FROM PR_M_WORK ORDER BY WORK_CODE")
+        cur.execute("SELECT WORK_CODE, ISNULL(WORK_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PR_M_WORK ORDER BY WORK_CODE")
         return {"rows": [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]}
     finally:
         cn.close()
@@ -37,7 +37,7 @@ def wr_sworks():
     """공정(S_WORK_CODE) 목록 — 실적 상위 사용코드"""
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT TOP 40 S_WORK_CODE, COUNT(*) c FROM PR_T_PROD_DTL
+        cur.execute("""SELECT TOP 40 S_WORK_CODE, COUNT(*) c FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL
             WHERE S_WORK_CODE IS NOT NULL AND S_WORK_CODE>0 GROUP BY S_WORK_CODE ORDER BY c DESC""")
         return {"rows": [{"code": int(r[0])} for r in cur.fetchall()]}
     finally:
@@ -70,8 +70,8 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
               l.MAINT_QTY, l.MAINT_COST, l.MAINT_AMT, ISNULL(l.REMARKS,'') remarks,
               ISNULL(l.TO_GAGONG_PROC_CODE,'') prod_work_code, ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
             FROM nx.stock_ledger l
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
-            LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ii ON ii.ITEM_CODE=l.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=l.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -172,7 +172,7 @@ def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str 
               ISNULL(d.LINE_NO,'') line, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, d.PROD_QTY,
               ISNULL(d.WORK_CODE,'') work_code, ISNULL(d.FINISH_FLAG,'') fin, ISNULL(d.PROD_USER_ID,'') usr,
               d.INSERT_DATETIME
-            FROM nx.proc_result d LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            FROM nx.proc_result d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC, d.ID DESC""", *p)
         cols = [dd[0] for dd in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -253,7 +253,7 @@ def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str =
               ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
               ISNULL(l.ITEM_CODE,'') item_code, ABS(l.MAINT_QTY) ISSUE_QTY, ISNULL(l.REMARKS,'') remarks,
               ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
+            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_GROUP_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]

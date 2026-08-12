@@ -13,12 +13,12 @@ def _pur_src(win):
     """확정입고(매입) 원천: 9/S/C/G/H(검사통과) + 수입(_C DIVISION=P). 금액 양수. win=마감기준 조건(mg 참조)."""
     return f"""
     SELECT A.CUST_CODE cc, A.MAT_CODE mat, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat
-     FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.MAINT_TAG IN ('9','S','C','G','H')
        AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
     UNION ALL
     SELECT A.CUST_CODE, A.MAT_CODE, A.MAINT_COST, A.MAINT_YMD, A.MAINT_QTY, A.MAINT_AMT, ISNULL(A.TAXPAYERS,0)
-     FROM PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.DIVISION='P'"""
 
 @router.get("/api/purmagam/list")
@@ -31,7 +31,7 @@ def purmagam_list(ym: str = Query("")):
           SELECT S.cc cc, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
             SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items
-          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN CM_M_CUST C ON S.cc=C.CUST_CODE
+          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
           GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -61,7 +61,7 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT S.mat mat, MAX(M.ITEM_DESC) nm, MAX(M.ITEM_SPEC) spec, MAX(M.UNIT) unit, S.cost cost,
             CAST(RIGHT(S.ymd,2) AS INT) d, SUM(S.qty) q, SUM(S.amt) amt
-          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PR_M_ITEM M ON S.mat=M.ITEM_CODE
+          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON S.mat=M.ITEM_CODE
           WHERE S.cc=? GROUP BY S.mat, S.cost, CAST(RIGHT(S.ymd,2) AS INT)""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:

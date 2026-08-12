@@ -34,11 +34,11 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                    INSERT_DATETIME idt, ISNULL(REMARKS,'') remarks,
                    LAG(ITEM_COST) OVER (PARTITION BY ITEM_CODE,COST_TAG,ISNULL(CUST_CODE,''),ISNULL(MKT,'')
                                         ORDER BY COST_APPLY_YMD, INSERT_DATETIME) prev
-            FROM PR_M_ITEM_COST)
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST)
           SELECT TOP 3000 H.item, ISNULL(i.ITEM_DESC,'') nm, H.tag, H.cust, ISNULL(c.CUST_DESC,'') cust_nm,
                  H.mkt, H.curr, H.apply_ymd, H.cost, H.mat, H.procc, H.oth, H.rate, H.prev, H.usr,
                  H.idt, H.remarks
-          FROM H LEFT JOIN PR_M_ITEM i ON i.ITEM_CODE=H.item LEFT JOIN CM_M_CUST c ON c.CUST_CODE=H.cust
+          FROM H LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=H.item LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=H.cust
           WHERE {' AND '.join(w)} ORDER BY H.apply_ymd DESC, H.idt DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -69,16 +69,16 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
         if lgroup.strip(): w += " AND i.ITEM_LGROUP=?"; p.append(lgroup.strip())
         if sgroup.strip(): w += " AND i.ITEM_SGROUP=?"; p.append(sgroup.strip())
         # 거래처 필터: 해당 거래처(코드=오토컴플리트값 / 명칭 LIKE) 단가가 있는 품목만 (AND)
-        cust_cond = "EXISTS(SELECT 1 FROM PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE"
+        cust_cond = "EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE"
         if cust.strip():
-            cust_cond += " AND (x.CUST_CODE=? OR EXISTS(SELECT 1 FROM CM_M_CUST c WHERE c.CUST_CODE=x.CUST_CODE AND c.CUST_DESC LIKE ?))"
+            cust_cond += " AND (x.CUST_CODE=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c WHERE c.CUST_CODE=x.CUST_CODE AND c.CUST_DESC LIKE ?))"
             p2 = [cust.strip(), f"%{cust.strip()}%"]
         else:
             p2 = []
         cust_cond += ")"
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),1000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
-              ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, (SELECT COUNT(*) FROM PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE) cnt
-            FROM PR_M_ITEM i
+              ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, (SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE) cnt
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i
             WHERE {cust_cond}{w}
             ORDER BY i.ITEM_CODE""", *(p2 + p))
         cols = [d[0] for d in cur.description]
@@ -88,8 +88,8 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
             d["lg_nm"] = dLG.get(str(d.get("lg", "")).strip(), str(d.get("lg", "")).strip())
             d["sg_nm"] = dSG.get(str(d.get("sg", "")).strip(), str(d.get("sg", "")).strip())
             rows.append(d)
-        cur.execute("""SELECT DISTINCT ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg FROM PR_M_ITEM i
-            WHERE EXISTS(SELECT 1 FROM PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE)""")
+        cur.execute("""SELECT DISTINCT ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i
+            WHERE EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE)""")
         lgs, sgs = set(), set()
         for r in cur.fetchall():
             if str(r[0]).strip(): lgs.add(str(r[0]).strip())
@@ -107,12 +107,12 @@ def price_item(item: str = Query("")):
     if not item: return {"item": item, "nm": "", "spec": "", "rows": []}
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,'') FROM PR_M_ITEM WHERE ITEM_CODE=?", item)
+        cur.execute("SELECT ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
         r0 = cur.fetchone(); nm, spec = (r0[0], r0[1]) if r0 else ("", "")
         cur.execute("""SELECT h.COST_TAG, ISNULL(h.CUST_CODE,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
               h.COST_APPLY_YMD, ISNULL(h.CURRENCY,'') curr, ISNULL(h.MAIN_FLAG,'') main_flag, ISNULL(h.MKT,'') mkt,
               h.ITEM_COST, h.MAT_COST, h.PROC_COST, h.OTHER_COST, ISNULL(h.REMARKS,'') remarks
-            FROM PR_M_ITEM_COST h LEFT JOIN CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
             WHERE h.ITEM_CODE=? ORDER BY h.COST_APPLY_YMD DESC, h.COST_TAG, h.CUST_CODE""", item)
         cols = [d[0] for d in cur.description]
         rows = []
@@ -149,7 +149,7 @@ def price_item(item: str = Query("")):
 _ITEM_MAKE = {"": "", "1": "자체생산", "2": "외주가공", "3": "매입", "4": "사급가공", "5": "외주완성"}
 _ITEM_WORK = {"": "", "P1": "용접", "P2": "가공", "D1": "직납"}
 def _kindmap(cur, kind):
-    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
+    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
     return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
 
 _MAT_SGROUP = ('210', '220', '230', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/사급/잡자재/소모품)
@@ -161,7 +161,7 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
     try:
         dLG = _kindmap(cur, "PR005"); dSG = _kindmap(cur, "PR006"); dPK = _kindmap(cur, "PR021")
         dUN = _kindmap(cur, "CM002"); dMT = _kindmap(cur, "PR019")
-        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM CM_M_CUST")
+        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST")
         dCust = {str(r[0]).strip(): r[1] for r in cur.fetchall()}
         w = ["1=1"]; p = []
         if q.strip(): w.append("(i.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"); p += [f"%{q.strip()}%"] * 2
@@ -176,7 +176,7 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
               ISNULL(i.SAFE_STOCK_MIN,0), ISNULL(i.SAFE_STOCK_MAX,0), ISNULL(i.KITTING_MIN,0),
               ISNULL(i.WELD_POINT_IN,0), ISNULL(i.WELD_POINT_OUT,0), ISNULL(i.TARIFF_RATE,0), ISNULL(i.REMARKS,'') remarks, ISNULL(i.ITEM_COST,0),
               ISNULL(nx.nature,'') nature, nx.active
-            FROM PR_M_ITEM i LEFT JOIN PARTNER_ERP_TEST3.nx.item nx ON nx.item_code = i.ITEM_CODE COLLATE DATABASE_DEFAULT
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i LEFT JOIN PARTNER_ERP_TEST3.nx.item nx ON nx.item_code = i.ITEM_CODE COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)} ORDER BY i.ITEM_CODE""", *p)
         rows = []
         for r in cur.fetchall():
