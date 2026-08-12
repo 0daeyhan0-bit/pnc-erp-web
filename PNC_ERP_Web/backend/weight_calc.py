@@ -344,19 +344,18 @@ def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub
 
 # ================= ★규격별 LME 정산금액 (담당 MASTER 모델: 규격별 재고 × (현물가−사급가)) =================
 def _load_price_metal(ym):
-    """price_metal(apply_ym=20+ym) → (PRICE[(재질,외경)]=(현물,사급), maxHS[외경]=고강도최대두께, canon외경리스트)."""
+    """price_metal(apply_ym=20+ym) → (PRICE[(재질,외경)]=(현물,사급), PM[(재질,외경,두께)], canon외경리스트)."""
     apply = ('20' + ym) if len(str(ym)) == 4 else str(ym)
     tx = _tx(); tc = tx.cursor()
     tc.execute("SELECT metal_gubun,CAST(diam AS float),CAST(thick AS float),CAST(std_price AS float),CAST(partner_price AS float) "
                "FROM nx.price_metal WHERE apply_ym=?", apply)
-    PRICE = {}; hs = {}; canon = set()
+    PRICE = {}; PM = []; canon = set()
     for g, od, th, std, pp in tc.fetchall():
         od = round(float(od), 2); canon.add(od)
         PRICE.setdefault((g, od), (float(std or 0), float(pp or 0)))
-        if g == '고강도':
-            hs[od] = max(hs.get(od, 0.0), float(th or 0))
+        PM.append((g, od, float(th or 0)))
     tx.close()
-    return PRICE, hs, sorted(canon)
+    return PRICE, PM, sorted(canon)
 
 def _snap_od(od, canon):
     if od is None or not canon:
@@ -364,15 +363,20 @@ def _snap_od(od, canon):
     b = min(canon, key=lambda x: abs(x - od))
     return b if abs(b - od) <= 0.35 else round(od, 2)
 
-def _classify_mat(od, th, hs, canon):
-    """(외경,두께)→재질: 같은 외경에서 고강도최대두께+0.03 이하면 고강도, 아니면 CU."""
-    so = _snap_od(od, canon)
-    m = hs.get(so)
-    if m is None and hs:
-        m = min(((abs(o - so), v) for o, v in hs.items()))[1]
-    if m is not None and (th or 0) <= m + 0.03:
-        return '고강도'
-    return 'CU'
+def _classify_mat(od, th, PM, canon):
+    """(외경,두께)→재질: price_metal에서 같은 외경의 최근접 두께 재질. 동점(고강도·CU 등거리)이면 일반(CU) 우선.
+       ★얇은 일반관(Φ5×0.41 등)이 고강도로 오분류되는 것 방지 — 실제 스펙표 최근접 매칭."""
+    so = _snap_od(od, canon); th = th if th else 0.7
+    rows = [r for r in PM if abs(r[1] - so) <= 0.35]
+    if not rows and PM:
+        nd = min(PM, key=lambda r: abs(r[1] - so))[1]
+        rows = [r for r in PM if r[1] == nd]
+    if not rows:
+        return 'CU'
+    ds = sorted((abs(tt - th), g) for g, dd, tt in rows)
+    mind = ds[0][0]
+    gs = {g for d, g in ds if abs(d - mind) <= 1e-9}
+    return 'CU' if ('CU' in gs and len(gs) > 1) else ds[0][1]
 
 def _price_lookup(mg, od, PRICE):
     key = (mg, round(od, 2))
@@ -424,7 +428,7 @@ def compute_quote_lme(ym):
     """★규격별 LME 정산금액. 담당 MASTER 모델: 규격(재질·외경)별 재고(출고−소요) × (현물가−사급가).
        현물가/사급가 = nx.price_metal(apply_ym). 재질=고강도/CU. compute_quote와 독립.
        반환 {CUST_CODE: {raw_out,raw_in,raw_diff,settle_amt,unmapped_out,specs:[...]}}."""
-    PRICE, hs, canon = _load_price_metal(ym)
+    PRICE, PM, canon = _load_price_metal(ym)
     qspec = _load_quote_spec()
     cn = _ro(); cur = cn.cursor(); bcur = cn.cursor()
     mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
@@ -442,7 +446,7 @@ def compute_quote_lme(ym):
         q = float(q or 0); gk, od, th = _parse_raw_od(desc)
         if not od:
             unmap[cc] = unmap.get(cc, 0.0) + q; continue
-        g = gk or _classify_mat(od, th, hs, canon)
+        g = gk or _classify_mat(od, th, PM, canon)
         buck.setdefault(cc, {}).setdefault((g, _snap_od(od, canon)), [0.0, 0.0])[0] += q
     # 소요: 완제품 입고(9/S/C/G/H) × 견적 규격별 동, CG2 전개
     cur.execute(f"""{mg}
@@ -457,7 +461,7 @@ def compute_quote_lme(ym):
             continue
         acc = []; _expand_spec(bcur, vendor, mat, qspec, set(), acc, float(q or 0))
         for od, th, w in acc:
-            g = _classify_mat(od, th, hs, canon)
+            g = _classify_mat(od, th, PM, canon)
             buck.setdefault(cc, {}).setdefault((g, _snap_od(od, canon)), [0.0, 0.0])[1] += w
     cn.close()
     res = {}
