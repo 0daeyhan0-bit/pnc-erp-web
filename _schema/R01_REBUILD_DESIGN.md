@@ -26,8 +26,11 @@
 ### Phase R2 — R01 BOM 구조 빌드 (현행 활성 → 정규 SUB 적용)
 - 원천 = **현행 활성 BOM**(생산 실사용 PR_M_ITEM_BOM EXCEPT<>1, [[MIGRATION_ISSUES]] G-7 nx단일BOM=PR). 스코프=납품이력 제품(1,824 도달)+거래이력.
 - 변환: 자도번 자식 → **sub_alias.canonical(`품번_S{nn}`)** 치환. **DISSOLVED→해체**(하위 단품 직접 전개). **LEAF→단품**(그대로, route=vendor). **공용→같은 canonical 참조(재고 1 pool)**.
-- 저장 = **nx.bom(단일 BOM 정본)** 또는 R01 route(sourcing_route_line, route_id=0). ★대표 결정 필요: 단일소스 목표는 nx.bom → **nx.bom에 정규 SUB 구조로 R01 적재** 권고(단일 BOM 통일 §10과 정합).
-- 다단계: SUB의 자식(그 SUB의 부품) = sub_alias의 그 canonical 하위. 재귀.
+- **★저장 = R01 route(`nx.sourcing_route` 현행 + `nx.sourcing_route_line`)** (대표 확정 2026-08-12: **nx.bom=단일BOM 정본(마스터, route무관 구조), R01은 route이니 R01 route에 넣음**). R02+는 후보 route(델타), R01은 현행 route.
+  - `nx.sourcing_route`: item당 현행 route 헤더(route_no=1/current_flag=1, route_name=`{item}_R01`, gubun 자체/외주, approve).
+  - `nx.sourcing_route_line`: 정규 SUB 구조 — node_kind(PART/SUB), sub_item=`품번_S{nn}`(정규 canonical), parent_line 계층, child_item=부품, vendor(현행 route).
+- 다단계: SUB(`품번_S{nn}`)의 자식(그 SUB의 부품) = 그 SUB 하위(parent_line). 재귀.
+- nx.bom(마스터, 단일정본)은 별도 — 단일 BOM 통일(§10) 시 route와 정합.
 
 ### Phase R3 — 검증 (diff0 게이트)
 - **원가 diff0**: 레거시 R01 실원가 == nx R01 실원가(nx_cost_engine 오라클). 구조 치환이 재료비 불변이어야.
