@@ -81,7 +81,7 @@ def coopquote_refresh_incost():
                SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) IC, MAINT_YMD, MAINT_COST,
                  ROW_NUMBER() OVER(PARTITION BY UPPER(LTRIM(RTRIM(MAT_CODE))) ORDER BY MAINT_YMD DESC) rc,
                  ROW_NUMBER() OVER(PARTITION BY UPPER(LTRIM(RTRIM(MAT_CODE))) ORDER BY (CASE WHEN MAINT_YMD<='{_PREV_YMD}' THEN 0 ELSE 1 END),MAINT_YMD DESC) rp
-               FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG IN ('9','S','C','G','H') AND MAINT_QTY>0 AND MAINT_COST>0
+               FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT WHERE MAINT_TAG IN ('9','S','C','G','H') AND MAINT_QTY>0 AND MAINT_COST>0
                  AND UPPER(LTRIM(RTRIM(MAT_CODE))) IN ('{inlist}'))
              SELECT IC, MAX(CASE WHEN rc=1 THEN MAINT_COST END), MAX(CASE WHEN rc=1 THEN MAINT_YMD END),
                MAX(CASE WHEN rp=1 AND MAINT_YMD<='{_PREV_YMD}' THEN MAINT_COST END),
@@ -273,7 +273,7 @@ def coopquote_set_role(payload: dict = Body(...)):
             mat = round(cur_mat)   # 용접봉 재료비 유지
         else:  # 사급부품 = 최신 매입가 × 소요
             cn = _conn(); cc = cn.cursor()
-            cc.execute("""SELECT TOP 1 ITEM_COST FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
+            cc.execute("""SELECT TOP 1 ITEM_COST FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
                 WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0
                 ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC""", part.upper())
             pr = cc.fetchone(); cn.close()
@@ -420,10 +420,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         # 1) BOM 재귀전개 (현행)
         cur.execute("""WITH tree AS (
             SELECT ITEM_CODE p, MAT_CODE c, CAST(USE_QTY AS decimal(18,6)) q, ISNULL(SAGUB_FLAG,'0') sag, ISNULL(BOM_SEQ,0) sq, 1 lvl
-            FROM CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'
+            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'
             UNION ALL
             SELECT b.ITEM_CODE, b.MAT_CODE, CAST(b.USE_QTY AS decimal(18,6)), ISNULL(b.SAGUB_FLAG,'0'), ISNULL(b.BOM_SEQ,0), t.lvl+1
-            FROM tree t JOIN CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'')<>'1'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'')<>'1'
             WHERE t.lvl < 8)
             SELECT p,c,q,sag,sq,lvl FROM tree OPTION(MAXRECURSION 50)""", item)
         edges = {}
@@ -439,7 +439,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
             chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
             cur.execute(f"""SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(METAL_GUBUN,''),
                   ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(IN_CUST_CODE,''), ISNULL(COST_GUBUN,'')
-                FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *chunk)
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *chunk)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "metal": str(r[3]).strip(),
                     "diam": float(r[4] or 0), "thick": float(r[5] or 0), "length": float(r[6] or 0),
@@ -452,7 +452,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                   SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST, COST_APPLY_YMD,
                     ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
                       ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC) rn
-                  FROM PR_M_ITEM_COST
+                  FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
                   WHERE ITEM_CODE IN ('{inl}')   -- 인덱스 시크(함수제거·CI콜레이션/trailing space 무시로 결과동일)
                     AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0)
                 SELECT ic, ITEM_COST FROM C WHERE rn=1""")
@@ -469,7 +469,7 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                           SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
                             ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
                               ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
-                          FROM PR_M_ITEM_COST
+                          FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
                           WHERE ITEM_CODE IN ('{inl}')   -- 인덱스 시크(함수제거·CI콜레이션/trailing space 무시로 결과동일)
                             AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
                             AND COST_APPLY_YMD<=? AND ITEM_COST>0)
@@ -797,10 +797,10 @@ def _coop_soyo(item):
     try:
         cur.execute("""WITH tree AS (
             SELECT ITEM_CODE p, MAT_CODE c, CAST(USE_QTY AS decimal(18,6)) q, ISNULL(SAGUB_FLAG,'0') sag, 1 lvl
-            FROM CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
             UNION ALL
             SELECT b.ITEM_CODE, b.MAT_CODE, CAST(b.USE_QTY AS decimal(18,6)), ISNULL(b.SAGUB_FLAG,'0'), t.lvl+1
-            FROM tree t JOIN CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
             WHERE t.lvl<8)
             SELECT p,c,q,sag FROM tree OPTION(MAXRECURSION 50)""", item)
         edges = {}
@@ -811,7 +811,7 @@ def _coop_soyo(item):
         nl = list(nodes)
         for i in range(0, len(nl), 900):
             ch = nl[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(METAL_GUBUN,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(METAL_GUBUN,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): metal[str(r[0]).strip()] = str(r[1]).strip()
     finally:
         cn.close()
