@@ -200,6 +200,10 @@ JAI_COST = (COST_GUBUN='3' ? WON_MAT_COST×ITEM_WEIGHT×USE_QTY   -- 원소재(�
   - **STUB(오염) 19** → 담당 정리.
 - **★공용 pool 실증(사용자 "버전 공유" 모델 확인)**: `AJR30012009_S01` = **15개 LG 버전(AJR30012009·010·011·012…) 공유 = 재고 1 pool**. 그외 AJR74844308_S01(12)·AJR77224501_S20(11). **공용 197 SUB가 여러 버전 참조** → 승인 후 nx.item 1건·BOM 자식참조 다수.
 - **공용 canonical 규약**: signature(부품셋 정확일치) owner=min(base)의 로컬 `_S{nn}` → 나머지 버전이 그 코드 참조.
-- **남은 규명**: ①LEAF_ROUTE 중 **vendor 미상 213**(코드엔 `-DONGJOO`=동주 등 있으나 IN_CUST 공백, `-1` 사내컷팅류=route 사내) → vendor 파싱/담당 ②STUB 19 텍스트오염.
-- ⚠아직 **드래프트(CSV)** — nx 쓰기 전. 승인 후 nx.sub_alias 적재 + nx.item 내부SUB 등록.
+- **남은 규명 해소(2026-08-12, r_norm_leaf.py)**:
+  - **LEAF vendor미상 213 → 152 자동해소**(route=**사내 129**[품명 사내/컷팅/성형 83 + mk1 46] · route=**매입 23**[mk3, 매입거래처는 매입마스터/담당]) + **담당 61**(`3A00375E-DONGJOO`·`-Body`·`-SUB`, 신호無).
+  - **STUB 19 → 대부분 사내 공정 스테이지**(은납/은납체결 7·도장 4·선행 2·+용접링 2 = **15건 route=사내 처리**) + **담당 4**(황동MASH·품번10번·가온).
+  - LEAF 382 = 기존vendor 169 + 사내129 + 매입23 + 담당61.
+- **★A-1 최종: 2,398 변형 중 ~97% 자동 정규화, 담당 확인 ~65건(2.7%)만.** (구조SUB 1,479코드+공용197 pool / LEAF흡수 / 공정스테이지 사내)
+- ⚠아직 **드래프트(CSV: sub_norm_draft.csv·sub_alias_draft.csv)** — nx 쓰기 전. 승인 후 nx.sub_alias 적재 + nx.item 내부SUB 등록.
 
