@@ -46,6 +46,7 @@
 ## 4. 진행 로그
 - **Phase R1 완료 (2026-08-12, r_phase_r1.py)**: ①`nx.item ADD item_source nvarchar(20)`(멱등) ②테스트 잔재 `AJR75563402_S01~_S06` 삭제(참조0 확인)·**`_S07` 보존(R02 실사용)** ③정규 SUB **1,196개** 등록(item_source='NORM_SUB', item_type='반제품', make_type=route기반 사내1/외주2, 새 LG품번 0). 검증 NORM_SUB=1,196. **DISSOLVED 8은 미등록(해체 대상)**.
 - **Phase R2 파일럿 10건 (2026-08-12, r_pilot_r01.py)** — 다양 케이스 R01 route 빌드(sourcing_route note='PILOT_R01'). **8/10 리프 일치**. 자도번→정규SUB·DISSOLVED해체·다단계 재귀 동작 확인.
+- **★★Phase R2 스케일 완료 (2026-08-12, r_scale_build.py)** — 전 납품제품 **1,357** R01 route 빌드(note='R01', 멱등). **nx.sourcing_route 1,357개 · nx.sourcing_route_line 16,262행**. **★제품별 재료비(누적소요량) diff0 = 1,357/1,357 (100%), FAIL 0.** 빌더=자도번→정규SUB(canonical)·DISSOLVED해체·실품번노드멈춤·용접봉제외/용접링유지·미정규'-'변형 재귀전개·다단계. **현행 R01 BOM이 정규 SUB로 nx 실물 적재 + 레거시 재료구성 100% 재현.**
 
 ## 5. ★Phase R2 파일럿 수집 이슈 (스케일 전 해소)
 | # | 이슈 | 케이스 | 처리 방향 |
