@@ -196,9 +196,88 @@ def _bom_tree_route(item, route_id):
     return {"item": item, "name": rootnm, "rows": out, "count": len(out) - 1, "maxlevel": maxlvl,
             "route_id": route_id, "route_no": int(h[1]), "route_name": h[2], "is_route": True}
 
+def _bom_tree_nx(item, real):
+    """★단일 정규화 BOM(nx.bom_line) 전개 — #1 이관본. 용접봉(RAC) 제외(설계=공정종속 nx.proc_weld), 자도번→품번_S{nn}(nx.sub_alias) 표시 정규화.
+       real=1: cs_calc_except=0 + 라이브 PR_M_ITEM.MAKE_TYPE='1' 하위전개(현행 CS bom/tree와 동일 grain → 리프·수량 diff0).
+       구조/수량=nx.bom_line, 상세(품명·매입처·치수)=라이브 PR_M_ITEM(자도번 코드 기준, 표시코드만 정규화)."""
+    exc = "AND ISNULL(bl.cs_calc_except,0)=0" if real else ""
+    mk = "JOIN PARTNER_ERP.dbo.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute(f"""WITH tree AS (
+            SELECT h.item_code p, bl.child_item c, CAST(bl.qty AS decimal(18,6)) q,
+                   CAST(ISNULL(bl.sagub_default,0) AS int) sag, CAST(ISNULL(bl.set_except,0) AS int) se,
+                   CAST(ISNULL(bl.kitting,0) AS int) kt, CAST(ISNULL(bl.vir_item,0) AS int) vir,
+                   CAST(ISNULL(bl.cs_calc_except,0) AS int) ce, CAST(ISNULL(bl.lme_except,0) AS int) le,
+                   ISNULL(bl.gagong_proc,'') gp, ISNULL(bl.s_work,'') sw, ISNULL(bl.seq,0) sq, 1 lvl
+            FROM nx.bom_header h JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
+            WHERE h.item_code=? {exc}
+            UNION ALL
+            SELECT h2.item_code, bl.child_item, CAST(bl.qty AS decimal(18,6)),
+                   CAST(ISNULL(bl.sagub_default,0) AS int), CAST(ISNULL(bl.set_except,0) AS int),
+                   CAST(ISNULL(bl.kitting,0) AS int), CAST(ISNULL(bl.vir_item,0) AS int),
+                   CAST(ISNULL(bl.cs_calc_except,0) AS int), CAST(ISNULL(bl.lme_except,0) AS int),
+                   ISNULL(bl.gagong_proc,''), ISNULL(bl.s_work,''), ISNULL(bl.seq,0), t.lvl+1
+            FROM tree t
+            {mk}
+            JOIN nx.bom_header h2 ON h2.item_code=t.c
+            JOIN nx.bom_line bl ON bl.bom_id=h2.bom_id {exc}
+            WHERE t.lvl < 8)
+            SELECT p,c,q,sag,se,kt,vir,ce,le,gp,sw,sq,lvl FROM tree OPTION(MAXRECURSION 50)""", item)
+        edges = {}
+        for r in cur.fetchall():
+            edges.setdefault((r[0] or '').strip(), []).append({
+                "child": (r[1] or '').strip(), "q": float(r[2] or 0), "sag": ('1' if r[3] else '0'),
+                "se": ('1' if r[4] else ''), "kt": ('1' if r[5] else ''), "vir": ('1' if r[6] else ''),
+                "ce": ('1' if r[7] else ''), "le": ('1' if r[8] else ''), "gp": str(r[9]).strip(),
+                "sw": str(r[10]).strip(), "sq": int(r[11] or 0)})
+        for p in edges: edges[p].sort(key=lambda x: x["sq"])
+        nl = list({item} | {e["child"] for lst in edges.values() for e in lst} | set(edges.keys()))
+        info = {}; alias = {}
+        for i in range(0, len(nl), 900):
+            chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
+            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
+                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                  ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
+                FROM PARTNER_ERP.dbo.PR_M_ITEM m LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                WHERE m.ITEM_CODE IN ({ph})""", *chunk)
+            for r in cur.fetchall():
+                info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
+                      "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
+            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
+            for r in cur.fetchall():
+                if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
+        def disp(code): return alias.get(code, code)   # 자도번→품번_S{nn} 표시 정규화
+        rootnm = info.get(item, {}).get("nm", "")
+        out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
+                "qty": 1, "cust": "", "custnm": "", "sag": "", "se": "", "kt": "", "vir": "", "ce": "", "le": "",
+                "gp": "", "sw": "", "metal": info.get(item, {}).get("metal", ""),
+                "diam": info.get(item, {}).get("diam", 0), "thick": info.get(item, {}).get("thick", 0), "length": info.get(item, {}).get("length", 0),
+                "haskids": item in edges}]
+        seen = set()
+        def walk(code, lvl):
+            if code in seen: return
+            seen.add(code)
+            for e in edges.get(code, []):
+                ci = info.get(e["child"], {})
+                out.append({"level": lvl, "code": disp(e["child"]), "raw": e["child"], "nm": ci.get("nm", ""), "spec": ci.get("spec", ""),
+                    "qty": e["q"], "cust": ci.get("cust", ""), "custnm": ci.get("custnm", ""),
+                    "sag": e["sag"], "se": e["se"], "kt": e["kt"], "vir": e["vir"], "ce": e["ce"], "le": e["le"],
+                    "gp": e["gp"], "sw": e["sw"], "metal": ci.get("metal", ""),
+                    "diam": ci.get("diam", 0), "thick": ci.get("thick", 0), "length": ci.get("length", 0),
+                    "haskids": e["child"] in edges})
+                walk(e["child"], lvl + 1)
+            seen.discard(code)
+        walk(item, 1)
+        maxlvl = max((r["level"] for r in out), default=0)
+        return {"item": item, "name": rootnm, "rows": out, "count": len(out) - 1, "maxlevel": maxlvl, "src": "nx"}
+    finally:
+        cn.close()
+
 @router.get("/api/bom/tree")
 def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, description="1=실사용전개(원가제외 스킵+제작품만 전개,매입중단)=실원가용 일치, 0=전체전개"),
-             route_id: int = Query(0, description="0/미지정=마스터 실사용 BOM(완전불변), >0=조달후보(nx.sourcing_route_line) 구조를 동일스키마로 반환")):
+             route_id: int = Query(0, description="0/미지정=마스터 실사용 BOM(완전불변), >0=조달후보(nx.sourcing_route_line) 구조를 동일스키마로 반환"),
+             src: str = Query('nx', description="nx=단일 정규화 BOM(nx.bom_line, 용접봉제외+자도번정규화) [기본], cs=현행 라이브 CS_M_ITEM_BOM(대조·롤백용)")):
     """다단계 BOM 트리(레벨별) — CS_M_ITEM_BOM 재귀전개. 매입처=컴포넌트 IN_CUST_CODE(현행 벤더).
     real=1(기본): 견적원가조회(실원가용, SP_CS_견적서(BOM)) 전개와 일치 — CS_CALC_EXCEPT_FLAG='1'(원가제외=현행아닌 조달경로) 제외 + MAKE_TYPE='1'(제작/자체)만 하위전개, 매입/구매품(구매완제)은 전개중단.
     route_id>0: 조달후보 계층(nx.sourcing_route_line)을 동일 트리 스키마로 반환(마스터 미조회)."""
@@ -206,6 +285,8 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
     if int(route_id or 0) > 0:
         return _bom_tree_route(item, int(route_id))
     real = 1 if real is None else int(real)
+    if str(src or 'nx').lower() != 'cs':
+        return _bom_tree_nx(item, real)   # ★#1 이관: 단일 정규화 BOM(nx.bom_line). src=cs면 아래 현행 CS 전개(대조·롤백)
     exc_a = "AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""      # 원가제외 라인 스킵
     exc_r = "AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""
     mk_gate = "JOIN PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
