@@ -212,12 +212,12 @@ def _pur_src(win):
     """확정입고(매입) 원천: 9/S/C/G/H(검사통과) + 수입(_C DIVISION=P). 금액 양수. win=마감기준 조건(mg 참조)."""
     return f"""
     SELECT A.CUST_CODE cc, A.MAT_CODE mat, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat
-     FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.MAINT_TAG IN ('9','S','C','G','H')
        AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
     UNION ALL
     SELECT A.CUST_CODE, A.MAT_CODE, A.MAINT_COST, A.MAINT_YMD, A.MAINT_QTY, A.MAINT_AMT, ISNULL(A.TAXPAYERS,0)
-     FROM PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.DIVISION='P'"""
 
 
@@ -227,13 +227,13 @@ def _custnm_map(cur, codes):
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
     for i in range(0, len(codes), 900):
         ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
         for r in cur.fetchall(): m[str(r[0]).strip()] = r[1]
     return m
 
 # ── 도메인간 공유(app.py에서 추출) ──
 def _kindmap(cur, kind):
-    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
+    cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
     return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
 
 
@@ -261,9 +261,9 @@ from urllib.parse import quote as _urlquote
 DOC_STORAGE_PATH = _os.getenv("DOC_STORAGE_PATH", r"F:\NEW_ERP_FILES")   # 배포시 NAS 마운트로 교체
 _SALE_MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
   SELECT CUST_CODE, format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') JUN_YYMM,
-    ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
-    ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
-  FROM CM_M_CUST A)"""
+    ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
+    ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
+  FROM PARTNER_ERP_TEST3.nx.CM_M_CUST A)"""
 
 
 # ── 도메인간 공유(추출) ──
