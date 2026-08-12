@@ -222,9 +222,10 @@ def salemagam_weight_quote(ym: str = Query("")):
     for cc, d in data.items():
         rows.append({"cc": cc, "nm": ven.get(cc, cc), "raw_out": d["raw_out"], "raw_in": d["raw_in"],
                      "raw_diff": d["raw_diff"], "settle_amt": d["settle_amt"],
-                     "unmapped_out": d.get("unmapped_out", 0), "specs": d.get("specs", [])})
-    rows.sort(key=lambda r: r["settle_amt"])
-    total = round(sum(r["settle_amt"] for r in rows))
+                     "unmapped_out": d.get("unmapped_out", 0), "soyo_only": d.get("soyo_only", False),
+                     "specs": d.get("specs", [])})
+    rows.sort(key=lambda r: (r["settle_amt"] if r["settle_amt"] is not None else 0))
+    total = round(sum((r["settle_amt"] or 0) for r in rows))
     return {"ym": y, "rows": rows, "total": total}
 
 @router.get("/api/matprice/list")

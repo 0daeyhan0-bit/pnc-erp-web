@@ -476,7 +476,11 @@ def compute_quote_lme(ym):
             specs.append({"mat": g, "od": od, "out": round(o, 1), "in": round(i, 1),
                           "diff": round(stock, 1), "spot": (round(std) if std else None),
                           "sagub": (round(pp) if pp else None), "amt": round(amt)})
-        res[cc] = {"raw_out": round(tout, 1), "raw_in": round(tin, 1), "raw_diff": round(tout - tin, 1),
-                   "settle_amt": round(tamt), "unmapped_out": round(unmap.get(cc, 0.0), 1),
+        # 출고 원장(tag5)이 없는 업체(예: 수테크=일신실업 직접공급) → 소요만 표기, 재고·정산은 비움(오해 방지)
+        soyo_only = (tout <= 0.01)
+        res[cc] = {"raw_out": (None if soyo_only else round(tout, 1)), "raw_in": round(tin, 1),
+                   "raw_diff": (None if soyo_only else round(tout - tin, 1)),
+                   "settle_amt": (None if soyo_only else round(tamt)),
+                   "unmapped_out": round(unmap.get(cc, 0.0), 1), "soyo_only": soyo_only,
                    "specs": sorted(specs, key=lambda x: -abs(x["amt"]))}
     return res
