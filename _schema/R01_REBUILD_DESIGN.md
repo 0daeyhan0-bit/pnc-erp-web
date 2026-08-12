@@ -74,7 +74,7 @@
 - 2중 게이트 통과: ①리프셋 일치 10/10 ②재료비 누적소요량 diff0 10/10.
 
 ### 5e. 남은 것 (전 제품 스케일 전) — ★기록 필수(레거시 전체 이관 스펙)
-- **★공정/가공비 정규화(다음 핵심)**: R01 route는 현재 **BOM 구조(재료비)만**. **공정(routing)·가공비는 별도 레이어** — 자도번 routing(CS_T_ITEM_PROC) → `품번_S{nn}` routing으로 **평행 정규화** 필요(SUB가 정규코드로 바뀌면 그 공정도 따라와야 완전 원가 diff0). sourcing_route_proc/nx.routing에 정규 SUB 공정 이관.
+- **✅공정/가공비 정규화 완료 (2026-08-12, r_proc_normalize/verify.py)**: 자도번 nx.routing → `품번_S{nn}` 복사. **223 SUB routing 보유**(공정있는 사내가공SUB)·973 무공정(매입·외주완성). 삽입 **6,121행**. **★공용 routing 불일치 0**(공용 자도번들 공정 완전일치=공용 pool 데이터검증). 충실성 ✔(canonical routing==소스 자도번). **원가엔진 회귀 0**(AJR75563402 실원가 **5722.2 앵커 불변** — 엔진은 nx.bom 읽어 canonical 추가 무영향, 안전). engine=nx.routing item_code키(cg3=임율/uph×wq, 91/92/93=율, 사내INNER_PROD만).
 - **용접링 결합코드**(`MJU+용접링`) 정리 + 사급 플래그(§5c).
 - **공용 SUB 1 pool 검증**: SUB_SHARED canonical이 여러 제품 R01에서 같은 코드 참조 = 재고 1 pool(실증).
 - **가공비 diff0**: 공정 정규화 후 nx_cost_engine 오라클로 실원가(재료+가공+LME) 전체 diff0.
