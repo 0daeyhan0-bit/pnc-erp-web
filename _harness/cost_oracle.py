@@ -22,9 +22,22 @@ import pyodbc, db_client
 SP_SIL = 'SP_CS_견적서(실원가용)_250910'
 SP_NAE = 'SP_CS_견적서(내부용)_250704'
 
+def _oracle_creds():
+    """레거시 SP EXECUTE 권한 로그인. 우선순위: env(PNCIND_USER/PWD) > _harness/pncind_cred.json > db_client(일반, EXEC불가).
+       ※일반 db_client 로그인은 SP EXECUTE 권한거부(229) → pncind 필요. cred 파일은 gitignore(*cred*.json)."""
+    u = os.environ.get('PNCIND_USER'); p = os.environ.get('PNCIND_PWD')
+    if u and p: return u, p
+    cf = os.path.join(os.path.dirname(__file__), 'pncind_cred.json')
+    if os.path.exists(cf):
+        try:
+            d = json.load(open(cf, encoding='utf-8')); return d.get('user'), d.get('pwd')
+        except Exception: pass
+    return db_client.DB_USER, db_client.DB_PASSWORD
+
 def _conn():
+    u, p = _oracle_creds()
     return pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
-                          f'DATABASE=PARTNER_ERP;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}')
+                          f'DATABASE=PARTNER_ERP;UID={u};PWD={p}')
 
 def _run(cur, sp, item, ymd):
     cur.execute("SET NOCOUNT ON; EXEC [dbo].[" + sp + "] ?, ?", item, ymd)

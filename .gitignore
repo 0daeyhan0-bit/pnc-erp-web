@@ -46,3 +46,10 @@ temp_profile/
 
 # --- git 자동스냅샷 스크립트 로그 ---
 _git_snapshot.log
+
+# --- 자격증명 (절대 커밋 금지) ---
+*cred*.json
+*_cred*
+.pncind*
+*secret*
+*.credentials

@@ -1198,7 +1198,7 @@ const _mkMagam=(CFG)=>(c)=>{
   const load=async(y)=>{loading=true;msg='';draw();
     try{const r=await fetch(`${API}/api/${CFG.base}/list?ym=${encodeURIComponent(y||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();rows=j.rows||[];ym=j.ym||y||'';
-      if(CFG.weight){try{const rw=await fetch(`${API}/api/${CFG.base}/weight?ym=${encodeURIComponent(ym)}`);const jw=await rw.json();wmap=jw.rows||{};realRaw=jw.real_raw||25000;sagubRaw=jw.sagub_raw||20000;}catch(e){wmap={};}}}
+      if(CFG.weight){try{const rw=await fetch(`${API}/api/${CFG.base}/weight_quote?ym=${encodeURIComponent(ym)}`);const jw=await rw.json();wmap={};(jw.rows||[]).forEach(w=>{wmap[w.cc]={raw_out:w.raw_out,raw_in:w.raw_in,raw_diff:w.raw_diff,raw_amt:w.settle_amt,specs:w.specs,unmapped_out:w.unmapped_out};});}catch(e){wmap={};}}}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];}
     loading=false;draw();};
   const ensureReasons=async()=>{if(reasons.length)return;try{const r=await fetch(`${API}/api/salemagam/reasons`);reasons=(await r.json()).rows||[];}catch(e){}};
@@ -1216,9 +1216,10 @@ const _mkMagam=(CFG)=>(c)=>{
       return '<td class="num wcol">'+_n(w.raw_out)+'</td><td class="num wcol">'+_n(w.raw_in)+'</td><td class="num wcol '+(w.raw_diff<0?'neg':'')+'">'+_n(w.raw_diff)+'</td>'+
         '<td class="num wcol2">'+_n(w.weld_out)+'</td><td class="num wcol2">'+_n(w.weld_in)+'</td><td class="num wcol2 '+((w.weld_diff||0)<0?'neg':'')+'">'+_n(w.weld_diff)+'</td>';};
     // 조정 3컬럼: 단가조정 · 원소재정산 · 용접봉정산
+    const spTip=(w)=>((w.specs||[]).slice(0,12).map(s=>`${s.mat} Φ${s.od}: 재고 ${num(s.diff)}kg ×(${won0((s.spot||0)-(s.sagub||0))}) = ${won0(s.amt)}`).join('&#10;'))||'';
     const ac=(r)=>{const w=wmap[r.cc]||{};
       return '<td class="num acol '+(r.adj_amt<0?'neg':'')+'">'+(r.adj_amt?won0(r.adj_amt):'')+'</td>'+
-        '<td class="num acol '+((w.raw_amt||0)<0?'neg':'')+'">'+_w(w.raw_amt)+'</td>'+
+        '<td class="num acol '+((w.raw_amt||0)<0?'neg':'')+'" title="'+spTip(w)+'">'+_w(w.raw_amt)+'</td>'+
         '<td class="num acol '+((w.weld_amt||0)<0?'neg':'')+'">'+(w.weld_amt?won0(w.weld_amt):'')+'</td>';};
     const finw=(r)=>(+r.final_amt||0)+((wmap[r.cc]||{}).raw_amt||0)+((wmap[r.cc]||{}).weld_amt||0);
     const NC=CFG.weight?18:10, amtl=CFG.amtlbl;
@@ -1244,7 +1245,7 @@ const _mkMagam=(CFG)=>(c)=>{
     c.innerHTML=`
      <div class="page-title">${CFG.title} <span style="font-size:12px;color:var(--muted);font-weight:400">${CFG.sub} · 거래처별 마감 · nx 저장</span></div>
      <div class="page-sub">거래처별 ${CFG.verb} 집계 → [마감]에서 품목×일자·단가변경·총액조정·사유 입력 후 확정. 원본 <code>${CFG.src}</code> · 🔴 라이브 마감기준 ${esc(ymToInput(ym)||'-')}</div>
-     ${CFG.weight?`<div class="page-sub" style="color:#3a6ea5">⚖️ 중량정산(원소재): 출고중량(tag5) − 업체가공 입고중량(PR_M_ITEM.ITEM_WEIGHT·사급 제외) = 차액 × (시세 ${won0(realRaw)} − 사급가 ${won0(sagubRaw)})/kg · 매월 증/차감 · <b style="color:#c0392b">잠정치(7월 마감표 검증·마스터 교정 예정)</b> · 용접봉은 소요량식 확정 후</div>`:''}
+     ${CFG.weight?`<div class="page-sub" style="color:#3a6ea5">⚖️ LME 중량정산(견적기준): 규격(재질·외경)별 [출고중량(tag5) − 견적 동소요] × (현물가 − 사급가) 합산. 현물가·사급가 = 원소재 마스터 월별단가(nx.price_metal). 절삭 8개 협력사 · 원소재정산 셀에 마우스 올리면 규격별 내역.</div>`:''}
      <div class="toolbar">
        <label class="tl">마감년월</label><input type="month" class="inp" id="sm-ym" value="${esc(ymToInput(ym))}" style="min-width:120px">
        <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명/담당자" style="width:180px">
