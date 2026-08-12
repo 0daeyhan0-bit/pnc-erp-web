@@ -262,7 +262,26 @@ def _load_quote_soyo():
     _QUOTE_SOYO = (qraw, qweld); _QUOTE_TS[0] = now
     return _QUOTE_SOYO
 
-def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=None):
+_CS_KIDS = {}   # code -> [자식코드] (CS_M_ITEM_BOM, except제외). BOM 구조는 정적 → 영구캐시
+def _cs_kids(bcur, code):
+    if code not in _CS_KIDS:
+        bcur.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM "
+                     "WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'", code)
+        _CS_KIDS[code] = [str(r[0]).strip() for r in bcur.fetchall()]
+    return _CS_KIDS[code]
+def _expand_dong(bcur, vendor, code, qraw, seen):
+    """완제품 견적 동 소요중량 = 자기 직접 동(qraw) + 조립SUB자식들의 동 재귀합.
+       ★레거시 bom()이 CG2 SUB를 매입leaf로 막아 안의 동을 놓치던 것 보정 — 조립품(자체BOM 보유)이면 전개."""
+    if code in seen:
+        return 0.0
+    seen = seen | {code}
+    tot = qraw.get((vendor, code), 0.0)
+    for ch in _cs_kids(bcur, code):
+        if _cs_kids(bcur, ch):   # 자식BOM 보유 = 조립SUB → 전개(그 안의 동 포함)
+            tot += _expand_dong(bcur, vendor, ch, qraw, seen)
+    return tot
+
+def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=None, expand_sub=True):
     """★견적기준 무게정산: 출고(tag5) − 견적서 소요(coop_quote_part_v2) = 차액.
        원소재 소요 = Σ(완제품 입고수량 × 견적 동소요중량) · 용접봉 소요 = Σ(입고수량 × 견적 용접봉소요).
        견적 없는 완제품 = 소요 0(compute()의 ITEM_WEIGHT master 폴백 안 함). 절삭 8개 협력사만.
