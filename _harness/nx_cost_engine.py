@@ -250,9 +250,8 @@ class NxCostEngine:
             if v: return v[2]
         a=asof(rows)
         if a: return a[2]
-        # as-of 없으면 최소 apply_ymd(초기가)
-        dated=[c for c in rows if c[1]]
-        return min(dated,key=lambda c:c[1])[2] if dated else rows[0][2]
+        # ★asof-fix(2026-08-12): as-of(≤원가일) 단가 없으면 0(None). 미래단가 폴백 금지(SP=PUR_COST 0 정합). AJR30161402-A-S-1 등.
+        return None
 
     def _metal_sub(self, metal, diam, thick, ymcut):
         """LME 사급차액단가 = std_price − partner_price (TOT_COST − TOT_COST_SUB)."""
