@@ -1272,7 +1272,7 @@ const _mkMagam=(CFG)=>(c)=>{
        .sm-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2}.sm-tbl thead tr:nth-child(2) th{top:26px}.sm-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
        .sm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}.sm-tbl td.neg{color:#c0392b}.sm-tbl .center{text-align:center}
        .sm-tbl tr.sm-closed{background:#f3f8f3}
-       .sm-tbl .wcol{background:#f2f8ff}.sm-tbl th.wcol{background:#e6f1ff}.sm-tbl .wcol2{background:#f6f6f6;color:#c2c2c2}.sm-tbl th.wcol2{background:#eee;color:#999}
+       .sm-tbl .wcol{background:#f2f8ff}.sm-tbl th.wcol{background:#e6f1ff}.sm-tbl .wcol2{background:#f2f9f4;color:#2a6b45}.sm-tbl th.wcol2{background:#e0f0e6;color:#2a6b45}
        .sm-tbl .acol{background:#fff9ec}.sm-tbl th.acol{background:#fdf2d6}
        .sm-tbl small{font-weight:400;color:#8aa0bd;font-size:9.5px}.sm-tbl tr.grandtot td{font-weight:700}.sm-tbl tr.grandtot .wcol,.sm-tbl tr.grandtot .wcol2{background:#eaf1fb}.sm-tbl tr.grandtot .acol{background:#fbf3df}
        .sm-badge{font-size:11px;padding:1px 8px;border-radius:10px;background:#eee;color:#777}.sm-badge.on{background:#e5f3e8;color:#2e7d32;font-weight:700}
