@@ -1,496 +1,231 @@
 {
- "AJR55707008": {
+ "AJR30008101": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 21006.8,
-  "eng_silwon": 21006.8
+  "sp_silwon": 36011.0,
+  "eng_silwon": 36011.0
  },
- "AJR74985501": {
+ "ALB31554001": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 2192.7,
-  "eng_silwon": 2193.9
+  "sp_silwon": 2165.3,
+  "eng_silwon": 2165.3
  },
- "AJR73950304": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 6953.9,
-  "eng_silwon": 6953.9
- },
- "AJR73324406": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 24211.6,
-  "eng_silwon": 24211.6
- },
- "AJR74364921": {
+ "AJR73946114": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 39289.8,
-    "eng": 39292.8,
+    "sp": 24404.0,
+    "eng": 24407.0,
     "d": 3.0
    },
    "silwon": {
-    "sp": 45459.9,
-    "eng": 45463.9,
-    "d": 4.0
+    "sp": 26324.0,
+    "eng": 26327.0,
+    "d": 3.0
    }
   },
-  "sp_silwon": 45459.9,
-  "eng_silwon": 45463.9
+  "sp_silwon": 26324.0,
+  "eng_silwon": 26327.0
  },
- "AJJ73040829": {
+ "AJR74942615": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 23058.7,
-  "eng_silwon": 23058.7
+  "sp_silwon": 3144.9,
+  "eng_silwon": 3144.9
  },
- "AJR76782304": {
+ "AGF04106701": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 8401.1,
-  "eng_silwon": 8401.1
+  "sp_silwon": 7592.6,
+  "eng_silwon": 7592.6
  },
- "5211A10570G": {
+ "AJR73824601": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 40054.9,
+  "eng_silwon": 40054.9
+ },
+ "AJR75142606": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 2425.0,
-    "eng": 2423.2,
-    "d": -1.8
+    "sp": 14282.5,
+    "eng": 14295.4,
+    "d": 12.9
    },
    "silwon": {
-    "sp": 2425.0,
-    "eng": 2423.2,
-    "d": -1.8
+    "sp": 17644.3,
+    "eng": 17658.5,
+    "d": 14.2
    }
   },
-  "sp_silwon": 2425.0,
-  "eng_silwon": 2423.2
+  "sp_silwon": 17644.3,
+  "eng_silwon": 17658.5
  },
- "AGR30002206": {
+ "5211A00011E": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 0.0,
-  "eng_silwon": 0.0
+  "sp_silwon": 15299.3,
+  "eng_silwon": 15299.3
  },
- "AJR30077602": {
+ "AJR30011201": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 1177.2,
-  "eng_silwon": 1177.2
+  "sp_silwon": 20693.2,
+  "eng_silwon": 20693.2
  },
- "AJR72910805": {
+ "AJR77144311": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 49422.1,
-  "eng_silwon": 49422.1
+  "sp_silwon": 12081.0,
+  "eng_silwon": 12081.0
  },
- "AJR65507733": {
+ "AJR74803545": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 12013.3,
+  "eng_silwon": 12013.3
+ },
+ "AJJ74578324": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 22944.4,
+  "eng_silwon": 22944.4
+ },
+ "AET30216904": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 286112.0,
+  "eng_silwon": 286112.0
+ },
+ "AJR67734302": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 7957.8,
+  "eng_silwon": 7957.8
+ },
+ "AJR73804307": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 14864.7,
+  "eng_silwon": 14864.7
+ },
+ "AJJ74498302": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 12122.7,
+  "eng_silwon": 12122.7
+ },
+ "AJR77263001": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 20741.0,
-    "eng": 20735.5,
-    "d": -5.5
-   },
-   "silwon": {
-    "sp": 22818.1,
-    "eng": 22812.5,
-    "d": -5.6
-   }
-  },
-  "sp_silwon": 22818.1,
-  "eng_silwon": 22812.5
- },
- "AJR73067005": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 605.4,
-  "eng_silwon": 605.4
- },
- "AJR76462626": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": -0.1,
-    "eng": 2780.9,
-    "d": 2781.0
-   },
-   "silwon": {
-    "sp": 225.9,
-    "eng": 3006.9,
-    "d": 2781.0
-   }
-  },
-  "sp_silwon": 225.9,
-  "eng_silwon": 3006.9
- },
- "AJR36092105": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 42738.9,
-  "eng_silwon": 42738.8
- },
- "AJR74983935": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 242612.3,
-    "eng": 242606.8,
-    "d": -5.5
-   },
-   "silwon": {
-    "sp": 255167.4,
-    "eng": 255160.7,
-    "d": -6.6
-   }
-  },
-  "sp_silwon": 255167.4,
-  "eng_silwon": 255160.7
- },
- "AJR74284505": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 9302.5,
-  "eng_silwon": 9302.5
- },
- "5211A10305J": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 20710.0,
-    "eng": 20754.3,
-    "d": 44.3
+    "sp": 46909.9,
+    "eng": 46993.4,
+    "d": 83.5
    },
    "ilban": {
-    "sp": 309.0,
-    "eng": 312.0,
+    "sp": 2026.0,
+    "eng": 2032.0,
+    "d": 6.0
+   },
+   "silwon": {
+    "sp": 55887.2,
+    "eng": 55978.5,
+    "d": 91.3
+   }
+  },
+  "sp_silwon": 55887.2,
+  "eng_silwon": 55978.5
+ },
+ "AJR73706903": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 22.0,
+  "eng_silwon": 22.0
+ },
+ "AJR75142603": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 6976.3,
+  "eng_silwon": 6976.3
+ },
+ "AJR77224505": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 99561.1,
+  "eng_silwon": 99561.1
+ },
+ "AJR65059905": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 1527.0,
+  "eng_silwon": 1527.0
+ },
+ "AJR30001901": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 2078.0,
+  "eng_silwon": 2078.0
+ },
+ "AET73271504": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 296884.5,
+  "eng_silwon": 296884.5
+ },
+ "AJR30038201": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 27048.0,
+    "eng": 27032.1,
+    "d": -15.9
+   },
+   "silwon": {
+    "sp": 31981.6,
+    "eng": 31964.5,
+    "d": -17.1
+   }
+  },
+  "sp_silwon": 31981.6,
+  "eng_silwon": 31964.5
+ },
+ "AJR30095101": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 11772.6,
+  "eng_silwon": 11772.6
+ },
+ "AJR77224509": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 98970.7,
+  "eng_silwon": 98970.7
+ },
+ "AJR65059909": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 1225.0,
+  "eng_silwon": 1225.0
+ },
+ "AJR33796503": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 10804.6,
+    "eng": 10807.6,
     "d": 3.0
    },
    "silwon": {
-    "sp": 23748.5,
-    "eng": 23796.6,
-    "d": 48.2
+    "sp": 13744.6,
+    "eng": 13747.6,
+    "d": 3.0
    }
   },
-  "sp_silwon": 23748.5,
-  "eng_silwon": 23796.6
- },
- "AJR74444402": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 36629.2,
-  "eng_silwon": 36629.2
- },
- "AJR76562804": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 21670.7,
-    "eng": 36000.8,
-    "d": 14330.2
-   },
-   "gagong": {
-    "sp": 2421.4,
-    "eng": 3385.9,
-    "d": 964.5
-   },
-   "ilban": {
-    "sp": 289.0,
-    "eng": 1216.0,
-    "d": 927.0
-   },
-   "profit": {
-    "sp": 217.0,
-    "eng": 369.0,
-    "d": 152.0
-   },
-   "silwon": {
-    "sp": 24848.1,
-    "eng": 41221.8,
-    "d": 16373.6
-   }
-  },
-  "sp_silwon": 24848.1,
-  "eng_silwon": 41221.8
- },
- "AJJ74578704": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 46517.2,
-  "eng_silwon": 46517.2
- },
- "품번13.20접합": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 1532.0,
-  "eng_silwon": 1532.0
- },
- "AJR36092103": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 17567.8,
-  "eng_silwon": 17567.8
- },
- "AJR73382901": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 8295.5,
-  "eng_silwon": 8295.5
- },
- "AJR65507704": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 11785.0,
-    "eng": 11779.5,
-    "d": -5.5
-   },
-   "silwon": {
-    "sp": 13209.1,
-    "eng": 13203.5,
-    "d": -5.6
-   }
-  },
-  "sp_silwon": 13209.1,
-  "eng_silwon": 13203.5
- },
- "AET73671520": {
-  "ok": false,
-  "diffs": {
-   "gagong": {
-    "sp": 1449.0,
-    "eng": 1687.0,
-    "d": 238.0
-   },
-   "ilban": {
-    "sp": 3553.0,
-    "eng": 3587.0,
-    "d": 34.0
-   },
-   "profit": {
-    "sp": 417.0,
-    "eng": 457.0,
-    "d": 40.0
-   },
-   "silwon": {
-    "sp": 51967.0,
-    "eng": 52277.7,
-    "d": 310.7
-   }
-  },
-  "sp_silwon": 51967.0,
-  "eng_silwon": 52277.7
- },
- "AJR75242402": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 41578.5,
-  "eng_silwon": 41578.5
- },
- "AJR30117301": {
-  "ok": false,
-  "diffs": {
-   "gagong": {
-    "sp": 13.0,
-    "eng": 3861.0,
-    "d": 3848.0
-   },
-   "ilban": {
-    "sp": 60.0,
-    "eng": 280.0,
-    "d": 220.0
-   },
-   "profit": {
-    "sp": 5.0,
-    "eng": 274.0,
-    "d": 269.0
-   },
-   "silwon": {
-    "sp": 10437.8,
-    "eng": 14774.8,
-    "d": 4337.0
-   }
-  },
-  "sp_silwon": 10437.8,
-  "eng_silwon": 14774.8
- },
- "AJR75662348": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 3242.9,
-  "eng_silwon": 3242.9
- },
- "AJJ73799914": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 38980.7,
-  "eng_silwon": 38980.7
- },
- "PQ061505R01.AKOR": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 44210.0,
-  "eng_silwon": 44208.7
- },
- "ABA74470301": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 38094.8,
-  "eng_silwon": 38094.8
- },
- "AJR74462303": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 52350.3,
-    "eng": 23119.3,
-    "d": -29231.0
-   },
-   "silwon": {
-    "sp": 52898.3,
-    "eng": 23667.3,
-    "d": -29231.0
-   }
-  },
-  "sp_silwon": 52898.3,
-  "eng_silwon": 23667.3
- },
- "AJR73981107": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 58895.6,
-  "eng_silwon": 58895.6
- },
- "AJR30025101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 8198.9,
-  "eng_silwon": 8198.9
- },
- "AJR30064401": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 16056.7,
-  "eng_silwon": 16056.7
- },
- "AJR77167311": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 24168.7,
-    "eng": 24163.2,
-    "d": -5.5
-   },
-   "silwon": {
-    "sp": 27257.8,
-    "eng": 27252.1,
-    "d": -5.6
-   }
-  },
-  "sp_silwon": 27257.8,
-  "eng_silwon": 27252.1
- },
- "AJR75544501": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 18474.7,
-  "eng_silwon": 18474.7
- },
- "AJR76582502": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 71151.7,
-  "eng_silwon": 71151.7
- },
- "AJR76823002": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 11788.2,
-  "eng_silwon": 11788.2
- },
- "4849A20060A": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 9435.0,
-  "eng_silwon": 9435.0
- },
- "AJR75623701": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 51185.4,
-  "eng_silwon": 51185.4
- },
- "AJR75524701": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 19756.1,
-  "eng_silwon": 19756.1
- },
- "AET73671504": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 32744.0,
-  "eng_silwon": 32744.0
- },
- "AET73151513": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 3922.8,
-  "eng_silwon": 3922.8
- },
- "AJR75563501": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 5518.4,
-  "eng_silwon": 5518.4
- },
- "AJR76502618": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 57667.8,
-  "eng_silwon": 57667.8
- },
- "AJR73688601": {
-  "ok": false,
-  "diffs": {
-   "gagong": {
-    "sp": 0.0,
-    "eng": 631.0,
-    "d": 631.0
-   },
-   "ilban": {
-    "sp": 30.0,
-    "eng": 74.0,
-    "d": 44.0
-   },
-   "profit": {
-    "sp": 2.0,
-    "eng": 56.0,
-    "d": 54.0
-   },
-   "silwon": {
-    "sp": 27519.0,
-    "eng": 28248.0,
-    "d": 729.0
-   }
-  },
-  "sp_silwon": 27519.0,
-  "eng_silwon": 28248.0
- },
- "AJR32564920": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 0.0,
-  "eng_silwon": 0.0
- },
- "AJR77263005": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 58156.8,
-  "eng_silwon": 58156.8
+  "sp_silwon": 13744.6,
+  "eng_silwon": 13747.6
  },
  "AJR30058801": {
   "ok": true,
@@ -498,154 +233,804 @@
   "sp_silwon": 12724.2,
   "eng_silwon": 12724.2
  },
- "AJR75702801": {
+ "AJR74365101": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 28445.9,
-  "eng_silwon": 28445.9
+  "sp_silwon": 31566.2,
+  "eng_silwon": 31566.2
  },
- "5211A21310A": {
+ "AJR77163101": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 2086.0,
-  "eng_silwon": 2086.0
+  "sp_silwon": 23561.5,
+  "eng_silwon": 23561.5
  },
- "5211A11065T": {
+ "AJJ76418714": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 28042.9,
+  "eng_silwon": 28043.0
+ },
+ "AJR30133608": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 11673.6,
-    "eng": 11677.3,
-    "d": 3.7
+    "sp": 153896.8,
+    "eng": 153421.1,
+    "d": -475.6
    },
-   "silwon": {
-    "sp": 13025.1,
-    "eng": 13028.9,
-    "d": 3.8
-   }
-  },
-  "sp_silwon": 13025.1,
-  "eng_silwon": 13028.9
- },
- "ADM72950707": {
-  "ok": false,
-  "diffs": {
    "gagong": {
-    "sp": 12422.1,
-    "eng": 5703.1,
-    "d": -6719.0
+    "sp": 7252.2,
+    "eng": 7643.0,
+    "d": 390.8
    },
    "ilban": {
-    "sp": 1548.0,
-    "eng": 1191.0,
-    "d": -357.0
+    "sp": 1584.0,
+    "eng": 1827.0,
+    "d": 243.0
+   },
+   "profit": {
+    "sp": 706.0,
+    "eng": 757.0,
+    "d": 51.0
+   },
+   "silwon": {
+    "sp": 165224.9,
+    "eng": 165434.2,
+    "d": 209.2
+   }
+  },
+  "sp_silwon": 165224.9,
+  "eng_silwon": 165434.2
+ },
+ "AJR30073601": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 25750.6,
+    "eng": 25519.2,
+    "d": -231.4
+   },
+   "silwon": {
+    "sp": 27018.6,
+    "eng": 26787.2,
+    "d": -231.4
+   }
+  },
+  "sp_silwon": 27018.6,
+  "eng_silwon": 26787.2
+ },
+ "AJR65507734": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 17338.1,
+  "eng_silwon": 17338.1
+ },
+ "AJR74984402": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 45715.1,
+    "eng": 45716.9,
+    "d": 1.8
+   },
+   "silwon": {
+    "sp": 50847.9,
+    "eng": 50849.8,
+    "d": 1.9
+   }
+  },
+  "sp_silwon": 50847.9,
+  "eng_silwon": 50849.8
+ },
+ "AJR30138104": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 23586.9,
+    "eng": 36954.9,
+    "d": 13368.0
+   },
+   "silwon": {
+    "sp": 26758.9,
+    "eng": 40126.9,
+    "d": 13368.0
+   }
+  },
+  "sp_silwon": 26758.9,
+  "eng_silwon": 40126.9
+ },
+ "AJR72367604": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 17296.0,
+    "eng": 16898.0,
+    "d": -398.0
+   },
+   "gagong": {
+    "sp": 2979.0,
+    "eng": 3776.1,
+    "d": 797.1
+   },
+   "ilban": {
+    "sp": 301.0,
+    "eng": 500.0,
+    "d": 199.0
+   },
+   "profit": {
+    "sp": 262.0,
+    "eng": 342.0,
+    "d": 80.0
+   },
+   "silwon": {
+    "sp": 20858.0,
+    "eng": 21536.1,
+    "d": 678.1
+   }
+  },
+  "sp_silwon": 20858.0,
+  "eng_silwon": 21536.1
+ },
+ "AJR75544604": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 14254.6,
+  "eng_silwon": 14254.6
+ },
+ "AET73831442": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 36710.1,
+    "eng": 31593.5,
+    "d": -5116.6
+   },
+   "ilban": {
+    "sp": 2612.0,
+    "eng": 2254.0,
+    "d": -358.0
+   },
+   "profit": {
+    "sp": 257.0,
+    "eng": 229.0,
+    "d": -28.0
+   },
+   "silwon": {
+    "sp": 40466.1,
+    "eng": 34963.4,
+    "d": -5502.6
+   }
+  },
+  "sp_silwon": 40466.1,
+  "eng_silwon": 34963.4
+ },
+ "AJR73023306": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 101144.1,
+  "eng_silwon": 101144.1
+ },
+ "ALB31554101": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 2214.2,
+  "eng_silwon": 2214.2
+ },
+ "AJR73980304": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 94599.0,
+    "eng": 94595.9,
+    "d": -3.0
+   },
+   "silwon": {
+    "sp": 104355.4,
+    "eng": 104352.4,
+    "d": -3.0
+   }
+  },
+  "sp_silwon": 104355.4,
+  "eng_silwon": 104352.4
+ },
+ "AJR73950306": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 7388.5,
+  "eng_silwon": 7388.5
+ },
+ "AJR74488604": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 8338.4,
+    "eng": 7138.4,
+    "d": -1200.0
+   },
+   "gagong": {
+    "sp": 231.0,
+    "eng": 393.0,
+    "d": 162.0
+   },
+   "ilban": {
+    "sp": 35.0,
+    "eng": 46.0,
+    "d": 11.0
+   },
+   "profit": {
+    "sp": 21.0,
+    "eng": 35.0,
+    "d": 14.0
+   },
+   "silwon": {
+    "sp": 8625.4,
+    "eng": 7612.4,
+    "d": -1013.0
+   }
+  },
+  "sp_silwon": 8625.4,
+  "eng_silwon": 7612.4
+ },
+ "AJR73502501": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 8510.6,
+  "eng_silwon": 8510.6
+ },
+ "AJR33796526": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 4605.3,
+    "eng": 5042.3,
+    "d": 437.0
+   },
+   "gagong": {
+    "sp": 1564.0,
+    "eng": 0.0,
+    "d": -1564.0
+   },
+   "ilban": {
+    "sp": 159.0,
+    "eng": 0.0,
+    "d": -159.0
    },
    "unban": {
-    "sp": 2739.0,
-    "eng": 60.0,
-    "d": -2679.0
+    "sp": 38.0,
+    "eng": 0.0,
+    "d": -38.0
    },
    "profit": {
-    "sp": 902.0,
-    "eng": 516.0,
-    "d": -386.0
+    "sp": 138.0,
+    "eng": 0.0,
+    "d": -138.0
    },
    "silwon": {
-    "sp": 714477.4,
-    "eng": 704336.4,
-    "d": -10141.0
+    "sp": 6504.3,
+    "eng": 5042.3,
+    "d": -1462.0
    }
   },
-  "sp_silwon": 714477.4,
-  "eng_silwon": 704336.4
+  "sp_silwon": 6504.3,
+  "eng_silwon": 5042.3
  },
- "AJR30060702": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 598.5,
-  "eng_silwon": 598.5
- },
- "AJR75802612": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 32458.0,
-  "eng_silwon": 32458.0
- },
- "AJJ74618303": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 30843.5,
-  "eng_silwon": 30843.5
- },
- "5211A10549A": {
+ "AJR73822504": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 13286.8,
-    "eng": 13289.8,
-    "d": 3.0
+    "sp": 106263.0,
+    "eng": 106550.9,
+    "d": 287.9
    },
    "gagong": {
-    "sp": 32.0,
-    "eng": 1720.2,
-    "d": 1688.2
+    "sp": 5016.5,
+    "eng": 5022.1,
+    "d": 5.6
    },
    "ilban": {
-    "sp": 315.0,
-    "eng": 434.0,
-    "d": 119.0
+    "sp": 1407.0,
+    "eng": 1428.0,
+    "d": 21.0
    },
    "profit": {
-    "sp": 28.0,
-    "eng": 172.0,
-    "d": 144.0
+    "sp": 514.0,
+    "eng": 516.0,
+    "d": 2.0
    },
    "silwon": {
-    "sp": 13661.8,
-    "eng": 15616.0,
-    "d": 1954.2
+    "sp": 113250.5,
+    "eng": 113567.0,
+    "d": 316.5
    }
   },
-  "sp_silwon": 13661.8,
-  "eng_silwon": 15616.0
+  "sp_silwon": 113250.5,
+  "eng_silwon": 113567.0
  },
- "AJR75747604": {
+ "AJR77224504": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 3229.6,
-  "eng_silwon": 3229.6
+  "sp_silwon": 101184.6,
+  "eng_silwon": 101184.6
+ },
+ "AJR76402407": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 259228.4,
+    "eng": 259560.5,
+    "d": 332.1
+   },
+   "gagong": {
+    "sp": 10300.4,
+    "eng": 10303.4,
+    "d": 3.0
+   },
+   "ilban": {
+    "sp": 6220.0,
+    "eng": 6245.0,
+    "d": 25.0
+   },
+   "silwon": {
+    "sp": 278856.8,
+    "eng": 279218.0,
+    "d": 361.1
+   }
+  },
+  "sp_silwon": 278856.8,
+  "eng_silwon": 279218.0
+ },
+ "AET73831441": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 28384.8,
+  "eng_silwon": 28384.8
+ },
+ "ADM74930506": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 236095.7,
+    "eng": 236099.9,
+    "d": 4.2
+   },
+   "silwon": {
+    "sp": 245458.2,
+    "eng": 245463.4,
+    "d": 5.2
+   }
+  },
+  "sp_silwon": 245458.2,
+  "eng_silwon": 245463.4
+ },
+ "AGF04226601": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 37644.0,
+    "eng": 36336.0,
+    "d": -1308.0
+   },
+   "gagong": {
+    "sp": 306.5,
+    "eng": 5382.4,
+    "d": 5075.8
+   },
+   "ilban": {
+    "sp": 2322.0,
+    "eng": 2913.0,
+    "d": 591.0
+   },
+   "profit": {
+    "sp": 210.0,
+    "eng": 663.0,
+    "d": 453.0
+   },
+   "silwon": {
+    "sp": 41315.5,
+    "eng": 46127.3,
+    "d": 4811.8
+   }
+  },
+  "sp_silwon": 41315.5,
+  "eng_silwon": 46127.3
+ },
+ "AJR77263009": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 44141.6,
+    "eng": 44143.5,
+    "d": 1.9
+   },
+   "ilban": {
+    "sp": 2342.0,
+    "eng": 2337.0,
+    "d": -5.0
+   },
+   "silwon": {
+    "sp": 57025.4,
+    "eng": 57021.3,
+    "d": -4.1
+   }
+  },
+  "sp_silwon": 57025.4,
+  "eng_silwon": 57021.3
+ },
+ "AJR76442510": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 10095.8,
+  "eng_silwon": 10095.8
+ },
+ "AJR75183101": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 7347.5,
+  "eng_silwon": 7347.5
+ },
+ "AAA71799405": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 28954.6,
+  "eng_silwon": 28954.6
+ },
+ "AJR71433336": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 14960.3,
+    "eng": 15828.3,
+    "d": 868.0
+   },
+   "gagong": {
+    "sp": 1733.5,
+    "eng": 2088.2,
+    "d": 354.6
+   },
+   "ilban": {
+    "sp": 188.0,
+    "eng": 269.0,
+    "d": 81.0
+   },
+   "profit": {
+    "sp": 153.0,
+    "eng": 187.0,
+    "d": 34.0
+   },
+   "silwon": {
+    "sp": 17034.9,
+    "eng": 18372.5,
+    "d": 1337.6
+   }
+  },
+  "sp_silwon": 17034.9,
+  "eng_silwon": 18372.5
+ },
+ "AJR74364922": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 25088.8,
+    "eng": 25098.1,
+    "d": 9.2
+   },
+   "silwon": {
+    "sp": 28882.7,
+    "eng": 28893.0,
+    "d": 10.3
+   }
+  },
+  "sp_silwon": 28882.7,
+  "eng_silwon": 28893.0
+ },
+ "AJR67613701": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 20567.8,
+  "eng_silwon": 20567.8
+ },
+ "ADM74790608": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 1410555.0,
+  "eng_silwon": 1410555.0
+ },
+ "AJR74523006": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 31373.2,
+    "eng": 31520.5,
+    "d": 147.3
+   },
+   "silwon": {
+    "sp": 33166.2,
+    "eng": 33313.5,
+    "d": 147.3
+   }
+  },
+  "sp_silwon": 33166.2,
+  "eng_silwon": 33313.5
+ },
+ "AJR74242510": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 24079.0,
+  "eng_silwon": 24079.0
+ },
+ "AJR77263006": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 46773.9,
+    "eng": 46801.8,
+    "d": 27.8
+   },
+   "ilban": {
+    "sp": 1554.0,
+    "eng": 1556.0,
+    "d": 2.0
+   },
+   "silwon": {
+    "sp": 52697.7,
+    "eng": 52727.8,
+    "d": 30.1
+   }
+  },
+  "sp_silwon": 52697.7,
+  "eng_silwon": 52727.8
+ },
+ "AJR73223901": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 6990.2,
+  "eng_silwon": 6990.2
+ },
+ "AJR74942730": {
+  "ok": false,
+  "diffs": {
+   "gagong": {
+    "sp": 21.0,
+    "eng": 516.0,
+    "d": 495.0
+   },
+   "ilban": {
+    "sp": 280.0,
+    "eng": 315.0,
+    "d": 35.0
+   },
+   "profit": {
+    "sp": 24.0,
+    "eng": 67.0,
+    "d": 43.0
+   },
+   "silwon": {
+    "sp": 10982.6,
+    "eng": 11555.6,
+    "d": 573.0
+   }
+  },
+  "sp_silwon": 10982.6,
+  "eng_silwon": 11555.6
+ },
+ "AJR36618623": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 55548.0,
+    "eng": 55562.8,
+    "d": 14.8
+   },
+   "silwon": {
+    "sp": 59961.1,
+    "eng": 59977.2,
+    "d": 16.1
+   }
+  },
+  "sp_silwon": 59961.1,
+  "eng_silwon": 59977.2
+ },
+ "AJJ75838615": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 30570.0,
+  "eng_silwon": 30570.0
+ },
+ "AJR75462803": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 28173.3,
+    "eng": 28251.5,
+    "d": 78.2
+   },
+   "gagong": {
+    "sp": 2076.3,
+    "eng": 2077.9,
+    "d": 1.6
+   },
+   "ilban": {
+    "sp": 456.0,
+    "eng": 463.0,
+    "d": 7.0
+   },
+   "silwon": {
+    "sp": 30957.6,
+    "eng": 31045.4,
+    "d": 87.8
+   }
+  },
+  "sp_silwon": 30957.6,
+  "eng_silwon": 31045.4
+ },
+ "AJR30117401": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 16342.7,
+    "eng": 16344.5,
+    "d": 1.9
+   },
+   "silwon": {
+    "sp": 20109.1,
+    "eng": 20112.0,
+    "d": 2.9
+   }
+  },
+  "sp_silwon": 20109.1,
+  "eng_silwon": 20112.0
+ },
+ "AJR75842504": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 1037.0,
+  "eng_silwon": 1037.0
+ },
+ "PW061205R01.AKOR": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 26434.3,
+  "eng_silwon": 26433.0
+ },
+ "MJU66889201": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": -63.2,
+    "eng": 693.5,
+    "d": 756.8
+   },
+   "ilban": {
+    "sp": 22.0,
+    "eng": 75.0,
+    "d": 53.0
+   },
+   "profit": {
+    "sp": 27.0,
+    "eng": 31.0,
+    "d": 4.0
+   },
+   "silwon": {
+    "sp": 300.5,
+    "eng": 1114.3,
+    "d": 813.8
+   }
+  },
+  "sp_silwon": 300.5,
+  "eng_silwon": 1114.3
+ },
+ "5211A20297S": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 3780.0,
+  "eng_silwon": 3780.0
+ },
+ "AJR75163206": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 11656.3,
+    "eng": 11667.4,
+    "d": 11.1
+   },
+   "silwon": {
+    "sp": 15068.0,
+    "eng": 15079.3,
+    "d": 11.3
+   }
+  },
+  "sp_silwon": 15068.0,
+  "eng_silwon": 15079.3
+ },
+ "AJR76302601": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 9299.2,
+  "eng_silwon": 9299.2
+ },
+ "AJR75483702": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 40763.1,
+    "eng": 40769.0,
+    "d": 6.0
+   },
+   "ilban": {
+    "sp": 1805.0,
+    "eng": 1807.0,
+    "d": 2.0
+   },
+   "silwon": {
+    "sp": 49035.0,
+    "eng": 49043.0,
+    "d": 8.0
+   }
+  },
+  "sp_silwon": 49035.0,
+  "eng_silwon": 49043.0
+ },
+ "AJR73068501": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 4384.0,
+  "eng_silwon": 4384.0
+ },
+ "5211A30756B": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 4794.4,
+  "eng_silwon": 4794.4
+ },
+ "AJJ74578322": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 24231.6,
+    "eng": 24228.6,
+    "d": -3.0
+   },
+   "silwon": {
+    "sp": 25610.6,
+    "eng": 25607.6,
+    "d": -3.0
+   }
+  },
+  "sp_silwon": 25610.6,
+  "eng_silwon": 25607.6
  },
  "AJR75563402": {
   "ok": false,
   "diffs": {
    "jae": {
     "sp": 4190.6,
-    "eng": 5283.2,
-    "d": 1092.6
+    "eng": 4073.7,
+    "d": -116.9
    },
    "gagong": {
     "sp": 602.0,
-    "eng": 377.0,
-    "d": -225.0
+    "eng": 712.0,
+    "d": 110.0
    },
    "ilban": {
     "sp": 48.0,
-    "eng": 22.0,
-    "d": -26.0
+    "eng": 66.0,
+    "d": 18.0
    },
    "profit": {
     "sp": 46.0,
-    "eng": 26.0,
-    "d": -20.0
+    "eng": 56.0,
+    "d": 10.0
    },
    "silwon": {
     "sp": 4911.6,
-    "eng": 5733.2,
-    "d": 821.6
+    "eng": 4932.7,
+    "d": 21.1
    }
   },
   "sp_silwon": 4911.6,
-  "eng_silwon": 5733.2
+  "eng_silwon": 4932.7
  },
  "AJR75563503": {
   "ok": true,
