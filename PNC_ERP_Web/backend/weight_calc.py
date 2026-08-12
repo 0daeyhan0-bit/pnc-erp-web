@@ -310,17 +310,21 @@ def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub
       WHERE A.MAINT_TAG IN ('9','S','C','G','H') AND {win}
       GROUP BY A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))) HAVING SUM(A.MAINT_QTY)>0""")
     inr = {}; inw = {}; noq = {}
-    for cc, mat, q in cur.fetchall():
+    ingo = cur.fetchall()
+    bcur = cn.cursor()   # CG2 SUB 전개용(BOM 조회) — 별도 커서
+    for cc, mat, q in ingo:
         vendor = _COOP_CUST_VENDOR.get(str(cc).strip())
         if not vendor:
             continue
         qf = float(q or 0)
-        rk = qraw.get((vendor, mat)); ws = qweld.get((vendor, mat))
-        if rk is not None:
+        # ★원소재 동 = CG2 SUB 전개 포함(expand_sub=True) / 미전개 시 직접 견적만
+        rk = _expand_dong(bcur, vendor, mat, qraw, set()) if expand_sub else qraw.get((vendor, mat), 0.0)
+        ws = qweld.get((vendor, mat))
+        if rk and rk > 0:
             inr[cc] = inr.get(cc, 0.0) + rk * qf
         if ws is not None:
             inw[cc] = inw.get(cc, 0.0) + ws * qf
-        if rk is None and ws is None:
+        if (not rk or rk <= 0) and ws is None:
             noq[cc] = noq.get(cc, 0) + 1        # 견적없는 완제품(정보용)
     cn.close()
     res = {}
