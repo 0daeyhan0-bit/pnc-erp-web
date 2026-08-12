@@ -1,6 +1,7 @@
 # (품번, route) 차원 = 재고·손익·공정분담 설계 검증 + 이관 계획
 
 > 상태: **설계·검증 완료 → 단계별 구현 착수(승인)**. 작성 2026-08-12 (세션 02b63e35).
+> ⚠️**정본 우선(2026-08-12 갱신)**: SUB 정체성·재고 모델은 **[[BOM_STRUCTURE_CANON]] §9가 정본**이며 이 문서보다 우선한다. 본 문서 §A/§B/§E의 "faceless 노드·재고없는 껍데기·별도 품목 유지" 및 상단 결정③ 표현은 **폐기** → 확정 모델 = **SUB = `품번_S{nn}`(품번 마스터에 `is_lg=0` 내부SUB 플래그로 등록, 새 LG품번 0)·자도번 정규형·공용은 여러 버전이 같은 `_S{nn}` 참조(재고 1 pool)·vendor는 ROUTE_ID로 분리.** route 차원(ROUTE_ID·Phase-1/2)은 유효. 이관 스코프=[[MIGRATION_ISSUES]] §G(25.01~26.07 출하품번 서브 2,400개).
 > **★구현 로그**:
 > - **Phase-1(§B-3 DDL) 완료 2026-08-12** — `nx.stock_ledger`에 `ROUTE_ID int NULL` 추가 + 전 171,867행 R01(=0) 백필(NULL 0, 총량보존 PASS) + `IX_stock_ledger_route(STOCK_POINT,ITEM_CODE,ROUTE_ID) INCLUDE(MAINT_QTY,GAGONG_PROC_CODE,WORK_ORDER)` 생성. **회귀0**(아직 어떤 코드도 ROUTE_ID 미참조 = `=0`은 접미사 미도입과 동일, 롤백 안전). 스크립트 `scratchpad/r_phase1_ddl.py`.
 > - **Phase-2(§E-2 back-stamp) 완료 2026-08-12** — 멱등 back-stamp 루틴 구축·실행(`scratchpad/r_phase2_backstamp.py`). 매핑원천=`sourcing_profile`(item+vendor+route_id>0, 유일매핑만·다대일 제외). 근거키(ITEM_CODE+CUST_CODE+ROUTE_ID=0) 스코프 UPDATE·수량 불변·삭제 0. **결과 대상 0행**(후보route 보유품목=AJR75563402 1개뿐인데 nx.stock_ledger에 그 완제품 세트입고(협력사 CUST_CODE) 행 없음 — 실입고는 라이브 PARTNER_ERP에만, nx는 자재 MAT 이관분 위주). **총량보존 PASS**. → **설계 §A-3 예측 일치(route변형 재고≈0)**. ★결론: **과거 back-stamp로 채울 재고 없음 → 실제 route 스탬프는 Phase-3 입고/생산 write 시점 forward-stamp가 담당**. back-stamp 루틴은 컷오버 후 재실행용 안전망으로 존치.
