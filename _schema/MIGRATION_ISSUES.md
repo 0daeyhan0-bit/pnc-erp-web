@@ -180,3 +180,14 @@ JAI_COST = (COST_GUBUN='3' ? WON_MAT_COST×ITEM_WEIGHT×USE_QTY   -- 원소재(�
 - 총량보존 — 자도번 재고 → `_S{nn}` 재고 이관 시 품목별 수량합 불변.
 - 커버리지 — 스코프(25.01~26.07 LG입고) 내 서브 100% 매핑(미매핑=담당 확인).
 
+### G-5. ★정규화 드래프트 1차 결과·문제점 (2026-08-12, scratchpad/r_norm_draft.py·r_norm_empty.py)
+드래프트 = 부품셋(CS_M_ITEM_BOM child, RAC제외) 정확일치 그룹핑 → `품번_S{nn}` 배정. CSV=scratchpad/sub_norm_draft.csv.
+- **736 base·2,398 변형 → 정규 SUB 2,032**(dedup −366). **공용(여러 base 동일구조) 200 signature.** MJU 개별부품 base 37.
+- 다vendor 그룹 29(같은구조·다vendor→**ROUTE로 접힘**), make_type 혼재 74(같은구조 사내/외주/매입=route차, 정상).
+- **★빈 부품셋 410건(구조없음) — 처리규칙 확정 필요:**
+  1. **CS없음·PR_M_ITEM_BOM있음 13** → ⚠**정규화 BOM 소스 결정**(CS 원가 vs PR 실사용). 예 `AJR30073603-은납`·`AJR30012012-SUB`.
+  2. **텍스트 스텁 20**(`3H03659L-1(황동MASH)`·`-선행`·`5210A21458T-품번10번`·`AEG74589808-가`) → **레거시 오염, 담당 정리**([[MIGRATION_ISSUES]] §C 오염 규칙).
+  3. **매입69+외주160 리프변형 229** → 구조없는 **조달변형 = `_S{nn}` 아님, base+ROUTE(vendor)로 흡수**(vendor→ROUTE 규칙).
+  4. **★사내(mk=1) 133 BOM없음 = 진짜 데이터 이슈**(사내생산인데 구조 없음). 원소재 성형품(원소재만) or 결손 규명 필요.
+- 미해결 결정: ①정규화 BOM 소스(CS/PR) ②리프변형 흡수 규칙 확정 ③사내133 규명 ④공용200 = 버전공유 pool 확정.
+
