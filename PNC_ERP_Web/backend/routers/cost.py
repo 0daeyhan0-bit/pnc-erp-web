@@ -100,7 +100,7 @@ def cost_sil(item: str = Query(..., description="품번"),
                     try:
                         for i in range(0, len(miss), 900):
                             ch = miss[i:i + 900]; ph = ",".join("?" * len(ch))
-                            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+                            c2.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
                             for r in c2.fetchall(): vmap.setdefault(str(r[0]).strip(), str(r[1]).strip())
                     finally:
                         cn.close()
@@ -168,7 +168,7 @@ def _nae_proc_grid(pg: dict):
             codes = list(pg.keys())
             for i in range(0, len(codes), 900):
                 ch = codes[i:i + 900]; ph = ",".join("?" * len(ch))
-                c2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,''), ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+                c2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,''), ISNULL(SORT_SEQ,0) FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
                 for r in c2.fetchall():
                     names[str(r[0]).strip()] = {"nm": str(r[1]).strip(), "seq": int(r[2] or 0)}
         finally:
@@ -216,7 +216,7 @@ def itemproc_assy(q: str = Query("", description="품번/품명 검색"), limit:
             uc = list(used)
             for i in range(0, len(uc), 900):
                 ch = uc[i:i+900]; ph = ",".join("?" * len(ch))
-                c2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,''), ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+                c2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,''), ISNULL(SORT_SEQ,0) FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
                 for r in c2.fetchall(): pnames[str(r[0]).strip()] = {"nm": str(r[1]).strip(), "seq": int(r[2] or 0)}
         finally:
             cn.close()
@@ -373,7 +373,7 @@ def cost_proc_get(node: str = Query(..., description="공정 편집 대상 품�
     cat = {}
     cn = _conn(); c2 = cn.cursor()
     try:
-        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0) FROM CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
+        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0) FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
         for r in c2.fetchall():
             pc = str(r[0]).strip()
             cat[pc] = {"name": str(r[1]).strip(), "seq": int(r[2] or 0), "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS}

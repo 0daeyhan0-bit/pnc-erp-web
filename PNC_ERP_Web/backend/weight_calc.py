@@ -61,7 +61,7 @@ def _load_maps():
         # 단위중량 = ITEM_WEIGHT 우선(소구경 정확), 없으면(0/NULL) 기하동중량 π(D−T)·T·L·8.94/1e6
         cur.execute("""SELECT ITEM_CODE, ISNULL(ITEM_WEIGHT,0), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0),
                               ISNULL(ITEM_LENGTH,0), METAL_GUBUN, ISNULL(ITEM_DESC,'')
-                       FROM PR_M_ITEM""")
+                       FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM""")
         META = {}
         for ic, iw, d, t, L, mg, nm in cur.fetchall():
             cls = None; w = 0.0
@@ -78,7 +78,7 @@ def _load_maps():
                 cls = 'weld'
             META[str(ic).strip().upper()] = (w, cls)          # ★키 정규화(공백패딩·대소문자 통일)
         cur.execute("""SELECT ITEM_CODE, MAT_CODE, USE_QTY, ISNULL(SAGUB_FLAG,'0')
-                       FROM CS_M_ITEM_BOM WHERE FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'""")
+                       FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'""")
         CH = {}
         for p, c, q, sag in cur.fetchall():
             CH.setdefault(str(p).strip().upper(), []).append((str(c).strip().upper(), float(q or 0), str(sag)))
@@ -169,7 +169,7 @@ def _load_weld():
             return _WELD
         cn = _ro(); cur = cn.cursor()
         # 정본: 부모품목별 Σ ITEM_USE_QTY(관경별 소요량) × 1.5
-        cur.execute("SELECT P_ITEM_CODE, ISNULL(SUM(CAST(ITEM_USE_QTY AS float)),0) FROM CS_T_ITEM_WELD GROUP BY P_ITEM_CODE")
+        cur.execute("SELECT P_ITEM_CODE, ISNULL(SUM(CAST(ITEM_USE_QTY AS float)),0) FROM PARTNER_ERP_TEST3.nx.CS_T_ITEM_WELD GROUP BY P_ITEM_CODE")
         soyo = {str(p).strip().upper(): round(float(q or 0) * 1.5, 4) for p, q in cur.fetchall()}
         cn.close()
         _WELD = soyo
@@ -177,9 +177,9 @@ def _load_weld():
 
 _MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
   SELECT CUST_CODE, format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') JUN_YYMM,
-    ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
-    ISNULL((SELECT TOP 1 MAGAM_DAY FROM CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
-  FROM CM_M_CUST A)"""
+    ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<=format(dateadd(MONTH,-1,convert(date,'{ym}'+'01',12)),'yyMM') ORDER BY APPLY_YYMM DESC),'31') JUN_MAGAM_DAY,
+    ISNULL((SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=A.CUST_CODE AND APPLY_YYMM<='{ym}' ORDER BY APPLY_YYMM DESC),'31') MAGAM_DAY
+  FROM PARTNER_ERP_TEST3.nx.CM_M_CUST A)"""
 _WIN = "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
 
 def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=None):
@@ -192,21 +192,21 @@ def compute(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub_weld=
     # 원소재 출고: tag5 원소재(E/G 210 KG)
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG='5' AND {win} AND M.ITEM_SGROUP='210' AND M.UNIT='KG' AND M.ITEM_LGROUP IN ('E','G')
       GROUP BY A.CUST_CODE""")
     out = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
     # 용접봉 출고(사급): tag5 용접봉(RAC*/Solder) by vendor
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG='5' AND {win} AND (A.MAT_CODE LIKE 'RAC%' OR M.ITEM_DESC LIKE '%용접봉%' OR M.ITEM_DESC LIKE '%Solder%')
       GROUP BY A.CUST_CODE""")
     wout = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
     # 입고중량: 확정입고(9/S/C/G/H) × 업체가공 동/용접봉 중량
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, A.MAT_CODE, SUM(A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG IN ('9','S','C','G','H') AND {win}
       GROUP BY A.CUST_CODE, A.MAT_CODE HAVING SUM(A.MAINT_QTY)>0""")
     inr = {}; inw = {}
@@ -266,7 +266,7 @@ def _load_quote_soyo():
 _CS_KIDS = {}   # code -> [자식코드] (CS_M_ITEM_BOM, except제외). BOM 구조는 정적 → 영구캐시
 def _cs_kids(bcur, code):
     if code not in _CS_KIDS:
-        bcur.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM "
+        bcur.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM "
                      "WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'", code)
         _CS_KIDS[code] = [str(r[0]).strip() for r in bcur.fetchall()]
     return _CS_KIDS[code]
@@ -293,21 +293,21 @@ def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub
     # 원소재 출고: tag5 원소재(E/G 210 KG) — compute()와 동일
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG='5' AND {win} AND M.ITEM_SGROUP='210' AND M.UNIT='KG' AND M.ITEM_LGROUP IN ('E','G')
       GROUP BY A.CUST_CODE""")
     out = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
     # 용접봉 출고(사급): tag5 용접봉 — compute()와 동일
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG='5' AND {win} AND (A.MAT_CODE LIKE 'RAC%' OR M.ITEM_DESC LIKE '%용접봉%' OR M.ITEM_DESC LIKE '%Solder%')
       GROUP BY A.CUST_CODE""")
     wout = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
     # 입고(완제품) × 견적 소요 = 소요중량
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))), SUM(A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG IN ('9','S','C','G','H') AND {win}
       GROUP BY A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))) HAVING SUM(A.MAINT_QTY)>0""")
     inr = {}; inw = {}; noq = {}
@@ -441,7 +441,7 @@ def compute_quote_lme(ym, weld_spot=62700.0, weld_sagub=21100.0):
     # 출고: tag5 원소재(210·KG·E/G), 외경은 DESC
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY), MAX(M.ITEM_DESC)
-      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG='5' AND {win} AND M.ITEM_SGROUP='210' AND M.UNIT='KG' AND M.ITEM_LGROUP IN ('E','G')
       GROUP BY A.CUST_CODE, A.MAT_CODE""")
     for cc, q, desc in cur.fetchall():
@@ -455,7 +455,7 @@ def compute_quote_lme(ym, weld_spot=62700.0, weld_sagub=21100.0):
     # 용접봉 출고(tag5): RAC% / 용접봉 / Solder
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG='5' AND {win} AND (A.MAT_CODE LIKE 'RAC%' OR M.ITEM_DESC LIKE '%용접봉%' OR M.ITEM_DESC LIKE '%Solder%')
       GROUP BY A.CUST_CODE""")
     for cc, q in cur.fetchall():
@@ -464,7 +464,7 @@ def compute_quote_lme(ym, weld_spot=62700.0, weld_sagub=21100.0):
     # 소요: 완제품 입고(9/S/C/G/H) × 견적 규격별 동, CG2 전개
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))), SUM(A.MAINT_QTY)
-      FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
       WHERE A.MAINT_TAG IN ('9','S','C','G','H') AND {win}
       GROUP BY A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))) HAVING SUM(A.MAINT_QTY)>0""")
     ingo = cur.fetchall()

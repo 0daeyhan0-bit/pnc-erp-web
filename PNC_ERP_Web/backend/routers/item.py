@@ -80,9 +80,9 @@ def _item_nature(cur, code, sgroup):
     # ★용접 존재판정=nx 용접테이블(nx.proc_weld) 런타임 기준 — 레거시 CS_T_ITEM_WELD 런타임 참조 제거(원칙: 런타임은 nx만)
     cur.execute("""SELECT
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0),
-        (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE ITEM_CODE=?),
-        (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?),
-        (SELECT TOP 1 1 FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE MAT_CODE=?)""", code, code, code, code)
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=?),
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?),
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE MAT_CODE=?)""", code, code, code, code)
     w, bp, g, bc = cur.fetchone()
     if w or bp: return "5.용접·조립품", 1
     if g: return "4.가공품", 1
@@ -119,7 +119,7 @@ def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Q
     try:
         dLG = _kindmap(c2, "PR005"); dSG = _kindmap(c2, "PR006"); dGRP = _kindmap(c2, "PR001")
         dCLS = _kindmap(c2, "PR008"); dPK = _kindmap(c2, "PR021"); dUN = _kindmap(c2, "CM002"); dMT = _kindmap(c2, "PR019")
-        c2.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM CM_M_CUST")
+        c2.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST")
         dCust = {str(r[0]).strip(): r[1] for r in c2.fetchall()}
         w = ["1=1"]; p = []
         if q.strip(): w.append("(i.item_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2
@@ -306,7 +306,7 @@ def itemmaster_delete(payload: dict = Body(...)):
         for code in codes:
             cur.execute("SELECT 1 FROM nx.bom_header WHERE item_code=?", code); a = cur.fetchone()
             cur.execute("SELECT 1 FROM nx.bom_line WHERE child_item=?", code); b = cur.fetchone()
-            cur.execute("SELECT TOP 1 1 FROM PARTNER_ERP.dbo.PR_M_ITEM_BOM WHERE ITEM_CODE=? OR MAT_CODE=?", code, code)
+            cur.execute("SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_BOM WHERE ITEM_CODE=? OR MAT_CODE=?", code, code)
             c = cur.fetchone()
             if a or b or c: blocked.append(code)
         if blocked:

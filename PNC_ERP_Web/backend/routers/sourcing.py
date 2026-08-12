@@ -39,7 +39,7 @@ def procgroup_vendors(q: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
         like = f"%{q}%"
-        cur.execute("""SELECT TOP 40 CUST_CODE, ISNULL(CUST_DESC,'') FROM CM_M_CUST
+        cur.execute("""SELECT TOP 40 CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST
             WHERE CUST_CODE LIKE ? OR CUST_DESC LIKE ? ORDER BY CUST_DESC""", like, like)
         return {"rows": [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]}
     finally:
@@ -59,7 +59,7 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
         # 실제 생산단은 아래 nk>0(현재유효 BOM 보유)로 자동 선별 → (CI적용)/예상가 더미 자동제외.
         cur.execute("""SELECT i.ITEM_CODE, ISNULL(i.ITEM_DESC,''), ISNULL(i.IN_CUST_CODE,''),
               ISNULL(cu.CUST_DESC,''), ISNULL(i.MAKE_TYPE,''), ISNULL(i.ITEM_STATUS,'')
-            FROM PR_M_ITEM i LEFT JOIN CM_M_CUST cu ON cu.CUST_CODE=i.IN_CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=i.IN_CUST_CODE
             WHERE i.ITEM_CODE LIKE ?""", base + '%')
         vs = []
         for ic, nm, cc, cnm, mk, st in cur.fetchall():
@@ -72,10 +72,10 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
         # 각 변형 BOM 자식 set (현재유효 또는 지정일)
         for v in vs:
             if ay:
-                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM CS_M_ITEM_BOM
+                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
                     WHERE ITEM_CODE=? AND FROM_APPLY_YMD<=? AND TO_APPLY_YMD>=?""", v["item"], ay, ay)
             else:
-                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM CS_M_ITEM_BOM
+                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
                     WHERE ITEM_CODE=? AND TO_APPLY_YMD>='260601'""", v["item"])
             ch = cur.fetchall()
             v["_kset"] = frozenset(x[0] for x in ch)
@@ -83,7 +83,7 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
             v["is_self"] = (v["item"] == base)
         prod = [v for v in vs if v["nk"] > 0]  # 실제 생산단(BOM 보유)
         # 사용여부 신호: as-built BOM 트리(현재 실제 투입경로) + 26년 확정입고
-        cur.execute("SELECT ITEM_CODE, MAT_CODE FROM CS_M_ITEM_BOM WHERE TO_APPLY_YMD>='260601'")
+        cur.execute("SELECT ITEM_CODE, MAT_CODE FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE TO_APPLY_YMD>='260601'")
         _ch = {}
         for p, m in cur.fetchall(): _ch.setdefault(p, set()).add(m)
         tree = {base}; stack = [base]
@@ -94,7 +94,7 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
         for v in vs:
             v["in_tree"] = v["item"] in tree
             # ★현행 = 실입고(recv>0). 개발(조달경로 통합검토 subvariant/get)과 동일 기준(동일 쿼리: 태그무관·MAINT_QTY>0·260101~)
-            q = cur.execute("""SELECT ISNULL(SUM(MAINT_QTY),0) FROM PU_T_STOCK_MAINT
+            q = cur.execute("""SELECT ISNULL(SUM(MAINT_QTY),0) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
                 WHERE UPPER(LTRIM(RTRIM(MAT_CODE)))=? AND MAINT_YMD>='260101' AND MAINT_QTY>0""", v["item"].upper()).fetchone()
             v["recv"] = float(q[0] or 0)
             v["used"] = v["recv"] > 0   # 현행=실입고만(개발과 일치). in_tree(BOM경로) 과다판정 제거
@@ -276,12 +276,12 @@ def subvariant_get(base: str = Query(...)):
         mk = {}; nm = {}
         for i in range(0, len(items), 900):
             ch = items[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mk[r[0]] = r[1]; nm[r[0]] = r[2]
         sag = {}
         for i in range(0, len(items), 900):
             ch = items[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"""SELECT LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(MAT_CODE)) FROM CS_M_ITEM_BOM
+            cur.execute(f"""SELECT LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(MAT_CODE)) FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
                 WHERE ITEM_CODE IN ({ph}) AND SAGUB_FLAG='1' AND TO_APPLY_YMD>='260601'""", *ch)
             for r in cur.fetchall(): sag.setdefault(r[0], []).append(r[1])
         # 변형별 실입고(2026, MAINT_QTY>0) — 현행 판정을 플래그 대신 실거래로 (레거시 is_current 오표시 정정)
@@ -291,7 +291,7 @@ def subvariant_get(base: str = Query(...)):
             for i in range(0, len(up), 900):
                 ch = up[i:i+900]; ph = ",".join("?" * len(ch))
                 cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(MAINT_QTY), MAX(MAINT_YMD)
-                    FROM PU_T_STOCK_MAINT WHERE UPPER(LTRIM(RTRIM(MAT_CODE))) IN ({ph})
+                    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT WHERE UPPER(LTRIM(RTRIM(MAT_CODE))) IN ({ph})
                     AND MAINT_YMD>='260101' AND MAINT_QTY>0 GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *ch)
                 for r in cur.fetchall(): recv[r[0]] = {"qty": float(r[1] or 0), "last": str(r[2] or "")}
         except Exception:
@@ -302,7 +302,7 @@ def subvariant_get(base: str = Query(...)):
             allc = sorted({c for lst in rtcode.values() for c in lst})
             for i in range(0, len(allc), 900):
                 ch = allc[i:i+900]; ph = ",".join("?" * len(ch))
-                cur.execute(f"SELECT PROC_CODE, PROC_DESC FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+                cur.execute(f"SELECT PROC_CODE, PROC_DESC FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
                 for r in cur.fetchall(): pname[str(r[0]).strip()] = str(r[1]).strip()
         except Exception:
             pass
@@ -484,9 +484,9 @@ def _route_baseline_lines(item):
               ISNULL(c.CUST_DESC,'') custnm, ISNULL(m.METAL_GUBUN,'') metal,
               ISNULL(m.ITEM_DIAM,0) diam, ISNULL(m.ITEM_THICK,0) thick, ISNULL(m.ITEM_LENGTH,0) len,
               ISNULL(b.BOM_SEQ,0) sq
-            FROM CS_M_ITEM_BOM b
-            LEFT JOIN PR_M_ITEM m ON m.ITEM_CODE=b.MAT_CODE
-            LEFT JOIN CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=b.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
             WHERE b.ITEM_CODE=? AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
               AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
               AND b.MAT_CODE NOT LIKE 'RAC%' ORDER BY b.BOM_SEQ""", item.strip())
@@ -582,7 +582,7 @@ def _custnm_map(cur, codes):
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
     for i in range(0, len(codes), 900):
         ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
         for r in cur.fetchall(): m[str(r[0]).strip()] = r[1]
     return m
 
@@ -964,7 +964,7 @@ def sourcing_pending(item: str = Query(""), gubun: str = Query(""), user: str = 
                 il = list(icodes)
                 for i in range(0, len(il), 900):
                     ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-                    c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+                    c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
                     for r in c2.fetchall(): imap[str(r[0]).strip()] = r[1]
             finally: cn.close()
         for d in rows:
@@ -1036,7 +1036,7 @@ def sourcing_route_detail(route_id: int = Query(...)):
                     lst = sorted(pcodes)
                     for i in range(0, len(lst), 900):
                         ch = lst[i:i + 900]; ph = ",".join("?" * len(ch))
-                        cur2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,'') FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+                        cur2.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
                         for r in cur2.fetchall(): pnames[str(r[0]).strip()] = str(r[1]).strip()
                 finally: cur2.close()
             part_cut = {pt: [{"proc_code": c, "name": pnames.get(c, c), "group": _proc_group_s(c), "wq": w}
@@ -1094,7 +1094,7 @@ def sourcing_sub_create(payload: dict = Body(...)):
             rowsn = [str(r[0]).strip() for r in cur.fetchall()]
             try:
                 lc = _conn(); lcur = lc.cursor()
-                lcur.execute("SELECT ITEM_CODE FROM PR_M_ITEM WHERE ITEM_CODE LIKE ? ESCAPE '!'", base_child + '!_S%')
+                lcur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE LIKE ? ESCAPE '!'", base_child + '!_S%')
                 rowsn += [str(r[0]).strip() for r in lcur.fetchall()]; lc.close()
             except Exception: pass
             for cd in rowsn:
@@ -1822,11 +1822,11 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
     try:
         cur.execute("""WITH tree AS (
             SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, 1 lvl
-            FROM CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
             UNION ALL
             SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), t.lvl+1
-            FROM tree t JOIN CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
-            JOIN PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
             SELECT c, SUM(q) qty FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
         agg = {str(r[0]).strip(): float(r[1] or 0) for r in cur.fetchall()}
@@ -1838,7 +1838,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
             cur.execute(f"""SELECT LTRIM(RTRIM(m.ITEM_CODE)), ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''), ISNULL(m.MAKE_TYPE,''),
                   ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,'')
-                FROM PR_M_ITEM m LEFT JOIN CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
                 WHERE m.ITEM_CODE IN ({ph})""", *ch)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "mk": str(r[3]).strip(), "cust": str(r[4]).strip(), "custnm": r[5]}
@@ -1849,7 +1849,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         mk1 = [c for c in codes if info.get(c, {}).get("mk", "") == "1"]
         for i in range(0, len(mk1), 900):
             ch = mk1[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM CS_M_ITEM_BOM
+            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
                 WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
                   AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
             for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())
@@ -1861,7 +1861,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
                 SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr, ISNULL(CUST_CODE,'') cust,
                   ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)) ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC) rn
-                FROM PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=? AND LTRIM(RTRIM(ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=? AND LTRIM(RTRIM(ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
             for r in cur.fetchall():
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
     finally:
@@ -2140,7 +2140,7 @@ def _route_proc_names(codes):
     try:
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,'') FROM CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT PROC_CODE, ISNULL(PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): out[str(r[0]).strip()] = str(r[1]).strip()
     finally:
         cn.close()

@@ -40,11 +40,11 @@ def gagong_prog420(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
         gpcs = [x for x in {str(r.get('gagong_proc_code') or '') for r in sp} if x]; gpn = {}
         for i in range(0, len(allitems), 1000):
             ck = allitems[i:i + 1000]; ph = ",".join("?" * len(ck))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ck)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ck)
             for a, b in cur.fetchall(): nm[a] = b
         if gpcs:
             ph = ",".join("?" * len(gpcs))
-            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
+            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
             for a, b in cur.fetchall(): gpn[a] = b
         rows = []
         for r in sp:
@@ -135,7 +135,7 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         codes = [g["assy"] for g in rows]; nm = {}
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; qm = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE ITEM_CODE IN ({qm})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({qm})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         # 자도번LIST = f_find_cust_mat_list2 재현(함수 EXECUTE 거부) — SP CTE_BOM 로직으로 도번의 mat_work_code(P2)자재 BOM전개
         jadomap = {}
@@ -149,12 +149,12 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
                 CTE_BOM AS (
                   SELECT CONVERT(int,1) level_no, CONVERT(varchar(50),s.item_code) item_code, CONVERT(varchar(50),s.item_code) mat_code,
                      CONVERT(decimal(18,5),1) cum_use_qty, CONVERT(varchar(20),CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust_code END) mwc
-                  FROM SEED s JOIN pr_m_item c ON c.item_code=s.item_code
+                  FROM SEED s JOIN PARTNER_ERP_TEST3.nx.pr_m_item c ON c.item_code=s.item_code
                   UNION ALL
                   SELECT cb.level_no+1, cb.item_code, CONVERT(varchar(50),b.mat_code),
                      CONVERT(decimal(18,5), cb.cum_use_qty*b.use_qty),
                      CONVERT(varchar(20),CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END)
-                  FROM CTE_BOM cb JOIN pr_m_item_bom b ON cb.mat_code=b.item_code JOIN pr_m_item m ON b.mat_code=m.item_code
+                  FROM CTE_BOM cb JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom b ON cb.mat_code=b.item_code JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON b.mat_code=m.item_code
                   WHERE ISNULL(b.EXCEPT_FLAG,'0')='0' AND cb.level_no<10 )
                 SELECT item_code, mat_code, SUM(CONVERT(float,cum_use_qty)) q
                 FROM CTE_BOM WHERE mwc=? AND level_no>1 GROUP BY item_code, mat_code
@@ -167,18 +167,18 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         # 소스: 라이브 직독(SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL + 중간재고롤업 kitting캐시). 도번(=ITEM_CODE) 단위 합산.
         assystk = {}; rstock = {}; saled = {}; midstk = {}; fixstk = {}
         try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): assystk[str(rr[0]).strip()] = float(rr[1] or 0)
         except Exception: pass
         try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): rstock[str(rr[0]).strip()] = float(rr[1] or 0)
         except Exception: pass
         try:  # 출하는 ★계획 WO로 제한(키팅과 동일, 무관 WO 출하 과다합산 방지). 키=(wo,swo,item)
             _pwos = list({wo for g in rows for (wo, sw) in g["_wos"]})
             for i in range(0, len(_pwos), 900):
                 ck = _pwos[i:i+900]; ph = ",".join("?" * len(ck))
-                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(str(rr[0]).strip(), str(rr[1] or '').strip(), str(rr[2]).strip())] = float(rr[3] or 0)
         except Exception: pass
         try:  # 중간공정 자재/생산재고 롤업 = kitting_grid 캐시 재사용, 없으면 자체계산(전역·필터무관, 색tag70용)
@@ -188,14 +188,14 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
                 cur.execute("""
                     ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
                         SELECT s.mat_code, s.mat_code, s.mat_code, CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
-                          FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM pr_t_mat_stock_wh WITH(NOLOCK)
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                          FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK)
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
                          GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
                         UNION ALL
                         SELECT cb.item_code, b.item_code, b.mat_code, 0, 0, CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
-                          FROM T_SUB_CTE cb JOIN pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
+                          FROM T_SUB_CTE cb JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
                     )
                     SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms4 FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
                 _mid = {}; _fix = {}
@@ -262,11 +262,11 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
                   ISNULL(p.S_WORK_CODE,'') swork, ISNULL(ws.WORK_DESC,'') sworknm,
                   ISNULL(p.MACH_CODE,'') mach, ISNULL(mm.MACH_DESC,'') machnm,
                   ISNULL(p.PROD_QTY,0) doneq, ic2.WORK_QTY proc_cnt, ic2.STD_SIZE std
-                FROM PR_T_PROD_DTL_GAGONG p
-                LEFT JOIN PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=p.GAGONG_PROC_CODE
-                LEFT JOIN PR_M_WORK_SINGLE ws ON ws.S_WORK_CODE=p.S_WORK_CODE
-                LEFT JOIN QA_M_MACHINE mm ON mm.MACH_CODE=p.MACH_CODE
-                LEFT JOIN PR_T_INDI_CUTTING_PROC_GAGONG ic2 ON ic2.BOX_NO=p.BOX_NO
+                FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL_GAGONG p
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=p.GAGONG_PROC_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE ws ON ws.S_WORK_CODE=p.S_WORK_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE mm ON mm.MACH_CODE=p.MACH_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING_PROC_GAGONG ic2 ON ic2.BOX_NO=p.BOX_NO
                      AND ISNULL(ic2.S_WORK_CODE,'')=ISNULL(p.S_WORK_CODE,'') AND ic2.PROC_SEQ=p.PROC_SEQ
                 WHERE p.BOX_NO=?
                 ORDER BY p.PROC_SEQ, p.PROD_SEQ""", box_no.strip())
@@ -298,18 +298,18 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
               COALESCE(NULLIF(iac.CUST_DESC,''), iaw.WORK_DESC, '') dobanwc,
               COALESCE(wh.GAGONG_PROC_DESC, ic.WH_GAGONG_PROC_CODE, '') inwh,
               CONVERT(varchar(19), ic.PRINT_DATETIME, 120) prt, ISNULL(pn.proc_n,0) proc_n
-            FROM PR_T_INDI_CUTTING ic
-            LEFT JOIN PR_M_ITEM ma ON ma.ITEM_CODE=ic.MAT_CODE
-            LEFT JOIN CM_M_CUST mac ON mac.CUST_CODE=ma.IN_CUST_CODE
-            LEFT JOIN PR_M_WORK maw ON maw.WORK_CODE=ma.WORK_CODE
-            LEFT JOIN PR_M_ITEM ia ON ia.ITEM_CODE=ic.ITEM_CODE
-            LEFT JOIN CM_M_CUST iac ON iac.CUST_CODE=ia.IN_CUST_CODE
-            LEFT JOIN PR_M_WORK iaw ON iaw.WORK_CODE=ia.WORK_CODE
-            LEFT JOIN PR_M_ITEM aa ON aa.ITEM_CODE=ic.ASSY_ITEM_CODE
-            LEFT JOIN CM_M_CUST aac ON aac.CUST_CODE=aa.IN_CUST_CODE
-            LEFT JOIN PR_M_WORK aaw ON aaw.WORK_CODE=aa.WORK_CODE
-            LEFT JOIN PR_M_PROC_GAGONG wh ON wh.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
-            LEFT JOIN (SELECT BOX_NO, COUNT(*) proc_n FROM PR_T_INDI_CUTTING_PROC_GAGONG GROUP BY BOX_NO) pn ON pn.BOX_NO=ic.BOX_NO
+            FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING ic
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ma ON ma.ITEM_CODE=ic.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST mac ON mac.CUST_CODE=ma.IN_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK maw ON maw.WORK_CODE=ma.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ia ON ia.ITEM_CODE=ic.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST iac ON iac.CUST_CODE=ia.IN_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK iaw ON iaw.WORK_CODE=ia.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM aa ON aa.ITEM_CODE=ic.ASSY_ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST aac ON aac.CUST_CODE=aa.IN_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK aaw ON aaw.WORK_CODE=aa.WORK_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG wh ON wh.GAGONG_PROC_CODE=ic.WH_GAGONG_PROC_CODE
+            LEFT JOIN (SELECT BOX_NO, COUNT(*) proc_n FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING_PROC_GAGONG GROUP BY BOX_NO) pn ON pn.BOX_NO=ic.BOX_NO
             WHERE {' AND '.join(w)}
             ORDER BY ic.BOX_NO DESC""", *p)
         cols = [d[0] for d in cur.description]
