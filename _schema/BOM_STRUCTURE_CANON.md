@@ -83,9 +83,43 @@ BOM: 품목 BOM관리·조달후보 통합검토·품목별 공정관리 / 재�
 
 ---
 
-## 7. 코드/테이블 지도 (진행 중 스캔으로 보강 예정)
+## 7. 코드/테이블 지도 (실측 스캔 2026-08-12)
 
-> 조달후보 통합검토 엔드포인트(route/copy·detail·cost·sub/create·dissolve·part/assign·proc/node_save·finalize·current_order·sub_price/sagub_price), 품목 BOM관리(bom/tree·cost/*), set입고 흐름, screens.dev.js 호출 순서를 파일:라인으로 채운다. (Explore 스캔 결과 반영)
+### 7-A. 조달후보 통합검토 = `backend/routers/sourcing.py` (2406줄, "route 기반 재설계" `:382`)
+| 엔드포인트 | :라인 | 역할 |
+|---|---|---|
+| `GET routes` | 589 | 후보목록. **경로1=현행 baseline(실사용 BOM 파생·읽기전용) 합성 포함**, next_route_no 채번미리보기 |
+| `POST route/copy` | 690 | 후보 생성. source=`blank`/`base`(BASE 평면seed)/`source_item`/`source_route_id`. `copy_children=1`→하위 `-S{route_no}` 신규채번→nx.item |
+| `POST route/save·delete·approve·reject` | 656·782·815·1957 | 헤더 CRUD·삭제가드(current_flag/profile매핑시 거부)·승인토글(route_seq bump)·반려 |
+| `POST line/save·delete`·`child/new` | 856·892·911 | 라인 CRUD(baseline 편집불가), 하위품번 채번 |
+| **`POST sub/create`** | **1076** | **SUB 생성·채번 `_S{nn}`**(언더스코어 제로패딩2, nx.item+PR_M_ITEM `LIKE base_S%` 최대+1 충돌회피). node_kind=SUB·sub_item·qty1, 선택부품 parent_line=SUB |
+| `POST sub/dissolve`·`part/assign` | 1124·1157 | SUB해제(공수합 보존 이관)·부품 드래그(SUB↔평면) |
+| `GET sub/match` | 2025 | SUB 중복검사(부품셋+공정 일치→기존코드 재사용) |
+| `POST proc/save`·`proc/node_save`·`weld/save` | 1184·1991·1918 | 공정 전체교체(BASE 공수합 게이트)·노드스코프 저장·용접점(nx.sourcing_route_weld, loss1.5) |
+| **`GET route/cost`** | **2149** | **★R01 vs R02 손익**: `eng.silwon`(마스터 diff0앵커) + 외주SUB(gubun 외주/사급) ASSY매입단가 **배분%가중평균**(:2205-2244) 치환→jae/silwon/sonik 이동. ASSY미입력=diff0 |
+| **`POST route/finalize`** | **2054** | 3게이트: SUB재사용(reuse_map)→공수합=BASE diff0→부품수=BASE |
+| `GET/POST sub_price·sagub_price` | 1736·1666 | ASSY매입단가(외주SUB·업체별)·사급부품가(SUB하위 매입부품, 공통+예외) → nx.item_price |
+| `GET/POST current_order` | 1814·1895 | **R01 발주근거**: 현행BOM 리프(maker_parents제외)별 발주업체(nx.order_vendor)·매입단가(PR_M_ITEM_COST 읽기전용) |
+| `profile/list·save`·`route/alloc·save` | 1248·2321 | 후보내 업체배분(sourcing_profile)·후보간 배분(route_alloc) |
+| `nx.item_price` 헬퍼 | 1495 | 통합단가 PK(item,vendor,gubun,apply_ym), `_asof_prices` ROW_NUMBER as-of |
+
+### 7-B. 품목 BOM관리 = `bom.py` + `cost.py`
+- **`GET bom/tree`** `bom.py:199` — `CS_M_ITEM_BOM` 재귀(real=1=실사용, MAKE_TYPE 1만 하위전개·매입중단). **`route_id>0`→`_bom_tree_route`(:142)가 nx.sourcing_route_line 계층을 동일 트리 스키마로**(마스터 미조회), `route_id=0`=마스터 불변. **route를 ASSY서 끌어오는 유일 구조 파라미터.**
+- `GET cost/nae`(내부원가) `cost.py:122`·`cost/sil`(실원가) `:71` — **route_id 없음(마스터 전용).** route 손익은 §7-A route/cost만.
+
+### 7-C. ★set입고(협력사 SUB 한번에 입고) = `setin.py`
+- 테이블: **`nx.set_input_req`**(헤더: sheet_no·item_code=도번·in_cust_code=협력사·barcode_no SET바코드·status) + **`nx.set_input_req_dtl`**(자도번 명세: mat_code=자도번·use_qty) + **`nx.set_stock_maint`**(입고실적).
+- **`POST setstock/receive`** `:174` — SET바코드 스캔→set_stock_maint 기록. **입고완료(status 90)분: set_input_req_dtl 각 자도번을 `qty×use_qty`로 `nx.stock_ledger` INSERT**(STOCK_POINT='MAT'·MAINT_TAG='S'·SET_MAINT_YMD/SEQ 역추적). → **협력사 SUB 한 SET 스캔=하위 자도번들 한꺼번에 원장 입고.** `setin/issue`(:55 바코드 500000~)·`invoice`(:95).
+- ※ **`set_profile` 테이블 없음**(내 초안 오류). 자도번=현 set입고 grain, `_S{nn}`↔자도번 매핑이 융합 과제.
+
+### 7-D. 프론트 `js/screens.dev.js`
+- **SCREEN.unifybom**(:972) 3탭: BOM구성(bom/search→get→tree)·내부원가(cost/nae→cost/proc/get)·실원가(cost/sil). route연동(:984-1000): `routes?for_profile=1`→`bom/tree?route_id`+`route/cost?route_id`.
+- **SCREEN.subvariant**(:1748): cost/nae(상단 재료평면)→routes(하단 후보)→route/detail→copy/save→part/assign·sub/create·dissolve→cost/proc/get→weld/save+proc/node_save→sub/match→route/finalize→profile/save→approve.
+- ※ `/api/subvariant/*`·`/api/procgroup/*`는 존재하나 현 흐름 미호출(sub_variant_map 기반 이전 이터레이션 잔존).
+
+### 7-E. 주의(정정)
+- **`nx.bom`(jadoban)은 테이블로 존재**하나 **BOM관리 화면은 라이브 `CS_M_ITEM_BOM`을 읽음**(nx.bom=LG기반 통합BOM, 별개). route트리만 nx.sourcing_route_line.
+- 재고 원장 `nx.stock_ledger`는 CLAUDE.md 절대규칙(태그 대량삭제 금지) 대상. "실입고140"은 레거시 프로그램번호(코드엔 setin/setstock).
 
 ---
 
