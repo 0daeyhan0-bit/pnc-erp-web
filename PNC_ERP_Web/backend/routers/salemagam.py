@@ -217,7 +217,7 @@ def salemagam_weight_quote(ym: str = Query("")):
     except Exception as e:
         raise HTTPException(500, f"LME 정산 계산 오류: {e}")
     ven = {'2142': '세광산업', '233': '썬텍코리아', '2148': '대원산업', '2096': '미래정밀',
-           '2306': '명진산업', '2068': '이젠터', '2266': '케이비', '2048': '중앙정밀'}
+           '2306': '명진산업', '2068': '이젠터', '2266': '케이비', '2048': '중앙정밀', '2250': '수테크'}
     rows = []
     for cc, d in data.items():
         rows.append({"cc": cc, "nm": ven.get(cc, cc), "raw_out": d["raw_out"], "raw_in": d["raw_in"],
