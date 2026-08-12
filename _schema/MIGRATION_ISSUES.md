@@ -237,3 +237,11 @@ JAI_COST = (COST_GUBUN='3' ? WON_MAT_COST×ITEM_WEIGHT×USE_QTY   -- 원소재(�
 - 나머지 자동: 태국F&T/은납/체결/고주파/저압=품명 route · IN_CUST 있으면 그 업체 · 사내/매입=mk.
 - ⚠드래프트 = nx 쓰기 전. `4H00049A-1` 결정 후 nx.sub_alias 적재 + nx.item 내부SUB 등록(구조 1,203 + 리프 route + 공용 139 pool).
 
+### G-11. ★★nx.sub_alias 적재 완료 = SUB 정규화 100% (2026-08-12, r_load_alias/resolve25/dissolve8.py)
+- **nx.sub_alias 테이블 적재**(자도번→품번_S{nn}·real_base·category·route·vendor·sig). 총 1,854행. **route 미상 0**.
+- category: **SUB 1,062 + SUB_SHARED 396 → 운영 정규SUB 코드 1,196**(공용 pool 139) · LEAF 364(단품흡수) · **DISSOLVED 8**(미운영 해체=하위 단품 운영) · STUB 24(공정스테이지 사내).
+- route: 외주 972 · 사내 865 · 매입 8 · **단품 8** · 태국 1.
+- route해소 규칙: IN_CUST → 그 업체 / 품명 업체명(대원2148·이젠터2068 등, CM_M_CUST.CUST_DESC 매칭) / 코드·품명 사내공정(은납·저압·고압·고주파) → 사내 / mk1사내·mk3매입 / 4H00049A-1=사내(자작, 과거 두진2012). 
+- **★DISSOLVED(미운영 SUB)**: 예전 SUB 운영했으나 지금은 SUB 안만들고 하위품번 단품 수령(사용자 확정). R01 재구축시 **해체→하위 단품 전개**. 8건(AJR77263008-SUB·엠케이SUB 등).
+- **다음 = 정규화된 SUB로 R01 재구축**(기존 R01은 SUB 미정리 자도번 상태로 로딩됨 → 재구축). SUB=`품번_S{nn}` 참조, DISSOLVED=해체, LEAF=단품.
+
