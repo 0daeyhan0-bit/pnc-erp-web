@@ -45,6 +45,16 @@
 
 ## 4. 진행 로그
 - **Phase R1 완료 (2026-08-12, r_phase_r1.py)**: ①`nx.item ADD item_source nvarchar(20)`(멱등) ②테스트 잔재 `AJR75563402_S01~_S06` 삭제(참조0 확인)·**`_S07` 보존(R02 실사용)** ③정규 SUB **1,196개** 등록(item_source='NORM_SUB', item_type='반제품', make_type=route기반 사내1/외주2, 새 LG품번 0). 검증 NORM_SUB=1,196. **DISSOLVED 8은 미등록(해체 대상)**.
-- **Phase R2 대기**: R01 BOM 구조 빌드 — ★저장 대상 결정 필요(nx.bom 단일정본 권고 vs R01 route). 현행 활성 BOM → 정규SUB 치환·DISSOLVED 해체·공용 1 pool → diff0 검증.
+- **Phase R2 파일럿 10건 (2026-08-12, r_pilot_r01.py)** — 다양 케이스 R01 route 빌드(sourcing_route note='PILOT_R01'). **8/10 리프 일치**. 자도번→정규SUB·DISSOLVED해체·다단계 재귀 동작 확인.
+
+## 5. ★Phase R2 파일럿 수집 이슈 (스케일 전 해소)
+| # | 이슈 | 케이스 | 처리 방향 |
+|---|---|---|---|
+| **I1** | **실품번 sub-assembly 그레인** — 자도번 아닌 실품번 sub(`AJR74482401`, 자체 BOM보유)를 R01에서 리프노드로 둘지 평면화할지. 리프셋 검증이 그레인 민감. | AJR30012101 | **결정필요**: 노드유지(자체 R01 참조, 다단계)가 설계정합. ★**진짜 게이트=원가 diff0**(리프셋 아님). |
+| **I2** | **용접/은납 자재 필터 누락** — RAC 접두사만 제외했으나 **BCUP(은납재)·`+용접링`은 RAC 아님** → BOM에 남음. | AJR77263008 | [[newerp-weld-cost-split]]대로 용접봉/은납/용접링=공정종속(BOM제외) 판정 확장(RAC*·BCUP*·%용접링%·3H008*·Solder). |
+| I3 | DISSOLVED 해체 정상(AJR77263008-SUB→하위단품 1건) | AJR77263008 | OK(정상) |
+- **검증 게이트 정정**: 리프셋 일치는 그레인 민감(실품번 sub 평면화 차이) → **원가 diff0(nx_cost_engine 오라클)를 R2 정본 게이트로**. 파일럿에 diff0 추가 예정.
+- 스케일 전 = I1 그레인 결정 + I2 필터 확장 + 원가 diff0 검증 붙이고 재파일럿.
+- 정리대상 = PILOT_R01 route(note='PILOT_R01') — 로직 확정 후 전 제품 재빌드 시 교체.
 
 ## 관련: [[BOM_STRUCTURE_CANON]] [[MIGRATION_ISSUES]] [[NX_BOM_SCHEMA]] [[SOURCING_COST_INTEGRATION]]
