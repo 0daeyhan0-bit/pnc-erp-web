@@ -311,7 +311,8 @@ class NxCostEngine:
     def _value_node(self, node, q, ymd, ymcut, seen):
         """노드 1개 재료비 기여. 사내+자식→전개, 그외(구매/외주완성/원소재)→매말단 계상."""
         info=self._load_item(node)
-        if info['cost_gubun']!='3' and self._expandable(node, info, seen):
+        # ★cg3fix(2026-08-12, 승인): 레거시 SP는 make_type='1'(제작)이면 전개(cg 무관). cg='3'인 제작SUB(원소재단가 표시)도 전개해야 함(AJR74482401 등 22SUB·60제품).
+        if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(node, info, seen):
             return sum(self._value_node(c, qty*q, ymd, ymcut, seen|{node}) for c,qty,cx,f,t,lx in self.lines(node) if not cx)
         return self._leaf_val(node, info, q, ymd, ymcut)
 
@@ -376,7 +377,7 @@ class NxCostEngine:
            원소재(cost_gubun='3' & 사내)만 소재단가×중량. LME=(std−partner)×중량(구매 동부품)."""
         ymcut='20'+ymd[:4]
         info=self._load_item(item)
-        if info['cost_gubun']!='3' and self._expandable(item, info, set()):
+        if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(item, info, set()):   # ★cg3fix
             base=sum(self._value_node(c, qty*mult, ymd, ymcut, {item}) for c,qty,cx,f,t,lx in self.lines(item) if not cx)
         else:
             base=self._leaf_val(item, info, mult, ymd, ymcut)
@@ -409,7 +410,7 @@ class NxCostEngine:
         def walk(node, cum_q, cum_ea, lvl, parent, seen):
             info=self._load_item(node); cg=info['cost_gubun']
             inner=self._inner_prod(info)
-            exp=(cg!='3') and bool(self._expandable(node,info,seen))   # 사내생산 & 자식 → 전개
+            exp=(cg!='3' or info['make_type']=='1') and bool(self._expandable(node,info,seen))   # ★cg3fix: 제작SUB(cg3)도 전개
             if exp:
                 won=0.0; mat=0.0
             elif inner and cg=='3':
