@@ -55,7 +55,10 @@ for i, it in enumerate(items):
         if 'jae' in diffs: jae_gap.append((it, diffs['jae']['d']))
     else: npass+=1
     if (i+1)%25==0: print(f"  ...{i+1}/{len(items)} (pass {npass} fail {nfail} err {nerr})")
-eng.close(); ocn.close()
+try: eng.close()
+except Exception: pass
+try: ocn.close()
+except Exception: pass
 json.dump(res, open(os.path.join(os.path.dirname(__file__), f'rebaseline_{YMD}.json'),'w',encoding='utf-8'), ensure_ascii=False, indent=1)
 tot=len(items)
 print(f"\n=== 엔진 vs 라이브 레거시 SP ({YMD}) ===")
