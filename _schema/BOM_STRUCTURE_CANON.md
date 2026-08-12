@@ -135,28 +135,32 @@ BOM: 품목 BOM관리·조달후보 통합검토·품목별 공정관리 / 재�
 - `nx.bom` child: 자도번0·_S{nn}0 = **평면**(SUB는 소비단위 아님).
 - → 현재 SUB 재고/입고=자도번, 우리 `_S{nn}`=조달후보 구조 → **분리 상태. 융합=하나로.**
 
-### 9-2. 융합 모델: 정본 SUB 재고 식별자 = `품번_S{nn}` + ROUTE_ID
-- **재고점 = (ITEM_CODE=`품번_S{nn}`, ROUTE_ID=공급원, STOCK_POINT=반제품).**
-- 자도번은 정본 아님 — vendor를 코드에 박아 **정체성+공급원 혼재**(-16-2=케이비). 우리 모델은 `_S{nn}`(정체성)+ROUTE_ID(공급원) **분리**(접미사 폭발 제거).
-- **신규 자산 = alias `nx.sub_alias`**: (자도번 → base·`품번_S{nn}`·route_id·vendor). 이관+set입고 re-key의 단일 지점.
+### 9-2. ★확정 모델: SUB = 마스터의 내부 품목 `품번_S{nn}` (공유 반제품)
+- **SUB = `품번_S{nn}`**(예 `AJR30012101_S01`) — **품번 마스터(nx.item)에 등록하되 `is_lg=0`/`item_source='INTERNAL_SUB'` 플래그로 LG와 구분** → **새 LG 품번 0**(LG 넘버링 공간 오염 없음, 마스터는 LG 동기화 없음 확인됨 2026-08-12).
+- **AJR74482401식 공유 반제품** — 자체 재고 pool·BOM·routing. 특별관리 아님(하드룰8: 전품목 균일 원장 그대로 흐름).
+- **재고점 = (ITEM_CODE=`품번_S{nn}`, ROUTE_ID=공급원, STOCK_POINT).** ROUTE_ID로 공급원 분리(정체성과 vendor 분리). 협력사 SUB 입고 = (`품번_S{nn}`, route, cust).
+- **공용 = LG 버전 01~08이 같은 `품번_S{nn}`을 BOM 자식으로 참조 → 한 서브·8군데·재고 1 pool.** (버전별 복제 아님)
+- 자도번은 정본 아님(vendor 혼재) → **정규형 `품번_S{nn}`으로 이관**.
+- **신규 자산 = alias `nx.sub_alias`**: (자도번 → `품번_S{nn}`·route_id·vendor). 같은 부품셋 자도번들(다른 vendor)을 한 `_S{nn}`으로 접고 vendor→ROUTE. 이관+set입고 re-key(추후)의 단일 지점.
 
-### 9-3. 3결선 (set입고 최소변경)
-1. **SUB 재고 승격**: `품번_S{nn}` nx.item 등록(반제품) + stock_ledger ITEM_CODE 사용.
-2. **자도번↔`_S{nn}` 매핑**: nx.sub_alias. 초안=sub_variant_map(변형→struct)+nx.bom.jadoban, 확정=조달후보 `_S{nn}`.
-3. **route 관통**: `setstock/receive`(setin.py:174)가 자도번 입고 시 alias로 (`_S{nn}`,ROUTE_ID) 해석→원장 stamp. **협력사 화면(set_input_req_dtl)은 자도번 유지(최소변경), 원장만 정본 코드.** 이후 kitting/백플러시/마감/손익이 (`_S{nn}`,ROUTE_ID) 공유.
+### 9-3. 3결선
+1. **SUB 마스터 등록**: `품번_S{nn}`을 nx.item에 **내부 SUB 플래그**(is_lg=0)로 등록(반제품). 자체 BOM(하위부품)·routing 보유. LG 버전들이 BOM 자식으로 참조.
+2. **자도번↔`_S{nn}` 매핑**: nx.sub_alias. 초안=sub_variant_map(변형→struct)+nx.bom.jadoban, 확정=조달후보 `_S{nn}`. 공유도>1이면 여러 버전이 같은 `_S{nn}` 참조.
+3. **재고 route 관통**: stock_ledger에 `품번_S{nn}` + ROUTE_ID로 입고/소비. kitting/백플러시/마감/손익이 (`품번_S{nn}`, ROUTE_ID) 공유. **set입고 re-key(setstock/receive 자도번→`_S{nn}`)는 추후**(협력사 화면 무변경).
 
-### 9-4. ★확정 (사용자 2026-08-12)
-1. **정본 SUB 재고 식별자 = `_S{nn}` + ROUTE_ID (자도번 아님).** 확정(분리 동의). 자도번은 정규화 대상.
-2. **공유 SUB = 독립 품번 승격 (나).** 확정. → **전용 SUB=`품번_S{nn}`(상위종속) / 공용 SUB=독립 품번**(AJR74482401식, 여러 상위 공유). 전용→공용 전환 시 독립 품번 승격.
-3. **SET 입고 re-key = 추후 구현.** 확정. 이번 스코프에서 `setstock/receive`·협력사 화면(set_input_req_dtl) **무변경**. 자도번↔`_S{nn}` alias는 만들되 원장 re-key 결선은 나중.
+### 9-4. ★확정 결정 (사용자 2026-08-12)
+1. **정본 SUB = `품번_S{nn}` + ROUTE_ID.** vendor는 코드서 빼 ROUTE로(자도번 정규화). 자도번=정본 아님.
+2. **`품번_S{nn}` = 품번 마스터에 등록(내부 SUB 플래그, LG 아님) → 새 LG 품번 0.** 마스터 LG 동기화 없음 확인. "독립 품번 승격/전용·공용 2종류" 폐기 — **SUB 한 종류(`품번_S{nn}`), 공유는 참조**.
+3. **공용 = 여러 LG 버전이 같은 `품번_S{nn}` 참조 = 재고 1 pool**(AJR74482401식). 버전별 복제 아님.
+4. **SET 입고 re-key = 추후.** 이번 스코프 `setstock/receive`·협력사 화면 무변경.
 
-### 9-5. ★"기존 서브 불러오기" (신규 기능 — 공용 SUB 재사용)
-- 공용 SUB(독립 품번)를 **A·B 어느 제품 route에든 끌어와 붙이는** 명시적 기능. 조달후보 통합검토(SCREEN.subvariant)에 추가.
+### 9-5. ★"기존 서브 불러오기" (신규 기능 — 공용 SUB 참조)
+- 이미 만든 공유 `품번_S{nn}`을 **다른 LG 버전(01~08 등) route/BOM에 검색해 참조 첨부**하는 명시 기능. 조달후보 통합검토(SCREEN.subvariant)에 추가.
 - 현재는 저장 시 `sub/match`(부품셋+공정 일치) **자동 dedup**만 존재 → **명시적 "공용 SUB 라이브러리 검색·첨부"** 신규.
-- SUB이 A와 B에서 공용이면 **재고·BOM·routing 1벌**(독립 품번), 각 상위는 참조만.
+- 참조라 **재고·BOM·routing 1벌**(그 `품번_S{nn}`), 각 버전은 자식으로 참조만.
 
 ### 9-6. 이번 융합 스코프 (set입고 제외)
-①SUB 정체성 모델(전용 `_S{nn}` / 공용 독립품번) → ②자도번↔`_S{nn}` 정규화 매핑 `nx.sub_alias`(공유도>1=독립품번 후보) → ③조달후보 "기존 서브 불러오기" 기능. **set입고 원장 re-key는 후속**(9-3의 route 관통 中 setstock/receive 부분 지연).
+①`품번_S{nn}` 마스터 내부SUB 등록 모델 → ②자도번↔`_S{nn}` 정규화 매핑 `nx.sub_alias`(공유도>1=버전 공유) → ③조달후보 "기존 서브 불러오기". **set입고 원장 re-key(setstock/receive)는 후속.** `sub/create`의 nx.item 등록은 내부SUB 플래그 부여로 정리(기존 7건 점검).
 
 ---
 
