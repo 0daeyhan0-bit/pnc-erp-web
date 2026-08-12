@@ -193,3 +193,13 @@ JAI_COST = (COST_GUBUN='3' ? WON_MAT_COST×ITEM_WEIGHT×USE_QTY   -- 원소재(�
 - **★사내133 규명**: 76/133이 라우팅(63)·치수(13) 보유 = **성형품("사내 컷팅만" diam9.52)·라우팅 있는 사내SUB = 정상**(결손 아님). 구조 없는 사내 성형품은 리프 흡수(base+ROUTE 사내).
 - 미해결 결정: ①리프변형 흡수 규칙 확정(구조없는 매입/외주/성형 → base+ROUTE) ②공용197 = 버전공유 pool 확정 ③**★프로그램별 BOM 소스 불일치 감사**(사용자 걱정: 단일 BOM 미준수) → 단일 BOM 통일계획.
 
+### G-6. ★정규화 매핑 확정 드래프트 (2026-08-12, PR 기준, scratchpad/r_norm_final.py → sub_alias_draft.csv = nx.sub_alias 초안)
+- **2,398 변형 → 카테고리 분류·정규 SUB 1,479코드**:
+  - **SUB(전용 구조) 1,385** + **SUB_SHARED(공용 구조) 612** → 정규 `품번_S{nn}` (공용 collapse로 1,479 유니크).
+  - **LEAF_ROUTE(구조없는 조달변형) 382** → `_S{nn}` 아님, **base+ROUTE(vendor) 흡수**.
+  - **STUB(오염) 19** → 담당 정리.
+- **★공용 pool 실증(사용자 "버전 공유" 모델 확인)**: `AJR30012009_S01` = **15개 LG 버전(AJR30012009·010·011·012…) 공유 = 재고 1 pool**. 그외 AJR74844308_S01(12)·AJR77224501_S20(11). **공용 197 SUB가 여러 버전 참조** → 승인 후 nx.item 1건·BOM 자식참조 다수.
+- **공용 canonical 규약**: signature(부품셋 정확일치) owner=min(base)의 로컬 `_S{nn}` → 나머지 버전이 그 코드 참조.
+- **남은 규명**: ①LEAF_ROUTE 중 **vendor 미상 213**(코드엔 `-DONGJOO`=동주 등 있으나 IN_CUST 공백, `-1` 사내컷팅류=route 사내) → vendor 파싱/담당 ②STUB 19 텍스트오염.
+- ⚠아직 **드래프트(CSV)** — nx 쓰기 전. 승인 후 nx.sub_alias 적재 + nx.item 내부SUB 등록.
+
