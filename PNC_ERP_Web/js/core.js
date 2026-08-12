@@ -1198,7 +1198,7 @@ const _mkMagam=(CFG)=>(c)=>{
   const load=async(y)=>{loading=true;msg='';draw();
     try{const r=await fetch(`${API}/api/${CFG.base}/list?ym=${encodeURIComponent(y||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();rows=j.rows||[];ym=j.ym||y||'';
-      if(CFG.weight){try{const rw=await fetch(`${API}/api/${CFG.base}/weight_quote?ym=${encodeURIComponent(ym)}`);const jw=await rw.json();wmap={};(jw.rows||[]).forEach(w=>{wmap[w.cc]={raw_out:w.raw_out,raw_in:w.raw_in,raw_diff:w.raw_diff,raw_amt:w.settle_amt,specs:w.specs,unmapped_out:w.unmapped_out};});}catch(e){wmap={};}}}
+      if(CFG.weight){try{const rw=await fetch(`${API}/api/${CFG.base}/weight_quote?ym=${encodeURIComponent(ym)}`);const jw=await rw.json();wmap={};(jw.rows||[]).forEach(w=>{wmap[w.cc]={raw_out:w.raw_out,raw_in:w.raw_in,raw_diff:w.raw_diff,raw_amt:w.settle_amt,weld_out:w.weld_out,weld_in:w.weld_in,weld_diff:w.weld_diff,weld_amt:w.weld_amt,specs:w.specs,unmapped_out:w.unmapped_out};});}catch(e){wmap={};}}}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];}
     loading=false;draw();};
   const ensureReasons=async()=>{if(reasons.length)return;try{const r=await fetch(`${API}/api/salemagam/reasons`);reasons=(await r.json()).rows||[];}catch(e){}};
@@ -1245,7 +1245,7 @@ const _mkMagam=(CFG)=>(c)=>{
     c.innerHTML=`
      <div class="page-title">${CFG.title} <span style="font-size:12px;color:var(--muted);font-weight:400">${CFG.sub} · 거래처별 마감 · nx 저장</span></div>
      <div class="page-sub">거래처별 ${CFG.verb} 집계 → [마감]에서 품목×일자·단가변경·총액조정·사유 입력 후 확정. 원본 <code>${CFG.src}</code> · 🔴 라이브 마감기준 ${esc(ymToInput(ym)||'-')}</div>
-     ${CFG.weight?`<div class="page-sub" style="color:#3a6ea5">⚖️ LME 중량정산(견적기준): 규격(재질·외경)별 [출고중량(tag5) − 견적 동소요] × (현물가 − 사급가) 합산. 현물가·사급가 = 원소재 마스터 월별단가(nx.price_metal). 절삭 8개 협력사 · 원소재정산 셀에 마우스 올리면 규격별 내역.</div>`:''}
+     ${CFG.weight?`<div class="page-sub" style="color:#3a6ea5">⚖️ LME 중량정산(견적기준): [출고(tag5) − 견적소요] × (현물가 − 사급가). <b>원소재</b>=규격(재질·외경)별 nx.price_metal · <b>용접봉</b>=1% 단일단가(현물 62,700 / 사급 21,100). 협력사(수테크=소요만). 원소재정산 셀 툴팁=규격내역.</div>`:''}
      <div class="toolbar">
        <label class="tl">마감년월</label><input type="month" class="inp" id="sm-ym" value="${esc(ymToInput(ym))}" style="min-width:120px">
        <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명/담당자" style="width:180px">

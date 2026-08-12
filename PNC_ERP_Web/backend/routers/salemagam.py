@@ -223,10 +223,14 @@ def salemagam_weight_quote(ym: str = Query("")):
         rows.append({"cc": cc, "nm": ven.get(cc, cc), "raw_out": d["raw_out"], "raw_in": d["raw_in"],
                      "raw_diff": d["raw_diff"], "settle_amt": d["settle_amt"],
                      "unmapped_out": d.get("unmapped_out", 0), "soyo_only": d.get("soyo_only", False),
+                     "weld_out": d.get("weld_out"), "weld_in": d.get("weld_in"),
+                     "weld_diff": d.get("weld_diff"), "weld_amt": d.get("weld_amt"),
                      "specs": d.get("specs", [])})
     rows.sort(key=lambda r: (r["settle_amt"] if r["settle_amt"] is not None else 0))
     total = round(sum((r["settle_amt"] or 0) for r in rows))
-    return {"ym": y, "rows": rows, "total": total}
+    weld_total = round(sum((r["weld_amt"] or 0) for r in rows))
+    return {"ym": y, "rows": rows, "total": total, "weld_total": weld_total,
+            "weld_spot": 62700, "weld_sagub": 21100}
 
 @router.get("/api/matprice/list")
 def matprice_list(ym: str = Query("")):

@@ -425,16 +425,19 @@ def _expand_spec(bcur, vendor, code, qspec, seen, acc, eqb):
         if _cs_kids(bcur, ch):
             _expand_spec(bcur, vendor, ch, qspec, seen, acc, eqb)
 
-def compute_quote_lme(ym):
-    """★규격별 LME 정산금액. 담당 MASTER 모델: 규격(재질·외경)별 재고(출고−소요) × (현물가−사급가).
-       현물가/사급가 = nx.price_metal(apply_ym). 재질=고강도/CU. compute_quote와 독립.
-       반환 {CUST_CODE: {raw_out,raw_in,raw_diff,settle_amt,unmapped_out,specs:[...]}}."""
+def compute_quote_lme(ym, weld_spot=62700.0, weld_sagub=21100.0):
+    """★규격별 LME 정산금액(동) + 용접봉 정산. 담당 MASTER 모델: 재고(출고−소요) × (현물가−사급가).
+       동=규격(재질·외경)별 price_metal. 용접봉=1% 단일단가(현물 62700/사급 21100). compute_quote와 독립.
+       반환 {CUST_CODE: {raw_out,raw_in,raw_diff,settle_amt,unmapped_out,soyo_only,specs,
+                         weld_out,weld_in,weld_diff,weld_amt}}."""
     PRICE, PM, canon = _load_price_metal(ym)
     qspec = _load_quote_spec()
+    _qraw, qweld = _load_quote_soyo()   # 용접봉 소요맵 (vendor, assy)→soyo
     cn = _ro(); cur = cn.cursor(); bcur = cn.cursor()
     mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
     buck = {}   # cc -> {(재질,외경): [출고,소요]}
     unmap = {}  # cc -> 미매핑 출고
+    wout = {}; win_ = {}   # 용접봉 출고/소요
     # 출고: tag5 원소재(210·KG·E/G), 외경은 DESC
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, SUM(-A.MAINT_QTY), MAX(M.ITEM_DESC)
@@ -449,6 +452,15 @@ def compute_quote_lme(ym):
             unmap[cc] = unmap.get(cc, 0.0) + q; continue
         g = gk or _classify_mat(od, th, PM, canon)
         buck.setdefault(cc, {}).setdefault((g, _snap_od(od, canon)), [0.0, 0.0])[0] += q
+    # 용접봉 출고(tag5): RAC% / 용접봉 / Solder
+    cur.execute(f"""{mg}
+      SELECT A.CUST_CODE, SUM(-A.MAINT_QTY)
+      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      WHERE A.MAINT_TAG='5' AND {win} AND (A.MAT_CODE LIKE 'RAC%' OR M.ITEM_DESC LIKE '%용접봉%' OR M.ITEM_DESC LIKE '%Solder%')
+      GROUP BY A.CUST_CODE""")
+    for cc, q in cur.fetchall():
+        if cc in _COOP_CUST_VENDOR:
+            wout[cc] = wout.get(cc, 0.0) + float(q or 0)
     # 소요: 완제품 입고(9/S/C/G/H) × 견적 규격별 동, CG2 전개
     cur.execute(f"""{mg}
       SELECT A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))), SUM(A.MAINT_QTY)
@@ -464,9 +476,13 @@ def compute_quote_lme(ym):
         for od, th, w in acc:
             g = _classify_mat(od, th, PM, canon)
             buck.setdefault(cc, {}).setdefault((g, _snap_od(od, canon)), [0.0, 0.0])[1] += w
+        wq = qweld.get((vendor, mat))
+        if wq:
+            win_[cc] = win_.get(cc, 0.0) + wq * float(q or 0)
     cn.close()
     res = {}
-    for cc, sp in buck.items():
+    for cc in set(buck) | set(wout) | set(win_):
+        sp = buck.get(cc, {})
         tout = tin = tamt = 0.0; specs = []
         for (g, od), (o, i) in sorted(sp.items()):
             std, pp = _price_lookup(g, od, PRICE)
@@ -478,9 +494,14 @@ def compute_quote_lme(ym):
                           "sagub": (round(pp) if pp else None), "amt": round(amt)})
         # 출고 원장(tag5)이 없는 업체(예: 수테크=일신실업 직접공급) → 소요만 표기, 재고·정산은 비움(오해 방지)
         soyo_only = (tout <= 0.01)
+        wo = wout.get(cc, 0.0); wi = win_.get(cc, 0.0); wdiff = wo - wi
+        wamt = round(wdiff * (weld_spot - weld_sagub))
         res[cc] = {"raw_out": (None if soyo_only else round(tout, 1)), "raw_in": round(tin, 1),
                    "raw_diff": (None if soyo_only else round(tout - tin, 1)),
                    "settle_amt": (None if soyo_only else round(tamt)),
                    "unmapped_out": round(unmap.get(cc, 0.0), 1), "soyo_only": soyo_only,
-                   "specs": sorted(specs, key=lambda x: -abs(x["amt"]))}
+                   "specs": sorted(specs, key=lambda x: -abs(x["amt"])),
+                   "weld_out": (None if soyo_only else round(wo, 1)), "weld_in": round(wi, 3),
+                   "weld_diff": (None if soyo_only else round(wdiff, 3)),
+                   "weld_amt": (None if soyo_only else wamt)}
     return res

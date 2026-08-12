@@ -13,10 +13,10 @@ def _is_inner_prod(cro, item):
     """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(PR_M_ITEM_PROC_GAGONG) 보유. 라이브 RO."""
     c = cro.cursor()
     try:
-        c.execute("SELECT ISNULL(MAKE_TYPE,'') FROM PR_M_ITEM WHERE ITEM_CODE=?", item)
+        c.execute("SELECT ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
         r = c.fetchone()
         if r and str(r[0]).strip() == '1': return True
-        c.execute("SELECT COUNT(*) FROM PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?", item)
+        c.execute("SELECT COUNT(*) FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?", item)
         return (c.fetchone()[0] or 0) > 0
     except Exception:
         return False
@@ -37,7 +37,7 @@ def _backflush_bom(nxc, root, cro=None):
         if cro is None: return True
         n = str(node).strip()
         if n not in _mkc:
-            cc = cro.cursor(); cc.execute("SELECT ISNULL(MAKE_TYPE,'') FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE=?", n)
+            cc = cro.cursor(); cc.execute("SELECT ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", n)
             r = cc.fetchone(); _mkc[n] = bool(r and str(r[0]).strip() == '1')
         return _mkc[n]
     out = {}; weld = {}
@@ -67,7 +67,7 @@ def _final_proc_code(cro, item):
     """완성공정(최종) gagong_proc_code = MAX(PROC_SEQ). method 무관·PROC_SEQ 최댓값. 라이브 RO."""
     c = cro.cursor()
     try:
-        c.execute("SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=? ORDER BY PROC_SEQ DESC", item)
+        c.execute("SELECT TOP 1 ISNULL(GAGONG_PROC_CODE,'') FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=? ORDER BY PROC_SEQ DESC", item)
         r = c.fetchone()
         return str(r[0]).strip() if r and r[0] else ""
     except Exception:
@@ -145,7 +145,7 @@ def backflush_post(payload: dict = Body(...)):
     user = (str(payload.get("user", "") or "").strip() or "웹사용자")[:20]
     import datetime as _d
     ref_key = f"{wo}|{item}|{_d.datetime.now().strftime('%y%m%d')}"   # 수기 멱등키(WO·품목·일자)
-    cn = _conn(); nx = _nx_tx()   # ★원자성: 소비(−P4)+생산입고(+P7/ASY)+backflush_log 동일 트랜잭션
+    cn = _nx(); nx = _nx_tx()   # ★nx전환: 읽기도 nx 충실복제. 원자성: 소비(−P4)+생산입고(+P7/ASY)+backflush_log 동일 트랜잭션
     try:
         r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)
         nx.commit() if r.get("ok") else nx.rollback()
