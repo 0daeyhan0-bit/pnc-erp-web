@@ -169,6 +169,36 @@ BOM: 품목 BOM관리·조달후보 통합검토·품목별 공정관리 / 재�
 
 ---
 
+## 10. ★★BOM 소스 감사 — "단일 BOM 미준수" (2026-08-12, 사용자 걱정 확인됨)
+
+> 감사 결론: **프로그램들이 단일 BOM으로 안 만들어져 있음.** 3 물리 계보(CS/PR/nx)가 목적별 분기 + 한 흐름 내 혼합 존재. 어떤 프로그램이든 손대기 전 이 표로 "그게 어느 BOM을 읽는지" 확인.
+
+### 10-1. 계보별 사용 (실측 backend grep)
+| BOM 소스 | 성격 | 쓰는 프로그램(파일) |
+|---|---|---|
+| **CS_M_ITEM_BOM** | 레거시 원가용(live) | bom(tree route0·copy폴백)·coopquote·coopquote2·sourcing(시드·사급판정)·item(존재)·weight_calc·salemagam **(7)** |
+| **PR_M_ITEM_BOM** | 레거시 생산/실사용(live) | partplan·soyo(→plan_part_mat)·gagong·_sp_4wk·item(삭제게이트) **(5)** |
+| **nx.bom_header/bom_line·nx.bom(평면)** | nx 통합=**원가 정본** | nx_cost_engine·cost·backflush(평면 nx.bom 직독)·item·app **(5)** |
+| nx.sourcing_route_line | 조달후보 구조 | sourcing·bom(route>0) |
+| nx.lg_bom | LG 참조 | nx_cost_engine·cost(naewon_lg) |
+| nx.plan_part_mat(PR 재귀파생) | 소요 정본 | soyo(생성)·ready·coopplan·autoorder |
+| nx.model_bom | 모델매핑 | modelbom |
+
+### 10-2. ★위험 지점 (마이그레이션 전 해소)
+1. 같은 "BOM 재귀전개" 목적인데 **소스 3분기**: 원가/견적/조달시드=**CS** · 생산소요/가공=**PR** · 원가엔진 실계산=**nx.bom_line**. CS·PR은 별도 마스터라 **구성·USE_QTY 다를 수 있음**.
+2. **한 엔드포인트 내 소스 혼합**: `bom/tree`(route0→CS, route>0→sourcing_route_line) · `bom/copy`(nx.bom_line 있으면 nx, 없으면 CS 폴백).
+3. **원가 흐름 내 이중 계보**: 엔진=nx.bom_line vs `weight_calc`(용접봉/중량)=CS+coop_bom vs `backflush`=평면 nx.bom 직독(재빌드 동기화 깨지면 원가↔소비 어긋남).
+4. **삭제 게이트 nx+PR만 검사(CS 누락)** → CS에만 물린 품목 삭제 위험(item.py).
+5. **"얼마 만드나(PR→plan_part_mat)" ≠ "얼마짜리냐(nx.bom_line)"** = 수량·금액이 다른 BOM 근거 → 두 마스터 어긋나면 정합 깨짐.
+
+### 10-3. 목표 = 단일 nx BOM (+ SUB 정규화가 enabler)
+- **원가엔진이 이미 `nx.bom_line`을 정본으로 사용**([[newerp-cost-verify-harness]]) → 목표 단일 BOM = **nx.bom(정규형 bom_header/bom_line)**.
+- 그러나 nx.bom은 현재 **평면(SUB 없음)·LG기반** → 생산(PR)·견적(CS)이 가진 **SUB 구조를 못 담음**. 그래서 프로그램들이 아직 CS/PR을 직독.
+- **∴ §9 SUB 정규화(`품번_S{nn}`)로 nx.bom에 SUB 구조를 채우는 것 = 단일 BOM 완성의 전제.** (이번 작업이 통일의 enabler)
+- **통일 계획**: ①SUB 정규화로 nx.bom 완성 → ②프로그램을 nx.bom 단일소스로 이관(CS/PR 직독 은퇴, 공용 어댑터) → ③원가 diff0·소요 대사 게이트로 프로그램 하나씩 검증([[MIGRATION_ISSUES]] §G).
+
+---
+
 ## 8. 관련 정본 문서
 - **[[SOURCING_COST_INTEGRATION]]** — route/cost·bom/tree route_id·2계층·단가 통합(item_price)·업체/사급단가. **가장 핵심.**
 - **[[SOURCING_PANEL_REDESIGN]]** — 조달후보 SUB 재구성·공정 배치 패널·`_S{nn}` 채번·검증 3종.
