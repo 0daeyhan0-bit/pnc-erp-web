@@ -26,7 +26,7 @@ for a in ['AJR75563402','AJR75563503','AJR30077403']:
 print(f"재베이스라인 N={len(items)} ymd={YMD} (성분 {KEYS}, tol={TOL})")
 ocn = CO._conn(); ocur = ocn.cursor()
 eng = NxCostEngine()
-res = {}; npass=nfail=nerr=0
+res = {}; npass=nfail=nerr=njae_ok=0
 from collections import Counter
 failkey = Counter(); jae_gap=[]
 for i, it in enumerate(items):
@@ -48,6 +48,7 @@ for i, it in enumerate(items):
         ov=float(osil.get(k,0) or 0); cv=float(s.get(k,0) or 0)
         if abs(ov-cv) > TOL: diffs[k]={"sp":round(ov,1),"eng":round(cv,1),"d":round(cv-ov,1)}
     res[it]={"ok":not diffs,"diffs":diffs,"sp_silwon":round(float(osil.get('silwon',0)),1),"eng_silwon":round(float(s.get('silwon',0)),1)}
+    if 'jae' not in diffs: njae_ok+=1   # ★재료비만(설계차=용접 가공비 무관) 정합
     if diffs:
         nfail+=1
         for k in diffs: failkey[k]+=1
@@ -59,6 +60,8 @@ json.dump(res, open(os.path.join(os.path.dirname(__file__), f'rebaseline_{YMD}.j
 tot=len(items)
 print(f"\n=== 엔진 vs 라이브 레거시 SP ({YMD}) ===")
 print(f"  PASS(전성분 diff0) {npass} / FAIL {nfail} / ERR {nerr}  = {tot}")
+ncomp=tot-nerr
+print(f"  ★재료비(jae) diff0: {njae_ok}/{ncomp} = {round(100*njae_ok/ncomp,1) if ncomp else 0}% (용접 등 설계차 무관 = 진짜 재료비 정합률)")
 print(f"  실패 성분 분포: {dict(failkey)}")
 if jae_gap:
     import statistics
