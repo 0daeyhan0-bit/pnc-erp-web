@@ -1,1047 +1,609 @@
 {
- "AJR30008101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 36011.0,
-  "eng_silwon": 36011.0
- },
- "ALB31554001": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 2165.3,
-  "eng_silwon": 2165.3
- },
- "AJR73946114": {
+ "AJR30083101": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 24404.0,
-    "eng": 24407.0,
-    "d": 3.0
-   },
-   "silwon": {
-    "sp": 26324.0,
-    "eng": 26327.0,
-    "d": 3.0
-   }
-  },
-  "sp_silwon": 26324.0,
-  "eng_silwon": 26327.0
- },
- "AJR74942615": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 3144.9,
-  "eng_silwon": 3144.9
- },
- "AGF04106701": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 7592.6,
-  "eng_silwon": 7592.6
- },
- "AJR73824601": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 40054.9,
-  "eng_silwon": 40054.9
- },
- "AJR75142606": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 14282.5,
-    "eng": 14295.4,
-    "d": 12.9
-   },
-   "silwon": {
-    "sp": 17644.3,
-    "eng": 17658.5,
-    "d": 14.2
-   }
-  },
-  "sp_silwon": 17644.3,
-  "eng_silwon": 17658.5
- },
- "5211A00011E": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 15299.3,
-  "eng_silwon": 15299.3
- },
- "AJR30011201": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 20693.2,
-  "eng_silwon": 20693.2
- },
- "AJR77144311": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 12081.0,
-  "eng_silwon": 12081.0
- },
- "AJR74803545": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 12013.3,
-  "eng_silwon": 12013.3
- },
- "AJJ74578324": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 22944.4,
-  "eng_silwon": 22944.4
- },
- "AET30216904": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 286112.0,
-  "eng_silwon": 286112.0
- },
- "AJR67734302": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 7957.8,
-  "eng_silwon": 7957.8
- },
- "AJR73804307": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 14864.7,
-  "eng_silwon": 14864.7
- },
- "AJJ74498302": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 12122.7,
-  "eng_silwon": 12122.7
- },
- "AJR77263001": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 46909.9,
-    "eng": 46993.4,
-    "d": 83.5
-   },
-   "ilban": {
-    "sp": 2026.0,
-    "eng": 2032.0,
-    "d": 6.0
-   },
-   "silwon": {
-    "sp": 55887.2,
-    "eng": 55978.5,
-    "d": 91.3
-   }
-  },
-  "sp_silwon": 55887.2,
-  "eng_silwon": 55978.5
- },
- "AJR73706903": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 22.0,
-  "eng_silwon": 22.0
- },
- "AJR75142603": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 6976.3,
-  "eng_silwon": 6976.3
- },
- "AJR77224505": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 99561.1,
-  "eng_silwon": 99561.1
- },
- "AJR65059905": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 1527.0,
-  "eng_silwon": 1527.0
- },
- "AJR30001901": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 2078.0,
-  "eng_silwon": 2078.0
- },
- "AET73271504": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 296884.5,
-  "eng_silwon": 296884.5
- },
- "AJR30038201": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 27048.0,
-    "eng": 27032.1,
-    "d": -15.9
-   },
-   "silwon": {
-    "sp": 31981.6,
-    "eng": 31964.5,
-    "d": -17.1
-   }
-  },
-  "sp_silwon": 31981.6,
-  "eng_silwon": 31964.5
- },
- "AJR30095101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 11772.6,
-  "eng_silwon": 11772.6
- },
- "AJR77224509": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 98970.7,
-  "eng_silwon": 98970.7
- },
- "AJR65059909": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 1225.0,
-  "eng_silwon": 1225.0
- },
- "AJR33796503": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 10804.6,
-    "eng": 10807.6,
-    "d": 3.0
-   },
-   "silwon": {
-    "sp": 13744.6,
-    "eng": 13747.6,
-    "d": 3.0
-   }
-  },
-  "sp_silwon": 13744.6,
-  "eng_silwon": 13747.6
- },
- "AJR30058801": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 12724.2,
-  "eng_silwon": 12724.2
- },
- "AJR74365101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 31566.2,
-  "eng_silwon": 31566.2
- },
- "AJR77163101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 23561.5,
-  "eng_silwon": 23561.5
- },
- "AJJ76418714": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 28042.9,
-  "eng_silwon": 28043.0
- },
- "AJR30133608": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 153896.8,
-    "eng": 153421.1,
-    "d": -475.6
+    "sp": 339027.9,
+    "eng": 340183.9,
+    "d": 1156.0
    },
    "gagong": {
-    "sp": 7252.2,
-    "eng": 7643.0,
-    "d": 390.8
+    "sp": 14066.9,
+    "eng": 14077.6,
+    "d": 10.7
    },
    "ilban": {
-    "sp": 1584.0,
-    "eng": 1827.0,
-    "d": 243.0
+    "sp": 7135.0,
+    "eng": 7218.0,
+    "d": 83.0
    },
    "profit": {
-    "sp": 706.0,
-    "eng": 757.0,
-    "d": 51.0
+    "sp": 1696.0,
+    "eng": 1704.0,
+    "d": 8.0
    },
    "silwon": {
-    "sp": 165224.9,
-    "eng": 165434.2,
-    "d": 209.2
+    "sp": 361975.8,
+    "eng": 363233.5,
+    "d": 1257.7
    }
   },
-  "sp_silwon": 165224.9,
-  "eng_silwon": 165434.2
+  "sp_silwon": 361975.8,
+  "eng_silwon": 363233.5
  },
- "AJR30073601": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 25750.6,
-    "eng": 25519.2,
-    "d": -231.4
-   },
-   "silwon": {
-    "sp": 27018.6,
-    "eng": 26787.2,
-    "d": -231.4
-   }
-  },
-  "sp_silwon": 27018.6,
-  "eng_silwon": 26787.2
- },
- "AJR65507734": {
+ "5211A10480C": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 17338.1,
-  "eng_silwon": 17338.1
+  "sp_silwon": 3352.6,
+  "eng_silwon": 3352.6
  },
- "AJR74984402": {
+ "AJR74524703": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 45715.1,
-    "eng": 45716.9,
-    "d": 1.8
+    "sp": 67368.3,
+    "eng": 67502.6,
+    "d": 134.3
    },
    "silwon": {
-    "sp": 50847.9,
-    "eng": 50849.8,
-    "d": 1.9
+    "sp": 75842.1,
+    "eng": 75975.0,
+    "d": 132.9
    }
   },
-  "sp_silwon": 50847.9,
-  "eng_silwon": 50849.8
+  "sp_silwon": 75842.1,
+  "eng_silwon": 75975.0
  },
- "AJR30138104": {
+ "AJR74982402": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 51364.0,
+  "eng_silwon": 51364.0
+ },
+ "AJR76742310": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 23586.9,
-    "eng": 36954.9,
-    "d": 13368.0
-   },
-   "silwon": {
-    "sp": 26758.9,
-    "eng": 40126.9,
-    "d": 13368.0
-   }
-  },
-  "sp_silwon": 26758.9,
-  "eng_silwon": 40126.9
- },
- "AJR72367604": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 17296.0,
-    "eng": 16898.0,
-    "d": -398.0
+    "sp": 8981.8,
+    "eng": 8551.7,
+    "d": -430.1
    },
    "gagong": {
-    "sp": 2979.0,
-    "eng": 3776.1,
-    "d": 797.1
+    "sp": 2351.1,
+    "eng": 2347.3,
+    "d": -3.8
    },
    "ilban": {
-    "sp": 301.0,
-    "eng": 500.0,
-    "d": 199.0
+    "sp": 562.0,
+    "eng": 531.0,
+    "d": -31.0
    },
    "profit": {
-    "sp": 262.0,
-    "eng": 342.0,
-    "d": 80.0
-   },
-   "silwon": {
-    "sp": 20858.0,
-    "eng": 21536.1,
-    "d": 678.1
-   }
-  },
-  "sp_silwon": 20858.0,
-  "eng_silwon": 21536.1
- },
- "AJR75544604": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 14254.6,
-  "eng_silwon": 14254.6
- },
- "AET73831442": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 36710.1,
-    "eng": 31593.5,
-    "d": -5116.6
-   },
-   "ilban": {
-    "sp": 2612.0,
-    "eng": 2254.0,
-    "d": -358.0
-   },
-   "profit": {
-    "sp": 257.0,
-    "eng": 229.0,
-    "d": -28.0
-   },
-   "silwon": {
-    "sp": 40466.1,
-    "eng": 34963.4,
-    "d": -5502.6
-   }
-  },
-  "sp_silwon": 40466.1,
-  "eng_silwon": 34963.4
- },
- "AJR73023306": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 101144.1,
-  "eng_silwon": 101144.1
- },
- "ALB31554101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 2214.2,
-  "eng_silwon": 2214.2
- },
- "AJR73980304": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 94599.0,
-    "eng": 94595.9,
+    "sp": 233.0,
+    "eng": 230.0,
     "d": -3.0
    },
    "silwon": {
-    "sp": 104355.4,
-    "eng": 104352.4,
-    "d": -3.0
+    "sp": 12152.9,
+    "eng": 11685.0,
+    "d": -468.0
    }
   },
-  "sp_silwon": 104355.4,
-  "eng_silwon": 104352.4
+  "sp_silwon": 12152.9,
+  "eng_silwon": 11685.0
  },
- "AJR73950306": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 7388.5,
-  "eng_silwon": 7388.5
- },
- "AJR74488604": {
+ "AJR30009004": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 8338.4,
-    "eng": 7138.4,
-    "d": -1200.0
+    "sp": 10322.7,
+    "eng": 10326.1,
+    "d": 3.4
+   },
+   "silwon": {
+    "sp": 14226.6,
+    "eng": 14230.0,
+    "d": 3.4
+   }
+  },
+  "sp_silwon": 14226.6,
+  "eng_silwon": 14230.0
+ },
+ "AJR37039701": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 11093.8,
+    "eng": 6722.3,
+    "d": -4371.5
+   },
+   "silwon": {
+    "sp": 12764.8,
+    "eng": 8393.3,
+    "d": -4371.5
+   }
+  },
+  "sp_silwon": 12764.8,
+  "eng_silwon": 8393.3
+ },
+ "AJR30138203": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 4775.8,
+    "eng": 4127.8,
+    "d": -648.0
    },
    "gagong": {
-    "sp": 231.0,
-    "eng": 393.0,
-    "d": 162.0
+    "sp": 826.0,
+    "eng": 1514.3,
+    "d": 688.3
    },
    "ilban": {
-    "sp": 35.0,
-    "eng": 46.0,
-    "d": 11.0
+    "sp": 78.0,
+    "eng": 266.0,
+    "d": 188.0
    },
    "profit": {
-    "sp": 21.0,
-    "eng": 35.0,
-    "d": 14.0
+    "sp": 72.0,
+    "eng": 142.0,
+    "d": 70.0
    },
    "silwon": {
-    "sp": 8625.4,
-    "eng": 7612.4,
-    "d": -1013.0
+    "sp": 5807.8,
+    "eng": 6106.1,
+    "d": 298.3
    }
   },
-  "sp_silwon": 8625.4,
-  "eng_silwon": 7612.4
+  "sp_silwon": 5807.8,
+  "eng_silwon": 6106.1
  },
- "AJR73502501": {
+ "5211AP2678J": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 8510.6,
-  "eng_silwon": 8510.6
+  "sp_silwon": 10654.2,
+  "eng_silwon": 10654.2
  },
- "AJR33796526": {
+ "AJR75242802": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 5450.4,
+  "eng_silwon": 5450.4
+ },
+ "AJR30125504": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 8061.6,
+  "eng_silwon": 8061.6
+ },
+ "AJR30012013": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 4605.3,
-    "eng": 5042.3,
-    "d": 437.0
+    "sp": 122639.6,
+    "eng": 123084.7,
+    "d": 445.0
    },
    "gagong": {
-    "sp": 1564.0,
-    "eng": 0.0,
-    "d": -1564.0
+    "sp": 2702.6,
+    "eng": 2707.2,
+    "d": 4.6
    },
    "ilban": {
-    "sp": 159.0,
-    "eng": 0.0,
-    "d": -159.0
-   },
-   "unban": {
-    "sp": 38.0,
-    "eng": 0.0,
-    "d": -38.0
+    "sp": 3081.0,
+    "eng": 3112.0,
+    "d": 31.0
    },
    "profit": {
-    "sp": 138.0,
-    "eng": 0.0,
-    "d": -138.0
-   },
-   "silwon": {
-    "sp": 6504.3,
-    "eng": 5042.3,
-    "d": -1462.0
-   }
-  },
-  "sp_silwon": 6504.3,
-  "eng_silwon": 5042.3
- },
- "AJR73822504": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 106263.0,
-    "eng": 106550.9,
-    "d": 287.9
-   },
-   "gagong": {
-    "sp": 5016.5,
-    "eng": 5022.1,
-    "d": 5.6
-   },
-   "ilban": {
-    "sp": 1407.0,
-    "eng": 1428.0,
-    "d": 21.0
-   },
-   "profit": {
-    "sp": 514.0,
-    "eng": 516.0,
-    "d": 2.0
-   },
-   "silwon": {
-    "sp": 113250.5,
-    "eng": 113567.0,
-    "d": 316.5
-   }
-  },
-  "sp_silwon": 113250.5,
-  "eng_silwon": 113567.0
- },
- "AJR77224504": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 101184.6,
-  "eng_silwon": 101184.6
- },
- "AJR76402407": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 259228.4,
-    "eng": 259560.5,
-    "d": 332.1
-   },
-   "gagong": {
-    "sp": 10300.4,
-    "eng": 10303.4,
-    "d": 3.0
-   },
-   "ilban": {
-    "sp": 6220.0,
-    "eng": 6245.0,
-    "d": 25.0
-   },
-   "silwon": {
-    "sp": 278856.8,
-    "eng": 279218.0,
-    "d": 361.1
-   }
-  },
-  "sp_silwon": 278856.8,
-  "eng_silwon": 279218.0
- },
- "AET73831441": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 28384.8,
-  "eng_silwon": 28384.8
- },
- "ADM74930506": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 236095.7,
-    "eng": 236099.9,
-    "d": 4.2
-   },
-   "silwon": {
-    "sp": 245458.2,
-    "eng": 245463.4,
-    "d": 5.2
-   }
-  },
-  "sp_silwon": 245458.2,
-  "eng_silwon": 245463.4
- },
- "AGF04226601": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 37644.0,
-    "eng": 36336.0,
-    "d": -1308.0
-   },
-   "gagong": {
-    "sp": 306.5,
-    "eng": 5382.4,
-    "d": 5075.8
-   },
-   "ilban": {
-    "sp": 2322.0,
-    "eng": 2913.0,
-    "d": 591.0
-   },
-   "profit": {
-    "sp": 210.0,
-    "eng": 663.0,
-    "d": 453.0
-   },
-   "silwon": {
-    "sp": 41315.5,
-    "eng": 46127.3,
-    "d": 4811.8
-   }
-  },
-  "sp_silwon": 41315.5,
-  "eng_silwon": 46127.3
- },
- "AJR77263009": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 44141.6,
-    "eng": 44143.5,
-    "d": 1.9
-   },
-   "ilban": {
-    "sp": 2342.0,
-    "eng": 2337.0,
-    "d": -5.0
-   },
-   "silwon": {
-    "sp": 57025.4,
-    "eng": 57021.3,
-    "d": -4.1
-   }
-  },
-  "sp_silwon": 57025.4,
-  "eng_silwon": 57021.3
- },
- "AJR76442510": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 10095.8,
-  "eng_silwon": 10095.8
- },
- "AJR75183101": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 7347.5,
-  "eng_silwon": 7347.5
- },
- "AAA71799405": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 28954.6,
-  "eng_silwon": 28954.6
- },
- "AJR71433336": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 14960.3,
-    "eng": 15828.3,
-    "d": 868.0
-   },
-   "gagong": {
-    "sp": 1733.5,
-    "eng": 2088.2,
-    "d": 354.6
-   },
-   "ilban": {
-    "sp": 188.0,
-    "eng": 269.0,
-    "d": 81.0
-   },
-   "profit": {
-    "sp": 153.0,
-    "eng": 187.0,
-    "d": 34.0
-   },
-   "silwon": {
-    "sp": 17034.9,
-    "eng": 18372.5,
-    "d": 1337.6
-   }
-  },
-  "sp_silwon": 17034.9,
-  "eng_silwon": 18372.5
- },
- "AJR74364922": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 25088.8,
-    "eng": 25098.1,
-    "d": 9.2
-   },
-   "silwon": {
-    "sp": 28882.7,
-    "eng": 28893.0,
-    "d": 10.3
-   }
-  },
-  "sp_silwon": 28882.7,
-  "eng_silwon": 28893.0
- },
- "AJR67613701": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 20567.8,
-  "eng_silwon": 20567.8
- },
- "ADM74790608": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 1410555.0,
-  "eng_silwon": 1410555.0
- },
- "AJR74523006": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 31373.2,
-    "eng": 31520.5,
-    "d": 147.3
-   },
-   "silwon": {
-    "sp": 33166.2,
-    "eng": 33313.5,
-    "d": 147.3
-   }
-  },
-  "sp_silwon": 33166.2,
-  "eng_silwon": 33313.5
- },
- "AJR74242510": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 24079.0,
-  "eng_silwon": 24079.0
- },
- "AJR77263006": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 46773.9,
-    "eng": 46801.8,
-    "d": 27.8
-   },
-   "ilban": {
-    "sp": 1554.0,
-    "eng": 1556.0,
-    "d": 2.0
-   },
-   "silwon": {
-    "sp": 52697.7,
-    "eng": 52727.8,
-    "d": 30.1
-   }
-  },
-  "sp_silwon": 52697.7,
-  "eng_silwon": 52727.8
- },
- "AJR73223901": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 6990.2,
-  "eng_silwon": 6990.2
- },
- "AJR74942730": {
-  "ok": false,
-  "diffs": {
-   "gagong": {
-    "sp": 21.0,
-    "eng": 516.0,
-    "d": 495.0
-   },
-   "ilban": {
-    "sp": 280.0,
-    "eng": 315.0,
-    "d": 35.0
-   },
-   "profit": {
-    "sp": 24.0,
-    "eng": 67.0,
-    "d": 43.0
-   },
-   "silwon": {
-    "sp": 10982.6,
-    "eng": 11555.6,
-    "d": 573.0
-   }
-  },
-  "sp_silwon": 10982.6,
-  "eng_silwon": 11555.6
- },
- "AJR36618623": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 55548.0,
-    "eng": 55562.8,
-    "d": 14.8
-   },
-   "silwon": {
-    "sp": 59961.1,
-    "eng": 59977.2,
-    "d": 16.1
-   }
-  },
-  "sp_silwon": 59961.1,
-  "eng_silwon": 59977.2
- },
- "AJJ75838615": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 30570.0,
-  "eng_silwon": 30570.0
- },
- "AJR75462803": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 28173.3,
-    "eng": 28251.5,
-    "d": 78.2
-   },
-   "gagong": {
-    "sp": 2076.3,
-    "eng": 2077.9,
-    "d": 1.6
-   },
-   "ilban": {
-    "sp": 456.0,
-    "eng": 463.0,
-    "d": 7.0
-   },
-   "silwon": {
-    "sp": 30957.6,
-    "eng": 31045.4,
-    "d": 87.8
-   }
-  },
-  "sp_silwon": 30957.6,
-  "eng_silwon": 31045.4
- },
- "AJR30117401": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 16342.7,
-    "eng": 16344.5,
-    "d": 1.9
-   },
-   "silwon": {
-    "sp": 20109.1,
-    "eng": 20112.0,
-    "d": 2.9
-   }
-  },
-  "sp_silwon": 20109.1,
-  "eng_silwon": 20112.0
- },
- "AJR75842504": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 1037.0,
-  "eng_silwon": 1037.0
- },
- "PW061205R01.AKOR": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 26434.3,
-  "eng_silwon": 26433.0
- },
- "MJU66889201": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": -63.2,
-    "eng": 693.5,
-    "d": 756.8
-   },
-   "ilban": {
-    "sp": 22.0,
-    "eng": 75.0,
-    "d": 53.0
-   },
-   "profit": {
-    "sp": 27.0,
-    "eng": 31.0,
+    "sp": 462.0,
+    "eng": 466.0,
     "d": 4.0
    },
    "silwon": {
-    "sp": 300.5,
-    "eng": 1114.3,
-    "d": 813.8
+    "sp": 128885.2,
+    "eng": 129369.9,
+    "d": 484.7
    }
   },
-  "sp_silwon": 300.5,
-  "eng_silwon": 1114.3
+  "sp_silwon": 128885.2,
+  "eng_silwon": 129369.9
  },
- "5211A20297S": {
+ "AJJ73618602": {
   "ok": true,
   "diffs": {},
-  "sp_silwon": 3780.0,
-  "eng_silwon": 3780.0
+  "sp_silwon": 25600.6,
+  "eng_silwon": 25600.6
  },
- "AJR75163206": {
+ "AJR37039702": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 2678.1,
+  "eng_silwon": 2678.1
+ },
+ "AJR75604703": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 8375.6,
+  "eng_silwon": 8375.6
+ },
+ "AJR76562802": {
   "ok": false,
   "diffs": {
    "jae": {
-    "sp": 11656.3,
-    "eng": 11667.4,
-    "d": 11.1
-   },
-   "silwon": {
-    "sp": 15068.0,
-    "eng": 15079.3,
-    "d": 11.3
-   }
-  },
-  "sp_silwon": 15068.0,
-  "eng_silwon": 15079.3
- },
- "AJR76302601": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 9299.2,
-  "eng_silwon": 9299.2
- },
- "AJR75483702": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 40763.1,
-    "eng": 40769.0,
-    "d": 6.0
-   },
-   "ilban": {
-    "sp": 1805.0,
-    "eng": 1807.0,
-    "d": 2.0
-   },
-   "silwon": {
-    "sp": 49035.0,
-    "eng": 49043.0,
-    "d": 8.0
-   }
-  },
-  "sp_silwon": 49035.0,
-  "eng_silwon": 49043.0
- },
- "AJR73068501": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 4384.0,
-  "eng_silwon": 4384.0
- },
- "5211A30756B": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 4794.4,
-  "eng_silwon": 4794.4
- },
- "AJJ74578322": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 24231.6,
-    "eng": 24228.6,
-    "d": -3.0
-   },
-   "silwon": {
-    "sp": 25610.6,
-    "eng": 25607.6,
-    "d": -3.0
-   }
-  },
-  "sp_silwon": 25610.6,
-  "eng_silwon": 25607.6
- },
- "AJR75563402": {
-  "ok": false,
-  "diffs": {
-   "jae": {
-    "sp": 4190.6,
-    "eng": 4073.7,
-    "d": -116.9
+    "sp": 15751.1,
+    "eng": 15871.1,
+    "d": 120.0
    },
    "gagong": {
-    "sp": 602.0,
-    "eng": 712.0,
-    "d": 110.0
+    "sp": 2807.8,
+    "eng": 2810.2,
+    "d": 2.3
    },
    "ilban": {
-    "sp": 48.0,
-    "eng": 66.0,
-    "d": 18.0
-   },
-   "profit": {
-    "sp": 46.0,
-    "eng": 56.0,
-    "d": 10.0
+    "sp": 1308.0,
+    "eng": 1316.0,
+    "d": 8.0
    },
    "silwon": {
-    "sp": 4911.6,
-    "eng": 4932.7,
-    "d": 21.1
+    "sp": 20445.9,
+    "eng": 20577.2,
+    "d": 131.3
    }
   },
-  "sp_silwon": 4911.6,
-  "eng_silwon": 4932.7
+  "sp_silwon": 20445.9,
+  "eng_silwon": 20577.2
+ },
+ "AJR30012009": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 122235.8,
+    "eng": 122680.8,
+    "d": 445.0
+   },
+   "gagong": {
+    "sp": 6392.6,
+    "eng": 6729.2,
+    "d": 336.6
+   },
+   "ilban": {
+    "sp": 3518.0,
+    "eng": 3572.0,
+    "d": 54.0
+   },
+   "profit": {
+    "sp": 792.0,
+    "eng": 825.0,
+    "d": 33.0
+   },
+   "silwon": {
+    "sp": 134724.4,
+    "eng": 135593.0,
+    "d": 868.6
+   }
+  },
+  "sp_silwon": 134724.4,
+  "eng_silwon": 135593.0
+ },
+ "AJR77225605": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 76137.6,
+    "eng": 79233.4,
+    "d": 3095.8
+   },
+   "gagong": {
+    "sp": 3108.3,
+    "eng": 3498.9,
+    "d": 390.7
+   },
+   "ilban": {
+    "sp": 928.0,
+    "eng": 1155.0,
+    "d": 227.0
+   },
+   "profit": {
+    "sp": 323.0,
+    "eng": 372.0,
+    "d": 49.0
+   },
+   "silwon": {
+    "sp": 80546.9,
+    "eng": 84309.3,
+    "d": 3762.4
+   }
+  },
+  "sp_silwon": 80546.9,
+  "eng_silwon": 84309.3
+ },
+ "AJJ73640102": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 15946.6,
+  "eng_silwon": 15946.6
+ },
+ "견적교육": {
+  "ok": true,
+  "diffs": {},
+  "sp_silwon": 3874.0,
+  "eng_silwon": 3874.0
+ },
+ "AJR73062903": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 2991.9,
+    "eng": 2988.9,
+    "d": -3.0
+   },
+   "silwon": {
+    "sp": 5012.9,
+    "eng": 5008.9,
+    "d": -4.0
+   }
+  },
+  "sp_silwon": 5012.9,
+  "eng_silwon": 5008.9
+ },
+ "AJR77224009": {
+  "ok": false,
+  "diffs": {
+   "jae": {
+    "sp": 66576.6,
+    "eng": 66580.6,
+    "d": 4.0
+   },
+   "silwon": {
+    "sp": 67303.1,
+    "eng": 67307.1,
+    "d": 4.0
+   }
+  },
+  "sp_silwon": 67303.1,
+  "eng_silwon": 67307.1
+ },
+ "AJR73988107": {
+  "err": "ENG ('01000', '[01000] [Microsoft][ODBC SQL "
+ },
+ "AET73831468": {
+  "err": "ORA ('01000', '[01000] [Microsoft][ODBC SQL "
+ },
+ "ADM73210501": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74243206": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73822523": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "MJU64329006": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74424620": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74942523": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73763001": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75523401": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR76462725": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AET73831438": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75623501": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR72929515": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74242512": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73967512": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AET72910311": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75243013": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73664901": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "EAD37660045": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "5211A10120T": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77223005": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "4849A20060A": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AGR30002201": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AET72910309": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR34870203": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR72586225": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75463503": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR31790102": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AAA31583902": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73952510": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30073604": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR34739801": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77224518": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30157801": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR52676212": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AET73671513": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30037110": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR37048417": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77170601": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75709903": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30031701": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75243014": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR37048408": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AGF30058402": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73767202": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "SH091905D04.ENCXLE3": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR36388501": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75544608": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73952007": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74424501": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77225602": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75942504": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77226301": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74803516": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR76442510": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77182405": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75744116": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74983909": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77243601": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30133605": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR54072909": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJJ74498303": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73383001": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR73981109": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AET72910042": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30077401": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75662311": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR30029901": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR36852207": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR74803505": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "5211A10570G": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJJ75358423": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR71429420": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR37048418": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "MJU39931117": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR77189104": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJJ75639409": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
+ },
+ "AJR75563402": {
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
  },
  "AJR75563503": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 21499.0,
-  "eng_silwon": 21499.0
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
  },
  "AJR30077403": {
-  "ok": true,
-  "diffs": {},
-  "sp_silwon": 28175.0,
-  "eng_silwon": 28175.0
+  "err": "ORA ('08S01', '[08S01] [Microsoft][ODBC SQL "
  }
 }

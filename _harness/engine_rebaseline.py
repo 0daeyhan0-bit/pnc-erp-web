@@ -37,7 +37,12 @@ for i, it in enumerate(items):
     try:
         s = eng.silwon(it, YMD)
     except Exception as e:
-        nerr+=1; res[it]={"err":"ENG "+str(e)[:40]}; continue
+        try:                              # 커넥션 끊김 → 엔진 재생성 1회 재시도
+            try: eng.close()
+            except Exception: pass
+            eng = NxCostEngine(); s = eng.silwon(it, YMD)
+        except Exception as e2:
+            nerr+=1; res[it]={"err":"ENG "+str(e2)[:40]}; continue
     diffs = {}
     for k in KEYS:
         ov=float(osil.get(k,0) or 0); cv=float(s.get(k,0) or 0)
