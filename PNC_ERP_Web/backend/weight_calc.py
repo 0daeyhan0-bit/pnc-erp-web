@@ -341,3 +341,137 @@ def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub
             "no_quote_items": noq.get(cc, 0),
         }
     return res
+
+# ================= ★규격별 LME 정산금액 (담당 MASTER 모델: 규격별 재고 × (현물가−사급가)) =================
+def _load_price_metal(ym):
+    """price_metal(apply_ym=20+ym) → (PRICE[(재질,외경)]=(현물,사급), maxHS[외경]=고강도최대두께, canon외경리스트)."""
+    apply = ('20' + ym) if len(str(ym)) == 4 else str(ym)
+    tx = _tx(); tc = tx.cursor()
+    tc.execute("SELECT metal_gubun,CAST(diam AS float),CAST(thick AS float),CAST(std_price AS float),CAST(partner_price AS float) "
+               "FROM nx.price_metal WHERE apply_ym=?", apply)
+    PRICE = {}; hs = {}; canon = set()
+    for g, od, th, std, pp in tc.fetchall():
+        od = round(float(od), 2); canon.add(od)
+        PRICE.setdefault((g, od), (float(std or 0), float(pp or 0)))
+        if g == '고강도':
+            hs[od] = max(hs.get(od, 0.0), float(th or 0))
+    tx.close()
+    return PRICE, hs, sorted(canon)
+
+def _snap_od(od, canon):
+    if od is None or not canon:
+        return od
+    b = min(canon, key=lambda x: abs(x - od))
+    return b if abs(b - od) <= 0.35 else round(od, 2)
+
+def _classify_mat(od, th, hs, canon):
+    """(외경,두께)→재질: 같은 외경에서 고강도최대두께+0.03 이하면 고강도, 아니면 CU."""
+    so = _snap_od(od, canon)
+    m = hs.get(so)
+    if m is None and hs:
+        m = min(((abs(o - so), v) for o, v in hs.items()))[1]
+    if m is not None and (th or 0) <= m + 0.03:
+        return '고강도'
+    return 'CU'
+
+def _price_lookup(mg, od, PRICE):
+    key = (mg, round(od, 2))
+    if key in PRICE:
+        return PRICE[key]
+    cand = [(abs(o - od), v) for (g, o), v in PRICE.items() if g == mg]
+    return min(cand)[1] if cand else (None, None)
+
+def _parse_raw_od(desc):
+    """원소재 DESC('Tube,Raw (9.52*0.7)'/'7*0.55 고강도관')에서 외경·두께·고강도여부."""
+    g = '고강도' if (desc and '고강' in str(desc)) else None
+    od = th = None
+    if desc:
+        m = re.search(r'(\d+\.?\d*)\s*[\*xX×]\s*(\d+\.?\d*)', str(desc))
+        if m:
+            od = float(m.group(1)); th = float(m.group(2))
+    return g, od, th
+
+def _load_quote_spec():
+    """(vendor, assy_upper) → [(외경,두께,soyo_weight)] 수불 부품(스펙 파싱)."""
+    tx = _tx(); tc = tx.cursor()
+    tc.execute("SELECT vendor, UPPER(LTRIM(RTRIM(assy_code))), spec, ISNULL(soyo_weight,0) "
+               "FROM nx.coop_quote_part_v2 WHERE ISNULL(is_active,1)=1 AND ISNULL(settle_exclude,0)=0 AND ptype_v2=N'수불'")
+    d = {}
+    for v, a, spec, sw in tc.fetchall():
+        od = th = None
+        if spec and 'x' in str(spec).lower():
+            try:
+                p = str(spec).lower().split('x'); od = float(p[0]); th = float(p[1])
+            except Exception:
+                pass
+        d.setdefault((str(v).strip(), a), []).append((od, th, float(sw or 0)))
+    tx.close()
+    return d
+
+def _expand_spec(bcur, vendor, code, qspec, seen, acc, eqb):
+    """완제품 소요 동을 규격별로: 자기 수불부품 + 조립SUB(자체BOM) 재귀."""
+    if code in seen:
+        return
+    seen = seen | {code}
+    for od, th, sw in qspec.get((vendor, code), []):
+        if sw > 0 and od:
+            acc.append((od, th, sw * eqb))
+    for ch in _cs_kids(bcur, code):
+        if _cs_kids(bcur, ch):
+            _expand_spec(bcur, vendor, ch, qspec, seen, acc, eqb)
+
+def compute_quote_lme(ym):
+    """★규격별 LME 정산금액. 담당 MASTER 모델: 규격(재질·외경)별 재고(출고−소요) × (현물가−사급가).
+       현물가/사급가 = nx.price_metal(apply_ym). 재질=고강도/CU. compute_quote와 독립.
+       반환 {CUST_CODE: {raw_out,raw_in,raw_diff,settle_amt,unmapped_out,specs:[...]}}."""
+    PRICE, hs, canon = _load_price_metal(ym)
+    qspec = _load_quote_spec()
+    cn = _ro(); cur = cn.cursor(); bcur = cn.cursor()
+    mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
+    buck = {}   # cc -> {(재질,외경): [출고,소요]}
+    unmap = {}  # cc -> 미매핑 출고
+    # 출고: tag5 원소재(210·KG·E/G), 외경은 DESC
+    cur.execute(f"""{mg}
+      SELECT A.CUST_CODE, SUM(-A.MAINT_QTY), MAX(M.ITEM_DESC)
+      FROM PU_T_STOCK_MAINT A JOIN PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      WHERE A.MAINT_TAG='5' AND {win} AND M.ITEM_SGROUP='210' AND M.UNIT='KG' AND M.ITEM_LGROUP IN ('E','G')
+      GROUP BY A.CUST_CODE, A.MAT_CODE""")
+    for cc, q, desc in cur.fetchall():
+        if cc not in _COOP_CUST_VENDOR:
+            continue
+        q = float(q or 0); gk, od, th = _parse_raw_od(desc)
+        if not od:
+            unmap[cc] = unmap.get(cc, 0.0) + q; continue
+        g = gk or _classify_mat(od, th, hs, canon)
+        buck.setdefault(cc, {}).setdefault((g, _snap_od(od, canon)), [0.0, 0.0])[0] += q
+    # 소요: 완제품 입고(9/S/C/G/H) × 견적 규격별 동, CG2 전개
+    cur.execute(f"""{mg}
+      SELECT A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))), SUM(A.MAINT_QTY)
+      FROM PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+      WHERE A.MAINT_TAG IN ('9','S','C','G','H') AND {win}
+      GROUP BY A.CUST_CODE, UPPER(LTRIM(RTRIM(A.MAT_CODE))) HAVING SUM(A.MAINT_QTY)>0""")
+    ingo = cur.fetchall()
+    for cc, mat, q in ingo:
+        vendor = _COOP_CUST_VENDOR.get(str(cc).strip())
+        if not vendor:
+            continue
+        acc = []; _expand_spec(bcur, vendor, mat, qspec, set(), acc, float(q or 0))
+        for od, th, w in acc:
+            g = _classify_mat(od, th, hs, canon)
+            buck.setdefault(cc, {}).setdefault((g, _snap_od(od, canon)), [0.0, 0.0])[1] += w
+    cn.close()
+    res = {}
+    for cc, sp in buck.items():
+        tout = tin = tamt = 0.0; specs = []
+        for (g, od), (o, i) in sorted(sp.items()):
+            std, pp = _price_lookup(g, od, PRICE)
+            diff = (std - pp) if (std is not None and pp is not None) else 0.0
+            stock = o - i; amt = stock * diff
+            tout += o; tin += i; tamt += amt
+            specs.append({"mat": g, "od": od, "out": round(o, 1), "in": round(i, 1),
+                          "diff": round(stock, 1), "spot": (round(std) if std else None),
+                          "sagub": (round(pp) if pp else None), "amt": round(amt)})
+        res[cc] = {"raw_out": round(tout, 1), "raw_in": round(tin, 1), "raw_diff": round(tout - tin, 1),
+                   "settle_amt": round(tamt), "unmapped_out": round(unmap.get(cc, 0.0), 1),
+                   "specs": sorted(specs, key=lambda x: -abs(x["amt"]))}
+    return res

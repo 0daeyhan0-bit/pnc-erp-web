@@ -277,7 +277,7 @@ def _bom_tree_nx(item, real):
 @router.get("/api/bom/tree")
 def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, description="1=실사용전개(원가제외 스킵+제작품만 전개,매입중단)=실원가용 일치, 0=전체전개"),
              route_id: int = Query(0, description="0/미지정=마스터 실사용 BOM(완전불변), >0=조달후보(nx.sourcing_route_line) 구조를 동일스키마로 반환"),
-             src: str = Query('nx', description="nx=단일 정규화 BOM(nx.bom_line, 용접봉제외+자도번정규화) [기본], cs=현행 라이브 CS_M_ITEM_BOM(대조·롤백용)")):
+             src: str = Query('cs', description="cs=현행 라이브 CS_M_ITEM_BOM [기본]. nx=nx.bom_line(원가엔진 정본, 용접봉제외+자도번정규화) — ★nx.bom_line≠CS(자도번 SUB, 레거시SP정합) 규명중이라 기본은 cs 유지")):
     """다단계 BOM 트리(레벨별) — CS_M_ITEM_BOM 재귀전개. 매입처=컴포넌트 IN_CUST_CODE(현행 벤더).
     real=1(기본): 견적원가조회(실원가용, SP_CS_견적서(BOM)) 전개와 일치 — CS_CALC_EXCEPT_FLAG='1'(원가제외=현행아닌 조달경로) 제외 + MAKE_TYPE='1'(제작/자체)만 하위전개, 매입/구매품(구매완제)은 전개중단.
     route_id>0: 조달후보 계층(nx.sourcing_route_line)을 동일 트리 스키마로 반환(마스터 미조회)."""

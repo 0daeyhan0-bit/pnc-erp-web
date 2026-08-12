@@ -207,6 +207,26 @@ def salemagam_weight(ym: str = Query("")):
     return {"ym": y, "real_raw": (rr if rr is not None else 25000.0), "sagub_raw": (sr if sr is not None else 20000.0),
             "real_weld": rw, "sagub_weld": (sw if sw is not None else 21100.0), "rows": data}
 
+@router.get("/api/salemagam/weight_quote")
+def salemagam_weight_quote(ym: str = Query("")):
+    """★규격별 LME 정산금액(견적기준): 규격(재질·외경)별 재고(출고−소요)×(현물가−사급가).
+       현물가/사급가=nx.price_metal(해당월). 절삭 8개 협력사만. compute_quote_lme 사용."""
+    y = _dig4(ym) or _cur_ym()
+    try:
+        data = weight_calc.compute_quote_lme(y)
+    except Exception as e:
+        raise HTTPException(500, f"LME 정산 계산 오류: {e}")
+    ven = {'2142': '세광산업', '233': '썬텍코리아', '2148': '대원산업', '2096': '미래정밀',
+           '2306': '명진산업', '2068': '이젠터', '2266': '케이비', '2048': '중앙정밀'}
+    rows = []
+    for cc, d in data.items():
+        rows.append({"cc": cc, "nm": ven.get(cc, cc), "raw_out": d["raw_out"], "raw_in": d["raw_in"],
+                     "raw_diff": d["raw_diff"], "settle_amt": d["settle_amt"],
+                     "unmapped_out": d.get("unmapped_out", 0), "specs": d.get("specs", [])})
+    rows.sort(key=lambda r: r["settle_amt"])
+    total = round(sum(r["settle_amt"] for r in rows))
+    return {"ym": y, "rows": rows, "total": total}
+
 @router.get("/api/matprice/list")
 def matprice_list(ym: str = Query("")):
     """월별 원소재/용접봉 시세·사급가 조회."""
