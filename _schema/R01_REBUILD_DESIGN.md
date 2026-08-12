@@ -3,6 +3,7 @@
 > 목적: 현행 실사용 BOM(R01)을 **정규화된 SUB(`품번_S{nn}`, nx.sub_alias)** 기반으로 nx에 실물 적재. 기존 R01은 라이브 CS 합성(SUB 미정리 자도번) 상태 → 정규 SUB로 재구축.
 > 상태: **착수(2026-08-12)**. 원칙: nx 쓰기·근거키·멱등·원가 diff0 게이트·롤백가능. 정본 [[BOM_STRUCTURE_CANON]] §9 · [[MIGRATION_ISSUES]] §G · 산출물 nx.sub_alias.
 > ★마이그레이션 필독: 최종 일괄 이관 시 이 문서의 Phase 순서·검증 게이트를 그대로 적용.
+> ★★주말 마이그레이션 실행 런북 = **`_migration/sub_norm/RUNBOOK.md`**(순서·nx객체·게이트·규칙·롤백) + 스크립트 7개(`_migration/sub_norm/*.py`). ③원가 안전 확인: 원가엔진 실원가 15/15 정상·앵커 5722.2 불변(정규SUB/routing/R01 적재가 엔진 nx.bom 무영향, r_cost_regress.py). 원가=CS엔진 병행 유지·diff0.
 
 ---
 
