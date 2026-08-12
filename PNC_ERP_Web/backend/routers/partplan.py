@@ -12,13 +12,13 @@ router = APIRouter()
 # 레거시 SP_PR_CREATE_PLAN_협력사계획_생성 정렬(98% 재현): PR_M_ITEM_BOM(except≠1) + 가공처(work_code‖in_cust)
 #  + charindex 중복제거(조상에 같은 가공처면 컷) + 조달프로파일 오버레이(유효기간·배분).
 def _compose_maps():
-    cn = _conn(); cur = cn.cursor()
+    cn = _nx(); cur = cn.cursor()   # ★nx전환: nx 충실복제 읽기
     try:
-        cur.execute("SELECT ITEM_CODE, LTRIM(RTRIM(ISNULL(WORK_CODE,''))), ISNULL(IN_CUST_CODE,'') FROM PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, LTRIM(RTRIM(ISNULL(WORK_CODE,''))), ISNULL(IN_CUST_CODE,'') FROM nx.PR_M_ITEM")
         WCEN = {}
         for ic, wc, inc in cur.fetchall():
             WCEN[ic] = wc if wc > '' else str(inc).strip()
-        cur.execute("""SELECT ITEM_CODE, MAT_CODE, USE_QTY FROM PR_M_ITEM_BOM
+        cur.execute("""SELECT ITEM_CODE, MAT_CODE, USE_QTY FROM nx.PR_M_ITEM_BOM
             WHERE ISNULL(EXCEPT_FLAG,'0')<>'1' AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'""")
         CH = {}
         for p, c, q in cur.fetchall():
@@ -62,13 +62,13 @@ def plan_compose(payload: dict = Body(...)):
             JOIN (SELECT RTRIM(ITEM_CODE) item_code,WORK_ORDER,SUM(ORDER_QTY) order_qty
                   FROM nx.recv_dtl WHERE ISNULL(ITEM_CODE,'')>'' GROUP BY RTRIM(ITEM_CODE),WORK_ORDER) r
               ON p.WORK_ORDER=r.WORK_ORDER
-            WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM b WHERE b.MODEL_NO=p.model_no AND b.C_ITEM_CODE=r.item_code)
+            WHERE NOT EXISTS(SELECT 1 FROM nx.PR_M_MODEL_BOM b WHERE b.MODEL_NO=p.model_no AND b.C_ITEM_CODE=r.item_code)
               AND NOT EXISTS(SELECT 1 FROM nx.model_bom m WHERE m.MODEL_NO=p.model_no AND m.C_ITEM_CODE=r.item_code)
-              AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM_EXCEPT e WHERE e.MODEL_NO=p.model_no AND e.C_ITEM_CODE=r.item_code)
+              AND NOT EXISTS(SELECT 1 FROM nx.PR_M_MODEL_BOM_EXCEPT e WHERE e.MODEL_NO=p.model_no AND e.C_ITEM_CODE=r.item_code)
             GROUP BY p.model_no,r.item_code""")
         # ASSY 매핑: ①모델BOM(MODEL→[ASSY×use_qty], 유효일자 버전) ②주문 fallback. + 제외조건.
         mbom = {}
-        cur.execute("SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, MAKE_YMD, TO_APPLY_YMD FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM")
+        cur.execute("SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, MAKE_YMD, TO_APPLY_YMD FROM nx.PR_M_MODEL_BOM")
         for m, ci, uq, my, ty in cur.fetchall():
             mbom.setdefault(str(m).strip(), []).append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
         try:  # 우리 신규등록 모델BOM(nx) union
@@ -78,10 +78,10 @@ def plan_compose(payload: dict = Body(...)):
         except Exception:
             pass
         mbexcept = set()  # 모델BOM제외조건
-        cur.execute("SELECT MODEL_NO, C_ITEM_CODE FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM_EXCEPT")
+        cur.execute("SELECT MODEL_NO, C_ITEM_CODE FROM nx.PR_M_MODEL_BOM_EXCEPT")
         for m, ci in cur.fetchall(): mbexcept.add((str(m).strip(), str(ci).strip()))
         recvmap = {}
-        cur.execute("SELECT DISTINCT WORK_ORDER, ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
+        cur.execute("SELECT DISTINCT WORK_ORDER, ITEM_CODE FROM nx.SA_T_RECV_DTL WHERE WORK_ORDER>''")
         for wo, ic in cur.fetchall(): recvmap.setdefault(str(wo).strip(), set()).add(str(ic).strip())
         # 조달프로파일(현행 활성): item→[(sg,vc,alloc,af,at)]
         cur.execute("""SELECT item_code, supply_gubun, ISNULL(vendor_code,''), ISNULL(alloc_ratio,100),
