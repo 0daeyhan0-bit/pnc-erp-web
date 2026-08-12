@@ -68,9 +68,20 @@
 - ⚠**결합코드 이슈**: `MJU65517914+용접링`처럼 관+링이 한 코드인 경우 존재 → 용접링을 별도 사급부품으로 분리할지/결합 유지할지 데이터정리 미결(스케일 전 검토).
 - R01 빌더 반영: `is_weld()`가 용접링은 False(유지), 용접봉/은납재만 True(제외).
 
-### 5d. 남은 것 (전 제품 스케일 전)
-- 원가 diff0 검증(route/cost 또는 nx_cost_engine 오라클) 파일럿에 추가 → 구조 뿐 아니라 원가 재현 확인.
-- 용접링 결합코드 정리 + 사급 플래그 반영.
-- 공용 SUB(SUB_SHARED)가 여러 제품 R01에서 같은 canonical 참조 = 재고 1 pool 검증.
+### 5d. ★재료비 diff0 검증 통과 (2026-08-12, r_pilot_verify.py) — 10/10
+- **리프별 누적소요량(cumulative qty) 레거시 vs R01 route = 완전 일치(diff0)** 10/10. → 리프·수량 동일 = **재료비 diff0**(단가는 품목별 동일). 누적수량 곱셈(SUB qty×child qty) 정상.
+- 2중 게이트 통과: ①리프셋 일치 10/10 ②재료비 누적소요량 diff0 10/10.
+
+### 5e. 남은 것 (전 제품 스케일 전) — ★기록 필수(레거시 전체 이관 스펙)
+- **★공정/가공비 정규화(다음 핵심)**: R01 route는 현재 **BOM 구조(재료비)만**. **공정(routing)·가공비는 별도 레이어** — 자도번 routing(CS_T_ITEM_PROC) → `품번_S{nn}` routing으로 **평행 정규화** 필요(SUB가 정규코드로 바뀌면 그 공정도 따라와야 완전 원가 diff0). sourcing_route_proc/nx.routing에 정규 SUB 공정 이관.
+- **용접링 결합코드**(`MJU+용접링`) 정리 + 사급 플래그(§5c).
+- **공용 SUB 1 pool 검증**: SUB_SHARED canonical이 여러 제품 R01에서 같은 코드 참조 = 재고 1 pool(실증).
+- **가공비 diff0**: 공정 정규화 후 nx_cost_engine 오라클로 실원가(재료+가공+LME) 전체 diff0.
+- **스케일 방식**: PILOT_R01(note) → 전 제품 R01 재빌드(멱등, note 제거/route_no=1). 대상 = 안전스코프 제품(납품이력+사용중BOM). 배치·검증 로그 기록.
+
+### 5f. ★전 제품 dry-run (2026-08-12, r_scale_verify.py) — 변환로직 모집단 검증
+- 대상 = 납품제품+BOM보유 **1,357**. **BOM 전개 정상 1,355(99.85%)**. **순환참조 0**.
+- **미정규 변형 2**(`AJJ74578301-3-1`·`-3-2`, 활성 BOM 부모인데 sub_alias 누락 = 깊은 sub-of-sub). → **빌더 견고화**: 미정규 '-'변형+자식보유 → **재귀 전개**(pass-through)로 처리. 사후 sub_alias 보강 대상.
+- 이상 2건(리프0) = 자식이 전부 용접봉/필터된 케이스, 검토.
 
 ## 관련: [[BOM_STRUCTURE_CANON]] [[MIGRATION_ISSUES]] [[NX_BOM_SCHEMA]] [[SOURCING_COST_INTEGRATION]]
