@@ -85,9 +85,9 @@ const priceInvView=(host)=>{
        <button class="btn" id="iv-go">🔍 조회</button><div class="spacer"></div>
        <span class="rowcount">${st.busy?'조회중…':`역전 <b style="color:#c0392b">${rows.length}</b>건 · 20${esc(st.retYm.slice(0,2))}년 ${esc(st.retYm.slice(2,4))}월`}</span></div>
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl">
-       <thead><tr><th>품번</th><th>품명</th><th class="center">분류</th><th>매입처</th><th class="num">입고가</th><th class="num">입고량</th><th>사급처</th><th class="num">출고가</th><th class="num">출고량</th><th class="num">역전액</th><th>상위 Assy(완제품)</th></tr></thead>
-       <tbody>${st.busy?`<tr><td colspan="11" class="empty">조회중…</td></tr>`:(rows.map(r=>`
-         <tr><td style="white-space:nowrap"><b>${esc(r.item)}</b></td>
+       <thead><tr><th>품번</th><th>품명</th><th class="center">분류</th><th>매입처</th><th class="num">입고가</th><th class="num">입고량</th><th>사급처</th><th class="num">출고가</th><th class="num">출고량</th><th class="num">역전액</th><th class="num">총역전액</th><th>상위 Assy(완제품)</th></tr></thead>
+       <tbody>${st.busy?`<tr><td colspan="12" class="empty">조회중…</td></tr>`:(rows.map(r=>`
+         <tr><td class="cap" style="max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item)}"><b>${esc(r.item)}</b></td>
            <td class="cap" style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.nm)}">${esc(r.nm)}</td>
            <td class="center" style="font-size:11px;color:#667">${esc(r.sg_nm||r.sg)}</td>
            <td class="cap" style="max-width:78px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.pur_cust_nm)}">${esc(r.pur_cust_nm)}</td>
@@ -97,7 +97,8 @@ const priceInvView=(host)=>{
            <td class="num">${won(r.sag)}</td>
            <td class="num" style="color:#889">${won(r.outq)}</td>
            <td class="num" style="color:#c0392b;font-weight:700">${won(r.diff)}</td>
-           <td class="cap" style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="${esc((r.assy||[]).join(', '))}">${(r.assy&&r.assy.length)?esc(r.assy.join(', ')):'<span style=\"color:#aaa\">(직접)</span>'}</td></tr>`).join('')||`<tr><td colspan="11" class="empty">해당월 입고+출고 역전 품목 없음</td></tr>`)}</tbody></table></div>`;
+           <td class="num" style="color:#8a1f1f;font-weight:800;background:#fbeeee">${won((r.diff||0)*(r.outq||0))}</td>
+           <td class="cap" style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="${esc((r.assy||[]).join(', '))}">${(r.assy&&r.assy.length)?esc(r.assy.join(', ')):'<span style=\"color:#aaa\">(직접)</span>'}</td></tr>`).join('')||`<tr><td colspan="12" class="empty">해당월 입고+출고 역전 품목 없음</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const ym=g('#iv-ym');ym.onchange=e=>{st.ym=e.target.value;load();};
     const q=g('#iv-q');q.oninput=e=>st.q=e.target.value;q.onkeydown=e=>{if(e.key==='Enter')load();};

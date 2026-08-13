@@ -319,7 +319,7 @@ def price_inversion(ym: str = Query(""), q: str = Query(""), limit: int = Query(
             FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' GROUP BY MAT_CODE, CUST_CODE) x WHERE rn=1)
         SELECT TOP {lim} inb.mat item, ISNULL(m.ITEM_DESC,'') nm, ISNULL(m.ITEM_SGROUP,'') sg,
           ic.CUST_CODE pur_cust, CAST(inb.amt/NULLIF(inb.q,0) AS DECIMAL(18,2)) pur, CAST(inb.q AS DECIMAL(18,2)) inq,
-          oc.CUST_CODE sag_cust, CAST(outb.amt/NULLIF(outb.q,0) AS DECIMAL(18,2)) sag, CAST(outb.q AS DECIMAL(18,2)) outq,
+          oc.CUST_CODE sag_cust, CAST(outb.amt/NULLIF(outb.q,0) AS DECIMAL(18,2)) sag, CAST(-outb.q AS DECIMAL(18,2)) outq,
           CAST((inb.amt/NULLIF(inb.q,0)) - (outb.amt/NULLIF(outb.q,0)) AS DECIMAL(18,2)) diff
         FROM inb JOIN outb ON inb.mat=outb.mat
           JOIN nx.PR_M_ITEM m ON m.ITEM_CODE=inb.mat
