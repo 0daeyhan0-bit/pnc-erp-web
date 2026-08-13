@@ -583,13 +583,12 @@ function itemLiveView(c, mat){
      </div>
      <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>${COLS.map(x=>`<th class="${x[2]==='n'?'num':''}">${x[1]}</th>`).join('')}</tr></thead>
-      <tbody>${st.loading?spinRow(COLS.length):(st.rows.length?st.rows.map(r=>`<tr>${COLS.map((x,i)=>{const v=r[x[0]];
-        if(x[0]==='nature')return `<td style="white-space:nowrap"><span style="font-size:10px;color:#33507d">${esc(String(v||'').replace(/^\d+\./,''))}</span>${r.active===0?' <span title="정리대상 후보" style="color:#c0392b;font-weight:700">▲</span>':''}</td>`;
-        return `<td class="${x[2]==='n'?'num':''} ${typeof x[2]==='number'?'cap':''}" ${typeof x[2]==='number'?`title="${esc(v)}" style="max-width:${x[2]}px;overflow:hidden;text-overflow:ellipsis"`:''}>${i===0?`<b>${esc(v)}</b>`:(x[2]==='n'?won(v):esc(v))}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${COLS.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
+      <tbody>${rowsHTML()}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     g('#it-go').onclick=()=>{st.q=g('#it-q').value;st.lg=g('#it-lg').value;st.sg=g('#it-sg').value;st.nat=g('#it-nat').value;load();};
     g('#it-q').onkeyup=e=>{if(e.key==='Enter')g('#it-go').click();};
-    attachResizers(c);
+    // ★UI규칙: 헤더 더블클릭=정렬(enableSort) + 컬럼폭 드래그(addResizer 내장). tbody만 갱신해 헤더/화살표 보존
+    enableSort(c, COLS.map(x=>x[0]), ()=>st.rows, ()=>{const tb=c.querySelector('tbody'); if(tb)tb.innerHTML=rowsHTML();});
   };
   load();
 }
