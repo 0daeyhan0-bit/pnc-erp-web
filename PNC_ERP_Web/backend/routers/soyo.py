@@ -184,7 +184,7 @@ def _forecast_plan_gn(cur, b, t):
 def sales_forecast(base: str = Query(""), to: str = Query("")):
     """★영업예상매출현황 라이브 API (레거시 dw_pr_plan_190 재현, 정적스냅샷 대체).
        소스=sa_t_plan_item_dtl(union1)+pr_t_plan_input(union4). 단가=pr_m_item_cost(COST_TAG in S/E=LG판매가, 품목단위 최신, cust무관) KRW.
-       gross=차감전(=원계획). net=차감후=계획−기출고(sa_t_sale_dtl−출하반품, 제번+도번 소진, 레거시020 정본). [[nextgen-erp-sales-forecast-190]]"""
+       gross=차감전(=라이브190). net=차감후=gross − union4(pr_t_plan_input)의 첫계획일 과대분 제거. [[nextgen-erp-sales-forecast-190]]"""
     cn = _conn(); cur = cn.cursor()
     try:
         b = _d6(base) if base.strip() else None
@@ -202,11 +202,19 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
                 t = _dt(_yr, _mo, _dy).strftime('%y%m%d')
             except Exception:
                 t = None
-        # ★계획 gross + 출고차감 net (레거시 020 정본, 공용헬퍼)
-        days_set, gross, net = _forecast_plan_gn(cur, b, t)
-        if not gross:
+        tc = " AND PLAN_YMD<=?" if t else ""
+        # union1(sa_t_plan_item_dtl) + union4(pr_t_plan_input), item×ymd×src · 기간 base~to
+        cur.execute(f"""
+          SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
+            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
+          UNION ALL
+          SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
+            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
+          *([b, t, b, t] if t else [b, b]))
+        src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
+        if not src:
             return {"base": b, "to": (t or b), "days": [], "rows": []}
-        base_ymd = min(days_set) if days_set else b
+        base_ymd = min(y for _, y, _, _ in src)  # 첫 계획일(차감 기준)
         # 단가: COST_TAG in (S,E) 최신 COST_APPLY_YMD, 품목단위(cust무관)
         cur.execute("""SELECT c.ITEM_CODE, c.ITEM_COST FROM pr_m_item_cost c
             JOIN (SELECT ITEM_CODE, MAX(COST_APPLY_YMD) mx FROM pr_m_item_cost WHERE COST_TAG IN('S','E') GROUP BY ITEM_CODE) m
@@ -218,10 +226,16 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
-        days = days_set; agg = {}
-        for item in set(list(gross.keys()) + list(net.keys())):
-            agg[item] = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0),
-                         "gdays": dict(gross.get(item, {})), "ndays": dict(net.get(item, {}))}
+        agg = {}; days = set()
+        for item, ymd, s, qty in src:
+            days.add(ymd)
+            g = agg.get(item)
+            if not g:
+                g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0), "gdays": {}, "ndays": {}}
+                agg[item] = g
+            g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty
+            if not (s == 'u4' and ymd == base_ymd):   # ★차감: pr_t_plan_input(u4) 첫날분 제외 (레거시190 정본)
+                g["ndays"][ymd] = g["ndays"].get(ymd, 0) + qty
         rows = []
         for g in agg.values():
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
@@ -283,23 +297,34 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             if u is not None: sac[str(prod).strip()] = float(u or 0)
         cur.execute(f"SELECT MAX(apply_ymd) FROM {NXP}price_item WHERE price_type=N'매입' AND vendor_code='LG'")
         _af = cur.fetchone(); asof = str(_af[0]).strip() if _af and _af[0] else ""
-        # ★계획 gross + 출고차감 net (레거시 020 정본, 매출과 동일 공용헬퍼) → 사급비 보유 완제품만
-        days_all, gross, net = _forecast_plan_gn(cur, b, t)
-        items = [it for it in set(list(gross.keys()) + list(net.keys())) if it in sac]
-        if not items:
+        # 계획 완제품 × 일자 × src (영업예상매출과 동일 소스)
+        cur.execute(f"""
+          SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
+            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
+          UNION ALL
+          SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
+            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
+          *([b, t, b, t] if t else [b, b]))
+        src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
+        src = [r for r in src if r[0] in sac]   # 사급비 보유 완제품만
+        if not src:
             return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0,
                     "n_parts": 0, "asof": asof, "priced": len(sac)}
-        days = set()
-        for it in items:
-            days.update(gross.get(it, {}).keys()); days.update(net.get(it, {}).keys())
-        base_ymd = min(days) if days else b
+        base_ymd = min(y for _, y, _, _ in src)
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
-        agg = {}
-        for item in items:
-            agg[item] = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": sac.get(item, 0),
-                         "gdays": dict(gross.get(item, {})), "ndays": dict(net.get(item, {}))}
+        agg = {}; days = set()
+        for item, ymd, s, qty in src:
+            days.add(ymd)
+            g = agg.get(item)
+            if not g:
+                g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": sac.get(item, 0),
+                     "gdays": {}, "ndays": {}}
+                agg[item] = g
+            g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty
+            if not (s == 'u4' and ymd == base_ymd):
+                g["ndays"][ymd] = g["ndays"].get(ymd, 0) + qty
         rows = []
         for g in agg.values():
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
