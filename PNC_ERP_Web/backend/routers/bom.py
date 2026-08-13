@@ -10,21 +10,24 @@ from common import _ITEM_MAKE
 router = APIRouter()
 
 @router.get("/api/bom/search")
-def bom_search(q: str = Query('', description="품번/품명 부분검색")):
+def bom_search(q: str = Query('', description="품번/품명 부분검색"),
+               include_past: int = Query(0, description="0=현행(status='사용')만[기본], 1=과거(휴면)포함")):
     q = q.strip()
     cn = _nx(); cur = cn.cursor()
     try:
         like = f'%{q}%'
+        # ★현행/과거 토글(2026-08-13): 기본은 현행(status='사용')만 — 휴면(과거) 품번/BOM 숨김. include_past=1이면 전체.
+        past = "" if int(include_past or 0) else "AND ISNULL(i.status,N'사용')=N'사용'"
         # BOM 보유 품목 우선. 인덱스(item_code PK) 활용, TOP 60 제한.
-        cur.execute("""
-            SELECT TOP 60 i.item_code, i.item_name, i.item_type,
+        cur.execute(f"""
+            SELECT TOP 60 i.item_code, i.item_name, i.item_type, ISNULL(i.status,'') st,
               CASE WHEN h.item_code IS NOT NULL THEN 1 ELSE 0 END AS has_bom
             FROM nx.item i
             LEFT JOIN (SELECT DISTINCT item_code FROM nx.bom_header) h ON h.item_code = i.item_code
-            WHERE i.item_code LIKE ? OR i.item_name LIKE ?
+            WHERE (i.item_code LIKE ? OR i.item_name LIKE ?) {past}
             ORDER BY has_bom DESC, i.item_code""", like, like)
-        rows = [{"item": r[0], "name": r[1], "type": r[2], "has_bom": bool(r[3])} for r in cur.fetchall()]
-        return {"rows": rows}
+        rows = [{"item": r[0], "name": r[1], "type": r[2], "status": str(r[3]).strip(), "has_bom": bool(r[4])} for r in cur.fetchall()]
+        return {"rows": rows, "include_past": int(include_past or 0)}
     finally:
         cn.close()
 

@@ -972,7 +972,7 @@ const PROC_MODAL_CSS=`<style>
 SCREEN.unifybom=(c,ro)=>{
   const API=API_BASE;
   const RO=(ro===true);
-  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={};
+  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false;
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
   let codes={}, vlist=[];
   let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
@@ -1066,7 +1066,7 @@ SCREEN.unifybom=(c,ro)=>{
   const date2ymd=d=>d?d.slice(2).replace(/-/g,''):'';                                            // date→YYMMDD(백엔드 파라미터)
   const doSearch=async q=>{q=(q||'').trim();query=q;item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';
     if(!q){results=[];draw();return;}
-    try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}`);results=(await r.json()).rows||[];msg='';}
+    try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}&include_past=${includePast?1:0}`);results=(await r.json()).rows||[];msg='';}
     catch(e){msg='백엔드 연결 실패 — 백엔드(uvicorn app:app --port 8010) 실행 필요';results=[];}draw();};
   const load=async (it, enterEdit)=>{it=(it||'').trim().toUpperCase();if(!it)return;loading=true;msg='';editMode=false;naeFor='';silFor='';draw();
     if(!codes.metal)await loadCodes();
