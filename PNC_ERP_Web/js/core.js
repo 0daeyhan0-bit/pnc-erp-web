@@ -562,6 +562,10 @@ function itemLiveView(c, mat){
     ['diam','외경','n'],['thick','두께','n'],['length','길이','n'],['weight','단위중량','n'],['metal','재질'],['work','작업처'],
     ['make_type','제작유형'],['status','상태'],['safe_min','안전min','n'],['safe_max','안전max','n'],['kitting_min','키팅최소','n'],
     ['weld_in','용접IN','n'],['weld_out','용접OUT','n'],['tariff','관세율','n'],['remarks','비고',140]]);
+  // tbody만 렌더(정렬 시 헤더 유지·화살표 보존용) — draw와 재사용
+  const rowsHTML=()=> st.loading?spinRow(COLS.length):(st.rows.length?st.rows.map(r=>`<tr>${COLS.map((x,i)=>{const v=r[x[0]];
+        if(x[0]==='nature')return `<td style="white-space:nowrap"><span style="font-size:10px;color:#33507d">${esc(String(v||'').replace(/^\d+\./,''))}</span>${r.active===0?' <span title="정리대상 후보" style="color:#c0392b;font-weight:700">▲</span>':''}</td>`;
+        return `<td class="${x[2]==='n'?'num':''} ${typeof x[2]==='number'?'cap':''}" ${typeof x[2]==='number'?`title="${esc(v)}" style="max-width:${x[2]}px;overflow:hidden;text-overflow:ellipsis"`:''}>${i===0?`<b>${esc(v)}</b>`:(x[2]==='n'?won(v):esc(v))}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${COLS.length}" class="empty">조회 결과 없음</td></tr>`);
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">📦 ${mat?'자재 목록 조회':'품목 조회'} <span style="font-size:12px;color:var(--muted);font-weight:400">라이브 · ${mat?'구매 대상 자재':'레거시 w_pr_master_010'}</span></div>
