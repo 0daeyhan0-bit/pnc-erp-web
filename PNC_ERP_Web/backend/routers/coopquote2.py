@@ -276,6 +276,13 @@ def coopquote_set_role(payload: dict = Body(...)):
         uw = float(row[0] or 0); soyo = float(row[1] or 1); cur_mat = float(row[2] or 0); sw0 = float(row[3] or 0)
         if uw <= 0 and sw0 > 0:
             uw = sw0   # unit_wt 없으면 soyo_weight로
+        if uw <= 0:   # ★사급 등 중량 0인 부품을 제작동관 전환 시: 프론트(모달 bom-form)가 가진 geom 개당중량 사용
+            try:
+                _puw = float(payload.get("unit_weight") or 0)
+            except Exception:
+                _puw = 0.0
+            if _puw > 0:
+                uw = _puw
         mat_before = None; ptype_disp = pt; sw = 0.0; uw_save = None
         if pt == "수불":   # 제작동관: 인상후=중량×현재사급가(20000/22000) · 인상전=중량×종전사급가(입력)
             sg = 22000 if is_high else 20000
