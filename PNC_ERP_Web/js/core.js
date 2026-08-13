@@ -575,7 +575,7 @@ function priceHistView(host){
   const API=API_BASE;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={from:iso(new Date(T.getTime()-14*864e5)),to:iso(T),item:'',tag:'',lgroup:'',sgroup:'',cust:'',changed:true};
+  let F={from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T),item:'',tag:'',lgroup:'',sgroup:'',cust:'',changed:true};
   let vT=null;
   let data={rows:[],cnt:0,changed:0}, loading=false, msg='';
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(0,2)}/${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:(s||'');
@@ -1469,7 +1469,7 @@ function wrCrud(host, cfg){
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date(), back=cfg.days||20;
-  const st={F:Object.assign({from:iso(new Date(T.getTime()-back*864e5)),to:iso(T)},cfg.filt0||{}),
+  const st={F:Object.assign({from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T)},cfg.filt0||{}),
             data:{rows:[],cnt:0}, loading:false, msg:'', form:null, sel:new Set()};
   const load=async()=>{st.loading=true;render();
     try{const r=await fetch(`${API}${cfg.listEp}?`+new URLSearchParams(cfg.buildQS(st.F)));st.data=await r.json();st.msg='';}
@@ -1614,7 +1614,7 @@ function wrLiveLedger(body, kind){
   const ymd=s=>(s&&(''+s).length===6)?`${(''+s).slice(0,2)}/${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:(s||'');
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date(); const isAdj=(kind==='adj');
-  let F={from:iso(new Date(T.getTime()-20*864e5)),to:iso(T),part:'',wc:''};
+  let F={from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T),part:'',wc:''};
   let data={rows:[],cnt:0,sum_qty:0}, loading=false, msg='';
   const load=async()=>{loading=true;draw();
     const qs=new URLSearchParams({kind,from_ymd:F.from,to_ymd:F.to,part:F.part,wc:F.wc});
@@ -2002,7 +2002,7 @@ function qcRead(host, cfg){
   const API=API_BASE;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date(), back=cfg.days||30;
-  const st={F:Object.assign({from:iso(new Date(T.getTime()-back*864e5)),to:iso(T)},cfg.filt0||{}),
+  const st={F:Object.assign({from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T)},cfg.filt0||{}),
             data:{rows:[],cnt:0}, loading:false, msg:'', sel:null, sub:null};
   const load=async()=>{st.loading=true;st.sub=null;render();
     try{const r=await fetch(`${API}${cfg.listEp}?`+new URLSearchParams(cfg.buildQS(st.F)));st.data=await r.json();st.msg='';}

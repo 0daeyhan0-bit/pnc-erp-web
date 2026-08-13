@@ -234,7 +234,7 @@ SCREEN.orderupload=(c)=>{
   const ymd=s=>(s&&(''+s).length===6)?`${(''+s).slice(0,2)}/${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:(s||'');
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={from:iso(new Date(T.getTime()-30*864e5)),to:iso(T),nfrom:'',nto:'',done:'all',item:'',wo:'',cr:''};
+  let F={from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T),nfrom:'',nto:'',done:'all',item:'',wo:'',cr:''};
   let data={rows:[],count:0,sum_qty:0,sum_amt:0}, loading=false, msg='', upcr='C', upfile=null;
   const load=async()=>{loading=true;draw();
     const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,need_from:F.nfrom,need_to:F.nto,done:F.done,item:F.item,wo:F.wo,cr:F.cr});
@@ -1376,7 +1376,7 @@ SCREEN.procresult=(c)=>{
     const API=API_BASE;
     const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
     const T=new Date();
-    let F={from:iso(new Date(T.getTime()-3*864e5)),to:iso(T),swork:'',line:'',item:''};
+    let F={from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T),swork:'',line:'',item:''};
     let data={rows:[],cnt:0,sum_qty:0}, loading=false, msg='';
     const load=async()=>{loading=true;draw();
       const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,swork:F.swork,line:F.line,item:F.item});
