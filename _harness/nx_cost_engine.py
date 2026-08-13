@@ -443,6 +443,21 @@ class NxCostEngine:
             walk(item, 1.0, set())
         return {k: round(v,2) for k,v in b.items()}
 
+    def sagub_sum(self, item, diffmap):
+        """완제품에 들어가는 사급부품들의 사급차액(개당) 합 = Σ diffmap[사급부품] × 누적소요qty.
+           diffmap={부품:사급차액(=실출고가−실입고가, 음수=손해)}. 사급부품(diffmap 보유)은 그 단위로 계상하고 하위 안 품."""
+        tot=[0.0]
+        def walk(node, q, seen):
+            if node in diffmap:
+                tot[0]+=diffmap[node]*q; return   # 사급 단위 = 그대로(하위 미전개)
+            info=self._load_item(node)
+            if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(node, info, seen):
+                for c,qty,cx,f,t,lx in self.lines(node):
+                    if cx or c in seen: continue
+                    walk(c, qty*q, seen|{node})
+        walk(item, 1.0, set())
+        return round(tot[0],2)
+
     def _lme_nodes(self, item, ymd, mult=1.0, seen=None, out=None):
         """lme_total과 동일 로직으로 per-node LME 사급차액 수집(그리드 방출용). out[node] += (std−partner)×중량×누적q."""
         if seen is None: seen=set()
