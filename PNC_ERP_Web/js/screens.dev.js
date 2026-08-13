@@ -565,8 +565,7 @@ SCREEN.costanalysis=(c)=>{
       recomputeAgg();
       if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
     }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
-    finally{rvBusy=false;renderBody();
-      const dl=c.querySelector('#ca-parts'); if(dl)dl.innerHTML=(D.rows||[]).slice(0,3000).map(r=>`<option value="${esc(r[0])}">`).join('');}
+    finally{rvBusy=false;renderBody();}
   };
   // 표시 컬럼: 직접입력은 입고수량(1)·LG총금액(20)·Impact(22) 제외 (수량 1 단품 관점)
   const colsOf=()=> mode==='direct'? NUM.filter(([i])=>![1,20,22].includes(i)) : NUM;
@@ -645,8 +644,7 @@ SCREEN.costanalysis=(c)=>{
        ${(typeof PERM==='undefined'||PERM.canEdit('costanalysis'))?`<label class="tl" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율로 전체 재계산">💲 단가 적용일자</label>
        <input class="inp" type="date" id="ca-ymd" value="${ymd2date(rvYmd)}" style="width:150px">
        <button class="btn" id="ca-regen" title="지정 단가일자로 nx엔진 재계산">🔄 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
-       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" list="ca-parts" value="${esc(q)}" placeholder="PART-NO 검색·선택" style="width:180px" autocomplete="off">
-       <datalist id="ca-parts">${(R||[]).slice(0,3000).map(r=>`<option value="${esc(r[0])}">`).join('')}</datalist>
+       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" value="${esc(q)}" placeholder="PART-NO 검색(타이핑하면 필터)" style="width:180px" autocomplete="off">
        <label class="chk"><input type="checkbox" id="ca-loss" ${lossOnly?'checked':''}> 적자만</label>
        <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
        <div class="spacer"></div><span class="rowcount" id="ca-cnt"></span>
