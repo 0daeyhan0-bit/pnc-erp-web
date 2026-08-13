@@ -2024,9 +2024,10 @@ def sourcing_proc_node_save(payload: dict = Body(...)):
 
 @router.get("/api/sourcing/sub/match")
 def sourcing_sub_match(route_id: int = Query(...)):
-    """★신규 SUB 중복검사 — 이 후보의 각 SUB 노드(부품셋+공정공수)가 기존 SUB(다른 후보/이 후보 포함)와 동일한지.
-       동일 판정: 직속 부품 child_item 셋(RAC 제외) 일치 AND 공정 {proc_code:round(wq,2)} 일치.
-       반환 matches: [{sub_line, sub_item, member_count, match_code, match_route_id}] — 코드가 다른 동일 SUB만."""
+    """★신규 SUB 중복검사 — 이 후보의 각 SUB 노드가 기존 SUB와 동일한지.
+       ①글로벌: nx.sub_registry(전 마스터 SUB) 시그니처(children[qty,RAC제외]+weld[weld_item·st·use_qty]) 대조 → 정본 S코드 강제재사용(우선).
+       ②후보간: 직속부품셋(RAC제외)+공정맵 일치. 반환 matches:[{sub_line,sub_item,member_count,match_code,match_route_id,match_kind}]."""
+    from routers.bom import _sub_signature
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
@@ -2038,6 +2039,20 @@ def sourcing_sub_match(route_id: int = Query(...)):
         for (sline, scode) in my_subs:
             mem = _sub_members(cur, route_id, sline)
             if not mem: continue
+            # ① 글로벌 레지스트리 시그니처 대조 (정본 S 강제재사용)
+            cur.execute("SELECT ISNULL(child_item,''), ISNULL(qty,1) FROM nx.sourcing_route_line WHERE route_id=? AND parent_line=? AND node_kind<>'SUB'", route_id, sline)
+            ch = [{"item": str(r[0]).strip(), "qty": float(r[1] or 1)} for r in cur.fetchall() if str(r[0]).strip()]
+            cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", route_id, scode)
+            wd = [{"weld_item": str(r[0]).strip(), "weld_st": float(r[1] or 0), "use_qty": float(r[2] or 0)} for r in cur.fetchall()]
+            if ch:
+                sig = _sub_signature(cur, ch, wd)
+                cur.execute("SELECT sub_code FROM nx.sub_registry WHERE sig=?", sig)
+                rr = cur.fetchone()
+                if rr and (rr[0] or '').strip() and (rr[0] or '').strip() != scode:
+                    matches.append({"sub_line": sline, "sub_item": scode, "member_count": len(mem),
+                                    "match_code": (rr[0] or '').strip(), "match_route_id": 0, "match_kind": "registry"})
+                    continue
+            # ② 후보끼리 대조(기존)
             prc = _node_procs_map(cur, route_id, scode) if scode else {}
             for (rid2, lid2, scode2) in all_subs:
                 if lid2 == sline: continue
@@ -2045,7 +2060,7 @@ def sourcing_sub_match(route_id: int = Query(...)):
                 if _sub_members(cur, rid2, lid2) != mem: continue
                 if _node_procs_map(cur, rid2, scode2) != prc: continue
                 matches.append({"sub_line": sline, "sub_item": scode, "member_count": len(mem),
-                                "match_code": scode2, "match_route_id": rid2})
+                                "match_code": scode2, "match_route_id": rid2, "match_kind": "candidate"})
                 break
         return {"ok": True, "matches": matches}
     finally:
