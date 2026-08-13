@@ -1950,7 +1950,7 @@ SCREEN.coopquote=(host)=>{
                  <td class="num" style="font-size:9px">${r.coop_diam||'-'}</td><td class="num" style="font-size:9px">${r.coop_thick||'-'}</td><td class="num" style="font-size:9px">${r.coop_length||'-'}</td>
                  <td class="num">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                  <td class="num" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
-                 <td class="num" style="color:#b8791f;font-weight:600">${sagubPrev!=null?nf(sagubPrev):'-'}</td>
+                 <td class="num" style="color:#b8791f;font-weight:600">${(!be.viewMode&&isTube)?`<span class="be-prevsg" data-code="${esc(r.code)}" data-high="${(r.role_disp||'').indexOf('고강')>=0?1:0}" style="cursor:pointer;border-bottom:1px dashed #b8791f" title="클릭: 종전(인상전) 사급가 수정 · 일반CU 7550">${sagubPrev!=null?nf(sagubPrev):'입력'} ✎</span>`:(sagubPrev!=null?nf(sagubPrev):'-')}</td>
                  <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}${r.sale_note_prev?'<div style="font-size:8px;color:#8aa0bd" title="종전 판매단가 적용일(해당 업체)">'+esc(r.sale_note_prev)+'</div>':''}</td>
                  <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
                  <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
@@ -2457,7 +2457,7 @@ SCREEN.coopquote2=(host)=>{
                  <td class="num" style="font-size:9px">${r.coop_diam||'-'}</td><td class="num" style="font-size:9px">${r.coop_thick||'-'}</td><td class="num" style="font-size:9px">${r.coop_length||'-'}</td>
                  <td class="num">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                  <td class="num" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
-                 <td class="num" style="color:#b8791f;font-weight:600">${sagubPrev!=null?nf(sagubPrev):'-'}</td>
+                 <td class="num" style="color:#b8791f;font-weight:600">${(!be.viewMode&&isTube)?`<span class="be-prevsg" data-code="${esc(r.code)}" data-high="${(r.role_disp||'').indexOf('고강')>=0?1:0}" style="cursor:pointer;border-bottom:1px dashed #b8791f" title="클릭: 종전(인상전) 사급가 수정 · 일반CU 7550">${sagubPrev!=null?nf(sagubPrev):'입력'} ✎</span>`:(sagubPrev!=null?nf(sagubPrev):'-')}</td>
                  <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}${r.sale_note_prev?'<div style="font-size:8px;color:#8aa0bd" title="종전 판매단가 적용일(해당 업체)">'+esc(r.sale_note_prev)+'</div>':''}</td>
                  <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
                  <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
@@ -2566,6 +2566,13 @@ SCREEN.coopquote2=(host)=>{
           prev_sagub=(d===null?7550:(d.trim()||7550));
         }
         sel.disabled=true;
+        try{await fetch(`${API}/api/coopquote2/set-role`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assy:be.assy,part:code,role,prev_sagub})});}catch(e){}
+        loadBomInto(be.assy,(be.rowvals?be.rowvals.sale:(be.data&&be.data.cur_incost!=null?be.data.cur_incost:null)));});
+      // ★종전사급가 클릭 편집(이미 제작동관인 건의 인상전 사급가 개별 수정 · 일반CU 7550)
+      host.querySelectorAll('.be-prevsg').forEach(sp=>sp.onclick=async()=>{const code=sp.dataset.code;
+        const cur0=(sp.textContent||'').replace(/[^\d]/g,'')||'7550';
+        const d=prompt('종전(인상전) 사급가 입력 · 일반 CU = 7550\n(제작동관 인상전 재료비 = 소요중량 × 종전사급가)', cur0);
+        if(d===null)return;const prev_sagub=(String(d).trim()||7550);const role=(sp.dataset.high==='1')?'동관고강도':'제작동관';
         try{await fetch(`${API}/api/coopquote2/set-role`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assy:be.assy,part:code,role,prev_sagub})});}catch(e){}
         loadBomInto(be.assy,(be.rowvals?be.rowvals.sale:(be.data&&be.data.cur_incost!=null?be.data.cur_incost:null)));});
       const upd=()=>{const soyo=beSoyo();const raw=beRaw();
