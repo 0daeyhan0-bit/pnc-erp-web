@@ -78,7 +78,7 @@ def _load_maps():
                 cls = 'weld'
             META[str(ic).strip().upper()] = (w, cls)          # ★키 정규화(공백패딩·대소문자 통일)
         cur.execute("""SELECT ITEM_CODE, MAT_CODE, USE_QTY, ISNULL(SAGUB_FLAG,'0')
-                       FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'""")
+                       FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'""")
         CH = {}
         for p, c, q, sag in cur.fetchall():
             CH.setdefault(str(p).strip().upper(), []).append((str(c).strip().upper(), float(q or 0), str(sag)))
@@ -266,7 +266,7 @@ def _load_quote_soyo():
 _CS_KIDS = {}   # code -> [자식코드] (CS_M_ITEM_BOM, except제외). BOM 구조는 정적 → 영구캐시
 def _cs_kids(bcur, code):
     if code not in _CS_KIDS:
-        bcur.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM "
+        bcur.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP_TEST3.nx.v_cs_bom "
                      "WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'", code)
         _CS_KIDS[code] = [str(r[0]).strip() for r in bcur.fetchall()]
     return _CS_KIDS[code]
