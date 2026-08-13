@@ -388,7 +388,7 @@ def cost_nx_bulk(p: dict = Body(...)):
                 s = eng.silwon(it, ymd)
                 out[it] = {k: round(float(s.get(k, 0) or 0), 2) for k in
                            ('jae', 'gagong', 'ilban', 'unban', 'profit', 'silwon', 'lg', 'sonik')}
-                out[it]['lme'] = round(float(s.get('lme_total') or eng.lme_total(it, ymd) or 0), 2)
+                out[it]['lme'] = round(float(s.get('lme_total') or eng.lme_u(it, ymd) or 0), 2)   # lme_u=캐시(silwon서 이미 계산) 재사용
                 sp = eng.material_split(it, ymd)   # 재료비 sgroup별 분리(원자재/부자재/LG사급) — 스냅샷 정합
                 out[it]['won'] = sp['won']; out[it]['bu'] = sp['bu']; out[it]['sa'] = sp['sa']
             except Exception as e:

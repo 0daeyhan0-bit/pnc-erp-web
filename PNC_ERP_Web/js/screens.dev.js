@@ -549,8 +549,8 @@ SCREEN.costanalysis=(c)=>{
       const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
       const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
       D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
-      // ★속도: 청크 100개 + 3개 동시(병렬) — 순차25 대비 라운드트립·엔진프라임 대폭 감소. 완료 후 1회 렌더(rvBusy 중엔 '조회 중' 표시).
-      const CH=100, PAR=3; let done=0;
+      // ★속도: 청크 35 + 6개 동시(병렬) — 무거운 품목(복합SUB)을 여러 워커로 분산. + 남은시간(ETA) 표시.
+      const CH=35, PAR=6; let done=0; const t0=Date.now();
       const chunks=[]; for(let i=0;i<list.length;i+=CH)chunks.push({start:i,items:list.slice(i,i+CH)});
       for(let b=0;b<chunks.length;b+=PAR){
         if(loadRecv._tok!==tok)break;
@@ -561,7 +561,8 @@ SCREEN.costanalysis=(c)=>{
           done+=ck.items.length;
         }));
         if(loadRecv._tok!==tok)break;
-        setRegenMsg(`실시간 계산 ${done}/${list.length}`);renderBody();
+        const el=(Date.now()-t0)/1000, eta=done?Math.ceil((list.length-done)*el/done):0;
+        setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();
       }
       recomputeAgg();
       if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
