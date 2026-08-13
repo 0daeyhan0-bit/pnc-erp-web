@@ -71,6 +71,7 @@ def cost_nx(item: str = Query(..., description="품번"),
 @router.get("/api/cost/sil")
 def cost_sil(item: str = Query(..., description="품번"),
              ymd: str = Query('260630', description="단가기준일 YYMMDD"),
+             ym: str = Query('', description="사급차액 리시빙월 YYMM(빈값=단가기준일 월). 실출고가−실입고가"),
              fresh: int = Query(0, description="1=엔진캐시 무시 최신계산(재계산 버튼)")):
     """실원가 — ★현재 매핑된 nx.bom을 지정된 조달방식대로. 사내(INNER_PROD)=소재×중량+가공, 외주완성/구매=매입단가,
        LME 사급차액 소급, 가공비=사내노드만. 레거시 실원가용 SP와 diff0(오라클 검증). 내부원가와 같은 BOM, 계산방식만 다름."""
@@ -108,8 +109,42 @@ def cost_sil(item: str = Query(..., description="품번"),
                     pass
         for r in d["rows"]:
             r["cust_name"] = vmap.get(r.get("in_cust", ""), "")
-        return {"item": item, "ymd": ymd, "rows": d["rows"], "agg": d["agg"],
-                "procs": procs, "labor": (procs[0]["labor"] if procs else 0)}
+        # ★사급차액(리시빙월 실출고가−실입고가) — 매입 SUB 안에 묻힌 사급부품만 계상(이중계상 방지, sagub_sum 규칙).
+        #   실원가는 매입 SUB에서 정지 → 묻힌 사급부품은 그리드에 안 보이므로 별도행으로 추가(LME패턴 동일).
+        ymv = "".join(ch for ch in str(ym or '') if ch.isdigit())[:4] or str(ymd)[:4]
+        sagub_total = 0.0
+        try:
+            smap = _sagub_diff_map(eng.cur, ymv)
+            snodes = eng.sagub_nodes(item, smap) if smap else {}
+        except Exception:
+            snodes = {}
+        if snodes:
+            scodes = [cd for cd in snodes if not any(rr["code"] == cd for rr in d["rows"])]
+            nm = {}
+            for i in range(0, len(scodes), 900):
+                ch = scodes[i:i + 900]
+                if not ch: continue
+                ph = ",".join("?" * len(ch))
+                try:
+                    eng.cur.execute(f"SELECT item_code, ISNULL(item_name,''), ISNULL(item_spec,'') FROM nx.item WHERE item_code IN ({ph})", *ch)
+                    for r in eng.cur.fetchall(): nm[str(r[0]).strip()] = (str(r[1]).strip(), str(r[2]).strip())
+                except Exception:
+                    pass
+            for cd, e in snodes.items():
+                sagub_total += e["amt"]
+                exist = next((rr for rr in d["rows"] if rr["code"] == cd), None)
+                if exist is not None:
+                    exist["sagub"] = e["unit"]; exist["sagub_amt"] = e["amt"]
+                else:
+                    n0 = nm.get(cd, ("", ""))
+                    d["rows"].append({"level": 1, "code": cd, "cost_gubun": "", "qty": e["qty"],
+                        "won": 0, "mat": 0.0, "lme": 0.0, "gag": 0.0, "inner": False, "kind": "사급차액",
+                        "in_cust": "", "cust_name": "", "metal": "", "diam": "", "thick": "", "weight": 0,
+                        "silver": False, "haskids": False, "name": n0[0], "spec": n0[1], "unit": "EA",
+                        "sagub": e["unit"], "sagub_amt": e["amt"]})
+        d["agg"]["sagub"] = round(sagub_total, 2)
+        return {"item": item, "ymd": ymd, "ym": ymv, "rows": d["rows"], "agg": d["agg"],
+                "procs": procs, "labor": (procs[0]["labor"] if procs else 0), "sagub_total": round(sagub_total, 2)}
     with _COST_LOCK:
         try:
             return _compute(_get_cost_engine(fresh=bool(fresh)))

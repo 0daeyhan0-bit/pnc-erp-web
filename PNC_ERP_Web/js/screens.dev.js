@@ -1109,7 +1109,8 @@ SCREEN.unifybom=(c,ro)=>{
       </div></div>`;
   }
   let codes={}, vlist=[];
-  let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
+  const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
+  let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let naeModal=false;   // 공정 수정 팝업(모달) 표시
   let silD=null, silFor='', silLoad=false, silView='company';
   // ★조달경로 후보 연동(현행 R01 + 승인 후보 R02..) — BOM구성·실원가 탭 공용 선택기. routeSel=0=현행(마스터), >0=후보 route_id.
@@ -1357,7 +1358,8 @@ SCREEN.unifybom=(c,ro)=>{
      ${rw}
      <div class="spacer"></div></div>`;
   const sumbar=(a,tot,totlb)=>{const chip=(lb,v,cl)=>`<span class="nae-chip"><em>${lb}</em><b style="color:${cl||'#243244'}">${M(v)}</b></span>`;
-    return `<div class="nae-sum">${chip('재료비',a.jae,'#1c6b3a')}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,a[tot],'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',a.sonik,(a.sonik<0?'#c0392b':'#1c7c3a'))}</div>`;};
+    const son2=(a.sagub!=null)?((+a.sonik||0)+(+a.sagub||0)):null;
+    return `<div class="nae-sum">${chip('재료비',a.jae,'#1c6b3a')}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,a[tot],'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',a.sonik,(a.sonik<0?'#c0392b':'#1c7c3a'))}${a.sagub!=null?chip('사급차액',a.sagub,(a.sagub<0?'#c0392b':'#1c7c3a'))+chip('손익(사급반영)',son2,(son2<0?'#c0392b':'#1c7c3a')):''}</div>`;};
   const naeViewBar=()=>{const V=[['proc','공정'],['weld','용접'],['fasten','체결'],['company','업체']];
     return `<div class="nae-vbar">${V.map(([k,l])=>`<span class="nae-vb ${naeView===k?'on':''}" data-v="${k}">${l}</span>`).join('')}</div>`;};
   // 역전개 재료(재료비만, 용접봉=종류별 합산)
@@ -1680,16 +1682,17 @@ SCREEN.unifybom=(c,ro)=>{
       else if(silView==='weld') mid=procTable(prc.filter(p=>p.group==='용접'));
       else if(silView==='fasten') mid=procTable(prc.filter(p=>p.group==='체결'));
       else mid=`<div class="grid-wrap" style="max-height:52vh;overflow:auto"><table class="tbl bm-tbl">
-        <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>구분</th><th>거래처</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">LME차액</th><th class="num">가공비</th></tr></thead>
+        <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>구분</th><th>거래처</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">LME차액</th><th class="num">가공비</th><th class="num" title="실출고가−실입고가(개당). 매입 SUB에 묻힌 사급부품만 손익 반영">사급차액<br>(개당)</th></tr></thead>
         <tbody>${rows.map(r=>{const k=silKind(r);return `<tr style="background:${['#fff','#f6f9ff','#edf3ff','#e4edff','#dbe7ff'][Math.min(r.level,4)]}">
           <td class="center">${r.level}</td><td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'└ ':''}<b>${esc(r.code)}</b></td>
           <td class="bcap" title="${esc(r.name)}" style="max-width:180px">${esc(r.name)}</td>
           <td class="center"><span style="color:${k.c};font-weight:600;font-size:11px">${k.t}</span></td>
           <td class="bcap" title="${esc(r.cust_name||r.in_cust||'')}" style="max-width:120px;color:#5a6b82">${esc(r.cust_name||r.in_cust||'')}</td>
           <td class="num">${r.won?M2(r.won):''}</td><td class="num" style="color:#1c6b3a">${M(r.mat)}</td>
-          <td class="num" style="color:#a8442a">${r.lme?M(r.lme):''}</td><td class="num" style="color:#8a5a1a">${M(r.gag)}</td></tr>`;}).join('')||'<tr><td colspan="9" class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
+          <td class="num" style="color:#a8442a">${r.lme?M(r.lme):''}</td><td class="num" style="color:#8a5a1a">${M(r.gag)}</td>
+          <td class="num" style="color:#b8860b;font-weight:600" title="${(r.sagub!=null&&r.sagub!=='')?('개당 '+M(r.sagub)+(r.sagub_amt!=null?' × 소요 → 기여 '+M(r.sagub_amt):'')):''}">${(r.sagub!=null&&r.sagub!=='')?M(r.sagub):''}</td></tr>`;}).join('')||'<tr><td colspan="10" class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
       content=`${sumbar(a,'silwon','실원가')}<div class="nae-vbar">${V.map(([k,l])=>`<span class="nae-vb sil-vb ${silView===k?'on':''}" data-v="${k}">${l}</span>`).join('')}</div>${mid}
-        <div class="page-sub" style="color:#8aa0bd;margin-top:4px">실원가=실제 조달 기준(매입 중단·구매완제=매입단가). 읽기전용 · LME차액=전서브트리 합산.</div>`;
+        <div class="page-sub" style="color:#8aa0bd;margin-top:4px">실원가=실제 조달 기준(매입 중단·구매완제=매입단가). 읽기전용 · LME차액=전서브트리 합산 · <b>사급차액</b>=리시빙월 실출고가−실입고가(개당, 매입 SUB에 <b>묻힌</b> 사급부품만·이중계상 방지). <b>손익(사급반영)</b>=손익+사급차액합.</div>`;
     }
     c.innerHTML=`
      <div class="page-title">🔀 품목 BOM관리 <span style="font-size:12px;color:var(--muted);font-weight:400">실원가(실제 조달·매입중단, 읽기전용)</span></div>

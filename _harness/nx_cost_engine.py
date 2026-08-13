@@ -467,6 +467,29 @@ class NxCostEngine:
         walk(item, 1.0, set(), False, 0)
         return round(tot[0],2)
 
+    def sagub_nodes(self, item, diffmap):
+        """실원가 그리드용: 매입 SUB 안에 묻힌(crossed) 사급부품별 개당차액·누적qty·기여액.
+           sagub_sum과 동일 규칙(묻힌것만·이중계상 방지). Σ amt == sagub_sum.
+           반환 {code:{'unit':개당차액, 'qty':누적소요, 'amt':개당×누적}}."""
+        out={}
+        def walk(node, q, seen, crossed, d):
+            if node in diffmap:
+                if crossed:
+                    e=out.get(node)
+                    if e is None: e=out[node]={'unit':round(diffmap[node],2),'qty':0.0,'amt':0.0}
+                    e['qty']+=q; e['amt']+=diffmap[node]*q
+                return
+            if d>14: return
+            info=self._load_item(node)
+            expands=(info['cost_gubun']!='3' or info['make_type']=='1') and bool(self._expandable(node, info, seen))
+            b=not expands
+            for c,qty,cx,f,t,lx in self.lines(node):
+                if cx or c in seen: continue
+                walk(c, qty*q, seen|{node}, crossed or b, d+1)
+        walk(item, 1.0, set(), False, 0)
+        for e in out.values(): e['qty']=round(e['qty'],4); e['amt']=round(e['amt'],2)
+        return out
+
     def _lme_nodes(self, item, ymd, mult=1.0, seen=None, out=None):
         """lme_total과 동일 로직으로 per-node LME 사급차액 수집(그리드 방출용). out[node] += (std−partner)×중량×누적q."""
         if seen is None: seen=set()
