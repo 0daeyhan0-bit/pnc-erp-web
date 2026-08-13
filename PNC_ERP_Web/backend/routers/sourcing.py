@@ -1106,6 +1106,7 @@ def sourcing_sub_create(payload: dict = Body(...)):
     suffix = (str(payload.get("suffix", "") or "").strip())[:12]   # 빈=자동 _S{nn}, 명시(-은납 등)=공정약칭 계승
     subname = str(payload.get("name", "")).strip()[:120]
     gubun = str(payload.get("gubun", "자체")).strip()[:20]
+    parent_sub = int(payload.get("parent_sub") or 0)   # ★>0=이 SUB 하위에 중첩 생성(서브안의서브), 0/미지정=레벨1(ASSY 직속)
     if rid <= 0 or not line_ids: raise HTTPException(400, "route_id·line_ids 필요")
     nx = _nx_tx(); cur = nx.cursor()
     try:
@@ -1129,9 +1130,16 @@ def sourcing_sub_create(payload: dict = Body(...)):
             cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", subcode)
             if not cur.fetchone():
                 cur.execute("INSERT INTO nx.item(item_code,item_name,item_type) VALUES(?,?,N'제품')", subcode, subname or subcode)
+        # ★부모 SUB 검증(중첩): parent_sub가 이 route의 SUB여야. 자기 자신/부품 지정 방지.
+        pl_val = None
+        if parent_sub > 0:
+            cur.execute("SELECT 1 FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, parent_sub)
+            if not cur.fetchone(): raise HTTPException(400, "parent_sub가 이 후보의 SUB가 아닙니다")
+            if parent_sub in line_ids: raise HTTPException(400, "부모 SUB를 자기 하위로 넣을 수 없습니다")
+            pl_val = parent_sub
         cur.execute("SELECT ISNULL(MAX(sort_seq),0)+1 FROM nx.sourcing_route_line WHERE route_id=?", rid); sq = int(cur.fetchone()[0])
-        cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,node_kind,sub_item)
-            OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,?,'SUB',?)""", rid, sq, subcode, (subname or subcode), gubun, subcode)
+        cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,node_kind,sub_item,parent_line)
+            OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,?,'SUB',?,?)""", rid, sq, subcode, (subname or subcode), gubun, subcode, pl_val)
         subline = int(cur.fetchone()[0])
         ph = ",".join("?" * len(line_ids))
         cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, node_kind='PART' WHERE route_id=? AND line_id IN ({ph})", subline, rid, *line_ids)
