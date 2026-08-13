@@ -421,8 +421,8 @@ SCREEN.delivery=(c)=>{
 };
 
 SCREEN.costanalysis=(c)=>{
-  const D=window.COSTDATA||{rows:[],agg:{},ym:'',base:''};
-  const R=D.rows||[], A=D.agg||{};
+  let D=window.COSTDATA||{rows:[],agg:{},ym:'',base:''};
+  let R=D.rows||[], A=D.agg||{};   // ★실시간(nx): loadRecv가 재구성. 초기값=기존 스냅샷(있으면)
   const eok=v=>(v/1e8).toFixed(1);
   const pct=v=>(v*100).toFixed(1)+'%';
   // [rowIdx, header, group, opts]
@@ -474,6 +474,40 @@ SCREEN.costanalysis=(c)=>{
       dLive=estiToRow(it,j);}
     catch(e){dErr='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';dLive=null;}
     dLoading=false;renderBody();
+  };
+  // ★리시빙실적 실시간(nx): 목록(SA_T_LG_RECEIVING_DTL)+행별 배치 원가(/api/cost/nx/bulk). 스냅샷 파일 대체·세션캐시.
+  const ym2str=(y)=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:(y||'');
+  const buildRow=(part,qty,cst)=>{const r=new Array(23).fill(0);r[0]=part;r[1]=qty;
+    if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0;
+      r[2]=jae;r[5]=jae;r[6]=sil;r[7]=lg?jae/lg:0;
+      r[8]=jae;r[11]=jae;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=cst.lme||0;r[18]=lg?jae/lg:0;
+      r[19]=lg;r[20]=lg*qty;r[21]=son;r[22]=son*qty;}
+    return r;};
+  const cardsHTML=()=>`<div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
+       <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
+       <div class="ca-card ${(A.impact||0)>=0?'pos':'neg'}"><span>손익 Impact</span><b>${(A.impact||0)>=0?'+':''}${eok(A.impact||0)}억</b></div>
+       <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>`;
+  const recomputeAgg=()=>{let sales=0,silamt=0,impact=0,loss=0,qt=0;D.rows.forEach(r=>{sales+=r[20];silamt+=r[12]*r[1];impact+=r[22];qt+=r[1];if(r[21]<0)loss++;});
+    D.agg={cnt:D.rows.length,qty:Math.round(qt),sales:Math.round(sales),silamt:Math.round(silamt),impact:Math.round(impact),loss};A=D.agg;
+    const cd=c.querySelector('.ca-cards');if(cd)cd.innerHTML=cardsHTML();};
+  let rvBusy=false;
+  const loadRecv=async(ym,ymd)=>{
+    if(rvBusy)return;rvBusy=true;ymd=ymd||rvYmd;const tok=ymd+'|'+(ym||'');loadRecv._tok=tok;setRegenMsg('목록 로드…');
+    try{
+      const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
+      const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
+      D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
+      const CH=25;let done=0;
+      for(let i=0;i<list.length;i+=CH){
+        if(loadRecv._tok!==tok)break;
+        const chunk=list.slice(i,i+CH);let cc={};
+        try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:chunk.map(x=>x.part),ymd})})).json()).costs||{};}catch(e){}
+        for(let j=0;j<chunk.length;j++)D.rows[i+j]=buildRow(chunk[j].part,chunk[j].qty,cc[chunk[j].part]);
+        done+=chunk.length;setRegenMsg(`실시간 계산 ${done}/${list.length}`);recomputeAgg();renderBody();
+      }
+      if(loadRecv._tok===tok){setRegenMsg(`완료 ${list.length}품목 · 실시간 nx (단가 ${ym2str(ymd)})`);window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
+    }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
+    finally{rvBusy=false;}
   };
   // 표시 컬럼: 직접입력은 입고수량(1)·LG총금액(20)·Impact(22) 제외 (수량 1 단품 관점)
   const colsOf=()=> mode==='direct'? NUM.filter(([i])=>![1,20,22].includes(i)) : NUM;
@@ -591,17 +625,19 @@ SCREEN.costanalysis=(c)=>{
     c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{const si=+th.dataset.si;if(sortI===si)dir=-dir;else{sortI=si;dir=-1;}draw();});
     if(mode==='recv'){
       c.querySelector('#ca-go').onclick=()=>{
-        const f=c.querySelector('#ca-from').value,t=c.querySelector('#ca-to').value;
-        const days=(new Date(t)-new Date(f))/86400000;
-        if(days<0){alert('종료일이 시작일보다 빠릅니다.');return;}
-        if(days>31){alert('최대 조회기간은 1개월입니다.');return;}
-        if(f!=='2026-06-01'||t!=='2026-06-30')alert('현재 화면은 '+(D.ym||'2026-06')+' 스냅샷입니다. 5월 등 다른 달은 백엔드(원가 스냅샷 + 리시빙 가중평균) 연결 후 조회됩니다.');
-        renderBody();
+        const f=c.querySelector('#ca-from').value;
+        const ym=f?f.slice(2,7).replace('-',''):'';   // YYYY-MM-DD → YYMM(리시빙 월)
+        loadRecv._tok=null; loadRecv(ym, rvYmd);       // 실시간 재로드(목록+원가)
       };
       c.querySelector('#ca-q').oninput=e=>{q=e.target.value.trim();renderBody();};
       c.querySelector('#ca-loss').onchange=e=>{lossOnly=e.target.checked;renderBody();};
       const cy=c.querySelector('#ca-ymd'); if(cy)cy.onchange=e=>{rvYmd=date2ymd(e.target.value);};
-      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=doRegen;
+      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd);};   // 재계산=실시간(nx)
+      // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
+      if(!rvBusy && !loadRecv._tok){
+        if(window.__CA_LIVE){D.rows=window.__CA_LIVE.rows;D.agg=window.__CA_LIVE.agg;D.ym=window.__CA_LIVE.ym;D.base=window.__CA_LIVE.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
+        else loadRecv(D.ym||'', rvYmd);
+      }
     }else{
       const dq=c.querySelector('#di-q'), dyv=c.querySelector('#di-ymd');
       const goLive=()=>{dItem=dq.value||'';if(dyv&&dyv.value)dYmd=date2ymd(dyv.value);dLoad();};
