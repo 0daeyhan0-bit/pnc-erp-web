@@ -249,8 +249,10 @@ class NxCostEngine:
         """매입단가 as-of ymd × 환율(SP line297: ITEM_COST × BAS). vendor 우선, 없으면 최신 as-of(모든 vendor)."""
         key=item
         if key not in self._pur:
+            # ★zeroprice-fix(2026-08-13): 0원 행 포함(제외 금지). SP는 TOP1 최신 as-of를 쓰므로 나중 0원(단가소멸/사급전환)이
+            #   과거 비-0을 대체. 0원 제외하면 옛 단가 오적재(MJX65072213 최신260214=0인데 옛251210=13893 오계상).
             self.cur.execute("""SELECT vendor_code,apply_ymd,price,ISNULL(currency,'KRW') FROM nx.price_item
-                WHERE item_code=? AND price_type='매입' AND ISNULL(price,0)<>0""", item)
+                WHERE item_code=? AND price_type='매입' AND price IS NOT NULL""", item)
             self._pur[key]=[(str(r[0]).strip(),str(r[1] or '').strip(),float(r[2] or 0),str(r[3] or 'KRW').strip()) for r in self.cur.fetchall()]
         rows=self._pur[key]
         if not rows: return None
