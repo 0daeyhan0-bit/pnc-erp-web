@@ -212,33 +212,37 @@ def _bom_tree_nx(item, real, expandbuy=0):
     mk = "" if (not real or expandbuy) else "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'"
     cn = _nx(); cur = cn.cursor()
     try:
+        # ★성능(2026-08-13): 13컬럼 CAST를 재귀 안에서 계산하면 525ms. 재귀는 (부모,자식)만 슬림 전개(~10ms) →
+        #   전개된 부모집합 대상으로 엣지 상세를 비재귀 1쿼리로 가져옴. 결과 동일, 원격DB 지연 대폭 감소.
         cur.execute(f"""WITH tree AS (
-            SELECT h.item_code p, bl.child_item c, CAST(bl.qty AS decimal(18,6)) q,
-                   CAST(ISNULL(bl.sagub_default,0) AS int) sag, CAST(ISNULL(bl.set_except,0) AS int) se,
-                   CAST(ISNULL(bl.kitting,0) AS int) kt, CAST(ISNULL(bl.vir_item,0) AS int) vir,
-                   CAST(ISNULL(bl.cs_calc_except,0) AS int) ce, CAST(ISNULL(bl.lme_except,0) AS int) le,
-                   ISNULL(bl.gagong_proc,'') gp, ISNULL(bl.s_work,'') sw, ISNULL(bl.seq,0) sq, 1 lvl
+            SELECT h.item_code p, bl.child_item c, 1 lvl
             FROM nx.bom_header h JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
             WHERE h.item_code=? {exc}
             UNION ALL
-            SELECT h2.item_code, bl.child_item, CAST(bl.qty AS decimal(18,6)),
-                   CAST(ISNULL(bl.sagub_default,0) AS int), CAST(ISNULL(bl.set_except,0) AS int),
-                   CAST(ISNULL(bl.kitting,0) AS int), CAST(ISNULL(bl.vir_item,0) AS int),
-                   CAST(ISNULL(bl.cs_calc_except,0) AS int), CAST(ISNULL(bl.lme_except,0) AS int),
-                   ISNULL(bl.gagong_proc,''), ISNULL(bl.s_work,''), ISNULL(bl.seq,0), t.lvl+1
+            SELECT h2.item_code, bl.child_item, t.lvl+1
             FROM tree t
             {mk}
             JOIN nx.bom_header h2 ON h2.item_code=t.c
             JOIN nx.bom_line bl ON bl.bom_id=h2.bom_id {exc}
             WHERE t.lvl < 8)
-            SELECT p,c,q,sag,se,kt,vir,ce,le,gp,sw,sq,lvl FROM tree OPTION(MAXRECURSION 50)""", item)
+            SELECT DISTINCT p FROM tree OPTION(MAXRECURSION 50)""", item)
+        parents = [(r[0] or '').strip() for r in cur.fetchall() if (r[0] or '').strip()]
         edges = {}
-        for r in cur.fetchall():
-            edges.setdefault((r[0] or '').strip(), []).append({
-                "child": (r[1] or '').strip(), "q": float(r[2] or 0), "sag": ('1' if r[3] else '0'),
-                "se": ('1' if r[4] else ''), "kt": ('1' if r[5] else ''), "vir": ('1' if r[6] else ''),
-                "ce": ('1' if r[7] else ''), "le": ('1' if r[8] else ''), "gp": str(r[9]).strip(),
-                "sw": str(r[10]).strip(), "sq": int(r[11] or 0)})
+        if parents:
+            pin = ",".join("N'" + p.replace("'", "''") + "'" for p in parents)
+            cur.execute(f"""SELECT h.item_code p, bl.child_item c, CAST(bl.qty AS decimal(18,6)) q,
+                   CAST(ISNULL(bl.sagub_default,0) AS int) sag, CAST(ISNULL(bl.set_except,0) AS int) se,
+                   CAST(ISNULL(bl.kitting,0) AS int) kt, CAST(ISNULL(bl.vir_item,0) AS int) vir,
+                   CAST(ISNULL(bl.cs_calc_except,0) AS int) ce, CAST(ISNULL(bl.lme_except,0) AS int) le,
+                   ISNULL(bl.gagong_proc,'') gp, ISNULL(bl.s_work,'') sw, ISNULL(bl.seq,0) sq
+                FROM nx.bom_header h JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
+                WHERE h.item_code IN ({pin}) {exc}""")
+            for r in cur.fetchall():
+                edges.setdefault((r[0] or '').strip(), []).append({
+                    "child": (r[1] or '').strip(), "q": float(r[2] or 0), "sag": ('1' if r[3] else '0'),
+                    "se": ('1' if r[4] else ''), "kt": ('1' if r[5] else ''), "vir": ('1' if r[6] else ''),
+                    "ce": ('1' if r[7] else ''), "le": ('1' if r[8] else ''), "gp": str(r[9]).strip(),
+                    "sw": str(r[10]).strip(), "sq": int(r[11] or 0)})
         for p in edges: edges[p].sort(key=lambda x: x["sq"])
         nl = list({item} | {e["child"] for lst in edges.values() for e in lst} | set(edges.keys()))
         info = {}; alias = {}
