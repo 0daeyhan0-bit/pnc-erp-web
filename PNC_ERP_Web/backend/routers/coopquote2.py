@@ -170,12 +170,12 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             if not chunk:
                 continue
             inlist = "','".join(c.upper() for c in chunk)
-            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(assy_code))), SUM(mat_before), SUM(ISNULL(mat_after,0))
+            cur.execute(f"""SELECT vendor, UPPER(LTRIM(RTRIM(assy_code))), SUM(mat_before), SUM(ISNULL(mat_after,0))
                 FROM nx.coop_quote_part_v2 WHERE UPPER(LTRIM(RTRIM(assy_code))) IN ('{inlist}')
                   AND ISNULL(is_active,1)=1 AND ISNULL(voided,0)=0
-                GROUP BY UPPER(LTRIM(RTRIM(assy_code)))""")
-            for a, mb, ma in cur.fetchall():
-                matcost[str(a).strip()] = ((float(mb) if mb is not None else None), (float(ma) if ma is not None else None))
+                GROUP BY vendor, UPPER(LTRIM(RTRIM(assy_code)))""")   # ★vendor별 분리(동일 assy를 여러 업체가 제작 시 합산 방지)
+            for v, a, mb, ma in cur.fetchall():
+                matcost[(str(v).strip(), str(a).strip())] = ((float(mb) if mb is not None else None), (float(ma) if ma is not None else None))
         # ★보완필요: 사급/용접봉 재료비 없는 부품이 있는 SUB (단가 미등록/견적없음)
         need_set = set()
         for i in range(0, len(assy_up), 400):
@@ -194,7 +194,7 @@ def coopquote_list(vendor: str = Query(""), q: str = Query(""), active_only: int
             au = r["assy_code"].strip().upper()
             r["need_fix"] = (au in need_set)
             prev_in = r["prev_incost"]; cur_in = r["cur_incost"]
-            mc = matcost.get(au)
+            mc = matcost.get((str(r.get("vendor") or "").strip(), au))
             if mc and mc[1] is not None:
                 mat_after = round(mc[1], 2)
                 # 인상전: 종전 데이터 없으면(신규 품목) None → 인상전·손익 비교 안 함
