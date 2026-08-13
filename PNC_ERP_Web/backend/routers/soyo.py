@@ -204,7 +204,7 @@ def _step6_sql(cur):
       SELECT cb.assy_item_code,cb.level_no+1,b.item_code,CASE cb.vir_item_flag WHEN '1' THEN cb.p_item_code ELSE b.item_code END,
              b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.use_qty),ISNULL(c.in_cust_code,''),
              CASE b.vir_item_flag WHEN '1' THEN '1' ELSE '0' END,CONVERT(varchar(500),cb.cum_item_code+'{'+b.mat_code+'}')
-      FROM CTE_BOM cb JOIN {P}PR_M_ITEM_BOM b ON cb.mat_code=b.item_code JOIN {P}PR_M_ITEM c ON b.mat_code=c.item_code
+      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}PR_M_ITEM c ON b.mat_code=c.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.level_no<10 AND NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=b.mat_code))
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
@@ -244,7 +244,7 @@ def _step7_sql(cur):
          CASE WHEN m.work_code>'' THEN m.work_code ELSE ISNULL(m.in_cust_code,'') END,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.use_qty END),
          CONVERT(varchar(500),cb.cum_in_cust_code+'|'+CASE WHEN m.work_code>'' THEN m.work_code ELSE ISNULL(m.in_cust_code,'') END+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
-      FROM CTE_BOM cb JOIN {P}PR_M_ITEM_BOM b ON cb.bom_mat_code=b.item_code JOIN {P}PR_M_ITEM m ON b.mat_code=m.item_code
+      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.bom_mat_code=b.item_code JOIN {P}PR_M_ITEM m ON b.mat_code=m.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1'
         AND NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code))
