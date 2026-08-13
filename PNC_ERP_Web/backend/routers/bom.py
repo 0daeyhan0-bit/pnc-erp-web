@@ -253,9 +253,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
-            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({inl})")
-            for r in cur.fetchall():
-                if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
+            # ★sub_alias 쿼리 제거(성능): 정리 후 canonical 전부 NULL=매핑 없음. 필요시 재도입. 원격DB 왕복 1회 절감.
         def disp(code): return alias.get(code, code)   # 리프변형 표시(자재 canonical). SUB는 아래 tree-order.
         # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(사용자 확정 2026-08-13: ASSY품번+SUB순번). raw=원본코드(navi/edit),
         #   정본식별 S#####(nx.sub_registry/sub_code_map)은 dedup·후보채번용 내부 identity(표시 아님).
@@ -419,9 +417,7 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
-            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({inl})")
-            for r in cur.fetchall():
-                if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
+            # ★sub_alias 쿼리 제거(성능): 정리 후 canonical 전부 NULL. 원격DB 왕복 1회 절감.
         def disp(code): return alias.get(code, code)   # 역전개=원본코드 표시(글로벌 S코드 미표시, 정본식별은 내부 dedup용)
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
