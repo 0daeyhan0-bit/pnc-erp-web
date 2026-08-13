@@ -15,8 +15,8 @@ _COST_TAG = {"1": "매입", "E": "판매(수출)", "S": "판매(내수)"}
 def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str = Query(""),
                   tag: str = Query(""), changed: str = Query(""),
                   lgroup: str = Query(""), sgroup: str = Query(""), cust: str = Query("")):
-    """전사 단가변동 피드: PR_M_ITEM_COST 적용일 내림차순 + 직전단가 대비 Δ(LAG). 라이브·읽기전용."""
-    cn = _conn(); cur = cn.cursor()
+    """전사 단가변동 피드: PR_M_ITEM_COST 적용일 내림차순 + 직전단가 대비 Δ(LAG). 소스=nx(우리 DB)·읽기전용."""
+    cn = _nx(); cur = cn.cursor()
     try:
         w = ["1=1"]; p = []
         if from_ymd: w.append("H.apply_ymd>=?"); p.append(_d6(from_ymd))
@@ -278,6 +278,79 @@ def price_sagub_list(q: str = Query("")):
                     WHERE x.item_code=p.item_code AND x.price_type='매입' AND x.vendor_code='LG')
             ORDER BY p.item_code""", q.strip(), like, like)
         rows = [{"item": r[0], "name": r[1], "apply_ymd": r[2], "price": float(r[3]), "currency": r[4]} for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
+    finally:
+        nx.close()
+
+
+# ============ 특이 단가목록: 유상사급 판가 역전(매입가 > 사급판가) ============
+# 우리가 매입(tag='1')하는 부품이 유상사급(tag='S')으로 나갈 때 사급판가 < 매입가 = 비싸게 사서 싸게 사급 = 손해.
+# 원소재·원자재·용접봉·소모품·수불예외 제외(별도 수불정산). 단 용접링은 유지. 각 품목의 상위 Assy(완제품) 표시. 소스=nx.PR_M_ITEM_COST(읽기).
+_INV_EXCL_SG = ('210', '220', '910', '991', '992', '993')  # 원소재/원자재/잡자재(용접봉·나이프)/생산소모품/일반소모품/수불예외
+@router.get("/api/price/inversion")
+def price_inversion(q: str = Query(""), cust: str = Query(""), limit: int = Query(2000)):
+    """특이 단가목록: 사급판가(tag='S') < 매입가(tag='1') 역전 부품. 원소재·용접봉·소모품 제외(용접링 유지). 상위 Assy 포함."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST")
+        dCust = {str(r[0]).strip(): r[1] for r in cur.fetchall()}
+        dSG = _kindmap(cur, "PR006")
+        _CURR_NM = {"KRW": "원화", "USD": "달러", "RMB": "위안", "EUR": "유로", "JPY": "엔"}
+        lim = max(1, min(int(limit), 5000))
+        exsg = ",".join("?" * len(_INV_EXCL_SG))
+        w = []; p = []
+        if q.strip(): w.append("(p.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"); p += [f"%{q.strip()}%"] * 2
+        if cust.strip():
+            w.append("(p.CUST_CODE=? OR s.CUST_CODE=? OR EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE IN (p.CUST_CODE,s.CUST_CODE) AND c.CUST_DESC LIKE ?))")
+            p += [cust.strip(), cust.strip(), f"%{cust.strip()}%"]
+        extra = (" AND " + " AND ".join(w)) if w else ""
+        cur.execute(f"""
+        WITH pur AS (
+          SELECT c.ITEM_CODE, c.CUST_CODE, c.ITEM_COST, ISNULL(c.CURRENCY,'KRW') curr,
+            ROW_NUMBER() OVER(PARTITION BY c.ITEM_CODE ORDER BY (CASE WHEN c.CUST_CODE=i.IN_CUST_CODE THEN 0 ELSE 1 END), c.COST_APPLY_YMD DESC) rn
+          FROM nx.PR_M_ITEM_COST c JOIN nx.PR_M_ITEM i ON i.ITEM_CODE=c.ITEM_CODE WHERE c.COST_TAG='1'),
+        sag AS (
+          SELECT ITEM_CODE, CUST_CODE, ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'KRW') curr,
+            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE ORDER BY COST_APPLY_YMD DESC) rn
+          FROM nx.PR_M_ITEM_COST WHERE COST_TAG='S')
+        SELECT TOP {lim} p.ITEM_CODE item, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SGROUP,'') sg,
+               p.CUST_CODE pur_cust, p.ITEM_COST pur, p.curr pur_curr,
+               s.CUST_CODE sag_cust, s.ITEM_COST sag, s.curr sag_curr, s.COST_APPLY_YMD sag_ymd,
+               CAST(s.ITEM_COST - p.ITEM_COST AS DECIMAL(18,2)) diff
+        FROM pur p JOIN sag s ON p.ITEM_CODE=s.ITEM_CODE AND p.rn=1 AND s.rn=1
+        JOIN nx.PR_M_ITEM i ON i.ITEM_CODE=p.ITEM_CODE
+        WHERE p.ITEM_COST > s.ITEM_COST AND s.ITEM_COST > 0
+          AND ( i.ITEM_SGROUP NOT IN ({exsg}) OR i.ITEM_DESC LIKE N'%용접링%' )
+          AND ( i.ITEM_CODE NOT LIKE 'RAC%' OR i.ITEM_DESC LIKE N'%용접링%' )
+          {extra}
+        ORDER BY (s.ITEM_COST - p.ITEM_COST)""", *(list(_INV_EXCL_SG) + p))
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # 상위 Assy(완제품 조상) — reverse-BOM 인메모리 워크(1쿼리)
+        cur.execute("SELECT bl.child_item, h.item_code FROM nx.bom_line bl JOIN nx.bom_header h ON bl.bom_id=h.bom_id")
+        par = {}
+        for ch, pa in cur.fetchall():
+            par.setdefault(str(ch).strip(), []).append(str(pa).strip())
+        def tops(it):
+            seen = {it}; out = set(); stk = list(par.get(it, []))
+            while stk:
+                nn = stk.pop()
+                if nn in seen: continue
+                seen.add(nn)
+                ps = par.get(nn)
+                if ps: stk.extend(ps)
+                else: out.add(nn)   # 부모 없음 = 최상위 완제품
+            return sorted(out)
+        for r in rows:
+            for k in ("pur", "sag", "diff"):
+                r[k] = float(r[k]) if r[k] is not None else 0.0
+            r["pur_cust_nm"] = dCust.get(str(r["pur_cust"]).strip(), str(r["pur_cust"] or "").strip())
+            r["sag_cust_nm"] = dCust.get(str(r["sag_cust"]).strip(), str(r["sag_cust"] or "").strip())
+            r["sg_nm"] = dSG.get(str(r["sg"]).strip(), str(r["sg"]).strip())
+            r["pur_curr_nm"] = _CURR_NM.get(str(r["pur_curr"]).strip(), str(r["pur_curr"]).strip())
+            r["sag_curr_nm"] = _CURR_NM.get(str(r["sag_curr"]).strip(), str(r["sag_curr"]).strip())
+            r["sag_ymd"] = str(r["sag_ymd"] or "")
+            r["assy"] = tops(str(r["item"]).strip())[:10]
         return {"rows": rows, "cnt": len(rows)}
     finally:
         nx.close()

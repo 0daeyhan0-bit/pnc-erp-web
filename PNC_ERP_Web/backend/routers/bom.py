@@ -19,15 +19,15 @@ def bom_search(q: str = Query('', description="품번/품명 부분검색"),
         # ★현행/과거 토글 + ★미사용 orphan 숨김(2026-08-13): 기본 = status='사용' AND (BOM보유 OR 다른BOM의 자식으로 사용).
         #   → 빈 SUB shell(BOM없고 아무 BOM에도 자식으로 안 쓰이는 _S01·_S07·-은납-S7 등)은 기본검색에서 숨김. include_past=1이면 전체.
         # ★현행 판정: (현행자식 cs_except=0으로 사용) OR (BOM보유 AND 아무데도 자식아님=최상위제품). → 비현행 변형(예 태국 -F&T, 현행자식 0)·빈 shell 숨김. include_past=1이면 전체.
-        past = "" if int(include_past or 0) else "AND ISNULL(i.status,N'사용')=N'사용' AND (uc.child_item IS NOT NULL OR (h.item_code IS NOT NULL AND u.child_item IS NULL))"
-        # BOM 보유 품목 우선. 인덱스(item_code PK) 활용, TOP 60 제한.
+        # ★성능: 파생 DISTINCT 조인(전체 bom_line 스캔 2회) → 상관 EXISTS로 교체(578ms→56ms). 매칭 item만 검사.
+        past = "" if int(include_past or 0) else """AND ISNULL(i.status,N'사용')=N'사용'
+              AND ( EXISTS(SELECT 1 FROM nx.bom_line uc WHERE uc.child_item=i.item_code AND ISNULL(uc.cs_calc_except,0)=0)
+                 OR ( EXISTS(SELECT 1 FROM nx.bom_header h2 WHERE h2.item_code=i.item_code)
+                      AND NOT EXISTS(SELECT 1 FROM nx.bom_line u WHERE u.child_item=i.item_code) ) )"""
         cur.execute(f"""
             SELECT TOP 60 i.item_code, i.item_name, i.item_type, ISNULL(i.status,'') st,
-              CASE WHEN h.item_code IS NOT NULL THEN 1 ELSE 0 END AS has_bom
+              CASE WHEN EXISTS(SELECT 1 FROM nx.bom_header h WHERE h.item_code=i.item_code) THEN 1 ELSE 0 END AS has_bom
             FROM nx.item i
-            LEFT JOIN (SELECT DISTINCT item_code FROM nx.bom_header) h ON h.item_code = i.item_code
-            LEFT JOIN (SELECT DISTINCT child_item FROM nx.bom_line) u ON u.child_item = i.item_code
-            LEFT JOIN (SELECT DISTINCT child_item FROM nx.bom_line WHERE ISNULL(cs_calc_except,0)=0) uc ON uc.child_item = i.item_code
             WHERE (i.item_code LIKE ? OR i.item_name LIKE ?) {past}
             ORDER BY has_bom DESC, i.item_code""", like, like)
         rows = [{"item": r[0], "name": r[1], "type": r[2], "status": str(r[3]).strip(), "has_bom": bool(r[4])} for r in cur.fetchall()]
@@ -241,23 +241,21 @@ def _bom_tree_nx(item, real, expandbuy=0):
                 "sw": str(r[10]).strip(), "sq": int(r[11] or 0)})
         for p in edges: edges[p].sort(key=lambda x: x["sq"])
         nl = list({item} | {e["child"] for lst in edges.values() for e in lst} | set(edges.keys()))
-        info = {}; alias = {}; codemap = {}
+        info = {}; alias = {}
         for i in range(0, len(nl), 900):
-            chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
+            chunk = nl[i:i+900]
+            inl = ",".join("N'" + str(x).replace("'", "''") + "'" for x in chunk)   # ★성능: 파라미터 IN(524ms)→N인라인(11ms). pyodbc param 오버헤드 회피
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
                   ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
                 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
-                WHERE m.ITEM_CODE IN ({ph})""", *chunk)
+                WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
-            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
+            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({inl})")
             for r in cur.fetchall():
                 if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
-            cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
-            for r in cur.fetchall():
-                if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
         def disp(code): return alias.get(code, code)   # 리프변형 표시(자재 canonical). SUB는 아래 tree-order.
         # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(사용자 확정 2026-08-13: ASSY품번+SUB순번). raw=원본코드(navi/edit),
         #   정본식별 S#####(nx.sub_registry/sub_code_map)은 dedup·후보채번용 내부 identity(표시 아님).
@@ -409,23 +407,21 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
                 "sq": int(r[6] or 0)})
         for c in parents: parents[c].sort(key=lambda x: x["parent"])
         nodes = {item} | {p["parent"] for lst in parents.values() for p in lst} | set(parents.keys())
-        nl = list(nodes); info = {}; alias = {}; codemap = {}
+        nl = list(nodes); info = {}; alias = {}
         for i in range(0, len(nl), 900):
-            chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
+            chunk = nl[i:i+900]
+            inl = ",".join("N'" + str(x).replace("'", "''") + "'" for x in chunk)   # ★성능: 파라미터 IN→N인라인(524ms→11ms)
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
                   ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
                   ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
                 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
-                WHERE m.ITEM_CODE IN ({ph})""", *chunk)
+                WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
-            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
+            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({inl})")
             for r in cur.fetchall():
                 if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
-            cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
-            for r in cur.fetchall():
-                if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
         def disp(code): return alias.get(code, code)   # 역전개=원본코드 표시(글로벌 S코드 미표시, 정본식별은 내부 dedup용)
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
