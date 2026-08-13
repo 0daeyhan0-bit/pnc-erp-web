@@ -266,6 +266,8 @@ SCREEN.receiptdetail=(c)=>{
   };
   const API=API_BASE;
   let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live', curMq='';   // ★Phase5 데이터원(기본 라이브 무변경) + curMq=품번 검색어(조회 후 유지·서버 스코프)
+  let curCq='', curLg='', curSg='', curCt='';   // ★거래처·대분류·소분류·거래처분류 검색어 유지(재조회·기간변경 시 안없어지게)
+  const RENDER_CAP=1500;   // ★초기속도: 비그룹(일자별) 렌더 상한(총계는 전체 기준·엑셀은 전체)
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const dToInput=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
   const inYm=v=>(''+(v||'')).slice(2).replace('-',''), inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');

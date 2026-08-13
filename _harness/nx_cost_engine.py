@@ -258,12 +258,12 @@ class NxCostEngine:
             valid=[c for c in cands if c[1] and c[1]<=ymd]
             return max(valid,key=lambda c:c[1]) if valid else None
         # ★fx-fix(2026-08-13): 매입단가 통화환산(USD/YEN/EUR/RMB × nx.fx_rate). 6851AR3278W 6.17USD×1359=8385.03 SP정합.
+        # ★vendorstrict-fix(2026-08-13): SP line303·309 `cust_code=T.IN_CUST_CODE AND IN_CUST_CODE>''` 정합 —
+        #   지정 vendor(=자식 in_cust) 정확매칭만. 빈 vendor/불일치→0(None). 전vendor 폴백 제거(폴백이 빈in_cust 노드에 매입가 오적재→과대계상, AJR74983905-12-X 등).
         if vendor:
             v=asof([c for c in rows if c[0]==vendor])
             if v: return v[2]*self._fx(v[3],ymd)
-        a=asof(rows)
-        if a: return a[2]*self._fx(a[3],ymd)
-        # ★asof-fix(2026-08-12): as-of(≤원가일) 단가 없으면 0(None). 미래단가 폴백 금지(SP=PUR_COST 0 정합). AJR30161402-A-S-1 등.
+        # ★asof-fix(2026-08-12): as-of(≤원가일) 단가 없으면 0(None). 미래단가 폴백 금지(SP=PUR_COST 0 정합).
         return None
 
     def _metal_sub(self, metal, diam, thick, ymcut):
