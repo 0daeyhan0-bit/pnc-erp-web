@@ -120,7 +120,7 @@ const MODULES=[
    {sep:true},
    {id:'salemagam',ic:'🧾',nm:'자재매출마감'},
    {id:'purmagam',ic:'📥',nm:'자재매입마감'},
-   {id:'coopquote',ic:'💱',nm:'협력사견적관리'},
+   {id:'coopquote2',ic:'💱',nm:'협력사견적관리'},
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
    {id:'partnerplan',ic:'📋',nm:'협력사계획현황'},
