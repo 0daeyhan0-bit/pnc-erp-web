@@ -18,7 +18,7 @@ def _compose_maps():
         WCEN = {}
         for ic, wc, inc in cur.fetchall():
             WCEN[ic] = wc if wc > '' else str(inc).strip()
-        cur.execute("""SELECT ITEM_CODE, MAT_CODE, USE_QTY FROM nx.PR_M_ITEM_BOM
+        cur.execute("""SELECT ITEM_CODE, MAT_CODE, USE_QTY FROM nx.v_pr_bom
             WHERE ISNULL(EXCEPT_FLAG,'0')<>'1' AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'""")
         CH = {}
         for p, c, q in cur.fetchall():
