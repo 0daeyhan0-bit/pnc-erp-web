@@ -476,6 +476,22 @@ def _sub_signature(cur, children, weld):
     return 'S:' + hashlib.md5(raw.encode('utf-8')).hexdigest()[:12]
 
 
+def _mint_sub(cur, sig, rep_item, nm=''):
+    """레지스트리 dedup-safe 등록(append-only): sig 존재 시 기존 S반환(신규 생성 안 함=완전차단),
+       없으면 다음 S##### 발급+nx.sub_registry/sub_code_map 등록. 반환 (sub_code, is_new).
+       ★주의: 최초 시드(sub_registry_build DROP+재빌드) 이후 레지스트리는 append-only. mint된 후보SUB는 bom_line에 없으므로 DROP+재빌드 재실행 금지(코드 안정성)."""
+    rep_item = (rep_item or '').strip()
+    cur.execute("SELECT sub_code FROM nx.sub_registry WHERE sig=?", sig)
+    r = cur.fetchone()
+    if r:
+        return ((r[0] or '').strip(), False)
+    cur.execute("SELECT ISNULL(MAX(CAST(SUBSTRING(sub_code,2,10) AS INT)),0) FROM nx.sub_registry WHERE sub_code LIKE 'S[0-9][0-9][0-9][0-9][0-9]'")
+    code = f"S{int(cur.fetchone()[0]) + 1:05d}"
+    cur.execute("INSERT INTO nx.sub_registry(sub_code,sig,rep_item,nm,members) VALUES(?,?,?,?,1)", code, sig, rep_item[:50], (nm or '')[:200])
+    cur.execute("IF NOT EXISTS(SELECT 1 FROM nx.sub_code_map WHERE raw_item=?) INSERT INTO nx.sub_code_map(raw_item,sub_code) VALUES(?,?)", rep_item[:50], rep_item[:50], code)
+    return (code, True)
+
+
 @router.post("/api/bom/sub/dedup")
 def sub_dedup(payload: dict = Body(...)):
     """★SUB 재사용 판정(조달후보 모달 '묶기' 시): children+weld의 시그니처로 nx.sub_registry 조회.
