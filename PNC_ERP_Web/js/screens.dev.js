@@ -439,11 +439,11 @@ SCREEN.costanalysis=(c)=>{
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
   let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
-  let dYmd=_CURDYMD;               // 단가 적용일자(YYMMDD) — 규칙: 일자=당일
+  let dYmd='260701';               // 단가 적용일자(YYMMDD) — 7월1일 고정(사용자 지정)
   const ymd2date=(y)=>y&&y.length===6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
   const date2ymd=(d)=>d?d.slice(2).replace(/-/g,''):'';                                          // date→YYMMDD
   // 리시빙실적(벌크) 단가 적용일자 — 변경 시 nx엔진 전체 재계산(백그라운드)
-  let rvYmd=_CURDYMD, regenMsg='', regenPoll=null;   // ★단가 적용일자=당일(규칙)
+  let rvYmd='260701', regenMsg='', regenPoll=null;   // ★단가 적용일자=7월1일 고정(사용자 지정)
   const setRegenMsg=(m)=>{regenMsg=m;const el=c.querySelector('#ca-regen-msg');if(el)el.textContent=m;};
   const doRegen=async()=>{
     if(!confirm(`단가 적용일자 ${ymd2date(rvYmd)} 기준으로 589품목을 재계산합니다.\n수 분 소요되며 완료 후 자동 새로고침됩니다. 진행할까요?`))return;
