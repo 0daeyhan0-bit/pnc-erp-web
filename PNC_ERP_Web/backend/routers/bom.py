@@ -241,7 +241,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
                 "sw": str(r[10]).strip(), "sq": int(r[11] or 0)})
         for p in edges: edges[p].sort(key=lambda x: x["sq"])
         nl = list({item} | {e["child"] for lst in edges.values() for e in lst} | set(edges.keys()))
-        info = {}; alias = {}
+        info = {}; alias = {}; codemap = {}
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
@@ -255,15 +255,13 @@ def _bom_tree_nx(item, real, expandbuy=0):
             cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
             for r in cur.fetchall():
                 if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
-        def disp(code): return alias.get(code, code)   # 자도번→품번_S{nn} 표시 정규화(리프변형)
-        # ★SUB 표시 = {root}_S{nn} 트리순서 채번(벤더무관). SUB=하위구성 보유 노드. 리프는 disp(sub_alias/raw).
-        sub_seq = [0]; sub_map = {}
+            cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
+            for r in cur.fetchall():
+                if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
+        def disp(code): return alias.get(code, code)   # 리프변형 표시 정규화(자재 canonical)
+        # ★SUB 표시 = 정본코드 S#####(nx.sub_code_map, 시그니처 dedup·전 제품 안정). 미채번 SUB/리프는 disp fallback.
         def subdisp(child):
-            if child in edges:   # 하위 보유 = SUB
-                if child not in sub_map:
-                    sub_seq[0] += 1; sub_map[child] = f"{item}_S{sub_seq[0]:02d}"
-                return sub_map[child]
-            return disp(child)
+            return codemap.get(child) or disp(child)
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
                 "qty": 1, "cust": "", "custnm": "", "sag": "", "se": "", "kt": "", "vir": "", "ce": "", "le": "",
@@ -405,7 +403,7 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
                 "sq": int(r[6] or 0)})
         for c in parents: parents[c].sort(key=lambda x: x["parent"])
         nodes = {item} | {p["parent"] for lst in parents.values() for p in lst} | set(parents.keys())
-        nl = list(nodes); info = {}; alias = {}
+        nl = list(nodes); info = {}; alias = {}; codemap = {}
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
             cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
@@ -419,7 +417,10 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
             cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
             for r in cur.fetchall():
                 if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
-        def disp(code): return alias.get(code, code)
+            cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
+            for r in cur.fetchall():
+                if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
+        def disp(code): return codemap.get(code) or alias.get(code, code)   # SUB=정본 S#####, 리프=자재 canonical
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
                 "qty": None, "custnm": "", "sag": "", "se": "", "ce": "",
