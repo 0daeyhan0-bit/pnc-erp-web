@@ -280,20 +280,19 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
 @router.post("/api/sales/forecast_sagub/rebuild")
 def sales_forecast_sagub_rebuild():
     """완제품별 개당 LG사급비(엔진 material_split['sa']) 캐시 재계산 → nx.item_sagub_cost.
-       대상=계획완제품(sa_t_plan_item_dtl+pr_t_plan_input) 중 사급부품(소분류310) BOM 보유. asof=오늘(최신 사급가).
-       사급가/BOM/계획 변경 시 실행. 수십초 소요."""
+       대상=계획완제품(sa_t_plan_item_dtl+pr_t_plan_input) '전부'. ★사전필터 없음: 엔진이 사급여부(sa=0/>0)를
+       직접 판정하므로 BOM 사전필터로 인한 누락이 원천 불가(과거 nx.bom_line 필터로 93건 누락 사고 방지). asof=오늘.
+       사급가/BOM/계획 변경 시 실행. 수분 소요."""
     nx = _nx(); cur = nx.cursor()
     try:
         import time as _t
         asof = _t.strftime('%y%m%d')
         cur.execute("""IF OBJECT_ID('nx.item_sagub_cost') IS NULL
             CREATE TABLE nx.item_sagub_cost(item_code varchar(50) PRIMARY KEY, sa_cost float, asof_ymd varchar(8), upd_dt datetime)""")
-        cur.execute("""WITH sagub AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
-            prods AS (SELECT DISTINCT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
-                      UNION SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101'),
-            expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part, 1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
-              UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
-            SELECT DISTINCT e.prod FROM expl e JOIN sagub s ON s.it=e.part OPTION(MAXRECURSION 30)""")
+        cur.execute("""SELECT DISTINCT item FROM (
+            SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
+            UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') p
+            WHERE ISNULL(item,'')<>''""")
         items = [r[0] for r in cur.fetchall()]
         eng = _get_cost_engine(cur)
         done = 0; nz = 0; tot = 0.0
