@@ -819,16 +819,39 @@ def sourcing_route_approve(payload: dict = Body(...)):
     if rid <= 0: return {"ok": True, "approve_flag": True}   # baseline 자동승인
     ap = 1 if payload.get("approve") else 0
     usr = (str(payload.get("user", "")).strip() or "개발")[:30]
-    nx = _nx(); cur = nx.cursor()
+    nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
         cur.execute("SELECT item_code, route_no FROM nx.sourcing_route WHERE route_id=?", rid)
         r0 = cur.fetchone()
         if not r0: raise HTTPException(404, "대상 없음")
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=?, upd_user=?, upd_dt=getdate() WHERE route_id=?", ap, usr, rid)
+        minted = []
         if ap == 1:   # ★승인 시에만 route_seq high-water bump(그 번호 소진→재사용 금지). 미승인은 미변경(삭제 시 재사용).
             _bump_approved_seq(cur, str(r0[0]).strip(), int(r0[1] or 0))
-        return {"ok": True, "approve_flag": bool(ap)}
+            # ★신규 SUB mint(정본 S 발급) — 승인 시점에만. dedup-safe(sig UNIQUE=중복불가). 이미 S코드면 skip.
+            from routers.bom import _sub_signature, _mint_sub
+            cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
+            for a, b in [(int(x[0]), str(x[1]).strip()) for x in cur.fetchall()]:
+                if b[:1] == 'S' and b[1:].isdigit(): continue
+                cur.execute("SELECT ISNULL(child_item,''), ISNULL(qty,1) FROM nx.sourcing_route_line WHERE route_id=? AND parent_line=? AND node_kind<>'SUB'", rid, a)
+                ch = [{"item": str(x[0]).strip(), "qty": float(x[1] or 1)} for x in cur.fetchall() if str(x[0]).strip()]
+                if not ch: continue
+                cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", rid, b)
+                wd = [{"weld_item": str(x[0]).strip(), "weld_st": float(x[1] or 0), "use_qty": float(x[2] or 0)} for x in cur.fetchall()]
+                sig = _sub_signature(cur, ch, wd)
+                newcode, is_new = _mint_sub(cur, sig, b, b)
+                if newcode and newcode != b:
+                    cur.execute("UPDATE nx.sourcing_route_line SET child_item=?, sub_item=?, child_name=? WHERE route_id=? AND line_id=?", newcode, newcode, newcode, rid, a)
+                    cur.execute("UPDATE nx.sourcing_route_proc SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, b)
+                    cur.execute("UPDATE nx.sourcing_route_weld SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, b)
+                    minted.append({"sub_line": a, "old": b, "new": newcode, "is_new": bool(is_new)})
+        nx.commit()
+        return {"ok": True, "approve_flag": bool(ap), "minted": minted}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 
@@ -2129,34 +2152,15 @@ def sourcing_route_finalize(payload: dict = Body(...)):
             if missing: errors.append(f"미배치(BASE 有·후보 無) {len(missing)}건: {', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}")
             if extra: errors.append(f"BASE에 없는 부품 {len(extra)}건: {', '.join(extra[:8])}{'…' if len(extra) > 8 else ''}")
         ok = gongsu_ok and part_ok
-        # (4) 신규 SUB mint — 재사용 안 된 SUB(=매칭없는 신규)를 nx.sub_registry에 등록(정본 S코드 발급). dedup-safe(sig UNIQUE=중복불가).
-        minted = []
+        # 신규 SUB mint(정본 S 발급)는 finalize 아닌 ★승인(route/approve) 시점에 수행 — 레지스트리 청결(승인된 SUB만 정본코드).
         if ok and commit:
-            from routers.bom import _sub_signature, _mint_sub
-            reused_lines = {r["sub_line"] for r in reused}
-            cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
-            for a, b in [(int(x[0]), str(x[1]).strip()) for x in cur.fetchall()]:
-                if a in reused_lines: continue
-                if b[:1] == 'S' and b[1:].isdigit(): continue   # 이미 정본 S코드
-                cur.execute("SELECT ISNULL(child_item,''), ISNULL(qty,1) FROM nx.sourcing_route_line WHERE route_id=? AND parent_line=? AND node_kind<>'SUB'", rid, a)
-                ch = [{"item": str(x[0]).strip(), "qty": float(x[1] or 1)} for x in cur.fetchall() if str(x[0]).strip()]
-                if not ch: continue
-                cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", rid, b)
-                wd = [{"weld_item": str(x[0]).strip(), "weld_st": float(x[1] or 0), "use_qty": float(x[2] or 0)} for x in cur.fetchall()]
-                sig = _sub_signature(cur, ch, wd)
-                newcode, is_new = _mint_sub(cur, sig, b, b)
-                if newcode and newcode != b:
-                    cur.execute("UPDATE nx.sourcing_route_line SET child_item=?, sub_item=?, child_name=? WHERE route_id=? AND line_id=?", newcode, newcode, newcode, rid, a)
-                    cur.execute("UPDATE nx.sourcing_route_proc SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, b)
-                    cur.execute("UPDATE nx.sourcing_route_weld SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, b)
-                    minted.append({"sub_line": a, "old": b, "new": newcode, "is_new": bool(is_new)})
             cur.execute("UPDATE nx.sourcing_route SET upd_dt=getdate() WHERE route_id=?", rid)
             nx.commit()
         else:
             nx.rollback()   # 검증전용(commit=0) 또는 실패 → reuse 변경 롤백
         return {"ok": ok, "gongsu_ok": gongsu_ok, "part_ok": part_ok, "cand_gongsu": cand, "base_gongsu": base,
                 "cut_sum": cut_sum, "proc_sum": proc_sum, "base_part_count": len(base_parts), "route_part_count": len(route_parts),
-                "missing": missing, "extra": extra, "reused": reused, "minted": minted, "committed": bool(ok and commit), "errors": errors}
+                "missing": missing, "extra": extra, "reused": reused, "committed": bool(ok and commit), "errors": errors}
     except HTTPException:
         nx.rollback(); raise
     except Exception:

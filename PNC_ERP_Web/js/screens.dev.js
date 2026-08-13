@@ -2378,7 +2378,7 @@ SCREEN.subvariant=(c)=>{
       }
       const r=await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',reuse_map:reuse,commit:1})});
       const j=await r.json();
-      if(j.ok){alert(`✅ 전체 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}${(j.minted&&j.minted.length)?'\n신규 SUB 채번(레지스트리 등록): '+j.minted.map(x=>x.old+'→'+x.new).join(', '):''}`);await loadRD(rid);await loadRoutes();}
+      if(j.ok){alert(`✅ 전체 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(신규 SUB 정본 채번은 승인 시 수행)`);await loadRD(rid);await loadRoutes();}
       else{alert('❌ 저장 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));}
     }catch(e){alert('전체 저장 오류: '+e.message);}};
   // ---------- 대상 선택(부분갱신) ----------
@@ -2469,7 +2469,7 @@ SCREEN.subvariant=(c)=>{
       const j=await r.json();if(j.ok){st.lineForm.child_item=j.code;if(!f.child_name)st.lineForm.child_name=j.name;st.msg=(j.existed?'기존':'신규')+' 하위품번 채번 → '+j.code;draw();}
       else alert('채번 실패: '+(j.detail||''));}catch(e){alert('채번 오류: '+e);}};
   const approve=async(rid,on)=>{try{const r=await fetch(`${API}/api/sourcing/route/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,approve:on?1:0,user:'개발'})});
-      const j=await r.json();if(j.ok){st.msg=on?'✔ 승인 — 조달프로파일 후보로 노출됩니다':'승인 취소 — 프로파일에서 숨김';await loadRoutes();draw();}else alert('승인 실패');}catch(e){alert('승인 오류: '+e);}};
+      const j=await r.json();if(j.ok){const mt=(j.minted&&j.minted.length)?' · 신규 SUB 채번 '+j.minted.map(x=>x.old+'→'+x.new).join(', '):'';st.msg=(on?'✔ 승인 — 조달프로파일 후보로 노출됩니다':'승인 취소 — 프로파일에서 숨김')+mt;await loadRoutes();draw();}else alert('승인 실패');}catch(e){alert('승인 오류: '+e);}};
   const delRoute=async(rid)=>{if(!confirm('이 대안 후보(헤더+라인)를 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});
       const j=await r.json();
