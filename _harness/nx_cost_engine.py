@@ -309,10 +309,14 @@ class NxCostEngine:
         return round(total,2)
 
     def _leaf_val(self, node, info, q, ymd, ymcut):
-        """최말단 재료비 base(LME제외): 사내+cost_gubun='3'→소재단가×중량, 그외→구매(매입)단가.
-           LME는 lme_total()에서 전서브트리 별도합산(외주완성 경계 뚫음)."""
-        if self._inner_prod(info) and info['cost_gubun']=='3':
-            return self.std_metal_price(info['metal'], info['diam'], info['thick'], ymcut) * info['wt'] * q
+        """최말단 재료비 base(LME제외): 사내(INNER_PROD=1)=cost_gubun='3'→소재단가×중량, 그외 0(매입가 안씀).
+           INNER_PROD=0(구매/외주완성)=매입단가. LME는 lme_total()에서 전서브트리 별도합산.
+           ★innerleaf-fix(2026-08-13): SP는 매입단가를 INNER_PROD='0'에만 적용(#TEMP_MAT: cost_gubun∉('3','4') AND INNER_PROD='0').
+             사내제작(mk='1') leaf가 자식없고 cg≠'3'이면 SP=0(예 MAZ66263602 mk1·cg1·자식0: SP 0, 기존엔진 매입가7894 오적재)."""
+        if self._inner_prod(info):
+            if info['cost_gubun']=='3':
+                return self.std_metal_price(info['metal'], info['diam'], info['thick'], ymcut) * info['wt'] * q
+            return 0.0
         price=self.pur_price(node, ymd, info['in_cust'])   # 구매품(INNER_PROD=0)=구매단가
         return (price or 0)*q
 
@@ -429,6 +433,8 @@ class NxCostEngine:
                 won=0.0; mat=0.0
             elif inner and cg=='3':
                 won=self.std_metal_price(info['metal'],info['diam'],info['thick'],ymcut); mat=round(won*info['wt']*cum_q,2)
+            elif inner:
+                won=0.0; mat=0.0   # ★innerleaf-fix(2026-08-13): 사내제작 leaf·cg≠3 = SP 0(매입가 안씀)
             else:
                 won=self.pur_price(node,ymd,info['in_cust']) or 0.0; mat=round(won*cum_q,2)
             gag=round(self.proc_amt(node,info,ym,parent)*cum_ea,2)
