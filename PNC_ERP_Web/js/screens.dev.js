@@ -2378,7 +2378,7 @@ SCREEN.subvariant=(c)=>{
       }
       const r=await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',reuse_map:reuse,commit:1})});
       const j=await r.json();
-      if(j.ok){alert(`✅ 전체 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}`);await loadRD(rid);await loadRoutes();}
+      if(j.ok){alert(`✅ 전체 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}${(j.minted&&j.minted.length)?'\n신규 SUB 채번(레지스트리 등록): '+j.minted.map(x=>x.old+'→'+x.new).join(', '):''}`);await loadRD(rid);await loadRoutes();}
       else{alert('❌ 저장 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));}
     }catch(e){alert('전체 저장 오류: '+e.message);}};
   // ---------- 대상 선택(부분갱신) ----------
