@@ -72,10 +72,10 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
         # 각 변형 BOM 자식 set (현재유효 또는 지정일)
         for v in vs:
             if ay:
-                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
+                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM PARTNER_ERP_TEST3.nx.v_cs_bom
                     WHERE ITEM_CODE=? AND FROM_APPLY_YMD<=? AND TO_APPLY_YMD>=?""", v["item"], ay, ay)
             else:
-                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
+                cur.execute("""SELECT MAT_CODE, ISNULL(SAGUB_FLAG,'0') FROM PARTNER_ERP_TEST3.nx.v_cs_bom
                     WHERE ITEM_CODE=? AND TO_APPLY_YMD>='260601'""", v["item"])
             ch = cur.fetchall()
             v["_kset"] = frozenset(x[0] for x in ch)
@@ -83,7 +83,7 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
             v["is_self"] = (v["item"] == base)
         prod = [v for v in vs if v["nk"] > 0]  # 실제 생산단(BOM 보유)
         # 사용여부 신호: as-built BOM 트리(현재 실제 투입경로) + 26년 확정입고
-        cur.execute("SELECT ITEM_CODE, MAT_CODE FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE TO_APPLY_YMD>='260601'")
+        cur.execute("SELECT ITEM_CODE, MAT_CODE FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE TO_APPLY_YMD>='260601'")
         _ch = {}
         for p, m in cur.fetchall(): _ch.setdefault(p, set()).add(m)
         tree = {base}; stack = [base]
@@ -281,7 +281,7 @@ def subvariant_get(base: str = Query(...)):
         sag = {}
         for i in range(0, len(items), 900):
             ch = items[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"""SELECT LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(MAT_CODE)) FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
+            cur.execute(f"""SELECT LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(MAT_CODE)) FROM PARTNER_ERP_TEST3.nx.v_cs_bom
                 WHERE ITEM_CODE IN ({ph}) AND SAGUB_FLAG='1' AND TO_APPLY_YMD>='260601'""", *ch)
             for r in cur.fetchall(): sag.setdefault(r[0], []).append(r[1])
         # 변형별 실입고(2026, MAINT_QTY>0) — 현행 판정을 플래그 대신 실거래로 (레거시 is_current 오표시 정정)
@@ -484,7 +484,7 @@ def _route_baseline_lines(item):
               ISNULL(c.CUST_DESC,'') custnm, ISNULL(m.METAL_GUBUN,'') metal,
               ISNULL(m.ITEM_DIAM,0) diam, ISNULL(m.ITEM_THICK,0) thick, ISNULL(m.ITEM_LENGTH,0) len,
               ISNULL(b.BOM_SEQ,0) sq
-            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b
+            FROM PARTNER_ERP_TEST3.nx.v_cs_bom b
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=b.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
             WHERE b.ITEM_CODE=? AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
@@ -1822,10 +1822,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
     try:
         cur.execute("""WITH tree AS (
             SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, 1 lvl
-            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
             UNION ALL
             SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), t.lvl+1
-            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
             JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
             SELECT c, SUM(q) qty FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
@@ -1849,7 +1849,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         mk1 = [c for c in codes if info.get(c, {}).get("mk", "") == "1"]
         for i in range(0, len(mk1), 900):
             ch = mk1[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM
+            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.v_cs_bom
                 WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
                   AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
             for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())

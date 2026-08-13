@@ -12,7 +12,7 @@ router = APIRouter()
 # STEP5 nx.plan_item_dtl(LOT합산·모델→ASSY 유효일자, EXCEPT미적용) → STEP6 nx.plan_part_dtl(10레벨BOM+가공공정 공정전이)
 #  → STEP7 nx.plan_part_mat(사급중단 NOT EXISTS PART_DTL + 최하위집계 + charindex중복 + 용접봉sgroup910 제외=공정처리).
 # 검증: 설계2건(용접봉·체결SUB이중계상)제외시 웹 vs 레거시 PR_T_PLAN_PART_MAT 수량완전일치100%. [[newerp-plan-soyo-verify]]
-_P = "nx."   # ★nx전환 확정(2026-08-12): 참조만 nx 충실복제(nx.PR_M_ITEM_BOM=PR복제·nx.PR_M_ITEM·가공마스터, r_bulk_copy.py). 백투백 검증 live=nx 45,250키 diff0. 컷오버후 라이브 무의존. 단일BOM 통일은 별도.
+_P = "nx."   # ★nx전환 확정(2026-08-12). ★단일BOM 통일(2026-08-13): BOM소스=nx.v_pr_bom(nx.bom_line 단일원본 위 호환뷰, except_flag=PR정합·cs_calc_except=원가). 가공/품목 마스터는 nx복제 유지. r_bomline_soyo_reconcile.py로 소요 PR수렴 검증.
 
 @router.post("/api/plan/compose_mat")
 def plan_compose_mat(payload: dict = Body(...)):
