@@ -83,8 +83,9 @@ SCREEN.salesforecast=(c)=>{
   let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[];   // mode:net(차감후)|gross(차감전=라이브)
   const WD=['일','월','화','수','목','금','토'];
   const dlabel=y=>{y=''+y;const D=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return `${y.slice(2,4)}/${y.slice(4,6)}<span class="wd">${WD[D.getDay()]}</span>`;};
-  const load=async(base)=>{loading=true;draw();
-    try{const r=await fetch(`${API}/api/sales/forecast${base?('?base='+encodeURIComponent(base)):''}`);F=await r.json();if(!F.rows)F={days:[],rows:[],base:''};}
+  const load=async(base,to)=>{loading=true;draw();
+    const qs=[];if(base)qs.push('base='+encodeURIComponent(base));if(to)qs.push('to='+encodeURIComponent(to));
+    try{const r=await fetch(`${API}/api/sales/forecast${qs.length?('?'+qs.join('&')):''}`);F=await r.json();if(!F.rows)F={days:[],rows:[],base:''};}
     catch(e){F={days:[],rows:[],base:'',_err:'백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요'};}
     loading=false;draw();};
   const draw=()=>{
@@ -95,9 +96,9 @@ SCREEN.salesforecast=(c)=>{
     const sfOpts=[...sfMap].sort((a,b)=>(''+a[1]).localeCompare(''+b[1],'ko')).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     c.innerHTML=`
      <div class="page-title">📅 영업예상매출현황</div>
-     <div class="page-sub">🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW) · 기준일 ${esc(F.base||'')}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
+     <div class="page-sub">🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW) · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
      <div class="toolbar">
-       <label class="tl">기준일</label><input type="date" class="inp" id="sf-base" value="${F.base?('20'+F.base.slice(0,2)+'-'+F.base.slice(2,4)+'-'+F.base.slice(4,6)):''}" title="이 날짜 이후 생산계획으로 예상매출 산출" style="min-width:135px">
+       <label class="tl">기간</label><input type="date" class="inp" id="sf-base" value="${F.base?('20'+F.base.slice(0,2)+'-'+F.base.slice(2,4)+'-'+F.base.slice(4,6)):''}" title="시작일" style="min-width:135px"><span style="color:var(--muted);margin:0 3px">~</span><input type="date" class="inp" id="sf-to" value="${F.to?('20'+F.to.slice(0,2)+'-'+F.to.slice(2,4)+'-'+F.to.slice(4,6)):''}" title="종료일(비우면 시작일 이후 전체)" style="min-width:135px">
        <label class="tl">구분</label>
        <div class="toggle-group"><button data-mode="net" class="${mode==='net'?'on':''}">차감후(순예상)</button><button data-mode="gross" class="${mode==='gross'?'on':''}">차감전(원계획=라이브)</button></div>
        <select class="sel" id="work"><option value="">전체작업처</option>${works.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('')}</select>
@@ -109,7 +110,8 @@ SCREEN.salesforecast=(c)=>{
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
     c.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;draw();});
-    c.querySelector('#sf-base').onchange=e=>{const v=e.target.value;load(v?v.slice(2).replace(/-/g,''):'');};   // 기준일 키인 → 재조회
+    const sfReload=()=>{const fv=c.querySelector('#sf-base').value,tv=c.querySelector('#sf-to').value;load(fv?fv.slice(2).replace(/-/g,''):'',tv?tv.slice(2).replace(/-/g,''):'');};   // 기간(from~to) 재조회
+    c.querySelector('#sf-base').onchange=sfReload; c.querySelector('#sf-to').onchange=sfReload;
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
     const rowQ=r=>mode==='net'?r.nq:r.gq, rowA=r=>mode==='net'?r.namt:r.gamt;
     const render=()=>{

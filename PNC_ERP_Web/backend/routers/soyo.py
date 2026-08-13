@@ -150,7 +150,17 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
         today = str(cur.fetchone()[0])
         b = b or today
-        t = _d6(to) if to.strip() else None    # ★기간 종료일(옵션). 없으면 base 이후 전체.
+        t = _d6(to) if to.strip() else None    # ★기간 종료일. 미지정 시 기본=시작일+1개월(far-future 오염 데이터 방지·기간뷰 기본).
+        if not t:
+            try:
+                import calendar as _cal
+                from datetime import datetime as _dt
+                d0 = _dt.strptime('20' + b, '%Y%m%d')
+                _mo = d0.month % 12 + 1; _yr = d0.year + (1 if d0.month == 12 else 0)
+                _dy = min(d0.day, _cal.monthrange(_yr, _mo)[1])
+                t = _dt(_yr, _mo, _dy).strftime('%y%m%d')
+            except Exception:
+                t = None
         tc = " AND PLAN_YMD<=?" if t else ""
         # union1(sa_t_plan_item_dtl) + union4(pr_t_plan_input), item×ymd×src · 기간 base~to
         cur.execute(f"""
