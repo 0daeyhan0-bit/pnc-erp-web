@@ -52,30 +52,27 @@ class NxCostEngine:
             self.cur.execute(CTE + "SELECT DISTINCT c FROM allc" + TAIL, item)
             codes = set(str(r[0]).strip() for r in self.cur.fetchall() if str(r[0]).strip())
             if not codes: return
-            # ★성능(2026-08-13): 재귀 CTE를 5번(각 ~500ms) 대신, codes를 1번만 CTE로 구해 나머지 4개는
-            #   STRING_SPLIT(단일파라미터) 조인으로 적재(적재 데이터 동일=원가 무변경). ~2500ms→~600ms.
-            codes_csv = ",".join(codes)
             # proc_weld
-            self.cur.execute("""SELECT pw.parent_item, pw.weld_item, ISNULL(pw.use_qty,0), ISNULL(pw.cs_calc_except,0),
+            self.cur.execute(CTE + """SELECT pw.parent_item, pw.weld_item, ISNULL(pw.use_qty,0), ISNULL(pw.cs_calc_except,0),
                 ISNULL(pw.from_ymd,''), ISNULL(pw.to_ymd,''), ISNULL(pw.lme_except,0)
-                FROM nx.proc_weld pw JOIN STRING_SPLIT(?,',') s ON pw.parent_item=s.value ORDER BY pw.parent_item, pw.weld_item""", codes_csv)
+                FROM nx.proc_weld pw JOIN allc s ON pw.parent_item=s.c ORDER BY pw.parent_item, pw.weld_item""" + TAIL, item)
             for r in self.cur.fetchall():
                 self._wlc.setdefault(str(r[0]).strip(), []).append(
                     (str(r[1]).strip(), float(r[2] or 0), bool(r[3]), str(r[4] or ''), str(r[5] or ''), bool(r[6])))
             for c in codes:
                 if c not in self._wlc: self._wlc[c] = []
             # item
-            self.cur.execute("""SELECT i.item_code, ISNULL(i.in_cust,''), ISNULL(i.make_type,''), ISNULL(i.cost_gubun,''),
+            self.cur.execute(CTE + """SELECT i.item_code, ISNULL(i.in_cust,''), ISNULL(i.make_type,''), ISNULL(i.cost_gubun,''),
                 ISNULL(i.metal_gubun,''), ISNULL(i.diam,0), ISNULL(i.thick,0), ISNULL(i.net_weight,0), ISNULL(i.has_gagong,0),
-                ISNULL(i.silver_flag,0), ISNULL(i.unit,''), ISNULL(i.lgroup,'') FROM nx.item i JOIN STRING_SPLIT(?,',') s ON i.item_code=s.value""", codes_csv)
+                ISNULL(i.silver_flag,0), ISNULL(i.unit,''), ISNULL(i.lgroup,'') FROM nx.item i JOIN allc s ON i.item_code=s.c""" + TAIL, item)
             for r in self.cur.fetchall():
                 self._item[str(r[0]).strip()] = {'in_cust': r[1].strip(), 'make_type': r[2].strip(), 'cost_gubun': r[3].strip(),
                     'metal': r[4].strip(), 'diam': float(r[5] or 0), 'thick': float(r[6] or 0), 'wt': float(r[7] or 0),
                     'has_gagong': bool(r[8]), 'silver': bool(r[9]), 'unit': r[10].strip(), 'lgroup': r[11].strip()}
             # routing → _pc(공정, 91/92/93/98/99 제외) + _rc(91/92/93)
             for c in codes: self._pc[c] = []
-            self.cur.execute("""SELECT r.item_code, r.proc_code, ISNULL(r.work_qty,0), ISNULL(r.prod_uph,0), ISNULL(r.calc_gubun,''), ISNULL(r.p_item,'')
-                FROM nx.routing r JOIN STRING_SPLIT(?,',') s ON r.item_code=s.value""", codes_csv)
+            self.cur.execute(CTE + """SELECT r.item_code, r.proc_code, ISNULL(r.work_qty,0), ISNULL(r.prod_uph,0), ISNULL(r.calc_gubun,''), ISNULL(r.p_item,'')
+                FROM nx.routing r JOIN allc s ON r.item_code=s.c""" + TAIL, item)
             for r in self.cur.fetchall():
                 code = str(r[0]).strip(); proc = str(r[1]); wq = float(r[2] or 0); uph = float(r[3] or 0)
                 cg = str(r[4] or '').strip(); pit = str(r[5] or '').strip()
@@ -88,23 +85,12 @@ class NxCostEngine:
                     if (c, pc) not in self._rc: self._rc[(c, pc)] = []
             # bom_header → _hdr (max version)
             best = {}
-            self.cur.execute("SELECT bh.item_code, bh.bom_id, ISNULL(bh.version,1) FROM nx.bom_header bh JOIN STRING_SPLIT(?,',') s ON bh.item_code=s.value", codes_csv)
+            self.cur.execute(CTE + "SELECT bh.item_code, bh.bom_id, ISNULL(bh.version,1) FROM nx.bom_header bh JOIN allc s ON bh.item_code=s.c" + TAIL, item)
             for r in self.cur.fetchall():
                 code = str(r[0]).strip(); ver = int(r[2] or 1)
                 if code not in best or ver > best[code][0]: best[code] = (ver, r[1])
             for c in codes:
                 self._hdr[c] = best[c][1] if c in best else None
-            # ★성능(2026-08-13): price_item(매입) 일괄적재 → _pur. naewon이 노드마다 매입단가 조회(원격DB 왕복)하던 것 제거.
-            #   적재행·필터(price_type='매입' AND price IS NOT NULL)·튜플순서(vendor,apply_ymd,price,currency) 동일 = pur_price 결과 무변경.
-            if not hasattr(self, '_pur'): self._pur = {}
-            for c in codes:
-                if c not in self._pur: self._pur[c] = []
-            self.cur.execute("""SELECT pi.item_code, pi.vendor_code, ISNULL(pi.apply_ymd,''), pi.price, ISNULL(pi.currency,'KRW')
-                FROM nx.price_item pi JOIN STRING_SPLIT(?,',') s ON pi.item_code=s.value
-                WHERE pi.price_type='매입' AND pi.price IS NOT NULL""", codes_csv)
-            for r in self.cur.fetchall():
-                self._pur.setdefault(str(r[0]).strip(), []).append(
-                    (str(r[1]).strip(), str(r[2] or '').strip(), float(r[3] or 0), str(r[4] or 'KRW').strip()))
         except Exception:
             return   # CTE 실패(순환 등) → 프라임 스킵, per-node 폴백(정확성 무손상)
 

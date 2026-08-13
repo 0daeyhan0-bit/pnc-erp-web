@@ -548,14 +548,21 @@ SCREEN.costanalysis=(c)=>{
       const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
       const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
       D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
-      const CH=25;let done=0;
-      for(let i=0;i<list.length;i+=CH){
+      // ★속도: 청크 100개 + 3개 동시(병렬) — 순차25 대비 라운드트립·엔진프라임 대폭 감소. 완료 후 1회 렌더(rvBusy 중엔 '조회 중' 표시).
+      const CH=100, PAR=3; let done=0;
+      const chunks=[]; for(let i=0;i<list.length;i+=CH)chunks.push({start:i,items:list.slice(i,i+CH)});
+      for(let b=0;b<chunks.length;b+=PAR){
         if(loadRecv._tok!==tok)break;
-        const chunk=list.slice(i,i+CH);let cc={};
-        try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:chunk.map(x=>x.part),ymd})})).json()).costs||{};}catch(e){}
-        for(let j=0;j<chunk.length;j++)D.rows[i+j]=buildRow(chunk[j].part,chunk[j].qty,cc[chunk[j].part]);
-        done+=chunk.length;setRegenMsg(`실시간 계산 ${done}/${list.length}`);recomputeAgg();renderBody();
+        await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
+          let cc={};
+          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd})})).json()).costs||{};}catch(e){}
+          ck.items.forEach((x,j)=>{D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
+          done+=ck.items.length;
+        }));
+        if(loadRecv._tok!==tok)break;
+        setRegenMsg(`실시간 계산 ${done}/${list.length}`);renderBody();
       }
+      recomputeAgg();
       if(loadRecv._tok===tok){setRegenMsg(`완료 ${list.length}품목 · 실시간 nx (단가 ${ym2str(ymd)})`);window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
     }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
     finally{rvBusy=false;}
@@ -676,6 +683,8 @@ SCREEN.costanalysis=(c)=>{
        .ca-tbl td.negv{color:#c0392b;font-weight:700}.ca-tbl td.posv{color:#1f8a5a}
        .ca-tbl tfoot td{position:sticky;bottom:0;background:#f0f4fb;font-weight:700;border-top:2px solid #cdd9ef}
        .chk{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);margin:0 4px}
+       .ca-spin{width:16px;height:16px;border:3px solid #cdd9ef;border-top-color:#2f5aa8;border-radius:50%;display:inline-block;animation:caspin .7s linear infinite}
+       @keyframes caspin{to{transform:rotate(360deg)}}
      </style>`;
     renderBody();
     {const xls=c.querySelector('#ca-xls'); if(xls)xls.onclick=caExport;}
