@@ -201,12 +201,13 @@ def _bom_tree_route(item, route_id):
     return {"item": item, "name": rootnm, "rows": out, "count": len(out) - 1, "maxlevel": maxlvl,
             "route_id": route_id, "route_no": int(h[1]), "route_name": h[2], "is_route": True}
 
-def _bom_tree_nx(item, real):
+def _bom_tree_nx(item, real, expandbuy=0):
     """★단일 정규화 BOM(nx.bom_line) 전개 — #1 이관본. 용접봉(RAC) 제외(설계=공정종속 nx.proc_weld), 자도번→품번_S{nn}(nx.sub_alias) 표시 정규화.
-       real=1: cs_calc_except=0 + 라이브 PR_M_ITEM.MAKE_TYPE='1' 하위전개(현행 CS bom/tree와 동일 grain → 리프·수량 diff0).
+       real=1: cs_calc_except=0(현행) + 라이브 PR_M_ITEM.MAKE_TYPE='1' 하위전개(현행 CS bom/tree와 동일 grain → 리프·수량 diff0).
+       ★expandbuy=1(real=1과 함께): 현행필터(cs_calc_except=0)는 유지하되 MAKE_TYPE 게이트 제거 → 매입 SUB(예 명진 -19-1) 하위도 전개(비현행 변형 태국 -F&T=cs_except1은 여전히 제외). 라우팅 화면 '현행 전체전개'용.
        구조/수량=nx.bom_line, 상세(품명·매입처·치수)=라이브 PR_M_ITEM(자도번 코드 기준, 표시코드만 정규화)."""
     exc = "AND ISNULL(bl.cs_calc_except,0)=0" if real else ""
-    mk = "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""
+    mk = "" if (not real or expandbuy) else "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'"
     cn = _nx(); cur = cn.cursor()
     try:
         cur.execute(f"""WITH tree AS (
@@ -282,7 +283,8 @@ def _bom_tree_nx(item, real):
 @router.get("/api/bom/tree")
 def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, description="1=실사용전개(원가제외 스킵+제작품만 전개,매입중단)=실원가용 일치, 0=전체전개"),
              route_id: int = Query(0, description="0/미지정=마스터 실사용 BOM(완전불변), >0=조달후보(nx.sourcing_route_line) 구조를 동일스키마로 반환"),
-             src: str = Query('nx', description="nx=단일BOM nx.bom_line [기본, 컷오버후 라이브](용접봉제외+자도번→품번_S{nn}정규화, 레거시SP구조 39/40검증). cs=현행 라이브 CS_M_ITEM_BOM(대조·롤백용)")):
+             src: str = Query('nx', description="nx=단일BOM nx.bom_line [기본, 컷오버후 라이브](용접봉제외+자도번→품번_S{nn}정규화, 레거시SP구조 39/40검증). cs=현행 라이브 CS_M_ITEM_BOM(대조·롤백용)"),
+             expandbuy: int = Query(0, description="1(real=1과 함께): 현행필터(cs_calc_except=0) 유지하되 매입SUB 하위도 전개(비현행 변형은 여전히 제외). 라우팅 '현행 전체전개'용")):
     """다단계 BOM 트리(레벨별) — CS_M_ITEM_BOM 재귀전개. 매입처=컴포넌트 IN_CUST_CODE(현행 벤더).
     real=1(기본): 견적원가조회(실원가용, SP_CS_견적서(BOM)) 전개와 일치 — CS_CALC_EXCEPT_FLAG='1'(원가제외=현행아닌 조달경로) 제외 + MAKE_TYPE='1'(제작/자체)만 하위전개, 매입/구매품(구매완제)은 전개중단.
     route_id>0: 조달후보 계층(nx.sourcing_route_line)을 동일 트리 스키마로 반환(마스터 미조회)."""
@@ -291,7 +293,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
         return _bom_tree_route(item, int(route_id))
     real = 1 if real is None else int(real)
     if str(src or 'nx').lower() != 'cs':
-        return _bom_tree_nx(item, real)   # ★#1 이관: 단일 정규화 BOM(nx.bom_line). src=cs면 아래 현행 CS 전개(대조·롤백)
+        return _bom_tree_nx(item, real, int(expandbuy or 0))   # ★#1 이관: 단일 정규화 BOM(nx.bom_line). src=cs면 아래 현행 CS 전개(대조·롤백)
     exc_a = "AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""      # 원가제외 라인 스킵
     exc_r = "AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""
     mk_gate = "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
