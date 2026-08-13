@@ -105,7 +105,7 @@ SCREEN.salesforecast=(c)=>{
      <div class="toolbar">
        <label class="tl">종류</label>
        <div class="toggle-group"><button data-metric="sales" class="${metric==='sales'?'on':''}">영업 예상매출</button><button data-metric="sagub" class="${metric==='sagub'?'on':''}">예상 LG사급금액</button></div>
-       <label class="tl">기간</label><input type="date" class="inp" id="sf-base" value="${F.base?('20'+F.base.slice(0,2)+'-'+F.base.slice(2,4)+'-'+F.base.slice(4,6)):''}" title="시작일" style="min-width:135px"><span style="color:var(--muted);margin:0 3px">~</span><input type="date" class="inp" id="sf-to" value="${F.to?('20'+F.to.slice(0,2)+'-'+F.to.slice(2,4)+'-'+F.to.slice(4,6)):''}" title="종료일(비우면 시작일 이후 전체)" style="min-width:135px">
+       <label class="tl">기간</label><input type="text" inputmode="numeric" class="inp sf-date" id="sf-base" value="${F.base?('20'+F.base.slice(0,2)+'-'+F.base.slice(2,4)+'-'+F.base.slice(4,6)):''}" placeholder="YYYY-MM-DD" maxlength="10" title="시작일 — 숫자 직접입력(예 20260901 또는 260901)" style="width:118px"><span style="color:var(--muted);margin:0 3px">~</span><input type="text" inputmode="numeric" class="inp sf-date" id="sf-to" value="${F.to?('20'+F.to.slice(0,2)+'-'+F.to.slice(2,4)+'-'+F.to.slice(4,6)):''}" placeholder="YYYY-MM-DD" maxlength="10" title="종료일(비우면 전체) — 숫자 직접입력" style="width:118px">
        <label class="tl">구분</label>
        <div class="toggle-group"><button data-mode="net" class="${mode==='net'?'on':''}">차감후(순예상)</button><button data-mode="gross" class="${mode==='gross'?'on':''}">차감전(원계획=라이브)</button></div>
        <select class="sel" id="work"><option value="">전체작업처</option>${works.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('')}</select>
@@ -117,9 +117,16 @@ SCREEN.salesforecast=(c)=>{
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
     c.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;draw();});
-    c.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{if(metric===b.dataset.metric)return;metric=b.dataset.metric;const fv=c.querySelector('#sf-base').value,tv=c.querySelector('#sf-to').value;load(fv?fv.slice(2).replace(/-/g,''):'',tv?tv.slice(2).replace(/-/g,''):'');});
-    const sfReload=()=>{const fv=c.querySelector('#sf-base').value,tv=c.querySelector('#sf-to').value;load(fv?fv.slice(2).replace(/-/g,''):'',tv?tv.slice(2).replace(/-/g,''):'');};   // 기간(from~to) 재조회
-    c.querySelector('#sf-base').onchange=sfReload; c.querySelector('#sf-to').onchange=sfReload;
+    // ★날짜 텍스트 직접입력: 6자리(YYMMDD)/8자리(YYYYMMDD) 모두 처리. 자동 대시 서식. Enter/blur 시 재조회. (type=date 네이티브 타이핑 불안정 회피)
+    const toY=el=>{const d=(el.value||'').replace(/\D/g,''); return d.length>=8?d.slice(2,8):(d.length===6?d:'');};
+    const fmtD=v=>{const d=(''+v).replace(/\D/g,'').slice(0,8); let s=d.slice(0,4); if(d.length>4)s+='-'+d.slice(4,6); if(d.length>6)s+='-'+d.slice(6,8); return s;};
+    c.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{if(metric===b.dataset.metric)return;metric=b.dataset.metric;load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to')));});
+    const sfReload=()=>load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to')));   // 기간(from~to) 재조회
+    c.querySelectorAll('.sf-date').forEach(el=>{
+      el.oninput=()=>{const p=el.value.length; el.value=fmtD(el.value);};   // 타이핑 즉시 YYYY-MM-DD 서식
+      el.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();sfReload();}};
+      el.onchange=sfReload;   // 포커스 벗어날 때 재조회
+    });
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
     const rowQ=r=>mode==='net'?r.nq:r.gq, rowA=r=>mode==='net'?r.namt:r.gamt;
     // ★헤더 더블클릭 정렬: 컬럼별 정렬값(도번/품명/작업처=문자, 합계=금액, 일자=그 날 수량)
