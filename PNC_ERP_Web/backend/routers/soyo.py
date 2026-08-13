@@ -140,7 +140,7 @@ def plan_sourcing(mode: str = Query("gubun"), gubun: str = Query(""), vendor: st
         nx.close()
 
 @router.get("/api/sales/forecast")
-def sales_forecast(base: str = Query("")):
+def sales_forecast(base: str = Query(""), to: str = Query("")):
     """★영업예상매출현황 라이브 API (레거시 dw_pr_plan_190 재현, 정적스냅샷 대체).
        소스=sa_t_plan_item_dtl(union1)+pr_t_plan_input(union4). 단가=pr_m_item_cost(COST_TAG in S/E=LG판매가, 품목단위 최신, cust무관) KRW.
        gross=차감전(=라이브190). net=차감후=gross − union4(pr_t_plan_input)의 첫계획일 과대분 제거. [[nextgen-erp-sales-forecast-190]]"""
@@ -150,16 +150,19 @@ def sales_forecast(base: str = Query("")):
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
         today = str(cur.fetchone()[0])
         b = b or today
-        # union1(sa_t_plan_item_dtl) + union4(pr_t_plan_input), item×ymd×src
+        t = _d6(to) if to.strip() else None    # ★기간 종료일(옵션). 없으면 base 이후 전체.
+        tc = " AND PLAN_YMD<=?" if t else ""
+        # union1(sa_t_plan_item_dtl) + union4(pr_t_plan_input), item×ymd×src · 기간 base~to
         cur.execute(f"""
           SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=? GROUP BY C_ITEM_CODE, PLAN_YMD
+            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
           UNION ALL
           SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM pr_t_plan_input WHERE PLAN_YMD>=? GROUP BY ITEM_CODE, PLAN_YMD""", b, b)
+            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
+          *([b, t, b, t] if t else [b, b]))
         src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
         if not src:
-            return {"base": b, "days": [], "rows": []}
+            return {"base": b, "to": (t or b), "days": [], "rows": []}
         base_ymd = min(y for _, y, _, _ in src)  # 첫 계획일(차감 기준)
         # 단가: COST_TAG in (S,E) 최신 COST_APPLY_YMD, 품목단위(cust무관)
         cur.execute("""SELECT c.ITEM_CODE, c.ITEM_COST FROM pr_m_item_cost c
@@ -187,7 +190,7 @@ def sales_forecast(base: str = Query("")):
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
             g["gq"] = gq; g["nq"] = nq; g["gamt"] = round(gq * c); g["namt"] = round(nq * c)
             rows.append(g)
-        return {"base": base_ymd, "days": sorted(days), "rows": rows,
+        return {"base": base_ymd, "to": (t or (max(days) if days else b)), "days": sorted(days), "rows": rows,
                 "gross_amt": round(sum(r["gamt"] for r in rows)), "net_amt": round(sum(r["namt"] for r in rows))}
     finally:
         cn.close()

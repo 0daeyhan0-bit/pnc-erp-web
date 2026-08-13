@@ -479,7 +479,7 @@ SCREEN.costanalysis=(c)=>{
   // [rowIdx, header, group, opts]
   const NUM=[[1,'입고수량','',{}],
     [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}],
-    [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'LME차액','실원가',{}],[18,'재료비율','실원가',{pct:1}],
+    [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
     [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}]];
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
@@ -529,11 +529,12 @@ SCREEN.costanalysis=(c)=>{
   // ★리시빙실적 실시간(nx): 목록(SA_T_LG_RECEIVING_DTL)+행별 배치 원가(/api/cost/nx/bulk). 스냅샷 파일 대체·세션캐시.
   const ym2str=(y)=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:(y||'');
   const buildRow=(part,qty,cst)=>{const r=new Array(23).fill(0);r[0]=part;r[1]=qty;
-    if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0;
+    if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0,sagub=cst.sagub||0;
       const won=(cst.won!=null?cst.won:jae),bu=cst.bu||0,sa=cst.sa||0,matb=won+bu+sa;   // 원자재/부자재/LG사급 분리(sgroup)
+      const son2=son+sagub;   // 손익 = (LG−실원가) + 사급차액(실출고가−실입고가, 음수=손해)
       r[2]=won;r[3]=bu;r[4]=sa;r[5]=matb;r[6]=sil;r[7]=lg?matb/lg:0;
-      r[8]=won;r[9]=bu;r[10]=sa;r[11]=matb;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=cst.lme||0;r[18]=lg?matb/lg:0;
-      r[19]=lg;r[20]=lg*qty;r[21]=son;r[22]=son*qty;}
+      r[8]=won;r[9]=bu;r[10]=sa;r[11]=matb;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=sagub;r[18]=lg?matb/lg:0;
+      r[19]=lg;r[20]=lg*qty;r[21]=son2;r[22]=son2*qty;}
     return r;};
   const cardsHTML=()=>`<div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
        <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
@@ -556,7 +557,7 @@ SCREEN.costanalysis=(c)=>{
         if(loadRecv._tok!==tok)break;
         await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
           let cc={};
-          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd})})).json()).costs||{};}catch(e){}
+          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||'')})})).json()).costs||{};}catch(e){}
           ck.items.forEach((x,j)=>{D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
           done+=ck.items.length;
         }));

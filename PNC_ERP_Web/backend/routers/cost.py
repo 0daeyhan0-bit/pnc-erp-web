@@ -385,9 +385,9 @@ def _sagub_diff_map(cur, ym):
     exsg = ",".join("'" + s + "'" for s in _SAGUB_EXCL_SG)
     cur.execute(f"""
     WITH inb AS (SELECT MAT_CODE mat, SUM(CAST(MAINT_AMT AS FLOAT)) amt, SUM(CAST(MAINT_QTY AS FLOAT)) qty
-      FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG IN ('9','S','C','G','H') AND MAINT_QTY>0 GROUP BY MAT_CODE),
+      FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG IN ('9','S','C','G','H') AND MAINT_QTY>0 AND MAINT_COST>0 GROUP BY MAT_CODE),
     outb AS (SELECT MAT_CODE mat, SUM(CAST(MAINT_AMT AS FLOAT)) amt, SUM(CAST(MAINT_QTY AS FLOAT)) qty
-      FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' GROUP BY MAT_CODE)
+      FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' AND MAINT_COST>0 GROUP BY MAT_CODE)
     SELECT i.mat, CAST((o.amt/NULLIF(o.qty,0)) - (i.amt/NULLIF(i.qty,0)) AS FLOAT) diff
     FROM inb i JOIN outb o ON i.mat=o.mat JOIN nx.PR_M_ITEM m ON m.ITEM_CODE=i.mat
     WHERE o.qty<>0 AND i.qty<>0 AND (o.amt/NULLIF(o.qty,0))>0
