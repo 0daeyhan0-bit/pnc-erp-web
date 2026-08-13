@@ -80,15 +80,17 @@ SCREEN.prodinvout=(c)=>{
 /* 영업예상매출현황 (영업, dw_pr_plan_190) — 도번×일별 수량 피벗 + 하단 일별 금액줄. ★차감=LG리시빙(20일 백로그), 21일+ 라이브일치. 차감전/차감후 토글 */
 SCREEN.salesforecast=(c)=>{
   const API=API_BASE;
-  let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[], metric='sales';   // mode:net(차감후)|gross(차감전=라이브) · metric:sales(영업예상매출)|sagub(예상 LG사급금액)
+  let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[], metric='sales', reqSeq=0, sortKey='', sortDir=1;   // mode:net(차감후)|gross(차감전=라이브) · metric:sales(영업예상매출)|sagub(예상 LG사급금액) · sortKey/Dir:헤더더블클릭 정렬
   const WD=['일','월','화','수','목','금','토'];
   const dlabel=y=>{y=''+y;const D=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return `${y.slice(2,4)}/${y.slice(4,6)}<span class="wd">${WD[D.getDay()]}</span>`;};
-  const load=async(base,to)=>{loading=true;draw();
+  const load=async(base,to)=>{loading=true;const mySeq=++reqSeq, myMetric=metric;draw();   // ★race가드: 토글 왕복 시 늦게 온 이전 응답이 최신 데이터 덮어쓰기 방지(최신 mySeq만 반영)
     const qs=[];if(base)qs.push('base='+encodeURIComponent(base));if(to)qs.push('to='+encodeURIComponent(to));
-    const ep=metric==='sagub'?'forecast_sagub':'forecast';
-    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);F=await r.json();if(!F.rows)F={days:[],rows:[],base:''};}
-    catch(e){F={days:[],rows:[],base:'',_err:'백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요'};}
-    loading=false;draw();};
+    const ep=myMetric==='sagub'?'forecast_sagub':'forecast';
+    let d;
+    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);d=await r.json();if(!d||!d.rows)d={days:[],rows:[],base:''};}
+    catch(e){d={days:[],rows:[],base:'',_err:'백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요'};}
+    if(mySeq!==reqSeq)return;   // 더 최신 요청이 있으면 이 응답은 폐기
+    F=d;loading=false;draw();};
   const draw=()=>{
     const days=F.days||[], rows=F.rows||[];
     const works=[...new Set(rows.map(r=>r.wc).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
@@ -120,13 +122,18 @@ SCREEN.salesforecast=(c)=>{
     c.querySelector('#sf-base').onchange=sfReload; c.querySelector('#sf-to').onchange=sfReload;
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
     const rowQ=r=>mode==='net'?r.nq:r.gq, rowA=r=>mode==='net'?r.namt:r.gamt;
+    // ★헤더 더블클릭 정렬: 컬럼별 정렬값(도번/품명/작업처=문자, 합계=금액, 일자=그 날 수량)
+    const sortVal=(r,k)=>{ if(k==='item'||k==='nm'||k==='wc')return r[k]||''; if(k==='amt')return rowA(r); if(k&&k[0]==='d')return dayQ(r,k.slice(2)); return ''; };
+    const arrow=k=>sortKey===k?(sortDir===1?' ▲':' ▼'):'';
     const render=()=>{
       const q=c.querySelector('#q').value.trim().toLowerCase(), wf=c.querySelector('#work').value;
-      cur=rows.filter(r=>(!wf||r.wc===wf)&&(!q||(''+r.item).toLowerCase().includes(q)||(''+r.nm).toLowerCase().includes(q))&&rowQ(r)>0)
-        .sort((a,b)=>(''+a.item).localeCompare(''+b.item,'ko'));
-      const dHdr=days.map(d=>`<th class="num">${dlabel(d)}</th>`).join('');
-      // ★단가 숨김, 합계·일별 모두 수량(위)/금액(아래) 스택
-      c.querySelector('#th').innerHTML=`<tr><th>도번</th><th class="cap">품명</th><th>작업처</th><th class="num gstock">합계<br><span class="wd">수량/금액</span></th>${dHdr}</tr>`;
+      cur=rows.filter(r=>(!wf||r.wc===wf)&&(!q||(''+r.item).toLowerCase().includes(q)||(''+r.nm).toLowerCase().includes(q))&&rowQ(r)>0);
+      if(sortKey){ cur.sort((a,b)=>{const x=sortVal(a,sortKey),y=sortVal(b,sortKey),nx=+x,ny=+y;
+          return (typeof x==='number'||(x!==''&&y!==''&&!isNaN(nx)&&!isNaN(ny)))?(nx-ny)*sortDir:String(x).localeCompare(String(y),'ko')*sortDir;}); }
+      else cur.sort((a,b)=>(''+a.item).localeCompare(''+b.item,'ko'));
+      const dHdr=days.map(d=>`<th class="num" data-sk="d:${d}" title="더블클릭 정렬">${dlabel(d)}${arrow('d:'+d)}</th>`).join('');
+      // ★단가 숨김, 합계·일별 모두 수량(위)/금액(아래) 스택 · th data-sk=더블클릭 정렬키
+      c.querySelector('#th').innerHTML=`<tr><th data-sk="item" title="더블클릭 정렬">도번${arrow('item')}</th><th class="cap" data-sk="nm" title="더블클릭 정렬">품명${arrow('nm')}</th><th data-sk="wc" title="더블클릭 정렬">작업처${arrow('wc')}</th><th class="num gstock" data-sk="amt" title="더블클릭 정렬(금액)">합계${arrow('amt')}<br><span class="wd">수량/금액</span></th>${dHdr}</tr>`;
       const stack=(q,a)=>`<b class="qty">${won(q)}</b><br><span class="famt">${wonI(a)}</span>`;
       let tb=cur.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="cap" title="${esc(r.wc)}">${esc(r.wc)}</td><td class="num gstock">${stack(rowQ(r),rowA(r))}</td>${days.map(d=>{const v=dayQ(r,d);return `<td class="num">${v?stack(v,Math.round(v*r.cost)):''}</td>`;}).join('')}</tr>`).join('');
       const gQ=cur.reduce((a,b)=>a+rowQ(b),0), gA=cur.reduce((a,b)=>a+rowA(b),0);
@@ -143,12 +150,14 @@ SCREEN.salesforecast=(c)=>{
         <div class="s-item">차감전(=라이브) <b>${wonI(sumG)} 원</b></div>
         <div class="s-item neg">첫계획일 과대분 제거 <b>-${wonI(sumG-sumN)} 원</b></div>
         <div class="s-item">차감후 ${mlab} <b>${wonI(sumN)} 원</b></div>`;
-      c.querySelector('#cnt').textContent=`${cur.length}도번 · ${metric==='sagub'?'예상 LG사급금액 · ':''}${mode==='net'?'차감후':'차감전(라이브)'} · 셀=수량, 하단=금액${metric==='sagub'?'(수량×개당LG사급비)':''}`;
+      c.querySelector('#cnt').textContent=`${cur.length}도번 · ${metric==='sagub'?'예상 LG사급금액 · ':''}${mode==='net'?'차감후':'차감전(라이브)'} · 셀=수량, 하단=금액${metric==='sagub'?'(수량×개당LG사급비)':''} · 헤더 더블클릭=정렬`;
       attachResizers(c);
+      // ★헤더 더블클릭 정렬 바인딩(리사이저는 자체 dblclick으로 stopPropagation → 충돌없음)
+      c.querySelectorAll('#th th[data-sk]').forEach(th=>{th.style.cursor='pointer';th.ondblclick=()=>{const k=th.dataset.sk;sortDir=sortKey===k?-sortDir:1;sortKey=k;render();};});
     };
     c.querySelector('#go').onclick=render;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#work').onchange=render;
-    c.querySelector('#reset').onclick=()=>{mode='net';draw();};
+    c.querySelector('#reset').onclick=()=>{mode='net';sortKey='';sortDir=1;draw();};
     c.querySelector('#xls').onclick=()=>{
       const amtcol=metric==='sagub'?'예상LG사급금액':'예상매출금액', unitcol=metric==='sagub'?'개당LG사급비':'단가';
       const hd=['도번','품명','작업처',unitcol,'합계수량',amtcol].concat(days.map(d=>(''+d).slice(2)+'수량')).concat(days.map(d=>(''+d).slice(2)+'금액'));
