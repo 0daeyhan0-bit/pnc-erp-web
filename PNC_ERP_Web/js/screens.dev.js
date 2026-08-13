@@ -437,7 +437,7 @@ SCREEN.costanalysis=(c)=>{
   const ymd2date=(y)=>y&&y.length===6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
   const date2ymd=(d)=>d?d.slice(2).replace(/-/g,''):'';                                          // date→YYMMDD
   // 리시빙실적(벌크) 단가 적용일자 — 변경 시 nx엔진 전체 재계산(백그라운드)
-  let rvYmd=(D.base||'260630'), regenMsg='', regenPoll=null;
+  let rvYmd='260701', regenMsg='', regenPoll=null;   // ★기본 단가 적용일자=7/1 (리시빙 7월 기준)
   const setRegenMsg=(m)=>{regenMsg=m;const el=c.querySelector('#ca-regen-msg');if(el)el.textContent=m;};
   const doRegen=async()=>{
     if(!confirm(`단가 적용일자 ${ymd2date(rvYmd)} 기준으로 589품목을 재계산합니다.\n수 분 소요되며 완료 후 자동 새로고침됩니다. 진행할까요?`))return;
@@ -571,8 +571,8 @@ SCREEN.costanalysis=(c)=>{
      </div>
      <div class="toolbar">
        <label class="tl">리시빙 기간</label>
-       <input class="inp" type="date" id="ca-from" value="2026-06-01" style="width:140px"><span style="color:var(--muted)">~</span>
-       <input class="inp" type="date" id="ca-to" value="2026-06-30" style="width:140px">
+       <input class="inp" type="date" id="ca-from" value="2026-07-01" style="width:140px"><span style="color:var(--muted)">~</span>
+       <input class="inp" type="date" id="ca-to" value="2026-07-31" style="width:140px">
        <span class="badge" title="최대 조회기간 1개월">최대 1개월</span>
        <button class="btn" id="ca-go">🔍 조회</button>
        <div class="spacer" style="max-width:20px"></div>
@@ -635,8 +635,8 @@ SCREEN.costanalysis=(c)=>{
       const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd);};   // 재계산=실시간(nx)
       // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
       if(!rvBusy && !loadRecv._tok){
-        if(window.__CA_LIVE){D.rows=window.__CA_LIVE.rows;D.agg=window.__CA_LIVE.agg;D.ym=window.__CA_LIVE.ym;D.base=window.__CA_LIVE.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
-        else loadRecv(D.ym||'', rvYmd);
+        if(window.__CA_LIVE&&window.__CA_LIVE.ymd===rvYmd){D.rows=window.__CA_LIVE.rows;D.agg=window.__CA_LIVE.agg;D.ym=window.__CA_LIVE.ym;D.base=window.__CA_LIVE.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
+        else loadRecv('2607', rvYmd);   // ★기본 7월 리시빙
       }
     }else{
       const dq=c.querySelector('#di-q'), dyv=c.querySelector('#di-ymd');
@@ -1139,11 +1139,12 @@ SCREEN.unifybom=(c,ro)=>{
     catch(e){msg='백엔드 연결 실패 — 백엔드(uvicorn app:app --port 8010) 실행 필요';results=[];}draw();};
   const load=async (it, enterEdit)=>{it=(it||'').trim().toUpperCase();if(!it)return;loading=true;msg='';editMode=false;naeFor='';silFor='';draw();
     if(!codes.metal)await loadCodes();
-    try{const r=await fetch(`${API}/api/bom/get?item=${encodeURIComponent(it)}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();item=j.item;name=j.name||'';procs=j.procs||[];procMap={};procs.forEach(p=>procMap[p.code]=p.name);lines=(j.lines||[]).map(l=>({...l,spec:specOf(l)}));}
-    catch(e){msg='조회 실패: '+e.message;lines=[];}
-    try{const tr=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(it)}`);const tj=await tr.json();tree=tj.rows||[];treeMax=tj.maxlevel||0;}
-    catch(e){tree=[];treeMax=0;}
+    const [gp,tp]=await Promise.allSettled([   // ★get·tree 병렬(순차 대비 tree 시간만큼 단축)
+      fetch(`${API}/api/bom/get?item=${encodeURIComponent(it)}`).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}),
+      fetch(`${API}/api/bom/tree?item=${encodeURIComponent(it)}`).then(r=>r.json())]);
+    if(gp.status==='fulfilled'){const j=gp.value;item=j.item;name=j.name||'';procs=j.procs||[];procMap={};procs.forEach(p=>procMap[p.code]=p.name);lines=(j.lines||[]).map(l=>({...l,spec:specOf(l)}));}
+    else{msg='조회 실패: '+((gp.reason&&gp.reason.message)||gp.reason);lines=[];}
+    if(tp.status==='fulfilled'){const tj=tp.value;tree=tj.rows||[];treeMax=tj.maxlevel||0;} else{tree=[];treeMax=0;}
     routeSel=0;routes=[];routesFor='';routeTree=null;routeTreeFor=-1;routeCost=null;routeCostFor=-1;   // ★품번 전환 → 후보선택 현행으로 리셋
     loadRoutes();   // 조달경로 후보 목록(현행+승인후보) 비동기 로드
     if(enterEdit && !RO && (typeof PERM==='undefined'||PERM.canEdit('unifybom'))){editMode=true;viewTree=false;}
@@ -1277,6 +1278,7 @@ SCREEN.unifybom=(c,ro)=>{
   // ★내부원가·실원가 탭은 개발 전용 — 품목 BOM 조회(RO)에서는 숨김(BOM구성만 노출)
   const tabbar=(act)=>`<div class="bm-tabs">
     <div class="bm-tab bm-tab-c ${act==='bom'?'on':''}" data-t="bom">🔀 BOM구성</div>
+    <div class="bm-tab bm-tab-c ${act==='route'?'on':''}" data-t="route">🧭 라우팅</div>
     ${RO?'':`<div class="bm-tab bm-tab-c ${act==='nae'?'on':''}" data-t="nae">🧮 내부원가</div>
     <div class="bm-tab bm-tab-c ${act==='sil'?'on':''}" data-t="sil">💠 실원가</div>`}</div>`;
   const bindTabs=()=>{c.querySelectorAll('.bm-tab-c').forEach(el=>el.onclick=()=>{const t=el.dataset.t;if(t===tab)return;tab=t;
@@ -1705,7 +1707,7 @@ SCREEN.unifybom=(c,ro)=>{
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
-         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${(!RO&&PERM.canEdit('unifybom'))?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button>`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
+         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button>`:''}<button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button>`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
      </div>
@@ -1805,7 +1807,34 @@ SCREEN.unifybom=(c,ro)=>{
      .bm-tbl td.mut{color:var(--muted)}.bm-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2}
      .ce{border:1px solid var(--line);border-radius:4px;padding:2px 5px;font-size:12px}
    </style>`;
+  // ===== 라우팅 탭: 실사용(매입중단) BOM 구조만 — 원가 미표시. 현행=tree(default bom/tree, 이미 로드), 후보=routeTreeTable =====
+  const routeRowsTbl=(rows,head)=>`${head}<div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl bm-tbl">
+    <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th style="text-align:left">거래처</th></tr></thead>
+    <tbody>${rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
+      const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
+      const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':(r.sag==='1'?'<span class="nae-tg" style="color:#8a6d1c;border-color:#e0d2a8">사급</span>':''));
+      return `<tr style="background:${bg}"><td class="center">${r.level}</td>
+        <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag}</td>
+        <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
+        <td class="center" style="color:#5a6b82">${esc(sp)}</td>
+        <td class="num">${r.qty!=null?q4(r.qty):''}</td>
+        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:150px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
+  const drawRoute=()=>{
+    let content;
+    if(routeSel>0){ content=routeTreeTable(); }
+    else if(!item){ content=`<div class="empty">품번을 조회하세요.</div>`; }
+    else{ const head=`<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#1c47a0">현행 실사용 BOM</b> · ROUTING(실제 조달·매입중단) 구성 · <span style="color:#8a94a6">원가 미표시</span></div></div>`;
+      content = routeRowsTbl(tree||[], head); }
+    c.innerHTML=`
+     <div class="page-title">🔀 품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">라우팅(조달경로 구성 BOM · 원가 미표시)</span></div>
+     ${tabbar('route')}
+     <div class="toolbar"><span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span><div class="spacer"></div></div>
+     ${candSelector('route')}
+     ${content}${naeCss()}`;
+    bindTabs();bindCandSel();
+  };
   const draw=()=>{
+    if(tab==='route'){ if(routeSel>0&&routeTreeFor!==routeSel&&!routeBusy){ loadRouteTree(); return; } drawRoute(); return; }
     if(tab==='nae'){ if(item&&naeFor!==item&&!naeLoad){loadNae();return;} drawNae(); return; }
     if(tab==='sil'){ if(item&&silFor!==item&&!silLoad){loadSil();return;}
       if(routeSel>0&&routeCostFor!==routeSel&&!routeBusy){ loadRouteCost(); return; } drawSil(); return; }
