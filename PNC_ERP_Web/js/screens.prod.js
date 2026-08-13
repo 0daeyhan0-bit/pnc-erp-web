@@ -1338,7 +1338,7 @@ SCREEN.gongsu=(c)=>{
 SCREEN.daycheck=(c)=>{
   const API=API_BASE;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
-  let F={from:'2016-01-01',to:'2016-12-31',dept:''}, data={rows:[],cnt:0,note:''}, loading=false, msg='';
+  let F={from:nowMS(),to:nowCD(),dept:''}, data={rows:[],cnt:0,note:''}, loading=false, msg='';
   const load=async()=>{loading=true;draw();
     const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,dept:F.dept});
     try{const r=await fetch(`${API}/api/daycheck/list?${qs}`);data=await r.json();msg='';}

@@ -287,6 +287,40 @@ def _pivot_prod(raw, keyname, extra):
         q = float(r["q"] or 0); g["days"][r["PROD_YMD"]] = g["days"].get(r["PROD_YMD"], 0) + q; g["tot"] += q
     return dates, list(keyed.values())
 
+# ===== 시작 워밍(첫 조회 콜드 지연 완화) =====
+# 무거운 첫 조회(자재수불장 등)는 플랜 컴파일 + 콜드 버퍼로 느림 → 기동 직후 백그라운드로 예열.
+# 데몬 스레드(비차단). 실패해도 무시(가용성 우선). 인덱스(nx 복제본, _migration/r_add_indexes.py)와 병행.
+@app.on_event("startup")
+def _warmup_heavy_queries():
+    import threading, time as _t
+    def _run():
+        _t.sleep(3)   # 기동 안정 후
+        warm = [
+            # 자재수불장 일/월 최신 — 실제 조인·집계 플랜 예열
+            """select t.mat_code, max(m.item_desc), isnull(max(c.cust_desc),''), sum(t.stock_qty)
+                 from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY t
+                 join PARTNER_ERP_TEST3.nx.pr_m_item m on t.mat_code=m.item_code
+                 join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
+                 left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust_code=c.cust_code
+                 where t.cust_code='Z99990' and t.STOCK_YMD=(SELECT MAX(STOCK_YMD) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY WHERE cust_code='Z99990')
+                 group by t.mat_code""",
+            """select t.mat_code, max(m.item_desc), sum(t.stock_qty)
+                 from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH t
+                 join PARTNER_ERP_TEST3.nx.pr_m_item m on t.mat_code=m.item_code
+                 where t.cust_code='Z99990' and t.STOCK_YYMM=(SELECT MAX(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE cust_code='Z99990')
+                 group by t.mat_code""",
+        ]
+        try:
+            cn = pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};'
+                                f'DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}')
+            cur = cn.cursor()
+            for q in warm:
+                try: cur.execute(q); cur.fetchall()
+                except Exception: pass
+            cn.close()
+        except Exception: pass
+    threading.Thread(target=_run, daemon=True).start()
+
 # ===== 프론트엔드 정적 서빙 (내부망 단일 포트 운영) =====
 # ★반드시 모든 API 라우트 정의 이후(파일 최하단)에 위치. /api/* · /live/* 가 먼저 매칭되고 나머지는 정적파일로.
 # 프론트도 8010에서 서빙 → 브라우저 API_BASE=location.origin 자동일치(직원 PC 어디서 열어도 동작).
