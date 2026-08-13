@@ -233,23 +233,36 @@ class NxCostEngine:
         dated=self._pm[key]
         return min(dated,key=lambda c:c[0])[1] if dated else 0.0
 
+    def _fx(self, currency, ymd):
+        """통화환산율(nx.fx_rate, apply_ymd<=ymd 최신). KRW/빈값=1.0. 2026 데이터 없으면 최신(SP 동일)."""
+        cur=(currency or 'KRW').strip().upper()
+        if cur in ('','KRW'): return 1.0
+        if not hasattr(self,'_fxc'): self._fxc={}
+        if cur not in self._fxc:
+            self.cur.execute("SELECT apply_ymd,rate FROM nx.fx_rate WHERE currency=?", cur)
+            self._fxc[cur]=[(str(r[0] or '').strip(),float(r[1] or 0)) for r in self.cur.fetchall()]
+        cands=[c for c in self._fxc[cur] if c[0] and c[0]<=ymd]
+        if cands: return max(cands,key=lambda c:c[0])[1]
+        return 1.0
+
     def pur_price(self, item, ymd, vendor=None):
-        """매입단가 as-of ymd. vendor 우선, 없으면 최신 as-of(모든 vendor)."""
+        """매입단가 as-of ymd × 환율(SP line297: ITEM_COST × BAS). vendor 우선, 없으면 최신 as-of(모든 vendor)."""
         key=item
         if key not in self._pur:
-            self.cur.execute("""SELECT vendor_code,apply_ymd,price FROM nx.price_item
+            self.cur.execute("""SELECT vendor_code,apply_ymd,price,ISNULL(currency,'KRW') FROM nx.price_item
                 WHERE item_code=? AND price_type='매입' AND ISNULL(price,0)<>0""", item)
-            self._pur[key]=[(str(r[0]).strip(),str(r[1] or '').strip(),float(r[2] or 0)) for r in self.cur.fetchall()]
+            self._pur[key]=[(str(r[0]).strip(),str(r[1] or '').strip(),float(r[2] or 0),str(r[3] or 'KRW').strip()) for r in self.cur.fetchall()]
         rows=self._pur[key]
         if not rows: return None
         def asof(cands):
             valid=[c for c in cands if c[1] and c[1]<=ymd]
             return max(valid,key=lambda c:c[1]) if valid else None
+        # ★fx-fix(2026-08-13): 매입단가 통화환산(USD/YEN/EUR/RMB × nx.fx_rate). 6851AR3278W 6.17USD×1359=8385.03 SP정합.
         if vendor:
             v=asof([c for c in rows if c[0]==vendor])
-            if v: return v[2]
+            if v: return v[2]*self._fx(v[3],ymd)
         a=asof(rows)
-        if a: return a[2]
+        if a: return a[2]*self._fx(a[3],ymd)
         # ★asof-fix(2026-08-12): as-of(≤원가일) 단가 없으면 0(None). 미래단가 폴백 금지(SP=PUR_COST 0 정합). AJR30161402-A-S-1 등.
         return None
 
