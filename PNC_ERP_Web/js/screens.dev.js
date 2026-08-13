@@ -64,41 +64,43 @@ const priceSagubView=(host)=>{
   draw();load();
 };
 
-/* 특이 단가목록 — 유상사급 부품이 매입가보다 싸게 나가는(판가 역전) 품목. 원소재·용접봉·소모품 제외(용접링 유지) · 상위 Assy 표시 · nx.PR_M_ITEM_COST */
+/* 특이 단가목록 — 해당월 실 입고가 > 실 유상사급 출고가(비싸게 사서 싸게 사급) 품목. 입고/출고 둘다 있는 품목만 · 원소재·용접봉·소모품 제외 · 상위 Assy(BOM) */
 const priceInvView=(host)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  let st={busy:true,rows:[],q:'',cust:''};
+  const curYm=()=>{const d=new Date();return `20${String(d.getFullYear()).slice(2)}-${String(d.getMonth()+1).padStart(2,'0')}`;};
+  const toYm4=v=>{v=(''+(v||'')).trim();return v.length>=7?v.slice(2,4)+v.slice(5,7):'';};
+  let st={busy:true,rows:[],q:'',ym:curYm(),retYm:''};
   const load=async()=>{
     st.busy=true;draw();
-    try{const r=await fetch(`${API}/api/price/inversion?q=${encodeURIComponent(st.q)}&cust=${encodeURIComponent(st.cust)}`);
-      const j=await r.json();st.rows=j.rows||[];}catch(e){st.rows=[];}
+    try{const r=await fetch(`${API}/api/price/inversion?ym=${toYm4(st.ym)}&q=${encodeURIComponent(st.q)}`);
+      const j=await r.json();st.rows=j.rows||[];st.retYm=j.ym||'';}catch(e){st.rows=[];}
     st.busy=false;draw();};
-  const curTag=(v,nm)=>(v&&v!=='KRW')?` <span style="color:#8a6d1a;font-size:10px">${esc(nm||v)}</span>`:'';
   const draw=()=>{
     const rows=st.rows;
     host.innerHTML=`
-     <div class="page-sub">우리가 <b>매입</b>하는 부품이 <b>유상사급</b>으로 나갈 때 <b style="color:#c0392b">사급판가 &lt; 매입가</b>(비싸게 사서 싸게 사급 = 역전)인 품목. 원소재·용접봉·소모품 제외(용접링 유지). <code>매입=tag'1' / 사급=tag'S' · nx.PR_M_ITEM_COST</code></div>
-     <div class="toolbar"><label class="tl">품목</label><input class="inp" id="iv-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px">
-       <label class="tl">거래처</label><input class="inp" id="iv-cust" value="${esc(st.cust)}" placeholder="매입/사급처" style="width:150px">
+     <div class="page-sub">해당월에 <b>입고</b>되고 <b>유상사급 출고</b>된 품목 중 <b style="color:#c0392b">실 입고가 &gt; 실 출고가</b>(비싸게 사서 싸게 사급 = 역전). 원소재·용접봉·소모품 제외(용접링 유지). <code>입고=자재입고명세서 / 출고=자재불출명세서(tag5) · nx</code></div>
+     <div class="toolbar"><label class="tl">적용월</label><input type="month" class="inp" id="iv-ym" value="${esc(st.ym)}" style="width:130px">
+       <label class="tl">품목</label><input class="inp" id="iv-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:160px">
        <button class="btn" id="iv-go">🔍 조회</button><div class="spacer"></div>
-       <span class="rowcount">${st.busy?'조회중…':`역전 <b style="color:#c0392b">${rows.length}</b>건`}</span></div>
+       <span class="rowcount">${st.busy?'조회중…':`역전 <b style="color:#c0392b">${rows.length}</b>건 · 20${esc(st.retYm.slice(0,2))}년 ${esc(st.retYm.slice(2,4))}월`}</span></div>
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl">
-       <thead><tr><th>품번</th><th>품명</th><th class="center">분류</th><th>매입처</th><th class="num">매입가</th><th>사급처</th><th class="num">사급가</th><th class="num">역전액</th><th class="center">사급적용일</th><th>상위 Assy(완제품)</th></tr></thead>
-       <tbody>${st.busy?`<tr><td colspan="10" class="empty">조회중…</td></tr>`:(rows.map(r=>`
+       <thead><tr><th>품번</th><th>품명</th><th class="center">분류</th><th>매입처</th><th class="num">입고가</th><th class="num">입고량</th><th>사급처</th><th class="num">출고가</th><th class="num">출고량</th><th class="num">역전액</th><th>상위 Assy(완제품)</th></tr></thead>
+       <tbody>${st.busy?`<tr><td colspan="11" class="empty">조회중…</td></tr>`:(rows.map(r=>`
          <tr><td style="white-space:nowrap"><b>${esc(r.item)}</b></td>
-           <td class="cap" style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.nm)}">${esc(r.nm)}</td>
+           <td class="cap" style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.nm)}">${esc(r.nm)}</td>
            <td class="center" style="font-size:11px;color:#667">${esc(r.sg_nm||r.sg)}</td>
-           <td class="cap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.pur_cust_nm)}">${esc(r.pur_cust_nm)}</td>
-           <td class="num">${won(r.pur)}${curTag(r.pur_curr,r.pur_curr_nm)}</td>
-           <td class="cap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.sag_cust_nm)}">${esc(r.sag_cust_nm)}</td>
-           <td class="num">${won(r.sag)}${curTag(r.sag_curr,r.sag_curr_nm)}</td>
+           <td class="cap" style="max-width:78px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.pur_cust_nm)}">${esc(r.pur_cust_nm)}</td>
+           <td class="num">${won(r.pur)}</td>
+           <td class="num" style="color:#889">${won(r.inq)}</td>
+           <td class="cap" style="max-width:78px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.sag_cust_nm)}">${esc(r.sag_cust_nm)}</td>
+           <td class="num">${won(r.sag)}</td>
+           <td class="num" style="color:#889">${won(r.outq)}</td>
            <td class="num" style="color:#c0392b;font-weight:700">${won(r.diff)}</td>
-           <td class="center" style="font-size:11px">${esc(r.sag_ymd)}</td>
-           <td class="cap" style="max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${esc((r.assy||[]).join(', '))}">${(r.assy&&r.assy.length)?esc(r.assy.join(', ')):'<span style=\"color:#aaa\">(직접·상위없음)</span>'}</td></tr>`).join('')||`<tr><td colspan="10" class="empty">역전 품목 없음</td></tr>`)}</tbody></table></div>`;
+           <td class="cap" style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="${esc((r.assy||[]).join(', '))}">${(r.assy&&r.assy.length)?esc(r.assy.join(', ')):'<span style=\"color:#aaa\">(직접)</span>'}</td></tr>`).join('')||`<tr><td colspan="11" class="empty">해당월 입고+출고 역전 품목 없음</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
+    const ym=g('#iv-ym');ym.onchange=e=>{st.ym=e.target.value;load();};
     const q=g('#iv-q');q.oninput=e=>st.q=e.target.value;q.onkeydown=e=>{if(e.key==='Enter')load();};
-    const cu=g('#iv-cust');cu.oninput=e=>st.cust=e.target.value;cu.onkeydown=e=>{if(e.key==='Enter')load();};
     g('#iv-go').onclick=load;
   };
   load();
