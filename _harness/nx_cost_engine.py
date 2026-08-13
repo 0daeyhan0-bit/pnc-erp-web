@@ -29,6 +29,11 @@ class NxCostEngine:
         """★성능: 서브트리 전 노드의 item/routing/proc_weld/bom_header를 **서버측 CTE-JOIN**으로 일괄 로드(클라 IN(N)은 드라이버 오버헤드 ~520ms/쿼리라 회피).
            채우는 캐시(_item·_pc·_rc·_wlc·_hdr)는 per-node 메서드와 동일 구조·동일 값 → 결과 불변(속도만).
            미프라임 노드는 기존 per-node 쿼리로 폴백(정확성 무손상). _reset 시 새 엔진=재프라임."""
+        # ★lgroup-fix(2026-08-13): 상위품목 lgroup 확정(SP @LS_ITEM_GROUP=최상위품목 ITEM_LGROUP). proc_amt가 이걸로 공정필터.
+        #   전 public 진입(silwon/naewon/*_nodes/*_grid)이 여기로 옴. top_lg 바뀌면 가공비 결과캐시(top_lg 의존) 무효화(bulk 엔진재사용 안전).
+        _lg=self._load_item(item).get('lgroup','')
+        if getattr(self,'_top_lg',None)!=_lg:
+            self._top_lg=_lg; self._gagc={}; self._gagcn={}
         return   # ★비활성화(2026-08-04): 다중경로/SUB 구조에서 캐시 프라임이 미묘한 중복 유발(43 baseline 59 이탈) → 정확성 위해 OFF.
                  #   속도 최적화는 nx.routing 인덱스(ix_routing_item)로 대체(값 불변·seek). 아래 프라임 로직은 보존(추후 dedup 완성 후 재활성).
         if not hasattr(self, '_primed'): self._primed = set()
@@ -158,6 +163,17 @@ class NxCostEngine:
         cands=[r for r in self._lr if r[0]<=ym]
         return (max(cands,key=lambda r:r[0])[1] if cands else (self._lr[0][1] if self._lr else 0.0))
 
+    def _valid_procs(self, lgroup):
+        """★lgroup-fix(2026-08-13): 레거시 SP는 가공비를 `CS_M_PROC.ITEM_LGROUP IN(@LS_ITEM_GROUP=상위품목lgroup,'J')`
+           공정만 계상(R_SORT_SEQ 매칭). 상위품목과 다른 그룹 부품의 공정(예 E품목에 든 G그룹 BOX공정)은 제외.
+           반환=해당 lgroup에서 유효한 proc_code 집합(91/92/93/98/99=overhead·별도처리 제외)."""
+        if not hasattr(self,'_vpc'): self._vpc={}
+        lg=lgroup or ''
+        if lg not in self._vpc:
+            self.cur.execute("SELECT proc_code FROM nx.CS_M_PROC WHERE item_lgroup IN (?,'J') AND proc_code NOT IN ('91','92','93','98','99')", lg)
+            self._vpc[lg]=set(str(r[0]) for r in self.cur.fetchall())
+        return self._vpc[lg]
+
     def _procs(self, node):
         """가공공정(91/92/93/98/99 제외) routing rows: (proc,work_qty,uph,calc_gubun,p_item)."""
         if not hasattr(self,'_pc'): self._pc={}
@@ -182,9 +198,10 @@ class NxCostEngine:
            은납/용접품 공정은 routing p_item=부모로 저장(부모별 용접), 그외 p_item=''."""
         if not self._inner_gagong(info): return 0.0
         labor=self.labor_rate(ym); db_item = parent if info['silver'] else ''
+        vp=self._valid_procs(getattr(self,'_top_lg',''))   # ★lgroup-fix: 상위품목 lgroup 공정만
         tot=0.0
         for proc,wq,uph,cg,pit in self._procs(node):
-            if pit!=db_item or wq==0: continue
+            if pit!=db_item or wq==0 or proc not in vp: continue
             if cg=='3':   tot += round(labor/uph*wq,0) if uph else 0.0   # 임율기반
             elif cg=='8': tot += info['wt']*uph*wq                        # 중량기반
             elif cg=='9': tot += uph*wq                                   # 적용율
@@ -552,9 +569,10 @@ class NxCostEngine:
     def proc_amt_nae(self, node, info, ym, parent=''):
         """내부용 노드 가공비 — INNER_PROD 게이트 없이 전 노드 계상. 공정귀속=실원가와 동일(은납품=부모별)."""
         labor=self.labor_rate(ym); db_item = parent if info['silver'] else ''
+        vp=self._valid_procs(getattr(self,'_top_lg',''))   # ★lgroup-fix: 상위품목 lgroup 공정만
         tot=0.0
         for proc,wq,uph,cg,pit in self._procs(node):
-            if pit!=db_item or wq==0: continue
+            if pit!=db_item or wq==0 or proc not in vp: continue
             if cg=='3':   tot += round(labor/uph*wq,0) if uph else 0.0
             elif cg=='8': tot += info['wt']*uph*wq
             elif cg=='9': tot += uph*wq
@@ -670,12 +688,13 @@ class NxCostEngine:
            용접·은납·부품부착·포장 등 조립공정(용접봉 노드에 얹혀있던 가공비 포함)을 공정 종류별로 모음.
            반환: {proc_code:{wq(작업량Σ), amt(가공비Σ), uph(대표), cg(계산구분), labor(임율)}}. 공정명은 백엔드가 CS_M_PROC로 매핑."""
         ym='20'+ymd[:4]; labor=self.labor_rate(ym)
+        vp=self._valid_procs(getattr(self,'_top_lg',''))   # ★lgroup-fix: 상위품목 lgroup 공정만
         agg={}
         def walk(node, cum_ea, parent, seen):
             info=self._load_item(node); cg0=info['cost_gubun']
             db_item = parent if info['silver'] else ''
             for proc,wq,uph,cg,pit in self._procs(node):
-                if pit!=db_item or wq==0: continue
+                if pit!=db_item or wq==0 or proc not in vp: continue
                 if cg=='3':   amt=(round(labor/uph*wq,0) if uph else 0.0)   # 임율기반
                 elif cg=='8': amt=info['wt']*uph*wq                          # 중량기반
                 elif cg=='9': amt=uph*wq                                     # 적용율
