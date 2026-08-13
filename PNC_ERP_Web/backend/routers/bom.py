@@ -16,14 +16,16 @@ def bom_search(q: str = Query('', description="품번/품명 부분검색"),
     cn = _nx(); cur = cn.cursor()
     try:
         like = f'%{q}%'
-        # ★현행/과거 토글(2026-08-13): 기본은 현행(status='사용')만 — 휴면(과거) 품번/BOM 숨김. include_past=1이면 전체.
-        past = "" if int(include_past or 0) else "AND ISNULL(i.status,N'사용')=N'사용'"
+        # ★현행/과거 토글 + ★미사용 orphan 숨김(2026-08-13): 기본 = status='사용' AND (BOM보유 OR 다른BOM의 자식으로 사용).
+        #   → 빈 SUB shell(BOM없고 아무 BOM에도 자식으로 안 쓰이는 _S01·_S07·-은납-S7 등)은 기본검색에서 숨김. include_past=1이면 전체.
+        past = "" if int(include_past or 0) else "AND ISNULL(i.status,N'사용')=N'사용' AND (h.item_code IS NOT NULL OR u.child_item IS NOT NULL)"
         # BOM 보유 품목 우선. 인덱스(item_code PK) 활용, TOP 60 제한.
         cur.execute(f"""
             SELECT TOP 60 i.item_code, i.item_name, i.item_type, ISNULL(i.status,'') st,
               CASE WHEN h.item_code IS NOT NULL THEN 1 ELSE 0 END AS has_bom
             FROM nx.item i
             LEFT JOIN (SELECT DISTINCT item_code FROM nx.bom_header) h ON h.item_code = i.item_code
+            LEFT JOIN (SELECT DISTINCT child_item FROM nx.bom_line) u ON u.child_item = i.item_code
             WHERE (i.item_code LIKE ? OR i.item_name LIKE ?) {past}
             ORDER BY has_bom DESC, i.item_code""", like, like)
         rows = [{"item": r[0], "name": r[1], "type": r[2], "status": str(r[3]).strip(), "has_bom": bool(r[4])} for r in cur.fetchall()]
