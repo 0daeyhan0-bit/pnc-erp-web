@@ -253,7 +253,15 @@ def _bom_tree_nx(item, real, expandbuy=0):
             cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
             for r in cur.fetchall():
                 if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
-        def disp(code): return alias.get(code, code)   # 자도번→품번_S{nn} 표시 정규화
+        def disp(code): return alias.get(code, code)   # 자도번→품번_S{nn} 표시 정규화(리프변형)
+        # ★SUB 표시 = {root}_S{nn} 트리순서 채번(벤더무관). SUB=하위구성 보유 노드. 리프는 disp(sub_alias/raw).
+        sub_seq = [0]; sub_map = {}
+        def subdisp(child):
+            if child in edges:   # 하위 보유 = SUB
+                if child not in sub_map:
+                    sub_seq[0] += 1; sub_map[child] = f"{item}_S{sub_seq[0]:02d}"
+                return sub_map[child]
+            return disp(child)
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
                 "qty": 1, "cust": "", "custnm": "", "sag": "", "se": "", "kt": "", "vir": "", "ce": "", "le": "",
@@ -266,7 +274,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
             seen.add(code)
             for e in edges.get(code, []):
                 ci = info.get(e["child"], {})
-                out.append({"level": lvl, "code": disp(e["child"]), "raw": e["child"], "nm": ci.get("nm", ""), "spec": ci.get("spec", ""),
+                out.append({"level": lvl, "code": subdisp(e["child"]), "raw": e["child"], "nm": ci.get("nm", ""), "spec": ci.get("spec", ""),
                     "qty": e["q"], "cust": ci.get("cust", ""), "custnm": ci.get("custnm", ""),
                     "sag": e["sag"], "se": e["se"], "kt": e["kt"], "vir": e["vir"], "ce": e["ce"], "le": e["le"],
                     "gp": e["gp"], "sw": e["sw"], "metal": ci.get("metal", ""),
