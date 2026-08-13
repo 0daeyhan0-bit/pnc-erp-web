@@ -530,8 +530,9 @@ SCREEN.costanalysis=(c)=>{
   const ym2str=(y)=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:(y||'');
   const buildRow=(part,qty,cst)=>{const r=new Array(23).fill(0);r[0]=part;r[1]=qty;
     if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0;
-      r[2]=jae;r[5]=jae;r[6]=sil;r[7]=lg?jae/lg:0;
-      r[8]=jae;r[11]=jae;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=cst.lme||0;r[18]=lg?jae/lg:0;
+      const won=(cst.won!=null?cst.won:jae),bu=cst.bu||0,sa=cst.sa||0,matb=won+bu+sa;   // 원자재/부자재/LG사급 분리(sgroup)
+      r[2]=won;r[3]=bu;r[4]=sa;r[5]=matb;r[6]=sil;r[7]=lg?matb/lg:0;
+      r[8]=won;r[9]=bu;r[10]=sa;r[11]=matb;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=cst.lme||0;r[18]=lg?matb/lg:0;
       r[19]=lg;r[20]=lg*qty;r[21]=son;r[22]=son*qty;}
     return r;};
   const cardsHTML=()=>`<div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>

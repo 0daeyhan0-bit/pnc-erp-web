@@ -147,13 +147,13 @@ class NxCostEngine:
         if item not in self._item:
             self.cur.execute("""SELECT ISNULL(in_cust,''),ISNULL(make_type,''),ISNULL(cost_gubun,''),
                 ISNULL(metal_gubun,''),ISNULL(diam,0),ISNULL(thick,0),ISNULL(net_weight,0),ISNULL(has_gagong,0),
-                ISNULL(silver_flag,0),ISNULL(unit,''),ISNULL(lgroup,'')
+                ISNULL(silver_flag,0),ISNULL(unit,''),ISNULL(lgroup,''),ISNULL(sgroup,'')
                 FROM nx.item WHERE item_code=?""", item)
             r=self.cur.fetchone()
             self._item[item]=({'in_cust':r[0].strip(),'make_type':r[1].strip(),'cost_gubun':r[2].strip(),
                 'metal':r[3].strip(),'diam':float(r[4] or 0),'thick':float(r[5] or 0),'wt':float(r[6] or 0),
-                'has_gagong':bool(r[7]),'silver':bool(r[8]),'unit':r[9].strip(),'lgroup':r[10].strip()} if r
-                else {'in_cust':'','make_type':'','cost_gubun':'','metal':'','diam':0,'thick':0,'wt':0,'has_gagong':False,'silver':False,'unit':'','lgroup':''})
+                'has_gagong':bool(r[7]),'silver':bool(r[8]),'unit':r[9].strip(),'lgroup':r[10].strip(),'sgroup':r[11].strip()} if r
+                else {'in_cust':'','make_type':'','cost_gubun':'','metal':'','diam':0,'thick':0,'wt':0,'has_gagong':False,'silver':False,'unit':'','lgroup':'','sgroup':''})
         return self._item[item]
 
     def labor_rate(self, ym):
@@ -417,6 +417,31 @@ class NxCostEngine:
         else:
             base=self._leaf_val(item, info, mult, ymd, ymcut)
         return round(base + self.lme_u(item, ymd)*mult, 2)   # 재료 = base(구매/소재단가) + LME차액 전서브트리
+
+    def material_split(self, item, ymd):
+        """재료비(base, LME제외)를 최말단 leaf의 sgroup별로 분리 — SP WON/BU/SA_JAI_AMT 정합(SP 860-862).
+           원자재(won)=110/120/130/220, 부자재(bu)=230/910, 사급(sa)=310, 기타(210 등)→won 캐치올. won+bu+sa=material base."""
+        ymcut='20'+ymd[:4]; b={'won':0.0,'bu':0.0,'sa':0.0}
+        def acc(sg, v):
+            if sg in ('230','910'): b['bu']+=v
+            elif sg=='310': b['sa']+=v
+            else: b['won']+=v
+        def walk(node, q, seen):
+            info=self._load_item(node)
+            if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(node, info, seen):
+                for c,qty,cx,f,t,lx in self.lines(node):
+                    if cx: continue
+                    walk(c, qty*q, seen|{node})
+            else:
+                acc(info.get('sgroup',''), self._leaf_val(node, info, q, ymd, ymcut))
+        info=self._load_item(item)
+        if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(item, info, set()):
+            for c,qty,cx,f,t,lx in self.lines(item):
+                if cx: continue
+                walk(c, qty, {item})
+        else:
+            walk(item, 1.0, set())
+        return {k: round(v,2) for k,v in b.items()}
 
     def _lme_nodes(self, item, ymd, mult=1.0, seen=None, out=None):
         """lme_total과 동일 로직으로 per-node LME 사급차액 수집(그리드 방출용). out[node] += (std−partner)×중량×누적q."""
