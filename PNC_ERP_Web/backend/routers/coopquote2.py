@@ -254,39 +254,52 @@ def coopquote_set_role(payload: dict = Body(...)):
     assy = str(payload.get("assy") or "").strip()
     part = str(payload.get("part") or "").strip()
     role = str(payload.get("role") or "").strip()
-    R2PT = {"제작동관": "동관", "동관": "동관", "동관고강도": "동관고강도",
-            "사급": "사급부품", "사급부품": "사급부품", "매입부품": "사급부품", "용접봉": "용접봉"}
+    # ★ptype_v2는 정산엔진(compute_quote_lme)과 동일 어휘 사용: 수불(제작동관)/사급/용접봉. ptype=배지표시용.
+    R2PT = {"제작동관": "수불", "동관": "수불", "동관고강도": "수불",
+            "사급": "사급", "사급부품": "사급", "매입부품": "사급", "용접봉": "용접봉"}
     pt = R2PT.get(role)
+    is_high = (role == "동관고강도")
     if not assy or not part or not pt:
         return {"ok": False, "error": "assy/part/role 필수"}
+    # ★종전사급가(인상전 제작동관 재료비용) — 사용자 입력, 미입력시 일반CU 7550
+    prev_sg = payload.get("prev_sagub")
+    try:
+        prev_sg = float(prev_sg) if prev_sg not in (None, "") else 7550.0
+    except Exception:
+        prev_sg = 7550.0
     nx = _nx(); cur = nx.cursor()
     try:
-        cur.execute("SELECT ISNULL(unit_wt,0), ISNULL(soyo,1), ISNULL(mat_cost,0) FROM nx.coop_quote_part_v2 WHERE assy_code=? AND UPPER(LTRIM(RTRIM(part_code)))=?", assy, part.upper())
+        cur.execute("SELECT ISNULL(unit_wt,0), ISNULL(soyo,1), ISNULL(mat_cost,0), ISNULL(soyo_weight,0), spec FROM nx.coop_quote_part_v2 WHERE assy_code=? AND UPPER(LTRIM(RTRIM(part_code)))=?", assy, part.upper())
         row = cur.fetchone()
         if not row:
             return {"ok": False, "error": "부품 없음"}
-        uw = float(row[0] or 0); soyo = float(row[1] or 1); cur_mat = float(row[2] or 0)
-        if pt in ("동관", "동관고강도"):
-            sg = 22000 if pt == "동관고강도" else 20000
+        uw = float(row[0] or 0); soyo = float(row[1] or 1); cur_mat = float(row[2] or 0); sw0 = float(row[3] or 0)
+        if uw <= 0 and sw0 > 0:
+            uw = sw0   # unit_wt 없으면 soyo_weight로
+        mat_before = None; ptype_disp = pt; sw = 0.0; uw_save = None
+        if pt == "수불":   # 제작동관: 인상후=중량×현재사급가(20000/22000) · 인상전=중량×종전사급가(입력)
+            sg = 22000 if is_high else 20000
             mat = round(uw * soyo * sg)
+            mat_before = round(uw * soyo * prev_sg)
+            sw = uw; uw_save = uw
+            ptype_disp = "제작(고강도)" if is_high else "제작(CU)"
         elif pt == "용접봉":
-            mat = round(cur_mat)   # 용접봉 재료비 유지
-        else:  # 사급부품 = 최신 매입가 × 소요
+            mat = round(cur_mat); sw = sw0; ptype_disp = "용접봉"
+        else:  # 사급 = 최신 매입가 × 소요 (인상전=인상후, 판매단가)
             cn = _conn(); cc = cn.cursor()
             cc.execute("""SELECT TOP 1 ITEM_COST FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
                 WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0
                 ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC""", part.upper())
             pr = cc.fetchone(); cn.close()
             pur = float(pr[0]) if (pr and pr[0]) else 0
-            mat = round(pur * soyo)
-            uw = None
-        cur.execute("""UPDATE nx.coop_quote_part_v2 SET ptype=?, ptype_v2=?, unit_wt=?, mat_cost=?, part_total=?, mat_after=?
-            WHERE assy_code=? AND UPPER(LTRIM(RTRIM(part_code)))=?""", pt, pt, uw, mat, mat, mat, assy, part.upper())
-        # 헤더 재계산: 동관/사급/용접 재료비 합
-        cur.execute("""SELECT SUM(CASE WHEN ptype_v2 IN(N'동관',N'동관고강도') THEN ISNULL(mat_cost,0) ELSE 0 END),
+            mat = round(pur * soyo); mat_before = mat; ptype_disp = "사급부품"
+        cur.execute("""UPDATE nx.coop_quote_part_v2 SET ptype=?, ptype_v2=?, unit_wt=?, soyo_weight=?, mat_cost=?, part_total=?, mat_after=?, mat_before=?, prev_sagub=?
+            WHERE assy_code=? AND UPPER(LTRIM(RTRIM(part_code)))=?""", ptype_disp, pt, uw_save, sw, mat, mat, mat, mat_before, (prev_sg if pt == "수불" else 0), assy, part.upper())
+        # 헤더 재계산: 수불(제작동관)/사급/용접 재료비 합 (구 '동관' 표기도 호환)
+        cur.execute("""SELECT SUM(CASE WHEN ptype_v2 IN(N'수불',N'동관',N'동관고강도') THEN ISNULL(mat_cost,0) ELSE 0 END),
                               SUM(CASE WHEN ptype_v2=N'용접봉' THEN ISNULL(mat_cost,0) ELSE 0 END),
-                              SUM(CASE WHEN ptype_v2 NOT IN(N'동관',N'동관고강도',N'용접봉') THEN ISNULL(mat_cost,0) ELSE 0 END),
-                              SUM(CASE WHEN ptype_v2 IN(N'동관',N'동관고강도') THEN ISNULL(unit_wt,0)*ISNULL(soyo,1) ELSE 0 END)
+                              SUM(CASE WHEN ptype_v2 NOT IN(N'수불',N'동관',N'동관고강도',N'용접봉') THEN ISNULL(mat_cost,0) ELSE 0 END),
+                              SUM(CASE WHEN ptype_v2 IN(N'수불',N'동관',N'동관고강도') THEN ISNULL(soyo_weight,0)*ISNULL(soyo,1) ELSE 0 END)
                        FROM nx.coop_quote_part_v2 WHERE assy_code=?""", assy)
         s = cur.fetchone()
         mat_raw = float(s[0] or 0); mat_weld = float(s[1] or 0); mat_part = float(s[2] or 0); tw = float(s[3] or 0)

@@ -2554,8 +2554,14 @@ SCREEN.coopquote2=(host)=>{
       if(ni)ni.onkeyup=e=>{if(e.key==='Enter')loadBomInto(ni.value,null);};
       const bs=g('#be-save');if(bs)bs.onclick=saveBomEdit;
       const bem=g('#be-editmode');if(bem)bem.onclick=()=>{st.bomedit.viewMode=false;render();};
-      host.querySelectorAll('.be-role').forEach(sel=>sel.onchange=async()=>{const code=sel.dataset.code,role=sel.value;sel.disabled=true;
-        try{await fetch(`${API}/api/coopquote2/set-role`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assy:be.assy,part:code,role})});}catch(e){}
+      host.querySelectorAll('.be-role').forEach(sel=>sel.onchange=async()=>{const code=sel.dataset.code,role=sel.value;
+        let prev_sagub=null;
+        if(role==='제작동관'||role==='동관고강도'){   // ★제작동관 전환 시 종전(인상전) 사급가 직접 입력(일반CU 7550)
+          const d=prompt('종전(인상전) 사급가 입력\n· 일반 CU: 7550\n· 고강도 등은 해당 종전 사급가\n(취소 시 7550 적용)', '7550');
+          prev_sagub=(d===null?7550:(d.trim()||7550));
+        }
+        sel.disabled=true;
+        try{await fetch(`${API}/api/coopquote2/set-role`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assy:be.assy,part:code,role,prev_sagub})});}catch(e){}
         loadBomInto(be.assy,(be.rowvals?be.rowvals.sale:(be.data&&be.data.cur_incost!=null?be.data.cur_incost:null)));});
       const upd=()=>{const soyo=beSoyo();const raw=beRaw();
         const baseMat=be.data.rows.filter(r=>r.role!=='제작동관'&&r.in_quote!==false).reduce((s,r)=>s+beRowMat(r),0);
