@@ -446,6 +446,57 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
         cn.close()
 
 
+def _sub_signature(cur, children, weld):
+    """SUB 시그니처(레지스트리와 동일 규칙): children[RAC%제외, 자식SUB는 자기 sig로]+weld[weld_item·st·use_qty] → 'S:'+md5[:12].
+       children=[{item,qty}], weld=[{weld_item,weld_st,use_qty}]. cur=nx 커서(자식 sig 조회용)."""
+    codes = [str(c.get("item", "")).strip() for c in children
+             if str(c.get("item", "")).strip() and not str(c.get("item", "")).upper().startswith('RAC')]
+    keymap = {}   # 자식코드 -> 'S:xxxx'(SUB) ; 없으면 리프
+    if codes:
+        uc = list(dict.fromkeys(codes))
+        for i in range(0, len(uc), 900):
+            chunk = uc[i:i+900]; ph = ",".join("?" * len(chunk))
+            cur.execute(f"""SELECT m.raw_item, r.sig FROM nx.sub_code_map m
+                            JOIN nx.sub_registry r ON r.sub_code=m.sub_code WHERE m.raw_item IN ({ph})""", *chunk)
+            for raw, sig in cur.fetchall(): keymap[(raw or '').strip()] = sig
+            cur.execute(f"SELECT sub_code, sig FROM nx.sub_registry WHERE sub_code IN ({ph})", *chunk)
+            for sc, sig in cur.fetchall(): keymap[(sc or '').strip()] = sig
+    items = []
+    for c in children:
+        it = str(c.get("item", "")).strip()
+        if not it or it.upper().startswith('RAC'): continue
+        q = round(float(c.get("qty", 1) or 1), 6)
+        items.append((it, q, keymap.get(it, 'L:' + it)))
+    items.sort(key=lambda x: (x[0], x[1]))
+    parts = [f"{key}#{q}" for it, q, key in items]
+    wl = sorted((str(w.get("weld_item", "")).strip(), round(float(w.get("weld_st", 0) or 0), 4),
+                 round(float(w.get("use_qty", 0) or 0), 6)) for w in (weld or []))
+    weldstr = ';'.join(f"{wi}|{st}|{uq}" for wi, st, uq in wl)
+    raw = f"C[{','.join(parts)}]W[{weldstr}]"
+    return 'S:' + hashlib.md5(raw.encode('utf-8')).hexdigest()[:12]
+
+
+@router.post("/api/bom/sub/dedup")
+def sub_dedup(payload: dict = Body(...)):
+    """★SUB 재사용 판정(조달후보 모달 '묶기' 시): children+weld의 시그니처로 nx.sub_registry 조회.
+       동일 SUB 있으면 기존 S코드 반환(강제 재사용) → 중복 생성 차단. 읽기전용(채번은 후보 저장시)."""
+    children = payload.get("children", []) or []
+    weld = payload.get("weld", []) or []
+    if not children:
+        raise HTTPException(400, "children(구성) 필요")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        sig = _sub_signature(cur, children, weld)
+        cur.execute("SELECT sub_code, rep_item, nm, members FROM nx.sub_registry WHERE sig=?", sig)
+        r = cur.fetchone()
+        if r:
+            return {"exists": True, "sub_code": (r[0] or '').strip(), "rep_item": (r[1] or '').strip(),
+                    "nm": r[2] or '', "members": int(r[3] or 0), "sig": sig}
+        return {"exists": False, "sub_code": None, "sig": sig}
+    finally:
+        cn.close()
+
+
 @router.post("/api/bom/save")
 def bom_save(payload: dict = Body(...)):
     """BOM 구성 전체 교체 저장. 마스터 가드: 참조무결성·중복·순환·필수값. (마감/재고 가드는 재고·실적 프로그램용, BOM 미적용)"""

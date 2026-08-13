@@ -75,6 +75,7 @@
 5. **각 단계마다 diff0 게이트 검증 + NX_MASTER_GAP 기록**
 
 ## 진행 로그
+- 2026-08-13 ★③-백엔드 dedup 프리미티브 **완료·검증**(bom.py `_sub_signature`+`POST /api/bom/sub/dedup`): children+weld → 레지스트리 동일규칙 시그니처 → nx.sub_registry 조회. 읽기전용(채번은 후보저장시). 검증: 은납→S01960·미래-4-1→S01510·5211A10305E-S6-2→S00056 **정확일치**, 신규조합→exists=False. **다음 = ③-프론트(조달후보 모달: 재귀드롭+group/ungroup, 묶기시 dedup호출→기존S강제·분기·영향경고, 저장시 신규 mint).**
 - 2026-08-13 설계 확정·문서 생성. 착수 ① 충돌검사 시작.
 - 2026-08-13 ★①충돌검사 완료: 레거시 PR_M_ITEM `S#####` **0건**, `S+숫자시작` 자체가 **0건**, nx.bom_line/header **0건**, `NS+숫자` 0건. → **코드 형식 `S00001~` 확정**(충돌 없음). 다음 = ②시그니처·nx.sub_registry 백엔드.
 - 2026-08-13 ★②시그니처 dedup **시뮬(쓰기없음) 완료**(scratchpad/sub_sig_sim.py): SUB(중간조립=edges보유+어딘가 child) **3412개 → 유니크 sig 2882개**(15.5% 통합, 530 공유제거). 공유 sig **276종**(예 5210A26600계열 18개→1, AJR30012-SOCKET계열 17개→1). **모순(한 raw코드=여러 sig) 0건**. 검증: (1)global이 크로스base 공유 잡음(5211A10305**E**-S6-2 = **F**-S6-2 동일 sig) (2)proc_weld가 구별자(같은 base 다른 용접=다른 sig) (3)혼합접미사(-SOCKET/-은납/-숫자) 구조같으면 1코드. 시그니처=children[RAC%제외]+proc_weld[weld_item·st·use_qty], Merkle 재귀(자식SUB=자기sig). → **채번(nx.sub_registry) 실행 대기**.

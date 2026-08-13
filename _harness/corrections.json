@@ -8,6 +8,12 @@
   "_note_grp_key": "grp=sil(실원가용)/nae(내부용), key=jae/gagong/ilban/unban/profit/silwon/lg/sonik/won/bu, 구조수정은 struct.itemset",
 
   "_pending_bug_candidates": [
+    {"target": "레거시 SP 가공비 lgroup 필터 (전 품목)", "field": "sil.gagong/nae.gagong", "legacy": "타 lgroup 부품 공정=0(CS_M_PROC ITEM_LGROUP IN(상위,'J')만 계상)", "corrected": "제작부품(make_type=1) 실제공정은 계상",
+     "reason": "AGF30058505(make1·BOX가공 868원)가 상위 lgroup(E)≠부품 lgroup(G)이라 레거시가 실제 제작 가공비를 0처리 → 제품원가 과소. 2026-08-13 lgroup-fix로 현재는 '레거시 재현'(diff0). 버그면 corrections 등록후 계상 전환 필요.", "status": "레거시오류 판단대기(나중)"},
+    {"target": "레거시 SP 임율 시점 (전 품목)", "field": "sil.gagong/nae.gagong", "legacy": "임율=CS_M_LABOR_COST_RATE APPLY<=GETDATE() 최신(날짜무관)", "corrected": "원가시점(ym) as-of 임율",
+     "reason": "1월 원가에 8월 임율 적용 등 소급/과거 원가 왜곡. 엔진은 as-of ym이 맞다고 보나 diff0 위해 GETDATE 재현 중. 2026-08-13 규명.", "status": "레거시오류 판단대기(나중)"},
+    {"target": "실원가 성분 분해 (용접봉 포함 품목)", "field": "sil.jae vs sil.gagong", "legacy": "용접봉을 가공비 아닌 재료비로 흡수 → 총액만 맞고 재료/가공 분해 부정확", "corrected": "용접봉=가공종속(proc_weld) 분리",
+     "reason": "손익 총액은 상쇄로 맞아도 재료/가공 컬럼 분해가 틀림. 2026-08-13 규명.", "status": "레거시오류 판단대기(나중)"},
     {"target": "AJR75563402-3-1 (이젠터)", "field": "make_type/구분", "legacy": "3=매입", "corrected": "2=유상사급",
      "reason": "이젠터에 원소재 tag5 유상사급 출고(2026 36만개)+사급자식(3H02717A,5210) 있음 = 매입 오분류. 실측근거 sagub_by_supplier.py", "status": "담당승인대기"},
     {"target": "AJR75563402-4-1 (미래) 등 국내 유상사급 서브", "field": "SAGUB_FLAG", "legacy": "0", "corrected": "1",
