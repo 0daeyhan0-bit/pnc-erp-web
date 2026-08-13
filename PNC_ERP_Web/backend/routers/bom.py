@@ -258,10 +258,16 @@ def _bom_tree_nx(item, real, expandbuy=0):
             cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
             for r in cur.fetchall():
                 if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
-        def disp(code): return codemap.get(code) or alias.get(code, code)   # SUB=정본 S#####(codemap), 리프=alias/raw
-        # ★SUB 표시 = 정본코드 S#####(nx.sub_code_map, 시그니처 dedup·전 제품 안정). 미채번 SUB/리프는 disp fallback.
+        def disp(code): return alias.get(code, code)   # 리프변형 표시(자재 canonical). SUB는 아래 tree-order.
+        # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(사용자 확정 2026-08-13: ASSY품번+SUB순번). raw=원본코드(navi/edit),
+        #   정본식별 S#####(nx.sub_registry/sub_code_map)은 dedup·후보채번용 내부 identity(표시 아님).
+        sub_seq = [0]; sub_map = {}
         def subdisp(child):
-            return codemap.get(child) or disp(child)
+            if child in edges:   # 하위 보유 = SUB
+                if child not in sub_map:
+                    sub_seq[0] += 1; sub_map[child] = f"{item}_S{sub_seq[0]:02d}"
+                return sub_map[child]
+            return disp(child)
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
                 "qty": 1, "cust": "", "custnm": "", "sag": "", "se": "", "kt": "", "vir": "", "ce": "", "le": "",
@@ -420,7 +426,7 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
             cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
             for r in cur.fetchall():
                 if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
-        def disp(code): return codemap.get(code) or alias.get(code, code)   # SUB=정본 S#####, 리프=자재 canonical
+        def disp(code): return alias.get(code, code)   # 역전개=원본코드 표시(글로벌 S코드 미표시, 정본식별은 내부 dedup용)
         rootnm = info.get(item, {}).get("nm", "")
         out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
                 "qty": None, "custnm": "", "sag": "", "se": "", "ce": "",
