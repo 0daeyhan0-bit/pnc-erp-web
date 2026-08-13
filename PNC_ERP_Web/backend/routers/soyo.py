@@ -139,11 +139,52 @@ def plan_sourcing(mode: str = Query("gubun"), gubun: str = Query(""), vendor: st
     finally:
         nx.close()
 
+def _forecast_plan_gn(cur, b, t):
+    """★계획 → gross(차감전=계획) + net(차감후=계획−기출고) 을 도번×일자로 반환.
+       레거시 생산계획진척(dw_pr_plan_020) 정본: 남은예상 = 계획 − 기출고(sa_t_sale_dtl.sale_qty − sa_t_item_move move_tag='3'),
+       키=제번(work_order)+도번(item_code), finish_flag='0', 일자셀 앞(이른날)에서부터 출고량 소진.
+       소스=sa_t_plan_item_dtl(u1, 제번+분할제번+도번 보유)+pr_t_plan_input(u4, 제번+도번). 반환: (days:set, gross:{item:{ymd:q}}, net:{item:{ymd:q}}).
+       [[newerp-coop-plan-delivery-formulas]]"""
+    from collections import defaultdict
+    tc = " AND PLAN_YMD<=?" if t else ""
+    params = ([b, t, b, t] if t else [b, b])
+    cur.execute(f"""
+      SELECT WORK_ORDER wo, LTRIM(RTRIM(C_ITEM_CODE)) it, PLAN_YMD ymd, SUM(CAST(PLAN_QTY AS float)) q
+        FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY WORK_ORDER, LTRIM(RTRIM(C_ITEM_CODE)), PLAN_YMD
+      UNION ALL
+      SELECT WORK_ORDER wo, LTRIM(RTRIM(ITEM_CODE)) it, PLAN_YMD ymd, SUM(CAST(PLAN_QTY AS float)) q
+        FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), PLAN_YMD""", *params)
+    plan = defaultdict(lambda: defaultdict(float))   # (wo,item) -> {ymd: qty}
+    for wo, it, ymd, q in cur.fetchall():
+        plan[(str(wo or '').strip(), str(it).strip())][str(ymd).strip()] += float(q or 0)
+    # 기출고 = sale_qty(finish_flag='0') − 출하반품(move_tag='3') by (work_order, item_code)
+    ship = defaultdict(float)
+    cur.execute("""SELECT WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), SUM(CAST(SALE_QTY AS float))
+        FROM sa_t_sale_dtl WHERE FINISH_FLAG='0' GROUP BY WORK_ORDER, LTRIM(RTRIM(ITEM_CODE))""")
+    for wo, it, q in cur.fetchall():
+        ship[(str(wo or '').strip(), str(it).strip())] += float(q or 0)
+    cur.execute("""SELECT FR_WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), SUM(CAST(MOVE_QTY AS float))
+        FROM sa_t_item_move WHERE MOVE_TAG='3' AND FR_FINISH_FLAG='0' GROUP BY FR_WORK_ORDER, LTRIM(RTRIM(ITEM_CODE))""")
+    for wo, it, q in cur.fetchall():
+        ship[(str(wo or '').strip(), str(it).strip())] -= float(q or 0)
+    # 소진: 제번별 기출고를 이른 일자부터 계획에서 차감
+    gross = defaultdict(lambda: defaultdict(float)); net = defaultdict(lambda: defaultdict(float)); days = set()
+    for (wo, it), dmap in plan.items():
+        s = ship.get((wo, it), 0.0)
+        if s < 0: s = 0.0
+        for ymd in sorted(dmap):
+            q = dmap[ymd]; days.add(ymd)
+            gross[it][ymd] += q
+            if s >= q: s -= q; rem = 0.0
+            else: rem = q - s; s = 0.0
+            net[it][ymd] += rem
+    return days, gross, net
+
 @router.get("/api/sales/forecast")
 def sales_forecast(base: str = Query(""), to: str = Query("")):
     """★영업예상매출현황 라이브 API (레거시 dw_pr_plan_190 재현, 정적스냅샷 대체).
        소스=sa_t_plan_item_dtl(union1)+pr_t_plan_input(union4). 단가=pr_m_item_cost(COST_TAG in S/E=LG판매가, 품목단위 최신, cust무관) KRW.
-       gross=차감전(=라이브190). net=차감후=gross − union4(pr_t_plan_input)의 첫계획일 과대분 제거. [[nextgen-erp-sales-forecast-190]]"""
+       gross=차감전(=원계획). net=차감후=계획−기출고(sa_t_sale_dtl−출하반품, 제번+도번 소진, 레거시020 정본). [[nextgen-erp-sales-forecast-190]]"""
     cn = _conn(); cur = cn.cursor()
     try:
         b = _d6(base) if base.strip() else None
@@ -161,19 +202,11 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
                 t = _dt(_yr, _mo, _dy).strftime('%y%m%d')
             except Exception:
                 t = None
-        tc = " AND PLAN_YMD<=?" if t else ""
-        # union1(sa_t_plan_item_dtl) + union4(pr_t_plan_input), item×ymd×src · 기간 base~to
-        cur.execute(f"""
-          SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
-          UNION ALL
-          SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
-          *([b, t, b, t] if t else [b, b]))
-        src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
-        if not src:
+        # ★계획 gross + 출고차감 net (레거시 020 정본, 공용헬퍼)
+        days_set, gross, net = _forecast_plan_gn(cur, b, t)
+        if not gross:
             return {"base": b, "to": (t or b), "days": [], "rows": []}
-        base_ymd = min(y for _, y, _, _ in src)  # 첫 계획일(차감 기준)
+        base_ymd = min(days_set) if days_set else b
         # 단가: COST_TAG in (S,E) 최신 COST_APPLY_YMD, 품목단위(cust무관)
         cur.execute("""SELECT c.ITEM_CODE, c.ITEM_COST FROM pr_m_item_cost c
             JOIN (SELECT ITEM_CODE, MAX(COST_APPLY_YMD) mx FROM pr_m_item_cost WHERE COST_TAG IN('S','E') GROUP BY ITEM_CODE) m
@@ -185,16 +218,10 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
-        agg = {}; days = set()
-        for item, ymd, s, qty in src:
-            days.add(ymd)
-            g = agg.get(item)
-            if not g:
-                g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0), "gdays": {}, "ndays": {}}
-                agg[item] = g
-            g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty
-            if not (s == 'u4' and ymd == base_ymd):   # ★차감: pr_t_plan_input(u4) 첫날분 제외
-                g["ndays"][ymd] = g["ndays"].get(ymd, 0) + qty
+        days = days_set; agg = {}
+        for item in set(list(gross.keys()) + list(net.keys())):
+            agg[item] = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0),
+                         "gdays": dict(gross.get(item, {})), "ndays": dict(net.get(item, {}))}
         rows = []
         for g in agg.values():
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
@@ -256,35 +283,23 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             if u is not None: sac[str(prod).strip()] = float(u or 0)
         cur.execute(f"SELECT MAX(apply_ymd) FROM {NXP}price_item WHERE price_type=N'매입' AND vendor_code='LG'")
         _af = cur.fetchone(); asof = str(_af[0]).strip() if _af and _af[0] else ""
-        # 계획 완제품 × 일자 × src (영업예상매출과 동일 소스)
-        cur.execute(f"""
-          SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc} GROUP BY C_ITEM_CODE, PLAN_YMD
-          UNION ALL
-          SELECT ITEM_CODE item, PLAN_YMD ymd, 'u4' src, SUM(CAST(PLAN_QTY AS float)) q
-            FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc} GROUP BY ITEM_CODE, PLAN_YMD""",
-          *([b, t, b, t] if t else [b, b]))
-        src = [(str(a).strip(), str(y).strip(), str(s).strip(), float(qq or 0)) for a, y, s, qq in cur.fetchall()]
-        # 사급비 보유 완제품(사급부품 있는 것)만
-        src = [r for r in src if r[0] in sac]
-        if not src:
+        # ★계획 gross + 출고차감 net (레거시 020 정본, 매출과 동일 공용헬퍼) → 사급비 보유 완제품만
+        days_all, gross, net = _forecast_plan_gn(cur, b, t)
+        items = [it for it in set(list(gross.keys()) + list(net.keys())) if it in sac]
+        if not items:
             return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0,
                     "n_parts": 0, "asof": asof, "priced": len(sac)}
-        base_ymd = min(y for _, y, _, _ in src)
+        days = set()
+        for it in items:
+            days.update(gross.get(it, {}).keys()); days.update(net.get(it, {}).keys())
+        base_ymd = min(days) if days else b
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
-        agg = {}; days = set()
-        for item, ymd, s, qty in src:
-            days.add(ymd)
-            g = agg.get(item)
-            if not g:
-                g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": sac.get(item, 0),
-                     "gdays": {}, "ndays": {}}
-                agg[item] = g
-            g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty      # 셀 = 완제품 계획수량
-            if not (s == 'u4' and ymd == base_ymd):
-                g["ndays"][ymd] = g["ndays"].get(ymd, 0) + qty
+        agg = {}
+        for item in items:
+            agg[item] = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": sac.get(item, 0),
+                         "gdays": dict(gross.get(item, {})), "ndays": dict(net.get(item, {}))}
         rows = []
         for g in agg.values():
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
