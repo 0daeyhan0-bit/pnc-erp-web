@@ -513,6 +513,45 @@ def sub_dedup(payload: dict = Body(...)):
         cn.close()
 
 
+@router.get("/api/bom/sub/impact")
+def sub_impact(item: str = Query(..., description="SUB의 raw코드 또는 정본 S코드")):
+    """★공유 영향 — 이 SUB 편집이 몇 개 제품에 전파되나.
+       direct_parents = 이 raw코드를 직속 참조하는 부모(=편집 시 **자동 전파** 대상, 같은 bom_header 공유).
+       variant_codes = 같은 정본 S코드에 묶인 다른 raw코드(구조동일·표시병합, 별도 bom_header=자동전파 아님). group_parent_count=그 변형들까지 포함한 제품수(분기/통합 검토 참고)."""
+    item = item.strip()
+    cn = _nx(); cur = cn.cursor()
+    try:
+        is_scode = (item[:1] == 'S' and item[1:].isdigit())
+        if is_scode:
+            scode = item
+            cur.execute("SELECT rep_item FROM nx.sub_registry WHERE sub_code=?", item)
+            rr = cur.fetchone(); target_raw = ((rr[0] or '').strip() if rr and rr[0] else item)
+        else:
+            cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE raw_item=?", item)
+            r = cur.fetchone(); scode = ((r[0] or '').strip() if r else None); target_raw = item
+        variants = []
+        if scode:
+            cur.execute("SELECT raw_item FROM nx.sub_code_map WHERE sub_code=?", scode)
+            variants = [(x[0] or '').strip() for x in cur.fetchall() if (x[0] or '').strip()]
+        # direct = 이 raw를 직속 자식으로 갖는 부모(자동전파 대상) + 이름
+        cur.execute("""SELECT DISTINCT h.item_code, ISNULL(m.ITEM_DESC,'')
+                       FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id
+                       LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=h.item_code
+                       WHERE bl.child_item=?""", target_raw)
+        direct = [{"code": (x[0] or '').strip(), "name": x[1] or ''} for x in cur.fetchall() if (x[0] or '').strip()]
+        group_parents = 0
+        if variants:
+            ph = ",".join("?" * len(variants))
+            cur.execute(f"SELECT COUNT(DISTINCT h.item_code) FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id WHERE bl.child_item IN ({ph})", *variants)
+            group_parents = int(cur.fetchone()[0] or 0)
+        return {"item": item, "sub_code": scode, "target_raw": target_raw,
+                "direct_parents": direct, "direct_count": len(direct),
+                "variant_codes": variants, "variant_count": len(variants),
+                "group_parent_count": group_parents}
+    finally:
+        cn.close()
+
+
 @router.post("/api/bom/save")
 def bom_save(payload: dict = Body(...)):
     """BOM 구성 전체 교체 저장. 마스터 가드: 참조무결성·중복·순환·필수값. (마감/재고 가드는 재고·실적 프로그램용, BOM 미적용)"""
