@@ -207,11 +207,12 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
 
 @router.get("/api/sales/forecast_sagub")
 def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
-    """★LG 사급 예상금액 (영업예상매출현황 '예상 사급금액' 구분).
-       사급부품 = 소분류 'LG사급'(ITEM_SGROUP='310'). 완제품 개당 LG사급비 = nx 원가엔진 material_split['sa']
-       (sgroup=310 leaf 재료비합, diff0정본, 품목별 원가분석 'LG사급비'와 동일값) → nx.item_sagub_cost 캐시.
-       예상금액 = 계획완제품(sa_t_plan_item_dtl u1 + pr_t_plan_input u4) 수량 × 개당LG사급비, 일자별.
-       gross=차감전, net=차감후(u4 첫계획일 과대분 제거, 라이브190과 동일). 셀=수량, 금액=수량×LG사급비. [[nextgen-erp-sales-forecast-190]]"""
+    """★예상 LG사급금액 (영업예상매출현황 '예상 LG사급금액' 구분) — LG사급 2종 중 '사급부품'(원소재 동은 별도).
+       사급부품 = 소분류 'LG사급'(ITEM_SGROUP='310'). 완제품 개당 사급금액 = Σ(BOM 사급부품 소요 × COSP 사급가).
+       COSP = 품목단가관리 '사급가(업로드)' = nx.price_item(price_type='매입', vendor='LG') 최신(LG 청구 실단가).
+       예상금액 = 계획완제품(sa_t_plan_item_dtl u1 + pr_t_plan_input u4) 수량 × 개당사급금액, 일자별.
+       gross=차감전, net=차감후(u4 첫계획일 과대분 제거, 라이브190과 동일). 셀=수량, 금액=수량×개당사급금액.
+       사급/매출≈35.5%(설치제외 ~40%, 사용자검증). [[nextgen-erp-sales-forecast-190]] [[newerp-install-product-consignment]]"""
     cn = _conn(); cur = cn.cursor()
     try:
         b = _d6(base) if base.strip() else None
@@ -229,13 +230,32 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             except Exception:
                 t = None
         tc = " AND PLAN_YMD<=?" if t else ""
-        # ★단가 = 완제품 개당 LG사급비 = nx 원가엔진 material_split['sa'](sgroup=310 leaf합, diff0정본, 품목별원가분석 LG사급비와 동일).
-        #   성능상 nx.item_sagub_cost 캐시(사전계산, /api/sales/forecast_sagub/rebuild로 갱신)에서 조회.
-        cur.execute("SELECT LTRIM(RTRIM(item_code)), CAST(sa_cost AS float), ISNULL(asof_ymd,'') FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
-        sac = {}; asof = ""
-        for ic, sc, af in cur.fetchall():
-            sac[str(ic).strip()] = float(sc or 0)
-            if af and not asof: asof = str(af).strip()
+        NXP = "PARTNER_ERP_TEST3.nx."
+        # ★단가 = 완제품 개당 예상 LG사급금액 = Σ(그 완제품 BOM의 사급부품[소분류 LG사급=ITEM_SGROUP '310'] 소요 × COSP 사급가).
+        #   COSP 사급가 = 품목단가관리 '사급가(업로드)' = nx.price_item(price_type='매입', vendor='LG') 최신. LG가 청구하는 실제 사급단가(LME포함).
+        #   ※ material_split['sa']는 재료비 base(LME제외)=사급 원가라 사급 청구금액보다 과소 → COSP 사용(사급/매출≈35.5%, 설치제외 ~40% 사용자검증).
+        #   전개=우리 단일BOM(nx.bom_line, 라이브 ~0.8s). 사급부품에서 중단 못하나(재귀 LEFT JOIN 불가) 소분류310은 리프라 이중계상 무시가능.
+        cur.execute(f"""
+          WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
+          cosp AS (SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn
+                     FROM {NXP}price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1),
+          prods AS (SELECT DISTINCT item FROM (
+             SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc}
+             UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc}) u),
+          expl AS (
+            SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part, CAST(bl.qty AS float) cum, 1 lvl
+              FROM prods p JOIN {NXP}bom_header h ON h.item_code=p.item JOIN {NXP}bom_line bl ON bl.bom_id=h.bom_id
+            UNION ALL
+            SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.cum*CAST(bl.qty AS float), e.lvl+1
+              FROM expl e JOIN {NXP}bom_header h ON h.item_code=e.part JOIN {NXP}bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
+          SELECT e.prod, SUM(e.cum*c.price) unit_sa
+          FROM expl e JOIN sag s ON s.it=e.part JOIN cosp c ON c.it=e.part
+          GROUP BY e.prod OPTION(MAXRECURSION 30)""", *([b, t, b, t] if t else [b, b]))
+        sac = {}
+        for prod, u in cur.fetchall():
+            if u is not None: sac[str(prod).strip()] = float(u or 0)
+        cur.execute(f"SELECT MAX(apply_ymd) FROM {NXP}price_item WHERE price_type=N'매입' AND vendor_code='LG'")
+        _af = cur.fetchone(); asof = str(_af[0]).strip() if _af and _af[0] else ""
         # 계획 완제품 × 일자 × src (영업예상매출과 동일 소스)
         cur.execute(f"""
           SELECT C_ITEM_CODE item, PLAN_YMD ymd, 'u1' src, SUM(CAST(PLAN_QTY AS float)) q
@@ -249,7 +269,7 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
         src = [r for r in src if r[0] in sac]
         if not src:
             return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0,
-                    "n_parts": 0, "asof": asof, "cached": len(sac)}
+                    "n_parts": 0, "asof": asof, "priced": len(sac)}
         base_ymd = min(y for _, y, _, _ in src)
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
@@ -268,12 +288,12 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
         rows = []
         for g in agg.values():
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
-            g["gq"] = gq; g["nq"] = nq; g["gamt"] = round(gq * c); g["namt"] = round(nq * c)  # 금액 = 수량 × 개당LG사급비
+            g["gq"] = gq; g["nq"] = nq; g["gamt"] = round(gq * c); g["namt"] = round(nq * c)  # 금액 = 수량 × 개당사급금액
             rows.append(g)
         rows.sort(key=lambda r: -r["gamt"])
         return {"base": base_ymd, "to": (t or (max(days) if days else b)), "days": sorted(days), "rows": rows,
                 "gross_amt": round(sum(r["gamt"] for r in rows)), "net_amt": round(sum(r["namt"] for r in rows)),
-                "n_parts": len(rows), "asof": asof, "cached": len(sac)}
+                "n_parts": len(rows), "asof": asof, "priced": len(sac)}
     finally:
         cn.close()
 
