@@ -450,34 +450,21 @@ class NxCostEngine:
              실원가는 사급부품을 둘 중 하나로 계상 —
               (A) **직접 leaf**(제작 아래 매입부품, 입고가) → 이미 반영 → 제외.
               (B) **매입 SUB 안에 묻힘**(SUB를 매입가≈사급가로 계상) → 개당차액 미반영 → **가산**.
-           crossed = 실원가 정지경계(매입/외주완성/원소재=전개안됨)를 지나 도달 = (B)묻힘."""
-        tot=[0.0]
-        def walk(node, q, seen, crossed, d):
-            if node in diffmap:
-                if crossed: tot[0]+=diffmap[node]*q   # (B)묻힘만 가산, (A)직접은 제외
-                return
-            if d>14: return
-            info=self._load_item(node)
-            # 이 노드가 실원가에서 전개되나? (제작&전개가능) 아니면 매입/원소재 정지경계
-            expands=(info['cost_gubun']!='3' or info['make_type']=='1') and bool(self._expandable(node, info, seen))
-            b=not expands
-            for c,qty,cx,f,t,lx in self.lines(node):   # 물리 전 레벨 전개 → SUB 안 사급부품 도달
-                if cx or c in seen: continue
-                walk(c, qty*q, seen|{node}, crossed or b, d+1)
-        walk(item, 1.0, set(), False, 0)
-        return round(tot[0],2)
+           crossed = 실원가 정지경계(매입/외주완성/원소재=전개안됨)를 지나 도달 = (B)묻힘.
+           ★다중경로 방어(2026-08-14): 변형SUB 미정규화로 같은 사급부품이 직접경로+묻힘경로 둘 다로 도달 가능.
+             '어느 경로로든 un-crossed(직접계상)로 도달하면' 그 부품은 전면 제외(이중계상 절대방지). AHQ73469301."""
+        return round(sum(h['amt'] for h in self._sagub_hits(item, diffmap).values() if not h['direct']), 2)
 
-    def sagub_nodes(self, item, diffmap):
-        """실원가 그리드용: 매입 SUB 안에 묻힌(crossed) 사급부품별 개당차액·누적qty·기여액.
-           sagub_sum과 동일 규칙(묻힌것만·이중계상 방지). Σ amt == sagub_sum.
-           반환 {code:{'unit':개당차액, 'qty':누적소요, 'amt':개당×누적}}."""
-        out={}
+    def _sagub_hits(self, item, diffmap):
+        """사급부품별 {code:{'unit':개당,'amt':묻힘경로 누적기여,'qty':묻힘누적,'direct':직접계상경로 존재}}.
+           direct=True(어느 경로로든 실원가 직접계상)면 사급차액 제외 대상."""
+        hits={}
         def walk(node, q, seen, crossed, d):
             if node in diffmap:
-                if crossed:
-                    e=out.get(node)
-                    if e is None: e=out[node]={'unit':round(diffmap[node],2),'qty':0.0,'amt':0.0}
-                    e['qty']+=q; e['amt']+=diffmap[node]*q
+                h=hits.get(node)
+                if h is None: h=hits[node]={'unit':round(diffmap[node],2),'amt':0.0,'qty':0.0,'direct':False}
+                if crossed: h['amt']+=diffmap[node]*q; h['qty']+=q
+                else: h['direct']=True   # 직접계상(실원가 재료비에 이미 입고가로 반영) → 제외
                 return
             if d>14: return
             info=self._load_item(node)
@@ -487,8 +474,15 @@ class NxCostEngine:
                 if cx or c in seen: continue
                 walk(c, qty*q, seen|{node}, crossed or b, d+1)
         walk(item, 1.0, set(), False, 0)
-        for e in out.values(): e['qty']=round(e['qty'],4); e['amt']=round(e['amt'],2)
-        return out
+        for h in hits.values(): h['amt']=round(h['amt'],2); h['qty']=round(h['qty'],4)
+        return hits
+
+    def sagub_nodes(self, item, diffmap):
+        """실원가 그리드용: 매입 SUB 안에 묻힌(crossed) 사급부품별 개당차액·누적qty·기여액.
+           sagub_sum과 동일 규칙(묻힌것만·이중계상 방지·다중경로 direct 제외). Σ amt == sagub_sum.
+           반환 {code:{'unit':개당차액, 'qty':누적소요, 'amt':개당×누적}}."""
+        return {c: {'unit':h['unit'],'qty':h['qty'],'amt':h['amt']}
+                for c,h in self._sagub_hits(item, diffmap).items() if (not h['direct']) and abs(h['amt'])>0.005}
 
     def _lme_nodes(self, item, ymd, mult=1.0, seen=None, out=None):
         """lme_total과 동일 로직으로 per-node LME 사급차액 수집(그리드 방출용). out[node] += (std−partner)×중량×누적q."""
