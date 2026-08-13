@@ -355,6 +355,47 @@ def cost_regen_status():
     return _regen
 
 
+# ===================== 품목별원가분석 실시간(nx) — 목록(리시빙실적) + 배치 원가 =====================
+@router.get("/api/cost/analysis/list")
+def cost_analysis_list(ym: str = Query('', description="YYMM(미지정=최신월). 리시빙실적 품목+입고수량")):
+    """품목별원가분석 목록 — nx 리시빙실적(SA_T_LG_RECEIVING_DTL)에서 품번+입고수량+품명. 스냅샷 아님(현재 nx).
+       원가는 프론트가 행별 배치(/api/cost/nx/bulk)로 실시간 채움 — 표시행 우선."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        ym = (ym or '').replace('-', '').strip()
+        if len(ym) >= 6: ym = ym[2:6]
+        if not ym:
+            ym = cur.execute("SELECT LEFT(MAX(RECEIVING_YMD),4) FROM nx.SA_T_LG_RECEIVING_DTL").fetchone()[0]
+        cur.execute("""SELECT r.ITEM_CODE, SUM(CONVERT(float,ISNULL(r.RECV_QTY,0))) qty, MAX(ISNULL(i.item_name,'')) nm
+            FROM nx.SA_T_LG_RECEIVING_DTL r LEFT JOIN nx.item i ON i.item_code=r.ITEM_CODE COLLATE DATABASE_DEFAULT
+            WHERE LEFT(r.RECEIVING_YMD,4)=? GROUP BY r.ITEM_CODE ORDER BY r.ITEM_CODE""", ym)
+        rows = [{"part": str(r[0]).strip(), "qty": float(r[1] or 0), "name": r[2] or ''} for r in cur.fetchall()]
+        return {"ym": ym, "count": len(rows), "rows": rows}
+    finally:
+        cn.close()
+
+@router.post("/api/cost/nx/bulk")
+def cost_nx_bulk(p: dict = Body(...)):
+    """여러 품번 실원가 배치 계산(엔진 1회 프라임). 프론트 행별 실시간 채움용. {parts:[], ymd}."""
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
+    ymd = str(p.get("ymd") or '260630').strip()
+    out = {}
+    eng = NxCostEngine()
+    try:
+        for it in parts:
+            try:
+                s = eng.silwon(it, ymd)
+                out[it] = {k: round(float(s.get(k, 0) or 0), 2) for k in
+                           ('jae', 'gagong', 'ilban', 'unban', 'profit', 'silwon', 'lg', 'sonik')}
+                out[it]['lme'] = round(float(s.get('lme_total') or eng.lme_total(it, ymd) or 0), 2)
+            except Exception as e:
+                out[it] = {"error": str(e)[:60]}
+    finally:
+        eng.close()
+    return {"ymd": ymd, "costs": out}
+
+
 # ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================
 #  ★체결·포장·용접 조립공정 ST는 용접봉(RAC) carrier에 p_item=부모(node)로 저장(레거시 carrier 모델). 여기서 전 공정군 편집.
 #   가공공정 = item_code=node, p_item=''  /  조립공정 = item_code=용접봉, p_item=node. calc_gubun 보존. 단가는 마감때만(제외).
