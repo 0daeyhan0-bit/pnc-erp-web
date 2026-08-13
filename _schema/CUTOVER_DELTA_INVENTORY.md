@@ -1,42 +1,51 @@
-# 컷오버 델타 인벤토리 (2026-08-14 실측, 읽기전용)
+# 컷오버 데이터 이관 — 토폴로지·델타 인벤토리·어제 이관 기록 (2026-08-14 실측)
 
-> 목적: 2일 후 하드컷오버 때 라이브(PARTNER_ERP)→nx로 옮길 데이터를 **미리 최소화**. 지금 라이브가 조용할 때 델타를 선(先)이관 → 컷오버엔 최종 소량만.
-> 접속: TEST3에서 cross-DB로 `PARTNER_ERP.dbo.*` **직독 가능**(확인됨) → stale한 TEST3.dbo 갱신 없이 라이브→nx 직접 sync 가능.
-> ★핵심: **nx는 라이브 미러가 아니라 재구축본** → 단순 건수차는 진짜 델타가 아님. 3부류로 구분.
+> ★이 토폴로지 혼동이 반복됨 — 작업 전 필독. 목적: 2일 후 하드컷오버 때 라이브→nx 이관량 최소화.
 
-## A. 거래로그 (append-only · 신규행만) — 지금 라이브 직독 INSERT로 옮기면 됨
-스냅샷(TEST3.dbo) 이후 라이브 신규행(날짜기준):
+## 1. 토폴로지 (정본 — 헷갈리지 말 것)
+- **PARTNER_ERP** = 라이브 운영DB(읽기전용). 지금도 매일 거래 발생(최신 260813).
+- **PARTNER_ERP_TEST3** = 작업DB. 스키마 2개가 전혀 다름:
+  - `TEST3.dbo` = **옛 스테이징(260801, 한달전). 안 씀. 무시.** ← 여기 보고 "stale하다" 착각 반복.
+  - `TEST3.nx` = **실제 작업 스키마**. 두 종류 테이블 공존:
+    - (a) **legacy 미러 82개** (`nx.PU_T_STOCK_MAINT`, `nx.SA_T_SALE_DTL`, `nx.PR_M_ITEM_COST` …) = 라이브 동일명·동일구조 충실복제. **백엔드가 legacy 조회에 이걸 읽음**(참조 프리픽스 `PARTNER_ERP.dbo.`→`nx.`).
+    - (b) **재구축본** (`nx.bom_line`·`nx.item`·`nx.bom`·`nx.stock_ledger` 등) = 원가엔진·정규화·단일원장용. 미러와 **별개**. r_bulk_copy 대상 아님(덮으면 안 됨).
+- 백엔드 접속: `common.py` `_nx()`=PARTNER_ERP_TEST3, `_conn()`=PARTNER_ERP RO. `.env` DB_DATABASE=PARTNER_ERP_TEST3.
 
-| 용도 | 라이브소스 | dbo스냅샷 | 라이브최신 | 신규행 | 동기화 |
-|---|---|---|---|---|---|
-| 자재 입출고/조정 원장 | PU_T_STOCK_MAINT | 260801 | 260813 | **13,664** (전체갭 33,050) | 원장 fold 재이관 |
-| LG 리시빙 | SA_T_LG_RECEIVING_DTL | 260717 | 260812 | 4,630 | INSERT |
-| 출하실적 | SA_T_SALE_DTL | 260716 | 260813 | 4,985 | (컷오버 DB복사) |
-| 생산실적 | PR_T_PROD_DTL | 260716 | 260813 | 5,091 | (컷오버 DB복사) |
-| 생산계획추가입력 | PR_T_PLAN_INPUT | — | — | 1,152 (anti-join) | INSERT 멱등 |
-| 품질 불량 | QA_T_ERROR | — | 260811 | 17 | INSERT |
-| 반성회의록 | cm_user_meeting_1 | — | — | 0 | INSERT 멱등 |
+## 2. 어제(2026-08-13) 이관 기록
+- **도구: `_migration/sub_norm/r_bulk_copy.py --commit`** (컷오버 대량이관 도구, 어제 실행).
+- 동작: `TABLES`(82개) 각각 — **행수 일치면 SKIP, 불일치면 `DROP TABLE nx.<T>` + `SELECT * INTO nx.<T> FROM PARTNER_ERP.dbo.<T>`** (전체 재복사, autocommit).
+- 결과: nx 미러가 라이브 **260812**로 갱신됨(리시빙 등 일부는 완전 일치). "라이브에서 바로 수정해서 가져왔다"=이 도구로 충실복제.
+- 멱등이지만 **델타가 아니라 전체 재복사**(행수 다르면 통째로 다시).
 
-→ **거래 신규행 합계 ≈ 28,370행(날짜기준)**. append라 지금 옮기고 컷오버 때 재실행 시 그 사이 델타만 추가.
+## 3. 지금 델타 (어제 갱신본 260812 → 라이브 260813, 하루치) — scratchpad/delta_mirror.py
+델타>0 상위(라이브에 늘어난 신규/변경분, 옮길 대상):
 
-## B. 마스터 (수정형) — 기존행 UPDATE 발생 → 건수차로 델타 못 잡음, upsert/전량비교 필요
-| 용도 | 라이브소스 | 라이브 | nx | 비고 |
+| nx 미러 | nx | 라이브 | 델타 | 타입 |
 |---|---|---|---|---|
-| 품목마스터 | PR_M_ITEM | 24,114 | nx.item 25,332(재구축>라이브) | 변경행 upsert. INSERT_DATETIME 有 |
-| 거래처 | CM_M_CUST | 358 | nx.cust 357 | 현재 DROP+전량 refresh |
-| 부서/라인/근무달력/파트달력 | HR_M_DEPT·PR_M_LINE_NO·HR_M_CALENDAR·PR_M_PART_CALENDAR | 소량 | ≈동일 | upsert(변경 드묾) |
-| 단가마스터 | PR_M_ITEM_COST | 130,806 | 125,349 | ★변경일컬럼 7개(감지가능). **단, 단가는 "마감때만" 규칙 — 임의반영 금지** |
+| PR_M_ITEM_COST(단가) | 127,611 | 130,806 | **+3,195** | ★마스터·단가(마감규칙 주의) |
+| PU_T_STOCK_MAINT(원장) | 1,739,392 | 1,742,585 | +3,193 | 거래 append |
+| PR_T_STOCK_MAINT_MAT | 1,367,100 | 1,368,757 | +1,657 | 거래 append |
+| SA_T_STOCK_MAINT | 656,319 | 656,949 | +630 | 거래 |
+| PR_T_INDI_SHEET2 | 417,729 | 418,340 | +611 | 거래 |
+| PR_T_PLAN_ITEM_DTL | 248,715 | 249,279 | +564 | 거래 |
+| PR_T_PROD_DTL(+PROC/STICKER) | 365,670 | 366,094 | +424(+434+493) | 거래 |
+| SA_T_SALE_DTL(출하) | 302,894 | 303,266 | +372 | 거래 |
+| HR_M_WORK_INFO | 128,400 | 128,558 | +158 | 마스터 |
+| … (델타>0 총 29개 테이블) | | | 양수합 ≈ 13,000행 | |
 
-## C. 변환 재구축본 — 행 복사 아님, 소스로 재이관(파이프라인) 필요
-- **nx.stock_ledger** = PU_T_STOCK_MAINT 등 5원천 fold(171,867행, STOCK_POINT). 신규 stock_maint → 원장 재적재 필요(증분 백플러시 설계).
-- **nx.item / nx.bom / nx.recv_dtl** = 스코프·구조 재구축본. 소스 신규분 재전개.
+→ **하루치라 소량(≈1.3만행)**. 대부분 append 거래로그. 나머지 53개 테이블은 델타 0.
 
-## 실행 결론(컷오버 최소화)
-1. **A(거래로그)** = 지금 라이브 직독으로 선이관하면 컷오버 payload 대폭↓. append라 안전(멱등 INSERT). 최우선.
-2. **B(마스터)** = upsert 드라이버(변경일/전량비교). 단가는 마감규칙 준수.
-3. **C(재구축본)** = 증분 재이관 파이프라인(원장 fold·BOM 전개). 가장 손 많이 감.
+## 4. ★위험·주의 (컷오버 전 반드시 반영)
+1. **행수 스킵의 맹점**: r_bulk_copy는 **행수만 비교** → 마스터가 건수 같고 값만 바뀐 UPDATE는 **감지 못 하고 스킵**. 특히 `PR_M_ITEM_COST`(단가) 변경 누락 위험. 단가는 "마감때만" 규칙과도 얽힘.
+2. **★덮어쓰기 데이터손실 위험**: nx > 라이브인 테이블(우리 생성/재구축분)을 r_bulk_copy가 DROP+재복사하면 **우리 데이터 소실**:
+   - `PR_T_PLAN_PART_MAT` nx 116,133 > 라이브 111,447 (**−4,686**)
+   - `PR_T_PLAN_PART_DTL / _COPY / _FOR_CUST` 각 −925, `PR_T_PLAN_DTL` −222, `SA_T_PLAN_DTL` −261
+   → 이들은 우리 계획엔진 생성분일 수 있음. **r_bulk_copy TABLES에서 제외하거나 별도확인** 필요(현재 리스트에 포함되어 위험).
+3. 재구축본(nx.bom_line·nx.item·nx.bom·nx.stock_ledger)은 미러와 다른 이름 → r_bulk_copy가 안 건드림(안전). 단 `PR_M_ITEM`(미러)와 `nx.item`(재구축)은 별개임을 혼동 말 것.
 
-## 방식
-- 소스 = `PARTNER_ERP.dbo.*` cross-DB 직독(TEST3 커넥션). stale TEST3.dbo 불필요.
-- 멱등: 지금 1회 + 컷오버 때 재실행 = 최종 소량 델타만.
-- 스크립트: scratchpad/delta_inventory.py, delta_probe.py(읽기전용 실측).
+## 5. 컷오버 최소화 방향 (2단계 제안 — 승인 후)
+- **거래로그(append·날짜키)**: DROP+전체복사 대신 **델타 INSERT**(라이브 date > nx max date)로 전환 → 컷오버 때 1.7M 재복사 대신 하루치만. 큰 최소화.
+- **마스터(수정형)**: 행수 아닌 **키+값 비교 upsert**. 단가는 마감규칙 준수.
+- **nx>라이브 테이블**: 라이브 복사 제외(우리 데이터 보존).
+- 지금 1회 + 컷오버 재실행 = 최종 소량만.
+- 스크립트(읽기전용 실측): scratchpad/delta_mirror.py, delta_probe.py.
