@@ -484,11 +484,11 @@ SCREEN.costanalysis=(c)=>{
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
   let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
-  let dYmd='260701';               // 단가 적용일자(YYMMDD) — 7월1일 고정(사용자 지정)
+  let dYmd=_CURDYMD;               // 단가 적용일자(YYMMDD) — 당일(사용자 지정: 일자=당일)
   const ymd2date=(y)=>y&&y.length===6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
   const date2ymd=(d)=>d?d.slice(2).replace(/-/g,''):'';                                          // date→YYMMDD
   // 리시빙실적(벌크) 단가 적용일자 — 변경 시 nx엔진 전체 재계산(백그라운드)
-  let rvYmd='260701', regenMsg='', regenPoll=null;   // ★단가 적용일자=7월1일 고정(사용자 지정)
+  let rvYmd=_CURDYMD, regenMsg='', regenPoll=null;   // ★단가 적용일자=당일(사용자 지정: 일자=당일)
   const setRegenMsg=(m)=>{regenMsg=m;const el=c.querySelector('#ca-regen-msg');if(el)el.textContent=m;};
   const doRegen=async()=>{
     if(!confirm(`단가 적용일자 ${ymd2date(rvYmd)} 기준으로 589품목을 재계산합니다.\n수 분 소요되며 완료 후 자동 새로고침됩니다. 진행할까요?`))return;
@@ -571,11 +571,18 @@ SCREEN.costanalysis=(c)=>{
   };
   const renderBody=()=>{
     const a=filt(), cols=colsOf();
+    // ★로딩 중(리시빙): 값이 계속 바뀌어 착각하므로 값 대신 "조회 중" 전체 표시(완료 후 1회 렌더)
+    if(mode!=='direct' && rvBusy){
+      const cb=c.querySelector('#ca-body'); if(cb)cb.innerHTML=`<tr><td colspan="${cols.length+1}" class="empty" style="padding:44px 0"><span style="display:inline-flex;align-items:center;gap:10px;color:#2f5aa8;font-weight:700;font-size:15px"><span class="ca-spin"></span> 조회 중… <span style="color:#8595ad;font-weight:500;font-size:13px">${esc(regenMsg||'')}</span></span></td></tr>`;
+      const ft=c.querySelector('#ca-foot'); if(ft)ft.innerHTML='';
+      const cn=c.querySelector('#ca-cnt'); if(cn)cn.textContent='조회 중…';
+      return;
+    }
     c.querySelector('#ca-body').innerHTML = a.map(r=>{const neg=r[21]<0;
       return `<tr class="${neg?'lossrow':''}"><td class="pcode" title="${esc(r[0])}"><b>${esc(r[0])}</b></td>`+
         cols.map(([i,,,op])=>{let cls='num';if(op.b)cls+=' bcol';if(op.sk&&r[i]<0)cls+=' negv';if(op.sk&&r[i]>0)cls+=' posv';
           return `<td class="${cls}">${op.pct?pct(r[i]):won(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
-      || `<tr><td colspan="${cols.length+1}" class="empty">${mode==='direct'?(dLoading?'라이브 계산중…':(dErr||'품번을 입력하고 조회 (라이브 · 아무 품번, 예: AJR75563503)')):'결과 없음'}</td></tr>`;
+      || `<tr><td colspan="${cols.length+1}" class="empty">${mode==='direct'?(dLoading?'라이브 계산중…':(dErr||'품번을 입력하고 조회 (라이브 · 아무 품번, 예: AJR75563503)')):(rvBusy?'<span style="display:inline-flex;align-items:center;gap:8px;color:#2f5aa8;font-weight:600"><span class="ca-spin"></span> 조회 중…</span>':'결과 없음')}</td></tr>`;
     if(mode!=='direct'){
       // 합계 = Σ(수량 × 단위금액). LG총금액(20)·Impact(22)는 이미 행별 총액이라 그대로 합산. 재료비율=Σ재료비/LG총매출.
       const T={}; NUM.forEach(([i,,,o])=>{if(!o.pct)T[i]=0;});
