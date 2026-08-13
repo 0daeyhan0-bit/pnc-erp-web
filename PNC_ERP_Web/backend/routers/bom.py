@@ -258,7 +258,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
             cur.execute(f"SELECT raw_item, sub_code FROM nx.sub_code_map WHERE raw_item IN ({ph})", *chunk)
             for r in cur.fetchall():
                 if r[1]: codemap[(r[0] or '').strip()] = (r[1] or '').strip()
-        def disp(code): return alias.get(code, code)   # 리프변형 표시 정규화(자재 canonical)
+        def disp(code): return codemap.get(code) or alias.get(code, code)   # SUB=정본 S#####(codemap), 리프=alias/raw
         # ★SUB 표시 = 정본코드 S#####(nx.sub_code_map, 시그니처 dedup·전 제품 안정). 미채번 SUB/리프는 disp fallback.
         def subdisp(child):
             return codemap.get(child) or disp(child)
