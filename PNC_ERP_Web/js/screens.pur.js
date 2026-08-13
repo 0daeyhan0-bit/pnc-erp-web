@@ -2194,7 +2194,7 @@ SCREEN.coopquote2=(host)=>{
       return `<b style="color:${c}">${s}${nf(Math.abs(r.diff))}</b>`;};
     {const _pg=host.querySelector('#cq-grid'); if(_pg) st._scroll=_pg.scrollTop;}  // 재렌더 전 리스트 스크롤 보존
     host.innerHTML=`
-     <div class="page-title">💱 협력사견적관리2 <span style="font-size:12px;color:var(--muted);font-weight:400">하위부품 bottom-up 견적 vs 실입고가 · nx.coop_quote</span></div>
+     <div class="page-title">💱 협력사견적관리 <span style="font-size:12px;color:var(--muted);font-weight:400">하위부품 bottom-up 견적 vs 실입고가 · nx.coop_quote</span></div>
      <div class="page-sub">「협력 업체 견적 정리」 기반 <b>bottom-up</b>. <b style="color:#1c6ec2">재료비 = Σ하위부품(원소재·용접봉·부속품)</b>, <b style="color:#1c7c3a">가공비 = 판가−재료비</b>, <b>재료비율 = 재료비/판가</b>.
        품번 행을 <b>클릭</b>하면 하위부품 3분류 상세가 열립니다. 입고가 = <b>실제 납품 거래가</b>(<code>PU_T_STOCK_MAINT</code>, 라이브) 종전(작년12월)·현재(최근). 🚚 토글=현재 납품품목만.</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
