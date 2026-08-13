@@ -9,6 +9,27 @@ const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'
 const nowCD = () => {const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};   // 당일 YYYY-MM-DD
 const nowCM = () => nowCD().slice(0,7);   // 당월 YYYY-MM
 const nowMS = () => nowCM()+'-01';        // 당월1일 YYYY-MM-01
+// ★전역: 날짜 input(type=date) 숫자 연속 키인 — YYYYMMDD 8자리 타이핑 시 자동 채움(진행표시). 모든 화면 공통 자동적용(화면별 수정 불필요).
+//   4자리=연, 6=연월, 8=연월일(완성). change는 8자리 완성 때만 발생(조기 재조회 방지). 화살표/Tab/Enter/달력클릭은 네이티브 유지.
+(function(){
+  if(typeof document==='undefined') return;
+  const buf=new WeakMap();
+  const isoOf=s=>{const y=s.slice(0,4),m=s.length>=6?s.slice(4,6):'01',d=s.length>=8?s.slice(6,8):'01';
+    if(s.length>=6&&(+m<1||+m>12))return null; if(s.length>=8&&(+d<1||+d>31))return null; return `${y}-${m}-${d}`;};
+  document.addEventListener('keydown',function(e){
+    const el=e.target; if(!(el&&el.tagName==='INPUT'&&el.type==='date'))return;
+    if(/^[0-9]$/.test(e.key)){
+      e.preventDefault();
+      let s=(buf.get(el)||'')+e.key; if(s.length>8)s=e.key; buf.set(el,s);
+      if(s.length>=4){const iso=isoOf(s); if(iso){el.value=iso; if(s.length===8){el.dispatchEvent(new Event('change',{bubbles:true}));buf.set(el,'');}}}
+    } else if(e.key==='Backspace'){
+      e.preventDefault();
+      const s=(buf.get(el)||'').slice(0,-1); buf.set(el,s);
+      if(s.length>=4){const iso=isoOf(s); if(iso)el.value=iso;} else el.value='';
+    } else { buf.set(el,''); }   // 그 외 키(화살표/Tab/Enter 등)=버퍼리셋, 네이티브 동작 유지
+  },true);
+  document.addEventListener('focusout',function(e){if(e.target&&e.target.type==='date')buf.delete(e.target);},true);
+})();
 const TYPE_NM={RAW:'원자재',SUB:'부자재',CON:'소모품',S_ASSY:'반제품',PROD:'완제품'};
 // 용접봉 판정(품명 '용접봉' 포함). 신 원칙: 용접봉=재료비지만 BOM 아닌 용접공정 종속 → 화면에서 기본 숨김(데이터는 보존). [[newerp-weld-cost-split]]
 const isWeld=nm=>/용접봉/.test(nm||'');
