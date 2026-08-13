@@ -101,7 +101,7 @@ SCREEN.salesforecast=(c)=>{
      <div class="page-title">📅 영업예상매출현황</div>
      <div class="page-sub">${metric==='sagub'
         ?'🟢 <b>라이브</b> LG 생산계획 기준 <b>예상 LG사급금액</b>(LG사급 2종 중 <b>사급부품</b>·원소재 동 별도) · 계획수량 × 개당 사급금액(BOM 사급부품[소분류 LG사급] 소요 × <b>COSP 사급가</b>=품목단가관리 사급가업로드) · 원화(KRW)'
-        :'🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW)'} · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${metric==='sagub'&&F.asof?' · 사급가 기준일 '+esc(F.asof):''}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
+        :'🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · <b>차감후=계획−기출고</b>(<code>sa_t_sale_dtl</code>−출하반품, 제번+도번, 레거시020 정본) · 원화(KRW)'} · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${metric==='sagub'&&F.asof?' · 사급가 기준일 '+esc(F.asof):''}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
      <div class="toolbar">
        <label class="tl">종류</label>
        <div class="toggle-group"><button data-metric="sales" class="${metric==='sales'?'on':''}">영업 예상매출</button><button data-metric="sagub" class="${metric==='sagub'?'on':''}">예상 LG사급금액</button></div>
@@ -154,9 +154,9 @@ SCREEN.salesforecast=(c)=>{
       const sumG=cur.reduce((a,b)=>a+b.gamt,0), sumN=cur.reduce((a,b)=>a+b.namt,0);
       const mlab=metric==='sagub'?'예상 LG사급금액':'예상매출';
       c.querySelector('#sum').innerHTML=`<div class="s-item">도번 <b>${won(cur.length)}</b></div>
-        <div class="s-item">차감전(=라이브) <b>${wonI(sumG)} 원</b></div>
-        <div class="s-item neg">첫계획일 과대분 제거 <b>-${wonI(sumG-sumN)} 원</b></div>
-        <div class="s-item">차감후 ${mlab} <b>${wonI(sumN)} 원</b></div>`;
+        <div class="s-item">차감전(계획) <b>${wonI(sumG)} 원</b></div>
+        <div class="s-item neg">기출고 차감 <b>-${wonI(sumG-sumN)} 원</b></div>
+        <div class="s-item">차감후(순예상) ${mlab} <b>${wonI(sumN)} 원</b></div>`;
       c.querySelector('#cnt').textContent=`${cur.length}도번 · ${metric==='sagub'?'예상 LG사급금액 · ':''}${mode==='net'?'차감후':'차감전(라이브)'} · 셀=수량, 하단=금액${metric==='sagub'?'(수량×개당LG사급비)':''} · 헤더 더블클릭=정렬`;
       attachResizers(c);
       // ★헤더 더블클릭 정렬 바인딩(리사이저는 자체 dblclick으로 stopPropagation → 충돌없음)
