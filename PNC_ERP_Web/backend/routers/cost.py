@@ -374,15 +374,45 @@ def cost_analysis_list(ym: str = Query('', description="YYMM(미지정=최신월
     finally:
         cn.close()
 
+# 사급차액 맵: 해당월 부품별 (실출고가 − 실입고가). 음수=손해(비싸게사서 싸게사급). 원소재·용접봉·소모품 제외(용접링 유지). 월별 캐시.
+_SAGUB_MAP_CACHE = {}
+_SAGUB_EXCL_SG = ('210', '220', '910', '991', '992', '993')
+def _sagub_diff_map(cur, ym):
+    ym = "".join(ch for ch in str(ym or '') if ch.isdigit())
+    ym = ym[2:6] if len(ym) >= 6 else ym[:4]
+    if not ym: return {}
+    if ym in _SAGUB_MAP_CACHE: return _SAGUB_MAP_CACHE[ym]
+    exsg = ",".join("'" + s + "'" for s in _SAGUB_EXCL_SG)
+    cur.execute(f"""
+    WITH inb AS (SELECT MAT_CODE mat, SUM(CAST(MAINT_AMT AS FLOAT)) amt, SUM(CAST(MAINT_QTY AS FLOAT)) qty
+      FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG IN ('9','S','C','G','H') AND MAINT_QTY>0 GROUP BY MAT_CODE),
+    outb AS (SELECT MAT_CODE mat, SUM(CAST(MAINT_AMT AS FLOAT)) amt, SUM(CAST(MAINT_QTY AS FLOAT)) qty
+      FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' GROUP BY MAT_CODE)
+    SELECT i.mat, CAST((o.amt/NULLIF(o.qty,0)) - (i.amt/NULLIF(i.qty,0)) AS FLOAT) diff
+    FROM inb i JOIN outb o ON i.mat=o.mat JOIN nx.PR_M_ITEM m ON m.ITEM_CODE=i.mat
+    WHERE o.qty<>0 AND i.qty<>0 AND (o.amt/NULLIF(o.qty,0))>0
+      AND ( m.ITEM_SGROUP NOT IN ({exsg}) OR m.ITEM_DESC LIKE N'%용접링%' )
+      AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.ITEM_DESC LIKE N'%용접링%' )""", ym, ym)
+    m = {}
+    for r in cur.fetchall():
+        if r[1] is not None: m[str(r[0]).strip()] = float(r[1])
+    _SAGUB_MAP_CACHE[ym] = m
+    return m
+
 @router.post("/api/cost/nx/bulk")
 def cost_nx_bulk(p: dict = Body(...)):
-    """여러 품번 실원가 배치 계산(엔진 1회 프라임). 프론트 행별 실시간 채움용. {parts:[], ymd}."""
+    """여러 품번 실원가 배치 계산(엔진 1회 프라임). 프론트 행별 실시간 채움용. {parts:[], ymd, ym}.
+       ym=리시빙월(YYMM) 주면 사급차액(그달 부품 실출고가−실입고가 × BOM소요) 함께 반환."""
     if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
     parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
     ymd = str(p.get("ymd") or '260630').strip()
+    ym = str(p.get("ym") or '').strip()
     out = {}
     eng = NxCostEngine()
     try:
+        smap = {}
+        try: smap = _sagub_diff_map(eng.cur, ym) if ym else {}
+        except Exception: smap = {}
         for it in parts:
             try:
                 s = eng.silwon(it, ymd)
@@ -391,11 +421,12 @@ def cost_nx_bulk(p: dict = Body(...)):
                 out[it]['lme'] = round(float(s.get('lme_total') or eng.lme_u(it, ymd) or 0), 2)   # lme_u=캐시(silwon서 이미 계산) 재사용
                 sp = eng.material_split(it, ymd)   # 재료비 sgroup별 분리(원자재/부자재/LG사급) — 스냅샷 정합
                 out[it]['won'] = sp['won']; out[it]['bu'] = sp['bu']; out[it]['sa'] = sp['sa']
+                out[it]['sagub'] = eng.sagub_sum(it, smap) if smap else 0.0   # 사급차액(개당, 완제품 BOM 사급부품 차액합)
             except Exception as e:
                 out[it] = {"error": str(e)[:60]}
     finally:
         eng.close()
-    return {"ymd": ymd, "costs": out}
+    return {"ymd": ymd, "ym": ym, "costs": out}
 
 
 # ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================

@@ -1,5 +1,7 @@
 # 조달프로파일 → 생산계획 → 자동발주 + 생산운영 통합 설계
 
+> ⏸️ **보류 (2026-08-14)**: 사용자 판단 "방향이 아닌 것 같다 · 너무 어려워 추후 설계". **아래는 확정 아님 = 논의 스냅샷/출발점.** 재개 시 방향부터 재검토(특히 route_line 공정별 업체·넷팅 전제). 성급히 구현 금지.
+
 작성 2026-08-14. 조달 프로파일(공정기반 route + 업체)을 **생산계획 시 자동발주 + 생산작업**으로 전개하는 정본 설계.
 관련: [[nextgen-erp-plan-procure-model]] · [[newerp-sourcing-profile]] · [[newerp-proc-sourcing-weld-model]] · _schema/SOURCING_PANEL_REDESIGN.md · SOURCING_COST_INTEGRATION.md · autoorder.py · manorder.py
 

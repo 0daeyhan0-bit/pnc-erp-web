@@ -445,17 +445,17 @@ class NxCostEngine:
 
     def sagub_sum(self, item, diffmap):
         """완제품에 들어가는 사급부품들의 사급차액(개당) 합 = Σ diffmap[사급부품] × 누적소요qty.
-           diffmap={부품:사급차액(=실출고가−실입고가, 음수=손해)}. 사급부품(diffmap 보유)은 그 단위로 계상하고 하위 안 품."""
+           diffmap={부품:사급차액(=실출고가−실입고가, 음수=손해)}. 사급부품은 SUB(매입) 안에 있어 **전 BOM레벨 전개**로 도달.
+           매칭된 사급부품은 그 단위로 계상하고 하위 미전개(우리가 그 부품을 사급으로 내보냄)."""
         tot=[0.0]
-        def walk(node, q, seen):
+        def walk(node, q, seen, d):
             if node in diffmap:
                 tot[0]+=diffmap[node]*q; return   # 사급 단위 = 그대로(하위 미전개)
-            info=self._load_item(node)
-            if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(node, info, seen):
-                for c,qty,cx,f,t,lx in self.lines(node):
-                    if cx or c in seen: continue
-                    walk(c, qty*q, seen|{node})
-        walk(item, 1.0, set())
+            if d>14: return
+            for c,qty,cx,f,t,lx in self.lines(node):   # 매입/제작 무관 전 레벨 전개 → SUB 안 사급부품 도달
+                if cx or c in seen: continue
+                walk(c, qty*q, seen|{node}, d+1)
+        walk(item, 1.0, set(), 0)
         return round(tot[0],2)
 
     def _lme_nodes(self, item, ymd, mult=1.0, seen=None, out=None):
