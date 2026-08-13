@@ -34,15 +34,15 @@ SCREEN.close=(c)=>{
         <td class="center"><button class="btn xs ghost act" data-cancel="${esc(r.name)}|${esc(r.ctype)}">취소</button></td></tr>`;}).join('')}</tbody></table></div>
    <div class="page-sub" style="font-weight:700;margin:6px 0">수동 마감 실행</div>
    <div class="toolbar">
-     <label class="tl">일마감 대상일</label><input type="date" class="inp" id="dday" value="2026-07-18" style="min-width:135px">
+     <label class="tl">일마감 대상일</label><input type="date" class="inp" id="dday" value="${nowCD()}" style="min-width:135px">
      <button class="btn" id="runday">일마감 실행</button><button class="btn ghost" id="canday">일마감 취소</button>
      <span style="width:18px"></span>
-     <label class="tl">월마감 대상월</label><input type="month" class="inp" id="dmon" value="2026-06" style="min-width:120px">
+     <label class="tl">월마감 대상월</label><input type="month" class="inp" id="dmon" value="${nowCM()}" style="min-width:120px">
      <button class="btn" id="runmon">월마감 실행</button><button class="btn ghost" id="canmon">월마감 취소</button>
    </div>
    <div class="page-sub" style="font-weight:700;margin:16px 0 6px">일자별 마감 캘린더</div>
    <div class="toolbar" style="border:none;padding:0;margin-bottom:8px">
-     <label class="tl">조회월</label><input type="month" class="inp" id="calm" value="2026-07" style="min-width:120px">
+     <label class="tl">조회월</label><input type="month" class="inp" id="calm" value="${nowCM()}" style="min-width:120px">
      <span style="font-size:12px;color:var(--muted)">🟩 마감완료 · ⬜ 미마감 · 파란테두리=오늘 · 날짜 클릭 시 일마감 실행/취소</span>
    </div>
    <div class="grid-wrap" style="overflow:auto;border:none"><table class="cal"><thead><tr>${['일','월','화','수','목','금','토'].map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody id="calbody"></tbody></table></div>
@@ -71,7 +71,7 @@ SCREEN.close=(c)=>{
       ph(`${'20'+y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)} 일마감을 ${isC?'취소':'실행'}합니다.`);});
   };
   c.querySelector('#calm').onchange=e=>renderCal(e.target.value);
-  renderCal('2026-07');
+  renderCal(nowCM());
   const ph=(msg)=>alert(msg+'\n\n※ 마감은 쓰기 작업이라 운영DB(읽기전용)에선 실행할 수 없습니다.\n차세대 ERP 신규 DB/백엔드 연결 후 활성화됩니다.');
   c.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>{const[n,t]=b.dataset.run.split('|');ph(`[${n}] ${t}마감을 실행합니다.`);});
   c.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>{const[n,t]=b.dataset.cancel.split('|');ph(`[${n}] ${t}마감을 취소(재개방)합니다.`);});

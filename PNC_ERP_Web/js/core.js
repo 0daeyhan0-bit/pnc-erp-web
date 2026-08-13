@@ -5,6 +5,10 @@
 const API_BASE=(typeof location!=='undefined' && location.protocol!=='file:' && location.host)?location.origin:'http://127.0.0.1:8010';
 const won = n => (n==null||n==='')?'-':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:2});
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// ★전역 날짜 기본값(모든 화면 통일): 일자=당일 · 월=당월 · 기간=당월1일~당일
+const nowCD = () => {const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};   // 당일 YYYY-MM-DD
+const nowCM = () => nowCD().slice(0,7);   // 당월 YYYY-MM
+const nowMS = () => nowCM()+'-01';        // 당월1일 YYYY-MM-01
 const TYPE_NM={RAW:'원자재',SUB:'부자재',CON:'소모품',S_ASSY:'반제품',PROD:'완제품'};
 // 용접봉 판정(품명 '용접봉' 포함). 신 원칙: 용접봉=재료비지만 BOM 아닌 용접공정 종속 → 화면에서 기본 숨김(데이터는 보존). [[newerp-weld-cost-split]]
 const isWeld=nm=>/용접봉/.test(nm||'');

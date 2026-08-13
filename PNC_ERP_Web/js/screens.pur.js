@@ -132,7 +132,7 @@ SCREEN.receipt=(c)=>{
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">입고기준</button></div>
        <label class="tl">${gijun==='close'?'마감년월':'입고일자'}</label>
-       ${gijun==='close'?`<input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||'2026-07')}" style="min-width:120px">`:`<input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">`}
+       ${gijun==='close'?`<input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||nowCM())}" style="min-width:120px">`:`<input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">`}
        <label class="tl">출력방식</label>
        <select class="sel" id="mode"><option value="cust" ${mode==='cust'?'selected':''}>거래처별</option><option value="item" ${mode==='item'?'selected':''}>품목별</option><option value="agg" ${mode==='agg'?'selected':''}>업체별</option></select>
        <button class="btn ${vat?'':'ghost'}" id="vat">부가세조정</button>
@@ -294,7 +294,7 @@ SCREEN.receiptdetail=(c)=>{
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">입고기준</button></div>
        <label class="tl">${gijun==='close'?'마감년월':'입고일자'}</label>
-       ${gijun==='close'?`<input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||'2026-07')}" style="min-width:120px">`:`<input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">`}
+       ${gijun==='close'?`<input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||nowCM())}" style="min-width:120px">`:`<input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">`}
        <label class="tl">출력방식</label>
        <select class="sel" id="mode">${Object.entries(MODES).map(([k,v])=>`<option value="${k}" ${mode===k?'selected':''}>${v.label}</option>`).join('')}</select>
      </div>
@@ -430,7 +430,7 @@ SCREEN.dispatchdetail=(c)=>{
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">불출기준</button></div>
        <label class="tl">${gijun==='close'?'마감년월':'불출일자'}</label>
-       ${gijun==='close'?`<input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||'2026-07')}" style="min-width:120px">`:`<input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">`}
+       ${gijun==='close'?`<input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||nowCM())}" style="min-width:120px">`:`<input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">`}
        <label class="tl">출력방식</label>
        <select class="sel" id="mode">${Object.entries(MODES).map(([k,v])=>`<option value="${k}" ${mode===k?'selected':''}>${v.label}</option>`).join('')}</select>
      </div>
@@ -529,8 +529,8 @@ SCREEN.dispatch=(c)=>{
     const sgs=[...new Set(pool.map(r=>(''+r.sg).trim()).filter(Boolean))].sort();
     const cts=[...new Set(pool.map(r=>(''+r.ct).trim()).filter(Boolean))].sort();
     const dateInput = gijun==='close'
-      ? `<label class="tl">마감년월</label><input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||'2026-07')}" style="min-width:120px">`
-      : `<label class="tl">불출일자</label><input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom)||'2026-07-01')}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo)||'2026-07-18')}" style="min-width:130px">`;
+      ? `<label class="tl">마감년월</label><input type="month" class="inp" id="dto" value="${esc(ymToInput(curYm)||nowCM())}" style="min-width:120px">`
+      : `<label class="tl">불출일자</label><input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom)||nowMS())}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo)||nowCD())}" style="min-width:130px">`;
     c.innerHTML=`
      <div class="page-title">📤 자재불출집계표</div>
      <div class="page-sub">LG外 전 매출(유상사급 포함) · 원본 <code>PU/SA_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🔴 라이브 ${gijun==='close'?`마감기준(업체별 마감일) ${esc(ymToInput(curYm)||'-')}`:`불출기준(실제 이동일) ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
