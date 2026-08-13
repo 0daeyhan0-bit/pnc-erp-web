@@ -1626,11 +1626,12 @@ SCREEN.unifybom=(c,ro)=>{
       return `<td><input class="ce" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" style="width:90px"></td>`;};
     c.innerHTML=`
      <div class="page-title">🔀 품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">${RO?'조회 전용':'nx · 백엔드 편집·저장'}</span></div>
-     <div class="page-sub">품번 검색 → BOM 구성(다단계 전개)·내부원가·실원가. 원천 CS_M_ITEM_BOM.</div>
+     <div class="page-sub">품번 검색 → BOM 구성(다단계 전개)·내부원가·실원가. 원천 단일BOM(nx.bom_line). 기본은 현행만, "과거포함" 체크 시 휴면 품번·BOM도 표시.</div>
      ${item?tabbar('bom'):''}
      <div class="toolbar">
        <label class="tl">품번</label><input class="inp" id="bm-q" value="${esc(query)}" placeholder="품번 일부 입력 후 조회" style="width:220px">
        <button class="btn" id="bm-search">🔍 검색</button>
+       <label class="tl" title="체크 시 휴면(과거) 품번·BOM도 검색결과에 표시" style="margin-left:2px;font-weight:400;color:var(--muted)"><input type="checkbox" id="bm-past" ${includePast?'checked':''} style="vertical-align:middle"> 과거포함</label>
        ${(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="bm-new" style="background:#1c7c3a;color:#fff">＋ 신규 BOM 등록</button>`:''}
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
@@ -1658,7 +1659,7 @@ SCREEN.unifybom=(c,ro)=>{
         </div></div>`:''}
      ${(editMode&&isNew)?`<div class="page-sub" style="color:#1c7c3a;font-weight:700">＋ 신규 등록 편집: 품번 <b>${esc(item)}</b> · ${esc(name||'(품명 미입력)')} — 구성 그리드 + 아래 용접공정 입력 후 [저장]</div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}</div>`).join('')}</div>`:''}
+     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
      ${item&&!loading&&viewTree&&!editMode?candSelector('bom'):''}
      ${item&&!loading?((viewTree&&!editMode)?`
@@ -1669,6 +1670,7 @@ SCREEN.unifybom=(c,ro)=>{
     const qi=c.querySelector('#bm-q');
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
     qi.onkeyup=e=>{if(e.key==='Enter')doSearch(qi.value);};
+    {const pc=c.querySelector('#bm-past');if(pc)pc.onchange=()=>{includePast=pc.checked;doSearch(qi.value);};}
     if(item)bindTabs();
     bindCandSel();
     c.querySelectorAll('.bm-r').forEach(el=>el.onclick=()=>{navStack=[];load(el.dataset.it);});

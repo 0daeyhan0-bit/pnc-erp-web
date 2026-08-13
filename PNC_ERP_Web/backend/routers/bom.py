@@ -359,6 +359,78 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
     finally:
         cn.close()
 
+@router.get("/api/bom/whereused")
+def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 하위자재로 쓰는 상위 품번들을 역전개(where-used)")):
+    """역전개(where-used): 이 품번을 하위구성으로 쓰는 상위 품번들을 다단계 상향전개.
+    ★우리 재설계 단일BOM(nx.bom_header/bom_line) 미러 — forward(_bom_tree_nx)의 상하반전
+      (bl.child_item=대상 → h.item_code=부모, 상향 재귀). 자도번→품번_S{nn} 표시정규화(nx.sub_alias) 동일 적용.
+    where-used는 원가제외/사급 여부와 무관하게 '어디에 쓰이나'를 모두 보여주되 플래그(제외·사급·세트제외)는 표시."""
+    item = item.strip()
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""WITH up AS (
+            SELECT h.item_code p, bl.child_item c, CAST(bl.qty AS decimal(18,6)) q,
+                   CAST(ISNULL(bl.sagub_default,0) AS int) sag, CAST(ISNULL(bl.set_except,0) AS int) se,
+                   CAST(ISNULL(bl.cs_calc_except,0) AS int) ce, ISNULL(bl.seq,0) sq, 1 lvl
+            FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id
+            WHERE bl.child_item=?
+            UNION ALL
+            SELECT h.item_code, bl.child_item, CAST(bl.qty AS decimal(18,6)),
+                   CAST(ISNULL(bl.sagub_default,0) AS int), CAST(ISNULL(bl.set_except,0) AS int),
+                   CAST(ISNULL(bl.cs_calc_except,0) AS int), ISNULL(bl.seq,0), u.lvl+1
+            FROM up u
+            JOIN nx.bom_line bl ON bl.child_item=u.p
+            JOIN nx.bom_header h ON h.bom_id=bl.bom_id
+            WHERE u.lvl < 8)
+            SELECT p,c,q,sag,se,ce,sq,lvl FROM up OPTION(MAXRECURSION 50)""", item)
+        parents = {}   # child c -> [ {부모 p, 소요량 q, 플래그...} ]  (c를 쓰는 상위 품번들)
+        for r in cur.fetchall():
+            parents.setdefault((r[1] or '').strip(), []).append({
+                "parent": (r[0] or '').strip(), "q": float(r[2] or 0),
+                "sag": ('1' if r[3] else '0'), "se": ('1' if r[4] else ''), "ce": ('1' if r[5] else ''),
+                "sq": int(r[6] or 0)})
+        for c in parents: parents[c].sort(key=lambda x: x["parent"])
+        nodes = {item} | {p["parent"] for lst in parents.values() for p in lst} | set(parents.keys())
+        nl = list(nodes); info = {}; alias = {}
+        for i in range(0, len(nl), 900):
+            chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
+            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
+                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                  ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                WHERE m.ITEM_CODE IN ({ph})""", *chunk)
+            for r in cur.fetchall():
+                info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
+                      "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
+            cur.execute(f"SELECT variant, canonical FROM nx.sub_alias WHERE variant IN ({ph})", *chunk)
+            for r in cur.fetchall():
+                if r[1]: alias[(r[0] or '').strip()] = (r[1] or '').strip()
+        def disp(code): return alias.get(code, code)
+        rootnm = info.get(item, {}).get("nm", "")
+        out = [{"level": 0, "code": disp(item), "raw": item, "nm": rootnm, "spec": info.get(item, {}).get("spec", ""),
+                "qty": None, "custnm": "", "sag": "", "se": "", "ce": "",
+                "metal": info.get(item, {}).get("metal", ""), "diam": info.get(item, {}).get("diam", 0),
+                "thick": info.get(item, {}).get("thick", 0), "hasparents": item in parents}]
+        seen = set()
+        def walk(code, lvl):
+            if code in seen: return   # 순환 방지
+            seen.add(code)
+            for p in parents.get(code, []):
+                pi = info.get(p["parent"], {})
+                out.append({"level": lvl, "code": disp(p["parent"]), "raw": p["parent"], "nm": pi.get("nm", ""),
+                    "spec": pi.get("spec", ""), "qty": p["q"], "custnm": pi.get("custnm", ""),
+                    "sag": p["sag"], "se": p["se"], "ce": p["ce"], "metal": pi.get("metal", ""),
+                    "diam": pi.get("diam", 0), "thick": pi.get("thick", 0),
+                    "hasparents": p["parent"] in parents})
+                walk(p["parent"], lvl + 1)
+            seen.discard(code)
+        walk(item, 1)
+        maxlvl = max((r["level"] for r in out), default=0)
+        return {"item": item, "name": rootnm, "rows": out, "count": len(out) - 1, "maxlevel": maxlvl, "src": "nx"}
+    finally:
+        cn.close()
+
+
 @router.post("/api/bom/save")
 def bom_save(payload: dict = Body(...)):
     """BOM 구성 전체 교체 저장. 마스터 가드: 참조무결성·중복·순환·필수값. (마감/재고 가드는 재고·실적 프로그램용, BOM 미적용)"""
