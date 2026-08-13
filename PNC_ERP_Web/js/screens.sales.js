@@ -100,7 +100,7 @@ SCREEN.salesforecast=(c)=>{
     c.innerHTML=`
      <div class="page-title">📅 영업예상매출현황</div>
      <div class="page-sub">${metric==='sagub'
-        ?'🟢 <b>라이브</b> LG 생산계획 기준 <b>예상 LG사급금액</b>(LG사급 2종 중 <b>사급부품</b>·원소재 동 별도) · 계획수량 × 개당 사급금액(BOM 사급부품[소분류 LG사급] 소요 × <b>COSP 사급가</b>=품목단가관리 사급가업로드) · 원화(KRW)'
+        ?'🟢 <b>라이브</b> LG 생산계획 기준 <b>예상 LG사급금액</b>(LG사급 2종 중 <b>사급부품</b>·원소재 동 별도) · 계획수량 × 개당 LG사급비(<b>품목별 원가분석과 동일</b>=엔진 material_split, 사급부품 최말단 leaf) · 원화(KRW)'
         :'🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW)'} · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${metric==='sagub'&&F.asof?' · 사급가 기준일 '+esc(F.asof):''}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
      <div class="toolbar">
        <label class="tl">종류</label>

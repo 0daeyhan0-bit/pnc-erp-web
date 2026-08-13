@@ -271,8 +271,8 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             except Exception:
                 t = None
         tc = " AND PLAN_YMD<=?" if t else ""
-        # ★단가 = 완제품 개당 예상 LG사급금액 = Σ(BOM 사급부품[소분류310] 소요 × COSP 사급가). 소요=CS_M_ITEM_BOM(레거시 실BOM, CS_CALC_EXCEPT_FLAG로 조달경로변형 배제, 코스트엔진 정본).
-        #   ★nx.bom_line은 조달경로변형(–F&T/–은납)을 형제로 넣어 전개 시 2배 과다 → CS로 사전계산해 nx.item_sagub_cost 캐시(rebuild로 갱신). COSP=품목단가관리 사급가(업로드).
+        # ★단가 = 완제품 개당 예상 LG사급금액 = nx 원가엔진 material_split['sa'](=품목별 원가분석 LG사급비와 동일값, 7월 리시빙 대사 일치).
+        #   ★사급(소분류310)은 '최말단 leaf'에서만 계상(비-leaf 310=사급가공품은 전개해 하위 사급만). nx.bom_line/첫310중단 방식은 2~4배 과다 → 엔진값으로 사전계산 nx.item_sagub_cost 캐시(rebuild 갱신).
         cur.execute("SELECT LTRIM(RTRIM(item_code)), CAST(sa_cost AS float), ISNULL(asof_ymd,'') FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
         sac = {}; asof = ""
         for ic, sc, af in cur.fetchall():
@@ -320,42 +320,30 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
 
 @router.post("/api/sales/forecast_sagub/rebuild")
 def sales_forecast_sagub_rebuild():
-    """완제품별 개당 예상 LG사급금액 = Σ(사급부품[소분류310] 소요 × COSP 사급가) 캐시 재계산 → nx.item_sagub_cost.
-       ★소요=CS_M_ITEM_BOM(레거시 실BOM, CS_CALC_EXCEPT_FLAG로 조달경로변형 배제, 코스트엔진 정본). nx.bom_line은 –F&T/–은납 형제로 2배과다라 미사용.
-       대상=계획완제품(260101+) 중 사급부품 보유(nx.bom_line로 SET만 식별=빠름·정확). asof=오늘. 사급가/BOM/계획 변경 시 실행. 수분 소요."""
+    """완제품별 개당 예상 LG사급금액 = nx 원가엔진 material_split['sa'](=품목별 원가분석 LG사급비, 7월 리시빙 대사 일치) 캐시 재계산 → nx.item_sagub_cost.
+       ★사급(소분류310)을 최말단 leaf에서만 계상(비-leaf 310=사급가공품은 전개). 대상=계획완제품(260101+) 전부. asof=오늘. 사급가/BOM/계획 변경 시 실행. 수분 소요."""
     nx = _nx(); cur = nx.cursor()
     try:
         import time as _t
         asof = _t.strftime('%y%m%d')
         cur.execute("""IF OBJECT_ID('nx.item_sagub_cost') IS NULL
             CREATE TABLE nx.item_sagub_cost(item_code varchar(50) PRIMARY KEY, sa_cost float, asof_ymd varchar(8), upd_dt datetime)""")
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
-        sag = set(x[0] for x in cur.fetchall())
-        cur.execute("SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
-        cosp = {a: float(b or 0) for a, b in cur.fetchall()}
-        # 사급보유 후보 완제품(SET은 nx.bom_line로 정확·빠름)
-        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
-            prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
-            expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
-             UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
-            SELECT DISTINCT e.prod FROM expl e JOIN sag s ON s.it=e.part OPTION(MAXRECURSION 30)""")
-        cand = [r[0] for r in cur.fetchall()]
-        CS = """WITH expl AS (SELECT LTRIM(RTRIM(MAT_CODE)) part, CAST(USE_QTY AS float) cum, 1 lvl FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
-            UNION ALL SELECT LTRIM(RTRIM(b.MAT_CODE)), e.cum*CAST(b.USE_QTY AS float), e.lvl+1 FROM expl e JOIN PARTNER_ERP.dbo.CS_M_ITEM_BOM b ON LTRIM(RTRIM(b.ITEM_CODE))=e.part AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' WHERE e.lvl<8)
-            SELECT part, SUM(cum) FROM expl GROUP BY part OPTION(MAXRECURSION 30)"""
+        cur.execute("""SELECT DISTINCT item FROM (
+            SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
+            UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') p WHERE ISNULL(item,'')<>''""")
+        items = [r[0] for r in cur.fetchall()]
+        eng = _get_cost_engine(cur)
         done = 0; nz = 0; tot = 0.0
-        for it in cand:
-            cur.execute(CS, it)
-            unit = 0.0
-            for part, soyo in cur.fetchall():
-                p = (part or '').strip()
-                if p in sag and p in cosp: unit += float(soyo or 0) * cosp[p]
-            cur.execute("""MERGE nx.item_sagub_cost t USING (SELECT ? item_code) s ON t.item_code=s.item_code
-                WHEN MATCHED THEN UPDATE SET sa_cost=?, asof_ymd=?, upd_dt=getdate()
-                WHEN NOT MATCHED THEN INSERT(item_code,sa_cost,asof_ymd,upd_dt) VALUES(?,?,?,getdate());""",
-                it, unit, asof, it, unit, asof)
-            done += 1; tot += unit
-            if unit > 0: nz += 1
+        with _COST_LOCK:
+            for it in items:
+                try: sa = float(eng.material_split(it, asof).get('sa', 0) or 0)
+                except Exception: sa = 0.0
+                cur.execute("""MERGE nx.item_sagub_cost t USING (SELECT ? item_code) s ON t.item_code=s.item_code
+                    WHEN MATCHED THEN UPDATE SET sa_cost=?, asof_ymd=?, upd_dt=getdate()
+                    WHEN NOT MATCHED THEN INSERT(item_code,sa_cost,asof_ymd,upd_dt) VALUES(?,?,?,getdate());""",
+                    it, sa, asof, it, sa, asof)
+                done += 1; tot += sa
+                if sa > 0: nz += 1
         nx.commit()
         return {"ok": True, "asof": asof, "computed": done, "with_sagub": nz, "sum_unit_sacost": round(tot)}
     except Exception as e:
