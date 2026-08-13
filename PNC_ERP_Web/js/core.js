@@ -14,19 +14,22 @@ const nowMS = () => nowCM()+'-01';        // 당월1일 YYYY-MM-01
 (function(){
   if(typeof document==='undefined') return;
   const buf=new WeakMap();
-  const isoOf=s=>{const y=s.slice(0,4),m=s.length>=6?s.slice(4,6):'01',d=s.length>=8?s.slice(6,8):'01';
-    if(s.length>=6&&(+m<1||+m>12))return null; if(s.length>=8&&(+d<1||+d>31))return null; return `${y}-${m}-${d}`;};
+  // ★YYMMDD(6자리, 한국식) 또는 YYYYMMDD(8자리) 완성 시 채움. 6자리=20YY로 해석.
+  //   20YY 8자리는 3~4번째=연도suffix(13~31 등)라 월로 무효→자동으로 8자리까지 진행(오인 없음).
+  const parse=s=>{
+    if(s.length===6){const y='20'+s.slice(0,2),m=s.slice(2,4),d=s.slice(4,6); if(+m>=1&&+m<=12&&+d>=1&&+d<=31)return `${y}-${m}-${d}`;}
+    if(s.length===8){const y=s.slice(0,4),m=s.slice(4,6),d=s.slice(6,8); if(+m>=1&&+m<=12&&+d>=1&&+d<=31)return `${y}-${m}-${d}`;}
+    return null;};
   document.addEventListener('keydown',function(e){
     const el=e.target; if(!(el&&el.tagName==='INPUT'&&el.type==='date'))return;
     if(/^[0-9]$/.test(e.key)){
       e.preventDefault();
       let s=(buf.get(el)||'')+e.key; if(s.length>8)s=e.key; buf.set(el,s);
-      if(s.length>=4){const iso=isoOf(s); if(iso){el.value=iso; if(s.length===8){el.dispatchEvent(new Event('change',{bubbles:true}));buf.set(el,'');}}}
+      const iso=parse(s); if(iso){el.value=iso; el.dispatchEvent(new Event('change',{bubbles:true})); if(s.length===8)buf.set(el,'');}
     } else if(e.key==='Backspace'){
       e.preventDefault();
-      const s=(buf.get(el)||'').slice(0,-1); buf.set(el,s);
-      if(s.length>=4){const iso=isoOf(s); if(iso)el.value=iso;} else el.value='';
-    } else { buf.set(el,''); }   // 그 외 키(화살표/Tab/Enter 등)=버퍼리셋, 네이티브 동작 유지
+      const s=(buf.get(el)||'').slice(0,-1); buf.set(el,s); const iso=parse(s); if(iso)el.value=iso;
+    } else if(e.key!=='Tab'&&e.key!=='Enter'&&!(e.key&&e.key.indexOf('Arrow')===0)){ buf.set(el,''); }  // 화살표/Tab/Enter는 네이티브 유지
   },true);
   document.addEventListener('focusout',function(e){if(e.target&&e.target.type==='date')buf.delete(e.target);},true);
 })();
