@@ -9,30 +9,8 @@ const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'
 const nowCD = () => {const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};   // 당일 YYYY-MM-DD
 const nowCM = () => nowCD().slice(0,7);   // 당월 YYYY-MM
 const nowMS = () => nowCM()+'-01';        // 당월1일 YYYY-MM-01
-// ★전역: 날짜 input(type=date) 숫자 연속 키인 — YYYYMMDD 8자리 타이핑 시 자동 채움(진행표시). 모든 화면 공통 자동적용(화면별 수정 불필요).
-//   4자리=연, 6=연월, 8=연월일(완성). change는 8자리 완성 때만 발생(조기 재조회 방지). 화살표/Tab/Enter/달력클릭은 네이티브 유지.
-(function(){
-  if(typeof document==='undefined') return;
-  const buf=new WeakMap();
-  // ★YYMMDD(6자리, 한국식) 또는 YYYYMMDD(8자리) 완성 시 채움. 6자리=20YY로 해석.
-  //   20YY 8자리는 3~4번째=연도suffix(13~31 등)라 월로 무효→자동으로 8자리까지 진행(오인 없음).
-  const parse=s=>{
-    if(s.length===6){const y='20'+s.slice(0,2),m=s.slice(2,4),d=s.slice(4,6); if(+m>=1&&+m<=12&&+d>=1&&+d<=31)return `${y}-${m}-${d}`;}
-    if(s.length===8){const y=s.slice(0,4),m=s.slice(4,6),d=s.slice(6,8); if(+m>=1&&+m<=12&&+d>=1&&+d<=31)return `${y}-${m}-${d}`;}
-    return null;};
-  document.addEventListener('keydown',function(e){
-    const el=e.target; if(!(el&&el.tagName==='INPUT'&&el.type==='date'))return;
-    if(/^[0-9]$/.test(e.key)){
-      e.preventDefault();
-      let s=(buf.get(el)||'')+e.key; if(s.length>8)s=e.key; buf.set(el,s);
-      const iso=parse(s); if(iso){el.value=iso; el.dispatchEvent(new Event('change',{bubbles:true})); if(s.length===8)buf.set(el,'');}
-    } else if(e.key==='Backspace'){
-      e.preventDefault();
-      const s=(buf.get(el)||'').slice(0,-1); buf.set(el,s); const iso=parse(s); if(iso)el.value=iso;
-    } else if(e.key!=='Tab'&&e.key!=='Enter'&&!(e.key&&e.key.indexOf('Arrow')===0)){ buf.set(el,''); }  // 화살표/Tab/Enter는 네이티브 유지
-  },true);
-  document.addEventListener('focusout',function(e){if(e.target&&e.target.type==='date')buf.delete(e.target);},true);
-})();
+// ★날짜 input(type=date)은 브라우저 네이티브 키보드 편집에 맡김: 세그먼트(연/월/일) 클릭 후 숫자 입력·연속 타이핑·화살표·달력 모두 네이티브 지원.
+//   (과거 전역 커스텀 핸들러가 모든 숫자키 preventDefault→ 월/일 세그먼트만 고치기 불가·YYMMDD 오인 문제. 2026-08-14 제거. 커스텀 자동채움 재도입 시 세그먼트 편집을 막지 말 것.)
 const TYPE_NM={RAW:'원자재',SUB:'부자재',CON:'소모품',S_ASSY:'반제품',PROD:'완제품'};
 // 용접봉 판정(품명 '용접봉' 포함). 신 원칙: 용접봉=재료비지만 BOM 아닌 용접공정 종속 → 화면에서 기본 숨김(데이터는 보존). [[newerp-weld-cost-split]]
 const isWeld=nm=>/용접봉/.test(nm||'');
