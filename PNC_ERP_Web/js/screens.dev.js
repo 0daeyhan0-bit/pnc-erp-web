@@ -1112,7 +1112,8 @@ SCREEN.unifybom=(c,ro)=>{
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let naeModal=false;   // 공정 수정 팝업(모달) 표시
-  let silD=null, silFor='', silLoad=false, silView='company';
+  const _prevYm=(()=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}`;})();  // 직전 완성월 YYMM(사급 리시빙월 기본)
+  let silD=null, silFor='', silLoad=false, silView='company', silSagYm=_prevYm;
   // ★조달경로 후보 연동(현행 R01 + 승인 후보 R02..) — BOM구성·실원가 탭 공용 선택기. routeSel=0=현행(마스터), >0=후보 route_id.
   let routes=[], routesFor='', routeSel=0, routeTree=null, routeTreeFor=-1, routeCost=null, routeCostFor=-1, routeBusy=false;
   const loadRoutes=async()=>{if(!item)return;
@@ -1664,7 +1665,7 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="center"><span class="nwr-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">＋점 으로 용접점 추가</td></tr>'}</tbody></table></div>`;};
   // ============ 실원가 로드/그리기 ============
   const loadSil=async(fresh)=>{if(!item)return;silLoad=true;draw();
-    try{const r=await fetch(`${API}/api/cost/sil?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(naeYmd)}${fresh?'&fresh=1':''}`);
+    try{const r=await fetch(`${API}/api/cost/sil?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(naeYmd)}&ym=${encodeURIComponent(silSagYm)}${fresh?'&fresh=1':''}`);
       if(!r.ok)throw new Error('HTTP '+r.status);silD=await r.json();silFor=item;}
     catch(e){silD={error:e.message};}silLoad=false;draw();};
   const silKind=r=>{if(r.silver)return{t:'은납',c:'#8e44ad'};if(r.haskids)return{t:'제작',c:'#1c7c3a'};if(String(r.kind||'').indexOf('사급')>=0||String(r.cost_gubun)==='2')return{t:'사급',c:'#b8860b'};if(r.metal&&(+r.weight>0))return{t:'원소재',c:'#1c47a0'};return{t:'매입',c:'#556'};};
@@ -1699,13 +1700,15 @@ SCREEN.unifybom=(c,ro)=>{
      ${tabbar('sil')}
      <div class="toolbar"><span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
        <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="sil-ymd" type="date" value="${ymd2date(naeYmd)}" style="width:150px">
+       <label class="tl" style="margin-left:8px" title="유상사급 실출고−실입고 차액을 집계할 리시빙월(당월은 월초라 희소 → 기본=직전 완성월)">사급 리시빙월</label><input class="inp" id="sil-sagym" type="month" value="20${silSagYm.slice(0,2)}-${silSagYm.slice(2,4)}" style="width:130px">
        <button class="btn" id="sil-go">🔍 조회</button><button class="btn ghost" id="sil-regen">🔄 재계산</button><div class="spacer"></div></div>
      ${candSelector('sil')}
      ${content}${naeCss()}`;
     bindTabs();bindCandSel();
     const g=id=>c.querySelector(id);
-    g('#sil-go').onclick=()=>{naeYmd=date2ymd(g('#sil-ymd').value)||naeYmd;routeCostFor=-1;if(routeSel>0)loadRouteCost();else loadSil();};
-    g('#sil-regen').onclick=()=>{if(routeSel>0){routeCostFor=-1;loadRouteCost();}else loadSil(true);};
+    const _rdSag=()=>{const v=g('#sil-sagym')&&g('#sil-sagym').value;if(v)silSagYm=v.slice(2).replace('-','');};
+    g('#sil-go').onclick=()=>{naeYmd=date2ymd(g('#sil-ymd').value)||naeYmd;_rdSag();routeCostFor=-1;if(routeSel>0)loadRouteCost();else loadSil();};
+    g('#sil-regen').onclick=()=>{_rdSag();if(routeSel>0){routeCostFor=-1;loadRouteCost();}else loadSil(true);};
     c.querySelectorAll('.sil-vb').forEach(el=>el.onclick=()=>{silView=el.dataset.v;drawSil();});
   };
   const naeCss=()=>`<style>

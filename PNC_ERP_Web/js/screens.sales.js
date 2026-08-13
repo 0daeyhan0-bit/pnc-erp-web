@@ -80,12 +80,13 @@ SCREEN.prodinvout=(c)=>{
 /* 영업예상매출현황 (영업, dw_pr_plan_190) — 도번×일별 수량 피벗 + 하단 일별 금액줄. ★차감=LG리시빙(20일 백로그), 21일+ 라이브일치. 차감전/차감후 토글 */
 SCREEN.salesforecast=(c)=>{
   const API=API_BASE;
-  let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[];   // mode:net(차감후)|gross(차감전=라이브)
+  let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[], metric='sales';   // mode:net(차감후)|gross(차감전=라이브) · metric:sales(영업예상매출)|sagub(예상 LG사급금액)
   const WD=['일','월','화','수','목','금','토'];
   const dlabel=y=>{y=''+y;const D=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return `${y.slice(2,4)}/${y.slice(4,6)}<span class="wd">${WD[D.getDay()]}</span>`;};
   const load=async(base,to)=>{loading=true;draw();
     const qs=[];if(base)qs.push('base='+encodeURIComponent(base));if(to)qs.push('to='+encodeURIComponent(to));
-    try{const r=await fetch(`${API}/api/sales/forecast${qs.length?('?'+qs.join('&')):''}`);F=await r.json();if(!F.rows)F={days:[],rows:[],base:''};}
+    const ep=metric==='sagub'?'forecast_sagub':'forecast';
+    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);F=await r.json();if(!F.rows)F={days:[],rows:[],base:''};}
     catch(e){F={days:[],rows:[],base:'',_err:'백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요'};}
     loading=false;draw();};
   const draw=()=>{
@@ -96,8 +97,12 @@ SCREEN.salesforecast=(c)=>{
     const sfOpts=[...sfMap].sort((a,b)=>(''+a[1]).localeCompare(''+b[1],'ko')).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     c.innerHTML=`
      <div class="page-title">📅 영업예상매출현황</div>
-     <div class="page-sub">🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW) · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
+     <div class="page-sub">${metric==='sagub'
+        ?'🟢 <b>라이브</b> LG 생산계획 기준 <b>예상 LG사급금액</b> · 계획수량 × 개당 LG사급비(<code>nx 원가엔진 material_split</code> 사급=소분류310, 품목별 원가분석 <b>LG사급비</b>와 동일값·diff0) · 원화(KRW)'
+        :'🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW)'} · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${metric==='sagub'&&F.asof?' · 사급가 기준일 '+esc(F.asof):''}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
      <div class="toolbar">
+       <label class="tl">종류</label>
+       <div class="toggle-group"><button data-metric="sales" class="${metric==='sales'?'on':''}">영업 예상매출</button><button data-metric="sagub" class="${metric==='sagub'?'on':''}">예상 LG사급금액</button></div>
        <label class="tl">기간</label><input type="date" class="inp" id="sf-base" value="${F.base?('20'+F.base.slice(0,2)+'-'+F.base.slice(2,4)+'-'+F.base.slice(4,6)):''}" title="시작일" style="min-width:135px"><span style="color:var(--muted);margin:0 3px">~</span><input type="date" class="inp" id="sf-to" value="${F.to?('20'+F.to.slice(0,2)+'-'+F.to.slice(2,4)+'-'+F.to.slice(4,6)):''}" title="종료일(비우면 시작일 이후 전체)" style="min-width:135px">
        <label class="tl">구분</label>
        <div class="toggle-group"><button data-mode="net" class="${mode==='net'?'on':''}">차감후(순예상)</button><button data-mode="gross" class="${mode==='gross'?'on':''}">차감전(원계획=라이브)</button></div>
@@ -110,6 +115,7 @@ SCREEN.salesforecast=(c)=>{
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
     c.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;draw();});
+    c.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{if(metric===b.dataset.metric)return;metric=b.dataset.metric;const fv=c.querySelector('#sf-base').value,tv=c.querySelector('#sf-to').value;load(fv?fv.slice(2).replace(/-/g,''):'',tv?tv.slice(2).replace(/-/g,''):'');});
     const sfReload=()=>{const fv=c.querySelector('#sf-base').value,tv=c.querySelector('#sf-to').value;load(fv?fv.slice(2).replace(/-/g,''):'',tv?tv.slice(2).replace(/-/g,''):'');};   // 기간(from~to) 재조회
     c.querySelector('#sf-base').onchange=sfReload; c.querySelector('#sf-to').onchange=sfReload;
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
@@ -132,19 +138,21 @@ SCREEN.salesforecast=(c)=>{
       }
       c.querySelector('#body').innerHTML=cur.length?tb:`<tr><td colspan="${4+days.length}" class="empty">결과 없음</td></tr>`;
       const sumG=cur.reduce((a,b)=>a+b.gamt,0), sumN=cur.reduce((a,b)=>a+b.namt,0);
+      const mlab=metric==='sagub'?'예상 LG사급금액':'예상매출';
       c.querySelector('#sum').innerHTML=`<div class="s-item">도번 <b>${won(cur.length)}</b></div>
         <div class="s-item">차감전(=라이브) <b>${wonI(sumG)} 원</b></div>
-        <div class="s-item neg">20일 과대분 제거 <b>-${wonI(sumG-sumN)} 원</b></div>
-        <div class="s-item">차감후 순예상 <b>${wonI(sumN)} 원</b></div>`;
-      c.querySelector('#cnt').textContent=`${cur.length}도번 · ${mode==='net'?'차감후':'차감전(라이브)'} · 셀=수량, 하단=금액`;
+        <div class="s-item neg">첫계획일 과대분 제거 <b>-${wonI(sumG-sumN)} 원</b></div>
+        <div class="s-item">차감후 ${mlab} <b>${wonI(sumN)} 원</b></div>`;
+      c.querySelector('#cnt').textContent=`${cur.length}도번 · ${metric==='sagub'?'예상 LG사급금액 · ':''}${mode==='net'?'차감후':'차감전(라이브)'} · 셀=수량, 하단=금액${metric==='sagub'?'(수량×개당LG사급비)':''}`;
       attachResizers(c);
     };
     c.querySelector('#go').onclick=render;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#work').onchange=render;
     c.querySelector('#reset').onclick=()=>{mode='net';draw();};
     c.querySelector('#xls').onclick=()=>{
-      const hd=['도번','품명','작업처','단가','합계수량','예상매출금액'].concat(days.map(d=>(''+d).slice(2)+'수량')).concat(days.map(d=>(''+d).slice(2)+'금액'));
-      downloadCSV('영업예상매출현황_'+mode+'.csv',hd,cur.map(r=>[r.item,r.nm,r.wc,r.cost,rowQ(r),rowA(r)].concat(days.map(d=>dayQ(r,d))).concat(days.map(d=>Math.round(dayQ(r,d)*r.cost)))));};
+      const amtcol=metric==='sagub'?'예상LG사급금액':'예상매출금액', unitcol=metric==='sagub'?'개당LG사급비':'단가';
+      const hd=['도번','품명','작업처',unitcol,'합계수량',amtcol].concat(days.map(d=>(''+d).slice(2)+'수량')).concat(days.map(d=>(''+d).slice(2)+'금액'));
+      downloadCSV((metric==='sagub'?'예상LG사급금액_':'영업예상매출현황_')+mode+'.csv',hd,cur.map(r=>[r.item,r.nm,r.wc,r.cost,rowQ(r),rowA(r)].concat(days.map(d=>dayQ(r,d))).concat(days.map(d=>Math.round(dayQ(r,d)*r.cost)))));};
     render();
   };
   load();
