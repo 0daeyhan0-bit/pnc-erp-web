@@ -565,11 +565,14 @@ class NxCostEngine:
         info=self._load_item(item)
         ym='20'+ymd[:4]
         tot=self.proc_amt_nae(item, info, ym, parent) * mult
-        for child,qty,cx,f,t,lx in self.lines(item):
-            if cx or child in seen: continue
-            cinfo=self._load_item(child)
-            eaq = qty if cinfo['unit']=='EA' else 1.0
-            tot += self.gagong_nae(child, ymd, mult*eaq, seen|{child}, parent=item)
+        # ★direct5-fix(2026-08-13): 직납(cost_gubun='5')은 하위 안 품(SP CTE_BOM `cb.cost_gubun<>'5'` 정합).
+        #   재료비(_expandable_nae)·실원가는 이미 '5' 정지. 내부 가공비/overhead만 누락 → 직납 넘어 공유용접봉·MJU 과다계상(내부 34→40/40).
+        if info['cost_gubun']!='5':
+            for child,qty,cx,f,t,lx in self.lines(item):
+                if cx or child in seen: continue
+                cinfo=self._load_item(child)
+                eaq = qty if cinfo['unit']=='EA' else 1.0
+                tot += self.gagong_nae(child, ymd, mult*eaq, seen|{child}, parent=item)
         return round(tot,2)
 
     def gagong_nae_u(self, item, ymd, parent):
@@ -599,12 +602,14 @@ class NxCostEngine:
         ilban=round(r91*(jn+gn),0) if r91 else 0.0
         unban=round(self._oh_rate_nae(item,'92',parent)*mea,0)
         profit=round(r93*(gn+ilban),0) if r93 else 0.0
-        for child,qty,cx,f,t,lx in self.lines(item):
-            if cx or child in seen: continue
-            cinfo=self._load_item(child)
-            cmea = mea*(qty if cinfo['unit']=='EA' else 1.0)
-            ci,cu,cp=self.overhead_nae(child, ymd, muse*qty, cmea, seen|{child}, parent=item)
-            ilban+=ci; unban+=cu; profit+=cp
+        # ★direct5-fix(2026-08-13): 직납(cost_gubun='5')은 하위 안 품(gagong_nae와 동일 정합).
+        if info['cost_gubun']!='5':
+            for child,qty,cx,f,t,lx in self.lines(item):
+                if cx or child in seen: continue
+                cinfo=self._load_item(child)
+                cmea = mea*(qty if cinfo['unit']=='EA' else 1.0)
+                ci,cu,cp=self.overhead_nae(child, ymd, muse*qty, cmea, seen|{child}, parent=item)
+                ilban+=ci; unban+=cu; profit+=cp
         return (ilban,unban,profit)
 
     def naewon(self, item, ymd):
