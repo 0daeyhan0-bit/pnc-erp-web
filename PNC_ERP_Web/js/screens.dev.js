@@ -422,6 +422,12 @@ SCREEN.delivery=(c)=>{
 
 SCREEN.costanalysis=(c)=>{
   let D=window.COSTDATA||{rows:[],agg:{},ym:'',base:''};
+  // ★UI 날짜 규칙: 날짜범위=당월1일~당일 · 월=당월 · 일자=당일 (동적)
+  const _t=new Date(), _p=n=>String(n).padStart(2,'0');
+  const _TODAY=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-${_p(_t.getDate())}`;
+  const _MFIRST=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-01`;
+  const _CURYM=`${String(_t.getFullYear()).slice(2)}${_p(_t.getMonth()+1)}`;         // YYMM(당월)
+  const _CURDYMD=_TODAY.slice(2).replace(/-/g,'');                                    // YYMMDD(당일)
   let R=D.rows||[], A=D.agg||{};   // ★실시간(nx): loadRecv가 재구성. 초기값=기존 스냅샷(있으면)
   const eok=v=>(v/1e8).toFixed(1);
   const pct=v=>(v*100).toFixed(1)+'%';
@@ -433,11 +439,11 @@ SCREEN.costanalysis=(c)=>{
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
   let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
-  let dYmd=(D.base||'260630');               // 단가 적용일자(YYMMDD) — 이 날짜 기준 LG인정가·LME·단가 적용
+  let dYmd=_CURDYMD;               // 단가 적용일자(YYMMDD) — 규칙: 일자=당일
   const ymd2date=(y)=>y&&y.length===6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
   const date2ymd=(d)=>d?d.slice(2).replace(/-/g,''):'';                                          // date→YYMMDD
   // 리시빙실적(벌크) 단가 적용일자 — 변경 시 nx엔진 전체 재계산(백그라운드)
-  let rvYmd='260701', regenMsg='', regenPoll=null;   // ★기본 단가 적용일자=7/1 (리시빙 7월 기준)
+  let rvYmd=_CURDYMD, regenMsg='', regenPoll=null;   // ★단가 적용일자=당일(규칙)
   const setRegenMsg=(m)=>{regenMsg=m;const el=c.querySelector('#ca-regen-msg');if(el)el.textContent=m;};
   const doRegen=async()=>{
     if(!confirm(`단가 적용일자 ${ymd2date(rvYmd)} 기준으로 589품목을 재계산합니다.\n수 분 소요되며 완료 후 자동 새로고침됩니다. 진행할까요?`))return;
@@ -571,8 +577,8 @@ SCREEN.costanalysis=(c)=>{
      </div>
      <div class="toolbar">
        <label class="tl">리시빙 기간</label>
-       <input class="inp" type="date" id="ca-from" value="2026-07-01" style="width:140px"><span style="color:var(--muted)">~</span>
-       <input class="inp" type="date" id="ca-to" value="2026-07-31" style="width:140px">
+       <input class="inp" type="date" id="ca-from" value="${_MFIRST}" style="width:140px"><span style="color:var(--muted)">~</span>
+       <input class="inp" type="date" id="ca-to" value="${_TODAY}" style="width:140px">
        <span class="badge" title="최대 조회기간 1개월">최대 1개월</span>
        <button class="btn" id="ca-go">🔍 조회</button>
        <div class="spacer" style="max-width:20px"></div>
@@ -636,7 +642,7 @@ SCREEN.costanalysis=(c)=>{
       // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
       if(!rvBusy && !loadRecv._tok){
         if(window.__CA_LIVE&&window.__CA_LIVE.ymd===rvYmd){D.rows=window.__CA_LIVE.rows;D.agg=window.__CA_LIVE.agg;D.ym=window.__CA_LIVE.ym;D.base=window.__CA_LIVE.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
-        else loadRecv('2607', rvYmd);   // ★기본 7월 리시빙
+        else loadRecv(_CURYM, rvYmd);   // ★기본 당월 리시빙
       }
     }else{
       const dq=c.querySelector('#di-q'), dyv=c.querySelector('#di-ymd');
