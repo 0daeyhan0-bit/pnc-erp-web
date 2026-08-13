@@ -1814,6 +1814,12 @@ SCREEN.unifybom=(c,ro)=>{
      .ce{border:1px solid var(--line);border-radius:4px;padding:2px 5px;font-size:12px}
    </style>`;
   // ===== 라우팅 탭: 실사용(매입중단) BOM 구조만 — 원가 미표시. 현행=tree(default bom/tree, 이미 로드), 후보=routeTreeTable =====
+  // 라우팅 탭 현행 전체전개(expandbuy=1 = 현행 cs_except=0 유지 + 매입SUB 하위전개, 비현행 변형 제외)
+  let routeFull=null, routeFullFor='';
+  const loadRouteFull=async()=>{ if(!item){routeFull=[];return;} routeBusy=true; draw();
+    try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}&real=1&expandbuy=1`); const j=await r.json(); routeFull=j.rows||[]; routeFullFor=item;}
+    catch(e){routeFull=[]; routeFullFor=item;}
+    routeBusy=false; draw(); };
   const routeRowsTbl=(rows,head)=>`${head}<div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl bm-tbl">
     <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th style="text-align:left">거래처</th></tr></thead>
     <tbody>${rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
@@ -1830,7 +1836,7 @@ SCREEN.unifybom=(c,ro)=>{
     if(routeSel>0){ content=routeTreeTable(); }
     else if(!item){ content=`<div class="empty">품번을 조회하세요.</div>`; }
     else{ const head=`<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#1c47a0">현행 실사용 BOM</b> · ROUTING(실제 조달·매입중단) 구성 · <span style="color:#8a94a6">원가 미표시</span></div></div>`;
-      content = routeRowsTbl(tree||[], head); }
+      content = routeRowsTbl(routeFull||[], head); }
     c.innerHTML=`
      <div class="page-title">🔀 품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">라우팅(조달경로 구성 BOM · 원가 미표시)</span></div>
      ${tabbar('route')}
@@ -1840,7 +1846,7 @@ SCREEN.unifybom=(c,ro)=>{
     bindTabs();bindCandSel();
   };
   const draw=()=>{
-    if(tab==='route'){ if(routeSel>0&&routeTreeFor!==routeSel&&!routeBusy){ loadRouteTree(); return; } drawRoute(); return; }
+    if(tab==='route'){ if(routeSel>0){ if(routeTreeFor!==routeSel&&!routeBusy){ loadRouteTree(); return; } } else if(routeFullFor!==item&&!routeBusy){ loadRouteFull(); return; } drawRoute(); return; }
     if(tab==='nae'){ if(item&&naeFor!==item&&!naeLoad){loadNae();return;} drawNae(); return; }
     if(tab==='sil'){ if(item&&silFor!==item&&!silLoad){loadSil();return;}
       if(routeSel>0&&routeCostFor!==routeSel&&!routeBusy){ loadRouteCost(); return; } drawSil(); return; }
