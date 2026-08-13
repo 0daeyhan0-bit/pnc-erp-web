@@ -299,11 +299,11 @@ SCREEN.receiptdetail=(c)=>{
        <select class="sel" id="mode">${Object.entries(MODES).map(([k,v])=>`<option value="${k}" ${mode===k?'selected':''}>${v.label}</option>`).join('')}</select>
      </div>
      <div class="toolbar">
-       <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}">${esc(lgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}">${esc(sgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}">${esc(ctN(x))}</option>`).join('')}</select>
-       <input class="inp" id="cq" placeholder="거래처코드/명">
-       <input class="inp" id="mq" placeholder="품번/품명/PART NO (Enter=서버조회)" value="${esc(curMq)}">
+       <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}" ${curLg===x?'selected':''}>${esc(lgN(x))}</option>`).join('')}</select>
+       <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}" ${curSg===x?'selected':''}>${esc(sgN(x))}</option>`).join('')}</select>
+       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}" ${curCt===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
+       <input class="inp" id="cq" placeholder="거래처코드/명" value="${esc(curCq)}">
+       <input class="inp" id="mq" placeholder="품번/품명/PART NO (검색=서버조회)" value="${esc(curMq)}">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -325,7 +325,7 @@ SCREEN.receiptdetail=(c)=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
       cur=lines; let html='';
-      if(!cfg.g1){ lines.forEach(r=>html+=rowHtml(r)); }
+      if(!cfg.g1){ lines.slice(0,RENDER_CAP).forEach(r=>html+=rowHtml(r)); if(lines.length>RENDER_CAP)html+=`<tr><td colspan="${order.length}" class="empty" style="color:#8a6d1c">상위 ${won(RENDER_CAP)}행만 표시 · 전체 ${won(lines.length)}행은 검색어로 좁히거나 엑셀 다운로드</td></tr>`; }
       else { let g1v=null,g2v=null,s1q=0,s1a=0,s2q=0,s2a=0;
         lines.forEach(r=>{const v1=r[cfg.g1], v2=cfg.g2?r[cfg.g2]:null;
           if(g1v!==null && v1!==g1v){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a); html+=subRow(cfg.l1,s1q,s1a); s1q=s1a=s2q=s2a=0; g2v=null; }
@@ -345,14 +345,16 @@ SCREEN.receiptdetail=(c)=>{
     };
     const go=()=>{if(gijun==='close'){curYm=inYm(c.querySelector('#dto').value);}
       else{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);}load();};
-    c.querySelector('#go').onclick=render;   // ★검색=클라이언트 필터(재조회 아님) → 검색어 유지·필터적용
-    c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
-    const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=go;   // 날짜 변경 시에만 재조회
-    const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=go;
-    ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=render);
-    c.querySelector('#cq').onkeyup=e=>{if(e.key==='Enter')render();};
-    c.querySelector('#mq').onkeyup=e=>{curMq=e.target.value.trim();if(e.key==='Enter')load();else render();};   // ★품번: 유지(curMq)·Enter=서버 스코프 재조회(기간 무관 빠름)·그외=로드된 데이터 클라 필터
-    c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curMq='';load();};
+    const capF=()=>{curCq=c.querySelector('#cq').value.trim();curLg=c.querySelector('#lg').value;curSg=c.querySelector('#sg').value;curCt=c.querySelector('#ct').value;curMq=c.querySelector('#mq').value.trim();};
+    const doSearch=()=>{capF();load();};   // ★검색버튼=Enter 동일(서버 재조회, 필터 유지)
+    c.querySelector('#go').onclick=doSearch;
+    c.querySelector('#nxsrc').onclick=()=>{capF();source='nx';load();};   // ★Phase5 nx 파생 보기
+    const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=()=>{capF();go();};   // 날짜 변경(검색어 유지)
+    const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=()=>{capF();go();};
+    ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=()=>{capF();render();});   // 분류=클라 필터(유지)
+    c.querySelector('#cq').onkeyup=e=>{curCq=e.target.value.trim();if(e.key==='Enter')doSearch();else render();};   // 거래처=클라 필터, Enter=검색버튼과 동일
+    c.querySelector('#mq').onkeyup=e=>{curMq=e.target.value.trim();if(e.key==='Enter')doSearch();else render();};   // 품번=Enter=검색(서버조회), 그외 클라 필터
+    c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curMq='';curCq='';curLg='';curSg='';curCt='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h);
       const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,ym:r=>fmtYm(r.ym),cnm:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,diam:r=>r.diam,thick:r=>r.thick,length:r=>r.length,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt)};
@@ -402,6 +404,8 @@ SCREEN.dispatchdetail=(c)=>{
   };
   const API=API_BASE;
   let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  let curCq='', curLg='', curSg='', curCt='', curMq='';   // ★검색어 유지(재조회·기간변경 시)
+  const RENDER_CAP=1500;   // ★초기속도: 비그룹 렌더 상한
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const dToInput=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
   const inYm=v=>(''+(v||'')).slice(2).replace('-',''), inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
@@ -431,11 +435,11 @@ SCREEN.dispatchdetail=(c)=>{
        <select class="sel" id="mode">${Object.entries(MODES).map(([k,v])=>`<option value="${k}" ${mode===k?'selected':''}>${v.label}</option>`).join('')}</select>
      </div>
      <div class="toolbar">
-       <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}">${esc(lgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}">${esc(sgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}">${esc(ctN(x))}</option>`).join('')}</select>
-       <input class="inp" id="cq" placeholder="불출처코드/명">
-       <input class="inp" id="mq" placeholder="품번/품명/PART NO">
+       <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}" ${curLg===x?'selected':''}>${esc(lgN(x))}</option>`).join('')}</select>
+       <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}" ${curSg===x?'selected':''}>${esc(sgN(x))}</option>`).join('')}</select>
+       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}" ${curCt===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
+       <input class="inp" id="cq" placeholder="불출처코드/명" value="${esc(curCq)}">
+       <input class="inp" id="mq" placeholder="품번/품명/PART NO" value="${esc(curMq)}">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -458,7 +462,7 @@ SCREEN.dispatchdetail=(c)=>{
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
       cur=lines;
       let html='';
-      if(!cfg.g1){ lines.forEach(r=>html+=rowHtml(r)); }
+      if(!cfg.g1){ lines.slice(0,RENDER_CAP).forEach(r=>html+=rowHtml(r)); if(lines.length>RENDER_CAP)html+=`<tr><td colspan="${order.length}" class="empty" style="color:#8a6d1c">상위 ${won(RENDER_CAP)}행만 표시 · 전체 ${won(lines.length)}행은 검색어로 좁히거나 엑셀 다운로드</td></tr>`; }
       else {
         let g1v=null,g2v=null,s1q=0,s1a=0,s2q=0,s2a=0;
         lines.forEach(r=>{const v1=r[cfg.g1], v2=cfg.g2?r[cfg.g2]:null;
@@ -480,13 +484,14 @@ SCREEN.dispatchdetail=(c)=>{
     };
     const go=()=>{if(gijun==='close'){curYm=inYm(c.querySelector('#dto').value);}
       else{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);}load();};
-    c.querySelector('#go').onclick=render;   // ★검색=클라이언트 필터(검색어 유지)
-    const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=go;
-    const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=go;
-    ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=render);
-    c.querySelector('#cq').onkeyup=e=>{if(e.key==='Enter')render();};
-    c.querySelector('#mq').onkeyup=e=>{if(e.key==='Enter')render();};
-    c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';load();};
+    const capF=()=>{curCq=c.querySelector('#cq').value.trim();curLg=c.querySelector('#lg').value;curSg=c.querySelector('#sg').value;curCt=c.querySelector('#ct').value;curMq=c.querySelector('#mq').value.trim();};
+    c.querySelector('#go').onclick=()=>{capF();render();};   // ★검색=필터적용(검색어 유지·버튼=Enter 동일)
+    const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=()=>{capF();go();};   // 날짜 변경(검색어 유지)
+    const _dfr=c.querySelector('#dfrom');if(_dfr)_dfr.onchange=()=>{capF();go();};
+    ['#lg','#sg','#ct'].forEach(s=>c.querySelector(s).onchange=()=>{capF();render();});
+    c.querySelector('#cq').onkeyup=e=>{curCq=e.target.value.trim();render();};
+    c.querySelector('#mq').onkeyup=e=>{curMq=e.target.value.trim();render();};
+    c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curCq='';curLg='';curSg='';curCt='';curMq='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h.replace(/<[^>]+>/g,''));
       const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,cc:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),ic:r=>r.ic,mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),incust:r=>r.incust,unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt)};
