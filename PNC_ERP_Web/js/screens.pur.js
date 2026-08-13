@@ -679,7 +679,7 @@ SCREEN.matledger=(c)=>{
     const snap=keyToInput(period,curKey)||(isMonth?'':'');
     const src=isMonth?'PU_T_MONTH_STOCK_WH':'PU_T_MONTH_STOCK_WH_DAILY';
     const sub=isMonth?`월 마감 자재 수불(기초+입고−출고+기타=재고) · 단가=금액/수량 · 원본 <code>${src}</code> · 🔴 라이브 마감월 ${esc(snap||'-')}`
-                     :`일자별 자재 수불(기초+입고−출고+기타=재고) · 단가=금액/수량 · 원본 <code>${src}</code> · 🔴 라이브 ${esc(snap||'-')}`;
+                     :`일자별 자재 수불(기초+입고−출고+기타=재고) · 단가=금액/수량 · 원본 <code>${src}</code> · 🔴 최신 마감일 ${esc(snap||'-')} 스냅샷`;
     const sgroups=[...new Set(pool.map(r=>(''+r.sg).trim()).filter(Boolean))].sort();
     const custs=[...new Set(pool.map(r=>r.cust).filter(Boolean))].sort();
     // 선택 범위 제한(일=라이브 최신1일만, 월=마감월 범위) — 데이터 없는 날짜 조회로 빈화면 되는 것 방지
@@ -688,7 +688,7 @@ SCREEN.matledger=(c)=>{
     const mmMon=bMon.max?`min="${keyToInput('month',bMon.min)}" max="${keyToInput('month',bMon.max)}"`:'';
     const dateInput=isMonth
       ? `<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">마감년월</label><input type="month" class="inp" id="dto" value="${esc(snap)}" ${mmMon} style="min-width:120px">`
-      : `<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">수불일자</label><input type="date" class="inp" id="dto" value="${esc(snap)}" ${mmDay} title="라이브 일수불은 최신 1일만 제공 · 과거는 월 수불장 이용" style="min-width:135px"><span style="font-size:11px;color:var(--muted)">＊일수불=라이브 최신 1일만 · 과거는 월 수불장</span>`;
+      : `<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">수불일자</label><input type="date" class="inp" id="dto" value="${esc(snap)}" ${mmDay} title="일수불은 최신 마감일 스냅샷만 제공 · 과거는 월 수불장 이용" style="min-width:135px"><span style="font-size:11px;color:var(--muted)">＊일수불=최신 마감일 스냅샷 · 과거는 월 수불장</span>`;
     c.innerHTML=`
      <div class="page-title">📒 자재 수불장</div>
      <div class="page-sub">${sub}</div>

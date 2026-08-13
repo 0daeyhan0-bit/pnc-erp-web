@@ -563,9 +563,10 @@ SCREEN.costanalysis=(c)=>{
         setRegenMsg(`실시간 계산 ${done}/${list.length}`);renderBody();
       }
       recomputeAgg();
-      if(loadRecv._tok===tok){setRegenMsg(`완료 ${list.length}품목 · 실시간 nx (단가 ${ym2str(ymd)})`);window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
+      if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
     }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
-    finally{rvBusy=false;}
+    finally{rvBusy=false;renderBody();
+      const dl=c.querySelector('#ca-parts'); if(dl)dl.innerHTML=(D.rows||[]).slice(0,3000).map(r=>`<option value="${esc(r[0])}">`).join('');}
   };
   // 표시 컬럼: 직접입력은 입고수량(1)·LG총금액(20)·Impact(22) 제외 (수량 1 단품 관점)
   const colsOf=()=> mode==='direct'? NUM.filter(([i])=>![1,20,22].includes(i)) : NUM;
@@ -643,9 +644,9 @@ SCREEN.costanalysis=(c)=>{
        <div class="spacer" style="max-width:20px"></div>
        ${(typeof PERM==='undefined'||PERM.canEdit('costanalysis'))?`<label class="tl" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율로 전체 재계산">💲 단가 적용일자</label>
        <input class="inp" type="date" id="ca-ymd" value="${ymd2date(rvYmd)}" style="width:150px">
-       <button class="btn" id="ca-regen" title="지정 단가일자로 589품목 nx엔진 재계산">🔄 재계산</button>
-       <span id="ca-regen-msg" style="color:#2c7;font-size:12px">${esc(regenMsg)}</span>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
-       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" value="${esc(q)}" placeholder="PART-NO 검색" style="width:150px">
+       <button class="btn" id="ca-regen" title="지정 단가일자로 nx엔진 재계산">🔄 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" list="ca-parts" value="${esc(q)}" placeholder="PART-NO 검색·선택" style="width:180px" autocomplete="off">
+       <datalist id="ca-parts">${(R||[]).slice(0,3000).map(r=>`<option value="${esc(r[0])}">`).join('')}</datalist>
        <label class="chk"><input type="checkbox" id="ca-loss" ${lossOnly?'checked':''}> 적자만</label>
        <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
        <div class="spacer"></div><span class="rowcount" id="ca-cnt"></span>
@@ -654,11 +655,7 @@ SCREEN.costanalysis=(c)=>{
     c.innerHTML=`
      <div class="page-title">💹 품목별 원가분석</div>
      <div class="page-sub">품목별 <b>내부원가·실원가·손익</b> · 원본 <code>w_cs_esti_020</code> · <b>nx 엔진 재계산</b>(실원가·LME·손익, <code>nx_cost_engine.py</code> 검증완료) · 라이브검증=개발›원가엔진 검증 · 기준일 ${esc(D.base||'')}</div>
-     <div class="ca-modes">
-       <button class="ca-mode ${mode==='recv'?'on':''}" data-mode="recv">리시빙실적</button>
-       <button class="ca-mode ${mode==='direct'?'on':''}" data-mode="direct">품번 직접입력</button>
-     </div>
-     ${mode==='recv'?recvBar():directBar()}
+     ${recvBar()}
      <div class="grid-wrap ca-wrap"><table class="tbl ca-tbl">${headHTML()}<tbody id="ca-body"></tbody><tfoot id="ca-foot"></tfoot></table></div>
      <style>
        .ca-modes{display:flex;margin:10px 0 2px;border:1px solid var(--line);border-radius:8px;overflow:hidden;width:fit-content}
@@ -668,7 +665,7 @@ SCREEN.costanalysis=(c)=>{
        .ca-card{flex:1;min-width:130px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 14px}
        .ca-card span{display:block;font-size:12px;color:var(--muted)}.ca-card b{font-size:22px;font-weight:800}
        .ca-card.pos b{color:#1f8a5a}.ca-card.neg b{color:#c0392b}.ca-card small{font-size:13px;color:var(--muted);font-weight:600}
-       .ca-wrap{max-height:560px;overflow:auto}
+       .ca-wrap{max-height:560px;overflow:auto;max-width:100%;width:100%;box-sizing:border-box}
        .ca-tbl{font-size:13px}
        .ca-tbl th,.ca-tbl td{padding:4px 7px}
        .ca-tbl th.ghead{background:#eef4ff;text-align:center;color:#2f5aa8;font-weight:700}
