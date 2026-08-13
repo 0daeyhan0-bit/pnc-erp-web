@@ -444,18 +444,27 @@ class NxCostEngine:
         return {k: round(v,2) for k,v in b.items()}
 
     def sagub_sum(self, item, diffmap):
-        """완제품에 들어가는 사급부품들의 사급차액(개당) 합 = Σ diffmap[사급부품] × 누적소요qty.
-           diffmap={부품:사급차액(=실출고가−실입고가, 음수=손해)}. 사급부품은 SUB(매입) 안에 있어 **전 BOM레벨 전개**로 도달.
-           매칭된 사급부품은 그 단위로 계상하고 하위 미전개(우리가 그 부품을 사급으로 내보냄)."""
+        """완제품 손익에 반영할 사급차액 합 = Σ diffmap[사급부품] × 누적소요qty.
+           diffmap={부품:사급차액(=실출고가−실입고가, 음수=손해)}.
+           ★이중계상 방지 규칙(검증됨: crossed==silwon_nodes 직접계상과 상보):
+             실원가는 사급부품을 둘 중 하나로 계상 —
+              (A) **직접 leaf**(제작 아래 매입부품, 입고가) → 이미 반영 → 제외.
+              (B) **매입 SUB 안에 묻힘**(SUB를 매입가≈사급가로 계상) → 개당차액 미반영 → **가산**.
+           crossed = 실원가 정지경계(매입/외주완성/원소재=전개안됨)를 지나 도달 = (B)묻힘."""
         tot=[0.0]
-        def walk(node, q, seen, d):
+        def walk(node, q, seen, crossed, d):
             if node in diffmap:
-                tot[0]+=diffmap[node]*q; return   # 사급 단위 = 그대로(하위 미전개)
+                if crossed: tot[0]+=diffmap[node]*q   # (B)묻힘만 가산, (A)직접은 제외
+                return
             if d>14: return
-            for c,qty,cx,f,t,lx in self.lines(node):   # 매입/제작 무관 전 레벨 전개 → SUB 안 사급부품 도달
+            info=self._load_item(node)
+            # 이 노드가 실원가에서 전개되나? (제작&전개가능) 아니면 매입/원소재 정지경계
+            expands=(info['cost_gubun']!='3' or info['make_type']=='1') and bool(self._expandable(node, info, seen))
+            b=not expands
+            for c,qty,cx,f,t,lx in self.lines(node):   # 물리 전 레벨 전개 → SUB 안 사급부품 도달
                 if cx or c in seen: continue
-                walk(c, qty*q, seen|{node}, d+1)
-        walk(item, 1.0, set(), 0)
+                walk(c, qty*q, seen|{node}, crossed or b, d+1)
+        walk(item, 1.0, set(), False, 0)
         return round(tot[0],2)
 
     def _lme_nodes(self, item, ymd, mult=1.0, seen=None, out=None):

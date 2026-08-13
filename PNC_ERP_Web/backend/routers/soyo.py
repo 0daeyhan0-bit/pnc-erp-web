@@ -205,6 +205,86 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
     finally:
         cn.close()
 
+@router.get("/api/sales/forecast_sagub")
+def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
+    """★LG 사급부품 예상금액 (영업예상매출현황 '예상 사급금액' 구분).
+       사급부품 = 소분류 'LG사급'(PR_M_ITEM.ITEM_SGROUP='310', 품목단가관리·품목BOM관리 공통 분류).
+       계획 완제품(sa_t_plan_item_dtl u1 + pr_t_plan_input u4)을 우리 단일BOM(nx.bom_line)으로 전개 →
+       사급부품 소요 × 사급가(nx.price_item price_type='매입' vendor='LG' COSP 최신) → 일자별 금액.
+       gross=차감전, net=차감후(u4 첫계획일 과대분 제거, 라이브190과 동일 로직). [[nextgen-erp-sales-forecast-190]]"""
+    cn = _conn(); cur = cn.cursor()
+    try:
+        b = _d6(base) if base.strip() else None
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')"); today = str(cur.fetchone()[0])
+        b = b or today
+        t = _d6(to) if to.strip() else None
+        if not t:
+            try:
+                import calendar as _cal
+                from datetime import datetime as _dt
+                d0 = _dt.strptime('20' + b, '%Y%m%d')
+                _mo = d0.month % 12 + 1; _yr = d0.year + (1 if d0.month == 12 else 0)
+                _dy = min(d0.day, _cal.monthrange(_yr, _mo)[1])
+                t = _dt(_yr, _mo, _dy).strftime('%y%m%d')
+            except Exception:
+                t = None
+        tc = " AND PLAN_YMD<=?" if t else ""
+        NXP = "PARTNER_ERP_TEST3.nx."
+        # 사급부품 소요 = 계획완제품 × BOM전개(nx.bom_line) → 사급부품(소분류 LG사급=310) × 사급가(매입/LG/COSP 최신)
+        q = f"""
+        WITH sagub AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
+        prc AS (SELECT it, price FROM (
+            SELECT LTRIM(RTRIM(item_code)) it, price, ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn
+            FROM {NXP}price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1),
+        pln AS (SELECT item, ymd, src, SUM(q) q FROM (
+            SELECT LTRIM(RTRIM(C_ITEM_CODE)) item, PLAN_YMD ymd, 'u1' src, CAST(PLAN_QTY AS float) q FROM sa_t_plan_item_dtl WHERE PLAN_YMD>=?{tc}
+            UNION ALL SELECT LTRIM(RTRIM(ITEM_CODE)), PLAN_YMD, 'u4', CAST(PLAN_QTY AS float) FROM pr_t_plan_input WHERE PLAN_YMD>=?{tc}
+          ) tt GROUP BY item, ymd, src),
+        prods AS (SELECT DISTINCT item FROM pln),
+        expl AS (
+            SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part, CAST(bl.qty AS float) cum, 1 lvl
+              FROM prods p JOIN {NXP}bom_header h ON h.item_code=p.item JOIN {NXP}bom_line bl ON bl.bom_id=h.bom_id
+            UNION ALL
+            SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.cum*CAST(bl.qty AS float), e.lvl+1
+              FROM expl e JOIN {NXP}bom_header h ON h.item_code=e.part JOIN {NXP}bom_line bl ON bl.bom_id=h.bom_id
+              WHERE e.lvl<8)
+        SELECT e.part, pln.ymd, pln.src, SUM(pln.q*e.cum) soyo, MAX(pr.price) price
+        FROM expl e JOIN sagub s ON s.it=e.part JOIN pln ON pln.item=e.prod
+             LEFT JOIN prc pr ON pr.it=e.part
+        GROUP BY e.part, pln.ymd, pln.src OPTION(MAXRECURSION 30)"""
+        cur.execute(q, *([b, t, b, t] if t else [b, b]))
+        raw = [(str(a).strip(), str(y).strip(), str(s).strip(), float(so or 0), (float(p) if p is not None else None))
+               for a, y, s, so, p in cur.fetchall()]
+        if not raw:
+            return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0}
+        base_ymd = min(y for _, y, _, _, _ in raw)
+        # 품명
+        cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+        nmm = {str(ic).strip(): d for ic, d in cur.fetchall()}
+        agg = {}; days = set()
+        for part, ymd, s, soyo, price in raw:
+            days.add(ymd)
+            g = agg.get(part)
+            if not g:
+                g = {"item": part, "nm": nmm.get(part, ""), "cost": (price or 0), "priced": price is not None,
+                     "gdays": {}, "ndays": {}}
+                agg[part] = g
+            g["gdays"][ymd] = g["gdays"].get(ymd, 0) + soyo
+            if not (s == 'u4' and ymd == base_ymd):
+                g["ndays"][ymd] = g["ndays"].get(ymd, 0) + soyo
+        rows = []
+        for g in agg.values():
+            gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]
+            g["gq"] = gq; g["nq"] = nq; g["gamt"] = round(gq * c); g["namt"] = round(nq * c)
+            rows.append(g)
+        rows.sort(key=lambda r: -r["gamt"])
+        n_unpriced = sum(1 for r in rows if not r["priced"])
+        return {"base": base_ymd, "to": (t or (max(days) if days else b)), "days": sorted(days), "rows": rows,
+                "gross_amt": round(sum(r["gamt"] for r in rows)), "net_amt": round(sum(r["namt"] for r in rows)),
+                "n_parts": len(rows), "n_unpriced": n_unpriced}
+    finally:
+        cn.close()
+
 def _step6_sql(cur):
     P = _P
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
