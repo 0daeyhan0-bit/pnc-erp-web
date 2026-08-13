@@ -94,6 +94,17 @@ class NxCostEngine:
                 if code not in best or ver > best[code][0]: best[code] = (ver, r[1])
             for c in codes:
                 self._hdr[c] = best[c][1] if c in best else None
+            # ★성능(2026-08-13): price_item(매입) 일괄적재 → _pur. naewon이 노드마다 매입단가 조회(원격DB 왕복)하던 것 제거.
+            #   적재행·필터(price_type='매입' AND price IS NOT NULL)·튜플순서(vendor,apply_ymd,price,currency) 동일 = pur_price 결과 무변경.
+            if not hasattr(self, '_pur'): self._pur = {}
+            for c in codes:
+                if c not in self._pur: self._pur[c] = []
+            self.cur.execute("""SELECT pi.item_code, pi.vendor_code, ISNULL(pi.apply_ymd,''), pi.price, ISNULL(pi.currency,'KRW')
+                FROM nx.price_item pi JOIN STRING_SPLIT(?,',') s ON pi.item_code=s.value
+                WHERE pi.price_type='매입' AND pi.price IS NOT NULL""", codes_csv)
+            for r in self.cur.fetchall():
+                self._pur.setdefault(str(r[0]).strip(), []).append(
+                    (str(r[1]).strip(), str(r[2] or '').strip(), float(r[3] or 0), str(r[4] or 'KRW').strip()))
         except Exception:
             return   # CTE 실패(순환 등) → 프라임 스킵, per-node 폴백(정확성 무손상)
 
