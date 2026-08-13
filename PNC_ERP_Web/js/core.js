@@ -130,7 +130,6 @@ const MODULES=[
    {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},
    {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
-   {id:'modelbom',ic:'🧬',nm:'모델BOM 관리'},
  ]},
  {id:'prod',nm:'생산',ic:'🏭',subs:[
    {id:'prodstock',ic:'🏭',nm:'생산재고조회'},
@@ -179,6 +178,7 @@ const MODULES=[
    {id:'rawmat',ic:'🧱',nm:'원소재 마스터'},
    {id:'itembom',ic:'📋',nm:'품목별 공정관리'},
    {id:'unifybom',ic:'🔀',nm:'품목 BOM관리'},
+   {id:'modelbom',ic:'🧬',nm:'모델BOM 관리'},
    {id:'delivery',ic:'📦',nm:'납품 포장/적재'},
    {id:'subvariant',ic:'🧩',nm:'조달경로 통합검토'},
    {id:'costanalysis',ic:'💹',nm:'품목별 원가분석'},
