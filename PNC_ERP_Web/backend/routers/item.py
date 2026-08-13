@@ -80,9 +80,9 @@ def _item_nature(cur, code, sgroup):
     # ★용접 존재판정=nx 용접테이블(nx.proc_weld) 런타임 기준 — 레거시 CS_T_ITEM_WELD 런타임 참조 제거(원칙: 런타임은 nx만)
     cur.execute("""SELECT
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0),
-        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=?),
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=?),
         (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?),
-        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE MAT_CODE=?)""", code, code, code, code)
+        (SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE MAT_CODE=?)""", code, code, code, code)
     w, bp, g, bc = cur.fetchone()
     if w or bp: return "5.용접·조립품", 1
     if g: return "4.가공품", 1
@@ -297,7 +297,8 @@ def itemmaster_save(payload: dict = Body(...)):
 
 @router.post("/api/itemmaster/delete")
 def itemmaster_delete(payload: dict = Body(...)):
-    """삭제 — BOM 무결성 게이트: nx.bom(모/자) + 레거시 PR_M_ITEM_BOM(모/자) 참조 있으면 거부."""
+    """삭제 — BOM 무결성 게이트: 단일BOM(nx.bom_header 모 / nx.bom_line 자) 참조 있으면 거부.
+    ★단일BOM 통일(2026-08-13): 레거시 PR_M_ITEM_BOM 별도체크 제거(nx.bom_line이 정본)."""
     codes = [str(x).strip() for x in (payload.get("codes", []) or []) if str(x).strip()]
     if not codes: return {"ok": True, "deleted": 0}
     nx = _nx(); cur = nx.cursor()
@@ -306,9 +307,7 @@ def itemmaster_delete(payload: dict = Body(...)):
         for code in codes:
             cur.execute("SELECT 1 FROM nx.bom_header WHERE item_code=?", code); a = cur.fetchone()
             cur.execute("SELECT 1 FROM nx.bom_line WHERE child_item=?", code); b = cur.fetchone()
-            cur.execute("SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_BOM WHERE ITEM_CODE=? OR MAT_CODE=?", code, code)
-            c = cur.fetchone()
-            if a or b or c: blocked.append(code)
+            if a or b: blocked.append(code)
         if blocked:
             return {"ok": False, "errors": [f"{c} : BOM에 사용중이라 삭제할 수 없습니다." for c in blocked]}
         for code in codes:

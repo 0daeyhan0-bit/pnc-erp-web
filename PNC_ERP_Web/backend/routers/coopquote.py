@@ -395,10 +395,10 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         # 1) BOM 재귀전개 (현행)
         cur.execute("""WITH tree AS (
             SELECT ITEM_CODE p, MAT_CODE c, CAST(USE_QTY AS decimal(18,6)) q, ISNULL(SAGUB_FLAG,'0') sag, ISNULL(BOM_SEQ,0) sq, 1 lvl
-            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
             UNION ALL
             SELECT b.ITEM_CODE, b.MAT_CODE, CAST(b.USE_QTY AS decimal(18,6)), ISNULL(b.SAGUB_FLAG,'0'), ISNULL(b.BOM_SEQ,0), t.lvl+1
-            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
             WHERE t.lvl < 8)
             SELECT p,c,q,sag,sq,lvl FROM tree OPTION(MAXRECURSION 50)""", item)
         edges = {}
@@ -746,10 +746,10 @@ def _coop_soyo(item):
     try:
         cur.execute("""WITH tree AS (
             SELECT ITEM_CODE p, MAT_CODE c, CAST(USE_QTY AS decimal(18,6)) q, ISNULL(SAGUB_FLAG,'0') sag, 1 lvl
-            FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
+            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
             UNION ALL
             SELECT b.ITEM_CODE, b.MAT_CODE, CAST(b.USE_QTY AS decimal(18,6)), ISNULL(b.SAGUB_FLAG,'0'), t.lvl+1
-            FROM tree t JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
             WHERE t.lvl<8)
             SELECT p,c,q,sag FROM tree OPTION(MAXRECURSION 50)""", item)
         edges = {}
