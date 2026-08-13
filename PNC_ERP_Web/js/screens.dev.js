@@ -974,6 +974,39 @@ SCREEN.unifybom=(c,ro)=>{
   const RO=(ro===true);
   let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false;
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
+  let wuData=null, wuBusy=false;   // 역전개(where-used) 모달 상태
+  const wuFmt=n=>(n==null||n==='')?'':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:5});
+  const openWhereUsed=async()=>{
+    if(!item)return; wuBusy=true; wuData=null; draw();
+    try{const r=await fetch(`${API}/api/bom/whereused?item=${encodeURIComponent(item)}`); wuData=await r.json();}
+    catch(e){wuData={rows:[],error:e.message,item:item,name:name};}
+    wuBusy=false; draw();
+  };
+  function wuModalHtml(){
+    const d=wuData||{}, rows=d.rows||[];
+    const body = wuBusy ? '<div class="empty" style="padding:24px">역전개 조회 중…</div>'
+      : d.error ? `<div class="empty" style="color:#c0392b;padding:24px">오류: ${esc(d.error)}</div>`
+      : (rows.length<=1) ? '<div class="empty" style="padding:24px">이 품번을 하위구성으로 쓰는 상위 품번이 없습니다 (최상위이거나 아직 미사용).</div>'
+      : `<table class="tbl" style="font-size:12px"><thead><tr><th style="width:54px">레벨</th><th>품번</th><th>품명</th><th>대표매입처</th><th class="num" style="width:72px">소요량</th><th style="width:160px">구분</th><th>규격</th></tr></thead><tbody>${rows.map(r=>{
+        const ind=8+(r.level||0)*16;
+        const flags = r.level===0 ? '<span class="badge">대상</span>'
+          : `${r.ce==='1'?'<span style="color:#c0392b;font-size:10px">원가제외</span> ':''}${r.sag==='1'?'<span style="color:#8a6d1c;font-size:10px">사급</span> ':''}${r.se==='1'?'<span style="color:#888;font-size:10px">세트제외</span>':''}`;
+        const sz = r.spec || ((r.diam?('Φ'+r.diam):'')+(r.thick?('×'+r.thick):''));
+        const clk = (r.level>0 && r.raw) ? ` class="wu-row" data-raw="${esc(r.raw)}" style="cursor:pointer"` : '';
+        return `<tr${clk}><td class="center" style="color:#8598b5">${r.level===0?'0':'▲'+r.level}</td><td style="padding-left:${ind}px"><b>${esc(r.code||'')}</b></td><td>${esc(r.nm||'')}</td><td>${esc(r.custnm||'')}</td><td class="num">${wuFmt(r.qty)}</td><td>${flags}</td><td>${esc(sz||'')}</td></tr>`;
+      }).join('')}</tbody></table>`;
+    return `<div id="wu-backdrop" style="position:fixed;inset:0;background:rgba(15,25,45,.38);z-index:1200;display:flex;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:12px;width:min(900px,93vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 14px 44px rgba(0,0,0,.32)">
+        <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)">
+          <b style="font-size:15px">🔺 역전개 <span style="font-size:12px;color:var(--muted);font-weight:400">where-used</span></b>
+          <span style="color:#33507d;font-size:12px;font-weight:600">${esc(d.item||item||'')} ${esc((d.name||name)||'')}</span>
+          ${(!wuBusy&&!d.error)?`<span class="badge">${Math.max(0,rows.length-1)}건</span>`:''}
+          <div style="flex:1"></div><button class="btn ghost" id="wu-close">✖ 닫기</button>
+        </div>
+        <div style="overflow:auto;padding:6px 12px 12px">${body}</div>
+        <div style="padding:7px 16px;border-top:1px solid var(--line);color:var(--muted);font-size:11px">▲N = N단계 상위 · <b>상위 품번 클릭 → 그 품번으로 이동</b> · 소스 = 재설계 단일BOM(nx.bom_line)</div>
+      </div></div>`;
+  }
   let codes={}, vlist=[];
   let tab='bom', naeD=null, naeFor='', naeYmd='260630', naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let naeModal=false;   // 공정 수정 팝업(모달) 표시
@@ -1636,7 +1669,7 @@ SCREEN.unifybom=(c,ro)=>{
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
-         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${(!RO&&PERM.canEdit('unifybom'))?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button>`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
+         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${(!RO&&PERM.canEdit('unifybom'))?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button>`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
      </div>
@@ -1666,6 +1699,7 @@ SCREEN.unifybom=(c,ro)=>{
        ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
        <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel():''}`):''}
+     ${(wuBusy||wuData)?wuModalHtml():''}
      ${bomCss()}`;
     const qi=c.querySelector('#bm-q');
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
@@ -1681,6 +1715,11 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
     if(naeModal)wireProcModal();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
+    // 역전개(where-used) 버튼·모달
+    {const wu=c.querySelector('#bm-wu');if(wu)wu.onclick=openWhereUsed;}
+    {const wx=c.querySelector('#wu-close');if(wx)wx.onclick=()=>{wuData=null;wuBusy=false;draw();};}
+    {const wb=c.querySelector('#wu-backdrop');if(wb)wb.onclick=e=>{if(e.target===wb){wuData=null;wuBusy=false;draw();}};}
+    c.querySelectorAll('.wu-row[data-raw]').forEach(el=>el.onclick=()=>{const raw=el.dataset.raw;if(raw){wuData=null;wuBusy=false;if(item)navStack.push(item);load(raw);}});
     // 신규등록 진입·모달·용접패널
     {const nb=c.querySelector('#bm-new');if(nb)nb.onclick=openNew;}
     {const x=c.querySelector('#nw-close');if(x)x.onclick=closeNew;}
