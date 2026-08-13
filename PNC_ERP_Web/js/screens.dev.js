@@ -2014,12 +2014,15 @@ SCREEN.subvariant=(c)=>{
       <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}
       <span style="margin-left:auto;color:${b.c};font-size:10px;border:1px solid ${b.c}55;border-radius:8px;padding:0 6px;white-space:nowrap">${esc(b.t)}</span>
       <button class="btn sp-ledit" draggable="false" data-lid="${p.line_id}" title="부품 라인 직접수정(BOM 구성과 동일 폼)" style="padding:0 5px;font-size:10px;color:#1c47a0">✎</button></div>`;};
-    const nodeBox=(node,label,color,dsub,np2)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
-      return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin-bottom:6px;background:#fff">
+    const nodeBox=(node,label,color,dsub,np2,depth)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
+      const kids=subs.filter(s=>dsub>0?s.parent_line===dsub:!s.parent_line);   // ★이 노드의 자식 SUB(중첩=서브안의서브)
+      return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
         <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span><div style="flex:1"></div>
           ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff">🧩 해체</button>`:''}
           <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:0 8px;font-size:10px;background:${color};color:#fff">수정</button></div>
-        ${np2.map(p=>`<div style="font-size:11.5px;padding:1px 0 1px 14px;color:#33507d">• ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 풀에서 드래그</div>'}
+        ${np2.map(p=>`<div style="font-size:11.5px;padding:1px 0 1px 14px;color:#33507d">• ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 풀에서 드래그</div>')}
+        ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
+        <div class="sp-newsub" data-parentsub="${dsub}" style="border:1.5px dashed #b9a0d8;border-radius:6px;padding:4px;text-align:center;color:#8e44ad;font-size:10.5px;background:#f6f0fc;cursor:copy;margin-top:4px">➕ 새 SUB로 묶기${dsub>0?' (이 SUB 안에 중첩)':' (레벨1)'}</div>
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -2033,10 +2036,8 @@ SCREEN.subvariant=(c)=>{
           ${parts.map(poolRow).join('')||'<div class="empty" style="font-size:11px">부품 없음 (RAC 용접봉 제외)</div>'}
         </div>
         <div style="flex:1.3;min-width:300px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
-          <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(노드 [수정]=공정팝업 · 부품 드롭=배치)</span></div>
-          ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat)}
-          ${subs.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item)+' (레벨1)','#8e44ad',s.line_id,memb(s.line_id))).join('')}
-          <div class="sp-newsub" style="border:2px dashed #b9a0d8;border-radius:7px;padding:8px;text-align:center;color:#8e44ad;font-size:11.5px;background:#f6f0fc;cursor:copy">➕ 새 SUB로 묶기 — 여기로 부품을 드롭(레벨1 생성)</div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(노드 [수정]=공정팝업 · 부품 드롭=배치 · SUB마다 [새 SUB로 묶기]=서브안의서브)</span></div>
+          ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat,0)}
         </div>
       </div></div>`;};
   // ===== ★노드 스코프 공정 팝업 = 품목BOM관리 '내부원가' 팝업과 완전 동일 창(PROC_MODAL_HTML 공유) =====
@@ -2249,18 +2250,19 @@ SCREEN.subvariant=(c)=>{
     // 드래그: 좌측 부품 풀 → 우측 노드(ASSY 레벨0=data-sub0 / SUB=line_id)로 배치. 절삭공정은 부품 따라감(자동).
     c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.stopPropagation();e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});
     c.querySelectorAll('.sp-drop').forEach(zone=>{
-      zone.ondragover=e=>{e.preventDefault();zone.style.boxShadow='0 0 0 2px #1c47a0 inset';};
-      zone.ondragleave=()=>{zone.style.boxShadow='';};
-      zone.ondrop=async e=>{e.preventDefault();zone.style.boxShadow='';const lid=e.dataTransfer.getData('text/lid');if(!lid)return;
+      zone.ondragover=e=>{e.preventDefault();e.stopPropagation();zone.style.boxShadow='0 0 0 2px #1c47a0 inset';};
+      zone.ondragleave=e=>{e.stopPropagation();zone.style.boxShadow='';};
+      zone.ondrop=async e=>{e.preventDefault();e.stopPropagation();zone.style.boxShadow='';const lid=e.dataTransfer.getData('text/lid');if(!lid)return;
         try{const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+zone.dataset.sub,line_ids:[+lid]})});
           if((await r.json()).ok)await reloadPanel();else alert('이동 실패');}catch(err){alert('이동 오류: '+err.message);}};});
-    // 새 SUB로 묶기 존 — 드롭한 부품 1개로 신규 SUB 생성(자동 _S{nn})
-    {const z=c.querySelector('.sp-newsub');if(z){
-      z.ondragover=e=>{e.preventDefault();z.style.background='#ecd9fb';};
-      z.ondragleave=()=>{z.style.background='#f6f0fc';};
-      z.ondrop=async e=>{e.preventDefault();z.style.background='#f6f0fc';const lid=+e.dataTransfer.getData('text/lid');if(!lid)return;
-        try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[lid],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)'})});
-          const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+' 생성';await reloadPanel();}else alert('SUB 생성 실패');}catch(err){alert('SUB 생성 오류: '+err.message);}};}}
+    // ★새 SUB로 묶기 존(노드별·중첩) — data-parentsub>0=서브안의서브. stopPropagation으로 중첩 드롭존만 처리.
+    c.querySelectorAll('.sp-newsub').forEach(z=>{
+      z.ondragover=e=>{e.preventDefault();e.stopPropagation();z.style.background='#ecd9fb';};
+      z.ondragleave=e=>{e.stopPropagation();z.style.background='#f6f0fc';};
+      z.ondrop=async e=>{e.preventDefault();e.stopPropagation();z.style.background='#f6f0fc';const lid=+e.dataTransfer.getData('text/lid');if(!lid)return;
+        const psub=+z.dataset.parentsub||0;
+        try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[lid],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)',parent_sub:psub})});
+          const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+(psub>0?' (중첩)':'')+' 생성';await reloadPanel();}else alert('SUB 생성 실패: '+(j.detail||''));}catch(err){alert('SUB 생성 오류: '+err.message);}};});
     // 노드 [수정] → 관경별 용접 + 공정별 작업ST 팝업(노드 스코프: 레벨0=ASSY값 / 신규SUB=빈값)
     c.querySelectorAll('.sp-nedit').forEach(b=>b.onclick=e=>{e.stopPropagation();openNodeProc(b.dataset.node,b.dataset.sub==='0');});
     // [해체] SUB 노드 → 하위부품 ASSY 복귀 · 비종속 공정/용접 ASSY 이관(공수합 보존, 백엔드 sub/dissolve). 해체 후 패널 갱신.
