@@ -93,7 +93,7 @@ const priceMgmtView=(host)=>{
     const cel=modalEl.querySelector('.pmf[data-k="cust_nm"]');if(cel)acAttach(cel,it=>{cel.value=it.name;acCust[it.name]=it.code;});
     const fi=modalEl.querySelector('.pmf');if(fi)fi.focus();};
   const openAdd=()=>{if(!sel){alert('먼저 좌측에서 품목을 선택하세요');return;}form={mode:'new',data:{tag:'S',cust:'',cust_nm:'',ymd:inD((new Date()).toISOString().slice(0,10)),cur:'KRW',main:'0',cost:0,mat:0,proc:0,other:0,matunit:'',remarks:''}};showModal();};
-  const openEdit=()=>{if(!dsel){alert('수정할 단가행을 선택하세요');return;}form={mode:'edit',data:Object.assign({},dsel)};showModal();};
+  const openEdit=()=>{if(!dsel){alert('수정 또는 삭제할 행을 선택해 주세요');return;}form={mode:'edit',data:Object.assign({},dsel)};showModal();};
   const doSave=async()=>{const f=form.data;const custNm=mq('cust_nm');let cust=acCust[custNm]||'';
     if(!cust){if(custNm===(f.cust_nm||''))cust=f.cust||'';else if(/^\d+$/.test(custNm))cust=custNm;}
     const body={item:sel,tag:mq('tag'),cust:cust,ymd:inD(mq('ymd')),cur:mq('cur'),main:mq('main'),cost:mq('cost'),mat:mq('mat'),proc:mq('proc'),other:mq('other'),matunit:mq('matunit'),remarks:mq('remarks'),by:(PERM&&PERM.userId)||'web'};
@@ -102,7 +102,7 @@ const priceMgmtView=(host)=>{
     try{const r=await fetch(`${API}/api/pricemgmt/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const j=await r.json();if(!r.ok){alert('저장 실패: '+(j.detail||r.status));return;}removeModal();form=null;dsel=null;loadDetail();}
     catch(e){alert('저장 오류: '+e.message);}};
-  const doDelete=async()=>{if(!dsel){alert('삭제할 단가행을 선택하세요');return;}
+  const doDelete=async()=>{if(!dsel){alert('수정 또는 삭제할 행을 선택해 주세요');return;}
     if(!confirm(`${TAGNM[dsel.tag]||dsel.tag} · ${dsel.cust_nm} · ${dsel.ymd} 단가행을 삭제할까요?`))return;
     try{const r=await fetch(`${API}/api/pricemgmt/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:sel,tag:dsel.tag,cust:dsel.cust,ymd:dsel.ymd})});
       const j=await r.json();if(!r.ok){alert('삭제 실패: '+(j.detail||r.status));return;}dsel=null;loadDetail();}
@@ -118,7 +118,7 @@ const priceMgmtView=(host)=>{
        <select class="inp" id="pmsg" style="max-width:120px"><option value="">소분류</option>${sgs}</select>
        <button class="btn" id="pmgo">🔍조회</button>
        <div class="spacer"></div>
-       ${canEdit?`<button class="btn" id="pmadd" style="background:#1c7c3a;color:#fff"${sel?'':' disabled'}>➕추가</button><button class="btn" id="pmedit"${dsel?'':' disabled'}>✏️수정</button><button class="btn" id="pmdel" style="color:#c0392b"${dsel?'':' disabled'}>🗑삭제</button>`:''}
+       ${canEdit?`<button class="btn" id="pmadd" style="background:#1c7c3a;color:#fff">➕추가</button><button class="btn" id="pmedit">✏️수정</button><button class="btn" id="pmdel" style="color:#c0392b">🗑삭제</button>`:''}
      </div>
      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:10px;flex:1;min-height:0">
       <div class="grid-wrap" style="min-height:0;overflow:auto;border:1px solid var(--line);border-radius:8px">
@@ -1488,7 +1488,8 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="spacer"></div></div>`;
   const sumbar=(a,tot,totlb)=>{const chip=(lb,v,cl)=>`<span class="nae-chip"><em>${lb}</em><b style="color:${cl||'#243244'}">${M(v)}</b></span>`;
     const son2=(a.sagub!=null)?((+a.sonik||0)+(+a.sagub||0)):null;
-    return `<div class="nae-sum">${chip('재료비',a.jae,'#1c6b3a')}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,a[tot],'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',a.sonik,(a.sonik<0?'#c0392b':'#1c7c3a'))}${a.sagub!=null?chip('사급차액',a.sagub,(a.sagub<0?'#c0392b':'#1c7c3a'))+chip('손익(사급반영)',son2,(son2<0?'#c0392b':'#1c7c3a')):''}</div>`;};
+    const sagChip=`<span class="nae-chip"><em>LG사급비</em><b style="color:#b8860b">${M((+a.sa_mat||0))}</b>${a.silsagub!=null?`<small style="display:block;font-size:10px;color:#8a5a1a">(실사급가: ${M(a.silsagub)}원)</small>`:''}</span>`;
+    return `<div class="nae-sum">${chip('재료비',(+a.jae||0)-(+a.sa_mat||0),'#1c6b3a')}${sagChip}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,a[tot],'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',a.sonik,(a.sonik<0?'#c0392b':'#1c7c3a'))}${a.sagub!=null?chip('사급차액',a.sagub,(a.sagub<0?'#c0392b':'#1c7c3a'))+chip('손익(사급반영)',son2,(son2<0?'#c0392b':'#1c7c3a')):''}</div>`;};
   const naeViewBar=()=>{const V=[['proc','공정'],['weld','용접'],['fasten','체결'],['company','업체']];
     return `<div class="nae-vbar">${V.map(([k,l])=>`<span class="nae-vb ${naeView===k?'on':''}" data-v="${k}">${l}</span>`).join('')}</div>`;};
   // 역전개 재료(재료비만, 용접봉=종류별 합산)

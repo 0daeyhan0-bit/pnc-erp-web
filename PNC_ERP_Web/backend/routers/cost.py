@@ -143,6 +143,13 @@ def cost_sil(item: str = Query(..., description="품번"),
                         "silver": False, "haskids": False, "name": n0[0], "spec": n0[1], "unit": "EA",
                         "sagub": e["unit"], "sagub_amt": e["amt"]})
         d["agg"]["sagub"] = round(sagub_total, 2)
+        # ★재료비 분해(재료비+LG사급비) + 이번 사급가(통째 실제사급가) — 나란히 표시용
+        try:
+            _sp = eng.material_split(item, ymd)
+            d["agg"]["sa_mat"] = round(float(_sp.get('sa', 0) or 0), 2)          # LG사급비(재료비 중 사급분, 분해=레거시)
+            d["agg"]["silsagub"] = round(eng.sagub_whole(item, ymd), 2)          # 이번 사급가(사급부품 통째 × 사급가@기준일)
+        except Exception:
+            d["agg"]["sa_mat"] = 0.0; d["agg"]["silsagub"] = 0.0
         return {"item": item, "ymd": ymd, "ym": ymv, "rows": d["rows"], "agg": d["agg"],
                 "procs": procs, "labor": (procs[0]["labor"] if procs else 0), "sagub_total": round(sagub_total, 2)}
     with _COST_LOCK:
@@ -172,6 +179,13 @@ def cost_nae(item: str = Query(..., description="품번"),
         d = eng.naewon_nodes(item, ymd)
         pg = eng.proc_grid(item, ymd)   # {proc_code:{wq,amt,uph,cg,labor}} — 합=가공비
         procs = _nae_proc_grid(pg)      # CS_M_PROC 공정명·정렬·그룹(용접/체결) 매핑
+        # ★재료비 분해(재료비+LG사급비) + 이번 사급가(통째) — 나란히 표시용
+        try:
+            _sp = eng.material_split(item, ymd)
+            d["agg"]["sa_mat"] = round(float(_sp.get('sa', 0) or 0), 2)
+            d["agg"]["silsagub"] = round(eng.sagub_whole(item, ymd), 2)
+        except Exception:
+            d["agg"]["sa_mat"] = 0.0; d["agg"]["silsagub"] = 0.0
         return {"item": item, "ymd": ymd, "bom": bom, "rows": d["rows"], "agg": d["agg"],
                 "procs": procs, "labor": (procs[0]["labor"] if procs else 0)}
     with _COST_LOCK:
