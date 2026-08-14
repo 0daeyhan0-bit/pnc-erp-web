@@ -2971,6 +2971,27 @@ SCREEN.lgsagub=(c)=>{
   const _def=(days)=>{const t=new Date(),f=new Date();f.setDate(1);if(days)f.setDate(t.getDate()-days);
     const g=d=>`20${String(d.getFullYear()).slice(2)}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return[g(f),g(t)];};
 
+  // 커스텀 오토컴플리트 드롭다운(datalist 브라우저 재필터 문제 회피 — 서버결과 그대로 표시·클릭선택)
+  function acAttach(inp, fetchFn, onPick){
+    let box=null, t=null, items=[], idx=-1;
+    const close=()=>{if(box){box.remove();box=null;}idx=-1;};
+    const open=(list)=>{close();items=list;if(!list||!list.length)return;
+      box=document.createElement('div');const r=inp.getBoundingClientRect();
+      box.style.cssText='position:fixed;left:'+r.left+'px;top:'+(r.bottom+2)+'px;width:'+Math.max(r.width,240)+'px;max-height:250px;overflow:auto;background:#fff;border:1px solid #b9c6dd;border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.2);z-index:1300;font-size:13px';
+      list.forEach((it,i)=>{const o=document.createElement('div');o.className='ac-op';
+        o.style.cssText='padding:6px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';o.innerHTML=it.label;
+        o.onmousedown=e=>{e.preventDefault();onPick(it);close();};box.appendChild(o);});
+      document.body.appendChild(box);};
+    inp.addEventListener('input',()=>{const q=inp.value.trim();clearTimeout(t);if(q.length<1){close();return;}
+      t=setTimeout(async()=>{try{open(await fetchFn(q));}catch(e){close();}},200);});
+    inp.addEventListener('blur',()=>setTimeout(close,150));
+    inp.addEventListener('keydown',e=>{if(!box)return;const ops=box.querySelectorAll('.ac-op');
+      if(e.key==='ArrowDown'){e.preventDefault();idx=Math.min(idx+1,ops.length-1);}
+      else if(e.key==='ArrowUp'){e.preventDefault();idx=Math.max(idx-1,0);}
+      else if(e.key==='Enter'&&idx>=0){e.preventDefault();onPick(items[idx]);close();return;}
+      else if(e.key==='Escape'){close();return;} else return;
+      ops.forEach((o,i)=>o.style.background=i===idx?'#eaf2fd':'');if(ops[idx])ops[idx].scrollIntoView({block:'nearest'});});
+  }
   function dopipView(c, kind){
     const wide = kind==='pur';
     const ep = wide ? 'purchase' : 'sale';
@@ -3026,8 +3047,8 @@ SCREEN.lgsagub=(c)=>{
       const T=(k,w)=>`<input class="dpf" data-k="${k}" value="${esc(f[k]!=null&&f[k]!==''?f[k]:'')}" style="width:${w||'100%'}">`;
       const R=[];
       R.push(L(wide?'입고일자':'출고일자')+`<input class="dpf" data-k="ymd" type="date" value="${esc(dIn(f.ymd))}" ${form.mode==='edit'?'readonly':''} style="width:150px">`
-           + L('거래처')+`<input class="dpf" data-k="cust_nm" list="dp-custdl" autocomplete="off" value="${esc(f.cust_nm||'')}" placeholder="거래처명 입력·선택" style="width:100%"><datalist id="dp-custdl"></datalist>`);
-      R.push(L('품목번호')+`<input class="dpf" data-k="mat" list="dp-matdl" autocomplete="off" value="${esc(f.mat||'')}" placeholder="자도번 입력" style="width:100%"><datalist id="dp-matdl"></datalist>`
+           + L('거래처')+`<input class="dpf" data-k="cust_nm" autocomplete="off" value="${esc(f.cust_nm||'')}" placeholder="거래처명/코드 입력" style="width:100%">`);
+      R.push(L('품목번호')+`<input class="dpf" data-k="mat" autocomplete="off" value="${esc(f.mat||'')}" placeholder="자도번/품명 입력" style="width:100%">`
            + L('수량')+N('qty'));
       R.push(L('통화')+`<select class="dpf" data-k="cur" style="width:120px">${CUROPT.map(x=>`<option value="${x}" ${(''+f.cur)===x?'selected':''}>${x}</option>`).join('')}</select>`
            + L('단가(외환)')+N('cost'));
@@ -3050,14 +3071,13 @@ SCREEN.lgsagub=(c)=>{
       modalEl.querySelector('#dp-cancel').onclick=()=>{removeModal();form=null;};
       modalEl.querySelector('#dp-save').onclick=doSave;
       const cel=modalEl.querySelector('.dpf[data-k="cust_nm"]');
-      if(cel)cel.oninput=e=>{const q=e.target.value.trim();clearTimeout(acT);if(!q)return;
-        acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);const vs=(await r.json()).rows||[];
-          acCust={};vs.forEach(x=>acCust[x.name]=x.code);
-          const dl=modalEl.querySelector('#dp-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.name)}">${esc(x.code)}</option>`).join('');}catch(err){}},220);};
+      if(cel)acAttach(cel, async q=>{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);
+          return ((await r.json()).rows||[]).map(x=>({name:x.name,code:x.code,label:`${esc(x.name)} <span style="color:#8896ab">${esc(x.code)}</span>`}));},
+        it=>{cel.value=it.name;acCust[it.name]=it.code;recalc();});
       const mel=modalEl.querySelector('.dpf[data-k="mat"]');
-      if(mel)mel.oninput=e=>{const q=e.target.value.trim();clearTimeout(acT);if(q.length<2)return;
-        acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/list?q=${encodeURIComponent(q)}&limit=25`);const vs=(await r.json()).rows||[];
-          const dl=modalEl.querySelector('#dp-matdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.item_code||'')}">${esc(x.nm||'')}</option>`).join('');}catch(err){}},220);};
+      if(mel)acAttach(mel, async q=>{const r=await fetch(`${API}/api/item/list?q=${encodeURIComponent(q)}&limit=25`);
+          return ((await r.json()).rows||[]).map(x=>({name:x.item_code,label:`<b>${esc(x.item_code)}</b> <span style="color:#8896ab">${esc(x.nm||'')}</span>`}));},
+        it=>{mel.value=it.name;recalc();});
       const fi=modalEl.querySelector('.dpf');if(fi)fi.focus();
     };
     const showModal=()=>{removeModal();modalEl=document.createElement('div');modalEl.innerHTML=modalHtml();document.body.appendChild(modalEl);wireModal();};
