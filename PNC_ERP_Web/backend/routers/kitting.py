@@ -318,11 +318,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
         raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]
-        keyed = {}
+        keyed = {}; earliest_ymd = d6a   # 생산실적 풀 하한(최소 계획일=밀린계획 시작)
         for r in raw:
             q = float(r["pl"] or 0); ymd = r["ymd"]
             bucket = 'P' if ymd < d6a else (ymd if ymd in dates else None)
             if bucket is None: continue
+            if ymd and ymd < earliest_ymd: earliest_ymd = ymd
             k = (r["gpc"], r["wo"], r["swo"] or '', r["assy"], r["upper"] or '', r["item"])
             g = keyed.get(k)
             if not g:
@@ -395,12 +396,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM {SCH}.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
         except Exception: pass
-        try:  # ★생산완료 판정 = 실제 생산실적(PR_T_PROD_DTL) — 재고 아님. (item,wo,swo)별 SUM(PROD_QTY). 미생산 WO는 0 → 완료로 안잡힘.
-            wos = list({g["wo"] for g in rows if g["wo"]})
-            for i in range(0, len(wos), 900):
-                ck = wos[i:i + 900]; ph = ",".join("?" * len(ck))
-                cur.execute(f"SELECT ITEM_CODE, WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), SUM(PROD_QTY) FROM {SCH}.PR_T_PROD_DTL WHERE WORK_ORDER IN ({ph}) GROUP BY ITEM_CODE, WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')", *ck)
-                for rr in cur.fetchall(): prodstk[(rr[0], rr[1], rr[2] or '')] = float(rr[3] or 0)
+        try:  # ★생산완료 판정 = 실제 생산실적(PR_T_PROD_DTL, WO없음 → 도번단위). 조회기간(최소계획일~to)내 SUM(PROD_QTY). 도번단위 풀을 날짜순 공유충당 → 밀린계획부터 완료, 미래=0.
+            items = list({g["item"] for g in rows if g["item"]})
+            for i in range(0, len(items), 900):
+                ck = items[i:i + 900]; ph = ",".join("?" * len(ck))
+                cur.execute(f"SELECT ITEM_CODE, SUM(PROD_QTY) FROM {SCH}.PR_T_PROD_DTL WHERE ITEM_CODE IN ({ph}) AND PROD_YMD BETWEEN ? AND ? GROUP BY ITEM_CODE", *ck, earliest_ymd, d6b)
+                for rr in cur.fetchall(): prodstk[rr[0]] = float(rr[1] or 0)
         except Exception: pass
         if str(src).strip() != "live":   # ★nx 셀단위 준비 flag 오버레이(우리 확인분) — 라이브 대사시 제외
             try:
@@ -414,32 +415,53 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         _TAG2FIN = {90: '6', 70: '4', 50: '3', 10: '3', 30: '2'}
         # ★충당 = 준비실적처리(키팅 /api/kitting/grid)와 100% 동일 검증엔진: 셀단위 pool 배분(출하90→ASSY×use/도번고정/중간공정70→준비50)+nx오버레이.
         #   410·460은 같은 SP라 숫자 동일해야 함 → 키팅의 검증된 충당을 그대로 사용. 생산ST=finish만 차감(준비 제외).
+        for g in rows:
+            g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])
+        # 1) 출하완료(90): WO단위 출하실적(SA_T_SALE_DTL) — 행별
         def _alloc(cellseq, pool, tag, key):
             pool = max(float(pool or 0), 0.0)
             for c in cellseq:
                 if pool <= 0: break
                 jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
                 if jan <= 0: continue
-                if jan > pool:
-                    c[key] += pool; pool = 0.0
+                if jan > pool: c[key] += pool; pool = 0.0
                 else:
                     c[key] += jan; pool -= jan
                     if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
         for g in rows:
-            it = g["item"]
-            g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])
             seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
-            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')            # 출하완료(출하실적)
-            # ★생산완료 = 실제 생산실적(PR_T_PROD_DTL by item·wo·swo)로만 판정. 재고(ASSY/중간공정/도번고정)는 실적아님 → 제외. 미생산 WO는 실적0 → 완료 안잡힘.
-            _alloc(seq, prodstk.get((it, g["wo"], g["swo"]), 0.0), 70, 'finish')                   # 생산완료=생산실적
-            _alloc(seq, max(rstock.get((it, g["gpc"]), 0.0), 0.0), 50, 'ready')                     # 키팅완료=준비재고
-            for c in seq:
-                ck = g["part_ymd"] if c["bucket"] == 'P' else c["ymd"]
+            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')
+        # 2)생산완료(70)=생산실적 / 3)키팅완료(50)=준비재고 : ★도번단위 풀 공유·날짜순 충당(WO별 재부여 방지→실제 생산/준비량 만큼만 완료).
+        def _shared(keyfn, poolmap, tag, key):
+            grp = {}
+            for g in rows:
+                for b, c in g["_cells"].items():
+                    grp.setdefault(keyfn(g), []).append((c, (b if b != 'P' else (g["part_ymd"] or '999999')), g["inhm"] or ''))
+            for k, lst in grp.items():
+                pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
+                if pool <= 0: continue
+                lst.sort(key=lambda x: (x[1], x[2]))
+                for c, sd, hm in lst:
+                    if pool <= 0: break
+                    jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
+                    if jan <= 0: continue
+                    if jan > pool: c[key] += pool; pool = 0.0
+                    else:
+                        c[key] += jan; pool -= jan
+                        if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
+        _shared(lambda g: g["item"], prodstk, 70, 'finish')                 # 생산완료=생산실적(도번단위)
+        _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')       # 키팅완료=준비재고(도번+파트)
+        # 4) nx 셀단위 준비 오버레이(우리 웹 확인분, src=nx만)
+        for g in rows:
+            it = g["item"]
+            for b, c in g["_cells"].items():
+                ck = g["part_ymd"] if b == 'P' else c["ymd"]
                 nq = nxcell.get((it, g["wo"], g["gpc"], ck), 0.0)
                 if nq > 0:
                     rem = max(c["plan"] - c["finish"] - c["ready"], 0.0)
                     if rem > 0: c["ready"] += min(nq, rem)
                     if c["plan"] > 0 and (c["finish"] + c["ready"]) >= c["plan"] and c["tag"] < 50: c["tag"] = 50
+        for g in rows:
             g["dcov"] = {}; g["dfin"] = {}
             pc = g["_cells"].get('P')
             g["prior_cover"] = round((pc["finish"] + pc["ready"]), 2) if pc else 0.0
