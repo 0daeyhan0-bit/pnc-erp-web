@@ -132,11 +132,19 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
             cur.execute(f"DELETE FROM nx.lg_sagub_actual WHERE src_file=? AND ym IN ({inl})", fn)
         else:
             cur.execute("DELETE FROM nx.lg_sagub_actual WHERE src_file=?", fn)
-        n = 0
-        for ymv, it, nmv, q, a, p, cst, rm in recs:
-            cur.execute("""INSERT INTO nx.lg_sagub_actual(ym,item_code,item_name,qty,amt,price,cust_code,remarks,src_file)
-                VALUES(?,?,?,?,?,?,?,?,?)""", ymv, it, nmv, q, a, p, cst, rm, fn)
-            n += 1
+        # ★배치 다중행 INSERT(200행/쿼리) — 행별 왕복 제거로 대용량 고속. (SQL Server 파라미터 2100 한도: 200×9=1800 안전)
+        try: cur.fast_executemany = True
+        except Exception: pass
+        cols = "(ym,item_code,item_name,qty,amt,price,cust_code,remarks,src_file)"
+        n = 0; BATCH = 200
+        for i in range(0, len(recs), BATCH):
+            chunk = recs[i:i + BATCH]
+            vals = ",".join("(?,?,?,?,?,?,?,?,?)" for _ in chunk)
+            flat = []
+            for ymv, it, nmv, q, a, p, cst, rm in chunk:
+                flat += [ymv, it, nmv, q, a, p, cst, rm, fn]
+            cur.execute(f"INSERT INTO nx.lg_sagub_actual{cols} VALUES {vals}", *flat)
+            n += len(chunk)
         nx.commit()
         # 업로드 요약
         cur.execute("SELECT ym, COUNT(*), SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual WHERE src_file=? GROUP BY ym ORDER BY ym", fn)
