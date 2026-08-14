@@ -186,6 +186,21 @@ def cost_nae(item: str = Query(..., description="품번"),
             d["agg"]["silsagub"] = round(eng.sagub_whole(item, ymd), 2)
         except Exception:
             d["agg"]["sa_mat"] = 0.0; d["agg"]["silsagub"] = 0.0
+        # ★표시용 사급 플래그 — nx.bom_line.sagub_default 재귀전개(레거시 SAGUB_FLAG 대응, 원가값 불변)
+        try:
+            eng.cur.execute("""WITH t AS (
+                SELECT bl.child_item AS c, CAST(ISNULL(bl.sagub_default,0) AS int) AS s
+                  FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id WHERE h.item_code=?
+                UNION ALL
+                SELECT bl.child_item, CAST(ISNULL(bl.sagub_default,0) AS int)
+                  FROM t JOIN nx.bom_header h ON h.item_code=t.c JOIN nx.bom_line bl ON bl.bom_id=h.bom_id)
+                SELECT c, MAX(s) FROM t GROUP BY c OPTION(MAXRECURSION 40)""", item)
+            sagm = {r[0]: (r[1] or 0) for r in eng.cur.fetchall()}
+            for row in d["rows"]:
+                row["sag"] = 1 if sagm.get(row.get("code")) else 0
+        except Exception:
+            for row in d["rows"]:
+                row.setdefault("sag", 0)
         return {"item": item, "ymd": ymd, "bom": bom, "rows": d["rows"], "agg": d["agg"],
                 "procs": procs, "labor": (procs[0]["labor"] if procs else 0)}
     with _COST_LOCK:
