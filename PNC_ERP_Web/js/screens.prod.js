@@ -373,59 +373,116 @@ SCREEN.planupload=(c)=>{
 };
 
 SCREEN.partplan=(c)=>{
+  // 파트별 생산계획 — 레거시 w_pr_input_410_new 재현. ★데이터/색상 정본 = 키팅과 동일 SP(GROUP BY gpc·wo·swo·assy·upper·item, 날짜피벗) → /api/kitting/grid 재사용(nx 직독). 값·색상 키팅과 자동일치.
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
-  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  const f2=n=>Number(n||0).toLocaleString('ko-KR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:(s||'');
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const wlab=y=>{if(!y||y.length<6)return dcol(y);const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));const dow='일월화수목금토'[dt.getDay()];return `${y.slice(4,6)}${dow}`;};
+  const isWkend=y=>{if(!y||y.length<6)return false;const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return dt.getDay()===0||dt.getDay()===6;};
+  // 당김: 원계획일(plan_ymd, LG) 대비 파트계획일(part_ymd) 당겨진 달력일수(음수=선행생산). ★근사(정밀 pull-SP 미이식).
+  const pull=(pymd,plan)=>{if(!pymd||!plan||pymd.length<6||plan.length<6)return '';const a=new Date(2000+ +pymd.slice(0,2),+pymd.slice(2,4)-1,+pymd.slice(4,6)),b=new Date(2000+ +plan.slice(0,2),+plan.slice(2,4)-1,+plan.slice(4,6));const d=Math.round((a-b)/864e5);return d?`${d>0?'+':''}${d}d`:'';};
   const T=new Date();
-  let F={from:iso(T),to:iso(new Date(T.getTime()+27*864e5)),wc:'',part:'',assy:'',line:''};
-  let data={dates:[],rows:[],part_count:0,sum_qty:0}, wcs=[], loading=false, msg='', src='nx';  // nx=우리편성, live=레거시
-  const loadWc=async()=>{const ep=src==='nx'?'/api/partner/workcenters':'/api/partplan/workcenters';try{const r=await fetch(`${API}${ep}`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
-  const load=async()=>{loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,wc:F.wc,part:F.part,assy:F.assy,line:F.line});
-    const ep=src==='nx'?'/api/plan/part':'/api/partplan/list';
-    try{const r=await fetch(`${API}${ep}?${qs}`);data=await r.json();msg='';}
-    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],part_count:0,sum_qty:0};}
-    loading=false;draw();};
-  const draw=()=>{
-    const dates=data.dates||[];
-    // 규칙17: 로드된 rows에서 자도번(값→품명표시)·Assy도번·라인 datalist
-    const ppPart=new Map(),ppAssy=new Set(),ppLine=new Set();
-    (data.rows||[]).forEach(r=>{if(r.part&&!ppPart.has(r.part))ppPart.set(r.part,r.nm||'');if(r.assy)ppAssy.add(r.assy);if(r.line)ppLine.add(r.line);});
-    const ppPartOpts=[...ppPart].map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
-    const ppAssyOpts=[...ppAssy].map(v=>`<option value="${esc(v)}"></option>`).join('');
-    const ppLineOpts=[...ppLine].map(v=>`<option value="${esc(v)}"></option>`).join('');
+  // ★색상 정본(레거시 c_color CASE = kitting finBg 이식): 90주황(출하완료)/70노랑(생산완료)/50·10녹(키팅완료)/else 백(미키팅)
+  const finBg=f=>f==='6'?'#fac090':(f==='4'?'#ffff00':(f==='3'?'#669900':''));
+  const finFg=f=>f==='3'?'#ffffff':'';
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'전체',view:'전체',loading:false,msg:''};
+  const load=async()=>{st.loading=true;render();
+    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:st.view,unfin:st.unfin,limit:8000});
+    try{const r=await fetch(`${API}/api/kitting/grid?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.note=j.note||'';st.msg='';}
+    catch(e){st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';st.rows=[];st.dates=[];}
+    st.loading=false;render();};
+  const shiftDay=n=>{const d=new Date(st.base);d.setDate(d.getDate()+n);st.base=iso(d);load();};
+  // 생산ST(행) = (생산계획 − 완료) × item_st(초) / 3600  [레거시 c_item_st]
+  const rowST=r=>Math.max((+r.plan_qty||0)-(+r.finish||0),0)*(+r.item_st||0)/3600;
+  const render=()=>{
+    const d=st.dates;
+    const wcM=new Map([['P1','용접'],['P2','가공']]);
+    const PART_FIX=[['S5','01라인(용접)'],['S5-2','01라인(조립)'],['S1','02라인'],['S6','03라인'],['S4','04라인'],['S11','05라인'],['RAC','06라인'],['S10','자동은납 10'],['S13','서브/고주파'],['S12','설치'],['S8','서포터 08'],['S9','용접 09'],['S7','다관절 로봇 용접'],['-','-'],['Q1000','용접봉창고']];
+    const partOpts='<option value=""'+(st.part?'':' selected')+'>전체</option>'+PART_FIX.map(([v,n])=>v==='-'?'<option disabled>─────────</option>':`<option value="${esc(v)}"${st.part===v?' selected':''}>${esc(n)}</option>`).join('');
+    const seg=(name,val,opts)=>opts.map(v=>`<label style="font-weight:400;margin:0 5px 0 1px"><input type="radio" name="${name}" value="${v}" ${val===v?'checked':''}> ${v}</label>`).join('');
+    // ── 구분(view): 집계=도번(item)단위 롤업 / 전체·제번=제번(WO)단위 상세 ──
+    let disp=st.rows;
+    if(st.view==='집계'){
+      const agg=new Map();
+      st.rows.forEach(r=>{const k=r.gpc+'|'+r.assy+'|'+r.upper+'|'+r.item;let g=agg.get(k);
+        if(!g){g={gpcnm:r.gpcnm,gpc:r.gpc,assy:r.assy,upper:r.upper,item:r.item,nm:r.nm,line:r.line,inhm:r.inhm,part_ymd:r.part_ymd,plan_ymd:r.plan_ymd,item_st:r.item_st,wo:'(집계)',swo:'',plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{}};agg.set(k,g);}
+        g.plan_qty+=+r.plan_qty||0;g.finish+=+r.finish||0;g.prior_plan+=+r.prior_plan||0;g.prior_cover+=+r.prior_cover||0;
+        if((r.part_ymd||'')<(g.part_ymd||'zz'))g.part_ymd=r.part_ymd;
+        if(+r.prior_plan>0&&(g.prior_fin==='0'||finRank(r.prior_fin)<finRank(g.prior_fin)))g.prior_fin=r.prior_fin;
+        d.forEach(x=>{if(r.days&&r.days[x]){g.days[x]=(g.days[x]||0)+r.days[x];g.dcov[x]=(g.dcov[x]||0)+((r.dcov&&r.dcov[x])||0);
+          const cf=(r.dfin&&r.dfin[x])||'0';if(!g.dfin[x]||g.dfin[x]==='0'||finRank(cf)<finRank(g.dfin[x]))g.dfin[x]=cf;}});});
+      disp=[...agg.values()];
+    }
+    // 정렬: PART일자+INPUT → 도번 → WO (레거시 sort)
+    disp=disp.slice().sort((a,b)=>((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.item||'').localeCompare(b.item||'')||(a.wo||'').localeCompare(b.wo||''));
+    const NCOL=12;  // 고정컬럼(파트..당일이전계획)
+    const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
+    const pcell=r=>r.prior_plan>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:'·';
+    const rowHtml=(r,seq)=>{const pf=r.prior_fin||'0';
+      return `<tr>
+        <td class="center mut">${seq}</td><td>${esc(r.gpcnm||r.gpc)}</td>
+        <td><b>${esc(r.assy)}</b></td><td>${esc(r.upper||'')}</td><td>${esc(r.item)}</td>
+        <td class="bcap" title="${esc(r.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
+        <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm||'')}</td>
+        <td class="center" style="color:#b8791f">${esc(pull(r.part_ymd,r.plan_ymd))}</td>
+        <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
+        ${r.prior_plan>0?numTd(pcell(r),finBg(pf)||'#eef4fb',pf!=='0',finFg(pf)):numTd('·','',false)}
+        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(`${nf(cv)}/${nf(pl)}`,finBg(cf)||'#eef4fb',cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}</tr>`;};
+    // footer: 당일이전·일자별 (완료/계획) + 생산ST행
+    const fPrP=disp.reduce((s,r)=>s+(+r.prior_plan||0),0), fPrC=disp.reduce((s,r)=>s+(+r.prior_cover||0),0);
+    const fPl=x=>disp.reduce((s,r)=>s+((r.days&&r.days[x])||0),0), fCv=x=>disp.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
+    const fST=disp.reduce((s,r)=>s+rowST(r),0);
+    const fSTd=x=>disp.reduce((s,r)=>s+Math.max(((r.days&&r.days[x])||0)-((r.dcov&&r.dcov[x])||0),0)*(+r.item_st||0)/3600,0);
+    const fSTprior=disp.reduce((s,r)=>s+Math.max((+r.prior_plan||0)-(+r.prior_cover||0),0)*(+r.item_st||0)/3600,0);
     c.innerHTML=`
-     <div class="page-title">🧩 파트별 생산계획 <span style="font-size:12px;color:var(--muted);font-weight:400">도번→자도번 전개 · 작업처별 일자계획</span></div>
-     <div class="page-sub">도번→자도번 전개 + 가공처 라우팅을 자도번(파트)·작업처 단위 일자별 전개. ${src==='nx'?'🟢 <b>우리 편성 정본</b>(<code>nx.plan_part_mat</code>, 레거시 STEP5→6→7 충실이식) — 수량 100% 검증':'🔴 라이브 레거시(<code>PR_T_PLAN_PART_MAT</code>)'}</div>
-     <div class="toolbar">
-       <label class="tl">소스</label><select class="inp" id="pp-src"><option value="nx"${src==='nx'?' selected':''}>우리 편성(nx)</option><option value="live"${src==='live'?' selected':''}>라이브 레거시</option></select>
-       <label class="tl">계획기간</label><input class="inp" type="date" id="pp-from" value="${F.from}"> ~ <input class="inp" type="date" id="pp-to" value="${F.to}">
-       <label class="tl">자도번작업처</label><select class="inp" id="pp-wc" style="max-width:180px"><option value="">전체</option>${wcs.map(w=>`<option value="${esc(w.cc)}"${F.wc===w.cc?' selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('')}</select>
-       <button class="btn" id="pp-search">🔍 조회</button>
+     <div class="page-title">🧩 파트별 생산계획 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_410_new · nx 직독(키팅과 동일 SP·색상)</span></div>
+     <div class="page-sub">사내 생산품(용접/가공) 파트별 일자계획. 당일이전계획=기준일 이전 계획 누적(완료/계획). 셀=완료/계획.
+       <span style="background:#669900;color:#fff;padding:0 5px">녹=키팅완료</span> <span style="background:#ffff00;padding:0 5px">노랑=생산완료</span> <span style="background:#fac090;padding:0 5px">주황=출하완료</span> 백=미키팅</div>
+     <div class="toolbar" style="flex-wrap:wrap;gap:4px">
+       <label class="tl">기준일자</label><button class="btn ghost" id="pp-prev" title="전일" style="padding:2px 6px">◀</button>
+       <input class="inp" type="date" id="pp-base" value="${st.base}" style="width:138px">
+       <button class="btn ghost" id="pp-next" title="익일" style="padding:2px 6px">▶</button>
+       <label class="tl">적용일수</label><select class="inp" id="pp-gigan" style="width:62px">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
+       <label class="tl">자도번작업처</label><select class="inp" id="pp-wc" style="width:80px"><option value="">전체</option>${[...wcM].map(([v,n])=>`<option value="${esc(v)}"${st.wc===v?' selected':''}>${esc(n)}</option>`).join('')}</select>
+       <label class="tl">파트</label><select class="inp" id="pp-part" style="width:130px">${partOpts}</select>
+       <label class="tl">도번</label><input class="inp" id="pp-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
+       <label class="tl">자도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
+       <label class="tl">미생산</label>${seg('pp-uf',st.unfin,['전체','미생산'])}
+       <label class="tl">구분</label>${seg('pp-vw',st.view,['전체','집계','제번'])}
+       <button class="btn" id="pp-go">🔍 조회</button>
+       <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(st.plan_sum)}</b> · 일자 ${d.length}개</span>
      </div>
-     <div class="toolbar" style="margin-top:2px">
-       <label class="tl">자도번(파트)</label><input class="inp" id="pp-part" list="ppn-partl" value="${esc(F.part)}" style="width:120px" placeholder="자도번/품명" autocomplete="off"><datalist id="ppn-partl">${ppPartOpts}</datalist>
-       <label class="tl">Assy도번</label><input class="inp" id="pp-assy" list="ppn-assyl" value="${esc(F.assy)}" style="width:120px" placeholder="Assy도번 입력" autocomplete="off"><datalist id="ppn-assyl">${ppAssyOpts}</datalist>
-       <label class="tl">라인</label><input class="inp" id="pp-line" list="ppn-linel" value="${esc(F.line)}" style="width:60px" placeholder="라인" autocomplete="off"><datalist id="ppn-linel">${ppLineOpts}</datalist>
-       <div class="spacer"></div><span class="rowcount">파트 <b>${nf(data.part_count)}</b> · 계획수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}개</span>
-     </div>
-     ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px"><thead><tr>
-       <th>Assy도번</th><th>자도번(파트)</th><th>품명</th><th>라인</th><th>작업처</th><th class="num">소요</th><th class="num">계</th>${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
-      <tbody>${loading?spinRow(7+dates.length):((data.rows&&data.rows.length)?data.rows.map(r=>`<tr>
-        <td>${esc(r.assy)}</td><td><b>${esc(r.part)}</b></td>
-        <td class="bcap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td>
-        <td class="center">${esc(r.line)}</td><td class="center">${esc(r.wcnm||r.wc)}</td><td class="num">${nf(r.use)}</td><td class="num"><b>${nf(r.tot)}</b></td>
-        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${7+dates.length}" class="empty">조회 결과 없음 — 생산계획업로드 후 협력사계획이 생성되면 표시됩니다.</td></tr>`)}</tbody></table></div>`;
+     ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
+     ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
+     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl fit" style="font-size:11px"><thead><tr>
+       <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}</tr></thead>
+      <tbody>${st.loading?spinRow(NCOL+d.length):(disp.length?disp.map((r,i)=>rowHtml(r,i+1)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
+      ${disp.length?`<tfoot>
+       <tr class="grandtot" style="position:sticky;bottom:22px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
+        <td class="center" colspan="10">합계</td><td class="num">${f2(fST)}</td><td class="num">${nf(st.plan_sum)}</td>
+        <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}</tr>
+       <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
+        <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fST)}</td><td></td>
+        <td class="num">${f2(fSTprior)}</td>${d.map(x=>`<td class="num">${f2(fSTd(x))}</td>`).join('')}</tr>
+       </tfoot>`:''}
+      </table></div>`;
     const g=id=>c.querySelector(id);
-    g('#pp-search').onclick=()=>{F.from=g('#pp-from').value;F.to=g('#pp-to').value;F.wc=g('#pp-wc').value;F.part=g('#pp-part').value;F.assy=g('#pp-assy').value;F.line=g('#pp-line').value;load();};
-    ['#pp-part','#pp-assy','#pp-line'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#pp-search').click();});
-    const sc=g('#pp-src');if(sc)sc.onchange=e=>{src=e.target.value;F.wc='';loadWc().then(load);};
+    g('#pp-go').onclick=()=>{st.base=g('#pp-base').value;st.wc=g('#pp-wc').value;st.part=g('#pp-part').value;
+      st.dono=g('#pp-dono').value.trim();st.jado=g('#pp-jado').value.trim();st.gigan=+g('#pp-gigan').value;
+      const uf=c.querySelector('input[name=pp-uf]:checked');if(uf)st.unfin=uf.value;
+      const vw=c.querySelector('input[name=pp-vw]:checked');if(vw)st.view=vw.value;
+      load();};
+    g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
+    ['#pp-dono','#pp-jado'].forEach(id=>{const e=g(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter')g('#pp-go').click();};});
+    if(typeof attachResizers==='function')attachResizers(c);
   };
-  loadWc().then(load);
+  render();load();
 };
+// 색 우선순위(낮을수록 완료단계 높음): 출하6 < 생산4 < 키팅3 < 자재2 < 미키팅0
+function finRank(f){return {'6':1,'4':2,'3':3,'2':4,'0':9}[f]||9;}
 
 /* ===== 생산 ③: 생산실적현황 (w_pr_list_010) — 작업장별집계/도번별상세(실측확정) ===== */
 SCREEN.prodresult=(c)=>{
