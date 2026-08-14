@@ -271,8 +271,9 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             except Exception:
                 t = None
         tc = " AND PLAN_YMD<=?" if t else ""
-        # ★단가 = 완제품 개당 예상 LG사급금액 = nx 원가엔진 material_split['sa'](=품목별 원가분석 LG사급비와 동일값, 7월 리시빙 대사 일치).
-        #   ★사급(소분류310)은 '최말단 leaf'에서만 계상(비-leaf 310=사급가공품은 전개해 하위 사급만). nx.bom_line/첫310중단 방식은 2~4배 과다 → 엔진값으로 사전계산 nx.item_sagub_cost 캐시(rebuild 갱신).
+        # ★단가 = 완제품 개당 예상 LG사급금액 = Σ(사급부품[소분류310] 소요 × 사급가 COSP), '통째'(사급부품은 분해 안 함).
+        #   ★OSP 실측 대사(2026-08-14): material_split(분해)는 실제 사급 대비 과소(15.4↔OSP 21.4억). 사급부품을 통째로 사급가 곱해야 실제 OSP와 정합.
+        #   소요=CS_M_ITEM_BOM(조달경로변형 배제), 사급가=nx.price_item(매입/LG) 조회당일 최신. nx.item_sagub_cost 캐시(rebuild=CS×COSP).
         cur.execute("SELECT LTRIM(RTRIM(item_code)), CAST(sa_cost AS float), ISNULL(asof_ymd,'') FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
         sac = {}; asof = ""
         for ic, sc, af in cur.fetchall():

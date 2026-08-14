@@ -3009,27 +3009,70 @@ SCREEN.lgsagub=(c)=>{
     const rowHtml=r=>{const on=sel&&sel.ymd===r.ymd&&sel.seq===r.seq;
       return `<tr class="dp-row${on?' sel':''}" data-y="${r.ymd}" data-s="${r.seq}" style="cursor:${canEdit?'pointer':'default'}${on?';background:#dce9ff':''}">${COLS.map(cd=>{const cap=cd[2].indexOf('cap')>=0;return `<td class="${cd[2]}"${cap?` title="${esc(cd[3](r).replace(/<[^>]+>/g,''))}"`:''}>${cd[3](r)}</td>`;}).join('')}</tr>`;};
     const sub=(label,q,a,k,cls)=>`<tr class="${cls||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${nD(q,0)}</td><td></td><td></td><td class="num">${nD(a,4)}</td><td class="num">${wonI(k)}</td><td colspan="${COLS.length-qi-4}"></td></tr>`;
-    // 편집 필드 정의
-    const FLD = [['ymd',wide?'입고일자':'출고일자','date'],['cust','거래처코드','text'],['mat','품목번호','text'],['qty','수량','num'],['cur','통화','text'],['cost','단가(외환)','num'],['rate','환율','num'],['remarks','비고','text']];
-    if(wide) FLD.push(['duty','관세','num'],['fare','운임','num'],['tax','부과세과표','num'],['insp','신고번호','text'],['bl','B/L번호','text'],['hs','HS CODE','text']);
+    // ===== 편집 모달 (document.body 렌더 = 조상 클리핑 방지) =====
+    const CUROPT=['USD','RMB','CNY','JPY','EUR','KRW'];
+    let modalEl=null, acT=null, acCust={};
+    if(!document.getElementById('dp-style')){const st=document.createElement('style');st.id='dp-style';
+      st.textContent='.dp-grid thead th{position:sticky;top:0;z-index:3;background:#f4f7fc}'
+        +'.dp-grid tr.grandtot td{position:sticky;bottom:0;background:#eaf1fb;z-index:2;font-weight:700;border-top:2px solid #cdd9ef}'
+        +'.dp-row.sel td{background:#dce9ff !important}'
+        +'.dp-modal .fl{text-align:right;white-space:nowrap;color:#4a5563;font-size:13px}'
+        +'.dp-modal input,.dp-modal select{border:1px solid #cbd5e6;border-radius:5px;padding:5px 8px;font-size:13px;box-sizing:border-box}';
+      document.head.appendChild(st);}
+    const removeModal=()=>{ if(modalEl){modalEl.remove();modalEl=null;} };
     const modalHtml=()=>{const f=form.data, amt=(+f.qty||0)*(+f.cost||0), krw=Math.trunc(amt*(+f.rate||0));
-      return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:40px 10px">
-       <div style="background:#fff;border-radius:10px;padding:18px 22px;min-width:440px;max-width:600px;box-shadow:0 12px 44px rgba(0,0,0,.32)">
-        <div style="font-weight:700;font-size:15px;margin-bottom:14px">${form.mode==='new'?('➕ 도입-'+(wide?'수입':'수출')+' 추가'):'✏️ 수정 ('+esc(f.ymd)+'-'+f.seq+')'}</div>
-        <div style="display:grid;grid-template-columns:96px 1fr 96px 1fr;gap:8px 10px;align-items:center">
-         ${FLD.map(([k,lbl,ty])=>`<label class="tl">${lbl}</label><input class="inp dpf" data-k="${k}" type="${ty==='date'?'date':'text'}" value="${esc(ty==='date'?dIn(f[k]):(f[k]!=null&&f[k]!==''?f[k]:''))}" ${form.mode==='edit'&&k==='ymd'?'readonly':''} style="width:100%">`).join('')}
-        </div>
-        <div style="margin-top:10px;padding:8px 10px;background:#f4f7fc;border-radius:6px;font-size:12.5px">금액(외환) <b id="dp-amt">${nD(amt,4)}</b> · 금액(KRW) <b id="dp-krw">${wonI(krw)}</b> <span style="color:#888">(=수량×단가, ×환율 버림 자동)</span></div>
-        <div style="margin-top:16px;text-align:right"><button class="btn ghost" id="dp-cancel">취소</button> <button class="btn" id="dp-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
+      const L=(t)=>`<label class="fl">${t}</label>`;
+      const N=(k,w)=>`<input class="dpf" data-k="${k}" value="${esc(f[k]!=null&&f[k]!==''?f[k]:'')}" style="width:${w||'130px'};text-align:right">`;
+      const T=(k,w)=>`<input class="dpf" data-k="${k}" value="${esc(f[k]!=null&&f[k]!==''?f[k]:'')}" style="width:${w||'100%'}">`;
+      const R=[];
+      R.push(L(wide?'입고일자':'출고일자')+`<input class="dpf" data-k="ymd" type="date" value="${esc(dIn(f.ymd))}" ${form.mode==='edit'?'readonly':''} style="width:150px">`
+           + L('거래처')+`<input class="dpf" data-k="cust_nm" list="dp-custdl" autocomplete="off" value="${esc(f.cust_nm||'')}" placeholder="거래처명 입력·선택" style="width:100%"><datalist id="dp-custdl"></datalist>`);
+      R.push(L('품목번호')+`<input class="dpf" data-k="mat" list="dp-matdl" autocomplete="off" value="${esc(f.mat||'')}" placeholder="자도번 입력" style="width:100%"><datalist id="dp-matdl"></datalist>`
+           + L('수량')+N('qty'));
+      R.push(L('통화')+`<select class="dpf" data-k="cur" style="width:120px">${CUROPT.map(x=>`<option value="${x}" ${(''+f.cur)===x?'selected':''}>${x}</option>`).join('')}</select>`
+           + L('단가(외환)')+N('cost'));
+      R.push(L('환율')+N('rate')+L('비고')+T('remarks'));
+      if(wide){ R.push(L('관세')+N('duty')+L('운임')+N('fare'));
+        R.push(L('부가세과표')+N('tax')+L('신고번호')+T('insp'));
+        R.push(L('B/L번호')+T('bl')+L('HS CODE')+T('hs')); }
+      return `<div class="wr-modal dp-modal" style="position:fixed;inset:0;z-index:1200;background:rgba(20,30,50,.44);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:48px 12px">
+       <div style="background:#fff;border-radius:12px;padding:20px 24px;width:660px;max-width:94vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
+        <div style="font-weight:700;font-size:15px;margin-bottom:16px">${form.mode==='new'?('➕ 도입-'+(wide?'수입':'수출')+' 추가'):'✏️ 수정 ('+esc(f.ymd)+'-'+f.seq+')'}</div>
+        <div style="display:grid;grid-template-columns:80px 1fr 80px 1fr;gap:11px 12px;align-items:center">${R.join('')}</div>
+        <div style="margin-top:14px;padding:9px 12px;background:#f4f7fc;border-radius:7px;font-size:13px">금액(외환) <b id="dp-amt">${nD(amt,4)}</b> · 금액(KRW) <b id="dp-krw">${wonI(krw)}</b> <span style="color:#888">(=수량×단가, ×환율 버림 자동)</span></div>
+        <div style="margin-top:18px;text-align:right"><button class="btn ghost" id="dp-cancel">취소</button> <button class="btn" id="dp-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
        </div></div>`;};
-    const openEdit=()=>{if(!sel){alert('행을 선택하세요');return;}const r=rows.find(x=>x.ymd===sel.ymd&&x.seq===sel.seq);if(r){form={mode:'edit',data:Object.assign({},r)};draw();}};
+    const mq2=k=>{const x=modalEl&&modalEl.querySelector('.dpf[data-k="'+k+'"]');return x?x.value.trim():'';};
+    const recalc=()=>{const amt=(+mq2('qty')||0)*(+mq2('cost')||0), krw=Math.trunc(amt*(+mq2('rate')||0));
+      const ae=modalEl.querySelector('#dp-amt'),ke=modalEl.querySelector('#dp-krw');if(ae)ae.textContent=nD(amt,4);if(ke)ke.textContent=wonI(krw);};
+    const wireModal=()=>{
+      modalEl.querySelectorAll('.dpf').forEach(el=>el.oninput=recalc);
+      modalEl.querySelector('#dp-cancel').onclick=()=>{removeModal();form=null;};
+      modalEl.querySelector('#dp-save').onclick=doSave;
+      const cel=modalEl.querySelector('.dpf[data-k="cust_nm"]');
+      if(cel)cel.oninput=e=>{const q=e.target.value.trim();clearTimeout(acT);if(!q)return;
+        acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);const vs=(await r.json()).rows||[];
+          acCust={};vs.forEach(x=>acCust[x.name]=x.code);
+          const dl=modalEl.querySelector('#dp-custdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.name)}">${esc(x.code)}</option>`).join('');}catch(err){}},220);};
+      const mel=modalEl.querySelector('.dpf[data-k="mat"]');
+      if(mel)mel.oninput=e=>{const q=e.target.value.trim();clearTimeout(acT);if(q.length<2)return;
+        acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/list?q=${encodeURIComponent(q)}&limit=25`);const vs=(await r.json()).rows||[];
+          const dl=modalEl.querySelector('#dp-matdl');if(dl)dl.innerHTML=vs.map(x=>`<option value="${esc(x.item_code||'')}">${esc(x.nm||'')}</option>`).join('');}catch(err){}},220);};
+      const fi=modalEl.querySelector('.dpf');if(fi)fi.focus();
+    };
+    const showModal=()=>{removeModal();modalEl=document.createElement('div');modalEl.innerHTML=modalHtml();document.body.appendChild(modalEl);wireModal();};
+    const openAdd=()=>{form={mode:'new',data:{ymd:inD(to),cust:'',cust_nm:'',mat:'',qty:0,cur:'USD',cost:0,rate:0,remarks:''}};showModal();};
+    const openEdit=()=>{if(!sel){alert('행을 선택하세요');return;}const r=rows.find(x=>x.ymd===sel.ymd&&x.seq===sel.seq);if(r){form={mode:'edit',data:Object.assign({},r)};showModal();}};
     const doSave=async()=>{const f=form.data;
-      const body={kind:wide?'pur':'sale',seq:form.mode==='edit'?f.seq:0};
-      c.querySelectorAll('.dpf').forEach(el=>{const k=el.dataset.k;body[k]=(k==='ymd')?inD(el.value):el.value.trim();});
-      if(!body.ymd||!body.cust||!body.mat){alert('일자·거래처·품목번호 필수');return;}
+      const custNm=mq2('cust_nm'); let cust=acCust[custNm]||'';
+      if(!cust){ if(custNm===(f.cust_nm||'')) cust=f.cust||''; else if(/^\d+$/.test(custNm)) cust=custNm; }
+      const body={kind:wide?'pur':'sale',seq:form.mode==='edit'?f.seq:0,ymd:inD(mq2('ymd')),cust:cust,mat:mq2('mat'),
+        qty:mq2('qty'),cur:mq2('cur'),cost:mq2('cost'),rate:mq2('rate'),remarks:mq2('remarks')};
+      if(wide){body.duty=mq2('duty');body.fare=mq2('fare');body.tax=mq2('tax');body.insp=mq2('insp');body.bl=mq2('bl');body.hs=mq2('hs');}
+      if(!body.ymd||!cust||!body.mat){alert('일자·거래처·품목번호 필수 (거래처는 목록에서 선택)');return;}
       try{const r=await fetch(`${API}/api/dopip/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const j=await r.json();if(!r.ok){alert('저장 실패: '+(j.detail||r.status));return;}
-        form=null;sel={ymd:body.ymd,seq:j.seq};load();}
+        removeModal();form=null;sel={ymd:body.ymd,seq:j.seq};load();}
       catch(e){alert('저장 오류: '+e.message);}};
     const doDelete=async()=>{if(!sel){alert('삭제할 행을 선택하세요');return;}
       if(!confirm(`${sel.ymd}-${sel.seq} 행을 삭제할까요?`))return;
@@ -3038,22 +3081,22 @@ SCREEN.lgsagub=(c)=>{
         sel=null;load();}
       catch(e){alert('삭제 오류: '+e.message);}};
     const draw=()=>{
-      c.innerHTML=`
-       <div class="page-title">${wide?'🚢 도입-수입입력':'✈️ 도입-수출입력'} <span style="font-size:12px;color:var(--muted);font-weight:400">${wide?'해외 수입(구매)':'해외 수출(판매)'} · nx</span></div>
-       <div class="page-sub">원본 <code>w_pu_stock_c_0${wide?'40':'50'}</code> · 데이터 <code>nx.PU_T_STOCK_MAINT_C</code> (MAINT_TAG='${wide?'P':'Q'}') · 금액(KRW)=금액×환율(버림) · 행 클릭=선택, 더블클릭=수정</div>
+      c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+       <div class="page-title" style="margin-bottom:2px">${wide?'🚢 도입-수입입력':'✈️ 도입-수출입력'} <span style="font-size:12px;color:var(--muted);font-weight:400">${wide?'해외 수입(구매)':'해외 수출(판매)'} · nx</span></div>
+       <div class="page-sub" style="margin-bottom:6px">원본 <code>w_pu_stock_c_0${wide?'40':'50'}</code> · <code>nx.PU_T_STOCK_MAINT_C</code> (MAINT_TAG='${wide?'P':'Q'}') · 금액(KRW)=금액×환율(버림) · 행 클릭=선택·더블클릭=수정</div>
        <div class="toolbar">
          <label class="tl">${wide?'입고기간':'출고기간'}</label>
-         <input type="date" class="inp" id="df" value="${esc(from)}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dt" value="${esc(to)}" style="min-width:130px">
-         <input class="inp" id="cq" placeholder="거래처코드" value="${esc(cq)}" style="width:110px">
-         <input class="inp" id="mq" placeholder="자도번" value="${esc(mq)}" style="width:130px">
-         ${wide?`<input class="inp" id="iq" placeholder="신고번호" value="${esc(iq)}" style="width:130px"><input class="inp" id="bq" placeholder="B/L번호" value="${esc(bq)}" style="width:130px">`:''}
+         <input type="date" class="inp" id="df" value="${esc(from)}" style="width:135px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dt" value="${esc(to)}" style="width:135px">
+         <input class="inp" id="cq" placeholder="거래처코드" value="${esc(cq)}" style="width:100px">
+         <input class="inp" id="mq" placeholder="자도번" value="${esc(mq)}" style="width:120px">
+         ${wide?`<input class="inp" id="iq" placeholder="신고번호" value="${esc(iq)}" style="width:120px"><input class="inp" id="bq" placeholder="B/L번호" value="${esc(bq)}" style="width:120px">`:''}
          <button class="btn" id="go">🔍 조회</button>
          ${canEdit?`<button class="btn" id="add" style="background:#1c7c3a;color:#fff">➕ 추가</button><button class="btn" id="edit">✏️ 수정</button><button class="btn" id="del" style="color:#c0392b">🗑 삭제</button>`:''}
          <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀</button>
        </div>
-       <div class="summary-bar" id="sum"></div>
-       <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit"><thead><tr>${COLS.map(cd=>`<th class="${cd[2]}">${cd[1]}</th>`).join('')}</tr></thead><tbody id="body"></tbody></table></div>
-       <div class="rowcount" id="cnt"></div>`;
+       <div class="summary-bar" id="sum" style="flex:0 0 auto"></div>
+       <div class="grid-wrap dp-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead><tr>${COLS.map(cd=>`<th class="${cd[2]}">${cd[1]}</th>`).join('')}</tr></thead><tbody id="body"></tbody></table></div>
+       <div class="rowcount" id="cnt" style="flex:0 0 auto"></div></div>`;
       const g=id=>c.querySelector(id);
       let html='';
       if(loading) html=`<tr><td colspan="${COLS.length}" class="empty">${typeof SPIN!=='undefined'?SPIN:''}조회 중…</td></tr>`;
@@ -3070,22 +3113,13 @@ SCREEN.lgsagub=(c)=>{
       g('#cnt').textContent=`${tot.cnt||0}건${sel?` · 선택 ${sel.ymd}-${sel.seq}`:''}`;
       const go=()=>{from=g('#df').value;to=g('#dt').value;cq=g('#cq').value.trim();mq=g('#mq').value.trim();if(wide){iq=g('#iq').value.trim();bq=g('#bq').value.trim();}sel=null;load();};
       g('#go').onclick=go;
-      c.querySelectorAll('.inp').forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')go();});
+      c.querySelectorAll('.toolbar .inp').forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')go();});
       g('#xls').onclick=()=>{const hd=COLS.map(cd=>cd[1]);
         downloadCSV((wide?'도입수입입력':'도입수출입력')+'_'+inD(from)+'_'+inD(to)+'.csv',hd,rows.map(r=>COLS.map(cd=>(''+cd[3](r)).replace(/<[^>]+>/g,''))));};
       c.querySelectorAll('.dp-row').forEach(tr=>{tr.onclick=()=>{sel={ymd:tr.dataset.y,seq:+tr.dataset.s};draw();};
         if(canEdit)tr.ondblclick=()=>{sel={ymd:tr.dataset.y,seq:+tr.dataset.s};openEdit();};});
       if(canEdit){const a=g('#add'),e=g('#edit'),d=g('#del');
-        if(a)a.onclick=()=>{form={mode:'new',data:{ymd:inD(to),cust:cq||'',mat:'',qty:0,cur:'USD',cost:0,rate:0,remarks:''}};draw();};
-        if(e)e.onclick=openEdit; if(d)d.onclick=doDelete;}
-      if(form){ c.insertAdjacentHTML('beforeend',modalHtml());
-        g('#dp-cancel').onclick=()=>{form=null;draw();};
-        g('#dp-save').onclick=doSave;
-        c.querySelectorAll('.dpf').forEach(el=>el.oninput=()=>{ // 금액 실시간
-          const get=k=>{const x=c.querySelector('.dpf[data-k="'+k+'"]');return x?x.value:'';};
-          const amt=(+get('qty')||0)*(+get('cost')||0), krw=Math.trunc(amt*(+get('rate')||0));
-          const ae=g('#dp-amt'),ke=g('#dp-krw');if(ae)ae.textContent=nD(amt,4);if(ke)ke.textContent=wonI(krw);});
-        const fi=c.querySelector('.dpf');if(fi)fi.focus();}
+        if(a)a.onclick=openAdd; if(e)e.onclick=openEdit; if(d)d.onclick=doDelete;}
       if(typeof attachResizers!=='undefined')attachResizers(c);
     };
     load();

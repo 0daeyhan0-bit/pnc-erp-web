@@ -59,6 +59,9 @@
 - **프론트 파일 분리:** 화면은 도메인별 `js/screens.<도메인>.js`(base·pur·prod·gagong·sales·qc·dev·etc). 새 화면은 `SCREEN.<이름>` 등록. (BOM/원가=dev.js)
 - **날짜 입력 직접 키인:** 날짜칸은 `<input type="date">`로 두면 **브라우저 네이티브** 키보드 편집이 됨 — 세그먼트(연/월/일) 클릭 후 숫자입력·연속 타이핑·화살표·달력 모두 지원. **전역 커스텀 키인 핸들러 금지**(모든 숫자키 preventDefault하면 월/일 세그먼트만 고치기가 안 됨·YYMMDD 오인 — 2026-08-14 제거 이력). 자동채움을 굳이 넣으려면 세그먼트 편집을 막지 말 것.
 - **조회 테이블 컬럼 정렬:** 조회/집계 그리드는 **헤더 더블클릭 = 그 컬럼 정렬**(재클릭 시 오름/내림 토글, ▲/▼ 표시). 고정컬럼 테이블은 `enableSort(c,keys,()=>cur,render)` 헬퍼, 피벗(일자컬럼 등)은 화면 로컬 정렬(정렬키→정렬값 함수). 리사이저 dblclick(너비초기화)과 충돌 안 나게 유지.
+- **★페이지 본문 세로 스크롤 금지(메인 우측 스크롤 없앰):** `.content`가 넘쳐 생기는 **창 전체 스크롤 금지**. 화면 루트를 `display:flex;flex-direction:column;height:100%`로 짜고, **표/그리드 영역만** `flex:1;min-height:0;overflow:auto`로 내부 스크롤. 제목·툴바·요약카드는 `flex:0 0 auto`. **`max-height:calc(100vh - Npx)` 고정치 대신 flex 사용**(툴바 줄바꿈에 견고). **헤더=`position:sticky;top:0`, 합계/총계행=`position:sticky;bottom:0`**(배경색 필수)로 스크롤해도 항상 보이게. → 합계 보려 창 전체를 내리는 이상동작 제거.
+- **★팝업/모달은 `document.body`에 렌더:** `.content` 안에 `position:fixed` 모달을 넣으면 조상(transform/overflow) 때문에 **잘림**. 모달 element를 만들어 `document.body.appendChild` 후 닫을 때 remove. 오버레이 `position:fixed;inset:0;z-index≥1200`.
+- **모달 입력칸도 §3 동일 규칙:** 거래처=**거래처명 오토컴플리트**(datalist, 값=이름·저장시 코드매핑), 품목=자도번 오토컴플리트, 통화 등 고정선택지=**드롭다운**. 코드 직접입력칸(거래처코드 등) 금지.
 
 ---
 
