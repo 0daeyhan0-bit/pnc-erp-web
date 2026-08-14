@@ -1120,6 +1120,9 @@ def sourcing_sub_create(payload: dict = Body(...)):
             mx = 0; import re as _re3
             cur.execute("SELECT DISTINCT sub_item FROM nx.sourcing_route_line WHERE sub_item LIKE ? ESCAPE '!'", base_child + '!_S%')
             rowsn = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
+            # 정본 NORM_SUB(정규화 확정) 코드도 소진번호 인정(재사용 금지) — 단 드래프트 고아(item_source null)는 제외
+            cur.execute("SELECT item_code FROM nx.item WHERE item_code LIKE ? ESCAPE '!' AND item_source='NORM_SUB'", base_child + '!_S%')
+            rowsn += [str(r[0]).strip() for r in cur.fetchall() if r[0]]
             for cd in rowsn:
                 m = _re3.search(r'_S0*(\d+)$', cd)
                 if m: mx = max(mx, int(m.group(1)))
