@@ -2466,18 +2466,24 @@ SCREEN.subvariant=(c)=>{
     // 부품 라인 직접수정(BOM 구성과 동일 폼)
     c.querySelectorAll('.sp-ledit').forEach(b=>b.onclick=e=>{e.stopPropagation();const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);if(l){st.lineForm=Object.assign({route_id:rid},l);draw();}});
     // 드래그: 좌측 부품 풀 → 우측 노드(ASSY 레벨0=data-sub0 / SUB=line_id)로 배치. 절삭공정은 부품 따라감(자동).
-    c.querySelectorAll('.sp-drag').forEach(el=>{el.ondragstart=e=>{e.stopPropagation();e.dataTransfer.setData('text/lid',el.dataset.lid);e.dataTransfer.effectAllowed='move';};});
+    // ★드래그 대상 line_id = 클로저(st._dragLid)로 확실히 보관 — 중첩 드롭존에서 dataTransfer.getData가 빈값 반환하는 회귀 방지.
+    c.querySelectorAll('.sp-drag').forEach(el=>{
+      el.ondragstart=e=>{e.stopPropagation();st._dragLid=el.dataset.lid;try{e.dataTransfer.setData('text/lid',el.dataset.lid);}catch(_){}e.dataTransfer.effectAllowed='move';};
+      el.ondragend=()=>{st._dragLid=null;};});
+    const _getLid=e=>{let v=st._dragLid;if(!v){try{v=e.dataTransfer.getData('text/lid');}catch(_){}}return v;};
     c.querySelectorAll('.sp-drop').forEach(zone=>{
-      zone.ondragover=e=>{e.preventDefault();e.stopPropagation();zone.style.boxShadow='0 0 0 2px #1c47a0 inset';};
+      zone.ondragenter=e=>{e.preventDefault();e.stopPropagation();};
+      zone.ondragover=e=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';zone.style.boxShadow='0 0 0 2px #1c47a0 inset';};
       zone.ondragleave=e=>{e.stopPropagation();zone.style.boxShadow='';};
-      zone.ondrop=async e=>{e.preventDefault();e.stopPropagation();zone.style.boxShadow='';const lid=e.dataTransfer.getData('text/lid');if(!lid)return;
+      zone.ondrop=async e=>{e.preventDefault();e.stopPropagation();zone.style.boxShadow='';const lid=_getLid(e);st._dragLid=null;if(!lid)return;
         try{const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+zone.dataset.sub,line_ids:[+lid]})});
           if((await r.json()).ok)await reloadPanel();else alert('이동 실패');}catch(err){alert('이동 오류: '+err.message);}};});
     // ★새 SUB로 묶기 존(노드별·중첩) — data-parentsub>0=서브안의서브. stopPropagation으로 중첩 드롭존만 처리.
     c.querySelectorAll('.sp-newsub').forEach(z=>{
-      z.ondragover=e=>{e.preventDefault();e.stopPropagation();z.style.background='#ecd9fb';};
+      z.ondragenter=e=>{e.preventDefault();e.stopPropagation();};
+      z.ondragover=e=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';z.style.background='#ecd9fb';};
       z.ondragleave=e=>{e.stopPropagation();z.style.background='#f6f0fc';};
-      z.ondrop=async e=>{e.preventDefault();e.stopPropagation();z.style.background='#f6f0fc';const lid=+e.dataTransfer.getData('text/lid');if(!lid)return;
+      z.ondrop=async e=>{e.preventDefault();e.stopPropagation();z.style.background='#f6f0fc';const lid=+_getLid(e);st._dragLid=null;if(!lid)return;
         const psub=+z.dataset.parentsub||0;
         try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[lid],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)',parent_sub:psub})});
           const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+(psub>0?' (중첩)':'')+' 생성';await reloadPanel();}else alert('SUB 생성 실패: '+(j.detail||''));}catch(err){alert('SUB 생성 오류: '+err.message);}};});
