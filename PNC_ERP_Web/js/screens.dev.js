@@ -2166,9 +2166,9 @@ SCREEN.subvariant=(c)=>{
       <span style="color:#5a6b82;font-size:12px">구분 <b>${esc(r.gubun||'-')}</b>${r.vendor_code?` · 공급처 <b>${esc(r.vendor_name||r.vendor_code)}</b>`:''}${r.apply_from?` · 적용 ${esc(r.apply_from)}`:''} · 라인 ${(r.lines||[]).length}</span>
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':apBadge(r)}
       <div style="flex:1"></div>
-      <button class="btn sv-open" data-rid="${r.route_id}" data-mode="${cur?'view':'edit'}" style="padding:1px 8px;font-size:11px">🔎 상세</button>
-      ${(canW&&!r.baseline)?`<button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'✔ 승인'}</button>
-        <button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">🗑</button>`:''}
+      <button class="btn sv-open" data-rid="${r.route_id}" data-mode="${cur?'view':'edit'}" style="padding:1px 8px;font-size:11px">${cur?'상세':'수정'}</button>
+      ${(canW&&!r.baseline)?`<button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'승인'}</button>
+        ${cur?'':`<button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">삭제</button>`}`:''}
     </div>`;};
   const routesPanel=()=>{
     const isRoot=st.routeTarget===st.sel;
@@ -2366,7 +2366,7 @@ SCREEN.subvariant=(c)=>{
     const fresh=ed&&!!d.fresh;   // 신규 미커밋 드래프트(가져오기로 방금 생성, [등록] 전) — 닫기=등록취소(롤백)
     const isCur=!R.baseline&&(R.current_flag||R.route_no===1);
     const footL=R.baseline
-      ? (canW?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff">✎ 현행 직접 수정</button> <button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:'')
+      ? (canW?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff">현행 수정</button> <button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">이 현행으로 새 후보 만들기</button>`:'')
       : (fresh
           ? '<span style="color:#8aa0bd;font-size:11px">[등록]해야 후보가 확정됩니다 · 닫기/취소 = 등록 취소</span>'
           : (canW?`${isCur?`<button class="btn" id="dt-resetcur" style="background:#e67e22;color:#fff" title="실사용 BOM에서 라인을 다시 불러와 편집 초기화">🔄 BOM 다시 불러오기</button> `:''}<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`:''));
