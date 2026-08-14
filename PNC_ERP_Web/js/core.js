@@ -395,6 +395,12 @@ const PERM={
   savePerms(){localStorage.setItem('perm_userperm',JSON.stringify(this.perms));
     try{return fetch(API_BASE+'/api/perm/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perms:this.perms,by:this.userId})});}catch(e){return Promise.resolve();}},
   async loadFromServer(){try{const r=await fetch(API_BASE+'/api/perm/all');if(!r.ok)return false;const j=await r.json();if(j&&j.perms){this.perms=j.perms;localStorage.setItem('perm_userperm',JSON.stringify(this.perms));return true;}}catch(e){}return false;},
+  // ★계정목록 서버 로드(전 PC 공통) — 로그인 전 호출. 서버값=정본, 시드계정은 항상 병합 보장.
+  async loadUsersFromServer(){try{const r=await fetch(API_BASE+'/api/perm/users');if(!r.ok)return false;const j=await r.json();
+    if(j&&Array.isArray(j.users)&&j.users.length){const merged=j.users.slice();
+      SEED_USERS.forEach(su=>{if(!merged.some(u=>u.id===su.id))merged.push(JSON.parse(JSON.stringify(su)));});
+      localStorage.setItem('perm_users',JSON.stringify(merged));return true;}}catch(e){}return false;},
+  saveUsersToServer(users){try{return fetch(API_BASE+'/api/perm/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({users,by:this.userId})});}catch(e){return Promise.resolve();}},
   setUser(id){this.userId=id;localStorage.setItem('perm_userId',id);},
   currentUser(){return getUsers().find(u=>u.id===this.userId)||{id:'-',nm:'미지정',roles:['시스템관리자']};},
   isAdmin(){return (this.currentUser().roles||[]).includes('시스템관리자');},

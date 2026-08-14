@@ -84,8 +84,10 @@ function showLogin(){
 }
 
 /* ---- init ---- */
-(function(){
+(async function(){
   ensureSuperAccount();                         // 슈퍼 계정 항상 보장
+  try{await PERM.loadUsersFromServer();}catch(e){}   // ★서버 계정목록(전 PC 공통) 병합 후 로그인 — 다른 PC에서 만든 계정도 로그인 가능
+  ensureSuperAccount();
   const authed=sessionStorage.getItem('perm_authed');
   if(authed && getUsers().some(u=>u.id===authed && (!u.status||u.status==='사용'))){
     PERM.setUser(authed); bootApp(); return;

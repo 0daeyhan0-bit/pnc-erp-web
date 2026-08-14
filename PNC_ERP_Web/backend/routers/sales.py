@@ -433,6 +433,44 @@ def perm_save(payload: dict = Body(...)):
     finally:
         cn.close()
 
+# ===================== 웹 사용자 계정(전 PC 공통) — nx.web_user 스냅샷 =====================
+@router.get("/api/perm/users")
+def perm_users_get():
+    """웹 로그인 계정목록(전 PC 공통) — 관리자 저장분. 없으면 users=null(프론트가 시드 사용)."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        users = None
+        try:
+            cur.execute("SELECT udata FROM nx.web_user WHERE user_id='__ALL__'")
+            r = cur.fetchone()
+            if r and r[0]:
+                import json as _json
+                users = _json.loads(r[0])
+        except Exception:
+            users = None
+        return {"users": users}
+    finally:
+        cn.close()
+
+@router.post("/api/perm/users")
+def perm_users_save(payload: dict = Body(...)):
+    """웹 로그인 계정목록 저장(전체 스냅샷, 전 PC 공통). body {users:[...], by?}. 사용자관리 저장 시 호출."""
+    users = payload.get("users") or []
+    by = (str(payload.get("by", "web")).strip() or "web")[:40]
+    import json as _json
+    blob = _json.dumps(users, ensure_ascii=False)
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("IF OBJECT_ID('nx.web_user') IS NULL CREATE TABLE nx.web_user(user_id NVARCHAR(20) NOT NULL PRIMARY KEY, udata NVARCHAR(MAX), upd_user NVARCHAR(40), upd_dt DATETIME)")
+        cur.execute("""MERGE nx.web_user AS t USING (SELECT '__ALL__' uid) s ON t.user_id=s.uid
+            WHEN MATCHED THEN UPDATE SET udata=?, upd_user=?, upd_dt=getdate()
+            WHEN NOT MATCHED THEN INSERT(user_id,udata,upd_user,upd_dt) VALUES('__ALL__',?,?,getdate());""",
+            blob, by, blob, by)
+        cn.commit()
+        return {"ok": True, "count": len(users)}
+    finally:
+        cn.close()
+
 # ===================== 판매및출고등록 (w_pu_output_010/015, nx.stock_maint tag='5') — 구매→협력사 판매출고 =====================
 # ★역분석 확정(2026-07-28, dw_pu_input_140_t2 retrieve + 라이브대사 98%): 판매출고 정본 = PU_T_STOCK_MAINT(자재수불) MAINT_TAG='5'.
 #   maint_cost=사급단가(f_get_item_cost 'S'=PR_M_ITEM_COST cost_tag='S' 유효일자최신), amt=trunc(qty×cost), vat=trunc(amt×0.1)=매출/부가세.

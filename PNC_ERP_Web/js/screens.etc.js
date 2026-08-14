@@ -194,7 +194,9 @@ SCREEN.users=(c)=>{
     };
     if(editMode){
       c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'1234',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'});rend();};
-      c.querySelector('#save').onclick=()=>{localStorage.setItem(lsu,JSON.stringify(users));editMode=false;draw();alert('저장되었습니다(브라우저 임시).');};
+      c.querySelector('#save').onclick=async()=>{localStorage.setItem(lsu,JSON.stringify(users));
+        let sv=false;try{const r=await PERM.saveUsersToServer(users);sv=!!(r&&(await r.json()).ok);}catch(e){}
+        editMode=false;draw();alert(sv?'저장되었습니다 (전 PC 공통 — 모든 PC에서 로그인 가능).':'로컬 저장됨(서버 저장 실패 — 백엔드 확인 필요).');};
       c.querySelector('#cancel').onclick=()=>{users=load();editMode=false;draw();};
     } else if(c.querySelector('#edit')) c.querySelector('#edit').onclick=()=>{editMode=true;draw();};
     c.querySelector('#q').onkeyup=rend;
