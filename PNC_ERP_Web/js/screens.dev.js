@@ -4,22 +4,148 @@ SCREEN.price=(c)=>{
   let mode='item';
   const paint=()=>{
     c.innerHTML=`
-     <div class="page-title">💰 품목단가 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 · 전사 변동내역 · 사급가 업로드</span></div>
+     <div class="page-title">💰 품목단가 조회 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 · 전사 변동내역 · 특이 단가목록 (읽기전용) · 편집은 [품목단가 관리]</span></div>
      <div style="display:flex;gap:6px;margin:6px 0 2px">
        <button class="btn ${mode==='item'?'':'ghost'}" id="pm-item" style="${mode==='item'?'background:#1c47a0;color:#fff':''}">📇 품목별 단가조회</button>
        <button class="btn ${mode==='hist'?'':'ghost'}" id="pm-hist" style="${mode==='hist'?'background:#1c47a0;color:#fff':''}">📊 전사 단가변동내역</button>
        <button class="btn ${mode==='inv'?'':'ghost'}" id="pm-inv" style="${mode==='inv'?'background:#b12a2a;color:#fff':''}">⚠️ 특이 단가목록</button>
-       <button class="btn ${mode==='sagub'?'':'ghost'}" id="pm-sagub" style="${mode==='sagub'?'background:#1c7c3a;color:#fff':''}">📤 사급가 업로드</button>
      </div>
      <div id="pr-host"></div>`;
     c.querySelector('#pm-item').onclick=()=>{if(mode!=='item'){mode='item';paint();}};
     c.querySelector('#pm-hist').onclick=()=>{if(mode!=='hist'){mode='hist';paint();}};
     c.querySelector('#pm-inv').onclick=()=>{if(mode!=='inv'){mode='inv';paint();}};
-    c.querySelector('#pm-sagub').onclick=()=>{if(mode!=='sagub'){mode='sagub';paint();}};
     const host=c.querySelector('#pr-host');
-    if(mode==='item') priceItemView(host); else if(mode==='hist') priceHistView(host); else if(mode==='inv') priceInvView(host); else priceSagubView(host);
+    if(mode==='item') priceItemView(host); else if(mode==='hist') priceHistView(host); else priceInvView(host);
   };
   paint();
+};
+
+/* ===== 품목단가 관리 (레거시 w_tc_master_090) — 매출처별 판매/매입 단가 마스터 CRUD. 권한자만 편집. nx.PR_M_ITEM_COST ===== */
+SCREEN.pricemgmt=(c)=>{
+  let mode='mgr';
+  const paint=()=>{
+    c.innerHTML=`
+     <div class="page-title" style="margin-bottom:2px">🛠️ 품목단가 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">매출처별 판매/매입 단가 · 사급가 업로드 · 권한자 편집</span></div>
+     <div style="display:flex;gap:6px;margin:4px 0">
+       <button class="btn ${mode==='mgr'?'':'ghost'}" id="pm2-mgr" style="${mode==='mgr'?'background:#1c47a0;color:#fff':''}">📇 품목별 단가관리</button>
+       <button class="btn ${mode==='sagub'?'':'ghost'}" id="pm2-sagub" style="${mode==='sagub'?'background:#1c7c3a;color:#fff':''}">📤 사급가 업로드</button>
+     </div>
+     <div id="pr2-host" style="height:calc(100% - 66px)"></div>`;
+    c.querySelector('#pm2-mgr').onclick=()=>{if(mode!=='mgr'){mode='mgr';paint();}};
+    c.querySelector('#pm2-sagub').onclick=()=>{if(mode!=='sagub'){mode='sagub';paint();}};
+    const host=c.querySelector('#pr2-host');
+    if(mode==='mgr') priceMgmtView(host); else priceSagubView(host);
+  };
+  paint();
+};
+
+const priceMgmtView=(host)=>{
+  const API=API_BASE;
+  const SG=DB.sgroupNames||{}, LG=DB.lgroupNames||{};
+  const sgN=s=>SG[(''+s).trim()]||(''+s).trim()||'';
+  const TAGNM={'1':'매입','E':'수출판매','S':'내수판매'};
+  const CUROPT=['KRW','USD','JPY','EUR','CNY','RMB'];
+  const nD=(v,n)=>(v==null||v==='')?'':Number(v).toLocaleString('en-US',{minimumFractionDigits:n||0,maximumFractionDigits:n||0});
+  const fmtY=y=>{y=(''+(y||'')).trim();return y.length>=6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;};
+  const dIn=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
+  const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
+  const canEdit=(typeof PERM!=='undefined')&&(PERM.isAdmin()||(((PERM.perms||{})[PERM.userId]||{})['pricemgmt']||{}).edit===true);
+  let items=[], sel='', selNm='', detail=[], q='', lg='', sg='', loadingI=false, loadingD=false, form=null, dsel=null, modalEl=null, acCust={};
+  // 거래처 커스텀 오토컴플리트
+  const acAttach=(inp,onPick)=>{let box=null,t=null,its=[],idx=-1;
+    const close=()=>{if(box){box.remove();box=null;}idx=-1;};
+    const open=(list)=>{close();its=list;if(!list||!list.length)return;box=document.createElement('div');const r=inp.getBoundingClientRect();
+      box.style.cssText='position:fixed;left:'+r.left+'px;top:'+(r.bottom+2)+'px;width:'+Math.max(r.width,220)+'px;max-height:240px;overflow:auto;background:#fff;border:1px solid #b9c6dd;border-radius:6px;box-shadow:0 10px 28px rgba(0,0,0,.2);z-index:1300;font-size:13px';
+      list.forEach(it=>{const o=document.createElement('div');o.className='ac-op';o.style.cssText='padding:6px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';o.innerHTML=it.label;o.onmousedown=e=>{e.preventDefault();onPick(it);close();};box.appendChild(o);});
+      document.body.appendChild(box);};
+    inp.addEventListener('input',()=>{const s=inp.value.trim();clearTimeout(t);if(!s){close();return;}t=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(s)}`);open(((await r.json()).rows||[]).map(x=>({name:x.name,code:x.code,label:`${esc(x.name)} <span style="color:#8896ab">${esc(x.code)}</span>`})));}catch(e){close();}},200);});
+    inp.addEventListener('blur',()=>setTimeout(close,150));
+    inp.addEventListener('keydown',e=>{if(!box)return;const ops=box.querySelectorAll('.ac-op');if(e.key==='ArrowDown'){e.preventDefault();idx=Math.min(idx+1,ops.length-1);}else if(e.key==='ArrowUp'){e.preventDefault();idx=Math.max(idx-1,0);}else if(e.key==='Enter'&&idx>=0){e.preventDefault();onPick(its[idx]);close();return;}else if(e.key==='Escape'){close();return;}else return;ops.forEach((o,i)=>o.style.background=i===idx?'#eaf2fd':'');if(ops[idx])ops[idx].scrollIntoView({block:'nearest'});});};
+  const loadItems=async()=>{loadingI=true;draw();
+    try{let u=`${API}/api/pricemgmt/items?limit=1000`;if(q)u+=`&q=${encodeURIComponent(q)}`;if(lg)u+=`&lg=${encodeURIComponent(lg)}`;if(sg)u+=`&sg=${encodeURIComponent(sg)}`;
+      items=(await(await fetch(u)).json()).rows||[];}catch(e){items=[];}loadingI=false;draw();};
+  const loadDetail=async()=>{if(!sel){detail=[];draw();return;}loadingD=true;draw();
+    try{detail=(await(await fetch(`${API}/api/pricemgmt/detail?item=${encodeURIComponent(sel)}`)).json()).rows||[];}catch(e){detail=[];}loadingD=false;draw();};
+  // 편집 모달
+  const removeModal=()=>{if(modalEl){modalEl.remove();modalEl=null;}};
+  const mq=k=>{const x=modalEl&&modalEl.querySelector('.pmf[data-k="'+k+'"]');return x?(x.type==='checkbox'?(x.checked?'1':'0'):x.value.trim()):'';};
+  const modalHtml=()=>{const f=form.data;const L=t=>`<label style="text-align:right;color:#4a5563;font-size:13px">${t}</label>`;
+    const N=k=>`<input class="pmf inp" data-k="${k}" value="${esc(f[k]!=null&&f[k]!==''?f[k]:'')}" style="width:130px;text-align:right">`;
+    const T=k=>`<input class="pmf inp" data-k="${k}" value="${esc(f[k]!=null&&f[k]!==''?f[k]:'')}" style="width:100%">`;
+    return `<div class="wr-modal" style="position:fixed;inset:0;z-index:1200;background:rgba(20,30,50,.44);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:48px 12px">
+     <div style="background:#fff;border-radius:12px;padding:20px 24px;width:680px;max-width:94vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
+      <div style="font-weight:700;font-size:15px;margin-bottom:16px">${form.mode==='new'?'➕ 단가 추가':'✏️ 단가 수정'} <span style="color:#888;font-weight:400;font-size:13px">${esc(sel)} · ${esc(selNm)}</span></div>
+      <div style="display:grid;grid-template-columns:82px 1fr 82px 1fr;gap:11px 12px;align-items:center">
+       ${L('단가구분')}<select class="pmf inp" data-k="tag" style="width:130px">${Object.entries(TAGNM).map(([k,v])=>`<option value="${k}" ${f.tag===k?'selected':''}>${v}</option>`).join('')}</select>
+       ${L('거래처')}<input class="pmf inp" data-k="cust_nm" autocomplete="off" value="${esc(f.cust_nm||'')}" placeholder="거래처명/코드" style="width:100%">
+       ${L('적용일')}<input class="pmf inp" data-k="ymd" type="date" value="${esc(dIn(f.ymd))}" style="width:150px">
+       ${L('화폐')}<select class="pmf inp" data-k="cur" style="width:120px">${CUROPT.map(x=>`<option value="${x}" ${(''+f.cur)===x?'selected':''}>${x}</option>`).join('')}</select>
+       ${L('현재단가')}${N('cost')}${L('주거래')}<label style="font-size:13px"><input class="pmf" data-k="main" type="checkbox" ${f.main==='1'?'checked':''}> 주거래처</label>
+       ${L('부품비')}${N('mat')}${L('가공비')}${N('proc')}
+       ${L('기타')}${N('other')}${L('소재단위')}<input class="pmf inp" data-k="matunit" value="${esc(f.matunit||'')}" style="width:130px">
+       ${L('비고')}<span style="grid-column:span 3">${T('remarks')}</span>
+      </div>
+      <div style="margin-top:18px;text-align:right"><button class="btn ghost" id="pm-cancel">취소</button> <button class="btn" id="pm-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
+     </div></div>`;};
+  const showModal=()=>{removeModal();modalEl=document.createElement('div');modalEl.innerHTML=modalHtml();document.body.appendChild(modalEl);
+    modalEl.querySelector('#pm-cancel').onclick=()=>{removeModal();form=null;};
+    modalEl.querySelector('#pm-save').onclick=doSave;
+    const cel=modalEl.querySelector('.pmf[data-k="cust_nm"]');if(cel)acAttach(cel,it=>{cel.value=it.name;acCust[it.name]=it.code;});
+    const fi=modalEl.querySelector('.pmf');if(fi)fi.focus();};
+  const openAdd=()=>{if(!sel){alert('먼저 좌측에서 품목을 선택하세요');return;}form={mode:'new',data:{tag:'S',cust:'',cust_nm:'',ymd:inD((new Date()).toISOString().slice(0,10)),cur:'KRW',main:'0',cost:0,mat:0,proc:0,other:0,matunit:'',remarks:''}};showModal();};
+  const openEdit=()=>{if(!dsel){alert('수정할 단가행을 선택하세요');return;}form={mode:'edit',data:Object.assign({},dsel)};showModal();};
+  const doSave=async()=>{const f=form.data;const custNm=mq('cust_nm');let cust=acCust[custNm]||'';
+    if(!cust){if(custNm===(f.cust_nm||''))cust=f.cust||'';else if(/^\d+$/.test(custNm))cust=custNm;}
+    const body={item:sel,tag:mq('tag'),cust:cust,ymd:inD(mq('ymd')),cur:mq('cur'),main:mq('main'),cost:mq('cost'),mat:mq('mat'),proc:mq('proc'),other:mq('other'),matunit:mq('matunit'),remarks:mq('remarks'),by:(PERM&&PERM.userId)||'web'};
+    if(form.mode==='edit')body.old={cust:f.cust,tag:f.tag,ymd:f.ymd};
+    if(!body.cust||!body.ymd){alert('거래처·적용일 필수 (거래처는 목록에서 선택)');return;}
+    try{const r=await fetch(`${API}/api/pricemgmt/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json();if(!r.ok){alert('저장 실패: '+(j.detail||r.status));return;}removeModal();form=null;dsel=null;loadDetail();}
+    catch(e){alert('저장 오류: '+e.message);}};
+  const doDelete=async()=>{if(!dsel){alert('삭제할 단가행을 선택하세요');return;}
+    if(!confirm(`${TAGNM[dsel.tag]||dsel.tag} · ${dsel.cust_nm} · ${dsel.ymd} 단가행을 삭제할까요?`))return;
+    try{const r=await fetch(`${API}/api/pricemgmt/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:sel,tag:dsel.tag,cust:dsel.cust,ymd:dsel.ymd})});
+      const j=await r.json();if(!r.ok){alert('삭제 실패: '+(j.detail||r.status));return;}dsel=null;loadDetail();}
+    catch(e){alert('삭제 오류: '+e.message);}};
+  const draw=()=>{
+    const lgs=Object.entries(LG).map(([k,v])=>`<option value="${esc(k)}" ${lg===k?'selected':''}>${esc(v)}</option>`).join('');
+    const sgs=Object.entries(SG).map(([k,v])=>`<option value="${esc(k)}" ${sg===k?'selected':''}>${esc(v)}</option>`).join('');
+    host.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+     ${!canEdit?`<div class="page-sub" style="color:#b8860b;margin:0 0 4px">🔒 조회만 가능 — 편집 권한이 없습니다(관리자에게 [품목단가 관리] 편집권한 요청). 단가는 권한자만 수정.</div>`:''}
+     <div class="toolbar" style="gap:5px;flex:0 0 auto">
+       <input class="inp" id="pmq" placeholder="품번/품명" value="${esc(q)}" style="width:150px">
+       <select class="inp" id="pmlg" style="max-width:120px"><option value="">대분류</option>${lgs}</select>
+       <select class="inp" id="pmsg" style="max-width:120px"><option value="">소분류</option>${sgs}</select>
+       <button class="btn" id="pmgo">🔍조회</button>
+       <div class="spacer"></div>
+       ${canEdit?`<button class="btn" id="pmadd" style="background:#1c7c3a;color:#fff"${sel?'':' disabled'}>➕추가</button><button class="btn" id="pmedit"${dsel?'':' disabled'}>✏️수정</button><button class="btn" id="pmdel" style="color:#c0392b"${dsel?'':' disabled'}>🗑삭제</button>`:''}
+     </div>
+     <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:10px;flex:1;min-height:0">
+      <div class="grid-wrap" style="min-height:0;overflow:auto;border:1px solid var(--line);border-radius:8px">
+       <table class="tbl fit"><thead><tr><th>품번</th><th style="text-align:left">품명</th><th>소분류</th><th class="num">단가건</th></tr></thead>
+       <tbody>${loadingI?`<tr><td colspan="4" class="empty">조회 중…</td></tr>`:(items.length?items.map(r=>`<tr class="pm-irow${sel===r.item?' sel':''}" data-i="${esc(r.item)}" style="cursor:pointer${sel===r.item?';background:#dce9ff':''}"><td><b>${esc(r.item)}</b></td><td class="bcap" title="${esc(r.nm)}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="center">${esc(sgN(r.sg))}</td><td class="num">${r.cnt||''}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">검색어/분류로 조회하세요</td></tr>`)}</tbody></table>
+      </div>
+      <div class="grid-wrap" style="min-height:0;overflow:auto;border:1px solid var(--line);border-radius:8px">
+       <table class="tbl fit"><thead><tr><th>구분</th><th>거래처</th><th class="center">주거래</th><th class="center">적용일</th><th>화폐</th><th class="num">현재단가</th><th class="num">부품비</th><th class="num">가공비</th><th class="num">기타</th><th>소재단위</th><th>비고</th><th>수정자</th><th>수정일시</th></tr></thead>
+       <tbody>${!sel?`<tr><td colspan="13" class="empty">좌측에서 품목을 선택하세요</td></tr>`:(loadingD?`<tr><td colspan="13" class="empty">단가 조회 중…</td></tr>`:(detail.length?detail.map(r=>{const on=dsel&&dsel.tag===r.tag&&dsel.cust===r.cust&&dsel.ymd===r.ymd;
+         return `<tr class="pm-drow${on?' sel':''}" data-t="${esc(r.tag)}" data-c="${esc(r.cust)}" data-y="${esc(r.ymd)}" style="cursor:${canEdit?'pointer':'default'}${on?';background:#dce9ff':''}">
+          <td class="center">${esc(r.tag_nm)}</td><td class="bcap" title="${esc(r.cust_nm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.cust_nm)}</td>
+          <td class="center">${r.main==='1'?'★':''}</td><td class="center">${fmtY(r.ymd)}</td><td class="center">${esc(r.cur)}</td>
+          <td class="num"><b>${nD(r.cost,r.cost%1?4:0)}</b></td><td class="num">${r.mat?nD(r.mat,0):''}</td><td class="num">${r.proc?nD(r.proc,0):''}</td><td class="num">${r.other?nD(r.other,0):''}</td>
+          <td>${esc(r.matunit)}</td><td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td><td>${esc(r.usr)}</td><td class="center" style="color:#8aa0bd">${esc(r.dt)}</td></tr>`;}).join(''):`<tr><td colspan="13" class="empty">단가 없음 — ${canEdit?'추가 버튼으로 등록':'등록된 단가 없음'}</td></tr>`))}</tbody></table>
+      </div>
+     </div></div>`;
+    const g=id=>host.querySelector(id);
+    const go=()=>{q=g('#pmq').value.trim();lg=g('#pmlg').value;sg=g('#pmsg').value;sel='';selNm='';detail=[];dsel=null;loadItems();};
+    g('#pmgo').onclick=go;g('#pmq').onkeyup=e=>{if(e.key==='Enter')go();};
+    g('#pmlg').onchange=go;g('#pmsg').onchange=go;
+    host.querySelectorAll('.pm-irow').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.i;const it=items.find(x=>x.item===sel);selNm=it?it.nm:'';dsel=null;loadDetail();});
+    if(canEdit){host.querySelectorAll('.pm-drow').forEach(tr=>{tr.onclick=()=>{dsel={tag:tr.dataset.t,cust:tr.dataset.c,ymd:tr.dataset.y,cust_nm:(detail.find(x=>x.tag===tr.dataset.t&&x.cust===tr.dataset.c&&x.ymd===tr.dataset.y)||{}).cust_nm};draw();};
+        tr.ondblclick=()=>{const r=detail.find(x=>x.tag===tr.dataset.t&&x.cust===tr.dataset.c&&x.ymd===tr.dataset.y);if(r){dsel=r;openEdit();}};});
+      const a=g('#pmadd'),e=g('#pmedit'),d=g('#pmdel');if(a)a.onclick=openAdd;if(e)e.onclick=openEdit;if(d)d.onclick=doDelete;}
+    if(typeof attachResizers!=='undefined')attachResizers(host);
+  };
+  draw();
 };
 
 /* 사급가(COSP Sales Price) 업로드 — LG 사급 부품가를 nx.price_item에 Start Date 반영 */
@@ -478,8 +604,8 @@ SCREEN.costanalysis=(c)=>{
   const pct=v=>(v*100).toFixed(1)+'%';
   // [rowIdx, header, group, opts]
   const NUM=[[1,'입고수량','',{}],
-    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}],
-    [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
+    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}],
+    [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[24,'실사급금액','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
     [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}]];
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
@@ -528,13 +654,14 @@ SCREEN.costanalysis=(c)=>{
   };
   // ★리시빙실적 실시간(nx): 목록(SA_T_LG_RECEIVING_DTL)+행별 배치 원가(/api/cost/nx/bulk). 스냅샷 파일 대체·세션캐시.
   const ym2str=(y)=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:(y||'');
-  const buildRow=(part,qty,cst)=>{const r=new Array(23).fill(0);r[0]=part;r[1]=qty;
+  const buildRow=(part,qty,cst)=>{const r=new Array(25).fill(0);r[0]=part;r[1]=qty;
     if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0,sagub=cst.sagub||0;
       const won=(cst.won!=null?cst.won:jae),bu=cst.bu||0,sa=cst.sa||0,matb=won+bu+sa;   // 원자재/부자재/LG사급 분리(sgroup)
       const son2=son+sagub;   // 손익 = (LG−실원가) + 사급차액(실출고가−실입고가, 음수=손해)
       r[2]=won;r[3]=bu;r[4]=sa;r[5]=matb;r[6]=sil;r[7]=lg?matb/lg:0;
       r[8]=won;r[9]=bu;r[10]=sa;r[11]=matb;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=sagub;r[18]=lg?matb/lg:0;
-      r[19]=lg;r[20]=lg*qty;r[21]=son2;r[22]=son2*qty;}
+      r[19]=lg;r[20]=lg*qty;r[21]=son2;r[22]=son2*qty;
+      r[23]=cst.silsagub||0;r[24]=cst.silsagub||0;}   // ★실사급금액(통째,기준일사급가) — 나란히 표시(원가/손익 무영향)
     return r;};
   const cardsHTML=()=>`<div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
        <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
@@ -615,7 +742,7 @@ SCREEN.costanalysis=(c)=>{
   const headHTML=()=>{
     const lgSpan=mode==='direct'?2:4;
     let g1='<th rowspan="2">PART-NO</th>'+(mode!=='direct'?'<th rowspan="2" class="num">입고수량</th>':'');
-    g1+=`<th colspan="6" class="ghead">내부용</th><th colspan="11" class="ghead">실원가</th><th colspan="${lgSpan}" class="ghead">LG단가·손익</th>`;
+    g1+=`<th colspan="7" class="ghead">내부용</th><th colspan="12" class="ghead">실원가</th><th colspan="${lgSpan}" class="ghead">LG단가·손익</th>`;
     const h2=colsOf().filter(([i])=>i!==1).map(([i,h])=>`<th class="num sortable ${sortI===i?'sorted':''}" data-si="${i}">${h}${sortI===i?(dir<0?' ▼':' ▲'):''}</th>`).join('');
     return `<thead><tr>${g1}</tr><tr>${h2}</tr></thead>`;
   };
