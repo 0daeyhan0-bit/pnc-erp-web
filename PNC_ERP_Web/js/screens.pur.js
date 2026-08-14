@@ -3018,7 +3018,7 @@ SCREEN.lgsagub=(c)=>{
     const [df,dt]=_def(wide?0:45);   // 수입=당월1일~오늘, 수출=45일
     const sid = wide?'dopippur':'dopipsale';
     const canEdit = (typeof PERM!=='undefined' && PERM.canEdit)?PERM.canEdit(sid):true;
-    let from=df, to=dt, cq='', mq='', iq='', bq='', rows=[], tot={}, loading=false, msg='', sel=null, form=null;
+    let from=df, to=dt, cq='', cqNm='', mq='', iq='', bq='', rows=[], tot={}, loading=false, msg='', sel=null, form=null;
     const load=async()=>{loading=true;msg='';draw();
       try{let u=`${API}/api/dopip/${ep}?from_ymd=${inD(from)}&to_ymd=${inD(to)}`;
         if(cq)u+=`&cust=${encodeURIComponent(cq)}`; if(mq)u+=`&mat=${encodeURIComponent(mq)}`;
@@ -3104,15 +3104,15 @@ SCREEN.lgsagub=(c)=>{
       c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
        <div class="page-title" style="margin-bottom:2px">${wide?'🚢 도입-수입입력':'✈️ 도입-수출입력'} <span style="font-size:12px;color:var(--muted);font-weight:400">${wide?'해외 수입(구매)':'해외 수출(판매)'} · nx</span></div>
        <div class="page-sub" style="margin-bottom:6px">원본 <code>w_pu_stock_c_0${wide?'40':'50'}</code> · <code>nx.PU_T_STOCK_MAINT_C</code> (MAINT_TAG='${wide?'P':'Q'}') · 금액(KRW)=금액×환율(버림) · 행 클릭=선택·더블클릭=수정</div>
-       <div class="toolbar">
-         <label class="tl">${wide?'입고기간':'출고기간'}</label>
-         <input type="date" class="inp" id="df" value="${esc(from)}" style="width:135px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dt" value="${esc(to)}" style="width:135px">
-         <input class="inp" id="cq" placeholder="거래처코드" value="${esc(cq)}" style="width:100px">
-         <input class="inp" id="mq" placeholder="자도번" value="${esc(mq)}" style="width:120px">
-         ${wide?`<input class="inp" id="iq" placeholder="신고번호" value="${esc(iq)}" style="width:120px"><input class="inp" id="bq" placeholder="B/L번호" value="${esc(bq)}" style="width:120px">`:''}
-         <button class="btn" id="go">🔍 조회</button>
-         ${canEdit?`<button class="btn" id="add" style="background:#1c7c3a;color:#fff">➕ 추가</button><button class="btn" id="edit">✏️ 수정</button><button class="btn" id="del" style="color:#c0392b">🗑 삭제</button>`:''}
-         <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀</button>
+       <div class="toolbar" style="gap:5px">
+         <label class="tl" style="margin:0">${wide?'입고':'출고'}</label>
+         <input type="date" class="inp" id="df" value="${esc(from)}" style="width:118px"><span style="color:var(--muted);margin:0 -3px">~</span><input type="date" class="inp" id="dt" value="${esc(to)}" style="width:118px">
+         <input class="inp" id="cqn" placeholder="거래처명" value="${esc(cqNm)}" autocomplete="off" style="width:118px">
+         <input class="inp" id="mq" placeholder="자도번" value="${esc(mq)}" style="width:100px">
+         ${wide?`<input class="inp" id="iq" placeholder="신고번호" value="${esc(iq)}" style="width:100px"><input class="inp" id="bq" placeholder="B/L번호" value="${esc(bq)}" style="width:95px">`:''}
+         <button class="btn" id="go">🔍조회</button>
+         ${canEdit?`<button class="btn" id="add" style="background:#1c7c3a;color:#fff">➕추가</button><button class="btn" id="edit">✏️수정</button><button class="btn" id="del" style="color:#c0392b">🗑삭제</button>`:''}
+         <div class="spacer"></div><button class="btn xls" id="xls">📥엑셀</button>
        </div>
        <div class="summary-bar" id="sum" style="flex:0 0 auto"></div>
        <div class="grid-wrap dp-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead><tr>${COLS.map(cd=>`<th class="${cd[2]}">${cd[1]}</th>`).join('')}</tr></thead><tbody id="body"></tbody></table></div>
@@ -3131,9 +3131,15 @@ SCREEN.lgsagub=(c)=>{
       g('#body').innerHTML=html;
       g('#sum').innerHTML=`<div class="s-item">건수 <b>${won(tot.cnt||0)}</b></div><div class="s-item">수량 <b>${nD(tot.qty||0,0)}</b></div><div class="s-item">금액 <b>${nD(tot.amt||0,3)}</b></div><div class="s-item">금액(KRW) <b>${wonI(tot.krw||0)} 원</b></div>`;
       g('#cnt').textContent=`${tot.cnt||0}건${sel?` · 선택 ${sel.ymd}-${sel.seq}`:''}`;
-      const go=()=>{from=g('#df').value;to=g('#dt').value;cq=g('#cq').value.trim();mq=g('#mq').value.trim();if(wide){iq=g('#iq').value.trim();bq=g('#bq').value.trim();}sel=null;load();};
+      const go=()=>{from=g('#df').value;to=g('#dt').value;
+        const nm=g('#cqn')?g('#cqn').value.trim():'';
+        if(!nm){cq='';cqNm='';} else if(nm===cqNm){} else if(/^\d+$/.test(nm)){cq=nm;cqNm=nm;} else {cq='';cqNm=nm;}
+        mq=g('#mq').value.trim();if(wide){iq=g('#iq').value.trim();bq=g('#bq').value.trim();}sel=null;load();};
       g('#go').onclick=go;
       c.querySelectorAll('.toolbar .inp').forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')go();});
+      const cqnEl=g('#cqn'); if(cqnEl)acAttach(cqnEl, async q=>{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(q)}`);
+        return ((await r.json()).rows||[]).map(x=>({name:x.name,code:x.code,label:`${esc(x.name)} <span style="color:#8896ab">${esc(x.code)}</span>`}));},
+        it=>{cq=it.code;cqNm=it.name;cqnEl.value=it.name;go();});
       g('#xls').onclick=()=>{const hd=COLS.map(cd=>cd[1]);
         downloadCSV((wide?'도입수입입력':'도입수출입력')+'_'+inD(from)+'_'+inD(to)+'.csv',hd,rows.map(r=>COLS.map(cd=>(''+cd[3](r)).replace(/<[^>]+>/g,''))));};
       c.querySelectorAll('.dp-row').forEach(tr=>{tr.onclick=()=>{sel={ymd:tr.dataset.y,seq:+tr.dataset.s};draw();};
