@@ -249,8 +249,19 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
     cn = _conn(); cur = cn.cursor()
     try:
         d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
-        d6b = _yadd(d6a, max(0, int(gigan) - 1))
-        dates = [_yadd(d6a, i) for i in range(max(1, int(gigan)))]
+        # ★근무일 지평(레거시 동일): 적용일수=근무일 수(HR_M_CALENDAR WORK_STATS in 1,2,5,6=근무·4/3=휴무). dates=base~to 전체 달력일(주말/휴일도 컬럼표시).
+        gigan_n = max(1, int(gigan)); dates = []
+        try:
+            cur.execute("""SELECT CALENDAR_YYMD, WORK_STATS FROM PARTNER_ERP.dbo.HR_M_CALENDAR
+                WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? ORDER BY CALENDAR_YYMD""", '20' + d6a)
+            _wd = 0
+            for _cy, _ws in cur.fetchall():
+                dates.append(str(_cy)[2:])
+                if str(_ws).strip() in ('1', '2', '5', '6'): _wd += 1
+                if _wd >= gigan_n or len(dates) >= 60: break
+        except Exception: pass
+        if not dates: dates = [_yadd(d6a, i) for i in range(gigan_n)]   # 캘린더 미조회시 달력일 fallback
+        d6b = dates[-1]
         whp = (wh_part.strip() or 'IS0001')
         # ★성능: 투입파트 KEYS(재귀 BOM, wc/part/assy 필터무관 · to일자+투입파트만 의존)를 (src,to,whp)별 90초 TTL 캐시.
         keys = set()
