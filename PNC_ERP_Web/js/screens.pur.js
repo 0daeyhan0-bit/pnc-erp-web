@@ -2995,7 +2995,9 @@ SCREEN.lgsagub=(c)=>{
     const qi = COLS.findIndex(x=>x[0]==='qty');
     const API=API_BASE;
     const [df,dt]=_def(wide?0:45);   // 수입=당월1일~오늘, 수출=45일
-    let from=df, to=dt, cq='', mq='', iq='', bq='', rows=[], tot={}, loading=false, msg='';
+    const sid = wide?'dopippur':'dopipsale';
+    const canEdit = (typeof PERM!=='undefined' && PERM.canEdit)?PERM.canEdit(sid):true;
+    let from=df, to=dt, cq='', mq='', iq='', bq='', rows=[], tot={}, loading=false, msg='', sel=null, form=null;
     const load=async()=>{loading=true;msg='';draw();
       try{let u=`${API}/api/dopip/${ep}?from_ymd=${inD(from)}&to_ymd=${inD(to)}`;
         if(cq)u+=`&cust=${encodeURIComponent(cq)}`; if(mq)u+=`&mat=${encodeURIComponent(mq)}`;
@@ -3004,12 +3006,41 @@ SCREEN.lgsagub=(c)=>{
         rows=j.rows||[];tot=j.tot||{};}
       catch(e){rows=[];tot={};msg='백엔드 연결 실패';}
       loading=false;draw();};
-    const rowHtml=r=>`<tr>${COLS.map(cd=>{const cap=cd[2].indexOf('cap')>=0;return `<td class="${cd[2]}"${cap?` title="${esc(cd[3](r).replace(/<[^>]+>/g,''))}"`:''}>${cd[3](r)}</td>`;}).join('')}</tr>`;
+    const rowHtml=r=>{const on=sel&&sel.ymd===r.ymd&&sel.seq===r.seq;
+      return `<tr class="dp-row${on?' sel':''}" data-y="${r.ymd}" data-s="${r.seq}" style="cursor:${canEdit?'pointer':'default'}${on?';background:#dce9ff':''}">${COLS.map(cd=>{const cap=cd[2].indexOf('cap')>=0;return `<td class="${cd[2]}"${cap?` title="${esc(cd[3](r).replace(/<[^>]+>/g,''))}"`:''}>${cd[3](r)}</td>`;}).join('')}</tr>`;};
     const sub=(label,q,a,k,cls)=>`<tr class="${cls||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${nD(q,0)}</td><td></td><td></td><td class="num">${nD(a,4)}</td><td class="num">${wonI(k)}</td><td colspan="${COLS.length-qi-4}"></td></tr>`;
+    // 편집 필드 정의
+    const FLD = [['ymd',wide?'입고일자':'출고일자','date'],['cust','거래처코드','text'],['mat','품목번호','text'],['qty','수량','num'],['cur','통화','text'],['cost','단가(외환)','num'],['rate','환율','num'],['remarks','비고','text']];
+    if(wide) FLD.push(['duty','관세','num'],['fare','운임','num'],['tax','부과세과표','num'],['insp','신고번호','text'],['bl','B/L번호','text'],['hs','HS CODE','text']);
+    const modalHtml=()=>{const f=form.data, amt=(+f.qty||0)*(+f.cost||0), krw=Math.trunc(amt*(+f.rate||0));
+      return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:40px 10px">
+       <div style="background:#fff;border-radius:10px;padding:18px 22px;min-width:440px;max-width:600px;box-shadow:0 12px 44px rgba(0,0,0,.32)">
+        <div style="font-weight:700;font-size:15px;margin-bottom:14px">${form.mode==='new'?('➕ 도입-'+(wide?'수입':'수출')+' 추가'):'✏️ 수정 ('+esc(f.ymd)+'-'+f.seq+')'}</div>
+        <div style="display:grid;grid-template-columns:96px 1fr 96px 1fr;gap:8px 10px;align-items:center">
+         ${FLD.map(([k,lbl,ty])=>`<label class="tl">${lbl}</label><input class="inp dpf" data-k="${k}" type="${ty==='date'?'date':'text'}" value="${esc(ty==='date'?dIn(f[k]):(f[k]!=null&&f[k]!==''?f[k]:''))}" ${form.mode==='edit'&&k==='ymd'?'readonly':''} style="width:100%">`).join('')}
+        </div>
+        <div style="margin-top:10px;padding:8px 10px;background:#f4f7fc;border-radius:6px;font-size:12.5px">금액(외환) <b id="dp-amt">${nD(amt,4)}</b> · 금액(KRW) <b id="dp-krw">${wonI(krw)}</b> <span style="color:#888">(=수량×단가, ×환율 버림 자동)</span></div>
+        <div style="margin-top:16px;text-align:right"><button class="btn ghost" id="dp-cancel">취소</button> <button class="btn" id="dp-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
+       </div></div>`;};
+    const openEdit=()=>{if(!sel){alert('행을 선택하세요');return;}const r=rows.find(x=>x.ymd===sel.ymd&&x.seq===sel.seq);if(r){form={mode:'edit',data:Object.assign({},r)};draw();}};
+    const doSave=async()=>{const f=form.data;
+      const body={kind:wide?'pur':'sale',seq:form.mode==='edit'?f.seq:0};
+      c.querySelectorAll('.dpf').forEach(el=>{const k=el.dataset.k;body[k]=(k==='ymd')?inD(el.value):el.value.trim();});
+      if(!body.ymd||!body.cust||!body.mat){alert('일자·거래처·품목번호 필수');return;}
+      try{const r=await fetch(`${API}/api/dopip/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const j=await r.json();if(!r.ok){alert('저장 실패: '+(j.detail||r.status));return;}
+        form=null;sel={ymd:body.ymd,seq:j.seq};load();}
+      catch(e){alert('저장 오류: '+e.message);}};
+    const doDelete=async()=>{if(!sel){alert('삭제할 행을 선택하세요');return;}
+      if(!confirm(`${sel.ymd}-${sel.seq} 행을 삭제할까요?`))return;
+      try{const r=await fetch(`${API}/api/dopip/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:wide?'pur':'sale',ymd:sel.ymd,seq:sel.seq})});
+        const j=await r.json();if(!r.ok){alert('삭제 실패: '+(j.detail||r.status));return;}
+        sel=null;load();}
+      catch(e){alert('삭제 오류: '+e.message);}};
     const draw=()=>{
       c.innerHTML=`
-       <div class="page-title">${wide?'🚢 도입-수입입력':'✈️ 도입-수출입력'} <span style="font-size:12px;color:var(--muted);font-weight:400">${wide?'해외 수입(구매)':'해외 수출(판매)'} · 조회</span></div>
-       <div class="page-sub">원본 <code>w_pu_stock_c_0${wide?'40':'50'}</code> · 데이터 <code>PU_T_STOCK_MAINT_C</code> (MAINT_TAG='${wide?'P':'Q'}') · 🔴 라이브 · 금액(KRW)=금액×환율(버림)</div>
+       <div class="page-title">${wide?'🚢 도입-수입입력':'✈️ 도입-수출입력'} <span style="font-size:12px;color:var(--muted);font-weight:400">${wide?'해외 수입(구매)':'해외 수출(판매)'} · nx</span></div>
+       <div class="page-sub">원본 <code>w_pu_stock_c_0${wide?'40':'50'}</code> · 데이터 <code>nx.PU_T_STOCK_MAINT_C</code> (MAINT_TAG='${wide?'P':'Q'}') · 금액(KRW)=금액×환율(버림) · 행 클릭=선택, 더블클릭=수정</div>
        <div class="toolbar">
          <label class="tl">${wide?'입고기간':'출고기간'}</label>
          <input type="date" class="inp" id="df" value="${esc(from)}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dt" value="${esc(to)}" style="min-width:130px">
@@ -3017,15 +3048,15 @@ SCREEN.lgsagub=(c)=>{
          <input class="inp" id="mq" placeholder="자도번" value="${esc(mq)}" style="width:130px">
          ${wide?`<input class="inp" id="iq" placeholder="신고번호" value="${esc(iq)}" style="width:130px"><input class="inp" id="bq" placeholder="B/L번호" value="${esc(bq)}" style="width:130px">`:''}
          <button class="btn" id="go">🔍 조회</button>
+         ${canEdit?`<button class="btn" id="add" style="background:#1c7c3a;color:#fff">➕ 추가</button><button class="btn" id="edit">✏️ 수정</button><button class="btn" id="del" style="color:#c0392b">🗑 삭제</button>`:''}
          <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀</button>
        </div>
        <div class="summary-bar" id="sum"></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit"><thead><tr>${COLS.map(cd=>`<th class="${cd[2]}">${cd[1]}</th>`).join('')}</tr></thead><tbody id="body"></tbody></table></div>
        <div class="rowcount" id="cnt"></div>`;
       const g=id=>c.querySelector(id);
-      // 그룹(거래처 연속) 소계 + 총계
       let html='';
-      if(loading) html=`<tr><td colspan="${COLS.length}" class="empty">${typeof SPIN!=='undefined'?SPIN:''}라이브 조회 중…</td></tr>`;
+      if(loading) html=`<tr><td colspan="${COLS.length}" class="empty">${typeof SPIN!=='undefined'?SPIN:''}조회 중…</td></tr>`;
       else if(msg) html=`<tr><td colspan="${COLS.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;
       else if(!rows.length) html=`<tr><td colspan="${COLS.length}" class="empty">결과 없음</td></tr>`;
       else{ let gv=null,sq=0,sa=0,sk=0;
@@ -3036,12 +3067,25 @@ SCREEN.lgsagub=(c)=>{
       }
       g('#body').innerHTML=html;
       g('#sum').innerHTML=`<div class="s-item">건수 <b>${won(tot.cnt||0)}</b></div><div class="s-item">수량 <b>${nD(tot.qty||0,0)}</b></div><div class="s-item">금액 <b>${nD(tot.amt||0,3)}</b></div><div class="s-item">금액(KRW) <b>${wonI(tot.krw||0)} 원</b></div>`;
-      g('#cnt').textContent=`${tot.cnt||0}건`;
-      const go=()=>{from=g('#df').value;to=g('#dt').value;cq=g('#cq').value.trim();mq=g('#mq').value.trim();if(wide){iq=g('#iq').value.trim();bq=g('#bq').value.trim();}load();};
+      g('#cnt').textContent=`${tot.cnt||0}건${sel?` · 선택 ${sel.ymd}-${sel.seq}`:''}`;
+      const go=()=>{from=g('#df').value;to=g('#dt').value;cq=g('#cq').value.trim();mq=g('#mq').value.trim();if(wide){iq=g('#iq').value.trim();bq=g('#bq').value.trim();}sel=null;load();};
       g('#go').onclick=go;
       c.querySelectorAll('.inp').forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')go();});
       g('#xls').onclick=()=>{const hd=COLS.map(cd=>cd[1]);
         downloadCSV((wide?'도입수입입력':'도입수출입력')+'_'+inD(from)+'_'+inD(to)+'.csv',hd,rows.map(r=>COLS.map(cd=>(''+cd[3](r)).replace(/<[^>]+>/g,''))));};
+      c.querySelectorAll('.dp-row').forEach(tr=>{tr.onclick=()=>{sel={ymd:tr.dataset.y,seq:+tr.dataset.s};draw();};
+        if(canEdit)tr.ondblclick=()=>{sel={ymd:tr.dataset.y,seq:+tr.dataset.s};openEdit();};});
+      if(canEdit){const a=g('#add'),e=g('#edit'),d=g('#del');
+        if(a)a.onclick=()=>{form={mode:'new',data:{ymd:inD(to),cust:cq||'',mat:'',qty:0,cur:'USD',cost:0,rate:0,remarks:''}};draw();};
+        if(e)e.onclick=openEdit; if(d)d.onclick=doDelete;}
+      if(form){ c.insertAdjacentHTML('beforeend',modalHtml());
+        g('#dp-cancel').onclick=()=>{form=null;draw();};
+        g('#dp-save').onclick=doSave;
+        c.querySelectorAll('.dpf').forEach(el=>el.oninput=()=>{ // 금액 실시간
+          const get=k=>{const x=c.querySelector('.dpf[data-k="'+k+'"]');return x?x.value:'';};
+          const amt=(+get('qty')||0)*(+get('cost')||0), krw=Math.trunc(amt*(+get('rate')||0));
+          const ae=g('#dp-amt'),ke=g('#dp-krw');if(ae)ae.textContent=nD(amt,4);if(ke)ke.textContent=wonI(krw);});
+        const fi=c.querySelector('.dpf');if(fi)fi.focus();}
       if(typeof attachResizers!=='undefined')attachResizers(c);
     };
     load();
