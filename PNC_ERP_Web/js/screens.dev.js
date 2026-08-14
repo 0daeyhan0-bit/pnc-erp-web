@@ -64,8 +64,25 @@ const priceMgmtView=(host)=>{
   const loadItems=async()=>{loadingI=true;draw();
     try{let u=`${API}/api/pricemgmt/items?limit=1000`;if(q)u+=`&q=${encodeURIComponent(q)}`;if(lg)u+=`&lg=${encodeURIComponent(lg)}`;if(sg)u+=`&sg=${encodeURIComponent(sg)}`;
       items=(await(await fetch(u)).json()).rows||[];}catch(e){items=[];}loadingI=false;draw();};
-  const loadDetail=async()=>{if(!sel){detail=[];draw();return;}loadingD=true;draw();
-    try{detail=(await(await fetch(`${API}/api/pricemgmt/detail?item=${encodeURIComponent(sel)}`)).json()).rows||[];}catch(e){detail=[];}loadingD=false;draw();};
+  // ★행 클릭시 full draw 금지(좌측 스크롤 리셋 버그) — 상세 tbody만 부분갱신. [feedback-ui-rules 마스터-디테일 규칙]
+  const detailBody=()=>{
+    if(!sel)return `<tr><td colspan="13" class="empty">좌측에서 품목을 선택하세요</td></tr>`;
+    if(loadingD)return `<tr><td colspan="13" class="empty">단가 조회 중…</td></tr>`;
+    if(!detail.length)return `<tr><td colspan="13" class="empty">단가 없음 — ${canEdit?'추가 버튼으로 등록':'등록된 단가 없음'}</td></tr>`;
+    return detail.map(r=>{const on=dsel&&dsel.tag===r.tag&&dsel.cust===r.cust&&dsel.ymd===r.ymd;
+      return `<tr class="pm-drow${on?' sel':''}" data-t="${esc(r.tag)}" data-c="${esc(r.cust)}" data-y="${esc(r.ymd)}" style="cursor:${canEdit?'pointer':'default'}${on?';background:#dce9ff':''}">
+        <td class="center">${esc(r.tag_nm)}</td><td class="bcap" title="${esc(r.cust_nm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.cust_nm)}</td>
+        <td class="center">${r.main==='1'?'★':''}</td><td class="center">${fmtY(r.ymd)}</td><td class="center">${esc(r.cur)}</td>
+        <td class="num"><b>${nD(r.cost,r.cost%1?4:0)}</b></td><td class="num">${r.mat?nD(r.mat,0):''}</td><td class="num">${r.proc?nD(r.proc,0):''}</td><td class="num">${r.other?nD(r.other,0):''}</td>
+        <td>${esc(r.matunit)}</td><td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td><td>${esc(r.usr)}</td><td class="center" style="color:#8aa0bd">${esc(r.dt)}</td></tr>`;}).join('');};
+  const wireDetail=()=>{ if(!canEdit)return;
+    host.querySelectorAll('.pm-drow').forEach(tr=>{
+      tr.onclick=()=>{dsel={tag:tr.dataset.t,cust:tr.dataset.c,ymd:tr.dataset.y,cust_nm:(detail.find(x=>x.tag===tr.dataset.t&&x.cust===tr.dataset.c&&x.ymd===tr.dataset.y)||{}).cust_nm};
+        host.querySelectorAll('.pm-drow').forEach(x=>{x.classList.remove('sel');x.style.background='';});tr.classList.add('sel');tr.style.background='#dce9ff';};
+      tr.ondblclick=()=>{const r=detail.find(x=>x.tag===tr.dataset.t&&x.cust===tr.dataset.c&&x.ymd===tr.dataset.y);if(r){dsel=r;openEdit();}};});};
+  const renderDetail=()=>{const tb=host.querySelector('#pm-dbody');if(tb){tb.innerHTML=detailBody();wireDetail();}};
+  const loadDetail=async()=>{if(!sel){detail=[];renderDetail();return;}loadingD=true;renderDetail();
+    try{detail=(await(await fetch(`${API}/api/pricemgmt/detail?item=${encodeURIComponent(sel)}`)).json()).rows||[];}catch(e){detail=[];}loadingD=false;renderDetail();};
   // 편집 모달
   const removeModal=()=>{if(modalEl){modalEl.remove();modalEl=null;}};
   const mq=k=>{const x=modalEl&&modalEl.querySelector('.pmf[data-k="'+k+'"]');return x?(x.type==='checkbox'?(x.checked?'1':'0'):x.value.trim()):'';};
@@ -127,22 +144,19 @@ const priceMgmtView=(host)=>{
       </div>
       <div class="grid-wrap" style="min-height:0;overflow:auto;border:1px solid var(--line);border-radius:8px">
        <table class="tbl fit"><thead><tr><th>구분</th><th>거래처</th><th class="center">주거래</th><th class="center">적용일</th><th>화폐</th><th class="num">현재단가</th><th class="num">부품비</th><th class="num">가공비</th><th class="num">기타</th><th>소재단위</th><th>비고</th><th>수정자</th><th>수정일시</th></tr></thead>
-       <tbody>${!sel?`<tr><td colspan="13" class="empty">좌측에서 품목을 선택하세요</td></tr>`:(loadingD?`<tr><td colspan="13" class="empty">단가 조회 중…</td></tr>`:(detail.length?detail.map(r=>{const on=dsel&&dsel.tag===r.tag&&dsel.cust===r.cust&&dsel.ymd===r.ymd;
-         return `<tr class="pm-drow${on?' sel':''}" data-t="${esc(r.tag)}" data-c="${esc(r.cust)}" data-y="${esc(r.ymd)}" style="cursor:${canEdit?'pointer':'default'}${on?';background:#dce9ff':''}">
-          <td class="center">${esc(r.tag_nm)}</td><td class="bcap" title="${esc(r.cust_nm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.cust_nm)}</td>
-          <td class="center">${r.main==='1'?'★':''}</td><td class="center">${fmtY(r.ymd)}</td><td class="center">${esc(r.cur)}</td>
-          <td class="num"><b>${nD(r.cost,r.cost%1?4:0)}</b></td><td class="num">${r.mat?nD(r.mat,0):''}</td><td class="num">${r.proc?nD(r.proc,0):''}</td><td class="num">${r.other?nD(r.other,0):''}</td>
-          <td>${esc(r.matunit)}</td><td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td><td>${esc(r.usr)}</td><td class="center" style="color:#8aa0bd">${esc(r.dt)}</td></tr>`;}).join(''):`<tr><td colspan="13" class="empty">단가 없음 — ${canEdit?'추가 버튼으로 등록':'등록된 단가 없음'}</td></tr>`))}</tbody></table>
+       <tbody id="pm-dbody">${detailBody()}</tbody></table>
       </div>
      </div></div>`;
     const g=id=>host.querySelector(id);
     const go=()=>{q=g('#pmq').value.trim();lg=g('#pmlg').value;sg=g('#pmsg').value;sel='';selNm='';detail=[];dsel=null;loadItems();};
     g('#pmgo').onclick=go;g('#pmq').onkeyup=e=>{if(e.key==='Enter')go();};
     g('#pmlg').onchange=go;g('#pmsg').onchange=go;
-    host.querySelectorAll('.pm-irow').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.i;const it=items.find(x=>x.item===sel);selNm=it?it.nm:'';dsel=null;loadDetail();});
-    if(canEdit){host.querySelectorAll('.pm-drow').forEach(tr=>{tr.onclick=()=>{dsel={tag:tr.dataset.t,cust:tr.dataset.c,ymd:tr.dataset.y,cust_nm:(detail.find(x=>x.tag===tr.dataset.t&&x.cust===tr.dataset.c&&x.ymd===tr.dataset.y)||{}).cust_nm};draw();};
-        tr.ondblclick=()=>{const r=detail.find(x=>x.tag===tr.dataset.t&&x.cust===tr.dataset.c&&x.ymd===tr.dataset.y);if(r){dsel=r;openEdit();}};});
-      const a=g('#pmadd'),e=g('#pmedit'),d=g('#pmdel');if(a)a.onclick=openAdd;if(e)e.onclick=openEdit;if(d)d.onclick=doDelete;}
+    // 품목 클릭 = 좌측 하이라이트만 부분갱신(스크롤 유지) + 상세 부분로드(full draw 금지)
+    host.querySelectorAll('.pm-irow').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.i;const it=items.find(x=>x.item===sel);selNm=it?it.nm:'';dsel=null;
+      host.querySelectorAll('.pm-irow').forEach(x=>{x.classList.remove('sel');x.style.background='';});tr.classList.add('sel');tr.style.background='#dce9ff';
+      loadDetail();});
+    wireDetail();
+    if(canEdit){const a=g('#pmadd'),e=g('#pmedit'),d=g('#pmdel');if(a)a.onclick=openAdd;if(e)e.onclick=openEdit;if(d)d.onclick=doDelete;}
     if(typeof attachResizers!=='undefined')attachResizers(host);
   };
   draw();

@@ -62,6 +62,7 @@
 - **★페이지 본문 세로 스크롤 금지(메인 우측 스크롤 없앰):** `.content`가 넘쳐 생기는 **창 전체 스크롤 금지**. 화면 루트를 `display:flex;flex-direction:column;height:100%`로 짜고, **표/그리드 영역만** `flex:1;min-height:0;overflow:auto`로 내부 스크롤. 제목·툴바·요약카드는 `flex:0 0 auto`. **`max-height:calc(100vh - Npx)` 고정치 대신 flex 사용**(툴바 줄바꿈에 견고). **헤더=`position:sticky;top:0`, 합계/총계행=`position:sticky;bottom:0`**(배경색 필수)로 스크롤해도 항상 보이게. → 합계 보려 창 전체를 내리는 이상동작 제거.
 - **★팝업/모달은 `document.body`에 렌더:** `.content` 안에 `position:fixed` 모달을 넣으면 조상(transform/overflow) 때문에 **잘림**. 모달 element를 만들어 `document.body.appendChild` 후 닫을 때 remove. 오버레이 `position:fixed;inset:0;z-index≥1200`.
 - **모달 입력칸도 §3 동일 규칙:** 거래처=**거래처명 오토컴플리트**(datalist, 값=이름·저장시 코드매핑), 품목=자도번 오토컴플리트, 통화 등 고정선택지=**드롭다운**. 코드 직접입력칸(거래처코드 등) 금지.
+- **★마스터-디테일 행 클릭 = 부분갱신(스크롤 리셋 버그 방지, 자주 재발):** 좌측 리스트 스크롤다운 후 행 클릭 시 **첫행으로 리셋되면 버그**. 원인=클릭 핸들러가 `draw()` 전체 재렌더. → (a)좌측 하이라이트는 `classList/style` 토글만(재렌더 X) (b)우측 상세는 별도 `<tbody id>`에 `innerHTML`만 교체(`detailBody()`+`wireDetail()` 패턴) (c)저장/삭제 후 새로고침도 부분갱신. 신규 마스터-디테일 렌더 전 필수 점검(합계 sticky·내부스크롤과 함께 스크롤 3종).
 
 ---
 
