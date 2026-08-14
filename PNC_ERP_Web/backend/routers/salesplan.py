@@ -3,13 +3,25 @@
    구분: 1=상세(원행) · 2=집계(연속 line·output_hm·work_order 병합+일별 overwrite+도번 concat) · 3=도번집계.
    ★집계 알고리즘은 레거시 srw 379~412 PowerScript 후처리 충실이식(검증: 2607/260814 7일 = 2,028행·일별합계 완전일치).
    조회 우선(라이브 PARTNER_ERP RO). 필터 오토컴플리트는 프론트."""
-import os, datetime
+import os, datetime, time
 from fastapi import APIRouter, Query, HTTPException
 from common import _conn
 
 router = APIRouter()
 with open(os.path.join(os.path.dirname(__file__), 'sql_plan050.txt'), encoding='utf-8') as _f:
     _BASE_SQL = _f.read()
+
+# ★raw SQL 결과 캐시(동일 기준일·일수·필터 30초 재사용) — 레거시 SQL이 무거워(상관서브쿼리) 반복조회 가속. 합계 불변.
+_CACHE = {}
+_TTL = 30.0
+def _cache_get(k):
+    v = _CACHE.get(k)
+    if v and (time.time() - v[0]) < _TTL: return v[1]
+    return None
+def _cache_put(k, raw):
+    _CACHE[k] = (time.time(), raw)
+    if len(_CACHE) > 40:   # 상한(메모리)
+        for old in sorted(_CACHE, key=lambda x: _CACHE[x][0])[:20]: _CACHE.pop(old, None)
 
 def _d6(s): return ''.join(ch for ch in str(s or '') if ch.isdigit())[:6]
 def _like(s):
@@ -35,35 +47,41 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
            ':as_cust_code': "'%s'" % _like(cust), ':as_line_no': "'%s'" % _like(line),
            ':as_model_no': "'%s'" % _like(model), ':as_work_order': "'%s'" % _like(wo),
            ':as_item_code': "'%s'" % _like(item)}
-    sql = _BASE_SQL
-    for k, v in sub.items(): sql = sql.replace(k, v)
-    dcols = ",".join("plan_qty_%02d" % i for i in range(1, days + 1))
-    selcols = ("line_no,plan_ymd,output_hm,work_order,ISNULL(model_no,''),ISNULL(tools_desc,''),"
-               "c_item_code,ISNULL(work_center,''),ISNULL(work_center_code,''),ISNULL(lot_qty,0),"
-               "ISNULL(prod_rate,0),ISNULL(remarks2,''),") + dcols
-    cn = _conn(); cur = cn.cursor()
-    try:
-        cur.execute("SELECT " + selcols + " FROM (" + sql + ") q ORDER BY line_no,plan_ymd,output_hm,work_order,c_item_code")
-        raw = cur.fetchall()
-    finally:
-        cn.close()
-    def mk(r):
-        return {"line": str(r[0] or '').strip(), "ymd": str(r[1] or '').strip(), "ohm": str(r[2] or '').strip(),
-                "wo": str(r[3] or '').strip(), "model": str(r[4] or '').strip(), "tool": str(r[5] or '').strip(),
-                "item": str(r[6] or '').strip(), "wc": str(r[7] or '').strip(), "lot": float(r[9] or 0),
-                "rate": float(r[10] or 0), "remarks": str(r[11] or '').strip(),
-                "d": [float(x or 0) for x in r[12:12 + days]]}
-    rows = [mk(r) for r in raw]
-    # 라인명(CM_M_MASTER_DETAIL PR003 생산라인)
-    lnm = {}
-    try:
-        cn2 = _conn(); c2 = cn2.cursor()
+    # ★조회부(raw+line_nm) 캐시 — gubun은 캐시키 제외(같은 필터서 구분전환 즉시). 캐시 히트시 복사본으로 gubun 처리(원본보존).
+    ckey = (fr, days, _like(cust), _like(line), _like(model), _like(wo), _like(item))
+    cached = _cache_get(ckey)
+    if cached is not None:
+        rows = [dict(x, d=x["d"][:]) for x in cached]   # 깊은복사(gubun 변형 방지)
+    else:
+        sql = _BASE_SQL
+        for k, v in sub.items(): sql = sql.replace(k, v)
+        dcols = ",".join("plan_qty_%02d" % i for i in range(1, days + 1))
+        selcols = ("line_no,plan_ymd,output_hm,work_order,ISNULL(model_no,''),ISNULL(tools_desc,''),"
+                   "c_item_code,ISNULL(work_center,''),ISNULL(work_center_code,''),ISNULL(lot_qty,0),"
+                   "ISNULL(prod_rate,0),ISNULL(remarks2,''),") + dcols
+        cn = _conn(); cur = cn.cursor()
         try:
-            c2.execute("SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM PARTNER_ERP.dbo.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003'")
-            for a, b in c2.fetchall(): lnm[str(a).strip()] = str(b).strip()
-        finally: cn2.close()
-    except Exception: pass
-    for x in rows: x["line_nm"] = lnm.get(x["line"], "")
+            cur.execute("SELECT " + selcols + " FROM (" + sql + ") q ORDER BY line_no,plan_ymd,output_hm,work_order,c_item_code")
+            raw = cur.fetchall()
+        finally:
+            cn.close()
+        def mk(r):
+            return {"line": str(r[0] or '').strip(), "ymd": str(r[1] or '').strip(), "ohm": str(r[2] or '').strip(),
+                    "wo": str(r[3] or '').strip(), "model": str(r[4] or '').strip(), "tool": str(r[5] or '').strip(),
+                    "item": str(r[6] or '').strip(), "wc": str(r[7] or '').strip(), "lot": float(r[9] or 0),
+                    "rate": float(r[10] or 0), "remarks": str(r[11] or '').strip(),
+                    "d": [float(x or 0) for x in r[12:12 + days]]}
+        rows = [mk(r) for r in raw]
+        lnm = {}
+        try:
+            cn2 = _conn(); c2 = cn2.cursor()
+            try:
+                c2.execute("SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM PARTNER_ERP.dbo.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003'")
+                for a, b in c2.fetchall(): lnm[str(a).strip()] = str(b).strip()
+            finally: cn2.close()
+        except Exception: pass
+        for x in rows: x["line_nm"] = lnm.get(x["line"], "")
+        _cache_put(ckey, [dict(x, d=x["d"][:]) for x in rows])   # 원본 복사본 저장
 
     if gubun == "2":       # 집계 (레거시 379~412)
         out = []
