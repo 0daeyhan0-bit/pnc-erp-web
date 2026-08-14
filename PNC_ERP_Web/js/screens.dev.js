@@ -1217,28 +1217,35 @@ SCREEN.unifybom=(c,ro)=>{
   const RO=(ro===true);
   let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false;
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
-  let mlEdit=false, mlRows=[], mlDupSet=new Set();   // 다단계 편집(전 레벨 구성 직접삭제)
+  let mlEdit=false, mlRows=[];   // BOM 수정(전 레벨 추가/삭제)
   const loadMlTree=async()=>{try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}&real=0`);const j=await r.json();mlRows=j.rows||[];
-    const cnt={};mlRows.forEach(n=>{if(n.level>0)cnt[n.raw]=(cnt[n.raw]||0)+1;});mlDupSet=new Set(Object.keys(cnt).filter(k=>cnt[k]>1));
-    mlEdit=true;draw();}catch(e){alert('다단계 트리 로드 실패: '+e.message);}};
-  const mlEditTable=()=>`
-    <div style="border:2px solid #c0392b;border-radius:10px;background:#fdf6f6;padding:10px;margin:8px 0">
+    mlEdit=true;draw();}catch(e){alert('트리 로드 실패: '+e.message);}};
+  const mlEditTable=()=>{
+    const parents=[item].concat([...new Set(mlRows.filter(n=>n.haskids&&n.level>0).map(n=>n.raw))]);
+    return `
+    <div style="border:1px solid #c9d3e0;border-radius:10px;background:#fff;padding:10px;margin:8px 0">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <b style="color:#c0392b;font-size:14px">🌲 다단계 편집 — 전 레벨 구성(중복·허수 직접 삭제)</b>
-        <span style="font-size:11px;color:#8a6060">각 행 🗑 = 그 <b>부모BOM</b>에서 해당 구성 1건 즉시 삭제 · 같은 품번이 상위·SUB 양쪽에 있으면 <span style="color:#c0392b">🔴중복</span>으로 둘 다 표시</span>
+        <b style="color:#1c47a0;font-size:14px">🌲 BOM 수정 — 전 레벨(상위·SUB) 추가/삭제</b>
         <div style="flex:1"></div><button class="btn ghost" id="ml-close">✖ 닫기</button>
       </div>
-      <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid #e2c4c4;border-radius:6px">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;padding:8px;background:#f4fbf6;border:1px solid #cfe8d6;border-radius:6px">
+        <b style="color:#1c7c3a;font-size:12px">➕ 구성 추가</b>
+        <label class="tl">부모</label><select class="inp" id="ml-parent" style="max-width:210px">${parents.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select>
+        <label class="tl">자식품번</label><input class="inp" id="ml-child" list="ml-childdl" style="width:160px" placeholder="품번 검색·입력" autocomplete="off"><datalist id="ml-childdl"></datalist>
+        <label class="tl">소요량</label><input class="inp" id="ml-qty" type="number" step="any" value="1" style="width:64px">
+        <button class="btn" id="ml-add" style="background:#1c7c3a;color:#fff">추가</button>
+      </div>
+      <div class="grid-wrap" style="max-height:calc(100vh - 380px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:6px">
        <table class="tbl fit" style="font-size:12px"><thead><tr><th>레벨 · 품번</th><th>품명</th><th>규격</th><th class="num">소요량</th><th>소속(부모)</th><th class="center">삭제</th></tr></thead>
-       <tbody>${mlRows.map((n,i)=>{const dup=mlDupSet.has(n.raw)&&n.level>0;return `<tr${dup?' style="background:#fff3f0"':''}>
-         <td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*16}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b>${n.haskids?' <span class="badge" style="background:#eef4ff;color:#2f5aa8">SUB</span>':''}${dup?' <span style="color:#c0392b;font-size:10px;font-weight:700">🔴중복</span>':''}</td>
-         <td class="bcap" title="${esc(n.nm)}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis">${esc(n.nm)}</td>
+       <tbody>${mlRows.map((n,i)=>`<tr>
+         <td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*16}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b>${n.haskids?' <span class="badge" style="background:#eef4ff;color:#2f5aa8">SUB</span>':''}</td>
+         <td class="bcap" title="${esc(n.nm)}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(n.nm)}</td>
          <td style="white-space:nowrap">${esc(n.spec||(n.diam?('Ø'+n.diam+(n.thick?'×'+n.thick:'')):''))}</td>
          <td class="num">${n.qty}</td>
          <td style="font-size:11px;color:#5a7089">${n.level?esc(n.parent):'—'}</td>
-         <td class="center">${n.level>0?`<button class="btn xs ghost ml-del" data-i="${i}" style="color:#c0392b">🗑 삭제</button>`:'<span style="color:#bbb">최상위</span>'}</td></tr>`;}).join('')}</tbody></table>
+         <td class="center">${n.level>0?`<button class="btn xs ghost ml-del" data-i="${i}" style="color:#c0392b">🗑</button>`:''}</td></tr>`).join('')}</tbody></table>
       </div>
-    </div>`;
+    </div>`;};
   let wuData=null, wuBusy=false;   // 역전개(where-used) 모달 상태
   const wuFmt=n=>(n==null||n==='')?'':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:5});
   const openWhereUsed=async()=>{
@@ -2295,18 +2302,18 @@ SCREEN.subvariant=(c)=>{
         <div class="sp-newsub" data-parentsub="${dsub}" style="border:2px dashed #a678d0;border-radius:8px;padding:14px 8px;text-align:center;color:#8e44ad;font-size:12.5px;font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;min-height:40px;display:flex;align-items:center;justify-content:center">➕ 부품을 여기로 드래그 → 새 SUB로 묶기${dsub>0?' (이 SUB 안에 중첩)':' (레벨1)'}</div>
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
+      <style>.sp-drop.dz-hi{box-shadow:0 0 0 2px #1c47a0 inset;background:#eef4ff!important}.sp-newsub.dz-hi{background:#e3c8f5!important;border-color:#8e44ad!important;color:#6c2f96!important;transform:scale(1.01)}</style>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <div style="font-weight:700;color:#8e44ad">🧩 SUB 재구성 · 공정 배치</div>
         <span id="sp-gate" style="font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(total)} / BASE ${base} = 절삭 ${nfq(cutSum)} + 조립 ${nfq(procSum)} ${ok?'✔':'✖ 불일치'}</span>
         <button class="btn" id="sp-finalize" style="margin-left:auto;background:#1c7c3a;color:#fff;padding:2px 12px" title="신규SUB중복검사→공수합=BASE→부품수 3종 검증 후 저장">💾 전체 저장(검증)</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-        <div style="flex:1;min-width:250px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
-          <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">부품 풀 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(전 구성부품·배지=배치노드·오른쪽 드래그)</span>
-            <button class="btn sp-padd" style="margin-left:auto;padding:0 7px;font-size:10px;color:#1c7c3a">➕ 부품추가</button></div>
+        <div style="flex:1;min-width:250px;min-height:420px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
+          <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">부품 풀 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(전 구성부품·배지=배치노드·오른쪽 SUB/새SUB존으로 드래그)</span></div>
           ${parts.map(poolRow).join('')||'<div class="empty" style="font-size:11px">부품 없음 (RAC 용접봉 제외)</div>'}
         </div>
-        <div style="flex:1.3;min-width:300px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
-          <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(노드 [수정]=공정팝업 · 부품 드롭=배치 · SUB마다 [새 SUB로 묶기]=서브안의서브)</span></div>
+        <div style="flex:1.3;min-width:300px;min-height:420px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
+          <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(SUB 노드 위=하이라이트+추가 · "새 SUB로 묶기"=SUB 생성 · 레벨1 바닥=무반응)</span></div>
           ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat,0)}
         </div>
       </div></div>`;};
@@ -2402,7 +2409,7 @@ SCREEN.subvariant=(c)=>{
           ? `<button class="btn" id="dt-cancel" style="color:#c0392b">✖ 취소</button> <button class="btn" id="dt-register" style="background:#1c7c3a;color:#fff">✔ 등록</button>`
           : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`);
     return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px 10px">
-      <div style="background:#fff;border-radius:12px;width:820px;max-width:97vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
+      <div style="background:#fff;border-radius:12px;width:1080px;max-width:97vw;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
         <div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${R.baseline?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:12px 12px 0 0">
           <b>${R.baseline?'현행 조달경로 상세(보기)':(fresh?'조달후보 신규 등록':'조달후보 상세 편집')} — ${esc(st.routeTarget)}_R${String(R.baseline?1:R.route_no).padStart(2,'0')}${R.baseline?' (현행·base품번 불변)':''}</b><span id="dt-x" style="cursor:pointer;font-size:17px">✕</span></div>
         <div style="flex:1 1 auto;overflow:auto;padding:14px 18px">
@@ -2439,7 +2446,7 @@ SCREEN.subvariant=(c)=>{
         </div>
         <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
           <span style="color:#c0392b;font-size:11px">${HINT} 소요량은 원가/조달/재고 계산에 쓰여 필수. 저장 시 후보 <b>미승인</b> 리셋.</span>
-          <span><button class="btn" id="ln-child" title="원본 하위품번 복사+접미사 채번">🧬 신규 채번</button> <button class="btn" id="ln-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="ln-cancel">닫기</button></span></div>
+          <span><button class="btn" id="ln-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="ln-cancel">닫기</button></span></div>
       </div><datalist id="sv-vdl"></datalist></div>`;};
   // ---------- draw ----------
   const draw=()=>{
@@ -2513,32 +2520,29 @@ SCREEN.subvariant=(c)=>{
     const rid=st.detail.route_id;
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
     const reloadPanel=async()=>{st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);};
-    // 부품추가(신규 라인) — 왼쪽 풀에서 line/save·child/new 호출(lineModal 재사용)
-    {const b=c.querySelector('.sp-padd');if(b)b.onclick=()=>{st.lineForm={route_id:rid,gubun:'',is_rawmat:0};draw();};}
-    // 부품 라인 직접수정(BOM 구성과 동일 폼)
+    // ★부품추가 버튼 제거 — 조달후보는 BASE BOM 부품만 재편성(BOM 외 부품 금지). 라인 직접수정만 유지.
     c.querySelectorAll('.sp-ledit').forEach(b=>b.onclick=e=>{e.stopPropagation();const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);if(l){st.lineForm=Object.assign({route_id:rid},l);draw();}});
-    // 드래그: 좌측 부품 풀 → 우측 노드(ASSY 레벨0=data-sub0 / SUB=line_id)로 배치. 절삭공정은 부품 따라감(자동).
-    // ★드래그 대상 line_id = 클로저(st._dragLid)로 확실히 보관 — 중첩 드롭존에서 dataTransfer.getData가 빈값 반환하는 회귀 방지.
-    c.querySelectorAll('.sp-drag').forEach(el=>{
-      el.ondragstart=e=>{e.stopPropagation();st._dragLid=el.dataset.lid;try{e.dataTransfer.setData('text/lid',el.dataset.lid);}catch(_){}e.dataTransfer.effectAllowed='move';};
-      el.ondragend=()=>{st._dragLid=null;};});
-    const _getLid=e=>{let v=st._dragLid;if(!v){try{v=e.dataTransfer.getData('text/lid');}catch(_){}}return v;};
-    c.querySelectorAll('.sp-drop').forEach(zone=>{
-      zone.ondragenter=e=>{e.preventDefault();e.stopPropagation();};
-      zone.ondragover=e=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';zone.style.boxShadow='0 0 0 2px #1c47a0 inset';};
-      zone.ondragleave=e=>{e.stopPropagation();zone.style.boxShadow='';};
-      zone.ondrop=async e=>{e.preventDefault();e.stopPropagation();zone.style.boxShadow='';const lid=_getLid(e);st._dragLid=null;if(!lid)return;
-        try{const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+zone.dataset.sub,line_ids:[+lid]})});
-          if((await r.json()).ok)await reloadPanel();else alert('이동 실패');}catch(err){alert('이동 오류: '+err.message);}};});
-    // ★새 SUB로 묶기 존(노드별·중첩) — data-parentsub>0=서브안의서브. stopPropagation으로 중첩 드롭존만 처리.
-    c.querySelectorAll('.sp-newsub').forEach(z=>{
-      z.ondragenter=e=>{e.preventDefault();e.stopPropagation();};
-      z.ondragover=e=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';z.style.background='#ecd9fb';};
-      z.ondragleave=e=>{e.stopPropagation();z.style.background='#f6f0fc';};
-      z.ondrop=async e=>{e.preventDefault();e.stopPropagation();z.style.background='#f6f0fc';const lid=+_getLid(e);st._dragLid=null;if(!lid)return;
-        const psub=+z.dataset.parentsub||0;
-        try{const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[lid],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)',parent_sub:psub})});
-          const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+(psub>0?' (중첩)':'')+' 생성';await reloadPanel();}else alert('SUB 생성 실패: '+(j.detail||''));}catch(err){alert('SUB 생성 오류: '+err.message);}};});
+    // ★드래그&드롭 = 컨테이너 이벤트 위임(재렌더에도 유지·property할당=멱등 → 재드롭/반복 SUB생성 안정).
+    //   드롭대상: 기존 SUB노드(부품 추가)·"새 SUB로 묶기"존(SUB 생성)만. ASSY 레벨1(data-sub=0)=무반응. 하이라이트=.dz-hi.
+    const _dzClear=()=>c.querySelectorAll('.dz-hi').forEach(x=>x.classList.remove('dz-hi'));
+    const _dzTarget=e=>{const z=e.target.closest&&e.target.closest('.sp-newsub,.sp-drop[data-sub]');if(!z)return null;
+      if(z.classList.contains('sp-newsub'))return z;              // 새 SUB 생성 존
+      return (+z.dataset.sub>0)?z:null;};                          // SUB(추가)만 / ASSY 레벨1(0)=무반응
+    c.ondragstart=e=>{const el=e.target.closest&&e.target.closest('.sp-drag');if(!el)return;
+      st._dragLid=el.dataset.lid;try{e.dataTransfer.setData('text/lid',el.dataset.lid);}catch(_){}e.dataTransfer.effectAllowed='move';};
+    c.ondragend=()=>{st._dragLid=null;_dzClear();};
+    c.ondragover=e=>{const z=_dzTarget(e);if(!z)return;e.preventDefault();e.dataTransfer.dropEffect='move';if(!z.classList.contains('dz-hi')){_dzClear();z.classList.add('dz-hi');}};
+    c.ondragleave=e=>{const z=e.target.closest&&e.target.closest('.sp-newsub,.sp-drop[data-sub]');if(z)z.classList.remove('dz-hi');};
+    c.ondrop=async e=>{const z=_dzTarget(e);const lid=+(st._dragLid||0);st._dragLid=null;_dzClear();if(!z)return;e.preventDefault();if(!lid)return;
+      try{
+        if(z.classList.contains('sp-newsub')){const psub=+z.dataset.parentsub||0;
+          const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[lid],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)',parent_sub:psub})});
+          const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+(psub>0?' (중첩)':'')+' 생성';await reloadPanel();}else alert('SUB 생성 실패: '+(j.detail||''));
+        }else{
+          const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+z.dataset.sub,line_ids:[lid]})});
+          if((await r.json()).ok)await reloadPanel();else alert('이동 실패');
+        }
+      }catch(err){alert('드롭 오류: '+err.message);}};
     // 노드 [수정] → 관경별 용접 + 공정별 작업ST 팝업(노드 스코프: 레벨0=ASSY값 / 신규SUB=빈값)
     c.querySelectorAll('.sp-nedit').forEach(b=>b.onclick=e=>{e.stopPropagation();openNodeProc(b.dataset.node,b.dataset.sub==='0');});
     // [해체] SUB 노드 → 하위부품 ASSY 복귀 · 비종속 공정/용접 ASSY 이관(공수합 보존, 백엔드 sub/dissolve). 해체 후 패널 갱신.
@@ -2565,7 +2569,7 @@ SCREEN.subvariant=(c)=>{
       else alert('저장 실패: '+(j.detail||JSON.stringify(j)));}catch(e){alert('오류: '+e.message);}};}};
   const bindLineModal=()=>{if(!st.lineForm)return;const g=id=>c.querySelector(id);
     g('#ln-x').onclick=g('#ln-cancel').onclick=()=>{st.lineForm=null;draw();};
-    g('#ln-save').onclick=saveLine;g('#ln-child').onclick=newChild;
+    g('#ln-save').onclick=saveLine;   // ★신규채번 버튼 제거(정규화 역행 방지) — SUB 생성은 "새 SUB로 묶기" _S{nn} 정본으로 일원화
     c.querySelectorAll('.lf').forEach(el=>{el.oninput=el.onchange=()=>{const v=el.type==='checkbox'?el.checked:el.value;st.lineForm[el.dataset.k]=v;if(el.dataset.k==='is_rawmat')draw();if(el.dataset.k==='vendor_code')vSearch(el.value);};});};
   // ---------- #3 용접 팝업 binds ----------
   const bindWeldModal=()=>{if(!st.weldEdit)return;const w=st.weldEdit,g=id=>c.querySelector(id);

@@ -721,6 +721,56 @@ def bom_deleteline(payload: dict = Body(...)):
     finally:
         cn.close()
 
+@router.post("/api/bom/addline")
+def bom_addline(payload: dict = Body(...)):
+    """다단계 편집: 부모 BOM에 자식 1행 추가(삭제 되돌리기·구성추가). body {parent, child, qty}.
+       가드: 부모·자식 등록확인·자기참조·순환·(용접봉 RAC은 proc_weld). 중복은 허용(dup 카운트 반환)."""
+    parent = str(payload.get("parent", "")).strip()
+    child = str(payload.get("child", "")).strip().upper()
+    try:
+        qty = float(payload.get("qty") or 1)
+    except (TypeError, ValueError):
+        qty = 1.0
+    if not parent or not child:
+        raise HTTPException(400, "parent·child 필요")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", parent)
+        if not cur.fetchone():
+            return {"ok": False, "errors": [f"부모 미등록 ({parent})"]}
+        if child == parent:
+            return {"ok": False, "errors": ["자기참조 불가"]}
+        # 헤더 확보
+        cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", parent)
+        h = cur.fetchone()
+        if h:
+            bom_id = h[0]
+        else:
+            cur.execute("INSERT INTO nx.bom_header(item_code,version,apply_from,status) VALUES(?,1,'2000-01-01',N'확정')", parent)
+            cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", parent); bom_id = cur.fetchone()[0]
+        if child.upper().startswith("RAC"):   # 용접봉 = 공정종속(proc_weld)
+            cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,use_qty,tag,src)
+                VALUES(?,?,?,?,'W','addline')""", parent, child, child.split('-')[0], qty)
+            cn.commit(); _reset_cost_engine()
+            return {"ok": True, "parent": parent, "child": child, "weld": True, "qty": qty}
+        cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", child)
+        if not cur.fetchone():
+            return {"ok": False, "errors": [f"자식 미등록 품목 ({child}) — 품목마스터에 먼저 등록하세요"]}
+        # 순환: 자식의 BOM이 부모를 포함하면 순환
+        cur.execute("""SELECT 1 FROM nx.bom_line l JOIN nx.bom_header h ON h.bom_id=l.bom_id
+                       WHERE h.item_code=? AND l.child_item=?""", child, parent)
+        if cur.fetchone():
+            return {"ok": False, "errors": [f"순환참조 ({child} 가 {parent} 를 이미 포함)"]}
+        cur.execute("SELECT COUNT(*) FROM nx.bom_line WHERE bom_id=? AND child_item=?", bom_id, child)
+        dup = cur.fetchone()[0]
+        cur.execute("SELECT ISNULL(MAX(seq),0)+1 FROM nx.bom_line WHERE bom_id=?", bom_id)
+        seq = cur.fetchone()[0]
+        cur.execute("INSERT INTO nx.bom_line(bom_id,seq,child_item,qty,node_type) VALUES(?,?,?,?,N'부품')", bom_id, seq, child, qty)
+        cn.commit(); _reset_cost_engine()
+        return {"ok": True, "parent": parent, "child": child, "seq": seq, "qty": qty, "dup": dup}
+    finally:
+        cn.close()
+
 @router.post("/api/bom/qty")
 def bom_qty(payload: dict = Body(...)):
     """BOM 단건 소요량 수정(부모+자식) — 다른 라인 속성 보존(전체교체 아님). 내부원가 수정에서 안전 갱신."""
