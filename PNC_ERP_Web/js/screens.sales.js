@@ -606,14 +606,15 @@ SCREEN.salesplan=(c)=>{
       :(msg?`<tr><td colspan="${NC}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
       :(rows.length?rows.map(r=>`<tr>
         <td class="bcap" title="${esc(r.line+' '+(r.line_nm||''))}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.line)} ${esc(r.line_nm||'')}</td>
-        <td>${esc(r.wo)}</td><td>${esc(r.model)}</td><td class="bcap" style="max-width:80px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.tool)}">${esc(r.tool)}</td>
+        <td>${esc(r.wo)}</td>
         <td class="bcap" title="${esc(r.item)}" style="max-width:230px;overflow:hidden;text-overflow:ellipsis">${esc(r.item)}</td>
         <td>${esc(r.wc)}</td><td class="num">${r.rate||''}</td><td class="center">${fmtHM(r.ohm)}</td><td class="center">${fmtY(r.ymd)} ${fmtHM(r.ohm)}</td>
         <td class="num">${won(r.lot)}</td><td class="num"><b>${won(r.total)}</b></td>
         ${r.d.map((v,i)=>`<td class="num${wk(labs[i])?' wkend':''}">${v?won(v):''}</td>`).join('')}
-        <td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td></tr>`).join('')
+        <td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td>
+        <td>${esc(r.model)}</td><td class="bcap" style="max-width:90px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.tool)}">${esc(r.tool)}</td></tr>`).join('')
       :`<tr><td colspan="${NC}" class="empty">결과 없음</td></tr>`));
-    const footRow=rows.length?`<tr class="sp-foot"><td colspan="9" class="right">총계 (${won(tot.cnt||0)}건)</td><td class="num">${won(tot.lot||0)}</td><td class="num">${won(tot.total||0)}</td>${footTd}<td></td></tr>`:'';
+    const footRow=rows.length?`<tr class="sp-foot"><td colspan="7" class="right">총계 (${won(tot.cnt||0)}건)</td><td class="num">${won(tot.lot||0)}</td><td class="num">${won(tot.total||0)}</td>${footTd}<td></td><td></td><td></td></tr>`:'';
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="margin-bottom:2px">📅 영업계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">일별 생산/영업계획 (w_pr_plan_050)</span></div>
      <div class="page-sub" style="margin-bottom:6px">기준일부터 N일 일별 계획수량 · 원본 <code>SA_T_PLAN_DTL</code> · 🔴 라이브 · 구분 상세/집계/도번집계 · 주말=주황</div>
@@ -629,7 +630,7 @@ SCREEN.salesplan=(c)=>{
        <button class="btn" id="sp-go">🔍조회</button><div class="spacer"></div><button class="btn xls" id="sp-xls">📥엑셀</button>
      </div>
      <div class="grid-wrap sp-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit">
-      <thead><tr><th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th style="text-align:left">도번</th><th>작업처</th><th class="num">비율</th><th>시간</th><th>Output</th><th class="num">LOT수량</th><th class="num">합계</th>${labs.map(l=>`<th class="num${wk(l)?' wkend':''}">${esc(l)}</th>`).join('')}<th>비고</th></tr></thead>
+      <thead><tr><th>라인</th><th>제번</th><th style="text-align:left">도번</th><th>작업처</th><th class="num">비율</th><th>시간</th><th>Output</th><th class="num">LOT수량</th><th class="num">합계</th>${labs.map(l=>`<th class="num${wk(l)?' wkend':''}">${esc(l)}</th>`).join('')}<th>비고</th><th>Model No</th><th>Tools</th></tr></thead>
       <tbody>${bodyRows}${footRow}</tbody></table></div>
      <div class="rowcount">${won((D.tot||{}).cnt||0)}건 · ${esc(D.from||'')}~${esc(D.to||'')} (${gubun==='1'?'상세':gubun==='2'?'집계':'도번집계'})</div>
      <style>.sp-grid thead th{position:sticky;top:0;z-index:3;background:#f4f7fc}.sp-grid tr.sp-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;z-index:2;border-top:2px solid #cdd9ef}.sp-grid th.wkend,.sp-grid td.wkend{background:#ffe8d4}.sp-grid tr.sp-foot td.wkend{background:#f5d9be}</style></div>`;
