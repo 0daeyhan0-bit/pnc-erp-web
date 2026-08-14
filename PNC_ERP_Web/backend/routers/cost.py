@@ -448,6 +448,12 @@ def cost_nx_bulk(p: dict = Body(...)):
         smap = {}
         try: smap = _sagub_diff_map(eng.cur, ym) if ym else {}
         except Exception: smap = {}
+        # ★실사급금액(통째): 사급부품 보유 완제품만 계산(성능). nx.item_sagub_cost=사급>0 필터.
+        sag_items = set()
+        try:
+            eng.cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
+            sag_items = set(r[0] for r in eng.cur.fetchall())
+        except Exception: sag_items = set()
         for it in parts:
             try:
                 s = eng.silwon(it, ymd)
@@ -457,6 +463,8 @@ def cost_nx_bulk(p: dict = Body(...)):
                 sp = eng.material_split(it, ymd)   # 재료비 sgroup별 분리(원자재/부자재/LG사급) — 스냅샷 정합
                 out[it]['won'] = sp['won']; out[it]['bu'] = sp['bu']; out[it]['sa'] = sp['sa']
                 out[it]['sagub'] = eng.sagub_sum(it, smap) if smap else 0.0   # 사급차액(개당, 완제품 BOM 사급부품 차액합)
+                # ★실사급금액(통째, 기준일 사급가) — 나란히 표시용. material_split(분해=sa) 무영향.
+                out[it]['silsagub'] = eng.sagub_whole(it, ymd) if (it in sag_items) else 0.0
             except Exception as e:
                 out[it] = {"error": str(e)[:60]}
     finally:

@@ -443,6 +443,33 @@ class NxCostEngine:
             walk(item, 1.0, set())
         return {k: round(v,2) for k,v in b.items()}
 
+    def cosp_price(self, item, ymd):
+        """사급가(COSP) = nx.price_item(price_type='매입', vendor='LG') as-of ymd 최신. LG가 청구하는 실 사급단가."""
+        if not hasattr(self, '_cospc'): self._cospc = {}
+        if item not in self._cospc:
+            self.cur.execute("SELECT ISNULL(apply_ymd,''), price FROM nx.price_item WHERE item_code=? AND price_type=N'매입' AND vendor_code='LG'", item)
+            self._cospc[item] = [(str(r[0]).strip(), float(r[1] or 0)) for r in self.cur.fetchall()]
+        cands = [c for c in self._cospc[item] if c[0] and c[0] <= ymd]
+        return max(cands, key=lambda c: c[0])[1] if cands else 0.0
+
+    def sagub_whole(self, item, ymd):
+        """★실사급금액(통째) = Σ(사급부품[소분류310] 소요 × 사급가 COSP@ymd). 사급부품을 분해 안 하고 통째로.
+           ※read-only 별도 메서드 — material()/실원가/손익 무영향(레거시 diff0 보존). 품목원가 '나란히 표시'용.
+           소요=CS_M_ITEM_BOM 전개(조달경로변형 배제=예상 사급금액과 동일 소스). 엔진 nx.bom_line은 외주완성에서 정지해
+           사급부품(예 AJR30077403→MJX65072203)을 못 잡음 → CS로 완전전개해야 실제 OSP 정합."""
+        if not hasattr(self, '_sag310'):
+            self.cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+            self._sag310 = set(r[0] for r in self.cur.fetchall())
+        self.cur.execute("""WITH expl AS (
+            SELECT LTRIM(RTRIM(MAT_CODE)) part, CAST(USE_QTY AS float) cum, 1 lvl FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            UNION ALL SELECT LTRIM(RTRIM(b.MAT_CODE)), e.cum*CAST(b.USE_QTY AS float), e.lvl+1 FROM expl e JOIN PARTNER_ERP.dbo.CS_M_ITEM_BOM b ON LTRIM(RTRIM(b.ITEM_CODE))=e.part AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' WHERE e.lvl<8)
+            SELECT part, SUM(cum) FROM expl GROUP BY part OPTION(MAXRECURSION 30)""", item)
+        soyos = [(str(p or '').strip(), float(s or 0)) for p, s in self.cur.fetchall()]
+        tot = 0.0
+        for p, s in soyos:
+            if p in self._sag310: tot += s * self.cosp_price(p, ymd)
+        return round(tot, 2)
+
     def sagub_sum(self, item, diffmap):
         """완제품 손익에 반영할 사급차액 합 = Σ diffmap[사급부품] × 누적소요qty.
            diffmap={부품:사급차액(=실출고가−실입고가, 음수=손해)}.
