@@ -381,16 +381,16 @@ SCREEN.partplan=(c)=>{
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const wlab=y=>{if(!y||y.length<6)return dcol(y);const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));const dow='일월화수목금토'[dt.getDay()];return `${y.slice(4,6)}${dow}`;};
   const isWkend=y=>{if(!y||y.length<6)return false;const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return dt.getDay()===0||dt.getDay()===6;};
-  // 당김: 원계획일(plan_ymd, LG) 대비 파트계획일(part_ymd) 당겨진 달력일수(음수=선행생산). ★근사(정밀 pull-SP 미이식).
-  const pull=(pymd,plan)=>{if(!pymd||!plan||pymd.length<6||plan.length<6)return '';const a=new Date(2000+ +pymd.slice(0,2),+pymd.slice(2,4)-1,+pymd.slice(4,6)),b=new Date(2000+ +plan.slice(0,2),+plan.slice(2,4)-1,+plan.slice(4,6));const d=Math.round((a-b)/864e5);return d?`${d>0?'+':''}${d}d`:'';};
+  // 당김,변경 = CHANGE_DAY + ',' + (LOT_QTY − LAST_LOT_QTY). 전차수 대비 일자·수량 변경(레거시 c_remarks3). 둘다 0이면 공백, 수량변경시 빨강.
+  const pulltxt=r=>{const cd=(r.change_day||'').trim(),ld=+r.lot_diff||0;if(!cd&&!ld)return '';return `${cd}${cd&&ld?',':''}${ld?(ld>0?'+':'')+ld:(cd?'':'')}`;};
   const T=new Date();
   // ★색상 정본(레거시 c_color CASE = kitting finBg 이식): 90주황(출하완료)/70노랑(생산완료)/50·10녹(키팅완료)/else 백(미키팅)
   const finBg=f=>f==='6'?'#fac090':(f==='4'?'#ffff00':(f==='3'?'#669900':''));
   const finFg=f=>f==='3'?'#ffffff':'';
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'전체',view:'전체',loading:false,msg:''};
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'전체',view:'전체',src:'nx',loading:false,msg:''};
   const load=async()=>{st.loading=true;render();
-    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:st.view,unfin:st.unfin,limit:8000});
-    try{const r=await fetch(`${API}/api/kitting/grid?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.note=j.note||'';st.msg='';}
+    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:st.view,unfin:st.unfin,src:st.src,limit:8000});
+    try{const r=await fetch(`${API}/api/plan/part410?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.inwon=j.inwon||0;st.note=j.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';st.rows=[];st.dates=[];}
     st.loading=false;render();};
   const shiftDay=n=>{const d=new Date(st.base);d.setDate(d.getDate()+n);st.base=iso(d);load();};
@@ -407,8 +407,8 @@ SCREEN.partplan=(c)=>{
     if(st.view==='집계'){
       const agg=new Map();
       st.rows.forEach(r=>{const k=r.gpc+'|'+r.assy+'|'+r.upper+'|'+r.item;let g=agg.get(k);
-        if(!g){g={gpcnm:r.gpcnm,gpc:r.gpc,assy:r.assy,upper:r.upper,item:r.item,nm:r.nm,line:r.line,inhm:r.inhm,part_ymd:r.part_ymd,plan_ymd:r.plan_ymd,item_st:r.item_st,wo:'(집계)',swo:'',plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{}};agg.set(k,g);}
-        g.plan_qty+=+r.plan_qty||0;g.finish+=+r.finish||0;g.prior_plan+=+r.prior_plan||0;g.prior_cover+=+r.prior_cover||0;
+        if(!g){g={gpcnm:r.gpcnm,gpc:r.gpc,assy:r.assy,upper:r.upper,item:r.item,nm:r.nm,line:r.line,inhm:r.inhm,part_ymd:r.part_ymd,plan_ymd:r.plan_ymd,item_st:r.item_st,change_day:r.change_day,lot_diff:0,wo:'(집계)',swo:'',plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{}};agg.set(k,g);}
+        g.plan_qty+=+r.plan_qty||0;g.finish+=+r.finish||0;g.prior_plan+=+r.prior_plan||0;g.prior_cover+=+r.prior_cover||0;g.lot_diff+=+r.lot_diff||0;if(!g.change_day)g.change_day=r.change_day;
         if((r.part_ymd||'')<(g.part_ymd||'zz'))g.part_ymd=r.part_ymd;
         if(+r.prior_plan>0&&(g.prior_fin==='0'||finRank(r.prior_fin)<finRank(g.prior_fin)))g.prior_fin=r.prior_fin;
         d.forEach(x=>{if(r.days&&r.days[x]){g.days[x]=(g.days[x]||0)+r.days[x];g.dcov[x]=(g.dcov[x]||0)+((r.dcov&&r.dcov[x])||0);
@@ -426,7 +426,7 @@ SCREEN.partplan=(c)=>{
         <td><b>${esc(r.assy)}</b></td><td>${esc(r.upper||'')}</td><td>${esc(r.item)}</td>
         <td class="bcap" title="${esc(r.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
         <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm||'')}</td>
-        <td class="center" style="color:#b8791f">${esc(pull(r.part_ymd,r.plan_ymd))}</td>
+        <td class="center" style="color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}">${esc(pulltxt(r))}</td>
         <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
         ${r.prior_plan>0?numTd(pcell(r),finBg(pf)||'#eef4fb',pf!=='0',finFg(pf)):numTd('·','',false)}
         ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(`${nf(cv)}/${nf(pl)}`,finBg(cf)||'#eef4fb',cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}</tr>`;};
@@ -451,8 +451,9 @@ SCREEN.partplan=(c)=>{
        <label class="tl">자도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
        <label class="tl">미생산</label>${seg('pp-uf',st.unfin,['전체','미생산'])}
        <label class="tl">구분</label>${seg('pp-vw',st.view,['전체','집계','제번'])}
+       <label class="tl">소스</label><select class="inp" id="pp-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>라이브 대사</option></select>
        <button class="btn" id="pp-go">🔍 조회</button>
-       <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(st.plan_sum)}</b> · 일자 ${d.length}개</span>
+       <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(st.plan_sum)}</b> · 인원 ${nf(st.inwon)} · ${st.src==='live'?'🔴 라이브':'🟢 nx'} · 일자 ${d.length}개</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
@@ -460,18 +461,21 @@ SCREEN.partplan=(c)=>{
       <table class="tbl fit" style="font-size:11px"><thead><tr>
        <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?spinRow(NCOL+d.length):(disp.length?disp.map((r,i)=>rowHtml(r,i+1)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
-      ${disp.length?`<tfoot>
-       <tr class="grandtot" style="position:sticky;bottom:22px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
+      ${disp.length?(()=>{const iw=st.inwon||0;return `<tfoot>
+       <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td class="center" colspan="10">합계</td><td class="num">${f2(fST)}</td><td class="num">${nf(st.plan_sum)}</td>
         <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}</tr>
-       <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
+       <tr class="grandtot" style="position:sticky;bottom:22px;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
         <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fST)}</td><td></td>
         <td class="num">${f2(fSTprior)}</td>${d.map(x=>`<td class="num">${f2(fSTd(x))}</td>`).join('')}</tr>
-       </tfoot>`:''}
+       <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#666;border-top:1px solid #d3ddea">
+        <td class="center" colspan="10" style="font-weight:600">계상근무공수 (÷인원 ${nf(iw)})</td><td class="num">${iw?f2(fST/iw):'—'}</td><td></td>
+        <td class="num"></td>${d.map((x,xi)=>`<td class="num">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}</tr>
+       </tfoot>`;})():''}
       </table></div>`;
     const g=id=>c.querySelector(id);
     g('#pp-go').onclick=()=>{st.base=g('#pp-base').value;st.wc=g('#pp-wc').value;st.part=g('#pp-part').value;
-      st.dono=g('#pp-dono').value.trim();st.jado=g('#pp-jado').value.trim();st.gigan=+g('#pp-gigan').value;
+      st.dono=g('#pp-dono').value.trim();st.jado=g('#pp-jado').value.trim();st.gigan=+g('#pp-gigan').value;st.src=g('#pp-src').value;
       const uf=c.querySelector('input[name=pp-uf]:checked');if(uf)st.unfin=uf.value;
       const vw=c.querySelector('input[name=pp-vw]:checked');if(vw)st.view=vw.value;
       load();};
