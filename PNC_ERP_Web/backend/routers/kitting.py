@@ -318,7 +318,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
         raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]
-        keyed = {}
+        keyed = {}; units = []   # units = 충당단위(행×실제 PART_PLAN_YMD grain, 레거시 SP 커서와 동일)
         for r in raw:
             q = float(r["pl"] or 0); ymd = r["ymd"]
             bucket = 'P' if ymd < d6a else (ymd if ymd in dates else None)
@@ -345,6 +345,10 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             if bucket == 'P': g["prior_plan"] += q
             else: g["days"][bucket] = g["days"].get(bucket, 0.0) + q
             g["plan_qty"] += q
+            units.append({"g": g, "ymd": ymd, "bucket": bucket, "plan": q, "use": float(r["useq"] or 1),
+                          "assy": r["assy"], "upper": r["upper"] or '', "item": r["item"], "gpc": r["gpc"],
+                          "wo": r["wo"], "swo": r["swo"] or '', "inhm": r["inhm"] or '', "plan_ymd": r["plan_ymd"] or '',
+                          "finish": 0.0, "ready": 0.0, "tag": 0})
         rows = list(keyed.values())
         capped = len(rows) >= int(limit); rows = rows[:int(limit)]
         rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
@@ -405,46 +409,54 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 nxc.close()
             except Exception: pass
         _TAG2FIN = {90: '6', 70: '4', 50: '3', 10: '3', 30: '2'}
-        def _alloc(cellseq, pool, tag, key):
-            pool = max(float(pool or 0), 0.0)
-            for c in cellseq:
-                if pool <= 0: break
-                jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
-                if jan <= 0: continue
-                if jan > pool:
-                    c[key] += pool; pool = 0.0
-                else:
-                    c[key] += jan; pool -= jan
-                    if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
-        for g in rows:
-            it = g["item"]
-            g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])
-            seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
-            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')
-            _alloc(seq, assystk.get(g["assy"], 0.0) * g["use_qty"], 70, 'finish')
-            _alloc(seq, max(fixstk.get((g["upper"], it), 0.0), 0.0), 70, 'finish')
-            _alloc(seq, max(midstk.get(it, 0.0), 0.0), 70, 'finish')
-            _alloc(seq, max(rstock.get((it, g["gpc"]), 0.0), 0.0), 50, 'ready')
-            for c in seq:
-                ck = g["part_ymd"] if c["bucket"] == 'P' else c["ymd"]
-                nq = nxcell.get((it, g["wo"], g["gpc"], ck), 0.0)
+        # ★레거시 SP 4단계 충당 정밀이식: 풀을 WO별 재부여가 아니라 SP 그룹키로 공유·날짜순 소진. 잔량=계획−finish. tag=완전충당時만(완료pass가 색 결정).
+        def _pass(keyfn, poolfn, usemul, tag, col):
+            grp = {}
+            for u in units: grp.setdefault(keyfn(u), []).append(u)
+            for gk, us in grp.items():
+                pool = max(float(poolfn(gk) or 0), 0.0)
+                if usemul: pool *= (us[0]["use"] or 1)
+                if pool <= 0: continue
+                us.sort(key=lambda u: (u["ymd"], u["inhm"], u["plan_ymd"], u["wo"], u["swo"]))
+                for u in us:
+                    if pool <= 0: break
+                    jan = u["plan"] - u["finish"]
+                    if jan <= 0: continue
+                    if jan > pool: u[col] += pool; pool = 0.0
+                    else: u[col] += jan; pool -= jan; u["tag"] = tag
+        _pass(lambda u: (u["wo"], u["swo"], u["assy"]), lambda gk: saled.get(gk, 0.0), True, 90, "finish")          # 1) 출하 tag90 ×use, 키=WO+SPLIT+ASSY
+        _pass(lambda u: (u["assy"], u["upper"], u["item"]), lambda gk: assystk.get(gk[0], 0.0), True, 70, "finish")  # 2) ASSY재고 tag70 ×use, 키=ASSY+상위+도번
+        _pass(lambda u: u["item"], lambda gk: midstk.get(gk, 0.0), False, 70, "finish")                             # 3) 파트재고 tag70, 키=도번(use미적용)
+        _pass(lambda u: (u["item"], u["gpc"]), lambda gk: rstock.get((gk[0], gk[1]), 0.0), False, 50, "ready")       # 4) 준비재고 tag50 READY, 키=도번+파트(use미적용)
+        if str(src).strip() != "live":   # 5) nx 셀 준비 오버레이(우리 확인분, 라이브대사 제외) — 유닛별 (item,wo,gpc,ymd)
+            for u in units:
+                nq = nxcell.get((u["item"], u["wo"], u["gpc"], u["ymd"]), 0.0)
                 if nq > 0:
-                    rem = max(c["plan"] - c["finish"] - c["ready"], 0.0)
-                    if rem > 0: c["ready"] += min(nq, rem)
-                    if c["plan"] > 0 and (c["finish"] + c["ready"]) >= c["plan"] and c["tag"] < 50: c["tag"] = 50
+                    jan = u["plan"] - u["finish"] - u["ready"]
+                    if jan > 0: u["ready"] += min(nq, jan)
+                    if u["plan"] > 0 and (u["finish"] + u["ready"]) >= u["plan"] and u["tag"] == 0: u["tag"] = 50
+        # ── 유닛 → 표시 버킷 롤업: cover=finish+ready, finish_only=생산ST용, 버킷색=min(유닛tag)(레거시 min(finish_tag)) ──
+        for g in rows: g["_cov"] = {}; g["_fin"] = {}; g["_tagm"] = {}
+        for u in units:
+            g = u["g"]; bk = u["bucket"]
+            if "_cov" not in g: continue   # capped 제외행
+            g["_cov"][bk] = g["_cov"].get(bk, 0.0) + u["finish"] + u["ready"]
+            g["_fin"][bk] = g["_fin"].get(bk, 0.0) + u["finish"]
+            g["_tagm"][bk] = min(g["_tagm"][bk], u["tag"]) if bk in g["_tagm"] else u["tag"]
+        for g in rows:
+            g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])
+            cov = g["_cov"]; fin = g["_fin"]; tgm = g["_tagm"]
             g["dcov"] = {}; g["dfin"] = {}
-            pc = g["_cells"].get('P')
-            g["prior_cover"] = round((pc["finish"] + pc["ready"]), 2) if pc else 0.0
-            g["prior_fin"] = _TAG2FIN.get(pc["tag"], '0') if pc else '0'
+            g["prior_cover"] = round(cov.get('P', 0.0), 2)
+            g["prior_fin"] = _TAG2FIN.get(tgm.get('P', 0), '0')
             for y in g["days"]:
-                c = g["_cells"].get(y)
-                g["dcov"][y] = round((c["finish"] + c["ready"]), 2) if c else 0.0
-                g["dfin"][y] = _TAG2FIN.get(c["tag"], '0') if c else '0'
-            g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)
+                g["dcov"][y] = round(cov.get(y, 0.0), 2)
+                g["dfin"][y] = _TAG2FIN.get(tgm.get(y, 0), '0')
+            g["finish"] = round(sum(fin.values()), 2)   # 생산ST용 = finish만(준비 제외)
             g["lot_diff"] = round(g["lot_qty"] - g["last_lot_qty"], 2)
-            fins = [_TAG2FIN.get(c["tag"], '0') for c in g["_cells"].values() if c["plan"] > 0]
+            fins = [_TAG2FIN.get(tgm.get(b, 0), '0') for b in g["_cells"] if g["_cells"][b]["plan"] > 0]
             g["_done_all"] = bool(fins) and all(f in ('4', '6') for f in fins)
-            del g["_cells"]
+            del g["_cells"], g["_cov"], g["_fin"], g["_tagm"]
         uf = unfin.strip()
         if uf == '미생산': rows = [r for r in rows if not r["_done_all"]]
         for r in rows: r.pop("_done_all", None)
