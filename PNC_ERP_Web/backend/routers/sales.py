@@ -535,31 +535,45 @@ def saleout_price(item: str = Query(...), cust: str = Query(...), ymd: str = Que
 
 @router.get("/api/saleout/list")
 def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""), cust: str = Query(""), item: str = Query(""), gubun: str = Query(""), limit: int = Query(1500)):
-    """판매출고 목록 = nx.stock_maint(maint_tag='5', 자재수불). 출고수량=|maint_qty|(음수저장 불출). 코드→이름."""
+    """판매출고 목록 = ★nx미러(nx.PU_T_STOCK_MAINT tag5, 기존이력·읽기전용) ∪ nx.saleout_maint(웹등록·편집가능).
+    미러도 nx라 레거시 의존 없음(컷오버 원칙). 출고수량/금액=|값|(음수저장 불출→양수표시). src='legacy'|'web'. 코드→이름."""
     cn = _nx(); cur = cn.cursor()
     try:
-        w = ["m.maint_tag='5'"]; p = []
-        if fr: w.append("m.maint_ymd>=?"); p.append(fr)
-        if to: w.append("m.maint_ymd<=?"); p.append(to)
-        if sheet: w.append("m.sheet_no LIKE ?"); p.append(f"%{sheet}%")
-        if cust: w.append("m.cust_code=?"); p.append(cust)
-        if item: w.append("m.mat_code LIKE ?"); p.append(f"%{item}%")
-        cur.execute(f"""SELECT TOP {int(limit)} m.id, m.maint_ymd out_ymd, m.cust_code out_cust, ISNULL(c.CUST_DESC,'') custnm,
-              m.sheet_no, m.maint_seq out_seq, m.mat_code item_code, ISNULL(i.ITEM_DESC,'') itemnm,
-              ABS(ISNULL(m.maint_qty,0)) out_qty, ISNULL(m.maint_cost,0) cost, ISNULL(m.maint_amt,0) amt, ISNULL(m.maint_vat,0) vat,
-              ISNULL(m.remarks,'') remarks, m.insert_user_id reg_user, m.upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt,
-              m.work_order, m.split_work_order, NULL sale_ymd, NULL sale_hms, ISNULL(m.print_flag,'0') print_flag
-            FROM nx.saleout_maint m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+        w = ["m.maint_tag='5'"]; pf = []
+        if fr: w.append("m.maint_ymd>=?"); pf.append(fr)
+        if to: w.append("m.maint_ymd<=?"); pf.append(to)
+        if sheet: w.append("CAST(m.sheet_no AS varchar) LIKE ?"); pf.append(f"%{sheet}%")
+        if cust: w.append("m.cust_code=?"); pf.append(cust)
+        if item: w.append("m.mat_code LIKE ?"); pf.append(f"%{item}%")
+        where = " AND ".join(w)
+        SEL = """SELECT {idcol} id, '{src}' src, m.maint_ymd out_ymd, m.cust_code out_cust, ISNULL(c.CUST_DESC,'') custnm,
+              CAST(m.sheet_no AS varchar) sheet_no, m.maint_seq out_seq, m.mat_code item_code, ISNULL(i.ITEM_DESC,'') itemnm,
+              ABS(ISNULL(m.maint_qty,0)) out_qty, ISNULL(m.maint_cost,0) cost, ABS(ISNULL(m.maint_amt,0)) amt, ABS(ISNULL(m.maint_vat,0)) vat,
+              ISNULL(m.remarks,'') remarks, m.insert_user_id reg_user, {upd} upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt,
+              m.work_order, m.split_work_order, NULL sale_ymd, NULL sale_hms, {pf_col} print_flag
+            FROM {tbl} m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=m.mat_code
-            WHERE {' AND '.join(w)} ORDER BY m.maint_ymd DESC, m.sheet_no, m.maint_seq""", *p)
+            WHERE {where}"""
+        web_sel = SEL.format(idcol="m.id", src="web", upd="m.upd_user", pf_col="ISNULL(m.print_flag,'0')",
+                             tbl="nx.saleout_maint", where=where)
+        leg_sel = SEL.format(idcol="NULL", src="legacy", upd="m.update_user_id", pf_col="'0'",
+                             tbl="PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT", where=where)
+        cur.execute(f"""SELECT TOP {int(limit)} * FROM ({web_sel} UNION ALL {leg_sel}) u
+            ORDER BY out_ymd DESC, sheet_no, out_seq""", *(pf + pf))
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         is_closed = _sale_close_lookup(cur)   # ★작업1: 매출마감된 자료 잠금 플래그(웹편집 차단용)
         for r in rows:
             r["gubun"] = "5"; r["gubunnm"] = _SALEOUT_GUBUN["5"]
             r["closed"] = 1 if is_closed(r.get("out_cust"), r.get("out_ymd")) else 0
-        cur.execute("""SELECT DISTINCT m.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.saleout_maint m
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.maint_tag='5' AND m.cust_code IS NOT NULL ORDER BY 2""")
+            # 편집가능 = 웹등록분(src=web, id 있음) AND 미마감. 미러(이력)행은 읽기전용.
+            r["editable"] = 1 if (r.get("src") == "web" and r.get("id") is not None and not r["closed"]) else 0
+        cur.execute("""SELECT DISTINCT cust_code, nm FROM (
+              SELECT m.cust_code, ISNULL(c.CUST_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT m
+                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.MAINT_TAG='5' AND m.cust_code IS NOT NULL
+              UNION SELECT m.cust_code, ISNULL(c.CUST_DESC,'') FROM nx.saleout_maint m
+                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code WHERE m.maint_tag='5' AND m.cust_code IS NOT NULL) u
+            ORDER BY nm""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         totqty = sum(float(r["out_qty"] or 0) for r in rows)
         totamt = sum(float(r["amt"] or 0) for r in rows); totvat = sum(float(r["vat"] or 0) for r in rows)

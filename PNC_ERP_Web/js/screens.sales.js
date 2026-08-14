@@ -471,8 +471,8 @@ SCREEN.saleout=(c)=>{
          <th class="num" data-key="cost">사급단가</th><th class="num" data-key="amt">금액(매출)</th><th class="num" data-key="vat">부가세</th>
          <th data-key="remarks">비고</th><th data-key="reg_user">등록자</th><th data-key="upd_user">수정자</th><th>작업일시</th>
          <th data-key="work_order">Work Order</th><th data-key="split_work_order">Split WO</th><th class="center">Sale Ymd</th><th class="center">Sale Hms</th><th class="center">관리</th></tr></thead>
-       <tbody>${st.rows.map(r=>`<tr>
-         <td class="center"><input type="checkbox" class="o-ck" data-id="${r.id}" ${st.sel[r.id]?"checked":""}></td>
+       <tbody>${st.rows.map(r=>`<tr${r.editable?"":' style="background:#fafbfc"'}>
+         <td class="center">${r.editable?`<input type="checkbox" class="o-ck" data-id="${r.id}" ${st.sel[r.id]?"checked":""}>`:""}</td>
          <td>${d8(r.out_ymd)}</td><td class="center">${r.gubun?esc(r.gubun)+":"+esc(r.gubunnm):""}</td><td>${esc(r.out_cust||"")}</td>
          <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.custnm||"")}">${esc(r.custnm||"")}</td>
          <td>${esc(r.sheet_no||"")}</td><td class="num">${r.out_seq??""}</td>
@@ -481,7 +481,7 @@ SCREEN.saleout=(c)=>{
          <td class="cap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.remarks||"")}">${esc(r.remarks||"")}</td>
          <td>${esc(r.reg_user||"")}</td><td>${esc(r.upd_user||"")}</td><td style="font-size:11px">${dt(r.work_dt)}</td>
          <td>${esc(r.work_order||"")}</td><td>${esc(r.split_work_order||"")}</td><td class="center">${d8(r.sale_ymd)}</td><td class="center">${esc(r.sale_hms||"")}</td>
-         <td class="center"><button class="btn xs o-ed" data-id="${r.id}">수정</button> <button class="btn xs o-cp" data-id="${r.id}">복사</button></td></tr>`).join("")||'<tr><td colspan="22" style="padding:16px;color:var(--muted)">판매출고 없음 — [추가]로 등록</td></tr>'}
+         <td class="center">${r.editable?`<button class="btn xs o-ed" data-id="${r.id}">수정</button> <button class="btn xs o-cp" data-id="${r.id}">복사</button>`:'<span style="color:#9aa6b2;font-size:11px" title="기존 이력(nx미러)·읽기전용">📁이력</span>'}</td></tr>`).join("")||'<tr><td colspan="22" style="padding:16px;color:var(--muted)">판매출고 없음 — [추가]로 등록</td></tr>'}
        <tr class="grandtot"><td colspan="9" class="center">합계 ${st.rows.length}건 · 출고증 ${st.sheetcnt}건</td><td class="num">${won(st.totqty)}</td><td></td><td class="num">${won(st.totamt)}</td><td class="num">${won(st.totvat)}</td><td colspan="9"></td></tr>
        </tbody></table></div></div></div>`;
     const g=id=>c.querySelector(id);
@@ -490,7 +490,7 @@ SCREEN.saleout=(c)=>{
     g("#o-item").oninput=x=>st.item=x.target.value;g("#o-gb").onchange=x=>st.gubun=x.target.value;
     g("#o-go").onclick=load;g("#o-del").onclick=delSel;g("#o-cv").onclick=carryover;g("#o-carry").onchange=x=>st.carry=x.target.value;
     g("#o-add").onclick=()=>{st.edit={gubun:"5",out_cust:st.cust||"",sheet_no:"",item_code:"",out_qty:"",work_order:"",remarks:""};draw();};
-    const all=g("#o-all");if(all)all.onclick=x=>{st.rows.forEach(r=>st.sel[r.id]=x.target.checked);draw();};
+    const all=g("#o-all");if(all)all.onclick=x=>{st.rows.forEach(r=>{if(r.editable)st.sel[r.id]=x.target.checked;});draw();};
     c.querySelectorAll(".o-ck").forEach(x=>x.onchange=()=>{st.sel[x.dataset.id]=x.checked;draw();});
     if(e){g("#e-gb").onchange=x=>e.gubun=x.target.value;
       g("#e-cust").oninput=x=>e.out_cust=x.target.value.trim();g("#e-cust").onblur=fetchCost;
