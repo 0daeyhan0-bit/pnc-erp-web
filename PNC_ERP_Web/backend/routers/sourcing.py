@@ -810,13 +810,19 @@ def _snap_clear(cur, rid):
     cur.execute("DELETE FROM nx.sourcing_route_snap WHERE route_id=?", rid)
 
 def _snap_load_rows(cur, tbl, dump):
-    cols = dump.get("cols") or []; rows = dump.get("rows") or []
+    cols = list(dump.get("cols") or []); rows = [list(r) for r in (dump.get("rows") or [])]
     if not rows: return
-    ident = (tbl == "sourcing_route_line")
-    if ident: cur.execute(f"SET IDENTITY_INSERT nx.{tbl} ON")
-    ph = ",".join("?" * len(cols))
-    cur.executemany(f"INSERT INTO nx.{tbl}({','.join(cols)}) VALUES({ph})", [tuple(r) for r in rows])
-    if ident: cur.execute(f"SET IDENTITY_INSERT nx.{tbl} OFF")
+    if tbl == "sourcing_route_line":
+        # line_id 보존(parent_line FK 유지) → IDENTITY_INSERT
+        cur.execute(f"SET IDENTITY_INSERT nx.{tbl} ON")
+        ph = ",".join("?" * len(cols))
+        cur.executemany(f"INSERT INTO nx.{tbl}({','.join(cols)}) VALUES({ph})", [tuple(r) for r in rows])
+        cur.execute(f"SET IDENTITY_INSERT nx.{tbl} OFF")
+    else:
+        # proc/weld: IDENTITY PK(rp_id/rw_id=첫 컬럼) 제외 → 새 id 자동생성(FK 없음, node_item=코드로 참조)
+        cols2 = cols[1:]; rows2 = [r[1:] for r in rows]
+        ph = ",".join("?" * len(cols2))
+        cur.executemany(f"INSERT INTO nx.{tbl}({','.join(cols2)}) VALUES({ph})", [tuple(r) for r in rows2])
 
 
 def _insert_current_tree(cur, rid, item, ymd="260630"):

@@ -471,22 +471,24 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q=""):
 """
     _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo FROM ({LINES}) x")
     _c2, bfrows = _rows(f"SELECT mat, SUM(sq) bf FROM ({BF}) b GROUP BY mat")
-    _c3, nmrows = _rows("SELECT UPPER(item_code) c, item_desc d FROM PARTNER_ERP_TEST3.nx.pr_m_item")
+    _c3, nmrows = _rows("SELECT UPPER(item_code) c, item_desc d, ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=i.in_cust_code),'') v FROM PARTNER_ERP_TEST3.nx.pr_m_item i")
     nm = {r["c"]: r["d"] for r in nmrows}
+    vend = {r["c"]: (r["v"] or "") for r in nmrows}   # 매입처(IN_CUST_CODE→거래처명)
     bfm = {r["mat"]: float(r["bf"] or 0) for r in bfrows}
-    net, lastin = {}, {}
+    net, lastin, lastout = {}, {}, {}
     for r in moves:
         m = r["mat"]
         net[m] = net.get(m, 0) + (float(r["i"] or 0) - float(r["o"] or 0) + float(r["e"] or 0) + float(r["mv"] or 0))
-        if float(r["i"] or 0) > 0:
-            y = str(r["ymd"] or "")
-            if y > lastin.get(m, ""):
-                lastin[m] = y
+        y = str(r["ymd"] or "")
+        if float(r["i"] or 0) > 0 and y > lastin.get(m, ""):
+            lastin[m] = y
+        if float(r["o"] or 0) > 0 and y > lastout.get(m, ""):   # 최종출고일(출고>0 최대일)
+            lastout[m] = y
     mats = set(bfm) | set(net)
     stock = []
     for m in sorted(mats):
         bf = bfm.get(m, 0); st = bf + net.get(m, 0)
-        stock.append({"mat": m, "nm": nm.get(m, ""), "stock": round(st, 4), "bf": round(bf, 4), "lastin": lastin.get(m, ""), "part": pw})
+        stock.append({"mat": m, "nm": nm.get(m, ""), "cust": vend.get(m, ""), "stock": round(st, 4), "bf": round(bf, 4), "lastin": lastin.get(m, ""), "lastout": lastout.get(m, ""), "part": pw})
     return stock, moves
 
 @live_router.get("/matinout")

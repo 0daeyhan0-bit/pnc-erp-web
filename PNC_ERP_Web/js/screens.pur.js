@@ -50,7 +50,7 @@ SCREEN.matinout=(c)=>{
    <div style="display:flex;gap:10px;align-items:flex-start">
      <div style="flex:0 0 42%;min-width:0">
        <div class="summary-bar" id="lsum"></div>
-       <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr><th>자도번</th><th>품명</th><th>파트창고</th><th class="num">재고</th><th class="center">최종입고일</th></tr></thead><tbody id="lbody"></tbody></table></div>
+       <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr><th>자도번</th><th>품명</th><th>매입처</th><th>파트창고</th><th class="num">재고</th><th class="center">최종입고일</th><th class="center">최종출고일</th></tr></thead><tbody id="lbody"></tbody></table></div>
        <div class="rowcount" id="lcnt"></div>
      </div>
      <div style="flex:1;min-width:0">
@@ -77,9 +77,9 @@ SCREEN.matinout=(c)=>{
     curL=stock.filter(s=>(gb==='all'||(gb==='plus'?s.stock>0:s.stock<0))&&(!q||(''+s.mat).toLowerCase().includes(q)||(''+s.nm).toLowerCase().includes(q))&&(!custMats||custMats.has(s.mat)))
       .sort((a,b)=>(''+a.mat).localeCompare(''+b.mat,'ko'));
     const tot=curL.reduce((a,b)=>a+(+b.stock||0),0);
-    let lb=curL.map(s=>`<tr data-mat="${esc(s.mat)}" class="${sel===s.mat?'sel':''}"><td><b>${esc(s.mat)}</b></td><td class="cap" title="${esc(s.nm)}">${esc(s.nm)}</td><td>${esc(pwName(s.part))}</td><td class="num qty">${won(s.stock)}</td><td class="center">${fmtYmd(s.lastin)!=='00/00/00'?fmtYmd(s.lastin):'-'}</td></tr>`).join('');
-    if(curL.length)lb+=`<tr class="grandtot"><td colspan="3" class="right">총계 (${won(curL.length)} 품목)</td><td class="num">${won(tot)}</td><td></td></tr>`;
-    c.querySelector('#lbody').innerHTML=curL.length?lb:`<tr><td colspan="5" class="empty">결과 없음</td></tr>`;
+    let lb=curL.map(s=>`<tr data-mat="${esc(s.mat)}" class="${sel===s.mat?'sel':''}"><td><b>${esc(s.mat)}</b></td><td class="cap" title="${esc(s.nm)}">${esc(s.nm)}</td><td class="cap" title="${esc(s.cust||'')}">${esc(s.cust||'')}</td><td>${esc(pwName(s.part))}</td><td class="num qty">${won(s.stock)}</td><td class="center">${fmtYmd(s.lastin)!=='00/00/00'?fmtYmd(s.lastin):'-'}</td><td class="center">${fmtYmd(s.lastout)!=='00/00/00'?fmtYmd(s.lastout):'-'}</td></tr>`).join('');
+    if(curL.length)lb+=`<tr class="grandtot"><td colspan="4" class="right">총계 (${won(curL.length)} 품목)</td><td class="num">${won(tot)}</td><td></td><td></td></tr>`;
+    c.querySelector('#lbody').innerHTML=curL.length?lb:`<tr><td colspan="7" class="empty">결과 없음</td></tr>`;
     c.querySelector('#lbody').querySelectorAll('tr[data-mat]').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.mat;c.querySelectorAll('#lbody tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');renderRight(sel);});
     c.querySelector('#lsum').innerHTML=`<div class="s-item">품목 <b>${won(curL.length)}</b></div><div class="s-item">재고 합계 <b>${won(tot)}</b></div>`;
     c.querySelector('#lcnt').textContent=`${curL.length}품목 (0재고 제외)`;
@@ -95,7 +95,7 @@ SCREEN.matinout=(c)=>{
   c.querySelector('#whcust').onchange=()=>load();
   c.querySelector('#partwh').onchange=()=>load();
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#qcust').value='';c.querySelector('#gubun').value='all';c.querySelector('#partwh').value='IS0001';c.querySelector('#whcust').value='Z99990';c.querySelector('#dfrom').value=m1Iso();c.querySelector('#dto').value=todayIso();sel=null;load();};
-  c.querySelector('#xls').onclick=()=>downloadCSV('자재입출고현황.csv',['자도번','품명','파트창고','재고','최종입고일'],curL.map(s=>[s.mat,s.nm,pwName(s.part),s.stock,fmtYmd(s.lastin)!=='00/00/00'?fmtYmd(s.lastin):'']));
+  c.querySelector('#xls').onclick=()=>downloadCSV('자재입출고현황.csv',['자도번','품명','매입처','파트창고','재고','최종입고일','최종출고일'],curL.map(s=>[s.mat,s.nm,s.cust||'',pwName(s.part),s.stock,fmtYmd(s.lastin)!=='00/00/00'?fmtYmd(s.lastin):'',fmtYmd(s.lastout)!=='00/00/00'?fmtYmd(s.lastout):'']));
   load();
 };
 
