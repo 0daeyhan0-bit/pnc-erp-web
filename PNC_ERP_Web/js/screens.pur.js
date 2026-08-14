@@ -2957,3 +2957,95 @@ SCREEN.lgsagub=(c)=>{
   };
   reload();
 };
+
+/* ===== 도입-수입입력(w_pu_stock_c_040, tag=P) · 도입-수출입력(w_pu_stock_c_050, tag=Q) — PU_T_STOCK_MAINT_C 라이브 조회 ===== */
+/* 금액(KRW)=금액×환율 버림(레거시 검증). 거래처별 그룹 소계 + 총계. */
+(function(){
+  const CURN={KRW:'원',USD:'달러',JPY:'엔',EUR:'유로',CNY:'위안',RMB:'위안'};
+  const fmtY=y=>{y=(''+(y||'')).trim();return y.length>=6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;};
+  const dIn=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
+  const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
+  const nD=(v,n)=>{const x=+v||0;return x.toLocaleString('en-US',{minimumFractionDigits:n,maximumFractionDigits:n});};
+  const wonI=v=>Math.round(+v||0).toLocaleString('en-US');
+  const curN=x=>CURN[(''+x).trim()]||(''+x).trim()||'';
+  const _def=(days)=>{const t=new Date(),f=new Date();f.setDate(1);if(days)f.setDate(t.getDate()-days);
+    const g=d=>`20${String(d.getFullYear()).slice(2)}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return[g(f),g(t)];};
+
+  function dopipView(c, kind){
+    const wide = kind==='pur';
+    const ep = wide ? 'purchase' : 'sale';
+    const dateLbl = wide ? '입고일자' : '출고일자';
+    // 컬럼정의
+    const COLS = wide ? [
+      ['ymd',dateLbl,'center',r=>fmtY(r.ymd)],['cust_nm','거래처','cap',r=>esc(r.cust_nm)],
+      ['mat','품목번호','',r=>`<b>${esc(r.mat)}</b>`],['qty','수량','num',r=>nD(r.qty,0)],
+      ['cur','통화','center',r=>esc(r.cur)],['cost','단가(외환)','num',r=>nD(r.cost,r.cost%1?4:2)],
+      ['amt','금액','num',r=>nD(r.amt,4)],['krw','금액(KRW)','num',r=>wonI(r.krw)],
+      ['rate','환율','num',r=>r.cur==='KRW'?'':nD(r.rate,2)],['remarks','비고','cap',r=>esc(r.remarks)],
+      ['duty','관세','num',r=>r.duty?wonI(r.duty):''],['fare','운임','num',r=>r.fare?wonI(r.fare):''],
+      ['tax','부과세과표','num',r=>r.tax?wonI(r.tax):''],['insp','신고번호','',r=>esc(r.insp)],
+      ['bl','B/L 번호','',r=>esc(r.bl)],['hs','HS CODE','',r=>esc(r.hs)],
+    ] : [
+      ['ymd',dateLbl,'center',r=>fmtY(r.ymd)],['cust_nm','거래처','cap',r=>esc(r.cust_nm)],
+      ['mat','품목번호','',r=>`<b>${esc(r.mat)}</b>`],['qty','수량','num',r=>nD(r.qty,0)],
+      ['cur','통화','center',r=>esc(r.cur)],['cost','단가(외화)','num',r=>nD(r.cost,r.cost%1?4:2)],
+      ['amt','금액','num',r=>nD(r.amt,4)],['krw','금액(KRW)','num',r=>wonI(r.krw)],
+      ['rate','환율','num',r=>r.cur==='KRW'?'':nD(r.rate,2)],['remarks','비고','cap',r=>esc(r.remarks)],
+    ];
+    const qi = COLS.findIndex(x=>x[0]==='qty');
+    const API=API_BASE;
+    const [df,dt]=_def(wide?0:45);   // 수입=당월1일~오늘, 수출=45일
+    let from=df, to=dt, cq='', mq='', iq='', bq='', rows=[], tot={}, loading=false, msg='';
+    const load=async()=>{loading=true;msg='';draw();
+      try{let u=`${API}/api/dopip/${ep}?from_ymd=${inD(from)}&to_ymd=${inD(to)}`;
+        if(cq)u+=`&cust=${encodeURIComponent(cq)}`; if(mq)u+=`&mat=${encodeURIComponent(mq)}`;
+        if(wide){if(iq)u+=`&insp=${encodeURIComponent(iq)}`; if(bq)u+=`&bl=${encodeURIComponent(bq)}`;}
+        const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
+        rows=j.rows||[];tot=j.tot||{};}
+      catch(e){rows=[];tot={};msg='백엔드 연결 실패';}
+      loading=false;draw();};
+    const rowHtml=r=>`<tr>${COLS.map(cd=>{const cap=cd[2].indexOf('cap')>=0;return `<td class="${cd[2]}"${cap?` title="${esc(cd[3](r).replace(/<[^>]+>/g,''))}"`:''}>${cd[3](r)}</td>`;}).join('')}</tr>`;
+    const sub=(label,q,a,k,cls)=>`<tr class="${cls||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${nD(q,0)}</td><td></td><td></td><td class="num">${nD(a,4)}</td><td class="num">${wonI(k)}</td><td colspan="${COLS.length-qi-4}"></td></tr>`;
+    const draw=()=>{
+      c.innerHTML=`
+       <div class="page-title">${wide?'🚢 도입-수입입력':'✈️ 도입-수출입력'} <span style="font-size:12px;color:var(--muted);font-weight:400">${wide?'해외 수입(구매)':'해외 수출(판매)'} · 조회</span></div>
+       <div class="page-sub">원본 <code>w_pu_stock_c_0${wide?'40':'50'}</code> · 데이터 <code>PU_T_STOCK_MAINT_C</code> (MAINT_TAG='${wide?'P':'Q'}') · 🔴 라이브 · 금액(KRW)=금액×환율(버림)</div>
+       <div class="toolbar">
+         <label class="tl">${wide?'입고기간':'출고기간'}</label>
+         <input type="date" class="inp" id="df" value="${esc(from)}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dt" value="${esc(to)}" style="min-width:130px">
+         <input class="inp" id="cq" placeholder="거래처코드" value="${esc(cq)}" style="width:110px">
+         <input class="inp" id="mq" placeholder="자도번" value="${esc(mq)}" style="width:130px">
+         ${wide?`<input class="inp" id="iq" placeholder="신고번호" value="${esc(iq)}" style="width:130px"><input class="inp" id="bq" placeholder="B/L번호" value="${esc(bq)}" style="width:130px">`:''}
+         <button class="btn" id="go">🔍 조회</button>
+         <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀</button>
+       </div>
+       <div class="summary-bar" id="sum"></div>
+       <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit"><thead><tr>${COLS.map(cd=>`<th class="${cd[2]}">${cd[1]}</th>`).join('')}</tr></thead><tbody id="body"></tbody></table></div>
+       <div class="rowcount" id="cnt"></div>`;
+      const g=id=>c.querySelector(id);
+      // 그룹(거래처 연속) 소계 + 총계
+      let html='';
+      if(loading) html=`<tr><td colspan="${COLS.length}" class="empty">${typeof SPIN!=='undefined'?SPIN:''}라이브 조회 중…</td></tr>`;
+      else if(msg) html=`<tr><td colspan="${COLS.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;
+      else if(!rows.length) html=`<tr><td colspan="${COLS.length}" class="empty">결과 없음</td></tr>`;
+      else{ let gv=null,sq=0,sa=0,sk=0;
+        rows.forEach(r=>{ const gk=r.cust+'|'+r.ymd; if(gv!==null && gk!==gv){ html+=sub('소계',sq,sa,sk); sq=sa=sk=0; }
+          html+=rowHtml(r); sq+=+r.qty||0; sa+=+r.amt||0; sk+=+r.krw||0; gv=gk; });
+        if(gv!==null) html+=sub('소계',sq,sa,sk);
+        html+=sub('총계',tot.qty||0,tot.amt||0,tot.krw||0,'grandtot');
+      }
+      g('#body').innerHTML=html;
+      g('#sum').innerHTML=`<div class="s-item">건수 <b>${won(tot.cnt||0)}</b></div><div class="s-item">수량 <b>${nD(tot.qty||0,0)}</b></div><div class="s-item">금액 <b>${nD(tot.amt||0,3)}</b></div><div class="s-item">금액(KRW) <b>${wonI(tot.krw||0)} 원</b></div>`;
+      g('#cnt').textContent=`${tot.cnt||0}건`;
+      const go=()=>{from=g('#df').value;to=g('#dt').value;cq=g('#cq').value.trim();mq=g('#mq').value.trim();if(wide){iq=g('#iq').value.trim();bq=g('#bq').value.trim();}load();};
+      g('#go').onclick=go;
+      c.querySelectorAll('.inp').forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')go();});
+      g('#xls').onclick=()=>{const hd=COLS.map(cd=>cd[1]);
+        downloadCSV((wide?'도입수입입력':'도입수출입력')+'_'+inD(from)+'_'+inD(to)+'.csv',hd,rows.map(r=>COLS.map(cd=>(''+cd[3](r)).replace(/<[^>]+>/g,''))));};
+      if(typeof attachResizers!=='undefined')attachResizers(c);
+    };
+    load();
+  }
+  SCREEN.dopippur=(c)=>dopipView(c,'pur');
+  SCREEN.dopipsale=(c)=>dopipView(c,'sale');
+})();
