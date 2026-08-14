@@ -108,6 +108,7 @@ const MODULES=[
    {id:'dispatch',ic:'📤',nm:'자재불출집계표'},
    {id:'receiptdetail',ic:'🧾',nm:'자재입고명세서'},
    {id:'receipt',ic:'📥',nm:'자재입고집계표'},
+   {id:'lgsagub',ic:'📊',nm:'LG사급현황'},
    {id:'matkanban',ic:'📊',nm:'자재입고현황',hide:true},
    {sep:true},
    {id:'stockreceipt',ic:'📥',nm:'자재입고관리'},
