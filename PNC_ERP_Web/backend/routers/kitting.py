@@ -230,6 +230,211 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
     finally:
         cn.close()
 
+# ================= 파트별 생산계획 (w_pr_input_410_new) — 키팅과 동일 SP grain·색상, 410 컬럼 =================
+@router.get("/api/plan/part410")
+def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Query(""),
+                 part: str = Query(""), line: str = Query(""), assy: str = Query(""), jado: str = Query(""),
+                 view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("nx"),
+                 wh_part: str = Query("IS0001"), limit: int = Query(20000)):
+    """파트별 생산계획 그리드 — 레거시 SP `SP_PR_CREATE_PLAN_파트별_생산계획계산_생산준비등록_NEW` 로직 복제.
+       ★키팅(/api/kitting/grid)과 동일 grain(gpc·wo·swo·assy·upper·item, 날짜피벗)·동일 충당·색상.
+       ★src=nx(우리 PARTNER_ERP_TEST3.nx) | live(레거시 PARTNER_ERP.dbo 대사검증). live=nx셀오버레이 제외(순수 레거시).
+       당김=CHANGE_DAY+','+(LOT_QTY-LAST_LOT_QTY)(전차수 대비 일자·수량 변경). 생산ST=(계획−완료)×item_st/3600.
+       계상근무공수=일자ST/y_inwon(인원=PR_M_PROC_GAGONG⋈WORKER work_flag='1'). 라이브 RO(SP 미실행)."""
+    from datetime import datetime as _dt, timedelta as _td
+    def _yadd(y6, n):
+        try: return (_dt.strptime('20' + y6, '%Y%m%d') + _td(days=n)).strftime('%y%m%d')
+        except Exception: return y6
+    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    cn = _conn(); cur = cn.cursor()
+    try:
+        d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
+        d6b = _yadd(d6a, max(0, int(gigan) - 1))
+        dates = [_yadd(d6a, i) for i in range(max(1, int(gigan)))]
+        whp = (wh_part.strip() or 'IS0001')
+        keys = set()
+        try:
+            cur.execute(f"""
+                ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
+                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
+                       FROM {SCH}.PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
+                      WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
+                     UNION ALL
+                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
+                       FROM CTE a JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
+                )
+                SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
+            for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
+        except Exception: pass
+        w = ["a.part_plan_ymd<=?", "a.GC_GUBUN='P'", "a.GAGONG_PROC_SEQ=1"]; p = [d6b]
+        if wc.strip():   w.append("a.WORK_CODE=?"); p.append(wc.strip())
+        if part.strip(): w.append("a.GAGONG_PROC_CODE=?"); p.append(part.strip())
+        if line.strip(): w.append("a.LINE_NO=?"); p.append(line.strip())
+        if assy.strip(): w.append("a.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{assy.strip()}%")
+        if jado.strip(): w.append("a.ITEM_CODE LIKE ?"); p.append(f"%{jado.strip()}%")
+        cur.execute(f"""SELECT TOP {int(limit) * 40}
+              a.ASSY_ITEM_CODE assy, a.UPPER_ITEM_CODE upper, a.ITEM_CODE item,
+              a.GAGONG_PROC_CODE gpc, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE) gpcnm,
+              ISNULL(pg.PART_GROUP_CODE,'') pgc, a.WORK_CODE wc,
+              COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE) wcnm, MAX(ISNULL(a.LINE_NO,'')) line,
+              a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.PART_PLAN_YMD ymd,
+              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, ISNULL(ib.ITEM_DESC,'') nm,
+              ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
+              MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
+              MAX(ISNULL(a.CHANGE_DAY,'')) change_day, SUM(CAST(ISNULL(a.LOT_QTY,0) AS float)) lot_qty,
+              SUM(CAST(ISNULL(a.LAST_LOT_QTY,0) AS float)) last_lot_qty,
+              SUM(CAST(a.PART_PLAN_QTY AS float)) pl
+            FROM {SCH}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+            JOIN {SCH}.pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
+            JOIN {SCH}.pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
+            JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
+            LEFT JOIN {SCH}.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
+            LEFT JOIN {SCH}.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
+            LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
+            WHERE {' AND '.join(w)}
+            GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
+              a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
+              a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.ITEM_DESC,''),
+              ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
+        cols = [d[0] for d in cur.description]
+        raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]
+        keyed = {}
+        for r in raw:
+            q = float(r["pl"] or 0); ymd = r["ymd"]
+            bucket = 'P' if ymd < d6a else (ymd if ymd in dates else None)
+            if bucket is None: continue
+            k = (r["gpc"], r["wo"], r["swo"] or '', r["assy"], r["upper"] or '', r["item"])
+            g = keyed.get(k)
+            if not g:
+                g = {"assy": r["assy"], "upper": r["upper"] or '', "item": r["item"], "nm": r["nm"],
+                     "gpc": r["gpc"], "gpcnm": r["gpcnm"], "pgc": r["pgc"], "wc": r["wc"], "wcnm": r["wcnm"],
+                     "line": r["line"], "inhm": r["inhm"], "rate": float(r["rate"] or 100),
+                     "item_st": float(r["st"] or 0), "use_qty": float(r["useq"] or 1),
+                     "wo": r["wo"], "swo": r["swo"] or '', "plan_ymd": (r["plan_ymd"] or ''),
+                     "change_day": (r["change_day"] or ''), "lot_qty": 0.0, "last_lot_qty": 0.0,
+                     "days": {}, "prior_plan": 0.0, "plan_qty": 0.0, "_cells": {}}
+                keyed[k] = g
+            if (r["plan_ymd"] or '') and (not g["plan_ymd"] or (r["plan_ymd"] or '') < g["plan_ymd"]): g["plan_ymd"] = r["plan_ymd"]
+            g["lot_qty"] += float(r["lot_qty"] or 0); g["last_lot_qty"] += float(r["last_lot_qty"] or 0)
+            if (r["change_day"] or '') and not g["change_day"]: g["change_day"] = r["change_day"]
+            cell = g["_cells"].get(bucket)
+            if not cell:
+                cell = {"bucket": bucket, "ymd": ymd, "plan": 0.0, "finish": 0.0, "ready": 0.0, "tag": 0}
+                g["_cells"][bucket] = cell
+            cell["plan"] += q
+            if bucket == 'P': g["prior_plan"] += q
+            else: g["days"][bucket] = g["days"].get(bucket, 0.0) + q
+            g["plan_qty"] += q
+        rows = list(keyed.values())
+        capped = len(rows) >= int(limit); rows = rows[:int(limit)]
+        rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
+        try:
+            cur.execute(f"SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM {SCH}.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
+            for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
+        except Exception: pass
+        try:
+            cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {SCH}.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+            for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
+        except Exception: pass
+        try:
+            cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
+            cur.execute(f"""
+                ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
+                    SELECT s.mat_code, s.mat_code, s.mat_code,
+                           CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
+                      FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM {SCH}.pr_t_mat_stock_wh WITH(NOLOCK)
+                             UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM {SCH}.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN {SCH}.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                             UNION ALL SELECT mat_code, stock_qty, 0 FROM {SCH}.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
+                             UNION ALL SELECT mat_code, stock_qty, 0 FROM {SCH}.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                     GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
+                    UNION ALL
+                    SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
+                           CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
+                      FROM T_SUB_CTE cb JOIN {SCH}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
+                )
+                SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms4 FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
+            cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms4 GROUP BY mat_code")
+            for rr in cur.fetchall(): midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
+            cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
+            for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
+        except Exception: pass
+        try:
+            wos = list({g["wo"] for g in rows if g["wo"]})
+            for i in range(0, len(wos), 900):
+                ck = wos[i:i + 900]; ph = ",".join("?" * len(ck))
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM {SCH}.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                for rr in cur.fetchall(): saled[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
+        except Exception: pass
+        if str(src).strip() != "live":   # ★nx 셀단위 준비 flag 오버레이(우리 확인분) — 라이브 대사시 제외
+            try:
+                nxc = _nx(); nc = nxc.cursor()
+                nc.execute("""SELECT ITEM_CODE, ISNULL(WORK_ORDER,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(INPUT_YMD,''), ISNULL(SUM(MAINT_QTY),0)
+                    FROM nx.stock_ledger WHERE STOCK_POINT='RDY'
+                    GROUP BY ITEM_CODE, ISNULL(WORK_ORDER,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(INPUT_YMD,'')""")
+                for rr in nc.fetchall(): nxcell[(rr[0], rr[1], rr[2], rr[3])] = float(rr[4] or 0)
+                nxc.close()
+            except Exception: pass
+        _TAG2FIN = {90: '6', 70: '4', 50: '3', 10: '3', 30: '2'}
+        def _alloc(cellseq, pool, tag, key):
+            pool = max(float(pool or 0), 0.0)
+            for c in cellseq:
+                if pool <= 0: break
+                jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
+                if jan <= 0: continue
+                if jan > pool:
+                    c[key] += pool; pool = 0.0
+                else:
+                    c[key] += jan; pool -= jan
+                    if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
+        for g in rows:
+            it = g["item"]
+            g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])
+            seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
+            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')
+            _alloc(seq, assystk.get(g["assy"], 0.0) * g["use_qty"], 70, 'finish')
+            _alloc(seq, max(fixstk.get((g["upper"], it), 0.0), 0.0), 70, 'finish')
+            _alloc(seq, max(midstk.get(it, 0.0), 0.0), 70, 'finish')
+            _alloc(seq, max(rstock.get((it, g["gpc"]), 0.0), 0.0), 50, 'ready')
+            for c in seq:
+                ck = g["part_ymd"] if c["bucket"] == 'P' else c["ymd"]
+                nq = nxcell.get((it, g["wo"], g["gpc"], ck), 0.0)
+                if nq > 0:
+                    rem = max(c["plan"] - c["finish"] - c["ready"], 0.0)
+                    if rem > 0: c["ready"] += min(nq, rem)
+                    if c["plan"] > 0 and (c["finish"] + c["ready"]) >= c["plan"] and c["tag"] < 50: c["tag"] = 50
+            g["dcov"] = {}; g["dfin"] = {}
+            pc = g["_cells"].get('P')
+            g["prior_cover"] = round((pc["finish"] + pc["ready"]), 2) if pc else 0.0
+            g["prior_fin"] = _TAG2FIN.get(pc["tag"], '0') if pc else '0'
+            for y in g["days"]:
+                c = g["_cells"].get(y)
+                g["dcov"][y] = round((c["finish"] + c["ready"]), 2) if c else 0.0
+                g["dfin"][y] = _TAG2FIN.get(c["tag"], '0') if c else '0'
+            g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)
+            g["lot_diff"] = round(g["lot_qty"] - g["last_lot_qty"], 2)
+            fins = [_TAG2FIN.get(c["tag"], '0') for c in g["_cells"].values() if c["plan"] > 0]
+            g["_done_all"] = bool(fins) and all(f in ('4', '6') for f in fins)
+            del g["_cells"]
+        uf = unfin.strip()
+        if uf == '미생산': rows = [r for r in rows if not r["_done_all"]]
+        for r in rows: r.pop("_done_all", None)
+        rows.sort(key=lambda x: ((x["part_ymd"] or "") + (x["inhm"] or ""), x["plan_ymd"] or "",
+                                 x["item"] or "", x["wo"] or "", x["swo"] or ""))
+        # 인원(y_inwon) — 레거시: COUNT(PR_M_PROC_GAGONG⋈WORKER work_flag='1', 파트필터 gpc·part_group like)
+        inwon = 0
+        try:
+            gp = (part.strip() or '%')
+            cur.execute(f"""SELECT COUNT(*) FROM {SCH}.PR_M_PROC_GAGONG a
+                JOIN {SCH}.PR_M_PROC_GAGONG_WORKER b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
+                WHERE b.WORK_FLAG='1' AND a.GAGONG_PROC_CODE LIKE ?""", gp)
+            inwon = int(cur.fetchone()[0] or 0)
+        except Exception: pass
+        note = f"⚠ 상위 {limit}건 초과 — 파트·작업처·도번으로 필터하세요." if capped else ""
+        return {"dates": dates, "rows": rows, "cnt": len(rows), "src": ("live" if SCH.endswith("dbo") else "nx"),
+                "plan_sum": sum(r["plan_qty"] for r in rows), "inwon": inwon, "note": note}
+    finally:
+        cn.close()
+
 def _kit_cell_guard(item, wo, swo, gpc, ymd, qty, assy):
     """셀 확인/취소 서버 가드(라이브 RO): 월마감(PU_T_MONTH_READY_STOCK) 이후·출하완료분 금지. (ok, detail)."""
     cn = _conn(); cur = cn.cursor()
