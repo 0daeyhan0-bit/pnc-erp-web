@@ -746,6 +746,7 @@ def sourcing_route_copy(payload: dict = Body(...)):
               _d(src_hdr["apply_from"]), src_hdr["note"], usr)
         nid = int(cur.fetchone()[0])
         new_children = []
+        _cap = lambda v, n: (None if v is None else str(v)[:n])   # ★컬럼길이 초과 잘림오류(8152) 방지 — 긴 spec 등
         for ln in src_lines:
             child = str(ln[1]).strip()
             if copy_children and child:
@@ -758,7 +759,8 @@ def sourcing_route_copy(payload: dict = Body(...)):
                 child = newc
             cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
                   vendor_code,is_rawmat,diam,thick,len_val,material,spec,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  nid, ln[0], child, ln[2], ln[3], ln[4], ln[5], ln[6], ln[7], ln[8], ln[9], ln[10], ln[11], ln[12])
+                  nid, ln[0], _cap(child, 60), _cap(ln[2], 120), ln[3], _cap(ln[4], 20), _cap(ln[5], 20),
+                  ln[6], ln[7], ln[8], ln[9], _cap(ln[10], 40), _cap(ln[11], 80), _cap(ln[12], 200))
         # ★BASE 복사: 조립 공정(비종속=용접·지그·교정·부품부착·포장)을 ASSY 노드에 시드 → 신규 후보 공수합=BASE로 시작
         # (절삭은 part_cut 자동귀속이라 시드 불필요). 이후 사용자가 SUB로 재배치·차감.
         seeded_asm = 0
