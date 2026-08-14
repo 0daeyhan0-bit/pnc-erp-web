@@ -387,7 +387,7 @@ SCREEN.partplan=(c)=>{
   // ★색상 정본(레거시 c_color CASE = kitting finBg 이식): 90주황(출하완료)/70노랑(생산완료)/50·10녹(키팅완료)/else 백(미키팅)
   const finBg=f=>f==='6'?'#fac090':(f==='4'?'#ffff00':(f==='3'?'#669900':''));
   const finFg=f=>f==='3'?'#ffffff':'';
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'전체',view:'전체',src:'nx',loading:false,msg:''};
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'전체',view:'상세',src:'nx',loading:false,msg:''};
   const load=async()=>{st.loading=true;render();
     const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:st.view,unfin:st.unfin,src:st.src,limit:8000});
     try{const r=await fetch(`${API}/api/plan/part410?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.inwon=j.inwon||0;st.note=j.note||'';st.msg='';}
@@ -449,8 +449,8 @@ SCREEN.partplan=(c)=>{
        <label class="tl">파트</label><select class="inp" id="pp-part" style="width:130px">${partOpts}</select>
        <label class="tl">도번</label><input class="inp" id="pp-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
        <label class="tl">자도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
-       <label class="tl">미생산</label>${seg('pp-uf',st.unfin,['전체','미생산'])}
-       <label class="tl">구분</label>${seg('pp-vw',st.view,['전체','집계','제번'])}
+       <label class="tl">생산여부</label>${seg('pp-uf',st.unfin,['전체','미생산'])}
+       <label class="tl">구분</label>${seg('pp-vw',st.view,['상세','집계','제번'])}
        <label class="tl">소스</label><select class="inp" id="pp-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>라이브 대사</option></select>
        <button class="btn" id="pp-go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(st.plan_sum)}</b> · 인원 ${nf(st.inwon)} · ${st.src==='live'?'🔴 라이브':'🟢 nx'} · 일자 ${d.length}개</span>

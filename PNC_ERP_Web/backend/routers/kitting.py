@@ -252,20 +252,29 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         d6b = _yadd(d6a, max(0, int(gigan) - 1))
         dates = [_yadd(d6a, i) for i in range(max(1, int(gigan)))]
         whp = (wh_part.strip() or 'IS0001')
+        # ★성능: 투입파트 KEYS(재귀 BOM, wc/part/assy 필터무관 · to일자+투입파트만 의존)를 (src,to,whp)별 90초 TTL 캐시.
         keys = set()
-        try:
-            cur.execute(f"""
-                ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
-                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM {SCH}.PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
-                      WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
-                     UNION ALL
-                     SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM CTE a JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
-                )
-                SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
-            for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
-        except Exception: pass
+        _kck = (("live" if SCH.endswith("dbo") else "nx"), d6b, whp)
+        _kcache = getattr(plan_part410, "_keys_cache", {})
+        _kent = _kcache.get(_kck); _now0 = _dt.now().timestamp()
+        if _kent and (_now0 - _kent["ts"] < 90):
+            keys = _kent["k"]
+        else:
+            try:
+                cur.execute(f"""
+                    ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
+                         SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
+                           FROM {SCH}.PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
+                          WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
+                         UNION ALL
+                         SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
+                           FROM CTE a JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
+                    )
+                    SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
+                for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
+            except Exception: pass
+            _kcache[_kck] = {"ts": _now0, "k": keys}
+            plan_part410._keys_cache = _kcache
         w = ["a.part_plan_ymd<=?", "a.GC_GUBUN='P'", "a.GAGONG_PROC_SEQ=1"]; p = [d6b]
         if wc.strip():   w.append("a.WORK_CODE=?"); p.append(wc.strip())
         if part.strip(): w.append("a.GAGONG_PROC_CODE=?"); p.append(part.strip())
@@ -328,36 +337,46 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         rows = list(keyed.values())
         capped = len(rows) >= int(limit); rows = rows[:int(limit)]
         rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
-        try:
-            cur.execute(f"SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM {SCH}.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
-            for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
-        except Exception: pass
-        try:
-            cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {SCH}.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
-            for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
-        except Exception: pass
-        try:
-            cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
-            cur.execute(f"""
-                ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
-                    SELECT s.mat_code, s.mat_code, s.mat_code,
-                           CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
-                      FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM {SCH}.pr_t_mat_stock_wh WITH(NOLOCK)
-                             UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM {SCH}.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN {SCH}.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                             UNION ALL SELECT mat_code, stock_qty, 0 FROM {SCH}.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
-                             UNION ALL SELECT mat_code, stock_qty, 0 FROM {SCH}.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
-                     GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
-                    UNION ALL
-                    SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
-                           CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
-                      FROM T_SUB_CTE cb JOIN {SCH}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
-                )
-                SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms4 FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
-            cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms4 GROUP BY mat_code")
-            for rr in cur.fetchall(): midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
-            cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
-            for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
-        except Exception: pass
+        # ★성능: 전역 재고 롤업(필터무관 rstock·assystk·midstk·fixstk = 색tag 전용, 값/계획합계는 매요청 라이브 재조회)을 src별 90초 TTL 캐시.
+        #   재귀 #tms4 롤업(~2초)을 반복조회마다 재계산하던 것을 캐시 → 조회 고속화. 소스맵은 읽기전용(_alloc은 셀만 변경)이라 공유 안전.
+        _ck = "live" if SCH.endswith("dbo") else "nx"
+        _cache = getattr(plan_part410, "_stk_cache", {})
+        _ent = _cache.get(_ck); _now = _dt.now().timestamp()
+        if _ent and (_now - _ent["ts"] < 90):
+            rstock = _ent["r"]; assystk = _ent["a"]; midstk = _ent["m"]; fixstk = _ent["f"]
+        else:
+            try:
+                cur.execute(f"SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM {SCH}.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
+                for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
+            except Exception: pass
+            try:
+                cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {SCH}.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
+            except Exception: pass
+            try:
+                cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
+                cur.execute(f"""
+                    ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
+                        SELECT s.mat_code, s.mat_code, s.mat_code,
+                               CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
+                          FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM {SCH}.pr_t_mat_stock_wh WITH(NOLOCK)
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM {SCH}.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN {SCH}.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM {SCH}.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM {SCH}.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                         GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
+                        UNION ALL
+                        SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
+                               CONVERT(int, (CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.stock_qty) END) * b.use_qty)
+                          FROM T_SUB_CTE cb JOIN {SCH}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1'
+                    )
+                    SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms4 FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
+                cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms4 GROUP BY mat_code")
+                for rr in cur.fetchall(): midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
+                cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
+                for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
+            except Exception: pass
+            _cache[_ck] = {"ts": _now, "r": rstock, "a": assystk, "m": midstk, "f": fixstk}
+            plan_part410._stk_cache = _cache
         try:
             wos = list({g["wo"] for g in rows if g["wo"]})
             for i in range(0, len(wos), 900):
