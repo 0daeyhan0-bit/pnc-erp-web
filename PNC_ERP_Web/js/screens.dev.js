@@ -1921,7 +1921,7 @@ SCREEN.unifybom=(c,ro)=>{
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
-         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
+         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
      </div>
@@ -1967,6 +1967,16 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
     if(naeModal)wireProcModal();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
+    // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
+    const dbtn=c.querySelector('#bm-del');if(dbtn)dbtn.onclick=async()=>{
+      if(!item)return;
+      if(!confirm(`품번 [${item}] ${name||''} 삭제할까요?\n\n· 구성(자식 ${lines.length}건) 관계 제거\n· 품번을 품목마스터에서 삭제\n· 다른 BOM이 이 품번을 자식으로 쓰면 삭제 안 됨\n\n되돌릴 수 없습니다.`))return;
+      try{const r=await fetch(`${API}/api/bom/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item})});
+        const j=await r.json();
+        if(!j.ok){alert('삭제 불가:\n'+(j.errors||['오류']).join('\n'));return;}
+        alert(`삭제 완료 — 품번 ${j.item} (구성 ${j.lines_removed||0}건 제거)`);
+        item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';results=[];query='';draw();
+      }catch(e){alert('삭제 실패: '+e.message);}};
     // 역전개(where-used) 버튼·모달
     {const wu=c.querySelector('#bm-wu');if(wu)wu.onclick=openWhereUsed;}
     {const wx=c.querySelector('#wu-close');if(wx)wx.onclick=()=>{wuData=null;wuBusy=false;draw();};}

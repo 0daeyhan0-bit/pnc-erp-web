@@ -651,6 +651,45 @@ def bom_save(payload: dict = Body(...)):
     finally:
         cn.close()
 
+@router.post("/api/bom/delete")
+def bom_delete(payload: dict = Body(...)):
+    """품번 삭제 — 레거시 방식(하위 구성 제거 후 품번 삭제). BOM구성(자식관계)·용접공정·서브테이블 제거 후 nx.item에서 품번 삭제.
+       ★가드: 이 품번을 자식으로 쓰는 다른 BOM이 하나라도 있으면 차단(사용중=삭제불가)."""
+    item = str(payload.get("item", "")).strip()
+    if not item:
+        raise HTTPException(400, "item(품번) 필요")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", item)
+        if not cur.fetchone():
+            return {"ok": False, "errors": [f"미등록 품번 ({item})"]}
+        # ★가드: 다른 BOM이 이 품번을 자식으로 사용 → 삭제불가(상위에서 먼저 제거해야 함)
+        cur.execute("""SELECT DISTINCT TOP 20 h.item_code FROM nx.bom_line l
+                       JOIN nx.bom_header h ON h.bom_id=l.bom_id WHERE l.child_item=?""", item)
+        used = [r[0] for r in cur.fetchall()]
+        if used:
+            more = "..." if len(used) >= 20 else ""
+            return {"ok": False, "errors": [
+                f"삭제 불가 — 이 품번을 자식(구성)으로 사용하는 BOM {len(used)}건이 있습니다. 상위 BOM에서 먼저 제거하세요:",
+                ", ".join(used[:15]) + more]}
+        # 삭제: 하위 구성(bom_line) → 헤더 → 용접공정 → 서브테이블 → 품번(마스터)
+        nline = 0
+        cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
+        h = cur.fetchone()
+        if h:
+            cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", h[0]); nline = cur.rowcount
+            cur.execute("DELETE FROM nx.bom_header WHERE bom_id=?", h[0])
+        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+        for t in ("item_sub", "item_valve", "routing", "item_weld"):
+            cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+        cur.execute("DELETE FROM nx.item WHERE item_code=?", item)
+        nitem = cur.rowcount
+        cn.commit()
+        _reset_cost_engine()   # 구성·품목 삭제 → 원가엔진 캐시 무효화
+        return {"ok": True, "item": item, "lines_removed": nline, "item_removed": nitem}
+    finally:
+        cn.close()
+
 @router.post("/api/bom/qty")
 def bom_qty(payload: dict = Body(...)):
     """BOM 단건 소요량 수정(부모+자식) — 다른 라인 속성 보존(전체교체 아님). 내부원가 수정에서 안전 갱신."""
