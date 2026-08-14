@@ -782,6 +782,42 @@ def sourcing_route_copy(payload: dict = Body(...)):
     finally:
         nx.close()
 
+# ===================== 편집 세션 스냅샷/되돌리기 (닫기=취소, 저장만 반영) =====================
+def _snap_ensure(cur):
+    cur.execute("IF OBJECT_ID('nx.sourcing_route_snap','U') IS NULL CREATE TABLE nx.sourcing_route_snap(route_id INT PRIMARY KEY, item_code NVARCHAR(60), existed BIT, snap NVARCHAR(MAX), snap_dt DATETIME)")
+
+def _snap_dump(cur, tbl, rid):
+    cur.execute(f"SELECT * FROM nx.{tbl} WHERE route_id=?", rid)
+    cols = [d[0] for d in cur.description]
+    return {"cols": cols, "rows": [list(r) for r in cur.fetchall()]}
+
+def _snap_save(cur, rid, item, existed):
+    """편집 세션 시작 스냅샷(라인/공정/용접 통째). 이미 있으면 유지(세션시작본 보존)."""
+    import json as _j
+    _snap_ensure(cur)
+    cur.execute("SELECT 1 FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+    if cur.fetchone():
+        return   # 세션 중 재호출 → 최초 스냅샷 유지
+    blob = _j.dumps({"line": _snap_dump(cur, "sourcing_route_line", rid),
+                     "proc": _snap_dump(cur, "sourcing_route_proc", rid),
+                     "weld": _snap_dump(cur, "sourcing_route_weld", rid)}, default=str)
+    cur.execute("INSERT INTO nx.sourcing_route_snap(route_id,item_code,existed,snap,snap_dt) VALUES(?,?,?,?,getdate())",
+                rid, item, int(existed), blob)
+
+def _snap_clear(cur, rid):
+    _snap_ensure(cur)
+    cur.execute("DELETE FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+
+def _snap_load_rows(cur, tbl, dump):
+    cols = dump.get("cols") or []; rows = dump.get("rows") or []
+    if not rows: return
+    ident = (tbl == "sourcing_route_line")
+    if ident: cur.execute(f"SET IDENTITY_INSERT nx.{tbl} ON")
+    ph = ",".join("?" * len(cols))
+    cur.executemany(f"INSERT INTO nx.{tbl}({','.join(cols)}) VALUES({ph})", [tuple(r) for r in rows])
+    if ident: cur.execute(f"SET IDENTITY_INSERT nx.{tbl} OFF")
+
+
 def _insert_current_tree(cur, rid, item, ymd="260630"):
     """현행(실사용 BOM) naewon 트리를 route_line SUB 구조로 실체화(대안 SUB 재구성과 동일한 편집 대상).
        중간노드(자식 있음)=SUB(node_kind='SUB', 중첩 parent_line) / leaf(mat>0)=부품(parent_line=소속SUB or ASSY).
