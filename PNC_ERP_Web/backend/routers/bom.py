@@ -35,6 +35,41 @@ def bom_search(q: str = Query('', description="품번/품명 부분검색"),
     finally:
         cn.close()
 
+@router.get("/api/bom/iteminfo")
+def bom_iteminfo(item: str = Query(...)):
+    """신규 BOM 등록 그리드: 기존 품번 입력 시 마스터(품명·규격·치수·재질·중량·분류·매입처) 자동조회. 3방식(LG불러오기·복사·새로) 공통."""
+    code = item.strip().upper()
+    if not code:
+        return {"found": False}
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT item_name, item_spec, diam, thick, length, metal_gubun, net_weight, unit,
+              lgroup, sgroup, make_type, cost_gubun, in_cust FROM nx.item WHERE item_code=?""", code)
+        r = cur.fetchone()
+        if not r:
+            return {"found": False}
+        keys = ["item_name", "item_spec", "diam", "thick", "length", "metal_gubun", "net_weight",
+                "unit", "lgroup", "sgroup", "make_type", "cost_gubun", "in_cust"]
+        num = {"diam", "thick", "length", "net_weight"}
+        d = {}
+        for k, v in zip(keys, r):
+            if k in num:
+                try: d[k] = (float(v) if v is not None else None)
+                except (TypeError, ValueError): d[k] = None
+            else:
+                d[k] = ("" if v is None else str(v).strip())
+        cust = ""
+        if d.get("in_cust"):
+            cur.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", d["in_cust"])
+            rc = cur.fetchone()
+            if rc and rc[0]:
+                cust = str(rc[0]).strip()
+        d["cust_name"] = cust
+        d["found"] = True
+        return d
+    finally:
+        cn.close()
+
 @router.get("/api/bom/get")
 def bom_get(item: str = Query(..., description="품번")):
     item = item.strip()

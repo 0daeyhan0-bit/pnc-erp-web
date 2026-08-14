@@ -1994,10 +1994,20 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelectorAll('.ceitem').forEach(el=>{
       el.oninput=()=>{const i=+el.dataset.i;lines[i].child_item=el.value.trim().toUpperCase();
         const q=el.value.trim();clearTimeout(itT);if(q.length<2)return;
-        itT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}`);const rows=(await r.json()).rows||[];
-          const dl=c.querySelector('#bm-itemdl');if(dl)dl.innerHTML=rows.map(x=>{itemNames[x.item]=x.name;return `<option value="${esc(x.item)}">${esc(x.name||'')}</option>`;}).join('');}catch(e){}},250);};
-      el.onchange=()=>{const i=+el.dataset.i,code=el.value.trim().toUpperCase();lines[i].child_item=code;
-        if(itemNames[code]){lines[i].item_name=itemNames[code];}};
+        itT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}&include_past=1`);const rows=(await r.json()).rows||[];  // ★부품등록=휴면·orphan 포함 전체검색
+          const dl=c.querySelector('#bm-itemdl');if(dl)dl.innerHTML=rows.map(x=>{itemNames[x.item]=x.name;return `<option value="${esc(x.item)}">${esc(x.name||'')}${x.status&&x.status!=='사용'?' ('+esc(x.status)+')':''}</option>`;}).join('');}catch(e){}},250);};
+      el.onchange=async()=>{const i=+el.dataset.i,code=el.value.trim().toUpperCase();lines[i].child_item=code;
+        if(itemNames[code]){lines[i].item_name=itemNames[code];}
+        if(!code)return;
+        // ★기존 품번 입력 시 품목마스터 자동조회(3방식 공통): 품명·규격·치수·재질·중량·단위·분류·매입처 채움
+        try{const r=await fetch(`${API}/api/bom/iteminfo?item=${encodeURIComponent(code)}`);const d=await r.json();
+          if(d&&d.found){const L=lines[i];
+            if(d.item_name)L.item_name=d.item_name;
+            if(d.item_spec)L.spec=d.item_spec;
+            ['diam','thick','length','metal_gubun','net_weight','unit','lgroup','sgroup','make_type','cost_gubun'].forEach(k=>{if(d[k]!==''&&d[k]!=null)L[k]=d[k];});
+            if(d.in_cust){L.in_cust=d.in_cust;L.cust_name=d.cust_name||'';}
+            draw();}
+        }catch(e){}};
     });
     let vT=null;
     c.querySelectorAll('.cevendor').forEach(el=>{
