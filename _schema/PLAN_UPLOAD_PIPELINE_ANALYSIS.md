@@ -85,3 +85,15 @@ PR_T_PLAN_ITEM_DTL_DAILY(work_ymd) 삭제후 백업(35컬럼). SP_DAILY_ANALYSYS
 - 미덤프SP(추가필요): SP_LG_SCHEDULE, SP_PROD_SCHEDULE_PROC, SP_PR_CREATE_PROC_PLAN, 자재리스트생성_240402, 함수 f_get_relative_work_day_of_part·f_plan_ymd_hm_proc·f_get_item_st_proc. (scratchpad/SP__*.sql 6종 저장됨)
 
 관련: [[newerp-prod-upload-programs]] [[newerp-plan-soyo-verify]] [[newerp-lg-order-coverage]] [[newerp-sourcing-profile]] [[feedback-working-rules]]
+
+---
+## ★검증 (2026-08-14, 오늘 라이브 7시 업로드 대조) — nx BOM 전환 후 재검증
+소스: 오늘 LG 파일 4종(lg_sac/rac 0814 주문·계획) → nx `/api/order/upload`·`/api/plan/upload`·compose_mat(STEP5~7) vs 라이브(오늘 7시 결과).
+- **생산계획업로드 파싱: 100.00%** — 제번 4,602 전부 일치, 총계획수량 202,765=202,765(1.00000), 수량차 0.
+- **주문업로드 파싱: 99.83%** — 주문번호 6,413 전부존재, 총 236,863 vs 236,874(0.99995), 11건만 ±1(파일 순간차).
+- **자재소요(compose_mat, nx.v_pr_bom=nx.bom_line 단일BOM): 99.984% 라인수량일치**(공통 80,346라인 중 80,333), 라인커버리지 99.36%, 총소요 비율 0.97258(nx −2.7%).
+  - ★잔차 원인 = **변형SUB(nx.bom_line 미정규화)** — 원가·사급차액과 동일 뿌리:
+    - 이중계상(2배): EBF40271407 등 13라인 = base+`-20-1` 두 부모로 다중경로(확증: nx.bom_line에 AJR30012009 & AJR30012009-20-1 둘 다 EBF40271407 보유).
+    - 접미사 표현차: nx만 `-F&T` / live만 `-19-1`,`-20-1` (변형SUB 상호보완, 515라인).
+- **결론: 업로드 프로그램 자체는 무결(파싱 100%/99.83%). 소요 잔차 2.7%는 프로그램 버그 아님 = nx.bom_line 변형SUB 구조 dedup으로 원가·사급과 함께 해소.**
+- 스크립트: scratchpad/upload_today.py·verify_upload.py·verify_soyo.py·run_step7.py.
