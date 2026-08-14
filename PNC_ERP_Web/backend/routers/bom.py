@@ -315,7 +315,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
             seen.add(code)
             for e in edges.get(code, []):
                 ci = info.get(e["child"], {})
-                out.append({"level": lvl, "code": subdisp(e["child"]), "raw": e["child"], "nm": ci.get("nm", ""), "spec": ci.get("spec", ""),
+                out.append({"level": lvl, "code": subdisp(e["child"]), "raw": e["child"], "parent": code, "pseq": e.get("sq", 0), "nm": ci.get("nm", ""), "spec": ci.get("spec", ""),
                     "qty": e["q"], "cust": ci.get("cust", ""), "custnm": ci.get("custnm", ""),
                     "sag": e["sag"], "se": e["se"], "kt": e["kt"], "vir": e["vir"], "ce": e["ce"], "le": e["le"],
                     "gp": e["gp"], "sw": e["sw"], "metal": ci.get("metal", ""),
@@ -687,6 +687,37 @@ def bom_delete(payload: dict = Body(...)):
         cn.commit()
         _reset_cost_engine()   # 구성·품목 삭제 → 원가엔진 캐시 무효화
         return {"ok": True, "item": item, "lines_removed": nline, "item_removed": nitem}
+    finally:
+        cn.close()
+
+@router.post("/api/bom/deleteline")
+def bom_deleteline(payload: dict = Body(...)):
+    """다단계 편집: 특정 부모 BOM에서 자식 1행(구성) 삭제. body {parent, child, seq?}.
+       seq 주면 정확히 그 라인만, 없으면 (parent,child) 매칭 전부. 용접봉(RAC)은 proc_weld에서 제거."""
+    parent = str(payload.get("parent", "")).strip()
+    child = str(payload.get("child", "")).strip()
+    seq = payload.get("seq")
+    if not parent or not child:
+        raise HTTPException(400, "parent·child 필요")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        if child.upper().startswith("RAC"):   # 용접봉 = 공정종속(proc_weld)
+            cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=? AND weld_item=?", parent, child)
+            n = cur.rowcount; cn.commit(); _reset_cost_engine()
+            return {"ok": True, "deleted": n, "parent": parent, "child": child, "weld": True}
+        cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", parent)
+        h = cur.fetchone()
+        if not h:
+            return {"ok": False, "errors": [f"부모 BOM 없음 ({parent})"]}
+        bom_id = h[0]
+        if seq is not None and str(seq) != "":
+            cur.execute("DELETE FROM nx.bom_line WHERE bom_id=? AND child_item=? AND seq=?", bom_id, child, int(seq))
+        else:
+            cur.execute("DELETE FROM nx.bom_line WHERE bom_id=? AND child_item=?", bom_id, child)
+        n = cur.rowcount
+        cn.commit()
+        _reset_cost_engine()   # 구성 변경 → 원가엔진 캐시 무효화
+        return {"ok": True, "deleted": n, "parent": parent, "child": child}
     finally:
         cn.close()
 
