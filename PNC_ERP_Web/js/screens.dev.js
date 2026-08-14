@@ -2166,9 +2166,11 @@ SCREEN.subvariant=(c)=>{
       <span style="color:#5a6b82;font-size:12px">구분 <b>${esc(r.gubun||'-')}</b>${r.vendor_code?` · 공급처 <b>${esc(r.vendor_name||r.vendor_code)}</b>`:''}${r.apply_from?` · 적용 ${esc(r.apply_from)}`:''} · 라인 ${(r.lines||[]).length}</span>
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':apBadge(r)}
       <div style="flex:1"></div>
-      <button class="btn sv-open" data-rid="${r.route_id}" data-mode="${cur?'view':'edit'}" style="padding:1px 8px;font-size:11px">${cur?'상세':'수정'}</button>
-      ${(canW&&!r.baseline)?`<button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'승인'}</button>
-        ${cur?'':`<button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">삭제</button>`}`:''}
+      ${cur
+        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${canW?(r.baseline
+            ? ` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`
+            : ` <button class="btn sv-open" data-rid="${r.route_id}" data-mode="edit" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`):''}`
+        : `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="${canW?'edit':'view'}" style="padding:1px 8px;font-size:11px">${canW?'수정':'상세'}</button>${canW?` <button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'승인'}</button> <button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">삭제</button>`:''}`}
     </div>`;};
   const routesPanel=()=>{
     const isRoot=st.routeTarget===st.sel;
@@ -2462,6 +2464,11 @@ SCREEN.subvariant=(c)=>{
     {const b=c.querySelector('.sv-new');if(b)b.onclick=openNew;}
     c.querySelectorAll('.sv-card').forEach(el=>el.ondblclick=()=>{const b=el.querySelector('.sv-open');openDetail(+el.dataset.rid,b?b.dataset.mode:'view');});
     c.querySelectorAll('.sv-open').forEach(b=>b.onclick=e=>{e.stopPropagation();openDetail(+b.dataset.rid,b.dataset.mode);});
+    // ★현행 카드 '수정'(baseline) = 실체화 후 편집 바로 진입
+    c.querySelectorAll('.sv-editcur').forEach(b=>b.onclick=async e=>{e.stopPropagation();
+      try{const r=await fetch(`${API}/api/sourcing/route/edit_current`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,user:'웹사용자'})});
+        const j=await r.json();if(!j.ok){alert('현행 수정 진입 실패: '+(j.detail||''));return;}
+        await loadRoutes();openDetail(j.route_id,'edit',false);}catch(x){alert('오류: '+x.message);}});
     c.querySelectorAll('.sv-appr').forEach(b=>b.onclick=e=>{e.stopPropagation();approve(+b.dataset.rid,b.dataset.on==='1');});
     c.querySelectorAll('.sv-rdel').forEach(b=>b.onclick=e=>{e.stopPropagation();delRoute(+b.dataset.rid);});
   };
