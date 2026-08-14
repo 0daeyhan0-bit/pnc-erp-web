@@ -756,24 +756,30 @@ GROUP BY t.mat
 
 # ================= LG리시빙관리 (영업, dw_sa_sale_110) — 도번×일자 피벗 =================
 @live_router.get("/lgrecv")
-def lgrecv(ym: str = Query("")):
-    """LG리시빙관리 라이브. ym=YYMM(미지정시 현재월). 셀=item×mkt×일자, items=작업처·동소요량. patch_lgrecv.py 이식."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-    fr, to = y + "01", y + "31"
+def lgrecv(ym: str = Query(""), fr: str = Query(""), to: str = Query("")):
+    """LG리시빙관리 라이브. ★기간조회: fr~to(YYMMDD). 미지정시 ym(YYMM) 월전체 또는 당월01~오늘.
+    셀=item×mkt×일자(d=YYMMDD 전체날짜, 월경계 대응), items=작업처·동소요량. patch_lgrecv.py 이식."""
+    fr6 = _digits(fr, 6); to6 = _digits(to, 6)
+    if not fr6 or not to6:
+        y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+        fr6 = fr6 or (y + "01")
+        to6 = to6 or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
+        if to6 < fr6:
+            to6 = y + "31"
     _c1, cells = _rows(f"""
-SELECT a.item_code item, ISNULL(a.mkt,'') mkt, CAST(RIGHT(a.receiving_ymd,2) AS INT) d,
+SELECT a.item_code item, ISNULL(a.mkt,'') mkt, a.receiving_ymd d,
   SUM(a.recv_qty) q, SUM(a.recv_amt) amt
 FROM sa_t_lg_receiving_dtl a
-WHERE a.receiving_ymd BETWEEN '{fr}' AND '{to}'
-GROUP BY a.item_code, ISNULL(a.mkt,''), CAST(RIGHT(a.receiving_ymd,2) AS INT)""")
+WHERE a.receiving_ymd BETWEEN '{fr6}' AND '{to6}'
+GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
 SELECT m.item_code item,
   CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END wcc,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END wc
 FROM PARTNER_ERP_TEST3.nx.pr_m_item m
-WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE receiving_ymd BETWEEN '{fr}' AND '{to}')""")
-    return {"ym": y, "cells": cells, "items": items}
+WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
+    return {"fr": fr6, "to": to6, "ym": fr6[:4], "cells": cells, "items": items}
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.

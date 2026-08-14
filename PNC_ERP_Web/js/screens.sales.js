@@ -169,43 +169,56 @@ SCREEN.salesforecast=(c)=>{
   load();
 };
 
-/* LG리시빙관리 (영업, dw_sa_sale_110) — 도번 × 일자(1~n) 피벗. 수량/금액 토글, 내수/수출(mkt) */
+/* LG리시빙관리 (영업, dw_sa_sale_110) — 도번 × 날짜(일자~일자 기간) 피벗. 수량/금액 토글, 내수/수출(mkt) */
 SCREEN.lgrecv=(c)=>{
   const API=API_BASE;
-  let cells=[], IM={}, curYm='', loading=false, msg='';
+  let cells=[], IM={}, curFr='', curTo='', loading=false, msg='';
   const WD=['일','월','화','수','목','금','토'];
   const MKT={'1':'수출','2':'내수'};  // mkt1=수출, mkt2=내수
-  const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
-  const inYm=v=>(''+(v||'')).slice(2).replace('-','');
+  const ymdToInput=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  const inYmd=v=>(''+(v||'')).slice(2).replace(/-/g,'');
+  const _tdy=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();
   let metric='amt', mkt='', cur=[];
-  const load=async(ym)=>{loading=true;msg='';
+  // 기간(fr~to, YYMMDD) 내 실제 날짜 컬럼 목록 — 월경계 넘어도 정확
+  const dayList=()=>{
+    const list=[]; if(curFr.length<6||curTo.length<6)return list;
+    const d0=new Date(2000+(+curFr.slice(0,2)),(+curFr.slice(2,4))-1,+curFr.slice(4,6));
+    const d1=new Date(2000+(+curTo.slice(0,2)),(+curTo.slice(2,4))-1,+curTo.slice(4,6));
+    let guard=0;
+    for(let d=new Date(d0);d<=d1&&guard<400;d.setDate(d.getDate()+1),guard++){
+      const yy=String(d.getFullYear()).slice(2),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'),wd=d.getDay();
+      list.push({ymd:yy+mm+dd,label:mm+'/'+dd,wd:WD[wd],we:(wd===0||wd===6)});
+    }
+    return list;
+  };
+  const load=async(fr,to)=>{loading=true;msg='';
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(20);
-    try{const r=await fetch(`${API}/api/live/lgrecv?ym=${encodeURIComponent(ym||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();cells=j.cells||[];IM={};(j.items||[]).forEach(x=>IM[x.item]=x);curYm=j.ym||ym||'';}
+    try{const r=await fetch(`${API}/api/live/lgrecv?fr=${encodeURIComponent(fr||'')}&to=${encodeURIComponent(to||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();cells=j.cells||[];IM={};(j.items||[]).forEach(x=>IM[x.item]=x);curFr=j.fr||fr||'';curTo=j.to||to||'';}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';cells=[];IM={};}
     loading=false;draw();};
   const draw=()=>{
-    const maxDay=cells.reduce((m,r)=>Math.max(m,+r.d||0),0)||31;
-    const days=[]; for(let d=1;d<=maxDay;d++)days.push(d);
-    const yy=2000+(+curYm.slice(0,2)||26), mm=(+curYm.slice(2,4)||7);
-    const wdOff=(new Date(yy,mm-1,1)).getDay();  // 그 달 1일의 요일 인덱스
-    c.innerHTML=`
-     <div class="page-title">🏢 LG리시빙관리</div>
-     <div class="page-sub">LG 리시빙 도번×일자 집계 · 원본 <code>SA_T_LG_RECEIVING_DTL</code> · 🔴 라이브 ${esc(ymToInput(curYm)||'-')}</div>
-     <div class="toolbar">
-       <label class="tl">조회월</label>
-       <input type="month" class="inp" id="ym" value="${esc(ymToInput(curYm))}" style="min-width:120px">
+    const days=dayList();
+    c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">🏢 LG리시빙관리</div>
+     <div class="page-sub" style="flex:0 0 auto">LG 리시빙 도번×날짜 집계 · 원본 <code>SA_T_LG_RECEIVING_DTL</code> · 🔴 라이브 ${esc(ymdToInput(curFr)||'-')} ~ ${esc(ymdToInput(curTo)||'-')}</div>
+     <div class="toolbar" style="flex:0 0 auto">
+       <label class="tl">조회기간</label>
+       <input type="date" class="inp" id="fr" value="${esc(ymdToInput(curFr))}" style="width:135px">
+       <span style="color:var(--muted)">~</span>
+       <input type="date" class="inp" id="to" value="${esc(ymdToInput(curTo))}" style="width:135px">
        <label class="tl">수량/금액</label>
        <div class="toggle-group"><button data-me="qty" class="${metric==='qty'?'on':''}">수량</button><button data-me="amt" class="${metric==='amt'?'on':''}">금액</button></div>
        <label class="tl">내수/수출</label>
        <select class="sel" id="mkt"><option value="" ${mkt===''?'selected':''}>전체</option><option value="2" ${mkt==='2'?'selected':''}>내수</option><option value="1" ${mkt==='1'?'selected':''}>수출</option></select>
-       <input class="inp" id="iq" placeholder="도번/작업처">
+       <input class="inp" id="iq" placeholder="도번/작업처" style="width:120px">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
-     <div class="summary-bar" id="sum"></div>
-     <div class="grid-wrap" style="max-height:510px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
-     <div class="rowcount" id="cnt"></div>`;
+     <div class="summary-bar" id="sum" style="flex:0 0 auto"></div>
+     <div class="grid-wrap lgrecv-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
+     <div class="rowcount" id="cnt" style="flex:0 0 auto"></div>
+     <style>.lgrecv-grid thead th{position:sticky;top:0;z-index:3;background:#f4f7fc}.lgrecv-grid tr.grandtot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;z-index:2;border-top:2px solid #cdd9ef}.lgrecv-grid th.wkend,.lgrecv-grid td.wkend{background:#ffe8d4}.lgrecv-grid tr.grandtot td.wkend{background:#f5d9be}</style></div>`;
     c.querySelectorAll('[data-me]').forEach(b=>b.onclick=()=>{metric=b.dataset.me;render();});
     c.querySelector('#mkt').onchange=e=>{mkt=e.target.value;render();};
     const render=()=>{
@@ -213,30 +226,32 @@ SCREEN.lgrecv=(c)=>{
       const map=new Map();
       cells.forEach(r=>{ if(mkt&&(''+r.mkt).trim()!==mkt)return;
         let o=map.get(r.item); if(!o){o={item:r.item,tot:0,dd:{}};map.set(r.item,o);}
-        const v=metric==='qty'?(+r.q||0):(+r.amt||0); o.tot+=v; o.dd[r.d]=(o.dd[r.d]||0)+v; });
+        const v=metric==='qty'?(+r.q||0):(+r.amt||0); o.tot+=v; o.dd[(''+r.d).trim()]=(o.dd[(''+r.d).trim()]||0)+v; });
       cur=[...map.values()].map(o=>{const im=IM[o.item]||{};o.wcc=im.wcc||'';o.wc=im.wc||'';o.wt=im.wt||0;return o;})
         .filter(o=>!iq||(''+o.item).toLowerCase().includes(iq)||(''+o.wc).toLowerCase().includes(iq))
         .sort((a,b)=>(''+a.item).localeCompare(''+b.item,'ko'));
-      const dHdr=days.map(d=>`<th class="num">${String(d).padStart(2,'0')}${WD[(wdOff+d-1)%7]}</th>`).join('');
+      const dHdr=days.map(x=>`<th class="num${x.we?' wkend':''}">${x.label}<br>${x.wd}</th>`).join('');
       c.querySelector('#th').innerHTML=`<tr><th>도번</th><th>작업장명</th><th class="num">합계</th>${dHdr}</tr>`;
-      let tbody=cur.map(o=>`<tr><td><b>${esc(o.item)}</b></td><td class="cap" title="${esc(o.wc)}">${esc(o.wc)}</td><td class="num gstock"><b>${won(o.tot)}</b></td>${days.map(d=>`<td class="num">${o.dd[d]?won(o.dd[d]):''}</td>`).join('')}</tr>`).join('');
+      let tbody=cur.map(o=>`<tr><td><b>${esc(o.item)}</b></td><td class="cap" title="${esc(o.wc)}">${esc(o.wc)}</td><td class="num gstock"><b>${won(o.tot)}</b></td>${days.map(x=>`<td class="num${x.we?' wkend':''}">${o.dd[x.ymd]?won(o.dd[x.ymd]):''}</td>`).join('')}</tr>`).join('');
       const gt=cur.reduce((a,b)=>a+(+b.tot||0),0);
-      const gd=days.map(d=>cur.reduce((a,b)=>a+(+b.dd[d]||0),0));
-      if(cur.length)tbody+=`<tr class="grandtot"><td colspan="2" class="right">총계 (${won(cur.length)} 도번)</td><td class="num">${won(gt)}</td>${gd.map(v=>`<td class="num">${v?won(v):''}</td>`).join('')}</tr>`;
+      const gd=days.map(x=>cur.reduce((a,b)=>a+(+b.dd[x.ymd]||0),0));
+      if(cur.length)tbody+=`<tr class="grandtot"><td colspan="2" class="right">총계 (${won(cur.length)} 도번)</td><td class="num">${won(gt)}</td>${gd.map((v,i)=>`<td class="num${days[i].we?' wkend':''}">${v?won(v):''}</td>`).join('')}</tr>`;
       c.querySelector('#body').innerHTML=loading?spinRow(3+days.length):(msg?`<tr><td colspan="${3+days.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`:(cur.length?tbody:`<tr><td colspan="${3+days.length}" class="empty">결과 없음</td></tr>`));
       c.querySelector('#sum').innerHTML=`<div class="s-item">도번 <b>${won(cur.length)}</b></div><div class="s-item">${metric==='qty'?'수량':'금액'} 합계 <b>${wonI(gt)} ${metric==='qty'?'':'원'}</b></div>`;
-      c.querySelector('#cnt').textContent=`${cur.length}도번 · ${metric==='qty'?'수량':'금액'} 기준`;
+      c.querySelector('#cnt').textContent=`${cur.length}도번 · ${days.length}일 · ${metric==='qty'?'수량':'금액'} 기준`;
       attachResizers(c);
     };
-    c.querySelector('#ym').onchange=e=>load(inYm(e.target.value));
-    c.querySelector('#go').onclick=render;c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
+    const go=()=>{const f=inYmd(c.querySelector('#fr').value)||curFr,t=inYmd(c.querySelector('#to').value)||curTo;load(f,t);};
+    c.querySelector('#go').onclick=go;
+    c.querySelector('#fr').onchange=go;c.querySelector('#to').onchange=go;
+    c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#reset').onclick=()=>{metric='amt';mkt='';c.querySelector('#iq').value='';render();};
     c.querySelector('#xls').onclick=()=>{
-      const hd=['도번','작업장명','합계'].concat(days.map(d=>String(d).padStart(2,'0')+WD[(2+d)%7]));
-      downloadCSV('LG리시빙관리_'+metric+(mkt?('_'+MKT[mkt]):'')+'.csv',hd,cur.map(o=>[o.item,o.wc,o.tot].concat(days.map(d=>o.dd[d]||0))));};
+      const hd=['도번','작업장명','합계'].concat(days.map(x=>x.label));
+      downloadCSV('LG리시빙관리_'+curFr+'_'+curTo+'_'+metric+(mkt?('_'+MKT[mkt]):'')+'.csv',hd,cur.map(o=>[o.item,o.wc,o.tot].concat(days.map(x=>o.dd[x.ymd]||0))));};
     render();
   };
-  load('');
+  load('','');
 };
 
 /* 출하실적현황 (영업, dw_sa_list_010) — 출하 라인. 출력방식 제번별상세/도번별집계/일별집계 */

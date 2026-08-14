@@ -420,6 +420,20 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         for r in rows: r.pop("_done_all", None)
         rows.sort(key=lambda x: ((x["part_ymd"] or "") + (x["inhm"] or ""), x["plan_ymd"] or "",
                                  x["item"] or "", x["wo"] or "", x["swo"] or ""))
+        # ★item_st 정본 = 생산정보등록(생산공정순서) ST(초) 합계 · nx우선(nx.prodinfo_proc 있으면 override, 없으면 레거시 PR_M_ITEM_PROC_GAGONG 유지).
+        #   생산ST=(계획−완료)×item_st/3600. src=live(순수 레거시 대사)는 레거시값 유지.
+        if str(src).strip() != "live":
+            try:
+                nxc2 = _nx(); nc2 = nxc2.cursor()
+                items = list({g["item"] for g in rows if g["item"]}); nxst = {}
+                for i in range(0, len(items), 900):
+                    ck = items[i:i + 900]; ph = ",".join("?" * len(ck))
+                    nc2.execute(f"SELECT item_code, SUM(CAST(ISNULL(tot_st,0) AS float)) FROM nx.prodinfo_proc WHERE item_code IN ({ph}) GROUP BY item_code", *ck)
+                    for rr in nc2.fetchall(): nxst[rr[0]] = float(rr[1] or 0)
+                nxc2.close()
+                for g in rows:
+                    if g["item"] in nxst: g["item_st"] = nxst[g["item"]]
+            except Exception: pass
         # 인원(y_inwon) — 레거시: COUNT(PR_M_PROC_GAGONG⋈WORKER work_flag='1', 파트필터 gpc·part_group like)
         inwon = 0
         try:
