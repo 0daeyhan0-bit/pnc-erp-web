@@ -782,6 +782,45 @@ def sourcing_route_copy(payload: dict = Body(...)):
     finally:
         nx.close()
 
+def _insert_current_tree(cur, rid, item, ymd="260630"):
+    """현행(실사용 BOM) naewon 트리를 route_line SUB 구조로 실체화(대안 SUB 재구성과 동일한 편집 대상).
+       중간노드(자식 있음)=SUB(node_kind='SUB', 중첩 parent_line) / leaf(mat>0)=부품(parent_line=소속SUB or ASSY).
+       RAC 용접봉 제외(용접링은 유지). 반환=삽입 라인 수."""
+    _cap = lambda v, n: (None if v is None else str(v)[:n])
+    with _COST_LOCK:
+        try: d = _get_cost_engine().naewon_nodes(item, ymd)
+        except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
+    rows = d.get("rows", []) if isinstance(d, dict) else []
+    n = len(rows); stack = {0: None}; seq = 0; cnt = 0
+    for i, r in enumerate(rows):
+        L = int(r.get("level", 0) or 0)
+        if L == 0: continue                                     # ASSY 루트(자식 parent_line=None)
+        code = str(r.get("code", "")).strip()
+        if not code: continue
+        name = str(r.get("name", "") or "")
+        has_child = (i + 1 < n and int(rows[i + 1].get("level", 0) or 0) == L + 1)
+        parent_line = stack.get(L - 1)
+        if has_child:                                           # 중간노드 = SUB
+            seq += 1; cnt += 1
+            cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,node_kind,sub_item,parent_line)
+                OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,N'자체','SUB',?,?)""",
+                rid, seq, _cap(code, 60), _cap(name, 120), _cap(code, 60), parent_line)
+            stack[L] = int(cur.fetchone()[0])
+        else:                                                   # leaf
+            mat = float(r.get("mat", 0) or 0)
+            if mat <= 0: continue                               # phantom/mat=0
+            if code.upper().startswith("RAC") and "용접링" not in name: continue   # 용접봉 제외·용접링 유지
+            metal = str(r.get("metal", "") or "").strip()
+            gub = "제작" if str(r.get("cost_gubun", "") or "") == "3" else "매입"
+            seq += 1; cnt += 1
+            cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
+                vendor_code,is_rawmat,diam,thick,len_val,material,spec,note,node_kind,parent_line)
+                VALUES(?,?,?,?,?,?,'',?,?,?,0,?,?,'','PART',?)""",
+                rid, seq, _cap(code, 60), _cap(name, 120), float(r.get("qty", 0) or 0), gub,
+                1 if metal else 0, float(r.get("diam", 0) or 0), float(r.get("thick", 0) or 0),
+                _cap(metal, 40), _cap(str(r.get("spec", "") or ""), 80), parent_line)
+    return cnt
+
 @router.post("/api/sourcing/route/edit_current")
 def sourcing_route_edit_current(payload: dict = Body(...)):
     """현행(R01) 직접 수정 진입 — 가상 baseline을 실제 저장 route(route_no=1·current_flag=1)로 실체화 후 대안과 동일 편집.
@@ -799,7 +838,6 @@ def sourcing_route_edit_current(payload: dict = Body(...)):
         r = cur.fetchone(); rid = int(r[0]) if r else 0
         if rid and not reset:
             nx.commit(); return {"ok": True, "route_id": rid, "existed": True}
-        blines = _route_baseline_lines(item)
         if not rid:
             cur.execute("""INSERT INTO nx.sourcing_route(item_code,route_no,route_name,vendor_code,gubun,current_flag,
                   approve_flag,apply_from,note,ins_user) OUTPUT INSERTED.route_id
@@ -810,12 +848,8 @@ def sourcing_route_edit_current(payload: dict = Body(...)):
             cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
             cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
             cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, current_flag=1, route_no=1, upd_dt=getdate() WHERE route_id=?", rid)
-        for l in blines:
-            cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
-                  vendor_code,is_rawmat,diam,thick,len_val,material,spec,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  rid, l["sort_seq"], _cap(l["child_item"], 60), _cap(l["child_name"], 120), l["qty"], _cap(l["gubun"], 20),
-                  _cap(l["vendor_code"], 20), l["is_rawmat"], l["diam"], l["thick"], l["len_val"],
-                  _cap(l["material"], 40), _cap(l["spec"], 80), _cap(l["note"], 200))
+        # ★실사용 BOM 트리를 그대로 SUB 구조로 실체화(기존 SUB=노드·중첩, 해체·공정수정 가능)
+        n_lines = _insert_current_tree(cur, rid, item, "260630")
         # 조립 공정(비종속) ASSY 노드 시드 → 공수합=BASE로 시작(대안 BASE 복사와 동일)
         try:
             _pc, _asm, _bg = _panel_cut_asm(item, "260630")
@@ -826,7 +860,7 @@ def sourcing_route_edit_current(payload: dict = Body(...)):
         except Exception:
             pass
         nx.commit()
-        return {"ok": True, "route_id": rid, "materialized": not bool(reset), "reset": bool(reset), "lines": len(blines)}
+        return {"ok": True, "route_id": rid, "materialized": not bool(reset), "reset": bool(reset), "lines": n_lines}
     except Exception:
         nx.rollback(); raise
     finally:
