@@ -347,7 +347,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             g["plan_qty"] += q
         rows = list(keyed.values())
         capped = len(rows) >= int(limit); rows = rows[:int(limit)]
-        rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
+        rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}; prodstk = {}
         # ★성능: 전역 재고 롤업(필터무관 rstock·assystk·midstk·fixstk = 색tag 전용, 값/계획합계는 매요청 라이브 재조회)을 src별 90초 TTL 캐시.
         #   재귀 #tms4 롤업(~2초)을 반복조회마다 재계산하던 것을 캐시 → 조회 고속화. 소스맵은 읽기전용(_alloc은 셀만 변경)이라 공유 안전.
         _ck = "live" if SCH.endswith("dbo") else "nx"
@@ -395,6 +395,13 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM {SCH}.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
         except Exception: pass
+        try:  # ★생산완료 판정 = 실제 생산실적(PR_T_PROD_DTL) — 재고 아님. (item,wo,swo)별 SUM(PROD_QTY). 미생산 WO는 0 → 완료로 안잡힘.
+            wos = list({g["wo"] for g in rows if g["wo"]})
+            for i in range(0, len(wos), 900):
+                ck = wos[i:i + 900]; ph = ",".join("?" * len(ck))
+                cur.execute(f"SELECT ITEM_CODE, WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), SUM(PROD_QTY) FROM {SCH}.PR_T_PROD_DTL WHERE WORK_ORDER IN ({ph}) GROUP BY ITEM_CODE, WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')", *ck)
+                for rr in cur.fetchall(): prodstk[(rr[0], rr[1], rr[2] or '')] = float(rr[3] or 0)
+        except Exception: pass
         if str(src).strip() != "live":   # ★nx 셀단위 준비 flag 오버레이(우리 확인분) — 라이브 대사시 제외
             try:
                 nxc = _nx(); nc = nxc.cursor()
@@ -422,11 +429,10 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             it = g["item"]
             g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])
             seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
-            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')
-            _alloc(seq, assystk.get(g["assy"], 0.0) * g["use_qty"], 70, 'finish')
-            _alloc(seq, max(fixstk.get((g["upper"], it), 0.0), 0.0), 70, 'finish')
-            _alloc(seq, max(midstk.get(it, 0.0), 0.0), 70, 'finish')
-            _alloc(seq, max(rstock.get((it, g["gpc"]), 0.0), 0.0), 50, 'ready')
+            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')            # 출하완료(출하실적)
+            # ★생산완료 = 실제 생산실적(PR_T_PROD_DTL by item·wo·swo)로만 판정. 재고(ASSY/중간공정/도번고정)는 실적아님 → 제외. 미생산 WO는 실적0 → 완료 안잡힘.
+            _alloc(seq, prodstk.get((it, g["wo"], g["swo"]), 0.0), 70, 'finish')                   # 생산완료=생산실적
+            _alloc(seq, max(rstock.get((it, g["gpc"]), 0.0), 0.0), 50, 'ready')                     # 키팅완료=준비재고
             for c in seq:
                 ck = g["part_ymd"] if c["bucket"] == 'P' else c["ymd"]
                 nq = nxcell.get((it, g["wo"], g["gpc"], ck), 0.0)
