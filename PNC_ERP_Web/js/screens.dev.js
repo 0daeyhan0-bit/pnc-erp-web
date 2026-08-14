@@ -1291,11 +1291,11 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
         <td class="center">${r.sag==='1'?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
-        <td class="num">${q4(r.qty)}</td>
-        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:130px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">후보 구성 없음</td></tr>';
+        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:130px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td>
+        <td class="num">${q4(r.qty)}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">후보 구성 없음</td></tr>';
     return `<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#8e44ad">후보 R${String(routeTree.route_no).padStart(2,'0')}</b> ${esc(routeTree.route_name||'')} · 조달경로 구조(SUB 포함) · <span style="color:#8a94a6">공급처=조달프로파일</span></div></div>
       <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto"><table class="tbl bm-tbl">
-      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th class="num">소요량</th><th style="text-align:left">공급처</th></tr></thead>
+      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th style="text-align:left">공급처</th><th class="num">소요량</th></tr></thead>
       <tbody>${body}</tbody></table></div>`;};
   // 후보 실원가(실원가 탭, routeSel>0) — route/cost. 현행 대비 손익 diff.
   const routeCostContent=()=>{
@@ -1553,6 +1553,7 @@ SCREEN.unifybom=(c,ro)=>{
         <td title="${esc(sp)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5a6b82">${esc(sp)}</td>
         <td class="center" style="color:#5a6b82">${esc(r.metal||'')}</td>
         <td class="center">${r.sag?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
+        <td class="bcap" title="${esc(r.cust||'')}" style="max-width:140px;text-align:left;color:#5a6b82">${esc(r.cust||'')}</td>
         <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td>
@@ -1561,7 +1562,7 @@ SCREEN.unifybom=(c,ro)=>{
         <td style="white-space:nowrap;text-align:left"><span style="color:#7a8aa0">1</span> <b>${esc(r.code)}</b> <span class="nae-tg" style="color:#a8442a;border-color:#e6c0b3">용접봉(제품조립)</span></td>
         <td class="bcap" title="${esc(r.name)}" style="max-width:200px;text-align:left">${esc(r.name)}</td>
         <td style="color:#5a6b82">${r.diam?('Ø'+r.diam):''}</td><td class="center" style="color:#5a6b82">${esc(r.metal||'')}</td>
-        <td class="center"></td>
+        <td class="center"></td><td></td>
         <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td><td></td></tr>`;
@@ -1569,7 +1570,7 @@ SCREEN.unifybom=(c,ro)=>{
     const prodRow=`<tr class="nae-trow nae-mrow" data-node="${esc(item)}" style="background:#eef3fb;font-weight:700;cursor:pointer">
         <td style="white-space:nowrap;text-align:left"><span style="color:#1c47a0">0</span> <b style="color:#1c47a0">${esc(item)}</b> <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span></td>
         <td class="bcap" title="${esc(name)}" style="max-width:200px;text-align:left">${esc(name)}</td>
-        <td></td><td></td><td></td><td class="num">1</td><td></td>
+        <td></td><td></td><td></td><td></td><td class="num">1</td><td></td>
         <td class="num" style="color:#1c6b3a"><b>${M(a.jae)}</b></td><td class="num" style="color:#7a8aa0">100%</td>
         <td class="center">${prodBtn}</td></tr>`;
     const weldBody=showWeld?fm.weldArr.map(weldRow).join(''):'';
@@ -1578,9 +1579,9 @@ SCREEN.unifybom=(c,ro)=>{
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
       <div class="summary-bar" style="flex:0 0 auto"><div class="s-item" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <span style="color:#8a94a6">평면 재료표 · [✎]=공정편집</span></div><div style="flex:1"></div>${weldBtn}</div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
-        <thead><tr><th style="text-align:left">품번(레벨)</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="center">사급</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">등록/수정</th></tr></thead>
+        <thead><tr><th style="text-align:left">품번(레벨)</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="center">사급</th><th style="text-align:left">매입처</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">등록/수정</th></tr></thead>
         <tbody>${body}</tbody>
-        <tfoot><tr class="nae-foot"><td colspan="7" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td><td></td></tr></tfoot></table></div></div>`;};
+        <tfoot><tr class="nae-foot"><td colspan="8" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td><td></td></tr></tfoot></table></div></div>`;};
   const procTable=(procList)=>{const sub=procList.reduce((s,p)=>s+(+p.amt||0),0);
     return `<div class="grid-wrap" style="max-height:${naeSel?'16vh':'34vh'};overflow:auto"><table class="tbl bm-tbl">
        <thead><tr><th style="text-align:left">공정</th><th class="num">작업량</th><th class="num">내부UPH</th><th class="num">임율</th><th>계산구분</th><th class="num">가공비</th></tr></thead>
@@ -2062,7 +2063,7 @@ SCREEN.unifybom=(c,ro)=>{
     catch(e){routeFull=[]; routeFullFor=item;}
     routeBusy=false; draw(); };
   const routeRowsTbl=(rows,head)=>`${head}<div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl bm-tbl">
-    <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th class="num">소요량</th><th style="text-align:left">거래처</th></tr></thead>
+    <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th style="text-align:left">매입처</th><th class="num">소요량</th></tr></thead>
     <tbody>${rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
       const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
       const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':'');
@@ -2071,8 +2072,8 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
         <td class="center">${r.sag==='1'?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
-        <td class="num">${r.qty!=null?q4(r.qty):''}</td>
-        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:150px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
+        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:150px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td>
+        <td class="num">${r.qty!=null?q4(r.qty):''}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
   const drawRoute=()=>{
     let content;
     if(routeSel>0){ content=routeTreeTable(); }
@@ -2476,6 +2477,16 @@ SCREEN.subvariant=(c)=>{
     {const b=g('#dt-register');if(b)b.onclick=()=>saveHdr(true);}         // ✔ 등록 = 커밋(fresh 해제)
     {const b=g('#dt-hsave2');if(b)b.onclick=()=>saveHdr(false);}          // 💾 저장(커밋된 후보 헤더 수정)
     {const b=g('#dt-newfromcur');if(b)b.onclick=()=>{st.detail=null;openNew('cur');};}
+    {const b=g('#dt-editcur');if(b)b.onclick=async()=>{   // ★현행(R01) 직접 수정 = baseline을 편집용 route로 실체화 후 대안과 동일 편집
+      if(!confirm('현행(R01)을 직접 수정합니다.\n실사용 BOM을 편집용 route로 실체화합니다 — 이후 실사용 BOM이 바뀌어도 자동반영 안 됩니다([BOM 다시 불러오기]로 리셋 가능). 계속?'))return;
+      try{const r=await fetch(`${API}/api/sourcing/route/edit_current`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,user:'웹사용자'})});
+        const j=await r.json();if(!j.ok){alert('현행 수정 진입 실패: '+(j.detail||''));return;}
+        st.detail=null;await loadRoutes();openDetail(j.route_id,'edit',false);}catch(e){alert('오류: '+e.message);}};}
+    {const b=g('#dt-resetcur');if(b)b.onclick=async()=>{   // ★현행 편집 초기화 = 실사용 BOM에서 라인 재도출
+      if(!confirm('실사용 BOM에서 라인을 다시 불러옵니다.\n현재 편집한 SUB 구성/공정 배치가 모두 초기화됩니다. 계속?'))return;
+      try{const r=await fetch(`${API}/api/sourcing/route/edit_current`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,user:'웹사용자',reset:1})});
+        const j=await r.json();if(!j.ok){alert('리셋 실패: '+(j.detail||''));return;}
+        st.msg='현행 BOM에서 다시 불러옴 (라인 '+j.lines+')';await loadRoutes();openDetail(j.route_id,'edit',false);}catch(e){alert('오류: '+e.message);}};}
     {const b=g('#dt-hsave');if(b)b.onclick=()=>saveHdr(false);}
     {const b=g('#dt-ladd');if(b)b.onclick=()=>{st.lineForm={route_id:st.detail.route_id,gubun:'',is_rawmat:0};draw();};}
     c.querySelectorAll('.df').forEach(el=>{el.oninput=el.onchange=()=>{st.detail.hdr[el.dataset.k]=el.type==='checkbox'?el.checked:el.value;if(el.dataset.k==='vendor_code')vSearch(el.value);};});
