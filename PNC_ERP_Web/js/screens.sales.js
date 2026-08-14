@@ -578,3 +578,68 @@ SCREEN.lgsale=(c)=>{
   };
   load();
 };
+
+/* ===== 영업계획현황 (w_pr_plan_050) — 일별 크로스탭. 레거시 SQL+집계 충실이식(2028건·합계 검증). ===== */
+SCREEN.salesplan=(c)=>{
+  const API=API_BASE;
+  const fmtY=y=>{y=(''+(y||'')).trim();return y.length>=6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;};
+  const fmtHM=h=>{h=(''+(h||'')).trim();return h.length>=4?`${h.slice(0,2)}:${h.slice(2,4)}`:h;};
+  const dIn=y=>(y&&y.length>=6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';
+  const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
+  const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('en-US');
+  const wk=l=>{const d=(''+(l||'')).slice(-1);return d==='토'||d==='일';};
+  const _tdy=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();
+  let fr=_tdy, days='7', gubun='2', cust='', line='', model='', wo='', item='', D={rows:[],tot:{},labels:[]}, loading=false, msg='';
+  const load=async()=>{loading=true;msg='';draw();
+    try{let u=`${API}/api/salesplan?from_ymd=${fr}&days=${days}&gubun=${gubun}`;
+      if(cust)u+=`&cust=${encodeURIComponent(cust)}`;if(line)u+=`&line=${encodeURIComponent(line)}`;
+      if(model)u+=`&model=${encodeURIComponent(model)}`;if(wo)u+=`&wo=${encodeURIComponent(wo)}`;if(item)u+=`&item=${encodeURIComponent(item)}`;
+      const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);D=await r.json();}
+    catch(e){D={rows:[],tot:{},labels:[]};msg='조회 실패: '+e.message;}
+    loading=false;draw();};
+  const draw=()=>{
+    const labs=D.labels||[], rows=D.rows||[], tot=D.tot||{}, NC=12+labs.length;
+    const dl=k=>[...new Set(rows.map(r=>r[k]).filter(Boolean))].slice(0,300).map(v=>`<option value="${esc(v)}">`).join('');
+    const lineOpts=[...new Map(rows.map(r=>[r.line,r.line_nm||''])).entries()].map(kv=>`<option value="${esc(kv[0])}">${esc(kv[1])}</option>`).join('');
+    const footTd=(tot.d||[]).map((v,i)=>`<td class="num${wk(labs[i])?' wkend':''}">${won(v)}</td>`).join('');
+    const bodyRows=loading?`<tr><td colspan="${NC}" class="empty">조회 중…</td></tr>`
+      :(msg?`<tr><td colspan="${NC}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
+      :(rows.length?rows.map(r=>`<tr>
+        <td class="bcap" title="${esc(r.line+' '+(r.line_nm||''))}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.line)} ${esc(r.line_nm||'')}</td>
+        <td>${esc(r.wo)}</td><td>${esc(r.model)}</td><td class="bcap" style="max-width:80px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.tool)}">${esc(r.tool)}</td>
+        <td class="bcap" title="${esc(r.item)}" style="max-width:230px;overflow:hidden;text-overflow:ellipsis">${esc(r.item)}</td>
+        <td>${esc(r.wc)}</td><td class="num">${r.rate||''}</td><td class="center">${fmtHM(r.ohm)}</td><td class="center">${fmtY(r.ymd)} ${fmtHM(r.ohm)}</td>
+        <td class="num">${won(r.lot)}</td><td class="num"><b>${won(r.total)}</b></td>
+        ${r.d.map((v,i)=>`<td class="num${wk(labs[i])?' wkend':''}">${v?won(v):''}</td>`).join('')}
+        <td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td></tr>`).join('')
+      :`<tr><td colspan="${NC}" class="empty">결과 없음</td></tr>`));
+    const footRow=rows.length?`<tr class="sp-foot"><td colspan="9" class="right">총계 (${won(tot.cnt||0)}건)</td><td class="num">${won(tot.lot||0)}</td><td class="num">${won(tot.total||0)}</td>${footTd}<td></td></tr>`:'';
+    c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="margin-bottom:2px">📅 영업계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">일별 생산/영업계획 (w_pr_plan_050)</span></div>
+     <div class="page-sub" style="margin-bottom:6px">기준일부터 N일 일별 계획수량 · 원본 <code>SA_T_PLAN_DTL</code> · 🔴 라이브 · 구분 상세/집계/도번집계 · 주말=주황</div>
+     <div class="toolbar" style="gap:5px;flex:0 0 auto">
+       <label class="tl">기준일</label><input type="date" class="inp" id="sp-fr" value="${dIn(fr)}" style="width:135px">
+       <label class="tl">일수</label><select class="inp" id="sp-days">${['7','14','21','30'].map(d=>`<option value="${d}" ${days===d?'selected':''}>${d}일</option>`).join('')}</select>
+       <label class="tl">구분</label><select class="inp" id="sp-gubun">${[['1','상세'],['2','집계'],['3','도번집계']].map(kv=>`<option value="${kv[0]}" ${gubun===kv[0]?'selected':''}>${kv[1]}</option>`).join('')}</select>
+       <input class="inp" id="sp-line" list="sp-linedl" placeholder="라인" value="${esc(line)}" style="width:80px"><datalist id="sp-linedl">${lineOpts}</datalist>
+       <input class="inp" id="sp-cust" list="sp-custdl" placeholder="작업처" value="${esc(cust)}" style="width:95px"><datalist id="sp-custdl">${dl('wc')}</datalist>
+       <input class="inp" id="sp-model" placeholder="모델" value="${esc(model)}" style="width:85px">
+       <input class="inp" id="sp-wo" list="sp-wodl" placeholder="제번" value="${esc(wo)}" style="width:95px"><datalist id="sp-wodl">${dl('wo')}</datalist>
+       <input class="inp" id="sp-item" list="sp-itemdl" placeholder="도번" value="${esc(item)}" style="width:105px"><datalist id="sp-itemdl">${dl('item')}</datalist>
+       <button class="btn" id="sp-go">🔍조회</button><div class="spacer"></div><button class="btn xls" id="sp-xls">📥엑셀</button>
+     </div>
+     <div class="grid-wrap sp-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit">
+      <thead><tr><th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th style="text-align:left">도번</th><th>작업처</th><th class="num">비율</th><th>시간</th><th>Output</th><th class="num">LOT수량</th><th class="num">합계</th>${labs.map(l=>`<th class="num${wk(l)?' wkend':''}">${esc(l)}</th>`).join('')}<th>비고</th></tr></thead>
+      <tbody>${bodyRows}${footRow}</tbody></table></div>
+     <div class="rowcount">${won((D.tot||{}).cnt||0)}건 · ${esc(D.from||'')}~${esc(D.to||'')} (${gubun==='1'?'상세':gubun==='2'?'집계':'도번집계'})</div>
+     <style>.sp-grid thead th{position:sticky;top:0;z-index:3;background:#f4f7fc}.sp-grid tr.sp-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;z-index:2;border-top:2px solid #cdd9ef}.sp-grid th.wkend,.sp-grid td.wkend{background:#ffe8d4}.sp-grid tr.sp-foot td.wkend{background:#f5d9be}</style></div>`;
+    const g=id=>c.querySelector(id);
+    const go=()=>{fr=inD(g('#sp-fr').value)||fr;days=g('#sp-days').value;gubun=g('#sp-gubun').value;line=g('#sp-line').value.trim();cust=g('#sp-cust').value.trim();model=g('#sp-model').value.trim();wo=g('#sp-wo').value.trim();item=g('#sp-item').value.trim();load();};
+    g('#sp-go').onclick=go;
+    c.querySelectorAll('.toolbar .inp').forEach(el=>{if(el.tagName==='SELECT')el.onchange=go;else el.onkeyup=e=>{if(e.key==='Enter')go();};});
+    g('#sp-xls').onclick=()=>{const hd=['라인','제번','ModelNo','Tools','도번','작업처','비율','시간','Output','LOT수량','합계'].concat(labs,['비고']);
+      downloadCSV('영업계획현황_'+fr+'.csv',hd,rows.map(r=>[r.line+' '+(r.line_nm||''),r.wo,r.model,r.tool,r.item,r.wc,r.rate,fmtHM(r.ohm),fmtY(r.ymd)+' '+fmtHM(r.ohm),r.lot,r.total].concat(r.d,[r.remarks])));};
+    if(typeof attachResizers!=='undefined')attachResizers(c);
+  };
+  load();
+};

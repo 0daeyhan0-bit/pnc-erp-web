@@ -161,6 +161,7 @@ const MODULES=[
    {id:'lgsale',ic:'🚚',nm:'출하실적등록/LG송장'},
    {id:'shipment',ic:'🚚',nm:'출하실적현황'},
    {id:'salesforecast',ic:'📅',nm:'영업예상매출현황'},
+   {id:'salesplan',ic:'🗓️',nm:'영업계획현황'},
    {id:'lgrecv',ic:'🏢',nm:'LG리시빙관리'},
  ]},
  {id:'gagong',nm:'가공',ic:'⚙️',subs:[
