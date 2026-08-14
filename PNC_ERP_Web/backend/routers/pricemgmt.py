@@ -71,9 +71,11 @@ def pm_save(p: dict = Body(...)):
     old = p.get("old") if isinstance(p.get("old"), dict) else None
     cn = _nx(); c = cn.cursor()
     try:
-        if old:   # 키변경(수정): 원래키 삭제
-            c.execute("DELETE FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?",
-                item, str(old.get("cust", "")).strip(), str(old.get("tag", "")).strip(), _d6(str(old.get("ymd", "")).strip()))
+        if old:   # 키가 실제 바뀐 경우에만 원래키 삭제(같은키 수정은 UPDATE로 감·INSERT_DATETIME 보존)
+            okey = (str(old.get("cust", "")).strip(), str(old.get("tag", "")).strip(), _d6(str(old.get("ymd", "")).strip()))
+            if okey != (cust, tag, ymd):
+                c.execute("DELETE FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?",
+                    item, okey[0], okey[1], okey[2])
         ex = c.execute("SELECT COUNT(*) FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?",
             item, cust, tag, ymd).fetchone()[0]
         if ex:
