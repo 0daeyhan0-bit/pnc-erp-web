@@ -2289,10 +2289,10 @@ SCREEN.subvariant=(c)=>{
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
         <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span><div style="flex:1"></div>
           ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff">🧩 해체</button>`:''}
-          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:0 8px;font-size:10px;background:${color};color:#fff">수정</button></div>
+          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff">⚙ ${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
         ${np2.map(p=>`<div style="font-size:11.5px;padding:1px 0 1px 14px;color:#33507d">• ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 풀에서 드래그</div>')}
         ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
-        <div class="sp-newsub" data-parentsub="${dsub}" style="border:1.5px dashed #b9a0d8;border-radius:6px;padding:4px;text-align:center;color:#8e44ad;font-size:10.5px;background:#f6f0fc;cursor:copy;margin-top:4px">➕ 새 SUB로 묶기${dsub>0?' (이 SUB 안에 중첩)':' (레벨1)'}</div>
+        <div class="sp-newsub" data-parentsub="${dsub}" style="border:2px dashed #a678d0;border-radius:8px;padding:14px 8px;text-align:center;color:#8e44ad;font-size:12.5px;font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;min-height:40px;display:flex;align-items:center;justify-content:center">➕ 부품을 여기로 드래그 → 새 SUB로 묶기${dsub>0?' (이 SUB 안에 중첩)':' (레벨1)'}</div>
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
