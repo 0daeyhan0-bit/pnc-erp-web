@@ -1336,6 +1336,13 @@ SCREEN.unifybom=(c,ro)=>{
     ['sagub_default','사급','chk'],['kitting','키팅','chk'],['set_except','세트제외','chk'],['remarks','비고','text']];
   const codeName=(grp,v)=>{const a=codes[grp]||[];const f=a.find(x=>x.code==v);return f?f.name:(v||'');};
   const specOf=l=>[l.metal_gubun,(l.diam?('Ø'+l.diam):''),(l.thick?('×'+l.thick):'')].filter(Boolean).join(' ')||(l.item_spec||'');
+  // ★동관(구리) 중량 자동계산: π/4×(OD²−ID²)×L×ρ/1e6 (ID=OD−2t, ρ=8.94 기존품목 역산확정). 치수·재질 입력 시 net_weight 자동.
+  const CU_RHO=8.94;
+  const isCu=m=>['CU','동','고강도'].includes((''+(m||'')).trim());
+  const calcWeight=l=>{const d=+l.diam||0,t=+l.thick||0,ln=+l.length||0;
+    if(!isCu(l.metal_gubun)||!(d>0&&t>0&&ln>0))return null;
+    const id=d-2*t; if(id<=0)return null;
+    return Math.round((Math.PI/4*(d*d-id*id)*ln)*CU_RHO/1e6*1e6)/1e6;};
   const CALCG={'3':'임율기반','8':'중량기반','9':'적용율','7':'세척'};
   const M=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const M2=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -1998,8 +2005,11 @@ SCREEN.unifybom=(c,ro)=>{
     const sv=c.querySelector('#bm-save');if(sv)sv.onclick=(isNew?saveNew:save);
     const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>dlCSV(`BOM_${item}.csv`,['#',...COLS.map(x=>x[1])],lines.map((l,i)=>[i+1,...COLS.map(([k])=>l[k])]));
     c.querySelectorAll('.bm-del').forEach(el=>el.onclick=()=>{lines.splice(+el.dataset.i,1);draw();});
-    c.querySelectorAll('.ce').forEach(el=>el.oninput=()=>{const i=+el.dataset.i,k=el.dataset.k;lines[i][k]=(el.type==='number')?(el.value===''?null:+el.value):el.value;});
-    c.querySelectorAll('.cesel').forEach(el=>el.onchange=()=>{lines[+el.dataset.i][el.dataset.k]=el.value;});
+    const recalcWt=(i,tr)=>{const w=calcWeight(lines[i]);if(w!=null){lines[i].net_weight=w;const wc=tr&&tr.querySelector('input[data-k="net_weight"]');if(wc&&document.activeElement!==wc)wc.value=w;}};
+    c.querySelectorAll('.ce').forEach(el=>el.oninput=()=>{const i=+el.dataset.i,k=el.dataset.k;lines[i][k]=(el.type==='number')?(el.value===''?null:+el.value):el.value;
+      if(['diam','thick','length'].includes(k))recalcWt(i,el.closest('tr'));});   // ★동관 치수 입력 시 중량 자동
+    c.querySelectorAll('.cesel').forEach(el=>el.onchange=()=>{const i=+el.dataset.i;lines[i][el.dataset.k]=el.value;
+      if(el.dataset.k==='metal_gubun')recalcWt(i,el.closest('tr'));});   // ★재질=동 선택 시 중량 자동
     let itT=null;
     c.querySelectorAll('.ceitem').forEach(el=>{
       el.oninput=()=>{const i=+el.dataset.i;lines[i].child_item=el.value.trim().toUpperCase();
@@ -2224,7 +2234,7 @@ SCREEN.subvariant=(c)=>{
     const rd=(st.rd&&st.rd.route_id===R.route_id)?st.rd:null;
     if(!rd) return `<div style="margin-top:10px;border-top:2px solid #e2e8f2;padding-top:8px"><button class="btn" id="sp-open" style="background:#8e44ad;color:#fff;padding:3px 12px">🧩 SUB 재구성 · 공정 배치 열기</button> <span style="color:#8aa0bd;font-size:11px">좌 부품풀→우 계층트리 드래그로 SUB 묶기 · 절삭공정 부품따라감 · 노드[수정]=공정팝업 · 공수합=BASE</span></div>`;
     if(rd.error) return `<div style="margin-top:10px;color:#c0392b">SUB패널 오류: ${esc(rd.error)}</div>`;
-    const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC');   // 용접봉(RAC) 제외 — 공정종속
+    const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC')&&!String(l.child_name||'').includes('용접링');   // 용접봉(RAC) 제외·용접링은 유지(사급부품)
     const lines=(rd.lines||[]).filter(l=>!RACX(l)), subs=lines.filter(l=>l.node_kind==='SUB'), parts=lines.filter(l=>l.node_kind!=='SUB');
     const flat=parts.filter(p=>!p.parent_line), memb=sid=>parts.filter(p=>p.parent_line===sid);
     const ASSY=st.routeTarget, partCut=rd.part_cut||{};
@@ -2567,7 +2577,7 @@ SCREEN.subvariant=(c)=>{
     const weldItem=(welds[0]&&welds[0].weld_item)||'RAC30599301-1';
     const weldTypes=[...new Set(welds.map(w=>w.weld_item).filter(Boolean))];
     // info(상단) 계산용: 이 노드 절삭 자동귀속 + 전역 기타합
-    const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC');
+    const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC')&&!String(l.child_name||'').includes('용접링');   // 용접봉 제외·용접링 유지
     const lines=(rd.lines||[]).filter(l=>!RACX(l)),parts=lines.filter(l=>l.node_kind!=='SUB'),subs=lines.filter(l=>l.node_kind==='SUB');
     let nodeParts;if(isAssy){nodeParts=parts.filter(p=>!p.parent_line);}else{const s=subs.find(x=>(x.sub_item||x.child_item)===node);nodeParts=s?parts.filter(p=>p.parent_line===s.line_id):[];}
     const partCut=rd.part_cut||{},cutAgg={};

@@ -516,7 +516,8 @@ def _base_flat_lines(item, ymd="260630"):
         if float(r.get("mat", 0) or 0) <= 0: continue        # 재료비 계상 leaf만(=flatMat)
         code = str(r.get("code", "")).strip()
         if not code: continue
-        if code.upper().startswith("RAC"): continue          # ★용접봉 제외(공정종속 — 조달 구성라인 아님)
+        # ★RAC 중 용접봉만 제외(공정종속). 용접링(ITEM_DESC '용접링')=사급 부품 → 부품풀 유지(cost.py·price.py 규칙 일치).
+        if code.upper().startswith("RAC") and "용접링" not in str(r.get("name") or ""): continue
         sq += 1
         metal = str(r.get("metal", "") or "").strip()
         # 제작/매입 판정 = 내부원가 cost_gubun: '3'(소재 절삭 제작, 예 MJU) → 제작 / '2'(매입단가) → 매입.
