@@ -1911,9 +1911,9 @@ SCREEN.unifybom=(c,ro)=>{
         return `<td class="bcap" title="${esc(''+(v==null?'':v))}">${esc(''+(v==null?'':v))}</td>`;}
       if(t==='chk')return `<td class="center"><input type="checkbox" data-i="${i}" data-k="${k}" ${v?'checked':''}></td>`;
       if(t==='num')return `<td><input class="ce" type="number" step="any" data-i="${i}" data-k="${k}" value="${v==null?'':v}" style="width:54px"></td>`;
-      if(isSel)return `<td><select class="ce cesel" data-i="${i}" data-k="${k}"><option value="">-</option>${(codes[grp]||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==v?'selected':''}>${esc(o.name)}</option>`).join('')}</select></td>`;
+      if(isSel)return `<td><select class="ce cesel" data-i="${i}" data-k="${k}" style="width:78px" title="${esc(codeName(grp,v))}"><option value="">-</option>${(codes[grp]||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==v?'selected':''}>${esc(o.name)}</option>`).join('')}</select></td>`;
       if(t==='vendor')return `<td><input class="ce cevendor" list="bm-vendordl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="${esc(l.cust_name||'코드/명')}" style="width:88px" title="${esc(l.cust_name||'')}"></td>`;
-      if(t==='proc')return `<td><select class="ce cesel" data-i="${i}" data-k="${k}"><option value="">-</option>${procs.map(p=>`<option value="${esc(p.code)}" ${p.code===v?'selected':''}>${esc(p.name)}</option>`).join('')}</select></td>`;
+      if(t==='proc')return `<td><select class="ce cesel" data-i="${i}" data-k="${k}" style="width:58px" title="${esc(procMap[v]||v||'')}"><option value="">-</option>${procs.map(p=>`<option value="${esc(p.code)}" ${p.code===v?'selected':''}>${esc(p.name)}</option>`).join('')}</select></td>`;
       if(t==='item')return `<td><input class="ce ceitem" list="bm-itemdl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="검색·선택" style="width:120px"></td>`;
       return `<td><input class="ce" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" style="width:90px"></td>`;};
     c.innerHTML=`

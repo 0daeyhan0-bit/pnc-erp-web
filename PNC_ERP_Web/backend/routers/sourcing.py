@@ -1114,16 +1114,12 @@ def sourcing_sub_create(payload: dict = Body(...)):
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
-        # ★SUB 채번: 명시 suffix 없으면 자동 _S{nn}(언더스코어·제로패딩2) — nx.item+라이브 _S\d 충돌검사→다음번호
+        # ★SUB 채번: 자동 _S{nn}(언더스코어·제로패딩2) — ★현재 살아있는 route_line(전 route) 기준.
+        #   nx.item 전체 스캔 금지(드래프트 취소/삭제분이 nx.item에 잔존→채번 무한증가 버그). 삭제된 route의 SUB는 자동 반영 안 됨=번호 재사용.
         if not suffix or suffix.upper() in ('_S', 'S', 'AUTO'):
             mx = 0; import re as _re3
-            cur.execute("SELECT item_code FROM nx.item WHERE item_code LIKE ? ESCAPE '!'", base_child + '!_S%')
-            rowsn = [str(r[0]).strip() for r in cur.fetchall()]
-            try:
-                lc = _conn(); lcur = lc.cursor()
-                lcur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE LIKE ? ESCAPE '!'", base_child + '!_S%')
-                rowsn += [str(r[0]).strip() for r in lcur.fetchall()]; lc.close()
-            except Exception: pass
+            cur.execute("SELECT DISTINCT sub_item FROM nx.sourcing_route_line WHERE sub_item LIKE ? ESCAPE '!'", base_child + '!_S%')
+            rowsn = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
             for cd in rowsn:
                 m = _re3.search(r'_S0*(\d+)$', cd)
                 if m: mx = max(mx, int(m.group(1)))
