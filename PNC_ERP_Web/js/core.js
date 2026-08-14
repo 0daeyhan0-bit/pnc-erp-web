@@ -157,6 +157,7 @@ const MODULES=[
  {id:'sales',nm:'영업',ic:'📈',subs:[
    {id:'salesstock',ic:'📦',nm:'제품재고조회'},
    {id:'prodinvout',ic:'🔁',nm:'제품입출고현황'},
+   {id:'prodstockadj',ic:'📦',nm:'제품재고조정'},
    {id:'saleout',ic:'📤',nm:'판매및출고등록'},
    {id:'lgsale',ic:'🚚',nm:'출하실적등록/LG송장'},
    {id:'shipment',ic:'🚚',nm:'출하실적현황'},

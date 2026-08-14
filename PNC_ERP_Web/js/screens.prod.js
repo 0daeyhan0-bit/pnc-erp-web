@@ -461,15 +461,15 @@ SCREEN.partplan=(c)=>{
       <table class="tbl fit" style="font-size:11px"><thead><tr>
        <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?spinRow(NCOL+d.length):(disp.length?disp.map((r,i)=>rowHtml(r,i+1)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
-      ${disp.length?(()=>{const iw=st.inwon||0;return `<tfoot>
+      ${disp.length?(()=>{const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);return `<tfoot>
        <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
-        <td class="center" colspan="10">합계</td><td class="num">${f2(fST)}</td><td class="num">${nf(st.plan_sum)}</td>
+        <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(st.plan_sum)}</td>
         <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}</tr>
        <tr class="grandtot" style="position:sticky;bottom:22px;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
-        <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fST)}</td><td></td>
+        <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fSTtot)}</td><td></td>
         <td class="num">${f2(fSTprior)}</td>${d.map(x=>`<td class="num">${f2(fSTd(x))}</td>`).join('')}</tr>
        <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#666;border-top:1px solid #d3ddea">
-        <td class="center" colspan="10" style="font-weight:600">계상근무공수 (÷인원 ${nf(iw)})</td><td class="num">${iw?f2(fST/iw):'—'}</td><td></td>
+        <td class="center" colspan="10" style="font-weight:600">계상근무공수 (÷인원 ${nf(iw)})</td><td class="num">${iw?f2(fSTtot/iw):'—'}</td><td></td>
         <td class="num"></td>${d.map((x,xi)=>`<td class="num">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}</tr>
        </tfoot>`;})():''}
       </table></div>`;
