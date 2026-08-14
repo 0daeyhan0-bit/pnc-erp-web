@@ -96,12 +96,16 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
         return None if v in (None, "") else v
 
     forced_ym = ym.strip()
+    _SUMMARY = ("total", "합계", "subtotal", "소계", "grand total", "총계")
     recs = []
     for r in rows_all[best_hi + 1:]:
         if not r or not any(x not in (None, "") for x in r):
             continue
+        # ★요약/Total 행 스킵(OSP 파일 끝 'Total' 행이 데이터에 섞여 이중계상 방지)
+        if any(isinstance(x, str) and x.strip().lower() in _SUMMARY for x in r):
+            continue
         it = str(gv(r, "item") or "").strip()
-        if not it or it.lower() in ("품번", "합계", "total", "소계"):
+        if not it or it.lower() in ("품번", "material", "품목", "합계", "total", "소계"):
             continue
         def _f(key):
             v = gv(r, key)

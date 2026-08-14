@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-"""도입-수입입력(w_pu_stock_c_040, MAINT_TAG='P') · 도입-수출입력(w_pu_stock_c_050, MAINT_TAG='Q').
-   데이터원 = PU_T_STOCK_MAINT_C (해외 수입/수출, 외환·관세·운임·BL·HS·신고번호).
-   조회 우선(라이브 PARTNER_ERP RO 직독, 레거시 화면과 대조). 컷오버 시 nx 소스 전환.
-   금액(KRW) = ROUND(MAINT_AMT × EXCHANGE_RATE, 0) (레거시 화면 검증)."""
-from fastapi import APIRouter, Query
-from common import _conn, _custnm_map, _d6
+"""도입-수입입력(w_pu_stock_c_040, MAINT_TAG='P'/DIVISION='P') · 도입-수출입력(w_pu_stock_c_050, 'Q').
+   데이터원 = nx.PU_T_STOCK_MAINT_C (해외 수입/수출, 외환·관세·운임·BL·HS·신고번호). 읽기+쓰기 nx.
+   금액(KRW) = ROUND(MAINT_AMT×EXCHANGE_RATE,0,1) 버림(레거시 검증). 금액=수량×단가.
+   키=(MAINT_YMD,MAINT_SEQ). 채번: sheet_no=max(division)+1, maint_seq=max(ymd)+1."""
+from fastapi import APIRouter, Query, Body, HTTPException
+from common import _nx, _custnm_map, _d6
 
 router = APIRouter()
 
+def _kd(kind):
+    return ("P", "도입-수입입력") if kind == "pur" else ("Q", "도입-수출입력")
+
 def _dopip_rows(tag, from_ymd, to_ymd, cust, mat, insp, bl, wide):
-    cn = _conn(); cur = cn.cursor()
+    cn = _nx(); cur = cn.cursor()
     try:
         w = ["MAINT_TAG=?", "MAINT_YMD BETWEEN ? AND ?"]
         p = [tag, _d6(from_ymd), _d6(to_ymd)]
@@ -17,22 +20,22 @@ def _dopip_rows(tag, from_ymd, to_ymd, cust, mat, insp, bl, wide):
         if mat.strip():  w.append("MAT_CODE LIKE ?"); p.append(f"%{mat.strip()}%")
         if insp.strip(): w.append("INSP_SEQ LIKE ?"); p.append(f"%{insp.strip()}%")
         if bl.strip():   w.append("BL_SEQ LIKE ?"); p.append(f"%{bl.strip()}%")
-        cur.execute(f"""SELECT MAINT_YMD, CUST_CODE, MAT_CODE, MAINT_QTY, CURRENCY, MAINT_COST, MAINT_AMT,
+        cur.execute(f"""SELECT MAINT_YMD, MAINT_SEQ, CUST_CODE, MAT_CODE, MAINT_QTY, CURRENCY, MAINT_COST, MAINT_AMT,
               ROUND(MAINT_AMT*EXCHANGE_RATE,0,1) AS KRW, EXCHANGE_RATE, ISNULL(REMARKS,''),
               CUSTOMS_DUTIES, TRANSPORTATION_FATE, TAX_TABLE, ISNULL(INSP_SEQ,''), ISNULL(BL_SEQ,''), ISNULL(HS_CODE,''),
-              MAINT_SEQ
-          FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C
+              ISNULL(SHEET_NO,0)
+          FROM nx.PU_T_STOCK_MAINT_C
           WHERE {' AND '.join(w)}
           ORDER BY MAINT_YMD, CUST_CODE, INSP_SEQ, MAINT_SEQ""", *p)
-        rows = []
-        cch = set()
+        rows = []; cch = set()
         for r in cur.fetchall():
-            d = {"ymd": str(r[0]).strip(), "cust": str(r[1] or '').strip(), "mat": str(r[2] or '').strip(),
-                 "qty": float(r[3] or 0), "cur": str(r[4] or '').strip(), "cost": float(r[5] or 0),
-                 "amt": float(r[6] or 0), "krw": float(r[7] or 0), "rate": float(r[8] or 0), "remarks": r[9]}
+            d = {"ymd": str(r[0]).strip(), "seq": int(r[1] or 0), "cust": str(r[2] or '').strip(), "mat": str(r[3] or '').strip(),
+                 "qty": float(r[4] or 0), "cur": str(r[5] or '').strip(), "cost": float(r[6] or 0),
+                 "amt": float(r[7] or 0), "krw": float(r[8] or 0), "rate": float(r[9] or 0), "remarks": r[10],
+                 "sheet": int(r[17] or 0)}
             if wide:
-                d.update({"duty": float(r[10] or 0), "fare": float(r[11] or 0), "tax": float(r[12] or 0),
-                          "insp": str(r[13] or '').strip(), "bl": str(r[14] or '').strip(), "hs": str(r[15] or '').strip()})
+                d.update({"duty": float(r[11] or 0), "fare": float(r[12] or 0), "tax": float(r[13] or 0),
+                          "insp": str(r[14] or '').strip(), "bl": str(r[15] or '').strip(), "hs": str(r[16] or '').strip()})
             cch.add(d["cust"]); rows.append(d)
         nm = _custnm_map(cur, cch)
         for d in rows: d["cust_nm"] = nm.get(d["cust"], d["cust"])
@@ -45,10 +48,62 @@ def _dopip_rows(tag, from_ymd, to_ymd, cust, mat, insp, bl, wide):
 @router.get("/api/dopip/purchase")
 def dopip_purchase(from_ymd: str = Query(""), to_ymd: str = Query(""), cust: str = Query(""),
                    mat: str = Query(""), insp: str = Query(""), bl: str = Query("")):
-    """도입-수입입력(040, tag=P). 전 컬럼(관세·운임·부가세과표·신고번호·BL·HS)."""
     return _dopip_rows("P", from_ymd, to_ymd, cust, mat, insp, bl, wide=True)
 
 @router.get("/api/dopip/sale")
 def dopip_sale(from_ymd: str = Query(""), to_ymd: str = Query(""), cust: str = Query(""), mat: str = Query("")):
-    """도입-수출입력(050, tag=Q). 축소 컬럼(출고일자·거래처·품목·수량·통화·단가·금액·KRW·환율·비고)."""
     return _dopip_rows("Q", from_ymd, to_ymd, cust, mat, "", "", wide=False)
+
+@router.post("/api/dopip/save")
+def dopip_save(p: dict = Body(...)):
+    """추가(seq=0)/수정(seq>0). 금액=수량×단가 자동. 채번=sheet_no(division)·maint_seq(ymd)."""
+    kind = str(p.get("kind", "pur"))
+    tag, _ = _kd(kind)
+    ymd = _d6(str(p.get("ymd", "")).strip())
+    if len(ymd) != 6: raise HTTPException(400, "일자(YYMMDD) 필요")
+    cust = str(p.get("cust", "")).strip(); mat = str(p.get("mat", "")).strip()
+    if not cust or not mat: raise HTTPException(400, "거래처·품목번호 필수")
+    qty = float(p.get("qty") or 0); cost = float(p.get("cost") or 0)
+    amt = round(qty * cost, 4)
+    cur_ccy = str(p.get("cur", "USD")).strip() or "USD"
+    rate = float(p.get("rate") or 0)
+    remarks = str(p.get("remarks", "")).strip()
+    duty = float(p.get("duty") or 0); fare = float(p.get("fare") or 0); tax = float(p.get("tax") or 0)
+    insp = str(p.get("insp", "")).strip(); bl = str(p.get("bl", "")).strip(); hs = str(p.get("hs", "")).strip()
+    seq = int(p.get("seq") or 0)
+    cn = _nx(); c = cn.cursor()
+    try:
+        if seq > 0:   # 수정
+            c.execute("""UPDATE nx.PU_T_STOCK_MAINT_C SET CUST_CODE=?, MAT_CODE=?, MAINT_QTY=?, MAINT_AMT=?,
+                  CURRENCY=?, MAINT_COST=?, EXCHANGE_RATE=?, REMARKS=?, CUSTOMS_DUTIES=?, TRANSPORTATION_FATE=?,
+                  TAX_TABLE=?, INSP_SEQ=?, BL_SEQ=?, HS_CODE=?, UPDATE_DATETIME=getdate(), UPDATE_USER_ID='web'
+                WHERE MAINT_YMD=? AND MAINT_SEQ=? AND MAINT_TAG=?""",
+                cust, mat, qty, amt, cur_ccy, cost, rate, remarks, duty, fare, tax, insp, bl, hs, ymd, seq, tag)
+            if c.rowcount == 0: raise HTTPException(404, "수정 대상 없음")
+            cn.commit(); return {"ok": True, "mode": "update", "ymd": ymd, "seq": seq}
+        # 추가: 채번
+        nseq = int(c.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=?", ymd).fetchone()[0])
+        sheet = int(c.execute("SELECT ISNULL(MAX(SHEET_NO),0)+1 FROM nx.PU_T_STOCK_MAINT_C WHERE DIVISION=?", tag).fetchone()[0])
+        c.execute("""INSERT INTO nx.PU_T_STOCK_MAINT_C
+              (MAINT_YMD,MAINT_SEQ,MAINT_TAG,DIVISION,SHEET_NO,CUST_CODE,MAT_CODE,MAINT_QTY,MAINT_AMT,
+               CURRENCY,MAINT_COST,EXCHANGE_RATE,REMARKS,CUSTOMS_DUTIES,TRANSPORTATION_FATE,TAX_TABLE,
+               INSP_SEQ,BL_SEQ,HS_CODE,INSERT_DATETIME,INSERT_USER_ID)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,getdate(),'web')""",
+            ymd, nseq, tag, tag, sheet, cust, mat, qty, amt, cur_ccy, cost, rate, remarks, duty, fare, tax, insp, bl, hs)
+        cn.commit(); return {"ok": True, "mode": "insert", "ymd": ymd, "seq": nseq, "sheet": sheet}
+    finally:
+        cn.close()
+
+@router.post("/api/dopip/delete")
+def dopip_delete(p: dict = Body(...)):
+    kind = str(p.get("kind", "pur")); tag, _ = _kd(kind)
+    ymd = _d6(str(p.get("ymd", "")).strip()); seq = int(p.get("seq") or 0)
+    if len(ymd) != 6 or seq <= 0: raise HTTPException(400, "일자·순번 필요")
+    cn = _nx(); c = cn.cursor()
+    try:
+        c.execute("DELETE FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=? AND MAINT_SEQ=? AND MAINT_TAG=?", ymd, seq, tag)
+        n = c.rowcount; cn.commit()
+        if n == 0: raise HTTPException(404, "삭제 대상 없음")
+        return {"ok": True, "deleted": n}
+    finally:
+        cn.close()
