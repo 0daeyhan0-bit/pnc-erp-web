@@ -1290,11 +1290,12 @@ SCREEN.unifybom=(c,ro)=>{
         <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag}</td>
         <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
+        <td class="center">${r.sag==='1'?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
         <td class="num">${q4(r.qty)}</td>
-        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:130px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">후보 구성 없음</td></tr>';
+        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:130px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">후보 구성 없음</td></tr>';
     return `<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#8e44ad">후보 R${String(routeTree.route_no).padStart(2,'0')}</b> ${esc(routeTree.route_name||'')} · 조달경로 구조(SUB 포함) · <span style="color:#8a94a6">공급처=조달프로파일</span></div></div>
       <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto"><table class="tbl bm-tbl">
-      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th style="text-align:left">공급처</th></tr></thead>
+      <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th class="num">소요량</th><th style="text-align:left">공급처</th></tr></thead>
       <tbody>${body}</tbody></table></div>`;};
   // 후보 실원가(실원가 탭, routeSel>0) — route/cost. 현행 대비 손익 diff.
   const routeCostContent=()=>{
@@ -2061,16 +2062,17 @@ SCREEN.unifybom=(c,ro)=>{
     catch(e){routeFull=[]; routeFullFor=item;}
     routeBusy=false; draw(); };
   const routeRowsTbl=(rows,head)=>`${head}<div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl bm-tbl">
-    <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th style="text-align:left">거래처</th></tr></thead>
+    <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th class="num">소요량</th><th style="text-align:left">거래처</th></tr></thead>
     <tbody>${rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
       const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
-      const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':(r.sag==='1'?'<span class="nae-tg" style="color:#8a6d1c;border-color:#e0d2a8">사급</span>':''));
+      const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':'');
       return `<tr style="background:${bg}"><td class="center">${r.level}</td>
         <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag}</td>
         <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
+        <td class="center">${r.sag==='1'?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
         <td class="num">${r.qty!=null?q4(r.qty):''}</td>
-        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:150px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
+        <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:150px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">구성 없음</td></tr>'}</tbody></table></div>`;
   const drawRoute=()=>{
     let content;
     if(routeSel>0){ content=routeTreeTable(); }
@@ -2361,11 +2363,12 @@ SCREEN.subvariant=(c)=>{
         <div style="grid-column:1/-1;color:#8aa0bd;font-size:10.5px">업체(공급처)는 승인 후 <b>업체 매핑(조달프로파일)</b>에서 배분% 지정합니다 — 후보 헤더엔 지정하지 않습니다.</div>
       </div>`;
     const fresh=ed&&!!d.fresh;   // 신규 미커밋 드래프트(가져오기로 방금 생성, [등록] 전) — 닫기=등록취소(롤백)
+    const isCur=!R.baseline&&(R.current_flag||R.route_no===1);
     const footL=R.baseline
-      ? (canW?`<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:'')
+      ? (canW?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff">✎ 현행 직접 수정</button> <button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">📋 이 현행으로 새 후보 만들기</button>`:'')
       : (fresh
           ? '<span style="color:#8aa0bd;font-size:11px">[등록]해야 후보가 확정됩니다 · 닫기/취소 = 등록 취소</span>'
-          : (canW?`<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`:''));
+          : (canW?`${isCur?`<button class="btn" id="dt-resetcur" style="background:#e67e22;color:#fff" title="실사용 BOM에서 라인을 다시 불러와 편집 초기화">🔄 BOM 다시 불러오기</button> `:''}<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`:''));
     const footR=R.baseline
       ? `<button class="btn" id="dt-close">닫기</button>`
       : (fresh

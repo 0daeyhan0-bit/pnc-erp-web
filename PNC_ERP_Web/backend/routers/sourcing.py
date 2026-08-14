@@ -782,6 +782,56 @@ def sourcing_route_copy(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.post("/api/sourcing/route/edit_current")
+def sourcing_route_edit_current(payload: dict = Body(...)):
+    """현행(R01) 직접 수정 진입 — 가상 baseline을 실제 저장 route(route_no=1·current_flag=1)로 실체화 후 대안과 동일 편집.
+       이미 실체화됐으면 그 route_id 반환. reset=1이면 실사용 BOM에서 라인 재도출(편집 초기화).
+       ★실체화 후엔 실사용 BOM이 바뀌어도 자동반영 안 됨(수동관리) — 리셋으로 다시 불러오기."""
+    item = str(payload.get("item_code", "")).strip()
+    if not item: raise HTTPException(400, "item_code 필요")
+    reset = 1 if payload.get("reset") else 0
+    usr = (str(payload.get("user", "")).strip() or "웹사용자")[:30]
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        _cap = lambda v, n: (None if v is None else str(v)[:n])
+        cur.execute("SELECT route_id FROM nx.sourcing_route WHERE item_code=? AND (route_no=1 OR current_flag=1)", item)
+        r = cur.fetchone(); rid = int(r[0]) if r else 0
+        if rid and not reset:
+            nx.commit(); return {"ok": True, "route_id": rid, "existed": True}
+        blines = _route_baseline_lines(item)
+        if not rid:
+            cur.execute("""INSERT INTO nx.sourcing_route(item_code,route_no,route_name,vendor_code,gubun,current_flag,
+                  approve_flag,apply_from,note,ins_user) OUTPUT INSERTED.route_id
+                  VALUES(?,1,N'현행(실사용 BOM)','',N'자체',1,0,NULL,N'현행 실체화(편집용)',?)""", item, usr)
+            rid = int(cur.fetchone()[0])
+        else:   # reset: 기존 라인/공정/용접 비우고 재도출
+            cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=?", rid)
+            cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
+            cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
+            cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, current_flag=1, route_no=1, upd_dt=getdate() WHERE route_id=?", rid)
+        for l in blines:
+            cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
+                  vendor_code,is_rawmat,diam,thick,len_val,material,spec,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  rid, l["sort_seq"], _cap(l["child_item"], 60), _cap(l["child_name"], 120), l["qty"], _cap(l["gubun"], 20),
+                  _cap(l["vendor_code"], 20), l["is_rawmat"], l["diam"], l["thick"], l["len_val"],
+                  _cap(l["material"], 40), _cap(l["spec"], 80), _cap(l["note"], 200))
+        # 조립 공정(비종속) ASSY 노드 시드 → 공수합=BASE로 시작(대안 BASE 복사와 동일)
+        try:
+            _pc, _asm, _bg = _panel_cut_asm(item, "260630")
+            for pc_code, wq in (_asm or {}).items():
+                if wq and float(wq) != 0:
+                    cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
+                        VALUES(?,?,?,?,0,'')""", rid, item, str(pc_code).strip()[:10], float(wq))
+        except Exception:
+            pass
+        nx.commit()
+        return {"ok": True, "route_id": rid, "materialized": not bool(reset), "reset": bool(reset), "lines": len(blines)}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 @router.post("/api/sourcing/route/delete")
 def sourcing_route_delete(payload: dict = Body(...)):
     """경로 삭제(헤더+라인+공정+용접). 현행 baseline(route_id=0)은 삭제 불가.

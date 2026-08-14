@@ -201,6 +201,24 @@ def cost_nae(item: str = Query(..., description="품번"),
         except Exception:
             for row in d["rows"]:
                 row.setdefault("sag", 0)
+        # ★표시용 매입처 — nx.item.in_cust → 거래처명(라우팅뷰와 동일 소스, 원가값 불변)
+        try:
+            codes = sorted({(row.get("code") or "").strip() for row in d["rows"] if row.get("code")})
+            custm = {}
+            for i in range(0, len(codes), 400):
+                ck = codes[i:i+400]; ph = ",".join("?" * len(ck))
+                eng.cur.execute(f"""SELECT it.item_code, ISNULL(pv.partner_name, pc.CUST_DESC)
+                    FROM nx.item it
+                    LEFT JOIN nx.partner pv ON pv.partner_code = it.in_cust
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = it.in_cust
+                    WHERE it.item_code IN ({ph})""", *ck)
+                for r in eng.cur.fetchall():
+                    custm[(r[0] or "").strip()] = (r[1] or "").strip()
+            for row in d["rows"]:
+                row["cust"] = custm.get((row.get("code") or "").strip(), "")
+        except Exception:
+            for row in d["rows"]:
+                row.setdefault("cust", "")
         return {"item": item, "ymd": ymd, "bom": bom, "rows": d["rows"], "agg": d["agg"],
                 "procs": procs, "labor": (procs[0]["labor"] if procs else 0)}
     with _COST_LOCK:
