@@ -2299,7 +2299,7 @@ SCREEN.subvariant=(c)=>{
           <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff">⚙ ${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
         ${np2.map(p=>`<div style="font-size:11.5px;padding:1px 0 1px 14px;color:#33507d">• ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 풀에서 드래그</div>')}
         ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
-        <div class="sp-newsub" data-parentsub="${dsub}" style="border:2px dashed #a678d0;border-radius:8px;padding:14px 8px;text-align:center;color:#8e44ad;font-size:12.5px;font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;min-height:40px;display:flex;align-items:center;justify-content:center">➕ 부품을 여기로 드래그 → 새 SUB로 묶기${dsub>0?' (이 SUB 안에 중첩)':' (레벨1)'}</div>
+        <div class="sp-newsub" data-parentsub="${dsub}" style="border:${dsub>0?'1px':'2px'} dashed #a678d0;border-radius:${dsub>0?'5px':'8px'};padding:${dsub>0?'4px 8px':'14px 8px'};text-align:center;color:#8e44ad;font-size:${dsub>0?'10px':'12.5px'};font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;${dsub>0?'':'min-height:44px;display:flex;align-items:center;justify-content:center'}">${dsub>0?'➕ 서브 안에 중첩 SUB로 묶기':'➕ 부품을 여기로 드래그 → 새 SUB로 묶기 (레벨1)'}</div>
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
       <style>.sp-drop.dz-hi{box-shadow:0 0 0 2px #1c47a0 inset;background:#eef4ff!important}.sp-newsub.dz-hi{background:#e3c8f5!important;border-color:#8e44ad!important;color:#6c2f96!important;transform:scale(1.01)}</style>
@@ -2310,7 +2310,7 @@ SCREEN.subvariant=(c)=>{
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
         <div style="flex:1;min-width:250px;min-height:420px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
           <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">부품 풀 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(전 구성부품·배지=배치노드·오른쪽 SUB/새SUB존으로 드래그)</span></div>
-          ${parts.map(poolRow).join('')||'<div class="empty" style="font-size:11px">부품 없음 (RAC 용접봉 제외)</div>'}
+          ${flat.map(poolRow).join('')||'<div class="empty" style="font-size:11px">미배치 부품 없음 — 모두 SUB에 배치됨 (RAC 용접봉 제외)</div>'}
         </div>
         <div style="flex:1.3;min-width:300px;min-height:420px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
           <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(SUB 노드 위=하이라이트+추가 · "새 SUB로 묶기"=SUB 생성 · 레벨1 바닥=무반응)</span></div>
