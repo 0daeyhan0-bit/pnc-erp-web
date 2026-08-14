@@ -1027,9 +1027,9 @@ const _toYMD=v=>v?v.slice(2).replace(/-/g,''):'';        // 2026-07-21 → 26072
 const _fmtY=y=>{y=''+(y||'');return y.length>=6?`${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:y;};
 function stockScreen(sid){
   const CFG=STOCK_CFG[sid], KEY=CFG.key;
-  const dl=`${sid}-matdl`;
+  const dl=`${sid}-matdl`, cdl=`${sid}-custdl`;
   return (c)=>{
-    let q='', rows=[], news=[], editMode=false, loading=false, msg='', itemNames={}, editRowKey=null, retMode=false;
+    let q='', rows=[], news=[], editMode=false, loading=false, msg='', itemNames={}, custNames={}, editRowKey=null, retMode=false;
     const curKey=()=>retMode?'return':KEY;                       // 반품모드=return screen(음수·≤현재고 가드)
     const curTags=()=>retMode?CFG.rettags:CFG.tags;
     const rowKey=r=>`${r.MAINT_YMD}|${r.MAINT_SEQ}`;
@@ -1042,7 +1042,7 @@ function stockScreen(sid){
         const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);rows=(await r.json()).rows||[];}
       catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];}
       loading=false;draw();};
-    const addRow=()=>{news.push({MAINT_YMD:toV,MAT_CODE:'',item_name:'',MAINT_TAG:curTags()[0][0],qty:'',CUST_CODE:'',GAGONG_PROC_CODE:'',REMARKS:''});draw();};
+    const addRow=()=>{news.push({MAINT_YMD:toV,MAT_CODE:'',item_name:'',MAINT_TAG:curTags()[0][0],qty:'',CUST_CODE:'',cust_name:'',GAGONG_PROC_CODE:'',REMARKS:''});draw();};
     const save=async()=>{
       if(!news.length){alert('등록할 신규 행이 없습니다. ＋행추가로 입력하세요.');return;}
       const errs=[];news.forEach((n,i)=>{const y=(n.MAINT_YMD||'').trim(),m=(n.MAT_CODE||'').trim(),qn=Number(n.qty||0);
@@ -1070,15 +1070,15 @@ function stockScreen(sid){
       const newTbl=editMode?`
         <div class="stk-new">
           <div class="stk-new-h">신규 등록 <span style="font-weight:400;color:var(--muted);font-size:12px">— 저장 시 일자별 채번, 마감월·FK·재고 가드 검증</span></div>
-          <table class="tbl stk-tbl"><thead><tr><th>#</th><th>일자</th><th>구분</th><th>자도번</th><th>품명</th><th>수량${CFG.neg?'(출고)':''}</th><th>거래처코드</th><th>비고</th><th>삭제</th></tr></thead>
+          <table class="tbl stk-tbl"><thead><tr><th>#</th><th>일자</th><th>구분</th><th>자도번</th><th>품명</th><th>수량${CFG.neg?'(출고)':''}</th><th>${retMode?'매입처':'거래처'}</th><th>비고</th><th>삭제</th></tr></thead>
           <tbody>${news.map((n,i)=>`<tr>
             <td class="center mut">${i+1}</td>
             <td><input class="ce sn-date" type="date" data-i="${i}" value="${esc(n.MAINT_YMD)}" style="width:130px"></td>
             <td><select class="ce sn-tag" data-i="${i}">${curTags().map(t=>`<option value="${t[0]}" ${t[0]===n.MAINT_TAG?'selected':''}>${esc(t[1])}</option>`).join('')}</select></td>
-            <td><input class="ce sn-mat" list="${dl}" data-i="${i}" value="${esc(n.MAT_CODE)}" placeholder="검색·선택" style="width:130px"></td>
+            <td><input class="ce sn-mat" list="${dl}" data-i="${i}" value="${esc(n.MAT_CODE)}" placeholder="자도번 검색·선택" autocomplete="off" style="width:130px"></td>
             <td class="bcap sn-nm" style="max-width:170px">${esc(n.item_name||'')}</td>
             <td><input class="ce sn-qty" type="number" step="any" ${CFG.signed?'':'min="0"'} data-i="${i}" value="${n.qty}" placeholder="${CFG.signed?'± 부호':''}" style="width:80px;text-align:right"></td>
-            <td><input class="ce sn-cust" data-i="${i}" value="${esc(n.CUST_CODE)}" placeholder="(선택)" style="width:90px"></td>
+            <td><input class="ce sn-cust" list="${cdl}" data-i="${i}" value="${esc(n.cust_name||n.CUST_CODE||'')}" placeholder="거래처명 검색(선택)" autocomplete="off" style="width:120px"></td>
             <td><input class="ce sn-rmk" data-i="${i}" value="${esc(n.REMARKS)}" style="width:120px"></td>
             <td class="center"><span class="stk-del" data-i="${i}" title="행삭제" style="cursor:pointer;color:#c0392b">✖</span></td>
           </tr>`).join('')||`<tr><td colspan="9" class="empty">＋행추가로 신규 등록 행을 추가하세요</td></tr>`}</tbody></table>
@@ -1094,11 +1094,11 @@ function stockScreen(sid){
          ${CFG.retn&&!editMode?`<button class="btn ${retMode?'':'ghost'}" id="stk-ret" style="${retMode?'background:#c0392b;color:#fff;border-color:#c0392b':''}">↩ ${retMode?'입고로 전환':'반품'}</button>`:''}
          ${editMode
            ?`<button class="btn" id="stk-add">＋ ${retMode?'반품행':'행추가'}</button><button class="btn" id="stk-save">💾 저장</button><button class="btn ghost" id="stk-cancel">✖ 취소</button>`
-           :`${PERM.canEdit(sid)?`<button class="btn" id="stk-edit">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}`}
+           :`${PERM.canEdit(sid)?`<button class="btn" id="stk-edit">✎ ${retMode?'반품등록/수정':'등록/수정'}</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}`}
          <button class="btn" id="stk-xls">⬇ 엑셀</button>
          <div class="spacer"></div><span class="rowcount">${rows.length}건 · 수량합 <b>${_nf(totQ)}</b></span>
        </div>
-       <datalist id="${dl}"></datalist>
+       <datalist id="${dl}"></datalist><datalist id="${cdl}"></datalist>
        ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
        ${newTbl}
        ${loading?`<div class="empty">조회 중…</div>`:`
@@ -1107,12 +1107,12 @@ function stockScreen(sid){
        <tbody>${rows.map(r=>{const k=rowKey(r);
          if(editMode&&editRowKey===k)return `<tr class="stk-editing" data-key="${esc(k)}">
            <td class="center">${esc(_fmtY(r.MAINT_YMD))}</td>
-           <td><select class="ce re-tag">${CFG.tags.map(t=>`<option value="${t[0]}" ${t[0]===r.MAINT_TAG?'selected':''}>${esc(t[1])}</option>`).join('')}</select></td>
+           <td><select class="ce re-tag">${curTags().map(t=>`<option value="${t[0]}" ${t[0]===r.MAINT_TAG?'selected':''}>${esc(t[1])}</option>`).join('')}</select></td>
            <td><b>${esc(r.MAT_CODE||'')}</b></td>
            <td class="bcap" title="${esc(r.item_name||'')}">${esc(r.item_name||'')}</td>
            <td class="bcap" title="${esc(r.item_spec||'')}">${esc(r.item_spec||'')}</td>
            <td><input class="ce re-qty" type="number" step="any" ${CFG.signed?'':'min="0"'} value="${CFG.signed?(Number(r.qty)||0):Math.abs(Number(r.qty||0))}" style="width:80px;text-align:right"></td>
-           <td><input class="ce re-cust" value="${esc(r.CUST_CODE||'')}" placeholder="(선택)" style="width:90px"></td>
+           <td><input class="ce re-cust" list="${cdl}" value="${esc(r.cust_name||r.CUST_CODE||'')}" placeholder="거래처명(선택)" autocomplete="off" style="width:120px"></td>
            <td><input class="ce re-proc" value="${esc(r.GAGONG_PROC_CODE||'')}" placeholder="(선택)" style="width:70px"></td>
            <td><input class="ce re-rmk" value="${esc(r.REMARKS||'')}" style="width:120px"></td>
            <td class="center mut">${esc(r.INSERT_USER_ID||'')}</td>
@@ -1143,6 +1143,12 @@ function stockScreen(sid){
        </style>`;
       // 핸들러
       const gv=id=>c.querySelector(id);
+      // 거래처(매입처) 오토컴플리트: 값=거래처명, 저장시 코드매핑(규칙#21). 미해석시 입력값 그대로.
+      let custT=null;
+      const custSearch=v=>{clearTimeout(custT);v=(v||'').trim();if(v.length<1)return;
+        custT=setTimeout(async()=>{try{const r=await fetch(`${STOCK_API}/api/item/vendorsearch?q=${encodeURIComponent(v)}`);const rr=(await r.json()).rows||[];
+          const d=c.querySelector('#'+cdl);if(d)d.innerHTML=rr.map(x=>{custNames[(x.name||'').toLowerCase()]=x.code;return `<option value="${esc(x.name||'')}">${esc(x.code||'')}</option>`;}).join('');}catch(e){}},220);};
+      const resolveCust=v=>{v=(v||'').trim();if(!v)return null;const code=custNames[v.toLowerCase()];return code||v;};
       gv('#stk-from').onchange=e=>fromV=e.target.value;
       gv('#stk-to').onchange=e=>toV=e.target.value;
       const qi=gv('#stk-q');qi.oninput=e=>q=e.target.value;qi.onkeyup=e=>{if(e.key==='Enter')list();};
@@ -1159,7 +1165,9 @@ function stockScreen(sid){
       c.querySelectorAll('.sn-date').forEach(el=>el.onchange=()=>{news[+el.dataset.i].MAINT_YMD=el.value;});
       c.querySelectorAll('.sn-tag').forEach(el=>el.onchange=()=>{news[+el.dataset.i].MAINT_TAG=el.value;});
       c.querySelectorAll('.sn-qty').forEach(el=>el.oninput=()=>{news[+el.dataset.i].qty=el.value;});
-      c.querySelectorAll('.sn-cust').forEach(el=>el.oninput=()=>{news[+el.dataset.i].CUST_CODE=el.value;});
+      c.querySelectorAll('.sn-cust').forEach(el=>{
+        el.oninput=()=>{const i=+el.dataset.i;news[i].cust_name=el.value;news[i].CUST_CODE=resolveCust(el.value);custSearch(el.value);};
+        el.onchange=()=>{const i=+el.dataset.i;news[i].cust_name=el.value;news[i].CUST_CODE=resolveCust(el.value);};});
       c.querySelectorAll('.sn-rmk').forEach(el=>el.oninput=()=>{news[+el.dataset.i].REMARKS=el.value;});
       let matT=null;
       c.querySelectorAll('.sn-mat').forEach(el=>{
@@ -1174,13 +1182,14 @@ function stockScreen(sid){
       // 기존행 인라인 수정·삭제
       c.querySelectorAll('.rowedit').forEach(el=>el.onclick=()=>{editRowKey=el.dataset.key;draw();});
       c.querySelectorAll('.rowdel').forEach(el=>el.onclick=()=>{const r=rows.find(x=>rowKey(x)===el.dataset.key);if(r)deleteRow(r);});
+      const rec=c.querySelector('.re-cust');if(rec)rec.oninput=()=>custSearch(rec.value);
       const rc=c.querySelector('.re-cancel');if(rc)rc.onclick=()=>{editRowKey=null;draw();};
       const rs=c.querySelector('.re-save');if(rs)rs.onclick=()=>{const r=rows.find(x=>rowKey(x)===editRowKey);if(!r)return;
         const g=s=>c.querySelector('.stk-editing '+s);
         const qv=Number(g('.re-qty').value);
         if(CFG.signed){if(qv===0){alert('조정수량은 0일 수 없습니다(증가 +, 감소 −).');return;}}
         else if(!(qv>0)){alert('수량은 0보다 커야 합니다.');return;}
-        updateRow(r,{MAINT_TAG:g('.re-tag').value,qty:qv,CUST_CODE:g('.re-cust').value.trim()||null,
+        updateRow(r,{MAINT_TAG:g('.re-tag').value,qty:qv,CUST_CODE:resolveCust(g('.re-cust').value),
           GAGONG_PROC_CODE:g('.re-proc').value.trim()||null,REMARKS:g('.re-rmk').value.trim()||null});};
     };
     list();
