@@ -464,11 +464,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         for g in rows:
             g["dcov"] = {}; g["dfin"] = {}
             pc = g["_cells"].get('P')
-            g["prior_cover"] = round((pc["finish"] + pc["ready"]), 2) if pc else 0.0
+            # ★완료수량(분자)=생산실적(finish)만. 준비(키팅완료)는 숫자 아닌 색(녹)으로만 표시. 색tag는 최고단계(생산/키팅/미키팅) 유지.
+            g["prior_cover"] = round(pc["finish"], 2) if pc else 0.0
             g["prior_fin"] = _TAG2FIN.get(pc["tag"], '0') if pc else '0'
             for y in g["days"]:
                 c = g["_cells"].get(y)
-                g["dcov"][y] = round((c["finish"] + c["ready"]), 2) if c else 0.0
+                g["dcov"][y] = round(c["finish"], 2) if c else 0.0
                 g["dfin"][y] = _TAG2FIN.get(c["tag"], '0') if c else '0'
             g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)
             g["lot_diff"] = round(g["lot_qty"] - g["last_lot_qty"], 2)

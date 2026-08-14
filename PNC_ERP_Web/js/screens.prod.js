@@ -419,7 +419,8 @@ SCREEN.partplan=(c)=>{
     disp=disp.slice().sort((a,b)=>((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.item||'').localeCompare(b.item||'')||(a.wo||'').localeCompare(b.wo||''));
     const NCOL=12;  // 고정컬럼(파트..당일이전계획)
     const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
-    const pcell=r=>r.prior_plan>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:'·';
+    // 완료수량=생산실적(finish)만. 생산분 있으면 "생산/계획", 없으면 계획만(바 없이=키팅/미키팅은 색으로만 구분)
+    const pcell=r=>r.prior_plan>0?(r.prior_cover>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:`${nf(r.prior_plan)}`):'·';
     const rowHtml=(r,seq)=>{const pf=r.prior_fin||'0';
       return `<tr>
         <td class="center mut">${seq}</td><td>${esc(r.gpcnm||r.gpc)}</td>
@@ -428,8 +429,8 @@ SCREEN.partplan=(c)=>{
         <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm||'')}</td>
         <td class="center" style="color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}">${esc(pulltxt(r))}</td>
         <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
-        ${r.prior_plan>0?numTd(pcell(r),finBg(pf)||'#eef4fb',pf!=='0',finFg(pf)):numTd('·','',false)}
-        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(`${nf(cv)}/${nf(pl)}`,finBg(cf)||'#eef4fb',cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}</tr>`;};
+        ${r.prior_plan>0?numTd(pcell(r),finBg(pf),pf!=='0',finFg(pf)):numTd('·','',false)}
+        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}</tr>`;};
     // footer: 당일이전·일자별 (완료/계획) + 생산ST행
     const fPrP=disp.reduce((s,r)=>s+(+r.prior_plan||0),0), fPrC=disp.reduce((s,r)=>s+(+r.prior_cover||0),0);
     const fPl=x=>disp.reduce((s,r)=>s+((r.days&&r.days[x])||0),0), fCv=x=>disp.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
