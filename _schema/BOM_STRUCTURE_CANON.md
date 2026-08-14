@@ -2,6 +2,8 @@
 
 > 목적: 품번·**SUB(S축)**·**조달경로(R축)** 3축과 2계층(구조/조달) 구조는 **모든 프로그램(BOM·재고·입고·kitting·생산·마감·손익·발주·계획)에 관통**한다. 어떤 프로그램을 만들거나 고치든 **먼저 이 문서로 구조를 확인**하고 그 축에 맞춰 작업한다.
 > 상태: 구조 확정(2026-08-12). 코드 지도(§7)는 진행 중 스캔으로 보강. 관련 정본: [[SOURCING_COST_INTEGRATION]] [[SOURCING_PANEL_REDESIGN]] [[NX_BOM_SCHEMA]] [[ROUTE_DIMENSION_INVENTORY_PL_DESIGN]] · 메모리 [[newerp-unified-bom-schema]] [[newerp-bom-sourcing-lme-concept]] [[newerp-subvariant-map]] [[newerp-sourcing-profile]]
+>
+> ★★필독 [[BOM_MIRROR_DEBT_AND_DIFF0_PRINCIPLE]] (2026-08-15): **현행 `nx.bom_line`은 이 클린 3축 모델이 아니라 레거시 CS 미러**(다중 플래그·변형SUB·죽은행 복제)라 레거시 병(MJC 이중계상 등)이 재현됨. **diff0=결과 동일≠방식 동일** → 클린 전환은 "옆에 짓고·오라클로 결과증명·초록불에 전환"(제자리 갈아엎기 금지).
 
 ---
 

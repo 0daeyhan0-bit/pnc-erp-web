@@ -2,6 +2,7 @@
 
 > 목적: 최종 일괄 이관(전체 재이관) 시 문제 없도록, 마이그레이션 중 발견한 **매핑 규칙·갭·레거시 데이터 오염·원가재현 규칙**을 전부 기록.
 > 원칙: 레거시 버그는 복제 금지·정제/수정. 원가규칙은 오라클(실원가용 SP) 100% 일치 게이트.
+> ★★[[BOM_MIRROR_DEBT_AND_DIFF0_PRINCIPLE]] (2026-08-15 필독): 현행 bom_line은 CS **미러**라 레거시 병 재현(MJC 이중계상). **diff0=결과 동일≠방식 동일** → 클린 전환은 옆에 짓고·오라클 결과증명·초록불 전환. 원가제외행 다축(소요312·키팅189·세트402) 살아있어 **함부로 삭제 불가**.
 > 최종 갱신: 2026-07-24 (세션 02b63e35). 관련 메모: newerp-bom-costengine-verify-260722, newerp-gagong-cost-structure, newerp-cost-engine-csbom, newerp-plan-soyo-verify(★자재소요SP이식 99.6%·E섹션 AJJ-SUB필수확인).
 
 ---
