@@ -1217,35 +1217,6 @@ SCREEN.unifybom=(c,ro)=>{
   const RO=(ro===true);
   let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false;
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
-  let mlEdit=false, mlRows=[];   // BOM 수정(전 레벨 추가/삭제)
-  const loadMlTree=async()=>{try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}&real=0`);const j=await r.json();mlRows=j.rows||[];
-    mlEdit=true;draw();}catch(e){alert('트리 로드 실패: '+e.message);}};
-  const mlEditTable=()=>{
-    const parents=[item].concat([...new Set(mlRows.filter(n=>n.haskids&&n.level>0).map(n=>n.raw))]);
-    return `
-    <div style="border:1px solid #c9d3e0;border-radius:10px;background:#fff;padding:10px;margin:8px 0">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-        <b style="color:#1c47a0;font-size:14px">🌲 BOM 수정 — 전 레벨(상위·SUB) 추가/삭제</b>
-        <div style="flex:1"></div><button class="btn ghost" id="ml-close">✖ 닫기</button>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;padding:8px;background:#f4fbf6;border:1px solid #cfe8d6;border-radius:6px">
-        <b style="color:#1c7c3a;font-size:12px">➕ 구성 추가</b>
-        <label class="tl">부모</label><select class="inp" id="ml-parent" style="max-width:210px">${parents.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}</select>
-        <label class="tl">자식품번</label><input class="inp" id="ml-child" list="ml-childdl" style="width:160px" placeholder="품번 검색·입력" autocomplete="off"><datalist id="ml-childdl"></datalist>
-        <label class="tl">소요량</label><input class="inp" id="ml-qty" type="number" step="any" value="1" style="width:64px">
-        <button class="btn" id="ml-add" style="background:#1c7c3a;color:#fff">추가</button>
-      </div>
-      <div class="grid-wrap" style="max-height:calc(100vh - 380px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:6px">
-       <table class="tbl fit" style="font-size:12px"><thead><tr><th>레벨 · 품번</th><th>품명</th><th>규격</th><th class="num">소요량</th><th>소속(부모)</th><th class="center">삭제</th></tr></thead>
-       <tbody>${mlRows.map((n,i)=>`<tr>
-         <td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*16}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b>${n.haskids?' <span class="badge" style="background:#eef4ff;color:#2f5aa8">SUB</span>':''}</td>
-         <td class="bcap" title="${esc(n.nm)}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(n.nm)}</td>
-         <td style="white-space:nowrap">${esc(n.spec||(n.diam?('Ø'+n.diam+(n.thick?'×'+n.thick:'')):''))}</td>
-         <td class="num">${n.qty}</td>
-         <td style="font-size:11px;color:#5a7089">${n.level?esc(n.parent):'—'}</td>
-         <td class="center">${n.level>0?`<button class="btn xs ghost ml-del" data-i="${i}" style="color:#c0392b">🗑</button>`:''}</td></tr>`).join('')}</tbody></table>
-      </div>
-    </div>`;};
   let wuData=null, wuBusy=false;   // 역전개(where-used) 모달 상태
   const wuFmt=n=>(n==null||n==='')?'':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:5});
   const openWhereUsed=async()=>{
@@ -1957,7 +1928,7 @@ SCREEN.unifybom=(c,ro)=>{
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
-         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-mledit" style="border-color:#e2b4b4" title="전 레벨(상위·SUB내부 모두)을 펼쳐 중복·허수 구성을 직접 삭제">🌲 다단계 편집</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
+         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
      </div>
@@ -1982,9 +1953,8 @@ SCREEN.unifybom=(c,ro)=>{
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
-     ${item&&!loading&&viewTree&&!editMode&&!mlEdit?candSelector('bom'):''}
-     ${item&&!loading&&mlEdit?mlEditTable():''}
-     ${item&&!loading&&!mlEdit?((viewTree&&!editMode)?`
+     ${item&&!loading&&viewTree&&!editMode?candSelector('bom'):''}
+     ${item&&!loading?((viewTree&&!editMode)?`
        ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
        <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel():''}`):''}
@@ -2014,15 +1984,6 @@ SCREEN.unifybom=(c,ro)=>{
         alert(`삭제 완료 — 품번 ${j.item} (구성 ${j.lines_removed||0}건 제거)`);
         item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';results=[];query='';draw();
       }catch(e){alert('삭제 실패: '+e.message);}};
-    // 다단계 편집 — 진입/라인삭제/닫기
-    {const mb=c.querySelector('#bm-mledit');if(mb)mb.onclick=loadMlTree;}
-    {const mc=c.querySelector('#ml-close');if(mc)mc.onclick=()=>{mlEdit=false;naeFor='';naeD=null;load(item);};}   // 닫으면 재조회(원가·트리 갱신)
-    c.querySelectorAll('.ml-del').forEach(el=>el.onclick=async()=>{const n=mlRows[+el.dataset.i];if(!n||!n.level)return;
-      if(!confirm(`[${n.parent}] BOM에서\n구성 [${n.raw}] ${n.nm||''} (소요량 ${n.qty}) 을(를) 삭제할까요?\n\n이 부모의 이 구성 1건만 제거합니다. 되돌릴 수 없습니다.`))return;
-      try{const r=await fetch(`${API}/api/bom/deleteline`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parent:n.parent,child:n.raw,seq:n.pseq})});
-        const j=await r.json();if(!j.ok){alert('삭제 불가:\n'+(j.errors||['오류']).join('\n'));return;}
-        await loadMlTree();   // 삭제 후 트리 새로고침
-      }catch(e){alert('삭제 실패: '+e.message);}});
     // 역전개(where-used) 버튼·모달
     {const wu=c.querySelector('#bm-wu');if(wu)wu.onclick=openWhereUsed;}
     {const wx=c.querySelector('#wu-close');if(wx)wx.onclick=()=>{wuData=null;wuBusy=false;draw();};}
