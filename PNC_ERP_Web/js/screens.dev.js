@@ -2702,13 +2702,20 @@ SCREEN.subvariant=(c)=>{
     st.detail={route_id:rid,mode:(R.baseline?'view':mode||'edit'),fresh:!!fresh,
       hdr:{route_name:R.route_name||'',gubun:R.gubun||'',apply_from:R.apply_from||today(),note:R.note||''}};  // 유효일자 default=오늘·공급처/현행 제거
     st.newForm=null;st.rd=null;draw();
-    if(!R.baseline && st.detail.mode==='edit') loadRD(rid);   // 편집모드=좌/우 패널 기본 펼침(버튼 클릭 불필요)
+    if(!R.baseline && st.detail.mode==='edit'){
+      if(!fresh){try{fetch(`${API}/api/sourcing/route/edit_begin`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}  // ★편집 세션 시작 스냅샷(닫기=되돌리기용)
+      loadRD(rid);   // 편집모드=좌/우 패널 기본 펼침(버튼 클릭 불필요)
+    }
   };
-  // 닫기(X/닫기): 신규 미커밋 드래프트면 "등록 취소?" confirm → 롤백. 커밋/재편집이면 일반 닫기.
+  // 닫기(X/닫기): 신규 미커밋 드래프트면 "등록 취소?" · ★편집 세션이면 닫기=되돌리기(세션 스냅샷 복원). 저장했으면 스냅 없어 그대로.
   const closeDetail=async()=>{
     if(st.detail&&st.detail.fresh){
       if(confirm('등록을 취소하시겠습니까?\n확인 시 이 후보는 등록되지 않습니다(삭제·번호 재사용).')) await cancelDraft();
       return;   // 계속 = 모달 유지
+    }
+    if(st.detail&&st.detail.mode==='edit'&&+st.detail.route_id>0){   // ★닫기=되돌리기(저장 안 했으면 편집 전으로 복원)
+      try{const r=await fetch(`${API}/api/sourcing/route/edit_cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:st.detail.route_id})});
+        const j=await r.json();if(j.reverted){st.detail=null;await loadRoutes();draw();return;}}catch(e){}
     }
     st.detail=null;draw();};
   // ✖ 취소 = 미커밋 드래프트 롤백(route 삭제)+닫기 → 고아 없음·다음 번호 재사용

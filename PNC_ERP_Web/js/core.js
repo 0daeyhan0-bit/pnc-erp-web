@@ -1145,8 +1145,8 @@ function stockScreen(sid){
          .stk-tbl td.mut,.stk-tbl .mut{color:var(--muted)}.stk-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
          .stk-tbl td.neg{color:#c0392b}
          .stk-tag{display:inline-block;padding:1px 7px;border-radius:10px;background:#eef4ff;color:#2f5aa8;font-size:11px;font-weight:600}
-         .stk-new{margin:10px 0;padding:10px 12px;background:#fbfdff;border:1px solid #cfe0ff;border-left:5px solid #2f6db3;border-radius:8px}
-         .stk-new-h{font-weight:700;color:#1c47a0;margin-bottom:6px}
+         .stk-new{margin:10px 0;padding:12px 14px;background:#f4fbf6;border:2px solid #1c7c3a;border-radius:10px;box-shadow:0 2px 10px rgba(28,124,58,.15)}
+         .stk-new-h{font-weight:800;color:#1c7c3a;font-size:14px;margin-bottom:8px}
          .ce{border:1px solid var(--line);border-radius:4px;padding:2px 5px;font-size:12px}
        </style>`;
       // 핸들러

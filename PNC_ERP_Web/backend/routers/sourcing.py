@@ -678,6 +678,7 @@ def sourcing_route_save(payload: dict = Body(...)):
                   apply_from=?, note=?, approve_flag=0, upd_user=?, upd_dt=getdate() WHERE route_id=?""",
                   rname, ven, gub, cur_f, apf, note, usr, int(rid))
             if cur.rowcount == 0: raise HTTPException(404, f"대상 없음(route_id={rid})")
+            _snap_clear(cur, int(rid))   # ★헤더 저장도 편집 세션 확정(닫기=되돌릴 것 없음)
             return {"ok": True, "route_id": int(rid), "mode": "update", "approve_reset": True}
         rno = _next_route_no(cur, item)   # ★단조증가 채번(삭제해도 재사용 안 함)
         cur.execute("""INSERT INTO nx.sourcing_route(item_code,route_no,route_name,vendor_code,gubun,current_flag,
@@ -872,7 +873,9 @@ def sourcing_route_edit_current(payload: dict = Body(...)):
         _cap = lambda v, n: (None if v is None else str(v)[:n])
         cur.execute("SELECT route_id FROM nx.sourcing_route WHERE item_code=? AND (route_no=1 OR current_flag=1)", item)
         r = cur.fetchone(); rid = int(r[0]) if r else 0
+        pre_existed = bool(rid)
         if rid and not reset:
+            _snap_save(cur, rid, item, 1)   # ★세션 시작 스냅샷(닫기=되돌리기용, 이미 있으면 유지)
             nx.commit(); return {"ok": True, "route_id": rid, "existed": True}
         if not rid:
             cur.execute("""INSERT INTO nx.sourcing_route(item_code,route_no,route_name,vendor_code,gubun,current_flag,
@@ -895,8 +898,60 @@ def sourcing_route_edit_current(payload: dict = Body(...)):
                         VALUES(?,?,?,?,0,'')""", rid, item, str(pc_code).strip()[:10], float(wq))
         except Exception:
             pass
+        if not pre_existed:
+            _snap_save(cur, rid, item, 0)   # ★신규 실체화 → 닫기 시 route 통째 삭제(원상=가상 baseline). reset은 세션스냅샷 유지(스냅 안 찍음)
         nx.commit()
         return {"ok": True, "route_id": rid, "materialized": not bool(reset), "reset": bool(reset), "lines": n_lines}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/route/edit_begin")
+def sourcing_route_edit_begin(payload: dict = Body(...)):
+    """편집 세션 시작 스냅샷(대안 후보 등 — 닫기=되돌리기용). 이미 스냅 있으면 유지."""
+    rid = int(payload.get("route_id") or 0)
+    if rid <= 0:
+        return {"ok": True, "skipped": True}
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT item_code FROM nx.sourcing_route WHERE route_id=?", rid)
+        r = cur.fetchone()
+        if not r:
+            nx.commit(); return {"ok": True, "skipped": True}
+        _snap_save(cur, rid, str(r[0]).strip(), 1)
+        nx.commit(); return {"ok": True}
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/route/edit_cancel")
+def sourcing_route_edit_cancel(payload: dict = Body(...)):
+    """★닫기=되돌리기 — 세션 시작 스냅샷으로 복원. existed=0(신규 실체화)면 route 통째 삭제(원상=가상 baseline). 스냅 없으면 no-op(변경 없었음)."""
+    rid = int(payload.get("route_id") or 0)
+    if rid <= 0:
+        return {"ok": True, "no_snapshot": True}
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _snap_ensure(cur)
+        cur.execute("SELECT existed, snap FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+        r = cur.fetchone()
+        if not r or not r[1]:
+            nx.commit(); return {"ok": True, "no_snapshot": True}
+        existed = int(r[0] or 0)
+        import json as _j
+        snap = _j.loads(r[1])
+        cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
+        cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
+        cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=?", rid)
+        if not existed:
+            cur.execute("DELETE FROM nx.sourcing_route WHERE route_id=?", rid)   # 신규 실체화 → 원상복귀(가상 baseline)
+        else:
+            _snap_load_rows(cur, "sourcing_route_line", snap.get("line", {}))
+            _snap_load_rows(cur, "sourcing_route_proc", snap.get("proc", {}))
+            _snap_load_rows(cur, "sourcing_route_weld", snap.get("weld", {}))
+        cur.execute("DELETE FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+        nx.commit()
+        return {"ok": True, "reverted": True, "deleted_route": (not existed)}
     except Exception:
         nx.rollback(); raise
     finally:
@@ -2285,6 +2340,7 @@ def sourcing_route_finalize(payload: dict = Body(...)):
         # 신규 SUB mint(정본 S 발급)는 finalize 아닌 ★승인(route/approve) 시점에 수행 — 레지스트리 청결(승인된 SUB만 정본코드).
         if ok and commit:
             cur.execute("UPDATE nx.sourcing_route SET upd_dt=getdate() WHERE route_id=?", rid)
+            _snap_clear(cur, rid)   # ★전체저장 확정 → 편집 세션 스냅샷 폐기(이후 닫기=되돌릴 것 없음)
             nx.commit()
         else:
             nx.rollback()   # 검증전용(commit=0) 또는 실패 → reuse 변경 롤백
