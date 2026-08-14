@@ -1,0 +1,640 @@
+select convert(varchar(6),:as_from_ymd) as c_as_from_ymd,
+
+		work_order,
+
+		min(plan_ymd) as plan_ymd,
+
+		line_no,
+
+		output_hm,
+
+		max(model_no) as model_no,
+
+		max(tools_desc) as tools_desc,
+
+		c_item_code + isnull(sina_flag,'') as c_item_code,
+
+		sina_flag,
+
+		max(work_center) as work_center,
+
+		max(work_code) as work_code,
+
+		max(in_cust_code) as in_cust_code,
+
+		max(work_center_code) as work_center_code,
+
+		max(lot_qty) as lot_qty,
+
+		sum(plan_qty) as plan_qty,
+
+		max(prod_rate) as prod_rate,
+
+		max(remarks2) as remarks2,
+
+		max(from_seq) as from_seq,
+
+		max(to_seq) as to_seq,
+
+		min(excel_seq) as excel_seq,
+
+		sum(plan_qty_01) as plan_qty_01,
+
+		sum(plan_qty_02) as plan_qty_02,
+
+		sum(plan_qty_03) as plan_qty_03,
+
+		sum(plan_qty_04) as plan_qty_04,
+
+		sum(plan_qty_05) as plan_qty_05,
+
+		sum(plan_qty_06) as plan_qty_06,
+
+		sum(plan_qty_07) as plan_qty_07,
+
+		sum(plan_qty_08) as plan_qty_08,
+
+		sum(plan_qty_09) as plan_qty_09,
+
+		sum(plan_qty_10) as plan_qty_10,
+
+		sum(plan_qty_11) as plan_qty_11,
+
+		sum(plan_qty_12) as plan_qty_12,
+
+		sum(plan_qty_13) as plan_qty_13,
+
+		sum(plan_qty_14) as plan_qty_14,
+
+		sum(plan_qty_15) as plan_qty_15,
+
+		sum(plan_qty_16) as plan_qty_16,
+
+		sum(plan_qty_17) as plan_qty_17,
+
+		sum(plan_qty_18) as plan_qty_18,
+
+		sum(plan_qty_19) as plan_qty_19,
+
+		sum(plan_qty_20) as plan_qty_20,
+
+		sum(plan_qty_21) as plan_qty_21,
+
+		sum(plan_qty_22) as plan_qty_22,
+
+		sum(plan_qty_23) as plan_qty_23,
+
+		sum(plan_qty_24) as plan_qty_24,
+
+		sum(plan_qty_25) as plan_qty_25,
+
+		sum(plan_qty_26) as plan_qty_26,
+
+		sum(plan_qty_27) as plan_qty_27,
+
+		sum(plan_qty_28) as plan_qty_28,
+
+		sum(plan_qty_29) as plan_qty_29,
+
+		sum(plan_qty_30) as plan_qty_30,
+
+		sum(plan_qty_31) as plan_qty_31
+
+from (
+
+		/*모델.SUFFIX가 일치하는 것*/
+
+		SELECT a.split_work_order as work_order,
+
+				a.plan_ymd,
+
+				a.line_no,
+
+				a.output_hm,
+
+				a.model_no,
+
+				isnull(a.tools_desc,'') as tools_desc,
+
+				convert(varchar(100),isnull(a.c_item_code,'') + case when a.use_qty > 1 then '(' + convert(varchar,a.use_qty) + ')' else '' end) as c_item_code,
+
+				b.other_item_gubun as sina_flag,
+
+				isnull((case when b.in_cust_code>'' then (select cust_desc from cm_m_cust where cust_code=b.in_cust_code)
+
+																else (select work_desc from pr_m_work where work_code=b.work_code and b.work_code<>'P1') end),(SELECT TOP 1 B1.GAGONG_PROC_DESC
+
+																																																FROM PR_M_ITEM_PROC_GAGONG A1
+
+																																																JOIN PR_M_PROC_GAGONG B1 ON A1.GAGONG_PROC_CODE = B1.GAGONG_PROC_CODE
+
+																																																WHERE A1.ITEM_CODE = A.C_ITEM_CODE
+
+																																																ORDER BY A1.PROC_SEQ ASC)) as work_center,
+
+				b.work_code as work_code,
+
+				b.in_cust_code as in_cust_code,
+
+				isnull((case when b.in_cust_code>'' then b.in_cust_code else b.work_code end),'') as work_center_code,
+
+				lot_qty as lot_qty,
+
+				ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) as plan_qty,
+
+				isnull(b.prod_rate,'') as prod_rate,
+
+				isnull(a.remarks2,'') as remarks2,
+
+				isnull(from_seq,'') as from_seq,
+
+				isnull(to_seq,'') as to_seq,
+
+				excel_seq,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 0, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_01,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 1, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_02,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 2, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_03,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 3, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_04,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 4, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_05,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 5, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_06,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 6, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_07,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 7, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_08,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 8, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_09,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 9, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_10,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 10, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_11,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 11, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_12,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 12, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_13,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 13, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_14,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 14, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_15,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 15, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_16,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 16, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_17,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 17, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_18,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 18, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_19,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 19, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_20,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 20, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_21,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 21, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_22,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 22, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_23,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 23, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_24,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 24, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_25,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 25, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_26,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 26, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_27,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 27, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_28,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 28, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_29,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 29, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_30,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 30, 12) then ceiling(convert(float,a.plan_qty) * isnull(a.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_31
+
+			FROM sa_t_plan_item_dtl a
+
+			join pr_m_item				b on a.c_item_code = b.item_code
+
+		  WHERE a.plan_ymd 			between :as_from_ymd and :as_to_ymd
+
+			 and a.line_no				like :as_line_no
+
+			 and a.model_no			like :as_model_no
+
+			 and a.split_work_order like :as_work_order
+
+
+
+		union all
+
+
+
+		/*모델만 일치하는 것*/
+
+		SELECT a.split_work_order as work_order,
+
+				a.plan_ymd,
+
+				a.line_no,
+
+				a.output_hm,
+
+				a.model_no,
+
+				isnull(a.tools_desc,'') as tools_desc,
+
+				convert(varchar(100),isnull(b.c_item_code,'') + case when b.use_qty > 1 then '(' + convert(varchar,b.use_qty) + ')' else '' end) as c_item_code,
+
+				b.other_item_gubun as sina_flag,
+
+				isnull((case when b.in_cust_code>'' then (select cust_desc from cm_m_cust where cust_code=b.in_cust_code)
+
+																else (select work_desc from pr_m_work where work_code=b.work_code and b.work_code<>'P1') end),(SELECT TOP 1 B1.GAGONG_PROC_DESC
+
+																																																FROM PR_M_ITEM_PROC_GAGONG A1
+
+																																																JOIN PR_M_PROC_GAGONG B1 ON A1.GAGONG_PROC_CODE = B1.GAGONG_PROC_CODE
+
+																																																WHERE A1.ITEM_CODE = B.C_ITEM_CODE
+
+																																																ORDER BY A1.PROC_SEQ ASC)) as work_center,
+
+				b.work_code as work_code,
+
+				b.in_cust_code as in_cust_code,
+
+				isnull((case when b.in_cust_code>'' then b.in_cust_code else b.work_code end),'') as work_center_code,
+
+				lot_qty as lot_qty,
+
+				ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) as plan_qty,
+
+				isnull(b.prod_rate,'') as prod_rate,
+
+				isnull(a.remarks2,'') as remarks2,
+
+				isnull(from_seq,'') as from_seq,
+
+				isnull(to_seq,'') as to_seq,
+
+				excel_seq,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 0, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_01,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 1, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_02,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 2, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_03,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 3, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_04,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 4, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_05,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 5, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_06,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 6, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_07,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 7, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_08,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 8, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_09,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 9, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_10,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 10, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_11,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 11, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_12,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 12, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_13,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 13, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_14,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 14, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_15,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 15, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_16,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 16, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_17,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 17, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_18,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 18, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_19,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 19, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_20,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 20, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_21,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 21, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_22,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 22, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_23,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 23, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_24,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 24, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_25,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 25, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_26,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 26, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_27,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 27, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_28,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 28, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_29,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 29, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_30,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 30, 12) then ceiling(convert(float,a.plan_qty) * isnull(b.use_qty,1) * isnull(b.prod_rate,100) / 100) else 0 end as plan_qty_31
+
+			FROM (select a1.*, 
+
+							substring(a1.model_no, 1, case charindex('.', a1.model_no) when 0 then len(a1.model_no) else charindex('.', a1.model_no) end) as c_model_no
+
+					 from sa_t_plan_dtl a1
+
+					where not exists (select 1
+
+											from pr_v_model_bom b1
+
+											where b1.model_no = a1.model_no)
+
+					) a
+
+			join (select b1.model_no, b1.c_item_code + '(모델BOM확인)' as c_item_code, b1.use_qty, 
+
+							b2.in_cust_code, b2.work_code, b2.prod_rate, b2.other_item_gubun
+
+					from pr_v_model_bom b1 
+
+					left join pr_m_item b2 on b1.c_item_code   = b2.item_code) b on b.model_no like a.c_model_no + '%'
+
+		  WHERE a.plan_ymd 			between :as_from_ymd and :as_to_ymd
+
+			 and a.line_no				like :as_line_no
+
+			 and a.model_no			like :as_model_no
+
+			 and a.split_work_order like :as_work_order
+
+
+
+		union all
+
+
+
+		/*모델BOM에 없는 것*/
+
+		SELECT a.split_work_order as work_order,
+
+				a.plan_ymd,
+
+				a.line_no,
+
+				a.output_hm,
+
+				a.model_no,
+
+				isnull(a.tools_desc,'') as tools_desc,
+
+				'' as c_item_code,
+
+				'' as sina_flag,
+
+				'000' as work_center,
+
+				'' as work_code,
+
+				'' as in_cust_code,
+
+				'' as work_center_code,
+
+				lot_qty as lot_qty,
+
+				a.plan_qty,
+
+				100 as prod_rate,
+
+				isnull(a.remarks2,'') as remarks2,
+
+				isnull(from_seq,'') as from_seq,
+
+				isnull(to_seq,'') as to_seq,
+
+				excel_seq,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 0, 12) then a.plan_qty else 0 end as plan_qty_01,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 1, 12) then a.plan_qty else 0 end as plan_qty_02,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 2, 12) then a.plan_qty else 0 end as plan_qty_03,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 3, 12) then a.plan_qty else 0 end as plan_qty_04,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 4, 12) then a.plan_qty else 0 end as plan_qty_05,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 5, 12) then a.plan_qty else 0 end as plan_qty_06,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 6, 12) then a.plan_qty else 0 end as plan_qty_07,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 7, 12) then a.plan_qty else 0 end as plan_qty_08,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 8, 12) then a.plan_qty else 0 end as plan_qty_09,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 9, 12) then a.plan_qty else 0 end as plan_qty_10,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 10, 12) then a.plan_qty else 0 end as plan_qty_11,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 11, 12) then a.plan_qty else 0 end as plan_qty_12,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 12, 12) then a.plan_qty else 0 end as plan_qty_13,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 13, 12) then a.plan_qty else 0 end as plan_qty_14,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 14, 12) then a.plan_qty else 0 end as plan_qty_15,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 15, 12) then a.plan_qty else 0 end as plan_qty_16,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 16, 12) then a.plan_qty else 0 end as plan_qty_17,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 17, 12) then a.plan_qty else 0 end as plan_qty_18,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 18, 12) then a.plan_qty else 0 end as plan_qty_19,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 19, 12) then a.plan_qty else 0 end as plan_qty_20,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 20, 12) then a.plan_qty else 0 end as plan_qty_21,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 21, 12) then a.plan_qty else 0 end as plan_qty_22,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 22, 12) then a.plan_qty else 0 end as plan_qty_23,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 23, 12) then a.plan_qty else 0 end as plan_qty_24,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 24, 12) then a.plan_qty else 0 end as plan_qty_25,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 25, 12) then a.plan_qty else 0 end as plan_qty_26,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 26, 12) then a.plan_qty else 0 end as plan_qty_27,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 27, 12) then a.plan_qty else 0 end as plan_qty_28,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 28, 12) then a.plan_qty else 0 end as plan_qty_29,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 29, 12) then a.plan_qty else 0 end as plan_qty_30,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 30, 12) then a.plan_qty else 0 end as plan_qty_31
+
+			FROM (select a1.*, 
+
+							substring(a1.model_no, 1, case charindex('.', a1.model_no) when 0 then len(a1.model_no) else charindex('.', a1.model_no) end) as c_model_no
+
+					 from sa_t_plan_dtl a1
+
+					) a
+
+		  WHERE a.plan_ymd 			between :as_from_ymd and :as_to_ymd
+
+			 and a.line_no				like :as_line_no
+
+			 and a.model_no			like :as_model_no
+
+			 and a.split_work_order like :as_work_order
+
+			 and not exists (select 1 from pr_v_model_bom b where b.model_no like a.c_model_no + '%')
+
+
+
+		union all
+
+
+
+		/*생산계획수동입력*/
+
+		SELECT a.work_order as work_order,
+
+				a.plan_ymd,
+
+				a.line_no,
+
+				a.output_hm,
+
+				'' as model_no,
+
+				'' as tools_desc,
+
+				a.item_code,
+
+				b.other_item_gubun as sina_flag,
+
+				isnull((case when b.in_cust_code>'' then (select cust_desc from cm_m_cust where cust_code=b.in_cust_code)
+
+																else (select work_desc from pr_m_work where work_code=b.work_code and b.work_code<>'P1') end),(SELECT TOP 1 B1.GAGONG_PROC_DESC
+
+																																																FROM PR_M_ITEM_PROC_GAGONG A1
+
+																																																JOIN PR_M_PROC_GAGONG B1 ON A1.GAGONG_PROC_CODE = B1.GAGONG_PROC_CODE
+
+																																																WHERE A1.ITEM_CODE = A.ITEM_CODE
+
+																																																ORDER BY A1.PROC_SEQ ASC)) as work_center,
+
+				b.work_code as work_code,
+
+				b.in_cust_code as in_cust_code,
+
+				isnull((case when b.in_cust_code>'' then b.in_cust_code else b.work_code end),'') as work_center_code,
+
+				a.plan_qty as lot_qty,
+
+				a.plan_qty,
+
+				100 as prod_rate,
+
+				isnull(a.remarks,'') as remarks2,
+
+				'' as from_seq,
+
+				'' as to_seq,
+
+				0 as excel_seq,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 0, 12) then a.plan_qty else 0 end as plan_qty_01,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 1, 12) then a.plan_qty else 0 end as plan_qty_02,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 2, 12) then a.plan_qty else 0 end as plan_qty_03,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 3, 12) then a.plan_qty else 0 end as plan_qty_04,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 4, 12) then a.plan_qty else 0 end as plan_qty_05,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 5, 12) then a.plan_qty else 0 end as plan_qty_06,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 6, 12) then a.plan_qty else 0 end as plan_qty_07,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 7, 12) then a.plan_qty else 0 end as plan_qty_08,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 8, 12) then a.plan_qty else 0 end as plan_qty_09,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 9, 12) then a.plan_qty else 0 end as plan_qty_10,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 10, 12) then a.plan_qty else 0 end as plan_qty_11,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 11, 12) then a.plan_qty else 0 end as plan_qty_12,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 12, 12) then a.plan_qty else 0 end as plan_qty_13,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 13, 12) then a.plan_qty else 0 end as plan_qty_14,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 14, 12) then a.plan_qty else 0 end as plan_qty_15,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 15, 12) then a.plan_qty else 0 end as plan_qty_16,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 16, 12) then a.plan_qty else 0 end as plan_qty_17,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 17, 12) then a.plan_qty else 0 end as plan_qty_18,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 18, 12) then a.plan_qty else 0 end as plan_qty_19,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 19, 12) then a.plan_qty else 0 end as plan_qty_20,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 20, 12) then a.plan_qty else 0 end as plan_qty_21,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 21, 12) then a.plan_qty else 0 end as plan_qty_22,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 22, 12) then a.plan_qty else 0 end as plan_qty_23,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 23, 12) then a.plan_qty else 0 end as plan_qty_24,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 24, 12) then a.plan_qty else 0 end as plan_qty_25,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 25, 12) then a.plan_qty else 0 end as plan_qty_26,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 26, 12) then a.plan_qty else 0 end as plan_qty_27,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 27, 12) then a.plan_qty else 0 end as plan_qty_28,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 28, 12) then a.plan_qty else 0 end as plan_qty_29,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 29, 12) then a.plan_qty else 0 end as plan_qty_30,
+
+				case a.plan_ymd when convert(varchar, convert(datetime, :as_from_ymd, 12) + 30, 12) then a.plan_qty else 0 end as plan_qty_31
+
+			FROM pr_t_plan_input		a
+
+			left join pr_m_item 		b on a.item_code = b.item_code
+
+		  WHERE a.plan_ymd 			between :as_from_ymd and :as_to_ymd
+
+			 and a.line_no				like :as_line_no
+
+			 and a.work_order			like :as_work_order
+
+
+
+		) t
+
+where work_center_code like :as_cust_code
+
+  and c_item_code like :as_item_code
+
+group by work_order,	line_no,	output_hm, c_item_code, sina_flag
+
