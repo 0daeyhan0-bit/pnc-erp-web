@@ -306,6 +306,10 @@ def _bom_tree_nx(item, real, expandbuy=0):
         sub_seq = [0]; sub_map = {}
         def subdisp(child):
             if child in edges:   # 하위 보유 = SUB
+                # ★2026-08-15: 실제 제품코드(접미사 -N-N·_S 없는 깨끗한 코드)는 개명 금지 → 도면 품번 그대로 표시.
+                #   합성/변형 SUB(base-N-N·_S)만 {부모}_S{nn} 채번. (실제 ASSY가 SUB코드로 가려지던 문제 수정)
+                if ('-' not in child) and ('_' not in child):
+                    return disp(child)
                 if child not in sub_map:
                     sub_seq[0] += 1; sub_map[child] = f"{item}_S{sub_seq[0]:02d}"
                 return sub_map[child]

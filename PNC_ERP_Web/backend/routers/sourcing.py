@@ -839,9 +839,11 @@ def _snap_save(cur, rid, item, existed):
     cur.execute("SELECT 1 FROM nx.sourcing_route_snap WHERE route_id=?", rid)
     if cur.fetchone():
         return
-    for t in _SNAP_TBLS:
-        cur.execute(f"DELETE FROM nx.{t}_snapbak WHERE route_id=?", rid)
-        cur.execute(f"INSERT INTO nx.{t}_snapbak SELECT * FROM nx.{t} WHERE route_id=?", rid)
+    # ★existed=0(신규 실체화)은 취소 시 route 통째 삭제(복원 안 씀)이므로 백업 복사 불필요 → 마커만 기록(속도).
+    if int(existed):
+        for t in _SNAP_TBLS:
+            cur.execute(f"DELETE FROM nx.{t}_snapbak WHERE route_id=?", rid)
+            cur.execute(f"INSERT INTO nx.{t}_snapbak SELECT * FROM nx.{t} WHERE route_id=?", rid)
     cur.execute("INSERT INTO nx.sourcing_route_snap(route_id,item_code,existed,snap_dt) VALUES(?,?,?,getdate())",
                 rid, item, int(existed))
 
