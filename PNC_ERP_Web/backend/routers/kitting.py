@@ -400,13 +400,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM {SCH}.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
         except Exception: pass
-        try:  # ★생산완료 판정 = 실제 생산실적(PR_T_PROD_DTL, WO없음 → 도번단위). 조회기간(최소계획일~to)내 SUM(PROD_QTY). 도번단위 풀을 날짜순 공유충당 → 밀린계획부터 완료, 미래=0.
-            items = list({g["item"] for g in rows if g["item"]})
-            for i in range(0, len(items), 900):
-                ck = items[i:i + 900]; ph = ",".join("?" * len(ck))
-                cur.execute(f"SELECT ITEM_CODE, SUM(PROD_QTY) FROM {SCH}.PR_T_PROD_DTL WHERE ITEM_CODE IN ({ph}) AND PROD_YMD BETWEEN ? AND ? GROUP BY ITEM_CODE", *ck, earliest_ymd, d6b)
-                for rr in cur.fetchall(): prodstk[rr[0]] = float(rr[1] or 0)
-        except Exception: pass
+        # ★생산완료(70): 레거시 SP_..._NEW2_오전오후는 실제생산(PROD_DTL) 미사용 — "완료된 전표는 이미 ASSY재고·파트재고로 잡히므로 감안 불필요"(SP주석).
+        #   → 아래 충당에서 assystk(ASSY재고)+partstk(중간파트재고) 2풀로만 tag70 완료 처리. (earliest_ymd는 참고용 미사용)
+        _ = earliest_ymd
         if str(src).strip() != "live":   # ★nx 셀단위 준비 flag 오버레이(우리 확인분) — 라이브 대사시 제외
             try:
                 nxc = _nx(); nc = nxc.cursor()
@@ -434,7 +430,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
         for g in rows:
             seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
-            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')
+            _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0) * g["use_qty"], 90, 'finish')   # 출하×use_qty(레거시 SALE×USE_QTY)
         # 2)생산완료(70)=생산실적 / 3)키팅완료(50)=준비재고 : ★도번단위 풀 공유·날짜순 충당(WO별 재부여 방지→실제 생산/준비량 만큼만 완료).
         def _shared(keyfn, poolmap, tag, key):
             grp = {}
@@ -453,8 +449,14 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     else:
                         c[key] += jan; pool -= jan
                         if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
-        _shared(lambda g: g["item"], prodstk, 70, 'finish')                 # 생산완료=생산실적(도번단위)
-        _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')       # 키팅완료=준비재고(도번+파트)
+        # ★생산완료(70): 레거시 SP_..._NEW2_오전오후 재현 = ASSY재고(×use) + 중간파트재고 2풀. (PROD_DTL 아님 — 완료전표는 이미 재고로 잡힘)
+        _assy_pool = {}
+        for g in rows:
+            k = (g["assy"], g["upper"], g["item"])
+            if k not in _assy_pool: _assy_pool[k] = assystk.get(g["assy"], 0.0) * g["use_qty"]   # 제품(ASSY)재고 = SA_T_ITEM_STOCK(도번)×use_qty
+        _shared(lambda g: (g["assy"], g["upper"], g["item"]), _assy_pool, 70, 'finish')   # A: 제품(ASSY)재고
+        _shared(lambda g: g["item"], partstk, 70, 'finish')                               # B: 중간공정 파트재고(PR+PU_T_MAT_STOCK_WH by 자도번)
+        _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')       # C: 준비재고(도번+파트) → 색(녹)만·미생산 판정 제외
         # 4) nx 셀단위 준비 오버레이(우리 웹 확인분, src=nx만)
         for g in rows:
             it = g["item"]
