@@ -162,17 +162,17 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         return dayidx.get(ymd)                  # 없으면 None(31일 밖)
     cn = _conn(); cur = cn.cursor()
     try:
-        wsel = ["mat_work_center_code=?", "plan_ymd<=?"]; wp = [cust, to_ymd]
+        wsel = ["mat_work_center_code=?", "part_plan_ymd<=?"]; wp = [cust, to_ymd]   # ★당김반영 협력사일자로 필터(원계획 plan_ymd 아님)
         if item and item != "%":    wsel.append("assy_item_code LIKE ?"); wp.append(item)
         if matcode and matcode != "%": wsel.append("mat_code LIKE ?"); wp.append(matcode)
         # 도번(ASSY) 계획그리드: (wo,swo,assy,plan_ymd) 배치별 MAX(plan_qty). 사급=mat_flag 2 존재.
         #   ★PART_MAT.plan_qty는 이미 회수율(CEILING×rate/100) 반영된 발주값(정상도번). SVC 소수도번만 raw(무시가능 4/44208).
-        cur.execute(f"""SELECT work_order, split_work_order, assy_item_code, plan_ymd,
+        cur.execute(f"""SELECT work_order, split_work_order, assy_item_code, part_plan_ymd,
               MAX(CAST(plan_qty AS float)) pq, MAX(CAST(lot_qty AS float)) lot, MAX(CAST(use_qty AS float)) uq,
               MAX(ISNULL(line_no,'')) line, MAX(ISNULL(output_hm,'')) ohm, MAX(CASE WHEN mat_flag='2' THEN 1 ELSE 0 END) sg
             FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT
             WHERE {' AND '.join(wsel)}
-            GROUP BY work_order, split_work_order, assy_item_code, plan_ymd""", *wp)
+            GROUP BY work_order, split_work_order, assy_item_code, part_plan_ymd""", *wp)
         keyed = {}
         for r in cur.fetchall():
             wo, swo, assy, pym = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
