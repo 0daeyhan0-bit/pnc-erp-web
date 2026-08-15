@@ -294,7 +294,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         gmode = 'mat'
         if wc.strip():
             try:
-                cur.execute("SELECT ISNULL(CUST_TYPE,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", wc.strip())
+                cur.execute("SELECT ISNULL(CUST_TYPE,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE=?", wc.strip())
                 _ct = cur.fetchone(); gmode = 'assy' if (_ct and str(_ct[0]).strip() == '6') else 'mat'
             except Exception:
                 pass
@@ -304,7 +304,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
               pp.assy_item_code assy, pp.mat_code mat, pp.mat_flag matflag,
               CAST(pp.lot_qty AS float) lot, CAST(pp.plan_qty AS float) planq, CAST(pp.part_plan_qty AS float) partq,
               pp.part_plan_ymd ppy
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
+            FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT pp
             WHERE {where}
             ORDER BY pp.mat_work_center_code, pp.split_work_order, pp.assy_item_code, pp.mat_code""", *p)
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -383,15 +383,15 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 for rr in cur.fetchall(): m[str(rr[0]).strip()] = rr
             return m
         wccodes = {g["wc"] for g in rows}; assycodes = {g["lookup"] for g in rows}   # lookup=도번(assy모드) or 자도번(mat모드)
-        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
-        custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP.dbo.PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})")
         # 도번 마스터(작업처=assy의 work/incust, 품명, 규격)
-        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})")
+        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE IN ({ph})")
         # assy 작업처 코드도 이름 필요 → 추가 조회
         awc = {str(v[2]).strip() for v in assym.values() if str(v[2]).strip()}
         aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
-        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
-        custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP.dbo.PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})")
         def nm_of(code):
             c = str(code or "").strip()
             if c in workm: return workm[c][1]
