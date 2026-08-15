@@ -310,7 +310,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               ISNULL(pg.PART_GROUP_CODE,'') pgc, a.WORK_CODE wc,
               COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE) wcnm, MAX(ISNULL(a.LINE_NO,'')) line,
               a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.PART_PLAN_YMD ymd,
-              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, ISNULL(ib.ITEM_DESC,'') nm,
+              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, MAX(ISNULL(a.OUTPUT_HM,'')) output_hm, ISNULL(ib.ITEM_DESC,'') nm,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
               MAX(ISNULL(a.CHANGE_DAY,'')) change_day, SUM(CAST(ISNULL(a.LOT_QTY,0) AS float)) lot_qty,
@@ -341,7 +341,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             if not g:
                 g = {"assy": r["assy"], "upper": r["upper"] or '', "item": r["item"], "nm": r["nm"],
                      "gpc": r["gpc"], "gpcnm": r["gpcnm"], "pgc": r["pgc"], "wc": r["wc"], "wcnm": r["wcnm"],
-                     "line": r["line"], "inhm": r["inhm"], "rate": float(r["rate"] or 100),
+                     "line": r["line"], "inhm": r["inhm"], "output_hm": (r["output_hm"] or ''), "rate": float(r["rate"] or 100),
                      "item_st": float(r["st"] or 0), "use_qty": float(r["useq"] or 1),
                      "wo": r["wo"], "swo": r["swo"] or '', "plan_ymd": (r["plan_ymd"] or ''),
                      "change_day": (r["change_day"] or ''), "lot_qty": 0.0, "last_lot_qty": 0.0,
@@ -474,13 +474,13 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             for g in rows:
                 for b, c in g["_cells"].items():
                     sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
-                    # ★배분순서 = 레거시 SP 커서 order by (part_plan_ymd, part_output_hm, plan_ymd, work_order, split_work_order) 이식 → 동순위 행 충당 일치
-                    grp.setdefault(keyfn(g), []).append((c, sd, g["inhm"] or '', g["plan_ymd"] or '', g["wo"] or '', g["swo"] or ''))
+                    # ★배분순서 = 레거시 SP 커서 order by (part_plan_ymd, part_output_hm, plan_ymd, output_hm, work_order, split_work_order) 완전이식 → 동순위 행 충당 일치
+                    grp.setdefault(keyfn(g), []).append((c, sd, g["inhm"] or '', g["plan_ymd"] or '', g["output_hm"] or '', g["wo"] or '', g["swo"] or ''))
             for k, lst in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
-                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5]))
-                for c, sd, hm, _py, _wo, _swo in lst:
+                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6]))
+                for c, sd, hm, _py, _ohm, _wo, _swo in lst:
                     if pool <= 0: break
                     jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
                     if jan <= 0: continue
