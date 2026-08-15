@@ -587,21 +587,24 @@ def _panel_node_asm(item, ymd="260630"):
         try: _ = eng.labor_rate(ym)
         except Exception: eng = _get_cost_engine(fresh=True)
         by_node = {}
-        def walk(node, cum_ea, parent, seen):
+        def walk(node, cum_ea, parent, ctx, seen):
             info = eng._load_item(node); cg0 = info['cost_gubun']
             db_item = parent if info['silver'] else ''
+            expandable = bool(eng._expandable_nae(node, seen)) if cg0 != '3' else False
+            # 구조노드(SUB/ASSY)면 자기자신, leaf(부품/용접봉)면 소속 SUB(ctx)에 조립공정 귀속
+            #  → 용접봉 RAC은 구조에서 제외되지만, 그 용접공정은 소속 SUB(은납/19-1/ASSY)로 롤업(공수합 보존)
+            target = node if (expandable or node == item) else ctx
             for proc, wq, uph, cg, pit in eng._procs(node):
                 if pit != db_item or wq == 0: continue
                 if not _proc_is_asm(str(proc)): continue
-                d = by_node.setdefault(node, {}); d[str(proc)] = d.get(str(proc), 0.0) + wq * cum_ea
-            expandable = bool(eng._expandable_nae(node, seen)) if cg0 != '3' else False
+                d = by_node.setdefault(target, {}); d[str(proc)] = d.get(str(proc), 0.0) + wq * cum_ea
             if expandable:
                 for c, qty, cx, f, t, lx in eng.lines(node):
                     if cx: continue
                     cinfo = eng._load_item(c)
                     ea = qty if cinfo['unit'] == 'EA' else 1.0
-                    walk(c, cum_ea * ea, node, seen | {node})
-        walk(item, 1.0, '', set())
+                    walk(c, cum_ea * ea, node, node, seen | {node})
+        walk(item, 1.0, '', item, set())
     return {k: {p: round(v, 3) for p, v in d.items()} for k, d in by_node.items()}
 
 def _custnm_map(cur, codes):
