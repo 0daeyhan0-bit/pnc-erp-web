@@ -299,7 +299,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
             LEFT JOIN {SCH}.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN {SCH}.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
-            LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
+            LEFT JOIN (SELECT ITEM_CODE, GAGONG_PROC_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE, GAGONG_PROC_CODE) st ON st.ITEM_CODE=a.ITEM_CODE AND st.GAGONG_PROC_CODE=a.GAGONG_PROC_CODE
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
               a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
@@ -319,7 +319,8 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 g = {"assy": r["assy"], "upper": r["upper"] or '', "item": r["item"], "nm": r["nm"],
                      "gpc": r["gpc"], "gpcnm": r["gpcnm"], "pgc": r["pgc"], "wc": r["wc"], "wcnm": r["wcnm"],
                      "line": r["line"], "inhm": r["inhm"], "output_hm": (r["output_hm"] or ''), "rate": float(r["rate"] or 100),
-                     "item_st": float(r["st"] or 0), "use_qty": float(r["useq"] or 1),
+                     "item_st": float(r["st"] or 0) * 100.0 / (float(r["rate"] or 100) or 100),   # ★레거시 item_st = 그 파트(gpc) ST ÷ prod_rate × 100 (f_get_item_st_part/wk.prod_rate*100)
+                     "use_qty": float(r["useq"] or 1),
                      "wo": r["wo"], "swo": r["swo"] or '', "plan_ymd": (r["plan_ymd"] or ''),
                      "change_day": (r["change_day"] or ''), "lot_qty": 0.0, "last_lot_qty": 0.0,
                      "days": {}, "prior_plan": 0.0, "plan_qty": 0.0, "_cells": {}}
@@ -507,7 +508,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         for r in rows: r.pop("_done_all", None)
         rows.sort(key=lambda x: ((x["part_ymd"] or "") + (x["inhm"] or ""), x["plan_ymd"] or "",
                                  x["item"] or "", x["wo"] or "", x["swo"] or ""))
-        # ★item_st 정본 = 생산정보등록(생산공정순서) ST(초) 합계 · nx우선(nx.prodinfo_proc 있으면 override, 없으면 레거시 PR_M_ITEM_PROC_GAGONG 유지).
+        # ★item_st 정본 = 생산정보등록(생산공정순서) ST(초), ★그 파트(gpc)의 공정만 합산 ÷ prod_rate × 100 (레거시 f_get_item_st_part/wk.prod_rate*100 동일). nx우선(있으면 override), 없으면 레거시 PR_M_ITEM_PROC_GAGONG 유지.
         #   생산ST=(계획−완료)×item_st/3600. src=live(순수 레거시 대사)는 레거시값 유지.
         if str(src).strip() != "live":
             try:
@@ -515,11 +516,11 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 items = list({g["item"] for g in rows if g["item"]}); nxst = {}
                 for i in range(0, len(items), 900):
                     ck = items[i:i + 900]; ph = ",".join("?" * len(ck))
-                    nc2.execute(f"SELECT item_code, SUM(CAST(ISNULL(tot_st,0) AS float)) FROM nx.prodinfo_proc WHERE item_code IN ({ph}) GROUP BY item_code", *ck)
-                    for rr in nc2.fetchall(): nxst[rr[0]] = float(rr[1] or 0)
+                    nc2.execute(f"SELECT item_code, gagong_proc_code, SUM(CAST(ISNULL(tot_st,0) AS float)) FROM nx.prodinfo_proc WHERE item_code IN ({ph}) GROUP BY item_code, gagong_proc_code", *ck)
+                    for rr in nc2.fetchall(): nxst[(rr[0], rr[1])] = float(rr[2] or 0)
                 nxc2.close()
                 for g in rows:
-                    if g["item"] in nxst: g["item_st"] = nxst[g["item"]]
+                    if (g["item"], g["gpc"]) in nxst: g["item_st"] = nxst[(g["item"], g["gpc"])] * 100.0 / (float(g["rate"] or 100) or 100)   # 그 파트 ST ÷ prod_rate × 100
             except Exception: pass
         # 인원(y_inwon) — 레거시: COUNT(PR_M_PROC_GAGONG⋈WORKER work_flag='1', 파트필터 gpc·part_group like)
         inwon = 0
