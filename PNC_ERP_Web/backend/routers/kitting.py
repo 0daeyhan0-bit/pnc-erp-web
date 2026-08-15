@@ -160,7 +160,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             nxc.close()
         except Exception: pass
         # finish_tag → color(fin) 매핑: 90출하→'6' / 70생산→'4' / 50·10준비→'3' / 30자재→'2' / else '0'
-        _TAG2FIN = {90: '6', 70: '4', 50: '3', 10: '3', 30: '2'}
+        _TAG2FIN = {90: '6', 70: '4', 40: '4', 50: '3', 10: '3', 30: '2'}   # 40=전표재고(J) 완료군
         def _alloc(cellseq, pool, tag, key):
             """SP 커서 재고충당: 계획순 셀에 pool 충당. 완전충당 셀=tag, 부분=태그유지. key='finish' or 'ready'."""
             pool = max(float(pool or 0), 0.0)
@@ -413,8 +413,33 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for rr in cur.fetchall(): saled[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
         except Exception: pass
         # ★생산완료(70): 레거시 SP_..._NEW2_오전오후는 실제생산(PROD_DTL) 미사용 — "완료된 전표는 이미 ASSY재고·파트재고로 잡히므로 감안 불필요"(SP주석).
-        #   → 아래 충당에서 assystk(ASSY재고)+partstk(중간파트재고) 2풀로만 tag70 완료 처리. (earliest_ymd는 참고용 미사용)
+        #   → 아래 충당에서 assystk(ASSY재고)+partstk(중간파트재고)+jpstk(작업중 전표재고) 3풀로 완료 처리. (earliest_ymd는 참고용 미사용)
         _ = earliest_ymd
+        # ★전표재고(J, tag40)=작업중 용접전표(PR_T_INDI_WELD_SHEET prod_fin_flag='0')의 최종공정 잔량(prod_qty−완료). SHEET헤더는 라이브에만 존재 → 항상 라이브 직독. src별 90초 캐시.
+        jpstk = {}
+        _jck = "jp"
+        _jent = _cache.get(_jck)
+        if _jent and (_now - _jent["ts"] < 90):
+            jpstk = _jent["j"]
+        else:
+            try:
+                cur.execute("""
+                    SELECT t.gagong_proc_code gpc, s.item_code item, SUM(t.prod_qty - s.finish_prod_qty) stk
+                    FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
+                    JOIN (SELECT t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq, MAX(s.to_proc_seq) to_proc_seq, MAX(s.item_code) item_code,
+                                 ISNULL((SELECT TOP 1 prod_qty FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK) WHERE sheet_no=t.sheet_no ORDER BY proc_seq DESC),0) finish_prod_qty
+                          FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
+                          JOIN (SELECT b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq, MAX(b.proc_seq) to_proc_seq, MAX(a.item_code) item_code
+                                FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
+                                WHERE a.prod_fin_flag='0' GROUP BY b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq) s
+                               ON t.sheet_no=s.sheet_no AND t.proc_seq=s.to_proc_seq
+                          GROUP BY t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq) s ON s.sheet_no=t.sheet_no AND s.to_proc_seq=t.proc_seq
+                    WHERE t.gagong_proc_code IS NOT NULL
+                    GROUP BY t.gagong_proc_code, s.item_code""")
+                for rr in cur.fetchall(): jpstk[(rr[1], rr[0])] = jpstk.get((rr[1], rr[0]), 0.0) + float(rr[2] or 0)
+            except Exception: pass
+            _cache[_jck] = {"ts": _now, "j": jpstk}
+            plan_part410._stk_cache = _cache
         if str(src).strip() != "live":   # ★nx 셀단위 준비 flag 오버레이(우리 확인분) — 라이브 대사시 제외
             try:
                 nxc = _nx(); nc = nxc.cursor()
@@ -424,7 +449,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for rr in nc.fetchall(): nxcell[(rr[0], rr[1], rr[2], rr[3])] = float(rr[4] or 0)
                 nxc.close()
             except Exception: pass
-        _TAG2FIN = {90: '6', 70: '4', 50: '3', 10: '3', 30: '2'}
+        _TAG2FIN = {90: '6', 70: '4', 40: '4', 50: '3', 10: '3', 30: '2'}   # 40=전표재고(J) 완료군
         # ★충당 = 준비실적처리(키팅 /api/kitting/grid)와 100% 동일 검증엔진: 셀단위 pool 배분(출하90→ASSY×use/도번고정/중간공정70→준비50)+nx오버레이.
         #   410·460은 같은 SP라 숫자 동일해야 함 → 키팅의 검증된 충당을 그대로 사용. 생산ST=finish만 차감(준비 제외).
         for g in rows:
@@ -470,6 +495,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             if k not in _assy_pool: _assy_pool[k] = assystk.get(g["assy"], 0.0) * g["use_qty"]   # 제품(ASSY)재고 = SA_T_ITEM_STOCK(도번)×use_qty
         _shared(lambda g: (g["assy"], g["upper"], g["item"]), _assy_pool, 70, 'finish')   # A: 제품(ASSY)재고
         _shared(lambda g: g["item"], partstk, 70, 'finish')                               # B: 중간공정 파트재고(PR+PU_T_MAT_STOCK_WH by 자도번)
+        _shared(lambda g: (g["item"], g["gpc"]), jpstk, 40, 'finish')                      # J: 작업중 전표재고(용접시트, 라이브) → finish 가산
         _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')       # C: 준비재고(도번+파트) → 색(녹)만·미생산 판정 제외
         # 4) nx 셀단위 준비 오버레이(우리 웹 확인분, src=nx만)
         for g in rows:
