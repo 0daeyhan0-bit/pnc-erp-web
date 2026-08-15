@@ -1219,17 +1219,13 @@ def sourcing_pending(item: str = Query(""), gubun: str = Query(""), user: str = 
 @router.get("/api/sourcing/route/detail")
 def sourcing_route_detail(route_id: int = Query(...)):
     """승인관리 상세: 후보 헤더 + 라인(공급처 코드→이름)."""
-    import time as _tt, sys as _ss; _te=_tt.time(); _te0=_te
     nx = _nx(); cur = nx.cursor()
-    print(f"[DETAIL-DBG] _nx open {(_tt.time()-_te)*1000:.0f}ms", file=_ss.stderr, flush=True); _te=_tt.time()
     try:
         _ensure_route_tbl(cur)
-        print(f"[DETAIL-DBG] ensure_route_tbl {(_tt.time()-_te)*1000:.0f}ms", file=_ss.stderr, flush=True); _te=_tt.time()
         cur.execute("""SELECT route_id,item_code,ISNULL(route_no,0),ISNULL(route_name,''),ISNULL(gubun,''),ISNULL(vendor_code,''),
               approve_flag,ISNULL(reject_flag,0),ISNULL(reject_reason,''),CONVERT(varchar(10),apply_from,23),ISNULL(note,''),ISNULL(ins_user,'')
             FROM nx.sourcing_route WHERE route_id=?""", route_id)
         h = cur.fetchone()
-        print(f"[DETAIL-DBG] hdr query {(_tt.time()-_te)*1000:.0f}ms", file=_ss.stderr, flush=True); _te=_tt.time()
         if not h: raise HTTPException(404, "대상 없음")
         cur.execute("""SELECT line_id,sort_seq,ISNULL(child_item,''),ISNULL(child_name,''),qty,ISNULL(gubun,''),
               ISNULL(vendor_code,''),is_rawmat,diam,thick,len_val,ISNULL(material,''),ISNULL(spec,''),
@@ -1243,9 +1239,7 @@ def sourcing_route_detail(route_id: int = Query(...)):
                           "diam": float(l[8] or 0), "thick": float(l[9] or 0), "len_val": float(l[10] or 0),
                           "material": l[11], "spec": l[12],
                           "node_kind": str(l[13] or 'PART'), "parent_line": (int(l[14]) if l[14] is not None else None), "sub_item": str(l[15] or '')})
-        print(f"[DETAIL-DBG] lines query {(_tt.time()-_te)*1000:.0f}ms", file=_ss.stderr, flush=True); _te=_tt.time()
         vmap = _custnm_map(cur, vcodes)
-        print(f"[DETAIL-DBG] custnm_map {(_tt.time()-_te)*1000:.0f}ms", file=_ss.stderr, flush=True); _te=_tt.time()
         for l in lines: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
         # 후보별 공정배치(route_proc) + BASE 공수합(게이트 기준)
         cur.execute("SELECT node_item,proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'') FROM nx.sourcing_route_proc WHERE route_id=?", route_id)
@@ -1256,14 +1250,10 @@ def sourcing_route_detail(route_id: int = Query(...)):
                "approve_flag": bool(h[6]), "reject_flag": bool(h[7]), "reject_reason": h[8], "apply_from": h[9],
                "note": h[10], "ins_user": h[11]}
         base_g = None; base_procs = []
-        import time as _t; _t0=_t.time(); import sys as _sys
         try:
             with _COST_LOCK:
                 try: pg = _get_cost_engine().proc_grid(str(h[1]).strip(), "260630")
-                except Exception as _e:
-                    print(f"[DETAIL-DBG] proc_grid warm FAILED → fresh: {type(_e).__name__}: {str(_e)[:150]}", file=_sys.stderr, flush=True)
-                    pg = _get_cost_engine(fresh=True).proc_grid(str(h[1]).strip(), "260630")
-            print(f"[DETAIL-DBG] proc_grid took {(_t.time()-_t0)*1000:.0f}ms", file=_sys.stderr, flush=True)
+                except Exception: pg = _get_cost_engine(fresh=True).proc_grid(str(h[1]).strip(), "260630")
             base_procs = [{"proc_code": k, "work_qty": round(float(v.get("wq", 0)), 2), "uph": float(v.get("uph", 0)), "cg": str(v.get("cg", ""))}
                           for k, v in pg.items() if float(v.get("wq", 0)) > 0]
             base_procs.sort(key=lambda x: x["proc_code"])
@@ -1278,7 +1268,6 @@ def sourcing_route_detail(route_id: int = Query(...)):
                   "weld_qty": float(r[3] or 0), "use_qty": float(r[4] or 0), "st": float(r[5] or 0)} for r in cur.fetchall()]
         # ★재설계 패널: 절삭(부품별 자동귀속) + 조립(비종속 pool·노드배치). Σ=base_gongsu diff0.
         part_cut = {}; asm_procs = []
-        _t1=_t.time()
         try:
             pc, asm, bg2 = _panel_cut_asm(str(h[1]).strip(), "260630")
             pcodes = set(asm.keys()) | {p for d in pc.values() for p in d.keys()}
@@ -1303,7 +1292,6 @@ def sourcing_route_detail(route_id: int = Query(...)):
         # ★I-2: cand_gongsu = cut_sum(절삭 자동귀속) + proc_sum(후보 배치 조립공정) → base_gongsu와 정합, gate_ok 정확.
         cut_sum = round(sum(x["wq"] for v in part_cut.values() for x in v), 2)
         cand_g = round(cut_sum + proc_sum, 2)
-        print(f"[DETAIL-DBG] panel+procname took {(_t.time()-_t1)*1000:.0f}ms | TOTAL cost-section {(_t.time()-_t0)*1000:.0f}ms | FUNC-TOTAL {(_tt.time()-_te0)*1000:.0f}ms", file=_sys.stderr, flush=True)
         return {"header": hdr, "lines": lines, "procs": procs, "base_procs": base_procs, "welds": welds,
                 "part_cut": part_cut, "asm_procs": asm_procs,
                 "base_gongsu": base_g, "cand_gongsu": cand_g, "cut_sum": cut_sum, "proc_sum": proc_sum,

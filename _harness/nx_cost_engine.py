@@ -25,6 +25,25 @@ class NxCostEngine:
     def close(self):
         if self.own and self.cn: self.cn.close()
 
+    def reconnect(self):
+        """커넥션만 재연결(메모캐시 _item/_lines/_pur/_matc/_gagc/_hdr/_top_lg 전부 보존).
+           FastAPI 스레드풀 전환·유휴로 pyodbc 커넥션이 죽었을 때(10054) 엔진을 통째 버리는 fresh 재생성(빈캐시 재적재=수초) 대신
+           커넥션만 갈아끼워 회복 → 값 불변·속도만 회복. pyodbc 풀링으로 재연결 자체는 near-instant."""
+        if not self.own: return   # 외부 커서 주입 모드는 재연결 불가(호출측 책임)
+        try:
+            if self.cn: self.cn.close()
+        except Exception: pass
+        self.cn = _nx(); self.cur = self.cn.cursor()
+
+    def alive(self):
+        """커넥션 헬스체크. 살아있으면 True, 죽었으면 reconnect 후 False(=재연결됨) 반환. 캐시는 항상 보존."""
+        try:
+            self.cur.execute("SELECT 1"); self.cur.fetchone(); return True
+        except Exception:
+            try: self.reconnect()
+            except Exception: pass
+            return False
+
     def _prime_caches(self, item):
         """★성능: 서브트리 전 노드의 item/routing/proc_weld/bom_header를 **서버측 CTE-JOIN**으로 일괄 로드(클라 IN(N)은 드라이버 오버헤드 ~520ms/쿼리라 회피).
            채우는 캐시(_item·_pc·_rc·_wlc·_hdr)는 per-node 메서드와 동일 구조·동일 값 → 결과 불변(속도만).
