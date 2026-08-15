@@ -2272,7 +2272,7 @@ SCREEN.subvariant=(c)=>{
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <div style="font-weight:700;color:#8e44ad">🧩 SUB 재구성 · 공정 배치</div>
         <span id="sp-gate" style="font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(total)} / BASE ${base} = 절삭 ${nfq(cutSum)} + 조립 ${nfq(procSum)} ${ok?'✔':'✖ 불일치'}</span>
-        <button class="btn" id="sp-finalize" style="margin-left:auto;background:#1c7c3a;color:#fff;padding:2px 12px" title="신규SUB중복검사→공수합=BASE→부품수 3종 검증 후 저장">💾 전체 저장(검증)</button></div>
+        <button class="btn" id="sp-validate" style="margin-left:auto;background:#1c47a0;color:#fff;padding:2px 12px" title="공수합=BASE · 부품수=BASE · 구성 검증만 수행(저장하지 않음). 저장은 하단 [저장] 버튼.">🔍 BOM 검증</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
         <div style="flex:1;min-width:250px;min-height:420px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
           <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">부품 풀 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(전 구성부품·배지=배치노드·오른쪽 SUB/새SUB존으로 드래그)</span></div>
@@ -2484,7 +2484,7 @@ SCREEN.subvariant=(c)=>{
     {const b=g('#dt-close');if(b)b.onclick=()=>closeDetail();}
     {const b=g('#dt-cancel');if(b)b.onclick=()=>cancelDraft();}          // ✖ 취소 = 롤백+닫기
     {const b=g('#dt-register');if(b)b.onclick=()=>saveHdr(true);}         // ✔ 등록 = 커밋(fresh 해제)
-    {const b=g('#dt-hsave2');if(b)b.onclick=()=>saveHdr(false);}          // 💾 저장(커밋된 후보 헤더 수정)
+    {const b=g('#dt-hsave2');if(b)b.onclick=()=>saveWithGate(st.detail.route_id);}  // 💾 저장 = 저장전 재검증(공정/구성≠BOM이면 차단) + 헤더 + SUB중복 + 확정
     {const b=g('#dt-newfromcur');if(b)b.onclick=()=>{st.detail=null;openNew('cur');};}
     {const b=g('#dt-editcur');if(b)b.onclick=async()=>{   // ★현행(R01) 직접 수정 = baseline을 편집용 route로 실체화 후 대안과 동일 편집
       if(!confirm('현행(R01)을 직접 수정합니다.\n실사용 BOM을 편집용 route로 실체화합니다 — 이후 실사용 BOM이 바뀌어도 자동반영 안 됩니다([BOM 다시 불러오기]로 리셋 가능). 계속?'))return;
@@ -2537,8 +2537,8 @@ SCREEN.subvariant=(c)=>{
       try{const r=await fetch(`${API}/api/sourcing/sub/dissolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+b.dataset.sub})});
         const j=await r.json();if(j.ok){st.msg=`SUB 해체 ✔ 부품 ${j.freed} 복귀 · 공정 이관 ${j.moved_proc} · 용접 이관 ${j.moved_weld}`;await reloadPanel();}
         else alert('해체 실패: '+(j.detail||JSON.stringify(j)));}catch(err){alert('해체 오류: '+err.message);}});
-    // 전체 저장 = ①신규SUB중복검사→재사용확인 ②공수합=BASE ③부품수 일치
-    {const b=g('#sp-finalize');if(b)b.onclick=()=>finalizeRoute(rid);}
+    // 🔍 BOM 검증 = 공수합=BASE·부품수=BASE·구성 검증만(저장 안 함). 저장은 하단 [저장](saveWithGate).
+    {const b=g('#sp-validate');if(b)b.onclick=()=>validateRoute(rid);}
     // ---- #4 업체 매핑(조달프로파일) binds ----
     {const b=g('#rp-open');if(b)b.onclick=()=>loadRP(rid);}
     c.querySelectorAll('.rp-f').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k,row=(st.rp&&st.rp.rows)?st.rp.rows[i]:null;if(!row)return;
@@ -2637,18 +2637,34 @@ SCREEN.subvariant=(c)=>{
       onWeldCount:(d,v)=>{const val=+v||0;if(val>0)np.weldCounts[d]=val;else delete np.weldCounts[d];draw();},
       onWeldType:(v)=>{np.weldItem=v;},
     });};
-  const finalizeRoute=async(rid)=>{const item=st.routeTarget;
+  // 🔍 BOM 검증 = 검증만(commit:0 → 롤백, 저장 안 함). 공수합=BASE·부품수=BASE·구성 확인. SUB 중복검사/재사용은 하지 않음(저장 시에만).
+  const validateRoute=async(rid)=>{const item=st.routeTarget;
     try{
+      const r=await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',commit:0})});
+      const j=await r.json();
+      if(j.ok){alert(`✅ BOM 검증 통과 (저장 안 됨 — 반영하려면 하단 [저장])\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count} 일치 ✔`);}
+      else{alert('❌ BOM 검증 실패 — 공정/구성이 BOM과 다릅니다:\n\n'+((j.errors||[]).join('\n')||`공수합 ${nfq(j.cand_gongsu)} ≠ BASE ${nfq(j.base_gongsu)}`)+'\n\n(이 상태로는 [저장]되지 않습니다.)');}
+    }catch(e){alert('검증 오류: '+e.message);}};
+  // 💾 저장 = ★저장 직전 재검증 → 공정/구성이 BOM과 다르면 저장 차단. 통과 시 헤더저장 + SUB중복 재사용확인 + 확정(commit:1).
+  const saveWithGate=async(rid)=>{const item=st.routeTarget;
+    try{
+      // (1) 저장 전 재검증(commit:0=검증만)
+      const v=await(await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',commit:0})})).json();
+      if(!v.ok){alert('❌ 저장할 수 없습니다 — 공정/구성이 BOM과 다릅니다:\n\n'+((v.errors||[]).join('\n')||`공수합 ${nfq(v.cand_gongsu)} ≠ BASE ${nfq(v.base_gongsu)}`)+'\n\n[BOM 검증]으로 확인 후 수정하세요.');return;}
+      // (2) 헤더(경로명/구분/유효일자/비고) 저장
+      const okh=await saveHdr(false);if(okh===false)return;
+      // (3) SUB 중복 재사용 확인(선택) — 저장 시에만 물어봄
       const sm=await(await fetch(`${API}/api/sourcing/sub/match?route_id=${rid}`)).json();
       const reuse={};
       for(const m of (sm.matches||[])){
-        if(confirm(`동일한 서브가 존재합니다(${m.match_code}).\n현재 SUB ${m.sub_item}(부품 ${m.member_count}종) 대신 그 서브를 사용하시겠습니까?`)) reuse[m.sub_line]=m.match_code;
+        if(confirm(`동일한 표준 SUB가 존재합니다(${m.match_code}).\n현재 SUB ${m.sub_item}(부품 ${m.member_count}종) 대신 그 표준 SUB를 사용하시겠습니까?\n(취소 = 현재 SUB 그대로 저장)`)) reuse[m.sub_line]=m.match_code;
       }
+      // (4) 확정 커밋(commit:1 — 서버가 게이트 재검증 후 통과 시에만 저장)
       const r=await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',reuse_map:reuse,commit:1})});
       const j=await r.json();
-      if(j.ok){alert(`✅ 전체 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(신규 SUB 정본 채번은 승인 시 수행)`);await loadRD(rid);await loadRoutes();}
+      if(j.ok){alert(`✅ 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(신규 SUB 정본 채번은 승인 시 수행)`);await loadRD(rid);await loadRoutes();}
       else{alert('❌ 저장 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));}
-    }catch(e){alert('전체 저장 오류: '+e.message);}};
+    }catch(e){alert('저장 오류: '+e.message);}};
   // ---------- 대상 선택(부분갱신) ----------
   const selectTarget=async(code,el)=>{
     if(!code||code===st.routeTarget)return;
