@@ -1925,7 +1925,7 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="page-sub">품번 검색 → BOM 구성(다단계 전개)·내부원가·실원가. 원천 단일BOM(nx.bom_line). 기본은 현행만, "과거포함" 체크 시 휴면 품번·BOM도 표시.</div>
      ${item?tabbar('bom'):''}
      <div class="toolbar">
-       <label class="tl">품번</label><input class="inp" id="bm-q" value="${esc(query)}" placeholder="품번 일부 입력 후 조회" style="width:220px">
+       <label class="tl">품번</label><input class="inp" id="bm-q" value="${esc(query)}" placeholder="품번/품명 검색" style="width:220px">
        <button class="btn" id="bm-search">🔍 검색</button>
        <label class="tl" title="체크 시 휴면(과거) 품번·BOM도 검색결과에 표시" style="margin-left:2px;font-weight:400;color:var(--muted)"><input type="checkbox" id="bm-past" ${includePast?'checked':''} style="vertical-align:middle"> 과거포함</label>
        ${(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="bm-new" style="background:#1c7c3a;color:#fff">＋ 신규 BOM 등록</button>`:''}
@@ -2427,10 +2427,10 @@ SCREEN.subvariant=(c)=>{
      <div class="page-sub">상단=<b>품목 BOM관리 '내부원가' 탭 재료표</b>(재료행 클릭=조달대상). 하단=<b>조달경로 후보</b> — <b>➕신규 등록</b>(현행복사/기존복사/빈수동) · <b>현행 더블클릭=상세보기</b> · <b>대안 더블클릭=상세편집</b>. 승인해야 조달프로파일 노출. <code>/api/cost/nae · nx.sourcing_route</code></div>
      <div style="display:flex;gap:14px;align-items:flex-start">
       <div style="flex:0 0 290px">
-       <div class="toolbar"><input class="inp" id="sv-q" list="sv-dl" autocomplete="off" value="${esc(st.q)}" placeholder="품번/품명 (예: 3402)" style="width:180px;min-width:0"><datalist id="sv-dl"></datalist><button class="btn" id="sv-search">🔍</button></div>
+       <div class="toolbar"><input class="inp" id="sv-q" list="sv-dl" autocomplete="off" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px;min-width:0"><datalist id="sv-dl"></datalist><button class="btn" id="sv-search">🔍</button></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th class="center">BOM</th></tr></thead>
-        <tbody>${st.searching?spinRow(3):(st.slist.length?st.slist.map(s=>`<tr class="sv-row${st.sel===s.item?' sel':''}" data-i="${esc(s.item)}" style="cursor:pointer"><td><b>${esc(s.item)}</b></td><td class="bcap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.name)}">${esc(s.name||'')}</td><td class="center">${s.has_bom?'<span style="color:#1c7c3a">●</span>':'<span style="color:#ccc">–</span>'}</td></tr>`).join(''):`<tr><td colspan="3" class="empty">품번/품명 검색 (예: 3402)</td></tr>`)}</tbody></table>
+        <tbody>${st.searching?spinRow(3):(st.slist.length?st.slist.map(s=>`<tr class="sv-row${st.sel===s.item?' sel':''}" data-i="${esc(s.item)}" style="cursor:pointer"><td><b>${esc(s.item)}</b></td><td class="bcap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.name)}">${esc(s.name||'')}</td><td class="center">${s.has_bom?'<span style="color:#1c7c3a">●</span>':'<span style="color:#ccc">–</span>'}</td></tr>`).join(''):`<tr><td colspan="3" class="empty">품번/품명 검색</td></tr>`)}</tbody></table>
        </div>
       </div>
       <div style="flex:1;min-width:0">
@@ -2442,7 +2442,7 @@ SCREEN.subvariant=(c)=>{
           <div id="sv-tree" style="overflow-x:auto">${matTbl()}</div>
           <div style="height:14px"></div>
           <div id="sv-routes">${routesPanel()}</div></div>`}`
-       :`<div class="empty" style="margin-top:40px">좌측에서 품번을 선택하세요. (예: 3402 검색)</div>`}
+       :`<div class="empty" style="margin-top:40px">좌측에서 품번을 선택하세요.</div>`}
       </div>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#1c7c3a">${esc(st.msg)}</div>`:''}
