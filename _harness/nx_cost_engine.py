@@ -329,6 +329,10 @@ class NxCostEngine:
     def lme_total(self, item, ymd, mult=1.0, seen=None):
         """LME차액 총합(전 서브트리). SP: 최말단 구매(INNER_PROD=0) 동부품(중량>0·사급거래처)만
            (소재단가−사급단가)×중량×누적qty. 외주완성 경계도 뚫고 전개(cost_gubun 5만 정지)."""
+        # ★jiknap-root-fix(2026-08-16, 승인·화면검증): 직납(cost_gubun=5) 품목은 직납가 고정 → 내부 LME 없음.
+        #   루프는 직납 '자식'만 정지하고 '루트'가 직납일 땐 자식(동)까지 파고들어 LME 오적용(AJR77223106·STS 6품목).
+        #   레거시는 직납 루트를 직납가로 멈춤(LME=0). 직납 138품목 전수 무회귀 검증.
+        if self._load_item(item)['cost_gubun']=='5': return 0.0
         if seen is None: seen=set()
         ymcut='20'+ymd[:4]
         total=0.0
