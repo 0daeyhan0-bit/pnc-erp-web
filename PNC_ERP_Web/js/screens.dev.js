@@ -2167,9 +2167,7 @@ SCREEN.subvariant=(c)=>{
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':(cur?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">현행</span>':apBadge(r))}
       <div style="flex:1"></div>
       ${cur
-        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${canW?(r.baseline
-            ? ` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`
-            : ` <button class="btn sv-open" data-rid="${r.route_id}" data-mode="edit" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`):''}`
+        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${canW?` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`:''}`
         : `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="${canW?'edit':'view'}" style="padding:1px 8px;font-size:11px">${canW?'수정':'상세'}</button>${canW?` <button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'승인'}</button> <button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">삭제</button>`:''}`}
     </div>`;};
   const routesPanel=()=>{
@@ -2469,6 +2467,7 @@ SCREEN.subvariant=(c)=>{
     c.querySelectorAll('.sv-open').forEach(b=>b.onclick=e=>{e.stopPropagation();openDetail(+b.dataset.rid,b.dataset.mode);});
     // ★현행 카드 '수정'(baseline) = 실체화 후 편집 바로 진입
     c.querySelectorAll('.sv-editcur').forEach(b=>b.onclick=async e=>{e.stopPropagation();
+      if(!confirm('현행(실사용 BOM)을 수정합니다.\n닫기=되돌리기 · 전체 저장(검증)해야 반영됩니다. 계속?'))return;   // ★매번 확인
       try{const r=await fetch(`${API}/api/sourcing/route/edit_current`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,user:'웹사용자'})});
         const j=await r.json();if(!j.ok){alert('현행 수정 진입 실패: '+(j.detail||''));return;}
         await loadRoutes();openDetail(j.route_id,'edit',false);}catch(x){alert('오류: '+x.message);}});
