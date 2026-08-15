@@ -448,12 +448,14 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             grp = {}
             for g in rows:
                 for b, c in g["_cells"].items():
-                    grp.setdefault(keyfn(g), []).append((c, (b if b != 'P' else (g["part_ymd"] or '999999')), g["inhm"] or ''))
+                    sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
+                    # ★배분순서 = 레거시 SP 커서 order by (part_plan_ymd, part_output_hm, plan_ymd, work_order, split_work_order) 이식 → 동순위 행 충당 일치
+                    grp.setdefault(keyfn(g), []).append((c, sd, g["inhm"] or '', g["plan_ymd"] or '', g["wo"] or '', g["swo"] or ''))
             for k, lst in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
-                lst.sort(key=lambda x: (x[1], x[2]))
-                for c, sd, hm in lst:
+                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5]))
+                for c, sd, hm, _py, _wo, _swo in lst:
                     if pool <= 0: break
                     jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
                     if jan <= 0: continue
