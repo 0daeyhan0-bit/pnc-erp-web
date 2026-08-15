@@ -2481,7 +2481,7 @@ SCREEN.subvariant=(c)=>{
     {const x=g('#dt-x');if(x)x.onclick=()=>closeDetail();}                 // ✕(항상) — fresh는 dt-close 없음(취소/등록) → 개별 널가드(체이닝 금지)
     {const b=g('#dt-close');if(b)b.onclick=()=>closeDetail();}
     {const b=g('#dt-cancel');if(b)b.onclick=()=>cancelDraft();}          // ✖ 취소 = 롤백+닫기
-    {const b=g('#dt-register');if(b)b.onclick=()=>saveHdr(true);}         // ✔ 등록 = 커밋(fresh 해제)
+    {const b=g('#dt-register');if(b)b.onclick=()=>registerWithGate(st.detail.route_id);}   // ✔ 등록 = 게이트검증(공정/구성≠BOM이면 차단) + SUB중복 + 확정 + fresh해제
     {const b=g('#dt-hsave2');if(b)b.onclick=()=>saveWithGate(st.detail.route_id);}  // 💾 저장 = 저장전 재검증(공정/구성≠BOM이면 차단) + 헤더 + SUB중복 + 확정
     {const b=g('#dt-newfromcur');if(b)b.onclick=()=>{st.detail=null;openNew('cur');};}
     {const b=g('#dt-editcur');if(b)b.onclick=async()=>{   // ★현행(R01) 직접 수정 = baseline을 편집용 route로 실체화 후 대안과 동일 편집
@@ -2663,6 +2663,26 @@ SCREEN.subvariant=(c)=>{
       if(j.ok){alert(`✅ 저장 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(신규 SUB 정본 채번은 승인 시 수행)`);await loadRD(rid);await loadRoutes();}
       else{alert('❌ 저장 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));}
     }catch(e){alert('저장 오류: '+e.message);}};
+  // ✔ 등록(신규 후보 확정) = 저장(saveWithGate)과 동일 작동: 재검증(공정/구성≠BOM이면 차단) + 헤더커밋(fresh해제) + SUB중복 + 확정.
+  const registerWithGate=async(rid)=>{const item=st.routeTarget;
+    try{
+      // (1) 등록 전 재검증(commit:0)
+      const v=await(await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',commit:0})})).json();
+      if(!v.ok){alert('❌ 등록할 수 없습니다 — 공정/구성이 BOM과 다릅니다:\n\n'+((v.errors||[]).join('\n')||`공수합 ${nfq(v.cand_gongsu)} ≠ BASE ${nfq(v.base_gongsu)}`)+'\n\n[BOM 검증]으로 확인 후 수정하세요.');return;}
+      // (2) SUB 중복 재사용 확인(선택)
+      const sm=await(await fetch(`${API}/api/sourcing/sub/match?route_id=${rid}`)).json();
+      const reuse={};
+      for(const m of (sm.matches||[])){
+        if(confirm(`동일한 표준 SUB가 존재합니다(${m.match_code}).\n현재 SUB ${m.sub_item}(부품 ${m.member_count}종) 대신 그 표준 SUB를 사용하시겠습니까?\n(취소 = 현재 SUB 그대로 등록)`)) reuse[m.sub_line]=m.match_code;
+      }
+      // (3) 확정 커밋(commit:1 — 서버 게이트 재검증 후 통과 시에만)
+      const j=await(await fetch(`${API}/api/sourcing/route/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,item_code:item,ymd:'260630',reuse_map:reuse,commit:1})})).json();
+      if(!j.ok){alert('❌ 등록 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));return;}
+      // (4) 헤더 커밋 + fresh 해제(닫기=삭제 방지 → 정식 후보 확정)
+      const okh=await saveHdr(true);if(okh===false)return;
+      alert(`✅ 등록 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(승인해야 조달프로파일에 노출됩니다)`);
+      await loadRoutes();
+    }catch(e){alert('등록 오류: '+e.message);}};
   // ---------- 대상 선택(부분갱신) ----------
   const selectTarget=async(code,el)=>{
     if(!code||code===st.routeTarget)return;

@@ -821,7 +821,7 @@ def sourcing_route_copy(payload: dict = Body(...)):
             except Exception:
                 pass
         nx.commit()
-        return {"ok": True, "route_id": nid, "route_no": rno, "lines": len(src_lines),
+        return {"ok": True, "route_id": nid, "route_no": rno, "lines": line_count,
                 "copied_children": new_children, "suffix": suffix, "seeded_asm": seeded_asm}
     except Exception:
         nx.rollback(); raise
