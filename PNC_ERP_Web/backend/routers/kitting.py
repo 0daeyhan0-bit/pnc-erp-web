@@ -447,7 +447,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
             _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0) * g["use_qty"], 90, 'finish')   # 출하×use_qty(레거시 SALE×USE_QTY)
         # 2)생산완료(70)=생산실적 / 3)키팅완료(50)=준비재고 : ★도번단위 풀 공유·날짜순 충당(WO별 재부여 방지→실제 생산/준비량 만큼만 완료).
-        def _shared(keyfn, poolmap, tag, key):
+        def _shared(keyfn, poolmap, tag, key, force=False):
             grp = {}
             for g in rows:
                 for b, c in g["_cells"].items():
@@ -465,7 +465,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     if jan > pool: c[key] += pool; pool = 0.0
                     else:
                         c[key] += jan; pool -= jan
-                        if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
+                        if force or tag > c["tag"] or c["tag"] == 0: c["tag"] = tag   # force=레거시 last-write(J 전표가 준비 태그 덮어씀)
         # ★생산완료(70): 레거시 SP_..._NEW2_오전오후 재현 = ASSY재고(×use) + 중간파트재고 2풀. (PROD_DTL 아님 — 완료전표는 이미 재고로 잡힘)
         # ★풀 그룹키에 gpc 포함 = 레거시 SP 그룹경계(A:assy,bomlvl,upper,item,PROC · B:item,PROC_SEQ) 이식. proc_seq↔gpc(파트) → 파트별 독립 풀(전체조회시 파트간 공유 방지, 파트필터시 동일).
         _assy_pool = {}; _part_pool = {}
@@ -474,10 +474,11 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             if ka not in _assy_pool: _assy_pool[ka] = assystk.get(g["assy"], 0.0) * g["use_qty"]   # 제품(ASSY)재고 = SA_T_ITEM_STOCK(도번)×use_qty
             kp = (g["item"], g["gpc"])
             if kp not in _part_pool: _part_pool[kp] = partstk.get(g["item"], 0.0)                   # 중간파트재고(자도번, 파트별 독립)
+        # ★레거시 pool 적용순서 A→B→C→J 완전이식: 준비재고(C)를 전표(J)보다 먼저 소진 → 키팅부품이 작업중전표로 먼저 빠지고 남은 준비재고만 녹색(이중 녹색표시 방지).
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # A: 제품(ASSY)재고
         _shared(lambda g: (g["item"], g["gpc"]), _part_pool, 70, 'finish')                          # B: 중간공정 파트재고(PR+PU_T_MAT_STOCK_WH by 자도번)
-        _shared(lambda g: (g["item"], g["gpc"]), jpstk, 40, 'finish')                      # J: 작업중 전표재고(용접시트, 라이브) → finish 가산
-        _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')       # C: 준비재고(도번+파트) → 색(녹)만·미생산 판정 제외
+        _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')                      # C: 준비재고 → 색(녹)만·미생산 판정 제외 (전표보다 먼저 소진)
+        _shared(lambda g: (g["item"], g["gpc"]), jpstk, 40, 'finish', force=True)          # J: 작업중 전표재고(용접시트, 라이브) → finish 가산, 준비 태그 덮어씀(레거시 last-write)
         # 4) nx 셀단위 준비 오버레이(우리 웹 확인분, src=nx만)
         for g in rows:
             it = g["item"]
