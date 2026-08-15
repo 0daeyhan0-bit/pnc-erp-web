@@ -348,14 +348,14 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             g["plan_qty"] += q
         rows = list(keyed.values())
         capped = len(rows) >= int(limit); rows = rows[:int(limit)]
-        rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}; prodstk = {}
+        rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}; partstk = {}
         # ★성능: 전역 재고 롤업(필터무관 rstock·assystk·midstk·fixstk = 색tag 전용, 값/계획합계는 매요청 라이브 재조회)을 src별 90초 TTL 캐시.
         #   재귀 #tms4 롤업(~2초)을 반복조회마다 재계산하던 것을 캐시 → 조회 고속화. 소스맵은 읽기전용(_alloc은 셀만 변경)이라 공유 안전.
         _ck = "live" if SCH.endswith("dbo") else "nx"
         _cache = getattr(plan_part410, "_stk_cache", {})
         _ent = _cache.get(_ck); _now = _dt.now().timestamp()
         if _ent and (_now - _ent["ts"] < 90):
-            rstock = _ent["r"]; assystk = _ent["a"]; midstk = _ent["m"]; fixstk = _ent["f"]
+            rstock = _ent["r"]; assystk = _ent["a"]; midstk = _ent["m"]; fixstk = _ent["f"]; partstk = _ent.get("p", {})
         else:
             try:
                 cur.execute(f"SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM {SCH}.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
@@ -364,6 +364,10 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             try:
                 cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {SCH}.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                 for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
+            except Exception: pass
+            try:   # ★중간공정 파트재고(레거시 SP JOB 'B') = PR_T_MAT_STOCK_WH + PU_T_MAT_STOCK_WH by MAT_CODE(자도번), 무필터
+                cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM (SELECT MAT_CODE, STOCK_QTY FROM {SCH}.pr_t_mat_stock_wh WITH(NOLOCK) UNION ALL SELECT MAT_CODE, STOCK_QTY FROM {SCH}.pu_t_mat_stock_wh WITH(NOLOCK)) T GROUP BY MAT_CODE")
+                for rr in cur.fetchall(): partstk[rr[0]] = float(rr[1] or 0)
             except Exception: pass
             try:
                 cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
@@ -387,7 +391,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
                 for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
             except Exception: pass
-            _cache[_ck] = {"ts": _now, "r": rstock, "a": assystk, "m": midstk, "f": fixstk}
+            _cache[_ck] = {"ts": _now, "r": rstock, "a": assystk, "m": midstk, "f": fixstk, "p": partstk}
             plan_part410._stk_cache = _cache
         try:
             wos = list({g["wo"] for g in rows if g["wo"]})
