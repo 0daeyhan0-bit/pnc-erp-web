@@ -2201,8 +2201,6 @@ SCREEN.subvariant=(c)=>{
           </div>
           ${f.method==='copy'&&alts.length?`<label style="font-weight:700;color:#33507d">복사할 원본 후보</label>
             <select class="inp nf" data-k="source_route_id" style="width:100%;box-sizing:border-box;margin:3px 0 8px">${alts.map(r=>`<option value="${r.route_id}" ${+f.source_route_id===r.route_id?'selected':''}>후보 ${r.route_no} · ${esc(r.route_name||'')}</option>`).join('')}</select>`:''}
-          ${(f.method==='cur'||f.method==='copy')?`<label style="display:block;margin:6px 0 4px"><input type="checkbox" class="nf" data-k="copy_children" ${f.copy_children?'checked':''}> 하위품번도 <b>신규 채번(접미사)</b>으로 복사 <span style="color:#8aa0bd">(끄면 기존 품번 유지)</span></label>
-            <label>접미사 <input class="inp nf" data-k="suffix" value="${esc(f.suffix||'')}" placeholder="예: -S3" style="width:90px"></label>`:''}
           ${f.method==='blank'?`<div style="margin-top:8px;padding:10px;border:1px solid #e2e8f2;border-radius:8px;background:#fafbfd">
             <div style="font-weight:700;color:#33507d;margin-bottom:6px">헤더(빈 후보 필수값)</div>
             <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:7px 9px;align-items:center">
@@ -2678,7 +2676,7 @@ SCREEN.subvariant=(c)=>{
   const openNew=(preMethod)=>{const baseline=st.routes.find(r=>r.baseline);
     const nn=nextRouteNo(),autoLabel=`${st.routeTarget}_R${String(nn).padStart(2,'0')}`;
     st.newForm={target:st.routeTarget,name:autoLabel,autoLabel,nextNo:nn,method:preMethod||'cur',source_route_id:(altRoutes()[0]||{}).route_id||0,
-      copy_children:false,suffix:'',gubun:'',vendor_code:'',apply_from:'',current_flag:false,
+      gubun:'',vendor_code:'',apply_from:'',current_flag:false,
       lgAvail:!!(baseline&&(baseline.lines||[]).length===0)};draw();};
   const doNewCreate=async()=>{const f=st.newForm;
     if(!f.name)f.name=f.autoLabel||`${st.routeTarget}_R${String(nextRouteNo()).padStart(2,'0')}`;  // 후보명 자동(수동입력 제거)
@@ -2686,7 +2684,7 @@ SCREEN.subvariant=(c)=>{
       if(f.method==='cur'||f.method==='copy'||f.method==='base'){
         const body={item_code:st.routeTarget,user:'웹사용자'};
         if(f.method==='base') body.source='base';                       // BASE BOM 평면 seed
-        else{ body.source_route_id=f.method==='copy'?(+f.source_route_id||0):0; body.copy_children=f.copy_children?1:0; body.suffix=f.suffix; }
+        else{ body.source_route_id=f.method==='copy'?(+f.source_route_id||0):0; body.copy_children=0; }   // ★하위품번 신규채번 제거(1품번1BOM 원칙 — 대안은 조달경로/공정만 다름, 품번 접미사 복제 금지)
         const r=await fetch(`${API}/api/sourcing/route/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const j=await r.json();if(!j.ok){alert('생성 실패: '+(j.detail||JSON.stringify(j)));return;}
         await afterCreate(j.route_id,f.name,`${st.routeTarget}_R${String(j.route_no).padStart(2,'0')} 생성 (라인 ${j.lines})`);
