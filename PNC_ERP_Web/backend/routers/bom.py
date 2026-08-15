@@ -301,8 +301,11 @@ def _bom_tree_nx(item, real, expandbuy=0):
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
             # ★sub_alias 쿼리 제거(성능): 정리 후 canonical 전부 NULL=매핑 없음. 필요시 재도입. 원격DB 왕복 1회 절감.
         def disp(code): return alias.get(code, code)   # 리프변형 표시(자재 canonical). SUB는 아래 tree-order.
-        # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(사용자 확정 2026-08-13: ASSY품번+SUB순번). raw=원본코드(navi/edit),
+        # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(현재 임시=위치기반). raw=원본코드(navi/edit),
         #   정본식별 S#####(nx.sub_registry/sub_code_map)은 dedup·후보채번용 내부 identity(표시 아님).
+        # ★★정본설계(2026-08-15, _schema/SUB_CODE_MASKS_REAL_ASSY.md §7-1): 코드=출생라벨 {첫작업ASSY}_R{첫route}_S{nn}
+        #   (태어난 자리 박제·영구재사용·영속번호). 실제 제품(깨끗한코드)은 개명 금지=아래 subdisp에서 실제코드 유지(적용됨).
+        #   출생라벨·영속번호·공용flag = 마이그레이션 정본화 과제(현재는 위치기반 표시 유지).
         sub_seq = [0]; sub_map = {}
         def subdisp(child):
             if child in edges:   # 하위 보유 = SUB

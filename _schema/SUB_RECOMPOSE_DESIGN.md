@@ -1,7 +1,9 @@
 # SUB 재구성·채번·재사용 통합 설계 (SUB_RECOMPOSE)
 
+> ★★2026-08-15 갱신: **SUB 코드/채번 정본은 [[SUB_CODE_MASKS_REAL_ASSY]] §7-1(출생라벨안)로 이관.** 아래 2026-08-13 "글로벌 S##### 표시/제품base_S{순번}" 표시규칙은 **폐기**. 현 정본 = **코드 `{첫작업ASSY}_R{첫route}_S{nn}`(출생라벨 박제·영구재사용)** + 정체성 시그니처(구성품+용접) + 공용flag(참조수>1) + 실제제품 SUB코드 금지. 이 문서의 시그니처·dedup·mint 로직(`_sub_signature`/`_lookup_sub`/`_mint_sub`)은 유효, **채번/표시 코드형식만 §7-1로 대체**.
+
 작성 시작 2026-08-13. 조달경로 통합검토 "신규 조달프로파일(후보) 등록" 모달의 SUB 재편성(공정 바꿔가며 SUB 재구성 + 신규 채번)을 정본화한다.
-관련: [[BOM_STRUCTURE_CANON]] · [[R01_REBUILD_DESIGN]] · [[NX_BOM_SCHEMA]] · _migration/sub_norm/NX_MASTER_GAP.md
+관련: [[BOM_STRUCTURE_CANON]] · [[R01_REBUILD_DESIGN]] · [[NX_BOM_SCHEMA]] · [[SUB_CODE_MASKS_REAL_ASSY]] · _migration/sub_norm/NX_MASTER_GAP.md
 
 ## 배경 / 문제
 - 레거시는 ASSY BOM을 1개로만 구성 → 공정·조달이 다르면 **품번 접미사로 SUB를 복제**(AJR75563402-은납/-19-1/-F&T ...).
