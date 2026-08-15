@@ -2159,7 +2159,7 @@ SCREEN.subvariant=(c)=>{
       <tbody>${fm.normal.map(r=>row(r,false)).join('')}${fm.weldArr.map(r=>row(r,true)).join('')}</tbody></table>`;};
   // ---------- 하단: 후보 요약 카드 ----------
   const apBadge=r=>r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#c0392b;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">개발 미승인</span>';
-  const card=r=>{const cur=r.current_flag||r.baseline;
+  const card=r=>{const cur=r.current_flag||r.baseline||r.route_no===1;   // ★route_no=1=현행(current_flag 리셋돼도 방어)
     return `<div class="sv-card" data-rid="${r.route_id}" style="border:1px solid ${cur?'#bfe6cd':'#c9d3e0'};border-radius:8px;padding:8px 12px;margin-bottom:8px;background:${cur?'#eafaef':'#fff'};cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center" title="더블클릭: 상세${cur?' 보기':' 편집'}">
       <span style="background:${cur?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700" title="후보 라벨(base 품번은 불변)">${esc(st.routeTarget)}_R${String(r.baseline?1:r.route_no).padStart(2,'0')}${cur?' · 현행':''}</span>
       <b style="color:#1c3a6e">${esc(r.route_name||(r.baseline?'현행(실사용 BOM)':''))}</b>
@@ -2371,7 +2371,10 @@ SCREEN.subvariant=(c)=>{
       ? (canW?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff">현행 수정</button> <button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">이 현행으로 새 후보 만들기</button>`:'')
       : (fresh
           ? '<span style="color:#8aa0bd;font-size:11px">[등록]해야 후보가 확정됩니다 · 닫기/취소 = 등록 취소</span>'
-          : (canW?`${isCur?`<button class="btn" id="dt-resetcur" style="background:#e67e22;color:#fff" title="실사용 BOM에서 라인을 다시 불러와 편집 초기화">🔄 BOM 다시 불러오기</button> `:''}<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`:''));
+          : (canW?(isCur
+              ? `<button class="btn" id="dt-resetcur" style="background:#e67e22;color:#fff" title="실사용 BOM에서 라인을 다시 불러와 편집 초기화">🔄 BOM 다시 불러오기</button>`   // ★현행: BOM리셋만(승인 없음 — 실사용 BOM 자체라 승인대상 아님)
+              : `<button class="btn sv-appr" data-rid="${R.route_id}" data-on="${R.approve_flag?0:1}" style="${R.approve_flag?'':'background:#1c7c3a;color:#fff'}">${R.approve_flag?'승인취소':'✔ 승인(개발)'}</button>`   // 대안: 승인
+            ):''));
     const footR=R.baseline
       ? `<button class="btn" id="dt-close">닫기</button>`
       : (fresh

@@ -674,9 +674,10 @@ def sourcing_route_save(payload: dict = Body(...)):
     try:
         _ensure_route_tbl(cur)
         if rid and int(rid) > 0:
-            cur.execute("""UPDATE nx.sourcing_route SET route_name=?, vendor_code=?, gubun=?, current_flag=?,
+            cur.execute("""UPDATE nx.sourcing_route SET route_name=?, vendor_code=?, gubun=?,
+                  current_flag=CASE WHEN route_no=1 THEN 1 ELSE ? END,
                   apply_from=?, note=?, approve_flag=0, upd_user=?, upd_dt=getdate() WHERE route_id=?""",
-                  rname, ven, gub, cur_f, apf, note, usr, int(rid))
+                  rname, ven, gub, cur_f, apf, note, usr, int(rid))   # ★현행(route_no=1) current_flag 리셋 방지
             if cur.rowcount == 0: raise HTTPException(404, f"대상 없음(route_id={rid})")
             _snap_clear(cur, int(rid))   # ★헤더 저장도 편집 세션 확정(닫기=되돌릴 것 없음)
             return {"ok": True, "route_id": int(rid), "mode": "update", "approve_reset": True}
@@ -977,11 +978,11 @@ def sourcing_route_delete(payload: dict = Body(...)):
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
-        cur.execute("SELECT current_flag FROM nx.sourcing_route WHERE route_id=?", rid)
+        cur.execute("SELECT current_flag, route_no FROM nx.sourcing_route WHERE route_id=?", rid)
         r = cur.fetchone()
         if not r: raise HTTPException(404, "대상 없음")
-        if int(r[0] or 0) == 1:
-            nx.rollback(); return {"ok": False, "guard": "CURRENT", "msg": "현행(실사용) 후보는 삭제할 수 없습니다."}
+        if int(r[0] or 0) == 1 or int(r[1] or 0) == 1:   # ★현행 하드락 — route_no=1은 절대 삭제 불가(current_flag 리셋돼도 방어)
+            nx.rollback(); return {"ok": False, "guard": "CURRENT", "msg": "현행(실사용 BOM)은 삭제할 수 없습니다."}
         # 삭제 가드: 조달프로파일에서 사용(업체 매핑) 중이면 거부
         cur.execute("SELECT COUNT(*) FROM nx.sourcing_profile WHERE route_id=?", rid)
         nprof = int(cur.fetchone()[0] or 0)
