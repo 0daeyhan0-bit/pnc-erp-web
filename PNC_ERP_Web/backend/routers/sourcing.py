@@ -730,6 +730,8 @@ def sourcing_route_copy(payload: dict = Body(...)):
     src_rid = int(p.get("source_route_id") or 0)
     src_item = str(p.get("source_item", "")).strip()   # 특정 품번에서 복사(현행 BOM seed)
     copy_children = 1 if p.get("copy_children") else 0
+    ymd = str(p.get("ymd", "260630")).strip() or "260630"
+    current_copy = False   # ★현행 복사=현행 수정과 동일 SUB 구조로 실체화(평면 아님)
     usr = (str(p.get("user", "")).strip() or "웹사용자")[:30]
     nx = _nx_tx(); cur = nx.cursor()   # 헤더+라인 원자적
     try:
@@ -763,11 +765,10 @@ def sourcing_route_copy(payload: dict = Body(...)):
                   ISNULL(vendor_code,''), is_rawmat, diam, thick, len_val, ISNULL(material,''), ISNULL(spec,''), ISNULL(note,'')
                 FROM nx.sourcing_route_line WHERE route_id=? ORDER BY sort_seq, line_id""", src_rid)
             src_lines = [list(r) for r in cur.fetchall()]
-        else:   # 현행 baseline 파생
+        else:   # ★현행 복사 → 현행 수정 화면과 동일: SUB 중첩 구조 실체화(_insert_current_tree) + 노드별 조립공정 프리시드
             src_hdr = {"route_name": "현행 복사", "vendor_code": "", "gubun": "자체", "apply_from": None, "note": "현행(실사용 BOM) 복사"}
-            bl = _route_baseline_lines(item)
-            src_lines = [[l["sort_seq"], l["child_item"], l["child_name"], l["qty"], l["gubun"], l["vendor_code"],
-                         l["is_rawmat"], l["diam"], l["thick"], l["len_val"], l["material"], l["spec"], l["note"]] for l in bl]
+            src_lines = []
+            current_copy = True
         # 새 route_no
         rno = _next_route_no(cur, item)   # ★단조증가 채번(삭제해도 재사용 안 함)
         suffix = str(p.get("suffix", "") or f"-S{rno}").strip()[:8]
@@ -777,21 +778,35 @@ def sourcing_route_copy(payload: dict = Body(...)):
               _d(src_hdr["apply_from"]), src_hdr["note"], usr)
         nid = int(cur.fetchone()[0])
         new_children = []
+        line_count = len(src_lines)
         _cap = lambda v, n: (None if v is None else str(v)[:n])   # ★컬럼길이 초과 잘림오류(8152) 방지 — 긴 spec 등
-        for ln in src_lines:
-            child = str(ln[1]).strip()
-            if copy_children and child:
-                newc = (child + suffix)[:60]
-                cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", newc)
-                if not cur.fetchone():
-                    cur.execute("INSERT INTO nx.item(item_code,item_name,item_type) VALUES(?,?,N'부품')",
-                                newc, (str(ln[2]) or child)[:120])
-                new_children.append({"old": child, "new": newc})
-                child = newc
-            cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
-                  vendor_code,is_rawmat,diam,thick,len_val,material,spec,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  nid, ln[0], _cap(child, 60), _cap(ln[2], 120), ln[3], _cap(ln[4], 20), _cap(ln[5], 20),
-                  ln[6], ln[7], ln[8], ln[9], _cap(ln[10], 40), _cap(ln[11], 80), _cap(ln[12], 200))
+        if current_copy:
+            # ★현행 복사 = 현행 수정과 동일: 실사용 BOM 트리를 SUB 중첩 구조로 실체화 + 노드별 조립공정 프리시드(공수합=BASE)
+            line_count = _insert_current_tree(cur, nid, item, ymd)
+            try:
+                node_asm = _panel_node_asm(item, ymd)
+                for _node, _procs in (node_asm or {}).items():
+                    for pc_code, wq in (_procs or {}).items():
+                        if wq and float(wq) != 0:
+                            cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
+                                VALUES(?,?,?,?,0,'')""", nid, str(_node).strip()[:60], str(pc_code).strip()[:10], float(wq))
+            except Exception:
+                pass
+        else:
+            for ln in src_lines:
+                child = str(ln[1]).strip()
+                if copy_children and child:
+                    newc = (child + suffix)[:60]
+                    cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", newc)
+                    if not cur.fetchone():
+                        cur.execute("INSERT INTO nx.item(item_code,item_name,item_type) VALUES(?,?,N'부품')",
+                                    newc, (str(ln[2]) or child)[:120])
+                    new_children.append({"old": child, "new": newc})
+                    child = newc
+                cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
+                      vendor_code,is_rawmat,diam,thick,len_val,material,spec,note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                      nid, ln[0], _cap(child, 60), _cap(ln[2], 120), ln[3], _cap(ln[4], 20), _cap(ln[5], 20),
+                      ln[6], ln[7], ln[8], ln[9], _cap(ln[10], 40), _cap(ln[11], 80), _cap(ln[12], 200))
         # ★BASE 복사: 조립 공정(비종속=용접·지그·교정·부품부착·포장)을 ASSY 노드에 시드 → 신규 후보 공수합=BASE로 시작
         # (절삭은 part_cut 자동귀속이라 시드 불필요). 이후 사용자가 SUB로 재배치·차감.
         seeded_asm = 0
