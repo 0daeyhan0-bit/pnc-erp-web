@@ -396,6 +396,8 @@ SCREEN.partplan=(c)=>{
   const shiftDay=n=>{const d=new Date(st.base);d.setDate(d.getDate()+n);st.base=iso(d);load();};
   // 생산ST(행) = (생산계획 − 완료) × item_st(초) / 3600  [레거시 c_item_st]
   const rowST=r=>Math.max((+r.plan_qty||0)-(+r.finish||0),0)*(+r.item_st||0)/3600;
+  // PART INPUT 시간(output_hm) "1126"→"11:26" 표기(레거시 동일)
+  const hhmm=s=>{s=(''+(s||'')).trim();if(!s||!/^\d{1,4}$/.test(s))return esc(s);s=s.padStart(4,'0');return s.slice(0,2)+':'+s.slice(2);};
   const render=()=>{
     const d=st.dates;
     const wcM=new Map([['P1','용접'],['P2','가공']]);
@@ -426,7 +428,7 @@ SCREEN.partplan=(c)=>{
         <td class="center mut">${seq}</td><td>${firstInGrp?esc(r.gpcnm||r.gpc):''}</td>
         <td>${firstInGrp?`<b>${esc(r.assy)}</b>`:''}</td><td>${firstInGrp?esc(r.upper||''):''}</td><td><b>${firstInGrp?esc(r.item):''}</b></td>
         <td class="bcap" title="${esc(r.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
-        <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm||'')}</td>
+        <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${hhmm(r.inhm)}</td>
         <td class="center" style="color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}">${esc(pulltxt(r))}</td>
         <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
         ${r.prior_plan>0?numTd(pcell(r),finBg(pf),pf!=='0',finFg(pf)):numTd('·','',false)}
