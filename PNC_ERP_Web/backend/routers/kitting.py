@@ -287,7 +287,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               ISNULL(pg.PART_GROUP_CODE,'') pgc, a.WORK_CODE wc,
               COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE) wcnm, MAX(ISNULL(a.LINE_NO,'')) line,
               a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.PART_PLAN_YMD ymd,
-              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, MAX(ISNULL(a.OUTPUT_HM,'')) output_hm, ISNULL(ib.ITEM_DESC,'') nm,
+              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, MAX(ISNULL(a.OUTPUT_HM,'')) output_hm, MAX(ISNULL(lg.lgh,'')) lgh, ISNULL(ib.ITEM_DESC,'') nm,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
               MAX(ISNULL(a.CHANGE_DAY,'')) change_day, SUM(CAST(ISNULL(a.LOT_QTY,0) AS float)) lot_qty,
@@ -300,6 +300,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             LEFT JOIN {SCH}.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN {SCH}.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
             LEFT JOIN (SELECT ITEM_CODE, GAGONG_PROC_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM {SCH}.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE, GAGONG_PROC_CODE) st ON st.ITEM_CODE=a.ITEM_CODE AND st.GAGONG_PROC_CODE=a.GAGONG_PROC_CODE
+            LEFT JOIN (SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, MIN(ORG_PLAN_YMD + ORG_OUTPUT_HM) lgh FROM {SCH}.PR_T_PLAN_DTL GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')) lg ON lg.WORK_ORDER=a.WORK_ORDER AND lg.swo=ISNULL(a.SPLIT_WORK_ORDER,'')
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
               a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
@@ -318,7 +319,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             if not g:
                 g = {"assy": r["assy"], "upper": r["upper"] or '', "item": r["item"], "nm": r["nm"],
                      "gpc": r["gpc"], "gpcnm": r["gpcnm"], "pgc": r["pgc"], "wc": r["wc"], "wcnm": r["wcnm"],
-                     "line": r["line"], "inhm": r["inhm"], "output_hm": (r["output_hm"] or ''), "rate": float(r["rate"] or 100),
+                     "line": r["line"], "inhm": r["inhm"], "output_hm": (r["output_hm"] or ''), "lgh": (r["lgh"] or ''), "rate": float(r["rate"] or 100),
                      "item_st": float(r["st"] or 0) * 100.0 / (float(r["rate"] or 100) or 100),   # ★레거시 item_st = 그 파트(gpc) ST ÷ prod_rate × 100 (f_get_item_st_part/wk.prod_rate*100)
                      "use_qty": float(r["useq"] or 1),
                      "wo": r["wo"], "swo": r["swo"] or '', "plan_ymd": (r["plan_ymd"] or ''),
@@ -507,8 +508,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         uf = unfin.strip()
         if uf == '미생산': rows = [r for r in rows if not r["_done_all"]]
         for r in rows: r.pop("_done_all", None)
-        rows.sort(key=lambda x: ((x["part_ymd"] or "") + (x["inhm"] or ""), x["plan_ymd"] or "",
-                                 x["item"] or "", x["wo"] or "", x["swo"] or ""))
+        # ★정렬 = 레거시 DW setsort(자도번 기본 sort_flag='1'): part_group_code → part_plan_ymd_output_hm → item_code → plan_ymd → output_hm → lg_plan_ymd_output_hm → work_order → split_work_order
+        rows.sort(key=lambda x: ((x["pgc"] or ""), (x["part_ymd"] or "") + (x["inhm"] or ""), (x["item"] or ""),
+                                 (x["plan_ymd"] or ""), (x["output_hm"] or ""), (x["lgh"] or ""), (x["wo"] or ""), (x["swo"] or "")))
         # ★item_st 정본 = 생산정보등록(생산공정순서) ST(초), ★그 파트(gpc)의 공정만 합산 ÷ prod_rate × 100 (레거시 f_get_item_st_part/wk.prod_rate*100 동일). nx우선(있으면 override), 없으면 레거시 PR_M_ITEM_PROC_GAGONG 유지.
         #   생산ST=(계획−완료)×item_st/3600. src=live(순수 레거시 대사)는 레거시값 유지.
         if str(src).strip() != "live":
