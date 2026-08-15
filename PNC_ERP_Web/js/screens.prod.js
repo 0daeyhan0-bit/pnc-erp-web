@@ -437,8 +437,9 @@ SCREEN.partplan=(c)=>{
     const fPrP=disp.reduce((s,r)=>s+(+r.prior_plan||0),0), fPrC=disp.reduce((s,r)=>s+(+r.prior_cover||0),0);
     const fPl=x=>disp.reduce((s,r)=>s+((r.days&&r.days[x])||0),0), fCv=x=>disp.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
     const fST=disp.reduce((s,r)=>s+rowST(r),0);
-    const fSTd=x=>disp.reduce((s,r)=>s+Math.max(((r.days&&r.days[x])||0)-((r.dcov&&r.dcov[x])||0),0)*(+r.item_st||0)/3600,0);
-    const fSTprior=disp.reduce((s,r)=>s+Math.max((+r.prior_plan||0)-(+r.prior_cover||0),0)*(+r.item_st||0)/3600,0);
+    const r2=v=>Math.round(v*100)/100;   // ★레거시 dw c_item_st=round(...,2) 셀별 반올림 후 합산(누적 반올림차 방지)
+    const fSTd=x=>disp.reduce((s,r)=>s+r2(Math.max(((r.days&&r.days[x])||0)-((r.dcov&&r.dcov[x])||0),0)*(+r.item_st||0)/3600),0);
+    const fSTprior=disp.reduce((s,r)=>s+r2(Math.max((+r.prior_plan||0)-(+r.prior_cover||0),0)*(+r.item_st||0)/3600),0);
     c.innerHTML=`
      <div class="page-title">🧩 파트별 생산계획 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_410_new · nx 직독(키팅과 동일 SP·색상)</span></div>
      <div class="page-sub">사내 생산품(용접/가공) 파트별 일자계획. 당일이전계획=기준일 이전 계획 누적(완료/계획). 셀=완료/계획.
