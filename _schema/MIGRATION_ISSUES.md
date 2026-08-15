@@ -246,3 +246,26 @@ JAI_COST = (COST_GUBUN='3' ? WON_MAT_COST×ITEM_WEIGHT×USE_QTY   -- 원소재(�
 - **★DISSOLVED(미운영 SUB)**: 예전 SUB 운영했으나 지금은 SUB 안만들고 하위품번 단품 수령(사용자 확정). R01 재구축시 **해체→하위 단품 전개**. 8건(AJR77263008-SUB·엠케이SUB 등).
 - **다음 = 정규화된 SUB로 R01 재구축**(기존 R01은 SUB 미정리 자도번 상태로 로딩됨 → 재구축). SUB=`품번_S{nn}` 참조, DISSOLVED=해체, LEAF=단품.
 
+
+---
+
+## Z. ★원가 스윕 규명 — 마이그레이션 마스터필드 소실 (2026-08-15)
+
+전 품목 원가 스윕(nx 엔진 vs 레거시 오라클, 260630, 2,826제품): **OK 80.7% + 나머지 79%가 100원미만 반올림**. 실제 이슈 ≥1000원 29건. 원인 3유형:
+
+### 원인 ① in_cust(매입처) 소실 = 과소 (해결완료·검증)
+- **마이그레이션이 nx.item.in_cust를 7종에서 흘림**(레거시 IN_CUST_CODE 有 → nx 空). 엔진·레거시SP 모두 `in_cust 비면 재료비 0`(SP_CS_견적리스트_실원가용 CTE line80 `in_cust_code in ('') then 0`, 엔진 pur_price vendorstrict) → nx 과소.
+- 7종: 4H00006A(2026,257제품)·MJX65110201(2111,서포터33)·MJX64331401(2111)·MJU66771601(2096)·MJX62771713(2093)·MJU66570409(2096)·AGR30801604-AL-1(2354).
+- **복원(레거시 IN_CUST_CODE)→서포터 15건 diff0, 4H00006A 제품 40표본 회귀0.** 백업 scratchpad/incust_restore_backup.json.
+- ★MJX65110201이 서포터 15건 공유부품이라 1건 복원=클러스터 전체 해결.
+
+### ④ 마스터필드 전수대조 결과 (nx.item vs PR_M_ITEM, 24,112매칭)
+- **in_cust 7(복원) · make_type 5(복원,원가무영향) 외 소실 0**: cost_gubun/diam/thick/length/net_weight 전부 온전. → **과소 클래스 주범=in_cust뿐, 종결.**
+- make_type 5 복원(scratchpad/maketype_restore_backup.json): AGR30801604-AL-1·AJR30012012-S1-2·-SUB·MJU66570409·MJX62771713. 조상제품 원가변화0.
+
+### 남은 원인(미해결, 별개 메커니즘)
+- **② 누락 SUB 과소**: AJR75563702(−8,913) — `AJR75563702-SUB`가 nx 미전개.
+- **③ 이중계상 과다**: AJR30133607(+13,020)·AJR30133707 — 직접+SUB 양쪽(MJC/AJR77224002 동일패턴, cs_calc_except 미설정).
+- **④ 가공비차**: ADM72950707(실원−16,362) 등 ~5건 — 재료비 정상, 공정/가공비 구조차.
+
+★검증 방법론: 오라클(cost_oracle, pncind SP EXECUTE) + nx 엔진 silwon, **동기화 날짜(260630)** 필수(당일=단가 드리프트). diff0 게이트=재료비/실원가 <2원.

@@ -858,6 +858,7 @@ SCREEN.partnerplan=(c)=>{
   const T=new Date();
   let F={from:iso(T),days:31,wc:'',part:'',assy:'',line:'',gubun:'외주',src:'legacy'};
   let data={dates:[],rows:[],cnt:0,sum_qty:0,note:''}, wcs=[], loading=false, msg='';
+  let rowsCur=[];   // ★헤더 더블클릭 정렬용 영속 행배열(enableSort가 in-place 정렬, tbody만 재렌더)
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||31))-1);
   const loadWc=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=${F.src}`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
   const load=async()=>{
@@ -875,7 +876,9 @@ SCREEN.partnerplan=(c)=>{
      nm:r.nm||'', spec:r.spec||'', days:r.days||{}, donedays:r.donedays||{}, colors:r.colors||{}, tot:r.tot||0});
   const draw=()=>{
     const dates=data.dates||[];
-    const rows=(data.rows||[]).map(norm);
+    rowsCur=(data.rows||[]).map(norm);
+    rowsCur.forEach(r=>dates.forEach(d=>{r['d_'+d]=Number((r.days&&r.days[d])||0);}));   // ★일자(피벗) 정렬용 합성 숫자키
+    const rows=rowsCur;
     const pnAssy=new Set(),pnLine=new Set(),pnPart=new Set();
     rows.forEach(r=>{if(r.assy)pnAssy.add(r.assy);if(r.line)pnLine.add(r.line);if(r.jado)pnPart.add((r.jado||'').split('{')[0]);});
     const pnAssyOpts=[...pnAssy].slice(0,400).map(v=>`<option value="${esc(v)}"></option>`).join('');
@@ -895,6 +898,18 @@ SCREEN.partnerplan=(c)=>{
     const FIX=12;
     const gcell=d=>frac?`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gDay[d]||0)}</b></td>`:`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`;
     const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td><td></td>${dates.map(d=>gcell(d)).join('')}</tr>`:'';
+    const rowTr=r=>`<tr>
+        <td class="num" style="color:#8aa0bd">${r.seq}</td>
+        <td><b>${esc(r.wcnm)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
+        <td><b>${esc(r.assy)}</b></td>
+        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
+        <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
+        <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
+        <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
+        <td class="num">${nn(r.reqq)}</td>
+        <td class="bcap" title="${esc(r.nm)} ${esc(r.spec)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
+        ${dates.map(d=>dcell(r,d)).join('')}</tr>`;
+    const bodyHTML=()=>loading?spinRow(FIX+dates.length):(rowsCur.length?(rowsCur.map(rowTr).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`);
     c.innerHTML=`
      <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 자도번작업처·도번·자도번LIST·일자별 (당김 반영)</span></div>
      <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량 컬럼 동일(1:1 대조용). 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). 첫 일자컬럼=기준일 이전 누적. ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
@@ -922,17 +937,7 @@ SCREEN.partnerplan=(c)=>{
        <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th style="min-width:400px;width:400px">자도번LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th>품목정보</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
-      <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map(r=>`<tr>
-        <td class="num" style="color:#8aa0bd">${r.seq}</td>
-        <td><b>${esc(r.wcnm)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
-        <td><b>${esc(r.assy)}</b></td>
-        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
-        <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
-        <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
-        <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
-        <td class="num">${nn(r.reqq)}</td>
-        <td class="bcap" title="${esc(r.nm)} ${esc(r.spec)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
-        ${dates.map(d=>dcell(r,d)).join('')}</tr>`).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`)}</tbody></table></div>`;
+      <tbody>${bodyHTML()}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     const syncInputs=()=>{const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||(wn?F.wc:'');F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;};
     const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};
@@ -941,6 +946,11 @@ SCREEN.partnerplan=(c)=>{
     g('#pn-days').onchange=()=>{syncInputs();load();};
     g('#pn-search').onclick=()=>{syncInputs();load();};
     ['#pn-part','#pn-assy','#pn-line','#pn-wc'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
+    // ★헤더 더블클릭 정렬(고정 12컬럼 + 일자 피벗) — tbody만 재렌더로 화살표·리사이저 보존. 합계행은 bodyHTML이 항상 맨끝에 붙임.
+    if(!loading&&rowsCur.length){
+      const KEYS=['seq','wcnm','line','workcenter','assy','jado','sagub','lot','matq','doneq','reqq','nm'].concat(dates.map(d=>'d_'+d));
+      enableSort(c,KEYS,()=>rowsCur,()=>{const tb=c.querySelector('tbody');if(tb)tb.innerHTML=bodyHTML();});
+    }
   };
   loadWc().then(draw);   // ★자동 전체조회 금지 — 협력사 선택 후 [조회]
 };
