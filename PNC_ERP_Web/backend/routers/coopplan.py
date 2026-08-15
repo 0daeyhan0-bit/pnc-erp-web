@@ -346,7 +346,9 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 d = _bucket(r["ppy"]); g["days"][d] = g["days"].get(d, 0.0) + pq; g["tot"] += pq
             rows = list(keyed.values())
             for g in rows:
-                g["lot"] = sum(g.pop("_wolot").values()); g["reqq"] = sum(g.pop("_woreq").values())
+                g["lot"] = sum(g.pop("_wolot").values())
+                # ★자재수량=도번 계획수량(Σ제번 plan_qty) — 레거시 410 정의. 자도번 part_plan_qty 합(과다) 아님.
+                g["matq"] = sum(g.pop("_woreq").values()); g["reqq"] = g["matq"]
                 g["line"] = ",".join(sorted(g.pop("_lines"))) or ""
         else:
             # ★부자재/기타 = 자도번(mat) 단위 롤업 — 여러 도번/제번에 걸친 같은 자도번 합침. 도번컬럼=속한 도번들.
