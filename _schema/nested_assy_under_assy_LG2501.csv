@@ -1,0 +1,160 @@
+﻿부모ASSY,부모유형,부모품명,자식ASSY(완제품),자식품명,소요량,LG출고최근일,LG출고수량합(25/01~)
+ADM72950701,완제품,판형 Assembly,AJR73664801,ADM75404602 내재화 SUB ASSY,1.0,260403,11.0
+ADM72950701,완제품,판형 Assembly,AJR73664901,ADM75404602 내재화 SUB ASSY,1.0,260403,11.0
+ADM72950701,완제품,판형 Assembly,AJR73665001,ADM75404602 내재화 SUB,1.0,260403,11.0
+ADM72950701,완제품,판형 Assembly,AJR73665101,ADM75404602 내재화 SUB ASSY,1.0,260403,11.0
+ADM72950701,완제품,판형 Assembly,AJR73665201,ADM75404602 내재화 SUB ASSY,1.0,260403,11.0
+ADM72950714,완제품,Exchanger Assembly,AJR73724004,ADM75404604 내재화 SUB ASSY,1.0,260625,473.0
+ADM72950714,완제품,Exchanger Assembly,AJR73724103,ADM75404604 내재화 SUB ASSY,1.0,260625,473.0
+ADM72950714,완제품,Exchanger Assembly,AJR76563201,ADM75404604 내재화 SUB ASSY,1.0,260625,473.0
+ADM72950714,완제품,Exchanger Assembly,AJR76563301,ADM75404604 내재화 SUB ASSY,1.0,260625,473.0
+ADM73210506,완제품,판형 Assembly(알파라발),AJR76462607,ADM73210506 SUB(대원직납),1.0,260706,182.0
+ADM73210506,완제품,판형 Assembly(알파라발),AJR76462608,ADM73210506 SUB(대원직납),1.0,260706,182.0
+ADM73210512,완제품,Exchanger Assembly,ADM73210510,Exchanger Assembly,1.0,260526,510.0
+ADM73210512,완제품,Exchanger Assembly,AJR76462903,판형 수배관 SUB,1.0,260526,510.0
+ADM73210515,완제품,판형 Assembly(동일),AJR76462631,판형 SUB,1.0,260320,610.0
+ADM73210515,완제품,판형 Assembly(동일),AJR76462736,판형 SUB,1.0,260320,610.0
+ADM73210515,완제품,판형 Assembly(동일),AJR76462903,판형 수배관 SUB,1.0,260320,610.0
+ADM73210516,완제품,Exchanger Assembly,ADM73210510,Exchanger Assembly,1.0,260810,233.0
+ADM73210516,완제품,Exchanger Assembly,AJR76462903,판형 수배관 SUB,1.0,260810,233.0
+ADM74930502,완제품,판형 Assembly(알파라발),AJR76462605,ADM74930502 SUB,1.0,260630,35.0
+ADM74930502,완제품,판형 Assembly(알파라발),AJR76462611,ADM74930502 SUB(대원직납),1.0,260630,35.0
+ADM74930507,완제품,Exchanger Assembly,AJR76462903,판형 수배관 SUB,1.0,250522,17.0
+ADM74930508,완제품,Exchanger Assembly,ADM74930506,판형 열교환기(스웹),1.0,260703,387.0
+ADM74930508,완제품,Exchanger Assembly,AJR76462903,판형 수배관 SUB,1.0,260703,387.0
+AET30216901,완제품,"Install Part Assembly, Set",AAA31179501,이지링크 1/4(Ø6.35),30.0,251023,5.0
+AET30216902,완제품,"Install Part Assembly, Set",AAA31179502,이지링크 3/8(Ø9.52),30.0,251023,5.0
+AET30216903,완제품,"Install Part Assembly, Set",AAA31179503,이지링크 1/2(Ø12.7),30.0,251023,5.0
+AET30216904,완제품,"Install Part Assembly, Set",AAA31179504,이지링크 5/8(Ø15.88),30.0,251023,5.0
+AGF04226601,완제품,"Package Assembly,C/SKD",AJR30120801,"Tube Assembly, Manifold(Indoor)",1.0,260514,60.0
+AGF04226602,완제품,"Package Assembly,C/SKD",AJR30120401,"Tube Assembly, Manifold(Outdoor)",1.0,260514,60.0
+AGF04226603,완제품,"Package Assembly, C/SKD",AJR76562819,STS Manifold,1.0,260812,290.0
+AGF30058404,완제품,"Package Assembly,C/SKD ",MAA63804601,Accumulator,1.0,260703,1050.0
+AGF30430301,완제품,"Package Assembly, C/SKD",AJR72931317,9.52*5m (양쪽막음캡),1.0,250903,731.0
+AGF30430302,완제품,"Package Assembly, C/SKD",AJR72931318,15.88*5m (양쪽막음캡),1.0,250404,170.0
+AGF30430303,완제품,"Package Assembly, C/SKD",AJR72931319,19.05*5m (양쪽막음캡),1.0,251015,315.0
+AGF30444802,완제품,"Package Assembly, C/SKD",5210A21458T,Accumulator,1.0,260814,19082.0
+AGF30444804,완제품,"Package Assembly, C/SKD",4848A20005L,Accumulator,1.0,260727,4217.0
+AJJ73898602,완제품,Supporter Assembly,AJR52737614,"Tube Assembly,Suction(Outdoor)",1.0,251016,20.0
+AJJ73898612,완제품,Supporter Assembly,AJR52737618,"Tube Assembly,Suction(Outdoor)",1.0,250910,15.0
+AJJ75358401,완제품,Supporter Assembly,AJR74803512,사내 고압부 SUB,1.0,260723,300.0
+AJJ75358404,완제품,Supporter Assembly,AJR74803512,사내 고압부 SUB,1.0,250820,5.0
+AJJ75358428,완제품,Supporter Assembly,AJR75744125,"Tube Assembly, Suciton",1.0,260529,10.0
+AJJ75358441,완제품,Supporter Assembly,AJJ73898630,체결 SUB,1.0,260721,48100.0
+AJJ75358441,완제품,Supporter Assembly,AJR74803542,사내 SUB,1.0,260721,48100.0
+AJJ75358444,완제품,Supporter Assembly,AJJ73898647,Supporter Assembly,1.0,260706,43.0
+AJJ75358444,완제품,Supporter Assembly,AJR74803545,"Tube Assembly,Condenser(Out)",1.0,260706,43.0
+AJJ75358446,완제품,Supporter Assembly,AJJ73898650,Supporter Assembly,1.0,260622,1011.0
+AJJ75358446,완제품,Supporter Assembly,AJR74803545,"Tube Assembly,Condenser(Out)",1.0,260622,1011.0
+AJJ75639409,완제품,Supporter Assembly,AJR36618614,Tube Assembly Reverse,1.0,260225,2860.0
+AJJ75838622,완제품,Supporter Assembly,AJJ73898650,Supporter Assembly,1.0,260623,10.0
+AJJ75838622,완제품,Supporter Assembly,AJR74803545,"Tube Assembly,Condenser(Out)",1.0,260623,10.0
+AJJ75838624,완제품,Supporter Assembly,AJJ73898650,Supporter Assembly,1.0,250311,765.0
+AJJ75838624,완제품,Supporter Assembly,AJR74803546,"Tube Assembly, Condenser(Out)",1.0,250311,765.0
+AJJ75838625,완제품,Supporter Assembly,AJJ73898650,Supporter Assembly,1.0,260814,49862.0
+AJJ75838625,완제품,Supporter Assembly,AJR74803547,"Tube Assembly, Condenser(Out)",1.0,260814,49862.0
+AJJ75838626,완제품,Supporter Assembly,AJJ73898650,Supporter Assembly,1.0,260814,14461.0
+AJR30009701,완제품,"Tube Assembly,Suction(Outdoor)",MAA63804601,Accumulator,1.0,260813,3725.0
+AJR30064801,완제품,"Tube Assembly,Suction",MAA63804601,Accumulator,1.0,260416,12.0
+AJR30071101,완제품,"Tube Assembly, Connector",MAZ64571803,Bracket,1.0,260730,554.0
+AJR30071102,완제품,"Tube Assembly, Connector",MAZ64571803,Bracket,1.0,260730,536.0
+AJR30123401,완제품,"Tube Assembly,Reverse",AJJ73040839,Supporter Assembly,1.0,260810,9394.0
+AJR30123401,완제품,"Tube Assembly,Reverse",AJR71433340,"Tube Assembly,Expansion",1.0,260810,9394.0
+AJR30125601,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260814,7179.0
+AJR30125602,서브ASSY,"Tube Assembly,Expansion",MAZ64571803,Bracket,1.0,260814,176.0
+AJR30125603,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260813,220.0
+AJR34870201,완제품,"Tube Assembly,Check Valve",5224A20002T,Strainer,1.0,250220,5.0
+AJR71429303,완제품,"Tube Assembly,Suction(Outdoor)",4848A20005L,Accumulator,1.0,250609,3.0
+AJR71429331,완제품,"Tube Assembly,Suction",4848A20005L,Accumulator,1.0,250709,3.0
+AJR71429343,완제품,"Tube Assembly,Suction",4848A20005L,Accumulator,1.0,250909,75.0
+AJR73026401,완제품,Tube Assembly,AJR73002901,"Tube Assembly,Manifold(Outdoor)",1.0,250922,3.0
+AJR73767314,완제품,"Tube Assembly,Suction(Outdoor)",AJR74488601,"Tube Assembly,Capillary",1.0,260423,37.0
+AJR73767318,완제품,"Tube Assembly,Suction(Outdoor)",AJR74488601,"Tube Assembly,Capillary",1.0,251028,16.0
+AJR73768803,완제품,"Tube Assembly,Condenser(Out)",5224A20002T,Strainer,1.0,260730,17.0
+AJR73822504,완제품,Tube Assembly,AAB73250401,Accumulator Assembly,1.0,260707,137.0
+AJR73822504,완제품,Tube Assembly,AJR36388509,"Tube Assembly,Suction(Outdoor)",1.0,260707,137.0
+AJR73822504,완제품,Tube Assembly,AJR36388606,"Tube Assembly, Expansion",1.0,260707,137.0
+AJR73822504,완제품,Tube Assembly,AJR73944505,"Tube Assembly,Reverse",1.0,260707,137.0
+AJR73822506,완제품,Tube Assembly,AAB73250401,Accumulator Assembly,1.0,260715,324.0
+AJR73822506,완제품,Tube Assembly,AJR36388509,"Tube Assembly,Suction(Outdoor)",1.0,260715,324.0
+AJR73822506,완제품,Tube Assembly,AJR36388606,"Tube Assembly, Expansion",1.0,260715,324.0
+AJR73822506,완제품,Tube Assembly,AJR73944506,"Tube Assembly,Reverse",1.0,260715,324.0
+AJR73822515,완제품,Tube Assembly,AAB73250401,Accumulator Assembly,1.0,250108,2.0
+AJR73822515,완제품,Tube Assembly,AJR36388510,"Tube Assembly,Suction(Outdoor)",1.0,250108,2.0
+AJR73822515,완제품,Tube Assembly,AJR36388606,"Tube Assembly, Expansion",1.0,250108,2.0
+AJR73822515,완제품,Tube Assembly,AJR73944512,"Tube Assembly,Reverse",1.0,250108,2.0
+AJR73822516,완제품,Tube Assembly,AAB73250401,Accumulator Assembly,1.0,250327,3.0
+AJR73822516,완제품,Tube Assembly,AJR36388510,"Tube Assembly,Suction(Outdoor)",1.0,250327,3.0
+AJR73822516,완제품,Tube Assembly,AJR36388606,"Tube Assembly, Expansion",1.0,250327,3.0
+AJR73822516,완제품,Tube Assembly,AJR73944513,"Tube Assembly,Reverse",1.0,250327,3.0
+AJR73822528,완제품,Tube Assembly,AAB73250401,Accumulator Assembly,1.0,260214,2324.0
+AJR73822528,완제품,Tube Assembly,AJR36388509,"Tube Assembly,Suction(Outdoor)",1.0,260214,2324.0
+AJR73822528,완제품,Tube Assembly,AJR36388606,"Tube Assembly, Expansion",1.0,260214,2324.0
+AJR73822528,완제품,Tube Assembly,AJR73944505,"Tube Assembly,Reverse",1.0,260214,2324.0
+AJR74265701,완제품,"Tube Assembly,Suction(Outdoor)",AJR74488601,"Tube Assembly,Capillary",1.0,250918,20.0
+AJR74265702,완제품,"Tube Assembly,Suction(Outdoor)",AJR74488601,"Tube Assembly,Capillary",1.0,250225,5.0
+AJR74289301,완제품,"Tube Assembly,Suction(Outdoor)",AJR74488601,"Tube Assembly,Capillary",1.0,260812,1822.0
+AJR74424616,완제품,Muffler Assembly,MJU63651004,Tube Connector,1.0,260728,12997.0
+AJR74424616,완제품,Muffler Assembly,MJU63651005,Tube Connector,1.0,260728,12997.0
+AJR74964701,완제품,"Tube Assembly,Expansion",AJR74482401,"Tube Assembly, Connector",1.0,250716,10.0
+AJR75244301,완제품,"Tube Assembly,Suction(Outdoor)",4848A20005L,Accumulator,1.0,260206,1.0
+AJR75462802,완제품,"Tube Assembly,Suction",MHH62041502,"Separator,Oil",1.0,260814,12019.0
+AJR75462803,완제품,"Tube Assembly,Suction",MHH62041502,"Separator,Oil",1.0,260813,2520.0
+AJR75463101,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,4.0,260629,1335.0
+AJR75463101,완제품,"Tube Assembly,Expansion",MAZ64571804,Bracket,2.0,260629,1335.0
+AJR75463110,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260423,12.0
+AJR75463110,완제품,"Tube Assembly,Expansion",MAZ64571804,Bracket,2.0,260423,12.0
+AJR75483401,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260506,705.0
+AJR75483401,완제품,"Tube Assembly,Expansion",MAZ64571804,Bracket,2.0,260506,705.0
+AJR75584501,완제품,Tube Assembly,AJR75444201,Tube Assembly,1.0,250527,5.0
+AJR75604801,완제품,Tube Assembly,AJR36388606,"Tube Assembly, Expansion",1.0,260608,268.0
+AJR75604801,완제품,Tube Assembly,AJR75625401,"Tube Assembly,Reverse",1.0,260608,268.0
+AJR75802606,완제품,Tube Assembly,AJR75786501,동T 형상 부품,1.0,260512,167.0
+AJR76462903,완제품,판형 수배관 SUB,AJR75786501,동T 형상 부품,1.0,260422,60.0
+AJR76523005,완제품,"Tube Assembly,Reverse",AJR71433340,"Tube Assembly,Expansion",1.0,250620,7.0
+AJR76523005,완제품,"Tube Assembly,Reverse",AJR74424612,"Tube Assembly,Reverse",1.0,250620,7.0
+AJR76523007,완제품,"Tube Assembly,Reverse",AJR71433340,"Tube Assembly,Expansion",1.0,260204,11.0
+AJR76523007,완제품,"Tube Assembly,Reverse",AJR74424612,"Tube Assembly,Reverse",1.0,260204,11.0
+AJR76523011,완제품,"Tube Assembly,Reverse",AJR71429343,"Tube Assembly,Suction",1.0,260210,548.0
+AJR76523012,완제품,"Tube Assembly,Reverse",AJR71433341,"Tube Assembly, Expansion",1.0,251202,120.0
+AJR76523027,완제품,"Tube Assembly,Reverse",AJJ73040839,Supporter Assembly,1.0,260731,10133.0
+AJR76523027,완제품,"Tube Assembly,Reverse",AJR71433340,"Tube Assembly,Expansion",1.0,260731,10133.0
+AJR76562403,완제품,"Tube Assembly,Reverse",AJJ74199009,Supporter Assembly,1.0,250918,8.0
+AJR76562403,완제품,"Tube Assembly,Reverse",AJR71429339,"Tube Assembly,Suction(Outdoor)",1.0,250918,8.0
+AJR76562403,완제품,"Tube Assembly,Reverse",AJR76543201,"Tube Assembly,Reverse",1.0,250918,8.0
+AJR76582505,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,1.0,260813,8321.0
+AJR76582506,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,1.0,260813,8313.0
+AJR77222902,완제품,Tube Assembly,AJR77223102,"Tube Assembly,Discharge",1.0,260706,1576.0
+AJR77222902,완제품,Tube Assembly,MAA63804601,Accumulator,1.0,260706,1576.0
+AJR77222905,완제품,Tube Assembly,MAA63804601,Accumulator,1.0,260723,51.0
+AJR77224501,완제품,"Tube Assembly, Expansion",MAZ64571803,Bracket,2.0,260812,525.0
+AJR77224502,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260721,147.0
+AJR77224503,완제품,"Tube Assembly, Expansion",MAZ64571803,Bracket,2.0,260529,28.0
+AJR77224504,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260814,274.0
+AJR77224505,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260813,481.0
+AJR77224506,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,250903,3.0
+AJR77224506,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,250903,3.0
+AJR77224509,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260605,25.0
+AJR77224510,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260813,3411.0
+AJR77224511,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,250610,197.0
+AJR77224511,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,250610,197.0
+AJR77224516,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,260305,2.0
+AJR77224516,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260305,2.0
+AJR77224517,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,260812,33243.0
+AJR77224517,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260812,33243.0
+AJR77224518,완제품,"Tube Assembly, Expansion",AJR30051301,"Tube Assembly,Expansion",1.0,260423,7583.0
+AJR77224518,완제품,"Tube Assembly, Expansion",MAZ64571803,Bracket,2.0,260423,7583.0
+AJR77224519,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260812,22703.0
+AJR77224520,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,260326,345.0
+AJR77224520,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260326,345.0
+AJR77224522,완제품,"Tube Assembly, Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,260729,1790.0
+AJR77224522,완제품,"Tube Assembly, Expansion",MAZ64571803,Bracket,2.0,260729,1790.0
+AJR77224523,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,260504,13.0
+AJR77224523,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260504,13.0
+AJR77224524,완제품,"Tube Assembly,Expansion",AJR75709904,"Tube Assembly, Expansion",1.0,260731,74.0
+AJR77224524,완제품,"Tube Assembly,Expansion",MAZ64571803,Bracket,2.0,260731,74.0
+AJR77282405,완제품,"Tube Assembly,Suction(Outdoor)",MAA63804601,Accumulator,1.0,260814,1941.0
+PCP-E06A00.AKM,완제품,"Install Part Assembly, Set",AET30216901,"Install Part Assembly, Set",1.0,260331,20.0
+PCP-E09A00.AKM,완제품,"Install Part Assembly, Set",AET30216902,"Install Part Assembly, Set",1.0,260403,20.0
+PCP-E12A00.AKM,완제품,"Install Part Assembly, Set",AET30216903,"Install Part Assembly, Set",1.0,260331,20.0
+PCP-E15A00.AKM,완제품,"Install Part Assembly, Set",AET30216904,"Install Part Assembly, Set",1.0,260331,22.0

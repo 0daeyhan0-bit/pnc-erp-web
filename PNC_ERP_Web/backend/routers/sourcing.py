@@ -931,13 +931,14 @@ def sourcing_route_edit_current(payload: dict = Body(...)):
             cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, current_flag=1, route_no=1, upd_dt=getdate() WHERE route_id=?", rid)
         # ★실사용 BOM 트리를 그대로 SUB 구조로 실체화(기존 SUB=노드·중첩, 해체·공정수정 가능)
         n_lines = _insert_current_tree(cur, rid, item, "260630")
-        # 조립 공정(비종속) ASSY 노드 시드 → 공수합=BASE로 시작(대안 BASE 복사와 동일)
+        # ★조립 공정을 각 노드(ASSY/SUB)에 실제 귀속 프리시드 → SUB 공정수정에서 기존 공정 편집·해체 시 ASSY로 정확 이관(공수합=BASE 보존)
         try:
-            _pc, _asm, _bg = _panel_cut_asm(item, "260630")
-            for pc_code, wq in (_asm or {}).items():
-                if wq and float(wq) != 0:
-                    cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
-                        VALUES(?,?,?,?,0,'')""", rid, item, str(pc_code).strip()[:10], float(wq))
+            node_asm = _panel_node_asm(item, "260630")
+            for _node, _procs in (node_asm or {}).items():
+                for pc_code, wq in (_procs or {}).items():
+                    if wq and float(wq) != 0:
+                        cur.execute("""INSERT INTO nx.sourcing_route_proc(route_id,node_item,proc_code,work_qty,prod_uph,calc_gubun)
+                            VALUES(?,?,?,?,0,'')""", rid, str(_node).strip()[:60], str(pc_code).strip()[:10], float(wq))
         except Exception:
             pass
         if not pre_existed:
