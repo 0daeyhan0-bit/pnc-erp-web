@@ -329,7 +329,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.ITEM_DESC,''),
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
-        raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]
+        raw = list(dict(zip(cols, r)) for r in cur.fetchall())   # ★keys(투입파트 WH='IS0001') 필터 제거 — 레거시 SP는 전 SEQ=1 GC_GUBUN='P' 포함(S5-2 등 gpc≠BOM gpc 케이스 탈락 방지)
         keyed = {}; earliest_ymd = d6a   # 생산실적 풀 하한(최소 계획일=밀린계획 시작)
         for r in raw:
             q = float(r["pl"] or 0); ymd = r["ymd"]
