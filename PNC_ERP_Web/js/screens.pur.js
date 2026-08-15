@@ -29,8 +29,10 @@ SCREEN.matinout=(c)=>{
       stock=stockAll.filter(s=>Math.abs(+s.stock||0)>0.0001);
       bfMap={};stockAll.forEach(s=>bfMap[s.mat]=+s.bf||0);
       byMat={};moves.forEach(x=>{(byMat[x.mat]=byMat[x.mat]||[]).push(x);});
-      const custs=[...new Set(moves.map(x=>(''+(x.cust||'')).trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
-      const cdl=c.querySelector('#mio-custdl');if(cdl)cdl.innerHTML=custs.map(x=>`<option value="${esc(x)}">`).join('');}
+      const buys=[...new Set(stockAll.map(x=>(''+(x.cust||'')).trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+      const bdl=c.querySelector('#mio-buydl');if(bdl)bdl.innerHTML=buys.map(x=>`<option value="${esc(x)}">`).join('');
+      const sells=[...new Set(moves.filter(x=>(+x.o||0)>0).map(x=>(''+(x.cust||'')).trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+      const sdl=c.querySelector('#mio-selldl');if(sdl)sdl.innerHTML=sells.map(x=>`<option value="${esc(x)}">`).join('');}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';stockAll=[];stock=[];moves=[];}
     loading=false;
     const df=c.querySelector('#dfrom');if(df)df.value=ymd2iso(curFrom);
@@ -44,7 +46,7 @@ SCREEN.matinout=(c)=>{
      <label class="tl">조회기간</label><input type="date" class="inp" id="dfrom" value="${m1Iso()}" style="min-width:130px"> ~ <input type="date" class="inp" id="dto" value="${todayIso()}" style="min-width:130px">
      <label class="tl">재고창고</label><select class="sel" id="whcust"><option value="Z99990">피앤씨창고</option></select>
      <label class="tl">파트창고</label><select class="sel" id="partwh"><option value="IS0001">자재창고</option><option value="IS0002">부자재창고(미키팅)</option></select>
-     <input class="inp" id="q" placeholder="자도번/품명"><input class="inp" id="qcust" list="mio-custdl" autocomplete="off" placeholder="거래처명 검색"><datalist id="mio-custdl"></datalist><select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
+     <input class="inp" id="q" placeholder="자도번/품명" style="width:120px"><input class="inp" id="qbuy" list="mio-buydl" autocomplete="off" placeholder="매입처" style="width:100px"><datalist id="mio-buydl"></datalist><input class="inp" id="qsell" list="mio-selldl" autocomplete="off" placeholder="매출처" style="width:100px"><datalist id="mio-selldl"></datalist><select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -74,9 +76,10 @@ SCREEN.matinout=(c)=>{
   };
   const renderLeft=()=>{
     const q=c.querySelector('#q').value.trim().toLowerCase(), gb=c.querySelector('#gubun').value;
-    const qc=c.querySelector('#qcust').value.trim().toLowerCase();
-    const custMats=qc?new Set(moves.filter(x=>(''+(x.cust||'')).toLowerCase().includes(qc)).map(x=>x.mat)):null;
-    curL=stock.filter(s=>(gb==='all'||(gb==='plus'?s.stock>0:s.stock<0))&&(!q||(''+s.mat).toLowerCase().includes(q)||(''+s.nm).toLowerCase().includes(q))&&(!custMats||custMats.has(s.mat)))
+    const qb=c.querySelector('#qbuy').value.trim().toLowerCase();
+    const qs=c.querySelector('#qsell').value.trim().toLowerCase();
+    const sellMats=qs?new Set(moves.filter(x=>(+x.o||0)>0&&(''+(x.cust||'')).toLowerCase().includes(qs)).map(x=>x.mat)):null;
+    curL=stock.filter(s=>(gb==='all'||(gb==='plus'?s.stock>0:s.stock<0))&&(!q||(''+s.mat).toLowerCase().includes(q)||(''+s.nm).toLowerCase().includes(q))&&(!qb||(''+(s.cust||'')).toLowerCase().includes(qb))&&(!sellMats||sellMats.has(s.mat)))
       .sort((a,b)=>(''+a.mat).localeCompare(''+b.mat,'ko'));
     const tot=curL.reduce((a,b)=>a+(+b.stock||0),0);
     let lb=curL.map(s=>`<tr data-mat="${esc(s.mat)}" class="${sel===s.mat?'sel':''}"><td><b>${esc(s.mat)}</b></td><td class="cap" title="${esc(s.nm)}">${esc(s.nm)}</td><td class="cap" title="${esc(s.cust||'')}">${esc(s.cust||'')}</td><td>${esc(pwName(s.part))}</td><td class="num qty">${won(s.stock)}</td><td class="center">${fmtYmd(s.lastin)!=='00/00/00'?fmtYmd(s.lastin):'-'}</td><td class="center">${fmtYmd(s.lastout)!=='00/00/00'?fmtYmd(s.lastout):'-'}</td></tr>`).join('');
@@ -90,13 +93,14 @@ SCREEN.matinout=(c)=>{
   c.querySelector('#go').onclick=()=>load();
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
   c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')load();else renderLeft();};   // ★Enter=서버 스코프 조회(기간 무관 빠름), 그외=로드된 데이터 클라 필터
-  c.querySelector('#qcust').onkeyup=()=>renderLeft();
+  c.querySelector('#qbuy').onkeyup=()=>renderLeft();
+  c.querySelector('#qsell').onkeyup=()=>renderLeft();
   c.querySelector('#gubun').onchange=renderLeft;
   c.querySelector('#dfrom').onchange=()=>load();
   c.querySelector('#dto').onchange=()=>load();
   c.querySelector('#whcust').onchange=()=>load();
   c.querySelector('#partwh').onchange=()=>load();
-  c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#qcust').value='';c.querySelector('#gubun').value='all';c.querySelector('#partwh').value='IS0001';c.querySelector('#whcust').value='Z99990';c.querySelector('#dfrom').value=m1Iso();c.querySelector('#dto').value=todayIso();sel=null;load();};
+  c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#qbuy').value='';c.querySelector('#qsell').value='';c.querySelector('#gubun').value='all';c.querySelector('#partwh').value='IS0001';c.querySelector('#whcust').value='Z99990';c.querySelector('#dfrom').value=m1Iso();c.querySelector('#dto').value=todayIso();sel=null;load();};
   c.querySelector('#xls').onclick=()=>downloadCSV('자재입출고현황.csv',['자도번','품명','매입처','파트창고','재고','최종입고일','최종출고일'],curL.map(s=>[s.mat,s.nm,s.cust||'',pwName(s.part),s.stock,fmtYmd(s.lastin)!=='00/00/00'?fmtYmd(s.lastin):'',fmtYmd(s.lastout)!=='00/00/00'?fmtYmd(s.lastout):'']));
   load();
 };
