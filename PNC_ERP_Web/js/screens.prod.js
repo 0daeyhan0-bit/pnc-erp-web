@@ -417,8 +417,8 @@ SCREEN.partplan=(c)=>{
           const cf=(r.dfin&&r.dfin[x])||'0';if(!g.dfin[x]||g.dfin[x]==='0'||finRank(cf)<finRank(g.dfin[x]))g.dfin[x]=cf;}});});
       disp=[...agg.values()];
     }
-    // 정렬: ★도번(item) 묶기(그룹) → PART일자+INPUT → WO
-    disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
+    // 정렬: ★상세=백엔드(레거시 setsort: part_group→part_plan_ymd_hm→item→plan_ymd→output_hm→lg→wo→swo) 순서 유지 / 집계·제번=도번 묶기
+    if(st.view!=='상세') disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
     const NCOL=12;  // 고정컬럼(파트..당일이전계획)
     const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
     // 완료수량=생산실적(finish)만. 생산분 있으면 "생산/계획", 없으면 계획만(바 없이=키팅/미키팅은 색으로만 구분)
@@ -433,6 +433,22 @@ SCREEN.partplan=(c)=>{
         <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
         ${r.prior_plan>0?numTd(pcell(r),finBg(pf),pf!=='0',finFg(pf)):numTd('·','',false)}
         ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}</tr>`;};
+    // ★레거시 DW 도번(item) 그룹 소계행(청록, group trailer) — 완료합/계획합. 상세뷰만.
+    const subHtml=(blk)=>{const r0=blk[0];
+      const sPl=blk.reduce((s,r)=>s+(+r.plan_qty||0),0), sST=blk.reduce((s,r)=>s+Math.round(rowST(r)*100)/100,0);
+      const sPrP=blk.reduce((s,r)=>s+(+r.prior_plan||0),0), sPrC=blk.reduce((s,r)=>s+(+r.prior_cover||0),0);
+      return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
+        <td></td><td>${esc(r0.gpcnm||r0.gpc)}</td><td><b>${esc(r0.assy)}</b></td><td></td><td><b>${esc(r0.item)}</b></td>
+        <td colspan="5"></td><td class="num">${f2(sST)}</td><td class="num"><b>${nf(sPl)}</b></td>
+        <td class="num">${sPrP>0?nf(sPrC)+'/'+nf(sPrP):'·'}</td>
+        ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);return `<td class="num">${pl>0?nf(cv)+'/'+nf(pl):'·'}</td>`;}).join('')}</tr>`;};
+    // tbody: 상세=도번블록별 상세행+청록소계, 집계/제번=집계행만
+    const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`;
+      if(st.view!=='상세')return disp.map((r,i)=>rowHtml(r,i+1,i===0||disp[i-1].item!==r.item)).join('');
+      let h='',i=0,seq=0;
+      while(i<disp.length){const it=disp[i].item;let j=i;const blk=[];while(j<disp.length&&disp[j].item===it){blk.push(disp[j]);j++;}
+        blk.forEach((r,bi)=>{seq++;h+=rowHtml(r,seq,bi===0);}); h+=subHtml(blk); i=j;}
+      return h;};
     // footer: 당일이전·일자별 (완료/계획) + 생산ST행
     const fPrP=disp.reduce((s,r)=>s+(+r.prior_plan||0),0), fPrC=disp.reduce((s,r)=>s+(+r.prior_cover||0),0);
     const fPl=x=>disp.reduce((s,r)=>s+((r.days&&r.days[x])||0),0), fCv=x=>disp.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
@@ -464,7 +480,7 @@ SCREEN.partplan=(c)=>{
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
        <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}</tr></thead>
-      <tbody>${st.loading?spinRow(NCOL+d.length):(disp.length?disp.map((r,i)=>rowHtml(r,i+1,i===0||disp[i-1].item!==r.item)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
+      <tbody>${st.loading?spinRow(NCOL+d.length):bodyHtml()}</tbody>
       ${disp.length?(()=>{const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);return `<tfoot>
        <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(st.plan_sum)}</td>
