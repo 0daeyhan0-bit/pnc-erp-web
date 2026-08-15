@@ -28,7 +28,9 @@ SCREEN.matinout=(c)=>{
       const j=await r.json();curFrom=j.from_ymd||f6;curTo=j.to_ymd||t6;stockAll=j.stock||[];moves=j.moves||[];
       stock=stockAll.filter(s=>Math.abs(+s.stock||0)>0.0001);
       bfMap={};stockAll.forEach(s=>bfMap[s.mat]=+s.bf||0);
-      byMat={};moves.forEach(x=>{(byMat[x.mat]=byMat[x.mat]||[]).push(x);});}
+      byMat={};moves.forEach(x=>{(byMat[x.mat]=byMat[x.mat]||[]).push(x);});
+      const custs=[...new Set(moves.map(x=>(''+(x.cust||'')).trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+      const cdl=c.querySelector('#mio-custdl');if(cdl)cdl.innerHTML=custs.map(x=>`<option value="${esc(x)}">`).join('');}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';stockAll=[];stock=[];moves=[];}
     loading=false;
     const df=c.querySelector('#dfrom');if(df)df.value=ymd2iso(curFrom);
@@ -42,7 +44,7 @@ SCREEN.matinout=(c)=>{
      <label class="tl">조회기간</label><input type="date" class="inp" id="dfrom" value="${m1Iso()}" style="min-width:130px"> ~ <input type="date" class="inp" id="dto" value="${todayIso()}" style="min-width:130px">
      <label class="tl">재고창고</label><select class="sel" id="whcust"><option value="Z99990">피앤씨창고</option></select>
      <label class="tl">파트창고</label><select class="sel" id="partwh"><option value="IS0001">자재창고</option><option value="IS0002">부자재창고(미키팅)</option></select>
-     <input class="inp" id="q" placeholder="자도번/품명 (Enter=서버조회)"><input class="inp" id="qcust" placeholder="거래처 입력"><select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
+     <input class="inp" id="q" placeholder="자도번/품명"><input class="inp" id="qcust" list="mio-custdl" autocomplete="off" placeholder="거래처명 검색"><datalist id="mio-custdl"></datalist><select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -73,7 +75,7 @@ SCREEN.matinout=(c)=>{
   const renderLeft=()=>{
     const q=c.querySelector('#q').value.trim().toLowerCase(), gb=c.querySelector('#gubun').value;
     const qc=c.querySelector('#qcust').value.trim().toLowerCase();
-    const custMats=qc?new Set(moves.filter(x=>(''+(x.cust||'')).toLowerCase().includes(qc)||(''+(x.wo||'')).toLowerCase().includes(qc)).map(x=>x.mat)):null;
+    const custMats=qc?new Set(moves.filter(x=>(''+(x.cust||'')).toLowerCase().includes(qc)).map(x=>x.mat)):null;
     curL=stock.filter(s=>(gb==='all'||(gb==='plus'?s.stock>0:s.stock<0))&&(!q||(''+s.mat).toLowerCase().includes(q)||(''+s.nm).toLowerCase().includes(q))&&(!custMats||custMats.has(s.mat)))
       .sort((a,b)=>(''+a.mat).localeCompare(''+b.mat,'ko'));
     const tot=curL.reduce((a,b)=>a+(+b.stock||0),0);
