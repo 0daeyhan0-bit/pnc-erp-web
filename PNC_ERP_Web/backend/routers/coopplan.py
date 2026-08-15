@@ -170,7 +170,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         cur.execute(f"""SELECT work_order, split_work_order, assy_item_code, plan_ymd,
               MAX(CAST(plan_qty AS float)) pq, MAX(CAST(lot_qty AS float)) lot, MAX(CAST(use_qty AS float)) uq,
               MAX(ISNULL(line_no,'')) line, MAX(ISNULL(output_hm,'')) ohm, MAX(CASE WHEN mat_flag='2' THEN 1 ELSE 0 END) sg
-            FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT
             WHERE {' AND '.join(wsel)}
             GROUP BY work_order, split_work_order, assy_item_code, plan_ymd""", *wp)
         keyed = {}
@@ -204,31 +204,31 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         # 출하/이동=work_order 인덱스로 스코프(item_code는 인덱스 없어 풀스캔 → wo 스코프가 훨씬 빠름). item은 파이썬 필터.
         for ch in _chunks(wos):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
+            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
             for r in cur.fetchall():
                 if str(r[2]) in aset: sale[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
-            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
+            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
             for r in cur.fetchall():
                 if str(r[2]) in aset: move[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
         for ch in _chunks(assys):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
+            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
             for r in cur.fetchall(): astk[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
+            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
             for r in cur.fetchall(): z99[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
+            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
             for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP.dbo.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
+            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP_TEST3.nx.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
             for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(IN_CUST_CODE,''), ISNULL(WORK_CODE,''), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(IN_CUST_CODE,''), ISNULL(WORK_CODE,''), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'0'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP.dbo.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'0'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): msub[str(r[0])] = (str(r[1] or '0'), int(r[2] or 0))
         # 자도번LIST(레거시 f_find_cust_mat_list2 = PR_M_CUST_MAT_LIST 조회, '(1)' 제거)
         matlist = {}
         for ch in _chunks(assys):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT ITEM_CODE, REPLACE(ISNULL(MAX(MAT_LIST),''),'(1)','') FROM PARTNER_ERP.dbo.PR_M_CUST_MAT_LIST WHERE CUST_CODE=? AND ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", cust, *ch)
+            cur.execute(f"SELECT ITEM_CODE, REPLACE(ISNULL(MAX(MAT_LIST),''),'(1)','') FROM PARTNER_ERP_TEST3.nx.PR_M_CUST_MAT_LIST WHERE CUST_CODE=? AND ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", cust, *ch)
             for r in cur.fetchall(): matlist[str(r[0])] = str(r[1] or '')
         # over_plan_qty(기준기간 이후 계획) — 스코프(wo). lot_overhang 계산에만 사용.
         try:
@@ -236,8 +236,8 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
                 ph = ",".join("?"*len(ch))
                 cur.execute(f"""SELECT a.work_order, a.split_work_order, b.c_item_code,
                       SUM(CEILING(CONVERT(float,a.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
-                    FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL a JOIN PARTNER_ERP.dbo.PR_M_MODEL_BOM b ON a.model_no=b.model_no
-                    JOIN PARTNER_ERP.dbo.PR_M_ITEM c ON b.c_item_code=c.item_code
+                    FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_DTL a JOIN PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b ON a.model_no=b.model_no
+                    JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON b.c_item_code=c.item_code
                     WHERE a.plan_ymd>? AND a.work_order IN ({ph})
                     GROUP BY a.work_order, a.split_work_order, b.c_item_code""", to_ymd, *ch)
                 for r in cur.fetchall(): over[(str(r[0]), str(r[1]), str(r[2]))] = int(float(r[3] or 0))
@@ -294,7 +294,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         gmode = 'mat'
         if wc.strip():
             try:
-                cur.execute("SELECT ISNULL(CUST_TYPE,'') FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE=?", wc.strip())
+                cur.execute("SELECT ISNULL(CUST_TYPE,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", wc.strip())
                 _ct = cur.fetchone(); gmode = 'assy' if (_ct and str(_ct[0]).strip() == '6') else 'mat'
             except Exception:
                 pass
@@ -304,7 +304,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
               pp.assy_item_code assy, pp.mat_code mat, pp.mat_flag matflag,
               CAST(pp.lot_qty AS float) lot, CAST(pp.plan_qty AS float) planq, CAST(pp.part_plan_qty AS float) partq,
               pp.part_plan_ymd ppy
-            FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT pp
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
             WHERE {where}
             ORDER BY pp.mat_work_center_code, pp.split_work_order, pp.assy_item_code, pp.mat_code""", *p)
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -383,15 +383,15 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 for rr in cur.fetchall(): m[str(rr[0]).strip()] = rr
             return m
         wccodes = {g["wc"] for g in rows}; assycodes = {g["lookup"] for g in rows}   # lookup=도번(assy모드) or 자도번(mat모드)
-        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP.dbo.PR_M_WORK WHERE WORK_CODE IN ({ph})")
-        custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
         # 도번 마스터(작업처=assy의 work/incust, 품명, 규격)
-        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ITEM_CODE IN ({ph})")
+        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})")
         # assy 작업처 코드도 이름 필요 → 추가 조회
         awc = {str(v[2]).strip() for v in assym.values() if str(v[2]).strip()}
         aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
-        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP.dbo.PR_M_WORK WHERE WORK_CODE IN ({ph})")
-        custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP.dbo.CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
+        custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
         def nm_of(code):
             c = str(code or "").strip()
             if c in workm: return workm[c][1]
