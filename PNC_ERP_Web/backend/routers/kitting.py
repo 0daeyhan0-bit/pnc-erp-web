@@ -427,7 +427,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for rr in nc.fetchall(): nxcell[(rr[0], rr[1], rr[2], rr[3])] = float(rr[4] or 0)
                 nxc.close()
             except Exception: pass
-        _TAG2FIN = {90: '6', 70: '4', 40: '4', 50: '3', 10: '3', 30: '2'}   # 40=전표재고(J) 완료군
+        _TAG2FIN = {90: '6', 70: '4', 40: '0', 50: '3', 10: '3', 30: '2'}   # ★색: 90주황·70노랑·50녹·40전표=백(작업중이라 완료색 아님, 레거시 color_NN 실측)·0백. 미생산 판정은 finish기반(전표 완료산입)으로 분리
         # ★충당 = 준비실적처리(키팅 /api/kitting/grid)와 100% 동일 검증엔진: 셀단위 pool 배분(출하90→ASSY×use/도번고정/중간공정70→준비50)+nx오버레이.
         #   410·460은 같은 SP라 숫자 동일해야 함 → 키팅의 검증된 충당을 그대로 사용. 생산ST=finish만 차감(준비 제외).
         for g in rows:
@@ -501,8 +501,8 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 g["dfin"][y] = _TAG2FIN.get(c["tag"], '0') if c else '0'
             g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)
             g["lot_diff"] = round(g["lot_qty"] - g["last_lot_qty"], 2)
-            fins = [_TAG2FIN.get(c["tag"], '0') for c in g["_cells"].values() if c["plan"] > 0]
-            g["_done_all"] = bool(fins) and all(f in ('4', '6') for f in fins)
+            cells_p = [c for c in g["_cells"].values() if c["plan"] > 0]   # ★미생산=셀별 finish<plan(레거시 finish_qty<plan_qty). 전표(J)도 finish 채워 완료 산입(색=백과 무관)
+            g["_done_all"] = bool(cells_p) and all(c["finish"] >= c["plan"] for c in cells_p)
             del g["_cells"]
         uf = unfin.strip()
         if uf == '미생산': rows = [r for r in rows if not r["_done_all"]]
