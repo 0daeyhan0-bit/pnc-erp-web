@@ -329,6 +329,18 @@ def _warmup_heavy_queries():
                 except Exception: pass
             cn.close()
         except Exception: pass
+        # ★원가엔진 예열 — 재시작 후 첫 조달경로 '수정'(실체화)/원가 조회 콜드지연(수초) 제거.
+        #   공유캐시(임율·공정마스터·품목마스터)를 미리 채움. 대표 품목 1개 walk로 엔진 상주 활성화.
+        try:
+            from common import _get_cost_engine, _COST_LOCK as _CL
+            with _CL:
+                eng = _get_cost_engine()
+                try: eng.labor_rate("2026" + "06")
+                except Exception: pass
+                for _wi in ("AJR75563402",):
+                    try: eng.naewon_nodes(_wi, "260630")
+                    except Exception: pass
+        except Exception: pass
     threading.Thread(target=_run, daemon=True).start()
 
 # ===== 프론트엔드 정적 서빙 (내부망 단일 포트 운영) =====
