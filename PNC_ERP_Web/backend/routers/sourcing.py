@@ -578,6 +578,32 @@ def _panel_cut_asm(item, ymd="260630"):
     base_g = round(sum(sum(d.values()) for d in part_cut.values()) + sum(asm.values()), 2)
     return part_cut, asm, base_g
 
+def _panel_node_asm(item, ymd="260630"):
+    """★per-node 조립(비종속) 공정 = 각 노드(ASSY/SUB)가 실제로 가진 조립·용접 공수. Σ = _panel_cut_asm의 flat asm과 동일(공수합 보존).
+       현행 수정 실체화 시 각 SUB에 자기 공정을 프리시드 → SUB 공정수정에서 기존 공정 편집, 해체 시 ASSY로 정확 이관."""
+    ym = "20" + ymd[:4]
+    with _COST_LOCK:
+        eng = _get_cost_engine()
+        try: _ = eng.labor_rate(ym)
+        except Exception: eng = _get_cost_engine(fresh=True)
+        by_node = {}
+        def walk(node, cum_ea, parent, seen):
+            info = eng._load_item(node); cg0 = info['cost_gubun']
+            db_item = parent if info['silver'] else ''
+            for proc, wq, uph, cg, pit in eng._procs(node):
+                if pit != db_item or wq == 0: continue
+                if not _proc_is_asm(str(proc)): continue
+                d = by_node.setdefault(node, {}); d[str(proc)] = d.get(str(proc), 0.0) + wq * cum_ea
+            expandable = bool(eng._expandable_nae(node, seen)) if cg0 != '3' else False
+            if expandable:
+                for c, qty, cx, f, t, lx in eng.lines(node):
+                    if cx: continue
+                    cinfo = eng._load_item(c)
+                    ea = qty if cinfo['unit'] == 'EA' else 1.0
+                    walk(c, cum_ea * ea, node, seen | {node})
+        walk(item, 1.0, '', set())
+    return {k: {p: round(v, 3) for p, v in d.items()} for k, d in by_node.items()}
+
 def _custnm_map(cur, codes):
     m = {}
     codes = sorted({str(c).strip() for c in codes if str(c or "").strip()})
