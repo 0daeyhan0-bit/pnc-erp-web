@@ -939,12 +939,14 @@ SCREEN.partnerplan=(c)=>{
      ${frac?`<div class="page-sub" style="font-size:11px">일자셀=<b>완료/계획</b> · 색: <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${data.note?`<div class="page-sub" style="color:#b8860b">ℹ ${esc(data.note)}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
+     </div>
+     <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl pn-grid" style="font-size:11px;white-space:nowrap"><thead><tr>
        <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th style="min-width:400px;width:400px">자도번LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th>품목정보</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
-      <tbody>${bodyHTML()}</tbody></table></div>`;
+      <tbody>${bodyHTML()}</tbody></table></div>
+    </div>`;
     const g=id=>c.querySelector(id);
     const syncInputs=()=>{const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||(wn?F.wc:'');F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;};
     const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};
