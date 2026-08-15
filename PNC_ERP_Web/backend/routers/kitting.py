@@ -274,30 +274,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             while _yadd(d6a, i) <= d6b and i < 60: dates.append(_yadd(d6a, i)); i += 1
             if not dates: dates = [d6a]
         d6b = dates[-1]
-        whp = (wh_part.strip() or 'IS0001')
-        # ★성능: 투입파트 KEYS(재귀 BOM, wc/part/assy 필터무관 · to일자+투입파트만 의존)를 (src,to,whp)별 90초 TTL 캐시.
-        keys = set()
-        _kck = (("live" if SCH.endswith("dbo") else "nx"), d6b, whp)
-        _kcache = getattr(plan_part410, "_keys_cache", {})
-        _kent = _kcache.get(_kck); _now0 = _dt.now().timestamp()
-        if _kent and (_now0 - _kent["ts"] < 90):
-            keys = _kent["k"]
-        else:
-            try:
-                cur.execute(f"""
-                    ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
-                         SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                           FROM {SCH}.PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
-                          WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
-                         UNION ALL
-                         SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                           FROM CTE a JOIN {SCH}.pr_m_item_bom B WITH(NOLOCK) ON A.MAT_CODE=B.ITEM_CODE WHERE A.VIR_ITEM_FLAG='1'
-                    )
-                    SELECT DISTINCT ITEM_CODE, GAGONG_PROC_CODE FROM CTE WHERE WH_GAGONG_PROC_CODE=? OPTION(MAXRECURSION 0)""", d6b, whp)
-                for rr in cur.fetchall(): keys.add((rr[0], rr[1]))
-            except Exception: pass
-            _kcache[_kck] = {"ts": _now0, "k": keys}
-            plan_part410._keys_cache = _kcache
+        # ★레거시 SP(NEW2_오전오후)는 투입파트(WH) 필터 없음 — 전 GC_GUBUN='P'·GAGONG_PROC_SEQ=1 포함. (구 keys/wh_part 필터 제거: gpc≠BOM gpc 케이스 탈락 방지, wh_part 파라미터는 하위호환 위해 시그니처만 유지)
         w = ["a.part_plan_ymd<=?", "a.GC_GUBUN='P'", "a.GAGONG_PROC_SEQ=1"]; p = [d6b]
         if wc.strip():   w.append("a.WORK_CODE=?"); p.append(wc.strip())
         if part.strip(): w.append("a.GAGONG_PROC_CODE=?"); p.append(part.strip())
@@ -489,12 +466,15 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                         c[key] += jan; pool -= jan
                         if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
         # ★생산완료(70): 레거시 SP_..._NEW2_오전오후 재현 = ASSY재고(×use) + 중간파트재고 2풀. (PROD_DTL 아님 — 완료전표는 이미 재고로 잡힘)
-        _assy_pool = {}
+        # ★풀 그룹키에 gpc 포함 = 레거시 SP 그룹경계(A:assy,bomlvl,upper,item,PROC · B:item,PROC_SEQ) 이식. proc_seq↔gpc(파트) → 파트별 독립 풀(전체조회시 파트간 공유 방지, 파트필터시 동일).
+        _assy_pool = {}; _part_pool = {}
         for g in rows:
-            k = (g["assy"], g["upper"], g["item"])
-            if k not in _assy_pool: _assy_pool[k] = assystk.get(g["assy"], 0.0) * g["use_qty"]   # 제품(ASSY)재고 = SA_T_ITEM_STOCK(도번)×use_qty
-        _shared(lambda g: (g["assy"], g["upper"], g["item"]), _assy_pool, 70, 'finish')   # A: 제품(ASSY)재고
-        _shared(lambda g: g["item"], partstk, 70, 'finish')                               # B: 중간공정 파트재고(PR+PU_T_MAT_STOCK_WH by 자도번)
+            ka = (g["assy"], g["upper"], g["item"], g["gpc"])
+            if ka not in _assy_pool: _assy_pool[ka] = assystk.get(g["assy"], 0.0) * g["use_qty"]   # 제품(ASSY)재고 = SA_T_ITEM_STOCK(도번)×use_qty
+            kp = (g["item"], g["gpc"])
+            if kp not in _part_pool: _part_pool[kp] = partstk.get(g["item"], 0.0)                   # 중간파트재고(자도번, 파트별 독립)
+        _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # A: 제품(ASSY)재고
+        _shared(lambda g: (g["item"], g["gpc"]), _part_pool, 70, 'finish')                          # B: 중간공정 파트재고(PR+PU_T_MAT_STOCK_WH by 자도번)
         _shared(lambda g: (g["item"], g["gpc"]), jpstk, 40, 'finish')                      # J: 작업중 전표재고(용접시트, 라이브) → finish 가산
         _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')       # C: 준비재고(도번+파트) → 색(녹)만·미생산 판정 제외
         # 4) nx 셀단위 준비 오버레이(우리 웹 확인분, src=nx만)
