@@ -911,6 +911,13 @@ SCREEN.partnerplan=(c)=>{
         ${dates.map(d=>dcell(r,d)).join('')}</tr>`;
     const bodyHTML=()=>loading?spinRow(FIX+dates.length):(rowsCur.length?(rowsCur.map(rowTr).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`);
     c.innerHTML=`
+    <style>
+      /* ★페이지 본문(창) 세로 스크롤 금지 — 그리드만 내부 스크롤. 헤더=sticky top, 합계행=sticky bottom(CLAUDE.md §3) */
+      .pn-grid thead th{position:sticky;top:0;z-index:3;background:#eef2f8}
+      .pn-grid tr.grandtot td{position:sticky;bottom:0;z-index:2;background:#f0f4fb;box-shadow:0 -1px 0 var(--line-2,#c9d3e0)}
+    </style>
+    <div style="display:flex;flex-direction:column;height:100%">
+     <div style="flex:0 0 auto">
      <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 자도번작업처·도번·자도번LIST·일자별 (당김 반영)</span></div>
      <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량 컬럼 동일(1:1 대조용). 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). 첫 일자컬럼=기준일 이전 누적. ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
      <div class="toolbar">

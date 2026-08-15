@@ -290,6 +290,14 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         if gubun == "외주":   w.append("(pp.work_code IS NULL OR pp.work_code='')")   # 거래처(협력사)만
         elif gubun == "자체": w.append("pp.work_code>''")                              # 내부공정(P1/P2)
         where = " AND ".join(w)
+        # ★협력사 유형별 묶기(사용자확정 2026-08-15): 절삭협력사(CM_M_CUST.CUST_TYPE=6·PR011)=도번 롤업 / 나머지=자도번 롤업.
+        gmode = 'mat'
+        if wc.strip():
+            try:
+                cur.execute("SELECT ISNULL(CUST_TYPE,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", wc.strip())
+                _ct = cur.fetchone(); gmode = 'assy' if (_ct and str(_ct[0]).strip() == '6') else 'mat'
+            except Exception:
+                pass
         CAP_PARTS = 40000
         # 부품(자도번) 레벨 raw → 파이썬에서 도번 단위 롤업(자도번LIST·일자매트릭스). 값=part_plan_qty(자재), 요청=plan_qty(발주).
         cur.execute(f"""SELECT TOP {CAP_PARTS} pp.mat_work_center_code wc, pp.split_work_order wo, ISNULL(pp.line_no,'') line,
@@ -316,23 +324,54 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             except Exception:
                 pass
         dates = sorted(dates)
-        # 도번(assy) 단위 롤업
         keyed = {}
-        for r in raw:
-            k = (r["wc"], r["wo"], r["line"], r["assy"])
-            g = keyed.get(k)
-            if not g:
-                g = {"wc": r["wc"], "wo": r["wo"], "line": r["line"], "assy": r["assy"],
-                     "lot": 0.0, "reqq": 0.0, "matq": 0.0, "sagub": False, "parts": {}, "days": {}, "tot": 0.0}
-                keyed[k] = g
-            g["lot"] = max(g["lot"], float(r["lot"] or 0))
-            g["reqq"] = max(g["reqq"], float(r["planq"] or 0))   # 요청수량=발주(도번 order qty)
-            pq = float(r["partq"] or 0); g["matq"] += pq          # 자재수량=자도번 part_plan_qty 합
-            if str(r["matflag"] or "") == "2": g["sagub"] = True
-            mc = str(r["mat"] or "").strip()
-            if mc: g["parts"][mc] = g["parts"].get(mc, 0.0) + pq
-            d = _bucket(r["ppy"]); g["days"][d] = g["days"].get(d, 0.0) + pq; g["tot"] += pq
-        rows = list(keyed.values())
+        if gmode == 'assy':
+            # ★절삭협력사 = 도번(assy) 단위 롤업 — 제번·라인·자도번 전부 합침(레거시 1도번=1행). lot/요청=제번별 max 합.
+            for r in raw:
+                k = (r["wc"], r["assy"])
+                g = keyed.get(k)
+                if not g:
+                    g = {"wc": r["wc"], "wo": "", "line": "", "assy": r["assy"], "lookup": r["assy"],
+                         "lot": 0.0, "reqq": 0.0, "matq": 0.0, "sagub": False, "parts": {}, "days": {}, "tot": 0.0,
+                         "_wolot": {}, "_woreq": {}, "_lines": set()}
+                    keyed[k] = g
+                wo = str(r["wo"] or "")
+                g["_wolot"][wo] = max(g["_wolot"].get(wo, 0.0), float(r["lot"] or 0))
+                g["_woreq"][wo] = max(g["_woreq"].get(wo, 0.0), float(r["planq"] or 0))
+                if str(r["line"] or "").strip(): g["_lines"].add(str(r["line"]).strip())
+                pq = float(r["partq"] or 0); g["matq"] += pq
+                if str(r["matflag"] or "") == "2": g["sagub"] = True
+                mc = str(r["mat"] or "").strip()
+                if mc: g["parts"][mc] = g["parts"].get(mc, 0.0) + pq
+                d = _bucket(r["ppy"]); g["days"][d] = g["days"].get(d, 0.0) + pq; g["tot"] += pq
+            rows = list(keyed.values())
+            for g in rows:
+                g["lot"] = sum(g.pop("_wolot").values()); g["reqq"] = sum(g.pop("_woreq").values())
+                g["line"] = ",".join(sorted(g.pop("_lines"))) or ""
+        else:
+            # ★부자재/기타 = 자도번(mat) 단위 롤업 — 여러 도번/제번에 걸친 같은 자도번 합침. 도번컬럼=속한 도번들.
+            for r in raw:
+                mc = str(r["mat"] or "").strip()
+                if not mc: continue
+                k = (r["wc"], mc)
+                g = keyed.get(k)
+                if not g:
+                    g = {"wc": r["wc"], "wo": "", "line": "", "assy": "", "lookup": mc, "matcode": mc,
+                         "lot": 0.0, "reqq": 0.0, "matq": 0.0, "sagub": False, "parts": {}, "days": {}, "tot": 0.0,
+                         "_assys": set(), "_lines": set()}
+                    keyed[k] = g
+                if str(r["assy"] or "").strip(): g["_assys"].add(str(r["assy"]).strip())
+                if str(r["line"] or "").strip(): g["_lines"].add(str(r["line"]).strip())
+                pq = float(r["partq"] or 0); g["matq"] += pq
+                if str(r["matflag"] or "") == "2": g["sagub"] = True
+                d = _bucket(r["ppy"]); g["days"][d] = g["days"].get(d, 0.0) + pq; g["tot"] += pq
+            rows = list(keyed.values())
+            for g in rows:
+                al = sorted(g.pop("_assys"))
+                g["assy"] = ", ".join(al[:6]) + ("…" if len(al) > 6 else "")   # 도번 컬럼=이 자도번이 속한 도번들
+                g["line"] = ",".join(sorted(g.pop("_lines"))) or ""
+                g["parts"] = {g["matcode"]: g["matq"]}   # 자도번LIST=자도번 자신
+                g["lot"] = g["matq"]; g["reqq"] = g["matq"]   # 자도번 단위: LOT/요청은 도번-level이라 자재수량으로 표기
         # 배치 이름조회: 자도번작업처(work/cust), 도번(assy) 마스터(작업처·품명·규격)
         def _batch(codes, sql):
             m = {}; codes = sorted({c for c in codes if c})
@@ -341,7 +380,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 cur.execute(sql.format(ph=ph), *ch)
                 for rr in cur.fetchall(): m[str(rr[0]).strip()] = rr
             return m
-        wccodes = {g["wc"] for g in rows}; assycodes = {g["assy"] for g in rows}
+        wccodes = {g["wc"] for g in rows}; assycodes = {g["lookup"] for g in rows}   # lookup=도번(assy모드) or 자도번(mat모드)
         workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
         custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
         # 도번 마스터(작업처=assy의 work/incust, 품명, 규격)
@@ -360,7 +399,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             return c
         for g in rows:
             g["wcnm"] = nm_of(g["wc"])
-            am = assym.get(str(g["assy"]).strip())
+            am = assym.get(str(g["lookup"]).strip())
             if am:
                 g["nm"] = am[1]
                 awcc = str(am[2]).strip(); aicc = str(am[3]).strip()
@@ -379,13 +418,12 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             g["doneq"] = None   # ⚠ 완료수량: 레거시 라이브 실적조인 원천 미확정 → 담당확인(추측채움 금지)
             g["days"] = {k2: _qint(v2) for k2, v2 in g["days"].items()}; g["tot"] = _qint(g["tot"])
             g.pop("parts", None)
-        rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["assy"]))
+        rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["assy"]))
         for i, g in enumerate(rows, 1): g["seq"] = i
-        note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영)."
+        note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영). 묶기=" + ("도번(절삭협력사)" if gmode == 'assy' else "자도번(부자재/기타)") + "."
         dates_out = dates; frac = False
-        # ★완료수량(fulfillment): 협력사(외주) 지정 시 레거시 SP_LIVE + 510창 배분으로 실제값 채움.
-        #   요청수량=계획−완료. 재고=도번 공유풀(과다계상 방지). 일자셀=완료/계획+색(가공4주간 동일).
-        if gubun == "외주" and wc.strip() and d6t:
+        # ★완료수량(fulfillment): 절삭협력사(도번 롤업)만 — 도번(swo,assy) 실적을 assy(도번)로 제번합산. 자도번모드는 도번-level이라 미표시(계획만).
+        if gmode == 'assy' and gubun == "외주" and wc.strip() and d6t:
             try:
                 import datetime as _dtp
                 fut_from = base or d6f or d6t
@@ -394,24 +432,26 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 tb = _dtp.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))
                 ndays = min(31, (tb - fb).days + 1) if tb >= fb else 31
                 axis = [(fb + _dtp.timedelta(days=i)).strftime('%y%m%d') for i in range(ndays)]
-                # 도번(swo,assy)별 일자 plan/done/tag 집계
+                # assy(도번) 단위 집계 — 제번(swo) 합산
+                pk_assy = {}
+                for (swo, a), v in per_key.items():
+                    e = pk_assy.setdefault(str(a), [0.0, 0.0, 0.0])
+                    e[0] += v[0]; e[1] += v[1]; e[2] += v[2]
                 fmap = {}
                 for fr in _m:
-                    k = (str(fr["swo"]), str(fr["assy"]))
-                    e = fmap.get(k)
-                    if not e: e = {"pl": [0]*31, "dn": [0]*31, "tg": [0]*31}; fmap[k] = e
+                    a = str(fr["assy"]); e = fmap.get(a)
+                    if not e: e = {"pl": [0]*31, "dn": [0]*31, "tg": [0]*31}; fmap[a] = e
                     for i in range(31):
                         e["pl"][i] += fr["days"][i]; e["dn"][i] += fr["done_days"][i]
                         if fr["tg"][i] > e["tg"][i]: e["tg"][i] = fr["tg"][i]
                 nmatch = 0
                 for g in rows:
-                    hit = per_key.get((str(g["wo"]), str(g["assy"])))
+                    hit = pk_assy.get(str(g["assy"]))
                     if hit is not None:
-                        cfin, cinp, pplan = hit
-                        g["doneq"] = _qint(cfin); g["reqq"] = _qint(cinp); nmatch += 1
+                        g["doneq"] = _qint(hit[0]); g["reqq"] = _qint(hit[1]); nmatch += 1
                     else:
                         g["doneq"] = 0
-                    fm = fmap.get((str(g["wo"]), str(g["assy"])))
+                    fm = fmap.get(str(g["assy"]))
                     if fm:
                         g["days"] = {axis[i]: _qint(fm["pl"][i]) for i in range(ndays) if fm["pl"][i]}
                         g["donedays"] = {axis[i]: _qint(fm["dn"][i]) for i in range(ndays) if fm["dn"][i]}
@@ -422,6 +462,8 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 note += f" 완료수량=출하+완제품재고+세트/입고대기 재고배분(레거시 SP+510창, 매칭 {nmatch}/{len(rows)}건). 일자셀=완료/계획+색."
             except Exception as e:
                 note += f" ⚠완료수량 계산 오류: {str(e)[:90]}"
+        elif gmode == 'mat':
+            note += " (자도번 묶기: 완료수량은 도번단위라 미표시 · 계획수량만 표시)"
         else:
             note += " 완료수량=협력사(외주) 지정 시 표시(레거시는 협력사별 화면)."
         if capped: note = f"⚠ 부품 {CAP_PARTS:,}행 상한 — 자도번작업처/제번으로 좁히세요. " + note
