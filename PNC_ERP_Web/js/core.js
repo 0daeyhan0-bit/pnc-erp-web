@@ -1182,7 +1182,7 @@ function stockScreen(sid){
         el.oninput=()=>{const i=+el.dataset.i,v=el.value.trim();news[i].MAT_CODE=v.toUpperCase();
           if(itemNames[v.toUpperCase()]!==undefined){news[i].item_name=itemNames[v.toUpperCase()];const tr=el.closest('tr');if(tr&&tr.querySelector('.sn-nm'))tr.querySelector('.sn-nm').textContent=itemNames[v.toUpperCase()];}
           clearTimeout(matT);if(v.length<2)return;
-          matT=setTimeout(async()=>{try{const r=await fetch(`${STOCK_API}/api/bom/search?q=${encodeURIComponent(v)}`);const rr=(await r.json()).rows||[];
+          matT=setTimeout(async()=>{try{const r=await fetch(`${STOCK_API}/api/bom/search?q=${encodeURIComponent(v)}&all_active=1`);const rr=(await r.json()).rows||[];
             const d=c.querySelector('#'+dl);if(d)d.innerHTML=rr.map(x=>{itemNames[x.item]=x.name||'';return `<option value="${esc(x.item)}">${esc(x.name||'')}</option>`;}).join('');}catch(e){}},250);};
         el.onchange=()=>{const i=+el.dataset.i,code=el.value.trim().toUpperCase();news[i].MAT_CODE=code;
           if(itemNames[code]!==undefined){news[i].item_name=itemNames[code];const tr=el.closest('tr');if(tr&&tr.querySelector('.sn-nm'))tr.querySelector('.sn-nm').textContent=itemNames[code];}};

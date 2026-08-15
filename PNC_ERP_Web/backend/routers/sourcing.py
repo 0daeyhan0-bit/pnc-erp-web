@@ -790,7 +790,12 @@ _SNAP_TBLS = ["sourcing_route_line", "sourcing_route_proc", "sourcing_route_weld
 def _snap_ensure(cur):
     cur.execute("IF OBJECT_ID('nx.sourcing_route_snap','U') IS NULL CREATE TABLE nx.sourcing_route_snap(route_id INT PRIMARY KEY, item_code NVARCHAR(60), existed BIT, snap_dt DATETIME)")
     for t in _SNAP_TBLS:
-        cur.execute(f"IF OBJECT_ID('nx.{t}_snapbak','U') IS NULL SELECT TOP 0 * INTO nx.{t}_snapbak FROM nx.{t}")
+        if cur.execute("SELECT OBJECT_ID(?)", f"nx.{t}_snapbak").fetchone()[0] is not None:
+            continue
+        # ★백업테이블 = 원본 구조 복제, 단 IDENTITY 컬럼은 CAST로 감싸 identity 속성 제거(INSERT SELECT 가능)
+        cs = cur.execute("SELECT name, is_identity FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + t).fetchall()
+        sel = ", ".join((f"CAST({c[0]} AS INT) AS {c[0]}" if c[1] else c[0]) for c in cs)
+        cur.execute(f"SELECT TOP 0 {sel} INTO nx.{t}_snapbak FROM nx.{t}")
 
 def _snap_collist(cur, tbl, skip_identity=False):
     cur.execute("SELECT name, is_identity FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + tbl)

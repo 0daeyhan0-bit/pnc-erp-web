@@ -11,7 +11,8 @@ router = APIRouter()
 
 @router.get("/api/bom/search")
 def bom_search(q: str = Query('', description="품번/품명 부분검색"),
-               include_past: int = Query(0, description="0=현행(status='사용')만[기본], 1=과거(휴면)포함")):
+               include_past: int = Query(0, description="0=현행(status='사용')만[기본], 1=과거(휴면)포함"),
+               all_active: int = Query(0, description="1=BOM연결 무관 status='사용' 전체(재고 입출고 화면용: orphan 원소재도 노출). include_past 우선.")):
     q = q.strip()
     cn = _nx(); cur = cn.cursor()
     try:
@@ -20,7 +21,13 @@ def bom_search(q: str = Query('', description="품번/품명 부분검색"),
         #   → 빈 SUB shell(BOM없고 아무 BOM에도 자식으로 안 쓰이는 _S01·_S07·-은납-S7 등)은 기본검색에서 숨김. include_past=1이면 전체.
         # ★현행 판정: (현행자식 cs_except=0으로 사용) OR (BOM보유 AND 아무데도 자식아님=최상위제품). → 비현행 변형(예 태국 -F&T, 현행자식 0)·빈 shell 숨김. include_past=1이면 전체.
         # ★성능: 파생 DISTINCT 조인(전체 bom_line 스캔 2회) → 상관 EXISTS로 교체(578ms→56ms). 매칭 item만 검사.
-        past = "" if int(include_past or 0) else """AND ISNULL(i.status,N'사용')=N'사용'
+        # ★all_active(2026-08-15): 재고 입출고 화면은 BOM연결 무관하게 입고 가능한 전 활성자재를 검색해야 함(orphan 원소재 7072AR9374M/X/L 등 노출). orphan 필터만 해제·status는 유지.
+        if int(include_past or 0):
+            past = ""
+        elif int(all_active or 0):
+            past = "AND ISNULL(i.status,N'사용')=N'사용'"
+        else:
+            past = """AND ISNULL(i.status,N'사용')=N'사용'
               AND ( EXISTS(SELECT 1 FROM nx.bom_line uc WHERE uc.child_item=i.item_code AND ISNULL(uc.cs_calc_except,0)=0)
                  OR ( EXISTS(SELECT 1 FROM nx.bom_header h2 WHERE h2.item_code=i.item_code)
                       AND NOT EXISTS(SELECT 1 FROM nx.bom_line u WHERE u.child_item=i.item_code) ) )"""
