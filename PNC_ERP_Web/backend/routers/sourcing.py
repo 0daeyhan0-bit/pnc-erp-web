@@ -784,45 +784,49 @@ def sourcing_route_copy(payload: dict = Body(...)):
         nx.close()
 
 # ===================== 편집 세션 스냅샷/되돌리기 (닫기=취소, 저장만 반영) =====================
-def _snap_ensure(cur):
-    cur.execute("IF OBJECT_ID('nx.sourcing_route_snap','U') IS NULL CREATE TABLE nx.sourcing_route_snap(route_id INT PRIMARY KEY, item_code NVARCHAR(60), existed BIT, snap NVARCHAR(MAX), snap_dt DATETIME)")
+# ★백업테이블 방식(JSON 금지 — datetime/decimal 타입 안전). 세션당 route_id별 1스냅샷.
+_SNAP_TBLS = ["sourcing_route_line", "sourcing_route_proc", "sourcing_route_weld"]
 
-def _snap_dump(cur, tbl, rid):
-    cur.execute(f"SELECT * FROM nx.{tbl} WHERE route_id=?", rid)
-    cols = [d[0] for d in cur.description]
-    return {"cols": cols, "rows": [list(r) for r in cur.fetchall()]}
+def _snap_ensure(cur):
+    cur.execute("IF OBJECT_ID('nx.sourcing_route_snap','U') IS NULL CREATE TABLE nx.sourcing_route_snap(route_id INT PRIMARY KEY, item_code NVARCHAR(60), existed BIT, snap_dt DATETIME)")
+    for t in _SNAP_TBLS:
+        cur.execute(f"IF OBJECT_ID('nx.{t}_snapbak','U') IS NULL SELECT TOP 0 * INTO nx.{t}_snapbak FROM nx.{t}")
+
+def _snap_collist(cur, tbl, skip_identity=False):
+    cur.execute("SELECT name, is_identity FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + tbl)
+    cols = cur.fetchall()
+    if skip_identity: cols = [c for c in cols if not c[1]]
+    return ",".join(c[0] for c in cols)
 
 def _snap_save(cur, rid, item, existed):
-    """편집 세션 시작 스냅샷(라인/공정/용접 통째). 이미 있으면 유지(세션시작본 보존)."""
-    import json as _j
+    """편집 세션 시작 스냅샷(라인/공정/용접 → 백업테이블). 이미 있으면 유지(세션시작본 보존)."""
     _snap_ensure(cur)
     cur.execute("SELECT 1 FROM nx.sourcing_route_snap WHERE route_id=?", rid)
     if cur.fetchone():
-        return   # 세션 중 재호출 → 최초 스냅샷 유지
-    blob = _j.dumps({"line": _snap_dump(cur, "sourcing_route_line", rid),
-                     "proc": _snap_dump(cur, "sourcing_route_proc", rid),
-                     "weld": _snap_dump(cur, "sourcing_route_weld", rid)}, default=str)
-    cur.execute("INSERT INTO nx.sourcing_route_snap(route_id,item_code,existed,snap,snap_dt) VALUES(?,?,?,?,getdate())",
-                rid, item, int(existed), blob)
+        return
+    for t in _SNAP_TBLS:
+        cur.execute(f"DELETE FROM nx.{t}_snapbak WHERE route_id=?", rid)
+        cur.execute(f"INSERT INTO nx.{t}_snapbak SELECT * FROM nx.{t} WHERE route_id=?", rid)
+    cur.execute("INSERT INTO nx.sourcing_route_snap(route_id,item_code,existed,snap_dt) VALUES(?,?,?,getdate())",
+                rid, item, int(existed))
 
 def _snap_clear(cur, rid):
     _snap_ensure(cur)
     cur.execute("DELETE FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+    for t in _SNAP_TBLS:
+        cur.execute(f"DELETE FROM nx.{t}_snapbak WHERE route_id=?", rid)
 
-def _snap_load_rows(cur, tbl, dump):
-    cols = list(dump.get("cols") or []); rows = [list(r) for r in (dump.get("rows") or [])]
-    if not rows: return
-    if tbl == "sourcing_route_line":
-        # line_id 보존(parent_line FK 유지) → IDENTITY_INSERT
-        cur.execute(f"SET IDENTITY_INSERT nx.{tbl} ON")
-        ph = ",".join("?" * len(cols))
-        cur.executemany(f"INSERT INTO nx.{tbl}({','.join(cols)}) VALUES({ph})", [tuple(r) for r in rows])
-        cur.execute(f"SET IDENTITY_INSERT nx.{tbl} OFF")
-    else:
-        # proc/weld: IDENTITY PK(rp_id/rw_id=첫 컬럼) 제외 → 새 id 자동생성(FK 없음, node_item=코드로 참조)
-        cols2 = cols[1:]; rows2 = [r[1:] for r in rows]
-        ph = ",".join("?" * len(cols2))
-        cur.executemany(f"INSERT INTO nx.{tbl}({','.join(cols2)}) VALUES({ph})", [tuple(r) for r in rows2])
+def _snap_restore(cur, rid):
+    """백업테이블 → live 복원(타입 안전). line은 IDENTITY_INSERT로 line_id 보존(parent_line FK). proc/weld는 새 id."""
+    for t in _SNAP_TBLS:
+        cur.execute(f"DELETE FROM nx.{t} WHERE route_id=?", rid)
+    cols = _snap_collist(cur, "sourcing_route_line")
+    cur.execute("SET IDENTITY_INSERT nx.sourcing_route_line ON")
+    cur.execute(f"INSERT INTO nx.sourcing_route_line({cols}) SELECT {cols} FROM nx.sourcing_route_line_snapbak WHERE route_id=?", rid)
+    cur.execute("SET IDENTITY_INSERT nx.sourcing_route_line OFF")
+    for t in ["sourcing_route_proc", "sourcing_route_weld"]:
+        c2 = _snap_collist(cur, t, skip_identity=True)
+        cur.execute(f"INSERT INTO nx.{t}({c2}) SELECT {c2} FROM nx.{t}_snapbak WHERE route_id=?", rid)
 
 
 def _insert_current_tree(cur, rid, item, ymd="260630"):
@@ -939,23 +943,18 @@ def sourcing_route_edit_cancel(payload: dict = Body(...)):
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _snap_ensure(cur)
-        cur.execute("SELECT existed, snap FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+        cur.execute("SELECT existed FROM nx.sourcing_route_snap WHERE route_id=?", rid)
         r = cur.fetchone()
-        if not r or not r[1]:
+        if not r:
             nx.commit(); return {"ok": True, "no_snapshot": True}
         existed = int(r[0] or 0)
-        import json as _j
-        snap = _j.loads(r[1])
-        cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
-        cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
-        cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=?", rid)
         if not existed:
+            for t in _SNAP_TBLS:
+                cur.execute(f"DELETE FROM nx.{t} WHERE route_id=?", rid)
             cur.execute("DELETE FROM nx.sourcing_route WHERE route_id=?", rid)   # 신규 실체화 → 원상복귀(가상 baseline)
         else:
-            _snap_load_rows(cur, "sourcing_route_line", snap.get("line", {}))
-            _snap_load_rows(cur, "sourcing_route_proc", snap.get("proc", {}))
-            _snap_load_rows(cur, "sourcing_route_weld", snap.get("weld", {}))
-        cur.execute("DELETE FROM nx.sourcing_route_snap WHERE route_id=?", rid)
+            _snap_restore(cur, rid)   # 백업테이블 → live 복원(세션 시작 상태)
+        _snap_clear(cur, rid)         # 메타+백업 정리
         nx.commit()
         return {"ok": True, "reverted": True, "deleted_route": (not existed)}
     except Exception:
