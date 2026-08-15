@@ -415,16 +415,16 @@ SCREEN.partplan=(c)=>{
           const cf=(r.dfin&&r.dfin[x])||'0';if(!g.dfin[x]||g.dfin[x]==='0'||finRank(cf)<finRank(g.dfin[x]))g.dfin[x]=cf;}});});
       disp=[...agg.values()];
     }
-    // 정렬: PART일자+INPUT → 도번 → WO (레거시 sort)
-    disp=disp.slice().sort((a,b)=>((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.item||'').localeCompare(b.item||'')||(a.wo||'').localeCompare(b.wo||''));
+    // 정렬: ★도번(item) 묶기(그룹) → PART일자+INPUT → WO
+    disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
     const NCOL=12;  // 고정컬럼(파트..당일이전계획)
     const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
     // 완료수량=생산실적(finish)만. 생산분 있으면 "생산/계획", 없으면 계획만(바 없이=키팅/미키팅은 색으로만 구분)
     const pcell=r=>r.prior_plan>0?(r.prior_cover>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:`${nf(r.prior_plan)}`):'·';
-    const rowHtml=(r,seq)=>{const pf=r.prior_fin||'0';
-      return `<tr>
-        <td class="center mut">${seq}</td><td>${esc(r.gpcnm||r.gpc)}</td>
-        <td><b>${esc(r.assy)}</b></td><td>${esc(r.upper||'')}</td><td>${esc(r.item)}</td>
+    const rowHtml=(r,seq,firstInGrp)=>{const pf=r.prior_fin||'0';
+      return `<tr${firstInGrp&&seq>1?' style="border-top:2px solid #9fb3c8"':''}>
+        <td class="center mut">${seq}</td><td>${firstInGrp?esc(r.gpcnm||r.gpc):''}</td>
+        <td>${firstInGrp?`<b>${esc(r.assy)}</b>`:''}</td><td>${firstInGrp?esc(r.upper||''):''}</td><td><b>${firstInGrp?esc(r.item):''}</b></td>
         <td class="bcap" title="${esc(r.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
         <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm||'')}</td>
         <td class="center" style="color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}">${esc(pulltxt(r))}</td>
@@ -461,7 +461,7 @@ SCREEN.partplan=(c)=>{
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
        <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}</tr></thead>
-      <tbody>${st.loading?spinRow(NCOL+d.length):(disp.length?disp.map((r,i)=>rowHtml(r,i+1)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
+      <tbody>${st.loading?spinRow(NCOL+d.length):(disp.length?disp.map((r,i)=>rowHtml(r,i+1,i===0||disp[i-1].item!==r.item)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
       ${disp.length?(()=>{const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);return `<tfoot>
        <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(st.plan_sum)}</td>
