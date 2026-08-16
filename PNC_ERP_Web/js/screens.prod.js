@@ -650,11 +650,9 @@ SCREEN.partresult=(c)=>{
 
 /* ===== 생산 ⑦: 생산파트재고조정 (w_pr_stock_470) — 라이브 조회 + nx.stock_maint 등록/수정/삭제 ===== */
 SCREEN.partstockadj=(c)=>{
-  wrShell(c,{sid:'partstockadj',
+  wrShell(c,{sid:'partstockadj', nxOnly:true,
     title:`🛠️ 생산파트재고조정 <span style="font-size:12px;color:var(--muted);font-weight:400">자재개별재고조정(등록·수정·삭제)</span>`,
-    sub:`파트재고 장부수정(조정, ±). 🔴 라이브=<code>PR_T_STOCK_MAINT_MAT</code> · ✏️ 신규편집=단일원장 <code>nx.stock_ledger</code>(PRD)`,
-    default:'edit',
-    live:(body)=>wrLiveLedger(body,'adj'),
+    sub:`파트재고 장부수정(조정, ±). 조회=📁미러이력(<code>PR_T_STOCK_MAINT_MAT</code> 재고조정)∪웹편집(<code>nx.stock_ledger</code> PRD). 레거시 라이브 없음(컷오버).`,
     cfg:{
       listEp:'/api/stockmaint/list', saveEp:'/api/stockmaint/save', delEp:'/api/stockmaint/delete',
       dateLabel:'수정기간', filters:[{k:'tag',label:'구분',width:50},{k:'mat',label:'자재',width:120},{k:'wc',label:'작업처',width:60}],
@@ -1052,8 +1050,8 @@ SCREEN.kitting=(host)=>{
         g.prior_fin=(g.prior_plan>0&&g.prior_cover>=g.prior_plan)?'3':'0';
         seq++;flat.push({t:'m',r:g,idxs:g.idxs,seq});});
     }else{
-      passed.forEach(({r,i})=>{seq++;flat.push({t:'m',r,idxs:[i],seq});
-        if(st.view==='상세'){(r.splits||[]).forEach(sp=>flat.push({t:'s',r,sp,i}));}});
+      // 상세·제번 = WO(제번)행. ★기존 하위행(splits=본행 자기복제, 레거시에 없는 중복)은 제거.
+      passed.forEach(({r,i})=>{seq++;flat.push({t:'m',r,idxs:[i],seq});});
     }
     const fcnt=flat.filter(o=>o.t==='m').length;
     const fplan=passed.reduce((s,o)=>s+(o.r.plan_qty||0),0);

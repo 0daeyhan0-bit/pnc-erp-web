@@ -1571,7 +1571,7 @@ function wrCrud(host, cfg){
       <tbody>${st.loading?spinRow(cfg.cols.length+2):((d.rows&&d.rows.length)?d.rows.map((r,i)=>`<tr>
         <td class="center">${ed&&r.ID?`<input type="checkbox" class="wr-chk" data-id="${r.ID}" ${st.sel.has(r.ID)?'checked':''}>`:''}</td>
         ${cfg.cols.map(col=>`<td class="${col.cls||''}" ${col.title?`title="${esc(r[col.title]||'')}"`:''} ${col.cap?'style="max-width:150px;overflow:hidden;text-overflow:ellipsis"':''}>${col.fmt?col.fmt(r):esc(r[col.k]??'')}</td>`).join('')}
-        <td class="center">${ed&&(r.ID||cfg.editAll)?`<button class="btn wr-edit" data-idx="${i}" style="padding:1px 6px">수정</button>`:`<span style="color:#b7c2d4;font-size:10px">${r.ID?'':'라이브'}</span>`}</td></tr>`).join(''):`<tr><td colspan="${cfg.cols.length+2}" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`)}</tbody></table></div>`;
+        <td class="center">${ed&&(r.ID||cfg.editAll)?`<button class="btn wr-edit" data-idx="${i}" style="padding:1px 6px">수정</button>`:`<span style="color:#8aa0bd;font-size:10px">${r.ID?'':'📁이력'}</span>`}</td></tr>`).join(''):`<tr><td colspan="${cfg.cols.length+2}" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const doSearch=()=>{st.F.from=g('#wr-from').value;st.F.to=g('#wr-to').value;qfRead(host,cfg.filters,st.F,'wr-f-');load();};
     g('#wr-search').onclick=doSearch;

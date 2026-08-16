@@ -54,34 +54,61 @@ _SM_LED2UI = {"PE": "4"}   # 원장 태그 → UI 태그
 @router.get("/api/stockmaint/list")
 def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str = Query(""),
                     mat: str = Query(""), wc: str = Query("")):
+    """생산파트재고조정 조회 = 웹(nx.stock_ledger PRD, editable) ∪ 미러이력(nx.PR_T_STOCK_MAINT_MAT tag2 재고조정, 읽기전용).
+       컷오버: 레거시 라이브 없음. 미러=델타싱크가 채운 nx, src='legacy' editable=0."""
     nx = _nx(); cur = nx.cursor()
     try:
-        w = ["l.STOCK_POINT='PRD'", "l.MAINT_TAG IN ('1','2','PE')"]; p = []
-        if from_ymd: w.append("l.MAINT_YMD>=?"); p.append(_d6(from_ymd))
-        if to_ymd:   w.append("l.MAINT_YMD<=?"); p.append(_d6(to_ymd))
-        if tag.strip():
-            ui = tag.strip()[:1]; w.append("l.MAINT_TAG=?"); p.append(_SM_UI2LED.get(ui, ui))
-        if mat.strip():  w.append("(l.MAT_CODE LIKE ? OR l.ITEM_CODE LIKE ?)"); p += [f"%{mat.strip()}%"]*2
-        if wc.strip():   w.append("(l.WORK_CODE=? OR l.TO_GAGONG_PROC_CODE=?)"); p += [wc.strip(), wc.strip()]
-        cur.execute(f"""SELECT TOP 3000 l.MAINT_YMD, l.MAINT_SEQ, ISNULL(l.MAINT_TAG,'') tag,
-              ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.GAGONG_PROC_CODE,'') part_code,
-              ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
-              ISNULL(l.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
-              l.MAINT_QTY, l.MAINT_COST, l.MAINT_AMT, ISNULL(l.REMARKS,'') remarks,
-              ISNULL(l.TO_GAGONG_PROC_CODE,'') prod_work_code, ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
-            FROM nx.stock_ledger l
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=l.ITEM_CODE
-            WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""", *p)
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            ui = _SM_LED2UI.get(r["tag"], r["tag"])
-            r["ID"] = f'{r["MAINT_YMD"]}-{r["MAINT_SEQ"]}'; r["tag"] = ui
-            r["MAINT_QTY"] = float(r["MAINT_QTY"] or 0); r["MAINT_COST"] = float(r["MAINT_COST"] or 0)
-            r["MAINT_AMT"] = float(r["MAINT_AMT"] or 0)
-            r["tag_nm"] = STOCKMAINT_TAGS.get(ui, ui)
-            r["INSERT_DATETIME"] = str(r["INSERT_DATETIME"] or "")[:19]
+        rows = []
+        # --- 웹행 (nx.stock_ledger PRD, 편집가능) ---
+        if not tag.strip() or _SM_UI2LED.get(tag.strip()[:1], tag.strip()[:1]) in ('1','2','PE'):
+            w = ["l.STOCK_POINT='PRD'", "l.MAINT_TAG IN ('1','2','PE')"]; p = []
+            if from_ymd: w.append("l.MAINT_YMD>=?"); p.append(_d6(from_ymd))
+            if to_ymd:   w.append("l.MAINT_YMD<=?"); p.append(_d6(to_ymd))
+            if tag.strip():
+                ui = tag.strip()[:1]; w.append("l.MAINT_TAG=?"); p.append(_SM_UI2LED.get(ui, ui))
+            if mat.strip():  w.append("(l.MAT_CODE LIKE ? OR l.ITEM_CODE LIKE ?)"); p += [f"%{mat.strip()}%"]*2
+            if wc.strip():   w.append("(l.WORK_CODE=? OR l.TO_GAGONG_PROC_CODE=?)"); p += [wc.strip(), wc.strip()]
+            cur.execute(f"""SELECT TOP 3000 l.MAINT_YMD, l.MAINT_SEQ, ISNULL(l.MAINT_TAG,'') tag,
+                  ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.GAGONG_PROC_CODE,'') part_code,
+                  ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+                  ISNULL(l.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
+                  l.MAINT_QTY, l.MAINT_COST, l.MAINT_AMT, ISNULL(l.REMARKS,'') remarks,
+                  ISNULL(l.TO_GAGONG_PROC_CODE,'') prod_work_code, ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
+                FROM nx.stock_ledger l
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=l.ITEM_CODE
+                WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""", *p)
+            cols = [d[0] for d in cur.description]
+            for r in cur.fetchall():
+                d = dict(zip(cols, r)); ui = _SM_LED2UI.get(d["tag"], d["tag"])
+                d["ID"] = f'{d["MAINT_YMD"]}-{d["MAINT_SEQ"]}'; d["tag"] = ui; d["src"] = "web"; d["editable"] = 1
+                d["MAINT_QTY"] = float(d["MAINT_QTY"] or 0); d["MAINT_COST"] = float(d["MAINT_COST"] or 0); d["MAINT_AMT"] = float(d["MAINT_AMT"] or 0)
+                d["tag_nm"] = STOCKMAINT_TAGS.get(ui, ui); d["INSERT_DATETIME"] = str(d["INSERT_DATETIME"] or "")[:19]
+                rows.append(d)
+        # --- 미러 이력행 (nx.PR_T_STOCK_MAINT_MAT tag2 재고조정, 읽기전용) ---
+        if not tag.strip() or tag.strip()[:1] == '2':
+            wm = ["m.MAINT_TAG='2'"]; pm = []
+            if from_ymd: wm.append("m.MAINT_YMD>=?"); pm.append(_d6(from_ymd))
+            if to_ymd:   wm.append("m.MAINT_YMD<=?"); pm.append(_d6(to_ymd))
+            if mat.strip():  wm.append("(m.MAT_CODE LIKE ? OR m.ITEM_CODE LIKE ?)"); pm += [f"%{mat.strip()}%"]*2
+            if wc.strip():   wm.append("(m.WORK_CODE=? OR m.PROD_WORK_CODE=?)"); pm += [wc.strip(), wc.strip()]
+            cur.execute(f"""SELECT TOP 3000 m.MAINT_YMD, m.MAINT_SEQ, ISNULL(m.WORK_CODE,'') work_code,
+                  ISNULL(m.PART_CODE,'') part_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+                  ISNULL(m.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
+                  m.MAINT_QTY, m.MAINT_COST, m.MAINT_AMT, ISNULL(m.REMARKS,'') remarks,
+                  ISNULL(m.PROD_WORK_CODE,'') prod_work_code, ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
+                FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=m.MAT_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=m.ITEM_CODE
+                WHERE {' AND '.join(wm)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *pm)
+            cols = [d[0] for d in cur.description]
+            for r in cur.fetchall():
+                d = dict(zip(cols, r)); d["tag"] = "2"; d["src"] = "legacy"; d["editable"] = 0
+                d["ID"] = None   # 미러 이력=읽기전용(wrCrud가 ID없으면 체크박스·수정 숨김)
+                d["MAINT_QTY"] = float(d["MAINT_QTY"] or 0); d["MAINT_COST"] = float(d["MAINT_COST"] or 0); d["MAINT_AMT"] = float(d["MAINT_AMT"] or 0)
+                d["tag_nm"] = STOCKMAINT_TAGS.get("2", "재고조정"); d["INSERT_DATETIME"] = str(d["INSERT_DATETIME"] or "")[:19]
+                rows.append(d)
+        rows.sort(key=lambda r: (str(r["MAINT_YMD"]), 1 if r["src"] == "web" else 0, r["MAINT_SEQ"]), reverse=True)
         return {"rows": rows, "cnt": len(rows), "sum_qty": sum(r["MAINT_QTY"] for r in rows),
                 "sum_amt": sum(r["MAINT_AMT"] for r in rows)}
     finally:
