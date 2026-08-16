@@ -99,6 +99,33 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 색상 color_NN: tag 90/70/50/40/20/10 → RGB 실측 매핑(전표10·가공창고20 색 확인).
 - per-cell finish_qty_NN/color_NN diff0 → 표시(컬럼·소계·정렬) → SP-EXEC 제거.
 
+## ★★finish 배분 로직 규명 (2026-08-16, 오라클 풀컬럼 격리검증 667/680=98.1%)
+- tag 정본: 90출하·70생산(ASSY재고)·30자재(자재/생산파트/사급)·20가공창고·10가공전표·00미완.
+- **배분 순서·풀·공유방식(오라클 풀컬럼 입력으로 격리검증):**
+  1. 출하(90) = sale_qty × use_qty — 행별
+  2. 가공창고재고(20) = proc_stock_qty — **mat 공유풀**
+  3. ASSY재고(70) = assy_stock_qty × use_qty — **행별(공유X!)** ★핵심(공유하면 84미스)
+  4. 자재(30) = pr_stock+sg_stock+stock_qty — **mat 공유풀**
+  5. 도번고정(fix, tag30) = fix_pr_stock_qty — 행별
+  6. 가공전표(10) = ing_stock_qty(가공전표발행수량) — 행별
+  - 각 풀: 셀(00당일이전/01기준/02익일) 날짜순 jan(plan-finish) 소진.
+- 검증: 오라클 풀컬럼 입력시 **667/680 finish_NN 일치(98.1%)**. 조합=ASSY행별+fix+ing.
+- ★남은 13건 = **공유풀(mat) 분배 정렬 순서**(같은 mat 여러 assy 중 누구 먼저): 예 MJU61919601 proc5→704/701, MJU61881601 proc10→929301/928401. 410처럼 SP 커서 정렬(assy? plan_ymd? wo?) 이식 필요. + AJR30033101 3행(proc8/pr18 셀) 미세.
+- ★★남은 작업: ① 공유풀 분배 정렬 규명(→680 diff0) ② **오라클 풀컬럼을 nx 소스로 대체**(sale=sa_t_sale_dtl·proc=pr_t_mat_stock_wh P0001·assy=sa_t_item_stock·pr/sg/stock=재귀CTE·ing=가공전표발행) — 각 소스도 오라클 컬럼과 diff0 확인 ③ 색상 color_NN ④ 엔드포인트+표시 ⑤ SP-EXEC 제거.
+
+## 공유풀 분배 정렬 (2026-08-16)
+- 공유풀(mat: proc·자재) 분배를 **assy 오름차순** 정렬 → finish **670/680(98.5%)**(13→10 개선). (ppy,assy)·(ppy,phm,assy)도 10. sort_num는 14(악화).
+- 남은 10건 = proc/pr 미세: 예 AJR30033101 3행(MJU66954305/310/311) plan14@02, proc8+pr18인데 오라클=8(=proc만, pr제외). 자재(pr) 풀이 이 케이스엔 미적용 — 조건(중간공정 특정 상황?) 추가규명 필요. 410의 설계예외(용접링·이중계상)처럼 개별 케이스.
+- 상태: **finish 로직 98.5% (오라클 풀컬럼 입력 기준)**. 남은 10 edge는 nx소싱 후 함께 마무리.
+
+## ★다음 큰 단계 = nx 소싱 (오라클 풀컬럼 → nx 실테이블)
+- sale=sa_t_sale_dtl(wo,swo,item=assy,ff='0')×use — 단 420은 WO집계라 assy별 SUM
+- proc=pr_t_mat_stock_wh(part_code='P0001') by mat_code=item
+- assy재고=sa_t_item_stock by assy ×use
+- 자재(30)=재귀CTE(pr_t_mat_stock_wh part<>P0001 + pu_t_mat_stock_wh Z99990 + PU_T_SAGUB_STOCK) by mat, fix=BOM롤업×use
+- 전표(10)=가공전표발행수량(ing_stock) — 원천 PR_T_INDI_CUTTING or ready? (오라클 ing_stock_qty와 대조)
+- 각 nx소스를 오라클 풀컬럼과 먼저 diff0 확인 후 배분투입.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
