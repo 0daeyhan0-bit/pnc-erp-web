@@ -144,8 +144,8 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         # ★공유풀 소진순서 = 레거시 SP 커서순서(plan_ymd→part_output_hm→output_hm→wo). assy순 아님(같은 원소재를 여러 assy가 나눠쓸 때 이른 계획이 먼저 가져감).
         _cur = lambda x: (x["plan_ymd"], x["phm"], x["ohm"], x["assy"])
         for g in rows: alloc(g, sale.get(g["assy"], 0.0) * g["use"], 90)      # 출하90 행별
+        for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ★ASSY재고70 행별 (proc보다 먼저: 자력충당 assy가 공유 proc풀을 선점하지 않게 → 남은 proc가 재고없는 assy로 감)
         shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["plan_ymd"], x["phm"], x["ohm"], x["assy"]))  # 가공창고20 mat공유 (bom_level 원소재 우선→커서순)
-        for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별
         shared(lambda g: g["item"], jae, 30, sortkey=_cur)                    # 자재30 mat공유(커서순)
         shared(lambda g: (g["upper"], g["item"]), fixm, 30, sortkey=_cur)     # 도번고정30 (upper,item)공유(커서순)
         for g in rows: alloc(g, ing.get(g["item"], 0.0), 10, 'ready')         # 전표10 ready
