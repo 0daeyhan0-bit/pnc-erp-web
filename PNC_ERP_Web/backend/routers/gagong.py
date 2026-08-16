@@ -51,7 +51,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         if item.strip(): w.append("a.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if jado.strip(): w.append("a.ITEM_CODE LIKE ?"); p.append(f"%{jado.strip()}%")
         cur.execute(f"""SELECT a.ASSY_ITEM_CODE assy, a.ITEM_CODE item, a.PART_PLAN_YMD ymd,
-              MAX(ISNULL(a.UPPER_ITEM_CODE,'')) upper, MAX(ISNULL(a.GAGONG_PROC_CODE,'')) gpc,
+              MAX(ISNULL(a.UPPER_ITEM_CODE,'')) upper, MIN(a.BOM_LEVEL) bl, MAX(ISNULL(a.GAGONG_PROC_CODE,'')) gpc,
               MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq, MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) phm, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.WORK_ORDER,'')) wo,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
@@ -66,7 +66,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
             if bucket is None: continue
             k = (r["assy"], r["item"]); g = keyed.get(k)
             if not g:
-                g = {"assy": r["assy"], "item": r["item"], "upper": r["upper"] or '', "gpc": r["gpc"] or '',
+                g = {"assy": r["assy"], "item": r["item"], "upper": r["upper"] or '', "bl": int(r["bl"] or 0), "gpc": r["gpc"] or '',
                      "use": float(r["useq"] or 1), "plan_ymd": r["plan_ymd"] or '', "phm": r["phm"] or '',
                      "ohm": r["ohm"] or '', "wo": '', "_cells": {}}
                 keyed[k] = g
@@ -127,13 +127,14 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                 if jan <= 0: continue
                 take = min(jan, pool); c2[key] += take; pool -= take
                 if take >= jan - 1e-9 and (tag > c2["tag"] or c2["tag"] == 0): c2["tag"] = tag
-        def shared(keyfn, poolmap, tag, key='fin'):
+        def shared(keyfn, poolmap, tag, key='fin', sortkey=None):
+            sk = sortkey or (lambda x: x["assy"])
             grp = {}
             for g in rows: grp.setdefault(keyfn(g), []).append(g)
             for k, gs in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
-                for g in sorted(gs, key=lambda x: x["assy"]):
+                for g in sorted(gs, key=sk):
                     for c2 in cellseq(g):
                         if pool <= 0: break
                         jan = c2["plan"] - c2["fin"]
@@ -141,7 +142,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         take = min(jan, pool); c2["fin"] += take; pool -= take
                         if take >= jan - 1e-9 and (tag > c2["tag"] or c2["tag"] == 0): c2["tag"] = tag
         for g in rows: alloc(g, sale.get(g["assy"], 0.0) * g["use"], 90)      # 출하90 행별
-        shared(lambda g: g["item"], proc, 20)                                 # 가공창고20 mat공유
+        shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["assy"]))  # 가공창고20 mat공유 (bom_level 원소재 우선)
         for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별
         shared(lambda g: g["item"], jae, 30)                                  # 자재30 mat공유
         shared(lambda g: (g["upper"], g["item"]), fixm, 30)                   # 도번고정30 (upper,item)공유 (레거시 (upper,mat)키)
