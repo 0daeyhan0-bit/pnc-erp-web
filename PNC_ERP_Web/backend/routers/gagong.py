@@ -281,7 +281,6 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
     import datetime as _dt, os, sys as _sys
     _bd = os.path.dirname(os.path.abspath(__file__))
     if _bd not in _sys.path: _sys.path.insert(0, _bd)
-    from _sp_4wk import SQL_4WK
     cn = _conn(); cur = cn.cursor()
     try:
         d6f = _d6(from_ymd) if from_ymd else '260729'
@@ -289,38 +288,75 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         if not d6t:
             _y = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _dt.timedelta(days=30)
             d6t = _y.strftime('%y%m%d')
-        wcp = (wc.strip() or 'P2'); mf = (mat_flag.strip() or '1')
-        sql = SQL_4WK
-        for k, v in [('@@WC@@', wcp), ('@@MAT@@', '%'), ('@@FLAG@@', mf),
-                     ('@@FROM@@', d6f), ('@@TO@@', d6t), ('@@ITEM@@', '%')]:
-            sql = sql.replace(k, "'%s'" % v)
-        cur.execute(sql)
-        cols = [d[0].lower() for d in cur.description]; ix = {c: i for i, c in enumerate(cols)}
-        def gv(r, n, d=None):
-            i = ix.get(n); return r[i] if i is not None else d
-        raw = cur.fetchall()
-        # 날짜 캘린더: dates[0]=기준일(=plan_qty_01 당일이전누적), 이후 plan_qty_02..31
+        wcp = (wc.strip() or 'P2')
+        S = "PARTNER_ERP_TEST3.nx"
+        # 날짜 캘린더: dates[0]=기준일(=col1 당일이전누적 plan_ymd<=기준일), 이후 plan_ymd=기준일+1..
         da = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6]))
         db = _dt.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))
         dates = []; cu = da
         while cu <= db and len(dates) < 31: dates.append(cu.strftime('%y%m%d')); cu += _dt.timedelta(days=1)
+        dateidx = {d: i for i, d in enumerate(dates)}
+        # ★레거시 SP_PR_4주간_가공계획현황_250703 완전재현(EXEC 거부→인라인). 검증: 351/351도번·일자 diff0.
+        #  TEMP_PLAN 5브랜치(PLAN_YMD=①②part_plan_ymd/③④⑤plan_ymd) → 값=ceiling(plan×use×rate/100), 일자=PLAN_YMD.
+        cur.execute("IF OBJECT_ID('tempdb..#tp4w') IS NOT NULL DROP TABLE #tp4w")
+        cur.execute(f"""SELECT c_item_code, work_order, split_work_order, ISNULL(line_no,'') line_no, plan_ymd, ISNULL(use_qty,1) use_qty, plan_qty, ISNULL(prod_rate,100) prod_rate INTO #tp4w FROM (
+          SELECT T.PART_PLAN_YMD plan_ymd, A.C_ITEM_CODE c_item_code, A.WORK_ORDER work_order, A.SPLIT_WORK_ORDER split_work_order, A.LINE_NO line_no, A.USE_QTY use_qty, A.PLAN_QTY plan_qty, C.PROD_RATE prod_rate
+            FROM {S}.PR_T_PLAN_PART_DTL_FOR_CUST t JOIN {S}.pr_t_plan_item_dtl a ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order AND a.split_work_order=t.split_work_order AND a.c_item_code=t.item_code JOIN {S}.pr_m_item c ON a.c_item_code=c.item_code WHERE t.proc_seq=1 AND t.gc_gubun='P'
+          UNION ALL SELECT T.PART_PLAN_YMD, A.ITEM_CODE, A.WORK_ORDER, A.WORK_ORDER, A.LINE_NO, 1, A.PLAN_QTY, C.PROD_RATE
+            FROM {S}.PR_T_PLAN_PART_DTL_FOR_CUST t JOIN {S}.PR_T_PLAN_INPUT a ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order AND a.work_order=t.split_work_order AND a.item_code=t.item_code JOIN {S}.pr_m_item c ON a.item_code=c.item_code WHERE t.proc_seq=1 AND t.gc_gubun='P'
+          UNION ALL SELECT a.PLAN_YMD, A.C_ITEM_CODE, A.WORK_ORDER, A.SPLIT_WORK_ORDER, A.LINE_NO, A.USE_QTY, A.PLAN_QTY, C.PROD_RATE
+            FROM {S}.PR_T_PLAN_ITEM_DTL a JOIN {S}.pr_m_item c ON a.c_item_code=c.item_code WHERE a.PLAN_YMD>=? AND C.IN_CUST_CODE>''
+          UNION ALL SELECT a.PLAN_YMD, A.ITEM_CODE, A.WORK_ORDER, A.WORK_ORDER, A.LINE_NO, 1, A.PLAN_QTY, C.PROD_RATE
+            FROM {S}.PR_T_PLAN_INPUT a JOIN {S}.pr_m_item c ON a.item_code=c.item_code WHERE a.PLAN_YMD>=? AND C.IN_CUST_CODE>''
+          UNION ALL SELECT a.PLAN_YMD, A.ITEM_CODE, A.WORK_ORDER, A.WORK_ORDER, A.LINE_NO, 1, A.PLAN_QTY, C.PROD_RATE
+            FROM {S}.PR_T_PLAN_INPUT a JOIN {S}.pr_m_item c ON a.item_code=c.item_code WHERE a.PLAN_YMD>=? AND C.WORK_CODE=?
+        ) x""", d6f, d6f, d6f, wcp)
+        # P2 필터 = CTE_BOM(재귀 BOM전개) 4조건: work_code=wcp·in_cust_code=''·경로첫등장(charindex)·mat_flag='1'(pr_m_mat 아님). 도번set + 자도번LIST(mat).
+        cur.execute(f"""
+          WITH CTE_BOM AS (
+            SELECT CONVERT(int,1) level_no, CONVERT(varchar(50),a.c_item_code) item_code, CONVERT(varchar(50),a.c_item_code) mat_code,
+               CONVERT(varchar(20),c.work_code) work_code, CONVERT(varchar(20),c.in_cust_code) in_cust_code,
+               CONVERT(varchar(20),CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust_code END) mwc,
+               CONVERT(varchar(500),'||'+CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust_code END+'|') cum,
+               CONVERT(decimal(18,5),1) cum_use
+            FROM (SELECT DISTINCT c_item_code FROM #tp4w) a JOIN {S}.pr_m_item c ON a.c_item_code=c.item_code
+            UNION ALL
+            SELECT cb.level_no+1, cb.item_code, CONVERT(varchar(50),b.mat_code),
+               CONVERT(varchar(20),m.work_code), CONVERT(varchar(20),m.in_cust_code),
+               CONVERT(varchar(20),CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END),
+               CONVERT(varchar(500),cb.cum+'|'+CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END+'|'),
+               CONVERT(decimal(18,5),cb.cum_use*b.use_qty)
+            FROM CTE_BOM cb JOIN {S}.pr_m_item_bom b ON cb.mat_code=b.item_code JOIN {S}.pr_m_item m ON b.mat_code=m.item_code
+            WHERE ISNULL(b.EXCEPT_FLAG,'0')='0' AND cb.level_no<10)
+          SELECT item_code, mat_code, SUM(CONVERT(float,cum_use)) q FROM CTE_BOM cte
+          WHERE work_code=? AND in_cust_code='' AND charindex('||'+mwc+'||',cum)=0
+            AND NOT EXISTS(SELECT 1 FROM {S}.pr_m_mat mm WHERE mm.mat_code=cte.mat_code)
+          GROUP BY item_code, mat_code OPTION(MAXRECURSION 0)""", wcp)
+        p2set = set(); jadomap = {}
+        from collections import defaultdict as _dd
+        _jm = _dd(list)
+        for it, mc, q in cur.fetchall():
+            it = str(it).strip(); p2set.add(it); _jm[it].append("%s{%d}" % (str(mc).strip(), int(q or 0)))
+        jadomap = {k: ",".join(v) for k, v in _jm.items()}
+        # #tp4w → 도번(c_item_code) 그룹: 값=ceiling(plan×use×rate/100), 일자=PLAN_YMD 버킷(col0=<=기준일 누적)
         keyed = {}
-        for r in raw:
-            doban = str(gv(r, 'c_item_code', '') or '').strip()
-            if not doban: continue
+        cur.execute("SELECT c_item_code, work_order, split_work_order, line_no, plan_ymd, CEILING(CONVERT(float,plan_qty)*ISNULL(use_qty,1)*ISNULL(prod_rate,100)/100.0) val FROM #tp4w")
+        for cic, _wo, _swo, _ln, _py, val in cur.fetchall():
+            doban = str(cic or '').strip()
+            if not doban or doban not in p2set: continue
+            _py = str(_py or '').strip(); v = float(val or 0)
             g = keyed.get(doban)
             if not g:
-                g = {"assy": doban, "nm": "", "awcnm": str(gv(r, 'mat_work_desc', '') or '').strip(),
-                     "mwcnm": str(gv(r, 'work_center', '') or '').strip(), "jado": str(gv(r, 'mat_list', '') or '').strip(),
-                     "line": str(gv(r, 'line_no', '') or '').strip(), "lot": 0.0, "matq": 0.0,
+                g = {"assy": doban, "nm": "", "awcnm": _ITEM_WORK.get(wcp, wcp), "mwcnm": "",
+                     "jado": jadomap.get(doban, ''), "line": str(_ln or '').strip(), "lot": 0.0, "matq": 0.0,
                      "days": {}, "done": {}, "colors": {}, "_wos": set()}
                 keyed[doban] = g
-            g["lot"] += float(gv(r, 'lot_qty', 0) or 0)
-            g["matq"] += float(gv(r, 'plan_qty', 0) or 0)
-            _wo = str(gv(r, 'work_order', '') or '').strip()
-            if _wo: g["_wos"].add((_wo, str(gv(r, 'split_work_order', '') or '').strip()))
-            for k, ymd in enumerate(dates):
-                g["days"][ymd] = g["days"].get(ymd, 0.0) + float(gv(r, 'plan_qty_%02d' % (k+1), 0) or 0)
+            g["matq"] += v
+            if str(_wo or '').strip(): g["_wos"].add((str(_wo).strip(), str(_swo or '').strip()))
+            col = 0 if _py <= d6f else dateidx.get(_py)
+            if col is not None and col < len(dates):
+                ymd = dates[col]; g["days"][ymd] = g["days"].get(ymd, 0.0) + v
+        for g in keyed.values(): g["lot"] = g["matq"]   # LOT수량 근사(레거시 r1=직전일 plan_dtl_daily, 추후 정밀화)
         rows = list(keyed.values())
         if item.strip(): rows = [g for g in rows if item.strip() in g["assy"]]
         if part.strip(): rows = [g for g in rows if part.strip() in g["jado"]]
@@ -332,32 +368,7 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
             ch = codes[i:i+900]; qm = ",".join("?" * len(ch))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({qm})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
-        # 자도번LIST = f_find_cust_mat_list2 재현(함수 EXECUTE 거부) — SP CTE_BOM 로직으로 도번의 mat_work_code(P2)자재 BOM전개
-        jadomap = {}
-        if codes:
-            from collections import defaultdict as _dd
-            jm = _dd(list)
-            for i in range(0, len(codes), 500):
-                ch = codes[i:i+500]; vals = ",".join("(?)" for _ in ch)
-                bomsql = f"""
-                WITH SEED(item_code) AS (SELECT item_code FROM (VALUES {vals}) v(item_code)),
-                CTE_BOM AS (
-                  SELECT CONVERT(int,1) level_no, CONVERT(varchar(50),s.item_code) item_code, CONVERT(varchar(50),s.item_code) mat_code,
-                     CONVERT(decimal(18,5),1) cum_use_qty, CONVERT(varchar(20),CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust_code END) mwc
-                  FROM SEED s JOIN PARTNER_ERP_TEST3.nx.pr_m_item c ON c.item_code=s.item_code
-                  UNION ALL
-                  SELECT cb.level_no+1, cb.item_code, CONVERT(varchar(50),b.mat_code),
-                     CONVERT(decimal(18,5), cb.cum_use_qty*b.use_qty),
-                     CONVERT(varchar(20),CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END)
-                  FROM CTE_BOM cb JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom b ON cb.mat_code=b.item_code JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON b.mat_code=m.item_code
-                  WHERE ISNULL(b.EXCEPT_FLAG,'0')='0' AND cb.level_no<10 )
-                SELECT item_code, mat_code, SUM(CONVERT(float,cum_use_qty)) q
-                FROM CTE_BOM WHERE mwc=? AND level_no>1 GROUP BY item_code, mat_code
-                ORDER BY item_code, mat_code OPTION(MAXRECURSION 0)"""
-                cur.execute(bomsql, *ch, wcp)
-                for it, mc, q in cur.fetchall():
-                    jm[str(it).strip()].append("%s{%d}" % (str(mc).strip(), int(q or 0)))
-            jadomap = {k: ",".join(v) for k, v in jm.items()}
+        # 자도번LIST(jadomap)은 위 P2필터 CTE_BOM에서 이미 산출됨(레거시 f_find_cust_mat_list2 = mat_work_code(P2)·in_cust''·mat_flag1 자재).
         # ★완료/색 = 준비실적처리(키팅, kitting_grid)와 동일 워터폴 이식: 출하(주황)→ASSY재고(노랑)→도번고정(노랑)→중간재고(노랑)→준비재고(녹) 순 계획일 충당.
         # 소스: 라이브 직독(SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL + 중간재고롤업 kitting캐시). 도번(=ITEM_CODE) 단위 합산.
         assystk = {}; rstock = {}; saled = {}; midstk = {}; fixstk = {}

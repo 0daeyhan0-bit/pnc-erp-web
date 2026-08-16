@@ -232,3 +232,22 @@ git 15148f7(수정 전) baseline 대비 OLD/NEW 실측대조: finish 14→4, per
 - 미생산 nx65 vs o68 차이의 원인. 다음 과제 = sale 스코핑 규명(WO/파트별 소진·캡 여부).
 
 **색 132 = 별개 대과제:** 혼합풀 셀의 per-cell 풀일치(finish 수량 맞아도 어느 풀이 그 셀을 채웠나로 색 갈림).
+
+
+## ★4주간 가공계획현황(plan4w) 레거시 SP 완전규명 (2026-08-16, 6h 자율)
+레거시 = SP_PR_4주간_가공계획현황_250703 (백엔드 EXECUTE 거부 229 → 인라인 재현 필수). 현행 web SQL_4WK가 과소(27689/323도번 vs SP 43990/351) → 재규명.
+
+**★계획(plan)+일자매트릭스 diff0 재현법 (검증: 351/351도번·일자셀 불일치0·plan 1건만 ±1):**
+1. **TEMP_PLAN = 5개 UNION ALL 브랜치** (전부 pr_m_item c 조인):
+   - ① PR_T_PLAN_PART_DTL_FOR_CUST t(proc_seq=1,gc_gubun='P') ⋈ pr_t_plan_item_dtl a (keys: plan_ymd,work_order,split_work_order,c_item_code=item_code). PLAN_YMD=**t.part_plan_ymd**, plan_qty=a.plan_qty, use=a.use_qty.
+   - ② 동 t ⋈ PR_T_PLAN_INPUT a (keys: plan_ymd,work_order,work_order=split,item_code). PLAN_YMD=t.part_plan_ymd, use=1.
+   - ③ PR_T_PLAN_ITEM_DTL a WHERE plan_ymd>=from AND c.in_cust_code>''. PLAN_YMD=a.plan_ymd.
+   - ④ PR_T_PLAN_INPUT a WHERE plan_ymd>=from AND c.in_cust_code>''. PLAN_YMD=a.plan_ymd.
+   - ⑤ PR_T_PLAN_INPUT a WHERE plan_ymd>=from AND c.work_code='P2'. PLAN_YMD=a.plan_ymd.
+2. **P2 필터 = CTE_BOM(재귀 BOM전개, level<10, except_flag='0')** INNER JOIN, 조건 **모두**: `work_code='P2' AND in_cust_code='' AND charindex('||'+mwc+'||',cum_in_cust_code)=0(경로 첫등장) AND mat_flag='1'(=pr_m_mat에 NOT EXISTS)`. mwc=case work_code>'' then work_code else in_cust_code. cum=상위경로 누적. ★4조건 다 필요(특히 mat_flag='1'=제작품만·NOT 원자재, in_cust_code=''=내부공정만) → 스퓨리어스(AAA설비4·PQ설치품2) 정확 제외.
+3. **값 = ceiling(plan_qty × isnull(use_qty,1) × isnull(prod_rate,100)/100)**. prod_rate=pr_m_item.PROD_RATE. (P2는 대개 rate100·use1이라 raw와 동일하나 공식 준수).
+4. **일자컬럼 = plan bucket by TEMP_PLAN.PLAN_YMD**: col1=Σ(PLAN_YMD<=from, 당일이전누적), col_k=Σ(PLAN_YMD=from+(k-1)일). ★part_plan_ymd(자재당김) 아님·PLAN_YMD(생산당김, PART_MAT은 mat별 달라 시프트발생).
+   - 주의: SQL Server 재귀 CTE는 서브쿼리·외부조인 불가 → mat_flag는 CTE 밖 NOT EXISTS pr_m_mat로 처리.
+
+**★완료(finish)·색 = SP가 안 줌 (fin_NN 전부 '0', color_NN 전부 흰색16777215) = 클라이언트(PB) 계산.** 웹 자체 _alloc4(출하→ASSY재고→준비) 방식이 원리 맞음. SP 최종 SELECT의 풀컬럼(참고): sale_qty=r61.sale_qty−r62.move_qty, assy_stock_qty=r3(sa_t_item_stock)+r3_mat(PU_T_MAT_STOCK_WH Z99990)+r3_set(pu_t_set_mat_stock in_cust=2228), input_req_qty=r5. over_plan_qty=pr_t_plan_dtl⋈pr_m_model_bom plan_ymd>to. lot_qty=r1(plan_dtl_daily/plan_input_daily 직전work_ymd).
+**잔여: AJR77144201 plan 10 vs 11(±1, UNION브랜치 중복). 완료풀 정합(r3_mat/r3_set 미반영시 차이 가능) 추후.** 다음=이 재현을 plan4w 백엔드에 이식→UI.
