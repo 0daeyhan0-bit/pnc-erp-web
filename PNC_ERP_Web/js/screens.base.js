@@ -470,14 +470,14 @@ SCREEN.partmaster=(c)=>{
      <div style="display:flex;gap:10px;align-items:flex-start">
       <div class="grid-wrap" style="flex:1 1 0;min-width:0;max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
        <table class="tbl fit" style="font-size:12px"><thead><tr>
-        <th>작업처</th><th>구분</th><th>파트</th><th>연동창고</th><th class="num">정렬</th><th class="num">생산효율</th><th>파트그룹</th><th class="num">RACK</th><th>최종작업자</th><th>최종시각</th>${ed?'<th></th>':''}</tr></thead>
+        <th>작업처</th><th>구분</th><th>파트</th><th>연동창고</th><th class="num">정렬</th><th class="num">생산효율</th><th>파트그룹</th><th class="num">RACK</th><th>최종작업자</th><th>최종시각</th>${ed?'<th class="pmact">수정</th>':''}</tr></thead>
        <tbody>${st.loading?spinRow(11):(st.rows.length?st.rows.map(r=>`<tr class="pm-row${st.sel===r.code?' pm-sel':''}" data-sel="${esc(r.code)}" style="cursor:pointer">
         <td>${esc(r.wcnm||r.wc)}</td><td class="center">${esc(r.gubunnm)}</td><td><b>${esc(r.code)}</b>${r.nm?' <span style="color:#5a6b82">'+esc(r.nm)+'</span>':''}</td>
         <td>${esc(r.whnm||r.wh)}</td><td class="num">${r.sortkey}</td>
         <td class="num" style="${r.rate!=100?'background:#fff8d6;font-weight:700':''}">${r.rate}</td>
         <td class="center">${esc(r.grp)}</td><td class="num">${r.rack}</td>
         <td>${esc(r.uid)}</td><td style="color:#8aa0bd;font-size:11px">${esc(r.udt)}</td>
-        ${ed?`<td class="center" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px">✎</button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="11" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
+        ${ed?`<td class="center pmact" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px">✎</button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="11" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
       <div style="flex:1.15 1 0;min-width:420px">
        <div style="display:flex;align-items:center;gap:6px;padding:4px 2px">
         <div style="font-weight:700;font-size:13px;color:#33507d">👷 파트별 작업자 ${st.sel?`— <b style="color:#1c47a0">${esc(st.sel)}</b> <span style="color:#8aa0bd;font-weight:400">${st.wload?'…':(st.wmode==='edit'?st.wdraft.length:st.workers.length)+'명'}</span>`:'<span style="color:#8aa0bd;font-weight:400">— 좌측 파트 클릭</span>'}</div>
@@ -500,7 +500,10 @@ SCREEN.partmaster=(c)=>{
           <tbody>${st.wload?spinRow(6):(st.workers.length?st.workers.map(w=>`<tr><td style="text-align:left"><b>${esc(w.worker)}</b></td><td class="center">${w.real?'<span style="color:#1c7c3a;font-weight:700">✔</span>':'<span style="color:#c8d0dc">—</span>'}</td><td>${esc(w.ins_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.ins_dt)}</td><td>${esc(w.upd_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.upd_dt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">${st.sel?'등록된 작업자 없음':'좌측에서 파트를 선택하세요'}</td></tr>`)}</tbody></table>`}</div>
       </div>
      </div>
-     <style>.pm-row:hover{background:#f2f7ff}.pm-row.pm-sel{background:#e7effe!important;outline:2px solid #9cc0f0;outline-offset:-2px}</style>
+     <style>.pm-row:hover{background:#f2f7ff}.pm-row.pm-sel{background:#e7effe!important;outline:2px solid #9cc0f0;outline-offset:-2px}
+      .pmact{position:sticky;right:0;background:#fff;box-shadow:-5px 0 6px -4px rgba(10,25,55,.18)}
+      thead .pmact{background:#eef2f8;z-index:2}
+      .pm-row:hover .pmact{background:#f2f7ff}.pm-row.pm-sel .pmact{background:#e7effe}</style>
      ${st.edit?editModal():''}`;
     const g=id=>c.querySelector(id);
     g('#pm-go').onclick=()=>{st.q=g('#pm-q').value;load();};
