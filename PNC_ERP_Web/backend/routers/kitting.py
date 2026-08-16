@@ -445,7 +445,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                                  ISNULL((SELECT TOP 1 prod_qty FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK) WHERE sheet_no=t.sheet_no ORDER BY proc_seq DESC),0) finish_prod_qty
                           FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
                           JOIN (SELECT b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq, MAX(b.proc_seq) to_proc_seq, MAX(a.item_code) item_code
-                                FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
+                                FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
                                 WHERE a.prod_fin_flag='0' GROUP BY b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq) s
                                ON t.sheet_no=s.sheet_no AND t.proc_seq=s.to_proc_seq
                           GROUP BY t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq) s ON s.sheet_no=t.sheet_no AND s.to_proc_seq=t.proc_seq

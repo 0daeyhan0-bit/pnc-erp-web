@@ -335,7 +335,7 @@ def sales_forecast_sagub_rebuild():
         cur.execute("SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
         cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
-            prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP_TEST3.nx.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
+            prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
             expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
              UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
             SELECT DISTINCT e.prod FROM expl e JOIN sag s ON s.it=e.part OPTION(MAXRECURSION 30)""")
