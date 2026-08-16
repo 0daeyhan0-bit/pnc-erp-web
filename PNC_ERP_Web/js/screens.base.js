@@ -388,7 +388,7 @@ SCREEN.basemaster=(c)=>{
     const cal_=isCal();
     c.innerHTML=`
      <div class="page-title">🗂️ 기준 마스터 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">생산 기준 마스터 조회</span></div>
-     <div class="page-sub">거래처·부서·라인·조립/단품공정 + 달력(근무/라인/파트)을 <b>라이브 조회</b>(읽기전용). 원본 <code>${esc(data.table||'')}</code> · 거래처구분=코드마스터 PR011 · 조립/단품 공정 원가편집은 개발›원가/BOM기준정보 · 달력 근무구분 소스=<code>w_pr_plan_020</code>(1·2·5·6=근무, 4=휴무)</div>
+     <div class="page-sub">거래처·부서·라인·조립/단품공정 + 달력(근무/라인/파트) <b>조회</b>(nx). 원본 <code>${esc(data.table||'')}</code> · 거래처구분=코드마스터 PR011 · 조립/단품 공정 원가편집은 개발›원가/BOM기준정보 · 달력 근무구분 소스=<code>w_pr_plan_020</code>(1·2·5·6=근무, 4=휴무)</div>
      <div class="toolbar" style="gap:4px;flex-wrap:wrap">${TABS.map(t=>`<button class="btn ${kind===t.k?'':'ghost'}" data-k="${t.k}" style="${kind===t.k?'background:#1c47a0;color:#fff':''}">${t.t}</button>`).join('')}</div>
      ${cal_?`<div class="toolbar" style="margin-top:2px">
         <label class="tl">${esc(data.entlbl||'대상')}</label><select class="inp" id="bm-ent" style="min-width:120px"><option value="">전체</option>${(data.ents||[]).map(e=>`<option value="${esc(e)}"${cal.ent===e?' selected':''}>${esc(e)}</option>`).join('')}</select>
@@ -459,7 +459,7 @@ SCREEN.partmaster=(c)=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('partmaster'):true;
     c.innerHTML=`
      <div class="page-title">🔧 파트 마스터 <span style="font-size:12px;color:var(--muted);font-weight:400">PR_M_PROC_GAGONG · 생산효율(=키팅 회수율)</span></div>
-     <div class="page-sub">파트별 <b>생산효율(회수율)</b>·연동창고·정렬키 관리. 원가·계획·키팅이 공유하는 마스터(라이브 편집). <span style="color:#b8860b">노란=생산효율≠100</span></div>
+     <div class="page-sub">파트별 <b>생산효율(회수율)</b>·연동창고·정렬키 관리. 원가·계획·키팅이 공유하는 마스터(nx 편집). <span style="color:#b8860b">노란=생산효율≠100</span></div>
      <div class="toolbar">
        <label class="tl">파트/파트명</label><input class="inp" id="pm-q" value="${esc(st.q)}" placeholder="파트코드/파트명" autocomplete="off" style="width:160px">
        <button class="btn" id="pm-go">🔍 조회</button>
@@ -587,7 +587,7 @@ SCREEN.prodinfo=(c)=>{
       #pi-assy .tbl input.inp,#pi-single .tbl input.inp,#pi-tabs .tbl input.inp{height:24px}
      </style>
      <div class="page-title">⚙️ 생산정보등록 <span style="font-size:12px;color:var(--muted);font-weight:400">품번별 조립·단품 공정 + 생산공정순서 · 레거시 w_pr_master_090</span></div>
-     <div class="page-sub">품번 검색 → ① 조립(공정수) ② 하단탭(LOB·양산준비·지그·수율·생산공정순서). 조회=라이브 PARTNER_ERP ∪ nx(<b>nx우선</b>) · 편집/저장=<code>nx</code>(TEST3) · ${ed()?'<span style="color:#1c7c3a">편집권한</span>':'<span style="color:#c0392b">조회권한(읽기)</span>'}</div>
+     <div class="page-sub">품번 검색 → ① 조립(공정수) ② 하단탭(LOB·양산준비·지그·수율·생산공정순서). 조회·편집/저장=<code>nx</code>(TEST3) · ${ed()?'<span style="color:#1c7c3a">편집권한</span>':'<span style="color:#c0392b">조회권한(읽기)</span>'}</div>
      <div class="toolbar">
        <label class="tl">품번</label><input class="inp" id="pi-q" list="pi-dl" value="${esc(st.q)}" placeholder="품번/품명 타이핑(자동완성)" style="width:230px" autocomplete="off">
        <datalist id="pi-dl">${(st.dlrows||[]).map(r=>`<option value="${esc(r.item)}">${esc(r.item)} · ${esc(r.name)}</option>`).join('')}</datalist>
