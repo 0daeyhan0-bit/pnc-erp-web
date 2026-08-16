@@ -141,29 +141,36 @@ SCREEN.gagongprog420=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'전체',gigan:2,
-            dates:[],rows:[],cnt:0,plan_sum:0,done_sum:0,note:'',loading:false,msg:''};
+  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',gigan:2,src:'nx',
+            dates:[],allrows:[],note:'',loading:false,msg:''};
   const load=async()=>{st.loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,part:st.part,item:st.item,jado:st.jado,unfin:st.unfin,limit:3000});
-    try{const r=await fetch(`${API}/api/gagong/prog420?${qs}`);const d=await r.json();
-      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.plan_sum=d.plan_sum||0;st.done_sum=d.done_sum||0;st.note=d.note||'';st.msg='';}
-    catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.rows=[];st.cnt=0;}
+    // ★nx 재현(prog420nx) 기본 · sp=레거시 암호화SP 비교용. 전체 1회 조회·캐시 → 미생산/미키팅 토글은 클라 즉시필터.
+    const ep=st.src==='sp'?'prog420':'prog420nx';
+    const qs=st.src==='sp'
+      ? new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,item:st.item,jado:st.jado,unfin:'전체',limit:8000})
+      : new URLSearchParams({from_ymd:st.from,gigan:st.gigan,wc:st.wc,item:st.item,jado:st.jado,unfin:'전체',limit:8000});
+    try{const r=await fetch(`${API}/api/gagong/${ep}?${qs}`);const d=await r.json();
+      st.dates=d.dates||[];st.allrows=d.rows||[];st.note=d.note||'';st.msg='';}
+    catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.allrows=[];}
     st.loading=false;draw();};
   const draw=()=>{
     const dates=st.dates;
+    // ★미생산/미키팅 토글 = 캐시(allrows)에서 클라 즉시필터(재조회 없음)
+    const rows0 = st.unfin==='미생산' ? st.allrows.filter(r=>(+r.finish||0)<(+r.plan_qty||0))
+                : st.unfin==='미키팅' ? st.allrows.filter(r=>(+r.prior_fn||0)<=0) : st.allrows;
     const wcS=new Map(),itS=new Map(),gpS=new Map();
-    st.rows.forEach(r=>{if(r.wcd&&!wcS.has(r.wcd))wcS.set(r.wcd,r.wcd);if(r.assy&&!itS.has(r.assy))itS.set(r.assy,'');if(r.gpcnm)gpS.set(r.gpcnm,r.gpcnm);});
+    rows0.forEach(r=>{if(r.wcd&&!wcS.has(r.wcd))wcS.set(r.wcd,r.wcd);if(r.assy&&!itS.has(r.assy))itS.set(r.assy,'');if(r.gpcnm)gpS.set(r.gpcnm,r.gpcnm);});
     const itOpts=[...itS].map(([v])=>`<option value="${esc(v)}"></option>`).join('');
     const gpOpts=[...gpS].map(([v])=>`<option value="${esc(v)}"></option>`).join('');
     let tPlan=0,tFin=0,tSale=0,tPrs=0,tPFn=0,tPPl=0;const dSum={};dates.forEach(d=>dSum[d]={dn:0,pl:0});
-    st.rows.forEach(r=>{tPlan+=+r.plan_qty||0;tFin+=+r.finish||0;tSale+=+r.sale||0;tPrs+=+r.prs||0;tPFn+=+r.prior_fn||0;tPPl+=+r.prior_pl||0;
+    rows0.forEach(r=>{tPlan+=+r.plan_qty||0;tFin+=+r.finish||0;tSale+=+r.sale||0;tPrs+=+r.prs||0;tPFn+=+r.prior_fn||0;tPPl+=+r.prior_pl||0;
       dates.forEach(d=>{dSum[d].dn+=(r.done&&r.done[d])||0;dSum[d].pl+=(r.days&&r.days[d])||0;});});
     const NC=15;
     const frac=(dn,pl,bg)=>{if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};   // 셀색=레거시SP color_NN
     c.innerHTML=`
      <div class="page-title">🏭 가공생산진척관리(전표발행) <span style="font-size:12px;color:var(--muted);font-weight:400">Assy도번·자도번별 생산진척</span></div>
-     <div class="page-sub">레거시 SP <code>SP_PR_가공생산진척관리</code> 직접 실행 → <b>라이브 100% 동일</b>(완료수량·셀 색상 포함). 당일이전=기준일 이전, 셀색=레거시 진척색(finish_tag). 🔴 라이브</div>
+     <div class="page-sub">${st.src==='sp'?'레거시 암호화SP 직접실행(대사용)':'<b>nx 재현</b>(암호화SP 탈피)'} · 그레인=(도번,가공컴포넌트) · 셀색 90주황출하/70·30노랑재고/20민트가공창고/10녹전표 · 당일이전=기준일 이전 · ${st.src==='sp'?'🔴 라이브':'🟢 nx'}</div>
      <div class="toolbar">
        <label class="tl">기준일자</label><input class="inp" type="date" id="g4-from" value="${st.from}">
        <label class="tl">기간</label><select class="inp" id="g4-gigan" style="max-width:70px">${[1,2,3,4,5,6,7,8].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
@@ -172,6 +179,7 @@ SCREEN.gagongprog420=(c)=>{
        <label class="rl"><input type="radio" name="g4-uf" value="전체"${st.unfin==='전체'?' checked':''}> 전체</label>
        <label class="rl"><input type="radio" name="g4-uf" value="미생산"${st.unfin==='미생산'?' checked':''}> 미생산</label>
        <label class="rl"><input type="radio" name="g4-uf" value="미키팅"${st.unfin==='미키팅'?' checked':''}> 미키팅</label>
+       <label class="tl">소스</label><select class="inp" id="g4-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="sp"${st.src==='sp'?' selected':''}>레거시 대사</option></select>
        <button class="btn" id="g4-search">🔍 조회</button>
        <div class="spacer"></div><button class="btn" id="g4-bc" style="background:#1c7c3a;color:#fff">📷 가공바코드실적처리</button>
      </div>
