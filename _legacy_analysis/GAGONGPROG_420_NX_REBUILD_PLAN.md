@@ -62,6 +62,25 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - ★결론: _260318/_251219 덤프는 base필터(WORK_CODE)·"(중략)"으로 **신뢰불가** → **런타임 _260602 EXEC 오라클을 정본으로 역설계**(410처럼 per-cell diff0 게이트).
 - 다음 규명: ① mat_work_code 파생식(자도번 작업처) ② base 그레인 677→680 정확화 ③ 풀 적용 ④ per-cell diff0.
 
+## ★★★그레인 재규명 (2026-08-16, 결정적)
+- 오라클 `mat_code` = **원소재/자재코드**(예 4H00901F = 파이프 규격), **자도번(ITEM_CODE=AJR...) 아님**. c_item_code=자도번, assy_item_code=도번.
+- base ITEM_CODE ∩ 오라클 mat_code = **0** → 420 출력 그레인 = **(wo, swo, assy도번, 원소재 mat_code)** = **자재/원소재 레벨**. 화면 "자도번"컬럼에 4H00901F(원소재) 표시됨.
+- PR_T_PLAN_PART_COPY엔 MAT_CODE 컬럼 **없음** → SP가 자도번→원소재 파생·집계(2020 base행 → 680 원소재행). ★410(자도번 그레인)과 근본적으로 다른 base 구성.
+- ★재사용 재평가: 410 **엔진(충당/색상/정렬/캐시/ST/날짜)**은 재사용 가능하나, **base 구성(자도번→원소재 매핑·집계)은 420 전용 신규**. "410+풀2개"보다 큰 작업.
+- 다음 규명(우선): **mat_code(원소재) 파생식** — 자도번 ITEM → 원소재 매핑 출처(PR_M_ITEM 원소재규격? PR_M_ITEM_BOM? item_diam/thick/length로 구성?). 오라클 mat_code=4H00901F인 자도번들의 nx 마스터 대조로 규명.
+
+## ★★★mat_code(원소재/가공컴포넌트) 규명 (2026-08-16)
+- 오라클 mat_code = 그 assy BOM 중 **P2에서 가공되는 컴포넌트의 ITEM_CODE**(예 AJR73965505의 BOM에 4H00901F="Tube,Pinch off" 동관 → mat=4H00901F). bom_level 0(도번=자체)이면 mat=자체.
+- 즉 **420 base = PR_T_PLAN_PART_COPY의 "컴포넌트 행"**(ITEM_CODE=가공대상=4H00901F, ASSY_ITEM_CODE=상위도번), GC_GUBUN='Q' AND **해당 ITEM의 PR_M_ITEM.WORK_CODE='P2'**.
+- STD_WON_MAT_FLAG는 None(규칙 아님). 선택=WORK_CODE=P2인 컴포넌트 자체.
+- ★내 이전 base∩오라클=0 원인: base를 자도번(top) 기준으로 잡음. 실제 그레인=(wo,swo,assy,가공컴포넌트ITEM). ITEM_CODE로 매칭하되 **컴포넌트 행**을 base로 + wo/swo 포맷(SVC/NG suffix·공백) 정합 필요.
+- 다음: ① base=컴포넌트행(wo,swo,assy,item=4H00901F류) 재구성 → 오라클 677/680 매칭 확인 ② 풀·엔진 ③ diff0.
+
+## 현 상태 요약(2026-08-16 세션종료 시점)
+- 규명완료: 목표(nx재현)·오라클기준선(680/68/22800/22244)·풀원천(출하/ASSY/자재·생산파트·사급/가공창고P0001/가공전표CUTTING)·base방향(GC_GUBUN='Q'·컴포넌트ITEM의 WORK_CODE=P2)·**그레인=가공컴포넌트(원소재)레벨**.
+- 재사용: 410 엔진(충당/색상/정렬/캐시/ST) O, **base 구성은 420 전용**(컴포넌트 그레인).
+- 미완: base 컴포넌트행 정확 재구성(→680 매칭) → 풀 적용 → per-cell diff0. (덤프 불신, 오라클 역설계)
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
