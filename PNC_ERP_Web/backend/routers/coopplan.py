@@ -162,34 +162,46 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         return dayidx.get(ymd)                  # 없으면 None(31일 밖)
     cn = _conn(); cur = cn.cursor()
     try:
-        wsel = ["mat_work_center_code=?", "part_plan_ymd<=?"]; wp = [cust, to_ymd]   # ★당김반영 협력사일자로 필터(원계획 plan_ymd 아님)
-        if item and item != "%":    wsel.append("assy_item_code LIKE ?"); wp.append(item)
-        if matcode and matcode != "%": wsel.append("mat_code LIKE ?"); wp.append(matcode)
-        # 도번(ASSY) 계획그리드: (wo,swo,assy,plan_ymd) 배치별 MAX(plan_qty). 사급=mat_flag 2 존재.
-        #   ★PART_MAT.plan_qty는 이미 회수율(CEILING×rate/100) 반영된 발주값(정상도번). SVC 소수도번만 raw(무시가능 4/44208).
-        cur.execute(f"""SELECT work_order, split_work_order, assy_item_code, part_plan_ymd,
-              MAX(CAST(plan_qty AS float)) pq, MAX(CAST(lot_qty AS float)) lot, MAX(CAST(use_qty AS float)) uq,
-              MAX(ISNULL(line_no,'')) line, MAX(ISNULL(output_hm,'')) ohm, MAX(CASE WHEN mat_flag='2' THEN 1 ELSE 0 END) sg
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT
-            WHERE {' AND '.join(wsel)}
-            GROUP BY work_order, split_work_order, assy_item_code, part_plan_ymd""", *wp)
+        # ★계획그리드 = 레거시 SP_PR_4주간계획현황_LIVE 직독(도번 authoritative, 백엔드 EXEC 가능·mat_flag='1'필수).
+        #   기존 fast-path(PART_MAT MAX)는 도번 계획 과다(이중계상: AJR30027702 958 vs SP 513) → SP직독으로 diff0.
+        #   days=SP의 plan_qty_01..31(from_ymd 기준 사전버킷), plan=Σ. (wo,swo,c_item_code) 그레인.
+        cur.execute("SET NOCOUNT ON; EXEC PARTNER_ERP_TEST3.dbo.[SP_PR_4주간계획현황_LIVE] ?,?,?,?,?,?,?",
+                    from_ymd, to_ymd, '1', (item or '%'), (matcode or '%'), '%', cust)
+        _spc = None; _spr = []
+        while True:
+            if cur.description: _spc = [d[0].lower() for d in cur.description]
+            try: _spr = cur.fetchall()
+            except Exception: _spr = []
+            if not cur.nextset(): break
+        _sci = {n: i for i, n in enumerate(_spc)} if _spc else {}
+        def _sv(r, n, d=0):
+            i = _sci.get(n); return r[i] if i is not None else d
         keyed = {}
-        for r in cur.fetchall():
-            wo, swo, assy, pym = str(r[0] or ''), str(r[1] or ''), str(r[2] or ''), str(r[3] or '')
-            bi = _bkt(pym)
-            if bi is None: continue
+        for r in _spr:
+            wo = str(_sv(r, 'work_order', '') or ''); swo = str(_sv(r, 'split_work_order', '') or ''); assy = str(_sv(r, 'c_item_code', '') or '')
+            if not assy: continue
             k = (wo, swo, assy)
             g = keyed.get(k)
             if not g:
-                g = {'wo': wo, 'swo': swo, 'assy': assy, 'cust': cust, 'line': str(r[7] or ''), 'output_hm': str(r[8] or ''),
+                g = {'wo': wo, 'swo': swo, 'assy': assy, 'cust': cust, 'line': str(_sv(r, 'line_no', '') or ''), 'output_hm': str(_sv(r, 'output_hm', '') or ''),
                      'excel': 0, 'days': [0]*31, 'plan': 0, 'lot': 0.0, 'use': 1.0, 'over': 0, 'rate': 100.0,
                      'sale': 0, 'assy_stock': 0, 'iset_stk': 0, 'ireq': 0, 'work_center': '', 'work_code': '', 'in_cust': '',
-                     'model': '', 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
+                     'model': str(_sv(r, 'model_no', '') or ''), 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
                 keyed[k] = g
-            q = int(float(r[4] or 0)); g['days'][bi] += q; g['plan'] += q   # PART_MAT.plan_qty(회수율 baked)
-            g['lot'] = max(g['lot'], float(r[5] or 0)); g['use'] = max(g['use'], float(r[6] or 1))
-            if int(r[9] or 0): g['sagub'] = 1
+            g['plan'] += int(float(_sv(r, 'plan_qty', 0) or 0))
+            for _di in range(31):
+                g['days'][_di] += int(float(_sv(r, 'plan_qty_%02d' % (_di + 1), 0) or 0))
+            g['lot'] = max(g['lot'], float(_sv(r, 'lot_qty', 0) or 0)); g['use'] = max(g['use'], float(_sv(r, 'use_qty', 1) or 1))
         rows = list(keyed.values())
+        # 사급(mat_flag=2) 표시플래그만 PART_MAT에서 경량 조회(도번단위)
+        try:
+            _sgw = ["mat_work_center_code=?", "part_plan_ymd<=?", "mat_flag='2'"]; _sgp = [cust, to_ymd]
+            if item and item != "%": _sgw.append("assy_item_code LIKE ?"); _sgp.append(item)
+            cur.execute(f"SELECT DISTINCT assy_item_code FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT WHERE {' AND '.join(_sgw)}", *_sgp)
+            _sgset = {str(r[0]).strip() for r in cur.fetchall()}
+            for g in rows:
+                if g['assy'] in _sgset: g['sagub'] = 1
+        except Exception: pass
         for g in rows:
             g['minidx'] = next((i for i, d in enumerate(g['days']) if d > 0), 99)
             g['lot_qty'] = int(g['lot'])
