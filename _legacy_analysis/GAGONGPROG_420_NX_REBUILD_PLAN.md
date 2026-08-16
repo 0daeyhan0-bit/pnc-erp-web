@@ -126,6 +126,34 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 전표(10)=가공전표발행수량(ing_stock) — 원천 PR_T_INDI_CUTTING or ready? (오라클 ing_stock_qty와 대조)
 - 각 nx소스를 오라클 풀컬럼과 먼저 diff0 확인 후 배분투입.
 
+## nx 소싱 검증 (2026-08-16, 오라클 풀컬럼 대조)
+- ✅ **diff0(불일치0)**: proc(가공창고=pr_t_mat_stock_wh part_code='P0001' by mat) · assy재고(sa_t_item_stock by assy) · pr_stock(생산파트=pr_t_mat_stock_wh part<>'P0001' stock<>0 by mat) · sg_stock(사급=PU_T_SAGUB_STOCK stock<>0 by mat).
+- ⚠️ **정제 필요**:
+  - stock(자재창고): 오라클809 vs nx(pu_t_mat_stock_wh cust='Z99990')512 — 부족분(4H00901F 297). union 보강 필요(PU_T_STACKER_STOCK? SA/SB proc 제외? 재귀BOM?). ★410 #tms4는 pu_t_mat(Z99990,gagong_proc NOT IN SA1/SA2/SB1/SB2)+PU_T_STACKER_STOCK 였음 → 확인.
+  - ing(가공전표발행): 오라클1000 vs nx(PR_T_INDI_CUTTING SUM plan_qty)7461 — 과다. 미완/날짜/status 필터 필요(410 용접전표처럼 prod_fin_flag·잔량). ★원천·필터 재규명.
+- 남음: stock·ing 소스 정제 → nx소스로 배분 재검증 → finish 10 edge 마무리 → 색상 → 엔드포인트+표시 → SP-EXEC 제거.
+
+## stock 소스 추가규명 (2026-08-16)
+- STACKER union 무효(4H00901F 여전 512, 오라클809). 809-512=297=pr_stock(297)과 동일 → **오라클 stock_qty 표시컬럼이 pr과 중복 집계** 의심. ★배분엔 (pr+sg+stock) 합산 투입이라, 표시용 stock_qty와 배분용을 분리 취급하면 됨(중복 방지). nx소스는 pr(part<>P0001)·sg·stock(Z99990) 각각 diff0이므로 배분엔 그대로 합산 사용 가능성 — nx소스 배분 재검증때 확인.
+- ing(가공전표) 소스는 미완: PR_T_INDI_CUTTING raw과다(7461 vs 1000) → 미완/기간 필터 재규명 필요.
+
+## ★★세션 종합 (2026-08-16, 420 nx재현 진척)
+**완료·검증:** 구조(그레인=assy도번×가공컴포넌트, WO집계) · base필터(GC='Q'·WORK_CODE='P2') · plan합/날짜피벗 diff0 · finish 배분로직 98.5%(오라클풀입력, 순서 출하90→가공창고20→ASSY70행별→자재30→fix→전표10) · nx소스 4/6 diff0(proc·assy재고·pr·sg).
+**남음(명확):** ① stock/ing 소스 정제 ② nx소스로 배분 재검증(→오라클 diff0) ③ finish 10 edge(proc/pr 미세) ④ 색상 color_NN ⑤ 엔드포인트(410엔진 재사용,키=(assy,item))+표시(컬럼·청록소계·정렬·캐시) ⑥ SP-EXEC 제거.
+**방식:** 옆에 짓고 오라클 per-cell diff0 증명 후 전환. 오라클=pncind EXEC `_260602`. 덤프 불신(오라클 역설계).
+
+## ★전표(E) 규명 + 6풀 소스 전부 확정 (2026-08-16)
+- 전표(10) 원천 = **`PR_T_INDI_CUTTING WHERE PROD_FLAG='0' SUM(plan_qty) by MAT_CODE`** (미완 절삭전표). nx 대조 **diff0**(오라클 ing_stock_qty=20개 일치).
+- ★전표(10)은 **READY_QTY에 가산(finish 아님, tag10)** — 410의 준비(C)처럼 **미생산 판정 제외·색(tag10)만**. → finish 배분에서 전표 빼야 함(내 이전 테스트의 ing-in-finish는 재검토: finish=출하90+가공창고20+ASSY70+자재30+fix, 전표는 ready).
+- **6풀 nx 소스 최종:**
+  1. 출하90 = sa_t_sale_dtl(finish_flag='0')×use — WO집계(assy별 SUM)
+  2. 가공창고20 = pr_t_mat_stock_wh(part_code='P0001') by mat ✅diff0
+  3. ASSY재고70 = sa_t_item_stock by assy ×use (행별) ✅diff0
+  4. 자재30 = pr(pr_t_mat_stock_wh part<>'P0001')✅ + sg(PU_T_SAGUB_STOCK)✅ + stock(pu_t_mat_stock_wh Z99990, 표시컬럼은 pr중복이나 배분엔 합산) by mat
+  5. 도번고정 fix = BOM롤업(fix<>0?fix:(pr+sg+stock+proc))×use_qty
+  6. 전표10(ready) = PR_T_INDI_CUTTING(PROD_FLAG='0') by mat ✅diff0
+- ★남음: ① nx소스로 배분 재검증(전표=ready로) → 오라클 finish/ready diff0 ② finish 10 edge(proc/pr) ③ 색상 color_NN ④ 엔드포인트(410엔진,키=(assy,item))+표시 ⑤ SP-EXEC 제거.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
