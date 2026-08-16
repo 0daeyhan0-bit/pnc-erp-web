@@ -1388,7 +1388,7 @@ SCREEN.gongsu=(c)=>{
     try{const r=await fetch(`${API}/api/gongsu/list?${qs}`);data=await r.json();msg='';}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010';data={rows:[],cnt:0,sum_hr:0};}
     loading=false;draw();};
-  const callPersons=async()=>{if(!entry.part){alert('투입파트를 선택하세요');return;}
+  const callPersons=async()=>{   // 투입파트 빈값=전체(backend persons가 전체 지원) → 항상 전체로 시작 가능
     entry.loading=true;draw();
     try{const qs=new URLSearchParams({part:entry.part,ymd:entry.ymd,gubun:entry.gubun});
       const r=await fetch(`${API}/api/gongsu/persons?${qs}`);const j=await r.json();
@@ -1413,7 +1413,7 @@ SCREEN.gongsu=(c)=>{
         <label class="tl">기준일</label><input class="inp" type="date" id="gs-eymd" value="${entry.ymd}">
         <label class="tl">구분</label><select class="inp" id="gs-egubun" style="width:80px">${['근무','지원'].map(g=>`<option${entry.gubun===g?' selected':''}>${g}</option>`).join('')}</select>
         <label class="tl">투입파트</label>
-        <select class="inp" id="gs-epart" style="min-width:200px"><option value="">파트 선택</option>${parts.map(p=>`<option value="${esc(p.code)}"${entry.part===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('')}</select>
+        <select class="inp" id="gs-epart" style="min-width:200px"><option value=""${entry.part===''?' selected':''}>전체</option>${parts.map(p=>`<option value="${esc(p.code)}"${entry.part===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('')}</select>
         <button class="btn" id="gs-call" style="background:#1c47a0;color:#fff">📥 인원정보호출</button>
         ${entry.rows.length?`<div style="flex:1"></div><span style="color:#5a6b82">선택 ${entry.rows.filter(r=>r._sel).length}/${entry.rows.length}명</span>
         ${ed?`<button class="btn" id="gs-bulksave" style="background:#1c7c3a;color:#fff">💾 선택 일괄저장</button>`:''}`:''}
@@ -1442,7 +1442,7 @@ SCREEN.gongsu=(c)=>{
        <label class="tl">부서</label><input class="inp" id="gs-dept" value="${esc(F.dept)}" style="width:70px">
        <label class="tl">작업자</label><input class="inp" id="gs-user" value="${esc(F.user)}" style="width:90px">
        <button class="btn" id="gs-search">🔍 조회</button>
-       ${ed?`<button class="btn" id="gs-newentry" style="background:#1c7c3a;color:#fff">👥 인원정보호출 등록</button>`:''}
+       ${ed?`<button class="btn" id="gs-newentry" style="background:#1c7c3a;color:#fff">👥 근무공수등록</button>`:''}
        <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 공수합 <b>${_wnf(data.sum_hr)}</b>h</span>
      </div>
      ${msg?`<div class="page-sub" style="color:${msg.includes('실패')||msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(msg)}</div>`:''}
@@ -1463,7 +1463,7 @@ SCREEN.gongsu=(c)=>{
     const g=id=>body.querySelector(id);
     g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
     ['#gs-gubun','#gs-dept','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
-    const nb=g('#gs-newentry');if(nb)nb.onclick=()=>{entry.open=!entry.open;draw();};
+    const nb=g('#gs-newentry');if(nb)nb.onclick=()=>{if(!entry.open){entry.part='';entry.rows=[];}entry.open=!entry.open;draw();};   // 열 때마다 투입파트=전체로 초기화
     body.querySelectorAll('.gs-del').forEach(b=>b.onclick=()=>delRow(+b.dataset.id));
     // 인원정보호출 패널 와이어
     if(entry.open){
