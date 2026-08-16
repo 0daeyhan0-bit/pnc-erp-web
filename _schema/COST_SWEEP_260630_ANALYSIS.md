@@ -50,3 +50,14 @@ AJR30100102·AJR33796526·AJR33796512·ADM72950717(−1.4 반올림)·AJR7394280
 - ✅ AJR73942805 = lgroup ''→'E'
 - ⏸ **AJR75563402(−497, 태국앵커)**: 라우팅 전노드 레거시일치(0불일치)인데 gagong−295. = 데이터아님, 엔진 proc_amt 필터(lgroup vp/p_item 매칭)가 하위공정 드롭. jae−145도 동반. 무단수정 위험(앵커·엔진로직) → **판단필요: 이 태국 편차가 수용가능한가 vs 엔진 traversal 재현**.
 - ⏸ **AJR30133707(+1941, 드리프트)**: nx.bom_line load-bearing 드리프트(jae+4420 gagong−1257 unban−1042 상쇄). [[DRIFT_CLEANUP]]에서 정리시 −4362 과교정 확인됨. = 구조정리 필요, 승인후.
+
+## ★수정3: AJR75563402(태국앵커) → 완전 diff0 = 클린 데이터(엔진변경 불필요) (2026-08-16, 사용자 도메인지적)
+사용자 "태국제품에 한국가공도 함" 지적으로 규명. 처음 "엔진 lgroup filter/태국 하이브리드 엔진변경" 추정했으나 **근본은 데이터 1행**:
+- **nx.proc_weld RAC30599327(AJR75563402-은납, 3%용접봉=한국용접) cs_calc_except=True**(레거시 CS_M_ITEM_BOM except=0) → gagong 순회가 cx노드 스킵 → 한국 용접가공 −286 드롭. + **use_qty=0**(레거시 0.0015) → 재료 −145(0.0015×96600).
+- 규명경로: 실제트리(cx제외) SP식 가공합→은납밑 RAC30599327 누락 특정→proc_amt(RAC30599327,은납)=286 정상인데 gagong 순회 미방문→_weld_lines cs_calc_except=True 발견.
+- **수정(데이터)**: cs_calc_except 1→0, use_qty 0→0.0015. → **전성분 diff0**(jae/gagong/ilban/unban/profit 전부, silwon 4911.59). 무회귀. 백업 pw402_backup.json.
+- **스코프**: nx.proc_weld cs_calc_except=1 나머지 11건은 전부 레거시도 except=정당 → **격리된 1건**(계통 아님).
+- ★교훈: 태국앵커도 위험한 엔진수술 아닌 1행 데이터. 사용자 도메인지식이 정확히 유도.
+
+## 큰갭 6건 최종: 5건 해결 · 1건(AJR30133707 드리프트) 승인대기
+5211A21333E·MJU65026409·AJJ76238416(whitespace)·AJR73942805(lgroup)·AJR75563402(proc_weld except+use_qty). 남은 AJR30133707=nx.bom_line 구조드리프트(과교정−4362 위험, 승인후).
