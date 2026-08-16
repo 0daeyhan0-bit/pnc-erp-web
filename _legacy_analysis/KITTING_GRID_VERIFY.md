@@ -85,3 +85,13 @@ fin: `sale_finish`(SA_T_LG_RECEIVING_DTL 누적), `prod_finish`(=ASSY 현재고)
   특히 c_item_code=ASSY_ITEM_CODE 매핑(vs UPPER_ITEM_CODE 다단계), proc_code(용접1000/검사2000/조립3000) 분해,
   prod_finish=ASSY 현재고의 정확한 재고 테이블(생산재고 스냅샷) 원천 확정.
 - 현재 nx.ready_ledger 기반 `/api/ready/plan`(L3430, 도번리스트)과 본 그리드의 정합(준비완료 단일원장) 정렬 필요.
+
+
+## ★키팅 완료(finish) diff0 수정 완료 (2026-08-16)
+오라클 = SP_PR_CREATE_PLAN_파트별_생산계획계산_생산준비등록_NEW(from,to,wh_part='IS0001') EXEC(pncind). plan_part410과 동일구조 출력(plan_qty_NN·finish_qty·color·ready). ★스테이징 PR_T_TEMP_PLAN_MAT은 2021 stale지만 SP 자체는 fresh 계산=오라클 유효.
+**검증(P1, 260816~260817): 행수 2105=2105·566키·계획 diff0(Σ52,731)·완료 diff0(1키 ±1 PQ설치품, 565/566, Σ29,089 vs SP 29,090).** write(cell-confirm/cancel) 무변경.
+**완료 과다버그 3원인 수정(36,521→29,089):**
+1. ★재고 이중계상: 행별 _alloc → plan_part410식 **도번단위 _shared 공유충당**(같은 ASSY재고를 여러 행이 중복차감하던 것, 36521→30596).
+2. 도번고정(fixstk) 완료풀 제외: SP 완료=sale+assy_stock+pr_stock+ready뿐(도번고정 별도풀 없음). 재귀롤업이 SUB 부풀림(30596→30424).
+3. ★파트재고(pr_stock)=**PR_T_MAT_STOCK_WH 직접만**(SP와 동일). midstk 4소스(pr_t_mat+사급+pu_mat+stacker) 롤업이 SUB 과다 → 직접값 prdirect로 교체(30424→29089).
+routers/kitting.py kitting_grid. dev만. = ⑤ 키팅↔plan_part410 동치화의 실체(plan_part410은 이미 _shared였고 kitting만 옛 _alloc이었음).

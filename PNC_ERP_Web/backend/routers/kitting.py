@@ -114,6 +114,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
         except Exception: pass
+        prdirect = {}
+        try:  # ★파트재고(pr_stock) = 레거시 SP 완료풀과 동일 = PR_T_MAT_STOCK_WH만(mat_code). midstk 재귀롤업(사급/스태커 포함)은 SUB 과다 → 직접값 사용.
+            cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_MAT_STOCK_WH GROUP BY MAT_CODE")
+            for rr in cur.fetchall(): prdirect[rr[0]] = float(rr[1] or 0)
+        except Exception: pass
         # ★중간공정 파트재고 롤업(SP #TEMP_MAT_STOCK T_SUB_CTE): 자재/생산/사급/스태커 재고 + 재귀BOM 도번고정 → tag70.
         #   ★필터 무관 전역 재고롤업이라 색(tag70)에만 영향(값/개수/계획합계는 매요청 라이브 재조회) → 90초 TTL 캐시로 재귀비용 회피(~2초 유지).
         _cache = getattr(kitting_grid, "_rollup_cache", None)
@@ -205,7 +210,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             kf = (g["upper"], g["item"], g["gpc"])
             if kf not in _fix_pool: _fix_pool[kf] = max(fixstk.get((g["upper"], g["item"]), 0.0), 0.0)  # 도번고정재고
             km = (g["item"], g["gpc"])
-            if km not in _mid_pool: _mid_pool[km] = max(midstk.get(g["item"], 0.0), 0.0)               # 중간공정 파트재고
+            if km not in _mid_pool: _mid_pool[km] = max(prdirect.get(g["item"], 0.0), 0.0)             # 중간공정 파트재고=PR_T_MAT_STOCK_WH 직접(SP pr_stock 일치)
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # 2) ASSY 현재고
         # ★도번고정재고(fixstk)는 완료풀에서 제외 — 레거시 SP(준비등록_NEW) 완료=sale+assy_stock+pr_stock+ready뿐(도번고정 별도풀 없음).
         #   재귀BOM롤업 fixstk가 SUB를 부풀려 과다(AJJ30041901-SUB SP5 vs 웹295)였음. plan_part410도 fixstk 미사용.
