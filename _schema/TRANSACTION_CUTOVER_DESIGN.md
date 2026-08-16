@@ -82,3 +82,11 @@ blanket flip이 **nx에 존재하지 않는 테이블**까지 바꿔 깨진 읽�
 | `SA_T_PLAN_ITEM_DTL` | soyo forecast L338 | nx에 없음(동의어도 없음) | dbo 복원 |
 - **하드컷오버 전 반드시**: 이 2테이블을 nx 미러에 추가(r_delta_sync 대상 확장)해야 kitting/soyo가 진짜 nx-단독. 현재는 dev에서도 이 2개만 dbo 직독(부분 cross-db).
 - **교훈**: flip 전 **참조 테이블 nx 존재감사 필수**(INFORMATION_SCHEMA.TABLES+VIEWS+synonyms). blanket 치환은 미러 불완전 테이블에서 조용히 깨짐.
+
+### ★★9-2. DEV 컷오버 리허설 — 미러갭 채우고 100% nx 완성 (2026-08-17)
+사용자 승인("미러갭도 채워라")으로 dev 리허설 수행:
+- **미러 2개 생성**: `SELECT * INTO PARTNER_ERP_TEST3.nx.{PR_T_INDI_WELD_SHEET, SA_T_PLAN_ITEM_DTL} FROM PARTNER_ERP.dbo.{...}`. 건수 114,571 / 341,373. **CHECKSUM_AGG(BINARY_CHECKSUM(*)) dbo=nx 내용동일** 확인.
+- **2곳 재-flip**(kitting L448 base·soyo L338)→ **4라우터 dbo참조 0 = 100% nx**.
+- **운영테스트**: 7 엔드포인트 에러0·건수 레거시일치·정렬해시 dbo복원본과 동일(=미러 byte-current, nx로 읽어도 결과 같음). **nx 단독 완전동작 확정.**
+- ★★**실제 하드컷오버 시 주의**: 위 미러 2개는 **1회성 point-in-time 복사**(SELECT INTO). 운영 전환엔 **r_delta_sync 대상에 이 2테이블 추가**(지속 동기화) 필요 — 안 하면 컷오버 후 stale. 나머지 미러(stock·sale·weld_dtl)와 동일한 델타싱크 편입 필수.
+- **상태**: dev/localhost만. 184/라이브 미배포. 병행운영 설계(§8) 무영향.
