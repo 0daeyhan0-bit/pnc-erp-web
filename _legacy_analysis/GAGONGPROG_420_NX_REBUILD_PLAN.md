@@ -42,9 +42,20 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 # NN 매핑: 00=당일이전 · 01=기준일 · 02=익일...
 ```
 
-## 미해결(구현 중 확정)
-- 가공창고재고(proc_stock_qty) 원천 테이블·조건
-- 사급재고(sg_stock_qty) = PU_T_SAGUB_STOCK 여부
-- 가공전표(tag10) 원천 = 절삭전표(INDI_CUTTING?) 잔량
-- 20·10 tag의 color_NN 실측값
-- ST c_item_st 정확식(파트별과 동일 여부)
+## 풀 원천 규명 완료 (SP _260318 실측)
+- **출하(90)** = `sa_t_sale_dtl`(wo,swo,item=assy,finish_flag='0') ×use — 410과 동일
+- **ASSY재고(70)** = `sa_t_item_stock`(item=assy) ×use — 410과 동일
+- **자재/생산파트/사급/가공창고재고** = 재귀CTE(410 #tms4와 거의 동일) by mat_code:
+  - 생산재고 pr_stock = `pr_t_mat_stock_wh`(part_code<>'P0001', stock<>0)
+  - 자재재고 stock = `pu_t_mat_stock_wh`(cust='Z99990', stock<>0)
+  - **사급재고 sg_stock = `PU_T_SAGUB_STOCK`(stock<>0)**
+  - **가공창고재고 proc_stock(tag20) = `pr_t_mat_stock_wh`(part_code='P0001', stock<>0)** ← 26.03.19 추가
+  - 도번고정 fix_pr = 재귀BOM (fix<>0?fix:(pr+sg+stock+proc))×use_qty
+- **가공전표(10)** = `PR_T_INDI_CUTTING` SUM(plan_qty) by MAT_CODE (절삭전표 발행분)
+- ing_stock_qty(가공전표발행수량) = max(ready_stock_qty)
+- ★410의 midstk(#tms4 재귀CTE)에 이미 pr_t_mat_stock_wh+pu_t_mat_stock_wh+PU_T_SAGUB_STOCK+PU_T_STACKER 있음 → **proc_stock(part_code='P0001') 분리·가공전표(CUTTING) 교체만 하면 재사용**.
+
+## 구현 착수 (2026-08-16~)
+- 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
+- /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
+- 검증: pncind EXEC `_260602` per-cell diff0 (680/68/22800/22244).
