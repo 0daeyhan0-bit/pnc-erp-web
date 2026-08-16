@@ -175,14 +175,17 @@ def lgsagub_summary():
 
 
 @router.get("/api/lgsagub/list")
-def lgsagub_list(ym: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
-    """LG사급 실적 품목별 목록(월 필터). item_name 없으면 마스터 보강."""
+def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
+    """LG사급 실적 품목별 목록(월 필터). ym=단월(우선), 없으면 ym_from~ym_to 기간(YYMM). item_name 없으면 마스터 보강."""
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute(_DDL)
         wh = ["1=1"]; p = []
         if ym.strip():
             wh.append("s.ym=?"); p.append(ym.strip())
+        else:
+            if ym_from.strip(): wh.append("s.ym>=?"); p.append(ym_from.strip())
+            if ym_to.strip():   wh.append("s.ym<=?"); p.append(ym_to.strip())
         if q.strip():
             wh.append("(s.item_code LIKE ? OR s.item_name LIKE ?)"); p += [f"%{q.strip()}%", f"%{q.strip()}%"]
         cur.execute(f"""SELECT TOP {int(limit)} s.ym, s.item_code,

@@ -2905,9 +2905,15 @@ SCREEN.autoorder=(c)=>{
 /* LG사급현황 (구매/자재) — LG 사급 실적(월별 유상사급 입고) 엑셀 업로드 + 조회. 사급가 업로드와 유사. nx.lg_sagub_actual */
 SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
-  let st={by_ym:[],files:[],rows:[],ym:'',q:'',loading:false,msg:''};
-  const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.files=j.files||[];}catch(e){st.by_ym=[];st.files=[];}};
-  const loadList=async()=>{try{const qs=[];if(st.ym)qs.push('ym='+encodeURIComponent(st.ym));if(st.q)qs.push('q='+encodeURIComponent(st.q));
+  let st={by_ym:[],files:[],rows:[],ym:'',ymf:'',ymt:'',q:'',loading:false,msg:''};
+  const ym2m=y=>(y&&(''+y).length>=4)?('20'+(''+y).slice(0,2)+'-'+(''+y).slice(2,4)):'';  // 2607→2026-07 (month input용)
+  const m2ym=v=>(v&&(''+v).length>=7)?((''+v).slice(2,4)+(''+v).slice(5,7)):'';           // 2026-07→2607
+  const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.files=j.files||[];
+      if(!st.ymf&&st.by_ym.length){st.ymf=st.by_ym[0].ym;st.ymt=st.by_ym[st.by_ym.length-1].ym;}}catch(e){st.by_ym=[];st.files=[];}};
+  const loadList=async()=>{try{const qs=[];
+      if(st.ym)qs.push('ym='+encodeURIComponent(st.ym));                                    // 단월(월별집계 클릭) 우선
+      else{if(st.ymf)qs.push('ym_from='+encodeURIComponent(st.ymf));if(st.ymt)qs.push('ym_to='+encodeURIComponent(st.ymt));}  // 기간범위
+      if(st.q)qs.push('q='+encodeURIComponent(st.q));
       const j=await(await fetch(`${API}/api/lgsagub/list${qs.length?('?'+qs.join('&')):''}`)).json();st.rows=j.rows||[];}catch(e){st.rows=[];}};
   const reload=async()=>{st.loading=true;draw();await loadSum();await loadList();st.loading=false;draw();};
   const upload=async(file)=>{if(!file)return;st.msg='업로드 중… '+file.name;draw();
@@ -2941,9 +2947,12 @@ SCREEN.lgsagub=(c)=>{
        </div>
        <div style="flex:1;min-width:400px">
          <div class="toolbar" style="margin-bottom:4px">
-           <label class="tl">월</label><select class="sel" id="lg-ym"><option value="">전체</option>${st.by_ym.map(r=>`<option value="${esc(r.ym)}" ${st.ym===r.ym?'selected':''}>${esc(r.ym)}</option>`).join('')}</select>
+           <label class="tl">기간</label>
+           <input class="inp" type="month" id="lg-ymf" value="${ym2m(st.ymf)}" style="width:135px"> ~
+           <input class="inp" type="month" id="lg-ymt" value="${ym2m(st.ymt)}" style="width:135px">
            <input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
            <button class="btn" id="lg-go">🔍 조회</button>
+           ${st.ym?`<span style="font-size:11px;color:#1c7c3a">단월 ${esc(st.ym)} 필터중</span>`:''}
            <div class="spacer"></div><span class="rowcount">${won(st.rows.length)}건</span>
          </div>
          <div class="grid-wrap" style="max-height:460px;overflow:auto"><table class="tbl fit"><thead><tr><th>월</th><th>품번</th><th class="cap">품명</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th></tr></thead>
