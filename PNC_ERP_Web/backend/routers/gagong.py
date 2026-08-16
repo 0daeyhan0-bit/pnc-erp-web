@@ -9,6 +9,170 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 from routers.kitting import kitting_grid
 router = APIRouter()
 
+# ===== 가공생산진척관리 nx 재현본(레거시 암호화 SP 탈피) — 확정사양 _legacy_analysis/GAGONGPROG_420_NX_REBUILD_PLAN.md =====
+@router.get("/api/gagong/prog420nx")
+def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Query("P2"),
+                     item: str = Query(""), jado: str = Query(""), unfin: str = Query("전체"), limit: int = Query(8000)):
+    """가공생산진척관리 nx 재현. 그레인=(assy도번, 가공컴포넌트 item), WO집계.
+       base=PR_T_PLAN_PART_COPY GC_GUBUN='Q' AND WORK_CODE=@wc GROUP BY (assy,item), 날짜피벗.
+       finish=출하90(×use)→가공창고20(mat공유)→ASSY재고70(×use,행별)→자재30(pr+sg+stock,mat공유)→fix / 공유풀 assy정렬.
+       ready=가공전표10(PR_T_INDI_CUTTING PROD_FLAG='0'). 색 90주황/70·30노랑/20민트/10녹/0백. 오라클 SP_PR_가공생산진척관리_260602와 diff0 목표."""
+    from datetime import datetime as _dt, timedelta as _td
+    def _yadd(y6, n):
+        try: return (_dt.strptime('20' + y6, '%Y%m%d') + _td(days=n)).strftime('%y%m%d')
+        except Exception: return y6
+    S = "PARTNER_ERP_TEST3.nx"
+    wcc = (wc.strip() or 'P2')
+    cn = _conn(); cur = cn.cursor()
+    try:
+        d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
+        gigan_n = max(1, int(gigan)); dates = []; d6b = d6a
+        if gigan_n > 1:
+            try:
+                cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
+                    (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd FROM PARTNER_ERP.dbo.HR_M_CALENDAR a WITH(NOLOCK)
+                      WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
+                        AND EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pr_m_line_calendar b WITH(NOLOCK) WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
+                    WHERE rn=?""", '20' + d6a, gigan_n - 1)
+                _r = cur.fetchone()
+                if _r and _r[0]: d6b = str(_r[0])
+            except Exception: pass
+        try:
+            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP.dbo.HR_M_CALENDAR WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
+            for (_cy,) in cur.fetchall(): dates.append(str(_cy)[2:])
+        except Exception: pass
+        if not dates:
+            i = 0
+            while _yadd(d6a, i) <= d6b and i < 60: dates.append(_yadd(d6a, i)); i += 1
+            if not dates: dates = [d6a]
+        d6b = dates[-1]
+        # base: (assy, item) grain, part_plan_ymd 피벗
+        w = ["a.GC_GUBUN='Q'", "a.WORK_CODE=?", "a.part_plan_ymd<=?"]; p = [wcc, d6b]
+        if item.strip(): w.append("a.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
+        if jado.strip(): w.append("a.ITEM_CODE LIKE ?"); p.append(f"%{jado.strip()}%")
+        cur.execute(f"""SELECT a.ASSY_ITEM_CODE assy, a.ITEM_CODE item, a.PART_PLAN_YMD ymd,
+              MAX(ISNULL(a.UPPER_ITEM_CODE,'')) upper, MAX(ISNULL(a.GAGONG_PROC_CODE,'')) gpc,
+              MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq, MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
+              MAX(ISNULL(a.PART_OUTPUT_HM,'')) phm, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.WORK_ORDER,'')) wo,
+              SUM(CAST(a.PART_PLAN_QTY AS float)) pl
+            FROM {S}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+            WHERE {' AND '.join(w)}
+            GROUP BY a.ASSY_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD""", *p)
+        cols = [d[0] for d in cur.description]
+        keyed = {}
+        for rr in cur.fetchall():
+            r = dict(zip(cols, rr)); ymd = r["ymd"]
+            bucket = 'P' if ymd < d6a else (ymd if ymd in dates else None)
+            if bucket is None: continue
+            k = (r["assy"], r["item"]); g = keyed.get(k)
+            if not g:
+                g = {"assy": r["assy"], "item": r["item"], "upper": r["upper"] or '', "gpc": r["gpc"] or '',
+                     "use": float(r["useq"] or 1), "plan_ymd": r["plan_ymd"] or '', "phm": r["phm"] or '',
+                     "ohm": r["ohm"] or '', "wo": '', "_cells": {}}
+                keyed[k] = g
+            c2 = g["_cells"].get(bucket)
+            if not c2:
+                c2 = {"ymd": ymd, "plan": 0.0, "fin": 0.0, "ready": 0.0, "tag": 0}; g["_cells"][bucket] = c2
+            c2["plan"] += float(r["pl"] or 0)
+        rows = list(keyed.values())
+        assys = list({g["assy"] for g in rows}); mats = list({g["item"] for g in rows})
+        # 풀 로드 (nx, 전부 오라클 diff0 검증됨)
+        proc = {}; assyst = {}; jae = {}; fixm = {}; sale = {}; ing = {}
+        cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.pr_t_mat_stock_wh WHERE part_code='P0001' GROUP BY MAT_CODE")
+        for a, b in cur.fetchall(): proc[a] = float(b or 0)
+        cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {S}.sa_t_item_stock GROUP BY ITEM_CODE")
+        for a, b in cur.fetchall(): assyst[a] = float(b or 0)
+        cur.execute(f"""SELECT MAT_CODE, SUM(q) FROM (
+              SELECT MAT_CODE, STOCK_QTY q FROM {S}.pr_t_mat_stock_wh WHERE part_code<>'P0001' AND stock_qty<>0
+              UNION ALL SELECT MAT_CODE, STOCK_QTY FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0
+              UNION ALL SELECT MAT_CODE, STOCK_QTY FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0) t GROUP BY MAT_CODE""")
+        for a, b in cur.fetchall(): jae[a] = float(b or 0)
+        cur.execute(f"SELECT MAT_CODE, SUM(plan_qty) FROM {S}.PR_T_INDI_CUTTING WHERE PROD_FLAG='0' GROUP BY MAT_CODE")
+        for a, b in cur.fetchall(): ing[a] = float(b or 0)
+        # 출하: 계획 WO(GC='Q'·WORK_CODE=wc)로 스코프 → sa_t_sale_dtl(wo,swo,item=assy,ff='0') SUM by assy (레거시 SP: 행별 (wo,swo,assy) sale → WO집계)
+        cur.execute(f"""SELECT p.ASSY_ITEM_CODE, SUM(s.SALE_QTY)
+              FROM (SELECT DISTINCT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, ASSY_ITEM_CODE
+                    FROM {S}.PR_T_PLAN_PART_COPY WITH(NOLOCK) WHERE GC_GUBUN='Q' AND WORK_CODE=? AND part_plan_ymd<=?) p
+              JOIN {S}.SA_T_SALE_DTL s WITH(NOLOCK) ON s.WORK_ORDER=p.WORK_ORDER AND ISNULL(s.SPLIT_WORK_ORDER,'')=p.swo AND s.ITEM_CODE=p.ASSY_ITEM_CODE AND s.FINISH_FLAG='0'
+              GROUP BY p.ASSY_ITEM_CODE""", wcc, d6b)
+        for a, b in cur.fetchall(): sale[a] = float(b or 0)
+        # fix(도번고정): 재귀 BOM 롤업 by (assy=item_code, mat_code)
+        try:
+            cur.execute(f"IF OBJECT_ID('tempdb..#tmsg') IS NOT NULL DROP TABLE #tmsg")
+            cur.execute(f"""
+                ;WITH T (item_code, mat_code, stock_qty, pr_stock_qty, sg_stock_qty, proc_stock_qty, fix_pr_stock_qty) AS (
+                    SELECT s.mat_code, s.mat_code, CONVERT(int,ISNULL(SUM(s.st),0)), CONVERT(int,ISNULL(SUM(s.pr),0)),
+                           CONVERT(int,ISNULL(SUM(s.sg),0)), CONVERT(int,ISNULL(SUM(s.pc),0)), 0
+                      FROM (SELECT mat_code, 0 st, STOCK_QTY pr, 0 sg, 0 pc FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code<>'P0001'
+                            UNION ALL SELECT mat_code, STOCK_QTY, 0,0,0 FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0
+                            UNION ALL SELECT mat_code, 0,0,STOCK_QTY,0 FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0
+                            UNION ALL SELECT mat_code, 0,0,0,STOCK_QTY FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code='P0001') s
+                     GROUP BY s.mat_code HAVING SUM(s.st)<>0 OR SUM(s.pr)<>0 OR SUM(s.sg)<>0 OR SUM(s.pc)<>0
+                    UNION ALL
+                    SELECT cb.item_code, b.mat_code, 0,0,0,0,
+                           CONVERT(int,(CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.sg_stock_qty+cb.stock_qty+cb.proc_stock_qty) END)*b.use_qty)
+                      FROM T cb JOIN {S}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1')
+                SELECT item_code, mat_code, SUM(fix_pr_stock_qty) INTO #tmsg FROM T GROUP BY item_code, mat_code OPTION(MAXRECURSION 0)""")
+            cur.execute("SELECT item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tmsg GROUP BY item_code, mat_code")
+            for a, m, v in cur.fetchall(): fixm[(a, m)] = float(v or 0)
+        except Exception: pass
+        # 배분
+        _TAGCLR = {90: '#fac090', 70: '#ffff00', 30: '#ffff00', 20: '#66ff99', 10: '#669900', 0: ''}
+        def cellseq(g): return ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
+        def alloc(g, pool, tag, key='fin'):
+            pool = max(float(pool or 0), 0.0)
+            for c2 in cellseq(g):
+                if pool <= 0: break
+                jan = c2["plan"] - c2["fin"] - (c2["ready"] if key == 'ready' else 0.0)
+                if jan <= 0: continue
+                take = min(jan, pool); c2[key] += take; pool -= take
+                if take >= jan - 1e-9 and (tag > c2["tag"] or c2["tag"] == 0): c2["tag"] = tag
+        def shared(keyfn, poolmap, tag, key='fin'):
+            grp = {}
+            for g in rows: grp.setdefault(keyfn(g), []).append(g)
+            for k, gs in grp.items():
+                pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
+                if pool <= 0: continue
+                for g in sorted(gs, key=lambda x: x["assy"]):
+                    for c2 in cellseq(g):
+                        if pool <= 0: break
+                        jan = c2["plan"] - c2["fin"]
+                        if jan <= 0: continue
+                        take = min(jan, pool); c2["fin"] += take; pool -= take
+                        if take >= jan - 1e-9 and (tag > c2["tag"] or c2["tag"] == 0): c2["tag"] = tag
+        for g in rows: alloc(g, sale.get(g["assy"], 0.0) * g["use"], 90)      # 출하90 행별
+        shared(lambda g: g["item"], proc, 20)                                 # 가공창고20 mat공유
+        for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별
+        shared(lambda g: g["item"], jae, 30)                                  # 자재30 mat공유
+        for g in rows: alloc(g, fixm.get((g["assy"], g["item"]), 0.0), 30)    # 도번고정 행별
+        for g in rows: alloc(g, ing.get(g["item"], 0.0), 10, 'ready')         # 전표10 ready
+        # 출력 (프론트 shape)
+        out = []
+        for g in rows:
+            pc = g["_cells"].get('P'); days = {}; done = {}; colors = {}
+            for y in dates:
+                c2 = g["_cells"].get(y)
+                if c2 and c2["plan"] > 0:
+                    days[y] = round(c2["plan"], 0); done[y] = round(c2["fin"], 0)
+                    colors[y] = ('background:' + _TAGCLR[c2["tag"]]) if _TAGCLR.get(c2["tag"]) else ''
+            fin = round(sum(c2["fin"] for c2 in g["_cells"].values()), 0)
+            plan = round(sum(c2["plan"] for c2 in g["_cells"].values()), 0)
+            out.append({"assy": g["assy"], "jado": g["item"], "gpc": g["gpc"],
+                        "use": g["use"], "plan_qty": plan, "finish": fin,
+                        "sale": round(sale.get(g["assy"], 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
+                        "assyst": round(assyst.get(g["assy"], 0.0), 0), "prs": round(jae.get(g["item"], 0.0), 0),
+                        "fixst": round(fixm.get((g["assy"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
+                        "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"], 0) if pc else 0,
+                        "prior_bg": (('background:' + _TAGCLR[pc["tag"]]) if pc and _TAGCLR.get(pc["tag"]) else ''),
+                        "wo": '', "days": days, "done": done, "colors": colors})
+        uf = unfin.strip()
+        if uf == "미생산": out = [r for r in out if r["finish"] < r["plan_qty"]]
+        out = out[:int(limit)]
+        return {"dates": dates, "rows": out, "cnt": len(out),
+                "plan_sum": sum(r["plan_qty"] for r in out), "done_sum": sum(r["finish"] for r in out), "note": "nx재현"}
+    finally:
+        cn.close()
+
 # ================= 가공생산진척관리(전표발행) (w_pr_input_420_new) — PR_T_PLAN_PART_DTL 스냅샷 직독 =================
 @router.get("/api/gagong/prog420")
 def gagong_prog420(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query("P2"),
