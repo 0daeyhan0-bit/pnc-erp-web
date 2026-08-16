@@ -28,14 +28,14 @@ def plan_compose_mat(payload: dict = Body(...)):
                   FROM nx.plan_dtl WHERE ISNULL(MODEL_NO,'')>'' GROUP BY RTRIM(MODEL_NO),WORK_ORDER) p
             JOIN (SELECT RTRIM(ITEM_CODE) item_code,WORK_ORDER,SUM(ORDER_QTY) order_qty
                   FROM nx.recv_dtl WHERE ISNULL(ITEM_CODE,'')>'' GROUP BY RTRIM(ITEM_CODE),WORK_ORDER) r ON p.WORK_ORDER=r.WORK_ORDER
-            WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM b WHERE b.MODEL_NO=p.model_no AND b.C_ITEM_CODE=r.item_code)
+            WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b WHERE b.MODEL_NO=p.model_no AND b.C_ITEM_CODE=r.item_code)
               AND NOT EXISTS(SELECT 1 FROM nx.model_bom m WHERE m.MODEL_NO=p.model_no AND m.C_ITEM_CODE=r.item_code)
-              AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM_EXCEPT e WHERE e.MODEL_NO=p.model_no AND e.C_ITEM_CODE=r.item_code)
+              AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM_EXCEPT e WHERE e.MODEL_NO=p.model_no AND e.C_ITEM_CODE=r.item_code)
             GROUP BY p.model_no,r.item_code""")
         # ── STEP5 nx.plan_item_dtl: (제번,모델) LOT합산 → 모델→ASSY 전개(유효일자, ★EXCEPT미적용) ──
         from collections import defaultdict as _dd
         mbom = _dd(list)
-        cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,MAKE_YMD,TO_APPLY_YMD FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM")
+        cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,MAKE_YMD,TO_APPLY_YMD FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM")
         for m, ci, uq, my, ty in cur.fetchall(): mbom[str(m).strip()].append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
         cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO FROM nx.model_bom")
         for m, ci, uq, my, ty in cur.fetchall(): mbom[str(m).strip()].append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
@@ -43,7 +43,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
         for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
         prate = {}
-        cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP.dbo.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
         for ic, pr in cur.fetchall(): prate[str(ic).strip()] = float(pr or 100)
         cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
             PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
@@ -79,7 +79,7 @@ def plan_compose_mat(payload: dict = Body(...)):
             QTY decimal(18,3),SOURCE varchar(10),COMPOSE_DT datetime DEFAULT getdate())""")
         cur.execute("DELETE FROM nx.plan_mat_source")
         MKF = {}; INCF = {}
-        cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(IN_CUST_CODE,'') FROM PARTNER_ERP.dbo.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(IN_CUST_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
         for ic, mkt, inc in cur.fetchall(): ic = str(ic).strip(); MKF[ic] = str(mkt).strip(); INCF[ic] = str(inc).strip()
         PRF = {}
         cur.execute("SELECT item_code, supply_gubun, ISNULL(vendor_code,''), ISNULL(alloc_ratio,100) FROM nx.sourcing_profile WHERE is_active=1 AND is_internal=0")
@@ -119,13 +119,13 @@ def plan_sourcing(mode: str = Query("gubun"), gubun: str = Query(""), vendor: st
             if mode == "vendor":
                 cur.execute(f"""SELECT s.SUPPLY_GUBUN, s.VENDOR_CODE, ISNULL(cu.CUST_DESC,'') vname,
                     COUNT(DISTINCT s.MAT_CODE) mats, SUM(s.QTY) qty FROM nx.plan_mat_source s
-                    LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} GROUP BY s.SUPPLY_GUBUN, s.VENDOR_CODE, cu.CUST_DESC ORDER BY SUM(s.QTY) DESC""", p)
             elif mode == "detail":
                 cur.execute(f"""SELECT TOP 2000 s.WORK_ORDER, s.MAT_CODE, ISNULL(it.ITEM_DESC,'') mname, s.SUPPLY_GUBUN,
                     s.VENDOR_CODE, ISNULL(cu.CUST_DESC,'') vname, s.QTY, s.SOURCE FROM nx.plan_mat_source s
-                    LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
-                    LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} ORDER BY s.QTY DESC""", p)
             else:  # gubun
                 cur.execute(f"""SELECT s.SUPPLY_GUBUN, COUNT(DISTINCT s.MAT_CODE) mats, SUM(s.QTY) qty,
@@ -330,18 +330,18 @@ def sales_forecast_sagub_rebuild():
         asof = _t.strftime('%y%m%d')
         cur.execute("""IF OBJECT_ID('nx.item_sagub_cost') IS NULL
             CREATE TABLE nx.item_sagub_cost(item_code varchar(50) PRIMARY KEY, sa_cost float, asof_ymd varchar(8), upd_dt datetime)""")
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
         sag = set(x[0] for x in cur.fetchall())
         cur.execute("SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
-        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
+        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
             prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
             expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
              UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
             SELECT DISTINCT e.prod FROM expl e JOIN sag s ON s.it=e.part OPTION(MAXRECURSION 30)""")
         cand = [r[0] for r in cur.fetchall()]
-        CS = """WITH expl AS (SELECT LTRIM(RTRIM(MAT_CODE)) part, CAST(USE_QTY AS float) cum, 1 lvl FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
-            UNION ALL SELECT LTRIM(RTRIM(b.MAT_CODE)), e.cum*CAST(b.USE_QTY AS float), e.lvl+1 FROM expl e JOIN PARTNER_ERP.dbo.CS_M_ITEM_BOM b ON LTRIM(RTRIM(b.ITEM_CODE))=e.part AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' WHERE e.lvl<8)
+        CS = """WITH expl AS (SELECT LTRIM(RTRIM(MAT_CODE)) part, CAST(USE_QTY AS float) cum, 1 lvl FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            UNION ALL SELECT LTRIM(RTRIM(b.MAT_CODE)), e.cum*CAST(b.USE_QTY AS float), e.lvl+1 FROM expl e JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON LTRIM(RTRIM(b.ITEM_CODE))=e.part AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' WHERE e.lvl<8)
             SELECT part, SUM(cum) FROM expl GROUP BY part OPTION(MAXRECURSION 30)"""
         done = 0; nz = 0; tot = 0.0
         for it in cand:
@@ -449,9 +449,9 @@ def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Quer
                   COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm, ISNULL(i.ITEM_DESC,'') nm,
                   SUM(CAST(pp.PART_PLAN_QTY AS float)) q
                 FROM nx.plan_part_mat pp
-                LEFT JOIN PARTNER_ERP.dbo.PR_M_WORK w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
-                LEFT JOIN PARTNER_ERP.dbo.CM_M_CUST cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
-                LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.PLAN_YMD, pp.ASSY_ITEM_CODE, pp.MAT_CODE, pp.MAT_WORK_CENTER_CODE,
                   COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE), i.ITEM_DESC""", *p)

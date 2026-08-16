@@ -291,7 +291,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             try:
                 cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
                     (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
-                       FROM PARTNER_ERP.dbo.HR_M_CALENDAR a WITH(NOLOCK)
+                       FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
                       WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
                         AND EXISTS (SELECT 1 FROM PARTNER_ERP.dbo.pr_m_line_calendar b WITH(NOLOCK)
                                     WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
@@ -300,7 +300,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 if _r and _r[0]: d6b = str(_r[0])
             except Exception: pass
         try:   # 표시 컬럼 = base~to 전체 달력일(주말/휴일 포함)
-            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP.dbo.HR_M_CALENDAR
+            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR
                 WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
             for (_cy,) in cur.fetchall(): dates.append(str(_cy)[2:])
         except Exception: pass
