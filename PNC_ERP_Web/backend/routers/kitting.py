@@ -252,9 +252,10 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             g["_has_unkit"] = any(f == '0' for f in fins)
             g["splits"] = [{"gpc": g["gpc"], "gpcnm": g["gpcnm"], "prior_plan": g["prior_plan"], "days": dict(g["days"])}]
             del g["_cells"]
+        for r in rows: r["done"] = (not r["_done_all"]); r["unkit"] = bool(r["_has_unkit"])   # ★미생산/미키팅 플래그 반환 → 프론트 즉시토글(재조회 없이 필터)
         uf = unfin.strip()
-        if uf == '미생산':   rows = [r for r in rows if not r["_done_all"]]
-        elif uf == '미키팅': rows = [r for r in rows if r["_has_unkit"]]
+        if uf == '미생산':   rows = [r for r in rows if r["done"]]
+        elif uf == '미키팅': rows = [r for r in rows if r["unkit"]]
         for r in rows: r.pop("_done_all", None); r.pop("_has_unkit", None)
         # 정렬 = 레거시 DW sort=: part_plan_ymd_output_hm → plan_ymd → gagong_proc_code → output_hm → work_order → split_work_order
         rows.sort(key=lambda x: ((x["part_ymd"] or "") + (x["inhm"] or ""), x["plan_ymd"] or "",

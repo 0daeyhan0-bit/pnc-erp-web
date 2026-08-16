@@ -995,9 +995,10 @@ SCREEN.kitting=(host)=>{
   const wlab=y=>{if(!y||y.length<6)return dcol(y);const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));const dow='일월화수목금토'[dt.getDay()];return `${y.slice(4,6)}${dow}`;};   // 레거시 라벨: 일자+요일 (예 19월)
   const isWkend=y=>{if(!y||y.length<6)return false;const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return dt.getDay()===0||dt.getDay()===6;};
   const T=new Date();
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:iso(T),gigan:2,wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',unfin:'전체',view:'전체',sel:new Set(),loading:false,msg:''};
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:iso(T),gigan:2,wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',unfin:'미생산',view:'상세',sel:new Set(),loading:false,msg:''};
   const load=async()=>{st.loading=true;render();
-    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,pgroup:st.pgroup,line:st.line,assy:st.dono,jado:st.jado,view:st.view,unfin:st.unfin,limit:6000});
+    // ★항상 전체(미생산 무필터)로 1회 fetch → 캐시. 미생산/구분 토글은 클라에서 즉시 필터·재렌더(재조회 없음).
+    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,pgroup:st.pgroup,line:st.line,assy:st.dono,jado:st.jado,view:'상세',unfin:'전체',limit:6000});
     try{const r=await fetch(`${API}/api/kitting/grid?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.ready_sum=j.ready_sum||0;st.note=j.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];st.dates=[];}
     st.loading=false;st.sel.clear();render();};
