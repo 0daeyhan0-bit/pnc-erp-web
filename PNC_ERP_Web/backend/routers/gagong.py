@@ -32,7 +32,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                 cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
                     (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
                       WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
-                        AND EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pr_m_line_calendar b WITH(NOLOCK) WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
+                        AND EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK) WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
                     WHERE rn=?""", '20' + d6a, gigan_n - 1)
                 _r = cur.fetchone()
                 if _r and _r[0]: d6b = str(_r[0])
@@ -340,7 +340,7 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
                 WHERE ISNULL(b.EXCEPT_FLAG,'0')='0' AND cb.level_no<10)
               SELECT item_code, mat_code, SUM(CONVERT(float,cum_use)) q FROM CTE_BOM cte
               WHERE work_code=? AND in_cust_code='' AND charindex('||'+mwc+'||',cum)=0
-                AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pr_m_mat mm WHERE mm.mat_code=cte.mat_code)
+                AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_mat mm WHERE mm.mat_code=cte.mat_code)
               GROUP BY item_code, mat_code OPTION(MAXRECURSION 0)""", *ch, wcp)
             for it, mc, q in cur.fetchall():
                 it = str(it).strip(); p2set.add(it); _jm[it].append("%s{%d}" % (str(mc).strip(), int(q or 0)))
@@ -380,18 +380,18 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         # 소스: 라이브 직독(SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL + 중간재고롤업 kitting캐시). 도번(=ITEM_CODE) 단위 합산.
         assystk = {}; rstock = {}; saled = {}; midstk = {}; fixstk = {}
         try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): assystk[str(rr[0]).strip()] = float(rr[1] or 0)
         except Exception: pass
         try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): rstock[str(rr[0]).strip()] = float(rr[1] or 0)
         except Exception: pass
         try:  # 출하는 ★계획 WO로 제한(키팅과 동일, 무관 WO 출하 과다합산 방지). 키=(wo,swo,item)
             _pwos = list({wo for g in rows for (wo, sw) in g["_wos"]})
             for i in range(0, len(_pwos), 900):
                 ck = _pwos[i:i+900]; ph = ",".join("?" * len(ck))
-                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(str(rr[0]).strip(), str(rr[1] or '').strip(), str(rr[2]).strip())] = float(rr[3] or 0)
         except Exception: pass
         try:  # 중간공정 자재/생산재고 롤업 = kitting_grid 캐시 재사용, 없으면 자체계산(전역·필터무관, 색tag70용)

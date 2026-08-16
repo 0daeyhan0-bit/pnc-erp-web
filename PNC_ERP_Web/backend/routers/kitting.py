@@ -294,7 +294,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
                        FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
                       WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
-                        AND EXISTS (SELECT 1 FROM PARTNER_ERP.dbo.pr_m_line_calendar b WITH(NOLOCK)
+                        AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK)
                                     WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
                     WHERE rn = ?""", '20' + d6a, gigan_n - 1)
                 _r = cur.fetchone()
@@ -440,12 +440,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             try:
                 cur.execute("""
                     SELECT t.gagong_proc_code gpc, s.item_code item, SUM(t.prod_qty - s.finish_prod_qty) stk
-                    FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
+                    FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
                     JOIN (SELECT t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq, MAX(s.to_proc_seq) to_proc_seq, MAX(s.item_code) item_code,
-                                 ISNULL((SELECT TOP 1 prod_qty FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK) WHERE sheet_no=t.sheet_no ORDER BY proc_seq DESC),0) finish_prod_qty
-                          FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
+                                 ISNULL((SELECT TOP 1 prod_qty FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK) WHERE sheet_no=t.sheet_no ORDER BY proc_seq DESC),0) finish_prod_qty
+                          FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
                           JOIN (SELECT b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq, MAX(b.proc_seq) to_proc_seq, MAX(a.item_code) item_code
-                                FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
+                                FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
                                 WHERE a.prod_fin_flag='0' GROUP BY b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq) s
                                ON t.sheet_no=s.sheet_no AND t.proc_seq=s.to_proc_seq
                           GROUP BY t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq) s ON s.sheet_no=t.sheet_no AND s.to_proc_seq=t.proc_seq
