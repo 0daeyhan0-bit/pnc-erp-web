@@ -1082,7 +1082,7 @@ SCREEN.kitting=(host)=>{
        <label class="tl">구분</label>${seg('kt-vw',st.view,['전체','집계','제번'])}
        <button class="btn" id="kt-go">🔍 조회</button>
        ${ed?`<button class="btn" id="kt-reg" style="background:#1c7c3a;color:#fff">✅ 확인(준비등록)</button><button class="btn ghost" id="kt-can">⏪ 준비취소</button>`:`<span style="color:#c0392b;font-size:12px">🔒 권한 없음</span>`}
-       <div class="spacer"></div><span class="rowcount">본행 ${nf(st.cnt)}건 · 선택 ${st.sel.size} · 계획 ${nf(st.plan_sum)} · 준비 ${nf(st.ready_sum)}</span>
+       <div class="spacer"></div><span class="rowcount">본행 ${nf(st.cnt)}건 · 선택 <b id="kt-selcnt">${st.sel.size}</b> · 계획 ${nf(st.plan_sum)} · 준비 ${nf(st.ready_sum)}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
@@ -1107,8 +1107,11 @@ SCREEN.kitting=(host)=>{
     g('#kt-bom').onclick=()=>alert('BOM출력: 선택 도번의 BOM 인쇄(레거시 전표 연동 예정).');
     g('#kt-move').onclick=()=>alert('생산이동표 강제발행: 선택분 생산창고 이동표 발행(레거시 연동 예정).');
     g('#kt-short').onclick=()=>alert('생산창고 재고과부족 확인: 준비재고 대비 소요 과부족 점검(레거시 연동 예정).');
-    const ka=g('#kt-all');if(ka)ka.onclick=e=>{st.sel.clear();if(e.target.checked)st.rows.forEach((r,i)=>st.sel.add(i));render();};
-    host.querySelectorAll('.kt-chk').forEach(ch=>ch.onclick=()=>{const i=+ch.dataset.i;ch.checked?st.sel.add(i):st.sel.delete(i);const a=g('#kt-all');if(a)a.checked=false;render();});
+    // ★체크박스는 render() 호출 안 함(대량행 재렌더 렉·먹통 방지) → 상태·DOM만 갱신, 선택카운트만 부분갱신.
+    const updSel=()=>{const c=g('#kt-selcnt');if(c)c.textContent=st.sel.size;};
+    const ka=g('#kt-all');if(ka)ka.onclick=e=>{const on=e.target.checked;st.sel.clear();if(on)st.rows.forEach((r,i)=>st.sel.add(i));
+      host.querySelectorAll('.kt-chk').forEach(ch=>{ch.checked=on;});updSel();};
+    host.querySelectorAll('.kt-chk').forEach(ch=>ch.onclick=()=>{const i=+ch.dataset.i;ch.checked?st.sel.add(i):st.sel.delete(i);const a=g('#kt-all');if(a)a.checked=false;updSel();});
     if(ed){g('#kt-reg').onclick=()=>act('register');g('#kt-can').onclick=()=>act('cancel');}
     // ★셀 우클릭 컨텍스트 메뉴(확인/취소) — canEdit 게이트. 마감/출고(fin 6)·완료(fin 4)·잔량0 은 확인 비활성.
     if(ed){

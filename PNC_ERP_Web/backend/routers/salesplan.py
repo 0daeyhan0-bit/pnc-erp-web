@@ -76,7 +76,7 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
         try:
             cn2 = _conn(); c2 = cn2.cursor()
             try:
-                c2.execute("SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM PARTNER_ERP.dbo.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003'")
+                c2.execute("SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003'")   # 분리: 레거시dbo→nx미러(데이터동일 검증)
                 for a, b in c2.fetchall(): lnm[str(a).strip()] = str(b).strip()
             finally: cn2.close()
         except Exception: pass
