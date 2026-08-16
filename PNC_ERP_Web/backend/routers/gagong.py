@@ -96,12 +96,12 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
               JOIN {S}.SA_T_SALE_DTL s WITH(NOLOCK) ON s.WORK_ORDER=p.WORK_ORDER AND ISNULL(s.SPLIT_WORK_ORDER,'')=p.swo AND s.ITEM_CODE=p.ASSY_ITEM_CODE AND s.FINISH_FLAG='0'
               GROUP BY p.ASSY_ITEM_CODE""", wcc, d6b)
         for a, b in cur.fetchall(): sale[a] = float(b or 0)
-        # fix(도번고정): 재귀 BOM 롤업 by (assy=item_code, mat_code)
+        # fix(도번고정): 재귀 BOM 롤업 → 레거시 SP는 (UPPER_ITEM_CODE, MAT_CODE) 키로 매핑(부모재고를 하위에 use_qty로 전개)
         try:
             cur.execute(f"IF OBJECT_ID('tempdb..#tmsg') IS NOT NULL DROP TABLE #tmsg")
             cur.execute(f"""
-                ;WITH T (item_code, mat_code, stock_qty, pr_stock_qty, sg_stock_qty, proc_stock_qty, fix_pr_stock_qty) AS (
-                    SELECT s.mat_code, s.mat_code, CONVERT(int,ISNULL(SUM(s.st),0)), CONVERT(int,ISNULL(SUM(s.pr),0)),
+                ;WITH T (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, sg_stock_qty, proc_stock_qty, fix_pr_stock_qty) AS (
+                    SELECT s.mat_code, s.mat_code, s.mat_code, CONVERT(int,ISNULL(SUM(s.st),0)), CONVERT(int,ISNULL(SUM(s.pr),0)),
                            CONVERT(int,ISNULL(SUM(s.sg),0)), CONVERT(int,ISNULL(SUM(s.pc),0)), 0
                       FROM (SELECT mat_code, 0 st, STOCK_QTY pr, 0 sg, 0 pc FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code<>'P0001'
                             UNION ALL SELECT mat_code, STOCK_QTY, 0,0,0 FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0
@@ -109,12 +109,12 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                             UNION ALL SELECT mat_code, 0,0,0,STOCK_QTY FROM {S}.pr_t_mat_stock_wh WHERE stock_qty<>0 AND part_code='P0001') s
                      GROUP BY s.mat_code HAVING SUM(s.st)<>0 OR SUM(s.pr)<>0 OR SUM(s.sg)<>0 OR SUM(s.pc)<>0
                     UNION ALL
-                    SELECT cb.item_code, b.mat_code, 0,0,0,0,
+                    SELECT cb.item_code, b.item_code, b.mat_code, 0,0,0,0,
                            CONVERT(int,(CASE WHEN cb.fix_pr_stock_qty<>0 THEN cb.fix_pr_stock_qty ELSE (cb.pr_stock_qty+cb.sg_stock_qty+cb.stock_qty+cb.proc_stock_qty) END)*b.use_qty)
                       FROM T cb JOIN {S}.pr_m_item_bom b WITH(NOLOCK) ON cb.mat_code=b.item_code WHERE ISNULL(b.except_flag,'0')<>'1')
-                SELECT item_code, mat_code, SUM(fix_pr_stock_qty) INTO #tmsg FROM T GROUP BY item_code, mat_code OPTION(MAXRECURSION 0)""")
-            cur.execute("SELECT item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tmsg GROUP BY item_code, mat_code")
-            for a, m, v in cur.fetchall(): fixm[(a, m)] = float(v or 0)
+                SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) fx INTO #tmsg FROM T GROUP BY upper_item_code, mat_code OPTION(MAXRECURSION 0)""")
+            cur.execute("SELECT upper_item_code, mat_code, fx FROM #tmsg")
+            for u, m, v in cur.fetchall(): fixm[(u, m)] = float(v or 0)
         except Exception: pass
         # 배분
         _TAGCLR = {90: '#fac090', 70: '#ffff00', 30: '#ffff00', 20: '#66ff99', 10: '#669900', 0: ''}
@@ -144,7 +144,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         shared(lambda g: g["item"], proc, 20)                                 # 가공창고20 mat공유
         for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별
         shared(lambda g: g["item"], jae, 30)                                  # 자재30 mat공유
-        for g in rows: alloc(g, fixm.get((g["assy"], g["item"]), 0.0), 30)    # 도번고정 행별
+        shared(lambda g: (g["upper"], g["item"]), fixm, 30)                   # 도번고정30 (upper,item)공유 (레거시 (upper,mat)키)
         for g in rows: alloc(g, ing.get(g["item"], 0.0), 10, 'ready')         # 전표10 ready
         # 출력 (프론트 shape)
         out = []
@@ -161,7 +161,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         "use": g["use"], "plan_qty": plan, "finish": fin,
                         "sale": round(sale.get(g["assy"], 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
                         "assyst": round(assyst.get(g["assy"], 0.0), 0), "prs": round(jae.get(g["item"], 0.0), 0),
-                        "fixst": round(fixm.get((g["assy"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
+                        "fixst": round(fixm.get((g["upper"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
                         "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"], 0) if pc else 0,
                         "prior_bg": (('background:' + _TAGCLR[pc["tag"]]) if pc and _TAGCLR.get(pc["tag"]) else ''),
                         "wo": '', "days": days, "done": done, "colors": colors})

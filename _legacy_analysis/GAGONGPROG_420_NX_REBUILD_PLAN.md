@@ -165,6 +165,13 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 남은 42: ①용접링 plan 과다(base plan≠오라클, 3건 계열) ②proc/자재/fix 공유풀·BOM롤업 과소(AJR30027702/MJU66799002 오라클151 nx15 — fix롤업 or 자재 공유분배 미세) ③출하 스코프 일부 과소.
 - 다음: fix CTE·자재 공유분배·용접링 plan 규명 → finish diff0 → 색상 per-cell 검증 → 프론트 UI(레거시 컬럼·청록소계) → SP-EXEC 제거.
 
+## ★fix CTE 수정 → nx 엔드포인트 97.5% (2026-08-16)
+- 진단: fix(도번고정)는 레거시 SP가 **(UPPER_ITEM_CODE, MAT_CODE) 키로 매핑**(재귀CTE가 부모재고를 하위에 use_qty 전개, upper=b.item_code). 내 CTE가 upper 누락·(assy,item) 조회로 틀림 → fix~0 과소.
+- 수정: CTE에 upper_item_code 추가(SELECT cb.item_code, b.item_code upper, b.mat_code), fixm 키=(upper,mat), 조회=(g.upper, g.item) 공유풀.
+- 결과: finish 불일치 **42→17 (97.5%)**, Σfin 22216(오라클22244, −28).
+- 남은 17: ①"+용접링" plan 반감(base plan>오라클, 예 MJU64671101+용접링 nx100 o30·MJU62128603 nx30 o15 — plan레벨 base 과다, use_qty/dedup 규명) ②proc 공유풀 경합(자기참조 assy=item: MJU66483702/66799405/66799103 nx0 o소량 — 공유분배 순서/자기행) ③AJR30033101·30087002/MJU66954x proc/pr/fix 미세 ④AJR76523027 off-by-1.
+- 다음: ①용접링 plan(base) 규명 ②proc 자기참조 공유분배 ③잔여 edge → finish diff0 → 색상 per-cell → 프론트 UI → SP-EXEC 제거.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
