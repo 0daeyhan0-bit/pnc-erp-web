@@ -147,6 +147,20 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         shared(lambda g: g["item"], jae, 30)                                  # 자재30 mat공유
         shared(lambda g: (g["upper"], g["item"]), fixm, 30)                   # 도번고정30 (upper,item)공유 (레거시 (upper,mat)키)
         for g in rows: alloc(g, ing.get(g["item"], 0.0), 10, 'ready')         # 전표10 ready
+        # 표시필드: 품명(mat item명)·출고처(gpc명)·작업처·생산ST(item_st×plan/3600)
+        nm = {}; gpn = {}; ist = {}
+        for i in range(0, len(mats), 900):
+            ck = mats[i:i + 900]; ph = ",".join("?" * len(ck))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM {S}.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ck)
+            for a, b in cur.fetchall(): nm[a] = b
+            cur.execute(f"SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) FROM {S}.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", *ck)
+            for a, b in cur.fetchall(): ist[a] = float(b or 0)
+        gpcs = list({g["gpc"] for g in rows if g["gpc"]})
+        if gpcs:
+            ph = ",".join("?" * len(gpcs))
+            cur.execute(f"SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') FROM {S}.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})", *gpcs)
+            for a, b in cur.fetchall(): gpn[a] = b
+        _wcd = _ITEM_WORK.get(wcc, wcc)
         # 출력 (프론트 shape)
         out = []
         for g in rows:
@@ -158,7 +172,9 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                     colors[y] = ('background:' + _TAGCLR[c2["tag"]]) if _TAGCLR.get(c2["tag"]) else ''
             fin = round(sum(c2["fin"] for c2 in g["_cells"].values()), 0)
             plan = round(sum(c2["plan"] for c2 in g["_cells"].values()), 0)
-            out.append({"assy": g["assy"], "jado": g["item"], "gpc": g["gpc"],
+            out.append({"assy": g["assy"], "jado": g["item"], "jnm": nm.get(g["item"], ''),
+                        "gpcnm": gpn.get(g["gpc"], g["gpc"]), "wcc": wcc, "wcd": _wcd,
+                        "st": round(ist.get(g["item"], 0.0) * plan / 3600.0, 2),
                         "use": g["use"], "plan_qty": plan, "finish": fin,
                         "sale": round(sale.get(g["assy"], 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
                         "assyst": round(assyst.get(g["assy"], 0.0), 0), "prs": round(jae.get(g["item"], 0.0), 0),
