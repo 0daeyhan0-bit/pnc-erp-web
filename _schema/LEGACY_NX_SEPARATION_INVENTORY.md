@@ -46,3 +46,9 @@ wrShell 화면 5개 중 **레거시토글 잔존 3개**:
 ## 도구
 - 백엔드 스캔: `grep PARTNER_ERP.dbo routers/*.py`. 프론트: `grep wrShell/nxOnly js/*.js`.
 - 원가관문: scratchpad/full_sweep.py.
+
+## ★진행: 마스터 repoint 완료 (2026-08-17)
+**안전 마스터 = nx미러 레거시와 바이트 동일 검증 완료**(행-해시 XOR폴드): HR_M_CALENDAR·CM_M_CUST·PR_M_ITEM(24114)·PR_M_WORK·PR_M_MODEL_BOM(62849)·PR_M_MODEL_BOM_EXCEPT·CS_M_ITEM_BOM(42407) 전부 컬럼·행수·내용 완전일치.
+- **repoint 완료 20건**: salesplan CM_M_MASTER_DETAIL(1, before/after hash 5e95c418 일치검증) + gagong HR_M_CALENDAR(2) + kitting HR_M_CALENDAR(2) + soyo 마스터(15: CM_M_CUST·PR_M_ITEM·PR_M_WORK·PR_M_MODEL_BOM(_EXCEPT)·CS_M_ITEM_BOM). `PARTNER_ERP.dbo.X`→`PARTNER_ERP_TEST3.nx.X`. 내용 바이트동일→출력불변 보장. 스모크(salesplan1938·forecast679·sourcing6·plan4w352) 전부 200.
+- **남은 레거시읽기 = 트랜잭션만**(운영컷오버 필요, nx가 운영저장소 돼야): gagong SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL / kitting PR_T_INDI_WELD_SHEET(_DTL)×5 / coopplan SA_T_*·PU_T_*×6. = 실시간 재고/매출/용접시트라 미러최신성 전제.
+- 도구 rowhash.py(내용검증)·repoint.py(일괄치환, 한글주석보호 utf-8). 배포보류(dev만).
