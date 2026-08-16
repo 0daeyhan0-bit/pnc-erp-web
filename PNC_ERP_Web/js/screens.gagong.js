@@ -141,7 +141,7 @@ SCREEN.gagongprog420=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',gigan:2,src:'nx',
+  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',view:'상세',gigan:2,src:'nx',
             dates:[],allrows:[],note:'',loading:false,msg:''};
   const load=async()=>{st.loading=true;draw();
     // ★nx 재현(prog420nx) 기본 · sp=레거시 암호화SP 비교용. 전체 1회 조회·캐시 → 미생산/미키팅 토글은 클라 즉시필터.
@@ -190,7 +190,10 @@ SCREEN.gagongprog420=(c)=>{
     const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`;
       let h='',i=0;
       while(i<disp.length){const a=disp[i].assy;let j=i;const blk=[];while(j<disp.length&&disp[j].assy===a){blk.push(disp[j]);j++;}
-        blk.forEach(r=>{h+=rowHtml(r);}); h+=subHtml(blk); i=j;}
+        // 구분: 상세=명세행+소계행 / 제번=명세행만 / 집계=소계행만(레거시 w_pr_input_420_new 구분토글)
+        if(st.view!=='집계') blk.forEach(r=>{h+=rowHtml(r);});
+        if(st.view!=='제번') h+=subHtml(blk);
+        i=j;}
       return h;};
     const frac=(dn,pl,bg)=>{if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};   // 셀색=레거시SP color_NN
@@ -205,6 +208,10 @@ SCREEN.gagongprog420=(c)=>{
        <label class="rl"><input type="radio" name="g4-uf" value="전체"${st.unfin==='전체'?' checked':''}> 전체</label>
        <label class="rl"><input type="radio" name="g4-uf" value="미생산"${st.unfin==='미생산'?' checked':''}> 미생산</label>
        <label class="rl"><input type="radio" name="g4-uf" value="미키팅"${st.unfin==='미키팅'?' checked':''}> 미키팅</label>
+       <label class="tl">구분</label>
+       <label class="rl"><input type="radio" name="g4-vw" value="상세"${st.view==='상세'?' checked':''}> 상세</label>
+       <label class="rl"><input type="radio" name="g4-vw" value="집계"${st.view==='집계'?' checked':''}> 집계</label>
+       <label class="rl"><input type="radio" name="g4-vw" value="제번"${st.view==='제번'?' checked':''}> 제번</label>
        <label class="tl">소스</label><select class="inp" id="g4-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="sp"${st.src==='sp'?' selected':''}>레거시 대사</option></select>
        <button class="btn" id="g4-search">🔍 조회</button>
        <div class="spacer"></div><button class="btn" id="g4-bc" style="background:#1c7c3a;color:#fff">📷 가공바코드실적처리</button>
@@ -232,6 +239,7 @@ SCREEN.gagongprog420=(c)=>{
       st.item=g('#g4-item').value.trim();st.jado=g('#g4-jado').value.trim();st.part=g('#g4-part').value.trim();load();};
     g('#g4-gigan').onchange=()=>{st.gigan=+g('#g4-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));g('#g4-search').click();};
     c.querySelectorAll('input[name=g4-uf]').forEach(rd=>rd.onchange=()=>{st.unfin=rd.value;draw();});  // ★캐시 즉시필터(재조회 없음)
+    c.querySelectorAll('input[name=g4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;draw();});  // 구분: 상세/집계/제번 즉시전환
     g('#g4-src').onchange=()=>{st.src=g('#g4-src').value;load();};
     g('#g4-wc').onchange=()=>g('#g4-search').click();
     ['#g4-item','#g4-jado','#g4-part'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#g4-search').click();});
