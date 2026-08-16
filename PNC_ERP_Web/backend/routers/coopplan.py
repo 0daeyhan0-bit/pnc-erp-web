@@ -214,23 +214,24 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         sale = {}; move = {}; astk = {}; z99 = {}; sset = {}; sreq = {}; mstr = {}; msub = {}; over = {}
         aset = set(assys)
         # 출하/이동=work_order 인덱스로 스코프(item_code는 인덱스 없어 풀스캔 → wo 스코프가 훨씬 빠름). item은 파이썬 필터.
+        # ★완료 풀=라이브(PARTNER_ERP.dbo) 직독 — 레거시 SP/화면이 라이브 읽고, nx 재고미러 stale(SA_T_ITEM_STOCK·SET·MAT_STOCK) → 완료 과소방지. 계획소스(SP_LIVE)와 일관.
         for ch in _chunks(wos):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
+            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
             for r in cur.fetchall():
                 if str(r[2]) in aset: sale[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
-            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
+            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
             for r in cur.fetchall():
                 if str(r[2]) in aset: move[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
         for ch in _chunks(assys):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
+            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
             for r in cur.fetchall(): astk[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
+            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
             for r in cur.fetchall(): z99[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
+            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
             for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP_TEST3.nx.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
+            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP.dbo.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
             for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
             cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(IN_CUST_CODE,''), ISNULL(WORK_CODE,''), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))

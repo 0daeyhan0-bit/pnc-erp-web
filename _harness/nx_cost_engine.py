@@ -130,7 +130,7 @@ class NxCostEngine:
     def _load_hasbom(self):
         if self._hasbom is None:
             self.cur.execute("SELECT DISTINCT item_code FROM nx.bom_header")
-            self._hasbom=set(r[0] for r in self.cur.fetchall())
+            self._hasbom=set(str(r[0]).strip() for r in self.cur.fetchall())   # ★whitespace-fix: bom_header 트레일링스페이스(2건 5211A21333E·MJU65026409)로 멤버십 실패→전개누락 방지. bom_id()는 SQL이라 공백무시=일관성회복
         return self._hasbom
 
     def bom_id(self, item):
