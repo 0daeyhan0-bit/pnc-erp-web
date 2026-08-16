@@ -154,6 +154,11 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
   6. 전표10(ready) = PR_T_INDI_CUTTING(PROD_FLAG='0') by mat ✅diff0
 - ★남음: ① nx소스로 배분 재검증(전표=ready로) → 오라클 finish/ready diff0 ② finish 10 edge(proc/pr) ③ 색상 color_NN ④ 엔드포인트(410엔진,키=(assy,item))+표시 ⑤ SP-EXEC 제거.
 
+## ★finish 최종 모델 검증 (2026-08-16, 669/680=98.4%)
+- 전표=ready 제외한 finish = 출하90+가공창고20(mat공유,assy정렬)+ASSY70(행별)+자재30(pr+sg+stock,mat공유,assy정렬)+fix(행별) → **669/680 일치**(전표 포함14→제외11, 전표=ready 확정).
+- 남은 11 edge: proc/pr 공유풀 분배·future셀(NN02) 미세. 예 AJR30033101 3행 proc8+pr18 plan14@02 → 오라클8(proc만, pr 미적용) = **자재(pr)가 future셀 미적용?** / MJU66799405 proc153 공유분배. 410 설계예외(용접링)처럼 개별 규명, nx소스 배분때 함께 마무리.
+- ★결론: **420 nx재현 = 구조·base·plan·날짜·6풀소스·finish로직(98.4%) 전부 규명·검증**. 남은 실작업 = 엔드포인트 코드(410엔진 재사용)+11edge+색상+표시. 오라클 풀컬럼 대신 nx소스(전부 규명됨) 투입만 하면 됨.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
