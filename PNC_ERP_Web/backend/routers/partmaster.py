@@ -97,3 +97,55 @@ def partmaster_workers(part: str = Query(..., description="파트코드(GAGONG_P
         return {"part": part, "rows": rows, "cnt": len(rows)}
     finally:
         cn.close()
+
+@router.post("/api/partmaster/worker_save")
+def partmaster_worker_save(payload: dict = Body(...)):
+    """파트별 작업자 추가/수정 (레거시 w_pr_master_350 하단그리드 추가·수정 버튼).
+       PK=(GAGONG_PROC_CODE, WORKER_CODE). orig≠worker면 이름변경(=PK변경) → 기존삭제+신규.
+       WORK_FLAG='1'=실작업자. nx.PR_M_PROC_GAGONG_WORKER 쓰기."""
+    part = (payload.get('part') or '').strip()
+    worker = (payload.get('worker') or '').strip()
+    orig = (payload.get('orig') or '').strip()   # 수정 전 이름(''=신규)
+    real = '1' if payload.get('real') else '0'
+    user = (payload.get('user') or '웹')[:20]
+    if not part:   return {"ok": False, "detail": "파트 선택 필수"}
+    if not worker: return {"ok": False, "detail": "작업자명 필수"}
+    if len(worker) > 30: return {"ok": False, "detail": "작업자명 30자 이내"}
+    cn = _nx(); cur = cn.cursor()   # ★nx전환: 작업자 마스터 편집=nx 복제본
+    try:
+        # 이름변경(PK변경): 기존 (part, orig) 제거
+        if orig and orig != worker:
+            cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, orig)
+        cur.execute("SELECT COUNT(*) FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, worker)
+        exists = cur.fetchone()[0] > 0
+        if exists:
+            cur.execute("""UPDATE nx.PR_M_PROC_GAGONG_WORKER SET WORK_FLAG=?,
+                  UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
+                WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?""", real, user, part, worker)
+            mode = "update"
+        else:
+            cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG_WORKER(GAGONG_PROC_CODE, WORKER_CODE, WORK_FLAG,
+                  INSERT_USER_ID, INSERT_DATETIME, INSERT_WINDOW, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
+                VALUES(?,?,?,?,getdate(),'web_partmaster',?,getdate(),'web_partmaster')""", part, worker, real, user, user)
+            mode = "insert"
+        cn.commit()
+        return {"ok": True, "mode": mode}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        cn.close()
+
+@router.post("/api/partmaster/worker_delete")
+def partmaster_worker_delete(payload: dict = Body(...)):
+    """파트별 작업자 삭제. PK=(GAGONG_PROC_CODE, WORKER_CODE)."""
+    part = (payload.get('part') or '').strip()
+    worker = (payload.get('worker') or '').strip()
+    if not part or not worker: return {"ok": False, "detail": "파트/작업자 필수"}
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, worker); cn.commit()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        cn.close()
