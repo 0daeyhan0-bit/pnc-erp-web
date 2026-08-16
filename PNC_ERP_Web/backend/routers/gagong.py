@@ -141,11 +141,13 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         if jan <= 0: continue
                         take = min(jan, pool); c2["fin"] += take; pool -= take
                         if take >= jan - 1e-9 and (tag > c2["tag"] or c2["tag"] == 0): c2["tag"] = tag
+        # ★공유풀 소진순서 = 레거시 SP 커서순서(plan_ymd→part_output_hm→output_hm→wo). assy순 아님(같은 원소재를 여러 assy가 나눠쓸 때 이른 계획이 먼저 가져감).
+        _cur = lambda x: (x["plan_ymd"], x["phm"], x["ohm"], x["assy"])
         for g in rows: alloc(g, sale.get(g["assy"], 0.0) * g["use"], 90)      # 출하90 행별
-        shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["assy"]))  # 가공창고20 mat공유 (bom_level 원소재 우선)
+        shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["plan_ymd"], x["phm"], x["ohm"], x["assy"]))  # 가공창고20 mat공유 (bom_level 원소재 우선→커서순)
         for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별
-        shared(lambda g: g["item"], jae, 30)                                  # 자재30 mat공유
-        shared(lambda g: (g["upper"], g["item"]), fixm, 30)                   # 도번고정30 (upper,item)공유 (레거시 (upper,mat)키)
+        shared(lambda g: g["item"], jae, 30, sortkey=_cur)                    # 자재30 mat공유(커서순)
+        shared(lambda g: (g["upper"], g["item"]), fixm, 30, sortkey=_cur)     # 도번고정30 (upper,item)공유(커서순)
         for g in rows: alloc(g, ing.get(g["item"], 0.0), 10, 'ready')         # 전표10 ready
         # 표시필드: 품명(mat item명)·출고처(gpc명)·작업처·생산ST(item_st×plan/3600)
         nm = {}; gpn = {}; ist = {}
