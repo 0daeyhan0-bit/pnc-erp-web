@@ -172,6 +172,12 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 남은 17: ①"+용접링" plan 반감(base plan>오라클, 예 MJU64671101+용접링 nx100 o30·MJU62128603 nx30 o15 — plan레벨 base 과다, use_qty/dedup 규명) ②proc 공유풀 경합(자기참조 assy=item: MJU66483702/66799405/66799103 nx0 o소량 — 공유분배 순서/자기행) ③AJR30033101·30087002/MJU66954x proc/pr/fix 미세 ④AJR76523027 off-by-1.
 - 다음: ①용접링 plan(base) 규명 ②proc 자기참조 공유분배 ③잔여 edge → finish diff0 → 색상 per-cell → 프론트 UI → SP-EXEC 제거.
 
+## ★UI + 배분튜닝 (2026-08-16) — 백엔드 nx + 프론트 완료
+- 백엔드 `/api/gagong/prog420nx`: proc bom_level 정렬·fix (upper,item) 수정 후 **finish 14 edge(98%)**, 전체677/미생산69(o68)/Σfin22227(o22244). 남은14=용접링 중복(base plan)·공유풀 미세순서(레거시 이상데이터·암호화 미공개 "(중략)"부).
+- 프론트 `screens.gagong.js SCREEN.gagongprog420`: **소스토글(우리nx 기본/레거시 대사)**·기본 미생산·**전체 1회조회 캐시→미생산·미키팅 즉시필터**·레거시 컬럼(완료·출하·**가공전표발행·가공창고재고·자재재고·도번고정·ASSY재고·자재사용량**)·**assy 청록 소계행**·셀색(90주황/70·30노랑/20민트/10녹). index screens.gagong.js?v=260816gagongnx.
+- 상태: nx재현 엔드포인트+UI 작동(레거시 SP-EXEC은 소스토글 sp로 비교유지). 98% diff0.
+- 남은: ①finish 14 edge(용접링 dedup·공유풀 순서) ②per-cell 색 검증 ③최종 diff0시 SP-EXEC 제거·배포.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).

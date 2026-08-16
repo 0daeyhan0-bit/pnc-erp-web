@@ -165,7 +165,33 @@ SCREEN.gagongprog420=(c)=>{
     let tPlan=0,tFin=0,tSale=0,tPrs=0,tPFn=0,tPPl=0;const dSum={};dates.forEach(d=>dSum[d]={dn:0,pl:0});
     rows0.forEach(r=>{tPlan+=+r.plan_qty||0;tFin+=+r.finish||0;tSale+=+r.sale||0;tPrs+=+r.prs||0;tPFn+=+r.prior_fn||0;tPPl+=+r.prior_pl||0;
       dates.forEach(d=>{dSum[d].dn+=(r.done&&r.done[d])||0;dSum[d].pl+=(r.days&&r.days[d])||0;});});
-    const NC=15;
+    const NC=18;  // 고정컬럼(Assy..당일이전 7 + 완료·출하·가공전표발행·가공창고·자재재고·도번고정·ASSY재고·자재사용량·자도번작업처·WO 11)
+    // ★정렬: assy(도번)→jado(가공컴포넌트) / assy 그룹별 청록 소계행(레거시 group trailer)
+    const disp=rows0.slice().sort((a,b)=>(a.assy||'').localeCompare(b.assy||'')||(a.jado||'').localeCompare(b.jado||''));
+    const dcap=(v)=>v?nf(v):'·';
+    const rowHtml=(r)=>`<tr>
+        <td><b>${esc(r.assy)}</b></td><td>${esc(r.jado)}</td>
+        <td class="bcap" title="${esc(r.jnm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.jnm)}</td>
+        <td class="center">${esc(r.gpcnm)}</td><td class="num">${nf2(r.st)}</td><td class="num">${nf(r.plan_qty)}</td>
+        <td class="num" style="white-space:nowrap${r.prior_bg?';'+r.prior_bg:''}">${(+r.prior_pl||0)?nf(r.prior_fn)+'/'+nf(r.prior_pl):'·'}</td>
+        ${dates.map(d=>frac((r.done&&r.done[d])||0,(r.days&&r.days[d])||0,(r.colors&&r.colors[d])||'')).join('')}
+        <td class="num">${dcap(r.finish)}</td><td class="num">${dcap(r.sale)}</td><td class="num">${dcap(r.ing)}</td><td class="num">${dcap(r.proc)}</td>
+        <td class="num">${dcap(r.prs)}</td><td class="num">${dcap(r.fixst)}</td><td class="num">${dcap(r.assyst)}</td><td class="num">${nf2(r.use)}</td>
+        <td class="center">${esc(r.wcc?(r.wcc+' '+r.wcd):r.wcd)}</td><td class="bcap" style="max-width:90px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.wo)}">${esc(r.wo)}</td></tr>`;
+    const subHtml=(blk)=>{const r0=blk[0];
+      const sPl=blk.reduce((s,r)=>s+(+r.plan_qty||0),0), sFn=blk.reduce((s,r)=>s+(+r.finish||0),0);
+      const sPrP=blk.reduce((s,r)=>s+(+r.prior_pl||0),0), sPrF=blk.reduce((s,r)=>s+(+r.prior_fn||0),0);
+      const sST=blk.reduce((s,r)=>s+(+r.st||0),0);
+      return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
+        <td><b>${esc(r0.assy)}</b></td><td colspan="3"></td><td class="num">${nf2(sST)}</td><td class="num"><b>${nf(sPl)}</b></td>
+        <td class="num">${sPrP?nf(sPrF)+'/'+nf(sPrP):'·'}</td>
+        ${dates.map(d=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[d])||0),0),dn=blk.reduce((s,r)=>s+((r.done&&r.done[d])||0),0);return `<td class="num">${pl?nf(dn)+'/'+nf(pl):'·'}</td>`;}).join('')}
+        <td class="num">${nf(sFn)}</td><td colspan="7"></td><td></td><td></td></tr>`;};
+    const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`;
+      let h='',i=0;
+      while(i<disp.length){const a=disp[i].assy;let j=i;const blk=[];while(j<disp.length&&disp[j].assy===a){blk.push(disp[j]);j++;}
+        blk.forEach(r=>{h+=rowHtml(r);}); h+=subHtml(blk); i=j;}
+      return h;};
     const frac=(dn,pl,bg)=>{if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};   // 셀색=레거시SP color_NN
     c.innerHTML=`
@@ -187,7 +213,7 @@ SCREEN.gagongprog420=(c)=>{
        <label class="tl">도번</label><input class="inp" id="g4-item" list="g4-iteml" value="${esc(st.item)}" style="width:120px" placeholder="Assy도번" autocomplete="off"><datalist id="g4-iteml">${itOpts}</datalist>
        <label class="tl">자도번</label><input class="inp" id="g4-jado" value="${esc(st.jado)}" style="width:120px" placeholder="자도번" autocomplete="off">
        <label class="tl">출고처(파트)</label><input class="inp" id="g4-part" list="g4-partl" value="${esc(st.part)}" style="width:110px" placeholder="가공파트" autocomplete="off"><datalist id="g4-partl">${gpOpts}</datalist>
-       <div class="spacer"></div><span class="rowcount">행 <b>${nf(st.cnt)}</b> · 생산계획합 <b>${nf(st.plan_sum)}</b> · 완료합 <b>${nf(st.done_sum)}</b></span>
+       <div class="spacer"></div><span class="rowcount">행 <b>${nf(disp.length)}</b> · 생산계획합 <b>${nf(tPlan)}</b> · 완료합 <b>${nf(tFin)}</b> · ${st.src==='sp'?'🔴 라이브':'🟢 nx'}</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
@@ -195,30 +221,18 @@ SCREEN.gagongprog420=(c)=>{
       <table class="tbl fit" style="font-size:11px"><thead><tr>
        <th>Assy도번</th><th>자도번</th><th>품명</th><th>출고처</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전</th>
        ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}
-       <th class="num">완료</th><th class="num">출하</th><th class="num">생산재고</th><th class="num">ASSY재고</th><th class="num">도번고정</th><th>자도번작업처</th><th>WO</th></tr></thead>
-      <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map(r=>{
-        return `<tr>
-        <td><b>${esc(r.assy)}</b></td><td>${esc(r.jado)}</td>
-        <td class="bcap" title="${esc(r.jnm)}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(r.jnm)}</td>
-        <td class="center">${esc(r.gpcnm)}</td><td class="num">${nf2(r.st)}</td><td class="num">${nf(r.plan_qty)}</td>
-        <td class="num" style="white-space:nowrap${r.prior_bg?';'+r.prior_bg:''}">${nf(r.prior_fn)}/${nf(r.prior_pl)}</td>
-        ${dates.map(d=>frac((r.done&&r.done[d])||0,(r.days&&r.days[d])||0,(r.colors&&r.colors[d])||'')).join('')}
-        <td class="num"${r.finish?'':' style="color:#dfe6ef"'}>${r.finish?nf(r.finish):'·'}</td>
-        <td class="num"${r.sale?'':' style="color:#dfe6ef"'}>${r.sale?nf(r.sale):'·'}</td>
-        <td class="num"${r.prs?'':' style="color:#dfe6ef"'}>${r.prs?nf(r.prs):'·'}</td>
-        <td class="num"${r.assyst?'':' style="color:#dfe6ef"'}>${r.assyst?nf(r.assyst):'·'}</td>
-        <td class="num"${r.fixst?'':' style="color:#dfe6ef"'}>${r.fixst?nf(r.fixst):'·'}</td>
-        <td class="center">${esc(r.wcc?(r.wcc+' '+r.wcd):r.wcd)}</td><td class="bcap" style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.wo)}">${esc(r.wo)}</td></tr>`;
-      }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
-      ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="5">합계 (${nf(st.cnt)}행)</td><td class="num">${nf(tPlan)}</td><td class="num">${nf(tPFn)}/${nf(tPPl)}</td>
+       <th class="num">완료</th><th class="num">출하</th><th class="num">가공전표발행</th><th class="num">가공창고재고</th><th class="num">자재재고</th><th class="num">도번고정</th><th class="num">ASSY재고</th><th class="num">자재사용량</th><th>자도번작업처</th><th>WO</th></tr></thead>
+      <tbody>${st.loading?spinRow(NC+dates.length):bodyHtml()}</tbody>
+      ${disp.length?`<tfoot><tr class="grandtot"><td colspan="4">합계 (${nf(disp.length)}행)</td><td class="num">${nf2(disp.reduce((s,r)=>s+(+r.st||0),0))}</td><td class="num">${nf(tPlan)}</td><td class="num">${nf(tPFn)}/${nf(tPPl)}</td>
         ${dates.map(d=>`<td class="num" style="white-space:nowrap">${nf(dSum[d].dn)}/${nf(dSum[d].pl)}</td>`).join('')}
-        <td class="num">${nf(tFin)}</td><td class="num">${nf(tSale)}</td><td class="num">${nf(tPrs)}</td><td></td><td></td><td></td><td></td></tr></tfoot>`:''}
+        <td class="num">${nf(tFin)}</td><td class="num">${nf(tSale)}</td><td colspan="6"></td><td></td><td></td></tr></tfoot>`:''}
       </table></div>`;
     const g=id=>c.querySelector(id);
     g('#g4-search').onclick=()=>{st.from=g('#g4-from').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));st.wc=g('#g4-wc').value.trim();
       st.item=g('#g4-item').value.trim();st.jado=g('#g4-jado').value.trim();st.part=g('#g4-part').value.trim();load();};
     g('#g4-gigan').onchange=()=>{st.gigan=+g('#g4-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));g('#g4-search').click();};
-    c.querySelectorAll('input[name=g4-uf]').forEach(rd=>rd.onchange=()=>{st.unfin=rd.value;load();});
+    c.querySelectorAll('input[name=g4-uf]').forEach(rd=>rd.onchange=()=>{st.unfin=rd.value;draw();});  // ★캐시 즉시필터(재조회 없음)
+    g('#g4-src').onchange=()=>{st.src=g('#g4-src').value;load();};
     g('#g4-wc').onchange=()=>g('#g4-search').click();
     ['#g4-item','#g4-jado','#g4-part'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#g4-search').click();});
     g('#g4-bc').onclick=openBcModal;
