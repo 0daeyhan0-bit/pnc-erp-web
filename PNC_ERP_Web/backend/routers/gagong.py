@@ -153,12 +153,13 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         if take >= jan - 1e-9 and (tag > c2["tag"] or c2["tag"] == 0): c2["tag"] = tag
         # ★공유풀 소진순서 = 레거시 SP 커서순서(plan_ymd→part_output_hm→output_hm→wo). assy순 아님(같은 원소재를 여러 assy가 나눠쓸 때 이른 계획이 먼저 가져감).
         _cur = lambda x: (x["plan_ymd"], x["phm"], x["ohm"], x["assy"])
-        # ★풀 적용순서 = 출하 → 자력풀(ASSY재고70·도번고정fix30) → 공유풀(가공창고proc20·자재jae30) → 전표. 자력충당 가능한 행이 공유풀을 선점하지 않게(오라클 실측: 702=assyst1+fix150로 full, proc/jae는 self·706으로 남음).
+        # ★풀 적용순서 = finish_tag 내림차순(=우선순위): 출하90 → ASSY재고70 → 자재30·도번고정30 → 가공창고proc20 → 전표10.
+        # 오라클 실측: proc재고가 커도 자재(pr_stock,tag30)를 먼저 씀(ADM72950717/4H00901J: proc907 있어도 자재6로 채움→색 노랑30). 즉 가공창고(20)가 재고풀 중 최하위.
         for g in rows: alloc(g, sale2.get((g["assy"], g["item"]), 0.0), 90)   # 출하90 행별(WO별 계획캡 합산, use 포함済)
         for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별(자력)
-        shared(lambda g: (g["upper"], g["item"]), fixm, 30, sortkey=_cur)     # 도번고정fix30 (upper,item)별 롤업(자력, proc/jae보다 먼저)
-        shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["plan_ymd"], x["phm"], x["ohm"], x["assy"]))  # 가공창고20 mat공유(원소재 우선→커서순)
-        shared(lambda g: g["item"], jae, 30, sortkey=_cur)                    # 자재30 mat공유(커서순)
+        shared(lambda g: (g["upper"], g["item"]), fixm, 30, sortkey=_cur)     # 도번고정fix30 (upper,item)별 롤업
+        shared(lambda g: g["item"], jae, 30, sortkey=_cur)                    # 자재30 mat공유(커서순) ★proc보다 먼저(tag30>20)
+        shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["plan_ymd"], x["phm"], x["ohm"], x["assy"]))  # 가공창고20 mat공유(원소재 우선→커서순), 재고풀 중 최하위
         for g in rows: alloc(g, ing.get(g["item"], 0.0), 10, 'ready')         # 전표10 ready
         # 표시필드: 품명(mat item명)·출고처(gpc명)·작업처·생산ST(item_st×plan/3600)
         nm = {}; gpn = {}; ist = {}
