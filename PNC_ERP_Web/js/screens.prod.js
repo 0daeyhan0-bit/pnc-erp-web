@@ -1032,20 +1032,41 @@ SCREEN.kitting=(host)=>{
     const PART_FIX=[['S5','01라인(용접)'],['S5-2','01라인(조립)'],['S1','02라인'],['S6','03라인'],['S4','04라인'],['S11','05라인'],['RAC','06라인'],['S10','자동은납 10'],['S13','서브/고주파'],['S12','설치'],['S8','서포터 08'],['S9','용접 09'],['S7','다관절 로봇 용접'],['-','-'],['Q1000','용접봉창고']];
     const partOpts='<option value=""'+(st.part?'':' selected')+'>전체</option>'+PART_FIX.map(([v,n])=>v==='-'?'<option disabled>─────────</option>':`<option value="${esc(v)}"${st.part===v?' selected':''}>${esc(n)}</option>`).join('');
     const seg=(name,val,opts)=>opts.map(v=>`<label style="font-weight:400;margin:0 5px 0 1px"><input type="radio" name="${name}" value="${v}" ${val===v?'checked':''}> ${v}</label>`).join('');
-    // ── 본행/하위행 평탄화 (view: 전체=본행+제번 / 집계=본행 / 제번=제번행) ──
-    const flat=[];let seq=0;
-    st.rows.forEach((r,i)=>{
-      if(st.view!=='제번'){seq++;flat.push({t:'m',r,i,seq});}
-      if(st.view!=='집계'){(r.splits||[]).forEach(sp=>flat.push({t:'s',r,sp,i}));}
-    });
+    // ── 미생산/미키팅 클라 즉시필터 + 평탄화(상세=본행+제번 / 집계=도번합침 1행 / 제번=제번행) ──
+    const passed=[];st.rows.forEach((r,i)=>{if(st.unfin==='미생산'?r.done:(st.unfin==='미키팅'?r.unkit:true))passed.push({r,i});});
+    const flat=[];let seq=0;const rank={'6':3,'4':2,'3':1,'0':0};
+    if(st.view==='집계'){
+      // ★도번(item) 단위 합침 — 모든 WO 합산 1행(레거시 집계와 동일). 체크박스는 하위 WO 전체를 선택.
+      const gm=new Map();
+      passed.forEach(({r,i})=>{let g=gm.get(r.item);
+        if(!g){g={item:r.item,gpc:r.gpc,gpcnm:r.gpcnm,line:r.line,inhm:r.inhm,part_ymd:r.part_ymd,wo:'',swo:'',assy:r.assy,rate:r.rate,item_st:0,use_qty:r.use_qty,
+                 days:{},dcov:{},dfin:{},prior_plan:0,prior_cover:0,prior_fin:'0',plan_qty:0,finish:0,ready_qty:0,ready_stock:0,prod_stock:0,assy_stock:0,sale:0,fin:'0',idxs:[],_fmax:{}};gm.set(r.item,g);}
+        g.idxs.push(i);
+        g.plan_qty+=r.plan_qty||0;g.finish+=r.finish||0;g.ready_qty+=r.ready_qty||0;g.item_st+=r.item_st||0;
+        g.prior_plan+=r.prior_plan||0;g.prior_cover+=r.prior_cover||0;g.sale+=r.sale||0;
+        g.ready_stock=Math.max(g.ready_stock,r.ready_stock||0);g.prod_stock=Math.max(g.prod_stock,r.prod_stock||0);g.assy_stock=Math.max(g.assy_stock,r.assy_stock||0);
+        (st.dates||[]).forEach(x=>{const pl=(r.days&&r.days[x])||0;if(pl){g.days[x]=(g.days[x]||0)+pl;g.dcov[x]=(g.dcov[x]||0)+((r.dcov&&r.dcov[x])||0);const cf=(r.dfin&&r.dfin[x])||'0';if((rank[cf]||0)>(rank[g._fmax[x]]||0))g._fmax[x]=cf;}});
+      });
+      [...gm.values()].forEach(g=>{
+        (st.dates||[]).forEach(x=>{g.dfin[x]=(g.days[x]>0&&(g.dcov[x]||0)>=g.days[x])?(g._fmax[x]||'3'):'0';});
+        g.prior_fin=(g.prior_plan>0&&g.prior_cover>=g.prior_plan)?'3':'0';
+        seq++;flat.push({t:'m',r:g,idxs:g.idxs,seq});});
+    }else{
+      passed.forEach(({r,i})=>{seq++;flat.push({t:'m',r,idxs:[i],seq});
+        if(st.view==='상세'){(r.splits||[]).forEach(sp=>flat.push({t:'s',r,sp,i}));}});
+    }
+    const fcnt=flat.filter(o=>o.t==='m').length;
+    const fplan=passed.reduce((s,o)=>s+(o.r.plan_qty||0),0);
+    const fready=passed.reduce((s,o)=>s+(o.r.ready_qty||0),0);
+    const fpass=passed.map(o=>o.r);   // 필터통과 원행(합계행용)
     const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
     // 우클릭 확인/취소 대상 셀(당일이전·일자) — data-*에 셀키(item·wo·gpc·ymd·잔량·assy·fin) 실어 컨텍스트메뉴에서 사용
     const ktCell=(v,bg,strong,fg,m)=>`<td class="num kt-cell" title="우클릭: 확인/취소" data-item="${esc(m.item)}" data-wo="${esc(m.wo)}" data-swo="${esc(m.swo)}" data-gpc="${esc(m.gpc)}" data-ymd="${esc(m.ymd)}" data-qty="${m.qty}" data-assy="${esc(m.assy)}" data-fin="${esc(m.fin)}"${(bg||fg)?` style="${bg?`background:${bg}${strong?';font-weight:700':''}`:''}${fg?';color:'+fg:''};cursor:context-menu"`:' style="cursor:context-menu"'}>${v}</td>`;
-    const mainRow=(o)=>{const r=o.r,i=o.i;   // 셀별 색(당일이전=prior_fin, 일자=dfin), 전체행 배경 없음(레거시=셀별)
+    const mainRow=(o)=>{const r=o.r,idxs=o.idxs||[];   // 셀별 색(당일이전=prior_fin, 일자=dfin), 전체행 배경 없음(레거시=셀별). idxs=하위 st.rows 인덱스(집계=여러WO)
       const pfin=r.prior_fin||'0';
       const pcell=r.prior_plan>0?`${nf(r.prior_cover||0)}/${nf(r.prior_plan)}`:'·';
       return `<tr class="kt-main">
-        <td class="center"><input type="checkbox" class="kt-chk" data-i="${i}" ${st.sel.has(i)?'checked':''}></td>
+        <td class="center"><input type="checkbox" class="kt-chk" data-idxs="${idxs.join(',')}" ${idxs.length&&idxs.every(x=>st.sel.has(x))?'checked':''}></td>
         <td class="center">${o.seq}</td><td>${esc(r.gpcnm||r.gpc)}</td><td><b>${esc(r.item)}</b></td>
         <td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm)}</td><td class="center">${esc(r.line)}</td>
         ${r.prior_plan>0?ktCell(pcell,finBg(pfin)||'#eef4fb',pfin!=='0',finFg(pfin),{item:r.item,wo:r.wo,swo:r.swo,gpc:r.gpc,ymd:r.part_ymd,qty:Math.max((r.prior_plan||0)-(r.prior_cover||0),0),assy:r.assy,fin:pfin}):numTd('·','',false)}
@@ -1080,10 +1101,10 @@ SCREEN.kitting=(host)=>{
        <label class="tl">도번</label><input class="inp" id="kt-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
        <label class="tl">자도번</label><input class="inp" id="kt-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
        <label class="tl">미생산</label>${seg('kt-uf',st.unfin,['전체','미생산','미키팅'])}
-       <label class="tl">구분</label>${seg('kt-vw',st.view,['전체','집계','제번'])}
+       <label class="tl">구분</label>${seg('kt-vw',st.view,['상세','집계','제번'])}
        <button class="btn" id="kt-go">🔍 조회</button>
        ${ed?`<button class="btn" id="kt-reg" style="background:#1c7c3a;color:#fff">✅ 확인(준비등록)</button><button class="btn ghost" id="kt-can">⏪ 준비취소</button>`:`<span style="color:#c0392b;font-size:12px">🔒 권한 없음</span>`}
-       <div class="spacer"></div><span class="rowcount">본행 ${nf(st.cnt)}건 · 선택 <b id="kt-selcnt">${st.sel.size}</b> · 계획 ${nf(st.plan_sum)} · 준비 ${nf(st.ready_sum)}</span>
+       <div class="spacer"></div><span class="rowcount">${st.view==='집계'?'도번':'본행'} ${nf(fcnt)}건 · 선택 <b id="kt-selcnt">${st.sel.size}</b> · 계획 ${nf(fplan)} · 준비 ${nf(fready)}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
@@ -1092,9 +1113,9 @@ SCREEN.kitting=(host)=>{
         <th>SEQ</th><th>파트</th><th>도번</th><th>PART일자</th><th>PART INPUT</th><th>Line No</th><th class="num">당일이전</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}<th class="num">준비재고</th><th class="num">완료수량</th><th class="num">준비수량</th><th class="num">생산재고</th><th class="num">ASSY재고</th><th class="num">출하</th><th class="num">자재사용량</th><th>Work Order</th><th>Split Work Order</th><th class="num">회수율</th><th class="num">Item St(회수율반영)</th><th>ASSV도번</th></tr></thead>
       <tbody>${st.loading?spinRow(NCOL+d.length):(flat.length?flat.map(o=>o.t==='m'?mainRow(o):subRow(o)).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
       ${flat.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
-        <td></td><td class="center">합계</td><td></td><td></td><td></td><td></td><td></td><td class="num">·</td>${d.map(x=>`<td class="num">${nf(st.rows.reduce((s,r)=>s+((r.days&&r.days[x])||0),0))}</td>`).join('')}
-        <td class="num">${nf(st.rows.reduce((s,r)=>s+(r.ready_stock||0),0))}</td><td class="num">${nf(st.rows.reduce((s,r)=>s+(r.finish||0),0))}</td><td class="num">${nf(st.ready_sum)}</td>
-        <td></td><td></td><td class="num">${nf(st.rows.reduce((s,r)=>s+(r.sale||0),0))}</td><td></td><td></td><td></td><td></td><td class="num">${f2(st.rows.reduce((s,r)=>s+(r.item_st||0),0))}</td><td></td></tr></tfoot>`:''}
+        <td></td><td class="center">합계</td><td></td><td></td><td></td><td></td><td></td><td class="num">·</td>${d.map(x=>`<td class="num">${nf(fpass.reduce((s,r)=>s+((r.days&&r.days[x])||0),0))}</td>`).join('')}
+        <td class="num">${nf(fpass.reduce((s,r)=>s+(r.ready_stock||0),0))}</td><td class="num">${nf(fpass.reduce((s,r)=>s+(r.finish||0),0))}</td><td class="num">${nf(fready)}</td>
+        <td></td><td></td><td class="num">${nf(fpass.reduce((s,r)=>s+(r.sale||0),0))}</td><td></td><td></td><td></td><td></td><td class="num">${f2(fpass.reduce((s,r)=>s+(r.item_st||0),0))}</td><td></td></tr></tfoot>`:''}
       </table></div>`;
     const g=id=>host.querySelector(id);
     // ★필터는 상태만(자동 조회/재렌더 없음) → 여러 필터 연속 선택 가능. 실제 조회·렌더는 [조회] 버튼에서만.
@@ -1110,9 +1131,13 @@ SCREEN.kitting=(host)=>{
     g('#kt-short').onclick=()=>alert('생산창고 재고과부족 확인: 준비재고 대비 소요 과부족 점검(레거시 연동 예정).');
     // ★체크박스는 render() 호출 안 함(대량행 재렌더 렉·먹통 방지) → 상태·DOM만 갱신, 선택카운트만 부분갱신.
     const updSel=()=>{const c=g('#kt-selcnt');if(c)c.textContent=st.sel.size;};
-    const ka=g('#kt-all');if(ka)ka.onclick=e=>{const on=e.target.checked;st.sel.clear();if(on)st.rows.forEach((r,i)=>st.sel.add(i));
-      host.querySelectorAll('.kt-chk').forEach(ch=>{ch.checked=on;});updSel();};
-    host.querySelectorAll('.kt-chk').forEach(ch=>ch.onclick=()=>{const i=+ch.dataset.i;ch.checked?st.sel.add(i):st.sel.delete(i);const a=g('#kt-all');if(a)a.checked=false;updSel();});
+    const idsOf=ch=>(ch.dataset.idxs||'').split(',').filter(Boolean).map(Number);
+    const ka=g('#kt-all');if(ka)ka.onclick=e=>{const on=e.target.checked;st.sel.clear();
+      host.querySelectorAll('.kt-chk').forEach(ch=>{ch.checked=on;if(on)idsOf(ch).forEach(x=>st.sel.add(x));});updSel();};
+    host.querySelectorAll('.kt-chk').forEach(ch=>ch.onclick=()=>{idsOf(ch).forEach(x=>ch.checked?st.sel.add(x):st.sel.delete(x));const a=g('#kt-all');if(a)a.checked=false;updSel();});
+    // ★미생산/구분 토글 = 재조회 없이 즉시 재렌더(캐시된 전체행에서 클라 필터/집계). 날짜·작업처·파트·도번 변경만 [조회] 재fetch.
+    host.querySelectorAll('input[name=kt-uf]').forEach(rb=>rb.onchange=()=>{st.unfin=rb.value;st.sel.clear();render();});
+    host.querySelectorAll('input[name=kt-vw]').forEach(rb=>rb.onchange=()=>{st.view=rb.value;st.sel.clear();render();});
     if(ed){g('#kt-reg').onclick=()=>act('register');g('#kt-can').onclick=()=>act('cancel');}
     // ★셀 우클릭 컨텍스트 메뉴(확인/취소) — canEdit 게이트. 마감/출고(fin 6)·완료(fin 4)·잔량0 은 확인 비활성.
     if(ed){
