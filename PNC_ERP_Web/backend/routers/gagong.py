@@ -182,7 +182,9 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
             for y in dates:
                 c2 = g["_cells"].get(y)
                 if c2 and c2["plan"] > 0:
-                    days[y] = round(c2["plan"], 0); done[y] = round(c2["fin"], 0)
+                    # ★일별/당일이전 완료 셀 = fin + ready(가공전표 PROD_FLAG='0'). 가공관점: 용접공정 이동전표 발행=가공완료(사용자 도메인규칙).
+                    #   레거시 SP finish_qty_NN도 전표(tag10)를 완료로 포함 → 셀완료가 실완료(master)보다 클 수 있음. master(완료컬럼)는 fin만(전표 제외) 유지.
+                    days[y] = round(c2["plan"], 0); done[y] = round(c2["fin"] + c2["ready"], 0)
                     colors[y] = ('background:' + _TAGCLR[c2["tag"]]) if _TAGCLR.get(c2["tag"]) else ''
             fin = round(sum(c2["fin"] for c2 in g["_cells"].values()), 0)
             plan = round(sum(c2["plan"] for c2 in g["_cells"].values()), 0)
@@ -193,7 +195,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         "sale": round(sale2.get((g["assy"], g["item"]), 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
                         "assyst": round(assyst.get(g["assy"], 0.0), 0), "prs": round(jae.get(g["item"], 0.0), 0),
                         "fixst": round(fixm.get((g["upper"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
-                        "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"], 0) if pc else 0,
+                        "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"] + pc["ready"], 0) if pc else 0,
                         "prior_bg": (('background:' + _TAGCLR[pc["tag"]]) if pc and _TAGCLR.get(pc["tag"]) else ''),
                         "wo": '', "days": days, "done": done, "colors": colors})
         uf = unfin.strip()
