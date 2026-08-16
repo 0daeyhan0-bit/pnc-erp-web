@@ -1577,7 +1577,7 @@ function wrCrud(host, cfg){
     g('#wr-search').onclick=doSearch;
     if(ed){g('#wr-new').onclick=()=>{st.form=cfg.newRow(st.F);render();};
       g('#wr-del').onclick=()=>del([...st.sel]);}
-    host.querySelectorAll('.wr-chk').forEach(ch=>ch.onclick=()=>{const id=+ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});
+    host.querySelectorAll('.wr-chk').forEach(ch=>ch.onclick=()=>{const id=ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});  // ★ID는 문자열 유지(웹행 ID='YMD-SEQ' 복합키, +변환시 NaN)
     host.querySelectorAll('.wr-edit').forEach(b=>b.onclick=()=>{const r=d.rows[+b.dataset.idx];st.form=cfg.fromRow(r);render();});
     qfBind(host,cfg.filters,st.F,'wr-f-',doSearch);
     if(editing){
