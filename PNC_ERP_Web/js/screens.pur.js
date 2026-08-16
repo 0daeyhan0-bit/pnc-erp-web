@@ -2907,14 +2907,14 @@ SCREEN.autoorder=(c)=>{
 SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
   let st={by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
-          ymf:'',ymt:'',biz:'',q:'',upBiz:'',loading:false,msg:''};
+          ymf:'',ymt:'',biz:'',cls:'',q:'',upBiz:'',loading:false,msg:''};
   const ym2m=y=>(y&&(''+y).length>=4)?('20'+(''+y).slice(0,2)+'-'+(''+y).slice(2,4)):'';   // 2607→2026-07 (month input용)
   const m2ym=v=>(v&&(''+v).length>=7)?((''+v).slice(2,4)+(''+v).slice(5,7)):'';            // 2026-07→2607
   const ymdF=s=>{s=''+(s||'');return s.length>=6?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:'-';};  // 260703→26/07/03
   const rng=()=>{const q=[];if(st.ymf)q.push('ym_from='+st.ymf);if(st.ymt)q.push('ym_to='+st.ymt);if(st.biz)q.push('biz='+encodeURIComponent(st.biz));return q;};
   const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.by_biz=j.by_biz||[];st.files=j.files||[];
       if(!st.ymf&&st.by_ym.length){st.ymf=st.by_ym[0].ym;st.ymt=st.by_ym[st.by_ym.length-1].ym;}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
-  const loadList=async()=>{try{const qs=rng().slice();if(st.q)qs.push('q='+encodeURIComponent(st.q));
+  const loadList=async()=>{try{const qs=rng().slice();if(st.cls)qs.push('cls='+encodeURIComponent(st.cls));if(st.q)qs.push('q='+encodeURIComponent(st.q));
       const j=await(await fetch(`${API}/api/lgsagub/list${qs.length?('?'+qs.join('&')):''}`)).json();st.rows=j.rows||[];}catch(e){st.rows=[];}};
   const loadDetail=async(item)=>{st.sel=item;st.dloading=true;paintDetail();
     try{const qs=['item='+encodeURIComponent(item)].concat(rng());
@@ -2975,6 +2975,7 @@ SCREEN.lgsagub=(c)=>{
        <input class="inp" type="month" id="lg-ymf" value="${ym2m(st.ymf)}" style="width:135px"> ~
        <input class="inp" type="month" id="lg-ymt" value="${ym2m(st.ymt)}" style="width:135px">
        <label class="tl">사업부</label><select class="sel" id="lg-biz">${bizOpts}</select>
+       <label class="tl">분류</label><select class="sel" id="lg-cls"><option value="">전체</option><option value="원소재"${st.cls==='원소재'?' selected':''}>원소재</option><option value="사급부품"${st.cls==='사급부품'?' selected':''}>사급부품</option></select>
        <input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
        <button class="btn" id="lg-go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">품목 ${won(st.rows.length)} · 수량 ${wonI(totq)} · 금액 ${wonI(tot)}원</span>
@@ -2982,8 +2983,8 @@ SCREEN.lgsagub=(c)=>{
      <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
        <div style="flex:1;min-width:440px">
          <div style="font-weight:600;margin:2px 0 6px">📦 품목별 요약 <span style="font-size:11px;color:var(--muted)">(품번 클릭 → 오른쪽 일자·단가별 기록)</span></div>
-         <div class="grid-wrap" style="max-height:460px;overflow:auto"><table class="tbl fit"><thead><tr><th>품번</th><th class="cap">품명</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th><th class="num">건</th></tr></thead>
-         <tbody>${st.loading?spinRow(6):(st.rows.length?st.rows.map(r=>`<tr class="it-row" data-item="${esc(r.item)}" data-name="${esc(r.name)}" style="cursor:pointer;${r.item===st.sel?'background:#e3f0ff':''}"><td><b>${esc(r.item)}</b></td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num">${wonI(r.qty)}</td><td class="num">${r.pchg?`<span style="color:#c0392b" title="단가 변동(${wonI(r.pmin)}~${wonI(r.pmax)})">${wonI(r.pmin)}~${wonI(r.pmax)} ▲</span>`:wonI(r.pmax)}</td><td class="num">${wonI(r.amt)}</td><td class="num">${won(r.cnt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">데이터 없음</td></tr>`)}</tbody></table></div>
+         <div class="grid-wrap" style="max-height:460px;overflow:auto"><table class="tbl fit"><thead><tr><th>품번</th><th class="cap">품명</th><th class="center">분류</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th><th class="num">건</th></tr></thead>
+         <tbody>${st.loading?spinRow(7):(st.rows.length?st.rows.map(r=>`<tr class="it-row" data-item="${esc(r.item)}" data-name="${esc(r.name)}" style="cursor:pointer;${r.item===st.sel?'background:#e3f0ff':''}"><td><b>${esc(r.item)}</b></td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="center"><span style="font-size:11px;padding:1px 6px;border-radius:8px;${r.cls==='원소재'?'background:#e6f0ff;color:#1c47a0':'background:#eef7ea;color:#1c7c3a'}">${esc(r.cls)}</span></td><td class="num">${wonI(r.qty)}</td><td class="num">${r.pchg?`<span style="color:#c0392b" title="단가 변동(${wonI(r.pmin)}~${wonI(r.pmax)})">${wonI(r.pmin)}~${wonI(r.pmax)} ▲</span>`:wonI(r.pmax)}</td><td class="num">${wonI(r.amt)}</td><td class="num">${won(r.cnt)}</td></tr>`).join(''):`<tr><td colspan="7" class="empty">데이터 없음</td></tr>`)}</tbody></table></div>
        </div>
        <div style="flex:1;min-width:380px" id="lg-detail">${detailHtml()}</div>
      </div>`;
@@ -2995,7 +2996,7 @@ SCREEN.lgsagub=(c)=>{
     fi.onchange=()=>{if(fi.files[0])upload(fi.files[0]);};
     c.querySelectorAll('input[name=lg-upbiz]').forEach(rd=>rd.onchange=()=>{st.upBiz=rd.value;});
     const go=()=>{st.ymf=m2ym(c.querySelector('#lg-ymf').value)||st.ymf;st.ymt=m2ym(c.querySelector('#lg-ymt').value)||st.ymt;
-      st.biz=c.querySelector('#lg-biz').value;st.q=c.querySelector('#lg-q').value;st.sel='';st.detail=[];loadList().then(draw);};
+      st.biz=c.querySelector('#lg-biz').value;st.cls=c.querySelector('#lg-cls').value;st.q=c.querySelector('#lg-q').value;st.sel='';st.detail=[];loadList().then(draw);};
     c.querySelector('#lg-go').onclick=go;
     c.querySelector('#lg-q').onkeyup=e=>{if(e.key==='Enter')go();};
     // ★품번 클릭 = 우측 상세만 부분갱신(전체 재렌더 X → 스크롤 유지)

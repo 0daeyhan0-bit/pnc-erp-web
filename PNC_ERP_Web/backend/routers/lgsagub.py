@@ -197,10 +197,15 @@ def lgsagub_summary():
         nx.close()
 
 
+def _cls_of(name):
+    """분류: 품명에 TUBE 있으면 원소재(동파이프 등), 나머지는 사급부품(사용자 규칙)."""
+    return "원소재" if "TUBE" in str(name or "").upper() else "사급부품"
+
+
 @router.get("/api/lgsagub/list")
-def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""), biz: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
-    """LG사급 실적 품목별 요약목록(기간·사업부 필터). 기간=ym_from~ym_to(YYMM), ym=단월 우선.
-       pmin/pmax=단가 최소/최대(다르면 가격변동 有→pchg=1), ndays=일자수. item_name 없으면 마스터 보강."""
+def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""), biz: str = Query(""), cls: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
+    """LG사급 실적 품목별 요약목록(기간·사업부·분류 필터). 기간=ym_from~ym_to(YYMM), ym=단월 우선.
+       pmin/pmax=단가 최소/최대(다르면 가격변동 有→pchg=1), ndays=일자수. cls=원소재(품명 TUBE)/사급부품. item_name 없으면 마스터 보강."""
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
@@ -221,9 +226,13 @@ def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Que
             WHERE {' AND '.join(wh)}
             GROUP BY s.item_code ORDER BY SUM(ISNULL(s.amt,0)) DESC, s.item_code""", *p)
         rows = []
+        clsf = cls.strip()
         for r in cur.fetchall():
             pmin = float(r[4] or 0); pmax = float(r[5] or 0)
-            rows.append({"item": r[0], "name": r[1], "qty": float(r[2] or 0), "amt": float(r[3] or 0),
+            cl = _cls_of(r[1])
+            if clsf and cl != clsf:
+                continue
+            rows.append({"item": r[0], "name": r[1], "cls": cl, "qty": float(r[2] or 0), "amt": float(r[3] or 0),
                          "pmin": pmin, "pmax": pmax, "cnt": r[6], "ndays": r[7],
                          "pchg": 1 if (pmin and pmax and abs(pmax - pmin) > 1e-6) else 0})
         return {"rows": rows, "cnt": len(rows)}
