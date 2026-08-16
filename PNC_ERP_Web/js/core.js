@@ -1569,7 +1569,7 @@ function wrCrud(host, cfg){
      <div class="grid-wrap" style="max-height:calc(100vh - ${(editing&&!cfg.modal)?430:330}px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:11px"><thead><tr><th style="width:26px"></th>${cfg.cols.map(col=>`<th class="${col.cls||''}">${col.h}</th>`).join('')}<th style="width:56px">작업</th></tr></thead>
       <tbody>${st.loading?spinRow(cfg.cols.length+2):((d.rows&&d.rows.length)?d.rows.map((r,i)=>`<tr>
-        <td class="center">${ed&&r.ID?`<input type="checkbox" class="wr-chk" data-id="${r.ID}" ${st.sel.has(r.ID)?'checked':''}>`:''}</td>
+        <td class="center">${ed&&r.ID?`<input type="checkbox" class="wr-chk" data-id="${r.ID}" ${st.sel.has(String(r.ID))?'checked':''}>`:''}</td>
         ${cfg.cols.map(col=>`<td class="${col.cls||''}" ${col.title?`title="${esc(r[col.title]||'')}"`:''} ${col.cap?'style="max-width:150px;overflow:hidden;text-overflow:ellipsis"':''}>${col.fmt?col.fmt(r):esc(r[col.k]??'')}</td>`).join('')}
         <td class="center">${ed&&(r.ID||cfg.editAll)?`<button class="btn wr-edit" data-idx="${i}" style="padding:1px 6px">수정</button>`:`<span style="color:#8aa0bd;font-size:10px">${r.ID?'':'📁이력'}</span>`}</td></tr>`).join(''):`<tr><td colspan="${cfg.cols.length+2}" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);

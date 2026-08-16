@@ -52,3 +52,17 @@ wrShell 화면 5개 중 **레거시토글 잔존 3개**:
 - **repoint 완료 20건**: salesplan CM_M_MASTER_DETAIL(1, before/after hash 5e95c418 일치검증) + gagong HR_M_CALENDAR(2) + kitting HR_M_CALENDAR(2) + soyo 마스터(15: CM_M_CUST·PR_M_ITEM·PR_M_WORK·PR_M_MODEL_BOM(_EXCEPT)·CS_M_ITEM_BOM). `PARTNER_ERP.dbo.X`→`PARTNER_ERP_TEST3.nx.X`. 내용 바이트동일→출력불변 보장. 스모크(salesplan1938·forecast679·sourcing6·plan4w352) 전부 200.
 - **남은 레거시읽기 = 트랜잭션만**(운영컷오버 필요, nx가 운영저장소 돼야): gagong SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL / kitting PR_T_INDI_WELD_SHEET(_DTL)×5 / coopplan SA_T_*·PU_T_*×6. = 실시간 재고/매출/용접시트라 미러최신성 전제.
 - 도구 rowhash.py(내용검증)·repoint.py(일괄치환, 한글주석보호 utf-8). 배포보류(dev만).
+
+## ★진행: 프론트 3화면 nxOnly union 전환 완료 (2026-08-17)
+잔존 wrShell 3화면(partstockadj·partissue·procresult) 정석 union 전환:
+- **발견**: 이들의 "🔴 레거시 라이브조회"는 실제로 **nx 미러**(PR_T_STOCK_MAINT_MAT·PR_T_PROD_DTL)를 읽고 있었음(레거시 dbo 아님, gongsu와 동일). 데이터는 이미 nx.
+- **wrCrud 이미 미러-union 지원**: 행 ID=null→읽기전용, ID有→편집. 라벨 "라이브"→"📁이력" 정정(공용 core.js).
+- **백엔드 union**(prodwrite.py): 웹(nx.stock_ledger/proc_result, editable=1) ∪ 미러이력(nx.PR_T_STOCK_MAINT_MAT tag2·창고이동 / nx.PR_T_PROD_DTL, ID=null editable=0). 
+  - stockmaint(재고조정 미러20 이력)·procreg(공정실적 미러516 이력) 검증. matissue=창고이동 데이터 0건(미러 FROM_PART_CODE 전무, live도 동일=버그아님).
+- **프론트 nxOnly:true** 3화면(토글 제거). 캐시버전 core.js/screens.prod.js→260817sepnx. 배포보류(dev).
+- **결과**: 프론트 5화면 전부 nxOnly(gongsu·qcerror·partstockadj·partissue·procresult). 레거시 라이브 토글 소멸.
+
+## 분리 현황 총괄 (2026-08-17)
+- ✅ 백엔드 마스터읽기 20건 nx repoint (내용 바이트동일 검증)
+- ✅ 프론트 레거시토글 5화면 전부 nxOnly
+- ⏸ **남은 레거시 의존 = 백엔드 트랜잭션읽기만**: gagong(SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL)·kitting(PR_T_INDI_WELD_SHEET_DTL×5)·coopplan(SA_T_*·PU_T_*×6). = 실시간 재고/매출/용접시트. **운영컷오버 필요**(nx가 이 데이터의 실시간 운영저장소가 되어야). 미러 델타싱크 실시간화 or 쓰기전환 설계 = 다음 큰 단계.
