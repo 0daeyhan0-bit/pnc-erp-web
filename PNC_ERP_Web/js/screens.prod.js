@@ -389,7 +389,8 @@ SCREEN.partplan=(c)=>{
   const finFg=f=>f==='3'?'#ffffff':'';
   const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'미생산',view:'상세',src:'nx',loading:false,msg:''};
   const load=async()=>{st.loading=true;render();
-    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:st.view,unfin:st.unfin,src:st.src,limit:8000});
+    // ★전체를 한 번만 조회해 캐시 → 미생산/구분 토글은 재조회 없이 클라이언트에서 즉시 필터(레거시 동일). 재조회는 기준일·작업처·파트·소스·기간 변경 시만.
+    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:'상세',unfin:'전체',src:st.src,limit:40000});
     try{const r=await fetch(`${API}/api/plan/part410?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.inwon=j.inwon||0;st.note=j.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';st.rows=[];st.dates=[];}
     st.loading=false;render();};
@@ -405,11 +406,13 @@ SCREEN.partplan=(c)=>{
     const PART_FIX=[['S5','01라인(용접)'],['S5-2','01라인(조립)'],['S1','02라인'],['S6','03라인'],['S4','04라인'],['S11','05라인'],['RAC','06라인'],['S10','자동은납 10'],['S13','서브/고주파'],['S12','설치'],['S8','서포터 08'],['S9','용접 09'],['S7','다관절 로봇 용접'],['-','-'],['Q1000','용접봉창고']];
     const partOpts='<option value=""'+(st.part?'':' selected')+'>전체</option>'+PART_FIX.map(([v,n])=>v==='-'?'<option disabled>─────────</option>':`<option value="${esc(v)}"${st.part===v?' selected':''}>${esc(n)}</option>`).join('');
     const seg=(name,val,opts)=>opts.map(v=>`<label style="font-weight:400;margin:0 5px 0 1px"><input type="radio" name="${name}" value="${v}" ${val===v?'checked':''}> ${v}</label>`).join('');
+    // ★미생산 필터 = 클라이언트 즉시(전체 캐시에서 done=false만). 레거시 setfilter처럼 재조회 없음.
+    const base = st.unfin==='미생산' ? st.rows.filter(r=>!r.done) : st.rows;
     // ── 구분(view): 집계=도번(item)단위 롤업 / 전체·제번=제번(WO)단위 상세 ──
-    let disp=st.rows;
+    let disp=base;
     if(st.view==='집계'){
       const agg=new Map();
-      st.rows.forEach(r=>{const k=r.gpc+'|'+r.assy+'|'+r.upper+'|'+r.item;let g=agg.get(k);
+      base.forEach(r=>{const k=r.gpc+'|'+r.assy+'|'+r.upper+'|'+r.item;let g=agg.get(k);
         if(!g){g={gpcnm:r.gpcnm,gpc:r.gpc,assy:r.assy,upper:r.upper,item:r.item,nm:r.nm,line:r.line,inhm:r.inhm,part_ymd:r.part_ymd,plan_ymd:r.plan_ymd,item_st:r.item_st,change_day:r.change_day,lot_diff:0,wo:'(집계)',swo:'',plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{}};agg.set(k,g);}
         g.plan_qty+=+r.plan_qty||0;g.finish+=+r.finish||0;g.prior_plan+=+r.prior_plan||0;g.prior_cover+=+r.prior_cover||0;g.lot_diff+=+r.lot_diff||0;if(!g.change_day)g.change_day=r.change_day;
         if((r.part_ymd||'')<(g.part_ymd||'zz'))g.part_ymd=r.part_ymd;
@@ -451,6 +454,7 @@ SCREEN.partplan=(c)=>{
         blk.forEach((r,bi)=>{seq++;h+=rowHtml(r,seq,bi===0);}); h+=subHtml(blk); i=j;}
       return h;};
     // footer: 당일이전·일자별 (완료/계획) + 생산ST행
+    const planSum=disp.reduce((s,r)=>s+(+r.plan_qty||0),0);   // ★표시중(필터적용) 계획합 — 캐시 클라이언트필터 기준
     const fPrP=disp.reduce((s,r)=>s+(+r.prior_plan||0),0), fPrC=disp.reduce((s,r)=>s+(+r.prior_cover||0),0);
     const fPl=x=>disp.reduce((s,r)=>s+((r.days&&r.days[x])||0),0), fCv=x=>disp.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
     const fST=disp.reduce((s,r)=>s+rowST(r),0);
@@ -474,7 +478,7 @@ SCREEN.partplan=(c)=>{
        <label class="tl">구분</label>${seg('pp-vw',st.view,['상세','집계','제번'])}
        <label class="tl">소스</label><select class="inp" id="pp-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>라이브 대사</option></select>
        <button class="btn" id="pp-go">🔍 조회</button>
-       <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(st.plan_sum)}</b> · 인원 ${nf(st.inwon)} · ${st.src==='live'?'🔴 라이브':'🟢 nx'} · 일자 ${d.length}개</span>
+       <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(planSum)}</b> · 인원 ${nf(st.inwon)} · ${st.src==='live'?'🔴 라이브':'🟢 nx'} · 일자 ${d.length}개</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
@@ -484,7 +488,7 @@ SCREEN.partplan=(c)=>{
       <tbody>${st.loading?spinRow(NCOL+d.length):bodyHtml()}</tbody>
       ${disp.length?(()=>{const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);return `<tfoot>
        <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
-        <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(st.plan_sum)}</td>
+        <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(planSum)}</td>
         <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}<td></td><td></td><td></td></tr>
        <tr class="grandtot" style="position:sticky;bottom:22px;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
         <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fSTtot)}</td><td></td>
@@ -500,6 +504,9 @@ SCREEN.partplan=(c)=>{
       const uf=c.querySelector('input[name=pp-uf]:checked');if(uf)st.unfin=uf.value;
       const vw=c.querySelector('input[name=pp-vw]:checked');if(vw)st.view=vw.value;
       load();};
+    // ★생산여부(미생산/전체)·구분(상세/집계/제번) 토글 = 캐시에서 즉시 재렌더(재조회 없음, 레거시 동일)
+    c.querySelectorAll('input[name=pp-uf]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-uf]:checked');if(x){st.unfin=x.value;render();}});
+    c.querySelectorAll('input[name=pp-vw]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-vw]:checked');if(x){st.view=x.value;render();}});
     g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
     ['#pp-dono','#pp-jado'].forEach(id=>{const e=g(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter')g('#pp-go').click();};});
     if(typeof attachResizers==='function')attachResizers(c);

@@ -505,8 +505,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             cells_p = [c for c in g["_cells"].values() if c["plan"] > 0]   # ★미생산=셀별 finish<plan(레거시 finish_qty<plan_qty). 전표(J)도 finish 채워 완료 산입(색=백과 무관)
             g["_done_all"] = bool(cells_p) and all(c["finish"] >= c["plan"] for c in cells_p)
             del g["_cells"]
+        for r in rows: r["done"] = bool(r.get("_done_all"))   # ★미생산여부 플래그 → 프론트가 전체 1회조회 후 미생산 토글을 즉시(재조회 없이) 필터
         uf = unfin.strip()
-        if uf == '미생산': rows = [r for r in rows if not r["_done_all"]]
+        if uf == '미생산': rows = [r for r in rows if not r["done"]]
         for r in rows: r.pop("_done_all", None)
         # ★정렬 = 레거시 DW setsort(자도번 기본 sort_flag='1'): part_group_code → part_plan_ymd_output_hm → item_code → plan_ymd → output_hm → lg_plan_ymd_output_hm → work_order → split_work_order
         rows.sort(key=lambda x: ((x["pgc"] or ""), (x["part_ymd"] or "") + (x["inhm"] or ""), (x["item"] or ""),
