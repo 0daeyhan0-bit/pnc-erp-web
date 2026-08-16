@@ -81,6 +81,24 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 재사용: 410 엔진(충당/색상/정렬/캐시/ST) O, **base 구성은 420 전용**(컴포넌트 그레인).
 - 미완: base 컴포넌트행 정확 재구성(→680 매칭) → 풀 적용 → per-cell diff0. (덤프 불신, 오라클 역설계)
 
+## ★★★base 확정 (2026-08-16, plan diff0 검증완료)
+- **오라클 680행 전부 work_order=''** → 420은 **(assy도번, 가공컴포넌트 item)로 WO 넘어 집계**! (410=WO별과 근본 차이)
+- **base = `PR_T_PLAN_PART_COPY WHERE GC_GUBUN='Q' AND WORK_CODE='P2'(행 자체) AND part_plan_ymd<=to` GROUP BY (ASSY_ITEM_CODE, ITEM_CODE)**, plan_qty=SUM(PART_PLAN_QTY).
+  - ITEM_CODE = 가공컴포넌트(=오라클 mat_code, 예 4H00901F 동관). 한 assy에 여러 Q컴포넌트(4H00901F·MJU62916207…) 각각 행.
+  - WORK_CODE는 **행의 WORK_CODE**(Q컴포넌트행은 P2), item마스터 join 아님.
+- 검증: base distinct(assy,item)=677 = 오라클(assy,mat)=677, **교집합 677/677·plan합 불일치 0**. (680 vs 677 = bom_level 소수 중복)
+- ★날짜: part_plan_ymd별 plan을 _NN 셀로 피벗(00=당일이전, 01=기준일...). 근무일 지평은 410과 동일 확인 필요.
+- ★남은 핵심 = **finish 5풀 per-date 배분**(출하90·가공창고20·ASSY70·자재/사급·가공전표10)을 이 (assy,item) 집계 그레인에 적용 → finish_qty_NN diff0. (410 _alloc/_shared 엔진 재사용, 단 그룹키=(assy,item))
+
+## ★날짜피벗 검증 (2026-08-16)
+- plan_qty_NN(00=<기준일·01=기준일·02=익일) base pivot vs 오라클 = **674/677 셀 일치**, 3개만 불일치(전부 "+용접링" 등: MJU64671101+용접링 base100/o30, MJU64671102+용접링 50/40, MJU62128603 30/15 — prior에서 base>오라클, 파트별 용접링 예외와 유사·추후 규명).
+- ★결론: **base 그레인·필터·plan·날짜피벗 = 검증완료(99.6%)**. 구조 역설계 사실상 완료.
+
+## 남은 단계 (finish 배분 — 다음 큰 phase)
+- finish_qty_NN을 (assy,item) 집계 그레인에 5풀 순서대로 배분: 출하90(sa_t_sale_dtl×use)→가공창고재고20(pr_t_mat_stock_wh part_code='P0001')→ASSY재고70(sa_t_item_stock×use)→자재/생산파트/사급(재귀CTE)→가공전표10(PR_T_INDI_CUTTING). 410 _alloc/_shared 엔진 재사용, 그룹키=(assy,item).
+- 색상 color_NN: tag 90/70/50/40/20/10 → RGB 실측 매핑(전표10·가공창고20 색 확인).
+- per-cell finish_qty_NN/color_NN diff0 → 표시(컬럼·소계·정렬) → SP-EXEC 제거.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
