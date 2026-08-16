@@ -37,11 +37,11 @@ SCREEN.matinout=(c)=>{
     loading=false;
     const df=c.querySelector('#dfrom');if(df)df.value=ymd2iso(curFrom);
     const dt=c.querySelector('#dto');if(dt)dt.value=ymd2iso(curTo);
-    const sub=c.querySelector('#mio-sub');if(sub)sub.innerHTML=`${esc(WHN[sc]||sc)} · ${esc(pwName(pw))} 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PU_T_STOCK_MAINT</code> 외 · 🔴 라이브 ${esc(fmtYmd(curFrom))}~${esc(fmtYmd(curTo))} · 0재고 숨김`;
+    const sub=c.querySelector('#mio-sub');if(sub)sub.innerHTML=`${esc(WHN[sc]||sc)} · ${esc(pwName(pw))} 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PU_T_STOCK_MAINT</code> 외 · 🟢 nx ${esc(fmtYmd(curFrom))}~${esc(fmtYmd(curTo))} · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 자도번을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 자재 입출고현황</div>
-   <div class="page-sub" id="mio-sub">재고창고·파트창고 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PU_T_STOCK_MAINT</code> 외 · 🔴 라이브 · 0재고 숨김</div>
+   <div class="page-sub" id="mio-sub">재고창고·파트창고 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PU_T_STOCK_MAINT</code> 외 · 🟢 nx · 0재고 숨김</div>
    <div class="toolbar">
      <label class="tl">조회기간</label><input type="date" class="inp" id="dfrom" value="${m1Iso()}" style="min-width:130px"> ~ <input type="date" class="inp" id="dto" value="${todayIso()}" style="min-width:130px">
      <label class="tl">재고창고</label><select class="sel" id="whcust"><option value="Z99990">피앤씨창고</option></select>
@@ -133,7 +133,7 @@ SCREEN.receipt=(c)=>{
     const cts=[...new Set(pool.map(r=>(''+r.ct).trim()).filter(Boolean))].sort();
     c.innerHTML=`
      <div class="page-title">📥 확정입고집계표</div>
-     <div class="page-sub">확정입고(검사통과)+수입 · 원본 <code>PU_T_STOCK_MAINT</code>(9/S/C/G/H)+<code>PU_T_STOCK_MAINT_C</code>(P) · 🔴 라이브 ${gijun==='close'?`마감기준 ${esc(ymToInput(curYm)||'-')}`:`입고기준 ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
+     <div class="page-sub">확정입고(검사통과)+수입 · 원본 <code>PU_T_STOCK_MAINT</code>(9/S/C/G/H)+<code>PU_T_STOCK_MAINT_C</code>(P) · 🟢 nx ${gijun==='close'?`마감기준 ${esc(ymToInput(curYm)||'-')}`:`입고기준 ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
      <div class="toolbar">
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">입고기준</button></div>
@@ -295,7 +295,7 @@ SCREEN.receiptdetail=(c)=>{
     const cts=[...new Set(pool.map(r=>(''+r.ct).trim()).filter(Boolean))].sort();
     c.innerHTML=`
      <div class="page-title">🧾 확정입고명세서</div>
-     <div class="page-sub">확정입고(검사통과)+수입 라인 명세 · 원본 <code>PU_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🔴 라이브 ${gijun==='close'?`마감기준 ${esc(ymToInput(curYm)||'-')}`:`입고기준 ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
+     <div class="page-sub">확정입고(검사통과)+수입 라인 명세 · 원본 <code>PU_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🟢 nx ${gijun==='close'?`마감기준 ${esc(ymToInput(curYm)||'-')}`:`입고기준 ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
      <div class="toolbar">
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">입고기준</button></div>
@@ -431,7 +431,7 @@ SCREEN.dispatchdetail=(c)=>{
     const cts=[...new Set(pool.map(r=>(''+r.ct).trim()).filter(Boolean))].sort();
     c.innerHTML=`
      <div class="page-title">📋 자재불출명세서</div>
-     <div class="page-sub">LG外 전 매출(유상사급 포함) 라인 명세 · 원본 <code>PU/SA_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🔴 라이브 ${gijun==='close'?`마감기준 ${esc(ymToInput(curYm)||'-')}`:`불출기준 ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
+     <div class="page-sub">LG外 전 매출(유상사급 포함) 라인 명세 · 원본 <code>PU/SA_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🟢 nx ${gijun==='close'?`마감기준 ${esc(ymToInput(curYm)||'-')}`:`불출기준 ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
      <div class="toolbar">
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">불출기준</button></div>
@@ -539,7 +539,7 @@ SCREEN.dispatch=(c)=>{
       : `<label class="tl">불출일자</label><input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom)||nowMS())}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo)||nowCD())}" style="min-width:130px">`;
     c.innerHTML=`
      <div class="page-title">📤 자재불출집계표</div>
-     <div class="page-sub">LG外 전 매출(유상사급 포함) · 원본 <code>PU/SA_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🔴 라이브 ${gijun==='close'?`마감기준(업체별 마감일) ${esc(ymToInput(curYm)||'-')}`:`불출기준(실제 이동일) ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
+     <div class="page-sub">LG外 전 매출(유상사급 포함) · 원본 <code>PU/SA_T_STOCK_MAINT</code>+<code>PU_T_STOCK_MAINT_C</code> · 🟢 nx ${gijun==='close'?`마감기준(업체별 마감일) ${esc(ymToInput(curYm)||'-')}`:`불출기준(실제 이동일) ${esc(dToInput(curFrom))}~${esc(dToInput(curTo))}`}</div>
      <div class="toolbar">
        <label class="tl">조회기준</label>
        <div class="toggle-group"><button data-g="close" class="${gijun==='close'?'on':''}">마감기준</button><button data-g="issue" class="${gijun==='issue'?'on':''}">불출기준</button></div>
@@ -684,7 +684,7 @@ SCREEN.matledger=(c)=>{
     const isMonth=period==='month';
     const snap=keyToInput(period,curKey)||(isMonth?'':'');
     const src=isMonth?'PU_T_MONTH_STOCK_WH':'PU_T_MONTH_STOCK_WH_DAILY';
-    const sub=isMonth?`월 마감 자재 수불(기초+입고−출고+기타=재고) · 단가=금액/수량 · 원본 <code>${src}</code> · 🔴 라이브 마감월 ${esc(snap||'-')}`
+    const sub=isMonth?`월 마감 자재 수불(기초+입고−출고+기타=재고) · 단가=금액/수량 · 원본 <code>${src}</code> · 🟢 nx 마감월 ${esc(snap||'-')}`
                      :`일자별 자재 수불(기초+입고−출고+기타=재고) · 단가=금액/수량 · 원본 <code>${src}</code> · 🔴 최신 마감일 ${esc(snap||'-')} 스냅샷`;
     const sgroups=[...new Set(pool.map(r=>(''+r.sg).trim()).filter(Boolean))].sort();
     const custs=[...new Set(pool.map(r=>r.cust).filter(Boolean))].sort();
@@ -892,7 +892,7 @@ SCREEN.stockissue=(c)=>{
     const opt=(list,sel)=>['<option value="">%% 전체</option>'].concat(list.map(x=>`<option value="${esc(x.code)}" ${sel===x.code?'selected':''}>${esc(x.nm||x.code)}</option>`)).join('');
     c.innerHTML=`
      <div class="page-title">📤 자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재개별출고 (레거시 w_pu_stock_150)</span></div>
-     <div class="page-sub">자재창고 → 생산/영업창고 개별출고(파트출고) 조회. 🔴 라이브 <code>PU_T_STOCK_MAINT</code> (MAINT_TAG='B') · 건수·수량합은 전체 집계.</div>
+     <div class="page-sub">자재창고 → 생산/영업창고 개별출고(파트출고) 조회. 🟢 nx <code>PU_T_STOCK_MAINT</code> (MAINT_TAG='B') · 건수·수량합은 전체 집계.</div>
      <div class="toolbar">
        <label class="tl">출고기간</label><input type="date" class="inp" id="si-from" value="${esc(ymd2iso(tot._f)||m1Iso())}" style="min-width:130px"> ~ <input type="date" class="inp" id="si-to" value="${esc(ymd2iso(tot._t)||todayIso())}" style="min-width:130px">
        <label class="tl">FROM파트창고</label><select class="sel" id="si-fw">${opt(fw,F.fromwh)}</select>
@@ -1059,7 +1059,7 @@ SCREEN.manorder=(c)=>{
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">🛒 수동발주 <span style="font-size:12px;color:var(--muted);font-weight:400">매입처 선택 → 발주계산(추가발주 조정) + 협력사 일자별 계획 → 발주서</span></div>
-     <div class="page-sub">좌: 생산계획(월) 대비 현재고·기발주 반영 추가발주(직접 조정 가능) · 우: 그 매입처 협력사 일자별 계획(한달). 조달 프로파일 배분(<code>nx.sourcing_profile</code>)·발주업체지정(<code>nx.order_vendor</code>)이 설정된 품목은 <b>이 매입처 몫</b>만 계상(미설정=현행 100%). 🔴 라이브 (계획 <code>PR_T_PLAN_ITEM_DTL</code>·재고 <code>PU_T_MONTH_STOCK_WH</code>)</div>
+     <div class="page-sub">좌: 생산계획(월) 대비 현재고·기발주 반영 추가발주(직접 조정 가능) · 우: 그 매입처 협력사 일자별 계획(한달). 조달 프로파일 배분(<code>nx.sourcing_profile</code>)·발주업체지정(<code>nx.order_vendor</code>)이 설정된 품목은 <b>이 매입처 몫</b>만 계상(미설정=현행 100%). 🟢 nx (계획 <code>PR_T_PLAN_ITEM_DTL</code>·재고 <code>PU_T_MONTH_STOCK_WH</code>)</div>
      <div class="toolbar">
        <label class="tl">매입처</label><input class="inp" id="mo-vq" value="${esc(vq)}" placeholder="업체명/코드 입력" style="width:200px"><button class="btn" id="mo-vsearch">🔍 검색</button>
        ${vendor?`<span style="margin-left:8px;font-weight:700;color:#1c47a0">✔ ${esc(vendor.nm)} (${esc(vendor.cc)})</span> <button class="btn ghost" id="mo-clear">✖ 변경</button>`:''}

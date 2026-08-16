@@ -66,3 +66,8 @@ wrShell 화면 5개 중 **레거시토글 잔존 3개**:
 - ✅ 백엔드 마스터읽기 20건 nx repoint (내용 바이트동일 검증)
 - ✅ 프론트 레거시토글 5화면 전부 nxOnly
 - ⏸ **남은 레거시 의존 = 백엔드 트랜잭션읽기만**: gagong(SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL)·kitting(PR_T_INDI_WELD_SHEET_DTL×5)·coopplan(SA_T_*·PU_T_*×6). = 실시간 재고/매출/용접시트. **운영컷오버 필요**(nx가 이 데이터의 실시간 운영저장소가 되어야). 미러 델타싱크 실시간화 or 쓰기전환 설계 = 다음 큰 단계.
+
+## ★전 프로그램 점검 — 라이브 표시 제거 (2026-08-17, 사용자 "레거시 라이브 표시 없애줘")
+**전수 스캔 확정: 진짜 레거시 dbo 직독 = 4파일뿐**(coopplan·gagong·kitting·soyo=트랜잭션). 나머지 전 화면은 이미 nx 미러 읽음(라벨만 낡음).
+- **낡은 🔴라이브 표시 ~24개 제거 완료**(전부 nx 확인): base(3 라벨)·pur(7)·sales(7)·prod(6 page-sub, partplan410 토글 보존)·qc(1 spec_rev union). 🔴라이브→🟢nx, "레거시행 읽기전용(라이브)"→"미러행 읽기전용". 캐시버전 260817nolive.
+- **남은 🔴라이브 = 진짜 레거시 읽는 4라우터 화면**: gagong.js(6: 협력사가공전개·4주간·진척·이동·전표)·etc.js partnerplan(coopplan)·prod.js partplan410 토글(kitting). = 1:1 검증용 라이브. **컷오버 flip시 nx 미러 repoint + 라벨정정**(미러 바이트동일이라 seamless). dev.js "🔴라이브 대사"=검증툴, 존치.

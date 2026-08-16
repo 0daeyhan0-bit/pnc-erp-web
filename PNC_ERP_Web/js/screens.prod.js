@@ -19,11 +19,11 @@ SCREEN.prodinout=(c)=>{
     const ymi=c.querySelector('#ym');if(ymi)ymi.value=ymToInput(curYm);
     const ps=[...new Set(rows.map(r=>r[0]))].sort((a,b)=>pName(a).localeCompare(pName(b),'ko'));
     const psel=c.querySelector('#part');if(psel){const v=psel.value;psel.innerHTML='<option value="">전체</option>'+ps.map(p=>`<option value="${esc(p)}">${esc(pName(p))}</option>`).join('');psel.value=v;}
-    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🔴 라이브 ${esc(ymToInput(curYm)||'-')}(이월기준 2502) · 0재고 숨김`;
+    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 nx ${esc(ymToInput(curYm)||'-')}(이월기준 2502) · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 생산입출고현황</div>
-   <div class="page-sub" id="pio-sub">파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🔴 라이브(이월기준 2502) · 0재고 숨김</div>
+   <div class="page-sub" id="pio-sub">파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 nx(이월기준 2502) · 0재고 숨김</div>
    <div class="toolbar">
      <label class="tl">조회월</label><input type="month" class="inp" id="ym" style="min-width:120px">
      <label class="tl">파트</label><select class="sel" id="part"><option value="">전체</option></select>
@@ -103,8 +103,8 @@ SCREEN.prodstock=(c)=>{
     else pool=livePS.filter(r=>r.stage===stage);
     const lines= showLine ? [...new Set(pool.map(r=>r.loc).filter(Boolean))].sort():[];
     const sub={READY:'키팅 준비재고(라인별) · 원본 PU_T_READY_STOCK · ⚠️스냅샷(라이브 예정)',
-               GAGONG:`가공(P0001) 재공 · 원장 9-union · 🔴 라이브 ${esc(ymToInput(curYm)||'-')}`,
-               WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🔴 라이브 ${esc(ymToInput(curYm)||'-')}`}[stage];
+               GAGONG:`가공(P0001) 재공 · 원장 9-union · 🟢 nx ${esc(ymToInput(curYm)||'-')}`,
+               WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🟢 nx ${esc(ymToInput(curYm)||'-')}`}[stage];
     c.innerHTML=`
      <div class="page-title">🏭 생산재고조회</div><div class="page-sub">${sub}</div>
      <div class="toolbar">
@@ -552,7 +552,7 @@ SCREEN.prodresult=(c)=>{
       : `<tfoot><tr class="grandtot"><td colspan="2" class="center">합계 ${nf(data.cnt)}건</td><td class="num">${nf(data.sum_lot)}</td><td class="num">${nf(data.sum_qty)}</td><td class="num">${nf1(data.sum_st)}</td><td></td></tr></tfoot>`):'';
     c.innerHTML=`
      <div class="page-title">📊 생산실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">${detail?'도번별 상세':'작업장별 일별 집계'} · 레거시 w_pr_list_010</span></div>
-     <div class="page-sub">필요ST=Σ(품목ST×생산수량)/60${detail?'':' · LOT수량=품목종수'}. 🔴 라이브 · 원본 <code>PR_T_PROD_DTL</code></div>
+     <div class="page-sub">필요ST=Σ(품목ST×생산수량)/60${detail?'':' · LOT수량=품목종수'}. 🟢 nx · 원본 <code>PR_T_PROD_DTL</code></div>
      <div class="toolbar">
        <label class="tl">생산기간</label><input class="inp" type="date" id="pr-from" value="${F.from}" style="width:130px"> ~ <input class="inp" type="date" id="pr-to" value="${F.to}" style="width:130px">
        <label class="tl">작업장</label><select class="inp" id="pr-sw" style="width:96px">${workOpts}</select>
@@ -622,7 +622,7 @@ SCREEN.partresult=(c)=>{
     const src=wide?'PR_T_PROD_DTL_STICKER + WELD_SHEET_DTL(공정ST)':'PROC(조립) ∪ STICKER(용접) ∪ CUTTING(가공)';
     c.innerHTML=`
      <div class="page-title">📈 파트별 생산실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">${desc} · 레거시 w_pr_list_090</span></div>
-     <div class="page-sub">${wide?'공정ST'+(m==='7'?'=TOT_ST×수량':'=TOT_ST×수량/60')+' · 바코드단위 공정실적':'생산수량=Σ·필요ST=Σ(파트별 공정ST×수량)/60'+(m==='2'?'':'·품목수=품목종수')+' · 필요ST 합계=시간(Σ분/60)'}. 🔴 라이브 · 원본 <code>${src}</code></div>
+     <div class="page-sub">${wide?'공정ST'+(m==='7'?'=TOT_ST×수량':'=TOT_ST×수량/60')+' · 바코드단위 공정실적':'생산수량=Σ·필요ST=Σ(파트별 공정ST×수량)/60'+(m==='2'?'':'·품목수=품목종수')+' · 필요ST 합계=시간(Σ분/60)'}. 🟢 nx · 원본 <code>${src}</code></div>
      <div class="toolbar">
        <label class="tl">생산기간</label><input class="inp" type="date" id="pt-from" value="${F.from}" style="width:130px"> ~ <input class="inp" type="date" id="pt-to" value="${F.to}" style="width:130px">
        <label class="tl">도번</label><input class="inp" id="pt-item" list="pt-itemdl" autocomplete="off" value="${esc(F.item)}" style="width:110px;text-transform:uppercase"><datalist id="pt-itemdl"></datalist>

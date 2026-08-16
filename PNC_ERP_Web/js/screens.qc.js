@@ -293,7 +293,7 @@ SCREEN.qcspec=(c)=>{
   // 통합뷰(레거시+nx 합집합 단일 프로그램) — 토글 제거. 레거시행=읽기전용, nx행=수정/삭제.
   c.innerHTML=`
     <div class="page-title">📐 시방변경관리 <span style="font-size:12px;color:var(--muted);font-weight:400">ECO/시방개정 이력 · 적용대상(좌:시방 / 우:적용품번)</span></div>
-    <div class="page-sub">설계변경(ECO)·시방개정 <b>통합뷰</b> — 🔴 레거시(<code>QA_T_SPEC_REV</code>) + ✏️ nx등록(<code>nx.qc_spec_rev</code>)을 한 목록으로. <b>레거시행=읽기전용(라이브), nx행=수정·삭제</b> · PART NO의 ✕=시방경보</div>
+    <div class="page-sub">설계변경(ECO)·시방개정 <b>통합뷰</b> — 📁 미러이력(<code>QA_T_SPEC_REV</code>) + ✏️ nx등록(<code>nx.qc_spec_rev</code>)을 한 목록으로. <b>미러행=읽기전용, nx행=수정·삭제</b> · PART NO의 ✕=시방경보</div>
     <div id="qcspec-body"></div>`;
   specView(c.querySelector('#qcspec-body'), {src:'all', editable:true});
 };

@@ -18,11 +18,11 @@ SCREEN.prodinvout=(c)=>{
     const ymi=c.querySelector('#ym');if(ymi)ymi.value=ymToInput(curYm);
     const ws=[...new Set(rows.map(r=>r[2]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
     const wsel=c.querySelector('#work');if(wsel){const v=wsel.value;wsel.innerHTML='<option value="">전체</option>'+ws.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');wsel.value=v;}
-    const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🔴 라이브 ${esc(ymToInput(curYm)||'-')}(이월기준 2502) · 0재고 숨김`;
+    const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 nx ${esc(ymToInput(curYm)||'-')}(이월기준 2502) · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 제품입출고현황</div>
-   <div class="page-sub" id="piv-sub">제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🔴 라이브(이월기준 2502) · 0재고 숨김</div>
+   <div class="page-sub" id="piv-sub">제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 nx(이월기준 2502) · 0재고 숨김</div>
    <div class="toolbar">
      <label class="tl">조회월</label><input type="month" class="inp" id="ym" style="min-width:120px">
      <label class="tl">작업처</label><select class="sel" id="work"><option value="">전체</option></select>
@@ -201,7 +201,7 @@ SCREEN.lgrecv=(c)=>{
     const days=dayList();
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🏢 LG리시빙관리</div>
-     <div class="page-sub" style="flex:0 0 auto">LG 리시빙 도번×날짜 집계 · 원본 <code>SA_T_LG_RECEIVING_DTL</code> · 🔴 라이브 ${esc(ymdToInput(curFr)||'-')} ~ ${esc(ymdToInput(curTo)||'-')}</div>
+     <div class="page-sub" style="flex:0 0 auto">LG 리시빙 도번×날짜 집계 · 원본 <code>SA_T_LG_RECEIVING_DTL</code> · 🟢 nx ${esc(ymdToInput(curFr)||'-')} ~ ${esc(ymdToInput(curTo)||'-')}</div>
      <div class="toolbar" style="flex:0 0 auto">
        <label class="tl">조회기간</label>
        <input type="date" class="inp" id="fr" value="${esc(ymdToInput(curFr))}" style="width:135px">
@@ -272,7 +272,7 @@ SCREEN.shipment=(c)=>{
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">🚚 출하실적현황</div>
-     <div class="page-sub">출하(매출) 실적 라인 · 원본 <code>SA_T_SALE_DTL</code> · 🔴 라이브 ${esc(dToInput(curFrom)||'-')}~${esc(dToInput(curTo)||'-')}</div>
+     <div class="page-sub">출하(매출) 실적 라인 · 원본 <code>SA_T_SALE_DTL</code> · 🟢 nx ${esc(dToInput(curFrom)||'-')}~${esc(dToInput(curTo)||'-')}</div>
      <div class="toolbar">
        <label class="tl">출하기간</label>
        <input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:130px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="dto" value="${esc(dToInput(curTo))}" style="min-width:130px">
@@ -351,13 +351,13 @@ SCREEN.salesstock=(c)=>{
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';pool=[];}
     loading=false;
     const df=c.querySelector('#dfrom'),dt=c.querySelector('#dto');if(df)df.value=dToInput(curFrom);if(dt)dt.value=dToInput(curTo);
-    const sub=c.querySelector('#ss-sub');if(sub)sub.innerHTML=`제품 수불(기초+입고−출고−기타출고) · 판매단가(S/E) 기준 · 원본 <code>SA_T_STOCK_MAINT</code> · 🔴 라이브 ${esc(dToInput(curFrom)||'-')}~${esc(dToInput(curTo)||'-')}`;
+    const sub=c.querySelector('#ss-sub');if(sub)sub.innerHTML=`제품 수불(기초+입고−출고−기타출고) · 판매단가(S/E) 기준 · 원본 <code>SA_T_STOCK_MAINT</code> · 🟢 nx ${esc(dToInput(curFrom)||'-')}~${esc(dToInput(curTo)||'-')}`;
     const ws=[...new Set(pool.map(r=>r.wc).filter(Boolean))].sort();
     const wsel=c.querySelector('#wc');if(wsel){const v=wsel.value;wsel.innerHTML='<option value="">전체작업장</option>'+ws.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');wsel.value=v;}
     apply();};
   c.innerHTML=`
    <div class="page-title">📦 제품재고조회</div>
-   <div class="page-sub" id="ss-sub">제품 수불(기초+입고−출고−기타출고) · 판매단가(S/E) 기준 · 원본 <code>SA_T_STOCK_MAINT</code> · 🔴 라이브</div>
+   <div class="page-sub" id="ss-sub">제품 수불(기초+입고−출고−기타출고) · 판매단가(S/E) 기준 · 원본 <code>SA_T_STOCK_MAINT</code> · 🟢 nx</div>
    <div class="toolbar">
      <label style="font-size:12px;color:var(--muted);font-weight:600">수불기간</label>
      <input type="date" class="inp" id="dfrom" value="${esc(dToInput(curFrom))}" style="min-width:135px">
@@ -632,7 +632,7 @@ SCREEN.salesplan=(c)=>{
     const footRow=rows.length?`<tr class="sp-foot"><td colspan="7" class="right">총계 (${won(tot.cnt||0)}건)</td><td class="num">${won(tot.lot||0)}</td><td class="num">${won(tot.total||0)}</td>${footTd}<td></td><td></td><td></td></tr>`:'';
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="margin-bottom:2px">📅 영업계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">일별 생산/영업계획 (w_pr_plan_050)</span></div>
-     <div class="page-sub" style="margin-bottom:6px">기준일부터 N일 일별 계획수량 · 원본 <code>SA_T_PLAN_DTL</code> · 🔴 라이브 · 구분 상세/집계/도번집계 · 주말=주황</div>
+     <div class="page-sub" style="margin-bottom:6px">기준일부터 N일 일별 계획수량 · 원본 <code>SA_T_PLAN_DTL</code> · 🟢 nx · 구분 상세/집계/도번집계 · 주말=주황</div>
      <div class="toolbar" style="gap:5px;flex:0 0 auto">
        <label class="tl">기준일</label><input type="date" class="inp" id="sp-fr" value="${dIn(fr)}" style="width:135px">
        <label class="tl">일수</label><select class="inp" id="sp-days">${['7','14','21','30'].map(d=>`<option value="${d}" ${days===d?'selected':''}>${d}일</option>`).join('')}</select>
