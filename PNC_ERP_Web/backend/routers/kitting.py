@@ -174,20 +174,46 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                     c[key] += jan; pool -= jan
                     if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag  # 완전충당 → tag(최고단계 유지)
         for g in rows:
-            it = g["item"]
             g["part_ymd"] = min([c["ymd"] for c in g["_cells"].values()] or [''])   # 당일이전 셀 키(=최소 계획일)
             seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
-            # 1) 출하(sale, tag90) — pool=sa_t_sale_dtl[(wo,swo,assy)]
+            # 1) 출하(sale, tag90) — pool=sa_t_sale_dtl[(wo,swo,assy)] (행별=제번단위 고유)
             _alloc(seq, saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 90, 'finish')
-            # 2) ASSY 현재고(tag70) — pool=sa_t_item_stock[assy] × use_qty
-            _alloc(seq, assystk.get(g["assy"], 0.0) * g["use_qty"], 70, 'finish')
-            # 2-1) 도번고정재고(tag70) — pool=재귀BOM 롤업 fixstk[(upper,item)] (SP 도번고정 감안)
-            _alloc(seq, max(fixstk.get((g["upper"], it), 0.0), 0.0), 70, 'finish')
-            # 2-2) 중간공정 파트재고(tag70) — pool=자재재고+생산재고 midstk[item] (SP 파트재고 감안)
-            _alloc(seq, max(midstk.get(it, 0.0), 0.0), 70, 'finish')
-            # 3) 준비재고(tag50) — pool=pu_t_ready_stock[(item,파트)]  → ready_qty
-            _alloc(seq, max(rstock.get((it, g["gpc"]), 0.0), 0.0), 50, 'ready')
-            # 4) ★nx 셀단위 준비 flag 오버레이(우리 확인분, 셀별) — 라이브 PU와 별도 합산(이중가산X), 커버 시 tag50 녹
+        # ★2·3) 재고풀 = plan_part410과 동일한 도번단위 공유 충당(_shared): 같은 재고를 여러 행이 중복차감하던 버그(SP 대비 완료 과다) 수정.
+        #   커서순(part_plan_ymd·output_hm·wo·swo) 그리디 소진 — 한 행이 쓰면 다음 행은 남은 것만.
+        def _shared(keyfn, poolmap, tag, key):
+            grp = {}
+            for g in rows:
+                for b, c in g["_cells"].items():
+                    sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
+                    grp.setdefault(keyfn(g), []).append((c, sd, g["inhm"] or '', g["plan_ymd"] or '', g["output_hm"] or '', g["wo"] or '', g["swo"] or ''))
+            for k, lst in grp.items():
+                pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
+                if pool <= 0: continue
+                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6]))
+                for c, sd, hm, _py, _ohm, _wo, _swo in lst:
+                    if pool <= 0: break
+                    jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
+                    if jan <= 0: continue
+                    if jan > pool: c[key] += pool; pool = 0.0
+                    else:
+                        c[key] += jan; pool -= jan
+                        if tag > c["tag"] or c["tag"] == 0: c["tag"] = tag
+        _assy_pool = {}; _fix_pool = {}; _mid_pool = {}
+        for g in rows:
+            ka = (g["assy"], g["upper"], g["item"], g["gpc"])
+            if ka not in _assy_pool: _assy_pool[ka] = assystk.get(g["assy"], 0.0) * g["use_qty"]     # ASSY현재고(도번)×use — 도번단위 공유
+            kf = (g["upper"], g["item"], g["gpc"])
+            if kf not in _fix_pool: _fix_pool[kf] = max(fixstk.get((g["upper"], g["item"]), 0.0), 0.0)  # 도번고정재고
+            km = (g["item"], g["gpc"])
+            if km not in _mid_pool: _mid_pool[km] = max(midstk.get(g["item"], 0.0), 0.0)               # 중간공정 파트재고
+        _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # 2) ASSY 현재고
+        _shared(lambda g: (g["upper"], g["item"], g["gpc"]), _fix_pool, 70, 'finish')               # 2-1) 도번고정재고
+        _shared(lambda g: (g["item"], g["gpc"]), _mid_pool, 70, 'finish')                           # 2-2) 중간공정 파트재고
+        _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')                               # 3) 준비재고(→ready, 색tag50)
+        # 4) ★nx 셀단위 준비 flag 오버레이(우리 확인분, 셀별) — 라이브 PU와 별도 합산(이중가산X), 커버 시 tag50 녹
+        for g in rows:
+            it = g["item"]
+            seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
             for c in seq:
                 ck = g["part_ymd"] if c["bucket"] == 'P' else c["ymd"]
                 nq = nxcell.get((it, g["wo"], g["gpc"], ck), 0.0)
@@ -195,6 +221,9 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                     rem = max(c["plan"] - c["finish"] - c["ready"], 0.0)
                     if rem > 0: c["ready"] += min(nq, rem)
                     if c["plan"] > 0 and (c["finish"] + c["ready"]) >= c["plan"] and c["tag"] < 50: c["tag"] = 50
+        for g in rows:
+            it = g["item"]
+            seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
             # 셀 표시: finish_qty_NN = finish + ready; fin = tag매핑
             g["dcov"] = {}; g["dfin"] = {}
             pc = g["_cells"].get('P')
