@@ -55,6 +55,13 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - ing_stock_qty(가공전표발행수량) = max(ready_stock_qty)
 - ★410의 midstk(#tms4 재귀CTE)에 이미 pr_t_mat_stock_wh+pu_t_mat_stock_wh+PU_T_SAGUB_STOCK+PU_T_STACKER 있음 → **proc_stock(part_code='P0001') 분리·가공전표(CUTTING) 교체만 하면 재사용**.
 
+## ★★base 필터 교정 (오라클 역설계 — 덤프 불신)
+- 오라클 680행 실측: **mat_work_code='P2' 전부**, work_code는 P1(491)/공백(165)/P2(24) 혼재 → **base 필터 = mat_work_code(자도번작업처)='P2', WORK_CODE 아님**. bom_level 0~4 전부 포함.
+- ★`MAT_WORK_CODE`는 PR_T_PLAN_PART_COPY **원컬럼 아님**(207 에러) → SP가 파생(자도번 작업처 = 자도번 item의 작업처). 파생식 규명 필요.
+- 그레인: distinct(wo,swo,assy,mat_code)=677 ≈ 680행(피벗 후, plan_ymd는 _NN 컬럼으로).
+- ★결론: _260318/_251219 덤프는 base필터(WORK_CODE)·"(중략)"으로 **신뢰불가** → **런타임 _260602 EXEC 오라클을 정본으로 역설계**(410처럼 per-cell diff0 게이트).
+- 다음 규명: ① mat_work_code 파생식(자도번 작업처) ② base 그레인 677→680 정확화 ③ 풀 적용 ④ per-cell diff0.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
