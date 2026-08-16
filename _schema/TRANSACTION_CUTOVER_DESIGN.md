@@ -65,3 +65,20 @@
 - ② r_delta_sync 대상테이블·주기·검증 현황 점검 → 트랜잭션 미러 동기화 SLA 초안.
 - ③ 유형별 웹입력 vs 레거시 diff0 대사 하네스(saleout·procresult·kitting 재고합).
 = 결정 없이 분석·검증만. 실제 repoint/입력전환은 승인 후.
+
+## ★9. DEV flip 검증 — "nx 단독 동작하는가" 실험 (2026-08-17, localhost 전용)
+> 사용자 요청("신규 DB 써도 4개 프로그램 작동·결과 동일한지 확인" + "flip하고 운영테스트 문제되나"→dev안전 확인). **184/라이브 아님, localhost:8010 dev만.** 병행운영 설계(§8 라이브유지)는 그대로 — 이건 컷오버 preview.
+- **대상 4라우터**: coopplan·gagong·kitting·soyo 의 `PARTNER_ERP.dbo.` 트랜잭션 읽기 18개를 `PARTNER_ERP_TEST3.nx.`로 flip.
+- **BEFORE(레거시) 캡처**(scratchpad/before4.json) → flip → AFTER 대조. 7 엔드포인트:
+  - **완전 바이트동일 4**: coopplan planstatus(4000)·kitting grid(1777)·soyo forecast(679)·soyo sourcing(6).
+  - **건수동일·행순서만차 3**: gagong prog420(680)·plan4w(352)·kitting part410(2789). plan4w=엔진 자체 **비결정 순서**(2회 호출 해시 상이·정렬시 안정) 확인. 입력테이블 **동일시점 바이트동일**(SA_T_ITEM_STOCK 2671·PU_T_READY_STOCK 3080·SA_T_SALE_DTL 303833·WELD_SHEET_DTL 117329) → 데이터 동일·순서만 차이 확정.
+- **결론**: 4개 프로그램 전부 nx 단독에서 **에러 0·건수 레거시 일치·데이터 동일**. nx-standalone 동작 증명.
+
+### ★★9-1. 발견 — nx 미러 없는 트랜잭션 2테이블 (컷오버 필수 갭)
+blanket flip이 **nx에 존재하지 않는 테이블**까지 바꿔 깨진 읽기 2건 발견(감사: 4파일 3부분 nx참조 40종 중 2종 missing) → **dbo로 복원**:
+| 테이블 | 읽는곳 | nx 상태 | 조치 |
+|---|---|---|---|
+| `PR_T_INDI_WELD_SHEET` (베이스) | kitting part410 L448 | nx엔 **_DTL만** 있고 베이스 없음 | dbo 복원(nx._DTL과 cross-db join) |
+| `SA_T_PLAN_ITEM_DTL` | soyo forecast L338 | nx에 없음(동의어도 없음) | dbo 복원 |
+- **하드컷오버 전 반드시**: 이 2테이블을 nx 미러에 추가(r_delta_sync 대상 확장)해야 kitting/soyo가 진짜 nx-단독. 현재는 dev에서도 이 2개만 dbo 직독(부분 cross-db).
+- **교훈**: flip 전 **참조 테이블 nx 존재감사 필수**(INFORMATION_SCHEMA.TABLES+VIEWS+synonyms). blanket 치환은 미러 불완전 테이블에서 조용히 깨짐.
