@@ -90,3 +90,12 @@ blanket flip이 **nx에 존재하지 않는 테이블**까지 바꿔 깨진 읽�
 - **운영테스트**: 7 엔드포인트 에러0·건수 레거시일치·정렬해시 dbo복원본과 동일(=미러 byte-current, nx로 읽어도 결과 같음). **nx 단독 완전동작 확정.**
 - ★★**실제 하드컷오버 시 주의**: 위 미러 2개는 **1회성 point-in-time 복사**(SELECT INTO). 운영 전환엔 **r_delta_sync 대상에 이 2테이블 추가**(지속 동기화) 필요 — 안 하면 컷오버 후 stale. 나머지 미러(stock·sale·weld_dtl)와 동일한 델타싱크 편입 필수.
 - **상태**: dev/localhost만. 184/라이브 미배포. 병행운영 설계(§8) 무영향.
+
+## ★10. 병행운영 실측 대조 하네스 — 미러 정합 모니터 (2026-08-17 신설)
+> 도구: `_harness/mirror_recon.py` (로그 `mirror_recon_log.jsonl`). 사용자 선택(옵션1).
+- **논리**: 코드는 접두어(dbo→nx)만 바뀌어 쿼리로직=레거시 동일(동기화 데이터서 결과일치 증명). ∴ 병행운영 유일 실측리스크 = "미러가 라이브만큼 최신인가". 매일 대조→며칠 GREEN=컷오버 seamless 근거.
+- **방식**: 라우터 `nx.<TABLE>` 참조 자동수집→분류(_T_ 트랜잭션=최신필수 / _M_ 마스터=차이허용 / 소문자=nx전용스킵)→각 트랜잭션 nx vs dbo `COUNT_BIG + CHECKSUM_AGG(BINARY_CHECKSUM(*))` 대조. GREEN/RED+타임스탬프 로그.
+- **★첫 실행 발견(4라우터 범위)**: 트랜잭션 미러 22개 중 15 MATCH·**7 DRIFT**. ★교훈: 아까 엔드포인트 점검(특정 파라미터)은 "일치"였으나 **테이블단위 대조가 실제 lag를 드러냄**(coopplan planstatus는 260817+ 창이라 우연 일치, 하지만 PR_T_PLAN_PART_MAT nx 110638 vs live 112966 = 2328행 stale).
+  drift: PR_T_PLAN_PART_MAT(−2328)·PART_COPY(−392)·PLAN_DTL(−193)·INDI_CUTTING(−5)·CUTTING_PROC_GAGONG(−5)·PR/PU_T_MAT_STOCK_WH(건수동일·내용상이=UPDATE미반영).
+- **원인·해소**: 델타싱크 미실행. `_migration/sub_norm/r_delta_sync.py`(DRY확인·FORCE_FULL에 계획테이블·우리 nx.plan_* 소문자 미접촉) `--commit` 시 전부 해소.
+- **컷오버 SLA**: r_delta_sync 고빈도(15분~1h) 스케줄 + mirror_recon.py로 GREEN 감시. 워크플로우 = recon(RED검출)→sync --commit→recon(GREEN). 며칠 GREEN 유지 = 하드컷오버 준비완료.
