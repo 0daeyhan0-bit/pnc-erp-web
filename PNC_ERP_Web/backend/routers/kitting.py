@@ -185,7 +185,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             for g in rows:
                 for b, c in g["_cells"].items():
                     sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
-                    grp.setdefault(keyfn(g), []).append((c, sd, g["inhm"] or '', g["plan_ymd"] or '', g["output_hm"] or '', g["wo"] or '', g["swo"] or ''))
+                    grp.setdefault(keyfn(g), []).append((c, sd, g.get("inhm") or '', g.get("plan_ymd") or '', g.get("output_hm") or g.get("inhm") or '', g.get("wo") or '', g.get("swo") or ''))
             for k, lst in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
@@ -207,8 +207,9 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             km = (g["item"], g["gpc"])
             if km not in _mid_pool: _mid_pool[km] = max(midstk.get(g["item"], 0.0), 0.0)               # 중간공정 파트재고
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # 2) ASSY 현재고
-        _shared(lambda g: (g["upper"], g["item"], g["gpc"]), _fix_pool, 70, 'finish')               # 2-1) 도번고정재고
-        _shared(lambda g: (g["item"], g["gpc"]), _mid_pool, 70, 'finish')                           # 2-2) 중간공정 파트재고
+        # ★도번고정재고(fixstk)는 완료풀에서 제외 — 레거시 SP(준비등록_NEW) 완료=sale+assy_stock+pr_stock+ready뿐(도번고정 별도풀 없음).
+        #   재귀BOM롤업 fixstk가 SUB를 부풀려 과다(AJJ30041901-SUB SP5 vs 웹295)였음. plan_part410도 fixstk 미사용.
+        _shared(lambda g: (g["item"], g["gpc"]), _mid_pool, 70, 'finish')                           # 2-2) 중간공정 파트재고(=SP pr_stock)
         _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')                               # 3) 준비재고(→ready, 색tag50)
         # 4) ★nx 셀단위 준비 flag 오버레이(우리 확인분, 셀별) — 라이브 PU와 별도 합산(이중가산X), 커버 시 tag50 녹
         for g in rows:
@@ -483,7 +484,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for b, c in g["_cells"].items():
                     sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
                     # ★배분순서 = 레거시 SP 커서 order by (part_plan_ymd, part_output_hm, plan_ymd, output_hm, work_order, split_work_order) 완전이식 → 동순위 행 충당 일치
-                    grp.setdefault(keyfn(g), []).append((c, sd, g["inhm"] or '', g["plan_ymd"] or '', g["output_hm"] or '', g["wo"] or '', g["swo"] or ''))
+                    grp.setdefault(keyfn(g), []).append((c, sd, g.get("inhm") or '', g.get("plan_ymd") or '', g.get("output_hm") or g.get("inhm") or '', g.get("wo") or '', g.get("swo") or ''))
             for k, lst in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
