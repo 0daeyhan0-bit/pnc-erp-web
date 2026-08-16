@@ -398,6 +398,7 @@ SCREEN.partplan=(c)=>{
   const rowST=r=>Math.max((+r.plan_qty||0)-(+r.finish||0),0)*(+r.item_st||0)/3600;
   // PART INPUT 시간(output_hm) "1126"→"11:26" 표기(레거시 동일)
   const hhmm=s=>{s=(''+(s||'')).trim();if(!s||!/^\d{1,4}$/.test(s))return esc(s);s=s.padStart(4,'0');return s.slice(0,2)+':'+s.slice(2);};
+  const ymd6=s=>{s=(''+(s||'')).trim();return s.length>=6?s.slice(0,2)+'/'+s.slice(2,4)+'/'+s.slice(4,6):esc(s);};  // 260816→26/08/16 (LG INPUT)
   const render=()=>{
     const d=st.dates;
     const wcM=new Map([['P1','용접'],['P2','가공']]);
@@ -419,7 +420,7 @@ SCREEN.partplan=(c)=>{
     }
     // 정렬: ★상세=백엔드(레거시 setsort: part_group→part_plan_ymd_hm→item→plan_ymd→output_hm→lg→wo→swo) 순서 유지 / 집계·제번=도번 묶기
     if(st.view!=='상세') disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
-    const NCOL=12;  // 고정컬럼(파트..당일이전계획)
+    const NCOL=16;  // 고정컬럼(SEQ..당일이전계획 13 + Part Plan Ymd Output Hm·LG INPUT·LG INPUT시간 3)
     const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
     // 완료수량=생산실적(finish)만. 생산분 있으면 "생산/계획", 없으면 계획만(바 없이=키팅/미키팅은 색으로만 구분)
     const pcell=r=>r.prior_plan>0?(r.prior_cover>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:`${nf(r.prior_plan)}`):'·';
@@ -432,7 +433,7 @@ SCREEN.partplan=(c)=>{
         <td class="center" style="color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}">${esc(pulltxt(r))}</td>
         <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
         ${r.prior_plan>0?numTd(pcell(r),finBg(pf),pf!=='0',finFg(pf)):numTd('·','',false)}
-        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}</tr>`;};
+        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}<td class="center mut" style="font-size:10px">${esc((r.part_ymd||'')+(r.inhm||''))}</td><td class="center">${ymd6(r.plan_ymd)}</td><td class="center">${hhmm(r.output_hm)}</td></tr>`;};
     // ★레거시 DW 도번(item) 그룹 소계행(청록, group trailer) — 완료합/계획합. 상세뷰만.
     const subHtml=(blk)=>{const r0=blk[0];
       const sPl=blk.reduce((s,r)=>s+(+r.plan_qty||0),0), sST=blk.reduce((s,r)=>s+Math.round(rowST(r)*100)/100,0);
@@ -441,7 +442,7 @@ SCREEN.partplan=(c)=>{
         <td></td><td>${esc(r0.gpcnm||r0.gpc)}</td><td><b>${esc(r0.assy)}</b></td><td></td><td><b>${esc(r0.item)}</b></td>
         <td colspan="5"></td><td class="num">${f2(sST)}</td><td class="num"><b>${nf(sPl)}</b></td>
         <td class="num">${sPrP>0?nf(sPrC)+'/'+nf(sPrP):'·'}</td>
-        ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);return `<td class="num">${pl>0?nf(cv)+'/'+nf(pl):'·'}</td>`;}).join('')}</tr>`;};
+        ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);return `<td class="num">${pl>0?nf(cv)+'/'+nf(pl):'·'}</td>`;}).join('')}<td class="center">${esc((r0.part_ymd||'')+(r0.inhm||''))}</td><td class="center">${esc(r0.plan_ymd||'')}</td><td class="center">${esc(r0.output_hm||'')}</td></tr>`;};
     // tbody: 상세=도번블록별 상세행+청록소계, 집계/제번=집계행만
     const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`;
       if(st.view!=='상세')return disp.map((r,i)=>rowHtml(r,i+1,i===0||disp[i-1].item!==r.item)).join('');
@@ -479,18 +480,18 @@ SCREEN.partplan=(c)=>{
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
-       <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}</tr></thead>
+       <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}<th class="center">Part Plan Ymd Output Hm</th><th class="center">LG INPUT</th><th class="center">LG INPUT시간</th></tr></thead>
       <tbody>${st.loading?spinRow(NCOL+d.length):bodyHtml()}</tbody>
       ${disp.length?(()=>{const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);return `<tfoot>
        <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(st.plan_sum)}</td>
-        <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}</tr>
+        <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}<td></td><td></td><td></td></tr>
        <tr class="grandtot" style="position:sticky;bottom:22px;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
         <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fSTtot)}</td><td></td>
-        <td class="num">${f2(fSTprior)}</td>${d.map(x=>`<td class="num">${f2(fSTd(x))}</td>`).join('')}</tr>
+        <td class="num">${f2(fSTprior)}</td>${d.map(x=>`<td class="num">${f2(fSTd(x))}</td>`).join('')}<td></td><td></td><td></td></tr>
        <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#666;border-top:1px solid #d3ddea">
         <td class="center" colspan="10" style="font-weight:600">계상근무공수 (÷인원 ${nf(iw)})</td><td class="num">${iw?f2(fSTtot/iw):'—'}</td><td></td>
-        <td class="num"></td>${d.map((x,xi)=>`<td class="num">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}</tr>
+        <td class="num"></td>${d.map((x,xi)=>`<td class="num">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}<td></td><td></td><td></td></tr>
        </tfoot>`;})():''}
       </table></div>`;
     const g=id=>c.querySelector(id);
