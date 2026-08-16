@@ -2902,62 +2902,90 @@ SCREEN.autoorder=(c)=>{
   };
   draw();
 };
-/* LG사급현황 (구매/자재) — LG 사급 실적(월별 유상사급 입고) 엑셀 업로드 + 조회. 사급가 업로드와 유사. nx.lg_sagub_actual */
+/* LG사급현황 (구매/자재) — LG 사급 실적(유상사급 입고) 엑셀 업로드 + 조회. nx.lg_sagub_actual.
+   ★업로드시 사업부(RAC/SAC) 선택 · 일자(Transaction Date) 저장 · 품번 클릭시 일자·단가별 개별기록(가격변동 확인). */
 SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
-  let st={by_ym:[],files:[],rows:[],ym:'',ymf:'',ymt:'',q:'',loading:false,msg:''};
-  const ym2m=y=>(y&&(''+y).length>=4)?('20'+(''+y).slice(0,2)+'-'+(''+y).slice(2,4)):'';  // 2607→2026-07 (month input용)
-  const m2ym=v=>(v&&(''+v).length>=7)?((''+v).slice(2,4)+(''+v).slice(5,7)):'';           // 2026-07→2607
-  const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.files=j.files||[];
-      if(!st.ymf&&st.by_ym.length){st.ymf=st.by_ym[0].ym;st.ymt=st.by_ym[st.by_ym.length-1].ym;}}catch(e){st.by_ym=[];st.files=[];}};
-  const loadList=async()=>{try{const qs=[];
-      if(st.ym)qs.push('ym='+encodeURIComponent(st.ym));                                    // 단월(월별집계 클릭) 우선
-      else{if(st.ymf)qs.push('ym_from='+encodeURIComponent(st.ymf));if(st.ymt)qs.push('ym_to='+encodeURIComponent(st.ymt));}  // 기간범위
-      if(st.q)qs.push('q='+encodeURIComponent(st.q));
+  let st={by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
+          ymf:'',ymt:'',biz:'',q:'',upBiz:'',loading:false,msg:''};
+  const ym2m=y=>(y&&(''+y).length>=4)?('20'+(''+y).slice(0,2)+'-'+(''+y).slice(2,4)):'';   // 2607→2026-07 (month input용)
+  const m2ym=v=>(v&&(''+v).length>=7)?((''+v).slice(2,4)+(''+v).slice(5,7)):'';            // 2026-07→2607
+  const ymdF=s=>{s=''+(s||'');return s.length>=6?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:'-';};  // 260703→26/07/03
+  const rng=()=>{const q=[];if(st.ymf)q.push('ym_from='+st.ymf);if(st.ymt)q.push('ym_to='+st.ymt);if(st.biz)q.push('biz='+encodeURIComponent(st.biz));return q;};
+  const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.by_biz=j.by_biz||[];st.files=j.files||[];
+      if(!st.ymf&&st.by_ym.length){st.ymf=st.by_ym[0].ym;st.ymt=st.by_ym[st.by_ym.length-1].ym;}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
+  const loadList=async()=>{try{const qs=rng().slice();if(st.q)qs.push('q='+encodeURIComponent(st.q));
       const j=await(await fetch(`${API}/api/lgsagub/list${qs.length?('?'+qs.join('&')):''}`)).json();st.rows=j.rows||[];}catch(e){st.rows=[];}};
+  const loadDetail=async(item)=>{st.sel=item;st.dloading=true;paintDetail();
+    try{const qs=['item='+encodeURIComponent(item)].concat(rng());
+      const j=await(await fetch(`${API}/api/lgsagub/detail?${qs.join('&')}`)).json();st.detail=j.rows||[];}catch(e){st.detail=[];}
+    st.dloading=false;paintDetail();};
   const reload=async()=>{st.loading=true;draw();await loadSum();await loadList();st.loading=false;draw();};
-  const upload=async(file)=>{if(!file)return;st.msg='업로드 중… '+file.name;draw();
+  const upload=async(file)=>{if(!file)return;
+    if(!st.upBiz){st.msg='⚠ 먼저 사업부(RAC/SAC)를 선택하세요.';draw();return;}
+    st.msg='업로드 중… '+file.name+' ('+st.upBiz+')';draw();
     try{const fd=new FormData();fd.append('file',file);
-      const r=await fetch(`${API}/api/lgsagub/upload`,{method:'POST',body:fd});const j=await r.json();
+      const r=await fetch(`${API}/api/lgsagub/upload?biz=${encodeURIComponent(st.upBiz)}`,{method:'POST',body:fd});const j=await r.json();
       if(!j.ok){st.msg='❌ '+(j.error||'실패')+(j.header_row?(' · 감지헤더: '+j.header_row.join(' | ')):'');}
       else{const det=Object.entries(j.detected||{}).map(([k,v])=>`${k}=${v}`).join(', ');
         const ym=(j.by_ym||[]).map(x=>`${x.ym}:${wonI(x.amt)}원(${x.rows})`).join('  ');
-        st.msg=`✅ ${file.name} · ${j.rows}행 · 감지[${det}] · 월별 ${ym}`;}
+        st.msg=`✅ [${st.upBiz}] ${file.name} · ${j.rows}행 · 감지[${det}] · ${ym}`;}
     }catch(e){st.msg='❌ 업로드 오류: '+e.message;}
-    await loadSum();await loadList();draw();};
+    st.sel='';st.detail=[];await loadSum();await loadList();draw();};
+  // ── 우측 상세(일자·단가별) 부분갱신 ──
+  const detailHtml=()=>{
+    if(!st.sel)return `<div class="empty" style="padding:24px;text-align:center;color:var(--muted)">← 왼쪽에서 품번을 클릭하면<br>일자·단가별 개별 기록이 표시됩니다</div>`;
+    if(st.dloading)return `<table class="tbl fit"><tbody>${spinRow(5)}</tbody></table>`;
+    const d=st.detail; let prevP=null;
+    const body=d.length?d.map(r=>{const chg=(prevP!==null&&Math.abs(r.price-prevP)>1e-6);prevP=r.price;
+        return `<tr${chg?' style="background:#fff6e0"':''}><td>${ymdF(r.ymd)}</td><td class="center">${esc(r.biz||'-')}</td>
+          <td class="num"${chg?' style="color:#c0392b;font-weight:700"':''}>${wonI(r.price)}${chg?' ▲':''}</td>
+          <td class="num">${wonI(r.qty)}</td><td class="num">${wonI(r.amt)}</td></tr>`;}).join('')
+      :`<tr><td colspan="5" class="empty">기록 없음</td></tr>`;
+    const tq=d.reduce((a,b)=>a+(b.qty||0),0),ta=d.reduce((a,b)=>a+(b.amt||0),0);
+    const prices=[...new Set(d.map(r=>r.price))];
+    return `<div style="font-weight:600;margin:2px 0 6px">📄 ${esc(st.sel)} <span style="color:var(--muted);font-weight:400;font-size:12px">${esc(st.selName)}</span>
+        ${prices.length>1?`<span style="color:#c0392b;font-size:12px">· 단가 ${prices.length}종 (변동 有)</span>`:`<span style="color:#1c7c3a;font-size:12px">· 단가 단일</span>`}</div>
+      <div class="grid-wrap" style="max-height:430px;overflow:auto"><table class="tbl fit"><thead><tr><th>일자</th><th>사업부</th><th class="num">단가</th><th class="num">수량</th><th class="num">금액</th></tr></thead>
+        <tbody>${body}</tbody>
+        <tfoot><tr class="grandtot"><td colspan="3" class="right">합계</td><td class="num">${wonI(tq)}</td><td class="num">${wonI(ta)}</td></tr></tfoot></table></div>`;
+  };
+  const paintDetail=()=>{const el=c.querySelector('#lg-detail');if(el)el.innerHTML=detailHtml();
+    c.querySelectorAll('.it-row').forEach(tr=>tr.style.background=(tr.dataset.item===st.sel?'#e3f0ff':''));};
   const draw=()=>{
-    const tot=st.by_ym.reduce((a,b)=>a+(b.amt||0),0), totq=st.by_ym.reduce((a,b)=>a+(b.qty||0),0);
+    const tot=st.rows.reduce((a,b)=>a+(b.amt||0),0), totq=st.rows.reduce((a,b)=>a+(b.qty||0),0);
+    const dataRange=st.by_ym.length?`${st.by_ym[0].ym}~${st.by_ym[st.by_ym.length-1].ym}`:'없음';
+    const bizOpts=`<option value="">전체</option>`+(st.by_biz.filter(b=>b.biz).map(b=>`<option value="${esc(b.biz)}"${st.biz===b.biz?' selected':''}>${esc(b.biz)}</option>`).join(''));
     c.innerHTML=`
-     <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">LG 사급 실적 업로드 · 월별 집계</span></div>
-     <div class="page-sub">LG 사급 실적(월별 유상사급 입고) 엑셀 업로드 → <code>nx.lg_sagub_actual</code>. 컬럼 자동감지(품번·수량·금액·단가·월). 실제 사급 입고를 넣어 예상/원가분석과 대사.</div>
-     <div id="dz" title="엑셀을 여기로 끌어다 놓거나 클릭" style="border:2px dashed #8fb4d6;border-radius:8px;padding:14px;background:#f4f9fe;color:#5a7597;text-align:center;cursor:pointer;margin-bottom:8px">
-        📥 LG 사급 실적 엑셀을 여기로 <b>드래그&드롭</b> 하거나 클릭 · <span style="color:#8aa0bd">1~7월 실적 파일(월별/사업부별 각각 올려도 됨)</span>
-        <input type="file" id="dz-f" accept=".xlsx,.xls" style="display:none"></div>
+     <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">LG 사급 실적(유상사급 입고) · 사업부·일자·단가</span></div>
+     <div class="page-sub">엑셀 업로드 → <code>nx.lg_sagub_actual</code>. 컬럼 자동감지(품번·수량·금액·단가·<b>일자</b>). <b>업로드 시 사업부(RAC/SAC) 선택</b> 필수. 보유 데이터: <b>${dataRange}</b>.</div>
+     <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:8px">
+       <div id="dz" title="엑셀을 여기로 끌어다 놓거나 클릭" style="flex:1;border:2px dashed #8fb4d6;border-radius:8px;padding:12px;background:#f4f9fe;color:#5a7597;text-align:center;cursor:pointer">
+          📥 LG 사급 실적 엑셀 <b>드래그&드롭</b> 또는 클릭 · <span style="color:#8aa0bd">Transfer History / lg_rac·lg_sac 파일</span>
+          <input type="file" id="dz-f" accept=".xlsx,.xls" style="display:none"></div>
+       <div style="flex:0 0 190px;border:1px solid #cfe0f5;border-radius:8px;padding:8px 10px;background:#fbfdff">
+          <div style="font-size:11px;color:#5a7597;margin-bottom:4px">업로드 사업부 <span style="color:#c0392b">*</span></div>
+          <label class="rl" style="margin-right:8px"><input type="radio" name="lg-upbiz" value="RAC"${st.upBiz==='RAC'?' checked':''}> RAC(DGZ)</label>
+          <label class="rl"><input type="radio" name="lg-upbiz" value="SAC"${st.upBiz==='SAC'?' checked':''}> SAC(DMZ)</label>
+          <div style="font-size:10px;color:#8aa0bd;margin-top:4px">선택 후 파일 올리기</div></div>
+     </div>
      ${st.msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px">${esc(st.msg)}</div>`:''}
-     <div class="summary-bar"><div class="s-item">업로드 월수 <b>${won(st.by_ym.length)}</b></div>
-        <div class="s-item">총 사급수량 <b>${wonI(totq)}</b></div>
-        <div class="s-item">총 사급금액 <b>${wonI(tot)} 원</b></div></div>
-     <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-       <div style="flex:0 0 340px">
-         <div style="font-weight:600;margin:6px 0">📅 월별 집계 <span style="font-size:11px;color:var(--muted)">(월 클릭=아래 목록 필터)</span></div>
-         <table class="tbl fit"><thead><tr><th>월</th><th class="num">품목수</th><th class="num">수량</th><th class="num">금액</th></tr></thead>
-         <tbody>${st.by_ym.length?st.by_ym.map(r=>`<tr class="ym-row" data-ym="${esc(r.ym)}" style="cursor:pointer;${st.ym===r.ym?'background:#e3f0ff':''}"><td><b>${esc(r.ym||'-')}</b></td><td class="num">${won(r.items)}</td><td class="num">${wonI(r.qty)}</td><td class="num">${wonI(r.amt)}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">업로드된 실적 없음</td></tr>`}
-           ${st.by_ym.length?`<tr class="grandtot"><td class="right">합계</td><td class="num">-</td><td class="num">${wonI(totq)}</td><td class="num">${wonI(tot)}</td></tr>`:''}</tbody></table>
-         ${st.files.length?`<div style="font-size:11px;color:var(--muted);margin-top:6px">파일: ${st.files.map(f=>`${esc(f.file)}(${esc(f.ym_from)}~${esc(f.ym_to)}, ${f.rows}행)`).join(' · ')}</div>`:''}
+     <div class="toolbar" style="margin-bottom:4px">
+       <label class="tl">기간</label>
+       <input class="inp" type="month" id="lg-ymf" value="${ym2m(st.ymf)}" style="width:135px"> ~
+       <input class="inp" type="month" id="lg-ymt" value="${ym2m(st.ymt)}" style="width:135px">
+       <label class="tl">사업부</label><select class="sel" id="lg-biz">${bizOpts}</select>
+       <input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
+       <button class="btn" id="lg-go">🔍 조회</button>
+       <div class="spacer"></div><span class="rowcount">품목 ${won(st.rows.length)} · 수량 ${wonI(totq)} · 금액 ${wonI(tot)}원</span>
+     </div>
+     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+       <div style="flex:1;min-width:440px">
+         <div style="font-weight:600;margin:2px 0 6px">📦 품목별 요약 <span style="font-size:11px;color:var(--muted)">(품번 클릭 → 오른쪽 일자·단가별 기록)</span></div>
+         <div class="grid-wrap" style="max-height:460px;overflow:auto"><table class="tbl fit"><thead><tr><th>품번</th><th class="cap">품명</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th><th class="num">건</th></tr></thead>
+         <tbody>${st.loading?spinRow(6):(st.rows.length?st.rows.map(r=>`<tr class="it-row" data-item="${esc(r.item)}" data-name="${esc(r.name)}" style="cursor:pointer;${r.item===st.sel?'background:#e3f0ff':''}"><td><b>${esc(r.item)}</b></td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num">${wonI(r.qty)}</td><td class="num">${r.pchg?`<span style="color:#c0392b" title="단가 변동(${wonI(r.pmin)}~${wonI(r.pmax)})">${wonI(r.pmin)}~${wonI(r.pmax)} ▲</span>`:wonI(r.pmax)}</td><td class="num">${wonI(r.amt)}</td><td class="num">${won(r.cnt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">데이터 없음</td></tr>`)}</tbody></table></div>
        </div>
-       <div style="flex:1;min-width:400px">
-         <div class="toolbar" style="margin-bottom:4px">
-           <label class="tl">기간</label>
-           <input class="inp" type="month" id="lg-ymf" value="${ym2m(st.ymf)}" style="width:135px"> ~
-           <input class="inp" type="month" id="lg-ymt" value="${ym2m(st.ymt)}" style="width:135px">
-           <input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
-           <button class="btn" id="lg-go">🔍 조회</button>
-           ${st.ym?`<span style="font-size:11px;color:#1c7c3a">단월 ${esc(st.ym)} 필터중</span>`:''}
-           <div class="spacer"></div><span class="rowcount">${won(st.rows.length)}건</span>
-         </div>
-         <div class="grid-wrap" style="max-height:460px;overflow:auto"><table class="tbl fit"><thead><tr><th>월</th><th>품번</th><th class="cap">품명</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th></tr></thead>
-         <tbody>${st.loading?spinRow(6):(st.rows.length?st.rows.map(r=>`<tr><td>${esc(r.ym)}</td><td><b>${esc(r.item)}</b></td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num">${wonI(r.qty)}</td><td class="num">${wonI(r.price)}</td><td class="num">${wonI(r.amt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">데이터 없음</td></tr>`)}</tbody></table></div>
-       </div>
+       <div style="flex:1;min-width:380px" id="lg-detail">${detailHtml()}</div>
      </div>`;
     const dz=c.querySelector('#dz'),fi=c.querySelector('#dz-f');
     dz.onclick=()=>fi.click();
@@ -2965,9 +2993,13 @@ SCREEN.lgsagub=(c)=>{
     dz.ondragleave=()=>{dz.style.background='#f4f9fe';dz.style.borderColor='#8fb4d6';};
     dz.ondrop=e=>{e.preventDefault();dz.style.background='#f4f9fe';dz.style.borderColor='#8fb4d6';if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0]);};
     fi.onchange=()=>{if(fi.files[0])upload(fi.files[0]);};
-    c.querySelectorAll('.ym-row').forEach(tr=>tr.onclick=()=>{st.ym=(st.ym===tr.dataset.ym?'':tr.dataset.ym);loadList().then(draw);});
-    c.querySelector('#lg-go').onclick=()=>{st.ym=c.querySelector('#lg-ym').value;st.q=c.querySelector('#lg-q').value;loadList().then(draw);};
-    c.querySelector('#lg-q').onkeyup=e=>{if(e.key==='Enter')c.querySelector('#lg-go').click();};
+    c.querySelectorAll('input[name=lg-upbiz]').forEach(rd=>rd.onchange=()=>{st.upBiz=rd.value;});
+    const go=()=>{st.ymf=m2ym(c.querySelector('#lg-ymf').value)||st.ymf;st.ymt=m2ym(c.querySelector('#lg-ymt').value)||st.ymt;
+      st.biz=c.querySelector('#lg-biz').value;st.q=c.querySelector('#lg-q').value;st.sel='';st.detail=[];loadList().then(draw);};
+    c.querySelector('#lg-go').onclick=go;
+    c.querySelector('#lg-q').onkeyup=e=>{if(e.key==='Enter')go();};
+    // ★품번 클릭 = 우측 상세만 부분갱신(전체 재렌더 X → 스크롤 유지)
+    c.querySelectorAll('.it-row').forEach(tr=>tr.onclick=()=>{st.selName=tr.dataset.name;loadDetail(tr.dataset.item);});
     attachResizers(c);
   };
   reload();
