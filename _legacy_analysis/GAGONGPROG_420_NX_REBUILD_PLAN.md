@@ -159,6 +159,12 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 남은 11 edge: proc/pr 공유풀 분배·future셀(NN02) 미세. 예 AJR30033101 3행 proc8+pr18 plan14@02 → 오라클8(proc만, pr 미적용) = **자재(pr)가 future셀 미적용?** / MJU66799405 proc153 공유분배. 410 설계예외(용접링)처럼 개별 규명, nx소스 배분때 함께 마무리.
 - ★결론: **420 nx재현 = 구조·base·plan·날짜·6풀소스·finish로직(98.4%) 전부 규명·검증**. 남은 실작업 = 엔드포인트 코드(410엔진 재사용)+11edge+색상+표시. 오라클 풀컬럼 대신 nx소스(전부 규명됨) 투입만 하면 됨.
 
+## ★코딩 착수 — nx 엔드포인트 작성 (2026-08-16)
+- **`/api/gagong/prog420nx`** 작성완료(gagong.py, 기존 SP-EXEC `/api/gagong/prog420` 유지·비교용). 410 엔진구조 이식: 날짜지평(근무일)·(assy,item)그레인·날짜피벗·6풀 nx소스·배분(출하90행별→가공창고20 mat공유 assy정렬→ASSY70행별→자재30 mat공유→fix행별→전표10 ready)·색상(_TAGCLR 90주황/70·30노랑/20민트#66ff99/10녹).
+- 검증(오라클 대조): **677행·Σplan 22800 diff0**. finish_NN: 출하 전체합산→**계획WO 스코프 수정**으로 64→**42 불일치(93.8%)**. Σfin 21495(오라클22244, 소폭과소).
+- 남은 42: ①용접링 plan 과다(base plan≠오라클, 3건 계열) ②proc/자재/fix 공유풀·BOM롤업 과소(AJR30027702/MJU66799002 오라클151 nx15 — fix롤업 or 자재 공유분배 미세) ③출하 스코프 일부 과소.
+- 다음: fix CTE·자재 공유분배·용접링 plan 규명 → finish diff0 → 색상 per-cell 검증 → 프론트 UI(레거시 컬럼·청록소계) → SP-EXEC 제거.
+
 ## 구현 착수 (2026-08-16~)
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
