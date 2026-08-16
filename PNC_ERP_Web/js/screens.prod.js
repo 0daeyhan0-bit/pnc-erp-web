@@ -1365,61 +1365,120 @@ SCREEN.prodplanstatus=(c)=>{
   load();
 };
 
-/* ===== 일반업무: 공수등록(근무/지원) — HR_M_WORK_INFO(라이브)↔nx.hr_work_info ===== */
+/* ===== 일반업무: 공수등록(근무/지원) — nx.hr_work_info(웹) ∪ HR_M_WORK_INFO 미러(읽기전용). 레거시 라이브 없음(컷오버) ===== */
+/*   인원정보호출: 파트별 등록작업자(PR_M_PROC_GAGONG_WORKER)를 공수 그리드에 자동채움(레거시 w_pr_worktime_010) */
 SCREEN.gongsu=(c)=>{
-  wrShell(c,{sid:'gongsu',
-    title:`⏱️ 공수등록 <span style="font-size:12px;color:var(--muted);font-weight:400">근무/지원 공수(등록·수정·삭제)</span>`,
-    sub:`부서·작업자별 근무/지원 공수. 🔴 라이브=<code>HR_M_WORK_INFO</code> · ✏️ 신규편집=<code>nx.hr_work_info</code> · 근태 0정상/1연차/2반차/3조퇴(소스 w_pr_worktime)`,
-    default:'live',
-    live:(body)=>qcRead(body,{
-      listEp:'/api/gongsu/list', dateLabel:'근무일', days:7,
-      filters:[{k:'gubun',label:'구분',width:60},{k:'dept',label:'부서',width:60},{k:'user',label:'작업자',width:90}],
-      buildQS:F=>({from_ymd:F.from,to_ymd:F.to,gubun:F.gubun||'',dept:F.dept||'',user:F.user||'',src:'legacy'}),
-      sum:d=>`공수합 <b>${_wnf(d.sum_hr)}</b>h`,
-      cols:[
-        {h:'구분',cls:'center',fmt:r=>r.gubun==='지원'?'<span class="bdg" style="background:#e7f0ff;color:#1c47a0">지원</span>':'<span class="bdg ok">근무</span>'},
-        {h:'근무일',cls:'center',fmt:r=>_wymd(r.work_ymd)},
-        {h:'부서',fmt:r=>esc(r.dept_nm||r.dept_code)},
-        {h:'작업자',k:'user_id'},
-        {h:'라인',k:'line',cls:'center'},
-        {h:'시작',k:'start_time',cls:'center'},{h:'종료',k:'end_time',cls:'center'},
-        {h:'근무h',cls:'num',fmt:r=>_wnf(r.work_hr)},
-        {h:'지원라인',k:'support_line',cls:'center'},
-        {h:'지원h',cls:'num',fmt:r=>r.support_hr?_wnf(r.support_hr):''},
-        {h:'근태',cls:'center',fmt:r=>r.hr_check_nm==='정상'?'':`<span style="color:#c0392b">${esc(r.hr_check_nm)}</span>`},
-        {h:'비고',k:'remarks',cap:1,title:'remarks'},
-      ]}),
-    cfg:{
-      listEp:'/api/gongsu/list', saveEp:'/api/gongsu/save', delEp:'/api/gongsu/delete', days:14,
-      dateLabel:'근무일', filters:[{k:'gubun',label:'구분',width:60},{k:'dept',label:'부서',width:60},{k:'user',label:'작업자',width:90}],
-      buildQS:F=>({from_ymd:F.from,to_ymd:F.to,gubun:F.gubun||'',dept:F.dept||'',user:F.user||'',src:'nx'}),
-      sum:d=>`공수합 <b>${_wnf(d.sum_hr)}</b>h`,
-      cols:[
-        {h:'구분',cls:'center',k:'gubun'},
-        {h:'근무일',cls:'center',fmt:r=>_wymd(r.work_ymd)},
-        {h:'부서',k:'dept_code',cls:'center'},
-        {h:'작업자',k:'user_id'},
-        {h:'라인',k:'line',cls:'center'},
-        {h:'시작',k:'start_time',cls:'center'},{h:'종료',k:'end_time',cls:'center'},
-        {h:'근무h',cls:'num',fmt:r=>_wnf(r.work_hr)},
-        {h:'지원h',cls:'num',fmt:r=>r.support_hr?_wnf(r.support_hr):''},
-        {h:'근태',cls:'center',k:'hr_check_nm'},
-        {h:'비고',k:'remarks',cap:1,title:'remarks'},
-      ],
-      form:[
-        {k:'gubun',label:'구분',type:'select',opts:[{v:'근무',t:'근무'},{v:'지원',t:'지원'}],width:80},
-        {k:'work_ymd',label:'근무일',type:'date',required:1,width:140},
-        {k:'dept_code',label:'부서',width:70},{k:'user_id',label:'작업자',required:1,width:100},
-        {k:'line',label:'라인',width:70},{k:'start_time',label:'시작',width:60},{k:'end_time',label:'종료',width:60},
-        {k:'work_hr',label:'근무시간',type:'num',width:80},
-        {k:'support_line',label:'지원라인',width:70},{k:'support_hr',label:'지원시간',type:'num',width:80},
-        {k:'hr_check',label:'근태',type:'select',opts:[{v:'0',t:'정상'},{v:'1',t:'연차'},{v:'2',t:'반차'},{v:'3',t:'조퇴'}],width:90},
-        {k:'remarks',label:'비고',width:200},
-      ],
-      newRow:F=>({id:null,gubun:'근무',work_ymd:F.to,dept_code:'',user_id:'',line:'',start_time:'0800',end_time:'1700',work_hr:8,support_line:'',support_hr:'',hr_check:'0',remarks:''}),
-      fromRow:r=>({id:r.ID,gubun:r.gubun,work_ymd:_y6(r.work_ymd),dept_code:r.dept_code,user_id:r.user_id,line:r.line,start_time:r.start_time,end_time:r.end_time,work_hr:r.work_hr,support_line:r.support_line,support_hr:r.support_hr,hr_check:r.hr_check,remarks:r.remarks}),
-      toBody:f=>({id:f.id,gubun:f.gubun,work_ymd:f.work_ymd,dept_code:f.dept_code,user_id:f.user_id,line:f.line,start_time:f.start_time,end_time:f.end_time,work_hr:f.work_hr,support_line:f.support_line,support_hr:f.support_hr,hr_check:f.hr_check,remarks:f.remarks,uuser:'웹사용자'}),
+  const API=API_BASE;
+  const canEd=()=>(typeof PERM!=='undefined')?PERM.canEdit('gongsu'):true;
+  const uname=()=>(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자');
+  const HRCHK=[['0','정상'],['1','연차'],['2','반차'],['3','조퇴']];
+  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  const T=new Date();
+  let body=null;
+  let F={from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T),gubun:'',dept:'',user:''};
+  let data={rows:[],cnt:0,sum_hr:0}, loading=false, msg='';
+  let parts=[];                                   // 투입파트 드롭다운
+  let entry={open:false,ymd:iso(T),part:'',gubun:'근무',rows:[],loading:false};   // 인원정보호출 입력
+  const loadParts=async()=>{try{const r=await fetch(`${API}/api/partmaster/list`);parts=(await r.json()).rows||[];}catch(e){parts=[];}};
+  const load=async()=>{loading=true;draw();
+    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,gubun:F.gubun,dept:F.dept,user:F.user});
+    try{const r=await fetch(`${API}/api/gongsu/list?${qs}`);data=await r.json();msg='';}
+    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010';data={rows:[],cnt:0,sum_hr:0};}
+    loading=false;draw();};
+  const callPersons=async()=>{if(!entry.part){alert('투입파트를 선택하세요');return;}
+    entry.loading=true;draw();
+    try{const qs=new URLSearchParams({part:entry.part,ymd:entry.ymd,gubun:entry.gubun});
+      const r=await fetch(`${API}/api/gongsu/persons?${qs}`);const j=await r.json();
+      entry.rows=(j.rows||[]).map(x=>({...x,_sel:!x.exists}));}   // 이미 등록된 사람은 기본 미선택
+    catch(e){alert('인원정보호출 실패: '+e);entry.rows=[];}
+    entry.loading=false;draw();};
+  const saveBulk=async()=>{const sel=entry.rows.filter(r=>r._sel);
+    if(!sel.length){alert('저장할 인원을 선택하세요');return;}
+    const rows=sel.map(r=>({gubun:entry.gubun,work_ymd:entry.ymd,dept_code:r.dept_code,user_id:r.user_id,line:r.line,
+      start_time:r.start_time,end_time:r.end_time,work_hr:r.work_hr,hr_check:r.hr_check,remarks:r.remarks||''}));
+    try{const r=await fetch(`${API}/api/gongsu/save_bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,uuser:uname()})});
+      const j=await r.json();if(j.ok){entry.open=false;entry.rows=[];msg=`✅ 공수 ${j.ins}건 등록`;F.from=entry.ymd;F.to=entry.ymd;await load();}else alert('저장 실패: '+(j.detail||''));}
+    catch(e){alert('저장 오류: '+e);}};
+  const delRow=async(id)=>{if(!confirm('이 공수 기록을 삭제할까요?'))return;
+    try{const r=await fetch(`${API}/api/gongsu/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id]})});
+      const j=await r.json();if(j.ok){msg='🗑 삭제 완료';await load();}else alert('삭제 실패');}
+    catch(e){alert('삭제 오류: '+e);}};
+  const entryPanel=()=>{const ed=canEd();
+    return `<div style="background:#f4f8ff;border:1px solid #cddcf3;border-radius:8px;padding:10px;margin:6px 0">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <b style="color:#1c47a0">👥 인원정보호출</b>
+        <label class="tl">기준일</label><input class="inp" type="date" id="gs-eymd" value="${entry.ymd}">
+        <label class="tl">구분</label><select class="inp" id="gs-egubun" style="width:80px">${['근무','지원'].map(g=>`<option${entry.gubun===g?' selected':''}>${g}</option>`).join('')}</select>
+        <label class="tl">투입파트</label>
+        <select class="inp" id="gs-epart" style="min-width:200px"><option value="">파트 선택</option>${parts.map(p=>`<option value="${esc(p.code)}"${entry.part===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('')}</select>
+        <button class="btn" id="gs-call" style="background:#1c47a0;color:#fff">📥 인원정보호출</button>
+        ${entry.rows.length?`<div style="flex:1"></div><span style="color:#5a6b82">선택 ${entry.rows.filter(r=>r._sel).length}/${entry.rows.length}명</span>
+        ${ed?`<button class="btn" id="gs-bulksave" style="background:#1c7c3a;color:#fff">💾 선택 일괄저장</button>`:''}`:''}
+        <button class="btn ghost" id="gs-eclose">닫기</button>
+      </div>
+      ${entry.loading?'<div class="page-sub">불러오는 중…</div>':(entry.rows.length?`
+      <div class="grid-wrap" style="max-height:340px;overflow:auto;margin-top:8px;background:#fff;border:1px solid #d3ddeb;border-radius:6px">
+       <table class="tbl fit" style="font-size:12px"><thead><tr>
+        <th class="center" style="width:34px"><input type="checkbox" id="gs-all" ${entry.rows.every(r=>r._sel)?'checked':''}></th>
+        <th style="text-align:left">작업자</th><th class="center">시작</th><th class="center">종료</th><th class="num">근무h</th><th class="center">근태</th><th style="text-align:left">비고</th><th class="center">상태</th></tr></thead>
+       <tbody>${entry.rows.map((r,i)=>`<tr style="${r.exists?'background:#fff7f2':''}">
+        <td class="center"><input type="checkbox" class="gs-sel" data-i="${i}" ${r._sel?'checked':''}></td>
+        <td style="text-align:left"><b>${esc(r.user_id)}</b>${r.real?'':' <span style="color:#c8a15a;font-size:11px">비실작업</span>'}</td>
+        <td class="center"><input class="inp gs-f" data-i="${i}" data-k="start_time" value="${esc(r.start_time)}" style="width:50px;text-align:center;font-size:12px;padding:1px 3px"></td>
+        <td class="center"><input class="inp gs-f" data-i="${i}" data-k="end_time" value="${esc(r.end_time)}" style="width:50px;text-align:center;font-size:12px;padding:1px 3px"></td>
+        <td class="num"><input class="inp gs-f" data-i="${i}" data-k="work_hr" value="${r.work_hr}" style="width:44px;text-align:right;font-size:12px;padding:1px 3px"></td>
+        <td class="center"><select class="inp gs-f" data-i="${i}" data-k="hr_check" style="font-size:12px;padding:1px">${HRCHK.map(([v,t])=>`<option value="${v}"${r.hr_check===v?' selected':''}>${t}</option>`).join('')}</select></td>
+        <td style="text-align:left"><input class="inp gs-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}" style="width:100%;font-size:12px;padding:1px 3px"></td>
+        <td class="center">${r.exists?'<span style="color:#c0392b;font-size:11px">이미등록</span>':'<span style="color:#1c7c3a;font-size:11px">신규</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="page-sub" style="margin-top:6px;color:#8aa0bd">파트를 선택하고 📥 인원정보호출을 누르면 등록 작업자가 채워집니다.</div>')}
+    </div>`;};
+  const draw=()=>{if(!body)return;const ed=canEd();
+    body.innerHTML=`
+     <div class="toolbar">
+       <label class="tl">근무일</label><input class="inp" type="date" id="gs-from" value="${F.from}"> ~ <input class="inp" type="date" id="gs-to" value="${F.to}">
+       <label class="tl">구분</label><input class="inp" id="gs-gubun" value="${esc(F.gubun)}" style="width:60px">
+       <label class="tl">부서</label><input class="inp" id="gs-dept" value="${esc(F.dept)}" style="width:70px">
+       <label class="tl">작업자</label><input class="inp" id="gs-user" value="${esc(F.user)}" style="width:90px">
+       <button class="btn" id="gs-search">🔍 조회</button>
+       ${ed?`<button class="btn" id="gs-newentry" style="background:#1c7c3a;color:#fff">👥 인원정보호출 등록</button>`:''}
+       <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 공수합 <b>${_wnf(data.sum_hr)}</b>h</span>
+     </div>
+     ${msg?`<div class="page-sub" style="color:${msg.includes('실패')||msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(msg)}</div>`:''}
+     ${entry.open?entryPanel():''}
+     <div class="grid-wrap" style="max-height:calc(100vh - ${entry.open?'560':'320'}px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl" style="font-size:12px"><thead><tr>
+       <th class="center">구분</th><th class="center">근무일</th><th>부서</th><th>작업자</th><th class="center">라인</th>
+       <th class="center">시작</th><th class="center">종료</th><th class="num">근무h</th><th class="center">지원h</th><th class="center">근태</th><th>비고</th><th class="center">출처</th>${ed?'<th></th>':''}</tr></thead>
+      <tbody>${loading?spinRow(ed?13:12):((data.rows&&data.rows.length)?data.rows.map(r=>`<tr>
+        <td class="center">${r.gubun==='지원'?'<span class="bdg" style="background:#e7f0ff;color:#1c47a0">지원</span>':'<span class="bdg ok">근무</span>'}</td>
+        <td class="center">${esc(_wymd(r.work_ymd))}</td><td>${esc(r.dept_nm||r.dept_code)}</td><td>${esc(r.user_id)}</td><td class="center">${esc(r.line)}</td>
+        <td class="center">${esc(r.start_time)}</td><td class="center">${esc(r.end_time)}</td><td class="num">${_wnf(r.work_hr)}</td>
+        <td class="center">${r.support_hr?_wnf(r.support_hr):''}</td>
+        <td class="center">${r.hr_check_nm==='정상'?'':`<span style="color:#c0392b">${esc(r.hr_check_nm)}</span>`}</td>
+        <td class="bcap" title="${esc(r.remarks)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td>
+        <td class="center">${r.editable?'<span style="color:#1c7c3a;font-size:11px">웹</span>':'<span style="color:#8aa0bd;font-size:11px">📁이력</span>'}</td>
+        ${ed?`<td class="center">${r.editable&&r.ID?`<button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b">🗑</button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?13:12}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
+    const g=id=>body.querySelector(id);
+    g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
+    ['#gs-gubun','#gs-dept','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
+    const nb=g('#gs-newentry');if(nb)nb.onclick=()=>{entry.open=!entry.open;draw();};
+    body.querySelectorAll('.gs-del').forEach(b=>b.onclick=()=>delRow(+b.dataset.id));
+    // 인원정보호출 패널 와이어
+    if(entry.open){
+      const ey=g('#gs-eymd');if(ey)ey.onchange=()=>{entry.ymd=ey.value;};
+      const eg=g('#gs-egubun');if(eg)eg.onchange=()=>{entry.gubun=eg.value;};
+      const ep=g('#gs-epart');if(ep)ep.onchange=()=>{entry.part=ep.value;};
+      const cb=g('#gs-call');if(cb)cb.onclick=callPersons;
+      const cl=g('#gs-eclose');if(cl)cl.onclick=()=>{entry.open=false;draw();};
+      const bs=g('#gs-bulksave');if(bs)bs.onclick=saveBulk;
+      const all=g('#gs-all');if(all)all.onchange=()=>{entry.rows.forEach(r=>r._sel=all.checked);draw();};
+      body.querySelectorAll('.gs-sel').forEach(x=>x.onchange=()=>{entry.rows[+x.dataset.i]._sel=x.checked;draw();});
+      body.querySelectorAll('.gs-f').forEach(inp=>inp.oninput=()=>{entry.rows[+inp.dataset.i][inp.dataset.k]=inp.value;});
     }
+  };
+  wrShell(c,{sid:'gongsu', nxOnly:true,
+    title:`⏱️ 공수등록 <span style="font-size:12px;color:var(--muted);font-weight:400">근무/지원 공수(등록·수정·삭제)</span>`,
+    sub:`부서·작업자별 근무/지원 공수. 조회=<code>nx.hr_work_info</code>(웹) ∪ <code>HR_M_WORK_INFO</code> 미러(📁읽기전용 이력). 👥 인원정보호출=파트별 등록작업자 자동채움.`,
+    cfg:{sid:'gongsu', _custom:(bd)=>{body=bd;(async()=>{await loadParts();await load();})();}}
   });
 };
 
