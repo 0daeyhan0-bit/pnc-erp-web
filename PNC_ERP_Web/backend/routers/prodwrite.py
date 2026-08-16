@@ -185,8 +185,11 @@ def stockmaint_delete(payload: dict = Body(...)):
 @router.get("/api/procreg/list")
 def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str = Query(""),
                  line: str = Query(""), item: str = Query(""), wo: str = Query("")):
+    # 공정별 생산실적 조회 = 웹(nx.proc_result, editable) ∪ 미러이력(nx.PR_T_PROD_DTL, 읽기전용). 레거시 라이브 없음(컷오버).
     nx = _nx(); cur = nx.cursor()
     try:
+        rows = []
+        # --- 웹행 (nx.proc_result, 편집가능) ---
         w = ["1=1"]; p = []
         if from_ymd: w.append("d.PROD_YMD>=?"); p.append(_d6(from_ymd))
         if to_ymd:   w.append("d.PROD_YMD<=?"); p.append(_d6(to_ymd))
@@ -202,10 +205,32 @@ def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str 
             FROM nx.proc_result d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC, d.ID DESC""", *p)
         cols = [dd[0] for dd in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            r["PROD_QTY"] = float(r["PROD_QTY"] or 0); r["sw"] = str(r["sw"] if r["sw"] is not None else "")
-            r["INSERT_DATETIME"] = str(r["INSERT_DATETIME"] or "")[:19]
+        for r in cur.fetchall():
+            d = dict(zip(cols, r)); d["src"] = "web"; d["editable"] = 1
+            d["PROD_QTY"] = float(d["PROD_QTY"] or 0); d["sw"] = str(d["sw"] if d["sw"] is not None else "")
+            d["INSERT_DATETIME"] = str(d["INSERT_DATETIME"] or "")[:19]
+            rows.append(d)
+        # --- 미러 이력행 (nx.PR_T_PROD_DTL, 읽기전용) ---
+        wm = ["1=1"]; pm = []
+        if from_ymd: wm.append("d.PROD_YMD>=?"); pm.append(_d6(from_ymd))
+        if to_ymd:   wm.append("d.PROD_YMD<=?"); pm.append(_d6(to_ymd))
+        if swork.strip(): wm.append("d.S_WORK_CODE=?"); pm.append(int(swork.strip()))
+        if line.strip():  wm.append("d.LINE_NO=?"); pm.append(line.strip())
+        if item.strip():  wm.append("d.ITEM_CODE LIKE ?"); pm.append(f"%{item.strip()}%")
+        if wo.strip():    wm.append("d.WORK_ORDER LIKE ?"); pm.append(f"%{wo.strip()}%")
+        cur.execute(f"""SELECT TOP 3000 d.PROD_YMD, d.PROD_HMS, ISNULL(d.WORK_ORDER,'') wo,
+              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.ITEM_DESC,'') nm,
+              ISNULL(d.LINE_NO,'') line, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, d.PROD_QTY,
+              ISNULL(d.WORK_CODE,'') work_code, ISNULL(d.FINISH_FLAG,'') fin, ISNULL(d.PROD_USER_ID,'') usr
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            WHERE {' AND '.join(wm)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC""", *pm)
+        cols = [dd[0] for dd in cur.description]
+        for r in cur.fetchall():
+            d = dict(zip(cols, r)); d["src"] = "legacy"; d["editable"] = 0; d["ID"] = None
+            d["PROD_QTY"] = float(d["PROD_QTY"] or 0); d["sw"] = str(d["sw"] if d["sw"] is not None else "")
+            d["INSERT_DATETIME"] = f'{str(d["PROD_YMD"] or "")} {str(d["PROD_HMS"] or "")}'.strip()
+            rows.append(d)
+        rows.sort(key=lambda r: (str(r["PROD_YMD"]), str(r["PROD_HMS"]), 1 if r["src"] == "web" else 0), reverse=True)
         return {"rows": rows, "cnt": len(rows), "sum_qty": sum(r["PROD_QTY"] for r in rows)}
     finally:
         nx.close()
@@ -267,8 +292,11 @@ def procreg_delete(payload: dict = Body(...)):
 @router.get("/api/matissue/list")
 def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str = Query(""),
                   frompart: str = Query(""), topart: str = Query("")):
+    # 자재출고(창고이동) 조회 = 웹(nx.stock_ledger MAT/MV, editable) ∪ 미러이력(PR_T_STOCK_MAINT_MAT 창고이동, 읽기전용). 레거시 라이브 없음.
     nx = _nx(); cur = nx.cursor()
-    try:  # 대표행 = − 출고행(MAINT_QTY<0): FROM=GAGONG_PROC_CODE, TO=TO_GAGONG_PROC_CODE
+    try:
+        rows = []
+        # --- 웹행 (nx.stock_ledger MAT/MV −출고행, 편집가능) ---
         w = ["l.STOCK_POINT='MAT'", "l.MAINT_TAG='MV'", "l.MAINT_QTY<0", "l.MAINT_GROUP_SEQ IS NOT NULL"]; p = []
         if from_ymd: w.append("l.MAINT_YMD>=?"); p.append(_d6(from_ymd))
         if to_ymd:   w.append("l.MAINT_YMD<=?"); p.append(_d6(to_ymd))
@@ -283,11 +311,31 @@ def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str =
             FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_GROUP_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            r["ID"] = f'{r["ISSUE_YMD"]}-{r["MAINT_GROUP_SEQ"]}'
-            r["ISSUE_QTY"] = float(r["ISSUE_QTY"] or 0)
-            r["INSERT_DATETIME"] = str(r["INSERT_DATETIME"] or "")[:19]
+        for r in cur.fetchall():
+            d = dict(zip(cols, r)); d["src"] = "web"; d["editable"] = 1
+            d["ID"] = f'{d["ISSUE_YMD"]}-{d["MAINT_GROUP_SEQ"]}'
+            d["ISSUE_QTY"] = float(d["ISSUE_QTY"] or 0); d["INSERT_DATETIME"] = str(d["INSERT_DATETIME"] or "")[:19]
+            rows.append(d)
+        # --- 미러 이력행 (PR_T_STOCK_MAINT_MAT 창고이동=FROM_PART_CODE≠PART_CODE, 읽기전용) ---
+        wm = ["ISNULL(m.FROM_PART_CODE,'')>''", "m.FROM_PART_CODE<>m.PART_CODE"]; pm = []
+        if from_ymd: wm.append("m.MAINT_YMD>=?"); pm.append(_d6(from_ymd))
+        if to_ymd:   wm.append("m.MAINT_YMD<=?"); pm.append(_d6(to_ymd))
+        if mat.strip():  wm.append("(m.MAT_CODE LIKE ? OR m.ITEM_CODE LIKE ?)"); pm += [f"%{mat.strip()}%"]*2
+        if frompart.strip(): wm.append("m.FROM_PART_CODE=?"); pm.append(frompart.strip())
+        if topart.strip():   wm.append("m.PART_CODE=?"); pm.append(topart.strip())
+        cur.execute(f"""SELECT TOP 3000 m.MAINT_YMD ISSUE_YMD, m.MAINT_SEQ,
+              ISNULL(m.FROM_PART_CODE,'') frompart, ISNULL(m.PART_CODE,'') topart,
+              ISNULL(m.WORK_CODE,'') work_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+              ISNULL(m.ITEM_CODE,'') item_code, ABS(m.MAINT_QTY) ISSUE_QTY, ISNULL(m.REMARKS,'') remarks,
+              ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
+            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=m.MAT_CODE
+            WHERE {' AND '.join(wm)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *pm)
+        cols = [d[0] for d in cur.description]
+        for r in cur.fetchall():
+            d = dict(zip(cols, r)); d["src"] = "legacy"; d["editable"] = 0; d["ID"] = None
+            d["ISSUE_QTY"] = float(d["ISSUE_QTY"] or 0); d["INSERT_DATETIME"] = str(d["INSERT_DATETIME"] or "")[:19]
+            rows.append(d)
+        rows.sort(key=lambda r: (str(r["ISSUE_YMD"]), 1 if r["src"] == "web" else 0), reverse=True)
         return {"rows": rows, "cnt": len(rows), "sum_qty": sum(r["ISSUE_QTY"] for r in rows)}
     finally:
         nx.close()

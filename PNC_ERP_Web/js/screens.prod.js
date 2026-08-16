@@ -690,9 +690,9 @@ SCREEN.partstockadj=(c)=>{
 
 /* ===== 생산 ⑧: 생산자재출고관리 (w_pr_stock_150) — PR_T_STOCK_MAINT_MAT 창고이동/출고 ===== */
 SCREEN.partissue=(c)=>{
-  wrShell(c,{sid:'partissue',
+  wrShell(c,{sid:'partissue', nxOnly:true,
     title:`📤 생산자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재출고(창고간 이동, 등록·수정·삭제)</span>`,
-    sub:`파트 창고간 이동(FROM파트→TO파트, net-0). 🔴 라이브=<code>PR_T_STOCK_MAINT_MAT</code> · ✏️ 신규편집=단일원장 <code>nx.stock_ledger</code>(MV)`,
+    sub:`파트 창고간 이동(FROM파트→TO파트, net-0). 조회=📁미러이력(<code>PR_T_STOCK_MAINT_MAT</code> 창고이동)∪웹편집(<code>nx.stock_ledger</code> MV). 레거시 라이브 없음(컷오버).`,
     default:'edit',
     live:(body)=>wrLiveLedger(body,'issue'),
     cfg:{
@@ -1582,9 +1582,9 @@ SCREEN.procresult=(c)=>{
     };
     load();
   };
-  wrShell(c,{sid:'procresult',
+  wrShell(c,{sid:'procresult', nxOnly:true,
     title:`✅ 공정별 생산실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">공정별 생산실적(등록·수정·삭제)</span>`,
-    sub:`공정별 생산실적(제번·품목·공정·수량). 🔴 라이브=<code>PR_T_PROD_DTL</code> · ✏️ 신규편집=<code>nx.proc_result</code>`,
+    sub:`공정별 생산실적(제번·품목·공정·수량). 조회=📁미러이력(<code>PR_T_PROD_DTL</code>)∪웹편집(<code>nx.proc_result</code>). 레거시 라이브 없음(컷오버).`,
     default:'edit',
     live:wrLiveProc,
     cfg:{
