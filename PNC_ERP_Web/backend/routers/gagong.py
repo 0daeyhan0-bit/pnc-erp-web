@@ -289,7 +289,8 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
             _y = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _dt.timedelta(days=30)
             d6t = _y.strftime('%y%m%d')
         wcp = (wc.strip() or 'P2')
-        S = "PARTNER_ERP_TEST3.nx"
+        # ★계획소스는 라이브 직독(PARTNER_ERP.dbo) — 레거시 SP가 라이브를 읽고, nx 계획미러는 이 조인분이 stale(6222 vs 9521행)이라 diff0 위해 라이브 필수. (nx 계획테이블 동기화는 컷오버 과제)
+        S = "PARTNER_ERP.dbo"
         # 날짜 캘린더: dates[0]=기준일(=col1 당일이전누적 plan_ymd<=기준일), 이후 plan_ymd=기준일+1..
         da = _dt.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6]))
         db = _dt.date(2000+int(d6t[:2]), int(d6t[2:4]), int(d6t[4:6]))
@@ -377,18 +378,18 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         # 소스: 라이브 직독(SA_T_ITEM_STOCK·PU_T_READY_STOCK·SA_T_SALE_DTL + 중간재고롤업 kitting캐시). 도번(=ITEM_CODE) 단위 합산.
         assystk = {}; rstock = {}; saled = {}; midstk = {}; fixstk = {}
         try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): assystk[str(rr[0]).strip()] = float(rr[1] or 0)
         except Exception: pass
         try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE")
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE")
             for rr in cur.fetchall(): rstock[str(rr[0]).strip()] = float(rr[1] or 0)
         except Exception: pass
         try:  # 출하는 ★계획 WO로 제한(키팅과 동일, 무관 WO 출하 과다합산 방지). 키=(wo,swo,item)
             _pwos = list({wo for g in rows for (wo, sw) in g["_wos"]})
             for i in range(0, len(_pwos), 900):
                 ck = _pwos[i:i+900]; ph = ",".join("?" * len(ck))
-                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): saled[(str(rr[0]).strip(), str(rr[1] or '').strip(), str(rr[2]).strip())] = float(rr[3] or 0)
         except Exception: pass
         try:  # 중간공정 자재/생산재고 롤업 = kitting_grid 캐시 재사용, 없으면 자체계산(전역·필터무관, 색tag70용)

@@ -251,3 +251,12 @@ git 15148f7(수정 전) baseline 대비 OLD/NEW 실측대조: finish 14→4, per
 
 **★완료(finish)·색 = SP가 안 줌 (fin_NN 전부 '0', color_NN 전부 흰색16777215) = 클라이언트(PB) 계산.** 웹 자체 _alloc4(출하→ASSY재고→준비) 방식이 원리 맞음. SP 최종 SELECT의 풀컬럼(참고): sale_qty=r61.sale_qty−r62.move_qty, assy_stock_qty=r3(sa_t_item_stock)+r3_mat(PU_T_MAT_STOCK_WH Z99990)+r3_set(pu_t_set_mat_stock in_cust=2228), input_req_qty=r5. over_plan_qty=pr_t_plan_dtl⋈pr_m_model_bom plan_ymd>to. lot_qty=r1(plan_dtl_daily/plan_input_daily 직전work_ymd).
 **잔여: AJR77144201 plan 10 vs 11(±1, UNION브랜치 중복). 완료풀 정합(r3_mat/r3_set 미반영시 차이 가능) 추후.** 다음=이 재현을 plan4w 백엔드에 이식→UI.
+
+
+## ★4주간 가공계획현황(plan4w) 계획+일자 diff0 구현완료 (2026-08-16)
+gagong.py plan4w의 SQL_4WK(과소 27689/323도번) → **5브랜치 TEMP_PLAN + CTE_BOM P2필터 이식**. 검증(웹 엔드포인트 vs 레거시 SP EXEC):
+- **351/351 도번(SP에만0·웹에만0), 일자셀 불일치 0, plan총계 불일치 1(AJR77144201 10 vs 11)** = 사실상 diff0. Σmatq 43991 vs SP 43990.
+- 구현: temp테이블 대신 Python 머티리얼라이즈(RO커서서 #temp 세션 유실) + VALUES seed CTE_BOM. 값=math.ceil(plan×use×rate/100) 행별합. 일자=PLAN_YMD 버킷(col0=<=기준일 누적).
+- ★**계획소스=라이브(PARTNER_ERP.dbo) 직독 필수**: nx 계획미러 이 조인분 stale(tp행 nx6222 vs live9521·도번632 vs676). 레거시 SP도 라이브 읽음. pr_m_mat도 nx=0행이라 라이브 조회. → nx 계획테이블 동기화는 컷오버 과제.
+- 잔여: AJR77144201 ±1(브랜치② 2행 중복). 완료(finish)=SP 미제공(fin_NN='0'·color 흰색=클라계산)→웹 _alloc4 유지(출하90→ASSY재고70→준비50).
+- 다음: 완료 풀도 라이브 정합·UI 확인 → 거래명세서420.
