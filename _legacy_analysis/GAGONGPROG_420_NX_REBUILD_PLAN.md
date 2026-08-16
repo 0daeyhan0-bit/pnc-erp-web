@@ -208,3 +208,27 @@ git 15148f7(수정 전) baseline 대비 OLD/NEW 실측대조: finish 14→4, per
 - [B] MJU62128603 plan 반감: 오라클15 vs nx30.
 - [C 잔여] AJR30027706/MJU66799405 finish ±4: 전표(가공전표 INDI_CUTTING)↔ready↔완료 경계와 얽힌 3-way 공유풀 미세. proc153+jae4 중 jae4가 오라클은 706으로, nx는 702로 감(702가 proc로 full 안 되어 jae까지 씀).
 - **색 153**: 혼합풀 셀의 per-cell 풀일치(finish 수량 맞아도 그 셀을 어느 풀이 채웠는지 갈림) = 별개 대과제.
+
+
+## ★[A][B] 그레인 + 마지막 finish edge 해결 → 계획·완료 diff0 (2026-08-16)
+
+**[A]용접링·[B]MJU62128603 = dedup/반감 아님, 그레인 문제.** 오라클 raw=680행(677 유니크 (assy,mat) + 3개만 SUB변형 upper별 2행). nx가 GROUP BY (assy,item)으로 합쳐 3행 소실 → 계획 과다(용접링 100 vs 30 등).
+- 3 케이스: AJR73123101/MJU62128603 [15,15] · AJR74984305/MJU64671101+용접링 [70,30] · /MJU64671102+용접링 [10,40]. upper = AJR...-S5-1 / -S5-2 (SUB변형).
+- **해결 = base 그레인에 UPPER_ITEM_CODE 추가**: SELECT upper(MAX 아님) + GROUP BY (assy, item, upper, part_plan_ymd), key=(assy,upper,item). nx (assy,upper,item)=680 = 오라클 정확일치(다른 행 안 쪼개짐 실측검증: (assy,item)=677 / (assy,upper,item)=680 / (assy,pitem,item)=678).
+
+**마지막 finish edge (AJR30027706) = fix(도번고정) 우선순위.** 오라클 풀실측: 702=assyst1+fix_pr150(=full, proc/jae 안 씀) · self=proc10 · 706=fix5+jae4. 즉 fix가 proc/jae보다 먼저라 자력충당 행이 공유풀을 안 뺏음.
+- **해결 = fix를 proc/jae 앞으로 이동.**
+
+**★풀 적용순서 최종 (오라클 diff0):**
+출하90 → [자력풀] ASSY재고70 · 도번고정fix30 → [공유풀] 가공창고proc20 · 자재jae30 → 전표10(ready).
+원리 = 자력충당(assyst·fix) 가능행이 공유풀(proc·jae)을 선점하지 않게. 공유풀 소진순서 = 커서순(plan_ymd→phm→ohm→assy), proc만 bl0(원소재) 우선 유지.
+
+**검증법 = 멀티셋 per (assy,mat) (collapse 금지!):** (assy,mat)당 여러 오라클 행을 리스트로 모아 plan 정렬 후 zip 비교. 단순 dict collapse는 3 SUB변형 행을 가림(초기 오판 원인).
+- 결과: 행수 680/680 · 계획 0 · 완료(per-cell) 0 · 색 132(153→개선). **행총계 OLD 17 → NEW 3** (git 15148f7 OLD/NEW 실측, 회귀 0).
+
+**남은 3 (사전존재·내 수정 무관·C와 다른 근본 = sale 과다크레딧):**
+- AJR74423601/MJU63648201 (o44 nx45) · AJR74844301/MJU64094901 (o8 nx12) · AJR74844302/MJU64094902 (o1 nx5).
+- 오라클 sale_qty 큼(167 등)이나 finish는 assyst+소량만 인정. nx는 sale×use로 full 채움 → 과다. OLD baseline에도 동일 존재.
+- 미생산 nx65 vs o68 차이의 원인. 다음 과제 = sale 스코핑 규명(WO/파트별 소진·캡 여부).
+
+**색 132 = 별개 대과제:** 혼합풀 셀의 per-cell 풀일치(finish 수량 맞아도 어느 풀이 그 셀을 채웠나로 색 갈림).

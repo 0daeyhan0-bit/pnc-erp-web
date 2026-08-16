@@ -424,7 +424,7 @@ SCREEN.basemaster=(c)=>{
 /* ===== 파트 마스터 (w_pr_master_280) — PR_M_PROC_GAGONG 라이브 CRUD. 생산효율=키팅 회수율 ===== */
 SCREEN.partmaster=(c)=>{
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',loading:false,msg:'',edit:null,sel:'',workers:[],wload:false};
+  const st={rows:[],cnt:0,q:'',loading:false,msg:'',edit:null,sel:'',workers:[],wload:false,wedit:null};
   const GUBUN=[['W','자재창고'],['P','생산파트'],['V','생산창고'],['Q','가공파트']];
   const loadWorkers=async(part)=>{st.sel=part;st.wload=true;st.workers=[];draw();   // 파트별 작업자(레거시 w_pr_master_350 하단)
     try{const r=await fetch(`${API}/api/partmaster/workers?part=${encodeURIComponent(part)}`);st.workers=(await r.json()).rows||[];}
@@ -441,6 +441,15 @@ SCREEN.partmaster=(c)=>{
   const del=async(code)=>{if(!confirm(`파트 [${code}] 삭제할까요?`))return;
     try{const r=await fetch(`${API}/api/partmaster/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
       const j=await r.json();if(j.ok){st.msg='🗑 삭제 완료';await load();}else alert('삭제 실패: '+(j.detail||''));}
+    catch(e){alert('삭제 오류: '+e);}};
+  // 파트별 작업자 CRUD (레거시 w_pr_master_350 하단그리드 추가/수정/삭제)
+  const wsave=async()=>{const w=st.wedit;const worker=(''+(w.worker||'')).trim();if(!worker){alert('작업자명 필수');return;}
+    try{const r=await fetch(`${API}/api/partmaster/worker_save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({part:st.sel,worker,orig:w.orig||'',real:!!w.real,user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})});
+      const j=await r.json();if(j.ok){st.wedit=null;await loadWorkers(st.sel);}else alert('저장 실패: '+(j.detail||''));}
+    catch(e){alert('저장 오류: '+e);}};
+  const wdel=async(worker)=>{if(!confirm(`작업자 [${worker}] 삭제할까요?`))return;
+    try{const r=await fetch(`${API}/api/partmaster/worker_delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({part:st.sel,worker})});
+      const j=await r.json();if(j.ok){await loadWorkers(st.sel);}else alert('삭제 실패: '+(j.detail||''));}
     catch(e){alert('삭제 오류: '+e);}};
   const draw=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('partmaster'):true;
@@ -465,15 +474,19 @@ SCREEN.partmaster=(c)=>{
         <td class="center">${esc(r.grp)}</td><td class="num">${r.rack}</td>
         <td>${esc(r.uid)}</td><td style="color:#8aa0bd;font-size:11px">${esc(r.udt)}</td>
         ${ed?`<td class="center" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px">✎</button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="11" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
-      <div style="flex:1 1 0;min-width:360px;max-width:520px">
-       <div style="font-weight:700;font-size:13px;color:#33507d;padding:4px 2px">👷 파트별 작업자 ${st.sel?`— <b style="color:#1c47a0">${esc(st.sel)}</b> <span style="color:#8aa0bd;font-weight:400">${st.wload?'…':st.workers.length+'명'}</span>`:'<span style="color:#8aa0bd;font-weight:400">— 좌측 파트 클릭</span>'}</div>
+      <div style="flex:1 1 0;min-width:360px;max-width:560px">
+       <div style="display:flex;align-items:center;gap:8px;padding:4px 2px">
+        <div style="font-weight:700;font-size:13px;color:#33507d">👷 파트별 작업자 ${st.sel?`— <b style="color:#1c47a0">${esc(st.sel)}</b> <span style="color:#8aa0bd;font-weight:400">${st.wload?'…':st.workers.length+'명'}</span>`:'<span style="color:#8aa0bd;font-weight:400">— 좌측 파트 클릭</span>'}</div>
+        <div style="flex:1"></div>
+        ${ed&&st.sel?`<button class="btn" id="pm-wnew" style="background:#1c7c3a;color:#fff;padding:2px 9px;font-size:12px">➕ 작업자</button>`:''}
+       </div>
        <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-        <table class="tbl fit" style="font-size:12px"><thead><tr><th style="text-align:left">작업자</th><th class="center">실작업자</th><th>등록자</th><th>등록시각</th><th>수정자</th><th>수정시각</th></tr></thead>
-        <tbody>${st.wload?spinRow(6):(st.workers.length?st.workers.map(w=>`<tr><td style="text-align:left"><b>${esc(w.worker)}</b></td><td class="center">${w.real?'<span style="color:#1c7c3a;font-weight:700">✔</span>':'<span style="color:#c8d0dc">—</span>'}</td><td>${esc(w.ins_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.ins_dt)}</td><td>${esc(w.upd_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.upd_dt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">${st.sel?'등록된 작업자 없음':'좌측에서 파트를 선택하세요'}</td></tr>`)}</tbody></table></div>
+        <table class="tbl fit" style="font-size:12px"><thead><tr><th style="text-align:left">작업자</th><th class="center">실작업자</th><th>등록자</th><th>등록시각</th><th>수정자</th><th>수정시각</th>${ed?'<th></th>':''}</tr></thead>
+        <tbody>${st.wload?spinRow(ed?7:6):(st.workers.length?st.workers.map(w=>`<tr><td style="text-align:left"><b>${esc(w.worker)}</b></td><td class="center">${w.real?'<span style="color:#1c7c3a;font-weight:700">✔</span>':'<span style="color:#c8d0dc">—</span>'}</td><td>${esc(w.ins_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.ins_dt)}</td><td>${esc(w.upd_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.upd_dt)}</td>${ed?`<td class="center" style="white-space:nowrap"><button class="btn ghost" data-we="${esc(w.worker)}" style="padding:1px 6px">✎</button> <button class="btn ghost" data-wd="${esc(w.worker)}" style="padding:1px 6px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?7:6}" class="empty">${st.sel?'등록된 작업자 없음':'좌측에서 파트를 선택하세요'}</td></tr>`)}</tbody></table></div>
       </div>
      </div>
      <style>.pm-row:hover{background:#f2f7ff}.pm-row.pm-sel{background:#e7effe!important;outline:2px solid #9cc0f0;outline-offset:-2px}</style>
-     ${st.edit?editModal():''}`;
+     ${st.edit?editModal():''}${st.wedit?workerModal():''}`;
     const g=id=>c.querySelector(id);
     g('#pm-go').onclick=()=>{st.q=g('#pm-q').value;load();};
     g('#pm-q').onkeyup=e=>{if(e.key==='Enter'){st.q=e.target.value;load();}};
@@ -482,7 +495,11 @@ SCREEN.partmaster=(c)=>{
       const nb=g('#pm-new');if(nb)nb.onclick=()=>{st.edit={code:'',nm:'',gubun:'P',wc:'',wh:'Z99990',sortkey:0,rate:100,grp:'',ip:'',rack:0,_new:true};draw();};
       c.querySelectorAll('[data-e]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();const row=st.rows.find(x=>x.code===b.dataset.e);st.edit={...row,_new:false};draw();});
       c.querySelectorAll('[data-d]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();del(b.dataset.d);});
-      wireModal();
+      // 작업자 CRUD 버튼
+      const wnb=g('#pm-wnew');if(wnb)wnb.onclick=()=>{st.wedit={worker:'',orig:'',real:true,_new:true};draw();};
+      c.querySelectorAll('[data-we]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();const w=st.workers.find(x=>x.worker===b.dataset.we);st.wedit={worker:w.worker,orig:w.worker,real:w.real,_new:false};draw();});
+      c.querySelectorAll('[data-wd]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();wdel(b.dataset.wd);});
+      wireModal(); wireWorkerModal();
     }
     attachResizers(c);
   };
@@ -504,6 +521,22 @@ SCREEN.partmaster=(c)=>{
     ['code','nm','gubun','wc','wh','sortkey','rate','grp','ip','rack'].forEach(k=>{const el=g('#pm-f-'+k);if(el)el.oninput=()=>{st.edit[k]=el.value;};});
     g('#pm-cancel').onclick=()=>{st.edit=null;draw();};
     g('#pm-save').onclick=save;};
+  const workerModal=()=>{const w=st.wedit;
+    return `<div style="position:fixed;inset:0;background:rgba(20,40,80,.4);display:flex;align-items:center;justify-content:center;z-index:900">
+     <div style="background:#fff;border-radius:12px;padding:20px;width:360px;box-shadow:0 20px 60px rgba(10,25,55,.4)">
+       <div style="font-weight:700;font-size:16px;margin-bottom:4px">${w._new?'➕ 작업자 추가':'✎ 작업자 수정'}</div>
+       <div style="font-size:12px;color:#8aa0bd;margin-bottom:10px">파트 <b style="color:#1c47a0">${esc(st.sel)}</b></div>
+       <label class="tl" style="display:block;margin:6px 0 2px">작업자명 *</label>
+       <input class="inp" id="pm-w-worker" value="${esc(w.worker||'')}" maxlength="30" autocomplete="off" style="width:100%;box-sizing:border-box">
+       <label style="display:flex;align-items:center;gap:6px;margin:12px 0 2px;cursor:pointer;font-size:13px"><input type="checkbox" id="pm-w-real" ${w.real?'checked':''}> 실작업자</label>
+       <div style="margin-top:14px;text-align:right"><button class="btn ghost" id="pm-wcancel">취소</button> <button class="btn" id="pm-wsave" style="background:#1c47a0;color:#fff">💾 저장</button></div>
+     </div></div>`;};
+  const wireWorkerModal=()=>{if(!st.wedit)return;const g=id=>c.querySelector(id);
+    const wi=g('#pm-w-worker');if(wi)wi.oninput=()=>{st.wedit.worker=wi.value;};
+    const ri=g('#pm-w-real');if(ri)ri.onchange=()=>{st.wedit.real=ri.checked;};
+    g('#pm-wcancel').onclick=()=>{st.wedit=null;draw();};
+    g('#pm-wsave').onclick=wsave;
+    if(wi)wi.focus();};
   load();
 };
 
