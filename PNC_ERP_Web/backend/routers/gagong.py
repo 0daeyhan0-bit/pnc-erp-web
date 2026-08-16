@@ -90,13 +90,22 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         for a, b in cur.fetchall(): jae[a] = float(b or 0)
         cur.execute(f"SELECT MAT_CODE, SUM(plan_qty) FROM {S}.PR_T_INDI_CUTTING WHERE PROD_FLAG='0' GROUP BY MAT_CODE")
         for a, b in cur.fetchall(): ing[a] = float(b or 0)
-        # 출하: 계획 WO(GC='Q'·WORK_CODE=wc)로 스코프 → sa_t_sale_dtl(wo,swo,item=assy,ff='0') SUM by assy (레거시 SP: 행별 (wo,swo,assy) sale → WO집계)
-        cur.execute(f"""SELECT p.ASSY_ITEM_CODE, SUM(s.SALE_QTY)
-              FROM (SELECT DISTINCT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, ASSY_ITEM_CODE
-                    FROM {S}.PR_T_PLAN_PART_COPY WITH(NOLOCK) WHERE GC_GUBUN='Q' AND WORK_CODE=? AND part_plan_ymd<=?) p
-              JOIN {S}.SA_T_SALE_DTL s WITH(NOLOCK) ON s.WORK_ORDER=p.WORK_ORDER AND ISNULL(s.SPLIT_WORK_ORDER,'')=p.swo AND s.ITEM_CODE=p.ASSY_ITEM_CODE AND s.FINISH_FLAG='0'
-              GROUP BY p.ASSY_ITEM_CODE""", wcc, d6b)
-        for a, b in cur.fetchall(): sale[a] = float(b or 0)
+        # 출하: 레거시 SP는 (wo,swo) 커서행별 sale을 그 행 계획만큼만 인정(min). WO별 sale이 그 WO 계획 초과분은 다른 WO/파트로 넘어가지 않음.
+        # → sale기여[(assy,item)] = Σ_wo MIN(wo_sale×use, wo_plan). (assy단위 총합 후 전체계획에 뿌리면 특정 WO의 대량출하가 무관 WO계획까지 채워 과다충당됨: AJR74844301 등)
+        cur.execute(f"""SELECT assy, item, SUM(CASE WHEN wo_sale*useq < wo_plan THEN wo_sale*useq ELSE wo_plan END) cap
+              FROM (SELECT p.ASSY_ITEM_CODE assy, p.ITEM_CODE item, p.WORK_ORDER wo, ISNULL(p.SPLIT_WORK_ORDER,'') swo,
+                           SUM(CAST(p.PART_PLAN_QTY AS float)) wo_plan, MAX(CAST(ISNULL(p.USE_QTY,1) AS float)) useq,
+                           ISNULL(MAX(sd.saleqty),0) wo_sale
+                      FROM {S}.PR_T_PLAN_PART_COPY p WITH(NOLOCK)
+                      LEFT JOIN (SELECT WORK_ORDER wo, ISNULL(SPLIT_WORK_ORDER,'') swo, ITEM_CODE, SUM(SALE_QTY) saleqty
+                                 FROM {S}.SA_T_SALE_DTL WITH(NOLOCK) WHERE FINISH_FLAG='0'
+                                 GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE) sd
+                        ON sd.wo=p.WORK_ORDER AND sd.swo=ISNULL(p.SPLIT_WORK_ORDER,'') AND sd.ITEM_CODE=p.ASSY_ITEM_CODE
+                     WHERE p.GC_GUBUN='Q' AND p.WORK_CODE=? AND p.part_plan_ymd<=?
+                     GROUP BY p.ASSY_ITEM_CODE, p.ITEM_CODE, p.WORK_ORDER, ISNULL(p.SPLIT_WORK_ORDER,'')) t
+              GROUP BY assy, item""", wcc, d6b)
+        sale2 = {}
+        for a, it, cap in cur.fetchall(): sale2[(a, it)] = float(cap or 0)
         # fix(도번고정): 재귀 BOM 롤업 → 레거시 SP는 (UPPER_ITEM_CODE, MAT_CODE) 키로 매핑(부모재고를 하위에 use_qty로 전개)
         try:
             cur.execute(f"IF OBJECT_ID('tempdb..#tmsg') IS NOT NULL DROP TABLE #tmsg")
@@ -145,7 +154,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         # ★공유풀 소진순서 = 레거시 SP 커서순서(plan_ymd→part_output_hm→output_hm→wo). assy순 아님(같은 원소재를 여러 assy가 나눠쓸 때 이른 계획이 먼저 가져감).
         _cur = lambda x: (x["plan_ymd"], x["phm"], x["ohm"], x["assy"])
         # ★풀 적용순서 = 출하 → 자력풀(ASSY재고70·도번고정fix30) → 공유풀(가공창고proc20·자재jae30) → 전표. 자력충당 가능한 행이 공유풀을 선점하지 않게(오라클 실측: 702=assyst1+fix150로 full, proc/jae는 self·706으로 남음).
-        for g in rows: alloc(g, sale.get(g["assy"], 0.0) * g["use"], 90)      # 출하90 행별
+        for g in rows: alloc(g, sale2.get((g["assy"], g["item"]), 0.0), 90)   # 출하90 행별(WO별 계획캡 합산, use 포함済)
         for g in rows: alloc(g, assyst.get(g["assy"], 0.0) * g["use"], 70)    # ASSY재고70 행별(자력)
         shared(lambda g: (g["upper"], g["item"]), fixm, 30, sortkey=_cur)     # 도번고정fix30 (upper,item)별 롤업(자력, proc/jae보다 먼저)
         shared(lambda g: g["item"], proc, 20, sortkey=lambda x: (x["bl"], x["plan_ymd"], x["phm"], x["ohm"], x["assy"]))  # 가공창고20 mat공유(원소재 우선→커서순)
@@ -180,7 +189,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         "gpcnm": gpn.get(g["gpc"], g["gpc"]), "wcc": wcc, "wcd": _wcd,
                         "st": round(ist.get(g["item"], 0.0) * plan / 3600.0, 2),
                         "use": g["use"], "plan_qty": plan, "finish": fin,
-                        "sale": round(sale.get(g["assy"], 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
+                        "sale": round(sale2.get((g["assy"], g["item"]), 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
                         "assyst": round(assyst.get(g["assy"], 0.0), 0), "prs": round(jae.get(g["item"], 0.0), 0),
                         "fixst": round(fixm.get((g["upper"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
                         "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"], 0) if pc else 0,
