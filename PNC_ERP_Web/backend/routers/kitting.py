@@ -134,7 +134,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                                CONVERT(int, ISNULL(SUM(s.stock_qty),0)), CONVERT(int, ISNULL(SUM(s.pr_stock_qty),0)), 0
                           FROM ( SELECT mat_code, 0 stock_qty, STOCK_QTY pr_stock_qty FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK)
                                  UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2')
                                  UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP.dbo.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
                          GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
                         UNION ALL
@@ -583,7 +583,7 @@ def _kit_cell_guard(item, wo, swo, gpc, ymd, qty, assy):
     try:
         cellm = _d6(ymd) if ymd else ''
         try:
-            cur.execute("SELECT ISNULL(MAX(stock_yymm),'0000') FROM PARTNER_ERP_TEST3.nx.pu_t_month_ready_stock")
+            cur.execute("SELECT ISNULL(MAX(stock_yymm),'0000') FROM PARTNER_ERP.dbo.pu_t_month_ready_stock")
             mclose = (cur.fetchone()[0] or '0000')
         except Exception:
             mclose = '0000'
