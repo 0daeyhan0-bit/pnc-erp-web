@@ -182,3 +182,29 @@ c.execute("SET NOCOUNT ON; EXEC PARTNER_ERP.dbo.[SP_PR_가공생산진척관리_
 - 방식: plan_part410(kitting.py)에 **mode 파라미터**('P'파트별/'Q'가공) 추가 → base필터·풀세트·정렬축만 분기, 엔진(날짜/충당/ST/색상/정렬/캐시/소계) 100% 공용.
 - /api/gagong/prog420 = nx 재현본으로 교체(기존 SP-EXEC은 오라클 비교용 유지 후 초록불시 제거).
 - 검증: pncind EXEC `_260602` per-cell diff0 (680/68/22800/22244).
+
+
+## ★C(공유풀 finish 순서) 해결 — finish 14→4, 색 198→153 (2026-08-16)
+git 15148f7(수정 전) baseline 대비 OLD/NEW 실측대조: finish 14→4, per-cell색 198→153 (둘 다 개선, 회귀 0).
+
+**원인 = 공유풀 소진순서가 assy순이라 레거시와 달랐음.** 두 원리 수정:
+
+1. **공유풀 소진순서 = 레거시 SP 커서순서**(plan_ymd → part_output_hm → output_hm → assy). assy 오름차순 아님.
+   - 같은 원소재(mat_code)를 여러 assy가 나눠쓸 때, **계획일(plan_ymd) 이른 쪽이 재고를 먼저 선점**.
+   - 코드: `_cur = lambda x:(x["plan_ymd"], x["phm"], x["ohm"], x["assy"])` → jae(자재30)/fix(도번고정30) sortkey로 적용.
+   - proc(가공창고20)은 `(bl, plan_ymd, phm, ohm, assy)` — bl0(원소재) 우선 유지 + 커서 tie-break.
+   - 증거: MJU66954305 (가공창고8+자재18=26) — AJR30087002(plan_ymd260817,plan18)이 AJR30033101(260819,plan14)보다 먼저 → 30087002=18(full), 30033101=8. assy순이면 30033101 먼저라 뒤바뀜.
+
+2. **풀 적용순서 = 출하90 → ASSY재고70 → 가공창고proc20 → 자재30 → 도번고정 → 전표10**.
+   - ★proc가 assyst보다 **먼저가 아님**. 자력충당(ASSY재고 보유) assy가 공유 proc풀을 선점하면, 재고 없는 형제 assy가 굶음.
+   - 증거: AJR74385603(ASSY재고15로 자력)·AJR74385607(재고0, proc10 공유). ASSY재고 먼저 → 603=재고15 full, proc10은 607로 → 603=15·607=10 (오라클 일치). proc 먼저면 603이 proc선점 → 607=0.
+
+**색 매핑 확정(순수풀 셀 실측):** proc로만 채운 셀 → 오라클 민트 #66ff99 (77건), assyst로만 → 노랑 #ffff00 (42건). 기본 매핑(90주황/70·30노랑/20민트/10녹) 정확.
+
+**검증법:** pncind EXEC `_260602` → color_00/01/02(BGR long → hex) + finish_qty_00/01/02 per-cell 대조. NN00=당일이전(part_plan_ymd<base)·01=기준일·02=익일.
+
+**남은 4:**
+- [A] 용접링 중복행 plan: AJR74984305/MJU64671101+용접링 오라클30 vs nx100, /MJU64671102+용접링 오라클40 vs nx50. base(PR_T_PLAN_PART_COPY)에 use_qty 다른 2행(30+70 등)으로 분할 → 레거시는 한 행만 채택. dedup 규칙이 암호화 "(중략)"부라 미확정.
+- [B] MJU62128603 plan 반감: 오라클15 vs nx30.
+- [C 잔여] AJR30027706/MJU66799405 finish ±4: 전표(가공전표 INDI_CUTTING)↔ready↔완료 경계와 얽힌 3-way 공유풀 미세. proc153+jae4 중 jae4가 오라클은 706으로, nx는 702로 감(702가 proc로 full 안 되어 jae까지 씀).
+- **색 153**: 혼합풀 셀의 per-cell 풀일치(finish 수량 맞아도 그 셀을 어느 풀이 채웠는지 갈림) = 별개 대과제.
