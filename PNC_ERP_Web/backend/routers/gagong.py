@@ -50,21 +50,22 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         w = ["a.GC_GUBUN='Q'", "a.WORK_CODE=?", "a.part_plan_ymd<=?"]; p = [wcc, d6b]
         if item.strip(): w.append("a.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if jado.strip(): w.append("a.ITEM_CODE LIKE ?"); p.append(f"%{jado.strip()}%")
+        # ★그레인 = (assy, UPPER_ITEM_CODE, item). 오라클 raw 680행과 정확일치(=677유니크+3 SUB변형 upper별 분리행). (assy,item)으로 합치면 -S5-1/-S5-2가 뭉쳐 계획 과다.
         cur.execute(f"""SELECT a.ASSY_ITEM_CODE assy, a.ITEM_CODE item, a.PART_PLAN_YMD ymd,
-              MAX(ISNULL(a.UPPER_ITEM_CODE,'')) upper, MIN(a.BOM_LEVEL) bl, MAX(ISNULL(a.GAGONG_PROC_CODE,'')) gpc,
+              ISNULL(a.UPPER_ITEM_CODE,'') upper, MIN(a.BOM_LEVEL) bl, MAX(ISNULL(a.GAGONG_PROC_CODE,'')) gpc,
               MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq, MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) phm, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.WORK_ORDER,'')) wo,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM {S}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
             WHERE {' AND '.join(w)}
-            GROUP BY a.ASSY_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD""", *p)
+            GROUP BY a.ASSY_ITEM_CODE, a.ITEM_CODE, ISNULL(a.UPPER_ITEM_CODE,''), a.PART_PLAN_YMD""", *p)
         cols = [d[0] for d in cur.description]
         keyed = {}
         for rr in cur.fetchall():
             r = dict(zip(cols, rr)); ymd = r["ymd"]
             bucket = 'P' if ymd < d6a else (ymd if ymd in dates else None)
             if bucket is None: continue
-            k = (r["assy"], r["item"]); g = keyed.get(k)
+            k = (r["assy"], r["upper"], r["item"]); g = keyed.get(k)
             if not g:
                 g = {"assy": r["assy"], "item": r["item"], "upper": r["upper"] or '', "bl": int(r["bl"] or 0), "gpc": r["gpc"] or '',
                      "use": float(r["useq"] or 1), "plan_ymd": r["plan_ymd"] or '', "phm": r["phm"] or '',
