@@ -135,6 +135,46 @@ def partmaster_worker_save(payload: dict = Body(...)):
     finally:
         cn.close()
 
+@router.post("/api/partmaster/worker_save_all")
+def partmaster_worker_save_all(payload: dict = Body(...)):
+    """파트별 작업자 리스트 통째 저장 (레거시 w_pr_master_350 하단그리드 일괄편집).
+       payload={part, rows:[{worker, real}], user}. 새 리스트에 없는 기존작업자=삭제, 변경분만 upsert."""
+    part = (payload.get('part') or '').strip()
+    rows = payload.get('rows') or []
+    user = (payload.get('user') or '웹')[:20]
+    if not part: return {"ok": False, "detail": "파트 선택 필수"}
+    seen = set(); norm = []
+    for r in rows:
+        w = (r.get('worker') or '').strip()
+        if not w:          return {"ok": False, "detail": "빈 작업자명이 있습니다"}
+        if len(w) > 30:    return {"ok": False, "detail": f"작업자명 30자 초과: {w}"}
+        if w in seen:      return {"ok": False, "detail": f"중복 작업자명: {w}"}
+        seen.add(w); norm.append((w, '1' if r.get('real') else '0'))
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("SELECT WORKER_CODE, ISNULL(WORK_FLAG,'') FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=?", part)
+        existing = {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall()}
+        newset = {w for w, _ in norm}
+        ndel = nins = nupd = 0
+        for w in (set(existing) - newset):
+            cur.execute("DELETE FROM nx.PR_M_PROC_GAGONG_WORKER WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?", part, w); ndel += 1
+        for w, flag in norm:
+            if w in existing:
+                if existing[w] != flag:
+                    cur.execute("""UPDATE nx.PR_M_PROC_GAGONG_WORKER SET WORK_FLAG=?,
+                          UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
+                        WHERE GAGONG_PROC_CODE=? AND WORKER_CODE=?""", flag, user, part, w); nupd += 1
+            else:
+                cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG_WORKER(GAGONG_PROC_CODE, WORKER_CODE, WORK_FLAG,
+                      INSERT_USER_ID, INSERT_DATETIME, INSERT_WINDOW, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
+                    VALUES(?,?,?,?,getdate(),'web_partmaster',?,getdate(),'web_partmaster')""", part, w, flag, user, user); nins += 1
+        cn.commit()
+        return {"ok": True, "ins": nins, "upd": nupd, "del": ndel, "cnt": len(norm)}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        cn.close()
+
 @router.post("/api/partmaster/worker_delete")
 def partmaster_worker_delete(payload: dict = Body(...)):
     """파트별 작업자 삭제. PK=(GAGONG_PROC_CODE, WORKER_CODE)."""

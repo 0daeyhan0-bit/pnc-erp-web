@@ -424,9 +424,9 @@ SCREEN.basemaster=(c)=>{
 /* ===== 파트 마스터 (w_pr_master_280) — PR_M_PROC_GAGONG 라이브 CRUD. 생산효율=키팅 회수율 ===== */
 SCREEN.partmaster=(c)=>{
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',loading:false,msg:'',edit:null,sel:'',workers:[],wload:false,wedit:null};
+  const st={rows:[],cnt:0,q:'',loading:false,msg:'',edit:null,sel:'',workers:[],wload:false,wmode:'view',wdraft:null};
   const GUBUN=[['W','자재창고'],['P','생산파트'],['V','생산창고'],['Q','가공파트']];
-  const loadWorkers=async(part)=>{st.sel=part;st.wload=true;st.workers=[];draw();   // 파트별 작업자(레거시 w_pr_master_350 하단)
+  const loadWorkers=async(part)=>{st.sel=part;st.wload=true;st.workers=[];st.wmode='view';st.wdraft=null;draw();   // 파트별 작업자(레거시 w_pr_master_350 하단)
     try{const r=await fetch(`${API}/api/partmaster/workers?part=${encodeURIComponent(part)}`);st.workers=(await r.json()).rows||[];}
     catch(e){st.workers=[];}st.wload=false;draw();};
   const load=async()=>{st.loading=true;draw();
@@ -442,15 +442,19 @@ SCREEN.partmaster=(c)=>{
     try{const r=await fetch(`${API}/api/partmaster/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
       const j=await r.json();if(j.ok){st.msg='🗑 삭제 완료';await load();}else alert('삭제 실패: '+(j.detail||''));}
     catch(e){alert('삭제 오류: '+e);}};
-  // 파트별 작업자 CRUD (레거시 w_pr_master_350 하단그리드 추가/수정/삭제)
-  const wsave=async()=>{const w=st.wedit;const worker=(''+(w.worker||'')).trim();if(!worker){alert('작업자명 필수');return;}
-    try{const r=await fetch(`${API}/api/partmaster/worker_save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({part:st.sel,worker,orig:w.orig||'',real:!!w.real,user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})});
-      const j=await r.json();if(j.ok){st.wedit=null;await loadWorkers(st.sel);}else alert('저장 실패: '+(j.detail||''));}
+  // 파트별 작업자 리스트 통째 편집 (레거시 w_pr_master_350 하단그리드)
+  const wEnter=(addBlank)=>{st.wdraft=st.workers.map(w=>({worker:w.worker,real:w.real}));if(addBlank)st.wdraft.push({worker:'',real:true});st.wmode='edit';draw();};
+  const wCancel=()=>{st.wmode='view';st.wdraft=null;draw();};
+  const wAddRow=()=>{st.wdraft.push({worker:'',real:true});draw();};
+  const wRemoveRow=(i)=>{st.wdraft.splice(i,1);draw();};
+  const wToggleReal=(i)=>{st.wdraft[i].real=!st.wdraft[i].real;draw();};
+  const wSaveAll=async()=>{
+    const rows=st.wdraft.map(w=>({worker:(''+(w.worker||'')).trim(),real:!!w.real}));
+    if(rows.some(r=>!r.worker)){alert('빈 작업자명이 있습니다');return;}
+    const names=rows.map(r=>r.worker);if(new Set(names).size!==names.length){alert('중복 작업자명이 있습니다');return;}
+    try{const r=await fetch(`${API}/api/partmaster/worker_save_all`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({part:st.sel,rows,user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})});
+      const j=await r.json();if(j.ok){st.wmode='view';st.wdraft=null;st.msg=`✅ 작업자 저장(추가 ${j.ins}·수정 ${j.upd}·삭제 ${j.del})`;await loadWorkers(st.sel);}else alert('저장 실패: '+(j.detail||''));}
     catch(e){alert('저장 오류: '+e);}};
-  const wdel=async(worker)=>{if(!confirm(`작업자 [${worker}] 삭제할까요?`))return;
-    try{const r=await fetch(`${API}/api/partmaster/worker_delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({part:st.sel,worker})});
-      const j=await r.json();if(j.ok){await loadWorkers(st.sel);}else alert('삭제 실패: '+(j.detail||''));}
-    catch(e){alert('삭제 오류: '+e);}};
   const draw=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('partmaster'):true;
     c.innerHTML=`
@@ -464,7 +468,7 @@ SCREEN.partmaster=(c)=>{
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
-      <div class="grid-wrap" style="flex:1.7 1 0;min-width:0;max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <div class="grid-wrap" style="flex:1 1 0;min-width:0;max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
        <table class="tbl fit" style="font-size:12px"><thead><tr>
         <th>작업처</th><th>구분</th><th>파트</th><th>연동창고</th><th class="num">정렬</th><th class="num">생산효율</th><th>파트그룹</th><th class="num">RACK</th><th>최종작업자</th><th>최종시각</th>${ed?'<th></th>':''}</tr></thead>
        <tbody>${st.loading?spinRow(11):(st.rows.length?st.rows.map(r=>`<tr class="pm-row${st.sel===r.code?' pm-sel':''}" data-sel="${esc(r.code)}" style="cursor:pointer">
