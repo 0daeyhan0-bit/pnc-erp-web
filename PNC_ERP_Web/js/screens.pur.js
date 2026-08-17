@@ -2970,7 +2970,7 @@ SCREEN.lgsagub=(c)=>{
   const sh=(k,label,cls)=>`<th data-sk="${k}"${cls?' class="'+cls+'"':''} style="cursor:pointer" title="더블클릭 정렬">${label}${st.sort.k===k?(st.sort.dir<0?' ▼':' ▲'):''}</th>`;
 
   // ═══════════ 리시빙 비교 탭 ═══════════
-  const TABS=[['status','📊 사급입고 현황'],['settle','📋 원단위 관리'],['compare','⚖ 리시빙비교(원소재)'],['parts','🔩 리시빙비교(부품)']];
+  const TABS=[['status','📊 사급입고 현황'],['compare','⚖ 리시빙비교(원소재)'],['parts','🔩 리시빙비교(부품)']];
   const tabBar=()=>`<div style="display:flex;gap:3px;margin:4px 0 10px;border-bottom:2px solid #dbe5f2;flex-wrap:wrap">
     ${TABS.map(([k,l])=>`<div class="lg-tab" data-tab="${k}" style="padding:7px 15px;cursor:pointer;font-weight:600;font-size:13px;border:1px solid #dbe5f2;border-bottom:none;border-radius:7px 7px 0 0;margin-bottom:-2px;${st.tab===k?'background:#fff;color:#1c47a0;border-bottom:2px solid #fff':'background:#eef3fa;color:#5a7597'}">${l}</div>`).join('')}
    </div>`;
@@ -3229,6 +3229,84 @@ SCREEN.lgsagub=(c)=>{
     attachResizers(c);
   };
   reload();
+};
+
+/* ===== 동정산 원단위 관리 — 원소재 마스터의 탭으로 호출됨(SCREEN.dongunit(host)). nx.lg_settle_unit ===== */
+SCREEN.dongunit=(host)=>{
+  const API=API_BASE;
+  const ym2m=y=>{y=(''+(y||'')).replace(/\D/g,'');return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
+  const m2ym=v=>{const s=(''+(v||'')).replace(/\D/g,'');return s.length>=6?s.slice(2,6):(s.length>=4?s.slice(0,4):'');};
+  let st={s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:''};
+  const load=async()=>{st.s_loading=true;draw();
+    try{const qs=[];if(st.s_ym)qs.push('ym='+encodeURIComponent(st.s_ym));if(st.s_q)qs.push('q='+encodeURIComponent(st.s_q));
+      const j=await(await fetch(`${API}/api/lgsagub/settle_list${qs.length?('?'+qs.join('&')):''}`)).json();st.slist=j;st.s_ym=j.ym||st.s_ym;}
+    catch(e){st.slist=null;st.s_msg='❌ 조회실패: '+e.message;}
+    st.s_loading=false;draw();};
+  const upload=async(file)=>{if(!file)return;
+    if(!/^\d{4}$/.test(st.s_ym)){st.s_msg='⚠ 적용월을 먼저 선택/입력하세요.';draw();return;}
+    if(!confirm(`동정산 원단위 파일을 [ ${st.s_ym} ] 적용월로 업로드합니다.\n(피앤씨 탭만, 같은 월 덮어씀)\n\n${file.name}\n계속?`))return;
+    st.s_msg='업로드 중… '+file.name;draw();
+    try{const fd=new FormData();fd.append('file',file);
+      const j=await(await fetch(`${API}/api/lgsagub/settle_upload?ym=${encodeURIComponent(st.s_ym)}`,{method:'POST',body:fd})).json();
+      if(!j.ok)st.s_msg='❌ '+(j.error||'실패');
+      else st.s_msg=`✅ [${st.s_ym}] ${j.sheet} · ${wonI(j.rows)}행 · `+(j.by_gubun1||[]).map(g=>`${g.gubun1} ${wonI(g.rows)}행`).join('  ');
+    }catch(e){st.s_msg='❌ '+e.message;}
+    await load();};
+  const copy=async()=>{
+    if(!st.s_ym){st.s_msg='⚠ 복사 원본 적용월을 먼저 선택하세요.';draw();return;}
+    const to=prompt(`[${st.s_ym}] 원단위를 복사할 신규 적용월(YYMM 4자리):`,'');
+    if(!to||!/^\d{4}$/.test(to.trim()))return;
+    st.s_msg='복사 중…';draw();
+    try{const j=await(await fetch(`${API}/api/lgsagub/settle_copy?from_ym=${encodeURIComponent(st.s_ym)}&to_ym=${encodeURIComponent(to.trim())}`,{method:'POST'})).json();
+      st.s_msg=j.ok?`✅ ${st.s_ym}→${to.trim()} ${wonI(j.rows)}행 복사`:'❌ 복사실패';st.s_ym=to.trim();}
+    catch(e){st.s_msg='❌ '+e.message;}
+    await load();};
+  const draw=()=>{
+    const m=st.slist, rows=(m&&m.rows)||[], yms=(m&&m.yms)||[];
+    const ymOpts=`<option value="">(선택)</option>`+yms.map(y=>`<option value="${y.ym}"${st.s_ym===y.ym?' selected':''}>${y.ym} (${wonI(y.rows)}행)</option>`).join('');
+    const body=st.s_loading?spinRow(12):(rows.length?rows.map(r=>`<tr>
+        <td><b>${esc(r.assy_pn)}</b></td><td class="cap" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.assy_desc)}">${esc(r.assy_desc)}</td>
+        <td class="cap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.coop)}</td>
+        <td>${esc(r.sub_pn)}</td><td class="cap" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.sub_desc)}">${esc(r.sub_desc)}</td>
+        <td class="num">${wonI(r.qty)}</td><td class="center"><span style="font-size:11px;padding:1px 6px;border-radius:8px;${r.gubun1==='사급'?'background:#e6f0ff;color:#1c47a0':'background:#fbe9e4;color:#a03d2c'}">${esc(r.gubun1)}</span></td>
+        <td class="center" style="font-size:11px">${esc(r.gubun2)}</td><td class="num">${r.od||'-'}</td><td class="num">${r.thk||'-'}</td><td class="num">${r.leng||'-'}</td><td class="num">${r.weight?r.weight.toFixed(4):'-'}</td></tr>`).join('')
+      :`<tr><td colspan="12" class="empty">데이터 없음 — 적용월 선택 후 엑셀 업로드</td></tr>`);
+    const sg=rows.filter(r=>r.gubun1==='사급').length, jk=rows.filter(r=>r.gubun1==='직거래').length;
+    host.innerHTML=`
+     <div class="page-sub" style="margin-top:2px">LG와 소통하는 <b>동정산 원단위</b>(Assy별 동부자재 소요·규격·사급/직거래 구분). 월별 큰 변경 없음 → 전월복사 후 부분수정. <code>nx.lg_settle_unit</code>. ★중량=수량반영값.</div>
+     <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:8px;flex-wrap:wrap">
+       <div style="flex:0 0 auto;border:1px solid #cfe0f5;border-radius:8px;padding:8px 14px;background:#fbfdff;display:flex;flex-direction:column;justify-content:center">
+         <div style="font-size:11px;color:#5a7597;margin-bottom:4px">적용월 <span style="color:#c0392b">*</span></div>
+         <div style="display:flex;gap:6px;align-items:center"><select class="sel" id="du-sel" style="width:130px">${ymOpts}</select>
+           <input type="month" class="inp" id="du-new" value="${ym2m(st.s_ym)}" style="width:140px" title="신규월 직접입력"></div></div>
+       <div id="du-dz" title="동정산 원단위 엑셀(피앤씨 탭)" style="flex:1;min-width:280px;border:2px dashed #8fb4d6;border-radius:8px;padding:8px;background:#f4f9fe;color:#5a7597;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px">
+         📥 동정산 <b style="margin:0 4px">원단위 엑셀</b> 드래그&드롭/클릭 <span style="color:#8aa0bd;margin-left:6px">(적용월 선택 후 · 피앤씨 탭)</span>
+         <input type="file" id="du-f" accept=".xlsx,.xls" style="display:none"></div>
+       <button class="btn" id="du-copy" style="flex:0 0 auto" title="선택 적용월을 신규월로 복사">📋 전월 복사로 신규월</button>
+     </div>
+     ${st.s_msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px">${esc(st.s_msg)}</div>`:''}
+     <div class="toolbar" style="margin-bottom:6px">
+       <input class="inp" id="du-q" value="${esc(st.s_q)}" placeholder="Assy/하위 품번·품명" style="width:200px"><button class="btn" id="du-go">🔍 조회</button>
+       <div class="spacer"></div><span class="rowcount">${m?`적용월 ${esc(m.ym||'-')} · ${wonI(rows.length)}행 (사급 ${wonI(sg)}·직거래 ${wonI(jk)})`:'조회 전'}</span>
+     </div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl fit du-tbl"><thead><tr>
+        <th>Assy P/N</th><th class="cap">Desc</th><th class="cap">협력사</th><th>P/N(하위1)</th><th class="cap">Desc</th>
+        <th class="num">수량</th><th class="center">구분1</th><th class="center">구분2</th><th class="num">외경</th><th class="num">T</th><th class="num">길이</th><th class="num">중량</th></tr></thead>
+       <tbody>${body}</tbody></table></div>
+     <style>.du-tbl thead th{position:sticky;top:0;background:#f1f5fb;z-index:4}</style>`;
+    const dz=host.querySelector('#du-dz'),fi=host.querySelector('#du-f');
+    dz.onclick=()=>fi.click();
+    dz.ondragover=e=>{e.preventDefault();dz.style.background='#e3f0ff';};dz.ondragleave=()=>{dz.style.background='#f4f9fe';};
+    dz.ondrop=e=>{e.preventDefault();dz.style.background='#f4f9fe';if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0]);};
+    fi.onchange=()=>{if(fi.files[0]){upload(fi.files[0]);fi.value='';}};
+    host.querySelector('#du-sel').onchange=e=>{st.s_ym=e.target.value;load();};
+    host.querySelector('#du-new').oninput=e=>{st.s_ym=m2ym(e.target.value);};
+    host.querySelector('#du-copy').onclick=copy;
+    host.querySelector('#du-go').onclick=()=>{st.s_q=host.querySelector('#du-q').value.trim();load();};
+    host.querySelector('#du-q').onkeyup=e=>{if(e.key==='Enter'){st.s_q=e.target.value.trim();load();}};
+    attachResizers(host);
+  };
+  load();
 };
 
 /* ===== 도입-수입입력(w_pu_stock_c_040, tag=P) · 도입-수출입력(w_pu_stock_c_050, tag=Q) — PU_T_STOCK_MAINT_C 라이브 조회 ===== */

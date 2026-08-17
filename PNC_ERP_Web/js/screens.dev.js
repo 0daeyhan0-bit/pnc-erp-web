@@ -3178,6 +3178,7 @@ SCREEN.rawmat=(host)=>{
      <div class="bm-tabs" style="display:flex;gap:2px;margin:6px 0 2px;border-bottom:2px solid #d3ddec">
        <div class="bm-tab rm-tab ${st.tab==='spec'?'on':''}" data-t="spec" style="border:1px solid #d3ddec;border-bottom:none;background:${st.tab==='spec'?'#fff':'#f1f5fb'};color:${st.tab==='spec'?'#1c47a0':'#5a6b82'};padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0">🧱 원소재 스펙</div>
        <div class="bm-tab rm-tab ${st.tab==='lme'?'on':''}" data-t="lme" style="border:1px solid #d3ddec;border-bottom:none;background:${st.tab==='lme'?'#fff':'#f1f5fb'};color:${st.tab==='lme'?'#1c47a0':'#5a6b82'};padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0">📈 LG전자 LME인정가</div>
+       <div class="bm-tab rm-tab ${st.tab==='settle'?'on':''}" data-t="settle" style="border:1px solid #d3ddec;border-bottom:none;background:${st.tab==='settle'?'#fff':'#f1f5fb'};color:${st.tab==='settle'?'#1c47a0':'#5a6b82'};padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0">📋 동정산 원단위</div>
      </div>
      <div id="rm-tabbody">${st.tab==='spec'?specBody():''}</div>`;
     host.querySelectorAll('.rm-tab').forEach(t=>t.onclick=()=>{const nt=t.dataset.t;if(nt===st.tab)return;st.tab=nt;
