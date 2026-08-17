@@ -1266,18 +1266,18 @@ SCREEN.unifybom=(c,ro)=>{
       alert(`체결 저장 완료 — ${j.count}공정 · 가공비 재계산`);
     }catch(e){alert('체결 저장 오류: '+e.message);} };
   // 체결 매트릭스 렌더(레거시 견적원가조회 체결보기: 표준공수 고정·공정횟수 입력·내부ST 자동)
-  const fastenMatrix=()=>{
+  const fastenMatrix=(embedded)=>{
     if(!fastenD)return `<div class="empty">체결 매트릭스 로딩…</div>`;
     const rows=fastenD.rows||[]; const RW=(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')));
     const tSt=rows.reduce((s,r)=>s+(+r.qty||0)*(+r.std_st||0),0);
     const gag=Math.round(tSt/3600*(fastenD.labor_rate||20776));
     const cell=(r,i)=>`<td class="num"><input class="fq" data-i="${i}" type="number" min="0" step="1" value="${r.qty||''}" ${RW?'':'disabled'} style="width:46px;text-align:center"></td>`;
-    return `<div style="flex:1 1 auto;min-height:0;overflow:auto">
+    return `<div style="${embedded?'':'flex:1 1 auto;min-height:0;overflow:auto'}">
       <div style="display:flex;align-items:center;gap:10px;padding:6px 4px">
         <b style="color:#8e44ad">🔩 체결 공정 (품목별 횟수 입력)</b>
         <span style="font-size:11px;color:var(--muted)">표준공수×횟수=내부ST · 가공비=Σ내부ST÷3600×임율(${won(fastenD.labor_rate||0)})</span>
         <span style="margin-left:auto;font-weight:700;color:#1c47a0">체결 내부ST ${won(Math.round(tSt))} · 가공비 ${won(gag)}원</span>
-        ${RW?`<button class="btn" id="ft-save" style="background:#1c7c3a;color:#fff">💾 저장</button>`:''}</div>
+        ${(RW&&!embedded)?`<button class="btn" id="ft-save" style="background:#1c7c3a;color:#fff">💾 저장</button>`:''}${embedded?'<span style="font-size:11px;color:#8a5a1a">(아래 [저장] 시 함께 저장)</span>':''}</div>
       <div class="grid-wrap" style="overflow:auto"><table class="tbl fit" style="font-size:12px"><thead><tr>
         <th>체결공정</th>${rows.map(r=>`<th class="num" title="${esc(r.fname)}" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.fname)}</th>`).join('')}<th class="num" style="background:#eef4ff">합계</th></tr></thead>
         <tbody>
