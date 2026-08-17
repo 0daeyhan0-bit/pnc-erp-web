@@ -624,14 +624,14 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
 _PARTS_MAPS = None
 def _parts_maps(cur):
     """CS_M_ITEM_BOM 부모→자식 맵 + 사급부품(SGROUP 310) 집합. 모듈캐시(1회 로드).
-       ★CS_CALC_EXCEPT_FLAG 필터 제거: 이 플래그는 '원가계산' 제외용(선택서브 이중계상 방지)이라
-         물리적 소비량 집계엔 부적합. 레거시 정본 SP_SA_LG리시빙기준도 except_flag 전개제외를 삭제(주석처리)함.
-         필터 시 소비 사급부품 누락 → OUT 과소(2607 182k→제거시 221k≈IN 230k, 실측 검증)."""
+       ★CS_CALC_EXCEPT_FLAG<>'1' 필터 유지: 이 플래그는 변형SUB 이중계상 방지용.
+         예) AJR30077403은 MJX65072203을 (a)직접행(except='1') + (b)-F&T 변형서브 안 = 2경로로 가짐.
+         except 필터가 (a)를 걸러 1회만 계상. 제거하면 2배 이중계상됨(실측 확인)."""
     global _PARTS_MAPS
     if _PARTS_MAPS is not None:
         return _PARTS_MAPS
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(USE_QTY,0)
-                   FROM nx.CS_M_ITEM_BOM""")
+                   FROM nx.CS_M_ITEM_BOM WHERE ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'""")
     ch = {}
     for p, c2, q in cur.fetchall():
         ch.setdefault(p, []).append((c2, float(q or 0)))
