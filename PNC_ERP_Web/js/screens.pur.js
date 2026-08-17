@@ -3063,7 +3063,6 @@ SCREEN.lgsagub=(c)=>{
       <div style="font-size:11px;color:#8aa0bd">${sub||''}</div></div>`;
   const drawCompare=()=>{
     const m=st.cmp, cop=m&&m.copper;
-    const diff=cop?(cop.in_osp_kg-cop.out_sagub_net):0;
     const its=(m&&m.items)||[];
     const showOnly=st.c_only;
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
@@ -3095,7 +3094,7 @@ SCREEN.lgsagub=(c)=>{
     c.innerHTML=`
      <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
      ${tabBar()}
-     <div class="page-sub">해당월 <b>리시빙</b>에 투입된 동 소요 vs <b>OSP 사급입고</b> 대사. 원단위(동정산) 기준. <b style="color:#1c47a0">사급=LG인정동</b> / <b style="color:#a03d2c">직거래=미인정(설치동·직매입)</b>. ★중량=수량반영값 · <span style="color:#8aa0bd">원단위 업로드는 '📋 원단위 관리' 탭에서</span></div>
+     <div class="page-sub"><b>완제품별</b> 사급소요량(리시빙 수량 × 원단위 개당소요 = <b style="color:#1c47a0">LG인정 사급동</b>) vs <b style="color:#1c7c3a">LG 입고중량(OSP)</b> 총계 대사. ★<b>차이 = 합계(리시빙×소요) − LG입고</b> · LG입고는 raw tube 총량이라 품목매칭 불가 → 총계로만 비교 · <span style="color:#8aa0bd">원단위 업로드는 '원소재 마스터 › 동정산 원단위'</span></div>
      ${st.c_msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px">${esc(st.c_msg)}</div>`:''}
      <div class="toolbar" style="margin-bottom:8px">
        <label class="tl">리시빙 기간</label><input type="date" class="inp" id="c-df" value="${ymd2date(st.c_from)}" style="width:150px"> ~ <input type="date" class="inp" id="c-dt" value="${ymd2date(st.c_to)}" style="width:150px">
@@ -3105,9 +3104,9 @@ SCREEN.lgsagub=(c)=>{
        <div class="spacer"></div><span class="rowcount">${cop?`리시빙×원단위(${esc(m.settle_ym)})`:'조회 전'}</span>
      </div>
      ${summ}
-     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+     <div class="grid-wrap" style="max-height:calc(100vh - 260px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
         ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
-        ${csh('out_sagub','OUT 사급동(kg)','num')}${csh('out_jikgae','OUT 직거래동(kg)','num')}${csh('per_sagub','개당사급','num')}</tr></thead>
+        ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
        <tbody>${rowsH}</tbody>${foot}</table></div>
      <style>.lg-tbl thead th{position:sticky;top:0;background:#f1f5fb;z-index:4}.lg-tbl tfoot .lg-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;border-top:2px solid #b9cbe6;z-index:3}</style>`;
     wireTabs();
