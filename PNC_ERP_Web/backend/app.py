@@ -158,6 +158,8 @@ from routers import salesplan as _r_salesplan
 app.include_router(_r_salesplan.router)
 from routers import prodstockadj as _r_prodstockadj
 app.include_router(_r_prodstockadj.router)
+from routers import assywork as _r_assywork  # 체결 매트릭스(품목별 체결 공정횟수 입력→가공비)
+app.include_router(_r_assywork.router)
 import weight_calc  # 무게정산(중량조정) 계산
 # 도메인간 공유헬퍼 — 로컬 def가 있으면 그게 shadow, 해당 도메인 라우터 이동 후엔 common판 사용(잔류 엔드포인트 보호)
 from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win

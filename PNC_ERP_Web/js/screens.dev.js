@@ -1188,6 +1188,7 @@ const PROC_MODAL_HTML=(pd)=>{
           ${pd.infoBar||''}
           ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-bottom:10px">${weldMatrix}</div>`:''}
           <div style="border:1px solid #cfe0ff;border-radius:8px;background:#f7faff">${procMatrix}</div>
+          ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-top:10px">${fastenMatrix(true)}</div>`:''}
         </div>
         <div style="padding:6px 14px;border-top:1px solid #dce4ee;color:#8aa0bd;font-size:11px;flex:0 0 auto">${esc(foot)}</div>
       </div></div>`;};
@@ -1255,6 +1256,37 @@ SCREEN.unifybom=(c,ro)=>{
   let codes={}, vlist=[];
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
+  let fastenD=null, fastenFor='';   // 체결 매트릭스(품목별 체결 공정횟수 입력→가공비). /api/assywork
+  const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
+    try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
+  const saveFasten=async()=>{ if(!fastenD)return; const it=fastenFor||item;
+    const rows=(fastenD.rows||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+    try{const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:it,rows,user:'웹'})});
+      const j=await r.json(); if(!j.ok){alert('체결 저장 실패');return;}
+      await loadFasten(it); if(tab==='nae')await loadNae(true);   // 가공비 재계산 반영
+      alert(`체결 저장 완료 — ${j.count}공정 · 가공비 재계산`);
+    }catch(e){alert('체결 저장 오류: '+e.message);} };
+  // 체결 매트릭스 렌더(레거시 견적원가조회 체결보기: 표준공수 고정·공정횟수 입력·내부ST 자동)
+  const fastenMatrix=(embedded)=>{
+    if(!fastenD)return `<div class="empty">체결 매트릭스 로딩…</div>`;
+    const rows=fastenD.rows||[]; const RW=(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')));
+    const tSt=rows.reduce((s,r)=>s+(+r.qty||0)*(+r.std_st||0),0);
+    const gag=Math.round(tSt/3600*(fastenD.labor_rate||20776));
+    const cell=(r,i)=>`<td class="num"><input class="fq" data-i="${i}" type="number" min="0" step="1" value="${r.qty||''}" ${RW?'':'disabled'} style="width:46px;text-align:center"></td>`;
+    return `<div style="${embedded?'':'flex:1 1 auto;min-height:0;overflow:auto'}">
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 4px">
+        <b style="color:#8e44ad">🔩 체결 공정 (품목별 횟수 입력)</b>
+        <span style="font-size:11px;color:var(--muted)">표준공수×횟수=내부ST · 가공비=Σ내부ST÷3600×임율(${won(fastenD.labor_rate||0)})</span>
+        <span style="margin-left:auto;font-weight:700;color:#1c47a0">체결 내부ST ${won(Math.round(tSt))} · 가공비 ${won(gag)}원</span>
+        ${(RW&&!embedded)?`<button class="btn" id="ft-save" style="background:#1c7c3a;color:#fff">💾 저장</button>`:''}${embedded?'<span style="font-size:11px;color:#8a5a1a">(아래 [저장] 시 함께 저장)</span>':''}</div>
+      <div class="grid-wrap" style="overflow:auto"><table class="tbl fit" style="font-size:12px"><thead><tr>
+        <th>체결공정</th>${rows.map(r=>`<th class="num" title="${esc(r.fname)}" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.fname)}</th>`).join('')}<th class="num" style="background:#eef4ff">합계</th></tr></thead>
+        <tbody>
+          <tr><td style="text-align:left;color:#5a6b82">표준공수</td>${rows.map(r=>`<td class="num" style="color:#8a94a6">${r.std_st}</td>`).join('')}<td></td></tr>
+          <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">공정횟수</td>${rows.map((r,i)=>cell(r,i)).join('')}<td class="num"><b>${won(rows.reduce((s,r)=>s+(+r.qty||0),0))}</b></td></tr>
+          <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td>${rows.map(r=>`<td class="num" style="color:#8a5a1a">${(+r.qty||0)?won(Math.round((+r.qty||0)*(+r.std_st||0))):''}</td>`).join('')}<td class="num" style="color:#8a5a1a"><b>${won(Math.round(tSt))}</b></td></tr>
+        </tbody></table></div></div>`;
+  };
   let naeModal=false;   // 공정 수정 팝업(모달) 표시
   const _prevYm=(()=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}`;})();  // 직전 완성월 YYMM(사급 리시빙월 기본)
   let silD=null, silFor='', silLoad=false, silView='company', silSagYm=_prevYm;
@@ -1406,6 +1438,7 @@ SCREEN.unifybom=(c,ro)=>{
     weldRows=[];
     (weldCand||[]).forEach(w=>{weldRows.push({weld_item:(w.child_item||w.weld_item||'').toUpperCase(),pipe_diam:'',weld_qty:''});});
     if(!weldRows.length) weldRows.push({weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''});
+    fastenD=null; fastenFor='';   // 체결은 조립공정 팝업(loadNaeProc)에서 로드
     tab='bom'; draw();
   };
   // ①LG BOM 불러오기 — [기준정보›LG BOM관리]에 적재된 nx.lg_bom에서 모델 선택→tree 전개→구성 초안(파일 업로드 아님)
@@ -1495,7 +1528,12 @@ SCREEN.unifybom=(c,ro)=>{
     let wsum=0;
     try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
       const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
-    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)}`);
+    // ★체결 매트릭스 저장(신규등록 시 함께) — nx.item_fasten
+    let fcnt=0;
+    try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+      const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
+      const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
+    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정`);
     isNew=false; load(item);
   };
   // ============ 탭바 ============
@@ -1609,7 +1647,7 @@ SCREEN.unifybom=(c,ro)=>{
     catch(e){naeD={error:e.message};}naeLoad=false;draw();};
   // ★carrier-aware 공정입력: /api/cost/proc/get → 가공(own) + 용접봉 carrier별 조립공정(용접/체결/포장). carrier별 in-place(통합/이동 금지).
   const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeModal=false;draw();
-    await loadWeldDiams();
+    await loadWeldDiams(); await loadFasten(node);   // ★체결 매트릭스도 팝업에 로드(노드별)
     // 조립 용접(관경별) 프리로드 — 제품/SUB 레벨에서 용접점 편집용
     let weldPoints=[], weldCarriers=[];
     try{const wr=await fetch(`${API}/api/weld/get?node=${encodeURIComponent(node)}`);const wj=await wr.json();
@@ -1644,6 +1682,9 @@ SCREEN.unifybom=(c,ro)=>{
     const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,loss_factor:+cr.loss_factor||1.5,procs:pick(cr.rows||[])}))};
     try{const r=await fetch(`${API}/api/cost/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const j=await r.json();if(!j.ok){alert('공정 저장 실패');return;}
+      // ★체결 매트릭스 → nx.routing(FS행) 저장(node별)
+      try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+        await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:naeSel,rows:frows,user:'웹'})});}catch(e){}
       // ★관경별 용접 매트릭스 → /api/weld/save (선택 용접봉종류 1개, node). 관경별 횟수 입력분만(weld_qty>0)
       let wmsg='';
       if(naeProcD.isAssy){
@@ -1654,7 +1695,7 @@ SCREEN.unifybom=(c,ro)=>{
       }
       const rc=(j.weld_recalc||[]).map(x=>`${x.carrier} 소요 ${x.use_qty}`).join(', ');
       naeModal=false;naeSel='';naeProcD=null;alert(`공정 저장(가공 ${j.own} · 용접봉 ${j.carriers}건) · 재계산${rc?'\n용접봉 소요량(ST): '+rc:''}${wmsg}`);
-      naeFor='';if(tab==='bom'){await load(item);}else{await loadNae(true);}}catch(e){alert('저장 오류: '+e.message);}};
+      naeFor='';if(isNew){naeModal=false;draw();}else if(tab==='bom'){await load(item);}else{await loadNae(true);}}catch(e){alert('저장 오류: '+e.message);}};
   // 공정입력 팝업(모달) 이벤트 바인딩 — 내부원가/BOM구성 탭 공유(close=draw()로 현재 탭 재렌더)
   const wireProcModal=()=>{
     const rowsOf=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
@@ -1670,6 +1711,7 @@ SCREEN.unifybom=(c,ro)=>{
     const rowsOf2=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
     c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf2(el.dataset.sec);if(a&&a[+el.dataset.i])a[+el.dataset.i].prod_uph=+el.value||0;});
     c.querySelectorAll('.pl').forEach(el=>el.oninput=()=>{const cr=naeProcD&&naeProcD.carriers[+el.dataset.c];if(cr)cr.loss_factor=+el.value||1.5;});
+    c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});  // ★팝업 내 체결 횟수 입력
   };
   const saveNaeMaster=async()=>{const rows=(naeD&&naeD.rows)||[];const qtyC=[];const specM={};const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
     rows.forEach(r=>{const e=naeEdits[r.code];if(!e)return;
@@ -1698,7 +1740,7 @@ SCREEN.unifybom=(c,ro)=>{
       let mid='';
       if(view==='proc') mid=`<div class="nae-2col" style="flex:1 1 auto;min-height:0;height:100%;grid-template-rows:minmax(0,1fr);align-items:stretch">${naeFlatMat(a,rows,prc)}${naeRightPanel(a,rows,prc)}</div>`;
       else if(view==='weld'){const wp=prc.filter(p=>p.group==='용접');mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${matTable(a,rows.filter(r=>String(r.code).toUpperCase().startsWith('RAC')||r.silver),false)}${procTable(wp)}</div>`;}
-      else if(view==='fasten'){const fp=prc.filter(p=>p.group==='체결');mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${procTable(fp)}</div>`;}
+      else if(view==='fasten'){mid=fastenMatrix();}
       else mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${companyTable(rows)}</div>`;
       content=`<div style="flex:0 0 auto">${sumbar(a,'naewon','내부원가')}${naeViewBar()}</div>${mid}${naeModal?naeProcModal():''}`;
     }
@@ -1719,7 +1761,9 @@ SCREEN.unifybom=(c,ro)=>{
     g('#nae-regen').onclick=()=>loadNae(true);
     {const w=g('#nae-weld');if(w)w.onclick=()=>{showWeld=!showWeld;drawNae();};}
     // [조립공정] 툴바 버튼 제거 — 레벨0(제품) 행의 [등록/수정]이 동일 팝업(용접·포장·체결) 담당(중복 제거)
-    c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=()=>{naeView=el.dataset.v;drawNae();});
+    c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=async()=>{naeView=el.dataset.v;if(naeView==='fasten')await loadFasten(item);drawNae();});
+    c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});
+    {const fs=c.querySelector('#ft-save');if(fs)fs.onclick=saveFasten;}
     // 좌측 레벨트리: 행 클릭=우측 조회 / [등록/수정] 버튼=팝업
     c.querySelectorAll('.nae-trow[data-node]').forEach(el=>el.onclick=e=>{if(e.target.closest('.nae-edit-btn'))return;loadNaeProc(el.dataset.node,false);});
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
@@ -1977,7 +2021,8 @@ SCREEN.unifybom=(c,ro)=>{
      ${item&&!loading?((viewTree&&!editMode)?`
        ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
-       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel():''}`):''}
+       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?`<div style="margin-top:10px;padding:9px;border:1px dashed #8e44ad;border-radius:8px;background:#faf7ff"><button class="btn" id="bm-assyproc" style="background:#8e44ad;color:#fff">✎ 조립공정 입력 (관경별 용접 · 공정 · 체결)</button> <span style="font-size:11px;color:var(--muted)">내부원가와 동일한 매트릭스 팝업에서 입력·저장 (한 표=nx.routing)</span></div>`:''}`):''}
+     ${naeModal?naeProcModal():''}
      ${(wuBusy||wuData)?wuModalHtml():''}
      ${bomCss()}`;
     const qi=c.querySelector('#bm-q');
@@ -1992,6 +2037,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
     // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
+    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>loadNaeProc(item,true);}  // ★신규등록 조립공정 = 내부원가와 동일 팝업
     if(naeModal)wireProcModal();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
     // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
@@ -2017,6 +2063,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const cy=c.querySelector('#nw-copy');if(cy)cy.onclick=copyNew;}
     {const bl=c.querySelector('#nw-blank');if(bl)bl.onclick=blankNew;}
     if(editMode&&isNew)bindWeld();
+    c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});  // 신규등록 체결 횟수 입력
     c.querySelectorAll('.nm-fld').forEach(el=>el.onchange=()=>{newMaster[el.dataset.k]=el.value;});  // 제품 마스터속성 write-back
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
