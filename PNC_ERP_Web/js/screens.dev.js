@@ -1188,7 +1188,7 @@ const PROC_MODAL_HTML=(pd)=>{
           ${pd.infoBar||''}
           ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-bottom:10px">${weldMatrix}</div>`:''}
           <div style="border:1px solid #cfe0ff;border-radius:8px;background:#f7faff">${procMatrix}</div>
-          ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-top:10px">${fastenMatrix(true)}</div>`:''}
+          ${isAssy&&pd.fastenHtml?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-top:10px">${pd.fastenHtml}</div>`:''}
         </div>
         <div style="padding:6px 14px;border-top:1px solid #dce4ee;color:#8aa0bd;font-size:11px;flex:0 0 auto">${esc(foot)}</div>
       </div></div>`;};
@@ -1257,6 +1257,7 @@ SCREEN.unifybom=(c,ro)=>{
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let fastenD=null, fastenFor='';   // 체결 매트릭스(품목별 체결 공정횟수 입력→가공비). /api/assywork
+  let naeProcLoading=false;         // 조립공정 팝업 로딩(사외망 DB 지연 대비 즉시 표시)
   const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
     try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
   const saveFasten=async()=>{ if(!fastenD)return; const it=fastenFor||item;
@@ -1413,7 +1414,9 @@ SCREEN.unifybom=(c,ro)=>{
     try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,lines})});
       const j=await r.json();if(!j.ok){alert('BOM 저장 거부 (백엔드 가드):\n'+(j.errors||[]).join('\n'));return;}
       alert(`저장 완료 — 마스터 ${mrows.length}건 · BOM ${j.count}구성`);load(item);}catch(e){alert('BOM 저장 실패: '+e.message);}};
-  const addRow=()=>{lines.push({child_item:'',item_name:'(저장 후 표시)',spec:'',qty:1,node_type:'부품',cs_calc_except:false,sagub_default:false,
+  let _lastAdd=0;
+  const addRow=()=>{const t=Date.now();if(t-_lastAdd<600)return;_lastAdd=t;  // ★rapid-click 가드(렌더 지연에 연타→중복행 방지)
+    lines.push({child_item:'',item_name:'(저장 후 표시)',spec:'',qty:1,node_type:'부품',cs_calc_except:false,sagub_default:false,
     kitting:false,set_except:false,vir_item:false,lme_except:false,gagong_proc:'',cust_name:'',remarks:''});draw();};
   const doCopy=async()=>{
     const tgt=(prompt(`「${item}」의 BOM을 복사할 새 품번을 입력하세요.\n(유사공정 협력사 변형 등 — 신규 품번은 nx에만 저장)`,'')||'').trim().toUpperCase();
@@ -1646,14 +1649,21 @@ SCREEN.unifybom=(c,ro)=>{
       if(!r.ok)throw new Error('HTTP '+r.status);naeD=await r.json();naeFor=item;}
     catch(e){naeD={error:e.message};}naeLoad=false;draw();};
   // ★carrier-aware 공정입력: /api/cost/proc/get → 가공(own) + 용접봉 carrier별 조립공정(용접/체결/포장). carrier별 in-place(통합/이동 금지).
-  const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeModal=false;draw();
-    await loadWeldDiams(); await loadFasten(node);   // ★체결 매트릭스도 팝업에 로드(노드별)
-    // 조립 용접(관경별) 프리로드 — 제품/SUB 레벨에서 용접점 편집용
+  const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeProcLoading=true;if(openModal)naeModal=true;draw();  // ★즉시 로딩모달 표시(사외망 지연 대비)
+    const enc=encodeURIComponent(node);
+    // ★4개 fetch 순차(≈9초)→병렬(≈3초). 사외망 DB 지연시 체감 크게 개선
+    const [,,wj,j]=await Promise.all([
+      loadWeldDiams(),
+      loadFasten(node),   // ★체결 매트릭스도 팝업에 로드(노드별)
+      fetch(`${API}/api/weld/get?node=${enc}`).then(r=>r.json()).catch(()=>({})),
+      fetch(`${API}/api/cost/proc/get?node=${enc}`).then(r=>r.json()).catch(e=>({error:e.message}))
+    ]);
+    naeProcLoading=false;
+    // 조립 용접(관경별) — 제품/SUB 레벨에서 용접점 편집용
     let weldPoints=[], weldCarriers=[];
-    try{const wr=await fetch(`${API}/api/weld/get?node=${encodeURIComponent(node)}`);const wj=await wr.json();
-      (wj.welds||[]).forEach(w=>{(w.rows||[]).forEach(x=>weldPoints.push({weld_item:w.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));});
-      weldCarriers=wj.carriers||[];}catch(e){}
-    try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(node)}`);const j=await r.json();
+    (wj.welds||[]).forEach(w=>{(w.rows||[]).forEach(x=>weldPoints.push({weld_item:w.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));});
+    weldCarriers=wj.carriers||[];
+    try{if(j.error)throw new Error(j.error);
       const cat=j.catalog||[]; const own0={}; (j.own_procs||[]).forEach(p=>own0[p.proc_code]=p);
       // 가공 own = 조립외 카탈로그 전체(기존값 병합)
       const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,std_uph:p.std_uph||0,
@@ -1826,7 +1836,7 @@ SCREEN.unifybom=(c,ro)=>{
     const cols=[];
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
-    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,cols});};
+    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,cols,fastenHtml:fastenMatrix(true)});};  // ★fastenMatrix는 클로저 로컬 → 여기서 만들어 pd로 전달(전역 PROC_MODAL_HTML은 접근불가)
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
        <tbody>${(rows||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>
@@ -2037,7 +2047,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
     // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
-    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>loadNaeProc(item,true);}  // ★신규등록 조립공정 = 내부원가와 동일 팝업
+    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 조립공정 여는 중…';loadNaeProc(item,true);};}  // ★신규등록 조립공정 = 내부원가와 동일 팝업(클릭 즉시 피드백)
     if(naeModal)wireProcModal();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
     // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
