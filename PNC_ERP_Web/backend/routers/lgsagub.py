@@ -766,8 +766,8 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
         for a, b in cur.fetchall():
             nm[a] = b
-        # 합집합(OUT 소요 ∪ IN 입고) 품목별 비교
-        parts = set(out_c) | set(in_map)
+        # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. OSP에 없는 소비부품은 사급 아님 → 제외.
+        parts = set(in_map)
         items = []
         tot_out_c = tot_out_r = tot_in_q = tot_in_a = 0.0
         for p in parts:

@@ -2996,6 +2996,8 @@ SCREEN.lgsagub=(c)=>{
     if(!L) return `<div style="font-size:12px;color:#8aa0bd;margin-bottom:8px">📦 월별 동 재고 수불 로딩…</div>`;
     const rs=L.rows||[]; const cur=rs.length?rs[rs.length-1]:null;
     const yl=y=>y?`${y.slice(0,2)}.${y.slice(2)}`:y;
+    const sumIn=rs.reduce((a,r)=>a+r.in_kg,0), sumSoyo=rs.reduce((a,r)=>a+r.soyo_kg,0);
+    const pct=sumSoyo?Math.abs((sumIn-sumSoyo)/sumSoyo*100):0;
     const rowsH=rs.map(r=>`<tr>
         <td><b>${yl(r.ym)}</b></td>
         <td class="num">${wonI(Math.round(r.open_kg))}</td>
@@ -3008,7 +3010,9 @@ SCREEN.lgsagub=(c)=>{
       <div style="padding:0 10px 8px"><table class="tbl fit lg-tbl" style="font-size:12px"><thead><tr>
         <th>월</th><th class="num">기초(kg)</th><th class="num">입고(kg)</th><th class="num">소요(kg)</th><th class="num">기말(kg)</th><th class="num">기말금액(원)</th>
       </tr></thead><tbody>${rowsH||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>
-      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">★"매월 차이"는 손실이 아니라 <b style="color:#1c47a0">동 재고 잔량</b>입니다(입고 타이밍으로 증감).${cur?` 현재 기말 <b style="color:#16324f">${wonI(Math.round(cur.close_kg))}kg · ${wonI(Math.round(cur.close_amt))}원</b>`:''}</div>
+      <div style="font-size:11px;color:#456;margin-top:5px;padding:5px 8px;background:#f0f7f0;border:1px solid #cfe6cf;border-radius:5px">
+        ✔ 누적 입고 <b>${wonI(Math.round(sumIn))}kg</b> ≈ 소요 <b>${wonI(Math.round(sumSoyo))}kg</b> → 최종 기말 <b style="color:${cur&&cur.close_kg<0?'#a03d2c':'#1c7c3a'}">${cur?wonI(Math.round(cur.close_kg)):0}kg</b> (차이 ${pct.toFixed(2)}%) = <b>사급 동 균형</b>, 기초0 검증.
+        <span style="color:#8aa0bd">월별 ±는 손실 아니라 <b>OSP 입고 인식 시차</b>(예: 3월 대량입고가 2월 생산분 커버)로 인한 재고 증감.</span></div>
       </div></details>`;
   };
   // ── 원단위 관리(업로드·적용월·목록) ──
