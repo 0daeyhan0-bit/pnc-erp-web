@@ -1188,7 +1188,7 @@ const PROC_MODAL_HTML=(pd)=>{
           ${pd.infoBar||''}
           ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-bottom:10px">${weldMatrix}</div>`:''}
           <div style="border:1px solid #cfe0ff;border-radius:8px;background:#f7faff">${procMatrix}</div>
-          ${isAssy?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-top:10px">${fastenMatrix(true)}</div>`:''}
+          ${isAssy&&pd.fastenHtml?`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-top:10px">${pd.fastenHtml}</div>`:''}
         </div>
         <div style="padding:6px 14px;border-top:1px solid #dce4ee;color:#8aa0bd;font-size:11px;flex:0 0 auto">${esc(foot)}</div>
       </div></div>`;};
@@ -1836,7 +1836,7 @@ SCREEN.unifybom=(c,ro)=>{
     const cols=[];
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
-    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,cols});};
+    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,cols,fastenHtml:fastenMatrix(true)});};  // ★fastenMatrix는 클로저 로컬 → 여기서 만들어 pd로 전달(전역 PROC_MODAL_HTML은 접근불가)
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
        <tbody>${(rows||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>
