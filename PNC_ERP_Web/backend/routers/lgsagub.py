@@ -556,15 +556,79 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         nx.close()
 
 
+@router.get("/api/lgsagub/recvcompare_ledger")
+def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_ym: str = Query("")):
+    """동 원소재 수불(월별 누적): 기초 + 입고(OSP TUBE) − 소요(리시빙×원단위 eff≤월) = 기말.
+       from_ym(기초0 시작월, 미지정=OSP 첫 입고월)~to_ym(미지정=OSP 최신월). eff_ym로 각 월 point-in-time 원단위.
+       ★기초=0 가정: 시작월 이전 동재고 없음. OSP 데이터 없는 달로 시작하면 입고0→마이너스 되므로 첫 OSP월 권장."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        sy = settle_ym.strip()
+        if not sy:
+            cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
+            r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
+        # from_ym 기본 = OSP(사급입고) 첫 데이터월. to_ym 기본 = OSP 최신월.
+        cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) LIKE '%TUBE%'")
+        r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
+        frm = from_ym.strip() or osp_min or "2603"
+        to = to_ym.strip() or osp_max or frm
+
+        def ym_next(y):
+            yy = int(y[:2]); mm = int(y[2:]) + 1
+            if mm > 12: mm = 1; yy += 1
+            return f"{yy:02d}{mm:02d}"
+        months = []; m = frm; guard = 0
+        while m <= to and guard < 120:
+            months.append(m); m = ym_next(m); guard += 1
+
+        rows = []; bal_kg = 0.0; bal_amt = 0.0
+        for M in months:
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, SUM(ISNULL(weight,0)) w,
+                             SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c
+                           FROM nx.lg_settle_unit
+                           WHERE ym=? AND gubun1=N'사급' AND (eff_ym IS NULL OR eff_ym='' OR eff_ym<=?)
+                           GROUP BY UPPER(LTRIM(RTRIM(assy_pn)))""", sy, M)
+            usg = {}; usc = {}
+            for a, w, c in cur.fetchall():
+                usg[a] = f(w); usc[a] = f(c)
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+                  SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END)
+                 -SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) net
+                FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=?
+                GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", M)
+            soyo_kg = 0.0; soyo_amt = 0.0
+            for it, net in cur.fetchall():
+                net = f(net)
+                soyo_kg += usg.get(it, 0.0) * net
+                soyo_amt += usc.get(it, 0.0) * net
+            cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
+                           WHERE ym=? AND UPPER(item_name) LIKE '%TUBE%'""", M)
+            r = cur.fetchone(); in_kg = f(r[0]); in_amt = f(r[1])
+            open_kg = bal_kg; open_amt = bal_amt
+            bal_kg = open_kg + in_kg - soyo_kg
+            bal_amt = open_amt + in_amt - soyo_amt
+            rows.append({"ym": M, "open_kg": open_kg, "open_amt": open_amt,
+                         "in_kg": in_kg, "in_amt": in_amt, "soyo_kg": soyo_kg, "soyo_amt": soyo_amt,
+                         "close_kg": bal_kg, "close_amt": bal_amt})
+        return {"settle_ym": sy, "from_ym": frm, "to_ym": to, "osp_min": osp_min, "rows": rows}
+    finally:
+        nx.close()
+
+
 # ── 사급부품(소분류310) BOM 전개 캐시 ──
 _PARTS_MAPS = None
 def _parts_maps(cur):
-    """CS_M_ITEM_BOM 부모→자식 맵 + 사급부품(SGROUP 310) 집합. 모듈캐시(1회 로드)."""
+    """CS_M_ITEM_BOM 부모→자식 맵 + 사급부품(SGROUP 310) 집합. 모듈캐시(1회 로드).
+       ★CS_CALC_EXCEPT_FLAG 필터 제거: 이 플래그는 '원가계산' 제외용(선택서브 이중계상 방지)이라
+         물리적 소비량 집계엔 부적합. 레거시 정본 SP_SA_LG리시빙기준도 except_flag 전개제외를 삭제(주석처리)함.
+         필터 시 소비 사급부품 누락 → OUT 과소(2607 182k→제거시 221k≈IN 230k, 실측 검증)."""
     global _PARTS_MAPS
     if _PARTS_MAPS is not None:
         return _PARTS_MAPS
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(USE_QTY,0)
-                   FROM nx.CS_M_ITEM_BOM WHERE ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'""")
+                   FROM nx.CS_M_ITEM_BOM""")
     ch = {}
     for p, c2, q in cur.fetchall():
         ch.setdefault(p, []).append((c2, float(q or 0)))
@@ -707,14 +771,16 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
             ind = in_map.get(p, {})
             iq = ind.get("q", 0.0); ia = ind.get("a", 0.0); price = ind.get("p", 0.0)
             tot_out_c += oc; tot_out_r += orr; tot_in_q += iq; tot_in_a += ia
+            # ★반품(R) 차감 제거: GUBUN='R'은 진짜 반품 아님(R품목 75종 중 C에도 있는 건 5종뿐·비율54%비현실적)
+            #   + 레거시 정본은 GUBUN을 차원으로만 유지(C−R 순계산 없음). 소비=C만. diff=IN−소비(C).
             items.append({"item": p, "name": ind.get("nm") or nm.get(p, ""),
-                          "out_c": oc, "out_r": orr, "out_net": oc - orr,
+                          "out_c": oc, "out_r": orr, "out_net": oc,
                           "in_qty": iq, "in_amt": ia, "price": price,
-                          "diff": iq - (oc - orr)})
+                          "diff": iq - oc})
         items.sort(key=lambda x: -(abs(x["out_net"]) + x["in_qty"]))
         return {
             "ym": ym.strip(),
-            "summary": {"out_net": tot_out_c - tot_out_r, "out_c": tot_out_c, "out_r": tot_out_r,
+            "summary": {"out_net": tot_out_c, "out_c": tot_out_c, "out_r": tot_out_r,
                         "in_qty": tot_in_q, "in_amt": tot_in_a, "parts": len(parts)},
             "items": items[:int(limit)],
         }
