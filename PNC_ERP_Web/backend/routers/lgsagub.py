@@ -451,10 +451,10 @@ def settle_summary():
 
 
 @router.get("/api/lgsagub/recvcompare")
-def recvcompare(ym: str = Query(...), settle_ym: str = Query(""), limit: int = Query(2000)):
-    """리시빙 비교: 해당월(ym=YYMM) LG리시빙 × 원단위(settle_ym) → OUT 동(사급/직거래) vs IN OSP(사급입고).
+def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""), settle_ym: str = Query(""), limit: int = Query(2000)):
+    """리시빙 비교(원소재 동): 기간 LG리시빙 × 원단위(settle_ym) → OUT 동(사급/직거래) vs IN OSP.
        ★OUT = Σ 리시빙수량 × Σ(원단위 중량 by 구분1)  [중량=수량반영값이라 그대로 합산].
-       사급=인정동(IN OSP원소재와 대사), 직거래=미인정(설치동류). C=정상출하·R=반품·순=C−R."""
+       사급=인정동(IN OSP원소재와 대사), 직거래=미인정. 기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
     f = lambda v: float(v or 0)
     nx = _nx(); cur = nx.cursor()
     try:
@@ -471,12 +471,12 @@ def recvcompare(ym: str = Query(...), settle_ym: str = Query(""), limit: int = Q
             g1 = (g1 or "").strip()
             if g1 == "사급": u_sg[a] = f(w)
             elif g1 == "직거래": u_jk[a] = f(w)
-        # 리시빙(ym) 제품별 C/R 수량·금액
-        cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+        rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
               SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
               SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr,
               SUM(CASE WHEN GUBUN='C' THEN ISNULL(RECV_AMT,0) ELSE 0 END) ac
-            FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", ym.strip())
+            FROM nx.SA_T_LG_RECEIVING_DTL WHERE {rwh} GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", *rp)
         recv = [(r[0], f(r[1]), f(r[2]), f(r[3])) for r in cur.fetchall()]
         # 품명 매핑
         nm = {}
@@ -501,9 +501,10 @@ def recvcompare(ym: str = Query(...), settle_ym: str = Query(""), limit: int = Q
                           "out_sagub": qc * sg, "out_jikgae": qc * jk,
                           "per_sagub": sg, "per_jikgae": jk})
         # IN OSP(사급입고) — 원소재/사급부품
-        cur.execute("""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END cl,
-              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a FROM nx.lg_sagub_actual WHERE ym=? GROUP BY
-              CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END""", ym.strip())
+        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
+        cur.execute(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END cl,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a FROM nx.lg_sagub_actual WHERE ym IN ({inl}) GROUP BY
+              CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END""")
         osp = {r[0]: {"qty": f(r[1]), "amt": f(r[2])} for r in cur.fetchall()}
         in_raw = osp.get("원소재", {"qty": 0, "amt": 0})
         # OUT 금액용 사급 동단가(원/kg) = OSP 원소재 평균단가
@@ -608,20 +609,45 @@ def settle_copy(from_ym: str = Query(...), to_ym: str = Query(...)):
         nx.close()
 
 
+def _ym_list(a, b):
+    """YYMMDD 범위 → 걸치는 YYMM 리스트. 둘 다 없으면 []."""
+    if not a and not b:
+        return []
+    a = a or b; b = b or a
+    try:
+        ya, ma = int(a[:2]), int(a[2:4]); yb, mb = int(b[:2]), int(b[2:4])
+    except Exception:
+        return []
+    out = []; y, m = ya, ma
+    while (y, m) <= (yb, mb) and len(out) < 60:
+        out.append(f"{y:02d}{m:02d}")
+        m += 1
+        if m > 12: m = 1; y += 1
+    return out
+
+def _recv_where(ym, ymd_from, ymd_to):
+    """리시빙 필터: 기간(ymd_from~ymd_to YYMMDD) 우선, 없으면 월(ym=YYMM=LEFT4). (where, params, yms)."""
+    if ymd_from.strip() or ymd_to.strip():
+        return ("RECEIVING_YMD>=? AND RECEIVING_YMD<=?",
+                [ymd_from.strip() or "000000", ymd_to.strip() or "999999"],
+                _ym_list(ymd_from.strip(), ymd_to.strip()))
+    return ("LEFT(RECEIVING_YMD,4)=?", [ym.strip()], [ym.strip()] if ym.strip() else [])
+
+
 @router.get("/api/lgsagub/recvcompare_parts")
-def recvcompare_parts(ym: str = Query(...), limit: int = Query(3000)):
-    """리시빙 비교(부품): 해당월 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.
-       ★부품=개수 단위(원소재 동=kg과 별개 탭). C=정상·R=반품·순=C−R."""
+def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""), limit: int = Query(3000)):
+    """리시빙 비교(부품): 기간 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.
+       ★부품=개수 단위. C=정상·R=반품·순=C−R. 기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
     f = lambda v: float(v or 0)
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
         ch, sg310 = _parts_maps(cur)
-        # 리시빙(ym) 제품별 C/R
-        cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+        rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
               SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
               SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr
-            FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", ym.strip())
+            FROM nx.SA_T_LG_RECEIVING_DTL WHERE {rwh} GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", *rp)
         recv = [(r[0], f(r[1]), f(r[2])) for r in cur.fetchall()]
         memo = {}
         out_c = {}; out_r = {}   # 사급부품별 OUT 소요개수
@@ -630,11 +656,13 @@ def recvcompare_parts(ym: str = Query(...), limit: int = Query(3000)):
             for part, per in pmap.items():
                 out_c[part] = out_c.get(part, 0.0) + qc * per
                 out_r[part] = out_r.get(part, 0.0) + qr * per
-        # IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 품목별
-        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
-              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a, MAX(price) p
-            FROM nx.lg_sagub_actual WHERE ym=? AND UPPER(item_name) NOT LIKE '%TUBE%'
-            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""", ym.strip())
+        # IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합, 평균단가=금액/수량
+        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a,
+              SUM(ISNULL(amt,0))/NULLIF(SUM(ISNULL(qty,0)),0) p
+            FROM nx.lg_sagub_actual WHERE ym IN ({inl}) AND UPPER(item_name) NOT LIKE '%TUBE%'
+            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
         in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
         # 품명 보강
         nm = {}

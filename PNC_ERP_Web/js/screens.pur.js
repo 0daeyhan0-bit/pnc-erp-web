@@ -2908,9 +2908,11 @@ SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
   let st={tab:'status',by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
           df:'',dt:'',ymdMin:'',ymdMax:'',biz:'',cls:'',q:'',upBiz:'',sort:{k:'amt',dir:-1},loading:false,msg:'',
-          c_ym:'2607',c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',
-          p_ym:'2607',pcmp:null,p_loading:false,p_only:'',
+          c_from:'260701',c_to:'260731',c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
+          p_from:'260701',p_to:'260731',pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},
           s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:''};
+  const sortItems=(arr,sort)=>{if(!sort.k||!arr.length)return arr;const {k,dir}=sort;const num=typeof arr[0][k]==='number';
+    return arr.slice().sort((a,b)=>num?(((a[k]||0)-(b[k]||0))*dir):((''+(a[k]||'')).localeCompare(''+(b[k]||''))*dir));};
   const ymd2date=s=>{s=''+(s||'');return s.length>=6?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';};  // 260703→2026-07-03
   const date2ymd=v=>v?(''+v).slice(2).replace(/-/g,''):'';                                                       // 2026-07-03→260703
   const ymdF=s=>{s=''+(s||'');return s.length>=6?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:'-';};        // 260703→26/07/03
@@ -2980,7 +2982,8 @@ SCREEN.lgsagub=(c)=>{
   };
   const wireTabs=()=>c.querySelectorAll('.lg-tab').forEach(t=>t.onclick=()=>{if(st.tab!==t.dataset.tab){st.tab=t.dataset.tab;routeTab();}});
   const loadCompare=async()=>{st.c_loading=true;drawCompare();
-    try{const j=await(await fetch(`${API}/api/lgsagub/recvcompare?ym=${encodeURIComponent(st.c_ym)}${st.c_sy?('&settle_ym='+encodeURIComponent(st.c_sy)):''}`)).json();st.cmp=j;st.c_msg='';}
+    try{const qs=[];if(st.c_from)qs.push('ymd_from='+st.c_from);if(st.c_to)qs.push('ymd_to='+st.c_to);if(st.c_sy)qs.push('settle_ym='+encodeURIComponent(st.c_sy));
+      const j=await(await fetch(`${API}/api/lgsagub/recvcompare?${qs.join('&')}`)).json();st.cmp=j;st.c_msg='';}
     catch(e){st.cmp=null;st.c_msg='❌ 조회 실패: '+e.message;}
     st.c_loading=false;drawCompare();};
   // ── 원단위 관리(업로드·적용월·목록) ──
@@ -3106,7 +3109,8 @@ SCREEN.lgsagub=(c)=>{
 
   // ── 리시빙비교(부품) ──
   const loadParts=async()=>{st.p_loading=true;drawParts();
-    try{const j=await(await fetch(`${API}/api/lgsagub/recvcompare_parts?ym=${encodeURIComponent(st.p_ym)}`)).json();st.pcmp=j;}
+    try{const qs=[];if(st.p_from)qs.push('ymd_from='+st.p_from);if(st.p_to)qs.push('ymd_to='+st.p_to);
+      const j=await(await fetch(`${API}/api/lgsagub/recvcompare_parts${qs.length?('?'+qs.join('&')):''}`)).json();st.pcmp=j;}
     catch(e){st.pcmp=null;}
     st.p_loading=false;drawParts();};
   const drawParts=()=>{
