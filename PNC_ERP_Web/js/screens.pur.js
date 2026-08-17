@@ -3064,26 +3064,31 @@ SCREEN.lgsagub=(c)=>{
   const drawCompare=()=>{
     const m=st.cmp, cop=m&&m.copper;
     const diff=cop?(cop.in_osp_kg-cop.out_sagub_net):0;
-    const cards=cop?`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        ${card('OUT 사급동(인정)',wonI(cop.out_sagub_net)+' kg',`순=C−R · 금액 ${wonI(cop.out_sagub_net_amt)}원`,'#1c47a0')}
-        ${card('IN OSP 사급입고(원소재)',wonI(cop.in_osp_kg)+' kg',`${wonI(cop.in_osp_amt)}원 · 단가 ${wonI(cop.osp_price)}/kg`,'#1c7c3a')}
-        ${card('차이(IN−OUT사급)',wonI(diff)+' kg',diff>=0?'입고초과(재고↑/타이밍)':'출고초과(재고↓/타이밍)','#8a6d1a')}
-        ${card('OUT 직거래동(미인정)',wonI(cop.out_jikgae_net)+' kg','LG 사급인정 아님(설치동/직매입)','#a03d2c')}
-      </div>
-      <div style="font-size:12px;color:#5a7597;margin-bottom:8px">사급부품 IN(참고): 수량 ${wonI(m.parts_in.qty)} · ${wonI(m.parts_in.amt)}원 &nbsp;|&nbsp; 리시빙 커버율 ${Math.round(m.coverage.rate)}% (미매칭 ${m.coverage.unmatched_items}품목) &nbsp;|&nbsp; 원단위 기준월 <b>${esc(m.settle_ym||'?')}</b></div>`:'';
     const its=(m&&m.items)||[];
     const showOnly=st.c_only;
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
+    const T={rc:0,rr:0,osg:0,ojk:0};
+    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.osg+=r.out_sagub;T.ojk+=r.out_jikgae;});
+    // 부품 탭과 통일: 큰 카드 대신 컴팩트 요약 1줄(OUT 사급동 vs IN OSP) + 하단 sticky 합계행
+    const summ=cop?`<div style="font-size:12.5px;color:#334;margin-bottom:8px;padding:7px 12px;background:#f4f8ff;border:1px solid #dbe5f2;border-radius:6px">
+        <b style="color:#1c47a0">출고(리시빙) 사급동 ${wonI(cop.out_sagub_net)}kg</b> vs <b style="color:#1c7c3a">입고(LG전산) OSP원소재 ${wonI(cop.in_osp_kg)}kg</b>
+        · 수량차이 <b style="color:${diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(diff)}kg</b>
+        · 직거래동(미인정) <b style="color:#a03d2c">${wonI(cop.out_jikgae_net)}kg</b>
+        <span style="color:#8aa0bd">· 원단위 ${esc(m.settle_ym||'?')} · 커버율 ${Math.round(m.coverage.rate)}%(미매칭 ${m.coverage.unmatched_items})</span></div>`:'';
     const csh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.c_sort.k===k?(st.c_sort.dir<0?' ▼':' ▲'):''}</th>`;
     const rowsH=st.c_loading?spinRow(7):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
         <td><b>${esc(r.item)}</b>${!r.matched?' <span style="color:#a03d2c;font-size:10px">미매칭</span>':''}</td>
         <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
-        <td class="num">${wonI(r.recv_c)}</td><td class="num" style="color:#a03d2c">${r.recv_r?wonI(r.recv_r):'-'}</td>
+        <td class="num">${wonI(r.recv_c)}</td><td class="num" style="color:#a03d2c">${r.recv_r?wonI(r.recv_r):''}</td>
         <td class="num" style="color:#1c47a0;font-weight:600">${r.out_sagub?wonI(r.out_sagub):'-'}</td>
         <td class="num" style="color:#a03d2c">${r.out_jikgae?wonI(r.out_jikgae):'-'}</td>
         <td class="num" style="font-size:11px;color:#8aa0bd">${r.per_sagub?r.per_sagub.toFixed(4):'-'}</td></tr>`).join('')
       :`<tr><td colspan="7" class="empty">데이터 없음 — 원단위 업로드 + 조회하세요</td></tr>`);
+    const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
+        <td class="num">${wonI(T.rc)}</td><td class="num" style="color:#a03d2c">${wonI(T.rr)}</td>
+        <td class="num" style="color:#1c47a0">${wonI(T.osg)}</td><td class="num" style="color:#a03d2c">${wonI(T.ojk)}</td>
+        <td class="num"></td></tr></tfoot>`:'';
     c.innerHTML=`
      <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
      ${tabBar()}
@@ -3096,12 +3101,12 @@ SCREEN.lgsagub=(c)=>{
        <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
        <div class="spacer"></div><span class="rowcount">${cop?`리시빙×원단위(${esc(m.settle_ym)})`:'조회 전'}</span>
      </div>
-     ${cards}
-     <div class="grid-wrap" style="max-height:440px;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
-        ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','리시빙 C','num')}${csh('recv_r','반품 R','num')}
+     ${summ}
+     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+        ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
         ${csh('out_sagub','OUT 사급동(kg)','num')}${csh('out_jikgae','OUT 직거래동(kg)','num')}${csh('per_sagub','개당사급','num')}</tr></thead>
-       <tbody>${rowsH}</tbody></table></div>
-     <style>.lg-tbl tfoot .lg-foot td,.grid-wrap tfoot .lg-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;border-top:2px solid #b9cbe6;z-index:3}</style>`;
+       <tbody>${rowsH}</tbody>${foot}</table></div>
+     <style>.lg-tbl thead th{position:sticky;top:0;background:#f1f5fb;z-index:4}.lg-tbl tfoot .lg-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;border-top:2px solid #b9cbe6;z-index:3}</style>`;
     wireTabs();
     c.querySelector('#c-sy2').oninput=e=>{st.c_sy=m2ym(e.target.value);};
     c.querySelector('#c-go').onclick=()=>{st.c_from=date2ymd(c.querySelector('#c-df').value);st.c_to=date2ymd(c.querySelector('#c-dt').value);loadCompare();};
