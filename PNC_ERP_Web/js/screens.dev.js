@@ -1255,6 +1255,37 @@ SCREEN.unifybom=(c,ro)=>{
   let codes={}, vlist=[];
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
+  let fastenD=null, fastenFor='';   // 체결 매트릭스(품목별 체결 공정횟수 입력→가공비). /api/assywork
+  const loadFasten=async(force)=>{ if(!item)return; if(!force&&fastenFor===item&&fastenD)return;
+    try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(item)}`);fastenD=await r.json();fastenFor=item;}catch(e){fastenD={rows:[],error:e.message};} };
+  const saveFasten=async()=>{ if(!fastenD)return;
+    const rows=(fastenD.rows||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+    try{const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows,user:'웹'})});
+      const j=await r.json(); if(!j.ok){alert('체결 저장 실패');return;}
+      await loadFasten(true); await loadNae(true);   // 가공비 재계산 반영
+      alert(`체결 저장 완료 — ${j.count}공정 · 가공비 재계산`);
+    }catch(e){alert('체결 저장 오류: '+e.message);} };
+  // 체결 매트릭스 렌더(레거시 견적원가조회 체결보기: 표준공수 고정·공정횟수 입력·내부ST 자동)
+  const fastenMatrix=()=>{
+    if(!fastenD)return `<div class="empty">체결 매트릭스 로딩…</div>`;
+    const rows=fastenD.rows||[]; const RW=(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')));
+    const tSt=rows.reduce((s,r)=>s+(+r.qty||0)*(+r.std_st||0),0);
+    const gag=Math.round(tSt/3600*(fastenD.labor_rate||20776));
+    const cell=(r,i)=>`<td class="num"><input class="fq" data-i="${i}" type="number" min="0" step="1" value="${r.qty||''}" ${RW?'':'disabled'} style="width:46px;text-align:center"></td>`;
+    return `<div style="flex:1 1 auto;min-height:0;overflow:auto">
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 4px">
+        <b style="color:#8e44ad">🔩 체결 공정 (품목별 횟수 입력)</b>
+        <span style="font-size:11px;color:var(--muted)">표준공수×횟수=내부ST · 가공비=Σ내부ST÷3600×임율(${won(fastenD.labor_rate||0)})</span>
+        <span style="margin-left:auto;font-weight:700;color:#1c47a0">체결 내부ST ${won(Math.round(tSt))} · 가공비 ${won(gag)}원</span>
+        ${RW?`<button class="btn" id="ft-save" style="background:#1c7c3a;color:#fff">💾 저장</button>`:''}</div>
+      <div class="grid-wrap" style="overflow:auto"><table class="tbl fit" style="font-size:12px"><thead><tr>
+        <th>체결공정</th>${rows.map(r=>`<th class="num" title="${esc(r.fname)}" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.fname)}</th>`).join('')}<th class="num" style="background:#eef4ff">합계</th></tr></thead>
+        <tbody>
+          <tr><td style="text-align:left;color:#5a6b82">표준공수</td>${rows.map(r=>`<td class="num" style="color:#8a94a6">${r.std_st}</td>`).join('')}<td></td></tr>
+          <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">공정횟수</td>${rows.map((r,i)=>cell(r,i)).join('')}<td class="num"><b>${won(rows.reduce((s,r)=>s+(+r.qty||0),0))}</b></td></tr>
+          <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td>${rows.map(r=>`<td class="num" style="color:#8a5a1a">${(+r.qty||0)?won(Math.round((+r.qty||0)*(+r.std_st||0))):''}</td>`).join('')}<td class="num" style="color:#8a5a1a"><b>${won(Math.round(tSt))}</b></td></tr>
+        </tbody></table></div></div>`;
+  };
   let naeModal=false;   // 공정 수정 팝업(모달) 표시
   const _prevYm=(()=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}`;})();  // 직전 완성월 YYMM(사급 리시빙월 기본)
   let silD=null, silFor='', silLoad=false, silView='company', silSagYm=_prevYm;
@@ -1698,7 +1729,7 @@ SCREEN.unifybom=(c,ro)=>{
       let mid='';
       if(view==='proc') mid=`<div class="nae-2col" style="flex:1 1 auto;min-height:0;height:100%;grid-template-rows:minmax(0,1fr);align-items:stretch">${naeFlatMat(a,rows,prc)}${naeRightPanel(a,rows,prc)}</div>`;
       else if(view==='weld'){const wp=prc.filter(p=>p.group==='용접');mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${matTable(a,rows.filter(r=>String(r.code).toUpperCase().startsWith('RAC')||r.silver),false)}${procTable(wp)}</div>`;}
-      else if(view==='fasten'){const fp=prc.filter(p=>p.group==='체결');mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${procTable(fp)}</div>`;}
+      else if(view==='fasten'){mid=fastenMatrix();}
       else mid=`<div style="flex:1 1 auto;min-height:0;overflow:auto">${companyTable(rows)}</div>`;
       content=`<div style="flex:0 0 auto">${sumbar(a,'naewon','내부원가')}${naeViewBar()}</div>${mid}${naeModal?naeProcModal():''}`;
     }
@@ -1719,7 +1750,9 @@ SCREEN.unifybom=(c,ro)=>{
     g('#nae-regen').onclick=()=>loadNae(true);
     {const w=g('#nae-weld');if(w)w.onclick=()=>{showWeld=!showWeld;drawNae();};}
     // [조립공정] 툴바 버튼 제거 — 레벨0(제품) 행의 [등록/수정]이 동일 팝업(용접·포장·체결) 담당(중복 제거)
-    c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=()=>{naeView=el.dataset.v;drawNae();});
+    c.querySelectorAll('.nae-vb').forEach(el=>el.onclick=async()=>{naeView=el.dataset.v;if(naeView==='fasten')await loadFasten();drawNae();});
+    c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});
+    {const fs=c.querySelector('#ft-save');if(fs)fs.onclick=saveFasten;}
     // 좌측 레벨트리: 행 클릭=우측 조회 / [등록/수정] 버튼=팝업
     c.querySelectorAll('.nae-trow[data-node]').forEach(el=>el.onclick=e=>{if(e.target.closest('.nae-edit-btn'))return;loadNaeProc(el.dataset.node,false);});
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
