@@ -1437,6 +1437,7 @@ SCREEN.unifybom=(c,ro)=>{
     weldRows=[];
     (weldCand||[]).forEach(w=>{weldRows.push({weld_item:(w.child_item||w.weld_item||'').toUpperCase(),pipe_diam:'',weld_qty:''});});
     if(!weldRows.length) weldRows.push({weld_item:'RAC30599301-1',pipe_diam:'',weld_qty:''});
+    fastenD=null; fastenFor=''; await loadFasten(true);   // ★신규등록 체결 매트릭스(빈 폼=표준공수만, 횟수 입력받음)
     tab='bom'; draw();
   };
   // ①LG BOM 불러오기 — [기준정보›LG BOM관리]에 적재된 nx.lg_bom에서 모델 선택→tree 전개→구성 초안(파일 업로드 아님)
@@ -1526,7 +1527,12 @@ SCREEN.unifybom=(c,ro)=>{
     let wsum=0;
     try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
       const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
-    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)}`);
+    // ★체결 매트릭스 저장(신규등록 시 함께) — nx.item_fasten
+    let fcnt=0;
+    try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+      const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
+      const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
+    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정`);
     isNew=false; load(item);
   };
   // ============ 탭바 ============
@@ -2010,7 +2016,7 @@ SCREEN.unifybom=(c,ro)=>{
      ${item&&!loading?((viewTree&&!editMode)?`
        ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
-       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel():''}`):''}
+       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?weldPanel()+`<div style="border:1px solid #d6c3ea;border-radius:8px;background:#faf7ff;margin-top:8px;padding:2px 6px">${fastenMatrix(true)}</div>`:''}`):''}
      ${(wuBusy||wuData)?wuModalHtml():''}
      ${bomCss()}`;
     const qi=c.querySelector('#bm-q');
@@ -2050,6 +2056,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const cy=c.querySelector('#nw-copy');if(cy)cy.onclick=copyNew;}
     {const bl=c.querySelector('#nw-blank');if(bl)bl.onclick=blankNew;}
     if(editMode&&isNew)bindWeld();
+    c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});  // 신규등록 체결 횟수 입력
     c.querySelectorAll('.nm-fld').forEach(el=>el.onchange=()=>{newMaster[el.dataset.k]=el.value;});  // 제품 마스터속성 write-back
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
