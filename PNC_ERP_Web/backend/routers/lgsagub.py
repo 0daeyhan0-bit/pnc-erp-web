@@ -305,10 +305,26 @@ CREATE TABLE nx.lg_settle_unit(
   assy_pn varchar(50), assy_desc nvarchar(200), sub_pn varchar(50), sub_desc nvarchar(200),
   qty float, gubun1 nvarchar(10), gubun2 nvarchar(30),
   od float, thk float, leng float, weight float, mat_cost float,
-  src_file nvarchar(200), upload_dt datetime DEFAULT getdate())"""
+  eff_ym varchar(4), src_file nvarchar(200), upload_dt datetime DEFAULT getdate())"""
+# eff_ym = Update 일정(품목 추가/변경 시점, YYMM). 유효일자 필터(리시빙월 ≤ eff_ym 제외)용.
+_SETTLE_MIGRATE = "IF COL_LENGTH('nx.lg_settle_unit','eff_ym') IS NULL ALTER TABLE nx.lg_settle_unit ADD eff_ym varchar(4);"
 
 def _settle_prep(cur):
-    cur.execute(_SETTLE_DDL)
+    cur.execute(_SETTLE_DDL); cur.execute(_SETTLE_MIGRATE)
+
+
+def _upd_ym(v):
+    """Update 일정 문자열 → YYMM(효력월). '19.05월'→'1905', '16.9월->17.6월'→'1706'(최신),
+       '17.11월(황동물 추가)'→'1711'. 빈값/'수정'→'' (기초행=항상 유효). 여러 날짜면 마지막 채택."""
+    import re
+    s = str(v or "")
+    ms = re.findall(r"(\d{1,2})[.\-/](\d{1,2})", s)
+    if not ms:
+        return ""
+    y, m = ms[-1]                      # 마지막 날짜(→ 이동 후 최신)
+    y = int(y); m = int(m)
+    if y >= 100: y = y % 100
+    return f"{y:02d}{m:02d}"
 
 
 def _pick_sheet(wb):
@@ -373,6 +389,7 @@ async def settle_upload(file: UploadFile = File(...), ym: str = Query(""), sheet
     ci_len = find("길이")
     ci_wt = find("중량")
     ci_mc = find("소재비변경후", "소재비")
+    ci_upd = find("update일정", "update", "업데이트일정")
     if ci_assy is None or ci_g1 is None or ci_wt is None:
         return {"ok": False, "error": "필수컬럼(Assy P/N·구분1·중량) 감지 실패",
                 "header": [str(x) for x in rows_all[hi]]}
@@ -398,7 +415,7 @@ async def settle_upload(file: UploadFile = File(...), ym: str = Query(""), sheet
                      str(gv(r, ci_assydesc) or "")[:200], str(gv(r, ci_sub) or "")[:50],
                      str(gv(r, ci_subdesc) or "")[:200], _f(r, ci_qty), g1[:10],
                      str(gv(r, ci_g2) or "")[:30], _f(r, ci_od), _f(r, ci_thk),
-                     _f(r, ci_len), _f(r, ci_wt), _f(r, ci_mc)))
+                     _f(r, ci_len), _f(r, ci_wt), _f(r, ci_mc), _upd_ym(gv(r, ci_upd))))
     if not recs:
         return {"ok": False, "error": "데이터 행 없음", "header": [str(x) for x in rows_all[hi]]}
 
@@ -414,11 +431,11 @@ async def settle_upload(file: UploadFile = File(...), ym: str = Query(""), sheet
             cur.execute("DELETE FROM nx.lg_settle_unit WHERE src_file=?", fn)
         try: cur.fast_executemany = True
         except Exception: pass
-        cols = "(ym,coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,src_file)"
+        cols = "(ym,coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,eff_ym,src_file)"
         n = 0; BATCH = 120
         for i in range(0, len(recs), BATCH):
             chunk = recs[i:i + BATCH]
-            vals = ",".join("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)" for _ in chunk)
+            vals = ",".join("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)" for _ in chunk)
             flat = []
             for t in chunk:
                 flat += list(t) + [fn]
@@ -463,17 +480,22 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         if not sy:
             cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
             r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
+        rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        # 유효일자 컷오프 = 리시빙 최종월. 그 시점에 아직 추가 안 된 품목(eff_ym > M)은 소요 제외.
+        eff_cut = (max(yms) if yms else (ym.strip() or sy))
         # 원단위 Assy별 사급/직거래 중량(1제품당) + 사급 소재비(원, 등급별 mat_cost 단가 반영)
         # 금액 = Σ(컴포넌트 중량 × 컴포넌트 단가). mat_cost=등급/코드별 동관 단가(원/kg): 일반18,458·고강도19,216 등.
+        # ★eff_ym 필터: 빈값(기초행)·eff_ym ≤ 리시빙월만 = 그 시점 유효 스펙(누적 마스터 point-in-time).
         cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, gubun1, SUM(ISNULL(weight,0)) w,
                          SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c
-                       FROM nx.lg_settle_unit WHERE ym=? GROUP BY UPPER(LTRIM(RTRIM(assy_pn))), gubun1""", sy)
+                       FROM nx.lg_settle_unit
+                       WHERE ym=? AND (eff_ym IS NULL OR eff_ym='' OR eff_ym<=?)
+                       GROUP BY UPPER(LTRIM(RTRIM(assy_pn))), gubun1""", sy, eff_cut)
         u_sg = {}; u_jk = {}; u_sg_c = {}
         for a, g1, w, c in cur.fetchall():
             g1 = (g1 or "").strip()
             if g1 == "사급": u_sg[a] = f(w); u_sg_c[a] = f(c)
             elif g1 == "직거래": u_jk[a] = f(w)
-        rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
               SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
               SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr,
