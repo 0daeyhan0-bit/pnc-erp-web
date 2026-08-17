@@ -3069,28 +3069,29 @@ SCREEN.lgsagub=(c)=>{
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
     const price=cop?cop.osp_price:0;
-    filt.forEach(r=>{r.sg_amt=Math.round(r.out_sagub*price);r.jk_amt=Math.round(r.out_jikgae*price);});
-    const T={rc:0,rr:0,osg:0,sga:0,ojk:0,jka:0};
-    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.osg+=r.out_sagub;T.sga+=r.sg_amt;T.ojk+=r.out_jikgae;T.jka+=r.jk_amt;});
-    // 부품 탭과 통일: 큰 카드 대신 컴팩트 요약 1줄(사급동 vs IN OSP, 금액포함) + 하단 sticky 합계행
+    // 완제품별 사급소요량 = 개당소요(원단위) × (리시빙 순수량 C−R). 금액 = 소요량 × 사급단가.
+    filt.forEach(r=>{r.soyo=Math.round((r.per_sagub||0)*((r.recv_c||0)-(r.recv_r||0)));r.amt=Math.round(r.soyo*price);});
+    const T={rc:0,rr:0,soyo:0,amt:0};
+    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.soyo+=r.soyo;T.amt+=r.amt;});
+    const chai=cop?(cop.out_sagub_net-cop.in_osp_kg):0;          // 합계(리시빙×소요) − LG입고
+    const chai_amt=cop?(cop.out_sagub_net_amt-cop.in_osp_amt):0;
+    // 총계 요약: 합계(리시빙×소요) − LG입고중량 = 차이. (LG입고는 raw tube 총량이라 완제품별 배분 불가)
     const summ=cop?`<div style="font-size:12.5px;color:#334;margin-bottom:8px;padding:7px 12px;background:#f4f8ff;border:1px solid #dbe5f2;border-radius:6px">
-        <b style="color:#1c47a0">출고(리시빙) 사급동 ${wonI(cop.out_sagub_net)}kg · ${wonI(cop.out_sagub_net_amt)}원</b> vs <b style="color:#1c7c3a">입고(LG전산) OSP ${wonI(cop.in_osp_kg)}kg · ${wonI(cop.in_osp_amt)}원</b>
-        · 수량차이 <b style="color:${diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(diff)}kg</b> · 직거래동(미인정) <b style="color:#a03d2c">${wonI(cop.out_jikgae_net)}kg</b>
-        <span style="color:#8aa0bd">· 사급단가 ${wonI(price)}/kg · 원단위 ${esc(m.settle_ym||'?')}</span></div>`:'';
+        합계 <b style="color:#1c47a0">사급소요량(리시빙×소요) ${wonI(cop.out_sagub_net)}kg · ${wonI(cop.out_sagub_net_amt)}원</b>
+        − <b style="color:#1c7c3a">LG 입고중량(OSP) ${wonI(cop.in_osp_kg)}kg · ${wonI(cop.in_osp_amt)}원</b>
+        = 차이 <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">${wonI(chai)}kg · ${wonI(chai_amt)}원</b>
+        <span style="color:#8aa0bd">· 사급단가 ${wonI(price)}/kg · 원단위 ${esc(m.settle_ym||'?')} · ★LG입고는 raw tube 총량(완제품 품목매칭 불가)</span></div>`:'';
     const csh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.c_sort.k===k?(st.c_sort.dir<0?' ▼':' ▲'):''}</th>`;
-    const rowsH=st.c_loading?spinRow(8):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
+    const rowsH=st.c_loading?spinRow(6):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
         <td><b>${esc(r.item)}</b>${!r.matched?' <span style="color:#a03d2c;font-size:10px">미매칭</span>':''}</td>
-        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
+        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
         <td class="num">${wonI(r.recv_c)}</td><td class="num" style="color:#a03d2c">${r.recv_r?wonI(r.recv_r):''}</td>
-        <td class="num" style="color:#1c47a0;font-weight:600">${r.out_sagub?wonI(r.out_sagub):'-'}</td>
-        <td class="num" style="color:#1c47a0">${r.sg_amt?wonI(r.sg_amt):'-'}</td>
-        <td class="num" style="color:#a03d2c">${r.out_jikgae?wonI(r.out_jikgae):'-'}</td>
-        <td class="num" style="color:#a03d2c">${r.jk_amt?wonI(r.jk_amt):'-'}</td></tr>`).join('')
-      :`<tr><td colspan="8" class="empty">데이터 없음 — 원단위 업로드 + 조회하세요</td></tr>`);
+        <td class="num" style="color:#1c47a0;font-weight:600">${r.soyo?wonI(r.soyo):'-'}</td>
+        <td class="num" style="color:#1c47a0">${r.amt?wonI(r.amt):'-'}</td></tr>`).join('')
+      :`<tr><td colspan="6" class="empty">데이터 없음 — 원단위 업로드('원소재 마스터'>동정산 원단위) 후 조회</td></tr>`);
     const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
         <td class="num">${wonI(T.rc)}</td><td class="num" style="color:#a03d2c">${wonI(T.rr)}</td>
-        <td class="num" style="color:#1c47a0">${wonI(T.osg)}</td><td class="num" style="color:#1c47a0">${wonI(T.sga)}</td>
-        <td class="num" style="color:#a03d2c">${wonI(T.ojk)}</td><td class="num" style="color:#a03d2c">${wonI(T.jka)}</td></tr></tfoot>`:'';
+        <td class="num" style="color:#1c47a0">${wonI(T.soyo)}</td><td class="num" style="color:#1c47a0">${wonI(T.amt)}</td></tr></tfoot>`:'';
     c.innerHTML=`
      <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
      ${tabBar()}
