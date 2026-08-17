@@ -154,9 +154,15 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
-        # 같은 파일 재업로드 시 중복방지: src_file+biz 기존 삭제 후 삽입(같은 파일을 다른 사업부로 올릴 일 없음)
+        # ★재업로드=최신 업데이트(#9): 같은 사업부의 "그 파일에 담긴 일자(ymd)" 또는 같은 파일명 기존행 삭제 후 삽입.
+        #   OSP 파일명은 다운로드마다 번호가 바뀌므로 파일명만으론 중복제거 안 됨 → biz+ymd 기준으로 같은 사업부·같은 날짜는 최신이 덮어씀.
         fn = (file.filename or "")[:200]
-        cur.execute("DELETE FROM nx.lg_sagub_actual WHERE src_file=? AND ISNULL(biz,'')=?", fn, bizv)
+        ymds = sorted({x[1] for x in recs if x[1]})
+        if ymds:
+            inl = ",".join("'" + y + "'" for y in ymds)
+            cur.execute(f"DELETE FROM nx.lg_sagub_actual WHERE ISNULL(biz,'')=? AND (ISNULL(ymd,'') IN ({inl}) OR src_file=?)", bizv, fn)
+        else:
+            cur.execute("DELETE FROM nx.lg_sagub_actual WHERE ISNULL(biz,'')=? AND src_file=?", bizv, fn)
         # ★배치 다중행 INSERT — 파라미터 2100 한도: 11컬럼 × 150 = 1650 안전
         try: cur.fast_executemany = True
         except Exception: pass
@@ -190,9 +196,11 @@ def lgsagub_summary():
         by_ym = [{"ym": r[0], "items": r[1], "qty": float(r[2] or 0), "amt": float(r[3] or 0)} for r in cur.fetchall()]
         cur.execute("SELECT ISNULL(biz,'') b, COUNT(*) c, SUM(ISNULL(amt,0)) amt FROM nx.lg_sagub_actual GROUP BY ISNULL(biz,'') ORDER BY b")
         by_biz = [{"biz": r[0], "rows": r[1], "amt": float(r[2] or 0)} for r in cur.fetchall()]
+        cur.execute("SELECT MIN(NULLIF(ymd,'')), MAX(NULLIF(ymd,'')) FROM nx.lg_sagub_actual")
+        _rr = cur.fetchone(); ymd_min = _rr[0] or ""; ymd_max = _rr[1] or ""
         cur.execute("SELECT src_file, ISNULL(biz,''), MIN(ym), MAX(ym), COUNT(*), MAX(upload_dt) FROM nx.lg_sagub_actual GROUP BY src_file, ISNULL(biz,'') ORDER BY MAX(upload_dt) DESC")
         files = [{"file": r[0], "biz": r[1], "ym_from": r[2], "ym_to": r[3], "rows": r[4], "dt": str(r[5])[:19]} for r in cur.fetchall()]
-        return {"by_ym": by_ym, "by_biz": by_biz, "files": files}
+        return {"by_ym": by_ym, "by_biz": by_biz, "files": files, "ymd_min": ymd_min, "ymd_max": ymd_max}
     finally:
         nx.close()
 
@@ -202,28 +210,44 @@ def _cls_of(name):
     return "원소재" if "TUBE" in str(name or "").upper() else "사급부품"
 
 
+def _range_wh(ym, ym_from, ym_to, ymd_from, ymd_to):
+    """기간 필터 조건 생성: ymd(일자 YYMMDD) 범위 우선, 없으면 ym(월). 반환 (조건리스트, 파라미터)."""
+    wh = []; p = []
+    if ymd_from.strip() or ymd_to.strip():
+        if ymd_from.strip(): wh.append("ISNULL(s.ymd,'')>=?"); p.append(ymd_from.strip())
+        if ymd_to.strip():   wh.append("ISNULL(s.ymd,'')<=?"); p.append(ymd_to.strip())
+    elif ym.strip():
+        wh.append("s.ym=?"); p.append(ym.strip())
+    else:
+        if ym_from.strip(): wh.append("s.ym>=?"); p.append(ym_from.strip())
+        if ym_to.strip():   wh.append("s.ym<=?"); p.append(ym_to.strip())
+    return wh, p
+
+
 @router.get("/api/lgsagub/list")
-def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""), biz: str = Query(""), cls: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
-    """LG사급 실적 품목별 요약목록(기간·사업부·분류 필터). 기간=ym_from~ym_to(YYMM), ym=단월 우선.
-       pmin/pmax=단가 최소/최대(다르면 가격변동 有→pchg=1), ndays=일자수. cls=원소재(품명 TUBE)/사급부품. item_name 없으면 마스터 보강."""
+def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""),
+                 biz: str = Query(""), cls: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
+    """LG사급 실적 품목별 요약목록(기간·사업부·분류 필터). 기간=일자범위 ymd_from~ymd_to(YYMMDD) 우선, 없으면 월(ym).
+       biz=품목별 사업부(콤마구분), pmin/pmax=단가(다르면 pchg=1), ndays=일자수. cls=원소재(품명 TUBE)/사급부품."""
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
         wh = ["1=1"]; p = []
-        if ym.strip():
-            wh.append("s.ym=?"); p.append(ym.strip())
-        else:
-            if ym_from.strip(): wh.append("s.ym>=?"); p.append(ym_from.strip())
-            if ym_to.strip():   wh.append("s.ym<=?"); p.append(ym_to.strip())
+        rwh, rp = _range_wh(ym, ym_from, ym_to, ymd_from, ymd_to); wh += rwh; p += rp
         if biz.strip(): wh.append("ISNULL(s.biz,'')=?"); p.append(biz.strip())
         if q.strip():
             wh.append("(s.item_code LIKE ? OR s.item_name LIKE ?)"); p += [f"%{q.strip()}%", f"%{q.strip()}%"]
+        whs = ' AND '.join(wh)
+        # 품목별 사업부(#8): 같은 필터로 (item, biz) 집계 → item별 사업부 콤마목록
+        cur.execute(f"SELECT s.item_code, ISNULL(s.biz,'') b FROM nx.lg_sagub_actual s WHERE {whs} GROUP BY s.item_code, ISNULL(s.biz,'')", *p)
+        bizmap = {}
+        for ic, b in cur.fetchall(): bizmap.setdefault(ic, set()).add(b or '')
         cur.execute(f"""SELECT TOP {int(limit)} s.item_code,
               MAX(ISNULL(NULLIF(s.item_name,''), ISNULL(i.item_name,''))) nm,
               SUM(ISNULL(s.qty,0)) qty, SUM(ISNULL(s.amt,0)) amt,
               MIN(NULLIF(s.price,0)) pmin, MAX(s.price) pmax, COUNT(*) cnt, COUNT(DISTINCT ISNULL(s.ymd,'')) ndays
             FROM nx.lg_sagub_actual s LEFT JOIN nx.item i ON i.item_code=s.item_code COLLATE DATABASE_DEFAULT
-            WHERE {' AND '.join(wh)}
+            WHERE {whs}
             GROUP BY s.item_code ORDER BY SUM(ISNULL(s.amt,0)) DESC, s.item_code""", *p)
         rows = []
         clsf = cls.strip()
@@ -232,7 +256,9 @@ def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Que
             cl = _cls_of(r[1])
             if clsf and cl != clsf:
                 continue
-            rows.append({"item": r[0], "name": r[1], "cls": cl, "qty": float(r[2] or 0), "amt": float(r[3] or 0),
+            rows.append({"item": r[0], "name": r[1], "cls": cl,
+                         "biz": ",".join(sorted(x for x in bizmap.get(r[0], set()) if x)),
+                         "qty": float(r[2] or 0), "amt": float(r[3] or 0),
                          "pmin": pmin, "pmax": pmax, "cnt": r[6], "ndays": r[7],
                          "pchg": 1 if (pmin and pmax and abs(pmax - pmin) > 1e-6) else 0})
         return {"rows": rows, "cnt": len(rows)}
@@ -241,7 +267,8 @@ def lgsagub_list(ym: str = Query(""), ym_from: str = Query(""), ym_to: str = Que
 
 
 @router.get("/api/lgsagub/detail")
-def lgsagub_detail(item: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""), biz: str = Query(""), limit: int = Query(3000)):
+def lgsagub_detail(item: str = Query(""), ym_from: str = Query(""), ym_to: str = Query(""),
+                   ymd_from: str = Query(""), ymd_to: str = Query(""), biz: str = Query(""), limit: int = Query(3000)):
     """품번별 개별 사급 기록(일자·사업부·단가별). 가격 변동일자 확인용. 같은 일자·사업부·단가는 합산."""
     nx = _nx(); cur = nx.cursor()
     try:
@@ -249,8 +276,10 @@ def lgsagub_detail(item: str = Query(""), ym_from: str = Query(""), ym_to: str =
         if not item.strip():
             return {"rows": [], "cnt": 0}
         wh = ["s.item_code=?"]; p = [item.strip()]
-        if ym_from.strip(): wh.append("s.ym>=?"); p.append(ym_from.strip())
-        if ym_to.strip():   wh.append("s.ym<=?"); p.append(ym_to.strip())
+        rwh, rp = _range_wh("", "", "", ymd_from, ymd_to); wh += rwh; p += rp
+        if not (ymd_from.strip() or ymd_to.strip()):
+            if ym_from.strip(): wh.append("s.ym>=?"); p.append(ym_from.strip())
+            if ym_to.strip():   wh.append("s.ym<=?"); p.append(ym_to.strip())
         if biz.strip():     wh.append("ISNULL(s.biz,'')=?"); p.append(biz.strip())
         cur.execute(f"""SELECT TOP {int(limit)} ISNULL(s.ymd,'') ymd, ISNULL(s.biz,'') biz, s.price,
               SUM(ISNULL(s.qty,0)) qty, SUM(ISNULL(s.amt,0)) amt, COUNT(*) cnt
