@@ -2020,17 +2020,21 @@ SCREEN.unifybom=(c,ro)=>{
         const q=el.value.trim();clearTimeout(itT);if(q.length<2)return;
         itT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}&include_past=1`);const rows=(await r.json()).rows||[];  // ★부품등록=휴면·orphan 포함 전체검색
           const dl=c.querySelector('#bm-itemdl');if(dl)dl.innerHTML=rows.map(x=>{itemNames[x.item]=x.name;return `<option value="${esc(x.item)}">${esc(x.name||'')}${x.status&&x.status!=='사용'?' ('+esc(x.status)+')':''}</option>`;}).join('');}catch(e){}},250);};
-      el.onchange=async()=>{const i=+el.dataset.i,code=el.value.trim().toUpperCase();lines[i].child_item=code;
-        if(itemNames[code]){lines[i].item_name=itemNames[code];}
-        if(!code)return;
-        // ★기존 품번 입력 시 품목마스터 자동조회(3방식 공통): 품명·규격·치수·재질·중량·단위·분류·매입처 채움
+      el.onchange=async()=>{const i=+el.dataset.i,code=el.value.trim().toUpperCase();const L=lines[i];L.child_item=code;
+        // ★버그수정: 품번 변경 시 마스터 파생필드는 "항상" 새 품번 기준으로 갱신. 새 품번 값이 비어있으면 이전 품번 잔류값을 클리어(예 Tube→Supporter 시 외경/두께/길이/중량이 남던 문제).
+        const MK=['diam','thick','length','metal_gubun','net_weight','unit','lgroup','sgroup','make_type','cost_gubun'];
+        if(!code){L.item_name='';L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';draw();return;}
         try{const r=await fetch(`${API}/api/bom/iteminfo?item=${encodeURIComponent(code)}`);const d=await r.json();
-          if(d&&d.found){const L=lines[i];
-            if(d.item_name)L.item_name=d.item_name;
-            if(d.item_spec)L.spec=d.item_spec;
-            ['diam','thick','length','metal_gubun','net_weight','unit','lgroup','sgroup','make_type','cost_gubun'].forEach(k=>{if(d[k]!==''&&d[k]!=null)L[k]=d[k];});
-            if(d.in_cust){L.in_cust=d.in_cust;L.cust_name=d.cust_name||'';}
-            draw();}
+          if(d&&d.found){
+            L.item_name=d.item_name||itemNames[code]||'';
+            L.spec=d.item_spec||'';
+            MK.forEach(k=>{L[k]=(d[k]==null?'':d[k]);});                 // 있으면 값·없으면 '' (잔류 방지)
+            if(d.in_cust){L.in_cust=d.in_cust;L.cust_name=d.cust_name||'';}else{L.in_cust='';L.cust_name='';}
+            if(L.net_weight===''||L.net_weight==null){const w=calcWeight(L);if(w!=null)L.net_weight=w;}  // 마스터 중량 없고 동관 치수 있으면 자동계산
+          }else{  // 마스터 미등록 신규 품번 → 스펙 초기화(이전 품번 값 잔류 방지)
+            L.item_name=itemNames[code]||'';L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';
+          }
+          draw();
         }catch(e){}};
     });
     let vT=null;
