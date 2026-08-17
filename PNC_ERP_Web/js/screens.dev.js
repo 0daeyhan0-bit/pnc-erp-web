@@ -1616,16 +1616,16 @@ SCREEN.unifybom=(c,ro)=>{
     try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(node)}`);const j=await r.json();
       const cat=j.catalog||[]; const own0={}; (j.own_procs||[]).forEach(p=>own0[p.proc_code]=p);
       // 가공 own = 조립외 카탈로그 전체(기존값 병합)
-      const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
-        work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
+      const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,std_uph:p.std_uph||0,
+        work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||p.std_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
       // 용접봉 carrier별 = 조립 카탈로그 전체(해당 carrier 기존값 병합)
       const carriers=(j.carriers||[]).map(cr=>{const cur={};(cr.procs||[]).forEach(p=>cur[p.proc_code]=p);
         // 조립공정군(추가용) + ★carrier에 실재하는 비-assy 공정(예:53 가공)도 포함해 표시·보존(유실 방지)
         const assy=cat.filter(p=>p.is_assy); const ac=new Set(assy.map(p=>p.proc_code));
         const extra=(cr.procs||[]).filter(p=>!ac.has(p.proc_code));
         return {weld_item:cr.weld_item,use_qty:cr.use_qty,pipe_diam:cr.pipe_diam,unit_qty:cr.unit_qty,loss_factor:(cr.loss_factor==null?1.5:cr.loss_factor),meta_ok:cr.meta_ok,
-          rows:assy.concat(extra).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
-          work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
+          rows:assy.concat(extra).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,std_uph:p.std_uph||0,
+          work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||p.std_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
       // 제품/SUB(=조립 노드) 판정: 용접봉 carrier 존재 or 최상위 품번(item)
       const isAssy=(carriers.length>0)||(weldCarriers.length>0)||(node===item);
       // ★용접봉 종류=노드당 1개(상단 드롭다운). 기존 종류들 목록 + 기본선택
