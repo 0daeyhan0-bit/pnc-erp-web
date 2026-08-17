@@ -32,10 +32,14 @@ def _prep(cur):
     ph = ",".join("?" * len(_FCODES))
     cur.execute(f"SELECT PROC_CODE FROM nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *_FCODES)
     have = {str(r[0]).strip() for r in cur.fetchall()}
+    ins = 0
     for fc, nm, st, sq in _FASTEN:
         if fc not in have:
             cur.execute("""INSERT INTO nx.CS_M_PROC(PROC_CODE,PROC_DESC,ITEM_LGROUP,SORT_SEQ,PROD_UPH,USE_FLAG)
                 VALUES(?,?,?,?,?,'0')""", fc, nm, 'J', 900 + sq, round(3600.0 / st, 6))
+            ins += 1
+    if ins:
+        cur.connection.commit()
     _seeded = True   # 이 호출로 21개 전부 존재 확정 → 이후 호출은 즉시 리턴
 
 
@@ -55,12 +59,14 @@ def assywork_get(item: str = Query(...)):
     it = item.strip()
     nx = _nx(); cur = nx.cursor()
     try:
-        _prep(cur); nx.commit()
+        _prep(cur)
         qm = {}
         if it:
-            ph = ",".join("?" * len(_FCODES))
-            cur.execute(f"SELECT proc_code, ISNULL(work_qty,0) FROM nx.routing WHERE item_code=? AND proc_code IN ({ph})", it, *_FCODES)
-            for c, q in cur.fetchall(): qm[str(c).strip()] = float(q or 0)
+            # ★proc_code IN(21) 절은 옵티마이저가 전체스캔(0.5s) → item_code seek + LIKE 잔여필터(0.01s). FS 코드만 파이썬에서 취함
+            cur.execute("SELECT proc_code, ISNULL(work_qty,0) FROM nx.routing WHERE item_code=? AND proc_code LIKE 'FS%'", it)
+            for c, q in cur.fetchall():
+                cc = str(c).strip()
+                if cc in _STD: qm[cc] = float(q or 0)
         labor = _labor_rate(cur)
         rows = []
         for fc, nm, st, sq in _FASTEN:
@@ -84,8 +90,8 @@ def assywork_save(payload: dict = Body(...)):
     try:
         _prep(cur)
         # 이 품목의 체결(FS) routing 행만 삭제 후 재삽입 (절삭·용접·기타 공정 불변)
-        ph = ",".join("?" * len(_FCODES))
-        cur.execute(f"DELETE FROM nx.routing WHERE item_code=? AND proc_code IN ({ph})", it, *_FCODES)
+        # ★IN(21) 대신 item_code seek + LIKE 'FS%'(FS 전용, 충돌코드 없음 검증) → 0.5s→0.01s
+        cur.execute("DELETE FROM nx.routing WHERE item_code=? AND proc_code LIKE 'FS%'", it)
         n = 0
         for r in rows:
             c = str(r.get("fcode", "")).strip()
