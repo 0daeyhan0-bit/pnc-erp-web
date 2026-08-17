@@ -3015,16 +3015,16 @@ SCREEN.lgsagub=(c)=>{
      <div class="page-sub">해당월 <b>리시빙(우리→LG 완제품 입고실적)</b>에 투입된 동 소요 vs <b>OSP 사급입고</b> 대사. 원단위(동정산) 기준. <b style="color:#1c47a0">사급=LG인정동</b> / <b style="color:#a03d2c">직거래=미인정(설치동·직매입)</b>. ★중량=수량반영값.</div>
      <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:8px">
        <div style="flex:0 0 auto;border:1px solid #cfe0f5;border-radius:8px;padding:8px 14px;background:#fbfdff;display:flex;flex-direction:column;justify-content:center;white-space:nowrap">
-         <div style="font-size:11px;color:#5a7597;margin-bottom:4px">원단위 기준월(YYMM) <span style="color:#c0392b">*</span></div>
-         <input class="inp" id="c-sy" value="${esc(st.c_sy)}" placeholder="2606" maxlength="4" style="width:90px"></div>
+         <div style="font-size:11px;color:#5a7597;margin-bottom:4px">원단위 기준월 <span style="color:#c0392b">*</span></div>
+         <input type="month" class="inp" id="c-sy" value="${ym2m(st.c_sy)}" style="width:140px"></div>
        <div id="c-dz" title="동정산 원단위 엑셀(피앤씨 탭)" style="flex:1;border:2px dashed #8fb4d6;border-radius:8px;padding:8px;background:#f4f9fe;color:#5a7597;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px">
          📥 동정산 <b style="margin:0 4px">원단위 엑셀</b> 드래그&드롭/클릭 <span style="color:#8aa0bd;margin-left:6px">(기준월 입력 후 · 피앤씨 탭 적재)</span>
          <input type="file" id="c-f" accept=".xlsx,.xls" style="display:none"></div>
      </div>
      ${st.c_msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px">${esc(st.c_msg)}</div>`:''}
      <div class="toolbar" style="margin-bottom:8px">
-       <label class="tl">리시빙 월(YYMM)</label><input class="inp" id="c-ym" value="${esc(st.c_ym)}" maxlength="4" style="width:80px" placeholder="2607">
-       <label class="tl">원단위 기준월</label><input class="inp" id="c-sy2" value="${esc(st.c_sy)}" maxlength="4" style="width:80px" placeholder="최신">
+       <label class="tl">리시빙 월</label><input type="month" class="inp" id="c-ym" value="${ym2m(st.c_ym)}" style="width:140px">
+       <label class="tl">원단위 기준월</label><input type="month" class="inp" id="c-sy2" value="${ym2m(st.c_sy)}" style="width:140px">
        <button class="btn" id="c-go">🔍 대사조회</button>
        <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
        <div class="spacer"></div><span class="rowcount">${cop?`리시빙×원단위(${esc(m.settle_ym)})`:'조회 전'}</span>
@@ -3042,10 +3042,10 @@ SCREEN.lgsagub=(c)=>{
     dz.ondragleave=()=>{dz.style.background='#f4f9fe';};
     dz.ondrop=e=>{e.preventDefault();dz.style.background='#f4f9fe';if(e.dataTransfer.files[0])settleUpload(e.dataTransfer.files[0]);};
     fi.onchange=()=>{if(fi.files[0]){settleUpload(fi.files[0]);fi.value='';}};
-    const syncSy=v=>{st.c_sy=v;const a=c.querySelector('#c-sy'),b=c.querySelector('#c-sy2');if(a&&a.value!==v)a.value=v;if(b&&b.value!==v)b.value=v;};
-    c.querySelector('#c-sy').oninput=e=>syncSy(e.target.value.trim());
-    c.querySelector('#c-sy2').oninput=e=>syncSy(e.target.value.trim());
-    c.querySelector('#c-go').onclick=()=>{st.c_ym=c.querySelector('#c-ym').value.trim();loadCompare();};
+    const syncSy=raw=>{st.c_sy=m2ym(raw);const mv=ym2m(st.c_sy);const a=c.querySelector('#c-sy'),b=c.querySelector('#c-sy2');if(a&&a.value!==mv)a.value=mv;if(b&&b.value!==mv)b.value=mv;};
+    c.querySelector('#c-sy').oninput=e=>syncSy(e.target.value);
+    c.querySelector('#c-sy2').oninput=e=>syncSy(e.target.value);
+    c.querySelector('#c-go').onclick=()=>{st.c_ym=m2ym(c.querySelector('#c-ym').value);loadCompare();};
     c.querySelector('#c-unm').onchange=e=>{st.c_only=e.target.checked?'unmatched':'';drawCompare();};
     attachResizers(c);
   };

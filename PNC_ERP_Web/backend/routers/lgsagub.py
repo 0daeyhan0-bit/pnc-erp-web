@@ -524,3 +524,95 @@ def recvcompare(ym: str = Query(...), settle_ym: str = Query(""), limit: int = Q
         }
     finally:
         nx.close()
+
+
+# ── 사급부품(소분류310) BOM 전개 캐시 ──
+_PARTS_MAPS = None
+def _parts_maps(cur):
+    """CS_M_ITEM_BOM 부모→자식 맵 + 사급부품(SGROUP 310) 집합. 모듈캐시(1회 로드)."""
+    global _PARTS_MAPS
+    if _PARTS_MAPS is not None:
+        return _PARTS_MAPS
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(USE_QTY,0)
+                   FROM nx.CS_M_ITEM_BOM WHERE ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'""")
+    ch = {}
+    for p, c2, q in cur.fetchall():
+        ch.setdefault(p, []).append((c2, float(q or 0)))
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+    sg310 = set(r[0] for r in cur.fetchall())
+    _PARTS_MAPS = (ch, sg310)
+    return _PARTS_MAPS
+
+def _explode_parts(item, ch, sg310, memo):
+    """1개 완제품 → {사급부품(310): 소요개수}. 310 도달시 계상 후 정지(LG가 완성제공)."""
+    if item in memo:
+        return memo[item]
+    memo[item] = {}
+    acc = {}
+    for c2, q in ch.get(item, []):
+        if q <= 0:
+            continue
+        if c2 in sg310:
+            acc[c2] = acc.get(c2, 0.0) + q
+        else:
+            for k, v in _explode_parts(c2, ch, sg310, memo).items():
+                acc[k] = acc.get(k, 0.0) + v * q
+    memo[item] = acc
+    return acc
+
+
+@router.get("/api/lgsagub/recvcompare_parts")
+def recvcompare_parts(ym: str = Query(...), limit: int = Query(3000)):
+    """리시빙 비교(부품): 해당월 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.
+       ★부품=개수 단위(원소재 동=kg과 별개 탭). C=정상·R=반품·순=C−R."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _prep(cur)
+        ch, sg310 = _parts_maps(cur)
+        # 리시빙(ym) 제품별 C/R
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+              SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
+              SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr
+            FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", ym.strip())
+        recv = [(r[0], f(r[1]), f(r[2])) for r in cur.fetchall()]
+        memo = {}
+        out_c = {}; out_r = {}   # 사급부품별 OUT 소요개수
+        for it, qc, qr in recv:
+            pmap = _explode_parts(it, ch, sg310, memo)
+            for part, per in pmap.items():
+                out_c[part] = out_c.get(part, 0.0) + qc * per
+                out_r[part] = out_r.get(part, 0.0) + qr * per
+        # IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 품목별
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a, MAX(price) p
+            FROM nx.lg_sagub_actual WHERE ym=? AND UPPER(item_name) NOT LIKE '%TUBE%'
+            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""", ym.strip())
+        in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
+        # 품명 보강
+        nm = {}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
+        for a, b in cur.fetchall():
+            nm[a] = b
+        # 합집합(OUT 소요 ∪ IN 입고) 품목별 비교
+        parts = set(out_c) | set(in_map)
+        items = []
+        tot_out_c = tot_out_r = tot_in_q = tot_in_a = 0.0
+        for p in parts:
+            oc = out_c.get(p, 0.0); orr = out_r.get(p, 0.0)
+            ind = in_map.get(p, {})
+            iq = ind.get("q", 0.0); ia = ind.get("a", 0.0); price = ind.get("p", 0.0)
+            tot_out_c += oc; tot_out_r += orr; tot_in_q += iq; tot_in_a += ia
+            items.append({"item": p, "name": ind.get("nm") or nm.get(p, ""),
+                          "out_c": oc, "out_r": orr, "out_net": oc - orr,
+                          "in_qty": iq, "in_amt": ia, "price": price,
+                          "diff": iq - (oc - orr)})
+        items.sort(key=lambda x: -(abs(x["out_net"]) + x["in_qty"]))
+        return {
+            "ym": ym.strip(),
+            "summary": {"out_net": tot_out_c - tot_out_r, "out_c": tot_out_c, "out_r": tot_out_r,
+                        "in_qty": tot_in_q, "in_amt": tot_in_a, "parts": len(parts)},
+            "items": items[:int(limit)],
+        }
+    finally:
+        nx.close()
