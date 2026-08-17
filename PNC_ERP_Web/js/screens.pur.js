@@ -2981,11 +2981,36 @@ SCREEN.lgsagub=(c)=>{
     return draw();
   };
   const wireTabs=()=>c.querySelectorAll('.lg-tab').forEach(t=>t.onclick=()=>{if(st.tab!==t.dataset.tab){st.tab=t.dataset.tab;routeTab();}});
-  const loadCompare=async()=>{st.c_loading=true;drawCompare();
+  const loadCompare=async()=>{st.c_loading=true;drawCompare();if(!st.ledger)loadLedger();
     try{const qs=[];if(st.c_from)qs.push('ymd_from='+st.c_from);if(st.c_to)qs.push('ymd_to='+st.c_to);if(st.c_sy)qs.push('settle_ym='+encodeURIComponent(st.c_sy));
       const j=await(await fetch(`${API}/api/lgsagub/recvcompare?${qs.join('&')}`)).json();st.cmp=j;st.c_msg='';}
     catch(e){st.cmp=null;st.c_msg='❌ 조회 실패: '+e.message;}
     st.c_loading=false;drawCompare();};
+  // 월별 동 원소재 수불(기초+입고−소요=기말, 첫 OSP월 기초0). "매월 차이=재고 잔량"을 증명.
+  const loadLedger=async()=>{
+    try{const j=await(await fetch(`${API}/api/lgsagub/recvcompare_ledger`)).json();st.ledger=j;}
+    catch(e){st.ledger=null;}
+    if(st.tab==='compare')drawCompare();};
+  const ledgerHtml=()=>{
+    const L=st.ledger;
+    if(!L) return `<div style="font-size:12px;color:#8aa0bd;margin-bottom:8px">📦 월별 동 재고 수불 로딩…</div>`;
+    const rs=L.rows||[]; const cur=rs.length?rs[rs.length-1]:null;
+    const yl=y=>y?`${y.slice(0,2)}.${y.slice(2)}`:y;
+    const rowsH=rs.map(r=>`<tr>
+        <td><b>${yl(r.ym)}</b></td>
+        <td class="num">${wonI(Math.round(r.open_kg))}</td>
+        <td class="num" style="color:#1c7c3a">${wonI(Math.round(r.in_kg))}</td>
+        <td class="num" style="color:#1c47a0">${wonI(Math.round(r.soyo_kg))}</td>
+        <td class="num" style="font-weight:700;color:${r.close_kg<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r.close_kg))}</td>
+        <td class="num" style="color:#5a7597">${wonI(Math.round(r.close_amt))}</td></tr>`).join('');
+    return `<details open style="margin-bottom:10px;border:1px solid #dbe5f2;border-radius:8px;background:#fbfdff">
+      <summary style="cursor:pointer;padding:8px 12px;font-size:12.5px;font-weight:700;color:#1c47a0">📦 월별 동 원소재 수불 &nbsp;<span style="font-weight:400;color:#8aa0bd">기초 + 입고 − 소요 = 기말 · ${yl(L.from_ym)}부터 기초0(첫 OSP월)</span></summary>
+      <div style="padding:0 10px 8px"><table class="tbl fit lg-tbl" style="font-size:12px"><thead><tr>
+        <th>월</th><th class="num">기초(kg)</th><th class="num">입고(kg)</th><th class="num">소요(kg)</th><th class="num">기말(kg)</th><th class="num">기말금액(원)</th>
+      </tr></thead><tbody>${rowsH||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>
+      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">★"매월 차이"는 손실이 아니라 <b style="color:#1c47a0">동 재고 잔량</b>입니다(입고 타이밍으로 증감).${cur?` 현재 기말 <b style="color:#16324f">${wonI(Math.round(cur.close_kg))}kg · ${wonI(Math.round(cur.close_amt))}원</b>`:''}</div>
+      </div></details>`;
+  };
   // ── 원단위 관리(업로드·적용월·목록) ──
   const loadSettle=async()=>{st.s_loading=true;drawSettle();
     try{const qs=[];if(st.s_ym)qs.push('ym='+encodeURIComponent(st.s_ym));if(st.s_q)qs.push('q='+encodeURIComponent(st.s_q));
@@ -3094,6 +3119,7 @@ SCREEN.lgsagub=(c)=>{
     c.innerHTML=`
      <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
      ${tabBar()}
+     ${ledgerHtml()}
      <div class="page-sub"><b>완제품별</b> 사급소요량(리시빙 수량 × 원단위 개당소요 = <b style="color:#1c47a0">LG인정 사급동</b>) vs <b style="color:#1c7c3a">LG 입고중량(OSP)</b> 총계 대사. ★<b>차이 = 합계(리시빙×소요) − LG입고</b> · LG입고는 raw tube 총량이라 품목매칭 불가 → 총계로만 비교 · <span style="color:#8aa0bd">원단위 업로드는 '원소재 마스터 › 동정산 원단위'</span></div>
      ${st.c_msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px">${esc(st.c_msg)}</div>`:''}
      <div class="toolbar" style="margin-bottom:8px">
@@ -3104,7 +3130,7 @@ SCREEN.lgsagub=(c)=>{
        <div class="spacer"></div><span class="rowcount">${cop?`리시빙×원단위(${esc(m.settle_ym)})`:'조회 전'}</span>
      </div>
      ${summ}
-     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+     <div class="grid-wrap" style="max-height:calc(100vh - 500px);min-height:180px;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
         ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
         ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
        <tbody>${rowsH}</tbody>${foot}</table></div>

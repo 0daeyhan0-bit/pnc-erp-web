@@ -569,10 +569,13 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
         if not sy:
             cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
             r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
-        # from_ym 기본 = OSP(사급입고) 첫 데이터월. to_ym 기본 = OSP 최신월.
+        # ★수불 개시월 = 2603(2026.03) 사용자 확정. 그 이전 OSP 데이터 없어 기초0 시작. to_ym 기본 = OSP 최신월.
         cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) LIKE '%TUBE%'")
         r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
-        frm = from_ym.strip() or osp_min or "2603"
+        LEDGER_START = "2603"
+        frm = from_ym.strip() or LEDGER_START
+        if osp_min and frm < osp_min:    # OSP 데이터 없는 이전달로 시작하면 입고0→마이너스 → 첫 OSP월로 클램프
+            frm = osp_min
         to = to_ym.strip() or osp_max or frm
 
         def ym_next(y):
@@ -730,7 +733,8 @@ def _recv_where(ym, ymd_from, ymd_to):
 @router.get("/api/lgsagub/recvcompare_parts")
 def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""), limit: int = Query(3000)):
     """리시빙 비교(부품): 기간 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.
-       ★부품=개수 단위. C=정상·R=반품·순=C−R. 기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
+       ★부품=개수 단위. 소비=C(정상)만(R은 반품 아님→차감안함). BOM=CS_M_ITEM_BOM 전체(원가제외필터 미적용).
+       기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
     f = lambda v: float(v or 0)
     nx = _nx(); cur = nx.cursor()
     try:
