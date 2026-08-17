@@ -19,16 +19,24 @@ _FASTEN = [
 ]
 _FCODES = [f[0] for f in _FASTEN]
 _STD = {f[0]: f[2] for f in _FASTEN}
+_seeded = False   # 프로세스 내 시드 완료 플래그(21회 왕복 회피). 재기동시 리셋.
 
 
 def _prep(cur):
     """체결 21공정을 nx.CS_M_PROC에 시드(없을 때만). item_lgroup='J'(전품목 유효), use_flag='0'(공정별 목록 숨김·엔진은 계상).
-       prod_uph=3600/표준공수 → 엔진 cg3(임율/UPH×횟수)=표준공수×횟수÷3600×임율."""
+       prod_uph=3600/표준공수 → 엔진 cg3(임율/UPH×횟수)=표준공수×횟수÷3600×임율.
+       ★사외망 지연 대비: 21개 개별 SELECT→1회 배치조회, 시드 완료 후 완전 스킵."""
+    global _seeded
+    if _seeded:
+        return
+    ph = ",".join("?" * len(_FCODES))
+    cur.execute(f"SELECT PROC_CODE FROM nx.CS_M_PROC WHERE PROC_CODE IN ({ph})", *_FCODES)
+    have = {str(r[0]).strip() for r in cur.fetchall()}
     for fc, nm, st, sq in _FASTEN:
-        cur.execute("SELECT 1 FROM nx.CS_M_PROC WHERE PROC_CODE=?", fc)
-        if not cur.fetchone():
+        if fc not in have:
             cur.execute("""INSERT INTO nx.CS_M_PROC(PROC_CODE,PROC_DESC,ITEM_LGROUP,SORT_SEQ,PROD_UPH,USE_FLAG)
                 VALUES(?,?,?,?,?,'0')""", fc, nm, 'J', 900 + sq, round(3600.0 / st, 6))
+    _seeded = True   # 이 호출로 21개 전부 존재 확정 → 이후 호출은 즉시 리턴
 
 
 def _labor_rate(cur):

@@ -3123,12 +3123,13 @@ SCREEN.lgsagub=(c)=>{
     its.forEach(r=>{r.avgprice=r.in_qty?Math.round(r.in_amt/r.in_qty):(r.price||0);r.amtdiff=Math.round(r.diff*r.avgprice);});
     let filt=st.p_only==='diff'?its.filter(x=>Math.abs(x.diff)>0.5):its;
     filt=sortItems(filt,st.p_sort);
-    const cards=s?`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        ${card('OUT 사급부품 소요(순)',wonI(s.out_net)+' 개',`C=${wonI(s.out_c)} R=${wonI(s.out_r)} · 리시빙×BOM(310)`,'#1c47a0')}
-        ${card('IN OSP 사급부품 입고',wonI(s.in_qty)+' 개',`${wonI(s.in_amt)}원`,'#1c7c3a')}
-        ${card('차이(IN−OUT)',wonI(s.in_qty-s.out_net)+' 개','+입고초과 / −출고초과(타이밍·재고)','#8a6d1a')}
-        ${card('대상 사급부품',wonI(s.parts)+' 종','OUT소요 ∪ IN입고','#5a7597')}
-      </div>`:'';
+    const T={out_net:0,out_r:0,in_qty:0,in_amt:0,diff:0,amtdiff:0};
+    filt.forEach(r=>{T.out_net+=r.out_net;T.out_r+=r.out_r;T.in_qty+=r.in_qty;T.in_amt+=r.in_amt;T.diff+=r.diff;T.amtdiff+=r.amtdiff;});
+    const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
+        <td class="num">${wonI(T.out_net)}</td><td class="num">${wonI(T.out_r)}</td><td class="num">${wonI(T.in_qty)}</td>
+        <td class="num" style="color:${T.diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(T.diff)}</td>
+        <td class="num">${T.in_qty?wonI(T.in_amt/T.in_qty):'-'}</td>
+        <td class="num" style="color:${T.amtdiff>=0?'#1c7c3a':'#a03d2c'}">${wonI(T.amtdiff)}</td></tr></tfoot>`:'';
     const body=st.p_loading?spinRow(8):(filt.length?filt.map(r=>`<tr>
         <td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
         <td class="num" style="color:#1c47a0;font-weight:600">${r.out_net?wonI(r.out_net):'-'}</td>
@@ -3148,11 +3149,11 @@ SCREEN.lgsagub=(c)=>{
        <label class="rl" style="margin-left:10px"><input type="checkbox" id="p-diff"${st.p_only==='diff'?' checked':''}> 차이있는것만</label>
        <div class="spacer"></div><span class="rowcount">${s?`사급부품 ${wonI(s.parts)}종`:'조회 전'}</span>
      </div>
-     ${cards}
-     <div class="grid-wrap" style="max-height:440px;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
         ${psh('item','사급부품 품번')}${psh('name','품명','cap')}${psh('out_net','출고(리시빙)','num')}${psh('out_r','반품(리시빙)','num')}
         ${psh('in_qty','입고(LG전산)','num')}${psh('diff','수량차이','num')}${psh('avgprice','평균단가','num')}${psh('amtdiff','금액차이','num')}</tr></thead>
-       <tbody>${body}</tbody></table></div>`;
+       <tbody>${body}</tbody>${foot}</table></div>
+     <style>.lg-tbl thead th{position:sticky;top:0;background:#f1f5fb;z-index:4}.lg-tbl tfoot .lg-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;border-top:2px solid #b9cbe6;z-index:3}</style>`;
     wireTabs();
     c.querySelector('#p-go').onclick=()=>{st.p_from=date2ymd(c.querySelector('#p-df').value);st.p_to=date2ymd(c.querySelector('#p-dt').value);loadParts();};
     c.querySelector('#p-diff').onchange=e=>{st.p_only=e.target.checked?'diff':'';drawParts();};
