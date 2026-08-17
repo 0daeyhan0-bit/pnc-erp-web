@@ -86,17 +86,47 @@
 
 ---
 
-## 6. 🚀 배포 (dev → live)
+## 6. 🚀 배포 (Gitea main → 운영 184) — ★2026-08-17 git 전환
 
-- **개발본 = 로컬 `D:\...\NEW_ERP_1`** / **라이브 = 184**(`\\ERP\ERP` 미러).
-- 배포: **`deploy.ps1` 실행** — 백엔드 트리 전체를 세트 미러(새 `routers/`·`common.py` 자동 포함). **부분배포(app.py만·엔진만) 금지.**
-- js 수정 시 `index.html`의 `?v=` 갱신(deploy.ps1이 타임스탬프로 자동 처리).
+> **소스 = ERP 서버 Gitea 중앙저장소.** robocopy `deploy.ps1`은 **DEPRECATED**. 이제 git pull 배포.
+
+- **중앙저장소**: `http://200.200.200.184:3000/pncind/new_erp_1` (main).
+- **개발**: 각자 clone → `feat/<도메인>` 브랜치 → **PR → main 병합**. (상세 = `_docs/DEV_ONBOARDING.md`)
+- **배포(운영 184에서만)**: `powershell -File D:\ERP\Projects\NEW_ERP_1\deploy_pull.ps1 -Restart`
+  = main pull + 백엔드 재기동 + 헬스체크. 운영폴더는 main의 clone.
+- **⚠ 운영폴더(D:\ERP\Projects\NEW_ERP_1) 직접 수정 금지** — 배포는 pull뿐(직접 고치면 pull 충돌).
+- **JS 변경 시**: `index.html`의 `?v=<숫자>`를 올려서 **커밋**(캐시버스팅). 커밋에 포함돼 pull로 반영.
+- 배포는 여전히 **승인 후에만**(§1 정신). PR 병합 = 승인 게이트.
 
 ---
 
 ## 7. 🛟 안전망 & 협업
 
-- **git 자동스냅샷** 5분마다(작업 `PNC_ERP_GitSnapshot`). 큰 작업 전 직접 커밋 권장.
+- **중앙 백업 = Gitea(184).** 각 개발자 clone에도 전체 히스토리 분산 보유 → 데이터 소실 없음.
   - 복구: `git log --oneline` → `git checkout <commit> -- <파일경로>`.
+  - (구 5분 자동스냅샷은 Gitea 전환으로 역할 축소 — 개발자 clone에선 비활성 권장, 커밋은 명시적으로.)
 - **작업 방식:** 분석 → 보고 → **승인 후 구현** → 하나씩 완료 공유. 핵심기능 누락·무단 축소 금지.
-- **세션 분담:** 도메인 단위로 나눠 잡으면(예: 원가/BOM · 생산 · 협력사) 물리적으로 파일이 안 겹침.
+- **세션/사람 분담:** 도메인 단위로 나눠 잡으면(예: 원가/BOM · 생산 · 협력사) 물리적으로 파일이 안 겹침.
+
+---
+
+## 8. 👥 2인 동시개발 & 네트워크 (★2026-08-17 신설)
+
+> 사용자 + 개발자 1인, 각자 clone으로 협업. 상세 절차 = **`_docs/DEV_ONBOARDING.md`**(신규 개발자 필독).
+
+**접속 주소**
+| 구분 | 사내망 | 사외망(ZeroTier) |
+|---|---|---|
+| Gitea | `200.200.200.184:3000` | `192.168.194.90:3000` |
+| 웹 ERP | `200.200.200.184:8010` | `192.168.194.90:8010` |
+(서버가 `0.0.0.0` 바인딩이라 양쪽 동일 접속. 사외는 ZeroTier 조인 후.)
+
+**Git 워크플로우 (충돌 방지)**
+- `git switch main && git pull` 로 최신에서 출발 → `feat/<도메인>-<작업>` 브랜치 → 작업 → push → **PR → main 병합**.
+- main은 **직접 push 금지, PR 병합만**(Gitea 브랜치 보호). 병합 = 배포 승인 게이트.
+- **두 명이 같은 도메인 동시 작업 금지.** 시작 전 Gitea 이슈로 분담. 공유파일 5개는 짧게 열고 즉시 push.
+- **DB 자격증명(db_client.py)은 repo 밖 sibling** `../New_ERP/db_client.py` — clone 후 관리자에게 받아 배치(§DEV_ONBOARDING 1-4). 커밋 금지.
+
+**운영 원칙**
+- 운영폴더(D:\ERP\Projects\NEW_ERP_1) = main clone. **직접 수정 금지, `deploy_pull.ps1`로 pull만.**
+- DB는 dev·운영 공유 → **쓰기 테스트는 nx에서만**, 로컬 백엔드는 8010 아닌 다른 포트(8011 등).

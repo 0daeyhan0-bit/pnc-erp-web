@@ -7,7 +7,12 @@
 # --- 대용량 정적 참조자료 (세션이 편집 안 함, 재추출 가능) ---
 RPA/
 src_extracted/
-_migration/
+# _migration: 대용량 마이그 산출물은 제외하되, sub_norm 도구(.py)·런북(.md)은 추적(2인 공유)
+_migration/*
+!_migration/sub_norm/
+_migration/sub_norm/*
+!_migration/sub_norm/*.py
+!_migration/sub_norm/*.md
 LG_FILES/
 LG_BOM_download/
 source_analysis_txt_full/
