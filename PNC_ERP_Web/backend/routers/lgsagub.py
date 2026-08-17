@@ -463,13 +463,15 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         if not sy:
             cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
             r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
-        # 원단위 Assy별 사급/직거래 중량(1제품당)
-        cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, gubun1, SUM(ISNULL(weight,0)) w
+        # 원단위 Assy별 사급/직거래 중량(1제품당) + 사급 소재비(원, 등급별 mat_cost 단가 반영)
+        # 금액 = Σ(컴포넌트 중량 × 컴포넌트 단가). mat_cost=등급/코드별 동관 단가(원/kg): 일반18,458·고강도19,216 등.
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, gubun1, SUM(ISNULL(weight,0)) w,
+                         SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c
                        FROM nx.lg_settle_unit WHERE ym=? GROUP BY UPPER(LTRIM(RTRIM(assy_pn))), gubun1""", sy)
-        u_sg = {}; u_jk = {}
-        for a, g1, w in cur.fetchall():
+        u_sg = {}; u_jk = {}; u_sg_c = {}
+        for a, g1, w, c in cur.fetchall():
             g1 = (g1 or "").strip()
-            if g1 == "사급": u_sg[a] = f(w)
+            if g1 == "사급": u_sg[a] = f(w); u_sg_c[a] = f(c)
             elif g1 == "직거래": u_jk[a] = f(w)
         rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
@@ -483,23 +485,25 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
         for a, b in cur.fetchall():
             nm[a] = b
-        out = {"sg_c": 0.0, "sg_r": 0.0, "jk_c": 0.0, "jk_r": 0.0}
+        out = {"sg_c": 0.0, "sg_r": 0.0, "jk_c": 0.0, "jk_r": 0.0, "sga_c": 0.0, "sga_r": 0.0}
         items = []; matched_qc = 0.0; total_qc = 0.0; unmatched = 0
         for it, qc, qr, ac in recv:
             total_qc += qc
             sg = u_sg.get(it); jk = u_jk.get(it)
             has = (sg is not None) or (jk is not None)
             sg = sg or 0.0; jk = jk or 0.0
+            sgc = u_sg_c.get(it, 0.0)          # 개당 사급 소재비(원, 등급별 단가 반영)
             if has:
                 matched_qc += qc
             else:
                 unmatched += 1
             out["sg_c"] += qc * sg; out["sg_r"] += qr * sg
+            out["sga_c"] += qc * sgc; out["sga_r"] += qr * sgc
             out["jk_c"] += qc * jk; out["jk_r"] += qr * jk
             items.append({"item": it, "name": nm.get(it, ""), "recv_c": qc, "recv_r": qr,
                           "recv_amt": ac, "matched": 1 if has else 0,
                           "out_sagub": qc * sg, "out_jikgae": qc * jk,
-                          "per_sagub": sg, "per_jikgae": jk})
+                          "per_sagub": sg, "per_jikgae": jk, "per_sagub_amt": sgc})
         # IN OSP(사급입고) — 원소재/사급부품
         inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
         cur.execute(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END cl,
@@ -507,16 +511,19 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
               CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END""")
         osp = {r[0]: {"qty": f(r[1]), "amt": f(r[2])} for r in cur.fetchall()}
         in_raw = osp.get("원소재", {"qty": 0, "amt": 0})
-        # OUT 금액용 사급 동단가(원/kg) = OSP 원소재 평균단가
+        # OSP 원소재 평균단가(참고). 실제 OUT 금액은 원단위 등급별 단가(mat_cost)로 계산.
         price = (in_raw["amt"] / in_raw["qty"]) if in_raw["qty"] else 0.0
+        out_sagub_net = out["sg_c"] - out["sg_r"]
+        out_sagub_net_amt = out["sga_c"] - out["sga_r"]      # 등급별 단가 반영(정확)
+        eff_price = (out_sagub_net_amt / out_sagub_net) if out_sagub_net else 0.0
         items.sort(key=lambda x: -(x["out_sagub"] + x["out_jikgae"]))
         return {
             "ym": ym.strip(), "settle_ym": sy,
             "copper": {
-                "out_sagub_c": out["sg_c"], "out_sagub_r": out["sg_r"], "out_sagub_net": out["sg_c"] - out["sg_r"],
+                "out_sagub_c": out["sg_c"], "out_sagub_r": out["sg_r"], "out_sagub_net": out_sagub_net,
                 "out_jikgae_c": out["jk_c"], "out_jikgae_r": out["jk_r"], "out_jikgae_net": out["jk_c"] - out["jk_r"],
                 "in_osp_kg": in_raw["qty"], "in_osp_amt": in_raw["amt"], "osp_price": price,
-                "out_sagub_net_amt": (out["sg_c"] - out["sg_r"]) * price,
+                "out_sagub_net_amt": out_sagub_net_amt, "eff_price": eff_price,
             },
             "parts_in": osp.get("사급부품", {"qty": 0, "amt": 0}),
             "coverage": {"matched_qty": matched_qc, "total_qty": total_qc, "unmatched_items": unmatched,

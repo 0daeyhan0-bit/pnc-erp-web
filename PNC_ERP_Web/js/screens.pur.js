@@ -3067,9 +3067,9 @@ SCREEN.lgsagub=(c)=>{
     const showOnly=st.c_only;
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
-    const price=cop?cop.osp_price:0;
-    // 완제품별 사급소요량 = 개당소요(원단위) × (리시빙 순수량 C−R). 금액 = 소요량 × 사급단가.
-    filt.forEach(r=>{r.soyo=Math.round((r.per_sagub||0)*((r.recv_c||0)-(r.recv_r||0)));r.amt=Math.round(r.soyo*price);});
+    const price=cop?(cop.eff_price||cop.osp_price):0;
+    // 완제품별 사급소요량 = 개당소요(원단위)×(리시빙 순수량 C−R). 금액 = 개당소재비(등급별 단가)×순수량.
+    filt.forEach(r=>{const net=(r.recv_c||0)-(r.recv_r||0);r.soyo=Math.round((r.per_sagub||0)*net);r.amt=Math.round((r.per_sagub_amt||0)*net);});
     const T={rc:0,rr:0,soyo:0,amt:0};
     filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.soyo+=r.soyo;T.amt+=r.amt;});
     const chai=cop?(cop.out_sagub_net-cop.in_osp_kg):0;          // 합계(리시빙×소요) − LG입고
@@ -3079,7 +3079,7 @@ SCREEN.lgsagub=(c)=>{
         합계 <b style="color:#1c47a0">사급소요량(리시빙×소요) ${wonI(cop.out_sagub_net)}kg · ${wonI(cop.out_sagub_net_amt)}원</b>
         − <b style="color:#1c7c3a">LG 입고중량(OSP) ${wonI(cop.in_osp_kg)}kg · ${wonI(cop.in_osp_amt)}원</b>
         = 차이 <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">${wonI(chai)}kg · ${wonI(chai_amt)}원</b>
-        <span style="color:#8aa0bd">· 사급단가 ${wonI(price)}/kg · 원단위 ${esc(m.settle_ym||'?')} · ★LG입고는 raw tube 총량(완제품 품목매칭 불가)</span></div>`:'';
+        <span style="color:#8aa0bd">· 등급반영 단가 ${wonI(price)}/kg(일반/고강도 각 mat_cost) · 원단위 ${esc(m.settle_ym||'?')} · ★LG입고는 raw tube 총량(완제품 품목매칭 불가)</span></div>`:'';
     const csh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.c_sort.k===k?(st.c_sort.dir<0?' ▼':' ▲'):''}</th>`;
     const rowsH=st.c_loading?spinRow(6):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
         <td><b>${esc(r.item)}</b>${!r.matched?' <span style="color:#a03d2c;font-size:10px">미매칭</span>':''}</td>
