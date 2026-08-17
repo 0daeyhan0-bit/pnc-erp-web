@@ -1414,7 +1414,9 @@ SCREEN.unifybom=(c,ro)=>{
     try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,lines})});
       const j=await r.json();if(!j.ok){alert('BOM 저장 거부 (백엔드 가드):\n'+(j.errors||[]).join('\n'));return;}
       alert(`저장 완료 — 마스터 ${mrows.length}건 · BOM ${j.count}구성`);load(item);}catch(e){alert('BOM 저장 실패: '+e.message);}};
-  const addRow=()=>{lines.push({child_item:'',item_name:'(저장 후 표시)',spec:'',qty:1,node_type:'부품',cs_calc_except:false,sagub_default:false,
+  let _lastAdd=0;
+  const addRow=()=>{const t=Date.now();if(t-_lastAdd<600)return;_lastAdd=t;  // ★rapid-click 가드(렌더 지연에 연타→중복행 방지)
+    lines.push({child_item:'',item_name:'(저장 후 표시)',spec:'',qty:1,node_type:'부품',cs_calc_except:false,sagub_default:false,
     kitting:false,set_except:false,vir_item:false,lme_except:false,gagong_proc:'',cust_name:'',remarks:''});draw();};
   const doCopy=async()=>{
     const tgt=(prompt(`「${item}」의 BOM을 복사할 새 품번을 입력하세요.\n(유사공정 협력사 변형 등 — 신규 품번은 nx에만 저장)`,'')||'').trim().toUpperCase();

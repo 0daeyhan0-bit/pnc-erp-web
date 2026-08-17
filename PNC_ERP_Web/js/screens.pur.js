@@ -3125,8 +3125,9 @@ SCREEN.lgsagub=(c)=>{
         <td class="num" style="color:#8aa0bd">${r.out_r?wonI(r.out_r):''}</td>
         <td class="num" style="color:#1c7c3a">${r.in_qty?wonI(r.in_qty):'-'}</td>
         <td class="num" style="font-weight:600;color:${r.diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(r.diff)}</td>
-        <td class="num" style="font-size:11px;color:#8aa0bd">${r.price?wonI(r.price):'-'}</td></tr>`).join('')
-      :`<tr><td colspan="7" class="empty">데이터 없음 — 리시빙 월 선택 후 조회</td></tr>`);
+        <td class="num" style="font-size:11px;color:#8aa0bd">${r.in_qty?wonI(r.in_amt/r.in_qty):(r.price?wonI(r.price):'-')}</td>
+        <td class="num" style="font-weight:600;color:${r.diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(r.diff*(r.in_qty?r.in_amt/r.in_qty:(r.price||0)))}</td></tr>`).join('')
+      :`<tr><td colspan="8" class="empty">데이터 없음 — 리시빙 월 선택 후 조회</td></tr>`);
     c.innerHTML=`
      <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 사급부품(개수)</span></div>
      ${tabBar()}
@@ -3139,8 +3140,8 @@ SCREEN.lgsagub=(c)=>{
      </div>
      ${cards}
      <div class="grid-wrap" style="max-height:440px;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
-        <th>사급부품 품번</th><th class="cap">품명</th><th class="num">OUT 소요(순)</th><th class="num">반품분</th>
-        <th class="num">IN 입고</th><th class="num">차이(IN−OUT)</th><th class="num">단가</th></tr></thead>
+        <th>사급부품 품번</th><th class="cap">품명</th><th class="num">출고(리시빙)</th><th class="num">반품(리시빙)</th>
+        <th class="num">입고(LG전산)</th><th class="num">수량차이</th><th class="num">평균단가</th><th class="num">금액차이</th></tr></thead>
        <tbody>${body}</tbody></table></div>`;
     wireTabs();
     c.querySelector('#p-go').onclick=()=>{st.p_ym=m2ym(c.querySelector('#p-ym').value);loadParts();};
