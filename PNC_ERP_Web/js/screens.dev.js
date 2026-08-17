@@ -1170,7 +1170,7 @@ const PROC_MODAL_HTML=(pd)=>{
         <thead><tr><th style="text-align:left;width:58px">구분</th>${sub.map(cc=>`<th class="num" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px" title="${esc(cc.name)} · ${esc(cc.code)}">${esc(cc.name)}</th>`).join('')}<th class="num" style="width:48px;background:#eef4ff">합계</th></tr></thead>
         <tbody>
           <tr style="background:#f5f9ff"><td style="text-align:left;font-weight:700;color:#1c47a0">작업ST</td>${sub.map(cc=>`<td class="num"><input class="pq" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.wq||''}" style="width:38px;text-align:center"></td>`).join('')}<td class="num" style="font-weight:700;background:#f6f9ff;color:#1c47a0">${bsum?M2(bsum):''}</td></tr>
-          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num" style="color:#5a6b82;font-variant-numeric:tabular-nums">${cc.uph?M2(cc.uph):''}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
+          <tr><td style="text-align:left;color:#5a6b82">내부UPH</td>${sub.map(cc=>`<td class="num"><input class="puph" data-sec="${cc.sec}" data-i="${cc.idx}" type="number" min="0" step="any" value="${cc.uph||''}" title="표준UPH 자동조회 · 수정가능(마감無관)" style="width:52px;text-align:center;color:#33507d;font-variant-numeric:tabular-nums"></td>`).join('')}<td style="background:#f6f9ff"></td></tr>
           <tr><td style="text-align:left;color:#5a6b82">임율/구분</td>${sub.map(cc=>`<td class="center" style="color:#8a94a6;font-size:10px">${esc(CALCG[cc.cg]||cc.cg||'임율')}</td>`).join('')}<td style="background:#f6f9ff"></td></tr>
         </tbody></table>`;};
   const _half=Math.ceil(cols.length/2);
@@ -1198,6 +1198,8 @@ const PROC_MODAL_BIND=(c,cbs)=>{const g=id=>c.querySelector(id);
   {const s=g('#pm-save');if(s)s.onclick=()=>cbs.onSave&&cbs.onSave();}
   c.querySelectorAll('.pq').forEach(el=>{el.oninput=()=>cbs.onProcInput&&cbs.onProcInput(el.dataset.sec,+el.dataset.i,el.value,el);
     el.onchange=()=>cbs.onProcCommit&&cbs.onProcCommit(el.dataset.sec,+el.dataset.i,el.value,el);});
+  c.querySelectorAll('.puph').forEach(el=>{el.oninput=()=>cbs.onProcUph&&cbs.onProcUph(el.dataset.sec,+el.dataset.i,el.value,el);
+    el.onchange=()=>cbs.onProcCommit&&cbs.onProcCommit(el.dataset.sec,+el.dataset.i,el.value,el);});  // ★UPH 편집(표준 자동조회+수정)
   c.querySelectorAll('.wm-q').forEach(el=>el.oninput=()=>cbs.onWeldCount&&cbs.onWeldCount(el.dataset.diam,el.value,el));
   {const ts=g('#wm-type');if(ts)ts.onchange=()=>cbs.onWeldType&&cbs.onWeldType(ts.value);}};
 // 공유 공정 팝업 CSS(관경/공정 매트릭스 .wm) — naeCss와 동일 규칙(subvariant 화면에 주입용).
@@ -1616,16 +1618,16 @@ SCREEN.unifybom=(c,ro)=>{
     try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(node)}`);const j=await r.json();
       const cat=j.catalog||[]; const own0={}; (j.own_procs||[]).forEach(p=>own0[p.proc_code]=p);
       // 가공 own = 조립외 카탈로그 전체(기존값 병합)
-      const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
-        work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
+      const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,std_uph:p.std_uph||0,
+        work_qty:(own0[p.proc_code]||{}).work_qty||0,prod_uph:(own0[p.proc_code]||{}).prod_uph||p.std_uph||0,calc_gubun:(own0[p.proc_code]||{}).calc_gubun||'3'}));
       // 용접봉 carrier별 = 조립 카탈로그 전체(해당 carrier 기존값 병합)
       const carriers=(j.carriers||[]).map(cr=>{const cur={};(cr.procs||[]).forEach(p=>cur[p.proc_code]=p);
         // 조립공정군(추가용) + ★carrier에 실재하는 비-assy 공정(예:53 가공)도 포함해 표시·보존(유실 방지)
         const assy=cat.filter(p=>p.is_assy); const ac=new Set(assy.map(p=>p.proc_code));
         const extra=(cr.procs||[]).filter(p=>!ac.has(p.proc_code));
         return {weld_item:cr.weld_item,use_qty:cr.use_qty,pipe_diam:cr.pipe_diam,unit_qty:cr.unit_qty,loss_factor:(cr.loss_factor==null?1.5:cr.loss_factor),meta_ok:cr.meta_ok,
-          rows:assy.concat(extra).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,
-          work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
+          rows:assy.concat(extra).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,std_uph:p.std_uph||0,
+          work_qty:(cur[p.proc_code]||{}).work_qty||0,prod_uph:(cur[p.proc_code]||{}).prod_uph||p.std_uph||0,calc_gubun:(cur[p.proc_code]||{}).calc_gubun||'3'}))};});
       // 제품/SUB(=조립 노드) 판정: 용접봉 carrier 존재 or 최상위 품번(item)
       const isAssy=(carriers.length>0)||(weldCarriers.length>0)||(node===item);
       // ★용접봉 종류=노드당 1개(상단 드롭다운). 기존 종류들 목록 + 기본선택
@@ -1660,6 +1662,7 @@ SCREEN.unifybom=(c,ro)=>{
       onClose:()=>{naeModal=false;draw();},
       onSave:saveNaeProc,
       onProcInput:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].work_qty=+v||0;},   // 입력중 값만(재draw 없음=포커스 유지, 기존 동작 동일)
+      onProcUph:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].prod_uph=+v||0;},     // ★UPH 편집 write-back(표준 자동조회+수정)
       onWeldCount:(d,v)=>{if(!naeProcD)return;const val=+v||0;if(val>0)naeProcD.weldCounts[d]=val;else delete naeProcD.weldCounts[d];draw();},
       onWeldType:(v)=>{if(!naeProcD)return;naeProcD.weldItem=v;const cnt={};(naeProcD.weldPoints||[]).forEach(w=>{if(w.weld_item===v&&w.pipe_diam)cnt[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});naeProcD.weldCounts=cnt;draw();},
     });
@@ -2649,6 +2652,7 @@ SCREEN.subvariant=(c)=>{
       onClose:()=>{st.np=null;draw();},
       onSave:saveNodeProc,
       onProcInput:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].work_qty=+v||0;},   // 입력중 값만(포커스 유지)
+      onProcUph:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].prod_uph=+v||0;},     // ★UPH 편집 write-back
       onProcCommit:()=>draw(),                                                          // 확정(blur)시 상단 info 갱신
       onWeldCount:(d,v)=>{const val=+v||0;if(val>0)np.weldCounts[d]=val;else delete np.weldCounts[d];draw();},
       onWeldType:(v)=>{np.weldItem=v;},

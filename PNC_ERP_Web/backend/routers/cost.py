@@ -537,16 +537,18 @@ def cost_proc_get(node: str = Query(..., description="공정 편집 대상 품�
     cat = {}
     cn = _conn(); c2 = cn.cursor()
     try:
-        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0) FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
+        c2.execute("SELECT PROC_CODE,ISNULL(PROC_DESC,''),ISNULL(SORT_SEQ,0),ISNULL(PROD_UPH,0) FROM PARTNER_ERP_TEST3.nx.CS_M_PROC WHERE ISNULL(TRY_CONVERT(int,PROC_CODE),99)<90 AND ISNULL(USE_FLAG,'1')<>'0' ORDER BY ISNULL(SORT_SEQ,0),PROC_CODE")
         for r in c2.fetchall():
             pc = str(r[0]).strip()
-            cat[pc] = {"name": str(r[1]).strip(), "seq": int(r[2] or 0), "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS}
+            cat[pc] = {"name": str(r[1]).strip(), "seq": int(r[2] or 0), "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS,
+                       "std_uph": float(r[3] or 0)}   # ★공정 표준UPH(절삭 등) — 품목 라우팅 UPH 없을 때 자동조회 기본값
     finally:
         cn.close()
     def _catrow(pc, wq, uph, cg):
-        m = cat.get(pc, {"name": pc, "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS})
+        m = cat.get(pc, {"name": pc, "group": _proc_group(pc), "is_assy": pc in _ASSY_PROCS, "std_uph": 0.0})
+        eff_uph = uph if uph > 0 else float(m.get("std_uph", 0) or 0)   # ★신규부품 UPH=0 → 표준UPH 자동조회(routing_get과 동일 규칙)
         return {"proc_code": pc, "name": m["name"], "group": m["group"], "is_assy": m["is_assy"],
-                "work_qty": wq, "prod_uph": uph, "calc_gubun": cg}
+                "work_qty": wq, "prod_uph": eff_uph, "std_uph": float(m.get("std_uph", 0) or 0), "calc_gubun": cg}
     nx = _nx(); cur = nx.cursor()
     try:
         # 가공(own): p_item='' 조립외 공정 (91/92/93/98/99 율 제외)
