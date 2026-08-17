@@ -1,39 +1,36 @@
-"""체결/조립공정 매트릭스 — 담당자 품목별 체결 공정횟수 입력·수정 → 손익(가공비) 반영.
-   ★단일 테이블: nx.item_fasten(품목별 횟수) + nx.fasten_std(21공정 표준공수 마스터).
-   내부원가 가공비의 체결분은 이 매트릭스가 정본(기존 CS라우팅 체결과 이중계상 방지=엔진에서 CS체결 제외)."""
+"""체결 공정 매트릭스 — 담당자 품목별 체결 횟수 입력·수정 → 손익(가공비) 반영.
+   ★단일 테이블: nx.routing (절삭·용접·체결 전부 여기). 별도 테이블 없음.
+   체결 21공정 = nx.CS_M_PROC(FS01~FS21, item_lgroup='J' 전품목유효, use_flag='0' 공정별목록엔 숨김) 마스터.
+   저장: nx.routing 행(proc_code=FS**, work_qty=횟수, prod_uph=3600/표준공수, calc_gubun='3') → 엔진 가공비 자동계상(임율/UPH×횟수=표준공수×횟수÷3600×임율)."""
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _nx, _conn
+from common import _nx
 
 router = APIRouter()
 
-# 체결 표준공수 마스터 (레거시 견적원가조회 체결보기 21공정, data.js DB.assemProc와 동일)
-_FASTEN_SEED = [
-    ("01", "Screw 체결", 6.0, 1), ("02", "Cap 삽입", 2.0, 2), ("03", "Coil 삽입", 7.0, 3),
-    ("17", "Mesh/링 삽입", 4.0, 4), ("04", "Sensor 삽입", 5.0, 5), ("05", "Insulator 부착", 6.0, 6),
-    ("06", "Spring", 6.0, 7), ("07", "뎀퍼,부틸부착", 7.0, 8), ("08", "Nut 체결", 10.0, 9),
-    ("09", "비닐호스 삽입", 4.0, 10), ("10", "Cable 정리", 13.0, 11), ("11", "Tape 부착", 5.0, 12),
-    ("12", "Tie 묶음,컷팅", 9.0, 13), ("13", "라벨 부착", 3.0, 14), ("14", "막힘검사", 3.0, 15),
-    ("15", "동작검사", 67.0, 16), ("16", "변봉부체결", 15.0, 17), ("18", "구리스도포", 8.0, 18),
-    ("19", "EEV헤드부틸부착", 30.0, 19), ("20", "서포터", 3.0, 20), ("21", "지그삽입켓/서포터", 5.0, 21),
+# 체결 표준공수 21공정 (레거시 견적원가조회 체결보기 = PR_M_WORK_ASSY 체결계열, data.js DB.assemProc와 동일)
+_FASTEN = [
+    ("FS01", "Screw 체결", 6.0, 1), ("FS02", "Cap 삽입", 2.0, 2), ("FS03", "Coil 삽입", 7.0, 3),
+    ("FS04", "Mesh/링 삽입", 4.0, 4), ("FS05", "Sensor 삽입", 5.0, 5), ("FS06", "Insulator 부착", 6.0, 6),
+    ("FS07", "Spring", 6.0, 7), ("FS08", "뎀퍼,부틸부착", 7.0, 8), ("FS09", "Nut 체결", 10.0, 9),
+    ("FS10", "비닐호스 삽입", 4.0, 10), ("FS11", "Cable 정리", 13.0, 11), ("FS12", "Tape 부착", 5.0, 12),
+    ("FS13", "Tie 묶음,컷팅", 9.0, 13), ("FS14", "라벨 부착", 3.0, 14), ("FS15", "막힘검사", 3.0, 15),
+    ("FS16", "동작검사", 67.0, 16), ("FS17", "변봉부체결", 15.0, 17), ("FS18", "구리스도포", 8.0, 18),
+    ("FS19", "EEV헤드부틸부착", 30.0, 19), ("FS20", "서포터", 3.0, 20), ("FS21", "지그삽입켓/서포터", 5.0, 21),
 ]
-
-_DDL_STD = """IF OBJECT_ID('nx.fasten_std') IS NULL
-CREATE TABLE nx.fasten_std(fcode varchar(4) PRIMARY KEY, fname nvarchar(60), std_st float, sort_seq int, use_flag char(1) DEFAULT '1')"""
-_DDL_ITEM = """IF OBJECT_ID('nx.item_fasten') IS NULL
-CREATE TABLE nx.item_fasten(item_code varchar(50), fcode varchar(4), qty float,
-  update_user_id varchar(30), update_datetime datetime DEFAULT getdate(), CONSTRAINT pk_item_fasten PRIMARY KEY(item_code,fcode))"""
+_FCODES = [f[0] for f in _FASTEN]
+_STD = {f[0]: f[2] for f in _FASTEN}
 
 
 def _prep(cur):
-    cur.execute(_DDL_STD); cur.execute(_DDL_ITEM)
-    # 마스터 시드(없을 때만)
-    cur.execute("SELECT COUNT(*) FROM nx.fasten_std")
-    if (cur.fetchone()[0] or 0) == 0:
-        for c, n, st, sq in _FASTEN_SEED:
-            cur.execute("INSERT INTO nx.fasten_std(fcode,fname,std_st,sort_seq,use_flag) VALUES(?,?,?,?,'1')", c, n, st, sq)
+    """체결 21공정을 nx.CS_M_PROC에 시드(없을 때만). item_lgroup='J'(전품목 유효), use_flag='0'(공정별 목록 숨김·엔진은 계상).
+       prod_uph=3600/표준공수 → 엔진 cg3(임율/UPH×횟수)=표준공수×횟수÷3600×임율."""
+    for fc, nm, st, sq in _FASTEN:
+        cur.execute("SELECT 1 FROM nx.CS_M_PROC WHERE PROC_CODE=?", fc)
+        if not cur.fetchone():
+            cur.execute("""INSERT INTO nx.CS_M_PROC(PROC_CODE,PROC_DESC,ITEM_LGROUP,SORT_SEQ,PROD_UPH,USE_FLAG)
+                VALUES(?,?,?,?,?,'0')""", fc, nm, 'J', 900 + sq, round(3600.0 / st, 6))
 
 
-# ★내부원가 임율(가공비 환산) — 엔진과 동일 소스. 없으면 legacy HOUR_PAY 11850.
 def _labor_rate(cur):
     try:
         cur.execute("SELECT TOP 1 rate FROM nx.labor_rate WHERE labor_tag='3' ORDER BY apply_ym DESC")
@@ -41,58 +38,60 @@ def _labor_rate(cur):
         if r and r[0]: return float(r[0])
     except Exception:
         pass
-    return 11850.0
+    return 20776.0
 
 
 @router.get("/api/assywork/get")
 def assywork_get(item: str = Query(...)):
-    """체결 매트릭스: 21공정 표준공수 + 이 품목 현재 횟수 + 내부ST(=표준공수×횟수)."""
+    """체결 매트릭스: 21공정 표준공수 + 이 품목 현재 횟수(nx.routing) + 내부ST(=표준공수×횟수)."""
     it = item.strip()
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur); nx.commit()
-        cur.execute("SELECT fcode,fname,std_st,sort_seq FROM nx.fasten_std WHERE ISNULL(use_flag,'1')<>'0' ORDER BY sort_seq,fcode")
-        std = [(str(r[0]), str(r[1]), float(r[2] or 0), int(r[3] or 0)) for r in cur.fetchall()]
         qm = {}
         if it:
-            cur.execute("SELECT fcode,qty FROM nx.item_fasten WHERE item_code=?", it)
-            for c, q in cur.fetchall(): qm[str(c)] = float(q or 0)
+            ph = ",".join("?" * len(_FCODES))
+            cur.execute(f"SELECT proc_code, ISNULL(work_qty,0) FROM nx.routing WHERE item_code=? AND proc_code IN ({ph})", it, *_FCODES)
+            for c, q in cur.fetchall(): qm[str(c).strip()] = float(q or 0)
         labor = _labor_rate(cur)
         rows = []
-        for c, n, st, sq in std:
-            q = qm.get(c, 0.0)
-            rows.append({"fcode": c, "fname": n, "std_st": st, "qty": q, "inner_st": round(st * q, 2)})
-        tot_st = sum(r["inner_st"] for r in rows)
+        for fc, nm, st, sq in _FASTEN:
+            q = qm.get(fc, 0.0)
+            rows.append({"fcode": fc, "fname": nm, "std_st": st, "qty": q, "inner_st": round(st * q, 2)})
+        tot = sum(r["inner_st"] for r in rows)
         return {"item": it, "rows": rows, "labor_rate": labor,
-                "total_inner_st": round(tot_st, 2), "gagong": round(tot_st / 3600.0 * labor, 0)}
+                "total_inner_st": round(tot, 2), "gagong": round(tot / 3600.0 * labor, 0)}
     finally:
         nx.close()
 
 
 @router.post("/api/assywork/save")
 def assywork_save(payload: dict = Body(...)):
-    """체결 횟수 저장(품목별). rows=[{fcode,qty}] — qty>0만 저장(전체교체). 저장시 원가엔진 캐시 무효화."""
+    """체결 횟수 저장 → nx.routing(체결 FS 행만 교체). qty>0만. 저장시 원가엔진 캐시 무효화."""
     it = str(payload.get("item", "")).strip()
     if not it:
         raise HTTPException(400, "item 필요")
     rows = payload.get("rows", []) or []
-    user = str(payload.get("user", "웹사용자"))[:30]
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
-        cur.execute("DELETE FROM nx.item_fasten WHERE item_code=?", it)
+        # 이 품목의 체결(FS) routing 행만 삭제 후 재삽입 (절삭·용접·기타 공정 불변)
+        ph = ",".join("?" * len(_FCODES))
+        cur.execute(f"DELETE FROM nx.routing WHERE item_code=? AND proc_code IN ({ph})", it, *_FCODES)
         n = 0
         for r in rows:
             c = str(r.get("fcode", "")).strip()
             q = float(r.get("qty") or 0)
-            if not c or q <= 0:
+            if c not in _STD or q <= 0:
                 continue
-            cur.execute("INSERT INTO nx.item_fasten(item_code,fcode,qty,update_user_id) VALUES(?,?,?,?)", it, c, q, user)
+            uph = round(3600.0 / _STD[c], 6)
+            cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+                VALUES('',?,?,?,?,'3',?)""", it, c, q, uph, 900)
             n += 1
         nx.commit()
         try:
             from common import _reset_cost_engine
-            _reset_cost_engine()   # 체결 변경 → 가공비 재계산
+            _reset_cost_engine()
         except Exception:
             pass
         return {"ok": True, "count": n, "item": it}

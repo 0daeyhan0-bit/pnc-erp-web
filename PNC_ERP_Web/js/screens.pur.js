@@ -2912,6 +2912,8 @@ SCREEN.lgsagub=(c)=>{
   const ymd2date=s=>{s=''+(s||'');return s.length>=6?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';};  // 260703→2026-07-03
   const date2ymd=v=>v?(''+v).slice(2).replace(/-/g,''):'';                                                       // 2026-07-03→260703
   const ymdF=s=>{s=''+(s||'');return s.length>=6?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:'-';};        // 260703→26/07/03
+  const ym2m=y=>{y=(''+(y||'')).replace(/\D/g,'');return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};   // 2607→2026-07 (type=month value)
+  const m2ym=v=>{const s=(''+(v||'')).replace(/\D/g,'');return s.length>=6?s.slice(2,6):(s.length>=4?s.slice(0,4):'');}; // 2026-07→2607
   const rng=()=>{const q=[];if(st.df)q.push('ymd_from='+st.df);if(st.dt)q.push('ymd_to='+st.dt);if(st.biz)q.push('biz='+encodeURIComponent(st.biz));return q;};
   const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.by_biz=j.by_biz||[];st.files=j.files||[];st.ymdMin=j.ymd_min||'';st.ymdMax=j.ymd_max||'';
       if(!st.df){st.df=st.ymdMin;st.dt=st.ymdMax;}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
