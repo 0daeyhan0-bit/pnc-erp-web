@@ -81,6 +81,7 @@ SCREEN.prodinvout=(c)=>{
 SCREEN.salesforecast=(c)=>{
   const API=API_BASE;
   let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[], metric='sales', reqSeq=0, sortKey='', sortDir=1;   // mode:net(차감후)|gross(차감전=라이브) · metric:sales(영업예상매출)|sagub(예상 LG사급금액) · sortKey/Dir:헤더더블클릭 정렬
+  let sfTimer=null;   // ★날짜 재조회 디바운스 타이머(SCREEN레벨 유지). 두자리(08) 입력 중 재렌더로 input이 교체돼 편집 깨지는 버그 방지
   const WD=['일','월','화','수','목','금','토'];
   const dlabel=y=>{y=''+y;const D=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return `${y.slice(2,4)}/${y.slice(4,6)}<span class="wd">${WD[D.getDay()]}</span>`;};
   const load=async(base,to)=>{loading=true;const mySeq=++reqSeq, myMetric=metric;
@@ -122,7 +123,8 @@ SCREEN.salesforecast=(c)=>{
     // ★날짜 = 네이티브 type=date (달력 아이콘 + 세그먼트 직접 타이핑, UI규칙). value "2026-08-14" → toY로 YYMMDD.
     const toY=el=>{const d=(el.value||'').replace(/\D/g,''); return d.length>=8?d.slice(2,8):(d.length===6?d:'');};
     c.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{if(metric===b.dataset.metric)return;metric=b.dataset.metric;load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to')));});
-    const sfReload=()=>load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to')));   // 기간(from~to) 재조회
+    // ★디바운스: 날짜 두자리 입력(0→8) 중 onchange가 먼저 발화해 load→draw로 input이 교체되면 편집이 깨짐. 500ms 지연으로 입력 완료 후 1회만 재조회.
+    const sfReload=()=>{clearTimeout(sfTimer);sfTimer=setTimeout(()=>load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to'))),500);};
     c.querySelector('#sf-base').onchange=sfReload; c.querySelector('#sf-to').onchange=sfReload;
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
     const rowQ=r=>mode==='net'?r.nq:r.gq, rowA=r=>mode==='net'?r.namt:r.gamt;
