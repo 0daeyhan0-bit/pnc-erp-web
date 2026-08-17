@@ -1257,6 +1257,7 @@ SCREEN.unifybom=(c,ro)=>{
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let fastenD=null, fastenFor='';   // 체결 매트릭스(품목별 체결 공정횟수 입력→가공비). /api/assywork
+  let naeProcLoading=false;         // 조립공정 팝업 로딩(사외망 DB 지연 대비 즉시 표시)
   const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
     try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
   const saveFasten=async()=>{ if(!fastenD)return; const it=fastenFor||item;
@@ -1646,14 +1647,21 @@ SCREEN.unifybom=(c,ro)=>{
       if(!r.ok)throw new Error('HTTP '+r.status);naeD=await r.json();naeFor=item;}
     catch(e){naeD={error:e.message};}naeLoad=false;draw();};
   // ★carrier-aware 공정입력: /api/cost/proc/get → 가공(own) + 용접봉 carrier별 조립공정(용접/체결/포장). carrier별 in-place(통합/이동 금지).
-  const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeModal=false;draw();
-    await loadWeldDiams(); await loadFasten(node);   // ★체결 매트릭스도 팝업에 로드(노드별)
-    // 조립 용접(관경별) 프리로드 — 제품/SUB 레벨에서 용접점 편집용
+  const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeProcLoading=true;if(openModal)naeModal=true;draw();  // ★즉시 로딩모달 표시(사외망 지연 대비)
+    const enc=encodeURIComponent(node);
+    // ★4개 fetch 순차(≈9초)→병렬(≈3초). 사외망 DB 지연시 체감 크게 개선
+    const [,,wj,j]=await Promise.all([
+      loadWeldDiams(),
+      loadFasten(node),   // ★체결 매트릭스도 팝업에 로드(노드별)
+      fetch(`${API}/api/weld/get?node=${enc}`).then(r=>r.json()).catch(()=>({})),
+      fetch(`${API}/api/cost/proc/get?node=${enc}`).then(r=>r.json()).catch(e=>({error:e.message}))
+    ]);
+    naeProcLoading=false;
+    // 조립 용접(관경별) — 제품/SUB 레벨에서 용접점 편집용
     let weldPoints=[], weldCarriers=[];
-    try{const wr=await fetch(`${API}/api/weld/get?node=${encodeURIComponent(node)}`);const wj=await wr.json();
-      (wj.welds||[]).forEach(w=>{(w.rows||[]).forEach(x=>weldPoints.push({weld_item:w.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));});
-      weldCarriers=wj.carriers||[];}catch(e){}
-    try{const r=await fetch(`${API}/api/cost/proc/get?node=${encodeURIComponent(node)}`);const j=await r.json();
+    (wj.welds||[]).forEach(w=>{(w.rows||[]).forEach(x=>weldPoints.push({weld_item:w.weld_item,pipe_diam:x.pipe_diam,weld_qty:x.weld_qty}));});
+    weldCarriers=wj.carriers||[];
+    try{if(j.error)throw new Error(j.error);
       const cat=j.catalog||[]; const own0={}; (j.own_procs||[]).forEach(p=>own0[p.proc_code]=p);
       // 가공 own = 조립외 카탈로그 전체(기존값 병합)
       const own=cat.filter(p=>!p.is_assy).map(p=>({proc_code:p.proc_code,name:p.name,group:p.group,std_uph:p.std_uph||0,
