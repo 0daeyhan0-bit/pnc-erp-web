@@ -1711,6 +1711,7 @@ SCREEN.unifybom=(c,ro)=>{
     const rowsOf2=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
     c.querySelectorAll('.pu').forEach(el=>el.oninput=()=>{const a=rowsOf2(el.dataset.sec);if(a&&a[+el.dataset.i])a[+el.dataset.i].prod_uph=+el.value||0;});
     c.querySelectorAll('.pl').forEach(el=>el.oninput=()=>{const cr=naeProcD&&naeProcD.carriers[+el.dataset.c];if(cr)cr.loss_factor=+el.value||1.5;});
+    c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});  // ★팝업 내 체결 횟수 입력
   };
   const saveNaeMaster=async()=>{const rows=(naeD&&naeD.rows)||[];const qtyC=[];const specM={};const num=v=>{const n=parseFloat(v);return isNaN(n)?null:n;};
     rows.forEach(r=>{const e=naeEdits[r.code];if(!e)return;

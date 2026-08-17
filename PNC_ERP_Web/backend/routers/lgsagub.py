@@ -561,6 +561,53 @@ def _explode_parts(item, ch, sg310, memo):
     return acc
 
 
+@router.get("/api/lgsagub/settle_list")
+def settle_list(ym: str = Query(""), q: str = Query(""), gubun1: str = Query(""), limit: int = Query(20000)):
+    """원단위 관리 목록: 적용월(ym)의 (Assy×하위동부자재) 행 조회 + 월목록(드롭다운용)."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        cur.execute("SELECT ym, COUNT(*) FROM nx.lg_settle_unit GROUP BY ym ORDER BY ym DESC")
+        yms = [{"ym": r[0], "rows": r[1]} for r in cur.fetchall()]
+        if not ym.strip() and yms:
+            ym = yms[0]["ym"]
+        wh = ["ym=?"]; p = [ym.strip()]
+        if gubun1.strip():
+            wh.append("gubun1=?"); p.append(gubun1.strip())
+        if q.strip():
+            wh.append("(assy_pn LIKE ? OR sub_pn LIKE ? OR assy_desc LIKE ? OR sub_desc LIKE ?)")
+            p += [f"%{q.strip()}%"] * 4
+        cur.execute(f"""SELECT TOP {int(limit)} assy_pn, assy_desc, coop, sub_pn, sub_desc, qty,
+              gubun1, gubun2, od, thk, leng, weight
+            FROM nx.lg_settle_unit WHERE {' AND '.join(wh)}
+            ORDER BY assy_pn, sub_pn""", *p)
+        rows = [{"assy_pn": r[0], "assy_desc": r[1], "coop": r[2], "sub_pn": r[3], "sub_desc": r[4],
+                 "qty": f(r[5]), "gubun1": r[6], "gubun2": r[7], "od": f(r[8]), "thk": f(r[9]),
+                 "leng": f(r[10]), "weight": f(r[11])} for r in cur.fetchall()]
+        return {"ym": ym.strip(), "yms": yms, "rows": rows, "cnt": len(rows)}
+    finally:
+        nx.close()
+
+
+@router.post("/api/lgsagub/settle_copy")
+def settle_copy(from_ym: str = Query(...), to_ym: str = Query(...)):
+    """전월 복사로 신규월: from_ym 원단위를 to_ym로 복제(기존 to_ym 삭제 후). 상대적 불변이라 복사후 부분수정용."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        cur.execute("DELETE FROM nx.lg_settle_unit WHERE ym=?", to_ym.strip())
+        cur.execute("""INSERT INTO nx.lg_settle_unit
+              (ym,coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,src_file)
+            SELECT ?, coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,
+              N'copy<'+ym+N'>' FROM nx.lg_settle_unit WHERE ym=?""", to_ym.strip(), from_ym.strip())
+        n = cur.rowcount
+        nx.commit()
+        return {"ok": True, "from_ym": from_ym.strip(), "to_ym": to_ym.strip(), "rows": n}
+    finally:
+        nx.close()
+
+
 @router.get("/api/lgsagub/recvcompare_parts")
 def recvcompare_parts(ym: str = Query(...), limit: int = Query(3000)):
     """리시빙 비교(부품): 해당월 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.

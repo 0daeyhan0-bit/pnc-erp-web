@@ -2908,7 +2908,9 @@ SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
   let st={tab:'status',by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
           df:'',dt:'',ymdMin:'',ymdMax:'',biz:'',cls:'',q:'',upBiz:'',sort:{k:'amt',dir:-1},loading:false,msg:'',
-          c_ym:'2607',c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:''};
+          c_ym:'2607',c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',
+          p_ym:'2607',pcmp:null,p_loading:false,p_only:'',
+          s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:''};
   const ymd2date=s=>{s=''+(s||'');return s.length>=6?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';};  // 260703→2026-07-03
   const date2ymd=v=>v?(''+v).slice(2).replace(/-/g,''):'';                                                       // 2026-07-03→260703
   const ymdF=s=>{s=''+(s||'');return s.length>=6?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:'-';};        // 260703→26/07/03
@@ -2966,11 +2968,17 @@ SCREEN.lgsagub=(c)=>{
   const sh=(k,label,cls)=>`<th data-sk="${k}"${cls?' class="'+cls+'"':''} style="cursor:pointer" title="더블클릭 정렬">${label}${st.sort.k===k?(st.sort.dir<0?' ▼':' ▲'):''}</th>`;
 
   // ═══════════ 리시빙 비교 탭 ═══════════
-  const tabBar=()=>`<div style="display:flex;gap:3px;margin:4px 0 10px;border-bottom:2px solid #dbe5f2">
-    ${[['status','📊 사급입고 현황'],['compare','⚖ 리시빙 비교']].map(([k,l])=>
-     `<div class="lg-tab" data-tab="${k}" style="padding:7px 18px;cursor:pointer;font-weight:600;font-size:13px;border:1px solid #dbe5f2;border-bottom:none;border-radius:7px 7px 0 0;margin-bottom:-2px;${st.tab===k?'background:#fff;color:#1c47a0;border-bottom:2px solid #fff':'background:#eef3fa;color:#5a7597'}">${l}</div>`).join('')}
+  const TABS=[['status','📊 사급입고 현황'],['settle','📋 원단위 관리'],['compare','⚖ 리시빙비교(원소재)'],['parts','🔩 리시빙비교(부품)']];
+  const tabBar=()=>`<div style="display:flex;gap:3px;margin:4px 0 10px;border-bottom:2px solid #dbe5f2;flex-wrap:wrap">
+    ${TABS.map(([k,l])=>`<div class="lg-tab" data-tab="${k}" style="padding:7px 15px;cursor:pointer;font-weight:600;font-size:13px;border:1px solid #dbe5f2;border-bottom:none;border-radius:7px 7px 0 0;margin-bottom:-2px;${st.tab===k?'background:#fff;color:#1c47a0;border-bottom:2px solid #fff':'background:#eef3fa;color:#5a7597'}">${l}</div>`).join('')}
    </div>`;
-  const wireTabs=()=>c.querySelectorAll('.lg-tab').forEach(t=>t.onclick=()=>{if(st.tab!==t.dataset.tab){st.tab=t.dataset.tab;st.tab==='compare'?(st.cmp?drawCompare():loadCompare()):draw();}});
+  const routeTab=()=>{
+    if(st.tab==='compare')return st.cmp?drawCompare():loadCompare();
+    if(st.tab==='parts')return st.pcmp?drawParts():loadParts();
+    if(st.tab==='settle')return st.slist?drawSettle():loadSettle();
+    return draw();
+  };
+  const wireTabs=()=>c.querySelectorAll('.lg-tab').forEach(t=>t.onclick=()=>{if(st.tab!==t.dataset.tab){st.tab=t.dataset.tab;routeTab();}});
   const loadCompare=async()=>{st.c_loading=true;drawCompare();
     try{const j=await(await fetch(`${API}/api/lgsagub/recvcompare?ym=${encodeURIComponent(st.c_ym)}${st.c_sy?('&settle_ym='+encodeURIComponent(st.c_sy)):''}`)).json();st.cmp=j;st.c_msg='';}
     catch(e){st.cmp=null;st.c_msg='❌ 조회 실패: '+e.message;}

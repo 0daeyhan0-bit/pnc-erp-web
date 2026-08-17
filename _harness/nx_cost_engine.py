@@ -713,7 +713,7 @@ class NxCostEngine:
         if seen is None: seen=set()
         info=self._load_item(item)
         ym='20'+ymd[:4]
-        tot=(self.proc_amt_nae(item, info, ym, parent) + self._fasten_amt(item, ym)) * mult   # ★체결 매트릭스 가공비 합산
+        tot=self.proc_amt_nae(item, info, ym, parent) * mult   # 체결은 nx.routing(FS코드)에 저장 → proc_amt_nae가 자동 계상(별도 합산 불필요)
         # ★direct5-fix(2026-08-13): 직납(cost_gubun='5')은 하위 안 품(SP CTE_BOM `cb.cost_gubun<>'5'` 정합).
         #   재료비(_expandable_nae)·실원가는 이미 '5' 정지. 내부 가공비/overhead만 누락 → 직납 넘어 공유용접봉·MJU 과다계상(내부 34→40/40).
         if info['cost_gubun']!='5':
@@ -789,7 +789,7 @@ class NxCostEngine:
             else:
                 won=self.pur_price(node,ymd,info['in_cust']) or 0.0
                 mat = 0.0 if expandable else round(won*cum_q,2)
-            gag=round((self.proc_amt_nae(node, info, ym, parent)+self._fasten_amt(node, ym))*cum_ea,2)   # ★체결 매트릭스 가공비 포함
+            gag=round(self.proc_amt_nae(node, info, ym, parent)*cum_ea,2)
             nproc=sum(1 for (p,wq,uph,c,pit) in self._procs(node) if pit==(parent if info['silver'] else '') and wq>0)
             rows.append({'level':lvl,'code':node,'parent':parent,'eqty':round(eqty,4),'cost_gubun':cg,'qty':round(cum_q,4),
                 'won':round(won,4),'mat':mat,'gag':gag,'weight':round(info['wt'],4),'make_type':info['make_type'],
