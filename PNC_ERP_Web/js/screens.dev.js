@@ -2047,7 +2047,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
     // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
-    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>loadNaeProc(item,true);}  // ★신규등록 조립공정 = 내부원가와 동일 팝업
+    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 조립공정 여는 중…';loadNaeProc(item,true);};}  // ★신규등록 조립공정 = 내부원가와 동일 팝업(클릭 즉시 피드백)
     if(naeModal)wireProcModal();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
     // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
