@@ -292,3 +292,501 @@ def lgsagub_detail(item: str = Query(""), ym_from: str = Query(""), ym_to: str =
         return {"rows": rows, "cnt": len(rows)}
     finally:
         nx.close()
+
+
+# ============================================================================
+#  LG 정산 원단위(동정산) — 리시빙 비교용. Assy별 동부자재 소요(사급/직거래 구분).
+#  ★중량 = (외경−T)·T·길이·π·8.94/1e6 × 수량  → 수량이 이미 반영됨(합산만, ×수량 금지).
+#  ★사급=LG유상사급 인정동 / 직거래=우리 직매입(미인정, 설치동류).
+# ============================================================================
+_SETTLE_DDL = """IF OBJECT_ID('nx.lg_settle_unit') IS NULL
+CREATE TABLE nx.lg_settle_unit(
+  id int IDENTITY(1,1) PRIMARY KEY, ym varchar(4), coop nvarchar(60),
+  assy_pn varchar(50), assy_desc nvarchar(200), sub_pn varchar(50), sub_desc nvarchar(200),
+  qty float, gubun1 nvarchar(10), gubun2 nvarchar(30),
+  od float, thk float, leng float, weight float, mat_cost float,
+  eff_ym varchar(4), src_file nvarchar(200), upload_dt datetime DEFAULT getdate())"""
+# eff_ym = Update 일정(품목 추가/변경 시점, YYMM). 유효일자 필터(리시빙월 ≤ eff_ym 제외)용.
+_SETTLE_MIGRATE = "IF COL_LENGTH('nx.lg_settle_unit','eff_ym') IS NULL ALTER TABLE nx.lg_settle_unit ADD eff_ym varchar(4);"
+
+def _settle_prep(cur):
+    cur.execute(_SETTLE_DDL); cur.execute(_SETTLE_MIGRATE)
+
+
+def _upd_ym(v):
+    """Update 일정 문자열 → YYMM(효력월). '19.05월'→'1905', '16.9월->17.6월'→'1706'(최신),
+       '17.11월(황동물 추가)'→'1711'. 빈값/'수정'→'' (기초행=항상 유효). 여러 날짜면 마지막 채택."""
+    import re
+    s = str(v or "")
+    ms = re.findall(r"(\d{1,2})[.\-/](\d{1,2})", s)
+    if not ms:
+        return ""
+    y, m = ms[-1]                      # 마지막 날짜(→ 이동 후 최신)
+    y = int(y); m = int(m)
+    if y >= 100: y = y % 100
+    return f"{y:02d}{m:02d}"
+
+
+def _pick_sheet(wb):
+    """원단위 파일에서 피앤씨 탭 선택(이름에 '피앤씨' 포함, 공백무시). 없으면 첫 시트."""
+    for sn in wb.sheetnames:
+        if "피앤씨" in sn.replace(" ", ""):
+            return wb[sn]
+    return wb[wb.sheetnames[0]]
+
+
+@router.post("/api/lgsagub/settle_upload")
+async def settle_upload(file: UploadFile = File(...), ym: str = Query(""), sheet: str = Query("")):
+    """LG 동정산 원단위 엑셀 업로드 → nx.lg_settle_unit. 피앤씨 탭의 (Assy×하위동부자재) 소요.
+       컬럼: Assy P/N·Desc·협력사·P/N(하위1)·Desc·수량·구분1·구분2·외경·T·길이·중량(+소재비).
+       ★중량은 수량 반영값이라 그대로 저장. ym=기준월(미지정시 파일에서 추론 안됨→필수 권장)."""
+    try:
+        import openpyxl
+    except Exception:
+        raise HTTPException(500, "openpyxl 미설치(서버)")
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
+    ws = wb[sheet] if (sheet and sheet in wb.sheetnames) else _pick_sheet(wb)
+    rows_all = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows_all:
+        raise HTTPException(400, "빈 시트")
+
+    def nrm(v):
+        return "".join(str(v or "").strip().lower().split()).replace("\n", "")
+
+    # 헤더행 탐지: 'assyp/n' 포함 행
+    hi = -1
+    for i in range(min(8, len(rows_all))):
+        joined = [nrm(x) for x in rows_all[i]]
+        if any("assyp/n" == c or "assyp/n" in c for c in joined):
+            hi = i; break
+    if hi < 0:
+        raise HTTPException(400, "헤더행(Assy P/N) 감지 실패")
+    hdr = [nrm(x) for x in rows_all[hi]]
+
+    def find(*keys, after=None):
+        start = (after + 1) if after is not None else 0
+        for j in range(start, len(hdr)):
+            if hdr[j] in keys:
+                return j
+        return None
+    ci_assy = find("assyp/n")
+    ci_assydesc = ci_assy + 1 if ci_assy is not None else None  # Assy 바로 뒤 Desc
+    ci_coop = find("협력사")
+    ci_sub = find("p/n(하위1)", "p/n하위1", "p/n(하위)", after=ci_coop)
+    if ci_sub is None:
+        ci_sub = find("p/n(하위1)", "p/n하위1")
+    ci_subdesc = ci_sub + 1 if ci_sub is not None else None
+    ci_qty = find("수량")
+    ci_g1 = find("구분1")
+    ci_g2 = find("구분2")
+    ci_od = find("외경")
+    ci_thk = find("t", "두께")
+    ci_len = find("길이")
+    ci_wt = find("중량")
+    ci_mc = find("소재비변경후", "소재비")
+    ci_upd = find("update일정", "update", "업데이트일정")
+    if ci_assy is None or ci_g1 is None or ci_wt is None:
+        return {"ok": False, "error": "필수컬럼(Assy P/N·구분1·중량) 감지 실패",
+                "header": [str(x) for x in rows_all[hi]]}
+
+    def gv(r, i):
+        return r[i] if (i is not None and i < len(r)) else None
+    def _f(r, i):
+        v = gv(r, i)
+        try:
+            return float(str(v).replace(",", "")) if v not in (None, "") else 0.0
+        except Exception:
+            return 0.0
+
+    recs = []
+    for r in rows_all[hi + 1:]:
+        assy = str(gv(r, ci_assy) or "").strip()
+        if not assy or nrm(assy) in ("assyp/n", "합계", "total"):
+            continue
+        g1 = str(gv(r, ci_g1) or "").strip()
+        if not g1:
+            continue
+        recs.append((ym.strip(), str(gv(r, ci_coop) or "")[:60], assy[:50],
+                     str(gv(r, ci_assydesc) or "")[:200], str(gv(r, ci_sub) or "")[:50],
+                     str(gv(r, ci_subdesc) or "")[:200], _f(r, ci_qty), g1[:10],
+                     str(gv(r, ci_g2) or "")[:30], _f(r, ci_od), _f(r, ci_thk),
+                     _f(r, ci_len), _f(r, ci_wt), _f(r, ci_mc), _upd_ym(gv(r, ci_upd))))
+    if not recs:
+        return {"ok": False, "error": "데이터 행 없음", "header": [str(x) for x in rows_all[hi]]}
+
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        fn = (file.filename or "")[:200]
+        # 재업로드=덮어쓰기: 같은 ym(+협력사)의 기존행 삭제. ym 없으면 파일명 기준.
+        if ym.strip():
+            coops = sorted({x[1] for x in recs if x[1]})
+            cur.execute("DELETE FROM nx.lg_settle_unit WHERE ISNULL(ym,'')=?", ym.strip())
+        else:
+            cur.execute("DELETE FROM nx.lg_settle_unit WHERE src_file=?", fn)
+        try: cur.fast_executemany = True
+        except Exception: pass
+        cols = "(ym,coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,eff_ym,src_file)"
+        n = 0; BATCH = 120
+        for i in range(0, len(recs), BATCH):
+            chunk = recs[i:i + BATCH]
+            vals = ",".join("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)" for _ in chunk)
+            flat = []
+            for t in chunk:
+                flat += list(t) + [fn]
+            cur.execute(f"INSERT INTO nx.lg_settle_unit{cols} VALUES {vals}", *flat)
+            n += len(chunk)
+        nx.commit()
+        cur.execute("""SELECT gubun1, COUNT(*), SUM(ISNULL(weight,0)) FROM nx.lg_settle_unit
+                       WHERE src_file=? GROUP BY gubun1""", fn)
+        by_g = [{"gubun1": r[0], "rows": r[1], "weight": float(r[2] or 0)} for r in cur.fetchall()]
+        return {"ok": True, "file": fn, "sheet": ws.title, "ym": ym.strip(), "rows": n, "by_gubun1": by_g}
+    finally:
+        nx.close()
+
+
+@router.get("/api/lgsagub/settle_summary")
+def settle_summary():
+    """업로드된 원단위 요약(기준월·협력사·구분1별)."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        cur.execute("""SELECT ym, COUNT(DISTINCT assy_pn) assys, COUNT(*) rows,
+              SUM(CASE WHEN gubun1=N'사급' THEN weight ELSE 0 END) sg_wt,
+              SUM(CASE WHEN gubun1=N'직거래' THEN weight ELSE 0 END) jk_wt, MAX(upload_dt) dt
+            FROM nx.lg_settle_unit GROUP BY ym ORDER BY ym""")
+        by_ym = [{"ym": r[0], "assys": r[1], "rows": r[2], "sagub_wt": float(r[3] or 0),
+                  "jikgae_wt": float(r[4] or 0), "dt": str(r[5])[:19]} for r in cur.fetchall()]
+        return {"by_ym": by_ym}
+    finally:
+        nx.close()
+
+
+@router.get("/api/lgsagub/recvcompare")
+def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""), settle_ym: str = Query(""), limit: int = Query(2000)):
+    """리시빙 비교(원소재 동): 기간 LG리시빙 × 원단위(settle_ym) → OUT 동(사급/직거래) vs IN OSP.
+       ★OUT = Σ 리시빙수량 × Σ(원단위 중량 by 구분1)  [중량=수량반영값이라 그대로 합산].
+       사급=인정동(IN OSP원소재와 대사), 직거래=미인정. 기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        sy = settle_ym.strip()
+        if not sy:
+            cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
+            r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
+        rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        # 유효일자 컷오프 = 리시빙 최종월. 그 시점에 아직 추가 안 된 품목(eff_ym > M)은 소요 제외.
+        eff_cut = (max(yms) if yms else (ym.strip() or sy))
+        # 원단위 Assy별 사급/직거래 중량(1제품당) + 사급 소재비(원, 등급별 mat_cost 단가 반영)
+        # 금액 = Σ(컴포넌트 중량 × 컴포넌트 단가). mat_cost=등급/코드별 동관 단가(원/kg): 일반18,458·고강도19,216 등.
+        # ★eff_ym 필터: 빈값(기초행)·eff_ym ≤ 리시빙월만 = 그 시점 유효 스펙(누적 마스터 point-in-time).
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, gubun1, SUM(ISNULL(weight,0)) w,
+                         SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c
+                       FROM nx.lg_settle_unit
+                       WHERE ym=? AND (eff_ym IS NULL OR eff_ym='' OR eff_ym<=?)
+                       GROUP BY UPPER(LTRIM(RTRIM(assy_pn))), gubun1""", sy, eff_cut)
+        u_sg = {}; u_jk = {}; u_sg_c = {}
+        for a, g1, w, c in cur.fetchall():
+            g1 = (g1 or "").strip()
+            if g1 == "사급": u_sg[a] = f(w); u_sg_c[a] = f(c)
+            elif g1 == "직거래": u_jk[a] = f(w)
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+              SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
+              SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr,
+              SUM(CASE WHEN GUBUN='C' THEN ISNULL(RECV_AMT,0) ELSE 0 END) ac
+            FROM nx.SA_T_LG_RECEIVING_DTL WHERE {rwh} GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", *rp)
+        recv = [(r[0], f(r[1]), f(r[2]), f(r[3])) for r in cur.fetchall()]
+        # 품명 매핑
+        nm = {}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
+        for a, b in cur.fetchall():
+            nm[a] = b
+        out = {"sg_c": 0.0, "sg_r": 0.0, "jk_c": 0.0, "jk_r": 0.0, "sga_c": 0.0, "sga_r": 0.0}
+        items = []; matched_qc = 0.0; total_qc = 0.0; unmatched = 0
+        for it, qc, qr, ac in recv:
+            total_qc += qc
+            sg = u_sg.get(it); jk = u_jk.get(it)
+            has = (sg is not None) or (jk is not None)
+            sg = sg or 0.0; jk = jk or 0.0
+            sgc = u_sg_c.get(it, 0.0)          # 개당 사급 소재비(원, 등급별 단가 반영)
+            if has:
+                matched_qc += qc
+            else:
+                unmatched += 1
+            out["sg_c"] += qc * sg; out["sg_r"] += qr * sg
+            out["sga_c"] += qc * sgc; out["sga_r"] += qr * sgc
+            out["jk_c"] += qc * jk; out["jk_r"] += qr * jk
+            items.append({"item": it, "name": nm.get(it, ""), "recv_c": qc, "recv_r": qr,
+                          "recv_amt": ac, "matched": 1 if has else 0,
+                          "out_sagub": qc * sg, "out_jikgae": qc * jk,
+                          "per_sagub": sg, "per_jikgae": jk, "per_sagub_amt": sgc})
+        # IN OSP(사급입고) — 원소재/사급부품
+        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
+        cur.execute(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END cl,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a FROM nx.lg_sagub_actual WHERE ym IN ({inl}) GROUP BY
+              CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN N'원소재' ELSE N'사급부품' END""")
+        osp = {r[0]: {"qty": f(r[1]), "amt": f(r[2])} for r in cur.fetchall()}
+        in_raw = osp.get("원소재", {"qty": 0, "amt": 0})
+        # OSP 원소재 평균단가(참고). 실제 OUT 금액은 원단위 등급별 단가(mat_cost)로 계산.
+        price = (in_raw["amt"] / in_raw["qty"]) if in_raw["qty"] else 0.0
+        out_sagub_net = out["sg_c"] - out["sg_r"]
+        out_sagub_net_amt = out["sga_c"] - out["sga_r"]      # 등급별 단가 반영(정확)
+        eff_price = (out_sagub_net_amt / out_sagub_net) if out_sagub_net else 0.0
+        items.sort(key=lambda x: -(x["out_sagub"] + x["out_jikgae"]))
+        return {
+            "ym": ym.strip(), "settle_ym": sy,
+            "copper": {
+                "out_sagub_c": out["sg_c"], "out_sagub_r": out["sg_r"], "out_sagub_net": out_sagub_net,
+                "out_jikgae_c": out["jk_c"], "out_jikgae_r": out["jk_r"], "out_jikgae_net": out["jk_c"] - out["jk_r"],
+                "in_osp_kg": in_raw["qty"], "in_osp_amt": in_raw["amt"], "osp_price": price,
+                "out_sagub_net_amt": out_sagub_net_amt, "eff_price": eff_price,
+            },
+            "parts_in": osp.get("사급부품", {"qty": 0, "amt": 0}),
+            "coverage": {"matched_qty": matched_qc, "total_qty": total_qc, "unmatched_items": unmatched,
+                         "rate": (matched_qc / total_qc * 100) if total_qc else 0},
+            "items": items[:int(limit)],
+        }
+    finally:
+        nx.close()
+
+
+@router.get("/api/lgsagub/recvcompare_ledger")
+def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_ym: str = Query("")):
+    """동 원소재 수불(월별 누적): 기초 + 입고(OSP TUBE) − 소요(리시빙×원단위 eff≤월) = 기말.
+       from_ym(기초0 시작월, 미지정=OSP 첫 입고월)~to_ym(미지정=OSP 최신월). eff_ym로 각 월 point-in-time 원단위.
+       ★기초=0 가정: 시작월 이전 동재고 없음. OSP 데이터 없는 달로 시작하면 입고0→마이너스 되므로 첫 OSP월 권장."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        sy = settle_ym.strip()
+        if not sy:
+            cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
+            r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
+        # ★수불 개시월 = 2603(2026.03) 사용자 확정. 그 이전 OSP 데이터 없어 기초0 시작. to_ym 기본 = OSP 최신월.
+        cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) LIKE '%TUBE%'")
+        r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
+        LEDGER_START = "2602"
+        frm = from_ym.strip() or LEDGER_START
+        if osp_min and frm < osp_min:    # OSP 데이터 없는 이전달로 시작하면 입고0→마이너스 → 첫 OSP월로 클램프
+            frm = osp_min
+        to = to_ym.strip() or osp_max or frm
+
+        def ym_next(y):
+            yy = int(y[:2]); mm = int(y[2:]) + 1
+            if mm > 12: mm = 1; yy += 1
+            return f"{yy:02d}{mm:02d}"
+        months = []; m = frm; guard = 0
+        while m <= to and guard < 120:
+            months.append(m); m = ym_next(m); guard += 1
+
+        rows = []; bal_kg = 0.0; bal_amt = 0.0
+        for M in months:
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, SUM(ISNULL(weight,0)) w,
+                             SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c
+                           FROM nx.lg_settle_unit
+                           WHERE ym=? AND gubun1=N'사급' AND (eff_ym IS NULL OR eff_ym='' OR eff_ym<=?)
+                           GROUP BY UPPER(LTRIM(RTRIM(assy_pn)))""", sy, M)
+            usg = {}; usc = {}
+            for a, w, c in cur.fetchall():
+                usg[a] = f(w); usc[a] = f(c)
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+                  SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END)
+                 -SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) net
+                FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=?
+                GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", M)
+            soyo_kg = 0.0; soyo_amt = 0.0
+            for it, net in cur.fetchall():
+                net = f(net)
+                soyo_kg += usg.get(it, 0.0) * net
+                soyo_amt += usc.get(it, 0.0) * net
+            cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
+                           WHERE ym=? AND UPPER(item_name) LIKE '%TUBE%'""", M)
+            r = cur.fetchone(); in_kg = f(r[0]); in_amt = f(r[1])
+            open_kg = bal_kg; open_amt = bal_amt
+            bal_kg = open_kg + in_kg - soyo_kg
+            bal_amt = open_amt + in_amt - soyo_amt
+            rows.append({"ym": M, "open_kg": open_kg, "open_amt": open_amt,
+                         "in_kg": in_kg, "in_amt": in_amt, "soyo_kg": soyo_kg, "soyo_amt": soyo_amt,
+                         "close_kg": bal_kg, "close_amt": bal_amt})
+        return {"settle_ym": sy, "from_ym": frm, "to_ym": to, "osp_min": osp_min, "rows": rows}
+    finally:
+        nx.close()
+
+
+# ── 사급부품(소분류310) BOM 전개 캐시 ──
+_PARTS_MAPS = None
+def _parts_maps(cur):
+    """CS_M_ITEM_BOM 부모→자식 맵 + 사급부품(SGROUP 310) 집합. 모듈캐시(1회 로드).
+       ★CS_CALC_EXCEPT_FLAG<>'1' 필터 유지: 이 플래그는 변형SUB 이중계상 방지용.
+         예) AJR30077403은 MJX65072203을 (a)직접행(except='1') + (b)-F&T 변형서브 안 = 2경로로 가짐.
+         except 필터가 (a)를 걸러 1회만 계상. 제거하면 2배 이중계상됨(실측 확인)."""
+    global _PARTS_MAPS
+    if _PARTS_MAPS is not None:
+        return _PARTS_MAPS
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(USE_QTY,0)
+                   FROM nx.CS_M_ITEM_BOM WHERE ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'""")
+    ch = {}
+    for p, c2, q in cur.fetchall():
+        ch.setdefault(p, []).append((c2, float(q or 0)))
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+    sg310 = set(r[0] for r in cur.fetchall())
+    _PARTS_MAPS = (ch, sg310)
+    return _PARTS_MAPS
+
+def _explode_parts(item, ch, sg310, memo):
+    """1개 완제품 → {사급부품(310): 소요개수}. 310 도달시 계상 후 정지(LG가 완성제공)."""
+    if item in memo:
+        return memo[item]
+    memo[item] = {}
+    acc = {}
+    for c2, q in ch.get(item, []):
+        if q <= 0:
+            continue
+        if c2 in sg310:
+            acc[c2] = acc.get(c2, 0.0) + q
+        else:
+            for k, v in _explode_parts(c2, ch, sg310, memo).items():
+                acc[k] = acc.get(k, 0.0) + v * q
+    memo[item] = acc
+    return acc
+
+
+@router.get("/api/lgsagub/settle_list")
+def settle_list(ym: str = Query(""), q: str = Query(""), gubun1: str = Query(""), limit: int = Query(20000)):
+    """원단위 관리 목록: 적용월(ym)의 (Assy×하위동부자재) 행 조회 + 월목록(드롭다운용)."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        cur.execute("SELECT ym, COUNT(*) FROM nx.lg_settle_unit GROUP BY ym ORDER BY ym DESC")
+        yms = [{"ym": r[0], "rows": r[1]} for r in cur.fetchall()]
+        if not ym.strip() and yms:
+            ym = yms[0]["ym"]
+        wh = ["ym=?"]; p = [ym.strip()]
+        if gubun1.strip():
+            wh.append("gubun1=?"); p.append(gubun1.strip())
+        if q.strip():
+            wh.append("(assy_pn LIKE ? OR sub_pn LIKE ? OR assy_desc LIKE ? OR sub_desc LIKE ?)")
+            p += [f"%{q.strip()}%"] * 4
+        cur.execute(f"""SELECT TOP {int(limit)} assy_pn, assy_desc, coop, sub_pn, sub_desc, qty,
+              gubun1, gubun2, od, thk, leng, weight
+            FROM nx.lg_settle_unit WHERE {' AND '.join(wh)}
+            ORDER BY assy_pn, sub_pn""", *p)
+        rows = [{"assy_pn": r[0], "assy_desc": r[1], "coop": r[2], "sub_pn": r[3], "sub_desc": r[4],
+                 "qty": f(r[5]), "gubun1": r[6], "gubun2": r[7], "od": f(r[8]), "thk": f(r[9]),
+                 "leng": f(r[10]), "weight": f(r[11])} for r in cur.fetchall()]
+        return {"ym": ym.strip(), "yms": yms, "rows": rows, "cnt": len(rows)}
+    finally:
+        nx.close()
+
+
+@router.post("/api/lgsagub/settle_copy")
+def settle_copy(from_ym: str = Query(...), to_ym: str = Query(...)):
+    """전월 복사로 신규월: from_ym 원단위를 to_ym로 복제(기존 to_ym 삭제 후). 상대적 불변이라 복사후 부분수정용."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _settle_prep(cur)
+        cur.execute("DELETE FROM nx.lg_settle_unit WHERE ym=?", to_ym.strip())
+        cur.execute("""INSERT INTO nx.lg_settle_unit
+              (ym,coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,src_file)
+            SELECT ?, coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,
+              N'copy<'+ym+N'>' FROM nx.lg_settle_unit WHERE ym=?""", to_ym.strip(), from_ym.strip())
+        n = cur.rowcount
+        nx.commit()
+        return {"ok": True, "from_ym": from_ym.strip(), "to_ym": to_ym.strip(), "rows": n}
+    finally:
+        nx.close()
+
+
+def _ym_list(a, b):
+    """YYMMDD 범위 → 걸치는 YYMM 리스트. 둘 다 없으면 []."""
+    if not a and not b:
+        return []
+    a = a or b; b = b or a
+    try:
+        ya, ma = int(a[:2]), int(a[2:4]); yb, mb = int(b[:2]), int(b[2:4])
+    except Exception:
+        return []
+    out = []; y, m = ya, ma
+    while (y, m) <= (yb, mb) and len(out) < 60:
+        out.append(f"{y:02d}{m:02d}")
+        m += 1
+        if m > 12: m = 1; y += 1
+    return out
+
+def _recv_where(ym, ymd_from, ymd_to):
+    """리시빙 필터: 기간(ymd_from~ymd_to YYMMDD) 우선, 없으면 월(ym=YYMM=LEFT4). (where, params, yms)."""
+    if ymd_from.strip() or ymd_to.strip():
+        return ("RECEIVING_YMD>=? AND RECEIVING_YMD<=?",
+                [ymd_from.strip() or "000000", ymd_to.strip() or "999999"],
+                _ym_list(ymd_from.strip(), ymd_to.strip()))
+    return ("LEFT(RECEIVING_YMD,4)=?", [ym.strip()], [ym.strip()] if ym.strip() else [])
+
+
+@router.get("/api/lgsagub/recvcompare_parts")
+def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""), limit: int = Query(3000)):
+    """리시빙 비교(부품): 기간 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.
+       ★부품=개수 단위. 소비=C(정상)만(R은 반품 아님→차감안함). BOM=CS_M_ITEM_BOM 전체(원가제외필터 미적용).
+       기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _prep(cur)
+        ch, sg310 = _parts_maps(cur)
+        rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+              SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
+              SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr
+            FROM nx.SA_T_LG_RECEIVING_DTL WHERE {rwh} GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", *rp)
+        recv = [(r[0], f(r[1]), f(r[2])) for r in cur.fetchall()]
+        memo = {}
+        out_c = {}; out_r = {}   # 사급부품별 OUT 소요개수
+        for it, qc, qr in recv:
+            pmap = _explode_parts(it, ch, sg310, memo)
+            for part, per in pmap.items():
+                out_c[part] = out_c.get(part, 0.0) + qc * per
+                out_r[part] = out_r.get(part, 0.0) + qr * per
+        # IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합, 평균단가=금액/수량
+        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a,
+              SUM(ISNULL(amt,0))/NULLIF(SUM(ISNULL(qty,0)),0) p
+            FROM nx.lg_sagub_actual WHERE ym IN ({inl}) AND UPPER(item_name) NOT LIKE '%TUBE%'
+            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
+        in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
+        # 품명 보강
+        nm = {}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
+        for a, b in cur.fetchall():
+            nm[a] = b
+        # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. OSP에 없는 소비부품은 사급 아님 → 제외.
+        parts = set(in_map)
+        items = []
+        tot_out_c = tot_out_r = tot_in_q = tot_in_a = 0.0
+        for p in parts:
+            oc = out_c.get(p, 0.0); orr = out_r.get(p, 0.0)
+            ind = in_map.get(p, {})
+            iq = ind.get("q", 0.0); ia = ind.get("a", 0.0); price = ind.get("p", 0.0)
+            tot_out_c += oc; tot_out_r += orr; tot_in_q += iq; tot_in_a += ia
+            # ★반품(R) 차감 제거: GUBUN='R'은 진짜 반품 아님(R품목 75종 중 C에도 있는 건 5종뿐·비율54%비현실적)
+            #   + 레거시 정본은 GUBUN을 차원으로만 유지(C−R 순계산 없음). 소비=C만. diff=IN−소비(C).
+            items.append({"item": p, "name": ind.get("nm") or nm.get(p, ""),
+                          "out_c": oc, "out_r": orr, "out_net": oc,
+                          "in_qty": iq, "in_amt": ia, "price": price,
+                          "diff": iq - oc})
+        items.sort(key=lambda x: -(abs(x["out_net"]) + x["in_qty"]))
+        return {
+            "ym": ym.strip(),
+            "summary": {"out_net": tot_out_c, "out_c": tot_out_c, "out_r": tot_out_r,
+                        "in_qty": tot_in_q, "in_amt": tot_in_a, "parts": len(parts)},
+            "items": items[:int(limit)],
+        }
+    finally:
+        nx.close()
