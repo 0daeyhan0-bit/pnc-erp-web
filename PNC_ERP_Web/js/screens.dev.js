@@ -1323,6 +1323,7 @@ SCREEN.unifybom=(c,ro)=>{
   // ★신규 BOM 등록 상태(방식①LG업로드 ②복사 ③새로) + 용접공정(관경별 횟수) 직원입력
   let newReg=null;              // {method} 모달 표시
   let isNew=false;             // 신규등록 편집 세션(저장시 마스터 생성)
+  let newMaster={lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};  // ★신규등록 제품(top) 마스터속성. 대분류=가공비 필터핵심(미설정시 부품공정 누락)
   let weldRows=[];             // [{weld_item,pipe_diam,weld_qty}] 관경별 용접점
   // ★관경 마스터 상수 fallback(weld_diam 정본 14관경) — API 미로드/지연에도 매트릭스 항상 채워지게(빈칸 방지)
   const WELD_DIAMS_DEFAULT=[{pipe_diam:4.76,std_use_qty:0.0007,std_st:10},{pipe_diam:5.00,std_use_qty:0.0007,std_st:10},{pipe_diam:6.35,std_use_qty:0.0008,std_st:10},{pipe_diam:7.94,std_use_qty:0.0008,std_st:10},{pipe_diam:9.52,std_use_qty:0.0008,std_st:10},{pipe_diam:12.70,std_use_qty:0.0010,std_st:15},{pipe_diam:15.88,std_use_qty:0.0012,std_st:15},{pipe_diam:19.05,std_use_qty:0.0022,std_st:23},{pipe_diam:22.00,std_use_qty:0.0028,std_st:23},{pipe_diam:25.40,std_use_qty:0.0038,std_st:29},{pipe_diam:28.00,std_use_qty:0.0047,std_st:29},{pipe_diam:31.75,std_use_qty:0.0057,std_st:29},{pipe_diam:34.90,std_use_qty:0.0066,std_st:29},{pipe_diam:38.10,std_use_qty:0.0076,std_st:29}];
@@ -1394,6 +1395,7 @@ SCREEN.unifybom=(c,ro)=>{
   const enterNew=async(topItem,topName,newLines,weldCand)=>{
     if(!codes.metal)await loadCodes(); await loadWeldDiams();
     item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null;
+    newMaster={lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};   // 제품 마스터속성 초기화(사용자 입력)
     results=[]; tree=[]; treeMax=0; naeFor=''; silFor='';
     lines=(newLines||[]).map(l=>({child_item:(l.child_item||'').toUpperCase(),item_name:l.item_name||'',spec:l.item_spec||'',
       qty:(l.qty!=null?+l.qty:1),unit:l.unit||'EA',node_type:'부품',cs_calc_except:false,sagub_default:false,kitting:false,
@@ -1472,11 +1474,14 @@ SCREEN.unifybom=(c,ro)=>{
   // 신규 저장: 마스터 + BOM(RAC자동라우팅) + 용접공정(관경별→파생)
   const saveNew=async()=>{
     if(!item){alert('품번 필요');return;}
+    if(!newMaster.lgroup){alert('제품 대분류를 선택하세요.\n(대분류 미설정 시 부품 가공비가 원가에서 누락됩니다 — 공정 필터가 대분류 기준)');return;}
     const seen={},errs=[];
     lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(ch&&ch===item)errs.push(`${i+1}행 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행 중복 ${ch}`);if(ch)seen[ch]=1;});
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
-    // 1) 마스터(신규품번 포함 자식들)
-    const mrows=lines.filter(l=>(l.child_item||'').trim()).map(l=>({item_code:l.child_item,item_name:l.item_name,item_spec:l.spec,
+    // 1) 마스터 — ★제품(top) 자신 + 신규품번 포함 자식들. 제품 대분류/소분류/생산구분/단가구분 저장(가공비 필터 정상화)
+    const mrows=[{item_code:item,item_name:name||item,lgroup:newMaster.lgroup,sgroup:newMaster.sgroup,
+      make_type:newMaster.make_type,cost_gubun:newMaster.cost_gubun,status:'사용'}];
+    lines.filter(l=>(l.child_item||'').trim()).forEach(l=>mrows.push({item_code:l.child_item,item_name:l.item_name,item_spec:l.spec,
       metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,unit:l.unit,in_cust:l.in_cust,
       sgroup:l.sgroup,lgroup:l.lgroup,make_type:l.make_type,cost_gubun:l.cost_gubun,status:l.status}));
     try{if(mrows.length)await fetch(`${API}/api/item/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:mrows})});}catch(e){alert('마스터 저장 실패: '+e.message);return;}
@@ -1953,7 +1958,15 @@ SCREEN.unifybom=(c,ro)=>{
             <b style="color:#1c47a0">③ 완전 새로</b><div style="font-size:11px;color:#5a6b82;margin:4px 0">빈 폼. 품번 직접입력 후 구성·용접공정 등록.</div>
             <button class="btn" id="nw-blank">빈 폼으로 시작</button></div>
         </div></div>`:''}
-     ${(editMode&&isNew)?`<div class="page-sub" style="color:#1c7c3a;font-weight:700">＋ 신규 등록 편집: 품번 <b>${esc(item)}</b> · ${esc(name||'(품명 미입력)')} — 구성 그리드 + 아래 용접공정 입력 후 [저장]</div>`:''}
+     ${(editMode&&isNew)?`<div class="page-sub" style="color:#1c7c3a;font-weight:700">＋ 신규 등록 편집: 품번 <b>${esc(item)}</b> · ${esc(name||'(품명 미입력)')} — 구성 그리드 + 아래 용접공정 입력 후 [저장]</div>
+     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 8px;margin:2px 0 4px;background:#f2fbf4;border:1px solid #bfe6c8;border-radius:8px;font-size:12px">
+       <b style="color:#1c7c3a">📋 제품 마스터</b>
+       <label class="tl">대분류<span style="color:#c0392b">*</span></label><select class="nm-fld" data-k="lgroup" style="width:130px"><option value="">-</option>${(codes.lgroup||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.lgroup?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
+       <label class="tl">소분류</label><select class="nm-fld" data-k="sgroup" style="width:130px"><option value="">-</option>${(codes.sgroup||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.sgroup?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
+       <label class="tl">생산구분</label><select class="nm-fld" data-k="make_type" style="width:110px"><option value="">-</option>${(codes.make_type||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.make_type?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
+       <label class="tl">단가구분</label><select class="nm-fld" data-k="cost_gubun" style="width:110px"><option value="">-</option>${(codes.cost_gubun||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.cost_gubun?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
+       <span style="color:#8a5a1a;font-size:11px">※ 대분류 미설정 시 부품 가공비가 누락됩니다(공정 필터).</span>
+     </div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
@@ -2001,6 +2014,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const cy=c.querySelector('#nw-copy');if(cy)cy.onclick=copyNew;}
     {const bl=c.querySelector('#nw-blank');if(bl)bl.onclick=blankNew;}
     if(editMode&&isNew)bindWeld();
+    c.querySelectorAll('.nm-fld').forEach(el=>el.onchange=()=>{newMaster[el.dataset.k]=el.value;});  // 제품 마스터속성 write-back
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
     const ed=c.querySelector('#bm-edit');if(ed)ed.onclick=()=>{editMode=true;viewTree=false;draw();};
