@@ -3189,7 +3189,8 @@ SCREEN.rawmat=(host)=>{
       g('#rm-q').onkeyup=e=>{if(e.key==='Enter')g('#rm-go').click();};
       host.querySelectorAll('.rm-row').forEach(tr=>tr.onclick=()=>{host.querySelectorAll('.rm-row').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');loadDetail(+tr.dataset.rid);});
       attachResizers(host);renderDetail();
-    } else { drawLme(); }
+    } else if(st.tab==='settle'){ SCREEN.dongunit(host.querySelector('#rm-tabbody')); }
+    else { drawLme(); }
   };
   load();
 };
