@@ -3104,7 +3104,7 @@ SCREEN.lgsagub=(c)=>{
        <div class="spacer"></div><span class="rowcount">${cop?`리시빙×원단위(${esc(m.settle_ym)})`:'조회 전'}</span>
      </div>
      ${summ}
-     <div class="grid-wrap" style="max-height:calc(100vh - 260px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
         ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
         ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
        <tbody>${rowsH}</tbody>${foot}</table></div>
