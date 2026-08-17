@@ -572,7 +572,7 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
         # ★수불 개시월 = 2603(2026.03) 사용자 확정. 그 이전 OSP 데이터 없어 기초0 시작. to_ym 기본 = OSP 최신월.
         cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) LIKE '%TUBE%'")
         r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
-        LEDGER_START = "2603"
+        LEDGER_START = "2602"
         frm = from_ym.strip() or LEDGER_START
         if osp_min and frm < osp_min:    # OSP 데이터 없는 이전달로 시작하면 입고0→마이너스 → 첫 OSP월로 클램프
             frm = osp_min
