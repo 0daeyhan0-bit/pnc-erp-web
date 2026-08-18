@@ -383,16 +383,15 @@ SCREEN.dispatchdetail=(c)=>{
   const CD={
     ymd:{h:'일자',cls:'center',get:r=>fmtYmd(r.ymd)},
     seq:{h:'순번',cls:'center',get:r=>esc(r.seq)},
-    cc:{h:'불출처',cls:'cap',get:r=>esc(r.cnm)},
-    ct:{h:'거래처분류',cls:'cap',get:r=>esc(ctN(r.ct))},
+    cc:{h:'불출처',cls:'cap',w:120,get:r=>esc(r.cnm)},
+    ct:{h:'매입유형',cls:'cap',w:100,get:r=>esc(ctN(r.ct))},
     chg:{h:'담당자',cls:'',get:r=>esc(chg(r.cc))||'-'},
-    ic:{h:'ASY PART NO',cls:'',get:r=>esc(r.ic)||''},
     mat:{h:'PART_NO',cls:'',get:r=>`<b>${esc(r.mat)}</b>`},
     nm:{h:'품명',cls:'cap',get:r=>esc(r.nm)},
     spec:{h:'PART SPEC',cls:'cap',get:r=>esc(r.spec)||''},
     lg:{h:'대분류',cls:'',get:r=>esc(lgN(r.lg))},
     sg:{h:'소분류',cls:'',get:r=>esc(sgN(r.sg))},
-    incust:{h:'입고처',cls:'cap',get:r=>esc(r.incust)||''},
+    incust:{h:'입고처',cls:'cap',w:120,get:r=>esc(r.incust)||''},
     unit:{h:'단위',cls:'center',get:r=>esc(r.unit)||''},
     qty:{h:'수량',cls:'num',get:r=>won(r.qty)},
     wt:{h:'중량',cls:'num',get:r=>won(r.wt)},
@@ -404,11 +403,11 @@ SCREEN.dispatchdetail=(c)=>{
   };
   const TAIL=['unit','qty','wt','cur','rate','cost','amt','kamt'];
   const MODES={
-    day:      {label:'일자별',       lead:['ymd','seq','cc','ct','chg','ic','mat','nm','spec','lg','sg','incust'], sort:['ymd','seq']},
-    cust:     {label:'불출처별',      lead:['cc','ct','chg','ymd','seq','ic','mat','nm','spec','lg','sg','incust'], sort:['cc','ymd','seq'], g1:'cc',g2:'ymd',l1:'불출처소계',l2:'일계'},
-    item:     {label:'품목별',        lead:['ic','mat','nm','spec','lg','sg','incust','ymd','seq','cc','ct','chg'], sort:['mat','ymd','seq'], g1:'mat',g2:'ymd',l1:'품목계',l2:'일계'},
-    custitem: {label:'불출처/품목별',  lead:['cc','ct','chg','ic','mat','nm','spec','lg','sg','incust','ymd','seq'], sort:['cc','mat','ymd','seq'], g1:'cc',g2:'mat',l1:'불출처소계',l2:'품목계'},
-    itemcust: {label:'품목/불출처별',  lead:['ic','mat','nm','spec','lg','sg','incust','cc','ct','chg','ymd','seq'], sort:['mat','cc','ymd','seq'], g1:'mat',g2:'cc',l1:'품목계',l2:'불출처소계'},
+    day:      {label:'일자별',       lead:['ymd','seq','cc','ct','chg','mat','nm','spec','lg','sg','incust'], sort:['ymd','seq']},
+    cust:     {label:'불출처별',      lead:['cc','ct','chg','ymd','seq','mat','nm','spec','lg','sg','incust'], sort:['cc','ymd','seq'], g1:'cc',g2:'ymd',l1:'불출처소계',l2:'일계'},
+    item:     {label:'품목별',        lead:['mat','nm','spec','lg','sg','incust','ymd','seq','cc','ct','chg'], sort:['mat','ymd','seq'], g1:'mat',g2:'ymd',l1:'품목계',l2:'일계'},
+    custitem: {label:'불출처/품목별',  lead:['cc','ct','chg','mat','nm','spec','lg','sg','incust','ymd','seq'], sort:['cc','mat','ymd','seq'], g1:'cc',g2:'mat',l1:'불출처소계',l2:'품목계'},
+    itemcust: {label:'품목/불출처별',  lead:['mat','nm','spec','lg','sg','incust','cc','ct','chg','ymd','seq'], sort:['mat','cc','ymd','seq'], g1:'mat',g2:'cc',l1:'품목계',l2:'불출처소계'},
   };
   const API=API_BASE;
   let gijun='close', mode='day', cur=[], pool=[], loading=false, msg='', curYm='', curFrom='', curTo='', source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
