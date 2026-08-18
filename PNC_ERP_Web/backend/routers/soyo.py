@@ -81,19 +81,49 @@ def plan_compose_mat(payload: dict = Body(...)):
         MKF = {}; INCF = {}
         cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(IN_CUST_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
         for ic, mkt, inc in cur.fetchall(): ic = str(ic).strip(); MKF[ic] = str(mkt).strip(); INCF[ic] = str(inc).strip()
-        PRF = {}
-        cur.execute("SELECT item_code, supply_gubun, ISNULL(vendor_code,''), ISNULL(alloc_ratio,100) FROM nx.sourcing_profile WHERE is_active=1 AND is_internal=0")
-        for ic, sg, v, al in cur.fetchall(): PRF.setdefault(str(ic).strip(), []).append((str(sg).strip(), str(v).strip(), float(al or 100)))
+        PRF = {}       # 현행경로(route_id 0/무관) 프로파일: item -> [(sg,v,al)]
+        PRF_ALT = {}   # 대안경로(route_id>0) 프로파일: (route_id,item) -> [(sg,v,al)]
+        cur.execute("SELECT item_code, supply_gubun, ISNULL(vendor_code,''), ISNULL(alloc_ratio,100), ISNULL(route_id,0) FROM nx.sourcing_profile WHERE is_active=1 AND is_internal=0")
+        for ic, sg, v, al, rid in cur.fetchall():
+            ic = str(ic).strip(); rid = int(rid or 0)
+            (PRF_ALT.setdefault((rid, ic), []) if rid else PRF.setdefault(ic, [])).append((str(sg).strip(), str(v).strip(), float(al or 100)))
         _MKMAP = {'1': '자체', '2': '외주가공', '3': '매입', '4': '유상사급', '5': '외주완성'}  # '자체'=프로파일 라벨과 통일
-        cur.execute("SELECT work_order, mat_code, SUM(CAST(part_plan_qty AS float)) FROM nx.plan_part_mat GROUP BY work_order, mat_code")
+        # ★경로 배분(nx.route_alloc, 규칙 §8·§9): 조립품(assy)별 활성경로 × route%로 부품수요 분해. ★총량 보존.
+        #   현행경로(R01/route_id=0)=기존 로직(프로파일/BOM기본, 업체 재분할은 자동발주 order_vendor 담당).
+        #   대안경로(R02+)=route별 프로파일 or 경로헤더 공급처, SOURCE='경로대안'(자동발주 order_vendor 재분할 제외 표식).
+        ROUTE = {}     # assy -> [(rid, ratio, iscur)]
+        cur.execute("""SELECT LTRIM(RTRIM(a.item_code)), a.route_id, a.alloc_ratio,
+              CASE WHEN a.route_id=0 THEN 1 WHEN EXISTS(SELECT 1 FROM nx.sourcing_route r
+                 WHERE r.route_id=a.route_id AND (r.current_flag=1 OR r.route_no=1)) THEN 1 ELSE 0 END
+            FROM nx.route_alloc a WHERE a.is_active=1 AND a.alloc_ratio IS NOT NULL""")
+        for ic, rid, rt, isc in cur.fetchall(): ROUTE.setdefault(str(ic).strip(), []).append((int(rid), float(rt), bool(isc)))
+        RHV = {}       # 대안경로 rid -> (헤더공급처, 구분)
+        alt_rids = sorted({rid for lst in ROUTE.values() for (rid, _, isc) in lst if not isc and rid != 0})
+        if alt_rids:
+            rph = ",".join("?" * len(alt_rids))
+            cur.execute(f"SELECT route_id, ISNULL(vendor_code,''), ISNULL(gubun,'') FROM nx.sourcing_route WHERE route_id IN ({rph})", *alt_rids)
+            for rid, v, g in cur.fetchall(): RHV[int(rid)] = (str(v or '').strip(), str(g or '').strip() or '외주가공')
+        cur.execute("SELECT work_order, ISNULL(assy_item_code,''), mat_code, SUM(CAST(part_plan_qty AS float)) FROM nx.plan_part_mat GROUP BY work_order, assy_item_code, mat_code")
         srows = []
-        for wo, mat, qty in cur.fetchall():
-            wo = str(wo).strip(); mat = str(mat).strip(); qty = float(qty or 0)
-            ps = PRF.get(mat)
-            if ps:
-                for sg, v, al in ps: srows.append((wo, mat, sg, v, qty * al / 100.0, '프로파일'))
-            else:
-                srows.append((wo, mat, _MKMAP.get(MKF.get(mat, ''), '미지정'), INCF.get(mat, ''), qty, 'BOM기본'))
+        for wo, assy, mat, qty in cur.fetchall():
+            wo = str(wo).strip(); assy = str(assy or '').strip(); mat = str(mat).strip(); qty = float(qty or 0)
+            routes = ROUTE.get(assy) or [(0, 100.0, True)]
+            rsum = sum(rt for _, rt, _ in routes) or 100.0
+            for (rid, rt, isc) in routes:
+                q = qty * (rt / rsum)
+                if isc:                                   # 현행경로: 기존 로직
+                    ps = PRF.get(mat)
+                    if ps:
+                        for sg, v, al in ps: srows.append((wo, mat, sg, v, q * al / 100.0, '프로파일'))
+                    else:
+                        srows.append((wo, mat, _MKMAP.get(MKF.get(mat, ''), '미지정'), INCF.get(mat, ''), q, 'BOM기본'))
+                else:                                     # 대안경로(R02+)
+                    pa = PRF_ALT.get((rid, mat))
+                    if pa:
+                        for sg, v, al in pa: srows.append((wo, mat, sg, v, q * al / 100.0, '경로대안'))
+                    else:
+                        hv, hg = RHV.get(rid, ('', '외주가공'))
+                        srows.append((wo, mat, hg, hv, q, '경로대안'))
         cur.fast_executemany = True
         cur.executemany("INSERT INTO nx.plan_mat_source(WORK_ORDER,MAT_CODE,SUPPLY_GUBUN,VENDOR_CODE,QTY,SOURCE) VALUES(?,?,?,?,?,?)", srows)
         cur.execute("SELECT COUNT(*), COUNT(DISTINCT work_order) FROM nx.plan_part_mat")
