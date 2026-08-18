@@ -1053,7 +1053,8 @@ SCREEN.matclose=(c)=>{
       if(f!==dfrom||t!==dto)load();else applyF();};
     c.querySelector('#mc-go').onclick=go;
     c.querySelector('#mc-q').onkeyup=e=>{if(e.key==='Enter')go();};
-    ['#mc-from','#mc-to'].forEach(id=>{const e=c.querySelector(id);if(e)e.onchange=()=>load();});
+    // 날짜는 자동조회 안 함(타이핑 중 change로 재렌더→포커스 뺏김 방지). 자유 키인 후 조회버튼/Enter로 적용. (UI규칙: 직접 키인 보장)
+    ['#mc-from','#mc-to'].forEach(id=>{const e=c.querySelector(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter')go();};});
     c.querySelectorAll('.mc-row').forEach(tr=>tr.onclick=()=>{const cd=tr.dataset.cd,r=rows.find(x=>x.cd===cd);openLedger(cd,r?r.nm:'');});
     c.querySelector('#mc-xls').onclick=()=>downloadCSV('자재일마감_'+(dfrom||'')+'_'+(dto||'')+'.csv',
       ['품번','품명','제품군','기초수량','기초금액','입고수량','입고금액','출고수량','출고금액','평가조정','기말수량','평균단가','기말금액'],
