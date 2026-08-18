@@ -741,6 +741,18 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         _prep(cur)
         ch, sg310 = _parts_maps(cur)
         rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        # ② IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합. ★이 OSP 목록 자체가 '사급부품 정의' = 전개 정지점.
+        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a,
+              SUM(ISNULL(amt,0))/NULLIF(SUM(ISNULL(qty,0)),0) p
+            FROM nx.lg_sagub_actual WHERE ym IN ({inl}) AND UPPER(item_name) NOT LIKE '%TUBE%'
+            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
+        in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
+        # ★전개 정지=OSP 목록(SGROUP=310 아님). 310으로만 멈추면 MAZ30083301(sg230, 구매단가)처럼
+        #   310 아닌 사급부품을 통째로 놓침. OSP에 있는 부품이면 어디서든 정지·계상.
+        osp_set = set(in_map)
+        # ③ 리시빙 → 사급부품 소요개수 (C+R 전부. R은 반품 아니라 정상 리시빙 다른 구분)
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
               SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
               SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr
@@ -749,18 +761,10 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         memo = {}
         out_c = {}; out_r = {}   # 사급부품별 OUT 소요개수
         for it, qc, qr in recv:
-            pmap = _explode_parts(it, ch, sg310, memo)
+            pmap = _explode_parts(it, ch, osp_set, memo)   # ★정지=OSP
             for part, per in pmap.items():
                 out_c[part] = out_c.get(part, 0.0) + qc * per
                 out_r[part] = out_r.get(part, 0.0) + qr * per
-        # IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합, 평균단가=금액/수량
-        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
-        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
-              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a,
-              SUM(ISNULL(amt,0))/NULLIF(SUM(ISNULL(qty,0)),0) p
-            FROM nx.lg_sagub_actual WHERE ym IN ({inl}) AND UPPER(item_name) NOT LIKE '%TUBE%'
-            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
-        in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
         # ★① 우리 ERP 확정입고(입고기준): 확정입고집계표와 동일 원천 = PU_T_STOCK_MAINT(9/S/C/G/H 검사통과)+_C(수입 DIVISION=P). MAT_CODE별 기간합.
         erp_map = {}
         if yms:
