@@ -685,21 +685,33 @@ SCREEN.costanalysis=(c)=>{
     D.agg={cnt:D.rows.length,qty:Math.round(qt),sales:Math.round(sales),silamt:Math.round(silamt),impact:Math.round(impact),loss};A=D.agg;
     const cd=c.querySelector('.ca-cards');if(cd)cd.innerHTML=cardsHTML();};
   let rvBusy=false;
-  const loadRecv=async(ym,ymd)=>{
+  const loadRecv=async(ym,ymd,force)=>{
     if(rvBusy)return;rvBusy=true;ymd=ymd||rvYmd;const tok=ymd+'|'+(ym||'');loadRecv._tok=tok;setRegenMsg('목록 로드…');
     try{
+      // ★서버 결과캐시 우선(첫 로드 즉시화). force(재계산)면 스킵.
+      if(!force){
+        try{const cg=await(await fetch(`${API}/api/cost/analysis/cache/get?ym=${encodeURIComponent(ym||'')}&ymd=${encodeURIComponent(ymd)}`)).json();
+          if(cg&&cg.cached&&cg.rows&&cg.rows.length&&loadRecv._tok===tok){
+            D.ym=cg.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
+            D.rows=cg.rows.map(x=>buildRow(x.part,x.qty,x));R=D.rows;recomputeAgg();
+            window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+            setRegenMsg(`캐시 ${cg.upd||''} · 최신화=재계산 버튼`);
+            rvBusy=false;renderBody();return;
+          }
+        }catch(e){}
+      }
       const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
       const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
       D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
       // ★속도: 청크 35 + 6개 동시(병렬) — 무거운 품목(복합SUB)을 여러 워커로 분산. + 남은시간(ETA) 표시.
-      const CH=35, PAR=6; let done=0; const t0=Date.now();
+      const CH=35, PAR=6; let done=0; const t0=Date.now(); const liveCC={};
       const chunks=[]; for(let i=0;i<list.length;i+=CH)chunks.push({start:i,items:list.slice(i,i+CH)});
       for(let b=0;b<chunks.length;b+=PAR){
         if(loadRecv._tok!==tok)break;
         await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
           let cc={};
           try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||'')})})).json()).costs||{};}catch(e){}
-          ck.items.forEach((x,j)=>{D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
+          ck.items.forEach((x,j)=>{liveCC[x.part]=cc[x.part]||{};D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
           done+=ck.items.length;
         }));
         if(loadRecv._tok!==tok)break;
@@ -707,7 +719,12 @@ SCREEN.costanalysis=(c)=>{
         setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();
       }
       recomputeAgg();
-      if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
+      if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+        // ★계산결과 서버캐시 저장 → 다음 진입·타 사용자 즉시(엔진 재계산 불요)
+        try{const saveRows=list.map(x=>Object.assign({part:x.part,qty:x.qty},liveCC[x.part]||{}));
+          fetch(`${API}/api/cost/analysis/cache/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym:D.ym,ymd,rows:saveRows})});}catch(e){}
+        setRegenMsg('완료 · 캐시 저장됨');
+      }
     }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
     finally{rvBusy=false;renderBody();}
   };
@@ -845,7 +862,7 @@ SCREEN.costanalysis=(c)=>{
       c.querySelector('#ca-q').oninput=e=>{q=e.target.value.trim();renderBody();};
       c.querySelector('#ca-loss').onchange=e=>{lossOnly=e.target.checked;renderBody();};
       const cy=c.querySelector('#ca-ymd'); if(cy)cy.onchange=e=>{rvYmd=date2ymd(e.target.value);};
-      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd);};   // 재계산=실시간(nx)
+      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd, true);};   // 재계산=캐시무시 강제 재계산+재저장
       // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
       if(!rvBusy && !loadRecv._tok){
         if(window.__CA_LIVE&&window.__CA_LIVE.ymd===rvYmd){D.rows=window.__CA_LIVE.rows;D.agg=window.__CA_LIVE.agg;D.ym=window.__CA_LIVE.ym;D.base=window.__CA_LIVE.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
