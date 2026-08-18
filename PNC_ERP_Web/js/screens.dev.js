@@ -1218,7 +1218,7 @@ const PROC_MODAL_CSS=`<style>
 SCREEN.unifybom=(c,ro)=>{
   const API=API_BASE;
   const RO=(ro===true);
-  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false;
+  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false, itemCut='';  // itemCut=절삭/설치 구분(nx.item.cut_gubun)
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
   let wuData=null, wuBusy=false;   // 역전개(where-used) 모달 상태
   const wuFmt=n=>(n==null||n==='')?'':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:5});
@@ -1395,7 +1395,7 @@ SCREEN.unifybom=(c,ro)=>{
     const [gp,tp]=await Promise.allSettled([   // ★get·tree 병렬(순차 대비 tree 시간만큼 단축)
       fetch(`${API}/api/bom/get?item=${encodeURIComponent(it)}`).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}),
       fetch(`${API}/api/bom/tree?item=${encodeURIComponent(it)}`).then(r=>r.json())]);
-    if(gp.status==='fulfilled'){const j=gp.value;item=j.item;name=j.name||'';procs=j.procs||[];procMap={};procs.forEach(p=>procMap[p.code]=p.name);lines=(j.lines||[]).map(l=>({...l,spec:specOf(l)}));}
+    if(gp.status==='fulfilled'){const j=gp.value;item=j.item;name=j.name||'';itemCut=j.cut_gubun||'';procs=j.procs||[];procMap={};procs.forEach(p=>procMap[p.code]=p.name);lines=(j.lines||[]).map(l=>({...l,spec:specOf(l)}));}
     else{msg='조회 실패: '+((gp.reason&&gp.reason.message)||gp.reason);lines=[];}
     if(tp.status==='fulfilled'){const tj=tp.value;tree=tj.rows||[];treeMax=tj.maxlevel||0;} else{tree=[];treeMax=0;}
     routeSel=0;routes=[];routesFor='';routeTree=null;routeTreeFor=-1;routeCost=null;routeCostFor=-1;   // ★품번 전환 → 후보선택 현행으로 리셋
@@ -1996,7 +1996,8 @@ SCREEN.unifybom=(c,ro)=>{
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
          :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
-       <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
+       ${item&&!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<label class="tl" style="margin-left:6px" title="경영 대시보드·영업예상 절삭/설치 분류(품목마스터 nx.item.cut_gubun). 즉시 저장.">구분</label><select class="sel" id="bm-cut" style="width:96px">${['','절삭','설치','분지관','이지링크'].map(g=>`<option value="${g}" ${itemCut===g?'selected':''}>${g||'미분류'}</option>`).join('')}</select>`:''}
+       <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}</span>`:''}
      </div>
      <datalist id="bm-itemdl"></datalist><datalist id="bm-vendordl"></datalist>
      ${newReg?`<div style="border:2px solid #1c7c3a;border-radius:10px;background:#f4fbf6;padding:12px;margin:8px 0">
@@ -2078,6 +2079,10 @@ SCREEN.unifybom=(c,ro)=>{
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
     const ed=c.querySelector('#bm-edit');if(ed)ed.onclick=()=>{editMode=true;viewTree=false;draw();};
+    {const bc=c.querySelector('#bm-cut');if(bc)bc.onchange=async()=>{const v=bc.value;   // 절삭/설치 구분 즉시저장(nx.item.cut_gubun)
+      try{const r=await fetch(`${API}/api/item/cutgubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:item,cut_gubun:v})});const j=await r.json();
+        if(j&&(j.ok||j.updated>=0)){itemCut=v;const rc=c.querySelector('.rowcount');if(rc&&item)rc.innerHTML=`<b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}`;}
+        else alert('구분 저장 실패');}catch(e){alert('구분 저장 오류: '+e.message);}};}
     const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{if(isNew){isNew=false;item='';name='';lines=[];weldRows=[];editMode=false;draw();}else load(item);};
     const add=c.querySelector('#bm-add');if(add)add.onclick=addRow;
     const sv=c.querySelector('#bm-save');if(sv)sv.onclick=(isNew?saveNew:save);

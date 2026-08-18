@@ -82,7 +82,7 @@ def bom_get(item: str = Query(..., description="품번")):
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT item_name, item_type FROM nx.item WHERE item_code=?", item)
+        cur.execute("SELECT item_name, item_type, ISNULL(cut_gubun,'') FROM nx.item WHERE item_code=?", item)
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품목 {item} 없음")
@@ -92,7 +92,7 @@ def bom_get(item: str = Query(..., description="품번")):
         cur.execute("SELECT bom_id, version, status FROM nx.bom_header WHERE item_code=?", item)
         h = cur.fetchone()
         if not h:
-            return {"item": item, "name": pi[0], "header": None, "lines": [], "procs": procs}
+            return {"item": item, "name": pi[0], "cut_gubun": pi[2], "header": None, "lines": [], "procs": procs}
         bom_id = h[0]
         cur.execute("""
             SELECT l.seq, l.child_item, ci.item_name, l.qty, l.node_type,
@@ -114,7 +114,7 @@ def bom_get(item: str = Query(..., description="품번")):
             for k, v in zip(cols, r):
                 d[k] = bool(v) if isinstance(v, bool) else v
             lines.append(d)
-        return {"item": item, "name": pi[0], "type": pi[1],
+        return {"item": item, "name": pi[0], "type": pi[1], "cut_gubun": pi[2],
                 "header": {"bom_id": bom_id, "version": h[1], "status": h[2]}, "lines": lines, "procs": procs}
     finally:
         cn.close()
