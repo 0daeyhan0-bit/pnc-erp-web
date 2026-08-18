@@ -168,14 +168,14 @@ const priceMgmtView=(host)=>{
 const priceSagubView=(host)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  let st={busy:false,msg:'',rows:[],q:''};
+  let st={busy:false,msg:'',rows:[],q:'',biz:'SAC'};
   const load=async()=>{try{const r=await fetch(`${API}/api/price/sagub_list?q=${encodeURIComponent(st.q)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
   const doUpload=async(f)=>{
     if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
     st.busy=true;st.msg='';draw();
     try{const fd=new FormData();fd.append('file',f);
-      const r=await fetch(`${API}/api/price/sagub_upload`,{method:'POST',body:fd});
+      const r=await fetch(`${API}/api/price/sagub_upload?biz=${encodeURIComponent(st.biz)}`,{method:'POST',body:fd});
       let j={};try{j=await r.json();}catch(e){}
       if(r.ok&&j.ok){st.msg=`✅ 업로드 완료 — ${won(j.rows)}행 적재 · 품목 ${j.items}개${j.skipped?` · 스킵 ${j.skipped}건(nx 미등록 품번)`:''}`;st.busy=false;await load();return;}
       else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
@@ -186,9 +186,11 @@ const priceSagubView=(host)=>{
      <div class="page-sub">LG <b>COSP Sales Price</b>(사급 부품가) 엑셀 업로드 → 각 행의 <b>Start Date를 적용일</b>로 <code>nx.price_item</code>(vendor=LG)에 반영. 최신가는 적용일 기준 자동 적용. 헤더: <code>Material·Sales Price·Start Date</code></div>
      <div id="sg-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:16px 18px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
        <span style="font-size:20px">📤</span> <b>COSP Sales Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
+       <label class="tl" style="margin-left:4px">사업부</label>
+       <select class="sel" id="sg-biz"><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select>
        <button class="btn" id="sg-pick" style="background:#1c7c3a;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
        <input type="file" id="sg-file" accept=".xlsx,.xls" style="display:none">
-       <span style="margin-left:auto;color:#8aa0bd;font-size:11px">사업부별 파일 각각 올리면 됩니다</span>
+       <span style="margin-left:auto;color:#8aa0bd;font-size:11px">COSP는 사업부 무관 동일가 — 선택은 표기용</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div class="toolbar"><label class="tl">검색</label><input class="inp" id="sg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:200px"><button class="btn" id="sg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">업로드 사급가 ${st.rows.length}건</span></div>
@@ -196,6 +198,7 @@ const priceSagubView=(host)=>{
      <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:280px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="5" class="empty">업로드된 사급가 없음 — COSP 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const fe=g('#sg-file'),drop=g('#sg-drop');
+    g('#sg-biz').onchange=e=>{st.biz=e.target.value;};
     g('#sg-pick').onclick=()=>fe.click();
     fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
     drop.ondragover=e=>{e.preventDefault();drop.style.background='#e3f0ff';drop.style.borderColor='#1c7c3a';};

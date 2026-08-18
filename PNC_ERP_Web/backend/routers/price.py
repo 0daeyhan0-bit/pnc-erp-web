@@ -260,7 +260,8 @@ async def price_sagub_upload(file: UploadFile = File(...), biz: str = Query(""))
                 up += 1; items.add(mat)
             except Exception:
                 skip += 1                        # nx.item 미등록(FK) 등 스킵
-        return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "file": file.filename}
+        return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "file": file.filename,
+                "biz": (biz or '').strip().upper()}
     finally:
         nx.close()
 
