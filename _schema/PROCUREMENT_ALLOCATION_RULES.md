@@ -58,17 +58,21 @@
 - `nx.sourcing_profile` / `nx.procgroup_alloc` — R02+ 경로 내부 업체 배분(유효기간 有, 별도).
 - 단가 = 라이브 `PARTNER_ERP.PR_M_ITEM_COST`(COST_TAG='1') 읽기전용.
 
-## 7. 현행 점검(2026-08-18) — 규칙 대비 GAP
+## 7. 구현 완료(2026-08-18) — 규칙 대비 (전 항목 ✅·검증완료)
 
-| 규칙 | 프로그램 | 현재 | 판정 |
+| 규칙 | 프로그램 | 조치 | 검증 |
 |---|---|---|---|
-| R2-1 유효기간 제거 | 조달프로파일(route_alloc) | apply_from/to 보유·UI 컬럼 有 | ❌ 제거필요 |
-| R2-2 합 100% | route_alloc 저장 | _validate_alloc 정확100%강제 O | ✔ (유효기간 기반→기간제거로 단순화) |
-| R2-3 R01 항상 활성 | 조달프로파일 | R01 비활성 체크 가능 | ❌ 강제필요 |
-| R3-1~3 업체배분·단가미등록 | 발주업체·배분 모달 | 다중업체·미등록차단 구현 | ✔ 완료 |
-| R4/R5 route×vendor | autoorder | vendor만·route 미적용 | ⚠ route% 곱셈 배선필요 |
-| R4/R5 route×vendor | manorder | vendor(order_vendor+profile)만·route 미적용 | ⚠ route% 곱셈 배선필요 |
-| R6 협력사 계획현황 | coopplan | route·vendor 배분 **0 반영** | ❌ 신규 반영필요 |
+| R2-1 유효기간 제거 | 조달프로파일(route_alloc) | UI 유효시작/종료 컬럼 삭제·저장 null | ✅ |
+| R2-2 합 100% | route_alloc 저장 | 활성합=100% 강제(프론트+백엔드 _validate_alloc) | ✅ |
+| R2-3 R01 항상 활성 | 조달프로파일 | R01 활성 강제("✔ 항상", 비활성 불가) | ✅ |
+| R3-1~3 업체배분·단가미등록 | 발주업체·배분 모달 | 다중업체 합100·단가미등록 저장차단(프론트+백엔드) | ✅ |
+| R4/R5 route×vendor | autoorder | `_route01_ratio`×업체비율 적용(현재 100=무영향) | ✅ 60/40·무회귀 |
+| R4/R5 route×vendor | manorder | `_route01_ratio`×_share 적용 | ✅ 60/40·무회귀 |
+| R6 협력사 계획현황 | coopplan | 배분 자도번을 협력사(발주업체)별 분할(route×vendor)+배지 | ✅ 60/40·총량보존·무회귀 |
+
+**공용 정의**: `common._route01_ratio(ncur, items)` — R01 경로% 단일 소스(자동발주·수동발주·협력사계획현황 공유). 세 곳이 같은 함수를 곱해 불일치 원천차단.
+
+**구현 파일(dev, 배포대기)**: screens.pur.js(조달프로파일 경로표·발주업체배분) · sourcing.py(order_vendor·route_alloc·item_vendor_price) · autoorder.py · manorder.py · coopplan.py · screens.etc.js(협력사계획현황 배지) · common.py(_route01_ratio).
 
 ---
 관련: [[newerp-sourcing-profile]] · _schema/AUTOORDER_PRODUCTION_DESIGN.md · BOM_EXPLOSION_RULES.md
