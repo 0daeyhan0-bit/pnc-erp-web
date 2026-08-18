@@ -146,13 +146,13 @@ SCREEN.receipt=(c)=>{
      <div class="toolbar">
        <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}" ${F.lg===x?'selected':''}>${esc(lgN(x))}</option>`).join('')}</select>
        <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}" ${F.sg===x?'selected':''}>${esc(sgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}" ${F.ct===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
+       <select class="sel" id="ct"><option value="">전체 매입유형</option>${cts.map(x=>`<option value="${esc(x)}" ${F.ct===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
        <input class="inp" id="cq" value="${esc(F.cq)}" placeholder="거래처코드/명">
        <input class="inp" id="mq" value="${esc(F.mq)}" placeholder="품번/품명/PART NO">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
+       <span id="derr" style="color:#c0392b;font-size:12px;font-weight:600"></span>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
-     <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
     c.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>{gijun=b.dataset.g;load();});
@@ -171,46 +171,59 @@ SCREEN.receipt=(c)=>{
     // 아이템 라인 셀 (거래처별/품목별 공통 우측)
     const itemMid=r=>`<td>${esc(lgN(r.lg))}</td><td>${esc(sgN(r.sg))}</td><td class="center">${esc(r.unit)||''}</td><td class="num">${won(r.qty)}</td><td class="num">${won(r.wt)}</td><td class="center">${esc(curN(r.cur))}</td><td class="num">${rateD(r)}</td><td class="num">${won(r.cost)}</td><td class="num">${won(r.kcost)}</td>${amtCells(r)}`;
     const midHdr=`<th>대분류</th><th>소분류</th><th class="center">단위</th><th class="num">수량</th><th class="num">중량</th><th class="center">화폐</th><th class="num">환율</th><th class="num">단가</th><th class="num">단가(KRW)</th>${amtHdr}`;
+    const midK=['lg','sg','unit','qty','wt','cur','rate','cost','kcost','amt'];
+    // 행 템플릿(모드별)+정렬키 — 헤더 더블클릭 정렬(소계무시 평면 렌더)에 재사용. ASY PART NO(ic) 컬럼 제거
+    const TPL={
+      cust:r=>`<tr><td><b>${esc(r.cc)}</b></td><td class="cap" title="${esc(r.cnm)}">${esc(r.cnm)}</td><td class="cap" title="${esc(ctN(r.ct))}">${esc(ctN(r.ct))}</td><td>${esc(r.mat)}</td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)||''}">${esc(r.spec)||''}</td>${itemMid(r)}</tr>`,
+      item:r=>`<tr><td><b>${esc(r.mat)}</b></td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)||''}">${esc(r.spec)||''}</td><td class="cap" title="${esc(r.cnm)}">${esc(r.cnm)}</td><td class="cap">${esc(ctN(r.ct))}</td>${itemMid(r)}</tr>`,
+      agg:r=>{const v6=(''+r.ct).trim()==='6'?'vat6':'';return `<tr><td><b>${esc(r.cc)}</b></td><td class="cap" title="${esc(r.cnm)}">${esc(r.cnm)}</td><td>${esc(chg(r.cc))||'-'}</td><td class="cap">${esc(ctN(r.ct))}</td><td class="num">${won(r.qty)}</td><td class="num gstock">${wonI(r.amt)}</td><td class="num">${wonI(r.kamt)}</td><td class="num ${v6}">${wonI(r.vat)}</td><td class="num ${v6}">${wonI(r.kvat)}</td><td class="num">${wonI(r.amt+r.vat)}</td><td class="num">${wonI(r.kamt+r.kvat)}</td></tr>`;},
+    };
+    const KEYS={cust:['cc','cnm','ct','mat','nm','spec'].concat(midK), item:['mat','nm','spec','cnm','ct'].concat(midK), agg:['cc','cnm','chg','ct','qty','amt','kamt','vat','kvat','amt','kamt']};
+    const gsty=' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"';
+    const grandRow=()=>{const gq=S(cur,'qty'),ga=S(cur,'amt'),gk=S(cur,'kamt');
+      if(mode==='agg'){const gv=S(cur,'vat'),gkv=S(cur,'kvat');
+        return `<tr class="grandtot"${gsty}><td colspan="4" class="right">총계 (${won(cur.length)} 업체)</td><td class="num">${won(gq)}</td><td class="num">${wonI(ga)}</td><td class="num">${wonI(gk)}</td><td class="num">${wonI(gv)}</td><td class="num">${wonI(gkv)}</td><td class="num">${wonI(ga+gv)}</td><td class="num">${wonI(gk+gkv)}</td></tr>`;}
+      const lead=mode==='cust'?9:8;
+      return `<tr class="grandtot"${gsty}><td colspan="${lead}" class="right">총계</td><td class="num">${won(gq)}</td><td colspan="5"></td>${amtSub({amt:ga,kamt:gk})}</tr>`;};
     if(mode==='cust'){
       cur=lines.slice().sort((a,b)=>(''+a.cc).localeCompare(''+b.cc,'ko')||(''+a.mat).localeCompare(''+b.mat,'ko'));
-      thead=`<tr><th>거래처코드</th><th>거래처명</th><th>거래처분류</th><th>ASY PART NO</th><th>PART NO</th><th>품명</th><th>PART SPEC</th>${midHdr}</tr>`;
-      ncols=17+VC;
+      thead=`<tr><th>거래처코드</th><th>거래처명</th><th style="min-width:100px">매입유형</th><th>PART NO</th><th>품명</th><th>PART SPEC</th>${midHdr}</tr>`;
+      ncols=16+VC;
       const groups=[]; let ck=null;
       cur.forEach(r=>{if(r.cc!==ck){groups.push({cc:r.cc,cnm:r.cnm,rows:[]});ck=r.cc;}groups[groups.length-1].rows.push(r);});
-      groups.forEach(g=>{g.rows.forEach(r=>{tbody+=`<tr><td><b>${esc(r.cc)}</b></td><td class="cap" title="${esc(r.cnm)}">${esc(r.cnm)}</td><td class="cap" title="${esc(ctN(r.ct))}">${esc(ctN(r.ct))}</td><td>${esc(r.ic)||''}</td><td>${esc(r.mat)}</td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)||''}">${esc(r.spec)||''}</td>${itemMid(r)}</tr>`;});
+      groups.forEach(g=>{g.rows.forEach(r=>{tbody+=TPL.cust(r);});
         const gs={qty:S(g.rows,'qty'),amt:S(g.rows,'amt'),kamt:S(g.rows,'kamt')};
-        tbody+=`<tr class="subtot"><td colspan="10" class="right">(업체계) ${esc(g.cnm)}</td><td class="num">${won(gs.qty)}</td><td colspan="5"></td>${amtSub(gs)}</tr>`;});
+        tbody+=`<tr class="subtot"><td colspan="9" class="right">(업체계) ${esc(g.cnm)}</td><td class="num">${won(gs.qty)}</td><td colspan="5"></td>${amtSub(gs)}</tr>`;});
     } else if(mode==='item'){
       const map=new Map();
       lines.forEach(r=>{const k=r.ic+'|'+r.mat; if(!map.has(k))map.set(k,{...r,qty:0,amt:0,kamt:0,vat:0,kvat:0}); const o=map.get(k);o.qty+=+r.qty||0;o.amt+=+r.amt||0;o.kamt+=+r.kamt||0;o.vat+=+r.vat||0;o.kvat+=+r.kvat||0;});
       cur=[...map.values()].sort((a,b)=>(''+a.mat).localeCompare(''+b.mat,'ko'));
-      thead=`<tr><th>ASY PART NO</th><th>PART NO</th><th>품명</th><th>PART SPEC</th><th>거래처명</th><th>거래처분류</th>${midHdr}</tr>`;
-      ncols=16+VC;
-      cur.forEach(r=>{tbody+=`<tr><td>${esc(r.ic)||''}</td><td><b>${esc(r.mat)}</b></td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)||''}">${esc(r.spec)||''}</td><td class="cap" title="${esc(r.cnm)}">${esc(r.cnm)}</td><td class="cap">${esc(ctN(r.ct))}</td>${itemMid(r)}</tr>`;});
+      thead=`<tr><th>PART NO</th><th>품명</th><th>PART SPEC</th><th>거래처명</th><th style="min-width:100px">매입유형</th>${midHdr}</tr>`;
+      ncols=15+VC;
+      cur.forEach(r=>{tbody+=TPL.item(r);});
     } else { // 업체별
       const map=new Map();
       lines.forEach(r=>{if(!map.has(r.cc))map.set(r.cc,{cc:r.cc,cnm:r.cnm,ct:r.ct,qty:0,amt:0,kamt:0,vat:0,kvat:0}); const o=map.get(r.cc);o.qty+=+r.qty||0;o.amt+=+r.amt||0;o.kamt+=+r.kamt||0;o.vat+=+r.vat||0;o.kvat+=+r.kvat||0;});
       cur=[...map.values()].sort((a,b)=>(''+a.cc).localeCompare(''+b.cc,'ko'));
-      thead=`<tr><th>거래처코드</th><th>거래처명</th><th>담당자</th><th>거래처분류</th><th class="num">수량</th><th class="num">금액</th><th class="num">금액(KRW)</th><th class="num">부가세</th><th class="num">부가세(KRW)</th><th class="num">합계</th><th class="num">합계(KRW)</th></tr>`;
+      thead=`<tr><th>거래처코드</th><th>거래처명</th><th>담당자</th><th style="min-width:100px">매입유형</th><th class="num">수량</th><th class="num">금액</th><th class="num">금액(KRW)</th><th class="num">부가세</th><th class="num">부가세(KRW)</th><th class="num">합계</th><th class="num">합계(KRW)</th></tr>`;
       ncols=11;
-      cur.forEach(r=>{const v6=(''+r.ct).trim()==='6'?'vat6':'';tbody+=`<tr><td><b>${esc(r.cc)}</b></td><td class="cap" title="${esc(r.cnm)}">${esc(r.cnm)}</td><td>${esc(chg(r.cc))||'-'}</td><td class="cap">${esc(ctN(r.ct))}</td><td class="num">${won(r.qty)}</td><td class="num gstock">${wonI(r.amt)}</td><td class="num">${wonI(r.kamt)}</td><td class="num ${v6}">${wonI(r.vat)}</td><td class="num ${v6}">${wonI(r.kvat)}</td><td class="num">${wonI(r.amt+r.vat)}</td><td class="num">${wonI(r.kamt+r.kvat)}</td></tr>`;});
+      cur.forEach(r=>{tbody+=TPL.agg(r);});
     }
-    const gq=S(cur,'qty'),ga=S(cur,'amt'),gk=S(cur,'kamt');
-    if(mode==='agg'){const gv=S(cur,'vat'),gkv=S(cur,'kvat');
-      tbody+=`<tr class="grandtot"><td colspan="4" class="right">총계 (${won(cur.length)} 업체)</td><td class="num">${won(gq)}</td><td class="num">${wonI(ga)}</td><td class="num">${wonI(gk)}</td><td class="num">${wonI(gv)}</td><td class="num">${wonI(gkv)}</td><td class="num">${wonI(ga+gv)}</td><td class="num">${wonI(gk+gkv)}</td></tr>`;
-    } else {
-      const lead=mode==='cust'?10:9;
-      tbody+=`<tr class="grandtot"><td colspan="${lead}" class="right">총계</td><td class="num">${won(gq)}</td><td colspan="5"></td>${amtSub({amt:ga,kamt:gk})}</tr>`;
-    }
+    tbody+=grandRow();
     c.querySelector('#th').innerHTML=thead;
     c.querySelector('#body').innerHTML=loading?`<tr><td colspan="${ncols}" class="empty">${SPIN}라이브 조회 중…</td></tr>`
       :(msg?`<tr><td colspan="${ncols}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
       :(cur.length?tbody:`<tr><td colspan="${ncols}" class="empty">결과 없음</td></tr>`));
-    c.querySelector('#sum').innerHTML=`<div class="s-item">${mode==='agg'?'업체':'라인'} <b>${won(cur.length)}</b></div><div class="s-item">수량 합계 <b>${won(gq)}</b></div><div class="s-item ${ga<0?'neg':''}">금액 합계 <b>${wonI(ga)} 원</b></div>`;
     c.querySelector('#cnt').textContent=`${cur.length}${mode==='agg'?'업체':'라인'} / 대상 ${lines.length}라인`;
     attachResizers(c);
-    const go=()=>{if(gijun==='close'){curYm=inYm(c.querySelector('#dto').value);}
-      else{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);}load();};
+    enableSort(c, KEYS[mode].concat(mode!=='agg'&&vat?['','','','','']:[]), ()=>cur, ()=>{
+      let b=''; cur.forEach(r=>b+=TPL[mode](r)); b+=grandRow(); c.querySelector('#body').innerHTML=b;});
+    const go=()=>{const de=c.querySelector('#derr');if(de)de.textContent='';
+      if(gijun==='close'){const v=c.querySelector('#dto').value;if(!/^\d{4}-\d{2}$/.test(v)){if(de)de.textContent='⚠ 마감년월을 올바르게 입력하세요';return;}curYm=inYm(v);}
+      else{const f=c.querySelector('#dfrom').value,t=c.querySelector('#dto').value;
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(f)||!/^\d{4}-\d{2}-\d{2}$/.test(t)){if(de)de.textContent='⚠ 입고일자를 올바르게 입력하세요';return;}
+        if(f>t){if(de)de.textContent='⚠ 시작일이 종료일보다 늦습니다';return;}curFrom=inD(f);curTo=inD(t);}
+      load();};
     const syncF=()=>{F.lg=c.querySelector('#lg').value;F.sg=c.querySelector('#sg').value;F.ct=c.querySelector('#ct').value;F.cq=c.querySelector('#cq').value;F.mq=c.querySelector('#mq').value;};
     c.querySelector('#go').onclick=()=>{syncF();draw();};   // ★검색=필터적용(검색어 유지)
     const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=go;   // 날짜 변경 시만 재조회
@@ -219,10 +232,10 @@ SCREEN.receipt=(c)=>{
     c.querySelector('#cq').onkeyup=e=>{if(e.key==='Enter'){syncF();draw();}};c.querySelector('#mq').onkeyup=e=>{if(e.key==='Enter'){syncF();draw();}};
     c.querySelector('#reset').onclick=()=>{gijun='close';mode='cust';vat=false;curYm='';F={lg:'',sg:'',ct:'',cq:'',mq:''};load();};
     c.querySelector('#xls').onclick=()=>{let hd,rows;
-      if(mode==='agg'){hd=['거래처코드','거래처명','담당자','거래처분류','수량','금액','금액(KRW)','부가세','부가세(KRW)','합계','합계(KRW)'];
+      if(mode==='agg'){hd=['거래처코드','거래처명','담당자','매입유형','수량','금액','금액(KRW)','부가세','부가세(KRW)','합계','합계(KRW)'];
         rows=cur.map(r=>[r.cc,r.cnm,chg(r.cc),ctN(r.ct),r.qty,Math.round(r.amt),Math.round(r.kamt),Math.round(r.vat),Math.round(r.kvat),Math.round(r.amt+r.vat),Math.round(r.kamt+r.kvat)]);}
-      else{const base=['ASY PART NO','PART NO','품명','PART SPEC','거래처코드','거래처명','거래처분류','대분류','소분류','단위','수량','중량','화폐','환율','단가','단가(KRW)','금액'].concat(vat?['금액(KRW)','부가세','부가세(KRW)','합계','합계(KRW)']:[]);hd=base;
-        rows=cur.map(r=>[r.ic,r.mat,r.nm,r.spec,r.cc,r.cnm,ctN(r.ct),lgN(r.lg),sgN(r.sg),r.unit,r.qty,r.wt,curN(r.cur),(''+r.cur).trim()==='KRW'?'':r.rate,r.cost,r.kcost,Math.round(r.amt)].concat(vat?[Math.round(r.kamt),fVat(r.amt),fVat(r.kamt),Math.round(r.amt+fVat(r.amt)),Math.round(r.kamt+fVat(r.kamt))]:[]));}
+      else{const base=['PART NO','품명','PART SPEC','거래처코드','거래처명','매입유형','대분류','소분류','단위','수량','중량','화폐','환율','단가','단가(KRW)','금액'].concat(vat?['금액(KRW)','부가세','부가세(KRW)','합계','합계(KRW)']:[]);hd=base;
+        rows=cur.map(r=>[r.mat,r.nm,r.spec,r.cc,r.cnm,ctN(r.ct),lgN(r.lg),sgN(r.sg),r.unit,r.qty,r.wt,curN(r.cur),(''+r.cur).trim()==='KRW'?'':r.rate,r.cost,r.kcost,Math.round(r.amt)].concat(vat?[Math.round(r.kamt),fVat(r.amt),fVat(r.kamt),Math.round(r.amt+fVat(r.amt)),Math.round(r.kamt+fVat(r.kamt))]:[]));}
       downloadCSV('확정입고집계표_'+gijun+'_'+mode+'.csv',hd,rows);};
   };
   load();
