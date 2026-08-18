@@ -181,6 +181,70 @@ def matledger_dates():
     mmin = _scalar("SELECT MIN(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE cust_code='Z99990'")
     return {"day": {"min": dmin, "max": dmax}, "month": {"min": mmin, "max": mmax}}
 
+# ================= 자재 일마감(이동평균) — 우리 교정 nx.mat_stock_daily 조회 =================
+# 기초=레거시 2606 월말 픽스 → 우리 이동평균 로직 일별 전개(수입환율·마이너스재고가드·tagP 반영).
+# 매입(9,S,도입P)=평균갱신 / 이동·반품·가공·출고·조정=현재평균 불변. 소모품(sgroup 99%) 제외.
+def _ymd6(s, default=None):
+    k = (s or "").replace("-", "").strip()
+    if len(k) == 8: k = k[2:]      # YYYYMMDD → YYMMDD
+    return k or default
+
+@live_router.get("/matclose/dates")
+def matclose_dates():
+    """우리 일마감(nx.mat_stock_daily) 가용 일자 범위."""
+    lo = _scalar("SELECT MIN(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    return {"min": lo, "max": hi}
+
+@live_router.get("/matclose")
+def matclose(dfrom: str = Query(""), dto: str = Query("")):
+    """자재 수불장(우리 이동평균). 기간 [dfrom,dto]: 기초(직전잔량)+Σ입고−Σ출고=기말. 품목별."""
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    to = _ymd6(dto, hi)
+    fr = _ymd6(dfrom, to[:4] + "01")   # 미지정시 해당월 1일
+    sql = """
+    ;WITH per AS (
+      SELECT UPPER(mat_code) cd, SUM(in_qty) iq, SUM(in_amt) ia, SUM(out_qty) oq, SUM(out_amt) oa
+      FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd BETWEEN ? AND ? GROUP BY UPPER(mat_code)),
+    endd AS (
+      SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa, avg_cost avg
+      FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd=?),
+    beg AS (
+      SELECT cd, sq, sa FROM (
+        SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa,
+          ROW_NUMBER() OVER(PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
+        FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd < ?) x WHERE rn=1),
+    keys AS (SELECT cd FROM per UNION SELECT cd FROM endd UNION SELECT cd FROM beg)
+    SELECT k.cd,
+      MAX(m.item_desc) nm, MAX(m.item_spec) spec, MAX(m.unit) unit,
+      MAX(ISNULL(i.sgroup,'')) sg, MAX(ISNULL(sd.DETAIL_DESC,'')) sgnm, MAX(ISNULL(i.cut_gubun,'')) cut,
+      MAX(ISNULL(b.sq,0)) bq, MAX(ISNULL(b.sa,0)) ba,
+      MAX(ISNULL(p.iq,0)) iq, MAX(ISNULL(p.ia,0)) ia,
+      MAX(ISNULL(p.oq,0)) oq, MAX(ISNULL(p.oa,0)) oa,
+      MAX(ISNULL(e.sq,0)) sq, MAX(ISNULL(e.sa,0)) sa, MAX(ISNULL(e.avg,0)) avg
+    FROM keys k
+    LEFT JOIN per p ON p.cd=k.cd
+    LEFT JOIN endd e ON e.cd=k.cd
+    LEFT JOIN beg b ON b.cd=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON UPPER(m.item_code)=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON UPPER(i.item_code)=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
+    GROUP BY k.cd ORDER BY k.cd
+    """
+    _cols, rows = _nx_rows(sql, fr, to, to, fr)
+    return {"dfrom": fr, "dto": to, "count": len(rows), "rows": rows}
+
+@live_router.get("/matclose/ledger")
+def matclose_ledger(mat: str = Query(...), dfrom: str = Query(""), dto: str = Query("")):
+    """단일 품목 일별 수불추이(우리 이동평균)."""
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    to = _ymd6(dto, hi); fr = _ymd6(dfrom, to[:4] + "01")
+    sql = """SELECT ymd, in_qty iq, in_amt ia, out_qty oq, out_amt oa,
+        stock_qty sq, avg_cost avg, stock_amt sa
+      FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE UPPER(mat_code)=? AND ymd BETWEEN ? AND ? ORDER BY ymd"""
+    _cols, rows = _nx_rows(sql, mat.upper(), fr, to)
+    return {"mat": mat.upper(), "dfrom": fr, "dto": to, "count": len(rows), "rows": rows}
+
 # ================= 자재불출집계표 (구매/자재, dw_pu_input_140) =================
 # LG外 전 매출(유상사급 포함). 원장(PU/SA_T_STOCK_MAINT + PU_T_STOCK_MAINT_C) 기반 → 기간 파라미터화 라이브.
 # 검증된 export_web_data.py _dispatch 쿼리 이식. 마감기준=업체별 마감일 구간, 불출기준=실제 이동일 구간.

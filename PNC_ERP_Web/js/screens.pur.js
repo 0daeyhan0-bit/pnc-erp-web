@@ -1528,8 +1528,11 @@ SCREEN.sourceprofile=(c)=>{
     if(!vs.length)vs.push({code:om.rows[i].cur_vendor_code,name:om.rows[i].cur_vendor_name,ratio:100,price:om.rows[i].item_master_price});
     if(vs.length===1)vs[0].ratio=100;draw();};
   const omSave=async()=>{
-    // 검증: 다중업체는 전원 배분%+합100
+    // 검증(저장 대상 행만): ★단가미등록 차단 + 다중업체 배분%합100
     for(const r of om.rows){const vs=r.vendors.filter(v=>v.code);
+      const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
+      if(isDefault && !r.has_override)continue;
+      if(vs.some(v=>v.price_reg===false)){om.msg=`❌ ${r.item_code}: 단가 미등록 업체가 있어 저장 불가 (단가 등록 후 배정)`;draw();return;}
       if(vs.length>=2){if(vs.some(v=>v.ratio==null)){om.msg=`❌ ${r.item_code}: 다중업체는 모든 업체에 배분% 입력`;draw();return;}
         const s=vs.reduce((a,v)=>a+(+v.ratio||0),0);if(Math.abs(s-100)>0.01){om.msg=`❌ ${r.item_code}: 배분% 합 ${s}≠100`;draw();return;}}}
     om.saving=true;om.msg='';draw();let cnt=0;
@@ -1544,11 +1547,14 @@ SCREEN.sourceprofile=(c)=>{
   const orderModal=()=>{if(!om)return '';
     const rowsHtml=om.loading?`<tr><td colspan="4">${spinRow(1)}</td></tr>`:(om.rows.length?om.rows.map((r,i)=>{
       const multi=r.vendors.length>1, sum=r.vendors.reduce((a,v)=>a+(+v.ratio||0),0), bad=multi&&Math.abs(sum-100)>0.01;
-      const vhtml=r.vendors.map((v,vi)=>{const price=(v.price!=null?v.price:r.item_master_price);
+      const vhtml=r.vendors.map((v,vi)=>{
+        const pcell=(v.price!=null)?`<span style="color:#556">${nfq(v.price)}</span>`
+          :(v.code?(v.price_reg===undefined?'<span style="color:#c9d1dc">…</span>':'<span style="color:#c0392b;font-weight:600" title="이 업체의 매입단가가 마스터에 없음 — 단가 등록 후 배정 가능">단가미등록</span>')
+                  :'<span style="color:#c9d1dc">-</span>');
         return `<div style="display:flex;align-items:center;gap:5px;margin:1px 0">
           <input class="inp om-e" list="om-vdl" autocomplete="off" data-i="${i}" data-vi="${vi}" value="${esc(v.name||v.code||'')}" placeholder="발주업체" style="width:150px" ${canW?'':'disabled'}>
           ${multi?`<input class="inp om-r" type="number" min="0" max="100" data-i="${i}" data-vi="${vi}" value="${v.ratio==null?'':v.ratio}" placeholder="%" style="width:50px;text-align:right" ${canW?'':'disabled'}><span style="color:#8aa0bd;font-size:11px">%</span>`:''}
-          <span style="min-width:68px;text-align:right;color:#556;background:#f4f6fb;border-radius:3px;padding:0 5px" title="업체별 마스터 매입단가(읽기전용)">${price==null?'<span style="color:#c9d1dc">-</span>':nfq(price)}</span>
+          <span style="min-width:78px;text-align:right;background:#f4f6fb;border-radius:3px;padding:0 5px" title="업체별 마스터 매입단가(읽기전용)">${pcell}</span>
           ${(canW&&multi)?`<span class="om-del" data-i="${i}" data-vi="${vi}" style="cursor:pointer;color:#c0392b;font-weight:700" title="업체 삭제">×</span>`:''}</div>`;}).join('');
       return `<tr>
         <td style="white-space:nowrap;vertical-align:top"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span></td>
