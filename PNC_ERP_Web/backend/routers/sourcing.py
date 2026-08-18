@@ -2189,12 +2189,18 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             vends = []
             for (vc, rt) in lst:
                 vpp = vprice.get((c, vc)) or {}
+                if vpp.get("cost") is not None:                      # 이 업체 매입단가 등록됨
+                    mp, reg, ap, cr = vpp.get("cost"), True, vpp.get("apply", ""), vpp.get("curr", "")
+                elif vc == cur_vc and pp.get("cost") is not None:    # 현행 매입처 = 품목 매입단가(등록)
+                    mp, reg, ap, cr = pp.get("cost"), True, pp.get("apply", ""), pp.get("curr", "")
+                else:                                                # ★이 업체 단가 미등록
+                    mp, reg, ap, cr = None, False, "", ""
                 vends.append({"vendor_code": vc, "vendor_name": ovcust.get(vc, vc), "alloc_ratio": rt,
-                    "master_price": (vpp.get("cost") if vpp.get("cost") is not None else pp.get("cost")),
-                    "price_apply": vpp.get("apply") or pp.get("apply", ""), "currency": vpp.get("curr") or pp.get("curr", "")})
+                    "master_price": mp, "price_reg": reg, "price_apply": ap, "currency": cr})
         else:     # override 없음 → 현행 매입처 100%
             vends = [{"vendor_code": cur_vc, "vendor_name": cur_vn, "alloc_ratio": 100,
-                "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")}]
+                "master_price": pp.get("cost"), "price_reg": (pp.get("cost") is not None),
+                "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")}]
         prim = vends[0]
         rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
             "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
@@ -2230,6 +2236,15 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
             raise HTTPException(400, "다중업체는 모든 업체에 배분%를 입력해야 합니다")
         if abs(sum(rated) - 100.0) > 0.01:
             raise HTTPException(400, f"배분% 합이 100이 아닙니다(현재 {sum(rated):.0f}%)")
+    # ★단가 미등록 업체 저장 차단(현행 매입처=품목 대표단가 인정)
+    if norm:
+        priced = _priced_vendors(item_code, list(norm.keys()))
+        unreg = [v for v in norm if v not in priced]
+        if unreg:
+            nn = _nx(); nc = nn.cursor()
+            try: un = _custnm_map(nc, set(unreg))
+            finally: nn.close()
+            raise HTTPException(400, "단가 미등록 업체는 저장할 수 없습니다: " + ", ".join(un.get(v, v) for v in unreg))
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_order_vendor_tbl(cur)
@@ -2245,6 +2260,56 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
         nx.rollback(); raise
     finally:
         nx.close()
+
+
+def _priced_vendors(item_code, vendors, asof=None):
+    """(품목, 각 업체) PR_M_ITEM_COST 매입단가 등록된 업체 집합. 현행 매입처(IN_CUST)는 품목 대표단가 보유시 인정. 읽기전용."""
+    vendors = [str(v).strip() for v in vendors if str(v).strip()]
+    if not vendors: return set()
+    asof = _d6(asof) if asof else datetime.now().strftime("%y%m%d")
+    cn = _conn(); cur = cn.cursor()
+    try:
+        vph = ",".join("?" * len(vendors))
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
+            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
+              AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})""", item_code, asof, *vendors)
+        priced = set(str(r[0]).strip() for r in cur.fetchall())
+        cur.execute("SELECT LTRIM(RTRIM(ISNULL(IN_CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item_code)
+        r = cur.fetchone(); cur_vc = str(r[0]).strip() if r else ""
+        if cur_vc in vendors and cur_vc not in priced:
+            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
+                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL""", item_code, asof)
+            if cur.fetchone(): priced.add(cur_vc)
+        return priced
+    finally:
+        cn.close()
+
+
+@router.get("/api/sourcing/item_vendor_price")
+def sourcing_item_vendor_price(item: str = Query(...), vendor: str = Query(...), ymd: str = Query("")):
+    """(품목,업체) 매입단가 등록여부·값(읽기전용). 미등록=reg False → 프론트 '단가미등록'·저장차단 근거."""
+    item = item.strip(); vendor = vendor.strip()
+    if not item or not vendor: return {"item": item, "vendor": vendor, "reg": False, "cost": None}
+    asof = _d6(ymd) if ymd.strip() else datetime.now().strftime("%y%m%d")
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
+            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
+            ORDER BY COST_APPLY_YMD DESC""", item, vendor, asof)
+        r = cur.fetchone()
+        if r: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r[0]), "apply": str(r[1] or ""), "currency": r[2]}
+        cur.execute("SELECT LTRIM(RTRIM(ISNULL(IN_CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
+        rr = cur.fetchone(); cur_vc = str(rr[0]).strip() if rr else ""
+        if cur_vc == vendor:
+            cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
+                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
+                ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC""", item, asof)
+            r2 = cur.fetchone()
+            if r2: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r2[0]), "apply": str(r2[1] or ""), "currency": r2[2]}
+        return {"item": item, "vendor": vendor, "reg": False, "cost": None}
+    finally:
+        cn.close()
+
 
 @router.post("/api/sourcing/weld/save")
 def sourcing_weld_save(payload: dict = Body(...)):

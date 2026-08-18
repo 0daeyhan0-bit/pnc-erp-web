@@ -1505,17 +1505,23 @@ SCREEN.sourceprofile=(c)=>{
         make_label:x.make_label||'',cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
         item_master_price:x.master_price,has_override:!!x.has_override,
         vendors:(x.vendors||[{vendor_code:x.cur_vendor_code,vendor_name:x.cur_vendor_name,alloc_ratio:100,master_price:x.master_price}])
-          .map(v=>({code:v.vendor_code||'',name:v.vendor_name||'',ratio:(v.alloc_ratio==null?null:+v.alloc_ratio),price:v.master_price}))}));
+          .map(v=>({code:v.vendor_code||'',name:v.vendor_name||'',ratio:(v.alloc_ratio==null?null:+v.alloc_ratio),price:v.master_price,price_reg:(v.price_reg!==false)}))}));
     }catch(e){om.msg='발주 근거 로드 실패: '+e;}
     om.loading=false;draw();};
   const omClose=()=>{om=null;draw();};
   const omVendorAC=(t)=>{clearTimeout(omAcT);omAcT=setTimeout(async()=>{
     try{const r=await fetch(`${API}/api/sourcing/vendors?q=${encodeURIComponent(t)}`);const vs=(await r.json()).rows||[];
       om._vlist=vs;const dl=c.querySelector('#om-vdl');if(dl)dl.innerHTML=vs.map(v=>`<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.code)})${v.role?' · '+esc(v.role):''}</option>`).join('');}catch(e){}},180);};
+  const omPrice=async(i,vi)=>{const vd=om.rows[i].vendors[vi];if(!vd.code){vd.price=null;vd.price_reg=undefined;return;}
+    vd.price=undefined;vd.price_reg=undefined;draw();   // 조회중
+    try{const r=await fetch(`${API}/api/sourcing/item_vendor_price?item=${encodeURIComponent(om.rows[i].item_code)}&vendor=${encodeURIComponent(vd.code)}`);const pj=await r.json();
+      vd.price=pj.reg?pj.cost:null;vd.price_reg=!!pj.reg;}catch(e){vd.price=null;vd.price_reg=false;}draw();};
   const omResolve=(i,vi,val)=>{const v=val.trim();const list=om._vlist||[];const hit=list.find(x=>x.name===v)||list.find(x=>x.code===v)||list.find(x=>(x.name||'').indexOf(v)>=0);
     const vd=om.rows[i].vendors[vi];
-    if(hit){vd.code=hit.code;vd.name=hit.name;vd.price=undefined;/*업체별 단가는 저장 후 반영*/}
-    else if(!v){vd.code='';vd.name='';vd.price=undefined;}else{vd.name=v;vd.code='';vd.price=undefined;}draw();};
+    if(hit){vd.code=hit.code;vd.name=hit.name;}
+    else if(!v){vd.code='';vd.name='';vd.price=null;vd.price_reg=undefined;draw();return;}
+    else{vd.name=v;vd.code='';vd.price=null;vd.price_reg=undefined;draw();return;}
+    omPrice(i,vi);};   // ★선택 업체의 단가 등록여부 조회(미등록=단가미등록·저장차단)
   const omRatio=(i,vi,val)=>{om.rows[i].vendors[vi].ratio=(val===''?null:Math.round(parseFloat(val)||0));draw();};
   const omAdd=(i)=>{om.rows[i].vendors.push({code:'',name:'',ratio:null,price:undefined});draw();};
   const omDelV=(i,vi)=>{const vs=om.rows[i].vendors;vs.splice(vi,1);
