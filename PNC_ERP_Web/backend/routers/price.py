@@ -9,6 +9,21 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 from common import _NATURE_ALL
 router = APIRouter()
 
+
+def _invalidate_cost_cache(cur, min_ymd: str) -> int:
+    """단가(LG판가/사급가) 변경 시 원가분석 결과캐시(nx.cost_analysis_cache) 무효화.
+       기준일(ymd) >= 최소 적용일인 행만 삭제 — 그보다 이전 기준일 분석은 새 단가에 영향받지 않음.
+       사급가는 BOM 통해 상위 조립품 원가에도 전파되므로 품목단위가 아닌 기준일 범위로 통삭제. 삭제행수 반환."""
+    min_ymd = (min_ymd or '').strip()
+    if not min_ymd:
+        return 0
+    try:
+        cur.execute("IF OBJECT_ID('nx.cost_analysis_cache') IS NOT NULL "
+                    "DELETE FROM nx.cost_analysis_cache WHERE ymd >= ?", min_ymd)
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    except Exception:
+        return 0
+
 # ============ 기준정보: 단가변동내역(전사 라이브 피드) — 품목단가조회에 통합 ============
 _COST_TAG = {"1": "매입", "E": "판매(수출)", "S": "판매(내수)"}
 @router.get("/api/price/history")
@@ -260,8 +275,11 @@ async def price_sagub_upload(file: UploadFile = File(...), biz: str = Query(""))
                 up += 1; items.add(mat)
             except Exception:
                 skip += 1                        # nx.item 미등록(FK) 등 스킵
+        # ★단가 변경 → 해당 적용일 이후(기준일 ymd>=최소적용일) 원가분석 캐시 무효화(stale LG단가/사급가 방지).
+        #   사급가는 BOM 통해 상위 조립품 원가에도 전파되므로 품목단위가 아닌 기준일 범위로 통삭제.
+        _inval = _invalidate_cost_cache(cur, min((ay for (_, ay) in seen), default=''))
         return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "file": file.filename,
-                "biz": (biz or '').strip().upper()}
+                "biz": (biz or '').strip().upper(), "cache_cleared": _inval}
     finally:
         nx.close()
 
@@ -368,8 +386,11 @@ async def price_lgprice_upload(file: UploadFile = File(...), biz: str = Query(""
           WHEN NOT MATCHED THEN INSERT(item_code,price_type,vendor_code,currency,apply_ymd,price)
             VALUES(s.item_code,s.price_type,s.vendor_code,s.currency,s.apply_ymd,s.price);""")
         cur.execute("DROP TABLE #lgp")
+        # ★단가 변경 → 적용일 이후 기준일 원가분석 캐시 무효화(같은 트랜잭션에서 커밋).
+        _inval = _invalidate_cost_cache(cur, min((b[3] for b in buf), default=''))
         nx.commit()
-        return {"ok": True, "rows": len(buf), "items": len(items), "skipped": skip, "biz": biz, "vendor": vendor, "file": file.filename}
+        return {"ok": True, "rows": len(buf), "items": len(items), "skipped": skip, "biz": biz, "vendor": vendor,
+                "file": file.filename, "cache_cleared": _inval}
     finally:
         nx.close()
 
