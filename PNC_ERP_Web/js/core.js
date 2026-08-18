@@ -194,6 +194,7 @@ const MODULES=[
    {id:'dtradeprice',ic:'🔁',nm:'직거래 LME 판가연동'},
  ]},
  {id:'mgmt',nm:'경영',ic:'📊',subs:[
+   {id:'dailypurissue',ic:'📋',nm:'일일 영업/매입 현황'},
    {id:'mgmtdash',ic:'📊',nm:'경영 대시보드',soon:1},
  ]},
  {id:'sys',nm:'시스템관리',ic:'⚙️',subs:[

@@ -963,3 +963,50 @@ SCREEN.partnerplan=(c)=>{
   };
   loadWc().then(draw);   // ★자동 전체조회 금지 — 협력사 선택 후 [조회]
 };
+
+/* ===== 일일 영업/매입 현황 (경영) — 조회화면(엑셀형). ① 매입/불출/실매입 by 구분 · 마감기준 · 공급가(원) ===== */
+SCREEN.dailypurissue=(c)=>{
+  const API=API_BASE;
+  let F=null, loading=false, day='';
+  const y2d=y=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
+  const d2y=d=>d?d.slice(2).replace(/-/g,''):'';                                             // date→YYMMDD
+  const load=async(d)=>{loading=true;draw();
+    try{const r=await fetch(`${API}/api/live/dailypurissue${d?('?date='+d):''}`);F=await r.json();day=F.date||d||'';}
+    catch(e){F=null;}
+    loading=false;draw();};
+  const sec=(rows,tot,lbl,color)=>{
+    let h=`<tr><td colspan="4" style="background:${color};color:#fff;font-weight:700;padding:4px 8px">${lbl}</td></tr>`;
+    h+=(rows||[]).map(r=>`<tr><td style="padding-left:16px">${esc(r.gubun)}</td><td class="num">${wonI(r.cum)}</td><td class="num">${wonI(r.day)}</td><td class="num"><b>${wonI(r.tot)}</b></td></tr>`).join('');
+    h+=`<tr style="background:#eef2f8;font-weight:700"><td>합계</td><td class="num">${wonI(tot.cum)}</td><td class="num">${wonI(tot.day)}</td><td class="num">${wonI(tot.tot)}</td></tr>`;
+    return h;};
+  const draw=()=>{
+    c.innerHTML=`
+     <div class="page-title">📋 일일 영업/매입 현황 <span style="font-size:12px;color:var(--muted);font-weight:400">확정입고·불출 마감기준 · 구분별 누적/당일/총 · 단위 원(공급가, VAT제외)</span></div>
+     <div class="page-sub">조회일 선택 → 마감월초~전일=<b>누적</b>, 조회일=<b>당일</b>, 누적+당일=<b>총</b>. 매입=확정입고(CUST_TYPE+사급원소재), 불출=자재불출, 실매입=매입−불출.</div>
+     <div class="toolbar">
+       <label class="tl">조회일</label><input type="date" class="inp" id="dp-d" value="${y2d(day)}" style="width:150px">
+       <button class="btn" id="dp-go">🔍 조회</button>
+       <div class="spacer"></div>
+       ${F?`<span class="rowcount">${esc(F.date||'')} 기준</span>`:''}
+       <button class="btn xls" id="dp-xls">📥 엑셀</button>
+     </div>
+     ${loading?`<div style="padding:20px;color:#b8860b">불러오는 중…</div>`:(F?`
+     <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto"><table class="tbl fit" style="min-width:560px">
+       <thead><tr><th style="text-align:left">구분</th><th class="num">누적</th><th class="num">당일</th><th class="num">총</th></tr></thead>
+       <tbody>
+         ${sec(F.pur,F.pur_tot,'매입','#1c47a0')}
+         ${sec(F.out,F.out_tot,'불출(매출)','#8a5a1a')}
+         ${sec(F.net,F.net_tot,'실매입 (매입 − 불출)','#1c7c3a')}
+       </tbody></table></div>`:`<div style="padding:20px;color:#8aa0bd">조회일을 선택하고 [조회]를 누르세요.</div>`)}`;
+    const gd=()=>d2y(c.querySelector('#dp-d').value);
+    c.querySelector('#dp-go').onclick=()=>load(gd());
+    c.querySelector('#dp-xls').onclick=()=>{
+      if(!F)return;
+      const hd=['섹션','구분','누적','당일','총'];
+      const rows=[];
+      const push=(sc,list,tot)=>{(list||[]).forEach(r=>rows.push([sc,r.gubun,r.cum,r.day,r.tot]));rows.push([sc,'합계',tot.cum,tot.day,tot.tot]);};
+      push('매입',F.pur,F.pur_tot);push('불출',F.out,F.out_tot);push('실매입',F.net,F.net_tot);
+      downloadCSV(`일일영업매입현황_${F.date}.csv`,hd,rows);};
+  };
+  load();
+};
