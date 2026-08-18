@@ -358,9 +358,8 @@ def dailypurissue(date: str = Query("")):
     pur_t, out_t, net_t = tot(pur), tot(out), tot(net)
 
     m0 = ym + '01'   # 월초(YYMMDD)
-    # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). 절삭/설치.
-    _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg,
-        SUM(CASE WHEN r.GUBUN='C' THEN ISNULL(r.RECV_AMT,0) WHEN r.GUBUN='R' THEN -ISNULL(r.RECV_AMT,0) ELSE 0 END) amt
+    # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
+    _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
       FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")

@@ -617,10 +617,11 @@ SCREEN.costanalysis=(c)=>{
   const eok=v=>(v/1e8).toFixed(1);
   const pct=v=>(v*100).toFixed(1)+'%';
   // [rowIdx, header, group, opts]
+  // ★컬럼 순서: 입고수량 → LG단가·손익 → 실원가 → 내부용 (인덱스는 데이터매핑이라 순서만 바뀜)
   const NUM=[[1,'입고수량','',{}],
-    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}],
+    [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}],
     [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[24,'실사급금액','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
-    [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}]];
+    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}]];
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
   let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
@@ -775,7 +776,7 @@ SCREEN.costanalysis=(c)=>{
   const headHTML=()=>{
     const lgSpan=mode==='direct'?2:4;
     let g1='<th rowspan="2">PART-NO</th>'+(mode!=='direct'?'<th rowspan="2" class="num">입고수량</th>':'');
-    g1+=`<th colspan="7" class="ghead">내부용</th><th colspan="12" class="ghead">실원가</th><th colspan="${lgSpan}" class="ghead">LG단가·손익</th>`;
+    g1+=`<th colspan="${lgSpan}" class="ghead">LG단가·손익</th><th colspan="12" class="ghead">실원가</th><th colspan="7" class="ghead">내부용</th>`;
     const h2=colsOf().filter(([i])=>i!==1).map(([i,h])=>`<th class="num sortable ${sortI===i?'sorted':''}" data-si="${i}">${h}${sortI===i?(dir<0?' ▼':' ▲'):''}</th>`).join('');
     return `<thead><tr>${g1}</tr><tr>${h2}</tr></thead>`;
   };
