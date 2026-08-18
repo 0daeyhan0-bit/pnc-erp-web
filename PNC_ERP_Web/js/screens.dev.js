@@ -713,6 +713,8 @@ SCREEN.costanalysis=(c)=>{
           try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||'')})})).json()).costs||{};}catch(e){}
           ck.items.forEach((x,j)=>{liveCC[x.part]=cc[x.part]||{};D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
           done+=ck.items.length;
+          // ★청크 완료마다 진행표시 갱신(라운드 끝까지 안 기다림 = 멈춘 듯 안 보임)
+          if(loadRecv._tok===tok){const el=(Date.now()-t0)/1000,eta=done?Math.ceil((list.length-done)*el/done):0;setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();}
         }));
         if(loadRecv._tok!==tok)break;
         const el=(Date.now()-t0)/1000, eta=done?Math.ceil((list.length-done)*el/done):0;
@@ -749,7 +751,7 @@ SCREEN.costanalysis=(c)=>{
     c.querySelector('#ca-body').innerHTML = a.map(r=>{const neg=r[21]<0;
       return `<tr class="${neg?'lossrow':''}"><td class="pcode" title="${esc(r[0])}"><b>${esc(r[0])}</b></td>`+
         cols.map(([i,,,op])=>{let cls='num';if(op.b)cls+=' bcol';if(op.sk&&r[i]<0)cls+=' negv';if(op.sk&&r[i]>0)cls+=' posv';
-          return `<td class="${cls}">${op.pct?pct(r[i]):won(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
+          return `<td class="${cls}">${op.pct?pct(r[i]):wonI(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
       || `<tr><td colspan="${cols.length+1}" class="empty">${mode==='direct'?(dLoading?'라이브 계산중…':(dErr||'품번을 입력하고 조회 (라이브 · 아무 품번, 예: AJR75563503)')):(rvBusy?'<span style="display:inline-flex;align-items:center;gap:8px;color:#2f5aa8;font-weight:600"><span class="ca-spin"></span> 조회 중…</span>':'결과 없음')}</td></tr>`;
     if(mode!=='direct'){
       // 합계 = Σ(수량 × 단위금액). LG총금액(20)·Impact(22)는 이미 행별 총액이라 그대로 합산. 재료비율=Σ재료비/LG총매출.

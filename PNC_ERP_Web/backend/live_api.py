@@ -334,7 +334,8 @@ def dailypurissue(date: str = Query("")):
     def agg(rows):
         m = {}
         for r in rows:
-            g = gb(r.get('cc'), r.get('ct')); m[g] = m.get(g, 0.0) + float(r.get('amt') or 0)
+            g = gb(r.get('cc'), r.get('ct'))
+            m[g] = m.get(g, 0.0) + float(r.get('kamt') or 0)   # ★KRW환산(외화 거래처=원통화 아님). 리포트=금액(KRW)
         return m
     win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"
     dc_cum = win + f" AND A.MAINT_YMD < '{d6}'"      # 누적=마감월초~전일
