@@ -2069,12 +2069,26 @@ def sourcing_sub_price_save(payload: dict = Body(...)):
 _MK_LABEL = {"": "", "1": "자체생산", "2": "외주가공", "3": "매입", "4": "사급가공", "5": "외주완성"}
 _ORDER_VENDOR_READY = False
 def _ensure_order_vendor_tbl(cur):
+    """R01(현행) 발주업체 override — ★품목당 다중업체+배분비율(alloc_ratio, 합100%). 유효기간 없음.
+       구모델(품목당 단일행, PK=item_code, alloc_ratio 없음)이면 in-place 마이그레이션(단일=100%)."""
     global _ORDER_VENDOR_READY
     if _ORDER_VENDOR_READY:
         return
     cur.execute("""IF OBJECT_ID('nx.order_vendor','U') IS NULL CREATE TABLE nx.order_vendor(
-        item_code NVARCHAR(60) NOT NULL, vendor_code NVARCHAR(20) NULL, upd_dt datetime DEFAULT getdate(),
-        CONSTRAINT PK_nx_order_vendor PRIMARY KEY(item_code))""")
+        item_code NVARCHAR(60) NOT NULL, vendor_code NVARCHAR(20) NOT NULL, alloc_ratio decimal(9,4) NULL,
+        upd_dt datetime DEFAULT getdate(), CONSTRAINT PK_nx_order_vendor PRIMARY KEY(item_code, vendor_code))""")
+    # 구모델 마이그레이션: alloc_ratio 컬럼 추가 + 단일행 100% + PK를 (item,vendor) 복합키로 전환
+    cur.execute("IF COL_LENGTH('nx.order_vendor','alloc_ratio') IS NULL ALTER TABLE nx.order_vendor ADD alloc_ratio decimal(9,4) NULL")
+    cur.execute("UPDATE nx.order_vendor SET alloc_ratio=100 WHERE alloc_ratio IS NULL")
+    cur.execute("""IF EXISTS(SELECT 1 FROM sys.key_constraints WHERE name='PK_nx_order_vendor' AND parent_object_id=OBJECT_ID('nx.order_vendor'))
+      AND NOT EXISTS(SELECT 1 FROM sys.index_columns ic JOIN sys.key_constraints kc ON kc.parent_object_id=ic.object_id AND kc.unique_index_id=ic.index_id
+        WHERE kc.name='PK_nx_order_vendor' AND ic.column_id=COLUMNPROPERTY(OBJECT_ID('nx.order_vendor'),'vendor_code','ColumnId'))
+    BEGIN
+      DELETE FROM nx.order_vendor WHERE vendor_code IS NULL OR LTRIM(RTRIM(vendor_code))='';
+      ALTER TABLE nx.order_vendor ALTER COLUMN vendor_code NVARCHAR(20) NOT NULL;
+      ALTER TABLE nx.order_vendor DROP CONSTRAINT PK_nx_order_vendor;
+      ALTER TABLE nx.order_vendor ADD CONSTRAINT PK_nx_order_vendor PRIMARY KEY(item_code, vendor_code);
+    END""")
     _ORDER_VENDOR_READY = True
 
 @router.get("/api/sourcing/current_order")
@@ -2132,48 +2146,99 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
     finally:
         cn.close()
-    # nx 발주업체 override 병합
-    ov = {}; ovcust = {}
+    # nx 발주업체 배분(★다중업체+alloc_ratio, 유효기간 없음) 로드
+    alloc = {}   # item -> [(vendor_code, ratio|None)]
+    ovcust = {}
     nx = _nx(); ncur = nx.cursor()
     try:
         _ensure_order_vendor_tbl(ncur)
         for i in range(0, len(oc), 900):
             ch = oc[i:i+900]; ph = ",".join("?" * len(ch))
-            ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(vendor_code,'') FROM nx.order_vendor WHERE item_code IN ({ph})", *ch)
-            for r in ncur.fetchall(): ov[str(r[0]).strip()] = str(r[1] or "").strip()
-        ovcust = _custnm_map(ncur, set(v for v in ov.values() if v))
+            ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))), alloc_ratio FROM nx.order_vendor WHERE item_code IN ({ph})", *ch)
+            for r in ncur.fetchall():
+                vc = str(r[1] or "").strip()
+                if vc: alloc.setdefault(str(r[0]).strip(), []).append((vc, (float(r[2]) if r[2] is not None else None)))
+        ovcust = _custnm_map(ncur, set(v for lst in alloc.values() for (v, _) in lst))
     finally:
         nx.close()
+    # 업체별 마스터 매입단가(PR_M_ITEM_COST by item×cust, as-of·읽기전용) — override 업체별 표시용
+    vprice = {}   # (item, vendor) -> {cost, apply, curr}
+    pitems = sorted(alloc.keys()); pvend = sorted(set(v for lst in alloc.values() for (v, _) in lst))
+    if pitems and pvend:
+        cn2 = _conn(); cur2 = cn2.cursor()
+        try:
+            vph = ",".join("?" * len(pvend))
+            for i in range(0, len(pitems), 500):
+                ich = pitems[i:i+500]; iph = ",".join("?" * len(ich))
+                cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST, apply, curr FROM (
+                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
+                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    asof, *ich, *pvend)
+                for r in cur2.fetchall():
+                    vprice[(str(r[0]).strip(), str(r[1]).strip())] = {"cost": (float(r[2]) if r[2] is not None else None), "apply": str(r[3] or ""), "curr": r[4]}
+        finally:
+            cn2.close()
     rows = []
     for c in sorted(oc, key=lambda x: (-order_items[x], x)):
         ii = info.get(c, {}); pp = price.get(c, {})
         cur_vc = ii.get("cust", ""); cur_vn = ii.get("custnm", "")
-        o_vc = ov.get(c, ""); eff_vc = o_vc or cur_vc
+        lst = alloc.get(c)
+        if lst:   # 다중업체 배분(override)
+            vends = []
+            for (vc, rt) in lst:
+                vpp = vprice.get((c, vc)) or {}
+                vends.append({"vendor_code": vc, "vendor_name": ovcust.get(vc, vc), "alloc_ratio": rt,
+                    "master_price": (vpp.get("cost") if vpp.get("cost") is not None else pp.get("cost")),
+                    "price_apply": vpp.get("apply") or pp.get("apply", ""), "currency": vpp.get("curr") or pp.get("curr", "")})
+        else:     # override 없음 → 현행 매입처 100%
+            vends = [{"vendor_code": cur_vc, "vendor_name": cur_vn, "alloc_ratio": 100,
+                "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")}]
+        prim = vends[0]
         rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
             "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
-            "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn,
-            "ovr_vendor_code": o_vc, "ovr_vendor_name": (ovcust.get(o_vc, o_vc) if o_vc else ""),
-            "eff_vendor_code": eff_vc, "eff_vendor_name": (ovcust.get(o_vc, o_vc) if o_vc else cur_vn),
+            "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn, "has_override": bool(lst), "vendors": vends,
+            "eff_vendor_code": prim["vendor_code"], "eff_vendor_name": prim["vendor_name"],
             "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")})
     return {"item": item, "asof": asof, "rows": rows, "n": len(rows),
-            "note": "R01(현행) 발주 근거(읽기) — 현행 매입처(IN_CUST 자동시드)+마스터 매입단가(PR_M_ITEM_COST COST_TAG=매입 as-of·읽기전용)+nx.order_vendor override. 라이브 불변(조회만)."}
+            "note": "R01(현행) 발주 근거(읽기) — 현행 매입처(IN_CUST 자동시드)+업체별 마스터 매입단가(PR_M_ITEM_COST as-of·읽기전용)+nx.order_vendor 다중업체 배분(alloc_ratio 합100%). 라이브 불변(조회만)."}
 
 @router.post("/api/sourcing/current_order/vendor")
 def sourcing_current_order_vendor(payload: dict = Body(...)):
-    """R01 발주업체 override 저장(근거키=item_code). vendor_code 공란=override 제거(레거시 매입처 복귀). 정산 마스터 미접근."""
+    """R01 발주업체 배분 저장(근거키=item_code 전체교체·멱등). ★다중업체+alloc_ratio(합100%, 유효기간 없음).
+       payload: {item_code, allocations:[{vendor_code, alloc_ratio}]} 또는 단일 {item_code, vendor_code}(=100%).
+       빈 목록 = override 제거(레거시 IN_CUST 복귀). 정산 마스터 미접근(단가는 마감때만)."""
     item_code = str(payload.get("item_code", "")).strip()
-    vc = str(payload.get("vendor_code", "") or "").strip()
     if not item_code: raise HTTPException(400, "item_code 필요")
+    allocs = payload.get("allocations")
+    if allocs is None:   # 단일 하위호환
+        vc = str(payload.get("vendor_code", "") or "").strip()
+        allocs = [{"vendor_code": vc, "alloc_ratio": 100}] if vc else []
+    norm = {}   # vendor_code -> ratio|None (dedup, 공란제외)
+    for a in (allocs or []):
+        vc = str(a.get("vendor_code", "") or "").strip()
+        if not vc: continue
+        rt = a.get("alloc_ratio")
+        try: rt = None if rt in (None, "", "null") else float(rt)
+        except Exception: rt = None
+        norm[vc] = rt
+    # 검증: 다중업체면 전원 배분%+합100
+    rated = [v for v in norm.values() if v is not None]
+    if len(norm) >= 2:
+        if len(rated) != len(norm):
+            raise HTTPException(400, "다중업체는 모든 업체에 배분%를 입력해야 합니다")
+        if abs(sum(rated) - 100.0) > 0.01:
+            raise HTTPException(400, f"배분% 합이 100이 아닙니다(현재 {sum(rated):.0f}%)")
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_order_vendor_tbl(cur)
-        if not vc:
-            cur.execute("DELETE FROM nx.order_vendor WHERE item_code=?", item_code)
-            nx.commit(); return {"ok": True, "item_code": item_code, "cleared": True}
-        cur.execute("""MERGE nx.order_vendor AS t USING (SELECT ? item_code) s ON t.item_code=s.item_code
-            WHEN MATCHED THEN UPDATE SET vendor_code=?, upd_dt=getdate()
-            WHEN NOT MATCHED THEN INSERT(item_code,vendor_code,upd_dt) VALUES(?,?,getdate());""", item_code, vc, item_code, vc)
-        nx.commit(); return {"ok": True, "item_code": item_code, "vendor_code": vc}
+        cur.execute("DELETE FROM nx.order_vendor WHERE item_code=?", item_code)   # 근거키 스코프 전체교체
+        for vc, rt in norm.items():
+            r = rt if rt is not None else (100 if len(norm) == 1 else None)
+            cur.execute("INSERT INTO nx.order_vendor(item_code,vendor_code,alloc_ratio,upd_dt) VALUES(?,?,?,getdate())", item_code, vc, r)
+        nx.commit()
+        return {"ok": True, "item_code": item_code, "vendors": len(norm), "cleared": (len(norm) == 0)}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
