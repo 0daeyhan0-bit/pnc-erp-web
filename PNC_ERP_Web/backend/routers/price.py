@@ -9,6 +9,21 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 from common import _NATURE_ALL
 router = APIRouter()
 
+
+def _invalidate_cost_cache(cur, min_ymd: str) -> int:
+    """단가(LG판가/사급가) 변경 시 원가분석 결과캐시(nx.cost_analysis_cache) 무효화.
+       기준일(ymd) >= 최소 적용일인 행만 삭제 — 그보다 이전 기준일 분석은 새 단가에 영향받지 않음.
+       사급가는 BOM 통해 상위 조립품 원가에도 전파되므로 품목단위가 아닌 기준일 범위로 통삭제. 삭제행수 반환."""
+    min_ymd = (min_ymd or '').strip()
+    if not min_ymd:
+        return 0
+    try:
+        cur.execute("IF OBJECT_ID('nx.cost_analysis_cache') IS NOT NULL "
+                    "DELETE FROM nx.cost_analysis_cache WHERE ymd >= ?", min_ymd)
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    except Exception:
+        return 0
+
 # ============ 기준정보: 단가변동내역(전사 라이브 피드) — 품목단가조회에 통합 ============
 _COST_TAG = {"1": "매입", "E": "판매(수출)", "S": "판매(내수)"}
 @router.get("/api/price/history")
@@ -202,9 +217,10 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
 
 # ============ 사급가(COSP Sales Price) 업로드 — LG 사급 부품가를 nx.price_item에 Start Date 반영 upsert ============
 @router.post("/api/price/sagub_upload")
-async def price_sagub_upload(file: UploadFile = File(...)):
+async def price_sagub_upload(file: UploadFile = File(...), biz: str = Query("")):
     """COSP Sales Price 엑셀(LG 사급 부품가) 업로드. 각 행의 Start Date를 적용일(apply_ymd)로 nx.price_item에 upsert.
-       price_type='매입', vendor_code='LG'. 최신가는 as-of(적용일 최신)로 자동 반영. nx.item 미등록 품번은 스킵."""
+       price_type='매입', vendor_code='LG'. 최신가는 as-of(적용일 최신)로 자동 반영. nx.item 미등록 품번은 스킵.
+       ★biz(SAC/RAC)=사업부 선택(UI 통일용). COSP는 사업부 무관 동일가라 저장은 vendor='LG' 단일(응답에 biz 표기)."""
     import io as _io
     try:
         import openpyxl
@@ -259,7 +275,11 @@ async def price_sagub_upload(file: UploadFile = File(...)):
                 up += 1; items.add(mat)
             except Exception:
                 skip += 1                        # nx.item 미등록(FK) 등 스킵
-        return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "file": file.filename}
+        # ★단가 변경 → 해당 적용일 이후(기준일 ymd>=최소적용일) 원가분석 캐시 무효화(stale LG단가/사급가 방지).
+        #   사급가는 BOM 통해 상위 조립품 원가에도 전파되므로 품목단위가 아닌 기준일 범위로 통삭제.
+        _inval = _invalidate_cost_cache(cur, min((ay for (_, ay) in seen), default=''))
+        return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "file": file.filename,
+                "biz": (biz or '').strip().upper(), "cache_cleared": _inval}
     finally:
         nx.close()
 
@@ -278,6 +298,119 @@ def price_sagub_list(q: str = Query("")):
                     WHERE x.item_code=p.item_code AND x.price_type='매입' AND x.vendor_code='LG')
             ORDER BY p.item_code""", q.strip(), like, like)
         rows = [{"item": r[0], "name": r[1], "apply_ymd": r[2], "price": float(r[3]), "currency": r[4]} for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
+    finally:
+        nx.close()
+
+
+# ============ LG 판가(PO Price) 업로드 — nx.price_item vendor 1010(SAC)/1020(RAC), TAGE(수출)/TAGS(내수) upsert ============
+_LGP_VEND = {'SAC': '1010', 'RAC': '1020'}   # 사업부→LG 사업장 vendor (실측 검증: SAC∩1010=1876, RAC∩1020=687)
+@router.post("/api/price/lgprice_upload")
+async def price_lgprice_upload(file: UploadFile = File(...), biz: str = Query("")):
+    """LG PO Price 엑셀(LG 판가) 업로드. biz=SAC(vendor 1010)/RAC(1020). 헤더=Material·MKT·Unit Price·Start Date·Curr.
+       MKT 1→TAGS(내수)·2→TAGE(수출). Start Date=적용일(apply_ymd). nx.price_item upsert(item·type·vendor·apply_ymd).
+       원가/손익 엔진의 LG판가 소스(vendor 1010/1020, TAGE/TAGS as-of)로 바로 사용됨. nx.item 미등록 품번은 스킵."""
+    biz = biz.strip().upper(); vendor = _LGP_VEND.get(biz)
+    if not vendor:
+        raise HTTPException(400, "사업부(biz)=SAC 또는 RAC 필요")
+    import io as _io
+    try:
+        import openpyxl
+    except Exception:
+        raise HTTPException(500, "openpyxl 미설치(서버)")
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
+    ws = wb.active; itr = ws.iter_rows(values_only=True)
+    try:
+        hdr = next(itr)
+    except StopIteration:
+        raise HTTPException(400, "빈 파일")
+    ix = {str(h or '').strip().lower().replace('\n', ' '): i for i, h in enumerate(hdr)}
+    def col(*names):
+        for n in names:
+            if n in ix: return ix[n]
+        return None
+    ci_mat = col('material'); ci_price = col('unit price', 'price'); ci_sd = col('start date'); ci_mkt = col('mkt'); ci_cur = col('curr', 'currency')
+    if ci_mat is None or ci_price is None or ci_sd is None:
+        raise HTTPException(400, "PO Price 형식 아님 — 헤더에 Material·Unit Price·Start Date 필요")
+    def _ymd6(dt):
+        if hasattr(dt, 'year'): return f"{dt.year % 100:02d}{dt.month:02d}{dt.day:02d}"
+        s = ''.join(ch for ch in str(dt) if ch.isdigit()); return s[2:8] if len(s) >= 8 else (s[-6:] if len(s) >= 6 else '')
+    def gv(r, i):
+        return r[i] if (i is not None and i < len(r)) else None
+    seen = {}
+    for r in itr:
+        if not r: continue
+        mat = str(gv(r, ci_mat) or '').strip()
+        if not mat: continue
+        try:
+            price = float(gv(r, ci_price) or 0)
+        except Exception:
+            continue
+        ay = _ymd6(gv(r, ci_sd))
+        if not ay or price <= 0: continue
+        mkt = str(gv(r, ci_mkt) or '').strip()
+        ptype = 'TAGS' if mkt in ('1', '1.0') else ('TAGE' if mkt in ('2', '2.0') else 'TAGS')
+        cv = gv(r, ci_cur); curc = (str(cv).strip()[:3] if cv else 'KRW') or 'KRW'
+        seen[(mat.upper(), ptype, ay)] = (price, curc)   # (품번,구분,적용일)별 dedup
+    wb.close()
+    if not seen:
+        raise HTTPException(400, "데이터 행 없음")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        # nx.item 등록 품번만(FK). LG코드는 대문자라 케이스 안전.
+        cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM nx.item")
+        valid = set(str(r[0]).strip().upper() for r in cur.fetchall())
+        buf = []; skip = 0; items = set()
+        for (mat, ptype, ay), (price, curc) in seen.items():
+            if mat not in valid:
+                skip += 1; continue
+            buf.append([mat, ptype, vendor, ay, price, curc]); items.add(mat)
+        if not buf:
+            return {"ok": True, "rows": 0, "items": 0, "skipped": skip, "biz": biz, "vendor": vendor, "file": file.filename}
+        # ★배치: temp테이블 일괄 INSERT → 단일 MERGE (per-row MERGE=수천왕복 회피)
+        nx.autocommit = False
+        cur.execute("IF OBJECT_ID('tempdb..#lgp') IS NOT NULL DROP TABLE #lgp")
+        cur.execute("CREATE TABLE #lgp(item_code varchar(50),price_type varchar(10),vendor_code varchar(10),apply_ymd varchar(8),price float,currency varchar(10))")
+        try: cur.fast_executemany = True
+        except Exception: pass
+        for i in range(0, len(buf), 1000):
+            cur.executemany("INSERT INTO #lgp(item_code,price_type,vendor_code,apply_ymd,price,currency) VALUES(?,?,?,?,?,?)",
+                            [[b[0], b[1], b[2], b[3], b[4], b[5]] for b in buf[i:i + 1000]])
+        cur.execute("""MERGE nx.price_item t USING #lgp s
+          ON t.item_code=s.item_code AND t.price_type=s.price_type AND t.vendor_code=s.vendor_code AND t.apply_ymd=s.apply_ymd
+          WHEN MATCHED THEN UPDATE SET price=s.price, currency=s.currency
+          WHEN NOT MATCHED THEN INSERT(item_code,price_type,vendor_code,currency,apply_ymd,price)
+            VALUES(s.item_code,s.price_type,s.vendor_code,s.currency,s.apply_ymd,s.price);""")
+        cur.execute("DROP TABLE #lgp")
+        # ★단가 변경 → 적용일 이후 기준일 원가분석 캐시 무효화(같은 트랜잭션에서 커밋).
+        _inval = _invalidate_cost_cache(cur, min((b[3] for b in buf), default=''))
+        nx.commit()
+        return {"ok": True, "rows": len(buf), "items": len(items), "skipped": skip, "biz": biz, "vendor": vendor,
+                "file": file.filename, "cache_cleared": _inval}
+    finally:
+        nx.close()
+
+@router.get("/api/price/lgprice_list")
+def price_lgprice_list(q: str = Query(""), biz: str = Query("")):
+    """업로드된 LG판가(price_item vendor 1010/1020, TAGE/TAGS) 품번×구분별 최신값. biz=SAC/RAC 필터(빈값=전체)."""
+    b = biz.strip().upper()
+    vendors = [_LGP_VEND[b]] if b in _LGP_VEND else ['1010', '1020']
+    vin = ",".join("'" + v + "'" for v in vendors)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        like = f"%{q.strip()}%"
+        cur.execute(f"""SELECT p.item_code, ISNULL(i.item_name,''), p.vendor_code, p.price_type, p.apply_ymd, p.price, p.currency
+            FROM nx.price_item p LEFT JOIN nx.item i ON i.item_code=p.item_code
+            WHERE p.vendor_code IN ({vin}) AND p.price_type IN ('TAGE','TAGS')
+              AND (?='' OR p.item_code LIKE ? OR i.item_name LIKE ?)
+              AND p.apply_ymd=(SELECT MAX(x.apply_ymd) FROM nx.price_item x
+                    WHERE x.item_code=p.item_code AND x.vendor_code=p.vendor_code AND x.price_type=p.price_type)
+            ORDER BY p.item_code, p.vendor_code, p.price_type""", q.strip(), like, like)
+        rows = [{"item": r[0], "name": r[1], "vendor": r[2], "type": r[3], "apply_ymd": r[4], "price": float(r[5]), "currency": r[6]} for r in cur.fetchall()]
         return {"rows": rows, "cnt": len(rows)}
     finally:
         nx.close()
