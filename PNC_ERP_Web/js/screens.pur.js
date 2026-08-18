@@ -3158,28 +3158,28 @@ SCREEN.lgsagub=(c)=>{
     const m=st.pcmp, s=m&&m.summary;
     let its=(m&&m.items)||[];
     its.forEach(r=>{r.avgprice=r.in_qty?Math.round(r.in_amt/r.in_qty):(r.price||0);r.amtdiff=Math.round(r.diff*r.avgprice);});
-    let filt=st.p_only==='diff'?its.filter(x=>Math.abs(x.diff)>0.5):its;
+    let filt=st.p_only==='diff'?its.filter(x=>Math.abs(x.diff_erp||0)>0.5):its;   // ★①↔②(우리ERP↔OSP) 불일치만
     filt=sortItems(filt,st.p_sort);
-    const T={out_net:0,out_r:0,in_qty:0,in_amt:0,diff:0,amtdiff:0};
-    filt.forEach(r=>{T.out_net+=r.out_net;T.out_r+=r.out_r;T.in_qty+=r.in_qty;T.in_amt+=r.in_amt;T.diff+=r.diff;T.amtdiff+=r.amtdiff;});
+    const T={erp_in:0,in_qty:0,out_net:0,diff_erp:0,diff:0};
+    filt.forEach(r=>{T.erp_in+=(r.erp_in||0);T.in_qty+=r.in_qty;T.out_net+=r.out_net;T.diff_erp+=(r.diff_erp||0);T.diff+=r.diff;});
     const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
-        <td class="num">${wonI(T.out_net)}</td><td class="num">${wonI(T.out_r)}</td><td class="num">${wonI(T.in_qty)}</td>
-        <td class="num" style="color:${T.diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(T.diff)}</td>
-        <td class="num">${T.in_qty?wonI(T.in_amt/T.in_qty):'-'}</td>
-        <td class="num" style="color:${T.amtdiff>=0?'#1c7c3a':'#a03d2c'}">${wonI(T.amtdiff)}</td></tr></tfoot>`:'';
+        <td class="num" style="color:#1c47a0">${wonI(T.erp_in)}</td><td class="num" style="color:#1c7c3a">${wonI(T.in_qty)}</td>
+        <td class="num" style="color:#8a5a1a">${wonI(T.out_net)}</td>
+        <td class="num" style="color:${Math.abs(T.diff_erp)<0.5?'#1c7c3a':'#a03d2c'}">${wonI(T.diff_erp)}</td>
+        <td class="num" style="color:#8aa0bd">${wonI(T.diff)}</td><td class="num">-</td></tr></tfoot>`:'';
     const body=st.p_loading?spinRow(8):(filt.length?filt.map(r=>`<tr>
-        <td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
-        <td class="num" style="color:#1c47a0;font-weight:600">${r.out_net?wonI(r.out_net):'-'}</td>
-        <td class="num" style="color:#8aa0bd">${r.out_r?wonI(r.out_r):''}</td>
-        <td class="num" style="color:#1c7c3a">${r.in_qty?wonI(r.in_qty):'-'}</td>
-        <td class="num" style="font-weight:600;color:${r.diff>=0?'#1c7c3a':'#a03d2c'}">${wonI(r.diff)}</td>
-        <td class="num" style="font-size:11px;color:#8aa0bd">${r.avgprice?wonI(r.avgprice):'-'}</td>
-        <td class="num" style="font-weight:600;color:${r.amtdiff>=0?'#1c7c3a':'#a03d2c'}">${r.amtdiff?wonI(r.amtdiff):'-'}</td></tr>`).join('')
+        <td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
+        <td class="num" style="color:#1c47a0;font-weight:600">${r.erp_in?wonI(r.erp_in):'-'}</td>
+        <td class="num" style="color:#1c7c3a;font-weight:600">${r.in_qty?wonI(r.in_qty):'-'}</td>
+        <td class="num" style="color:#8a5a1a">${r.out_net?wonI(r.out_net):'-'}</td>
+        <td class="num" style="font-weight:600;color:${Math.abs(r.diff_erp||0)<0.5?'#8aa0bd':'#a03d2c'}" title="우리ERP↔LG OSP 불일치(둘 다 공급이라 0이어야 정상)">${(r.diff_erp||0)?wonI(r.diff_erp):'0'}</td>
+        <td class="num" style="color:#8aa0bd" title="②공급−③소비 = 선입고(양수 정상)">${wonI(r.diff)}</td>
+        <td class="num" style="font-size:11px;color:#8aa0bd">${r.avgprice?wonI(r.avgprice):'-'}</td></tr>`).join('')
       :`<tr><td colspan="8" class="empty">데이터 없음 — 리시빙 기간 선택 후 조회</td></tr>`);
     c.innerHTML=`
      <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 사급부품(개수)</span></div>
      ${tabBar()}
-     <div class="page-sub">해당기간 <b>리시빙</b>에 투입된 <b>사급부품(소분류310)</b> 소요개수 vs <b>OSP 사급부품 입고</b> 대사. OUT=리시빙×BOM(CS_M_ITEM_BOM 310전개). 헤더 더블클릭 정렬.</div>
+     <div class="page-sub">사급부품 3-way 대사: <b style="color:#1c47a0">①우리ERP 확정입고</b>(PU_T_STOCK_MAINT) vs <b style="color:#1c7c3a">②LG OSP</b>(전산) vs <b style="color:#8a5a1a">③리시빙소비</b>(리시빙×BOM). <b>①≈② 정상</b>(둘 다 공급)·<b>①↔②차이=기록불일치</b>·②−③=선입고. 헤더 더블클릭 정렬.</div>
      <div class="toolbar" style="margin-bottom:8px">
        <label class="tl">리시빙 기간</label><input type="date" class="inp" id="p-df" value="${ymd2date(st.p_from)}" style="width:150px"> ~ <input type="date" class="inp" id="p-dt" value="${ymd2date(st.p_to)}" style="width:150px">
        <button class="btn" id="p-go">🔍 대사조회</button>
@@ -3187,8 +3187,8 @@ SCREEN.lgsagub=(c)=>{
        <div class="spacer"></div><span class="rowcount">${s?`사급부품 ${wonI(s.parts)}종`:'조회 전'}</span>
      </div>
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
-        ${psh('item','사급부품 품번')}${psh('name','품명','cap')}${psh('out_net','출고(리시빙)','num')}${psh('out_r','반품(리시빙)','num')}
-        ${psh('in_qty','입고(LG전산)','num')}${psh('diff','수량차이','num')}${psh('avgprice','평균단가','num')}${psh('amtdiff','금액차이','num')}</tr></thead>
+        ${psh('item','사급부품 품번')}${psh('name','품명','cap')}${psh('erp_in','①우리ERP입고','num')}${psh('in_qty','②LG OSP','num')}
+        ${psh('out_net','③리시빙소비','num')}${psh('diff_erp','①↔②차이','num')}${psh('diff','선입고(②−③)','num')}${psh('avgprice','평균단가','num')}</tr></thead>
        <tbody>${body}</tbody>${foot}</table></div>
      <style>.lg-tbl thead th{position:sticky;top:0;background:#f1f5fb;z-index:4}.lg-tbl tfoot .lg-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;border-top:2px solid #b9cbe6;z-index:3}</style>`;
     wireTabs();
