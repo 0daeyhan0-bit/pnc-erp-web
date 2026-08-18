@@ -1528,20 +1528,27 @@ SCREEN.sourceprofile=(c)=>{
     if(!vs.length)vs.push({code:om.rows[i].cur_vendor_code,name:om.rows[i].cur_vendor_name,ratio:100,price:om.rows[i].item_master_price});
     if(vs.length===1)vs[0].ratio=100;draw();};
   const omSave=async()=>{
-    // 검증(저장 대상 행만): ★단가미등록 차단 + 다중업체 배분%합100
-    for(const r of om.rows){const vs=r.vendors.filter(v=>v.code);
+    // 저장 대상 행 판정 + 미확인 단가(price_reg undefined) 동기 조회(타이밍 갭 제거)
+    om.saving=true;om.msg='⏳ 단가 확인 중…';draw();
+    const targets=[];
+    for(let i=0;i<om.rows.length;i++){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
       const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
       if(isDefault && !r.has_override)continue;
-      if(vs.some(v=>v.price_reg===false)){om.msg=`❌ ${r.item_code}: 단가 미등록 업체가 있어 저장 불가 (단가 등록 후 배정)`;draw();return;}
-      if(vs.length>=2){if(vs.some(v=>v.ratio==null)){om.msg=`❌ ${r.item_code}: 다중업체는 모든 업체에 배분% 입력`;draw();return;}
-        const s=vs.reduce((a,v)=>a+(+v.ratio||0),0);if(Math.abs(s-100)>0.01){om.msg=`❌ ${r.item_code}: 배분% 합 ${s}≠100`;draw();return;}}}
-    om.saving=true;om.msg='';draw();let cnt=0;
-    try{for(const r of om.rows){const vs=r.vendors.filter(v=>v.code);
+      targets.push(i);
+      for(let vi=0;vi<r.vendors.length;vi++){const v=r.vendors[vi];if(v.code && v.price_reg===undefined){await omPrice(i,vi);}}}
+    // 검증: ★단가미등록 차단(경고) + 다중업체 배분%합100
+    for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
+      const unreg=vs.filter(v=>v.price_reg===false);
+      if(unreg.length){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code} ${r.item_name}]의 업체 「${unreg.map(v=>v.name||v.code).join(', ')}」는 매입단가가 등록되지 않았습니다. 단가 등록 후 배정하세요.`;draw();return;}
+      if(vs.length>=2){if(vs.some(v=>v.ratio==null)){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] 다중업체는 모든 업체에 배분% 입력 필요`;draw();return;}
+        const s=vs.reduce((a,v)=>a+(+v.ratio||0),0);if(Math.abs(s-100)>0.01){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] 배분% 합이 ${s}% (100% 필요)`;draw();return;}}}
+    if(!targets.length){om.saving=false;om.msg='변경사항 없음';draw();return;}
+    om.msg='';draw();let cnt=0;
+    try{for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
         const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
-        if(isDefault && !r.has_override)continue;   // 변화 없음(현행 매입처 단일)
         const allocations=isDefault?[]:vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));   // isDefault=override 해제
         const res=await fetch(`${API}/api/sourcing/current_order/vendor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:r.item_code,allocations})});
-        const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`❌ ${r.item_code}: ${jj.detail||'저장실패'}`;draw();return;}cnt++;}
+        const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] ${jj.detail||'저장실패'}`;draw();return;}cnt++;}
       await omOpen(om.item);om.msg=`✅ 발주업체·배분 저장 (${cnt}건)`;draw();
     }catch(e){om.saving=false;om.msg='❌ 저장 실패: '+e;draw();}};
   const orderModal=()=>{if(!om)return '';
@@ -1582,7 +1589,9 @@ SCREEN.sourceprofile=(c)=>{
          <div style="font-size:11px;color:#8aa0bd;margin-top:4px">※ 단일업체면 100% 자동. 안 바꾸면 현행 매입처 그대로. 단가=마스터(PR_M_ITEM_COST) 자동조회·읽기전용. R02(외주 SUB 후보)는 [🏭 업체·단가]에서.</div>
        </div>
        <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">
-         ${om.msg?`<span style="font-size:12px;font-weight:600;color:${om.msg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(om.msg)}</span>`:''}
+         ${om.msg?(om.msg.startsWith('✅')||om.msg.startsWith('⏳')||om.msg==='변경사항 없음'
+            ?`<span style="font-size:12px;font-weight:600;color:${om.msg.startsWith('✅')?'#1c7c3a':'#8a94a6'}">${esc(om.msg)}</span>`
+            :`<span style="flex:1;font-size:13px;font-weight:700;color:#9a1b1b;background:#fdeaea;border:1px solid #f0c2c2;border-radius:6px;padding:6px 10px">${esc(om.msg)}</span>`):''}
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="om-cancel">닫기</button>
          ${canW?`<button class="btn" id="om-save" style="background:#1c7c3a;color:#fff" ${om.saving?'disabled':''}>💾 발주업체·배분 저장</button>`:''}</div>
