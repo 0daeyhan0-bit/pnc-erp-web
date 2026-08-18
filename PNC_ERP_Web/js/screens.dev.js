@@ -2165,7 +2165,20 @@ SCREEN.unifybom=(c,ro)=>{
     const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{if(isNew){isNew=false;item='';name='';lines=[];weldRows=[];editMode=false;draw();}else load(item);};
     const add=c.querySelector('#bm-add');if(add)add.onclick=addRow;
     const sv=c.querySelector('#bm-save');if(sv)sv.onclick=(isNew?saveNew:save);
-    const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>dlCSV(`BOM_${item}.csv`,['#',...COLS.map(x=>x[1])],lines.map((l,i)=>[i+1,...COLS.map(([k])=>l[k])]));
+    const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>{
+      // ★화면에 보이는 뷰와 동일하게 export. 다단계 전개(평면 재료표=naeD)면 그 행을, 단일레벨/편집이면 원천 lines를.
+      if(viewTree && !editMode && !(routeSel>0) && naeD && !naeD.error && naeFor===item){
+        const fm=flatMat(naeD.rows||[]); const jae=(+((naeD.agg||{}).jae)||0);
+        const pct=m=>(jae?((+m||0)/jae*100).toFixed(1):'0.0')+'%';
+        const hd=['레벨','품번','품명','규격','소재','사급','매입처','소요량','단위단가','재료비','비율'];
+        const rows=[['0',item,name,'','','','',1,'',Math.round(jae),'100%']];
+        const push=r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
+          rows.push(['1',r.code,r.name,sp,r.metal||'',r.sag?'사급':'',r.cust||'',r.qty,r.won?Math.round(r.won):'',Math.round(r.mat||0),pct(r.mat)]);};
+        fm.normal.forEach(push); if(showWeld)fm.weldArr.forEach(push);
+        dlCSV(`BOM_${item}_전개.csv`,hd,rows);
+      } else {
+        dlCSV(`BOM_${item}.csv`,['#',...COLS.map(x=>x[1])],lines.map((l,i)=>[i+1,...COLS.map(([k])=>l[k])]));
+      }};
     c.querySelectorAll('.bm-del').forEach(el=>el.onclick=()=>{lines.splice(+el.dataset.i,1);draw();});
     const recalcWt=(i,tr)=>{const w=calcWeight(lines[i]);if(w!=null){lines[i].net_weight=w;const wc=tr&&tr.querySelector('input[data-k="net_weight"]');if(wc&&document.activeElement!==wc)wc.value=w;}};
     c.querySelectorAll('.ce').forEach(el=>el.oninput=()=>{const i=+el.dataset.i,k=el.dataset.k;lines[i][k]=(el.type==='number')?(el.value===''?null:+el.value):el.value;
