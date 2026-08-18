@@ -934,7 +934,7 @@ SCREEN.stockissue=(c)=>{
     const opt=(list,sel)=>['<option value="">%% 전체</option>'].concat(list.map(x=>`<option value="${esc(x.code)}" ${sel===x.code?'selected':''}>${esc(x.nm||x.code)}</option>`)).join('');
     c.innerHTML=`
      <div class="page-title">📤 자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재개별출고 (레거시 w_pu_stock_150)</span></div>
-     <div class="page-sub">자재창고 → 생산/영업창고 개별출고(파트출고) 조회. 🟢 nx <code>PU_T_STOCK_MAINT</code> (MAINT_TAG='B') · 건수·수량합은 전체 집계.</div>
+     <div class="page-sub">자재창고 → 생산/영업창고 개별출고(파트출고) 조회. 🟢 nx <code>PU_T_STOCK_MAINT</code> (MAINT_TAG in '4'축관·'B'개별출고) · 건수·수량합은 전체 집계.</div>
      <div class="toolbar">
        <label class="tl">출고기간</label><input type="date" class="inp" id="si-from" value="${esc(ymd2iso(tot._f)||m1Iso())}" style="min-width:130px"> ~ <input type="date" class="inp" id="si-to" value="${esc(ymd2iso(tot._t)||todayIso())}" style="min-width:130px">
        <label class="tl">FROM파트창고</label><select class="sel" id="si-fw">${opt(fw,F.fromwh)}</select>
@@ -1353,18 +1353,21 @@ SCREEN.sourceprofile=(c)=>{
     tload=false;draw();};
   const curE=(rid,f,dflt)=>{const k=rid+'|'+f;return edit[k]!==undefined?edit[k]:dflt;};
   const setE=(rid,f,v)=>{edit[rid+'|'+f]=v;};
-  const rfrom=r=>curE(r.route_id,'apply_from',r.apply_from||'');
-  const rto=r=>curE(r.route_id,'apply_to',r.apply_to||'');
-  const ract=r=>!!curE(r.route_id,'is_active',!!r.is_active);
+  const _isCur=r=>!!(r.current_flag||r.route_no===1);   // R01(현행)
+  const ract=r=>_isCur(r)?true:!!curE(r.route_id,'is_active',!!r.is_active);   // ★R2-3 R01(현행) 항상 활성
   const ralloc=r=>curE(r.route_id,'alloc_ratio',(r.alloc_ratio!=null?r.alloc_ratio:''));
-  const validOn=(r,d)=>{const f=rfrom(r),t=rto(r);return ract(r)&&(!f||f<=d)&&(!t||d<=t);};
-  const aStat=()=>{const active=routes.filter(r=>ract(r)&&validOn(r,ref));const withAl=active.filter(r=>ralloc(r)!==''&&ralloc(r)!=null);const sum=Math.round(withAl.reduce((a,r)=>a+(parseFloat(ralloc(r))||0),0)*100)/100;return {n:active.length,sum,single:active.length<=1,withAl:withAl.length};};
-  const autoset=()=>{routes.forEach(r=>{const isCur=r.current_flag||r.route_no===1;if(isCur){setE(r.route_id,'is_active',true);if(!rfrom(r))setE(r.route_id,'apply_from',FROM0);setE(r.route_id,'apply_to',OPEN);setE(r.route_id,'alloc_ratio',100);}else{setE(r.route_id,'is_active',false);setE(r.route_id,'apply_to',CLOSE);setE(r.route_id,'alloc_ratio','');}});msg='현행(R01) 활성·100% + 나머지 후보 비활성 마감('+CLOSE+'). [저장]으로 확정.';draw();};
-  const save=async()=>{const rows=routes.filter(r=>!r.readonly).map(r=>{const al=ralloc(r);
-      return {route_id:r.route_id,apply_from:rfrom(r)||null,apply_to:rto(r)||null,is_active:ract(r)?1:0,alloc_ratio:(ract(r)&&al!==''&&al!=null)?parseFloat(al):null};});
+  const validOn=(r,d)=>ract(r);   // ★R2-1 유효기간 폐지 — 활성 여부로만 판정
+  const aStat=()=>{const active=routes.filter(r=>ract(r));const withAl=active.filter(r=>ralloc(r)!==''&&ralloc(r)!=null);const sum=Math.round(withAl.reduce((a,r)=>a+(parseFloat(ralloc(r))||0),0)*100)/100;return {n:active.length,sum,single:active.length<=1,withAl:withAl.length};};
+  const autoset=()=>{routes.forEach(r=>{if(_isCur(r)){setE(r.route_id,'is_active',true);setE(r.route_id,'alloc_ratio',100);}else{setE(r.route_id,'is_active',false);setE(r.route_id,'alloc_ratio','');}});msg='현행(R01) 활성·100% + 나머지 후보 비활성. [저장]으로 확정.';draw();};
+  const save=async()=>{const A=aStat();
+    if(!A.single){const active=routes.filter(r=>ract(r));
+      if(active.some(r=>{const v=ralloc(r);return v===''||v==null;})){alert('저장 불가 — 활성 경로가 2개 이상이면 모든 활성 경로에 배분%를 입력해야 합니다.');return;}
+      if(Math.abs(A.sum-100)>0.01){alert(`저장 불가 — 활성 경로 배분% 합이 ${A.sum}% 입니다. 정확히 100%가 되어야 합니다.`);return;}}
+    const rows=routes.filter(r=>!r.readonly).map(r=>{const al=ralloc(r);
+      return {route_id:r.route_id,apply_from:null,apply_to:null,is_active:ract(r)?1:0,alloc_ratio:(ract(r)&&al!==''&&al!=null)?parseFloat(al):null};});
     try{const r=await fetch(`${API}/api/sourcing/route/alloc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:sel,rows})});
       const j=await r.json();if(j.ok){alert(`저장 완료 (${j.count}건)`);open(sel);return;}
-      const hint=j.gate==='ALLOC'?'유효기간 겹치는 활성 후보 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
+      const hint=j.gate==='ALLOC'?'활성 경로 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
       alert('저장 실패 — '+hint+':\n\n'+(j.errors?j.errors.join('\n'):JSON.stringify(j)));}
     catch(e){alert('저장 실패: '+e);}};
   // ===== 업체·단가 모달 — ★ASSY 매입단가=업체별(공통 없음), 업체=배분%(정수). 사급 부품가 UI 없음(이 모달 스코프 밖) =====
@@ -1607,25 +1610,24 @@ SCREEN.sourceprofile=(c)=>{
   const treeTbl=()=>{if(!tree)return '';if(!tree.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
     return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${tree.map(n=>{const k=kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${esc(n.custnm||'')}</td></tr>`;}).join('')}</tbody></table>`;};
   const badge=r=>{const on=r.current_flag;return `<span style="background:${on?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700">R${String(r.route_no).padStart(2,'0')}${on?' · 현행':''}</span>`;};
-  const routeRow=r=>{const ro=r.readonly,valid=validOn(r,ref),al=ralloc(r);
+  const routeRow=r=>{const ro=r.readonly,al=ralloc(r);
     const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 후보 업체·계획단가 지정(R02…)
-    const isCur=r.current_flag||r.route_no===1;   // R01(현행) → 발주업체·단가(현행 매입처·마스터단가)
-    return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':((!valid)?'opacity:.6;':'')}">
+    const isCur=_isCur(r);   // R01(현행)
+    const A=aStat();
+    return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':(!ract(r)?'opacity:.55;':'')}">
       <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}</td>
       <td>${esc(r.gubun||'-')}</td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
       <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
-      <td>${(canW&&!ro)?`<input class="inp sp-e" type="date" data-ri="${r.route_id}" data-f="apply_from" value="${esc(rfrom(r))}" style="width:120px;min-width:0">`:esc(rfrom(r)||'-')}</td>
-      <td>${(canW&&!ro)?`<input class="inp sp-e" type="date" data-ri="${r.route_id}" data-f="apply_to" value="${esc(rto(r))}" style="width:120px;min-width:0" title="비우면 무기한">`:esc(rto(r)||'무기한')}</td>
-      <td class="center">${(canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':''))}</td>
-      <td class="num" style="white-space:nowrap">${(canW&&!ro)?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" ${valid?'':'disabled'} style="width:60px;min-width:0;${valid?'':'background:#eee;color:#aab'}" placeholder="—">`:(al==null?'—':al)}${(isCur&&canW)?` <button class="btn ghost sp-editvend" title="발주업체·배분 수정 (현행 R01 자동발주 근거 · 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 수정</button>`:''}</td>
+      <td class="center">${isCur?'<span title="현행(R01)은 항상 활성 — 비활성 불가" style="color:#1c7c3a;font-weight:700">✔ 항상</span>':((canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':'')))}</td>
+      <td class="num" style="white-space:nowrap">${(isCur&&A.single)?'<b style="color:#1c7c3a">100</b> <span style="font-size:10px;color:#8aa0bd">자동</span>':((canW&&!ro&&ract(r))?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" style="width:60px;min-width:0" placeholder="—">`:(ract(r)?(al==null?'—':al):'<span style="color:#c9d1dc">비활성</span>'))}${(isCur&&canW)?` <button class="btn ghost sp-editvend" title="발주업체·배분 수정 (현행 R01 자동발주 근거 · 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 수정</button>`:''}</td>
     </tr>`;};
   const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr,A=aStat(),ok=A.single||Math.abs(A.sum-100)<0.01;
     return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 배정 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(단일 소스 <code>nx.sourcing_route</code> · 승인 후보만 배정 · 저장 <code>nx.route_alloc</code>)</span>
       <label style="float:right;font-size:12px;font-weight:400;color:#5a6b82"><input type="checkbox" id="sp-unappr" ${showUnappr?'checked':''}> 미승인 보기</label></div>
-      <div style="margin:0 0 6px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${A.single?`활성 ${A.n}개(단일 → 100% 자동)`:`유효기간(${esc(ref)}) 겹치는 활성 ${A.n}개 배분합 ${A.sum}% ${ok?'✓':'(=100 필요)'}`}${allocErrs.length?` · 저장값 검증: ${esc(allocErrs.join(' / '))}`:''}</div>
-      <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>구분</th><th>공급처</th><th class="center">승인</th><th>유효시작</th><th>유효종료</th><th class="center">활성</th><th class="num">배분%</th></tr></thead>
-      <tbody>${routes.length?routes.map(routeRow).join(''):`<tr><td colspan="8" class="empty">조달경로 후보 없음${!showUnappr?' — [미승인 보기]로 개발 진행중 후보 확인':' (개발 › 조달경로 통합검토에서 생성·승인)'}</td></tr>`}</tbody></table>
+      <div style="margin:0 0 6px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${A.single?`활성 ${A.n}개(단일 → 100% 자동)`:`활성 ${A.n}개 배분합 ${A.sum}% ${ok?'✓':'(정확히 100% 필요 — 미달·초과 시 저장 불가)'}`}${allocErrs.length?` · 저장값 검증: ${esc(allocErrs.join(' / '))}`:''}</div>
+      <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>구분</th><th>공급처</th><th class="center">승인</th><th class="center">활성</th><th class="num">배분%</th></tr></thead>
+      <tbody>${routes.length?routes.map(routeRow).join(''):`<tr><td colspan="6" class="empty">조달경로 후보 없음${!showUnappr?' — [미승인 보기]로 개발 진행중 후보 확인':' (개발 › 조달경로 통합검토에서 생성·승인)'}</td></tr>`}</tbody></table>
       <div class="page-sub" style="color:#8aa0bd;margin-top:3px">승인 ${appr}건${un?` · 미승인 ${un}건(회색·배정불가)`:''}. R01=현행(실사용 BOM 기준선·자동승인). 미승인 후보는 [개발 › 조달경로 통합검토]에서 승인해야 배정 가능.</div>`;};
   const draw=()=>{
     c.innerHTML=`

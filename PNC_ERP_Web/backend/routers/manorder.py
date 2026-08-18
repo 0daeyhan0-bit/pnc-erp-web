@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
 
@@ -121,14 +121,17 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         def _par(ic):
             ic = str(ic or ""); i = ic.find("-"); return ic[:i] if i > 0 else ic
         # ── 이 매입처(cc) 배분율 적용: 계획수량·일자별을 이 매입처 몫으로 스케일(배분율<100=badge, 0=제외) ──
-        #   재고/기발주는 미스케일: po_qty는 이미 CUST_CODE=cc 스코프, stock_qty는 물리재고(업체분할 규칙 없음→현행유지).
+        #   ★실발주비율 = R01 경로비율 × 업체비율. 재고/기발주는 미스케일(po_qty는 CUST_CODE=cc 스코프, stock_qty는 물리재고).
+        rn = _nx(); rc = rn.cursor()
+        try: route01 = _route01_ratio(rc, [str(r["ic"]).strip() for r in rows])   # ★R01 경로 계수(현재 100)
+        finally: rn.close()
         out = []
         for r in rows:
             r["days"] = daily.get(_par(r["ic"]), {})
-            ratio = _share(r["ic"])
-            if ratio <= 0:
-                continue                        # 이 매입처 발주 아님(배분/발주업체지정에서 제외)
             ic = str(r["ic"]).strip()
+            ratio = _share(ic) * (route01.get(ic, 100.0) / 100.0)   # 실발주비율 = 업체비율 × route01
+            if ratio <= 0:
+                continue                        # 이 매입처 발주 아님(배분/발주업체지정/경로에서 제외)
             r["alloc_ratio"] = round(ratio, 4)
             r["alloc_note"] = ((f"발주업체지정 {ratio:g}%" if len(ovr.get(ic, [])) > 1 else "발주업체지정") if ic in ovr else
                                (f"배분 {ratio:g}%" if (ratio != 100.0 or len(prof.get(ic, [])) > 1) else ""))

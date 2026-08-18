@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
 
@@ -540,8 +540,45 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                 keyed[k] = g
             q = float(r["q"] or 0); g["days"][r["PLAN_YMD"]] = g["days"].get(r["PLAN_YMD"], 0) + q; g["tot"] += q
         rows = sorted(keyed.values(), key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
+        # ★조달 배분 반영(규칙 §5): 자도번(part)에 발주업체 배분(order_vendor)+경로계수(route01)가 있으면 협력사(발주업체)별로 분할.
+        #   실배분비율 = route01% × 업체비율. 배분 없는 자도번은 그대로(무회귀). 현재 route01=100.
+        parts = sorted({r["part"] for r in rows if r.get("part")})
+        ov = {}   # part -> [(vendor, ratio|None)]
+        if parts:
+            try:
+                _hr = (cur.execute("SELECT COL_LENGTH('nx.order_vendor','alloc_ratio')").fetchone()[0] is not None)
+                for i in range(0, len(parts), 900):
+                    ch = parts[i:i+900]; ph = ",".join("?"*len(ch)); col = "alloc_ratio" if _hr else "NULL"
+                    cur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(vendor_code,''), {col} FROM nx.order_vendor WHERE item_code IN ({ph})", *ch)
+                    for rr in cur.fetchall():
+                        vc = str(rr[1] or "").strip()
+                        if vc: ov.setdefault(str(rr[0]).strip(), []).append((vc, (float(rr[2]) if rr[2] is not None else None)))
+            except Exception:
+                pass
+        route01 = _route01_ratio(cur, parts)
+        need = bool(ov) or any(route01.get(p, 100.0) != 100.0 for p in parts)
+        if need:
+            vend_nm = _custnm_map(cur, {v for lst in ov.values() for (v, _) in lst})
+            newrows = []
+            for r in rows:
+                p = r.get("part"); rf = route01.get(p, 100.0) / 100.0; lst = ov.get(p)
+                if not lst:                                   # 배분 없음 → route01만 스케일(현재 1.0=무변경)
+                    if rf == 1.0: newrows.append(r)
+                    else: newrows.append(dict(r, days={d: round(q*rf, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*rf, 3)))
+                    continue
+                rated = [(v, rt) for (v, rt) in lst if rt is not None]
+                if len(rated) == len(lst) and rated:
+                    tot = sum(rt for _, rt in rated) or 1.0; splits = [(v, rt/tot) for (v, rt) in rated]
+                else:
+                    n = len(lst); splits = [(v, 1.0/n) for (v, _) in lst]
+                for (vc, frac) in splits:                     # 협력사(발주업체)별 분할행
+                    f = frac * rf
+                    newrows.append(dict(r, wc=vc, wcnm=vend_nm.get(vc, vc),
+                        days={d: round(q*f, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*f, 3),
+                        alloc_note=f"배분 {round(frac*100)}%"))
+            rows = sorted(newrows, key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
         note = f"⚠ 결과가 많아 상위 {CAP}건만 표시했습니다. 협력사(가공처)·제번·자도번으로 필터하세요." if capped else ""
-        return {"dates": dates, "rows": rows, "cnt": len(rows), "sum_qty": sum(float(r["q"] or 0) for r in raw), "note": note}
+        return {"dates": dates, "rows": rows, "cnt": len(rows), "sum_qty": sum(r["tot"] for r in rows), "note": note}
     finally:
         nx.close()
 

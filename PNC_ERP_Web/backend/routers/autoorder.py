@@ -10,7 +10,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
 
@@ -84,6 +84,7 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
                         alloc.setdefault(str(r[0]).strip(), []).append((v, (float(r[2]) if r[2] is not None else None)))
         except Exception:
             pass
+        route01 = _route01_ratio(ncur, cur_items)   # ★실발주비율 = route01%(현행 경로) × 업체비율. 현재 R01=100.
         # 이미 발주된 순소요 차감분: 확정 PO 라인 (item, vendor)별 order_qty 합
         already = {}
         ncur.execute("""SELECT l.item_code, h.vendor_code, SUM(CAST(l.order_qty AS float))
@@ -108,6 +109,7 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
         else:
             splits = [(b["vendor"], b["req"])]
             overridden = False
+        rf = route01.get(b["item"], 100.0) / 100.0   # ★route01 경로 계수(현재 100=무영향)
         for (eff, qty) in splits:
             k = (b["item"], eff)
             g = merged.get(k)
@@ -115,7 +117,7 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
                 g = {"item": b["item"], "vendor": eff, "gubun": b["gubun"], "source": b["source"], "req": 0.0,
                      "overridden": overridden}
                 merged[k] = g
-            g["req"] += qty
+            g["req"] += qty * rf
             if b["gubun"] == "매입":   # 공급방식: 매입 우선 표기(혼재 시)
                 g["gubun"] = "매입"
     lines = list(merged.values())
