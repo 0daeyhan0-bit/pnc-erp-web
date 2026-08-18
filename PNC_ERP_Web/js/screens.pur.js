@@ -242,9 +242,9 @@ SCREEN.receiptdetail=(c)=>{
     seq:{h:'입고순번',cls:'center',get:r=>esc(r.seq)},
     ym:{h:'입고년월',cls:'center',get:r=>fmtYm(r.ym)},
     cnm:{h:'거래처',cls:'cap',get:r=>esc(r.cnm)},
-    ct:{h:'거래처분류',cls:'cap',get:r=>esc(ctN(r.ct))},
+    ct:{h:'매입유형',cls:'cap',w:100,get:r=>esc(ctN(r.ct))},
     chg:{h:'담당자',cls:'',get:r=>esc(chg(r.cc))||'-'},
-    mat:{h:'PART_NO',cls:'',get:r=>`<b>${esc(r.mat)}</b>`},
+    mat:{h:'입고품번',cls:'',w:96,get:r=>`<b style="display:inline-block;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom" title="${esc(r.mat)}">${esc(r.mat)}</b>`},
     nm:{h:'품명',cls:'cap',get:r=>esc(r.nm)},
     spec:{h:'PART SPEC',cls:'cap',get:r=>esc(r.spec)||''},
     diam:{h:'Φ',cls:'num',get:r=>won(r.diam)},
@@ -308,14 +308,14 @@ SCREEN.receiptdetail=(c)=>{
      <div class="toolbar">
        <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}" ${curLg===x?'selected':''}>${esc(lgN(x))}</option>`).join('')}</select>
        <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}" ${curSg===x?'selected':''}>${esc(sgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}" ${curCt===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
+       <select class="sel" id="ct"><option value="">전체 매입유형</option>${cts.map(x=>`<option value="${esc(x)}" ${curCt===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
        <input class="inp" id="cq" placeholder="거래처코드/명" value="${esc(curCq)}">
        <input class="inp" id="mq" placeholder="품번/품명/PART NO (검색=서버조회)" value="${esc(curMq)}">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
+       <span id="derr" style="color:#c0392b;font-size:12px;font-weight:600"></span>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
-     <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
     c.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>{gijun=b.dataset.g;load();});
@@ -327,7 +327,7 @@ SCREEN.receiptdetail=(c)=>{
         &&(!mq||(''+r.mat).toLowerCase().includes(mq)||(''+r.nm).toLowerCase().includes(mq)));};
     const rowHtml=r=>`<tr>${order.map(k=>{const cd=CD[k],cap=cd.cls.indexOf('cap')>=0,v=cd.get(r);return `<td class="${cd.cls}"${cap?` title="${esc((''+(k==='cnm'?r.cnm:k==='nm'?r.nm:k==='spec'?r.spec:k==='ct'?ctN(r.ct):'')))}"`:''}>${v}</td>`;}).join('')}</tr>`;
     /* receiptdetail-live */
-    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
+    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"${g==='grandtot'?' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"':''}><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
     const render=()=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
@@ -342,16 +342,25 @@ SCREEN.receiptdetail=(c)=>{
       }
       const tq=lines.reduce((a,b)=>a+(+b.qty||0),0), ta=lines.reduce((a,b)=>a+(+b.amt||0),0), tk=lines.reduce((a,b)=>a+(+b.kamt||0),0);
       html+=subRow('총계',tq,ta,tk,'grandtot');
-      c.querySelector('#th').innerHTML=`<tr>${order.map(k=>`<th class="${CD[k].cls}">${CD[k].h}</th>`).join('')}</tr>`;
+      c.querySelector('#th').innerHTML=`<tr>${order.map(k=>`<th class="${CD[k].cls}" data-base="${esc(CD[k].h)}"${CD[k].w?` style="min-width:${CD[k].w}px"`:''}>${CD[k].h}</th>`).join('')}</tr>`;
       c.querySelector('#body').innerHTML=loading?`<tr><td colspan="${order.length}" class="empty">${SPIN}라이브 조회 중…</td></tr>`
         :(msg?`<tr><td colspan="${order.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
         :(lines.length?html:`<tr><td colspan="${order.length}" class="empty">결과 없음</td></tr>`));
-      c.querySelector('#sum').innerHTML=`<div class="s-item">라인 <b>${won(lines.length)}</b></div><div class="s-item">입고수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">금액 합계 <b>${wonI(ta)} 원</b></div><div class="s-item ${tk<0?'neg':''}">금액(KRW) 합계 <b>${wonI(tk)} 원</b></div>`;
       c.querySelector('#cnt').textContent=`${lines.length}라인 / 대상 ${pool.length}라인`;
       attachResizers(c);
+      enableSort(c, order, ()=>cur, ()=>{
+        let h=''; cur.slice(0,RENDER_CAP).forEach(r=>h+=rowHtml(r));
+        const gq=cur.reduce((a,b)=>a+(+b.qty||0),0),ga=cur.reduce((a,b)=>a+(+b.amt||0),0),gk=cur.reduce((a,b)=>a+(+b.kamt||0),0);
+        h+=subRow('총계',gq,ga,gk,'grandtot');
+        c.querySelector('#body').innerHTML=h;
+      });
     };
-    const go=()=>{if(gijun==='close'){curYm=inYm(c.querySelector('#dto').value);}
-      else{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);}load();};
+    const go=()=>{const de=c.querySelector('#derr');if(de)de.textContent='';
+      if(gijun==='close'){const v=c.querySelector('#dto').value;if(!/^\d{4}-\d{2}$/.test(v)){if(de)de.textContent='⚠ 마감년월을 올바르게 입력하세요';return;}curYm=inYm(v);}
+      else{const f=c.querySelector('#dfrom').value,t=c.querySelector('#dto').value;
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(f)||!/^\d{4}-\d{2}-\d{2}$/.test(t)){if(de)de.textContent='⚠ 입고일자를 올바르게 입력하세요';return;}
+        if(f>t){if(de)de.textContent='⚠ 시작일이 종료일보다 늦습니다';return;}curFrom=inD(f);curTo=inD(t);}
+      load();};
     const capF=()=>{curCq=c.querySelector('#cq').value.trim();curLg=c.querySelector('#lg').value;curSg=c.querySelector('#sg').value;curCt=c.querySelector('#ct').value;curMq=c.querySelector('#mq').value.trim();};
     const doSearch=()=>{capF();load();};   // ★검색버튼=Enter 동일(서버 재조회, 필터 유지)
     c.querySelector('#go').onclick=doSearch;
@@ -444,14 +453,14 @@ SCREEN.dispatchdetail=(c)=>{
      <div class="toolbar">
        <select class="sel" id="lg"><option value="">전체 대분류</option>${lgs.map(x=>`<option value="${esc(x)}" ${curLg===x?'selected':''}>${esc(lgN(x))}</option>`).join('')}</select>
        <select class="sel" id="sg"><option value="">전체 소분류</option>${sgs.map(x=>`<option value="${esc(x)}" ${curSg===x?'selected':''}>${esc(sgN(x))}</option>`).join('')}</select>
-       <select class="sel" id="ct"><option value="">전체 거래처분류</option>${cts.map(x=>`<option value="${esc(x)}" ${curCt===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
+       <select class="sel" id="ct"><option value="">전체 매입유형</option>${cts.map(x=>`<option value="${esc(x)}" ${curCt===x?'selected':''}>${esc(ctN(x))}</option>`).join('')}</select>
        <input class="inp" id="cq" placeholder="불출처코드/명" value="${esc(curCq)}">
        <input class="inp" id="mq" placeholder="품번/품명/PART NO" value="${esc(curMq)}">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
+       <span id="derr" style="color:#c0392b;font-size:12px;font-weight:600"></span>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
-     <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
      <div class="rowcount" id="cnt"></div>`;
     c.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>{gijun=b.dataset.g;load();});
@@ -463,7 +472,7 @@ SCREEN.dispatchdetail=(c)=>{
         &&(!mq||(''+r.mat).toLowerCase().includes(mq)||(''+r.nm).toLowerCase().includes(mq)));};
     const rowHtml=r=>`<tr>${order.map(k=>{const cd=CD[k],cap=cd.cls.indexOf('cap')>=0,v=cd.get(r);return `<td class="${cd.cls}"${cap?` title="${esc((''+(k==='cc'?r.cnm:k==='nm'?r.nm:k==='spec'?r.spec:k==='incust'?r.incust:k==='ct'?ctN(r.ct):'')))}"`:''}>${v}</td>`;}).join('')}</tr>`;
     /* dispatchdetail-live */
-    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
+    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"${g==='grandtot'?' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"':''}><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
     const render=()=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
@@ -481,16 +490,26 @@ SCREEN.dispatchdetail=(c)=>{
       }
       const tq=lines.reduce((a,b)=>a+(+b.qty||0),0), ta=lines.reduce((a,b)=>a+(+b.amt||0),0), tk=lines.reduce((a,b)=>a+(+b.kamt||0),0);
       html+=subRow('총계',tq,ta,tk,'grandtot');
-      c.querySelector('#th').innerHTML=`<tr>${order.map(k=>`<th class="${CD[k].cls}">${CD[k].h}</th>`).join('')}</tr>`;
+      c.querySelector('#th').innerHTML=`<tr>${order.map(k=>`<th class="${CD[k].cls}" data-base="${esc(CD[k].h)}"${CD[k].w?` style="min-width:${CD[k].w}px"`:''}>${CD[k].h}</th>`).join('')}</tr>`;
       c.querySelector('#body').innerHTML=loading?`<tr><td colspan="${order.length}" class="empty">${SPIN}라이브 조회 중…</td></tr>`
         :(msg?`<tr><td colspan="${order.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
         :(lines.length?html:`<tr><td colspan="${order.length}" class="empty">결과 없음</td></tr>`));
-      c.querySelector('#sum').innerHTML=`<div class="s-item">라인 <b>${won(lines.length)}</b></div><div class="s-item">수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">금액 합계 <b>${wonI(ta)} 원</b></div><div class="s-item ${tk<0?'neg':''}">금액(KRW) 합계 <b>${wonI(tk)} 원</b></div>`;
       c.querySelector('#cnt').textContent=`${lines.length}라인 / 대상 ${pool.length}라인`;
       attachResizers(c);
+      // 헤더 더블클릭 정렬(소계 무시=잎행 평면 렌더)
+      enableSort(c, order, ()=>cur, ()=>{
+        let h=''; cur.slice(0,RENDER_CAP).forEach(r=>h+=rowHtml(r));
+        const gq=cur.reduce((a,b)=>a+(+b.qty||0),0),ga=cur.reduce((a,b)=>a+(+b.amt||0),0),gk=cur.reduce((a,b)=>a+(+b.kamt||0),0);
+        h+=subRow('총계',gq,ga,gk,'grandtot');
+        c.querySelector('#body').innerHTML=h;
+      });
     };
-    const go=()=>{if(gijun==='close'){curYm=inYm(c.querySelector('#dto').value);}
-      else{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);}load();};
+    const go=()=>{const de=c.querySelector('#derr');if(de)de.textContent='';
+      if(gijun==='close'){const v=c.querySelector('#dto').value;if(!/^\d{4}-\d{2}$/.test(v)){if(de)de.textContent='⚠ 마감년월을 올바르게 입력하세요';return;}curYm=inYm(v);}
+      else{const f=c.querySelector('#dfrom').value,t=c.querySelector('#dto').value;
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(f)||!/^\d{4}-\d{2}-\d{2}$/.test(t)){if(de)de.textContent='⚠ 불출일자를 올바르게 입력하세요';return;}
+        if(f>t){if(de)de.textContent='⚠ 시작일이 종료일보다 늦습니다';return;}curFrom=inD(f);curTo=inD(t);}
+      load();};
     const capF=()=>{curCq=c.querySelector('#cq').value.trim();curLg=c.querySelector('#lg').value;curSg=c.querySelector('#sg').value;curCt=c.querySelector('#ct').value;curMq=c.querySelector('#mq').value.trim();};
     c.querySelector('#go').onclick=()=>{capF();render();};   // ★검색=필터적용(검색어 유지·버튼=Enter 동일)
     const _dto=c.querySelector('#dto');if(_dto)_dto.onchange=()=>{capF();go();};   // 날짜 변경(검색어 유지)
