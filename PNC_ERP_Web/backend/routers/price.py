@@ -202,9 +202,10 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
 
 # ============ 사급가(COSP Sales Price) 업로드 — LG 사급 부품가를 nx.price_item에 Start Date 반영 upsert ============
 @router.post("/api/price/sagub_upload")
-async def price_sagub_upload(file: UploadFile = File(...)):
+async def price_sagub_upload(file: UploadFile = File(...), biz: str = Query("")):
     """COSP Sales Price 엑셀(LG 사급 부품가) 업로드. 각 행의 Start Date를 적용일(apply_ymd)로 nx.price_item에 upsert.
-       price_type='매입', vendor_code='LG'. 최신가는 as-of(적용일 최신)로 자동 반영. nx.item 미등록 품번은 스킵."""
+       price_type='매입', vendor_code='LG'. 최신가는 as-of(적용일 최신)로 자동 반영. nx.item 미등록 품번은 스킵.
+       ★biz(SAC/RAC)=사업부 선택(UI 통일용). COSP는 사업부 무관 동일가라 저장은 vendor='LG' 단일(응답에 biz 표기)."""
     import io as _io
     try:
         import openpyxl
