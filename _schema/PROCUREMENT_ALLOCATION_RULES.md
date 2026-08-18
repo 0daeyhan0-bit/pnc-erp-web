@@ -99,5 +99,12 @@
 
 **검증 게이트**: 배분 미설정/R01=100% 상태에서 coopplan(nx) 총량 = 레거시(src=legacy) 총량 = diff0. 배분 설정 시 업체별로 쪼개지되 **합계는 불변**.
 
+### 9-1. 구현·검증 완료 (2026-08-19)
+- **`common._route01_ratio` 재작성**: 키=조립품(assy), R01 합성(route_id=0) OR 현행저장경로(current_flag=1/route_no=1) 둘 다 인식(합성R01 갭 해소).
+- **`coopplan.partner_planstatus` 오버레이 재작성 = 총량보존 다중경로**: assy별 활성경로[(route_id,ratio,is_current)] × 부품 업체분포(현행=order_vendor·대안=sourcing_profile route_id별·폴백=경로헤더 공급처) → 부품수요를 (경로×업체)로 재분배, 전 행 합=원수요.
+- **E2E 검증(AJR75563402, R02=대원산업 생성, R01 70%/R02 30%)**: 베이스라인 총 37,104(무분할·원가공처=레거시일치) → 배분후 대원산업 11,131.2(30%)+원가공처4사 각 6,493.2(70%), **총 37,104 불변**. alloc_note="경로 R01 70%×업체 100%"/"경로 R{id} 30%×업체 100%". 이름 표시 정상.
+- **회귀안전**: route_alloc 없으면 routes=[(0,100,current)]·order_vendor 없으면 원 가공처 유지 → 출력 불변.
+- **남음**: 수동발주(manorder)·자동발주/compose_mat은 grain에 assy 링크 확보 필요(부품→제품). 테스트 데이터(R02 route_id=1528·route_alloc)는 검증후 정리 대상.
+
 ---
 관련: [[newerp-sourcing-profile]] · _schema/AUTOORDER_PRODUCTION_DESIGN.md · BOM_EXPLOSION_RULES.md
