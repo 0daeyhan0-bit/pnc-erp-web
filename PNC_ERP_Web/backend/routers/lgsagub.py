@@ -795,7 +795,7 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         items.sort(key=lambda x: -(x["in_qty"] + x["erp_in"] + abs(x["out_net"])))
         return {
             "ym": ym.strip(),
-            "summary": {"erp_in": tot_erp, "out_net": tot_out_c, "out_c": tot_out_c, "out_r": tot_out_r,
+            "summary": {"erp_in": tot_erp, "out_net": tot_out,
                         "in_qty": tot_in_q, "in_amt": tot_in_a, "parts": len(parts)},
             "items": items[:int(limit)],
         }
