@@ -832,6 +832,24 @@ def item_spec(payload: dict = Body(...)):
     finally:
         cn.close()
 
+@router.post("/api/item/cutgubun")
+def item_cutgubun(payload: dict = Body(...)):
+    """품목 절삭/설치 구분(cut_gubun) 단건 수정 — nx.item.cut_gubun. 값: 절삭/설치/분지관/이지링크/빈값(미분류).
+       경영 대시보드·영업예상매출 절삭/설치 분류의 정본(품목마스터 속성). 원가 무영향."""
+    code = str(payload.get("item_code", "")).strip()
+    if not code:
+        raise HTTPException(400, "item_code 필요")
+    g = str(payload.get("cut_gubun", "")).strip()
+    if g not in ("", "절삭", "설치", "분지관", "이지링크"):
+        raise HTTPException(400, "cut_gubun 값 오류(절삭/설치/분지관/이지링크/빈값)")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("IF COL_LENGTH('nx.item','cut_gubun') IS NULL ALTER TABLE nx.item ADD cut_gubun nvarchar(20)")
+        cur.execute("UPDATE nx.item SET cut_gubun=NULLIF(?,'') WHERE item_code=?", g, code)
+        return {"ok": cur.rowcount > 0, "updated": int(cur.rowcount)}
+    finally:
+        cn.close()
+
 
 # ===================== LG BOM 조회 (nx.lg_bom, LG 원본 BOM Explosion 56,522행) =====================
 @router.get("/api/lgbom/search")
