@@ -3,3 +3,6 @@
 {"stamp": "2026-08-17 재싱크후", "tx_total": 22, "tx_match": 22, "tx_bad": [], "green": true, "ms_diff": ["PR_M_ITEM"]}
 {"stamp": "2026-08-17 재싱크후", "tx_total": 22, "tx_match": 22, "tx_bad": [], "green": true, "ms_diff": ["PR_M_ITEM"]}
 {"stamp": "2026-08-19 07:29", "tx_total": 28, "tx_match": 27, "tx_bad": ["PR_T_PRINT_STICKER"], "green": false, "ms_diff": []}
+{"stamp": "2026-08-19 07:31", "tx_total": 28, "tx_match": 27, "tx_bad": ["PU_T_STOCK_MAINT_GAGONG_MOVE"], "green": false, "ms_diff": []}
+{"stamp": "2026-08-19 07:32", "tx_total": 28, "tx_match": 27, "tx_bad": ["PR_T_INDI_CUTTING"], "green": false, "ms_diff": []}
+{"stamp": "2026-08-19 07:33", "tx_total": 28, "tx_match": 27, "tx_bad": ["PU_T_STOCK_MAINT_GAGONG_MOVE"], "green": false, "ms_diff": []}

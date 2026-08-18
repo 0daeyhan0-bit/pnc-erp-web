@@ -75,7 +75,7 @@ function enableSort(c, keys, getRows, render){
   const ths=c.querySelectorAll('thead th');
   ths.forEach((th,i)=>{
     addResizer(th);
-    const key=keys[i]; if(!key)return;
+    const key=keys&&keys[i]; if(!key)return;   // keys 미전달(단일인자 호출=리사이저만)시 정렬 스킵·크래시 방지
     th.style.cursor='pointer'; th.title='더블클릭하여 정렬 · 우측 경계 드래그로 너비조절';
     th.ondblclick=()=>{
       th._d = th._d===1?-1:1; const d=th._d;
