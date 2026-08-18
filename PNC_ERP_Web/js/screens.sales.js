@@ -117,6 +117,7 @@ SCREEN.salesforecast=(c)=>{
        <select class="sel" id="cutf"><option value="">전체구분</option>${['절삭','설치','분지관','이지링크'].map(g=>`<option value="${g}" ${cutf===g?'selected':''}>${g}</option>`).join('')}</select>
        <input class="inp" id="q" list="sf-ql" placeholder="도번/품명 입력" autocomplete="off"><datalist id="sf-ql">${sfOpts}</datalist>
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
+       <span id="sf-err" style="color:#c0392b;font-size:12px;font-weight:600;display:none;margin-left:6px"></span>
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
      <div class="summary-bar" id="sum"></div>
@@ -126,9 +127,15 @@ SCREEN.salesforecast=(c)=>{
     // ★날짜 = 네이티브 type=date (달력 아이콘 + 세그먼트 직접 타이핑, UI규칙). value "2026-08-14" → toY로 YYMMDD.
     const toY=el=>{const d=(el.value||'').replace(/\D/g,''); return d.length>=8?d.slice(2,8):(d.length===6?d:'');};
     c.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{if(metric===b.dataset.metric)return;metric=b.dataset.metric;load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to')));});
-    // ★디바운스: 날짜 두자리 입력(0→8) 중 onchange가 먼저 발화해 load→draw로 input이 교체되면 편집이 깨짐. 500ms 지연으로 입력 완료 후 1회만 재조회.
-    const sfReload=()=>{clearTimeout(sfTimer);sfTimer=setTimeout(()=>load(toY(c.querySelector('#sf-base')),toY(c.querySelector('#sf-to'))),500);};
-    c.querySelector('#sf-base').onchange=sfReload; c.querySelector('#sf-to').onchange=sfReload;
+    // ★날짜 조회: 검색버튼·날짜 변경·엔터 = 재조회. 시작일 필수·유효, 시작>종료 에러표시. (load가 draw전 F반영이라 08 입력도 안 튐)
+    const setSfErr=(m)=>{const e=c.querySelector('#sf-err');if(e){e.textContent=m||'';e.style.display=m?'inline':'none';}};
+    const doGo=()=>{const bEl=c.querySelector('#sf-base'),tEl=c.querySelector('#sf-to');const from=toY(bEl),to=toY(tEl);
+      if(!from||from.length!==6){setSfErr('⚠ 시작일을 올바르게 입력하세요');return;}
+      if((tEl.value||'').trim()&&(!to||to.length!==6)){setSfErr('⚠ 종료일이 올바르지 않습니다');return;}
+      if(to&&from>to){setSfErr('⚠ 시작일이 종료일보다 늦습니다');return;}
+      setSfErr('');load(from,to);};
+    c.querySelector('#sf-base').onchange=doGo; c.querySelector('#sf-to').onchange=doGo;
+    c.querySelector('#sf-base').onkeyup=e=>{if(e.key==='Enter')doGo();}; c.querySelector('#sf-to').onkeyup=e=>{if(e.key==='Enter')doGo();};
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
     const rowQ=r=>mode==='net'?r.nq:r.gq, rowA=r=>mode==='net'?r.namt:r.gamt;
     // ★헤더 더블클릭 정렬: 컬럼별 정렬값(도번/품명/작업처=문자, 합계=금액, 일자=그 날 수량)
@@ -171,7 +178,7 @@ SCREEN.salesforecast=(c)=>{
       // ★헤더 더블클릭 정렬 바인딩(리사이저는 자체 dblclick으로 stopPropagation → 충돌없음)
       c.querySelectorAll('#th th[data-sk]').forEach(th=>{th.style.cursor='pointer';th.ondblclick=()=>{const k=th.dataset.sk;sortDir=sortKey===k?-sortDir:1;sortKey=k;render();};});
     };
-    c.querySelector('#go').onclick=render;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')render();};
+    c.querySelector('#go').onclick=doGo;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')render();};   // ★검색=기간 재조회(doGo). 품번검색은 클라이언트 필터(render)
     c.querySelector('#work').onchange=render; c.querySelector('#cutf').onchange=e=>{cutf=e.target.value;render();};
     c.querySelector('#reset').onclick=()=>{mode='net';sortKey='';sortDir=1;cutf='';draw();};
     c.querySelector('#xls').onclick=()=>{

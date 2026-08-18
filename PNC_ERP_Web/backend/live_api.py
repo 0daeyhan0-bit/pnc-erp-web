@@ -355,8 +355,46 @@ def dailypurissue(date: str = Query("")):
     net_day = {g: pur_day.get(g, 0) - out_day.get(g, 0) for g in gubuns}
     pur, out, net = blk(pur_cum, pur_day), blk(out_cum, out_day), blk(net_cum, net_day)
     def tot(rs): return {"cum": sum(r['cum'] for r in rs), "day": sum(r['day'] for r in rs), "tot": sum(r['tot'] for r in rs)}
-    return {"date": d6, "ym": ym, "pur": pur, "pur_tot": tot(pur),
-            "out": out, "out_tot": tot(out), "net": net, "net_tot": tot(net)}
+    pur_t, out_t, net_t = tot(pur), tot(out), tot(net)
+
+    m0 = ym + '01'   # 월초(YYMMDD)
+    # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). 절삭/설치.
+    _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg,
+        SUM(CASE WHEN r.GUBUN='C' THEN ISNULL(r.RECV_AMT,0) WHEN r.GUBUN='R' THEN -ISNULL(r.RECV_AMT,0) ELSE 0 END) amt
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
+      WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
+    cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
+    hyeon_cut, hyeon_seol = round(cutm.get('절삭', 0)), round(cutm.get('설치', 0))
+    lg_sales = hyeon_cut + hyeon_seol   # LG매출액(현매출 합계) = ②의 분모, 절삭매출=사급율 분모
+
+    # ④ 사급율 원천 = OSP(nx.lg_sagub_actual) 월초~조회일. 원소재(TUBE)/부품.
+    _c, ro = _rows(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END t,
+        SUM(ISNULL(amt,0)) a FROM PARTNER_ERP_TEST3.nx.lg_sagub_actual
+      WHERE ym='{ym}' AND ISNULL(ymd,'') BETWEEN '{m0}' AND '{d6}'
+      GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END""")
+    ospm = {r['t']: float(r['a'] or 0) for r in ro}
+    osp_raw, osp_part = round(ospm.get('raw', 0)), round(ospm.get('part', 0))
+    pct = lambda a, b: round(a / b * 100, 1) if b else 0.0
+
+    # 당사ERP 유상사급 = ①의 유상사급-원재료+부품(확정입고, 총)
+    dangsa_sagub = 0
+    for r in pur:
+        if r['gubun'] in ('유상사급-원재료', '유상사급-부품'): dangsa_sagub += r['tot']
+    lg_osp = osp_raw + osp_part   # LG전산(OSP) 총
+
+    return {"date": d6, "ym": ym,
+            "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
+            # ⑤ 현매출 / ② 매입비율
+            "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "lg_sales": lg_sales},
+            "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
+                      "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales},
+            # ④ 사급율
+            "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
+                         "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
+            # D 유상사급 대사 (당사ERP 확정입고 vs LG전산 OSP)
+            "dae": {"dangsa": dangsa_sagub, "lg": lg_osp, "diff": dangsa_sagub - lg_osp,
+                    "lg_raw": osp_raw, "lg_part": osp_part}}
 
 # ================= 확정입고명세서 (구매/자재, dw_pu_input_110) — 라인단위 =================
 def _MAGAM(ref_ym):
