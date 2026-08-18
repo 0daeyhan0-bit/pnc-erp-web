@@ -377,6 +377,23 @@ def dailypurissue(date: str = Query("")):
     osp_raw, osp_part = round(ospm.get('raw', 0)), round(ospm.get('part', 0))
     pct = lambda a, b: round(a / b * 100, 1) if b else 0.0
 
+    # ③ 재고조정 = 전월기말재고 − 조회일재고 (재고증가면 음수). 실재고(조정후)=실매입−재고조정=실매입+재고증가.
+    #    소스=생산재고조회(_prodstock)·제품재고조회(salesstock)·자재수불(matledger). 재고조정=Σ(기초금액 basic×cost − 현재고금액 amt).
+    def _sdelta(rows, basek='basic', costk='cost', amtk='amt'):
+        cur_a = sum(float(x.get(amtk) or 0) for x in rows)
+        base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
+        return round(base_a - cur_a)
+    try: jaego_prod = _sdelta(_prodstock(ym))
+    except Exception: jaego_prod = 0
+    try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
+    except Exception: jaego_sales = 0
+    try:   # 자재수불(자재재고): matledger 월기준(일별마감 없음). rows에 basic/curr/amt(금액)
+        _mr = matledger(period='month', ymd=ym).get('rows', [])
+        jaego_mat = round(sum(float(x.get('basic_amt') or 0) for x in _mr) - sum(float(x.get('amt') or x.get('curr_amt') or 0) for x in _mr))
+    except Exception: jaego_mat = 0
+    jaego = jaego_prod + jaego_sales + jaego_mat
+    silrae = net_t['tot'] - jaego   # 실재고(조정후) = 실매입 − 재고조정
+
     # 당사ERP 유상사급 = ①의 유상사급-원재료+부품(확정입고, 총)
     dangsa_sagub = 0
     for r in pur:
@@ -388,7 +405,10 @@ def dailypurissue(date: str = Query("")):
             # ⑤ 현매출 / ② 매입비율
             "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
-                      "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales},
+                      "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
+                      "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
+            # ③ 재고조정 (기초−현재고, 재고증가면 음수). 자재는 8월 스냅샷 없어 0(원장계산 예정).
+            "jaego": {"prod": jaego_prod, "sales": jaego_sales, "mat": jaego_mat, "total": jaego, "mat_pending": jaego_mat == 0},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},

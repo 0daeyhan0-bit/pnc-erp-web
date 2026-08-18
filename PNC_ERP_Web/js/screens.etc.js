@@ -1012,10 +1012,12 @@ SCREEN.dailypurissue=(c)=>{
            <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">② 매입비율 (÷ LG매출액)</div>
            <table class="tbl fit"><tbody>
              <tr><td>매입</td><td class="num">${wonI(F.ratio.pur)}</td><td class="num"><b>${F.ratio.pur_pct}%</b></td></tr>
-             <tr><td>실매입 (매입−불출)</td><td class="num">${wonI(F.ratio.net)}</td><td class="num"><b>${F.ratio.net_pct}%</b></td></tr>
-             <tr style="background:#eef2f8"><td>LG매출액</td><td class="num">${wonI(F.ratio.lg_sales)}</td><td>기준</td></tr>
+             <tr><td>실매입(조정전)=매입−불출</td><td class="num">${wonI(F.ratio.net)}</td><td class="num"><b>${F.ratio.net_pct}%</b></td></tr>
+             <tr><td>재고조정 ${F.jaego&&F.jaego.mat_pending?'<span style="color:#c0392b;font-size:10px">(자재 제외)</span>':''}</td><td class="num" style="color:${F.jaego&&F.jaego.total<0?'#c0392b':'#1c7c3a'}">${wonI(F.jaego?F.jaego.total:0)}</td><td></td></tr>
+             <tr style="background:#eef2f8;font-weight:700"><td>실재고(조정후)</td><td class="num">${wonI(F.ratio.silrae)}</td><td class="num"><b>${F.ratio.silrae_pct}%</b></td></tr>
+             <tr style="background:#f6f9ff"><td>LG매출액(기준)</td><td class="num">${wonI(F.ratio.lg_sales)}</td><td></td></tr>
            </tbody></table>
-           <div style="font-size:11px;color:#8aa0bd;margin-top:2px">※실재고(조정후)=실매입−재고조정 → ③ 재고조정 붙이면 완성</div></div>
+           <div style="font-size:11px;color:#8aa0bd;margin-top:2px">재고조정=기초−현재고(용접BOM·가공·영업${F.jaego&&F.jaego.mat_pending?' · <b style="color:#c0392b">자재=8월 수불스냅샷 없음→원장계산 예정</b>':'·자재'})</div></div>
        </div>
        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px">
          <div style="flex:1;min-width:290px">
