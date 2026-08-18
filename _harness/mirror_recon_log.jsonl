@@ -2,3 +2,4 @@
 {"stamp": "2026-08-17 dev리허설(정규화)", "tx_total": 22, "tx_match": 15, "tx_bad": ["PR_T_INDI_CUTTING", "PR_T_INDI_CUTTING_PROC_GAGONG", "PR_T_MAT_STOCK_WH", "PR_T_PLAN_DTL", "PR_T_PLAN_PART_COPY", "PR_T_PLAN_PART_MAT", "PU_T_MAT_STOCK_WH"], "green": false, "ms_diff": ["PR_M_CUST_MAT_LIST"]}
 {"stamp": "2026-08-17 재싱크후", "tx_total": 22, "tx_match": 22, "tx_bad": [], "green": true, "ms_diff": ["PR_M_ITEM"]}
 {"stamp": "2026-08-17 재싱크후", "tx_total": 22, "tx_match": 22, "tx_bad": [], "green": true, "ms_diff": ["PR_M_ITEM"]}
+{"stamp": "2026-08-19 07:29", "tx_total": 28, "tx_match": 27, "tx_bad": ["PR_T_PRINT_STICKER"], "green": false, "ms_diff": []}
