@@ -291,3 +291,31 @@ def _d(s):  # 'yyyy-mm-dd' → date str or None
 # -- 도메인간 공유 상수(품목 제작구분/성격) --
 _ITEM_MAKE = {"": "", "1": "자체생산", "2": "외주가공", "3": "매입", "4": "사급가공", "5": "외주완성"}
 _NATURE_ALL = ["1.원소재", "2.부자재/소모품", "3.사급자재", "4.가공품", "5.용접·조립품", "6.구매·부품"]
+
+
+# ── 조달 배분: R01(현행) 경로 계수 (실발주비율 = route% × vendor% 의 route 축) ──
+def _route01_ratio(ncur, item_codes):
+    """품목별 R01(현행) 경로 배분율(nx.route_alloc, %). 미설정/단일=100. 실발주비율 = route01% × 업체비율.
+       ★현재 R01=100%뿐이라 대개 100(업체비율 그대로) — R02 도입 대비 공용 배선. 자동발주·수동발주·협력사계획현황 공유.
+       규칙 정본: _schema/PROCUREMENT_ALLOCATION_RULES.md §4·§5."""
+    items = [str(c).strip() for c in item_codes if str(c).strip()]
+    out = {c: 100.0 for c in items}
+    if not items:
+        return out
+    try:
+        if ncur.execute("SELECT COL_LENGTH('nx.route_alloc','alloc_ratio')").fetchone()[0] is None:
+            return out
+    except Exception:
+        return out
+    for i in range(0, len(items), 900):
+        ch = items[i:i + 900]; ph = ",".join("?" * len(ch))
+        try:
+            ncur.execute(f"""SELECT LTRIM(RTRIM(a.item_code)), a.alloc_ratio
+                FROM nx.route_alloc a JOIN nx.sourcing_route r ON r.route_id=a.route_id
+                WHERE a.is_active=1 AND (r.current_flag=1 OR r.route_no=1)
+                  AND a.alloc_ratio IS NOT NULL AND LTRIM(RTRIM(a.item_code)) IN ({ph})""", *ch)
+            for ic, rt in ncur.fetchall():
+                out[str(ic).strip()] = float(rt)
+        except Exception:
+            pass
+    return out
