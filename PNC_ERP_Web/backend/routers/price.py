@@ -341,20 +341,33 @@ async def price_lgprice_upload(file: UploadFile = File(...), biz: str = Query(""
         raise HTTPException(400, "데이터 행 없음")
     nx = _nx(); cur = nx.cursor()
     try:
-        up = 0; skip = 0; items = set()
+        # nx.item 등록 품번만(FK). LG코드는 대문자라 케이스 안전.
+        cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM nx.item")
+        valid = set(str(r[0]).strip().upper() for r in cur.fetchall())
+        buf = []; skip = 0; items = set()
         for (mat, ptype, ay), (price, curc) in seen.items():
-            try:
-                cur.execute("""MERGE nx.price_item AS t
-                  USING (SELECT ? item_code,? price_type,? vendor_code,? apply_ymd) s
-                  ON t.item_code=s.item_code AND t.price_type=s.price_type AND t.vendor_code=s.vendor_code AND t.apply_ymd=s.apply_ymd
-                  WHEN MATCHED THEN UPDATE SET price=?, currency=?
-                  WHEN NOT MATCHED THEN INSERT(item_code,price_type,vendor_code,currency,apply_ymd,price)
-                    VALUES(?,?,?,?,?,?);""",
-                    mat, ptype, vendor, ay, price, curc, mat, ptype, vendor, curc, ay, price)
-                up += 1; items.add(mat)
-            except Exception:
-                skip += 1
-        return {"ok": True, "rows": up, "items": len(items), "skipped": skip, "biz": biz, "vendor": vendor, "file": file.filename}
+            if mat not in valid:
+                skip += 1; continue
+            buf.append([mat, ptype, vendor, ay, price, curc]); items.add(mat)
+        if not buf:
+            return {"ok": True, "rows": 0, "items": 0, "skipped": skip, "biz": biz, "vendor": vendor, "file": file.filename}
+        # ★배치: temp테이블 일괄 INSERT → 단일 MERGE (per-row MERGE=수천왕복 회피)
+        nx.autocommit = False
+        cur.execute("IF OBJECT_ID('tempdb..#lgp') IS NOT NULL DROP TABLE #lgp")
+        cur.execute("CREATE TABLE #lgp(item_code varchar(50),price_type varchar(10),vendor_code varchar(10),apply_ymd varchar(8),price float,currency varchar(10))")
+        try: cur.fast_executemany = True
+        except Exception: pass
+        for i in range(0, len(buf), 1000):
+            cur.executemany("INSERT INTO #lgp(item_code,price_type,vendor_code,apply_ymd,price,currency) VALUES(?,?,?,?,?,?)",
+                            [[b[0], b[1], b[2], b[3], b[4], b[5]] for b in buf[i:i + 1000]])
+        cur.execute("""MERGE nx.price_item t USING #lgp s
+          ON t.item_code=s.item_code AND t.price_type=s.price_type AND t.vendor_code=s.vendor_code AND t.apply_ymd=s.apply_ymd
+          WHEN MATCHED THEN UPDATE SET price=s.price, currency=s.currency
+          WHEN NOT MATCHED THEN INSERT(item_code,price_type,vendor_code,currency,apply_ymd,price)
+            VALUES(s.item_code,s.price_type,s.vendor_code,s.currency,s.apply_ymd,s.price);""")
+        cur.execute("DROP TABLE #lgp")
+        nx.commit()
+        return {"ok": True, "rows": len(buf), "items": len(items), "skipped": skip, "biz": biz, "vendor": vendor, "file": file.filename}
     finally:
         nx.close()
 
