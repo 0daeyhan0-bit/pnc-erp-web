@@ -3086,10 +3086,12 @@ SCREEN.autoorder=(c)=>{
    ★업로드시 사업부(RAC/SAC) 선택 · 일자(Transaction Date) 저장 · 품번 클릭시 일자·단가별 개별기록(가격변동 확인). */
 SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
+  const _now=new Date(),_yy=String(_now.getFullYear()%100).padStart(2,'0'),_mm=String(_now.getMonth()+1).padStart(2,'0');
+  const _M1=_yy+_mm+'01',_TD=_yy+_mm+String(_now.getDate()).padStart(2,'0');   // ★현재월 1일·당일(YYMMDD) — 기본 기간
   let st={tab:'status',by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
           df:'',dt:'',ymdMin:'',ymdMax:'',biz:'',cls:'',q:'',upBiz:'',sort:{k:'amt',dir:-1},loading:false,msg:'',
-          c_from:'260701',c_to:'260731',c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
-          p_from:'260701',p_to:'260731',pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},
+          c_from:_M1,c_to:_TD,c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
+          p_from:_M1,p_to:_TD,pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},
           s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:''};
   const sortItems=(arr,sort)=>{if(!sort.k||!arr.length)return arr;const {k,dir}=sort;const num=typeof arr[0][k]==='number';
     return arr.slice().sort((a,b)=>num?(((a[k]||0)-(b[k]||0))*dir):((''+(a[k]||'')).localeCompare(''+(b[k]||''))*dir));};
