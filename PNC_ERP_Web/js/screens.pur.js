@@ -3571,7 +3571,7 @@ SCREEN.dongunit=(host)=>{
           return `<td style="padding:2px 4px"><input class="ge${ty==='ac'?' gac':''}" data-i="${i}" data-k="${k}" value="${esc(r[k]||'')}" ${ty==='ac'?'autocomplete="off" placeholder="자도번"':''} style="width:${w}px;${al};font-size:12px;border:1px solid #d3dcea;border-radius:4px;padding:3px 5px"></td>`;
         }).join('')+`<td class="center"><button class="grx" data-i="${i}" title="행삭제" style="border:0;background:none;color:#c0392b;cursor:pointer;font-size:14px">✕</button></td></tr>`;
       const gridHtml=()=>`<div class="wr-modal dp-modal" style="position:fixed;inset:0;z-index:1200;background:rgba(20,30,50,.44);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:38px 10px">
-        <div style="background:#fff;border-radius:12px;padding:18px 20px;width:${wide?1180:720}px;max-width:97vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
+        <div style="background:#fff;border-radius:12px;padding:18px 20px;width:${wide?1500:720}px;max-width:98vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
          <div style="font-weight:700;font-size:15px;margin-bottom:12px">➕ 도입-${wide?'수입':'수출'} 다건 입력 <span style="font-size:12px;color:#888;font-weight:400">· 거래처 먼저 선택 → 그 거래처 품번 검색</span></div>
          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:#f4f7fc;border-radius:8px">
            <label class="fl">${wide?'입고일자':'출고일자'}</label><input class="gh" data-k="ymd" type="date" value="${esc(dIn(G.ymd))}" style="width:145px">
