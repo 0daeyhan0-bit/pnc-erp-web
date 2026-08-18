@@ -1590,14 +1590,14 @@ SCREEN.sourceprofile=(c)=>{
     const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 후보 업체·계획단가 지정(R02…)
     const isCur=r.current_flag||r.route_no===1;   // R01(현행) → 발주업체·단가(현행 매입처·마스터단가)
     return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':((!valid)?'opacity:.6;':'')}">
-      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}${isCur?` <button class="btn ghost sp-order" title="현행 발주업체·단가(자동발주 근거)" style="padding:1px 7px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">📦 발주업체·단가</button>`:''}</td>
+      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}</td>
       <td>${esc(r.gubun||'-')}</td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
       <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
       <td>${(canW&&!ro)?`<input class="inp sp-e" type="date" data-ri="${r.route_id}" data-f="apply_from" value="${esc(rfrom(r))}" style="width:120px;min-width:0">`:esc(rfrom(r)||'-')}</td>
       <td>${(canW&&!ro)?`<input class="inp sp-e" type="date" data-ri="${r.route_id}" data-f="apply_to" value="${esc(rto(r))}" style="width:120px;min-width:0" title="비우면 무기한">`:esc(rto(r)||'무기한')}</td>
       <td class="center">${(canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':''))}</td>
-      <td class="num">${(canW&&!ro)?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" ${valid?'':'disabled'} style="width:60px;min-width:0;${valid?'':'background:#eee;color:#aab'}" placeholder="—">`:(al==null?'':al)}</td>
+      <td class="num" style="white-space:nowrap">${(canW&&!ro)?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" ${valid?'':'disabled'} style="width:60px;min-width:0;${valid?'':'background:#eee;color:#aab'}" placeholder="—">`:(al==null?'—':al)}${(isCur&&canW)?` <button class="btn ghost sp-editvend" title="발주업체·배분 수정 (현행 R01 자동발주 근거 · 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 수정</button>`:''}</td>
     </tr>`;};
   const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr,A=aStat(),ok=A.single||Math.abs(A.sum-100)<0.01;
     return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 배정 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(단일 소스 <code>nx.sourcing_route</code> · 승인 후보만 배정 · 저장 <code>nx.route_alloc</code>)</span>
@@ -1649,7 +1649,7 @@ SCREEN.sourceprofile=(c)=>{
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});
     c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)pmOpen(r);});
-    c.querySelectorAll('.sp-order').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
+    c.querySelectorAll('.sp-editvend').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
     wireModal();
     wireOrder();
     fillDL();
