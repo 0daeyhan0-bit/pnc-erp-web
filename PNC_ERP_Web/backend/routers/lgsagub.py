@@ -774,26 +774,22 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
                 ) t GROUP BY UPPER(LTRIM(RTRIM(mat)))""")
             for r in cur.fetchall():
                 erp_map[r[0]] = f(r[1])
-        # 품명 보강
-        nm = {}
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
-        for a, b in cur.fetchall():
-            nm[a] = b
-        # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. OSP에 없는 소비부품은 사급 아님 → 제외.
+        # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. 품명은 OSP(in_map)에 이미 있음(nx.item 전체조회 제거=속도).
         parts = set(in_map)
         items = []
-        tot_out_c = tot_out_r = tot_in_q = tot_in_a = tot_erp = 0.0
+        tot_out = tot_in_q = tot_in_a = tot_erp = 0.0
         for p in parts:
-            oc = out_c.get(p, 0.0); orr = out_r.get(p, 0.0)
+            # ★소비 = C+R 전부. GUBUN='R'은 반품이 아니라 정상 리시빙의 다른 구분(R전용 제품 다수)이라
+            #   C만 세면 그 제품들의 부품이 통째로 0이 됨(EAP65270720 등). C+R로 ③/②=0.72→0.97 검증.
+            oc = out_c.get(p, 0.0) + out_r.get(p, 0.0)
             ind = in_map.get(p, {})
             iq = ind.get("q", 0.0); ia = ind.get("a", 0.0); price = ind.get("p", 0.0)
             ei = erp_map.get(p, 0.0)   # ① 우리 ERP 확정입고
-            tot_out_c += oc; tot_out_r += orr; tot_in_q += iq; tot_in_a += ia; tot_erp += ei
-            # ★3-way: ①우리ERP입고(erp_in) vs ②LG OSP(in_qty) vs ③LG리시빙소비(out_net=C만·반품미차감).
-            #   ①≈② 이어야 정상(둘 다 공급). ③<①② 는 선입고(정상). diff_erp=②−①(우리기록 vs LG기록 불일치).
-            items.append({"item": p, "name": ind.get("nm") or nm.get(p, ""),
-                          "erp_in": ei,
-                          "out_c": oc, "out_r": orr, "out_net": oc,
+            tot_out += oc; tot_in_q += iq; tot_in_a += ia; tot_erp += ei
+            # ★3-way: ①우리ERP입고(erp_in) vs ②LG OSP(in_qty) vs ③LG리시빙소비(out_net=C+R).
+            #   ①≈② 정상(둘 다 공급)·③≈② 정상(넓은 기간)·diff_erp=②−①(기록불일치)·diff=②−③(선입고).
+            items.append({"item": p, "name": ind.get("nm") or "",
+                          "erp_in": ei, "out_net": oc,
                           "in_qty": iq, "in_amt": ia, "price": price,
                           "diff": iq - oc, "diff_erp": iq - ei})
         items.sort(key=lambda x: -(x["in_qty"] + x["erp_in"] + abs(x["out_net"])))
