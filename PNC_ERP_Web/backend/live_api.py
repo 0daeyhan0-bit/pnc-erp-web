@@ -231,7 +231,7 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
     GROUP BY k.cd ORDER BY k.cd
     """
-    _cols, rows = _nx_rows(sql, fr, to, to, fr)
+    rows = _nx_rows(sql, fr, to, to, fr)
     return {"dfrom": fr, "dto": to, "count": len(rows), "rows": rows}
 
 @live_router.get("/matclose/ledger")
@@ -242,7 +242,7 @@ def matclose_ledger(mat: str = Query(...), dfrom: str = Query(""), dto: str = Qu
     sql = """SELECT ymd, in_qty iq, in_amt ia, out_qty oq, out_amt oa,
         stock_qty sq, avg_cost avg, stock_amt sa
       FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE UPPER(mat_code)=? AND ymd BETWEEN ? AND ? ORDER BY ymd"""
-    _cols, rows = _nx_rows(sql, mat.upper(), fr, to)
+    rows = _nx_rows(sql, mat.upper(), fr, to)
     return {"mat": mat.upper(), "dfrom": fr, "dto": to, "count": len(rows), "rows": rows}
 
 # ================= 자재불출집계표 (구매/자재, dw_pu_input_140) =================
