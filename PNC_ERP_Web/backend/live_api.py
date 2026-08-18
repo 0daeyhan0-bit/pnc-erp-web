@@ -305,6 +305,58 @@ def receipt(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Query
         rows = _receipt(dc, y)
         return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows}
 
+# ================= 일일 영업/매입 현황 (경영) ① 매입/불출/실매입 by 구분 =================
+_CT_NAME = {'1': '유상사급-부품', '4': '절삭-원자재', '5': '설치-원자재', '6': '절삭-협력사',
+            '7': '절삭-부자재', '8': '설치-부자재', '9': '소모품', 'A': '이지링크'}
+_GUBUN_ORDER = ['유상사급-원재료', '유상사급-부품', '절삭-원자재', '설치-원자재', '절삭-협력사',
+                '절삭-부자재', '설치-부자재', '소모품', '이지링크']
+_VGUBUN = None
+def _vgubun():
+    """거래처→매입구분 오버라이드(사급 원소재 등). nx.mgmt_vendor_gubun. 모듈캐시."""
+    global _VGUBUN
+    if _VGUBUN is None:
+        try:
+            _c, rs = _rows("SELECT cust_code, override_gubun FROM PARTNER_ERP_TEST3.nx.mgmt_vendor_gubun")
+            _VGUBUN = {str(r['cust_code']).strip(): str(r['override_gubun']).strip() for r in rs}
+        except Exception:
+            _VGUBUN = {}
+    return _VGUBUN
+
+@live_router.get("/dailypurissue")
+def dailypurissue(date: str = Query("")):
+    """일일 영업/매입 현황 ① 매입/불출/실매입 by 구분(CUST_TYPE + 사급원소재 오버라이드).
+       date=조회일(YYMMDD). 마감기준: 누적=마감월초~전일, 당일=조회일, 총=누적+당일. 금액=공급가(MAINT_AMT, VAT제외)."""
+    d6 = _digits(date, 6) or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
+    ym = d6[:4]
+    ov = _vgubun()
+    def gb(cc, ct):
+        return ov.get(str(cc or '').strip()) or _CT_NAME.get(str(ct or '').strip(), '기타(' + str(ct or '').strip() + ')')
+    def agg(rows):
+        m = {}
+        for r in rows:
+            g = gb(r.get('cc'), r.get('ct')); m[g] = m.get(g, 0.0) + float(r.get('amt') or 0)
+        return m
+    win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"
+    dc_cum = win + f" AND A.MAINT_YMD < '{d6}'"      # 누적=마감월초~전일
+    dc_day = win + f" AND A.MAINT_YMD = '{d6}'"      # 당일=조회일
+    pur_cum, pur_day = agg(_receipt(dc_cum, ym)), agg(_receipt(dc_day, ym))
+    out_cum, out_day = agg(_dispatch(dc_cum, ym)), agg(_dispatch(dc_day, ym))
+    gubuns = list(_GUBUN_ORDER)
+    for ex in sorted(set(list(pur_cum) + list(out_cum) + list(pur_day) + list(out_day)) - set(gubuns)):
+        gubuns.append(ex)
+    def blk(cum, day):
+        rows = []
+        for g in gubuns:
+            c, dd = round(cum.get(g, 0)), round(day.get(g, 0))
+            if c or dd: rows.append({"gubun": g, "cum": c, "day": dd, "tot": c + dd})
+        return rows
+    net_cum = {g: pur_cum.get(g, 0) - out_cum.get(g, 0) for g in gubuns}
+    net_day = {g: pur_day.get(g, 0) - out_day.get(g, 0) for g in gubuns}
+    pur, out, net = blk(pur_cum, pur_day), blk(out_cum, out_day), blk(net_cum, net_day)
+    def tot(rs): return {"cum": sum(r['cum'] for r in rs), "day": sum(r['day'] for r in rs), "tot": sum(r['tot'] for r in rs)}
+    return {"date": d6, "ym": ym, "pur": pur, "pur_tot": tot(pur),
+            "out": out, "out_tot": tot(out), "net": net, "net_tot": tot(net)}
+
 # ================= 확정입고명세서 (구매/자재, dw_pu_input_110) — 라인단위 =================
 def _MAGAM(ref_ym):
     return f"""WITH MAGAM (CUST_CODE, JUN_YYMM, JUN_MAGAM_DAY, MAGAM_DAY) AS (
