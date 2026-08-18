@@ -997,7 +997,42 @@ SCREEN.dailypurissue=(c)=>{
          ${sec(F.pur,F.pur_tot,'매입','#1c47a0')}
          ${sec(F.out,F.out_tot,'불출(매출)','#8a5a1a')}
          ${sec(F.net,F.net_tot,'실매입 (매입 − 불출)','#1c7c3a')}
-       </tbody></table></div>`:`<div style="padding:20px;color:#8aa0bd">조회일을 선택하고 [조회]를 누르세요.</div>`)}`;
+       </tbody></table></div>
+       ${F.sales?`
+       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px">
+         <div style="flex:1;min-width:290px">
+           <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">⑤ 매출 (현매출 · 리시빙)</div>
+           <table class="tbl fit"><tbody>
+             <tr><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td></tr>
+             <tr><td>현매출 − 설치</td><td class="num">${wonI(F.sales.hyeon_seol)}</td></tr>
+             <tr><td>현매출 − 기타(이지링크)</td><td class="num">${wonI(F.sales.hyeon_etc)}</td></tr>
+             <tr style="background:#eef2f8;font-weight:700"><td>LG매출 합계</td><td class="num">${wonI(F.sales.lg_sales)}</td></tr>
+           </tbody></table></div>
+         <div style="flex:1;min-width:290px">
+           <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">② 매입비율 (÷ LG매출액)</div>
+           <table class="tbl fit"><tbody>
+             <tr><td>매입</td><td class="num">${wonI(F.ratio.pur)}</td><td class="num"><b>${F.ratio.pur_pct}%</b></td></tr>
+             <tr><td>실매입 (매입−불출)</td><td class="num">${wonI(F.ratio.net)}</td><td class="num"><b>${F.ratio.net_pct}%</b></td></tr>
+             <tr style="background:#eef2f8"><td>LG매출액</td><td class="num">${wonI(F.ratio.lg_sales)}</td><td>기준</td></tr>
+           </tbody></table>
+           <div style="font-size:11px;color:#8aa0bd;margin-top:2px">※실재고(조정후)=실매입−재고조정 → ③ 재고조정 붙이면 완성</div></div>
+       </div>
+       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px">
+         <div style="flex:1;min-width:290px">
+           <div style="font-weight:700;color:#8a5a1a;margin-bottom:4px">④ 사급율 (÷ 절삭매출)</div>
+           <table class="tbl fit"><tbody>
+             <tr><td>원소재 매입 (OSP)</td><td class="num">${wonI(F.sagubyul.osp_raw)}</td><td class="num"><b>${F.sagubyul.raw_pct}%</b></td></tr>
+             <tr><td>사급부품 매입 (OSP)</td><td class="num">${wonI(F.sagubyul.osp_part)}</td><td class="num"><b>${F.sagubyul.part_pct}%</b></td></tr>
+             <tr style="background:#f7f2ea"><td>절삭매출 (기준)</td><td class="num">${wonI(F.sagubyul.jeolsak_sales)}</td><td></td></tr>
+           </tbody></table></div>
+         <div style="flex:1;min-width:290px">
+           <div style="font-weight:700;color:#1c7c3a;margin-bottom:4px">D 유상사급 대사</div>
+           <table class="tbl fit"><tbody>
+             <tr><td>당사ERP (확정입고)</td><td class="num">${wonI(F.dae.dangsa)}</td></tr>
+             <tr><td>LG전산 (OSP)</td><td class="num">${wonI(F.dae.lg)}</td></tr>
+             <tr style="background:#eef8f0;font-weight:700"><td>차액 (당사 − LG)</td><td class="num" style="color:${F.dae.diff<0?'#c0392b':'#1c7c3a'}">${wonI(F.dae.diff)}</td></tr>
+           </tbody></table></div>
+       </div>`:''}`:`<div style="padding:20px;color:#8aa0bd">조회일을 선택하고 [조회]를 누르세요.</div>`)}`;
     const gd=()=>d2y(c.querySelector('#dp-d').value);
     c.querySelector('#dp-go').onclick=()=>load(gd());
     c.querySelector('#dp-xls').onclick=()=>{
@@ -1006,6 +1041,12 @@ SCREEN.dailypurissue=(c)=>{
       const rows=[];
       const push=(sc,list,tot)=>{(list||[]).forEach(r=>rows.push([sc,r.gubun,r.cum,r.day,r.tot]));rows.push([sc,'합계',tot.cum,tot.day,tot.tot]);};
       push('매입',F.pur,F.pur_tot);push('불출',F.out,F.out_tot);push('실매입',F.net,F.net_tot);
+      if(F.sales){rows.push([]);
+        rows.push(['매출','현매출-절삭',F.sales.hyeon_cut]);rows.push(['매출','현매출-설치',F.sales.hyeon_seol]);
+        rows.push(['매출','현매출-기타',F.sales.hyeon_etc]);rows.push(['매출','LG매출합계',F.sales.lg_sales]);
+        rows.push(['매입비율','매입/LG매출',F.ratio.pur,'',F.ratio.pur_pct+'%']);rows.push(['매입비율','실매입/LG매출',F.ratio.net,'',F.ratio.net_pct+'%']);
+        rows.push(['사급율','원소재/절삭매출',F.sagubyul.osp_raw,'',F.sagubyul.raw_pct+'%']);rows.push(['사급율','부품/절삭매출',F.sagubyul.osp_part,'',F.sagubyul.part_pct+'%']);
+        rows.push(['대사','당사ERP',F.dae.dangsa]);rows.push(['대사','LG전산',F.dae.lg]);rows.push(['대사','차액',F.dae.diff]);}
       downloadCSV(`일일영업매입현황_${F.date}.csv`,hd,rows);};
   };
   load();

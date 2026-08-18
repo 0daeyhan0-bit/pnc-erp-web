@@ -29,12 +29,14 @@ SCREEN.pricemgmt=(c)=>{
      <div style="display:flex;gap:6px;margin:4px 0">
        <button class="btn ${mode==='mgr'?'':'ghost'}" id="pm2-mgr" style="${mode==='mgr'?'background:#1c47a0;color:#fff':''}">📇 품목별 단가관리</button>
        <button class="btn ${mode==='sagub'?'':'ghost'}" id="pm2-sagub" style="${mode==='sagub'?'background:#1c7c3a;color:#fff':''}">📤 사급가 업로드</button>
+       <button class="btn ${mode==='lgprice'?'':'ghost'}" id="pm2-lg" style="${mode==='lgprice'?'background:#b8860b;color:#fff':''}">📈 LG 판가 업로드</button>
      </div>
      <div id="pr2-host" style="height:calc(100% - 66px)"></div>`;
     c.querySelector('#pm2-mgr').onclick=()=>{if(mode!=='mgr'){mode='mgr';paint();}};
     c.querySelector('#pm2-sagub').onclick=()=>{if(mode!=='sagub'){mode='sagub';paint();}};
+    c.querySelector('#pm2-lg').onclick=()=>{if(mode!=='lgprice'){mode='lgprice';paint();}};
     const host=c.querySelector('#pr2-host');
-    if(mode==='mgr') priceMgmtView(host); else priceSagubView(host);
+    if(mode==='mgr') priceMgmtView(host); else if(mode==='sagub') priceSagubView(host); else priceLgView(host);
   };
   paint();
 };
@@ -200,6 +202,52 @@ const priceSagubView=(host)=>{
     drop.ondragleave=()=>{drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';};
     drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};
     const q=g('#sg-q');q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==='Enter')load();};g('#sg-go').onclick=load;
+  };
+  draw();load();
+};
+
+/* LG 판가(PO Price) 업로드 — 사업부(SAC=vendor1010·RAC=1020)별 nx.price_item(TAGE수출/TAGS내수)에 반영. 원가/손익 LG판가 소스 */
+const priceLgView=(host)=>{
+  const API=API_BASE;
+  const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  let st={busy:false,msg:'',rows:[],q:'',biz:'SAC'};
+  const load=async()=>{try{const r=await fetch(`${API}/api/price/lgprice_list?q=${encodeURIComponent(st.q)}&biz=${encodeURIComponent(st.biz)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
+  const doUpload=async(f)=>{
+    if(!f)return;
+    if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
+    st.busy=true;st.msg='';draw();
+    try{const fd=new FormData();fd.append('file',f);
+      const r=await fetch(`${API}/api/price/lgprice_upload?biz=${encodeURIComponent(st.biz)}`,{method:'POST',body:fd});
+      let j={};try{j=await r.json();}catch(e){}
+      if(r.ok&&j.ok){st.msg=`✅ ${j.biz} 업로드 완료 — ${won(j.rows)}행 · 품목 ${j.items}개 (vendor ${j.vendor})${j.skipped?` · 스킵 ${j.skipped}건(nx 미등록)`:''}`;st.busy=false;await load();return;}
+      else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
+    }catch(e){st.msg='❌ 오류: '+e.message;}
+    st.busy=false;draw();};
+  const draw=()=>{
+    host.innerHTML=`
+     <div class="page-sub">LG <b>PO Price</b>(LG 판가) 엑셀 업로드 → <b>사업부별</b> <code>nx.price_item</code>(SAC=vendor1010·RAC=1020, MKT <b>1→내수(TAGS)·2→수출(TAGE)</b>)에 <b>Start Date를 적용일</b>로 반영. 원가/손익의 <b>LG판가</b>로 바로 사용. 헤더: <code>Material·MKT·Unit Price·Start Date·Curr</code></div>
+     <div id="lg-drop" style="border:2px dashed #d6b06a;border-radius:9px;padding:16px 18px;background:#fdfaf3;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
+       <span style="font-size:20px">📈</span> <b>사업부</b>
+       <select class="sel" id="lg-biz"><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC (vendor 1010)</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC (vendor 1020)</option></select>
+       <b>PO Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
+       <button class="btn" id="lg-pick" style="background:#b8860b;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
+       <input type="file" id="lg-file" accept=".xlsx,.xls" style="display:none">
+       <span style="margin-left:auto;color:#a98a4f;font-size:11px">SAC·RAC 파일 각각 (사업부 선택 후) 올리세요</span>
+     </div>
+     ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
+     <div class="toolbar"><label class="tl">사업부</label><select class="sel" id="lg-bf"><option value="">전체(SAC+RAC)</option><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select><label class="tl">검색</label><input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px"><button class="btn" id="lg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">LG판가 ${st.rows.length}건</span></div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">사업부</th><th class="center">구분</th><th class="center">적용일(Start)</th><th class="num">LG판가</th><th class="center">통화</th></tr></thead>
+     <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${r.vendor==='1010'?'SAC':r.vendor==='1020'?'RAC':esc(r.vendor)}</td><td class="center">${r.type==='TAGS'?'내수':r.type==='TAGE'?'수출':esc(r.type)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="7" class="empty">업로드된 LG판가 없음 — PO Price 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
+    const g=id=>host.querySelector(id);
+    const fe=g('#lg-file'),drop=g('#lg-drop');
+    g('#lg-biz').onchange=e=>{st.biz=e.target.value;};
+    g('#lg-pick').onclick=()=>fe.click();
+    fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
+    drop.ondragover=e=>{e.preventDefault();drop.style.background='#f5e9cf';drop.style.borderColor='#b8860b';};
+    drop.ondragleave=()=>{drop.style.background='#fdfaf3';drop.style.borderColor='#d6b06a';};
+    drop.ondrop=e=>{e.preventDefault();drop.style.background='#fdfaf3';drop.style.borderColor='#d6b06a';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};
+    g('#lg-bf').onchange=e=>{st.biz=e.target.value;load();};
+    const q=g('#lg-q');q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==='Enter')load();};g('#lg-go').onclick=load;
   };
   draw();load();
 };
