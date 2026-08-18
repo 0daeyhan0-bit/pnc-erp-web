@@ -97,7 +97,8 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
     # 유효벤더 확정 후 (item,vendor) 병합 — ★override 배분(다중업체+alloc_ratio)이면 소요를 비율분할
     merged = {}
     for b in base:
-        lst = alloc.get(b["item"])
+        # ★'경로대안'(R02+) 행은 compose_mat에서 이미 경로율×경로업체 배정됨 → order_vendor 재분할 제외(이중배분 방지, 규칙 §8·§9).
+        lst = alloc.get(b["item"]) if b.get("source") != "경로대안" else None
         if lst:
             rated = [(v, r) for (v, r) in lst if r is not None]
             if len(rated) == len(lst) and rated:                          # 전원 배분%: 합100 정규화 분할
