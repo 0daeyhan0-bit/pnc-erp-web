@@ -827,8 +827,9 @@ SCREEN.costanalysis=(c)=>{
        .ca-card span{display:block;font-size:12px;color:var(--muted)}.ca-card b{font-size:22px;font-weight:800}
        .ca-card.pos b{color:#1f8a5a}.ca-card.neg b{color:#c0392b}.ca-card small{font-size:13px;color:var(--muted);font-weight:600}
        .ca-wrap{max-height:calc(100vh - 310px);overflow:auto;max-width:100%;width:100%;box-sizing:border-box}
-       .ca-tbl{font-size:13px;table-layout:auto}
-       .ca-tbl th,.ca-tbl td{padding:4px 6px}
+       .ca-tbl{font-size:11px;table-layout:auto}
+       .ca-tbl th,.ca-tbl td{padding:2px 4px}
+       .ca-tbl td.num,.ca-tbl th.num{white-space:nowrap}   /* 숫자 컬럼 압축(폭=내용) */
        .ca-tbl td.num,.ca-tbl th.num{font-variant-numeric:tabular-nums}
        .ca-tbl th.ghead{background:#eef4ff;text-align:center;color:#2f5aa8;font-weight:700}
        .ca-tbl th.sortable{cursor:pointer;white-space:nowrap}.ca-tbl th.sorted{background:#dfe9ff;color:#1c47a0}
@@ -836,8 +837,9 @@ SCREEN.costanalysis=(c)=>{
        .ca-tbl thead tr:first-child th{position:sticky;top:0;z-index:4}
        .ca-tbl thead tr:nth-child(2) th{position:sticky;top:26px;z-index:4}
        .ca-tbl td.bcol{background:#f6f9ff;font-weight:700}
-       .ca-tbl td.pcode{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-       .ca-tbl thead tr:first-child th:first-child{max-width:92px}
+       .ca-tbl td.pcode{white-space:nowrap;font-weight:600}   /* ★품번 전체표시(잘림 제거) */
+       .ca-tbl td.pcode,.ca-tbl thead th:first-child{position:sticky;left:0;background:#fff;z-index:3}   /* 품번 고정(좌측) */
+       .ca-tbl thead tr:first-child th:first-child{z-index:5}
        .ca-tbl tr.lossrow td.pcode{color:#c0392b;font-weight:600}
        .ca-tbl td.negv{color:#c0392b;font-weight:700}.ca-tbl td.posv{color:#1f8a5a}
        .ca-tbl tfoot td{position:sticky;bottom:0;background:#f0f4fb;font-weight:700;border-top:2px solid #cdd9ef}
