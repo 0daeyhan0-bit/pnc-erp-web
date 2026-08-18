@@ -555,13 +555,15 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                         if vc: ov.setdefault(str(rr[0]).strip(), []).append((vc, (float(rr[2]) if rr[2] is not None else None)))
             except Exception:
                 pass
-        route01 = _route01_ratio(cur, parts)
-        need = bool(ov) or any(route01.get(p, 100.0) != 100.0 for p in parts)
+        # ★route% = 조립품(assy) 키 (route_alloc.item_code=제품). 부품키 조회는 무영향 버그였음(규칙 §8).
+        assys = sorted({r.get("assy") for r in rows if r.get("assy")})
+        route01 = _route01_ratio(cur, assys)
+        need = bool(ov) or any(route01.get(a, 100.0) != 100.0 for a in assys)
         if need:
             vend_nm = _custnm_map(cur, {v for lst in ov.values() for (v, _) in lst})
             newrows = []
             for r in rows:
-                p = r.get("part"); rf = route01.get(p, 100.0) / 100.0; lst = ov.get(p)
+                p = r.get("part"); rf = route01.get(r.get("assy"), 100.0) / 100.0; lst = ov.get(p)
                 if not lst:                                   # 배분 없음 → route01만 스케일(현재 1.0=무변경)
                     if rf == 1.0: newrows.append(r)
                     else: newrows.append(dict(r, days={d: round(q*rf, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*rf, 3)))
