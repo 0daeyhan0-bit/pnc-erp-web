@@ -1497,65 +1497,112 @@ SCREEN.sourceprofile=(c)=>{
       else if(f==='supply_gubun'){el.onchange=()=>{pm.rows[i].supply_gubun=el.value;};}
       else if(f==='alloc_ratio'){el.onchange=()=>{pm.rows[i].alloc_ratio=(el.value===''?null:Math.round(parseFloat(el.value)||0));draw();};}   // ★정수만
       else{el.onchange=()=>{pm.rows[i][f]=(el.value===''?'':el.value);};}});};
-  // ===== R01(현행) 발주업체·단가 모달 (자동발주 근거) — 현행 매입처 자동시드 + 마스터 매입단가(읽기전용) =====
+  // ===== R01(현행) 발주업체·단가 모달 (자동발주 근거) — ★품목당 다중업체+배분%(합100). 현행 매입처 자동시드 + 업체별 마스터단가(읽기전용) =====
   let om=null, omAcT=null;   // om={item,asof,rows[],msg,loading,saving}
   const omOpen=async(it)=>{om={item:it,asof:'',rows:[],msg:'',loading:true,saving:false};draw();
     try{const r=await fetch(`${API}/api/sourcing/current_order?item=${encodeURIComponent(it)}`);const j=await r.json();
       om.asof=j.asof||'';om.rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',spec:x.spec||'',qty:x.qty,
         make_label:x.make_label||'',cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
-        ovr_vendor_code:x.ovr_vendor_code||'',master_price:x.master_price,price_apply:x.price_apply||'',
-        sel_code:x.eff_vendor_code||'',sel_name:x.eff_vendor_name||''}));
+        item_master_price:x.master_price,has_override:!!x.has_override,
+        vendors:(x.vendors||[{vendor_code:x.cur_vendor_code,vendor_name:x.cur_vendor_name,alloc_ratio:100,master_price:x.master_price}])
+          .map(v=>({code:v.vendor_code||'',name:v.vendor_name||'',ratio:(v.alloc_ratio==null?null:+v.alloc_ratio),price:v.master_price,price_reg:(v.price_reg!==false)}))}));
     }catch(e){om.msg='발주 근거 로드 실패: '+e;}
     om.loading=false;draw();};
   const omClose=()=>{om=null;draw();};
   const omVendorAC=(t)=>{clearTimeout(omAcT);omAcT=setTimeout(async()=>{
     try{const r=await fetch(`${API}/api/sourcing/vendors?q=${encodeURIComponent(t)}`);const vs=(await r.json()).rows||[];
       om._vlist=vs;const dl=c.querySelector('#om-vdl');if(dl)dl.innerHTML=vs.map(v=>`<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.code)})${v.role?' · '+esc(v.role):''}</option>`).join('');}catch(e){}},180);};
-  const omResolve=(i,val)=>{const v=val.trim();const list=om._vlist||[];const hit=list.find(x=>x.name===v)||list.find(x=>x.code===v)||list.find(x=>(x.name||'').indexOf(v)>=0);
-    if(hit){om.rows[i].sel_code=hit.code;om.rows[i].sel_name=hit.name;}else if(!v){om.rows[i].sel_code=om.rows[i].cur_vendor_code;om.rows[i].sel_name=om.rows[i].cur_vendor_name;}else{om.rows[i].sel_name=v;om.rows[i].sel_code='';}draw();};
-  const omSave=async()=>{om.saving=true;om.msg='';draw();let cnt=0;
-    try{for(const r of om.rows){const target=(r.sel_code===r.cur_vendor_code)?'':r.sel_code;   // 현행 매입처와 같으면 override 해제
-        if(target===(r.ovr_vendor_code||''))continue;   // 변경 없음
-        const res=await fetch(`${API}/api/sourcing/current_order/vendor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:r.item_code,vendor_code:target})});
-        if((await res.json()).ok)cnt++;}
-      await omOpen(om.item);om.msg=`✅ 발주업체 저장 (${cnt}건 변경)`;draw();
+  const omPrice=async(i,vi)=>{const vd=om.rows[i].vendors[vi];if(!vd.code){vd.price=null;vd.price_reg=undefined;return;}
+    vd.price=undefined;vd.price_reg=undefined;draw();   // 조회중
+    try{const r=await fetch(`${API}/api/sourcing/item_vendor_price?item=${encodeURIComponent(om.rows[i].item_code)}&vendor=${encodeURIComponent(vd.code)}`);const pj=await r.json();
+      vd.price=pj.reg?pj.cost:null;vd.price_reg=!!pj.reg;}catch(e){vd.price=null;vd.price_reg=false;}draw();};
+  const omResolve=(i,vi,val)=>{const v=val.trim();const list=om._vlist||[];const hit=list.find(x=>x.name===v)||list.find(x=>x.code===v)||list.find(x=>(x.name||'').indexOf(v)>=0);
+    const vd=om.rows[i].vendors[vi];
+    if(hit){vd.code=hit.code;vd.name=hit.name;}
+    else if(!v){vd.code='';vd.name='';vd.price=null;vd.price_reg=undefined;draw();return;}
+    else{vd.name=v;vd.code='';vd.price=null;vd.price_reg=undefined;draw();return;}
+    omPrice(i,vi);};   // ★선택 업체의 단가 등록여부 조회(미등록=단가미등록·저장차단)
+  const omRatio=(i,vi,val)=>{om.rows[i].vendors[vi].ratio=(val===''?null:Math.round(parseFloat(val)||0));draw();};
+  const omAdd=(i)=>{om.rows[i].vendors.push({code:'',name:'',ratio:null,price:undefined});draw();};
+  const omDelV=(i,vi)=>{const vs=om.rows[i].vendors;vs.splice(vi,1);
+    if(!vs.length)vs.push({code:om.rows[i].cur_vendor_code,name:om.rows[i].cur_vendor_name,ratio:100,price:om.rows[i].item_master_price});
+    if(vs.length===1)vs[0].ratio=100;draw();};
+  const omSave=async()=>{
+    // 저장 대상 행 판정 + 미확인 단가(price_reg undefined) 동기 조회(타이밍 갭 제거)
+    om.saving=true;om.msg='⏳ 단가 확인 중…';draw();
+    const targets=[];
+    for(let i=0;i<om.rows.length;i++){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
+      const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
+      if(isDefault && !r.has_override)continue;
+      targets.push(i);
+      for(let vi=0;vi<r.vendors.length;vi++){const v=r.vendors[vi];if(v.code && v.price_reg===undefined){await omPrice(i,vi);}}}
+    // 검증: ★단가미등록 차단(경고) + 다중업체 배분%합100
+    for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
+      const unreg=vs.filter(v=>v.price_reg===false);
+      if(unreg.length){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code} ${r.item_name}]의 업체 「${unreg.map(v=>v.name||v.code).join(', ')}」는 매입단가가 등록되지 않았습니다. 단가 등록 후 배정하세요.`;draw();return;}
+      if(vs.length>=2){if(vs.some(v=>v.ratio==null)){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] 다중업체는 모든 업체에 배분% 입력 필요`;draw();return;}
+        const s=vs.reduce((a,v)=>a+(+v.ratio||0),0);if(Math.abs(s-100)>0.01){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] 배분% 합이 ${s}% (100% 필요)`;draw();return;}}}
+    if(!targets.length){om.saving=false;om.msg='변경사항 없음';draw();return;}
+    om.msg='';draw();let cnt=0;
+    try{for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
+        const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
+        const allocations=isDefault?[]:vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));   // isDefault=override 해제
+        const res=await fetch(`${API}/api/sourcing/current_order/vendor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:r.item_code,allocations})});
+        const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] ${jj.detail||'저장실패'}`;draw();return;}cnt++;}
+      await omOpen(om.item);om.msg=`✅ 발주업체·배분 저장 (${cnt}건)`;draw();
     }catch(e){om.saving=false;om.msg='❌ 저장 실패: '+e;draw();}};
   const orderModal=()=>{if(!om)return '';
-    const rowsHtml=om.loading?`<tr><td colspan="6">${spinRow(1)}</td></tr>`:(om.rows.length?om.rows.map((r,i)=>{
-      const changed=(r.sel_code||'')!==(r.cur_vendor_code||'');
+    const rowsHtml=om.loading?`<tr><td colspan="4">${spinRow(1)}</td></tr>`:(om.rows.length?om.rows.map((r,i)=>{
+      const multi=r.vendors.length>1, sum=r.vendors.reduce((a,v)=>a+(+v.ratio||0),0), bad=multi&&Math.abs(sum-100)>0.01;
+      const vhtml=r.vendors.map((v,vi)=>{
+        const pcell=(v.price!=null)?`<span style="color:#556">${nfq(v.price)}</span>`
+          :(v.code?(v.price_reg===undefined?'<span style="color:#c9d1dc">…</span>':'<span style="color:#c0392b;font-weight:600" title="이 업체의 매입단가가 마스터에 없음 — 단가 등록 후 배정 가능">단가미등록</span>')
+                  :'<span style="color:#c9d1dc">-</span>');
+        return `<div style="display:flex;align-items:center;gap:5px;margin:1px 0">
+          <input class="inp om-e" list="om-vdl" autocomplete="off" data-i="${i}" data-vi="${vi}" value="${esc(v.name||v.code||'')}" placeholder="발주업체" style="width:150px" ${canW?'':'disabled'}>
+          ${multi?`<input class="inp om-r" type="number" min="0" max="100" data-i="${i}" data-vi="${vi}" value="${v.ratio==null?'':v.ratio}" placeholder="%" style="width:50px;text-align:right" ${canW?'':'disabled'}><span style="color:#8aa0bd;font-size:11px">%</span>`:''}
+          <span style="min-width:78px;text-align:right;background:#f4f6fb;border-radius:3px;padding:0 5px" title="업체별 마스터 매입단가(읽기전용)">${pcell}</span>
+          ${(canW&&multi)?`<span class="om-del" data-i="${i}" data-vi="${vi}" style="cursor:pointer;color:#c0392b;font-weight:700" title="업체 삭제">×</span>`:''}</div>`;}).join('');
       return `<tr>
-        <td style="white-space:nowrap"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span></td>
-        <td class="bcap" style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.item_name)}">${esc(r.item_name)}</td>
-        <td class="num">${nfq(r.qty)}</td>
-        <td><input class="inp om-e" list="om-vdl" autocomplete="off" data-i="${i}" value="${esc(r.sel_name||r.sel_code||'')}" placeholder="발주업체" style="width:180px;min-width:150px" ${canW?'':'disabled'}>${changed?`<div style="font-size:10px;color:#b8860b">변경(현행 ${esc(r.cur_vendor_name||r.cur_vendor_code)})</div>`:`<div style="font-size:10px;color:#8aa0bd">현행 매입처</div>`}</td>
-        <td class="num" style="background:#f4f6fb" title="마스터 매입단가(PR_M_ITEM_COST·읽기전용)">${r.master_price==null?'<span style="color:#c9d1dc">-</span>':nfq(r.master_price)}${r.price_apply?` <span style="font-size:9px;color:#8aa0bd">${esc(r.price_apply)}</span>`:''}</td>
-        <td class="center" style="font-size:11px;color:#778">${esc(r.sel_code||'')}</td>
-      </tr>`;}).join(''):`<tr><td colspan="6" class="empty">현행 발주 대상 품목 없음(매입처 지정 품목 없음)</td></tr>`);
+        <td style="white-space:nowrap;vertical-align:top"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span></td>
+        <td class="bcap" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:top" title="${esc(r.item_name)}">${esc(r.item_name)}</td>
+        <td class="num" style="vertical-align:top">${nfq(r.qty)}</td>
+        <td style="vertical-align:top">${vhtml}
+          <div style="margin-top:2px;display:flex;align-items:center;gap:8px">
+            ${canW?`<button class="btn ghost om-add" data-i="${i}" style="padding:1px 7px;font-size:11px">＋ 업체추가</button>`:''}
+            ${multi?`<span style="font-size:11px;font-weight:600;color:${bad?'#c0392b':'#1c7c3a'}">합 ${sum}%${bad?' ⚠':' ✓'}</span>`:(r.has_override?'':`<span style="font-size:10px;color:#8aa0bd">현행 매입처 100%</span>`)}
+          </div></td>
+      </tr>`;}).join(''):`<tr><td colspan="4" class="empty">현행 발주 대상 품목 없음</td></tr>`);
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
-      <div style="background:#fff;border-radius:10px;min-width:760px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+      <div style="background:#fff;border-radius:10px;min-width:720px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
-         <span style="font-weight:700;font-size:15px;color:#1c7c3a">📦 발주업체·단가 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(현행 R01 · 자동발주 근거)</span></span>
+         <span style="font-weight:700;font-size:15px;color:#1c7c3a">📦 발주업체·배분 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(현행 R01 · 자동발주 근거)</span></span>
          <b style="color:#1c3a6e">${esc(om.item)}</b><span style="color:var(--muted);font-size:12px">${esc(selNm)} · 기준일 ${esc(om.asof||'')}</span>
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="om-x" style="font-size:16px">✖</button></div>
        <div style="padding:8px 16px 4px;font-size:12px;color:#1c5b2e;background:#eefaf0;border-bottom:1px solid #cfe9d5">
-         ✅ <b>자동발주 근거(품목→발주업체→단가)</b> — 현행 <b>매입처 자동시드</b>(레거시 실사용) + <b>마스터 매입단가</b>(PR_M_ITEM_COST as-of·<b>읽기전용·불변</b>). 발주업체를 바꾸면 nx에 저장(단가는 마감때만 수정, 여기선 변경 안 함).</div>
+         ✅ <b>자동발주 근거(품목→발주업체→배분%→단가)</b> — 현행 <b>매입처 자동시드</b> + <b>업체별 마스터 매입단가</b>(읽기전용). ★<b>한 부품을 여러 업체로 분할발주</b>: [＋업체추가]로 업체 넣고 <b>배분%</b> 입력(합 100). 자동발주가 소요를 <b>비율대로 업체별 PO 분할</b>합니다. (단가는 마감때만 수정)</div>
        <div style="padding:0 16px 12px;overflow:auto;max-height:66vh">
-         <table class="tbl" style="font-size:12px;margin-top:8px"><thead><tr><th>품번</th><th>품명</th><th class="num">소요량</th><th>발주업체(현행 매입처)</th><th class="num">마스터 매입단가<br><span style="font-weight:400;font-size:10px">(읽기전용)</span></th><th class="center">코드</th></tr></thead>
+         <table class="tbl" style="font-size:12px;margin-top:8px"><thead><tr><th>품번</th><th>품명</th><th class="num">소요량</th><th>발주업체 · 배분% · 마스터단가<span style="font-weight:400;font-size:10px;color:#8aa0bd">(읽기전용)</span></th></tr></thead>
          <tbody>${rowsHtml}</tbody></table>
          <datalist id="om-vdl"></datalist>
-         <div style="font-size:11px;color:#8aa0bd;margin-top:4px">※ 발주업체 안 바꾸면 현행 매입처 그대로. 단가는 마스터(PR_M_ITEM_COST) 자동조회·읽기전용. R02(외주 SUB 후보)는 [🏭 업체·단가]에서.</div>
+         <div style="font-size:11px;color:#8aa0bd;margin-top:4px">※ 단일업체면 100% 자동. 안 바꾸면 현행 매입처 그대로. 단가=마스터(PR_M_ITEM_COST) 자동조회·읽기전용. R02(외주 SUB 후보)는 [🏭 업체·단가]에서.</div>
        </div>
        <div style="padding:10px 16px;border-top:1px solid #e2e8f2;display:flex;align-items:center;gap:8px">
-         ${om.msg?`<span style="font-size:12px;font-weight:600;color:${om.msg.startsWith('✅')?'#1c7c3a':'#c0392b'}">${esc(om.msg)}</span>`:''}
+         ${om.msg?(om.msg.startsWith('✅')||om.msg.startsWith('⏳')||om.msg==='변경사항 없음'
+            ?`<span style="font-size:12px;font-weight:600;color:${om.msg.startsWith('✅')?'#1c7c3a':'#8a94a6'}">${esc(om.msg)}</span>`
+            :`<span style="flex:1;font-size:13px;font-weight:700;color:#9a1b1b;background:#fdeaea;border:1px solid #f0c2c2;border-radius:6px;padding:6px 10px">${esc(om.msg)}</span>`):''}
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="om-cancel">닫기</button>
-         ${canW?`<button class="btn" id="om-save" style="background:#1c7c3a;color:#fff" ${om.saving?'disabled':''}>💾 발주업체 저장</button>`:''}</div>
+         ${canW?`<button class="btn" id="om-save" style="background:#1c7c3a;color:#fff" ${om.saving?'disabled':''}>💾 발주업체·배분 저장</button>`:''}</div>
       </div></div>`;};
   const wireOrder=()=>{if(!om)return;const g=id=>c.querySelector(id);
     const x=g('#om-x'),cn=g('#om-cancel');if(x)x.onclick=omClose;if(cn)cn.onclick=omClose;
     const sv=g('#om-save');if(sv)sv.onclick=omSave;
-    c.querySelectorAll('.om-e').forEach(el=>{el.oninput=e=>omVendorAC(e.target.value);el.onchange=e=>omResolve(+el.dataset.i,e.target.value);});};
+    c.querySelectorAll('.om-e').forEach(el=>{el.oninput=e=>omVendorAC(e.target.value);el.onchange=e=>omResolve(+el.dataset.i,+el.dataset.vi,e.target.value);});
+    c.querySelectorAll('.om-r').forEach(el=>{el.onchange=e=>omRatio(+el.dataset.i,+el.dataset.vi,e.target.value);});
+    c.querySelectorAll('.om-add').forEach(el=>el.onclick=()=>omAdd(+el.dataset.i));
+    c.querySelectorAll('.om-del').forEach(el=>el.onclick=()=>omDelV(+el.dataset.i,+el.dataset.vi));};
   const kindOf=n=>{if((n.nm||'').indexOf('용접봉')>=0)return{t:'용접봉',c:'#8e44ad'};if(n.haskids)return{t:'제작(SUB)',c:'#1c7c3a'};if(String(n.sag)==='1')return{t:'사급',c:'#b8860b'};return{t:'매입/구매',c:'#1c47a0'};};
   const treeTbl=()=>{if(!tree)return '';if(!tree.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
     return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${tree.map(n=>{const k=kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${esc(n.custnm||'')}</td></tr>`;}).join('')}</tbody></table>`;};
@@ -1564,14 +1611,14 @@ SCREEN.sourceprofile=(c)=>{
     const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 후보 업체·계획단가 지정(R02…)
     const isCur=r.current_flag||r.route_no===1;   // R01(현행) → 발주업체·단가(현행 매입처·마스터단가)
     return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':((!valid)?'opacity:.6;':'')}">
-      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}${isCur?` <button class="btn ghost sp-order" title="현행 발주업체·단가(자동발주 근거)" style="padding:1px 7px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">📦 발주업체·단가</button>`:''}</td>
+      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}</td>
       <td>${esc(r.gubun||'-')}</td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
       <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
       <td>${(canW&&!ro)?`<input class="inp sp-e" type="date" data-ri="${r.route_id}" data-f="apply_from" value="${esc(rfrom(r))}" style="width:120px;min-width:0">`:esc(rfrom(r)||'-')}</td>
       <td>${(canW&&!ro)?`<input class="inp sp-e" type="date" data-ri="${r.route_id}" data-f="apply_to" value="${esc(rto(r))}" style="width:120px;min-width:0" title="비우면 무기한">`:esc(rto(r)||'무기한')}</td>
       <td class="center">${(canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':''))}</td>
-      <td class="num">${(canW&&!ro)?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" ${valid?'':'disabled'} style="width:60px;min-width:0;${valid?'':'background:#eee;color:#aab'}" placeholder="—">`:(al==null?'':al)}</td>
+      <td class="num" style="white-space:nowrap">${(canW&&!ro)?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" ${valid?'':'disabled'} style="width:60px;min-width:0;${valid?'':'background:#eee;color:#aab'}" placeholder="—">`:(al==null?'—':al)}${(isCur&&canW)?` <button class="btn ghost sp-editvend" title="발주업체·배분 수정 (현행 R01 자동발주 근거 · 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 수정</button>`:''}</td>
     </tr>`;};
   const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr,A=aStat(),ok=A.single||Math.abs(A.sum-100)<0.01;
     return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 배정 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(단일 소스 <code>nx.sourcing_route</code> · 승인 후보만 배정 · 저장 <code>nx.route_alloc</code>)</span>
@@ -1623,7 +1670,7 @@ SCREEN.sourceprofile=(c)=>{
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});
     c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)pmOpen(r);});
-    c.querySelectorAll('.sp-order').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
+    c.querySelectorAll('.sp-editvend').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
     wireModal();
     wireOrder();
     fillDL();
