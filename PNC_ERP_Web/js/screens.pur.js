@@ -985,9 +985,10 @@ SCREEN.matclose=(c)=>{
   const m1=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
   const tdy=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   let all=[], rows=[], loading=false, msg='', q='', dfrom='', dto='';
-  const load=async()=>{loading=true;msg='';draw();
-    const gf=c.querySelector('#mc-from'),gt=c.querySelector('#mc-to');
-    const f=iso2ymd(gf?gf.value:''),t=iso2ymd(gt?gt.value:'');
+  const load=async()=>{
+    const gf=c.querySelector('#mc-from'),gt=c.querySelector('#mc-to');   // ★재렌더 前 입력 먼저 읽어 상태갱신(날짜 직접 키인 값 보존 — 안 그러면 draw가 옛값으로 되돌림)
+    const f=(gf&&iso2ymd(gf.value))||dfrom, t=(gt&&iso2ymd(gt.value))||dto;
+    dfrom=f; dto=t; loading=true; msg=''; draw();
     try{const r=await fetch(`${API}/api/live/matclose?dfrom=${f}&dto=${t}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();all=j.rows||[];dfrom=j.dfrom||f;dto=j.dto||t;}
     catch(e){all=[];msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}

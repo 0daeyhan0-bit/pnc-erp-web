@@ -74,5 +74,17 @@
 
 **구현 파일(dev, 배포대기)**: screens.pur.js(조달프로파일 경로표·발주업체배분) · sourcing.py(order_vendor·route_alloc·item_vendor_price) · autoorder.py · manorder.py · coopplan.py · screens.etc.js(협력사계획현황 배지) · common.py(_route01_ratio).
 
+## 8. ★★발견·교정 (2026-08-19) — route%는 조립품(assy) 키, 공용 proc에서 적용
+
+**실측 발견(2026-08-19)**: `nx.route_alloc`은 **제품(조립품 assy_item_code)** 키(예 AJR75563402는 plan_part_mat에서 assy 204행·mat 0행). 그런데 초판 `_route01_ratio` 배선은 엔진에서 **부품(MAT_CODE)** 으로 조회 → **절대 안 걸림 = route% 무영향**. (지금까지 60/40 검증은 전부 업체%(order_vendor)만, 경로%는 미적용이었음.)
+
+**교정 설계 = 공용 소요 proc에서 배분 일괄 적용**:
+- **공용 proc = `/api/plan/compose_mat`**(soyo.py): plan_part_mat(소요량, **assy_item_code 보유**) → 오버레이 → nx.plan_mat_source. ★현재 오버레이는 (work_order, mat_code)로 그룹핑하며 **assy 유실** + sourcing_profile만 적용(order_vendor·route% 없음).
+- **교정**: 오버레이를 **(work_order, assy, mat_code)** 로 유지하고, 각 행에 **route%[assy] × 업체%(order_vendor[mat] R01 leaf / sourcing_profile / BOM기본)** 를 곱해 plan_mat_source에 적재. → 소요량이 이미 배분 반영된 단일 정본.
+- **정합 원칙**: 자동발주·수동발주·협력사계획현황이 **모두 이 plan_mat_source(공용 proc 결과)를 읽어야** 세 곳이 자동일치. 각 엔진이 따로 배분 계산하면 또 불일치(초판 오류).
+- **한 부품이 여러 assy에 쓰이면 (assy,부품)별 route% 스케일 후 합산** — 부품 총량 일괄 곱 금지.
+
+**초판 `_route01_ratio`(부품키 조회)는 무영향이므로 제거/교정 대상.** 발주관련 전 프로그램(자동발주·수동발주·협력사계획현황·거래명세서·세트입고)이 공용 proc 결과를 소비하는지 전수 점검 필요.
+
 ---
 관련: [[newerp-sourcing-profile]] · _schema/AUTOORDER_PRODUCTION_DESIGN.md · BOM_EXPLOSION_RULES.md
