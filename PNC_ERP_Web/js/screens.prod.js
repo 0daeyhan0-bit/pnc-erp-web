@@ -374,6 +374,37 @@ SCREEN.planupload=(c)=>{
 
 SCREEN.partplan=(c)=>{
   // 파트별 생산계획 — 레거시 w_pr_input_410_new 재현. ★데이터/색상 정본 = 키팅과 동일 SP(GROUP BY gpc·wo·swo·assy·upper·item, 날짜피벗) → /api/kitting/grid 재사용(nx 직독). 값·색상 키팅과 자동일치.
+  //
+  // ┌─ 2026-08-18 수정내역 (레거시 화면 대조하며 보완) ────────────────────────────────
+  // │ 1. 필터 추가: 라인(LINE_NO)·제번(WORK_ORDER) — 레거시엔 있었으나 웹에 누락돼 있던 것.
+  // │    · 라인 드롭다운 소스 = /api/plan/part410/lines (PR_T_PLAN_PART_COPY.LINE_NO distinct, CA/CM/GR…).
+  // │      ※ /api/planinput/lines(PR003 주문구분: 설치/이지링크/CKD…)는 코드체계가 달라 쓰면 안 됨.
+  // │    · 제번은 백엔드 part410에 wo 파라미터를 신규 추가(kitting.py)했으나, 아래 3번으로 현재는 클라 필터 사용.
+  // │ 2. 툴바 2줄 배치(레거시 순서): 1줄=기준일자·자도번작업처·파트·생산여부·구분·적용일수·소스,
+  // │    2줄=라인·제번·ASSY도번·도번. 생산여부/구분 라디오는 테두리 박스로 그룹 구획(레거시 모양).
+  // │    라벨명 변경: 도번→ASSY도번, 자도번→도번. 건수요약은 표 아래 왼쪽으로 이동(계획합·인원은 tfoot과 중복이라 제거).
+  // │ 3. ★조회버튼 없이 즉시필터: 한 번 조회한 캐시(st.rows)에서 클라이언트 필터링(레거시 setfilter 방식).
+  // │    · 서버 재조회 필요 = 기준일자·자도번작업처·적용일수·소스 4개뿐.
+  // │    · 즉시필터 = 파트·라인·ASSY도번·도번·제번·생산여부·구분. 텍스트칸은 지워도 재조회 안 함.
+  // │ 4. ★소계행/집계뷰 색상 롤업(aggRank): 하위행 중 관련색이 하나라도 있으면 그 색. 녹3 > 노랑4 > 주황6, 무색('0')은 판정 제외.
+  // │    (셀 단위 finRank와는 우선순위가 반대 — 소계는 "진행중인 게 하나라도 있으면 그 상태로 보이게")
+  // │ 5. 집계뷰 = 상세뷰 청록 소계행과 1:1 동일하게 재구성. 그룹키를 "연속된 같은 도번 구간"으로(상세 blk 분할과 동일),
+  // │    정렬도 백엔드 순서 유지(도번순 재정렬 제거). 집계행 청록배경 + 클릭시 상세 펼침/접힘(▶/▼, 상세는 집계행 위에 표시).
+  // │ 6. 컬럼: 품명·Part Plan Ymd Output Hm 삭제 / 재고 7종 추가(자재재고·생산재고·도번고정재고·ASSY재고·출하·생산준비재고·Work Order).
+  // │    재고값은 kitting.py part410이 충당계산에 쓰던 풀(midstk/partstk/fixstk/assystk/saled/rstock)을 행에 노출한 것 = 표시전용.
+  // │    좌측 코드컬럼(파트·Assy도번·상위도번·도번) 가운데정렬.
+  // │ 7. ★후행컬럼(일자컬럼 뒤) = TAILDEF 정의 기반으로 리팩터 + 유저별 순서변경 지원.
+  // │    · 기본순서(레거시 배치): LG INPUT · LG INPUT시간 · Work Order · LG OUTPUT시간 · 앞공정 · 현재공정 · 자재재고 · 생산재고 · 도번고정재고 · ASSY재고 · 출하 · 생산준비재고
+  // │    · ★앞공정/현재공정 = 레거시 SP(SP_PR_CREATE_PLAN_파트별_생산계획계산_NEW_250826) 1285줄 산식 이식.
+  // │      현재공정 = 작업중 전표재고(#TEMP_전표재고)[item·gpc·gagong_proc_seq]
+  // │      앞공정   = PROC_SEQ=1 → 0, else 전표재고[item·PRIOR_gpc·PRIOR_seq] − 현재공정
+  // │      → 01라인(용접 S5 → 조립 S5-2) 2공정 품목에서 뒷공정 실적이 잡히면 앞공정 잔량이 상계되어 0.
+  // │      (SP 본문은 pncind 계정으로 DB에서 직독 — 일반계정은 VIEW DEFINITION 권한 없어 못 읽음)
+  // │    · LG OUTPUT시간 = 백엔드 lgh(PR_T_PLAN_DTL의 ORG_PLAN_YMD+ORG_OUTPUT_HM) 신규 표시.
+  // │    · ★헤더 드래그앤드롭으로 순서 이동 → localStorage 'pp410_tailorder'에 저장(사람마다 다르게 보기).
+  // │      DB 미사용이라 다른 PC에선 기본순서. 신규 컬럼을 TAILDEF에 추가하면 저장된 순서 뒤에 자동 보충되므로 기존 사용자도 안 깨짐.
+  // │    · 헤더/행/소계/집계/푸터가 전부 tailTh()·tailTd()·tailBlank()를 쓰므로 컬럼 추가·삭제는 TAILDEF만 고치면 됨.
+  // └────────────────────────────────────────────────────────────────────────────
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const f2=n=>Number(n||0).toLocaleString('ko-KR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -385,12 +416,16 @@ SCREEN.partplan=(c)=>{
   const pulltxt=r=>{const cd=(r.change_day||'').trim(),ld=+r.lot_diff||0;if(!cd&&!ld)return '';return `${cd}${cd&&ld?',':''}${ld?(ld>0?'+':'')+ld:(cd?'':'')}`;};
   const T=new Date();
   // ★색상 정본(레거시 c_color CASE = kitting finBg 이식): 90주황(출하완료)/70노랑(생산완료)/50·10녹(키팅완료)/else 백(미키팅)
-  const finBg=f=>f==='6'?'#fac090':(f==='4'?'#ffff00':(f==='3'?'#669900':''));
-  const finFg=f=>f==='3'?'#ffffff':'';
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',dono:'',jado:'',unfin:'미생산',view:'상세',src:'nx',loading:false,msg:''};
+  // 색: '6'=출하완료(살구) · '7'=현재공정/작업중전표(진한주황, 출하와 구분) · '4'=생산완료(노랑) · '3'=키팅완료(녹)
+  const finBg=f=>f==='6'?'#fac090':(f==='7'?'#ed7d31':(f==='4'?'#ffff00':(f==='3'?'#669900':'')));
+  const finFg=f=>(f==='3'||f==='7')?'#ffffff':'';   // 진한 녹·주황 배경엔 흰 글자(가독)
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'nx',lines:[],loading:false,msg:'',expand:new Set()};
+  // ★라인 드롭다운 = 이 그리드 Line No 컬럼 실사용값(PR_T_PLAN_PART_COPY.LINE_NO distinct, CA/CM/GR 등). PR003 주문구분과는 다른 코드체계.
+  const loadLines=async()=>{try{const r=await fetch(`${API}/api/plan/part410/lines?src=${st.src}`);const j=await r.json();st.lines=j.rows||[];}catch(e){st.lines=[];}};
   const load=async()=>{st.loading=true;render();
-    // ★전체를 한 번만 조회해 캐시 → 미생산/구분 토글은 재조회 없이 클라이언트에서 즉시 필터(레거시 동일). 재조회는 기준일·작업처·파트·소스·기간 변경 시만.
-    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,part:st.part,assy:st.dono,jado:st.jado,view:'상세',unfin:'전체',src:st.src,limit:40000});
+    // ★전체를 한 번만 조회해 캐시 → 파트·라인·ASSY도번·도번·제번·미생산·구분은 재조회 없이 클라이언트에서 즉시 필터(레거시 동일).
+    //   재조회(=조회버튼)는 기준일·자도번작업처·적용일수·소스 변경 시만.
+    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,view:'상세',unfin:'전체',src:st.src,limit:40000});
     try{const r=await fetch(`${API}/api/plan/part410?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.inwon=j.inwon||0;st.note=j.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';st.rows=[];st.dates=[];}
     st.loading=false;render();};
@@ -400,58 +435,185 @@ SCREEN.partplan=(c)=>{
   // PART INPUT 시간(output_hm) "1126"→"11:26" 표기(레거시 동일)
   const hhmm=s=>{s=(''+(s||'')).trim();if(!s||!/^\d{1,4}$/.test(s))return esc(s);s=s.padStart(4,'0');return s.slice(0,2)+':'+s.slice(2);};
   const ymd6=s=>{s=(''+(s||'')).trim();return s.length>=6?s.slice(0,2)+'/'+s.slice(2,4)+'/'+s.slice(4,6):esc(s);};  // 260816→26/08/16 (LG INPUT)
-  const render=()=>{
+  // ★render(bodyOnly=true) = 표(tbody/tfoot)와 건수만 갱신(툴바·헤더 유지). 필터 변경시 사용해 버벅임 제거.
+  //   redrawBody()는 스크롤 위치까지 보존하는 래퍼.
+  let _typeT=null;
+  const redrawBody=()=>{const w=c.querySelector('.grid-wrap');const sy=w?w.scrollTop:0,sx=w?w.scrollLeft:0;
+    render(true);
+    const n=c.querySelector('.grid-wrap');if(n){n.scrollTop=sy;n.scrollLeft=sx;}};
+  // ★집계행 클릭 = 상세 펼침/접힘 토글. tbody만 교체해도 다시 연결돼야 하므로 분리.
+  const wireRows=()=>{c.querySelectorAll('tr.pp-agg').forEach(tr=>tr.onclick=()=>{
+    const k=tr.getAttribute('data-gk');if(!k)return;
+    if(st.expand.has(k))st.expand.delete(k);else st.expand.add(k);
+    redrawBody();});};
+  const render=(bodyOnly)=>{
     const d=st.dates;
     const wcM=new Map([['P1','용접'],['P2','가공']]);
     const PART_FIX=[['S5','01라인(용접)'],['S5-2','01라인(조립)'],['S1','02라인'],['S6','03라인'],['S4','04라인'],['S11','05라인'],['RAC','06라인'],['S10','자동은납 10'],['S13','서브/고주파'],['S12','설치'],['S8','서포터 08'],['S9','용접 09'],['S7','다관절 로봇 용접'],['-','-'],['Q1000','용접봉창고']];
     const partOpts='<option value=""'+(st.part?'':' selected')+'>전체</option>'+PART_FIX.map(([v,n])=>v==='-'?'<option disabled>─────────</option>':`<option value="${esc(v)}"${st.part===v?' selected':''}>${esc(n)}</option>`).join('');
-    const seg=(name,val,opts)=>opts.map(v=>`<label style="font-weight:400;margin:0 5px 0 1px"><input type="radio" name="${name}" value="${v}" ${val===v?'checked':''}> ${v}</label>`).join('');
-    // ★미생산 필터 = 클라이언트 즉시(전체 캐시에서 done=false만). 레거시 setfilter처럼 재조회 없음.
-    const base = st.unfin==='미생산' ? st.rows.filter(r=>!r.done) : st.rows;
+    // ★레거시처럼 라디오그룹 전체를 테두리 박스로 구획(어디까지 한 그룹인지 시각적으로 구분)
+    const seg=(name,val,opts)=>`<span style="border:1px solid var(--line-2,#c9d3e0);border-radius:4px;padding:2px 6px;background:#fff;display:inline-flex;align-items:center">${opts.map(v=>`<label style="font-weight:400;margin:0 5px 0 1px;white-space:nowrap"><input type="radio" name="${name}" value="${v}" ${val===v?'checked':''}> ${v}</label>`).join('')}</span>`;
+    // ★미생산·파트·라인·도번·제번 = 전부 클라이언트 즉시필터(전체 캐시에서). 레거시 setfilter처럼 재조회 없음.
+    let base = st.unfin==='미생산' ? st.rows.filter(r=>!r.done) : st.rows;
+    if(st.part) base = base.filter(r=>r.gpc===st.part);
+    if(st.line) base = base.filter(r=>(r.line||'')===st.line);
+    const inc=(v,q)=>String(v||'').toUpperCase().includes(q);
+    if(st.dono){const q=st.dono.toUpperCase();base = base.filter(r=>inc(r.assy,q));}
+    if(st.jado){const q=st.jado.toUpperCase();base = base.filter(r=>inc(r.item,q));}
+    if(st.wo){const q=st.wo.toUpperCase();base = base.filter(r=>inc(r.wo,q));}
+    // ★소계/집계 색상 롤업: 관련 색상이 하나라도 있으면 그 색(aggRank 녹3>노랑4>주황6).
+    //   무색('0'=미키팅/전표)은 판정 대상에서 제외. 색이 하나도 없으면 무색. (소계행·집계뷰 공통)
+    const rollFin=(fs)=>{const v=fs.filter(f=>f&&f!=='0');if(!v.length)return '0';
+      return v.slice().sort((a,b)=>aggRank(a)-aggRank(b))[0];};
     // ── 구분(view): 집계=도번(item)단위 롤업 / 전체·제번=제번(WO)단위 상세 ──
     let disp=base;
     if(st.view==='집계'){
-      const agg=new Map();
-      base.forEach(r=>{const k=r.gpc+'|'+r.assy+'|'+r.upper+'|'+r.item;let g=agg.get(k);
-        if(!g){g={gpcnm:r.gpcnm,gpc:r.gpc,assy:r.assy,upper:r.upper,item:r.item,nm:r.nm,line:r.line,inhm:r.inhm,part_ymd:r.part_ymd,plan_ymd:r.plan_ymd,item_st:r.item_st,change_day:r.change_day,lot_diff:0,wo:'(집계)',swo:'',plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{}};agg.set(k,g);}
-        g.plan_qty+=+r.plan_qty||0;g.finish+=+r.finish||0;g.prior_plan+=+r.prior_plan||0;g.prior_cover+=+r.prior_cover||0;g.lot_diff+=+r.lot_diff||0;if(!g.change_day)g.change_day=r.change_day;
-        if((r.part_ymd||'')<(g.part_ymd||'zz'))g.part_ymd=r.part_ymd;
-        if(+r.prior_plan>0&&(g.prior_fin==='0'||finRank(r.prior_fin)<finRank(g.prior_fin)))g.prior_fin=r.prior_fin;
-        d.forEach(x=>{if(r.days&&r.days[x]){g.days[x]=(g.days[x]||0)+r.days[x];g.dcov[x]=(g.dcov[x]||0)+((r.dcov&&r.dcov[x])||0);
-          const cf=(r.dfin&&r.dfin[x])||'0';if(!g.dfin[x]||g.dfin[x]==='0'||finRank(cf)<finRank(g.dfin[x]))g.dfin[x]=cf;}});});
-      disp=[...agg.values()];
+      // ★집계 = 상세뷰의 청록 소계행(도번 item "연속블록")과 1:1 동일해야 함.
+      //   → Map(전역 도번키)로 묶으면 떨어져 등장하는 같은 도번이 하나로 합쳐져 상세와 어긋남.
+      //     bodyHtml의 블록분할(연속 item)과 똑같이 구간별로 집계.
+      const out=[];
+      for(let i=0;i<base.length;){
+        const it=base[i].item; let j=i; const blk=[];
+        while(j<base.length&&base[j].item===it){blk.push(base[j]);j++;}
+        const r0=blk[0];
+        const g={gpcnm:r0.gpcnm,gpc:r0.gpc,assy:r0.assy,upper:r0.upper,item:r0.item,nm:r0.nm,line:r0.line,inhm:r0.inhm,
+                 part_ymd:r0.part_ymd,plan_ymd:r0.plan_ymd,output_hm:r0.output_hm,item_st:r0.item_st,
+                 change_day:r0.change_day,lot_diff:0,wo:'',swo:'',
+                 // 재고류는 도번(item) 기준 값이라 블록 대표행 값 그대로(합산 아님)
+                 mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,fix_stock:r0.fix_stock,
+                 assy_stock:r0.assy_stock,sale_qty:r0.sale_qty,ready_stock:r0.ready_stock,
+                 prev_proc:r0.prev_proc,cur_proc:r0.cur_proc,
+                 plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{},_st:0,
+                 _blk:blk,_gkey:it+'@'+i};   // ★펼침 토글용: 이 집계행이 대표하는 상세행들 + 블록 고유키(같은 도번 반복 대비 인덱스 포함)
+        blk.forEach(r=>{
+          g.plan_qty+=+r.plan_qty||0;g.finish+=+r.finish||0;g.prior_plan+=+r.prior_plan||0;g.prior_cover+=+r.prior_cover||0;
+          g.lot_diff+=+r.lot_diff||0;if(!g.change_day)g.change_day=r.change_day;
+          g._st+=Math.round(rowST(r)*100)/100;            // 소계행과 동일: 셀별 round(,2) 후 합산
+          if((r.part_ymd||'')<(g.part_ymd||'zz'))g.part_ymd=r.part_ymd;
+          d.forEach(x=>{if(r.days&&r.days[x]){g.days[x]=(g.days[x]||0)+r.days[x];g.dcov[x]=(g.dcov[x]||0)+((r.dcov&&r.dcov[x])||0);}});
+        });
+        // 색상 = 소계행 rollFin과 동일(계획>0인 행만 대상, aggRank: 녹3 > 노랑4 > 주황6)
+        g.prior_fin=rollFin(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'));
+        d.forEach(x=>{g.dfin[x]=rollFin(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'));});
+        out.push(g); i=j;
+      }
+      disp=out;
     }
-    // 정렬: ★상세=백엔드(레거시 setsort: part_group→part_plan_ymd_hm→item→plan_ymd→output_hm→lg→wo→swo) 순서 유지 / 집계·제번=도번 묶기
-    if(st.view!=='상세') disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
-    const NCOL=16;  // 고정컬럼(SEQ..당일이전계획 13 + Part Plan Ymd Output Hm·LG INPUT·LG INPUT시간 3)
-    const numTd=(v,bg,strong,fg)=>`<td class="num"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;
+    // 정렬: ★전 뷰 공통 = 백엔드(레거시 setsort: part_group→part_plan_ymd_hm→item→plan_ymd→output_hm→lg→wo→swo) 순서 유지.
+    //   ★집계도 상세와 동일 순서(레거시 확인) — 도번순 재정렬하면 상세와 어긋남. Map은 삽입순 유지라 그대로 두면 됨.
+    if(st.view==='제번') disp=disp.slice().sort((a,b)=>(a.item||'').localeCompare(b.item||'')||((a.part_ymd||'')+(a.inhm||'')).localeCompare((b.part_ymd||'')+(b.inhm||''))||(a.wo||'').localeCompare(b.wo||''));
+    const numTd=(v,bg,strong,fg)=>`<td class="center"${bg?` style="background:${bg}${strong?';font-weight:700':''}${fg?';color:'+fg:''}"`:''}>${v}</td>`;   // ★가운데정렬
     // 완료수량=생산실적(finish)만. 생산분 있으면 "생산/계획", 없으면 계획만(바 없이=키팅/미키팅은 색으로만 구분)
-    const pcell=r=>r.prior_plan>0?(r.prior_cover>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:`${nf(r.prior_plan)}`):'·';
-    const rowHtml=(r,seq,firstInGrp)=>{const pf=r.prior_fin||'0';
-      return `<tr${firstInGrp&&seq>1?' style="border-top:2px solid #9fb3c8"':''}>
-        <td class="center mut">${seq}</td><td>${firstInGrp?esc(r.gpcnm||r.gpc):''}</td>
-        <td>${firstInGrp?`<b>${esc(r.assy)}</b>`:''}</td><td>${firstInGrp?esc(r.upper||''):''}</td><td><b>${firstInGrp?esc(r.item):''}</b></td>
-        <td class="bcap" title="${esc(r.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
-        <td class="center">${esc(r.line||'')}</td><td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${hhmm(r.inhm)}</td>
-        <td class="center" style="color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}">${esc(pulltxt(r))}</td>
-        <td class="num">${f2(rowST(r))}</td><td class="num"><b>${nf(r.plan_qty)}</b></td>
-        ${r.prior_plan>0?numTd(pcell(r),finBg(pf),pf!=='0',finFg(pf)):numTd('·','',false)}
-        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('·','',false);}).join('')}<td class="center mut" style="font-size:10px">${esc((r.part_ymd||'')+(r.inhm||''))}</td><td class="center">${ymd6(r.plan_ymd)}</td><td class="center">${hhmm(r.output_hm)}</td></tr>`;};
+    // ★값 없는 셀은 공백(기존 '·' 표시 제거 — 빈칸이 많아 지저분해서)
+    const pcell=r=>r.prior_plan>0?(r.prior_cover>0?`${nf(r.prior_cover)}/${nf(r.prior_plan)}`:`${nf(r.prior_plan)}`):'';
+    const stkc=v=>(+v||0)?nf(v):'';   // 재고컬럼: 0은 공백(레거시 동일 — 값 있는 것만 눈에 띄게)
+    // ★후행(일자컬럼 뒤) 컬럼 정의 — 순서변경/드래그 대상. key로 localStorage에 유저별 순서 저장.
+    //   기본순서 = 레거시 배치: LG INPUT · LG INPUT시간 · Work Order · LG OUTPUT시간 · 재고6종
+    const TAILDEF={
+      // ★전 컬럼 가운데정렬(center) — 숫자도 우측정렬 대신 가운데(사용자 요청)
+      plan_ymd:  {t:'LG INPUT',      cls:'center', v:r=>ymd6(r.plan_ymd)},
+      output_hm: {t:'LG INPUT시간',  cls:'center', v:r=>hhmm(r.output_hm)},
+      wo:        {t:'Work Order',    cls:'center', v:r=>esc(r.wo||''), st:'font-size:10px'},
+      lgh:       {t:'LG OUTPUT시간', cls:'center', v:r=>{const s=(''+(r.lgh||'')).trim();return s.length>=10?ymd6(s.slice(0,6))+' '+hhmm(s.slice(6,10)):esc(s);}, st:'font-size:10px'},
+      // ★앞공정/현재공정(레거시 SP_..._NEW_250826): 작업중 전표재고 기준.
+      //   현재공정=자기 공정 잔량 / 앞공정=PROC_SEQ 1이면 0, else 앞공정잔량−현재공정잔량
+      //   01라인(용접S5→조립S5-2)처럼 2공정인 품목에서 뒷공정 실적이 잡히면 앞공정이 상계돼 0이 됨.
+      prev_proc: {t:'앞공정',        cls:'center mut', v:r=>stkc(r.prev_proc)},
+      cur_proc:  {t:'현재공정',      cls:'center mut', v:r=>stkc(r.cur_proc)},
+      mat_stock: {t:'자재재고',      cls:'center mut', v:r=>stkc(r.mat_stock)},
+      prod_stock:{t:'생산재고',      cls:'center mut', v:r=>stkc(r.prod_stock)},
+      fix_stock: {t:'도번고정재고',  cls:'center mut', v:r=>stkc(r.fix_stock)},
+      assy_stock:{t:'ASSY재고',      cls:'center mut', v:r=>stkc(r.assy_stock)},
+      sale_qty:  {t:'출하',          cls:'center mut', v:r=>stkc(r.sale_qty)},
+      ready_stock:{t:'생산준비재고', cls:'center mut', v:r=>stkc(r.ready_stock)},
+    };
+    // ★앞쪽(SEQ 뒤 ~ 일자컬럼 앞) 컬럼도 동일하게 정의 → 전 컬럼 드래그 이동 대상.
+    //   firstInGrp(그룹 첫행만 코드 표시) 규칙이 있는 컬럼은 v(r,fg)의 2번째 인자로 처리.
+    const HEADDEF={
+      gpc:      {t:'파트',        cls:'center', v:(r,fg)=>fg?esc(r.gpcnm||r.gpc):''},
+      assy:     {t:'Assy도번',    cls:'center', v:(r,fg)=>fg?`<b>${esc(r.assy)}</b>`:''},
+      upper:    {t:'상위도번',    cls:'center', v:(r,fg)=>fg?esc(r.upper||''):''},
+      item:     {t:'도번',        cls:'center', v:(r,fg)=>`<b>${fg?esc(r.item):''}</b>`},
+      line:     {t:'Line No',     cls:'center', v:r=>esc(r.line||'')},
+      part_ymd: {t:'PART일자',    cls:'center', v:r=>esc(dcol(r.part_ymd||''))},
+      inhm:     {t:'PART INPUT',  cls:'center', v:r=>hhmm(r.inhm)},
+      pull:     {t:'당김',        cls:'center', v:r=>esc(pulltxt(r)), sf:r=>`color:${(+r.lot_diff||0)?'#c0392b':'#b8791f'};font-weight:${(+r.lot_diff||0)?'700':'400'}`},
+      st:       {t:'생산ST',      cls:'center', v:r=>f2(r._st!==undefined?r._st:rowST(r))},
+      plan_qty: {t:'생산계획',    cls:'center', v:r=>`<b>${nf(r.plan_qty)}</b>`},
+      prior:    {t:'당일이전계획',cls:'center', v:r=>r.prior_plan>0?pcell(r):'',
+                 bg:r=>r.prior_plan>0&&(r.prior_fin||'0')!=='0'?{b:finBg(r.prior_fin),f:finFg(r.prior_fin)}:null},
+    };
+    const ALLDEF=Object.assign({},HEADDEF,TAILDEF);
+    const HEAD_DEFAULT=['gpc','assy','upper','item','line','part_ymd','inhm','pull','st','plan_qty','prior'];
+    const TAIL_DEFAULT=['plan_ymd','output_hm','wo','lgh','prev_proc','cur_proc','mat_stock','prod_stock','fix_stock','assy_stock','sale_qty','ready_stock'];
+    const HEAD_LSKEY='pp410_headorder', TAIL_LSKEY='pp410_tailorder';
+    // 유저별 저장순서 로드(없거나 깨졌으면 기본). 신규 컬럼을 정의에 추가하면 저장순서 뒤에 자동 보충 → 기존 사용자도 안 깨짐.
+    const loadOrder=(lskey,def,defs)=>{
+      try{const s=JSON.parse(localStorage.getItem(lskey)||'null');
+        if(Array.isArray(s)&&s.length){const v=s.filter(k=>defs[k]);def.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
+      }catch(e){}
+      return def.slice();};
+    const headOrder=loadOrder(HEAD_LSKEY,HEAD_DEFAULT,HEADDEF);
+    const tailOrder=loadOrder(TAIL_LSKEY,TAIL_DEFAULT,TAILDEF);
+    // th/td 생성 공통 — data-tk(컬럼키)·data-grp(head|tail)로 드래그 그룹 구분(그룹 내에서만 이동).
+    const mkTh=(ks,defs,grp)=>ks.map(k=>`<th class="center" draggable="true" data-tk="${k}" data-grp="${grp}" title="드래그해서 순서 변경(내 브라우저에 저장)" style="cursor:grab">${defs[k].t}</th>`).join('');
+    const mkTd=(ks,defs,r,fg)=>ks.map(k=>{const c=defs[k];
+      const b=c.bg?c.bg(r):null;
+      const stl=(c.st||'')+(c.sf?c.sf(r):'')+(b?`background:${b.b};font-weight:700${b.f?';color:'+b.f:''}`:'');
+      return `<td class="${c.cls}"${stl?` style="${stl}"`:''}>${c.v(r,fg)}</td>`;}).join('');
+    const headTh=()=>mkTh(headOrder,HEADDEF,'head');
+    const tailTh=()=>mkTh(tailOrder,TAILDEF,'tail');
+    const headTd=(r,fg)=>mkTd(headOrder,HEADDEF,r,fg);
+    const tailTd=(r)=>mkTd(tailOrder,TAILDEF,r,true);
+    const tailBlank=()=>tailOrder.map(()=>'<td></td>').join('');
+    const rowHtml=(r,seq,firstInGrp,gkey,open,childOf)=>{const pf=r.prior_fin||'0';
+      // ★집계행(gkey) = 청록 배경 + 클릭시 펼침/접힘. 펼쳐진 상세행(childOf) = 흰 배경이지만 클릭시 같이 접힘.
+      const isAgg = gkey!==undefined;
+      const tog = isAgg ? gkey : childOf;                       // 클릭 토글 대상 키
+      const aggBg = isAgg ? 'background:#cdeef7;font-weight:600;cursor:pointer;' : (childOf?'cursor:pointer;':'');
+      return `<tr${tog!==undefined?` class="pp-agg" data-gk="${esc(tog)}"`:''}${(aggBg||(firstInGrp&&seq>1))?` style="${aggBg}${firstInGrp&&seq>1?'border-top:2px solid #9fb3c8':''}"`:''}>
+        <td class="center mut">${isAgg?`<span style="color:#456">${open?'▼':'▶'}</span> `:''}${seq}</td>${headTd(r,firstInGrp)}
+        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('','',false);}).join('')}${tailTd(r)}</tr>`;};
     // ★레거시 DW 도번(item) 그룹 소계행(청록, group trailer) — 완료합/계획합. 상세뷰만.
-    const subHtml=(blk)=>{const r0=blk[0];
+    // gkey/folded = 상세뷰 블록 접기 토글용(클릭시 그 블록 상세행 숨김). 미전달이면 기존처럼 단순 소계행.
+    const subHtml=(blk,gkey,folded)=>{const r0=blk[0];
       const sPl=blk.reduce((s,r)=>s+(+r.plan_qty||0),0), sST=blk.reduce((s,r)=>s+Math.round(rowST(r)*100)/100,0);
       const sPrP=blk.reduce((s,r)=>s+(+r.prior_plan||0),0), sPrC=blk.reduce((s,r)=>s+(+r.prior_cover||0),0);
-      return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
-        <td></td><td>${esc(r0.gpcnm||r0.gpc)}</td><td><b>${esc(r0.assy)}</b></td><td></td><td><b>${esc(r0.item)}</b></td>
-        <td colspan="5"></td><td class="num">${f2(sST)}</td><td class="num"><b>${nf(sPl)}</b></td>
-        <td class="num">${sPrP>0?nf(sPrC)+'/'+nf(sPrP):'·'}</td>
-        ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);return `<td class="num">${pl>0?nf(cv)+'/'+nf(pl):'·'}</td>`;}).join('')}<td class="center">${esc((r0.part_ymd||'')+(r0.inhm||''))}</td><td class="center">${esc(r0.plan_ymd||'')}</td><td class="center">${esc(r0.output_hm||'')}</td></tr>`;};
-    // tbody: 상세=도번블록별 상세행+청록소계, 집계/제번=집계행만
+      const sPrF=rollFin(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'));
+      const subTd=(v,f)=>`<td class="center"${f&&f!=='0'?` style="background:${finBg(f)};font-weight:700${finFg(f)?';color:'+finFg(f):''}"`:''}>${v}</td>`;   // ★가운데정렬
+      // ★소계행도 headOrder(유저 컬럼순서)를 따라야 하므로, 합계값을 담은 가상행을 만들어 headTd에 넘김.
+      //   소계에 표시 안 하는 컬럼(상위도번·LineNo·PART일자·PART INPUT·당김)은 빈값 처리.
+      const sub={gpcnm:r0.gpcnm,gpc:r0.gpc,assy:r0.assy,upper:'',item:r0.item,line:'',part_ymd:'',inhm:'',
+                 lot_diff:0,change_day:'',_st:sST,plan_qty:sPl,prior_plan:sPrP,prior_cover:sPrC,prior_fin:sPrF,
+                 plan_ymd:r0.plan_ymd,output_hm:r0.output_hm,wo:'',lgh:r0.lgh,
+                 mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,fix_stock:r0.fix_stock,
+                 assy_stock:r0.assy_stock,sale_qty:r0.sale_qty,ready_stock:r0.ready_stock,
+                 prev_proc:r0.prev_proc,cur_proc:r0.cur_proc};
+      return `<tr${gkey!==undefined?` class="pp-agg" data-gk="${esc(gkey)}"`:''} style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8${gkey!==undefined?';cursor:pointer':''}">
+        <td class="center mut">${gkey!==undefined?`<span style="color:#456">${folded?'▶':'▼'}</span>`:''}</td>${headTd(sub,true)}
+        ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
+          const cf=rollFin(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'));
+          return pl>0?subTd(nf(cv)+'/'+nf(pl),cf):`<td class="center"></td>`;}).join('')}${tailTd(sub)}</tr>`;};
+    // tbody: 상세=도번블록별 상세행+청록소계, 집계=집계행(클릭시 상세 펼침), 제번=집계행만
+    // 전체 컬럼수 = SEQ(1) + 앞쪽컬럼(headOrder) + 일자컬럼(d) + 후행컬럼(tailOrder). colspan/스피너 계산용.
+    const NCOL=1+headOrder.length+tailOrder.length;
     const bodyHtml=()=>{if(!disp.length)return `<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`;
+      // ★집계: 행 클릭 = 그 블록 상세행 펼침/접힘 토글(레거시 드릴다운).
+      //   상세는 집계행 "위"에 표시(상세뷰와 동일한 배치: 상세행들 → 소계행 순).
+      //   펼쳐진 상세행도 같은 gkey를 달아 클릭시 닫히게 함.
+      if(st.view==='집계')return disp.map((r,i)=>{
+        const open=st.expand.has(r._gkey);
+        const kids=(open&&r._blk)?r._blk.map((cr,ci)=>rowHtml(cr,ci+1,ci===0,undefined,undefined,r._gkey)).join(''):'';
+        return kids+rowHtml(r,i+1,true,r._gkey,open);}).join('');
       if(st.view!=='상세')return disp.map((r,i)=>rowHtml(r,i+1,i===0||disp[i-1].item!==r.item)).join('');
+      // ★상세: 블록(연속 도번) 단위 접기/펼치기. 상세행·소계행 아무 데나 클릭하면 그 블록이 접힘(집계처럼 소계만 보임).
+      //   st.expand에 담긴 키 = "접힌" 블록(집계뷰에선 "펼친" 의미라 반대지만, 각 뷰 전환시 clear하므로 충돌 없음)
       let h='',i=0,seq=0;
       while(i<disp.length){const it=disp[i].item;let j=i;const blk=[];while(j<disp.length&&disp[j].item===it){blk.push(disp[j]);j++;}
-        blk.forEach((r,bi)=>{seq++;h+=rowHtml(r,seq,bi===0);}); h+=subHtml(blk); i=j;}
+        const gk=it+'@'+i, folded=st.expand.has(gk);
+        // 상세행은 클릭 대상 아님(childOf 미전달) — 접기/펼치기는 소계행 클릭으로만
+        if(!folded) blk.forEach((r,bi)=>{seq++;h+=rowHtml(r,seq,bi===0);});
+        h+=subHtml(blk,gk,folded); i=j;}
       return h;};
     // footer: 당일이전·일자별 (완료/계획) + 생산ST행
     const planSum=disp.reduce((s,r)=>s+(+r.plan_qty||0),0);   // ★표시중(필터적용) 계획합 — 캐시 클라이언트필터 기준
@@ -461,60 +623,116 @@ SCREEN.partplan=(c)=>{
     const r2=v=>Math.round(v*100)/100;   // ★레거시 dw c_item_st=round(...,2) 셀별 반올림 후 합산(누적 반올림차 방지)
     const fSTd=x=>disp.reduce((s,r)=>s+r2(Math.max(((r.days&&r.days[x])||0)-((r.dcov&&r.dcov[x])||0),0)*(+r.item_st||0)/3600),0);
     const fSTprior=disp.reduce((s,r)=>s+r2(Math.max((+r.prior_plan||0)-(+r.prior_cover||0),0)*(+r.item_st||0)/3600),0);
+    // ★성능: bodyOnly=true면 표(tbody/tfoot)와 건수줄만 교체하고 툴바·헤더는 그대로 둠.
+    //   필터 변경마다 c.innerHTML 전체를 갈아엎으면 2,900행 기준 눈에 띄게 버벅여서 분리함.
+    //   (툴바를 유지하므로 입력칸 포커스·커서위치도 자연히 보존됨)
+    const tbodyHtml=st.loading?spinRow(NCOL+d.length):bodyHtml();
+    const tfootHtml=(()=>{if(!disp.length)return '';
+      const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);
+      const footRow=(label,vals)=>{let put=false;
+        return headOrder.map(k=>{
+          if(vals[k]!==undefined)return `<td class="center">${vals[k]}</td>`;
+          if(!put){put=true;return `<td class="center" style="font-weight:600">${label}</td>`;}
+          return '<td></td>';}).join('');};
+      return `<tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
+        <td></td>${footRow('합계',{st:f2(fSTtot),plan_qty:nf(planSum),prior:fPrP>0?nf(fPrC)+'/'+nf(fPrP):''})}${d.map(x=>{const pl=fPl(x);return `<td class="center">${pl>0?nf(fCv(x))+'/'+nf(pl):''}</td>`;}).join('')}${tailBlank()}</tr>
+       <tr class="grandtot" style="position:sticky;bottom:22px;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
+        <td></td>${footRow('생산ST',{st:f2(fSTtot),prior:f2(fSTprior)})}${d.map(x=>`<td class="center">${f2(fSTd(x))}</td>`).join('')}${tailBlank()}</tr>
+       <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#666;border-top:1px solid #d3ddea">
+        <td></td>${footRow(`계상근무공수 (÷인원 ${nf(iw)})`,{st:iw?f2(fSTtot/iw):'—'})}${d.map((x,xi)=>`<td class="center">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}${tailBlank()}</tr>`;})();
+    const cntHtml=`${nf(disp.length)}건 · ${st.src==='live'?'🔴 라이브':'🟢 nx'} · 일자 ${d.length}개`;
+    if(bodyOnly){
+      const tb=c.querySelector('tbody'), tf=c.querySelector('tfoot'), cnt=c.querySelector('#pp-cnt');
+      if(tb){tb.innerHTML=tbodyHtml;}
+      if(tf){tf.innerHTML=tfootHtml;}
+      if(cnt){cnt.textContent=cntHtml;}
+      wireRows();          // 새로 그린 행에 클릭(집계 펼침) 핸들러만 다시 연결
+      return;
+    }
     c.innerHTML=`
      <div class="page-title">🧩 파트별 생산계획 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_410_new · nx 직독(키팅과 동일 SP·색상)</span></div>
      <div class="page-sub">사내 생산품(용접/가공) 파트별 일자계획. 당일이전계획=기준일 이전 계획 누적(완료/계획). 셀=완료/계획.
-       <span style="background:#669900;color:#fff;padding:0 5px">녹=키팅완료</span> <span style="background:#ffff00;padding:0 5px">노랑=생산완료</span> <span style="background:#fac090;padding:0 5px">주황=출하완료</span> 백=미키팅</div>
-     <div class="toolbar" style="flex-wrap:wrap;gap:4px">
+       <span style="background:#669900;color:#fff;padding:0 5px">녹=키팅완료</span> <span style="background:#ffff00;padding:0 5px">노랑=생산완료</span> <span style="background:#ed7d31;color:#fff;padding:0 5px">진주황=현재공정(작업중전표)</span> <span style="background:#fac090;padding:0 5px">살구=출하완료</span> 백=미키팅</div>
+     <div class="toolbar" style="flex-wrap:wrap;gap:4px;row-gap:2px">
        <label class="tl">기준일자</label><button class="btn ghost" id="pp-prev" title="전일" style="padding:2px 6px">◀</button>
-       <input class="inp" type="date" id="pp-base" value="${st.base}" style="width:138px">
+       <!-- ★날짜칸 폭: type=date는 브라우저 기본 패딩/캘린더아이콘 여백이 커서 width만 줄이면 값이 잘림.
+            → 패딩 제거 + 폰트 살짝 축소 + width:auto(내용폭)로 두어 빈공백 최소화. 네이티브 세그먼트 편집은 유지(CLAUDE.md §3). -->
+       <input class="inp" type="date" id="pp-base" value="${st.base}" style="width:auto;min-width:0;padding:2px 0 2px 3px;font-size:12px">
        <button class="btn ghost" id="pp-next" title="익일" style="padding:2px 6px">▶</button>
-       <label class="tl">적용일수</label><select class="inp" id="pp-gigan" style="width:62px">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
        <label class="tl">자도번작업처</label><select class="inp" id="pp-wc" style="width:80px"><option value="">전체</option>${[...wcM].map(([v,n])=>`<option value="${esc(v)}"${st.wc===v?' selected':''}>${esc(n)}</option>`).join('')}</select>
        <label class="tl">파트</label><select class="inp" id="pp-part" style="width:130px">${partOpts}</select>
-       <label class="tl">도번</label><input class="inp" id="pp-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
-       <label class="tl">자도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
        <label class="tl">생산여부</label>${seg('pp-uf',st.unfin,['전체','미생산'])}
        <label class="tl">구분</label>${seg('pp-vw',st.view,['상세','집계','제번'])}
+       <label class="tl">적용일수</label><select class="inp" id="pp-gigan" style="width:62px">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
        <label class="tl">소스</label><select class="inp" id="pp-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>라이브 대사</option></select>
        <button class="btn" id="pp-go">🔍 조회</button>
-       <div class="spacer"></div><span class="rowcount">${nf(disp.length)}건 · 계획합 <b>${nf(planSum)}</b> · 인원 ${nf(st.inwon)} · ${st.src==='live'?'🔴 라이브':'🟢 nx'} · 일자 ${d.length}개</span>
+       <div style="flex-basis:100%;height:0"></div>
+       <label class="tl">라인</label><select class="inp" id="pp-line" style="width:90px"><option value="">전체</option>${st.lines.map(l=>`<option value="${esc(l.code)}"${st.line===String(l.code)?' selected':''}>${esc(l.nm||l.code)}</option>`).join('')}</select>
+       <label class="tl">제번</label><input class="inp" id="pp-wo" value="${esc(st.wo)}" style="width:90px" placeholder="제번" autocomplete="off">
+       <label class="tl">ASSY도번</label><input class="inp" id="pp-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
+       <label class="tl">도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
-       <th>SEQ</th><th>파트</th><th>Assy도번</th><th>상위도번</th><th>도번</th><th>품명</th><th>Line No</th><th>PART일자</th><th>PART INPUT</th><th>당김</th><th class="num">생산ST</th><th class="num">생산계획</th><th class="num">당일이전계획</th>${d.map(x=>`<th class="num"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}<th class="center">Part Plan Ymd Output Hm</th><th class="center">LG INPUT</th><th class="center">LG INPUT시간</th></tr></thead>
-      <tbody>${st.loading?spinRow(NCOL+d.length):bodyHtml()}</tbody>
-      ${disp.length?(()=>{const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);return `<tfoot>
-       <tr class="grandtot" style="position:sticky;bottom:44px;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
-        <td class="center" colspan="10">합계</td><td class="num">${f2(fSTtot)}</td><td class="num">${nf(planSum)}</td>
-        <td class="num">${fPrP>0?nf(fPrC)+'/'+nf(fPrP):'·'}</td>${d.map(x=>{const pl=fPl(x);return `<td class="num">${pl>0?nf(fCv(x))+'/'+nf(pl):'0/0'}</td>`;}).join('')}<td></td><td></td><td></td></tr>
-       <tr class="grandtot" style="position:sticky;bottom:22px;background:#f4f7fc;color:#456;border-top:1px solid #d3ddea">
-        <td class="center" colspan="10" style="font-weight:600">생산ST</td><td class="num">${f2(fSTtot)}</td><td></td>
-        <td class="num">${f2(fSTprior)}</td>${d.map(x=>`<td class="num">${f2(fSTd(x))}</td>`).join('')}<td></td><td></td><td></td></tr>
-       <tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc;color:#666;border-top:1px solid #d3ddea">
-        <td class="center" colspan="10" style="font-weight:600">계상근무공수 (÷인원 ${nf(iw)})</td><td class="num">${iw?f2(fSTtot/iw):'—'}</td><td></td>
-        <td class="num"></td>${d.map((x,xi)=>`<td class="num">${iw?f2(((xi===0?fSTprior:0)+fSTd(x))/iw):'—'}</td>`).join('')}<td></td><td></td><td></td></tr>
-       </tfoot>`;})():''}
-      </table></div>`;
+       <th class="center">SEQ</th>${headTh()}${d.map(x=>`<th class="center"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}${tailTh()}</tr></thead>
+      <tbody>${tbodyHtml}</tbody>
+      <tfoot>${tfootHtml}</tfoot>
+      </table></div>
+     <div class="page-sub" style="text-align:left;margin-top:2px" id="pp-cnt">${cntHtml}</div>`;
     const g=id=>c.querySelector(id);
-    g('#pp-go').onclick=()=>{st.base=g('#pp-base').value;st.wc=g('#pp-wc').value;st.part=g('#pp-part').value;
-      st.dono=g('#pp-dono').value.trim();st.jado=g('#pp-jado').value.trim();st.gigan=+g('#pp-gigan').value;st.src=g('#pp-src').value;
-      const uf=c.querySelector('input[name=pp-uf]:checked');if(uf)st.unfin=uf.value;
-      const vw=c.querySelector('input[name=pp-vw]:checked');if(vw)st.view=vw.value;
+    // 조회(서버 재조회) = 기준일·자도번작업처·적용일수·소스만. 나머지 필터는 캐시에서 즉시필터라 재조회 불필요.
+    g('#pp-go').onclick=()=>{st.base=g('#pp-base').value;st.wc=g('#pp-wc').value;st.gigan=+g('#pp-gigan').value;st.src=g('#pp-src').value;
       load();};
-    // ★생산여부(미생산/전체)·구분(상세/집계/제번) 토글 = 캐시에서 즉시 재렌더(재조회 없음, 레거시 동일)
-    c.querySelectorAll('input[name=pp-uf]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-uf]:checked');if(x){st.unfin=x.value;render();}});
-    c.querySelectorAll('input[name=pp-vw]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-vw]:checked');if(x){st.view=x.value;render();}});
+    // ★생산여부·구분·파트·라인·ASSY도번·도번·제번 = 캐시에서 즉시 재렌더(재조회 없음, 레거시 동일)
+    // ★전부 redrawBody() = 표만 갱신(툴바 유지) → 2,900행에서도 즉각 반응
+    c.querySelectorAll('input[name=pp-uf]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-uf]:checked');if(x){st.unfin=x.value;redrawBody();}});
+    c.querySelectorAll('input[name=pp-vw]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-vw]:checked');if(x){st.view=x.value;st.expand.clear();redrawBody();}});
+    g('#pp-part').onchange=()=>{st.part=g('#pp-part').value;redrawBody();};
+    g('#pp-line').onchange=()=>{st.line=g('#pp-line').value;redrawBody();};
+    // ★컬럼 헤더 드래그앤드롭 = 유저별 컬럼순서 변경(localStorage에 저장).
+    //   사람마다 보고 싶은 순서가 달라서 각자 브라우저에 저장 — 서버/DB 미사용(다른 PC로 가면 기본순서).
+    //   앞쪽그룹(head: 파트~당일이전계획)과 후행그룹(tail: LG INPUT~생산준비재고)은 각각의 그룹 안에서만 이동.
+    //   (일자 컬럼이 두 그룹 사이에 끼어 있어 그룹을 넘나드는 이동은 불가)
+    //   드래그한 컬럼을 놓은 위치 "앞"에 삽입. 저장 후 재렌더(스크롤 유지).
+    let _dragTk=null,_dragGrp=null;
+    c.querySelectorAll('th[data-tk]').forEach(th=>{
+      th.ondragstart=e=>{_dragTk=th.getAttribute('data-tk');_dragGrp=th.getAttribute('data-grp');th.style.opacity='.4';
+        try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',_dragTk);}catch(_){}};
+      th.ondragend=()=>{th.style.opacity='';c.querySelectorAll('th[data-tk]').forEach(x=>x.style.borderLeft='');};
+      th.ondragover=e=>{if(th.getAttribute('data-grp')!==_dragGrp)return;   // 같은 그룹끼리만
+        e.preventDefault();if(_dragTk&&_dragTk!==th.getAttribute('data-tk'))th.style.borderLeft='3px solid #2563eb';};
+      th.ondragleave=()=>{th.style.borderLeft='';};
+      th.ondrop=e=>{th.style.borderLeft='';
+        if(th.getAttribute('data-grp')!==_dragGrp)return;
+        e.preventDefault();
+        const to=th.getAttribute('data-tk');const from=_dragTk;const grp=_dragGrp;_dragTk=null;_dragGrp=null;
+        if(!from||from===to)return;
+        const cur=(grp==='head')?headOrder:tailOrder, lskey=(grp==='head')?HEAD_LSKEY:TAIL_LSKEY;
+        const arr=cur.filter(k=>k!==from);
+        const at=arr.indexOf(to); arr.splice(at<0?arr.length:at,0,from);
+        try{localStorage.setItem(lskey,JSON.stringify(arr));}catch(_){}
+        const wrap=c.querySelector('.grid-wrap');const sy=wrap?wrap.scrollTop:0,sx=wrap?wrap.scrollLeft:0;
+        render();
+        const nw=c.querySelector('.grid-wrap');if(nw){nw.scrollTop=sy;nw.scrollLeft=sx;}};
+    });
+    wireRows();   // 집계행 클릭(펼침/접힘) — 표만 다시 그릴 때도 재연결 필요해서 별도 함수로 분리
     g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
-    ['#pp-dono','#pp-jado'].forEach(id=>{const e=g(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter')g('#pp-go').click();};});
+    // 텍스트 필터 3종 = 입력 즉시 클라이언트 필터(재조회 없음).
+    // ★성능: 타이핑마다 전체 재렌더하면 2,900행 기준 버벅임 → 180ms 디바운스 + 표(tbody/tfoot)만 교체(툴바 유지=포커스/커서 보존).
+    [['#pp-dono','dono'],['#pp-jado','jado'],['#pp-wo','wo']].forEach(([id,key])=>{const e=g(id);if(!e)return;
+      e.oninput=()=>{clearTimeout(_typeT);const v=e.value.trim();
+        _typeT=setTimeout(()=>{st[key]=v;redrawBody();},180);};});
     if(typeof attachResizers==='function')attachResizers(c);
   };
-  render();load();
+  (async()=>{await loadLines();render();await load();})();
 };
 // 색 우선순위(낮을수록 완료단계 높음): 출하6 < 생산4 < 키팅3 < 자재2 < 미키팅0
 function finRank(f){return {'6':1,'4':2,'3':3,'2':4,'0':9}[f]||9;}
+// ★소계/집계행 색 롤업 우선순위(파트별 생산계획): 관련색 하나라도 있으면 그 색 — 녹3 > 노랑4 > 주황6 > 자재2 > 무색0.
+//   (셀 단위 finRank와 반대 방향: 소계는 "진행 중인 게 하나라도 있으면 그 상태로 보이게" = 현장 판단 기준)
+function aggRank(f){return {'3':1,'4':2,'7':3,'6':4,'2':5,'0':9}[f]||9;}   // '7'=현재공정(전표) — 출하'6'보다 앞
 
 /* ===== 생산 ③: 생산실적현황 (w_pr_list_010) — 작업장별집계/도번별상세(실측확정) ===== */
 SCREEN.prodresult=(c)=>{
