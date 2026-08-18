@@ -3011,7 +3011,7 @@ SCREEN.lgsagub=(c)=>{
   const m2ym=v=>{const s=(''+(v||'')).replace(/\D/g,'');return s.length>=6?s.slice(2,6):(s.length>=4?s.slice(0,4):'');}; // 2026-07→2607
   const rng=()=>{const q=[];if(st.df)q.push('ymd_from='+st.df);if(st.dt)q.push('ymd_to='+st.dt);if(st.biz)q.push('biz='+encodeURIComponent(st.biz));return q;};
   const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.by_biz=j.by_biz||[];st.files=j.files||[];st.ymdMin=j.ymd_min||'';st.ymdMax=j.ymd_max||'';
-      if(!st.df){st.df=st.ymdMin;st.dt=st.ymdMax;}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
+      if(!st.df){const _d=new Date();const _y=String(_d.getFullYear()%100).padStart(2,'0'),_m=String(_d.getMonth()+1).padStart(2,'0');st.df=_y+_m+'01';st.dt=_y+_m+String(_d.getDate()).padStart(2,'0');}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
   const NUMK=['qty','pmax','amt','cnt'];
   const applySort=()=>{const {k,dir}=st.sort;if(!k)return;const num=NUMK.includes(k);
     st.rows.sort((a,b)=>{let va=a[k],vb=b[k];if(num){return ((+va||0)-(+vb||0))*dir;}return (''+(va||'')).localeCompare(''+(vb||''))*dir;});};
