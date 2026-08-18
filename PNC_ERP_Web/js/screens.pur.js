@@ -3100,7 +3100,7 @@ SCREEN.lgsagub=(c)=>{
   const m2ym=v=>{const s=(''+(v||'')).replace(/\D/g,'');return s.length>=6?s.slice(2,6):(s.length>=4?s.slice(0,4):'');}; // 2026-07→2607
   const rng=()=>{const q=[];if(st.df)q.push('ymd_from='+st.df);if(st.dt)q.push('ymd_to='+st.dt);if(st.biz)q.push('biz='+encodeURIComponent(st.biz));return q;};
   const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.by_biz=j.by_biz||[];st.files=j.files||[];st.ymdMin=j.ymd_min||'';st.ymdMax=j.ymd_max||'';
-      if(!st.df){st.df=st.ymdMin;st.dt=st.ymdMax;}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
+      if(!st.df){const _d=new Date();const _y=String(_d.getFullYear()%100).padStart(2,'0'),_m=String(_d.getMonth()+1).padStart(2,'0');st.df=_y+_m+'01';st.dt=_y+_m+String(_d.getDate()).padStart(2,'0');}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};   // ★기본 기간=현재월 1일~당일
   const NUMK=['qty','pmax','amt','cnt'];
   const applySort=()=>{const {k,dir}=st.sort;if(!k)return;const num=NUMK.includes(k);
     st.rows.sort((a,b)=>{let va=a[k],vb=b[k];if(num){return ((+va||0)-(+vb||0))*dir;}return (''+(va||'')).localeCompare(''+(vb||''))*dir;});};
@@ -3660,7 +3660,7 @@ SCREEN.dongunit=(host)=>{
           return `<td style="padding:2px 4px"><input class="ge${ty==='ac'?' gac':''}" data-i="${i}" data-k="${k}" value="${esc(r[k]||'')}" ${ty==='ac'?'autocomplete="off" placeholder="자도번"':''} style="width:${w}px;${al};font-size:12px;border:1px solid #d3dcea;border-radius:4px;padding:3px 5px"></td>`;
         }).join('')+`<td class="center"><button class="grx" data-i="${i}" title="행삭제" style="border:0;background:none;color:#c0392b;cursor:pointer;font-size:14px">✕</button></td></tr>`;
       const gridHtml=()=>`<div class="wr-modal dp-modal" style="position:fixed;inset:0;z-index:1200;background:rgba(20,30,50,.44);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:38px 10px">
-        <div style="background:#fff;border-radius:12px;padding:18px 20px;width:${wide?1180:720}px;max-width:97vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
+        <div style="background:#fff;border-radius:12px;padding:18px 20px;width:${wide?1500:720}px;max-width:98vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
          <div style="font-weight:700;font-size:15px;margin-bottom:12px">➕ 도입-${wide?'수입':'수출'} 다건 입력 <span style="font-size:12px;color:#888;font-weight:400">· 거래처 먼저 선택 → 그 거래처 품번 검색</span></div>
          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:#f4f7fc;border-radius:8px">
            <label class="fl">${wide?'입고일자':'출고일자'}</label><input class="gh" data-k="ymd" type="date" value="${esc(dIn(G.ymd))}" style="width:145px">
