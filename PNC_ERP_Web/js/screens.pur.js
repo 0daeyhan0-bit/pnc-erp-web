@@ -259,8 +259,9 @@ SCREEN.receiptdetail=(c)=>{
     rate:{h:'환율',cls:'num',get:r=>rateD(r)},
     cost:{h:'단가',cls:'num',get:r=>won(r.cost)},
     amt:{h:'금액',cls:'num gstock',get:r=>wonI(r.amt)},
+    kamt:{h:'금액(KRW)',cls:'num',get:r=>wonI(r.kamt)},
   };
-  const TAIL=['unit','qty','wt','cur','rate','cost','amt'];
+  const TAIL=['unit','qty','wt','cur','rate','cost','amt','kamt'];
   const ITEM=['mat','nm','spec','diam','thick','length','lg','sg'];
   const MODES={
     day:      {label:'일자별',      lead:['ymd','seq','cnm','ct','chg','ym'].concat(ITEM), sort:['ymd','seq']},
@@ -326,26 +327,26 @@ SCREEN.receiptdetail=(c)=>{
         &&(!mq||(''+r.mat).toLowerCase().includes(mq)||(''+r.nm).toLowerCase().includes(mq)));};
     const rowHtml=r=>`<tr>${order.map(k=>{const cd=CD[k],cap=cd.cls.indexOf('cap')>=0,v=cd.get(r);return `<td class="${cd.cls}"${cap?` title="${esc((''+(k==='cnm'?r.cnm:k==='nm'?r.nm:k==='spec'?r.spec:k==='ct'?ctN(r.ct):'')))}"`:''}>${v}</td>`;}).join('')}</tr>`;
     /* receiptdetail-live */
-    const subRow=(label,q,a,g)=>`<tr class="${g||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td></tr>`;
+    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
     const render=()=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
       cur=lines; let html='';
       if(!cfg.g1){ lines.slice(0,RENDER_CAP).forEach(r=>html+=rowHtml(r)); if(lines.length>RENDER_CAP)html+=`<tr><td colspan="${order.length}" class="empty" style="color:#8a6d1c">상위 ${won(RENDER_CAP)}행만 표시 · 전체 ${won(lines.length)}행은 검색어로 좁히거나 엑셀 다운로드</td></tr>`; }
-      else { let g1v=null,g2v=null,s1q=0,s1a=0,s2q=0,s2a=0;
+      else { let g1v=null,g2v=null,s1q=0,s1a=0,s1k=0,s2q=0,s2a=0,s2k=0;
         lines.forEach(r=>{const v1=r[cfg.g1], v2=cfg.g2?r[cfg.g2]:null;
-          if(g1v!==null && v1!==g1v){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a); html+=subRow(cfg.l1,s1q,s1a); s1q=s1a=s2q=s2a=0; g2v=null; }
-          else if(cfg.g2 && g2v!==null && v2!==g2v){ html+=subRow(cfg.l2,s2q,s2a); s2q=s2a=0; }
-          html+=rowHtml(r); s1q+=+r.qty||0; s1a+=+r.amt||0; s2q+=+r.qty||0; s2a+=+r.amt||0; g1v=v1; g2v=v2; });
-        if(g1v!==null){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a); html+=subRow(cfg.l1,s1q,s1a); }
+          if(g1v!==null && v1!==g1v){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a,s2k); html+=subRow(cfg.l1,s1q,s1a,s1k); s1q=s1a=s1k=s2q=s2a=s2k=0; g2v=null; }
+          else if(cfg.g2 && g2v!==null && v2!==g2v){ html+=subRow(cfg.l2,s2q,s2a,s2k); s2q=s2a=s2k=0; }
+          html+=rowHtml(r); s1q+=+r.qty||0; s1a+=+r.amt||0; s1k+=+r.kamt||0; s2q+=+r.qty||0; s2a+=+r.amt||0; s2k+=+r.kamt||0; g1v=v1; g2v=v2; });
+        if(g1v!==null){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a,s2k); html+=subRow(cfg.l1,s1q,s1a,s1k); }
       }
-      const tq=lines.reduce((a,b)=>a+(+b.qty||0),0), ta=lines.reduce((a,b)=>a+(+b.amt||0),0);
-      html+=subRow('총계',tq,ta,'grandtot');
+      const tq=lines.reduce((a,b)=>a+(+b.qty||0),0), ta=lines.reduce((a,b)=>a+(+b.amt||0),0), tk=lines.reduce((a,b)=>a+(+b.kamt||0),0);
+      html+=subRow('총계',tq,ta,tk,'grandtot');
       c.querySelector('#th').innerHTML=`<tr>${order.map(k=>`<th class="${CD[k].cls}">${CD[k].h}</th>`).join('')}</tr>`;
       c.querySelector('#body').innerHTML=loading?`<tr><td colspan="${order.length}" class="empty">${SPIN}라이브 조회 중…</td></tr>`
         :(msg?`<tr><td colspan="${order.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
         :(lines.length?html:`<tr><td colspan="${order.length}" class="empty">결과 없음</td></tr>`));
-      c.querySelector('#sum').innerHTML=`<div class="s-item">라인 <b>${won(lines.length)}</b></div><div class="s-item">입고수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">금액 합계 <b>${wonI(ta)} 원</b></div>`;
+      c.querySelector('#sum').innerHTML=`<div class="s-item">라인 <b>${won(lines.length)}</b></div><div class="s-item">입고수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">금액 합계 <b>${wonI(ta)} 원</b></div><div class="s-item ${tk<0?'neg':''}">금액(KRW) 합계 <b>${wonI(tk)} 원</b></div>`;
       c.querySelector('#cnt').textContent=`${lines.length}라인 / 대상 ${pool.length}라인`;
       attachResizers(c);
     };
@@ -363,7 +364,7 @@ SCREEN.receiptdetail=(c)=>{
     c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curMq='';curCq='';curLg='';curSg='';curCt='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h);
-      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,ym:r=>fmtYm(r.ym),cnm:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,diam:r=>r.diam,thick:r=>r.thick,length:r=>r.length,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt)};
+      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,ym:r=>fmtYm(r.ym),cnm:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,diam:r=>r.diam,thick:r=>r.thick,length:r=>r.length,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt),kamt:r=>Math.round(r.kamt)};
       downloadCSV('확정입고명세서_'+gijun+'_'+mode+'.csv',hd,cur.map(r=>order.map(k=>raw[k](r))));
     };
     render();
@@ -399,8 +400,9 @@ SCREEN.dispatchdetail=(c)=>{
     rate:{h:'환율',cls:'num',get:r=>rateD(r)},
     cost:{h:'단가',cls:'num',get:r=>won(r.cost)},
     amt:{h:'금액',cls:'num gstock',get:r=>wonI(r.amt)},
+    kamt:{h:'금액(KRW)',cls:'num',get:r=>wonI(r.kamt)},
   };
-  const TAIL=['unit','qty','wt','cur','rate','cost','amt'];
+  const TAIL=['unit','qty','wt','cur','rate','cost','amt','kamt'];
   const MODES={
     day:      {label:'일자별',       lead:['ymd','seq','cc','ct','chg','ic','mat','nm','spec','lg','sg','incust'], sort:['ymd','seq']},
     cust:     {label:'불출처별',      lead:['cc','ct','chg','ymd','seq','ic','mat','nm','spec','lg','sg','incust'], sort:['cc','ymd','seq'], g1:'cc',g2:'ymd',l1:'불출처소계',l2:'일계'},
@@ -462,7 +464,7 @@ SCREEN.dispatchdetail=(c)=>{
         &&(!mq||(''+r.mat).toLowerCase().includes(mq)||(''+r.nm).toLowerCase().includes(mq)));};
     const rowHtml=r=>`<tr>${order.map(k=>{const cd=CD[k],cap=cd.cls.indexOf('cap')>=0,v=cd.get(r);return `<td class="${cd.cls}"${cap?` title="${esc((''+(k==='cc'?r.cnm:k==='nm'?r.nm:k==='spec'?r.spec:k==='incust'?r.incust:k==='ct'?ctN(r.ct):'')))}"`:''}>${v}</td>`;}).join('')}</tr>`;
     /* dispatchdetail-live */
-    const subRow=(label,q,a,g)=>`<tr class="${g||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td></tr>`;
+    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
     const render=()=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
@@ -470,21 +472,21 @@ SCREEN.dispatchdetail=(c)=>{
       let html='';
       if(!cfg.g1){ lines.slice(0,RENDER_CAP).forEach(r=>html+=rowHtml(r)); if(lines.length>RENDER_CAP)html+=`<tr><td colspan="${order.length}" class="empty" style="color:#8a6d1c">상위 ${won(RENDER_CAP)}행만 표시 · 전체 ${won(lines.length)}행은 검색어로 좁히거나 엑셀 다운로드</td></tr>`; }
       else {
-        let g1v=null,g2v=null,s1q=0,s1a=0,s2q=0,s2a=0;
+        let g1v=null,g2v=null,s1q=0,s1a=0,s1k=0,s2q=0,s2a=0,s2k=0;
         lines.forEach(r=>{const v1=r[cfg.g1], v2=cfg.g2?r[cfg.g2]:null;
-          if(g1v!==null && v1!==g1v){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a); html+=subRow(cfg.l1,s1q,s1a); s1q=s1a=s2q=s2a=0; g2v=null; }
-          else if(cfg.g2 && g2v!==null && v2!==g2v){ html+=subRow(cfg.l2,s2q,s2a); s2q=s2a=0; }
+          if(g1v!==null && v1!==g1v){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a,s2k); html+=subRow(cfg.l1,s1q,s1a,s1k); s1q=s1a=s1k=s2q=s2a=s2k=0; g2v=null; }
+          else if(cfg.g2 && g2v!==null && v2!==g2v){ html+=subRow(cfg.l2,s2q,s2a,s2k); s2q=s2a=s2k=0; }
           html+=rowHtml(r);
-          s1q+=+r.qty||0; s1a+=+r.amt||0; s2q+=+r.qty||0; s2a+=+r.amt||0; g1v=v1; g2v=v2; });
-        if(g1v!==null){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a); html+=subRow(cfg.l1,s1q,s1a); }
+          s1q+=+r.qty||0; s1a+=+r.amt||0; s1k+=+r.kamt||0; s2q+=+r.qty||0; s2a+=+r.amt||0; s2k+=+r.kamt||0; g1v=v1; g2v=v2; });
+        if(g1v!==null){ if(cfg.g2)html+=subRow(cfg.l2,s2q,s2a,s2k); html+=subRow(cfg.l1,s1q,s1a,s1k); }
       }
-      const tq=lines.reduce((a,b)=>a+(+b.qty||0),0), ta=lines.reduce((a,b)=>a+(+b.amt||0),0);
-      html+=subRow('총계',tq,ta,'grandtot');
+      const tq=lines.reduce((a,b)=>a+(+b.qty||0),0), ta=lines.reduce((a,b)=>a+(+b.amt||0),0), tk=lines.reduce((a,b)=>a+(+b.kamt||0),0);
+      html+=subRow('총계',tq,ta,tk,'grandtot');
       c.querySelector('#th').innerHTML=`<tr>${order.map(k=>`<th class="${CD[k].cls}">${CD[k].h}</th>`).join('')}</tr>`;
       c.querySelector('#body').innerHTML=loading?`<tr><td colspan="${order.length}" class="empty">${SPIN}라이브 조회 중…</td></tr>`
         :(msg?`<tr><td colspan="${order.length}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
         :(lines.length?html:`<tr><td colspan="${order.length}" class="empty">결과 없음</td></tr>`));
-      c.querySelector('#sum').innerHTML=`<div class="s-item">라인 <b>${won(lines.length)}</b></div><div class="s-item">수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">금액 합계 <b>${wonI(ta)} 원</b></div>`;
+      c.querySelector('#sum').innerHTML=`<div class="s-item">라인 <b>${won(lines.length)}</b></div><div class="s-item">수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">금액 합계 <b>${wonI(ta)} 원</b></div><div class="s-item ${tk<0?'neg':''}">금액(KRW) 합계 <b>${wonI(tk)} 원</b></div>`;
       c.querySelector('#cnt').textContent=`${lines.length}라인 / 대상 ${pool.length}라인`;
       attachResizers(c);
     };
@@ -500,7 +502,7 @@ SCREEN.dispatchdetail=(c)=>{
     c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curCq='';curLg='';curSg='';curCt='';curMq='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h.replace(/<[^>]+>/g,''));
-      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,cc:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),ic:r=>r.ic,mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),incust:r=>r.incust,unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt)};
+      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,cc:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),ic:r=>r.ic,mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),incust:r=>r.incust,unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt),kamt:r=>Math.round(r.kamt)};
       downloadCSV('자재불출명세서_'+gijun+'_'+mode+'.csv',hd,cur.map(r=>order.map(k=>raw[k](r))));
     };
     render();
