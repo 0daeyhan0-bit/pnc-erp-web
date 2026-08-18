@@ -94,6 +94,79 @@ def dopip_save(p: dict = Body(...)):
     finally:
         cn.close()
 
+@router.get("/api/dopip/vendors")
+def dopip_vendors(kind: str = Query("pur"), q: str = Query("")):
+    """도입 거래처 오토컴플리트(해당 division 도입이력에 등장한 거래처만). 거래처 먼저 선택용."""
+    tag, _ = _kd(kind); qq = f"%{q.strip()}%"
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT TOP 40 a.CUST_CODE, MAX(ISNULL(c.CUST_DESC,'')) nm, MAX(a.MAINT_YMD) lastymd
+              FROM nx.PU_T_STOCK_MAINT_C a LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=a.CUST_CODE
+              WHERE a.DIVISION=? AND a.CUST_CODE>'' AND (a.CUST_CODE LIKE ? OR ISNULL(c.CUST_DESC,'') LIKE ?)
+              GROUP BY a.CUST_CODE ORDER BY MAX(a.MAINT_YMD) DESC""", tag, qq, qq)
+        rows = [{"code": str(r[0]).strip(), "name": (str(r[1]).strip() or str(r[0]).strip())} for r in cur.fetchall()]
+        return {"rows": rows}
+    finally:
+        cn.close()
+
+@router.get("/api/dopip/items")
+def dopip_items(kind: str = Query("pur"), cust: str = Query(""), q: str = Query("")):
+    """선택 거래처가 도입한 품번 오토컴플리트(+ 최근 단가·통화). 거래처 미선택시 빈 목록."""
+    tag, _ = _kd(kind); cust = cust.strip()
+    if not cust:
+        return {"rows": []}
+    qq = f"%{q.strip()}%"
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT mat, nm, cost, cur FROM (
+              SELECT a.MAT_CODE mat, ISNULL(i.ITEM_DESC,'') nm, ISNULL(a.MAINT_COST,0) cost, ISNULL(a.CURRENCY,'') cur,
+                ROW_NUMBER() OVER(PARTITION BY a.MAT_CODE ORDER BY a.MAINT_YMD DESC, a.MAINT_SEQ DESC) rn
+              FROM nx.PU_T_STOCK_MAINT_C a LEFT JOIN nx.PR_M_ITEM i ON i.ITEM_CODE=a.MAT_CODE
+              WHERE a.DIVISION=? AND a.CUST_CODE=? AND a.MAT_CODE>'' AND (a.MAT_CODE LIKE ? OR ISNULL(i.ITEM_DESC,'') LIKE ?)
+            ) x WHERE rn=1 ORDER BY mat""", tag, cust, qq, qq)
+        rows = [{"mat": str(r[0]).strip(), "nm": str(r[1]).strip(), "cost": float(r[2] or 0), "cur": str(r[3] or '').strip()} for r in cur.fetchall()]
+        return {"rows": rows[:40]}
+    finally:
+        cn.close()
+
+@router.post("/api/dopip/save_batch")
+def dopip_save_batch(p: dict = Body(...)):
+    """다건 입력(레거시 w_pu_stock_c_045 그리드): 헤더(일자·거래처·통화·환율) 공유 + 행별(품번·수량·단가·관세·운임·신고·BL·HS).
+       한 번 = 한 SHEET_NO, 행마다 MAINT_SEQ 증가. 금액=수량×단가."""
+    kind = str(p.get("kind", "pur")); tag, _ = _kd(kind)
+    ymd = _d6(str(p.get("ymd", "")).strip())
+    if len(ymd) != 6: raise HTTPException(400, "일자(YYMMDD) 필요")
+    cust = str(p.get("cust", "")).strip()
+    if not cust: raise HTTPException(400, "거래처 필수")
+    cur_ccy = str(p.get("cur", "USD")).strip() or "USD"
+    rate = float(p.get("rate") or 0)
+    rows = p.get("rows") or []
+    valid = [r for r in rows if str(r.get("mat", "")).strip() and float(r.get("qty") or 0) != 0]
+    if not valid: raise HTTPException(400, "품목 행 1개 이상(품번·수량) 필요")
+    cn = _nx(); c = cn.cursor()
+    try:
+        nseq = int(c.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=?", ymd).fetchone()[0])
+        sheet = int(c.execute("SELECT ISNULL(MAX(SHEET_NO),0)+1 FROM nx.PU_T_STOCK_MAINT_C WHERE DIVISION=?", tag).fetchone()[0])
+        ins = 0; seqs = []
+        for r in valid:
+            nseq += 1
+            mat = str(r.get("mat", "")).strip(); qty = float(r.get("qty") or 0); cost = float(r.get("cost") or 0)
+            amt = round(qty * cost, 4)
+            duty = float(r.get("duty") or 0); fare = float(r.get("fare") or 0); tax = float(r.get("tax") or 0)
+            insp = str(r.get("insp", "")).strip(); bl = str(r.get("bl", "")).strip(); hs = str(r.get("hs", "")).strip()
+            remarks = str(r.get("remarks", "")).strip()
+            c.execute("""INSERT INTO nx.PU_T_STOCK_MAINT_C
+                  (MAINT_YMD,MAINT_SEQ,MAINT_TAG,DIVISION,SHEET_NO,CUST_CODE,MAT_CODE,MAINT_QTY,MAINT_AMT,
+                   CURRENCY,MAINT_COST,EXCHANGE_RATE,REMARKS,CUSTOMS_DUTIES,TRANSPORTATION_FATE,TAX_TABLE,
+                   INSP_SEQ,BL_SEQ,HS_CODE,INSERT_DATETIME,INSERT_USER_ID)
+                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,getdate(),'web')""",
+                ymd, nseq, tag, tag, sheet, cust, mat, qty, amt, cur_ccy, cost, rate, remarks, duty, fare, tax, insp, bl, hs)
+            ins += 1; seqs.append(nseq)
+        cn.commit()
+        return {"ok": True, "inserted": ins, "ymd": ymd, "sheet": sheet, "seqs": seqs}
+    finally:
+        cn.close()
+
 @router.post("/api/dopip/delete")
 def dopip_delete(p: dict = Body(...)):
     kind = str(p.get("kind", "pur")); tag, _ = _kd(kind)
