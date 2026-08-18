@@ -226,12 +226,20 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
+        # 절삭/설치 구분 = nx.item.cut_gubun(품목마스터 속성, 크로스DB). 절삭/설치/분지관/이지링크.
+        cutm = {}
+        try:
+            cur.execute("SELECT item_code, ISNULL(cut_gubun,'') FROM PARTNER_ERP_TEST3.nx.item WHERE cut_gubun>''")
+            for ic, g0 in cur.fetchall(): cutm[str(ic).strip().upper()] = str(g0).strip()
+        except Exception:
+            pass
         agg = {}; days = set()
         for item, ymd, s, qty in src:
             days.add(ymd)
             g = agg.get(item)
             if not g:
-                g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0), "gdays": {}, "ndays": {}}
+                g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0),
+                     "cut": cutm.get(item.upper(), ""), "gdays": {}, "ndays": {}}
                 agg[item] = g
             g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty
             if not (s == 'u4' and ymd == base_ymd):   # ★차감: pr_t_plan_input(u4) 첫날분 제외 (레거시190 정본)
@@ -296,13 +304,19 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
         cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
+        cutm = {}
+        try:
+            cur.execute("SELECT item_code, ISNULL(cut_gubun,'') FROM PARTNER_ERP_TEST3.nx.item WHERE cut_gubun>''")
+            for ic, g0 in cur.fetchall(): cutm[str(ic).strip().upper()] = str(g0).strip()
+        except Exception:
+            pass
         agg = {}; days = set()
         for item, ymd, s, qty in src:
             days.add(ymd)
             g = agg.get(item)
             if not g:
                 g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": sac.get(item, 0),
-                     "gdays": {}, "ndays": {}}
+                     "cut": cutm.get(item.upper(), ""), "gdays": {}, "ndays": {}}
                 agg[item] = g
             g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty
             if not (s == 'u4' and ymd == base_ymd):

@@ -82,7 +82,7 @@ def bom_get(item: str = Query(..., description="품번")):
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT item_name, item_type FROM nx.item WHERE item_code=?", item)
+        cur.execute("SELECT item_name, item_type, ISNULL(cut_gubun,'') FROM nx.item WHERE item_code=?", item)
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품목 {item} 없음")
@@ -92,7 +92,7 @@ def bom_get(item: str = Query(..., description="품번")):
         cur.execute("SELECT bom_id, version, status FROM nx.bom_header WHERE item_code=?", item)
         h = cur.fetchone()
         if not h:
-            return {"item": item, "name": pi[0], "header": None, "lines": [], "procs": procs}
+            return {"item": item, "name": pi[0], "cut_gubun": pi[2], "header": None, "lines": [], "procs": procs}
         bom_id = h[0]
         cur.execute("""
             SELECT l.seq, l.child_item, ci.item_name, l.qty, l.node_type,
@@ -114,7 +114,7 @@ def bom_get(item: str = Query(..., description="품번")):
             for k, v in zip(cols, r):
                 d[k] = bool(v) if isinstance(v, bool) else v
             lines.append(d)
-        return {"item": item, "name": pi[0], "type": pi[1],
+        return {"item": item, "name": pi[0], "type": pi[1], "cut_gubun": pi[2],
                 "header": {"bom_id": bom_id, "version": h[1], "status": h[2]}, "lines": lines, "procs": procs}
     finally:
         cn.close()
@@ -829,6 +829,24 @@ def item_spec(payload: dict = Body(...)):
         n = cur.rowcount
         _reset_cost_engine()
         return {"ok": n > 0, "updated": int(n)}
+    finally:
+        cn.close()
+
+@router.post("/api/item/cutgubun")
+def item_cutgubun(payload: dict = Body(...)):
+    """품목 절삭/설치 구분(cut_gubun) 단건 수정 — nx.item.cut_gubun. 값: 절삭/설치/분지관/이지링크/빈값(미분류).
+       경영 대시보드·영업예상매출 절삭/설치 분류의 정본(품목마스터 속성). 원가 무영향."""
+    code = str(payload.get("item_code", "")).strip()
+    if not code:
+        raise HTTPException(400, "item_code 필요")
+    g = str(payload.get("cut_gubun", "")).strip()
+    if g not in ("", "절삭", "설치", "분지관", "이지링크"):
+        raise HTTPException(400, "cut_gubun 값 오류(절삭/설치/분지관/이지링크/빈값)")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("IF COL_LENGTH('nx.item','cut_gubun') IS NULL ALTER TABLE nx.item ADD cut_gubun nvarchar(20)")
+        cur.execute("UPDATE nx.item SET cut_gubun=NULLIF(?,'') WHERE item_code=?", g, code)
+        return {"ok": cur.rowcount > 0, "updated": int(cur.rowcount)}
     finally:
         cn.close()
 
