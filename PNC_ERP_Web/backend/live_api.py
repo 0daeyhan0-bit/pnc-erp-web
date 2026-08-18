@@ -365,7 +365,8 @@ def dailypurissue(date: str = Query("")):
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
     hyeon_cut, hyeon_seol = round(cutm.get('절삭', 0)), round(cutm.get('설치', 0))
-    lg_sales = hyeon_cut + hyeon_seol   # LG매출액(현매출 합계) = ②의 분모, 절삭매출=사급율 분모
+    hyeon_etc = round(sum(v for k, v in cutm.items() if k not in ('절삭', '설치')))   # 이지링크/분지관/미분류
+    lg_sales = hyeon_cut + hyeon_seol + hyeon_etc   # LG매출액=현매출합계=전체 리시빙(원리포트 매출합계와 동일). ②분모.
 
     # ④ 사급율 원천 = OSP(nx.lg_sagub_actual) 월초~조회일. 원소재(TUBE)/부품.
     _c, ro = _rows(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END t,
@@ -385,7 +386,7 @@ def dailypurissue(date: str = Query("")):
     return {"date": d6, "ym": ym,
             "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
             # ⑤ 현매출 / ② 매입비율
-            "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "lg_sales": lg_sales},
+            "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales},
             # ④ 사급율
