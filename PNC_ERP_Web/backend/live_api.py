@@ -207,8 +207,10 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
       SELECT UPPER(mat_code) cd, SUM(in_qty) iq, SUM(in_amt) ia, SUM(out_qty) oq, SUM(out_amt) oa
       FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd BETWEEN ? AND ? GROUP BY UPPER(mat_code)),
     endd AS (
-      SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa, avg_cost avg
-      FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd=?),
+      SELECT cd, sq, sa, avg FROM (
+        SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa, avg_cost avg,
+          ROW_NUMBER() OVER(PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
+        FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd <= ?) x WHERE rn=1),
     beg AS (
       SELECT cd, sq, sa FROM (
         SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa,
