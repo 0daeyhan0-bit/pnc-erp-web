@@ -829,7 +829,13 @@ SCREEN.costanalysis=(c)=>{
     renderBody();
     {const xls=c.querySelector('#ca-xls'); if(xls)xls.onclick=caExport;}
     c.querySelectorAll('.ca-mode').forEach(b=>b.onclick=()=>{mode=b.dataset.mode; if(mode==='recv')sortI=20; else if([1,20,22].includes(sortI))sortI=21; dir=-1; draw();});
-    c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{const si=+th.dataset.si;if(sortI===si)dir=-dir;else{sortI=si;dir=-1;}draw();});
+    // ★정렬 = 클라이언트만(draw 전체재렌더/재조회 금지). 헤더(정렬표시)만 교체+재바인딩 후 body만 갱신.
+    const bindSort=()=>c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
+      const si=+th.dataset.si; if(sortI===si)dir=-dir; else{sortI=si;dir=-1;}
+      const th0=c.querySelector('.ca-tbl thead'); if(th0){th0.outerHTML=headHTML();bindSort();}
+      renderBody();
+    });
+    bindSort();
     if(mode==='recv'){
       c.querySelector('#ca-go').onclick=()=>{
         const f=c.querySelector('#ca-from').value;
