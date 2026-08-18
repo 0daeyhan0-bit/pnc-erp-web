@@ -741,6 +741,18 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         _prep(cur)
         ch, sg310 = _parts_maps(cur)
         rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
+        # ② IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합. ★이 OSP 목록 자체가 '사급부품 정의' = 전개 정지점.
+        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
+              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a,
+              SUM(ISNULL(amt,0))/NULLIF(SUM(ISNULL(qty,0)),0) p
+            FROM nx.lg_sagub_actual WHERE ym IN ({inl}) AND UPPER(item_name) NOT LIKE '%TUBE%'
+            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
+        in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
+        # ★전개 정지=OSP 목록(SGROUP=310 아님). 310으로만 멈추면 MAZ30083301(sg230, 구매단가)처럼
+        #   310 아닌 사급부품을 통째로 놓침. OSP에 있는 부품이면 어디서든 정지·계상.
+        osp_set = set(in_map)
+        # ③ 리시빙 → 사급부품 소요개수 (C+R 전부. R은 반품 아니라 정상 리시빙 다른 구분)
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
               SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qc,
               SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qr
@@ -749,42 +761,45 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         memo = {}
         out_c = {}; out_r = {}   # 사급부품별 OUT 소요개수
         for it, qc, qr in recv:
-            pmap = _explode_parts(it, ch, sg310, memo)
+            pmap = _explode_parts(it, ch, osp_set, memo)   # ★정지=OSP
             for part, per in pmap.items():
                 out_c[part] = out_c.get(part, 0.0) + qc * per
                 out_r[part] = out_r.get(part, 0.0) + qr * per
-        # IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합, 평균단가=금액/수량
-        inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
-        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))) it, MAX(item_name) nm,
-              SUM(ISNULL(qty,0)) q, SUM(ISNULL(amt,0)) a,
-              SUM(ISNULL(amt,0))/NULLIF(SUM(ISNULL(qty,0)),0) p
-            FROM nx.lg_sagub_actual WHERE ym IN ({inl}) AND UPPER(item_name) NOT LIKE '%TUBE%'
-            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
-        in_map = {r[0]: {"nm": r[1], "q": f(r[2]), "a": f(r[3]), "p": f(r[4])} for r in cur.fetchall()}
-        # 품명 보강
-        nm = {}
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
-        for a, b in cur.fetchall():
-            nm[a] = b
-        # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. OSP에 없는 소비부품은 사급 아님 → 제외.
+        # ★① 우리 ERP 확정입고(입고기준): 확정입고집계표와 동일 원천 = PU_T_STOCK_MAINT(9/S/C/G/H 검사통과)+_C(수입 DIVISION=P). MAT_CODE별 기간합.
+        erp_map = {}
+        if yms:
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(mat))) it, SUM(qty) q FROM (
+                  SELECT MAT_CODE mat, CONVERT(float,ISNULL(MAINT_QTY,0)) qty FROM nx.PU_T_STOCK_MAINT
+                    WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND MAINT_TAG IN ('9','S','C','G','H')
+                      AND ((ISNULL(INSP_FLAG,'N') IN ('','N')) OR (ISNULL(INSP_FLAG,'N') IN ('S','F') AND INSP_PROC_YMD >= ''))
+                  UNION ALL
+                  SELECT MAT_CODE, CONVERT(float,ISNULL(MAINT_QTY,0)) FROM nx.PU_T_STOCK_MAINT_C
+                    WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND DIVISION='P'
+                ) t GROUP BY UPPER(LTRIM(RTRIM(mat)))""")
+            for r in cur.fetchall():
+                erp_map[r[0]] = f(r[1])
+        # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. 품명은 OSP(in_map)에 이미 있음(nx.item 전체조회 제거=속도).
         parts = set(in_map)
         items = []
-        tot_out_c = tot_out_r = tot_in_q = tot_in_a = 0.0
+        tot_out = tot_in_q = tot_in_a = tot_erp = 0.0
         for p in parts:
-            oc = out_c.get(p, 0.0); orr = out_r.get(p, 0.0)
+            # ★소비 = C+R 전부. GUBUN='R'은 반품이 아니라 정상 리시빙의 다른 구분(R전용 제품 다수)이라
+            #   C만 세면 그 제품들의 부품이 통째로 0이 됨(EAP65270720 등). C+R로 ③/②=0.72→0.97 검증.
+            oc = out_c.get(p, 0.0) + out_r.get(p, 0.0)
             ind = in_map.get(p, {})
             iq = ind.get("q", 0.0); ia = ind.get("a", 0.0); price = ind.get("p", 0.0)
-            tot_out_c += oc; tot_out_r += orr; tot_in_q += iq; tot_in_a += ia
-            # ★반품(R) 차감 제거: GUBUN='R'은 진짜 반품 아님(R품목 75종 중 C에도 있는 건 5종뿐·비율54%비현실적)
-            #   + 레거시 정본은 GUBUN을 차원으로만 유지(C−R 순계산 없음). 소비=C만. diff=IN−소비(C).
-            items.append({"item": p, "name": ind.get("nm") or nm.get(p, ""),
-                          "out_c": oc, "out_r": orr, "out_net": oc,
+            ei = erp_map.get(p, 0.0)   # ① 우리 ERP 확정입고
+            tot_out += oc; tot_in_q += iq; tot_in_a += ia; tot_erp += ei
+            # ★3-way: ①우리ERP입고(erp_in) vs ②LG OSP(in_qty) vs ③LG리시빙소비(out_net=C+R).
+            #   ①≈② 정상(둘 다 공급)·③≈② 정상(넓은 기간)·diff_erp=②−①(기록불일치)·diff=②−③(선입고).
+            items.append({"item": p, "name": ind.get("nm") or "",
+                          "erp_in": ei, "out_net": oc,
                           "in_qty": iq, "in_amt": ia, "price": price,
-                          "diff": iq - oc})
-        items.sort(key=lambda x: -(abs(x["out_net"]) + x["in_qty"]))
+                          "diff": iq - oc, "diff_erp": iq - ei})
+        items.sort(key=lambda x: -(x["in_qty"] + x["erp_in"] + abs(x["out_net"])))
         return {
             "ym": ym.strip(),
-            "summary": {"out_net": tot_out_c, "out_c": tot_out_c, "out_r": tot_out_r,
+            "summary": {"erp_in": tot_erp, "out_net": tot_out,
                         "in_qty": tot_in_q, "in_amt": tot_in_a, "parts": len(parts)},
             "items": items[:int(limit)],
         }
