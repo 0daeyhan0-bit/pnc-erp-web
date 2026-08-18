@@ -29,11 +29,16 @@ if ($Restart) {
 }
 
 Write-Host "[3/3] 헬스체크..." -ForegroundColor Cyan
-Start-Sleep 3
+Start-Sleep 6   # 재기동 직후 콜드스타트 워밍 대기(첫 요청 실패 방지)
 foreach ($p in @('/','/openapi.json')) {
-  try { $r = Invoke-WebRequest "$health$p" -UseBasicParsing -TimeoutSec 20
-        Write-Host ("  OK  {0} -> {1}" -f $p, $r.StatusCode) -ForegroundColor Green }
-  catch { Write-Host ("  X   {0} -> {1}" -f $p, $_.Exception.Message) -ForegroundColor Yellow }
+  # 워밍 재시도 3회(0.5초 콜드-500/연결오류 흡수). -f 대신 문자열결합(예외메시지 내 특수문자 안전).
+  $ok = $false; $last = ''
+  for ($i = 0; $i -lt 3 -and -not $ok; $i++) {
+    try { $r = Invoke-WebRequest "$health$p" -UseBasicParsing -TimeoutSec 20
+          Write-Host ("  OK  " + $p + " -> " + $r.StatusCode) -ForegroundColor Green; $ok = $true }
+    catch { $last = "$($_.Exception.Message)"; Start-Sleep 2 }
+  }
+  if (-not $ok) { Write-Host ("  X   " + $p + " -> " + $last) -ForegroundColor Yellow }
 }
 Write-Host "`n✅ 배포(pull) 완료." -ForegroundColor Green
 Write-Host "★프론트(js/html) 변경: 직원 브라우저 Ctrl+F5. (index.html ?v= 는 커밋에 포함되어 옴)" -ForegroundColor Yellow
