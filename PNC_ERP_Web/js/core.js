@@ -104,6 +104,7 @@ const MODULES=[
  {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
    {id:'mat',ic:'📦',nm:'자재목록조회'},
    {id:'matledger',ic:'📒',nm:'자재수불장'},
+   {id:'matclose',ic:'📗',nm:'자재 일마감(이동평균)'},
    {id:'dispatchdetail',ic:'📋',nm:'자재불출명세서'},
    {id:'dispatch',ic:'📤',nm:'자재불출집계표'},
    {id:'receiptdetail',ic:'🧾',nm:'자재입고명세서'},
