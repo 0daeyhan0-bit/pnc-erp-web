@@ -733,6 +733,9 @@ def saleout_copy(payload: dict = Body(...)):
         r = cur.fetchone()
         if not r:
             raise HTTPException(404, "원본 없음")
+        is_closed = _sale_close_lookup(cur)   # ★마감잠금(규칙B): 마감된 기간으로 복사 차단
+        if is_closed(r[1], r[0]):
+            raise HTTPException(409, f"매출마감된 기간({r[0]})으로는 복사할 수 없습니다.")
         cur.execute("SELECT ISNULL(MAX(maint_seq),0)+1 FROM nx.saleout_maint WHERE sheet_no=?", r[2])
         seq = int(cur.fetchone()[0])
         cur.execute("""INSERT INTO nx.saleout_maint(maint_ymd,maint_seq,maint_tag,cust_code,sheet_no,mat_code,maint_qty,
@@ -756,6 +759,11 @@ def saleout_carryover(payload: dict = Body(...)):
     cn = _nx(); cur = cn.cursor()
     try:
         ph = ",".join("?" * len(ids))
+        is_closed = _sale_close_lookup(cur)   # ★마감잠금(규칙B): 원본기간·이월대상기간 어느쪽이든 마감이면 이월 차단
+        cur.execute(f"SELECT id, cust_code, maint_ymd FROM nx.saleout_maint WHERE maint_tag='5' AND id IN ({ph})", *[int(x) for x in ids])
+        locked = [str(r[0]) for r in cur.fetchall() if is_closed(r[1], r[2]) or is_closed(r[1], ymd)]
+        if locked:
+            raise HTTPException(409, f"매출마감된 기간이 포함되어 이월할 수 없습니다(id: {','.join(locked)}).")
         cur.execute(f"""UPDATE nx.saleout_maint SET carryover_ymd=maint_ymd, maint_ymd=?, upd_user='web', update_datetime=getdate()
             WHERE maint_tag='5' AND id IN ({ph})""", ymd, *[int(x) for x in ids])
         n = cur.rowcount
