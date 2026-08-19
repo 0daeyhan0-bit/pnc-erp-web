@@ -1,0 +1,16 @@
+# PNC 차세대 웹 ERP — 백엔드 의존 패키지
+#
+# 입서버에만 설치하면 됩니다. 직원 PC(브라우저)에는 불필요 —
+#   바코드/QR 이미지는 백엔드가 생성해 <img>로 내려주는 구조라 클라이언트 의존성이 없습니다.
+#
+# 설치:  python -m pip install -r requirements.txt
+# 대상:  운영 서버 184(8010) · 각자 개발 PC에서 백엔드를 띄울 때
+#
+# ※DB 접속정보(db_client.py)는 repo 밖 sibling(../New_ERP/)에 별도 배치 — CLAUDE.md §8 참조.
+
+fastapi==0.133.1
+uvicorn==0.41.0
+pyodbc==5.3.0          # MSSQL 접속 (PARTNER_ERP 조회 / nx 쓰기)
+openpyxl==3.1.5        # 엑셀 업로드·다운로드
+Pillow==12.2.0         # Code128 바코드 이미지 생성(외부 바코드 패키지 없이 직접 렌더)
+qrcode==8.2            # 제품스티커 QR 생성 (2026-08-19 추가 — 없으면 QR 라벨만 안 나옴)

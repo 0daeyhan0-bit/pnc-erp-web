@@ -107,7 +107,10 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         # ── 충당 소스 조회(라이브 직독, SP 소스와 동일) ──
         rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
         try:  # 준비재고: pu_t_ready_stock cust='Z99990', (proc_gubun=파트, item)
-            cur.execute("SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
+            # ★2026-08-18: 라이브(PARTNER_ERP.dbo) → nx 로 전환.
+            #   웹 준비등록(/api/ready/commit)이 nx.PU_T_READY_STOCK 에 쓰므로, 라이브를 읽으면
+            #   방금 등록한 준비재고가 화면에 0으로 보임(실제 사례: AJR30027707 S4 nx=5 / 라이브=0).
+            cur.execute("SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
             for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
         except Exception: pass
         try:  # ASSY 현재고: sa_t_item_stock (item)
@@ -116,7 +119,8 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         except Exception: pass
         prdirect = {}
         try:  # ★파트재고(pr_stock) = 레거시 SP 완료풀과 동일 = PR_T_MAT_STOCK_WH만(mat_code). midstk 재귀롤업(사급/스태커 포함)은 SUB 과다 → 직접값 사용.
-            cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PR_T_MAT_STOCK_WH GROUP BY MAT_CODE")
+            # ★2026-08-18: 라이브 → nx 전환(준비재고와 동일 사유 — 웹 준비등록이 nx.PR_T_MAT_STOCK_WH 에 파트재고를 옮김)
+            cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_MAT_STOCK_WH GROUP BY MAT_CODE")
             for rr in cur.fetchall(): prdirect[rr[0]] = float(rr[1] or 0)
         except Exception: pass
         # ★중간공정 파트재고 롤업(SP #TEMP_MAT_STOCK T_SUB_CTE): 자재/생산/사급/스태커 재고 + 재귀BOM 도번고정 → tag70.
@@ -231,13 +235,18 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             it = g["item"]
             seq = ([g["_cells"]['P']] if 'P' in g["_cells"] else []) + [g["_cells"][y] for y in dates if y in g["_cells"]]
             # 셀 표시: finish_qty_NN = finish + ready; fin = tag매핑
-            g["dcov"] = {}; g["dfin"] = {}
+            # ★drdy/prior_ready = 그 셀의 '준비(ready)'분만 = 준비취소 가능수량.
+            #   dcov(=finish+ready)를 취소수량으로 쓰면 이미 생산실적이 잡힌 finish까지 취소하려 해서 과다취소.
+            #   (2026-08-19: 이 화면이 쓰는 API가 /api/kitting/grid 임 — part410이 아님)
+            g["dcov"] = {}; g["dfin"] = {}; g["drdy"] = {}
             pc = g["_cells"].get('P')
             g["prior_cover"] = round((pc["finish"] + pc["ready"]), 2) if pc else 0.0
+            g["prior_ready"] = round(pc["ready"], 2) if pc else 0.0
             g["prior_fin"] = _TAG2FIN.get(pc["tag"], '0') if pc else '0'
             for y in g["days"]:
                 c = g["_cells"].get(y)
                 g["dcov"][y] = round((c["finish"] + c["ready"]), 2) if c else 0.0
+                g["drdy"][y] = round(c["ready"], 2) if c else 0.0
                 g["dfin"][y] = _TAG2FIN.get(c["tag"], '0') if c else '0'
             g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)         # 완료수량=충당 finish합(SP finish_qty)
             g["ready_stock"] = round(max(rstock.get((it, g["gpc"]), 0.0), 0.0), 2)          # 준비재고(파트버킷)
@@ -267,16 +276,40 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         cn.close()
 
 # ================= 파트별 생산계획 (w_pr_input_410_new) — 키팅과 동일 SP grain·색상, 410 컬럼 =================
+@router.get("/api/plan/part410/lines")
+def plan_part410_lines(src: str = Query("nx")):
+    """파트별 생산계획 라인(LINE_NO) 드롭다운 — 실사용값(PR_T_PLAN_PART_COPY.LINE_NO) distinct.
+       ★/api/planinput/lines(PR003 주문구분: 설치/이지링크/CKD 등)와는 다른 코드체계이므로 별도 소스 필요.
+       CA/CM/GR 등 part410 그리드의 실제 Line No 컬럼값 그대로."""
+    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(LINE_NO)) v FROM {SCH}.PR_T_PLAN_PART_COPY WITH(NOLOCK)
+                        WHERE ISNULL(LTRIM(RTRIM(LINE_NO)),'')<>'' ORDER BY v""")
+        rows = [{"code": r[0], "nm": r[0]} for r in cur.fetchall()]
+        return {"rows": rows}
+    finally:
+        cn.close()
+
 @router.get("/api/plan/part410")
 def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Query(""),
                  part: str = Query(""), line: str = Query(""), assy: str = Query(""), jado: str = Query(""),
+                 wo: str = Query(""),
                  view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("nx"),
                  wh_part: str = Query("IS0001"), limit: int = Query(20000)):
     """파트별 생산계획 그리드 — 레거시 SP `SP_PR_CREATE_PLAN_파트별_생산계획계산_생산준비등록_NEW` 로직 복제.
        ★키팅(/api/kitting/grid)과 동일 grain(gpc·wo·swo·assy·upper·item, 날짜피벗)·동일 충당·색상.
        ★src=nx(우리 PARTNER_ERP_TEST3.nx) | live(레거시 PARTNER_ERP.dbo 대사검증). live=nx셀오버레이 제외(순수 레거시).
        당김=CHANGE_DAY+','+(LOT_QTY-LAST_LOT_QTY)(전차수 대비 일자·수량 변경). 생산ST=(계획−완료)×item_st/3600.
-       계상근무공수=일자ST/y_inwon(인원=PR_M_PROC_GAGONG⋈WORKER work_flag='1'). 라이브 RO(SP 미실행)."""
+       계상근무공수=일자ST/y_inwon(인원=PR_M_PROC_GAGONG⋈WORKER work_flag='1'). 라이브 RO(SP 미실행).
+
+       ★2026-08-18 추가(레거시 대조 보완):
+         · wo 파라미터(제번 WORK_ORDER LIKE 필터) 신규. ※프론트는 현재 클라이언트 즉시필터를 쓰므로 미사용이나 API로는 유효.
+         · 응답 행에 레거시 410 재고컬럼 6종 노출(표시전용, 계산에 영향 없음):
+             mat_stock(자재재고=midstk) · prod_stock(생산재고=partstk) · fix_stock(도번고정재고=fixstk[upper,item])
+             assy_stock(ASSY재고=assystk) · sale_qty(출하=saled 미마감 SALE_DTL) · ready_stock(생산준비재고=rstock)
+           → 원래 충당(allocation) 계산에만 쓰고 버리던 풀을 그대로 행에 붙인 것. 프론트 screens.prod.js SCREEN.partplan에서 컬럼 표시.
+         · 라인 드롭다운용 /api/plan/part410/lines 신규(아래 별도 엔드포인트)."""
     from datetime import datetime as _dt, timedelta as _td
     def _yadd(y6, n):
         try: return (_dt.strptime('20' + y6, '%Y%m%d') + _td(days=n)).strftime('%y%m%d')
@@ -317,6 +350,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         if line.strip(): w.append("a.LINE_NO=?"); p.append(line.strip())
         if assy.strip(): w.append("a.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{assy.strip()}%")
         if jado.strip(): w.append("a.ITEM_CODE LIKE ?"); p.append(f"%{jado.strip()}%")
+        if wo.strip():   w.append("a.WORK_ORDER LIKE ?"); p.append(f"%{wo.strip()}%")
         cur.execute(f"""SELECT TOP {int(limit) * 40}
               a.ASSY_ITEM_CODE assy, a.UPPER_ITEM_CODE upper, a.ITEM_CODE item,
               a.GAGONG_PROC_CODE gpc, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE) gpcnm,
@@ -326,6 +360,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, MAX(ISNULL(a.OUTPUT_HM,'')) output_hm, MAX(ISNULL(lg.lgh,'')) lgh, ISNULL(ib.ITEM_DESC,'') nm,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
+              -- ★앞공정/현재공정 컬럼용(레거시 SP_..._NEW_250826 1285줄): PROC_SEQ=1이면 앞공정 0, 아니면 앞공정전표재고−현재공정전표재고
+              MAX(ISNULL(a.PROC_SEQ,0)) proc_seq, MAX(ISNULL(a.GAGONG_PROC_SEQ,0)) gseq,
+              MAX(ISNULL(a.PRIOR_GAGONG_PROC_CODE,'')) pgpc, MAX(ISNULL(a.PRIOR_GAGONG_PROC_SEQ,0)) pgseq,
               MAX(ISNULL(a.CHANGE_DAY,'')) change_day, SUM(CAST(ISNULL(a.LOT_QTY,0) AS float)) lot_qty,
               SUM(CAST(ISNULL(a.LAST_LOT_QTY,0) AS float)) last_lot_qty,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
@@ -360,6 +397,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                      "use_qty": float(r["useq"] or 1),
                      "wo": r["wo"], "swo": r["swo"] or '', "plan_ymd": (r["plan_ymd"] or ''),
                      "change_day": (r["change_day"] or ''), "lot_qty": 0.0, "last_lot_qty": 0.0,
+                     # ★앞공정/현재공정 산식 입력값(레거시 PR_T_PLAN_PART_COPY 원본컬럼)
+                     "_proc_seq": int(r["proc_seq"] or 0), "_gseq": int(r["gseq"] or 0),
+                     "_pgpc": (r["pgpc"] or '').strip(), "_pgseq": int(r["pgseq"] or 0),
                      "days": {}, "prior_plan": 0.0, "plan_qty": 0.0, "_cells": {}}
                 keyed[k] = g
             if (r["plan_ymd"] or '') and (not g["plan_ymd"] or (r["plan_ymd"] or '') < g["plan_ymd"]): g["plan_ymd"] = r["plan_ymd"]
@@ -430,30 +470,38 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         # ★생산완료(70): 레거시 SP_..._NEW2_오전오후는 실제생산(PROD_DTL) 미사용 — "완료된 전표는 이미 ASSY재고·파트재고로 잡히므로 감안 불필요"(SP주석).
         #   → 아래 충당에서 assystk(ASSY재고)+partstk(중간파트재고)+jpstk(작업중 전표재고) 3풀로 완료 처리. (earliest_ymd는 참고용 미사용)
         _ = earliest_ymd
-        # ★전표재고(J, tag40)=작업중 용접전표(PR_T_INDI_WELD_SHEET prod_fin_flag='0')의 최종공정 잔량(prod_qty−완료). SHEET헤더는 라이브에만 존재 → 항상 라이브 직독. src별 90초 캐시.
-        jpstk = {}
-        _jck = "jp"
+        # ★전표재고(J, tag40)=작업중 용접전표(PR_T_INDI_WELD_SHEET prod_fin_flag='0')의 최종공정 잔량(prod_qty−완료).
+        #   ★2026-08-19 수정: 이 쿼리만 PARTNER_ERP.dbo 하드코딩이라, src=nx 여도 라이브를 봤음.
+        #     → 웹(w_pr_input_520)에서 잡은 실적이 nx.PR_T_INDI_WELD_SHEET_DTL 에 쌓이는데
+        #       410 화면의 현재공정(진주황)·전표재고가 영영 안 변하던 원인. SCH(=src) 따라가도록 교정.
+        #   src별 90초 캐시(캐시키에 SCH 포함 — 안 그러면 live/nx 결과가 서로 섞임).
+        jpstk = {}; jpseq = {}    # jpseq = (item,gpc,seq)별 전표재고 → 앞공정·현재공정 컬럼 산식용
+        _jck = "jp:" + SCH
         _jent = _cache.get(_jck)
         if _jent and (_now - _jent["ts"] < 90):
-            jpstk = _jent["j"]
+            jpstk = _jent["j"]; jpseq = _jent.get("q", {})
         else:
             try:
-                cur.execute("""
-                    SELECT t.gagong_proc_code gpc, s.item_code item, SUM(t.prod_qty - s.finish_prod_qty) stk
-                    FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
+                cur.execute(f"""
+                    SELECT t.gagong_proc_code gpc, t.gagong_proc_seq seq, s.item_code item, SUM(t.prod_qty - s.finish_prod_qty) stk
+                    FROM {SCH}.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
                     JOIN (SELECT t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq, MAX(s.to_proc_seq) to_proc_seq, MAX(s.item_code) item_code,
-                                 ISNULL((SELECT TOP 1 prod_qty FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK) WHERE sheet_no=t.sheet_no ORDER BY proc_seq DESC),0) finish_prod_qty
-                          FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
+                                 ISNULL((SELECT TOP 1 prod_qty FROM {SCH}.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK) WHERE sheet_no=t.sheet_no ORDER BY proc_seq DESC),0) finish_prod_qty
+                          FROM {SCH}.PR_T_INDI_WELD_SHEET_DTL t WITH(NOLOCK)
                           JOIN (SELECT b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq, MAX(b.proc_seq) to_proc_seq, MAX(a.item_code) item_code
-                                FROM PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN PARTNER_ERP.dbo.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
+                                FROM {SCH}.PR_T_INDI_WELD_SHEET a WITH(NOLOCK) JOIN {SCH}.PR_T_INDI_WELD_SHEET_DTL b WITH(NOLOCK) ON a.sheet_no=b.sheet_no
                                 WHERE a.prod_fin_flag='0' GROUP BY b.sheet_no, b.gagong_proc_code, b.gagong_proc_seq) s
                                ON t.sheet_no=s.sheet_no AND t.proc_seq=s.to_proc_seq
                           GROUP BY t.sheet_no, t.gagong_proc_code, t.gagong_proc_seq) s ON s.sheet_no=t.sheet_no AND s.to_proc_seq=t.proc_seq
                     WHERE t.gagong_proc_code IS NOT NULL
-                    GROUP BY t.gagong_proc_code, s.item_code""")
-                for rr in cur.fetchall(): jpstk[(rr[1], rr[0])] = jpstk.get((rr[1], rr[0]), 0.0) + float(rr[2] or 0)
+                    GROUP BY t.gagong_proc_code, t.gagong_proc_seq, s.item_code""")
+                # ★(item,gpc) 집계 = 기존 충당용 / (item,gpc,seq) 집계 = 앞공정·현재공정 컬럼용(레거시 #TEMP_전표재고 그레인 동일)
+                for rr in cur.fetchall():
+                    _gpc, _seq, _it, _q = rr[0], rr[1], rr[2], float(rr[3] or 0)
+                    jpstk[(_it, _gpc)] = jpstk.get((_it, _gpc), 0.0) + _q
+                    jpseq[(_it, _gpc, int(_seq or 0))] = jpseq.get((_it, _gpc, int(_seq or 0)), 0.0) + _q
             except Exception: pass
-            _cache[_jck] = {"ts": _now, "j": jpstk}
+            _cache[_jck] = {"ts": _now, "j": jpstk, "q": jpseq}
             plan_part410._stk_cache = _cache
         if str(src).strip() != "live":   # ★nx 셀단위 준비 flag 오버레이(우리 확인분) — 라이브 대사시 제외
             try:
@@ -464,7 +512,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for rr in nc.fetchall(): nxcell[(rr[0], rr[1], rr[2], rr[3])] = float(rr[4] or 0)
                 nxc.close()
             except Exception: pass
-        _TAG2FIN = {90: '6', 70: '4', 40: '0', 50: '3', 10: '3', 30: '2'}   # ★색: 90주황·70노랑·50녹·40전표=백(작업중이라 완료색 아님, 레거시 color_NN 실측)·0백. 미생산 판정은 finish기반(전표 완료산입)으로 분리
+        # ★색: 90출하='6'(살구 #fac090) · 70생산='4'(노랑) · 50/10준비='3'(녹) · 30자재='2' · 0='0'(백,미키팅)
+        # ★2026-08-18 수정: 40(작업중 전표=현재공정)을 '7'(진한주황)로 신설.
+        #   기존엔 '0'(백)이었으나 레거시 화면 대조 결과 전표 잔량 셀도 완료색으로 표시됨(예: AJR76562804 13/13·2/2).
+        #   단 출하완료(90,살구)와 같은 색이면 구분이 안 되므로 별도 코드 '7'로 분리(프론트 finBg에서 진한주황).
+        #   미생산 판정은 여전히 finish 기반이라 이 색 변경이 건수에 영향 없음.
+        _TAG2FIN = {90: '6', 70: '4', 40: '7', 50: '3', 10: '3', 30: '2'}
         # ★충당 = 준비실적처리(키팅 /api/kitting/grid)와 100% 동일 검증엔진: 셀단위 pool 배분(출하90→ASSY×use/도번고정/중간공정70→준비50)+nx오버레이.
         #   410·460은 같은 SP라 숫자 동일해야 함 → 키팅의 검증된 충당을 그대로 사용. 생산ST=finish만 차감(준비 제외).
         for g in rows:
@@ -527,20 +580,41 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     if rem > 0: c["ready"] += min(nq, rem)
                     if c["plan"] > 0 and (c["finish"] + c["ready"]) >= c["plan"] and c["tag"] < 50: c["tag"] = 50
         for g in rows:
-            g["dcov"] = {}; g["dfin"] = {}
+            g["dcov"] = {}; g["dfin"] = {}; g["drdy"] = {}
             pc = g["_cells"].get('P')
             # ★완료수량(분자)=생산실적(finish)만. 준비(키팅완료)는 숫자 아닌 색(녹)으로만 표시. 색tag는 최고단계(생산/키팅/미키팅) 유지.
+            # ★drdy = 그 셀의 '준비(ready)'분만 = 준비취소 가능수량.
+            #   dcov(=finish, 생산실적)는 준비취소로 되돌릴 수 없음.
+            #   (2026-08-18 버그: 셀 18/18에서 18을 취소수량으로 넘겨 실제 준비 1개보다 과다 취소 시도)
             g["prior_cover"] = round(pc["finish"], 2) if pc else 0.0
+            g["prior_ready"] = round(pc["ready"], 2) if pc else 0.0
             g["prior_fin"] = _TAG2FIN.get(pc["tag"], '0') if pc else '0'
             for y in g["days"]:
                 c = g["_cells"].get(y)
                 g["dcov"][y] = round(c["finish"], 2) if c else 0.0
+                g["drdy"][y] = round(c["ready"], 2) if c else 0.0
                 g["dfin"][y] = _TAG2FIN.get(c["tag"], '0') if c else '0'
             g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)
             g["lot_diff"] = round(g["lot_qty"] - g["last_lot_qty"], 2)
+            # ★레거시 410 재고 컬럼(화면표시용) — 충당에 쓰던 풀을 그대로 노출. 표시 전용(계산 영향 없음).
+            g["mat_stock"]   = round(midstk.get(g["item"], 0.0), 2)                       # 자재재고(자재+생산 롤업)
+            g["prod_stock"]  = round(partstk.get(g["item"], 0.0), 2)                      # 생산재고(중간파트재고)
+            g["fix_stock"]   = round(fixstk.get((g["upper"], g["item"]), 0.0), 2)         # 도번고정재고(upper,item)
+            g["assy_stock"]  = round(assystk.get(g["assy"], 0.0), 2)                      # ASSY재고(제품재고)
+            g["sale_qty"]    = round(saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 2)   # 출하(미마감 SALE_DTL)
+            g["ready_stock"] = round(rstock.get((g["item"], g["gpc"]), 0.0), 2)           # 생산준비재고(키팅 준비분)
+            # ★앞공정/현재공정 (레거시 SP_PR_CREATE_PLAN_파트별_생산계획계산_NEW_250826):
+            #   현재공정 = #TEMP_전표재고[자기 gpc·gseq·item]  (작업중 전표의 그 공정 잔량)
+            #   앞공정   = PROC_SEQ=1 → 0, else #TEMP_전표재고[PRIOR_gpc·PRIOR_seq·item] − 현재공정
+            #   → 01라인(용접S5→조립S5-2)처럼 2공정인 경우, 뒷공정 실적이 잡히면 앞공정 잔량이 상계돼 0이 됨.
+            _cur_jp = jpseq.get((g["item"], g["gpc"], g["_gseq"]), 0.0)
+            _prv_jp = jpseq.get((g["item"], g["_pgpc"], g["_pgseq"]), 0.0) if g["_pgpc"] else 0.0
+            g["cur_proc"]  = round(_cur_jp, 2)
+            g["prev_proc"] = 0.0 if g["_proc_seq"] == 1 else round(_prv_jp - _cur_jp, 2)
             cells_p = [c for c in g["_cells"].values() if c["plan"] > 0]   # ★미생산=셀별 finish<plan(레거시 finish_qty<plan_qty). 전표(J)도 finish 채워 완료 산입(색=백과 무관)
             g["_done_all"] = bool(cells_p) and all(c["finish"] >= c["plan"] for c in cells_p)
             del g["_cells"]
+            for _k in ("_proc_seq", "_gseq", "_pgpc", "_pgseq"): g.pop(_k, None)   # 앞공정 산식용 내부값 — 응답에서 제거
         for r in rows: r["done"] = bool(r.get("_done_all"))   # ★미생산여부 플래그 → 프론트가 전체 1회조회 후 미생산 토글을 즉시(재조회 없이) 필터
         uf = unfin.strip()
         if uf == '미생산': rows = [r for r in rows if not r["done"]]
