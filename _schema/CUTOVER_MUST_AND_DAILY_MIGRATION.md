@@ -10,6 +10,7 @@
 
 > 목적 = 병행운영 중 **nx 미러가 라이브만큼 최신인지** 매일 확인. **며칠 연속 GREEN = 하드컷오버 준비완료** 근거. 하루치라 소량(≈1.3만 행, 대부분 append 거래로그).
 > 도구: `_harness/mirror_recon.py`(읽기전용 대조) · `_migration/sub_norm/r_delta_sync.py`(델타 쓰기).
+> ★**실행 시각 = 아침 7:30경, 데이터가 움직이지 않을 때**(업무 개시 전). 데이터 이동 중 실행 금지 — recon 스냅샷이 라이브와 어긋나 **가짜 드리프트**·델타 싱크가 이동 중 값 복사로 부정확. 낮/업무중엔 돌리지 말 것.
 
 **순서 (문서 TRANSACTION_CUTOVER_DESIGN §10 명시):**
 1. **recon (읽기전용)** — `mirror_recon.py` 실행. 라우터가 읽는 `nx.<TABLE>` 자동수집→트랜잭션(_T_)만 `COUNT_BIG + CHECKSUM_AGG(BINARY_CHECKSUM(*))`로 nx 미러 vs dbo 라이브 대조 → GREEN/RED. 로그 `mirror_recon_log.jsonl`.
