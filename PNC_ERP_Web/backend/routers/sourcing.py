@@ -2128,16 +2128,20 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
     asof = _d6(ymd) if ymd else datetime.now().strftime("%y%m%d")
     cn = _conn(); cur = cn.cursor()   # live PARTNER_ERP (읽기전용)
     try:
+        # ★2026-08-20 생산 전개제외(EXCEPT_FLAG) 반영: 전개제외 자식(상위 SUB가 통째조달=명진 등)은 발주 대상 아님(그 SUB로 귀속).
+        #   레거시 생산계획(PR_T_PLAN_PART_MAT)과 diff0 — 명진 SUB 내부 MJU(미래정밀 등)를 발주에서 제거. + 사급여부(SAGUB_FLAG) 수집.
         cur.execute("""WITH tree AS (
-            SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, 1 lvl
-            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, CAST(ISNULL(SAGUB_FLAG,'0') AS int) sg, 1 lvl
+            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(EXCEPT_FLAG,'0')<>'1'
             UNION ALL
-            SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), t.lvl+1
-            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), CAST(ISNULL(b.SAGUB_FLAG,'0') AS int), t.lvl+1
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
             JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
-            SELECT c, SUM(q) qty FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
-        agg = {str(r[0]).strip(): float(r[1] or 0) for r in cur.fetchall()}
+            SELECT c, SUM(q) qty, MAX(sg) sg FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
+        agg = {}; sagub = {}
+        for r in cur.fetchall():
+            _c = str(r[0]).strip(); agg[_c] = float(r[1] or 0); sagub[_c] = int(r[2] or 0)
         if not agg:
             return {"item": item, "asof": asof, "rows": [], "n": 0, "note": "현행 BOM 구성 없음"}
         codes = [c for c in agg if not c.upper().startswith("RAC")]   # 용접봉 제외
@@ -2159,7 +2163,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             ch = mk1[i:i+900]; ph = ",".join("?" * len(ch))
             cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.v_cs_bom
                 WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
-                  AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
+                  AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
             for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())
         order_items = {c: agg[c] for c in codes if c not in maker_parents}
         oc = list(order_items.keys())
