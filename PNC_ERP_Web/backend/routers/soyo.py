@@ -466,12 +466,13 @@ def _step7_sql(cur):
     SELECT * INTO nx.plan_part_mat_tmp FROM CTE_BOM
     WHERE CHARINDEX('||'+mat_work_center_code+'||',cum_in_cust_code)=0 AND NOT (cust_flag='0' AND gc_gubun='P') OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_mat') IS NOT NULL DROP TABLE nx.plan_part_mat")
-    # 최하위집계 + ★용접봉(sgroup910)=공정처리 제외
+    # 최하위집계 + ★용접봉(RAC, proc_weld 별도)만 제외. ★2026-08-19 교정: 레거시 SP엔 sgroup910 제외 없음 →
+    #   910 일괄제외는 우리 오추가(4930 등 910 오분류 실 매입부품까지 제외). RAC(용접봉)만 공정처리로 제외, 용접링은 사급으로 유지(RACX 일치).
     cur.execute(("""SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code AS mat_code,
         SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code
     INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
-      AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_sgroup='910')
+      AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
 
 @router.get("/api/plan/part")

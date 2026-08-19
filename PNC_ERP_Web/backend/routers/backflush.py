@@ -79,7 +79,7 @@ def _is_final_product(nxc, item):
     c.execute("SELECT COUNT(*) FROM nx.bom WHERE child_code=?", item)
     return (c.fetchone()[0] or 0) == 0
 
-def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_bc=None, enforce=False):
+def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_bc=None):
     """★백플러시 코어(트랜잭션 미관리 — 호출측 commit/rollback). cro=RO conn, nx=쓰기 tx conn.
        완성공정 1회 전체BOM×생산량 소비(−P4: RDY 우선 없으면 MAT) + 생산품 +ASY(최종제품)/+PRD(반제품, tag P7).
        회수율 제외. INNER_PROD=1만. 멱등=ref_key(바코드=BC:{barcode}:{proc} / 수기=wo|item|ymd)."""
@@ -95,10 +95,11 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
     if not comps and not weld: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
-    # ★재고 게이트(마이너스 원천차단): 키팅=flag-only(자재무차감) → 실제 자재는 생산실적서 전량 차감되므로
-    #   자재 현재고(mat_stock_daily=_mat_avail 정본)가 BOM 소요를 커버해야 함. mode=post만(reverse=재고환원, 게이트無).
-    #   ★커버리지 인지: 자재재고 '관리품목'만 게이트 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 제외(오차단 방지, 정본 §4-C 검증).
-    #   ★한계: mat_stock_daily는 레거시 PU_T_STOCK_MAINT 일스냅샷 → 당일 연속 백플러시분 미반영(컷오버시 실시간 정본으로 승격 필요).
+    # ★생산실적은 항상 기록 가능해야 함(사용자 확정 2026-08-19) — 키팅과 무관·재고부족으로 실적을 막지 않는다.
+    #   자재 현재고(mat_stock_daily=_mat_avail) < BOM소요면 '경고(stock_warn)'로만 surface(마이너스 신호=상류 입고 누락 등), ★실적 차단 안 함.
+    #   커버리지 인지: 자재재고 관리품목만 판정 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 경고대상서도 제외(오탐 방지).
+    #   ★한계: mat_stock_daily는 레거시 일스냅샷 → 당일 연속분 미반영(관찰용). 마이너스 원천차단의 하드 게이트는 실적이 아니라 출고(ASY/완성재고)에 둔다.
+    stock_warn = None
     if mode == "post":
         gc = cro.cursor(); short = []
         def _tracked(code):
@@ -118,14 +119,7 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
                     short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
         if short:
             more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
-            _msg = "재고부족(마이너스 방지) — " + "; ".join(short[:8]) + more
-            if enforce:   # ★하드 차단(자재 정본 실시간 정확 확인 후=컷오버). 기본 OFF=소프트(경고만·차단無)
-                return {"ok": False, "detail": _msg}
-            stock_warn = _msg   # 소프트: 경고만 부착하고 진행(정본 미완성 구간 오차단 방지)
-        else:
-            stock_warn = None
-    else:
-        stock_warn = None
+            stock_warn = "자재부족 경고(실적은 기록됨) — " + "; ".join(short[:8]) + more   # ★차단 아님
     out_sp = 'ASY' if _is_final_product(nx, item) else 'PRD'   # ★완성=최종제품 ASY / 반제품 PRD
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
@@ -175,14 +169,13 @@ def backflush_post(payload: dict = Body(...)):
     gpc = (payload.get("gpc") or "").strip(); prod_qty = float(payload.get("prod_qty") or 0)
     mode = str(payload.get("mode", "post")).strip()
     user = (str(payload.get("user", "") or "").strip() or "웹사용자")[:20]
-    enforce = bool(payload.get("enforce"))   # ★재고게이트 하드차단 여부(기본 소프트=경고만). 자재 정본 정확확인 후(컷오버) true.
     import datetime as _d
     ref_key = f"{wo}|{item}|{_d.datetime.now().strftime('%y%m%d')}"   # 수기 멱등키(WO·품목·일자)
     cn = _nx(); nx = _nx_tx()   # ★nx전환: 읽기도 nx 충실복제. 원자성: 소비(−P4)+생산입고(+P7/ASY)+backflush_log 동일 트랜잭션
     try:
         lm = _lock_msg(cn.cursor(), _d.datetime.now().strftime('%y%m%d'))   # ★공통 마감잠금(생산일=당월)
         if lm: return {"ok": False, "detail": lm}
-        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key, enforce=enforce)
+        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)   # ★실적은 재고부족으로 차단 안 함(경고 stock_warn만)
         nx.commit() if r.get("ok") else nx.rollback()
         return r
     except Exception as e:
