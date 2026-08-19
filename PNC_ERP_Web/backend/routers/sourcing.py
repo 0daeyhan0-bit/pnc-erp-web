@@ -1452,6 +1452,29 @@ def sourcing_part_assign(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.post("/api/sourcing/line/gubun")
+def sourcing_line_gubun(payload: dict = Body(...)):
+    """부품/SUB 라인의 구분(제작/매입/사급) 설정 — 조달경로 통합검토 SUB패널. ★제작/매입/사급은 여기서 결정(업체=조달프로파일).
+       payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB에 지정 시 그 SUB 자체 성격(사급=협력사 유상사급 조립)."""
+    rid = int(payload.get("route_id") or 0); line_id = int(payload.get("line_id") or 0)
+    gubun = str(payload.get("gubun", "")).strip()[:20]
+    if rid <= 0 or line_id <= 0: raise HTTPException(400, "route_id·line_id 필요")
+    if gubun not in ("제작", "매입", "사급"): raise HTTPException(400, "구분은 제작/매입/사급 중 하나")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("UPDATE nx.sourcing_route_line SET gubun=? WHERE route_id=? AND line_id=?", gubun, rid, line_id)
+        n = cur.rowcount
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)  # 편집=승인 리셋
+        nx.commit()
+        return {"ok": True, "updated": n, "gubun": gubun}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 @router.post("/api/sourcing/proc/save")
 def sourcing_proc_save(payload: dict = Body(...)):
     """후보별 공정배치 저장(nx.sourcing_route_proc 전체교체). ★게이트: Σ(후보 work_qty 전노드) == BASE 공수합(내부원가 proc_grid) diff0.

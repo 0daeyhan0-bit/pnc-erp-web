@@ -2414,21 +2414,24 @@ SCREEN.subvariant=(c)=>{
     const procByNode={};(rd.procs||[]).forEach(p=>{procByNode[p.node_item]=(procByNode[p.node_item]||0)+(+p.work_qty||0);});
     const cutOfPart=code=>{const arr=partCut[code];return arr?arr.reduce((a,x)=>a+(+x.wq||0),0):0;};
     const cutOfNode=np2=>np2.reduce((a,p)=>a+cutOfPart(p.child_item),0);
+    // ★구분(제작/매입/사급) selector — 이 화면에서 부품/SUB별 결정(업체는 조달프로파일). 색: 제작초록·매입파랑·사급주황.
+    const _GBC={'제작':'#1c7c3a','매입':'#1c47a0','사급':'#b8860b'};
+    const gubunSel=l=>`<select class="sp-gb" data-lid="${l.line_id}" title="구분: 제작(내부)/매입(구매)/사급(유상사급)" style="font-size:10px;padding:0 2px;border:1px solid ${_GBC[l.gubun]||'#c9d3e0'};border-radius:4px;color:${_GBC[l.gubun]||'#33507d'};font-weight:600">${['제작','매입','사급'].map(g=>`<option value="${g}" ${(l.gubun||'')===g?'selected':''}>${g}</option>`).join('')}</select>`;
     let cutSum=0;Object.values(partCut).forEach(arr=>arr.forEach(x=>cutSum+=+x.wq||0));cutSum=Math.round(cutSum*100)/100;
     let procSum=0;(rd.procs||[]).forEach(p=>procSum+=+p.work_qty||0);procSum=Math.round(procSum*100)/100;
     const total=Math.round((cutSum+procSum)*100)/100, base=rd.base_gongsu||0, ok=Math.abs(total-base)<0.5;
     const cutBadge=code=>{const arr=partCut[code];if(!arr||!arr.length)return '';const s=arr.reduce((a,x)=>a+(+x.wq||0),0);
       return ` <span title="절삭공정 자동귀속(부품 위치 따라감): ${esc(arr.map(x=>x.name+' '+nfq(x.wq)).join(', '))}" style="color:#b5651d;font-size:10px;border:1px solid #e6cfae;border-radius:3px;padding:0 4px">⚙${nfq(s)}</span>`;};
     const poolRow=p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:grab;padding:2px 0;border-bottom:1px solid #f0eef6">
-      <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}
-      <span style="margin-left:auto;color:#c0392b;font-size:10px;border:1px solid #c0392b55;border-radius:8px;padding:0 6px;white-space:nowrap">보관·우측 드래그=배치</span></div>`;
+      <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}<span style="flex:1"></span>${gubunSel(p)}
+      <span style="color:#c0392b;font-size:9px;border:1px solid #c0392b55;border-radius:8px;padding:0 4px;white-space:nowrap">보관</span></div>`;
     const nodeBox=(node,label,color,dsub,np2,depth)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
       const kids=subs.filter(s=>dsub>0?s.parent_line===dsub:!s.parent_line);   // ★이 노드의 자식 SUB(중첩=서브안의서브)
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span><div style="flex:1"></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span>${dsub>0?`<span style="color:#8a94a6;font-size:10px;margin-left:4px">SUB 구분</span>${gubunSel(subs.find(s=>s.line_id===dsub)||{line_id:dsub,gubun:''})}`:''}<div style="flex:1"></div>
           ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff">🧩 해체</button>`:''}
           <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff">⚙ ${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
-        ${np2.map(p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="font-size:11.5px;padding:2px 0 2px 14px;color:#33507d;cursor:grab;display:flex;align-items:center;gap:4px" title="드래그: 왼쪽 보관함 또는 다른 SUB로 이동"><span style="color:#b9c2d0">⠿</span>${esc(p.child_item)} <span style="color:#8a94a6;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 보관함에서 드래그</div>')}
+        ${np2.map(p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="font-size:11.5px;padding:2px 0 2px 14px;color:#33507d;cursor:grab;display:flex;align-items:center;gap:4px" title="드래그: 왼쪽 보관함 또는 다른 SUB로 이동"><span style="color:#b9c2d0">⠿</span>${esc(p.child_item)} <span style="color:#8a94a6;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}<span style="flex:1"></span>${gubunSel(p)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 보관함에서 드래그</div>')}
         ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
         <div class="sp-newsub" data-parentsub="${dsub}" style="border:${dsub>0?'1px':'2px'} dashed #a678d0;border-radius:${dsub>0?'5px':'8px'};padding:${dsub>0?'4px 8px':'14px 8px'};text-align:center;color:#8e44ad;font-size:${dsub>0?'10px':'12.5px'};font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;${dsub>0?'':'min-height:44px;display:flex;align-items:center;justify-content:center'}">${dsub>0?'➕ 서브 안에 중첩 SUB로 묶기':'➕ 부품을 여기로 드래그 → 새 SUB로 묶기 (레벨1)'}</div>
       </div>`;};
@@ -2696,6 +2699,11 @@ SCREEN.subvariant=(c)=>{
       }catch(err){alert('드롭 오류: '+err.message);}};
     // 노드 [수정] → 관경별 용접 + 공정별 작업ST 팝업(노드 스코프: 레벨0=ASSY값 / 신규SUB=빈값)
     c.querySelectorAll('.sp-nedit').forEach(b=>b.onclick=e=>{e.stopPropagation();openNodeProc(b.dataset.node,b.dataset.sub==='0');});
+    // ★부품/SUB 구분(제작/매입/사급) 변경 → 저장(승인 리셋) → 패널 갱신
+    c.querySelectorAll('.sp-gb').forEach(el=>{el.onmousedown=e=>e.stopPropagation();el.onclick=e=>e.stopPropagation();
+      el.onchange=async e=>{e.stopPropagation();const lid=+el.dataset.lid,gb=el.value;
+      try{const r=await fetch(`${API}/api/sourcing/line/gubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_id:lid,gubun:gb})});
+        const j=await r.json();if(j.ok){st.msg=`구분 → ${gb}`;await reloadPanel();}else alert('구분 저장 실패: '+(j.detail||''));}catch(err){alert('구분 저장 오류: '+err.message);}};});
     // [해체] SUB 노드 → 하위부품 ASSY 복귀 · 비종속 공정/용접 ASSY 이관(공수합 보존, 백엔드 sub/dissolve). 해체 후 패널 갱신.
     c.querySelectorAll('.sp-ndissolve').forEach(b=>b.onclick=async e=>{e.stopPropagation();
       if(!confirm('이 SUB를 해체합니다.\n하위부품은 ASSY(레벨0)로 복귀하고, SUB의 비종속 공정/용접은 ASSY로 이관되어 공수합이 보존됩니다. 계속?'))return;
