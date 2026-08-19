@@ -39,8 +39,9 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         # ── 조달 프로파일 배분(후보내 업체 배분, nx.sourcing_profile) + 발주업체 지정(nx.order_vendor) 적용 ──
         #   ★이 매입처(cc)의 발주 몫 = 소요 × 배분율. 배분 미설정/단일=100%(현행 그대로 → 회귀0).
         #   배분 설정된 품목은 이 매입처 몫만 계상(다른 매입처 몫은 그 매입처 선택 시 계상).
-        #   route_alloc(후보간 R01/R02 배분)은 어떤 소요엔진(plan_mat_source·autoorder)에도 아직 미적용(_schema §6 '추후 도입')
-        #     → 정합 위해 여기서도 미곱함(곱하면 자동발주와 수량 불일치). sourcing_profile(업체) 계층만 적용.
+        #   ★route_alloc(경로 R01/R02 배분)은 조립품(assy)키 → 부품(ic)엔 직접 없으므로 plan_part_mat에서 '부품→assy R01 경로계수'
+        #     (부품이 속한 assy들의 R01% 수요가중)를 산출해 곱함. 이 매입처(R01 업체) 몫 = 소요 × 업체비율 × R01경로계수.
+        #     자동발주(plan_mat_source 경로대안행)·협력사계획현황과 R01 업체 수량 정합(규칙 §8·§9).
         wdate = f"20{from6[0:2]}-{from6[2:4]}-{from6[4:6]}"     # 배분 유효일자 판정(계획 윈도우 시작일)
         prof = {}   # item -> [(vendor, ratio)] 활성·비내부·업체지정·유효
         ovr = {}    # item -> [(vendor, ratio)]  (order_vendor 발주업체 지정 ★다중업체 배분)

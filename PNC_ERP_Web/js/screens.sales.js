@@ -5,26 +5,31 @@ SCREEN.prodinvout=(c)=>{
   const API=API_BASE;
   let rows=[], mv={}, curYm='', loading=false, msg='';   // rows=[item,desc,workNm,stock,bf]
   const fmtYmd=y=>{y=(''+(y||'')).trim();return (y.length>=6&&y!=='000000')?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:'00/00/00';};
-  const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
-  const inYm=v=>(''+(v||'')).slice(2).replace('-','');
+  // ★레거시 dw_pr_stock_110과 동일: 수불기간(frm~to) 일범위. 기본=이달1일~오늘.
+  const _pad=n=>(''+n).padStart(2,'0');
+  const _tod=(()=>{const d=new Date();return `${(''+d.getFullYear()).slice(2)}${_pad(d.getMonth()+1)}${_pad(d.getDate())}`;})();
+  let frm=_tod.slice(0,4)+'01', to=_tod;   // YYMMDD 수불기간
+  const ymd2d=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};
   let sel=null, curL=[], source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
-  const load=async(ym)=>{loading=true;msg='';sel=null;
+  const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(4);
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinvout?ym=${encodeURIComponent(ym||'')}&source=nx`,{title:'제품입출고현황',onBack:()=>{source='live';load(ym);}});}
-    try{const r=await fetch(`${API}/api/live/prodinvout?ym=${encodeURIComponent(ym||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();curYm=j.ym||ym||'';rows=j.stock||[];mv=j.moves||{};}
+    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
+    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinvout?${qs}&source=nx`,{title:'제품입출고현황',onBack:()=>{source='live';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodinvout?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};}
     loading=false;
-    const ymi=c.querySelector('#ym');if(ymi)ymi.value=ymToInput(curYm);
+    const fi=c.querySelector('#frm'),ti=c.querySelector('#to');if(fi)fi.value=ymd2d(frm);if(ti)ti.value=ymd2d(to);
     const ws=[...new Set(rows.map(r=>r[2]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
     const wsel=c.querySelector('#work');if(wsel){const v=wsel.value;wsel.innerHTML='<option value="">전체</option>'+ws.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');wsel.value=v;}
-    const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 nx ${esc(ymToInput(curYm)||'-')}(이월기준 2502) · 0재고 숨김`;
+    const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 제품입출고현황</div>
    <div class="page-sub" id="piv-sub">제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 nx(이월기준 2502) · 0재고 숨김</div>
    <div class="toolbar">
-     <label class="tl">조회월</label><input type="month" class="inp" id="ym" style="min-width:120px">
+     <label class="tl">수불기간</label><input type="date" class="inp" id="frm" value="${esc(ymd2d(frm))}" style="min-width:130px"><span style="color:var(--muted);align-self:center">~</span><input type="date" class="inp" id="to" value="${esc(ymd2d(to))}" style="min-width:130px">
      <label class="tl">작업처</label><select class="sel" id="work"><option value="">전체</option></select>
      <input class="inp" id="q" placeholder="P/N·품명">
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
@@ -68,13 +73,14 @@ SCREEN.prodinvout=(c)=>{
     c.querySelector('#lcnt').textContent=`${curL.length}품목 (0재고 제외)`;
     attachResizers(c);
   };
-  c.querySelector('#go').onclick=renderLeft;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
-  c.querySelector('#nxsrc').onclick=()=>{source='nx';load(curYm);};   // ★Phase5 nx 파생 보기
+  const _reload=()=>{frm=d2ymd(c.querySelector('#frm').value)||frm;to=d2ymd(c.querySelector('#to').value)||to;load();};
+  c.querySelector('#go').onclick=_reload;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
+  c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#work').onchange=renderLeft;
-  c.querySelector('#ym').onchange=e=>load(inYm(e.target.value));
+  c.querySelector('#frm').onchange=_reload;c.querySelector('#to').onchange=_reload;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#work').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.querySelector('#xls').onclick=()=>downloadCSV('제품입출고현황.csv',['P/N','품명','재고','작업처'],curL.map(r=>[r[0],r[1],r[3],r[2]]));
-  load('');
+  load();
 };
 
 /* 영업예상매출현황 (영업, dw_pr_plan_190) — 도번×일별 수량 피벗 + 하단 일별 금액줄. ★차감=LG리시빙(20일 백로그), 21일+ 라이브일치. 차감전/차감후 토글 */
@@ -361,13 +367,14 @@ SCREEN.shipment=(c)=>{
 /* 제품재고조회 (영업, dw_pr_stock_040) — 기초/입고/출고/조정/현재고 · 작업장별 */
 SCREEN.salesstock=(c)=>{
   const API=API_BASE;
-  let pool=[], loading=false, msg='', curFrom='', curTo='', cur=[], source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  let pool=[], loading=false, msg='', curFrom='', curTo='', cur=[], source='live', incZero=false;   // ★Phase5 데이터원(기본 라이브 무변경) · incZero=0재고포함(레거시 gross 대조)
   const dToInput=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
   const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
   const load=async()=>{loading=true;msg='';
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(10);
+    const zq=incZero?'&zero=1':'';
     if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}&source=nx`,{title:'제품재고조회',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}`);if(!r.ok)throw new Error('HTTP '+r.status);
+    try{const r=await fetch(`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}${zq}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();pool=j.rows||[];curFrom=j.dfrom||curFrom;curTo=j.dto||curTo;}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';pool=[];}
     loading=false;
@@ -387,6 +394,7 @@ SCREEN.salesstock=(c)=>{
      <input class="inp" id="q" placeholder="품목코드/품명/규격">
      <select class="sel" id="wc"><option value="">전체작업장</option></select>
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
+     <label style="font-size:12px;color:var(--muted);font-weight:600;display:inline-flex;align-items:center;gap:3px" title="레거시 w_pr_stock_040처럼 최종재고 0인 품목까지 포함(gross 대조)"><input type="checkbox" id="zero" ${incZero?'checked':''}>0재고 포함</label>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -410,6 +418,7 @@ SCREEN.salesstock=(c)=>{
   c.querySelector('#go').onclick=go;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
   c.querySelector('#dfrom').onchange=go;c.querySelector('#dto').onchange=go;
+  c.querySelector('#zero').onchange=e=>{incZero=e.target.checked;load();};   // 0재고 포함=서버 재조회(레거시 gross 대조)
   c.querySelector('#wc').onchange=apply;c.querySelector('#gubun').onchange=apply;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#wc').value='';c.querySelector('#gubun').value='all';curFrom='';curTo='';load();};
   c.querySelector('#xls').onclick=()=>downloadCSV('제품재고조회.csv',['품목코드','품명','기초재고','입고','출고','기타출고','재고수량','단가','금액','작업처'],cur.map(r=>[r.cd,r.nm,r.basic,r.inq,r.outq,r.adj,r.qty,r.cost,Math.round(r.amt),r.wc]));

@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, _mat_avail)
 
 router = APIRouter()
 
@@ -95,6 +95,30 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
     if not comps and not weld: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
+    # ★자재 부족이면 생산실적 차단(사용자 확정 2026-08-19): "자재가 부족하면 생산실적이 잡히면 안돼."
+    #   자재 현재고(mat_stock_daily=_mat_avail 정본) < BOM소요면 실적 거부 → 마이너스 원천차단. ★키팅과 무관(키팅=flag) — 실제 자재재고로만 판정.
+    #   ★커버리지 인지: 자재재고 '관리품목'만 게이트 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 제외(오차단 방지, 정본 §4-C 검증).
+    #   ★한계: mat_stock_daily=레거시 일스냅샷 → 당일 입고/연속차감 미반영. 컷오버시 실시간 자재정본으로 승격 필요(§4 step4) — 그래야 당일 입고분 오차단 없음.
+    if mode == "post":
+        gc = cro.cursor(); short = []
+        def _tracked(code):
+            gc.execute("SELECT COUNT(*) FROM nx.mat_stock_daily WHERE UPPER(mat_code)=?", str(code or "").strip().upper())
+            return (gc.fetchone()[0] or 0) > 0
+        for _ch, _cq in comps:
+            _need = _cq * prod_qty
+            if _need > 0 and _tracked(_ch):
+                _av = _mat_avail(gc, _ch)
+                if _need > _av + 1e-6:
+                    short.append(f"{_ch}(가용 {_av:g} < 소요 {_need:g})")
+        for _br, _wq in weld.items():
+            _wneed = _wq * prod_qty
+            if _wneed > 0 and _tracked(_br):
+                _av = _mat_avail(gc, _br)
+                if _wneed > _av + 1e-6:
+                    short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
+        if short:
+            more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
+            return {"ok": False, "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8]) + more}
     out_sp = 'ASY' if _is_final_product(nx, item) else 'PRD'   # ★완성=최종제품 ASY / 반제품 PRD
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
@@ -147,7 +171,9 @@ def backflush_post(payload: dict = Body(...)):
     ref_key = f"{wo}|{item}|{_d.datetime.now().strftime('%y%m%d')}"   # 수기 멱등키(WO·품목·일자)
     cn = _nx(); nx = _nx_tx()   # ★nx전환: 읽기도 nx 충실복제. 원자성: 소비(−P4)+생산입고(+P7/ASY)+backflush_log 동일 트랜잭션
     try:
-        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)
+        lm = _lock_msg(cn.cursor(), _d.datetime.now().strftime('%y%m%d'))   # ★공통 마감잠금(생산일=당월)
+        if lm: return {"ok": False, "detail": lm}
+        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)   # ★실적은 재고부족으로 차단 안 함(경고 stock_warn만)
         nx.commit() if r.get("ok") else nx.rollback()
         return r
     except Exception as e:

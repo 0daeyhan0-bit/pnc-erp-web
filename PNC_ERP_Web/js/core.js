@@ -104,6 +104,7 @@ const MODULES=[
  {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
    {id:'mat',ic:'📦',nm:'자재목록조회'},
    {id:'matledger',ic:'📒',nm:'자재수불장'},
+   {id:'matclose',ic:'📗',nm:'자재 일마감(이동평균)'},
    {id:'dispatchdetail',ic:'📋',nm:'자재불출명세서'},
    {id:'dispatch',ic:'📤',nm:'자재불출집계표'},
    {id:'receiptdetail',ic:'🧾',nm:'자재입고명세서'},
@@ -194,7 +195,7 @@ const MODULES=[
    {id:'dtradeprice',ic:'🔁',nm:'직거래 LME 판가연동'},
  ]},
  {id:'mgmt',nm:'경영',ic:'📊',subs:[
-   {id:'mgmtdash',ic:'📊',nm:'경영 대시보드',soon:1},
+   {id:'dailypurissue',ic:'📋',nm:'일일 영업/매입 현황'},
  ]},
  {id:'sys',nm:'시스템관리',ic:'⚙️',subs:[
    {id:'close',ic:'🔒',nm:'마감관리'},

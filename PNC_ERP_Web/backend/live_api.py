@@ -181,6 +181,72 @@ def matledger_dates():
     mmin = _scalar("SELECT MIN(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE cust_code='Z99990'")
     return {"day": {"min": dmin, "max": dmax}, "month": {"min": mmin, "max": mmax}}
 
+# ================= 자재 일마감(이동평균) — 우리 교정 nx.mat_stock_daily 조회 =================
+# 기초=레거시 2606 월말 픽스 → 우리 이동평균 로직 일별 전개(수입환율·마이너스재고가드·tagP 반영).
+# 매입(9,S,도입P)=평균갱신 / 이동·반품·가공·출고·조정=현재평균 불변. 소모품(sgroup 99%) 제외.
+def _ymd6(s, default=None):
+    k = (s or "").replace("-", "").strip()
+    if len(k) == 8: k = k[2:]      # YYYYMMDD → YYMMDD
+    return k or default
+
+@live_router.get("/matclose/dates")
+def matclose_dates():
+    """우리 일마감(nx.mat_stock_daily) 가용 일자 범위."""
+    lo = _scalar("SELECT MIN(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    return {"min": lo, "max": hi}
+
+@live_router.get("/matclose")
+def matclose(dfrom: str = Query(""), dto: str = Query("")):
+    """자재 수불장(우리 이동평균). 기간 [dfrom,dto]: 기초(직전잔량)+Σ입고−Σ출고=기말. 품목별."""
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    to = _ymd6(dto, hi)
+    fr = _ymd6(dfrom, to[:4] + "01")   # 미지정시 해당월 1일
+    sql = """
+    ;WITH per AS (
+      SELECT UPPER(mat_code) cd, SUM(in_qty) iq, SUM(in_amt) ia, SUM(out_qty) oq, SUM(out_amt) oa
+      FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd BETWEEN ? AND ? GROUP BY UPPER(mat_code)),
+    endd AS (
+      SELECT cd, sq, sa, avg FROM (
+        SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa, avg_cost avg,
+          ROW_NUMBER() OVER(PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
+        FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd <= ?) x WHERE rn=1),
+    beg AS (
+      SELECT cd, sq, sa FROM (
+        SELECT UPPER(mat_code) cd, stock_qty sq, stock_amt sa,
+          ROW_NUMBER() OVER(PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
+        FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd < ?) x WHERE rn=1),
+    keys AS (SELECT cd FROM per UNION SELECT cd FROM endd UNION SELECT cd FROM beg)
+    SELECT k.cd,
+      MAX(m.item_desc) nm, MAX(m.item_spec) spec, MAX(m.unit) unit,
+      MAX(ISNULL(i.sgroup,'')) sg, MAX(ISNULL(sd.DETAIL_DESC,'')) sgnm, MAX(ISNULL(i.cut_gubun,'')) cut,
+      MAX(ISNULL(b.sq,0)) bq, MAX(ISNULL(b.sa,0)) ba,
+      MAX(ISNULL(p.iq,0)) iq, MAX(ISNULL(p.ia,0)) ia,
+      MAX(ISNULL(p.oq,0)) oq, MAX(ISNULL(p.oa,0)) oa,
+      MAX(ISNULL(e.sq,0)) sq, MAX(ISNULL(e.sa,0)) sa, MAX(ISNULL(e.avg,0)) avg
+    FROM keys k
+    LEFT JOIN per p ON p.cd=k.cd
+    LEFT JOIN endd e ON e.cd=k.cd
+    LEFT JOIN beg b ON b.cd=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON UPPER(m.item_code)=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON UPPER(i.item_code)=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
+    GROUP BY k.cd ORDER BY k.cd
+    """
+    rows = _nx_rows(sql, fr, to, to, fr)
+    return {"dfrom": fr, "dto": to, "count": len(rows), "rows": rows}
+
+@live_router.get("/matclose/ledger")
+def matclose_ledger(mat: str = Query(...), dfrom: str = Query(""), dto: str = Query("")):
+    """단일 품목 일별 수불추이(우리 이동평균)."""
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    to = _ymd6(dto, hi); fr = _ymd6(dfrom, to[:4] + "01")
+    sql = """SELECT ymd, in_qty iq, in_amt ia, out_qty oq, out_amt oa,
+        stock_qty sq, avg_cost avg, stock_amt sa
+      FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE UPPER(mat_code)=? AND ymd BETWEEN ? AND ? ORDER BY ymd"""
+    rows = _nx_rows(sql, mat.upper(), fr, to)
+    return {"mat": mat.upper(), "dfrom": fr, "dto": to, "count": len(rows), "rows": rows}
+
 # ================= 자재불출집계표 (구매/자재, dw_pu_input_140) =================
 # LG外 전 매출(유상사급 포함). 원장(PU/SA_T_STOCK_MAINT + PU_T_STOCK_MAINT_C) 기반 → 기간 파라미터화 라이브.
 # 검증된 export_web_data.py _dispatch 쿼리 이식. 마감기준=업체별 마감일 구간, 불출기준=실제 이동일 구간.
@@ -304,6 +370,128 @@ def receipt(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Query
         dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
         rows = _receipt(dc, y)
         return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows}
+
+# ================= 일일 영업/매입 현황 (경영) ① 매입/불출/실매입 by 구분 =================
+_CT_NAME = {'1': '유상사급-부품', '4': '절삭-원자재', '5': '설치-원자재', '6': '절삭-협력사',
+            '7': '절삭-부자재', '8': '설치-부자재', '9': '소모품', 'A': '이지링크'}
+_GUBUN_ORDER = ['유상사급-원재료', '유상사급-부품', '절삭-원자재', '설치-원자재', '절삭-협력사',
+                '절삭-부자재', '설치-부자재', '소모품', '이지링크']
+_VGUBUN = None
+def _vgubun():
+    """거래처→매입구분 오버라이드(사급 원소재 등). nx.mgmt_vendor_gubun. 모듈캐시."""
+    global _VGUBUN
+    if _VGUBUN is None:
+        try:
+            _c, rs = _rows("SELECT cust_code, override_gubun FROM PARTNER_ERP_TEST3.nx.mgmt_vendor_gubun")
+            _VGUBUN = {str(r['cust_code']).strip(): str(r['override_gubun']).strip() for r in rs}
+        except Exception:
+            _VGUBUN = {}
+    return _VGUBUN
+
+import time as _time
+_DPI_CACHE = {}   # dailypurissue: d6 -> (expiry_ts, result). 무거운 재고조정 3쿼리(_prodstock 등) → 날짜별 캐시(재조회 즉시)
+
+@live_router.get("/dailypurissue")
+def dailypurissue(date: str = Query(""), nocache: str = Query("")):
+    """일일 영업/매입 현황 ① 매입/불출/실매입 by 구분(CUST_TYPE + 사급원소재 오버라이드).
+       date=조회일(YYMMDD). 마감기준: 누적=마감월초~전일, 당일=조회일, 총=누적+당일. 금액=공급가(MAINT_AMT, VAT제외).
+       ★날짜별 결과 캐시(TTL 180초). nocache=1로 강제 재계산."""
+    d6 = _digits(date, 6) or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
+    ym = d6[:4]
+    _now = _time.time()
+    if not str(nocache).strip():
+        _hit = _DPI_CACHE.get(d6)
+        if _hit and _hit[0] > _now:
+            return _hit[1]
+    ov = _vgubun()
+    def gb(cc, ct):
+        return ov.get(str(cc or '').strip()) or _CT_NAME.get(str(ct or '').strip(), '기타(' + str(ct or '').strip() + ')')
+    def agg(rows):
+        m = {}
+        for r in rows:
+            g = gb(r.get('cc'), r.get('ct'))
+            m[g] = m.get(g, 0.0) + float(r.get('kamt') or 0)   # ★KRW환산(외화 거래처=원통화 아님). 리포트=금액(KRW)
+        return m
+    win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"
+    dc_cum = win + f" AND A.MAINT_YMD < '{d6}'"      # 누적=마감월초~전일
+    dc_day = win + f" AND A.MAINT_YMD = '{d6}'"      # 당일=조회일
+    pur_cum, pur_day = agg(_receipt(dc_cum, ym)), agg(_receipt(dc_day, ym))
+    out_cum, out_day = agg(_dispatch(dc_cum, ym)), agg(_dispatch(dc_day, ym))
+    gubuns = list(_GUBUN_ORDER)
+    for ex in sorted(set(list(pur_cum) + list(out_cum) + list(pur_day) + list(out_day)) - set(gubuns)):
+        gubuns.append(ex)
+    def blk(cum, day):
+        rows = []
+        for g in gubuns:
+            c, dd = round(cum.get(g, 0)), round(day.get(g, 0))
+            if c or dd: rows.append({"gubun": g, "cum": c, "day": dd, "tot": c + dd})
+        return rows
+    net_cum = {g: pur_cum.get(g, 0) - out_cum.get(g, 0) for g in gubuns}
+    net_day = {g: pur_day.get(g, 0) - out_day.get(g, 0) for g in gubuns}
+    pur, out, net = blk(pur_cum, pur_day), blk(out_cum, out_day), blk(net_cum, net_day)
+    def tot(rs): return {"cum": sum(r['cum'] for r in rs), "day": sum(r['day'] for r in rs), "tot": sum(r['tot'] for r in rs)}
+    pur_t, out_t, net_t = tot(pur), tot(out), tot(net)
+
+    m0 = ym + '01'   # 월초(YYMMDD)
+    # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
+    _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
+      WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
+    cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
+    hyeon_cut, hyeon_seol = round(cutm.get('절삭', 0)), round(cutm.get('설치', 0))
+    hyeon_etc = round(sum(v for k, v in cutm.items() if k not in ('절삭', '설치')))   # 이지링크/분지관/미분류
+    lg_sales = hyeon_cut + hyeon_seol + hyeon_etc   # LG매출액=현매출합계=전체 리시빙(원리포트 매출합계와 동일). ②분모.
+
+    # ④ 사급율 원천 = OSP(nx.lg_sagub_actual) 월초~조회일. 원소재(TUBE)/부품.
+    _c, ro = _rows(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END t,
+        SUM(ISNULL(amt,0)) a FROM PARTNER_ERP_TEST3.nx.lg_sagub_actual
+      WHERE ym='{ym}' AND ISNULL(ymd,'') BETWEEN '{m0}' AND '{d6}'
+      GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END""")
+    ospm = {r['t']: float(r['a'] or 0) for r in ro}
+    osp_raw, osp_part = round(ospm.get('raw', 0)), round(ospm.get('part', 0))
+    pct = lambda a, b: round(a / b * 100, 1) if b else 0.0
+
+    # ③ 재고조정 = 전월기말재고 − 조회일재고 (재고증가면 음수). 실재고(조정후)=실매입−재고조정=실매입+재고증가.
+    #    소스=생산재고조회(_prodstock)·제품재고조회(salesstock)·자재수불(matledger). 재고조정=Σ(기초금액 basic×cost − 현재고금액 amt).
+    def _sdelta(rows, basek='basic', costk='cost', amtk='amt'):
+        cur_a = sum(float(x.get(amtk) or 0) for x in rows)
+        base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
+        return round(base_a - cur_a)
+    try: jaego_prod = _sdelta(_prodstock(ym, m0, d6))   # ★조회일 기준(기초=7월말=조회월기초, 현재고=월초~조회일). 설계문서 "원장 날짜컷" 반영
+    except Exception: jaego_prod = 0
+    try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
+    except Exception: jaego_sales = 0
+    try:   # 자재수불(자재재고): matledger 월기준(일별마감 없음). rows에 basic/curr/amt(금액)
+        _mr = matledger(period='month', ymd=ym).get('rows', [])
+        jaego_mat = round(sum(float(x.get('basic_amt') or 0) for x in _mr) - sum(float(x.get('amt') or x.get('curr_amt') or 0) for x in _mr))
+    except Exception: jaego_mat = 0
+    jaego = jaego_prod + jaego_sales + jaego_mat
+    silrae = net_t['tot'] - jaego   # 실재고(조정후) = 실매입 − 재고조정
+
+    # 당사ERP 유상사급 = ①의 유상사급-원재료+부품(확정입고, 총)
+    dangsa_sagub = 0
+    for r in pur:
+        if r['gubun'] in ('유상사급-원재료', '유상사급-부품'): dangsa_sagub += r['tot']
+    lg_osp = osp_raw + osp_part   # LG전산(OSP) 총
+
+    _res = {"date": d6, "ym": ym,
+            "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
+            # ⑤ 현매출 / ② 매입비율
+            "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
+            "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
+                      "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
+                      "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
+            # ③ 재고조정 (기초−현재고, 재고증가면 음수). 자재는 8월 스냅샷 없어 0(원장계산 예정).
+            "jaego": {"prod": jaego_prod, "sales": jaego_sales, "mat": jaego_mat, "total": jaego, "mat_pending": jaego_mat == 0},
+            # ④ 사급율
+            "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
+                         "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
+            # D 유상사급 대사 (당사ERP 확정입고 vs LG전산 OSP)
+            "dae": {"dangsa": dangsa_sagub, "lg": lg_osp, "diff": dangsa_sagub - lg_osp,
+                    "lg_raw": osp_raw, "lg_part": osp_part}}
+    _DPI_CACHE[d6] = (_time.time() + 180, _res)   # ★180초 캐시(재조회 즉시). 오늘자도 3분 이내 재계산 안 함.
+    return _res
 
 # ================= 확정입고명세서 (구매/자재, dw_pu_input_110) — 라인단위 =================
 def _MAGAM(ref_ym):
@@ -553,8 +741,10 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
 # ================= 생산입출고현황 (생산, dw_pr_stock_460) — 파트×자도번 마스터-디테일 =================
 # 유니버스=pr_t_mat_stock_wh(part,mat), BF=2502마감+2502~당월 이동(생산월마감이 2502에 멈춤=고정base), 당월=[ym01,ym99].
 # patch_460c.py 이식, FR/BFT만 월 파라미터화(2502 base 고정).
-def _prodinout(ym):
-    y01, y99 = ym + "01", ym + "99"
+def _prodinout(ym, frm=None, to=None):
+    # 레거시와 동일: 수불기간(frm~to). frm/to(YYMMDD) 우선, 없으면 ym월 전체.
+    y01 = frm if frm else (ym + "01")
+    y99 = to if to else (ym + "99")
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
     CUR = f"""
@@ -614,18 +804,21 @@ def _prodinout(ym):
     return stock, mv, partNames
 
 @live_router.get("/prodinout")
-def prodinout(ym: str = Query(""), source: str = Query("live")):
-    """생산입출고현황. 기본 source=live(현행 무변경). source=nx면 stock_ledger(PRD) 파생(컷오버 전 빈데이터 사유표시). ym=YYMM."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+    """생산입출고현황. 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환). source=nx면 stock_ledger(PRD) 파생."""
+    f6, t6 = _digits(frm, 6), _digits(to, 6)
+    y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "nx":
-        r = _nx_screen("PRD", y + "01", y + "31"); r["ym"] = y; return r
-    stock, moves, partNames = _prodinout(y)
-    return {"ym": y, "stock": stock, "moves": moves, "partNames": partNames}
+        r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
+    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves, "partNames": partNames}
 
 # ================= 제품입출고현황 (영업, dw_pr_stock_110) — 제품(P/N) 마스터-디테일 =================
 # 유니버스=SA_T_ITEM_STOCK, BF=2502마감+2502~당월(고정base), 당월=[ym01,ym99]. patch_110.py 이식.
-def _prodinvout(ym):
-    y01, y99 = ym + "01", ym + "99"
+def _prodinvout(ym, frm=None, to=None):
+    # 레거시 dw_pr_stock_110과 동일: 수불기간(frm~to). frm/to(YYMMDD) 우선, 없으면 ym월 전체.
+    y01 = frm if frm else (ym + "01")
+    y99 = to if to else (ym + "99")
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
     BF = f"""
  SELECT UPPER(item_code) item, stock_qty q FROM PARTNER_ERP_TEST3.nx.sa_t_month_stock WHERE stock_yymm='2502'
@@ -668,13 +861,14 @@ def _prodinvout(ym):
     return stock, mv
 
 @live_router.get("/prodinvout")
-def prodinvout(ym: str = Query(""), source: str = Query("live")):
-    """제품입출고현황. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). ym=YYMM."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+def prodinvout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+    """제품입출고현황(레거시 dw_pr_stock_110). 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환). source=nx면 stock_ledger(ASY) 파생."""
+    f6, t6 = _digits(frm, 6), _digits(to, 6)
+    y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "nx":
-        r = _nx_screen("ASY", y + "01", y + "31"); r["ym"] = y; return r
-    stock, moves = _prodinvout(y)
-    return {"ym": y, "stock": stock, "moves": moves}
+        r = _nx_screen("ASY", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
+    stock, moves = _prodinvout(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves}
 
 # ================= 출하실적현황 (영업, dw_sa_list_010) — 라인단위 =================
 @live_router.get("/shipment")
@@ -699,8 +893,9 @@ WHERE a.sale_ymd BETWEEN '{f}' AND '{t}'
 # ================= 제품재고조회 (영업, dw_pr_stock_040) — 제품수불 플랫 =================
 # 기초(2502+~기간전)+입고-출고-기타출고=재고. export_web_data.py _S040 이식, 기간 파라미터화(base 2502 고정).
 @live_router.get("/salesstock")
-def salesstock(dfrom: str = Query(""), dto: str = Query(""), source: str = Query("live")):
-    """제품재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). dfrom~dto=YYMMDD."""
+def salesstock(dfrom: str = Query(""), dto: str = Query(""), source: str = Query("live"), zero: str = Query("")):
+    """제품재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). dfrom~dto=YYMMDD.
+    zero=1이면 최종재고 0인 품목도 포함(레거시 w_pr_stock_040 2,172건과 동일 gross 대조용). 기본=0재고 숨김."""
     f, t = _def_range(dfrom, dto)
     if source == "nx":
         return _nx_screen("ASY", f, t)
@@ -744,17 +939,18 @@ FROM t JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON t.mat=m.item_code
 GROUP BY t.mat
 """
     _c, rows = _rows(sql)
+    inc_zero = str(zero).strip() in ("1", "true", "y", "Y")
     out = []
     for r in rows:
         q = float(r["qty"] or 0)
-        if abs(q) <= 0.0001:
+        if abs(q) <= 0.0001 and not inc_zero:
             continue
         cost = float(r["cost"] or 0)
         r["amt"] = round(q * cost)
         r["qty"] = q
         out.append(r)
     out.sort(key=lambda r: -abs(r.get("amt") or 0))
-    return {"dfrom": f, "dto": t, "count": len(out), "rows": out}
+    return {"dfrom": f, "dto": t, "count": len(out), "zero": 1 if inc_zero else 0, "rows": out}
 
 # ================= LG리시빙관리 (영업, dw_sa_sale_110) — 도번×일자 피벗 =================
 @live_router.get("/lgrecv")
@@ -785,8 +981,10 @@ WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.
-def _prodstock(ym):
-    y01, y99 = ym + "01", ym + "99"
+def _prodstock(ym, frm=None, to=None):
+    # 레거시 w_pr_stock_480과 동일: 수불기간(frm~to) 일범위. frm/to(YYMMDD) 우선, 없으면 ym월 전체.
+    y01 = frm if frm else (ym + "01")
+    y99 = to if to else (ym + "99")
     U = f"""
 SELECT a.gagong_proc_code gpc, A.MAT_CODE mat, A.STOCK_QTY basic,0 inq,0 outq,0 etc FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,iif(a.maint_ymd<'{y01}',-A.MAINT_QTY,0),iif(a.maint_ymd<'{y01}',0,-A.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND a.maint_tag='B' AND isnull(a.out_wh_gubun,'1')='1'
@@ -799,7 +997,8 @@ UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),i
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,0,iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG in ('2','1')
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
 """
-    C2 = f"(select top 1 q.item_cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust_code end order by q.cost_apply_ymd desc)"
+    # ★단가 상관서브쿼리를 OUTER APPLY로 1회만 계산(기존엔 cost·amt에 2회 → 품목당 2배). 값 동일·성능개선.
+    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust_code end order by q.cost_apply_ymd desc"
     sql = f"""
 ;WITH agg AS (
   SELECT LTRIM(RTRIM(t.mat)) mat, ISNULL(LTRIM(RTRIM(t.gpc)),'') line,
@@ -812,20 +1011,23 @@ SELECT CASE WHEN agg.line='P0001' THEN 'GAGONG' ELSE 'WELD' END stage,
   CASE WHEN agg.line='P0001' THEN '' ELSE agg.line END loc,
   agg.mat cd, pi.item_desc nm, ISNULL(pi.item_class,'') type,
   agg.basic, agg.inq, agg.outq, agg.adj, agg.qty,
-  {C2} cost, CAST(ROUND(agg.qty*ISNULL({C2},0),0) AS DECIMAL(18,0)) amt
+  cc.cost cost, CAST(ROUND(agg.qty*ISNULL(cc.cost,0),0) AS DECIMAL(18,0)) amt
 FROM agg JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.item_code=agg.mat
+  OUTER APPLY ({C2A}) cc
 """
     _c, rows = _rows(sql)
     return rows
 
 @live_router.get("/prodstock")
-def prodstock(ym: str = Query(""), source: str = Query("live")):
-    """생산재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(PRD) 파생(컷오버 전 빈데이터 사유표시). ym=YYMM."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+def prodstock(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+    """생산재고조회(레거시 w_pr_stock_480). 수불기간 frm~to(YYMMDD) 우선 = 레거시 화면과 동일 일범위.
+    frm/to 없으면 ym(YYMM) 월전체(하위호환). source=nx면 stock_ledger(PRD) 파생."""
+    f6, t6 = _digits(frm, 6), _digits(to, 6)
+    y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "nx":
-        r = _nx_screen("PRD", y + "01", y + "31"); r["ym"] = y; return r
-    rows = _prodstock(y)
-    return {"ym": y, "rows": rows}
+        r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
+    rows = _prodstock(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "rows": rows}
 
 # ================= ★Phase5: nx 파생 vs 라이브 대조 (diff 리포트) =================
 @live_router.get("/nxcompare")

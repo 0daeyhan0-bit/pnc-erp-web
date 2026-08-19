@@ -973,6 +973,97 @@ SCREEN.stockissue=(c)=>{
   load();
 };
 
+/* ==== 자재 일마감/수불장(이동평균) — 우리 교정 nx.mat_stock_daily 조회 ====
+   기초(직전잔량)+입고−출고+평가조정=기말. 매입=평균갱신·이동/출고=현재평균 불변(수입환율·마이너스가드·tagP 반영). 소모품 제외. */
+SCREEN.matclose=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const nq=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const iso2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2).replace(/-/g,''):'';};
+  const ymd2iso=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  const fmtY=y=>{y=(''+(y||'')).trim();return y.length>=6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;};
+  const m1=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
+  const tdy=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+  let all=[], rows=[], loading=false, msg='', q='', dfrom='', dto='';
+  const load=async()=>{
+    const gf=c.querySelector('#mc-from'),gt=c.querySelector('#mc-to');   // ★재렌더 前 입력 먼저 읽어 상태갱신(날짜 직접 키인 값 보존 — 안 그러면 draw가 옛값으로 되돌림)
+    const f=(gf&&iso2ymd(gf.value))||dfrom, t=(gt&&iso2ymd(gt.value))||dto;
+    dfrom=f; dto=t; loading=true; msg=''; draw();
+    try{const r=await fetch(`${API}/api/live/matclose?dfrom=${f}&dto=${t}`);if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();all=j.rows||[];dfrom=j.dfrom||f;dto=j.dto||t;}
+    catch(e){all=[];msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
+    loading=false;applyF();};
+  const adjOf=r=>Number(r.sa||0)-(Number(r.ba||0)+Number(r.ia||0)-Number(r.oa||0));
+  const applyF=()=>{const s=q.trim().toLowerCase();
+    rows=s?all.filter(r=>(''+(r.cd||'')).toLowerCase().includes(s)||(''+(r.nm||'')).toLowerCase().includes(s)||(''+(r.sgnm||'')).toLowerCase().includes(s)):all;draw();};
+  // 품목 일별 수불추이 팝업
+  const openLedger=async(cd,nm)=>{
+    let el=document.createElement('div');
+    el.innerHTML=`<div style="position:fixed;inset:0;z-index:1250;background:rgba(20,30,50,.44);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:44px 12px">
+      <div style="background:#fff;border-radius:12px;padding:18px 20px;width:820px;max-width:96vw;box-shadow:0 14px 50px rgba(0,0,0,.34)">
+       <div style="font-weight:700;font-size:15px;margin-bottom:10px">📒 ${esc(cd)} <span style="font-size:12px;color:#888;font-weight:400">${esc(nm||'')} · 일별 수불추이(이동평균)</span></div>
+       <div id="mcl-body" style="max-height:60vh;overflow:auto"><div class="empty" style="padding:20px">${typeof SPIN!=='undefined'?SPIN:''}조회 중…</div></div>
+       <div style="margin-top:14px;text-align:right"><button class="btn" id="mcl-close">닫기</button></div>
+      </div></div>`;
+    document.body.appendChild(el);
+    el.querySelector('#mcl-close').onclick=()=>el.remove();
+    el.firstElementChild.onclick=e=>{if(e.target===el.firstElementChild)el.remove();};
+    try{const r=await fetch(`${API}/api/live/matclose/ledger?mat=${encodeURIComponent(cd)}&dfrom=${dfrom}&dto=${dto}`);
+      const j=await r.json();const L=j.rows||[];
+      el.querySelector('#mcl-body').innerHTML=`<table class="tbl" style="font-size:12px;width:100%"><thead><tr style="position:sticky;top:0;background:#eef3fb">
+        <th>일자</th><th class="num">입고수량</th><th class="num">입고금액</th><th class="num">출고수량</th><th class="num">출고금액</th><th class="num">재고수량</th><th class="num">평균단가</th><th class="num">재고금액</th></tr></thead>
+        <tbody>${L.length?L.map(r=>`<tr><td class="center">${fmtY(r.ymd)}</td><td class="num">${r.iq?nq(r.iq):''}</td><td class="num">${r.ia?nf(r.ia):''}</td><td class="num">${r.oq?nq(r.oq):''}</td><td class="num">${r.oa?nf(r.oa):''}</td><td class="num"><b>${nq(r.sq)}</b></td><td class="num">${nf(r.avg)}</td><td class="num"><b>${nf(r.sa)}</b></td></tr>`).join(''):`<tr><td colspan="8" class="empty">이동 없음</td></tr>`}</tbody></table>`;
+    }catch(e){el.querySelector('#mcl-body').innerHTML=`<div class="empty" style="color:#c0392b;padding:20px">조회 실패</div>`;}
+  };
+  const draw=()=>{
+    const T={ba:0,ia:0,oa:0,adj:0,sa:0,bq:0,iq:0,oq:0,sq:0};
+    rows.forEach(r=>{T.ba+=+r.ba||0;T.ia+=+r.ia||0;T.oa+=+r.oa||0;T.adj+=adjOf(r);T.sa+=+r.sa||0;T.bq+=+r.bq||0;T.iq+=+r.iq||0;T.oq+=+r.oq||0;T.sq+=+r.sq||0;});
+    c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="margin-bottom:2px">📗 자재 일마감/수불장 <span style="font-size:12px;color:var(--muted);font-weight:400">이동평균 · nx.mat_stock_daily (교정본)</span></div>
+     <div class="page-sub" style="margin-bottom:6px">기초(직전잔량)+입고−출고+평가조정=기말. 매입=평균갱신·이동/출고=현재평균 불변(수입 환율·마이너스재고 가드·tagP 반영). 소모품 제외. 행 클릭=일별추이.</div>
+     <div class="toolbar" style="gap:6px;flex:0 0 auto">
+       <label class="tl">기간</label><input type="date" class="inp" id="mc-from" value="${esc(ymd2iso(dfrom)||m1())}" style="width:140px"> ~ <input type="date" class="inp" id="mc-to" value="${esc(ymd2iso(dto)||tdy())}" style="width:140px">
+       <input class="inp" id="mc-q" placeholder="품번/품명/제품군" value="${esc(q)}" style="width:170px">
+       <button class="btn" id="mc-go">🔍 조회</button>
+       <div class="spacer"></div><button class="btn xls" id="mc-xls">📥 엑셀</button>
+     </div>
+     ${msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">⚠ ${esc(msg)}</div>`:''}
+     <div class="summary-bar" style="flex:0 0 auto"><div class="s-item">품목 <b>${nf(rows.length)}</b></div><div class="s-item">기초 <b>${nf(T.ba)}</b></div><div class="s-item">입고 <b>${nf(T.ia)}</b></div><div class="s-item">출고 <b>${nf(T.oa)}</b></div><div class="s-item">기말 <b>${nf(T.sa)} 원</b></div></div>
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <table class="tbl fit" style="font-size:12px"><thead><tr>
+       <th>품번</th><th>품명</th><th>제품군</th>
+       <th class="num">기초수량</th><th class="num">기초금액</th><th class="num">입고수량</th><th class="num">입고금액</th>
+       <th class="num">출고수량</th><th class="num">출고금액</th><th class="num" title="기말−(기초+입고−출고). 이동평균 평가조정">평가조정</th>
+       <th class="num">기말수량</th><th class="num">평균단가</th><th class="num">기말금액</th></tr></thead>
+     <tbody id="mc-body"></tbody>
+     <tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#eaf1fb;font-weight:700"><td colspan="3" class="right">총계 ${nf(rows.length)}품목</td>
+       <td class="num">${nq(T.bq)}</td><td class="num">${nf(T.ba)}</td><td class="num">${nq(T.iq)}</td><td class="num">${nf(T.ia)}</td>
+       <td class="num">${nq(T.oq)}</td><td class="num">${nf(T.oa)}</td><td class="num">${nf(T.adj)}</td><td class="num">${nq(T.sq)}</td><td></td><td class="num">${nf(T.sa)}</td></tr></tfoot></table></div>
+     <div class="rowcount" style="flex:0 0 auto">${dfrom?`${fmtY(dfrom)} ~ ${fmtY(dto)}`:''}</div></div>`;
+    const b=c.querySelector('#mc-body');
+    b.innerHTML=loading?`<tr><td colspan="13" class="empty">${typeof SPIN!=='undefined'?SPIN:''}조회 중…</td></tr>`
+      :(rows.length?rows.map(r=>{const adj=adjOf(r);return `<tr class="mc-row" data-cd="${esc(r.cd)}" style="cursor:pointer">
+        <td><b>${esc(r.cd)}</b></td><td class="cap" title="${esc(r.nm||'')}">${esc(r.nm||'')}</td><td class="center">${esc(r.sgnm||r.sg||'')}</td>
+        <td class="num">${nq(r.bq)}</td><td class="num">${nf(r.ba)}</td><td class="num">${nq(r.iq)}</td><td class="num">${nf(r.ia)}</td>
+        <td class="num">${nq(r.oq)}</td><td class="num">${nf(r.oa)}</td><td class="num" style="${Math.abs(adj)>1?'color:#a03d2c':''}">${adj?nf(adj):''}</td>
+        <td class="num"><b>${nq(r.sq)}</b></td><td class="num">${nf(r.avg)}</td><td class="num"><b>${nf(r.sa)}</b></td></tr>`;}).join('')
+      :`<tr><td colspan="13" class="empty">결과 없음</td></tr>`);
+    const go=()=>{q=(c.querySelector('#mc-q').value||'').trim();
+      const f=iso2ymd(c.querySelector('#mc-from').value),t=iso2ymd(c.querySelector('#mc-to').value);
+      if(f!==dfrom||t!==dto)load();else applyF();};
+    c.querySelector('#mc-go').onclick=go;
+    c.querySelector('#mc-q').onkeyup=e=>{if(e.key==='Enter')go();};
+    // 날짜는 자동조회 안 함(타이핑 중 change로 재렌더→포커스 뺏김 방지). 자유 키인 후 조회버튼/Enter로 적용. (UI규칙: 직접 키인 보장)
+    ['#mc-from','#mc-to'].forEach(id=>{const e=c.querySelector(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter')go();};});
+    c.querySelectorAll('.mc-row').forEach(tr=>tr.onclick=()=>{const cd=tr.dataset.cd,r=rows.find(x=>x.cd===cd);openLedger(cd,r?r.nm:'');});
+    c.querySelector('#mc-xls').onclick=()=>downloadCSV('자재일마감_'+(dfrom||'')+'_'+(dto||'')+'.csv',
+      ['품번','품명','제품군','기초수량','기초금액','입고수량','입고금액','출고수량','출고금액','평가조정','기말수량','평균단가','기말금액'],
+      rows.map(r=>[r.cd,r.nm,r.sgnm||r.sg,r.bq,r.ba,r.iq,r.ia,r.oq,r.oa,adjOf(r),r.sq,r.avg,r.sa]));
+    if(typeof attachResizers!=='undefined')attachResizers(c);if(typeof enableSort!=='undefined')enableSort(c);
+  };
+  load();
+};
+
 /* ==== 자재입고진행현황(읽기전용 집계): 품목별 현재고=원장 SUM ==== */
 SCREEN.matkanban=(c)=>{
   let q='', rows=[], loading=false, msg='';
@@ -1340,6 +1431,7 @@ SCREEN.sourceprofile=(c)=>{
   const nfq=v=>{v=Number(v||0);return v%1===0?v.toLocaleString('ko-KR'):v.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');};
   let q='', slist=[], sel=null, selNm='', tree=null, tload=false, searching=false, msg='', acT=null, edit={}, ref=today;
   let showUnappr=false, routes=[], allocErrs=[];   // 조달경로 후보(단일 소스 nx.sourcing_route) + 저장된 route 단위 배분(nx.route_alloc)
+  let selRid=null, rtree={}, rvmap={};   // ★선택 경로(null=현행 R01)·경로별 BOM트리 캐시·경로별 부품→업체배분 캐시(R01=current_order·R02=route/detail)
   const loadAlloc=async()=>{try{const r=await fetch(`${API}/api/sourcing/route/alloc?item=${encodeURIComponent(sel)}&show_unapproved=${showUnappr?1:0}`);const j=await r.json();routes=j.routes||[];allocErrs=j.alloc_errs||[];}catch(e){routes=[];allocErrs=[];}};
   const search=async(auto)=>{searching=true;draw();
     try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}`);slist=(await r.json()).rows||[];}
@@ -1347,9 +1439,12 @@ SCREEN.sourceprofile=(c)=>{
     searching=false;draw();if(auto&&slist.length&&!sel)open(slist[0].item);};
   const fillDL=()=>{const dl=c.querySelector('#sp-dl');if(dl)dl.innerHTML=slist.slice(0,60).map(s=>`<option value="${esc(s.item)}">${esc((s.name||'').replace(/"/g,''))}</option>`).join('');};
   const ac=t=>{clearTimeout(acT);acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(t)}`);slist=(await r.json()).rows||[];fillDL();}catch(e){}},180);};
-  const open=async(item)=>{sel=item;selNm='';tree=null;tload=true;edit={};draw();
+  const loadCurVend=async(item)=>{try{const j=await(await fetch(`${API}/api/sourcing/current_order?item=${encodeURIComponent(item)}`)).json();
+    const m={};(j.rows||[]).forEach(x=>{m[String(x.item_code).trim()]=(x.vendors||[]).map(v=>({name:v.vendor_name||v.vendor_code,ratio:v.alloc_ratio}));});return m;}catch(e){return {};}};
+  const open=async(item)=>{sel=item;selNm='';tree=null;tload=true;edit={};selRid=null;rtree={};rvmap={};draw();
     try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}`);const j=await r.json();tree=j.rows||[];selNm=j.name||'';}catch(e){tree=[];}
     await loadAlloc();
+    rvmap['_cur']=await loadCurVend(item);   // ★현행(R01) 부품별 다중업체·비율(order_vendor)
     tload=false;draw();};
   const curE=(rid,f,dflt)=>{const k=rid+'|'+f;return edit[k]!==undefined?edit[k]:dflt;};
   const setE=(rid,f,v)=>{edit[rid+'|'+f]=v;};
@@ -1502,10 +1597,11 @@ SCREEN.sourceprofile=(c)=>{
       else{el.onchange=()=>{pm.rows[i][f]=(el.value===''?'':el.value);};}});};
   // ===== R01(현행) 발주업체·단가 모달 (자동발주 근거) — ★품목당 다중업체+배분%(합100). 현행 매입처 자동시드 + 업체별 마스터단가(읽기전용) =====
   let om=null, omAcT=null;   // om={item,asof,rows[],msg,loading,saving}
-  const omOpen=async(it)=>{om={item:it,asof:'',rows:[],msg:'',loading:true,saving:false};draw();
-    try{const r=await fetch(`${API}/api/sourcing/current_order?item=${encodeURIComponent(it)}`);const j=await r.json();
+  const omOpen=async(it,rid)=>{rid=+rid||0;om={item:it,route_id:rid,asof:'',rows:[],msg:'',loading:true,saving:false};draw();
+    try{const url=rid>0?`${API}/api/sourcing/route_order?route_id=${rid}`:`${API}/api/sourcing/current_order?item=${encodeURIComponent(it)}`;
+      const r=await fetch(url);const j=await r.json();
       om.asof=j.asof||'';om.rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',spec:x.spec||'',qty:x.qty,
-        make_label:x.make_label||'',cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
+        make_label:x.make_label||'',sagub:!!x.sagub,cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
         item_master_price:x.master_price,has_override:!!x.has_override,
         vendors:(x.vendors||[{vendor_code:x.cur_vendor_code,vendor_name:x.cur_vendor_name,alloc_ratio:100,master_price:x.master_price}])
           .map(v=>({code:v.vendor_code||'',name:v.vendor_name||'',ratio:(v.alloc_ratio==null?null:+v.alloc_ratio),price:v.master_price,price_reg:(v.price_reg!==false)}))}));
@@ -1567,7 +1663,7 @@ SCREEN.sourceprofile=(c)=>{
           <span style="min-width:78px;text-align:right;background:#f4f6fb;border-radius:3px;padding:0 5px" title="업체별 마스터 매입단가(읽기전용)">${pcell}</span>
           ${(canW&&multi)?`<span class="om-del" data-i="${i}" data-vi="${vi}" style="cursor:pointer;color:#c0392b;font-weight:700" title="업체 삭제">×</span>`:''}</div>`;}).join('');
       return `<tr>
-        <td style="white-space:nowrap;vertical-align:top"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span></td>
+        <td style="white-space:nowrap;vertical-align:top"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span>${r.sagub?' <span style="font-size:10px;color:#7a3ea8;background:#f3ecfb;border-radius:3px;padding:0 4px;font-weight:700" title="사급(우리가 자재 공급)">사급</span>':''}</td>
         <td class="bcap" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:top" title="${esc(r.item_name)}">${esc(r.item_name)}</td>
         <td class="num" style="vertical-align:top">${nfq(r.qty)}</td>
         <td style="vertical-align:top">${vhtml}
@@ -1607,8 +1703,29 @@ SCREEN.sourceprofile=(c)=>{
     c.querySelectorAll('.om-add').forEach(el=>el.onclick=()=>omAdd(+el.dataset.i));
     c.querySelectorAll('.om-del').forEach(el=>el.onclick=()=>omDelV(+el.dataset.i,+el.dataset.vi));};
   const kindOf=n=>{if((n.nm||'').indexOf('용접봉')>=0)return{t:'용접봉',c:'#8e44ad'};if(n.haskids)return{t:'제작(SUB)',c:'#1c7c3a'};if(String(n.sag)==='1')return{t:'사급',c:'#b8860b'};return{t:'매입/구매',c:'#1c47a0'};};
-  const treeTbl=()=>{if(!tree)return '';if(!tree.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
-    return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${tree.map(n=>{const k=kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${esc(n.custnm||'')}</td></tr>`;}).join('')}</tbody></table>`;};
+  // ★선택 경로(R01/R02) 기준 BOM 트리 전환 + 매입처 다중업체·비율
+  const gubunKind=g=>{g=(g||'').trim();return g==='제작'?{t:'제작',c:'#1c7c3a'}:(g==='사급'?{t:'사급',c:'#b8860b'}:{t:'매입/구매',c:'#1c47a0'});};
+  const buildRouteTree=(item,itemNm,lines)=>{const live=(lines||[]).filter(l=>!l.staged);
+    const byP={};live.forEach(l=>{const p=(l.parent_line==null?'root':l.parent_line);(byP[p]=byP[p]||[]).push(l);});
+    const rows=[{level:0,code:item,nm:itemNm||'',haskids:true,qty:1}];
+    const walk=(key,lvl)=>{(byP[key]||[]).forEach(l=>{const isSub=l.node_kind==='SUB';
+      rows.push({level:lvl,code:isSub?(l.sub_item||l.child_item):l.child_item,nm:l.child_name||'',qty:l.qty,haskids:isSub,kind:isSub?null:gubunKind(l.gubun),custnm:l.vendor_name||''});
+      if(isSub)walk(l.line_id,lvl+1);});};
+    walk('root',1);return rows;};
+  const selectRoute=async(r)=>{const rid=r.route_id,isCur=_isCur(r);selRid=isCur?null:rid;
+    if(!isCur&&!rtree[rid]){try{const j=await(await fetch(`${API}/api/sourcing/route/detail?route_id=${rid}`)).json();
+      rtree[rid]=buildRouteTree(sel,selNm,j.lines||[]);
+      const m={};(j.lines||[]).forEach(l=>{if(l.node_kind!=='SUB'&&l.vendor_name)m[String(l.child_item).trim()]=[{name:l.vendor_name,ratio:null}];});rvmap[rid]=m;
+      }catch(e){rtree[rid]=[];rvmap[rid]={};}}
+    draw();};
+  const curTree=()=>selRid==null?tree:(rtree[selRid]||[]);
+  const curVmap=()=>selRid==null?(rvmap['_cur']||{}):(rvmap[selRid]||{});
+  const selRouteLabel=()=>{if(selRid==null)return 'R01 · 현행';const r=routes.find(x=>x.route_id==selRid);return r?('R'+String(r.route_no).padStart(2,'0')+(r.route_name?' · '+r.route_name:'')):'선택 경로';};
+  const vcell=(code,fallback)=>{const vs=curVmap()[String(code).trim()];
+    if(vs&&vs.length)return vs.map(v=>`${esc(v.name)}${v.ratio!=null?` <span style="color:#1c47a0;font-size:10px;font-weight:600">${nfq(v.ratio)}%</span>`:''}`).join(' <span style="color:#c9d1dc">/</span> ');
+    return esc(fallback||'');};
+  const treeTbl=()=>{const T=curTree();if(!T)return '';if(!T.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
+    return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${T.map(n=>{const k=n.kind||kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${root||n.haskids?'':vcell(n.code,n.custnm)}</td></tr>`;}).join('')}</tbody></table>`;};
   const badge=r=>{const on=r.current_flag;return `<span style="background:${on?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700">R${String(r.route_no).padStart(2,'0')}${on?' · 현행':''}</span>`;};
   const routeRow=r=>{const ro=r.readonly,al=ralloc(r);
     const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 후보 업체·계획단가 지정(R02…)
@@ -1622,8 +1739,9 @@ SCREEN.sourceprofile=(c)=>{
       <td class="center">${isCur?'<span title="현행(R01)은 항상 활성 — 비활성 불가" style="color:#1c7c3a;font-weight:700">✔ 항상</span>':((canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':'')))}</td>
       <td class="num" style="white-space:nowrap">${(isCur&&A.single)?'<b style="color:#1c7c3a">100</b> <span style="font-size:10px;color:#8aa0bd">자동</span>':((canW&&!ro&&ract(r))?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" style="width:60px;min-width:0" placeholder="—">`:(ract(r)?(al==null?'—':al):'<span style="color:#c9d1dc">비활성</span>'))}${(isCur&&canW)?` <button class="btn ghost sp-editvend" title="발주업체·배분 수정 (현행 R01 자동발주 근거 · 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 수정</button>`:''}</td>
     </tr>`;};
-  const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr,A=aStat(),ok=A.single||Math.abs(A.sum-100)<0.01;
-    return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 배정 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(단일 소스 <code>nx.sourcing_route</code> · 승인 후보만 배정 · 저장 <code>nx.route_alloc</code>)</span>
+  const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr;
+    const act=routes.find(r=>ract(r));
+    return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(★운영 경로 택1 — 동시 2경로 불가 · 승인 후보만 · 저장 <code>nx.route_alloc</code>)</span>
       <label style="float:right;font-size:12px;font-weight:400;color:#5a6b82"><input type="checkbox" id="sp-unappr" ${showUnappr?'checked':''}> 미승인 보기</label></div>
       <div style="margin:0 0 6px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${A.single?`활성 ${A.n}개(단일 → 100% 자동)`:`활성 ${A.n}개 배분합 ${A.sum}% ${ok?'✓':'(정확히 100% 필요 — 미달·초과 시 저장 불가)'}`}${allocErrs.length?` · 저장값 검증: ${esc(allocErrs.join(' / '))}`:''}</div>
       <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>구분</th><th>공급처</th><th class="center">승인</th><th class="center">활성</th><th class="num">배분%</th></tr></thead>
@@ -1631,8 +1749,8 @@ SCREEN.sourceprofile=(c)=>{
       <div class="page-sub" style="color:#8aa0bd;margin-top:3px">승인 ${appr}건${un?` · 미승인 ${un}건(회색·배정불가)`:''}. R01=현행(실사용 BOM 기준선·자동승인). 미승인 후보는 [개발 › 조달경로 통합검토]에서 승인해야 배정 가능.</div>`;};
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">🧭 조달 프로파일 <span style="font-size:12px;color:var(--muted);font-weight:400">승인 조달경로 후보(R01 현행·R02…)에 유효기간·배분% 배정</span></div>
-     <div class="page-sub">품번 검색 → <b>실제 설정된 BOM</b>(참고) + <b>조달경로 후보 배정</b>. 후보(R01 vs R02…)마다 <b>유효기간·활성·배분%</b>(활성 겹치는 후보 합 100%) 지정. 저장 <code>nx.route_alloc</code></div>
+     <div class="page-title">🧭 조달 프로파일 <span style="font-size:12px;color:var(--muted);font-weight:400">승인 조달경로 후보(R01 현행·R02…)에 활성·배분% 배정</span></div>
+     <div class="page-sub">품번 검색 → <b>실제 설정된 BOM</b>(참고) + <b>조달경로 후보 배정</b>. 후보(R01 vs R02…)마다 <b>활성·배분%</b>(활성 후보 합 100%) 지정. 저장 <code>nx.route_alloc</code></div>
      <div style="display:flex;gap:14px;align-items:flex-start">
       <div style="flex:0 0 290px">
        <div class="toolbar"><input class="inp" id="sp-q" list="sp-dl" autocomplete="off" value="${esc(q)}" placeholder="품번/품명 (예: 3402)" style="width:180px;min-width:0"><datalist id="sp-dl"></datalist><button class="btn" id="sp-search">🔍</button></div>
@@ -1646,9 +1764,9 @@ SCREEN.sourceprofile=(c)=>{
         <div class="toolbar"><span style="font-weight:700;color:#1c47a0;font-size:16px">${esc(sel)}</span> <span style="color:var(--muted)">${esc(selNm)}</span>
           <label class="tl" style="margin-left:10px">기준일</label><input class="inp" type="date" id="sp-ref" value="${ref}" style="width:130px">
           <div class="spacer"></div>
-          ${canW?`<button class="btn" id="sp-auto" title="현행 유지·비활성 마감">🪄 현행유지·비활성마감</button><button class="btn" id="sp-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}</div>
+          ${canW?`<button class="btn" id="sp-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}</div>
         ${tload?`<div class="grid-wrap" style="padding:20px">${spinRow(1)}</div>`:`<div style="overflow:auto;max-height:calc(100vh - 205px)">
-          <div style="font-weight:700;color:#334;margin:2px 0 4px">📦 실제 설정된 BOM 구성</div>
+          <div style="font-weight:700;color:#334;margin:2px 0 4px">📦 실제 설정된 BOM 구성 <span style="font-size:12px;font-weight:600;color:#1c47a0">— ${esc(selRouteLabel())}</span> <span style="font-size:11px;color:#8aa0bd;font-weight:400">(아래 경로 R01/R02 행을 클릭하면 그 경로 구성으로 전환 · 매입처=업체·비율)</span></div>
           <div style="overflow-x:auto">${treeTbl()}</div>
           <div style="height:12px"></div>
           ${routePanel()}
@@ -1667,7 +1785,6 @@ SCREEN.sourceprofile=(c)=>{
     g('#sp-q').onchange=e=>{const v=e.target.value.trim();if(v&&slist.some(s=>s.item===v))open(v);};
     c.querySelectorAll('.sp-row').forEach(el=>el.onclick=()=>open(el.dataset.i));
     const sv=g('#sp-save');if(sv)sv.onclick=save;
-    const au=g('#sp-auto');if(au)au.onclick=autoset;
     const rf=g('#sp-ref');if(rf)rf.onchange=()=>{ref=rf.value;draw();};
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});

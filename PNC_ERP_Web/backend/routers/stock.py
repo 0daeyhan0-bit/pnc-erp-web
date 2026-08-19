@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail)
 
 router = APIRouter()
 
@@ -88,14 +88,12 @@ def stock_save(payload: dict = Body(...)):
                 errs.append(f"{idx}행: 수량은 0보다 커야 함")
             # 재고 음수방지: 출고·반품(가용 이내) / 조정 감소(결과재고 ≥ 0). 현재고=원장 SUM.
             if mat and screen in ("issue", "return"):
-                cur.execute("SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE MAT_CODE=?", mat)
-                avail = float(cur.fetchone()[0] or 0)
+                avail = _mat_avail(cur, mat)   # ★정본=mat_stock_daily(레거시 실재고). nx.stock_ledger(미동기화·테스트오염) 금지 §4-C
                 if qty > avail:
                     lbl = "반품" if screen == "return" else "출고"
                     errs.append(f"{idx}행: 재고부족 ({mat} 가용 {avail:g} < {lbl} {qty:g}) — 다음공정 이동분은 반품 불가")
             elif mat and screen == "adjust" and qty < 0:
-                cur.execute("SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE MAT_CODE=?", mat)
-                avail = float(cur.fetchone()[0] or 0)
+                avail = _mat_avail(cur, mat)   # ★정본=mat_stock_daily(레거시 실재고). nx.stock_ledger(미동기화·테스트오염) 금지 §4-C
                 if avail + qty < 0:
                     errs.append(f"{idx}행: 음수재고 유발 ({mat} 결과재고 {avail+qty:g} < 0)")
         if errs:

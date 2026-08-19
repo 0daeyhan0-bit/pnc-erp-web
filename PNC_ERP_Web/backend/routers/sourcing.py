@@ -409,6 +409,7 @@ def _ensure_route_tbl(cur):
     cur.execute("IF COL_LENGTH('nx.sourcing_route_line','node_kind') IS NULL ALTER TABLE nx.sourcing_route_line ADD node_kind NVARCHAR(10) NOT NULL DEFAULT 'PART'")
     cur.execute("IF COL_LENGTH('nx.sourcing_route_line','parent_line') IS NULL ALTER TABLE nx.sourcing_route_line ADD parent_line INT NULL")
     cur.execute("IF COL_LENGTH('nx.sourcing_route_line','sub_item') IS NULL ALTER TABLE nx.sourcing_route_line ADD sub_item NVARCHAR(60) NULL")
+    cur.execute("IF COL_LENGTH('nx.sourcing_route_line','staged') IS NULL ALTER TABLE nx.sourcing_route_line ADD staged BIT NOT NULL DEFAULT 0")  # ★보관(풀) 상태: 1=미배치 보관함(왼쪽 풀)·0=배치됨(ASSY레벨0 or SUB)
     cur.execute("""IF OBJECT_ID('nx.sourcing_route_proc','U') IS NULL CREATE TABLE nx.sourcing_route_proc(
         rp_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
         proc_code NVARCHAR(10) NOT NULL, work_qty FLOAT DEFAULT 0, prod_uph FLOAT DEFAULT 0, calc_gubun NVARCHAR(4) NULL,
@@ -677,15 +678,13 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
         nx.close()
 
 def _route_hdr_errors(p):
-    # ★공급처는 후보 헤더에서 받지 않음(업체=조달프로파일에서 배분, 2계층) → vendor 필수검증 제거.
-    errs = []
-    if not str(p.get("gubun", "")).strip(): errs.append("구분은 필수입니다")
-    if not str(p.get("apply_from", "")).strip(): errs.append("유효일자(적용시작)는 필수입니다")
-    return errs
+    # ★후보 헤더는 공급처·구분·유효일자를 받지 않는다: 구분=라인(부품)별(제작/매입/사급) · 업체=조달프로파일 배분 · 유효기간 폐지.
+    #   경로는 라인 성격이 섞인 합성이라 헤더 단일 구분이 성립하지 않음(사용자 확정 2026-08-19).
+    return []
 
 @router.post("/api/sourcing/route/save")
 def sourcing_route_save(payload: dict = Body(...)):
-    """경로 헤더 추가/수정 → nx.sourcing_route. 필수=구분·공급처(자체제외)·유효일자·현행여부. ★편집 시 approve_flag=0(승인 리셋)."""
+    """경로 헤더 추가/수정 → nx.sourcing_route. ★헤더 필수값 없음(구분=라인별·업체=조달프로파일·유효기간 폐지). 경로명/현행여부/비고만. ★편집 시 approve_flag=0(승인 리셋)."""
     p = payload
     item = str(p.get("item_code", "")).strip()
     if not item: raise HTTPException(400, "item_code 필요")
@@ -1246,7 +1245,7 @@ def sourcing_route_detail(route_id: int = Query(...)):
         if not h: raise HTTPException(404, "대상 없음")
         cur.execute("""SELECT line_id,sort_seq,ISNULL(child_item,''),ISNULL(child_name,''),qty,ISNULL(gubun,''),
               ISNULL(vendor_code,''),is_rawmat,diam,thick,len_val,ISNULL(material,''),ISNULL(spec,''),
-              ISNULL(node_kind,'PART'),parent_line,ISNULL(sub_item,'')
+              ISNULL(node_kind,'PART'),parent_line,ISNULL(sub_item,''),ISNULL(staged,0)
             FROM nx.sourcing_route_line WHERE route_id=? ORDER BY sort_seq,line_id""", route_id)
         lines = []; vcodes = {str(h[5]).strip()}
         for l in cur.fetchall():
@@ -1255,7 +1254,8 @@ def sourcing_route_detail(route_id: int = Query(...)):
                           "gubun": l[5], "vendor_code": str(l[6]).strip(), "is_rawmat": int(l[7] or 0),
                           "diam": float(l[8] or 0), "thick": float(l[9] or 0), "len_val": float(l[10] or 0),
                           "material": l[11], "spec": l[12],
-                          "node_kind": str(l[13] or 'PART'), "parent_line": (int(l[14]) if l[14] is not None else None), "sub_item": str(l[15] or '')})
+                          "node_kind": str(l[13] or 'PART'), "parent_line": (int(l[14]) if l[14] is not None else None),
+                          "sub_item": str(l[15] or ''), "staged": int(l[16] or 0)})
         vmap = _custnm_map(cur, vcodes)
         for l in lines: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
         # 후보별 공정배치(route_proc) + BASE 공수합(게이트 기준)
@@ -1422,26 +1422,54 @@ def sourcing_sub_dissolve(payload: dict = Body(...)):
 
 @router.post("/api/sourcing/part/assign")
 def sourcing_part_assign(payload: dict = Body(...)):
-    """부품 라인을 SUB로 이동/평면복귀(드래그드롭). sub_line>0=해당 SUB 하위로, 0=평면(parent_line=NULL).
+    """부품 라인을 SUB로 이동/평면복귀/★보관(풀). to_pool=1이면 왼쪽 풀로 보관(staged=1, 미배치).
+       그 외 sub_line>0=해당 SUB 하위(배치), 0=ASSY 평면(배치, parent_line=NULL). 배치 시 staged=0.
        근거키=route_id·line_ids. 재료(구성)만 이동, 공정(route_proc)·공수합 불변. 승인 리셋."""
     rid = int(payload.get("route_id") or 0)
     sub_line = int(payload.get("sub_line") or 0)
+    to_pool = bool(payload.get("to_pool"))
     line_ids = [int(x) for x in (payload.get("line_ids", []) or []) if str(x).strip().isdigit()]
     if rid <= 0 or not line_ids: raise HTTPException(400, "route_id·line_ids 필요")
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
-        if sub_line > 0:   # 대상 SUB 유효성(같은 route·SUB)
-            cur.execute("SELECT 1 FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, sub_line)
-            if not cur.fetchone(): raise HTTPException(404, "대상 SUB 없음")
-            if sub_line in line_ids: raise HTTPException(400, "SUB 자신은 이동 불가")
         ph = ",".join("?" * len(line_ids))
-        cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, node_kind='PART' WHERE route_id=? AND line_id IN ({ph}) AND node_kind<>'SUB'",
-                    (sub_line or None), rid, *line_ids)
+        if to_pool:        # ★보관(왼쪽 풀): staged=1, parent_line=NULL(SUB에서도 빠짐). SUB 노드는 제외.
+            cur.execute(f"UPDATE nx.sourcing_route_line SET staged=1, parent_line=NULL, node_kind='PART' WHERE route_id=? AND line_id IN ({ph}) AND node_kind<>'SUB'", rid, *line_ids)
+        else:              # 배치: staged=0 + 위치(ASSY 평면 or SUB)
+            if sub_line > 0:   # 대상 SUB 유효성(같은 route·SUB)
+                cur.execute("SELECT 1 FROM nx.sourcing_route_line WHERE route_id=? AND line_id=? AND node_kind='SUB'", rid, sub_line)
+                if not cur.fetchone(): raise HTTPException(404, "대상 SUB 없음")
+                if sub_line in line_ids: raise HTTPException(400, "SUB 자신은 이동 불가")
+            cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, staged=0, node_kind='PART' WHERE route_id=? AND line_id IN ({ph}) AND node_kind<>'SUB'",
+                        (sub_line or None), rid, *line_ids)
         moved = cur.rowcount
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
         nx.commit()
-        return {"ok": True, "moved": moved, "to": (sub_line or "평면")}
+        return {"ok": True, "moved": moved, "to": ("보관(풀)" if to_pool else (sub_line or "ASSY평면"))}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
+@router.post("/api/sourcing/line/gubun")
+def sourcing_line_gubun(payload: dict = Body(...)):
+    """부품/SUB 라인의 구분(제작/매입/사급) 설정 — 조달경로 통합검토 SUB패널. ★제작/매입/사급은 여기서 결정(업체=조달프로파일).
+       payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB에 지정 시 그 SUB 자체 성격(사급=협력사 유상사급 조립)."""
+    rid = int(payload.get("route_id") or 0); line_id = int(payload.get("line_id") or 0)
+    gubun = str(payload.get("gubun", "")).strip()[:20]
+    if rid <= 0 or line_id <= 0: raise HTTPException(400, "route_id·line_id 필요")
+    if gubun not in ("제작", "매입", "사급"): raise HTTPException(400, "구분은 제작/매입/사급 중 하나")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("UPDATE nx.sourcing_route_line SET gubun=? WHERE route_id=? AND line_id=?", gubun, rid, line_id)
+        n = cur.rowcount
+        cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)  # 편집=승인 리셋
+        nx.commit()
+        return {"ok": True, "updated": n, "gubun": gubun}
+    except HTTPException:
+        nx.rollback(); raise
     except Exception:
         nx.rollback(); raise
     finally:
@@ -2100,16 +2128,21 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
     asof = _d6(ymd) if ymd else datetime.now().strftime("%y%m%d")
     cn = _conn(); cur = cn.cursor()   # live PARTNER_ERP (읽기전용)
     try:
+        # ★2026-08-20 생산 BOM(v_pr_bom)+전개제외(EXCEPT_FLAG)로 전환: 발주=생산 조달이므로 생산구조·생산flag를 씀(compose STEP6/7 동일).
+        #   전개제외 자식(상위 SUB가 통째조달=명진 등)은 발주 대상 아님(그 SUB로 귀속) → 명진 SUB 내부 MJU(미래정밀 등) 제거. + 사급여부(SAGUB_FLAG) 수집.
+        #   ★v_cs_bom(원가구조)+except_flag는 구조불일치로 실 발주부품 유실(회귀검증) → v_pr_bom 사용이 정답(레거시 외부부품 유실 최소).
         cur.execute("""WITH tree AS (
-            SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, 1 lvl
-            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, CAST(ISNULL(SAGUB_FLAG,'0') AS int) sg, 1 lvl
+            FROM PARTNER_ERP_TEST3.nx.v_pr_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(EXCEPT_FLAG,'0')<>'1'
             UNION ALL
-            SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), t.lvl+1
-            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
+            SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), CAST(ISNULL(b.SAGUB_FLAG,'0') AS int), t.lvl+1
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_pr_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
             JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
-            SELECT c, SUM(q) qty FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
-        agg = {str(r[0]).strip(): float(r[1] or 0) for r in cur.fetchall()}
+            SELECT c, SUM(q) qty, MAX(sg) sg FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
+        agg = {}; sagub = {}
+        for r in cur.fetchall():
+            _c = str(r[0]).strip(); agg[_c] = float(r[1] or 0); sagub[_c] = int(r[2] or 0)
         if not agg:
             return {"item": item, "asof": asof, "rows": [], "n": 0, "note": "현행 BOM 구성 없음"}
         codes = [c for c in agg if not c.upper().startswith("RAC")]   # 용접봉 제외
@@ -2131,7 +2164,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             ch = mk1[i:i+900]; ph = ",".join("?" * len(ch))
             cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.v_cs_bom
                 WHERE ITEM_CODE IN ({ph}) AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101'
-                  AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
+                  AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(EXCEPT_FLAG,'0')<>'1' AND UPPER(LTRIM(RTRIM(MAT_CODE))) NOT LIKE 'RAC%'""", *ch)
             for r in cur.fetchall(): maker_parents.add(str(r[0]).strip())
         order_items = {c: agg[c] for c in codes if c not in maker_parents}
         oc = list(order_items.keys())
@@ -2204,6 +2237,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         prim = vends[0]
         rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
             "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
+            "sagub": bool(sagub.get(c, 0)),
             "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn, "has_override": bool(lst), "vendors": vends,
             "eff_vendor_code": prim["vendor_code"], "eff_vendor_name": prim["vendor_name"],
             "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")})
@@ -2524,7 +2558,13 @@ def sourcing_route_finalize(payload: dict = Body(...)):
         if not part_ok:
             if missing: errors.append(f"미배치(BASE 有·후보 無) {len(missing)}건: {', '.join(missing[:8])}{'…' if len(missing) > 8 else ''}")
             if extra: errors.append(f"BASE에 없는 부품 {len(extra)}건: {', '.join(extra[:8])}{'…' if len(extra) > 8 else ''}")
-        ok = gongsu_ok and part_ok
+        # (4) ★보관함(풀) 미배치 부품 = 아직 배치 안 됨 → 저장/검증 불가
+        cur.execute("SELECT ISNULL(child_item,'') FROM nx.sourcing_route_line WHERE route_id=? AND node_kind<>'SUB' AND ISNULL(staged,0)=1", rid)
+        staged_parts = sorted(str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip())
+        staged_ok = (len(staged_parts) == 0)
+        if not staged_ok:
+            errors.append(f"보관함(왼쪽 풀)에 미배치 부품 {len(staged_parts)}건: {', '.join(staged_parts[:8])}{'…' if len(staged_parts) > 8 else ''} — 모두 ASSY/SUB에 배치해야 저장됩니다")
+        ok = gongsu_ok and part_ok and staged_ok
         # 신규 SUB mint(정본 S 발급)는 finalize 아닌 ★승인(route/approve) 시점에 수행 — 레지스트리 청결(승인된 SUB만 정본코드).
         if ok and commit:
             cur.execute("UPDATE nx.sourcing_route SET upd_dt=getdate() WHERE route_id=?", rid)
@@ -2532,9 +2572,9 @@ def sourcing_route_finalize(payload: dict = Body(...)):
             nx.commit()
         else:
             nx.rollback()   # 검증전용(commit=0) 또는 실패 → reuse 변경 롤백
-        return {"ok": ok, "gongsu_ok": gongsu_ok, "part_ok": part_ok, "cand_gongsu": cand, "base_gongsu": base,
+        return {"ok": ok, "gongsu_ok": gongsu_ok, "part_ok": part_ok, "staged_ok": staged_ok, "cand_gongsu": cand, "base_gongsu": base,
                 "cut_sum": cut_sum, "proc_sum": proc_sum, "base_part_count": len(base_parts), "route_part_count": len(route_parts),
-                "missing": missing, "extra": extra, "reused": reused, "committed": bool(ok and commit), "errors": errors}
+                "missing": missing, "extra": extra, "staged": staged_parts, "reused": reused, "committed": bool(ok and commit), "errors": errors}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
@@ -2754,8 +2794,8 @@ def sourcing_route_alloc_get(item: str = Query(...), show_unapproved: int = Quer
             if s is None:
                 is_cur = r["current_flag"] or r["route_no"] == 1
                 dflt_active = bool(is_cur) and not has_saved   # 저장 이력 없을 때만 현행 기본활성
-                s = {"apply_from": None, "apply_to": None, "is_active": dflt_active,
-                     "alloc_ratio": (100.0 if dflt_active else None)}
+                # ★배분%는 자동 채우지 않음(사용자 수동입력). 단일 R01은 프론트가 '100 자동' 표시. 다중이면 빈칸→사용자 입력.
+                s = {"apply_from": None, "apply_to": None, "is_active": dflt_active, "alloc_ratio": None}
             out.append({**r,
                         "apply_from": s["apply_from"], "apply_to": s["apply_to"],
                         "is_active": (bool(s["is_active"]) if s["is_active"] is not None else False),
@@ -2804,6 +2844,30 @@ def sourcing_route_alloc_save(payload: dict = Body(...)):
         alloc_errs = _validate_alloc(act) if act else []
         if alloc_errs:
             nx.rollback(); return {"ok": False, "gate": "ALLOC", "errors": list(dict.fromkeys(alloc_errs))}
+        # ★VENDOR 게이트: 활성 대안경로(R02+)는 모든 매입/사급 부품에 매입처(sourcing_profile) 배정돼야 저장 가능.
+        #   제작=내부(업체 불필요) · 현행(R01)은 order_vendor/현행매입처(별도 레이어)라 제외.
+        vendor_errs = []
+        for (rid, af, at, iact, ratio) in norm:
+            if not iact or rid <= 0:
+                continue
+            info = approved.get(rid)
+            if not info or info.get("current_flag") or info.get("route_no") == 1:
+                continue
+            cur.execute("""SELECT LTRIM(RTRIM(child_item)) FROM nx.sourcing_route_line
+                WHERE route_id=? AND node_kind<>'SUB' AND ISNULL(staged,0)=0 AND ISNULL(gubun,'') IN (N'매입', N'사급')""", rid)
+            parts = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+            if not parts:
+                continue
+            ph = ",".join("?" * len(parts))
+            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(item_code)) FROM nx.sourcing_profile
+                WHERE route_id=? AND is_active=1 AND ISNULL(vendor_code,'')<>'' AND LTRIM(RTRIM(item_code)) IN ({ph})""", rid, *parts)
+            assigned = {str(r[0]).strip() for r in cur.fetchall()}
+            missing = [p for p in parts if p not in assigned]
+            if missing:
+                rno = info.get("route_no")
+                vendor_errs.append(f"R{str(rno).zfill(2) if rno is not None else '?'} 경로 활성 저장 불가 — 매입처 미지정 부품 {len(missing)}건: {', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}. 업체 지정(✎ 수정)에서 매입처를 배정하세요.")
+        if vendor_errs:
+            nx.rollback(); return {"ok": False, "gate": "VENDOR", "errors": vendor_errs}
         for (rid, af, at, iact, ratio) in norm:   # 근거키 스코프 upsert(대량삭제 금지)
             cur.execute("DELETE FROM nx.route_alloc WHERE item_code=? AND route_id=?", item, rid)
             cur.execute("""INSERT INTO nx.route_alloc(item_code,route_id,apply_from,apply_to,is_active,alloc_ratio,upd_dt)

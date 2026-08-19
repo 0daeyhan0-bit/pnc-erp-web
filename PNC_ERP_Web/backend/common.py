@@ -186,6 +186,113 @@ def _closed(cur, ymd):
     r = cur.fetchone()
     return bool(r and r[0])
 
+# ===== 전 도메인 공통 가드 (마감 일자 잠금 + 재고 가용성 게이팅) — 정본 _schema/STOCK_GATING_CLOSE_LOCK_RULES.md =====
+def _lock_msg(cur, ymd):
+    """마감 일자 잠금. 마감월(nx.stock_close)이면 사유메시지, 아니면 None. (비발생형 — 호출측이 return/raise 결정)"""
+    ymd = str(ymd or "").strip()
+    if len(ymd) >= 6 and _closed(cur, ymd):
+        return f"{_ym(ymd)} 마감된 월입니다 — 생성/수정/삭제 불가"
+    return None
+
+def _mat_avail(cur, item):
+    """자재 현재고 정본 = nx.mat_stock_daily 최신일 stock_qty. (★nx.stock_ledger은 최근이동 미동기화로 부정확 → 사용금지, 정본 §4-C)
+       mat_stock_daily = 2607스냅샷 + 레거시 PU_T_STOCK_MAINT 이동(QTY 99.85% 검증). 없으면 0."""
+    item = str(item or "").strip().upper()
+    if not item:
+        return 0.0
+    cur.execute("SELECT TOP 1 stock_qty FROM nx.mat_stock_daily WHERE UPPER(mat_code)=? ORDER BY ymd DESC", item)
+    r = cur.fetchone()
+    return float(r[0] or 0) if r else 0.0
+
+def _mat_short_msg(cur, item, need, label="출고"):
+    """자재 재고 가용 게이트(정본=mat_stock_daily). 부족하면 사유메시지, 아니면 None. 마이너스 원천차단."""
+    item = str(item or "").strip(); need = float(need or 0)
+    if not item or need <= 0:
+        return None
+    avail = _mat_avail(cur, item)
+    if need > avail + 1e-6:
+        return f"재고부족 ({item} 가용 {avail:g} < {label} {need:g})"
+    return None
+
+def _finished_avail(cur, item, asof=None):
+    """완성/제품 현재고 정본(ASY 게이트 source) = 제품재고조회(salesstock) recipe 단일품목 압축.
+       = 2502기말 snap + Σ sa_t_stock_maint[P(무in_part)/B/V/J/8/R/2].maint_qty − Σ 직납(pu out_wh_gubun=2).maint_qty, maint_ymd≤asof(기본 오늘).
+       ★2026-08-19 레거시 w_pr_stock_040 diff0 검증(총 55,296). nx 병행운영중 테스트오염 주의 — 컷오버 후 정본. 정본 §4-C."""
+    item = str(item or "").strip().upper()
+    if not item:
+        return 0.0
+    if not asof:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')"); asof = cur.fetchone()[0]
+    cur.execute("""SELECT
+        (SELECT ISNULL(SUM(stock_qty),0) FROM PARTNER_ERP_TEST3.nx.sa_t_month_stock WHERE stock_yymm='2502' AND UPPER(item_code)=?)
+      + (SELECT ISNULL(SUM(maint_qty),0) FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint WHERE UPPER(item_code)=? AND maint_ymd BETWEEN '250299' AND ?
+           AND ((maint_tag='P' AND ISNULL(in_part_code,'')='') OR maint_tag IN ('B','V','J','8','R','2')))
+      - (SELECT ISNULL(SUM(maint_qty),0) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint WHERE UPPER(mat_code)=? AND maint_ymd BETWEEN '250299' AND ? AND ISNULL(out_wh_gubun,'1')='2')
+    """, item, item, asof, item, asof)
+    r = cur.fetchone()
+    return float(r[0] or 0)
+
+def _finished_short_msg(cur, item, need, label="출고"):
+    """완성/제품 재고 가용 게이트(ASY, 정본=_finished_avail). 부족하면 사유메시지, 아니면 None."""
+    item = str(item or "").strip(); need = float(need or 0)
+    if not item or need <= 0:
+        return None
+    avail = _finished_avail(cur, item)
+    if need > avail + 1e-6:
+        return f"재고부족 ({item} 완성재고 {avail:g} < {label} {need:g})"
+    return None
+
+# 생산재고조회(_prodstock, dw_pr_stock_480) recipe U — 단일품목 현재고용(라인=P0001 가공/그외 용접). live_api와 동일 정본, {asof}까지 누적.
+def _prod_avail(cur, mat, line="P0001", asof=None):
+    """생산 현재고 정본(PRD 게이트 source) = 생산재고조회(_prodstock) recipe 단일품목. line='P0001'=가공(기본)·그외=용접 라인코드.
+       ★2026-08-19 레거시 w_pr_stock_480 가공창고 18일 diff0 검증. nx 병행운영중 테스트오염 주의 — 컷오버 후 정본. 정본 §4-C."""
+    mat = str(mat or "").strip().upper()
+    if not mat:
+        return 0.0
+    if not asof:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')"); asof = cur.fetchone()[0]
+    T3 = "PARTNER_ERP_TEST3.nx."
+    U = f"""
+SELECT a.gagong_proc_code gpc, A.MAT_CODE mat, A.STOCK_QTY q FROM {T3}PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
+UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,-A.MAINT_QTY FROM {T3}PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND a.maint_tag='B' AND isnull(a.out_wh_gubun,'1')='1'
+UNION ALL SELECT A.gagong_proc_code,a.mat_code,a.cut_QTY FROM PARTNER_ERP.dbo.pu_t_cut_dtl a WHERE A.cut_ymd>'250299' and A.cut_ymd<='{asof}'
+UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,a.MAINT_QTY FROM {T3}PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND a.maint_tag='T' and isnull(a.out_wh_gubun,'3')='3'
+UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,-a.MAINT_QTY FROM {T3}PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND a.maint_tag='C'
+UNION ALL SELECT A.stock_part_code,a.item_code,a.prod_qty FROM {T3}pr_t_prod_dtl a WHERE A.prod_ymd>'250299' and A.prod_ymd<='{asof}' and a.stock_part_code>'' and not exists (select 1 from {T3}sa_t_stock_maint where maint_ymd=a.prod_ymd and item_code=a.item_code and in_part_code=a.stock_part_code)
+UNION ALL SELECT A.IN_PART_CODE,a.item_code,a.MAINT_QTY FROM {T3}sa_t_stock_maint a WHERE A.maint_ymd>'250299' and A.MAINT_YMD<='{asof}' and a.in_part_code>''
+UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG='3'
+UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG in ('2','1')
+UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A JOIN {T3}PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG='4'
+"""
+    cur.execute(f"""SELECT ISNULL(SUM(t.q),0) FROM ({U}) t
+        WHERE ISNULL(LTRIM(RTRIM(t.gpc)),'')=? AND UPPER(LTRIM(RTRIM(t.mat)))=?""", line, mat)
+    r = cur.fetchone()
+    return float(r[0] or 0)
+
+def _prod_short_msg(cur, mat, need, line="P0001", label="사용"):
+    """생산 재고 가용 게이트(PRD, 정본=_prod_avail). 부족하면 사유메시지, 아니면 None."""
+    mat = str(mat or "").strip(); need = float(need or 0)
+    if not mat or need <= 0:
+        return None
+    avail = _prod_avail(cur, mat, line)
+    if need > avail + 1e-6:
+        return f"재고부족 ({mat} 생산재고 {avail:g} < {label} {need:g})"
+    return None
+
+def _stock_short_msg(cur, item, need, points=("MAT",), label="출고"):
+    """재고 가용성 게이팅. item(MAT_CODE 또는 ITEM_CODE)의 지정 재고점 가용(원장 SUM) < need면 부족메시지, 아니면 None.
+       points: MAT(자재)·RDY(준비)·PRD(생산/가공)·ASY(완성)·SAG(사급). 마이너스 원천차단용."""
+    item = str(item or "").strip(); need = float(need or 0)
+    if not item or need <= 0:
+        return None
+    ph = ",".join("?" * len(points))
+    cur.execute(f"""SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger
+        WHERE STOCK_POINT IN ({ph}) AND (MAT_CODE=? OR ITEM_CODE=?)""", *points, item, item)
+    avail = float(cur.fetchone()[0] or 0)
+    if need > avail + 1e-6:
+        return f"재고부족 ({item} 가용 {avail:g} < {label} {need:g})"
+    return None
+
 # ===================== ★Phase5: nx 재고 월마감 스냅샷 (STOCK_POINT별 기초→기말=기초+ΣMAINT) =====================
 # 기말 스냅샷=다음달 기초 연속성·마감후 파생 고정. 잠금=기존 nx.stock_close(ym) 플래그 재사용(옵션).
 # ★사고 재발방지: stock_ledger 무삭제. 재계산은 자기생성 근거키(ym+point)의 stock_close_snap만 갱신.
