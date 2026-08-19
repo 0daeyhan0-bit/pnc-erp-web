@@ -10,7 +10,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
 
@@ -68,20 +68,23 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
     try:
         _ensure_ao_tbl(ncur)
         base = _mat_requirement(ncur, line, cr, vendor, item, gubun)
-        # 발주업체 override(nx.order_vendor) — R01(현행) 근거 재사용. 있으면 그 업체로 발주(자재단위).
+        # 발주업체 배분(nx.order_vendor) — R01(현행) 근거 재사용. ★다중업체+alloc_ratio(합100%) → 비율분할.
         cur_items = sorted({b["item"] for b in base})
-        ovr = {}
+        alloc = {}   # item -> [(vendor, ratio|None)]
         try:
             ncur.execute("IF OBJECT_ID('nx.order_vendor','U') IS NULL SELECT 1 WHERE 1=0")
+            has_ratio = (ncur.execute("SELECT COL_LENGTH('nx.order_vendor','alloc_ratio')").fetchone()[0] is not None)
             for i in range(0, len(cur_items), 900):
                 ch = cur_items[i:i+900]; ph = ",".join("?" * len(ch))
-                ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(vendor_code,'') FROM nx.order_vendor WHERE item_code IN ({ph})", *ch)
+                col = "alloc_ratio" if has_ratio else "NULL"
+                ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), ISNULL(vendor_code,''), {col} FROM nx.order_vendor WHERE item_code IN ({ph})", *ch)
                 for r in ncur.fetchall():
                     v = str(r[1] or "").strip()
                     if v:
-                        ovr[str(r[0]).strip()] = v
+                        alloc.setdefault(str(r[0]).strip(), []).append((v, (float(r[2]) if r[2] is not None else None)))
         except Exception:
             pass
+        route01 = _route01_ratio(ncur, cur_items)   # ★실발주비율 = route01%(현행 경로) × 업체비율. 현재 R01=100.
         # 이미 발주된 순소요 차감분: 확정 PO 라인 (item, vendor)별 order_qty 합
         already = {}
         ncur.execute("""SELECT l.item_code, h.vendor_code, SUM(CAST(l.order_qty AS float))
@@ -91,20 +94,32 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
             already[(str(it).strip(), str(vc or "").strip())] = float(q or 0)
     finally:
         nx.close()
-    # 유효벤더 확정(override 우선) 후 (item,vendor) 병합
+    # 유효벤더 확정 후 (item,vendor) 병합 — ★override 배분(다중업체+alloc_ratio)이면 소요를 비율분할
     merged = {}
     for b in base:
-        eff = ovr.get(b["item"], b["vendor"])
-        k = (b["item"], eff)
-        g = merged.get(k)
-        if not g:
-            g = {"item": b["item"], "vendor": eff, "gubun": b["gubun"], "source": b["source"], "req": 0.0,
-                 "overridden": (eff != b["vendor"])}
-            merged[k] = g
-        g["req"] += b["req"]
-        # 공급방식: 매입 우선 표기(혼재 시)
-        if b["gubun"] == "매입":
-            g["gubun"] = "매입"
+        lst = alloc.get(b["item"])
+        if lst:
+            rated = [(v, r) for (v, r) in lst if r is not None]
+            if len(rated) == len(lst) and rated:                          # 전원 배분%: 합100 정규화 분할
+                tot = sum(r for _, r in rated) or 1.0
+                splits = [(v, b["req"] * (r / tot)) for (v, r) in rated]
+            else:                                                          # 비율 미입력(단일 등) → 균등분할
+                n = len(lst); splits = [(v, b["req"] / n) for (v, _) in lst]
+            overridden = True
+        else:
+            splits = [(b["vendor"], b["req"])]
+            overridden = False
+        rf = route01.get(b["item"], 100.0) / 100.0   # ★route01 경로 계수(현재 100=무영향)
+        for (eff, qty) in splits:
+            k = (b["item"], eff)
+            g = merged.get(k)
+            if not g:
+                g = {"item": b["item"], "vendor": eff, "gubun": b["gubun"], "source": b["source"], "req": 0.0,
+                     "overridden": overridden}
+                merged[k] = g
+            g["req"] += qty * rf
+            if b["gubun"] == "매입":   # 공급방식: 매입 우선 표기(혼재 시)
+                g["gubun"] = "매입"
     lines = list(merged.values())
     # 단가(마스터 매입단가 as-of, 읽기전용) + 자재명 + 업체명 (라이브 PARTNER_ERP 조회만)
     codes = sorted({l["item"] for l in lines})

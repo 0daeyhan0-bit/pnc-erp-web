@@ -29,12 +29,14 @@ SCREEN.pricemgmt=(c)=>{
      <div style="display:flex;gap:6px;margin:4px 0">
        <button class="btn ${mode==='mgr'?'':'ghost'}" id="pm2-mgr" style="${mode==='mgr'?'background:#1c47a0;color:#fff':''}">📇 품목별 단가관리</button>
        <button class="btn ${mode==='sagub'?'':'ghost'}" id="pm2-sagub" style="${mode==='sagub'?'background:#1c7c3a;color:#fff':''}">📤 사급가 업로드</button>
+       <button class="btn ${mode==='lgprice'?'':'ghost'}" id="pm2-lg" style="${mode==='lgprice'?'background:#b8860b;color:#fff':''}">📈 LG 판가 업로드</button>
      </div>
      <div id="pr2-host" style="height:calc(100% - 66px)"></div>`;
     c.querySelector('#pm2-mgr').onclick=()=>{if(mode!=='mgr'){mode='mgr';paint();}};
     c.querySelector('#pm2-sagub').onclick=()=>{if(mode!=='sagub'){mode='sagub';paint();}};
+    c.querySelector('#pm2-lg').onclick=()=>{if(mode!=='lgprice'){mode='lgprice';paint();}};
     const host=c.querySelector('#pr2-host');
-    if(mode==='mgr') priceMgmtView(host); else priceSagubView(host);
+    if(mode==='mgr') priceMgmtView(host); else if(mode==='sagub') priceSagubView(host); else priceLgView(host);
   };
   paint();
 };
@@ -166,14 +168,14 @@ const priceMgmtView=(host)=>{
 const priceSagubView=(host)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  let st={busy:false,msg:'',rows:[],q:''};
+  let st={busy:false,msg:'',rows:[],q:'',biz:'SAC'};
   const load=async()=>{try{const r=await fetch(`${API}/api/price/sagub_list?q=${encodeURIComponent(st.q)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
   const doUpload=async(f)=>{
     if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
     st.busy=true;st.msg='';draw();
     try{const fd=new FormData();fd.append('file',f);
-      const r=await fetch(`${API}/api/price/sagub_upload`,{method:'POST',body:fd});
+      const r=await fetch(`${API}/api/price/sagub_upload?biz=${encodeURIComponent(st.biz)}`,{method:'POST',body:fd});
       let j={};try{j=await r.json();}catch(e){}
       if(r.ok&&j.ok){st.msg=`✅ 업로드 완료 — ${won(j.rows)}행 적재 · 품목 ${j.items}개${j.skipped?` · 스킵 ${j.skipped}건(nx 미등록 품번)`:''}`;st.busy=false;await load();return;}
       else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
@@ -184,9 +186,11 @@ const priceSagubView=(host)=>{
      <div class="page-sub">LG <b>COSP Sales Price</b>(사급 부품가) 엑셀 업로드 → 각 행의 <b>Start Date를 적용일</b>로 <code>nx.price_item</code>(vendor=LG)에 반영. 최신가는 적용일 기준 자동 적용. 헤더: <code>Material·Sales Price·Start Date</code></div>
      <div id="sg-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:16px 18px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
        <span style="font-size:20px">📤</span> <b>COSP Sales Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
+       <label class="tl" style="margin-left:4px">사업부</label>
+       <select class="sel" id="sg-biz"><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select>
        <button class="btn" id="sg-pick" style="background:#1c7c3a;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
        <input type="file" id="sg-file" accept=".xlsx,.xls" style="display:none">
-       <span style="margin-left:auto;color:#8aa0bd;font-size:11px">사업부별 파일 각각 올리면 됩니다</span>
+       <span style="margin-left:auto;color:#8aa0bd;font-size:11px">COSP는 사업부 무관 동일가 — 선택은 표기용</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div class="toolbar"><label class="tl">검색</label><input class="inp" id="sg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:200px"><button class="btn" id="sg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">업로드 사급가 ${st.rows.length}건</span></div>
@@ -194,12 +198,59 @@ const priceSagubView=(host)=>{
      <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:280px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="5" class="empty">업로드된 사급가 없음 — COSP 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const fe=g('#sg-file'),drop=g('#sg-drop');
+    g('#sg-biz').onchange=e=>{st.biz=e.target.value;};
     g('#sg-pick').onclick=()=>fe.click();
     fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
     drop.ondragover=e=>{e.preventDefault();drop.style.background='#e3f0ff';drop.style.borderColor='#1c7c3a';};
     drop.ondragleave=()=>{drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';};
     drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';drop.style.borderColor='#8fb4d6';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};
     const q=g('#sg-q');q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==='Enter')load();};g('#sg-go').onclick=load;
+  };
+  draw();load();
+};
+
+/* LG 판가(PO Price) 업로드 — 사업부(SAC=vendor1010·RAC=1020)별 nx.price_item(TAGE수출/TAGS내수)에 반영. 원가/손익 LG판가 소스 */
+const priceLgView=(host)=>{
+  const API=API_BASE;
+  const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  let st={busy:false,msg:'',rows:[],q:'',biz:'SAC'};
+  const load=async()=>{try{const r=await fetch(`${API}/api/price/lgprice_list?q=${encodeURIComponent(st.q)}&biz=${encodeURIComponent(st.biz)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
+  const doUpload=async(f)=>{
+    if(!f)return;
+    if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
+    st.busy=true;st.msg='';draw();
+    try{const fd=new FormData();fd.append('file',f);
+      const r=await fetch(`${API}/api/price/lgprice_upload?biz=${encodeURIComponent(st.biz)}`,{method:'POST',body:fd});
+      let j={};try{j=await r.json();}catch(e){}
+      if(r.ok&&j.ok){st.msg=`✅ ${j.biz} 업로드 완료 — ${won(j.rows)}행 · 품목 ${j.items}개 (vendor ${j.vendor})${j.skipped?` · 스킵 ${j.skipped}건(nx 미등록)`:''}`;st.busy=false;await load();return;}
+      else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
+    }catch(e){st.msg='❌ 오류: '+e.message;}
+    st.busy=false;draw();};
+  const draw=()=>{
+    host.innerHTML=`
+     <div class="page-sub">LG <b>PO Price</b>(LG 판가) 엑셀 업로드 → <b>사업부별</b> <code>nx.price_item</code>(SAC=vendor1010·RAC=1020, MKT <b>1→내수(TAGS)·2→수출(TAGE)</b>)에 <b>Start Date를 적용일</b>로 반영. 원가/손익의 <b>LG판가</b>로 바로 사용. 헤더: <code>Material·MKT·Unit Price·Start Date·Curr</code></div>
+     <div id="lg-drop" style="border:2px dashed #d6b06a;border-radius:9px;padding:16px 18px;background:#fdfaf3;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
+       <span style="font-size:20px">📈</span> <b>사업부</b>
+       <select class="sel" id="lg-biz"><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC (vendor 1010)</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC (vendor 1020)</option></select>
+       <b>PO Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
+       <button class="btn" id="lg-pick" style="background:#b8860b;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
+       <input type="file" id="lg-file" accept=".xlsx,.xls" style="display:none">
+       <span style="margin-left:auto;color:#a98a4f;font-size:11px">SAC·RAC 파일 각각 (사업부 선택 후) 올리세요</span>
+     </div>
+     ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
+     <div class="toolbar"><label class="tl">사업부</label><select class="sel" id="lg-bf"><option value="">전체(SAC+RAC)</option><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select><label class="tl">검색</label><input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px"><button class="btn" id="lg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">LG판가 ${st.rows.length}건</span></div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">사업부</th><th class="center">구분</th><th class="center">적용일(Start)</th><th class="num">LG판가</th><th class="center">통화</th></tr></thead>
+     <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${r.vendor==='1010'?'SAC':r.vendor==='1020'?'RAC':esc(r.vendor)}</td><td class="center">${r.type==='TAGS'?'내수':r.type==='TAGE'?'수출':esc(r.type)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="7" class="empty">업로드된 LG판가 없음 — PO Price 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
+    const g=id=>host.querySelector(id);
+    const fe=g('#lg-file'),drop=g('#lg-drop');
+    g('#lg-biz').onchange=e=>{st.biz=e.target.value;};
+    g('#lg-pick').onclick=()=>fe.click();
+    fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
+    drop.ondragover=e=>{e.preventDefault();drop.style.background='#f5e9cf';drop.style.borderColor='#b8860b';};
+    drop.ondragleave=()=>{drop.style.background='#fdfaf3';drop.style.borderColor='#d6b06a';};
+    drop.ondrop=e=>{e.preventDefault();drop.style.background='#fdfaf3';drop.style.borderColor='#d6b06a';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};
+    g('#lg-bf').onchange=e=>{st.biz=e.target.value;load();};
+    const q=g('#lg-q');q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==='Enter')load();};g('#lg-go').onclick=load;
   };
   draw();load();
 };
@@ -617,10 +668,11 @@ SCREEN.costanalysis=(c)=>{
   const eok=v=>(v/1e8).toFixed(1);
   const pct=v=>(v*100).toFixed(1)+'%';
   // [rowIdx, header, group, opts]
+  // ★컬럼 순서: 입고수량 → LG단가·손익 → 실원가 → 내부용 (인덱스는 데이터매핑이라 순서만 바뀜)
   const NUM=[[1,'입고수량','',{}],
-    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}],
+    [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}],
     [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[24,'실사급금액','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
-    [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}]];
+    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}]];
   let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
   const API=API_BASE;
   let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
@@ -685,29 +737,48 @@ SCREEN.costanalysis=(c)=>{
     D.agg={cnt:D.rows.length,qty:Math.round(qt),sales:Math.round(sales),silamt:Math.round(silamt),impact:Math.round(impact),loss};A=D.agg;
     const cd=c.querySelector('.ca-cards');if(cd)cd.innerHTML=cardsHTML();};
   let rvBusy=false;
-  const loadRecv=async(ym,ymd)=>{
+  const loadRecv=async(ym,ymd,force)=>{
     if(rvBusy)return;rvBusy=true;ymd=ymd||rvYmd;const tok=ymd+'|'+(ym||'');loadRecv._tok=tok;setRegenMsg('목록 로드…');
     try{
+      // ★서버 결과캐시 우선(첫 로드 즉시화). force(재계산)면 스킵.
+      if(!force){
+        try{const cg=await(await fetch(`${API}/api/cost/analysis/cache/get?ym=${encodeURIComponent(ym||'')}&ymd=${encodeURIComponent(ymd)}`)).json();
+          if(cg&&cg.cached&&cg.rows&&cg.rows.length&&loadRecv._tok===tok){
+            D.ym=cg.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
+            D.rows=cg.rows.map(x=>buildRow(x.part,x.qty,x));R=D.rows;recomputeAgg();
+            window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+            setRegenMsg(`캐시 ${cg.upd||''} · 최신화=재계산 버튼`);
+            rvBusy=false;renderBody();return;
+          }
+        }catch(e){}
+      }
       const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
       const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
       D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
       // ★속도: 청크 35 + 6개 동시(병렬) — 무거운 품목(복합SUB)을 여러 워커로 분산. + 남은시간(ETA) 표시.
-      const CH=35, PAR=6; let done=0; const t0=Date.now();
+      const CH=35, PAR=6; let done=0; const t0=Date.now(); const liveCC={};
       const chunks=[]; for(let i=0;i<list.length;i+=CH)chunks.push({start:i,items:list.slice(i,i+CH)});
       for(let b=0;b<chunks.length;b+=PAR){
         if(loadRecv._tok!==tok)break;
         await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
           let cc={};
           try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||'')})})).json()).costs||{};}catch(e){}
-          ck.items.forEach((x,j)=>{D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
+          ck.items.forEach((x,j)=>{liveCC[x.part]=cc[x.part]||{};D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
           done+=ck.items.length;
+          // ★청크 완료마다 진행표시 갱신(라운드 끝까지 안 기다림 = 멈춘 듯 안 보임)
+          if(loadRecv._tok===tok){const el=(Date.now()-t0)/1000,eta=done?Math.ceil((list.length-done)*el/done):0;setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();}
         }));
         if(loadRecv._tok!==tok)break;
         const el=(Date.now()-t0)/1000, eta=done?Math.ceil((list.length-done)*el/done):0;
         setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();
       }
       recomputeAgg();
-      if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};}
+      if(loadRecv._tok===tok){window.__CA_LIVE={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+        // ★계산결과 서버캐시 저장 → 다음 진입·타 사용자 즉시(엔진 재계산 불요)
+        try{const saveRows=list.map(x=>Object.assign({part:x.part,qty:x.qty},liveCC[x.part]||{}));
+          fetch(`${API}/api/cost/analysis/cache/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym:D.ym,ymd,rows:saveRows})});}catch(e){}
+        setRegenMsg('완료 · 캐시 저장됨');
+      }
     }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
     finally{rvBusy=false;renderBody();}
   };
@@ -732,7 +803,7 @@ SCREEN.costanalysis=(c)=>{
     c.querySelector('#ca-body').innerHTML = a.map(r=>{const neg=r[21]<0;
       return `<tr class="${neg?'lossrow':''}"><td class="pcode" title="${esc(r[0])}"><b>${esc(r[0])}</b></td>`+
         cols.map(([i,,,op])=>{let cls='num';if(op.b)cls+=' bcol';if(op.sk&&r[i]<0)cls+=' negv';if(op.sk&&r[i]>0)cls+=' posv';
-          return `<td class="${cls}">${op.pct?pct(r[i]):won(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
+          return `<td class="${cls}">${op.pct?pct(r[i]):wonI(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
       || `<tr><td colspan="${cols.length+1}" class="empty">${mode==='direct'?(dLoading?'라이브 계산중…':(dErr||'품번을 입력하고 조회 (라이브 · 아무 품번, 예: AJR75563503)')):(rvBusy?'<span style="display:inline-flex;align-items:center;gap:8px;color:#2f5aa8;font-weight:600"><span class="ca-spin"></span> 조회 중…</span>':'결과 없음')}</td></tr>`;
     if(mode!=='direct'){
       // 합계 = Σ(수량 × 단위금액). LG총금액(20)·Impact(22)는 이미 행별 총액이라 그대로 합산. 재료비율=Σ재료비/LG총매출.
@@ -756,7 +827,7 @@ SCREEN.costanalysis=(c)=>{
   const headHTML=()=>{
     const lgSpan=mode==='direct'?2:4;
     let g1='<th rowspan="2">PART-NO</th>'+(mode!=='direct'?'<th rowspan="2" class="num">입고수량</th>':'');
-    g1+=`<th colspan="7" class="ghead">내부용</th><th colspan="12" class="ghead">실원가</th><th colspan="${lgSpan}" class="ghead">LG단가·손익</th>`;
+    g1+=`<th colspan="${lgSpan}" class="ghead">LG단가·손익</th><th colspan="12" class="ghead">실원가</th><th colspan="7" class="ghead">내부용</th>`;
     const h2=colsOf().filter(([i])=>i!==1).map(([i,h])=>`<th class="num sortable ${sortI===i?'sorted':''}" data-si="${i}">${h}${sortI===i?(dir<0?' ▼':' ▲'):''}</th>`).join('');
     return `<thead><tr>${g1}</tr><tr>${h2}</tr></thead>`;
   };
@@ -810,6 +881,7 @@ SCREEN.costanalysis=(c)=>{
        .ca-wrap{max-height:calc(100vh - 310px);overflow:auto;max-width:100%;width:100%;box-sizing:border-box}
        .ca-tbl{font-size:13px;table-layout:auto}
        .ca-tbl th,.ca-tbl td{padding:4px 6px}
+       .ca-tbl td.num,.ca-tbl th.num{white-space:nowrap}
        .ca-tbl td.num,.ca-tbl th.num{font-variant-numeric:tabular-nums}
        .ca-tbl th.ghead{background:#eef4ff;text-align:center;color:#2f5aa8;font-weight:700}
        .ca-tbl th.sortable{cursor:pointer;white-space:nowrap}.ca-tbl th.sorted{background:#dfe9ff;color:#1c47a0}
@@ -817,8 +889,9 @@ SCREEN.costanalysis=(c)=>{
        .ca-tbl thead tr:first-child th{position:sticky;top:0;z-index:4}
        .ca-tbl thead tr:nth-child(2) th{position:sticky;top:26px;z-index:4}
        .ca-tbl td.bcol{background:#f6f9ff;font-weight:700}
-       .ca-tbl td.pcode{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-       .ca-tbl thead tr:first-child th:first-child{max-width:92px}
+       .ca-tbl td.pcode{white-space:nowrap;font-weight:600}   /* ★품번 전체표시(잘림 제거) */
+       .ca-tbl td.pcode,.ca-tbl thead th:first-child{position:sticky;left:0;background:#fff;z-index:3}   /* 품번 고정(좌측) */
+       .ca-tbl thead tr:first-child th:first-child{z-index:5}
        .ca-tbl tr.lossrow td.pcode{color:#c0392b;font-weight:600}
        .ca-tbl td.negv{color:#c0392b;font-weight:700}.ca-tbl td.posv{color:#1f8a5a}
        .ca-tbl tfoot td{position:sticky;bottom:0;background:#f0f4fb;font-weight:700;border-top:2px solid #cdd9ef}
@@ -829,7 +902,13 @@ SCREEN.costanalysis=(c)=>{
     renderBody();
     {const xls=c.querySelector('#ca-xls'); if(xls)xls.onclick=caExport;}
     c.querySelectorAll('.ca-mode').forEach(b=>b.onclick=()=>{mode=b.dataset.mode; if(mode==='recv')sortI=20; else if([1,20,22].includes(sortI))sortI=21; dir=-1; draw();});
-    c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{const si=+th.dataset.si;if(sortI===si)dir=-dir;else{sortI=si;dir=-1;}draw();});
+    // ★정렬 = 클라이언트만(draw 전체재렌더/재조회 금지). 헤더(정렬표시)만 교체+재바인딩 후 body만 갱신.
+    const bindSort=()=>c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
+      const si=+th.dataset.si; if(sortI===si)dir=-dir; else{sortI=si;dir=-1;}
+      const th0=c.querySelector('.ca-tbl thead'); if(th0){th0.outerHTML=headHTML();bindSort();}
+      renderBody();
+    });
+    bindSort();
     if(mode==='recv'){
       c.querySelector('#ca-go').onclick=()=>{
         const f=c.querySelector('#ca-from').value;
@@ -839,7 +918,7 @@ SCREEN.costanalysis=(c)=>{
       c.querySelector('#ca-q').oninput=e=>{q=e.target.value.trim();renderBody();};
       c.querySelector('#ca-loss').onchange=e=>{lossOnly=e.target.checked;renderBody();};
       const cy=c.querySelector('#ca-ymd'); if(cy)cy.onchange=e=>{rvYmd=date2ymd(e.target.value);};
-      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd);};   // 재계산=실시간(nx)
+      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd, true);};   // 재계산=캐시무시 강제 재계산+재저장
       // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
       if(!rvBusy && !loadRecv._tok){
         if(window.__CA_LIVE&&window.__CA_LIVE.ymd===rvYmd){D.rows=window.__CA_LIVE.rows;D.agg=window.__CA_LIVE.agg;D.ym=window.__CA_LIVE.ym;D.base=window.__CA_LIVE.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
@@ -1218,7 +1297,7 @@ const PROC_MODAL_CSS=`<style>
 SCREEN.unifybom=(c,ro)=>{
   const API=API_BASE;
   const RO=(ro===true);
-  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false;
+  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false, itemCut='';  // itemCut=절삭/설치 구분(nx.item.cut_gubun)
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
   let wuData=null, wuBusy=false;   // 역전개(where-used) 모달 상태
   const wuFmt=n=>(n==null||n==='')?'':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:5});
@@ -1395,7 +1474,7 @@ SCREEN.unifybom=(c,ro)=>{
     const [gp,tp]=await Promise.allSettled([   // ★get·tree 병렬(순차 대비 tree 시간만큼 단축)
       fetch(`${API}/api/bom/get?item=${encodeURIComponent(it)}`).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}),
       fetch(`${API}/api/bom/tree?item=${encodeURIComponent(it)}`).then(r=>r.json())]);
-    if(gp.status==='fulfilled'){const j=gp.value;item=j.item;name=j.name||'';procs=j.procs||[];procMap={};procs.forEach(p=>procMap[p.code]=p.name);lines=(j.lines||[]).map(l=>({...l,spec:specOf(l)}));}
+    if(gp.status==='fulfilled'){const j=gp.value;item=j.item;name=j.name||'';itemCut=j.cut_gubun||'';procs=j.procs||[];procMap={};procs.forEach(p=>procMap[p.code]=p.name);lines=(j.lines||[]).map(l=>({...l,spec:specOf(l)}));}
     else{msg='조회 실패: '+((gp.reason&&gp.reason.message)||gp.reason);lines=[];}
     if(tp.status==='fulfilled'){const tj=tp.value;tree=tj.rows||[];treeMax=tj.maxlevel||0;} else{tree=[];treeMax=0;}
     routeSel=0;routes=[];routesFor='';routeTree=null;routeTreeFor=-1;routeCost=null;routeCostFor=-1;   // ★품번 전환 → 후보선택 현행으로 리셋
@@ -1996,7 +2075,8 @@ SCREEN.unifybom=(c,ro)=>{
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
          :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
-       <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성</span>`:''}
+       ${item&&!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<label class="tl" style="margin-left:6px" title="경영 대시보드·영업예상 절삭/설치 분류(품목마스터 nx.item.cut_gubun). 즉시 저장.">구분</label><select class="sel" id="bm-cut" style="width:96px">${['','절삭','설치','분지관','이지링크'].map(g=>`<option value="${g}" ${itemCut===g?'selected':''}>${g||'미분류'}</option>`).join('')}</select>`:''}
+       <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}</span>`:''}
      </div>
      <datalist id="bm-itemdl"></datalist><datalist id="bm-vendordl"></datalist>
      ${newReg?`<div style="border:2px solid #1c7c3a;border-radius:10px;background:#f4fbf6;padding:12px;margin:8px 0">
@@ -2078,10 +2158,27 @@ SCREEN.unifybom=(c,ro)=>{
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
     const ed=c.querySelector('#bm-edit');if(ed)ed.onclick=()=>{editMode=true;viewTree=false;draw();};
+    {const bc=c.querySelector('#bm-cut');if(bc)bc.onchange=async()=>{const v=bc.value;   // 절삭/설치 구분 즉시저장(nx.item.cut_gubun)
+      try{const r=await fetch(`${API}/api/item/cutgubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:item,cut_gubun:v})});const j=await r.json();
+        if(j&&(j.ok||j.updated>=0)){itemCut=v;const rc=c.querySelector('.rowcount');if(rc&&item)rc.innerHTML=`<b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}`;}
+        else alert('구분 저장 실패');}catch(e){alert('구분 저장 오류: '+e.message);}};}
     const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{if(isNew){isNew=false;item='';name='';lines=[];weldRows=[];editMode=false;draw();}else load(item);};
     const add=c.querySelector('#bm-add');if(add)add.onclick=addRow;
     const sv=c.querySelector('#bm-save');if(sv)sv.onclick=(isNew?saveNew:save);
-    const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>dlCSV(`BOM_${item}.csv`,['#',...COLS.map(x=>x[1])],lines.map((l,i)=>[i+1,...COLS.map(([k])=>l[k])]));
+    const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>{
+      // ★화면에 보이는 뷰와 동일하게 export. 다단계 전개(평면 재료표=naeD)면 그 행을, 단일레벨/편집이면 원천 lines를.
+      if(viewTree && !editMode && !(routeSel>0) && naeD && !naeD.error && naeFor===item){
+        const fm=flatMat(naeD.rows||[]); const jae=(+((naeD.agg||{}).jae)||0);
+        const pct=m=>(jae?((+m||0)/jae*100).toFixed(1):'0.0')+'%';
+        const hd=['레벨','품번','품명','규격','소재','사급','매입처','소요량','단위단가','재료비','비율'];
+        const rows=[['0',item,name,'','','','',1,'',Math.round(jae),'100%']];
+        const push=r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
+          rows.push(['1',r.code,r.name,sp,r.metal||'',r.sag?'사급':'',r.cust||'',r.qty,r.won?Math.round(r.won):'',Math.round(r.mat||0),pct(r.mat)]);};
+        fm.normal.forEach(push); if(showWeld)fm.weldArr.forEach(push);
+        dlCSV(`BOM_${item}_전개.csv`,hd,rows);
+      } else {
+        dlCSV(`BOM_${item}.csv`,['#',...COLS.map(x=>x[1])],lines.map((l,i)=>[i+1,...COLS.map(([k])=>l[k])]));
+      }};
     c.querySelectorAll('.bm-del').forEach(el=>el.onclick=()=>{lines.splice(+el.dataset.i,1);draw();});
     const recalcWt=(i,tr)=>{const w=calcWeight(lines[i]);if(w!=null){lines[i].net_weight=w;const wc=tr&&tr.querySelector('input[data-k="net_weight"]');if(wc&&document.activeElement!==wc)wc.value=w;}};
     c.querySelectorAll('.ce').forEach(el=>el.oninput=()=>{const i=+el.dataset.i,k=el.dataset.k;lines[i][k]=(el.type==='number')?(el.value===''?null:+el.value):el.value;

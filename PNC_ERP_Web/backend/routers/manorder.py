@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
 
@@ -43,7 +43,7 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         #     → 정합 위해 여기서도 미곱함(곱하면 자동발주와 수량 불일치). sourcing_profile(업체) 계층만 적용.
         wdate = f"20{from6[0:2]}-{from6[2:4]}-{from6[4:6]}"     # 배분 유효일자 판정(계획 윈도우 시작일)
         prof = {}   # item -> [(vendor, ratio)] 활성·비내부·업체지정·유효
-        ovr = {}    # item -> vendor  (order_vendor 발주업체 지정 override)
+        ovr = {}    # item -> [(vendor, ratio)]  (order_vendor 발주업체 지정 ★다중업체 배분)
         nxn = _nx(); ncur = nxn.cursor()
         try:
             ncur.execute("""SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))), ISNULL(alloc_ratio,100),
@@ -55,24 +55,30 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
                 prof.setdefault(str(ic).strip(), []).append((str(vc).strip(), float(al or 0)))
             try:
                 ncur.execute("IF OBJECT_ID('nx.order_vendor','U') IS NULL SELECT 1 WHERE 1=0")
-                ncur.execute("SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) FROM nx.order_vendor WHERE ISNULL(vendor_code,'')<>''")
-                for ic, vc in ncur.fetchall(): ovr[str(ic).strip()] = str(vc).strip()
+                _has = (ncur.execute("SELECT COL_LENGTH('nx.order_vendor','alloc_ratio')").fetchone()[0] is not None)
+                _rc = "ISNULL(alloc_ratio,100)" if _has else "100"
+                ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))), {_rc} FROM nx.order_vendor WHERE ISNULL(vendor_code,'')<>''")
+                for ic, vc, al in ncur.fetchall():
+                    ovr.setdefault(str(ic).strip(), []).append((str(vc).strip(), float(al if al is not None else 100)))
             except Exception:
                 pass
         finally:
             nxn.close()
         def _share(ic):
-            """이 매입처(cc)의 배분율(0~100). override > 프로파일 > 현행100(미설정)."""
+            """이 매입처(cc)의 배분율(0~100). 발주업체지정(다중배분) > 프로파일 > 현행100(미설정)."""
             ic = str(ic).strip()
-            if ic in ovr:
-                return 100.0 if ovr[ic] == cc else 0.0
+            ov = ovr.get(ic)
+            if ov:
+                if len(ov) == 1:
+                    return 100.0 if ov[0][0] == cc else 0.0        # 단일=100/0(현행 그대로 → 회귀0)
+                return sum((r or 0) for (v, r) in ov if v == cc)    # cc 몫(다중 배분%)
             ps = prof.get(ic)
             if ps:
                 return sum(r for (v, r) in ps if v == cc)   # cc 몫(cc 미포함이면 0 = 이 매입처 발주 아님)
             return 100.0
-        # cc가 프로파일/override 대상인 품목(마스터 IN_CUST≠cc여도 노출) → 다중 매입처 커버
+        # cc가 프로파일/발주업체지정 대상인 품목(마스터 IN_CUST≠cc여도 노출) → 다중 매입처 커버
         extra = sorted({ic for ic, ps in prof.items() if any(v == cc for (v, r) in ps)} |
-                       {ic for ic, v in ovr.items() if v == cc})
+                       {ic for ic, ov in ovr.items() if any(v == cc for (v, r) in ov)})
         eph = ",".join("?" * len(extra)) if extra else ""
         or_main = f" OR M.ITEM_CODE IN ({eph})" if extra else ""
         or_itm = f" OR ITEM_CODE IN ({eph})" if extra else ""
@@ -115,16 +121,19 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         def _par(ic):
             ic = str(ic or ""); i = ic.find("-"); return ic[:i] if i > 0 else ic
         # ── 이 매입처(cc) 배분율 적용: 계획수량·일자별을 이 매입처 몫으로 스케일(배분율<100=badge, 0=제외) ──
-        #   재고/기발주는 미스케일: po_qty는 이미 CUST_CODE=cc 스코프, stock_qty는 물리재고(업체분할 규칙 없음→현행유지).
+        #   ★실발주비율 = R01 경로비율 × 업체비율. 재고/기발주는 미스케일(po_qty는 CUST_CODE=cc 스코프, stock_qty는 물리재고).
+        rn = _nx(); rc = rn.cursor()
+        try: route01 = _route01_ratio(rc, [str(r["ic"]).strip() for r in rows])   # ★R01 경로 계수(현재 100)
+        finally: rn.close()
         out = []
         for r in rows:
             r["days"] = daily.get(_par(r["ic"]), {})
-            ratio = _share(r["ic"])
-            if ratio <= 0:
-                continue                        # 이 매입처 발주 아님(배분/발주업체지정에서 제외)
             ic = str(r["ic"]).strip()
+            ratio = _share(ic) * (route01.get(ic, 100.0) / 100.0)   # 실발주비율 = 업체비율 × route01
+            if ratio <= 0:
+                continue                        # 이 매입처 발주 아님(배분/발주업체지정/경로에서 제외)
             r["alloc_ratio"] = round(ratio, 4)
-            r["alloc_note"] = ("발주업체지정" if ic in ovr else
+            r["alloc_note"] = ((f"발주업체지정 {ratio:g}%" if len(ovr.get(ic, [])) > 1 else "발주업체지정") if ic in ovr else
                                (f"배분 {ratio:g}%" if (ratio != 100.0 or len(prof.get(ic, [])) > 1) else ""))
             if ratio != 100.0:
                 f = ratio / 100.0

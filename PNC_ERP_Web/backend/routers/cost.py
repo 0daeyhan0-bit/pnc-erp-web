@@ -519,6 +519,75 @@ def cost_nx_bulk(p: dict = Body(...)):
     return {"ymd": ymd, "ym": ym, "costs": out}
 
 
+# ===================== 품목별 원가분석 결과 캐시 (첫 로드 즉시화) =====================
+#  프론트가 nx엔진으로 계산한 결과(품목별 원가/손익)를 (ym=리시빙월, ymd=단가일)별로 저장 → 다음 진입/타 사용자 즉시 로드.
+#  엔진 자체는 안 건드림. 재계산 버튼=강제 재계산 후 재저장. buildRow가 쓰는 13필드+qty만 보관.
+_CA_FIELDS = ('qty', 'jae', 'lg', 'silwon', 'sonik', 'sagub', 'won', 'bu', 'sa',
+              'gagong', 'ilban', 'unban', 'profit', 'silsagub')
+
+def _ca_norm(ym, ymd):
+    ym = "".join(ch for ch in str(ym or '') if ch.isdigit()); ym = ym[2:6] if len(ym) >= 6 else ym[:4]
+    ymd = "".join(ch for ch in str(ymd or '') if ch.isdigit()); ymd = ymd[2:8] if len(ymd) >= 8 else ymd[:6]
+    return ym, ymd
+
+def _ca_ddl(cur):
+    cur.execute("""IF OBJECT_ID('nx.cost_analysis_cache') IS NULL
+        CREATE TABLE nx.cost_analysis_cache(
+          ym varchar(4), ymd varchar(6), part varchar(50),
+          qty float, jae float, lg float, silwon float, sonik float, sagub float,
+          won float, bu float, sa float, gagong float, ilban float, unban float, profit float, silsagub float,
+          upd_dt datetime, CONSTRAINT pk_ca_cache PRIMARY KEY(ym,ymd,part))""")
+
+@router.get("/api/cost/analysis/cache/get")
+def cost_analysis_cache_get(ym: str = Query(''), ymd: str = Query('')):
+    """저장된 원가분석 결과 로드(있으면 즉시). 없으면 cached=false → 프론트가 라이브 계산."""
+    ym, ymd = _ca_norm(ym, ymd)
+    cn = _nx(); cur = cn.cursor()
+    try:
+        _ca_ddl(cur); cn.commit()
+        cur.execute("SELECT part," + ",".join(_CA_FIELDS) + ",CONVERT(varchar,upd_dt,120) "
+                    "FROM nx.cost_analysis_cache WHERE ym=? AND ymd=? ORDER BY part", ym, ymd)
+        rows = []; upd = ''
+        for r in cur.fetchall():
+            d = {"part": str(r[0]).strip()}
+            for i, f in enumerate(_CA_FIELDS): d[f] = float(r[1 + i] or 0)
+            upd = r[1 + len(_CA_FIELDS)] or ''; rows.append(d)
+        return {"ym": ym, "ymd": ymd, "rows": rows, "upd": upd, "cached": len(rows) > 0}
+    finally:
+        cn.close()
+
+@router.post("/api/cost/analysis/cache/save")
+def cost_analysis_cache_save(p: dict = Body(...)):
+    """프론트 계산 결과 저장(해당 ym·ymd 교체). rows=[{part,qty,jae,...}]."""
+    ym, ymd = _ca_norm(p.get('ym'), p.get('ymd'))
+    rows = p.get('rows') or []
+    if not ym or not ymd:
+        return {"ok": False, "error": "ym/ymd 필요"}
+    cn = _nx(); cur = cn.cursor()
+    try:
+        _ca_ddl(cur)
+        cur.execute("DELETE FROM nx.cost_analysis_cache WHERE ym=? AND ymd=?", ym, ymd)
+        cols = "ym,ymd,part," + ",".join(_CA_FIELDS) + ",upd_dt"
+        ph = "?,?,?," + ",".join("?" * len(_CA_FIELDS)) + ",getdate()"
+        buf = []
+        for r in rows:
+            part = str(r.get('part', '')).strip()
+            if not part: continue
+            buf.append([ym, ymd, part] + [float(r.get(f) or 0) for f in _CA_FIELDS])
+        try: cur.fast_executemany = True
+        except Exception: pass
+        n = 0; BATCH = 100   # 17파라미터×100=1700 < 2100 한도
+        for i in range(0, len(buf), BATCH):
+            cur.executemany(f"INSERT INTO nx.cost_analysis_cache({cols}) VALUES({ph})", buf[i:i + BATCH])
+            n += len(buf[i:i + BATCH])
+        cn.commit()
+        return {"ok": True, "saved": n, "ym": ym, "ymd": ymd}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:150]}
+    finally:
+        cn.close()
+
+
 # ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================
 #  ★체결·포장·용접 조립공정 ST는 용접봉(RAC) carrier에 p_item=부모(node)로 저장(레거시 carrier 모델). 여기서 전 공정군 편집.
 #   가공공정 = item_code=node, p_item=''  /  조립공정 = item_code=용접봉, p_item=node. calc_gubun 보존. 단가는 마감때만(제외).

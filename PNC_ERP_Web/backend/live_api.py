@@ -218,7 +218,7 @@ def _dispatch_inner(dc):
    UNION ALL
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC), C2.CUST_TYPE, A.MAT_CODE, A.MAINT_COST, (A.MAINT_COST*A.EXCHANGE_RATE), A.ITEM_CODE,
      MAX(M.ITEM_DESC), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.ITEM_LGROUP, M.ITEM_SGROUP,
-     SUM(A.MAINT_QTY), SUM(A.MAINT_AMT), SUM(A.TAXPAYERS), 0, 0, A.EXCHANGE_RATE, MAX(M.IN_CUST_CODE), A.CURRENCY, MAX(M.ITEM_WEIGHT)
+     SUM(A.MAINT_QTY), SUM(A.MAINT_AMT), SUM(ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1)), 0, 0, A.EXCHANGE_RATE, MAX(M.IN_CUST_CODE), A.CURRENCY, MAX(M.ITEM_WEIGHT)
     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.DIVISION='Q'
     GROUP BY A.CUST_CODE,A.MAINT_TAG,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,A.EXCHANGE_RATE,M.ITEM_LGROUP,M.ITEM_SGROUP,A.CURRENCY"""
@@ -271,7 +271,7 @@ def _receipt_inner(dc):
   SELECT A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE, A.ITEM_CODE, A.MAT_CODE,
     M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
     A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE,
-    A.MAINT_QTY, A.MAINT_AMT, A.TAXPAYERS, 0, 0
+    A.MAINT_QTY, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0, 0
    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
    WHERE {dc} AND A.DIVISION IN ('P')"""
 
@@ -340,7 +340,7 @@ UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
   A.MAT_CODE, M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_DIAM, M.ITEM_THICK, M.ITEM_LENGTH,
   M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
-  A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, A.TAXPAYERS, 0
+  A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0
  FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
  WHERE {dc} AND A.DIVISION IN ('P'){MF}"""
     _cols, rows = _rows(sql)
@@ -386,7 +386,7 @@ UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
   A.MAT_CODE, A.ITEM_CODE, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE),
   M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT, M.ITEM_DESC, M.ITEM_SPEC,
-  A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, A.TAXPAYERS, 0
+  A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0
  FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.DIVISION='Q'"""
     _cols, rows = _rows(sql)
@@ -505,7 +505,7 @@ def matinout(from_ymd: str = Query(""), to_ymd: str = Query(""), stock_cust: str
     return {"from_ymd": from6, "to_ymd": to6, "stock": stock, "moves": moves, "stock_cust": stock_cust, "part_wh": part_wh, "q": q}
 
 # ================= 자재출고관리 (구매/자재, w_pu_stock_150 / dw_pu_stock_150) — 자재개별출고 조회 =================
-# ★레거시 정본: PU_T_STOCK_MAINT WHERE MAINT_TAG='B'(자재개별출고=파트출고/생산투입 이동전표) + 기간.
+# ★레거시 정본(dw_pu_stock_150): PU_T_STOCK_MAINT WHERE MAINT_TAG IN('4','B') + 기간. 4=생산사용(축관)·B=자재개별출고(파트출고).
 #   13컬럼(출고일자/SEQ/FROM파트창고/P·N/TO창고구분/TO파트창고/자도번/출고수량(=maint_qty*-1)/출고단가/출고금액/비고/작업자/작업일시).
 #   현재고/집계는 서버 SUM·COUNT(전체 매칭 대상)로 계산 → 500 cap 부분합 문제 제거.
 def _qesc(s):
@@ -515,19 +515,19 @@ def _qesc(s):
 def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str = Query(""),
                     mat: str = Query(""), out_wh: str = Query(""), to_wh: str = Query(""),
                     from_wh: str = Query(""), page: int = Query(1), size: int = Query(2000)):
-    """자재출고관리 라이브 조회(레거시 w_pu_stock_150, PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT MAINT_TAG='B'). 서버 집계(건수·수량합)+페이징."""
+    """자재출고관리 라이브 조회(레거시 w_pu_stock_150, PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT MAINT_TAG IN('4','B')). 서버 집계(건수·수량합)+페이징."""
     t6 = _digits(to_ymd, 6) or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
     f6 = _digits(from_ymd, 6) or t6
     if f6 > t6:
         f6, t6 = t6, f6
-    W = ["a.maint_tag='B'", f"a.maint_ymd BETWEEN '{f6}' AND '{t6}'"]
+    W = ["a.maint_tag IN ('4','B')", f"a.maint_ymd BETWEEN '{f6}' AND '{t6}'"]   # ★레거시 w_pu_stock_150 = 4(생산사용/축관)+B(자재개별출고)
     if pn.strip():      W.append(f"a.item_code LIKE '%{_qesc(pn.strip())}%'")
     if mat.strip():     W.append(f"a.mat_code LIKE '%{_qesc(mat.strip())}%'")
     if out_wh in ("1", "2"): W.append(f"ISNULL(a.out_wh_gubun,'')='{out_wh}'")
     if to_wh.strip():   W.append(f"a.to_gagong_proc_code='{_qesc(to_wh.strip())}'")
     if from_wh.strip(): W.append(f"a.gagong_proc_code='{_qesc(from_wh.strip())}'")
     WH = " AND ".join(W)
-    PW = f"a.maint_tag='B' AND a.maint_ymd BETWEEN '{f6}' AND '{t6}'"   # 드롭다운 옵션용(기간만)
+    PW = f"a.maint_tag IN ('4','B') AND a.maint_ymd BETWEEN '{f6}' AND '{t6}'"   # 드롭다운 옵션용(기간만)
     _c, agg = _rows(f"SELECT COUNT(*) cnt, ISNULL(SUM(a.maint_qty*-1),0) qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE {WH}")
     tot = agg[0] if agg else {"cnt": 0, "qty": 0}
     sz = max(1, min(int(size or 2000), 10000)); off = max(0, (int(page or 1) - 1)) * sz

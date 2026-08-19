@@ -873,7 +873,7 @@ SCREEN.partnerplan=(c)=>{
   const norm=(r,i)=>({seq:r.seq||i+1, wc:r.wc, wcnm:r.wcnm||r.wc, line:r.line||'', workcenter:r.workcenter||'',
      assy:r.assy||'', jado:r.part||'', sagub:!!r.sagub, lot:(r.lot!=null?r.lot:null),
      matq:(r.matq!=null?r.matq:r.tot), doneq:(r.doneq!=null?r.doneq:null), reqq:(r.reqq!=null?r.reqq:null),
-     nm:r.nm||'', spec:r.spec||'', days:r.days||{}, donedays:r.donedays||{}, colors:r.colors||{}, tot:r.tot||0});
+     nm:r.nm||'', spec:r.spec||'', days:r.days||{}, donedays:r.donedays||{}, colors:r.colors||{}, tot:r.tot||0, alloc_note:r.alloc_note||''});
   const draw=()=>{
     const dates=data.dates||[];
     rowsCur=(data.rows||[]).map(norm);
@@ -900,7 +900,7 @@ SCREEN.partnerplan=(c)=>{
     const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td><td></td>${dates.map(d=>gcell(d)).join('')}</tr>`:'';
     const rowTr=r=>`<tr>
         <td class="num" style="color:#8aa0bd">${r.seq}</td>
-        <td><b>${esc(r.wcnm)}</b></td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
+        <td><b>${esc(r.wcnm)}</b>${r.alloc_note?` <span class="bdg" style="font-size:9px;background:#eaf3ff;color:#1c47a0;border:1px solid #bcd;border-radius:6px;padding:0 4px" title="조달 프로파일 발주업체 배분 반영">${esc(r.alloc_note)}</span>`:''}</td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
         <td><b>${esc(r.assy)}</b></td>
         <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.jado)}">${esc(r.jado)}</div></td>
         <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>

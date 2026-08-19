@@ -694,11 +694,26 @@ class NxCostEngine:
             elif cg=='9': tot += uph*wq
         return tot
 
+    def _fasten_amt(self, node, ym):
+        """체결 매트릭스(nx.item_fasten × nx.fasten_std) 가공비 = Σ(표준공수×횟수)÷3600×임율. 담당자 입력분(품목별). 데이터 없으면 0."""
+        if not hasattr(self, '_fac'): self._fac = {}
+        k = (node, ym)
+        if k in self._fac: return self._fac[k]
+        amt = 0.0
+        try:
+            self.cur.execute("""SELECT ISNULL(SUM(f.qty*s.std_st),0) FROM nx.item_fasten f
+                JOIN nx.fasten_std s ON s.fcode=f.fcode WHERE f.item_code=?""", node)
+            st = float(self.cur.fetchone()[0] or 0)
+            amt = round(st / 3600.0 * self.labor_rate(ym), 2) if st else 0.0
+        except Exception:
+            amt = 0.0
+        self._fac[k] = amt; return amt
+
     def gagong_nae(self, item, ymd, mult=1.0, seen=None, parent=''):
         if seen is None: seen=set()
         info=self._load_item(item)
         ym='20'+ymd[:4]
-        tot=self.proc_amt_nae(item, info, ym, parent) * mult
+        tot=self.proc_amt_nae(item, info, ym, parent) * mult   # 체결은 nx.routing(FS코드)에 저장 → proc_amt_nae가 자동 계상(별도 합산 불필요)
         # ★direct5-fix(2026-08-13): 직납(cost_gubun='5')은 하위 안 품(SP CTE_BOM `cb.cost_gubun<>'5'` 정합).
         #   재료비(_expandable_nae)·실원가는 이미 '5' 정지. 내부 가공비/overhead만 누락 → 직납 넘어 공유용접봉·MJU 과다계상(내부 34→40/40).
         if info['cost_gubun']!='5':
