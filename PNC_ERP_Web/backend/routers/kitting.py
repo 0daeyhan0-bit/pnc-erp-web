@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg)
 
 router = APIRouter()
 
@@ -614,6 +614,8 @@ def kitting_cell_confirm(payload: dict = Body(...)):
     if not ok: return {"ok": False, "detail": detail}
     nx = _nx(); nc = nx.cursor()
     try:  # ★Phase1: 단일원장 nx.stock_ledger(STOCK_POINT='RDY', tag K1=+확인). 셀키=item·wo·gpc·plan_ymd(INPUT_YMD). flag-only(자재무차감)
+        lm = _lock_msg(nc, ymd)   # ★공통 마감잠금(정본 STOCK_GATING_CLOSE_LOCK_RULES.md)
+        if lm: return {"ok": False, "detail": lm}
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         seq = int(nc.fetchone()[0] or 1)
         nc.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,GAGONG_PROC_CODE,
@@ -636,6 +638,8 @@ def kitting_cell_cancel(payload: dict = Body(...)):
     if not item or not gpc: return {"ok": False, "detail": "item·파트 필수"}
     nx = _nx(); nc = nx.cursor()
     try:  # 셀 현재 net(RDY 원장 우리 flag) 계산 → 그 이내로 취소
+        lm = _lock_msg(nc, ymd)   # ★공통 마감잠금
+        if lm: return {"ok": False, "detail": lm}
         nc.execute("""SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE STOCK_POINT='RDY'
               AND ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=? AND ISNULL(WORK_ORDER,'')=? AND ISNULL(INPUT_YMD,'')=?""",
                    item, gpc, (wo or ''), (ymd or ''))

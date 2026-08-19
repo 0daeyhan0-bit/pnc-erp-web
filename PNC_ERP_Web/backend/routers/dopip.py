@@ -4,7 +4,7 @@
    금액(KRW) = ROUND(MAINT_AMT×EXCHANGE_RATE,0,1) 버림(레거시 검증). 금액=수량×단가.
    키=(MAINT_YMD,MAINT_SEQ). 채번: sheet_no=max(division)+1, maint_seq=max(ymd)+1."""
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _nx, _custnm_map, _d6
+from common import _nx, _custnm_map, _d6, _lock_msg
 
 router = APIRouter()
 
@@ -73,6 +73,8 @@ def dopip_save(p: dict = Body(...)):
     seq = int(p.get("seq") or 0)
     cn = _nx(); c = cn.cursor()
     try:
+        lm = _lock_msg(c, ymd)   # ★공통 마감잠금
+        if lm: raise HTTPException(400, lm)
         if seq > 0:   # 수정
             c.execute("""UPDATE nx.PU_T_STOCK_MAINT_C SET CUST_CODE=?, MAT_CODE=?, MAINT_QTY=?, MAINT_AMT=?,
                   CURRENCY=?, MAINT_COST=?, EXCHANGE_RATE=?, REMARKS=?, CUSTOMS_DUTIES=?, TRANSPORTATION_FATE=?,
@@ -145,6 +147,8 @@ def dopip_save_batch(p: dict = Body(...)):
     if not valid: raise HTTPException(400, "품목 행 1개 이상(품번·수량) 필요")
     cn = _nx(); c = cn.cursor()
     try:
+        lm = _lock_msg(c, ymd)   # ★공통 마감잠금
+        if lm: raise HTTPException(400, lm)
         nseq = int(c.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=?", ymd).fetchone()[0])
         sheet = int(c.execute("SELECT ISNULL(MAX(SHEET_NO),0)+1 FROM nx.PU_T_STOCK_MAINT_C WHERE DIVISION=?", tag).fetchone()[0])
         ins = 0; seqs = []

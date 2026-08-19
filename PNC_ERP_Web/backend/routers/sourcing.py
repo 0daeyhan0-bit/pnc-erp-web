@@ -2765,8 +2765,8 @@ def sourcing_route_alloc_get(item: str = Query(...), show_unapproved: int = Quer
             if s is None:
                 is_cur = r["current_flag"] or r["route_no"] == 1
                 dflt_active = bool(is_cur) and not has_saved   # 저장 이력 없을 때만 현행 기본활성
-                s = {"apply_from": None, "apply_to": None, "is_active": dflt_active,
-                     "alloc_ratio": (100.0 if dflt_active else None)}
+                # ★배분%는 자동 채우지 않음(사용자 수동입력). 단일 R01은 프론트가 '100 자동' 표시. 다중이면 빈칸→사용자 입력.
+                s = {"apply_from": None, "apply_to": None, "is_active": dflt_active, "alloc_ratio": None}
             out.append({**r,
                         "apply_from": s["apply_from"], "apply_to": s["apply_to"],
                         "is_active": (bool(s["is_active"]) if s["is_active"] is not None else False),
