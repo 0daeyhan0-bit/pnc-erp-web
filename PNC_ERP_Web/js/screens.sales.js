@@ -361,13 +361,14 @@ SCREEN.shipment=(c)=>{
 /* 제품재고조회 (영업, dw_pr_stock_040) — 기초/입고/출고/조정/현재고 · 작업장별 */
 SCREEN.salesstock=(c)=>{
   const API=API_BASE;
-  let pool=[], loading=false, msg='', curFrom='', curTo='', cur=[], source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  let pool=[], loading=false, msg='', curFrom='', curTo='', cur=[], source='live', incZero=false;   // ★Phase5 데이터원(기본 라이브 무변경) · incZero=0재고포함(레거시 gross 대조)
   const dToInput=d=>{d=(''+(d||'')).trim();return d.length>=6?`20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`:'';};
   const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
   const load=async()=>{loading=true;msg='';
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(10);
+    const zq=incZero?'&zero=1':'';
     if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}&source=nx`,{title:'제품재고조회',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}`);if(!r.ok)throw new Error('HTTP '+r.status);
+    try{const r=await fetch(`${API}/api/live/salesstock?dfrom=${curFrom}&dto=${curTo}${zq}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();pool=j.rows||[];curFrom=j.dfrom||curFrom;curTo=j.dto||curTo;}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';pool=[];}
     loading=false;
@@ -387,6 +388,7 @@ SCREEN.salesstock=(c)=>{
      <input class="inp" id="q" placeholder="품목코드/품명/규격">
      <select class="sel" id="wc"><option value="">전체작업장</option></select>
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
+     <label style="font-size:12px;color:var(--muted);font-weight:600;display:inline-flex;align-items:center;gap:3px" title="레거시 w_pr_stock_040처럼 최종재고 0인 품목까지 포함(gross 대조)"><input type="checkbox" id="zero" ${incZero?'checked':''}>0재고 포함</label>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
@@ -410,6 +412,7 @@ SCREEN.salesstock=(c)=>{
   c.querySelector('#go').onclick=go;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
   c.querySelector('#dfrom').onchange=go;c.querySelector('#dto').onchange=go;
+  c.querySelector('#zero').onchange=e=>{incZero=e.target.checked;load();};   // 0재고 포함=서버 재조회(레거시 gross 대조)
   c.querySelector('#wc').onchange=apply;c.querySelector('#gubun').onchange=apply;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#wc').value='';c.querySelector('#gubun').value='all';curFrom='';curTo='';load();};
   c.querySelector('#xls').onclick=()=>downloadCSV('제품재고조회.csv',['품목코드','품명','기초재고','입고','출고','기타출고','재고수량','단가','금액','작업처'],cur.map(r=>[r.cd,r.nm,r.basic,r.inq,r.outq,r.adj,r.qty,r.cost,Math.round(r.amt),r.wc]));

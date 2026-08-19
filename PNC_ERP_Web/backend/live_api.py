@@ -876,8 +876,9 @@ WHERE a.sale_ymd BETWEEN '{f}' AND '{t}'
 # ================= 제품재고조회 (영업, dw_pr_stock_040) — 제품수불 플랫 =================
 # 기초(2502+~기간전)+입고-출고-기타출고=재고. export_web_data.py _S040 이식, 기간 파라미터화(base 2502 고정).
 @live_router.get("/salesstock")
-def salesstock(dfrom: str = Query(""), dto: str = Query(""), source: str = Query("live")):
-    """제품재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). dfrom~dto=YYMMDD."""
+def salesstock(dfrom: str = Query(""), dto: str = Query(""), source: str = Query("live"), zero: str = Query("")):
+    """제품재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). dfrom~dto=YYMMDD.
+    zero=1이면 최종재고 0인 품목도 포함(레거시 w_pr_stock_040 2,172건과 동일 gross 대조용). 기본=0재고 숨김."""
     f, t = _def_range(dfrom, dto)
     if source == "nx":
         return _nx_screen("ASY", f, t)
@@ -921,17 +922,18 @@ FROM t JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON t.mat=m.item_code
 GROUP BY t.mat
 """
     _c, rows = _rows(sql)
+    inc_zero = str(zero).strip() in ("1", "true", "y", "Y")
     out = []
     for r in rows:
         q = float(r["qty"] or 0)
-        if abs(q) <= 0.0001:
+        if abs(q) <= 0.0001 and not inc_zero:
             continue
         cost = float(r["cost"] or 0)
         r["amt"] = round(q * cost)
         r["qty"] = q
         out.append(r)
     out.sort(key=lambda r: -abs(r.get("amt") or 0))
-    return {"dfrom": f, "dto": t, "count": len(out), "rows": out}
+    return {"dfrom": f, "dto": t, "count": len(out), "zero": 1 if inc_zero else 0, "rows": out}
 
 # ================= LG리시빙관리 (영업, dw_sa_sale_110) — 도번×일자 피벗 =================
 @live_router.get("/lgrecv")
