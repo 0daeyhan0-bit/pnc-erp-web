@@ -130,5 +130,16 @@
 
 **구현 대상**: ①조달경로 통합검토 SUB패널에 부품/SUB별 구분 selector(→sourcing_route_line.gubun) ②조달프로파일 R02 ✎수정=R01모달 복제(→sourcing_profile) ③구분→생산/협력사계획 반영 검증·교정.
 
+## 11. ★★★경로 택1 확정 (사용자 결정 2026-08-19) — route 배분% 폐기
+
+**핵심 결정**: 동일 제품에 **경로를 동시 2개 운영 불가**(=서로 다른 BOM/구조로 2개 생산계획 편성은 대공사·운영복잡 → 불채택). 따라서:
+- **경로(R01/R02)는 항상 1개만 활성 = 운영 100%.** route 레벨 배분%(70/30) **폐기**. 조달프로파일 경로표=**라디오 택1**.
+- R02 활성 선택 = **현행 전환**(그 경로 구성·라인구분으로 생산계획 편성, R01 비활성).
+- **업체 배분%는 활성 경로 안에서만** 유효(부품별 다중업체, R01=order_vendor·R02=sourcing_profile). 이건 "1계획 내 발주처 분할"이라 문제없음.
+- ★2계층(route%×vendor%) 모델(§1·§4)은 **route%=항상100%로 단순화**. compose_mat/coopplan 다중경로 로직은 단일활성 기준.
+
+**구현 완료(2026-08-19, dev)**: 조달프로파일 경로표 라디오 택1(routeRow/routePanel/save/activeRid)·route 배분%컬럼 제거·업체지정 컬럼. E2E: R01 운영 저장 ok·미승인 R02 저장 차단. VENDOR 게이트(활성 대안경로 매입/사급 부품 업체 미지정→차단) 유지.
+**남음**: ①R02 업체지정=R01 omOpen 모달 복제(→sourcing_profile) ②R02 활성(전환) 시 생산계획을 R02 BOM으로 편성(현재 compose_mat=nx.bom 고정, 전환 반영 미구현) ③compose_mat/coopplan 대안경로를 라인구분(sourcing_route_line.gubun) 기반으로 교정(§8).
+
 ---
 관련: [[newerp-sourcing-profile]] · _schema/AUTOORDER_PRODUCTION_DESIGN.md · BOM_EXPLOSION_RULES.md
