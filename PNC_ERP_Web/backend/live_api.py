@@ -730,8 +730,10 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
 # ================= 생산입출고현황 (생산, dw_pr_stock_460) — 파트×자도번 마스터-디테일 =================
 # 유니버스=pr_t_mat_stock_wh(part,mat), BF=2502마감+2502~당월 이동(생산월마감이 2502에 멈춤=고정base), 당월=[ym01,ym99].
 # patch_460c.py 이식, FR/BFT만 월 파라미터화(2502 base 고정).
-def _prodinout(ym):
-    y01, y99 = ym + "01", ym + "99"
+def _prodinout(ym, frm=None, to=None):
+    # 레거시와 동일: 수불기간(frm~to). frm/to(YYMMDD) 우선, 없으면 ym월 전체.
+    y01 = frm if frm else (ym + "01")
+    y99 = to if to else (ym + "99")
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
     CUR = f"""
@@ -791,18 +793,21 @@ def _prodinout(ym):
     return stock, mv, partNames
 
 @live_router.get("/prodinout")
-def prodinout(ym: str = Query(""), source: str = Query("live")):
-    """생산입출고현황. 기본 source=live(현행 무변경). source=nx면 stock_ledger(PRD) 파생(컷오버 전 빈데이터 사유표시). ym=YYMM."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+    """생산입출고현황. 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환). source=nx면 stock_ledger(PRD) 파생."""
+    f6, t6 = _digits(frm, 6), _digits(to, 6)
+    y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "nx":
-        r = _nx_screen("PRD", y + "01", y + "31"); r["ym"] = y; return r
-    stock, moves, partNames = _prodinout(y)
-    return {"ym": y, "stock": stock, "moves": moves, "partNames": partNames}
+        r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
+    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves, "partNames": partNames}
 
 # ================= 제품입출고현황 (영업, dw_pr_stock_110) — 제품(P/N) 마스터-디테일 =================
 # 유니버스=SA_T_ITEM_STOCK, BF=2502마감+2502~당월(고정base), 당월=[ym01,ym99]. patch_110.py 이식.
-def _prodinvout(ym):
-    y01, y99 = ym + "01", ym + "99"
+def _prodinvout(ym, frm=None, to=None):
+    # 레거시 dw_pr_stock_110과 동일: 수불기간(frm~to). frm/to(YYMMDD) 우선, 없으면 ym월 전체.
+    y01 = frm if frm else (ym + "01")
+    y99 = to if to else (ym + "99")
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
     BF = f"""
  SELECT UPPER(item_code) item, stock_qty q FROM PARTNER_ERP_TEST3.nx.sa_t_month_stock WHERE stock_yymm='2502'
@@ -845,13 +850,14 @@ def _prodinvout(ym):
     return stock, mv
 
 @live_router.get("/prodinvout")
-def prodinvout(ym: str = Query(""), source: str = Query("live")):
-    """제품입출고현황. 기본 source=live(현행 무변경). source=nx면 stock_ledger(ASY) 파생(컷오버 전 빈데이터 사유표시). ym=YYMM."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+def prodinvout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+    """제품입출고현황(레거시 dw_pr_stock_110). 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환). source=nx면 stock_ledger(ASY) 파생."""
+    f6, t6 = _digits(frm, 6), _digits(to, 6)
+    y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "nx":
-        r = _nx_screen("ASY", y + "01", y + "31"); r["ym"] = y; return r
-    stock, moves = _prodinvout(y)
-    return {"ym": y, "stock": stock, "moves": moves}
+        r = _nx_screen("ASY", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
+    stock, moves = _prodinvout(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves}
 
 # ================= 출하실적현황 (영업, dw_sa_list_010) — 라인단위 =================
 @live_router.get("/shipment")
