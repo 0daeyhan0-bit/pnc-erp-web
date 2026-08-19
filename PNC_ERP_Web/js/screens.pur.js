@@ -1449,15 +1449,17 @@ SCREEN.sourceprofile=(c)=>{
   const curE=(rid,f,dflt)=>{const k=rid+'|'+f;return edit[k]!==undefined?edit[k]:dflt;};
   const setE=(rid,f,v)=>{edit[rid+'|'+f]=v;};
   const _isCur=r=>!!(r.current_flag||r.route_no===1);   // R01(현행)
-  const curRid=()=>{const r0=routes.find(r=>_isCur(r));return r0?r0.route_id:0;};   // 현행 route_id
-  // ★경로 택1: 동시 2경로 불가(2계획 편성 불가) → 활성은 항상 1개(100%). 세션선택 or 저장활성 or 현행.
-  const activeRid=()=>{const e=edit['_active'];if(e!==undefined)return +e;const sv=routes.find(r=>r.is_active);return sv?sv.route_id:curRid();};
-  const ract=r=>r.route_id==activeRid();
-  const save=async()=>{
-    const arid=activeRid(), act=routes.find(r=>r.route_id==arid);
-    if(!act){alert('활성 경로를 선택하세요.');return;}
-    if(act.readonly||!act.approve_flag){alert('저장 불가 — 미승인 후보는 활성 지정 불가(개발 › 조달경로 통합검토에서 승인).');return;}
-    const rows=routes.filter(r=>!r.readonly).map(r=>({route_id:r.route_id,apply_from:null,apply_to:null,is_active:(r.route_id==arid)?1:0,alloc_ratio:(r.route_id==arid)?100:null}));
+  const ract=r=>_isCur(r)?true:!!curE(r.route_id,'is_active',!!r.is_active);   // ★R2-3 R01(현행) 항상 활성
+  const ralloc=r=>curE(r.route_id,'alloc_ratio',(r.alloc_ratio!=null?r.alloc_ratio:''));
+  const validOn=(r,d)=>ract(r);   // ★R2-1 유효기간 폐지 — 활성 여부로만 판정
+  const aStat=()=>{const active=routes.filter(r=>ract(r));const withAl=active.filter(r=>ralloc(r)!==''&&ralloc(r)!=null);const sum=Math.round(withAl.reduce((a,r)=>a+(parseFloat(ralloc(r))||0),0)*100)/100;return {n:active.length,sum,single:active.length<=1,withAl:withAl.length};};
+  const autoset=()=>{routes.forEach(r=>{if(_isCur(r)){setE(r.route_id,'is_active',true);setE(r.route_id,'alloc_ratio',100);}else{setE(r.route_id,'is_active',false);setE(r.route_id,'alloc_ratio','');}});msg='현행(R01) 활성·100% + 나머지 후보 비활성. [저장]으로 확정.';draw();};
+  const save=async()=>{const A=aStat();
+    if(!A.single){const active=routes.filter(r=>ract(r));
+      if(active.some(r=>{const v=ralloc(r);return v===''||v==null;})){alert('저장 불가 — 활성 경로가 2개 이상이면 모든 활성 경로에 배분%를 입력해야 합니다.');return;}
+      if(Math.abs(A.sum-100)>0.01){alert(`저장 불가 — 활성 경로 배분% 합이 ${A.sum}% 입니다. 정확히 100%가 되어야 합니다.`);return;}}
+    const rows=routes.filter(r=>!r.readonly).map(r=>{const al=ralloc(r);
+      return {route_id:r.route_id,apply_from:null,apply_to:null,is_active:ract(r)?1:0,alloc_ratio:(ract(r)&&al!==''&&al!=null)?parseFloat(al):null};});
     try{const r=await fetch(`${API}/api/sourcing/route/alloc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:sel,rows})});
       const j=await r.json();if(j.ok){alert(`저장 완료 (${j.count}건)`);open(sel);return;}
       const hint=j.gate==='ALLOC'?'활성 경로 배분합=100% 확인':(j.gate==='APPROVE'?'미승인 후보는 활성 배정 불가(개발 승인 필요)':'저장 거부');
@@ -1642,13 +1644,11 @@ SCREEN.sourceprofile=(c)=>{
     if(!targets.length){om.saving=false;om.msg='변경사항 없음';draw();return;}
     om.msg='';draw();let cnt=0;
     try{for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
-        const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code && !om.route_id);   // R01만 현행매입처=default 해제 개념
-        const allocations=isDefault?[]:vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));
-        const url=om.route_id>0?`${API}/api/sourcing/route_order/vendor`:`${API}/api/sourcing/current_order/vendor`;
-        const body=om.route_id>0?{route_id:om.route_id,item_code:r.item_code,allocations}:{item_code:r.item_code,allocations};
-        const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
+        const allocations=isDefault?[]:vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));   // isDefault=override 해제
+        const res=await fetch(`${API}/api/sourcing/current_order/vendor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:r.item_code,allocations})});
         const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] ${jj.detail||'저장실패'}`;draw();return;}cnt++;}
-      await omOpen(om.item,om.route_id);om.msg=`✅ 업체·배분 저장 (${cnt}건)`;draw();
+      await omOpen(om.item);om.msg=`✅ 발주업체·배분 저장 (${cnt}건)`;draw();
     }catch(e){om.saving=false;om.msg='❌ 저장 실패: '+e;draw();}};
   const orderModal=()=>{if(!om)return '';
     const rowsHtml=om.loading?`<tr><td colspan="4">${spinRow(1)}</td></tr>`:(om.rows.length?om.rows.map((r,i)=>{
@@ -1675,7 +1675,7 @@ SCREEN.sourceprofile=(c)=>{
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
       <div style="background:#fff;border-radius:10px;min-width:720px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
-         <span style="font-weight:700;font-size:15px;color:#1c7c3a">📦 발주업체·배분 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(${om.route_id>0?'대안경로 · 매입/사급 부품':'현행 R01 · 자동발주 근거'})</span></span>
+         <span style="font-weight:700;font-size:15px;color:#1c7c3a">📦 발주업체·배분 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(현행 R01 · 자동발주 근거)</span></span>
          <b style="color:#1c3a6e">${esc(om.item)}</b><span style="color:var(--muted);font-size:12px">${esc(selNm)} · 기준일 ${esc(om.asof||'')}</span>
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="om-x" style="font-size:16px">✖</button></div>
@@ -1727,26 +1727,26 @@ SCREEN.sourceprofile=(c)=>{
   const treeTbl=()=>{const T=curTree();if(!T)return '';if(!T.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
     return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${T.map(n=>{const k=n.kind||kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${root||n.haskids?'':vcell(n.code,n.custnm)}</td></tr>`;}).join('')}</tbody></table>`;};
   const badge=r=>{const on=r.current_flag;return `<span style="background:${on?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700">R${String(r.route_no).padStart(2,'0')}${on?' · 현행':''}</span>`;};
-  const routeRow=r=>{const ro=r.readonly;
-    const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 부품별 업체 지정(R02…)
+  const routeRow=r=>{const ro=r.readonly,al=ralloc(r);
+    const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 후보 업체·계획단가 지정(R02…)
     const isCur=_isCur(r);   // R01(현행)
-    const selNow=(selRid==null&&isCur)||(selRid==r.route_id);
-    const active=ract(r);
-    return `<tr class="sp-rrow" data-ri="${r.route_id}" title="클릭: 이 경로 구성을 위 'BOM 구성'에 표시" style="cursor:pointer;${selNow?'box-shadow:inset 3px 0 0 #1c47a0;':''}${active?'background:#eafaef;':(r.current_flag?'background:#f0f7f0;':'')}${ro?'opacity:.55;':''}">
-      <td style="white-space:nowrap">${selNow?'<span style="color:#1c47a0">▶ </span>':''}${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${active?' <span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">운영 100%</span>':''}</td>
+    const A=aStat();
+    return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':(!ract(r)?'opacity:.55;':'')}">
+      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}</td>
+      <td>${esc(r.gubun||'-')}</td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
-      <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 운영 불가">미승인</span>'}</td>
-      <td class="center">${(canW&&!ro&&r.approve_flag)?`<input type="radio" name="sp-active" class="sp-active" data-ri="${r.route_id}"${active?' checked':''} title="이 경로를 운영(100%)으로 선택 — 동시 2경로 불가">`:(active?'<span style="color:#1c7c3a;font-weight:700">●</span>':'<span style="color:#c9d1dc">○</span>')}</td>
-      <td class="center">${(isCur&&canW)?`<button class="btn ghost sp-editvend" title="현행 R01 발주업체·배분 (부품별 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 업체지정</button>`:''}${(canVend&&canW&&!isCur)?`<button class="btn ghost sp-vend" data-ri="${r.route_id}" title="이 경로(R02+) 부품별 업체 지정" style="padding:1px 8px;font-size:11px;color:#1c47a0;border-color:#a9c3ec">✎ 업체지정</button>`:''}</td>
+      <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
+      <td class="center">${isCur?'<span title="현행(R01)은 항상 활성 — 비활성 불가" style="color:#1c7c3a;font-weight:700">✔ 항상</span>':((canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':'')))}</td>
+      <td class="num" style="white-space:nowrap">${(isCur&&A.single)?'<b style="color:#1c7c3a">100</b> <span style="font-size:10px;color:#8aa0bd">자동</span>':((canW&&!ro&&ract(r))?`<input class="inp sp-e" type="number" step="0.1" data-ri="${r.route_id}" data-f="alloc_ratio" value="${al==null?'':al}" style="width:60px;min-width:0" placeholder="—">`:(ract(r)?(al==null?'—':al):'<span style="color:#c9d1dc">비활성</span>'))}${(isCur&&canW)?` <button class="btn ghost sp-editvend" title="발주업체·배분 수정 (현행 R01 자동발주 근거 · 다중업체 배분%)" style="padding:1px 8px;font-size:11px;color:#1c7c3a;border-color:#9fd0ac">✎ 수정</button>`:''}</td>
     </tr>`;};
   const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr;
     const act=routes.find(r=>ract(r));
     return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(★운영 경로 택1 — 동시 2경로 불가 · 승인 후보만 · 저장 <code>nx.route_alloc</code>)</span>
       <label style="float:right;font-size:12px;font-weight:400;color:#5a6b82"><input type="checkbox" id="sp-unappr" ${showUnappr?'checked':''}> 미승인 보기</label></div>
-      <div style="margin:0 0 6px;font-size:12px;color:#1c7c3a;font-weight:600">운영 경로: <b>${act?esc(act.route_name||('R'+String(act.route_no).padStart(2,'0'))):'미선택'}</b> (100%) <span style="font-weight:400;color:#8aa0bd">— 경로는 동시 2개 운영 불가(택1). 전환하려면 대안 경로를 [운영] 선택 후 [저장].</span></div>
-      <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>공급처</th><th class="center">승인</th><th class="center">운영(택1)</th><th class="center">업체지정</th></tr></thead>
-      <tbody>${routes.length?routes.map(routeRow).join(''):`<tr><td colspan="5" class="empty">조달경로 후보 없음${!showUnappr?' — [미승인 보기]로 개발 진행중 후보 확인':' (개발 › 조달경로 통합검토에서 생성·승인)'}</td></tr>`}</tbody></table>
-      <div class="page-sub" style="color:#8aa0bd;margin-top:3px">승인 ${appr}건${un?` · 미승인 ${un}건(회색·운영불가)`:''}. R01=현행(실사용 BOM). 대안 경로를 [운영] 선택=전환(그 경로 구성·구분으로 생산계획 편성). 업체 배분%는 [✎ 업체지정]에서 부품별로.</div>`;};
+      <div style="margin:0 0 6px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${A.single?`활성 ${A.n}개(단일 → 100% 자동)`:`활성 ${A.n}개 배분합 ${A.sum}% ${ok?'✓':'(정확히 100% 필요 — 미달·초과 시 저장 불가)'}`}${allocErrs.length?` · 저장값 검증: ${esc(allocErrs.join(' / '))}`:''}</div>
+      <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>구분</th><th>공급처</th><th class="center">승인</th><th class="center">활성</th><th class="num">배분%</th></tr></thead>
+      <tbody>${routes.length?routes.map(routeRow).join(''):`<tr><td colspan="6" class="empty">조달경로 후보 없음${!showUnappr?' — [미승인 보기]로 개발 진행중 후보 확인':' (개발 › 조달경로 통합검토에서 생성·승인)'}</td></tr>`}</tbody></table>
+      <div class="page-sub" style="color:#8aa0bd;margin-top:3px">승인 ${appr}건${un?` · 미승인 ${un}건(회색·배정불가)`:''}. R01=현행(실사용 BOM 기준선·자동승인). 미승인 후보는 [개발 › 조달경로 통합검토]에서 승인해야 배정 가능.</div>`;};
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">🧭 조달 프로파일 <span style="font-size:12px;color:var(--muted);font-weight:400">승인 조달경로 후보(R01 현행·R02…)에 활성·배분% 배정</span></div>
@@ -1787,9 +1787,8 @@ SCREEN.sourceprofile=(c)=>{
     const sv=g('#sp-save');if(sv)sv.onclick=save;
     const rf=g('#sp-ref');if(rf)rf.onchange=()=>{ref=rf.value;draw();};
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
-    c.querySelectorAll('.sp-active').forEach(el=>el.onchange=e=>{e.stopPropagation();edit['_active']=+el.dataset.ri;draw();});   // ★운영 경로 택1(라디오)
-    c.querySelectorAll('.sp-rrow').forEach(el=>el.onclick=e=>{if(e.target.closest('input,button,select,label'))return;const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)selectRoute(r);});
-    c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)omOpen(sel,r.route_id);});   // ★R02도 R01과 동일 모달(omOpen), 저장만 sourcing_profile
+    c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});
+    c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)pmOpen(r);});
     c.querySelectorAll('.sp-editvend').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
     wireModal();
     wireOrder();
@@ -3116,7 +3115,7 @@ SCREEN.autoorder=(c)=>{
 SCREEN.lgsagub=(c)=>{
   const API=API_BASE;
   const _now=new Date(),_yy=String(_now.getFullYear()%100).padStart(2,'0'),_mm=String(_now.getMonth()+1).padStart(2,'0');
-  const _M1=_yy+_mm+'01',_TD=_yy+_mm+String(_now.getDate()).padStart(2,'0');   // ★현재월 1일·당일(YYMMDD) — 기본 기간
+  const _M1=_yy+_mm+'01',_TD=_yy+_mm+String(_now.getDate()).padStart(2,'0');
   let st={tab:'status',by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
           df:'',dt:'',ymdMin:'',ymdMax:'',biz:'',cls:'',q:'',upBiz:'',sort:{k:'amt',dir:-1},loading:false,msg:'',
           c_from:_M1,c_to:_TD,c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
@@ -3131,7 +3130,7 @@ SCREEN.lgsagub=(c)=>{
   const m2ym=v=>{const s=(''+(v||'')).replace(/\D/g,'');return s.length>=6?s.slice(2,6):(s.length>=4?s.slice(0,4):'');}; // 2026-07→2607
   const rng=()=>{const q=[];if(st.df)q.push('ymd_from='+st.df);if(st.dt)q.push('ymd_to='+st.dt);if(st.biz)q.push('biz='+encodeURIComponent(st.biz));return q;};
   const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/lgsagub/summary`)).json();st.by_ym=j.by_ym||[];st.by_biz=j.by_biz||[];st.files=j.files||[];st.ymdMin=j.ymd_min||'';st.ymdMax=j.ymd_max||'';
-      if(!st.df){const _d=new Date();const _y=String(_d.getFullYear()%100).padStart(2,'0'),_m=String(_d.getMonth()+1).padStart(2,'0');st.df=_y+_m+'01';st.dt=_y+_m+String(_d.getDate()).padStart(2,'0');}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};   // ★기본 기간=현재월 1일~당일
+      if(!st.df){const _d=new Date();const _y=String(_d.getFullYear()%100).padStart(2,'0'),_m=String(_d.getMonth()+1).padStart(2,'0');st.df=_y+_m+'01';st.dt=_y+_m+String(_d.getDate()).padStart(2,'0');}}catch(e){st.by_ym=[];st.by_biz=[];st.files=[];}};
   const NUMK=['qty','pmax','amt','cnt'];
   const applySort=()=>{const {k,dir}=st.sort;if(!k)return;const num=NUMK.includes(k);
     st.rows.sort((a,b)=>{let va=a[k],vb=b[k];if(num){return ((+va||0)-(+vb||0))*dir;}return (''+(va||'')).localeCompare(''+(vb||''))*dir;});};

@@ -540,28 +540,10 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                 keyed[k] = g
             q = float(r["q"] or 0); g["days"][r["PLAN_YMD"]] = g["days"].get(r["PLAN_YMD"], 0) + q; g["tot"] += q
         rows = sorted(keyed.values(), key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
-        # ★조달 배분 반영(규칙 §8·§9): 부품수요를 활성 경로(route)×업체(vendor)로 재분배. ★총량 보존(전 업체행 합=레거시).
-        #   실배분 = 경로율(route_alloc) × 업체율. 현행(R01/route_id=0)=order_vendor·대안(R02+)=sourcing_profile(route_id별).
-        #   경로율 미설정 assy=현행 100%(무회귀). 현행 내 업체 미지정=원 가공처 유지. ★route_alloc 키=조립품(assy).
+        # ★조달 배분 반영(규칙 §5): 자도번(part)에 발주업체 배분(order_vendor)+경로계수(route01)가 있으면 협력사(발주업체)별로 분할.
+        #   실배분비율 = route01% × 업체비율. 배분 없는 자도번은 그대로(무회귀). 현재 route01=100.
         parts = sorted({r["part"] for r in rows if r.get("part")})
-        assys = sorted({r.get("assy") for r in rows if r.get("assy")})
-        # (1) assy별 활성 경로 [(route_id, ratio, is_current)]
-        route_ratios = {}
-        if assys:
-            for i in range(0, len(assys), 900):
-                ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
-                try:
-                    cur.execute(f"""SELECT LTRIM(RTRIM(a.item_code)), a.route_id, a.alloc_ratio,
-                          CASE WHEN a.route_id=0 THEN 1 WHEN EXISTS(SELECT 1 FROM nx.sourcing_route r
-                             WHERE r.route_id=a.route_id AND (r.current_flag=1 OR r.route_no=1)) THEN 1 ELSE 0 END iscur
-                        FROM nx.route_alloc a
-                        WHERE a.is_active=1 AND a.alloc_ratio IS NOT NULL AND LTRIM(RTRIM(a.item_code)) IN ({ph})""", *ch)
-                    for ic, rid, rt, isc in cur.fetchall():
-                        route_ratios.setdefault(str(ic).strip(), []).append((int(rid), float(rt), bool(isc)))
-                except Exception:
-                    pass
-        # (2) 현행(R01) 업체배분: part -> [(vendor, ratio|None)]  (order_vendor)
-        ov = {}
+        ov = {}   # part -> [(vendor, ratio|None)]
         if parts:
             try:
                 _hr = (cur.execute("SELECT COL_LENGTH('nx.order_vendor','alloc_ratio')").fetchone()[0] is not None)
@@ -573,60 +555,27 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                         if vc: ov.setdefault(str(rr[0]).strip(), []).append((vc, (float(rr[2]) if rr[2] is not None else None)))
             except Exception:
                 pass
-        # (3) 대안경로(R02+) 업체배분: (route_id, part) -> [(vendor, ratio)]  (sourcing_profile) + 경로 헤더 공급처(폴백)
-        prof = {}; route_hdr_vendor = {}
-        alt_rids = sorted({rid for lst in route_ratios.values() for (rid, _, isc) in lst if not isc and rid != 0})
-        if alt_rids and parts:
-            rph = ",".join("?"*len(alt_rids))
-            for i in range(0, len(parts), 500):
-                pch = parts[i:i+500]; pph = ",".join("?"*len(pch))
-                try:
-                    cur.execute(f"""SELECT route_id, LTRIM(RTRIM(item_code)), ISNULL(vendor_code,''), ISNULL(alloc_ratio,100)
-                        FROM nx.sourcing_profile WHERE is_active=1 AND route_id IN ({rph}) AND LTRIM(RTRIM(item_code)) IN ({pph})""",
-                        *alt_rids, *pch)
-                    for rid, ic, vc, al in cur.fetchall():
-                        vc = str(vc or "").strip()
-                        if vc: prof.setdefault((int(rid), str(ic).strip()), []).append((vc, float(al or 100)))
-                except Exception:
-                    pass
-            try:
-                cur.execute(f"SELECT route_id, ISNULL(vendor_code,'') FROM nx.sourcing_route WHERE route_id IN ({rph})", *alt_rids)
-                for rid, vc in cur.fetchall(): route_hdr_vendor[int(rid)] = str(vc or "").strip()
-            except Exception:
-                pass
-        need = bool(ov) or bool(route_ratios)
+        route01 = _route01_ratio(cur, parts)
+        need = bool(ov) or any(route01.get(p, 100.0) != 100.0 for p in parts)
         if need:
-            allv = ({v for lst in ov.values() for (v, _) in lst} | {v for lst in prof.values() for (v, _) in lst}
-                    | {v for v in route_hdr_vendor.values() if v})
-            vend_nm = _custnm_map(cur, allv)
-            def _norm(lst):
-                rated = [(v, rt) for (v, rt) in lst if rt is not None]
-                if rated and len(rated) == len(lst):
-                    t = sum(rt for _, rt in rated) or 1.0; return [(v, rt/t) for (v, rt) in rated]
-                n = len(lst) or 1; return [(v, 1.0/n) for (v, _) in lst]
+            vend_nm = _custnm_map(cur, {v for lst in ov.values() for (v, _) in lst})
             newrows = []
             for r in rows:
-                p = r.get("part"); assy = r.get("assy")
-                routes = route_ratios.get(assy) or [(0, 100.0, True)]
-                rsum = sum(rt for (_, rt, _) in routes) or 100.0    # 방어: 저장합≠100이어도 총량보존
-                for (rid, rt, isc) in routes:
-                    w = rt / rsum
-                    if isc:                                          # 현행 = order_vendor, 없으면 원 가공처 유지
-                        vlst = ov.get(p); splits = _norm(vlst) if vlst else [(r.get("wc"), 1.0)]
-                        rlabel = "R01"
-                    else:                                            # 대안 = sourcing_profile, 없으면 경로 헤더 공급처
-                        vlst = prof.get((rid, p))
-                        splits = _norm(vlst) if vlst else [((route_hdr_vendor.get(rid) or r.get("wc")), 1.0)]
-                        rlabel = f"R{rid}"
-                    multi = (len(routes) > 1) or bool(vlst)
-                    for (vc, frac) in splits:
-                        f = w * frac
-                        if f <= 0: continue
-                        wcnm = r.get("wcnm") if (vc == r.get("wc") or not vc) else vend_nm.get(vc, vc)  # 원 가공처면 원 이름 보존
-                        note_txt = (f"경로 {rlabel} {round(rt)}%×업체 {round(frac*100)}%" if multi else "")
-                        newrows.append(dict(r, wc=vc, wcnm=wcnm,
-                            days={d: round(q*f, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*f, 3),
-                            alloc_note=note_txt))
+                p = r.get("part"); rf = route01.get(p, 100.0) / 100.0; lst = ov.get(p)
+                if not lst:                                   # 배분 없음 → route01만 스케일(현재 1.0=무변경)
+                    if rf == 1.0: newrows.append(r)
+                    else: newrows.append(dict(r, days={d: round(q*rf, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*rf, 3)))
+                    continue
+                rated = [(v, rt) for (v, rt) in lst if rt is not None]
+                if len(rated) == len(lst) and rated:
+                    tot = sum(rt for _, rt in rated) or 1.0; splits = [(v, rt/tot) for (v, rt) in rated]
+                else:
+                    n = len(lst); splits = [(v, 1.0/n) for (v, _) in lst]
+                for (vc, frac) in splits:                     # 협력사(발주업체)별 분할행
+                    f = frac * rf
+                    newrows.append(dict(r, wc=vc, wcnm=vend_nm.get(vc, vc),
+                        days={d: round(q*f, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*f, 3),
+                        alloc_note=f"배분 {round(frac*100)}%"))
             rows = sorted(newrows, key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
         note = f"⚠ 결과가 많아 상위 {CAP}건만 표시했습니다. 협력사(가공처)·제번·자도번으로 필터하세요." if capped else ""
         return {"dates": dates, "rows": rows, "cnt": len(rows), "sum_qty": sum(r["tot"] for r in rows), "note": note}

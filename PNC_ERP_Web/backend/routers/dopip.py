@@ -147,8 +147,6 @@ def dopip_save_batch(p: dict = Body(...)):
     if not valid: raise HTTPException(400, "품목 행 1개 이상(품번·수량) 필요")
     cn = _nx(); c = cn.cursor()
     try:
-        lm = _lock_msg(c, ymd)   # ★공통 마감잠금
-        if lm: raise HTTPException(400, lm)
         nseq = int(c.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=?", ymd).fetchone()[0])
         sheet = int(c.execute("SELECT ISNULL(MAX(SHEET_NO),0)+1 FROM nx.PU_T_STOCK_MAINT_C WHERE DIVISION=?", tag).fetchone()[0])
         ins = 0; seqs = []

@@ -402,11 +402,9 @@ _NATURE_ALL = ["1.원소재", "2.부자재/소모품", "3.사급자재", "4.가�
 
 # ── 조달 배분: R01(현행) 경로 계수 (실발주비율 = route% × vendor% 의 route 축) ──
 def _route01_ratio(ncur, item_codes):
-    """★조립품(제품)별 R01(현행) 경로 배분율(nx.route_alloc, %). 미설정/단일=100. 실발주비율 = route01% × 업체비율.
-       ★키=조립품(assy_item_code = route_alloc.item_code = 조달프로파일 대상). 부품(MAT_CODE)키 조회는 무영향 버그였음(규칙 §8).
-       R01은 저장이 없으면 합성(route_id=0)이므로 sourcing_route 조인이 못 잡는 갭 → route_id=0(합성현행) OR 현행 저장경로 둘 다 인식.
-       현재 대개 R01 하나=100(업체비율 그대로) — R02 도입 시 경로율이 곱해짐. 자동발주·수동발주·협력사계획현황 공유.
-       규칙 정본: _schema/PROCUREMENT_ALLOCATION_RULES.md §4·§5·§8·§9."""
+    """품목별 R01(현행) 경로 배분율(nx.route_alloc, %). 미설정/단일=100. 실발주비율 = route01% × 업체비율.
+       ★현재 R01=100%뿐이라 대개 100(업체비율 그대로) — R02 도입 대비 공용 배선. 자동발주·수동발주·협력사계획현황 공유.
+       규칙 정본: _schema/PROCUREMENT_ALLOCATION_RULES.md §4·§5."""
     items = [str(c).strip() for c in item_codes if str(c).strip()]
     out = {c: 100.0 for c in items}
     if not items:
@@ -419,15 +417,10 @@ def _route01_ratio(ncur, item_codes):
     for i in range(0, len(items), 900):
         ch = items[i:i + 900]; ph = ",".join("?" * len(ch))
         try:
-            # R01(현행)의 활성 배분율. route_id=0=합성 현행 baseline(sourcing_route 행 없음) OR 현행으로 저장된 경로(current_flag=1/route_no=1).
             ncur.execute(f"""SELECT LTRIM(RTRIM(a.item_code)), a.alloc_ratio
-                FROM nx.route_alloc a
-                WHERE a.is_active=1 AND a.alloc_ratio IS NOT NULL
-                  AND LTRIM(RTRIM(a.item_code)) IN ({ph})
-                  AND (a.route_id=0
-                       OR EXISTS(SELECT 1 FROM nx.sourcing_route r
-                                 WHERE r.route_id=a.route_id AND LTRIM(RTRIM(r.item_code))=LTRIM(RTRIM(a.item_code))
-                                   AND (r.current_flag=1 OR r.route_no=1)))""", *ch)
+                FROM nx.route_alloc a JOIN nx.sourcing_route r ON r.route_id=a.route_id
+                WHERE a.is_active=1 AND (r.current_flag=1 OR r.route_no=1)
+                  AND a.alloc_ratio IS NOT NULL AND LTRIM(RTRIM(a.item_code)) IN ({ph})""", *ch)
             for ic, rt in ncur.fetchall():
                 out[str(ic).strip()] = float(rt)
         except Exception:
