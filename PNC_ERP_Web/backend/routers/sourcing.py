@@ -2815,6 +2815,30 @@ def sourcing_route_alloc_save(payload: dict = Body(...)):
         alloc_errs = _validate_alloc(act) if act else []
         if alloc_errs:
             nx.rollback(); return {"ok": False, "gate": "ALLOC", "errors": list(dict.fromkeys(alloc_errs))}
+        # ★VENDOR 게이트: 활성 대안경로(R02+)는 모든 매입/사급 부품에 매입처(sourcing_profile) 배정돼야 저장 가능.
+        #   제작=내부(업체 불필요) · 현행(R01)은 order_vendor/현행매입처(별도 레이어)라 제외.
+        vendor_errs = []
+        for (rid, af, at, iact, ratio) in norm:
+            if not iact or rid <= 0:
+                continue
+            info = approved.get(rid)
+            if not info or info.get("current_flag") or info.get("route_no") == 1:
+                continue
+            cur.execute("""SELECT LTRIM(RTRIM(child_item)) FROM nx.sourcing_route_line
+                WHERE route_id=? AND node_kind<>'SUB' AND ISNULL(staged,0)=0 AND ISNULL(gubun,'') IN (N'매입', N'사급')""", rid)
+            parts = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+            if not parts:
+                continue
+            ph = ",".join("?" * len(parts))
+            cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(item_code)) FROM nx.sourcing_profile
+                WHERE route_id=? AND is_active=1 AND ISNULL(vendor_code,'')<>'' AND LTRIM(RTRIM(item_code)) IN ({ph})""", rid, *parts)
+            assigned = {str(r[0]).strip() for r in cur.fetchall()}
+            missing = [p for p in parts if p not in assigned]
+            if missing:
+                rno = info.get("route_no")
+                vendor_errs.append(f"R{str(rno).zfill(2) if rno is not None else '?'} 경로 활성 저장 불가 — 매입처 미지정 부품 {len(missing)}건: {', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}. 업체 지정(✎ 수정)에서 매입처를 배정하세요.")
+        if vendor_errs:
+            nx.rollback(); return {"ok": False, "gate": "VENDOR", "errors": vendor_errs}
         for (rid, af, at, iact, ratio) in norm:   # 근거키 스코프 upsert(대량삭제 금지)
             cur.execute("DELETE FROM nx.route_alloc WHERE item_code=? AND route_id=?", item, rid)
             cur.execute("""INSERT INTO nx.route_alloc(item_code,route_id,apply_from,apply_to,is_active,alloc_ratio,upd_dt)
