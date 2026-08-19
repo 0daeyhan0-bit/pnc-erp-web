@@ -683,7 +683,7 @@ def _route_hdr_errors(p):
 
 @router.post("/api/sourcing/route/save")
 def sourcing_route_save(payload: dict = Body(...)):
-    """경로 헤더 추가/수정 → nx.sourcing_route. 필수=구분·공급처(자체제외)·유효일자·현행여부. ★편집 시 approve_flag=0(승인 리셋)."""
+    """경로 헤더 추가/수정 → nx.sourcing_route. ★헤더 필수값 없음(구분=라인별·업체=조달프로파일·유효기간 폐지). 경로명/현행여부/비고만. ★편집 시 approve_flag=0(승인 리셋)."""
     p = payload
     item = str(p.get("item_code", "")).strip()
     if not item: raise HTTPException(400, "item_code 필요")
