@@ -79,7 +79,7 @@ def _is_final_product(nxc, item):
     c.execute("SELECT COUNT(*) FROM nx.bom WHERE child_code=?", item)
     return (c.fetchone()[0] or 0) == 0
 
-def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_bc=None):
+def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_bc=None, enforce=False):
     """★백플러시 코어(트랜잭션 미관리 — 호출측 commit/rollback). cro=RO conn, nx=쓰기 tx conn.
        완성공정 1회 전체BOM×생산량 소비(−P4: RDY 우선 없으면 MAT) + 생산품 +ASY(최종제품)/+PRD(반제품, tag P7).
        회수율 제외. INNER_PROD=1만. 멱등=ref_key(바코드=BC:{barcode}:{proc} / 수기=wo|item|ymd)."""
@@ -118,7 +118,14 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
                     short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
         if short:
             more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
-            return {"ok": False, "detail": "재고부족(마이너스 방지) — " + "; ".join(short[:8]) + more}
+            _msg = "재고부족(마이너스 방지) — " + "; ".join(short[:8]) + more
+            if enforce:   # ★하드 차단(자재 정본 실시간 정확 확인 후=컷오버). 기본 OFF=소프트(경고만·차단無)
+                return {"ok": False, "detail": _msg}
+            stock_warn = _msg   # 소프트: 경고만 부착하고 진행(정본 미완성 구간 오차단 방지)
+        else:
+            stock_warn = None
+    else:
+        stock_warn = None
     out_sp = 'ASY' if _is_final_product(nx, item) else 'PRD'   # ★완성=최종제품 ASY / 반제품 PRD
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
@@ -158,7 +165,8 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     # 협력사 용접봉 무게정산(weight_calc) 연계는 후속(TODO) — 여기선 물리적 재고소비만.
     return {"ok": True, "mode": mode, "item": item, "prod_qty": prod_qty, "out_point": out_sp,
             "components": len(comps), "consumed_qty": round(consumed, 3),
-            "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
+            "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key,
+            "stock_warn": stock_warn}   # ★소프트 재고게이트 경고(자재부족·비차단). 하드=enforce=true(컷오버)
 
 @router.post("/api/backflush/post")
 def backflush_post(payload: dict = Body(...)):
@@ -167,13 +175,14 @@ def backflush_post(payload: dict = Body(...)):
     gpc = (payload.get("gpc") or "").strip(); prod_qty = float(payload.get("prod_qty") or 0)
     mode = str(payload.get("mode", "post")).strip()
     user = (str(payload.get("user", "") or "").strip() or "웹사용자")[:20]
+    enforce = bool(payload.get("enforce"))   # ★재고게이트 하드차단 여부(기본 소프트=경고만). 자재 정본 정확확인 후(컷오버) true.
     import datetime as _d
     ref_key = f"{wo}|{item}|{_d.datetime.now().strftime('%y%m%d')}"   # 수기 멱등키(WO·품목·일자)
     cn = _nx(); nx = _nx_tx()   # ★nx전환: 읽기도 nx 충실복제. 원자성: 소비(−P4)+생산입고(+P7/ASY)+backflush_log 동일 트랜잭션
     try:
         lm = _lock_msg(cn.cursor(), _d.datetime.now().strftime('%y%m%d'))   # ★공통 마감잠금(생산일=당월)
         if lm: return {"ok": False, "detail": lm}
-        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)
+        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key, enforce=enforce)
         nx.commit() if r.get("ok") else nx.rollback()
         return r
     except Exception as e:
