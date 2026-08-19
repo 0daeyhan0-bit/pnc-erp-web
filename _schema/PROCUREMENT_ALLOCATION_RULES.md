@@ -103,8 +103,14 @@
 - **`common._route01_ratio` 재작성**: 키=조립품(assy), R01 합성(route_id=0) OR 현행저장경로(current_flag=1/route_no=1) 둘 다 인식(합성R01 갭 해소).
 - **`coopplan.partner_planstatus` 오버레이 재작성 = 총량보존 다중경로**: assy별 활성경로[(route_id,ratio,is_current)] × 부품 업체분포(현행=order_vendor·대안=sourcing_profile route_id별·폴백=경로헤더 공급처) → 부품수요를 (경로×업체)로 재분배, 전 행 합=원수요.
 - **E2E 검증(AJR75563402, R02=대원산업 생성, R01 70%/R02 30%)**: 베이스라인 총 37,104(무분할·원가공처=레거시일치) → 배분후 대원산업 11,131.2(30%)+원가공처4사 각 6,493.2(70%), **총 37,104 불변**. alloc_note="경로 R01 70%×업체 100%"/"경로 R{id} 30%×업체 100%". 이름 표시 정상.
-- **회귀안전**: route_alloc 없으면 routes=[(0,100,current)]·order_vendor 없으면 원 가공처 유지 → 출력 불변.
-- **남음**: 수동발주(manorder)·자동발주/compose_mat은 grain에 assy 링크 확보 필요(부품→제품). 테스트 데이터(R02 route_id=1528·route_alloc)는 검증후 정리 대상.
+- **회귀안전**: route_alloc 없으면 routes=[(0,100,current)]·order_vendor 없으면 원 가공처 유지 → 출력 불변. (실측: 타 assy AJJ75838626 529행·배분표시 0.)
+
+### 9-2. 자동발주·수동발주·compose_mat 정합 완료·검증 (2026-08-19)
+- **compose_mat(공용 proc, soyo.py) 오버레이 = route%[assy] 총량보존**: (wo,assy,mat)그룹·현행경로(R01)=기존로직(업체재분할은 자동발주 order_vendor)·대안경로(R02+)=route프로파일/경로헤더공급처, **SOURCE='경로대안'**. E2E검증(독립 재현): plan_mat_source 총 2,550,361=plan_part_mat(차이0)·AJR부품 R01 70%+R02(대원2148) 30% 분할.
+- **자동발주(autoorder)**: plan_mat_source(경로분할 정본) 소비. **'경로대안'행은 order_vendor 재분할 제외**(이중배분 방지). 검증: 5410A30279K → 그린(2345) 6493.2(R01 70%·매입)+대원(2148) 2782.8(R02 30%·경로대안)=9276.
+- **수동발주(manorder)**: 부품(ic)→assy 링크 없어 plan_part_mat에서 **부품 R01 경로계수(속한 assy들 R01% 수요가중)** 산출·곱. 검증: 그린(2345) 5410A30279K alloc 70%·"배분 70%"·타 변형 100%(무영향).
+- **정합 결론**: 4곳 모두 R01 업체=70%·R02 업체=30% 일관. 공용 proc(plan_mat_source)이 자동발주 단일정본, 협력사계획현황/수동발주는 동일 route%[assy] 로직 공유.
+- **미배포(dev만)**. 테스트 데이터: AJR75563402에 R02(route_id=1528, 대원산업2148)+route_alloc(R01 70/R02 30). 검토용 유지 중(정리 시 route_alloc·sourcing_route[TEST-R02] 삭제 후 compose 재편성).
 
 ---
 관련: [[newerp-sourcing-profile]] · _schema/AUTOORDER_PRODUCTION_DESIGN.md · BOM_EXPLOSION_RULES.md

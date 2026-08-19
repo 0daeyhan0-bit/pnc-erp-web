@@ -39,8 +39,9 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         # ── 조달 프로파일 배분(후보내 업체 배분, nx.sourcing_profile) + 발주업체 지정(nx.order_vendor) 적용 ──
         #   ★이 매입처(cc)의 발주 몫 = 소요 × 배분율. 배분 미설정/단일=100%(현행 그대로 → 회귀0).
         #   배분 설정된 품목은 이 매입처 몫만 계상(다른 매입처 몫은 그 매입처 선택 시 계상).
-        #   route_alloc(후보간 R01/R02 배분)은 어떤 소요엔진(plan_mat_source·autoorder)에도 아직 미적용(_schema §6 '추후 도입')
-        #     → 정합 위해 여기서도 미곱함(곱하면 자동발주와 수량 불일치). sourcing_profile(업체) 계층만 적용.
+        #   ★route_alloc(경로 R01/R02 배분)은 조립품(assy)키 → 부품(ic)엔 직접 없으므로 plan_part_mat에서 '부품→assy R01 경로계수'
+        #     (부품이 속한 assy들의 R01% 수요가중)를 산출해 곱함. 이 매입처(R01 업체) 몫 = 소요 × 업체비율 × R01경로계수.
+        #     자동발주(plan_mat_source 경로대안행)·협력사계획현황과 R01 업체 수량 정합(규칙 §8·§9).
         wdate = f"20{from6[0:2]}-{from6[2:4]}-{from6[4:6]}"     # 배분 유효일자 판정(계획 윈도우 시작일)
         prof = {}   # item -> [(vendor, ratio)] 활성·비내부·업체지정·유효
         ovr = {}    # item -> [(vendor, ratio)]  (order_vendor 발주업체 지정 ★다중업체 배분)
@@ -123,13 +124,32 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         # ── 이 매입처(cc) 배분율 적용: 계획수량·일자별을 이 매입처 몫으로 스케일(배분율<100=badge, 0=제외) ──
         #   ★실발주비율 = R01 경로비율 × 업체비율. 재고/기발주는 미스케일(po_qty는 CUST_CODE=cc 스코프, stock_qty는 물리재고).
         rn = _nx(); rc = rn.cursor()
-        try: route01 = _route01_ratio(rc, [str(r["ic"]).strip() for r in rows])   # ★R01 경로 계수(현재 100)
+        try:
+            items = [str(r["ic"]).strip() for r in rows]
+            route01 = _route01_ratio(rc, items)   # 아이템 자체가 assy면 직접 R01%
+            # 부품→assy R01 경로계수: 부품이 속한 assy들의 R01% 수요가중 평균(0~1). route_alloc 없으면 1.0.
+            comp_factor = {}
+            if items:
+                agg = {}   # mat -> {assy: qty}
+                for i in range(0, len(items), 900):
+                    ch = items[i:i+900]; ph = ",".join("?" * len(ch))
+                    rc.execute(f"""SELECT LTRIM(RTRIM(mat_code)), LTRIM(RTRIM(ISNULL(assy_item_code,''))),
+                          SUM(CAST(part_plan_qty AS float)) FROM nx.plan_part_mat
+                        WHERE mat_code IN ({ph}) GROUP BY mat_code, assy_item_code""", *ch)
+                    for mat, assy, q in rc.fetchall():
+                        agg.setdefault(str(mat).strip(), {})[str(assy).strip()] = float(q or 0)
+                assys = sorted({a for m in agg.values() for a in m})
+                r01a = _route01_ratio(rc, assys)   # assy -> R01%
+                for mat, amap in agg.items():
+                    tot = sum(amap.values()) or 1.0
+                    comp_factor[mat] = sum(q * (r01a.get(a, 100.0) / 100.0) for a, q in amap.items()) / tot
         finally: rn.close()
         out = []
         for r in rows:
             r["days"] = daily.get(_par(r["ic"]), {})
             ic = str(r["ic"]).strip()
-            ratio = _share(ic) * (route01.get(ic, 100.0) / 100.0)   # 실발주비율 = 업체비율 × route01
+            rfrac = comp_factor[ic] if ic in comp_factor else (route01.get(ic, 100.0) / 100.0)   # 부품 경로계수 우선, assy면 직접
+            ratio = _share(ic) * rfrac   # 실발주비율 = 업체비율 × R01 경로계수
             if ratio <= 0:
                 continue                        # 이 매입처 발주 아님(배분/발주업체지정/경로에서 제외)
             r["alloc_ratio"] = round(ratio, 4)
