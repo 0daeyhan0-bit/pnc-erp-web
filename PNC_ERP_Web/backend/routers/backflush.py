@@ -95,11 +95,10 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
     if not comps and not weld: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
-    # ★생산실적은 항상 기록 가능해야 함(사용자 확정 2026-08-19) — 키팅과 무관·재고부족으로 실적을 막지 않는다.
-    #   자재 현재고(mat_stock_daily=_mat_avail) < BOM소요면 '경고(stock_warn)'로만 surface(마이너스 신호=상류 입고 누락 등), ★실적 차단 안 함.
-    #   커버리지 인지: 자재재고 관리품목만 판정 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 경고대상서도 제외(오탐 방지).
-    #   ★한계: mat_stock_daily는 레거시 일스냅샷 → 당일 연속분 미반영(관찰용). 마이너스 원천차단의 하드 게이트는 실적이 아니라 출고(ASY/완성재고)에 둔다.
-    stock_warn = None
+    # ★자재 부족이면 생산실적 차단(사용자 확정 2026-08-19): "자재가 부족하면 생산실적이 잡히면 안돼."
+    #   자재 현재고(mat_stock_daily=_mat_avail 정본) < BOM소요면 실적 거부 → 마이너스 원천차단. ★키팅과 무관(키팅=flag) — 실제 자재재고로만 판정.
+    #   ★커버리지 인지: 자재재고 '관리품목'만 게이트 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 제외(오차단 방지, 정본 §4-C 검증).
+    #   ★한계: mat_stock_daily=레거시 일스냅샷 → 당일 입고/연속차감 미반영. 컷오버시 실시간 자재정본으로 승격 필요(§4 step4) — 그래야 당일 입고분 오차단 없음.
     if mode == "post":
         gc = cro.cursor(); short = []
         def _tracked(code):
@@ -119,7 +118,7 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
                     short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
         if short:
             more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
-            stock_warn = "자재부족 경고(실적은 기록됨) — " + "; ".join(short[:8]) + more   # ★차단 아님
+            return {"ok": False, "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8]) + more}
     out_sp = 'ASY' if _is_final_product(nx, item) else 'PRD'   # ★완성=최종제품 ASY / 반제품 PRD
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
@@ -159,8 +158,7 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     # 협력사 용접봉 무게정산(weight_calc) 연계는 후속(TODO) — 여기선 물리적 재고소비만.
     return {"ok": True, "mode": mode, "item": item, "prod_qty": prod_qty, "out_point": out_sp,
             "components": len(comps), "consumed_qty": round(consumed, 3),
-            "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key,
-            "stock_warn": stock_warn}   # ★소프트 재고게이트 경고(자재부족·비차단). 하드=enforce=true(컷오버)
+            "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
 
 @router.post("/api/backflush/post")
 def backflush_post(payload: dict = Body(...)):
