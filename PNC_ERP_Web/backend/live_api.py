@@ -388,12 +388,21 @@ def _vgubun():
             _VGUBUN = {}
     return _VGUBUN
 
+import time as _time
+_DPI_CACHE = {}   # dailypurissue: d6 -> (expiry_ts, result). 무거운 재고조정 3쿼리(_prodstock 등) → 날짜별 캐시(재조회 즉시)
+
 @live_router.get("/dailypurissue")
-def dailypurissue(date: str = Query("")):
+def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     """일일 영업/매입 현황 ① 매입/불출/실매입 by 구분(CUST_TYPE + 사급원소재 오버라이드).
-       date=조회일(YYMMDD). 마감기준: 누적=마감월초~전일, 당일=조회일, 총=누적+당일. 금액=공급가(MAINT_AMT, VAT제외)."""
+       date=조회일(YYMMDD). 마감기준: 누적=마감월초~전일, 당일=조회일, 총=누적+당일. 금액=공급가(MAINT_AMT, VAT제외).
+       ★날짜별 결과 캐시(TTL 180초). nocache=1로 강제 재계산."""
     d6 = _digits(date, 6) or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
     ym = d6[:4]
+    _now = _time.time()
+    if not str(nocache).strip():
+        _hit = _DPI_CACHE.get(d6)
+        if _hit and _hit[0] > _now:
+            return _hit[1]
     ov = _vgubun()
     def gb(cc, ct):
         return ov.get(str(cc or '').strip()) or _CT_NAME.get(str(ct or '').strip(), '기타(' + str(ct or '').strip() + ')')
@@ -466,7 +475,7 @@ def dailypurissue(date: str = Query("")):
         if r['gubun'] in ('유상사급-원재료', '유상사급-부품'): dangsa_sagub += r['tot']
     lg_osp = osp_raw + osp_part   # LG전산(OSP) 총
 
-    return {"date": d6, "ym": ym,
+    _res = {"date": d6, "ym": ym,
             "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
             # ⑤ 현매출 / ② 매입비율
             "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
@@ -481,6 +490,8 @@ def dailypurissue(date: str = Query("")):
             # D 유상사급 대사 (당사ERP 확정입고 vs LG전산 OSP)
             "dae": {"dangsa": dangsa_sagub, "lg": lg_osp, "diff": dangsa_sagub - lg_osp,
                     "lg_raw": osp_raw, "lg_part": osp_part}}
+    _DPI_CACHE[d6] = (_time.time() + 180, _res)   # ★180초 캐시(재조회 즉시). 오늘자도 3분 이내 재계산 안 함.
+    return _res
 
 # ================= 확정입고명세서 (구매/자재, dw_pu_input_110) — 라인단위 =================
 def _MAGAM(ref_ym):
@@ -986,7 +997,8 @@ UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),i
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,0,iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG in ('2','1')
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
 """
-    C2 = f"(select top 1 q.item_cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust_code end order by q.cost_apply_ymd desc)"
+    # ★단가 상관서브쿼리를 OUTER APPLY로 1회만 계산(기존엔 cost·amt에 2회 → 품목당 2배). 값 동일·성능개선.
+    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust_code end order by q.cost_apply_ymd desc"
     sql = f"""
 ;WITH agg AS (
   SELECT LTRIM(RTRIM(t.mat)) mat, ISNULL(LTRIM(RTRIM(t.gpc)),'') line,
@@ -999,8 +1011,9 @@ SELECT CASE WHEN agg.line='P0001' THEN 'GAGONG' ELSE 'WELD' END stage,
   CASE WHEN agg.line='P0001' THEN '' ELSE agg.line END loc,
   agg.mat cd, pi.item_desc nm, ISNULL(pi.item_class,'') type,
   agg.basic, agg.inq, agg.outq, agg.adj, agg.qty,
-  {C2} cost, CAST(ROUND(agg.qty*ISNULL({C2},0),0) AS DECIMAL(18,0)) amt
+  cc.cost cost, CAST(ROUND(agg.qty*ISNULL(cc.cost,0),0) AS DECIMAL(18,0)) amt
 FROM agg JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.item_code=agg.mat
+  OUTER APPLY ({C2A}) cc
 """
     _c, rows = _rows(sql)
     return rows
