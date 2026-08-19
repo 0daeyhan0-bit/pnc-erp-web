@@ -264,26 +264,30 @@ SCREEN.prodinout=(c)=>{
   let rows=[], mv={}, pn={}, curYm='', loading=false, msg='';   // rows=[part,mat,desc,spec,sgn,stock,bf]
   const pName=p=>pn[(''+p).trim()]||p;
   const fmtYmd=y=>{y=(''+(y||'')).trim();return (y.length>=6&&y!=='000000')?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:'00/00/00';};
-  const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
-  const inYm=v=>(''+(v||'')).slice(2).replace('-','');
+  const _pad=n=>(''+n).padStart(2,'0');
+  const _tod=(()=>{const d=new Date();return `${(''+d.getFullYear()).slice(2)}${_pad(d.getMonth()+1)}${_pad(d.getDate())}`;})();
+  let frm=_tod.slice(0,4)+'01', to=_tod;
+  const ymd2d=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};
   let sel=null, curL=[], source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
-  const load=async(ym)=>{loading=true;msg='';sel=null;
+  const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(5);
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?ym=${encodeURIComponent(ym||'')}&source=nx`,{title:'생산입출고현황',onBack:()=>{source='live';load(ym);}});}
-    try{const r=await fetch(`${API}/api/live/prodinout?ym=${encodeURIComponent(ym||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();curYm=j.ym||ym||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};}
+    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
+    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?${qs}&source=nx`,{title:'생산입출고현황',onBack:()=>{source='live';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodinout?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};pn={};}
     loading=false;
-    const ymi=c.querySelector('#ym');if(ymi)ymi.value=ymToInput(curYm);
+    const fi=c.querySelector('#frm'),ti=c.querySelector('#to');if(fi)fi.value=ymd2d(frm);if(ti)ti.value=ymd2d(to);
     const ps=[...new Set(rows.map(r=>r[0]))].sort((a,b)=>pName(a).localeCompare(pName(b),'ko'));
     const psel=c.querySelector('#part');if(psel){const v=psel.value;psel.innerHTML='<option value="">전체</option>'+ps.map(p=>`<option value="${esc(p)}">${esc(pName(p))}</option>`).join('');psel.value=v;}
-    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 nx ${esc(ymToInput(curYm)||'-')}(이월기준 2502) · 0재고 숨김`;
+    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 생산입출고현황</div>
    <div class="page-sub" id="pio-sub">파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 nx(이월기준 2502) · 0재고 숨김</div>
    <div class="toolbar">
-     <label class="tl">조회월</label><input type="month" class="inp" id="ym" style="min-width:120px">
+     <label class="tl">수불기간</label><input type="date" class="inp" id="frm" value="${esc(ymd2d(frm))}" style="min-width:130px"><span style="color:var(--muted);align-self:center">~</span><input type="date" class="inp" id="to" value="${esc(ymd2d(to))}" style="min-width:130px">
      <label class="tl">파트</label><select class="sel" id="part"><option value="">전체</option></select>
      <input class="inp" id="q" placeholder="자도번/품명">
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
@@ -330,14 +334,15 @@ SCREEN.prodinout=(c)=>{
   // ★검색 = 서버 재조회(load) — renderLeft(캐시 필터)만 하면 화면을 연 뒤 발생한 실적/이동이 반영되지 않음.
   //   (2026-08-19: 준비실적 등록 후 검색해도 "결과 없음" → 탭을 닫았다 열어야 보이던 문제)
   //   드롭다운/구분 변경은 기존대로 캐시 필터(즉시반응) 유지.
-  c.querySelector('#go').onclick=()=>load(inYm(c.querySelector('#ym').value)||curYm);
-  c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')load(inYm(c.querySelector('#ym').value)||curYm);};
-  c.querySelector('#nxsrc').onclick=()=>{source='nx';load(curYm);};   // ★Phase5 nx 파생 보기
+  const _reload=()=>{frm=d2ymd(c.querySelector('#frm').value)||frm;to=d2ymd(c.querySelector('#to').value)||to;load();};
+  c.querySelector('#go').onclick=_reload;
+  c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
+  c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#part').onchange=renderLeft;
-  c.querySelector('#ym').onchange=e=>load(inYm(e.target.value));
+  c.querySelector('#frm').onchange=_reload;c.querySelector('#to').onchange=_reload;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#part').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.querySelector('#xls').onclick=()=>downloadCSV('생산재고입출고.csv',['파트','자도번','품명','규격','소분류','재고'],curL.map(r=>[pName(r[0]),r[1],r[2],r[3],r[4],r[5]]));
-  load('');
+  load();
 };
 
 /* 생산재고조회 — 준비/가공/용접 토글 (+용접 집계/BOM풀기) */
@@ -370,15 +375,16 @@ SCREEN.prodstock=(c)=>{
     else if(stage==='READY') pool=(DB.stock||[]).filter(r=>r.stage==='READY');
     else pool=livePS.filter(r=>r.stage===stage);
     const lines= showLine ? [...new Set(pool.map(r=>r.loc).filter(Boolean))].sort():[];
+    const _per=`${esc(ymd2d(frm))} ~ ${esc(ymd2d(to))}`;
     const sub={READY:'키팅 준비재고(라인별) · 원본 PU_T_READY_STOCK · ⚠️스냅샷(라이브 예정)',
-               GAGONG:`가공(P0001) 재공 · 원장 9-union · 🟢 nx ${esc(ymToInput(curYm)||'-')}`,
-               WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🟢 nx ${esc(ymToInput(curYm)||'-')}`}[stage];
+               GAGONG:`가공(P0001) 재공 · 원장 9-union · 🟢 수불기간 ${_per}`,
+               WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🟢 수불기간 ${_per}`}[stage];
     c.innerHTML=`
      <div class="page-title">🏭 생산재고조회</div><div class="page-sub">${sub}</div>
      <div class="toolbar">
        <div class="toggle-group">${STAGES.map(([k,v])=>`<button data-stage="${k}" class="${stage===k?'on':''}">${v}</button>`).join('')}</div>
        ${isWeld?`<div class="toggle-group" style="margin-left:6px"><button data-w="agg" class="${wmode==='agg'?'on':''}">집계</button><button data-w="bom" class="${wmode==='bom'?'on':''}">BOM풀기</button></div>`:''}
-       ${live?`<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">조회월</label><input type="month" class="inp" id="ym" value="${esc(ymToInput(curYm))}" style="min-width:120px">`:''}
+       ${live?`<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">수불기간</label><input type="date" class="inp" id="frm" value="${esc(ymd2d(frm))}" style="min-width:130px"><span style="color:var(--muted);align-self:center">~</span><input type="date" class="inp" id="to" value="${esc(ymd2d(to))}" style="min-width:130px">`:''}
        <input class="inp" id="q" placeholder="${bomMode?'ASSY/자재품번/품명':'품목코드/품명'}">
        ${!bomMode?`<select class="sel" id="type"><option value="">전체유형</option>${Object.entries(TYPE_NM).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`:''}
        ${showLine?`<select class="sel" id="line"><option value="">전체라인</option>${lines.map(l=>`<option value="${esc(l)}">${esc(lineName(l))}</option>`).join('')}</select>`:''}
@@ -392,7 +398,7 @@ SCREEN.prodstock=(c)=>{
      <div class="rowcount" id="cnt"></div>
      <div class="summary-bar botsum" id="botsum" style="margin-top:6px;position:sticky;bottom:0"></div>`;
     c.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>{stage=b.dataset.stage;wmode='agg';draw();});
-    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{source='nx';load(curYm);};}   // ★Phase5 nx 파생 보기
+    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{source='nx';load();};}   // ★Phase5 nx 파생 보기
     c.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{wmode=b.dataset.w;draw();});
     let cur=[];
     const sumbar=rows=>{const qty=rows.reduce((a,b)=>a+(+b.qty||0),0),amt=rows.reduce((a,b)=>a+(+b.amt||0),0);
@@ -402,8 +408,11 @@ SCREEN.prodstock=(c)=>{
       c.querySelector('#sum').innerHTML=html;
       const bs=c.querySelector('#botsum');if(bs)bs.innerHTML=`<div class="s-item" style="font-weight:700">📊 합계</div>${html}`;};
     function wire(apply){
-      c.querySelector('#go').onclick=apply;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
-      const ymi=c.querySelector('#ym');if(ymi)ymi.onchange=e=>load(inYm(e.target.value));   // 라이브 월변경=재조회
+      c.querySelector('#go').onclick=()=>{ if(live) load(); else apply(); };
+      c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
+      const fi=c.querySelector('#frm'),ti=c.querySelector('#to');
+      if(fi)fi.onchange=e=>{const v=d2ymd(e.target.value);if(v)frm=v;};
+      if(ti)ti.onchange=e=>{const v=d2ymd(e.target.value);if(v)to=v;};
       if(c.querySelector('#type'))c.querySelector('#type').onchange=apply;
       if(c.querySelector('#line'))c.querySelector('#line').onchange=apply;
       c.querySelector('#gubun').onchange=apply;
@@ -438,7 +447,7 @@ SCREEN.prodstock=(c)=>{
       enableSort(c,['cd','nm','type','loc','qty','uom','cost','amt'],()=>cur,render);
     }
   };
-  load('');
+  load();
 };
 
 /* 용접 재고 — 집계 / BOM풀기 토글 */

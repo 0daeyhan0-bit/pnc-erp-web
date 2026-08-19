@@ -2128,14 +2128,15 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
     asof = _d6(ymd) if ymd else datetime.now().strftime("%y%m%d")
     cn = _conn(); cur = cn.cursor()   # live PARTNER_ERP (읽기전용)
     try:
-        # ★2026-08-20 생산 전개제외(EXCEPT_FLAG) 반영: 전개제외 자식(상위 SUB가 통째조달=명진 등)은 발주 대상 아님(그 SUB로 귀속).
-        #   레거시 생산계획(PR_T_PLAN_PART_MAT)과 diff0 — 명진 SUB 내부 MJU(미래정밀 등)를 발주에서 제거. + 사급여부(SAGUB_FLAG) 수집.
+        # ★2026-08-20 생산 BOM(v_pr_bom)+전개제외(EXCEPT_FLAG)로 전환: 발주=생산 조달이므로 생산구조·생산flag를 씀(compose STEP6/7 동일).
+        #   전개제외 자식(상위 SUB가 통째조달=명진 등)은 발주 대상 아님(그 SUB로 귀속) → 명진 SUB 내부 MJU(미래정밀 등) 제거. + 사급여부(SAGUB_FLAG) 수집.
+        #   ★v_cs_bom(원가구조)+except_flag는 구조불일치로 실 발주부품 유실(회귀검증) → v_pr_bom 사용이 정답(레거시 외부부품 유실 최소).
         cur.execute("""WITH tree AS (
             SELECT LTRIM(RTRIM(MAT_CODE)) c, CAST(USE_QTY AS decimal(28,10)) q, CAST(ISNULL(SAGUB_FLAG,'0') AS int) sg, 1 lvl
-            FROM PARTNER_ERP_TEST3.nx.v_cs_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(EXCEPT_FLAG,'0')<>'1'
+            FROM PARTNER_ERP_TEST3.nx.v_pr_bom WHERE ITEM_CODE=? AND FROM_APPLY_YMD<='991231' AND TO_APPLY_YMD>='260101' AND ISNULL(EXCEPT_FLAG,'0')<>'1'
             UNION ALL
             SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), CAST(ISNULL(b.SAGUB_FLAG,'0') AS int), t.lvl+1
-            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_cs_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
+            FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_pr_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
             JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
             SELECT c, SUM(q) qty, MAX(sg) sg FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
