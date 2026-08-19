@@ -133,6 +133,19 @@ assert_open(cur, ymd, domain=None, cust=None)
 - **결론: 자재 현재고 정본 = `mat_stock_daily`(=2607스냅샷+레거시 PU_T_STOCK_MAINT 이동, matclose_build. QTY 99.85% 검증). nx.stock_ledger는 미완(병행운영중 동기화 안 됨) → 자재 게이트 source로 금지.**
 - ★재고게이트 `_stock_short_msg`는 nx.stock_ledger SUM이 아니라 **정본 현재고(자재=mat_stock_daily / 레거시 recipe)**를 읽어야 함. (게이트 켜기 전 이 source 교체 필수 — 안 그러면 45% 오차단.)
 
+### ★키팅 게이트 = BOM 부품 기준 (2026-08-19 검증발견)
+- 키팅 품목(RDY 원장)은 전부 **ASSY/SUB(분류 110/120, Tube Assembly·Sub Assy)** — **자재(MAT)가 아님**. `_mat_avail(키팅품목)`=0 → 그대로 쓰면 **전 키팅 오차단**.
+- 따라서 키팅 게이트 = **"그 ASSY의 BOM 자재 부품들이 입고(자재재고>0)됐는지"**. nx.bom 전개 → 각 자재부품 소요(use_qty×키팅수량) vs `_mat_avail(부품)`. 부족부품 있으면 키팅 거부.
+- 이건 [[§4-B (1) 생산실적=키팅기준 소비]]와 연결 — 키팅=예약이지만 부품 가용성은 자재재고로 검증. (BOM 전개 = backflush `_backflush_bom` 재사용.)
+
+### 각 재고점 게이트 source (정본)
+| 재고점 | 게이트 대상 품목 | 현재고 정본 | 상태 |
+|---|---|---|---|
+| 자재(MAT) | 자재출고 품목=자재 | `_mat_avail`(mat_stock_daily) | ✅ 적용 |
+| 준비/키팅 | ASSY의 **BOM 자재부품** | 부품별 `_mat_avail` | 게이트 설계됨(BOM전개) |
+| 생산(PRD가공/PRD용접) | 앞공정 산출물 | **미비**(생산 현재고 정본 없음) | 다음단계 |
+| 완성(ASY) | 완제품출고=완성품 | **미비**(완성 현재고 정본 없음=제품일마감 필요) | 다음단계 |
+
 ### 마이그 5단계 (각 단계 검증 필수) — ★source 수정 반영
 1. **자재(MAT) 기초 심기**: nx.stock_close_snap에 **2607(7월기말) MAT 스냅샷**(PU_T_MONTH_STOCK_WH Z99990) 적재. 자기생성 근거키(ym=2607·point=MAT) 재적재 멱등.
 2. **MAT diff0 대조**: `현재고=snap(2607)+Σ원장(≥260801)` == 레거시 현재고(2607+8월이동). 품목별 diff0 검증(허용오차0).
