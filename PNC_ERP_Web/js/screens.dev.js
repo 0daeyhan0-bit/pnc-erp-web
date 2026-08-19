@@ -2412,7 +2412,8 @@ SCREEN.subvariant=(c)=>{
     if(rd.error) return `<div style="margin-top:10px;color:#c0392b">SUB패널 오류: ${esc(rd.error)}</div>`;
     const RACX=l=>String(l.child_item||'').toUpperCase().startsWith('RAC')&&!String(l.child_name||'').includes('용접링');   // 용접봉(RAC) 제외·용접링은 유지(사급부품)
     const lines=(rd.lines||[]).filter(l=>!RACX(l)), subs=lines.filter(l=>l.node_kind==='SUB'), parts=lines.filter(l=>l.node_kind!=='SUB');
-    const flat=parts.filter(p=>!p.parent_line), memb=sid=>parts.filter(p=>p.parent_line===sid);
+    const pool=parts.filter(p=>p.staged), placed=parts.filter(p=>!p.staged);   // ★풀=보관(staged=1) · 배치=staged=0
+    const flat=placed.filter(p=>!p.parent_line), memb=sid=>placed.filter(p=>p.parent_line===sid);
     const ASSY=st.routeTarget, partCut=rd.part_cut||{};
     const subOf=sid=>{const s=subs.find(x=>x.line_id===sid);return s?(s.sub_item||s.child_item):null;};
     const badgeOf=p=>{if(!p.parent_line)return {t:'레벨0·ASSY',c:'#1c47a0'};const sc=subOf(p.parent_line);return sc?{t:'SUB '+sc,c:'#8e44ad'}:{t:'미배치',c:'#c0392b'};};
@@ -2424,32 +2425,32 @@ SCREEN.subvariant=(c)=>{
     const total=Math.round((cutSum+procSum)*100)/100, base=rd.base_gongsu||0, ok=Math.abs(total-base)<0.5;
     const cutBadge=code=>{const arr=partCut[code];if(!arr||!arr.length)return '';const s=arr.reduce((a,x)=>a+(+x.wq||0),0);
       return ` <span title="절삭공정 자동귀속(부품 위치 따라감): ${esc(arr.map(x=>x.name+' '+nfq(x.wq)).join(', '))}" style="color:#b5651d;font-size:10px;border:1px solid #e6cfae;border-radius:3px;padding:0 4px">⚙${nfq(s)}</span>`;};
-    const poolRow=p=>{const b=badgeOf(p);return `<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:grab;padding:2px 0;border-bottom:1px solid #f0eef6">
-      <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}
-      <span style="margin-left:auto;color:${b.c};font-size:10px;border:1px solid ${b.c}55;border-radius:8px;padding:0 6px;white-space:nowrap">${esc(b.t)}</span></div>`;};
+    const poolRow=p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:grab;padding:2px 0;border-bottom:1px solid #f0eef6">
+      <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}
+      <span style="margin-left:auto;color:#c0392b;font-size:10px;border:1px solid #c0392b55;border-radius:8px;padding:0 6px;white-space:nowrap">보관·우측 드래그=배치</span></div>`;
     const nodeBox=(node,label,color,dsub,np2,depth)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
       const kids=subs.filter(s=>dsub>0?s.parent_line===dsub:!s.parent_line);   // ★이 노드의 자식 SUB(중첩=서브안의서브)
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
         <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span><div style="flex:1"></div>
           ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff">🧩 해체</button>`:''}
           <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff">⚙ ${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
-        ${np2.map(p=>`<div style="font-size:11.5px;padding:1px 0 1px 14px;color:#33507d">• ${esc(p.child_item)} <span style="color:#8a94a6">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 풀에서 드래그</div>')}
+        ${np2.map(p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="font-size:11.5px;padding:2px 0 2px 14px;color:#33507d;cursor:grab;display:flex;align-items:center;gap:4px" title="드래그: 왼쪽 보관함 또는 다른 SUB로 이동"><span style="color:#b9c2d0">⠿</span>${esc(p.child_item)} <span style="color:#8a94a6;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 보관함에서 드래그</div>')}
         ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
         <div class="sp-newsub" data-parentsub="${dsub}" style="border:${dsub>0?'1px':'2px'} dashed #a678d0;border-radius:${dsub>0?'5px':'8px'};padding:${dsub>0?'4px 8px':'14px 8px'};text-align:center;color:#8e44ad;font-size:${dsub>0?'10px':'12.5px'};font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;${dsub>0?'':'min-height:44px;display:flex;align-items:center;justify-content:center'}">${dsub>0?'➕ 서브 안에 중첩 SUB로 묶기':'➕ 부품을 여기로 드래그 → 새 SUB로 묶기 (레벨1)'}</div>
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
-      <style>.sp-drop.dz-hi{box-shadow:0 0 0 2px #1c47a0 inset;background:#eef4ff!important}.sp-newsub.dz-hi{background:#e3c8f5!important;border-color:#8e44ad!important;color:#6c2f96!important;transform:scale(1.01)}</style>
+      <style>.sp-drop.dz-hi{box-shadow:0 0 0 2px #1c47a0 inset;background:#eef4ff!important}.sp-newsub.dz-hi{background:#e3c8f5!important;border-color:#8e44ad!important;color:#6c2f96!important;transform:scale(1.01)}.sp-pool.dz-hi{box-shadow:0 0 0 2px #c0392b inset;background:#fdeeea!important}</style>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <div style="font-weight:700;color:#8e44ad">🧩 SUB 재구성 · 공정 배치</div>
         <span id="sp-gate" style="font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(total)} / BASE ${base} = 절삭 ${nfq(cutSum)} + 조립 ${nfq(procSum)} ${ok?'✔':'✖ 불일치'}</span>
-        <button class="btn" id="sp-validate" style="margin-left:auto;background:#1c47a0;color:#fff;padding:2px 12px" title="공수합=BASE · 부품수=BASE · 구성 검증만 수행(저장하지 않음). 저장은 하단 [저장] 버튼.">🔍 BOM 검증</button></div>
+        <button class="btn" id="sp-validate" style="margin-left:auto;background:#1c47a0;color:#fff;padding:2px 12px" title="①모든 부품 배치(보관함 비었는지) ②부품수=BASE ③공수합=BASE 검증(저장 안 함). 실패 시 에러 표시. 저장은 하단 [저장].">🔍 BOM 검증</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-        <div style="flex:1;min-width:250px;min-height:420px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
-          <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">부품 풀 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(전 구성부품·배지=배치노드·오른쪽 SUB/새SUB존으로 드래그)</span></div>
-          ${flat.map(poolRow).join('')||'<div class="empty" style="font-size:11px">미배치 부품 없음 — 모두 SUB에 배치됨 (RAC 용접봉 제외)</div>'}
+        <div class="sp-pool" style="flex:1;min-width:250px;min-height:420px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
+          <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">📦 보관함 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(오른쪽 트리에서 뺀 부품 보관 · 여기로 드래그=빼기 · 우측으로 다시 드래그=배치)</span></div>
+          ${pool.length?pool.map(poolRow).join(''):'<div class="empty" style="font-size:11px;color:#8a94a6">보관 부품 없음 — 모든 부품이 배치됨 ✔<br>오른쪽 트리에서 부품을 여기로 드래그하면 빼서 보관합니다.</div>'}
         </div>
         <div style="flex:1.3;min-width:300px;min-height:420px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
-          <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(SUB 노드 위=하이라이트+추가 · "새 SUB로 묶기"=SUB 생성 · 레벨1 바닥=무반응)</span></div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(부품 드래그 → 왼쪽 보관함(빼기) or 다른 SUB로 이동 · ASSY/SUB 노드에 드롭=배치)</span></div>
           ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat,0)}
         </div>
       </div></div>`;};
@@ -2679,22 +2680,24 @@ SCREEN.subvariant=(c)=>{
     // ★드래그&드롭 = 컨테이너 이벤트 위임(재렌더에도 유지·property할당=멱등 → 재드롭/반복 SUB생성 안정).
     //   드롭대상: 기존 SUB노드(부품 추가)·"새 SUB로 묶기"존(SUB 생성)만. ASSY 레벨1(data-sub=0)=무반응. 하이라이트=.dz-hi.
     const _dzClear=()=>c.querySelectorAll('.dz-hi').forEach(x=>x.classList.remove('dz-hi'));
-    const _dzTarget=e=>{const z=e.target.closest&&e.target.closest('.sp-newsub,.sp-drop[data-sub]');if(!z)return null;
-      if(z.classList.contains('sp-newsub'))return z;              // 새 SUB 생성 존
-      return (+z.dataset.sub>0)?z:null;};                          // SUB(추가)만 / ASSY 레벨1(0)=무반응
+    // 드롭 타겟: 새SUB존 · SUB노드 · ★ASSY노드(레벨0=배치) · ★보관함(sp-pool=빼기)
+    const _dzTarget=e=>{const z=e.target.closest&&e.target.closest('.sp-newsub,.sp-drop[data-sub],.sp-pool');return z||null;};
     c.ondragstart=e=>{const el=e.target.closest&&e.target.closest('.sp-drag');if(!el)return;
       st._dragLid=el.dataset.lid;try{e.dataTransfer.setData('text/lid',el.dataset.lid);}catch(_){}e.dataTransfer.effectAllowed='move';};
     c.ondragend=()=>{st._dragLid=null;_dzClear();};
     c.ondragover=e=>{const z=_dzTarget(e);if(!z)return;e.preventDefault();e.dataTransfer.dropEffect='move';if(!z.classList.contains('dz-hi')){_dzClear();z.classList.add('dz-hi');}};
-    c.ondragleave=e=>{const z=e.target.closest&&e.target.closest('.sp-newsub,.sp-drop[data-sub]');if(z)z.classList.remove('dz-hi');};
+    c.ondragleave=e=>{const z=e.target.closest&&e.target.closest('.sp-newsub,.sp-drop[data-sub],.sp-pool');if(z)z.classList.remove('dz-hi');};
     c.ondrop=async e=>{const z=_dzTarget(e);const lid=+(st._dragLid||0);st._dragLid=null;_dzClear();if(!z)return;e.preventDefault();if(!lid)return;
       try{
         if(z.classList.contains('sp-newsub')){const psub=+z.dataset.parentsub||0;
           const r=await fetch(`${API}/api/sourcing/sub/create`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,line_ids:[lid],base_child:st.routeTarget,suffix:'',name:'SUB '+st.routeTarget,gubun:'외주(유상사급)',parent_sub:psub})});
           const j=await r.json();if(j.ok){st.msg='신규 SUB '+j.sub_item+(psub>0?' (중첩)':'')+' 생성';await reloadPanel();}else alert('SUB 생성 실패: '+(j.detail||''));
-        }else{
-          const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+z.dataset.sub,line_ids:[lid]})});
-          if((await r.json()).ok)await reloadPanel();else alert('이동 실패');
+        }else if(z.classList.contains('sp-pool')){   // ★보관함으로 = 빼기(staged)
+          const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,to_pool:1,line_ids:[lid]})});
+          if((await r.json()).ok)await reloadPanel();else alert('보관 실패');
+        }else{   // ★ASSY(data-sub=0) 또는 SUB(>0) 배치
+          const r=await fetch(`${API}/api/sourcing/part/assign`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,sub_line:+z.dataset.sub||0,line_ids:[lid]})});
+          if((await r.json()).ok)await reloadPanel();else alert('배치 실패');
         }
       }catch(err){alert('드롭 오류: '+err.message);}};
     // 노드 [수정] → 관경별 용접 + 공정별 작업ST 팝업(노드 스코프: 레벨0=ASSY값 / 신규SUB=빈값)
