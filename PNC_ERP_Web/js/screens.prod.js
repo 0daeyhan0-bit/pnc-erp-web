@@ -343,15 +343,21 @@ SCREEN.prodinout=(c)=>{
 /* 생산재고조회 — 준비/가공/용접 토글 (+용접 집계/BOM풀기) */
 SCREEN.prodstock=(c)=>{
   const API=API_BASE;
+  const _pad=n=>(''+n).padStart(2,'0');
+  const _tod=(()=>{const d=new Date();return `${(''+d.getFullYear()).slice(2)}${_pad(d.getMonth()+1)}${_pad(d.getDate())}`;})();
   let stage='GAGONG', wmode='agg', livePS=[], curYm='', loading=false, source='live';   // livePS=가공/용접 라이브 · ★Phase5 데이터원(기본 라이브)
+  let frm=_tod.slice(0,4)+'01', to=_tod;   // YYMMDD 수불기간
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const inYm=v=>(''+(v||'')).slice(2).replace('-','');
+  const ymd2d=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};
   const STAGES=[['GAGONG','가공'],['WELD','용접']];   // 준비(키팅) 탭 제거(중복·별도메뉴 폐지)
-  const load=async(ym)=>{loading=true;
+  const load=async()=>{loading=true;
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(11);
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodstock?ym=${encodeURIComponent(ym||'')}&source=nx`,{title:'생산재고조회',onBack:()=>{source='live';load(ym);}});}
-    try{const r=await fetch(`${API}/api/live/prodstock?ym=${encodeURIComponent(ym||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();livePS=j.rows||[];curYm=j.ym||ym||'';}
+    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
+    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodstock?${qs}&source=nx`,{title:'생산재고조회',onBack:()=>{source='live';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodstock?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();livePS=j.rows||[];curYm=j.ym||to.slice(0,4)||'';}
     catch(e){livePS=[];}
     loading=false;draw();};
   const draw=()=>{
