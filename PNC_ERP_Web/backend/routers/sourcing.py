@@ -2236,6 +2236,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         prim = vends[0]
         rows.append({"item_code": c, "item_name": ii.get("nm", ""), "spec": ii.get("spec", ""), "qty": round(order_items[c], 4),
             "make_type": ii.get("mk", ""), "make_label": _MK_LABEL.get(ii.get("mk", ""), ii.get("mk", "")),
+            "sagub": bool(sagub.get(c, 0)),
             "cur_vendor_code": cur_vc, "cur_vendor_name": cur_vn, "has_override": bool(lst), "vendors": vends,
             "eff_vendor_code": prim["vendor_code"], "eff_vendor_name": prim["vendor_name"],
             "master_price": pp.get("cost"), "price_apply": pp.get("apply", ""), "currency": pp.get("curr", "")})

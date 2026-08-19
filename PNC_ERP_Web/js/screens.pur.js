@@ -1601,7 +1601,7 @@ SCREEN.sourceprofile=(c)=>{
     try{const url=rid>0?`${API}/api/sourcing/route_order?route_id=${rid}`:`${API}/api/sourcing/current_order?item=${encodeURIComponent(it)}`;
       const r=await fetch(url);const j=await r.json();
       om.asof=j.asof||'';om.rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',spec:x.spec||'',qty:x.qty,
-        make_label:x.make_label||'',cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
+        make_label:x.make_label||'',sagub:!!x.sagub,cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
         item_master_price:x.master_price,has_override:!!x.has_override,
         vendors:(x.vendors||[{vendor_code:x.cur_vendor_code,vendor_name:x.cur_vendor_name,alloc_ratio:100,master_price:x.master_price}])
           .map(v=>({code:v.vendor_code||'',name:v.vendor_name||'',ratio:(v.alloc_ratio==null?null:+v.alloc_ratio),price:v.master_price,price_reg:(v.price_reg!==false)}))}));
@@ -1663,7 +1663,7 @@ SCREEN.sourceprofile=(c)=>{
           <span style="min-width:78px;text-align:right;background:#f4f6fb;border-radius:3px;padding:0 5px" title="업체별 마스터 매입단가(읽기전용)">${pcell}</span>
           ${(canW&&multi)?`<span class="om-del" data-i="${i}" data-vi="${vi}" style="cursor:pointer;color:#c0392b;font-weight:700" title="업체 삭제">×</span>`:''}</div>`;}).join('');
       return `<tr>
-        <td style="white-space:nowrap;vertical-align:top"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span></td>
+        <td style="white-space:nowrap;vertical-align:top"><b>${esc(r.item_code)}</b> <span style="font-size:10px;color:#8aa0bd">${esc(r.make_label||'')}</span>${r.sagub?' <span style="font-size:10px;color:#7a3ea8;background:#f3ecfb;border-radius:3px;padding:0 4px;font-weight:700" title="사급(우리가 자재 공급)">사급</span>':''}</td>
         <td class="bcap" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:top" title="${esc(r.item_name)}">${esc(r.item_name)}</td>
         <td class="num" style="vertical-align:top">${nfq(r.qty)}</td>
         <td style="vertical-align:top">${vhtml}
