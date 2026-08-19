@@ -962,8 +962,10 @@ WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.
-def _prodstock(ym):
-    y01, y99 = ym + "01", ym + "99"
+def _prodstock(ym, frm=None, to=None):
+    # 레거시 w_pr_stock_480과 동일: 수불기간(frm~to) 일범위. frm/to(YYMMDD) 우선, 없으면 ym월 전체.
+    y01 = frm if frm else (ym + "01")
+    y99 = to if to else (ym + "99")
     U = f"""
 SELECT a.gagong_proc_code gpc, A.MAT_CODE mat, A.STOCK_QTY basic,0 inq,0 outq,0 etc FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,iif(a.maint_ymd<'{y01}',-A.MAINT_QTY,0),iif(a.maint_ymd<'{y01}',0,-A.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND a.maint_tag='B' AND isnull(a.out_wh_gubun,'1')='1'
@@ -996,13 +998,15 @@ FROM agg JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.item_code=agg.mat
     return rows
 
 @live_router.get("/prodstock")
-def prodstock(ym: str = Query(""), source: str = Query("live")):
-    """생산재고조회. 기본 source=live(현행 무변경). source=nx면 stock_ledger(PRD) 파생(컷오버 전 빈데이터 사유표시). ym=YYMM."""
-    y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
+def prodstock(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+    """생산재고조회(레거시 w_pr_stock_480). 수불기간 frm~to(YYMMDD) 우선 = 레거시 화면과 동일 일범위.
+    frm/to 없으면 ym(YYMM) 월전체(하위호환). source=nx면 stock_ledger(PRD) 파생."""
+    f6, t6 = _digits(frm, 6), _digits(to, 6)
+    y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "nx":
-        r = _nx_screen("PRD", y + "01", y + "31"); r["ym"] = y; return r
-    rows = _prodstock(y)
-    return {"ym": y, "rows": rows}
+        r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
+    rows = _prodstock(y, f6 or None, t6 or None)
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "rows": rows}
 
 # ================= ★Phase5: nx 파생 vs 라이브 대조 (diff 리포트) =================
 @live_router.get("/nxcompare")

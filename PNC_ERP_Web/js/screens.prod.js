@@ -81,15 +81,22 @@ SCREEN.prodinout=(c)=>{
 /* 생산재고조회 — 준비/가공/용접 토글 (+용접 집계/BOM풀기) */
 SCREEN.prodstock=(c)=>{
   const API=API_BASE;
+  // ★레거시 w_pr_stock_480과 동일: 수불기간(frm~to) 일범위. 기본=이달1일~오늘.
+  const _pad=n=>(''+n).padStart(2,'0');
+  const _tod=(()=>{const d=new Date();return `${(''+d.getFullYear()).slice(2)}${_pad(d.getMonth()+1)}${_pad(d.getDate())}`;})();
   let stage='GAGONG', wmode='agg', livePS=[], curYm='', loading=false, source='live';   // livePS=가공/용접 라이브 · ★Phase5 데이터원(기본 라이브)
+  let frm=_tod.slice(0,4)+'01', to=_tod;   // YYMMDD 수불기간
   const ymToInput=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const inYm=v=>(''+(v||'')).slice(2).replace('-','');
+  const ymd2d=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};   // 260818 -> 2026-08-18
+  const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};   // 2026-08-18 -> 260818
   const STAGES=[['GAGONG','가공'],['WELD','용접']];   // 준비(키팅) 탭 제거(중복·별도메뉴 폐지)
-  const load=async(ym)=>{loading=true;
+  const load=async()=>{loading=true;
     const bd=c.querySelector('#body');if(bd)bd.innerHTML=spinRow(11);
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodstock?ym=${encodeURIComponent(ym||'')}&source=nx`,{title:'생산재고조회',onBack:()=>{source='live';load(ym);}});}
-    try{const r=await fetch(`${API}/api/live/prodstock?ym=${encodeURIComponent(ym||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();livePS=j.rows||[];curYm=j.ym||ym||'';}
+    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
+    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodstock?${qs}&source=nx`,{title:'생산재고조회',onBack:()=>{source='live';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodstock?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();livePS=j.rows||[];curYm=j.ym||to.slice(0,4)||'';}
     catch(e){livePS=[];}
     loading=false;draw();};
   const draw=()=>{
@@ -102,15 +109,16 @@ SCREEN.prodstock=(c)=>{
     else if(stage==='READY') pool=(DB.stock||[]).filter(r=>r.stage==='READY');
     else pool=livePS.filter(r=>r.stage===stage);
     const lines= showLine ? [...new Set(pool.map(r=>r.loc).filter(Boolean))].sort():[];
+    const _per=`${esc(ymd2d(frm))} ~ ${esc(ymd2d(to))}`;
     const sub={READY:'키팅 준비재고(라인별) · 원본 PU_T_READY_STOCK · ⚠️스냅샷(라이브 예정)',
-               GAGONG:`가공(P0001) 재공 · 원장 9-union · 🟢 nx ${esc(ymToInput(curYm)||'-')}`,
-               WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🟢 nx ${esc(ymToInput(curYm)||'-')}`}[stage];
+               GAGONG:`가공(P0001) 재공 · 원장 9-union · 🟢 수불기간 ${_per}`,
+               WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🟢 수불기간 ${_per}`}[stage];
     c.innerHTML=`
      <div class="page-title">🏭 생산재고조회</div><div class="page-sub">${sub}</div>
      <div class="toolbar">
        <div class="toggle-group">${STAGES.map(([k,v])=>`<button data-stage="${k}" class="${stage===k?'on':''}">${v}</button>`).join('')}</div>
        ${isWeld?`<div class="toggle-group" style="margin-left:6px"><button data-w="agg" class="${wmode==='agg'?'on':''}">집계</button><button data-w="bom" class="${wmode==='bom'?'on':''}">BOM풀기</button></div>`:''}
-       ${live?`<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">조회월</label><input type="month" class="inp" id="ym" value="${esc(ymToInput(curYm))}" style="min-width:120px">`:''}
+       ${live?`<label style="font-size:12px;color:var(--muted);font-weight:600;margin-left:4px">수불기간</label><input type="date" class="inp" id="frm" value="${esc(ymd2d(frm))}" style="min-width:130px"><span style="color:var(--muted);align-self:center">~</span><input type="date" class="inp" id="to" value="${esc(ymd2d(to))}" style="min-width:130px">`:''}
        <input class="inp" id="q" placeholder="${bomMode?'ASSY/자재품번/품명':'품목코드/품명'}">
        ${!bomMode?`<select class="sel" id="type"><option value="">전체유형</option>${Object.entries(TYPE_NM).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`:''}
        ${showLine?`<select class="sel" id="line"><option value="">전체라인</option>${lines.map(l=>`<option value="${esc(l)}">${esc(lineName(l))}</option>`).join('')}</select>`:''}
@@ -124,7 +132,7 @@ SCREEN.prodstock=(c)=>{
      <div class="rowcount" id="cnt"></div>
      <div class="summary-bar botsum" id="botsum" style="margin-top:6px;position:sticky;bottom:0"></div>`;
     c.querySelectorAll('[data-stage]').forEach(b=>b.onclick=()=>{stage=b.dataset.stage;wmode='agg';draw();});
-    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{source='nx';load(curYm);};}   // ★Phase5 nx 파생 보기
+    {const _nx=c.querySelector('#nxsrc');if(_nx)_nx.onclick=()=>{source='nx';load();};}   // ★Phase5 nx 파생 보기
     c.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{wmode=b.dataset.w;draw();});
     let cur=[];
     const sumbar=rows=>{const qty=rows.reduce((a,b)=>a+(+b.qty||0),0),amt=rows.reduce((a,b)=>a+(+b.amt||0),0);
@@ -134,8 +142,13 @@ SCREEN.prodstock=(c)=>{
       c.querySelector('#sum').innerHTML=html;
       const bs=c.querySelector('#botsum');if(bs)bs.innerHTML=`<div class="s-item" style="font-weight:700">📊 합계</div>${html}`;};
     function wire(apply){
-      c.querySelector('#go').onclick=apply;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
-      const ymi=c.querySelector('#ym');if(ymi)ymi.onchange=e=>load(inYm(e.target.value));   // 라이브 월변경=재조회
+      // 검색: 라이브(가공/용접집계)는 수불기간으로 서버 재조회, 그 외(스냅샷)는 클라이언트 필터
+      c.querySelector('#go').onclick=()=>{ if(live) load(); else apply(); };
+      c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
+      // 수불기간 변경 시엔 자동재조회 안 함(입력 중 끊김 방지) — 검색 버튼으로만
+      const fi=c.querySelector('#frm'),ti=c.querySelector('#to');
+      if(fi)fi.onchange=e=>{const v=d2ymd(e.target.value);if(v)frm=v;};
+      if(ti)ti.onchange=e=>{const v=d2ymd(e.target.value);if(v)to=v;};
       if(c.querySelector('#type'))c.querySelector('#type').onchange=apply;
       if(c.querySelector('#line'))c.querySelector('#line').onchange=apply;
       c.querySelector('#gubun').onchange=apply;
@@ -170,7 +183,7 @@ SCREEN.prodstock=(c)=>{
       enableSort(c,['cd','nm','type','loc','qty','uom','cost','amt'],()=>cur,render);
     }
   };
-  load('');
+  load();
 };
 
 /* 용접 재고 — 집계 / BOM풀기 토글 */
