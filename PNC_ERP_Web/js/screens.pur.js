@@ -1707,7 +1707,6 @@ SCREEN.sourceprofile=(c)=>{
     const A=aStat();
     return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':(!ract(r)?'opacity:.55;':'')}">
       <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b>${canVend?` <button class="btn ghost sp-vend" data-ri="${r.route_id}" title="후보 업체·계획단가 지정" style="padding:1px 7px;font-size:11px">🏭 업체·단가</button>`:''}</td>
-      <td>${esc(r.gubun||'-')}</td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
       <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
       <td class="center">${isCur?'<span title="현행(R01)은 항상 활성 — 비활성 불가" style="color:#1c7c3a;font-weight:700">✔ 항상</span>':((canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':'')))}</td>
@@ -1717,8 +1716,8 @@ SCREEN.sourceprofile=(c)=>{
     return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 배정 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(단일 소스 <code>nx.sourcing_route</code> · 승인 후보만 배정 · 저장 <code>nx.route_alloc</code>)</span>
       <label style="float:right;font-size:12px;font-weight:400;color:#5a6b82"><input type="checkbox" id="sp-unappr" ${showUnappr?'checked':''}> 미승인 보기</label></div>
       <div style="margin:0 0 6px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${A.single?`활성 ${A.n}개(단일 → 100% 자동)`:`활성 ${A.n}개 배분합 ${A.sum}% ${ok?'✓':'(정확히 100% 필요 — 미달·초과 시 저장 불가)'}`}${allocErrs.length?` · 저장값 검증: ${esc(allocErrs.join(' / '))}`:''}</div>
-      <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>구분</th><th>공급처</th><th class="center">승인</th><th class="center">활성</th><th class="num">배분%</th></tr></thead>
-      <tbody>${routes.length?routes.map(routeRow).join(''):`<tr><td colspan="6" class="empty">조달경로 후보 없음${!showUnappr?' — [미승인 보기]로 개발 진행중 후보 확인':' (개발 › 조달경로 통합검토에서 생성·승인)'}</td></tr>`}</tbody></table>
+      <table class="tbl" style="font-size:12px;margin:0"><thead><tr><th>경로</th><th>공급처</th><th class="center">승인</th><th class="center">활성</th><th class="num">배분%</th></tr></thead>
+      <tbody>${routes.length?routes.map(routeRow).join(''):`<tr><td colspan="5" class="empty">조달경로 후보 없음${!showUnappr?' — [미승인 보기]로 개발 진행중 후보 확인':' (개발 › 조달경로 통합검토에서 생성·승인)'}</td></tr>`}</tbody></table>
       <div class="page-sub" style="color:#8aa0bd;margin-top:3px">승인 ${appr}건${un?` · 미승인 ${un}건(회색·배정불가)`:''}. R01=현행(실사용 BOM 기준선·자동승인). 미승인 후보는 [개발 › 조달경로 통합검토]에서 승인해야 배정 가능.</div>`;};
   const draw=()=>{
     c.innerHTML=`
@@ -1737,7 +1736,7 @@ SCREEN.sourceprofile=(c)=>{
         <div class="toolbar"><span style="font-weight:700;color:#1c47a0;font-size:16px">${esc(sel)}</span> <span style="color:var(--muted)">${esc(selNm)}</span>
           <label class="tl" style="margin-left:10px">기준일</label><input class="inp" type="date" id="sp-ref" value="${ref}" style="width:130px">
           <div class="spacer"></div>
-          ${canW?`<button class="btn" id="sp-auto" title="현행 유지·비활성 마감">🪄 현행유지·비활성마감</button><button class="btn" id="sp-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}</div>
+          ${canW?`<button class="btn" id="sp-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}</div>
         ${tload?`<div class="grid-wrap" style="padding:20px">${spinRow(1)}</div>`:`<div style="overflow:auto;max-height:calc(100vh - 205px)">
           <div style="font-weight:700;color:#334;margin:2px 0 4px">📦 실제 설정된 BOM 구성</div>
           <div style="overflow-x:auto">${treeTbl()}</div>
@@ -1758,7 +1757,6 @@ SCREEN.sourceprofile=(c)=>{
     g('#sp-q').onchange=e=>{const v=e.target.value.trim();if(v&&slist.some(s=>s.item===v))open(v);};
     c.querySelectorAll('.sp-row').forEach(el=>el.onclick=()=>open(el.dataset.i));
     const sv=g('#sp-save');if(sv)sv.onclick=save;
-    const au=g('#sp-auto');if(au)au.onclick=autoset;
     const rf=g('#sp-ref');if(rf)rf.onchange=()=>{ref=rf.value;draw();};
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});

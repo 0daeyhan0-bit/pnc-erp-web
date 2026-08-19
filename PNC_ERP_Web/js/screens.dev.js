@@ -2376,12 +2376,6 @@ SCREEN.subvariant=(c)=>{
           </div>
           ${f.method==='copy'&&alts.length?`<label style="font-weight:700;color:#33507d">복사할 원본 후보</label>
             <select class="inp nf" data-k="source_route_id" style="width:100%;box-sizing:border-box;margin:3px 0 8px">${alts.map(r=>`<option value="${r.route_id}" ${+f.source_route_id===r.route_id?'selected':''}>후보 ${r.route_no} · ${esc(r.route_name||'')}</option>`).join('')}</select>`:''}
-          ${f.method==='blank'?`<div style="margin-top:8px;padding:10px;border:1px solid #e2e8f2;border-radius:8px;background:#fafbfd">
-            <div style="font-weight:700;color:#33507d;margin-bottom:6px">헤더(빈 후보)</div>
-            <div style="display:grid;grid-template-columns:auto 1fr;gap:7px 9px;align-items:center">
-              <label style="text-align:right;color:#33507d">현행여부</label><label style="font-size:12px"><input type="checkbox" class="nf" data-k="current_flag" ${f.current_flag?'checked':''}> 현행</label>
-            </div>
-            <div style="color:#8aa0bd;font-size:10.5px;margin-top:6px">구분(제작/매입/사급)은 라인별 · 공급처는 조달프로파일에서 배정 · 유효기간 없음.</div></div>`:''}
           <div style="color:#8aa0bd;font-size:11px;margin-top:10px">생성 시 <b style="color:#c0392b">개발 미승인</b> 상태이며, 곧바로 상세 편집 모달이 열립니다. 승인해야 조달프로파일에 노출됩니다.</div>
         </div>
         <div style="padding:12px 18px;border-top:1px solid #e2e8f2;text-align:right"><button class="btn ghost" id="nr-cancel">취소</button> <button class="btn" id="nr-create" style="background:#1c7c3a;color:#fff">생성 →</button></div>
