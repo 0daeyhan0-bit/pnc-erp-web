@@ -1595,8 +1595,9 @@ SCREEN.sourceprofile=(c)=>{
       else{el.onchange=()=>{pm.rows[i][f]=(el.value===''?'':el.value);};}});};
   // ===== R01(현행) 발주업체·단가 모달 (자동발주 근거) — ★품목당 다중업체+배분%(합100). 현행 매입처 자동시드 + 업체별 마스터단가(읽기전용) =====
   let om=null, omAcT=null;   // om={item,asof,rows[],msg,loading,saving}
-  const omOpen=async(it)=>{om={item:it,asof:'',rows:[],msg:'',loading:true,saving:false};draw();
-    try{const r=await fetch(`${API}/api/sourcing/current_order?item=${encodeURIComponent(it)}`);const j=await r.json();
+  const omOpen=async(it,rid)=>{rid=+rid||0;om={item:it,route_id:rid,asof:'',rows:[],msg:'',loading:true,saving:false};draw();
+    try{const url=rid>0?`${API}/api/sourcing/route_order?route_id=${rid}`:`${API}/api/sourcing/current_order?item=${encodeURIComponent(it)}`;
+      const r=await fetch(url);const j=await r.json();
       om.asof=j.asof||'';om.rows=(j.rows||[]).map(x=>({item_code:x.item_code,item_name:x.item_name||'',spec:x.spec||'',qty:x.qty,
         make_label:x.make_label||'',cur_vendor_code:x.cur_vendor_code||'',cur_vendor_name:x.cur_vendor_name||'',
         item_master_price:x.master_price,has_override:!!x.has_override,
@@ -1641,11 +1642,13 @@ SCREEN.sourceprofile=(c)=>{
     if(!targets.length){om.saving=false;om.msg='변경사항 없음';draw();return;}
     om.msg='';draw();let cnt=0;
     try{for(const i of targets){const r=om.rows[i];const vs=r.vendors.filter(v=>v.code);
-        const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code);
-        const allocations=isDefault?[]:vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));   // isDefault=override 해제
-        const res=await fetch(`${API}/api/sourcing/current_order/vendor`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:r.item_code,allocations})});
+        const isDefault=(vs.length===1 && vs[0].code===r.cur_vendor_code && !om.route_id);   // R01만 현행매입처=default 해제 개념
+        const allocations=isDefault?[]:vs.map(v=>({vendor_code:v.code,alloc_ratio:v.ratio}));
+        const url=om.route_id>0?`${API}/api/sourcing/route_order/vendor`:`${API}/api/sourcing/current_order/vendor`;
+        const body=om.route_id>0?{route_id:om.route_id,item_code:r.item_code,allocations}:{item_code:r.item_code,allocations};
+        const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         const jj=await res.json();if(!res.ok||!jj.ok){om.saving=false;om.msg=`⚠ 저장 불가 — [${r.item_code}] ${jj.detail||'저장실패'}`;draw();return;}cnt++;}
-      await omOpen(om.item);om.msg=`✅ 발주업체·배분 저장 (${cnt}건)`;draw();
+      await omOpen(om.item,om.route_id);om.msg=`✅ 업체·배분 저장 (${cnt}건)`;draw();
     }catch(e){om.saving=false;om.msg='❌ 저장 실패: '+e;draw();}};
   const orderModal=()=>{if(!om)return '';
     const rowsHtml=om.loading?`<tr><td colspan="4">${spinRow(1)}</td></tr>`:(om.rows.length?om.rows.map((r,i)=>{
@@ -1672,7 +1675,7 @@ SCREEN.sourceprofile=(c)=>{
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
       <div style="background:#fff;border-radius:10px;min-width:720px;max-width:96vw;box-shadow:0 8px 40px rgba(0,0,0,.25)">
        <div style="padding:12px 16px;border-bottom:1px solid #e2e8f2;display:flex;align-items:center;gap:10px">
-         <span style="font-weight:700;font-size:15px;color:#1c7c3a">📦 발주업체·배분 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(현행 R01 · 자동발주 근거)</span></span>
+         <span style="font-weight:700;font-size:15px;color:#1c7c3a">📦 발주업체·배분 <span style="font-size:11px;font-weight:400;color:#8aa0bd">(${om.route_id>0?'대안경로 · 매입/사급 부품':'현행 R01 · 자동발주 근거'})</span></span>
          <b style="color:#1c3a6e">${esc(om.item)}</b><span style="color:var(--muted);font-size:12px">${esc(selNm)} · 기준일 ${esc(om.asof||'')}</span>
          <div class="spacer" style="flex:1"></div>
          <button class="btn ghost" id="om-x" style="font-size:16px">✖</button></div>
@@ -1786,7 +1789,7 @@ SCREEN.sourceprofile=(c)=>{
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-active').forEach(el=>el.onchange=e=>{e.stopPropagation();edit['_active']=+el.dataset.ri;draw();});   // ★운영 경로 택1(라디오)
     c.querySelectorAll('.sp-rrow').forEach(el=>el.onclick=e=>{if(e.target.closest('input,button,select,label'))return;const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)selectRoute(r);});
-    c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)pmOpen(r);});
+    c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)omOpen(sel,r.route_id);});   // ★R02도 R01과 동일 모달(omOpen), 저장만 sourcing_profile
     c.querySelectorAll('.sp-editvend').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
     wireModal();
     wireOrder();

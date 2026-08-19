@@ -2289,6 +2289,109 @@ def sourcing_current_order_vendor(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.get("/api/sourcing/route_order")
+def sourcing_route_order(route_id: int = Query(...), ymd: str = Query("")):
+    """대안경로(R02+) 부품별 업체 지정 근거 — ★R01 발주업체·배분 모달과 동일 구조, 저장만 sourcing_profile.
+       매입/사급 리프부품(제작 제외·staged 제외) + 부품별 sourcing_profile 업체·배분% + 업체별 마스터 매입단가(읽기전용)."""
+    asof = _d6(ymd) if ymd.strip() else datetime.now().strftime("%y%m%d")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT item_code FROM nx.sourcing_route WHERE route_id=?", route_id)
+        h = cur.fetchone()
+        if not h: raise HTTPException(404, "route 없음")
+        item = str(h[0]).strip()
+        cur.execute("""SELECT LTRIM(RTRIM(child_item)), ISNULL(child_name,''), ISNULL(qty,1), ISNULL(gubun,'')
+            FROM nx.sourcing_route_line WHERE route_id=? AND node_kind<>'SUB' AND ISNULL(staged,0)=0 AND ISNULL(gubun,'') IN (N'매입', N'사급')
+            ORDER BY sort_seq, line_id""", route_id)
+        parts = [(str(r[0]).strip(), str(r[1] or ''), float(r[2] or 1), str(r[3] or '')) for r in cur.fetchall() if str(r[0]).strip()]
+        prof = {}
+        cur.execute("""SELECT LTRIM(RTRIM(item_code)), ISNULL(vendor_code,''), ISNULL(alloc_ratio,100)
+            FROM nx.sourcing_profile WHERE route_id=? AND ISNULL(is_active,1)=1 AND ISNULL(vendor_code,'')<>''""", route_id)
+        for ic, vc, al in cur.fetchall():
+            ic = str(ic).strip(); vc = str(vc).strip()
+            if vc: prof.setdefault(ic, []).append((vc, float(al or 100)))
+        vname = _custnm_map(cur, {v for lst in prof.values() for (v, _) in lst})
+    finally:
+        nx.close()
+    # 업체별 마스터 매입단가(item×vendor)
+    pairs = [(pc, vc) for (pc, _, _, _) in parts for (vc, _) in prof.get(pc, [])]
+    vprice = {}
+    if pairs:
+        items = sorted({p for (p, _) in pairs}); vends = sorted({v for (_, v) in pairs})
+        cn = _conn(); c2 = cn.cursor()
+        try:
+            iph = ",".join("?" * len(items)); vph = ",".join("?" * len(vends))
+            c2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST FROM (
+                SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST,
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)),LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
+                  AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                asof, *items, *vends)
+            for ic, vc, cost in c2.fetchall():
+                vprice[(str(ic).strip(), str(vc).strip())] = (float(cost) if cost is not None else None)
+        finally:
+            cn.close()
+    rows = []
+    for (pc, pn, qty, gb) in parts:
+        vs = prof.get(pc, [])
+        if vs:
+            vends2 = [{"vendor_code": vc, "vendor_name": vname.get(vc, vc), "alloc_ratio": al,
+                       "master_price": vprice.get((pc, vc)), "price_reg": (vprice.get((pc, vc)) is not None)} for (vc, al) in vs]
+        else:
+            vends2 = [{"vendor_code": "", "vendor_name": "", "alloc_ratio": 100, "master_price": None, "price_reg": False}]
+        rows.append({"item_code": pc, "item_name": pn, "spec": "", "qty": qty, "make_label": gb,
+            "cur_vendor_code": (vends2[0]["vendor_code"] if vs else ""), "cur_vendor_name": (vends2[0]["vendor_name"] if vs else ""),
+            "master_price": None, "has_override": bool(vs), "vendors": vends2})
+    return {"item": item, "route_id": route_id, "asof": asof, "rows": rows, "n": len(rows),
+            "note": "R02(대안경로) 부품별 업체 지정 — 매입/사급 부품(제작 제외)에 sourcing_profile 업체·배분%(합100). 단가=마스터 읽기전용."}
+
+@router.post("/api/sourcing/route_order/vendor")
+def sourcing_route_order_vendor(payload: dict = Body(...)):
+    """대안경로(R02+) 부품 업체 배분 저장 → nx.sourcing_profile (근거키=route_id·item_code 전체교체·멱등).
+       payload {route_id, item_code, allocations:[{vendor_code, alloc_ratio}]}. 다중=합100·단가미등록 차단. 업체지정은 승인 리셋 안 함(구조변경 아님)."""
+    rid = int(payload.get("route_id") or 0)
+    item_code = str(payload.get("item_code", "")).strip()
+    if rid <= 0 or not item_code: raise HTTPException(400, "route_id·item_code 필요")
+    norm = {}
+    for a in (payload.get("allocations") or []):
+        vc = str(a.get("vendor_code", "") or "").strip()
+        if not vc: continue
+        rt = a.get("alloc_ratio")
+        try: rt = None if rt in (None, "", "null") else float(rt)
+        except Exception: rt = None
+        norm[vc] = rt
+    rated = [v for v in norm.values() if v is not None]
+    if len(norm) >= 2:
+        if len(rated) != len(norm): raise HTTPException(400, "다중업체는 모든 업체에 배분%를 입력해야 합니다")
+        if abs(sum(rated) - 100.0) > 0.01: raise HTTPException(400, f"배분% 합이 100이 아닙니다(현재 {sum(rated):.0f}%)")
+    if norm:
+        priced = _priced_vendors(item_code, list(norm.keys()))
+        unreg = [v for v in norm if v not in priced]
+        if unreg:
+            nn = _nx(); nc = nn.cursor()
+            try: un = _custnm_map(nc, set(unreg))
+            finally: nn.close()
+            raise HTTPException(400, "단가 미등록 업체는 저장할 수 없습니다: " + ", ".join(un.get(v, v) for v in unreg))
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        cur.execute("SELECT TOP 1 ISNULL(gubun,'매입') FROM nx.sourcing_route_line WHERE route_id=? AND LTRIM(RTRIM(child_item))=? AND node_kind<>'SUB'", rid, item_code)
+        gr = cur.fetchone(); supply = '유상사급' if (gr and str(gr[0]).strip() == '사급') else '매입'
+        cur.execute("DELETE FROM nx.sourcing_profile WHERE route_id=? AND LTRIM(RTRIM(item_code))=?", rid, item_code)  # 근거키 전체교체
+        for vc, rt in norm.items():
+            r = rt if rt is not None else (100 if len(norm) == 1 else None)
+            cur.execute("""INSERT INTO nx.sourcing_profile(item_code,profile_name,supply_gubun,vendor_code,lme_flag,apply_from,is_active,is_internal,alloc_ratio,route_id)
+                VALUES(?,?,?,?,0,'2000-01-01',1,0,?,?)""", item_code, f"R{rid}", supply, vc, r, rid)   # 유효기간 폐지 → apply_from=고정기준
+        nx.commit()
+        return {"ok": True, "route_id": rid, "item_code": item_code, "vendors": len(norm), "cleared": (len(norm) == 0)}
+    except HTTPException:
+        nx.rollback(); raise
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+
 
 def _priced_vendors(item_code, vendors, asof=None):
     """(품목, 각 업체) PR_M_ITEM_COST 매입단가 등록된 업체 집합. 현행 매입처(IN_CUST)는 품목 대표단가 보유시 인정. 읽기전용."""
