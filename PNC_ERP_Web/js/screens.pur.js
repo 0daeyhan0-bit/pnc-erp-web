@@ -1431,6 +1431,7 @@ SCREEN.sourceprofile=(c)=>{
   const nfq=v=>{v=Number(v||0);return v%1===0?v.toLocaleString('ko-KR'):v.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');};
   let q='', slist=[], sel=null, selNm='', tree=null, tload=false, searching=false, msg='', acT=null, edit={}, ref=today;
   let showUnappr=false, routes=[], allocErrs=[];   // 조달경로 후보(단일 소스 nx.sourcing_route) + 저장된 route 단위 배분(nx.route_alloc)
+  let selRid=null, rtree={}, rvmap={};   // ★선택 경로(null=현행 R01)·경로별 BOM트리 캐시·경로별 부품→업체배분 캐시(R01=current_order·R02=route/detail)
   const loadAlloc=async()=>{try{const r=await fetch(`${API}/api/sourcing/route/alloc?item=${encodeURIComponent(sel)}&show_unapproved=${showUnappr?1:0}`);const j=await r.json();routes=j.routes||[];allocErrs=j.alloc_errs||[];}catch(e){routes=[];allocErrs=[];}};
   const search=async(auto)=>{searching=true;draw();
     try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}`);slist=(await r.json()).rows||[];}
@@ -1438,9 +1439,12 @@ SCREEN.sourceprofile=(c)=>{
     searching=false;draw();if(auto&&slist.length&&!sel)open(slist[0].item);};
   const fillDL=()=>{const dl=c.querySelector('#sp-dl');if(dl)dl.innerHTML=slist.slice(0,60).map(s=>`<option value="${esc(s.item)}">${esc((s.name||'').replace(/"/g,''))}</option>`).join('');};
   const ac=t=>{clearTimeout(acT);acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(t)}`);slist=(await r.json()).rows||[];fillDL();}catch(e){}},180);};
-  const open=async(item)=>{sel=item;selNm='';tree=null;tload=true;edit={};draw();
+  const loadCurVend=async(item)=>{try{const j=await(await fetch(`${API}/api/sourcing/current_order?item=${encodeURIComponent(item)}`)).json();
+    const m={};(j.rows||[]).forEach(x=>{m[String(x.item_code).trim()]=(x.vendors||[]).map(v=>({name:v.vendor_name||v.vendor_code,ratio:v.alloc_ratio}));});return m;}catch(e){return {};}};
+  const open=async(item)=>{sel=item;selNm='';tree=null;tload=true;edit={};selRid=null;rtree={};rvmap={};draw();
     try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}`);const j=await r.json();tree=j.rows||[];selNm=j.name||'';}catch(e){tree=[];}
     await loadAlloc();
+    rvmap['_cur']=await loadCurVend(item);   // ★현행(R01) 부품별 다중업체·비율(order_vendor)
     tload=false;draw();};
   const curE=(rid,f,dflt)=>{const k=rid+'|'+f;return edit[k]!==undefined?edit[k]:dflt;};
   const setE=(rid,f,v)=>{edit[rid+'|'+f]=v;};
@@ -1698,15 +1702,37 @@ SCREEN.sourceprofile=(c)=>{
     c.querySelectorAll('.om-add').forEach(el=>el.onclick=()=>omAdd(+el.dataset.i));
     c.querySelectorAll('.om-del').forEach(el=>el.onclick=()=>omDelV(+el.dataset.i,+el.dataset.vi));};
   const kindOf=n=>{if((n.nm||'').indexOf('용접봉')>=0)return{t:'용접봉',c:'#8e44ad'};if(n.haskids)return{t:'제작(SUB)',c:'#1c7c3a'};if(String(n.sag)==='1')return{t:'사급',c:'#b8860b'};return{t:'매입/구매',c:'#1c47a0'};};
-  const treeTbl=()=>{if(!tree)return '';if(!tree.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
-    return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${tree.map(n=>{const k=kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${esc(n.custnm||'')}</td></tr>`;}).join('')}</tbody></table>`;};
+  // ★선택 경로(R01/R02) 기준 BOM 트리 전환 + 매입처 다중업체·비율
+  const gubunKind=g=>{g=(g||'').trim();return g==='제작'?{t:'제작',c:'#1c7c3a'}:(g==='사급'?{t:'사급',c:'#b8860b'}:{t:'매입/구매',c:'#1c47a0'});};
+  const buildRouteTree=(item,itemNm,lines)=>{const live=(lines||[]).filter(l=>!l.staged);
+    const byP={};live.forEach(l=>{const p=(l.parent_line==null?'root':l.parent_line);(byP[p]=byP[p]||[]).push(l);});
+    const rows=[{level:0,code:item,nm:itemNm||'',haskids:true,qty:1}];
+    const walk=(key,lvl)=>{(byP[key]||[]).forEach(l=>{const isSub=l.node_kind==='SUB';
+      rows.push({level:lvl,code:isSub?(l.sub_item||l.child_item):l.child_item,nm:l.child_name||'',qty:l.qty,haskids:isSub,kind:isSub?null:gubunKind(l.gubun),custnm:l.vendor_name||''});
+      if(isSub)walk(l.line_id,lvl+1);});};
+    walk('root',1);return rows;};
+  const selectRoute=async(r)=>{const rid=r.route_id,isCur=_isCur(r);selRid=isCur?null:rid;
+    if(!isCur&&!rtree[rid]){try{const j=await(await fetch(`${API}/api/sourcing/route/detail?route_id=${rid}`)).json();
+      rtree[rid]=buildRouteTree(sel,selNm,j.lines||[]);
+      const m={};(j.lines||[]).forEach(l=>{if(l.node_kind!=='SUB'&&l.vendor_name)m[String(l.child_item).trim()]=[{name:l.vendor_name,ratio:null}];});rvmap[rid]=m;
+      }catch(e){rtree[rid]=[];rvmap[rid]={};}}
+    draw();};
+  const curTree=()=>selRid==null?tree:(rtree[selRid]||[]);
+  const curVmap=()=>selRid==null?(rvmap['_cur']||{}):(rvmap[selRid]||{});
+  const selRouteLabel=()=>{if(selRid==null)return 'R01 · 현행';const r=routes.find(x=>x.route_id==selRid);return r?('R'+String(r.route_no).padStart(2,'0')+(r.route_name?' · '+r.route_name:'')):'선택 경로';};
+  const vcell=(code,fallback)=>{const vs=curVmap()[String(code).trim()];
+    if(vs&&vs.length){const multi=vs.length>1;return vs.map(v=>`${esc(v.name)}${(multi&&v.ratio!=null)?` <span style="color:#1c47a0;font-size:10px;font-weight:600">${nfq(v.ratio)}%</span>`:''}`).join(' <span style="color:#c9d1dc">/</span> ');}
+    return esc(fallback||'');};
+  const treeTbl=()=>{const T=curTree();if(!T)return '';if(!T.length)return `<div class="empty" style="margin-top:16px">설정된 BOM 구성 없음</div>`;
+    return `<table class="tbl" style="font-size:12px"><thead><tr><th style="min-width:280px">레벨·품번</th><th>품명</th><th class="num">수량</th><th>구분</th><th>매입처</th></tr></thead><tbody>${T.map(n=>{const k=n.kind||kindOf(n),root=n.level===0;return `<tr style="${root?'background:#eef5ff;font-weight:700':''}"><td style="white-space:nowrap"><span style="display:inline-block;width:${n.level*18}px"></span>${n.level?'└ ':''}<b>${esc(n.code)}</b></td><td class="bcap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(n.nm)}">${esc(n.nm)}</td><td class="num">${root?'':nfq(n.qty)}</td><td>${root?'':`<span style="color:${k.c};font-weight:600">${k.t}</span>`}</td><td>${root||n.haskids?'':vcell(n.code,n.custnm)}</td></tr>`;}).join('')}</tbody></table>`;};
   const badge=r=>{const on=r.current_flag;return `<span style="background:${on?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700">R${String(r.route_no).padStart(2,'0')}${on?' · 현행':''}</span>`;};
   const routeRow=r=>{const ro=r.readonly,al=ralloc(r);
     const canVend=r.approve_flag&&r.route_id>0;   // 승인 + 실저장 후보만 후보 업체·계획단가 지정(R02…)
     const isCur=_isCur(r);   // R01(현행)
     const A=aStat();
-    return `<tr style="${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':(!ract(r)?'opacity:.55;':'')}">
-      <td style="white-space:nowrap">${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b></td>
+    const selNow=(selRid==null&&isCur)||(selRid==r.route_id);
+    return `<tr class="sp-rrow" data-ri="${r.route_id}" title="클릭: 이 경로 구성을 위 'BOM 구성'에 표시" style="cursor:pointer;${selNow?'box-shadow:inset 3px 0 0 #1c47a0;':''}${r.current_flag?'background:#f0f7f0;':''}${ro?'background:#f4f4f4;opacity:.6;':(!ract(r)?'opacity:.55;':'')}">
+      <td style="white-space:nowrap">${selNow?'<span style="color:#1c47a0">▶ </span>':''}${badge(r)} <b style="color:#1c3a6e">${esc(r.route_name||'')}</b></td>
       <td style="font-weight:600">${r.vendor_code?esc(r.vendor_name||r.vendor_code):'<span style="color:#aab">-</span>'}</td>
       <td class="center">${r.approve_flag?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">승인</span>':'<span style="background:#999;color:#fff;border-radius:8px;padding:0 7px;font-size:10px" title="개발 승인 전 — 배정 불가">미승인</span>'}</td>
       <td class="center">${isCur?'<span title="현행(R01)은 항상 활성 — 비활성 불가" style="color:#1c7c3a;font-weight:700">✔ 항상</span>':((canW&&!ro)?`<input type="checkbox" class="sp-e" data-ri="${r.route_id}" data-f="is_active"${ract(r)?' checked':''}>`:(ro?'<span style="color:#c0392b;font-size:10px">배정불가</span>':(ract(r)?'✔':'')))}</td>
@@ -1738,7 +1764,7 @@ SCREEN.sourceprofile=(c)=>{
           <div class="spacer"></div>
           ${canW?`<button class="btn" id="sp-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}</div>
         ${tload?`<div class="grid-wrap" style="padding:20px">${spinRow(1)}</div>`:`<div style="overflow:auto;max-height:calc(100vh - 205px)">
-          <div style="font-weight:700;color:#334;margin:2px 0 4px">📦 실제 설정된 BOM 구성</div>
+          <div style="font-weight:700;color:#334;margin:2px 0 4px">📦 실제 설정된 BOM 구성 <span style="font-size:12px;font-weight:600;color:#1c47a0">— ${esc(selRouteLabel())}</span> <span style="font-size:11px;color:#8aa0bd;font-weight:400">(아래 경로 R01/R02 행을 클릭하면 그 경로 구성으로 전환 · 매입처=업체·비율)</span></div>
           <div style="overflow-x:auto">${treeTbl()}</div>
           <div style="height:12px"></div>
           ${routePanel()}
@@ -1760,6 +1786,7 @@ SCREEN.sourceprofile=(c)=>{
     const rf=g('#sp-ref');if(rf)rf.onchange=()=>{ref=rf.value;draw();};
     const un=g('#sp-unappr');if(un)un.onchange=async()=>{showUnappr=un.checked;await loadAlloc();draw();};
     c.querySelectorAll('.sp-e').forEach(el=>{el.onchange=()=>{setE(el.dataset.ri,el.dataset.f,el.type==='checkbox'?el.checked:el.value);draw();};});
+    c.querySelectorAll('.sp-rrow').forEach(el=>el.onclick=e=>{if(e.target.closest('input,button,select,label'))return;const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)selectRoute(r);});
     c.querySelectorAll('.sp-vend').forEach(el=>el.onclick=()=>{const r=routes.find(x=>x.route_id==el.dataset.ri);if(r)pmOpen(r);});
     c.querySelectorAll('.sp-editvend').forEach(el=>el.onclick=()=>{if(sel)omOpen(sel);});
     wireModal();
