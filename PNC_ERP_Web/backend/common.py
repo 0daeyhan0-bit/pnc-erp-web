@@ -194,6 +194,26 @@ def _lock_msg(cur, ymd):
         return f"{_ym(ymd)} 마감된 월입니다 — 생성/수정/삭제 불가"
     return None
 
+def _mat_avail(cur, item):
+    """자재 현재고 정본 = nx.mat_stock_daily 최신일 stock_qty. (★nx.stock_ledger은 최근이동 미동기화로 부정확 → 사용금지, 정본 §4-C)
+       mat_stock_daily = 2607스냅샷 + 레거시 PU_T_STOCK_MAINT 이동(QTY 99.85% 검증). 없으면 0."""
+    item = str(item or "").strip().upper()
+    if not item:
+        return 0.0
+    cur.execute("SELECT TOP 1 stock_qty FROM nx.mat_stock_daily WHERE UPPER(mat_code)=? ORDER BY ymd DESC", item)
+    r = cur.fetchone()
+    return float(r[0] or 0) if r else 0.0
+
+def _mat_short_msg(cur, item, need, label="출고"):
+    """자재 재고 가용 게이트(정본=mat_stock_daily). 부족하면 사유메시지, 아니면 None. 마이너스 원천차단."""
+    item = str(item or "").strip(); need = float(need or 0)
+    if not item or need <= 0:
+        return None
+    avail = _mat_avail(cur, item)
+    if need > avail + 1e-6:
+        return f"재고부족 ({item} 가용 {avail:g} < {label} {need:g})"
+    return None
+
 def _stock_short_msg(cur, item, need, points=("MAT",), label="출고"):
     """재고 가용성 게이팅. item(MAT_CODE 또는 ITEM_CODE)의 지정 재고점 가용(원장 SUM) < need면 부족메시지, 아니면 None.
        points: MAT(자재)·RDY(준비)·PRD(생산/가공)·ASY(완성)·SAG(사급). 마이너스 원천차단용."""
