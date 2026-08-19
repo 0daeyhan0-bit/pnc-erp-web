@@ -991,15 +991,19 @@ SCREEN.dailypurissue=(c)=>{
        <button class="btn xls" id="dp-xls">📥 엑셀</button>
      </div>
      ${loading?`<div style="padding:20px;color:#b8860b">불러오는 중…</div>`:(F?`
-     <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto"><table class="tbl fit" style="min-width:560px">
+     <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+     <div style="flex:0 0 auto;width:560px;max-width:560px;min-width:340px">
+     <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto"><table class="tbl fit" style="min-width:520px">
        <thead><tr><th style="text-align:left">구분</th><th class="num">누적</th><th class="num">당일</th><th class="num">총</th></tr></thead>
        <tbody>
          ${sec(F.pur,F.pur_tot,'매입','#1c47a0')}
          ${sec(F.out,F.out_tot,'불출(매출)','#8a5a1a')}
          ${sec(F.net,F.net_tot,'실매입 (매입 − 불출)','#1c7c3a')}
        </tbody></table></div>
+       </div>
        ${F.sales?`
-       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px">
+       <div style="flex:1;min-width:520px">
+       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:0">
          <div style="flex:1;min-width:290px">
            <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">⑤ 매출 (현매출 · 리시빙)</div>
            <table class="tbl fit"><tbody>
@@ -1034,7 +1038,9 @@ SCREEN.dailypurissue=(c)=>{
              <tr><td>LG전산 (OSP)</td><td class="num">${wonI(F.dae.lg)}</td></tr>
              <tr style="background:#eef8f0;font-weight:700"><td>차액 (당사 − LG)</td><td class="num" style="color:${F.dae.diff<0?'#c0392b':'#1c7c3a'}">${wonI(F.dae.diff)}</td></tr>
            </tbody></table></div>
-       </div>`:''}`:`<div style="padding:20px;color:#8aa0bd">조회일을 선택하고 [조회]를 누르세요.</div>`)}`;
+       </div>
+       </div>`:''}
+       </div>`:`<div style="padding:20px;color:#8aa0bd">조회일을 선택하고 [조회]를 누르세요.</div>`)}`;
     const gd=()=>d2y(c.querySelector('#dp-d').value);
     c.querySelector('#dp-go').onclick=()=>load(gd());
     c.querySelector('#dp-xls').onclick=()=>{
