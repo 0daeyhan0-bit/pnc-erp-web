@@ -350,5 +350,19 @@ def _warmup_heavy_queries():
 # 프론트도 8010에서 서빙 → 브라우저 API_BASE=location.origin 자동일치(직원 PC 어디서 열어도 동작).
 import os as _os
 from fastapi.staticfiles import StaticFiles as _StaticFiles
+
+# ★index.html / *.js 는 브라우저 캐시 금지.
+#   index.html이 캐시되면 그 안의 ?v=… 캐시버스팅이 통째로 무력화되어, JS를 고쳐도 화면이 안 바뀜
+#   (2026-08-19: 준비실적처리 수정분이 여러 번 반영 안 되는 문제의 원인). ?v= 는 그대로 두되 보험으로 헤더도 no-store.
+@app.middleware("http")
+async def _no_cache_front(request, call_next):
+    resp = await call_next(request)
+    p = request.url.path.lower()
+    if p.endswith((".html", ".js")) or p in ("/", ""):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
+
 _FRONT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))   # backend의 상위 = PNC_ERP_Web
 app.mount("/", _StaticFiles(directory=_FRONT_DIR, html=True), name="front")

@@ -58,3 +58,11 @@ _git_snapshot.log
 .pncind*
 *secret*
 *.credentials
+
+# --- 멀티에이전트 작업 인프라 (로컬 전용, 대표님 저장소엔 노출 안 함) ---
+# claude-main/gemini 워커 브리프·결과·task 진행기록. 개발된 실코드(routers/*.py 등)만
+# 커밋되고, 이 작업관리 폴더는 push되지 않음.
+/tasks/
+/_shared/
+/_templates/
+/CLAUDE.local.md
