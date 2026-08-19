@@ -2338,7 +2338,7 @@ SCREEN.subvariant=(c)=>{
     return `<div class="sv-card" data-rid="${r.route_id}" style="border:1px solid ${cur?'#bfe6cd':'#c9d3e0'};border-radius:8px;padding:8px 12px;margin-bottom:8px;background:${cur?'#eafaef':'#fff'};cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:center" title="더블클릭: 상세${cur?' 보기':' 편집'}">
       <span style="background:${cur?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:8px;padding:1px 8px;font-size:11px;font-weight:700" title="후보 라벨(base 품번은 불변)">${esc(st.routeTarget)}_R${String(r.baseline?1:r.route_no).padStart(2,'0')}${cur?' · 현행':''}</span>
       <b style="color:#1c3a6e">${esc(r.route_name||(r.baseline?'현행(실사용 BOM)':''))}</b>
-      <span style="color:#5a6b82;font-size:12px">구분 <b>${esc(r.gubun||'-')}</b>${r.vendor_code?` · 공급처 <b>${esc(r.vendor_name||r.vendor_code)}</b>`:''}${r.apply_from?` · 적용 ${esc(r.apply_from)}`:''} · 라인 ${(r.lines||[]).length}</span>
+      <span style="color:#5a6b82;font-size:12px">라인 ${(r.lines||[]).length}</span>
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':(cur?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">현행</span>':apBadge(r))}
       <div style="flex:1"></div>
       ${cur
@@ -2377,13 +2377,11 @@ SCREEN.subvariant=(c)=>{
           ${f.method==='copy'&&alts.length?`<label style="font-weight:700;color:#33507d">복사할 원본 후보</label>
             <select class="inp nf" data-k="source_route_id" style="width:100%;box-sizing:border-box;margin:3px 0 8px">${alts.map(r=>`<option value="${r.route_id}" ${+f.source_route_id===r.route_id?'selected':''}>후보 ${r.route_no} · ${esc(r.route_name||'')}</option>`).join('')}</select>`:''}
           ${f.method==='blank'?`<div style="margin-top:8px;padding:10px;border:1px solid #e2e8f2;border-radius:8px;background:#fafbfd">
-            <div style="font-weight:700;color:#33507d;margin-bottom:6px">헤더(빈 후보 필수값)</div>
-            <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:7px 9px;align-items:center">
-              <label style="text-align:right;color:#33507d">구분${REQ}</label><select class="inp nf" data-k="gubun">${['',...st.gopts].map(o=>`<option value="${esc(o)}" ${String(o)===String(f.gubun||'')?'selected':''}>${o?esc(o):'(선택)'}</option>`).join('')}</select>
-              <label style="text-align:right;color:#33507d">공급처${REQ}</label><input class="inp nf" list="sv-vdl" data-k="vendor_code" value="${esc(f.vendor_code||'')}" placeholder="거래처 검색">
-              <label style="text-align:right;color:#33507d">유효일자${REQ}</label><input class="inp nf" type="date" data-k="apply_from" value="${esc(f.apply_from||'')}">
+            <div style="font-weight:700;color:#33507d;margin-bottom:6px">헤더(빈 후보)</div>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:7px 9px;align-items:center">
               <label style="text-align:right;color:#33507d">현행여부</label><label style="font-size:12px"><input type="checkbox" class="nf" data-k="current_flag" ${f.current_flag?'checked':''}> 현행</label>
-            </div></div>`:''}
+            </div>
+            <div style="color:#8aa0bd;font-size:10.5px;margin-top:6px">구분(제작/매입/사급)은 라인별 · 공급처는 조달프로파일에서 배정 · 유효기간 없음.</div></div>`:''}
           <div style="color:#8aa0bd;font-size:11px;margin-top:10px">생성 시 <b style="color:#c0392b">개발 미승인</b> 상태이며, 곧바로 상세 편집 모달이 열립니다. 승인해야 조달프로파일에 노출됩니다.</div>
         </div>
         <div style="padding:12px 18px;border-top:1px solid #e2e8f2;text-align:right"><button class="btn ghost" id="nr-cancel">취소</button> <button class="btn" id="nr-create" style="background:#1c7c3a;color:#fff">생성 →</button></div>
@@ -2428,8 +2426,7 @@ SCREEN.subvariant=(c)=>{
       return ` <span title="절삭공정 자동귀속(부품 위치 따라감): ${esc(arr.map(x=>x.name+' '+nfq(x.wq)).join(', '))}" style="color:#b5651d;font-size:10px;border:1px solid #e6cfae;border-radius:3px;padding:0 4px">⚙${nfq(s)}</span>`;};
     const poolRow=p=>{const b=badgeOf(p);return `<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:grab;padding:2px 0;border-bottom:1px solid #f0eef6">
       <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}
-      <span style="margin-left:auto;color:${b.c};font-size:10px;border:1px solid ${b.c}55;border-radius:8px;padding:0 6px;white-space:nowrap">${esc(b.t)}</span>
-      <button class="btn sp-ledit" draggable="false" data-lid="${p.line_id}" title="부품 라인 직접수정(BOM 구성과 동일 폼)" style="padding:0 5px;font-size:10px;color:#1c47a0">✎</button></div>`;};
+      <span style="margin-left:auto;color:${b.c};font-size:10px;border:1px solid ${b.c}55;border-radius:8px;padding:0 6px;white-space:nowrap">${esc(b.t)}</span></div>`;};
     const nodeBox=(node,label,color,dsub,np2,depth)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
       const kids=subs.filter(s=>dsub>0?s.parent_line===dsub:!s.parent_line);   // ★이 노드의 자식 SUB(중첩=서브안의서브)
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
@@ -2528,13 +2525,11 @@ SCREEN.subvariant=(c)=>{
       </div></div>`;};
   const detailModal=()=>{const d=st.detail;if(!d)return '';const R=routeById(d.route_id);if(!R)return '';
     const ed=d.mode==='edit'&&canW&&!R.baseline, h=d.hdr||{};
-    const hdrView=`<div style="color:#5a6b82;font-size:12.5px">구분 <b>${esc(R.gubun||'-')}</b>${R.vendor_code?` · 공급처 <b>${esc(R.vendor_name||R.vendor_code)}</b>`:''}${R.apply_from?` · 적용 ${esc(R.apply_from)}`:''}${R.note?` · ${esc(R.note)}`:''}</div>`;
-    const hdrEdit=`<div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px 10px;align-items:center;font-size:12px;padding:10px 0;border-bottom:1px dashed #e2e8f2">
+    const hdrView=`<div style="color:#5a6b82;font-size:12.5px">${R.note?esc(R.note):'<span style="color:#8aa0bd">경로 비고 없음</span>'}</div>`;
+    const hdrEdit=`<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center;font-size:12px;padding:10px 0;border-bottom:1px dashed #e2e8f2">
         <label style="text-align:right;color:#33507d;font-weight:600">경로명</label><input class="inp df" data-k="route_name" value="${esc(h.route_name||'')}">
-        <label style="text-align:right;color:#33507d;font-weight:600">구분${REQ}</label><select class="inp df" data-k="gubun">${['',...st.gopts].map(o=>`<option value="${esc(o)}" ${String(o)===String(h.gubun||'')?'selected':''}>${o?esc(o):'(선택)'}</option>`).join('')}</select>
-        <label style="text-align:right;color:#33507d;font-weight:600">유효일자${REQ}</label><input class="inp df" type="date" data-k="apply_from" value="${esc(h.apply_from||'')}">
         <label style="text-align:right;color:#33507d;font-weight:600">비고</label><input class="inp df" data-k="note" value="${esc(h.note||'')}">
-        <div style="grid-column:1/-1;color:#8aa0bd;font-size:10.5px">업체(공급처)는 승인 후 <b>업체 매핑(조달프로파일)</b>에서 배분% 지정합니다 — 후보 헤더엔 지정하지 않습니다.</div>
+        <div style="grid-column:1/-1;color:#8aa0bd;font-size:10.5px">구분(제작/매입/사급)은 라인(부품)별로 지정 · 업체(공급처)는 승인 후 <b>업체 매핑(조달프로파일)</b>에서 배분% 지정합니다.</div>
       </div>`;
     const fresh=ed&&!!d.fresh;   // 신규 미커밋 드래프트(가져오기로 방금 생성, [등록] 전) — 닫기=등록취소(롤백)
     const isCur=!R.baseline&&(R.current_flag||R.route_no===1);

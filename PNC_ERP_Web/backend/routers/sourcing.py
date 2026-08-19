@@ -677,11 +677,9 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
         nx.close()
 
 def _route_hdr_errors(p):
-    # ★공급처는 후보 헤더에서 받지 않음(업체=조달프로파일에서 배분, 2계층) → vendor 필수검증 제거.
-    errs = []
-    if not str(p.get("gubun", "")).strip(): errs.append("구분은 필수입니다")
-    if not str(p.get("apply_from", "")).strip(): errs.append("유효일자(적용시작)는 필수입니다")
-    return errs
+    # ★후보 헤더는 공급처·구분·유효일자를 받지 않는다: 구분=라인(부품)별(제작/매입/사급) · 업체=조달프로파일 배분 · 유효기간 폐지.
+    #   경로는 라인 성격이 섞인 합성이라 헤더 단일 구분이 성립하지 않음(사용자 확정 2026-08-19).
+    return []
 
 @router.post("/api/sourcing/route/save")
 def sourcing_route_save(payload: dict = Body(...)):
