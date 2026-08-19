@@ -39,6 +39,15 @@ nx.bom_line.except_flag  ←  PR_M_ITEM_BOM.EXCEPT_FLAG (현행 효력, TO_APPLY
 4. **검증 게이트**: 컷오버 전 `PR_M_ITEM_BOM vs nx.bom_line.except_flag 불일치=0` + 샘플 품목 `우리 plan = 레거시 PR_T_PLAN_PART_MAT` 대조.
 5. 관련 미해결(아래 §6) : 사급자식 인입·직하위 매입 누락 = 별도 compose STEP7 이슈.
 
+## 5-1. ★★★원가(LME)도 같이 재싱크 필요 — except_flag만 고치면 원가 LME 과다 (2026-08-19 규명)
+- **핵심 교훈**: 명진 같은 전개제외 변경은 **생산(except_flag)뿐 아니라 원가(cs_calc_except/구조)에도** 영향. except_flag만 재싱크하면 **원가 LME가 과다**해짐.
+- **실측(AJR75563402, 260813)**: except_flag 재싱크 후 생산·협력사계획은 diff0인데, **원가 +345 과다**(nx 4783.6 vs 레거시 4438.3).
+  - 분해: 순재료(LME외) 거의일치, **+345 = 전부 LME**(엔진 +275.4 vs 레거시 −69.8).
+  - 원인: 레거시 실원가SP는 **make=2 외주완성 SUB(명진 AJR75563402-19-1)에서 전개정지**(struct에 19-1이 리프, MJU 없음) → 명진이 동 공급하니 LME=0. 우리 엔진 `lme_total`은 "외주완성 뚫고 전개"라 명진 SUB 내부 동부품(MJU64794201/202/302·3H02717A)의 LME(+90/+66/+65/+53)를 계상.
+  - ★내 except_flag 변경과 무관(되돌림 실측 원가변화 +0.0 — 엔진은 cs_calc_except만 읽음).
+- **이것은 [[newerp-lme-overcount-rootcause]] 부채의 새 사례**(nx.bom_line 전개제외 SUB를 원가에서 안 막음). 급조 엔진수정 실패이력 有 → 정답=CS 2계층 구조복구(19-1을 원가 리프로 = cs_calc_except 정합).
+- **컷오버 필수 추가**: except_flag(PR)·cs_calc_except(CS) 재싱크 시 **전개제외 SUB의 원가 리프 경계도 정합**(make=2 외주완성 SUB 내부 미전개) 확인. 안 하면 원가 diff0 깨짐. 검증게이트에 **cost_oracle 전수 diff0(직납138 무회귀)** 포함.
+
 ## 6-1. ★해결 완료 (2026-08-19) — 910 일괄제외 제거
 - **레거시 SP엔 SGROUP=910 제외가 없음**(SP_PR_CREATE_PLAN_협력사계획_생성 규명). 우리 compose STEP7이 임의로 `item_sgroup='910'` 일괄제외를 추가 → 4930A20053B·5210A22409B 등 **910으로 분류된 실 매입/사급부품까지 제외**(gap①②의 공통 근본).
 - **교정(soyo.py _step7_sql)**: `item_sgroup='910'` → **`item_code LIKE 'RAC%' AND item_desc NOT LIKE '%용접링%'`**(RAC 용접봉만 proc_weld로 제외, 용접링은 사급 유지).
