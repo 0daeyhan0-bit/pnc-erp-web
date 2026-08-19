@@ -186,6 +186,28 @@ def _closed(cur, ymd):
     r = cur.fetchone()
     return bool(r and r[0])
 
+# ===== 전 도메인 공통 가드 (마감 일자 잠금 + 재고 가용성 게이팅) — 정본 _schema/STOCK_GATING_CLOSE_LOCK_RULES.md =====
+def _lock_msg(cur, ymd):
+    """마감 일자 잠금. 마감월(nx.stock_close)이면 사유메시지, 아니면 None. (비발생형 — 호출측이 return/raise 결정)"""
+    ymd = str(ymd or "").strip()
+    if len(ymd) >= 6 and _closed(cur, ymd):
+        return f"{_ym(ymd)} 마감된 월입니다 — 생성/수정/삭제 불가"
+    return None
+
+def _stock_short_msg(cur, item, need, points=("MAT",), label="출고"):
+    """재고 가용성 게이팅. item(MAT_CODE 또는 ITEM_CODE)의 지정 재고점 가용(원장 SUM) < need면 부족메시지, 아니면 None.
+       points: MAT(자재)·RDY(준비)·PRD(생산/가공)·ASY(완성)·SAG(사급). 마이너스 원천차단용."""
+    item = str(item or "").strip(); need = float(need or 0)
+    if not item or need <= 0:
+        return None
+    ph = ",".join("?" * len(points))
+    cur.execute(f"""SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger
+        WHERE STOCK_POINT IN ({ph}) AND (MAT_CODE=? OR ITEM_CODE=?)""", *points, item, item)
+    avail = float(cur.fetchone()[0] or 0)
+    if need > avail + 1e-6:
+        return f"재고부족 ({item} 가용 {avail:g} < {label} {need:g})"
+    return None
+
 # ===================== ★Phase5: nx 재고 월마감 스냅샷 (STOCK_POINT별 기초→기말=기초+ΣMAINT) =====================
 # 기말 스냅샷=다음달 기초 연속성·마감후 파생 고정. 잠금=기존 nx.stock_close(ym) 플래그 재사용(옵션).
 # ★사고 재발방지: stock_ledger 무삭제. 재계산은 자기생성 근거키(ym+point)의 stock_close_snap만 갱신.

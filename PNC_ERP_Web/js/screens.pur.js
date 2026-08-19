@@ -1721,8 +1721,8 @@ SCREEN.sourceprofile=(c)=>{
       <div class="page-sub" style="color:#8aa0bd;margin-top:3px">승인 ${appr}건${un?` · 미승인 ${un}건(회색·배정불가)`:''}. R01=현행(실사용 BOM 기준선·자동승인). 미승인 후보는 [개발 › 조달경로 통합검토]에서 승인해야 배정 가능.</div>`;};
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">🧭 조달 프로파일 <span style="font-size:12px;color:var(--muted);font-weight:400">승인 조달경로 후보(R01 현행·R02…)에 유효기간·배분% 배정</span></div>
-     <div class="page-sub">품번 검색 → <b>실제 설정된 BOM</b>(참고) + <b>조달경로 후보 배정</b>. 후보(R01 vs R02…)마다 <b>유효기간·활성·배분%</b>(활성 겹치는 후보 합 100%) 지정. 저장 <code>nx.route_alloc</code></div>
+     <div class="page-title">🧭 조달 프로파일 <span style="font-size:12px;color:var(--muted);font-weight:400">승인 조달경로 후보(R01 현행·R02…)에 활성·배분% 배정</span></div>
+     <div class="page-sub">품번 검색 → <b>실제 설정된 BOM</b>(참고) + <b>조달경로 후보 배정</b>. 후보(R01 vs R02…)마다 <b>활성·배분%</b>(활성 후보 합 100%) 지정. 저장 <code>nx.route_alloc</code></div>
      <div style="display:flex;gap:14px;align-items:flex-start">
       <div style="flex:0 0 290px">
        <div class="toolbar"><input class="inp" id="sp-q" list="sp-dl" autocomplete="off" value="${esc(q)}" placeholder="품번/품명 (예: 3402)" style="width:180px;min-width:0"><datalist id="sp-dl"></datalist><button class="btn" id="sp-search">🔍</button></div>
