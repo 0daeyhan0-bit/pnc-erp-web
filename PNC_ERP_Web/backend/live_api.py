@@ -449,7 +449,7 @@ def dailypurissue(date: str = Query("")):
         cur_a = sum(float(x.get(amtk) or 0) for x in rows)
         base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
         return round(base_a - cur_a)
-    try: jaego_prod = _sdelta(_prodstock(ym))
+    try: jaego_prod = _sdelta(_prodstock(ym, m0, d6))   # ★조회일 기준(기초=7월말=조회월기초, 현재고=월초~조회일). 설계문서 "원장 날짜컷" 반영
     except Exception: jaego_prod = 0
     try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
     except Exception: jaego_sales = 0
