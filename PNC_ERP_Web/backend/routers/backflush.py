@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, _mat_avail)
 
 router = APIRouter()
 
@@ -95,6 +95,30 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
     if not comps and not weld: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
+    # ★재고 게이트(마이너스 원천차단): 키팅=flag-only(자재무차감) → 실제 자재는 생산실적서 전량 차감되므로
+    #   자재 현재고(mat_stock_daily=_mat_avail 정본)가 BOM 소요를 커버해야 함. mode=post만(reverse=재고환원, 게이트無).
+    #   ★커버리지 인지: 자재재고 '관리품목'만 게이트 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 제외(오차단 방지, 정본 §4-C 검증).
+    #   ★한계: mat_stock_daily는 레거시 PU_T_STOCK_MAINT 일스냅샷 → 당일 연속 백플러시분 미반영(컷오버시 실시간 정본으로 승격 필요).
+    if mode == "post":
+        gc = cro.cursor(); short = []
+        def _tracked(code):
+            gc.execute("SELECT COUNT(*) FROM nx.mat_stock_daily WHERE UPPER(mat_code)=?", str(code or "").strip().upper())
+            return (gc.fetchone()[0] or 0) > 0
+        for _ch, _cq in comps:
+            _need = _cq * prod_qty
+            if _need > 0 and _tracked(_ch):
+                _av = _mat_avail(gc, _ch)
+                if _need > _av + 1e-6:
+                    short.append(f"{_ch}(가용 {_av:g} < 소요 {_need:g})")
+        for _br, _wq in weld.items():
+            _wneed = _wq * prod_qty
+            if _wneed > 0 and _tracked(_br):
+                _av = _mat_avail(gc, _br)
+                if _wneed > _av + 1e-6:
+                    short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
+        if short:
+            more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
+            return {"ok": False, "detail": "재고부족(마이너스 방지) — " + "; ".join(short[:8]) + more}
     out_sp = 'ASY' if _is_final_product(nx, item) else 'PRD'   # ★완성=최종제품 ASY / 반제품 PRD
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
