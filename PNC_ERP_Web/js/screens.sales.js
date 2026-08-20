@@ -683,7 +683,9 @@ SCREEN.lgsale=(c)=>{
        .s4c.s4sel{background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72));
                   outline:2px solid #4a86e8;outline-offset:-2px;font-weight:700}
        .s4c.s4lock{cursor:default}
-       .s4tbl tbody{user-select:none}
+       /* 드래그 선택은 계획셀(.s4c)에서만 막는다. 나머지 칸은 Ctrl+C 복사 가능 */
+       .s4tbl tbody td{user-select:text;-webkit-user-select:text}
+       .s4tbl tbody td.s4c{user-select:none;-webkit-user-select:none}
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
@@ -743,7 +745,8 @@ SCREEN.lgsale=(c)=>{
         const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;n++;q+=Math.max(0,pl-sd);}}));
       e.innerHTML=n?`선택 <b>${nf(n)}</b>칸 · 수량 <b>${nf(q)}</b>`:'';};
     if(tb&&gw){
-      gw.style.userSelect='none';gw.onselectstart=()=>false;
+      // 계획셀(.s4c)에서 시작한 드래그만 선택을 막는다 — 그 외 칸은 Ctrl+C 복사 가능
+      gw.onselectstart=e=>{const t=e.target;return !(t&&t.closest&&t.closest('td.s4c'));};
       const rcOf=td=>{const tr=td.parentElement;return {r:tr?tr.rowIndex:-1,c:td.cellIndex};};
       const cellAt=(x,y)=>{const e=document.elementFromPoint(x,y);if(!e)return null;
         const td=e.closest('td.s4c[data-k]');if(td)return td;
@@ -771,6 +774,8 @@ SCREEN.lgsale=(c)=>{
       tb.addEventListener('mousedown',e=>{if(e.button!==0)return;
         const start=e.target.closest('td');if(!start||!start.closest('tr'))return;
         const hit=e.target.closest('td.s4c[data-k]');
+        // 계획셀이 아니면 드래그선택을 걸지 않는다 → 도번·제번 등은 자유롭게 복사
+        if(!hit){if(!e.ctrlKey&&!e.metaKey){clearAll();selInfo();}return;}
         e.preventDefault();
         if(hit&&!e.ctrlKey&&!e.metaKey&&st.sel.has(hit.getAttribute('data-k'))&&st.sel.size===1){
           st.sel.delete(hit.getAttribute('data-k'));hit.classList.remove('s4sel');selInfo();return;}
