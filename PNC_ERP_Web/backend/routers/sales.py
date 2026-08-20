@@ -2,7 +2,7 @@
 """사급(sagub)+매출(saleout/lgsale)+권한(perm) 도메인 라우터 — 사급재고조정/출고/회수·매출마감출고·LG송장·권한.
    app.py에서 분리. 원장/가격 헬퍼(_led_ins·_sagub_move·_pur_price·_sagub_price·_is_free_sagub·
    _sale_close_lookup·_saleout_led·_lgsale_led·_next_yymm)는 이 도메인 로컬(블록내). 공유는 common.py."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed
 
@@ -922,5 +922,403 @@ def lgsale_cancel(payload: dict = Body(...)):
             raise HTTPException(400, "sheet_no 또는 id 필요")
         cn.commit()
         return {"ok": True, "canceled": n}
+    finally:
+        cn.close()
+
+
+# ===================== 출하실적등록 (레거시 w_pr_input_040) =====================
+# 제번단위 출하실적. 드래그 선택 → 확인(F12) = 완제품(ASSY)재고 있는 만큼만 출하처리.
+#   그리드: PR_T_PLAN_ITEM_DTL(계획) + 실적 4종(생산/검사/출하/이동) + ASSY재고
+#   확인:   SA_T_SALE_DTL(+) · SA_T_STOCK_MAINT(TAG='J', 음수) · SA_T_ITEM_STOCK(차감)
+#   ★쓰기는 nx 만(§1-1). 음수재고 발생시 롤백(레거시 동일).
+S040 = "PARTNER_ERP_TEST3.nx"
+
+@router.get("/api/sale040/lines")
+def sale040_lines(src: str = Query("nx")):
+    """라인 드롭다운 = CM_M_MASTER_DETAIL(KIND_CODE='PR003') + 계획에 실제 쓰인 코드."""
+    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    cn = _conn() if str(src).strip() == "live" else _nx()
+    cur = cn.cursor()
+    try:
+        cur.execute(f"""SELECT DETAIL_CODE, REPLACE(REPLACE(ISNULL(DETAIL_DESC,''),CHAR(13),''),CHAR(10),'')
+                         FROM {SCH}.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR003' ORDER BY DETAIL_CODE""")
+        nm = {str(a).strip(): str(b).strip() for a, b in cur.fetchall()}
+        cur.execute(f"""SELECT DISTINCT LINE_NO FROM {SCH}.PR_T_PLAN_ITEM_DTL
+                        WHERE ISNULL(LINE_NO,'')<>'' AND PLAN_YMD>=CONVERT(varchar(6),DATEADD(month,-3,getdate()),12)""")
+        for r in cur.fetchall():
+            c = str(r[0]).strip()
+            nm.setdefault(c, c)
+        return {"rows": [{"code": c, "nm": (nm[c] or c)} for c in sorted(nm)]}
+    finally:
+        cn.close()
+
+def _s040_dates(from_ymd, gigan):
+    d0 = datetime.strptime(_d6(from_ymd) or datetime.now().strftime("%y%m%d"), "%y%m%d")
+    return [(d0 + timedelta(days=i)).strftime("%y%m%d") for i in range(max(1, int(gigan or 1)))]
+
+@router.get("/api/sale040/grid")
+def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Query(""),
+                 wo: str = Query(""), item: str = Query(""), src: str = Query("nx"),
+                 limit: int = Query(4000)):
+    """출하실적등록 그리드. 그레인=(제번, 분할제번, 도번)."""
+    dates = _s040_dates(from_ymd, gigan)
+    d1, d2 = dates[0], dates[-1]
+    # ★소스 토글(키팅·410 과 동일): nx=우리 재현 / live=레거시 라이브 직독(대사용, 읽기전용)
+    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    cn = _conn() if str(src).strip() == "live" else _nx()
+    cur = cn.cursor()
+    try:
+        # ── 계획원천 = 레거시 dw_pr_input_040_t1 3-UNION ──────────────────
+        #   b1 엘지계획   sa_t_plan_item_dtl              (data_gubun=1)
+        #   b2 예외생산   pr_t_plan_input                 (분할제번 없음 → work_order 로 대체)
+        #   b3 전일계획잔여 sa_t_plan_dtl_daily × pr_m_model_bom (del_flag=1)
+        #   계획수량 = ceiling(plan_qty × use_qty × prod_rate/100)
+        #   대상 = (work_code LIKE 'A%' OR in_cust_code 존재) AND pr_m_mat 에 없음
+        # ※ nx 에는 SA_T_PLAN_DTL_DAILY 가 없어 b3 는 live 에서만 적용.
+        has_daily = str(src).strip() == "live"
+
+        f_item = "%%%s%%" % item.strip() if item.strip() else None
+        f_wo = "%%%s%%" % wo.strip() if wo.strip() else None
+        f_line = line.strip() if (line.strip() and line.strip() != '%') else None
+
+        def _flt(alias_item, alias_wo, alias_swo, alias_line):
+            """공통 화면필터(품목/제번/라인) — 브랜치별 컬럼명이 달라 별칭을 받는다."""
+            cc, pp = [], []
+            if f_item: cc.append("%s LIKE ?" % alias_item); pp.append(f_item)
+            if f_wo:
+                cc.append("(%s LIKE ? OR %s LIKE ?)" % (alias_wo, alias_swo)); pp += [f_wo, f_wo]
+            if f_line: cc.append("ISNULL(%s,'')=?" % alias_line); pp.append(f_line)
+            return ("".join(" AND " + c for c in cc), pp)
+
+        # 대상품목 필터(레거시 동일) — pr_m_mat 제외
+        # ※ 'A%' 의 % 때문에 %-포맷 금지. 함수로 조립한다.
+        def TGT(col):
+            return ("(c.WORK_CODE LIKE 'A" + "%" + "' OR ISNULL(c.IN_CUST_CODE,'')>'')"
+                    " AND NOT EXISTS(SELECT 1 FROM {SCH}.PR_M_MAT m WITH(NOLOCK)"
+                    " WHERE m.MAT_CODE=" + col + ")")
+        # 계획수량식(레거시 ceiling)
+        def QEXP(q, u):
+            return ("CEILING(CONVERT(float," + q + ") * ISNULL(" + u + ",1)"
+                    " * ISNULL(c.PROD_RATE,100) / 100)")
+
+        parts, prm = [], []
+
+        # ---- b1 엘지계획 ----
+        w1, p1 = _flt("a.C_ITEM_CODE", "a.WORK_ORDER", "ISNULL(a.SPLIT_WORK_ORDER,'')", "a.LINE_NO")
+        parts.append(f"""
+            SELECT '0' del_flag, '1' data_gubun,
+                   a.WORK_ORDER wo, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER) swo, a.C_ITEM_CODE item,
+                   ISNULL(a.LINE_NO,'') line_no, ISNULL(a.MODEL_NO,'') model_no,
+                   ISNULL(a.TOOLS_DESC,'') tools, ISNULL(c.WORK_CODE,'') work_code,
+                   ISNULL(a.REMARKS2,'') rmk1, ISNULL(a.FROM_SEQ,0) fseq, ISNULL(a.TO_SEQ,0) tseq,
+                   ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
+                   ISNULL(a.LOT_QTY,0) lot,
+                   {QEXP('a.PLAN_QTY','a.USE_QTY')} planq
+              FROM {{SCH}}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
+              JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
+             WHERE a.PLAN_YMD BETWEEN ? AND ?
+               AND {TGT('a.C_ITEM_CODE')}{w1}""")
+        prm += [d1, d2] + p1
+
+        # ---- b2 예외생산 (분할제번 컬럼 없음 → work_order) ----
+        w2, p2 = _flt("a.ITEM_CODE", "a.WORK_ORDER", "a.WORK_ORDER", "a.LINE_NO")
+        parts.append(f"""
+            SELECT '0' del_flag,
+                   CASE WHEN ISNULL(a.PROD_TAG,'')='PO' THEN '3' ELSE '2' END data_gubun,
+                   a.WORK_ORDER wo, a.WORK_ORDER swo, a.ITEM_CODE item,
+                   ISNULL(a.LINE_NO,'') line_no, '' model_no,
+                   '' tools, ISNULL(c.WORK_CODE,'') work_code,
+                   ISNULL(a.REMARKS,'') rmk1, 0 fseq, 0 tseq,
+                   ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
+                   ISNULL(a.PLAN_QTY,0) lot,
+                   {QEXP('a.PLAN_QTY','1')} planq
+              FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
+              JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
+             WHERE a.PLAN_YMD BETWEEN ? AND ?
+               AND {TGT('a.ITEM_CODE')}{w2}""")
+        prm += [d1, d2] + p2
+
+        # ---- b3 전일계획 잔여(삭제된계획) — live 전용 ----
+        if has_daily:
+            yst = (datetime.strptime(d1, "%y%m%d") - timedelta(days=1)).strftime("%y%m%d")
+            w3, p3 = _flt("b.C_ITEM_CODE", "a.WORK_ORDER", "ISNULL(a.SPLIT_WORK_ORDER,'')", "a.LINE_NO")
+            parts.append(f"""
+            SELECT '1' del_flag, '1' data_gubun,
+                   a.WORK_ORDER wo, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER) swo, b.C_ITEM_CODE item,
+                   ISNULL(a.LINE_NO,'') line_no, ISNULL(a.MODEL_NO,'') model_no,
+                   '' tools, ISNULL(c.WORK_CODE,'') work_code,
+                   ISNULL(a.REMARKS2,'') rmk1, 0 fseq, 0 tseq,
+                   ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
+                   ISNULL(a.LOT_QTY,0) lot,
+                   {QEXP('a.PLAN_QTY','b.USE_QTY')} planq
+              FROM {{SCH}}.SA_T_PLAN_DTL_DAILY a WITH(NOLOCK)
+              JOIN {{SCH}}.PR_M_MODEL_BOM b WITH(NOLOCK)
+                   ON a.MODEL_NO=b.MODEL_NO AND a.PLAN_YMD BETWEEN b.MAKE_YMD AND b.TO_APPLY_YMD
+              JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON b.C_ITEM_CODE=c.ITEM_CODE
+             WHERE a.WORK_YMD=? AND a.PLAN_YMD BETWEEN ? AND ?
+               AND {TGT('b.C_ITEM_CODE')}{w3}
+               AND EXISTS(SELECT 1 FROM {{SCH}}.SA_T_PLAN_DTL_DAILY x WITH(NOLOCK)
+                           WHERE x.WORK_YMD=? AND x.WORK_ORDER=a.WORK_ORDER
+                             AND ISNULL(x.SPLIT_WORK_ORDER,'')=ISNULL(a.SPLIT_WORK_ORDER,'')
+                             AND x.PLAN_YMD>?)
+               AND NOT EXISTS(SELECT 1 FROM {{SCH}}.SA_T_PLAN_DTL_DAILY y WITH(NOLOCK)
+                           WHERE y.WORK_YMD=CONVERT(varchar,getdate(),12) AND y.WORK_ORDER=a.WORK_ORDER
+                             AND ISNULL(y.SPLIT_WORK_ORDER,'')=ISNULL(a.SPLIT_WORK_ORDER,''))""")
+            prm += [yst, yst, d2] + p3 + [yst, yst]
+
+        sql = ("SELECT TOP %d * FROM (\n%s\n) u WHERE u.planq > 0 "
+               "ORDER BY u.line_no, u.wo, u.item") % (int(limit) * 8, "\n            UNION ALL\n".join(parts))
+        cur.execute(sql.format(SCH=SCH), *prm)
+        cols = [d[0] for d in cur.description]
+        keyed = {}
+        for rr in cur.fetchall():
+            r = dict(zip(cols, rr))
+            # ★del_flag 는 행 정체성의 일부(레거시 동일): 0=현재계획 / 1=전일 삭제계획.
+            #   같은 (제번,도번)이 양쪽에 다 나올 수 있어 키에서 빼면 수량이 2배가 된다.
+            k = (r["del_flag"], r["wo"], r["swo"], r["item"])
+            g = keyed.get(k)
+            if not g:
+                g = {"wo": r["wo"], "swo": r["swo"], "item": r["item"], "line_no": r["line_no"],
+                     "model_no": r["model_no"], "tools": r["tools"], "work_code": r["work_code"],
+                     "rmk1": r["rmk1"], "fseq": r["fseq"], "tseq": r["tseq"], "ohm": r["ohm"],
+                     "org_ymd": r["ymd"], "org_hm": r["ohm"], "del_flag": r["del_flag"],
+                     "data_gubun": r["data_gubun"], "lot": 0.0, "days": {}}
+                keyed[k] = g
+            g["lot"] = max(g["lot"], float(r["lot"] or 0))
+            g["days"][r["ymd"]] = g["days"].get(r["ymd"], 0.0) + float(r["planq"] or 0)
+        rows = list(keyed.values())
+        if not rows:
+            return {"dates": dates, "rows": [], "cnt": 0}
+
+        # ---- 실적 4종 + ASSY재고 (제번·도번 단위) ----
+        keys = [(g["wo"], g["swo"], g["item"]) for g in rows]
+        items = sorted({g["item"] for g in rows})
+        prod = {}; insp = {}; sale = {}; mvin = {}; mvout = {}; sday = {}
+        def _chunk(seq, n=600):
+            for i in range(0, len(seq), n):
+                yield seq[i:i + n]
+        for ck in _chunk(items):
+            ph = ",".join("?" * len(ck))
+            cur.execute(f"""SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(ISNULL(PROD_QTY,0))
+                              FROM {SCH}.PR_T_PROD_DTL WITH(NOLOCK)
+                             WHERE ITEM_CODE IN ({ph}) AND ISNULL(FINISH_FLAG,'0')='0'
+                             GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE""", *ck)
+            for a, b, c, v in cur.fetchall(): prod[(a, b, c)] = float(v or 0)
+            # 검사수량(QA_T_INSP_DTL)은 이 화면에서 미사용
+            pass
+            
+            cur.execute(f"""SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(ISNULL(SALE_QTY,0))
+                              FROM {SCH}.SA_T_SALE_DTL WITH(NOLOCK)
+                             WHERE ITEM_CODE IN ({ph}) AND ISNULL(FINISH_FLAG,'0')='0'
+                             GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE""", *ck)
+            for a, b, c, v in cur.fetchall(): sale[(a, b, c)] = float(v or 0)
+            # 출하반품(move_tag='3') 은 출하에서 뺀다(레거시 동일)
+            cur.execute(f"""SELECT FR_WORK_ORDER, ISNULL(FR_SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(ISNULL(MOVE_QTY,0))
+                              FROM {SCH}.SA_T_ITEM_MOVE WITH(NOLOCK)
+                             WHERE ITEM_CODE IN ({ph}) AND ISNULL(FR_FINISH_FLAG,'0')='0' AND MOVE_TAG='3'
+                             GROUP BY FR_WORK_ORDER, ISNULL(FR_SPLIT_WORK_ORDER,''), ITEM_CODE""", *ck)
+            for a, b, c, v in cur.fetchall(): mvout[(a, b, c)] = float(v or 0)
+            # 일자별 출하(셀 색·표시용)
+            cur.execute(f"""SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SALE_YMD, SUM(ISNULL(SALE_QTY,0))
+                              FROM {SCH}.SA_T_SALE_DTL WITH(NOLOCK)
+                             WHERE ITEM_CODE IN ({ph}) AND ISNULL(FINISH_FLAG,'0')='0'
+                             GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SALE_YMD""", *ck)
+            for a, b, c, y, v in cur.fetchall(): sday[(a, b, c, y)] = float(v or 0)
+        astk = {}
+        for ck in _chunk(items):
+            ph = ",".join("?" * len(ck))
+            cur.execute(f"""SELECT ITEM_CODE, SUM(ISNULL(STOCK_QTY,0)) FROM {SCH}.SA_T_ITEM_STOCK WITH(NOLOCK)
+                             WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE""", *ck)
+            for a, v in cur.fetchall(): astk[str(a).strip()] = float(v or 0)
+        nm = {}
+        for ck in _chunk(items):
+            ph = ",".join("?" * len(ck))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM {SCH}.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ck)
+            for a, b in cur.fetchall(): nm[str(a).strip()] = b
+
+        # 제번 전체계획(조회기간 밖 포함) — 살구색(제번 전량출하) 판정용.
+        # ※ 화면 기간만 보면 부분출하도 완료로 보이므로 반드시 제번 전체로 비교한다.
+        woplan = {}
+        wolist = sorted({(g["wo"], g["swo"], g["item"]) for g in rows})
+        for ck in _chunk(wolist, 300):
+            oc = " OR ".join(["(a.WORK_ORDER=? AND a.C_ITEM_CODE=?)"] * len(ck))
+            pv = []
+            for w_, s_, i_ in ck: pv += [w_, i_]
+            cur.execute(f"""SELECT a.WORK_ORDER, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER), a.C_ITEM_CODE,
+                                   SUM(CEILING(CONVERT(float,a.PLAN_QTY)*ISNULL(a.USE_QTY,1)
+                                               *ISNULL(c.PROD_RATE,100)/100))
+                              FROM {SCH}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
+                              JOIN {SCH}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
+                             WHERE ({oc})
+                             GROUP BY a.WORK_ORDER, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER),
+                                      a.C_ITEM_CODE""", *pv)
+            for a_, b_, c_, v in cur.fetchall():
+                kk = (str(a_).strip(), str(b_).strip(), str(c_).strip())
+                woplan[kk] = woplan.get(kk, 0.0) + float(v or 0)
+
+        out = []
+        for g in rows:
+            k = (g["wo"], g["swo"], g["item"])
+            sq = sale.get(k, 0.0) - mvout.get(k, 0.0)
+            plan_tot = round(sum(g["days"].values()), 0)
+            g.update({
+                "itemnm": nm.get(g["item"], ''),
+                "prod_qty": round(prod.get(k, 0.0), 0),
+                "sale_qty": round(sq, 0),
+                "stock_qty": round(astk.get(g["item"], 0.0), 0),
+                "lot": round(g["lot"], 0),
+                "plan_qty": plan_tot,
+                "wo_plan": round(woplan.get(k, plan_tot), 0),   # 제번 전체계획(살구 판정 기준)
+                "sday": {y: round(sday.get((g["wo"], g["swo"], g["item"], y), 0.0), 0) for y in dates},
+                "days": {y: round(v, 0) for y, v in g["days"].items()},
+            })
+            out.append(g)
+        return {"dates": dates, "rows": out, "cnt": len(out)}
+    finally:
+        cn.close()
+
+@router.post("/api/sale040/confirm")
+def sale040_confirm(payload: dict = Body(...)):
+    """확인(F12) — 선택 셀을 출하처리. 레거시 w_pr_input_040 ue_save 이식.
+       · 출하량 = 계획셀 − 기출하량, 재고 초과분은 재고만큼으로 절삭
+       · SA_T_SALE_DTL / SA_T_STOCK_MAINT(TAG='J') / SA_T_ITEM_STOCK 차감
+       · 음수재고 발생시 전체 롤백"""
+    cells = payload.get("cells") or []
+    user = str(payload.get("user") or "웹")[:20]
+    ymd = _d6(str(payload.get("ymd") or "")) or datetime.now().strftime("%y%m%d")
+    hms = datetime.now().strftime("%H%M%S")
+    if not cells:
+        return {"ok": False, "msg": "출하처리할 셀을 선택하세요."}
+    cn = _nx_tx(); cur = cn.cursor()
+    win = 'w_pr_input_040'
+    try:
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+        seq = int(cur.fetchone()[0] or 0)
+        done = []; skipped = []
+        # 도번별 재고 캐시(같은 도번 여러 제번 → 순서대로 소진)
+        stk = {}
+        for c in cells:
+            wo = str(c.get("wo") or "").strip()
+            swo = str(c.get("swo") or "").strip()
+            it = str(c.get("item") or "").strip()
+            want = int(float(c.get("qty") or 0))
+            if not (wo and it) or want <= 0:
+                continue
+            if it not in stk:
+                cur.execute("SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.SA_T_ITEM_STOCK WHERE ITEM_CODE=?", it)
+                stk[it] = float(cur.fetchone()[0] or 0)
+            avail = stk[it]
+            if avail <= 0:
+                skipped.append({"wo": swo or wo, "item": it, "why": "영업창고 재고없음"})
+                continue
+            qty = int(min(want, avail))       # ★재고만큼만 출하
+            if qty <= 0:
+                skipped.append({"wo": swo or wo, "item": it, "why": "재고부족"})
+                continue
+            cur.execute("""SELECT TOP 1 ISNULL(ITEM_COST,0) FROM nx.PR_M_ITEM_COST
+                            WHERE ITEM_CODE=? AND CUST_CODE IN ('1010','1020')
+                              AND COST_TAG IN ('S','E') AND COST_APPLY_YMD<=?
+                            ORDER BY COST_APPLY_YMD DESC, CUST_CODE ASC, COST_TAG DESC""", it, ymd)
+            cr = cur.fetchone()
+            cost = float(cr[0] or 0) if cr else 0.0
+            cur.execute("""INSERT INTO nx.SA_T_SALE_DTL
+                           (WORK_ORDER,SPLIT_WORK_ORDER,ITEM_CODE,SALE_YMD,SALE_HMS,SALE_QTY,
+                            SALE_COST,SALE_AMT,SALE_USER_ID,FINISH_FLAG,LINE_NO,
+                            INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                            UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                           VALUES(?,?,?,?,?,?,?,?,?,'0',?,?,getdate(),?,?,getdate(),?)""",
+                        wo, swo, it, ymd, hms, qty, cost, round(cost * qty, 2), user,
+                        str(c.get("line_no") or "")[:10], user, win, user, win)
+            seq += 1
+            cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT
+                           (MAINT_YMD,MAINT_SEQ,MAINT_TAG,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,
+                            WORK_ORDER,SPLIT_WORK_ORDER,REMARKS,
+                            INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                            UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                           VALUES(?,?,'J',?,?,0,0,?,?,'',?,getdate(),?,?,getdate(),?)""",
+                        ymd, seq, it, -qty, wo, swo, user, win, user, win)
+            cur.execute("""UPDATE nx.SA_T_ITEM_STOCK
+                              SET STOCK_QTY=ISNULL(STOCK_QTY,0)-?, UPDATE_USER_ID=?,
+                                  UPDATE_DATETIME=getdate(), UPDATE_WINDOW=?
+                            WHERE ITEM_CODE=?""", qty, user, win, it)
+            if cur.rowcount == 0:
+                cn.rollback()
+                return {"ok": False, "msg": "영업창고 재고행이 없습니다(%s)" % it}
+            cur.execute("SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.SA_T_ITEM_STOCK WHERE ITEM_CODE=?", it)
+            left = float(cur.fetchone()[0] or 0)
+            if left < 0:
+                cn.rollback()
+                return {"ok": False, "msg": "영업창고재고를 차감하는 중 (-)재고 발생 — 제번 %s / 도번 %s" % (swo or wo, it)}
+            stk[it] = left
+            done.append({"wo": wo, "swo": swo, "item": it, "qty": qty,
+                         "cell_ymd": str(c.get("ymd") or ""), "left": left})
+        if not done:
+            cn.rollback()
+            msg = "출하처리된 건이 없습니다."
+            if skipped:
+                msg += " (" + ", ".join("%s %s:%s" % (x["wo"], x["item"], x["why"]) for x in skipped[:4]) + ")"
+            return {"ok": False, "skipped": skipped, "msg": msg}
+        cn.commit()
+        tot = sum(x["qty"] for x in done)
+        msg = "출하처리 %d건 · 수량 %d" % (len(done), tot)
+        if skipped:
+            msg += " · 제외 %d건(재고부족)" % len(skipped)
+        return {"ok": True, "done": done, "skipped": skipped, "msg": msg}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
+
+@router.post("/api/sale040/cancel")
+def sale040_cancel(payload: dict = Body(...)):
+    """출하취소 — 그 제번·도번·일자의 출하분을 되돌린다(재고 복원)."""
+    cells = payload.get("cells") or []
+    user = str(payload.get("user") or "웹")[:20]
+    if not cells:
+        return {"ok": False, "msg": "취소할 셀을 선택하세요."}
+    cn = _nx_tx(); cur = cn.cursor()
+    win = 'w_pr_input_040'
+    try:
+        done = []
+        for c in cells:
+            wo = str(c.get("wo") or "").strip()
+            swo = str(c.get("swo") or "").strip()
+            it = str(c.get("item") or "").strip()
+            y = _d6(str(c.get("ymd") or ""))
+            if not (wo and it and y):
+                continue
+            cur.execute("""SELECT ISNULL(SUM(SALE_QTY),0) FROM nx.SA_T_SALE_DTL
+                            WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
+                              AND SALE_YMD=? AND ISNULL(FINISH_FLAG,'0')='0'""", wo, swo, it, y)
+            q = int(float(cur.fetchone()[0] or 0))
+            if q <= 0:
+                continue
+            cur.execute("""DELETE FROM nx.SA_T_SALE_DTL
+                            WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
+                              AND SALE_YMD=? AND ISNULL(FINISH_FLAG,'0')='0'""", wo, swo, it, y)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", y)
+            sq = int(cur.fetchone()[0] or 1)
+            cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT
+                           (MAINT_YMD,MAINT_SEQ,MAINT_TAG,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,
+                            WORK_ORDER,SPLIT_WORK_ORDER,REMARKS,
+                            INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                            UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                           VALUES(?,?,'J',?,?,0,0,?,?,'출하취소',?,getdate(),?,?,getdate(),?)""",
+                        y, sq, it, q, wo, swo, user, win, user, win)
+            cur.execute("""UPDATE nx.SA_T_ITEM_STOCK
+                              SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?, UPDATE_USER_ID=?,
+                                  UPDATE_DATETIME=getdate(), UPDATE_WINDOW=?
+                            WHERE ITEM_CODE=?""", q, user, win, it)
+            cur.execute("SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.SA_T_ITEM_STOCK WHERE ITEM_CODE=?", it)
+            _lf = float(cur.fetchone()[0] or 0)
+            done.append({"wo": wo, "swo": swo, "item": it, "ymd": y, "qty": q, "left": _lf})
+        if not done:
+            cn.rollback()
+            return {"ok": False, "msg": "취소할 출하실적이 없습니다."}
+        cn.commit()
+        return {"ok": True, "done": done,
+                "msg": "출하취소 %d건 · 수량 %d" % (len(done), sum(x["qty"] for x in done))}
+    except Exception:
+        cn.rollback(); raise
     finally:
         cn.close()
