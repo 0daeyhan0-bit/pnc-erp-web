@@ -620,21 +620,31 @@ SCREEN.lgsale=(c)=>{
         +` title="${del?'전일 삭제계획(참고용) — 출하대상 아님':(done?('출하 '+nf(sd)+'/'+nf(pl)+' — 우클릭: 확인/취소'):'우클릭: 확인/취소')}"`
         +`>${sd?nf(sd)+'/'+nf(pl):nf(pl)}</td>`;};
 
-    const NC=13;
+    const NC=16;   // 고정컬럼 17개 → colspan 은 NC+1+dates.length
+    // Output = 계획일자 + 출력시각 (레거시 '26/08/21 21:00' 형식)
+    const outHm=r=>{const y=String(r.org_ymd||''),h=String(r.ohm||'');
+      if(!y&&!h)return '';
+      const yy=y.length===6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;
+      const hh=h.length===4?`${h.slice(0,2)}:${h.slice(2,4)}`:h;
+      return (yy+' '+hh).trim();};
+    // 도번은 툴팁으로 품명 제공(품명 컬럼은 레거시에 없어 제거)
     const rowHtml=r=>`<tr class="s4row"${(r.del_flag||'0')==='1'?' style="color:#78909c" title="전일 삭제계획(참고용)"':''}>
       <td class="center">${esc2((lnm[r.line_no]&&lnm[r.line_no]!==r.line_no)?(r.line_no+' '+lnm[r.line_no]):r.line_no)}</td>
       <td class="center">${(r.del_flag||'0')==='1'?'<span style="color:#b0413e;font-weight:700" title="전일 삭제계획">✕</span> ':''}${esc2(r.swo||r.wo)}</td>
       <td class="center">${esc2(r.model_no)}</td>
       <td class="center">${esc2(r.tools)}</td>
-      <td class="center"><b>${esc2(r.item)}</b></td>
-      <td class="bcap" style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc2(r.itemnm)}">${esc2(r.itemnm)}</td>
+      <td class="center" title="${esc2(r.itemnm)}"><b>${esc2(r.item)}</b></td>
+      <td class="center mut">${esc2(r.change_day)}</td>
       <td class="center mut">${esc2(r.rmk1)}</td>
+      <td class="num mut">${cap(r.prod_rate)}</td>
       <td class="num">${cap(r.fseq)}</td><td class="num">${cap(r.tseq)}</td>
-      <td class="center mut">${esc2(r.ohm)}</td>
+      <td class="center mut">${esc2(String(r.ohm||'').length===4?String(r.ohm).slice(0,2)+':'+String(r.ohm).slice(2,4):(r.ohm||''))}</td>
+      <td class="center mut" style="white-space:nowrap">${esc2(outHm(r))}</td>
       <td class="num">${cap(r.lot)}</td>
       <td class="num">${cap(r.prod_qty)}</td>
       <td class="num"${woDone(r)?' style="background:#fac090"':''}>${cap(r.sale_qty)}</td>
       <td class="num"${(+r.stock_qty||0)>0?' style="font-weight:700;color:#1c47a0"':''}>${cap(r.stock_qty)}</td>
+      <td class="num">${cap(r.plan_qty)}</td>
       ${dates.map(d=>cell(r,d)).join('')}</tr>`;
 
     // 집계행(제번 블록) — 구분=집계/전체 일 때
@@ -642,11 +652,12 @@ SCREEN.lgsale=(c)=>{
       const S=k=>blk.reduce((s,x)=>s+(+x[k]||0),0);
       return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
         <td class="center">${esc2(r0.line_no)}</td><td class="center">${esc2(r0.swo||r0.wo)}</td>
-        <td colspan="3"></td><td colspan="5"></td>
+        <td colspan="3"></td><td colspan="7"></td>
         <td class="num"><b>${nf(S('lot'))}</b></td>
         <td class="num">${cap(S('prod_qty'))}</td>
         <td class="num"${(blk.length&&blk.every(woDone))?' style="background:#fac090"':''}>${cap(S('sale_qty'))}</td>
         <td class="num">${cap(S('stock_qty'))}</td>
+        <td class="num">${cap(S('plan_qty'))}</td>
         ${dates.map(d=>{const pl=blk.reduce((s,x)=>s+((x.days&&x.days[d])||0),0);
           const sd=blk.reduce((s,x)=>s+((x.sday&&x.sday[d])||0),0);
           if(!pl&&!sd)return '<td class="num"></td>';
@@ -717,9 +728,11 @@ SCREEN.lgsale=(c)=>{
      <div id="s4-msg" class="page-sub" style="flex:0 0 auto;min-height:16px"></div>
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit s4tbl" style="font-size:11px"><thead><tr>
-       <th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th><th>품명</th><th>비고</th>
-       <th class="num">From</th><th class="num">To</th><th class="center">시간</th>
-       <th class="num">LOT수량</th><th class="num">생산실적</th><th class="num">출하실적</th><th class="num">ASSY재고</th>
+       <th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th>
+       <th class="center">당김,변경</th><th>비고</th><th class="num">비율</th>
+       <th class="num">From</th><th class="num">To</th><th class="center">시간</th><th class="center">Output</th>
+       <th class="num">LOT수량</th><th class="num">생산실적</th><th class="num">출하실적</th>
+       <th class="num">ASSY재고</th><th class="num">출하계획</th>
        ${dates.map(d=>`<th class="num${dcls(d)}">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?`<tr><td colspan="${NC+1+dates.length}" class="empty">조회 중…</td></tr>`:bodyHtml()}</tbody>
       </table></div></div>`;

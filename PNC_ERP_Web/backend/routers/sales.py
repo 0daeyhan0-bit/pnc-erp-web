@@ -1015,6 +1015,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.LOT_QTY,0) lot,
                    ISNULL(a.USE_QTY,1) use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
+                   ISNULL(a.CHANGE_DAY,'') change_day,
                    {QEXP('a.PLAN_QTY','a.USE_QTY')} planq
               FROM {{SCH}}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
@@ -1034,6 +1035,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.PLAN_QTY,0) lot,
                    1 use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
+                   '' change_day,
                    {QEXP('a.PLAN_QTY','1')} planq
               FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
@@ -1054,6 +1056,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.LOT_QTY,0) lot,
                    ISNULL(b.USE_QTY,1) use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
+                   ISNULL(a.CHANGE_DAY,'') change_day,
                    {QEXP('a.PLAN_QTY','b.USE_QTY')} planq
               FROM {{SCH}}.SA_T_PLAN_DTL_DAILY a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_MODEL_BOM b WITH(NOLOCK)
@@ -1088,6 +1091,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                      "org_ymd": r["ymd"], "org_hm": r["ohm"], "del_flag": r["del_flag"],
                      "data_gubun": r["data_gubun"],
                      "use_qty": float(r["use_qty"] or 1), "prod_rate": float(r["prod_rate"] or 100),
+                     "change_day": r["change_day"] or '',
                      "lot": 0.0, "days": {}}
                 keyed[k] = g
             g["lot"] = max(g["lot"], float(r["lot"] or 0))
