@@ -265,15 +265,34 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
             pass
         agg = {}; days = set()
         for item, ymd, s, qty in src:
+            _cut = cutm.get(item.upper(), '')
+            if _cut not in ('절삭', '설치'):   # ★절삭/설치만 표시(이지링크·분지관·미분류 제외, 사용자 2026-08-20)
+                continue
             days.add(ymd)
             g = agg.get(item)
             if not g:
                 g = {"item": item, "nm": nmm.get(item, ""), "wc": wcm.get(item, ""), "cost": cost.get(item, 0),
-                     "cut": cutm.get(item.upper(), ""), "gdays": {}, "ndays": {}}
+                     "cut": _cut, "gdays": {}, "ndays": {}}
                 agg[item] = g
             g["gdays"][ymd] = g["gdays"].get(ymd, 0) + qty
-            if not (s == 'u4' and ymd == base_ymd):   # ★차감: pr_t_plan_input(u4) 첫날분 제외 (레거시190 정본)
+            if not (s == 'u4' and ymd == base_ymd):   # ★차감: pr_t_plan_input(u4) 첫날분 제외 (레거시190 정본) — 절삭 검증치 보존
                 g["ndays"][ymd] = g["ndays"].get(ymd, 0) + qty
+        # ★설치(영업 수동계획=pr_t_plan_input)는 위 차감으로 통째 제거됨 → 잔량=Σ_WO(계획−출하실적 SA_T_SALE_DTL)로 재설정. 절삭(LG계획 u1)은 무영향. (사용자 2026-08-20: "출고하고 남은 것만")
+        _seol = [it for it in agg if agg[it]["cut"] == '설치']
+        if _seol:
+            try:
+                cur.execute(f"""SELECT x.ITEM_CODE, SUM(CASE WHEN x.pq-x.sh>0 THEN x.pq-x.sh ELSE 0 END) rem FROM (
+                    SELECT p.ITEM_CODE, p.WORK_ORDER, SUM(CAST(p.PLAN_QTY AS float)) pq, ISNULL(MAX(s.sh),0) sh
+                      FROM pr_t_plan_input p
+                      LEFT JOIN (SELECT WORK_ORDER, SUM(CAST(ISNULL(SALE_QTY,0) AS float)) sh FROM sa_t_sale_dtl GROUP BY WORK_ORDER) s ON s.WORK_ORDER=p.WORK_ORDER
+                     WHERE p.PLAN_YMD>=?{tc} GROUP BY p.ITEM_CODE, p.WORK_ORDER) x GROUP BY x.ITEM_CODE""",
+                    *([b, t] if t else [b]))
+                _rem = {str(a).strip(): float(q or 0) for a, q in cur.fetchall()}
+                for it in _seol:
+                    g = agg[it]; _pday = min(g["gdays"]) if g["gdays"] else base_ymd
+                    g["ndays"] = {_pday: _rem.get(it, 0)}   # 설치 잔량(계획−출하)을 계획일에 배치
+            except Exception:
+                pass
         rows = []
         for g in agg.values():
             gq = sum(g["gdays"].values()); nq = sum(g["ndays"].values()); c = g["cost"]

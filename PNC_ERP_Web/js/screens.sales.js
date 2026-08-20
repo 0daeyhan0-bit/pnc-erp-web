@@ -88,6 +88,11 @@ SCREEN.salesforecast=(c)=>{
   const API=API_BASE;
   let F={days:[],rows:[],base:''}, loading=true, mode='net', cur=[], metric='sales', reqSeq=0, sortKey='', sortDir=1, cutf='';   // mode:net(차감후)|gross(차감전=라이브) · metric:sales(영업예상매출)|sagub(예상 LG사급금액) · sortKey/Dir:헤더더블클릭 정렬 · cutf:구분(절삭/설치)필터
   let sfTimer=null;   // ★날짜 재조회 디바운스 타이머(SCREEN레벨 유지). 두자리(08) 입력 중 재렌더로 input이 교체돼 편집 깨지는 버그 방지
+  // ★기본 기간 = 당일 ~ 당월말
+  const _p2=n=>(''+n).padStart(2,'0');
+  const _defRange=()=>{const n=new Date();const e=new Date(n.getFullYear(),n.getMonth()+1,0);
+    return [`${(''+n.getFullYear()).slice(2)}${_p2(n.getMonth()+1)}${_p2(n.getDate())}`,
+            `${(''+e.getFullYear()).slice(2)}${_p2(e.getMonth()+1)}${_p2(e.getDate())}`];};
   const WD=['일','월','화','수','목','금','토'];
   const CUTCLR={'절삭':'#1c47a0','설치':'#1c7c3a','분지관':'#b8860b','이지링크':'#8e44ad'};   // 구분(절삭/설치) 색
   const cutBadge=v=>v?`<span style="font-size:11px;font-weight:700;color:${CUTCLR[v]||'#5a7597'}">${esc(v)}</span>`:'<span style="color:#c9d3e0">-</span>';
@@ -140,7 +145,7 @@ SCREEN.salesforecast=(c)=>{
       if((tEl.value||'').trim()&&(!to||to.length!==6)){setSfErr('⚠ 종료일이 올바르지 않습니다');return;}
       if(to&&from>to){setSfErr('⚠ 시작일이 종료일보다 늦습니다');return;}
       setSfErr('');load(from,to);};
-    c.querySelector('#sf-base').onchange=doGo; c.querySelector('#sf-to').onchange=doGo;
+    // ★날짜 onchange 자동재조회 제거 — 세그먼트(08) 입력 중 재렌더로 input이 교체돼 편집이 튕기던 버그. 검색버튼·Enter로만 재조회.
     c.querySelector('#sf-base').onkeyup=e=>{if(e.key==='Enter')doGo();}; c.querySelector('#sf-to').onkeyup=e=>{if(e.key==='Enter')doGo();};
     const dayQ=(r,d)=>(mode==='net'?r.ndays:r.gdays)[d]||0;
     const rowQ=r=>mode==='net'?r.nq:r.gq, rowA=r=>mode==='net'?r.namt:r.gamt;
@@ -186,14 +191,14 @@ SCREEN.salesforecast=(c)=>{
     };
     c.querySelector('#go').onclick=doGo;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')render();};   // ★검색=기간 재조회(doGo). 품번검색은 클라이언트 필터(render)
     c.querySelector('#work').onchange=render; c.querySelector('#cutf').onchange=e=>{cutf=e.target.value;render();};
-    c.querySelector('#reset').onclick=()=>{mode='net';sortKey='';sortDir=1;cutf='';draw();};
+    c.querySelector('#reset').onclick=()=>{mode='net';sortKey='';sortDir=1;cutf='';const[b,t]=_defRange();load(b,t);};   // 초기화=기본기간(당일~당월말) 재조회
     c.querySelector('#xls').onclick=()=>{
       const amtcol=metric==='sagub'?'예상LG사급금액':'예상매출금액', unitcol=metric==='sagub'?'개당LG사급비':'단가';
       const hd=['도번','품명','작업처','구분',unitcol,'합계수량',amtcol].concat(days.map(d=>(''+d).slice(2)+'수량')).concat(days.map(d=>(''+d).slice(2)+'금액'));
       downloadCSV((metric==='sagub'?'예상LG사급금액_':'영업예상매출현황_')+mode+'.csv',hd,cur.map(r=>[r.item,r.nm,r.wc,r.cut||'',r.cost,rowQ(r),rowA(r)].concat(days.map(d=>dayQ(r,d))).concat(days.map(d=>Math.round(dayQ(r,d)*r.cost)))));};
     render();
   };
-  load();
+  { const[b,t]=_defRange(); load(b,t); }   // ★기본 기간 = 당일 ~ 당월말
 };
 
 /* LG리시빙관리 (영업, dw_sa_sale_110) — 도번 × 날짜(일자~일자 기간) 피벗. 수량/금액 토글, 내수/수출(mkt) */
