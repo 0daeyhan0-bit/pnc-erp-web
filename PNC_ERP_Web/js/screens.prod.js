@@ -1,10 +1,10 @@
 /* ===== Spec Sheet(BOM) 출력 — ★최상위 공용 함수 =====
    준비실적처리(키팅) [🖨 BOM출력] → A4 가로 미리보기 → 인쇄.
    레거시 w_pr_input_460 Print미리보기 양식 재현(2026-08-19):
-     헤더 : 공정(용접) · 파트명 · Spec Sheet(BOM) · 도번 · 품명 · 시발예정(수기) · 지그보관구역
+     헤더 : 공정(용접) · 파트명 · Spec Sheet(BOM) · 도번 · 품명 · 시방예정(수기) · 지그보관구역
      본문 : 레벨|품목코드|소분류|체크|대표매입처|재고취처|재고|소요량|품명|규격|지름|두께|길이
-            + 자재사양/제조사양/품질사양(수기란)
-     푸터 : 페이지 n/tot · DATE. 마지막 페이지에 [n 건]·소요량합계 + 서명표.
+            + 자재서명/생산서명/품질서명(수기란)
+     푸터 : 페이지 n/tot · DATE. 마지막 페이지에 [n 건] + 서명표(준비수량/자재팀/생산팀/품질팀 초물·OQC/내사경).
    ※페이지 분할 = 행 수 기준(레거시도 넘치면 다음 장). 키팅대상 회색음영은 제외(사용자 지시). */
 window.printBomSheet=async(item,gpc)=>{
   const API=API_BASE;
@@ -16,9 +16,17 @@ window.printBomSheet=async(item,gpc)=>{
   catch(e){alert('BOM 조회 실패: '+e);return;}
   if(!j||!j.rows){alert('BOM 조회 실패: '+((j&&j.detail)||''));return;}
   if(!j.rows.length){alert(`${item} 의 BOM 이 없습니다.`);return;}
-  const ROWS_1=30, ROWS_N=34;          // 1쪽(헤더 큼)·이후쪽 행수
+  // 1쪽(상단 헤더 영역 큼)·이후쪽 행수. ★마지막 쪽엔 건수박스+서명표가 더 붙으므로
+  //   그 쪽만 여유를 둔다(안 그러면 서명표가 다음 장으로 밀리거나 잘림).
+  const ROWS_1=28, ROWS_N=32, TAIL_RESERVE=8;
   const pages=[]; let i=0;
-  while(i<j.rows.length){const n=pages.length?ROWS_N:ROWS_1;pages.push(j.rows.slice(i,i+n));i+=n;}
+  while(i<j.rows.length){
+    const cap=pages.length?ROWS_N:ROWS_1;
+    const rest=j.rows.length-i;
+    // 이번이 마지막 쪽이 되는 경우 = 꼬리(건수박스+서명표) 자리까지 필요.
+    //   들어가면 그대로 마감, 모자라면 cap 만큼 채워 다음 쪽으로 넘긴다.
+    const n=(rest<=cap-TAIL_RESERVE)?rest:cap;
+    pages.push(j.rows.slice(i,i+n)); i+=n;}
   const now=new Date();
   const dt=`${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')}`
           +` ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
@@ -33,7 +41,7 @@ window.printBomSheet=async(item,gpc)=>{
         <div class="bh-r3">품명 : ${esc2(j.nm||'')}</div>
       </div>
       <div class="bh-c"><div class="bh-title">Spec Sheet(BOM)</div>
-        <div class="bh-si"><span>시발예정 :</span><span class="bh-box"></span></div></div>
+        <div class="bh-si"><span>시방예정 :</span><span class="bh-box"></span></div></div>
       <div class="bh-r"><div class="bh-jig">지그보관구역 : ${esc2(j.jig||'')}</div></div>
     </div>`;
   const thead=`<tr>
@@ -41,7 +49,7 @@ window.printBomSheet=async(item,gpc)=>{
       <th class="w-ck">체크</th><th class="w-cs">대표매입처</th><th class="w-rk">재고취처</th>
       <th class="w-st">재고</th><th class="w-uq">소요량</th><th class="w-nm">품명</th>
       <th class="w-sp">규격</th><th class="w-dm">지름</th><th class="w-dm">두께</th><th class="w-dm">길이</th>
-      <th class="w-sv">자재<br>사양</th><th class="w-sv">제조<br>사양</th><th class="w-sv">품질<br>사양</th></tr>`;
+      <th class="w-sv">자재<br>서명</th><th class="w-sv">생산<br>서명</th><th class="w-sv">품질<br>서명</th></tr>`;
   // ★레벨 들여쓰기(2026-08-19 요청) — 같은 줄에 붙어 있으면 계층이 안 보여서.
   //   레벨 1=좌측정렬, 2 이상은 레벨당 6mm 들여쓰기(레거시 화면과 동일한 계단 배치).
   const body=rs=>rs.map(x=>`<tr class="${x.lvl===1?'lv1':''}">
@@ -56,7 +64,7 @@ window.printBomSheet=async(item,gpc)=>{
   const tail=`
     <table class="btot"><tr><td class="c">${nf(j.cnt)} 건</td></tr></table>
     <table class="bsig">
-      <tr><th>준비수량</th><th>자재팀</th><th>제조팀</th><th>품질팀 초물</th><th>품질팀 OQC</th><th>내사경 검사</th></tr>
+      <tr><th>준비수량</th><th>자재팀</th><th>생산팀</th><th>품질팀 초물</th><th>품질팀 OQC</th><th>내사경 검사</th></tr>
       <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr></table>`;
   const html=pages.map((rs,pi)=>`
     <div class="pg">
@@ -83,18 +91,25 @@ window.printBomSheet=async(item,gpc)=>{
     .bh-c{flex:1;text-align:center}
     .bh-title{font-size:19pt;font-weight:700;text-decoration:underline;letter-spacing:1px;margin-bottom:2mm}
     .bh-si{display:flex;align-items:center;justify-content:center;gap:2mm;font-size:8pt}
-    .bh-box{display:inline-block;width:95mm;height:9mm;border:1px solid #000}
-    .bh-r{flex:0 0 44mm;text-align:right;font-size:10pt;padding-top:9mm}
+    .bh-box{display:inline-block;width:80mm;height:9mm;border:1px solid #000}
+    /* 지그보관구역 = 값이 길어도(예 A-6,A-11) 줄바꿈되어 표 위로 넘치지 않게 */
+    .bh-r{flex:0 0 40mm;text-align:right;font-size:10pt;padding-top:9mm;
+          white-space:normal;word-break:break-all;line-height:1.25}
     .btbl{width:100%;border-collapse:collapse;table-layout:fixed}
     .btbl th,.btbl td{border:1px solid #000;padding:0 1mm;font-size:7.2pt;height:4.6mm;
         overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-    .btbl th{background:#fff;font-weight:700;text-align:center;line-height:1.05}
+    /* 헤더는 2줄(자재/서명)이 들어가므로 높이 확보 + 줄바꿈 허용 — 안 그러면 글자가 잘림 */
+    .btbl th{background:#fff;font-weight:700;text-align:center;line-height:1.1;
+        height:8mm;white-space:normal;vertical-align:middle}
     .btbl td.c{text-align:center}.btbl td.r{text-align:right}
     .btbl td.cd{text-align:left}                     /* 품목코드 = 레벨 들여쓰기라 좌측정렬 */
     .btbl tr.lv1>td{border-top:1.6px solid #000}      /* 레벨1 시작마다 굵은 구분선 = 계층 그룹 분리 */
-    .w-lv{width:7mm}.w-cd{width:38mm}.w-sg{width:15mm}.w-ck{width:11mm}.w-cs{width:24mm}
-    .w-rk{width:16mm}.w-st{width:14mm}.w-uq{width:12mm}.w-nm{width:42mm}.w-sp{width:38mm}
-    .w-dm{width:11mm}.w-sv{width:9mm}
+    /* ★컬럼폭 합계 = 가용폭(281mm − 좌우패딩 10mm = 271mm) 이내여야 함.
+       table-layout:fixed 라 넘치면 오른쪽(품질서명)부터 잘림 — 2026-08-20 재조정.
+       7+36+14+9+23+15+13+11+40+34+10+10+10+13+13+13 = 271mm (딱 맞춤) */
+    .w-lv{width:7mm}.w-cd{width:36mm}.w-sg{width:14mm}.w-ck{width:9mm}.w-cs{width:23mm}
+    .w-rk{width:15mm}.w-st{width:13mm}.w-uq{width:11mm}.w-nm{width:40mm}.w-sp{width:34mm}
+    .w-dm{width:10mm}.w-sv{width:13mm}
     .btot{border-collapse:collapse;margin-top:0}
     .btot td{border:1px solid #000;width:42mm;height:5mm;font-size:8pt;text-align:center}
     .bsig{border-collapse:collapse;margin:9mm auto 0}
@@ -837,7 +852,7 @@ SCREEN.partplan=(c)=>{
     const tailOrder=loadOrder(TAIL_LSKEY,TAIL_DEFAULT,TAILDEF);
     // th/td 생성 공통 — data-tk(컬럼키)·data-grp(head|tail)로 드래그 그룹 구분(그룹 내에서만 이동).
     const mkTh=(ks,defs,grp)=>ks.map(k=>`<th class="center" draggable="true" data-tk="${k}" data-grp="${grp}" title="드래그해서 순서 변경(내 브라우저에 저장)" style="cursor:grab">${defs[k].t}</th>`).join('');
-    const mkTd=(ks,defs,r,fg)=>ks.map(k=>{const c=defs[k];
+    const mkTd=(ks,defs,r,fg)=>ks.map(k=>{const c=defs[k];   // data-tk = 컬럼이동시 열 식별용
       const b=c.bg?c.bg(r):null;
       const stl=(c.st||'')+(c.sf?c.sf(r):'')+(b?`background:${b.b};font-weight:700${b.f?';color:'+b.f:''}`:'');
       return `<td class="${c.cls}"${stl?` style="${stl}"`:''}>${c.v(r,fg)}</td>`;}).join('');
@@ -996,9 +1011,22 @@ SCREEN.partplan=(c)=>{
         const arr=cur.filter(k=>k!==from);
         const at=arr.indexOf(to); arr.splice(at<0?arr.length:at,0,from);
         try{localStorage.setItem(lskey,JSON.stringify(arr));}catch(_){}
-        const wrap=c.querySelector('.grid-wrap');const sy=wrap?wrap.scrollTop:0,sx=wrap?wrap.scrollLeft:0;
-        render();
-        const nw=c.querySelector('.grid-wrap');if(nw){nw.scrollTop=sy;nw.scrollLeft=sx;}};
+        cur.length=0; arr.forEach(k=>cur.push(k));   // headOrder/tailOrder 참조 유지
+        // ★성능(2026-08-20): 드롭마다 render() 로 2,900행 전체를 다시 그려 심하게 버벅였다.
+        //   → DOM 에서 해당 열의 th/td 만 제자리 이동(재렌더 없음). 스크롤·포커스도 그대로.
+        const tbl=th.closest('table'); if(!tbl)return;
+        const idxOf=(row,k)=>{const cs=row.children;
+          for(let i=0;i<cs.length;i++)if(cs[i].getAttribute&&cs[i].getAttribute('data-tk')===k)return i;
+          return -1;};
+        const hr=tbl.tHead?tbl.tHead.rows[0]:null; if(!hr)return;
+        const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
+        const move=(row)=>{const cs=row.children; if(fi>=cs.length||ti>=cs.length)return;
+          const cell=cs[fi]; row.insertBefore(cell, cs[ti]);};
+        move(hr);
+        const bodies=[...tbl.tBodies, ...(tbl.tFoot?[tbl.tFoot]:[])];
+        bodies.forEach(tb=>{for(const row of tb.rows){
+          if(row.children.length===hr.children.length)move(row);}});   // colspan 행(소계 등)은 건너뜀
+      };
     });
     wireRows();   // 집계행 클릭(펼침/접힘) — 표만 다시 그릴 때도 재연결 필요해서 별도 함수로 분리
     g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
@@ -1562,13 +1590,17 @@ SCREEN.kitting=(host)=>{
   //   ★DOM 을 건드리지 않는다(2026-08-19 재재수정): 배지 span 을 append/remove 하면
   //     드래그 중 커서 아래 요소가 매번 바뀌어 mouseover 판정이 흔들리고 선택이 빠졌음.
   //     → 스타일 3개만 갈아끼움. 좌상단 삼각 표식도 background-image(그라디언트)로 처리.
-  const _SELBG='linear-gradient(135deg,#1d4ed8 0,#1d4ed8 9px,transparent 9px)';
+  // ★2026-08-20 선택표시 완화(사용자 요청) — 도번칸(paintItem)과 같은 톤.
+  //   진한 파랑 삼각+두꺼운 흰 테두리 → 연파랑 오버레이 + 얇은 파란 테두리.
+  //   배경'색'(완료 녹/노랑)은 유지해야 하므로 backgroundImage 로 연한 막만 덧씌움.
+  const _SELBG='linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))';
   const paintOne=(td,on)=>{
     const s=td.style;
-    s.outline       = on?'3px solid #1d4ed8':'';
-    s.outlineOffset = on?'-3px':'';
-    s.boxShadow     = on?'inset 0 0 0 5px rgba(255,255,255,.9)':'';
+    s.outline       = on?'2px solid #4a86e8':'';
+    s.outlineOffset = on?'-2px':'';
+    s.boxShadow     = '';
     s.backgroundImage = on?_SELBG:'';      // 배경'색'(완료 녹/노랑)은 그대로 두고 이미지만 덧씌움
+    s.fontWeight    = on?'700':'';
     td.classList.toggle('kt-sel',on);};
   // 선택 뱃지 = 칸수 + 잔량합(준비등록 대상) + 등록분합(취소 대상)
   const paintCnt=()=>{const b=host.querySelector('#kt-cellcnt');
@@ -1596,15 +1628,26 @@ SCREEN.kitting=(host)=>{
   // ★도번 칸 선택(2026-08-19) — 레거시처럼 도번 셀 자체가 반전(검정바탕/흰글씨)되고,
   //   그 상태로 [🖨 BOM출력] 을 누르면 그 도번의 Spec Sheet(BOM) 이 나옴.
   //   일자셀 드래그선택(st.cellSel)과는 별개 상태(st.itemSel). 서로 지우지 않음.
+  //   ★2026-08-20 두 가지 개선(사용자 요청):
+  //   (1) 같은 도번이 집계행+상세행에 여러 번 나와도 "클릭한 그 칸 하나"만 표시.
+  //       → item·gpc 뿐 아니라 행 고유키(uid)까지 비교. 펼친 상세행을 클릭하면 그 행만 반전.
+  //   (2) 검정(#111) 반전이 너무 진해 → 연한 파랑 + 파란 테두리로 완화.
+  const itemUid=(td)=>{const tr=td.closest('tr');if(!tr)return '';
+    const rows=[...host.querySelectorAll('tr')];
+    return String(rows.indexOf(tr));};
   const paintItem=()=>{host.querySelectorAll('.kt-item').forEach(td=>{
-    const on=st.itemSel && td.dataset.item===st.itemSel.item && td.dataset.gpc===st.itemSel.gpc;
-    td.style.background = on?'#111':'';
-    td.style.color      = on?'#fff':'';
-    td.style.outline    = on?'2px solid #c0392b':'';
+    const on=st.itemSel && td.dataset.item===st.itemSel.item
+             && td.dataset.gpc===st.itemSel.gpc && itemUid(td)===st.itemSel.uid;
+    td.style.background = on?'#dbeafe':'';
+    td.style.color      = on?'#123a6b':'';
+    td.style.fontWeight = on?'700':'';
+    td.style.outline    = on?'2px solid #4a86e8':'';
     td.style.outlineOffset = on?'-2px':'';});};
   const itemPick=(td)=>{
-    const k={item:td.dataset.item,gpc:td.dataset.gpc};
-    st.itemSel=(st.itemSel&&st.itemSel.item===k.item&&st.itemSel.gpc===k.gpc)?null:k;  // 재클릭=해제
+    const k={item:td.dataset.item,gpc:td.dataset.gpc,uid:itemUid(td)};
+    st.itemSel=(st.itemSel&&st.itemSel.item===k.item&&st.itemSel.gpc===k.gpc
+                &&st.itemSel.uid===k.uid)?null:k;  // 재클릭=해제
+    selClear();          // ★도번 클릭 = 수량셀 선택 해제(둘이 동시에 남지 않게, 2026-08-20)
     paintItem();};
   const selectedCells=()=>[...host.querySelectorAll('.kt-cell')].filter(td=>st.cellSel.has(cellKey(td)));
   // viewOnly=true : [🔎 세트가능 확인] 에서 호출 — 조회 전용(등록 버튼·세트수량 입력·전표출력 숨김)
@@ -1746,6 +1789,10 @@ SCREEN.kitting=(host)=>{
     //       엑셀과 동일한 감각이고, 커서가 셀 사이를 건너뛰어도 절대 빠지지 않음.
     const gwSel=host.querySelector('.grid-wrap');
     if(gwSel){
+      // ★브라우저 기본 텍스트선택 차단(2026-08-20) — 빈칸 드래그시 파란 하이라이트가
+      //   그리드를 덮던 문제. 선택표시는 우리가 그리는 연파랑만 남는다.
+      gwSel.style.userSelect='none'; gwSel.style.webkitUserSelect='none';
+      gwSel.onselectstart=()=>false;
       //   ※행 구조가 달라도(소계/집계행) 안전하도록 (행=rowIndex, 열=cellIndex)로 좌표화.
       //     kt-cell 은 일자컬럼에만 붙으므로 열 인덱스는 같은 컬럼끼리 일치.
       const rcOf=td=>{const tr=td.parentElement;
@@ -1763,7 +1810,9 @@ SCREEN.kitting=(host)=>{
             const d=(x<r.left)?(r.left-x):((x>r.right)?(x-r.right):0);
             if(d<bd){bd=d;best=c;}});
           if(best)return best;}
-        return null;};
+        // ★빈칸 위를 지날 때도 좌표를 잃지 않도록 일반 td 로 폴백(2026-08-20).
+        //   선택은 _cells(=숫자칸)만 대상이라 빈칸이 켜지지는 않는다.
+        return e?e.closest('td'):null;};
       let _a=null, _cells=null, _lastTd=null;   // 시작 (행,열) / 셀 스냅샷 / 직전 커서 셀
       const applyRect=(td)=>{
         if(!_a||!_cells)return;
@@ -1781,8 +1830,37 @@ SCREEN.kitting=(host)=>{
         if(ev.button!==0)return;                       // 좌클릭만(우클릭=컨텍스트메뉴)
         const it=ev.target.closest('.kt-item');        // 도번 칸 클릭 = 도번 선택(BOM출력 대상)
         if(it){ev.preventDefault();itemPick(it);return;}
+        // ★빈칸(수량 없는 셀)에서 시작한 드래그도 사각범위 선택으로(2026-08-20 사용자요청).
+        //   선택 자체는 숫자칸만 — 빈칸은 기준점 역할만 하고 켜지지 않는다.
+        //   (기존: .kt-cell 아니면 return → 브라우저 기본 텍스트선택이 파랗게 잡히던 문제)
+        const any=ev.target.closest('td');
+        if(any&&!ev.target.closest('.kt-cell')&&any.closest('tr')&&rcOf(any)){
+          ev.preventDefault();
+          if(st.itemSel){st.itemSel=null;paintItem();}
+          if(!ev.ctrlKey&&!ev.metaKey)selClear();
+          _ktDrag=true;_rectOwn=new Set();
+          _cells=[...host.querySelectorAll('.kt-cell')].filter(selectable)
+                   .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c,k:cellKey(x)};});
+          _a=rcOf(any);_lastTd=any;return;
+        }
         const td=ev.target.closest('.kt-cell'); if(!td||!selectable(td))return;
-        ev.preventDefault();_ktDrag=true;
+        ev.preventDefault();
+        if(st.itemSel){st.itemSel=null;paintItem();}   // ★수량셀 선택 = 도번 선택 해제(2026-08-20)
+        // ★재클릭=해제(도번칸과 동일). Ctrl 없이 이미 선택된 칸을 다시 누르면 그 칸만 끈다.
+        const _k=cellKey(td);
+        if(!ev.ctrlKey&&!ev.metaKey&&st.cellSel.has(_k)){
+          if(st.cellSel.size===1){st.cellSel.delete(_k);paintOne(td,false);paintCnt();return;}
+          selClear();                       // 여러 칸 선택 상태 → 한 번에 정리
+          st.cellSel.add(_k);paintOne(td,true);paintCnt();
+          _ktDrag=true;_rectOwn=new Set([_k]);
+          _cells=[...host.querySelectorAll('.kt-cell')].filter(selectable)
+                   .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c,k:cellKey(x)};});
+          _a=rcOf(td);_lastTd=td;return;
+        }
+        if(ev.ctrlKey||ev.metaKey){         // Ctrl+클릭 = 개별 토글
+          if(st.cellSel.has(_k)){st.cellSel.delete(_k);paintOne(td,false);paintCnt();return;}
+        }
+        _ktDrag=true;
         if(!ev.ctrlKey&&!ev.metaKey)selClear();
         _rectOwn=new Set();                            // 이번 드래그가 만든 선택분(되돌릴 대상)
         // 선택가능 셀 좌표를 드래그 시작시 1회만 스냅샷 → move 마다 DOM 질의 없음
@@ -2849,6 +2927,7 @@ SCREEN.procbarcode=(host)=>{
   const st={ymd:iso(new Date()),part:_sv.part||'',swork:_sv.swork||'',worker:_sv.worker||'',mach:_sv.mach||'',
             parts:[],procs:[],machs:[],workers:[],
             cur:null,      // 스캔된 바코드 정보(처리부에 표시)
+            netOnly:true,  // 실적이력: 등록/취소 상쇄분 숨김(실제 생산분만)
             rows:[],cnt:0,sumQty:0,last:null,loading:false};
   const qsv=o=>new URLSearchParams(Object.entries(o).filter(([,v])=>v!==''&&v!=null)).toString();
   const loadMasters=async(keepSel)=>{
@@ -2981,16 +3060,46 @@ SCREEN.procbarcode=(host)=>{
                  done:(+c.lk.done_qty||0)+q,tot:c.lk.qty,sta:c.sta,left,
                  assy:sk.assy,mats:(sk.mats||[]).length};
         st.cur=null;await load();focusBc();
+      }else if(j.shortage){
+        // ★자재 재고부족 = 실적 미등록(음수재고 금지). 부족 품번·수량을 그대로 보여줌.
+        alert((j.errors||[]).join('\n'));
+        st.last={err:`자재 재고부족 — ${j.shortage.length}개 품번`,bc:c.bc};
+        render();focusBc();
       }else{alert('등록 실패: '+((j.errors||[]).join(' ')||j.detail||''));
         if(btn){btn.disabled=false;btn.textContent='✅ 실적등록 (Enter)';}}
     }catch(e){alert('등록 오류: '+e);
       if(btn){btn.disabled=false;btn.textContent='✅ 실적등록 (Enter)';}}
   };
   const clearCur=()=>{st.cur=null;render();focusBc();};
+  // ★"실제 생산분만" 필터 — 등록(+)/취소(−)가 상쇄된 쌍을 숨긴다.
+  //   같은 (바코드+공정+수량절대값) 안에서 + 와 − 를 짝지어 제거하고, 남는 것만 표시.
+  //   예: 54, -54, 54, -54, 54  → 마지막 54 한 건만 남음(순합계 54와 일치).
+  //   체크 해제하면 취소내역까지 전부 보인다.
+  const netRows=()=>{
+    if(!st.netOnly) return st.rows;
+    const neg=new Map();                       // key → 남은 취소 건수
+    st.rows.forEach(r=>{if((+r.qty||0)<0){
+      const k=`${r.barcode}|${r.swork}|${Math.abs(+r.qty||0)}`;
+      neg.set(k,(neg.get(k)||0)+1);}});
+    const out=[];
+    // 최신순 배열이므로 뒤(오래된 것)부터 훑어 +를 취소분과 짝지음
+    for(let i=st.rows.length-1;i>=0;i--){
+      const r=st.rows[i], q=+r.qty||0;
+      if(q<0) continue;                        // 취소행 자체는 표시 안 함
+      const k=`${r.barcode}|${r.swork}|${Math.abs(q)}`;
+      const n=neg.get(k)||0;
+      if(n>0){neg.set(k,n-1);continue;}        // 짝이 있는 등록 = 상쇄 → 숨김
+      out.unshift(r);
+    }
+    return out;
+  };
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('procbarcode'):true;
     const L=st.last, C=st.cur;
     const warn=C&&C.lk.warn?C.lk.warn:'';
+    const hrows=netRows();
+    const hcnt=hrows.length;
+    const hsum=Math.round(hrows.reduce((s,r)=>s+(+r.qty||0),0)*100)/100;
     host.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🔫 공정별 바코드생산실적 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_520 · 전표/간판/라벨 스캔 → 실적</span></div>
@@ -3087,10 +3196,17 @@ SCREEN.procbarcode=(host)=>{
      <!-- ★좌: 실적이력 / 우: 작업지도서 -->
      <div style="display:flex;gap:8px;flex:1 1 auto;min-height:0;margin-top:12px">
        <div style="flex:1 1 50%;min-width:0;display:flex;flex-direction:column">
-         <div class="page-sub" style="flex:0 0 auto;font-weight:600;margin:0 0 4px">실적 이력
+         <div class="page-sub" style="flex:0 0 auto;font-weight:600;margin:0 0 4px;display:flex;align-items:center;gap:8px">
+           <span>실적 이력</span>
            <span style="color:var(--muted);font-weight:400">${st.part
-             ?`${esc(st.part)}${(st.parts.find(p=>p.code===st.part)||{}).nm?' '+esc((st.parts.find(p=>p.code===st.part)||{}).nm):''} · ${nf(st.cnt)}건 · 합계 ${nf(st.sumQty)}`
-             :'파트 선택 시 표시'}</span></div>
+             ?`${esc(st.part)}${(st.parts.find(p=>p.code===st.part)||{}).nm?' '+esc((st.parts.find(p=>p.code===st.part)||{}).nm):''} · ${nf(hcnt)}건 · 합계 ${nf(hsum)}`
+             :'파트 선택 시 표시'}</span>
+           <span style="flex:1"></span>
+           <!-- ★등록/취소가 상쇄된 쌍은 숨김 = 실제 생산분만. 해제하면 취소내역까지 전부 표시. -->
+           <label style="font-weight:400;font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer"
+                  title="등록 후 취소해서 실적이 0이 된 건을 숨깁니다">
+             <input type="checkbox" id="pb-netonly" ${st.netOnly?'checked':''}> 실제 생산분만</label>
+         </div>
          <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
           <table class="tbl fit" style="font-size:11px"><thead><tr>
             <th class="center">생산시작</th><th class="center">생산종료</th><th class="center">소요</th>
@@ -3098,7 +3214,7 @@ SCREEN.procbarcode=(host)=>{
             <th class="num">수량</th><th class="center">작업자</th><th class="center">파트</th><th class="center">공정</th>
             <th class="center">바코드</th>
             </tr></thead>
-          <tbody>${st.loading?spinRow(10):(st.rows.length?st.rows.map(r=>`<tr${r.qty<0?' style="background:#fff3e0"':''}>
+          <tbody>${st.loading?spinRow(10):(hrows.length?hrows.map(r=>`<tr${r.qty<0?' style="background:#fff3e0"':''}>
             <td class="center mut">${esc(r.sta||'')}</td>
             <td class="center mut">${esc(r.fin||'')}</td>
             <td class="center mut">${r.secs!=null?esc(dur(r.secs)):''}</td>
@@ -3109,7 +3225,7 @@ SCREEN.procbarcode=(host)=>{
             <td class="center mut" title="${esc(r.barcode)}${r.sheet_no?' · 전표 '+esc(r.sheet_no):''}"
                 style="max-width:110px;overflow:hidden;text-overflow:ellipsis">${esc(r.barcode||'')}</td>
             </tr>`).join('')
-            :`<tr><td colspan="10" class="empty">${st.part?'실적 이력 없음':'파트코드를 선택하면 해당 파트의 실적이 표시됩니다'}</td></tr>`)}</tbody></table></div>
+            :`<tr><td colspan="10" class="empty">${!st.part?'파트코드를 선택하면 해당 파트의 실적이 표시됩니다':(st.rows.length?'표시할 실적 없음 — 등록·취소가 모두 상쇄되었습니다(체크 해제 시 전체 표시)':'실적 이력 없음')}</td></tr>`)}</tbody></table></div>
        </div>
        <div style="flex:1 1 50%;min-width:0;display:flex;flex-direction:column">
          <div class="page-sub" style="flex:0 0 auto;font-weight:600;margin:0 0 4px">📄 작업지도서
@@ -3131,6 +3247,7 @@ SCREEN.procbarcode=(host)=>{
     g('#pb-worker').onchange=e=>{st.worker=e.target.value;saveSel();};
     g('#pb-mach').onchange=e=>{st.mach=e.target.value;saveSel();};
     g('#pb-go').onclick=load;
+    {const nb=g('#pb-netonly'); if(nb)nb.onchange=e=>{st.netOnly=e.target.checked;render();};}
     // 작업중 칩 클릭 = 그 바코드를 다시 인식(최초 시작시각 복원됨)
     host.querySelectorAll('.pb-run').forEach(el=>{el.onclick=()=>scan(el.getAttribute('data-bc'));});
     // ★포커스는 항상 바코드칸(대기중이어도) — 스캐너만으로 연속 처리.
