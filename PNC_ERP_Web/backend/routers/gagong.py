@@ -55,6 +55,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
               ISNULL(a.UPPER_ITEM_CODE,'') upper, MIN(a.BOM_LEVEL) bl, MAX(ISNULL(a.GAGONG_PROC_CODE,'')) gpc,
               MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq, MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) phm, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.WORK_ORDER,'')) wo,
+              MAX(ISNULL(a.LINE_NO,'')) line_no, MAX(ISNULL(a.TUIP_GAGONG_PROC_CODE,'')) tuip,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM {S}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
             WHERE {' AND '.join(w)}
@@ -69,7 +70,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
             if not g:
                 g = {"assy": r["assy"], "item": r["item"], "upper": r["upper"] or '', "bl": int(r["bl"] or 0), "gpc": r["gpc"] or '',
                      "use": float(r["useq"] or 1), "plan_ymd": r["plan_ymd"] or '', "phm": r["phm"] or '',
-                     "ohm": r["ohm"] or '', "wo": '', "_cells": {}}
+                     "ohm": r["ohm"] or '', "wo": r["wo"] or '', "line_no": r["line_no"] or '', "tuip": r["tuip"] or '', "_cells": {}}
                 keyed[k] = g
             c2 = g["_cells"].get(bucket)
             if not c2:
@@ -83,11 +84,77 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         for a, b in cur.fetchall(): proc[a] = float(b or 0)
         cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {S}.sa_t_item_stock GROUP BY ITEM_CODE")
         for a, b in cur.fetchall(): assyst[a] = float(b or 0)
-        cur.execute(f"""SELECT MAT_CODE, SUM(q) FROM (
-              SELECT MAT_CODE, STOCK_QTY q FROM {S}.pr_t_mat_stock_wh WHERE part_code<>'P0001' AND stock_qty<>0
-              UNION ALL SELECT MAT_CODE, STOCK_QTY FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0
-              UNION ALL SELECT MAT_CODE, STOCK_QTY FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0) t GROUP BY MAT_CODE""")
-        for a, b in cur.fetchall(): jae[a] = float(b or 0)
+        # ★자재+생산+사급 = 합계(jae). 2026-08-20: 화면에서 3종을 나눠 보기 위해 개별값도 함께 반환.
+        #   jae_m 자재창고(pu_t_mat_stock_wh) · jae_p 생산창고(pr_t_mat_stock_wh, P0001 제외) · jae_s 사급(PU_T_SAGUB_STOCK)
+        jae_m = {}; jae_p = {}; jae_s = {}
+        cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.pr_t_mat_stock_wh WHERE part_code<>'P0001' AND stock_qty<>0 GROUP BY MAT_CODE")
+        for a, b in cur.fetchall(): jae_p[a] = float(b or 0)
+        cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0 GROUP BY MAT_CODE")
+        for a, b in cur.fetchall(): jae_m[a] = float(b or 0)
+        cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0 GROUP BY MAT_CODE")
+        for a, b in cur.fetchall(): jae_s[a] = float(b or 0)
+        for _k in set(jae_m) | set(jae_p) | set(jae_s):
+            jae[_k] = jae_m.get(_k, 0.0) + jae_p.get(_k, 0.0) + jae_s.get(_k, 0.0)
+
+        # ★출고처(2026-08-20) — 레거시 w_pr_input_420_new 실측 규칙(6/6 일치).
+        #   ① UPPER 품목의 거래처명(IN_CUST_CODE) = 외주 판매처
+        #   ② 없으면 TUIP_GAGONG_PROC_CODE 공정명
+        #   ③ 없으면 UPPER 품목의 작업처명(WORK_CODE)
+        #   기존엔 wcc(P2 가공) 고정이라 전 행이 같은 값이었음.
+        _uppers = list({g["upper"] for g in rows if g["upper"]})
+        _tuips  = list({g["tuip"] for g in rows if g.get("tuip")})
+        _ucust = {}; _uwork = {}; _tnm = {}
+        for i in range(0, len(_uppers), 900):
+            ch = _uppers[i:i+900]; ph2 = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT m.ITEM_CODE,
+                     ISNULL((SELECT CUST_DESC FROM {S}.CM_M_CUST WHERE CUST_CODE=m.IN_CUST_CODE),''),
+                     ISNULL((SELECT WORK_DESC FROM {S}.PR_M_WORK WHERE WORK_CODE=m.WORK_CODE),'')
+                   FROM {S}.PR_M_ITEM m WITH(NOLOCK) WHERE m.ITEM_CODE IN ({ph2})""", *ch)
+            for a, b, c3 in cur.fetchall():
+                _ucust[a] = (b or '').strip(); _uwork[a] = (c3 or '').strip()
+        for i in range(0, len(_tuips), 900):
+            ch = _tuips[i:i+900]; ph2 = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'')
+                              FROM {S}.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE IN ({ph2})""", *ch)
+            for a, b in cur.fetchall(): _tnm[a] = (b or '').strip()
+        def _outsrc(g):
+            u = g.get("upper") or ''
+            return _ucust.get(u, '') or _tnm.get(g.get("tuip") or '', '') or _uwork.get(u, '')
+
+        # ★치수(지름·두께·길이) = PR_M_ITEM (레거시 dw_pr_input_420_t1: max(d.item_diam) 등, d=자도번 품목)
+        dim = {}
+        for i in range(0, len(mats), 900):
+            ch = mats[i:i+900]; ph2 = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT ITEM_CODE, ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0)
+                              FROM {S}.PR_M_ITEM WITH(NOLOCK) WHERE ITEM_CODE IN ({ph2})""", *ch)
+            for a, b, c3, d3 in cur.fetchall(): dim[a] = (b, c3, d3)
+        # ★LG OUTPUT시간(2026-08-20) — 레거시 dw_pr_input_420_t1 실측:
+        #     LEFT JOIN PR_T_PLAN_ITEM_DTL t
+        #       ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order
+        #      AND a.split_work_order=t.split_work_order AND a.assy_item_code=t.c_item_code
+        #     min(isnull(t.org_plan_ymd, a.plan_ymd)) / min(isnull(t.org_output_hm, a.output_hm))
+        #   표시 = 'YY/MM/DD  HH:MM' (파워빌더 string(...,'@@/@@/@@') + '  ' + string(...,'@@:@@'))
+        #   ※PR_T_PLAN_DTL 이 아니라 PR_T_PLAN_ITEM_DTL 이다(처음에 잘못 잡아 빈값이었음).
+        lgo = {}
+        try:
+            cur.execute(f"""SELECT a.ASSY_ITEM_CODE, a.ITEM_CODE,
+                       MIN(ISNULL(t.ORG_PLAN_YMD,  a.PLAN_YMD))  oy,
+                       MIN(ISNULL(t.ORG_OUTPUT_HM, a.OUTPUT_HM)) oh
+                  FROM {S}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+                  LEFT JOIN {S}.PR_T_PLAN_ITEM_DTL t WITH(NOLOCK)
+                         ON a.PLAN_YMD=t.PLAN_YMD AND a.WORK_ORDER=t.WORK_ORDER
+                        AND ISNULL(a.SPLIT_WORK_ORDER,'')=ISNULL(t.SPLIT_WORK_ORDER,'')
+                        AND a.ASSY_ITEM_CODE=t.C_ITEM_CODE
+                 WHERE a.GC_GUBUN='Q' AND a.WORK_CODE=? AND a.part_plan_ymd<=?
+                 GROUP BY a.ASSY_ITEM_CODE, a.ITEM_CODE""", wcc, d6b)
+            for aa, ii, oy, oh in cur.fetchall():
+                y = str(oy or '').strip(); h = str(oh or '').strip()
+                if len(y) >= 6:
+                    v = f"{y[0:2]}/{y[2:4]}/{y[4:6]}"
+                    if len(h) >= 4: v += f"  {h[0:2]}:{h[2:4]}"
+                    lgo[(aa, ii)] = v
+        except Exception:
+            pass
         cur.execute(f"SELECT MAT_CODE, SUM(plan_qty) FROM {S}.PR_T_INDI_CUTTING WHERE PROD_FLAG='0' GROUP BY MAT_CODE")
         for a, b in cur.fetchall(): ing[a] = float(b or 0)
         # 출하: 레거시 SP는 (wo,swo) 커서행별 sale을 그 행 계획만큼만 인정(min). WO별 sale이 그 WO 계획 초과분은 다른 WO/파트로 넘어가지 않음.
@@ -105,6 +172,23 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                      GROUP BY p.ASSY_ITEM_CODE, p.ITEM_CODE, p.WORK_ORDER, ISNULL(p.SPLIT_WORK_ORDER,'')) t
               GROUP BY assy, item""", wcc, d6b)
         sale2 = {}
+        for a, it, cap in cur.fetchall(): sale2[(a, it)] = float(cap or 0)
+        # ★출하는 '제번(LOT) 단위 완결' — 그 제번이 출하되면 계획이 어제15/오늘5 로 쪼개져
+        #   있어도 20 전부 끝난 것으로 본다(완제품재고와 달리 수량 소진식이 아님).
+        #   → 출하가 잡힌 제번의 '계획 전량'을 출하충당 한도로 쓴다.
+        cur.execute(f"""SELECT assy, item, SUM(wo_plan) cap
+              FROM (SELECT p.ASSY_ITEM_CODE assy, p.ITEM_CODE item,
+                           SUM(CAST(p.PART_PLAN_QTY AS float)) wo_plan,
+                           ISNULL(MAX(sd.saleqty),0) wo_sale
+                      FROM {S}.PR_T_PLAN_PART_COPY p WITH(NOLOCK)
+                      LEFT JOIN (SELECT WORK_ORDER wo, ISNULL(SPLIT_WORK_ORDER,'') swo, ITEM_CODE, SUM(SALE_QTY) saleqty
+                                 FROM {S}.SA_T_SALE_DTL WITH(NOLOCK) WHERE FINISH_FLAG='0'
+                                 GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE) sd
+                        ON sd.wo=p.WORK_ORDER AND sd.swo=ISNULL(p.SPLIT_WORK_ORDER,'') AND sd.ITEM_CODE=p.ASSY_ITEM_CODE
+                     WHERE p.GC_GUBUN='Q' AND p.WORK_CODE=? AND p.part_plan_ymd<=?
+                     GROUP BY p.ASSY_ITEM_CODE, p.ITEM_CODE, p.WORK_ORDER, ISNULL(p.SPLIT_WORK_ORDER,'')) t
+             WHERE wo_sale > 0
+             GROUP BY assy, item""", wcc, d6b)
         for a, it, cap in cur.fetchall(): sale2[(a, it)] = float(cap or 0)
         # fix(도번고정): 재귀 BOM 롤업 → 레거시 SP는 (UPPER_ITEM_CODE, MAT_CODE) 키로 매핑(부모재고를 하위에 use_qty로 전개)
         try:
@@ -189,7 +273,15 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
             fin = round(sum(c2["fin"] for c2 in g["_cells"].values()), 0)
             plan = round(sum(c2["plan"] for c2 in g["_cells"].values()), 0)
             out.append({"assy": g["assy"], "jado": g["item"], "jnm": nm.get(g["item"], ''),
-                        "gpcnm": gpn.get(g["gpc"], g["gpc"]), "wcc": wcc, "wcd": _wcd,
+                        "gpcnm": gpn.get(g["gpc"], g["gpc"]), "wcc": wcc, "wcd": _outsrc(g),
+                        "upper": g["upper"], "bl": g["bl"], "line_no": g.get("line_no", ''),
+                        "diam": round(float(dim.get(g["item"], (0, 0, 0))[0] or 0), 2),
+                        "thick": round(float(dim.get(g["item"], (0, 0, 0))[1] or 0), 2),
+                        "length": round(float(dim.get(g["item"], (0, 0, 0))[2] or 0), 0),
+                        "lgout": lgo.get((g["assy"], g["item"]), ''),
+                        "jae_m": round(jae_m.get(g["item"], 0.0), 0),
+                        "jae_p": round(jae_p.get(g["item"], 0.0), 0),
+                        "jae_s": round(jae_s.get(g["item"], 0.0), 0),
                         "st": round(ist.get(g["item"], 0.0) * plan / 3600.0, 2),
                         "use": g["use"], "plan_qty": plan, "finish": fin,
                         "sale": round(sale2.get((g["assy"], g["item"]), 0.0), 0), "proc": round(proc.get(g["item"], 0.0), 0),
@@ -197,12 +289,103 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         "fixst": round(fixm.get((g["upper"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
                         "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"] + pc["ready"], 0) if pc else 0,
                         "prior_bg": (('background:' + _TAGCLR[pc["tag"]]) if pc and _TAGCLR.get(pc["tag"]) else ''),
-                        "wo": '', "days": days, "done": done, "colors": colors})
+                        "wo": g.get("wo") or '', "days": days, "done": done, "colors": colors})
+        # ★재고 충당(2026-08-20) — 레거시 w_pr_input_580 방식 이식.
+        #   재고 '컬럼값'은 현재 보유량이라 깎지 않는다(그대로 표시).
+        #   대신 재고로 덮이는 계획셀을 앞 일자부터 순서대로 소진시켜 셀에 색을 칠한다.
+        #   충당순서(2026-08-20 사용자확정) =
+        #     출하 → ASSY재고 → 사급재고 → 생산재고 → 자재재고 → 가공창고 → 가공전표발행
+        #   (완제품에 가까운 쪽부터 소진. 580도 assy_stock_qty 부터 채운다)
+        #   ※화면 컬럼은 자재·생산·사급을 분리 유지하되, 충당 판단은 세 재고의 합으로 한다
+        #     (레거시 420 = '자재+생산+사급재고' 한 컬럼으로 합쳐 충당).
+        _ORD = ("sale", "assyst", "jae_s", "jae_p", "jae_m", "proc", "ing")
+        # 충당원별 셀색(레거시 420 범례) — 출하=주황, 가공창고=연두, 전표발행=녹색, 그외=노랑
+        _CLR = {"sale": '#fac090', "proc": '#99ffcc', "ing": '#66ff99'}
+        _COVER = '#ffff00'
+        # ★ASSY재고(완제품)는 "Assy 1대분"이라 자도번마다 그 수량이 각각 적용된다.
+        #   (레거시 420 실측: ASSY재고 2 → 자도번 5개 행이 모두 2씩 충당)
+        # ★출하는 제번(LOT) 단위 완결 — sale2 가 '출하된 제번의 계획 전량'이라
+        #   계획이 어제15/오늘5 로 쪼개져 있어도 20 전부 채워진다.
+        #   (assy,jado) 로 묶어 그 자도번 계획을 순서대로 덮는다.
+        def _pkey(k, r):
+            if k in ("assyst", "sale"):
+                return ("A", k, r["assy"], r["jado"])
+            if k == "fixst":               # 도번고정=(상위도번,자도번) 단위
+                return ("F", r["upper"], r["jado"])
+            return ("J", r["jado"], k)     # 나머지=자도번 단위
+        _pool = {}
+        for r in out:
+            for k in _ORD:
+                _pool.setdefault(_pkey(k, r), float(r.get(k) or 0))
+        # ※기존 완료분은 재고에서 차감하지 않는다.
+        #   재고(자재15·가공5)는 '지금 남아있는' 수량이고, 완료분은 이미 소비돼
+        #   그 잔량에 반영돼 있다. 또 빼면 이중차감이라 뒤 일자가 충당을 못 받음.
+        #   → 계획셀의 미충족분(계획−완료)만 재고로 순서대로 덮는다.
+        _cvd = set()      # 재고가 배정된 행(완료 컬럼 재계산 대상)
+        # 앞 일자부터(당일이전 → dates 순), 같은 일자면 Assy도번 순
+        for y in ['P'] + list(dates):
+            for r in sorted(out, key=lambda x: x["assy"]):
+                if y == 'P':
+                    pl, dn = float(r.get("prior_pl") or 0), float(r.get("prior_fn") or 0)
+                else:
+                    pl, dn = float((r.get("days") or {}).get(y) or 0), float((r.get("done") or {}).get(y) or 0)
+                # ★계획 전체를 재고로 덮는다(완료분 포함).
+                #   예) 자재15 → 당일이전 10+5 를 채우고, 남은 가공창고5 가 20(목) 을 채움.
+                #   완료가 이미 있어도 그 수량만큼 재고가 배정된 것으로 본다(레거시 420 동일).
+                need = max(pl, 0.0)
+                if need <= 0:
+                    continue
+                took = {}
+                for k in _ORD:
+                    if need <= 0:
+                        break
+                    pk = _pkey(k, r)
+                    take = min(_pool[pk], need)
+                    if take <= 0:
+                        continue
+                    _pool[pk] = round(_pool[pk] - take, 4)
+                    need = round(need - take, 4)
+                    took[k] = took.get(k, 0.0) + take
+                if not took:
+                    continue
+                # 여러 재고로 나뉘면 가장 많이 충당한 원천의 색(동률이면 _ORD 우선순위)
+                kmax = max(took, key=lambda k: (took[k], -_ORD.index(k)))
+                bg = 'background:' + _CLR.get(kmax, _COVER)
+                cov = round(sum(took.values()), 0)      # 이 셀에 배정된 재고수량
+                # ★셀 완료 = "재고로 배정된 수량"(기존완료와 합치지 않는다).
+                #   예) 자재15 → 당일이전 10/10·5/5, 가공창고5 → 20(목) 5/15.
+                #   완료 컬럼(finish)은 아래에서 셀 합으로 재계산.
+                # ★색은 '계획을 전부 충족'했을 때만 칠한다(부분충당 5/15 = 무색).
+                full = cov >= round(pl, 0) - 1e-6
+                if y == 'P':
+                    r["prior_fn"] = cov
+                    if full:
+                        if not r.get("prior_bg"):
+                            r["prior_bg"] = bg
+                    else:
+                        r["prior_bg"] = ''       # 부분충당 = 무색
+                else:
+                    r.setdefault("done", {})[y] = cov
+                    if full:
+                        if not (r.get("colors") or {}).get(y):
+                            r.setdefault("colors", {})[y] = bg
+                    else:
+                        r.setdefault("colors", {})[y] = ''
+                _cvd.add(id(r))
+        # 완료 컬럼 = 재고배정 셀들의 합(당일이전 + 각 일자). 배정된 행만 갱신.
+        for r in out:
+            if id(r) in _cvd:
+                r["finish"] = round(float(r.get("prior_fn") or 0)
+                                    + sum(float(v or 0) for v in (r.get("done") or {}).values()), 0)
         uf = unfin.strip()
         if uf == "미생산": out = [r for r in out if r["finish"] < r["plan_qty"]]
         out = out[:int(limit)]
+                # ★ASSY생산파트 드롭다운(2026-08-20) — 레거시 '전체/01라인(용접)/02라인/…' 과 동일 목록.
+        #   결과에 실제로 쓰인 gpc 만 코드순으로.
+        _pc = sorted({r["wcd"] for r in out if r.get("wcd")})
+        parts = [{"code": c, "nm": c} for c in _pc]
         return {"dates": dates, "rows": out, "cnt": len(out),
-                "plan_sum": sum(r["plan_qty"] for r in out), "done_sum": sum(r["finish"] for r in out), "note": "nx재현"}
+                "plan_sum": sum(r["plan_qty"] for r in out), "done_sum": sum(r["finish"] for r in out), "note": "nx재현", "parts": parts}
     finally:
         cn.close()
 
@@ -510,8 +693,11 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
               COALESCE(NULLIF(aac.CUST_DESC,''), aaw.WORK_DESC, '') assywc,
               COALESCE(NULLIF(iac.CUST_DESC,''), iaw.WORK_DESC, '') dobanwc,
               COALESCE(wh.GAGONG_PROC_DESC, ic.WH_GAGONG_PROC_CODE, '') inwh,
-              CONVERT(varchar(19), ic.PRINT_DATETIME, 120) prt, ISNULL(pn.proc_n,0) proc_n
-            FROM PARTNER_ERP.dbo.PR_T_INDI_CUTTING ic
+              CONVERT(varchar(19), ic.PRINT_DATETIME, 120) prt, ISNULL(pn.proc_n,0) proc_n,
+              ISNULL(ic.PLAN_QTY,0) plan_qty, ISNULL(ic.PROD_QTY,0) prod_qty,
+              ISNULL(ic.PROD_FLAG,'0') prod_flag, ISNULL(ic.DEL_FLAG,'0') del_flag,
+              ISNULL(ic.PRINT_USER_ID,'') prtuser
+            FROM PARTNER_ERP_TEST3.nx.PR_T_INDI_CUTTING ic
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ma ON ma.ITEM_CODE=ic.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST mac ON mac.CUST_CODE=ma.IN_CUST_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK maw ON maw.WORK_CODE=ma.WORK_CODE
@@ -528,5 +714,200 @@ def gagong_jeohist(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         return {"rows": rows, "cnt": len(rows)}
+    finally:
+        cn.close()
+
+
+# --- 컷팅간판 인쇄용 헬퍼 ---
+def _sheet_procs(cur, jado):
+    """공정순서: 공정명=PR_M_WORK_SINGLE.WORK_DESC(S_WORK_CODE), SPEC=STD_SIZE"""
+    cur.execute("""SELECT TOP 10 ISNULL(w.WORK_DESC, CONVERT(varchar(20), d.S_WORK_CODE)),
+                          ISNULL(d.STD_SIZE,'')
+                     FROM nx.PR_M_ITEM_PROC_GAGONG d
+                     LEFT JOIN nx.PR_M_WORK_SINGLE w ON w.S_WORK_CODE=d.S_WORK_CODE
+                    WHERE d.ITEM_CODE=? ORDER BY d.PROC_SEQ""", jado)
+    return [{"nm": (x[0] or '').strip(), "spec": (x[1] or '').strip()} for x in cur.fetchall()]
+
+def _sheet_wh(cur, jado):
+    """창고 = 첫 공정의 가공공정명(예 11라인(가공)/01라인(용접)), 라인 = GAGONG_GROUP_CODE"""
+    cur.execute("""SELECT TOP 1 ISNULL(g.GAGONG_PROC_DESC, d.GAGONG_PROC_CODE),
+                          ISNULL(CONVERT(varchar(20), w.GAGONG_GROUP_CODE),'')
+                     FROM nx.PR_M_ITEM_PROC_GAGONG d
+                     LEFT JOIN nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=d.GAGONG_PROC_CODE
+                     LEFT JOIN nx.PR_M_WORK_SINGLE w ON w.S_WORK_CODE=d.S_WORK_CODE
+                    WHERE d.ITEM_CODE=? ORDER BY d.PROC_SEQ""", jado)
+    r = cur.fetchone()
+    return ((r[0] or '') if r else '', (r[1] or '') if r else '')
+
+def _sheet_cat(cur, jado):
+    """좌상단 구분(SVC/CA 등) = 품목 대분류코드"""
+    try:
+        cur.execute("SELECT TOP 1 ISNULL(ITEM_LGROUP,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", jado)
+        r = cur.fetchone()
+        return (r[0] or '').strip() if r else ''
+    except Exception:
+        return ''
+
+def _sheet_draw(cur, jado):
+    """도면 이미지(PR_M_ITEM_BLOB, FILE_TYPE='K') → data URI"""
+    try:
+        cur.execute("""SELECT TOP 1 MODULE_BLOB, ISNULL(FILE_EXT,'jpg')
+                         FROM nx.PR_M_ITEM_BLOB
+                        WHERE ITEM_CODE=? AND FILE_TYPE='K' AND MODULE_BLOB IS NOT NULL
+                        ORDER BY MODULE_SEQ""", jado)
+        r = cur.fetchone()
+        if not r or not r[0]:
+            return ''
+        ext = (r[1] or 'jpg').lower().lstrip('.')
+        mime = 'image/png' if ext == 'png' else 'image/jpeg'
+        return "data:%s;base64,%s" % (mime, base64.b64encode(bytes(r[0])).decode())
+    except Exception:
+        return ''
+
+# ===== 전표발행(컷팅간판 출력) — 레거시 w_pr_input_017 =====
+# 채번: SELECT MAX(BOX_NO) → 더미 UPDATE로 테이블 락 → 행마다 +1 (레거시 동일)
+# 저장: PR_T_INDI_CUTTING (PLAN_QTY/규격/PRINT_*). ★쓰기는 nx 만(§1).
+@router.post("/api/gagong/sheet/issue")
+def gagong_sheet_issue(payload: dict = Body(...)):
+    rows = payload.get("rows") or []
+    user = str(payload.get("user") or "웹")[:20]
+    ymd = _d6(str(payload.get("ymd") or "")) or datetime.now().strftime("%y%m%d")
+    items = []
+    for r in rows:
+        q = int(float(r.get("qty") or 0))
+        jado = str(r.get("jado") or "").strip()
+        if q > 0 and jado:
+            items.append({"assy": str(r.get("assy") or "").strip(),
+                          "upper": str(r.get("upper") or "").strip(),
+                          "jado": jado, "qty": q})
+    if not items:
+        return {"ok": False, "msg": "발행할 행이 없습니다."}
+
+    cn = _nx_tx(); cur = cn.cursor()
+    try:
+        # 테이블 락(레거시 방식) 후 채번
+        cur.execute("SELECT ISNULL(MAX(BOX_NO),0) FROM nx.PR_T_INDI_CUTTING WITH(UPDLOCK,HOLDLOCK)")
+        box = int(cur.fetchone()[0] or 0)
+        sheets = []
+        for it in items:
+            box += 1
+            cur.execute("""SELECT ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0),
+                                  ISNULL(ITEM_WEIGHT,0), ISNULL(ITEM_DESC,'')
+                             FROM nx.PR_M_ITEM WHERE ITEM_CODE=?""", it["jado"])
+            m = cur.fetchone() or (0, 0, 0, 0, '')
+            cur.execute("""INSERT INTO nx.PR_T_INDI_CUTTING
+                           (BOX_NO,LINE_NO,ITEM_DIAM,ITEM_THICK,ITEM_LENGTH,
+                            ASSY_ITEM_CODE,ITEM_CODE,MAT_CODE,PLAN_YMD,PLAN_QTY,
+                            PRINT_USER_ID,PRINT_DATETIME,PRINT_WINDOW_NAME,
+                            CUT_QTY,CUT_FLAG,CUT_OUT_QTY,PROD_QTY,PROD_FLAG,DEL_FLAG,
+                            WH_GAGONG_PROC_CODE,IN_GAGONG_PROC_CODE)
+                           VALUES(?,'',?,?,?,?,?,?,?,?,?,getdate(),?,0,'0',0,0,'0','0','IS0001','P0001')""",
+                        box, m[0], m[1], m[2],
+                        it["assy"], (it["upper"] or it["assy"]), it["jado"], ymd, it["qty"],
+                        user, 'w_pr_input_017')
+            # 공정순서(간판 인쇄용): 공정명=S_WORK_CODE(작업명), SPEC=STD_SIZE
+            procs = _sheet_procs(cur, it["jado"])
+            whnm, lineno = _sheet_wh(cur, it["jado"])
+            sheets.append({"box_no": box, "barcode": "CT%08d" % box,
+                           "assy": it["assy"], "upper": it["upper"], "mat": it["jado"],
+                           "matnm": m[4], "qty": it["qty"], "wh": "P0001",
+                           "diam": float(m[0] or 0), "thick": float(m[1] or 0),
+                           "length": float(m[2] or 0),
+                           "weight": round(float(m[3] or 0) * it["qty"], 3),
+                           "whnm": whnm, "lineno": lineno,
+                           "cat": _sheet_cat(cur, it["jado"]),
+                           "draw": _sheet_draw(cur, it["jado"]),
+                           "procs": procs})
+        cn.commit()
+        return {"ok": True, "cnt": len(sheets), "sheets": sheets,
+                "msg": "전표발행 완료 %d건 (바코드 %s~%s)" % (
+                    len(sheets), sheets[0]["barcode"], sheets[-1]["barcode"])}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
+
+
+# ===== 컷팅간판 수기입력 지원: 자도번 → 규격·공정순서·상위도번 자동조회 =====
+@router.get("/api/gagong/sheet/lookup")
+def gagong_sheet_lookup(jado: str = Query("")):
+    j = (jado or "").strip()
+    if not j:
+        return {"ok": False}
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0),
+                              ISNULL(ITEM_WEIGHT,0), ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''),
+                              ISNULL(IN_CUST_CODE,'')
+                         FROM nx.PR_M_ITEM WHERE ITEM_CODE=?""", j)
+        m = cur.fetchone()
+        if not m:
+            return {"ok": False, "msg": "자도번 %s 없음" % j}
+        # 상위도번(이 자도번을 쓰는 BOM 부모) 1건
+        cur.execute("""SELECT TOP 1 b.ITEM_CODE FROM nx.PR_M_ITEM_BOM b
+                        WHERE b.MAT_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'""", j)
+        up = cur.fetchone()
+        upper = up[0] if up else ''
+        # 작업처명
+        cur.execute("""SELECT TOP 1 ISNULL(w.WORK_DESC,'') FROM nx.PR_M_WORK w WHERE w.WORK_CODE=?""", m[5])
+        w = cur.fetchone()
+        wcd = (w[0] if w and w[0] else '')
+        if not wcd and m[6]:
+            cur.execute("SELECT TOP 1 ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE CUST_CODE=?", m[6])
+            cc = cur.fetchone()
+            wcd = cc[0] if cc else ''
+        procs = _sheet_procs(cur, j)
+        return {"ok": True, "jado": j, "matnm": m[4], "upper": upper, "wcd": wcd,
+                "diam": float(m[0] or 0), "thick": float(m[1] or 0), "length": float(m[2] or 0),
+                "weight": float(m[3] or 0),
+                "procs": procs, "procstr": ",".join(x["nm"] for x in procs)}
+    finally:
+        cn.close()
+
+
+# ===== 가공전표 삭제(발행취소) — 레거시 w_pr_processing_010 ue_deleterow_check =====
+# 규칙(레거시 동일): 실적이 잡혀 있으면 삭제 불가.
+#   PROD_QTY>0  → "이미 검사완료수량이 등록되어 삭제할 수 없습니다."
+#   PROD_FLAG=1 → "이미 검사완료처리가 되어 삭제할 수 없습니다."
+#   통과시 PR_T_PROD_DTL_GAGONG 삭제 → PR_T_INDI_CUTTING 삭제. ★nx 만.
+@router.post("/api/gagong/sheet/delete")
+def gagong_sheet_delete(payload: dict = Body(...)):
+    boxes = payload.get("boxes") or []
+    try:
+        boxes = [int(b) for b in boxes if str(b).strip()]
+    except Exception:
+        return {"ok": False, "msg": "바코드번호 오류"}
+    if not boxes:
+        return {"ok": False, "msg": "삭제할 전표를 선택하세요."}
+    cn = _nx_tx(); cur = cn.cursor()
+    try:
+        blocked, done = [], []
+        for box in boxes:
+            cur.execute("""SELECT ISNULL(PROD_QTY,0), ISNULL(PROD_FLAG,'0'), ISNULL(MAT_CODE,'')
+                             FROM nx.PR_T_INDI_CUTTING WHERE BOX_NO=?""", box)
+            r = cur.fetchone()
+            if not r:
+                blocked.append({"box": box, "why": "전표 없음"}); continue
+            if float(r[0] or 0) > 0:
+                blocked.append({"box": box, "why": "실적수량 %g 등록됨" % float(r[0])}); continue
+            if str(r[1]) == '1':
+                blocked.append({"box": box, "why": "실적처리 완료됨"}); continue
+            cur.execute("SELECT COUNT(*) FROM nx.PU_T_CUT_DTL WHERE BOX_NO=?", box)
+            if int(cur.fetchone()[0] or 0) > 0:
+                blocked.append({"box": box, "why": "실적이력 있음"}); continue
+            try:
+                cur.execute("DELETE FROM nx.PR_T_PROD_DTL_GAGONG WHERE BOX_NO=?", box)
+            except Exception:
+                pass
+            cur.execute("DELETE FROM nx.PR_T_INDI_CUTTING WHERE BOX_NO=?", box)
+            done.append(box)
+        cn.commit()
+        msg = "삭제 %d건" % len(done)
+        if blocked:
+            msg += " · 불가 %d건(%s)" % (len(blocked),
+                   ", ".join("%s:%s" % (b["box"], b["why"]) for b in blocked[:5]))
+        return {"ok": True, "deleted": done, "blocked": blocked, "msg": msg}
+    except Exception:
+        cn.rollback(); raise
     finally:
         cn.close()

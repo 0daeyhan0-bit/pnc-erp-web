@@ -102,26 +102,14 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
                                  GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *ch)
                 for r in cur.fetchall():
                     stkmap[str(r[0] or '').strip()] = float(r[1] or 0)
-            # 웹 원장 가산분: 스냅샷 최종갱신(UPDATE_DATETIME) 이후 INSERT 된 MAT 원장만 더함(이중계상 방지)
-            nx2 = _nx(); ncur = nx2.cursor()
-            try:
-                for i in range(0, len(mats), 900):
-                    ch = mats[i:i+900]; ph = ",".join("?" * len(ch))
-                    ncur.execute(f"""
-                        SELECT UPPER(LTRIM(RTRIM(l.MAT_CODE))), SUM(CAST(l.MAINT_QTY AS float))
-                          FROM nx.stock_ledger l WITH(NOLOCK)
-                          LEFT JOIN nx.PU_T_MAT_STOCK_WH s WITH(NOLOCK)
-                                 ON s.MAT_CODE=l.MAT_CODE AND s.CUST_CODE='Z99990' AND ISNULL(s.GAGONG_PROC_CODE,'')='IS0001'
-                         WHERE l.STOCK_POINT='MAT' AND l.MAT_CODE IN ({ph})
-                           AND l.INSERT_DATETIME > ISNULL(s.UPDATE_DATETIME,'1900-01-01')
-                         GROUP BY UPPER(LTRIM(RTRIM(l.MAT_CODE)))""", *ch)
-                    for r in ncur.fetchall():
-                        k = str(r[0] or '').strip()
-                        stkmap[k] = stkmap.get(k, 0.0) + float(r[1] or 0)
-            except Exception:
-                pass
-            finally:
-                nx2.close()
+            # ★2026-08-20: 웹 원장 가산 제거 — 스냅샷(PU_T_MAT_STOCK_WH)이 정본.
+            #   자재재고조정(/api/stock/save)이 이제 스냅샷 잔액을 직접 증감시키므로
+            #   원장을 또 더하면 이중계상. (nx.stock_ledger 는 이력·추적용으로 계속 기록)
+            #
+            #   ※기존 방식(스냅샷 갱신시각 이후 원장만 가산)은 조정으로 시각이 갱신되면
+            #     그 이전 원장분이 통째로 빠져 값이 되레 줄어드는 문제가 있었음(실측 100→50).
+            #   ※nx.stock_ledger(MAT) 에는 레거시 출고이력까지 적재돼 있어(전체 −624만)
+            #     무조건 가산도 불가. → 스냅샷 단일정본이 가장 안전하고 다른 화면과도 일치.
         rows = []
         for b in bom:
             use = b["use_qty"]; stk = stkmap.get(b["mat"].upper(), 0.0)
@@ -433,6 +421,20 @@ def ready_commit(payload: dict = Body(...)):
                         today6, seq, mat, gpc, -sgn * need, (wo or None),
                         ('생산준비취소' if mode == 'cancel' else '생산준비출고'),
                         d6, user, WIN)   # INPUT_YMD=계획일자(추적용), TO=파트(생산파트창고)
+            # ②-2 자재창고 잔액 차감 / 취소시 복원 (2026-08-20 추가)
+            #   ★기존엔 출고 "이력"(PU_T_STOCK_MAINT)만 쓰고 잔액(PU_T_MAT_STOCK_WH)은 그대로여서,
+            #     준비등록을 해도 세트가능 확인 팝업의 재고수량이 안 줄었음
+            #     (실측: 이력 −12 기록됐는데 자재창고는 100 그대로, 파트창고만 12 증가).
+            #   자재창고 → 파트창고 이동이므로 양쪽 잔액이 함께 움직여야 한다.
+            cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                              UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
+                            WHERE MAT_CODE=? AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'""",
+                        -sgn * need, user, WIN, mat)
+            if cur.rowcount == 0:
+                cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,STOCK_QTY,
+                                  UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                VALUES(?,'Z99990','IS0001',?,?,GETDATE(),?)""",
+                            mat, -sgn * need, user, WIN)
             # ③ 파트창고 재고 증가 / 취소시 감소
             cur.execute("""UPDATE nx.PR_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
                               UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?

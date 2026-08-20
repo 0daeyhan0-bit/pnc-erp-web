@@ -116,6 +116,44 @@ def stock_save(payload: dict = Body(...)):
                 str(r.get("MAT_CODE", "")).strip(), (r.get("ITEM_CODE") or None), (r.get("WORK_CODE") or None),
                 store_qty, float(r.get("MAINT_COST") or 0), float(r.get("MAINT_AMT") or 0),
                 (r.get("REMARKS") or None), (r.get("SHEET_NO") or None), "web")
+            # ★자재창고 재고에도 반영(2026-08-20) — 레거시와 같은 구조.
+            #   기존엔 nx.stock_ledger 에만 쌓여서 화면마다 반영이 갈렸음:
+            #     준비등록 팝업 = 스냅샷 + stock_ledger 합산 → 조정분 보임
+            #     자재입출고현황 = pu_t_stock_maint 만 조회   → 조정분 안 보임
+            #   → 조정/입고/출고 시 nx.PU_T_MAT_STOCK_WH 잔액도 함께 증감시켜
+            #     모든 화면이 같은 값을 보게 한다. (원장은 이력용으로 그대로 유지)
+            #   ※버킷 키 = (MAT_CODE, CUST_CODE, GAGONG_PROC_CODE).
+            #     자재창고 기본 버킷은 CUST_CODE='Z99990' · GAGONG_PROC_CODE='IS0001'
+            #     (준비등록 setcheck 가 읽는 버킷과 동일해야 값이 맞음 — ready.py line 101)
+            _mc = str(r.get("MAT_CODE", "")).strip()
+            _cc = (str(r.get("CUST_CODE") or "").strip() or "Z99990")
+            _gp = (str(r.get("GAGONG_PROC_CODE") or "").strip() or "IS0001")
+            try:
+                cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                                  UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='stockadjust'
+                                WHERE MAT_CODE=? AND CUST_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""",
+                            store_qty, _mc, _cc, _gp)
+                if cur.rowcount == 0:
+                    cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,STOCK_QTY,
+                                      UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                    VALUES(?,?,?,?,'web',GETDATE(),'stockadjust')""",
+                                _mc, _cc, _gp, store_qty)
+            except Exception: pass   # 재고 반영 실패해도 원장 기록은 유지(이력 우선)
+            # ★자재 입출고이력에도 기록(2026-08-20) — 레거시 w_pu_stock_016 과 동일 형태.
+            #   자재입출고현황·자재수불장 등은 nx.PU_T_STOCK_MAINT 를 읽으므로 여기 없으면
+            #   잔액은 맞는데 "입출고 내역"에는 안 잡힌다.
+            #   ★WH_CUST_CODE·GAGONG_PROC_CODE 필수 — 공백이면 창고 필터에서 빠져 조회 누락됨.
+            try:
+                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+                _sq = int(cur.fetchone()[0] or 1)
+                cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT
+                        (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
+                         WH_CUST_CODE,GAGONG_PROC_CODE,
+                         INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                         UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                        VALUES(?,?,?,?,?,?,?,?,?,'web',GETDATE(),'stockadjust','web',GETDATE(),'stockadjust')""",
+                    ymd, _sq, tag, _cc, _mc, store_qty, (r.get("REMARKS") or None), _cc, _gp)
+            except Exception: pass
             saved += 1
         return {"ok": True, "count": saved}
     finally:

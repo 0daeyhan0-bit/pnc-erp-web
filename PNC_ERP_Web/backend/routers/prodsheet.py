@@ -1215,6 +1215,34 @@ def procbc_save(payload: dict = Body(...)):
         boms = _bom_expand(cur, item, '%')
         cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=?", today6)
         mseq = int(cur.fetchone()[0] or 0)
+        # ★자재 재고부족 사전검증(2026-08-20) — 음수재고 금지.
+        #   실적 수량 × BOM 소요 > 파트창고 재고 이면 실적을 잡지 않고 거부한다.
+        #   (기존엔 검증 없이 차감해 파트창고가 0/음수가 됐고, 생산입출고현황에서
+        #    해당 품번이 사라져 보였음 — 실측 AJR30038201 실적54 → 자재 216 차감)
+        #   ※취소(qty<0)는 되돌리는 동작이므로 검증 제외.
+        if qty > 0:
+            _short = []
+            for mat, mwc, use, mgpc in boms:
+                if use <= 0 or (mgpc or '').upper() in ('Q1000', 'Q2000'):
+                    continue
+                _need = qty * use
+                _pc = mgpc or proc
+                cur.execute("""SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.PR_T_MAT_STOCK_WH WITH(NOLOCK)
+                                WHERE MAT_CODE=? AND PART_CODE=?""", mat, _pc)
+                _have = float(cur.fetchone()[0] or 0)
+                if _have < _need:
+                    _short.append({"mat": mat, "part": _pc, "need": round(_need, 4),
+                                   "have": round(_have, 4), "lack": round(_need - _have, 4)})
+            if _short:
+                nx.rollback()
+                _msg = "자재 재고가 부족합니다.\n\n" + "\n".join(
+                    f"· {s['mat']} ({s['part']})  필요 {s['need']:g} / 재고 {s['have']:g}  → 부족 {s['lack']:g}"
+                    for s in _short[:10])
+                if len(_short) > 10:
+                    _msg += f"\n… 외 {len(_short)-10}건"
+                return {"ok": False, "shortage": _short,
+                        "errors": [_msg]}
+
         for mat, mwc, use, mgpc in boms:
             if use <= 0 or (mgpc or '').upper() in ('Q1000', 'Q2000'):
                 continue
