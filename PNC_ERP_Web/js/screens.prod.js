@@ -2701,7 +2701,7 @@ SCREEN.prodsheet=(host)=>{
     draw();document.body.appendChild(ov);
     ov.onclick=e=>{if(e.target===ov)close();};
   };
-  // ★가간판 인쇄 — A4 1/3 크기(가로 배치). 레거시 양식 실측 재현:
+  // ★가간판 인쇄 — 용지 210×110mm(A4 3등분, 2026-08-20 실측). 레거시 양식 재현:
   //   [라인 | 도번(대) | ★간판수량(대)] / [박스종류·표준포장수 | 바코드 GP+BOX_NO 8자리]
   //   ※우상단 대형숫자 = 순번이 아니라 그 간판의 수량.
   //     (실측: box=2618985 표시4 = 수량4, 순번은 1/7 → 수량 확정. 2026-08-19 수정)
@@ -2729,9 +2729,9 @@ SCREEN.prodsheet=(host)=>{
     const card=c=>`<div class="kb">
       <table>
         <tr>
-          <td class="c" style="width:12%;font-size:15px;font-weight:700">${esc(c.line||'')}</td>
-          <td class="c" style="width:58%;font-size:26px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
-          <td class="c" style="width:30%;font-size:26px;font-weight:800">${nf(c.qty)}</td></tr>
+          <td class="c" style="width:12%;font-size:17px;font-weight:700;height:11mm">${esc(c.line||'')}</td>
+          <td class="c" style="width:58%;font-size:30px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
+          <td class="c" style="width:30%;font-size:30px;font-weight:800">${nf(c.qty)}</td></tr>
       </table>
       <table>
         <tr>
@@ -2747,9 +2747,10 @@ SCREEN.prodsheet=(host)=>{
         <tr><td class="c lb">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px">${esc(c.proc_nm||'')}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:12%;height:34px">불량이력</td><td style="width:62%"></td>
+        <tr><td class="c lb" style="width:12%;height:15mm">불량이력</td><td style="width:62%"></td>
             <td class="c lb" style="width:26%">검수란</td></tr>
-        <tr><td class="c lb" style="height:34px">시방이력</td><td></td><td></td></tr>
+        <tr><td class="c lb" style="height:15mm">시방이력</td><td></td>
+            <td></td></tr>
       </table>
       <table>
         <tr><td class="c lb" style="width:12%">용접자</td><td class="c" style="width:26%;font-weight:700">${esc(c.prod_worker||'')}</td>
@@ -2759,27 +2760,35 @@ SCREEN.prodsheet=(host)=>{
       <div class="ft"><span>출력일시 : ${esc((c.print_dt||'').slice(2,16).replace('T',' ').replace(/-/g,'/'))} ${esc(c.print_user||'')}</span>
         <span>용접전표번호 : ${esc(c.sheet_no_fmt)}</span></div>
     </div>`;
-    const w=window.open('','_blank','width=900,height=1100');
+    const w=window.open('','_blank','width=980,height=680');   // 210×110 비율에 맞춘 미리보기
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>가간판 ${esc(cards[0].item)} (${cards.length}장)</title>
     <style>
-      @page{size:A4 portrait;margin:6mm}
+      /* ★용지 = A4 3등분(210 × 110mm) — 실제 간판 용지크기(2026-08-20).
+         이전 A4 portrait 는 세로 297mm 를 다 잡아 아래 2/3 가 빈 채로 출력됐다.
+         간판 1장 = 1페이지. */
+      @page{size:210mm 110mm;margin:4mm}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
       /* ★A4 1/3 폭 기준. 높이는 내용에 맞춤(고정 X — 아래쪽 빈칸 방지).
          한 페이지에 3장까지 자연스럽게 들어감. */
-      .kb{border:2px solid #000;margin-bottom:3mm;page-break-inside:avoid}
+      /* 간판 1장 = 1페이지. 레거시 실물처럼 표는 위쪽에 모으고 아래는 비운다
+         (표를 억지로 늘려 채우지 않음 — 2026-08-20 레거시 대조). */
+      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden}
+      .kb+.kb{page-break-before:always}
       .kb table{border-collapse:collapse;width:100%}
-      .kb td{border:1px solid #000;padding:1px 2px;font-size:10px}
+      /* 레거시 실물 대조: 글자·행높이를 키우고 라벨칸 음영은 없앤다(전부 흰 바탕) */
+      .kb td{border:1px solid #000;padding:2px 3px;font-size:12px;height:7mm}
       .kb .c{text-align:center}
-      .kb .lb{font-weight:700;background:#f4f4f4;white-space:nowrap}
-      .kb .ft{display:flex;justify-content:space-between;padding:2px 4px;font-size:8px;border-top:1px solid #000}
+      .kb .lb{font-weight:700;white-space:nowrap}
+      .kb .ft{display:flex;justify-content:space-between;padding:2px 4px;font-size:9px;
+              font-weight:700;border-top:1px solid #000}
       @media print{.noprint{display:none}}
     </style></head><body>
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · A4 1/3 크기</span></div>
+      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span></div>
     ${cards.map(card).join('')}
     <script>
       (function(){var imgs=[].slice.call(document.images),left=imgs.length;
