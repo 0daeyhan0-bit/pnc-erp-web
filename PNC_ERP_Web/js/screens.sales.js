@@ -542,161 +542,471 @@ SCREEN.saleout=(c)=>{
   load();
 };
 
-/* 영업 > 출하실적등록/LG송장 (레거시 w_pr_input_040 복원) — 출하실적 CRUD + LG송장 발행/취소. nx.sale_dtl+nx.lg_songjang_dtl. */
+/* 영업 > 출하실적등록 (레거시 w_pr_input_040) — 제번단위 출하실적.
+   드래그로 계획셀 선택 → 우클릭 [확인] = ASSY재고 있는 만큼만 출하처리(재고차감).
+   구분 4종(전체/집계/제번/라인) · 라인 드롭다운 · 출하완료셀=살구색. */
 SCREEN.lgsale=(c)=>{
   const API=API_BASE;
   const pad=n=>String(n).padStart(2,"0");
   const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-  const yy=s=>s?s.slice(2).replace(/-/g,""):"";
-  const now=new Date();
-  const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
-  let st={rows:[],wo:"",item:"",fin:"",fr:iso(new Date(now.getFullYear(),now.getMonth(),1)),to:iso(now),
-          sel:{},edit:null,sortKey:"",sortDir:1,loading:false,busy:false};
-  const load=async()=>{st.loading=true;st.sel={};draw();
-    try{const r=await fetch(`${API}/api/lgsale/list?fr=${yy(st.fr)}&to=${yy(st.to)}&wo=${encodeURIComponent(st.wo)}&item=${encodeURIComponent(st.item)}&fin=${st.fin}`);
-      const j=await r.json();st.rows=j.rows||[];}catch(e){st.rows=[];}
+  const nf=v=>(+v||0).toLocaleString('ko-KR');
+  const nf2=v=>(+v||0).toFixed(2);
+  const cap=v=>(+v||0)?nf(v):'';
+  const esc2=s=>String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  const _DW=['일','월','화','수','목','금','토'];
+  const dcol=s=>{s=''+(s||'');if(s.length!==6)return s;
+    const d=new Date(2000+ +s.slice(0,2),+s.slice(2,4)-1,+s.slice(4,6));
+    return `${+s.slice(4,6)}(${_DW[d.getDay()]})`;};
+  const dow=s=>{s=''+(s||'');if(s.length!==6)return -1;
+    return new Date(2000+ +s.slice(0,2),+s.slice(2,4)-1,+s.slice(4,6)).getDay();};
+  const dcls=s=>{const w=dow(s);return w===0?' s4sun':(w===6?' s4sat':'');};
+  const T=new Date();
+  const st={from:iso(T),gigan:4,line:'',wo:'',item:'',view:'전체',src:'nx',
+            dates:[],rows:[],cnt:0,loading:false,msg:'',lines:[],sel:new Set()};
+
+  const loadLines=async()=>{try{const r=await fetch(`${API}/api/sale040/lines?src=${st.src}`);
+    st.lines=(await r.json()).rows||[];}catch(e){st.lines=[];}};
+  const load=async()=>{st.loading=true;draw();
+    const qs=new URLSearchParams({from_ymd:st.from,gigan:st.gigan,line:st.line,
+                                  wo:st.wo,item:st.item,src:st.src,limit:4000});
+    try{const r=await fetch(`${API}/api/sale040/grid?${qs}`);const d=await r.json();
+      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.msg='';st.sel.clear();}
+    catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.rows=[];st.cnt=0;}
     st.loading=false;draw();};
-  const save=async()=>{const e=st.edit;if(!e.work_order||!e.item_code)return alert("제번·품번을 입력하세요.");
-    if(e.sale_qty===""||isNaN(+e.sale_qty))return alert("출하수량(숫자)을 입력하세요.");
-    try{const r=await fetch(`${API}/api/lgsale/save`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(e)});
-      if(!r.ok)throw new Error((await r.json()).detail||r.status);st.edit=null;await load();}catch(x){alert("저장 실패: "+x.message);}};
-  const del=async(id)=>{if(!window.confirm("이 출하실적을 삭제할까요?"))return;
-    try{const r=await fetch(`${API}/api/lgsale/delete`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});if(!r.ok)throw new Error((await r.json()).detail||r.status);await load();}catch(x){alert("삭제 실패: "+x.message);}};
-  const issue=async()=>{if(st.busy)return;const ids=Object.keys(st.sel).filter(k=>st.sel[k]).map(Number);
-    if(!ids.length)return alert("발행할 출하실적을 체크하세요(미발행 건만).");
-    if(!window.confirm(`${ids.length}건 LG송장 발행 → 동일 송장번호로 묶임. 진행?`))return;st.busy=true;draw();
-    try{const r=await fetch(`${API}/api/lgsale/issue`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids})});
-      const j=await r.json();if(!r.ok)throw new Error(j.detail||r.status);alert(`LG송장 발행완료 — ${j.issued}건, 송장번호 ${j.sheet_no}`);await load();}catch(x){alert("발행 실패: "+x.message);}st.busy=false;draw();};
-  const cancel=async(sheet)=>{if(!window.confirm(`송장번호 ${sheet} 전체 취소 → 발행정보 제거 + LG송장 원장 삭제. 진행?`))return;
-    try{const r=await fetch(`${API}/api/lgsale/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sheet_no:sheet})});if(!r.ok)throw new Error((await r.json()).detail||r.status);await load();}catch(x){alert("취소 실패: "+x.message);}};
+
   const draw=()=>{
-    if(st.sortKey){const k=st.sortKey,d=st.sortDir||1;st.rows.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*d;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*d;});}
-    const totq=st.rows.reduce((a,r)=>a+(+r.sale_qty||0),0);const selcnt=Object.values(st.sel).filter(Boolean).length;
-    const e=st.edit;
+    const dates=st.dates;
+    // 필터(클라 즉시) — 제번·도번
+    const q=s=>(s||'').trim().toUpperCase();
+    const qw=q(st.wo), qi=q(st.item);
+    let rows=st.rows.filter(r=>
+      (!qw||((r.wo||'').toUpperCase().includes(qw)||(r.swo||'').toUpperCase().includes(qw)))
+      &&(!qi||(r.item||'').toUpperCase().includes(qi)));
+    if(st.line) rows=rows.filter(r=>(r.line_no||'')===st.line);
+    // 정렬: 라인 → 제번 → 도번
+    rows.sort((a,b)=>(a.line_no||'').localeCompare(b.line_no||'')
+                   ||(a.swo||a.wo||'').localeCompare(b.swo||b.wo||'')
+                   ||(a.item||'').localeCompare(b.item||''));
+    const lnm={};(st.lines||[]).forEach(o=>{lnm[o.code]=o.nm;});
+    // 셀 = 그 일자 계획. 출하완료분은 살구색.
+    // ★del_flag(0=현재계획 / 1=전일 삭제계획)를 키에 포함 — 같은 제번·도번이 양쪽에 나올 수 있다.
+    const ckey=(r,d)=>`${r.del_flag||'0'}|${r.wo}|${r.swo}|${r.item}|${d}`;
+    // 살구 = 그 제번(제번·도번)이 전량출하. 조회기간과 무관하게 제번 전체계획 기준.
+    const woDone=r=>{const p=+r.wo_plan||0, s=+r.sale_qty||0; return p>0&&s>=p;};
+    // ASSY재고 충당(노랑) — 앞 일자부터, 계획을 전량 덮을 때만.
+    const _cov={};
+    (function(){const pool={};
+      rows.forEach(r=>{if(!(r.item in pool))pool[r.item]=+r.stock_qty||0;});
+      // 삭제계획(del_flag=1)은 실제 출하대상이 아니므로 재고를 소진시키지 않는다.
+      dates.forEach(d=>rows.filter(r=>(r.del_flag||'0')!=='1').forEach(r=>{
+        const pl=(r.days&&r.days[d])||0, sd=(r.sday&&r.sday[d])||0;
+        const need=Math.max(0,pl-sd); if(need<=0)return;
+        const av=pool[r.item]||0; if(av<=0)return;
+        const take=Math.min(av,need); pool[r.item]=av-take;
+        if(take>=need-1e-6)_cov[ckey(r,d)]=1;}));})();
+    const cell=(r,d)=>{
+      const pl=(r.days&&r.days[d])||0, sd=(r.sday&&r.sday[d])||0;
+      const wk=(!pl&&!sd)?dcls(d).replace(/s4s(at|un)/,'s4wk'):'';
+      if(!pl&&!sd)return `<td class="num${wk}"></td>`;      // 빈칸은 무조건 무색
+      const rem=Math.max(0,pl-sd);
+      const k=ckey(r,d);
+      const del=(r.del_flag||'0')==='1';                    // 전일 삭제계획 = 참고용(출하대상 아님)
+      const done=sd>0&&rem<=0;                              // 그 셀 전량출하 = 살구
+      const bg=del?'#eceff1':(done?'#fac090':(_cov[k]?'#ffff00':''));  // 재고충당 = 노랑
+      const lock=del||(rem<=0&&sd<=0);                      // 출하분은 취소해야 하므로 선택가능
+      return `<td class="num s4c${lock?' s4lock':''}${st.sel.has(k)?' s4sel':''}"`
+        +`${lock?'':` data-k="${esc2(k)}" data-rem="${rem}" data-sd="${sd}"`}`
+        +` style="white-space:nowrap${bg?';background:'+bg:''}"`
+        +` title="${del?'전일 삭제계획(참고용) — 출하대상 아님':(done?('출하 '+nf(sd)+'/'+nf(pl)+' — 우클릭: 확인/취소'):'우클릭: 확인/취소')}"`
+        +`>${sd?nf(sd)+'/'+nf(pl):nf(pl)}</td>`;};
+
+    const NC=16;   // 고정컬럼 17개 → colspan 은 NC+1+dates.length
+    // Output = 계획일자 + 출력시각 (레거시 '26/08/21 21:00' 형식)
+    const outHm=r=>{const y=String(r.org_ymd||''),h=String(r.ohm||'');
+      if(!y&&!h)return '';
+      const yy=y.length===6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;
+      const hh=h.length===4?`${h.slice(0,2)}:${h.slice(2,4)}`:h;
+      return (yy+' '+hh).trim();};
+    // ── 고정컬럼 정의 (레거시 배치) ─────────────────────────────────────
+    //   t=헤더명 · cls=정렬 · w=기본폭(px) · h(r)=행 셀 · s(blk,S)=집계행 셀
+    //   도번은 툴팁으로 품명 제공(품명 컬럼은 레거시에 없어 제거)
+    const CD={
+      line_no:{t:'라인',cls:'center',w:78,
+        h:r=>`<td class="center">${esc2((lnm[r.line_no]&&lnm[r.line_no]!==r.line_no)?(r.line_no+' '+lnm[r.line_no]):r.line_no)}</td>`,
+        s:(b,S,r0)=>`<td class="center">${esc2(r0.line_no)}</td>`},
+      wo:{t:'제번',cls:'center',w:96,
+        h:r=>`<td class="center">${(r.del_flag||'0')==='1'?'<span style="color:#b0413e;font-weight:700" title="전일 삭제계획">✕</span> ':''}${esc2(r.swo||r.wo)}</td>`,
+        s:(b,S,r0)=>`<td class="center">${esc2(r0.swo||r0.wo)}</td>`},
+      model_no:{t:'Model No',cls:'center',w:150,h:r=>`<td class="center">${esc2(r.model_no)}</td>`},
+      tools:{t:'Tools',cls:'center',w:78,h:r=>`<td class="center">${esc2(r.tools)}</td>`},
+      item:{t:'도번',cls:'center',w:104,
+        h:r=>`<td class="center" title="${esc2(r.itemnm)}"><b>${esc2(r.item)}</b></td>`},
+      change_day:{t:'당김,변경',cls:'center',w:62,h:r=>`<td class="center mut">${esc2(r.change_day)}</td>`},
+      rmk1:{t:'비고',cls:'center',w:70,
+        h:r=>`<td class="center mut bcap" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc2(r.rmk1)}">${esc2(r.rmk1)}</td>`},
+      prod_rate:{t:'비율',cls:'num',w:44,h:r=>`<td class="num mut">${cap(r.prod_rate)}</td>`},
+      fseq:{t:'From',cls:'num',w:48,h:r=>`<td class="num">${cap(r.fseq)}</td>`},
+      tseq:{t:'To',cls:'num',w:48,h:r=>`<td class="num">${cap(r.tseq)}</td>`},
+      ohm:{t:'시간',cls:'center',w:52,
+        h:r=>`<td class="center mut">${esc2(String(r.ohm||'').length===4?String(r.ohm).slice(0,2)+':'+String(r.ohm).slice(2,4):(r.ohm||''))}</td>`},
+      output:{t:'Output',cls:'center',w:112,
+        h:r=>`<td class="center mut" style="white-space:nowrap">${esc2(outHm(r))}</td>`},
+      lot:{t:'LOT수량',cls:'num',w:64,h:r=>`<td class="num">${cap(r.lot)}</td>`,
+        s:(b,S)=>`<td class="num"><b>${nf(S('lot'))}</b></td>`},
+      prod_qty:{t:'생산실적',cls:'num',w:64,h:r=>`<td class="num">${cap(r.prod_qty)}</td>`,
+        s:(b,S)=>`<td class="num">${cap(S('prod_qty'))}</td>`},
+      sale_qty:{t:'출하실적',cls:'num',w:64,
+        h:r=>`<td class="num"${woDone(r)?' style="background:#fac090"':''}>${cap(r.sale_qty)}</td>`,
+        s:(b,S)=>`<td class="num"${(b.length&&b.every(woDone))?' style="background:#fac090"':''}>${cap(S('sale_qty'))}</td>`},
+      stock_qty:{t:'ASSY재고',cls:'num',w:70,
+        h:r=>`<td class="num"${(+r.stock_qty||0)>0?' style="font-weight:700;color:#1c47a0"':''}>${cap(r.stock_qty)}</td>`,
+        s:(b,S)=>`<td class="num">${cap(S('stock_qty'))}</td>`},
+      plan_qty:{t:'출하계획',cls:'num',w:64,h:r=>`<td class="num">${cap(r.plan_qty)}</td>`,
+        s:(b,S)=>`<td class="num">${cap(S('plan_qty'))}</td>`},
+    };
+    const C_DEF=['line_no','wo','model_no','tools','item','change_day','rmk1','prod_rate',
+                 'fseq','tseq','ohm','output','lot','prod_qty','sale_qty','stock_qty','plan_qty'];
+    const C_LS='s4_colorder', W_LS='s4_colwidth';
+    const cOrd=(()=>{try{const s=JSON.parse(localStorage.getItem(C_LS)||'null');
+        if(Array.isArray(s)&&s.length){const v=s.filter(k=>CD[k]);C_DEF.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
+      }catch(e){}
+      return C_DEF.slice();})();
+    const cW=(()=>{try{return JSON.parse(localStorage.getItem(W_LS)||'{}')||{};}catch(e){return {};}})();
+    const thW=k=>`width:${cW[k]||CD[k].w}px;min-width:${cW[k]||CD[k].w}px;max-width:${cW[k]||CD[k].w}px`;
+    const headHtml=()=>cOrd.map(k=>`<th class="${CD[k].cls}" draggable="true" data-tk="${k}"`
+      +` title="드래그=순서 이동 · 우측경계 드래그=너비조절(내 브라우저에 저장)"`
+      +` style="cursor:grab;${thW(k)}">${CD[k].t}</th>`).join('');
+
+    // 열 이동은 헤더 인덱스 기준으로 <td>를 옮기므로 순서만 맞으면 된다.
+    const rowHtml=r=>`<tr class="s4row"${(r.del_flag||'0')==='1'?' style="color:#78909c" title="전일 삭제계획(참고용)"':''}>`
+      +cOrd.map(k=>CD[k].h(r)).join('')
+      +dates.map(d=>cell(r,d)).join('')+'</tr>';
+
+    // 집계행(제번 블록) — 구분=집계/전체 일 때. 컬럼 순서(cOrd)를 그대로 따른다.
+    const subHtml=blk=>{const r0=blk[0];
+      const S=k=>blk.reduce((s,x)=>s+(+x[k]||0),0);
+      return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
+        ${cOrd.map(k=>CD[k].s?CD[k].s(blk,S,r0):'<td></td>').join('')}
+        ${dates.map(d=>{const pl=blk.reduce((s,x)=>s+((x.days&&x.days[d])||0),0);
+          const sd=blk.reduce((s,x)=>s+((x.sday&&x.sday[d])||0),0);
+          if(!pl&&!sd)return '<td class="num"></td>';
+          const done=sd>0&&pl-sd<=0;
+          const cov=!done&&blk.some(x=>_cov[ckey(x,d)]);
+          const bg=done?'#fac090':(cov?'#ffff00':'');
+          return `<td class="num"${bg?` style="background:${bg}"`:''}>${nf(sd)+'/'+nf(pl)}</td>`;}).join('')}</tr>`;};
+
+    const bodyHtml=()=>{
+      if(!rows.length)return `<tr><td colspan="${NC+1+dates.length}" class="empty">조회 결과 없음</td></tr>`;
+      let h='',i=0;
+      while(i<rows.length){
+        const k=(rows[i].swo||rows[i].wo);let j=i;const blk=[];
+        while(j<rows.length&&(rows[j].swo||rows[j].wo)===k){blk.push(rows[j]);j++;}
+        if(st.view!=='집계') blk.forEach(r=>{h+=rowHtml(r);});
+        if(st.view==='전체'||st.view==='집계') h+=subHtml(blk);
+        i=j;}
+      return h;};
+
+    const tLot=rows.reduce((s,r)=>s+(+r.lot||0),0);
+    const tSale=rows.reduce((s,r)=>s+(+r.sale_qty||0),0);
+    const tStk=rows.reduce((s,r)=>s+(+r.stock_qty||0),0);
+    const selN=st.sel.size;
+    let selQ=0;
+    rows.forEach(r=>dates.forEach(d=>{if(st.sel.has(ckey(r,d))){
+      const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;selQ+=Math.max(0,pl-sd);}}));
+
     c.innerHTML=`
-     <div class="page-title">🚚 출하실적등록 / LG송장</div>
-     <div class="page-sub">제번단위 <b>출하실적 등록 → LG송장 발행/취소</b>(<b style="color:#c0392b">LG 완제품 출하=매출</b>) · nx.sale_dtl+nx.lg_songjang_dtl · <span style="color:var(--muted)">⚠완제품 재고차감은 완제품원장 확정후</span> · 레거시 <code>w_pr_input_040</code>(복원)</div>
-     <div class="toolbar">
-       <label class="tl">출하기간</label><input class="inp" type="date" id="l-fr" value="${esc(st.fr)}"> ~ <input class="inp" type="date" id="l-to" value="${esc(st.to)}">
-       <label class="tl" style="margin-left:8px">제번</label><input class="inp" id="l-wo" value="${esc(st.wo)}" placeholder="제번" style="width:120px">
-       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="l-item" value="${esc(st.item)}" placeholder="품번" style="width:120px">
-       <label class="tl" style="margin-left:8px">송장</label><select class="inp" id="l-fin"><option value="">전체</option><option value="0" ${st.fin==="0"?"selected":""}>미발행</option><option value="1" ${st.fin==="1"?"selected":""}>발행완료</option></select>
-       <button class="btn" id="l-go">🔍 조회</button>
-       <button class="btn" id="l-add" style="background:#2e86de;color:#fff">➕ 실적추가</button>
-       <button class="btn" id="l-issue" style="background:#8e44ad;color:#fff" ${st.busy?"disabled":""}>🧾 LG송장 발행${selcnt?`(${selcnt})`:""}</button>
+     <style>
+       .s4tbl td,.s4tbl th{text-align:center}
+       .s4tbl th.s4sat{color:#1558d6}.s4tbl th.s4sun{color:#c0392b}
+       .s4tbl td.s4wk{background:#f4f6f9}
+       .s4c[data-k]{cursor:cell}
+       .s4c.s4sel{background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72));
+                  outline:2px solid #4a86e8;outline-offset:-2px;font-weight:700}
+       .s4c.s4lock{cursor:default}
+       /* 드래그 선택은 계획셀(.s4c)에서만 막는다. 나머지 칸은 Ctrl+C 복사 가능 */
+       .s4tbl tbody td{user-select:text;-webkit-user-select:text}
+       .s4tbl tbody td.s4c{user-select:none;-webkit-user-select:none}
+       /* 지정한 헤더 너비가 지켜지도록(내용이 길어도 밀지 않게) */
+       .s4tbl{table-layout:fixed}
+       .s4tbl th,.s4tbl td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+       /* 헤더·본문 전부 가운데 정렬 (.tbl .num 우측정렬을 이김) */
+       .tbl.s4tbl th,.tbl.s4tbl td,
+       .tbl.s4tbl th.num,.tbl.s4tbl td.num{text-align:center}
+       .s4tbl th{padding-right:10px}
+     </style>
+     <div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
+     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · ${st.src==='live'?'🔴 레거시(라이브 직독·대사용)':'🟢 nx'}</div>
+     <div class="toolbar" style="flex:0 0 auto">
+       <label class="tl">기준일자</label><input class="inp" type="date" id="s4-from" value="${st.from}">
+       <label class="tl">라인</label>
+       <select class="inp" id="s4-line" style="width:150px"><option value="">% 전체</option>
+         ${(st.lines||[]).map(o=>`<option value="${esc2(o.code)}"${st.line===o.code?' selected':''}>${esc2(o.code)} ${esc2(o.nm)}</option>`).join('')}</select>
+       <label class="tl">기간</label>
+       <select class="inp" id="s4-gigan" style="max-width:72px">${[1,2,3,4,5,6,7,8,14].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
+       <label class="tl">구분</label>
+       ${['전체','집계','제번'].map(v=>`<label class="rl"><input type="radio" name="s4-vw" value="${v}"${st.view===v?' checked':''}> ${v}</label>`).join('')}
+       <label class="tl">소스</label>
+       <select class="inp" id="s4-src" style="width:112px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>레거시 대사</option></select>
+       <button class="btn" id="s4-search">🔍 조회</button>
+       <div class="spacer"></div>
+       <span class="rowcount" id="s4-selinfo">${selN?`선택 <b>${nf(selN)}</b>칸 · 수량 <b>${nf(selQ)}</b>`:''}</span>
+       <button class="btn" id="s4-ok" style="background:#1c7c3a;color:#fff">✔ 확인(출하처리)</button>
+       <button class="btn" id="s4-cancel" style="background:#c0392b;color:#fff">↩ 출하취소</button>
      </div>
-     ${e?`<div class="panel" style="border:2px solid #2e86de"><div class="panel-h">${e.id?"수정":"신규"} 출하실적</div><div class="panel-b">
-       <div class="toolbar" style="flex-wrap:wrap;gap:8px">
-         <label class="tl">제번<span style="color:red">*</span></label><input class="inp" id="e-wo" value="${esc(e.work_order||"")}" placeholder="work_order" style="width:120px">
-         <label class="tl">split</label><input class="inp" id="e-sp" value="${esc(e.split_work_order||"")}" style="width:60px">
-         <label class="tl">품번<span style="color:red">*</span></label><input class="inp" id="e-item" value="${esc(e.item_code||"")}" placeholder="품번" style="width:150px">
-         <label class="tl">출하수량<span style="color:red">*</span></label><input class="inp" id="e-qty" value="${esc(e.sale_qty??"")}" style="width:90px;text-align:right">
-         <label class="tl">비고</label><input class="inp" id="e-rmk" value="${esc(e.remarks||"")}" style="width:180px">
-         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">💾 저장</button><button class="btn" id="e-cancel">취소</button>
-       </div></div></div>`:""}
-     <div class="panel"><div class="panel-h">출하실적 목록 ${st.loading?"(조회중…)":`(${st.rows.length}건)`}</div><div class="panel-b" style="padding:0">
-       <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
-         <th class="center" style="width:30px"><input type="checkbox" id="l-all"></th>
-         <th data-key="work_order">제번</th><th class="center" data-key="split_work_order">split</th><th data-key="item_code">품번</th><th data-key="itemnm">품명</th>
-         <th data-key="sale_ymd">출하일자</th><th class="num" data-key="sale_qty">출하수량</th>
-         <th class="center" data-key="print_flag">송장상태</th><th data-key="sheet_no">송장번호</th><th data-key="remarks">비고</th><th class="center">관리</th></tr></thead>
-       <tbody>${st.rows.map(r=>{const done=r.print_flag==='1';return `<tr>
-         <td class="center">${done?'':`<input type="checkbox" class="l-ck" data-id="${r.id}" ${st.sel[r.id]?"checked":""}>`}</td>
-         <td><b>${esc(r.work_order)}</b></td><td class="center">${esc(r.split_work_order||"")}</td><td>${esc(r.item_code)}</td>
-         <td class="cap" style="max-width:170px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.itemnm||"")}">${esc(r.itemnm||"")}</td>
-         <td>${esc(r.sale_ymd)}</td><td class="num qty">${won(r.sale_qty)}</td>
-         <td class="center">${done?'<span style="color:#1f7a3d;font-weight:700">발행완료</span>':'<span style="color:#c67d00">미발행</span>'}</td>
-         <td>${esc(r.sheet_no||"")}</td>
-         <td class="cap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.remarks||"")}">${esc(r.remarks||"")}</td>
-         <td class="center">${done?`<button class="btn xs l-cancel" data-sheet="${esc(r.sheet_no)}">송장취소</button>`:`<button class="btn xs l-ed" data-id="${r.id}">수정</button> <button class="btn xs l-del" data-id="${r.id}">삭제</button>`}</td></tr>`;}).join("")||'<tr><td colspan="11" style="padding:16px;color:var(--muted)">출하실적 없음 — [실적추가]로 등록</td></tr>'}
-       <tr class="grandtot"><td colspan="6" class="center">합계 ${st.rows.length}건</td><td class="num">${won(totq)}</td><td colspan="4"></td></tr>
-       </tbody></table></div></div></div>`;
+     <div class="toolbar" style="flex:0 0 auto;margin-top:2px">
+       <label class="tl">제번</label><input class="inp" id="s4-wo" value="${esc2(st.wo)}" style="width:130px" placeholder="제번" autocomplete="off">
+       <label class="tl">도번</label><input class="inp" id="s4-item" value="${esc2(st.item)}" style="width:130px" placeholder="도번" autocomplete="off">
+       <div class="spacer"></div>
+       <span class="rowcount">행 <b>${nf(rows.length)}</b> · LOT합 <b>${nf(tLot)}</b> · 출하합 <b>${nf(tSale)}</b> · ASSY재고합 <b>${nf(tStk)}</b></span>
+     </div>
+     ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc2(st.msg)}</div>`:''}
+     <div id="s4-msg" class="page-sub" style="flex:0 0 auto;margin:0;padding:0;line-height:1.5"></div>
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl fit s4tbl" style="font-size:11px"><thead><tr>
+       ${headHtml()}
+       ${dates.map(d=>`<th class="num${dcls(d)}" style="width:58px;min-width:58px">${dcol(d)}</th>`).join('')}</tr></thead>
+      <tbody>${st.loading?`<tr><td colspan="${NC+1+dates.length}" class="empty">조회 중…</td></tr>`:bodyHtml()}</tbody>
+      </table></div></div>`;
+
     const g=id=>c.querySelector(id);
-    g("#l-fr").onchange=x=>st.fr=x.target.value;g("#l-to").onchange=x=>st.to=x.target.value;
-    g("#l-wo").oninput=x=>st.wo=x.target.value;g("#l-item").oninput=x=>st.item=x.target.value;g("#l-fin").onchange=x=>st.fin=x.target.value;
-    g("#l-go").onclick=load;g("#l-issue").onclick=issue;
-    g("#l-add").onclick=()=>{st.edit={work_order:"",split_work_order:"",item_code:"",sale_qty:"",remarks:""};draw();};
-    const all=g("#l-all");if(all)all.onclick=x=>{st.rows.forEach(r=>{if(r.print_flag!=='1')st.sel[r.id]=x.target.checked;});draw();};
-    c.querySelectorAll(".l-ck").forEach(x=>x.onchange=()=>{st.sel[x.dataset.id]=x.checked;draw();});
-    if(e){g("#e-wo").oninput=x=>e.work_order=x.target.value.trim();g("#e-sp").oninput=x=>e.split_work_order=x.target.value.trim();
-      g("#e-item").oninput=x=>e.item_code=x.target.value.trim();g("#e-qty").oninput=x=>e.sale_qty=x.target.value;g("#e-rmk").oninput=x=>e.remarks=x.target.value;
-      g("#e-save").onclick=save;g("#e-cancel").onclick=()=>{st.edit=null;draw();};}
-    c.querySelectorAll(".l-ed").forEach(x=>x.onclick=()=>{const r=st.rows.find(v=>v.id==x.dataset.id);st.edit={id:r.id,work_order:r.work_order,split_work_order:r.split_work_order||"",item_code:r.item_code,sale_qty:r.sale_qty,remarks:r.remarks||""};draw();});
-    c.querySelectorAll(".l-del").forEach(x=>x.onclick=()=>del(+x.dataset.id));
-    c.querySelectorAll(".l-cancel").forEach(x=>x.onclick=()=>cancel(x.dataset.sheet));
-    c.querySelectorAll("thead th").forEach(th=>{addResizer(th);const k=th.dataset.key;if(k){th.style.cursor="pointer";th.title="더블클릭 정렬·경계드래그 너비조절";th.ondblclick=()=>{st.sortDir=(st.sortKey===k&&st.sortDir===1)?-1:1;st.sortKey=k;draw();};}});
+    g('#s4-search').onclick=()=>{st.from=g('#s4-from').value;st.gigan=+g('#s4-gigan').value;
+      st.line=g('#s4-line').value;st.src=g('#s4-src').value;load();};
+    g('#s4-gigan').onchange=()=>g('#s4-search').click();
+    g('#s4-src').onchange=()=>{st.src=g('#s4-src').value;loadLines().then(load);};
+    g('#s4-line').onchange=()=>{st.line=g('#s4-line').value;draw();};
+    c.querySelectorAll('input[name=s4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;draw();});
+    ['#s4-wo','#s4-item'].forEach(id=>{const el=g(id);if(!el)return;
+      el.oninput=()=>{const v=el.value,ss=el.selectionStart;
+        if(id==='#s4-wo')st.wo=v.trim(); else st.item=v.trim();
+        draw();const n=c.querySelector(id);
+        if(n){n.value=v;n.focus();try{n.setSelectionRange(ss,ss);}catch(e){}}};});
+
+    // ── 컬럼 순서 이동 + 너비 조절 (410·420과 동일 · localStorage 저장) ──
+    //   순서: 헤더 드래그앤드롭 → 재렌더 없이 DOM 열만 이동(버벅임 없음)
+    //   너비: 헤더 우측경계 드래그 · 경계 더블클릭 = 기본폭 복귀
+    (function(){
+      let _dtk=null;
+      c.querySelectorAll('th[data-tk]').forEach(th=>{
+        const key=th.getAttribute('data-tk');
+        // 너비 핸들
+        const rz=document.createElement('div');
+        rz.style.cssText='position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:2';
+        th.style.position='relative';
+        rz.draggable=false;
+        rz.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();
+          const sx=e.pageX, sw=th.offsetWidth;
+          const mv=ev=>{const w=Math.max(28,sw+ev.pageX-sx);
+            th.style.width=th.style.minWidth=th.style.maxWidth=w+'px';};
+          const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);
+            cW[key]=th.offsetWidth;try{localStorage.setItem(W_LS,JSON.stringify(cW));}catch(_){}};
+          document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
+        rz.addEventListener('dblclick',e=>{e.stopPropagation();
+          const w=CD[key].w; th.style.width=th.style.minWidth=th.style.maxWidth=w+'px';
+          delete cW[key];try{localStorage.setItem(W_LS,JSON.stringify(cW));}catch(_){}});
+        th.appendChild(rz);
+        // 순서 이동
+        th.ondragstart=e=>{_dtk=key;th.style.opacity='.4';
+          try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',key);}catch(_){}};
+        th.ondragend=()=>{th.style.opacity='';
+          c.querySelectorAll('th[data-tk]').forEach(x=>x.style.borderLeft='');};
+        th.ondragover=e=>{e.preventDefault();
+          if(_dtk&&_dtk!==key)th.style.borderLeft='3px solid #2563eb';};
+        th.ondragleave=()=>{th.style.borderLeft='';};
+        th.ondrop=e=>{th.style.borderLeft='';e.preventDefault();
+          const from=_dtk,to=key;_dtk=null;
+          if(!from||from===to)return;
+          const arr=cOrd.filter(k=>k!==from);
+          const at=arr.indexOf(to); arr.splice(at<0?arr.length:at,0,from);
+          try{localStorage.setItem(C_LS,JSON.stringify(arr));}catch(_){}
+          cOrd.length=0; arr.forEach(k=>cOrd.push(k));
+          const tbl=th.closest('table'); if(!tbl)return;
+          const hr=tbl.tHead?tbl.tHead.rows[0]:null; if(!hr)return;
+          const idxOf=(row,k)=>{const cs=row.children;
+            for(let i=0;i<cs.length;i++)if(cs[i].getAttribute&&cs[i].getAttribute('data-tk')===k)return i;
+            return -1;};
+          const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
+          const mv=row=>{const cs=row.children;if(fi>=cs.length||ti>=cs.length)return;
+            row.insertBefore(cs[fi],cs[ti]);};
+          mv(hr);
+          [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tbd=>{
+            for(const row of tbd.rows) if(row.children.length===hr.children.length) mv(row);});
+        };
+      });
+    })();
+
+    // ── 사각영역 드래그 선택(키팅·가공420과 동일) ──
+    const tb=c.querySelector('.s4tbl tbody'), gw=c.querySelector('.grid-wrap');
+    // 셀키 → 잔량 맵을 1회만 만들어 둔다(선택정보 계산이 rows×dates 순회를 반복하지 않게).
+    const _remOf=new Map();
+    rows.forEach(r=>dates.forEach(d=>{
+      const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;
+      if(pl||sd)_remOf.set(ckey(r,d),Math.max(0,pl-sd));}));
+    // 드래그 중엔 매 프레임 DOM 을 건드리지 않도록 rAF 로 합친다.
+    let _siReq=0;
+    const selInfoNow=()=>{const e=g('#s4-selinfo');if(!e)return;
+      let q=0; st.sel.forEach(k=>{q+=_remOf.get(k)||0;});
+      e.innerHTML=st.sel.size?`선택 <b>${nf(st.sel.size)}</b>칸 · 수량 <b>${nf(q)}</b>`:'';};
+    const selInfo=()=>{if(_siReq)return;
+      _siReq=requestAnimationFrame(()=>{_siReq=0;selInfoNow();});};
+    if(tb&&gw){
+      // 계획셀(.s4c)에서 시작한 드래그만 선택을 막는다 — 그 외 칸은 Ctrl+C 복사 가능
+      gw.onselectstart=e=>{const t=e.target;return !(t&&t.closest&&t.closest('td.s4c'));};
+      const rcOf=td=>{const tr=td.parentElement;return {r:tr?tr.rowIndex:-1,c:td.cellIndex};};
+      const cellAt=(x,y)=>{const e=document.elementFromPoint(x,y);if(!e)return null;
+        const td=e.closest('td.s4c[data-k]');if(td)return td;
+        const tr=e.closest('tr');
+        if(tr){let best=null,bd=1e9;
+          tr.querySelectorAll('td.s4c[data-k]').forEach(z=>{const r=z.getBoundingClientRect();
+            const d=(x<r.left)?(r.left-x):((x>r.right)?(x-r.right):0);
+            if(d<bd){bd=d;best=z;}});
+          if(best)return best;}
+        return e.closest('td');};
+      let drag=false,_a=null,_cells=null,_own=null,_last=null,_byRow=null,_prev=null;
+      // 셀을 행별로 색인해 둔다 → 드래그 중엔 '사각형에 걸친 행'만 훑으면 된다.
+      const snap=()=>{_cells=[...tb.querySelectorAll('td.s4c[data-k]')]
+          .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c,k:x.getAttribute('data-k')};});
+        _byRow=new Map();
+        for(const it of _cells){let a=_byRow.get(it.r);if(!a){a=[];_byRow.set(it.r,a);}a.push(it);}
+        _prev=null;};
+      const clearAll=()=>{tb.querySelectorAll('td.s4c.s4sel').forEach(td=>{
+        st.sel.delete(td.getAttribute('data-k'));td.classList.remove('s4sel');});};
+      const applyRect=td=>{if(!_a||!_byRow)return;
+        const b=rcOf(td);
+        const r1=Math.min(_a.r,b.r),r2=Math.max(_a.r,b.r);
+        const c1=Math.min(_a.c,b.c),c2=Math.max(_a.c,b.c);
+        // 같은 사각형이면 아무것도 하지 않는다(마우스가 셀 안에서 미세하게 움직일 때).
+        if(_prev&&_prev.r1===r1&&_prev.r2===r2&&_prev.c1===c1&&_prev.c2===c2)return;
+        // 직전 사각형과의 합집합 행만 재평가 → 전체(수천 셀) 순회 제거
+        const lo=_prev?Math.min(r1,_prev.r1):r1, hi=_prev?Math.max(r2,_prev.r2):r2;
+        for(let r=lo;r<=hi;r++){
+          const arr=_byRow.get(r); if(!arr)continue;
+          const rowIn=(r>=r1&&r<=r2);
+          for(const it of arr){
+            const inR=rowIn&&it.c>=c1&&it.c<=c2, has=st.sel.has(it.k);
+            if(inR&&!has){st.sel.add(it.k);it.td.classList.add('s4sel');_own.add(it.k);}
+            else if(!inR&&has&&_own.has(it.k)){st.sel.delete(it.k);it.td.classList.remove('s4sel');}}}
+        _prev={r1,r2,c1,c2};
+        selInfo();};
+      tb.addEventListener('mousedown',e=>{if(e.button!==0)return;
+        const start=e.target.closest('td');if(!start||!start.closest('tr'))return;
+        const hit=e.target.closest('td.s4c[data-k]');
+        // 계획셀이 아니면 드래그선택을 걸지 않는다 → 도번·제번 등은 자유롭게 복사
+        if(!hit){if(!e.ctrlKey&&!e.metaKey){clearAll();selInfo();}return;}
+        e.preventDefault();
+        if(hit&&!e.ctrlKey&&!e.metaKey&&st.sel.has(hit.getAttribute('data-k'))&&st.sel.size===1){
+          st.sel.delete(hit.getAttribute('data-k'));hit.classList.remove('s4sel');selInfo();return;}
+        if(!e.ctrlKey&&!e.metaKey)clearAll();
+        drag=true;_own=new Set();snap();_a=rcOf(start);_last=start;
+        if(hit)applyRect(hit); else selInfo();});
+      // mousemove 는 프레임당 1회만 처리(마우스 이벤트는 프레임보다 훨씬 자주 온다)
+      let _mvReq=0,_mvXY=null;
+      const _stop=()=>{drag=false;_a=null;_cells=null;_byRow=null;_last=null;_prev=null;
+        if(_mvReq){cancelAnimationFrame(_mvReq);_mvReq=0;}};
+      tb.addEventListener('mousemove',e=>{if(!drag)return;
+        if(!(e.buttons&1)){_stop();return;}
+        _mvXY={x:e.clientX,y:e.clientY};
+        if(_mvReq)return;
+        _mvReq=requestAnimationFrame(()=>{_mvReq=0;
+          if(!drag||!_mvXY)return;
+          const td=cellAt(_mvXY.x,_mvXY.y)||_last;
+          if(td){_last=td;applyRect(td);}});});
+      document.addEventListener('mouseup',_stop);
+      // 우클릭 = 확인/취소 메뉴(생산준비등록과 동일). body 에 렌더(§3)
+      gw.oncontextmenu=(ev)=>{
+        const td=ev.target.closest('td.s4c[data-k]'); if(!td)return;
+        ev.preventDefault();
+        if(!st.sel.has(td.getAttribute('data-k'))){clearAll();
+          st.sel.add(td.getAttribute('data-k'));td.classList.add('s4sel');selInfo();}
+        let qOk=0,qNo=0;
+        rows.forEach(r=>dates.forEach(d=>{if(!st.sel.has(ckey(r,d)))return;
+          const pl=(r.days&&r.days[d])||0, s2=(r.sday&&r.sday[d])||0;
+          const rm=Math.max(0,pl-s2); if(rm>0)qOk+=rm; if(s2>0)qNo+=s2;}));
+        const canC=qOk>0, canX=qNo>0;
+        const old=document.getElementById('s4-ctxmenu'); if(old)old.remove();
+        const mn=document.createElement('div'); mn.id='s4-ctxmenu';
+        mn.style.cssText=`position:fixed;left:${ev.clientX}px;top:${ev.clientY}px;z-index:99999;background:#fff;border:1px solid #b8c4d4;border-radius:6px;box-shadow:0 3px 10px rgba(0,0,0,.25);font-size:12px;min-width:190px;overflow:hidden`;
+        mn.innerHTML=`<div style="padding:5px 12px;background:#f2f6fb;color:#456;border-bottom:1px solid #e3e9f0">선택 ${nf(st.sel.size)}칸 · 출하가능 ${nf(qOk)} / 취소가능 ${nf(qNo)}</div>`
+          +`<div class="s4m" data-a="ok" style="padding:7px 12px;cursor:${canC?'pointer':'not-allowed'};color:${canC?'#1c7c3a':'#c0c8d2'};font-weight:600;display:flex;justify-content:space-between;gap:14px"><span>✅ 확 인(출하처리) ${qOk?nf(qOk):''}</span><span style="color:#8aa0bd">F12</span></div>`
+          +`<div class="s4m" data-a="no" style="padding:7px 12px;cursor:${canX?'pointer':'not-allowed'};color:${canX?'#c0392b':'#c0c8d2'};border-top:1px solid #eee;display:flex;justify-content:space-between;gap:14px"><span>⏪ 취 소(출하취소) ${qNo?nf(qNo):''}</span><span style="color:#8aa0bd">F11</span></div>`;
+        document.body.appendChild(mn);
+        const rc=mn.getBoundingClientRect();
+        if(rc.right>innerWidth)mn.style.left=(innerWidth-rc.width-6)+'px';
+        if(rc.bottom>innerHeight)mn.style.top=(innerHeight-rc.height-6)+'px';
+        mn.querySelectorAll('.s4m').forEach(el=>{
+          el.onmouseenter=()=>{if(!el.style.cursor.includes('not'))el.style.background='#eaf2ff';};
+          el.onmouseleave=()=>el.style.background='';
+          el.onclick=()=>{const ac=el.dataset.a;
+            if((ac==='ok'&&!canC)||(ac==='no'&&!canX))return;
+            mn.remove(); if(ac==='ok')doConfirm(); else doCancel();};});
+        setTimeout(()=>document.addEventListener('click',()=>{
+          const x=document.getElementById('s4-ctxmenu');if(x)x.remove();},{once:true}),0);
+      };
+    }
+
+    // 선택셀 → 처리대상
+    const picked=()=>{const out=[];
+      rows.forEach(r=>dates.forEach(d=>{
+        if(!st.sel.has(ckey(r,d)))return;
+        const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;
+        const rem=Math.max(0,pl-sd);
+        if(rem>0)out.push({wo:r.wo,swo:r.swo,item:r.item,line_no:r.line_no,ymd:d,qty:rem});}));
+      return out;};
+    const msg=(t,ok)=>{const e=g('#s4-msg');if(e)e.innerHTML=`<span style="color:${ok?'#1c7c3a':'#c0392b'}">${esc2(t)}</span>`;};
+    // 부분갱신 — 서버 done[] 을 st.rows 에 반영하고 표만 다시 그린다(재조회 X, 스크롤 유지)
+    const applyLocal=(done,sgn)=>{const left={};
+      (done||[]).forEach(x=>{const y=x.cell_ymd||x.ymd, q=(+x.qty||0)*sgn;
+        st.rows.forEach(r=>{if(r.item!==x.item)return;
+          if(x.wo&&r.wo!==x.wo)return;
+          if(x.swo!==undefined&&x.swo!==null&&(r.swo||'')!==(x.swo||''))return;
+          r.sale_qty=Math.max(0,(+r.sale_qty||0)+q);
+          if(y){r.sday=r.sday||{};r.sday[y]=Math.max(0,(+r.sday[y]||0)+q);}});
+        if(x.left!==undefined&&x.left!==null)left[x.item]=+x.left;});
+      st.rows.forEach(r=>{if(r.item in left)r.stock_qty=left[r.item];});
+      st.sel.clear();
+      const w0=c.querySelector('.grid-wrap');const sy=w0?w0.scrollTop:0,sx=w0?w0.scrollLeft:0;
+      draw();
+      const w1=c.querySelector('.grid-wrap');if(w1){w1.scrollTop=sy;w1.scrollLeft=sx;}};
+
+    const doConfirm=async()=>{
+      if(st.src==='live'){msg('레거시 대사 모드에서는 출하처리를 할 수 없습니다(읽기전용). 소스를 우리(nx)로 바꾸세요.',false);return;}
+      const cells=picked();
+      if(!cells.length){msg('출하처리할 셀을 선택하세요(계획 남은 칸).',false);return;}
+      // 우클릭 확인 = 즉시 처리(재확인 없음)
+      g('#s4-ok').disabled=true;
+      try{
+        const d=await(await fetch(`${API}/api/sale040/confirm`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({cells:cells,user:'웹',ymd:st.from})})).json();
+        if(d.ok){applyLocal(d.done||[],+1);msg('✔ '+d.msg,true);} else msg(d.msg||'출하처리 실패',false);
+      }catch(e){msg('출하처리 실패',false);}
+      finally{const b=c.querySelector('#s4-ok');if(b)b.disabled=false;}};
+
+    const doCancel=async()=>{
+      if(st.src==='live'){msg('레거시 대사 모드에서는 취소할 수 없습니다(읽기전용).',false);return;}
+      const out=[];
+      rows.forEach(r=>dates.forEach(d=>{
+        if(!st.sel.has(ckey(r,d)))return;
+        const sd=(r.sday&&r.sday[d])||0;
+        if(sd>0)out.push({wo:r.wo,swo:r.swo,item:r.item,ymd:d});}));
+      if(!out.length){msg('취소할 출하실적이 있는 셀을 선택하세요.',false);return;}
+      if(!confirm(`[출하취소]\n\n선택 ${out.length}칸의 출하실적을 취소합니다.\n완제품 재고가 복원됩니다. 진행할까요?`))return;
+      g('#s4-cancel').disabled=true;
+      try{
+        const d=await(await fetch(`${API}/api/sale040/cancel`,{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({cells:out,user:'웹'})})).json();
+        if(d.ok){applyLocal(d.done||[],-1);msg('✔ '+d.msg,true);} else msg(d.msg||'취소 실패',false);
+      }catch(e){msg('취소 실패',false);}
+      finally{const b=c.querySelector('#s4-cancel');if(b)b.disabled=false;}};
+
+    g('#s4-ok').onclick=doConfirm;
+    g('#s4-cancel').onclick=doCancel;
+    selInfo();
   };
-  load();
+  (async()=>{await loadLines();load();})();
 };
 
-/* ===== 영업계획현황 (w_pr_plan_050) — 일별 크로스탭. 레거시 SQL+집계 충실이식(2028건·합계 검증). ===== */
-SCREEN.salesplan=(c)=>{
-  const API=API_BASE;
-  const fmtY=y=>{y=(''+(y||'')).trim();return y.length>=6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;};
-  const fmtHM=h=>{h=(''+(h||'')).trim();return h.length>=4?`${h.slice(0,2)}:${h.slice(2,4)}`:h;};
-  const dIn=y=>(y&&y.length>=6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';
-  const inD=v=>(''+(v||'')).slice(2).replace(/-/g,'');
-  const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('en-US');
-  const wk=l=>{const d=(''+(l||'')).slice(-1);return d==='토'||d==='일';};
-  const _tdy=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();
-  let fr=_tdy, days='7', gubun='2', cust='', line='', model='', wo='', item='', D={rows:[],tot:{},labels:[]}, loading=false, msg='';
-  const load=async()=>{loading=true;msg='';draw();
-    try{let u=`${API}/api/salesplan?from_ymd=${fr}&days=${days}&gubun=${gubun}`;
-      if(cust)u+=`&cust=${encodeURIComponent(cust)}`;if(line)u+=`&line=${encodeURIComponent(line)}`;
-      if(model)u+=`&model=${encodeURIComponent(model)}`;if(wo)u+=`&wo=${encodeURIComponent(wo)}`;if(item)u+=`&item=${encodeURIComponent(item)}`;
-      const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);D=await r.json();}
-    catch(e){D={rows:[],tot:{},labels:[]};msg='조회 실패: '+e.message;}
-    loading=false;draw();};
-  const draw=()=>{
-    const labs=D.labels||[], rows=D.rows||[], tot=D.tot||{}, NC=12+labs.length;
-    const dl=k=>[...new Set(rows.map(r=>r[k]).filter(Boolean))].slice(0,300).map(v=>`<option value="${esc(v)}">`).join('');
-    const lineOpts=[...new Map(rows.map(r=>[r.line,r.line_nm||''])).entries()].map(kv=>`<option value="${esc(kv[0])}">${esc(kv[1])}</option>`).join('');
-    const footTd=(tot.d||[]).map((v,i)=>`<td class="num${wk(labs[i])?' wkend':''}">${won(v)}</td>`).join('');
-    const bodyRows=loading?`<tr><td colspan="${NC}" class="empty">조회 중…</td></tr>`
-      :(msg?`<tr><td colspan="${NC}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`
-      :(rows.length?rows.map(r=>`<tr>
-        <td class="bcap" title="${esc(r.line+' '+(r.line_nm||''))}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.line)} ${esc(r.line_nm||'')}</td>
-        <td>${esc(r.wo)}</td>
-        <td class="bcap" title="${esc(r.item)}" style="max-width:230px;overflow:hidden;text-overflow:ellipsis">${esc(r.item)}</td>
-        <td>${esc(r.wc)}</td><td class="num">${r.rate||''}</td><td class="center">${fmtHM(r.ohm)}</td><td class="center">${fmtY(r.ymd)} ${fmtHM(r.ohm)}</td>
-        <td class="num">${won(r.lot)}</td><td class="num"><b>${won(r.total)}</b></td>
-        ${r.d.map((v,i)=>`<td class="num${wk(labs[i])?' wkend':''}">${v?won(v):''}</td>`).join('')}
-        <td class="bcap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td>
-        <td>${esc(r.model)}</td><td class="bcap" style="max-width:90px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.tool)}">${esc(r.tool)}</td></tr>`).join('')
-      :`<tr><td colspan="${NC}" class="empty">결과 없음</td></tr>`));
-    const footRow=rows.length?`<tr class="sp-foot"><td colspan="7" class="right">총계 (${won(tot.cnt||0)}건)</td><td class="num">${won(tot.lot||0)}</td><td class="num">${won(tot.total||0)}</td>${footTd}<td></td><td></td><td></td></tr>`:'';
-    c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
-     <div class="page-title" style="margin-bottom:2px">📅 영업계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">일별 생산/영업계획 (w_pr_plan_050)</span></div>
-     <div class="page-sub" style="margin-bottom:6px">기준일부터 N일 일별 계획수량 · 원본 <code>SA_T_PLAN_DTL</code> · 🟢 nx · 구분 상세/집계/도번집계 · 주말=주황</div>
-     <div class="toolbar" style="gap:5px;flex:0 0 auto">
-       <label class="tl">기준일</label><input type="date" class="inp" id="sp-fr" value="${dIn(fr)}" style="width:135px">
-       <label class="tl">일수</label><select class="inp" id="sp-days">${['7','14','21','30'].map(d=>`<option value="${d}" ${days===d?'selected':''}>${d}일</option>`).join('')}</select>
-       <label class="tl">구분</label><select class="inp" id="sp-gubun">${[['1','상세'],['2','집계'],['3','도번집계']].map(kv=>`<option value="${kv[0]}" ${gubun===kv[0]?'selected':''}>${kv[1]}</option>`).join('')}</select>
-       <input class="inp" id="sp-line" list="sp-linedl" placeholder="라인" value="${esc(line)}" style="width:80px"><datalist id="sp-linedl">${lineOpts}</datalist>
-       <input class="inp" id="sp-cust" list="sp-custdl" placeholder="작업처" value="${esc(cust)}" style="width:95px"><datalist id="sp-custdl">${dl('wc')}</datalist>
-       <input class="inp" id="sp-model" placeholder="모델" value="${esc(model)}" style="width:85px">
-       <input class="inp" id="sp-wo" list="sp-wodl" placeholder="제번" value="${esc(wo)}" style="width:95px"><datalist id="sp-wodl">${dl('wo')}</datalist>
-       <input class="inp" id="sp-item" list="sp-itemdl" placeholder="도번" value="${esc(item)}" style="width:105px"><datalist id="sp-itemdl">${dl('item')}</datalist>
-       <button class="btn" id="sp-go">🔍조회</button><div class="spacer"></div><button class="btn xls" id="sp-xls">📥엑셀</button>
-     </div>
-     <div class="grid-wrap sp-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit">
-      <thead><tr><th>라인</th><th>제번</th><th style="text-align:left">도번</th><th>작업처</th><th class="num">비율</th><th>시간</th><th>Output</th><th class="num">LOT수량</th><th class="num">합계</th>${labs.map(l=>`<th class="num${wk(l)?' wkend':''}">${esc(l)}</th>`).join('')}<th>비고</th><th>Model No</th><th>Tools</th></tr></thead>
-      <tbody>${bodyRows}${footRow}</tbody></table></div>
-     <div class="rowcount">${won((D.tot||{}).cnt||0)}건 · ${esc(D.from||'')}~${esc(D.to||'')} (${gubun==='1'?'상세':gubun==='2'?'집계':'도번집계'})</div>
-     <style>.sp-grid thead th{position:sticky;top:0;z-index:3;background:#f4f7fc}.sp-grid tr.sp-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;z-index:2;border-top:2px solid #cdd9ef}.sp-grid th.wkend,.sp-grid td.wkend{background:#ffe8d4}.sp-grid tr.sp-foot td.wkend{background:#f5d9be}</style></div>`;
-    const g=id=>c.querySelector(id);
-    const go=()=>{fr=inD(g('#sp-fr').value)||fr;days=g('#sp-days').value;gubun=g('#sp-gubun').value;line=g('#sp-line').value.trim();cust=g('#sp-cust').value.trim();model=g('#sp-model').value.trim();wo=g('#sp-wo').value.trim();item=g('#sp-item').value.trim();load();};
-    g('#sp-go').onclick=go;
-    c.querySelectorAll('.toolbar .inp').forEach(el=>{if(el.tagName==='SELECT')el.onchange=go;else el.onkeyup=e=>{if(e.key==='Enter')go();};});
-    g('#sp-xls').onclick=()=>{const hd=['라인','제번','ModelNo','Tools','도번','작업처','비율','시간','Output','LOT수량','합계'].concat(labs,['비고']);
-      downloadCSV('영업계획현황_'+fr+'.csv',hd,rows.map(r=>[r.line+' '+(r.line_nm||''),r.wo,r.model,r.tool,r.item,r.wc,r.rate,fmtHM(r.ohm),fmtY(r.ymd)+' '+fmtHM(r.ohm),r.lot,r.total].concat(r.d,[r.remarks])));};
-    if(typeof attachResizers!=='undefined')attachResizers(c);
-  };
-  load();
-};
-
-/* ===== 제품재고조정 (레거시 w_sa_stock_010) — 제품수불원장(SA_T_STOCK_MAINT) 조회 + 수동 재고조정 CRUD.
-   조회=nx미러(이력·읽기전용) ∪ nx.prod_stock_adjust(웹조정·편집). 쓰기=웹조정테이블. 채번 SEQ=일자별max+1. ===== */
 SCREEN.prodstockadj=(c)=>{
   const API=API_BASE;
   const pad=n=>String(n).padStart(2,"0");
