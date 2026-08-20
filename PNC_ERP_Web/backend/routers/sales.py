@@ -2,6 +2,7 @@
 """사급(sagub)+매출(saleout/lgsale)+권한(perm) 도메인 라우터 — 사급재고조정/출고/회수·매출마감출고·LG송장·권한.
    app.py에서 분리. 원장/가격 헬퍼(_led_ins·_sagub_move·_pur_price·_sagub_price·_is_free_sagub·
    _sale_close_lookup·_saleout_led·_lgsale_led·_next_yymm)는 이 도메인 로컬(블록내). 공유는 common.py."""
+import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed
@@ -1013,6 +1014,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.REMARKS2,'') rmk1, ISNULL(a.FROM_SEQ,0) fseq, ISNULL(a.TO_SEQ,0) tseq,
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.LOT_QTY,0) lot,
+                   ISNULL(a.USE_QTY,1) use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
                    {QEXP('a.PLAN_QTY','a.USE_QTY')} planq
               FROM {{SCH}}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
@@ -1031,6 +1033,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.REMARKS,'') rmk1, 0 fseq, 0 tseq,
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.PLAN_QTY,0) lot,
+                   1 use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
                    {QEXP('a.PLAN_QTY','1')} planq
               FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
@@ -1050,6 +1053,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.REMARKS2,'') rmk1, 0 fseq, 0 tseq,
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.LOT_QTY,0) lot,
+                   ISNULL(b.USE_QTY,1) use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
                    {QEXP('a.PLAN_QTY','b.USE_QTY')} planq
               FROM {{SCH}}.SA_T_PLAN_DTL_DAILY a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_MODEL_BOM b WITH(NOLOCK)
@@ -1082,7 +1086,9 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                      "model_no": r["model_no"], "tools": r["tools"], "work_code": r["work_code"],
                      "rmk1": r["rmk1"], "fseq": r["fseq"], "tseq": r["tseq"], "ohm": r["ohm"],
                      "org_ymd": r["ymd"], "org_hm": r["ohm"], "del_flag": r["del_flag"],
-                     "data_gubun": r["data_gubun"], "lot": 0.0, "days": {}}
+                     "data_gubun": r["data_gubun"],
+                     "use_qty": float(r["use_qty"] or 1), "prod_rate": float(r["prod_rate"] or 100),
+                     "lot": 0.0, "days": {}}
                 keyed[k] = g
             g["lot"] = max(g["lot"], float(r["lot"] or 0))
             g["days"][r["ymd"]] = g["days"].get(r["ymd"], 0.0) + float(r["planq"] or 0)
@@ -1093,7 +1099,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         # ---- 실적 4종 + ASSY재고 (제번·도번 단위) ----
         keys = [(g["wo"], g["swo"], g["item"]) for g in rows]
         items = sorted({g["item"] for g in rows})
-        prod = {}; insp = {}; sale = {}; mvin = {}; mvout = {}; sday = {}
+        prod = {}; insp = {}; sale = {}; mvin = {}; mvout = {}
         def _chunk(seq, n=600):
             for i in range(0, len(seq), n):
                 yield seq[i:i + n]
@@ -1118,12 +1124,8 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                              WHERE ITEM_CODE IN ({ph}) AND ISNULL(FR_FINISH_FLAG,'0')='0' AND MOVE_TAG='3'
                              GROUP BY FR_WORK_ORDER, ISNULL(FR_SPLIT_WORK_ORDER,''), ITEM_CODE""", *ck)
             for a, b, c, v in cur.fetchall(): mvout[(a, b, c)] = float(v or 0)
-            # 일자별 출하(셀 색·표시용)
-            cur.execute(f"""SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SALE_YMD, SUM(ISNULL(SALE_QTY,0))
-                              FROM {SCH}.SA_T_SALE_DTL WITH(NOLOCK)
-                             WHERE ITEM_CODE IN ({ph}) AND ISNULL(FINISH_FLAG,'0')='0'
-                             GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SALE_YMD""", *ck)
-            for a, b, c, y, v in cur.fetchall(): sday[(a, b, c, y)] = float(v or 0)
+            # ※ 일자별 출하(SALE_YMD)는 쓰지 않는다 — 레거시 dw 에도 sale_ymd 가 없다.
+            #   셀 출하수량은 ue_set_dd_color 가 제번 총출하를 계획셀에 배분해 만든다(아래).
         astk = {}
         for ck in _chunk(items):
             ph = ",".join("?" * len(ck))
@@ -1161,6 +1163,30 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
             k = (g["wo"], g["swo"], g["item"])
             sq = sale.get(k, 0.0) - mvout.get(k, 0.0)
             plan_tot = round(sum(g["days"].values()), 0)
+            # ── 셀 출하수량 = 레거시 ue_set_dd_color '출하수량 적용' 그대로 ──────────
+            #   ll_lot_qty = ceiling(lot_qty × use_qty × prod_rate/100)
+            #   ll_qty = sale_qty − (ll_lot_qty − plan_qty)   ← "지난 계획을 차감한 후 적용"
+            #   → 조회기간 밖(과거) 계획분만큼을 총출하에서 먼저 빼므로,
+            #     과거에 출하된 분은 화면 셀에 나타나지 않는다(레거시 동일 동작).
+            #   그 뒤 앞 일자부터: 계획셀 이상이면 계획만큼 채우고(=출하완료), 모자라면 남은 만큼.
+            lotq = math.ceil(float(g["lot"] or 0) * float(g.get("use_qty") or 1)
+                             * float(g.get("prod_rate") or 100) / 100.0)
+            if lotq < plan_tot:
+                lotq = plan_tot
+            rest = sq - (lotq - plan_tot)
+            sd = {}
+            for y in dates:
+                if rest <= 0:
+                    break
+                pq = g["days"].get(y, 0.0)
+                if pq <= 0:
+                    continue
+                if rest >= pq:
+                    sd[y] = round(pq, 0)     # 그 셀 전량출하 → 살구
+                    rest -= pq
+                else:
+                    sd[y] = round(rest, 0)   # 부분출하
+                    rest = 0
             g.update({
                 "itemnm": nm.get(g["item"], ''),
                 "prod_qty": round(prod.get(k, 0.0), 0),
@@ -1169,7 +1195,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                 "lot": round(g["lot"], 0),
                 "plan_qty": plan_tot,
                 "wo_plan": round(woplan.get(k, plan_tot), 0),   # 제번 전체계획(살구 판정 기준)
-                "sday": {y: round(sday.get((g["wo"], g["swo"], g["item"], y), 0.0), 0) for y in dates},
+                "sday": sd,
                 "days": {y: round(v, 0) for y, v in g["days"].items()},
             })
             out.append(g)
