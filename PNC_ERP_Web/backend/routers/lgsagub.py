@@ -766,18 +766,24 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
                 out_c[part] = out_c.get(part, 0.0) + qc * per
                 out_r[part] = out_r.get(part, 0.0) + qr * per
         # ★① 우리 ERP 확정입고(입고기준): 확정입고집계표와 동일 원천 = PU_T_STOCK_MAINT(9/S/C/G/H 검사통과)+_C(수입 DIVISION=P). MAT_CODE별 기간합.
+        #   ★2026-08-21 수정: 라이브 dbo 직독. 웹 자재입고관리(stock.py)가 nx.PU_T_STOCK_MAINT(미러 테이블)에 직접 등록 →
+        #   레거시 미러분과 이중계상(EBD64385805 300→600). 라이브 원본이 확정입고 정본이므로 nx 대신 라이브 읽음.
         erp_map = {}
         if yms:
-            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(mat))) it, SUM(qty) q FROM (
-                  SELECT MAT_CODE mat, CONVERT(float,ISNULL(MAINT_QTY,0)) qty FROM nx.PU_T_STOCK_MAINT
-                    WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND MAINT_TAG IN ('9','S','C','G','H')
-                      AND ((ISNULL(INSP_FLAG,'N') IN ('','N')) OR (ISNULL(INSP_FLAG,'N') IN ('S','F') AND INSP_PROC_YMD >= ''))
-                  UNION ALL
-                  SELECT MAT_CODE, CONVERT(float,ISNULL(MAINT_QTY,0)) FROM nx.PU_T_STOCK_MAINT_C
-                    WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND DIVISION='P'
-                ) t GROUP BY UPPER(LTRIM(RTRIM(mat)))""")
-            for r in cur.fetchall():
-                erp_map[r[0]] = f(r[1])
+            cn2 = _conn(); cur2 = cn2.cursor()
+            try:
+                cur2.execute(f"""SELECT UPPER(LTRIM(RTRIM(mat))) it, SUM(qty) q FROM (
+                      SELECT MAT_CODE mat, CONVERT(float,ISNULL(MAINT_QTY,0)) qty FROM dbo.PU_T_STOCK_MAINT
+                        WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND MAINT_TAG IN ('9','S','C','G','H')
+                          AND ((ISNULL(INSP_FLAG,'N') IN ('','N')) OR (ISNULL(INSP_FLAG,'N') IN ('S','F') AND INSP_PROC_YMD >= ''))
+                      UNION ALL
+                      SELECT MAT_CODE, CONVERT(float,ISNULL(MAINT_QTY,0)) FROM dbo.PU_T_STOCK_MAINT_C
+                        WHERE LEFT(MAINT_YMD,4) IN ({inl}) AND DIVISION='P'
+                    ) t GROUP BY UPPER(LTRIM(RTRIM(mat)))""")
+                for r in cur2.fetchall():
+                    erp_map[r[0]] = f(r[1])
+            finally:
+                cn2.close()
         # ★OSP에 나오는 부품(=LG 사급 목록)만 대상. 품명은 OSP(in_map)에 이미 있음(nx.item 전체조회 제거=속도).
         parts = set(in_map)
         items = []
