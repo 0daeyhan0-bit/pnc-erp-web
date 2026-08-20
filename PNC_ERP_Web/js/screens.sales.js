@@ -732,7 +732,9 @@ SCREEN.lgsale=(c)=>{
        /* 헤더·본문 전부 가운데 정렬 (.tbl .num 우측정렬을 이김) */
        .tbl.s4tbl th,.tbl.s4tbl td,
        .tbl.s4tbl th.num,.tbl.s4tbl td.num{text-align:center}
-       .s4tbl th{padding-right:10px}
+       /* 헤더 고정 — 스크롤해도 항상 보이게(§3). 배경 불투명 필수 */
+       .tbl.s4tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
+         padding-right:10px;box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
@@ -792,7 +794,8 @@ SCREEN.lgsale=(c)=>{
         // 너비 핸들
         const rz=document.createElement('div');
         rz.style.cssText='position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:2';
-        th.style.position='relative';
+        // ★position:relative 를 주면 CSS 의 position:sticky 가 덮여 헤더고정이 풀린다.
+        //   sticky 도 absolute 자식의 기준(containing block)이 되므로 그대로 둔다.
         rz.draggable=false;
         rz.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();
           const sx=e.pageX, sw=th.offsetWidth;
