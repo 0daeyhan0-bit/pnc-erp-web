@@ -627,37 +627,66 @@ SCREEN.lgsale=(c)=>{
       const yy=y.length===6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;
       const hh=h.length===4?`${h.slice(0,2)}:${h.slice(2,4)}`:h;
       return (yy+' '+hh).trim();};
-    // 도번은 툴팁으로 품명 제공(품명 컬럼은 레거시에 없어 제거)
-    const rowHtml=r=>`<tr class="s4row"${(r.del_flag||'0')==='1'?' style="color:#78909c" title="전일 삭제계획(참고용)"':''}>
-      <td class="center">${esc2((lnm[r.line_no]&&lnm[r.line_no]!==r.line_no)?(r.line_no+' '+lnm[r.line_no]):r.line_no)}</td>
-      <td class="center">${(r.del_flag||'0')==='1'?'<span style="color:#b0413e;font-weight:700" title="전일 삭제계획">✕</span> ':''}${esc2(r.swo||r.wo)}</td>
-      <td class="center">${esc2(r.model_no)}</td>
-      <td class="center">${esc2(r.tools)}</td>
-      <td class="center" title="${esc2(r.itemnm)}"><b>${esc2(r.item)}</b></td>
-      <td class="center mut">${esc2(r.change_day)}</td>
-      <td class="center mut">${esc2(r.rmk1)}</td>
-      <td class="num mut">${cap(r.prod_rate)}</td>
-      <td class="num">${cap(r.fseq)}</td><td class="num">${cap(r.tseq)}</td>
-      <td class="center mut">${esc2(String(r.ohm||'').length===4?String(r.ohm).slice(0,2)+':'+String(r.ohm).slice(2,4):(r.ohm||''))}</td>
-      <td class="center mut" style="white-space:nowrap">${esc2(outHm(r))}</td>
-      <td class="num">${cap(r.lot)}</td>
-      <td class="num">${cap(r.prod_qty)}</td>
-      <td class="num"${woDone(r)?' style="background:#fac090"':''}>${cap(r.sale_qty)}</td>
-      <td class="num"${(+r.stock_qty||0)>0?' style="font-weight:700;color:#1c47a0"':''}>${cap(r.stock_qty)}</td>
-      <td class="num">${cap(r.plan_qty)}</td>
-      ${dates.map(d=>cell(r,d)).join('')}</tr>`;
+    // ── 고정컬럼 정의 (레거시 배치) ─────────────────────────────────────
+    //   t=헤더명 · cls=정렬 · w=기본폭(px) · h(r)=행 셀 · s(blk,S)=집계행 셀
+    //   도번은 툴팁으로 품명 제공(품명 컬럼은 레거시에 없어 제거)
+    const CD={
+      line_no:{t:'라인',cls:'center',w:78,
+        h:r=>`<td class="center">${esc2((lnm[r.line_no]&&lnm[r.line_no]!==r.line_no)?(r.line_no+' '+lnm[r.line_no]):r.line_no)}</td>`,
+        s:(b,S,r0)=>`<td class="center">${esc2(r0.line_no)}</td>`},
+      wo:{t:'제번',cls:'center',w:96,
+        h:r=>`<td class="center">${(r.del_flag||'0')==='1'?'<span style="color:#b0413e;font-weight:700" title="전일 삭제계획">✕</span> ':''}${esc2(r.swo||r.wo)}</td>`,
+        s:(b,S,r0)=>`<td class="center">${esc2(r0.swo||r0.wo)}</td>`},
+      model_no:{t:'Model No',cls:'center',w:150,h:r=>`<td class="center">${esc2(r.model_no)}</td>`},
+      tools:{t:'Tools',cls:'center',w:78,h:r=>`<td class="center">${esc2(r.tools)}</td>`},
+      item:{t:'도번',cls:'center',w:104,
+        h:r=>`<td class="center" title="${esc2(r.itemnm)}"><b>${esc2(r.item)}</b></td>`},
+      change_day:{t:'당김,변경',cls:'center',w:62,h:r=>`<td class="center mut">${esc2(r.change_day)}</td>`},
+      rmk1:{t:'비고',cls:'center',w:70,
+        h:r=>`<td class="center mut bcap" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc2(r.rmk1)}">${esc2(r.rmk1)}</td>`},
+      prod_rate:{t:'비율',cls:'num',w:44,h:r=>`<td class="num mut">${cap(r.prod_rate)}</td>`},
+      fseq:{t:'From',cls:'num',w:48,h:r=>`<td class="num">${cap(r.fseq)}</td>`},
+      tseq:{t:'To',cls:'num',w:48,h:r=>`<td class="num">${cap(r.tseq)}</td>`},
+      ohm:{t:'시간',cls:'center',w:52,
+        h:r=>`<td class="center mut">${esc2(String(r.ohm||'').length===4?String(r.ohm).slice(0,2)+':'+String(r.ohm).slice(2,4):(r.ohm||''))}</td>`},
+      output:{t:'Output',cls:'center',w:112,
+        h:r=>`<td class="center mut" style="white-space:nowrap">${esc2(outHm(r))}</td>`},
+      lot:{t:'LOT수량',cls:'num',w:64,h:r=>`<td class="num">${cap(r.lot)}</td>`,
+        s:(b,S)=>`<td class="num"><b>${nf(S('lot'))}</b></td>`},
+      prod_qty:{t:'생산실적',cls:'num',w:64,h:r=>`<td class="num">${cap(r.prod_qty)}</td>`,
+        s:(b,S)=>`<td class="num">${cap(S('prod_qty'))}</td>`},
+      sale_qty:{t:'출하실적',cls:'num',w:64,
+        h:r=>`<td class="num"${woDone(r)?' style="background:#fac090"':''}>${cap(r.sale_qty)}</td>`,
+        s:(b,S)=>`<td class="num"${(b.length&&b.every(woDone))?' style="background:#fac090"':''}>${cap(S('sale_qty'))}</td>`},
+      stock_qty:{t:'ASSY재고',cls:'num',w:70,
+        h:r=>`<td class="num"${(+r.stock_qty||0)>0?' style="font-weight:700;color:#1c47a0"':''}>${cap(r.stock_qty)}</td>`,
+        s:(b,S)=>`<td class="num">${cap(S('stock_qty'))}</td>`},
+      plan_qty:{t:'출하계획',cls:'num',w:64,h:r=>`<td class="num">${cap(r.plan_qty)}</td>`,
+        s:(b,S)=>`<td class="num">${cap(S('plan_qty'))}</td>`},
+    };
+    const C_DEF=['line_no','wo','model_no','tools','item','change_day','rmk1','prod_rate',
+                 'fseq','tseq','ohm','output','lot','prod_qty','sale_qty','stock_qty','plan_qty'];
+    const C_LS='s4_colorder', W_LS='s4_colwidth';
+    const cOrd=(()=>{try{const s=JSON.parse(localStorage.getItem(C_LS)||'null');
+        if(Array.isArray(s)&&s.length){const v=s.filter(k=>CD[k]);C_DEF.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
+      }catch(e){}
+      return C_DEF.slice();})();
+    const cW=(()=>{try{return JSON.parse(localStorage.getItem(W_LS)||'{}')||{};}catch(e){return {};}})();
+    const thW=k=>`width:${cW[k]||CD[k].w}px;min-width:${cW[k]||CD[k].w}px;max-width:${cW[k]||CD[k].w}px`;
+    const headHtml=()=>cOrd.map(k=>`<th class="${CD[k].cls}" draggable="true" data-tk="${k}"`
+      +` title="드래그=순서 이동 · 우측경계 드래그=너비조절(내 브라우저에 저장)"`
+      +` style="cursor:grab;${thW(k)}">${CD[k].t}</th>`).join('');
 
-    // 집계행(제번 블록) — 구분=집계/전체 일 때
+    // 열 이동은 헤더 인덱스 기준으로 <td>를 옮기므로 순서만 맞으면 된다.
+    const rowHtml=r=>`<tr class="s4row"${(r.del_flag||'0')==='1'?' style="color:#78909c" title="전일 삭제계획(참고용)"':''}>`
+      +cOrd.map(k=>CD[k].h(r)).join('')
+      +dates.map(d=>cell(r,d)).join('')+'</tr>';
+
+    // 집계행(제번 블록) — 구분=집계/전체 일 때. 컬럼 순서(cOrd)를 그대로 따른다.
     const subHtml=blk=>{const r0=blk[0];
       const S=k=>blk.reduce((s,x)=>s+(+x[k]||0),0);
       return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
-        <td class="center">${esc2(r0.line_no)}</td><td class="center">${esc2(r0.swo||r0.wo)}</td>
-        <td colspan="3"></td><td colspan="7"></td>
-        <td class="num"><b>${nf(S('lot'))}</b></td>
-        <td class="num">${cap(S('prod_qty'))}</td>
-        <td class="num"${(blk.length&&blk.every(woDone))?' style="background:#fac090"':''}>${cap(S('sale_qty'))}</td>
-        <td class="num">${cap(S('stock_qty'))}</td>
-        <td class="num">${cap(S('plan_qty'))}</td>
+        ${cOrd.map(k=>CD[k].s?CD[k].s(blk,S,r0):'<td></td>').join('')}
         ${dates.map(d=>{const pl=blk.reduce((s,x)=>s+((x.days&&x.days[d])||0),0);
           const sd=blk.reduce((s,x)=>s+((x.sday&&x.sday[d])||0),0);
           if(!pl&&!sd)return '<td class="num"></td>';
@@ -697,6 +726,10 @@ SCREEN.lgsale=(c)=>{
        /* 드래그 선택은 계획셀(.s4c)에서만 막는다. 나머지 칸은 Ctrl+C 복사 가능 */
        .s4tbl tbody td{user-select:text;-webkit-user-select:text}
        .s4tbl tbody td.s4c{user-select:none;-webkit-user-select:none}
+       /* 지정한 헤더 너비가 지켜지도록(내용이 길어도 밀지 않게) */
+       .s4tbl{table-layout:fixed}
+       .s4tbl th,.s4tbl td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+       .s4tbl th{padding-right:10px}
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
@@ -728,12 +761,8 @@ SCREEN.lgsale=(c)=>{
      <div id="s4-msg" class="page-sub" style="flex:0 0 auto;min-height:16px"></div>
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit s4tbl" style="font-size:11px"><thead><tr>
-       <th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th>
-       <th class="center">당김,변경</th><th>비고</th><th class="num">비율</th>
-       <th class="num">From</th><th class="num">To</th><th class="center">시간</th><th class="center">Output</th>
-       <th class="num">LOT수량</th><th class="num">생산실적</th><th class="num">출하실적</th>
-       <th class="num">ASSY재고</th><th class="num">출하계획</th>
-       ${dates.map(d=>`<th class="num${dcls(d)}">${dcol(d)}</th>`).join('')}</tr></thead>
+       ${headHtml()}
+       ${dates.map(d=>`<th class="num${dcls(d)}" style="width:58px;min-width:58px">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?`<tr><td colspan="${NC+1+dates.length}" class="empty">조회 중…</td></tr>`:bodyHtml()}</tbody>
       </table></div></div>`;
 
@@ -749,6 +778,59 @@ SCREEN.lgsale=(c)=>{
         if(id==='#s4-wo')st.wo=v.trim(); else st.item=v.trim();
         draw();const n=c.querySelector(id);
         if(n){n.value=v;n.focus();try{n.setSelectionRange(ss,ss);}catch(e){}}};});
+
+    // ── 컬럼 순서 이동 + 너비 조절 (410·420과 동일 · localStorage 저장) ──
+    //   순서: 헤더 드래그앤드롭 → 재렌더 없이 DOM 열만 이동(버벅임 없음)
+    //   너비: 헤더 우측경계 드래그 · 경계 더블클릭 = 기본폭 복귀
+    (function(){
+      let _dtk=null;
+      c.querySelectorAll('th[data-tk]').forEach(th=>{
+        const key=th.getAttribute('data-tk');
+        // 너비 핸들
+        const rz=document.createElement('div');
+        rz.style.cssText='position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:2';
+        th.style.position='relative';
+        rz.draggable=false;
+        rz.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();
+          const sx=e.pageX, sw=th.offsetWidth;
+          const mv=ev=>{const w=Math.max(28,sw+ev.pageX-sx);
+            th.style.width=th.style.minWidth=th.style.maxWidth=w+'px';};
+          const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);
+            cW[key]=th.offsetWidth;try{localStorage.setItem(W_LS,JSON.stringify(cW));}catch(_){}};
+          document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
+        rz.addEventListener('dblclick',e=>{e.stopPropagation();
+          const w=CD[key].w; th.style.width=th.style.minWidth=th.style.maxWidth=w+'px';
+          delete cW[key];try{localStorage.setItem(W_LS,JSON.stringify(cW));}catch(_){}});
+        th.appendChild(rz);
+        // 순서 이동
+        th.ondragstart=e=>{_dtk=key;th.style.opacity='.4';
+          try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',key);}catch(_){}};
+        th.ondragend=()=>{th.style.opacity='';
+          c.querySelectorAll('th[data-tk]').forEach(x=>x.style.borderLeft='');};
+        th.ondragover=e=>{e.preventDefault();
+          if(_dtk&&_dtk!==key)th.style.borderLeft='3px solid #2563eb';};
+        th.ondragleave=()=>{th.style.borderLeft='';};
+        th.ondrop=e=>{th.style.borderLeft='';e.preventDefault();
+          const from=_dtk,to=key;_dtk=null;
+          if(!from||from===to)return;
+          const arr=cOrd.filter(k=>k!==from);
+          const at=arr.indexOf(to); arr.splice(at<0?arr.length:at,0,from);
+          try{localStorage.setItem(C_LS,JSON.stringify(arr));}catch(_){}
+          cOrd.length=0; arr.forEach(k=>cOrd.push(k));
+          const tbl=th.closest('table'); if(!tbl)return;
+          const hr=tbl.tHead?tbl.tHead.rows[0]:null; if(!hr)return;
+          const idxOf=(row,k)=>{const cs=row.children;
+            for(let i=0;i<cs.length;i++)if(cs[i].getAttribute&&cs[i].getAttribute('data-tk')===k)return i;
+            return -1;};
+          const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
+          const mv=row=>{const cs=row.children;if(fi>=cs.length||ti>=cs.length)return;
+            row.insertBefore(cs[fi],cs[ti]);};
+          mv(hr);
+          [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tbd=>{
+            for(const row of tbd.rows) if(row.children.length===hr.children.length) mv(row);});
+        };
+      });
+    })();
 
     // ── 사각영역 드래그 선택(키팅·가공420과 동일) ──
     const tb=c.querySelector('.s4tbl tbody'), gw=c.querySelector('.grid-wrap');
