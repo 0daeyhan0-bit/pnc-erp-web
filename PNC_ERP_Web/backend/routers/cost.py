@@ -150,8 +150,14 @@ def cost_sil(item: str = Query(..., description="품번"),
             d["agg"]["silsagub"] = round(eng.sagub_whole(item, ymd), 2)          # 이번 사급가(사급부품 통째 × 사급가@기준일)
         except Exception:
             d["agg"]["sa_mat"] = 0.0; d["agg"]["silsagub"] = 0.0
+        # ★엑셀 매트릭스용 품목별 공정맵(표시전용) — 실원가 grid, 최상위=풀 롤업(pg 재사용)
+        try:
+            _pm, _pc = _build_procmap(d["rows"], lambda c: (pg if c == item else eng.silwon_proc_grid(c, ymd)), top=item, cur=eng.cur)
+        except Exception:
+            _pm, _pc = {}, []
         return {"item": item, "ymd": ymd, "ym": ymv, "rows": d["rows"], "agg": d["agg"],
-                "procs": procs, "labor": (procs[0]["labor"] if procs else 0), "sagub_total": round(sagub_total, 2)}
+                "procs": procs, "labor": (procs[0]["labor"] if procs else 0), "sagub_total": round(sagub_total, 2),
+                "procmap": _pm, "proccols": _pc}
     with _COST_LOCK:
         try:
             return _compute(_get_cost_engine(fresh=bool(fresh)))
@@ -219,8 +225,14 @@ def cost_nae(item: str = Query(..., description="품번"),
         except Exception:
             for row in d["rows"]:
                 row.setdefault("cust", "")
+        # ★엑셀 매트릭스용 품목별 공정맵(표시전용, 원가 불변) — 최상위=풀 롤업(pg 재사용), 하위 가공품=자체 grid
+        try:
+            _pm, _pc = _build_procmap(d["rows"], lambda c: (pg if c == item else eng.proc_grid(c, ymd)), top=item, cur=eng.cur)
+        except Exception:
+            _pm, _pc = {}, []
         return {"item": item, "ymd": ymd, "bom": bom, "rows": d["rows"], "agg": d["agg"],
-                "procs": procs, "labor": (procs[0]["labor"] if procs else 0)}
+                "procs": procs, "labor": (procs[0]["labor"] if procs else 0),
+                "procmap": _pm, "proccols": _pc}
     with _COST_LOCK:
         try:
             return _compute(_get_cost_engine(fresh=bool(fresh)))
@@ -265,6 +277,42 @@ def _nae_proc_grid(pg: dict):
                     "uph": v["uph"], "cg": v["cg"], "labor": v["labor"]})
     out.sort(key=lambda x: (x["seq"], x["code"]))
     return out
+
+def _build_procmap(rows, grid_fn, top=None, cur=None):
+    """엑셀 매트릭스용 — 각 가공품(자체 공정 보유) 코드별 공정 그리드 + 전체 공정 컬럼(union·seq정렬).
+       grid_fn(code) = eng.proc_grid(code,ymd)(내부원가) 또는 eng.silwon_proc_grid(code,ymd)(실원가).
+       각 행=그 품목의 공정, 최상위(top)=풀 롤업(레거시 보기구분 그리드와 동일). 원가값 불변·표시전용.
+       ★공정 보유 판정 = nx.routing에 work_qty>0 존재(cur 제공시) — 내부·실원가 동일 품목집합(외주 게이팅 무관)."""
+    rowcodes = sorted({(r.get("code") or "").strip() for r in rows if r.get("code")})
+    codes = None
+    if cur is not None and rowcodes:
+        try:
+            has = set()
+            for i in range(0, len(rowcodes), 900):
+                ch = rowcodes[i:i + 900]; ph = ",".join("?" * len(ch))
+                cur.execute(f"SELECT DISTINCT item_code FROM nx.routing WHERE ISNULL(work_qty,0)>0 AND item_code IN ({ph})", *ch)
+                for r in cur.fetchall(): has.add(str(r[0]).strip())
+            codes = sorted(c for c in rowcodes if c in has)
+        except Exception:
+            codes = None
+    if codes is None:   # 폴백: 행 플래그(nproc/gag/haskids)
+        codes = sorted({c for c in rowcodes
+                        if any((rr.get("code") == c and ((rr.get("nproc", 0) or 0) > 0 or (rr.get("gag", 0) or 0) > 0 or rr.get("haskids"))) for rr in rows)})
+    if top and top not in codes:
+        codes = [top] + codes   # 최상위 ASSY는 자체노드 가공비 0이라도 풀 롤업 공정 표시(맨앞)
+    procmap = {}; colmap = {}
+    for c in codes:
+        try:
+            lst = _nae_proc_grid(grid_fn(c))
+        except Exception:
+            continue
+        if not lst:
+            continue
+        procmap[c] = [{"code": p["code"], "name": p["name"], "seq": p["seq"], "wq": p["wq"], "amt": p["amt"]} for p in lst]
+        for p in lst:
+            colmap.setdefault(p["code"], {"code": p["code"], "name": p["name"], "seq": p["seq"]})
+    proccols = sorted(colmap.values(), key=lambda x: (x["seq"], x["code"]))
+    return procmap, proccols
 
 # 조립공정 코드셋(가공 11~27·overhead 91~99 제외) = 용접/은납 + 체결계열 + 포장. 품목별 공정관리 'ASSY 조립공정' 탭용.
 _ASSY_PROC = _PROC_WELD | _PROC_FASTEN | {"61", "83", "53", "54", "56"}   # +교정·수몰검사·에어브로잉·포장
