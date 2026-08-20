@@ -1632,13 +1632,90 @@ SCREEN.unifybom=(c,ro)=>{
   const naeToolbar=(rw)=>`<div class="toolbar" style="flex-wrap:wrap;gap:4px">
      <span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
      <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="nae-ymd" type="date" value="${ymd2date(naeYmd)}" style="width:150px">
-     <button class="btn" id="nae-go">🔍 조회</button><button class="btn ghost" id="nae-regen">🔄 재계산</button>
+     <button class="btn" id="nae-go">🔍 조회</button><button class="btn ghost" id="nae-regen">🔄 재계산</button><button class="btn xls" id="nae-xls">📥 엑셀</button>
      ${rw}
      <div class="spacer"></div></div>`;
   const sumbar=(a,tot,totlb)=>{const chip=(lb,v,cl)=>`<span class="nae-chip"><em>${lb}</em><b style="color:${cl||'#243244'}">${M(v)}</b></span>`;
-    const son2=(a.sagub!=null)?((+a.sonik||0)+(+a.sagub||0)):null;
-    const sagChip=`<span class="nae-chip"><em>LG사급비</em><b style="color:#b8860b">${M((+a.sa_mat||0))}</b>${a.silsagub!=null?`<small style="display:block;font-size:10px;color:#8a5a1a">(실사급가: ${M(a.silsagub)}원)</small>`:''}</span>`;
-    return `<div class="nae-sum">${chip('재료비',(+a.jae||0)-(+a.sa_mat||0),'#1c6b3a')}${sagChip}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,a[tot],'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',a.sonik,(a.sonik<0?'#c0392b':'#1c7c3a'))}${a.sagub!=null?chip('사급차액',a.sagub,(a.sagub<0?'#c0392b':'#1c7c3a'))+chip('손익(사급반영)',son2,(son2<0?'#c0392b':'#1c7c3a')):''}</div>`;};
+    const _sam=(+a.sa_mat||0), _sil=(a.silsagub!=null?(+a.silsagub||0):_sam);
+    if(tot==='naewon'){
+      // ★내부원가만: 사급 = 실사급가(COSP)로 반영 → 내부원가·손익 재계산(material_split sa 대신 silsagub). 재료비(자작)는 불변.
+      const _naeSil=(+a[tot]||0)-_sam+_sil;   // 내부원가(실사급가 반영)
+      const _sonSil=(+a.lg||0)-_naeSil;        // 손익(실사급가 반영)
+      const son2=(a.sagub!=null)?(_sonSil+(+a.sagub||0)):null;
+      const sagChip=`<span class="nae-chip"><em>LG사급비(실사급가)</em><b style="color:#b8860b">${M(_sil)}</b><small style="display:block;font-size:10px;color:#8a5a1a">(재료비기준: ${M(_sam)}원)</small></span>`;
+      return `<div class="nae-sum">${chip('재료비',(+a.jae||0)-_sam,'#1c6b3a')}${sagChip}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,_naeSil,'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',_sonSil,(_sonSil<0?'#c0392b':'#1c7c3a'))}${a.sagub!=null?chip('사급차액',a.sagub,(a.sagub<0?'#c0392b':'#1c7c3a'))+chip('손익(사급반영)',son2,(son2<0?'#c0392b':'#1c7c3a')):''}</div>`;
+    }
+    // ★실원가(및 비교): 사급가 불변 — 실사급가(COSP) 미반영. LG사급비=재료비기준(sam), 원가/손익은 순수 엔진값. 실원가 자체 사급차액 로직 유지.
+    const _son=(+a.lg||0)-(+a[tot]||0);
+    const _son2=(a.sagub!=null)?(_son+(+a.sagub||0)):null;
+    const sagChip=(a.sa_mat!=null)?`<span class="nae-chip"><em>LG사급비</em><b style="color:#b8860b">${M(_sam)}</b><small style="display:block;font-size:10px;color:#8a5a1a">(재료비 기준)</small></span>`:'';
+    return `<div class="nae-sum">${chip('재료비',(+a.jae||0)-_sam,'#1c6b3a')}${sagChip}${chip('가공비',a.gagong,'#8a5a1a')}${chip('일반관리',a.ilban)}${chip('운반비',a.unban)}${chip('이윤',a.profit)}${chip(totlb,a[tot],'#1c47a0')}${chip('LG판가',a.lg,'#1c47a0')}${chip('손익',_son,(_son<0?'#c0392b':'#1c7c3a'))}${a.sagub!=null?chip('사급차액',a.sagub,(a.sagub<0?'#c0392b':'#1c7c3a'))+chip('손익(사급반영)',_son2,(_son2<0?'#c0392b':'#1c7c3a')):''}</div>`;};
+  // ★엑셀 다운로드 — 재료표 + 공정 + 요약(원가/사급/손익). 내부원가·실원가 공용.
+  // 엑셀 다운로드 — 화면 포맷 그대로: 좌측 재료표 + 가로 공정 매트릭스(품목별). 색·컬럼폭·천단위콤마·%.
+  // Excel이 읽는 HTML표(.xls) 방식(색/폭/서식 지원). 내부원가·실원가 공용(D.procmap/D.proccols는 백엔드가 반환).
+  const _costXls=(D,kind)=>{
+    if(!D||!D.rows){alert('먼저 조회하세요');return;}
+    const a=D.agg||{}, jae=+a.jae||0;
+    const cols=D.proccols||[], pmap=D.procmap||{};
+    const eH=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const rw=v=>{v=+v||0; if(!v)return''; return (Math.round(v*100)/100).toString();};   // 공정 횟수(작업량)
+    const procCells=code=>{const pm={};(pmap[code]||[]).forEach(p=>{pm[p.code]=p.wq;});return cols.map(c=>`<td class="c">${eH(rw(pm[c.code]))}</td>`).join('');};
+    const isSil=(kind==='실원가');
+    let head, colg, body=[];
+    if(isSil){
+      // ★실원가 = 화면(업체 뷰) 그대로: 레벨·품번·품명·구분·거래처·단위단가·재료비·LME차액·가공비·사급차액(개당) + 전 행(SUB·사급 포함) + 공정 매트릭스
+      const hd=['레벨','품번','품명','구분','거래처','단위단가','재료비','LME차액','가공비','사급차액(개당)'];
+      head=`<tr>${hd.map(h=>`<th>${h}</th>`).join('')}<th class="gap"></th>${cols.map(c=>`<th class="p">${eH(c.name)}</th>`).join('')}</tr>`;
+      colg=`<colgroup><col style="width:44px"><col style="width:150px"><col style="width:200px"><col style="width:52px"><col style="width:140px"><col style="width:76px"><col style="width:80px"><col style="width:74px"><col style="width:66px"><col style="width:86px"><col style="width:16px">`+cols.map(()=>`<col style="width:48px">`).join('')+`</colgroup>`;
+      (D.rows||[]).forEach(r=>{
+        const k=silKind(r);
+        body.push(`<tr${r.level===0?' class="top"':''}>`+
+          `<td class="c">${r.level}</td>`+
+          `<td>${(r.level?'└ ':'')+eH(r.code)}</td>`+
+          `<td>${eH(r.name)}</td>`+
+          `<td class="c">${eH(k.t)}</td>`+
+          `<td>${eH(r.cust_name||r.in_cust||'')}</td>`+
+          `<td class="r">${r.won?M2(r.won):''}</td>`+
+          `<td class="r">${M(r.mat)}</td>`+
+          `<td class="r">${r.lme?M(r.lme):''}</td>`+
+          `<td class="r">${M(r.gag)}</td>`+
+          `<td class="r">${(r.sagub!=null&&r.sagub!=='')?M(r.sagub):''}</td>`+
+          `<td class="gap"></td>`+procCells(r.code)+`</tr>`);
+      });
+    } else {
+      // ★내부원가 = 재료표(품번·품명·규격·소재·사급·매입처·소요량·단위단가·재료비·비율%) + 공정 매트릭스
+      const fm=flatMat(D.rows);
+      const pctOf=m=>jae?((+m||0)/jae*100):0;
+      const trow=(o,isTop)=>`<tr${isTop?' class="top"':''}>`+
+        `<td>${eH(o.code)}</td><td>${eH(o.name)}</td><td>${eH(o.sp)}</td>`+
+        `<td class="c">${eH(o.metal||'')}</td><td class="c">${o.sag?'사급':''}</td><td>${eH(o.cust||'')}</td>`+
+        `<td class="r">${o.qty===''?'':M2(o.qty)}</td><td class="r">${o.won?M2(o.won):''}</td>`+
+        `<td class="r">${o.mat===''?'':M(o.mat)}</td><td class="r">${o.pct===''?'':(+o.pct).toFixed(1)+'%'}</td>`+
+        `<td class="gap"></td>`+procCells(o.code)+`</tr>`;
+      body.push(trow({code:item||'',name:name||item||'',sp:'',metal:'',sag:0,cust:'',qty:'',won:'',mat:jae,pct:100},true));
+      [...(fm.normal||[]),...(fm.weldArr||[])].forEach(r=>{
+        const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
+        body.push(trow({code:r.code,name:r.name,sp:sp,metal:r.metal||'',sag:(r.sag||(/사급/.test(r.kind||'')?1:0)),cust:(r.cust||r.cust_name||''),qty:(r.qty==null?'':r.qty),won:r.won,mat:r.mat,pct:pctOf(r.mat)},false));
+      });
+      const hdBase=['품번','품명','규격','소재','사급','매입처','소요량','단위단가','재료비','비율%'];
+      head=`<tr>${hdBase.map(h=>`<th>${h}</th>`).join('')}<th class="gap"></th>${cols.map(c=>`<th class="p">${eH(c.name)}</th>`).join('')}</tr>`;
+      colg=`<colgroup><col style="width:110px"><col style="width:200px"><col style="width:120px"><col style="width:44px"><col style="width:44px"><col style="width:120px"><col style="width:62px"><col style="width:78px"><col style="width:80px"><col style="width:56px"><col style="width:16px">`+cols.map(()=>`<col style="width:48px">`).join('')+`</colgroup>`;
+    }
+    const html=`<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8">
+      <style>
+      table{border-collapse:collapse}
+      td,th{border:.5pt solid #bbb;padding:2px 6px;font:11px '맑은 고딕',sans-serif;white-space:nowrap}
+      th{background:#4472c4;color:#fff;font-weight:bold;text-align:center}
+      th.p{background:#548235}
+      th.gap,td.gap{border:none;background:#fff}
+      td.r{text-align:right}
+      td.c{text-align:center}
+      tr.top td{background:#fff2cc;font-weight:bold}
+      </style></head><body><table>${colg}<thead>${head}</thead><tbody>${body.join('')}</tbody></table></body></html>`;
+    const A=document.createElement('a');
+    A.href=URL.createObjectURL(new Blob(['﻿'+html],{type:'application/vnd.ms-excel;charset=utf-8;'}));
+    A.download=`${kind}_${item||''}_${naeYmd}.xls`; document.body.appendChild(A); A.click(); A.remove();
+  };
   const naeViewBar=()=>{const V=[['proc','공정'],['weld','용접'],['fasten','체결'],['company','업체']];
     return `<div class="nae-vbar">${V.map(([k,l])=>`<span class="nae-vb ${naeView===k?'on':''}" data-v="${k}">${l}</span>`).join('')}</div>`;};
   // 역전개 재료(재료비만, 용접봉=종류별 합산)
@@ -1847,6 +1924,7 @@ SCREEN.unifybom=(c,ro)=>{
     bindTabs();
     const g=id=>c.querySelector(id);
     g('#nae-go').onclick=()=>{naeYmd=date2ymd(g('#nae-ymd').value)||naeYmd;loadNae();};
+    {const x=g('#nae-xls');if(x)x.onclick=()=>_costXls(naeD,'내부원가');}
     g('#nae-regen').onclick=()=>loadNae(true);
     {const w=g('#nae-weld');if(w)w.onclick=()=>{showWeld=!showWeld;drawNae();};}
     // [조립공정] 툴바 버튼 제거 — 레벨0(제품) 행의 [등록/수정]이 동일 팝업(용접·포장·체결) 담당(중복 제거)
@@ -1996,13 +2074,14 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="toolbar"><span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span>
        <label class="tl" style="margin-left:8px">단가기준일</label><input class="inp" id="sil-ymd" type="date" value="${ymd2date(naeYmd)}" style="width:150px">
        <label class="tl" style="margin-left:8px" title="유상사급 실출고−실입고 차액을 집계할 리시빙월(당월은 월초라 희소 → 기본=직전 완성월)">사급 리시빙월</label><input class="inp" id="sil-sagym" type="month" value="20${silSagYm.slice(0,2)}-${silSagYm.slice(2,4)}" style="width:130px">
-       <button class="btn" id="sil-go">🔍 조회</button><button class="btn ghost" id="sil-regen">🔄 재계산</button><div class="spacer"></div></div>
+       <button class="btn" id="sil-go">🔍 조회</button><button class="btn ghost" id="sil-regen">🔄 재계산</button><button class="btn xls" id="sil-xls">📥 엑셀</button><div class="spacer"></div></div>
      ${candSelector('sil')}
      ${content}${naeCss()}`;
     bindTabs();bindCandSel();
     const g=id=>c.querySelector(id);
     const _rdSag=()=>{const v=g('#sil-sagym')&&g('#sil-sagym').value;if(v)silSagYm=v.slice(2).replace('-','');};
     g('#sil-go').onclick=()=>{naeYmd=date2ymd(g('#sil-ymd').value)||naeYmd;_rdSag();routeCostFor=-1;if(routeSel>0)loadRouteCost();else loadSil();};
+    {const x=g('#sil-xls');if(x)x.onclick=()=>_costXls(silD,'실원가');}
     g('#sil-regen').onclick=()=>{_rdSag();if(routeSel>0){routeCostFor=-1;loadRouteCost();}else loadSil(true);};
     c.querySelectorAll('.sil-vb').forEach(el=>el.onclick=()=>{silView=el.dataset.v;drawSil();});
   };
