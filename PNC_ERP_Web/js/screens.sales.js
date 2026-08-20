@@ -729,6 +729,9 @@ SCREEN.lgsale=(c)=>{
        /* 지정한 헤더 너비가 지켜지도록(내용이 길어도 밀지 않게) */
        .s4tbl{table-layout:fixed}
        .s4tbl th,.s4tbl td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+       /* 헤더·본문 전부 가운데 정렬 (.tbl .num 우측정렬을 이김) */
+       .tbl.s4tbl th,.tbl.s4tbl td,
+       .tbl.s4tbl th.num,.tbl.s4tbl td.num{text-align:center}
        .s4tbl th{padding-right:10px}
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
@@ -758,7 +761,7 @@ SCREEN.lgsale=(c)=>{
        <span class="rowcount">행 <b>${nf(rows.length)}</b> · LOT합 <b>${nf(tLot)}</b> · 출하합 <b>${nf(tSale)}</b> · ASSY재고합 <b>${nf(tStk)}</b></span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc2(st.msg)}</div>`:''}
-     <div id="s4-msg" class="page-sub" style="flex:0 0 auto;min-height:16px"></div>
+     <div id="s4-msg" class="page-sub" style="flex:0 0 auto;margin:0;padding:0;line-height:1.5"></div>
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit s4tbl" style="font-size:11px"><thead><tr>
        ${headHtml()}
@@ -834,11 +837,18 @@ SCREEN.lgsale=(c)=>{
 
     // ── 사각영역 드래그 선택(키팅·가공420과 동일) ──
     const tb=c.querySelector('.s4tbl tbody'), gw=c.querySelector('.grid-wrap');
-    const selInfo=()=>{const e=g('#s4-selinfo');if(!e)return;
-      let n=0,q=0;
-      rows.forEach(r=>dates.forEach(d=>{if(st.sel.has(ckey(r,d))){
-        const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;n++;q+=Math.max(0,pl-sd);}}));
-      e.innerHTML=n?`선택 <b>${nf(n)}</b>칸 · 수량 <b>${nf(q)}</b>`:'';};
+    // 셀키 → 잔량 맵을 1회만 만들어 둔다(선택정보 계산이 rows×dates 순회를 반복하지 않게).
+    const _remOf=new Map();
+    rows.forEach(r=>dates.forEach(d=>{
+      const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;
+      if(pl||sd)_remOf.set(ckey(r,d),Math.max(0,pl-sd));}));
+    // 드래그 중엔 매 프레임 DOM 을 건드리지 않도록 rAF 로 합친다.
+    let _siReq=0;
+    const selInfoNow=()=>{const e=g('#s4-selinfo');if(!e)return;
+      let q=0; st.sel.forEach(k=>{q+=_remOf.get(k)||0;});
+      e.innerHTML=st.sel.size?`선택 <b>${nf(st.sel.size)}</b>칸 · 수량 <b>${nf(q)}</b>`:'';};
+    const selInfo=()=>{if(_siReq)return;
+      _siReq=requestAnimationFrame(()=>{_siReq=0;selInfoNow();});};
     if(tb&&gw){
       // 계획셀(.s4c)에서 시작한 드래그만 선택을 막는다 — 그 외 칸은 Ctrl+C 복사 가능
       gw.onselectstart=e=>{const t=e.target;return !(t&&t.closest&&t.closest('td.s4c'));};
@@ -852,19 +862,31 @@ SCREEN.lgsale=(c)=>{
             if(d<bd){bd=d;best=z;}});
           if(best)return best;}
         return e.closest('td');};
-      let drag=false,_a=null,_cells=null,_own=null,_last=null;
+      let drag=false,_a=null,_cells=null,_own=null,_last=null,_byRow=null,_prev=null;
+      // 셀을 행별로 색인해 둔다 → 드래그 중엔 '사각형에 걸친 행'만 훑으면 된다.
       const snap=()=>{_cells=[...tb.querySelectorAll('td.s4c[data-k]')]
-        .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c,k:x.getAttribute('data-k')};});};
+          .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c,k:x.getAttribute('data-k')};});
+        _byRow=new Map();
+        for(const it of _cells){let a=_byRow.get(it.r);if(!a){a=[];_byRow.set(it.r,a);}a.push(it);}
+        _prev=null;};
       const clearAll=()=>{tb.querySelectorAll('td.s4c.s4sel').forEach(td=>{
         st.sel.delete(td.getAttribute('data-k'));td.classList.remove('s4sel');});};
-      const applyRect=td=>{if(!_a||!_cells)return;
+      const applyRect=td=>{if(!_a||!_byRow)return;
         const b=rcOf(td);
         const r1=Math.min(_a.r,b.r),r2=Math.max(_a.r,b.r);
         const c1=Math.min(_a.c,b.c),c2=Math.max(_a.c,b.c);
-        for(const it of _cells){
-          const inR=it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2, has=st.sel.has(it.k);
-          if(inR&&!has){st.sel.add(it.k);it.td.classList.add('s4sel');_own.add(it.k);}
-          else if(!inR&&has&&_own.has(it.k)){st.sel.delete(it.k);it.td.classList.remove('s4sel');}}
+        // 같은 사각형이면 아무것도 하지 않는다(마우스가 셀 안에서 미세하게 움직일 때).
+        if(_prev&&_prev.r1===r1&&_prev.r2===r2&&_prev.c1===c1&&_prev.c2===c2)return;
+        // 직전 사각형과의 합집합 행만 재평가 → 전체(수천 셀) 순회 제거
+        const lo=_prev?Math.min(r1,_prev.r1):r1, hi=_prev?Math.max(r2,_prev.r2):r2;
+        for(let r=lo;r<=hi;r++){
+          const arr=_byRow.get(r); if(!arr)continue;
+          const rowIn=(r>=r1&&r<=r2);
+          for(const it of arr){
+            const inR=rowIn&&it.c>=c1&&it.c<=c2, has=st.sel.has(it.k);
+            if(inR&&!has){st.sel.add(it.k);it.td.classList.add('s4sel');_own.add(it.k);}
+            else if(!inR&&has&&_own.has(it.k)){st.sel.delete(it.k);it.td.classList.remove('s4sel');}}}
+        _prev={r1,r2,c1,c2};
         selInfo();};
       tb.addEventListener('mousedown',e=>{if(e.button!==0)return;
         const start=e.target.closest('td');if(!start||!start.closest('tr'))return;
@@ -877,11 +899,19 @@ SCREEN.lgsale=(c)=>{
         if(!e.ctrlKey&&!e.metaKey)clearAll();
         drag=true;_own=new Set();snap();_a=rcOf(start);_last=start;
         if(hit)applyRect(hit); else selInfo();});
+      // mousemove 는 프레임당 1회만 처리(마우스 이벤트는 프레임보다 훨씬 자주 온다)
+      let _mvReq=0,_mvXY=null;
+      const _stop=()=>{drag=false;_a=null;_cells=null;_byRow=null;_last=null;_prev=null;
+        if(_mvReq){cancelAnimationFrame(_mvReq);_mvReq=0;}};
       tb.addEventListener('mousemove',e=>{if(!drag)return;
-        if(!(e.buttons&1)){drag=false;_a=null;_cells=null;_last=null;return;}
-        const td=cellAt(e.clientX,e.clientY)||_last;
-        if(td){_last=td;applyRect(td);}});
-      document.addEventListener('mouseup',()=>{drag=false;_a=null;_cells=null;_last=null;});
+        if(!(e.buttons&1)){_stop();return;}
+        _mvXY={x:e.clientX,y:e.clientY};
+        if(_mvReq)return;
+        _mvReq=requestAnimationFrame(()=>{_mvReq=0;
+          if(!drag||!_mvXY)return;
+          const td=cellAt(_mvXY.x,_mvXY.y)||_last;
+          if(td){_last=td;applyRect(td);}});});
+      document.addEventListener('mouseup',_stop);
       // 우클릭 = 확인/취소 메뉴(생산준비등록과 동일). body 에 렌더(§3)
       gw.oncontextmenu=(ev)=>{
         const td=ev.target.closest('td.s4c[data-k]'); if(!td)return;
