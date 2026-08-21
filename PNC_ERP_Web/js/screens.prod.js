@@ -1,3 +1,25 @@
+/* ===== 인쇄창 열기 — ★최상위 공용 함수 (프린터 기억을 위해 실제 URL 사용) =====
+   window.open('', ...) 로 열면 주소가 about:blank 가 되는데, 브라우저(특히 Edge)는
+   "마지막에 고른 프린터"를 URL 기준으로 저장한다. about:blank 는 저장 키가 못 되어
+   매번 기본 프린터(PDF로 저장)로 돌아간다.
+   → /print.html?t=<종류> 로 열고, 종류(label/kanban/sheet)를 나눠 출력물별로 따로 기억시킨다.
+   호출: openPrintWin('label','pncPrnLabel','width=760,height=1000').then(w=>{...})
+   반환: 창이 로드된 뒤의 window (팝업차단이면 null) */
+window.openPrintWin=(kind,name,feat)=>new Promise(resolve=>{
+  const w=window.open('print.html?t='+encodeURIComponent(kind),name,feat);
+  if(!w){resolve(null);return;}
+  let done=false;
+  const fin=()=>{if(done)return;done=true;
+    // 로드된 문서를 비우고 쓰기모드로 — 이래야 URL 은 print.html 로 유지된 채 내용만 교체된다.
+    try{w.document.open();}catch(e){}
+    resolve(w);};
+  try{
+    if(w.document&&w.document.readyState==='complete')return fin();   // 재사용되는 창
+    w.addEventListener('load',fin,{once:true});
+  }catch(e){}
+  setTimeout(fin,1200);   // 안전장치(로드 이벤트를 놓쳐도 진행)
+});
+
 /* ===== Spec Sheet(BOM) 출력 — ★최상위 공용 함수 =====
    준비실적처리(키팅) [🖨 BOM출력] → A4 가로 미리보기 → 인쇄.
    레거시 w_pr_input_460 Print미리보기 양식 재현(2026-08-19):
@@ -178,9 +200,9 @@ window.printWeldSheet=async(sheetNo)=>{
         <td style="text-align:center;font-weight:700${mbg?';background:'+mbg:''}">${esc(mn)}</td>
         <td>${bc}</td></tr>`);
     }
-    // ★창이름 = 'pncPrnSheet'+전표번호 — A4 전표는 여러 건을 동시에 띄우므로 전표별로 창을 분리한다.
-    //   (라벨 40×20 / 가간판 210×110 과도 분리되어 프린터 선택이 서로 덮이지 않는다)
-    const w=window.open('','pncPrnSheet'+String(sn8||'').replace(/\W/g,''),'width=900,height=1100');
+    // ★실제 URL(print.html?t=sheet)로 연다 — about:blank 는 프린터 선택이 기억되지 않는다.
+    //   창이름만 전표별로 분리(동시 다건 출력). URL 은 t=sheet 로 같아 프린터 선택을 공유한다.
+    const w=await openPrintWin('sheet','pncPrnSheet'+String(sn8||'').replace(/\W/g,''),'width=900,height=1100');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>생산이동전표 ${esc(sn8)}</title>
     <style>
@@ -2601,9 +2623,8 @@ SCREEN.prodsheet=(host)=>{
         <div class="t4">${esc(j.item)}</div>
         <div class="t5">${esc(j.worker||'')}/${esc(j.inspector||'')}</div>
       </div></div>`;
-    // ★창이름 고정 = 'pncPrnLabel' — 브라우저는 (사이트+창) 단위로 마지막 프린터 선택을 기억한다.
-    //   전표/가간판과 창을 분리해야 라벨프린터 선택이 A4프린터 선택에 덮이지 않는다(§490 프린터 2대).
-    const w=window.open('','pncPrnLabel','width=760,height=1000');
+    // ★실제 URL(print.html?t=label)로 연다 — about:blank 는 프린터 선택이 기억되지 않는다.
+    const w=await openPrintWin('label','pncPrnLabel','width=760,height=1000');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>제품스티커 ${esc(j.item)} (${j.qty}장)</title>
     <style>
@@ -2805,8 +2826,8 @@ SCREEN.prodsheet=(host)=>{
       <div class="ft"><span>출력일시 : ${esc((c.print_dt||'').slice(2,16).replace('T',' ').replace(/-/g,'/'))} ${esc(c.print_user||'')}</span>
         <span>용접전표번호 : ${esc(c.sheet_no_fmt)}</span></div>
     </div>`;
-    // ★창이름 고정 = 'pncPrnKanban' (라벨/전표와 분리 → 프린터 선택이 서로 안 덮임)
-    const w=window.open('','pncPrnKanban','width=980,height=680');   // 210×110 비율에 맞춘 미리보기
+    // ★실제 URL(print.html?t=kanban)로 연다 — about:blank 는 프린터 선택이 기억되지 않는다.
+    const w=await openPrintWin('kanban','pncPrnKanban','width=980,height=680');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>가간판 ${esc(cards[0].item)} (${cards.length}장)</title>
     <style>

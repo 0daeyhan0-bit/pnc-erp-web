@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>인쇄 준비 중…</title>
+<!-- ★인쇄 전용 빈 페이지.
+     window.open('','창이름') 으로 열면 주소가 about:blank 가 되는데,
+     브라우저(특히 Edge)는 프린터 선택을 URL 기준으로 기억하므로
+     about:blank 에서는 "마지막에 고른 프린터"가 저장되지 않는다.
+     → 실제 URL(/print.html?t=label 등)로 열어야 출력물별로 프린터가 기억된다.
+     내용은 호출한 화면이 document.write 로 채운다. -->
+<style>
+  body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;color:#555;
+       display:flex;align-items:center;justify-content:center;height:100vh}
+  .m{font-size:13px}
+  @media print{.m{display:none}}
+</style></head>
+<body><div class="m">인쇄 내용을 준비하고 있습니다…</div></body></html>
