@@ -2924,7 +2924,7 @@ SCREEN.prodsheet=(host)=>{
          한 페이지에 3장까지 자연스럽게 들어감. */
       /* 간판 1장 = 1페이지. 레거시 실물처럼 표는 위쪽에 모으고 아래는 비운다
          (표를 억지로 늘려 채우지 않음 — 2026-08-20 레거시 대조). */
-      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden;min-height:100mm;display:flex;flex-direction:column}
+      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden}
       .kb+.kb{page-break-before:always}
       .kb table{border-collapse:collapse;width:100%}
       /* 레거시 실물 대조: 글자·행높이를 키우고 라벨칸 음영은 없앤다(전부 흰 바탕) */
