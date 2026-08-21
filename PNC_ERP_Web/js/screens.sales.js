@@ -975,6 +975,25 @@ SCREEN.lgsale=(c)=>{
       if(st.src==='live'){msg('레거시 대사 모드에서는 출하처리를 할 수 없습니다(읽기전용). 소스를 우리(nx)로 바꾸세요.',false);return;}
       const cells=picked();
       if(!cells.length){msg('출하처리할 셀을 선택하세요(계획 남은 칸).',false);return;}
+      // ★ASSY재고 부족 사전점검 — 서버는 "재고만큼만" 출하하므로, 선택량을 다 못 잡는 경우
+      //   무엇이 얼마나 모자란지 먼저 알리고 진행여부를 묻는다.
+      //   같은 도번을 여러 셀이 함께 쓰면 재고를 나눠 쓰므로 도번 단위로 합산해 판정.
+      {
+        const stkOf={}; rows.forEach(r=>{if(!(r.item in stkOf))stkOf[r.item]=+r.stock_qty||0;});
+        const need={}; cells.forEach(x=>{need[x.item]=(need[x.item]||0)+(+x.qty||0);});
+        const short=Object.keys(need).filter(it=>(stkOf[it]||0)<need[it])
+          .map(it=>({item:it,need:need[it],have:Math.max(0,stkOf[it]||0)}));
+        if(short.length){
+          const totN=Object.values(need).reduce((a,b)=>a+b,0);
+          const totG=Object.keys(need).reduce((a,it)=>a+Math.min(need[it],Math.max(0,stkOf[it]||0)),0);
+          const list=short.slice(0,10).map(s=>
+            `　· ${s.item} : 계획 ${nf(s.need)} / 재고 ${nf(s.have)} → ${nf(s.have)}개만 처리`).join('\n');
+          const more=short.length>10?`\n　… 외 ${short.length-10}건`:'';
+          if(!confirm(`ASSY(완제품)재고가 부족합니다.\n\n${list}${more}\n\n`
+            +`선택 ${nf(totN)}개 중 ${nf(totG)}개만 출하실적이 잡히고,\n`
+            +`나머지 ${nf(totN-totG)}개는 계획으로 남습니다.\n\n그래도 진행할까요?`))return;
+        }
+      }
       // 우클릭 확인 = 즉시 처리(재확인 없음)
       g('#s4-ok').disabled=true;
       try{

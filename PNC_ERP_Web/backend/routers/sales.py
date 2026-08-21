@@ -1227,6 +1227,7 @@ def sale040_confirm(payload: dict = Body(...)):
         done = []; skipped = []
         # 도번별 재고 캐시(같은 도번 여러 제번 → 순서대로 소진)
         stk = {}
+        want_tot = 0      # 요청 총량(재고절삭 전) — 부분출하 안내용
         for c in cells:
             wo = str(c.get("wo") or "").strip()
             swo = str(c.get("swo") or "").strip()
@@ -1234,6 +1235,7 @@ def sale040_confirm(payload: dict = Body(...)):
             want = int(float(c.get("qty") or 0))
             if not (wo and it) or want <= 0:
                 continue
+            want_tot += want
             if it not in stk:
                 cur.execute("SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.SA_T_ITEM_STOCK WHERE ITEM_CODE=?", it)
                 stk[it] = float(cur.fetchone()[0] or 0)
@@ -1291,9 +1293,13 @@ def sale040_confirm(payload: dict = Body(...)):
         cn.commit()
         tot = sum(x["qty"] for x in done)
         msg = "출하처리 %d건 · 수량 %d" % (len(done), tot)
+        # 재고가 모자라 일부만 잡힌 경우(6개 계획 → 재고 3개 = 3개만)도 명시한다.
+        if want_tot > tot:
+            msg += " (요청 %d 중 %d — ASSY재고 부족으로 %d 미처리)" % (want_tot, tot, want_tot - tot)
         if skipped:
             msg += " · 제외 %d건(재고부족)" % len(skipped)
-        return {"ok": True, "done": done, "skipped": skipped, "msg": msg}
+        return {"ok": True, "done": done, "skipped": skipped,
+                "want": want_tot, "short": max(0, want_tot - tot), "msg": msg}
     except Exception:
         cn.rollback(); raise
     finally:
