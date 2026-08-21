@@ -1377,7 +1377,7 @@ def sourcing_sub_create(payload: dict = Body(...)):
             OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,?,'SUB',?,?)""", rid, sq, subcode, (subname or subcode), gubun, subcode, pl_val)
         subline = int(cur.fetchone()[0])
         ph = ",".join("?" * len(line_ids))
-        cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, node_kind='PART' WHERE route_id=? AND line_id IN ({ph})", subline, rid, *line_ids)
+        cur.execute(f"UPDATE nx.sourcing_route_line SET parent_line=?, node_kind='PART', staged=0 WHERE route_id=? AND line_id IN ({ph})", subline, rid, *line_ids)   # ★staged=0(버그수정): 보관함(staged=1) 부품을 새/중첩 SUB로 묶으면 배치상태여야 트리에 보임(안 하면 '부품 없음')
         moved = cur.rowcount
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_dt=getdate() WHERE route_id=?", rid)
         nx.commit()
