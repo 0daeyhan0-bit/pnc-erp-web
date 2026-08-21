@@ -2896,8 +2896,9 @@ SCREEN.prodsheet=(host)=>{
         <tr><td class="c lb" style="font-size:13px">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px;font-size:14px">${esc(c.proc_nm||'')}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:8%;height:14mm;font-size:16px">불량이력</td><td style="width:66%"></td>
-            <td class="c lb" style="width:26%">검수란</td></tr>
+        <colgroup><col style="width:12%"><col style="width:62%"><col style="width:26%"></colgroup>
+        <tr><td class="c lb" style="height:14mm;font-size:16px">불량이력</td><td></td>
+            <td class="c lb">검수란</td></tr>
         <tr><td class="c lb" style="height:14mm;font-size:16px">시방이력</td><td></td>
             <td></td></tr>
       </table>
