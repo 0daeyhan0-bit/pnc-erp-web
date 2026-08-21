@@ -2878,9 +2878,9 @@ SCREEN.prodsheet=(host)=>{
     const card=c=>`<div class="kb">
       <table>
         <tr>
-          <td class="c" style="width:12%;font-size:19px;font-weight:700;height:14mm">${esc(c.line||'')}</td>
-          <td class="c" style="width:58%;font-size:34px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
-          <td class="c" style="width:30%;font-size:34px;font-weight:800">${nf(c.qty)}</td></tr>
+          <td class="c" style="width:12%;font-size:21px;font-weight:700;height:22mm">${esc(c.line||'')}</td>
+          <td class="c" style="width:58%;font-size:40px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
+          <td class="c" style="width:30%;font-size:40px;font-weight:800">${nf(c.qty)}</td></tr>
       </table>
       <table>
         <tr>
