@@ -55,6 +55,27 @@ window.renderPrint = function (html) {
     return;
   }
 
+  // 인쇄창을 닫으면(인쇄 완료/취소 모두) 이 미리보기 창도 자동으로 닫는다.
+  //   ※afterprint 는 인쇄대화상자가 내려간 뒤 발생. 일부 브라우저는 늦게 주므로
+  //     focus 복귀도 함께 감지한다.
+  window.__printAt = 0;          // 새 출력마다 초기화(창을 재사용해도 정상 동작)
+  if (!window.__closeWired) {
+    window.__closeWired = true;
+    var bye = function () {
+      if (!window.__printAt) return;        // 아직 인쇄를 걸지 않았으면 무시
+      window.__printAt = 0;                 // 중복 호출 방지
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 300);
+    };
+    window.addEventListener('afterprint', bye);
+    // afterprint 를 못 주는 브라우저 대비 — print() 호출 뒤 포커스가 돌아오면 닫는다.
+    //   (print() 직전의 focus 로 오작동하지 않도록 __printAt 이후 시점만 인정)
+    window.addEventListener('focus', function () {
+      if (!window.__printAt) return;
+      if (Date.now() - window.__printAt < 400) return;   // 인쇄창이 뜨기도 전의 포커스는 무시
+      bye();
+    });
+  }
+
   // 이미지 로드 완료 후 인쇄
   var imgs = [].slice.call(d.images);
   var left = 0;
@@ -62,7 +83,9 @@ window.renderPrint = function (html) {
   var fired = false;
   function go() {
     if (fired) return; fired = true;
-    setTimeout(function () { try { window.focus(); window.print(); } catch (e) {} }, 250);
+    setTimeout(function () {
+      try { window.focus(); window.__printAt = Date.now(); window.print(); } catch (e) {}
+    }, 250);
   }
   if (!left) return go();
   for (var q = 0; q < imgs.length; q++) {
