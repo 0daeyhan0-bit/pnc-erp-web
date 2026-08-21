@@ -2925,7 +2925,8 @@ SCREEN.prodsheet=(host)=>{
        <span id="ps-prn-msg" style="font-size:11px;color:#8a94a6">${
          st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
          :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.'}</span>
-       <span style="font-size:11px;color:#8a94a6">출력물별로 <b>처음 1회만</b> 인쇄창에서 고르면 다음부터 자동 선택됩니다.</span>
+       <span style="font-size:11px;color:#8a94a6">※ 위 칸은 <b>메모용</b>(자동지정 아님) — 실제 선택은
+         출력물별로 <b>인쇄창에서 처음 1회만</b> 고르면 그 뒤로는 자동으로 그 프린터가 잡힙니다.</span>
      </div>
      <div class="page-sub" style="flex:0 0 auto">출력기간=전표 <code>PRINT_DATETIME</code> · 전표처리방법 <b>J:전표</b>(용접전표 바코드로 실적) / <b>G:가간판</b>(간판 바코드로 실적) · 포장정보=<code>PR_M_ITEM_SUB</code>.</div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
