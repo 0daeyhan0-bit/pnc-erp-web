@@ -1254,3 +1254,157 @@ SCREEN.prodstockadj=(c)=>{
   };
   load();
 };
+
+/* 영업계획현황 (영업, w_pr_plan_050 / dw_pr_plan_050_t1) — SA_T_PLAN_DTL 일별 크로스탭.
+   조회 전용. 구분 3종(상세/집계/도번집계)은 백엔드가 레거시 후처리를 그대로 수행.
+   레거시 대조(2026-08-21 기준 7일): 상세 3,289 / 집계 1,948 / 도번집계 553 — 건수 일치 확인. */
+SCREEN.salesplan=(c)=>{
+  const API=API_BASE;
+  const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const d2i=v=>{v=(''+(v||'')).trim();return v.length>=6?`20${v.slice(0,2)}-${v.slice(2,4)}-${v.slice(4,6)}`:'';};
+  const i2d=v=>(''+(v||'')).slice(2).replace(/-/g,'');
+  const st={from:i2d(iso(new Date())),days:7,gubun:'1',
+            wc:'',line:'',model:'',wo:'',item:'',
+            rows:[],tot:null,labels:[],loading:false,msg:''};
+  // 레거시 f_like — 입력값을 %..% 로 감싼다(빈값=%)
+  const lk=v=>{v=(''+(v||'')).trim();return v?('%'+v+'%'):'';};
+  const shift=n=>{const d=new Date(d2i(st.from));if(isNaN(d))return;
+    d.setDate(d.getDate()+n);st.from=i2d(iso(d));load();};
+  const load=async()=>{st.loading=true;st.msg='';draw();
+    const qs=new URLSearchParams({from_ymd:st.from,days:st.days,gubun:st.gubun,
+      line:lk(st.line),model:lk(st.model),wo:lk(st.wo),item:lk(st.item),cust:lk(st.wc)});
+    try{const r=await fetch(`${API}/api/salesplan?${qs}`);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const j=await r.json();
+      st.rows=j.rows||[];st.tot=j.tot||null;st.labels=j.labels||[];}
+    catch(e){st.rows=[];st.tot=null;st.msg='조회 실패 — '+e.message;}
+    st.loading=false;draw();};
+  // 주말(토·일) 셀 배경 — 레거시는 주황
+  const isWk=lb=>/토|일/.test(lb||'');
+  const wkbg=lb=>isWk(lb)?' style="background:#fac090"':'';
+  const fmtOut=r=>{const y=(''+(r.ymd||'')),h=(''+(r.ohm||''));
+    const ys=y.length===6?`${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:y;
+    const hs=h.length===4?`${h.slice(0,2)}:${h.slice(2,4)}`:h;
+    return (ys+' '+hs).trim();};
+  const fmtHm=v=>{v=(''+(v||''));return v.length===4?`${v.slice(0,2)}:${v.slice(2,4)}`:v;};
+  // ★도번집계(구분3)는 레거시가 컬럼 구성을 달리 쓴다 — 도번·작업처·LOT수량·합계·일자만.
+  //   (라인/제번/Model/Tools/비율/시간/Output/비고 없음)
+  const isAgg=()=>st.gubun==='3';
+  const NCOL=()=>isAgg()?4:12;   // 고정컬럼 수(일자 제외)
+  const draw=()=>{
+    const L=st.labels, ITEMAGG=isAgg();
+    c.innerHTML=`
+     <style>
+       .sp-tbl{table-layout:auto}
+       .sp-tbl th,.sp-tbl td{white-space:nowrap}
+       .sp-tbl td.sp-item{white-space:normal;min-width:170px;max-width:340px;line-height:1.35}
+       .sp-tbl td.sp-rmk{white-space:normal;min-width:120px;max-width:280px}
+     </style>
+     <div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">🗓️ 영업계획현황
+       <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_plan_050 · <code>SA_T_PLAN_DTL</code> 일별 계획 · 조회전용</span></div>
+     <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
+       구분 <b>상세</b>=원행 / <b>집계</b>=연속 라인·시간·제번 병합(도번 묶음) / <b>도번집계</b>=도번별 합산 ·
+       <span style="background:#fac090;padding:0 5px">주황</span>=토·일 · 🔴 라이브</div>
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
+       <label class="tl">기준일자</label>
+       <button class="btn ghost" id="sp-prev" title="하루 앞으로">◀</button>
+       <input class="inp" type="date" id="sp-from" value="${esc(d2i(st.from))}" style="min-width:0;width:140px">
+       <button class="btn ghost" id="sp-next" title="하루 뒤로">▶</button>
+       <label class="tl">일수</label>
+       <select class="sel" id="sp-days" style="width:74px">
+         ${[7,10,11,12,13,14,15,31,40].map(n=>`<option value="${n}"${st.days===n?' selected':''}>${n}일</option>`).join('')}
+       </select>
+       <label class="tl">작업처</label>
+       <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처" style="width:110px" autocomplete="off">
+       <label class="tl">구분</label>
+       <span style="border:1px solid var(--line-2,#c9d3e0);border-radius:4px;padding:2px 6px;background:#fff;display:inline-flex;align-items:center">
+         ${[['1','상세'],['2','집계'],['3','도번집계']].map(([v,n])=>
+           `<label style="font-weight:400;margin:0 6px 0 1px;white-space:nowrap"><input type="radio" name="sp-gb" value="${v}"${st.gubun===v?' checked':''}> ${n}</label>`).join('')}
+       </span>
+       <div class="spacer"></div>
+       <button class="btn xls" id="sp-xls">📥 엑셀</button>
+     </div>
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0">
+       <label class="tl">라인</label><input class="inp" id="sp-line" value="${esc(st.line)}" placeholder="라인" style="width:90px" autocomplete="off">
+       <label class="tl">모델</label><input class="inp" id="sp-model" value="${esc(st.model)}" placeholder="Model No" style="width:150px" autocomplete="off">
+       <label class="tl">제번</label><input class="inp" id="sp-wo" value="${esc(st.wo)}" placeholder="제번" style="width:120px" autocomplete="off">
+       <label class="tl">도번</label><input class="inp" id="sp-item" value="${esc(st.item)}" placeholder="도번" style="width:130px" autocomplete="off">
+       <button class="btn" id="sp-go">🔍 조회</button>
+       <button class="btn ghost" id="sp-reset">초기화</button>
+       <div class="spacer"></div>
+       <span class="rowcount" id="sp-cnt">${st.tot?`${nf(st.tot.cnt)}건`:''}</span>
+     </div>
+     ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl fit sp-tbl" style="font-size:11px"><thead><tr>
+        ${ITEMAGG?`<th>도번</th><th>작업처</th><th class="num">LOT수량</th><th class="num">합계</th>`
+          :`<th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th>
+            <th>작업처</th><th class="num">비율</th><th class="center">시간</th><th class="center">Output</th>
+            <th class="num">LOT수량</th><th class="num">합계</th>`}
+        ${L.map(x=>`<th class="num"${wkbg(x)}>${esc(x)}</th>`).join('')}
+        ${ITEMAGG?'':'<th>비고</th>'}</tr></thead>
+      <tbody>${st.loading?`<tr><td colspan="${NCOL()+L.length}" class="empty"><span class="lspin"></span> 조회 중…</td></tr>`:bodyHtml()}</tbody>
+      ${st.tot&&st.rows.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
+        <td colspan="${ITEMAGG?2:9}" class="right">총계 (${nf(st.tot.cnt)}건)</td>
+        <td class="num">${nf(st.tot.lot)}</td><td class="num">${nf(st.tot.total)}</td>
+        ${st.tot.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('')}
+        ${ITEMAGG?'':'<td></td>'}</tr></tfoot>`:''}
+      </table></div></div>`;
+
+    const g=id=>c.querySelector(id);
+    const sync=()=>{st.wc=g('#sp-wc').value.trim();st.line=g('#sp-line').value.trim();
+      st.model=g('#sp-model').value.trim();st.wo=g('#sp-wo').value.trim();st.item=g('#sp-item').value.trim();};
+    g('#sp-prev').onclick=()=>shift(-1);
+    g('#sp-next').onclick=()=>shift(1);
+    g('#sp-from').onchange=()=>{st.from=i2d(g('#sp-from').value);load();};
+    g('#sp-days').onchange=()=>{st.days=+g('#sp-days').value;load();};
+    c.querySelectorAll('input[name="sp-gb"]').forEach(r=>r.onchange=()=>{
+      st.gubun=c.querySelector('input[name="sp-gb"]:checked').value;load();});
+    g('#sp-go').onclick=()=>{sync();load();};
+    g('#sp-reset').onclick=()=>{st.wc=st.line=st.model=st.wo=st.item='';st.gubun='1';st.days=7;
+      st.from=i2d(iso(new Date()));load();};
+    ['#sp-wc','#sp-line','#sp-model','#sp-wo','#sp-item'].forEach(id=>{
+      const e=g(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter'){sync();load();}};});
+    g('#sp-xls').onclick=()=>{
+      const GB={'1':'상세','2':'집계','3':'도번집계'}[st.gubun]||'';
+      let hd,rows;
+      if(ITEMAGG){
+        hd=['도번','작업처','LOT수량','합계'].concat(st.labels);
+        rows=st.rows.map(r=>[r.item,r.wc,r.lot,r.total].concat(r.d.map(v=>v||'')));
+      }else{
+        hd=['라인','제번','Model No','Tools','도번','작업처','비율','시간','Output','LOT수량','합계']
+          .concat(st.labels).concat(['비고']);
+        rows=st.rows.map(r=>[r.line_nm?`${r.line} ${r.line_nm}`:r.line,r.wo,r.model,r.tool,r.item,
+          r.wc,r.rate,fmtHm(r.ohm),fmtOut(r),r.lot,r.total].concat(r.d.map(v=>v||'')).concat([r.remarks]));
+      }
+      downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
+    attachResizers(c);
+  };
+  const bodyHtml=()=>{
+    const L=st.labels, ITEMAGG=isAgg();
+    if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">조회 결과 없음 — 기준일자·필터를 조정하세요</td></tr>`;
+    const days=r=>r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
+    if(ITEMAGG)return st.rows.map(r=>`<tr>
+      <td class="center"><b>${esc(r.item)}</b></td>
+      <td class="center">${esc(r.wc)}</td>
+      <td class="num">${r.lot?nf(r.lot):''}</td>
+      <td class="num"><b>${r.total?nf(r.total):''}</b></td>
+      ${days(r)}</tr>`).join('');
+    return st.rows.map(r=>`<tr>
+      <td class="center">${esc(r.line_nm?`${r.line} ${r.line_nm}`:r.line)}</td>
+      <td class="center">${esc(r.wo)}</td>
+      <td class="center">${esc(r.model)}</td>
+      <td class="center">${esc(r.tool)}</td>
+      <td class="sp-item"><b>${esc(r.item)}</b></td>
+      <td class="center">${esc(r.wc)}</td>
+      <td class="num mut">${r.rate?nf(r.rate):''}</td>
+      <td class="center mut">${esc(fmtHm(r.ohm))}</td>
+      <td class="center mut">${esc(fmtOut(r))}</td>
+      <td class="num">${r.lot?nf(r.lot):''}</td>
+      <td class="num"><b>${r.total?nf(r.total):''}</b></td>
+      ${days(r)}
+      <td class="sp-rmk mut" title="${esc(r.remarks)}">${esc(r.remarks)}</td></tr>`).join('');
+  };
+  load();
+};
