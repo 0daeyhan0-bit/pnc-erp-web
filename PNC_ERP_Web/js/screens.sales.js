@@ -1469,20 +1469,16 @@ SCREEN.salesplan=(c)=>{
   //   → 뷰포트 기준 위치(getBoundingClientRect)로 "실제 남은 공간"을 계산해 고정한다.
   const fitHeight=()=>{
     const root=c.querySelector('#sp-root'); if(!root)return;
-    const apply=()=>{
-      const rc=root.getBoundingClientRect();
-      const h=window.innerHeight-rc.top-16;   // 화면 아래쪽 여백 16px
-      if(h>200)root.style.height=h+'px';
-    };
-    requestAnimationFrame(apply);   // 레이아웃이 자리잡은 뒤 측정
+    // .content{padding:16px} 의 아래쪽 패딩만큼 빼야 한다.
+    const calc=r=>{const rc=r.getBoundingClientRect();return window.innerHeight-rc.top-16;};
+    const apply=()=>{const r=c.querySelector('#sp-root'); if(!r)return;
+      const h=calc(r); if(h>200)r.style.height=h+'px';};
+    // 레이아웃이 완전히 자리잡을 때까지 여러 번 재보정(초기 프레임엔 아직 좁은 값이 잡힐 수 있음).
+    let n=0; const tick=()=>{apply(); if(++n<6)requestAnimationFrame(tick);};
+    requestAnimationFrame(tick);
     if(!fitHeight._wired){
       fitHeight._wired=true;
-      window.addEventListener('resize',()=>{
-        const r=c.querySelector('#sp-root'); if(!r)return;
-        const rc=r.getBoundingClientRect();
-        const h=window.innerHeight-rc.top-16;
-        if(h>200)r.style.height=h+'px';
-      });
+      window.addEventListener('resize',apply);
     }
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
