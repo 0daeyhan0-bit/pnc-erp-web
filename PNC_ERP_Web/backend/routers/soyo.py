@@ -436,7 +436,7 @@ def _step6_sql(cur):
       WHERE NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=a.c_item_code)
       UNION ALL
       SELECT cb.assy_item_code,cb.level_no+1,b.item_code,CASE cb.vir_item_flag WHEN '1' THEN cb.p_item_code ELSE b.item_code END,
-             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.use_qty),ISNULL(c.in_cust_code,''),
+             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust_code,''),
              CASE b.vir_item_flag WHEN '1' THEN '1' ELSE '0' END,CONVERT(varchar(500),cb.cum_item_code+'{'+b.mat_code+'}')
       FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}PR_M_ITEM c ON b.mat_code=c.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.level_no<10 AND NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=b.mat_code))
@@ -460,25 +460,36 @@ def _step6_sql(cur):
 
 def _step7_sql(cur):
     P = _P
+    # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
+    #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
+    #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
+    #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
+    cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
+    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust_code, c.prod_rate,
+        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END) AS ov_wc
+      INTO nx.item_ov FROM {P}PR_M_ITEM c
+      LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
+        ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
+    cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
     cur.execute(("""
     WITH CTE_BOM(plan_ymd,work_order,split_work_order,assy_item_code,bom_level,upper_item_code,item_code,proc_seq,bom_mat_code,mat_work_center_code,cum_use_qty,cum_in_cust_code,mat_flag,use_qty,part_plan_qty,gc_gubun,cust_flag) AS (
       SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.item_code,
-         CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END,CONVERT(decimal(18,5),a.use_qty),
-         CONVERT(varchar(500),'||'+CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END+'|'),'1',a.use_qty,CONVERT(float,a.part_plan_qty)/NULLIF(a.use_qty,0),a.gc_gubun,'0'
-      FROM nx.plan_part_dtl a JOIN {P}PR_M_ITEM c ON a.item_code=c.item_code WHERE a.proc_seq=1
+         c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
+         CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CONVERT(float,a.part_plan_qty)/NULLIF(a.use_qty,0),a.gc_gubun,'0'
+      FROM nx.plan_part_dtl a JOIN nx.item_ov c ON a.item_code=c.item_code WHERE a.proc_seq=1
       UNION ALL
       SELECT a.plan_ymd,a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
-         CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END,CONVERT(decimal(18,5),a.use_qty),
-         CONVERT(varchar(500),'||'+CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END+'|'),'1',a.use_qty,CEILING(CONVERT(float,a.plan_qty)*ISNULL(a.use_qty,1)*ISNULL(c.prod_rate,100)/100),'','1'
-      FROM nx.plan_item_dtl a JOIN {P}PR_M_ITEM c ON a.c_item_code=c.item_code
+         c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
+         CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CEILING(CONVERT(float,a.plan_qty)*ISNULL(a.use_qty,1)*ISNULL(c.prod_rate,100)/100),'','1'
+      FROM nx.plan_item_dtl a JOIN nx.item_ov c ON a.c_item_code=c.item_code
       WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.item_code=a.c_item_code)
       UNION ALL
       SELECT cb.plan_ymd,cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
-         CASE WHEN m.work_code>'' THEN m.work_code ELSE ISNULL(m.in_cust_code,'') END,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.use_qty END),
-         CONVERT(varchar(500),cb.cum_in_cust_code+'|'+CASE WHEN m.work_code>'' THEN m.work_code ELSE ISNULL(m.in_cust_code,'') END+'|'),
+         m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.USE_QTY_PR END),
+         CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
-      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.bom_mat_code=b.item_code JOIN {P}PR_M_ITEM m ON b.mat_code=m.item_code
+      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1'
         AND NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code))
@@ -493,6 +504,48 @@ def _step7_sql(cur):
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
+
+def _routing_edge_sync(cur):
+    """★routing_edge 생산처(wc) 정기 시드/싱크 (편집 보존 + 신규 반영). compose는 읽기만·이 함수만 씀.
+    모델: wc_live=라이브 PR_M_ITEM 시드(매싱크 갱신), wc_user=사용자 편집(NULL=미편집), 유효 wc=COALESCE(wc_user,wc_live).
+      → 미편집 엣지는 라이브 생산처 자동 추종, 편집 엣지는 보존. 신규 엣지(v_pr_bom 증가분)는 라이브 기준 시드로 INSERT."""
+    # 1) 편집추적 컬럼 보장
+    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
+    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
+    # 2) 신규 엣지 INSERT (v_pr_bom엔 있고 routing_edge엔 없는 것) — 라이브 마스터 기준 시드, wc_user=NULL
+    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,gubun,vendor_seed,route_id,src_except,src_sagub,wc_live,wc)
+      SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
+             WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
+             WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust_code,'') ELSE ISNULL(ci.in_cust_code,'') END,
+        1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
+      FROM nx.v_pr_bom b
+      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
+      WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
+        AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
+    new_cnt = cur.rowcount
+    # 3) wc_live 라이브 갱신 (편집 무관, child 생산처=work_code||in_cust)
+    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust_code,'') END
+      FROM nx.routing_edge re JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
+    # 4) 유효 wc = COALESCE(wc_user, wc_live) — 편집 보존
+    cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
+    return int(new_cnt or 0)
+
+@router.post("/api/routing/sync")
+def routing_sync():
+    """routing_edge 생산처 시드/싱크(멱등). 편집(wc_user) 보존, 미편집은 라이브 추종, 신규 엣지 INSERT."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        new_cnt = _routing_edge_sync(cur)
+        cur.execute("SELECT COUNT(*), SUM(CASE WHEN ISNULL(LTRIM(RTRIM(wc_user)),'')<>'' THEN 1 ELSE 0 END) FROM nx.routing_edge")
+        tot, edited = cur.fetchone()
+        return {"ok": True, "new_edges": new_cnt, "total_edges": int(tot or 0), "edited_edges": int(edited or 0)}
+    finally:
+        nx.close()
 
 @router.get("/api/plan/part")
 def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
