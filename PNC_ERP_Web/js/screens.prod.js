@@ -178,7 +178,9 @@ window.printWeldSheet=async(sheetNo)=>{
         <td style="text-align:center;font-weight:700${mbg?';background:'+mbg:''}">${esc(mn)}</td>
         <td>${bc}</td></tr>`);
     }
-    const w=window.open('','_blank','width=900,height=1100');
+    // ★창이름 = 'pncPrnSheet'+전표번호 — A4 전표는 여러 건을 동시에 띄우므로 전표별로 창을 분리한다.
+    //   (라벨 40×20 / 가간판 210×110 과도 분리되어 프린터 선택이 서로 덮이지 않는다)
+    const w=window.open('','pncPrnSheet'+String(sn8||'').replace(/\W/g,''),'width=900,height=1100');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>생산이동전표 ${esc(sn8)}</title>
     <style>
@@ -2182,6 +2184,16 @@ SCREEN.prodsheet=(host)=>{
   const T=new Date(), today=iso(T);
   const st={rows:[],cnt:0,sumQty:0,from:today,to:today,part:'',item:'',sheetNo:'',boxNo:'',labelNo:'',
             fin:'N',parts:[],sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
+  // ★프린터 2대 운용(레거시 w_pr_input_490 동일) — 제품스티커=라벨프린터 / 가간판·전표=A4프린터.
+  //   웹은 보안상 프린터를 코드로 지정할 수 없다. 대신
+  //   (a) 출력물마다 용지규격을 다르게 두고(40×20 / 210×110 / A4)
+  //   (b) 인쇄창(window.open)의 '창이름'을 분리해 브라우저가 각 창의 마지막 프린터를 따로 기억하게 하고
+  //   (c) 어느 프린터로 보낼지 이름을 화면·인쇄창에 표시한다.
+  //   → 직원이 출력물별로 처음 1회만 프린터를 고르면 이후 자동 선택된다.
+  const PRN_LS='ps490_printers';
+  const PRN=(()=>{try{return Object.assign({label:'',kanban:''},
+      JSON.parse(localStorage.getItem(PRN_LS)||'{}'));}catch(e){return {label:'',kanban:''};}})();
+  const savePrn=()=>{try{localStorage.setItem(PRN_LS,JSON.stringify(PRN));}catch(e){}};
   const qsv=o=>new URLSearchParams(Object.entries(o).filter(([,v])=>v!==''&&v!=null)).toString();
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/prodsheet/parts`);const j=await r.json();st.parts=j.rows||[];}catch(e){st.parts=[];}};
   const load=async()=>{st.loading=true;st.cur=null;st.det=null;render();
@@ -2562,7 +2574,9 @@ SCREEN.prodsheet=(host)=>{
         <div class="t4">${esc(j.item)}</div>
         <div class="t5">${esc(j.worker||'')}/${esc(j.inspector||'')}</div>
       </div></div>`;
-    const w=window.open('','_blank','width=760,height=1000');
+    // ★창이름 고정 = 'pncPrnLabel' — 브라우저는 (사이트+창) 단위로 마지막 프린터 선택을 기억한다.
+    //   전표/가간판과 창을 분리해야 라벨프린터 선택이 A4프린터 선택에 덮이지 않는다(§490 프린터 2대).
+    const w=window.open('','pncPrnLabel','width=760,height=1000');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>제품스티커 ${esc(j.item)} (${j.qty}장)</title>
     <style>
@@ -2588,7 +2602,11 @@ SCREEN.prodsheet=(host)=>{
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3</span></div>
+      <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×20mm</span>
+      <div style="margin-top:6px;padding:6px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:4px;font-size:12px">
+        🖨 <b>프린터: ${esc(PRN.label||'(라벨프린터 미지정)')}</b>
+        <span style="color:#8c6d1f">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
+      </div></div>
     ${(j.labels||[]).map(one).join('')}
     <script>
       (function(){var imgs=[].slice.call(document.images),left=imgs.length;
@@ -2760,7 +2778,8 @@ SCREEN.prodsheet=(host)=>{
       <div class="ft"><span>출력일시 : ${esc((c.print_dt||'').slice(2,16).replace('T',' ').replace(/-/g,'/'))} ${esc(c.print_user||'')}</span>
         <span>용접전표번호 : ${esc(c.sheet_no_fmt)}</span></div>
     </div>`;
-    const w=window.open('','_blank','width=980,height=680');   // 210×110 비율에 맞춘 미리보기
+    // ★창이름 고정 = 'pncPrnKanban' (라벨/전표와 분리 → 프린터 선택이 서로 안 덮임)
+    const w=window.open('','pncPrnKanban','width=980,height=680');   // 210×110 비율에 맞춘 미리보기
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>가간판 ${esc(cards[0].item)} (${cards.length}장)</title>
     <style>
@@ -2788,7 +2807,11 @@ SCREEN.prodsheet=(host)=>{
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span></div>
+      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span>
+      <div style="margin-top:6px;padding:6px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;font-size:12px">
+        🖨 <b>프린터: ${esc(PRN.kanban||'(가간판 프린터 미지정)')}</b>
+        <span style="color:#1a6a99">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
+      </div></div>
     ${cards.map(card).join('')}
     <script>
       (function(){var imgs=[].slice.call(document.images),left=imgs.length;
@@ -2844,6 +2867,17 @@ SCREEN.prodsheet=(host)=>{
             :`<span style="color:#c0392b;font-size:12px">🔒 발행권한 없음</span>`}
        <div class="spacer"></div><span class="rowcount">선택 <b id="ps-selcnt">${st.sel.size}</b></span>
      </div>
+     <!-- ★프린터 2대 지정(레거시 490 상단과 동일 개념) — 이름은 내 브라우저에 저장 -->
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0">
+       <span style="font-size:12px;color:#8a94a6">🖨 프린터</span>
+       <label class="tl" style="color:#b8860b">제품스티커(라벨)</label>
+       <input class="inp" id="ps-prn-l" value="${esc(PRN.label)}" placeholder="예) Zebra ZD421"
+              style="min-width:0;width:170px" autocomplete="off" title="라벨(40×20mm) 출력에 쓸 프린터 이름">
+       <label class="tl" style="color:#1c7c3a">가간판·전표(A4)</label>
+       <input class="inp" id="ps-prn-k" value="${esc(PRN.kanban)}" placeholder="예) Kyocera TASKalfa 3253ci"
+              style="min-width:0;width:200px" autocomplete="off" title="가간판(210×110mm)·생산이동전표(A4) 출력에 쓸 프린터 이름">
+       <span style="font-size:11px;color:#8a94a6">인쇄창에서 출력물별로 <b>처음 1회만</b> 이 프린터를 고르면 다음부터 자동 선택됩니다.</span>
+     </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div style="display:flex;gap:8px;flex:1 1 auto;min-height:0;margin-top:2px">
        <div style="flex:0 0 46%;min-width:0;display:flex;flex-direction:column">
@@ -2871,6 +2905,10 @@ SCREEN.prodsheet=(host)=>{
     g('#ps-all').onclick=e=>{st.sel.clear();if(e.target.checked)st.rows.forEach((r,i)=>st.sel.add(i));
       host.querySelectorAll('.ps-chk').forEach(ch=>ch.checked=e.target.checked);
       const c=g('#ps-selcnt');if(c)c.textContent=st.sel.size;};
+    // 프린터 이름 저장(재렌더 없이 값만 보관 — 입력 중 포커스 유지)
+    {const pl=g('#ps-prn-l'),pk=g('#ps-prn-k');
+     if(pl)pl.oninput=()=>{PRN.label=pl.value.trim();savePrn();};
+     if(pk)pk.oninput=()=>{PRN.kanban=pk.value.trim();savePrn();};}
     if(ed){g('#ps-pj').onclick=printSheets;g('#ps-ig').onclick=openKanban;g('#ps-il').onclick=openLabel;}
     wireLeft();paintDetail();attachResizers(host);
   };
