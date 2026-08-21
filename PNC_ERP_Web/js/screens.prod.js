@@ -2199,6 +2199,28 @@ SCREEN.prodsheet=(host)=>{
     try{const r=await fetch(`${API}/api/prodsheet/printers${refresh?'?refresh=1':''}`);
       const j=await r.json(); st.printers=j.rows||[];}
     catch(e){st.printers=[];}};
+  // 프린터 선택칩 — ★select 드롭다운(언제든 다시 열어 바꿀 수 있음).
+  //   datalist 는 값이 채워지면 그 값으로 목록이 필터링돼 다른 프린터가 안 보였다(2026-08-21 수정).
+  //   목록에 없는 프린터는 '✏ 직접입력…' 을 고르면 입력칸으로 전환된다.
+  const prnPick=(k,tit,sz,val,bg,bd,c1,c2,w)=>{
+    const list=st.printers||[];
+    const known=list.some(p=>p.name===val);
+    const custom=!!val&&!known;      // 목록에 없는 값 = 직접입력 상태
+    return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+                  background:${bg};border:1px solid ${bd};border-radius:14px">
+      <b style="font-size:11px;color:${c1}">${tit}</b>
+      <span style="font-size:10px;color:${c2}">${sz}</span>
+      <select class="sel" id="ps-prn-${k}" style="min-width:0;width:${w}px;height:24px;font-size:12px"
+              title="${esc(tit)} 출력에 쓸 프린터 (언제든 다시 선택 가능)">
+        <option value=""${val?'':' selected'}>— 선택 안 함 —</option>
+        ${list.map(p=>`<option value="${esc(p.name)}"${p.name===val?' selected':''}>${esc(p.name)}</option>`).join('')}
+        <option value="__custom__"${custom?' selected':''}>✏ 직접입력…</option>
+      </select>
+      <input class="inp" id="ps-prn-${k}-tx" value="${esc(custom?val:'')}" placeholder="프린터명 직접입력"
+             style="min-width:0;width:${w}px;height:24px;font-size:12px;${custom?'':'display:none'}"
+             autocomplete="off">
+      ${val?`<span id="ps-prn-${k}-ok" title="지정됨" style="font-size:11px;color:#1c7c3a">✔</span>`:''}
+    </span>`;};
   const qsv=o=>new URLSearchParams(Object.entries(o).filter(([,v])=>v!==''&&v!=null)).toString();
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/prodsheet/parts`);const j=await r.json();st.parts=j.rows||[];}catch(e){st.parts=[];}};
   const load=async()=>{st.loading=true;st.cur=null;st.det=null;render();
@@ -2851,28 +2873,13 @@ SCREEN.prodsheet=(host)=>{
                  margin:0 0 6px;padding:7px 10px;border:1px solid #d6dee8;border-left:4px solid #5b7fa6;
                  border-radius:6px;background:linear-gradient(180deg,#fbfdff,#f1f5fa)">
        <span style="font-size:12px;font-weight:700;color:#41546b">🖨 프린터 설정</span>
-       <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
-                    background:#fff7e6;border:1px solid #ffd591;border-radius:14px">
-         <b style="font-size:11px;color:#a06a00">🔖 제품스티커</b>
-         <span style="font-size:10px;color:#b08a4a">40×20</span>
-         <input class="inp" id="ps-prn-l" list="ps-prnlist" value="${esc(PRN.label)}"
-                placeholder="프린터 선택/입력" style="min-width:0;width:178px;height:24px;font-size:12px"
-                autocomplete="off" title="라벨(40×20mm) 출력에 쓸 프린터">
-       </span>
-       <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
-                    background:#e6f7ff;border:1px solid #91d5ff;border-radius:14px">
-         <b style="font-size:11px;color:#0d6b9a">🏷 가간판·전표</b>
-         <span style="font-size:10px;color:#4a92b5">210×110 / A4</span>
-         <input class="inp" id="ps-prn-k" list="ps-prnlist" value="${esc(PRN.kanban)}"
-                placeholder="프린터 선택/입력" style="min-width:0;width:200px;height:24px;font-size:12px"
-                autocomplete="off" title="가간판(210×110mm)·생산이동전표(A4) 출력에 쓸 프린터">
-       </span>
-       <datalist id="ps-prnlist">${(st.printers||[]).map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
+       ${prnPick('l','🔖 제품스티커','40×20',PRN.label,'#fff7e6','#ffd591','#a06a00','#b08a4a',178)}
+       ${prnPick('k','🏷 가간판·전표','210×110 / A4',PRN.kanban,'#e6f7ff','#91d5ff','#0d6b9a','#4a92b5',200)}
        <button class="btn" id="ps-prn-r" style="height:24px;padding:0 8px;font-size:11px"
                title="ERP서버에 설치된 프린터 목록을 다시 읽습니다">🔄 목록</button>
        <span id="ps-prn-msg" style="font-size:11px;color:#8a94a6">${
-         st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 목록에 없으면 직접 입력하세요.`
-         :'목록을 못 읽었습니다 — 프린터명을 직접 입력하세요.'}</span>
+         st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
+         :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.'}</span>
        <span style="font-size:11px;color:#8a94a6">출력물별로 <b>처음 1회만</b> 인쇄창에서 고르면 다음부터 자동 선택됩니다.</span>
      </div>
      <div class="page-sub" style="flex:0 0 auto">출력기간=전표 <code>PRINT_DATETIME</code> · 전표처리방법 <b>J:전표</b>(용접전표 바코드로 실적) / <b>G:가간판</b>(간판 바코드로 실적) · 포장정보=<code>PR_M_ITEM_SUB</code>.</div>
@@ -2928,16 +2935,35 @@ SCREEN.prodsheet=(host)=>{
     g('#ps-all').onclick=e=>{st.sel.clear();if(e.target.checked)st.rows.forEach((r,i)=>st.sel.add(i));
       host.querySelectorAll('.ps-chk').forEach(ch=>ch.checked=e.target.checked);
       const c=g('#ps-selcnt');if(c)c.textContent=st.sel.size;};
-    // 프린터 이름 저장(재렌더 없이 값만 보관 — 입력 중 포커스 유지)
-    {const pl=g('#ps-prn-l'),pk=g('#ps-prn-k'),pr=g('#ps-prn-r'),pm=g('#ps-prn-msg');
-     if(pl)pl.oninput=()=>{PRN.label=pl.value.trim();savePrn();};
-     if(pk)pk.oninput=()=>{PRN.kanban=pk.value.trim();savePrn();};
+    // 프린터 선택 — select 로 언제든 재선택 가능. '직접입력' 고르면 옆 입력칸으로 전환.
+    //   재렌더하지 않고 DOM 만 토글(입력 중 포커스·스크롤 유지)
+    {const wire=(k,key)=>{
+       const sel=g('#ps-prn-'+k), tx=g('#ps-prn-'+k+'-tx');
+       if(!sel||!tx)return;
+       const mark=v=>{const o=g('#ps-prn-'+k+'-ok');
+         if(v&&!o){const s=document.createElement('span');s.id='ps-prn-'+k+'-ok';
+           s.title='지정됨';s.style.cssText='font-size:11px;color:#1c7c3a';s.textContent='✔';
+           sel.parentElement.appendChild(s);}
+         else if(!v&&o)o.remove();};
+       sel.onchange=()=>{
+         if(sel.value==='__custom__'){tx.style.display='';tx.focus();
+           PRN[key]=tx.value.trim();savePrn();mark(PRN[key]);return;}
+         tx.style.display='none';
+         PRN[key]=sel.value;savePrn();mark(PRN[key]);};
+       tx.oninput=()=>{PRN[key]=tx.value.trim();savePrn();mark(PRN[key]);};};
+     wire('l','label'); wire('k','kanban');
+     const pr=g('#ps-prn-r'),pm=g('#ps-prn-msg');
      if(pr)pr.onclick=async()=>{pr.disabled=true;if(pm)pm.textContent='목록 읽는 중…';
        await loadPrinters(true);
-       const dl=g('#ps-prnlist');
-       if(dl)dl.innerHTML=(st.printers||[]).map(p=>`<option value="${esc(p.name)}">`).join('');
-       if(pm)pm.textContent=st.printers.length?`서버 프린터 ${st.printers.length}대 — 목록에 없으면 직접 입력하세요.`
-                                              :'목록을 못 읽었습니다 — 프린터명을 직접 입력하세요.';
+       // 목록이 바뀌었으므로 선택칩만 다시 그린다(현재 지정값은 PRN 에 보존됨)
+       ['l','k'].forEach(k=>{const s=g('#ps-prn-'+k);if(!s)return;
+         const cur=(k==='l')?PRN.label:PRN.kanban;
+         const known=(st.printers||[]).some(p=>p.name===cur);
+         s.innerHTML=`<option value="">— 선택 안 함 —</option>`
+           +(st.printers||[]).map(p=>`<option value="${esc(p.name)}"${p.name===cur?' selected':''}>${esc(p.name)}</option>`).join('')
+           +`<option value="__custom__"${(cur&&!known)?' selected':''}>✏ 직접입력…</option>`;});
+       if(pm)pm.textContent=st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
+                                              :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.';
        pr.disabled=false;};}
     if(ed){g('#ps-pj').onclick=printSheets;g('#ps-ig').onclick=openKanban;g('#ps-il').onclick=openLabel;}
     wireLeft();paintDetail();attachResizers(host);
