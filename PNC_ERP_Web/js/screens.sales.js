@@ -1371,9 +1371,7 @@ SCREEN.salesplan=(c)=>{
        .tbl.sp-tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
          box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
      </style>
-     <!-- .content 가 flex:1;overflow:auto;min-height:0 이라 height:100% 가 안 먹는다.
-          → 뷰포트 기준으로 직접 높이를 잡아 표가 화면 아래까지 차게 한다. -->
-     <div style="display:flex;flex-direction:column;height:calc(100vh - 210px);min-height:420px">
+     <div id="sp-root" style="display:flex;flex-direction:column;height:420px">
      <div class="page-title" style="flex:0 0 auto">🗓️ 영업계획현황
        <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_plan_050 · <code>SA_T_PLAN_DTL</code> 일별 계획 · 조회전용</span></div>
      <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
@@ -1464,6 +1462,23 @@ SCREEN.salesplan=(c)=>{
       }
       downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
     attachResizers(c);
+    fitHeight();
+  };
+  // ★CSS(height:100%/calc(100vh..)) 가 .content 의 flex 구조와 맞물려 먹지 않는 경우가 있어
+  //   부모의 실제 렌더 높이를 측정해 픽셀로 직접 채운다(표가 화면 아래까지 차게).
+  const fitHeight=()=>{
+    const root=c.querySelector('#sp-root'); if(!root)return;
+    const apply=()=>{
+      const parent=root.parentElement; if(!parent)return;
+      const ph=parent.clientHeight;
+      if(ph>100)root.style.height=ph+'px';
+    };
+    apply();
+    if(!fitHeight._wired){
+      fitHeight._wired=true;
+      window.addEventListener('resize',()=>{const r=c.querySelector('#sp-root');
+        if(r){const p=r.parentElement;if(p&&p.clientHeight>100)r.style.height=p.clientHeight+'px';}});
+    }
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
   //   조건을 다 맞춘 뒤 [조회]를 눌러야 조회되게 해서 불필요한 대기를 없앰.
