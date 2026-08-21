@@ -1371,7 +1371,7 @@ SCREEN.salesplan=(c)=>{
        .tbl.sp-tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
          box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
      </style>
-     <div id="sp-root" style="display:flex;flex-direction:column;height:420px">
+     <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🗓️ 영업계획현황
        <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_plan_050 · <code>SA_T_PLAN_DTL</code> 일별 계획 · 조회전용</span></div>
      <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
@@ -1462,24 +1462,6 @@ SCREEN.salesplan=(c)=>{
       }
       downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
     attachResizers(c);
-    fitHeight();
-  };
-  // ★parent.clientHeight 로 재면 부모(.content)가 overflow:auto 라 "자식 콘텐츠 크기만큼"
-  //   커진 상태를 재게 되어 점점 좁아지는 악순환이 생긴다(2026-08-21 실측).
-  //   → 뷰포트 기준 위치(getBoundingClientRect)로 "실제 남은 공간"을 계산해 고정한다.
-  const fitHeight=()=>{
-    const root=c.querySelector('#sp-root'); if(!root)return;
-    // .content{padding:16px} 의 아래쪽 패딩만큼 빼야 한다.
-    const calc=r=>{const rc=r.getBoundingClientRect();return window.innerHeight-rc.top-16;};
-    const apply=()=>{const r=c.querySelector('#sp-root'); if(!r)return;
-      const h=calc(r); if(h>200)r.style.height=h+'px';};
-    // 레이아웃이 완전히 자리잡을 때까지 여러 번 재보정(초기 프레임엔 아직 좁은 값이 잡힐 수 있음).
-    let n=0; const tick=()=>{apply(); if(++n<6)requestAnimationFrame(tick);};
-    requestAnimationFrame(tick);
-    if(!fitHeight._wired){
-      fitHeight._wired=true;
-      window.addEventListener('resize',apply);
-    }
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
   //   조건을 다 맞춘 뒤 [조회]를 눌러야 조회되게 해서 불필요한 대기를 없앰.
