@@ -1358,3 +1358,67 @@ def sale040_cancel(payload: dict = Body(...)):
         cn.rollback(); raise
     finally:
         cn.close()
+
+
+# ===================== 출하실적현황 — 출하단가 수정 (dw_sa_list_010) =====================
+# ※CLAUDE.md §1-2 는 "단가는 마감 때만 수정, 그 외 화면은 읽기전용" 이지만,
+#   사용자 요청으로 이 화면에서 직접 수정 허용(2026-08-21). 대신 안전장치를 둔다.
+#     · 마감된 월(_closed)의 출하건은 거부 — 마감 후 금액 변동 방지
+#     · 수정자/수정시각(UPDATE_*)을 남겨 감사추적 가능
+#     · 쓰기는 nx 만(§1-1)
+#   SA_T_SALE_DTL 에 PK 가 없어 5키로 식별한다
+#   (WORK_ORDER+SPLIT_WORK_ORDER+ITEM_CODE+SALE_YMD+SALE_HMS — 실측 중복 0건).
+@router.post("/api/shipment/cost")
+def shipment_cost(payload: dict = Body(...)):
+    """출하단가 수정 → 출하금액(SALE_AMT) 자동 재계산."""
+    wo  = str(payload.get("wo") or "").strip()
+    swo = str(payload.get("swo") or "").strip()
+    it  = str(payload.get("item") or "").strip()
+    ymd = _d6(str(payload.get("ymd") or ""))
+    hms = str(payload.get("hms") or "").strip().zfill(6)
+    user = str(payload.get("user") or "웹")[:20]
+    if not (wo and it and ymd and hms):
+        return {"ok": False, "msg": "행 식별정보가 부족합니다(제번/도번/일자/시각)."}
+    try:
+        cost = float(payload.get("cost"))
+    except Exception:
+        return {"ok": False, "msg": "단가는 숫자로 입력하세요."}
+    if cost < 0:
+        return {"ok": False, "msg": "단가는 0 이상이어야 합니다."}
+    cn = _nx_tx(); cur = cn.cursor()
+    try:
+        # 마감월 보호 — 마감 후 금액이 바뀌면 원가/매출 집계가 어긋난다
+        try:
+            if _closed(cur, ymd):
+                cn.rollback()
+                return {"ok": False,
+                        "msg": "마감된 월(20%s-%s)의 출하건은 수정할 수 없습니다." % (ymd[:2], ymd[2:4])}
+        except Exception:
+            pass
+        cur.execute("""SELECT SALE_QTY, SALE_COST, SALE_AMT FROM nx.SA_T_SALE_DTL
+                        WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
+                          AND SALE_YMD=? AND SALE_HMS=?""", wo, swo, it, ymd, hms)
+        r = cur.fetchone()
+        if not r:
+            cn.rollback()
+            return {"ok": False, "msg": "대상 출하건을 찾을 수 없습니다(이미 삭제/변경됨). 새로고침 후 다시 시도하세요."}
+        qty = float(r[0] or 0); old = float(r[1] or 0)
+        amt = round(cost * qty, 2)
+        cur.execute("""UPDATE nx.SA_T_SALE_DTL
+                          SET SALE_COST=?, SALE_AMT=?,
+                              UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='dw_sa_list_010'
+                        WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
+                          AND SALE_YMD=? AND SALE_HMS=?""",
+                    cost, amt, user, wo, swo, it, ymd, hms)
+        if cur.rowcount != 1:
+            cn.rollback()
+            return {"ok": False, "msg": "수정 대상이 %d건 — 중단했습니다." % cur.rowcount}
+        cn.commit()
+        return {"ok": True, "qty": qty, "cost": cost, "amt": amt, "old_cost": old,
+                "msg": "출하단가 {:,.2f} → {:,.2f} · 금액 {:,.0f}".format(old, cost, amt)}
+    except Exception as e:
+        try: cn.rollback()
+        except Exception: pass
+        return {"ok": False, "msg": "수정 실패: %s" % str(e)[:200]}
+    finally:
+        cn.close()

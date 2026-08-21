@@ -323,10 +323,19 @@ SCREEN.shipment=(c)=>{
     const render=()=>{
       let lines=filt(), thead='', tbody='', tq=0, ta=0, ncols;
       if(mode==='detail'){
-        cur=lines.slice().sort((a,b)=>(''+a.item).localeCompare(''+b.item,'ko')||(''+a.ymd).localeCompare(''+b.ymd,'ko'));
+        // ★정렬 = 출하일자 내림차순(최신 위) → 같은 날은 처리시각 오름차순(빠른 것 먼저) → 도번
+        const _h=v=>(''+(v||'')).trim().padStart(6,'0');
+        cur=lines.slice().sort((a,b)=>
+          (''+b.ymd).localeCompare(''+a.ymd,'ko')          // 일자 최신순
+          || _h(a.hms).localeCompare(_h(b.hms))            // 같은 날 → 시각 빠른순
+          || (''+a.item).localeCompare(''+b.item,'ko'));
         thead=`<tr><th>출하일자</th><th>Work Order</th><th>Split W/O</th><th>도번</th><th class="num">출하수량</th><th class="num">출하단가</th><th class="num">출하금액</th><th class="num">마스터단가</th><th>처리담당자</th><th class="center">처리시각</th><th>작업처</th><th>비고</th></tr>`;
         ncols=12;
-        cur.forEach(r=>{tbody+=`<tr><td class="center">${fmtYmd(r.ymd)}</td><td>${esc(r.wo)}</td><td>${esc(r.swo)}</td><td><b>${esc(r.item)}</b></td><td class="num">${won(r.qty)}</td><td class="num">${won(r.cost)}</td><td class="num gstock">${wonI(r.amt)}</td><td class="num">${won(r.mcost)}</td><td>${esc(r.usr)||''}</td><td class="center">${fmtHms(r.hms)}</td><td class="cap" title="${esc(r.wc)||''}">${esc(r.wc)||''}</td><td class="cap" title="${esc(r.remarks)||''}">${esc(r.remarks)||''}</td></tr>`;});
+        // ★출하단가 = 인라인 수정(더블클릭 또는 클릭). 저장시 출하금액 자동 재계산.
+        cur.forEach((r,i)=>{tbody+=`<tr><td class="center">${fmtYmd(r.ymd)}</td><td>${esc(r.wo)}</td><td>${esc(r.swo)}</td><td><b>${esc(r.item)}</b></td><td class="num">${won(r.qty)}</td>`
+          +`<td class="num sc-cost" data-i="${i}" tabindex="0" title="클릭하여 단가 수정 — 저장시 출하금액 자동계산"`
+          +` style="cursor:cell;background:#fffbe6;outline:1px dashed #e0c26a;outline-offset:-2px">${won(r.cost)}</td>`
+          +`<td class="num gstock sc-amt" data-i="${i}">${wonI(r.amt)}</td><td class="num">${won(r.mcost)}</td><td>${esc(r.usr)||''}</td><td class="center">${fmtHms(r.hms)}</td><td class="cap" title="${esc(r.wc)||''}">${esc(r.wc)||''}</td><td class="cap" title="${esc(r.remarks)||''}">${esc(r.remarks)||''}</td></tr>`;});
         tq=S(cur,'qty');ta=S(cur,'amt');
         tbody+=`<tr class="grandtot"><td colspan="4" class="right">총계</td><td class="num">${won(tq)}</td><td colspan="1"></td><td class="num">${wonI(ta)}</td><td colspan="5"></td></tr>`;
       } else if(mode==='item'){
@@ -353,7 +362,59 @@ SCREEN.shipment=(c)=>{
       c.querySelector('#sum').innerHTML=`<div class="s-item">${mode==='detail'?'라인':mode==='item'?'도번':'일'} <b>${won(cur.length)}</b></div><div class="s-item">출하수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">출하금액 합계 <b>${wonI(ta)} 원</b></div>`;
       c.querySelector('#cnt').textContent=`${cur.length}${mode==='detail'?'라인':mode==='item'?'도번':'일'} / 대상 ${lines.length}라인`;
       attachResizers(c);
+      if(mode==='detail')wireCostEdit();
     };
+    // ── 출하단가 인라인 수정 → 저장시 출하금액 자동 재계산 ──────────────
+    //   ※CLAUDE.md §1-2 는 조회화면 단가 읽기전용이나, 사용자 요청으로 이 화면만 허용.
+    //     마감월은 백엔드가 거부한다(감사추적용 UPDATE_USER_ID/DATETIME 기록).
+    const wireCostEdit=()=>{
+      c.querySelectorAll('td.sc-cost').forEach(td=>{
+        if(td.dataset.wired)return; td.dataset.wired='1';
+        const open=()=>{
+          if(td.querySelector('input'))return;
+          const r=cur[+td.dataset.i]; if(!r)return;
+          const before=+r.cost||0;
+          td.innerHTML=`<input type="number" step="0.01" min="0" value="${before}"
+            style="width:100%;box-sizing:border-box;text-align:right;font:inherit;border:1px solid #4a86e8;padding:1px 3px">`;
+          const inp=td.querySelector('input'); inp.focus(); inp.select();
+          let closed=false;
+          const revert=()=>{if(closed)return;closed=true;td.textContent=won(r.cost);};
+          const save=async()=>{
+            if(closed)return;
+            const v=parseFloat(inp.value);
+            if(isNaN(v)||v<0){alert('단가는 0 이상의 숫자로 입력하세요.');inp.focus();return;}
+            if(Math.abs(v-before)<0.005){revert();return;}      // 변경 없음
+            closed=true; td.textContent='저장중…';
+            try{
+              const res=await(await fetch(`${API}/api/shipment/cost`,{method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({wo:r.wo,swo:r.swo,item:r.item,ymd:r.ymd,hms:r.hms,cost:v,user:'웹'})})).json();
+              if(!res.ok){alert(res.msg||'단가 수정 실패');td.textContent=won(r.cost);return;}
+              // 로컬 반영 — 재조회 없이 금액·합계까지 갱신(스크롤 유지)
+              r.cost=res.cost; r.amt=res.amt;
+              const src=pool.find(x=>x.wo===r.wo&&x.swo===r.swo&&x.item===r.item&&x.ymd===r.ymd&&x.hms===r.hms);
+              if(src){src.cost=res.cost;src.amt=res.amt;}
+              td.textContent=won(r.cost);
+              const at=c.querySelector(`td.sc-amt[data-i="${td.dataset.i}"]`);
+              if(at)at.textContent=wonI(r.amt);
+              const tq=S(cur,'qty'), ta=S(cur,'amt');
+              const sm=c.querySelector('#sum');
+              if(sm)sm.innerHTML=`<div class="s-item">라인 <b>${won(cur.length)}</b></div><div class="s-item">출하수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">출하금액 합계 <b>${wonI(ta)} 원</b></div>`;
+              const gt=c.querySelector('#body tr.grandtot');
+              if(gt){const tds=gt.querySelectorAll('td');
+                if(tds[1])tds[1].textContent=won(tq);
+                if(tds[3])tds[3].textContent=wonI(ta);}
+              td.style.transition='background .25s'; td.style.background='#d9f7be';
+              setTimeout(()=>{td.style.background='#fffbe6';},700);
+            }catch(e){alert('단가 수정 실패');td.textContent=won(r.cost);}
+          };
+          inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save();}
+                            else if(e.key==='Escape'){e.preventDefault();revert();}};
+          inp.onblur=save;
+        };
+        td.onclick=open;
+        td.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};
+      });};
     const go=()=>{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);load();};
     c.querySelector('#go').onclick=go;c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#dfrom').onchange=go;c.querySelector('#dto').onchange=go;
