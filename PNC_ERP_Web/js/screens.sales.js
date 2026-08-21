@@ -1265,18 +1265,26 @@ SCREEN.salesplan=(c)=>{
   const i2d=v=>(''+(v||'')).slice(2).replace(/-/g,'');
   const st={from:i2d(iso(new Date())),days:7,gubun:'1',
             wc:'',line:'',model:'',wo:'',item:'',
-            rows:[],tot:null,labels:[],loading:false,msg:''};
+            rows:[],tot:null,labels:[],loading:false,msg:'',done:false};
   // 레거시 f_like — 입력값을 %..% 로 감싼다(빈값=%)
   const lk=v=>{v=(''+(v||'')).trim();return v?('%'+v+'%'):'';};
   const shift=n=>{const d=new Date(d2i(st.from));if(isNaN(d))return;
     d.setDate(d.getDate()+n);st.from=i2d(iso(d));load();};
+  // 드롭다운 목록 — 라인은 서버 목록, 작업처는 조회결과에서 실측 수집(마스터엔 안 쓰는 값이 많음)
+  //   ※작업처 필터는 SQL 에서 work_center_code 에 걸리므로 value 는 '코드', 표시는 '이름'
+  const opts={lines:[],wcs:[]};
+  const loadOpts=async()=>{try{
+      const j=await(await fetch(`${API}/api/salesplan/opts`)).json();
+      opts.lines=j.lines||[]; opts.wcs=j.wcs||[];}catch(e){}};
   const load=async()=>{st.loading=true;st.msg='';draw();
+    // 라인만 드롭다운(정확값), 나머지 텍스트칸은 %..% 부분일치
     const qs=new URLSearchParams({from_ymd:st.from,days:st.days,gubun:st.gubun,
-      line:lk(st.line),model:lk(st.model),wo:lk(st.wo),item:lk(st.item),cust:lk(st.wc)});
+      line:st.line||'',model:lk(st.model),wo:lk(st.wo),item:lk(st.item),cust:lk(st.wc)});
     try{const r=await fetch(`${API}/api/salesplan?${qs}`);
       if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();
-      st.rows=j.rows||[];st.tot=j.tot||null;st.labels=j.labels||[];}
+      st.rows=j.rows||[];st.tot=j.tot||null;st.labels=j.labels||[];
+      st.done=true;collectWc();}
     catch(e){st.rows=[];st.tot=null;st.msg='조회 실패 — '+e.message;}
     st.loading=false;draw();};
   // 주말(토·일) 셀 배경 — 레거시는 주황
@@ -1316,7 +1324,8 @@ SCREEN.salesplan=(c)=>{
          ${[7,10,11,12,13,14,15,31,40].map(n=>`<option value="${n}"${st.days===n?' selected':''}>${n}일</option>`).join('')}
        </select>
        <label class="tl">작업처</label>
-       <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처" style="width:110px" autocomplete="off">
+       <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처코드" style="width:110px" autocomplete="off"
+              title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
        <label class="tl">구분</label>
        <span style="border:1px solid var(--line-2,#c9d3e0);border-radius:4px;padding:2px 6px;background:#fff;display:inline-flex;align-items:center">
          ${[['1','상세'],['2','집계'],['3','도번집계']].map(([v,n])=>
@@ -1326,7 +1335,11 @@ SCREEN.salesplan=(c)=>{
        <button class="btn xls" id="sp-xls">📥 엑셀</button>
      </div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0">
-       <label class="tl">라인</label><input class="inp" id="sp-line" value="${esc(st.line)}" placeholder="라인" style="width:90px" autocomplete="off">
+       <label class="tl">라인</label>
+       <select class="sel" id="sp-line" style="width:150px">
+         <option value=""${st.line?'':' selected'}>% 전체</option>
+         ${opts.lines.map(o=>`<option value="${esc(o.code)}"${st.line===o.code?' selected':''}>${esc(o.nm?o.code+' '+o.nm:o.code)}</option>`).join('')}
+       </select>
        <label class="tl">모델</label><input class="inp" id="sp-model" value="${esc(st.model)}" placeholder="Model No" style="width:150px" autocomplete="off">
        <label class="tl">제번</label><input class="inp" id="sp-wo" value="${esc(st.wo)}" placeholder="제번" style="width:120px" autocomplete="off">
        <label class="tl">도번</label><input class="inp" id="sp-item" value="${esc(st.item)}" placeholder="도번" style="width:130px" autocomplete="off">
@@ -1383,7 +1396,9 @@ SCREEN.salesplan=(c)=>{
   };
   const bodyHtml=()=>{
     const L=st.labels, ITEMAGG=isAgg();
-    if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">조회 결과 없음 — 기준일자·필터를 조정하세요</td></tr>`;
+    if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">${
+      st.done?'조회 결과 없음 — 기준일자·필터를 조정하세요'
+             :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요. (레거시 SQL 이 무거워 6초 안팎 걸립니다)'}</td></tr>`;
     const days=r=>r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
     if(ITEMAGG)return st.rows.map(r=>`<tr>
       <td class="center"><b>${esc(r.item)}</b></td>
@@ -1406,5 +1421,9 @@ SCREEN.salesplan=(c)=>{
       ${days(r)}
       <td class="sp-rmk mut" title="${esc(r.remarks)}">${esc(r.remarks)}</td></tr>`).join('');
   };
-  load();
+  // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
+  //   조건을 다 맞춘 뒤 [조회]를 눌러야 조회되게 해서 불필요한 대기를 없앰.
+  //   (라인 드롭다운 목록만 미리 받아둔다 — 가볍고 캐시됨)
+  draw();
+  loadOpts().then(draw);
 };

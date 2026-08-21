@@ -112,3 +112,47 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
            "d": [sum(x["d"][i] for x in rows) for i in range(days)]}
     labels = [_label(_rel(fr, i)) for i in range(days)]
     return {"from": fr, "to": to, "days": days, "labels": labels, "gubun": gubun, "rows": rows, "tot": tot}
+
+
+# ===================== 드롭다운 목록 (라인 / 작업처) =====================
+# 레거시 w_pr_plan_050 상단 콤보 재현.
+#   라인   = 계획에 실제 쓰인 LINE_NO(코드만, 예 C1/CA/CC…) + 마스터 PR003(코드+이름, 예 AA 설치)
+#            → 스크린샷 순서와 동일(사용코드 먼저, 이어서 마스터코드)
+#   작업처 = 계획 품목의 work_center(사내공정명 또는 사급거래처명) 실측 목록
+_OPT_CACHE = {"t": 0.0, "v": None}
+
+@router.get("/api/salesplan/opts")
+def salesplan_opts():
+    """상단 필터 드롭다운 목록. 5분 캐시."""
+    now = time.time()
+    if _OPT_CACHE["v"] is not None and (now - _OPT_CACHE["t"]) < 300:
+        return _OPT_CACHE["v"]
+    lines = []
+    cn = _conn(); cur = cn.cursor()
+    try:
+        # ① 계획에 실제 쓰인 라인코드(최근 3개월)
+        cur.execute("""SELECT DISTINCT LINE_NO FROM PARTNER_ERP.dbo.SA_T_PLAN_DTL WITH(NOLOCK)
+                        WHERE ISNULL(LINE_NO,'')<>''
+                          AND PLAN_YMD >= CONVERT(varchar(6),DATEADD(month,-3,getdate()),12)
+                        ORDER BY LINE_NO""")
+        used = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
+        seen = set(used)
+        lines = [{"code": u, "nm": ""} for u in used]
+        # ② 마스터 PR003(코드+이름) — 위에 없는 것만 이어붙임
+        cur.execute("""SELECT DETAIL_CODE, ISNULL(DETAIL_DESC,'')
+                         FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL
+                        WHERE KIND_CODE='PR003' ORDER BY DETAIL_CODE""")
+        for a, b in cur.fetchall():
+            code = str(a).strip()
+            if code and code not in seen:
+                seen.add(code)
+                lines.append({"code": code, "nm": str(b).strip()})
+        # ※작업처는 드롭다운을 만들지 않는다 — work_center_code 체계가 정리돼 있지 않아
+        #   (사내공정코드와 사급거래처코드가 섞임) 목록이 무의미하다. 화면에서 검색(부분일치)으로 처리.
+    except Exception as e:
+        return {"lines": lines, "err": str(e)[:200]}
+    finally:
+        cn.close()
+    v = {"lines": lines}
+    _OPT_CACHE["t"] = now; _OPT_CACHE["v"] = v
+    return v
