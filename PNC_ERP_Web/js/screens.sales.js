@@ -1371,7 +1371,9 @@ SCREEN.salesplan=(c)=>{
        .tbl.sp-tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
          box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
      </style>
-     <div style="display:flex;flex-direction:column;height:100%;min-height:calc(100vh - 140px)">
+     <!-- .content 가 flex:1;overflow:auto;min-height:0 이라 height:100% 가 안 먹는다.
+          → 뷰포트 기준으로 직접 높이를 잡아 표가 화면 아래까지 차게 한다. -->
+     <div style="display:flex;flex-direction:column;height:calc(100vh - 210px);min-height:420px">
      <div class="page-title" style="flex:0 0 auto">🗓️ 영업계획현황
        <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_plan_050 · <code>SA_T_PLAN_DTL</code> 일별 계획 · 조회전용</span></div>
      <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
@@ -1391,8 +1393,8 @@ SCREEN.salesplan=(c)=>{
               title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
        <button class="btn xls" id="sp-xls" style="margin-left:10px">📥 엑셀</button>
      </div>
-     <!-- 두 조건줄 높이를 맞춘다(위: 날짜버튼이 있어 더 높음 → 아래도 같은 높이·정렬) -->
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0;align-items:center;min-height:44px">
+     <!-- 두 조건줄 높이를 맞추고, 표와 붙지 않도록 아래 여백을 준다 -->
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0;align-items:center;min-height:44px;margin-bottom:8px">
        <label class="tl">라인</label>
        <select class="sel" id="sp-line" style="width:150px">
          <option value=""${st.line?'':' selected'}>% 전체</option>
