@@ -1413,7 +1413,7 @@ const PROC_MODAL_CSS=`<style>
 SCREEN.unifybom=(c,ro)=>{
   const API=API_BASE;
   const RO=(ro===true);
-  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false, itemCut='';  // itemCut=절삭/설치 구분(nx.item.cut_gubun)
+  let item='', name='', lines=[], results=[], loading=false, msg='', editMode=false, query='', procs=[], procMap={}, itemNames={}, includePast=false, itemCut='', useFilter='1';  // itemCut=절삭/설치 구분(nx.item.cut_gubun) · useFilter=사용여부(1사용중/0사용중지/''전체)
   let tree=[], treeMax=0, viewTree=true, showWeld=false, navStack=[];
   let wuData=null, wuBusy=false;   // 역전개(where-used) 모달 상태
   const wuFmt=n=>(n==null||n==='')?'':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:5});
@@ -1583,7 +1583,7 @@ SCREEN.unifybom=(c,ro)=>{
   const date2ymd=d=>d?d.slice(2).replace(/-/g,''):'';                                            // date→YYMMDD(백엔드 파라미터)
   const doSearch=async q=>{q=(q||'').trim();query=q;item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';
     if(!q){results=[];draw();return;}
-    try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}&include_past=${includePast?1:0}`);results=(await r.json()).rows||[];msg='';}
+    try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(q)}&include_past=${includePast?1:0}&use=${useFilter}`);results=(await r.json()).rows||[];msg='';}
     catch(e){msg='백엔드 연결 실패 — 백엔드(uvicorn app:app --port 8010) 실행 필요';results=[];}draw();};
   const load=async (it, enterEdit)=>{it=(it||'').trim().toUpperCase();if(!it)return;loading=true;msg='';editMode=false;naeFor='';silFor='';draw();
     if(!codes.metal)await loadCodes();
@@ -2263,7 +2263,7 @@ SCREEN.unifybom=(c,ro)=>{
      <div class="toolbar">
        <label class="tl">품번</label><input class="inp" id="bm-q" value="${esc(query)}" placeholder="품번/품명 검색" style="width:220px">
        <button class="btn" id="bm-search">🔍 검색</button>
-       <label class="tl" title="체크 시 휴면(과거) 품번·BOM도 검색결과에 표시" style="margin-left:2px;font-weight:400;color:var(--muted)"><input type="checkbox" id="bm-past" ${includePast?'checked':''} style="vertical-align:middle"> 과거포함</label>
+       <label class="tl" style="margin-left:4px" title="LG 리시빙 2501~ 실사용+거래품목=사용중">사용여부</label><select class="inp" id="bm-use" style="width:auto;padding:1px 4px"><option value="1" ${useFilter==='1'?'selected':''}>사용중</option><option value="0" ${useFilter==='0'?'selected':''}>사용중지</option><option value="" ${useFilter===''?'selected':''}>전체</option></select>
        ${(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="bm-new" style="background:#1c7c3a;color:#fff">＋ 신규 BOM 등록</button>`:''}
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
@@ -2300,7 +2300,7 @@ SCREEN.unifybom=(c,ro)=>{
        <span style="color:#8a5a1a;font-size:11px">※ 대분류 미설정 시 부품 가공비가 누락됩니다(공정 필터).</span>
      </div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}</div>`).join('')}</div>`:''}
+     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}${(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<button class="btn bm-usetgl" data-it="${esc(r.item)}" data-use="${r.use_flag}" style="float:right;padding:0 6px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용':'중지'}</button>`:(r.use_flag?'':'<span style="float:right;color:#adb5bd;font-size:10px">중지</span>')}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
      ${item&&!loading&&viewTree&&!editMode?candSelector('bom'):''}
      ${item&&!loading?((viewTree&&!editMode)?`
@@ -2313,7 +2313,10 @@ SCREEN.unifybom=(c,ro)=>{
     const qi=c.querySelector('#bm-q');
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
     qi.onkeyup=e=>{if(e.key==='Enter')doSearch(qi.value);};
-    {const pc=c.querySelector('#bm-past');if(pc)pc.onchange=()=>{includePast=pc.checked;doSearch(qi.value);};}
+    {const uu=c.querySelector('#bm-use');if(uu)uu.onchange=()=>{useFilter=uu.value;doSearch(qi.value);};}
+    c.querySelectorAll('.bm-usetgl').forEach(b=>b.onclick=async e=>{e.stopPropagation();const code=b.dataset.it,nu=(+b.dataset.use)?0:1;
+      try{const r=await fetch(`${API}/api/itemmaster/use_flag`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:code,use:nu})});
+        const j=await r.json();if(j.ok)doSearch(query);else alert('전환 실패');}catch(err){alert('전환 오류: '+err);}});
     if(item)bindTabs();
     bindCandSel();
     c.querySelectorAll('.bm-r').forEach(el=>el.onclick=()=>{navStack=[];load(el.dataset.it);});
@@ -3168,7 +3171,7 @@ SCREEN.subvariant=(c)=>{
 SCREEN.itemmaster=(host)=>{
   const API=API_BASE;
   let opts={};
-  const st={rows:[],cnt:0,q:'',status:'사용',nature:'',prod_group:'',form:null,sel:new Set(),msg:''};
+  const st={rows:[],cnt:0,q:'',status:'',nature:'',prod_group:'',use:'1',form:null,sel:new Set(),msg:''};   // use=사용여부(1사용중/0사용중지/''전체) 기본 사용중
   // [key,label,type,optkey] · type: req/text/num/date/sel/chk/ro
   // ★3층 원칙: 품목마스터는 "고정 속성"만. 조달·거래·운영 필드는 분리(백엔드 _IM_CORE/_IM_BIZ/_SUB와 일치).
   const F=[
@@ -3186,7 +3189,7 @@ SCREEN.itemmaster=(host)=>{
   const REQ=new Set(['item_code','item_name','sgroup','unit']);   // 하드필수(전 그룹 공통). 성격별 소프트권장은 저장 후 경고.
   const softField=()=>{const nat=st.form&&st.form.nature; return (nat&&opts.nature_soft&&opts.nature_soft[nat])||[];};
   const load=async()=>{
-    const qs=new URLSearchParams({q:st.q,status:st.status,nature:st.nature,prod_group:st.prod_group,limit:500});
+    const qs=new URLSearchParams({q:st.q,status:st.status,nature:st.nature,prod_group:st.prod_group,use:st.use,limit:500});
     try{const r=await fetch(`${API}/api/itemmaster/list?${qs}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;
       if(j.natures)opts.nature_f=j.natures; if(j.prod_groups)opts.prod_groups=j.prod_groups;}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
@@ -3209,7 +3212,7 @@ SCREEN.itemmaster=(host)=>{
        <label class="tl">검색</label><input class="inp" id="im-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
        <label class="tl">제품군</label><select class="inp" id="im-pg" style="width:auto"><option value="">전체</option>${(opts.prod_groups||[]).map(o=>`<option value="${esc(o.code)}" ${st.prod_group===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl">품목유형</label><select class="inp" id="im-nat"><option value="">전체</option>${(opts.nature_f||opts.nature||[]).map(o=>`<option value="${esc(o.code)}" ${st.nature===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
-       <label class="tl">상태</label><select class="inp" id="im-st"><option value="사용" ${st.status==='사용'?'selected':''}>사용</option><option value="휴면" ${st.status==='휴면'?'selected':''}>휴면</option><option value="중지" ${st.status==='중지'?'selected':''}>중지</option><option value="" ${st.status===''?'selected':''}>전체</option></select>
+       <label class="tl" title="LG 리시빙 2501~ 스코프 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="im-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
        <button class="btn" id="im-search">🔍 조회</button>
        ${ed?`<button class="btn" id="im-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
        <button class="btn" id="im-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
@@ -3238,7 +3241,7 @@ SCREEN.itemmaster=(host)=>{
        </div></div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr><th style="width:26px"></th>
-        <th>품번</th><th>품명</th><th>제품군</th><th>제품계열</th><th>품목유형</th><th>규격</th><th>단위</th><th>재질</th><th>검사</th><th class="center">상태</th><th style="width:46px">작업</th></tr></thead>
+        <th>품번</th><th>품명</th><th>제품군</th><th>제품계열</th><th>품목유형</th><th>규격</th><th>단위</th><th>재질</th><th>검사</th><th class="center">상태</th><th class="center">사용여부</th><th style="width:46px">작업</th></tr></thead>
       <tbody>${st.rows.length?st.rows.map((r,i)=>`<tr>
         <td class="center">${ed?`<input type="checkbox" class="im-chk" data-code="${esc(r.item_code)}" ${st.sel.has(r.item_code)?'checked':''}>`:''}</td>
         <td><b>${esc(r.item_code)}</b></td><td class="cap" title="${esc(r.item_name)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.item_name)}</td>
@@ -3249,14 +3252,19 @@ SCREEN.itemmaster=(host)=>{
         <td>${esc(r.unit)}</td><td>${esc(r.metal)}</td>
         <td>${esc(r.insp_flag)}</td>
         <td class="center">${(r.status==='중지')?'<span class="bdg off">중지</span>':(r.status==='휴면')?'<span class="bdg" style="background:#f0ad4e;color:#fff">휴면</span>':'<span class="bdg ok">사용</span>'}</td>
-        <td class="center">${ed?`<button class="btn im-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="12" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
+        <td class="center">${ed?`<button class="btn im-usetgl" data-code="${esc(r.item_code)}" data-use="${r.use_flag}" style="padding:1px 8px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용중':'중지'}</button>`:(r.use_flag?'<span class="bdg ok">사용중</span>':'<span class="bdg off">중지</span>')}</td>
+        <td class="center">${ed?`<button class="btn im-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="13" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
-    g('#im-search').onclick=()=>{st.q=g('#im-q').value;st.status=g('#im-st').value;st.nature=g('#im-nat').value;st.prod_group=g('#im-pg').value;load();};
+    g('#im-search').onclick=()=>{st.q=g('#im-q').value;st.nature=g('#im-nat').value;st.prod_group=g('#im-pg').value;st.use=g('#im-use').value;load();};
+    {const u=g('#im-use');if(u)u.onchange=()=>{st.use=u.value;load();};}
     g('#im-q').onkeyup=e=>{if(e.key==='Enter')g('#im-search').click();};
     if(ed){
       g('#im-new').onclick=()=>{st.form={_edit:0,item_code:'',item_name:'',item_type:'제품',status:'사용',unit:'EA',make_type:'',lgroup:'',sgroup:''};render();};
       g('#im-del').onclick=()=>del([...st.sel]);
       host.querySelectorAll('.im-chk').forEach(ch=>ch.onclick=()=>{const cd=ch.dataset.code;ch.checked?st.sel.add(cd):st.sel.delete(cd);});
+      host.querySelectorAll('.im-usetgl').forEach(b=>b.onclick=async()=>{const code=b.dataset.code,nu=(+b.dataset.use)?0:1;
+        try{const r=await fetch(`${API}/api/itemmaster/use_flag`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:code,use:nu})});
+          const j=await r.json();if(j.ok){st.msg=`${code} → ${nu?'사용중':'사용중지'} 전환`;load();}else alert('전환 실패');}catch(e){alert('전환 오류: '+e);}});
       host.querySelectorAll('.im-edit').forEach(b=>b.onclick=async()=>{const code=st.rows[+b.dataset.idx].item_code;
         try{const j=await(await fetch(`${API}/api/itemmaster/get?item=${encodeURIComponent(code)}`)).json();
           st.form=Object.assign({_edit:1,_orig_code:code},j.item||{},j.sub||{});}
