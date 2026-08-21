@@ -2917,7 +2917,7 @@ SCREEN.prodsheet=(host)=>{
       /* ★용지 = 190 × 110mm — 실제 간판 용지크기(2026-08-21, 폭 -2cm 조정).
          이전 A4 portrait 는 세로 297mm 를 다 잡아 아래 2/3 가 빈 채로 출력됐다.
          간판 1장 = 1페이지. */
-      @page{size:170mm 110mm;margin:4mm}
+      @page{size:180mm 110mm;margin:4mm}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
       /* ★A4 1/3 폭 기준. 높이는 내용에 맞춤(고정 X — 아래쪽 빈칸 방지).
