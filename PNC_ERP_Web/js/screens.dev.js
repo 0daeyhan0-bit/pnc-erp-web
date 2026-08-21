@@ -2750,7 +2750,7 @@ SCREEN.subvariant=(c)=>{
             <th>하위품번</th><th>품명</th><th class="num">소요량</th><th>구분</th><th>공급처</th><th>소재(외경×두께×길이·재질)</th></tr></thead>
             <tbody>${(R.lines||[]).length?R.lines.map(l=>lineRow(l,false)).join(''):`<tr><td colspan="6" class="empty">라인 없음</td></tr>`}</tbody></table></div>`:''}
           ${ed?subPanel(R):''}
-          ${(canW&&!R.baseline&&R.approve_flag)?profPanel(R):(!R.baseline&&R.approve_flag?'':(!R.baseline?'<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체 매핑은 <b>승인(개발)</b> 후 가능합니다 — 승인하면 이 후보(구조)에 업체·배분%를 지정할 수 있습니다.</div>':''))}
+          ${(!R.baseline)?`<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체(매입처) 지정은 여기서 하지 않습니다 — <b>승인</b> 후 <b>조달 프로파일</b> 화면에서 이 경로를 활성 지정하고 <b>[✎ 매입처 수정]</b>에서 지정합니다(R01 매입처 자동 시드).</div>`:''}
         </div>
         <div style="flex:0 0 auto;padding:12px 18px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:0 0 12px 12px">
           <span>${footL}</span><span>${footR}</span></div>
