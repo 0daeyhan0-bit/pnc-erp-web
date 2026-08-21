@@ -66,6 +66,23 @@ def plan_compose_mat(payload: dict = Body(...)):
             for a, mq in assys:
                 irows.append([ymd, wos, wos, a, mq, 0, pq, ymd, '', '0800', prate.get(a, 100)]); lot[wos] = max(lot[wos], pq)
         for rr in irows: rr[5] = lot[rr[1]]
+        # ── STEP5-AS: A/S(WO) 계획 앵커 (레거시 compose 3번째 앵커, 우리 누락분 반영) ──
+        #   소스=라이브 PR_T_PLAN_INPUT(w_pr_plan_060 수기 A/S/긴급, LINE SVC/AR). ITEM_CODE=완성품 직접(모델매핑 없음),
+        #   prod_rate=100(WO 특례, SP substring(work_order,1,2)='WO'), plan_ymd>=생산계획 최소일자(@as_from_ymd).
+        #   ★병행기간=라이브 직독(주문 sa_t_recv_dtl 직독과 동일 패턴). 컷오버 후=웹 A/S입력→nx.plan_input.
+        cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
+        _asfrom = str(cur.fetchone()[0] or '').strip()
+        cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
+                MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
+              FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
+              JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
+              WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
+              GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
+        for wo, it, pq, ymd, ohm, ln in cur.fetchall():
+            wos=str(wo).strip(); it=str(it).strip(); pq=int(pq or 0); ymd=str(ymd).strip()
+            ohm=(str(ohm).strip() or '0800'); ln=(str(ln or '').strip())[:6]
+            # C_ITEM_CODE=ITEM_CODE(직접 assy), USE_QTY=1, LOT_QTY=PLAN_QTY=pq, PROD_RATE=100
+            irows.append([ymd, wos, wos, it, 1.0, pq, pq, ymd, ln, ohm, 100])
         cur.fast_executemany = True
         cur.executemany("INSERT INTO nx.plan_item_dtl(PLAN_YMD,WORK_ORDER,SPLIT_WORK_ORDER,C_ITEM_CODE,USE_QTY,LOT_QTY,PLAN_QTY,ORG_PLAN_YMD,LINE_NO,OUTPUT_HM,PROD_RATE) VALUES(?,?,?,?,?,?,?,?,?,?,?)", irows)
         # ── STEP6 nx.plan_part_dtl: 10레벨 BOM전개 → 가공공정 → 공정전이지점 ──
