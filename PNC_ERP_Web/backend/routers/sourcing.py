@@ -834,12 +834,17 @@ _SNAP_TBLS = ["sourcing_route_line", "sourcing_route_proc", "sourcing_route_weld
 def _snap_ensure(cur):
     cur.execute("IF OBJECT_ID('nx.sourcing_route_snap','U') IS NULL CREATE TABLE nx.sourcing_route_snap(route_id INT PRIMARY KEY, item_code NVARCHAR(60), existed BIT, snap_dt DATETIME)")
     for t in _SNAP_TBLS:
-        if cur.execute("SELECT OBJECT_ID(?)", f"nx.{t}_snapbak").fetchone()[0] is not None:
-            continue
-        # ★백업테이블 = 원본 구조 복제, 단 IDENTITY 컬럼은 CAST로 감싸 identity 속성 제거(INSERT SELECT 가능)
-        cs = cur.execute("SELECT name, is_identity FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + t).fetchall()
-        sel = ", ".join((f"CAST({c[0]} AS INT) AS {c[0]}" if c[1] else c[0]) for c in cs)
-        cur.execute(f"SELECT TOP 0 {sel} INTO nx.{t}_snapbak FROM nx.{t}")
+        if cur.execute("SELECT OBJECT_ID(?)", f"nx.{t}_snapbak").fetchone()[0] is None:
+            # ★백업테이블 신규 = 원본 구조 복제, IDENTITY 컬럼은 CAST로 감싸 identity 속성 제거(INSERT SELECT 가능)
+            cs = cur.execute("SELECT name, is_identity FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + t).fetchall()
+            sel = ", ".join((f"CAST({c[0]} AS INT) AS {c[0]}" if c[1] else c[0]) for c in cs)
+            cur.execute(f"SELECT TOP 0 {sel} INTO nx.{t}_snapbak FROM nx.{t}")
+        else:
+            # ★스키마 드리프트 동기화(버그수정): 원본에 나중 추가된 컬럼(staged 등)이 snapbak에 없어 INSERT 컬럼불일치 500 → ALTER ADD로 맞춤.
+            bak = {str(r[0]) for r in cur.execute("SELECT name FROM sys.columns WHERE object_id=OBJECT_ID(?)", f"nx.{t}_snapbak").fetchall()}
+            for (nm, ty) in cur.execute("SELECT name, TYPE_NAME(user_type_id) FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + t).fetchall():
+                if str(nm) not in bak:
+                    cur.execute(f"ALTER TABLE nx.{t}_snapbak ADD [{nm}] {ty} NULL")
 
 def _snap_collist(cur, tbl, skip_identity=False):
     cur.execute("SELECT name, is_identity FROM sys.columns WHERE object_id=OBJECT_ID(?) ORDER BY column_id", "nx." + tbl)
@@ -857,7 +862,8 @@ def _snap_save(cur, rid, item, existed):
     if int(existed):
         for t in _SNAP_TBLS:
             cur.execute(f"DELETE FROM nx.{t}_snapbak WHERE route_id=?", rid)
-            cur.execute(f"INSERT INTO nx.{t}_snapbak SELECT * FROM nx.{t} WHERE route_id=?", rid)
+            cols = _snap_collist(cur, t)   # ★명시컬럼(SELECT * 회피) — 드리프트에도 안전. snapbak은 _snap_ensure가 동기화.
+            cur.execute(f"INSERT INTO nx.{t}_snapbak ({cols}) SELECT {cols} FROM nx.{t} WHERE route_id=?", rid)
     cur.execute("INSERT INTO nx.sourcing_route_snap(route_id,item_code,existed,snap_dt) VALUES(?,?,?,getdate())",
                 rid, item, int(existed))
 
