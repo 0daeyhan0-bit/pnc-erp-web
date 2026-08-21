@@ -2846,33 +2846,7 @@ SCREEN.prodsheet=(host)=>{
             #ps-lbody tr:hover{background:#f2f8fd}</style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🖨️ 생산전표출력관리 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_490 · 전표 기준 가간판/제품스티커 발행</span></div>
-     <div class="page-sub" style="flex:0 0 auto">출력기간=전표 <code>PRINT_DATETIME</code> · 전표처리방법 <b>J:전표</b>(용접전표 바코드로 실적) / <b>G:가간판</b>(간판 바코드로 실적) · 포장정보=<code>PR_M_ITEM_SUB</code>.</div>
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
-       <label class="tl">출력기간</label>
-       <input class="inp" type="date" id="ps-from" value="${st.from}" style="min-width:0;width:132px"> ~
-       <input class="inp" type="date" id="ps-to" value="${st.to}" style="min-width:0;width:132px">
-       <label class="tl">파트</label>
-       <select class="sel" id="ps-part" style="min-width:0;width:120px"><option value="">전체</option>
-         ${st.parts.map(p=>`<option value="${esc(p.code)}" ${st.part===p.code?'selected':''}>${esc(p.nm)}</option>`).join('')}</select>
-       <label class="tl">도번</label><input class="inp" id="ps-item" value="${esc(st.item)}" style="min-width:0;width:110px" autocomplete="off">
-       <label class="tl">생산완료</label>
-       <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="" ${st.fin===''?'checked':''}> 전체</label>
-       <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="N" ${st.fin==='N'?'checked':''}> 미완료</label>
-       <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="Y" ${st.fin==='Y'?'checked':''}> 완료</label>
-       <button class="btn" id="ps-go">🔍 조회</button>
-     </div>
-     <div class="toolbar" style="flex:0 0 auto;margin-top:2px;gap:4px;flex-wrap:wrap">
-       <label class="tl">전표번호</label><input class="inp" id="ps-sn" value="${esc(st.sheetNo)}" style="min-width:0;width:90px" autocomplete="off">
-       <label class="tl">간판번호</label><input class="inp" id="ps-box" value="${esc(st.boxNo)}" style="min-width:0;width:90px" autocomplete="off">
-       <label class="tl">라벨번호</label><input class="inp" id="ps-lbl" value="${esc(st.labelNo)}" style="min-width:0;width:90px" autocomplete="off">
-       <span style="width:10px"></span>
-       ${ed?`<button class="btn" id="ps-pj" style="background:#1c47a0;color:#fff">📄 생산이동전표 출력</button>
-             <button class="btn" id="ps-ig" style="background:#1c7c3a;color:#fff">🏷 가간판 발행</button>
-             <button class="btn" id="ps-il" style="background:#b8860b;color:#fff">🔖 제품스티커 발행</button>`
-            :`<span style="color:#c0392b;font-size:12px">🔒 발행권한 없음</span>`}
-       <div class="spacer"></div><span class="rowcount">선택 <b id="ps-selcnt">${st.sel.size}</b></span>
-     </div>
-     <!-- ★프린터 2대 지정(레거시 490 상단과 동일 개념) — 이름은 내 브라우저에 저장 -->
+     <!-- ★프린터 2대 지정(레거시 490 상단과 동일 위치) — 이름은 내 브라우저에 저장 -->
      <div style="flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px;
                  margin:0 0 6px;padding:7px 10px;border:1px solid #d6dee8;border-left:4px solid #5b7fa6;
                  border-radius:6px;background:linear-gradient(180deg,#fbfdff,#f1f5fa)">
@@ -2900,6 +2874,32 @@ SCREEN.prodsheet=(host)=>{
          st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 목록에 없으면 직접 입력하세요.`
          :'목록을 못 읽었습니다 — 프린터명을 직접 입력하세요.'}</span>
        <span style="font-size:11px;color:#8a94a6">출력물별로 <b>처음 1회만</b> 인쇄창에서 고르면 다음부터 자동 선택됩니다.</span>
+     </div>
+     <div class="page-sub" style="flex:0 0 auto">출력기간=전표 <code>PRINT_DATETIME</code> · 전표처리방법 <b>J:전표</b>(용접전표 바코드로 실적) / <b>G:가간판</b>(간판 바코드로 실적) · 포장정보=<code>PR_M_ITEM_SUB</code>.</div>
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
+       <label class="tl">출력기간</label>
+       <input class="inp" type="date" id="ps-from" value="${st.from}" style="min-width:0;width:132px"> ~
+       <input class="inp" type="date" id="ps-to" value="${st.to}" style="min-width:0;width:132px">
+       <label class="tl">파트</label>
+       <select class="sel" id="ps-part" style="min-width:0;width:120px"><option value="">전체</option>
+         ${st.parts.map(p=>`<option value="${esc(p.code)}" ${st.part===p.code?'selected':''}>${esc(p.nm)}</option>`).join('')}</select>
+       <label class="tl">도번</label><input class="inp" id="ps-item" value="${esc(st.item)}" style="min-width:0;width:110px" autocomplete="off">
+       <label class="tl">생산완료</label>
+       <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="" ${st.fin===''?'checked':''}> 전체</label>
+       <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="N" ${st.fin==='N'?'checked':''}> 미완료</label>
+       <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="Y" ${st.fin==='Y'?'checked':''}> 완료</label>
+       <button class="btn" id="ps-go">🔍 조회</button>
+     </div>
+     <div class="toolbar" style="flex:0 0 auto;margin-top:2px;gap:4px;flex-wrap:wrap">
+       <label class="tl">전표번호</label><input class="inp" id="ps-sn" value="${esc(st.sheetNo)}" style="min-width:0;width:90px" autocomplete="off">
+       <label class="tl">간판번호</label><input class="inp" id="ps-box" value="${esc(st.boxNo)}" style="min-width:0;width:90px" autocomplete="off">
+       <label class="tl">라벨번호</label><input class="inp" id="ps-lbl" value="${esc(st.labelNo)}" style="min-width:0;width:90px" autocomplete="off">
+       <span style="width:10px"></span>
+       ${ed?`<button class="btn" id="ps-pj" style="background:#1c47a0;color:#fff">📄 생산이동전표 출력</button>
+             <button class="btn" id="ps-ig" style="background:#1c7c3a;color:#fff">🏷 가간판 발행</button>
+             <button class="btn" id="ps-il" style="background:#b8860b;color:#fff">🔖 제품스티커 발행</button>`
+            :`<span style="color:#c0392b;font-size:12px">🔒 발행권한 없음</span>`}
+       <div class="spacer"></div><span class="rowcount">선택 <b id="ps-selcnt">${st.sel.size}</b></span>
      </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div style="display:flex;gap:8px;flex:1 1 auto;min-height:0;margin-top:2px">
