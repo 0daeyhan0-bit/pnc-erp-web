@@ -58,9 +58,18 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
         # ★성능(2026-08-21 실측): 바깥에서 컬럼을 명시하고 ISNULL 로 감싸면 SQL Server 가
         #   실행계획을 다시 짜면서 3.4초가 걸린다. SELECT * 로 그대로 받으면 0.6초.
         #   (같은 결과, 5배 차이) → NULL 처리·정렬은 파이썬에서 한다.
+        # ★긴 기간(15일↑)은 바깥 GROUP BY 가 급격히 느려진다(실측 31일 = 13.4초).
+        #   내부 UNION 원행만 받아 파이썬에서 집계하면 2.2초. 짧은 기간은 SQL 집계가 더 빠르므로
+        #   기간에 따라 갈라 쓴다(결과는 전수대조로 동일 확인 — 10,791그룹·합계 일치).
+        heavy = days >= 15
+        if heavy:
+            _i = sql.rfind("group by"); _in = sql[:_i]; _j = _in.find("from (")
+            q = "SELECT * FROM (" + _in[_j + 6:_in.rfind(") t")] + ") x"
+        else:
+            q = "SELECT * FROM (" + sql + ") q"
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT * FROM (" + sql + ") q")
+            cur.execute(q)
             cols = [d[0].lower() for d in cur.description]
             raw = cur.fetchall()
         finally:
@@ -69,16 +78,48 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
         def g(r, name, dflt=''):
             i = ix.get(name)
             return dflt if i is None or r[i] is None else r[i]
-        dpos = [ix.get("plan_qty_%02d" % i) for i in range(1, days + 1)]
-        def mk(r):
-            return {"line": str(g(r, "line_no")).strip(), "ymd": str(g(r, "plan_ymd")).strip(),
-                    "ohm": str(g(r, "output_hm")).strip(), "wo": str(g(r, "work_order")).strip(),
-                    "model": str(g(r, "model_no")).strip(), "tool": str(g(r, "tools_desc")).strip(),
-                    "item": str(g(r, "c_item_code")).strip(), "wc": str(g(r, "work_center")).strip(),
-                    "lot": float(g(r, "lot_qty", 0) or 0), "rate": float(g(r, "prod_rate", 0) or 0),
-                    "remarks": str(g(r, "remarks2")).strip(),
-                    "d": [float(r[p] or 0) if p is not None else 0.0 for p in dpos]}
-        rows = [mk(r) for r in raw]
+
+        if heavy:
+            # 레거시 바깥 GROUP BY 재현:
+            #   키   = work_order, line_no, output_hm, c_item_code+sina_flag
+            #   집계 = min(plan_ymd) / max(그 외 표시항목) / sum(plan_qty)
+            #   일자 = plan_ymd 로 버킷팅(레거시의 CASE 31개와 동치)
+            dpos_ymd = {_rel(fr, i): i for i in range(days)}
+            acc = {}
+            for r in raw:
+                item = (str(g(r, "c_item_code")) + str(g(r, "sina_flag"))).strip()
+                k = (str(g(r, "work_order")).strip(), str(g(r, "line_no")).strip(),
+                     str(g(r, "output_hm")).strip(), item)
+                o = acc.get(k)
+                if not o:
+                    o = acc[k] = {"line": k[1], "ymd": None, "ohm": k[2], "wo": k[0],
+                                  "model": "", "tool": "", "item": item, "wc": "",
+                                  "lot": 0.0, "rate": 0.0, "remarks": "", "d": [0.0] * days}
+                y = str(g(r, "plan_ymd")).strip()
+                if o["ymd"] is None or y < o["ymd"]: o["ymd"] = y
+                qv = float(g(r, "plan_qty", 0) or 0)
+                p = dpos_ymd.get(y)
+                if p is not None: o["d"][p] += qv
+                o["lot"] = max(o["lot"], float(g(r, "lot_qty", 0) or 0))
+                o["rate"] = max(o["rate"], float(g(r, "prod_rate", 0) or 0))
+                for fld, col in (("model", "model_no"), ("tool", "tools_desc"),
+                                 ("wc", "work_center"), ("remarks", "remarks2")):
+                    v = str(g(r, col)).strip()
+                    if v > o[fld]: o[fld] = v          # max() 재현
+            rows = list(acc.values())
+            for x in rows:
+                if x["ymd"] is None: x["ymd"] = ""
+        else:
+            dpos = [ix.get("plan_qty_%02d" % i) for i in range(1, days + 1)]
+            def mk(r):
+                return {"line": str(g(r, "line_no")).strip(), "ymd": str(g(r, "plan_ymd")).strip(),
+                        "ohm": str(g(r, "output_hm")).strip(), "wo": str(g(r, "work_order")).strip(),
+                        "model": str(g(r, "model_no")).strip(), "tool": str(g(r, "tools_desc")).strip(),
+                        "item": str(g(r, "c_item_code")).strip(), "wc": str(g(r, "work_center")).strip(),
+                        "lot": float(g(r, "lot_qty", 0) or 0), "rate": float(g(r, "prod_rate", 0) or 0),
+                        "remarks": str(g(r, "remarks2")).strip(),
+                        "d": [float(r[p] or 0) if p is not None else 0.0 for p in dpos]}
+            rows = [mk(r) for r in raw]
         # 정렬도 파이썬에서(SQL ORDER BY 를 붙이면 위 실행계획 문제가 재현될 수 있다)
         rows.sort(key=lambda x: (x["line"], x["ymd"], x["ohm"], x["wo"], x["item"]))
         lnm = {}
@@ -104,17 +145,54 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
             else:
                 out.append(x)
         rows = out
-    elif gubun == "3":     # 도번집계 (도번별 합산)
-        agg = {}
+    elif gubun == "3":     # 도번집계 — 레거시 dw_pr_plan_050_t3 규칙
+        # ★t1/t2 와 다른 점(2026-08-21 실측 대조):
+        #   ① t3 는 c_item_code 에 use_qty 접미 '(n)' 을 붙이지 않는다
+        #      → t1 의 'AJR30071101(2)' 는 t3 에선 'AJR30071101' 로 합쳐진다
+        #   ② t3 는 join pr_m_item m on t.c_item_code=m.item_code
+        #      → 품목마스터에 없는 도번(빈값·'(모델BOM확인)' 표기 등)은 제외된다
+        #   ③ lot_qty 는 max (t1 의 합산이 아님)
+        #   ④ 표시는 'c_item_code + sina_flag'(예 'AJJ30041801(신규)')지만
+        #      pr_m_item 조인은 순수 c_item_code 로 한다. '(신규)' 같은 sina_flag 를
+        #      접미로 오인해 떼면 안 되고, 마스터 조회시엔 반대로 떼야 한다.
+        import re as _re
+        _SFX = _re.compile(r"\(\d+\)$")            # use_qty 접미 '(2)' — t3 는 붙이지 않음
+        #   ⑤ 레거시 t3 는 join 을 'c_item_code + (t2가 덧붙인 문자열)' 그대로 수행한다.
+        #      → '(모델BOM확인)' 이 붙은 도번은 마스터와 매칭되지 않아 제외된다(레거시 실동작).
+        #        반면 sina_flag '(신규)' 는 join 뒤에 표시용으로 붙으므로 떼고 조인해야 한다.
+        _SINA = _re.compile(r"\((?!\d+\)$)(?!모델BOM확인\)$)[^()]*\)$")
+        base = {}
         for x in rows:
-            k = x["item"]
-            a = agg.get(k)
+            disp = _SFX.sub("", x["item"] or "").strip()   # ① use_qty 접미만 제거
+            if not disp:
+                continue
+            code = _SINA.sub("", disp).strip()             # 마스터 조인용 순수 도번
+            a = base.get(disp)
             if not a:
-                a = agg[k] = {"line": x["line"], "ohm": "", "wo": "", "model": "", "tool": "",
-                              "item": k, "wc": x["wc"], "lot": 0.0, "rate": 0.0, "remarks": "", "d": [0.0] * days}
+                a = base[disp] = {"line": x["line"], "ohm": "", "wo": "", "model": "", "tool": "",
+                                  "item": disp, "_code": code, "wc": x["wc"], "lot": 0.0,
+                                  "rate": 0.0, "remarks": "", "d": [0.0] * days}
             for i in range(days): a["d"][i] += x["d"][i]
-            a["lot"] += x["lot"]
-        rows = list(agg.values())
+            a["lot"] = max(a["lot"], x["lot"])             # ③ max
+            if not a["wc"] and x["wc"]: a["wc"] = x["wc"]
+        # ② 품목마스터에 있는 도번만 남긴다(조인은 순수 코드로)
+        codes = sorted({v["_code"] for v in base.values() if v["_code"]})
+        alive = set()
+        if codes:
+            cn3 = _conn(); c3 = cn3.cursor()
+            try:
+                for i in range(0, len(codes), 900):
+                    ck = codes[i:i + 900]
+                    ph = ",".join("?" * len(ck))
+                    c3.execute("SELECT ITEM_CODE FROM pr_m_item WHERE ITEM_CODE IN (%s)" % ph, *ck)
+                    for r in c3.fetchall(): alive.add(str(r[0]).strip())
+            except Exception:
+                alive = set(codes)     # 조회 실패시 필터하지 않음(데이터 누락 방지)
+            finally:
+                cn3.close()
+        rows = [v for v in base.values() if v["_code"] in alive]
+        for v in rows: v.pop("_code", None)
+        rows.sort(key=lambda x: x["item"])
 
     for x in rows: x["total"] = sum(x["d"])
     tot = {"cnt": len(rows), "lot": sum(x["lot"] for x in rows), "total": sum(x["total"] for x in rows),
