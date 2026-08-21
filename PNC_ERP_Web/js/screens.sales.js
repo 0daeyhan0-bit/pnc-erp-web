@@ -1371,13 +1371,13 @@ SCREEN.salesplan=(c)=>{
        .tbl.sp-tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
          box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
      </style>
-     <div style="display:flex;flex-direction:column;height:100%">
+     <div style="display:flex;flex-direction:column;height:100%;min-height:calc(100vh - 140px)">
      <div class="page-title" style="flex:0 0 auto">🗓️ 영업계획현황
        <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_plan_050 · <code>SA_T_PLAN_DTL</code> 일별 계획 · 조회전용</span></div>
      <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
        구분 <b>상세</b>=원행 / <b>집계</b>=연속 라인·시간·제번 병합(도번 묶음) / <b>도번집계</b>=도번별 합산 ·
        <span style="background:#fac090;padding:0 5px">주황</span>=토·일 · 🔴 라이브</div>
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;align-items:center;min-height:44px">
        <label class="tl">기준일자</label>
        <button class="btn ghost" id="sp-prev" title="하루 앞으로">◀</button>
        <input class="inp" type="date" id="sp-from" value="${esc(d2i(st.from))}" style="min-width:0;width:140px">
@@ -1391,7 +1391,8 @@ SCREEN.salesplan=(c)=>{
               title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
        <button class="btn xls" id="sp-xls" style="margin-left:10px">📥 엑셀</button>
      </div>
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0">
+     <!-- 두 조건줄 높이를 맞춘다(위: 날짜버튼이 있어 더 높음 → 아래도 같은 높이·정렬) -->
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0;align-items:center;min-height:44px">
        <label class="tl">라인</label>
        <select class="sel" id="sp-line" style="width:150px">
          <option value=""${st.line?'':' selected'}>% 전체</option>
