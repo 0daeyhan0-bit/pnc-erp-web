@@ -2878,27 +2878,27 @@ SCREEN.prodsheet=(host)=>{
     const card=c=>`<div class="kb">
       <table>
         <tr>
-          <td class="c" style="width:12%;font-size:19px;font-weight:700;height:14mm">${esc(c.line||'')}</td>
-          <td class="c" style="width:58%;font-size:34px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
-          <td class="c" style="width:30%;font-size:34px;font-weight:800">${nf(c.qty)}</td></tr>
+          <td class="c" style="width:12%;font-size:17px;font-weight:700;height:11mm">${esc(c.line||'')}</td>
+          <td class="c" style="width:58%;font-size:30px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
+          <td class="c" style="width:30%;font-size:30px;font-weight:800">${nf(c.qty)}</td></tr>
       </table>
       <table>
         <tr>
           <td style="width:12%"></td>
-          <td class="c lb" style="width:14%;font-size:13px">박스종류</td><td class="c" style="width:18%;font-size:14px">${esc(c.pack_kind||'')}</td>
-          <td class="c lb" style="width:16%;font-size:13px">표준포장수</td><td class="c" style="width:10%;font-weight:700;font-size:14px">${c.pack_qty||''}</td>
+          <td class="c lb" style="width:14%">박스종류</td><td class="c" style="width:18%">${esc(c.pack_kind||'')}</td>
+          <td class="c lb" style="width:16%">표준포장수</td><td class="c" style="width:10%;font-weight:700">${c.pack_qty||''}</td>
           <td style="width:30%">${bc(c.barcode)}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:12%;font-size:13px">생산날짜</td><td class="c" style="width:20%;font-weight:700;font-size:14px">${esc(ymdw(c.plan_ymd))}</td>
-            <td class="c lb" style="width:14%;font-size:13px">엘지날짜</td><td class="c" style="width:20%;font-weight:700;font-size:14px">${esc(ymdw(c.plan_ymd))}</td>
-            <td class="c lb" style="width:8%;font-size:13px">품명</td><td style="width:26%;font-size:11px;padding-left:3px">${esc(c.nm||'')}</td></tr>
-        <tr><td class="c lb" style="font-size:13px">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px;font-size:14px">${esc(c.proc_nm||'')}</td></tr>
+        <tr><td class="c lb" style="width:12%">생산날짜</td><td class="c" style="width:20%;font-weight:700">${esc(ymdw(c.plan_ymd))}</td>
+            <td class="c lb" style="width:14%">엘지날짜</td><td class="c" style="width:20%;font-weight:700">${esc(ymdw(c.plan_ymd))}</td>
+            <td class="c lb" style="width:8%">품명</td><td style="width:26%;font-size:9px;padding-left:3px">${esc(c.nm||'')}</td></tr>
+        <tr><td class="c lb">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px">${esc(c.proc_nm||'')}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:8%;height:14mm;font-size:16px">불량이력</td><td style="width:66%"></td>
+        <tr><td class="c lb" style="width:8%;height:24mm;font-size:16px">불량이력</td><td style="width:66%"></td>
             <td class="c lb" style="width:26%">검수란</td></tr>
-        <tr><td class="c lb" style="height:14mm;font-size:16px">시방이력</td><td></td>
+        <tr><td class="c lb" style="height:24mm;font-size:16px">시방이력</td><td></td>
             <td></td></tr>
       </table>
       <table>
@@ -2917,7 +2917,7 @@ SCREEN.prodsheet=(host)=>{
       /* ★용지 = 190 × 110mm — 실제 간판 용지크기(2026-08-21, 폭 -2cm 조정).
          이전 A4 portrait 는 세로 297mm 를 다 잡아 아래 2/3 가 빈 채로 출력됐다.
          간판 1장 = 1페이지. */
-      @page{size:170mm 110mm;margin:4mm}
+      @page{size:190mm 110mm;margin:4mm}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
       /* ★A4 1/3 폭 기준. 높이는 내용에 맞춤(고정 X — 아래쪽 빈칸 방지).
