@@ -1741,6 +1741,8 @@ SCREEN.sourceprofile=(c)=>{
     </tr>`;};
   const routePanel=()=>{const appr=routes.filter(r=>r.approve_flag).length,un=routes.length-appr;
     const act=routes.find(r=>ract(r));
+    const A=aStat();                                     // ★버그수정(2026-08-21): A·ok 미정의로 routePanel throw→우측 안그려짐
+    const ok=A.single||Math.abs(A.sum-100)<0.01;         // 활성 단일(100%자동) 또는 배분합=100%면 정상
     return `<div style="font-weight:700;color:#334;margin:2px 0 4px">🧬 조달경로 후보 <span style="font-size:11px;color:#8aa0bd;font-weight:400">(★운영 경로 택1 — 동시 2경로 불가 · 승인 후보만 · 저장 <code>nx.route_alloc</code>)</span>
       <label style="float:right;font-size:12px;font-weight:400;color:#5a6b82"><input type="checkbox" id="sp-unappr" ${showUnappr?'checked':''}> 미승인 보기</label></div>
       <div style="margin:0 0 6px;font-size:12px;color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">${A.single?`활성 ${A.n}개(단일 → 100% 자동)`:`활성 ${A.n}개 배분합 ${A.sum}% ${ok?'✓':'(정확히 100% 필요 — 미달·초과 시 저장 불가)'}`}${allocErrs.length?` · 저장값 검증: ${esc(allocErrs.join(' / '))}`:''}</div>
