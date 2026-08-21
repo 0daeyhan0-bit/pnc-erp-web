@@ -1383,3 +1383,40 @@ def procbc_list(ymd: str = Query(""), part: str = Query(""), swork: str = Query(
                 "sum_qty": round(sum(x["qty"] for x in rows), 2)}
     finally:
         nx.close(); cn.close()
+
+
+# ===================== 프린터 목록 (생산전표출력관리 490 · 프린터 2대 운용) =====================
+# 웹(브라우저)은 보안상 PC에 설치된 프린터를 읽을 수 없다. 현장 프린터는 대부분
+# 네트워크 공유프린터라 ERP서버에도 잡혀 있으므로, 서버에서 목록을 뽑아 드롭다운으로 제공한다.
+# (목록에 없으면 화면에서 직접 타이핑도 가능 — 프론트에서 datalist 로 병행)
+_PRN_CACHE = {"t": 0.0, "rows": []}
+
+@router.get("/api/prodsheet/printers")
+def prodsheet_printers(refresh: int = Query(0)):
+    """ERP서버에 설치된 프린터 목록. 60초 캐시(매번 WMI 조회는 느림)."""
+    now = time.time()
+    if not refresh and _PRN_CACHE["rows"] and (now - _PRN_CACHE["t"] < 60):
+        return {"rows": _PRN_CACHE["rows"], "cached": True}
+    rows = []
+    try:
+        import subprocess
+        # PowerShell Get-Printer (Windows). 이름/드라이버/포트만 CSV 로 받는다.
+        ps = ("Get-Printer | Select-Object Name,DriverName,PortName | "
+              "ConvertTo-Csv -NoTypeInformation")
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                             capture_output=True, timeout=20)
+        txt = out.stdout.decode("cp949", "ignore") or out.stdout.decode("utf-8", "ignore")
+        import csv as _csv
+        lines = [l for l in txt.splitlines() if l.strip()]
+        for r in list(_csv.DictReader(lines)):
+            nm = (r.get("Name") or "").strip()
+            if not nm:
+                continue
+            rows.append({"name": nm,
+                         "driver": (r.get("DriverName") or "").strip(),
+                         "port": (r.get("PortName") or "").strip()})
+    except Exception as e:
+        return {"rows": [], "err": str(e)[:200]}
+    rows.sort(key=lambda x: x["name"])
+    _PRN_CACHE["t"] = now; _PRN_CACHE["rows"] = rows
+    return {"rows": rows, "cached": False}

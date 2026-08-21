@@ -2183,7 +2183,7 @@ SCREEN.prodsheet=(host)=>{
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const T=new Date(), today=iso(T);
   const st={rows:[],cnt:0,sumQty:0,from:today,to:today,part:'',item:'',sheetNo:'',boxNo:'',labelNo:'',
-            fin:'N',parts:[],sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
+            fin:'N',parts:[],printers:[],sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
   // ★프린터 2대 운용(레거시 w_pr_input_490 동일) — 제품스티커=라벨프린터 / 가간판·전표=A4프린터.
   //   웹은 보안상 프린터를 코드로 지정할 수 없다. 대신
   //   (a) 출력물마다 용지규격을 다르게 두고(40×20 / 210×110 / A4)
@@ -2194,6 +2194,11 @@ SCREEN.prodsheet=(host)=>{
   const PRN=(()=>{try{return Object.assign({label:'',kanban:''},
       JSON.parse(localStorage.getItem(PRN_LS)||'{}'));}catch(e){return {label:'',kanban:''};}})();
   const savePrn=()=>{try{localStorage.setItem(PRN_LS,JSON.stringify(PRN));}catch(e){}};
+  // 서버(ERP 184)에 설치된 프린터 목록 — 현장 프린터는 대개 네트워크 공유라 서버에도 잡힌다.
+  const loadPrinters=async(refresh)=>{
+    try{const r=await fetch(`${API}/api/prodsheet/printers${refresh?'?refresh=1':''}`);
+      const j=await r.json(); st.printers=j.rows||[];}
+    catch(e){st.printers=[];}};
   const qsv=o=>new URLSearchParams(Object.entries(o).filter(([,v])=>v!==''&&v!=null)).toString();
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/prodsheet/parts`);const j=await r.json();st.parts=j.rows||[];}catch(e){st.parts=[];}};
   const load=async()=>{st.loading=true;st.cur=null;st.det=null;render();
@@ -2868,15 +2873,33 @@ SCREEN.prodsheet=(host)=>{
        <div class="spacer"></div><span class="rowcount">선택 <b id="ps-selcnt">${st.sel.size}</b></span>
      </div>
      <!-- ★프린터 2대 지정(레거시 490 상단과 동일 개념) — 이름은 내 브라우저에 저장 -->
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0">
-       <span style="font-size:12px;color:#8a94a6">🖨 프린터</span>
-       <label class="tl" style="color:#b8860b">제품스티커(라벨)</label>
-       <input class="inp" id="ps-prn-l" value="${esc(PRN.label)}" placeholder="예) Zebra ZD421"
-              style="min-width:0;width:170px" autocomplete="off" title="라벨(40×20mm) 출력에 쓸 프린터 이름">
-       <label class="tl" style="color:#1c7c3a">가간판·전표(A4)</label>
-       <input class="inp" id="ps-prn-k" value="${esc(PRN.kanban)}" placeholder="예) Kyocera TASKalfa 3253ci"
-              style="min-width:0;width:200px" autocomplete="off" title="가간판(210×110mm)·생산이동전표(A4) 출력에 쓸 프린터 이름">
-       <span style="font-size:11px;color:#8a94a6">인쇄창에서 출력물별로 <b>처음 1회만</b> 이 프린터를 고르면 다음부터 자동 선택됩니다.</span>
+     <div style="flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+                 margin:0 0 6px;padding:7px 10px;border:1px solid #d6dee8;border-left:4px solid #5b7fa6;
+                 border-radius:6px;background:linear-gradient(180deg,#fbfdff,#f1f5fa)">
+       <span style="font-size:12px;font-weight:700;color:#41546b">🖨 프린터 설정</span>
+       <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+                    background:#fff7e6;border:1px solid #ffd591;border-radius:14px">
+         <b style="font-size:11px;color:#a06a00">🔖 제품스티커</b>
+         <span style="font-size:10px;color:#b08a4a">40×20</span>
+         <input class="inp" id="ps-prn-l" list="ps-prnlist" value="${esc(PRN.label)}"
+                placeholder="프린터 선택/입력" style="min-width:0;width:178px;height:24px;font-size:12px"
+                autocomplete="off" title="라벨(40×20mm) 출력에 쓸 프린터">
+       </span>
+       <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+                    background:#e6f7ff;border:1px solid #91d5ff;border-radius:14px">
+         <b style="font-size:11px;color:#0d6b9a">🏷 가간판·전표</b>
+         <span style="font-size:10px;color:#4a92b5">210×110 / A4</span>
+         <input class="inp" id="ps-prn-k" list="ps-prnlist" value="${esc(PRN.kanban)}"
+                placeholder="프린터 선택/입력" style="min-width:0;width:200px;height:24px;font-size:12px"
+                autocomplete="off" title="가간판(210×110mm)·생산이동전표(A4) 출력에 쓸 프린터">
+       </span>
+       <datalist id="ps-prnlist">${(st.printers||[]).map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
+       <button class="btn" id="ps-prn-r" style="height:24px;padding:0 8px;font-size:11px"
+               title="ERP서버에 설치된 프린터 목록을 다시 읽습니다">🔄 목록</button>
+       <span id="ps-prn-msg" style="font-size:11px;color:#8a94a6">${
+         st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 목록에 없으면 직접 입력하세요.`
+         :'목록을 못 읽었습니다 — 프린터명을 직접 입력하세요.'}</span>
+       <span style="font-size:11px;color:#8a94a6">출력물별로 <b>처음 1회만</b> 인쇄창에서 고르면 다음부터 자동 선택됩니다.</span>
      </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div style="display:flex;gap:8px;flex:1 1 auto;min-height:0;margin-top:2px">
@@ -2906,13 +2929,20 @@ SCREEN.prodsheet=(host)=>{
       host.querySelectorAll('.ps-chk').forEach(ch=>ch.checked=e.target.checked);
       const c=g('#ps-selcnt');if(c)c.textContent=st.sel.size;};
     // 프린터 이름 저장(재렌더 없이 값만 보관 — 입력 중 포커스 유지)
-    {const pl=g('#ps-prn-l'),pk=g('#ps-prn-k');
+    {const pl=g('#ps-prn-l'),pk=g('#ps-prn-k'),pr=g('#ps-prn-r'),pm=g('#ps-prn-msg');
      if(pl)pl.oninput=()=>{PRN.label=pl.value.trim();savePrn();};
-     if(pk)pk.oninput=()=>{PRN.kanban=pk.value.trim();savePrn();};}
+     if(pk)pk.oninput=()=>{PRN.kanban=pk.value.trim();savePrn();};
+     if(pr)pr.onclick=async()=>{pr.disabled=true;if(pm)pm.textContent='목록 읽는 중…';
+       await loadPrinters(true);
+       const dl=g('#ps-prnlist');
+       if(dl)dl.innerHTML=(st.printers||[]).map(p=>`<option value="${esc(p.name)}">`).join('');
+       if(pm)pm.textContent=st.printers.length?`서버 프린터 ${st.printers.length}대 — 목록에 없으면 직접 입력하세요.`
+                                              :'목록을 못 읽었습니다 — 프린터명을 직접 입력하세요.';
+       pr.disabled=false;};}
     if(ed){g('#ps-pj').onclick=printSheets;g('#ps-ig').onclick=openKanban;g('#ps-il').onclick=openLabel;}
     wireLeft();paintDetail();attachResizers(host);
   };
-  loadParts().then(()=>{render();load();});
+  Promise.all([loadParts(),loadPrinters(false)]).then(()=>{render();load();});
 };
 
 /* ===== 공정별 바코드생산실적 (w_pr_input_520) — 스캔→자동채움→등록/취소(nx.proc_barcode) ===== */
