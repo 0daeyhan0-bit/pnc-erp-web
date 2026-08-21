@@ -549,9 +549,9 @@ function itemDetail(c,cd){
 /* 품목/자재 조회 — 라이브 PR_M_ITEM 전 컬럼(코드→이름), 레거시 w_pr_master_010 · mat=true→자재만+표준원가 */
 function itemLiveView(c, mat){
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',lg:'',sg:'',nat:'',lgroups:[],sgroups:[],natures:[],loading:false};
+  const st={rows:[],cnt:0,q:'',lg:'',sg:'',nat:'',use:'1',lgroups:[],sgroups:[],natures:[],loading:false};   // use=사용여부(1사용중/0사용중지/''전체) 기본 사용중
   const load=async()=>{st.loading=true;draw();
-    try{const r=await fetch(`${API}/api/item/list?q=${encodeURIComponent(st.q)}&lgroup=${encodeURIComponent(st.lg)}&sgroup=${encodeURIComponent(st.sg)}&nature=${encodeURIComponent(st.nat)}&mat=${mat?'1':''}`);
+    try{const r=await fetch(`${API}/api/item/list?q=${encodeURIComponent(st.q)}&lgroup=${encodeURIComponent(st.lg)}&sgroup=${encodeURIComponent(st.sg)}&nature=${encodeURIComponent(st.nat)}&use=${encodeURIComponent(st.use)}&mat=${mat?'1':''}`);
       const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;if(j.lgroups)st.lgroups=j.lgroups;if(j.sgroups)st.sgroups=j.sgroups;if(j.natures)st.natures=j.natures;}
     catch(e){st.rows=[];}
     st.loading=false;draw();};
@@ -573,6 +573,7 @@ function itemLiveView(c, mat){
        <label class="tl">대분류</label><select class="inp" id="it-lg" style="width:auto"><option value="">전체</option>${st.lgroups.map(o=>`<option value="${esc(o.code)}" ${st.lg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">소분류</label><select class="inp" id="it-sg" style="width:auto"><option value="">전체</option>${st.sgroups.map(o=>`<option value="${esc(o.code)}" ${st.sg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">성격</label><select class="inp" id="it-nat" style="width:auto"><option value="">전체</option>${st.natures.map(o=>`<option value="${esc(o.code)}" ${st.nat===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
+       <label class="tl" title="LG 리시빙 2501~ 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="it-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
        <button class="btn" id="it-go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건${st.cnt>=3000?'(상한)':''}</span>
      </div>
@@ -580,7 +581,7 @@ function itemLiveView(c, mat){
       <table class="tbl fit" style="font-size:11px"><thead><tr>${COLS.map(x=>`<th class="${x[2]==='n'?'num':''}">${x[1]}</th>`).join('')}</tr></thead>
       <tbody>${rowsHTML()}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
-    g('#it-go').onclick=()=>{st.q=g('#it-q').value;st.lg=g('#it-lg').value;st.sg=g('#it-sg').value;st.nat=g('#it-nat').value;load();};
+    g('#it-go').onclick=()=>{st.q=g('#it-q').value;st.lg=g('#it-lg').value;st.sg=g('#it-sg').value;st.nat=g('#it-nat').value;st.use=g('#it-use').value;load();};
     g('#it-q').onkeyup=e=>{if(e.key==='Enter')g('#it-go').click();};
     // ★UI규칙: 헤더 더블클릭=정렬(enableSort) + 컬럼폭 드래그(addResizer 내장). tbody만 갱신해 헤더/화살표 보존
     enableSort(c, COLS.map(x=>x[0]), ()=>st.rows, ()=>{const tb=c.querySelector('tbody'); if(tb)tb.innerHTML=rowsHTML();});
