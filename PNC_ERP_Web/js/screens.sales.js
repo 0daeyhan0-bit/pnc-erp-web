@@ -303,7 +303,15 @@ SCREEN.shipment=(c)=>{
     loading=false;draw();};
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">🚚 출하실적현황</div>
+     <style>
+       /* 단가 수정칸 — 인라인 style 을 행마다 반복하지 않도록 클래스로(성능) */
+       td.sc-cost{cursor:cell;background:#fffbe6;outline:1px dashed #e0c26a;outline-offset:-2px}
+       td.sc-cost:hover{background:#fff3c4}
+       td.sc-cost.saved{background:#d9f7be;transition:background .25s}
+       td.sc-cost input{width:100%;box-sizing:border-box;text-align:right;font:inherit;
+         border:1px solid #4a86e8;padding:1px 3px}
+     </style>
+     <div class="page-title">🚚 출하실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">· 출하단가 칸 클릭 → 수정 → Enter (금액 자동계산)</span></div>
      <div class="page-sub">출하(매출) 실적 라인 · 원본 <code>SA_T_SALE_DTL</code> · 🟢 nx ${esc(dToInput(curFrom)||'-')}~${esc(dToInput(curTo)||'-')}</div>
      <div class="toolbar">
        <label class="tl">출하기간</label>
@@ -320,6 +328,27 @@ SCREEN.shipment=(c)=>{
     c.querySelector('#mode').onchange=e=>{mode=e.target.value;render();};
     const filt=()=>{const q=c.querySelector('#iq').value.trim().toLowerCase();
       return pool.filter(r=>!q||(''+r.item).toLowerCase().includes(q)||(''+r.wo).toLowerCase().includes(q));};
+    // ── 대용량 대응: 처음 PAGE 행만 그리고 스크롤에 따라 이어붙인다 ──────
+    //   4,067행 x 12컬럼 = 약 4.9만 셀을 한 번에 그리면 화면이 버벅인다.
+    const PAGE=300;
+    let shown=0;
+    const rowHtml=(r,i)=>`<tr data-i="${i}"><td class="center">${fmtYmd(r.ymd)}</td><td>${esc(r.wo)}</td><td>${esc(r.swo)}</td><td><b>${esc(r.item)}</b></td><td class="num">${won(r.qty)}</td>`
+      +`<td class="num sc-cost">${won(r.cost)}</td>`
+      +`<td class="num gstock sc-amt">${wonI(r.amt)}</td><td class="num">${won(r.mcost)}</td><td>${esc(r.usr)||''}</td><td class="center">${fmtHms(r.hms)}</td><td class="cap" title="${esc(r.wc)||''}">${esc(r.wc)||''}</td><td class="cap" title="${esc(r.remarks)||''}">${esc(r.remarks)||''}</td></tr>`;
+    const grandRow=(tq,ta)=>`<tr class="grandtot"><td colspan="4" class="right">총계</td><td class="num">${won(tq)}</td><td colspan="1"></td><td class="num">${wonI(ta)}</td><td colspan="5"></td></tr>`;
+    // 남은 행을 이어붙임(총계행 앞에 삽입 → 총계는 항상 맨 아래)
+    const appendMore=()=>{
+      if(mode!=='detail'||shown>=cur.length)return;
+      const body=c.querySelector('#body'); if(!body)return;
+      const to=Math.min(shown+PAGE,cur.length);
+      const frag=document.createElement('tbody');
+      frag.innerHTML=cur.slice(shown,to).map((r,k)=>rowHtml(r,shown+k)).join('');
+      const gt=body.querySelector('tr.grandtot');
+      while(frag.firstChild)body.insertBefore(frag.firstChild,gt);
+      shown=to;
+      const cnt=c.querySelector('#cnt');
+      if(cnt)cnt.textContent=`${cur.length}라인 (표시 ${shown}) / 대상 ${cur.length}라인`;
+    };
     const render=()=>{
       let lines=filt(), thead='', tbody='', tq=0, ta=0, ncols;
       if(mode==='detail'){
@@ -331,13 +360,14 @@ SCREEN.shipment=(c)=>{
           || (''+a.item).localeCompare(''+b.item,'ko'));
         thead=`<tr><th>출하일자</th><th>Work Order</th><th>Split W/O</th><th>도번</th><th class="num">출하수량</th><th class="num">출하단가</th><th class="num">출하금액</th><th class="num">마스터단가</th><th>처리담당자</th><th class="center">처리시각</th><th>작업처</th><th>비고</th></tr>`;
         ncols=12;
-        // ★출하단가 = 인라인 수정(더블클릭 또는 클릭). 저장시 출하금액 자동 재계산.
-        cur.forEach((r,i)=>{tbody+=`<tr><td class="center">${fmtYmd(r.ymd)}</td><td>${esc(r.wo)}</td><td>${esc(r.swo)}</td><td><b>${esc(r.item)}</b></td><td class="num">${won(r.qty)}</td>`
-          +`<td class="num sc-cost" data-i="${i}" tabindex="0" title="클릭하여 단가 수정 — 저장시 출하금액 자동계산"`
-          +` style="cursor:cell;background:#fffbe6;outline:1px dashed #e0c26a;outline-offset:-2px">${won(r.cost)}</td>`
-          +`<td class="num gstock sc-amt" data-i="${i}">${wonI(r.amt)}</td><td class="num">${won(r.mcost)}</td><td>${esc(r.usr)||''}</td><td class="center">${fmtHms(r.hms)}</td><td class="cap" title="${esc(r.wc)||''}">${esc(r.wc)||''}</td><td class="cap" title="${esc(r.remarks)||''}">${esc(r.remarks)||''}</td></tr>`;});
-        tq=S(cur,'qty');ta=S(cur,'amt');
-        tbody+=`<tr class="grandtot"><td colspan="4" class="right">총계</td><td class="num">${won(tq)}</td><td colspan="1"></td><td class="num">${wonI(ta)}</td><td colspan="5"></td></tr>`;
+        // ★출하단가 = 인라인 수정(클릭). 저장시 출하금액 자동 재계산.
+        //   성능: 인라인 style/title 대신 CSS 클래스(HTML 32% 감소) + tbody 이벤트위임 1개.
+        //   ★4천여행을 한 번에 그리면 버벅여서 처음 300행만 그리고 스크롤에 따라 이어붙인다.
+        shown=Math.min(PAGE,cur.length);
+        tbody=cur.slice(0,shown).map((r,i)=>rowHtml(r,i)).join('');
+        tq=S(cur,'qty');ta=S(cur,'amt');   // 합계는 언제나 전체 기준
+        // 총계행은 '더보기'로 이어붙일 때 밀리지 않게 렌더 후 별도로 관리(grandRow)
+        tbody+=grandRow(tq,ta);
       } else if(mode==='item'){
         const map=new Map();
         lines.forEach(r=>{if(!map.has(r.item))map.set(r.item,{item:r.item,qty:0,amt:0,n:0});const o=map.get(r.item);o.qty+=+r.qty||0;o.amt+=+r.amt||0;o.n++;});
@@ -360,19 +390,33 @@ SCREEN.shipment=(c)=>{
       c.querySelector('#th').innerHTML=thead;
       c.querySelector('#body').innerHTML=loading?spinRow(ncols):(msg?`<tr><td colspan="${ncols}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`:(cur.length?tbody:`<tr><td colspan="${ncols}" class="empty">결과 없음</td></tr>`));
       c.querySelector('#sum').innerHTML=`<div class="s-item">${mode==='detail'?'라인':mode==='item'?'도번':'일'} <b>${won(cur.length)}</b></div><div class="s-item">출하수량 합계 <b>${won(tq)}</b></div><div class="s-item ${ta<0?'neg':''}">출하금액 합계 <b>${wonI(ta)} 원</b></div>`;
-      c.querySelector('#cnt').textContent=`${cur.length}${mode==='detail'?'라인':mode==='item'?'도번':'일'} / 대상 ${lines.length}라인`;
+      c.querySelector('#cnt').textContent=(mode==='detail'&&shown<cur.length)
+        ? `${cur.length}라인 (표시 ${shown}) / 대상 ${lines.length}라인`
+        : `${cur.length}${mode==='detail'?'라인':mode==='item'?'도번':'일'} / 대상 ${lines.length}라인`;
       attachResizers(c);
-      if(mode==='detail')wireCostEdit();
+      if(mode==='detail'){wireCostEdit();wireLazy();}
+    };
+    // 스크롤이 끝에 가까워지면 다음 묶음을 이어붙인다
+    const wireLazy=()=>{
+      const wrap=c.querySelector('.grid-wrap');
+      if(!wrap||wrap.dataset.lazy)return;
+      wrap.dataset.lazy='1';
+      wrap.addEventListener('scroll',()=>{
+        if(wrap.scrollTop+wrap.clientHeight>=wrap.scrollHeight-300)appendMore();},{passive:true});
     };
     // ── 출하단가 인라인 수정 → 저장시 출하금액 자동 재계산 ──────────────
     //   ※CLAUDE.md §1-2 는 조회화면 단가 읽기전용이나, 사용자 요청으로 이 화면만 허용.
     //     마감월은 백엔드가 거부한다(감사추적용 UPDATE_USER_ID/DATETIME 기록).
     const wireCostEdit=()=>{
-      c.querySelectorAll('td.sc-cost').forEach(td=>{
-        if(td.dataset.wired)return; td.dataset.wired='1';
-        const open=()=>{
+      const body=c.querySelector('#body');
+      if(!body||body.dataset.wired)return;
+      body.dataset.wired='1';                       // ★핸들러 1개만(셀마다 걸지 않는다)
+      const openTd=td=>{
+        const tr=td.parentElement, i=tr&&+tr.dataset.i;
+        if(!(i>=0))return;
+        {
           if(td.querySelector('input'))return;
-          const r=cur[+td.dataset.i]; if(!r)return;
+          const r=cur[i]; if(!r)return;
           const before=+r.cost||0;
           td.innerHTML=`<input type="number" step="0.01" min="0" value="${before}"
             style="width:100%;box-sizing:border-box;text-align:right;font:inherit;border:1px solid #4a86e8;padding:1px 3px">`;
@@ -395,7 +439,7 @@ SCREEN.shipment=(c)=>{
               const src=pool.find(x=>x.wo===r.wo&&x.swo===r.swo&&x.item===r.item&&x.ymd===r.ymd&&x.hms===r.hms);
               if(src){src.cost=res.cost;src.amt=res.amt;}
               td.textContent=won(r.cost);
-              const at=c.querySelector(`td.sc-amt[data-i="${td.dataset.i}"]`);
+              const at=tr.querySelector('td.sc-amt');
               if(at)at.textContent=wonI(r.amt);
               const tq=S(cur,'qty'), ta=S(cur,'amt');
               const sm=c.querySelector('#sum');
@@ -404,17 +448,20 @@ SCREEN.shipment=(c)=>{
               if(gt){const tds=gt.querySelectorAll('td');
                 if(tds[1])tds[1].textContent=won(tq);
                 if(tds[3])tds[3].textContent=wonI(ta);}
-              td.style.transition='background .25s'; td.style.background='#d9f7be';
-              setTimeout(()=>{td.style.background='#fffbe6';},700);
+              td.classList.add('saved');
+              setTimeout(()=>td.classList.remove('saved'),700);
             }catch(e){alert('단가 수정 실패');td.textContent=won(r.cost);}
           };
           inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save();}
                             else if(e.key==='Escape'){e.preventDefault();revert();}};
           inp.onblur=save;
-        };
-        td.onclick=open;
-        td.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};
-      });};
+        }
+      };
+      // 이벤트 위임 — tbody 한 곳에서 단가셀 클릭만 잡는다
+      body.addEventListener('click',e=>{
+        const td=e.target.closest&&e.target.closest('td.sc-cost');
+        if(td&&body.contains(td))openTd(td);});
+    };
     const go=()=>{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);load();};
     c.querySelector('#go').onclick=go;c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#dfrom').onchange=go;c.querySelector('#dto').onchange=go;
