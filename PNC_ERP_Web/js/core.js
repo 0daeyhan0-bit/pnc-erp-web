@@ -296,7 +296,10 @@ function openTab(id,nm){
     t.innerHTML=`<span>${nm}</span>`+(id!=='dash'?`<span class="x">✖</span>`:'');
     t.onclick=(ev)=>{if(ev.target.classList.contains('x')){closeTab(id);ev.stopPropagation();}else activate(id);};
     $tabbar.appendChild(t);tabs[id].el=t;
-    const c=document.createElement('div');c.id='pg-'+id;c.style.display='none';
+    // ★height:100% 를 쓰는 화면(대부분의 조회화면)이 정상 작동하려면 이 컨테이너부터
+    //   확정된 높이를 가져야 한다. display:block 인 채로는 자식의 height:100% 가
+    //   전달되지 않아, 내용이 짧은 화면은 표가 화면 아래까지 안 늘어나는 문제가 생긴다.
+    const c=document.createElement('div');c.id='pg-'+id;c.style.cssText='display:none;height:100%';
     $content.appendChild(c);tabs[id].pg=c;
     (SCREEN[id]||SCREEN._na)(c,id);
     attachResizers(c);

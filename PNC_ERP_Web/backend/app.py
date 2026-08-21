@@ -358,10 +358,17 @@ from fastapi.staticfiles import StaticFiles as _StaticFiles
 async def _no_cache_front(request, call_next):
     resp = await call_next(request)
     p = request.url.path.lower()
-    if p.endswith((".html", ".js")) or p in ("/", ""):
+    if p.endswith((".html", ".js", ".css")) or p in ("/", ""):
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
+        # ★charset 명시(2026-08-21). StaticFiles 는 .js 에 charset 을 안 붙인다.
+        #   소스가 BOM 없는 UTF-8 이라 브라우저가 시스템 기본(CP949)으로 읽으면
+        #   한글 주석·문자열이 깨져 따옴표 짝이 어긋나고 파싱이 중단된다.
+        #   → 파일 뒤쪽에 있는 화면(예: SCREEN.salesplan)이 등록되지 않는 원인.
+        ct = resp.headers.get("content-type", "")
+        if ct and "charset" not in ct.lower():
+            resp.headers["Content-Type"] = ct.split(";")[0] + "; charset=utf-8"
     return resp
 
 _FRONT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))   # backend의 상위 = PNC_ERP_Web

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>인쇄 준비 중…</title>
+<!-- ★인쇄 전용 페이지.
+     window.open('','창이름') 으로 열면 주소가 about:blank 가 되는데, 브라우저(특히 Edge)는
+     "마지막에 고른 프린터"를 URL 기준으로 저장하므로 about:blank 에서는 기억되지 않는다.
+     document.write()/open() 도 문서를 새로 여는 동작이라 URL 을 about:blank 로 되돌린다.
+     → 이 페이지를 실제 URL(/print.html?t=label 등)로 열고, 아래 renderPrint() 로
+       DOM 에만 내용을 주입한다. URL 이 유지되므로 출력물별로 프린터가 기억된다. -->
+<style>
+  html,body{margin:0}
+  body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;color:#000}
+  #_wait{display:flex;align-items:center;justify-content:center;height:100vh;
+         font-size:13px;color:#666}
+  @media print{#_wait{display:none}}
+</style></head>
+<body>
+<div id="_wait">인쇄 내용을 준비하고 있습니다…</div>
+<script>
+/* 호출측(screens.*.js)이 만든 전체 HTML 문자열을 받아 이 문서에 주입한다.
+   - <title> → document.title
+   - <head> 의 style/link → head 로 이식
+   - <body> 내용 → body 로 이식(스크립트는 실행되지 않으므로 인쇄는 여기서 직접 트리거)
+   - 이미지(바코드/QR)가 모두 로드된 뒤 print() */
+window.renderPrint = function (html) {
+  var d = document;
+  // ★같은 내용으로 두 번 불리면(로드 타이밍 경합 등) 인쇄창이 두 번 뜬다 — 한 번만 처리.
+  if (window.__lastHtml === html && window.__renderAt && Date.now() - window.__renderAt < 3000) return;
+  window.__lastHtml = html;
+  window.__renderAt = Date.now();
+  try {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+
+    if (doc.title) d.title = doc.title;
+
+    // 이전 주입분 제거 후 style/link 이식
+    var old = d.head.querySelectorAll('[data-inj]');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+    var sts = doc.head.querySelectorAll('style,link[rel=stylesheet]');
+    for (var j = 0; j < sts.length; j++) {
+      var n = d.importNode(sts[j], true);
+      n.setAttribute('data-inj', '1');
+      d.head.appendChild(n);
+    }
+
+    // 본문 교체
+    var wait = d.getElementById('_wait');
+    if (wait) wait.remove();
+    d.body.innerHTML = '';
+    var kids = doc.body.childNodes;
+    for (var k = 0; k < kids.length; k++) {
+      var nd = kids[k];
+      if (nd.nodeType === 1 && nd.tagName === 'SCRIPT') continue;  // 인쇄는 아래서 직접
+      d.body.appendChild(d.importNode(nd, true));
+    }
+  } catch (e) {
+    d.body.innerHTML = '<p style="padding:16px;color:#c0392b">인쇄 내용 생성 실패: '
+      + String(e && e.message ? e.message : e) + '</p>';
+    return;
+  }
+
+  // 인쇄창을 닫으면(인쇄 완료/취소 모두) 이 미리보기 창도 자동으로 닫는다.
+  //   ※afterprint 는 인쇄대화상자가 내려간 뒤 발생. 일부 브라우저는 늦게 주므로
+  //     focus 복귀도 함께 감지한다.
+  window.__printAt = 0;          // 새 출력마다 초기화(창을 재사용해도 정상 동작)
+  if (!window.__closeWired) {
+    window.__closeWired = true;
+    var bye = function () {
+      if (!window.__printAt) return;        // 아직 인쇄를 걸지 않았으면 무시
+      window.__printAt = 0;                 // 중복 호출 방지
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 300);
+    };
+    window.addEventListener('afterprint', bye);
+    // afterprint 를 못 주는 브라우저 대비 — print() 호출 뒤 포커스가 돌아오면 닫는다.
+    //   (print() 직전의 focus 로 오작동하지 않도록 __printAt 이후 시점만 인정)
+    window.addEventListener('focus', function () {
+      if (!window.__printAt) return;
+      if (Date.now() - window.__printAt < 400) return;   // 인쇄창이 뜨기도 전의 포커스는 무시
+      bye();
+    });
+  }
+
+  // 이미지 로드 완료 후 인쇄
+  var imgs = [].slice.call(d.images);
+  var left = 0;
+  for (var m = 0; m < imgs.length; m++) if (!imgs[m].complete) left++;
+  var fired = false;
+  function go() {
+    if (fired) return; fired = true;
+    setTimeout(function () {
+      try { window.focus(); window.__printAt = Date.now(); window.print(); } catch (e) {}
+    }, 250);
+  }
+  if (!left) return go();
+  for (var q = 0; q < imgs.length; q++) {
+    if (imgs[q].complete) continue;
+    imgs[q].addEventListener('load', function () { if (--left <= 0) go(); }, { once: true });
+    imgs[q].addEventListener('error', function () { if (--left <= 0) go(); }, { once: true });
+  }
+  setTimeout(go, 5000);   // 이미지가 끝내 안 오면 그래도 인쇄
+};
+
+// 호출측이 renderPrint 준비 전에 write 했을 경우 — 소비 후 즉시 비운다(중복인쇄 방지)
+if (window.__pendingHtml) {
+  var _h = window.__pendingHtml; window.__pendingHtml = null;
+  try { window.renderPrint(_h); } catch (e) {}
+}
+</script>
+</body></html>

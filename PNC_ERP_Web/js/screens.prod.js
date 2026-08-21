@@ -1,3 +1,49 @@
+/* ===== 인쇄창 열기 — ★최상위 공용 함수 (프린터 기억을 위해 실제 URL 사용) =====
+   window.open('', ...) 로 열면 주소가 about:blank 가 되는데, 브라우저(특히 Edge)는
+   "마지막에 고른 프린터"를 URL 기준으로 저장한다. about:blank 는 저장 키가 못 되어
+   매번 기본 프린터(PDF로 저장)로 돌아간다.
+   → /print.html?t=<종류> 로 열고, 종류(label/kanban/sheet)를 나눠 출력물별로 따로 기억시킨다.
+   호출: openPrintWin('label','pncPrnLabel','width=760,height=1000').then(w=>{...})
+   반환: 창이 로드된 뒤의 window (팝업차단이면 null) */
+window.openPrintWin=(kind,name,feat)=>new Promise(resolve=>{
+  const w=window.open('print.html?t='+encodeURIComponent(kind),name,feat);
+  if(!w){resolve(null);return;}
+  let done=false;
+  const fin=()=>{if(done)return;done=true;
+    // ★document.open()/write() 는 문서를 새로 여는 동작이라 URL 이 about:blank 로 돌아가고,
+    //   그러면 브라우저가 프린터 선택을 기억하지 못한다(2026-08-21 실측).
+    //   → write 대신 print.html 안의 헬퍼(renderPrint)로 DOM 에 주입한다.
+    //   호출측은 기존처럼 w.document.write(html); w.document.close(); 를 쓰면 된다.
+    const d=w.document;
+    let buf='';
+    d.write=d.writeln=function(html){buf+=html;};
+    d.close=function(){
+      const html=buf; buf='';
+      if(!html)return;
+      try{
+        if(typeof w.renderPrint==='function'){w.__pendingHtml=null;w.renderPrint(html);}
+        else{                                  // print.html 이 아직 안 떴을 때의 대비책
+          //  ※print.html 로드시 __pendingHtml 을 스스로 소비한다(중복인쇄 방지)
+          w.__pendingHtml=html;
+          setTimeout(()=>{try{
+            const h=w.__pendingHtml; if(!h)return;   // 이미 소비됐으면 아무것도 안 함
+            w.__pendingHtml=null;
+            if(typeof w.renderPrint==='function')w.renderPrint(h);
+          }catch(e){}},400);
+        }
+      }catch(e){
+        // 최후수단 — 내용이라도 보이게(URL 은 about:blank 가 되어 프린터 기억은 포기)
+        try{d.open();d.write(html);d.close();}catch(_){}
+      }
+    };
+    resolve(w);};
+  try{
+    if(w.document&&w.document.readyState==='complete')return fin();   // 재사용되는 창
+    w.addEventListener('load',fin,{once:true});
+  }catch(e){}
+  setTimeout(fin,1500);   // 안전장치(로드 이벤트를 놓쳐도 진행)
+});
+
 /* ===== Spec Sheet(BOM) 출력 — ★최상위 공용 함수 =====
    준비실적처리(키팅) [🖨 BOM출력] → A4 가로 미리보기 → 인쇄.
    레거시 w_pr_input_460 Print미리보기 양식 재현(2026-08-19):
@@ -178,7 +224,9 @@ window.printWeldSheet=async(sheetNo)=>{
         <td style="text-align:center;font-weight:700${mbg?';background:'+mbg:''}">${esc(mn)}</td>
         <td>${bc}</td></tr>`);
     }
-    const w=window.open('','_blank','width=900,height=1100');
+    // ★실제 URL(print.html?t=sheet)로 연다 — about:blank 는 프린터 선택이 기억되지 않는다.
+    //   창이름만 전표별로 분리(동시 다건 출력). URL 은 t=sheet 로 같아 프린터 선택을 공유한다.
+    const w=await openPrintWin('sheet','pncPrnSheet'+String(sn8||'').replace(/\W/g,''),'width=900,height=1100');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>생산이동전표 ${esc(sn8)}</title>
     <style>
@@ -738,6 +786,28 @@ SCREEN.partplan=(c)=>{
     const k=tr.getAttribute('data-gk');if(!k)return;
     if(st.expand.has(k))st.expand.delete(k);else st.expand.add(k);
     redrawBody();});};
+  // ── 점진 렌더(대용량) ────────────────────────────────────────────────
+  //   처음 PP_PAGE 행만 DOM 에 올리고, 스크롤 끝에서 이어붙인다.
+  const PP_PAGE=400;
+  let ppRest=null;                 // 아직 안 붙인 <tr> 조각들
+  const ppAppend=()=>{
+    if(!ppRest||!ppRest.length)return;
+    const tb=c.querySelector('tbody'); if(!tb){ppRest=null;return;}
+    const take=ppRest.slice(0,PP_PAGE); ppRest=ppRest.slice(PP_PAGE);
+    tb.insertAdjacentHTML('beforeend',take.join(''));
+    wireRows();                    // 새로 붙은 집계행에도 클릭 연결
+    const cnt=c.querySelector('#pp-cnt');
+    if(cnt&&ppRest.length)cnt.textContent=cnt.textContent.replace(/^\S+건/,
+      nf(tb.rows.length)+'행 표시');
+  };
+  const ppWireLazy=()=>{
+    const w=c.querySelector('.grid-wrap');
+    if(!w||w.dataset.lazy)return;
+    w.dataset.lazy='1';
+    w.addEventListener('scroll',()=>{
+      if(ppRest&&ppRest.length&&w.scrollTop+w.clientHeight>=w.scrollHeight-400)ppAppend();
+    },{passive:true});
+  };
   const render=(bodyOnly)=>{
     const d=st.dates;
     const wcM=new Map([['P1','용접'],['P2','가공']]);
@@ -924,7 +994,16 @@ SCREEN.partplan=(c)=>{
     // ★성능: bodyOnly=true면 표(tbody/tfoot)와 건수줄만 교체하고 툴바·헤더는 그대로 둠.
     //   필터 변경마다 c.innerHTML 전체를 갈아엎으면 2,900행 기준 눈에 띄게 버벅여서 분리함.
     //   (툴바를 유지하므로 입력칸 포커스·커서위치도 자연히 보존됨)
-    const tbodyHtml=st.loading?spinRow(NCOL+d.length):bodyHtml();
+    // ★대용량 대응(2026-08-21): 4,782행 × 30컬럼 = 약 14만 셀을 한 번에 DOM 에 올리면
+    //   저사양 PC에서 최초렌더·컬럼이동·스크롤이 모두 멈춘다("응답 없음").
+    //   → 완성된 tbody HTML 을 <tr> 단위로 잘라 처음 PP_PAGE 개만 붙이고,
+    //     스크롤이 끝에 가까워지면 이어붙인다. 행 생성 로직(집계/상세/블록접기)은 그대로.
+    const _fullBody=st.loading?spinRow(NCOL+d.length):bodyHtml();
+    const _chunks=(()=>{if(st.loading)return null;
+      const parts=_fullBody.split(/(?=<tr)/);          // <tr 앞에서 분할(행 경계 보존)
+      return parts.length>PP_PAGE?parts:null;})();     // 적으면 통째로
+    ppRest=_chunks?_chunks.slice(PP_PAGE):null;
+    const tbodyHtml=_chunks?_chunks.slice(0,PP_PAGE).join(''):_fullBody;
     const tfootHtml=(()=>{if(!disp.length)return '';
       const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);
       const footRow=(label,vals)=>{let put=false;
@@ -945,6 +1024,7 @@ SCREEN.partplan=(c)=>{
       if(tf){tf.innerHTML=tfootHtml;}
       if(cnt){cnt.textContent=cntHtml;}
       wireRows();          // 새로 그린 행에 클릭(집계 펼침) 핸들러만 다시 연결
+      ppWireLazy();        // 스크롤 이어붙이기(점진 렌더)
       return;
     }
     c.innerHTML=`
@@ -998,9 +1078,14 @@ SCREEN.partplan=(c)=>{
     c.querySelectorAll('th[data-tk]').forEach(th=>{
       th.ondragstart=e=>{_dragTk=th.getAttribute('data-tk');_dragGrp=th.getAttribute('data-grp');th.style.opacity='.4';
         try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',_dragTk);}catch(_){}};
-      th.ondragend=()=>{th.style.opacity='';c.querySelectorAll('th[data-tk]').forEach(x=>x.style.borderLeft='');};
+      // 표시가 남은 th 만 되돌린다(전체 훑기 대신 style 속성 선택자로 한정)
+      th.ondragend=()=>{th.style.opacity='';
+        c.querySelectorAll('th[data-tk][style*="border-left"]').forEach(x=>x.style.borderLeft='');};
       th.ondragover=e=>{if(th.getAttribute('data-grp')!==_dragGrp)return;   // 같은 그룹끼리만
-        e.preventDefault();if(_dragTk&&_dragTk!==th.getAttribute('data-tk'))th.style.borderLeft='3px solid #2563eb';};
+        e.preventDefault();
+        // dragover 는 초당 수십회 발생 — 이미 표시돼 있으면 건드리지 않는다(리페인트 절감)
+        if(_dragTk&&_dragTk!==th.getAttribute('data-tk')&&!th.style.borderLeft)
+          th.style.borderLeft='3px solid #2563eb';};
       th.ondragleave=()=>{th.style.borderLeft='';};
       th.ondrop=e=>{th.style.borderLeft='';
         if(th.getAttribute('data-grp')!==_dragGrp)return;
@@ -1022,13 +1107,35 @@ SCREEN.partplan=(c)=>{
         const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
         const move=(row)=>{const cs=row.children; if(fi>=cs.length||ti>=cs.length)return;
           const cell=cs[fi]; row.insertBefore(cell, cs[ti]);};
-        move(hr);
-        const bodies=[...tbl.tBodies, ...(tbl.tFoot?[tbl.tFoot]:[])];
-        bodies.forEach(tb=>{for(const row of tb.rows){
-          if(row.children.length===hr.children.length)move(row);}});   // colspan 행(소계 등)은 건너뜀
+        // ★성능(2026-08-21): 4,782행 × insertBefore 를 붙어있는 표에 하면 행마다 레이아웃이
+        //   무효화돼 저사양 PC에서 수 초씩 멈춘다. 표를 잠시 DOM 에서 떼어내고 옮긴 뒤
+        //   되돌리면 레이아웃 계산이 1회로 합쳐진다(스크롤 위치는 직접 보존).
+        const holder=tbl.parentNode, next=tbl.nextSibling;
+        const sy=holder&&holder.scrollTop||0, sx=holder&&holder.scrollLeft||0;
+        const ph=tbl.offsetHeight;                     // 떼는 동안 스크롤 튐 방지
+        if(holder){holder.style.minHeight=ph+'px'; tbl.remove();}
+        try{
+          move(hr);
+          const bodies=[...tbl.tBodies, ...(tbl.tFoot?[tbl.tFoot]:[])];
+          const n=hr.children.length;
+          bodies.forEach(tb=>{const rs=tb.rows;
+            for(let i=0;i<rs.length;i++){const row=rs[i];
+              if(row.children.length===n)move(row);}});   // colspan 행(소계 등)은 건너뜀
+        }finally{
+          if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
+            holder.scrollTop=sy; holder.scrollLeft=sx;}
+        }
+        // 아직 DOM 에 안 붙은 나머지 행 조각들은 새 컬럼순서로 다시 만들어야 어긋나지 않는다.
+        //   (headOrder/tailOrder 는 위에서 이미 갱신됨 → bodyHtml() 을 새 순서로 재생성)
+        if(ppRest&&ppRest.length){
+          const shownRows=(tbl.tBodies[0]?tbl.tBodies[0].rows.length:0);
+          const parts=bodyHtml().split(/(?=<tr)/);
+          ppRest=parts.slice(shownRows);
+        }
       };
     });
     wireRows();   // 집계행 클릭(펼침/접힘) — 표만 다시 그릴 때도 재연결 필요해서 별도 함수로 분리
+    ppWireLazy(); // 스크롤 이어붙이기(점진 렌더) — 전체 렌더 경로
     g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
     // 텍스트 필터 3종 = 입력 즉시 클라이언트 필터(재조회 없음).
     // ★성능: 타이핑마다 전체 재렌더하면 2,900행 기준 버벅임 → 180ms 디바운스 + 표(tbody/tfoot)만 교체(툴바 유지=포커스/커서 보존).
@@ -2181,7 +2288,44 @@ SCREEN.prodsheet=(host)=>{
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const T=new Date(), today=iso(T);
   const st={rows:[],cnt:0,sumQty:0,from:today,to:today,part:'',item:'',sheetNo:'',boxNo:'',labelNo:'',
-            fin:'N',parts:[],sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
+            fin:'N',parts:[],printers:[],sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
+  // ★프린터 2대 운용(레거시 w_pr_input_490 동일) — 제품스티커=라벨프린터 / 가간판·전표=A4프린터.
+  //   웹은 보안상 프린터를 코드로 지정할 수 없다. 대신
+  //   (a) 출력물마다 용지규격을 다르게 두고(40×20 / 210×110 / A4)
+  //   (b) 인쇄창(window.open)의 '창이름'을 분리해 브라우저가 각 창의 마지막 프린터를 따로 기억하게 하고
+  //   (c) 어느 프린터로 보낼지 이름을 화면·인쇄창에 표시한다.
+  //   → 직원이 출력물별로 처음 1회만 프린터를 고르면 이후 자동 선택된다.
+  const PRN_LS='ps490_printers';
+  const PRN=(()=>{try{return Object.assign({label:'',kanban:''},
+      JSON.parse(localStorage.getItem(PRN_LS)||'{}'));}catch(e){return {label:'',kanban:''};}})();
+  const savePrn=()=>{try{localStorage.setItem(PRN_LS,JSON.stringify(PRN));}catch(e){}};
+  // 서버(ERP 184)에 설치된 프린터 목록 — 현장 프린터는 대개 네트워크 공유라 서버에도 잡힌다.
+  const loadPrinters=async(refresh)=>{
+    try{const r=await fetch(`${API}/api/prodsheet/printers${refresh?'?refresh=1':''}`);
+      const j=await r.json(); st.printers=j.rows||[];}
+    catch(e){st.printers=[];}};
+  // 프린터 선택칩 — ★select 드롭다운(언제든 다시 열어 바꿀 수 있음).
+  //   datalist 는 값이 채워지면 그 값으로 목록이 필터링돼 다른 프린터가 안 보였다(2026-08-21 수정).
+  //   목록에 없는 프린터는 '✏ 직접입력…' 을 고르면 입력칸으로 전환된다.
+  const prnPick=(k,tit,sz,val,bg,bd,c1,c2,w)=>{
+    const list=st.printers||[];
+    const known=list.some(p=>p.name===val);
+    const custom=!!val&&!known;      // 목록에 없는 값 = 직접입력 상태
+    return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+                  background:${bg};border:1px solid ${bd};border-radius:14px">
+      <b style="font-size:11px;color:${c1}">${tit}</b>
+      <span style="font-size:10px;color:${c2}">${sz}</span>
+      <select class="sel" id="ps-prn-${k}" style="min-width:0;width:${w}px;height:24px;font-size:12px"
+              title="${esc(tit)} 출력에 쓸 프린터 (언제든 다시 선택 가능)">
+        <option value=""${val?'':' selected'}>— 선택 안 함 —</option>
+        ${list.map(p=>`<option value="${esc(p.name)}"${p.name===val?' selected':''}>${esc(p.name)}</option>`).join('')}
+        <option value="__custom__"${custom?' selected':''}>✏ 직접입력…</option>
+      </select>
+      <input class="inp" id="ps-prn-${k}-tx" value="${esc(custom?val:'')}" placeholder="프린터명 직접입력"
+             style="min-width:0;width:${w}px;height:24px;font-size:12px;${custom?'':'display:none'}"
+             autocomplete="off">
+      ${val?`<span id="ps-prn-${k}-ok" title="지정됨" style="font-size:11px;color:#1c7c3a">✔</span>`:''}
+    </span>`;};
   const qsv=o=>new URLSearchParams(Object.entries(o).filter(([,v])=>v!==''&&v!=null)).toString();
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/prodsheet/parts`);const j=await r.json();st.parts=j.rows||[];}catch(e){st.parts=[];}};
   const load=async()=>{st.loading=true;st.cur=null;st.det=null;render();
@@ -2562,7 +2706,8 @@ SCREEN.prodsheet=(host)=>{
         <div class="t4">${esc(j.item)}</div>
         <div class="t5">${esc(j.worker||'')}/${esc(j.inspector||'')}</div>
       </div></div>`;
-    const w=window.open('','_blank','width=760,height=1000');
+    // ★실제 URL(print.html?t=label)로 연다 — about:blank 는 프린터 선택이 기억되지 않는다.
+    const w=await openPrintWin('label','pncPrnLabel','width=760,height=1000');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>제품스티커 ${esc(j.item)} (${j.qty}장)</title>
     <style>
@@ -2588,7 +2733,11 @@ SCREEN.prodsheet=(host)=>{
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3</span></div>
+      <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×20mm</span>
+      <div style="margin-top:6px;padding:6px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:4px;font-size:12px">
+        🖨 <b>프린터: ${esc(PRN.label||'(라벨프린터 미지정)')}</b>
+        <span style="color:#8c6d1f">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
+      </div></div>
     ${(j.labels||[]).map(one).join('')}
     <script>
       (function(){var imgs=[].slice.call(document.images),left=imgs.length;
@@ -2729,27 +2878,28 @@ SCREEN.prodsheet=(host)=>{
     const card=c=>`<div class="kb">
       <table>
         <tr>
-          <td class="c" style="width:12%;font-size:17px;font-weight:700;height:11mm">${esc(c.line||'')}</td>
-          <td class="c" style="width:58%;font-size:30px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
-          <td class="c" style="width:30%;font-size:30px;font-weight:800">${nf(c.qty)}</td></tr>
+          <td class="c" style="width:12%;font-size:21px;font-weight:700;height:22mm">${esc(c.line||'')}</td>
+          <td class="c" style="width:58%;font-size:40px;font-weight:800;letter-spacing:1px">${esc(c.item)}</td>
+          <td class="c" style="width:30%;font-size:40px;font-weight:800">${nf(c.qty)}</td></tr>
       </table>
       <table>
         <tr>
           <td style="width:12%"></td>
-          <td class="c lb" style="width:14%">박스종류</td><td class="c" style="width:18%">${esc(c.pack_kind||'')}</td>
-          <td class="c lb" style="width:16%">표준포장수</td><td class="c" style="width:10%;font-weight:700">${c.pack_qty||''}</td>
+          <td class="c lb" style="width:14%;font-size:13px">박스종류</td><td class="c" style="width:18%;font-size:14px">${esc(c.pack_kind||'')}</td>
+          <td class="c lb" style="width:16%;font-size:13px">표준포장수</td><td class="c" style="width:10%;font-weight:700;font-size:14px">${c.pack_qty||''}</td>
           <td style="width:30%">${bc(c.barcode)}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:12%">생산날짜</td><td class="c" style="width:20%;font-weight:700">${esc(ymdw(c.plan_ymd))}</td>
-            <td class="c lb" style="width:14%">엘지날짜</td><td class="c" style="width:20%;font-weight:700">${esc(ymdw(c.plan_ymd))}</td>
-            <td class="c lb" style="width:8%">품명</td><td style="width:26%;font-size:9px;padding-left:3px">${esc(c.nm||'')}</td></tr>
-        <tr><td class="c lb">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px">${esc(c.proc_nm||'')}</td></tr>
+        <tr><td class="c lb" style="width:12%;font-size:13px">생산날짜</td><td class="c" style="width:20%;font-weight:700;font-size:14px">${esc(ymdw(c.plan_ymd))}</td>
+            <td class="c lb" style="width:14%;font-size:13px">엘지날짜</td><td class="c" style="width:20%;font-weight:700;font-size:14px">${esc(ymdw(c.plan_ymd))}</td>
+            <td class="c lb" style="width:8%;font-size:13px">품명</td><td style="width:26%;font-size:11px;padding-left:3px">${esc(c.nm||'')}</td></tr>
+        <tr><td class="c lb" style="font-size:13px">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px;font-size:14px">${esc(c.proc_nm||'')}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:12%;height:15mm">불량이력</td><td style="width:62%"></td>
-            <td class="c lb" style="width:26%">검수란</td></tr>
-        <tr><td class="c lb" style="height:15mm">시방이력</td><td></td>
+        <colgroup><col style="width:12%"><col style="width:62%"><col style="width:26%"></colgroup>
+        <tr><td class="c lb" style="height:14mm;font-size:16px">불량이력</td><td></td>
+            <td class="c lb">검수란</td></tr>
+        <tr><td class="c lb" style="height:14mm;font-size:16px">시방이력</td><td></td>
             <td></td></tr>
       </table>
       <table>
@@ -2760,21 +2910,22 @@ SCREEN.prodsheet=(host)=>{
       <div class="ft"><span>출력일시 : ${esc((c.print_dt||'').slice(2,16).replace('T',' ').replace(/-/g,'/'))} ${esc(c.print_user||'')}</span>
         <span>용접전표번호 : ${esc(c.sheet_no_fmt)}</span></div>
     </div>`;
-    const w=window.open('','_blank','width=980,height=680');   // 210×110 비율에 맞춘 미리보기
+    // ★실제 URL(print.html?t=kanban)로 연다 — about:blank 는 프린터 선택이 기억되지 않는다.
+    const w=await openPrintWin('kanban','pncPrnKanban','width=980,height=680');
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>가간판 ${esc(cards[0].item)} (${cards.length}장)</title>
     <style>
-      /* ★용지 = A4 3등분(210 × 110mm) — 실제 간판 용지크기(2026-08-20).
+      /* ★용지 = 190 × 110mm — 실제 간판 용지크기(2026-08-21, 폭 -2cm 조정).
          이전 A4 portrait 는 세로 297mm 를 다 잡아 아래 2/3 가 빈 채로 출력됐다.
          간판 1장 = 1페이지. */
-      @page{size:210mm 110mm;margin:4mm}
+      @page{size:180mm 110mm;margin:4mm}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
       /* ★A4 1/3 폭 기준. 높이는 내용에 맞춤(고정 X — 아래쪽 빈칸 방지).
          한 페이지에 3장까지 자연스럽게 들어감. */
       /* 간판 1장 = 1페이지. 레거시 실물처럼 표는 위쪽에 모으고 아래는 비운다
          (표를 억지로 늘려 채우지 않음 — 2026-08-20 레거시 대조). */
-      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden}
+      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden;min-height:90mm;display:flex;flex-direction:column}
       .kb+.kb{page-break-before:always}
       .kb table{border-collapse:collapse;width:100%}
       /* 레거시 실물 대조: 글자·행높이를 키우고 라벨칸 음영은 없앤다(전부 흰 바탕) */
@@ -2782,13 +2933,17 @@ SCREEN.prodsheet=(host)=>{
       .kb .c{text-align:center}
       .kb .lb{font-weight:700;white-space:nowrap}
       .kb .ft{display:flex;justify-content:space-between;padding:2px 4px;font-size:9px;
-              font-weight:700;border-top:1px solid #000}
+              font-weight:700;border-top:1px solid #000;margin-top:auto}
       @media print{.noprint{display:none}}
     </style></head><body>
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span></div>
+      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span>
+      <div style="margin-top:6px;padding:6px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;font-size:12px">
+        🖨 <b>프린터: ${esc(PRN.kanban||'(가간판 프린터 미지정)')}</b>
+        <span style="color:#1a6a99">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
+      </div></div>
     ${cards.map(card).join('')}
     <script>
       (function(){var imgs=[].slice.call(document.images),left=imgs.length;
@@ -2818,6 +2973,21 @@ SCREEN.prodsheet=(host)=>{
             #ps-lbody tr:hover{background:#f2f8fd}</style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🖨️ 생산전표출력관리 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_490 · 전표 기준 가간판/제품스티커 발행</span></div>
+     <!-- ★프린터 2대 지정(레거시 490 상단과 동일 위치) — 이름은 내 브라우저에 저장 -->
+     <div style="flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+                 margin:0 0 6px;padding:7px 10px;border:1px solid #d6dee8;border-left:4px solid #5b7fa6;
+                 border-radius:6px;background:linear-gradient(180deg,#fbfdff,#f1f5fa)">
+       <span style="font-size:12px;font-weight:700;color:#41546b">🖨 프린터 설정</span>
+       ${prnPick('l','🔖 제품스티커','40×20',PRN.label,'#fff7e6','#ffd591','#a06a00','#b08a4a',178)}
+       ${prnPick('k','🏷 가간판·전표','210×110 / A4',PRN.kanban,'#e6f7ff','#91d5ff','#0d6b9a','#4a92b5',200)}
+       <button class="btn" id="ps-prn-r" style="height:24px;padding:0 8px;font-size:11px"
+               title="ERP서버에 설치된 프린터 목록을 다시 읽습니다">🔄 목록</button>
+       <span id="ps-prn-msg" style="font-size:11px;color:#8a94a6">${
+         st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
+         :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.'}</span>
+       <span style="font-size:11px;color:#8a94a6">※ 위 칸은 <b>메모용</b>(자동지정 아님) — 실제 선택은
+         출력물별로 <b>인쇄창에서 처음 1회만</b> 고르면 그 뒤로는 자동으로 그 프린터가 잡힙니다.</span>
+     </div>
      <div class="page-sub" style="flex:0 0 auto">출력기간=전표 <code>PRINT_DATETIME</code> · 전표처리방법 <b>J:전표</b>(용접전표 바코드로 실적) / <b>G:가간판</b>(간판 바코드로 실적) · 포장정보=<code>PR_M_ITEM_SUB</code>.</div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
        <label class="tl">출력기간</label>
@@ -2871,10 +3041,40 @@ SCREEN.prodsheet=(host)=>{
     g('#ps-all').onclick=e=>{st.sel.clear();if(e.target.checked)st.rows.forEach((r,i)=>st.sel.add(i));
       host.querySelectorAll('.ps-chk').forEach(ch=>ch.checked=e.target.checked);
       const c=g('#ps-selcnt');if(c)c.textContent=st.sel.size;};
+    // 프린터 선택 — select 로 언제든 재선택 가능. '직접입력' 고르면 옆 입력칸으로 전환.
+    //   재렌더하지 않고 DOM 만 토글(입력 중 포커스·스크롤 유지)
+    {const wire=(k,key)=>{
+       const sel=g('#ps-prn-'+k), tx=g('#ps-prn-'+k+'-tx');
+       if(!sel||!tx)return;
+       const mark=v=>{const o=g('#ps-prn-'+k+'-ok');
+         if(v&&!o){const s=document.createElement('span');s.id='ps-prn-'+k+'-ok';
+           s.title='지정됨';s.style.cssText='font-size:11px;color:#1c7c3a';s.textContent='✔';
+           sel.parentElement.appendChild(s);}
+         else if(!v&&o)o.remove();};
+       sel.onchange=()=>{
+         if(sel.value==='__custom__'){tx.style.display='';tx.focus();
+           PRN[key]=tx.value.trim();savePrn();mark(PRN[key]);return;}
+         tx.style.display='none';
+         PRN[key]=sel.value;savePrn();mark(PRN[key]);};
+       tx.oninput=()=>{PRN[key]=tx.value.trim();savePrn();mark(PRN[key]);};};
+     wire('l','label'); wire('k','kanban');
+     const pr=g('#ps-prn-r'),pm=g('#ps-prn-msg');
+     if(pr)pr.onclick=async()=>{pr.disabled=true;if(pm)pm.textContent='목록 읽는 중…';
+       await loadPrinters(true);
+       // 목록이 바뀌었으므로 선택칩만 다시 그린다(현재 지정값은 PRN 에 보존됨)
+       ['l','k'].forEach(k=>{const s=g('#ps-prn-'+k);if(!s)return;
+         const cur=(k==='l')?PRN.label:PRN.kanban;
+         const known=(st.printers||[]).some(p=>p.name===cur);
+         s.innerHTML=`<option value="">— 선택 안 함 —</option>`
+           +(st.printers||[]).map(p=>`<option value="${esc(p.name)}"${p.name===cur?' selected':''}>${esc(p.name)}</option>`).join('')
+           +`<option value="__custom__"${(cur&&!known)?' selected':''}>✏ 직접입력…</option>`;});
+       if(pm)pm.textContent=st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
+                                              :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.';
+       pr.disabled=false;};}
     if(ed){g('#ps-pj').onclick=printSheets;g('#ps-ig').onclick=openKanban;g('#ps-il').onclick=openLabel;}
     wireLeft();paintDetail();attachResizers(host);
   };
-  loadParts().then(()=>{render();load();});
+  Promise.all([loadParts(),loadPrinters(false)]).then(()=>{render();load();});
 };
 
 /* ===== 공정별 바코드생산실적 (w_pr_input_520) — 스캔→자동채움→등록/취소(nx.proc_barcode) ===== */

@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>영업계획현황 진단</title>
+<link rel="stylesheet" href="css/app.css">
+<style>
+  #log{font-family:monospace;font-size:12px;white-space:pre-wrap;padding:10px;
+       background:#111;color:#0f0;max-height:240px;overflow:auto}
+  #log .e{color:#f66}
+  #box{height:420px;border:2px solid #c00;margin:8px}
+</style></head>
+<body>
+<div id="log"></div>
+<div id="box"></div>
+<script>
+const L=document.getElementById('log');
+const log=(m,e)=>{const d=document.createElement('div');if(e)d.className='e';d.textContent=m;L.appendChild(d);L.scrollTop=L.scrollHeight;};
+window.addEventListener('error',ev=>log('★오류: '+ev.message+'  @'+(ev.filename||'').split('/').pop()+':'+ev.lineno,1));
+window.addEventListener('unhandledrejection',ev=>log('★Promise 거부: '+(ev.reason&&ev.reason.message||ev.reason),1));
+
+// fetch 를 감싸 호출/응답을 전부 기록
+const _f=window.fetch;
+window.fetch=function(u,o){
+  const t0=Date.now(); log('→ fetch '+u);
+  return _f.apply(this,arguments).then(r=>{
+    log('← '+r.status+' '+((Date.now()-t0)/1000).toFixed(2)+'초  '+u.split('?')[0].split('/').pop());
+    return r;
+  }).catch(e=>{log('← ✗ fetch 실패: '+e.message,1);throw e;});
+};
+
+function loadJs(src){return new Promise((res,rej)=>{
+  const s=document.createElement('script');s.src=src+'?nc='+Date.now();
+  s.onload=()=>{log('✓ '+src);res();};
+  s.onerror=()=>{log('✗ 로드실패 '+src,1);rej(new Error(src));};
+  document.head.appendChild(s);});}
+
+(async()=>{
+  try{
+    // index.html 과 동일한 순서로 의존 스크립트를 먼저 로드해야 한다
+    await loadJs('js/data.js');
+    await loadJs('js/costdata.js');
+    await loadJs('js/core.js');
+    log('  API_BASE = '+(window.API_BASE||'(없음)'));
+    await loadJs('js/screens.sales.js');
+    log('  SCREEN.salesplan = '+typeof (window.SCREEN||{}).salesplan);
+    if(typeof (window.SCREEN||{}).salesplan!=='function'){log('★화면 함수 없음',1);return;}
+
+    const box=document.getElementById('box');
+    log('— 화면 렌더 —');
+    SCREEN.salesplan(box);
+    log('  렌더 완료. 조회버튼 '+(box.querySelector('#sp-go')?'있음':'없음'));
+
+    setTimeout(()=>{
+      const b=box.querySelector('#sp-go'); if(!b){log('★조회버튼 없음',1);return;}
+      log('— 조회 클릭 —');
+      const t0=Date.now();
+      b.click();
+      const iv=setInterval(()=>{
+        const tb=box.querySelector('.sp-tbl tbody');
+        const n=tb?tb.querySelectorAll('tr').length:0;
+        const txt=tb?tb.textContent:'';
+        if(/조회 중/.test(txt)){
+          if(Date.now()-t0>45000){clearInterval(iv);log('★45초 초과 — "조회 중" 그대로',1);}
+          return;
+        }
+        clearInterval(iv);
+        log('✓ 완료 '+((Date.now()-t0)/1000).toFixed(1)+'초 · 표시 '+n+'행');
+        log('  건수표시: '+((box.querySelector('#sp-cnt')||{}).textContent||''));
+      },300);
+    },500);
+  }catch(e){log('★예외: '+e.message,1);}
+})();
+</script></body></html>

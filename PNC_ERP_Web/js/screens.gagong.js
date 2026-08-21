@@ -447,9 +447,22 @@ SCREEN.gagongprog420=(c)=>{
           return -1;};
         const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
         const mv=row=>{const cs=row.children;if(fi>=cs.length||ti>=cs.length)return;row.insertBefore(cs[fi],cs[ti]);};
-        mv(hr);
-        [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tb=>{
-          for(const row of tb.rows) if(row.children.length===hr.children.length) mv(row);});   // colspan 행(소계·합계)은 제외
+        // ★성능(2026-08-21, 410과 동일): 붙어있는 표에 행마다 insertBefore 하면 매번 레이아웃이
+        //   무효화돼 저사양 PC에서 멈춘다. 표를 잠시 떼고 옮긴 뒤 되돌린다(스크롤 직접 보존).
+        const holder=tbl.parentNode, next=tbl.nextSibling;
+        const sy=holder&&holder.scrollTop||0, sx=holder&&holder.scrollLeft||0;
+        const ph=tbl.offsetHeight;
+        if(holder){holder.style.minHeight=ph+'px'; tbl.remove();}
+        try{
+          mv(hr);
+          const n=hr.children.length;
+          [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tb=>{const rs=tb.rows;
+            for(let i=0;i<rs.length;i++){const row=rs[i];
+              if(row.children.length===n)mv(row);}});   // colspan 행(소계·합계)은 제외
+        }finally{
+          if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
+            holder.scrollTop=sy; holder.scrollLeft=sx;}
+        }
       };
     });
     // 선택 없이 눌러도 열린다 → 빈 50행 수기입력(레거시 동일)
