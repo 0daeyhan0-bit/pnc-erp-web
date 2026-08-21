@@ -939,9 +939,22 @@ SCREEN.lgsale=(c)=>{
           const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
           const mv=row=>{const cs=row.children;if(fi>=cs.length||ti>=cs.length)return;
             row.insertBefore(cs[fi],cs[ti]);};
-          mv(hr);
-          [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tbd=>{
-            for(const row of tbd.rows) if(row.children.length===hr.children.length) mv(row);});
+          // ★성능(410·420과 동일): 붙어있는 표에 행마다 insertBefore 하면 매번 레이아웃이
+          //   무효화된다. 표를 잠시 떼고 옮긴 뒤 되돌린다(스크롤 직접 보존).
+          const holder=tbl.parentNode, next=tbl.nextSibling;
+          const sy=holder&&holder.scrollTop||0, sx=holder&&holder.scrollLeft||0;
+          const ph=tbl.offsetHeight;
+          if(holder){holder.style.minHeight=ph+'px'; tbl.remove();}
+          try{
+            mv(hr);
+            const n=hr.children.length;
+            [...tbl.tBodies,...(tbl.tFoot?[tbl.tFoot]:[])].forEach(tbd=>{const rs=tbd.rows;
+              for(let i=0;i<rs.length;i++){const row=rs[i];
+                if(row.children.length===n)mv(row);}});
+          }finally{
+            if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
+              holder.scrollTop=sy; holder.scrollLeft=sx;}
+          }
         };
       });
     })();

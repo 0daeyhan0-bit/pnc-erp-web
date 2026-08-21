@@ -1046,9 +1046,14 @@ SCREEN.partplan=(c)=>{
     c.querySelectorAll('th[data-tk]').forEach(th=>{
       th.ondragstart=e=>{_dragTk=th.getAttribute('data-tk');_dragGrp=th.getAttribute('data-grp');th.style.opacity='.4';
         try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',_dragTk);}catch(_){}};
-      th.ondragend=()=>{th.style.opacity='';c.querySelectorAll('th[data-tk]').forEach(x=>x.style.borderLeft='');};
+      // 표시가 남은 th 만 되돌린다(전체 훑기 대신 style 속성 선택자로 한정)
+      th.ondragend=()=>{th.style.opacity='';
+        c.querySelectorAll('th[data-tk][style*="border-left"]').forEach(x=>x.style.borderLeft='');};
       th.ondragover=e=>{if(th.getAttribute('data-grp')!==_dragGrp)return;   // 같은 그룹끼리만
-        e.preventDefault();if(_dragTk&&_dragTk!==th.getAttribute('data-tk'))th.style.borderLeft='3px solid #2563eb';};
+        e.preventDefault();
+        // dragover 는 초당 수십회 발생 — 이미 표시돼 있으면 건드리지 않는다(리페인트 절감)
+        if(_dragTk&&_dragTk!==th.getAttribute('data-tk')&&!th.style.borderLeft)
+          th.style.borderLeft='3px solid #2563eb';};
       th.ondragleave=()=>{th.style.borderLeft='';};
       th.ondrop=e=>{th.style.borderLeft='';
         if(th.getAttribute('data-grp')!==_dragGrp)return;
@@ -1070,10 +1075,24 @@ SCREEN.partplan=(c)=>{
         const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
         const move=(row)=>{const cs=row.children; if(fi>=cs.length||ti>=cs.length)return;
           const cell=cs[fi]; row.insertBefore(cell, cs[ti]);};
-        move(hr);
-        const bodies=[...tbl.tBodies, ...(tbl.tFoot?[tbl.tFoot]:[])];
-        bodies.forEach(tb=>{for(const row of tb.rows){
-          if(row.children.length===hr.children.length)move(row);}});   // colspan 행(소계 등)은 건너뜀
+        // ★성능(2026-08-21): 4,782행 × insertBefore 를 붙어있는 표에 하면 행마다 레이아웃이
+        //   무효화돼 저사양 PC에서 수 초씩 멈춘다. 표를 잠시 DOM 에서 떼어내고 옮긴 뒤
+        //   되돌리면 레이아웃 계산이 1회로 합쳐진다(스크롤 위치는 직접 보존).
+        const holder=tbl.parentNode, next=tbl.nextSibling;
+        const sy=holder&&holder.scrollTop||0, sx=holder&&holder.scrollLeft||0;
+        const ph=tbl.offsetHeight;                     // 떼는 동안 스크롤 튐 방지
+        if(holder){holder.style.minHeight=ph+'px'; tbl.remove();}
+        try{
+          move(hr);
+          const bodies=[...tbl.tBodies, ...(tbl.tFoot?[tbl.tFoot]:[])];
+          const n=hr.children.length;
+          bodies.forEach(tb=>{const rs=tb.rows;
+            for(let i=0;i<rs.length;i++){const row=rs[i];
+              if(row.children.length===n)move(row);}});   // colspan 행(소계 등)은 건너뜀
+        }finally{
+          if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
+            holder.scrollTop=sy; holder.scrollLeft=sx;}
+        }
       };
     });
     wireRows();   // 집계행 클릭(펼침/접힘) — 표만 다시 그릴 때도 재연결 필요해서 별도 함수로 분리
