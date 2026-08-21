@@ -1269,13 +1269,15 @@ SCREEN.salesplan=(c)=>{
   // 레거시 f_like — 입력값을 %..% 로 감싼다(빈값=%)
   const lk=v=>{v=(''+(v||'')).trim();return v?('%'+v+'%'):'';};
   const shift=n=>{const d=new Date(d2i(st.from));if(isNaN(d))return;
-    d.setDate(d.getDate()+n);st.from=i2d(iso(d));load();};
+    d.setDate(d.getDate()+n);st.from=i2d(iso(d));
+    if(st.done)load(); else draw();};   // 조회 전이면 날짜만 이동
   // 드롭다운 목록 — 라인은 서버 목록, 작업처는 조회결과에서 실측 수집(마스터엔 안 쓰는 값이 많음)
-  //   ※작업처 필터는 SQL 에서 work_center_code 에 걸리므로 value 는 '코드', 표시는 '이름'
-  const opts={lines:[],wcs:[]};
+  //   ※작업처는 work_center_code 체계가 정리돼 있지 않아(사내공정코드+사급거래처코드 혼재)
+  //     드롭다운을 만들지 않고 검색(부분일치)으로 둔다.
+  const opts={lines:[]};
   const loadOpts=async()=>{try{
       const j=await(await fetch(`${API}/api/salesplan/opts`)).json();
-      opts.lines=j.lines||[]; opts.wcs=j.wcs||[];}catch(e){}};
+      opts.lines=j.lines||[];}catch(e){}};
   const load=async()=>{st.loading=true;st.msg='';draw();
     // 라인만 드롭다운(정확값), 나머지 텍스트칸은 %..% 부분일치
     const qs=new URLSearchParams({from_ymd:st.from,days:st.days,gubun:st.gubun,
@@ -1284,7 +1286,7 @@ SCREEN.salesplan=(c)=>{
       if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();
       st.rows=j.rows||[];st.tot=j.tot||null;st.labels=j.labels||[];
-      st.done=true;collectWc();}
+      st.done=true;}
     catch(e){st.rows=[];st.tot=null;st.msg='조회 실패 — '+e.message;}
     st.loading=false;draw();};
   // 주말(토·일) 셀 배경 — 레거시는 주황
@@ -1299,8 +1301,14 @@ SCREEN.salesplan=(c)=>{
   //   (라인/제번/Model/Tools/비율/시간/Output/비고 없음)
   const isAgg=()=>st.gubun==='3';
   const NCOL=()=>isAgg()?4:12;   // 고정컬럼 수(일자 제외)
+  // 조회 전에도 일자 컬럼이 보이도록 라벨을 프론트에서 계산(서버 라벨과 동일 규칙)
+  const calcLabels=()=>{const out=[],WD='일월화수목금토';
+    const b=new Date(d2i(st.from)); if(isNaN(b))return [];
+    for(let i=0;i<st.days;i++){const d=new Date(b);d.setDate(d.getDate()+i);
+      out.push(String(d.getDate()).padStart(2,'0')+WD[d.getDay()]);}
+    return out;};
   const draw=()=>{
-    const L=st.labels, ITEMAGG=isAgg();
+    const L=(st.labels&&st.labels.length)?st.labels:calcLabels(), ITEMAGG=isAgg();
     c.innerHTML=`
      <style>
        .sp-tbl{table-layout:auto}
@@ -1326,11 +1334,6 @@ SCREEN.salesplan=(c)=>{
        <label class="tl">작업처</label>
        <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처코드" style="width:110px" autocomplete="off"
               title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
-       <label class="tl">구분</label>
-       <span style="border:1px solid var(--line-2,#c9d3e0);border-radius:4px;padding:2px 6px;background:#fff;display:inline-flex;align-items:center">
-         ${[['1','상세'],['2','집계'],['3','도번집계']].map(([v,n])=>
-           `<label style="font-weight:400;margin:0 6px 0 1px;white-space:nowrap"><input type="radio" name="sp-gb" value="${v}"${st.gubun===v?' checked':''}> ${n}</label>`).join('')}
-       </span>
        <div class="spacer"></div>
        <button class="btn xls" id="sp-xls">📥 엑셀</button>
      </div>
@@ -1343,6 +1346,11 @@ SCREEN.salesplan=(c)=>{
        <label class="tl">모델</label><input class="inp" id="sp-model" value="${esc(st.model)}" placeholder="Model No" style="width:150px" autocomplete="off">
        <label class="tl">제번</label><input class="inp" id="sp-wo" value="${esc(st.wo)}" placeholder="제번" style="width:120px" autocomplete="off">
        <label class="tl">도번</label><input class="inp" id="sp-item" value="${esc(st.item)}" placeholder="도번" style="width:130px" autocomplete="off">
+       <label class="tl">구분</label>
+       <span style="border:1px solid var(--line-2,#c9d3e0);border-radius:4px;padding:2px 6px;background:#fff;display:inline-flex;align-items:center">
+         ${[['1','상세'],['2','집계'],['3','도번집계']].map(([v,n])=>
+           `<label style="font-weight:400;margin:0 6px 0 1px;white-space:nowrap"><input type="radio" name="sp-gb" value="${v}"${st.gubun===v?' checked':''}> ${n}</label>`).join('')}
+       </span>
        <button class="btn" id="sp-go">🔍 조회</button>
        <button class="btn ghost" id="sp-reset">초기화</button>
        <div class="spacer"></div>
@@ -1370,13 +1378,18 @@ SCREEN.salesplan=(c)=>{
       st.model=g('#sp-model').value.trim();st.wo=g('#sp-wo').value.trim();st.item=g('#sp-item').value.trim();};
     g('#sp-prev').onclick=()=>shift(-1);
     g('#sp-next').onclick=()=>shift(1);
-    g('#sp-from').onchange=()=>{st.from=i2d(g('#sp-from').value);load();};
-    g('#sp-days').onchange=()=>{st.days=+g('#sp-days').value;load();};
+    // 조회 전에는 값만 반영(조회 유발 X) — 조건을 다 맞춘 뒤 [조회] 한 번만 누르게
+    g('#sp-from').onchange=()=>{st.from=i2d(g('#sp-from').value);if(st.done)load();};
+    g('#sp-days').onchange=()=>{st.days=+g('#sp-days').value;if(st.done)load();else draw();};
+    // 구분 전환 — 아직 조회 전이면 화면만 갱신(무거운 조회를 유발하지 않음).
+    //   이미 조회했다면 같은 조건이라 서버 캐시(30초)로 대부분 즉시 응답.
     c.querySelectorAll('input[name="sp-gb"]').forEach(r=>r.onchange=()=>{
-      st.gubun=c.querySelector('input[name="sp-gb"]:checked').value;load();});
+      st.gubun=c.querySelector('input[name="sp-gb"]:checked').value;
+      if(st.done)load(); else draw();});
     g('#sp-go').onclick=()=>{sync();load();};
+    // 초기화 = 조건만 되돌리고 조회는 하지 않는다(조회 전 상태로 복귀)
     g('#sp-reset').onclick=()=>{st.wc=st.line=st.model=st.wo=st.item='';st.gubun='1';st.days=7;
-      st.from=i2d(iso(new Date()));load();};
+      st.from=i2d(iso(new Date()));st.rows=[];st.tot=null;st.labels=[];st.done=false;st.msg='';draw();};
     ['#sp-wc','#sp-line','#sp-model','#sp-wo','#sp-item'].forEach(id=>{
       const e=g(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter'){sync();load();}};});
     g('#sp-xls').onclick=()=>{
@@ -1395,7 +1408,7 @@ SCREEN.salesplan=(c)=>{
     attachResizers(c);
   };
   const bodyHtml=()=>{
-    const L=st.labels, ITEMAGG=isAgg();
+    const L=(st.labels&&st.labels.length)?st.labels:calcLabels(), ITEMAGG=isAgg();
     if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">${
       st.done?'조회 결과 없음 — 기준일자·필터를 조정하세요'
              :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요. (레거시 SQL 이 무거워 6초 안팎 걸립니다)'}</td></tr>`;
