@@ -12,8 +12,10 @@ router = APIRouter()
 @router.get("/api/bom/search")
 def bom_search(q: str = Query('', description="품번/품명 부분검색"),
                include_past: int = Query(0, description="0=현행(status='사용')만[기본], 1=과거(휴면)포함"),
-               all_active: int = Query(0, description="1=BOM연결 무관 status='사용' 전체(재고 입출고 화면용: orphan 원소재도 노출). include_past 우선.")):
+               all_active: int = Query(0, description="1=BOM연결 무관 status='사용' 전체(재고 입출고 화면용: orphan 원소재도 노출). include_past 우선."),
+               use: str = Query("", description="사용여부(nx.item.use_flag): ''=전체, '1'=사용중, '0'=사용중지")):
     q = q.strip()
+    usef = "AND ISNULL(i.use_flag,1)=1" if use.strip() == "1" else ("AND ISNULL(i.use_flag,1)=0" if use.strip() == "0" else "")
     cn = _nx(); cur = cn.cursor()
     try:
         like = f'%{q}%'
@@ -33,11 +35,12 @@ def bom_search(q: str = Query('', description="품번/품명 부분검색"),
                       AND NOT EXISTS(SELECT 1 FROM nx.bom_line u WHERE u.child_item=i.item_code) ) )"""
         cur.execute(f"""
             SELECT TOP 60 i.item_code, i.item_name, i.item_type, ISNULL(i.status,'') st,
-              CASE WHEN EXISTS(SELECT 1 FROM nx.bom_header h WHERE h.item_code=i.item_code) THEN 1 ELSE 0 END AS has_bom
+              CASE WHEN EXISTS(SELECT 1 FROM nx.bom_header h WHERE h.item_code=i.item_code) THEN 1 ELSE 0 END AS has_bom,
+              ISNULL(i.use_flag,1) uf
             FROM nx.item i
-            WHERE (i.item_code LIKE ? OR i.item_name LIKE ?) {past}
+            WHERE (i.item_code LIKE ? OR i.item_name LIKE ?) {past} {usef}
             ORDER BY has_bom DESC, i.item_code""", like, like)
-        rows = [{"item": r[0], "name": r[1], "type": r[2], "status": str(r[3]).strip(), "has_bom": bool(r[4])} for r in cur.fetchall()]
+        rows = [{"item": r[0], "name": r[1], "type": r[2], "status": str(r[3]).strip(), "has_bom": bool(r[4]), "use_flag": int(r[5])} for r in cur.fetchall()]
         return {"rows": rows, "include_past": int(include_past or 0)}
     finally:
         cn.close()

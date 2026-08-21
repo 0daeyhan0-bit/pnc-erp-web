@@ -112,8 +112,10 @@ def itemmaster_opts():
 
 @router.get("/api/itemmaster/list")
 def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query(""),
-                    status: str = Query(""), nature: str = Query(""), prod_group: str = Query(""), limit: int = Query(500)):
-    """품목마스터 목록(nx.item + item_sub). 코드→이름 디코드. nature=성격6그룹, prod_group=제품군(접두어) 필터."""
+                    status: str = Query(""), nature: str = Query(""), prod_group: str = Query(""),
+                    use: str = Query("", description="사용여부 필터: ''=전체, '1'=사용중, '0'=사용중지"), limit: int = Query(500)):
+    """품목마스터 목록(nx.item + item_sub). 코드→이름 디코드. nature=성격6그룹, prod_group=제품군(접두어) 필터.
+       use=사용여부(nx.item.use_flag): LG리시빙 스코프 실사용=1·나머지=0. ISNULL시 사용중(1) 취급."""
     nx = _nx(); cur = nx.cursor()
     cn2 = _conn(); c2 = cn2.cursor()
     try:
@@ -128,10 +130,12 @@ def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Q
         if status.strip(): w.append("i.status=?"); p.append(status.strip())
         if nature.strip(): w.append("i.nature=?"); p.append(nature.strip())
         if prod_group.strip(): w.append("i.prod_group=?"); p.append(prod_group.strip())
+        if use.strip() == "1": w.append("ISNULL(i.use_flag,1)=1")      # 사용중
+        elif use.strip() == "0": w.append("ISNULL(i.use_flag,1)=0")    # 사용중지
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))} i.item_code,i.item_name,i.item_spec,i.item_type,
               i.lgroup,i.sgroup,i.item_group,i.item_class,i.pipe_kind,i.unit,i.metal_gubun,i.in_cust,i.work_code,
               i.make_type,i.cost_gubun,i.item_status,i.status,i.diam,i.thick,i.length,i.net_weight,i.item_pipe_id,
-              i.prod_rate,i.sub_mat_flag, s.insp_flag, s.rack_no, i.nature, i.active, i.prod_group, i.prod_line
+              i.prod_rate,i.sub_mat_flag, s.insp_flag, s.rack_no, i.nature, i.active, i.prod_group, i.prod_line, i.use_flag
             FROM nx.item i LEFT JOIN nx.item_sub s ON s.item_code=i.item_code
             WHERE {' AND '.join(w)} ORDER BY i.item_code""", *p)
         rows = []
@@ -148,7 +152,8 @@ def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Q
                 "net_weight": num(20), "pipe_id": num(21), "prod_rate": num(22), "sub_mat_flag": g(23),
                 "insp_flag": _INSP.get(g(24), g(24)), "rack_no": g(25),
                 "nature": g(26), "active": (1 if (r[27] is None or r[27]) else 0),
-                "prod_group": g(28), "prod_line": g(29)})
+                "prod_group": g(28), "prod_line": g(29),
+                "use_flag": (1 if (r[30] is None or r[30]) else 0)})
         cur.execute("SELECT DISTINCT prod_group FROM nx.item WHERE prod_group IS NOT NULL")
         pgs = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
         pgs = sorted(pgs, key=lambda g: _PROD_GROUP_ORDER.index(g) if g in _PROD_GROUP_ORDER else 99)
@@ -159,6 +164,30 @@ def itemmaster_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Q
                 "prod_groups": [{"code": g, "nm": g} for g in pgs]}
     finally:
         nx.close(); cn2.close()
+
+@router.post("/api/itemmaster/use_flag")
+def itemmaster_use_flag(payload: dict = Body(...)):
+    """품목 사용/사용중지 토글(nx.item.use_flag=1 사용/0 사용중지). payload {items:[code..] 또는 item, use:0|1}.
+       LG리시빙 스코프 초기시드 후 사용자 수동 토글이 정본. 원가/분석·조회는 이 플래그로 필터."""
+    items = payload.get("items")
+    if items is None and payload.get("item"): items = [payload["item"]]
+    items = [str(x).strip() for x in (items or []) if str(x).strip()]
+    if not items: raise HTTPException(400, "item(또는 items) 필요")
+    use = 1 if payload.get("use") else 0
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        cur.execute("IF COL_LENGTH('nx.item','use_flag') IS NULL ALTER TABLE nx.item ADD use_flag BIT NULL")
+        n = 0
+        for i in range(0, len(items), 900):
+            ch = items[i:i + 900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"UPDATE nx.item SET use_flag=? WHERE LTRIM(RTRIM(item_code)) IN ({ph})", use, *ch)
+            n += cur.rowcount
+        nx.commit()
+        return {"ok": True, "updated": n, "use": use}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
 
 @router.get("/api/itemmaster/get")
 def itemmaster_get(item: str = Query(...)):
