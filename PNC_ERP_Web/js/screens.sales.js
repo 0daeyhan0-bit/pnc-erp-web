@@ -1377,7 +1377,7 @@ SCREEN.salesplan=(c)=>{
      <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
        구분 <b>상세</b>=원행 / <b>집계</b>=연속 라인·시간·제번 병합(도번 묶음) / <b>도번집계</b>=도번별 합산 ·
        <span style="background:#fac090;padding:0 5px">주황</span>=토·일 · 🔴 라이브</div>
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;align-items:center;min-height:44px">
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;align-items:center;min-height:44px;margin-top:8px">
        <label class="tl">기준일자</label>
        <button class="btn ghost" id="sp-prev" title="하루 앞으로">◀</button>
        <input class="inp" type="date" id="sp-from" value="${esc(d2i(st.from))}" style="min-width:0;width:140px">
