@@ -1312,6 +1312,47 @@ SCREEN.salesplan=(c)=>{
     for(let i=0;i<st.days;i++){const d=new Date(b);d.setDate(d.getDate()+i);
       out.push(String(d.getDate()).padStart(2,'0')+WD[d.getDay()]);}
     return out;};
+  const rowHtml1=(r,L)=>{
+    const days=r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
+    return isAgg()
+      ? `<tr><td class="center"><b>${esc(r.item)}</b></td><td class="center">${esc(r.wc)}</td>`
+        +`<td class="num">${r.lot?nf(r.lot):''}</td><td class="num"><b>${r.total?nf(r.total):''}</b></td>${days}</tr>`
+      : `<tr><td class="center">${esc(r.line_nm?`${r.line} ${r.line_nm}`:r.line)}</td>`
+        +`<td class="center">${esc(r.wo)}</td><td class="center">${esc(r.model)}</td>`
+        +`<td class="center">${esc(r.tool)}</td><td class="sp-item"><b>${esc(r.item)}</b></td>`
+        +`<td class="center">${esc(r.wc)}</td><td class="num mut">${r.rate?nf(r.rate):''}</td>`
+        +`<td class="center mut">${esc(fmtHm(r.ohm))}</td><td class="center mut">${esc(fmtOut(r))}</td>`
+        +`<td class="num">${r.lot?nf(r.lot):''}</td><td class="num"><b>${r.total?nf(r.total):''}</b></td>`
+        +days+`<td class="sp-rmk mut" title="${esc(r.remarks)}">${esc(r.remarks)}</td></tr>`;};
+  const bodyHtml=()=>{
+    const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
+    if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">${
+      st.done?'조회 결과 없음 — 기준일자·필터를 조정하세요'
+             :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요.'}</td></tr>`;
+    spShown=Math.min(SP_PAGE,st.rows.length);
+    return st.rows.slice(0,spShown).map(r=>rowHtml1(r,L)).join('');
+  };
+  // 스크롤이 끝에 가까워지면 다음 묶음을 이어붙인다
+  const spAppend=()=>{
+    if(spShown>=st.rows.length)return;
+    const tb=c.querySelector('.sp-tbl tbody'); if(!tb)return;
+    const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
+    const to=Math.min(spShown+SP_PAGE,st.rows.length);
+    tb.insertAdjacentHTML('beforeend',st.rows.slice(spShown,to).map(r=>rowHtml1(r,L)).join(''));
+    spShown=to;
+    const cnt=c.querySelector('#sp-cnt');
+    if(cnt)cnt.textContent=spShown<st.rows.length
+      ? `${nf(st.rows.length)}건 (표시 ${nf(spShown)})` : `${nf(st.rows.length)}건`;
+  };
+  const spWireLazy=()=>{
+    const w=c.querySelector('.grid-wrap');
+    if(!w||w.dataset.lazy)return;
+    w.dataset.lazy='1';
+    w.addEventListener('scroll',()=>{
+      if(spShown<st.rows.length&&w.scrollTop+w.clientHeight>=w.scrollHeight-300)spAppend();
+    },{passive:true});
+  };
+
   const draw=()=>{
     const L=(st.labels&&st.labels.length)?st.labels:calcLabels(), ITEMAGG=isAgg();
     c.innerHTML=`
@@ -1417,46 +1458,6 @@ SCREEN.salesplan=(c)=>{
       }
       downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
     attachResizers(c);
-  };
-  const rowHtml1=(r,L)=>{
-    const days=r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
-    return isAgg()
-      ? `<tr><td class="center"><b>${esc(r.item)}</b></td><td class="center">${esc(r.wc)}</td>`
-        +`<td class="num">${r.lot?nf(r.lot):''}</td><td class="num"><b>${r.total?nf(r.total):''}</b></td>${days}</tr>`
-      : `<tr><td class="center">${esc(r.line_nm?`${r.line} ${r.line_nm}`:r.line)}</td>`
-        +`<td class="center">${esc(r.wo)}</td><td class="center">${esc(r.model)}</td>`
-        +`<td class="center">${esc(r.tool)}</td><td class="sp-item"><b>${esc(r.item)}</b></td>`
-        +`<td class="center">${esc(r.wc)}</td><td class="num mut">${r.rate?nf(r.rate):''}</td>`
-        +`<td class="center mut">${esc(fmtHm(r.ohm))}</td><td class="center mut">${esc(fmtOut(r))}</td>`
-        +`<td class="num">${r.lot?nf(r.lot):''}</td><td class="num"><b>${r.total?nf(r.total):''}</b></td>`
-        +days+`<td class="sp-rmk mut" title="${esc(r.remarks)}">${esc(r.remarks)}</td></tr>`;};
-  const bodyHtml=()=>{
-    const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
-    if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">${
-      st.done?'조회 결과 없음 — 기준일자·필터를 조정하세요'
-             :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요.'}</td></tr>`;
-    spShown=Math.min(SP_PAGE,st.rows.length);
-    return st.rows.slice(0,spShown).map(r=>rowHtml1(r,L)).join('');
-  };
-  // 스크롤이 끝에 가까워지면 다음 묶음을 이어붙인다
-  const spAppend=()=>{
-    if(spShown>=st.rows.length)return;
-    const tb=c.querySelector('.sp-tbl tbody'); if(!tb)return;
-    const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
-    const to=Math.min(spShown+SP_PAGE,st.rows.length);
-    tb.insertAdjacentHTML('beforeend',st.rows.slice(spShown,to).map(r=>rowHtml1(r,L)).join(''));
-    spShown=to;
-    const cnt=c.querySelector('#sp-cnt');
-    if(cnt)cnt.textContent=spShown<st.rows.length
-      ? `${nf(st.rows.length)}건 (표시 ${nf(spShown)})` : `${nf(st.rows.length)}건`;
-  };
-  const spWireLazy=()=>{
-    const w=c.querySelector('.grid-wrap');
-    if(!w||w.dataset.lazy)return;
-    w.dataset.lazy='1';
-    w.addEventListener('scroll',()=>{
-      if(spShown<st.rows.length&&w.scrollTop+w.clientHeight>=w.scrollHeight-300)spAppend();
-    },{passive:true});
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
   //   조건을 다 맞춘 뒤 [조회]를 눌러야 조회되게 해서 불필요한 대기를 없앰.
