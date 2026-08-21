@@ -1313,8 +1313,14 @@ SCREEN.salesplan=(c)=>{
      <style>
        .sp-tbl{table-layout:auto}
        .sp-tbl th,.sp-tbl td{white-space:nowrap}
+       /* 헤더·본문 전부 가운데 정렬(.tbl .num 우측정렬을 이김) */
+       .tbl.sp-tbl th,.tbl.sp-tbl td,
+       .tbl.sp-tbl th.num,.tbl.sp-tbl td.num{text-align:center;vertical-align:middle}
        .sp-tbl td.sp-item{white-space:normal;min-width:170px;max-width:340px;line-height:1.35}
        .sp-tbl td.sp-rmk{white-space:normal;min-width:120px;max-width:280px}
+       /* 헤더 고정 — 스크롤해도 컬럼명이 보이게(배경 불투명 필수) */
+       .tbl.sp-tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
+         box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🗓️ 영업계획현황
@@ -1354,11 +1360,12 @@ SCREEN.salesplan=(c)=>{
        <button class="btn" id="sp-go">🔍 조회</button>
        <button class="btn ghost" id="sp-reset">초기화</button>
        <div class="spacer"></div>
-       <span class="rowcount" id="sp-cnt">${st.tot?`${nf(st.tot.cnt)}건`:''}</span>
+       <span class="rowcount" id="sp-cnt">${st.tot?(st.tot.cnt>SP_PAGE
+         ? `${nf(st.tot.cnt)}건 (표시 ${nf(Math.min(SP_PAGE,st.tot.cnt))})` : `${nf(st.tot.cnt)}건`):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
-     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit sp-tbl" style="font-size:11px"><thead><tr>
+     <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl fit sp-tbl" style="font-size:11px;margin:0 auto"><thead><tr>
         ${ITEMAGG?`<th>도번</th><th>작업처</th><th class="num">LOT수량</th><th class="num">합계</th>`
           :`<th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th>
             <th>작업처</th><th class="num">비율</th><th class="center">시간</th><th class="center">Output</th>
@@ -1387,6 +1394,7 @@ SCREEN.salesplan=(c)=>{
       st.gubun=c.querySelector('input[name="sp-gb"]:checked').value;
       if(st.done)load(); else draw();});
     g('#sp-go').onclick=()=>{sync();load();};
+    spWireLazy();   // 스크롤 이어붙이기(점진 렌더)
     // 초기화 = 조건만 되돌리고 조회는 하지 않는다(조회 전 상태로 복귀)
     g('#sp-reset').onclick=()=>{st.wc=st.line=st.model=st.wo=st.item='';st.gubun='1';st.days=7;
       st.from=i2d(iso(new Date()));st.rows=[];st.tot=null;st.labels=[];st.done=false;st.msg='';draw();};
@@ -1407,32 +1415,49 @@ SCREEN.salesplan=(c)=>{
       downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
     attachResizers(c);
   };
+  // ★대용량 대응: 3,289행 × 20컬럼을 한 번에 그리면 브라우저가 멈춘다(서버는 0.3초).
+  //   처음 SP_PAGE 행만 그리고 스크롤 끝에서 이어붙인다(출하실적현황·410과 동일 방식).
+  const SP_PAGE=300;
+  let spShown=0;
+  const rowHtml1=(r,L)=>{
+    const days=r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
+    return isAgg()
+      ? `<tr><td class="center"><b>${esc(r.item)}</b></td><td class="center">${esc(r.wc)}</td>`
+        +`<td class="num">${r.lot?nf(r.lot):''}</td><td class="num"><b>${r.total?nf(r.total):''}</b></td>${days}</tr>`
+      : `<tr><td class="center">${esc(r.line_nm?`${r.line} ${r.line_nm}`:r.line)}</td>`
+        +`<td class="center">${esc(r.wo)}</td><td class="center">${esc(r.model)}</td>`
+        +`<td class="center">${esc(r.tool)}</td><td class="sp-item"><b>${esc(r.item)}</b></td>`
+        +`<td class="center">${esc(r.wc)}</td><td class="num mut">${r.rate?nf(r.rate):''}</td>`
+        +`<td class="center mut">${esc(fmtHm(r.ohm))}</td><td class="center mut">${esc(fmtOut(r))}</td>`
+        +`<td class="num">${r.lot?nf(r.lot):''}</td><td class="num"><b>${r.total?nf(r.total):''}</b></td>`
+        +days+`<td class="sp-rmk mut" title="${esc(r.remarks)}">${esc(r.remarks)}</td></tr>`;};
   const bodyHtml=()=>{
-    const L=(st.labels&&st.labels.length)?st.labels:calcLabels(), ITEMAGG=isAgg();
+    const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
     if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">${
       st.done?'조회 결과 없음 — 기준일자·필터를 조정하세요'
-             :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요. (레거시 SQL 이 무거워 6초 안팎 걸립니다)'}</td></tr>`;
-    const days=r=>r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
-    if(ITEMAGG)return st.rows.map(r=>`<tr>
-      <td class="center"><b>${esc(r.item)}</b></td>
-      <td class="center">${esc(r.wc)}</td>
-      <td class="num">${r.lot?nf(r.lot):''}</td>
-      <td class="num"><b>${r.total?nf(r.total):''}</b></td>
-      ${days(r)}</tr>`).join('');
-    return st.rows.map(r=>`<tr>
-      <td class="center">${esc(r.line_nm?`${r.line} ${r.line_nm}`:r.line)}</td>
-      <td class="center">${esc(r.wo)}</td>
-      <td class="center">${esc(r.model)}</td>
-      <td class="center">${esc(r.tool)}</td>
-      <td class="sp-item"><b>${esc(r.item)}</b></td>
-      <td class="center">${esc(r.wc)}</td>
-      <td class="num mut">${r.rate?nf(r.rate):''}</td>
-      <td class="center mut">${esc(fmtHm(r.ohm))}</td>
-      <td class="center mut">${esc(fmtOut(r))}</td>
-      <td class="num">${r.lot?nf(r.lot):''}</td>
-      <td class="num"><b>${r.total?nf(r.total):''}</b></td>
-      ${days(r)}
-      <td class="sp-rmk mut" title="${esc(r.remarks)}">${esc(r.remarks)}</td></tr>`).join('');
+             :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요.'}</td></tr>`;
+    spShown=Math.min(SP_PAGE,st.rows.length);
+    return st.rows.slice(0,spShown).map(r=>rowHtml1(r,L)).join('');
+  };
+  // 스크롤이 끝에 가까워지면 다음 묶음을 이어붙인다
+  const spAppend=()=>{
+    if(spShown>=st.rows.length)return;
+    const tb=c.querySelector('.sp-tbl tbody'); if(!tb)return;
+    const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
+    const to=Math.min(spShown+SP_PAGE,st.rows.length);
+    tb.insertAdjacentHTML('beforeend',st.rows.slice(spShown,to).map(r=>rowHtml1(r,L)).join(''));
+    spShown=to;
+    const cnt=c.querySelector('#sp-cnt');
+    if(cnt)cnt.textContent=spShown<st.rows.length
+      ? `${nf(st.rows.length)}건 (표시 ${nf(spShown)})` : `${nf(st.rows.length)}건`;
+  };
+  const spWireLazy=()=>{
+    const w=c.querySelector('.grid-wrap');
+    if(!w||w.dataset.lazy)return;
+    w.dataset.lazy='1';
+    w.addEventListener('scroll',()=>{
+      if(spShown<st.rows.length&&w.scrollTop+w.clientHeight>=w.scrollHeight-300)spAppend();
+    },{passive:true});
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
   //   조건을 다 맞춘 뒤 [조회]를 눌러야 조회되게 해서 불필요한 대기를 없앰.
