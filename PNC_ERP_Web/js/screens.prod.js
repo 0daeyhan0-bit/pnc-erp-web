@@ -10,14 +10,33 @@ window.openPrintWin=(kind,name,feat)=>new Promise(resolve=>{
   if(!w){resolve(null);return;}
   let done=false;
   const fin=()=>{if(done)return;done=true;
-    // 로드된 문서를 비우고 쓰기모드로 — 이래야 URL 은 print.html 로 유지된 채 내용만 교체된다.
-    try{w.document.open();}catch(e){}
+    // ★document.open()/write() 는 문서를 새로 여는 동작이라 URL 이 about:blank 로 돌아가고,
+    //   그러면 브라우저가 프린터 선택을 기억하지 못한다(2026-08-21 실측).
+    //   → write 대신 print.html 안의 헬퍼(renderPrint)로 DOM 에 주입한다.
+    //   호출측은 기존처럼 w.document.write(html); w.document.close(); 를 쓰면 된다.
+    const d=w.document;
+    let buf='';
+    d.write=d.writeln=function(html){buf+=html;};
+    d.close=function(){
+      const html=buf; buf='';
+      if(!html)return;
+      try{
+        if(typeof w.renderPrint==='function')w.renderPrint(html);
+        else{                                  // print.html 이 아직 안 떴을 때의 대비책
+          w.__pendingHtml=html;
+          setTimeout(()=>{try{if(typeof w.renderPrint==='function')w.renderPrint(w.__pendingHtml);}catch(e){}},400);
+        }
+      }catch(e){
+        // 최후수단 — 내용이라도 보이게(URL 은 about:blank 가 되어 프린터 기억은 포기)
+        try{d.open();d.write(html);d.close();}catch(_){}
+      }
+    };
     resolve(w);};
   try{
     if(w.document&&w.document.readyState==='complete')return fin();   // 재사용되는 창
     w.addEventListener('load',fin,{once:true});
   }catch(e){}
-  setTimeout(fin,1200);   // 안전장치(로드 이벤트를 놓쳐도 진행)
+  setTimeout(fin,1500);   // 안전장치(로드 이벤트를 놓쳐도 진행)
 });
 
 /* ===== Spec Sheet(BOM) 출력 — ★최상위 공용 함수 =====

@@ -1,16 +1,79 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <title>인쇄 준비 중…</title>
-<!-- ★인쇄 전용 빈 페이지.
-     window.open('','창이름') 으로 열면 주소가 about:blank 가 되는데,
-     브라우저(특히 Edge)는 프린터 선택을 URL 기준으로 기억하므로
-     about:blank 에서는 "마지막에 고른 프린터"가 저장되지 않는다.
-     → 실제 URL(/print.html?t=label 등)로 열어야 출력물별로 프린터가 기억된다.
-     내용은 호출한 화면이 document.write 로 채운다. -->
+<!-- ★인쇄 전용 페이지.
+     window.open('','창이름') 으로 열면 주소가 about:blank 가 되는데, 브라우저(특히 Edge)는
+     "마지막에 고른 프린터"를 URL 기준으로 저장하므로 about:blank 에서는 기억되지 않는다.
+     document.write()/open() 도 문서를 새로 여는 동작이라 URL 을 about:blank 로 되돌린다.
+     → 이 페이지를 실제 URL(/print.html?t=label 등)로 열고, 아래 renderPrint() 로
+       DOM 에만 내용을 주입한다. URL 이 유지되므로 출력물별로 프린터가 기억된다. -->
 <style>
-  body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;color:#555;
-       display:flex;align-items:center;justify-content:center;height:100vh}
-  .m{font-size:13px}
-  @media print{.m{display:none}}
+  html,body{margin:0}
+  body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;color:#000}
+  #_wait{display:flex;align-items:center;justify-content:center;height:100vh;
+         font-size:13px;color:#666}
+  @media print{#_wait{display:none}}
 </style></head>
-<body><div class="m">인쇄 내용을 준비하고 있습니다…</div></body></html>
+<body>
+<div id="_wait">인쇄 내용을 준비하고 있습니다…</div>
+<script>
+/* 호출측(screens.*.js)이 만든 전체 HTML 문자열을 받아 이 문서에 주입한다.
+   - <title> → document.title
+   - <head> 의 style/link → head 로 이식
+   - <body> 내용 → body 로 이식(스크립트는 실행되지 않으므로 인쇄는 여기서 직접 트리거)
+   - 이미지(바코드/QR)가 모두 로드된 뒤 print() */
+window.renderPrint = function (html) {
+  var d = document;
+  try {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+
+    if (doc.title) d.title = doc.title;
+
+    // 이전 주입분 제거 후 style/link 이식
+    var old = d.head.querySelectorAll('[data-inj]');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+    var sts = doc.head.querySelectorAll('style,link[rel=stylesheet]');
+    for (var j = 0; j < sts.length; j++) {
+      var n = d.importNode(sts[j], true);
+      n.setAttribute('data-inj', '1');
+      d.head.appendChild(n);
+    }
+
+    // 본문 교체
+    var wait = d.getElementById('_wait');
+    if (wait) wait.remove();
+    d.body.innerHTML = '';
+    var kids = doc.body.childNodes;
+    for (var k = 0; k < kids.length; k++) {
+      var nd = kids[k];
+      if (nd.nodeType === 1 && nd.tagName === 'SCRIPT') continue;  // 인쇄는 아래서 직접
+      d.body.appendChild(d.importNode(nd, true));
+    }
+  } catch (e) {
+    d.body.innerHTML = '<p style="padding:16px;color:#c0392b">인쇄 내용 생성 실패: '
+      + String(e && e.message ? e.message : e) + '</p>';
+    return;
+  }
+
+  // 이미지 로드 완료 후 인쇄
+  var imgs = [].slice.call(d.images);
+  var left = 0;
+  for (var m = 0; m < imgs.length; m++) if (!imgs[m].complete) left++;
+  var fired = false;
+  function go() {
+    if (fired) return; fired = true;
+    setTimeout(function () { try { window.focus(); window.print(); } catch (e) {} }, 250);
+  }
+  if (!left) return go();
+  for (var q = 0; q < imgs.length; q++) {
+    if (imgs[q].complete) continue;
+    imgs[q].addEventListener('load', function () { if (--left <= 0) go(); }, { once: true });
+    imgs[q].addEventListener('error', function () { if (--left <= 0) go(); }, { once: true });
+  }
+  setTimeout(go, 5000);   // 이미지가 끝내 안 오면 그래도 인쇄
+};
+
+// 호출측이 renderPrint 준비 전에 write 했을 경우
+if (window.__pendingHtml) { try { window.renderPrint(window.__pendingHtml); } catch (e) {} }
+</script>
+</body></html>
