@@ -1412,7 +1412,7 @@ SCREEN.salesplan=(c)=>{
          ? `${nf(st.tot.cnt)}건 (표시 ${nf(Math.min(SP_PAGE,st.tot.cnt))})` : `${nf(st.tot.cnt)}건`):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
-     <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit sp-tbl" style="font-size:11px"><thead><tr>
         ${ITEMAGG?`<th>도번</th><th>작업처</th><th class="num">LOT수량</th><th class="num">합계</th>`
           :`<th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th>
@@ -1421,7 +1421,7 @@ SCREEN.salesplan=(c)=>{
         ${L.map(x=>`<th class="num"${wkbg(x)}>${esc(x)}</th>`).join('')}
         ${ITEMAGG?'':'<th>비고</th>'}</tr></thead>
       <tbody>${st.loading?`<tr><td colspan="${NCOL()+L.length}" class="empty"><span class="lspin"></span> 조회 중…</td></tr>`:bodyHtml()}</tbody>
-      ${st.tot&&st.rows.length?`<tfoot><tr class="grandtot" style="background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
+      ${st.tot&&st.rows.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td colspan="${ITEMAGG?2:9}" class="right">총계 (${nf(st.tot.cnt)}건)</td>
         <td class="num">${nf(st.tot.lot)}</td><td class="num">${nf(st.tot.total)}</td>
         ${st.tot.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('')}
