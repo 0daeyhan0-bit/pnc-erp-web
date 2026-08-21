@@ -34,6 +34,9 @@ function loadJs(src){return new Promise((res,rej)=>{
 
 (async()=>{
   try{
+    // index.html 과 동일한 순서로 의존 스크립트를 먼저 로드해야 한다
+    await loadJs('js/data.js');
+    await loadJs('js/costdata.js');
     await loadJs('js/core.js');
     log('  API_BASE = '+(window.API_BASE||'(없음)'));
     await loadJs('js/screens.sales.js');
