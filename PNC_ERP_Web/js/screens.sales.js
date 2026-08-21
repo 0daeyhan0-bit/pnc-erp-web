@@ -1464,20 +1464,25 @@ SCREEN.salesplan=(c)=>{
     attachResizers(c);
     fitHeight();
   };
-  // ★CSS(height:100%/calc(100vh..)) 가 .content 의 flex 구조와 맞물려 먹지 않는 경우가 있어
-  //   부모의 실제 렌더 높이를 측정해 픽셀로 직접 채운다(표가 화면 아래까지 차게).
+  // ★parent.clientHeight 로 재면 부모(.content)가 overflow:auto 라 "자식 콘텐츠 크기만큼"
+  //   커진 상태를 재게 되어 점점 좁아지는 악순환이 생긴다(2026-08-21 실측).
+  //   → 뷰포트 기준 위치(getBoundingClientRect)로 "실제 남은 공간"을 계산해 고정한다.
   const fitHeight=()=>{
     const root=c.querySelector('#sp-root'); if(!root)return;
     const apply=()=>{
-      const parent=root.parentElement; if(!parent)return;
-      const ph=parent.clientHeight;
-      if(ph>100)root.style.height=ph+'px';
+      const rc=root.getBoundingClientRect();
+      const h=window.innerHeight-rc.top-16;   // 화면 아래쪽 여백 16px
+      if(h>200)root.style.height=h+'px';
     };
-    apply();
+    requestAnimationFrame(apply);   // 레이아웃이 자리잡은 뒤 측정
     if(!fitHeight._wired){
       fitHeight._wired=true;
-      window.addEventListener('resize',()=>{const r=c.querySelector('#sp-root');
-        if(r){const p=r.parentElement;if(p&&p.clientHeight>100)r.style.height=p.clientHeight+'px';}});
+      window.addEventListener('resize',()=>{
+        const r=c.querySelector('#sp-root'); if(!r)return;
+        const rc=r.getBoundingClientRect();
+        const h=window.innerHeight-rc.top-16;
+        if(h>200)r.style.height=h+'px';
+      });
     }
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
