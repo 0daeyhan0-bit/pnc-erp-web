@@ -1421,7 +1421,7 @@ SCREEN.salesplan=(c)=>{
         ${L.map(x=>`<th class="num"${wkbg(x)}>${esc(x)}</th>`).join('')}
         ${ITEMAGG?'':'<th>비고</th>'}</tr></thead>
       <tbody>${st.loading?`<tr><td colspan="${NCOL()+L.length}" class="empty"><span class="lspin"></span> 조회 중…</td></tr>`:bodyHtml()}</tbody>
-      ${st.tot&&st.rows.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
+      ${st.tot&&st.rows.length?`<tfoot><tr class="grandtot" style="background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td colspan="${ITEMAGG?2:9}" class="right">총계 (${nf(st.tot.cnt)}건)</td>
         <td class="num">${nf(st.tot.lot)}</td><td class="num">${nf(st.tot.total)}</td>
         ${st.tot.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('')}
