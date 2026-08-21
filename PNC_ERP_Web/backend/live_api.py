@@ -435,7 +435,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     m0 = ym + '01'   # 월초(YYMMDD)
     # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
     _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
@@ -480,17 +480,18 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _yr = 2000 + int(ym[:2]); _mo = int(ym[2:4]); _ld = _cal.monthrange(_yr, _mo)[1]
     eom = ym + ("%02d" % _ld)
     _half = lambda y6: 'H1' if (str(y6)[4:6] <= '15') else 'H2'
-    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'naesu')}
+    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'naesu')}
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,''), r.RECEIVING_YMD, ISNULL(r.mkt,'')""")
     for _r in _rr5:
         _cg = (_r['cg'] or '').strip(); _h = _half(_r['ymd']); _a = float(_r['amt'] or 0)
         if _cg == '절삭': _madd('hyeon_cut', _h, _a)
         elif _cg == '설치': _madd('hyeon_seol', _h, _a)
+        else: _madd('hyeon_etc', _h, _a)   # 기타(이지링크/분지관/미분류) — LG매출 합계 tie-out
         if str(_r['mkt']).strip() == '2': _madd('naesu', _h, _a)   # 내수(숨김·LG수금 산식용)
     # 다음날~월말 예상 기간
     try:
@@ -526,12 +527,12 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
         except Exception: pass
     # 파생행 + LG수금 = (내수−사급예상)×10% + 유상제외(=총매출−사급예상)
     def _r3(d): h1 = round(d['H1']); h2 = round(d['H2']); return {"h1": h1, "h2": h2, "tot": h1 + h2}
-    _hyeon_hab = {h: MS['hyeon_cut'][h] + MS['hyeon_seol'][h] for h in ('H1', 'H2')}
+    _hyeon_hab = {h: MS['hyeon_cut'][h] + MS['hyeon_seol'][h] + MS['hyeon_etc'][h] for h in ('H1', 'H2')}
     _sagub_hab = {h: MS['sagub_raw'][h] + MS['sagub_part'][h] for h in ('H1', 'H2')}
     _chong = {h: _hyeon_hab[h] + MS['chuga_cut'][h] + MS['chuga_seol'][h] for h in ('H1', 'H2')}   # 총매출
     _yusang = {h: _chong[h] - _sagub_hab[h] for h in ('H1', 'H2')}   # 유상제외(숨김) = LG매출(총매출)−사급금액
     _lgsu = {h: _chong[h] - _sagub_hab[h] + MS['naesu'][h] * 0.1 for h in ('H1', 'H2')}   # ★LG수금 = LG매출 − 사급금액 + 내수매출×10%
-    maechul = {"hyeon_cut": _r3(MS['hyeon_cut']), "hyeon_seol": _r3(MS['hyeon_seol']), "hyeon_hab": _r3(_hyeon_hab),
+    maechul = {"hyeon_cut": _r3(MS['hyeon_cut']), "hyeon_seol": _r3(MS['hyeon_seol']), "hyeon_etc": _r3(MS['hyeon_etc']), "hyeon_hab": _r3(_hyeon_hab),
                "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']),
                "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']), "sagub_hab": _r3(_sagub_hab),
                "lg_sugum": _r3(_lgsu)}

@@ -1012,6 +1012,7 @@ SCREEN.dailypurissue=(c)=>{
            <table class="tbl" style="${TS}">${CG}<tbody>
              <tr><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td><td></td></tr>
              <tr><td>현매출 − 설치</td><td class="num">${wonI(F.sales.hyeon_seol)}</td><td></td></tr>
+             ${F.sales.hyeon_etc?`<tr><td>현매출 − 기타 <span style="color:var(--muted);font-size:10px">(이지링크/미분류)</span></td><td class="num">${wonI(F.sales.hyeon_etc)}</td><td></td></tr>`:''}
              <tr style="font-weight:700"><td>LG매출 합계</td><td class="num">${wonI(F.sales.lg_sales)}</td><td></td></tr>
            </tbody></table>
            <div style="font-weight:700;color:#1c47a0;margin:10px 0 4px">매입비율</div>
@@ -1037,6 +1038,7 @@ SCREEN.dailypurissue=(c)=>{
            <table class="tbl" style="${TS}"><colgroup><col><col style="width:110px"><col style="width:110px"><col style="width:110px"></colgroup><thead><tr><th style="text-align:left">구분</th><th class="num">상반기</th><th class="num">하반기</th><th class="num">합계</th></tr></thead><tbody>
              ${mrow('현매출(절삭)',F.maechul.hyeon_cut)}
              ${mrow('현매출(설치)',F.maechul.hyeon_seol)}
+             ${(F.maechul.hyeon_etc&&F.maechul.hyeon_etc.tot)?mrow('현매출(기타)',F.maechul.hyeon_etc):''}
              ${mrow('현매출(합계)',F.maechul.hyeon_hab,true)}
              ${mrow('추가매출(절삭)',F.maechul.chuga_cut)}
              ${mrow('추가매출(설치)',F.maechul.chuga_seol)}
