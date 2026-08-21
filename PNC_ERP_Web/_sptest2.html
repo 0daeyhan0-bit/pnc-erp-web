@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>높이 진단</title>
+<link rel="stylesheet" href="css/app.css">
+<style>#log{position:fixed;top:0;left:0;right:0;z-index:9999;font-family:monospace;font-size:13px;
+  white-space:pre-wrap;padding:10px;background:#111;color:#0f0;max-height:50vh;overflow:auto}
+#log .e{color:#f66}</style></head>
+<body>
+<div id="log"></div>
+<div id="app" style="height:100%;display:flex">
+  <main class="ws" style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div class="tabbar" id="tabbar"></div>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+<script>
+const L=document.getElementById('log');
+const log=(m,e)=>{const d=document.createElement('div');if(e)d.className='e';d.textContent=m;L.appendChild(d);};
+function loadJs(src){return new Promise((res,rej)=>{const s=document.createElement('script');
+  s.src=src+'?nc='+Date.now();s.onload=res;s.onerror=()=>rej(new Error(src));document.head.appendChild(s);});}
+(async()=>{
+  await loadJs('js/data.js'); await loadJs('js/costdata.js'); await loadJs('js/core.js');
+  await loadJs('js/screens.sales.js');
+  log('core.js/screens.sales.js 로드 완료');
+
+  const content=document.getElementById('content');
+  const pg=document.createElement('div'); pg.id='pg-salesplan'; pg.style.cssText='display:none;height:100%';
+  content.appendChild(pg);
+  log('#pg-salesplan 인라인 style(생성직후): "'+pg.getAttribute('style')+'"');
+
+  SCREEN.salesplan(pg);
+  pg.style.display='block';   // activate() 가 하는 것과 동일
+
+  await new Promise(r=>setTimeout(r,1500));   // 조회 완료 대기
+
+  const cs1=getComputedStyle(content);
+  const cs2=getComputedStyle(pg);
+  log('--- 계산된 스타일 ---');
+  log('.content  height=' + content.clientHeight + 'px  computed-height=' + cs1.height);
+  log('#pg-salesplan height=' + pg.clientHeight + 'px  computed-height=' + cs2.height + '  inline="'+pg.getAttribute('style')+'"');
+  log('pg 자식 태그들: ' + [...pg.children].map(x=>x.tagName).join(','));
+  const root=[...pg.children].find(x=>x.tagName==='DIV');
+  if(root){
+    const cs3=getComputedStyle(root);
+    log('화면 루트 div  height=' + root.clientHeight + 'px  computed-height=' + cs3.height + '  inline="'+root.getAttribute('style')+'"');
+  }
+  const wrap=pg.querySelector('.grid-wrap');
+  if(wrap) log('.grid-wrap  height=' + wrap.clientHeight + 'px  (표 영역 실제 높이)');
+  log('\n브라우저 창 innerHeight=' + window.innerHeight);
+})();
+</script></body></html>

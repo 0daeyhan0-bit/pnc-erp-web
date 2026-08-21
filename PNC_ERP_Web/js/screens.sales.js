@@ -1392,7 +1392,7 @@ SCREEN.salesplan=(c)=>{
        <button class="btn xls" id="sp-xls" style="margin-left:10px">📥 엑셀</button>
      </div>
      <!-- 두 조건줄 높이를 맞추고, 표와 붙지 않도록 아래 여백을 준다 -->
-     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0;align-items:center;min-height:44px;margin-top:6px;margin-bottom:8px">
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;align-items:center;min-height:44px;margin-bottom:8px">
        <label class="tl">라인</label>
        <select class="sel" id="sp-line" style="width:150px">
          <option value=""${st.line?'':' selected'}>% 전체</option>
