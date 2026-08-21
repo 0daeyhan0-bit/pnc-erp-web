@@ -1301,6 +1301,11 @@ SCREEN.salesplan=(c)=>{
   //   (라인/제번/Model/Tools/비율/시간/Output/비고 없음)
   const isAgg=()=>st.gubun==='3';
   const NCOL=()=>isAgg()?4:12;   // 고정컬럼 수(일자 제외)
+  // ★대용량 대응: 3,289행 × 19컬럼을 한 번에 그리면 브라우저가 멈춘다(서버는 0.3초).
+  //   처음 SP_PAGE 행만 그리고 스크롤 끝에서 이어붙인다(출하실적현황·410과 동일 방식).
+  //   ※draw() 안에서 참조하므로 draw 보다 반드시 앞에 선언해야 한다(const 는 호이스팅 안 됨).
+  const SP_PAGE=300;
+  let spShown=0;
   // 조회 전에도 일자 컬럼이 보이도록 라벨을 프론트에서 계산(서버 라벨과 동일 규칙)
   const calcLabels=()=>{const out=[],WD='일월화수목금토';
     const b=new Date(d2i(st.from)); if(isNaN(b))return [];
@@ -1340,8 +1345,7 @@ SCREEN.salesplan=(c)=>{
        <label class="tl">작업처</label>
        <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처코드" style="width:110px" autocomplete="off"
               title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
-       <div class="spacer"></div>
-       <button class="btn xls" id="sp-xls">📥 엑셀</button>
+       <button class="btn xls" id="sp-xls" style="margin-left:10px">📥 엑셀</button>
      </div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;padding-top:0">
        <label class="tl">라인</label>
@@ -1359,13 +1363,12 @@ SCREEN.salesplan=(c)=>{
        </span>
        <button class="btn" id="sp-go">🔍 조회</button>
        <button class="btn ghost" id="sp-reset">초기화</button>
-       <div class="spacer"></div>
-       <span class="rowcount" id="sp-cnt">${st.tot?(st.tot.cnt>SP_PAGE
+       <span class="rowcount" id="sp-cnt" style="margin-left:10px">${st.tot?(st.tot.cnt>SP_PAGE
          ? `${nf(st.tot.cnt)}건 (표시 ${nf(Math.min(SP_PAGE,st.tot.cnt))})` : `${nf(st.tot.cnt)}건`):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      <div class="grid-wrap" style="flex:1 1 auto;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit sp-tbl" style="font-size:11px;margin:0 auto"><thead><tr>
+      <table class="tbl fit sp-tbl" style="font-size:11px"><thead><tr>
         ${ITEMAGG?`<th>도번</th><th>작업처</th><th class="num">LOT수량</th><th class="num">합계</th>`
           :`<th>라인</th><th>제번</th><th>Model No</th><th>Tools</th><th>도번</th>
             <th>작업처</th><th class="num">비율</th><th class="center">시간</th><th class="center">Output</th>
@@ -1415,10 +1418,6 @@ SCREEN.salesplan=(c)=>{
       downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
     attachResizers(c);
   };
-  // ★대용량 대응: 3,289행 × 20컬럼을 한 번에 그리면 브라우저가 멈춘다(서버는 0.3초).
-  //   처음 SP_PAGE 행만 그리고 스크롤 끝에서 이어붙인다(출하실적현황·410과 동일 방식).
-  const SP_PAGE=300;
-  let spShown=0;
   const rowHtml1=(r,L)=>{
     const days=r.d.map((v,i)=>`<td class="num"${wkbg(L[i])}>${v?nf(v):''}</td>`).join('');
     return isAgg()
