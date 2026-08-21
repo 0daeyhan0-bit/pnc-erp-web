@@ -1260,6 +1260,9 @@ SCREEN.prodstockadj=(c)=>{
    레거시 대조(2026-08-21 기준 7일): 상세 3,289 / 집계 1,948 / 도번집계 553 — 건수 일치 확인. */
 SCREEN.salesplan=(c)=>{
   const API=API_BASE;
+  // ★nf 는 전역이 아니다 — 각 화면이 자기 스코프에 따로 정의해 쓴다(core.js/이 파일의 다른 화면 모두 지역).
+  //   빠뜨리면 draw() 에서 "nf is not defined" 로 렌더가 중단돼 "조회 중" 이 남는다(2026-08-21).
+  const nf=v=>(+v||0).toLocaleString('ko-KR');
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const d2i=v=>{v=(''+(v||'')).trim();return v.length>=6?`20${v.slice(0,2)}-${v.slice(2,4)}-${v.slice(4,6)}`:'';};
   const i2d=v=>(''+(v||'')).slice(2).replace(/-/g,'');
