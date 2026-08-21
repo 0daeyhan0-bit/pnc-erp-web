@@ -77,4 +77,28 @@ for (p, cc), q in add:
     c.execute("""INSERT INTO nx.bom_line(bom_id,seq,child_item,qty,node_type,cs_calc_except,lme_except,sagub_default,is_optional,except_flag,set_except,kitting,vir_item,remarks)
       VALUES(?,?,?,?,'키팅',1,0,0,0,0,0,0,0,'[soyorec 2026-08-13 PR소요정합 cs_except=1]')""", bid, nseq[bid], cc, q)
 print(f"완료: flip_in {len(flip_in)} / flip_out {len(flip_out)} / add {len(add)}. 되돌리기: *_bak_soyorec")
+# ── ★생산 use_qty=PR 분리(qty_pr) + PR전용 중복행 dedup (2026-08-21) ──
+#   qty(=CS 원가값)는 불변(cost engine 직독) / qty_pr=PR 생산값(compose는 USE_QTY_PR 읽음).
+#   PR!=CS use_qty 엣지가 중복행(cs_calc=0=CS·cs_calc=1=PR) 2개면 생산이 둘 다 계상(더블) → cs_calc=1 행 except=1로 생산제외.
+c.execute("IF COL_LENGTH('nx.bom_line','qty_pr') IS NULL ALTER TABLE nx.bom_line ADD qty_pr float")
+# v_pr_bom 뷰에 USE_QTY_PR 없으면 추가(재빌드 대비 self-heal). 원가 USE_QTY(=b.qty) 불변.
+if not c.execute("SELECT COL_LENGTH('nx.v_pr_bom','USE_QTY_PR')").fetchone()[0]:
+    vd = c.execute("SELECT OBJECT_DEFINITION(OBJECT_ID('nx.v_pr_bom'))").fetchone()[0]
+    vd = vd.replace("CREATE VIEW nx.v_pr_bom AS", "ALTER VIEW nx.v_pr_bom AS", 1)
+    vd = vd.replace("CAST(b.qty AS float) AS USE_QTY,", "CAST(b.qty AS float) AS USE_QTY, CAST(ISNULL(b.qty_pr,b.qty) AS float) AS USE_QTY_PR,", 1)
+    vd = vd.replace("CAST(pw.use_qty AS float) AS USE_QTY,", "CAST(pw.use_qty AS float) AS USE_QTY, CAST(pw.use_qty AS float) AS USE_QTY_PR,", 1)
+    c.execute(vd); print("  v_pr_bom USE_QTY_PR 추가(self-heal)")
+c.execute("UPDATE nx.bom_line SET qty_pr = qty")   # 기본=CS(미매칭 엣지 생산=원가 동일)
+q_pr = c.execute("""UPDATE bl SET bl.qty_pr = pr.uq
+  FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id
+  JOIN (SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it, UPPER(LTRIM(RTRIM(MAT_CODE))) mt, MAX(CAST(USE_QTY AS float)) uq
+        FROM nx.PR_M_ITEM_BOM WHERE ISNULL(EXCEPT_FLAG,'0')<>'1'
+        GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE)))) pr
+    ON pr.it=UPPER(LTRIM(RTRIM(h.item_code))) AND pr.mt=UPPER(LTRIM(RTRIM(bl.child_item)))
+  WHERE ABS(ISNULL(bl.qty_pr,0)-pr.uq)>0.001""").rowcount
+d_dup = c.execute("""WITH cur AS (SELECT h.bom_id FROM nx.bom_header h JOIN (SELECT item_code,MAX(ISNULL(version,1)) mv FROM nx.bom_header GROUP BY item_code) mx ON mx.item_code=h.item_code AND ISNULL(h.version,1)=mx.mv),
+ dup AS (SELECT c2.bom_id, b.child_item FROM cur c2 JOIN nx.bom_line b ON b.bom_id=c2.bom_id GROUP BY c2.bom_id,b.child_item HAVING COUNT(*)>1)
+ UPDATE b SET b.except_flag=1 FROM nx.bom_line b JOIN dup d ON b.bom_id=d.bom_id AND b.child_item=d.child_item
+ WHERE CAST(b.cs_calc_except AS int)=1 AND CAST(ISNULL(b.except_flag,0) AS int)=0""").rowcount
+print(f"  qty_pr(생산=PR) 갱신 {q_pr}행 / PR전용중복 except=1 {d_dup}행")
 n.close()

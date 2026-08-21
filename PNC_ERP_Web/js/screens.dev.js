@@ -2566,7 +2566,6 @@ SCREEN.subvariant=(c)=>{
             ${M('cur','현행 복사','실사용 BOM(현행)을 복제해 대안 시작')}
             ${M('base','BASE BOM 가져오기','평면 BASE(실사용) 가져와 SUB 재구성 시작')}
             ${alts.length?M('copy','기존 후보 복사','다른 대안 후보를 복제'):''}
-            ${M('blank','빈 상태(수동)','헤더만 만들고 라인은 상세에서 추가')}
             ${f.lgAvail?M('lg','LG BOM 불러오기','BOM 미등록 신규품목 — LG BOM(nx.lg_bom) 직하위 시딩'):''}
           </div>
           ${f.method==='copy'&&alts.length?`<label style="font-weight:700;color:#33507d">복사할 원본 후보</label>
@@ -2623,12 +2622,12 @@ SCREEN.subvariant=(c)=>{
     const nodeBox=(node,label,color,dsub,np2,depth)=>{const ng=Math.round((cutOfNode(np2)+(procByNode[node]||0))*100)/100;
       const kids=subs.filter(s=>dsub>0?s.parent_line===dsub:!s.parent_line);   // ★이 노드의 자식 SUB(중첩=서브안의서브)
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
-        <div style="display:flex;align-items:center;gap:6px;font-size:12px"><b style="color:${color}">${esc(label)}</b><span style="color:#8a94a6;font-size:10px">노드공수 ${nfq(ng)}</span>${dsub>0?`<span style="color:#8a94a6;font-size:10px;margin-left:4px">SUB 구분</span>${gubunSel(subs.find(s=>s.line_id===dsub)||{line_id:dsub,gubun:''})}`:''}<div style="flex:1"></div>
-          ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff">🧩 해체</button>`:''}
-          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff">⚙ ${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap"><b style="color:${color};white-space:nowrap">${esc(label)}</b><span style="color:#8a94a6;font-size:10px;white-space:nowrap">노드공수 ${nfq(ng)}</span>${dsub>0?`<span style="color:#8a94a6;font-size:10px;margin-left:4px">SUB 구분</span>${gubunSel(subs.find(s=>s.line_id===dsub)||{line_id:dsub,gubun:''})}`:''}<div style="flex:1"></div>
+          ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff;white-space:nowrap;flex-shrink:0">해체</button>`:''}
+          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff;white-space:nowrap;flex-shrink:0">${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
         ${np2.map(p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="font-size:11.5px;padding:2px 0 2px 14px;color:#33507d;cursor:grab;display:flex;align-items:center;gap:4px" title="드래그: 왼쪽 보관함 또는 다른 SUB로 이동"><span style="color:#b9c2d0">⠿</span>${esc(p.child_item)} <span style="color:#8a94a6;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}<span style="flex:1"></span>${gubunSel(p)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 보관함에서 드래그</div>')}
+        <div class="sp-newsub" data-parentsub="${dsub}" style="border:${dsub>0?'1px':'2px'} dashed #a678d0;border-radius:${dsub>0?'5px':'8px'};padding:${dsub>0?'4px 8px':'10px 8px'};text-align:center;color:#8e44ad;font-size:${dsub>0?'10px':'12.5px'};font-weight:600;background:#f6f0fc;cursor:copy;margin:6px 0;${dsub>0?'':'min-height:38px;display:flex;align-items:center;justify-content:center'}">${dsub>0?'➕ 서브 안에 중첩 SUB로 묶기':'➕ 부품을 여기로 드래그 → 새 SUB로 묶기 (레벨1)'}</div>
         ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
-        <div class="sp-newsub" data-parentsub="${dsub}" style="border:${dsub>0?'1px':'2px'} dashed #a678d0;border-radius:${dsub>0?'5px':'8px'};padding:${dsub>0?'4px 8px':'14px 8px'};text-align:center;color:#8e44ad;font-size:${dsub>0?'10px':'12.5px'};font-weight:600;background:#f6f0fc;cursor:copy;margin-top:6px;${dsub>0?'':'min-height:44px;display:flex;align-items:center;justify-content:center'}">${dsub>0?'➕ 서브 안에 중첩 SUB로 묶기':'➕ 부품을 여기로 드래그 → 새 SUB로 묶기 (레벨1)'}</div>
       </div>`;};
     return `<div style="margin-top:10px;border-top:2px solid #d6c3ea;padding-top:8px">
       <style>.sp-drop.dz-hi{box-shadow:0 0 0 2px #1c47a0 inset;background:#eef4ff!important}.sp-newsub.dz-hi{background:#e3c8f5!important;border-color:#8e44ad!important;color:#6c2f96!important;transform:scale(1.01)}.sp-pool.dz-hi{box-shadow:0 0 0 2px #c0392b inset;background:#fdeeea!important}</style>
@@ -2637,11 +2636,11 @@ SCREEN.subvariant=(c)=>{
         <span id="sp-gate" style="font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(total)} / BASE ${base} = 절삭 ${nfq(cutSum)} + 조립 ${nfq(procSum)} ${ok?'✔':'✖ 불일치'}</span>
         <button class="btn" id="sp-validate" style="margin-left:auto;background:#1c47a0;color:#fff;padding:2px 12px" title="①모든 부품 배치(보관함 비었는지) ②부품수=BASE ③공수합=BASE 검증(저장 안 함). 실패 시 에러 표시. 저장은 하단 [저장].">🔍 BOM 검증</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-        <div class="sp-pool" style="flex:1;min-width:250px;min-height:420px;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
+        <div class="sp-pool" style="flex:1;min-width:250px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
           <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">📦 보관함 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(오른쪽 트리에서 뺀 부품 보관 · 여기로 드래그=빼기 · 우측으로 다시 드래그=배치)</span></div>
           ${pool.length?pool.map(poolRow).join(''):'<div class="empty" style="font-size:11px;color:#8a94a6">보관 부품 없음 — 모든 부품이 배치됨 ✔<br>오른쪽 트리에서 부품을 여기로 드래그하면 빼서 보관합니다.</div>'}
         </div>
-        <div style="flex:1.3;min-width:300px;min-height:420px;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
+        <div style="flex:1.3;min-width:300px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
           <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(부품 드래그 → 왼쪽 보관함(빼기) or 다른 SUB로 이동 · ASSY/SUB 노드에 드롭=배치)</span></div>
           ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat,0)}
         </div>
@@ -2739,8 +2738,8 @@ SCREEN.subvariant=(c)=>{
       : (fresh
           ? `<button class="btn" id="dt-cancel" style="color:#c0392b">✖ 취소</button> <button class="btn" id="dt-register" style="background:#1c7c3a;color:#fff">✔ 등록</button>`
           : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`);
-    return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:20px 10px">
-      <div style="background:#fff;border-radius:12px;width:1080px;max-width:97vw;max-height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
+    return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1.5vh 10px">
+      <div style="background:#fff;border-radius:12px;width:1320px;max-width:98vw;height:97vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
         <div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${R.baseline?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:12px 12px 0 0">
           <b>${R.baseline?'현행 조달경로 상세(보기)':(fresh?'조달후보 신규 등록':'조달후보 상세 편집')} — ${esc(st.routeTarget)}_R${String(R.baseline?1:R.route_no).padStart(2,'0')}${R.baseline?' (현행·base품번 불변)':''}</b><span id="dt-x" style="cursor:pointer;font-size:17px">✕</span></div>
         <div style="flex:1 1 auto;overflow:auto;padding:14px 18px">
@@ -2751,7 +2750,7 @@ SCREEN.subvariant=(c)=>{
             <th>하위품번</th><th>품명</th><th class="num">소요량</th><th>구분</th><th>공급처</th><th>소재(외경×두께×길이·재질)</th></tr></thead>
             <tbody>${(R.lines||[]).length?R.lines.map(l=>lineRow(l,false)).join(''):`<tr><td colspan="6" class="empty">라인 없음</td></tr>`}</tbody></table></div>`:''}
           ${ed?subPanel(R):''}
-          ${(canW&&!R.baseline&&R.approve_flag)?profPanel(R):(!R.baseline&&R.approve_flag?'':(!R.baseline?'<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체 매핑은 <b>승인(개발)</b> 후 가능합니다 — 승인하면 이 후보(구조)에 업체·배분%를 지정할 수 있습니다.</div>':''))}
+          ${(!R.baseline)?`<div style="margin-top:10px;color:#8aa0bd;font-size:11.5px;border-top:1px dashed #e2e8f2;padding-top:8px">🏭 업체(매입처) 지정은 여기서 하지 않습니다 — <b>승인</b> 후 <b>조달 프로파일</b> 화면에서 이 경로를 활성 지정하고 <b>[✎ 매입처 수정]</b>에서 지정합니다(R01 매입처 자동 시드).</div>`:''}
         </div>
         <div style="flex:0 0 auto;padding:12px 18px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:0 0 12px 12px">
           <span>${footL}</span><span>${footR}</span></div>
@@ -2782,21 +2781,22 @@ SCREEN.subvariant=(c)=>{
   // ---------- draw ----------
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">🧩 조달경로 통합검토 <span style="font-size:12px;color:var(--muted);font-weight:400">상단 내부원가 재료표 · 하단 조달경로 후보(신규등록·상세편집)</span></div>
-     <div class="page-sub">상단=<b>품목 BOM관리 '내부원가' 탭 재료표</b>(재료행 클릭=조달대상). 하단=<b>조달경로 후보</b> — <b>➕신규 등록</b>(현행복사/기존복사/빈수동) · <b>현행 더블클릭=상세보기</b> · <b>대안 더블클릭=상세편집</b>. 승인해야 조달프로파일 노출. <code>/api/cost/nae · nx.sourcing_route</code></div>
-     <div style="display:flex;gap:14px;align-items:flex-start">
-      <div style="flex:0 0 290px">
-       <div class="toolbar"><input class="inp" id="sv-q" list="sv-dl" autocomplete="off" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px;min-width:0"><datalist id="sv-dl"></datalist><button class="btn" id="sv-search">🔍</button></div>
-       <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">🧩 조달경로 통합검토 <span style="font-size:12px;color:var(--muted);font-weight:400">상단 내부원가 재료표 · 하단 조달경로 후보(신규등록·상세편집)</span></div>
+     <div class="page-sub" style="flex:0 0 auto">상단=<b>품목 BOM관리 '내부원가' 탭 재료표</b>(재료행 클릭=조달대상). 하단=<b>조달경로 후보</b> — <b>➕신규 등록</b>(현행복사/기존복사) · <b>현행 더블클릭=상세보기</b> · <b>대안 더블클릭=상세편집</b>. 승인해야 조달프로파일 노출. <code>/api/cost/nae · nx.sourcing_route</code></div>
+     <div style="display:flex;gap:14px;align-items:stretch;flex:1;min-height:0">
+      <div style="flex:0 0 290px;display:flex;flex-direction:column;min-height:0">
+       <div class="toolbar" style="flex:0 0 auto"><input class="inp" id="sv-q" list="sv-dl" autocomplete="off" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px;min-width:0"><datalist id="sv-dl"></datalist><button class="btn" id="sv-search">🔍</button></div>
+       <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th class="center">BOM</th></tr></thead>
         <tbody>${st.searching?spinRow(3):(st.slist.length?st.slist.map(s=>`<tr class="sv-row${st.sel===s.item?' sel':''}" data-i="${esc(s.item)}" style="cursor:pointer"><td><b>${esc(s.item)}</b></td><td class="bcap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.name)}">${esc(s.name||'')}</td><td class="center">${s.has_bom?'<span style="color:#1c7c3a">●</span>':'<span style="color:#ccc">–</span>'}</td></tr>`).join(''):`<tr><td colspan="3" class="empty">품번/품명 검색</td></tr>`)}</tbody></table>
        </div>
       </div>
-      <div style="flex:1;min-width:0">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0">
        ${st.sel?`
-        <div class="toolbar"><span style="font-weight:700;color:#1c47a0;font-size:16px">${esc(st.sel)}</span> <span style="color:var(--muted)">${esc(st.selNm)}</span> ${st.mat?`<span class="rowcount">재료 ${flatMat().normal.length+flatMat().weldArr.length}종</span>`:''}
+        <div class="toolbar" style="flex:0 0 auto"><span style="font-weight:700;color:#1c47a0;font-size:16px">${esc(st.sel)}</span> <span style="color:var(--muted)">${esc(st.selNm)}</span> ${st.mat?`<span class="rowcount">재료 ${flatMat().normal.length+flatMat().weldArr.length}종</span>`:''}
           ${!canW?'<span style="color:#c0392b;font-size:12px;margin-left:8px">🔒 수정권한 없음</span>':''}</div>
-        ${st.loading?`<div class="grid-wrap" style="padding:20px">${spinRow(1)}</div>`:`<div id="sv-right" style="overflow:auto;max-height:calc(100vh - 205px)">
+        ${st.loading?`<div class="grid-wrap" style="padding:20px">${spinRow(1)}</div>`:`<div id="sv-right" style="overflow:auto;flex:1;min-height:0">
           <div style="font-weight:700;color:#334;margin:2px 0 4px">① 재료(내부원가 역전개) <span style="font-size:11px;color:#8aa0bd;font-weight:400">(품번·품명·규격·소재·소요량 · 용접봉 종류별 · 행 클릭=조달대상 선택)</span></div>
           <div id="sv-tree" style="overflow-x:auto">${matTbl()}</div>
           <div style="height:14px"></div>
@@ -2804,7 +2804,8 @@ SCREEN.subvariant=(c)=>{
        :`<div class="empty" style="margin-top:40px">좌측에서 품번을 선택하세요.</div>`}
       </div>
      </div>
-     ${st.msg?`<div class="page-sub" style="color:#1c7c3a">${esc(st.msg)}</div>`:''}
+     ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:#1c7c3a">${esc(st.msg)}</div>`:''}
+     </div>
      ${newModal()}${detailModal()}${lineModal()}${weldModal()}${nodeProcModal()}
      ${PROC_MODAL_CSS}
      <style>.sv-row.sel{background:#e8f0ff}.sv-row:hover{background:#eef4ff}.sv-mrow:hover{background:#f4f8ff}.sv-mrow.sel{outline:2px solid #1c7c3a;outline-offset:-2px;background:#eafaef}.sv-card:hover{filter:brightness(.985);box-shadow:0 2px 8px rgba(30,45,70,.08)}</style>`;
