@@ -2896,9 +2896,9 @@ SCREEN.prodsheet=(host)=>{
         <tr><td class="c lb">공정순서</td><td colspan="5" style="font-weight:700;padding-left:4px">${esc(c.proc_nm||'')}</td></tr>
       </table>
       <table>
-        <tr><td class="c lb" style="width:12%;height:15mm">불량이력</td><td style="width:62%"></td>
+        <tr><td class="c lb" style="width:12%;height:24mm">불량이력</td><td style="width:62%"></td>
             <td class="c lb" style="width:26%">검수란</td></tr>
-        <tr><td class="c lb" style="height:15mm">시방이력</td><td></td>
+        <tr><td class="c lb" style="height:24mm">시방이력</td><td></td>
             <td></td></tr>
       </table>
       <table>
@@ -2924,7 +2924,7 @@ SCREEN.prodsheet=(host)=>{
          한 페이지에 3장까지 자연스럽게 들어감. */
       /* 간판 1장 = 1페이지. 레거시 실물처럼 표는 위쪽에 모으고 아래는 비운다
          (표를 억지로 늘려 채우지 않음 — 2026-08-20 레거시 대조). */
-      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden}
+      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden;min-height:100mm;display:flex;flex-direction:column;justify-content:space-between}
       .kb+.kb{page-break-before:always}
       .kb table{border-collapse:collapse;width:100%}
       /* 레거시 실물 대조: 글자·행높이를 키우고 라벨칸 음영은 없앤다(전부 흰 바탕) */
