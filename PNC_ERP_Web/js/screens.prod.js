@@ -786,6 +786,28 @@ SCREEN.partplan=(c)=>{
     const k=tr.getAttribute('data-gk');if(!k)return;
     if(st.expand.has(k))st.expand.delete(k);else st.expand.add(k);
     redrawBody();});};
+  // ── 점진 렌더(대용량) ────────────────────────────────────────────────
+  //   처음 PP_PAGE 행만 DOM 에 올리고, 스크롤 끝에서 이어붙인다.
+  const PP_PAGE=400;
+  let ppRest=null;                 // 아직 안 붙인 <tr> 조각들
+  const ppAppend=()=>{
+    if(!ppRest||!ppRest.length)return;
+    const tb=c.querySelector('tbody'); if(!tb){ppRest=null;return;}
+    const take=ppRest.slice(0,PP_PAGE); ppRest=ppRest.slice(PP_PAGE);
+    tb.insertAdjacentHTML('beforeend',take.join(''));
+    wireRows();                    // 새로 붙은 집계행에도 클릭 연결
+    const cnt=c.querySelector('#pp-cnt');
+    if(cnt&&ppRest.length)cnt.textContent=cnt.textContent.replace(/^\S+건/,
+      nf(tb.rows.length)+'행 표시');
+  };
+  const ppWireLazy=()=>{
+    const w=c.querySelector('.grid-wrap');
+    if(!w||w.dataset.lazy)return;
+    w.dataset.lazy='1';
+    w.addEventListener('scroll',()=>{
+      if(ppRest&&ppRest.length&&w.scrollTop+w.clientHeight>=w.scrollHeight-400)ppAppend();
+    },{passive:true});
+  };
   const render=(bodyOnly)=>{
     const d=st.dates;
     const wcM=new Map([['P1','용접'],['P2','가공']]);
@@ -972,7 +994,16 @@ SCREEN.partplan=(c)=>{
     // ★성능: bodyOnly=true면 표(tbody/tfoot)와 건수줄만 교체하고 툴바·헤더는 그대로 둠.
     //   필터 변경마다 c.innerHTML 전체를 갈아엎으면 2,900행 기준 눈에 띄게 버벅여서 분리함.
     //   (툴바를 유지하므로 입력칸 포커스·커서위치도 자연히 보존됨)
-    const tbodyHtml=st.loading?spinRow(NCOL+d.length):bodyHtml();
+    // ★대용량 대응(2026-08-21): 4,782행 × 30컬럼 = 약 14만 셀을 한 번에 DOM 에 올리면
+    //   저사양 PC에서 최초렌더·컬럼이동·스크롤이 모두 멈춘다("응답 없음").
+    //   → 완성된 tbody HTML 을 <tr> 단위로 잘라 처음 PP_PAGE 개만 붙이고,
+    //     스크롤이 끝에 가까워지면 이어붙인다. 행 생성 로직(집계/상세/블록접기)은 그대로.
+    const _fullBody=st.loading?spinRow(NCOL+d.length):bodyHtml();
+    const _chunks=(()=>{if(st.loading)return null;
+      const parts=_fullBody.split(/(?=<tr)/);          // <tr 앞에서 분할(행 경계 보존)
+      return parts.length>PP_PAGE?parts:null;})();     // 적으면 통째로
+    ppRest=_chunks?_chunks.slice(PP_PAGE):null;
+    const tbodyHtml=_chunks?_chunks.slice(0,PP_PAGE).join(''):_fullBody;
     const tfootHtml=(()=>{if(!disp.length)return '';
       const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);
       const footRow=(label,vals)=>{let put=false;
@@ -993,6 +1024,7 @@ SCREEN.partplan=(c)=>{
       if(tf){tf.innerHTML=tfootHtml;}
       if(cnt){cnt.textContent=cntHtml;}
       wireRows();          // 새로 그린 행에 클릭(집계 펼침) 핸들러만 다시 연결
+      ppWireLazy();        // 스크롤 이어붙이기(점진 렌더)
       return;
     }
     c.innerHTML=`
@@ -1093,9 +1125,17 @@ SCREEN.partplan=(c)=>{
           if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
             holder.scrollTop=sy; holder.scrollLeft=sx;}
         }
+        // 아직 DOM 에 안 붙은 나머지 행 조각들은 새 컬럼순서로 다시 만들어야 어긋나지 않는다.
+        //   (headOrder/tailOrder 는 위에서 이미 갱신됨 → bodyHtml() 을 새 순서로 재생성)
+        if(ppRest&&ppRest.length){
+          const shownRows=(tbl.tBodies[0]?tbl.tBodies[0].rows.length:0);
+          const parts=bodyHtml().split(/(?=<tr)/);
+          ppRest=parts.slice(shownRows);
+        }
       };
     });
     wireRows();   // 집계행 클릭(펼침/접힘) — 표만 다시 그릴 때도 재연결 필요해서 별도 함수로 분리
+    ppWireLazy(); // 스크롤 이어붙이기(점진 렌더) — 전체 렌더 경로
     g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
     // 텍스트 필터 3종 = 입력 즉시 클라이언트 필터(재조회 없음).
     // ★성능: 타이핑마다 전체 재렌더하면 2,900행 기준 버벅임 → 180ms 디바운스 + 표(tbody/tfoot)만 교체(툴바 유지=포커스/커서 보존).
