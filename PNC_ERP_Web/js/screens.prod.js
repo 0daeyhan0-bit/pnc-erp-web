@@ -21,10 +21,15 @@ window.openPrintWin=(kind,name,feat)=>new Promise(resolve=>{
       const html=buf; buf='';
       if(!html)return;
       try{
-        if(typeof w.renderPrint==='function')w.renderPrint(html);
+        if(typeof w.renderPrint==='function'){w.__pendingHtml=null;w.renderPrint(html);}
         else{                                  // print.html 이 아직 안 떴을 때의 대비책
+          //  ※print.html 로드시 __pendingHtml 을 스스로 소비한다(중복인쇄 방지)
           w.__pendingHtml=html;
-          setTimeout(()=>{try{if(typeof w.renderPrint==='function')w.renderPrint(w.__pendingHtml);}catch(e){}},400);
+          setTimeout(()=>{try{
+            const h=w.__pendingHtml; if(!h)return;   // 이미 소비됐으면 아무것도 안 함
+            w.__pendingHtml=null;
+            if(typeof w.renderPrint==='function')w.renderPrint(h);
+          }catch(e){}},400);
         }
       }catch(e){
         // 최후수단 — 내용이라도 보이게(URL 은 about:blank 가 되어 프린터 기억은 포기)
