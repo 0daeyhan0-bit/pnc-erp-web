@@ -120,7 +120,10 @@ def patch_leaf(eng, rbmap, fbmap=None):
         base = orig(node, info, q, ymd, ymcut)
         # ★단가 결손 fallback(§8): 매입 leaf(구매)인데 base=0(in_cust 빈값/불일치·except_flag) → 조용한 0 방지.
         #   ②실매입/③마스터 최신(fbmap) → ④원소재=소재단가 / 전개제외=0(정당). 원소재(inner cg3)는 엔진 소재단가라 대상 아님.
-        if base == 0 and not eng._inner_prod(info) and info.get('cost_gubun', '') != '5':
+        #   ★조립품(sgroup 110/120) 제외: 변형 SUB(AJR*-N-M, in_cust빈값=미사용/변형)를 마스터가로 채우면 이중계상(+42000 사고).
+        #   진짜 매입 SUB는 in_cust 있어 base>0(fallback 불필요). 원소재/매입부품(130/220/230 등)만 채움.
+        if (base == 0 and not eng._inner_prod(info) and info.get('cost_gubun', '') != '5'
+                and str(info.get('sgroup', '')).strip() not in ('110', '120')):
             fb = float(fbmap.get(node, 0.0) or 0.0)
             if fb > 0:
                 return round(fb * q, 2)                              # ②/③ 실매입·마스터 (매입단위 per-unit × qty)
