@@ -53,8 +53,53 @@ def build_realbuy_map(cur, asof_ym):
     return m
 
 
-def patch_leaf(eng, rbmap):
-    """eng._leaf_val 인스턴스 패치: 직거래 원소재 reliable leaf → 실매입가(단위인식). 원본 함수 보존."""
+_FB_CACHE = {}   # asof_ym(YYMM) -> {code: (price, spread)}  단가 fallback 맵
+
+
+def build_fallback_map(cur, asof_ym):
+    """단가 fallback 맵(§8): {code: price}. 우선순위 ②실매입(tag9 any cust 가중평균) > ③마스터 최신 tag='1'(any cust).
+    in_cust 빈값/불일치·except_flag로 마스터 in_cust 조회가 0일 때 이걸로 우회. as-of(월)·캐시."""
+    asof_ym = str(asof_ym)[:4] or '2608'
+    if asof_ym in _FB_CACHE:
+        return _FB_CACHE[asof_ym]
+    m = {}
+    # ③ 마스터 최신 tag='1'(cust 무관) — base로 깔고 ②로 덮음
+    try:
+        cur.execute("""SELECT it, item_cost FROM (
+            SELECT LTRIM(RTRIM(item_code)) it, item_cost,
+                   ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)) ORDER BY ISNULL(cost_apply_ymd,'') DESC) rn
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
+            WHERE cost_tag='1' AND CONVERT(float,ISNULL(item_cost,0))>0 AND ISNULL(cost_apply_ymd,'')<=?
+        ) t WHERE rn=1""", asof_ym + '32')
+        for it, p in cur.fetchall():
+            if p and float(p) > 0:
+                m[str(it).strip()] = float(p)
+    except Exception:
+        pass
+    # ② 실매입(tag9, any cust, 가중평균) — 우선(덮어씀)
+    try:
+        cur.execute("""SELECT mat_code,
+            SUM(CONVERT(float,maint_cost)*CONVERT(float,maint_qty))/NULLIF(SUM(CONVERT(float,maint_qty)),0)
+          FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+          WHERE maint_tag='9' AND maint_ymd>='2601' AND maint_ymd<=?
+            AND CONVERT(float,ISNULL(maint_cost,0))>0 AND CONVERT(float,ISNULL(maint_qty,0))>0
+          GROUP BY mat_code""", asof_ym + '32')
+        for mc, p in cur.fetchall():
+            if p and float(p) > 0:
+                m[str(mc).strip()] = float(p)
+    except Exception:
+        pass
+    _FB_CACHE[asof_ym] = m
+    return m
+
+
+def patch_leaf(eng, rbmap, fbmap=None):
+    """eng._leaf_val 인스턴스 패치: ①직거래 원소재→실매입가(단위인식) ②단가결손 fallback(§8, 조용한 0 방지). 원본 보존."""
+    if fbmap is None:
+        try:
+            fbmap = build_fallback_map(eng.cur, '2608')
+        except Exception:
+            fbmap = {}
     orig = eng._leaf_val
 
     def v2_leaf(node, info, q, ymd, ymcut):
@@ -72,7 +117,19 @@ def patch_leaf(eng, rbmap):
                 return round(jik * q, 2)                             # jik=EA당
             if not inner:                                            # 매입(구매단가 계상)
                 return round(jik * q, 2)
-        return orig(node, info, q, ymd, ymcut)
+        base = orig(node, info, q, ymd, ymcut)
+        # ★단가 결손 fallback(§8): 매입 leaf(구매)인데 base=0(in_cust 빈값/불일치·except_flag) → 조용한 0 방지.
+        #   ②실매입/③마스터 최신(fbmap) → ④원소재=소재단가 / 전개제외=0(정당). 원소재(inner cg3)는 엔진 소재단가라 대상 아님.
+        if base == 0 and not eng._inner_prod(info) and info.get('cost_gubun', '') != '5':
+            fb = float(fbmap.get(node, 0.0) or 0.0)
+            if fb > 0:
+                return round(fb * q, 2)                              # ②/③ 실매입·마스터 (매입단위 per-unit × qty)
+            metal = str(info.get('metal', '')).strip()
+            if metal:                                                # ④ 원소재 → 소재단가(사급가, per kg × 중량)
+                sp = eng.std_metal_price(info['metal'], info['diam'], info['thick'], ymcut)
+                if sp > 0:
+                    return round(sp * info['wt'] * q, 2)
+        return base
 
     eng._leaf_val = v2_leaf
     return eng
@@ -121,7 +178,8 @@ def cost_v2(item, ymd, v1_engine=None, engine_factory=None, recovery=100):
     e2 = engine_factory()
     try:
         rb = build_realbuy_map(e2.cur, ymd[:4])
-        patch_leaf(e2, rb)
+        fb = build_fallback_map(e2.cur, ymd[:4])
+        patch_leaf(e2, rb, fb)
         patch_recovery(e2, recovery)   # ★가공비 회수율(효율) 곱셈. 기본 100=no-op.
         v2 = e2.silwon(item, ymd)
     finally:

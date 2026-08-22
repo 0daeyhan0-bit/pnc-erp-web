@@ -756,5 +756,23 @@ cg=5 직납 → 제외
 - **실원가=0 제품 3개**(AJR30167201·AGR30801603/604) = 원가인풋 결손.
 - 구성품(매입/원소재) 단가결손 = noprice.txt 스윕중. 조치=발견→(영업/마감때) 단가 채움. 단가수정은 마감때만(하드룰)—대사는 식별만.
 
+## §8. 단가 결손 = 조회문제 + fallback 체인 (2026-08-22, 사용자 "단가없는것 정리·매입데이터 활용")
+
+### 실측 진단 (스코프=사용중 BOM, 결손 40품목)
+- **"단가 없음"의 대부분은 진짜 없는게 아니라 조회 실패**:
+  - **매입가**: PR_M_ITEM_COST에 단가 있는데(4H00901F 11행) **품목 in_cust 빈값→cust=''로 조회 실패→0**. ★원인=**except_flag(전개제외)**: 전개제외 부품은 상위 SUB 거래처 귀속→자기 in_cust 비어있음이 정상(사용자 지적).
+  - **판가**: price_item에 판가 있는데 **apply_ymd(260806)>기준일(260630)→as-of 필터 제외→0**(날짜 squeeze와 직결).
+- **결손 40품목 분해**: 매입이력있음 1(4H00901F 339)·in_cust빈값/불일치 7·전개제외(0정답, 상위SUB에 원가)·원소재(소재단가 가능)·**진짜 직거래부품 영업입력필요=0개**.
+- **14 진짜미입력 분해**: 원소재(소재단가 가능) **11**·전개제외(0정답) **3**·직거래부품 **0**. → **스코프에 "어디에도 단가없는 직거래부품"이 0개** = 막히는 케이스 없음.
+
+### ★단가 fallback 체인 (V2, "조용히 0 금지")
+매입/원소재 leaf 단가 해결 순서:
+1. **마스터 in_cust 조회**(엔진 현행 pur_price, cost_tag='1')
+2. **실매입 이력**(PU_T_STOCK_MAINT tag9 가중평균, 우리가 실제 산 값 — "매입데이터 활용")
+3. **마스터 최신 tag='1'**(cust 무관 최신) — in_cust 빈값/불일치 우회
+4. **원소재(metal 있음) → 소재단가**(std_metal_price by spec, 항상 존재) / **전개제외(metal 없음) → 0**(상위 SUB에 원가, 정당)
+- 효과: except_flag·in_cust빈값 자동우회. 원소재는 절대 0 안됨. 전개제외만 0(정당). **재료비 조용한 0 소실 방지**([[newerp-legacy-nx-separation]] in_cust 재료비0 사고 예방).
+- 판가 결손(11제품)=apply_ymd 미래→as-of 정책(현재손익=최신판가) 별도. 진짜 tag1 0행 직거래부품=영업입력(스코프 0개).
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]

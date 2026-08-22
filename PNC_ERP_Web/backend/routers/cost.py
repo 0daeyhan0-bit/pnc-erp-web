@@ -608,7 +608,7 @@ def cost_nx_bulk_v2(p: dict = Body(...)):
     e2 = NxCostEngine()      # V2 (직거래 원소재 실매입 패치)
     try:
         try:
-            _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]))
+            _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]), _V2.build_fallback_map(e2.cur, ymd[:4]))
         except Exception as ex:
             raise HTTPException(500, f"V2 맵/패치 오류: {ex}")
         smap = {}
