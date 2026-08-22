@@ -110,9 +110,10 @@ SCREEN.matverify=(c)=>{
   const API=API_BASE;
   const CT={'6':'절삭-협력사','7':'절삭-부자재','8':'설치-부자재','A':'이지링크','4':'절삭-원자재','5':'설치-원자재','1':'유상사급-부품','9':'소모품','IMP':'수입(해외)'};
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  const ym2in=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
-  const in2ym=v=>{v=(''+(v||'')).trim();return v.length>=7?v.slice(2).replace('-',''):'';};
-  const nowYm=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;};
+  const iso2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2).replace(/-/g,''):'';};   // 2026-08-01→260801
+  const ymd2iso=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
+  const todayIso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+  const m1Iso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};   // 당월 1일
   const flagColor=f=>({'소비없음':'#c0392b','순증과다':'#c0392b','사급>매입':'#b8860b'}[f]||'#8a5a1a');
   const flowColor=f=>({'직납':'#1c7c3a','사급재출고형':'#8a5a1a','다업체소싱':'#1c47a0','컴포넌트(가공소비)':'#555'}[f]||'#555');
   let rows=[], vend=[], sel=null, loading=false, msg='', begym='';

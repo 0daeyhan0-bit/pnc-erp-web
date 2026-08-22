@@ -593,6 +593,7 @@ cg=5 직납 → 제외
 | 2026-08-22 | Q3 설치 3개 사급 | 사용자 확인중 | — |
 | 2026-08-22 | R-2 직거래 원소재 재료비 소스 | **이동평균 마감가(mat_stock_daily) 방향**(대사 추천, 사용자 검토중) | 소비원가 회계정합·매입추종 92%·일단위·이미구축. vs 확정입고(매입shock 보조) |
 | 2026-08-22 | §5R 협력사 routing 분리 원가반영 | **(B) 매입가 거래처 오버라이드(소스=routing_edge.wc)** but **실효≈0** | 계획서 생산 기록=soyo STEP7 routing_edge.wc override. 검증축=wc(생산처)≠vendor_resolved. 실측: 협력사노드 5,490 중 in_cust≠wc 단1건 → 이미정합. 래퍼는 wc_user편집·in_cust공백만 재지정(안전장치·미래추종), 나머지 in_cust 유지 |
+| 2026-08-22 | **STEP-U1 실행완료** (죽은 조달컬럼 제거) | routing_edge에서 gubun·vendor_seed·vendor_resolved·src_except·src_sagub DROP + soyo._routing_edge_sync INSERT 수정(wc만 시드). 백업=nx.routing_edge_bak_preU1_260822. **검증불필요·완료** | 전저장소 grep: 5컬럼 소비처 0(soyo INSERT만 write). 컴파일OK·INSERT멱등 실행OK. ★잔여 `src_type`도 소비0=추가잔재(드롭 후보). routing_edge=이제 생산처(wc) 전용 |
 | 2026-08-22 | §5S R01/R02 조달경로 원가반영 | **route-aware 설계(활성=route_alloc.is_active)** — R01 현행/엔진, R02 활성시 sourcing_route_line 구분+vendor로 재판정. **오늘 실효=0(R02 미활성 전량)** | 사용자: "routing 1,2도 설계 반영". R02 정의 1건(AJR75563402)·미활성. 래퍼가 route_alloc 조회해 R02 노드만 재판정 |
 | 2026-08-22 | ★음수재고/무가격 정리 시점 | **지금 원장 정리 금지 → 마이그가 소유** | 음수=레거시실적 재현(우리버그 아님). 지금 원장 손대면 마이그 재고 true-up과 이중조정·드리프트. 신규ERP 단계게이팅은 컷오버때 적용 [[newerp-stock-gating-close-lock]]. **V2는 읽기시점 fallback(avg=0/음수→소재단가/직전유효/매입가)으로 원장무변경·마이그무영향·재료비정확** |
 
