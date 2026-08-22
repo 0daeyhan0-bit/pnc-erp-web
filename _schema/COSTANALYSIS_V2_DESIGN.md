@@ -530,6 +530,29 @@ cg=5 직납 → 제외
 - **R-2 소스 확정**: 레거시=CS_M_METERIAL_COST(사급가) / 구매품=PR_M_ITEM_COST[cost_tag='1']. Cost Table(lg_lme_costtable)은 별개(직거래 인정가 화면용). 엔진 price_metal=CS_M_METERIAL_COST 미러 → 레거시와 동일(사급가).
 - **R-4 사급부품**: 실원가 SP=매입가(cost_tag='1'). 단 CQV2 협력사견적은 판매단가(cost_tag='S') — 맥락 다름(실원가 vs 견적손익). V2 원가분석은 실원가 SP 계보.
 
+## 5O. lg_settle_unit 의존 제거 (사용자 확정 2026-08-22)
+> "lg settle unit은 지금 큰 의미 없다. LG 판가를 읽어오면 돼."
+- **판가 = LG 판가 직독**(`price_item` vendor 1010/1020/1030, TAGE/TAGS, apply_ymd as-of). 원단위로 판가 계산 안 함 → **lg_settle_unit 다월 적재 불필요(무의미)**.
+- **원소재 사급/직거래 판정 = 거래처 조달구분**(사급 거래처 매입=2237/2238 vs 직구매 거래처=CUST_TYPE 4/5) **+ 불출이력(§5M tag5)**. **lg_settle_unit.gubun1 의존 제거.**
+- **중량(소요) = BOM(CS_M_ITEM_BOM.USE_QTY)**, lg_settle_unit 원단위 아님.
+- ∴ 앞선 "설치 3개 사급 컴포넌트"·"lg_settle_unit 다월" 불명은 **폐기**(lg_settle_unit 안 씀).
+
+## 5P. ★영업 업로드 = 가격 mapping 정본 (백엔드 직독 2026-08-22)
+> "영업에서 업로드하는 사급가·판가를 확인하면 mapping이 될 것 같은데?" → 맞음. 확인됨:
+| 업로드 | 엔드포인트(price.py) | 저장(mapping) |
+|---|---|---|
+| **LG 판가**(PO Price) | `/api/price/lgprice_upload` L311 | **price_item** vendor **1010(SAC)/1020(RAC)** · type **TAGE(수출)/TAGS(내수)** · Start Date=apply_ymd. 헤더=Material·MKT(1→TAGS/2→TAGE)·Unit Price·Start Date·Curr |
+| **사급부품가**(COSP) | `/api/price/sagub_upload` L222 | **price_item** vendor **'LG'** · **COSP** · Start Date |
+| 원소재 사급가 | 절삭재료비 탭 DND | CS_M_METERIAL_COST / price_metal.std |
+
+### ★가격 소스 맵 (완성, 전부 영업 업로드/매입 실적)
+- **LG 판가**(손익 상단) = `price_item` 1010/1020 TAGE/TAGS **as-of**(엔진 lg_cost가 이미 읽음). "LG 판가 읽어오면 됨"=이것.
+- **사급부품가**(R-4) = `price_item` 'LG' COSP ← sgroup310 COSP와 일치(R-4 확정).
+- **원소재 사급가** = CS_M_METERIAL_COST(=price_metal.std).
+- **직거래 원소재 실매입가**(V2 신규) = 직구매 거래처(비-사급) 매입(PU_T_STOCK_MAINT).
+- **구매품 매입가** = PR_M_ITEM_COST cost_tag='1'(품목 IN_CUST_CODE).
+- 참고: price.py에 **"실입고가 > 사급출고가(판가역전)" 특이단가 리포트** 이미 존재(L422) = R-6/R-7 실측 도구.
+
 ## 6. 결정 로그 (담당 판단 — 하나씩 확정)
 
 | 일자 | 항목 | 결정 | 사유 |

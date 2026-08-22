@@ -79,7 +79,12 @@ def _build(ct, fr, to):
         cu.execute("SELECT UPPER(LTRIM(RTRIM(variant_item))),UPPER(LTRIM(RTRIM(base_item))) FROM PARTNER_ERP_TEST3.nx.sub_variant_map")
         for v, b in cu.fetchall():
             if _U(v) and _U(b): v2b[_U(v)] = _U(b)
-        def base(m): return v2b[m] if m in v2b else (m.split("-")[0] if "-" in m else m)
+        def base(m):
+            # sub_variant_map(검증) 우선. ★'-SUB'(체결 SUB=별개 품목, 조달변형 아님)은 병합 금지(서포터 루프 오병합 방지).
+            #   그 외 숫자 조달경로 접미사(-3-1/-4-2/-20-1 등)는 첫 '-' 앞 base로 접음.
+            if m in v2b: return v2b[m]
+            if m.endswith("-SUB") or "_S" in m: return m
+            return m.split("-")[0] if "-" in m else m
 
         # 5) base로 접어 결합. ★items 키(base)는 type6 매입 있는 것만(buy_rows 기준). 소비/순이동은 전 변형코드에서 base로 합산.
         items = {}
