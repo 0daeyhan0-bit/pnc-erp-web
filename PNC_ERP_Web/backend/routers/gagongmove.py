@@ -83,27 +83,30 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
         # ★보조조회는 IN(수천개) 대신 "날짜/전량 조회 + 파이썬 필터"로. IN 목록이 커지면 SQL Server가
         #   비선형으로 느려진다(2026-08-22 실측: 이동원장 IN 3.47s → 날짜조회 0.02s, 출하 1.96s → 0.06s).
         # 이동완료(확정)=IN_CONFIRM_FLAG '1' / 이동전표발행(미확정)='0'. 날짜별(MAINT_YMD) 매핑.
+        # ★조회는 라이브(레거시가 쓴 실적) + nx(웹이 발행한 것)를 합산해야 실제 상태가 보인다.
+        #   (쓰기는 여전히 nx만 — §1 절대규칙. 2026-08-22: 라이브 65건/확정15 vs nx 38건/확정0 실측)
         moved = {}; movedday = {}; printed = {}; printedday = {}
-        try:
-            q = ("SELECT MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG, SUM(CAST(MAINT_QTY AS float)) "
-                 "FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE 1=1")
-            pr = []
-            if d6a: q += " AND MAINT_YMD>=?"; pr.append(d6a)
-            if d6b: q += " AND MAINT_YMD<=?"; pr.append(d6b)
-            q += " GROUP BY MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG"
-            cur.execute(q, *pr)
-            for rr in cur.fetchall():
-                mat = str(rr[0] or "").strip()
-                if mat not in matset: continue
-                ymd, flag, v = rr[1], rr[2], float(rr[3] or 0)
-                if flag == '1':
-                    moved[mat] = moved.get(mat, 0.0) + v
-                    movedday[(mat, ymd)] = movedday.get((mat, ymd), 0.0) + v
-                else:
-                    printed[mat] = printed.get(mat, 0.0) + v
-                    printedday[(mat, ymd)] = printedday.get((mat, ymd), 0.0) + v
-        except Exception:
-            pass
+        for _src in ("PARTNER_ERP.dbo", "PARTNER_ERP_TEST3.nx"):
+            try:
+                q = ("SELECT MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG, SUM(CAST(MAINT_QTY AS float)) "
+                     f"FROM {_src}.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE 1=1")
+                pr = []
+                if d6a: q += " AND MAINT_YMD>=?"; pr.append(d6a)
+                if d6b: q += " AND MAINT_YMD<=?"; pr.append(d6b)
+                q += " GROUP BY MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG"
+                cur.execute(q, *pr)
+                for rr in cur.fetchall():
+                    mat = str(rr[0] or "").strip()
+                    if mat not in matset: continue
+                    ymd, flag, v = rr[1], rr[2], float(rr[3] or 0)
+                    if flag == '1':
+                        moved[mat] = moved.get(mat, 0.0) + v
+                        movedday[(mat, ymd)] = movedday.get((mat, ymd), 0.0) + v
+                    else:
+                        printed[mat] = printed.get(mat, 0.0) + v
+                        printedday[(mat, ymd)] = printedday.get((mat, ymd), 0.0) + v
+            except Exception:
+                pass
         # ASSY재고 = SA_T_ITEM_STOCK(완제품 재고, 도번단위)
         assystk = {}
         try:
@@ -135,15 +138,16 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
                     if mat in matset: prior_plan_map[(str(rr[0] or "").strip(), mat)] = float(rr[2] or 0)
             except Exception:
                 pass
-            try:
-                cur.execute("""SELECT MAT_CODE, SUM(CAST(MAINT_QTY AS float))
-                    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE
-                    WHERE IN_CONFIRM_FLAG='1' AND MAINT_YMD<? GROUP BY MAT_CODE""", d6a)
-                for rr in cur.fetchall():
-                    mat = str(rr[0] or "").strip()
-                    if mat in matset: prior_moved_map[mat] = float(rr[1] or 0)
-            except Exception:
-                pass
+            for _src in ("PARTNER_ERP.dbo", "PARTNER_ERP_TEST3.nx"):   # 라이브+nx 합산(위와 동일 사유)
+                try:
+                    cur.execute(f"""SELECT MAT_CODE, SUM(CAST(MAINT_QTY AS float))
+                        FROM {_src}.PU_T_STOCK_MAINT_GAGONG_MOVE
+                        WHERE IN_CONFIRM_FLAG='1' AND MAINT_YMD<? GROUP BY MAT_CODE""", d6a)
+                    for rr in cur.fetchall():
+                        mat = str(rr[0] or "").strip()
+                        if mat in matset: prior_moved_map[mat] = prior_moved_map.get(mat, 0.0) + float(rr[1] or 0)
+                except Exception:
+                    pass
         for g in rows:
             g["moved"] = sum(moved.get(m, 0.0) for m in g["matlist"])
             g["jp_print"] = sum(printed.get(m, 0.0) for m in g["matlist"])
@@ -282,7 +286,8 @@ def gagong_move580_issue(payload: dict = Body(...)):
 @router.get("/api/gagong/move580/sheets")
 def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
                           item: str = Query(""), part: str = Query(""), confirm: str = Query("전체"), limit: int = Query(2500)):
-    """구분=이동전표 모드 — MAINT_GROUP_SEQ 단위로 발행된 전표 목록(확정여부 포함)."""
+    """구분=이동전표 모드 — MAINT_GROUP_SEQ 단위로 발행된 전표 목록(확정여부 포함).
+       ★라이브(레거시 발행분) + nx(웹 발행분) 합산 조회. 쓰기는 nx만(§1)."""
     nx = _nx(); cur = nx.cursor()
     try:
         w = ["m.MAINT_TAG='B'"]; p = []
@@ -292,19 +297,27 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
         if part.strip(): w.append("m.MAT_CODE LIKE ?"); p.append(f"%{part.strip()}%")
         if confirm.strip() == "미확정": w.append("m.IN_CONFIRM_FLAG='0'")
         elif confirm.strip() == "확정": w.append("m.IN_CONFIRM_FLAG='1'")
+        wsql = ' AND '.join(w)
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))}
-              m.MAINT_YMD, m.MAINT_SEQ, m.MAINT_GROUP_SEQ, m.CHECK_LIST_SEQ,
-              COALESCE(pg.GAGONG_PROC_DESC, m.PR_PART_CODE, cc.CUST_DESC, '') dest,
-              m.ITEM_CODE, m.MAT_CODE, ISNULL(mi.ITEM_DESC,'') nm, ISNULL(su.RACK_NO,'') rack,
-              m.MAINT_QTY, m.IN_CONFIRM_FLAG, ISNULL(m.IN_CONFIRM_DATETIME,'') confirm_dt,
-              ISNULL(m.IN_CONFIRM_USER_ID,'') confirm_user
-            FROM nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM mi ON mi.ITEM_CODE=m.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=m.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=m.PR_PART_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=m.SAGUB_CUST_CODE
-            WHERE {' AND '.join(w)}
-            ORDER BY m.MAINT_GROUP_SEQ DESC, m.MAINT_SEQ""", *p)
+              u.MAINT_YMD, u.MAINT_SEQ, u.MAINT_GROUP_SEQ, u.CHECK_LIST_SEQ,
+              COALESCE(pg.GAGONG_PROC_DESC, u.PR_PART_CODE, cc.CUST_DESC, '') dest,
+              u.ITEM_CODE, u.MAT_CODE, ISNULL(mi.ITEM_DESC,'') nm, ISNULL(su.RACK_NO,'') rack,
+              u.MAINT_QTY, u.IN_CONFIRM_FLAG, ISNULL(u.IN_CONFIRM_DATETIME,'') confirm_dt,
+              ISNULL(u.IN_CONFIRM_USER_ID,'') confirm_user
+            FROM (
+              SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_GROUP_SEQ,m.CHECK_LIST_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,
+                     m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
+                FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
+              UNION ALL
+              SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_GROUP_SEQ,m.CHECK_LIST_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,
+                     m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
+                FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
+            ) u
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM mi ON mi.ITEM_CODE=u.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
+            ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *(p + p))
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():
@@ -325,15 +338,22 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
     gt = group_to if group_to is not None else group_from
     nx = _nx(); cur = nx.cursor()
     try:
-        cur.execute("""SELECT m.MAINT_YMD, m.MAINT_GROUP_SEQ, m.MAINT_SEQ,
-              COALESCE(pg.GAGONG_PROC_DESC, m.PR_PART_CODE, cc.CUST_DESC, '') line,
-              m.ITEM_CODE, m.MAT_CODE, ISNULL(su.RACK_NO,'') rack, m.MAINT_QTY
-            FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=m.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=m.PR_PART_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=m.SAGUB_CUST_CODE
-            WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
-            ORDER BY m.MAINT_GROUP_SEQ, m.MAINT_SEQ""", group_from, gt)
+        cur.execute("""SELECT u.MAINT_YMD, u.MAINT_GROUP_SEQ, u.MAINT_SEQ,
+              COALESCE(pg.GAGONG_PROC_DESC, u.PR_PART_CODE, cc.CUST_DESC, '') line,
+              u.ITEM_CODE, u.MAT_CODE, ISNULL(su.RACK_NO,'') rack, u.MAINT_QTY
+            FROM (
+              SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY
+                FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_GAGONG_MOVE m
+               WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
+              UNION ALL
+              SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY
+                FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
+               WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
+            ) u
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
+            ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt, group_from, gt)
         cols = [d[0] for d in cur.description]
         raw = [dict(zip(cols, r)) for r in cur.fetchall()]
         groups = {}

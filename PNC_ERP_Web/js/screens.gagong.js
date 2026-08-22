@@ -767,44 +767,45 @@ SCREEN.gagongmove580=(c)=>{
       dates.forEach(d=>{dSum[d]+=(r.days&&r.days[d])||0;});});
     const NC=13;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none"><thead><tr>
+      <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none;text-align:center"><thead><tr>
        <th>SEQ</th><th>최종납품처</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
-       <th class="num">이동전표발행</th><th class="num">이동필요</th><th class="num">출하</th><th class="num">ASSY재고</th><th class="num">당일이전</th>
-       ${dates.map(d=>`<th class="num" style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
+       <th>이동전표발행</th><th>이동필요</th><th>출하</th><th>ASSY재고</th><th>당일이전</th>
+       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
-        <td class="num">${i+1}</td><td>${esc(r.dest)}</td><td><b>${esc(r.assy)}</b></td>
-        <td class="jado-cell" data-i="${i}" title="${esc(r.jado)}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(jshort)} <span style="color:#8aa">(${r.matcnt})</span></td>
+        <td class="center">${i+1}</td><td class="center">${esc(r.dest)}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer" title="클릭=이 행 전체선택 (Ctrl=추가)"><b>${esc(r.assy)}</b></td>
+        <td class="center jado-cell mv-rowsel" data-i="${i}" title="${esc(r.jado)}&#10;클릭=행 전체선택 / 더블클릭=자도번 펼치기" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(jshort)} <span style="color:#8aa">(${r.matcnt})</span></td>
         <td class="center">${dcol(r.part_ymd)}</td><td class="center">${esc(r.hm)}</td><td class="center">${esc(r.line)}</td>
-        <td class="num"${r.jp_print?'':' style="color:#dfe6ef"'}>${r.jp_print?nf(r.jp_print):'·'}</td>
-        <td class="num"${r.need>0?' style="color:#c0392b;font-weight:600"':' style="color:#dfe6ef"'}>${r.need>0?nf(r.need):'·'}</td>
-        <td class="num"${r.sale?'':' style="color:#dfe6ef"'}>${r.sale?nf(r.sale):'·'}</td>
-        <td class="num"${r.assy_stock?'':' style="color:#dfe6ef"'}>${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="num"${r.prior?'':' style="color:#dfe6ef"'}>${r.prior?nf(r.prior):'·'}</td>
+        <td class="center"${r.jp_print?'':' style="color:#dfe6ef"'}>${r.jp_print?nf(r.jp_print):'·'}</td>
+        <td class="center"${r.need>0?' style="color:#c0392b;font-weight:600"':' style="color:#dfe6ef"'}>${r.need>0?nf(r.need):'·'}</td>
+        <td class="center"${r.sale?'':' style="color:#dfe6ef"'}>${r.sale?nf(r.sale):'·'}</td>
+        <td class="center"${r.assy_stock?'':' style="color:#dfe6ef"'}>${r.assy_stock?nf(r.assy_stock):'·'}</td>
+        <td class="center"${r.prior?'':' style="color:#dfe6ef"'}>${r.prior?nf(r.prior):'·'}</td>
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,pr=(r.printday&&r.printday[d])||0,stt=(r.cellst&&r.cellst[d])||'';
-          if(!plan)return `<td class="num mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
+          if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const bg=CLR[stt]||''; const fg=stt==='print'?'#fff':(stt?'#222':'#333');
           const key=`${i}:${d}`, on=st.sel.has(key);
-          return `<td class="num mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg}`:wkbg(d)};color:${fg};font-weight:700${on?';outline:2px solid #1c47a0;outline-offset:-2px':''}">${nf(done||pr||0)}/${nf(plan)}</td>`;}).join('')}</tr>
-        ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
+          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg}`:wkbg(d)};color:${fg};font-weight:700${on?';outline:2px solid #1c47a0;outline-offset:-2px':''}">${nf(done||pr||0)}/${nf(plan)}</td>`;}).join('')}</tr>
+        ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334;text-align:left">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
       ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="7">합계 (${nf(st.cnt)}행)</td>
-        <td class="num">${nf(tPrint)}</td><td class="num" style="color:#c0392b">${nf(tNeed)}</td><td class="num">${nf(tSale)}</td><td class="num">${nf(tAssy)}</td><td class="num">${nf(tPrior)}</td>
-        ${dates.map(d=>`<td class="num">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
+        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td><td class="center">${nf(tPrior)}</td>
+        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
       </table></div>`;
   };
   // ★"이동전표" 모드 — MAINT_GROUP_SEQ(전표) 단위 발행목록. 확정여부(입고확인)와 각 전표 재출력 버튼.
   const sheetGridHtml=()=>{
     const rows=st.sheetRows;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit" style="font-size:11px"><thead><tr>
+      <table class="tbl fit" style="font-size:11px;text-align:center"><thead><tr>
        <th>이동일자</th><th>이동전표번호</th><th>CHECK-LIST SEQ</th><th>출고처</th><th>ASSY품번</th><th>품번</th><th>품명</th><th>보관장소</th>
-       <th class="num">입고수량</th><th class="center">입고확인</th><th>확인일시</th><th>작업자</th><th class="center">인쇄</th></tr></thead>
+       <th>입고수량</th><th>입고확인</th><th>확인일시</th><th>작업자</th><th>인쇄</th></tr></thead>
       <tbody>${st.loading?spinRow(13):(rows.length?rows.map(r=>`<tr>
-        <td class="center">${dcol(r.ymd)}</td><td><b>${nf(r.group_seq)}</b></td><td class="num">${nf(r.check_seq)}</td>
-        <td>${esc(r.dest)}</td><td><b>${esc(r.assy)}</b></td><td>${esc(r.mat)}</td><td>${esc(r.nm)}</td><td>${esc(r.rack)}</td>
-        <td class="num">${nf(r.qty)}</td>
+        <td class="center">${dcol(r.ymd)}</td><td class="center"><b>${nf(r.group_seq)}</b></td><td class="center">${nf(r.check_seq)}</td>
+        <td class="center">${esc(r.dest)}</td><td class="center"><b>${esc(r.assy)}</b></td><td class="center">${esc(r.mat)}</td><td class="center">${esc(r.nm)}</td><td class="center">${esc(r.rack)}</td>
+        <td class="center">${nf(r.qty)}</td>
         <td class="center">${r.confirmed?'<span style="color:#1c7c3a">✔입고확인</span>':'<span style="color:#c0392b">미확정</span>'}</td>
         <td class="center">${r.confirmed?esc((r.confirm_dt||'').slice(0,16)):'·'}</td><td class="center">${esc(r.confirm_user)||'·'}</td>
         <td class="center"><button class="btn sm sheet-print" data-g="${r.group_seq}" style="padding:2px 8px;font-size:11px">🖨</button></td></tr>`).join('')
@@ -845,7 +846,7 @@ SCREEN.gagongmove580=(c)=>{
        <label class="rl"><input type="radio" name="mv-gubun" value="이동계획"${st.gubun==='이동계획'?' checked':''}> 이동계획</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
        <button class="btn" id="mv-search">🔍 조회</button>
-       <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b>${st.sel.size}</b>셀 · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
+       <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
@@ -869,19 +870,28 @@ SCREEN.gagongmove580=(c)=>{
     }
     c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;refilter();});
     ['#mv-wc','#mv-prpart','#mv-sagub'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
-    c.querySelectorAll('.jado-cell').forEach(el=>el.onclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
-    // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현) — mousedown 시작, mouseover로 사각영역 확장, mouseup 종료.
+    c.querySelectorAll('.jado-cell').forEach(el=>el.ondblclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
+    // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현).
+    //   재렌더(draw)하면 DOM이 새로 만들어져 mouseover가 끊긴다 → 드래그 중에는 style만 갱신(2026-08-22 수정).
     let dragging=false,startCell=null;
+    const paint=()=>{c.querySelectorAll('.mv-cell[data-key]').forEach(el=>{
+        const on=st.sel.has(el.dataset.key);
+        el.style.outline=on?'2px solid #1c47a0':''; el.style.outlineOffset=on?'-2px':'';});
+      const b=c.querySelector('#mv-selcnt'); if(b)b.textContent=st.sel.size;};
     const applySel=(r1,r2,d1,d2)=>{const di1=dates.indexOf(d1),di2=dates.indexOf(d2);
       const rlo=Math.min(r1,r2),rhi=Math.max(r1,r2),dlo=Math.min(di1,di2),dhi=Math.max(di1,di2);
       st.sel.clear();
       for(let ri=rlo;ri<=rhi;ri++)for(let di=dlo;di<=dhi;di++){const dd=dates[di];if((st.rows[ri].days||{})[dd])st.sel.add(`${ri}:${dd}`);}};
+    // 행 전체선택 = 도번/자도번 셀 클릭(생산준비등록과 동일 감각). Ctrl=추가선택.
+    const selRow=(i,add)=>{if(!add)st.sel.clear();
+      dates.forEach(d=>{if((st.rows[i].days||{})[d])st.sel.add(`${i}:${d}`);});paint();};
+    c.querySelectorAll('.mv-rowsel').forEach(el=>el.onclick=e=>selRow(+el.dataset.i,e.ctrlKey||e.metaKey));
     c.querySelectorAll('.mv-cell[data-key]').forEach(el=>{
-      el.addEventListener('mousedown',e=>{dragging=true;startCell={i:+el.dataset.i,d:el.dataset.d};applySel(startCell.i,startCell.i,startCell.d,startCell.d);draw();e.preventDefault();});
-      el.addEventListener('mouseover',()=>{if(dragging&&startCell){applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d);
-        c.querySelectorAll('.mv-cell[data-key]').forEach(el2=>{const on=st.sel.has(el2.dataset.key);el2.style.outline=on?'2px solid #1c47a0':'';el2.style.outlineOffset=on?'-2px':'';});}});
+      el.addEventListener('mousedown',e=>{dragging=true;startCell={i:+el.dataset.i,d:el.dataset.d};
+        applySel(startCell.i,startCell.i,startCell.d,startCell.d);paint();e.preventDefault();});
+      el.addEventListener('mouseover',()=>{if(dragging&&startCell){applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d);paint();}});
     });
-    document.addEventListener('mouseup',()=>{if(dragging){dragging=false;draw();}},{once:false});
+    if(!c._mvUp){c._mvUp=true;document.addEventListener('mouseup',()=>{dragging=false;});}
     g('#mv-move').onclick=()=>openMoveModal(st,dates);
   };
   loadOpts().then(draw);
@@ -913,34 +923,36 @@ function openMoveModal(st,dates){
     }
     for(const a of acc.values())for(const [mat,q] of a.mats)rows.push({item_code:a.assy,mat_code:mat,item_desc:'',set_qty:q,use_qty:1,maint_qty:q,remarks:''});
   }
-  while(rows.length<20)rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});
+  // 빈 행은 5줄만(레거시는 50줄이지만 화면을 넘겨 스크롤 유발 — 필요하면 행추가로).
+  while(rows.length<5)rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});
   const state={ymd:iso(new Date()),out_wh:'P0001',in_wh:'IS0001',dest:'',rows};
   const render=()=>{
-    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:920px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:13px">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #e5e9f0">
-        <b style="font-size:15px">🚚 자재개별일괄출고 (가공자재 이동처리)</b><span id="mm-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
-      <div style="padding:12px 16px;display:flex;gap:10px;align-items:center;background:#f2f7ff">
-        <label class="tl">이동일자</label><input class="inp" type="date" id="mm-ymd" value="${state.ymd}">
-        <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:90px">
-        <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:90px">
-        <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:120px" placeholder="최종납품처">
-        <div class="spacer"></div><button class="btn" id="mm-addrow">➕ 행추가</button>
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:760px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #e5e9f0">
+        <b style="font-size:14px">🚚 자재개별일괄출고 (가공자재 이동처리)</b><span id="mm-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
+      <div style="padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#f2f7ff">
+        <label class="tl">이동일자</label><input class="inp" type="date" id="mm-ymd" value="${state.ymd}" style="width:130px">
+        <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:72px">
+        <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:72px">
+        <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:100px" placeholder="최종납품처">
+        <div class="spacer"></div><button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
       </div>
-      <div id="mm-msg" style="padding:0 16px;min-height:16px;font-size:12px"></div>
-      <div style="flex:1;min-height:0;overflow:auto;padding:0 16px">
-        <table class="tbl fit" style="font-size:12px"><thead><tr>
-          <th>SEQ</th><th>생산품번(도번)</th><th>가공품번(자도번)</th><th>품명</th><th class="num">SET수량</th><th class="num">사용수량</th><th class="num">출고수량</th><th>비고</th></tr></thead>
+      <div id="mm-msg" style="padding:0 12px;min-height:15px;font-size:12px"></div>
+      <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 12px">
+        <table class="tbl fit" style="font-size:12px;text-align:center;width:100%;table-layout:fixed"><thead><tr>
+          <th style="width:34px">SEQ</th><th style="width:20%">생산품번</th><th style="width:20%">가공품번</th><th>품명</th>
+          <th style="width:62px">SET</th><th style="width:56px">사용</th><th style="width:70px">출고수량</th><th style="width:15%">비고</th></tr></thead>
         <tbody>${state.rows.map((r,i)=>`<tr>
-          <td class="num">${i+1}</td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="item_code" value="${esc(r.item_code)}" style="width:130px" placeholder="도번"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="mat_code" value="${esc(r.mat_code)}" style="width:130px" placeholder="자도번"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="item_desc" value="${esc(r.item_desc)}" style="width:150px" readonly></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="set_qty" type="number" value="${r.set_qty||''}" style="width:70px;text-align:right"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="use_qty" type="number" value="${r.use_qty||''}" style="width:70px;text-align:right"></td>
-          <td class="num" style="font-weight:700">${nf(r.maint_qty||0)}</td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}" style="width:140px"></td></tr>`).join('')}</tbody></table>
+          <td class="center">${i+1}</td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="item_code" value="${esc(r.item_code)}" style="width:100%;text-align:center" placeholder="도번"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="mat_code" value="${esc(r.mat_code)}" style="width:100%;text-align:center" placeholder="자도번"></td>
+          <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item_desc)}">${esc(r.item_desc)}</td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="set_qty" type="number" value="${r.set_qty||''}" style="width:100%;text-align:center"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="use_qty" type="number" value="${r.use_qty||''}" style="width:100%;text-align:center"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="maint_qty" type="number" value="${r.maint_qty||''}" style="width:100%;text-align:center;font-weight:700;background:#fffbe6" title="직접 수정 가능(SET×사용 자동계산값을 덮어씀)"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}" style="width:100%"></td></tr>`).join('')}</tbody></table>
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:12px 16px;border-top:1px solid #e5e9f0">
+      <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:8px 12px;border-top:1px solid #e5e9f0">
         <label class="rl" style="margin-right:auto"><input type="checkbox" id="mm-doprint" checked> 저장 시 납품표 자동인쇄</label>
         <button class="btn" id="mm-save" style="background:#1c47a0;color:#fff">✔ 저장(이동전표 발행)</button>
         <button class="btn" id="mm-close2">닫기</button></div>
@@ -952,12 +964,16 @@ function openMoveModal(st,dates){
     q('#mm-outwh').onchange=e=>state.out_wh=e.target.value.trim();
     q('#mm-inwh').onchange=e=>state.in_wh=e.target.value.trim();
     q('#mm-dest').onchange=e=>state.dest=e.target.value.trim();
-    q('#mm-addrow').onclick=()=>{for(let k=0;k<20;k++)state.rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});render();};
-    ov.querySelectorAll('.mm-f').forEach(el=>el.onchange=e=>{
+    q('#mm-addrow').onclick=()=>{for(let k=0;k<5;k++)state.rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});render();};
+    // ★출고수량(maint_qty)은 직접 입력 가능. SET/사용 수정 시에만 자동계산으로 덮어쓴다.
+    //   재렌더하면 입력 중 포커스가 날아가므로 state만 갱신(품명 등 표시는 다음 렌더에 반영).
+    ov.querySelectorAll('.mm-f').forEach(el=>el.onchange=()=>{
       const i=+el.dataset.i,k=el.dataset.k,r=state.rows[i];
-      r[k]=(k==='set_qty'||k==='use_qty')?(+el.value||0):el.value;
-      if(k==='set_qty'||k==='use_qty')r.maint_qty=(r.set_qty||0)*(r.use_qty||0);
-      render();});
+      r[k]=(k==='set_qty'||k==='use_qty'||k==='maint_qty')?(+el.value||0):el.value;
+      if(k==='set_qty'||k==='use_qty'){
+        r.maint_qty=(r.set_qty||0)*(r.use_qty||0);
+        const t=ov.querySelector(`.mm-f[data-i="${i}"][data-k="maint_qty"]`); if(t)t.value=r.maint_qty||'';
+      }});
     q('#mm-save').onclick=async()=>{
       const valid=state.rows.filter(r=>r.mat_code&&r.item_code&&(r.maint_qty>0));
       if(!valid.length){msg('출고수량이 있는 행이 없습니다(자도번·수량 확인).',false);return;}
