@@ -728,6 +728,9 @@ SCREEN.gagongmove580=(c)=>{
     let rows=st.all;
     if(it) rows=rows.filter(r=>(r.assy||'').toUpperCase().includes(it));
     if(pt) rows=rows.filter(r=>(r.jado||'').toUpperCase().includes(pt));
+    // ★생산파트·사급업체도 클라이언트 필터(SP가 해당 인자를 무시하므로 결과에서 거른다 = 레거시와 동일 구조)
+    if(st.prPart) rows=rows.filter(r=>r.gagong_proc===st.prPart);
+    if(st.sagub) rows=rows.filter(r=>r.gole_cust===st.sagub);
     if(st.mv==='이동필요') rows=rows.filter(r=>r.need>0);
     else if(st.mv==='이동완료') rows=rows.filter(r=>r.need<=0);
     st.rows=rows; st.cnt=rows.length;
@@ -740,7 +743,8 @@ SCREEN.gagongmove580=(c)=>{
     if(st.gubun==='이동전표')return loadSheets();
     st.loading=true;draw();
     // mv(이동필요)는 서버에 안 넘긴다 — 클라이언트 필터로 즉시 전환하기 위해 항상 '전체'로 받아둔다.
-    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:st.prPart||'%',pu_part:st.puPart,sagub:st.sagub,mv:'전체',limit:2500});
+    // 생산파트·사급업체·이동필요는 넘기지 않는다(클라이언트 즉시필터). 서버는 기간/가공창고/자재파트만.
+    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:'%',pu_part:st.puPart,sagub:'',mv:'전체',limit:2500});
     try{const r=await fetch(`${API}/api/gagong/move580?${qs}`);const d=await r.json();
       st.all=d.rows||[];st.allDates=d.dates||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';st.loaded=true;applyFilter();}
     catch(e){st.msg='백엔드 연결 실패';st.all=[];st.allDates=[];st.dates=[];st.rows=[];st.cnt=0;}
@@ -799,7 +803,7 @@ SCREEN.gagongmove580=(c)=>{
   const sheetGridHtml=()=>{
     const rows=st.sheetRows;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit" style="font-size:11px;text-align:center"><thead><tr>
+      <table class="tbl fit mvs-tbl" style="font-size:11px;text-align:center"><thead><tr>
        <th>이동일자</th><th>이동전표번호</th><th>CHECK-LIST SEQ</th><th>출고처</th><th>ASSY품번</th><th>품번</th><th>품명</th><th>보관장소</th>
        <th>입고수량</th><th>입고확인</th><th>확인일시</th><th>작업자</th><th>인쇄</th></tr></thead>
       <tbody>${st.loading?spinRow(13):(rows.length?rows.map(r=>`<tr>
@@ -820,6 +824,11 @@ SCREEN.gagongmove580=(c)=>{
     const ptOpts=[...ptS].sort().slice(0,400).map(v=>`<option value="${esc(v)}"></option>`).join('');
     const isSheet=st.gubun==='이동전표';
     c.innerHTML=`
+     <style>
+       /* ★.tbl th 가 전역 text-align:left 라 헤더가 좌측정렬됨 → 이 화면 표는 전부 가운데 */
+       .mv-tbl th,.mv-tbl td,.mvs-tbl th,.mvs-tbl td{text-align:center!important}
+       .mv-tbl tr.jado-exp td{text-align:left!important}
+     </style>
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
      <div class="page-sub">조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일. 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행. 🔴 라이브 조회 / 🟢 발행은 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
@@ -871,7 +880,10 @@ SCREEN.gagongmove580=(c)=>{
       return;
     }
     c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;refilter();});
-    ['#mv-wc','#mv-prpart','#mv-pupart','#mv-sagub'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
+    // 가공창고·자재파트 = SP 인자라 재조회 / 생산파트·사급업체 = 결과필터라 즉시반영
+    ['#mv-wc','#mv-pupart'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
+    g('#mv-prpart').onchange=()=>{st.prPart=g('#mv-prpart').value.trim();refilter();};
+    g('#mv-sagub').onchange=()=>{st.sagub=g('#mv-sagub').value.trim();refilter();};
     c.querySelectorAll('.jado-cell').forEach(el=>el.ondblclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
     // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현).
     //   재렌더(draw)하면 DOM이 새로 만들어져 mouseover가 끊긴다 → 드래그 중에는 style만 갱신(2026-08-22 수정).
@@ -934,7 +946,7 @@ function openMoveModal(st,dates){
       <style>
         /* ★.inp 전역 min-width:200px 이 표 안에서 칸을 밀어내 출고수량이 잘렸다 → 팝업 안에서만 해제 */
         .mm-tbl .inp{min-width:0!important;width:100%!important;height:26px;padding:0 4px;font-size:12px}
-        .mm-tbl td,.mm-tbl th{padding:2px 3px}
+        .mm-tbl td,.mm-tbl th{padding:2px 3px;text-align:center!important}
       </style>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #e5e9f0">
         <b style="font-size:14px">🚚 자재개별일괄출고 (가공자재 이동처리)</b><span id="mm-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>

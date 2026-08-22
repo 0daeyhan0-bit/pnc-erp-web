@@ -114,6 +114,7 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
             "prior_color": _pbcolor(r.get("color_00")),
             "stock": _f(r.get("stock_qty")), "pr_stock": _f(r.get("pr_stock_qty")),
             "days": days, "doneday": done, "colorday": colors,
+            "gagong_proc": (r.get("gagong_proc_code") or "").strip(),   # 생산파트(화면 필터 대상)
             "gole_proc": (r.get("GOLE_GAGONG_PROC_CODE") or "").strip(),
             "gole_cust": (r.get("GOLE_IN_CUST_CODE") or "").strip(),
             "mat_work": (r.get("mat_work_code") or "").strip(),
@@ -124,6 +125,12 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
     it = item.strip().upper(); pt = part.strip().upper()
     if it: rows = [r for r in rows if it in (r["assy"] or "").upper()]
     if pt: rows = [r for r in rows if pt in (r["jado"] or "").upper()]
+    # ★생산파트/사급업체는 SP 인자로 넘겨도 SP가 무시한다(실측: S5/S1/% 모두 384행 동일).
+    #   레거시도 화면단에서 거르는 구조 → 결과에서 필터. 생산파트 = gagong_proc_code.
+    pp = (pr_part or "").strip()
+    if pp and pp != "%": rows = [r for r in rows if r["gagong_proc"] == pp]
+    sg = (sagub or "").strip()
+    if sg: rows = [r for r in rows if r["gole_cust"] == sg]
     m = mv.strip()
     if m == "이동필요": rows = [r for r in rows if r["need"] > 0]
     elif m == "이동완료": rows = [r for r in rows if r["need"] <= 0]
