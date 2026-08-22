@@ -139,7 +139,7 @@ SCREEN.matverify=(c)=>{
     loading=false;renderLeft();
     c.querySelector('#mv-rhead').innerHTML='<div class="s-item">← 좌측에서 업체를 클릭하세요</div>';
     c.querySelector('#mv-rbody').innerHTML='';
-    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · <b>순증=매입−가공출고−사급출고±조정</b>(실측) · 기초·실재고·재고증감=<b>정본(자재일마감 이동평균)</b> · <b>순증≫재고증감=과매입 미실현(재고미확인)</b> · 단정 아님, 사람이 검토`;
+    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · <b>순증=매입−가공출고−사급출고±조정</b>(실측) · 기초·재고증감·재고증감액·실재고=<b>정본(자재일마감 이동평균)</b> · 재고증감액=정본재고금액증감(vendor단가 튐 배제) · <b>순증≫재고증감=과매입 미실현</b> · 단정 아님, 사람이 검토`;
   };
   c.innerHTML=`
    <div class="mv-screen" style="display:flex;flex-direction:column;height:100%">
@@ -161,7 +161,7 @@ SCREEN.matverify=(c)=>{
        <div style="flex:1;min-width:0;display:flex;flex-direction:column">
          <div class="summary-bar" id="mv-rhead" style="flex:0 0 auto"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
          <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit mv-dtl"><thead>
-           <tr class="grp"><th rowspan="2">품번</th><th rowspan="2">품명</th><th rowspan="2" class="num" title="정본(자재일마감 이동평균) 기초재고">기초</th><th colspan="2" class="ghd">입고</th><th colspan="4" class="ghd">출고</th><th rowspan="2" class="num" title="실측: 매입−가공−사급−직납±조정">순증</th><th rowspan="2" class="num">순증액</th><th rowspan="2" class="num" title="정본 재고증감 = 실재고 − 기초. 순증과 대조(순증≫재고증감=과매입 미실현)">재고증감</th><th rowspan="2" class="num" title="정본(자재일마감 이동평균) 기말재고">실재고</th><th rowspan="2">비고</th><th rowspan="2" style="min-width:160px">공급원(전체)</th><th rowspan="2">흐름</th></tr>
+           <tr class="grp"><th rowspan="2">품번</th><th rowspan="2">품명</th><th rowspan="2" class="num" title="정본(자재일마감 이동평균) 기초재고">기초</th><th colspan="2" class="ghd">입고</th><th colspan="4" class="ghd">출고</th><th rowspan="2" class="num" title="실측: 매입−가공−사급−직납±조정">순증</th><th rowspan="2" class="num" title="정본 재고증감 = 실재고 − 기초. 순증과 대조(순증≫재고증감=과매입 미실현)">재고증감</th><th rowspan="2" class="num" title="정본 재고금액 증감 = 기말금액 − 기초금액(자재일마감 이동평균). vendor 송장단가 튐 배제">재고증감액</th><th rowspan="2" class="num" title="정본(자재일마감 이동평균) 기말재고">실재고</th><th rowspan="2">비고</th><th rowspan="2" style="min-width:160px">공급원(전체)</th><th rowspan="2">흐름</th></tr>
            <tr><th class="num">협력사</th><th class="num">타협력사</th><th class="num">가공</th><th class="num">사급</th><th class="num">직납</th><th class="num">조정</th></tr>
          </thead><tbody id="mv-rbody"></tbody></table></div>
        </div>
@@ -190,7 +190,8 @@ SCREEN.matverify=(c)=>{
       // 순증(실측) 크게 양수인데 정본 재고증감이 못 미침 = 과매입 미실현 → 재고증감 강조
       const chgc=((+r.net||0)>0 && r.off_chg!=null && (+r.off_chg||0)<(+r.net||0)*0.5)?'color:#c0392b;font-weight:600':'color:#555';
       const stkc=r.off_cov?'color:#555':'color:#bbb';
-      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num" style="color:#888">${nn(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(other)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.jiknap?won(r.jiknap):''}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="${chgc}">${nn(r.off_chg)}</td><td class="num" style="${stkc}">${nn(r.stock)}</td><td>${fl}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td></tr>`;
+      const amtc=(+r.net_amt||0)>3000000?'color:#c0392b;font-weight:600':'color:#333';
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num" style="color:#888">${nn(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(other)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.jiknap?won(r.jiknap):''}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${chgc}">${nn(r.off_chg)}</td><td class="num" style="${amtc}">${won(r.net_amt)}</td><td class="num" style="${stkc}">${nn(r.stock)}</td><td>${fl}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td></tr>`;
     }).join('');
     c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="16" class="empty">품목 없음</td></tr>`;
     c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 총매입·가공출고·사급출고·순증=품목 전체(전 업체)</div>`;
@@ -201,8 +202,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','기초(정본)','협력사(입고)','타협력사(입고)','가공','사급','직납','조정','순증(실측)','순증액','재고증감(정본)','실재고(정본)','비고','공급원(전체)','흐름'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.beg,r.vq,(+r.buy_all||0)-(+r.vq||0),r.gagong,r.sagub,r.jiknap,r.adj,r.net,r.net_amt,r.off_chg,r.stock,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow])));
+    const hd=['업체','품번','품명','기초(정본)','협력사(입고)','타협력사(입고)','가공','사급','직납','조정','순증(실측)','재고증감(정본)','재고증감액(정본)','실재고(정본)','비고','공급원(전체)','흐름'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.beg,r.vq,(+r.buy_all||0)-(+r.vq||0),r.gagong,r.sagub,r.jiknap,r.adj,r.net,r.off_chg,r.net_amt,r.stock,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };
