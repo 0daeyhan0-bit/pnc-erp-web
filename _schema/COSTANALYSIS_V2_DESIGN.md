@@ -516,6 +516,20 @@ cg=5 직납 → 제외
 ### 정독 잔여 불명(전량 정독 후 확정 필요)
 - make_type 4/5 nx 매핑 · 용접봉 소요 이원화(BOM×1.5 vs 견적 c14) · 사급 관리플래그(SAGUB_STOCK_FLAG vs item_class='J') · lg_settle_unit 다월 · nx.routing 가공비 잔여 하드갭.
 
+## 5N. ★레거시 원가 SP 재료비 단가 직독 — R-2/R-4 확정 (2026-08-22)
+> `SP_CS_견적서(실원가용)_250910.sql` 직독. **재료비 단가에 직거래/사급 분기 없음.**
+
+- **① 원소재(cg='3')** (L214·323): `WON_MAT_COST = CS_M_METERIAL_COST.tot_cost`(=LG 사급가/원재료비), `JAI = WON_MAT_COST × 중량 × USE_QTY`. → **모든 원소재를 LG 사급가로. 직거래/사급 구분 없음.**
+- **② 구매품(cg≠3, INNER_PROD='0')** (L296-306): `MAT_COST = PR_M_ITEM_COST.ITEM_COST × 환율 WHERE cust_code=IN_CUST_CODE AND cost_tag='1' AND cost_apply_ymd≤기준일 ORDER BY DESC`. → 매입가 as-of, 거래처=품목 IN_CUST_CODE.
+- **③ 입고이력 기반 거래처 선택 = 전부 주석처리(비활성)** (L256-292). 그냥 품목 IN_CUST_CODE 사용.
+- **LME**(L329): `JAI_SUB = WON_MAT_COST_SUB × 중량 × qty`, `WON_MAT_COST_SUB = tot_cost − tot_cost_sub`(LG−협력사).
+
+### ★결론 (R-2/R-4 확정)
+- **레거시 원가 = 원소재를 무조건 사급가로 계상(직거래도 사급가).** → 이동평균이 사급가와 일치한 이유 설명됨(레거시 자체가 사급가).
+- **V2 "직거래 원소재 = 실매입가"는 레거시에 없는 우리식 개선** = 실제 손익 정확화의 핵심. 레거시 한계(직거래도 사급가→손익왜곡)를 V2가 바로잡음.
+- **R-2 소스 확정**: 레거시=CS_M_METERIAL_COST(사급가) / 구매품=PR_M_ITEM_COST[cost_tag='1']. Cost Table(lg_lme_costtable)은 별개(직거래 인정가 화면용). 엔진 price_metal=CS_M_METERIAL_COST 미러 → 레거시와 동일(사급가).
+- **R-4 사급부품**: 실원가 SP=매입가(cost_tag='1'). 단 CQV2 협력사견적은 판매단가(cost_tag='S') — 맥락 다름(실원가 vs 견적손익). V2 원가분석은 실원가 SP 계보.
+
 ## 6. 결정 로그 (담당 판단 — 하나씩 확정)
 
 | 일자 | 항목 | 결정 | 사유 |
