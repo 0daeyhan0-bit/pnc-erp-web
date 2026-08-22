@@ -153,21 +153,21 @@ SCREEN.matverify=(c)=>{
          <div class="spacer"></div><button class="btn xls" id="mv-xls">📥 엑셀</button>
        </div>
      </div>
-     <div style="flex:1;min-height:0;display:flex;gap:10px;align-items:stretch">
-       <div style="flex:0 0 30%;min-width:0;display:flex;flex-direction:column">
+     <div style="flex:1;min-height:0;display:flex;gap:8px;align-items:stretch">
+       <div style="flex:0 0 21%;min-width:0;display:flex;flex-direction:column">
          <div class="summary-bar" id="mv-lsum" style="flex:0 0 auto"></div>
          <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead><tr><th>업체</th><th class="num">매입액</th><th class="num">품목</th><th class="num">플래그</th></tr></thead><tbody id="mv-lbody"></tbody></table></div>
        </div>
        <div style="flex:1;min-width:0;display:flex;flex-direction:column">
          <div class="summary-bar" id="mv-rhead" style="flex:0 0 auto"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
-         <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead>
+         <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit mv-dtl"><thead>
            <tr class="grp"><th rowspan="2">품번</th><th rowspan="2">품명</th><th colspan="2" class="ghd">입고</th><th colspan="4" class="ghd">출고</th><th rowspan="2" class="num">순증</th><th rowspan="2" class="num">순증액</th><th rowspan="2" class="num">실재고</th><th rowspan="2">비고</th><th rowspan="2" style="min-width:160px">공급원(전체)</th><th rowspan="2">흐름</th></tr>
            <tr><th class="num">협력사</th><th class="num">타협력사</th><th class="num">가공</th><th class="num">사급</th><th class="num">직납</th><th class="num">조정</th></tr>
          </thead><tbody id="mv-rbody"></tbody></table></div>
        </div>
      </div>
    </div>
-   <style>.mv-screen .grid-wrap thead th{position:sticky;background:#eef3fa;z-index:2}.mv-screen .grid-wrap thead tr.grp th{top:0}.mv-screen .grid-wrap thead tr:not(.grp) th{top:23px}.mv-screen .grid-wrap thead .ghd{text-align:center;background:#dde7f5;border-left:1px solid #c9d3e0;border-right:1px solid #c9d3e0}.mv-screen .grid-wrap .grandtot td{position:sticky;bottom:0;background:#f4f7fc}</style>`;
+   <style>.mv-screen .grid-wrap thead th{position:sticky;top:0;background:#eef3fa;z-index:2}.mv-screen .mv-dtl thead tr:not(.grp) th{top:23px}.mv-screen .mv-dtl thead .ghd{text-align:center;background:#dde7f5;border-left:1px solid #c9d3e0;border-right:1px solid #c9d3e0}.mv-screen .grid-wrap .grandtot td{position:sticky;bottom:0;background:#f4f7fc}</style>`;
   const renderLeft=()=>{
     const kc=k=>({'수입':'#c0392b','기타':'#b8860b'}[k]||'#1c47a0');
     let lb=vend.map(v=>`<tr data-vk="${esc(v.vkey)}" class="${sel===v.vkey?'sel':''}"><td class="cap" title="${esc(v.name)}"><b>${esc(v.name||v.code||'(기타)')}</b> <span style="font-size:9px;color:${kc(v.kind)}">${esc(v.tname||v.kind)}</span></td><td class="num">${won(v.amt)}</td><td class="num">${won(v.items.length)}</td><td class="num" style="color:${v.nflag?'#c0392b':'#999'}">${v.nflag||''}</td></tr>`).join('');
