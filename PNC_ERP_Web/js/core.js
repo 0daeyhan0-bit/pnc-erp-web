@@ -1223,6 +1223,7 @@ const _mkMagam=(CFG)=>(c)=>{
   const inYm=v=>(''+(v||'')).slice(2).replace('-','');
   const canW=(typeof PERM!=='undefined')?PERM.canEdit(CFG.base):true;   // 수정권한 게이트(규칙#16)
   let ym='', rows=[], loading=false, msg='', reasons=[], q='', wmap={}, realRaw=25000, sagubRaw=20000;
+  let sortKey='', sortDir=1, ctf='';   // 정렬키·방향(1오름/-1내림)·분류필터
   // 모달 상태
   let mc=null, detail=null, mLoading=false, mClosed=false, pEdit={}, dEdit={}, amtAdjs=[], expanded=new Set();
   const dkey=(mat,d)=>mat+'|'+d;
@@ -1238,10 +1239,24 @@ const _mkMagam=(CFG)=>(c)=>{
     loading=false;draw();};
   const ensureReasons=async()=>{if(reasons.length)return;try{const r=await fetch(`${API}/api/salemagam/reasons`);reasons=(await r.json()).rows||[];}catch(e){}};
 
-  const filt=()=>{const k=q.trim().toLowerCase();return rows.filter(r=>!k||(''+r.cc).toLowerCase().includes(k)||(''+r.nm).toLowerCase().includes(k)||(''+r.chg).toLowerCase().includes(k));};
+  const filt=()=>{const k=q.trim().toLowerCase();return rows.filter(r=>(!k||(''+r.cc).toLowerCase().includes(k)||(''+r.nm).toLowerCase().includes(k)||(''+r.chg).toLowerCase().includes(k))&&(!ctf||ctN(r.ct)===ctf));};
+  const finw0=(r)=>(+r.final_amt||0)+((wmap[r.cc]||{}).raw_amt||0)+((wmap[r.cc]||{}).weld_amt||0);
+  const SVAL=(r,key)=>{const w=wmap[r.cc]||{};switch(key){   // 정렬값 접근자(문자=코드/명/담당/분류, 그외 숫자)
+    case 'cc':return (''+r.cc); case 'nm':return (''+r.nm); case 'chg':return (''+r.chg); case 'ct':return ctN(r.ct);
+    case 'qty':return +r.qty||0; case 'amt':return +r.amt||0;
+    case 'raw_out':return +w.raw_out||0; case 'raw_in':return +w.raw_in||0; case 'raw_diff':return +w.raw_diff||0;
+    case 'weld_out':return +w.weld_out||0; case 'weld_in':return +w.weld_in||0; case 'weld_diff':return +w.weld_diff||0;
+    case 'adj_amt':return +r.adj_amt||0; case 'raw_amt':return +w.raw_amt||0; case 'weld_amt':return +w.weld_amt||0;
+    case 'finw':return CFG.weight?finw0(r):(+r.final_amt||0); case 'close_flag':return +r.close_flag||0; default:return 0;}};
+  const sortList=(list)=>{if(!sortKey)return list;const cp=list.slice();
+    cp.sort((a,b)=>{const va=SVAL(a,sortKey),vb=SVAL(b,sortKey);
+      if(typeof va==='string'||typeof vb==='string')return sortDir*(''+va).localeCompare(''+vb,'ko');
+      return sortDir*((va||0)-(vb||0));});return cp;};
+  const sa=k=>sortKey===k?`<span class="sm-ar">${sortDir>0?'▲':'▼'}</span>`:'';   // 정렬 화살표(헤더 구조 불변, span만 추가)
 
   const draw=()=>{
-    const cur=filt();
+    const cur=sortList(filt());
+    const cts=[...new Set(rows.map(r=>ctN(r.ct)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));   // 분류 드롭다운 옵션
     const tAmt=cur.reduce((a,b)=>a+(+b.amt||0),0), tFin=cur.reduce((a,b)=>a+(+b.final_amt||0),0), tAdj=cur.reduce((a,b)=>a+(+b.adj_amt||0),0);
     const nClosed=cur.filter(r=>r.close_flag).length;
     const wTot=cur.reduce((a,b)=>{const w=wmap[b.cc]||{};a.out+=+w.raw_out||0;a.in+=+w.raw_in||0;a.diff+=+w.raw_diff||0;a.amt+=+w.raw_amt||0;a.wo+=+w.weld_out||0;a.wi+=+w.weld_in||0;a.wd+=+w.weld_diff||0;a.wa+=+w.weld_amt||0;return a;},{out:0,in:0,diff:0,amt:0,wo:0,wi:0,wd:0,wa:0});
@@ -1260,30 +1275,32 @@ const _mkMagam=(CFG)=>(c)=>{
     const NC=CFG.weight?18:10, amtl=CFG.amtlbl;
     const THEAD=CFG.weight?`<thead>
        <tr>
-         <th rowspan="2">코드</th><th rowspan="2">거래처명</th><th rowspan="2">담당자</th><th rowspan="2">분류</th>
-         <th rowspan="2" class="num">수량</th><th rowspan="2" class="num">${amtl}</th>
+         <th rowspan="2" data-sk="cc">코드${sa('cc')}</th><th rowspan="2" data-sk="nm">거래처명${sa('nm')}</th><th rowspan="2" data-sk="chg">담당자${sa('chg')}</th><th rowspan="2" data-sk="ct">분류${sa('ct')}</th>
+         <th rowspan="2" class="num" data-sk="qty">수량${sa('qty')}</th><th rowspan="2" class="num" data-sk="amt">${amtl}${sa('amt')}</th>
          <th colspan="3" class="center wcol">원소재 <small>kg</small></th>
          <th colspan="3" class="center wcol2">용접봉 <small>kg</small></th>
          <th colspan="3" class="center acol">조정 <small>원</small></th>
-         <th rowspan="2" class="num">최종금액</th>
-         <th rowspan="2" class="center">상태</th><th rowspan="2" class="center">처리</th>
+         <th rowspan="2" class="num" data-sk="finw">최종금액${sa('finw')}</th>
+         <th rowspan="2" class="center" data-sk="close_flag">상태${sa('close_flag')}</th><th rowspan="2" class="center">처리</th>
        </tr>
        <tr>
-         <th class="num wcol">출고</th><th class="num wcol">소요</th><th class="num wcol">차액</th>
-         <th class="num wcol2">출고</th><th class="num wcol2">소요</th><th class="num wcol2">차액</th>
-         <th class="num acol">단가조정</th><th class="num acol">원소재정산</th><th class="num acol">용접봉정산</th>
+         <th class="num wcol" data-sk="raw_out">출고${sa('raw_out')}</th><th class="num wcol" data-sk="raw_in">소요${sa('raw_in')}</th><th class="num wcol" data-sk="raw_diff">차액${sa('raw_diff')}</th>
+         <th class="num wcol2" data-sk="weld_out">출고${sa('weld_out')}</th><th class="num wcol2" data-sk="weld_in">소요${sa('weld_in')}</th><th class="num wcol2" data-sk="weld_diff">차액${sa('weld_diff')}</th>
+         <th class="num acol" data-sk="adj_amt">단가조정${sa('adj_amt')}</th><th class="num acol" data-sk="raw_amt">원소재정산${sa('raw_amt')}</th><th class="num acol" data-sk="weld_amt">용접봉정산${sa('weld_amt')}</th>
        </tr></thead>`:`<thead><tr>
-         <th>코드</th><th>거래처명</th><th>담당자</th><th>분류</th><th class="num">수량</th><th class="num">${amtl}</th><th class="num">조정</th><th class="num">최종금액</th><th class="center">상태</th><th class="center">처리</th>
+         <th data-sk="cc">코드${sa('cc')}</th><th data-sk="nm">거래처명${sa('nm')}</th><th data-sk="chg">담당자${sa('chg')}</th><th data-sk="ct">분류${sa('ct')}</th><th class="num" data-sk="qty">수량${sa('qty')}</th><th class="num" data-sk="amt">${amtl}${sa('amt')}</th><th class="num" data-sk="adj_amt">조정${sa('adj_amt')}</th><th class="num" data-sk="finw">최종금액${sa('finw')}</th><th class="center" data-sk="close_flag">상태${sa('close_flag')}</th><th class="center">처리</th>
        </tr></thead>`;
     const rowMid=(r)=>CFG.weight?`${wc(r.cc)}${ac(r)}<td class="num"><b>${won0(finw(r))}</b></td>`:`<td class="num ${r.adj_amt<0?'neg':''}">${r.adj_amt?won0(r.adj_amt):''}</td><td class="num"><b>${won0(r.final_amt)}</b></td>`;
     const gtMid=CFG.weight?`<td class="num">${num(wTot.out)}</td><td class="num">${num(wTot.in)}</td><td class="num ${wTot.diff<0?'neg':''}">${num(wTot.diff)}</td><td class="num wcol2">${num(wTot.wo)}</td><td class="num wcol2">${num(wTot.wi)}</td><td class="num wcol2 ${wTot.wd<0?'neg':''}">${num(wTot.wd)}</td><td class="num">${won0(tAdj)}</td><td class="num ${wTot.amt<0?'neg':''}"><b>${won0(wTot.amt)}</b></td><td class="num acol ${wTot.wa<0?'neg':''}">${wTot.wa?won0(wTot.wa):''}</td><td class="num"><b>${won0(tFin+wTot.amt+wTot.wa)}</b></td>`:`<td class="num">${won0(tAdj)}</td><td class="num"><b>${won0(tFin)}</b></td>`;
     c.innerHTML=`
+     <div class="sm-root" style="display:flex;flex-direction:column;height:100%;min-height:0">
      <div class="page-title">${CFG.title} <span style="font-size:12px;color:var(--muted);font-weight:400">${CFG.sub} · 거래처별 마감 · nx 저장</span></div>
      <div class="page-sub">거래처별 ${CFG.verb} 집계 → [마감]에서 품목×일자·단가변경·총액조정·사유 입력 후 확정. 원본 <code>${CFG.src}</code> · 🔴 라이브 마감기준 ${esc(ymToInput(ym)||'-')}</div>
      ${CFG.weight?`<div class="page-sub" style="color:#3a6ea5">⚖️ LME 중량정산(견적기준): [출고(tag5) − 견적소요] × (현물가 − 사급가). <b>원소재</b>=규격(재질·외경)별 nx.price_metal · <b>용접봉</b>=1% 단일단가(현물 62,700 / 사급 21,100). 협력사(수테크=소요만). 원소재정산 셀 툴팁=규격내역.</div>`:''}
      <div class="toolbar">
        <label class="tl">마감년월</label><input type="month" class="inp" id="sm-ym" value="${esc(ymToInput(ym))}" style="min-width:120px">
        <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명/담당자" style="width:180px">
+       <label class="tl">분류</label><select class="inp" id="sm-ct" style="width:auto"><option value="">전체</option>${cts.map(t=>`<option value="${esc(t)}" ${ctf===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
        <button class="btn" id="sm-go">🔍 조회</button>
        <div class="spacer"></div>
        <span class="rowcount">${cur.length}업체 · 마감 ${nClosed}/${cur.length} · 금액 <b>${won0(tAmt)}</b> → 최종 <b>${won0(tFin)}</b>${tAdj?` (조정 ${won0(tAdj)})`:''}</span>
@@ -1300,16 +1317,18 @@ const _mkMagam=(CFG)=>(c)=>{
          <button class="btn sm-mini sm-open" data-cc="${esc(r.cc)}" data-nm="${esc(r.nm)}">${(r.close_flag||!canW)?'상세':'✎ 마감'}</button>
          <button class="btn sm-mini ghost" title="계산서 발행(추후 구현)" disabled>🧾 계산서</button>
        </td></tr>`).join('')+`<tr class="grandtot"><td colspan="4" class="right">총계 (${cur.length}업체)</td><td class="num">${num(cur.reduce((a,b)=>a+(+b.qty||0),0))}</td><td class="num">${won0(tAmt)}</td>${gtMid}<td colspan="2"></td></tr>`:`<tr><td colspan="${NC}" class="empty">해당 마감월 ${CFG.verb} 없음</td></tr>`)}</tbody></table></div>
+     </div>
      <div id="sm-modal"></div>
      <style>
-       .sm-wrap{max-height:calc(100vh - 260px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;box-shadow:0 3px 12px rgba(30,45,70,.08)}
+       .sm-wrap{flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;box-shadow:0 3px 12px rgba(30,45,70,.08)}
        .sm-tbl{font-size:11.5px;width:100%;table-layout:auto}.sm-tbl th,.sm-tbl td{padding:3px 5px;white-space:nowrap}
-       .sm-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2}.sm-tbl thead tr:nth-child(2) th{top:26px}.sm-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+       .sm-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2;cursor:pointer;user-select:none}.sm-tbl thead tr:nth-child(2) th{top:26px}.sm-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+       .sm-tbl thead th[data-sk]:hover{background:#e4ecf8}.sm-ar{font-size:9px;color:#2f6db3;margin-left:2px}
        .sm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}.sm-tbl td.neg{color:#c0392b}.sm-tbl .center{text-align:center}
        .sm-tbl tr.sm-closed{background:#f3f8f3}
        .sm-tbl .wcol{background:#f2f8ff}.sm-tbl th.wcol{background:#e6f1ff}.sm-tbl .wcol2{background:#f2f9f4;color:#2a6b45}.sm-tbl th.wcol2{background:#e0f0e6;color:#2a6b45}
        .sm-tbl .acol{background:#fff9ec}.sm-tbl th.acol{background:#fdf2d6}
-       .sm-tbl small{font-weight:400;color:#8aa0bd;font-size:9.5px}.sm-tbl tr.grandtot td{font-weight:700}.sm-tbl tr.grandtot .wcol,.sm-tbl tr.grandtot .wcol2{background:#eaf1fb}.sm-tbl tr.grandtot .acol{background:#fbf3df}
+       .sm-tbl small{font-weight:400;color:#8aa0bd;font-size:9.5px}.sm-tbl tr.grandtot td{font-weight:700;border-top-width:1px;padding:3px 5px}.sm-tbl tr.grandtot .wcol,.sm-tbl tr.grandtot .wcol2{background:#eaf1fb}.sm-tbl tr.grandtot .acol{background:#fbf3df}
        .sm-badge{font-size:11px;padding:1px 8px;border-radius:10px;background:#eee;color:#777}.sm-badge.on{background:#e5f3e8;color:#2e7d32;font-weight:700}
        .sm-mini{padding:2px 8px;font-size:11px}
        .sm-ov{position:fixed;inset:0;background:rgba(20,30,50,.45);z-index:9998;display:flex;align-items:center;justify-content:center}
@@ -1330,6 +1349,8 @@ const _mkMagam=(CFG)=>(c)=>{
     c.querySelector('#sm-ym').onchange=e=>{load(inYm(e.target.value));};
     const qi=c.querySelector('#sm-q');qi.oninput=e=>{q=e.target.value;};qi.onkeyup=e=>{if(e.key==='Enter')draw();};
     c.querySelector('#sm-go').onclick=()=>draw();
+    const cts_=c.querySelector('#sm-ct');if(cts_)cts_.onchange=e=>{ctf=e.target.value;draw();};   // 분류 필터
+    c.querySelectorAll('.sm-tbl thead th[data-sk]').forEach(th=>{th.onclick=()=>{const k=th.dataset.sk;if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}draw();};});   // 헤더 클릭 정렬(THEAD 재생성=구조동일, 스크롤만 상단복귀)
     c.querySelectorAll('.sm-open').forEach(b=>b.onclick=()=>openModal(b.dataset.cc,b.dataset.nm));
     if(mc)drawModal();
   };

@@ -264,7 +264,20 @@ def _load_quote_soyo():
     return _QUOTE_SOYO
 
 _CS_KIDS = {}   # code -> [자식코드] (CS_M_ITEM_BOM, except제외). BOM 구조는 정적 → 영구캐시
+_CS_PRELOADED = [False]
+def _preload_cs_kids(bcur):
+    """★성능: 노드별 개별조회(콜드 N+1=2168쿼리·65초) 대신 v_cs_bom 인접구조를 1회 벌크로드(0.24초).
+       BOM 정적 → 영구캐시(재기동시 갱신, 기존 _CS_KIDS 설계와 동일). 프리로드 후 미등장 코드=리프([])."""
+    if _CS_PRELOADED[0]:
+        return
+    bcur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP_TEST3.nx.v_cs_bom "
+                 "WHERE ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'")
+    for p, c in bcur.fetchall():
+        _CS_KIDS.setdefault(str(p).strip(), []).append(str(c).strip())
+    _CS_PRELOADED[0] = True
 def _cs_kids(bcur, code):
+    if _CS_PRELOADED[0]:
+        return _CS_KIDS.get(code, [])   # 프리로드 완료 → 인접맵 조회만(부모 아니면 리프)
     if code not in _CS_KIDS:
         bcur.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM PARTNER_ERP_TEST3.nx.v_cs_bom "
                      "WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'')<>'1'", code)
@@ -313,6 +326,7 @@ def compute_quote(ym, real_raw=25000.0, sagub_raw=20000.0, real_weld=None, sagub
     inr = {}; inw = {}; noq = {}
     ingo = cur.fetchall()
     bcur = cn.cursor()   # CG2 SUB 전개용(BOM 조회) — 별도 커서
+    _preload_cs_kids(bcur)   # ★BOM 인접구조 1회 벌크로드(콜드 N+1 제거)
     for cc, mat, q in ingo:
         vendor = _COOP_CUST_VENDOR.get(str(cc).strip())
         if not vendor:
@@ -434,6 +448,7 @@ def compute_quote_lme(ym, weld_spot=62700.0, weld_sagub=21100.0):
     qspec = _load_quote_spec()
     _qraw, qweld = _load_quote_soyo()   # 용접봉 소요맵 (vendor, assy)→soyo
     cn = _ro(); cur = cn.cursor(); bcur = cn.cursor()
+    _preload_cs_kids(bcur)   # ★BOM 인접구조 1회 벌크로드(콜드 N+1 제거)
     mg = _MAGAM.format(ym=ym); win = _WIN.format(ym=ym)
     buck = {}   # cc -> {(재질,외경): [출고,소요]}
     unmap = {}  # cc -> 미매핑 출고
