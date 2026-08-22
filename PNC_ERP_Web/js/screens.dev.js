@@ -1052,6 +1052,287 @@ SCREEN.costanalysis=(c)=>{
   draw();
 };
 
+// ===== 품목별 원가분석 V2 (원본 SCREEN.costanalysis 복제 — 독립 발전용, 읽기전용 API 재사용) =====
+SCREEN.costanalysis_v2=(c)=>{
+  let D=window.COSTDATA_V2||{rows:[],agg:{},ym:'',base:''};
+  // ★UI 날짜 규칙: 날짜범위=당월1일~당일 · 월=당월 · 일자=당일 (동적)
+  const _t=new Date(), _p=n=>String(n).padStart(2,'0');
+  const _TODAY=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-${_p(_t.getDate())}`;
+  const _MFIRST=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-01`;
+  const _CURYM=`${String(_t.getFullYear()).slice(2)}${_p(_t.getMonth()+1)}`;         // YYMM(당월)
+  const _CURDYMD=_TODAY.slice(2).replace(/-/g,'');                                    // YYMMDD(당일)
+  let R=D.rows||[], A=D.agg||{};   // ★실시간(nx): loadRecv가 재구성. 초기값=기존 스냅샷(있으면)
+  const eok=v=>(v/1e8).toFixed(1);
+  const pct=v=>(v*100).toFixed(1)+'%';
+  // [rowIdx, header, group, opts]
+  // ★컬럼 순서: 입고수량 → LG단가·손익 → 실원가 → 내부용 (인덱스는 데이터매핑이라 순서만 바뀜)
+  const NUM=[[1,'입고수량','',{}],
+    [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}],
+    [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[24,'실사급금액','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
+    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}]];
+  let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
+  const API=API_BASE;
+  let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
+  let dYmd=_CURDYMD;               // 단가 적용일자(YYMMDD) — 당일(사용자 지정: 일자=당일)
+  const ymd2date=(y)=>y&&y.length===6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
+  const date2ymd=(d)=>d?d.slice(2).replace(/-/g,''):'';                                          // date→YYMMDD
+  // 리시빙실적(벌크) 단가 적용일자 — 변경 시 nx엔진 전체 재계산(백그라운드)
+  let rvYmd=_CURDYMD, regenMsg='', regenPoll=null;   // ★단가 적용일자=당일(사용자 지정: 일자=당일)
+  const setRegenMsg=(m)=>{regenMsg=m;const el=c.querySelector('#ca-regen-msg');if(el)el.textContent=m;};
+  const doRegen=async()=>{
+    if(!confirm(`단가 적용일자 ${ymd2date(rvYmd)} 기준으로 589품목을 재계산합니다.\n수 분 소요되며 완료 후 자동 새로고침됩니다. 진행할까요?`))return;
+    try{
+      const r=await fetch(`${API}/api/cost/regen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ymd:rvYmd})});
+      if(r.status===409){setRegenMsg('이미 재계산 중…');}
+      else if(!r.ok)throw new Error('HTTP '+r.status);
+      if(regenPoll)clearInterval(regenPoll);
+      regenPoll=setInterval(async()=>{
+        try{const s=await(await fetch(`${API}/api/cost/regen/status`)).json();
+          if(s.running){setRegenMsg(`재계산 중… ${s.done}/${s.total||'?'}`);}
+          else{clearInterval(regenPoll);
+            if(s.error){setRegenMsg('오류: '+s.error);}
+            else{setRegenMsg(`완료 (${s.sec}s) — 새로고침…`);setTimeout(()=>location.reload(),900);}}
+        }catch(e){clearInterval(regenPoll);setRegenMsg('상태 조회 실패');}
+      },2000);
+    }catch(e){setRegenMsg('재계산 시작 실패 — 백엔드 확인');}
+  };
+  // /api/esti 응답 → 23컬럼 행배열 (내부용+실원가+LG+손익, 수량1 단품)
+  const estiToRow=(part,j)=>{
+    const s=(j.sil&&j.sil.agg)||{}, n=(j.nae&&j.nae.agg)||{};
+    const r=new Array(23).fill(0); r[0]=part; r[1]=1;
+    r[2]=n.WON_JAI_AMT||0; r[3]=n.BU_JAI_AMT||0; r[4]=n.SA_JAI_AMT||0; r[5]=n.JAI_COST||0; r[6]=n.TOT_AMT||0; r[7]=(n.TOT_AMT&&s.LG_COST)?n.JAI_COST/s.LG_COST:0;
+    r[8]=s.WON_JAI_AMT||0; r[9]=s.BU_JAI_AMT||0; r[10]=s.SA_JAI_AMT||0; r[11]=s.JAI_COST||0; r[12]=s.TOT_AMT||0;
+    r[13]=s.GAGONG_AMT||0; r[14]=s.ILBAN_AMT||0; r[15]=s.UNBAN_AMT||0; r[16]=s.PROFIT_AMT||0; r[17]=s.LME_CHA_AMT||0;
+    r[18]=s.LG_COST?(s.JAI_COST/s.LG_COST):0; r[19]=s.LG_COST||0; r[20]=s.LG_COST||0; r[21]=(s.LG_COST||0)-(s.TOT_AMT||0); r[22]=r[21];
+    return r;
+  };
+  const dLoad=async()=>{
+    const it=dItem.trim(); if(!it){dLive=null;renderBody();return;}
+    dLoading=true;dErr='';renderBody();
+    try{const r=await fetch(`${API}/api/esti?item=${encodeURIComponent(it)}&ymd=${encodeURIComponent(dYmd)}`);
+      if(!r.ok)throw new Error('HTTP '+r.status); const j=await r.json();
+      dLive=estiToRow(it,j);}
+    catch(e){dErr='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';dLive=null;}
+    dLoading=false;renderBody();
+  };
+  // ★리시빙실적 실시간(nx): 목록(SA_T_LG_RECEIVING_DTL)+행별 배치 원가(/api/cost/nx/bulk). 스냅샷 파일 대체·세션캐시.
+  const ym2str=(y)=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:(y||'');
+  const buildRow=(part,qty,cst)=>{const r=new Array(25).fill(0);r[0]=part;r[1]=qty;
+    if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0,sagub=cst.sagub||0;
+      const won=(cst.won!=null?cst.won:jae),bu=cst.bu||0,sa=cst.sa||0,matb=won+bu+sa;   // 원자재/부자재/LG사급 분리(sgroup)
+      const son2=son+sagub;   // 손익 = (LG−실원가) + 사급차액(실출고가−실입고가, 음수=손해)
+      r[2]=won;r[3]=bu;r[4]=sa;r[5]=matb;r[6]=sil;r[7]=lg?matb/lg:0;
+      r[8]=won;r[9]=bu;r[10]=sa;r[11]=matb;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=sagub;r[18]=lg?matb/lg:0;
+      r[19]=lg;r[20]=lg*qty;r[21]=son2;r[22]=son2*qty;
+      r[23]=cst.silsagub||0;r[24]=cst.silsagub||0;}   // ★실사급금액(통째,기준일사급가) — 나란히 표시(원가/손익 무영향)
+    return r;};
+  const cardsHTML=()=>`<div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
+       <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
+       <div class="ca-card ${(A.impact||0)>=0?'pos':'neg'}"><span>손익 Impact</span><b>${(A.impact||0)>=0?'+':''}${eok(A.impact||0)}억</b></div>
+       <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>`;
+  const recomputeAgg=()=>{let sales=0,silamt=0,impact=0,loss=0,qt=0;D.rows.forEach(r=>{sales+=r[20];silamt+=r[12]*r[1];impact+=r[22];qt+=r[1];if(r[21]<0)loss++;});
+    D.agg={cnt:D.rows.length,qty:Math.round(qt),sales:Math.round(sales),silamt:Math.round(silamt),impact:Math.round(impact),loss};A=D.agg;
+    const cd=c.querySelector('.ca-cards');if(cd)cd.innerHTML=cardsHTML();};
+  let rvBusy=false;
+  const loadRecv=async(ym,ymd,force)=>{
+    if(rvBusy)return;rvBusy=true;ymd=ymd||rvYmd;const tok=ymd+'|'+(ym||'');loadRecv._tok=tok;setRegenMsg('목록 로드…');
+    try{
+      // ★서버 결과캐시 우선(첫 로드 즉시화). force(재계산)면 스킵.
+      if(!force){
+        try{const cg=await(await fetch(`${API}/api/cost/analysis/cache/get?ym=${encodeURIComponent(ym||'')}&ymd=${encodeURIComponent(ymd)}`)).json();
+          if(cg&&cg.cached&&cg.rows&&cg.rows.length&&loadRecv._tok===tok){
+            D.ym=cg.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
+            D.rows=cg.rows.map(x=>buildRow(x.part,x.qty,x));R=D.rows;recomputeAgg();
+            window.__CA_LIVE_V2={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+            setRegenMsg(`캐시 ${cg.upd||''} · 최신화=재계산 버튼`);
+            rvBusy=false;renderBody();return;
+          }
+        }catch(e){}
+      }
+      const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
+      const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
+      D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
+      // ★속도: 청크 35 + 6개 동시(병렬) — 무거운 품목(복합SUB)을 여러 워커로 분산. + 남은시간(ETA) 표시.
+      const CH=35, PAR=6; let done=0; const t0=Date.now(); const liveCC={};
+      const chunks=[]; for(let i=0;i<list.length;i+=CH)chunks.push({start:i,items:list.slice(i,i+CH)});
+      for(let b=0;b<chunks.length;b+=PAR){
+        if(loadRecv._tok!==tok)break;
+        await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
+          let cc={};
+          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||'')})})).json()).costs||{};}catch(e){}
+          ck.items.forEach((x,j)=>{liveCC[x.part]=cc[x.part]||{};D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
+          done+=ck.items.length;
+          // ★청크 완료마다 진행표시 갱신(라운드 끝까지 안 기다림 = 멈춘 듯 안 보임)
+          if(loadRecv._tok===tok){const el=(Date.now()-t0)/1000,eta=done?Math.ceil((list.length-done)*el/done):0;setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();}
+        }));
+        if(loadRecv._tok!==tok)break;
+        const el=(Date.now()-t0)/1000, eta=done?Math.ceil((list.length-done)*el/done):0;
+        setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();
+      }
+      recomputeAgg();
+      if(loadRecv._tok===tok){window.__CA_LIVE_V2={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+        // ★계산결과 서버캐시 저장 → 다음 진입·타 사용자 즉시(엔진 재계산 불요)
+        try{const saveRows=list.map(x=>Object.assign({part:x.part,qty:x.qty},liveCC[x.part]||{}));
+          fetch(`${API}/api/cost/analysis/cache/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym:D.ym,ymd,rows:saveRows})});}catch(e){}
+        setRegenMsg('완료 · 캐시 저장됨');
+      }
+    }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
+    finally{rvBusy=false;renderBody();}
+  };
+  // 표시 컬럼: 직접입력은 입고수량(1)·LG총금액(20)·Impact(22) 제외 (수량 1 단품 관점)
+  const colsOf=()=> mode==='direct'? NUM.filter(([i])=>![1,20,22].includes(i)) : NUM;
+  const filt=()=>{
+    if(mode==='direct'){ return dLive?[dLive]:[]; }   // 직접입력=라이브 단품
+    let a=R.slice();
+    if(q){const ql=q.toLowerCase();a=a.filter(r=>r[0].toLowerCase().includes(ql));} if(lossOnly)a=a.filter(r=>r[21]<0);
+    a.sort((x,y)=>sortI<0?x[0].localeCompare(y[0])*dir:(x[sortI]-y[sortI])*dir);
+    return a;
+  };
+  const renderBody=()=>{
+    const a=filt(), cols=colsOf();
+    // ★로딩 중(리시빙): 값이 계속 바뀌어 착각하므로 값 대신 "조회 중" 전체 표시(완료 후 1회 렌더)
+    if(mode!=='direct' && rvBusy){
+      const cb=c.querySelector('#ca-body'); if(cb)cb.innerHTML=`<tr><td colspan="${cols.length+1}" class="empty" style="padding:44px 0"><span style="display:inline-flex;align-items:center;gap:10px;color:#2f5aa8;font-weight:700;font-size:15px"><span class="ca-spin"></span> 조회 중… <span style="color:#8595ad;font-weight:500;font-size:13px">${esc(regenMsg||'')}</span></span></td></tr>`;
+      const ft=c.querySelector('#ca-foot'); if(ft)ft.innerHTML='';
+      const cn=c.querySelector('#ca-cnt'); if(cn)cn.textContent='조회 중…';
+      return;
+    }
+    c.querySelector('#ca-body').innerHTML = a.map(r=>{const neg=r[21]<0;
+      return `<tr class="${neg?'lossrow':''}"><td class="pcode" title="${esc(r[0])}"><b>${esc(r[0])}</b></td>`+
+        cols.map(([i,,,op])=>{let cls='num';if(op.b)cls+=' bcol';if(op.sk&&r[i]<0)cls+=' negv';if(op.sk&&r[i]>0)cls+=' posv';
+          return `<td class="${cls}">${op.pct?pct(r[i]):wonI(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
+      || `<tr><td colspan="${cols.length+1}" class="empty">${mode==='direct'?(dLoading?'라이브 계산중…':(dErr||'품번을 입력하고 조회 (라이브 · 아무 품번, 예: AJR75563503)')):(rvBusy?'<span style="display:inline-flex;align-items:center;gap:8px;color:#2f5aa8;font-weight:600"><span class="ca-spin"></span> 조회 중…</span>':'결과 없음')}</td></tr>`;
+    if(mode!=='direct'){
+      // 합계 = Σ(수량 × 단위금액). LG총금액(20)·Impact(22)는 이미 행별 총액이라 그대로 합산. 재료비율=Σ재료비/LG총매출.
+      const T={}; NUM.forEach(([i,,,o])=>{if(!o.pct)T[i]=0;});
+      a.forEach(r=>{const q2=r[1];NUM.forEach(([i,,,op])=>{if(op.pct)return;T[i]+=(i===1)?q2:(i===20||i===22)?r[i]:r[i]*q2;});});
+      const lgTot=T[20]||0, rN=lgTot?T[5]/lgTot:0, rS=lgTot?T[11]/lgTot:0;
+      c.querySelector('#ca-foot').innerHTML=`<tr class="sumrow"><td>합계 ${won(a.length)}건</td>`+
+        NUM.map(([i,,,op])=>{const v=(i===7)?pct(rN):(i===18)?pct(rS):(op.pct?'':won(Math.round(T[i])));
+          let cls='num';if(op.b)cls+=' bcol';if(op.sk&&T[i]<0)cls+=' negv';if(op.sk&&T[i]>0)cls+=' posv';
+          return `<td class="${cls}">${v}</td>`;}).join('')+`</tr>`;
+    }else c.querySelector('#ca-foot').innerHTML='';
+    const cnt=c.querySelector('#ca-cnt'); if(cnt)cnt.textContent=`${a.length}품번${mode==='direct'?' (부분일치)':(lossOnly?' · 적자만':'')}`;
+  };
+  const caExport=()=>{
+    const a=filt(), cols=colsOf();
+    const header=['PART-NO', ...cols.map(x=>x[1])];
+    const rows=a.map(r=>[r[0], ...cols.map(([i,,,op])=>op.pct?(r[i]*100).toFixed(1)+'%':r[i])]);
+    dlCSV(`품목별원가분석_V2_${mode==='recv'?'리시빙실적':'직접입력'}_${(D.base||'')}.csv`, header, rows);
+  };
+  // 헤더(그룹+컬럼) — 모드별. 직접입력은 입고수량 제외, LG그룹 2컬럼(LG단가·손익).
+  const headHTML=()=>{
+    const lgSpan=mode==='direct'?2:4;
+    let g1='<th rowspan="2">PART-NO</th>'+(mode!=='direct'?'<th rowspan="2" class="num">입고수량</th>':'');
+    g1+=`<th colspan="${lgSpan}" class="ghead">LG단가·손익</th><th colspan="12" class="ghead">실원가</th><th colspan="7" class="ghead">내부용</th>`;
+    const h2=colsOf().filter(([i])=>i!==1).map(([i,h])=>`<th class="num sortable ${sortI===i?'sorted':''}" data-si="${i}">${h}${sortI===i?(dir<0?' ▼':' ▲'):''}</th>`).join('');
+    return `<thead><tr>${g1}</tr><tr>${h2}</tr></thead>`;
+  };
+  const directBar=()=>`
+     <div class="toolbar">
+       <label class="tl">품번</label>
+       <input class="inp" id="di-q" value="${esc(dItem)}" placeholder="PART-NO 입력 (예: AJR75563503)" style="width:220px">
+       <label class="tl" style="margin-left:8px">단가 적용일자</label>
+       <input class="inp" type="date" id="di-ymd" value="${ymd2date(dYmd)}" style="width:150px" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율 적용">
+       <button class="btn" id="di-go">🔍 라이브 조회</button>
+       <span style="color:var(--muted);font-size:12px">그 날짜 기준 단가 적용 · 아무 품번 · 수량1 단위원가·손익</span>
+       <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
+       <div class="spacer"></div><span class="rowcount" id="ca-cnt"></span>
+     </div>`;
+  const recvBar=()=>`
+     <div class="ca-cards">
+       <div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
+       <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
+       <div class="ca-card pos"><span>손익 Impact</span><b>+${eok(A.impact||0)}억</b></div>
+       <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>
+     </div>
+     <div class="toolbar">
+       <label class="tl">리시빙 기간</label>
+       <input class="inp" type="date" id="ca-from" value="${_MFIRST}" style="width:140px"><span style="color:var(--muted)">~</span>
+       <input class="inp" type="date" id="ca-to" value="${_TODAY}" style="width:140px">
+       <span class="badge" title="최대 조회기간 1개월">최대 1개월</span>
+       <button class="btn" id="ca-go">🔍 조회</button>
+       <div class="spacer" style="max-width:20px"></div>
+       ${(typeof PERM==='undefined'||PERM.canEdit('costanalysis'))?`<label class="tl" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율로 전체 재계산">💲 단가 적용일자</label>
+       <input class="inp" type="date" id="ca-ymd" value="${ymd2date(rvYmd)}" style="width:150px">
+       <button class="btn" id="ca-regen" title="지정 단가일자로 nx엔진 재계산">🔄 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" value="${esc(q)}" placeholder="PART-NO 검색(타이핑하면 필터)" style="width:180px" autocomplete="off">
+       <label class="chk"><input type="checkbox" id="ca-loss" ${lossOnly?'checked':''}> 적자만</label>
+       <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
+       <div class="spacer"></div><span class="rowcount" id="ca-cnt"></span>
+     </div>`;
+  const draw=()=>{
+    c.innerHTML=`
+     <div class="page-title">💹 품목별 원가분석_V2</div>
+     <div class="page-sub">품목별 <b>내부원가·실원가·손익</b> · 원본 <code>w_cs_esti_020</code> · <b>nx 엔진 재계산</b>(실원가·LME·손익, <code>nx_cost_engine.py</code> 검증완료) · 라이브검증=개발›원가엔진 검증 · 기준일 ${esc(D.base||'')}</div>
+     ${recvBar()}
+     <div class="grid-wrap ca-wrap"><table class="tbl ca-tbl">${headHTML()}<tbody id="ca-body"></tbody><tfoot id="ca-foot"></tfoot></table></div>
+     <style>
+       .ca-modes{display:flex;margin:10px 0 2px;border:1px solid var(--line);border-radius:8px;overflow:hidden;width:fit-content}
+       .ca-mode{padding:7px 18px;border:none;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
+       .ca-mode.on{background:#2f5aa8;color:#fff}
+       .ca-cards{display:flex;gap:12px;margin:10px 0 4px;flex-wrap:wrap}
+       .ca-card{flex:1;min-width:130px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 14px}
+       .ca-card span{display:block;font-size:12px;color:var(--muted)}.ca-card b{font-size:22px;font-weight:800}
+       .ca-card.pos b{color:#1f8a5a}.ca-card.neg b{color:#c0392b}.ca-card small{font-size:13px;color:var(--muted);font-weight:600}
+       .ca-wrap{max-height:calc(100vh - 310px);overflow:auto;max-width:100%;width:100%;box-sizing:border-box}
+       .ca-tbl{font-size:13px;table-layout:auto}
+       .ca-tbl th,.ca-tbl td{padding:4px 6px}
+       .ca-tbl td.num,.ca-tbl th.num{white-space:nowrap}
+       .ca-tbl td.num,.ca-tbl th.num{font-variant-numeric:tabular-nums}
+       .ca-tbl th.ghead{background:#eef4ff;text-align:center;color:#2f5aa8;font-weight:700}
+       .ca-tbl th.sortable{cursor:pointer;white-space:nowrap}.ca-tbl th.sorted{background:#dfe9ff;color:#1c47a0}
+       .ca-tbl thead th{height:26px;box-sizing:border-box;white-space:nowrap;background:#f4f7fc}
+       .ca-tbl thead tr:first-child th{position:sticky;top:0;z-index:4}
+       .ca-tbl thead tr:nth-child(2) th{position:sticky;top:26px;z-index:4}
+       .ca-tbl td.bcol{background:#f6f9ff;font-weight:700}
+       .ca-tbl td.pcode{white-space:nowrap;font-weight:600}   /* ★품번 전체표시(잘림 제거) */
+       .ca-tbl td.pcode,.ca-tbl thead th:first-child{position:sticky;left:0;background:#fff;z-index:3}   /* 품번 고정(좌측) */
+       .ca-tbl thead tr:first-child th:first-child{z-index:5}
+       .ca-tbl tr.lossrow td.pcode{color:#c0392b;font-weight:600}
+       .ca-tbl td.negv{color:#c0392b;font-weight:700}.ca-tbl td.posv{color:#1f8a5a}
+       .ca-tbl tfoot td{position:sticky;bottom:0;background:#f0f4fb;font-weight:700;border-top:2px solid #cdd9ef}
+       .chk{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);margin:0 4px}
+       .ca-spin{width:16px;height:16px;border:3px solid #cdd9ef;border-top-color:#2f5aa8;border-radius:50%;display:inline-block;animation:caspin .7s linear infinite}
+       @keyframes caspin{to{transform:rotate(360deg)}}
+     </style>`;
+    renderBody();
+    {const xls=c.querySelector('#ca-xls'); if(xls)xls.onclick=caExport;}
+    c.querySelectorAll('.ca-mode').forEach(b=>b.onclick=()=>{mode=b.dataset.mode; if(mode==='recv')sortI=20; else if([1,20,22].includes(sortI))sortI=21; dir=-1; draw();});
+    // ★정렬 = 클라이언트만(draw 전체재렌더/재조회 금지). 헤더(정렬표시)만 교체+재바인딩 후 body만 갱신.
+    const bindSort=()=>c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
+      const si=+th.dataset.si; if(sortI===si)dir=-dir; else{sortI=si;dir=-1;}
+      const th0=c.querySelector('.ca-tbl thead'); if(th0){th0.outerHTML=headHTML();bindSort();}
+      renderBody();
+    });
+    bindSort();
+    if(mode==='recv'){
+      c.querySelector('#ca-go').onclick=()=>{
+        const f=c.querySelector('#ca-from').value;
+        const ym=f?f.slice(2,7).replace('-',''):'';   // YYYY-MM-DD → YYMM(리시빙 월)
+        loadRecv._tok=null; loadRecv(ym, rvYmd);       // 실시간 재로드(목록+원가)
+      };
+      c.querySelector('#ca-q').oninput=e=>{q=e.target.value.trim();renderBody();};
+      c.querySelector('#ca-loss').onchange=e=>{lossOnly=e.target.checked;renderBody();};
+      const cy=c.querySelector('#ca-ymd'); if(cy)cy.onchange=e=>{rvYmd=date2ymd(e.target.value);};
+      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd, true);};   // 재계산=캐시무시 강제 재계산+재저장
+      // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
+      if(!rvBusy && !loadRecv._tok){
+        if(window.__CA_LIVE_V2&&window.__CA_LIVE_V2.ymd===rvYmd){D.rows=window.__CA_LIVE_V2.rows;D.agg=window.__CA_LIVE_V2.agg;D.ym=window.__CA_LIVE_V2.ym;D.base=window.__CA_LIVE_V2.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
+        else loadRecv(_CURYM, rvYmd);   // ★기본 당월 리시빙
+      }
+    }else{
+      const dq=c.querySelector('#di-q'), dyv=c.querySelector('#di-ymd');
+      const goLive=()=>{dItem=dq.value||'';if(dyv&&dyv.value)dYmd=date2ymd(dyv.value);dLoad();};
+      c.querySelector('#di-go').onclick=goLive;
+      dq.oninput=e=>{dItem=e.target.value;};
+      dq.onkeydown=e=>{if(e.key==='Enter')goLive();};
+      if(dyv)dyv.onchange=e=>{dYmd=date2ymd(e.target.value);if(dItem.trim())goLive();};
+    }
+  };
+  draw();
+};
+
 SCREEN.esticost=(c)=>{
   const API=API_BASE;
   const canW=(typeof PERM!=='undefined')?PERM.canEdit('esticost'):true;

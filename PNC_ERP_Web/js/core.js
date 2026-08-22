@@ -189,6 +189,7 @@ const MODULES=[
    {id:'delivery',ic:'📦',nm:'납품 포장/적재'},
    {id:'subvariant',ic:'🧩',nm:'조달경로 통합검토'},
    {id:'costanalysis',ic:'💹',nm:'품목별 원가분석'},
+   {id:'costanalysis_v2',ic:'💹',nm:'품목별 원가분석_V2'},
    {id:'costverify',ic:'🔬',nm:'원가엔진 검증(라이브)'},
    {id:'price',ic:'💰',nm:'품목단가 조회'},
    {id:'pricemgmt',ic:'🛠️',nm:'품목단가 관리'},
