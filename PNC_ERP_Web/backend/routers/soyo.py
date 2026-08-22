@@ -530,18 +530,15 @@ def _routing_edge_sync(cur):
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
     # 2) 신규 엣지 INSERT (v_pr_bom엔 있고 routing_edge엔 없는 것) — 라이브 마스터 기준 시드, wc_user=NULL
-    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,gubun,vendor_seed,route_id,src_except,src_sagub,wc_live,wc)
+    # ★U1(2026-08-22): routing_edge=생산처(wc) 전용. 죽은 조달컬럼(gubun/vendor_seed/vendor_resolved/src_except/src_sagub) 제거
+    #   — 조달경로 정본은 조달프로파일(sourcing_route/route_alloc)이 단독. 여긴 wc(생산처)만 시드.
+    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,route_id,wc_live,wc)
       SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
-             WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
-             WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust_code,'') ELSE ISNULL(ci.in_cust_code,'') END,
-        1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
+        1,
         CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
         CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
       FROM nx.v_pr_bom b
       LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
       WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
         AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
     new_cnt = cur.rowcount

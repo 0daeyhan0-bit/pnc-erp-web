@@ -653,8 +653,19 @@ cg=5 직납 → 제외
    - `gubun=외주(유상사급)` → 유상사급: 원소재 사급가 + LME 차액.
 4. **V2 래퍼**: route_alloc 조회 → 활성=R02인 노드만 위 규칙으로 재판정, 나머지는 엔진 그대로. **오늘 실효=0건**(R02 미활성)이나 R02 전환 시 원가 자동 정합.
 
-### ★미해결 확인점 (사용자)
-- routing_edge(생산계획 축, wc) ↔ sourcing_route/route_alloc(조달프로파일 축, 구분+vendor)은 **별개 테이블**. 원가가 따라야 할 정본이 둘 중 무엇인지 — 또는 R02 활성 시 둘이 어떻게 합류하는지 확인 필요. (현재는 R01 전량이라 두 축 동일 결과)
+### ★단일 시스템 통합 (2026-08-22, 사용자 승인 "한개 시스템")
+**실측: 조달경로 운영 시스템은 이미 1개.** routing_edge는 조달경로가 아님.
+- **조달경로 정본 = 조달 프로파일**(sourcing_route + route_alloc + sourcing_profile). 하류 전량 소비: plan_mat_source[soyo:103,115]·수동발주[manorder:52]·협력사배분[common:422].
+- **routing_edge 실소비 = `wc`(생산처) 1개뿐**[soyo:488]. `vendor_resolved` 소비처 **0건**, `gubun`·`vendor_seed`·`src_except`·`src_sagub` = INSERT만·미소비 = **except_flag 은퇴 마이그 잔재**. 이 죽은 컬럼이 조달프로파일과 중복돼 보여 "2개 시스템" 오인 유발.
+
+**통합 2단계:**
+- **STEP-U1 (죽은 조달컬럼 제거)**: routing_edge에서 gubun·vendor_seed·vendor_resolved·src_except·src_sagub 제거 → 조달 정본 1개 명확화. **생산계획/협력사계획 검증 불필요**(wc 소스 무변경, 안 읽히는 컬럼만 제거).
+- **STEP-U2 (wc를 조달프로파일로 흡수 → routing_edge 은퇴)**: 생산처(wc)를 route/profile 모델 라인속성으로 이관, 생산계획 STEP7이 조달프로파일에서 생산처 읽게. **★생산계획·협력사계획 diff0 회귀검증 필수**(생산처 소스 교체 지점).
+  - **핵심 리스크**: routing_edge=42,625엣지 전량+wc_user 편집보존. 조달프로파일 R01 baseline은 라인 미저장(실사용BOM 파생, sourcing_route_line=11행/R02 1건뿐). → wc 담을 커버리지·편집보존을 먼저 맞춰야 흡수 후 생산처가 마스터폴백으로 안 떨어짐.
+  - **검증 게이트**: 흡수 前 compose→plan_part_mat 스냅샷(생산처 포함) vs 흡수 後 = **행별 생산처 diff0**. 협력사계획(410/명세서420)도 前後 동일. 하네스 재사용 [[newerp-plan-soyo-verify]](자재소요 100% 재현)·[[newerp-coopplan-grouping-livesync]](93협력사 불일치0).
+
+### V2 원가와의 관계
+- 원가는 통합 후 **단일 정본(route_alloc 활성경로)** 만 참조. STEP-U1/U2는 조달 축 정리 → 원가는 §5S route-aware 설계 그대로 얹힘.
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]

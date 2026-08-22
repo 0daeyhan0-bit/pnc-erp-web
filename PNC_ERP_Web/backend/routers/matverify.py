@@ -22,6 +22,13 @@ router = APIRouter()
 _U = lambda s: (str(s).strip().upper() if s else "")
 _CACHE = {}   # key=(ct,fr,to) -> (expiry, result)
 _CT_NAME = {'1': '유상사급부품', '4': '절삭원자재', '5': '설치원자재', '6': '절삭협력', '7': '절삭부자재', '8': '설치부자재', '9': '소모품', 'A': '이지링크'}
+# 비자재 pseudo-코드 제외(소급/샘플/금형비/수불정산 등). ★한글시작+키워드만 제외 → 실자재(영숫자시작 -삼화·동BODY 등) 보호.
+_NONMAT_KW = ('샘플', '소급', '금형', '교육', '수불정산', '견본', '폐기', '불용', '시험', 'TEST', '정산')
+def _is_nonmat(code):
+    c = _U(code)
+    if not c: return True
+    if c[0].isascii(): return False        # 영숫자 시작 = 정상 품번(거래처접미사 포함) 유지
+    return any(k in c for k in _NONMAT_KW)  # 한글 시작 pseudo-코드 중 키워드만 제외
 
 
 def _digits(s, n):
@@ -67,7 +74,7 @@ def _build(ct, fr, to):
         # 2) 대상 base = 선택 유형(ct) 공급이 있는 base
         def is_prim(kind, cty):
             return (kind == "수입") if ct == "IMP" else (cty == ct)
-        prim_bases = set(base(m) for m, cc, cnm, cty, kind, q, amt in sup if q > 0 and is_prim(kind, cty))
+        prim_bases = set(base(m) for m, cc, cnm, cty, kind, q, amt in sup if q > 0 and is_prim(kind, cty) and not _is_nonmat(base(m)))
 
         # 3) 소비·조정·순이동 broad (전 코드, PU) → base 집계
         cu.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat,
