@@ -687,6 +687,16 @@ cg=5 직납 → 제외
 - silwon_nodes 반환=`{'rows':[...],'agg':silwon}`. 노드 kind: 매입(buy,pur_price)·원소재(raw,사급가std)·제작(mk)·사급(LME). 원소재 재료비는 buy/raw 노드에(§5Q 2사급가+38매입단가 = raw+buy 분포와 일치).
 - ⚠ **단위검증 필요**: new_mat=mat×jik/won은 jik(maint_cost)·won 동일단위 가정. 이상치(5210A00039G eng3214 vs jik1502=ratio0.47) = 마스터 스테일 or 단위불일치 확인. 래퍼 착수 전 검증.
 
+### ★단위 근본원인·수정 공식 (2026-08-22, v2_compute 검증으로 발견)
+- **버그**: 비율식 mat×jik/won은 unit=EA 원소재에서 깨짐. 실측: **unit=KG 원소재**(7072AR9374N·3H00627M)=maint_cost **kg당**(22017·23790, 엔진 사급가/kg와 동일단위→OK). **unit=EA 원소재/부품**(MJU63612402·MJU66958505 등)=maint_cost **EA당**(1217·1777)인데 엔진은 kg당×중량으로 계상→단위 섞임(ratio 0.07~0.12 비현실).
+- **★수정 공식(단위 인식)**: 각 원소재 노드 new_mat =
+  - **매입(inner=False)**: `jik × qty` (엔진 won=pur_price/stock-unit, jik 동일단위)
+  - **원소재 unit=KG**: `jik × weight × qty` (jik kg당)
+  - **원소재 unit=EA**: `jik × qty` (jik EA당)
+  - delta += new_mat − node.mat. (node.qty=cum_q, node.weight, node.unit 사용)
+- **부산물 발견(진짜)**: 일부 매입 원소재 마스터 매입단가 stale(5210A22977R won=310 vs 실매입~1288, 5210A00039G 3214 vs 1502) + maint 단가 스프레드 큼(동일코드 다spec 혼입 의심). → **신뢰도 플래그(hi/lo>2)** 병기, 스프레드 큰 override는 검토표시. V2가 마스터 stale를 실매입으로 교정하는 가치 실증.
+- **사급품 diff0**: none노드(직구매 매입없음)=override 대상아님→사급 품목 V2=V1 유지(AJR75563503 등 미세delta는 소량 매입부품 override, 검증표에서 확인).
+
 ### (구) per-usage 규칙 확정 = 진단중
 - 후보 신호: (a)원소재 직구매매입 존재(사급전환 안됨) (b)제품 cut_gubun (c)사급 불출(tag5). 이중사용 원소재(7072AR9374N: 직구매+사급 둘다) 처리가 관건.
 - **진단(v2_diag)**: 스코프 리시빙상위20 제품×엔진 silwon_nodes → 원소재노드별 (제품cut/직구매실매입/사급매입/엔진mat) 매입지형 실측 → 규칙 데이터확정.
