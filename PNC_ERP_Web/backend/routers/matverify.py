@@ -90,11 +90,11 @@ def _build(ct, fr, to):
         cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT_C WHERE MAINT_YMD <= ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
         for r in cu.fetchall():
             m = _U(r[0]); stock_cum[m] = stock_cum.get(m, 0.0) + float(r[1] or 0)
-        # ★정본재고 = 자재일마감(이동평균) nx.mat_stock_daily. 실재고=정본기말(≤to)·기초=정본기초(<fr).
+        # ★정본재고 = 자재일마감(이동평균) nx.mat_stock_daily. 실재고=정본 최신스냅샷(≤to).
         #   ※matverify는 스냅샷을 저장하지 않고 정본을 조회만(read-only). 정확코드→base 폴딩. 미커버=정본이 추적 안 하는 품목.
-        # ★정본 금액(stock_amt)도 함께 → 순증액=정본 재고금액증감(기말금액−기초금액). vendor 송장 블렌드단가 튐 제거.
-        off_end, off_beg, off_cov = {}, {}, set()          # qty
-        off_end_amt, off_beg_amt = {}, {}                  # 금액(정본 이동평균)
+        # ★재고증감/증감액 = 기간 flow Σ(in−out) (스냅샷差 아님). 조회시작이 테이블시작(2601)보다 앞서도 정합
+        #   (스냅샷차는 <fr 스냅샷이 없으면 이월재고를 기초0으로 오인→증감 과대. flow는 이 문제 없음). 기초 = 실재고 − 재고증감.
+        off_end, off_end_amt, off_cov = {}, {}, set()      # 실재고/실재고액(정본 최신스냅샷 ≤to)
         cu.execute("""SELECT mat_code, stock_qty, stock_amt FROM (
               SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, CONVERT(float,ISNULL(stock_qty,0)) stock_qty,
                      CONVERT(float,ISNULL(stock_amt,0)) stock_amt,
@@ -102,13 +102,14 @@ def _build(ct, fr, to):
               FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd <= ?) t WHERE rn=1""", to)
         for mc, q, a in cu.fetchall():
             u = _U(mc); off_end[u] = float(q or 0); off_end_amt[u] = float(a or 0); off_cov.add(u)
-        cu.execute("""SELECT mat_code, stock_qty, stock_amt FROM (
-              SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, CONVERT(float,ISNULL(stock_qty,0)) stock_qty,
-                     CONVERT(float,ISNULL(stock_amt,0)) stock_amt,
-                     ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(mat_code))) ORDER BY ymd DESC) rn
-              FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd < ?) t WHERE rn=1""", fr)
-        for mc, q, a in cu.fetchall():
-            u = _U(mc); off_beg[u] = float(q or 0); off_beg_amt[u] = float(a or 0)
+        off_chg, off_chg_amt = {}, {}                       # 재고증감/증감액(기간 flow Σin−out)
+        cu.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))),
+              SUM(CONVERT(float,ISNULL(in_qty,0))-CONVERT(float,ISNULL(out_qty,0))),
+              SUM(CONVERT(float,ISNULL(in_amt,0))-CONVERT(float,ISNULL(out_amt,0)))
+            FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd BETWEEN ? AND ?
+            GROUP BY UPPER(LTRIM(RTRIM(mat_code)))""", fr, to)
+        for mc, cq, ca in cu.fetchall():
+            u = _U(mc); off_chg[u] = float(cq or 0); off_chg_amt[u] = float(ca or 0); off_cov.add(u)
         # 수입(_C)은 netmv(PU)에 없음 → 순증에 별도 가산
         imp_net = {}
         for m, cc, cnm, cty, kind, q, amt in sup:
@@ -122,8 +123,8 @@ def _build(ct, fr, to):
         items = {}
         def _it(k): return items.setdefault(k, {"item": k, "buy_all": 0.0, "prim_q": 0.0, "prim_amt": 0.0,
                                                  "gagong": 0.0, "sagub": 0.0, "adj": 0.0, "netmv": 0.0, "recv": 0.0,
-                                                 "stock": 0.0, "off_end": 0.0, "off_beg": 0.0, "off_cov": False,
-                                                 "off_end_amt": 0.0, "off_beg_amt": 0.0,
+                                                 "stock": 0.0, "off_end": 0.0, "off_end_amt": 0.0, "off_cov": False,
+                                                 "off_chg": 0.0, "off_chg_amt": 0.0,
                                                  "vendors": {}, "raw_codes": set()})
         for m, cc, cnm, cty, kind, q, amt in sup:
             k = base(m)
@@ -148,12 +149,12 @@ def _build(ct, fr, to):
         for m, q in stock_cum.items():                 # (참고) 전이동 누적, PU — 표시 안 함
             k = base(m)
             if k in items: items[k]["stock"] += q
-        for m, q in off_end.items():                    # ★정본기말(자재일마감) → 실재고
+        for m, q in off_end.items():                    # ★정본 실재고(최신스냅샷 ≤to)
             k = base(m)
             if k in items: items[k]["off_end"] += q; items[k]["off_end_amt"] += off_end_amt.get(m, 0.0); items[k]["off_cov"] = True
-        for m, q in off_beg.items():                    # ★정본기초(자재일마감) → 기초
+        for m, cq in off_chg.items():                   # ★정본 재고증감(기간 flow Σin−out)
             k = base(m)
-            if k in items: items[k]["off_beg"] += q; items[k]["off_beg_amt"] += off_beg_amt.get(m, 0.0)
+            if k in items: items[k]["off_chg"] += cq; items[k]["off_chg_amt"] += off_chg_amt.get(m, 0.0); items[k]["off_cov"] = True
 
         # 품명
         cu.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM PARTNER_ERP_TEST3.nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -179,13 +180,13 @@ def _build(ct, fr, to):
             else: flow = "컴포넌트(가공소비)"
             # ★정본재고(자재일마감). 미커버=정본이 이 품목을 추적 안 함 → 실재고 확인 불가(빈값).
             cov = d["off_cov"]
-            off_e = d["off_end"] if cov else None      # 실재고(정본기말)
-            off_b = d["off_beg"] if cov else None       # 기초(정본기초)
-            off_chg = (off_e - off_b) if cov else None  # 정본 재고증감(=기말−기초)
-            # ★순증액 = 정본 재고금액증감(기말금액−기초금액). vendor 송장 블렌드단가 튐(완성세트 등) 제거.
+            off_e = d["off_end"] if cov else None            # 실재고(정본 최신스냅샷 ≤to)
+            off_chg = d["off_chg"] if cov else None           # 재고증감(정본 기간 flow Σin−out)
+            off_b = (off_e - off_chg) if cov else None         # 기초 = 실재고 − 재고증감 (이월재고 정합)
+            # ★순증액(재고증감액) = 정본 기간 flow Σ(in_amt−out_amt). vendor 송장 블렌드단가 튐(완성세트 등) 제거.
             #   미커버(정본 미추적, 소량)만 vendor 추정단가로 폴백.
             if cov:
-                net_amt = round(d["off_end_amt"] - d["off_beg_amt"])
+                net_amt = round(d["off_chg_amt"])
             else:
                 net_amt = 0 if unreliable else round(net * up)
             flags = []

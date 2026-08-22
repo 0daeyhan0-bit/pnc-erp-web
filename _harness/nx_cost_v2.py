@@ -78,7 +78,26 @@ def patch_leaf(eng, rbmap):
     return eng
 
 
-def cost_v2(item, ymd, v1_engine=None, engine_factory=None):
+def patch_recovery(eng, recovery_pct):
+    """★가공비 ST 회수율(효율) 반영 — 하드코딩 아님, 곱셈 로직.
+    실 가공비 = 표준가공비 × (100/효율). 효율<100이면 가공비 gross-up(일반관리비·이윤도 엔진 롤업으로 전파).
+    현재=화면 입력값(전역). 추후=라인별(nx.item.prod_line × nx.line_efficiency, 생산실적 기반). 정본 §7A.
+    효율 100(또는 무효값)이면 no-op(V2 가공비=V1)."""
+    try:
+        rp = float(recovery_pct)
+    except (TypeError, ValueError):
+        return eng
+    if rp <= 0 or abs(rp - 100.0) < 1e-9:
+        return eng
+    k = 100.0 / rp
+    orig = eng.gagong_u
+    def g2(item, ymd, parent):
+        return orig(item, ymd, parent) * k
+    eng.gagong_u = g2
+    return eng
+
+
+def cost_v2(item, ymd, v1_engine=None, engine_factory=None, recovery=100):
     """V1(엔진 그대로) + V2(직거래 원소재 실매입 override) 실원가·손익 산출.
 
     v1_engine: 기존(공유) 엔진 재사용(V1용, 읽기만). 없으면 새로 생성.
@@ -103,6 +122,7 @@ def cost_v2(item, ymd, v1_engine=None, engine_factory=None):
     try:
         rb = build_realbuy_map(e2.cur, ymd[:4])
         patch_leaf(e2, rb)
+        patch_recovery(e2, recovery)   # ★가공비 회수율(효율) 곱셈. 기본 100=no-op.
         v2 = e2.silwon(item, ymd)
     finally:
         e2.close()
