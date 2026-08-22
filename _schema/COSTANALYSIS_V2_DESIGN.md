@@ -774,5 +774,15 @@ cg=5 직납 → 제외
 - 효과: except_flag·in_cust빈값 자동우회. 원소재는 절대 0 안됨. 전개제외만 0(정당). **재료비 조용한 0 소실 방지**([[newerp-legacy-nx-separation]] in_cust 재료비0 사고 예방).
 - 판가 결손(11제품)=apply_ymd 미래→as-of 정책(현재손익=최신판가) 별도. 진짜 tag1 0행 직거래부품=영업입력(스코프 0개).
 
+## §9. #2 재검증 + #3 날짜 squeeze (2026-08-22)
+
+### #2 전스코프 재검증 (fallback 반영)
+- 263품번·에러0·**사급품 178 diff0**. +42,000 사고 재발생→**조립품(110/120) fallback 가드**로 해소(변형SUB in_cust빈값 마스터가 채움 금지). unit실원가 V1 22,830,146→V2 22,840,628(+10,482). 수량가중 손익impact +0.13억. 제품별 스윙 큼(PQ060905R01 +7040만·PQ060903E30 −5719만).
+
+### #3 날짜 squeeze 월별분석 (직거래 12제품, 2602~2608)
+- **squeeze 실재·V2 포착**: 2602(사급전환직후) V2손익 V1보다 **−3,583**(실매입>새사급가). 2603 손익급락(54K→19K, 판가flat·원가↑=판가지연). 원소재 실매입 연중상승(3H00627M 20,038→22,338). 2603+ 실매입<사급가로 뒤집힘.
+- **V1은 squeeze 못봄**(항상 사급가). V2가 실매입 timing 반영.
+- **★방법론 한계**: 실매입맵=누적 가중평균(as-of)→timing 평탄화→squeeze 약하게. **period(그달) 실매입가** 방식이 다음 정밀화(사용자 "실매입가 적용 방식"). sq.txt.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
