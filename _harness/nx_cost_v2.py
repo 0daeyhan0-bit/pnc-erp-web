@@ -59,7 +59,11 @@ def patch_leaf(eng, rbmap):
 
     def v2_leaf(node, info, q, ymd, ymcut):
         ent = rbmap.get(node)
-        if ent and ent[1] <= SPREAD_GUARD and ent[0] > 0:
+        # ★원소재 한정 필터(2026-08-22): SUB/조립품은 metal_gubun 빈값·용접봉(910)/사급(310) 제외.
+        #   tag9 매입이력만으론 SUB(AJR*-N-M)·용접봉도 걸려 orig=0을 실매입가로 오적재(+42000 사고). 원소재(metal채움)만 override.
+        if (ent and ent[1] <= SPREAD_GUARD and ent[0] > 0
+                and str(info.get('metal', '')).strip() != ''
+                and str(info.get('sgroup', '')).strip() not in ('910', '310')):
             jik = ent[0]
             inner = eng._inner_prod(info)
             if inner and info.get('cost_gubun', '') == '3':          # 원소재(소재단가 계상)

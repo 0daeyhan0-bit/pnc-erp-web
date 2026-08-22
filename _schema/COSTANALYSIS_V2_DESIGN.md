@@ -716,5 +716,13 @@ cg=5 직납 → 제외
 - **진단(v2_diag)**: 스코프 리시빙상위20 제품×엔진 silwon_nodes → 원소재노드별 (제품cut/직구매실매입/사급매입/엔진mat) 매입지형 실측 → 규칙 데이터확정.
 - V2 래퍼: nodes=engine.silwon_nodes(item,ymd); 직거래 원소재노드 mat→실매입가×wt×qty(fallback 사급가); delta 누적; V2_실원가=silwon+delta. 엔진 원본 무변경.
 
+## §6Q. 래퍼 구현·검증 완료 (2026-08-22)
+
+- **모듈 `_harness/nx_cost_v2.py`**: 엔진 `_leaf_val` 인스턴스 패치로 직거래 원소재 leaf 단가→실매입가. 엔진 롤업이 **일반관리비(ilban=율91×(재료+가공))·이윤(율93×(가공+일반)) 전파 자동 반영**(재료비만 델타는 과소). V1=공유엔진·V2=격리 패치엔진.
+- **★원소재 한정 필터(필수)**: `metal_gubun≠'' AND sgroup∉('910','310')`. **tag9 매입이력만으론 SUB(AJR*-N-M, metal='', sgroup120)·용접봉(910)·부자재(230)도 걸려 orig=0을 실매입가로 오적재**(AJR30125601 +42,000 사고). 원소재는 metal 채움, SUB/조립품은 metal 빈값 → 이걸로 분리. 매입 원소재(sgroup130 MJU66570402 등)는 metal 있어 통과.
+- **검증(6제품 V1 vs V2, 260630)**: 사급앵커 AJR75563503 **delta 0(diff0)** · AJR30125601 **사고+45,332→0**(순수 사급제품, 매입노드 전부 SUB/부자재) · PQ060903E30(설치 고강도) +2,974(재료비 2,668+전파 306) · AJR30027702 −2,023 · AJJ75838626 +1,122. **전파 반영·사급품 diff0 확인.**
+- ★교훈: v2_c4의 재료비-only 델타(−12,485)도 SUB/부자재 오염 포함이었음 → 원소재 필터 후가 정본. 매입 SUB 실매입가는 별도 스코프(Phase 후속).
+- **남은 구현**: /api/cost/nx_v2 엔드포인트 + SCREEN.costanalysis_v2 연결 + 전스코프(253) V1vsV2 검증표.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]

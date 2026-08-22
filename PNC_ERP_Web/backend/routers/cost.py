@@ -68,6 +68,29 @@ def cost_nx(item: str = Query(..., description="품번"),
     finally:
         eng.close()
 
+@router.get("/api/cost/nx_v2")
+def cost_nx_v2(item: str = Query(..., description="품번"),
+               ymd: str = Query('260630', description="단가기준일 YYMMDD")):
+    """★품목별 원가분석 V2 — 직거래 원소재 실매입가 반영 실원가·손익(우리식 클린 계산).
+       엔진(V1=레거시충실 사급가) 원본 무변경, _leaf_val 패치로 직거래 원소재만 실매입가 override.
+       일반관리비·이윤 전파 자동 반영. 사급 원소재=엔진값 유지(사급품 V1=V2 diff0).
+       규칙·검증 정본: _schema/COSTANALYSIS_V2_DESIGN.md §5A~§6Q."""
+    if NxCostEngine is None:
+        raise HTTPException(500, "nx_cost_engine 로드 실패")
+    item = item.strip(); ymd = ymd.strip()
+    if not item:
+        raise HTTPException(400, "item(품번) 필요")
+    try:
+        import nx_cost_v2 as _V2
+    except Exception as e:
+        raise HTTPException(500, f"nx_cost_v2 로드 실패: {e}")
+    try:
+        r = _V2.cost_v2(item, ymd, engine_factory=NxCostEngine)
+        return {"item": item, "ymd": ymd, "v1": r["v1"], "v2": r["v2"],
+                "delta": r["delta"], "sonik_delta": r["sonik_delta"]}
+    except Exception as e:
+        raise HTTPException(500, f"V2 원가 오류: {e}")
+
 @router.get("/api/cost/sil")
 def cost_sil(item: str = Query(..., description="품번"),
              ymd: str = Query('260630', description="단가기준일 YYMMDD"),
