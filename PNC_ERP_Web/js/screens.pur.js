@@ -108,7 +108,7 @@ SCREEN.matinout=(c)=>{
 /* 자재 소요-매입 검증(업체별 과입고 진단) — 신규. 실적(리시빙)→CS real=1 소요 vs 업체별 매입, 사급출고·기초 펼침+흐름/이상치 플래그(집계 단정 없음, 사람이 검토) */
 SCREEN.matverify=(c)=>{
   const API=API_BASE;
-  const CT={'6':'절삭-협력사','7':'절삭-부자재','8':'설치-부자재','A':'이지링크','4':'절삭-원자재','5':'설치-원자재','1':'유상사급-부품','9':'소모품'};
+  const CT={'6':'절삭-협력사','7':'절삭-부자재','8':'설치-부자재','A':'이지링크','4':'절삭-원자재','5':'설치-원자재','1':'유상사급-부품','9':'소모품','IMP':'수입(해외)'};
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const ym2in=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const in2ym=v=>{v=(''+(v||'')).trim();return v.length>=7?v.slice(2).replace('-',''):'';};
