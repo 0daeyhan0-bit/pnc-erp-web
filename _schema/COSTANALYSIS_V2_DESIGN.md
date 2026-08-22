@@ -784,5 +784,23 @@ cg=5 직납 → 제외
 - **V1은 squeeze 못봄**(항상 사급가). V2가 실매입 timing 반영.
 - **★방법론 한계**: 실매입맵=누적 가중평균(as-of)→timing 평탄화→squeeze 약하게. **period(그달) 실매입가** 방식이 다음 정밀화(사용자 "실매입가 적용 방식"). sq.txt.
 
+## §10. ★판가 = 리시빙 실적 가중평균 (2026-08-23, 사용자 — 아마 최대 손익요인)
+
+### 사용자 설명 (판가 구조 정본)
+- LG 판가 인상해도 **한번에 다 안오름**: 기존 발행 PO는 **종전가로 출하**. → 조회기간 같은 제품이 **여러 가격에 출하**.
+- **실제 판가 = Σ(판가×수량)/Σ수량**(리시빙 실적 sa_t_recv_dtl item_cost×order_qty 가중평균). ★단일 as-of(apply_ymd) 판가는 틀림.
+- **원가(LG사급가·원소재·부자재)도 같은 기준(기간·수량 가중)** 으로 계산해야 손익 정합.
+
+### ★실측 검증 (엔진 lg_cost as-of vs 리시빙 실적 가중평균)
+- AJR30027702: 실적 **192,984**(9종 판가) vs 엔진 as-of **233,804** = **엔진 40,820 과대(17%)** → 손익 과대. ×2,412qty = **−0.98억** 한 제품.
+- AJR75563503: 19,629 vs 21,988(−2,359, 7종). PQ060903E30: 33,194 vs 34,473(−1,279, 5종).
+- **판가결손 11제품 → 리시빙 실적엔 판가 있음**(AJR30133607 95,121·AJR76402409 278,684, 엔진 as-of=0 apply_ymd미래). **실적 쓰면 결손 자동해결**.
+
+### ★결론 = 3문제 동시해결·최대지렛대
+- 엔진 `lg_cost`(단일 최신 as-of)를 **리시빙 실적 가중평균 판가**로 교체 → ①판가 과대(as-of 최신) ②판가 결손(apply_ymd 미래) ③날짜 squeeze(PO시차) **동시 해결**.
+- **재료비 방향(±수천만)보다 큰 지렛대**(판가 과대 제품당 수천만~억).
+- **V2 손익 = 리시빙 실적 가중평균 판가 − 실원가(기간·수량 가중 매칭)**. 원가측도 리시빙 수량가중으로 맞춤.
+- 구현: /api/cost bulk에서 판가=sa_t_recv_dtl 가중평균(기간 파라미터), 엔진 lg 대체. recvprice.txt.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
