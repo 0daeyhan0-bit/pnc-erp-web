@@ -120,6 +120,33 @@
 3. 260806 사급단가 변경·직거래 월변동이 원가월별로 정확히 반영되는지
 4. 갭 = V2 계산방식 재설계 항목으로 등록
 
+## 5C. 기록 전수 확인 결과 (2026-08-22, 서브에이전트 + 실측)
+
+### 재료비 계산 체인 (엔진 실측, 정본)
+- **원소재 소재단가** = `nx.price_metal.std_price`(=절삭재료비 CS_M_METERIAL_COST.TOT_COST=LG사급가). 실원가=협력사가(partner=CU20,000/고강도22,000)+LG사급가+LME차액(std−partner). ([[newerp-metal-unit-price-source]], METAL_UNIT_PRICE_SAGUB_SOURCE.md)
+- **price_metal 8/21 전체정렬 수정됨**(라이브 CS_M∪웹, 8월 22,387 반영, 재료비 diff0 스윕 9/11 PASS). 단 **R-3(8/6 mid-month)은 월단위라 여전히 미표현**.
+- **make_type→INNER_PROD→재료비 갈림**(nx_cost_engine.py:245-373): make_type='1'→INNER=1(사내전개, 소재단가×중량); ''→조건부; 그외(2/3/4/5)→INNER=0(매입가 pur_price leaf, 하위전개 중단). ★엔진은 **4/5를 구별 안 함**(전부 INNER=0). cost_gubun='3' 저장이어도 INNER=0이면 SP가 동적 '2'(구매단가) — INNER_PROD 우선.
+- ⚠ **make_type '2' 정의 문서 불일치**: "외주가공"(BOM_EXPLOSION_RULES) vs "유상사급"(V2·vendor-rules). **사용자 확정 필요.**
+- **routing 개선=except_flag→routing_edge(생산처 work_center) 이관**이지 make_type 재정의 아님. make_type B3 오분류(이젠터 3→2·SAGUB_FLAG=0 누락)는 corrections.json 등록·승인대기.
+
+### flag 관계
+- **except_flag(생산/전개) ≠ cs_calc_except(원가)** — 한 bom_line에 둘 다. 엔진은 **cs_calc_except만 읽음**(except_flag 안 읽음). ([[newerp-bom-flag-sync-cutover]])
+- **except_flag ↔ SAGUB_FLAG 상호배타**: 안보냄=EXCEPT(상위SUB 거래처 귀속)/보냄=SAGUB(사급). ([[newerp-except-flag-vendor-rule]])
+- **except_flag 재싱크→LME 과다** 위험(외주완성 SUB 전개정지 안 함, CS 2계층 복구 필요 [[newerp-lme-overcount-rootcause]]). cs_calc_except 재싱크=**보류 결정**.
+
+### R02 협력사 seeding
+- R02 sourcing_profile 매입처 시드(R01에서). **배포완료 PR#25**. 원가 pur_price 반영은 **미배포·후속과제**(route/cost 원가 미반영 결정=diff0 보호). V2 통합 예정.
+- ⚠ **사용자 "최근 협력사 seeding"이 R02 sourcing_profile인지, 별도 협력사매핑([[newerp-coop-2026-mapping]])인지 확인 필요.**
+
+### 샘플 재료비 분해 (esti, ymd=260630) — 손익=LG판가−실원가
+| 품번 | 그룹 | 재료계 | 가공 | LME차액 | 실원가 | LG판가 | 손익 |
+|---|---|---|---|---|---|---|---|
+| AJR30117902 | 절삭(CU) | 21,993 | 267 | 0 | 22,327 | 23,325 | +998 |
+| AJR30125601 | 절삭(SS) | 88,349 | 4,192 | −840 | 94,503 | 132,282 | +37,779 |
+| PQ061208C41.AKOR | 설치(직거래) | 56,121 | 1,150 | 0 | 62,118 | 58,872 | **−3,246 적자** |
+| AJR30077403 | 절삭 | 26,437 | **1,463 ★stale** | 0 | 28,175 | 27,557 | −618(가공 정상335이면 흑자권) |
+- ★esti sil.agg는 원자재/부자재/LG사급 분해가 0으로 안 채워짐(JAI_COST 합만) → 성분분해는 /api/cost/nx(cst.won/bu/sa) 사용 필요.
+
 ## 6. 결정 로그 (담당 판단 — 하나씩 확정)
 
 | 일자 | 항목 | 결정 | 사유 |
