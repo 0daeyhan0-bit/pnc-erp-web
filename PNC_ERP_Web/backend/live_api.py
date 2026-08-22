@@ -452,27 +452,36 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     osp_raw, osp_part = round(ospm.get('raw', 0)), round(ospm.get('part', 0))
     pct = lambda a, b: round(a / b * 100, 1) if b else 0.0
 
-    # ③ 재고조정 = 전월기말재고 − 조회일재고 (재고증가면 음수). 실재고(조정후)=실매입−재고조정=실매입+재고증가.
-    #    소스=생산재고조회(_prodstock)·제품재고조회(salesstock)·자재수불(matledger). 재고조정=Σ(기초금액 basic×cost − 현재고금액 amt).
-    def _sdelta(rows, basek='basic', costk='cost', amtk='amt'):
-        cur_a = sum(float(x.get(amtk) or 0) for x in rows)
-        base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
-        return round(base_a - cur_a)
-    try: jaego_prod = _sdelta(_prodstock(ym, m0, d6))   # ★조회일 기준(기초=7월말=조회월기초, 현재고=월초~조회일). 설계문서 "원장 날짜컷" 반영
-    except Exception: jaego_prod = 0
-    try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
+    # ③ 재고조정(버킷별) = 조회일 현재고 − 7월말(=조회월초) 기초 = 재고증가분(양수=증가, 음수=감소).
+    #    용접/가공(생산 _prodstock stage=WELD/GAGONG)·영업(salesstock)·자재(nx.mat_stock_daily 이동평균 일마감).
+    #    생산·영업 기초=2502스냅샷+월초직전무브(=7월말) × 월초원가, 현재고=조회일 수량 × 월초원가. 자재=일별 이동평균.
+    #    실재고(조정후) = 실매입 + 재고증가합계.
+    def _delta(rows, stage=None, basek='basic', costk='cost', amtk='amt'):
+        cur_a = base_a = 0.0
+        for x in rows:
+            if stage is not None and x.get('stage') != stage: continue
+            cur_a += float(x.get(amtk) or 0)
+            base_a += float(x.get(basek) or 0) * float(x.get(costk) or 0)
+        return round(cur_a - base_a)   # 현재고 − 기초
+    try:
+        _pr = _prodstock(ym, m0, d6)   # ★조회일 기준. stage='WELD'(용접, gagong_proc≠P0001) / 'GAGONG'(가공, P0001)
+        jaego_weld, jaego_gagong = _delta(_pr, 'WELD'), _delta(_pr, 'GAGONG')
+    except Exception: jaego_weld = jaego_gagong = 0
+    try: jaego_sales = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
     except Exception: jaego_sales = 0
-    try:   # 자재수불(자재재고): matledger 월기준(일별마감 없음). rows에 basic/curr/amt(금액)
-        _mr = matledger(period='month', ymd=ym).get('rows', [])
-        jaego_mat = round(sum(float(x.get('basic_amt') or 0) for x in _mr) - sum(float(x.get('amt') or x.get('curr_amt') or 0) for x in _mr))
+    try:   # 자재: 우리 이동평균 일마감(nx.mat_stock_daily). 기초=월초직전잔량(ba)·현재고=조회일(sa)
+        _mc = matclose(dfrom=m0, dto=d6).get('rows', [])
+        jaego_mat = round(sum(float(x.get('sa') or 0) for x in _mc) - sum(float(x.get('ba') or 0) for x in _mc))
     except Exception: jaego_mat = 0
-    jaego = jaego_prod + jaego_sales + jaego_mat
-    silrae = net_t['tot'] - jaego   # 실재고(조정후) = 실매입 − 재고조정
+    jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
+    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
 
-    # 당사ERP 유상사급 = ①의 유상사급-원재료+부품(확정입고, 총)
-    dangsa_sagub = 0
+    # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
+    dangsa_raw = dangsa_part = 0
     for r in pur:
-        if r['gubun'] in ('유상사급-원재료', '유상사급-부품'): dangsa_sagub += r['tot']
+        if r['gubun'] == '유상사급-원재료': dangsa_raw += r['tot']
+        elif r['gubun'] == '유상사급-부품': dangsa_part += r['tot']
+    dangsa_sagub = dangsa_raw + dangsa_part
     lg_osp = osp_raw + osp_part   # LG전산(OSP) 총
 
     # ===== ⑤ 매출요약 (상반기 1~15 / 하반기 16~말 / 합계). 매출=조회일까지 실적(리시빙)+이후~월말 예상(forecast). 원화 =====
@@ -480,7 +489,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _yr = 2000 + int(ym[:2]); _mo = int(ym[2:4]); _ld = _cal.monthrange(_yr, _mo)[1]
     eom = ym + ("%02d" % _ld)
     _half = lambda y6: 'H1' if (str(y6)[4:6] <= '15') else 'H2'
-    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'naesu')}
+    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'sagub_part_fc', 'naesu')}
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
@@ -517,24 +526,26 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     for _r in _ro5:
         _h = _half(_r['ymd']) if str(_r['ymd']) else 'H1'
         _madd('sagub_raw' if _r['t'] == 'raw' else 'sagub_part', _h, _r['a'])
-    # 사급부품 예상 = forecast_sagub(다음날~월말)·half. (원재료 예상=0 — 추후 원소재식)
+    # 사급부품 예상 = forecast_sagub(다음날~월말)·half → sagub_part_fc(실적과 분리). (원재료 예상=0 — 추후 원소재식)
     if _nb <= eom:
         try:
             for _g in _soyo.sales_forecast_sagub(base=_nb, to=eom).get('rows', []):
                 _cst = float(_g.get('cost') or 0)
                 for _y, _q in (_g.get('ndays') or {}).items():
-                    _madd('sagub_part', _half(_y), float(_q or 0) * _cst)
+                    _madd('sagub_part_fc', _half(_y), float(_q or 0) * _cst)
         except Exception: pass
     # 파생행 + LG수금 = (내수−사급예상)×10% + 유상제외(=총매출−사급예상)
     def _r3(d): h1 = round(d['H1']); h2 = round(d['H2']); return {"h1": h1, "h2": h2, "tot": h1 + h2}
     _hyeon_hab = {h: MS['hyeon_cut'][h] + MS['hyeon_seol'][h] + MS['hyeon_etc'][h] for h in ('H1', 'H2')}
-    _sagub_hab = {h: MS['sagub_raw'][h] + MS['sagub_part'][h] for h in ('H1', 'H2')}
-    _chong = {h: _hyeon_hab[h] + MS['chuga_cut'][h] + MS['chuga_seol'][h] for h in ('H1', 'H2')}   # 총매출
+    _sagub_part_sum = {h: MS['sagub_part'][h] + MS['sagub_part_fc'][h] for h in ('H1', 'H2')}   # 사급부품 실적+예상
+    _sagub_hab = {h: MS['sagub_raw'][h] + _sagub_part_sum[h] for h in ('H1', 'H2')}
+    _chong = {h: _hyeon_hab[h] + MS['chuga_cut'][h] + MS['chuga_seol'][h] for h in ('H1', 'H2')}   # 총예상매출 = 현매출+추가매출
     _yusang = {h: _chong[h] - _sagub_hab[h] for h in ('H1', 'H2')}   # 유상제외(숨김) = LG매출(총매출)−사급금액
     _lgsu = {h: _chong[h] - _sagub_hab[h] + MS['naesu'][h] * 0.1 for h in ('H1', 'H2')}   # ★LG수금 = LG매출 − 사급금액 + 내수매출×10%
     maechul = {"hyeon_cut": _r3(MS['hyeon_cut']), "hyeon_seol": _r3(MS['hyeon_seol']), "hyeon_etc": _r3(MS['hyeon_etc']), "hyeon_hab": _r3(_hyeon_hab),
-               "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']),
-               "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']), "sagub_hab": _r3(_sagub_hab),
+               "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']), "chong": _r3(_chong),
+               "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']), "sagub_part_fc": _r3(MS['sagub_part_fc']),
+               "sagub_part_sum": _r3(_sagub_part_sum), "sagub_hab": _r3(_sagub_hab),
                "lg_sugum": _r3(_lgsu)}
 
     _res = {"date": d6, "ym": ym,
@@ -544,14 +555,14 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
-            # ③ 재고조정 (기초−현재고, 재고증가면 음수). 자재는 8월 스냅샷 없어 0(원장계산 예정).
-            "jaego": {"prod": jaego_prod, "sales": jaego_sales, "mat": jaego_mat, "total": jaego, "mat_pending": jaego_mat == 0},
+            # ③ 재고조정 (조회일 현재고 − 7월말 기초 = 재고증가분, 버킷별). 용접/가공/영업/자재 + 합계.
+            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
             # D 유상사급 대사 (당사ERP 확정입고 vs LG전산 OSP) — ④사급율에 당사ERP·비교(차액) 흡수
             "dae": {"dangsa": dangsa_sagub, "lg": lg_osp, "diff": dangsa_sagub - lg_osp,
-                    "lg_raw": osp_raw, "lg_part": osp_part},
+                    "lg_raw": osp_raw, "lg_part": osp_part, "dangsa_raw": dangsa_raw, "dangsa_part": dangsa_part},
             # ⑤ 매출요약 (상반기 h1 / 하반기 h2 / 합계 tot · 원화). 현매출=실적, 추가매출=예상, 사급=원재료(예상0)/부품, LG수금=(내수−사급)×10%+유상제외
             "maechul": maechul}
     _DPI_CACHE[d6] = (_time.time() + 180, _res)   # ★180초 캐시(재조회 즉시). 오늘자도 3분 이내 재계산 안 함.
