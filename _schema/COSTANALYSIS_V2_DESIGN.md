@@ -593,6 +593,7 @@ cg=5 직납 → 제외
 | 2026-08-22 | Q3 설치 3개 사급 | 사용자 확인중 | — |
 | 2026-08-22 | R-2 직거래 원소재 재료비 소스 | **이동평균 마감가(mat_stock_daily) 방향**(대사 추천, 사용자 검토중) | 소비원가 회계정합·매입추종 92%·일단위·이미구축. vs 확정입고(매입shock 보조) |
 | 2026-08-22 | §5R 협력사 routing 분리 원가반영 | **(B) 매입가 거래처 오버라이드(소스=routing_edge.wc)** but **실효≈0** | 계획서 생산 기록=soyo STEP7 routing_edge.wc override. 검증축=wc(생산처)≠vendor_resolved. 실측: 협력사노드 5,490 중 in_cust≠wc 단1건 → 이미정합. 래퍼는 wc_user편집·in_cust공백만 재지정(안전장치·미래추종), 나머지 in_cust 유지 |
+| 2026-08-22 | §5S R01/R02 조달경로 원가반영 | **route-aware 설계(활성=route_alloc.is_active)** — R01 현행/엔진, R02 활성시 sourcing_route_line 구분+vendor로 재판정. **오늘 실효=0(R02 미활성 전량)** | 사용자: "routing 1,2도 설계 반영". R02 정의 1건(AJR75563402)·미활성. 래퍼가 route_alloc 조회해 R02 노드만 재판정 |
 | 2026-08-22 | ★음수재고/무가격 정리 시점 | **지금 원장 정리 금지 → 마이그가 소유** | 음수=레거시실적 재현(우리버그 아님). 지금 원장 손대면 마이그 재고 true-up과 이중조정·드리프트. 신규ERP 단계게이팅은 컷오버때 적용 [[newerp-stock-gating-close-lock]]. **V2는 읽기시점 fallback(avg=0/음수→소재단가/직전유효/매입가)으로 원장무변경·마이그무영향·재료비정확** |
 
 ## §5R 협력사 BOM분리→routing 이관의 원가 반영 (2026-08-22 실측)
@@ -627,6 +628,33 @@ cg=5 직납 → 제외
 - ∴ **협력사 routing 분리는 원가에 이미 정확 반영**(wc_live가 in_cust와 동일 마스터에서 시드 → 5,489/5,490 일치). 원가엔진 in_cust ≡ 계획 wc.
 - **(B)의 현재 실효 = 1건**(in_cust 공백 노드 매입가 vendor 확보). **전방위 가치 = 앞으로 wc_user 편집(협력사 재배정)이 생기면 원가가 자동 추종**하는 얇은 안전장치.
 - **결정**: V2 래퍼에 `wc_user≠''`(사용자편집) OR `in_cust 공백` 노드만 매입가 vendor를 routing_edge.wc로 재지정. 나머지는 in_cust 그대로(=현행 정합 유지). 엔진 원본 무변경.
+
+## §5S R01/R02 조달경로(routing 1,2)의 원가 반영 (2026-08-22 실측·설계)
+
+사용자 지시: "routing 1, 2에 대한 부분도 설계에 반영을 해야 할 것 같아." (R01=현행경로, R02=대안경로)
+
+### R01/R02 데이터 모델 (실측)
+- **`nx.sourcing_route`**(헤더): route_id·item_code·route_no(1=R01/2=R02)·route_name·vendor_code·gubun·`current_flag`·`approve_flag`·apply_from·reject_flag. 예: AJR75563402 route_no=2(R02) approve=1·current=0.
+- **`nx.sourcing_route_line`**(경로별 부품): route_id·child_item·`gubun`(**제작/매입/외주(유상사급)**)·`vendor_code`·is_rawmat·node_kind(PART/SUB)·parent_line. (R02 1건=11line: 매입7·외주1·제작3)
+- **`nx.route_alloc`**(활성판정): item_code·route_id·`is_active`·alloc_ratio. **route_id=0=R01 base(현행), else=특정 R02 route_id.** 예: AJR75563402 → R01(0) is_active=True / R02(1536) is_active=False.
+- **`nx.route_seq`**: 품목별 마지막 route_no.
+
+### 현재 상태 (실측)
+- **전 품목 R01(base) 활성.** R02 정의는 `AJR75563402` 1건뿐이며 **미활성**(is_active=False). ∴ **오늘 원가=R01=정합**, R02 전환 품목 0건.
+- routing_edge.route_id는 전부 1(자체 numbering, route_alloc과 별개). **원가엔진은 route 시스템(route_alloc/sourcing_route)을 안 읽음.**
+
+### 원가 반영 설계 (route-aware)
+**원가의 조달 축(제작/매입/사급 + vendor)은 "활성경로"에서 온다:**
+1. **활성경로 조회** = `route_alloc.is_active=True`의 route_id (품목별).
+2. **R01(route_id=0) 활성** → 원가 = 현행 bom_line + routing_edge.wc 축(=엔진 그대로). ✓ 오늘 전량 이 경로.
+3. **R02(특정 route_id) 활성** → 그 route의 `sourcing_route_line`으로 **노드 조달축 재판정**:
+   - `gubun=제작` → 사내 전개(INNER_PROD=1): 재료+가공 전개.
+   - `gubun=매입` → 외주완성(INNER_PROD=0): `vendor_code` 매입가.
+   - `gubun=외주(유상사급)` → 유상사급: 원소재 사급가 + LME 차액.
+4. **V2 래퍼**: route_alloc 조회 → 활성=R02인 노드만 위 규칙으로 재판정, 나머지는 엔진 그대로. **오늘 실효=0건**(R02 미활성)이나 R02 전환 시 원가 자동 정합.
+
+### ★미해결 확인점 (사용자)
+- routing_edge(생산계획 축, wc) ↔ sourcing_route/route_alloc(조달프로파일 축, 구분+vendor)은 **별개 테이블**. 원가가 따라야 할 정본이 둘 중 무엇인지 — 또는 R02 활성 시 둘이 어떻게 합류하는지 확인 필요. (현재는 R01 전량이라 두 축 동일 결과)
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
