@@ -113,8 +113,8 @@ SCREEN.matverify=(c)=>{
   const ym2in=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
   const in2ym=v=>{v=(''+(v||'')).trim();return v.length>=7?v.slice(2).replace('-',''):'';};
   const nowYm=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;};
-  const flagColor=f=>({'소요없음':'#c0392b','기말음수':'#c0392b','사급>매입':'#b8860b','매입≫소요':'#c0392b'}[f]||'#8a5a1a');
-  const flowColor=f=>({'직납':'#1c7c3a','서포터(사급출고형)':'#8a5a1a','다업체소싱':'#1c47a0','컴포넌트':'#555'}[f]||'#555');
+  const flagColor=f=>({'소비없음':'#c0392b','순증과다':'#c0392b','사급>매입':'#b8860b'}[f]||'#8a5a1a');
+  const flowColor=f=>({'직납':'#1c7c3a','사급재출고형':'#8a5a1a','다업체소싱':'#1c47a0','컴포넌트(가공소비)':'#555'}[f]||'#555');
   let rows=[], vend=[], sel=null, loading=false, msg='', begym='';
   const buildVend=()=>{
     const vm={};
@@ -137,7 +137,7 @@ SCREEN.matverify=(c)=>{
     loading=false;renderLeft();
     c.querySelector('#mv-rhead').innerHTML='<div class="s-item">← 좌측에서 업체를 클릭하세요</div>';
     c.querySelector('#mv-rbody').innerHTML='';
-    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · 소요=리시빙×CS BOM(real=1) · 매입=확정입고+수입 · 기초=${esc(begym)}말 · <b>집계 단정 아님, 플래그는 검토용</b>`;
+    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · <b>순증=매입−가공출고−사급출고±조정</b>(실측 자재수불) · 매입=확정입고+수입 · <b>순증 크면 과입고 후보(단정 아님, 사람이 검토)</b>`;
   };
   c.innerHTML=`
    <div class="page-title">🔍 자재 소요-매입 검증 <span style="font-size:12px;color:var(--muted);font-weight:400">(업체별 과입고 진단)</span></div>
@@ -156,7 +156,7 @@ SCREEN.matverify=(c)=>{
      <div style="flex:1;min-width:0">
        <div class="summary-bar" id="mv-rhead"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr>
-         <th>품번</th><th>품명</th><th>흐름</th><th class="num">기초</th><th class="num">업체매입</th><th class="num">총매입</th><th class="num">소요</th><th class="num">사급출고</th><th class="num">리시빙</th><th class="num">기말</th><th class="num">검토후보액</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
+         <th>품번</th><th>품명</th><th>흐름</th><th class="num">업체매입</th><th class="num">총매입</th><th class="num">가공출고</th><th class="num">사급출고</th><th class="num">조정</th><th class="num">순증</th><th class="num">순증액</th><th class="num">리시빙</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
      </div>
    </div>`;
   const renderLeft=()=>{
@@ -170,14 +170,14 @@ SCREEN.matverify=(c)=>{
   };
   const renderRight=cc=>{
     const v=vend.find(x=>x.code===cc);if(!v)return;
-    const its=v.items.slice().sort((a,b)=>(b.cand_over||0)-(a.cand_over||0));
+    const its=v.items.slice().sort((a,b)=>(b.net_amt||0)-(a.net_amt||0));
     let html=its.map(r=>{
       const fl=(r.flags||[]).map(f=>`<span style="color:${flagColor(f)};font-size:10px;border:1px solid ${flagColor(f)};border-radius:3px;padding:0 3px;margin-right:2px">${esc(f)}</span>`).join('');
-      const endc=r.end<0?'color:#c0392b':'';
-      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num">${won(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_q)}</td><td class="num">${won(r.soyo)}</td><td class="num">${won(r.sagub_out)}</td><td class="num">${won(r.recv)}</td><td class="num" style="${endc}">${won(r.end)}</td><td class="num" style="${(r.cand_over||0)>0?'color:#c0392b;font-weight:600':''}">${won(r.cand_over)}</td><td>${fl}</td></tr>`;
+      const netc=(r.net||0)>0?'color:#c0392b;font-weight:600':((r.net||0)<0?'color:#1c7c3a':'');
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_q)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="color:#999">${won(r.recv)}</td><td>${fl}</td></tr>`;
     }).join('');
     c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="12" class="empty">품목 없음</td></tr>`;
-    c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 소요·사급·기초·리시빙=품목 전체</div>`;
+    c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 총매입·가공출고·사급출고·순증=품목 전체(전 업체)</div>`;
     if(typeof attachResizers!=='undefined')attachResizers(c);
   };
   c.querySelector('#mv-go').onclick=()=>load();
@@ -185,8 +185,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','흐름','기초','업체매입','총매입','소요','사급출고','리시빙','기말','검토후보액','플래그'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.beg,r.vq,r.buy_q,r.soyo,r.sagub_out,r.recv,r.end,r.cand_over,(r.flags||[]).join('|')])));
+    const hd=['업체','품번','품명','흐름','업체매입','총매입','가공출고','사급출고','조정','순증','순증액','리시빙','플래그'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.vq,r.buy_q,r.gagong,r.sagub,r.adj,r.net,r.net_amt,r.recv,(r.flags||[]).join('|')])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };
