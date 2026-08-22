@@ -51,28 +51,24 @@ def _build(ct, fr, to):
             ) t GROUP BY UPPER(LTRIM(RTRIM(t.mat))), t.cc""", fr, to, ct, fr, to, ct)
         buy_rows = [(_U(r[0]), str(r[1]).strip(), r[2], float(r[3] or 0), float(r[4] or 0), float(r[5] or 0)) for r in cu.fetchall()]
 
-        # 2) 이 자재들의 전 태그 이동(소비·조정) — 자재×태그. (매입유형=ct 자재로 스코프)
-        cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))) mat, a.MAINT_TAG tag, SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))) q
-            FROM dbo.PU_T_STOCK_MAINT a
-            WHERE a.MAINT_YMD BETWEEN ? AND ?
-              AND UPPER(LTRIM(RTRIM(a.MAT_CODE))) IN (
-                SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM dbo.PU_T_STOCK_MAINT
-                WHERE MAINT_YMD BETWEEN ? AND ? AND MAINT_TAG IN ('9','S','C','G','H')
-                  AND CUST_CODE IN (SELECT CUST_CODE FROM dbo.CM_M_CUST WHERE CUST_TYPE=?))
-            GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.MAINT_TAG""", fr, to, fr, to, ct)
-        # 자재별 태그 버킷
-        mv = {}   # mat -> {gagong,sagub,adj,etc,ipgo_pu,netmv}
-        for mat, tag, q in cu.fetchall():
-            m = _U(mat); tg = str(tag or "").strip(); q = float(q or 0)
-            d = mv.setdefault(m, {"gagong": 0.0, "sagub": 0.0, "adj": 0.0, "etc": 0.0, "ipgo_pu": 0.0, "netmv": 0.0})
-            if tg == "3":   # 기초행: 이동 아님, 순증서 제외
-                continue
-            d["netmv"] += q
-            if tg == "B":   d["gagong"] += -q      # 가공출고이동(소비)
-            elif tg == "5": d["sagub"] += -q       # 사급출고
-            elif tg in ("1", "2"): d["adj"] += q   # 조정
-            elif tg in _IN_TAGS:   d["ipgo_pu"] += q
-            else:           d["etc"] += -q         # 기타출고(4자재출고/T이동/J/R반품 등)
+        # 2) 소비·조정·순이동 — ★전 코드 스캔(변형코드 포함) 후 base 집계해야 정확.
+        #    (소비가 매입코드와 다른 변형코드로 잡히므로 type6-매입코드 스코프 금지.)
+        #    가공출고(B)·사급출고(5)·조정(1,2)·전업체매입(9SHGC)·순이동(tag≠3). CASE 집계, GROUP BY mat.
+        cu.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat,
+            SUM(CASE WHEN MAINT_TAG='B' THEN -CONVERT(float,ISNULL(MAINT_QTY,0)) ELSE 0 END) gagong,
+            SUM(CASE WHEN MAINT_TAG='5' THEN -CONVERT(float,ISNULL(MAINT_QTY,0)) ELSE 0 END) sagub,
+            SUM(CASE WHEN MAINT_TAG IN ('1','2') THEN CONVERT(float,ISNULL(MAINT_QTY,0)) ELSE 0 END) adj,
+            SUM(CASE WHEN MAINT_TAG IN ('9','S','C','G','H') THEN CONVERT(float,ISNULL(MAINT_QTY,0)) ELSE 0 END) ipgo_all,
+            SUM(CASE WHEN MAINT_TAG='3' THEN 0 ELSE CONVERT(float,ISNULL(MAINT_QTY,0)) END) netmv
+          FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD BETWEEN ? AND ?
+          GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", fr, to)
+        mv = {}
+        for mat, gag, sag, adj, ipgo, netmv in cu.fetchall():
+            mv[_U(mat)] = {"gagong": float(gag or 0), "sagub": float(sag or 0), "adj": float(adj or 0),
+                           "ipgo_all": float(ipgo or 0), "netmv": float(netmv or 0)}
+        # 전업체 수입(_C, DIVISION=P) — 순이동에 합산
+        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT_C WHERE MAINT_YMD BETWEEN ? AND ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", fr, to)
+        imp_all = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
 
         # 3) 리시빙(참고) — 이 품번이 LG로 직접 나간 실적
         cu.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it, SUM(CONVERT(float,ISNULL(RECV_QTY,0))) q FROM dbo.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr, to)
@@ -85,21 +81,24 @@ def _build(ct, fr, to):
             if _U(v) and _U(b): v2b[_U(v)] = _U(b)
         def base(m): return v2b[m] if m in v2b else (m.split("-")[0] if "-" in m else m)
 
-        # 5) base로 접어 결합
+        # 5) base로 접어 결합. ★items 키(base)는 type6 매입 있는 것만(buy_rows 기준). 소비/순이동은 전 변형코드에서 base로 합산.
         items = {}
-        def _it(k): return items.setdefault(k, {"item": k, "buy_q": 0.0, "buy_amt": 0.0, "imp_q": 0.0,
-                                                 "gagong": 0.0, "sagub": 0.0, "adj": 0.0, "etc": 0.0,
+        def _it(k): return items.setdefault(k, {"item": k, "buy_q": 0.0, "buy_amt": 0.0,   # buy_q=type6 매입(업체분)
+                                                 "buy_all": 0.0, "gagong": 0.0, "sagub": 0.0, "adj": 0.0, "netmv": 0.0,
                                                  "recv": 0.0, "vendors": {}, "raw_codes": set()})
         for mat, cc, cnm, q, amt, imp in buy_rows:
             k = base(mat); d = _it(k)
-            d["buy_q"] += q; d["buy_amt"] += amt; d["imp_q"] += imp; d["raw_codes"].add(mat)
+            d["buy_q"] += q; d["buy_amt"] += amt; d["raw_codes"].add(mat)
             v = d["vendors"].setdefault(cc, {"code": cc, "name": cnm, "q": 0.0, "amt": 0.0})
             v["q"] += q; v["amt"] += amt
-        for mat, d0 in mv.items():
+        for mat, d0 in mv.items():                     # 전 변형코드 소비/이동 → base
             k = base(mat)
             if k in items:
                 items[k]["gagong"] += d0["gagong"]; items[k]["sagub"] += d0["sagub"]
-                items[k]["adj"] += d0["adj"]; items[k]["etc"] += d0["etc"]
+                items[k]["adj"] += d0["adj"]; items[k]["buy_all"] += d0["ipgo_all"]; items[k]["netmv"] += d0["netmv"]
+        for mat, q in imp_all.items():                 # 전업체 수입 → base(총매입·순증)
+            k = base(mat)
+            if k in items: items[k]["buy_all"] += q; items[k]["netmv"] += q
         for mat, q in recv.items():
             k = base(mat)
             if k in items: items[k]["recv"] += q
@@ -108,26 +107,26 @@ def _build(ct, fr, to):
         cu.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM PARTNER_ERP_TEST3.nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
         nm = {_U(a): b for a, b in cu.fetchall()}
 
-        # 6) 순증·흐름·플래그
+        # 6) 순증·흐름·플래그. ★순증=순이동(netmv, 전코드 전태그≠3)=진짜 재고변화. 총매입=전업체 매입(base).
         out = []
         for k, d in items.items():
-            buy, gag, sag, adj, etc, rv = d["buy_q"], d["gagong"], d["sagub"], d["adj"], d["etc"], d["recv"]
-            up = d["buy_amt"] / buy if buy else 0.0
-            consume = gag + sag + etc                 # 총 소비/출고
-            net = buy + adj - consume                 # 순증(재고변화)
+            buy6, buyall, gag, sag, adj, rv = d["buy_q"], d["buy_all"], d["gagong"], d["sagub"], d["adj"], d["recv"]
+            up = d["buy_amt"] / buy6 if buy6 else 0.0
+            net = d["netmv"]                          # 순증(재고변화, 전코드 순이동)
+            consume = gag + sag
             # 흐름유형
-            if sag > buy * 0.3: flow = "사급재출고형"
-            elif rv > buy * 0.3: flow = "직납"
+            if sag > buyall * 0.3: flow = "사급재출고형"
+            elif rv > buyall * 0.3: flow = "직납"
             elif len(d["vendors"]) > 1: flow = "다업체소싱"
             else: flow = "컴포넌트(가공소비)"
             flags = []
-            if consume <= 0 and buy > 0: flags.append("소비없음")
-            if net > 0 and buy > 0 and net > buy * 0.2 and net * up > 3_000_000: flags.append("순증과다")
-            if sag > buy * 1.05: flags.append("사급>매입")
+            if consume <= 0 and buyall > 0: flags.append("소비없음")
+            if net > 0 and buyall > 0 and net > buyall * 0.2 and net * up > 3_000_000: flags.append("순증과다")
+            if sag > buyall * 1.05: flags.append("사급>매입")
             out.append({
                 "item": k, "name": nm.get(k, ""),
-                "buy_q": round(buy), "buy_amt": round(d["buy_amt"]), "imp_q": round(d["imp_q"]),
-                "gagong": round(gag), "sagub": round(sag), "adj": round(adj), "etc": round(etc),
+                "buy_q": round(buy6), "buy_amt": round(d["buy_amt"]), "buy_all": round(buyall),
+                "gagong": round(gag), "sagub": round(sag), "adj": round(adj),
                 "consume": round(consume), "net": round(net), "net_amt": round(net * up),
                 "recv": round(rv), "flow": flow, "flags": flags,
                 "vendors": sorted(d["vendors"].values(), key=lambda x: -x["amt"]),
