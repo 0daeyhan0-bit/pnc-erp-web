@@ -206,6 +206,35 @@
 | AJR30077403 | 절삭 | 26,437 | **1,463 ★stale** | 0 | 28,175 | 27,557 | −618(가공 정상335이면 흑자권) |
 - ★esti sil.agg는 원자재/부자재/LG사급 분해가 0으로 안 채워짐(JAI_COST 합만) → 성분분해는 /api/cost/nx(cst.won/bu/sa) 사용 필요.
 
+## 5D. ★V2 재료비 계산모델 — 종합 (2026-08-22, 기록 전수분석)
+> **V2 재료비 = Σ(부품별 [단가구분 단가] × 소요량) + Σ(구매 동부품 LME차액) + 용접봉(공정종속 재료비)**. 재료비=base(최말단 leaf 단가합)+LME(전서브트리 별도순회). BOM=CS_M_ITEM_BOM(=nx.bom_line 미러). 중량=(외경−두께)×두께×π×길이×비중/1e6.
+
+| 부품 유형 | 판정(make_type/INNER_PROD/cost_gubun/gubun1) | 재료비 단가 | 소스 | 유효일자 | 상태 |
+|---|---|---|---|---|---|
+| **원소재·사급전환(3)** | INNER=1 & cg='3', gubun1=사급 | 소재단가=**LG사급가**×중량 | price_metal.std | 월⚠ | ✅정확·8/6미표현 |
+| **원소재·직거래(3)** | INNER=1 & cg='3', gubun1=직거래 | ❓직거래 인정가 vs price_metal | **lg_lme_costtable(정본) vs price_metal(현엔진)** | 월 | ⚠**R-2 갭** |
+| **LG 사급부품(1)** | INNER=0 (★엔진 사급단가 독립분기 없음) | ❓사급단가 | ❓미특정 | ❓ | ⚠**R-4 갭** |
+| **매입부품(2)** | INNER=0, mk∈(2/3) | 구매단가×수량 | price_item('매입') | 일✅ | ✅as-of·통화·거래처 |
+| **용접봉(2)** | sgroup=910, RAC | 용접봉단가×[Σ관경 use_qty×1.5] | proc_weld(←CS use_qty) | — | ✅공정종속 43/43 |
+| **사내제작 SUB** | INNER=1, mk='1'(또는 ''+has_gagong) | 하위 재귀전개 | CS_M_ITEM_BOM | — | ✅cg3fix |
+| **LME 사급차액** | INNER=0 & 동부품(중량>0·metal·in_cust)·lme_except≠1·루트/자식 cg≠'5' | (std−partner)×중량×qty | price_metal std/partner | 월 | ✅13/13 diff0 |
+
+**핵심 규칙**: cost_gubun='3' 저장이어도 **INNER_PROD=0이면 동적 '2'(구매단가)** — INNER_PROD 우선. 전개경계=INNER=0 or cg='5' 정지 / INNER=1 전개(mk='1'이면 cg무관).
+**★단가구분1(사급단가)은 현재 엔진에 독립 분기가 없음** = R-4 핵심 갭.
+**직거래 재료비 소스 불일치**(엔진 price_metal vs 정본 Cost Table=lg_lme_costtable) = R-2 핵심 갭.
+
+### V2 남은 검증과제 (사용자 확인 대기)
+1. **R-4** 단가구분1(LG 사급부품) 소스 테이블·유효일자 특정
+2. **R-2** 직거래 재료비 = price_metal vs lg_lme_costtable(Cost Table 정본) 일치 검증
+3. **R-3** 원소재 단가 일단위 유효일자 재설계(8/6 mid-month)
+4. lg_settle_unit 다월(2601~2608) 적재 여부(현 2606만)
+5. make_type='2' 정의 확정(외주가공 vs 유상사급) + 3유형 처리규칙
+6. 설치 Assy 3개 사급 컴포넌트 데이터 오류 여부
+
+### 기록보정
+- ⚠ `_schema/METAL_UNIT_PRICE_SAGUB_SOURCE.md` durable 파일 **실재하지 않음**(메모리 slug만 존재). 필요시 재생성.
+- 산식정본 = `_legacy_analysis/SP_CS_견적서_실원가용_250910.sql`(987줄)·`LEGACY_COST_ALGORITHM.md`.
+
 ## 6. 결정 로그 (담당 판단 — 하나씩 확정)
 
 | 일자 | 항목 | 결정 | 사유 |
