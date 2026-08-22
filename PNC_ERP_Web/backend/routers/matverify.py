@@ -162,12 +162,13 @@ def _build(ct, fr, to):
             if sag > buyall * 1.05: flags.append("사급>매입")
             out.append({
                 "item": k, "name": nm.get(k, ""),
+                "beg": round(stock - net),   # 기초재고(조회 시작 전) = 실재고 − 순증
                 "buy_q": round(prim), "buy_amt": round(d["prim_amt"]), "buy_all": round(buyall), "other_q": round(other),
                 "gagong": round(gagong), "jiknap": round(jiknap), "sagub": round(sag), "adj": round(adj),
                 "consume": round(consume), "net": round(net), "net_amt": net_amt, "stock": round(stock),
                 "recv": round(rv), "flow": flow, "flags": flags,
                 "vendors": sorted(d["vendors"].values(), key=lambda x: -x["q"]),
-                "n_codes": len(d["raw_codes"]), "raws": sorted(d["raw_codes"]),
+                "n_codes": len(d["raw_codes"]),
             })
         out.sort(key=lambda x: -x["net_amt"])
         return {"ct": ct, "fr": fr, "to": to, "count": len(out), "rows": out}
