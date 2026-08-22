@@ -706,27 +706,58 @@ SCREEN.gagongmove580=(c)=>{
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
+  // 레거시 일자헤더 = 일자+요일(예 "22토"), 토=파랑·일=빨강 (생산계획추가입력 wlab/wke와 동일)
+  const wlab=y=>{if(!y||y.length<6)return dcol(y);const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return `${y.slice(4,6)}${'일월화수목금토'[dt.getDay()]}`;};
+  const wdow=y=>{if(!y||y.length<6)return -1;return new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6)).getDay();};
+  const wke=y=>{const d=wdow(y);return d===6?'color:#1b6ec2':(d===0?'color:#c0392b':'');};        // 토 파랑 / 일 빨강
+  const wkbg=y=>{const d=wdow(y);return d===6?'background:#eef4fc':(d===0?'background:#fdeeee':'');};
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  const st={from:iso(T),to:iso(new Date(T.getTime()+14*864e5)),wc:'',prPart:'',sagub:'',item:'',part:'',mv:'이동필요',gigan:14,
+  const st={from:iso(T),to:iso(new Date(T.getTime()+10*864e5)),wc:'',prPart:'',sagub:'',item:'',part:'',mv:'이동필요',gigan:10,
             gubun:'이동계획',confirm:'전체',   // gubun: 이동계획(매트릭스) / 이동전표(발행목록)
             dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,msg:'',exp:new Set(),
-            sel:new Set(),optParts:[],optSagubs:[],sheetRows:[],sheetCnt:0};   // sel = 선택한 셀 키("행i:날짜") — 이동처리 팝업으로 넘김
+            sel:new Set(),optParts:[],optSagubs:[],sheetRows:[],sheetAll:[],sheetCnt:0,
+            all:[]};   // all = 서버에서 받은 원본(필터 전). sel = 선택한 셀 키("행i:날짜")
   const loadOpts=async()=>{try{const d=await(await fetch(`${API}/api/gagong/move580/opts`)).json();
     st.optParts=d.parts||[];st.optSagubs=d.sagubs||[];}catch(e){}};
+  // ★서버조회는 기간/가공창고/생산파트/사급업체가 바뀔 때만. 도번·자도번·이동필요는 받아둔 데이터로 즉시 필터
+  //   (레거시도 조회 1회 후 필터는 즉답 — 2026-08-22 사용자요청).
+  const applyFilter=()=>{
+    const it=st.item.trim().toUpperCase(), pt=st.part.trim().toUpperCase();
+    let rows=st.all;
+    if(it) rows=rows.filter(r=>(r.assy||'').toUpperCase().includes(it));
+    if(pt) rows=rows.filter(r=>(r.jado||'').toUpperCase().includes(pt));
+    if(st.mv==='이동필요') rows=rows.filter(r=>r.need>0);
+    else if(st.mv==='이동완료') rows=rows.filter(r=>r.need<=0);
+    st.rows=rows; st.cnt=rows.length;
+    st.need_sum=rows.reduce((s,r)=>s+(+r.need||0),0);
+    st.moved_sum=rows.reduce((s,r)=>s+(+r.moved||0),0);
+    st.dates=[...new Set(rows.flatMap(r=>Object.keys(r.days||{})))].sort();
+    st.exp.clear(); st.sel.clear();
+  };
   const load=async()=>{
     if(st.gubun==='이동전표')return loadSheets();
     st.loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:st.prPart,sagub:st.sagub,item:st.item,part:st.part,mv:st.mv,limit:2500});
+    // mv(이동필요)는 서버에 안 넘긴다 — 클라이언트 필터로 즉시 전환하기 위해 항상 '전체'로 받아둔다.
+    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:st.prPart,sagub:st.sagub,mv:'전체',limit:2500});
     try{const r=await fetch(`${API}/api/gagong/move580?${qs}`);const d=await r.json();
-      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.plan_sum=d.plan_sum||0;st.need_sum=d.need_sum||0;st.moved_sum=d.moved_sum||0;st.note=d.note||'';st.msg='';st.exp.clear();st.sel.clear();}
-    catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.rows=[];st.cnt=0;}
+      st.all=d.rows||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';applyFilter();}
+    catch(e){st.msg='백엔드 연결 실패';st.all=[];st.dates=[];st.rows=[];st.cnt=0;}
     st.loading=false;draw();};
+  const applySheetFilter=()=>{
+    const it=st.item.trim().toUpperCase(), pt=st.part.trim().toUpperCase();
+    let rows=st.sheetAll;
+    if(it) rows=rows.filter(r=>(r.assy||'').toUpperCase().includes(it));
+    if(pt) rows=rows.filter(r=>(r.mat||'').toUpperCase().includes(pt));
+    if(st.confirm==='미확정') rows=rows.filter(r=>!r.confirmed);
+    else if(st.confirm==='확정') rows=rows.filter(r=>r.confirmed);
+    st.sheetRows=rows; st.sheetCnt=rows.length;
+  };
   const loadSheets=async()=>{st.loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,item:st.item,part:st.part,confirm:st.confirm,limit:2500});
+    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,confirm:'전체',limit:2500});
     try{const r=await fetch(`${API}/api/gagong/move580/sheets?${qs}`);const d=await r.json();
-      st.sheetRows=d.rows||[];st.sheetCnt=d.cnt||0;st.msg='';}
-    catch(e){st.msg='백엔드 연결 실패';st.sheetRows=[];st.sheetCnt=0;}
+      st.sheetAll=d.rows||[];st.msg='';applySheetFilter();}
+    catch(e){st.msg='백엔드 연결 실패';st.sheetAll=[];st.sheetRows=[];st.sheetCnt=0;}
     st.loading=false;draw();};
   const CLR={done:'#66bb6a',print:'#333',part:'#ffd54f'};   // 초록/검정/노랑
   const planGridHtml=()=>{
@@ -739,7 +770,7 @@ SCREEN.gagongmove580=(c)=>{
       <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none"><thead><tr>
        <th>SEQ</th><th>최종납품처</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
        <th class="num">이동전표발행</th><th class="num">이동필요</th><th class="num">출하</th><th class="num">ASSY재고</th><th class="num">당일이전</th>
-       ${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
+       ${dates.map(d=>`<th class="num" style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
@@ -752,10 +783,10 @@ SCREEN.gagongmove580=(c)=>{
         <td class="num"${r.assy_stock?'':' style="color:#dfe6ef"'}>${r.assy_stock?nf(r.assy_stock):'·'}</td>
         <td class="num"${r.prior?'':' style="color:#dfe6ef"'}>${r.prior?nf(r.prior):'·'}</td>
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,pr=(r.printday&&r.printday[d])||0,stt=(r.cellst&&r.cellst[d])||'';
-          if(!plan)return `<td class="num mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef">·</td>`;
+          if(!plan)return `<td class="num mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const bg=CLR[stt]||''; const fg=stt==='print'?'#fff':(stt?'#222':'#333');
           const key=`${i}:${d}`, on=st.sel.has(key);
-          return `<td class="num mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;background:${bg};color:${fg};font-weight:700${on?';outline:2px solid #1c47a0;outline-offset:-2px':''}">${nf(done||pr||0)}/${nf(plan)}</td>`;}).join('')}</tr>
+          return `<td class="num mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg}`:wkbg(d)};color:${fg};font-weight:700${on?';outline:2px solid #1c47a0;outline-offset:-2px':''}">${nf(done||pr||0)}/${nf(plan)}</td>`;}).join('')}</tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
       ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="7">합계 (${nf(st.cnt)}행)</td>
@@ -820,18 +851,23 @@ SCREEN.gagongmove580=(c)=>{
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      ${isSheet?sheetGridHtml():planGridHtml()}`;
     const g=id=>c.querySelector(id);
+    // 서버 재조회 = 기간·가공창고·생산파트·사급업체 변경 시에만. 그 외(도번/자도번/이동필요/입고확인)는 즉시 클라이언트 필터.
+    const refilter=()=>{isSheet?applySheetFilter():applyFilter();draw();};
     g('#mv-search').onclick=()=>{st.from=g('#mv-from').value;st.to=g('#mv-to').value;
       if(!isSheet){st.wc=g('#mv-wc').value.trim();st.prPart=g('#mv-prpart').value.trim();st.sagub=g('#mv-sagub').value.trim();}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
     g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+st.gigan*864e5));g('#mv-search').click();};
     c.querySelectorAll('input[name=mv-gubun]').forEach(rd=>rd.onchange=()=>{st.gubun=rd.value;load();});
-    ['#mv-item','#mv-part'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#mv-search').click();});
+    ['#mv-item','#mv-part'].forEach(id=>{const el=g(id);
+      el.oninput=()=>{st.item=g('#mv-item').value;st.part=g('#mv-part').value;refilter();
+        const f=c.querySelector(id);if(f){f.focus();try{f.setSelectionRange(f.value.length,f.value.length);}catch(e){}}};
+      el.onkeyup=e=>{if(e.key==='Enter')g('#mv-search').click();};});
     if(isSheet){
-      c.querySelectorAll('input[name=mv-cf]').forEach(rd=>rd.onchange=()=>{st.confirm=rd.value;load();});
+      c.querySelectorAll('input[name=mv-cf]').forEach(rd=>rd.onchange=()=>{st.confirm=rd.value;refilter();});
       c.querySelectorAll('.sheet-print').forEach(btn=>btn.onclick=()=>printMoveSheets(+btn.dataset.g,+btn.dataset.g));
       return;
     }
-    c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;load();});
+    c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;refilter();});
     ['#mv-wc','#mv-prpart','#mv-sagub'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
     c.querySelectorAll('.jado-cell').forEach(el=>el.onclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
     // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현) — mousedown 시작, mouseover로 사각영역 확장, mouseup 종료.

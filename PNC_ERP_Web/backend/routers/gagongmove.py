@@ -77,46 +77,71 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
         for g in rows:
             g["jado"] = ",".join(f"{m}{{{int(v)}}}" for m, v in sorted(g["mats"].items()))
             g["matcnt"] = len(g["mats"]); g["matlist"] = list(g["mats"].keys()); del g["mats"]
-        matset = list({m for g in rows for m in g["matlist"]})
-        assyset = list({g["assy"] for g in rows})
+        matset = {m for g in rows for m in g["matlist"]}
+        assyset = {g["assy"] for g in rows}
         d6a = _d6(from_ymd) if from_ymd else None; d6b = _d6(to_ymd) if to_ymd else None
-        CH = 1000
-        # 이동완료(확정) = IN_CONFIRM_FLAG='1', 이동전표발행(미확정) = IN_CONFIRM_FLAG='0'. 둘 다 날짜별(MAINT_YMD)로 매핑.
+        # ★보조조회는 IN(수천개) 대신 "날짜/전량 조회 + 파이썬 필터"로. IN 목록이 커지면 SQL Server가
+        #   비선형으로 느려진다(2026-08-22 실측: 이동원장 IN 3.47s → 날짜조회 0.02s, 출하 1.96s → 0.06s).
+        # 이동완료(확정)=IN_CONFIRM_FLAG '1' / 이동전표발행(미확정)='0'. 날짜별(MAINT_YMD) 매핑.
         moved = {}; movedday = {}; printed = {}; printedday = {}
-        for i in range(0, len(matset), CH):
-            ck = matset[i:i + CH]; ph = ",".join("?" * len(ck))
-            for flag, bucket, dbucket in (('1', moved, movedday), ('0', printed, printedday)):
-                pr = list(ck)
-                q = (f"SELECT MAT_CODE, MAINT_YMD, SUM(CAST(MAINT_QTY AS float)) "
-                     f"FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE "
-                     f"WHERE IN_CONFIRM_FLAG='{flag}' AND MAT_CODE IN ({ph})")
-                if d6a: q += " AND MAINT_YMD>=?"; pr.append(d6a)
-                if d6b: q += " AND MAINT_YMD<=?"; pr.append(d6b)
-                q += " GROUP BY MAT_CODE, MAINT_YMD"
-                try:
-                    cur.execute(q, *pr)
-                    for rr in cur.fetchall():
-                        mat, ymd, v = rr[0], rr[1], float(rr[2] or 0)
-                        bucket[mat] = bucket.get(mat, 0.0) + v
-                        if dbucket is not None: dbucket[(mat, ymd)] = dbucket.get((mat, ymd), 0.0) + v
-                except Exception:
-                    pass
+        try:
+            q = ("SELECT MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG, SUM(CAST(MAINT_QTY AS float)) "
+                 "FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE 1=1")
+            pr = []
+            if d6a: q += " AND MAINT_YMD>=?"; pr.append(d6a)
+            if d6b: q += " AND MAINT_YMD<=?"; pr.append(d6b)
+            q += " GROUP BY MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG"
+            cur.execute(q, *pr)
+            for rr in cur.fetchall():
+                mat = str(rr[0] or "").strip()
+                if mat not in matset: continue
+                ymd, flag, v = rr[1], rr[2], float(rr[3] or 0)
+                if flag == '1':
+                    moved[mat] = moved.get(mat, 0.0) + v
+                    movedday[(mat, ymd)] = movedday.get((mat, ymd), 0.0) + v
+                else:
+                    printed[mat] = printed.get(mat, 0.0) + v
+                    printedday[(mat, ymd)] = printedday.get((mat, ymd), 0.0) + v
+        except Exception:
+            pass
         # ASSY재고 = SA_T_ITEM_STOCK(완제품 재고, 도번단위)
         assystk = {}
-        for i in range(0, len(assyset), CH):
-            ck = assyset[i:i + CH]; ph = ",".join("?" * len(ck))
+        try:
+            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+            for rr in cur.fetchall():
+                k = str(rr[0] or "").strip()
+                if k in assyset: assystk[k] = float(rr[1] or 0)
+        except Exception:
+            pass
+        # 출하 = SA_T_SALE_DTL 미출하잔(FINISH_FLAG='0'), 도번단위 근사(계획 WO 미보유 — §P4 웹구현 한계)
+        saled = {}
+        try:
+            cur.execute("SELECT ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' GROUP BY ITEM_CODE")
+            for rr in cur.fetchall():
+                k = str(rr[0] or "").strip()
+                if k in assyset: saled[k] = float(rr[1] or 0)
+        except Exception:
+            pass
+        # ★당일이전(prior, 레거시 plan_qty_00) = from_ymd 이전 계획 − 그 이전 이동완료(확정).
+        prior_plan_map = {}   # (assy,mat) -> 이전 계획합
+        prior_moved_map = {}  # mat -> 이전 이동완료합
+        if d6a:
             try:
-                cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", *ck)
-                for rr in cur.fetchall(): assystk[str(rr[0]).strip()] = float(rr[1] or 0)
+                cur.execute("""SELECT ASSY_ITEM_CODE, MAT_CODE, SUM(CAST(PART_PLAN_QTY AS float))
+                    FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT
+                    WHERE PART_PLAN_YMD<? GROUP BY ASSY_ITEM_CODE, MAT_CODE""", d6a)
+                for rr in cur.fetchall():
+                    mat = str(rr[1] or "").strip()
+                    if mat in matset: prior_plan_map[(str(rr[0] or "").strip(), mat)] = float(rr[2] or 0)
             except Exception:
                 pass
-        # 출하 = SA_T_SALE_DTL 미출하잔(FINISH_FLAG='0'), 도번단위 근사(계획 WO 미보유 — §P4 웹구현 한계, 담당확인 필요시 재정밀화)
-        saled = {}
-        for i in range(0, len(assyset), CH):
-            ck = assyset[i:i + CH]; ph = ",".join("?" * len(ck))
             try:
-                cur.execute(f"SELECT ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", *ck)
-                for rr in cur.fetchall(): saled[str(rr[0]).strip()] = float(rr[1] or 0)
+                cur.execute("""SELECT MAT_CODE, SUM(CAST(MAINT_QTY AS float))
+                    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE
+                    WHERE IN_CONFIRM_FLAG='1' AND MAINT_YMD<? GROUP BY MAT_CODE""", d6a)
+                for rr in cur.fetchall():
+                    mat = str(rr[0] or "").strip()
+                    if mat in matset: prior_moved_map[mat] = float(rr[1] or 0)
             except Exception:
                 pass
         for g in rows:
@@ -125,21 +150,12 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
             g["need"] = max(0.0, g["plan_qty"] - g["moved"])
             g["assy_stock"] = assystk.get(g["assy"], 0.0)
             g["sale"] = saled.get(g["assy"], 0.0)
-            # 당일이전(prior) = from_ymd 이전 계획 대비 완료 잔여(레거시 plan_qty_00). from_ymd 미지정 시 0.
-            g["prior"] = 0.0
             if d6a:
-                try:
-                    ph = ",".join("?" * len(g["matlist"]))
-                    cur.execute(f"""SELECT SUM(CAST(PART_PLAN_QTY AS float)) FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT
-                        WHERE ASSY_ITEM_CODE=? AND MAT_CODE IN ({ph}) AND PART_PLAN_YMD<?""", g["assy"], *g["matlist"], d6a)
-                    prior_plan = float((cur.fetchone() or [0])[0] or 0)
-                    prior_moved = 0.0
-                    for m in g["matlist"]:
-                        for (mm, ymd), v in movedday.items():
-                            if mm == m and ymd < d6a: prior_moved += v
-                    g["prior"] = max(0.0, prior_plan - prior_moved)
-                except Exception:
-                    g["prior"] = 0.0
+                pp = sum(prior_plan_map.get((g["assy"], m), 0.0) for m in g["matlist"])
+                pm = sum(prior_moved_map.get(m, 0.0) for m in g["matlist"])
+                g["prior"] = max(0.0, pp - pm)
+            else:
+                g["prior"] = 0.0
             # 날짜별 자/모(계획/완료/발행) — days=계획, doneday=확정완료(초록), printday=미확정발행(검정)
             # 셀상태(cellst): 'done'(계획<=완료) > 'print'(계획<=완료+발행) > ''(미착수) — 그리드가 색상 판정에 사용.
             g["doneday"] = {}; g["printday"] = {}; g["cellst"] = {}
