@@ -22,6 +22,7 @@ router = APIRouter()
 _U = lambda s: (str(s).strip().upper() if s else "")
 _CACHE = {}   # key=(ct,fr,to) -> (expiry, result)
 _IN_TAGS = ("9", "S", "C", "G", "H")   # 확정입고(매입)
+_CT_NAME = {'1': '유상사급부품', '4': '절삭원자재', '5': '설치원자재', '6': '절삭협력', '7': '절삭부자재', '8': '설치부자재', '9': '소모품', 'A': '이지링크'}
 
 
 def _digits(s, n):
@@ -39,17 +40,13 @@ def _build(ct, fr, to):
     """ct=CUST_TYPE, fr/to=YYMMDD. 업체별 실측 수불 진단 dict."""
     cn = _conn(); cu = cn.cursor()
     try:
-        # 1) 매입입고 업체×자재 (확정입고 9/S/C/G/H + 수입 _C P)
-        cu.execute("""SELECT UPPER(LTRIM(RTRIM(t.mat))) mat, t.cc, MAX(t.cnm) cnm, SUM(t.q) q, SUM(t.amt) amt, SUM(t.imp) imp FROM (
-            SELECT a.MAT_CODE mat, a.CUST_CODE cc, c.CUST_DESC cnm, CONVERT(float,ISNULL(a.MAINT_QTY,0)) q, CONVERT(float,ISNULL(a.MAINT_AMT,0)) amt, CONVERT(float,0) imp
-              FROM dbo.PU_T_STOCK_MAINT a JOIN dbo.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
-              WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ('9','S','C','G','H') AND c.CUST_TYPE=?
-            UNION ALL
-            SELECT a.MAT_CODE, a.CUST_CODE, c.CUST_DESC, CONVERT(float,ISNULL(a.MAINT_QTY,0)), CONVERT(float,ISNULL(a.MAINT_AMT,0)), CONVERT(float,ISNULL(a.MAINT_QTY,0))
-              FROM dbo.PU_T_STOCK_MAINT_C a JOIN dbo.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
-              WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.DIVISION='P' AND c.CUST_TYPE=?
-            ) t GROUP BY UPPER(LTRIM(RTRIM(t.mat))), t.cc""", fr, to, ct, fr, to, ct)
-        buy_rows = [(_U(r[0]), str(r[1]).strip(), r[2], float(r[3] or 0), float(r[4] or 0), float(r[5] or 0)) for r in cu.fetchall()]
+        # 1) 매입유형(ct) 확정입고 업체×자재 (PU 9/S/C/G/H). 수입·비협력매입은 아래서 공급원으로 별도 합류.
+        cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))) mat, a.CUST_CODE cc, MAX(c.CUST_DESC) cnm,
+              SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))) q, SUM(CONVERT(float,ISNULL(a.MAINT_AMT,0))) amt
+            FROM dbo.PU_T_STOCK_MAINT a JOIN dbo.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
+            WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ('9','S','C','G','H') AND c.CUST_TYPE=?
+            GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE""", fr, to, ct)
+        buy_rows = [(_U(r[0]), str(r[1]).strip(), r[2], float(r[3] or 0), float(r[4] or 0)) for r in cu.fetchall()]
 
         # 2) 소비·조정·순이동 — ★전 코드 스캔(변형코드 포함) 후 base 집계해야 정확.
         #    (소비가 매입코드와 다른 변형코드로 잡히므로 type6-매입코드 스코프 금지.)
@@ -66,9 +63,16 @@ def _build(ct, fr, to):
         for mat, gag, sag, adj, ipgo, netmv in cu.fetchall():
             mv[_U(mat)] = {"gagong": float(gag or 0), "sagub": float(sag or 0), "adj": float(adj or 0),
                            "ipgo_all": float(ipgo or 0), "netmv": float(netmv or 0)}
-        # 전업체 수입(_C, DIVISION=P) — 순이동에 합산
-        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT_C WHERE MAINT_YMD BETWEEN ? AND ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", fr, to)
-        imp_all = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
+        # 전업체 수입(_C, DIVISION=P) — 순이동 합산 + ★공급원 분해(업체별, XINXIANG 등 수입 주범 노출)
+        cu.execute("""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))) mat, a.CUST_CODE cc, MAX(ISNULL(c.CUST_DESC,a.CUST_CODE)) cnm,
+              SUM(CONVERT(float,ISNULL(a.MAINT_QTY,0))) q, SUM(CONVERT(float,ISNULL(a.MAINT_AMT*ISNULL(a.EXCHANGE_RATE,1),0))) amt
+            FROM dbo.PU_T_STOCK_MAINT_C a LEFT JOIN dbo.CM_M_CUST c ON a.CUST_CODE=c.CUST_CODE
+            WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE))), a.CUST_CODE""", fr, to)
+        imp_all = {}; imp_vend = []
+        for mat, cc, cnm, q, amt in cu.fetchall():
+            m = _U(mat); q = float(q or 0)
+            imp_all[m] = imp_all.get(m, 0.0) + q
+            imp_vend.append((m, str(cc).strip(), cnm, q, float(amt or 0)))
 
         # 3) 리시빙(참고) — 이 품번이 LG로 직접 나간 실적
         cu.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it, SUM(CONVERT(float,ISNULL(RECV_QTY,0))) q FROM dbo.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr, to)
@@ -91,19 +95,23 @@ def _build(ct, fr, to):
         def _it(k): return items.setdefault(k, {"item": k, "buy_q": 0.0, "buy_amt": 0.0,   # buy_q=type6 매입(업체분)
                                                  "buy_all": 0.0, "gagong": 0.0, "sagub": 0.0, "adj": 0.0, "netmv": 0.0,
                                                  "recv": 0.0, "vendors": {}, "raw_codes": set()})
-        for mat, cc, cnm, q, amt, imp in buy_rows:
+        _tn = _CT_NAME.get(ct, ct)
+        for mat, cc, cnm, q, amt in buy_rows:          # 매입유형(ct) 협력사 매입 → base가 items 키가 됨
             k = base(mat); d = _it(k)
             d["buy_q"] += q; d["buy_amt"] += amt; d["raw_codes"].add(mat)
-            v = d["vendors"].setdefault(cc, {"code": cc, "name": cnm, "q": 0.0, "amt": 0.0})
+            v = d["vendors"].setdefault(cc, {"code": cc, "name": cnm, "q": 0.0, "amt": 0.0, "tname": _tn, "kind": "협력"})
             v["q"] += q; v["amt"] += amt
-        for mat, d0 in mv.items():                     # 전 변형코드 소비/이동 → base
+        for mat, d0 in mv.items():                     # 전 변형코드 소비/이동·전업체매입 → base
             k = base(mat)
             if k in items:
                 items[k]["gagong"] += d0["gagong"]; items[k]["sagub"] += d0["sagub"]
                 items[k]["adj"] += d0["adj"]; items[k]["buy_all"] += d0["ipgo_all"]; items[k]["netmv"] += d0["netmv"]
-        for mat, q in imp_all.items():                 # 전업체 수입 → base(총매입·순증)
-            k = base(mat)
-            if k in items: items[k]["buy_all"] += q; items[k]["netmv"] += q
+        for m, cc, cnm, q, amt in imp_vend:            # ★수입 공급원 분해(XINXIANG 등) → base 공급원에 합류(tag=수입)
+            k = base(m)
+            if k in items:
+                items[k]["buy_all"] += q; items[k]["netmv"] += q
+                v = items[k]["vendors"].setdefault("IMP:" + cc, {"code": cc, "name": cnm, "q": 0.0, "amt": 0.0, "tname": "수입", "kind": "수입"})
+                v["q"] += q; v["amt"] += amt
         for mat, q in recv.items():
             k = base(mat)
             if k in items: items[k]["recv"] += q
