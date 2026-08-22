@@ -312,6 +312,8 @@
 | 2026-08-22 | Q4 lg_settle_unit(동정산 원단위) | ★사용자: **매월 갱신** | 단 실측상 nx.lg_settle_unit엔 ym=2606만 적재됨 → 다월(2601~2608) 적재 갭. 사용자 확인 예정 |
 | 2026-08-22 | Q1 make_type '2' | 사용자 판단중 | 종류별 샘플 제공(make_type2_by_group.txt): 외주/협력 in_cust(MTS·두진·중앙정밀·태영·대원·미래·이젠터·둔안·토탈솔루션 등) 전 prod_group 분포. cg 2/3/1/빈 혼재 |
 | 2026-08-22 | Q3 설치 3개 사급 | 사용자 확인중 | — |
+| 2026-08-22 | R-2 직거래 원소재 재료비 소스 | **이동평균 마감가(mat_stock_daily) 방향**(대사 추천, 사용자 검토중) | 소비원가 회계정합·매입추종 92%·일단위·이미구축. vs 확정입고(매입shock 보조) |
+| 2026-08-22 | ★음수재고/무가격 정리 시점 | **지금 원장 정리 금지 → 마이그가 소유** | 음수=레거시실적 재현(우리버그 아님). 지금 원장 손대면 마이그 재고 true-up과 이중조정·드리프트. 신규ERP 단계게이팅은 컷오버때 적용 [[newerp-stock-gating-close-lock]]. **V2는 읽기시점 fallback(avg=0/음수→소재단가/직전유효/매입가)으로 원장무변경·마이그무영향·재료비정확** |
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]

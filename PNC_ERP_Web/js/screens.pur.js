@@ -156,7 +156,7 @@ SCREEN.matverify=(c)=>{
      <div style="flex:1;min-width:0">
        <div class="summary-bar" id="mv-rhead"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr>
-         <th>품번</th><th>품명</th><th>흐름</th><th class="num">기초</th><th class="num">업체매입</th><th class="num">소요</th><th class="num">사급출고</th><th class="num">리시빙</th><th class="num">기말</th><th class="num">검토후보액</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
+         <th>품번</th><th>품명</th><th>흐름</th><th class="num">기초</th><th class="num">업체매입</th><th class="num">총매입</th><th class="num">소요</th><th class="num">사급출고</th><th class="num">리시빙</th><th class="num">기말</th><th class="num">검토후보액</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
      </div>
    </div>`;
   const renderLeft=()=>{
@@ -174,9 +174,9 @@ SCREEN.matverify=(c)=>{
     let html=its.map(r=>{
       const fl=(r.flags||[]).map(f=>`<span style="color:${flagColor(f)};font-size:10px;border:1px solid ${flagColor(f)};border-radius:3px;padding:0 3px;margin-right:2px">${esc(f)}</span>`).join('');
       const endc=r.end<0?'color:#c0392b':'';
-      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num">${won(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num">${won(r.soyo)}</td><td class="num">${won(r.sagub_out)}</td><td class="num">${won(r.recv)}</td><td class="num" style="${endc}">${won(r.end)}</td><td class="num" style="${(r.cand_over||0)>0?'color:#c0392b;font-weight:600':''}">${won(r.cand_over)}</td><td>${fl}</td></tr>`;
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num">${won(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_q)}</td><td class="num">${won(r.soyo)}</td><td class="num">${won(r.sagub_out)}</td><td class="num">${won(r.recv)}</td><td class="num" style="${endc}">${won(r.end)}</td><td class="num" style="${(r.cand_over||0)>0?'color:#c0392b;font-weight:600':''}">${won(r.cand_over)}</td><td>${fl}</td></tr>`;
     }).join('');
-    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="11" class="empty">품목 없음</td></tr>`;
+    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="12" class="empty">품목 없음</td></tr>`;
     c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 소요·사급·기초·리시빙=품목 전체</div>`;
     if(typeof attachResizers!=='undefined')attachResizers(c);
   };
@@ -185,8 +185,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','흐름','기초','업체매입','소요','사급출고','리시빙','기말','검토후보액','플래그'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.beg,r.vq,r.soyo,r.sagub_out,r.recv,r.end,r.cand_over,(r.flags||[]).join('|')])));
+    const hd=['업체','품번','품명','흐름','기초','업체매입','총매입','소요','사급출고','리시빙','기말','검토후보액','플래그'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.beg,r.vq,r.buy_q,r.soyo,r.sagub_out,r.recv,r.end,r.cand_over,(r.flags||[]).join('|')])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };
