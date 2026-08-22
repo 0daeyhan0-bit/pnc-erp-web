@@ -115,6 +115,12 @@ def _build(ct, fr, to):
         for mat, q in recv.items():
             k = base(mat)
             if k in items: items[k]["recv"] += q
+        # 기타(비협력 PU 매입) = 전업체매입(buy_all) − 협력(buy_q) − 수입. 남으면 공급원에 집계로 표시(총매입 정합).
+        for k, d in items.items():
+            imp_t = sum(v["q"] for v in d["vendors"].values() if v.get("kind") == "수입")
+            other = d["buy_all"] - d["buy_q"] - imp_t
+            if other > max(d["buy_all"] * 0.02, 100):
+                d["vendors"]["ETC"] = {"code": "", "name": "기타(비협력매입)", "q": other, "amt": 0.0, "tname": "기타", "kind": "기타"}
 
         # 품명
         cu.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM PARTNER_ERP_TEST3.nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -146,7 +152,7 @@ def _build(ct, fr, to):
                 "gagong": round(gag), "sagub": round(sag), "adj": round(adj),
                 "consume": round(consume), "net": round(net), "net_amt": net_amt,
                 "recv": round(rv), "flow": flow, "flags": flags,
-                "vendors": sorted(d["vendors"].values(), key=lambda x: -x["amt"]),
+                "vendors": sorted(d["vendors"].values(), key=lambda x: -x["q"]),
                 "n_codes": len(d["raw_codes"]),
             })
         out.sort(key=lambda x: -x["net_amt"])

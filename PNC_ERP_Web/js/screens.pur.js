@@ -119,7 +119,8 @@ SCREEN.matverify=(c)=>{
   const buildVend=()=>{
     const vm={};
     rows.forEach(r=>{(r.vendors||[]).forEach(v=>{
-      const d=vm[v.code]||(vm[v.code]={code:v.code,name:v.name,amt:0,q:0,items:[],nflag:0});
+      const key=(v.kind||'')+':'+(v.code||v.name||'');
+      const d=vm[key]||(vm[key]={vkey:key,code:v.code,name:v.name,tname:v.tname||'',kind:v.kind||'협력',amt:0,q:0,items:[],nflag:0});
       d.amt+=(+v.amt||0);d.q+=(+v.q||0);d.items.push(Object.assign({},r,{vq:+v.q||0,vamt:+v.amt||0}));
       if(r.flags&&r.flags.length)d.nflag++;
     });});
@@ -156,27 +157,29 @@ SCREEN.matverify=(c)=>{
      <div style="flex:1;min-width:0">
        <div class="summary-bar" id="mv-rhead"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr>
-         <th>품번</th><th>품명</th><th>흐름</th><th class="num">업체매입</th><th class="num">총매입</th><th class="num">가공출고</th><th class="num">사급출고</th><th class="num">조정</th><th class="num">순증</th><th class="num">순증액</th><th class="num">리시빙</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
+         <th>품번</th><th>품명</th><th>흐름</th><th class="num">업체매입</th><th class="num">총매입</th><th style="min-width:180px">공급원(전체)</th><th class="num">가공출고</th><th class="num">사급출고</th><th class="num">조정</th><th class="num">순증</th><th class="num">순증액</th><th class="num">리시빙</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
      </div>
    </div>`;
   const renderLeft=()=>{
-    let lb=vend.map(v=>`<tr data-cc="${esc(v.code)}" class="${sel===v.code?'sel':''}"><td class="cap" title="${esc(v.name)}"><b>${esc(v.name||v.code)}</b></td><td class="num">${won(v.amt)}</td><td class="num">${won(v.items.length)}</td><td class="num" style="color:${v.nflag?'#c0392b':'#999'}">${v.nflag||''}</td></tr>`).join('');
+    const kc=k=>({'수입':'#c0392b','기타':'#b8860b'}[k]||'#1c47a0');
+    let lb=vend.map(v=>`<tr data-vk="${esc(v.vkey)}" class="${sel===v.vkey?'sel':''}"><td class="cap" title="${esc(v.name)}"><b>${esc(v.name||v.code||'(기타)')}</b> <span style="font-size:9px;color:${kc(v.kind)}">${esc(v.tname||v.kind)}</span></td><td class="num">${won(v.amt)}</td><td class="num">${won(v.items.length)}</td><td class="num" style="color:${v.nflag?'#c0392b':'#999'}">${v.nflag||''}</td></tr>`).join('');
     const tot=vend.reduce((a,b)=>a+b.amt,0);
-    if(vend.length)lb+=`<tr class="grandtot"><td class="right">총계 (${won(vend.length)} 업체)</td><td class="num">${won(tot)}</td><td colspan="2"></td></tr>`;
+    if(vend.length)lb+=`<tr class="grandtot"><td class="right">총계 (${won(vend.length)} 공급처)</td><td class="num">${won(tot)}</td><td colspan="2"></td></tr>`;
     c.querySelector('#mv-lbody').innerHTML=vend.length?lb:`<tr><td colspan="4" class="empty">${esc(msg||'결과 없음')}</td></tr>`;
-    c.querySelector('#mv-lbody').querySelectorAll('tr[data-cc]').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.cc;c.querySelectorAll('#mv-lbody tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');renderRight(sel);});
+    c.querySelector('#mv-lbody').querySelectorAll('tr[data-vk]').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.vk;c.querySelectorAll('#mv-lbody tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');renderRight(sel);});
     c.querySelector('#mv-lsum').innerHTML=`<div class="s-item">업체 <b>${won(vend.length)}</b></div><div class="s-item">매입 합계 <b>${won(tot)}</b></div>`;
     if(typeof attachResizers!=='undefined')attachResizers(c);
   };
-  const renderRight=cc=>{
-    const v=vend.find(x=>x.code===cc);if(!v)return;
+  const renderRight=vk=>{
+    const v=vend.find(x=>x.vkey===vk);if(!v)return;
     const its=v.items.slice().sort((a,b)=>(b.net_amt||0)-(a.net_amt||0));
     let html=its.map(r=>{
       const fl=(r.flags||[]).map(f=>`<span style="color:${flagColor(f)};font-size:10px;border:1px solid ${flagColor(f)};border-radius:3px;padding:0 3px;margin-right:2px">${esc(f)}</span>`).join('');
       const netc=(r.net||0)>0?'color:#c0392b;font-weight:600':((r.net||0)<0?'color:#1c7c3a':'');
-      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_all)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="color:#999">${won(r.recv)}</td><td>${fl}</td></tr>`;
+      const src=(r.vendors||[]).map(v=>`<span style="color:${v.kind==='수입'?'#c0392b':(v.kind==='기타'?'#b8860b':'#1c47a0')}">${esc(v.name||v.code)}<span style="font-size:9px;color:#999">(${esc(v.tname||'')})</span> ${won(v.q)}</span>`).join(' · ');
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_all)}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="color:#999">${won(r.recv)}</td><td>${fl}</td></tr>`;
     }).join('');
-    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="12" class="empty">품목 없음</td></tr>`;
+    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="13" class="empty">품목 없음</td></tr>`;
     c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 총매입·가공출고·사급출고·순증=품목 전체(전 업체)</div>`;
     if(typeof attachResizers!=='undefined')attachResizers(c);
   };
@@ -185,8 +188,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','흐름','업체매입','총매입','가공출고','사급출고','조정','순증','순증액','리시빙','플래그'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.vq,r.buy_all,r.gagong,r.sagub,r.adj,r.net,r.net_amt,r.recv,(r.flags||[]).join('|')])));
+    const hd=['업체','품번','품명','흐름','업체매입','총매입','공급원(전체)','가공출고','사급출고','조정','순증','순증액','리시빙','플래그'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.vq,r.buy_all,(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.gagong,r.sagub,r.adj,r.net,r.net_amt,r.recv,(r.flags||[]).join('|')])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };

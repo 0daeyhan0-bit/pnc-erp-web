@@ -594,5 +594,27 @@ cg=5 직납 → 제외
 | 2026-08-22 | R-2 직거래 원소재 재료비 소스 | **이동평균 마감가(mat_stock_daily) 방향**(대사 추천, 사용자 검토중) | 소비원가 회계정합·매입추종 92%·일단위·이미구축. vs 확정입고(매입shock 보조) |
 | 2026-08-22 | ★음수재고/무가격 정리 시점 | **지금 원장 정리 금지 → 마이그가 소유** | 음수=레거시실적 재현(우리버그 아님). 지금 원장 손대면 마이그 재고 true-up과 이중조정·드리프트. 신규ERP 단계게이팅은 컷오버때 적용 [[newerp-stock-gating-close-lock]]. **V2는 읽기시점 fallback(avg=0/음수→소재단가/직전유효/매입가)으로 원장무변경·마이그무영향·재료비정확** |
 
+## §5R 협력사 BOM분리→routing 이관의 원가 반영 (2026-08-22 실측)
+
+사용자 지시: "우리는 협력사를 BOM에서 분리를 해서 routing으로 넣은 부분도 잘 반영해야해."
+
+### 실측 사실
+- **협력사 조달분리물 = `nx.routing_edge`** (42,625행). 컬럼: parent_item·child_item·seq·`gubun`·`vendor_seed`·`vendor_resolved`·`src_except`·`src_sagub`·`wc`. except_flag 은퇴 → 여기로 이관 [[newerp-routing-edge-flag-retire]].
+- **`vendor_resolved` 채움 = 7,170엣지 = src_except=1 전량**. 즉 "실제 누가 조달/제작하나"의 클린 정답이 전개제외 엣지에 담김(명진-type 상위 SUB 귀속).
+- **★원가엔진은 routing_edge를 안 읽음.** 재료비=`nx.bom_line`(외주완성 전개정지), 가공비=`nx.routing`(공정, 사내노드만). routing_edge는 **조달/계획 레이어**.
+
+### 협력사가 원가에 반영되는 실제 경로 (현행)
+- 협력사 제작 SUB = **INNER_PROD=0(외주완성)** → `_leaf_val`에서 **매입가(pur_price, cost_tag='1', cust=in_cust)로 계상**([nx_cost_engine.py:356-361]). 협력사 가공비는 그 매입가 안에 포함 → **구조상 이미 반영**(PROCUREMENT_BOM_WORKPLAN §3-C4 "무영향"과 일치).
+- 즉 routing_edge를 안 읽어도 원가 총액은 협력사 몫을 매입가로 흡수 중.
+
+### ★정확도 리스크 = 매입가의 **거래처 불일치**
+- 매입가 거래처 = **품목마스터 `in_cust`**(품목당 1개만 등록 → EXCEPT_FLAG_VENDOR_RULE의 "미래정밀로 뜸" 문제).
+- routing_edge `vendor_resolved` = 실제 협력사(명진 등). **둘이 어긋나면 매입가 단가가 틀어짐.**
+- 단 전개제외 부품은 개별 전개 안 되고 상위 명진 SUB가 통째 매입되므로, SUB의 in_cust만 맞으면 총액은 정합. **리스크는 "SUB의 in_cust가 실제 협력사와 다르게 등록된 경우"에 국한.**
+
+### V2 반영 방향 (택1, 사용자 확인 대기)
+- **(A) 검증만**: 엔진 무변경. in_cust≠vendor_resolved인 외주완성 SUB의 매입가 실단가가 실제 협력사 정산가와 맞는지 실측만. 어긋난 품목만 보고.
+- **(B) 오버라이드**: V2 래퍼가 외주완성 노드 매입가의 거래처를 `routing_edge.vendor_resolved`로 재지정(직거래 원소재 실매입가 오버라이드와 동일 패턴, 엔진 원본 무변경). 클린 nextgen 구조 반영.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
