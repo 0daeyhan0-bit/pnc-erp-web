@@ -714,13 +714,13 @@ SCREEN.gagongmove580=(c)=>{
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   // ★조회엔진 = 레거시 SP(SP_PR_가공창고_이동계획_260213) 직접호출. 기본 인자도 레거시와 동일(P2/IS0001/%).
-  const st={from:iso(T),to:iso(new Date(T.getTime()+10*864e5)),wc:'P2',prPart:'',puPart:'IS0001',sagub:'',item:'',part:'',mv:'이동필요',gigan:10,
+  const st={from:iso(T),to:iso(new Date(T.getTime()+10*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:10,
             gubun:'이동계획',confirm:'전체',   // gubun: 이동계획(매트릭스) / 이동전표(발행목록)
             dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,loaded:false,msg:'',exp:new Set(),
-            sel:new Set(),optParts:[],optSagubs:[],sheetRows:[],sheetAll:[],sheetCnt:0,
+            sel:new Set(),optParts:[],optDests:[],sheetRows:[],sheetAll:[],sheetCnt:0,
             all:[],allDates:[]};   // all = 서버에서 받은 원본(필터 전). sel = 선택한 셀 키("행i:날짜")
   const loadOpts=async()=>{try{const d=await(await fetch(`${API}/api/gagong/move580/opts`)).json();
-    st.optParts=d.parts||[];st.optSagubs=d.sagubs||[];}catch(e){}};
+    st.optParts=d.parts||[];}catch(e){}};   // 자재파트용. 납품처 목록은 조회결과(d.dests)에서 만든다
   // ★서버조회는 기간/가공창고/생산파트/사급업체가 바뀔 때만. 도번·자도번·이동필요는 받아둔 데이터로 즉시 필터
   //   (레거시도 조회 1회 후 필터는 즉답 — 2026-08-22 사용자요청).
   const applyFilter=()=>{
@@ -728,10 +728,8 @@ SCREEN.gagongmove580=(c)=>{
     let rows=st.all;
     if(it) rows=rows.filter(r=>(r.assy||'').toUpperCase().includes(it));
     if(pt) rows=rows.filter(r=>(r.jado||'').toUpperCase().includes(pt));
-    // ★생산파트·사급업체도 클라이언트 필터(SP가 해당 인자를 무시하므로 결과에서 거른다 = 레거시와 동일 구조)
-    //   생산파트 = gole_proc(GOLE_GAGONG_PROC_CODE). 납품처를 정하는 값이라 사급건은 자연히 제외된다.
-    if(st.prPart) rows=rows.filter(r=>r.gole_proc===st.prPart);
-    if(st.sagub) rows=rows.filter(r=>r.gole_cust===st.sagub);
+    // ★납품처(생산라인+사급업체 통합)도 클라이언트 필터 — SP가 해당 인자를 무시하므로 결과에서 거른다.
+    if(st.dest) rows=rows.filter(r=>r.dest_key===st.dest);
     if(st.mv==='이동필요') rows=rows.filter(r=>r.need>0);
     else if(st.mv==='이동완료') rows=rows.filter(r=>r.need<=0);
     st.rows=rows; st.cnt=rows.length;
@@ -744,10 +742,12 @@ SCREEN.gagongmove580=(c)=>{
     if(st.gubun==='이동전표')return loadSheets();
     st.loading=true;draw();
     // mv(이동필요)는 서버에 안 넘긴다 — 클라이언트 필터로 즉시 전환하기 위해 항상 '전체'로 받아둔다.
-    // 생산파트·사급업체·이동필요는 넘기지 않는다(클라이언트 즉시필터). 서버는 기간/가공창고/자재파트만.
+    // 납품처·이동필요는 넘기지 않는다(클라이언트 즉시필터). 서버는 기간/가공창고/자재파트만.
     const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:'%',pu_part:st.puPart,sagub:'',mv:'전체',limit:2500});
     try{const r=await fetch(`${API}/api/gagong/move580?${qs}`);const d=await r.json();
-      st.all=d.rows||[];st.allDates=d.dates||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';st.loaded=true;applyFilter();}
+      st.all=d.rows||[];st.allDates=d.dates||[];st.optDests=d.dests||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';st.loaded=true;
+      if(st.dest&&!st.optDests.some(o=>o.key===st.dest))st.dest='';   // 새 조회에 없는 납품처면 해제
+      applyFilter();}
     catch(e){st.msg='백엔드 연결 실패';st.all=[];st.allDates=[];st.dates=[];st.rows=[];st.cnt=0;}
     st.loading=false;draw();};
   const applySheetFilter=()=>{
@@ -838,9 +838,8 @@ SCREEN.gagongmove580=(c)=>{
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">기준일자</label><input class="inp" type="date" id="mv-from" value="${st.from}"> ~ <input class="inp" type="date" id="mv-to" value="${st.to}">
        <label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"${isSheet?' disabled':''}><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
-       <label class="tl">생산파트</label><select class="inp" id="mv-prpart" style="width:150px"${isSheet?' disabled':''}><option value="">% 전체</option>${st.optParts.map(o=>`<option value="${esc(o.code)}"${st.prPart===o.code?' selected':''}>${esc(o.code)} ${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl" title="생산(라인)과 사급업체는 같은 축 — 조회결과의 실제 납품처를 중복제거해 생산 먼저, 그 뒤 업체 순으로">납품처</label><select class="inp" id="mv-dest" style="width:180px"${isSheet?' disabled':''}><option value="">% 전체</option>${st.optDests.map(o=>`<option value="${esc(o.key)}"${st.dest===o.key?' selected':''}>${o.kind==='C'?'· ':''}${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl" title="레거시 as_pu_part_code (입고 자재창고)">자재파트</label><select class="inp" id="mv-pupart" style="width:130px"${isSheet?' disabled':''}>${st.optParts.map(o=>`<option value="${esc(o.code)}"${st.puPart===o.code?' selected':''}>${esc(o.code)} ${esc(o.nm)}</option>`).join('')}</select>
-       <label class="tl">사급업체</label><select class="inp" id="mv-sagub" style="width:150px"${isSheet?' disabled':''}><option value="">전체업체</option>${st.optSagubs.map(o=>`<option value="${esc(o.code)}"${st.sagub===o.code?' selected':''}>${esc(o.nm)}(${esc(o.code)})</option>`).join('')}</select>
        <div class="spacer"></div>
        ${isSheet?'':'<button class="btn" id="mv-move" style="background:#1c47a0;color:#fff">🚚 가공자재 이동처리</button>'}
      </div>
@@ -869,8 +868,8 @@ SCREEN.gagongmove580=(c)=>{
     // 서버 재조회 = 기간·가공창고·생산파트·사급업체 변경 시에만. 그 외(도번/자도번/이동필요/입고확인)는 즉시 클라이언트 필터.
     const refilter=()=>{isSheet?applySheetFilter():applyFilter();draw();};
     g('#mv-search').onclick=()=>{st.from=g('#mv-from').value;st.to=g('#mv-to').value;
-      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.prPart=g('#mv-prpart').value.trim();
-        st.puPart=g('#mv-pupart').value.trim();st.sagub=g('#mv-sagub').value.trim();}
+      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();
+        st.puPart=g('#mv-pupart').value.trim();}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
     g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+st.gigan*864e5));g('#mv-search').click();};
     c.querySelectorAll('input[name=mv-gubun]').forEach(rd=>rd.onchange=()=>{st.gubun=rd.value;draw();});   // 전환만, 조회는 버튼으로
@@ -886,8 +885,7 @@ SCREEN.gagongmove580=(c)=>{
     c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;refilter();});
     // 가공창고·자재파트 = SP 인자라 재조회 / 생산파트·사급업체 = 결과필터라 즉시반영
     ['#mv-wc','#mv-pupart'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
-    g('#mv-prpart').onchange=()=>{st.prPart=g('#mv-prpart').value.trim();refilter();};
-    g('#mv-sagub').onchange=()=>{st.sagub=g('#mv-sagub').value.trim();refilter();};
+    g('#mv-dest').onchange=()=>{st.dest=g('#mv-dest').value.trim();refilter();};   // 납품처 = 결과필터(즉시)
     c.querySelectorAll('.jado-cell').forEach(el=>el.ondblclick=e=>{e.stopPropagation();const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
     // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현).
     //   재렌더(draw)하면 DOM이 새로 만들어져 mouseover가 끊긴다 → 드래그 중에는 style만 갱신(2026-08-22 수정).

@@ -114,33 +114,42 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
             "prior_color": _pbcolor(r.get("color_00")),
             "stock": _f(r.get("stock_qty")), "pr_stock": _f(r.get("pr_stock_qty")),
             "days": days, "doneday": done, "colorday": colors,
-            "gagong_proc": (r.get("gagong_proc_code") or "").strip(),   # 생산파트(화면 필터 대상)
+            "gagong_proc": (r.get("gagong_proc_code") or "").strip(),
             "gole_proc": (r.get("GOLE_GAGONG_PROC_CODE") or "").strip(),
             "gole_cust": (r.get("GOLE_IN_CUST_CODE") or "").strip(),
             "mat_work": (r.get("mat_work_code") or "").strip(),
             "work_code": (r.get("work_code") or "").strip(),
         }
+        # ★납품처 = 생산(라인)과 사급업체가 같은 축이라 하나로 합친다(2026-08-22 사용자요청).
+        #   키는 'P:코드'(생산라인) / 'C:코드'(사급업체) 로 구분해 동명이인 충돌을 막는다.
+        if g["gole_cust"]:
+            g["dest_key"] = "C:" + g["gole_cust"]; g["dest_kind"] = "C"
+        elif g["gole_proc"]:
+            g["dest_key"] = "P:" + g["gole_proc"]; g["dest_kind"] = "P"
+        else:
+            g["dest_key"] = ""; g["dest_kind"] = ""
         rows.append(g)
 
     it = item.strip().upper(); pt = part.strip().upper()
     if it: rows = [r for r in rows if it in (r["assy"] or "").upper()]
     if pt: rows = [r for r in rows if pt in (r["jado"] or "").upper()]
-    # ★생산파트/사급업체는 SP 인자로 넘겨도 SP가 무시한다(실측: S5/S1/% 모두 384행 동일).
-    #   레거시도 화면단에서 거르는 구조 → 결과에서 필터.
-    #   ★생산파트 = GOLE_GAGONG_PROC_CODE(조달가공공정=납품처를 정하는 값). gagong_proc_code 로 거르면
-    #     사급건(GOLE_GAGONG_PROC_CODE 공란, 납품처=업체명)이 섞여 들어온다.
-    #     실측 2026-08-22: S5 기준 gagong_proc_code=48행(대원산업 1건 혼입) vs GOLE_=47행(전부 01라인(용접)).
-    pp = (pr_part or "").strip()
-    if pp and pp != "%": rows = [r for r in rows if r["gole_proc"] == pp]
-    sg = (sagub or "").strip()
-    if sg: rows = [r for r in rows if r["gole_cust"] == sg]
+    # ★납품처 목록 = 조회결과에서 중복제거. 생산(라인) 먼저 → 사급업체 순, 각 그룹은 이름순.
+    #   (SP 는 as_pr_part_code/as_sagub_cust_code 인자를 무시하므로 필터는 결과에서 한다 = 레거시와 동일 구조)
+    seen = {}
+    for r in rows:
+        k = r["dest_key"]
+        if k and k not in seen:
+            seen[k] = {"key": k, "nm": r["dest"], "kind": r["dest_kind"]}
+    dests = sorted(seen.values(), key=lambda x: (0 if x["kind"] == "P" else 1, x["nm"]))
+    dk = (pr_part or "").strip()
+    if dk and dk != "%": rows = [r for r in rows if r["dest_key"] == dk]
     m = mv.strip()
     if m == "이동필요": rows = [r for r in rows if r["need"] > 0]
     elif m == "이동완료": rows = [r for r in rows if r["need"] <= 0]
     capped = len(rows) > int(limit)
     rows = rows[:int(limit)]
     note = ("⚠ 상위 %d건만 표시 — 조건으로 좁혀주세요." % limit) if capped else ""
-    return {"dates": dates, "rows": rows, "cnt": len(rows),
+    return {"dates": dates, "rows": rows, "cnt": len(rows), "dests": dests,
             "plan_sum": sum(r["plan_qty"] for r in rows),
             "need_sum": sum(r["need"] for r in rows),
             "moved_sum": sum(r["moved"] for r in rows), "note": note}
