@@ -713,11 +713,12 @@ SCREEN.gagongmove580=(c)=>{
   const wkbg=y=>{const d=wdow(y);return d===6?'background:#eef4fc':(d===0?'background:#fdeeee':'');};
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  const st={from:iso(T),to:iso(new Date(T.getTime()+10*864e5)),wc:'',prPart:'',sagub:'',item:'',part:'',mv:'이동필요',gigan:10,
+  // ★조회엔진 = 레거시 SP(SP_PR_가공창고_이동계획_260213) 직접호출. 기본 인자도 레거시와 동일(P2/IS0001/%).
+  const st={from:iso(T),to:iso(new Date(T.getTime()+10*864e5)),wc:'P2',prPart:'',puPart:'IS0001',sagub:'',item:'',part:'',mv:'이동필요',gigan:10,
             gubun:'이동계획',confirm:'전체',   // gubun: 이동계획(매트릭스) / 이동전표(발행목록)
-            dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,msg:'',exp:new Set(),
+            dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,loaded:false,msg:'',exp:new Set(),
             sel:new Set(),optParts:[],optSagubs:[],sheetRows:[],sheetAll:[],sheetCnt:0,
-            all:[]};   // all = 서버에서 받은 원본(필터 전). sel = 선택한 셀 키("행i:날짜")
+            all:[],allDates:[]};   // all = 서버에서 받은 원본(필터 전). sel = 선택한 셀 키("행i:날짜")
   const loadOpts=async()=>{try{const d=await(await fetch(`${API}/api/gagong/move580/opts`)).json();
     st.optParts=d.parts||[];st.optSagubs=d.sagubs||[];}catch(e){}};
   // ★서버조회는 기간/가공창고/생산파트/사급업체가 바뀔 때만. 도번·자도번·이동필요는 받아둔 데이터로 즉시 필터
@@ -732,17 +733,17 @@ SCREEN.gagongmove580=(c)=>{
     st.rows=rows; st.cnt=rows.length;
     st.need_sum=rows.reduce((s,r)=>s+(+r.need||0),0);
     st.moved_sum=rows.reduce((s,r)=>s+(+r.moved||0),0);
-    st.dates=[...new Set(rows.flatMap(r=>Object.keys(r.days||{})))].sort();
+    st.dates=st.allDates;   // 일자컬럼은 SP 기준(from~to 고정) — 행 필터로 줄이지 않는다
     st.exp.clear(); st.sel.clear();
   };
   const load=async()=>{
     if(st.gubun==='이동전표')return loadSheets();
     st.loading=true;draw();
     // mv(이동필요)는 서버에 안 넘긴다 — 클라이언트 필터로 즉시 전환하기 위해 항상 '전체'로 받아둔다.
-    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:st.prPart,sagub:st.sagub,mv:'전체',limit:2500});
+    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:st.prPart||'%',pu_part:st.puPart,sagub:st.sagub,mv:'전체',limit:2500});
     try{const r=await fetch(`${API}/api/gagong/move580?${qs}`);const d=await r.json();
-      st.all=d.rows||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';applyFilter();}
-    catch(e){st.msg='백엔드 연결 실패';st.all=[];st.dates=[];st.rows=[];st.cnt=0;}
+      st.all=d.rows||[];st.allDates=d.dates||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';st.loaded=true;applyFilter();}
+    catch(e){st.msg='백엔드 연결 실패';st.all=[];st.allDates=[];st.dates=[];st.rows=[];st.cnt=0;}
     st.loading=false;draw();};
   const applySheetFilter=()=>{
     const it=st.item.trim().toUpperCase(), pt=st.part.trim().toUpperCase();
@@ -782,14 +783,13 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center"${r.need>0?' style="color:#c0392b;font-weight:600"':' style="color:#dfe6ef"'}>${r.need>0?nf(r.need):'·'}</td>
         <td class="center"${r.sale?'':' style="color:#dfe6ef"'}>${r.sale?nf(r.sale):'·'}</td>
         <td class="center"${r.assy_stock?'':' style="color:#dfe6ef"'}>${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="center"${r.prior?'':' style="color:#dfe6ef"'}>${r.prior?nf(r.prior):'·'}</td>
-        ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,pr=(r.printday&&r.printday[d])||0,stt=(r.cellst&&r.cellst[d])||'';
+        <td class="center"${r.prior?` style="background:${r.prior_color||''}"`:' style="color:#dfe6ef"'}>${r.prior?`${nf(r.prior_done||0)}/${nf(r.prior)}`:'·'}</td>
+        ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,bg=(r.colorday&&r.colorday[d])||'';
           if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
-          const bg=CLR[stt]||''; const fg=stt==='print'?'#fff':(stt?'#222':'#333');
           const key=`${i}:${d}`, on=st.sel.has(key);
-          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg}`:wkbg(d)};color:${fg};font-weight:700${on?';outline:2px solid #1c47a0;outline-offset:-2px':''}">${nf(done||pr||0)}/${nf(plan)}</td>`;}).join('')}</tr>
+          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg}`:wkbg(d)};font-weight:700${on?';outline:2px solid #1c47a0;outline-offset:-2px':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}</tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334;text-align:left">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
-      }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
+      }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody>
       ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="7">합계 (${nf(st.cnt)}행)</td>
         <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td><td class="center">${nf(tPrior)}</td>
         ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
@@ -821,11 +821,12 @@ SCREEN.gagongmove580=(c)=>{
     const isSheet=st.gubun==='이동전표';
     c.innerHTML=`
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
-     <div class="page-sub">계획(<code>PR_T_PLAN_PART_MAT</code>) − 이동완료(확정) = 이동필요수. 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행(<span style="color:#333">■검정</span>=발행·미확정, <span style="color:#66bb6a">■초록</span>=확정완료). 🔴 라이브 <span style="color:#c0392b">(레거시 SP 암호화 → 라이브 역설계)</span></div>
+     <div class="page-sub">조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일. 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행. 🔴 라이브 조회 / 🟢 발행은 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">기준일자</label><input class="inp" type="date" id="mv-from" value="${st.from}"> ~ <input class="inp" type="date" id="mv-to" value="${st.to}">
        <label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"${isSheet?' disabled':''}><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
        <label class="tl">생산파트</label><select class="inp" id="mv-prpart" style="width:150px"${isSheet?' disabled':''}><option value="">% 전체</option>${st.optParts.map(o=>`<option value="${esc(o.code)}"${st.prPart===o.code?' selected':''}>${esc(o.code)} ${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl" title="레거시 as_pu_part_code (입고 자재창고)">자재파트</label><select class="inp" id="mv-pupart" style="width:130px"${isSheet?' disabled':''}>${st.optParts.map(o=>`<option value="${esc(o.code)}"${st.puPart===o.code?' selected':''}>${esc(o.code)} ${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl">사급업체</label><select class="inp" id="mv-sagub" style="width:150px"${isSheet?' disabled':''}><option value="">전체업체</option>${st.optSagubs.map(o=>`<option value="${esc(o.code)}"${st.sagub===o.code?' selected':''}>${esc(o.nm)}(${esc(o.code)})</option>`).join('')}</select>
        <div class="spacer"></div>
        ${isSheet?'':'<button class="btn" id="mv-move" style="background:#1c47a0;color:#fff">🚚 가공자재 이동처리</button>'}
@@ -855,10 +856,11 @@ SCREEN.gagongmove580=(c)=>{
     // 서버 재조회 = 기간·가공창고·생산파트·사급업체 변경 시에만. 그 외(도번/자도번/이동필요/입고확인)는 즉시 클라이언트 필터.
     const refilter=()=>{isSheet?applySheetFilter():applyFilter();draw();};
     g('#mv-search').onclick=()=>{st.from=g('#mv-from').value;st.to=g('#mv-to').value;
-      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.prPart=g('#mv-prpart').value.trim();st.sagub=g('#mv-sagub').value.trim();}
+      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.prPart=g('#mv-prpart').value.trim();
+        st.puPart=g('#mv-pupart').value.trim();st.sagub=g('#mv-sagub').value.trim();}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
     g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+st.gigan*864e5));g('#mv-search').click();};
-    c.querySelectorAll('input[name=mv-gubun]').forEach(rd=>rd.onchange=()=>{st.gubun=rd.value;load();});
+    c.querySelectorAll('input[name=mv-gubun]').forEach(rd=>rd.onchange=()=>{st.gubun=rd.value;draw();});   // 전환만, 조회는 버튼으로
     ['#mv-item','#mv-part'].forEach(id=>{const el=g(id);
       el.oninput=()=>{st.item=g('#mv-item').value;st.part=g('#mv-part').value;refilter();
         const f=c.querySelector(id);if(f){f.focus();try{f.setSelectionRange(f.value.length,f.value.length);}catch(e){}}};
@@ -869,7 +871,7 @@ SCREEN.gagongmove580=(c)=>{
       return;
     }
     c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;refilter();});
-    ['#mv-wc','#mv-prpart','#mv-sagub'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
+    ['#mv-wc','#mv-prpart','#mv-pupart','#mv-sagub'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
     c.querySelectorAll('.jado-cell').forEach(el=>el.ondblclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
     // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현).
     //   재렌더(draw)하면 DOM이 새로 만들어져 mouseover가 끊긴다 → 드래그 중에는 style만 갱신(2026-08-22 수정).
@@ -894,8 +896,9 @@ SCREEN.gagongmove580=(c)=>{
     if(!c._mvUp){c._mvUp=true;document.addEventListener('mouseup',()=>{dragging=false;});}
     g('#mv-move').onclick=()=>openMoveModal(st,dates);
   };
+  // ★화면 진입 시 자동조회 안 함(조건 잡고 조회 버튼을 눌렀을 때만) — 2026-08-22 사용자요청.
+  draw();
   loadOpts().then(draw);
-  load();
 };
 
 /* 가공자재 이동처리 팝업 (w_pr_input_586 "자재개별일괄출고") — 선택셀 자동채움 or 수동 행추가.
@@ -927,30 +930,35 @@ function openMoveModal(st,dates){
   while(rows.length<5)rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});
   const state={ymd:iso(new Date()),out_wh:'P0001',in_wh:'IS0001',dest:'',rows};
   const render=()=>{
-    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:760px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:12px">
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:12px">
+      <style>
+        /* ★.inp 전역 min-width:200px 이 표 안에서 칸을 밀어내 출고수량이 잘렸다 → 팝업 안에서만 해제 */
+        .mm-tbl .inp{min-width:0!important;width:100%!important;height:26px;padding:0 4px;font-size:12px}
+        .mm-tbl td,.mm-tbl th{padding:2px 3px}
+      </style>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #e5e9f0">
         <b style="font-size:14px">🚚 자재개별일괄출고 (가공자재 이동처리)</b><span id="mm-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
       <div style="padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#f2f7ff">
-        <label class="tl">이동일자</label><input class="inp" type="date" id="mm-ymd" value="${state.ymd}" style="width:130px">
-        <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:72px">
-        <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:72px">
-        <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:100px" placeholder="최종납품처">
+        <label class="tl">이동일자</label><input class="inp" type="date" id="mm-ymd" value="${state.ymd}" style="width:132px;min-width:0">
+        <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:70px;min-width:0">
+        <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:70px;min-width:0">
+        <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:110px;min-width:0" placeholder="최종납품처">
         <div class="spacer"></div><button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
       </div>
       <div id="mm-msg" style="padding:0 12px;min-height:15px;font-size:12px"></div>
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 12px">
-        <table class="tbl fit" style="font-size:12px;text-align:center;width:100%;table-layout:fixed"><thead><tr>
-          <th style="width:34px">SEQ</th><th style="width:20%">생산품번</th><th style="width:20%">가공품번</th><th>품명</th>
-          <th style="width:62px">SET</th><th style="width:56px">사용</th><th style="width:70px">출고수량</th><th style="width:15%">비고</th></tr></thead>
+        <table class="tbl fit mm-tbl" style="font-size:12px;text-align:center;width:100%;table-layout:fixed"><thead><tr>
+          <th style="width:32px">SEQ</th><th style="width:150px">생산품번</th><th style="width:150px">가공품번</th><th>품명</th>
+          <th style="width:58px">SET</th><th style="width:52px">사용</th><th style="width:78px">출고수량</th><th style="width:110px">비고</th></tr></thead>
         <tbody>${state.rows.map((r,i)=>`<tr>
           <td class="center">${i+1}</td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="item_code" value="${esc(r.item_code)}" style="width:100%;text-align:center" placeholder="도번"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="mat_code" value="${esc(r.mat_code)}" style="width:100%;text-align:center" placeholder="자도번"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="item_code" value="${esc(r.item_code)}" style="text-align:center" placeholder="도번"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="mat_code" value="${esc(r.mat_code)}" style="text-align:center" placeholder="자도번"></td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item_desc)}">${esc(r.item_desc)}</td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="set_qty" type="number" value="${r.set_qty||''}" style="width:100%;text-align:center"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="use_qty" type="number" value="${r.use_qty||''}" style="width:100%;text-align:center"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="maint_qty" type="number" value="${r.maint_qty||''}" style="width:100%;text-align:center;font-weight:700;background:#fffbe6" title="직접 수정 가능(SET×사용 자동계산값을 덮어씀)"></td>
-          <td><input class="inp mm-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}" style="width:100%"></td></tr>`).join('')}</tbody></table>
+          <td><input class="inp mm-f" data-i="${i}" data-k="set_qty" type="number" value="${r.set_qty||''}" style="text-align:center"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="use_qty" type="number" value="${r.use_qty||''}" style="text-align:center"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="maint_qty" type="number" value="${r.maint_qty||''}" style="text-align:center;font-weight:700;background:#fffbe6" title="직접 수정 가능(SET×사용 자동계산값을 덮어씀)"></td>
+          <td><input class="inp mm-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}"></td></tr>`).join('')}</tbody></table>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:8px 12px;border-top:1px solid #e5e9f0">
         <label class="rl" style="margin-right:auto"><input type="checkbox" id="mm-doprint" checked> 저장 시 납품표 자동인쇄</label>

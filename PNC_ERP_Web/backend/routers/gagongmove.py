@@ -24,167 +24,116 @@ def gagong_move580_opts():
     finally:
         cn.close()
 
-# ================= 가공창고 이동계획 (w_pr_input_580) — 도번×라인, 자도번LIST + 이동필요/완료 =================
-# ★레거시 dw_pr_input_580_t1.srd 컬럼 스펙(_legacy_analysis/GAGONG_4PROGRAMS_ANALYSIS.md §P4) 대조:
-#   당일이전(plan_qty_00) · 일자매트릭스(plan_qty_NN/finish_qty_NN 자/모) · 재고(sale_qty·assy_stock_qty·jp_print_qty).
-#   SP 본문 자체는 암호화라 조인 미판독 — 아래는 라이브 데이터로 역설계한 근사(진행하며 대사검증).
+# ================= 가공창고 이동계획 (w_pr_input_580) =================
+# ★2026-08-22 전환: 역설계 중단 → 레거시 SP 를 그대로 호출한다.
+#   SP 본문은 암호화(WITH ENCRYPTION)라 못 읽지만 EXEC 는 되고 174컬럼을 그대로 반환한다(실측 384행).
+#   → 계획/완료 자·모, 색상(color_00~31), 자도번LIST(mat_list), 재고 컬럼 전부 레거시 정답을 그대로 받는다.
+#   조회 = 라이브(PARTNER_ERP) 읽기전용. 쓰기(이동전표 발행)는 여전히 nx 만(§1 절대규칙).
+SP_MOVE580 = "SP_PR_가공창고_이동계획_260213"
+
+# PowerBuilder 색상정수(BGR) → CSS. 실측 분포: 16777215(흰=없음) / 39270(초록=확정) / 65535(노랑) / 9486586(회청)
+def _pbcolor(v):
+    try:
+        n = int(v)
+    except Exception:
+        return ""
+    if n in (16777215, -1, 0):        # 흰색/미지정 = 색 없음
+        return ""
+    b, g, r = (n >> 16) & 255, (n >> 8) & 255, n & 255
+    return "#%02x%02x%02x" % (r, g, b)
+
+def _f(v):
+    try: return float(v or 0)
+    except Exception: return 0.0
+
 @router.get("/api/gagong/move580")
-def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
-                   pr_part: str = Query(""), sagub: str = Query(""),
+def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query("P2"),
+                   pr_part: str = Query("%"), pu_part: str = Query("IS0001"), sagub: str = Query(""),
                    item: str = Query(""), part: str = Query(""), mv: str = Query("전체"), limit: int = Query(2500)):
-    """가공창고 이동계획. 계획=PR_T_PLAN_PART_MAT, 이동완료=PU_T_STOCK_MAINT_GAGONG_MOVE(IN_CONFIRM_FLAG='1').
-       이동전표발행(미확정)=IN_CONFIRM_FLAG='0'. 이동필요수=계획−이동완료. 도번(ASSY)×라인 그룹, 자도번LIST 묶기.
-       ★필터: wc=가공창고(P1/P2, ASSY의 WORK_CODE) · pr_part=생산파트(PR_M_PROC_GAGONG.GAGONG_PROC_CODE, 자도번의 자기 가공공정)
-         · sagub=사급업체(CM_M_CUST.CUST_CODE, 자도번의 IN_CUST_CODE)."""
+    """레거시 SP 직접호출. 인자 = (as_from_ymd, as_to_ymd, as_work_code, as_pu_part_code, as_pr_part_code, as_sagub_cust_code).
+       도번(item)·자도번(part)·이동필요(mv) 필터는 SP 인자에 없으므로 결과에서 파이썬 필터."""
+    d6a = _d6(from_ymd) if from_ymd else ""
+    d6b = _d6(to_ymd) if to_ymd else ""
     cn = _conn(); cur = cn.cursor()
     try:
-        w = ["pp.PART_PLAN_QTY>0"]; p = []
-        if from_ymd: w.append("pp.PART_PLAN_YMD>=?"); p.append(_d6(from_ymd))
-        if to_ymd:   w.append("pp.PART_PLAN_YMD<=?"); p.append(_d6(to_ymd))
-        if wc.strip():   w.append("ia.WORK_CODE=?"); p.append(wc.strip())
-        if pr_part.strip(): w.append("ma.GAGONG_PROC_CODE=?"); p.append(pr_part.strip())
-        if sagub.strip():   w.append("ma.IN_CUST_CODE=?"); p.append(sagub.strip())
-        if item.strip(): w.append("pp.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
-        if part.strip(): w.append("pp.MAT_CODE LIKE ?"); p.append(f"%{part.strip()}%")
-        cur.execute(f"""SELECT TOP {int(limit) * 60} pp.ASSY_ITEM_CODE assy, ISNULL(ia.ITEM_DESC,'') nm,
-              ISNULL(pp.LINE_NO,'') line, COALESCE(cw.WORK_DESC, cc.CUST_DESC, pp.MAT_WORK_CENTER_CODE, '') dest,
-              pp.MAT_CODE mat, pp.PART_PLAN_YMD ymd, MIN(ISNULL(pp.PART_OUTPUT_HM,'')) hm,
-              SUM(CAST(pp.PART_PLAN_QTY AS float)) q
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT pp
-            JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ia ON ia.ITEM_CODE=pp.ASSY_ITEM_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ma ON ma.ITEM_CODE=pp.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK cw ON cw.WORK_CODE=pp.MAT_WORK_CENTER_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=pp.MAT_WORK_CENTER_CODE
-            WHERE {' AND '.join(w)}
-            GROUP BY pp.ASSY_ITEM_CODE, ISNULL(ia.ITEM_DESC,''), pp.LINE_NO,
-              COALESCE(cw.WORK_DESC, cc.CUST_DESC, pp.MAT_WORK_CENTER_CODE, ''), pp.MAT_CODE, pp.PART_PLAN_YMD
-            ORDER BY assy, line""", *p)
-        cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
-        keyed = {}
-        for r in raw:
-            k = (r["assy"], r["line"], r["dest"])
-            g = keyed.get(k)
-            if not g:
-                g = {"assy": r["assy"], "nm": r["nm"], "line": r["line"], "dest": r["dest"],
-                     "days": {}, "mats": {}, "plan_qty": 0.0, "part_ymd": r["ymd"], "hm": r["hm"] or ""}
-                keyed[k] = g
-            q = float(r["q"] or 0)
-            g["days"][r["ymd"]] = g["days"].get(r["ymd"], 0) + q
-            g["mats"][r["mat"]] = g["mats"].get(r["mat"], 0) + q
-            g["plan_qty"] += q
-            if r["ymd"] < g["part_ymd"]: g["part_ymd"] = r["ymd"]; g["hm"] = r["hm"] or ""
-        rows = list(keyed.values()); capped = len(keyed) > int(limit); rows = rows[:int(limit)]
-        for g in rows:
-            g["jado"] = ",".join(f"{m}{{{int(v)}}}" for m, v in sorted(g["mats"].items()))
-            g["matcnt"] = len(g["mats"]); g["matlist"] = list(g["mats"].keys()); del g["mats"]
-        matset = {m for g in rows for m in g["matlist"]}
-        assyset = {g["assy"] for g in rows}
-        d6a = _d6(from_ymd) if from_ymd else None; d6b = _d6(to_ymd) if to_ymd else None
-        # ★보조조회는 IN(수천개) 대신 "날짜/전량 조회 + 파이썬 필터"로. IN 목록이 커지면 SQL Server가
-        #   비선형으로 느려진다(2026-08-22 실측: 이동원장 IN 3.47s → 날짜조회 0.02s, 출하 1.96s → 0.06s).
-        # 이동완료(확정)=IN_CONFIRM_FLAG '1' / 이동전표발행(미확정)='0'. 날짜별(MAINT_YMD) 매핑.
-        # ★조회는 라이브(레거시가 쓴 실적) + nx(웹이 발행한 것)를 합산해야 실제 상태가 보인다.
-        #   (쓰기는 여전히 nx만 — §1 절대규칙. 2026-08-22: 라이브 65건/확정15 vs nx 38건/확정0 실측)
-        moved = {}; movedday = {}; printed = {}; printedday = {}
-        for _src in ("PARTNER_ERP.dbo", "PARTNER_ERP_TEST3.nx"):
-            try:
-                q = ("SELECT MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG, SUM(CAST(MAINT_QTY AS float)) "
-                     f"FROM {_src}.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE 1=1")
-                pr = []
-                if d6a: q += " AND MAINT_YMD>=?"; pr.append(d6a)
-                if d6b: q += " AND MAINT_YMD<=?"; pr.append(d6b)
-                q += " GROUP BY MAT_CODE, MAINT_YMD, IN_CONFIRM_FLAG"
-                cur.execute(q, *pr)
-                for rr in cur.fetchall():
-                    mat = str(rr[0] or "").strip()
-                    if mat not in matset: continue
-                    ymd, flag, v = rr[1], rr[2], float(rr[3] or 0)
-                    if flag == '1':
-                        moved[mat] = moved.get(mat, 0.0) + v
-                        movedday[(mat, ymd)] = movedday.get((mat, ymd), 0.0) + v
-                    else:
-                        printed[mat] = printed.get(mat, 0.0) + v
-                        printedday[(mat, ymd)] = printedday.get((mat, ymd), 0.0) + v
-            except Exception:
-                pass
-        # ASSY재고 = SA_T_ITEM_STOCK(완제품 재고, 도번단위)
-        assystk = {}
-        try:
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
-            for rr in cur.fetchall():
-                k = str(rr[0] or "").strip()
-                if k in assyset: assystk[k] = float(rr[1] or 0)
-        except Exception:
-            pass
-        # 출하 = SA_T_SALE_DTL 미출하잔(FINISH_FLAG='0'), 도번단위 근사(계획 WO 미보유 — §P4 웹구현 한계)
-        saled = {}
-        try:
-            cur.execute("SELECT ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' GROUP BY ITEM_CODE")
-            for rr in cur.fetchall():
-                k = str(rr[0] or "").strip()
-                if k in assyset: saled[k] = float(rr[1] or 0)
-        except Exception:
-            pass
-        # ★당일이전(prior, 레거시 plan_qty_00) = from_ymd 이전 계획 − 그 이전 이동완료(확정).
-        prior_plan_map = {}   # (assy,mat) -> 이전 계획합
-        prior_moved_map = {}  # mat -> 이전 이동완료합
-        if d6a:
-            try:
-                cur.execute("""SELECT ASSY_ITEM_CODE, MAT_CODE, SUM(CAST(PART_PLAN_QTY AS float))
-                    FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT
-                    WHERE PART_PLAN_YMD<? GROUP BY ASSY_ITEM_CODE, MAT_CODE""", d6a)
-                for rr in cur.fetchall():
-                    mat = str(rr[1] or "").strip()
-                    if mat in matset: prior_plan_map[(str(rr[0] or "").strip(), mat)] = float(rr[2] or 0)
-            except Exception:
-                pass
-            for _src in ("PARTNER_ERP.dbo", "PARTNER_ERP_TEST3.nx"):   # 라이브+nx 합산(위와 동일 사유)
-                try:
-                    cur.execute(f"""SELECT MAT_CODE, SUM(CAST(MAINT_QTY AS float))
-                        FROM {_src}.PU_T_STOCK_MAINT_GAGONG_MOVE
-                        WHERE IN_CONFIRM_FLAG='1' AND MAINT_YMD<? GROUP BY MAT_CODE""", d6a)
-                    for rr in cur.fetchall():
-                        mat = str(rr[0] or "").strip()
-                        if mat in matset: prior_moved_map[mat] = prior_moved_map.get(mat, 0.0) + float(rr[1] or 0)
-                except Exception:
-                    pass
-        for g in rows:
-            g["moved"] = sum(moved.get(m, 0.0) for m in g["matlist"])
-            g["jp_print"] = sum(printed.get(m, 0.0) for m in g["matlist"])
-            g["need"] = max(0.0, g["plan_qty"] - g["moved"])
-            g["assy_stock"] = assystk.get(g["assy"], 0.0)
-            g["sale"] = saled.get(g["assy"], 0.0)
-            if d6a:
-                pp = sum(prior_plan_map.get((g["assy"], m), 0.0) for m in g["matlist"])
-                pm = sum(prior_moved_map.get(m, 0.0) for m in g["matlist"])
-                g["prior"] = max(0.0, pp - pm)
-            else:
-                g["prior"] = 0.0
-            # 날짜별 자/모(계획/완료/발행) — days=계획, doneday=확정완료(초록), printday=미확정발행(검정)
-            # 셀상태(cellst): 'done'(계획<=완료) > 'print'(계획<=완료+발행) > ''(미착수) — 그리드가 색상 판정에 사용.
-            g["doneday"] = {}; g["printday"] = {}; g["cellst"] = {}
-            for ymd, planv in g["days"].items():
-                dv = sum(movedday.get((m, ymd), 0.0) for m in g["matlist"])
-                pv = sum(printedday.get((m, ymd), 0.0) for m in g["matlist"])
-                g["doneday"][ymd] = dv; g["printday"][ymd] = pv
-                if planv <= 0: st = ''
-                elif dv >= planv - 1e-9: st = 'done'
-                elif (dv + pv) >= planv - 1e-9: st = 'print'
-                elif dv > 0 or pv > 0: st = 'part'
-                else: st = ''
-                g["cellst"][ymd] = st
-            del g["matlist"]
-        m = mv.strip()
-        if m == "이동필요": rows = [r for r in rows if r["need"] > 0]
-        elif m == "이동완료": rows = [r for r in rows if r["need"] <= 0]
-        dates = sorted({ymd for g in rows for ymd in g["days"]})
-        rows.sort(key=lambda x: (x["part_ymd"], x["assy"]))
-        note = f"⚠ 상위 {limit}건만 표시 — 작업처·도번으로 필터하세요." if capped else ""
-        return {"dates": dates, "rows": rows, "cnt": len(rows),
-                "plan_sum": sum(r["plan_qty"] for r in rows), "need_sum": sum(r["need"] for r in rows),
-                "moved_sum": sum(r["moved"] for r in rows), "note": note}
+        cur.execute("SET NOCOUNT ON; EXEC [dbo].[" + SP_MOVE580 + "] ?,?,?,?,?,?",
+                    d6a, d6b, (wc or "").strip(), (pu_part or "").strip(),
+                    (pr_part or "%").strip() or "%", (sagub or "").strip())
+        while cur.description is None:
+            if not cur.nextset(): break
+        cols = [d[0] for d in cur.description]
+        raw = [dict(zip(cols, r)) for r in cur.fetchall()]
     finally:
         cn.close()
+
+    # 일자컬럼(NN) → 실제 날짜 매핑. SP 는 from_ymd 기준 00=이전, 01..31=경과일.
+    from datetime import date as _date
+    def _ymd_add(y6, k):
+        y, m, d = 2000 + int(y6[0:2]), int(y6[2:4]), int(y6[4:6])
+        t = _date(y, m, d) + timedelta(days=k)
+        return "%02d%02d%02d" % (t.year % 100, t.month, t.day)
+    ndays = 0
+    if d6a and d6b:
+        ya, ma, da = 2000 + int(d6a[0:2]), int(d6a[2:4]), int(d6a[4:6])
+        yb, mb, db = 2000 + int(d6b[0:2]), int(d6b[2:4]), int(d6b[4:6])
+        ndays = (_date(yb, mb, db) - _date(ya, ma, da)).days
+    ndays = max(0, min(ndays, 31))
+    dates = [_ymd_add(d6a, k + 1) for k in range(ndays)] if d6a else []
+
+    rows = []
+    for r in raw:
+        days, done, colors = {}, {}, {}
+        for k in range(1, ndays + 1):
+            ii = "%02d" % k
+            ymd = dates[k - 1]
+            days[ymd] = _f(r.get("plan_qty_" + ii))
+            done[ymd] = _f(r.get("finish_qty_" + ii))
+            colors[ymd] = _pbcolor(r.get("color_" + ii))
+        plan_qty = _f(r.get("plan_qty")); fin_qty = _f(r.get("finish_qty"))
+        g = {
+            "assy": (r.get("assy_item_code") or "").strip(),
+            "item": (r.get("item_code") or "").strip(),
+            "nm": (r.get("ITEM_DESC") or "").strip(),
+            "line": (r.get("line_no") or "").strip(),
+            # 최종납품처 = 사급업체명 우선, 없으면 조달가공공정명(레거시 dw 컬럼 gole_in_cust_desc)
+            "dest": ((r.get("GOLE_IN_CUST_DESC") or "").strip()
+                     or (r.get("GOLE_GAGONG_PROC_DESC") or "").strip()
+                     or (r.get("MAT_WORK_DESC") or "").strip()),
+            "jado": (r.get("mat_list") or "").strip(),
+            "matcnt": len([x for x in (r.get("mat_list") or "").split(",") if x.strip()]),
+            "part_ymd": (r.get("part_plan_ymd") or "").strip(),
+            "hm": (r.get("part_output_hm") or "").strip(),
+            "plan_qty": plan_qty,
+            "moved": fin_qty,                       # 이동완료(확정)
+            "need": max(0.0, plan_qty - fin_qty),   # 이동필요수
+            "jp_print": _f(r.get("jp_print_qty")),  # 이동전표발행
+            "sale": _f(r.get("sale_qty")),
+            "assy_stock": _f(r.get("assy_stock_qty")),
+            "prior": _f(r.get("plan_qty_00")),      # 당일이전
+            "prior_done": _f(r.get("finish_qty_00")),
+            "prior_color": _pbcolor(r.get("color_00")),
+            "stock": _f(r.get("stock_qty")), "pr_stock": _f(r.get("pr_stock_qty")),
+            "days": days, "doneday": done, "colorday": colors,
+            "gole_proc": (r.get("GOLE_GAGONG_PROC_CODE") or "").strip(),
+            "gole_cust": (r.get("GOLE_IN_CUST_CODE") or "").strip(),
+            "mat_work": (r.get("mat_work_code") or "").strip(),
+            "work_code": (r.get("work_code") or "").strip(),
+        }
+        rows.append(g)
+
+    it = item.strip().upper(); pt = part.strip().upper()
+    if it: rows = [r for r in rows if it in (r["assy"] or "").upper()]
+    if pt: rows = [r for r in rows if pt in (r["jado"] or "").upper()]
+    m = mv.strip()
+    if m == "이동필요": rows = [r for r in rows if r["need"] > 0]
+    elif m == "이동완료": rows = [r for r in rows if r["need"] <= 0]
+    capped = len(rows) > int(limit)
+    rows = rows[:int(limit)]
+    note = ("⚠ 상위 %d건만 표시 — 조건으로 좁혀주세요." % limit) if capped else ""
+    return {"dates": dates, "rows": rows, "cnt": len(rows),
+            "plan_sum": sum(r["plan_qty"] for r in rows),
+            "need_sum": sum(r["need"] for r in rows),
+            "moved_sum": sum(r["moved"] for r in rows), "note": note}
 
 # ================= 가공자재 이동처리 (w_pr_input_586 "자재개별일괄출고") =================
 # ★레거시 로직 이식(w_pr_input_586.srw ue_save_after, 2026-08-22 소스 확보):
