@@ -159,20 +159,23 @@ def _build(ct, fr, to):
         cn.close()
 
 
-def _cur_ym():
+def _today6():
     cn = _conn(); cu = cn.cursor()
     try:
-        cu.execute("SELECT FORMAT(GETDATE(),'yyMM')"); return cu.fetchone()[0]
+        cu.execute("SELECT FORMAT(GETDATE(),'yyMMdd')"); return cu.fetchone()[0]
     finally:
         cn.close()
 
 
 @router.get("/api/matverify/coop")
-def matverify_coop(ct: str = Query("6"), ym_from: str = Query(""), ym_to: str = Query(""), nocache: str = Query("")):
-    """매입유형(ct=CUST_TYPE, 기본6=절삭협력; 'IMP'=수입)별 매입-소비 실측 수불 진단. 기간 YYMM(기본 2601~당월)."""
+def matverify_coop(ct: str = Query("6"), ymd_from: str = Query(""), ymd_to: str = Query(""),
+                   ym_from: str = Query(""), ym_to: str = Query(""), nocache: str = Query("")):
+    """매입유형(ct=CUST_TYPE, 기본6=절삭협력; 'IMP'=수입)별 매입-소비 실측 수불 진단.
+       기간=일자(ymd_from~ymd_to YYMMDD) 우선, 없으면 월(ym_from~ym_to). 기본=조회 당월1일~당일."""
     ct = (ct or "6").strip()
-    fr = (_digits(ym_from, 4) or "2601") + "01"
-    to = (_digits(ym_to, 4) or _digits(_cur_ym(), 4)) + "99"
+    t6 = _today6()
+    fr = _digits(ymd_from, 6) or ((_digits(ym_from, 4) or t6[:4]) + "01")
+    to = _digits(ymd_to, 6) or ((_digits(ym_to, 4) + "99") if _digits(ym_to, 4) else t6)
     key = (ct, fr, to); now = _time.time()
     if not str(nocache).strip():
         hit = _CACHE.get(key)

@@ -130,9 +130,9 @@ SCREEN.matverify=(c)=>{
   const load=async()=>{loading=true;msg='';sel=null;
     const lb=c.querySelector('#mv-lbody');if(lb)lb.innerHTML=`<tr><td colspan="4" class="empty">불러오는 중…</td></tr>`;
     const ct=c.querySelector('#mv-ct').value||'6';
-    const yf=in2ym(c.querySelector('#mv-from').value)||'2601';
-    const yt=in2ym(c.querySelector('#mv-to').value)||in2ym(nowYm());
-    try{const r=await fetch(`${API}/api/matverify/coop?ct=${encodeURIComponent(ct)}&ym_from=${yf}&ym_to=${yt}`);
+    const yf=iso2ymd(c.querySelector('#mv-from').value)||iso2ymd(m1Iso());
+    const yt=iso2ymd(c.querySelector('#mv-to').value)||iso2ymd(todayIso());
+    try{const r=await fetch(`${API}/api/matverify/coop?ct=${encodeURIComponent(ct)}&ymd_from=${yf}&ymd_to=${yt}`);
       if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
       rows=j.rows||[];begym=j.begym||'';buildVend();}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];vend=[];}
@@ -142,25 +142,30 @@ SCREEN.matverify=(c)=>{
     const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · <b>순증=매입−가공출고−사급출고±조정</b>(실측 자재수불) · 매입=확정입고+수입 · <b>순증 크면 과입고 후보(단정 아님, 사람이 검토)</b>`;
   };
   c.innerHTML=`
-   <div class="page-title">🔍 자재 소요-매입 검증 <span style="font-size:12px;color:var(--muted);font-weight:400">(업체별 과입고 진단)</span></div>
-   <div class="page-sub" id="mv-sub">실적(리시빙)→소요 vs 업체별 매입입고. 사급출고·기초 펼침 + 이상치 플래그(사람이 검토).</div>
-   <div class="toolbar">
-     <label class="tl">매입유형</label><select class="sel" id="mv-ct">${Object.keys(CT).map(k=>`<option value="${k}" ${k==='6'?'selected':''}>${esc(CT[k])}</option>`).join('')}</select>
-     <label class="tl">기간</label><input type="month" class="inp" id="mv-from" value="2026-01" style="min-width:120px"><span style="color:var(--muted)">~</span><input type="month" class="inp" id="mv-to" value="${nowYm()}" style="min-width:120px">
-     <button class="btn" id="mv-go">🔍 조회</button>
-     <div class="spacer"></div><button class="btn xls" id="mv-xls">📥 엑셀</button>
+   <div class="mv-screen" style="display:flex;flex-direction:column;height:100%">
+     <div style="flex:0 0 auto">
+       <div class="page-title">🔍 자재 소요-매입 검증 <span style="font-size:12px;color:var(--muted);font-weight:400">(업체별 과입고 진단)</span></div>
+       <div class="page-sub" id="mv-sub">실적(리시빙)→소요 vs 업체별 매입입고. 사급출고·기초 펼침 + 이상치 플래그(사람이 검토).</div>
+       <div class="toolbar">
+         <label class="tl">매입유형</label><select class="sel" id="mv-ct">${Object.keys(CT).map(k=>`<option value="${k}" ${k==='6'?'selected':''}>${esc(CT[k])}</option>`).join('')}</select>
+         <label class="tl">기간</label><input type="date" class="inp" id="mv-from" value="${m1Iso()}" style="min-width:140px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="mv-to" value="${todayIso()}" style="min-width:140px">
+         <button class="btn" id="mv-go">🔍 조회</button>
+         <div class="spacer"></div><button class="btn xls" id="mv-xls">📥 엑셀</button>
+       </div>
+     </div>
+     <div style="flex:1;min-height:0;display:flex;gap:10px;align-items:stretch">
+       <div style="flex:0 0 30%;min-width:0;display:flex;flex-direction:column">
+         <div class="summary-bar" id="mv-lsum" style="flex:0 0 auto"></div>
+         <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead><tr><th>업체</th><th class="num">매입액</th><th class="num">품목</th><th class="num">플래그</th></tr></thead><tbody id="mv-lbody"></tbody></table></div>
+       </div>
+       <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+         <div class="summary-bar" id="mv-rhead" style="flex:0 0 auto"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
+         <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead><tr>
+           <th>품번</th><th>품명</th><th>플래그</th><th style="min-width:180px">공급원(전체)</th><th>흐름</th><th class="num">업체매입</th><th class="num">총매입</th><th class="num">가공출고</th><th class="num">사급출고</th><th class="num">조정</th><th class="num">순증</th><th class="num">순증액</th><th class="num">리시빙</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
+       </div>
+     </div>
    </div>
-   <div style="display:flex;gap:10px;align-items:flex-start">
-     <div style="flex:0 0 32%;min-width:0">
-       <div class="summary-bar" id="mv-lsum"></div>
-       <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr><th>업체</th><th class="num">매입액</th><th class="num">품목</th><th class="num">플래그</th></tr></thead><tbody id="mv-lbody"></tbody></table></div>
-     </div>
-     <div style="flex:1;min-width:0">
-       <div class="summary-bar" id="mv-rhead"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
-       <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr>
-         <th>품번</th><th>품명</th><th>흐름</th><th class="num">업체매입</th><th class="num">총매입</th><th style="min-width:180px">공급원(전체)</th><th class="num">가공출고</th><th class="num">사급출고</th><th class="num">조정</th><th class="num">순증</th><th class="num">순증액</th><th class="num">리시빙</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
-     </div>
-   </div>`;
+   <style>.mv-screen .grid-wrap thead th{position:sticky;top:0;background:#eef3fa;z-index:2}.mv-screen .grid-wrap .grandtot td{position:sticky;bottom:0;background:#f4f7fc}</style>`;
   const renderLeft=()=>{
     const kc=k=>({'수입':'#c0392b','기타':'#b8860b'}[k]||'#1c47a0');
     let lb=vend.map(v=>`<tr data-vk="${esc(v.vkey)}" class="${sel===v.vkey?'sel':''}"><td class="cap" title="${esc(v.name)}"><b>${esc(v.name||v.code||'(기타)')}</b> <span style="font-size:9px;color:${kc(v.kind)}">${esc(v.tname||v.kind)}</span></td><td class="num">${won(v.amt)}</td><td class="num">${won(v.items.length)}</td><td class="num" style="color:${v.nflag?'#c0392b':'#999'}">${v.nflag||''}</td></tr>`).join('');
@@ -178,7 +183,7 @@ SCREEN.matverify=(c)=>{
       const fl=(r.flags||[]).map(f=>`<span style="color:${flagColor(f)};font-size:10px;border:1px solid ${flagColor(f)};border-radius:3px;padding:0 3px;margin-right:2px">${esc(f)}</span>`).join('');
       const netc=(r.net||0)>0?'color:#c0392b;font-weight:600':((r.net||0)<0?'color:#1c7c3a':'');
       const src=(r.vendors||[]).map(v=>`<span style="color:${v.kind==='수입'?'#c0392b':(v.kind==='기타'?'#b8860b':'#1c47a0')}">${esc(v.name||v.code)}<span style="font-size:9px;color:#999">(${esc(v.tname||'')})</span> ${won(v.q)}</span>`).join(' · ');
-      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_all)}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="color:#999">${won(r.recv)}</td><td>${fl}</td></tr>`;
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td>${fl}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(r.buy_all)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="color:#999">${won(r.recv)}</td></tr>`;
     }).join('');
     c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="13" class="empty">품목 없음</td></tr>`;
     c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 총매입·가공출고·사급출고·순증=품목 전체(전 업체)</div>`;
@@ -189,8 +194,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','흐름','업체매입','총매입','공급원(전체)','가공출고','사급출고','조정','순증','순증액','리시빙','플래그'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.vq,r.buy_all,(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.gagong,r.sagub,r.adj,r.net,r.net_amt,r.recv,(r.flags||[]).join('|')])));
+    const hd=['업체','품번','품명','플래그','공급원(전체)','흐름','업체매입','총매입','가공출고','사급출고','조정','순증','순증액','리시빙'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow,r.vq,r.buy_all,r.gagong,r.sagub,r.adj,r.net,r.net_amt,r.recv])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };

@@ -477,16 +477,13 @@ def _step6_sql(cur):
 
 def _step7_sql(cur):
     P = _P
-    # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
-    #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
-    #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
-    #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
+    # ★U2(2026-08-22, routing_edge 은퇴): 생산처(work_center)=마스터 직독. 조달 라우팅 시스템 단일화=조달프로파일(sourcing_route/route_alloc) 단독.
+    #   routing_edge는 wc_user 편집 0건·wc≡마스터파생(42622/42625)이라 순수 중복 → 제거. 생산처 diff0 증명완료(item_ov ov_wc OLD vs NEW 불일치0, nx.plan_part_mat_preU2_260822 대조).
+    #   ★향후 생산처 편집은 조달프로파일에서 소유(활성경로 vendor=매입/사급 생산처). 재귀 CTE inner join 회피용 nx.item_ov는 유지(마스터 투영).
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
     cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust_code, c.prod_rate,
-        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END) AS ov_wc
-      INTO nx.item_ov FROM {P}PR_M_ITEM c
-      LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
-        ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
+        CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END AS ov_wc
+      INTO nx.item_ov FROM {P}PR_M_ITEM c""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
     cur.execute(("""
@@ -522,44 +519,12 @@ def _step7_sql(cur):
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
 
-def _routing_edge_sync(cur):
-    """★routing_edge 생산처(wc) 정기 시드/싱크 (편집 보존 + 신규 반영). compose는 읽기만·이 함수만 씀.
-    모델: wc_live=라이브 PR_M_ITEM 시드(매싱크 갱신), wc_user=사용자 편집(NULL=미편집), 유효 wc=COALESCE(wc_user,wc_live).
-      → 미편집 엣지는 라이브 생산처 자동 추종, 편집 엣지는 보존. 신규 엣지(v_pr_bom 증가분)는 라이브 기준 시드로 INSERT."""
-    # 1) 편집추적 컬럼 보장
-    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
-    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
-    # 2) 신규 엣지 INSERT (v_pr_bom엔 있고 routing_edge엔 없는 것) — 라이브 마스터 기준 시드, wc_user=NULL
-    # ★U1(2026-08-22): routing_edge=생산처(wc) 전용. 죽은 조달컬럼(gubun/vendor_seed/vendor_resolved/src_except/src_sagub) 제거
-    #   — 조달경로 정본은 조달프로파일(sourcing_route/route_alloc)이 단독. 여긴 wc(생산처)만 시드.
-    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,route_id,wc_live,wc)
-      SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ,
-        1,
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
-      FROM nx.v_pr_bom b
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
-      WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
-        AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
-    new_cnt = cur.rowcount
-    # 3) wc_live 라이브 갱신 (편집 무관, child 생산처=work_code||in_cust)
-    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust_code,'') END
-      FROM nx.routing_edge re JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
-    # 4) 유효 wc = COALESCE(wc_user, wc_live) — 편집 보존
-    cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
-    return int(new_cnt or 0)
-
 @router.post("/api/routing/sync")
 def routing_sync():
-    """routing_edge 생산처 시드/싱크(멱등). 편집(wc_user) 보존, 미편집은 라이브 추종, 신규 엣지 INSERT."""
-    nx = _nx(); cur = nx.cursor()
-    try:
-        new_cnt = _routing_edge_sync(cur)
-        cur.execute("SELECT COUNT(*), SUM(CASE WHEN ISNULL(LTRIM(RTRIM(wc_user)),'')<>'' THEN 1 ELSE 0 END) FROM nx.routing_edge")
-        tot, edited = cur.fetchone()
-        return {"ok": True, "new_edges": new_cnt, "total_edges": int(tot or 0), "edited_edges": int(edited or 0)}
-    finally:
-        nx.close()
+    """★DEPRECATED(2026-08-22, U2): routing_edge 은퇴. 생산처=조달프로파일/마스터 단일 시스템으로 통합.
+    routing_edge.wc는 wc_user 편집 0건·wc≡마스터파생이라 순수 중복이었음 → 제거. STEP7은 마스터 직독.
+    이 엔드포인트는 기존 매일 재싱크 런북 호환을 위해 no-op으로 유지(호출해도 무해)."""
+    return {"ok": True, "deprecated": "routing_edge retired (U2); 생산처=조달프로파일/마스터 단일화. no-op."}
 
 @router.get("/api/plan/part")
 def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
