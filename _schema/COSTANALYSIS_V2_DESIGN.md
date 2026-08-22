@@ -155,6 +155,10 @@
 | 2026-08-22 | A2 임율 GETDATE | **유지(우리식 as-of ym)** | 엔진 이미 교정됨(L182), 등록부 stale |
 | 2026-08-22 | A3 용접봉/용접공수 | **교정(공정 분리)** | 사용자: "용접공수도 우리는 공정으로 뺐어" → **계산방식 자체가 달라져야** (재료흡수 X, 공정 가공비 계상) |
 | 2026-08-22 | A1 lgroup 가공비 | 판단대기(검증 먼저) | 타그룹 제작부품 가공비 포함 여부 = 실측+사업지식 |
+| 2026-08-22 | Q2 협력사 seeding 정의 | ★사용자 정정 | R02 sourcing_profile 아님. **except_flag 제외하면서 "우리가 실제 제작하는 업체명"을 입력한 것**(routing_edge/sourcing vendor). 정확한 이벤트 기록은 사용자 확인 대기 |
+| 2026-08-22 | Q4 lg_settle_unit(동정산 원단위) | ★사용자: **매월 갱신** | 단 실측상 nx.lg_settle_unit엔 ym=2606만 적재됨 → 다월(2601~2608) 적재 갭. 사용자 확인 예정 |
+| 2026-08-22 | Q1 make_type '2' | 사용자 판단중 | 종류별 샘플 제공(make_type2_by_group.txt): 외주/협력 in_cust(MTS·두진·중앙정밀·태영·대원·미래·이젠터·둔안·토탈솔루션 등) 전 prod_group 분포. cg 2/3/1/빈 혼재 |
+| 2026-08-22 | Q3 설치 3개 사급 | 사용자 확인중 | — |
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
