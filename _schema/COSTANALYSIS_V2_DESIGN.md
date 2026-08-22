@@ -680,7 +680,14 @@ cg=5 직납 → 제외
 - **★cut_gubun은 제품(sgroup110 ASSY)에만**(절삭3635·설치273·분지관114·공백21297). **원소재(sgroup210)는 전부 공백**. → per-usage 판정=**루트 제품 cut_gubun**(원소재 자체 아님). 다단계BOM이라 원소재는 중간SUB(제작동관) 밑 깊이.
 - ★핵심 긴장: 사용자 관심 직거래품=**사급전환 안 된 절삭 원소재**(절삭 제품 안). "절삭=사급/설치=직거래" 단순 cut규칙으론 못잡음(R-1 "전환된것/아닌것"). +0.71억(§5Q)은 **per-품번 매입gap**이지 제품손익 아님(엔진 재계산 필요, §5Q:567).
 
-### per-usage 규칙 확정 = 진단중
+### ★per-usage 규칙 확정 (v2_diag2 실측, 25제품 엔진전개)
+- **제품 cut**: 절삭18·설치6·공백1(직거래 관심=절삭 안, 확인).
+- **원소재노드 매입지형: jik_only 62·sag_only 0·both 0·none 80.** ★**both=0·sag_only=0 → 이중사용 원소재 스코프에 실재하지 않음.** per-usage 모호성 없음 → **(A)품번·(B)usage 수렴**: 직구매 실매입 존재=직거래.
+- **★확정 오버라이드 규칙**: 원소재노드 `mat>0` & `code∈직구매실매입맵` → `new_mat = mat×(직구매실매입/엔진won)`. **kind='lme'(mat=0) 스킵**(LME 엔진 별도처리). none노드(사급)=엔진값유지→**사급품목 V2=V1 diff0 보장**.
+- silwon_nodes 반환=`{'rows':[...],'agg':silwon}`. 노드 kind: 매입(buy,pur_price)·원소재(raw,사급가std)·제작(mk)·사급(LME). 원소재 재료비는 buy/raw 노드에(§5Q 2사급가+38매입단가 = raw+buy 분포와 일치).
+- ⚠ **단위검증 필요**: new_mat=mat×jik/won은 jik(maint_cost)·won 동일단위 가정. 이상치(5210A00039G eng3214 vs jik1502=ratio0.47) = 마스터 스테일 or 단위불일치 확인. 래퍼 착수 전 검증.
+
+### (구) per-usage 규칙 확정 = 진단중
 - 후보 신호: (a)원소재 직구매매입 존재(사급전환 안됨) (b)제품 cut_gubun (c)사급 불출(tag5). 이중사용 원소재(7072AR9374N: 직구매+사급 둘다) 처리가 관건.
 - **진단(v2_diag)**: 스코프 리시빙상위20 제품×엔진 silwon_nodes → 원소재노드별 (제품cut/직구매실매입/사급매입/엔진mat) 매입지형 실측 → 규칙 데이터확정.
 - V2 래퍼: nodes=engine.silwon_nodes(item,ymd); 직거래 원소재노드 mat→실매입가×wt×qty(fallback 사급가); delta 누적; V2_실원가=silwon+delta. 엔진 원본 무변경.
