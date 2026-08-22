@@ -84,6 +84,9 @@ def _build(ct, fr, to):
             SUM(CASE WHEN MAINT_TAG='3' THEN 0 ELSE CONVERT(float,ISNULL(MAINT_QTY,0)) END) netmv
           FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", fr, to)
         mv = {_U(r[0]): {"gagong": float(r[1] or 0), "sagub": float(r[2] or 0), "adj": float(r[3] or 0), "netmv": float(r[4] or 0)} for r in cu.fetchall()}
+        # ★실재고(조회일 기준) = PU 전기간 누적(≤to, 전 태그) — 순증만큼 실제 재고 있는지 대조(비고)용.
+        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD <= ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
+        stock_cum = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
         # 수입(_C)은 netmv(PU)에 없음 → 순증에 별도 가산
         imp_net = {}
         for m, cc, cnm, cty, kind, q, amt in sup:
@@ -97,7 +100,7 @@ def _build(ct, fr, to):
         items = {}
         def _it(k): return items.setdefault(k, {"item": k, "buy_all": 0.0, "prim_q": 0.0, "prim_amt": 0.0,
                                                  "gagong": 0.0, "sagub": 0.0, "adj": 0.0, "netmv": 0.0, "recv": 0.0,
-                                                 "vendors": {}, "raw_codes": set()})
+                                                 "stock": 0.0, "vendors": {}, "raw_codes": set()})
         for m, cc, cnm, cty, kind, q, amt in sup:
             k = base(m)
             if k not in prim_bases or q == 0: continue
@@ -118,6 +121,9 @@ def _build(ct, fr, to):
         for m, q in recv.items():
             k = base(m)
             if k in items: items[k]["recv"] += q
+        for m, q in stock_cum.items():                 # 실재고(≤to 누적, PU)
+            k = base(m)
+            if k in items: items[k]["stock"] += q
 
         # 품명
         cu.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM PARTNER_ERP_TEST3.nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -126,15 +132,18 @@ def _build(ct, fr, to):
         # 6) 순증·흐름·플래그
         out = []
         for k, d in items.items():
-            prim, buyall = d["prim_q"], d["buy_all"]
-            gag, sag, adj, rv = d["gagong"], d["sagub"], d["adj"], d["recv"]
+            prim, buyall = d["prim_q"], d["buy_all"]           # 협력사(선택), 총매입
+            other = buyall - prim                              # 타협력사(그 외 공급처)
+            gag_all, sag, adj, rv, stock = d["gagong"], d["sagub"], d["adj"], d["recv"], d["stock"]
+            jiknap = min(rv, gag_all) if gag_all > 0 else 0.0  # 직납(리시빙分, 가공출고 내에서 분리 → 이중차감 없음)
+            gagong = gag_all - jiknap                          # 가공(순소비)
             up = d["prim_amt"] / prim if prim else 0.0
-            net = d["netmv"]                             # 순증(재고변화, 전 공급원)
-            consume = gag + sag
+            net = d["netmv"]                                   # 순증 = 총매입 − 가공 − 사급 − 직납 + 조정 (전 공급원)
+            consume = gag_all + sag
             imp_q = sum(v["q"] for v in d["vendors"].values() if v["kind"] == "수입")
             unreliable = prim < 10 or up <= 0
             if sag > buyall * 0.3: flow = "사급재출고형"
-            elif rv > buyall * 0.3: flow = "직납"
+            elif jiknap > buyall * 0.3: flow = "직납"
             elif imp_q > buyall * 0.3: flow = "수입주도"
             elif len(d["vendors"]) > 1: flow = "다업체소싱"
             else: flow = "컴포넌트(가공소비)"
@@ -142,13 +151,15 @@ def _build(ct, fr, to):
             flags = []
             if unreliable and abs(net) > 100: flags.append("단가불명")
             if consume <= 0 and buyall > 0: flags.append("소비없음")
-            if (not unreliable) and net > 0 and net > buyall * 0.2 and net_amt > 3_000_000: flags.append("순증과다")
+            big = (not unreliable) and net > 0 and net > buyall * 0.2 and net_amt > 3_000_000
+            if big: flags.append("순증과다")
+            if big and stock < net * 0.5: flags.append("재고미확인")   # ★순증만큼 실재고 없음(과매입 미실현/이상)
             if sag > buyall * 1.05: flags.append("사급>매입")
             out.append({
                 "item": k, "name": nm.get(k, ""),
-                "buy_q": round(prim), "buy_amt": round(d["prim_amt"]), "buy_all": round(buyall),
-                "gagong": round(gag), "sagub": round(sag), "adj": round(adj),
-                "consume": round(consume), "net": round(net), "net_amt": net_amt,
+                "buy_q": round(prim), "buy_amt": round(d["prim_amt"]), "buy_all": round(buyall), "other_q": round(other),
+                "gagong": round(gagong), "jiknap": round(jiknap), "sagub": round(sag), "adj": round(adj),
+                "consume": round(consume), "net": round(net), "net_amt": net_amt, "stock": round(stock),
                 "recv": round(rv), "flow": flow, "flags": flags,
                 "vendors": sorted(d["vendors"].values(), key=lambda x: -x["q"]),
                 "n_codes": len(d["raw_codes"]),
