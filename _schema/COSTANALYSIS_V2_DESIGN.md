@@ -725,7 +725,8 @@ cg=5 직납 → 제외
 - **★identity 검증(핵심 안전장치, 2026-08-22)**: V2를 **빈 오버라이드맵(=V1과 동일 원소재가격)**으로 실행 → PQ060903E30·AJR30027702·PQ060905R01(오버라이드시 바뀌는 제품들조차) **jae/gagong/ilban/profit/sonik 전부 Δ=0.00 DIFF0**. → V2는 원소재 단가 외 아무것도 안 바꿈 증명. 비교표에서도 사급품 12/22 완전동일(=).
 - **결과값 실측(22제품, 260630)**: 10개만 변화·12개 사급품 동일. 최대 PQ060903E30(설치고강도) 손익 −2,974(−8.6%pt). 실원가합 V1 2,668,331→V2 2,668,897(+566, 상쇄). 방향=실매입>사급가면 손익↓/반대면↑.
 - **엔드포인트 `/api/cost/nx_v2`** 추가(cost.py, 컴파일·런타임import OK). 반환 v1/v2/delta/sonik_delta.
-- **남은 구현**: SCREEN.costanalysis_v2 연결(V1대비 표시) + 전스코프(253) V1vsV2 검증표 + 백엔드 재기동 라이브확인.
+- **★프론트·배치 완성(2026-08-22)**: `/api/cost/nx/bulk_v2`(엔진2개 V1·V2패치 배치, 응답=V1필드+v2_silwon/v2_sonik/v2_delta superset). SCREEN.costanalysis_v2 배선: bulk→bulk_v2·buildRow 28칸(r25 V2실원가·r26 V2손익·r27 Δ실원가)·NUM에 'V2 실매입' 그룹 3컬럼·g1헤더 그룹추가. V1화면(costanalysis) 무변경(라인범위 스코프 편집). index.html ?v=2608221. 배치 sanity: 사급품 Δ0·PQ060903E30 +2974·AJR30027702 −2023(cost_v2와 일치).
+- **Phase 1 완료 = dev만·미배포**. 남음: 전스코프(253) V1vsV2 검증표 + 백엔드 재기동 라이브확인 + (승인후)배포. Phase 후속: 용접 공정분리·R02 route-aware·매입SUB 실매입가.
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
