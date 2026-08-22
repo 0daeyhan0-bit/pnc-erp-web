@@ -114,7 +114,7 @@ SCREEN.matverify=(c)=>{
   const ymd2iso=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
   const todayIso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const m1Iso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};   // 당월 1일
-  const flagColor=f=>({'소비없음':'#c0392b','순증과다':'#c0392b','재고미확인':'#c0392b','재고음수':'#c0392b','사급>매입':'#b8860b'}[f]||'#8a5a1a');
+  const flagColor=f=>({'소비없음':'#c0392b','순증과다':'#c0392b','재고미확인':'#c0392b','재고음수':'#c0392b','사급>매입':'#b8860b','정본미커버':'#888'}[f]||'#8a5a1a');
   const flowColor=f=>({'직납':'#1c7c3a','사급재출고형':'#8a5a1a','다업체소싱':'#1c47a0','컴포넌트(가공소비)':'#555'}[f]||'#555');
   let rows=[], vend=[], sel=null, loading=false, msg='', begym='';
   const buildVend=()=>{
@@ -139,7 +139,7 @@ SCREEN.matverify=(c)=>{
     loading=false;renderLeft();
     c.querySelector('#mv-rhead').innerHTML='<div class="s-item">← 좌측에서 업체를 클릭하세요</div>';
     c.querySelector('#mv-rbody').innerHTML='';
-    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · <b>순증=매입−가공출고−사급출고±조정</b>(실측 자재수불) · 매입=확정입고+수입 · <b>순증 크면 과입고 후보(단정 아님, 사람이 검토)</b>`;
+    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · <b>순증=매입−가공출고−사급출고±조정</b>(실측) · 기초·실재고·재고증감=<b>정본(자재일마감 이동평균)</b> · <b>순증≫재고증감=과매입 미실현(재고미확인)</b> · 단정 아님, 사람이 검토`;
   };
   c.innerHTML=`
    <div class="mv-screen" style="display:flex;flex-direction:column;height:100%">
@@ -201,8 +201,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','기초','협력사(입고)','타협력사(입고)','가공','사급','직납','조정','순증','순증액','실재고','비고','공급원(전체)','흐름'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.beg,r.vq,(+r.buy_all||0)-(+r.vq||0),r.gagong,r.sagub,r.jiknap,r.adj,r.net,r.net_amt,r.stock,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow])));
+    const hd=['업체','품번','품명','기초(정본)','협력사(입고)','타협력사(입고)','가공','사급','직납','조정','순증(실측)','순증액','재고증감(정본)','실재고(정본)','비고','공급원(전체)','흐름'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.beg,r.vq,(+r.buy_all||0)-(+r.vq||0),r.gagong,r.sagub,r.jiknap,r.adj,r.net,r.net_amt,r.off_chg,r.stock,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };

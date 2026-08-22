@@ -669,5 +669,21 @@ cg=5 직납 → 제외
 ### V2 원가와의 관계
 - 원가는 통합 후 **단일 정본(route_alloc 활성경로)** 만 참조. STEP-U1/U2는 조달 축 정리 → 원가는 §5S route-aware 설계 그대로 얹힘.
 
+## §6P. Phase 1 착수 — 직거래 원소재 실매입가 (2026-08-22, 구현·검증)
+
+사용자: "Phase 1을 착수해" + "검증과 기록은 필수" + 직거래 판정 **(B) usage 단위** 선택.
+
+### 확정·검증된 사실
+- **매입 입고 tag = `PU_T_STOCK_MAINT.maint_tag='9'`**(원소재 avgcost 21,938). 컬럼=maint_ymd/maint_tag/cust_code/mat_code/maint_qty/maint_cost.
+- **사급 vendor set = `nx.mgmt_vendor_gubun`(override_gubun '사급': 2235/2236/2237/2238) ∪ `CM_M_CUST.cust_type='1'`**(1010/1020/1030 LG 등). 31개.
+- **★직거래 실매입가 맵 = tag9 매입 중 사급vendor 제외 가중평균**(2601~). **검증 PASS**(설계 known값 정확일치): 7072AR9374N=**20,316**(§5J LS메탈2151 일치)·7072AR9374M=19,601·MJU66885911-3M=21,564·3H00627L=22,296. 직구매>사급 확인(N: 직20,316>사19,038).
+- **★cut_gubun은 제품(sgroup110 ASSY)에만**(절삭3635·설치273·분지관114·공백21297). **원소재(sgroup210)는 전부 공백**. → per-usage 판정=**루트 제품 cut_gubun**(원소재 자체 아님). 다단계BOM이라 원소재는 중간SUB(제작동관) 밑 깊이.
+- ★핵심 긴장: 사용자 관심 직거래품=**사급전환 안 된 절삭 원소재**(절삭 제품 안). "절삭=사급/설치=직거래" 단순 cut규칙으론 못잡음(R-1 "전환된것/아닌것"). +0.71억(§5Q)은 **per-품번 매입gap**이지 제품손익 아님(엔진 재계산 필요, §5Q:567).
+
+### per-usage 규칙 확정 = 진단중
+- 후보 신호: (a)원소재 직구매매입 존재(사급전환 안됨) (b)제품 cut_gubun (c)사급 불출(tag5). 이중사용 원소재(7072AR9374N: 직구매+사급 둘다) 처리가 관건.
+- **진단(v2_diag)**: 스코프 리시빙상위20 제품×엔진 silwon_nodes → 원소재노드별 (제품cut/직구매실매입/사급매입/엔진mat) 매입지형 실측 → 규칙 데이터확정.
+- V2 래퍼: nodes=engine.silwon_nodes(item,ymd); 직거래 원소재노드 mat→실매입가×wt×qty(fallback 사급가); delta 누적; V2_실원가=silwon+delta. 엔진 원본 무변경.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
