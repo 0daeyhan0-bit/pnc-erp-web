@@ -592,6 +592,7 @@ cg=5 직납 → 제외
 | 2026-08-22 | Q1 make_type '2' | 사용자 판단중 | 종류별 샘플 제공(make_type2_by_group.txt): 외주/협력 in_cust(MTS·두진·중앙정밀·태영·대원·미래·이젠터·둔안·토탈솔루션 등) 전 prod_group 분포. cg 2/3/1/빈 혼재 |
 | 2026-08-22 | Q3 설치 3개 사급 | 사용자 확인중 | — |
 | 2026-08-22 | R-2 직거래 원소재 재료비 소스 | **이동평균 마감가(mat_stock_daily) 방향**(대사 추천, 사용자 검토중) | 소비원가 회계정합·매입추종 92%·일단위·이미구축. vs 확정입고(매입shock 보조) |
+| 2026-08-22 | §5R 협력사 routing 분리 원가반영 | **(B) 매입가 거래처 오버라이드(소스=routing_edge.wc)** but **실효≈0** | 계획서 생산 기록=soyo STEP7 routing_edge.wc override. 검증축=wc(생산처)≠vendor_resolved. 실측: 협력사노드 5,490 중 in_cust≠wc 단1건 → 이미정합. 래퍼는 wc_user편집·in_cust공백만 재지정(안전장치·미래추종), 나머지 in_cust 유지 |
 | 2026-08-22 | ★음수재고/무가격 정리 시점 | **지금 원장 정리 금지 → 마이그가 소유** | 음수=레거시실적 재현(우리버그 아님). 지금 원장 손대면 마이그 재고 true-up과 이중조정·드리프트. 신규ERP 단계게이팅은 컷오버때 적용 [[newerp-stock-gating-close-lock]]. **V2는 읽기시점 fallback(avg=0/음수→소재단가/직전유효/매입가)으로 원장무변경·마이그무영향·재료비정확** |
 
 ## §5R 협력사 BOM분리→routing 이관의 원가 반영 (2026-08-22 실측)
@@ -612,9 +613,20 @@ cg=5 직납 → 제외
 - routing_edge `vendor_resolved` = 실제 협력사(명진 등). **둘이 어긋나면 매입가 단가가 틀어짐.**
 - 단 전개제외 부품은 개별 전개 안 되고 상위 명진 SUB가 통째 매입되므로, SUB의 in_cust만 맞으면 총액은 정합. **리스크는 "SUB의 in_cust가 실제 협력사와 다르게 등록된 경우"에 국한.**
 
-### V2 반영 방향 (택1, 사용자 확인 대기)
-- **(A) 검증만**: 엔진 무변경. in_cust≠vendor_resolved인 외주완성 SUB의 매입가 실단가가 실제 협력사 정산가와 맞는지 실측만. 어긋난 품목만 보고.
-- **(B) 오버라이드**: V2 래퍼가 외주완성 노드 매입가의 거래처를 `routing_edge.vendor_resolved`로 재지정(직거래 원소재 실매입가 오버라이드와 동일 패턴, 엔진 원본 무변경). 클린 nextgen 구조 반영.
+### V2 반영 방향 (사용자 결정: (B) 매입가 거래처 오버라이드, 2026-08-22)
+- 사용자 근거: "생산계획·협력사계획에 어느 정도 검증이 됐다고 봐서" → routing_edge 판정을 원가가 차용해도 안전.
+
+### ★계획서를 routing_edge로 생산한 기록 (soyo.py 실측)
+- **[soyo.py:478-489] `_step7_sql`**: 생산계획 자재소요(compose_mat→nx.plan_part_mat) 생성 시 각 부품의 **생산처(work_center)를 품목마스터 대신 `routing_edge.wc`에서 오버라이드**. `ov_wc=ISNULL(routing_edge.wc, 마스터default)`.
+- **[soyo.py:525-553] `_routing_edge_sync`**(편집보존): `wc_live`=라이브 PR_M_ITEM 시드, `wc_user`=사용자편집(NULL=미편집), **유효 wc=COALESCE(wc_user,wc_live)**. gubun=EXCEPT→전개제외/SAGUB→사급.
+- ➡️ 검증된 축은 `vendor_resolved`가 아니라 **`wc`(생산처)**. 협력사 부품이면 wc=협력사코드. **(B)의 정확한 소스 = routing_edge.wc**(계획이 실제 검증·사용한 필드).
+
+### ★실측 규모 (2026-08-22) — 이미 정합, 오버라이드 실효 ≈ 0
+- routing_edge.wc가 협력사(거래처)코드인 노드 = **5,490**.
+- 그중 **품목마스터 in_cust ≠ routing.wc = 단 1건**(`MJU66998702-1`: in_cust 공백→wc=2280).
+- ∴ **협력사 routing 분리는 원가에 이미 정확 반영**(wc_live가 in_cust와 동일 마스터에서 시드 → 5,489/5,490 일치). 원가엔진 in_cust ≡ 계획 wc.
+- **(B)의 현재 실효 = 1건**(in_cust 공백 노드 매입가 vendor 확보). **전방위 가치 = 앞으로 wc_user 편집(협력사 재배정)이 생기면 원가가 자동 추종**하는 얇은 안전장치.
+- **결정**: V2 래퍼에 `wc_user≠''`(사용자편집) OR `in_cust 공백` 노드만 매입가 vendor를 routing_edge.wc로 재지정. 나머지는 in_cust 그대로(=현행 정합 유지). 엔진 원본 무변경.
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
