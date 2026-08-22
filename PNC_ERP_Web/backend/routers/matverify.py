@@ -167,7 +167,7 @@ def _build(ct, fr, to):
                 "consume": round(consume), "net": round(net), "net_amt": net_amt, "stock": round(stock),
                 "recv": round(rv), "flow": flow, "flags": flags,
                 "vendors": sorted(d["vendors"].values(), key=lambda x: -x["q"]),
-                "n_codes": len(d["raw_codes"]),
+                "n_codes": len(d["raw_codes"]), "raws": sorted(d["raw_codes"]),
             })
         out.sort(key=lambda x: -x["net_amt"])
         return {"ct": ct, "fr": fr, "to": to, "count": len(out), "rows": out}
