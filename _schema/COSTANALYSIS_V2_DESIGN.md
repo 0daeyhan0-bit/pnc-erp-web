@@ -820,5 +820,24 @@ cg=5 직납 → 제외
 - 이동평균=올바른 원가기준, **단 소비시점(월별) 가중 적용**. 단일 as-of 금지.
 - 미해결: 재고 commingled 여부(사급/직구매 풀분리)=사용자 확인.
 
+## §12. ★이론/실제 토글 + 월별매칭 실제손익 검증 (2026-08-23, 사용자)
+
+사용자: "이론 프로그램과 실제 원가 프로그램 선택 토글" = ①해당날짜 판가기준 손익(이론) ②실제 결과 손익(실제).
+
+### 토글 설계
+| | 이론(표준·as-of) | 실제(실적·월별매칭) |
+|---|---|---|
+| 판가 | 엔진 LG판가 단일 as-of | **리시빙 실적 가중평균 Σ(판가×수량)/Σ수량** |
+| 재료비 | 사급가/실매입 기준일단가 | **이동평균(그달 소비시점)** |
+| 기간 | 단일시점 | **월별 매칭(판가·원가 같은달)** |
+| 상태 | 구축완료(V2) | 신규(월별매칭) |
+
+### ★실제손익 월별매칭 검증 (actual2.txt) — 논리정상화 확인
+- **AJR30027702: 기준불일치 −34,888(인위적적자) → 월별매칭 +14,495흑자(총+29.4M)**. 논리해소.
+- 실제 vs 이론 제품별 상이(둘다 sensible): PQ060903E30 실제+4,740 vs 이론+6,864(총 실제 +0.91억)·AJR30133601 +16,820 vs +14,543·AJR75563503 −205 vs +489.
+- **월별매칭 공식**: `실제손익 = Σ_월[ 리시빙매출(그달) − (이동평균재료비+가공비+일반+이윤 그달)×수량 ]`. 판가·원가 같은달=논리성립.
+- 재고 commingled=사급vendor(LS메탈-사급2237·Hailiang2238)만·나머지 직거래. mat_stock_daily=mat_code단일풀=commingled 확인→이동평균=실제소비원가 정합.
+- **다음**: bulk_v2 mode=이론|실제 param + SCREEN 토글 + 실제모드 월별 집계 구현.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
