@@ -126,9 +126,12 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
     if it: rows = [r for r in rows if it in (r["assy"] or "").upper()]
     if pt: rows = [r for r in rows if pt in (r["jado"] or "").upper()]
     # ★생산파트/사급업체는 SP 인자로 넘겨도 SP가 무시한다(실측: S5/S1/% 모두 384행 동일).
-    #   레거시도 화면단에서 거르는 구조 → 결과에서 필터. 생산파트 = gagong_proc_code.
+    #   레거시도 화면단에서 거르는 구조 → 결과에서 필터.
+    #   ★생산파트 = GOLE_GAGONG_PROC_CODE(조달가공공정=납품처를 정하는 값). gagong_proc_code 로 거르면
+    #     사급건(GOLE_GAGONG_PROC_CODE 공란, 납품처=업체명)이 섞여 들어온다.
+    #     실측 2026-08-22: S5 기준 gagong_proc_code=48행(대원산업 1건 혼입) vs GOLE_=47행(전부 01라인(용접)).
     pp = (pr_part or "").strip()
-    if pp and pp != "%": rows = [r for r in rows if r["gagong_proc"] == pp]
+    if pp and pp != "%": rows = [r for r in rows if r["gole_proc"] == pp]
     sg = (sagub or "").strip()
     if sg: rows = [r for r in rows if r["gole_cust"] == sg]
     m = mv.strip()

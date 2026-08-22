@@ -729,7 +729,8 @@ SCREEN.gagongmove580=(c)=>{
     if(it) rows=rows.filter(r=>(r.assy||'').toUpperCase().includes(it));
     if(pt) rows=rows.filter(r=>(r.jado||'').toUpperCase().includes(pt));
     // ★생산파트·사급업체도 클라이언트 필터(SP가 해당 인자를 무시하므로 결과에서 거른다 = 레거시와 동일 구조)
-    if(st.prPart) rows=rows.filter(r=>r.gagong_proc===st.prPart);
+    //   생산파트 = gole_proc(GOLE_GAGONG_PROC_CODE). 납품처를 정하는 값이라 사급건은 자연히 제외된다.
+    if(st.prPart) rows=rows.filter(r=>r.gole_proc===st.prPart);
     if(st.sagub) rows=rows.filter(r=>r.gole_cust===st.sagub);
     if(st.mv==='이동필요') rows=rows.filter(r=>r.need>0);
     else if(st.mv==='이동완료') rows=rows.filter(r=>r.need<=0);
