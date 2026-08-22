@@ -84,13 +84,27 @@ def _build(ct, fr, to):
             SUM(CASE WHEN MAINT_TAG='3' THEN 0 ELSE CONVERT(float,ISNULL(MAINT_QTY,0)) END) netmv
           FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", fr, to)
         mv = {_U(r[0]): {"gagong": float(r[1] or 0), "sagub": float(r[2] or 0), "adj": float(r[3] or 0), "netmv": float(r[4] or 0)} for r in cu.fetchall()}
-        # ★실재고(조회일 기준) = 전기간 누적(≤to): PU 전 태그 + 수입(_C). — 순증만큼 실제 재고 있는지 대조(비고)용.
-        #   ※수입 유입은 _C(PU 밖)라 반드시 합산해야 실재고 양수 정합(안 하면 수입소비분이 음수로 남음).
+        # (참고) 전이동 누적 재고(≤to): PU 전 태그 + 수입(_C). — 실재고 표시엔 안 씀(정본=자재일마감 사용). 내부 참고만.
         cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD <= ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
         stock_cum = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
         cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT_C WHERE MAINT_YMD <= ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
         for r in cu.fetchall():
             m = _U(r[0]); stock_cum[m] = stock_cum.get(m, 0.0) + float(r[1] or 0)
+        # ★정본재고 = 자재일마감(이동평균) nx.mat_stock_daily. 실재고=정본기말(≤to)·기초=정본기초(<fr).
+        #   ※matverify는 스냅샷을 저장하지 않고 정본을 조회만(read-only). 정확코드→base 폴딩. 미커버=정본이 추적 안 하는 품목.
+        off_end, off_beg, off_cov = {}, {}, set()
+        cu.execute("""SELECT mat_code, stock_qty FROM (
+              SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, CONVERT(float,ISNULL(stock_qty,0)) stock_qty,
+                     ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(mat_code))) ORDER BY ymd DESC) rn
+              FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd <= ?) t WHERE rn=1""", to)
+        for mc, q in cu.fetchall():
+            off_end[_U(mc)] = float(q or 0); off_cov.add(_U(mc))
+        cu.execute("""SELECT mat_code, stock_qty FROM (
+              SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, CONVERT(float,ISNULL(stock_qty,0)) stock_qty,
+                     ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(mat_code))) ORDER BY ymd DESC) rn
+              FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd < ?) t WHERE rn=1""", fr)
+        for mc, q in cu.fetchall():
+            off_beg[_U(mc)] = float(q or 0)
         # 수입(_C)은 netmv(PU)에 없음 → 순증에 별도 가산
         imp_net = {}
         for m, cc, cnm, cty, kind, q, amt in sup:
@@ -104,7 +118,8 @@ def _build(ct, fr, to):
         items = {}
         def _it(k): return items.setdefault(k, {"item": k, "buy_all": 0.0, "prim_q": 0.0, "prim_amt": 0.0,
                                                  "gagong": 0.0, "sagub": 0.0, "adj": 0.0, "netmv": 0.0, "recv": 0.0,
-                                                 "stock": 0.0, "vendors": {}, "raw_codes": set()})
+                                                 "stock": 0.0, "off_end": 0.0, "off_beg": 0.0, "off_cov": False,
+                                                 "vendors": {}, "raw_codes": set()})
         for m, cc, cnm, cty, kind, q, amt in sup:
             k = base(m)
             if k not in prim_bases or q == 0: continue
@@ -125,9 +140,15 @@ def _build(ct, fr, to):
         for m, q in recv.items():
             k = base(m)
             if k in items: items[k]["recv"] += q
-        for m, q in stock_cum.items():                 # 실재고(≤to 누적, PU)
+        for m, q in stock_cum.items():                 # (참고) 전이동 누적, PU — 표시 안 함
             k = base(m)
             if k in items: items[k]["stock"] += q
+        for m, q in off_end.items():                    # ★정본기말(자재일마감) → 실재고
+            k = base(m)
+            if k in items: items[k]["off_end"] += q; items[k]["off_cov"] = True
+        for m, q in off_beg.items():                    # ★정본기초(자재일마감) → 기초
+            k = base(m)
+            if k in items: items[k]["off_beg"] += q
 
         # 품명
         cu.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM PARTNER_ERP_TEST3.nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -152,20 +173,29 @@ def _build(ct, fr, to):
             elif len(d["vendors"]) > 1: flow = "다업체소싱"
             else: flow = "컴포넌트(가공소비)"
             net_amt = 0 if unreliable else round(net * up)
+            # ★정본재고(자재일마감). 미커버=정본이 이 품목을 추적 안 함 → 실재고 확인 불가(빈값).
+            cov = d["off_cov"]
+            off_e = d["off_end"] if cov else None      # 실재고(정본기말)
+            off_b = d["off_beg"] if cov else None       # 기초(정본기초)
+            off_chg = (off_e - off_b) if cov else None  # 정본 재고증감(=기말−기초)
             flags = []
             if unreliable and abs(net) > 100: flags.append("단가불명")
             if consume <= 0 and buyall > 0: flags.append("소비없음")
             big = (not unreliable) and net > 0 and net > buyall * 0.2 and net_amt > 3_000_000
             if big: flags.append("순증과다")
-            if big and stock < net * 0.5: flags.append("재고미확인")   # ★순증만큼 실재고 없음(과매입 미실현/이상)
-            if stock < -max(buyall * 0.05, 100): flags.append("재고음수")   # 실재고 음수=불가능(데이터 이상)
+            # ★순증만큼 정본재고가 실제로 늘었는지 대조: big인데 정본증감이 순증에 크게 못 미침 = 과매입 미실현(통과/타창고)
+            if big and cov and off_chg is not None and off_chg < net * 0.5: flags.append("재고미확인")
+            if big and not cov: flags.append("정본미커버")   # 정본(자재일마감)이 추적 안 함 → 실재고 대조 불가
+            if cov and off_e is not None and off_e < -100: flags.append("재고음수")   # 정본재고 음수=데이터 이상
             if sag > buyall * 1.05: flags.append("사급>매입")
             out.append({
                 "item": k, "name": nm.get(k, ""),
-                "beg": round(stock - net),   # 기초재고(조회 시작 전) = 실재고 − 순증
+                "beg": (round(off_b) if off_b is not None else None),   # 기초(정본기초, 자재일마감)
                 "buy_q": round(prim), "buy_amt": round(d["prim_amt"]), "buy_all": round(buyall), "other_q": round(other),
                 "gagong": round(gagong), "jiknap": round(jiknap), "sagub": round(sag), "adj": round(adj),
-                "consume": round(consume), "net": round(net), "net_amt": net_amt, "stock": round(stock),
+                "consume": round(consume), "net": round(net), "net_amt": net_amt,
+                "stock": (round(off_e) if off_e is not None else None),   # 실재고(정본기말, 자재일마감)
+                "off_chg": (round(off_chg) if off_chg is not None else None), "off_cov": cov,
                 "recv": round(rv), "flow": flow, "flags": flags,
                 "vendors": sorted(d["vendors"].values(), key=lambda x: -x["q"]),
                 "n_codes": len(d["raw_codes"]),

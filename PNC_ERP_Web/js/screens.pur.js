@@ -161,7 +161,7 @@ SCREEN.matverify=(c)=>{
        <div style="flex:1;min-width:0;display:flex;flex-direction:column">
          <div class="summary-bar" id="mv-rhead" style="flex:0 0 auto"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
          <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit mv-dtl"><thead>
-           <tr class="grp"><th rowspan="2">품번</th><th rowspan="2">품명</th><th rowspan="2" class="num">기초</th><th colspan="2" class="ghd">입고</th><th colspan="4" class="ghd">출고</th><th rowspan="2" class="num">순증</th><th rowspan="2" class="num">순증액</th><th rowspan="2" class="num">실재고</th><th rowspan="2">비고</th><th rowspan="2" style="min-width:160px">공급원(전체)</th><th rowspan="2">흐름</th></tr>
+           <tr class="grp"><th rowspan="2">품번</th><th rowspan="2">품명</th><th rowspan="2" class="num" title="정본(자재일마감 이동평균) 기초재고">기초</th><th colspan="2" class="ghd">입고</th><th colspan="4" class="ghd">출고</th><th rowspan="2" class="num" title="실측: 매입−가공−사급−직납±조정">순증</th><th rowspan="2" class="num">순증액</th><th rowspan="2" class="num" title="정본 재고증감 = 실재고 − 기초. 순증과 대조(순증≫재고증감=과매입 미실현)">재고증감</th><th rowspan="2" class="num" title="정본(자재일마감 이동평균) 기말재고">실재고</th><th rowspan="2">비고</th><th rowspan="2" style="min-width:160px">공급원(전체)</th><th rowspan="2">흐름</th></tr>
            <tr><th class="num">협력사</th><th class="num">타협력사</th><th class="num">가공</th><th class="num">사급</th><th class="num">직납</th><th class="num">조정</th></tr>
          </thead><tbody id="mv-rbody"></tbody></table></div>
        </div>
@@ -186,10 +186,13 @@ SCREEN.matverify=(c)=>{
       const netc=(r.net||0)>0?'color:#c0392b;font-weight:600':((r.net||0)<0?'color:#1c7c3a':'');
       const src=(r.vendors||[]).map(v=>`<span style="color:${v.kind==='수입'?'#c0392b':(v.kind==='기타'?'#b8860b':'#1c47a0')}">${esc(v.name||v.code)}<span style="font-size:9px;color:#999">(${esc(v.tname||'')})</span> ${won(v.q)}</span>`).join(' · ');
       const other=(+r.buy_all||0)-(+r.vq||0);
-      const stkc=((+r.net||0)>0 && (+r.stock||0)<(+r.net||0)*0.5)?'color:#c0392b;font-weight:600':'color:#555';
-      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num" style="color:#888">${won(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(other)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.jiknap?won(r.jiknap):''}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="${stkc}">${won(r.stock)}</td><td>${fl}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td></tr>`;
+      const nn=x=>(x==null?'<span style="color:#bbb">-</span>':won(x));
+      // 순증(실측) 크게 양수인데 정본 재고증감이 못 미침 = 과매입 미실현 → 재고증감 강조
+      const chgc=((+r.net||0)>0 && r.off_chg!=null && (+r.off_chg||0)<(+r.net||0)*0.5)?'color:#c0392b;font-weight:600':'color:#555';
+      const stkc=r.off_cov?'color:#555':'color:#bbb';
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num" style="color:#888">${nn(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(other)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.jiknap?won(r.jiknap):''}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="${chgc}">${nn(r.off_chg)}</td><td class="num" style="${stkc}">${nn(r.stock)}</td><td>${fl}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td></tr>`;
     }).join('');
-    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="15" class="empty">품목 없음</td></tr>`;
+    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="16" class="empty">품목 없음</td></tr>`;
     c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 총매입·가공출고·사급출고·순증=품목 전체(전 업체)</div>`;
     if(typeof attachResizers!=='undefined')attachResizers(c);
   };
