@@ -816,7 +816,9 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center">${nf(r.qty)}</td>
         <td class="center">${r.confirmed?'<span style="color:#1c7c3a">✔입고확인</span>':'<span style="color:#c0392b">미확정</span>'}</td>
         <td class="center">${r.confirmed?esc((r.confirm_dt||'').slice(0,16)):'·'}</td><td class="center">${esc(r.confirm_user)||'·'}</td>
-        <td class="center"><button class="btn sm sheet-print" data-g="${r.group_seq}" style="padding:2px 8px;font-size:11px">🖨</button></td></tr>`).join('')
+        <td class="center" style="white-space:nowrap">
+          <button class="btn sm sheet-print" data-g="${r.group_seq}" data-k="card" title="부품납품표(개별카드)" style="padding:2px 6px;font-size:11px">🖨납품표</button>
+          <button class="btn sm sheet-print" data-g="${r.group_seq}" data-k="list" title="부품확인/납품표(묶음)" style="padding:2px 6px;font-size:11px">🖨확인표</button></td></tr>`).join('')
         :`<tr><td colspan="13" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
   };
   const draw=()=>{
@@ -879,7 +881,8 @@ SCREEN.gagongmove580=(c)=>{
       el.onkeyup=e=>{if(e.key==='Enter')g('#mv-search').click();};});
     if(isSheet){
       c.querySelectorAll('input[name=mv-cf]').forEach(rd=>rd.onchange=()=>{st.confirm=rd.value;refilter();});
-      c.querySelectorAll('.sheet-print').forEach(btn=>btn.onclick=()=>printMoveSheets(+btn.dataset.g,+btn.dataset.g));
+      c.querySelectorAll('.sheet-print').forEach(btn=>btn.onclick=()=>{
+        const k=btn.dataset.k; printMoveSheets(+btn.dataset.g,+btn.dataset.g,{card:k==='card',list:k==='list'});});
       return;
     }
     c.querySelectorAll('input[name=mv-f]').forEach(rd=>rd.onchange=()=>{st.mv=rd.value;refilter();});
@@ -947,12 +950,13 @@ function openMoveModal(st,dates){
       list.forEach(p=>{
         if(!p.mat)return;
         const k=r.assy+' '+p.mat;
-        const prev=acc.get(k)||{assy:r.assy,mat:p.mat,qty:0};
+        const prev=acc.get(k)||{assy:r.assy,mat:p.mat,qty:0,gole_proc:r.gole_proc||'',gole_cust:r.gole_cust||'',nm:r.nm||''};
         prev.qty+=outQty;                       // 자도번별로 각각 출고수량 적용(레거시 동일)
         acc.set(k,prev);
       });
     }
-    for(const v of acc.values())rows.push({item_code:v.assy,mat_code:v.mat,item_desc:'',set_qty:v.qty,use_qty:1,maint_qty:v.qty,remarks:''});
+    for(const v of acc.values())rows.push({item_code:v.assy,mat_code:v.mat,item_desc:v.nm,set_qty:v.qty,use_qty:1,maint_qty:v.qty,remarks:'',
+                                            gole_proc:v.gole_proc,gole_cust:v.gole_cust});
   }
   // 빈 행은 5줄만(레거시는 50줄이지만 화면을 넘겨 스크롤 유발 — 필요하면 행추가로).
   while(rows.length<5)rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});
@@ -988,8 +992,12 @@ function openMoveModal(st,dates){
           <td><input class="inp mm-f" data-i="${i}" data-k="maint_qty" type="number" value="${r.maint_qty||''}" style="text-align:center;font-weight:700;background:#fffbe6" title="직접 수정 가능(SET×사용 자동계산값을 덮어씀)"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}"></td></tr>`).join('')}</tbody></table>
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:8px 12px;border-top:1px solid #e5e9f0">
-        <label class="rl" style="margin-right:auto"><input type="checkbox" id="mm-doprint" checked> 저장 시 납품표 자동인쇄</label>
+      <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:8px 12px;border-top:1px solid #e5e9f0;flex-wrap:wrap">
+        <span style="margin-right:auto;display:flex;gap:12px;align-items:center">
+          <b style="font-size:12px;color:#555">저장 시 인쇄</b>
+          <label class="rl"><input type="checkbox" id="mm-pr-card" checked> 부품납품표(개별)</label>
+          <label class="rl"><input type="checkbox" id="mm-pr-list" checked> 부품확인/납품표(묶음)</label>
+        </span>
         <button class="btn" id="mm-save" style="background:#1c47a0;color:#fff">✔ 저장(이동전표 발행)</button>
         <button class="btn" id="mm-close2">닫기</button></div>
     </div>`;
@@ -1013,18 +1021,21 @@ function openMoveModal(st,dates){
     q('#mm-save').onclick=async()=>{
       const valid=state.rows.filter(r=>r.mat_code&&r.item_code&&(r.maint_qty>0));
       if(!valid.length){msg('출고수량이 있는 행이 없습니다(자도번·수량 확인).',false);return;}
-      const doPrint=q('#mm-doprint').checked;
+      const wantCard=q('#mm-pr-card').checked, wantList=q('#mm-pr-list').checked;
       q('#mm-save').disabled=true;
       try{
-        const d=await(await fetch(`${API}/api/gagong/move580/issue`,{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ymd:state.ymd,out_wh:state.out_wh,in_wh:state.in_wh,dest:state.dest,rows:valid,user:'웹'})})).json();
+        const res=await fetch(`${API}/api/gagong/move580/issue`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ymd:state.ymd,out_wh:state.out_wh,in_wh:state.in_wh,dest:state.dest,rows:valid,user:'웹'})});
+        if(!res.ok){let t='';try{t=(await res.json()).detail||'';}catch(e){t=await res.text();}
+          msg('등록 실패: '+(t||res.status),false);return;}
+        const d=await res.json();
         if(d.ok){
           msg(`✔ 이동전표 ${d.cnt}건 발행됨(전표번호 MV${String(d.group_seq_from||0).padStart(8,'0')}~MV${String(d.group_seq_to||0).padStart(8,'0')})`,true);
-          if(doPrint&&d.group_seq_from!=null)await printMoveSheets(d.group_seq_from,d.group_seq_to);
+          if((wantCard||wantList)&&d.group_seq_from!=null)await printMoveSheets(d.group_seq_from,d.group_seq_to,{card:wantCard,list:wantList});
           setTimeout(()=>{ov.remove();},900);
         }
         else msg(d.msg||'등록 실패',false);
-      }catch(e){msg('등록 실패',false);}
+      }catch(e){msg('등록 실패: '+(e&&e.message||e),false);}
       finally{const b=q('#mm-save');if(b)b.disabled=false;}
     };
   };
@@ -1032,8 +1043,11 @@ function openMoveModal(st,dates){
 }
 
 /* 부품납품표(개별카드)+부품확인/납품표(그룹묶음 8행/페이지) 인쇄 — dw_pr_input_586_p1/p2 재현.
-   group_from~group_to = MAINT_GROUP_SEQ 범위(단건이면 동일값). 바코드 = "MV"+8자리0패딩. */
-async function printMoveSheets(groupFrom,groupTo){
+   group_from~group_to = MAINT_GROUP_SEQ 범위(단건이면 동일값). 바코드 = "MV"+8자리0패딩.
+   opt={card:bool,list:bool} — 두 전표를 각각 낼지 선택(미지정=둘 다). */
+async function printMoveSheets(groupFrom,groupTo,opt){
+  const want={card:true,list:true,...(opt||{})};
+  if(!want.card&&!want.list)return;
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   let data;
@@ -1074,45 +1088,67 @@ async function printMoveSheets(groupFrom,groupTo){
       :`<tr><td></td><td></td><td></td><td></td><td></td><td class="chk"><span></span></td></tr>`).join('')}</tbody></table>
     <div class="mvl-ft">(주)피앤씨인더스트리</div>
   </div>`;
-  const w=await openPrintWin('movesheet','pncPrnMoveSheet','width=900,height=680');
-  if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>부품납품표 (${cards.length}장)</title>
-  <style>
-    @page{size:100mm 60mm;margin:3mm}
-    *{box-sizing:border-box}
-    body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:11px;color:#000}
-    .mvc{border:2px solid #000;page-break-after:always}
-    .mvc-title{text-align:center;font-size:20px;font-weight:800;padding:6px;border-bottom:2px solid #000;position:relative}
-    .mvc-no{position:absolute;right:6px;top:8px;font-size:9px;color:#666;font-weight:400}
-    .mvc table{border-collapse:collapse;width:100%}
-    .mvc td{border:1px solid #000;padding:4px 6px;font-size:12px}
-    .mvc .lb{font-weight:700;background:#f5f5f5;width:22%}
-    .mvc .big{font-size:18px;font-weight:800}
-    .mvc-ft{text-align:center;font-size:9px;padding:3px;border-top:1px solid #000}
-    .mvl{page-break-after:always}
-    .mvl-title{font-size:26px;font-weight:800;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #000;padding-bottom:4px}
-    .mvl-hd{display:flex;gap:20px;font-size:14px;padding:4px 0;border-bottom:1px solid #000}
-    .mvl table{border-collapse:collapse;width:100%;margin-top:2px}
-    .mvl th,.mvl td{border:1px solid #000;padding:4px 6px;font-size:12px;text-align:center}
-    .mvl .chk span{display:inline-block;width:14px;height:14px;border:1px solid #000}
-    .mvl-ft{text-align:center;font-size:9px;padding:4px;border-top:1px solid #000;margin-top:2px}
-    @media print{.noprint{display:none}}
-  </style></head><body>
-  <div class="noprint" style="margin-bottom:6px">
-    <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
-    <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-    <span style="font-size:12px;color:#555;margin-left:8px">부품납품표 ${cards.length}장 + 부품확인/납품표 ${listPages.length}쪽</span>
-  </div>
-  ${cards.map(cardHtml).join('')}
-  ${listPages.map(listHtml).join('')}
-  <script>
+  // ★두 전표는 용지가 다르다(카드 100×60mm / 확인표 A4) → 각각 별도 창으로 열어 프린터도 따로 기억시킨다.
+  const AUTOPRINT=`<script>
     (function(){var imgs=[].slice.call(document.images),left=imgs.length;
       function go(){setTimeout(function(){window.print();},250);}
       if(!left)return go();
       imgs.forEach(function(im){if(im.complete)done();else{im.addEventListener('load',done);im.addEventListener('error',done);}});
       function done(){if(--left<=0)go();}})();
-  <\/script></body></html>`);
-  w.document.close();
+  <\/script>`;
+  const TOOLBAR=t=>`<div class="noprint" style="margin-bottom:6px">
+    <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
+    <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
+    <span style="font-size:12px;color:#555;margin-left:8px">${t}</span></div>`;
+  if(want.card&&cards.length){
+    const w=await openPrintWin('mvcard','pncPrnMvCard','width=760,height=620');
+    if(!w)alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');
+    else{
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>부품납품표 (${cards.length}장)</title>
+      <style>
+        @page{size:100mm 60mm;margin:3mm}
+        *{box-sizing:border-box}
+        body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:11px;color:#000}
+        .mvc{border:2px solid #000;page-break-after:always}
+        .mvc-title{text-align:center;font-size:20px;font-weight:800;padding:6px;border-bottom:2px solid #000;position:relative}
+        .mvc-no{position:absolute;right:6px;top:8px;font-size:9px;color:#666;font-weight:400}
+        .mvc table{border-collapse:collapse;width:100%}
+        .mvc td{border:1px solid #000;padding:4px 6px;font-size:12px}
+        .mvc .lb{font-weight:700;background:#f5f5f5;width:22%}
+        .mvc .big{font-size:18px;font-weight:800}
+        .mvc-ft{text-align:center;font-size:9px;padding:3px;border-top:1px solid #000}
+        @media print{.noprint{display:none}}
+      </style></head><body>
+      ${TOOLBAR(`부품납품표 ${cards.length}장 · 100×60mm`)}
+      ${cards.map(cardHtml).join('')}
+      ${AUTOPRINT}</body></html>`);
+      w.document.close();
+    }
+  }
+  if(want.list&&listPages.length){
+    const w2=await openPrintWin('mvlist','pncPrnMvList','width=900,height=700');
+    if(!w2)alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');
+    else{
+      w2.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>부품확인/납품표 (${listPages.length}쪽)</title>
+      <style>
+        @page{size:A4 portrait;margin:8mm}
+        *{box-sizing:border-box}
+        body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:11px;color:#000}
+        .mvl{page-break-after:always}
+        .mvl-title{font-size:26px;font-weight:800;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #000;padding-bottom:4px}
+        .mvl-hd{display:flex;gap:20px;font-size:14px;padding:4px 0;border-bottom:1px solid #000}
+        .mvl table{border-collapse:collapse;width:100%;margin-top:2px}
+        .mvl th,.mvl td{border:1px solid #000;padding:4px 6px;font-size:12px;text-align:center}
+        .mvl .chk span{display:inline-block;width:14px;height:14px;border:1px solid #000}
+        .mvl-ft{text-align:center;font-size:9px;padding:4px;border-top:1px solid #000;margin-top:2px}
+        @media print{.noprint{display:none}}
+      </style></head><body>
+      ${TOOLBAR(`부품확인/납품표 ${listPages.length}쪽 · A4`)}
+      ${listPages.map(listHtml).join('')}
+      ${AUTOPRINT}</body></html>`);
+      w2.document.close();
+    }
+  }
 }
 
 /* ===== 생산: 가공전표이력현황 (w_pr_processing_010) — BOX_NO 마스터-디테일 ===== */

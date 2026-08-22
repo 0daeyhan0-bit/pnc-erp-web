@@ -169,17 +169,18 @@ def gagong_move580_issue(payload: dict = Body(...)):
     user = str(payload.get("user") or "web").strip()
     if not rows_in:
         raise HTTPException(400, "발행할 자도번이 없습니다.")
-    # work_code 판정 + 사급/사내생산 BOM전개는 item_code(도번)마다 1회만 조회(레거시 = ASSY 단위 판정).
+    # 자재구분(work_code) 판정. ★PR_M_ITEM 에는 GAGONG_PROC_CODE 컬럼이 없다(2026-08-23 실측: WORK_CODE·IN_CUST_CODE만).
+    #   조달가공공정/사급업체는 화면(SP결과)이 gole_proc·gole_cust 로 함께 넘겨주므로 그 값을 우선 사용한다.
     cn = _conn(); cur = cn.cursor()
     itemset = list({str(r.get("item_code") or "").strip() for r in rows_in if r.get("item_code")})
-    wkinfo = {}   # item_code -> {work_code, gole_gagong_proc_code, gole_in_cust_code}
+    wkinfo = {}   # item_code -> {work_code, in_cust}
     try:
         for i in range(0, len(itemset), 900):
             ck = itemset[i:i + 900]; ph = ",".join("?" * len(ck))
-            cur.execute(f"""SELECT ITEM_CODE, ISNULL(WORK_CODE,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(IN_CUST_CODE,'')
+            cur.execute(f"""SELECT ITEM_CODE, ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,'')
                 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *ck)
             for r in cur.fetchall():
-                wkinfo[str(r[0]).strip()] = {"work_code": r[1], "gagong_proc": r[2], "in_cust": r[3]}
+                wkinfo[str(r[0]).strip()] = {"work_code": r[1], "in_cust": r[2]}
     finally:
         cn.close()
     # 자재구분별 최종 전표행 조립. P2(가공)는 프론트가 넘긴 값 그대로(자기자신), 사급/사내생산은 BOM 1단계 전개.
@@ -196,15 +197,18 @@ def gagong_move580_issue(payload: dict = Body(...)):
             if maint_qty <= 0:
                 continue
             info = wkinfo.get(item_code, {})
+            # 화면이 SP 결과로 넘겨준 값 우선(gole_proc=조달가공공정, gole_cust=사급업체)
+            row_proc = str(r.get("gole_proc") or "").strip()
+            row_cust = str(r.get("gole_cust") or "").strip() or info.get("in_cust", "")
             if info.get("work_code") == "P2":
                 # 가공직납품 — 자기자신 등록(BOM전개 없음)
                 out_rows.append({"item_code": item_code, "mat_code": item_code, "item_desc": r.get("item_desc") or "",
                                   "set_qty": maint_qty, "use_qty": 1, "maint_qty": maint_qty,
-                                  "remarks": r.get("remarks") or "", "pr_part_code": info.get("gagong_proc", ""), "sagub_cust_code": ""})
+                                  "remarks": r.get("remarks") or "", "pr_part_code": row_proc, "sagub_cust_code": ""})
             else:
                 # 사급/사내생산 — mat_code(자도번) 자체가 이미 선택 대상이면 그대로, BOM 하위전개가 필요하면 1단계 조회.
-                pr_part = "" if info.get("in_cust") else info.get("gagong_proc", "")
-                sagub = info.get("in_cust", "")
+                pr_part = "" if row_cust else row_proc
+                sagub = row_cust
                 out_rows.append({"item_code": item_code, "mat_code": mat_code, "item_desc": r.get("item_desc") or "",
                                   "set_qty": set_qty, "use_qty": use_qty, "maint_qty": maint_qty,
                                   "remarks": r.get("remarks") or "", "pr_part_code": pr_part, "sagub_cust_code": sagub})
