@@ -779,15 +779,18 @@ SCREEN.gagongmove580=(c)=>{
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
-        <td class="center">${i+1}</td><td class="center">${esc(r.dest)}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${i+1}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.dest)}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer" title="클릭=이 행 전체선택 (Ctrl=추가)"><b>${esc(r.assy)}</b></td>
         <td class="center jado-cell mv-rowsel" data-i="${i}" title="${esc(r.jado)}&#10;클릭=행 전체선택 / 더블클릭=자도번 펼치기" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(jshort)} <span style="color:#8aa">(${r.matcnt})</span></td>
-        <td class="center">${dcol(r.part_ymd)}</td><td class="center">${esc(r.hm)}</td><td class="center">${esc(r.line)}</td>
-        <td class="center"${r.jp_print?'':' style="color:#dfe6ef"'}>${r.jp_print?nf(r.jp_print):'·'}</td>
-        <td class="center"${r.need>0?' style="color:#c0392b;font-weight:600"':' style="color:#dfe6ef"'}>${r.need>0?nf(r.need):'·'}</td>
-        <td class="center"${r.sale?'':' style="color:#dfe6ef"'}>${r.sale?nf(r.sale):'·'}</td>
-        <td class="center"${r.assy_stock?'':' style="color:#dfe6ef"'}>${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="center"${r.prior?` style="background:${r.prior_color||''}"`:' style="color:#dfe6ef"'}>${r.prior?`${nf(r.prior_done||0)}/${nf(r.prior)}`:'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${dcol(r.part_ymd)}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.hm)}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.line)}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.jp_print?'':';color:#dfe6ef'}">${r.jp_print?nf(r.jp_print):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef'}">${r.need>0?nf(r.need):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer;${r.prior?`background:${r.prior_color||''}`:'color:#dfe6ef'}">${r.prior?`${nf(r.prior_done||0)}/${nf(r.prior)}`:'·'}</td>
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,bg=(r.colorday&&r.colorday[d])||'';
           if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const key=`${i}:${d}`, on=st.sel.has(key);
@@ -884,7 +887,7 @@ SCREEN.gagongmove580=(c)=>{
     ['#mv-wc','#mv-pupart'].forEach(id=>g(id).onchange=()=>g('#mv-search').click());
     g('#mv-prpart').onchange=()=>{st.prPart=g('#mv-prpart').value.trim();refilter();};
     g('#mv-sagub').onchange=()=>{st.sagub=g('#mv-sagub').value.trim();refilter();};
-    c.querySelectorAll('.jado-cell').forEach(el=>el.ondblclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
+    c.querySelectorAll('.jado-cell').forEach(el=>el.ondblclick=e=>{e.stopPropagation();const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
     // ★셀 드래그선택(레거시 DataWindow.Selected.Mouse 재현).
     //   재렌더(draw)하면 DOM이 새로 만들어져 mouseover가 끊긴다 → 드래그 중에는 style만 갱신(2026-08-22 수정).
     let dragging=false,startCell=null;
@@ -901,9 +904,14 @@ SCREEN.gagongmove580=(c)=>{
       dates.forEach(d=>{if((st.rows[i].days||{})[d])st.sel.add(`${i}:${d}`);});paint();};
     c.querySelectorAll('.mv-rowsel').forEach(el=>el.onclick=e=>selRow(+el.dataset.i,e.ctrlKey||e.metaKey));
     c.querySelectorAll('.mv-cell[data-key]').forEach(el=>{
-      el.addEventListener('mousedown',e=>{dragging=true;startCell={i:+el.dataset.i,d:el.dataset.d};
+      // ★왼쪽 버튼(e.button===0)일 때만 드래그. 우클릭/휠클릭은 무시(브라우저 기본동작 유지).
+      el.addEventListener('mousedown',e=>{
+        if(e.button!==0)return;
+        dragging=true;startCell={i:+el.dataset.i,d:el.dataset.d};
+        if(!(e.ctrlKey||e.metaKey))st.sel.clear();
         applySel(startCell.i,startCell.i,startCell.d,startCell.d);paint();e.preventDefault();});
-      el.addEventListener('mouseover',()=>{if(dragging&&startCell){applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d);paint();}});
+      el.addEventListener('mouseover',e=>{
+        if(dragging&&startCell&&(e.buttons&1)){applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d);paint();}});
     });
     if(!c._mvUp){c._mvUp=true;document.addEventListener('mouseup',()=>{dragging=false;});}
     g('#mv-move').onclick=()=>openMoveModal(st,dates);
@@ -925,18 +933,27 @@ function openMoveModal(st,dates){
   const rows=[];   // {seq,item_code(생산품번/도번),mat_code(자도번),item_desc,set_qty,use_qty,maint_qty,remarks}
   // 선택셀 → 자동채움: ceiling(plan-done) 수량으로 (도번,자도번) 1행씩. BOM전개는 저장시 백엔드가 work_code로 판정.
   if(st.sel.size){
-    const acc=new Map();   // key=assy → {assy, mats:Map(mat→qty)}
+    // key=(assy|mat) → 수량 누적. 레거시 586: 출고수량 = ceiling(plan - finish), 자도번마다 그 수량이 각각 적용.
+    const acc=new Map();
     for(const key of st.sel){
-      const [ri,d]=key.split(':'); const r=st.rows[+ri]; if(!r)continue;
+      const ri=key.slice(0,key.indexOf(':')), d=key.slice(key.indexOf(':')+1);
+      const r=st.rows[+ri]; if(!r)continue;
       const plan=(r.days&&r.days[d])||0, done=(r.doneday&&r.doneday[d])||0;
       const outQty=Math.ceil(plan-done); if(outQty<=0)continue;
-      let a=acc.get(r.assy); if(!a){a={assy:r.assy,mats:new Map()};acc.set(r.assy,a);}
-      // 자도번LIST(예: "MAT1{12},MAT2{5}")에서 비율대로 분배 — 단일 자도번이면 그대로.
-      const parts=(r.jado||'').split(',').map(x=>{const m=x.match(/^(.+)\{(\d+)\}$/);return m?{mat:m[1],q:+m[2]}:null;}).filter(Boolean);
-      const tot=parts.reduce((s,p)=>s+p.q,0)||1;
-      parts.forEach(p=>{const share=Math.round(outQty*p.q/tot);if(share>0)a.mats.set(p.mat,(a.mats.get(p.mat)||0)+share);});
+      // ★SP의 mat_list 형식 = "MJU63612402" 또는 "MJU66510812,MJU66510813" (수량 {n} 없음).
+      //   예전 파서는 "MAT{수량}"만 인식해 전부 버려졌다 → 콤마분리 + 선택적 {수량} 처리(2026-08-22 수정).
+      const mats=(r.jado||'').split(',').map(x=>x.trim()).filter(Boolean)
+        .map(x=>{const m=x.match(/^(.+?)\{(\d+)\}$/);return m?{mat:m[1].trim(),q:+m[2]}:{mat:x,q:null};});
+      const list=mats.length?mats:[{mat:(r.assy||''),q:null}];
+      list.forEach(p=>{
+        if(!p.mat)return;
+        const k=r.assy+' '+p.mat;
+        const prev=acc.get(k)||{assy:r.assy,mat:p.mat,qty:0};
+        prev.qty+=outQty;                       // 자도번별로 각각 출고수량 적용(레거시 동일)
+        acc.set(k,prev);
+      });
     }
-    for(const a of acc.values())for(const [mat,q] of a.mats)rows.push({item_code:a.assy,mat_code:mat,item_desc:'',set_qty:q,use_qty:1,maint_qty:q,remarks:''});
+    for(const v of acc.values())rows.push({item_code:v.assy,mat_code:v.mat,item_desc:'',set_qty:v.qty,use_qty:1,maint_qty:v.qty,remarks:''});
   }
   // 빈 행은 5줄만(레거시는 50줄이지만 화면을 넘겨 스크롤 유발 — 필요하면 행추가로).
   while(rows.length<5)rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});
