@@ -505,8 +505,13 @@ cg=5 직납 → 제외
 - **사급출고 = 매출**(tag5, PU_T_STOCK_MAINT, 사급단가 S, 부호−, 마감기준). 유상사급은 매출마감 직결.
 - 견적원가관리(ESTI): 엔진=NxCostEngine, nx.esti_bom에 **사급여부·신규여부 필드** 보유, 확정 시 nx.bom 승격.
 
-### make_type 코드 불명(실측 필요)
-- CQV2/BOMT는 make_type을 **'1'제작·'2'외주 이진**으로만 씀. **4(사급가공)/5(외주완성) 코드가 이 문서군에 없음** → nx 매핑 실측 필요. 전개게이트=**make_type='1'만 하위전개, mk≠1 leaf**(BOMT:34).
+### ★make_type 코드 확정 (레거시 원가 SP 직독 2026-08-22) — 원가에선 '1'만 의미
+> 레거시 원가 정본 = **w_cs_esti_020(견적원가손익금액) → `SP_CS_견적서(실원가용)_250910`**. MAKE_TYPE 쓰임 = **딱 1곳**(L140-141·184-185):
+> `INNER_PROD_FLAG = IIF(MAKE_TYPE='', IIF(IN_CUST='' OR 공정있음,'1','0'), IIF(MAKE_TYPE='1','1','0'))`
+- **∴ 원가에서 make_type 2·3·4·5는 전부 동일(INNER_PROD='0'=매입가 leaf·전개정지). 4/5뿐 아니라 2/3도 원가상 무의미 flag.** MAKE_TYPE='1'만 사내생산(전개).
+- **원가 핵심 축 = INNER_PROD_FLAG('1'사내/'0'매입)**, make_type 아님. 이후 SP 전체가 INNER_PROD로 분기(가공비 L359-362=INNER='1'만·매입 L241=INNER='0').
+- 은납/용접(SILVER_SOLDER) override: INNER_PROD='1' 강제(L352).
+- → V2도 make_type 코드값(2/4/5) 구별 불필요. **INNER_PROD 판정(make_type='1' or 빈값+공정/in_cust빈값)** 만 재현. 사급/제작 실동작은 §5M 불출이력으로.
 
 ### 정독 잔여 불명(전량 정독 후 확정 필요)
 - make_type 4/5 nx 매핑 · 용접봉 소요 이원화(BOM×1.5 vs 견적 c14) · 사급 관리플래그(SAGUB_STOCK_FLAG vs item_class='J') · lg_settle_unit 다월 · nx.routing 가공비 잔여 하드갭.
