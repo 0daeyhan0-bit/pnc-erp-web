@@ -114,20 +114,24 @@ def _build(ct, fr, to):
             up = d["buy_amt"] / buy6 if buy6 else 0.0
             net = d["netmv"]                          # 순증(재고변화, 전코드 순이동)
             consume = gag + sag
+            # ★단가 신뢰성 가드: 소량매입(buy6<10)이면 단가 스파이크(예 "수불정산" 2개→13B) → 순증액 산정 제외
+            unreliable = buy6 < 10 or up <= 0
             # 흐름유형
             if sag > buyall * 0.3: flow = "사급재출고형"
             elif rv > buyall * 0.3: flow = "직납"
             elif len(d["vendors"]) > 1: flow = "다업체소싱"
             else: flow = "컴포넌트(가공소비)"
+            net_amt = 0 if unreliable else round(net * up)
             flags = []
+            if unreliable and abs(net) > 100: flags.append("단가불명")
             if consume <= 0 and buyall > 0: flags.append("소비없음")
-            if net > 0 and buyall > 0 and net > buyall * 0.2 and net * up > 3_000_000: flags.append("순증과다")
+            if (not unreliable) and net > 0 and net > buyall * 0.2 and net_amt > 3_000_000: flags.append("순증과다")
             if sag > buyall * 1.05: flags.append("사급>매입")
             out.append({
                 "item": k, "name": nm.get(k, ""),
                 "buy_q": round(buy6), "buy_amt": round(d["buy_amt"]), "buy_all": round(buyall),
                 "gagong": round(gag), "sagub": round(sag), "adj": round(adj),
-                "consume": round(consume), "net": round(net), "net_amt": round(net * up),
+                "consume": round(consume), "net": round(net), "net_amt": net_amt,
                 "recv": round(rv), "flow": flow, "flags": flags,
                 "vendors": sorted(d["vendors"].values(), key=lambda x: -x["amt"]),
                 "n_codes": len(d["raw_codes"]),
