@@ -114,7 +114,7 @@ SCREEN.matverify=(c)=>{
   const ymd2iso=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
   const todayIso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const m1Iso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};   // 당월 1일
-  const flagColor=f=>({'소비없음':'#c0392b','순증과다':'#c0392b','사급>매입':'#b8860b'}[f]||'#8a5a1a');
+  const flagColor=f=>({'소비없음':'#c0392b','순증과다':'#c0392b','재고미확인':'#c0392b','재고음수':'#c0392b','사급>매입':'#b8860b'}[f]||'#8a5a1a');
   const flowColor=f=>({'직납':'#1c7c3a','사급재출고형':'#8a5a1a','다업체소싱':'#1c47a0','컴포넌트(가공소비)':'#555'}[f]||'#555');
   let rows=[], vend=[], sel=null, loading=false, msg='', begym='';
   const buildVend=()=>{
@@ -189,7 +189,7 @@ SCREEN.matverify=(c)=>{
       const stkc=((+r.net||0)>0 && (+r.stock||0)<(+r.net||0)*0.5)?'color:#c0392b;font-weight:600':'color:#555';
       return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num" style="color:#777">${won(other)}</td><td class="num">${won(r.gagong)}</td><td class="num">${won(r.sagub)}</td><td class="num">${r.jiknap?won(r.jiknap):''}</td><td class="num">${r.adj?won(r.adj):''}</td><td class="num" style="${netc}">${won(r.net)}</td><td class="num" style="${netc}">${won(r.net_amt)}</td><td class="num" style="${stkc}">${won(r.stock)}</td><td>${fl}</td><td style="font-size:11px" title="${esc((r.vendors||[]).map(v=>(v.name||v.code)+'('+(v.tname||'')+') '+won(v.q)).join(' · '))}">${src}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td></tr>`;
     }).join('');
-    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="13" class="empty">품목 없음</td></tr>`;
+    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="14" class="empty">품목 없음</td></tr>`;
     c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 총매입·가공출고·사급출고·순증=품목 전체(전 업체)</div>`;
     if(typeof attachResizers!=='undefined')attachResizers(c);
   };
@@ -198,8 +198,8 @@ SCREEN.matverify=(c)=>{
   c.querySelector('#mv-from').onchange=()=>load();
   c.querySelector('#mv-to').onchange=()=>load();
   c.querySelector('#mv-xls').onclick=()=>{
-    const hd=['업체','품번','품명','업체매입','총매입','가공출고','사급출고','조정','순증','순증액','리시빙','플래그','공급원(전체)','흐름'];
-    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.vq,r.buy_all,r.gagong,r.sagub,r.adj,r.net,r.net_amt,r.recv,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow])));
+    const hd=['업체','품번','품명','협력사(입고)','타협력사(입고)','가공','사급','직납','조정','순증','순증액','실재고','비고','공급원(전체)','흐름'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.vq,(+r.buy_all||0)-(+r.vq||0),r.gagong,r.sagub,r.jiknap,r.adj,r.net,r.net_amt,r.stock,(r.flags||[]).join('|'),(r.vendors||[]).map(x=>(x.name||x.code)+'('+(x.tname||'')+')'+won(x.q)).join(' / '),r.flow])));
     downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
   load();
 };

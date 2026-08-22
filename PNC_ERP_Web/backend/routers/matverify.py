@@ -84,9 +84,13 @@ def _build(ct, fr, to):
             SUM(CASE WHEN MAINT_TAG='3' THEN 0 ELSE CONVERT(float,ISNULL(MAINT_QTY,0)) END) netmv
           FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", fr, to)
         mv = {_U(r[0]): {"gagong": float(r[1] or 0), "sagub": float(r[2] or 0), "adj": float(r[3] or 0), "netmv": float(r[4] or 0)} for r in cu.fetchall()}
-        # ★실재고(조회일 기준) = PU 전기간 누적(≤to, 전 태그) — 순증만큼 실제 재고 있는지 대조(비고)용.
+        # ★실재고(조회일 기준) = 전기간 누적(≤to): PU 전 태그 + 수입(_C). — 순증만큼 실제 재고 있는지 대조(비고)용.
+        #   ※수입 유입은 _C(PU 밖)라 반드시 합산해야 실재고 양수 정합(안 하면 수입소비분이 음수로 남음).
         cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD <= ? GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
         stock_cum = {_U(r[0]): float(r[1] or 0) for r in cu.fetchall()}
+        cu.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))) mat, SUM(CONVERT(float,ISNULL(MAINT_QTY,0))) q FROM dbo.PU_T_STOCK_MAINT_C WHERE MAINT_YMD <= ? AND DIVISION='P' GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", to)
+        for r in cu.fetchall():
+            m = _U(r[0]); stock_cum[m] = stock_cum.get(m, 0.0) + float(r[1] or 0)
         # 수입(_C)은 netmv(PU)에 없음 → 순증에 별도 가산
         imp_net = {}
         for m, cc, cnm, cty, kind, q, amt in sup:
@@ -154,6 +158,7 @@ def _build(ct, fr, to):
             big = (not unreliable) and net > 0 and net > buyall * 0.2 and net_amt > 3_000_000
             if big: flags.append("순증과다")
             if big and stock < net * 0.5: flags.append("재고미확인")   # ★순증만큼 실재고 없음(과매입 미실현/이상)
+            if stock < -max(buyall * 0.05, 100): flags.append("재고음수")   # 실재고 음수=불가능(데이터 이상)
             if sag > buyall * 1.05: flags.append("사급>매입")
             out.append({
                 "item": k, "name": nm.get(k, ""),
