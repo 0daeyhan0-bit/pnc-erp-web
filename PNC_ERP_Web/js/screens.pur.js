@@ -105,6 +105,92 @@ SCREEN.matinout=(c)=>{
   load();
 };
 
+/* 자재 소요-매입 검증(업체별 과입고 진단) — 신규. 실적(리시빙)→CS real=1 소요 vs 업체별 매입, 사급출고·기초 펼침+흐름/이상치 플래그(집계 단정 없음, 사람이 검토) */
+SCREEN.matverify=(c)=>{
+  const API=API_BASE;
+  const CT={'6':'절삭-협력사','7':'절삭-부자재','8':'설치-부자재','A':'이지링크','4':'절삭-원자재','5':'설치-원자재','1':'유상사급-부품','9':'소모품'};
+  const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const ym2in=y=>{y=(''+(y||'')).trim();return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'';};
+  const in2ym=v=>{v=(''+(v||'')).trim();return v.length>=7?v.slice(2).replace('-',''):'';};
+  const nowYm=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;};
+  const flagColor=f=>({'소요없음':'#c0392b','기말음수':'#c0392b','사급>매입':'#b8860b','매입≫소요':'#c0392b'}[f]||'#8a5a1a');
+  const flowColor=f=>({'직납':'#1c7c3a','서포터(사급출고형)':'#8a5a1a','다업체소싱':'#1c47a0','컴포넌트':'#555'}[f]||'#555');
+  let rows=[], vend=[], sel=null, loading=false, msg='', begym='';
+  const buildVend=()=>{
+    const vm={};
+    rows.forEach(r=>{(r.vendors||[]).forEach(v=>{
+      const d=vm[v.code]||(vm[v.code]={code:v.code,name:v.name,amt:0,q:0,items:[],nflag:0});
+      d.amt+=(+v.amt||0);d.q+=(+v.q||0);d.items.push(Object.assign({},r,{vq:+v.q||0,vamt:+v.amt||0}));
+      if(r.flags&&r.flags.length)d.nflag++;
+    });});
+    vend=Object.values(vm).sort((a,b)=>b.amt-a.amt);
+  };
+  const load=async()=>{loading=true;msg='';sel=null;
+    const lb=c.querySelector('#mv-lbody');if(lb)lb.innerHTML=`<tr><td colspan="4" class="empty">불러오는 중…</td></tr>`;
+    const ct=c.querySelector('#mv-ct').value||'6';
+    const yf=in2ym(c.querySelector('#mv-from').value)||'2601';
+    const yt=in2ym(c.querySelector('#mv-to').value)||in2ym(nowYm());
+    try{const r=await fetch(`${API}/api/matverify/coop?ct=${encodeURIComponent(ct)}&ym_from=${yf}&ym_to=${yt}`);
+      if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
+      rows=j.rows||[];begym=j.begym||'';buildVend();}
+    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];vend=[];}
+    loading=false;renderLeft();
+    c.querySelector('#mv-rhead').innerHTML='<div class="s-item">← 좌측에서 업체를 클릭하세요</div>';
+    c.querySelector('#mv-rbody').innerHTML='';
+    const sub=c.querySelector('#mv-sub');if(sub)sub.innerHTML=`${esc(CT[ct]||ct)} · 소요=리시빙×CS BOM(real=1) · 매입=확정입고+수입 · 기초=${esc(begym)}말 · <b>집계 단정 아님, 플래그는 검토용</b>`;
+  };
+  c.innerHTML=`
+   <div class="page-title">🔍 자재 소요-매입 검증 <span style="font-size:12px;color:var(--muted);font-weight:400">(업체별 과입고 진단)</span></div>
+   <div class="page-sub" id="mv-sub">실적(리시빙)→소요 vs 업체별 매입입고. 사급출고·기초 펼침 + 이상치 플래그(사람이 검토).</div>
+   <div class="toolbar">
+     <label class="tl">매입유형</label><select class="sel" id="mv-ct">${Object.keys(CT).map(k=>`<option value="${k}" ${k==='6'?'selected':''}>${esc(CT[k])}</option>`).join('')}</select>
+     <label class="tl">기간</label><input type="month" class="inp" id="mv-from" value="2026-01" style="min-width:120px"><span style="color:var(--muted)">~</span><input type="month" class="inp" id="mv-to" value="${nowYm()}" style="min-width:120px">
+     <button class="btn" id="mv-go">🔍 조회</button>
+     <div class="spacer"></div><button class="btn xls" id="mv-xls">📥 엑셀</button>
+   </div>
+   <div style="display:flex;gap:10px;align-items:flex-start">
+     <div style="flex:0 0 32%;min-width:0">
+       <div class="summary-bar" id="mv-lsum"></div>
+       <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr><th>업체</th><th class="num">매입액</th><th class="num">품목</th><th class="num">플래그</th></tr></thead><tbody id="mv-lbody"></tbody></table></div>
+     </div>
+     <div style="flex:1;min-width:0">
+       <div class="summary-bar" id="mv-rhead"><div class="s-item">← 좌측에서 업체를 클릭하세요</div></div>
+       <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto"><table class="tbl fit"><thead><tr>
+         <th>품번</th><th>품명</th><th>흐름</th><th class="num">기초</th><th class="num">업체매입</th><th class="num">소요</th><th class="num">사급출고</th><th class="num">리시빙</th><th class="num">기말</th><th class="num">검토후보액</th><th>플래그</th></tr></thead><tbody id="mv-rbody"></tbody></table></div>
+     </div>
+   </div>`;
+  const renderLeft=()=>{
+    let lb=vend.map(v=>`<tr data-cc="${esc(v.code)}" class="${sel===v.code?'sel':''}"><td class="cap" title="${esc(v.name)}"><b>${esc(v.name||v.code)}</b></td><td class="num">${won(v.amt)}</td><td class="num">${won(v.items.length)}</td><td class="num" style="color:${v.nflag?'#c0392b':'#999'}">${v.nflag||''}</td></tr>`).join('');
+    const tot=vend.reduce((a,b)=>a+b.amt,0);
+    if(vend.length)lb+=`<tr class="grandtot"><td class="right">총계 (${won(vend.length)} 업체)</td><td class="num">${won(tot)}</td><td colspan="2"></td></tr>`;
+    c.querySelector('#mv-lbody').innerHTML=vend.length?lb:`<tr><td colspan="4" class="empty">${esc(msg||'결과 없음')}</td></tr>`;
+    c.querySelector('#mv-lbody').querySelectorAll('tr[data-cc]').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.cc;c.querySelectorAll('#mv-lbody tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');renderRight(sel);});
+    c.querySelector('#mv-lsum').innerHTML=`<div class="s-item">업체 <b>${won(vend.length)}</b></div><div class="s-item">매입 합계 <b>${won(tot)}</b></div>`;
+    if(typeof attachResizers!=='undefined')attachResizers(c);
+  };
+  const renderRight=cc=>{
+    const v=vend.find(x=>x.code===cc);if(!v)return;
+    const its=v.items.slice().sort((a,b)=>(b.cand_over||0)-(a.cand_over||0));
+    let html=its.map(r=>{
+      const fl=(r.flags||[]).map(f=>`<span style="color:${flagColor(f)};font-size:10px;border:1px solid ${flagColor(f)};border-radius:3px;padding:0 3px;margin-right:2px">${esc(f)}</span>`).join('');
+      const endc=r.end<0?'color:#c0392b':'';
+      return `<tr><td><b>${esc(r.item)}</b>${r.n_codes>1?`<span style="color:#999;font-size:10px"> +${r.n_codes-1}변형</span>`:''}</td><td class="cap" title="${esc(r.name)}">${esc(r.name)}</td><td style="color:${flowColor(r.flow)};font-size:11px">${esc(r.flow)}</td><td class="num">${won(r.beg)}</td><td class="num qty"><b>${won(r.vq)}</b></td><td class="num">${won(r.soyo)}</td><td class="num">${won(r.sagub_out)}</td><td class="num">${won(r.recv)}</td><td class="num" style="${endc}">${won(r.end)}</td><td class="num" style="${(r.cand_over||0)>0?'color:#c0392b;font-weight:600':''}">${won(r.cand_over)}</td><td>${fl}</td></tr>`;
+    }).join('');
+    c.querySelector('#mv-rbody').innerHTML=its.length?html:`<tr><td colspan="11" class="empty">품목 없음</td></tr>`;
+    c.querySelector('#mv-rhead').innerHTML=`<div class="s-item">업체 <b>${esc(v.name||v.code)}</b></div><div class="s-item">품목 <b>${won(v.items.length)}</b></div><div class="s-item">매입 <b>${won(v.amt)}</b></div><div class="s-item" style="color:#999">업체매입=이 업체분 / 소요·사급·기초·리시빙=품목 전체</div>`;
+    if(typeof attachResizers!=='undefined')attachResizers(c);
+  };
+  c.querySelector('#mv-go').onclick=()=>load();
+  c.querySelector('#mv-ct').onchange=()=>load();
+  c.querySelector('#mv-from').onchange=()=>load();
+  c.querySelector('#mv-to').onchange=()=>load();
+  c.querySelector('#mv-xls').onclick=()=>{
+    const hd=['업체','품번','품명','흐름','기초','업체매입','소요','사급출고','리시빙','기말','검토후보액','플래그'];
+    const out=[];vend.forEach(v=>v.items.forEach(r=>out.push([v.name||v.code,r.item,r.name,r.flow,r.beg,r.vq,r.soyo,r.sagub_out,r.recv,r.end,r.cand_over,(r.flags||[]).join('|')])));
+    downloadCSV('자재소요매입검증_'+(c.querySelector('#mv-ct').value)+'.csv',hd,out);};
+  load();
+};
+
 /* 확정입고집계표 (구매/자재, dw_pu_input_120) — 확정입고(검사통과)+수입. 조회기준 마감/입고 × 출력방식 거래처별/품목별/업체별 */
 SCREEN.receipt=(c)=>{
   const SG=DB.sgroupNames||{}, CT=DB.custTypeNames||{}, LG=DB.lgroupNames||{}, CHG=DB.chargeMap||{};
