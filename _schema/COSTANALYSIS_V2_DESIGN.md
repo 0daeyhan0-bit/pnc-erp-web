@@ -722,7 +722,10 @@ cg=5 직납 → 제외
 - **★원소재 한정 필터(필수)**: `metal_gubun≠'' AND sgroup∉('910','310')`. **tag9 매입이력만으론 SUB(AJR*-N-M, metal='', sgroup120)·용접봉(910)·부자재(230)도 걸려 orig=0을 실매입가로 오적재**(AJR30125601 +42,000 사고). 원소재는 metal 채움, SUB/조립품은 metal 빈값 → 이걸로 분리. 매입 원소재(sgroup130 MJU66570402 등)는 metal 있어 통과.
 - **검증(6제품 V1 vs V2, 260630)**: 사급앵커 AJR75563503 **delta 0(diff0)** · AJR30125601 **사고+45,332→0**(순수 사급제품, 매입노드 전부 SUB/부자재) · PQ060903E30(설치 고강도) +2,974(재료비 2,668+전파 306) · AJR30027702 −2,023 · AJJ75838626 +1,122. **전파 반영·사급품 diff0 확인.**
 - ★교훈: v2_c4의 재료비-only 델타(−12,485)도 SUB/부자재 오염 포함이었음 → 원소재 필터 후가 정본. 매입 SUB 실매입가는 별도 스코프(Phase 후속).
-- **남은 구현**: /api/cost/nx_v2 엔드포인트 + SCREEN.costanalysis_v2 연결 + 전스코프(253) V1vsV2 검증표.
+- **★identity 검증(핵심 안전장치, 2026-08-22)**: V2를 **빈 오버라이드맵(=V1과 동일 원소재가격)**으로 실행 → PQ060903E30·AJR30027702·PQ060905R01(오버라이드시 바뀌는 제품들조차) **jae/gagong/ilban/profit/sonik 전부 Δ=0.00 DIFF0**. → V2는 원소재 단가 외 아무것도 안 바꿈 증명. 비교표에서도 사급품 12/22 완전동일(=).
+- **결과값 실측(22제품, 260630)**: 10개만 변화·12개 사급품 동일. 최대 PQ060903E30(설치고강도) 손익 −2,974(−8.6%pt). 실원가합 V1 2,668,331→V2 2,668,897(+566, 상쇄). 방향=실매입>사급가면 손익↓/반대면↑.
+- **엔드포인트 `/api/cost/nx_v2`** 추가(cost.py, 컴파일·런타임import OK). 반환 v1/v2/delta/sonik_delta.
+- **남은 구현**: SCREEN.costanalysis_v2 연결(V1대비 표시) + 전스코프(253) V1vsV2 검증표 + 백엔드 재기동 라이브확인.
 
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]

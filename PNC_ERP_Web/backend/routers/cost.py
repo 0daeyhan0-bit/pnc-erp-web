@@ -590,6 +590,59 @@ def cost_nx_bulk(p: dict = Body(...)):
     return {"ymd": ymd, "ym": ym, "costs": out}
 
 
+@router.post("/api/cost/nx/bulk_v2")
+def cost_nx_bulk_v2(p: dict = Body(...)):
+    """★V2 배치 — 여러 품번 V1(레거시충실 사급가)+V2(직거래 원소재 실매입가) 동시 계산.
+       엔진 2개(V1·V2패치)를 배치 전체 재사용. 응답=bulk와 동일 V1 필드 + v2_silwon/v2_sonik/v2_jae/v2_delta(superset·렌더호환).
+       규칙·검증: _schema/COSTANALYSIS_V2_DESIGN.md §5A~§6Q."""
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    try:
+        import nx_cost_v2 as _V2
+    except Exception as e:
+        raise HTTPException(500, f"nx_cost_v2 로드 실패: {e}")
+    parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
+    ymd = str(p.get("ymd") or '260630').strip()
+    ym = str(p.get("ym") or '').strip()
+    out = {}
+    e1 = NxCostEngine()      # V1 (엔진 그대로)
+    e2 = NxCostEngine()      # V2 (직거래 원소재 실매입 패치)
+    try:
+        try:
+            _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]))
+        except Exception as ex:
+            raise HTTPException(500, f"V2 맵/패치 오류: {ex}")
+        smap = {}
+        try: smap = _sagub_diff_map(e1.cur, ym) if ym else {}
+        except Exception: smap = {}
+        sag_items = set()
+        try:
+            e1.cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
+            sag_items = set(r[0] for r in e1.cur.fetchall())
+        except Exception: sag_items = set()
+        for it in parts:
+            try:
+                s = e1.silwon(it, ymd)
+                row = {k: round(float(s.get(k, 0) or 0), 2) for k in
+                       ('jae', 'gagong', 'ilban', 'unban', 'profit', 'silwon', 'lg', 'sonik')}
+                row['lme'] = round(float(s.get('lme_total') or e1.lme_u(it, ymd) or 0), 2)
+                sp = e1.material_split(it, ymd)
+                row['won'] = sp['won']; row['bu'] = sp['bu']; row['sa'] = sp['sa']
+                row['sagub'] = e1.sagub_sum(it, smap) if smap else 0.0
+                row['silsagub'] = e1.sagub_whole(it, ymd) if (it in sag_items) else 0.0
+                # ★V2 (직거래 원소재 실매입 반영)
+                s2 = e2.silwon(it, ymd)
+                row['v2_jae'] = round(float(s2.get('jae', 0) or 0), 2)
+                row['v2_silwon'] = round(float(s2.get('silwon', 0) or 0), 2)
+                row['v2_sonik'] = round(float(s2.get('sonik', 0) or 0), 2)
+                row['v2_delta'] = round(row['v2_silwon'] - row['silwon'], 2)
+                out[it] = row
+            except Exception as e:
+                out[it] = {"error": str(e)[:60]}
+    finally:
+        e1.close(); e2.close()
+    return {"ymd": ymd, "ym": ym, "costs": out}
+
+
 # ===================== 품목별 원가분석 결과 캐시 (첫 로드 즉시화) =====================
 #  프론트가 nx엔진으로 계산한 결과(품목별 원가/손익)를 (ym=리시빙월, ymd=단가일)별로 저장 → 다음 진입/타 사용자 즉시 로드.
 #  엔진 자체는 안 건드림. 재계산 버튼=강제 재계산 후 재저장. buildRow가 쓰는 13필드+qty만 보관.
