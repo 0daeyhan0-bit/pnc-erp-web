@@ -821,30 +821,30 @@ SCREEN.gagongmove580=(c)=>{
     c.innerHTML=`
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
      <div class="page-sub">계획(<code>PR_T_PLAN_PART_MAT</code>) − 이동완료(확정) = 이동필요수. 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행(<span style="color:#333">■검정</span>=발행·미확정, <span style="color:#66bb6a">■초록</span>=확정완료). 🔴 라이브 <span style="color:#c0392b">(레거시 SP 암호화 → 라이브 역설계)</span></div>
-     <div class="toolbar">
+     <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">기준일자</label><input class="inp" type="date" id="mv-from" value="${st.from}"> ~ <input class="inp" type="date" id="mv-to" value="${st.to}">
-       <label class="tl">기간</label><select class="inp" id="mv-gigan" style="max-width:78px">${[7,10,14,21,31].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
+       <label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"${isSheet?' disabled':''}><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
+       <label class="tl">생산파트</label><select class="inp" id="mv-prpart" style="width:150px"${isSheet?' disabled':''}><option value="">% 전체</option>${st.optParts.map(o=>`<option value="${esc(o.code)}"${st.prPart===o.code?' selected':''}>${esc(o.code)} ${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl">사급업체</label><select class="inp" id="mv-sagub" style="width:150px"${isSheet?' disabled':''}><option value="">전체업체</option>${st.optSagubs.map(o=>`<option value="${esc(o.code)}"${st.sagub===o.code?' selected':''}>${esc(o.nm)}(${esc(o.code)})</option>`).join('')}</select>
+       <div class="spacer"></div>
+       ${isSheet?'':'<button class="btn" id="mv-move" style="background:#1c47a0;color:#fff">🚚 가공자재 이동처리</button>'}
+     </div>
+     <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px">
+       <label class="tl">도번</label><input class="inp" id="mv-item" list="mv-iteml" value="${esc(st.item)}" style="width:130px" placeholder="도번" autocomplete="off"><datalist id="mv-iteml">${itOpts}</datalist>
+       <label class="tl">자도번</label><input class="inp" id="mv-part" list="mv-partl" value="${esc(st.part)}" style="width:130px" placeholder="자도번" autocomplete="off"><datalist id="mv-partl">${ptOpts}</datalist>
        ${isSheet?`<label class="tl">입고확인</label>
          <label class="rl"><input type="radio" name="mv-cf" value="전체"${st.confirm==='전체'?' checked':''}> 전체</label>
          <label class="rl"><input type="radio" name="mv-cf" value="미확정"${st.confirm==='미확정'?' checked':''}> 미확정</label>
          <label class="rl"><input type="radio" name="mv-cf" value="확정"${st.confirm==='확정'?' checked':''}> 확정</label>`
-        :`<label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
-       <label class="tl">생산파트</label><select class="inp" id="mv-prpart" style="width:150px"><option value="">% 전체</option>${st.optParts.map(o=>`<option value="${esc(o.code)}"${st.prPart===o.code?' selected':''}>${esc(o.code)} ${esc(o.nm)}</option>`).join('')}</select>
-       <label class="tl">사급업체</label><select class="inp" id="mv-sagub" style="width:140px"><option value="">전체업체</option>${st.optSagubs.map(o=>`<option value="${esc(o.code)}"${st.sagub===o.code?' selected':''}>${esc(o.nm)}(${esc(o.code)})</option>`).join('')}</select>
-       <label class="tl">이동필요</label>
+        :`<label class="tl">이동필요</label>
        <label class="rl"><input type="radio" name="mv-f" value="전체"${st.mv==='전체'?' checked':''}> 전체</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동필요"${st.mv==='이동필요'?' checked':''}> 이동필요</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동완료"${st.mv==='이동완료'?' checked':''}> 이동완료</label>`}
+       <label class="tl">기간</label><select class="inp" id="mv-gigan" style="max-width:78px">${[7,10,14,21,31].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
        <label class="tl">구분</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동계획"${st.gubun==='이동계획'?' checked':''}> 이동계획</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
        <button class="btn" id="mv-search">🔍 조회</button>
-       <div class="spacer"></div>
-       ${isSheet?'':'<button class="btn" id="mv-move" style="background:#1c47a0;color:#fff">🚚 가공자재 이동처리</button>'}
-     </div>
-     <div class="toolbar" style="margin-top:2px">
-       <label class="tl">도번</label><input class="inp" id="mv-item" list="mv-iteml" value="${esc(st.item)}" style="width:130px" placeholder="도번" autocomplete="off"><datalist id="mv-iteml">${itOpts}</datalist>
-       <label class="tl">자도번</label><input class="inp" id="mv-part" list="mv-partl" value="${esc(st.part)}" style="width:130px" placeholder="자도번" autocomplete="off"><datalist id="mv-partl">${ptOpts}</datalist>
        <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b>${st.sel.size}</b>셀 · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
