@@ -29,16 +29,24 @@ if ($Restart) {
 }
 
 Write-Host "[3/3] 헬스체크..." -ForegroundColor Cyan
-Start-Sleep 6   # 재기동 직후 콜드스타트 워밍 대기(첫 요청 실패 방지)
-foreach ($p in @('/','/openapi.json')) {
-  # 워밍 재시도 3회(0.5초 콜드-500/연결오류 흡수). -f 대신 문자열결합(예외메시지 내 특수문자 안전).
+# ★헬스체크는 정보용(비종료). 재기동 콜드스타트가 길어도 최대 ~40초 폴링(2초×20)으로 흡수.
+#   openapi.json 먼저(신뢰가능 JSON), '/'는 정적 HTML(간헐 파싱예외 흡수). 실패해도 배포(pull) 자체엔 영향 없음.
+$allok = $true
+foreach ($p in @('/openapi.json','/')) {
   $ok = $false; $last = ''
-  for ($i = 0; $i -lt 3 -and -not $ok; $i++) {
-    try { $r = Invoke-WebRequest "$health$p" -UseBasicParsing -TimeoutSec 20
+  for ($i = 0; $i -lt 20 -and -not $ok; $i++) {
+    try { $r = Invoke-WebRequest "$health$p" -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
           Write-Host ("  OK  " + $p + " -> " + $r.StatusCode) -ForegroundColor Green; $ok = $true }
     catch { $last = "$($_.Exception.Message)"; Start-Sleep 2 }
   }
-  if (-not $ok) { Write-Host ("  X   " + $p + " -> " + $last) -ForegroundColor Yellow }
+  if (-not $ok) {
+    $allok = $false
+    # ★실패 메시지: 개행/길이 정리 후 출력(RDP 콘솔 Write-Host IndexOutOfRange 방지) + 예외 시 폴백(비종료)
+    $m = ($last -replace '\s+', ' '); if ($m.Length -gt 160) { $m = $m.Substring(0, 160) }
+    try { Write-Host ("  X   " + $p + " -> " + $m) -ForegroundColor Yellow }
+    catch { [Console]::WriteLine("  X   " + $p + " -> " + $m) }
+  }
 }
-Write-Host "`n✅ 배포(pull) 완료." -ForegroundColor Green
+if ($allok) { Write-Host "`n✅ 배포(pull) 완료 — 헬스체크 정상." -ForegroundColor Green }
+else        { Write-Host "`n⚠️ 배포(pull)는 완료. 헬스체크 일부 실패(위 X) — 재기동이 늦었을 수 있으니 잠시 후 브라우저로 재확인." -ForegroundColor Yellow }
 Write-Host "★프론트(js/html) 변경: 직원 브라우저 Ctrl+F5. (index.html ?v= 는 커밋에 포함되어 옴)" -ForegroundColor Yellow
