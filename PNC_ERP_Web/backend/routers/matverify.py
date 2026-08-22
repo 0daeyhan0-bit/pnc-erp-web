@@ -183,14 +183,14 @@ def _build(ct, fr, to):
             off_e = d["off_end"] if cov else None            # 실재고(정본 최신스냅샷 ≤to)
             off_chg = d["off_chg"] if cov else None           # 재고증감(정본 기간 flow Σin−out)
             off_b = (off_e - off_chg) if cov else None         # 기초 = 실재고 − 재고증감 (이월재고 정합)
-            # ★재고증감액 = 재고증감(수량) × 기말 정본단가(off_end_amt/off_end). 이동평균 금액 flow(Σin_amt−out_amt)는
-            #   수량변화+단가 재평가가 섞여 부적합(예 AJR30077403 -219M) → 수량×현재단가로 재평가 노이즈 제거.
-            #   기말재고 0(단가 미상)이거나 미커버면 vendor 추정단가 폴백.
+            # ★순증액 = 순증(실측) × 정본 기말단가(off_end_amt/off_end). 과입고 신호는 순증(매입−소비, 수입포함);
+            #   정본 재고증감은 자재일마감(자재창고)이라 수입을 안 잡음(예 AGR30801601 수입25,600이 정본 in 502뿐) →
+            #   금액은 순증 기준, 단가만 정본으로(vendor 송장 블렌드단가 튐 제거). 정본단가 없으면 vendor 추정단가 폴백.
             off_unit = (d["off_end_amt"] / d["off_end"]) if (cov and d["off_end"] > 0) else 0.0
-            if cov and off_unit > 0:
-                net_amt = round(off_chg * off_unit)
+            if off_unit > 0:
+                net_amt = round(net * off_unit)
             else:
-                net_amt = 0 if unreliable else round((off_chg if cov else net) * up)
+                net_amt = 0 if unreliable else round(net * up)
             flags = []
             # 순증 유의성 = 수량 기준(가격 무관): 매입 대비 20%↑ & 최소량. (단가 튐에 오염 안 됨)
             sig = net > 0 and net > buyall * 0.2 and net > 50
