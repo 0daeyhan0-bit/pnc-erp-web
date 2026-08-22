@@ -104,6 +104,10 @@ def _build(ct, fr, to):
         for mat, q in imp_all.items():                 # 전업체 수입 → base(총매입·순증)
             k = base(mat)
             if k in items: items[k]["buy_all"] += q; items[k]["netmv"] += q
+        import os as _os
+        if _os.environ.get("MVDBG"):
+            _f = sorted([(m, round(mv[m]["ipgo_all"]), round(mv[m]["netmv"])) for m in mv if base(m) == "AGR30801601"], key=lambda x: -abs(x[2]))
+            print("DBG fold→AGR30801601:", _f[:10], "| buy_all=", round(items.get("AGR30801601", {}).get("buy_all", 0)))
         for mat, q in recv.items():
             k = base(mat)
             if k in items: items[k]["recv"] += q
