@@ -474,8 +474,15 @@ class NxCostEngine:
 
     def material(self, item, ymd, mult=1.0, depth=0, seen=None):
         """실원가 재료비 (SP_실원가용 산식). ymd=YYMMDD.
-           INNER_PROD(사내생산)이면 자식 전개, 아니면(구매/외주완성=태국F&T·AUDY '받아와 매입정리') 매입가.
-           원소재(cost_gubun='3' & 사내)만 소재단가×중량. LME=(std−partner)×중량(구매 동부품)."""
+           ★2026-08-24 통일엔진 전환(SOYO_ENGINE_UNIFY §3 Step3): 로직 정본 = nx_soyo_engine.cost_material.
+           전 스코프 diff0 검증(사용중 1052/1052·넓은스코프 60/60·비사용중 포함). mult/depth/seen=하위호환
+           시그니처(실사용 mult=1.0). 롤백=아래 _material_legacy 호출로 1줄 교체."""
+        import nx_soyo_engine as _se
+        v = _se.cost_material(self, item, ymd)
+        return v if mult == 1.0 else round(v * mult, 2)
+
+    def _material_legacy(self, item, ymd, mult=1.0, depth=0, seen=None):
+        """전환 전 원본 material 로직 — 롤백·대조용 보존(2026-08-24). 통일엔진 cost_material와 diff0."""
         ymcut='20'+ymd[:4]
         info=self._load_item(item)
         if (info['cost_gubun']!='3' or info['make_type']=='1') and self._expandable(item, info, set()):   # ★cg3fix
@@ -710,7 +717,15 @@ class NxCostEngine:
         return self._leaf_val_nae(node, info, q, ymd, ymcut)
 
     def material_nae(self, item, ymd, mult=1.0):
-        """내부용 재료비: 전개-all(직납/except만 정지), LME 없음."""
+        """내부용 재료비: 전개-all(직납/except만 정지), LME 없음.
+           ★2026-08-24 통일엔진 전환#2: 로직 정본 = nx_soyo_engine.cost_material_nae (diff0 60/60).
+           mult=하위호환(실사용 1.0). 롤백=_material_nae_legacy."""
+        import nx_soyo_engine as _se
+        v = _se.cost_material_nae(self, item, ymd)
+        return v if mult == 1.0 else round(v * mult, 2)
+
+    def _material_nae_legacy(self, item, ymd, mult=1.0):
+        """전환 전 원본 material_nae 로직 — 롤백·대조용 보존(2026-08-24)."""
         ymcut='20'+ymd[:4]
         info=self._load_item(item)
         if info['cost_gubun']!='3' and self._expandable_nae(item, set()):

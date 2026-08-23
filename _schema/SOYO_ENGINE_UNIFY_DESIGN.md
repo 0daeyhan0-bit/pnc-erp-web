@@ -116,5 +116,18 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 | 2026-08-23 | **★용접포인트 1단계: 신규(공정/proc_weld) ↔ 레거시(BOM)** | 라이브 CS_M_ITEM_BOM RAC 전수 5167 | **✅검증완료 5165일치·잔차해결** | 구조=신규는 용접포인트를 BOM에서 빼서 공정(proc_weld)으로 이관·레거시는 BOM내(RAC 라인)·레거시 정본. ★함정회피: v_cs_bom(원가뷰)는 **RAC 라인 2배 fanout**(46=23+23) → 잘못쓰면 276불일치 부풀림. **라이브 CS_M_ITEM_BOM(베이스)**가 정답. nx.bom_line은 RAC 공정이관돼 397잔존(정본 아님). **잔차4건 규명·해결(2026-08-23)**: 3건=**신규 계산실패**(변형SUB, meta_ok=False/weld_st=0)→레거시정본값으로 proc_weld.use_qty 수정(AJR77224002-12-1=0.0084·AJR30012101-16-2=0.0015·AJR75062906-F&T=0.0237, 근거키 스코프 3행 UPDATE src='legacy_fix_260823'). 1건=**AJR30077403**(레거시qty=0빈값·신규 geometry 0.0048)=**신규가 정본**(RAC라인존재+형제품 AJR30077401 전부용접→레거시 미입력 결손 보정, 유지). 잔여 AJJ30041201=use_flag=False 사용안함 무영향. **최근변경 탓 아님**(빌드08-03 이전). ★근본=proc_weld 1회 이관스냅샷 재빌드無→드리프트, ☐sync전략 후속(E). **결론=사용중 스코프 신규 용접계산방식 레거시 100% 검증**. |
 | 2026-08-23 | **★용접포인트 2단계: 협력사 견적 ↔ 우리 용접포인트** | coop_quote_part_v2 용접봉 934 assy | **☐TODO(추후 점검, 2026-08-23 사용자 결정)** | [1차실측] 협력사 견적 용접봉 vs proc_weld: 대조 841 중 일치 419(~50%)·불일치 422. **불일치=실제 값차**·깨끗한 배수관계 없음(0.24~1.27). **근본=소요 계산식이 다름**: 우리=proc_weld(용접ST×원단위×1.5 geometry 계산) / 협력사=**견적서 파싱값**(coop_quote_part_v2.soyo, 협력사가 견적서에 기재). 코드도 명시 인지([coopquote2.py:644·716] "용접봉=견적기준·현BOM소요 무시·BOM용접봉코드가 견적과 달라 미매치"). **★ST 비교 불가**: coop_quote_part_v2엔 ST 미저장·소요량(soyo)만 있음(spec 빈값) → ST 대조하려면 **협력사 견적서 원본(엑셀)에 ST 유무 확인** 선행. **추후 TODO**: ①견적서에 ST 있으면 우리 weld_st와 직접 대조 ②협력사 소요를 우리 용접포인트에 정합시킬지 정책결정 ③원소재(동)도 동일 관점. ※compute_quote_lme 정산 자체는 화면과 diff0(검증됨)=별개. |
 
+| 2026-08-24 | **★전환#1(§3 Step3): `NxCostEngine.material` → 통일 walker `cost_material` 위임** | 넓은스코프 60(비사용중 포함)+사용중 25 | **DIFF0 PASS 60/60·25/25** | 전환 전 material==cost_material 재확인(1052/1052 08-23 + 60/60 넓은스코프 신규). material()이 `nx_soyo_engine.cost_material(self,item,ymd)` 위임(mult 하위호환). **원본 로직=`_material_legacy` 보존**(1줄 롤백·대조용). 전환 후 material==_material_legacy 60/60 재검증·silwon(material_u→material) 정상·py_compile OK. 백엔드 common.py/app.py가 `_harness` sys.path 보유→`import nx_soyo_engine` 프로덕션 가능 확인. **dev만·미배포. 프로덕션 실원가 재료비가 통일엔진 사용 시작.** 다음=#2 내부원가(material_nae→cost_material_nae). |
+
+## 3-A. 전환(repoint) 진행 (§3 Step3, 2026-08-24 착수)
+| 전환 | 대상 → 통일 walker | 상태 |
+|---|---|---|
+| #1 | `NxCostEngine.material` → `cost_material` | **✅완료·diff0(60/60·25/25)·dev** |
+| #2 | `material_nae` → `cost_material_nae` | **✅완료·diff0(60/60)·naewon정상·dev** |
+| #3 | `weight_calc._explode` → `weight_explode` | ☐다음(별도 모듈 weight_calc.py) |
+| #4 | soyo Stage1/2 → `plan_explode`/`plan_gagong` (Stage3 존치) | ☐ |
+| #5 | 캐시(explode 1회→월별 단가) | ☐ |
+- 보류(별건): R02~Rnn walker(현 sourcing/route/cost), 용접포인트 2단계(협력사).
+- 각 전환: dev만·해당 diff0 게이트 통과 필수·미배포·실패시 롤백(_ *_legacy).
+
 ## 관련
 [[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]]
