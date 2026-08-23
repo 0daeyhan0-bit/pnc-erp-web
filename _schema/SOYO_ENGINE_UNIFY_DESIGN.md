@@ -102,7 +102,8 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 |---|---|---|---|---|
 | 2026-08-23 | 설계 확정 | — | — | explode+원가walker부터 착수 |
 | 2026-08-23 | **explode()+원가 walker(cost_material)** 구축 | 리시빙 상위 45제품 | **DIFF0 PASS 45/45**(FAIL0·ERR0) | `_harness/nx_soyo_engine.py`. 통일엔진 cost_material==엔진 material() 전수 일치. 데이터층=엔진 프리미티브 공유(lines/_load_item/_leaf_val). 재료비+LME. |
-| 2026-08-23 | **원가 walker 전 사용중 스코프 검증** | **리시빙 제품 전수 1052** | **★DIFF0 PASS 1052/1052**(FAIL0·ERR0) | 전 사용중 BOM에서 재료비 완벽 재현. 원가 모드 통일엔진 신뢰 확보. 다음=생산 walker(plan_part_mat diff0, except_flag·사급중단·최하위집계) |
+| 2026-08-23 | **원가 walker 전 사용중 스코프 검증** | **리시빙 제품 전수 1052** | **★DIFF0 PASS 1052/1052**(FAIL0·ERR0) | 전 사용중 BOM에서 재료비 완벽 재현. 원가 모드 통일엔진 신뢰 확보. |
+| 2026-08-23 | **생산 walker v1**(prod_soyo, except_flag·최하위·용접봉제외) | vs 참조SQL 6 / vs 실제 plan_part_mat 6 | 참조SQL **6/6 OK** · **실제 plan_part_mat 불일치(갭 발견)** | ★검증이 갭 포착: walker가 사급/제작 SUB를 뚫고 전개→plan_part_mat은 그 SUB에서 정지·SUB를 소요로 나열. **사급중단 규칙 누락**. 원인=STEP6 사급중단점(가공공정 보유 PART_DTL) 미재현. 다음=사급중단 규칙 추가 후 재검증 |
 
 ## 관련
 [[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]]
