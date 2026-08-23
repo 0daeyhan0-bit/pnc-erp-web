@@ -113,6 +113,49 @@ class NxCostEngine:
         except Exception:
             return   # CTE 실패(순환 등) → 프라임 스킵, per-node 폴백(정확성 무손상)
 
+    def warm_all(self):
+        """★글로벌 벌크로드(opt-in, 2026-08-23): 구조 캐시(_item·_hdr·_lines·_pc·_rc·_wlc)를 전 테이블 1회씩 예열 →
+        재귀가 노드별 DB 왕복 없이 순수 in-memory(N+1 제거). lazy와 **동일 키·필드·필터·정규화**로 채워 결과 불변.
+        ★옛 per-item 예열(L56 비활성)은 _item에 sgroup 누락(11필드)으로 이탈했음 → 여기선 12필드 완전복제.
+        가격(_pm/_pms/_pur/_lg/_fxc/_lr)은 float키(diam/thick) 불일치 위험 회피 위해 lazy 유지(배치 내 자동예열).
+        호출 안 하면 엔진 무변경(검증정확도 유지). 누락 키는 lazy 폴백. ★적용 전 diff0 검증 필수."""
+        c = self.cur
+        for a in ('_item', '_hdr', '_lines', '_pc', '_rc', '_wlc'):
+            if not hasattr(self, a): setattr(self, a, {})
+        # item — lazy _load_item과 동일 12필드(sgroup 포함)
+        c.execute("""SELECT item_code,ISNULL(in_cust,''),ISNULL(make_type,''),ISNULL(cost_gubun,''),
+            ISNULL(metal_gubun,''),ISNULL(diam,0),ISNULL(thick,0),ISNULL(net_weight,0),ISNULL(has_gagong,0),
+            ISNULL(silver_flag,0),ISNULL(unit,''),ISNULL(lgroup,''),ISNULL(sgroup,'') FROM nx.item""")
+        for r in c.fetchall():
+            self._item[str(r[0]).strip()] = {'in_cust': r[1].strip(), 'make_type': r[2].strip(), 'cost_gubun': r[3].strip(),
+                'metal': r[4].strip(), 'diam': float(r[5] or 0), 'thick': float(r[6] or 0), 'wt': float(r[7] or 0),
+                'has_gagong': bool(r[8]), 'silver': bool(r[9]), 'unit': r[10].strip(), 'lgroup': r[11].strip(), 'sgroup': r[12].strip()}
+        # bom_header → _hdr(품목별 최대 version), 없는 품목=None(리프 bom_id 조회 제거)
+        best = {}
+        c.execute("SELECT item_code,bom_id,ISNULL(version,1) FROM nx.bom_header")
+        for r in c.fetchall():
+            code = str(r[0]).strip(); ver = int(r[2] or 1)
+            if code not in best or ver > best[code][0]: best[code] = (ver, r[1])
+        for code in best: self._hdr[code] = best[code][1]
+        for it in self._item:
+            if it not in self._hdr: self._hdr[it] = None
+        # bom_line → _lines(bom_id별, RAC 제외·seq 순) = lazy lines()와 동일
+        c.execute("SELECT bom_id,child_item,qty,cs_calc_except,from_ymd,to_ymd,ISNULL(lme_except,0) FROM nx.bom_line WHERE child_item NOT LIKE 'RAC%' ORDER BY bom_id,seq")
+        for r in c.fetchall():
+            self._lines.setdefault(r[0], []).append((str(r[1]).strip(), float(r[2] or 0), bool(r[3]), str(r[4] or ''), str(r[5] or ''), bool(r[6])))
+        # routing → _pc/_rc = lazy _procs/_rate_proc 필터와 동일(91/92/93=_rc, 98/99제외 나머지=_pc)
+        c.execute("SELECT item_code,proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,''),ISNULL(p_item,'') FROM nx.routing")
+        for r in c.fetchall():
+            code = str(r[0]).strip(); proc = str(r[1]); wq = float(r[2] or 0); uph = float(r[3] or 0); cg = str(r[4] or '').strip(); pit = str(r[5] or '').strip()
+            if proc in ('91', '92', '93'): self._rc.setdefault((code, proc), []).append((uph, wq, pit))
+            elif proc not in ('98', '99'): self._pc.setdefault(code, []).append((proc, wq, uph, cg, pit))
+        # proc_weld → _wlc = _weld_lines()와 동일
+        c.execute("SELECT parent_item,weld_item,ISNULL(use_qty,0),ISNULL(cs_calc_except,0),ISNULL(from_ymd,''),ISNULL(to_ymd,''),ISNULL(lme_except,0) FROM nx.proc_weld ORDER BY parent_item,weld_item")
+        for r in c.fetchall():
+            self._wlc.setdefault(str(r[0]).strip(), []).append((str(r[1]).strip(), float(r[2] or 0), bool(r[3]), str(r[4] or ''), str(r[5] or ''), bool(r[6])))
+        self._warmed = True
+        return self
+
     # --- 단위(mult=1) 메모이제이션: material/gagong/lme는 mult에 선형 → 단위값 캐시 후 ×mult ---
     def material_u(self, item, ymd):
         k=(item,ymd)
