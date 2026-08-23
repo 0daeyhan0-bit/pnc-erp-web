@@ -68,3 +68,65 @@ def _expandable(eng, node, info, seen):
         return None
     kids = [l for l in eng.lines(node) if not l[2]]
     return kids or None
+
+
+# ============================ 생산 소요 walker ============================
+# soyo STEP5~7(nx.v_pr_bom, except_flag)의 BOM 전개를 explode 트리 위에서 재현.
+# 정지=사급/최하위, 필터=except_flag(생산·PR축), 용접봉(RAC)=자재소요 제외.
+# ★1차=per-unit BOM 전개 정합(v_pr_bom 재귀와 diff0). 계획통합(STEP5/6 시드·plan_part_mat)은 후속.
+
+def _vpr_lines(eng, item):
+    """nx.v_pr_bom 직상위 자식 + 플래그(생산축). 반환 [(child, qty, except_flag)].
+    소요 정본 소스=nx.v_pr_bom(=nx.bom_line 위 생산 호환뷰, USE_QTY_PR·except_flag). RAC(용접봉) 포함(walker가 제외)."""
+    if not hasattr(eng, '_vprc'):
+        eng._vprc = {}
+    if item not in eng._vprc:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR, USE_QTY), ISNULL(except_flag,'0')
+            FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? ORDER BY BOM_SEQ""", item.strip().upper())
+        eng._vprc[item] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip()) for r in eng.cur.fetchall()]
+    return eng._vprc[item]
+
+
+def prod_soyo(eng, item):
+    """[생산 walker] per-unit 자재소요 {mat_code: qty}. except_flag=1 제외, 최하위집계, 용접봉(RAC) 제외.
+    STEP7 규칙: 자식 있으면 전개(제작SUB 관통), 최하위 leaf만 집계, 같은 mat_code는 가장 깊은 레벨."""
+    hasvpr = _has_vpr(eng)
+    raw = {}   # mat_code -> list of (level, qty)
+    def walk(node, cum_q, lvl, seen):
+        kids = _vpr_lines(eng, node) if (node in hasvpr and node not in seen) else []
+        kids = [(c, q, ex) for (c, q, ex) in kids if ex != '1']   # except_flag 제외
+        if kids:
+            for c, q, ex in kids:
+                walk(c, cum_q * q, lvl + 1, seen | {node})
+        # 최하위(자식 없음) = leaf 소요
+        if not kids and lvl > 0:
+            raw.setdefault(node, []).append((lvl, cum_q))
+    walk(item, 1.0, 0, set())
+    # 최하위 집계: 같은 mat_code 여러 경로면 합산(STEP7 SUM). 용접봉(RAC 접두, 용접링 제외)은 소요 제외.
+    out = {}
+    for mc, occ in raw.items():
+        if _is_weldrod(eng, mc):
+            continue
+        out[mc] = round(sum(q for _, q in occ), 6)
+    return out
+
+
+def _has_vpr(eng):
+    if not hasattr(eng, '_hasvpr'):
+        eng.cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(item_code))) FROM nx.v_pr_bom")
+        eng._hasvpr = set(r[0].strip() for r in eng.cur.fetchall())
+    return eng._hasvpr
+
+
+def _is_weldrod(eng, code):
+    """용접봉(RAC 접두, 단 용접링은 자재유지) = 자재소요 제외(공정처리). STEP7 정본 규칙."""
+    if not code.upper().startswith('RAC'):
+        return False
+    if not hasattr(eng, '_weldrod'):
+        eng._weldrod = {}
+    if code not in eng._weldrod:
+        eng.cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", code)
+        r = eng.cur.fetchone()
+        nm = (str(r[0]) if r else '')
+        eng._weldrod[code] = ('용접링' not in nm)   # 용접링 아니면 용접봉→제외
+    return eng._weldrod[code]

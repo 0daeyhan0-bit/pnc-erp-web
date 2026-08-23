@@ -101,7 +101,8 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 | 일자 | 단계 | 스코프 | diff0 결과 | 잔차/조치 |
 |---|---|---|---|---|
 | 2026-08-23 | 설계 확정 | — | — | explode+원가walker부터 착수 |
-| 2026-08-23 | **explode()+원가 walker(cost_material)** 구축 | 리시빙 상위 45제품 | **DIFF0 PASS 45/45**(FAIL0·ERR0) | `_harness/nx_soyo_engine.py`. 통일엔진 cost_material==엔진 material() 전수 일치. 데이터층=엔진 프리미티브 공유(lines/_load_item/_leaf_val). 재료비+LME. 다음=생산 walker(plan_part_mat diff0) |
+| 2026-08-23 | **explode()+원가 walker(cost_material)** 구축 | 리시빙 상위 45제품 | **DIFF0 PASS 45/45**(FAIL0·ERR0) | `_harness/nx_soyo_engine.py`. 통일엔진 cost_material==엔진 material() 전수 일치. 데이터층=엔진 프리미티브 공유(lines/_load_item/_leaf_val). 재료비+LME. |
+| 2026-08-23 | **원가 walker 전 사용중 스코프 검증** | **리시빙 제품 전수 1052** | **★DIFF0 PASS 1052/1052**(FAIL0·ERR0) | 전 사용중 BOM에서 재료비 완벽 재현. 원가 모드 통일엔진 신뢰 확보. 다음=생산 walker(plan_part_mat diff0, except_flag·사급중단·최하위집계) |
 
 ## 관련
 [[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]]
