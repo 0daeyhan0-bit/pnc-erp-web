@@ -194,10 +194,11 @@ def plan_explode_full(eng, item):
 
 
 def _incust(eng, code):
+    # ★소스=nx.PR_M_ITEM.in_cust_code (STEP6 CTE_BOM와 동일). nx.item.in_cust는 dbo값(2068 등)이라 갈림 → 561전수 FAIL2 원인이었음.
     if not hasattr(eng, '_incc'):
         eng._incc = {}
     if code not in eng._incc:
-        eng.cur.execute("SELECT ISNULL(in_cust,'') FROM nx.item WHERE item_code=?", code)
+        eng.cur.execute("SELECT ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM WHERE item_code=?", code)
         r = eng.cur.fetchone()
         eng._incc[code] = (str(r[0]).strip() if r else '')
     return eng._incc[code]
