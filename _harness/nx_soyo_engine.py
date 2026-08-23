@@ -375,3 +375,21 @@ def weight_explode(eng, item):
 
     rk, wk = walk(item)
     return (round(rk, 6), round(wk, 6))
+
+
+# ========================= 용접봉 소요 (geom/원가/재고 트랙, =weight_calc._load_weld 재현) =========================
+# 용접봉 소요(CS_T_ITEM_WELD.ITEM_USE_QTY 관경별 × 1.5, 품목별 flat) = ★원가/재고소비 트랙 primitive. 15/15검증(레거시 w_cs_esti ×1.5룰).
+#   ★주의: 협력사 "수불정산"의 용접봉 소요 정본은 이게 아님 — **협력사 견적서 기준**(coop_quote_part_v2 ptype_v2='용접봉' soyo, compute_quote).
+#   3트랙 구분: ①견적서=협력사 수불정산 정본 ②CS_T_ITEM_WELD×1.5=원가/재고 ③proc_weld(용접ST×원단위×1.5)=사내 재고차감.
+def _weld_soyo_map(eng):
+    if hasattr(eng, '_wsm'):
+        return eng._wsm
+    eng.cur.execute("SELECT UPPER(LTRIM(RTRIM(P_ITEM_CODE))), ISNULL(SUM(CAST(ITEM_USE_QTY AS float)),0) FROM nx.CS_T_ITEM_WELD GROUP BY P_ITEM_CODE")
+    eng._wsm = {str(r[0]).strip(): round(float(r[1] or 0) * 1.5, 4) for r in eng.cur.fetchall()}
+    return eng._wsm
+
+
+def weld_soyo(eng, item):
+    """[원가 용접봉 소요] 품목 1개당 용접봉 소요량 = Σ(CS_T_ITEM_WELD.ITEM_USE_QTY) × 1.5. flat(입고품번 직접).
+    ★원가 계산식의 용접봉 소요(1.5배). 협력사 수불정산(원소재+용접봉)은 별개=견적서 기준. weight_calc._load_weld diff0(3588/3588)."""
+    return _weld_soyo_map(eng).get(item.strip().upper(), 0.0)
