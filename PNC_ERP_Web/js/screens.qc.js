@@ -1,122 +1,293 @@
 /* ===== PNC ERP screens.qc.js — 품질 SCREEN (app.js 분할, 순수이동) ===== */
 
 /* ===== 품질 반성회의록 CRUD (nx.meeting ← cm_user_meeting_1) — 비용 자동계산 ===== */
-SCREEN.meeting=(host)=>{
+/* ===== 품질 반성회일지 (w_pr_input_590 조회 + w_pr_input_595 등록/수정) =====
+   ★원천: PR_T_DAILY_ISSUE_REVIEW (+ _FILE 첨부). 레거시 dw 조회쿼리 3종 그대로 이식.
+   ★조회 = 라이브 + nx(웹 등록분) 합산 / 쓰기 = nx 만.
+     라이브(레거시 작성분)는 웹에서 수정·삭제 불가 — nx 등록분만 가능. */
+SCREEN.meeting=(c)=>{
   const API=API_BASE;
-  const st={rows:[],cnt:0,q:'',from:'',to:'',form:null,sel:new Set(),msg:''};
-  const A=[1,2,3,4,5];
-  const calcPay=(f)=>{const mc=parseInt(f.member_count),du=parseInt(f.duration_min);
-    return (!isNaN(mc)&&!isNaN(du))?Math.round((mc+1)*du*358.3):(parseInt(f.pay_amount)||0);};
-  const load=async()=>{
-    const qs=new URLSearchParams({q:st.q,from_ymd:st.from,to_ymd:st.to,limit:300});
-    try{const r=await fetch(`${API}/api/meeting/list?${qs}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;st.msg='';}
-    catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
-    render();
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  const d2y=s=>(s||'').replace(/-/g,'').slice(2);                 // 2026-08-23 -> 260823
+  const y2d=s=>(s&&s.length===6)?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';
+  const ymdk=s=>(s&&s.length===6)?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:(s||'');
+  const hm=s=>(s&&s.length===4)?`${s.slice(0,2)}:${s.slice(2,4)}`:(s||'');
+  const T=new Date();
+  const st={from:iso(new Date(T.getTime()-22*864e5)),to:iso(T),q:'',
+            rows:[],cnt:0,loading:false,loaded:false,msg:'',
+            sel:null,detail:null,dloading:false,chk:new Set(),procs:[]};
+  const loadOpts=async()=>{try{const d=await(await fetch(`${API}/api/qareview/opts`)).json();st.procs=d.procs||[];}catch(e){}};
+  const load=async()=>{st.loading=true;draw();
+    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,q:st.q,limit:1000});
+    try{const r=await fetch(`${API}/api/qareview/list?${qs}`);const d=await r.json();
+      st.rows=d.rows||[];st.cnt=d.cnt||0;st.msg='';st.loaded=true;st.chk.clear();
+      if(st.sel&&!st.rows.some(x=>x.seq===st.sel)){st.sel=null;st.detail=null;}}
+    catch(e){st.msg='백엔드 연결 실패';st.rows=[];st.cnt=0;}
+    st.loading=false;draw();
+    if(!st.sel&&st.rows.length)pick(st.rows[0].seq);};
+  const pick=async(seq)=>{
+    st.sel=seq;
+    c.querySelectorAll('.mt-row').forEach(el=>el.style.background=(+el.dataset.seq===seq)?'#dcebff':'');
+    st.dloading=true;renderDetail();
+    try{st.detail=await(await fetch(`${API}/api/qareview/detail?seq=${seq}`)).json();}
+    catch(e){st.detail=null;}
+    st.dloading=false;renderDetail();};
+  // 레거시 일지 양식 그대로(보기 전용)
+  const paperHtml=()=>{
+    if(st.dloading)return `<div style="padding:30px;text-align:center;color:var(--muted)">불러오는 중…</div>`;
+    const d=st.detail;
+    if(!d||d.detail==null&&!d.seq)return `<div style="padding:30px;text-align:center;color:var(--muted)">← 좌측에서 일지를 선택하세요</div>`;
+    const rate=(a,b)=>{a=+a||0;b=+b||0;return b?Math.round(a/b*1000)/10:0;};
+    const box=(t,v)=>`<div style="border:1px solid #333;min-height:150px;padding:6px 8px;white-space:pre-wrap;font-size:12px;line-height:1.5">${esc(v||'')}</div>`;
+    return `
+    <div style="padding:10px 14px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px">
+        <table style="border-collapse:collapse;font-size:12px">
+          <tr><th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">구 분</th>
+              <th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">전체</th>
+              <th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">품 질</th>
+              <th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">불량수</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.err)} 대</td></tr>
+          <tr><th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">당일목표</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.t_target)} 대</td>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.ppm_target)} ppm</td>
+              <th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">총 원</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.inwon)} 명</td></tr>
+          <tr><th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">당일실적</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.t_result)} 대</td>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.ppm_result)} ppm</td>
+              <th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">휴 가</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.holiday)} 명</td></tr>
+          <tr><th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">달성율</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${rate(d.t_result,d.t_target)} %</td>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${rate(d.ppm_result,d.ppm_target)} %</td>
+              <th style="border:1px solid #333;background:#eef2f7;padding:3px 8px">참석인원</th>
+              <td style="border:1px solid #333;padding:3px 8px;text-align:right">${nf(d.attend)} 명</td></tr>
+        </table>
+        <div style="flex:1">
+          <div style="font-size:20px;font-weight:800;border-bottom:2px solid #333;display:inline-block;padding:0 8px 2px">Daily Issue Review</div>
+          <div style="margin-top:8px;font-size:12px;line-height:1.9">
+            <div>★시 간 : <b>${esc(hm(d.hhmm))}</b> &nbsp;&nbsp; ★구 분 : <b>${esc(d.proc_nm||'전체')}</b></div>
+            <div>★장 소 : <b>${esc(d.place)}</b> &nbsp;&nbsp; ★작성자 : <b>${esc(d.user_name||d.writer)}</b></div>
+            <div>★대 상 : <b>${esc(d.target)}</b> &nbsp;&nbsp; ★작성일 : <b>${esc(ymdk(d.ymd))}</b></div>
+          </div>
+        </div>
+        <table style="border-collapse:collapse;font-size:11px;text-align:center">
+          <tr><td rowspan="2" style="border:1px solid #333;padding:3px 5px;background:#eef2f7">결<br>재</td>
+              <th style="border:1px solid #333;padding:3px 14px;background:#eef2f7">반 장</th>
+              <th style="border:1px solid #333;padding:3px 14px;background:#eef2f7">팀 장</th></tr>
+          <tr><td style="border:1px solid #333;height:34px"></td><td style="border:1px solid #333"></td></tr>
+        </table>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #333">
+        <div style="border-right:1px solid #333">
+          <div style="text-align:center;font-weight:700;background:#eef2f7;border-bottom:1px solid #333;padding:4px">당일 공정 품질 및 Return 불량 현황</div>
+          <div style="padding:6px 8px;font-weight:700;font-size:12px">1.당일 공정품질 문제점(전체 Issue)</div>
+          ${box('',d.qa_issue)}
+          <div style="padding:6px 8px;font-weight:700;font-size:12px">2.당일 Return 불량 Issue 사항</div>
+          ${box('',d.rtn_err)}
+        </div>
+        <div>
+          <div style="text-align:center;font-weight:700;background:#eef2f7;border-bottom:1px solid #333;padding:4px">공유 내용 및 파급 전파</div>
+          <div style="padding:6px 8px;font-weight:700;font-size:12px">1.4M 변경사항(설비/자재/인원/작업방법)</div>
+          ${box('',d.c1)}
+          <div style="padding:6px 8px;font-weight:700;font-size:12px">2.자주/순차검사</div>
+          ${box('',d.c2)}
+          <div style="padding:6px 8px;font-weight:700;font-size:12px">3.전달사항</div>
+          ${box('',d.c3)}
+          <div style="padding:6px 8px;font-weight:700;font-size:12px">4.공유후 질문사항(인터뷰)</div>
+          ${box('',d.c4)}
+        </div>
+      </div>
+      <div style="margin-top:6px;font-size:12px">☞ 첨부파일 ${(d.files||[]).length?`: ${(d.files||[]).map(f=>esc(f.name)).join(', ')}`:'<span style="color:var(--muted)">없음</span>'}</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--muted)">
+        ${d.editable?'🟢 웹 등록분 — 수정/삭제 가능':'🔴 레거시 작성분 — 웹에서 수정/삭제 불가(조회 전용)'}
+        · 등록 ${esc(d.ins_user)} ${esc(d.ins_dt)} · 수정 ${esc(d.upd_user)} ${esc(d.upd_dt)}
+      </div>
+    </div>`;
   };
-  const render=()=>{
-    const editing=st.form!==null, f=st.form||{};
-    const ed=(typeof PERM!=='undefined')?PERM.canEdit('meeting'):true;
-    const pay=editing?calcPay(f):0;
-    host.innerHTML=`
-     <div class="page-title">📝 품질 반성회의록 <span style="font-size:12px;color:var(--muted);font-weight:400">회의 기록·조치사항 · nx.meeting</span></div>
-     <div class="page-sub">회의 기록·조치사항 관리. <b>비용 = (참석인원+1) × 소요시간(분) × 358.3</b> 자동계산. 원천 <code>cm_user_meeting_1</code>.</div>
-     <div class="toolbar" style="flex-wrap:wrap;gap:4px">
-       <label class="tl">회의일자</label><input class="inp" id="mt-from" value="${esc(st.from)}" placeholder="YYYYMM" style="width:90px"> ~ <input class="inp" id="mt-to" value="${esc(st.to)}" placeholder="YYYYMM" style="width:90px">
-       <label class="tl">검색</label><input class="inp" id="mt-q" value="${esc(st.q)}" placeholder="제목/작성자/참석자" style="width:170px">
+  const renderDetail=()=>{const b=c.querySelector('#mt-paper');if(b)b.innerHTML=paperHtml();};
+  const draw=()=>{
+    c.innerHTML=`
+     <style>.mt-tbl th,.mt-tbl td{text-align:center!important}</style>
+     <div class="page-title">📝 품질 반성회일지 <span style="font-size:12px;color:var(--muted);font-weight:400">Daily Issue Review · 작성/조회</span></div>
+     <div class="page-sub">레거시 <code>w_pr_input_590</code>(조회)+<code>595</code>(등록) 이식 · 원천 <code>PR_T_DAILY_ISSUE_REVIEW</code>. 🔴 라이브 조회 / 🟢 등록은 nx</div>
+     <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
+       <label class="tl">대상기간</label><input class="inp" type="date" id="mt-from" value="${st.from}"> ~ <input class="inp" type="date" id="mt-to" value="${st.to}">
+       <label class="tl">검색</label><input class="inp" id="mt-q" value="${esc(st.q)}" style="width:170px" placeholder="작성자/장소/대상" autocomplete="off">
        <button class="btn" id="mt-search">🔍 조회</button>
-       ${ed?`<button class="btn" id="mt-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
-       <button class="btn" id="mt-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
-       <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
+       <div class="spacer"></div>
+       <button class="btn" id="mt-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
+       <button class="btn" id="mt-edit">✏ 수정</button>
+       <button class="btn" id="mt-del" style="background:#c0392b;color:#fff">🗑 선택삭제</button>
+       <span class="rowcount">일지 <b>${nf(st.cnt)}</b>건</span>
      </div>
-     ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     ${editing?`<div class="wr-modal" style="position:fixed;inset:0;z-index:110;background:rgba(20,30,50,.38);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
-       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:760px;max-width:97vw">
-         <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
-           <b>회의록 ${f.meeting_id?'수정':'신규'}</b><span id="mt-x" style="cursor:pointer;font-size:17px">✕</span></div>
-         <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto">
-           <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px 8px;align-items:center;font-size:12px">
-             <label style="color:#33507d;font-weight:600;text-align:right">회의일자</label><input class="inp mf" data-k="meeting_ymd" value="${esc(f.meeting_ymd||'')}" placeholder="YYYYMMDD">
-             <label style="color:#33507d;font-weight:600;text-align:right">유형</label><input class="inp mf" data-k="meeting_type" value="${esc(f.meeting_type||'')}" placeholder="반성/아침조회 등">
-             <label style="color:#33507d;font-weight:600;text-align:right">제목<span style="color:#c0392b">*</span></label><input class="inp mf" data-k="subject" value="${esc(f.subject||'')}" style="grid-column:span 3">
-             <label style="color:#33507d;font-weight:600;text-align:right">작성자</label><input class="inp mf" data-k="organizer" value="${esc(f.organizer||'')}">
-             <label style="color:#33507d;font-weight:600;text-align:right">참석자</label><input class="inp mf" data-k="member" value="${esc(f.member||'')}">
-             <label style="color:#33507d;font-weight:600;text-align:right">참석인원</label><input class="inp mf" type="number" data-k="member_count" value="${esc(f.member_count||'')}">
-             <label style="color:#33507d;font-weight:600;text-align:right">소요시간(분)</label><input class="inp mf" type="number" data-k="duration_min" value="${esc(f.duration_min||'')}">
-             <label style="color:#33507d;font-weight:600;text-align:right">비용(자동)</label><input class="inp" id="mt-pay" value="${won(pay)}" readonly style="background:#eef2f7;grid-column:span 3">
-           </div>
-           <div style="margin-top:10px"><label style="color:#33507d;font-weight:600;font-size:12px">회의 내용</label>
-             <textarea class="inp mf" data-k="note" style="width:100%;min-height:70px;box-sizing:border-box">${esc(f.note||'')}</textarea></div>
-           <div style="margin-top:6px"><label style="color:#33507d;font-weight:600;font-size:12px">회의 내용 2</label>
-             <textarea class="inp mf" data-k="note2" style="width:100%;min-height:50px;box-sizing:border-box">${esc(f.note2||'')}</textarea></div>
-           <div style="margin-top:10px;font-weight:600;color:#33507d;font-size:12px">조치사항</div>
-           <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#8aa0bd">
-             <th style="width:24px">#</th><th style="text-align:left">조치내용</th><th style="width:110px">담당자</th><th style="width:100px">기한</th></tr></thead>
-             <tbody>${A.map(n=>`<tr>
-               <td class="center mut">${n}</td>
-               <td><input class="inp mf" data-k="action${n}_desc" value="${esc(f['action'+n+'_desc']||'')}" style="width:100%;box-sizing:border-box"></td>
-               <td><input class="inp mf" data-k="action${n}_person" value="${esc(f['action'+n+'_person']||'')}" style="width:100%;box-sizing:border-box"></td>
-               <td><input class="inp mf" data-k="action${n}_due" value="${esc(f['action'+n+'_due']||'')}" style="width:100%;box-sizing:border-box"></td></tr>`).join('')}</tbody></table>
-         </div>
-         <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
-           <span style="color:#c0392b;font-size:11px">* 제목은 필수. 비용은 인원·시간 입력 시 자동계산됩니다.</span>
-           <span><button class="btn" id="mt-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="mt-cancel">닫기</button></span></div>
-       </div></div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit" style="font-size:11px"><thead><tr><th style="width:26px"></th>
-        <th>회의일자</th><th>유형</th><th>제목</th><th>작성자</th><th>참석자</th><th class="num">인원</th><th class="num">시간(분)</th><th class="num">비용</th><th style="width:46px">작업</th></tr></thead>
-      <tbody>${st.rows.length?st.rows.map((r,i)=>`<tr>
-        <td class="center">${ed?`<input type="checkbox" class="mt-chk" data-id="${r.meeting_id}" ${st.sel.has(r.meeting_id)?'checked':''}>`:''}</td>
-        <td>${esc(r.meeting_ymd)}</td><td>${esc(r.meeting_type)}</td>
-        <td class="cap" title="${esc(r.subject)}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(r.subject)}</td>
-        <td>${esc(r.organizer)}</td><td class="cap" title="${esc(r.member)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.member)}</td>
-        <td class="num">${esc(r.member_count)}</td><td class="num">${esc(r.duration_min)}</td><td class="num">${won(r.pay_amount||0)}</td>
-        <td class="center">${ed?`<button class="btn mt-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="10" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
-    const g=id=>host.querySelector(id);
-    g('#mt-search').onclick=()=>{st.q=g('#mt-q').value;st.from=g('#mt-from').value;st.to=g('#mt-to').value;load();};
+     ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
+     <div style="display:flex;gap:8px;align-items:stretch">
+      <div class="grid-wrap" style="flex:0 0 44%;max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+       <table class="tbl fit mt-tbl" style="font-size:11px"><thead><tr>
+         <th style="width:30px"><input type="checkbox" id="mt-all" title="전체선택"></th>
+         <th>SEQ</th><th>작성일자</th><th>시간</th><th>작성자</th><th>장소</th><th>대상</th><th>참석</th><th>출처</th></tr></thead>
+       <tbody>${st.loading?spinRow(9):(st.rows.length?st.rows.map((r,i)=>`<tr class="mt-row" data-seq="${r.seq}" style="cursor:pointer${st.sel===r.seq?';background:#dcebff':''}">
+         <td class="center">${r.src==='nx'?`<input type="checkbox" class="mt-chk" data-seq="${r.seq}">`:'<span title="레거시 작성분은 삭제 불가" style="color:#c9d3e0">🔒</span>'}</td>
+         <td class="center">${i+1}</td><td class="center">${esc(ymdk(r.ymd))}</td><td class="center">${esc(hm(r.hhmm))}</td>
+         <td class="center">${esc(r.writer)}</td>
+         <td class="center" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.place)}">${esc(r.place)}</td>
+         <td class="center" style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.target)}">${esc(r.target)}</td>
+         <td class="center">${nf(r.attend)}</td>
+         <td class="center"><span style="font-size:10px;color:${r.src==='nx'?'#1c7c3a':'#888'}">${esc(r.src)}</span></td></tr>`).join('')
+         :`<tr><td colspan="9" class="empty">${st.loaded?'조회 결과 없음':'기간을 지정한 뒤 <b>🔍 조회</b>'}</td></tr>`)}</tbody></table></div>
+      <div class="grid-wrap" id="mt-paper" style="flex:1;max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">${paperHtml()}</div>
+     </div>`;
+    const g=id=>c.querySelector(id);
+    g('#mt-search').onclick=()=>{st.from=g('#mt-from').value;st.to=g('#mt-to').value;st.q=g('#mt-q').value.trim();load();};
     g('#mt-q').onkeyup=e=>{if(e.key==='Enter')g('#mt-search').click();};
-    if(ed){
-      g('#mt-new').onclick=()=>{st.form={meeting_ymd:'',subject:''};render();};
-      g('#mt-del').onclick=()=>del([...st.sel]);
-      host.querySelectorAll('.mt-chk').forEach(ch=>ch.onclick=()=>{const id=+ch.dataset.id;ch.checked?st.sel.add(id):st.sel.delete(id);});
-      host.querySelectorAll('.mt-edit').forEach(b=>b.onclick=()=>{st.form=Object.assign({},st.rows[+b.dataset.idx]);render();});
-    }
-    attachResizers(host);
-    if(editing){
-      g('#mt-cancel').onclick=g('#mt-x').onclick=()=>{st.form=null;render();};
-      g('#mt-save').onclick=save;
-      host.querySelectorAll('.mf').forEach(el=>{el.oninput=()=>{st.form[el.dataset.k]=el.value;
-        if(el.dataset.k==='member_count'||el.dataset.k==='duration_min'){const pe=g('#mt-pay');if(pe)pe.value=won(calcPay(st.form));}};});
-    }
+    c.querySelectorAll('.mt-row').forEach(el=>el.onclick=e=>{
+      if(e.target&&e.target.classList&&e.target.classList.contains('mt-chk'))return;
+      pick(+el.dataset.seq);});
+    c.querySelectorAll('.mt-chk').forEach(ch=>ch.onclick=e=>e.stopPropagation());
+    const all=g('#mt-all');
+    if(all)all.onclick=e=>{e.stopPropagation();c.querySelectorAll('.mt-chk').forEach(ch=>ch.checked=all.checked);};
+    g('#mt-new').onclick=()=>openReviewModal(st,null,()=>load());
+    g('#mt-edit').onclick=()=>{
+      if(!st.detail||!st.sel){alert('수정할 일지를 선택하세요.');return;}
+      if(!st.detail.editable){alert('레거시에서 작성된 일지는 웹에서 수정할 수 없습니다.');return;}
+      openReviewModal(st,st.detail,()=>load());};
+    g('#mt-del').onclick=async()=>{
+      const seqs=[...c.querySelectorAll('.mt-chk:checked')].map(ch=>+ch.dataset.seq);
+      if(!seqs.length){alert('삭제할 일지를 선택하세요(체크박스).');return;}
+      if(!confirm(`선택한 일지 ${seqs.length}건을 삭제할까요?`))return;
+      try{
+        const res=await fetch(`${API}/api/qareview/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seqs})});
+        if(!res.ok){let t='';try{t=(await res.json()).detail||'';}catch(e){t=await res.text();}alert('삭제 실패: '+(t||res.status));return;}
+        const d=await res.json();alert(d.msg||'');if(d.deleted)load();
+      }catch(e){alert('삭제 실패: '+(e&&e.message||e));}};
   };
-  const save=async()=>{
-    const f=st.form;
-    if(!String(f.subject||'').trim()){alert('회의 제목은 필수입니다');return;}
-    try{const r=await fetch(`${API}/api/meeting/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(f)});
-      const j=await r.json();
-      if(r.ok&&j.ok){st.msg=(j.mode==='insert'?'✅ 등록완료':'✅ 수정완료')+` (비용 ${won(j.pay_amount||0)})`;st.form=null;await load();}
-      else alert('저장 실패: '+(j.detail||JSON.stringify(j)));}
-    catch(e){alert('저장 오류: '+e);}
-  };
-  const del=async(ids)=>{if(!ids.length){alert('삭제할 행을 체크하세요');return;}
-    if(!confirm(ids.length+'건을 삭제하시겠습니까?'))return;
-    try{const r=await fetch(`${API}/api/meeting/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
-    catch(e){alert('삭제 오류: '+e);}
-  };
-  load();
+  draw();
+  loadOpts().then(()=>{draw();load();});
 };
+
+/* 반성회일지 등록/수정 팝업 (w_pr_input_595) — 레거시 일지 양식 그대로 입력폼으로 */
+function openReviewModal(st,cur,onSaved){
+  const API=API_BASE;
+  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
+  const y2d=s=>(s&&s.length===6)?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:iso(new Date());
+  const hm=s=>(s&&s.length===4)?`${s.slice(0,2)}:${s.slice(2,4)}`:'00:00';
+  const f=cur?{seq:cur.seq,ymd:y2d(cur.ymd),hhmm:hm(cur.hhmm),writer:cur.writer,place:cur.place,target:cur.target,
+               proc:cur.proc||'%',t_target:cur.t_target,t_result:cur.t_result,ppm_target:cur.ppm_target,
+               ppm_result:cur.ppm_result,err:cur.err,inwon:cur.inwon,holiday:cur.holiday,attend:cur.attend,
+               qa_issue:cur.qa_issue,rtn_err:cur.rtn_err,c1:cur.c1,c2:cur.c2,c3:cur.c3,c4:cur.c4}
+             :{seq:0,ymd:iso(new Date()),hhmm:'00:00',writer:'',place:'',target:'',proc:'%',
+               t_target:0,t_result:0,ppm_target:0,ppm_result:0,err:0,inwon:0,holiday:0,attend:0,
+               qa_issue:'',rtn_err:'',c1:'',c2:'',c3:'',c4:''};
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center';
+  const num=(k,unit)=>`<input class="inp rv-f" data-k="${k}" type="number" step="any" value="${f[k]||0}" style="width:78px;min-width:0;text-align:right"> ${unit}`;
+  const ta=(k,ph)=>`<textarea class="rv-f" data-k="${k}" placeholder="${ph}" style="width:100%;height:88px;border:1px solid #ccd3dc;border-radius:4px;padding:5px 7px;font-size:12px;font-family:inherit;resize:vertical">${esc(f[k]||'')}</textarea>`;
+  ov.innerHTML=`<div class="rv-modal" style="background:#fff;border-radius:10px;width:1000px;max-width:97vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:12px;overflow:hidden">
+    <style>
+      /* ★.inp 전역 min-width:200px 가 표 칸을 밀어내 하단 버튼까지 화면 밖으로 나가는 것을 막는다 */
+      .rv-modal .inp,.rv-modal select.inp{min-width:0!important}
+      .rv-modal table{max-width:100%}
+      .rv-lb{font-weight:700;background:#eef2f7;border:1px solid #333;padding:3px 8px;white-space:nowrap}
+      .rv-cell{border:1px solid #333;padding:2px 6px}
+    </style>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #e5e9f0">
+      <b style="font-size:14px">📝 품질 반성회일지 ${cur?'수정':'등록'}</b><span id="rv-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
+    <div id="rv-msg" style="padding:2px 12px;min-height:15px;font-size:12px"></div>
+    <div class="rv-wrap" style="flex:1;min-height:0;overflow:auto;padding:8px 12px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px">
+        <table style="border-collapse:collapse">
+          <tr><td class="rv-lb">구 분</td>
+              <td class="rv-cell" colspan="2"><select class="inp rv-f" data-k="proc" style="width:150px">${(st.procs||[]).map(o=>`<option value="${esc(o.code)}"${f.proc===o.code?' selected':''}>${esc(o.nm)}</option>`).join('')}</select></td>
+              <td class="rv-lb">불량수</td><td class="rv-cell">${num('err','대')}</td></tr>
+          <tr><td class="rv-lb">당일목표</td><td class="rv-cell">${num('t_target','대')}</td><td class="rv-cell">${num('ppm_target','ppm')}</td>
+              <td class="rv-lb">총 원</td><td class="rv-cell">${num('inwon','명')}</td></tr>
+          <tr><td class="rv-lb">당일실적</td><td class="rv-cell">${num('t_result','대')}</td><td class="rv-cell">${num('ppm_result','ppm')}</td>
+              <td class="rv-lb">휴 가</td><td class="rv-cell">${num('holiday','명')}</td></tr>
+          <tr><td class="rv-lb">달성율</td><td class="rv-cell" id="rv-rate1" style="text-align:right">0 %</td>
+              <td class="rv-cell" id="rv-rate2" style="text-align:right">0 %</td>
+              <td class="rv-lb">참석인원</td><td class="rv-cell">${num('attend','명')}</td></tr>
+        </table>
+        <div style="flex:1;min-width:280px">
+          <div style="font-size:18px;font-weight:800;border-bottom:2px solid #333;display:inline-block;padding:0 8px 2px">Daily Issue Review</div>
+          <div style="margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center">
+            <label class="tl">★시 간</label><input class="inp rv-f" data-k="hhmm" type="time" value="${esc(f.hhmm)}" style="width:110px">
+            <label class="tl">★장 소</label><input class="inp rv-f" data-k="place" value="${esc(f.place)}" style="width:100%" placeholder="예: S3라인">
+            <label class="tl">★대 상</label><input class="inp rv-f" data-k="target" value="${esc(f.target)}" style="width:100%" placeholder="예: 3라인작업자">
+            <label class="tl">★작성자</label><input class="inp rv-f" data-k="writer" value="${esc(f.writer)}" style="width:100%" placeholder="작성자명">
+            <label class="tl">★작성일</label><input class="inp rv-f" data-k="ymd" type="date" value="${esc(f.ymd)}" style="width:150px">
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <div style="text-align:center;font-weight:700;background:#eef2f7;border:1px solid #333;padding:4px">당일 공정 품질 및 Return 불량 현황</div>
+          <div style="padding:5px 0 3px;font-weight:700">1.당일 공정품질 문제점(전체 Issue)</div>${ta('qa_issue','')}
+          <div style="padding:5px 0 3px;font-weight:700">2.당일 Return 불량 Issue 사항</div>${ta('rtn_err','')}
+        </div>
+        <div>
+          <div style="text-align:center;font-weight:700;background:#eef2f7;border:1px solid #333;padding:4px">공유 내용 및 파급 전파</div>
+          <div style="padding:5px 0 3px;font-weight:700">1.4M 변경사항(설비/자재/인원/작업방법)</div>${ta('c1','')}
+          <div style="padding:5px 0 3px;font-weight:700">2.자주/순차검사</div>${ta('c2','')}
+          <div style="padding:5px 0 3px;font-weight:700">3.전달사항</div>${ta('c3','')}
+          <div style="padding:5px 0 3px;font-weight:700">4.공유후 질문사항(인터뷰)</div>${ta('c4','')}
+        </div>
+      </div>
+    </div>
+    <div style="flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:8px 12px;border-top:1px solid #e5e9f0;background:#fff">
+      <span style="margin-right:auto;font-size:11px;color:#666">※ 등록분은 nx 에 저장됩니다(라이브 원본은 변경하지 않습니다).</span>
+      <button class="btn" id="rv-save" style="background:#1c47a0;color:#fff">✔ 저장</button>
+      <button class="btn" id="rv-close">닫기</button></div>
+  </div>`;
+  const q=s=>ov.querySelector(s);
+  const msg=(t,ok)=>{q('#rv-msg').innerHTML=t?`<span style="color:${ok?'#1c7c3a':'#c0392b'}">${esc(t)}</span>`:'';};
+  const rate=()=>{const r=(a,b)=>{a=+a||0;b=+b||0;return b?Math.round(a/b*1000)/10:0;};
+    q('#rv-rate1').textContent=r(f.t_result,f.t_target)+' %';
+    q('#rv-rate2').textContent=r(f.ppm_result,f.ppm_target)+' %';};
+  // ★oninput 으로 즉시 반영 — onchange 만 쓰면 입력 직후 저장을 누를 때 값이 안 잡힌다(2026-08-23)
+  const syncOne=el=>{const k=el.dataset.k;f[k]=(el.type==='number')?(+el.value||0):el.value;};
+  const syncAll=()=>ov.querySelectorAll('.rv-f').forEach(syncOne);
+  ov.querySelectorAll('.rv-f').forEach(el=>{
+    const h=()=>{syncOne(el);
+      const k=el.dataset.k;
+      if(k==='t_target'||k==='t_result'||k==='ppm_target'||k==='ppm_result')rate();};
+    el.oninput=h; el.onchange=h;});
+  q('#rv-x').onclick=q('#rv-close').onclick=()=>ov.remove();
+  q('#rv-save').onclick=async()=>{
+    syncAll();                                  // 저장 직전 DOM 값을 한번 더 수거(포커스 유지 상태 대비)
+    if(!String(f.writer||'').trim()){msg('작성자를 입력하세요.',false);
+      const w=ov.querySelector('.rv-f[data-k="writer"]');if(w)w.focus();return;}
+    q('#rv-save').disabled=true;
+    try{
+      const body={...f,ymd:String(f.ymd||'').replace(/-/g,'').slice(2),
+                  hhmm:String(f.hhmm||'').replace(':',''),user:'웹'};
+      const res=await fetch(`${API}/api/qareview/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!res.ok){let t='';try{t=(await res.json()).detail||'';}catch(e){t=await res.text();}
+        msg('저장 실패: '+(t||res.status),false);return;}
+      const d=await res.json();
+      if(d.ok){msg(`✔ ${d.msg}`,true);setTimeout(()=>{ov.remove();if(typeof onSaved==='function')onSaved();},700);}
+      else msg(d.msg||'저장 실패',false);
+    }catch(e){msg('저장 실패: '+(e&&e.message||e),false);}
+    finally{const b=q('#rv-save');if(b)b.disabled=false;}
+  };
+  document.body.appendChild(ov); rate();
+}
 SCREEN.qcerror=(c)=>{
   wrShell(c,{sid:'qcerror',
     title:`🚫 품질불량관리 <span style="font-size:12px;color:var(--muted);font-weight:400">공정 불량 발생·조치 이력(등록·수정·삭제)</span>`,
-    sub:`레거시 <code>w_qa_input_020</code> 전체 컬럼(옆스크롤). 원장=<code>nx.qc_error</code>(레거시 이관완료) · ➕신규·수정은 팝업 · 코드→이름`,
+    sub:`레거시 <code>w_qa_input_020</code> 전체 컬럼(옆스크롤). 🔴 라이브(<code>QA_T_ERROR</code>) 조회 + 🟢 등록·수정은 nx(<code>qc_error</code>) · ➕신규·수정은 팝업 · 코드→이름`,
     nxOnly:true,
     cfg:{
       listEp:'/api/qc/error/list', saveEp:'/api/qc/error/save', delEp:'/api/qc/error/delete', days:30,
-      dateLabel:'불량기간', filters:qcFilters, buildQS:F=>qcQS(F,'nx'),
+      // ★src='all' — 레거시(QA_T_ERROR) + nx(qc_error) 합산 조회. 'nx' 로 두면 웹 등록분만 보여 0건이었다(2026-08-23)
+      dateLabel:'불량기간', filters:qcFilters, buildQS:F=>qcQS(F,'all'),
       sum:d=>`불량수량합 <b>${_wnf(d.sum_err)}</b>`,
-      cols:qcCols, modal:true, modalTitle:'불량관리 Maint', modalWidth:600, allReq:true,
+      // ★필수는 P/No 뿐 — 레거시 w_qa_input_025 도 P/No 만 필수(2026-08-23 확인)
+      cols:qcCols, modal:true, modalTitle:'불량관리 Maint', modalWidth:980, modalCols:2,
       form:[
-        {k:'error_ymd',label:'불량일자',type:'date',required:1,width:140},
+        {k:'error_ymd',label:'불량일자',type:'date',width:140},
         {k:'error_tag',label:'불량구분',type:'select',opts:QC_TAG,width:110},
         {k:'division',label:'사업부',type:'select',opts:QC_BIZ,width:80},
         {k:'cust_line',label:'고객사라인',type:'auto',optKind:'line',width:140},
@@ -127,10 +298,10 @@ SCREEN.qcerror=(c)=>{
         {k:'partner_code',label:'협력사',type:'auto',optKind:'partner',width:160},
         {k:'inspector',label:'검사자',width:100},{k:'error_member',label:'원인자',width:100},
         {k:'error_item1',label:'불량항목1',width:100},{k:'error_item2',label:'불량항목2',width:100},{k:'error_item3',label:'불량항목3',width:120},
-        {k:'error_desc',label:'불량내용',width:260},{k:'color',label:'색깔',type:'select',opts:QC_COLOR,width:80},
+        {k:'error_desc',label:'불량내용',width:700,full:1},{k:'color',label:'색깔',type:'select',opts:QC_COLOR,width:80},
         {k:'lot_qty',label:'생산수량(Lot)',type:'num',width:100},{k:'error_qty',label:'불량수량',type:'num',width:90},{k:'real_error_qty',label:'실발생불량',type:'num',width:90},
         {k:'scrap_weight',label:'스크랩중량(kg)',type:'num',width:100},
-        {k:'error_cause',label:'원인',width:180},{k:'progress_stats',label:'진행상황',width:140},{k:'charge_name',label:'담당',width:80},
+        {k:'error_cause',label:'원인',width:700,full:1},{k:'progress_stats',label:'진행상황',width:700,full:1},{k:'charge_name',label:'담당',width:80},
         {k:'water_flag',label:'수몰여부',type:'select',opts:QC_YN,width:90},
         {k:'reinsp_flag',label:'재검사여부',type:'select',opts:QC_YN,width:90},
         {k:'finish_flag',label:'완료여부',type:'select',opts:QC_YN,width:90},

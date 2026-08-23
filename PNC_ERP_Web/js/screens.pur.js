@@ -40,6 +40,10 @@ SCREEN.matinout=(c)=>{
     const sub=c.querySelector('#mio-sub');if(sub)sub.innerHTML=`${esc(WHN[sc]||sc)} · ${esc(pwName(pw))} 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PU_T_STOCK_MAINT</code> 외 · 🟢 nx ${esc(fmtYmd(curFrom))}~${esc(fmtYmd(curTo))} · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 자도번을 클릭하세요</div>';};
   c.innerHTML=`
+   <style>
+     /* 사용이력 = "업체명 : OO, 세트품번 : AJR…" 라 길다. 전역 .cap(86px) 대신 넉넉히(2026-08-23) */
+     .tbl th.mio-uh,.tbl td.mio-uh{min-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+   </style>
    <div class="page-title">🔁 자재 입출고현황</div>
    <div class="page-sub" id="mio-sub">재고창고·파트창고 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PU_T_STOCK_MAINT</code> 외 · 🟢 nx · 0재고 숨김</div>
    <div class="toolbar">
@@ -59,17 +63,29 @@ SCREEN.matinout=(c)=>{
      </div>
      <div style="flex:1;min-width:0">
        <div class="summary-bar" id="rhead"><div class="s-item">← 좌측에서 자도번을 클릭하세요</div></div>
-       <div class="grid-wrap" style="max-height:548px;overflow:auto"><table class="tbl fit"><thead><tr><th class="center">일자</th><th class="num">전일재고</th><th class="num">입고</th><th class="num">출고</th><th class="num">재고조정</th><th class="num">재고이동</th><th class="num">재고수량</th><th>구분</th><th>사용이력</th></tr></thead><tbody id="rbody"></tbody></table></div>
+       <div class="grid-wrap" style="max-height:548px;overflow:auto"><table class="tbl fit"><thead><tr><th class="center">일자</th><th class="num">전일재고</th><th class="num">입고</th><th class="num">출고</th><th class="num">재고조정</th><th class="num">재고이동</th><th class="num">재고수량</th><th>구분</th><th class="mio-uh">사용이력</th><th class="center">작업시간</th></tr></thead><tbody id="rbody"></tbody></table></div>
      </div>
    </div>`;
   const renderRight=mat=>{
     const s=stockAll.find(x=>x.mat===mat)||{}; const bf=bfMap[mat]||0;
-    const lines=(byMat[mat]||[]).slice().sort((a,b)=>(''+a.ymd).localeCompare(''+b.ymd,'ko'));
-    let bal=bf, html=`<tr><td class="center">00/00/00</td><td class="num">${won(bf)}</td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num qty"><b>${won(bf)}</b></td><td>전월이월</td><td></td></tr>`;
+    // 같은 날짜 안에서는 작업시간(INSERT_DATETIME) 순 — 레거시와 행 순서를 맞춘다
+    const lines=(byMat[mat]||[]).slice().sort((a,b)=>
+      (''+a.ymd).localeCompare(''+b.ymd,'ko') || (''+(a.wt||'')).localeCompare(''+(b.wt||''),'ko'));
+    // ★사용이력(레거시 w_pu_stock_060_wh) — 입고: "업체명 : OO, 세트품번 : AJR…" / 출고: "세트품번 : AJR…"
+    //   원천 PU_T_STOCK_MAINT.ITEM_CODE(상위·세트품번) + INSERT_DATETIME(작업시간). 2026-08-23 추가.
+    const useHist=r=>{
+      const p=[];
+      if(r.cust)p.push(`업체명 : ${r.cust}`);
+      if(r.itm) p.push(`세트품번 : ${r.itm}`);
+      if(!p.length&&r.wo)p.push(`제번 : ${r.wo}`);
+      return p.join(', ');
+    };
+    let bal=bf, html=`<tr><td class="center">00/00/00</td><td class="num">${won(bf)}</td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num qty"><b>${won(bf)}</b></td><td>전월이월</td><td></td><td></td></tr>`;
     let si=0,so=0,se=0,sm=0;
     lines.forEach(r=>{const prev=bal; const i=+r.i||0,o=+r.o||0,e=+r.e||0,mv=+r.mv||0; bal=prev+i-o+e+mv; si+=i;so+=o;se+=e;sm+=mv;
-      html+=`<tr><td class="center">${fmtYmd(r.ymd)}</td><td class="num">${won(prev)}</td><td class="num">${i?won(i):''}</td><td class="num">${o?won(o):''}</td><td class="num">${e?won(e):''}</td><td class="num">${mv?won(mv):''}</td><td class="num qty"><b>${won(bal)}</b></td><td>${esc(r.div)||''}</td><td class="cap" title="${esc(r.cust||r.wo||'')}">${esc(r.cust||r.wo||'')}</td></tr>`;});
-    html+=`<tr class="grandtot"><td class="center">총계</td><td class="num">${won(bf)}</td><td class="num">${won(si)}</td><td class="num">${won(so)}</td><td class="num">${won(se)}</td><td class="num">${won(sm)}</td><td class="num">${won(bal)}</td><td colspan="2"></td></tr>`;
+      const uh=useHist(r);
+      html+=`<tr><td class="center">${fmtYmd(r.ymd)}</td><td class="num">${won(prev)}</td><td class="num">${i?won(i):''}</td><td class="num">${o?won(o):''}</td><td class="num">${e?won(e):''}</td><td class="num">${mv?won(mv):''}</td><td class="num qty"><b>${won(bal)}</b></td><td>${esc(r.div)||''}</td><td class="mio-uh" title="${esc(uh)}">${esc(uh)}</td><td class="center" style="white-space:nowrap;font-size:10px;color:#667">${esc(r.wt||'')}</td></tr>`;});
+    html+=`<tr class="grandtot"><td class="center">총계</td><td class="num">${won(bf)}</td><td class="num">${won(si)}</td><td class="num">${won(so)}</td><td class="num">${won(se)}</td><td class="num">${won(sm)}</td><td class="num">${won(bal)}</td><td colspan="3"></td></tr>`;
     c.querySelector('#rbody').innerHTML=html;
     c.querySelector('#rhead').innerHTML=`<div class="s-item">자도번 <b>${esc(mat)}</b></div><div class="s-item">${esc(s.nm||'')}</div><div class="s-item">현재고 <b>${won(bal)}</b></div>`;
     attachResizers(c);

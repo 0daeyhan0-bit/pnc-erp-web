@@ -171,6 +171,7 @@ const MODULES=[
    {id:'gagongplan4w',ic:'📋',nm:'4주간 가공계획현황'},
    {id:'gagongjeohist',ic:'🧾',nm:'가공전표이력현황'},
    {id:'gagongmove580',ic:'🚚',nm:'가공창고 이동계획'},
+   {id:'gagongset280',ic:'📦',nm:'가공세트재고관리'},
  ]},
  {id:'qc',nm:'품질',ic:'🔎',subs:[
    {id:'qcerror',ic:'🚫',nm:'품질불량관리'},
@@ -1576,9 +1577,31 @@ function wrCrud(host, cfg){
           <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
             <b>${cfg.modalTitle||'등록'} ${st.form.id?'— 수정 (id '+st.form.id+')':'— 신규'}</b><span id="wr-x" style="cursor:pointer;font-size:17px">✕</span></div>
           <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto">
-            <table style="border-collapse:collapse;width:100%">${cfg.form.map(f=>`<tr>
-              <td style="padding:5px 10px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:104px;vertical-align:middle">${f.label}${_req(f)?'<span style="color:#c0392b">*</span>':''}</td>
-              <td style="padding:4px 0">${fld(f)}</td></tr>`).join('')}</table>
+            ${(()=>{
+              // ★modalCols(기본1) — 항목이 많으면 여러 열로 나눠 한 화면에 담는다(세로 스크롤 최소화).
+              //   f.full:true 인 항목(불량내용 등 긴 입력)은 행 전체를 차지한다.
+              const NC=Math.max(1,+(cfg.modalCols||1));
+              if(NC===1)
+                return `<table style="border-collapse:collapse;width:100%">${cfg.form.map(f=>`<tr>
+                  <td style="padding:5px 10px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:104px;vertical-align:middle">${f.label}${_req(f)?'<span style="color:#c0392b">*</span>':''}</td>
+                  <td style="padding:4px 0">${fld(f)}</td></tr>`).join('')}</table>`;
+              const lb=f=>`<td style="padding:5px 8px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;vertical-align:middle">${f.label}${_req(f)?'<span style="color:#c0392b">*</span>':''}</td>`;
+              let html='<table style="border-collapse:collapse;width:100%"><colgroup>'
+                + Array.from({length:NC}).map(()=>'<col style="width:96px"><col>').join('') + '</colgroup>';
+              let buf=[];
+              const flush=()=>{ if(!buf.length)return;
+                html+='<tr>'+buf.map(f=>lb(f)+`<td style="padding:4px 14px 4px 0">${fld(f)}</td>`).join('')
+                     + (buf.length<NC?`<td colspan="${(NC-buf.length)*2}"></td>`:'') + '</tr>';
+                buf=[]; };
+              cfg.form.forEach(f=>{
+                if(f.full){ flush();
+                  html+=`<tr>${lb(f)}<td colspan="${NC*2-1}" style="padding:4px 0">${fld(f)}</td></tr>`;
+                  return; }
+                buf.push(f); if(buf.length===NC)flush();
+              });
+              flush();
+              return html+'</table>';
+            })()}
           </div>
           <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center;gap:10px">
             <span style="color:#c0392b;font-size:11px;text-align:left">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span>
