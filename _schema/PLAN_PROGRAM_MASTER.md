@@ -182,6 +182,7 @@
 |---|---|---|
 | 2026-08-23 | 계획 기록 4갈래 전수 통합 → 본 문서 작성 | 완료 |
 | 2026-08-23 | **착수①: #3 partplan retire** | ✅완료(dev). 실측근거=nx.plan_part 死테이블(읽는코드 0)·편성버튼 이중호출·compose_mat이 STEP M 포함 상위집합. **조치**: (a)partplan.py `/api/plan/compose`→deprecated no-op(엔드포인트 유지) (b)screens.prod.js #p-compose 버튼+핸들러 제거(#p-compmat만) (c)index.html ?v=260823compose3retire. **검증**: py_compile OK·라우터 임포트 OK(라우트 유지)·JS 백틱 1058짝수·p-compose 0잔존·no-op응답 정상·plan_part 읽는코드 0 재확인. 전개기 3→2. nx.plan_part 테이블=freeze(후속 DROP 대상). 미배포(dev만·배포는 승인후). |
+| 2026-08-23 | **착수②: 협력사계획 소요경로 실측** | ✅완료. coopplan.py **자체 BOM 전개 없음**(v_pr_bom/v_cs_bom/CTE 검색 공란). 소요수량=`plan_part_mat.part_plan_qty`(src=nx→nx.plan_part_mat·src=legacy→라이브 PR_T_PLAN_PART_MAT·SP_PR_4주간계획현황_LIVE, 모두 STEP7=#2). 당김=**날짜만**(part_plan_ymd에 CUST_MAINT_DAY baked, 수량 불변). → 협력사계획=이미 정본 #2 소비·통일조치 불요. |
 
 ---
 
