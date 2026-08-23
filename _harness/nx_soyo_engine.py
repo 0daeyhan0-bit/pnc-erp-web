@@ -253,13 +253,14 @@ _WT_COPPER = {'CU', '고강도'}
 
 
 def _wt_meta(eng, code):
-    """중량 leaf META: (w, cls). raw=동(net_weight 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현."""
+    """중량 leaf META: (w, cls). raw=동(ITEM_WEIGHT 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현.
+    ★소스=nx.PR_M_ITEM(중량 정본). nx.item은 일부품목 net_weight=geom·length 드리프트(3H00627M 0.3332→0.2907 등) → PR_M_ITEM 직독으로 diff0."""
     if not hasattr(eng, '_wtm'):
         eng._wtm = {}
     u = code.strip().upper()
     if u not in eng._wtm:
-        eng.cur.execute("""SELECT ISNULL(net_weight,0),ISNULL(diam,0),ISNULL(thick,0),ISNULL(length,0),
-            ISNULL(metal_gubun,''),ISNULL(item_name,'') FROM nx.item WHERE item_code=?""", code)
+        eng.cur.execute("""SELECT ISNULL(ITEM_WEIGHT,0),ISNULL(ITEM_DIAM,0),ISNULL(ITEM_THICK,0),ISNULL(ITEM_LENGTH,0),
+            ISNULL(METAL_GUBUN,''),ISNULL(ITEM_DESC,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?""", code)
         r = eng.cur.fetchone()
         w = 0.0
         cls = None
