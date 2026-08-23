@@ -171,6 +171,7 @@ const MODULES=[
    {id:'gagongplan4w',ic:'📋',nm:'4주간 가공계획현황'},
    {id:'gagongjeohist',ic:'🧾',nm:'가공전표이력현황'},
    {id:'gagongmove580',ic:'🚚',nm:'가공창고 이동계획'},
+   {id:'gagongset280',ic:'📦',nm:'가공세트재고관리'},
  ]},
  {id:'qc',nm:'품질',ic:'🔎',subs:[
    {id:'qcerror',ic:'🚫',nm:'품질불량관리'},
