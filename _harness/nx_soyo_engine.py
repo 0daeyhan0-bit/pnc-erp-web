@@ -187,8 +187,8 @@ def plan_explode_full(eng, item):
         for c, q, ex, vf in _vpr_full(eng, mat):
             if ex == '1':
                 continue
-            p = parent if vir == '1' else mat     # vir_item이면 parent 유지
-            walk(c, cum * q, lvl + 1, p, vf, _incust(eng, c), seen | {mat})
+            # plan_part_temp/gagong의 item_code = 직접 부모(mat). vir 로직은 p_item_code(별도컬럼)용이라 이 그레인엔 무영향.
+            walk(c, cum * q, lvl + 1, mat, vf, _incust(eng, c), seen | {mat})
     walk(item, 1.0, 0, item, '0', _incust(eng, item), set())
     return agg
 
