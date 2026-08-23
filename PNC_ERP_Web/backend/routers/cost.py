@@ -734,6 +734,8 @@ def _regen_ca_worker(ym, ymd):
         _regen_ca['total'] = len(items)
         e1 = NxCostEngine(); e2 = NxCostEngine()
         _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]), _V2.build_fallback_map(e2.cur, ymd[:4]))
+        try: e1.warm_all(); e2.warm_all()   # ★글로벌 벌크로드(diff0 PASS·7.8배) — 노드별 DB왕복 제거
+        except Exception: pass
         smap = {}
         try: smap = _sagub_diff_map(e1.cur, ym)
         except Exception: smap = {}
