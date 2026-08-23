@@ -183,6 +183,8 @@
 | 2026-08-23 | 계획 기록 4갈래 전수 통합 → 본 문서 작성 | 완료 |
 | 2026-08-23 | **착수①: #3 partplan retire** | ✅완료(dev). 실측근거=nx.plan_part 死테이블(읽는코드 0)·편성버튼 이중호출·compose_mat이 STEP M 포함 상위집합. **조치**: (a)partplan.py `/api/plan/compose`→deprecated no-op(엔드포인트 유지) (b)screens.prod.js #p-compose 버튼+핸들러 제거(#p-compmat만) (c)index.html ?v=260823compose3retire. **검증**: py_compile OK·라우터 임포트 OK(라우트 유지)·JS 백틱 1058짝수·p-compose 0잔존·no-op응답 정상·plan_part 읽는코드 0 재확인. 전개기 3→2. nx.plan_part 테이블=freeze(후속 DROP 대상). 미배포(dev만·배포는 승인후). |
 | 2026-08-23 | **착수②: 협력사계획 소요경로 실측** | ✅완료. coopplan.py **자체 BOM 전개 없음**(v_pr_bom/v_cs_bom/CTE 검색 공란). 소요수량=`plan_part_mat.part_plan_qty`(src=nx→nx.plan_part_mat·src=legacy→라이브 PR_T_PLAN_PART_MAT·SP_PR_4주간계획현황_LIVE, 모두 STEP7=#2). 당김=**날짜만**(part_plan_ymd에 CUST_MAINT_DAY baked, 수량 불변). → 협력사계획=이미 정본 #2 소비·통일조치 불요. |
+| 2026-08-23 | **착수③: 중량 walker**(weight_explode) | ✅**DIFF0 PASS 450/450**(raw_kg, 전수 census 진행). weight_calc._explode(geom/BOM 동중량) 재현. 소스등가 선검증(nx.bom_line≡v_cs_bom)·leaf=PR_M_ITEM(nx.item 드리프트 회피)·SAGUB 필터. `_harness/nx_soyo_engine.py:weight_explode`. SOYO_ENGINE_UNIFY_DESIGN §7. |
+| 2026-08-23 | **☐추후과제 기록**(사용자 지적) | — | **자재매출마감 실제 정산중량=협력사 견적기준**(compute_quote·coop 협의중량)로 walker의 geom기준과 다름. 견적기준 **로직 정합 여부 + 별도 견적중량 walker 편입** 추후 검토. 용접봉 소요 정본=CS_T_ITEM_WELD×1.5. [[newerp-weld-settlement-roadmap]] |
 
 ---
 
