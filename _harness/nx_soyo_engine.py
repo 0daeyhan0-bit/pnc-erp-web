@@ -7,6 +7,7 @@
 핵심: explode()가 전 BOM 트리를 1회 전개(전 노드 태깅) → 모드 walker가 자기 정지/필터/집계 적용.
 소비자: 내부원가·실원가 R01~Rnn·중량정산·용접봉수불·자재소요/매입검증·OSP비교·발주·실제손익.
 """
+import math
 
 
 def explode(eng, item, ymd):
@@ -242,3 +243,134 @@ def _is_weldrod(eng, code):
         nm = (str(r[0]) if r else '')
         eng._weldrod[code] = ('용접링' not in nm)   # 용접링 아니면 용접봉→제외
     return eng._weldrod[code]
+
+
+# ========================= 중량 walker (=weight_calc._explode 재현) =========================
+# ★소스 등가 검증(2026-08-23): nx.bom_line 엣지 ≡ v_cs_bom(멤버·qty·sagub_default 0차), nx.item leaf ≡ PR_M_ITEM(동중량 0차).
+#   → weight_calc(v_cs_bom+PR_M_ITEM)를 통일엔진 트리(nx.bom_line+nx.item)로 diff0 재현 가능.
+#   같은 BOM 다른 필터: 원가=cs_calc_except / 중량=SAGUB(sagub_default=1 업체가공 제외). RAC 포함(폴백조건 raw==0 AND weld==0 보존).
+_WT_COPPER = {'CU', '고강도'}
+
+
+def _wt_meta(eng, code):
+    """중량 leaf META: (w, cls). raw=동(net_weight 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현."""
+    if not hasattr(eng, '_wtm'):
+        eng._wtm = {}
+    u = code.strip().upper()
+    if u not in eng._wtm:
+        eng.cur.execute("""SELECT ISNULL(net_weight,0),ISNULL(diam,0),ISNULL(thick,0),ISNULL(length,0),
+            ISNULL(metal_gubun,''),ISNULL(item_name,'') FROM nx.item WHERE item_code=?""", code)
+        r = eng.cur.fetchone()
+        w = 0.0
+        cls = None
+        if r:
+            mg = str(r[4]).strip()
+            nm = str(r[5])
+            if mg in _WT_COPPER:
+                cls = 'raw'
+                iw = float(r[0] or 0)
+                if iw > 0:
+                    w = iw
+                else:
+                    d, t, L = float(r[1] or 0), float(r[2] or 0), float(r[3] or 0)
+                    if d > 0 and t > 0 and L > 0:
+                        w = math.pi * (d - t) * t * L * 8.94 / 1e6
+            elif '용접봉' in nm:
+                cls = 'weld'
+        eng._wtm[u] = (w, cls)
+    return eng._wtm[u]
+
+
+def _cs_lines_wt(eng, item):
+    """중량축 BOM 엣지 (child, qty, sagub) = nx.bom_line (★RAC 포함=weight_calc CH 등가, sagub_default 유지)."""
+    if not hasattr(eng, '_cslw'):
+        eng._cslw = {}
+    u = item.strip().upper()
+    if u not in eng._cslw:
+        bid = eng.bom_id(item)
+        if bid is None:
+            eng._cslw[u] = []
+        else:
+            eng.cur.execute("SELECT child_item,qty,ISNULL(sagub_default,0) FROM nx.bom_line WHERE bom_id=? ORDER BY seq", bid)
+            eng._cslw[u] = [(str(r[0]).strip(), float(r[1] or 0), int(r[2])) for r in eng.cur.fetchall()]
+    return eng._cslw[u]
+
+
+def _wt_coop(eng):
+    """협력사 정산기준: coop_raw_spec(COOP_SET 리프=자기중량 override) + coop_bom(CS전개결손 폴백). weight_calc와 동일 소스."""
+    if hasattr(eng, '_wtcoop'):
+        return eng._wtcoop
+    cs = {}
+    cb = {}
+    try:
+        eng.cur.execute("SELECT item_code, unit_weight FROM nx.coop_raw_spec WHERE unit_weight IS NOT NULL AND unit_weight>0")
+        for ic, uw in eng.cur.fetchall():
+            cs[str(ic).strip().upper()] = float(uw)
+    except Exception:
+        pass
+    try:
+        eng.cur.execute("SELECT parent, child, use_qty FROM nx.coop_bom")
+        for p, c, u in eng.cur.fetchall():
+            cb.setdefault(str(p).strip().upper(), []).append((str(c).strip().upper(), float(u or 1)))
+    except Exception:
+        pass
+    eng._wtcoop = (cs, cb)
+    return eng._wtcoop
+
+
+def weight_explode(eng, item):
+    """[중량 walker] 1개 → (raw_kg, weld_kg): 업체가공(sagub_default≠1) 경로의 동/용접봉 중량. weight_calc._explode 완전재현.
+    COOP_SET(coop_raw_spec) 리프=자기중량(하위 사급 전개 안함)·CS전개0이면 coop_bom 폴백. raw_kg=협력사 동 중량정산 소요 정본."""
+    COOP_SET, COOPB = _wt_coop(eng)
+    memo = {}
+
+    def walk(node):
+        u = node.strip().upper()
+        if u in memo:
+            return memo[u]
+        memo[u] = (0.0, 0.0)   # cycle guard
+        ch = _cs_lines_wt(eng, node)
+        if ch:
+            rk = wk = 0.0
+            for c, q, sag in ch:
+                if sag == 1:      # 사급(업체에 우리가 공급) 제외 — 업체가공만 인정
+                    continue
+                cr, cw = walk(c)
+                rk += cr * q
+                wk += cw * q
+            if rk > 0 or wk > 0:
+                memo[u] = (rk, wk)
+                return memo[u]
+            # 전개 0(자식 전부 사급/비동) → coop 단품이면 자기중량, 아니면 협력사BOM 폴백
+            if u in COOP_SET:
+                memo[u] = (COOP_SET[u], 0.0)
+                return memo[u]
+            cb = COOPB.get(u)
+            if cb:
+                rk = wk = 0.0
+                for c, q in cb:
+                    cr, cw = walk(c)
+                    rk += cr * q
+                    wk += cw * q
+                memo[u] = (rk, wk)
+                return memo[u]
+            return memo[u]        # (0,0)
+        # CS 자식 없음 = 리프
+        cb = COOPB.get(u)
+        if cb and u not in COOP_SET:
+            rk = wk = 0.0
+            for c, q in cb:
+                cr, cw = walk(c)
+                rk += cr * q
+                wk += cw * q
+            memo[u] = (rk, wk)
+            return memo[u]
+        if u in COOP_SET:
+            memo[u] = (COOP_SET[u], 0.0)
+            return memo[u]
+        w, cls = _wt_meta(eng, node)
+        memo[u] = (w, 0.0) if cls == 'raw' else ((0.0, w) if cls == 'weld' else (0.0, 0.0))
+        return memo[u]
+
+    rk, wk = walk(item)
+    return (round(rk, 6), round(wk, 6))
