@@ -58,7 +58,7 @@
 | **C20** | **Gitea org명** | ⚠불일치: 런북=`pnc` vs ONBOARDING/CLAUDE=`pncind`. **실사용=pncind 추정, 런북 갱신 필요** | GITEA_RUNBOOK vs DEV_ONBOARDING |
 
 **미해결 버그(코드 교정 대기)**:
-- **current_order가 EXCEPT_FLAG 무시**(상위SUB 귀속규칙 위반, 개별발주 위험) — EXCEPT_FLAG_VENDOR_RULE. route_order/autoorder도 준수확인 필요.
+- ~~current_order가 EXCEPT_FLAG 무시~~ → **✅해소(08-20 수정·08-24 검증)**: current_order가 v_pr_bom+EXCEPT<>1 전개, MJU 전개제외·명진 SUB 통째귀속 라이브 확인. route_order 상속. (autoorder/manorder=plan_mat_source 소비, 별도 확인 여지)
 
 ---
 
