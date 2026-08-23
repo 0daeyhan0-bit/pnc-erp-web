@@ -185,6 +185,7 @@
 | 2026-08-23 | **착수②: 협력사계획 소요경로 실측** | ✅완료. coopplan.py **자체 BOM 전개 없음**(v_pr_bom/v_cs_bom/CTE 검색 공란). 소요수량=`plan_part_mat.part_plan_qty`(src=nx→nx.plan_part_mat·src=legacy→라이브 PR_T_PLAN_PART_MAT·SP_PR_4주간계획현황_LIVE, 모두 STEP7=#2). 당김=**날짜만**(part_plan_ymd에 CUST_MAINT_DAY baked, 수량 불변). → 협력사계획=이미 정본 #2 소비·통일조치 불요. |
 | 2026-08-23 | **착수③: 중량 walker**(weight_explode) | ✅**DIFF0 PASS 6576/6577**(raw_kg 전수, 99.98%). weight_calc._explode(geom/BOM 동중량) 재현. 소스등가 선검증(nx.bom_line≡v_cs_bom)·leaf=PR_M_ITEM(nx.item 드리프트 회피)·SAGUB 필터. FAIL1=데이터위생(item_code 후행개행·리시빙0). `_harness/nx_soyo_engine.py:weight_explode`. |
 | 2026-08-23 | **☐추후과제 기록**(사용자 지적) | — | **자재매출마감 실제 정산중량=협력사 견적기준**(compute_quote·coop 협의중량)로 walker의 geom기준과 다름. 견적기준 **로직 정합 여부 + 별도 견적중량 walker 편입** 추후 검토. 용접봉 소요 정본=CS_T_ITEM_WELD×1.5. [[newerp-weld-settlement-roadmap]] |
+| 2026-08-23 | **☐추후 TODO 일괄 미룸**(사용자결정) | — | 아래 전부 추후: **협력사 수불 용접포인트 점검**(협력사 견적 소요=견적서 파싱값·우리 용접포인트와 계산식 다름 ~50%·ST는 coop미저장→견적서원본 ST확인 선행) · **A** 구 compute_quote 정리 · **B** 전개기 repoint(현행→통일엔진 호출) · **C** 규격별 정산 부호표시 개선 · **D** 견적중량 walker 편입 · **E** 데이터위생(bom_line 후행개행 TRIM·proc_weld 재빌드 sync). 상세=SOYO_ENGINE_UNIFY_DESIGN §7·[[newerp-soyo-engine-unify]]. |
 
 ---
 
