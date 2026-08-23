@@ -2716,7 +2716,7 @@ SCREEN.unifybom=(c,ro)=>{
      .bm-tab{border:1px solid #d3ddec;border-bottom:none;background:#f1f5fb;color:#5a6b82;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0}
      .bm-tab.on{background:#fff;color:#1c47a0;border-color:#bcd;position:relative;top:2px}
      .bm-results{border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin:6px 0 0;max-height:calc(100vh - 250px);overflow:auto;background:#fff;box-shadow:0 3px 12px rgba(30,45,70,.10)}
-     .bm-r{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px}
+     .bm-r{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;display:flow-root}
      .bm-r:last-child{border-bottom:none}.bm-r:hover{background:#eef4ff}
      .bm-tbl{font-size:12px}.bm-tbl th,.bm-tbl td{padding:3px 6px;white-space:nowrap}
      .bm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}
