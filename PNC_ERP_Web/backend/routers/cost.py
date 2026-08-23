@@ -649,7 +649,8 @@ def cost_nx_bulk_v2(p: dict = Body(...)):
 #  프론트가 nx엔진으로 계산한 결과(품목별 원가/손익)를 (ym=리시빙월, ymd=단가일)별로 저장 → 다음 진입/타 사용자 즉시 로드.
 #  엔진 자체는 안 건드림. 재계산 버튼=강제 재계산 후 재저장. buildRow가 쓰는 13필드+qty만 보관.
 _CA_FIELDS = ('qty', 'jae', 'lg', 'silwon', 'sonik', 'sagub', 'won', 'bu', 'sa',
-              'gagong', 'ilban', 'unban', 'profit', 'silsagub')
+              'gagong', 'ilban', 'unban', 'profit', 'silsagub',
+              'v2_silwon', 'v2_sonik', 'v2_delta')   # ★V2(직거래 실매입) 편입 — 화면은 캐시 조회만(즉시)
 
 def _ca_norm(ym, ymd):
     ym = "".join(ch for ch in str(ym or '') if ch.isdigit()); ym = ym[2:6] if len(ym) >= 6 else ym[:4]
@@ -663,6 +664,9 @@ def _ca_ddl(cur):
           qty float, jae float, lg float, silwon float, sonik float, sagub float,
           won float, bu float, sa float, gagong float, ilban float, unban float, profit float, silsagub float,
           upd_dt datetime, CONSTRAINT pk_ca_cache PRIMARY KEY(ym,ymd,part))""")
+    # ★기존 테이블에 V2 컬럼 없으면 추가(멱등)
+    for _c in ('v2_silwon', 'v2_sonik', 'v2_delta'):
+        cur.execute("IF COL_LENGTH('nx.cost_analysis_cache',?) IS NULL EXEC('ALTER TABLE nx.cost_analysis_cache ADD %s float')" % _c, _c)
 
 @router.get("/api/cost/analysis/cache/get")
 def cost_analysis_cache_get(ym: str = Query(''), ymd: str = Query('')):
