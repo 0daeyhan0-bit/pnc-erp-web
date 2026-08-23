@@ -93,89 +93,89 @@ function enableSort(c, keys, getRows, render){
 
 /* ---- 모듈(상단) → 하위메뉴(좌측) 구성 ---- */
 const MODULES=[
- {id:'base',nm:'기준정보 관리',ic:'',subs:[
-   {id:'items',ic:'',nm:'품목 조회',cnt:DB.dashboard.items_total},
-   {id:'bomview',ic:'',nm:'품목 BOM 조회'},
-   {id:'lgbomview',ic:'',nm:'LG BOM 관리'},
+ {id:'base',nm:'기준정보 관리',ic:'📦',subs:[
+   {id:'items',ic:'📦',nm:'품목 조회',cnt:DB.dashboard.items_total},
+   {id:'bomview',ic:'🔀',nm:'품목 BOM 조회'},
+   {id:'lgbomview',ic:'🔀',nm:'LG BOM 관리'},
    {id:'docmgr',ic:'📐',nm:'도면/문서 조회'},
    {id:'basemaster',ic:'🗂️',nm:'기준 마스터 관리'},
-   {id:'prodinfo',ic:'',nm:'생산정보등록'},
+   {id:'prodinfo',ic:'⚙️',nm:'생산정보등록'},
  ]},
- {id:'pur',nm:'구매/자재',ic:'',subs:[
-   {id:'mat',ic:'',nm:'자재목록조회'},
+ {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
+   {id:'mat',ic:'📦',nm:'자재목록조회'},
    {id:'matledger',ic:'📒',nm:'자재수불장'},
    {id:'matclose',ic:'📗',nm:'자재 일마감(이동평균)'},
-   {id:'dispatchdetail',ic:'',nm:'자재불출명세서'},
-   {id:'dispatch',ic:'',nm:'자재불출집계표'},
-   {id:'receiptdetail',ic:'',nm:'자재입고명세서'},
-   {id:'receipt',ic:'',nm:'자재입고집계표'},
-   {id:'lgsagub',ic:'',nm:'LG사급현황'},
-   {id:'matverify',ic:'',nm:'자재 소요-매입 검증'},
-   {id:'matkanban',ic:'',nm:'자재입고현황',hide:true},
+   {id:'dispatchdetail',ic:'📋',nm:'자재불출명세서'},
+   {id:'dispatch',ic:'📤',nm:'자재불출집계표'},
+   {id:'receiptdetail',ic:'🧾',nm:'자재입고명세서'},
+   {id:'receipt',ic:'📥',nm:'자재입고집계표'},
+   {id:'lgsagub',ic:'📊',nm:'LG사급현황'},
+   {id:'matverify',ic:'🔍',nm:'자재 소요-매입 검증'},
+   {id:'matkanban',ic:'📊',nm:'자재입고현황',hide:true},
    {sep:true},
    {id:'dopippur',ic:'🚢',nm:'도입-수입입력'},
    {id:'dopipsale',ic:'✈️',nm:'도입-수출입력'},
    {sep:true},
-   {id:'stockreceipt',ic:'',nm:'자재입고관리'},
-   {id:'matreceive',ic:'',nm:'자재입고(발주분)'},
-   {id:'stockissue',ic:'',nm:'자재출고관리'},
+   {id:'stockreceipt',ic:'📥',nm:'자재입고관리'},
+   {id:'matreceive',ic:'📦',nm:'자재입고(발주분)'},
+   {id:'stockissue',ic:'📤',nm:'자재출고관리'},
    {id:'stockadjust',ic:'🛠️',nm:'자재재고조정'},
-   {id:'saguboutput',ic:'',nm:'사급출고관리'},
-   {id:'matinout',ic:'',nm:'자재 입출고현황'},
+   {id:'saguboutput',ic:'📤',nm:'사급출고관리'},
+   {id:'matinout',ic:'🔁',nm:'자재 입출고현황'},
    {id:'manorder',ic:'🛒',nm:'수동발주'},
-   {id:'matprice',ic:'',nm:'원소재/용접봉 시세',hide:true},
+   {id:'matprice',ic:'💲',nm:'원소재/용접봉 시세',hide:true},
    {id:'sourceprofile',ic:'🧭',nm:'조달 프로파일'},
    {sep:true},
-   {id:'salemagam',ic:'',nm:'자재매출마감'},
-   {id:'purmagam',ic:'',nm:'자재매입마감'},
+   {id:'salemagam',ic:'🧾',nm:'자재매출마감'},
+   {id:'purmagam',ic:'📥',nm:'자재매입마감'},
    {id:'coopquote2',ic:'💱',nm:'협력사견적관리'},
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
-   {id:'partnerplan',ic:'',nm:'협력사계획현황'},
-   {id:'deliv420',ic:'',nm:'거래명세서 발행'},
+   {id:'partnerplan',ic:'📋',nm:'협력사계획현황'},
+   {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
    {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},
-   {id:'setstock',ic:'',nm:'자재세트입고관리'},
+   {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
  ]},
- {id:'prod',nm:'생산',ic:'',subs:[
-   {id:'prodstock',ic:'',nm:'생산재고조회'},
-   {id:'prodinout',ic:'',nm:'생산입출고현황'},
+ {id:'prod',nm:'생산',ic:'🏭',subs:[
+   {id:'prodstock',ic:'🏭',nm:'생산재고조회'},
+   {id:'prodinout',ic:'🔁',nm:'생산입출고현황'},
    {sep:true},
-   {id:'orderupload',ic:'',nm:'주문업로드'},
-   {id:'planupload',ic:'',nm:'생산계획업로드'},
-   {id:'planinput',ic:'',nm:'생산계획추가입력'},
-   {id:'prodsheet',ic:'',nm:'생산전표출력관리'},
+   {id:'orderupload',ic:'📥',nm:'주문업로드'},
+   {id:'planupload',ic:'📅',nm:'생산계획업로드'},
+   {id:'planinput',ic:'➕',nm:'생산계획추가입력'},
+   {id:'prodsheet',ic:'🖨️',nm:'생산전표출력관리'},
    {id:'partplan',ic:'🧩',nm:'파트별 생산계획'},
    {id:'kitting',ic:'🧰',nm:'준비실적처리(키팅)'},
    {id:'procresult',ic:'✅',nm:'공정별 생산실적등록'},
    {id:'procbarcode',ic:'🔫',nm:'공정별 바코드생산실적'},
-   {id:'partresult',ic:'',nm:'파트별 생산실적현황'},
-   {id:'prodresult',ic:'',nm:'생산실적현황'},
+   {id:'partresult',ic:'📈',nm:'파트별 생산실적현황'},
+   {id:'prodresult',ic:'📊',nm:'생산실적현황'},
    {id:'gongsu',ic:'⏱️',nm:'공수등록(근무/지원)'},
    {sep:true},
    {id:'partstockadj',ic:'🛠️',nm:'생산파트재고조정'},
-   {id:'partissue',ic:'',nm:'생산자재출고관리'},
+   {id:'partissue',ic:'📤',nm:'생산자재출고관리'},
  ]},
- {id:'sales',nm:'영업',ic:'',subs:[
-   {id:'salesstock',ic:'',nm:'제품재고조회'},
-   {id:'prodinvout',ic:'',nm:'제품입출고현황'},
-   {id:'prodstockadj',ic:'',nm:'제품재고조정'},
-   {id:'saleout',ic:'',nm:'판매및출고등록'},
+ {id:'sales',nm:'영업',ic:'📈',subs:[
+   {id:'salesstock',ic:'📦',nm:'제품재고조회'},
+   {id:'prodinvout',ic:'🔁',nm:'제품입출고현황'},
+   {id:'prodstockadj',ic:'📦',nm:'제품재고조정'},
+   {id:'saleout',ic:'📤',nm:'판매및출고등록'},
    {id:'lgsale',ic:'🚚',nm:'출하실적등록/LG송장'},
    {id:'shipment',ic:'🚚',nm:'출하실적현황'},
-   {id:'salesforecast',ic:'',nm:'영업예상매출현황'},
+   {id:'salesforecast',ic:'📅',nm:'영업예상매출현황'},
    {id:'salesplan',ic:'🗓️',nm:'영업계획현황'},
    {id:'lgrecv',ic:'🏢',nm:'LG리시빙관리'},
  ]},
- {id:'gagong',nm:'가공',ic:'',subs:[
-   {id:'gagongprog420',ic:'',nm:'가공생산진척관리(전표발행)'},
-   {id:'gagongplan4w',ic:'',nm:'4주간 가공계획현황'},
-   {id:'gagongjeohist',ic:'',nm:'가공전표이력현황'},
+ {id:'gagong',nm:'가공',ic:'⚙️',subs:[
+   {id:'gagongprog420',ic:'🏭',nm:'가공생산진척관리(전표발행)'},
+   {id:'gagongplan4w',ic:'📋',nm:'4주간 가공계획현황'},
+   {id:'gagongjeohist',ic:'🧾',nm:'가공전표이력현황'},
    {id:'gagongmove580',ic:'🚚',nm:'가공창고 이동계획'},
  ]},
  {id:'qc',nm:'품질',ic:'🔎',subs:[
    {id:'qcerror',ic:'🚫',nm:'품질불량관리'},
-   {id:'scrapraw',ic:'',nm:'가공스크랩관리'},
+   {id:'scrapraw',ic:'🗑',nm:'가공스크랩관리'},
    {id:'qcspec',ic:'📐',nm:'시방변경관리'},
    {id:'qciqc',ic:'🔬',nm:'수입검사(IQC)조회'},
    {id:'meeting',ic:'📝',nm:'품질 반성회의록'},
@@ -184,22 +184,22 @@ const MODULES=[
    {id:'devmaster',ic:'🛠️',nm:'원가/BOM 기준정보'},
    {id:'itemmaster',ic:'📇',nm:'품목마스터 관리'},
    {id:'rawmat',ic:'🧱',nm:'원소재 마스터'},
-   {id:'itembom',ic:'',nm:'품목별 공정관리'},
-   {id:'unifybom',ic:'',nm:'품목 BOM관리'},
+   {id:'itembom',ic:'📋',nm:'품목별 공정관리'},
+   {id:'unifybom',ic:'🔀',nm:'품목 BOM관리'},
    {id:'modelbom',ic:'🧬',nm:'모델BOM 관리'},
-   {id:'delivery',ic:'',nm:'납품 포장/적재'},
+   {id:'delivery',ic:'📦',nm:'납품 포장/적재'},
    {id:'subvariant',ic:'🧩',nm:'조달경로 통합검토'},
-   {id:'costanalysis',ic:'',nm:'품목별 원가분석'},
-   {id:'costanalysis_v2',ic:'',nm:'품목별 원가분석_V2'},
+   {id:'costanalysis',ic:'💹',nm:'품목별 원가분석'},
+   {id:'costanalysis_v2',ic:'💹',nm:'품목별 원가분석_V2'},
    {id:'costverify',ic:'🔬',nm:'원가엔진 검증(라이브)'},
    {id:'price',ic:'💰',nm:'품목단가 조회'},
    {id:'pricemgmt',ic:'🛠️',nm:'품목단가 관리'},
-   {id:'dtradeprice',ic:'',nm:'직거래 LME 판가연동'},
+   {id:'dtradeprice',ic:'🔁',nm:'직거래 LME 판가연동'},
  ]},
- {id:'mgmt',nm:'경영',ic:'',subs:[
-   {id:'dailypurissue',ic:'',nm:'일일 영업/매입 현황'},
+ {id:'mgmt',nm:'경영',ic:'📊',subs:[
+   {id:'dailypurissue',ic:'📋',nm:'일일 영업/매입 현황'},
  ]},
- {id:'sys',nm:'시스템관리',ic:'',subs:[
+ {id:'sys',nm:'시스템관리',ic:'⚙️',subs:[
    {id:'close',ic:'🔒',nm:'마감관리'},
    {id:'users',ic:'👤',nm:'사용자관리'},
    {id:'perm',ic:'🔑',nm:'권한관리'},
@@ -568,7 +568,7 @@ function itemLiveView(c, mat){
         return `<td class="${x[2]==='n'?'num':''} ${typeof x[2]==='number'?'cap':''}" ${typeof x[2]==='number'?`title="${esc(v)}" style="max-width:${x[2]}px;overflow:hidden;text-overflow:ellipsis"`:''}>${i===0?`<b>${esc(v)}</b>`:(x[2]==='n'?won(v):esc(v))}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${COLS.length}" class="empty">조회 결과 없음</td></tr>`);
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">${mat?'자재 목록 조회':'품목 조회'} <span style="font-size:12px;color:var(--muted);font-weight:400">라이브 · ${mat?'구매 대상 자재':'레거시 w_pr_master_010'}</span></div>
+     <div class="page-title">📦 ${mat?'자재 목록 조회':'품목 조회'} <span style="font-size:12px;color:var(--muted);font-weight:400">라이브 · ${mat?'구매 대상 자재':'레거시 w_pr_master_010'}</span></div>
      <div class="page-sub">${mat?'구매 자재(원자재·부자재·소모품·사급) + <b>표준원가·매입처</b>':'전 컬럼 라이브 조회'}(코드→이름: 대/소분류·품목형태·단위·재질·매입처·작업처·제작유형). 원본 <code>PR_M_ITEM</code> · 빈컬럼(밸브/형상 등) 미표시</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <input class="inp" id="it-q" value="${esc(st.q)}" placeholder="품번/품명 검색" style="width:170px">
@@ -768,7 +768,7 @@ function priceItemView(c){
            <select class="inp" id="pi-sg" style="width:auto"><option value="">소분류</option>${st.sgroups.map(o=>`<option value="${esc(o.code)}" ${st.sg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
            <input class="inp" id="pi-cust" list="pi-custdl" autocomplete="off" value="${esc(st.cust)}" placeholder="거래처명/코드" style="width:120px"><datalist id="pi-custdl"></datalist>
            ${st.cust?`<button class="btn ghost" id="pi-custx" title="거래처 필터 해제" style="padding:2px 6px">✖거래처</button>`:''}
-           <button class="btn" id="pi-go"></button><span class="rowcount">${won(st.cnt)}건${st.cnt>=1000?' (상한·검색/분류로 좁히세요)':''}</span></div>
+           <button class="btn" id="pi-go">🔍</button><span class="rowcount">${won(st.cnt)}건${st.cnt>=1000?' (상한·검색/분류로 좁히세요)':''}</span></div>
          <div class="grid-wrap" id="pi-list" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl fit"><thead><tr><th>품번</th><th>품명</th><th>소분류</th><th class="num">단가건</th></tr></thead>
           <tbody>${st.loading?spinRow(4):(st.rows.length?st.rows.map(r=>`<tr class="pi-row ${st.sel===r.ITEM_CODE?'sel':''}" data-cd="${esc(r.ITEM_CODE)}" style="cursor:pointer"><td><b>${esc(r.ITEM_CODE)}</b></td><td class="cap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="cap" title="${esc(r.spec)}" style="max-width:100px;overflow:hidden;text-overflow:ellipsis">${esc(r.sg_nm||'')}</td><td class="num">${won(r.cnt)}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">품번/품명으로 검색</td></tr>`)}</tbody></table></div>
        </div>
@@ -1029,11 +1029,11 @@ const STOCK_CFG={
   stockadjust:{key:'adjust',ic:'🛠️',nm:'자재개별재고조정',signed:true,
     tags:[['1','불량(−)'],['2','장부수정(±)'],['3','기초재고'],['A','개발불출(−)']],
     sub:'장부수정·불량·기초재고·개발불출 등 개별 재고 증감을 등록합니다. <b>수량은 부호 입력</b>(증가 +, 감소 −). 가드: 마감월 잠금·미등록품목·음수재고 차단.'},
-  stockreceipt:{key:'receipt',ic:'',nm:'자재입고관리',retn:true,rettags:[['RT','반품(−)']],
+  stockreceipt:{key:'receipt',ic:'📥',nm:'자재입고관리',retn:true,rettags:[['RT','반품(−)']],
     tags:[['9','개별입고'],['S','세트입고'],['C','가공입고'],['G','축관입고'],['H','5팀입고']],
     sub:'가공·세트·축관 등 자재 입고를 등록합니다(＋). 가드: 마감월 잠금·미등록품목 차단.',
     retsub:'입고된 부품을 반품합니다(−). 가드: 반품수량 ≤ 현재고(다음공정 이동분은 이미 재고감소 → 반품 불가, 마이너스 재고 방지).'},
-  stockissue:{key:'issue',ic:'',nm:'자재출고관리',neg:true,
+  stockissue:{key:'issue',ic:'📤',nm:'자재출고관리',neg:true,
     tags:[['4','생산사용']],
     sub:'생산사용 등 자재 출고를 등록합니다(−, 수량은 양수 입력). 가드: 마감월 잠금·재고부족 차단.'},
 };
@@ -1109,7 +1109,7 @@ function stockScreen(sid){
          ${CFG.retn&&!editMode?`<button class="btn ${retMode?'':'ghost'}" id="stk-ret" style="${retMode?'background:#c0392b;color:#fff;border-color:#c0392b':''}">↩ ${retMode?'입고로 전환':'반품'}</button>`:''}
          ${editMode
            ?`<button class="btn" id="stk-add">＋ ${retMode?'반품행':'행추가'}</button><button class="btn" id="stk-save">저장</button><button class="btn ghost" id="stk-cancel">✖ 취소</button>`
-           :`${PERM.canEdit(sid)?`<button class="btn" id="stk-edit">${retMode?'반품등록/수정':'등록/수정'}</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}`}
+           :`${PERM.canEdit(sid)?`<button class="btn" id="stk-edit">✎ ${retMode?'반품등록/수정':'등록/수정'}</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}`}
          <button class="btn" id="stk-xls">엑셀</button>
          <div class="spacer"></div><span class="rowcount">${rows.length}건 · 수량합 <b>${_nf(totQ)}</b></span>
        </div>
@@ -1131,7 +1131,7 @@ function stockScreen(sid){
            <td><input class="ce re-proc" value="${esc(r.GAGONG_PROC_CODE||'')}" placeholder="(선택)" style="width:70px"></td>
            <td><input class="ce re-rmk" value="${esc(r.REMARKS||'')}" style="width:120px"></td>
            <td class="center mut">${esc(r.INSERT_USER_ID||'')}</td>
-           <td class="center" style="white-space:nowrap"><span class="re-save" title="저장" style="cursor:pointer;color:#2f6db3;font-weight:700"></span> <span class="re-cancel" title="취소" style="cursor:pointer;color:#888">✖</span></td></tr>`;
+           <td class="center" style="white-space:nowrap"><span class="re-save" title="저장" style="cursor:pointer;color:#2f6db3;font-weight:700">💾</span> <span class="re-cancel" title="취소" style="cursor:pointer;color:#888">✖</span></td></tr>`;
          return `<tr data-key="${esc(k)}">
          <td class="center">${esc(_fmtY(r.MAINT_YMD))}</td>
          <td class="center"><span class="stk-tag">${esc(r.tag_name||r.MAINT_TAG||'')}</span></td>
@@ -1142,7 +1142,7 @@ function stockScreen(sid){
          <td class="bcap" title="${esc(r.cust_name||r.CUST_CODE||'')}">${esc(r.cust_name||r.CUST_CODE||'')}</td>
          <td class="center mut">${esc(r.GAGONG_PROC_CODE||'')}</td>
          <td class="bcap" title="${esc(r.REMARKS||'')}">${esc(r.REMARKS||'')}</td>
-         <td class="center mut">${esc(r.INSERT_USER_ID||'')}</td>${editMode?`<td class="center" style="white-space:nowrap"><span class="rowedit" data-key="${esc(k)}" title="수정" style="cursor:pointer;color:#2f6db3"></span> <span class="rowdel" data-key="${esc(k)}" title="삭제" style="cursor:pointer;color:#c0392b"></span></td>`:''}</tr>`;
+         <td class="center mut">${esc(r.INSERT_USER_ID||'')}</td>${editMode?`<td class="center" style="white-space:nowrap"><span class="rowedit" data-key="${esc(k)}" title="수정" style="cursor:pointer;color:#2f6db3">✎</span> <span class="rowdel" data-key="${esc(k)}" title="삭제" style="cursor:pointer;color:#c0392b">🗑</span></td>`:''}</tr>`;
          }).join('')||`<tr><td colspan="${editMode?11:10}" class="empty">조회 결과 없음 — 기간/조건을 확인하세요</td></tr>`}</tbody></table></div>`}
        <style>
          .stk-wrap{max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;box-shadow:0 3px 12px rgba(30,45,70,.08)}
@@ -1541,7 +1541,7 @@ function wrCrud(host, cfg){
   const del=async(ids)=>{if(!ids.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(ids.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}${cfg.delEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();st.form=null;await load();}
+      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();st.form=null;await load();}
     catch(e){alert('삭제 오류: '+e);}};
   const fld=(f)=>{
     const v=st.form[f.k]??'';
@@ -1816,7 +1816,7 @@ function custMaint(host){
   const del=async(codes)=>{if(!codes.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(codes.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/cust/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes})});
-      const j=await r.json();st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}
+      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
     catch(e){alert('삭제 오류: '+e);}
   };
   (async()=>{try{opts=await (await fetch(`${API}/api/cust/opts`)).json();}catch(e){}load();})();
@@ -1901,7 +1901,7 @@ function mstCrud(host, cfg){
   const del=async(codes)=>{if(!codes.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(codes.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}${cfg.delEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes})});
-      const j=await r.json();st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}
+      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
     catch(e){alert('삭제 오류: '+e);}
   };
   load();
@@ -1950,7 +1950,7 @@ function lineCalView(host){
     const d=st.data;
     host.innerHTML=`
      ${ed?`<div id="lc-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:12px 14px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-        <span style="font-size:20px"></span>
+        <span style="font-size:20px">📤</span>
         <b>LG 라인스케줄 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
         <button class="btn" id="lc-pick">📁 파일 선택</button>
         <input type="file" id="lc-file" accept=".xlsx,.xls" style="display:none">
@@ -2104,10 +2104,10 @@ const QC_BIZ=[{v:'DGZ',t:'DGZ'},{v:'DMZ',t:'DMZ'}];
 const QC_PGREG=[{v:'내부용',t:'내부용'},{v:'보고용',t:'보고용'}];
 const _pgreg=v=>v==='1'?'전산':(v==='0'||v===''?'':esc(v));  // 레거시1/0 vs nx 내부용/보고용
 
-/* ===== 레거시 스타일 기준일자 위젯(재사용): ‹ YY/MM/DD › =====
+/* ===== 레거시 스타일 기준일자 위젯(재사용): ‹ YY/MM/DD › 📅 =====
    여러 레거시 조회화면(pr_outside 계열 등) 공용. 표시=YY/MM/DD, 내부값=YYYY-MM-DD(기존 로직 호환).
    사용: 1) HTML에 legacyDateHTML(id, isoValue) 삽입  2) draw 후 bindLegacyDate(container, id, ()=>현재iso, (newIso)=>{반영+재조회})
-   ‹/› = ±1일, /날짜클릭 = 달력선택. onSet 콜백에서 값갱신+load() 하면 자동 재조회. */
+   ‹/› = ±1일, 📅/날짜클릭 = 달력선택. onSet 콜백에서 값갱신+load() 하면 자동 재조회. */
 function _isoAddDays(iso,n){var d=new Date((iso||'')+'T00:00:00');if(isNaN(d.getTime()))return iso;d.setDate(d.getDate()+n);var p=function(x){return String(x).padStart(2,'0');};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());}
 function _isoToYYMMDD(iso){var s=(iso||'').split('-');return s.length===3?(s[0].slice(2)+'/'+s[1]+'/'+s[2]):(iso||'');}
 function legacyDateHTML(id,iso){
@@ -2115,7 +2115,7 @@ function legacyDateHTML(id,iso){
     +'<button type="button" id="'+id+'-prev" title="전일" style="border:0;background:transparent;cursor:pointer;font-size:16px;line-height:1;padding:2px 7px;color:#33507d">‹</button>'
     +'<span id="'+id+'-disp" title="클릭하면 달력" style="min-width:78px;text-align:center;font-family:monospace;font-size:13px;cursor:pointer;user-select:none">'+esc(_isoToYYMMDD(iso))+'</span>'
     +'<button type="button" id="'+id+'-next" title="익일" style="border:0;background:transparent;cursor:pointer;font-size:16px;line-height:1;padding:2px 7px;color:#33507d">›</button>'
-    +'<label title="달력" style="cursor:pointer;position:relative;display:inline-flex;align-items:center;padding:0 4px">'
+    +'<label title="달력" style="cursor:pointer;position:relative;display:inline-flex;align-items:center;padding:0 4px">📅'
       +'<input type="date" id="'+id+'-cal" value="'+esc(iso||'')+'" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer">'
     +'</label></span>';
 }

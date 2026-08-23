@@ -808,7 +808,7 @@ SCREEN.modelbom=(c)=>{
      <div style="display:flex;gap:14px;align-items:flex-start">
       <div style="flex:0 0 300px">
        <div class="toolbar"><select class="inp" id="mb-by"><option value="model"${by==='model'?' selected':''}>모델→도번</option><option value="item"${by==='item'?' selected':''}>도번→모델(역)</option></select>
-         <input class="inp" id="mb-q" value="${esc(q)}" placeholder="${by==='item'?'도번':'모델'} 검색" style="width:150px"><button class="btn" id="mb-search"></button></div>
+         <input class="inp" id="mb-q" value="${esc(q)}" placeholder="${by==='item'?'도번':'모델'} 검색" style="width:150px"><button class="btn" id="mb-search">🔍</button></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" style="font-size:12px"><thead><tr><th>${by==='item'?'도번':'모델'}</th><th class="num">${by==='item'?'모델수':'도번수'}</th></tr></thead>
         <tbody>${searching?spinRow(2):(slist.length?slist.map(s=>`<tr class="mb-row${sel===s.code?' sel':''}" data-c="${esc(s.code)}" style="cursor:pointer"><td><b>${esc(s.code)}</b></td><td class="num">${s.n}</td></tr>`).join(''):`<tr><td colspan="2" class="empty">검색</td></tr>`)}</tbody></table>

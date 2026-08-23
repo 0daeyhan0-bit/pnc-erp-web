@@ -13,7 +13,7 @@ SCREEN.dash=(c)=>{
   c.innerHTML=`<div class="page-title">🏠 대시보드 <span class="muted" style="font-size:12px;font-weight:400">차세대 스키마 실데이터</span></div>
    <div class="page-sub">현행 ERP 데이터를 차세대 스키마로 이관·검증한 실측 현황입니다.</div>
    <div class="kpis">
-     ${kpi('품목 마스터',d.items_total,'RAW·SUB·CON·S_ASSY·PROD','')}
+     ${kpi('품목 마스터',d.items_total,'RAW·SUB·CON·S_ASSY·PROD','📦')}
      ${kpi('거래처',d.partners_total,'매입·매출·가공외주','🤝')}
      ${kpi('BOM 리비전',d.bom_revisions,`구성 ${won(d.bom_comps)}행`,'🧬')}
      ${kpi('단가 이력',d.price_records,'시계열','💰')}
@@ -242,8 +242,8 @@ SCREEN.drawingdoc=(host)=>{
         <td class="cap" title="${esc(r.filename)}" style="max-width:260px;overflow:hidden;text-overflow:ellipsis"><b>${esc(r.filename)}</b></td>
         <td>${esc(r.spec_no||r.rev||'')}</td><td>${esc(r.user)}</td><td class="mut">${esc(String(r.dt||'').slice(0,19).replace('T',' '))}</td>
         <td class="num">${fmt(r.size)}</td>
-        <td class="center"><button class="btn dd-dl" data-i="${i}" style="padding:1px 8px"></button></td>
-        ${ed?`<td class="center">${r.editable?`<button class="btn dd-del" data-i="${i}" style="padding:1px 6px;color:#c0392b"></button>`:'<span class="mut" style="font-size:10px" title="시방도면은 시방변경관리에서 삭제">시방</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?8:7}" class="empty">${st.item.trim()?'검색 결과 없음':'조회를 누르면 최근 파일이 표시됩니다 (품번·파일명으로 검색)'}</td></tr>`)}</tbody></table></div>`;
+        <td class="center"><button class="btn dd-dl" data-i="${i}" style="padding:1px 8px">⬇</button></td>
+        ${ed?`<td class="center">${r.editable?`<button class="btn dd-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="시방도면은 시방변경관리에서 삭제">시방</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?8:7}" class="empty">${st.item.trim()?'검색 결과 없음':'조회를 누르면 최근 파일이 표시됩니다 (품번·파일명으로 검색)'}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#dd-go').onclick=()=>{st.item=g('#dd-item').value;load();};
     g('#dd-item').onkeyup=e=>{if(e.key==='Enter')g('#dd-go').click();};
@@ -307,8 +307,8 @@ SCREEN.itemspec=(host)=>{
         <td class="cap" title="${esc(r.filename)}" style="max-width:280px;overflow:hidden;text-overflow:ellipsis"><b>${esc(r.filename)}</b></td>
         <td>${esc(r.user)}</td><td class="mut">${esc(String(r.dt||'').slice(0,19).replace('T',' '))}</td>
         <td class="num">${fmt(r.size)}</td>
-        <td class="center"><button class="btn is-dl" data-i="${i}" style="padding:1px 8px"></button></td>
-        ${ed?`<td class="center">${r.editable?`<button class="btn is-del" data-i="${i}" style="padding:1px 6px;color:#c0392b"></button>`:'<span class="mut" style="font-size:10px" title="레거시 첨부는 레거시에서 관리">레거시</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?7:6}" class="empty">${st.item.trim()?'첨부 없음':'품목번호를 조회하세요'}</td></tr>`)}</tbody></table></div>`;
+        <td class="center"><button class="btn is-dl" data-i="${i}" style="padding:1px 8px">⬇</button></td>
+        ${ed?`<td class="center">${r.editable?`<button class="btn is-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="레거시 첨부는 레거시에서 관리">레거시</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?7:6}" class="empty">${st.item.trim()?'첨부 없음':'품목번호를 조회하세요'}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#is-go').onclick=()=>{st.item=g('#is-item').value;load();};
     g('#is-item').onkeyup=e=>{if(e.key==='Enter')g('#is-go').click();};
@@ -396,7 +396,7 @@ SCREEN.basemaster=(c)=>{
         <button class="btn" id="bm-cgo">조회</button>
         <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 근무일 <b>${won(data.work_days)}</b></span>
       </div>`:`<div class="toolbar" style="margin-top:2px">
-        <div class="spacer"></div><input class="inp" id="bm-q" value="${esc(q)}" placeholder="코드/명 검색" style="width:160px"><button class="btn" id="bm-go"></button>
+        <div class="spacer"></div><input class="inp" id="bm-q" value="${esc(q)}" placeholder="코드/명 검색" style="width:160px"><button class="btn" id="bm-go">🔍</button>
         <span class="rowcount" style="margin-left:8px">${won(data.cnt)}건</span></div>`}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
@@ -477,7 +477,7 @@ SCREEN.partmaster=(c)=>{
         <td class="num" style="${r.rate!=100?'background:#fff8d6;font-weight:700':''}">${r.rate}</td>
         <td class="center">${esc(r.grp)}</td><td class="num">${r.rack}</td>
         <td>${esc(r.uid)}</td><td style="color:#8aa0bd;font-size:11px">${esc(r.udt)}</td>
-        ${ed?`<td class="center pmact" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px"></button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b"></button></td>`:''}</tr>`).join(''):`<tr><td colspan="11" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
+        ${ed?`<td class="center pmact" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px">✎</button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="11" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
       <div style="flex:1.15 1 0;min-width:420px">
        <div style="display:flex;align-items:center;gap:6px;padding:4px 2px">
         <div style="font-weight:700;font-size:13px;color:#33507d">👷 파트별 작업자 ${st.sel?`— <b style="color:#1c47a0">${esc(st.sel)}</b> <span style="color:#8aa0bd;font-weight:400">${st.wload?'…':(st.wmode==='edit'?st.wdraft.length:st.workers.length)+'명'}</span>`:'<span style="color:#8aa0bd;font-weight:400">— 좌측 파트 클릭</span>'}</div>
@@ -495,7 +495,7 @@ SCREEN.partmaster=(c)=>{
           <tbody>${st.wdraft.length?st.wdraft.map((w,i)=>`<tr>
             <td style="text-align:left"><input class="inp pm-wname" data-i="${i}" value="${esc(w.worker)}" maxlength="30" autocomplete="off" placeholder="작업자명" style="width:100%;box-sizing:border-box;font-size:12px;padding:2px 5px"></td>
             <td class="center"><span class="pm-wreal" data-i="${i}" title="클릭하여 실작업자 토글" style="cursor:pointer;font-weight:700;font-size:15px;color:${w.real?'#1c7c3a':'#c8d0dc'}">${w.real?'✔':'—'}</span></td>
-            <td class="center"><button class="btn ghost pm-wrm" data-i="${i}" style="padding:1px 6px;color:#c0392b"></button></td></tr>`).join(''):`<tr><td colspan="3" class="empty">작업자 없음 — 작업자로 추가</td></tr>`}</tbody></table>`
+            <td class="center"><button class="btn ghost pm-wrm" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button></td></tr>`).join(''):`<tr><td colspan="3" class="empty">작업자 없음 — 작업자로 추가</td></tr>`}</tbody></table>`
         :`<table class="tbl fit" style="font-size:12px"><thead><tr><th style="text-align:left">작업자</th><th class="center">실작업자</th><th>등록자</th><th>등록시각</th><th>수정자</th><th>수정시각</th></tr></thead>
           <tbody>${st.wload?spinRow(6):(st.workers.length?st.workers.map(w=>`<tr><td style="text-align:left"><b>${esc(w.worker)}</b></td><td class="center">${w.real?'<span style="color:#1c7c3a;font-weight:700">✔</span>':'<span style="color:#c8d0dc">—</span>'}</td><td>${esc(w.ins_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.ins_dt)}</td><td>${esc(w.upd_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.upd_dt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">${st.sel?'등록된 작업자 없음':'좌측에서 파트를 선택하세요'}</td></tr>`)}</tbody></table>`}</div>
       </div>
@@ -726,7 +726,7 @@ SCREEN.prodinfo=(c)=>{
       <tbody>${rows.length?rows.map((r,i)=>{const wc=r.work_code;
         const cell=(k,w=44,step='0.001')=>canEd?`<input class="inp pi-pc" data-i="${i}" data-k="${k}" type="number" step="${step}" value="${r[k]==null?'':r[k]}" style="width:${w}px;min-width:0;text-align:right;padding:1px 3px">`:num(r[k],3);
         return `<tr>
-        <td class="center">${canEd?`<button class="btn ghost pi-pdel" data-i="${i}" style="padding:0 5px;color:#c0392b"></button>`:''}</td>
+        <td class="center">${canEd?`<button class="btn ghost pi-pdel" data-i="${i}" style="padding:0 5px;color:#c0392b">🗑</button>`:''}</td>
         <td class="num">${canEd?`<input class="inp pi-pc" data-i="${i}" data-k="proc_seq" type="number" value="${r.proc_seq}" style="width:44px;min-width:0;text-align:right;padding:1px 3px">`:r.proc_seq}</td>
         <td>${canEd?`<select class="inp pi-pwc" data-i="${i}" style="min-width:64px">${opt(O.works,wc,o=>o.code+' '+o.name)}</select>`:esc((wc?wc+' ':'')+r.work_desc)}</td>
         <td>${canEd?`<select class="inp pi-pc" data-i="${i}" data-k="gagong_proc_code" style="min-width:0;font-size:10px">${opt(partsFor(wc),r.gagong_proc_code,o=>o.name)}</select>`:esc(r.part_desc)}</td>
@@ -799,7 +799,7 @@ SCREEN.prodinfo=(c)=>{
      <div class="panel-b" style="padding:0"><div class="grid-wrap" style="max-height:240px;overflow:auto"><table class="tbl" style="font-size:12px"><thead><tr>
        <th></th><th>생산구분</th><th class="num">투입인원</th><th class="num">CAPA</th><th class="center">원천</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`<tr>
-        <td class="center">${canEd?`<button class="btn ghost pi-lobdel" data-i="${i}" style="padding:0 5px;color:#c0392b"></button>`:''}</td>
+        <td class="center">${canEd?`<button class="btn ghost pi-lobdel" data-i="${i}" style="padding:0 5px;color:#c0392b">🗑</button>`:''}</td>
         <td>${canEd?`<input class="inp pi-lobc" data-i="${i}" data-k="prod_gubun" value="${esc(r.prod_gubun)}" maxlength="2" style="width:44px;min-width:0;padding:1px 4px">`:esc(r.prod_gubun)}</td>
         <td class="num">${canEd?`<input class="inp pi-lobc" data-i="${i}" data-k="member_qty" type="number" value="${r.member_qty}" style="width:60px;min-width:0;text-align:right;padding:1px 4px">`:won(r.member_qty)}</td>
         <td class="num">${canEd?`<input class="inp pi-lobc" data-i="${i}" data-k="capa_qty" type="number" value="${r.capa_qty}" style="width:72px;min-width:0;text-align:right;padding:1px 4px">`:won(r.capa_qty)}</td>
@@ -825,7 +825,7 @@ SCREEN.prodinfo=(c)=>{
         return `<tr>
         <td class="num">${i+1}</td>
         <td>${esc(d.doc_nm)}</td>
-        <td>${f?`<a href="#" class="pi-ys-view" data-yid="${f.yid}">${esc(f.filename)}</a>${d.files.length>1?` <span class="mut">외 ${d.files.length-1}</span>`:''}${canEd?` <button class="btn ghost pi-ys-del" data-yid="${f.yid}" style="padding:0 5px;color:#c0392b"></button>`:''}`:'<span class="mut">-</span>'}</td>
+        <td>${f?`<a href="#" class="pi-ys-view" data-yid="${f.yid}">${esc(f.filename)}</a>${d.files.length>1?` <span class="mut">외 ${d.files.length-1}</span>`:''}${canEd?` <button class="btn ghost pi-ys-del" data-yid="${f.yid}" style="padding:0 5px;color:#c0392b">🗑</button>`:''}`:'<span class="mut">-</span>'}</td>
         <td class="center">${esc(f?f.user:'')}</td>
         <td class="center">${esc(f?f.dt:'')}</td>
         ${canEd?`<td class="center"><button class="btn pi-ys-add" data-dt="${esc(d.doc_type)}" style="padding:1px 8px;background:#1c7c3a;color:#fff">＋</button></td>`:''}
@@ -853,7 +853,7 @@ SCREEN.prodinfo=(c)=>{
      <div class="grid-wrap" style="max-height:300px;overflow:auto"><table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr>
        <th></th><th>지그구분</th><th class="num">수량</th><th>보관위치(RACK)</th><th class="center">제작일</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`<tr>
-        <td class="center">${canEd?`<button class="btn ghost pi-jigdel" data-i="${i}" style="padding:0 5px;color:#c0392b"></button>`:''}</td>
+        <td class="center">${canEd?`<button class="btn ghost pi-jigdel" data-i="${i}" style="padding:0 5px;color:#c0392b">🗑</button>`:''}</td>
         <td>${canEd?`<input class="inp pi-jigc" data-i="${i}" data-k="jig_gubun" value="${esc(r.jig_gubun||'')}" style="width:140px;padding:1px 4px">`:esc(r.jig_gubun||'')}</td>
         <td class="num">${canEd?`<input class="inp pi-jigc" data-i="${i}" data-k="jig_qty" type="number" value="${r.jig_qty==null?'':r.jig_qty}" style="width:64px;min-width:0;text-align:right;padding:1px 4px">`:won(r.jig_qty)}</td>
         <td>${canEd?`<input class="inp pi-jigc" data-i="${i}" data-k="rack_loc" value="${esc(r.rack_loc||'')}" style="width:140px;padding:1px 4px">`:esc(r.rack_loc||'')}</td>
@@ -878,7 +878,7 @@ SCREEN.prodinfo=(c)=>{
      <div class="grid-wrap" style="max-height:300px;overflow:auto"><table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr>
        <th></th><th>수율공정</th><th class="num">공정수</th><th class="num">표준ST</th><th class="num">ST</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`<tr>
-        <td class="center">${canEd?`<button class="btn ghost pi-ylddel" data-i="${i}" style="padding:0 5px;color:#c0392b"></button>`:''}</td>
+        <td class="center">${canEd?`<button class="btn ghost pi-ylddel" data-i="${i}" style="padding:0 5px;color:#c0392b">🗑</button>`:''}</td>
         <td>${canEd?`<input class="inp pi-yldc" data-i="${i}" data-k="yield_proc" value="${esc(r.yield_proc||'')}" style="width:170px;padding:1px 4px">`:esc(r.yield_proc||'')}</td>
         <td class="num">${canEd?`<input class="inp pi-yldc" data-i="${i}" data-k="proc_qty" type="number" step="0.1" value="${r.proc_qty==null?'':r.proc_qty}" style="width:64px;min-width:0;text-align:right;padding:1px 4px">`:num(r.proc_qty,1)}</td>
         <td class="num">${canEd?`<input class="inp pi-yldc" data-i="${i}" data-k="std_st" type="number" step="0.001" value="${r.std_st==null?'':r.std_st}" style="width:72px;min-width:0;text-align:right;padding:1px 4px">`:num(r.std_st,3)}</td>

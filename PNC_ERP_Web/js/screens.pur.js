@@ -1864,7 +1864,7 @@ SCREEN.sourceprofile=(c)=>{
      <div class="page-sub">품번 검색 → <b>실제 설정된 BOM</b>(참고) + <b>조달경로 후보 배정</b>. 후보(R01 vs R02…)마다 <b>활성·배분%</b>(활성 후보 합 100%) 지정. 저장 <code>nx.route_alloc</code></div>
      <div style="display:flex;gap:14px;align-items:flex-start">
       <div style="flex:0 0 290px">
-       <div class="toolbar"><input class="inp" id="sp-q" list="sp-dl" autocomplete="off" value="${esc(q)}" placeholder="품번/품명 (예: 3402)" style="width:180px;min-width:0"><datalist id="sp-dl"></datalist><button class="btn" id="sp-search"></button></div>
+       <div class="toolbar"><input class="inp" id="sp-q" list="sp-dl" autocomplete="off" value="${esc(q)}" placeholder="품번/품명 (예: 3402)" style="width:180px;min-width:0"><datalist id="sp-dl"></datalist><button class="btn" id="sp-search">🔍</button></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th></tr></thead>
         <tbody>${searching?spinRow(2):(slist.length?slist.map(s=>`<tr class="sp-row${sel===s.item?' sel':''}" data-i="${esc(s.item)}" style="cursor:pointer"><td><b>${esc(s.item)}</b></td><td class="bcap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${esc(s.name||'')}</td></tr>`).join(''):`<tr><td colspan="2" class="empty">품번 검색</td></tr>`)}</tbody></table>
@@ -2038,7 +2038,7 @@ SCREEN.coopquote=(host)=>{
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      ${st.workMode?`<div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid #d8cbee;border-radius:8px">
-       <div style="padding:9px 14px;background:#f4f0fb;font-size:13px;color:#4a3a6a;position:sticky;top:0;z-index:2"><b>직원 입력 작업목록</b> — 데이터문제 <b style="color:#c0392b">${st.workBy['데이터문제']||0}</b> · 신규 <b style="color:#b8791f">${st.workBy['신규']||0}</b> · 완료 <b style="color:#1c7c3a">${st.workDone}</b> <span style="color:#8a7aa5">· 입고수량 큰 순 · 행 클릭 → 입력폼 → 저장 시 완료</span></div>
+       <div style="padding:9px 14px;background:#f4f0fb;font-size:13px;color:#4a3a6a;position:sticky;top:0;z-index:2">📋 <b>직원 입력 작업목록</b> — 데이터문제 <b style="color:#c0392b">${st.workBy['데이터문제']||0}</b> · 신규 <b style="color:#b8791f">${st.workBy['신규']||0}</b> · 완료 <b style="color:#1c7c3a">${st.workDone}</b> <span style="color:#8a7aa5">· 입고수량 큰 순 · 행 클릭 → 입력폼 → 저장 시 완료</span></div>
        <table class="tbl fit" style="font-size:12.5px"><thead><tr><th>품번</th><th>협력사</th><th>유형</th><th>사유</th><th class="num">입고수량</th></tr></thead>
        <tbody>${st.workLoading?spinRow(5):(st.worklist.length?st.worklist.map((r,i)=>`<tr class="cq-wrow" data-idx="${i}" style="cursor:pointer">
          <td style="font-family:monospace;font-size:12px">${esc(r.assy_code)}</td><td>${r.vendor?esc(r.vendor):'<span style="color:#c9d1dc">-</span>'}</td>
@@ -2274,7 +2274,7 @@ SCREEN.coopquote=(host)=>{
                  <td class="num" style="font-size:9px">${r.coop_diam||'-'}</td><td class="num" style="font-size:9px">${r.coop_thick||'-'}</td><td class="num" style="font-size:9px">${r.coop_length||'-'}</td>
                  <td class="num">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                  <td class="num" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
-                 <td class="num" style="color:#b8791f;font-weight:600">${(!be.viewMode&&isTube)?`<span class="be-prevsg" data-code="${esc(r.code)}" data-high="${(r.role_disp||'').indexOf('고강')>=0?1:0}" style="cursor:pointer;border-bottom:1px dashed #b8791f" title="클릭: 종전(인상전) 사급가 수정 · 일반CU 7550">${sagubPrev!=null?nf(sagubPrev):'입력'} </span>`:(sagubPrev!=null?nf(sagubPrev):'-')}</td>
+                 <td class="num" style="color:#b8791f;font-weight:600">${(!be.viewMode&&isTube)?`<span class="be-prevsg" data-code="${esc(r.code)}" data-high="${(r.role_disp||'').indexOf('고강')>=0?1:0}" style="cursor:pointer;border-bottom:1px dashed #b8791f" title="클릭: 종전(인상전) 사급가 수정 · 일반CU 7550">${sagubPrev!=null?nf(sagubPrev):'입력'} ✎</span>`:(sagubPrev!=null?nf(sagubPrev):'-')}</td>
                  <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}${r.sale_note_prev?'<div style="font-size:8px;color:#8aa0bd" title="종전 판매단가 적용일(해당 업체)">'+esc(r.sale_note_prev)+'</div>':''}</td>
                  <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
                  <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>
@@ -2545,7 +2545,7 @@ SCREEN.coopquote2=(host)=>{
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      ${st.workMode?`<div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid #d8cbee;border-radius:8px">
-       <div style="padding:9px 14px;background:#f4f0fb;font-size:13px;color:#4a3a6a;position:sticky;top:0;z-index:2"><b>직원 입력 작업목록</b> — 데이터문제 <b style="color:#c0392b">${st.workBy['데이터문제']||0}</b> · 신규 <b style="color:#b8791f">${st.workBy['신규']||0}</b> · 완료 <b style="color:#1c7c3a">${st.workDone}</b> <span style="color:#8a7aa5">· 입고수량 큰 순 · 행 클릭 → 입력폼 → 저장 시 완료</span></div>
+       <div style="padding:9px 14px;background:#f4f0fb;font-size:13px;color:#4a3a6a;position:sticky;top:0;z-index:2">📋 <b>직원 입력 작업목록</b> — 데이터문제 <b style="color:#c0392b">${st.workBy['데이터문제']||0}</b> · 신규 <b style="color:#b8791f">${st.workBy['신규']||0}</b> · 완료 <b style="color:#1c7c3a">${st.workDone}</b> <span style="color:#8a7aa5">· 입고수량 큰 순 · 행 클릭 → 입력폼 → 저장 시 완료</span></div>
        <table class="tbl fit" style="font-size:12.5px"><thead><tr><th>품번</th><th>협력사</th><th>유형</th><th>사유</th><th class="num">입고수량</th></tr></thead>
        <tbody>${st.workLoading?spinRow(5):(st.worklist.length?st.worklist.map((r,i)=>`<tr class="cq-wrow" data-idx="${i}" style="cursor:pointer">
          <td style="font-family:monospace;font-size:12px">${esc(r.assy_code)}</td><td>${r.vendor?esc(r.vendor):'<span style="color:#c9d1dc">-</span>'}</td>
@@ -2781,7 +2781,7 @@ SCREEN.coopquote2=(host)=>{
                  <td class="num" style="font-size:9px">${r.coop_diam||'-'}</td><td class="num" style="font-size:9px">${r.coop_thick||'-'}</td><td class="num" style="font-size:9px">${r.coop_length||'-'}</td>
                  <td class="num">${uw?nf4(uw):(isWeld?'<span style="color:#b8791f;font-size:9px">공정</span>':'-')}</td>
                  <td class="num" style="color:#1c6ec2">${(isTube&&uw)?nf4(uw*rq):'-'}</td>
-                 <td class="num" style="color:#b8791f;font-weight:600">${(!be.viewMode&&isTube)?`<span class="be-prevsg" data-code="${esc(r.code)}" data-high="${(r.role_disp||'').indexOf('고강')>=0?1:0}" style="cursor:pointer;border-bottom:1px dashed #b8791f" title="클릭: 종전(인상전) 사급가 수정 · 일반CU 7550">${sagubPrev!=null?nf(sagubPrev):'입력'} </span>`:(sagubPrev!=null?nf(sagubPrev):'-')}</td>
+                 <td class="num" style="color:#b8791f;font-weight:600">${(!be.viewMode&&isTube)?`<span class="be-prevsg" data-code="${esc(r.code)}" data-high="${(r.role_disp||'').indexOf('고강')>=0?1:0}" style="cursor:pointer;border-bottom:1px dashed #b8791f" title="클릭: 종전(인상전) 사급가 수정 · 일반CU 7550">${sagubPrev!=null?nf(sagubPrev):'입력'} ✎</span>`:(sagubPrev!=null?nf(sagubPrev):'-')}</td>
                  <td class="num" style="color:#8a6d3b;font-weight:700">${grey?('('+nf(rmatB)+')'):nf(rmatB)}${r.sale_note_prev?'<div style="font-size:8px;color:#8aa0bd" title="종전 판매단가 적용일(해당 업체)">'+esc(r.sale_note_prev)+'</div>':''}</td>
                  <td class="num" style="color:#8a6d3b">${grey?'-':rratioB+'%'}</td>
                  <td class="num" style="color:#1c7c3a">${isTube?nf(rgag):'-'}</td>

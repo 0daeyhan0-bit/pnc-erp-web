@@ -185,7 +185,7 @@ const priceSagubView=(host)=>{
     host.innerHTML=`
      <div class="page-sub">LG <b>COSP Sales Price</b>(사급 부품가) 엑셀 업로드 → 각 행의 <b>Start Date를 적용일</b>로 <code>nx.price_item</code>(vendor=LG)에 반영. 최신가는 적용일 기준 자동 적용. 헤더: <code>Material·Sales Price·Start Date</code></div>
      <div id="sg-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:16px 18px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
-       <span style="font-size:20px"></span> <b>COSP Sales Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
+       <span style="font-size:20px">📤</span> <b>COSP Sales Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
        <label class="tl" style="margin-left:4px">사업부</label>
        <select class="sel" id="sg-biz"><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select>
        <button class="btn" id="sg-pick" style="background:#1c7c3a;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
@@ -230,7 +230,7 @@ const priceLgView=(host)=>{
     host.innerHTML=`
      <div class="page-sub">LG <b>PO Price</b>(LG 판가) 엑셀 업로드 → <b>사업부별</b> <code>nx.price_item</code>(SAC=vendor1010·RAC=1020, MKT <b>1→내수(TAGS)·2→수출(TAGE)</b>)에 <b>Start Date를 적용일</b>로 반영. 원가/손익의 <b>LG판가</b>로 바로 사용. 헤더: <code>Material·MKT·Unit Price·Start Date·Curr</code></div>
      <div id="lg-drop" style="border:2px dashed #d6b06a;border-radius:9px;padding:16px 18px;background:#fdfaf3;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0">
-       <span style="font-size:20px"></span> <b>사업부</b>
+       <span style="font-size:20px">📈</span> <b>사업부</b>
        <select class="sel" id="lg-biz"><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC (vendor 1010)</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC (vendor 1020)</option></select>
        <b>PO Price 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
        <button class="btn" id="lg-pick" style="background:#b8860b;color:#fff"${st.busy?' disabled':''}>${st.busy?'⏳ 처리중…':'📁 파일 선택'}</button>
@@ -513,7 +513,7 @@ SCREEN.cutmatcost=(host)=>{
        <div class="spacer"></div><input class="inp" id="mc-q" placeholder="검색" value="${esc(st.q||'')}" style="width:130px"><span class="rowcount">${vis.length}건${editing?' · 수정중':''}</span></div>
      <div style="margin:4px 0 8px">${hint}</div>
      ${canW?`<div id="mc-drop" style="border:2px dashed #b9c7de;border-radius:10px;padding:12px;text-align:center;color:#5a6b82;background:#f7faff;margin-bottom:8px;font-size:12.5px;cursor:pointer">
-        <b>LG 원소재 사급가 변경 엑셀</b>을 여기로 <b>드래그&드롭</b> (또는 클릭하여 선택) — 등록 년월 = 위 <b>적용년월(${toIn(y6(st.ym))})</b> · 동일월 존재 시 업데이트 확인
+        📥 <b>LG 원소재 사급가 변경 엑셀</b>을 여기로 <b>드래그&드롭</b> (또는 클릭하여 선택) — 등록 년월 = 위 <b>적용년월(${toIn(y6(st.ym))})</b> · 동일월 존재 시 업데이트 확인
         <input type="file" id="mc-file" accept=".xlsx,.xls" style="display:none"></div>`:''}
      <div class="grid-wrap" style="max-height:480px;overflow:auto"><table class="tbl fit"><thead><tr>${th}</tr></thead>
        <tbody id="mc-tb">${vis.map(({r,i})=>`<tr>${COLS.map(cc=>`<td class="${cc.n?'num':''}">${editing?inp(cc,r,i):disp(cc,r)}</td>`).join('')}${editing?`<td class="center"><button class="btn xs ghost" data-del="${i}">✕</button></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editing?1:0)}" class="empty">데이터 없음${editing?' — 추가':''}</td></tr>`}</tbody></table></div>`;
@@ -728,7 +728,7 @@ SCREEN.delivery=(c)=>{
          <td>${r.seq}</td><td>${esc(r.pack_item)}</td><td>${esc(r.pack_name)}</td><td>${esc(r.pack_level)}</td>
          <td>${esc(r.use_basis)}</td><td class="num">${r.qty_per}</td><td class="num">${r.units_per||''}</td>
          <td>${r.ceiling?'✔':''}</td><td>${r.is_bom?'✔':''}</td><td>${esc(r.remarks)}</td>
-         <td>${canW?`<button class="btn sm" data-ed="${r.id}"></button> <button class="btn sm" data-del="${r.id}"></button>`:''}</td></tr>`).join('')
+         <td>${canW?`<button class="btn sm" data-ed="${r.id}">✎</button> <button class="btn sm" data-del="${r.id}">🗑</button>`:''}</td></tr>`).join('')
        ||`<tr><td colspan="11" class="empty">${item.trim()?'포장 구성이 없습니다. ＋행추가로 등록하세요.':'완제품 품번을 조회하세요'}</td></tr>`}
      </tbody></table>
      ${E?`<div class="card" style="margin-top:12px;padding:12px;border:1px solid var(--bd,#ddd);border-radius:8px;max-width:900px">
@@ -1550,7 +1550,7 @@ SCREEN.esticost=(c)=>{
      </div>
      <div style="display:flex;gap:12px;align-items:flex-start">
       <div style="flex:0 0 290px">
-       <div class="toolbar"><input class="inp" id="ec-q" value="${esc(q)}" placeholder="견적/품번/품명 검색" style="width:180px;min-width:0"><button class="btn" id="ec-qbtn"></button></div>
+       <div class="toolbar"><input class="inp" id="ec-q" value="${esc(q)}" placeholder="견적/품번/품명 검색" style="width:180px;min-width:0"><button class="btn" id="ec-qbtn">🔍</button></div>
        <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" id="ec-list" style="font-size:11.5px"><thead><tr><th data-key="esti_no">견적번호</th><th data-key="item_code">품번</th><th data-key="status" class="center">상태</th><th data-key="sonik" class="num">손익</th></tr></thead>
         <tbody>${searching?spinRow(4):(slist.length?slist.map(s=>`<tr class="ec-row${head.esti_no===s.esti_no?' sel':''}" data-no="${esc(s.esti_no)}" style="cursor:pointer">
@@ -2154,7 +2154,7 @@ SCREEN.unifybom=(c,ro)=>{
        <tbody>${fm.normal.map(r=>row(r)).join('')}${fm.weldArr.map(r=>row(r,r.code)).join('')}</tbody>
        <tfoot><tr class="nae-foot"><td colspan="6" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td></tr></tfoot></table></div>`;};
   // ★내부원가 좌측 = LG BOM 수준 평면 재료표(SUB 해체·역전개평면, 트리 아님 — 대표 확정 [[newerp-sourcing-profile]])
-  // 편집모델: 절삭부품(가공품)=행 []→가공공정 팝업 · 제품(맨위)=[조립공정]→용접(관경별)·포장·체결 팝업 · 구매/부자재/사급=재료만(편집X)
+  // 편집모델: 절삭부품(가공품)=행 [✎]→가공공정 팝업 · 제품(맨위)=[조립공정]→용접(관경별)·포장·체결 팝업 · 구매/부자재/사급=재료만(편집X)
   const naeFlatMat=(a,rows,prc)=>{
     const RW=(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')));
     const fm=flatMat(rows); const jae=(+a.jae||0);
@@ -2172,7 +2172,7 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td>
-        <td class="center">${canEd?`<button class="nae-edit-btn" data-node="${esc(r.code)}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3"></button>`:''}</td></tr>`;};
+        <td class="center">${canEd?`<button class="nae-edit-btn" data-node="${esc(r.code)}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button>`:''}</td></tr>`;};
     const weldRow=(r)=>`<tr class="nae-mrow" style="background:#fdf6f0">
         <td style="white-space:nowrap;text-align:left"><span style="color:#7a8aa0">1</span> <b>${esc(r.code)}</b> <span class="nae-tg" style="color:#a8442a;border-color:#e6c0b3">용접봉(제품조립)</span></td>
         <td class="bcap" title="${esc(r.name)}" style="max-width:200px;text-align:left">${esc(r.name)}</td>
@@ -2181,7 +2181,7 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td><td></td></tr>`;
-    // ★레벨0 제품 행 — 조립공정(용접 관경별·포장·체결) 입력 지점. []=조립공정 팝업(node===item→isAssy)
+    // ★레벨0 제품 행 — 조립공정(용접 관경별·포장·체결) 입력 지점. [✎]=조립공정 팝업(node===item→isAssy)
     const prodRow=`<tr class="nae-trow nae-mrow" data-node="${esc(item)}" style="background:#eef3fb;font-weight:700;cursor:pointer">
         <td style="white-space:nowrap;text-align:left"><span style="color:#1c47a0">0</span> <b style="color:#1c47a0">${esc(item)}</b> <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span></td>
         <td class="bcap" title="${esc(name)}" style="max-width:200px;text-align:left">${esc(name)}</td>
@@ -2192,7 +2192,7 @@ SCREEN.unifybom=(c,ro)=>{
     const body=(prodRow+fm.normal.map(matRow).join('')+weldBody);
     const weldBtn=`<button class="btn ghost" id="nae-weld" style="padding:2px 9px;font-size:11px">${showWeld?'용접봉 숨기기':`용접봉 표시${fm.weldArr.length?' ('+fm.weldArr.length+')':''}`}</button>`;
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
-      <div class="summary-bar" style="flex:0 0 auto"><div class="s-item" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <span style="color:#8a94a6">평면 재료표 · []=공정편집</span></div><div style="flex:1"></div>${weldBtn}</div>
+      <div class="summary-bar" style="flex:0 0 auto"><div class="s-item" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <span style="color:#8a94a6">평면 재료표 · [✎]=공정편집</span></div><div style="flex:1"></div>${weldBtn}</div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
         <thead><tr><th style="text-align:left">품번(레벨)</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="center">사급</th><th style="text-align:left">매입처</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">등록/수정</th></tr></thead>
         <tbody>${body}</tbody>
@@ -2361,9 +2361,9 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="bcap" title="${esc(r.nm)}" style="max-width:190px;overflow:hidden;text-overflow:ellipsis;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
         <td class="num">${q4(r.qty)}</td>
-        <td class="center"><button class="nae-edit-btn" data-node="${esc(r.code)}" data-level="${r.level}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3"></button></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">구성 없음 — 조회하세요</td></tr>';
+        <td class="center"><button class="nae-edit-btn" data-node="${esc(r.code)}" data-level="${r.level}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button></td></tr>`;}).join('')||'<tr><td colspan=6 class="empty">구성 없음 — 조회하세요</td></tr>';
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
-      <div class="summary-bar" style="flex:0 0 auto"><div class="s-item"><b>BOM 레벨트리</b> · 레벨0=제품 / 레벨1+=부품 · 행클릭=우측조회 · <b>[]</b>=공정입력 팝업</div></div>
+      <div class="summary-bar" style="flex:0 0 auto"><div class="s-item"><b>BOM 레벨트리</b> · 레벨0=제품 / 레벨1+=부품 · 행클릭=우측조회 · <b>[✎]</b>=공정입력 팝업</div></div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
         <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="num">소요량</th><th class="center">등록/수정</th></tr></thead>
         <tbody>${body}</tbody></table></div></div>`;};
@@ -2618,7 +2618,7 @@ SCREEN.unifybom=(c,ro)=>{
     const tg=c.querySelector('#bm-tree');if(tg)tg.onclick=()=>{viewTree=!viewTree;draw();};
     const wl=c.querySelector('#bm-weld');if(wl)wl.onclick=()=>{showWeld=!showWeld;draw();};
     {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
-    // 평면표 [] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
+    // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
     {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 조립공정 여는 중…';loadNaeProc(item,true);};}  // ★신규등록 조립공정 = 내부원가와 동일 팝업(클릭 즉시 피드백)
     if(naeModal)wireProcModal();
@@ -2913,7 +2913,7 @@ SCREEN.subvariant=(c)=>{
     let procSum=0;(rd.procs||[]).forEach(p=>procSum+=+p.work_qty||0);procSum=Math.round(procSum*100)/100;
     const total=Math.round((cutSum+procSum)*100)/100, base=rd.base_gongsu||0, ok=Math.abs(total-base)<0.5;
     const cutBadge=code=>{const arr=partCut[code];if(!arr||!arr.length)return '';const s=arr.reduce((a,x)=>a+(+x.wq||0),0);
-      return ` <span title="절삭공정 자동귀속(부품 위치 따라감): ${esc(arr.map(x=>x.name+' '+nfq(x.wq)).join(', '))}" style="color:#b5651d;font-size:10px;border:1px solid #e6cfae;border-radius:3px;padding:0 4px">${nfq(s)}</span>`;};
+      return ` <span title="절삭공정 자동귀속(부품 위치 따라감): ${esc(arr.map(x=>x.name+' '+nfq(x.wq)).join(', '))}" style="color:#b5651d;font-size:10px;border:1px solid #e6cfae;border-radius:3px;padding:0 4px">⚙${nfq(s)}</span>`;};
     const poolRow=p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:grab;padding:2px 0;border-bottom:1px solid #f0eef6">
       <span>⠿</span><b>${esc(p.child_item)}</b><span style="color:#8a94a6;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}<span style="flex:1"></span>${gubunSel(p)}
       <span style="color:#c0392b;font-size:9px;border:1px solid #c0392b55;border-radius:8px;padding:0 4px;white-space:nowrap">보관</span></div>`;
@@ -3084,7 +3084,7 @@ SCREEN.subvariant=(c)=>{
      <div class="page-sub" style="flex:0 0 auto">상단=<b>품목 BOM관리 '내부원가' 탭 재료표</b>(재료행 클릭=조달대상). 하단=<b>조달경로 후보</b> — <b>신규 등록</b>(현행복사/기존복사) · <b>현행 더블클릭=상세보기</b> · <b>대안 더블클릭=상세편집</b>. 승인해야 조달프로파일 노출. <code>/api/cost/nae · nx.sourcing_route</code></div>
      <div style="display:flex;gap:14px;align-items:stretch;flex:1;min-height:0">
       <div style="flex:0 0 290px;display:flex;flex-direction:column;min-height:0">
-       <div class="toolbar" style="flex:0 0 auto"><input class="inp" id="sv-q" list="sv-dl" autocomplete="off" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px;min-width:0"><datalist id="sv-dl"></datalist><button class="btn" id="sv-search"></button></div>
+       <div class="toolbar" style="flex:0 0 auto"><input class="inp" id="sv-q" list="sv-dl" autocomplete="off" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px;min-width:0"><datalist id="sv-dl"></datalist><button class="btn" id="sv-search">🔍</button></div>
        <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" style="font-size:12px"><thead><tr><th>품번</th><th>품명</th><th class="center">BOM</th></tr></thead>
         <tbody>${st.searching?spinRow(3):(st.slist.length?st.slist.map(s=>`<tr class="sv-row${st.sel===s.item?' sel':''}" data-i="${esc(s.item)}" style="cursor:pointer"><td><b>${esc(s.item)}</b></td><td class="bcap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.name)}">${esc(s.name||'')}</td><td class="center">${s.has_bom?'<span style="color:#1c7c3a">●</span>':'<span style="color:#ccc">–</span>'}</td></tr>`).join(''):`<tr><td colspan="3" class="empty">품번/품명 검색</td></tr>`)}</tbody></table>
@@ -3388,7 +3388,7 @@ SCREEN.subvariant=(c)=>{
     }catch(e){alert('생성 오류: '+e);}};
   const afterCreate=async(rid,rename,msg)=>{
     // 복사본 채번명 대신 사용자가 입력한 후보명을 상세 편집 헤더에 프리필(저장 시 route/save로 확정)
-    st.newForm=null;st.msg=''+msg+' — 미커밋(드래프트). [등록]해야 확정, 닫기=등록 취소.';
+    st.newForm=null;st.msg='📋 '+msg+' — 미커밋(드래프트). [등록]해야 확정, 닫기=등록 취소.';
     await loadRoutes();openDetail(rid,'edit',true);   // fresh=true(미커밋 드래프트)
     if(rename&&st.detail){st.detail.hdr.route_name=rename;draw();}};
   const createFromLg=async(f)=>{
@@ -3592,7 +3592,7 @@ SCREEN.itemmaster=(host)=>{
     if(!confirm(codes.length+'건을 삭제하시겠습니까? (BOM에 사용중이면 거부됩니다)'))return;
     try{const r=await fetch(`${API}/api/itemmaster/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes})});
       const j=await r.json();
-      if(j.ok){st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}
+      if(j.ok){st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
       else alert('삭제 불가 (BOM 무결성):\n'+(j.errors||[]).join('\n'));}
     catch(e){alert('삭제 오류: '+e);}
   };
@@ -3708,7 +3708,7 @@ SCREEN.rawmat=(host)=>{
     if(to.length!==6)return;
     try{const r=await fetch(`${API}/api/lglme/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_ym:st.L.ym,to_ym:to,user:'web'})});
       const j=await r.json();if(!j.ok){alert('복사 실패: '+(j.detail||JSON.stringify(j)));return;}
-      st.L.msg=''+to+' 생성('+j.rows+'행) — LME/환율 갱신 후 저장·재계산';await loadLmeMonths();await loadLme(to);}catch(e){alert('복사 오류: '+e);}};
+      st.L.msg='📋 '+to+' 생성('+j.rows+'행) — LME/환율 갱신 후 저장·재계산';await loadLmeMonths();await loadLme(to);}catch(e){alert('복사 오류: '+e);}};
   const openGagong=(row)=>{
     const g=st.L.gagong.find(x=>x.gubun===row.gubun&&Math.abs((x.diam||0)-(row.diam||0))<1e-6&&Math.abs((x.thick||0)-(row.thick||0))<1e-6);
     st.L.gform=g?Object.assign({},g):{gubun:row.gubun,diam:row.diam,thick:row.thick,vn_gagong:0,vn_prem:0,vn_mul:0,vn_naeryuk:0,cn_gagong:0,cn_prem:0,cn_mul:0,cn_naeryuk:0,duty_vn:0,duty_cn:0.016,mix_cn:0.3,mix_vn:0.7};
@@ -3942,7 +3942,7 @@ SCREEN.dtradeprice=(host)=>{
        <span style="background:#8090a5;color:#fff;border-radius:8px;padding:3px 12px;font-size:12px">사급정체(제외) <b>${won(stl.cnt||0)}</b></span>
      </div>
      ${canW?`<div id="dt-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:9px 14px;background:#f4f9fe;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0;font-size:12px">
-       <span style="font-size:18px"></span><b>LG PO Price 엑셀</b>을 드래그&드롭 또는
+       <span style="font-size:18px">📤</span><b>LG PO Price 엑셀</b>을 드래그&드롭 또는
        <button class="btn" id="dt-pick" style="background:#1c47a0;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 처리중…':'📁 파일 선택'}</button>
        <input type="file" id="dt-file" accept=".xlsx,.xls" style="display:none">
        <span style="color:#5a6b82">→ 최신 Created 회차가 <b>LG확정판가(정본)</b>. LME 계산판가는 검증용.</span>

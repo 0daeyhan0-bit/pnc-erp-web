@@ -1604,7 +1604,7 @@ SCREEN.planinput=(host)=>{
     if(!ids.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(`선택 ${st.sel.size}행(${ids.length}건)을 삭제하시겠습니까?`))return;
     try{const r=await fetch(`${API}/api/planinput/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}
+      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
     catch(e){alert('삭제 오류: '+e);}
   };
   // 초기: 라인목록 로드 후 기준일 조회
@@ -2729,7 +2729,7 @@ SCREEN.prodsheet=(host)=>{
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
       <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×20mm</span>
       <div style="margin-top:6px;padding:6px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:4px;font-size:12px">
-        <b>프린터: ${esc(PRN.label||'(라벨프린터 미지정)')}</b>
+        🖨 <b>프린터: ${esc(PRN.label||'(라벨프린터 미지정)')}</b>
         <span style="color:#8c6d1f">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
       </div></div>
     ${(j.labels||[]).map(one).join('')}
@@ -2935,7 +2935,7 @@ SCREEN.prodsheet=(host)=>{
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
       <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span>
       <div style="margin-top:6px;padding:6px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;font-size:12px">
-        <b>프린터: ${esc(PRN.kanban||'(가간판 프린터 미지정)')}</b>
+        🖨 <b>프린터: ${esc(PRN.kanban||'(가간판 프린터 미지정)')}</b>
         <span style="color:#1a6a99">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
       </div></div>
     ${cards.map(card).join('')}
@@ -3655,7 +3655,7 @@ SCREEN.gongsu=(c)=>{
         <td class="center">${r.hr_check_nm==='정상'?'':`<span style="color:#c0392b">${esc(r.hr_check_nm)}</span>`}</td>
         <td class="bcap" title="${esc(r.remarks)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td>
         <td class="center">${r.editable?'<span style="color:#1c7c3a;font-size:11px">웹</span>':'<span style="color:#8aa0bd;font-size:11px">📁이력</span>'}</td>
-        ${ed?`<td class="center">${r.editable&&r.ID?`<button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b"></button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?13:12}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
+        ${ed?`<td class="center">${r.editable&&r.ID?`<button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b">🗑</button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?13:12}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
     const g=id=>body.querySelector(id);
     g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
     ['#gs-gubun','#gs-dept','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});

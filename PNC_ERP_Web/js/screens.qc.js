@@ -100,7 +100,7 @@ SCREEN.meeting=(host)=>{
   const del=async(ids)=>{if(!ids.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(ids.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/meeting/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}
+      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
     catch(e){alert('삭제 오류: '+e);}
   };
   load();
@@ -239,8 +239,8 @@ SCREEN.qcspec=(c)=>{
                <div style="font-weight:600;color:#33507d;font-size:12px;margin-bottom:6px">📎 첨부파일 <span style="color:#8aa0bd;font-weight:400">(도면/시방서 · nx 등록건)</span></div>
                <div id="hf-files" style="font-size:12px">불러오는 중...</div>
                <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:12px">
-                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px"><button class="btn" id="hf-dwg-up" style="padding:2px 8px"></button>
-                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px"><button class="btn" id="hf-spec-up" style="padding:2px 8px"></button>
+                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px"><button class="btn" id="hf-dwg-up" style="padding:2px 8px">⬆</button>
+                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px"><button class="btn" id="hf-spec-up" style="padding:2px 8px">⬆</button>
                </div></div>`:''}
            </div>
            <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center"><span style="color:#c0392b;font-size:11px">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span><span><button class="btn" id="hf-save" style="background:#1b6ec2;color:#fff">저장</button> <button class="btn" id="hf-cancel">닫기</button></span></div>
@@ -444,7 +444,7 @@ SCREEN.scrapraw=(host)=>{
   const del=async(ids)=>{if(!ids.length){alert('삭제할 신규(nx) 행을 체크하세요 (라이브는 삭제불가)');return;}
     if(!confirm(ids.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/scrap/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();if(r.ok&&j.ok){st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}else alert('삭제 실패: '+(j.detail||JSON.stringify(j)));}
+      const j=await r.json();if(r.ok&&j.ok){st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}else alert('삭제 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('삭제 오류: '+e);}
   };
   const copy=async(id)=>{
