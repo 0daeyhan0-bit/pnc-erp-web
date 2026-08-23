@@ -217,7 +217,7 @@
 ## §F. 미해결 과제 통합 (도메인별)
 
 - **BOM 클린전환**: nx.bom 평면→SUB 충전(enabler) → 프로그램 CS/PR 직독 은퇴 → 단일 nx.bom. "옆에짓고 diff0 증명 후"(MIRROR_DEBT). C11 갱신갭(bom_save↔소요/R01 재빌드).
-- **소요엔진 통일**: 7전개기→1엔진(nx_soyo_engine). 중량·용접봉 walker 잔여, Stage3 plan_part_mat 편입.
+- **소요엔진 통일**: walker 전부 diff0 완료. **★원가 전환(#1 material·#2 material_nae) 완료 마일스톤(2026-08-24, dev·미배포)** — NxCostEngine이 통일 walker 위임(_legacy 보존). #3 weight_calc·#4 soyo·#5 캐시=⏸️점진 채택(고리스크 리팩터, 모듈 리팩터 시). Stage3=STEP7 존치. SOYO_ENGINE_UNIFY §3-A.
 - **플래그**: current_order EXCEPT_FLAG 준수 교정(버그). 정기 flag 싱크 파이프라인(ECO).
 - **원가 V2**: 판가 리시빙실적 토글·회수율 라인별·매입SUB·용접공정분리. dev·미배포.
 - **재고/마감**: 게이트 실운영 ON(컷오버). 키팅 백플러시. mat_stock_daily 조회일화.
