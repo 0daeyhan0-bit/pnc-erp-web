@@ -123,11 +123,16 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 |---|---|---|
 | #1 | `NxCostEngine.material` → `cost_material` | **✅완료·diff0(60/60·25/25)·dev** |
 | #2 | `material_nae` → `cost_material_nae` | **✅완료·diff0(60/60)·naewon정상·dev** |
-| #3 | `weight_calc._explode` → `weight_explode` | ☐다음(별도 모듈 weight_calc.py) |
-| #4 | soyo Stage1/2 → `plan_explode`/`plan_gagong` (Stage3 존치) | ☐ |
-| #5 | 캐시(explode 1회→월별 단가) | ☐ |
+| #3 | `weight_calc._explode` → `weight_explode` | ⏸️점진 채택(별도 모듈·배치선적 구조·live 협력사중량정산) |
+| #4 | soyo Stage1/2 → `plan_explode`/`plan_gagong` (Stage3 존치) | ⏸️점진 채택(프로덕션 SQL CTE 파이프라인) |
+| #5 | 캐시(explode 1회→월별 단가) | ⏸️(walker의 explode() 채택 선행 필요) |
 - 보류(별건): R02~Rnn walker(현 sourcing/route/cost), 용접포인트 2단계(협력사).
 - 각 전환: dev만·해당 diff0 게이트 통과 필수·미배포·실패시 롤백(_ *_legacy).
+
+### ★마일스톤 결정 (2026-08-24, 사용자 확정)
+- **원가 통일(#1 material·#2 material_nae) = 완료 마일스톤으로 매듭.** 가장 많이 쓰이는 원가 소요 소비자가 통일엔진(cost_material/cost_material_nae)을 사용 시작. 원본 로직 `_material_legacy`/`_material_nae_legacy` 보존(1줄 롤백). dev만·미배포.
+- **#3~#5 = 점진 채택으로 이월**. 이유: #3 weight_calc(딕셔너리 배치선적·live 중량정산), #4 soyo(SQL CTE 프로덕션 파이프라인), #5 캐시(walker explode() 채택 선행)는 **다른 모듈·아키텍처 불일치·고리스크 리팩터**. 통일 walker는 diff0 증명된 정본 라이브러리로 존치, 각 모듈 리팩터 시점에 별도 승인·검증 사이클로 채택. **최근 깨짐 다발 감안 = 안전 우선.**
+- **미배포 상태**: 이 전환은 dev nx_cost_engine.py에만 있음(=nx_cost_engine.py는 backend가 `_harness`서 import). 배포 시 별도 승인.
 
 ## 관련
 [[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]]
