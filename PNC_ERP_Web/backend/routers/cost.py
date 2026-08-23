@@ -603,12 +603,14 @@ def cost_nx_bulk_v2(p: dict = Body(...)):
     parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
     ymd = str(p.get("ymd") or '260630').strip()
     ym = str(p.get("ym") or '').strip()
+    recovery = p.get("recovery", 100)   # ★회수율(ST효율) — 헤더 입력값 전 품목 일괄. 기본100=no-op(V2가공비=V1). §7A
     out = {}
     e1 = NxCostEngine()      # V1 (엔진 그대로)
     e2 = NxCostEngine()      # V2 (직거래 원소재 실매입 패치)
     try:
         try:
             _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]), _V2.build_fallback_map(e2.cur, ymd[:4]))
+            _V2.patch_recovery(e2, recovery)   # ★가공비 회수율 곱셈(100/효율). patch_leaf와 다른 메서드(gagong_u) 패치→조합. 100=no-op
         except Exception as ex:
             raise HTTPException(500, f"V2 맵/패치 오류: {ex}")
         smap = {}
