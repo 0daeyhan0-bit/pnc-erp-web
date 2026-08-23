@@ -34,6 +34,9 @@ def _sale_win():
 def salemagam_list(ym: str = Query("")):
     """매출마감 업체별 집계(협력사판매 tag5, 마감기준) + nx 마감상태·조정합."""
     y = _dig4(ym) or _cur_ym()
+    _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
+    if _pm == 0: _pm = 12; _py -= 1
+    prevym = f"{_py:02d}{_pm:02d}"   # ★조대 하한(전월) — 거래처별 마감일 범위는 전월~당월이므로 이 범위 밖은 스캔 불필요(MAINT_YMD 인덱스 프루닝)
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
@@ -41,7 +44,7 @@ def salemagam_list(ym: str = Query("")):
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
             SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, SUM(-A.MAINT_VAT) vat, COUNT(DISTINCT A.MAT_CODE) items
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND {_sale_win().format(ym=y)}
+          WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win().format(ym=y)}
           GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -66,13 +69,16 @@ def salemagam_list(ym: str = Query("")):
 def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
     """업체 마감상세: 품목×일자 피벗 + 저장된 조정내역."""
     y = _dig4(ym) or _cur_ym()
+    _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
+    if _pm == 0: _pm = 12; _py -= 1
+    prevym = f"{_py:02d}{_pm:02d}"   # ★조대 하한(전월)
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT A.MAT_CODE mat, MAX(M.ITEM_DESC) nm, MAX(M.ITEM_SPEC) spec, MAX(M.UNIT) unit, A.MAINT_COST cost,
             CAST(RIGHT(A.MAINT_YMD,2) AS INT) d, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND {_sale_win().format(ym=y)}
+          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win().format(ym=y)}
           GROUP BY A.MAT_CODE, A.MAINT_COST, CAST(RIGHT(A.MAINT_YMD,2) AS INT)""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:

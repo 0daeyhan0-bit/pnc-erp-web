@@ -1012,23 +1012,27 @@ SCREEN.dailypurissue=(c)=>{
            <table class="tbl" style="${TS}">${CG}<tbody>
              <tr><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td><td></td></tr>
              <tr><td>현매출 − 설치</td><td class="num">${wonI(F.sales.hyeon_seol)}</td><td></td></tr>
+             ${F.sales.hyeon_etc?`<tr><td>현매출 − 기타 <span style="color:var(--muted);font-size:10px">(이지링크/미분류)</span></td><td class="num">${wonI(F.sales.hyeon_etc)}</td><td></td></tr>`:''}
              <tr style="font-weight:700"><td>LG매출 합계</td><td class="num">${wonI(F.sales.lg_sales)}</td><td></td></tr>
            </tbody></table>
            <div style="font-weight:700;color:#1c47a0;margin:10px 0 4px">매입비율</div>
            <table class="tbl" style="${TS}">${CG}<tbody>
              <tr><td>매입</td><td class="num">${wonI(F.ratio.pur)}</td><td class="num"><b>${F.ratio.pur_pct}%</b></td></tr>
              <tr><td>실매입(조정전)</td><td class="num">${wonI(F.ratio.net)}</td><td class="num"><b>${F.ratio.net_pct}%</b></td></tr>
-             <tr><td>재고조정 ${F.jaego&&F.jaego.mat_pending?'<span style="color:#c0392b;font-size:10px">(자재 제외)</span>':''}</td><td class="num" style="color:${F.jaego&&F.jaego.total<0?'#c0392b':'#1c7c3a'}">${wonI(F.jaego?F.jaego.total:0)}</td><td></td></tr>
-             <tr style="font-weight:700"><td>실재고(조정후)</td><td class="num">${wonI(F.ratio.silrae)}</td><td class="num"><b>${F.ratio.silrae_pct}%</b></td></tr>
+             ${(()=>{const J=F.jaego||{};const jc=v=>`color:${(v||0)<0?'#c0392b':'#1c7c3a'}`;const jr=(lb,v)=>`<tr><td style="padding-left:16px;color:#555">└ ${lb}</td><td class="num" style="${jc(v)}">${wonI(v||0)}</td><td></td></tr>`;return `<tr><td colspan="3" style="font-weight:600;color:#333;border-top:1px solid #dde3ea;padding-top:4px">재고조정 <span style="font-weight:400;font-size:10px;color:#888">(조회일 현재고 − 7월말 기초)</span></td></tr>`+jr('용접',J.weld)+jr('가공',J.gagong)+jr('영업',J.sales)+jr('자재',J.mat)+`<tr style="font-weight:700"><td>재고조정 합계</td><td class="num" style="${jc(J.total)}">${wonI(J.total||0)}</td><td></td></tr>`;})()}
+             <tr style="font-weight:700"><td>실재고(조정후) <span style="font-weight:400;font-size:10px;color:#888">=실매입+증가</span></td><td class="num">${wonI(F.ratio.silrae)}</td><td class="num"><b>${F.ratio.silrae_pct}%</b></td></tr>
              <tr><td>LG매출액</td><td class="num">${wonI(F.ratio.lg_sales)}</td><td></td></tr>
            </tbody></table>
-           <div style="font-weight:700;color:#8a5a1a;margin:10px 0 4px">사급율</div>
+           <div style="font-weight:700;color:#8a5a1a;margin:10px 0 4px">사급율 <span style="font-weight:400;font-size:10px;color:#888">(LG사급 vs 당사ERP)</span></div>
            <table class="tbl" style="${TS}">${CG}<tbody>
-             <tr><td>원소재 매입</td><td class="num">${wonI(F.sagubyul.osp_raw)}</td><td class="num"><b>${F.sagubyul.raw_pct}%</b></td></tr>
-             <tr><td>사급부품 매입</td><td class="num">${wonI(F.sagubyul.osp_part)}</td><td class="num"><b>${F.sagubyul.part_pct}%</b></td></tr>
-             <tr><td>절삭매출</td><td class="num">${wonI(F.sagubyul.jeolsak_sales)}</td><td></td></tr>
-             <tr><td>당사ERP</td><td class="num">${wonI(F.dae.dangsa)}</td><td></td></tr>
-             <tr style="font-weight:700"><td>비교(차액)</td><td class="num" style="color:${F.dae.diff<0?'#c0392b':'#1c7c3a'}">${wonI(F.dae.diff)}</td><td></td></tr>
+             ${(()=>{const D=F.dae||{};const S=F.sagubyul||{};const dr=(D.dangsa_raw||0)-(D.lg_raw||0);const dp=(D.dangsa_part||0)-(D.lg_part||0);const dc=v=>`color:${(v||0)<0?'#c0392b':'#1c7c3a'}`;return `
+             <tr><td>LG사급 − 원소재</td><td class="num">${wonI(D.lg_raw||0)}</td><td class="num"><b>${S.raw_pct}%</b></td></tr>
+             <tr><td style="padding-left:12px;color:#555">당사ERP − 원소재</td><td class="num">${wonI(D.dangsa_raw||0)}</td><td></td></tr>
+             <tr><td style="padding-left:12px">차액</td><td class="num" style="${dc(dr)}">${wonI(dr)}</td><td></td></tr>
+             <tr><td>LG사급 − 부품</td><td class="num">${wonI(D.lg_part||0)}</td><td class="num"><b>${S.part_pct}%</b></td></tr>
+             <tr><td style="padding-left:12px;color:#555">당사ERP − 부품</td><td class="num">${wonI(D.dangsa_part||0)}</td><td></td></tr>
+             <tr><td style="padding-left:12px">차액</td><td class="num" style="${dc(dp)}">${wonI(dp)}</td><td></td></tr>
+             <tr style="font-weight:700;border-top:1px solid #dde3ea"><td>차액 합계</td><td class="num" style="${dc(D.diff)}">${wonI(D.diff||0)}</td><td></td></tr>`;})()}
            </tbody></table>
          </div>
          <!-- 맨 오른쪽: 매출요약 (상반기/하반기/합계, 원·흰배경) -->
@@ -1037,11 +1041,15 @@ SCREEN.dailypurissue=(c)=>{
            <table class="tbl" style="${TS}"><colgroup><col><col style="width:110px"><col style="width:110px"><col style="width:110px"></colgroup><thead><tr><th style="text-align:left">구분</th><th class="num">상반기</th><th class="num">하반기</th><th class="num">합계</th></tr></thead><tbody>
              ${mrow('현매출(절삭)',F.maechul.hyeon_cut)}
              ${mrow('현매출(설치)',F.maechul.hyeon_seol)}
+             ${(F.maechul.hyeon_etc&&F.maechul.hyeon_etc.tot)?mrow('현매출(기타)',F.maechul.hyeon_etc):''}
              ${mrow('현매출(합계)',F.maechul.hyeon_hab,true)}
              ${mrow('추가매출(절삭)',F.maechul.chuga_cut)}
              ${mrow('추가매출(설치)',F.maechul.chuga_seol)}
+             ${mrow('총예상매출',F.maechul.chong,true)}
              ${mrow('사급-원재료',F.maechul.sagub_raw)}
-             ${mrow('사급-부품',F.maechul.sagub_part)}
+             ${mrow('사급-부품(실적)',F.maechul.sagub_part)}
+             ${mrow('추가-사급부품(예상)',F.maechul.sagub_part_fc)}
+             ${mrow('사급-부품(합계)',F.maechul.sagub_part_sum,true)}
              ${mrow('사급-합계',F.maechul.sagub_hab,true)}
              ${mrow('LG 수금금액',F.maechul.lg_sugum,true)}
            </tbody></table></div>`:''}
@@ -1060,8 +1068,16 @@ SCREEN.dailypurissue=(c)=>{
         rows.push(['매출','현매출-절삭',F.sales.hyeon_cut]);rows.push(['매출','현매출-설치',F.sales.hyeon_seol]);
         rows.push(['매출','현매출-기타',F.sales.hyeon_etc]);rows.push(['매출','LG매출합계',F.sales.lg_sales]);
         rows.push(['매입비율','매입/LG매출',F.ratio.pur,'',F.ratio.pur_pct+'%']);rows.push(['매입비율','실매입/LG매출',F.ratio.net,'',F.ratio.net_pct+'%']);
-        rows.push(['사급율','원소재/절삭매출',F.sagubyul.osp_raw,'',F.sagubyul.raw_pct+'%']);rows.push(['사급율','부품/절삭매출',F.sagubyul.osp_part,'',F.sagubyul.part_pct+'%']);
-        rows.push(['대사','당사ERP',F.dae.dangsa]);rows.push(['대사','LG전산',F.dae.lg]);rows.push(['대사','차액',F.dae.diff]);}
+        {const J=F.jaego||{};rows.push(['재고조정','용접(현재고−기초)',J.weld]);rows.push(['재고조정','가공',J.gagong]);rows.push(['재고조정','영업',J.sales]);rows.push(['재고조정','자재',J.mat]);rows.push(['재고조정','합계',J.total]);rows.push(['매입비율','실재고(조정후)',F.ratio.silrae,'',F.ratio.silrae_pct+'%']);}
+        {const D=F.dae||{};const S=F.sagubyul||{};const dr=(D.dangsa_raw||0)-(D.lg_raw||0);const dp=(D.dangsa_part||0)-(D.lg_part||0);
+          rows.push(['사급율','LG사급-원소재',D.lg_raw,'',S.raw_pct+'%']);rows.push(['사급율','당사ERP-원소재',D.dangsa_raw]);rows.push(['사급율','차액(원소재)',dr]);
+          rows.push(['사급율','LG사급-부품',D.lg_part,'',S.part_pct+'%']);rows.push(['사급율','당사ERP-부품',D.dangsa_part]);rows.push(['사급율','차액(부품)',dp]);
+          rows.push(['사급율','차액 합계',D.diff]);}
+        if(F.maechul){const M=F.maechul;const mr=(lb,k)=>{const v=M[k]||{};rows.push(['매출요약',lb,v.h1,v.h2,v.tot]);};
+          mr('현매출(절삭)','hyeon_cut');mr('현매출(설치)','hyeon_seol');mr('현매출(기타)','hyeon_etc');mr('현매출(합계)','hyeon_hab');
+          mr('추가매출(절삭)','chuga_cut');mr('추가매출(설치)','chuga_seol');mr('총예상매출','chong');
+          mr('사급-원재료','sagub_raw');mr('사급-부품(실적)','sagub_part');mr('추가-사급부품(예상)','sagub_part_fc');
+          mr('사급-부품(합계)','sagub_part_sum');mr('사급-합계','sagub_hab');mr('LG수금금액','lg_sugum');}}
       downloadCSV(`일일영업매입현황_${F.date}.csv`,hd,rows);};
   };
   draw();   // ★초기엔 자동조회 안 함 — 조회일(기본 오늘) 확인 후 조회/Enter로 조회

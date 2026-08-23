@@ -170,7 +170,7 @@ def _kindmap(cur, kind):
 _MAT_SGROUP = ('210', '220', '230', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/사급/잡자재/소모품)
 @router.get("/api/item/list")
 def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query(""), mat: str = Query(""),
-              nature: str = Query(""), limit: int = Query(500)):
+              nature: str = Query(""), use: str = Query("", description="사용여부(nx.item.use_flag): ''전체/'1'사용중/'0'사용중지"), limit: int = Query(500)):
     """품목조회(라이브). 대/소분류·품목형태·단위·재질·협력사·작업처·제작유형 코드→이름. mat=1→자재만. nature=성격6그룹(nx.item 조인)."""
     cn = _conn(); cur = cn.cursor()
     try:
@@ -184,13 +184,15 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
         if sgroup.strip(): w.append("i.ITEM_SGROUP=?"); p.append(sgroup.strip())
         if mat == "1": w.append(f"i.ITEM_SGROUP IN ({','.join('?'*len(_MAT_SGROUP))})"); p += list(_MAT_SGROUP)
         if nature.strip(): w.append("nx.nature=?"); p.append(nature.strip())
+        if use.strip() == "1": w.append("ISNULL(nx.use_flag,1)=1")      # 사용중
+        elif use.strip() == "0": w.append("ISNULL(nx.use_flag,1)=0")    # 사용중지
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
               ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, ISNULL(i.PIPE_KIND,'') pk, ISNULL(i.UNIT,'') un,
               i.ITEM_DIAM, i.ITEM_THICK, i.ITEM_LENGTH, i.ITEM_WEIGHT, ISNULL(i.METAL_GUBUN,'') metal, ISNULL(i.IN_CUST_CODE,'') incust,
               ISNULL(i.WORK_CODE,'') work, ISNULL(i.MAKE_TYPE,'') mk, ISNULL(i.COST_GUBUN,'') cg, ISNULL(i.ITEM_STATUS,'') status,
               ISNULL(i.SAFE_STOCK_MIN,0), ISNULL(i.SAFE_STOCK_MAX,0), ISNULL(i.KITTING_MIN,0),
               ISNULL(i.WELD_POINT_IN,0), ISNULL(i.WELD_POINT_OUT,0), ISNULL(i.TARIFF_RATE,0), ISNULL(i.REMARKS,'') remarks, ISNULL(i.ITEM_COST,0),
-              ISNULL(nx.nature,'') nature, nx.active
+              ISNULL(nx.nature,'') nature, nx.active, nx.use_flag
             FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i LEFT JOIN PARTNER_ERP_TEST3.nx.item nx ON nx.item_code = i.ITEM_CODE COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)} ORDER BY i.ITEM_CODE""", *p)
         rows = []
@@ -205,7 +207,8 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
                 "make_type": _ITEM_MAKE.get(g(14), g(14)), "cost_gubun": g(15), "status": ("사용" if g(16) in ("", "1", "사용") else g(16)),
                 "safe_min": num(17), "safe_max": num(18), "kitting_min": num(19),
                 "weld_in": num(20), "weld_out": num(21), "tariff": num(22), "remarks": g(23), "item_cost": num(24),
-                "nature": g(25), "active": (0 if (r[26] is not None and not r[26]) else 1)})
+                "nature": g(25), "active": (0 if (r[26] is not None and not r[26]) else 1),
+                "use_flag": (1 if (r[27] is None or r[27]) else 0)})
         # 분류 드롭다운
         return {"rows": rows, "cnt": len(rows),
                 "lgroups": [{"code": k, "nm": v} for k, v in sorted(dLG.items())],
