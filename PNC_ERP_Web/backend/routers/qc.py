@@ -138,10 +138,11 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
 @router.post("/api/qc/error/save")
 def qc_error_save(payload: dict = Body(...)):
     p = payload
-    ymd = _d6(str(p.get("error_ymd", "")))
+    # ★필수는 P/No 뿐(레거시 w_qa_input_025 동일). 불량일자 미입력 시 오늘로 채운다(2026-08-23)
+    ymd = _d6(str(p.get("error_ymd", ""))) or datetime.now().strftime("%y%m%d")
     item = str(p.get("item_code", "")).strip()[:40]
-    if not ymd or not item:
-        raise HTTPException(400, "불량일자·품번은 필수입니다.")
+    if not item:
+        raise HTTPException(400, "P/No(품번)는 필수입니다.")
     def s(k, n): return str(p.get(k, "")).strip()[:n]
     def f(k):
         try: return float(p.get(k) or 0)

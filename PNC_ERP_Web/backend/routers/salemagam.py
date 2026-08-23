@@ -280,6 +280,8 @@ _MEETING_COLS = ["meeting_type", "meeting_ymd", "subject", "member", "member_cou
                  "action5_desc", "action5_person", "action5_due"]
 _MEETING_INT = {"member_count", "duration_min", "pay_amount"}
 
+# ⚠️ 2026-08-23: 품질 반성회의록 화면이 레거시 일지(w_pr_input_590/595, routers/qareview.py)로 교체되어
+#    아래 /api/meeting/* 3종은 프론트에서 더 이상 호출하지 않는다(미사용). nx.meeting 데이터 보존을 위해 남겨둠.
 @router.get("/api/meeting/list")
 def meeting_list(q: str = Query(""), from_ymd: str = Query(""), to_ymd: str = Query(""), limit: int = Query(300)):
     """반성회의록 목록(nx.meeting). 제목/작성자/참석자 검색 + 회의일자 범위."""
