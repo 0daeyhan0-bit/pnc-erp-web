@@ -1055,6 +1055,7 @@ SCREEN.costanalysis=(c)=>{
 // ===== 품목별 원가분석 V2 (원본 SCREEN.costanalysis 복제 — 독립 발전용, 읽기전용 API 재사용) =====
 SCREEN.costanalysis_v2=(c)=>{
   let D=window.COSTDATA_V2||{rows:[],agg:{},ym:'',base:''};
+  let recovery=100;   // ★회수율(ST효율,%) — 헤더 입력·전 품목 일괄. 실가공비=표준×(100/효율). 100=반영안함(no-op). 백엔드 patch_recovery. §7A
   // ★UI 날짜 규칙: 날짜범위=당월1일~당일 · 월=당월 · 일자=당일 (동적)
   const _t=new Date(), _p=n=>String(n).padStart(2,'0');
   const _TODAY=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-${_p(_t.getDate())}`;
@@ -1162,7 +1163,7 @@ SCREEN.costanalysis_v2=(c)=>{
         if(loadRecv._tok!==tok)break;
         await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
           let cc={};
-          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk_v2`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||'')})})).json()).costs||{};}catch(e){}
+          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk_v2`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||''),recovery})})).json()).costs||{};}catch(e){}
           ck.items.forEach((x,j)=>{liveCC[x.part]=cc[x.part]||{};D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
           done+=ck.items.length;
           // ★청크 완료마다 진행표시 갱신(라운드 끝까지 안 기다림 = 멈춘 듯 안 보임)
@@ -1173,11 +1174,13 @@ SCREEN.costanalysis_v2=(c)=>{
         setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();
       }
       recomputeAgg();
-      if(loadRecv._tok===tok){window.__CA_LIVE_V2={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
-        // ★계산결과 서버캐시 저장 → 다음 진입·타 사용자 즉시(엔진 재계산 불요)
-        try{const saveRows=list.map(x=>Object.assign({part:x.part,qty:x.qty},liveCC[x.part]||{}));
-          fetch(`${API}/api/cost/analysis/cache/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym:D.ym,ymd,rows:saveRows})});}catch(e){}
-        setRegenMsg('완료 · 캐시 저장됨');
+      if(loadRecv._tok===tok){
+        // ★회수율 100(기본)일 때만 캐시(클라·서버) 저장. ≠100=시나리오뷰→미저장(기본뷰·타사용자 오염 방지)
+        if(recovery===100){window.__CA_LIVE_V2={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
+          try{const saveRows=list.map(x=>Object.assign({part:x.part,qty:x.qty},liveCC[x.part]||{}));
+            fetch(`${API}/api/cost/analysis/cache/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym:D.ym,ymd,rows:saveRows})});}catch(e){}
+          setRegenMsg('완료 · 캐시 저장됨');
+        }else setRegenMsg(`완료 · 회수율 ${recovery}% 적용(시나리오·캐시 미저장)`);
       }
     }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
     finally{rvBusy=false;renderBody();}
@@ -1259,6 +1262,10 @@ SCREEN.costanalysis_v2=(c)=>{
        ${(typeof PERM==='undefined'||PERM.canEdit('costanalysis'))?`<label class="tl" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율로 전체 재계산">💲 단가 적용일자</label>
        <input class="inp" type="date" id="ca-ymd" value="${ymd2date(rvYmd)}" style="width:150px">
        <button class="btn" id="ca-regen" title="지정 단가일자로 nx엔진 재계산">🔄 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <span class="badge" style="background:#eef6ee;color:#1f8a5a;margin-left:10px" title="가공비 ST회수율(효율) - 전 품목 일괄. 실가공비=표준가공비×(100/효율). 일반관리·이윤도 자동 전파. 100=반영 안 함">🎯 회수율</span>
+       <input class="inp" type="number" id="ca-recov" value="${recovery}" min="1" max="300" step="1" style="width:64px;text-align:right" title="ST효율(%) - 전 품목 일괄 적용. 예: 55 입력 시 가공비×(100/55)">
+       <span style="color:var(--muted);font-size:12px">%</span>
+       <button class="btn" id="ca-recov-go" title="회수율 적용 후 재조회">적용</button>
        <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" value="${esc(q)}" placeholder="PART-NO 검색(타이핑하면 필터)" style="width:180px" autocomplete="off">
        <label class="chk"><input type="checkbox" id="ca-loss" ${lossOnly?'checked':''}> 적자만</label>
        <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
@@ -1319,6 +1326,10 @@ SCREEN.costanalysis_v2=(c)=>{
       c.querySelector('#ca-loss').onchange=e=>{lossOnly=e.target.checked;renderBody();};
       const cy=c.querySelector('#ca-ymd'); if(cy)cy.onchange=e=>{rvYmd=date2ymd(e.target.value);};
       const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd, true);};   // 재계산=캐시무시 강제 재계산+재저장
+      const rcv=c.querySelector("#ca-recov"), rcb=c.querySelector("#ca-recov-go");
+      const applyRecov=()=>{const v=parseFloat(rcv&&rcv.value);recovery=(isFinite(v)&&v>0)?v:100;if(rcv)rcv.value=recovery;loadRecv._tok=null;loadRecv(D.ym||"", rvYmd, true);};   // ★회수율 적용=전 품목 재계산(force·캐시무시)
+      if(rcb)rcb.onclick=applyRecov;
+      if(rcv)rcv.onkeydown=e=>{if(e.key==="Enter")applyRecov();};
       // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
       if(!rvBusy && !loadRecv._tok){
         if(window.__CA_LIVE_V2&&window.__CA_LIVE_V2.ymd===rvYmd){D.rows=window.__CA_LIVE_V2.rows;D.agg=window.__CA_LIVE_V2.agg;D.ym=window.__CA_LIVE_V2.ym;D.base=window.__CA_LIVE_V2.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
