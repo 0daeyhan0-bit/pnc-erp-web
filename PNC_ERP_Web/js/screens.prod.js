@@ -675,7 +675,6 @@ SCREEN.planupload=(c)=>{
        ${canW?`<label class="tl">업로드</label><select class="inp" id="p-upcr"><option value="C"${upcr==='C'?' selected':''}>C(SAC)</option><option value="R"${upcr==='R'?' selected':''}>R(RAC)</option></select>
        <input type="file" id="p-file" accept=".xls,.xlsx" style="width:200px">
        <button class="btn" id="p-upload" style="background:#1c47a0;color:#fff">📅 생산계획UPLOAD</button>
-       <button class="btn" id="p-compose" style="background:#1c7c3a;color:#fff" title="ASSY→자도번 전개 + 조달프로파일 라우팅">🔗 협력사계획 편성</button>
        <button class="btn" id="p-compmat" style="background:#7a4ca0;color:#fff" title="레거시 STEP5→6→7 충실이식 정본 자재소요 + 조달 프로파일 오버레이 (수량100% 검증)">🧾 자재소요·조달 편성</button>`:`<span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -693,13 +692,8 @@ SCREEN.planupload=(c)=>{
     if(canW){g('#p-upcr').onchange=e=>upcr=e.target.value;
       g('#p-file').onchange=e=>upfile=e.target.files[0]||null;
       g('#p-upload').onclick=doUpload;}
-    const cp=g('#p-compose');if(cp)cp.onclick=async()=>{if(!confirm('업로드된 생산계획 전량을 협력사계획으로 편성합니다.\n(ASSY→자도번 전개 + 조달프로파일 라우팅)\n진행할까요?'))return;
-      cp.disabled=true;cp.textContent='편성 중…';
-      try{const r=await fetch(`${API}/api/plan/compose`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const jj=await r.json();
-        if(jj.ok)alert(`협력사계획 편성 완료\n매핑 ${nf(jj.mapped)} / 미매핑 ${nf(jj.unmapped)}(계획선행분)\n자도번 계획라인 ${nf(jj.part_lines)}\n\n→ 파트별 생산계획 화면에서 확인`);
-        else alert('편성 실패: '+(jj.detail||JSON.stringify(jj)));}
-      catch(e){alert('편성 실패: '+e);}
-      cp.disabled=false;cp.textContent='🔗 협력사계획 편성';};
+    // ★2026-08-23 소요전개기 #3 retire(PLAN_PROGRAM_MASTER §P1): 구 '협력사계획 편성'(/api/plan/compose→死 nx.plan_part) 버튼 제거.
+    //   정본 소요=아래 '자재소요·조달 편성'(compose_mat→nx.plan_part_mat, STEP M 포함 상위집합).
     const cm=g('#p-compmat');if(cm)cm.onclick=async()=>{if(!confirm('업로드된 생산계획으로 정본 자재소요(레거시 STEP5→6→7)를 산출하고\n조달 프로파일을 오버레이해 조달 소요를 편성합니다.\n(수량 100% 검증본)\n진행할까요?'))return;
       cm.disabled=true;cm.textContent='편성 중…';
       try{const r=await fetch(`${API}/api/plan/compose_mat`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const jj=await r.json();
