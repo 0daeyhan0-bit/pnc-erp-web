@@ -26,7 +26,7 @@ SCREEN.prodinvout=(c)=>{
     const sub=c.querySelector('#piv-sub');if(sub)sub.innerHTML=`제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
-   <div class="page-title">🔁 제품입출고현황</div>
+   <div class="page-title">제품입출고현황</div>
    <div class="page-sub" id="piv-sub">제품(P/N)별 재고 + 선택품목 입출고이력(누적재고) · 원본 <code>SA_T_STOCK_MAINT</code> 외 · 🟢 nx(이월기준 2502) · 0재고 숨김</div>
    <div class="toolbar">
      <label class="tl">수불기간</label><input type="date" class="inp" id="frm" value="${esc(ymd2d(frm))}" style="min-width:130px"><span style="color:var(--muted);align-self:center">~</span><input type="date" class="inp" id="to" value="${esc(ymd2d(to))}" style="min-width:130px">
@@ -34,8 +34,8 @@ SCREEN.prodinvout=(c)=>{
      <input class="inp" id="q" placeholder="P/N·품명">
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-     <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
-     <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
+     <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">nx원장 파생</button>
+     <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
    </div>
    <div style="display:flex;gap:10px;align-items:flex-start">
      <div style="flex:0 0 46%;min-width:0">
@@ -114,7 +114,7 @@ SCREEN.salesforecast=(c)=>{
     const sfMap=new Map(); rows.forEach(r=>{if(r.item&&!sfMap.has(r.item))sfMap.set(r.item,r.nm||'');});
     const sfOpts=[...sfMap].sort((a,b)=>(''+a[1]).localeCompare(''+b[1],'ko')).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     c.innerHTML=`
-     <div class="page-title">📅 영업예상매출현황</div>
+     <div class="page-title">영업예상매출현황</div>
      <div class="page-sub">${metric==='sagub'
         ?'🟢 <b>라이브</b> LG 생산계획 기준 <b>예상 LG사급금액</b>(LG사급 2종 중 <b>사급부품</b>·원소재 동 별도) · 계획수량 × 개당 LG사급비(<b>품목별 원가분석과 동일</b>=엔진 material_split, 사급부품 최말단 leaf) · 원화(KRW)'
         :'🟢 <b>라이브</b> LG 생산계획 기준 일별 예상매출 · 원본 <code>sa_t_plan_item_dtl</code>+<code>pr_t_plan_input</code>×단가(<code>pr_m_item_cost</code> S/E=LG판매가) · 레거시 190 재현(차감전=완전일치 검증) · <b>차감후=첫계획일 pr_t_plan_input 과대분 제거</b> · 원화(KRW)'} · 기간 ${esc(F.base||'')}~${esc(F.to||'')}${metric==='sagub'&&F.asof?' · 사급가 기준일 '+esc(F.asof):''}${loading?' · <span style="color:#b8860b">불러오는 중…</span>':''}${F._err?' · <span style="color:#c0392b">'+esc(F._err)+'</span>':''}</div>
@@ -129,7 +129,7 @@ SCREEN.salesforecast=(c)=>{
        <input class="inp" id="q" list="sf-ql" placeholder="도번/품명 입력" autocomplete="off"><datalist id="sf-ql">${sfOpts}</datalist>
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
        <span id="sf-err" style="color:#c0392b;font-size:12px;font-weight:600;display:none;margin-left:6px"></span>
-       <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
+       <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
      </div>
      <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
@@ -245,7 +245,7 @@ SCREEN.lgrecv=(c)=>{
        <select class="sel" id="mkt"><option value="" ${mkt===''?'selected':''}>전체</option><option value="2" ${mkt==='2'?'selected':''}>내수</option><option value="1" ${mkt==='1'?'selected':''}>수출</option></select>
        <input class="inp" id="iq" placeholder="도번/작업처" style="width:120px">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-       <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
+       <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
      </div>
      <div class="summary-bar" id="sum" style="flex:0 0 auto"></div>
      <div class="grid-wrap lgrecv-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
@@ -320,7 +320,7 @@ SCREEN.shipment=(c)=>{
        <select class="sel" id="mode"><option value="detail" ${mode==='detail'?'selected':''}>제번별 상세</option><option value="item" ${mode==='item'?'selected':''}>도번별 집계</option><option value="day" ${mode==='day'?'selected':''}>일별 집계</option></select>
        <input class="inp" id="iq" placeholder="도번/Work Order">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-       <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
+       <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
      </div>
      <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:510px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
@@ -497,7 +497,7 @@ SCREEN.salesstock=(c)=>{
     const wsel=c.querySelector('#wc');if(wsel){const v=wsel.value;wsel.innerHTML='<option value="">전체작업장</option>'+ws.map(w=>`<option value="${esc(w)}">${esc(w)}</option>`).join('');wsel.value=v;}
     apply();};
   c.innerHTML=`
-   <div class="page-title">📦 제품재고조회</div>
+   <div class="page-title">제품재고조회</div>
    <div class="page-sub" id="ss-sub">제품 수불(기초+입고−출고−기타출고) · 판매단가(S/E) 기준 · 원본 <code>SA_T_STOCK_MAINT</code> · 🟢 nx</div>
    <div class="toolbar">
      <label style="font-size:12px;color:var(--muted);font-weight:600">수불기간</label>
@@ -509,8 +509,8 @@ SCREEN.salesstock=(c)=>{
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <label style="font-size:12px;color:var(--muted);font-weight:600;display:inline-flex;align-items:center;gap:3px" title="레거시 w_pr_stock_040처럼 최종재고 0인 품목까지 포함(gross 대조)"><input type="checkbox" id="zero" ${incZero?'checked':''}>0재고 포함</label>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-     <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
-     <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
+     <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">nx원장 파생</button>
+     <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
    </div>
    <div class="summary-bar" id="sum"></div>
    <div class="grid-wrap" style="max-height:510px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
@@ -574,7 +574,7 @@ SCREEN.saleout=(c)=>{
     if(st.sortKey){const k=st.sortKey,d=st.sortDir||1;st.rows.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*d;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*d;});}
     const selcnt=Object.values(st.sel).filter(Boolean).length;const e=st.edit;
     c.innerHTML=`
-     <div class="page-title">📤 판매및출고등록</div>
+     <div class="page-title">판매및출고등록</div>
      <div class="page-sub">구매 → 협력사(외주처) <b>판매출고</b>(구분 <b>5:협력업체판매</b>) · <b style="color:#c0392b">사급단가×수량=매출</b>, VAT 10% · 사급수불원장(nx.sagub_maint tag='5')=사급재고 반영 · 레거시 <code>w_pu_output_010</code></div>
      <div class="toolbar">
        <label class="tl">출고일자</label><input class="inp" type="date" id="o-fr" value="${esc(st.fr)}"> ~ <input class="inp" type="date" id="o-to" value="${esc(st.to)}">
@@ -583,11 +583,11 @@ SCREEN.saleout=(c)=>{
        <select class="inp" id="o-cust"><option value="">전체</option>${st.custs.map(o=>`<option value="${esc(o.code)}" ${st.cust===o.code?"selected":""}>${esc(o.nm||o.code)}</option>`).join("")}</select>
        <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="o-item" value="${esc(st.item)}" placeholder="품번" style="width:110px">
        <label class="tl" style="margin-left:8px">구분</label><select class="inp" id="o-gb"><option value="">전체</option>${Object.entries(st.gubuns).map(([k,v])=>`<option value="${esc(k)}" ${st.gubun===k?"selected":""}>${esc(k)}:${esc(v)}</option>`).join("")}</select>
-       <button class="btn" id="o-go">🔍 조회</button>
+       <button class="btn" id="o-go">조회</button>
      </div>
      <div class="toolbar" style="padding-top:0">
-       <button class="btn" id="o-add" style="background:#2e86de;color:#fff">➕ 추가</button>
-       <button class="btn" id="o-del">🗑 삭제${selcnt?`(${selcnt})`:""}</button>
+       <button class="btn" id="o-add" style="background:#2e86de;color:#fff">추가</button>
+       <button class="btn" id="o-del">삭제${selcnt?`(${selcnt})`:""}</button>
        <span style="margin-left:16px;padding:4px 10px;background:var(--soft);border-radius:6px">
          <b>이월처리</b> 이월일자 <input class="inp" type="date" id="o-carry" value="${esc(st.carry)}" style="width:150px">
          <button class="btn" id="o-cv">📆 이월</button>
@@ -603,7 +603,7 @@ SCREEN.saleout=(c)=>{
          <label class="tl">사급단가🔒</label><input class="inp" id="e-cost" value="${esc(e.cost??"")}" style="width:90px;text-align:right;background:#eef2f7;color:#555" readonly title="단가는 마스터 자동조회값이며 마감때만 변경 가능(자재 단가 수정금지 규칙)">
          <label class="tl">Work Order</label><input class="inp" id="e-wo" value="${esc(e.work_order||"")}" style="width:90px">
          <label class="tl">비고</label><input class="inp" id="e-rmk" value="${esc(e.remarks||"")}" style="width:130px">
-         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">💾 저장</button><button class="btn" id="e-cancel">취소</button>
+         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">저장</button><button class="btn" id="e-cancel">취소</button>
        </div>
        <div style="font-size:12px;color:var(--muted);margin-top:6px">매출(예상) = 수량 × 사급단가 = <b style="color:#c0392b">${won((+e.out_qty||0)*(+e.cost||0))}</b> · 부가세 = <b>${won(Math.trunc((+e.out_qty||0)*(+e.cost||0)*0.1))}</b> · 단가 미입력시 PR_M_ITEM_COST(사급) 자동적용</div></div></div>`:""}
      <div class="panel"><div class="panel-h">판매출고 목록 ${st.loading?"(조회중…)":`(${st.rows.length}건)`}</div><div class="panel-b" style="padding:0">
@@ -858,7 +858,7 @@ SCREEN.lgsale=(c)=>{
        ${['전체','집계','제번'].map(v=>`<label class="rl"><input type="radio" name="s4-vw" value="${v}"${st.view===v?' checked':''}> ${v}</label>`).join('')}
        <label class="tl">소스</label>
        <select class="inp" id="s4-src" style="width:112px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>레거시 대사</option></select>
-       <button class="btn" id="s4-search">🔍 조회</button>
+       <button class="btn" id="s4-search">조회</button>
        <div class="spacer"></div>
        <span class="rowcount" id="s4-selinfo">${selN?`선택 <b>${nf(selN)}</b>칸 · 수량 <b>${nf(selQ)}</b>`:''}</span>
        <button class="btn" id="s4-ok" style="background:#1c7c3a;color:#fff">✔ 확인(출하처리)</button>
@@ -1186,18 +1186,18 @@ SCREEN.prodstockadj=(c)=>{
     const selcnt=Object.values(st.sel).filter(Boolean).length;const e=st.edit;
     const tagOpts=Object.entries(st.tags).map(([k,v])=>`${k}:${v}`);
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
-     <div class="page-title" style="flex:0 0 auto">📦 제품재고조정</div>
+     <div class="page-title" style="flex:0 0 auto">제품재고조정</div>
      <div class="page-sub" style="flex:0 0 auto">제품수불원장 <code>SA_T_STOCK_MAINT</code> 조회 + 수동 재고조정 · 🔵 nx(미러 이력=읽기전용 ∪ 웹조정=편집) · 레거시 <code>w_sa_stock_010</code></div>
      <div class="toolbar" style="flex:0 0 auto">
        <label class="tl">수정기간</label><input class="inp" type="date" id="a-fr" value="${esc(st.fr)}" style="width:135px"> ~ <input class="inp" type="date" id="a-to" value="${esc(st.to)}" style="width:135px">
        <label class="tl" style="margin-left:8px">구분</label>
        <select class="inp" id="a-tag"><option value="%" ${st.tag==='%'?'selected':''}>전체</option>${Object.entries(st.tags).map(([k,v])=>`<option value="${esc(k)}" ${st.tag===k?'selected':''}>${esc(k)}:${esc(v)}</option>`).join('')}</select>
        <label class="tl" style="margin-left:8px">도번</label><input class="inp" id="a-item" value="${esc(st.item)}" placeholder="도번" style="width:130px">
-       <button class="btn" id="a-go">🔍 조회</button>
+       <button class="btn" id="a-go">조회</button>
        <div class="spacer"></div>
-       <button class="btn" id="a-add" style="background:#2e86de;color:#fff">➕ 추가</button>
-       <button class="btn" id="a-del">🗑 삭제${selcnt?`(${selcnt})`:""}</button>
-       <button class="btn xls" id="a-xls">📥 엑셀</button>
+       <button class="btn" id="a-add" style="background:#2e86de;color:#fff">추가</button>
+       <button class="btn" id="a-del">삭제${selcnt?`(${selcnt})`:""}</button>
+       <button class="btn xls" id="a-xls">엑셀</button>
      </div>
      ${e?`<div class="panel" style="border:2px solid #2e86de;flex:0 0 auto"><div class="panel-h">${e.id?"수정":"신규"} 재고조정</div><div class="panel-b">
        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
@@ -1209,7 +1209,7 @@ SCREEN.prodstockadj=(c)=>{
          <label class="tl">수정단가</label><input class="inp" id="e-cost" value="${esc(e.maint_cost??0)}" style="width:90px;text-align:right">
          <label class="tl">Work Order</label><input class="inp" id="e-wo" value="${esc(e.work_order||"")}" style="width:100px">
          <label class="tl">비고</label><input class="inp" id="e-rmk" value="${esc(e.remarks||"")}" style="width:160px">
-         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">💾 저장</button><button class="btn" id="e-cancel">취소</button>
+         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">저장</button><button class="btn" id="e-cancel">취소</button>
        </div>
        <div style="font-size:12px;color:var(--muted);margin-top:6px">수정금액(예상) = 수량 × 단가 = <b>${won(Math.trunc((+e.maint_qty||0)*(+e.maint_cost||0)))}</b> · 재고조정(수량)이 기본, 단가 미입력시 0</div></div></div>`:""}
      <div class="grid-wrap psa-grid" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
@@ -1331,7 +1331,7 @@ SCREEN.salesplan=(c)=>{
     const L=(st.labels&&st.labels.length)?st.labels:calcLabels();
     if(!st.rows.length)return `<tr><td colspan="${NCOL()+L.length}" class="empty">${
       st.done?'조회 결과 없음 — 기준일자·필터를 조정하세요'
-             :'조건을 지정한 뒤 <b>[🔍 조회]</b> 를 누르세요.'}</td></tr>`;
+             :'조건을 지정한 뒤 <b>[조회]</b> 를 누르세요.'}</td></tr>`;
     spShown=Math.min(SP_PAGE,st.rows.length);
     return st.rows.slice(0,spShown).map(r=>rowHtml1(r,L)).join('');
   };
@@ -1389,7 +1389,7 @@ SCREEN.salesplan=(c)=>{
        <label class="tl">작업처</label>
        <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처코드" style="width:110px" autocomplete="off"
               title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
-       <button class="btn xls" id="sp-xls" style="margin-left:10px">📥 엑셀</button>
+       <button class="btn xls" id="sp-xls" style="margin-left:10px">엑셀</button>
      </div>
      <!-- 두 조건줄 높이를 맞추고, 표와 붙지 않도록 아래 여백을 준다 -->
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;align-items:center;min-height:44px;margin-bottom:8px">
@@ -1406,7 +1406,7 @@ SCREEN.salesplan=(c)=>{
          ${[['1','상세'],['2','집계'],['3','도번집계']].map(([v,n])=>
            `<label style="font-weight:400;margin:0 6px 0 1px;white-space:nowrap"><input type="radio" name="sp-gb" value="${v}"${st.gubun===v?' checked':''}> ${n}</label>`).join('')}
        </span>
-       <button class="btn" id="sp-go">🔍 조회</button>
+       <button class="btn" id="sp-go">조회</button>
        <button class="btn ghost" id="sp-reset">초기화</button>
        <span class="rowcount" id="sp-cnt" style="margin-left:10px">${st.tot?(st.tot.cnt>SP_PAGE
          ? `${nf(st.tot.cnt)}건 (표시 ${nf(Math.min(SP_PAGE,st.tot.cnt))})` : `${nf(st.tot.cnt)}건`):''}</span>

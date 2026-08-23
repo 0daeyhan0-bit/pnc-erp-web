@@ -24,13 +24,13 @@ SCREEN.partplanproc=(c)=>{
     const gpDiamOpts=[...gpDiam].sort((a,b)=>a-b).map(v=>`<option value="${esc(v)}"></option>`).join('');
     const gpThickOpts=[...gpThick].sort((a,b)=>a-b).map(v=>`<option value="${esc(v)}"></option>`).join('');
     c.innerHTML=`
-     <div class="page-title">⚙️ 가공공정 파트별계획 <span style="font-size:12px;color:var(--muted);font-weight:400">동파이프(지름·두께) 가공 파트 일자계획</span></div>
+     <div class="page-title">가공공정 파트별계획 <span style="font-size:12px;color:var(--muted);font-weight:400">동파이프(지름·두께) 가공 파트 일자계획</span></div>
      <div class="page-sub">협력사계획(<code>PR_T_PLAN_PART_MAT</code>)을 가공 파트(동파이프) 단위로 지름·두께 포함 일자별 전개. 🔴 라이브</div>
      <div class="toolbar">
        <label class="tl">계획기간</label><input class="inp" type="date" id="gp-from" value="${F.from}"> ~ <input class="inp" type="date" id="gp-to" value="${F.to}">
        <label class="tl">자도번작업처</label><select class="inp" id="gp-wc" style="max-width:170px"><option value="">전체</option>${wcs.map(w=>`<option value="${esc(w.cc)}"${F.wc===w.cc?' selected':''}>${esc(w.nm||w.cc)} (${w.n})</option>`).join('')}</select>
        <label class="tl">동파이프만</label><input type="checkbox" id="gp-pipe"${F.pipe==='1'?' checked':''}>
-       <button class="btn" id="gp-search">🔍 조회</button>
+       <button class="btn" id="gp-search">조회</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
        <label class="tl">자도번</label><input class="inp" id="gp-part" list="gpp-partl" value="${esc(F.part)}" style="width:110px" placeholder="자도번/품명" autocomplete="off"><datalist id="gpp-partl">${gpPartOpts}</datalist>
@@ -87,14 +87,14 @@ SCREEN.gagongplan4w=(c)=>{
     const frac=(dn,pl,bg)=>{if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};   // 날짜셀 색=완료상태(서버)
     c.innerHTML=`
-     <div class="page-title">📋 4주간 가공계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">도번×라인×작업처 · 자도번LIST 묶음</span></div>
+     <div class="page-title">4주간 가공계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">도번×라인×작업처 · 자도번LIST 묶음</span></div>
      <div class="page-sub">레거시 4주간 원천(<code>PR_T_PLAN_PART_DTL_FOR_CUST</code>·당일생성 스냅샷) 직독. <b>도번=부품</b>·<b>자도번LIST=이 부품을 쓰는 부모 자도번들</b>. 첫 일자컬럼=당일이전 누적. 🔴 라이브
        <span style="margin-left:8px;font-size:11px">날짜셀 색(완료≥계획): <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span></div>
      <div class="toolbar">
        <label class="tl">기준일자</label><input class="inp" type="date" id="p4-from" value="${st.from}">
        <label class="tl">기간</label><select class="inp" id="p4-gigan" style="max-width:78px">${[7,14,21,31,42,60].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
        <label class="tl">자도번작업처</label><select class="inp" id="p4-wc" style="max-width:110px"><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 용접</option></select>
-       <button class="btn" id="p4-search">🔍 조회</button>
+       <button class="btn" id="p4-search">조회</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
        <label class="tl">도번</label><input class="inp" id="p4-item" list="p4-iteml" value="${esc(st.item)}" style="width:130px" placeholder="도번/품명" autocomplete="off"><datalist id="p4-iteml">${itOpts}</datalist>
@@ -118,7 +118,7 @@ SCREEN.gagongplan4w=(c)=>{
         <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.matq)}</td><td class="num"${r.finish?'':' style="color:#dfe6ef"'}>${r.finish?nf(r.finish):'·'}</td><td class="num">${nf(r.plan_qty)}</td>
         <td class="bcap" title="${esc(r.nm)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td>
         ${dates.map(d=>frac((r.done&&r.done[d])||0,(r.days&&r.days[d])||0,(r.colors&&r.colors[d])||'')).join('')}</tr>
-        ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
+        ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
       ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="6">합계 (${nf(st.cnt)}행)</td>
         <td class="num">${nf(tLot)}</td><td class="num">${nf(tMat)}</td><td class="num">${nf(tFin)}</td><td class="num">${nf(tReq)}</td><td></td>
@@ -293,7 +293,7 @@ SCREEN.gagongprog420=(c)=>{
        .g4tbl th.g4sat{color:#1558d6}
        .g4tbl th.g4sun{color:#c0392b}
        .g4tbl td.g4wk{background:#f4f6f9}</style>
-     <div class="page-title">🏭 가공생산진척관리(전표발행) <span style="font-size:12px;color:var(--muted);font-weight:400">Assy도번·자도번별 생산진척</span></div>
+     <div class="page-title">가공생산진척관리(전표발행) <span style="font-size:12px;color:var(--muted);font-weight:400">Assy도번·자도번별 생산진척</span></div>
      <div class="page-sub">${st.src==='sp'?'레거시 암호화SP 직접실행(대사용)':'<b>nx 재현</b>(암호화SP 탈피)'} · 그레인=(도번,가공컴포넌트) · 셀색 90주황출하/70·30노랑재고/20민트가공창고/10녹전표 · 당일이전=기준일 이전 · ${st.src==='sp'?'🔴 라이브':'🟢 nx'}</div>
      <div class="toolbar">
       <label class="tl">기준일자</label><input class="inp" type="date" id="g4-from" value="${st.from}">
@@ -304,10 +304,10 @@ SCREEN.gagongprog420=(c)=>{
       <label class="rl"><input type="radio" name="g4-uf" value="전체"${st.unfin==='전체'?' checked':''}> 전체</label>
       <label class="rl"><input type="radio" name="g4-uf" value="미생산"${st.unfin==='미생산'?' checked':''}> 미생산</label>
       <label class="tl">소스</label><select class="inp" id="g4-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="sp"${st.src==='sp'?' selected':''}>레거시 대사</option></select>
-      <button class="btn" id="g4-search">🔍 조회</button>
+      <button class="btn" id="g4-search">조회</button>
       <div class="spacer"></div>
       <span class="rowcount" id="g4-selinfo" style="margin-right:8px"></span>
-      <button class="btn" id="g4-issue" style="background:#1c47a0;color:#fff">🧾 전표발행</button>
+      <button class="btn" id="g4-issue" style="background:#1c47a0;color:#fff">전표발행</button>
       <button class="btn" id="g4-bc" style="background:#1c7c3a;color:#fff">📷 가공바코드실적처리</button>
     </div>
     <div class="toolbar" style="margin-top:2px">
@@ -493,7 +493,7 @@ SCREEN.gagongprog420=(c)=>{
       const tot=rows.reduce((s,r)=>s+(+r.qty||0),0);
       ov.innerHTML=`<div style="background:#fff;border-radius:10px;width:1100px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:13px">
         <div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #e5e9f0">
-          <b style="font-size:15px">🧾 컷팅간판 출력 (전표발행)</b><span id="is-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
+          <b style="font-size:15px">컷팅간판 출력 (전표발행)</b><span id="is-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
         <div style="flex:1;min-height:0;overflow:auto;padding:0 16px">
           <table class="tbl fit" style="font-size:11px;white-space:nowrap"><thead><tr>
             <th class="num">SEQ</th><th>Assy도번</th><th>Assy도번작업처</th><th>도번</th><th>상위도번작업처</th>
@@ -512,7 +512,7 @@ SCREEN.gagongprog420=(c)=>{
           <tfoot><tr class="grandtot"><td colspan="11">${nf(rows.filter(r=>r.jado&&+r.qty>0).length)}건</td><td class="num"><b id="is-tot">${nf(tot)}</b></td></tr></tfoot></table></div>
         <div id="is-msg" style="flex:0 0 auto;padding:6px 16px;min-height:18px;font-size:12px"></div>
         <div style="flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;padding:10px 16px;border-top:1px solid #e5e9f0">
-          <button class="btn" id="is-go" style="background:#1c47a0;color:#fff">🖨 출력(전표발행)</button>
+          <button class="btn" id="is-go" style="background:#1c47a0;color:#fff">출력(전표발행)</button>
           <button class="btn" id="is-close">닫기</button></div></div>`;
       const q=s=>ov.querySelector(s);
       const msg=(t,ok)=>{q('#is-msg').innerHTML=`<span style="color:${ok?'#1c7c3a':'#c0392b'}">${esc(t)}</span>`;};
@@ -647,7 +647,7 @@ SCREEN.gagongprog420=(c)=>{
             ${i.done?'● 실적완료 상태입니다. 바코드를 <b>한번 더 스캔</b>하면 취소 확인창이 뜹니다.':'○ 미실적입니다. 수량 확인 후 바코드를 <b>한번 더 스캔</b>하면 실적이 등록됩니다.'}</div>`:''}
           <div id="bc-msg" style="margin-top:8px;min-height:18px;font-size:12px"></div>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">
-            ${i&&i.done?`<button class="btn" id="bc-cancel" style="background:#c0392b;color:#fff">🗑 실적취소</button>`:''}
+            ${i&&i.done?`<button class="btn" id="bc-cancel" style="background:#c0392b;color:#fff">실적취소</button>`:''}
             <button class="btn" id="bc-reg" style="background:#1c47a0;color:#fff"${i&&!i.done?'':' disabled'}>✔ 실적등록</button>
             <button class="btn" id="bc-close2">닫기</button></div>
         </div></div>`;
@@ -733,7 +733,7 @@ SCREEN.gagongmove580=(c)=>{
        <label class="rl"><input type="radio" name="mv-f" value="전체"${st.mv==='전체'?' checked':''}> 전체</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동필요"${st.mv==='이동필요'?' checked':''}> 이동필요</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동완료"${st.mv==='이동완료'?' checked':''}> 이동완료</label>
-       <button class="btn" id="mv-search">🔍 조회</button>
+       <button class="btn" id="mv-search">조회</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
        <label class="tl">도번</label><input class="inp" id="mv-item" list="mv-iteml" value="${esc(st.item)}" style="width:130px" placeholder="도번" autocomplete="off"><datalist id="mv-iteml">${itOpts}</datalist>
@@ -755,7 +755,7 @@ SCREEN.gagongmove580=(c)=>{
         <td class="num"${r.need>0?' style="color:#c0392b;font-weight:600"':' style="color:#dfe6ef"'}>${r.need>0?nf(r.need):'·'}</td>
         <td class="num"${r.moved?'':' style="color:#dfe6ef"'}>${r.moved?nf(r.moved):'·'}</td>
         ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>
-        ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
+        ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334">자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
       ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="7">합계 (${nf(st.cnt)}행)</td><td class="num" style="color:#c0392b">${nf(tNeed)}</td><td class="num">${nf(tMoved)}</td>
         ${dates.map(d=>`<td class="num">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
@@ -801,16 +801,16 @@ SCREEN.gagongjeohist=(c)=>{
     const itS=new Map();st.rows.forEach(r=>{if(r.assy&&!itS.has(r.assy))itS.set(r.assy,'');});
     const itOpts=[...itS].map(([v])=>`<option value="${esc(v)}"></option>`).join('');
     c.innerHTML=`
-     <div class="page-title">🧾 가공전표이력현황 <span style="font-size:12px;color:var(--muted);font-weight:400">전표(바코드)별 가공공정 이력</span></div>
+     <div class="page-title">가공전표이력현황 <span style="font-size:12px;color:var(--muted);font-weight:400">전표(바코드)별 가공공정 이력</span></div>
      <div class="page-sub">전표=<code>PR_T_INDI_CUTTING</code>(바코드) · 공정실적=<code>PR_T_PROD_DTL_GAGONG</code>(레거시정본) + 명칭 <code>PR_M_WORK_SINGLE</code>·<code>QA_M_MACHINE</code>. 🟢 nx(웹 발행분 포함) · <span style="color:#c0392b">※=원천 미확정(담당확인)</span></div>
      <div class="toolbar">
        <label class="tl">전표출력기간</label><input class="inp" type="date" id="jh-from" value="${st.from}"> ~ <input class="inp" type="date" id="jh-to" value="${st.to}">
        <label class="tl">도번</label><input class="inp" id="jh-item" list="jh-iteml" value="${esc(st.item)}" style="width:120px" placeholder="상위도번" autocomplete="off"><datalist id="jh-iteml">${itOpts}</datalist>
        <label class="tl">자도번</label><input class="inp" id="jh-jado" value="${esc(st.jado)}" style="width:120px" placeholder="자도번" autocomplete="off">
        <label class="tl">작업처</label><input class="inp" id="jh-wc" value="${esc(st.wc)}" style="width:110px" placeholder="작업처 코드/명" autocomplete="off">
-       <button class="btn" id="jh-search">🔍 조회</button>
+       <button class="btn" id="jh-search">조회</button>
        <div class="spacer"></div>
-       <button class="btn" id="jh-del" style="background:#c0392b;color:#fff">🗑 삭제(발행취소)</button>
+       <button class="btn" id="jh-del" style="background:#c0392b;color:#fff">삭제(발행취소)</button>
        <span class="rowcount">전표 <b>${nf(st.cnt)}</b>건</span>
      </div>
      <div id="jh-msg" class="page-sub" style="min-height:16px"></div>

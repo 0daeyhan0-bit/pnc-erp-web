@@ -23,9 +23,9 @@ SCREEN.meeting=(host)=>{
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">회의일자</label><input class="inp" id="mt-from" value="${esc(st.from)}" placeholder="YYYYMM" style="width:90px"> ~ <input class="inp" id="mt-to" value="${esc(st.to)}" placeholder="YYYYMM" style="width:90px">
        <label class="tl">검색</label><input class="inp" id="mt-q" value="${esc(st.q)}" placeholder="제목/작성자/참석자" style="width:170px">
-       <button class="btn" id="mt-search">🔍 조회</button>
-       ${ed?`<button class="btn" id="mt-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
-       <button class="btn" id="mt-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="mt-search">조회</button>
+       ${ed?`<button class="btn" id="mt-new" style="background:#1c7c3a;color:#fff">신규</button>
+       <button class="btn" id="mt-del">선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -59,7 +59,7 @@ SCREEN.meeting=(host)=>{
          </div>
          <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
            <span style="color:#c0392b;font-size:11px">* 제목은 필수. 비용은 인원·시간 입력 시 자동계산됩니다.</span>
-           <span><button class="btn" id="mt-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="mt-cancel">닫기</button></span></div>
+           <span><button class="btn" id="mt-save" style="background:#1b6ec2;color:#fff">저장</button> <button class="btn" id="mt-cancel">닫기</button></span></div>
        </div></div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr><th style="width:26px"></th>
@@ -70,7 +70,7 @@ SCREEN.meeting=(host)=>{
         <td class="cap" title="${esc(r.subject)}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(r.subject)}</td>
         <td>${esc(r.organizer)}</td><td class="cap" title="${esc(r.member)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.member)}</td>
         <td class="num">${esc(r.member_count)}</td><td class="num">${esc(r.duration_min)}</td><td class="num">${won(r.pay_amount||0)}</td>
-        <td class="center">${ed?`<button class="btn mt-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="10" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
+        <td class="center">${ed?`<button class="btn mt-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="10" class="empty">조회 결과 없음${ed?' (신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#mt-search').onclick=()=>{st.q=g('#mt-q').value;st.from=g('#mt-from').value;st.to=g('#mt-to').value;load();};
     g('#mt-q').onkeyup=e=>{if(e.key==='Enter')g('#mt-search').click();};
@@ -100,7 +100,7 @@ SCREEN.meeting=(host)=>{
   const del=async(ids)=>{if(!ids.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(ids.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/meeting/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
+      const j=await r.json();st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}
     catch(e){alert('삭제 오류: '+e);}
   };
   load();
@@ -108,7 +108,7 @@ SCREEN.meeting=(host)=>{
 SCREEN.qcerror=(c)=>{
   wrShell(c,{sid:'qcerror',
     title:`🚫 품질불량관리 <span style="font-size:12px;color:var(--muted);font-weight:400">공정 불량 발생·조치 이력(등록·수정·삭제)</span>`,
-    sub:`레거시 <code>w_qa_input_020</code> 전체 컬럼(옆스크롤). 원장=<code>nx.qc_error</code>(레거시 이관완료) · ➕신규·수정은 팝업 · 코드→이름`,
+    sub:`레거시 <code>w_qa_input_020</code> 전체 컬럼(옆스크롤). 원장=<code>nx.qc_error</code>(레거시 이관완료) · 신규·수정은 팝업 · 코드→이름`,
     nxOnly:true,
     cfg:{
       listEp:'/api/qc/error/list', saveEp:'/api/qc/error/save', delEp:'/api/qc/error/delete', days:30,
@@ -210,8 +210,8 @@ SCREEN.qcspec=(c)=>{
        <div class="toolbar">
          <label class="tl">접수기간</label><input class="inp" type="date" id="sp-from" value="${F.from}"> ~ <input class="inp" type="date" id="sp-to" value="${F.to}">
          <label class="tl">PART NO</label><input class="inp" id="sp-item" value="${esc(F.item)}" placeholder="입력하세요" style="width:130px">
-         <button class="btn" id="sp-go">🔍 조회</button>
-         ${editable?`<button class="btn" id="sp-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>`:''}
+         <button class="btn" id="sp-go">조회</button>
+         ${editable?`<button class="btn" id="sp-new" style="background:#1c7c3a;color:#fff">신규</button>`:''}
          <div class="spacer"></div><span class="rowcount">${won(data.cnt||0)}건</span>
        </div>
        ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -239,11 +239,11 @@ SCREEN.qcspec=(c)=>{
                <div style="font-weight:600;color:#33507d;font-size:12px;margin-bottom:6px">📎 첨부파일 <span style="color:#8aa0bd;font-weight:400">(도면/시방서 · nx 등록건)</span></div>
                <div id="hf-files" style="font-size:12px">불러오는 중...</div>
                <div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap;font-size:12px">
-                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px"><button class="btn" id="hf-dwg-up" style="padding:2px 8px">⬆</button>
-                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px"><button class="btn" id="hf-spec-up" style="padding:2px 8px">⬆</button>
+                 <span style="color:#33507d;font-weight:600">도면</span><input type="file" id="hf-dwg" style="width:150px"><button class="btn" id="hf-dwg-up" style="padding:2px 8px"></button>
+                 <span style="color:#33507d;font-weight:600;margin-left:6px">시방서</span><input type="file" id="hf-spec" style="width:150px"><button class="btn" id="hf-spec-up" style="padding:2px 8px"></button>
                </div></div>`:''}
            </div>
-           <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center"><span style="color:#c0392b;font-size:11px">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span><span><button class="btn" id="hf-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="hf-cancel">닫기</button></span></div>
+           <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center"><span style="color:#c0392b;font-size:11px">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span><span><button class="btn" id="hf-save" style="background:#1b6ec2;color:#fff">저장</button> <button class="btn" id="hf-cancel">닫기</button></span></div>
           </div></div>`:''}
        <style>.sp-row.sel{background:#e8f0ff}.sp-row:hover{background:#eef4ff}</style>`;
       const g=id=>body.querySelector(id);
@@ -361,7 +361,7 @@ SCREEN.scrapraw=(host)=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('scrapraw'):true;
     const editing=st.form!==null, f=st.form||{};
     host.innerHTML=`
-     <div class="page-title">🗑 가공스크랩관리 <span style="font-size:12px;color:var(--muted);font-weight:400">가공 스크랩(불량) 중량 기록 · nx.scrap_raw</span></div>
+     <div class="page-title">가공스크랩관리 <span style="font-size:12px;color:var(--muted);font-weight:400">가공 스크랩(불량) 중량 기록 · nx.scrap_raw</span></div>
      <div class="page-sub">레거시 <code>w_qa_input_100</code> 그대로. 조회=라이브 <code>QA_T_RAW_ERROR</code> ∪ <code>nx.scrap_raw</code> · 추가·수정·삭제·복사=<b>nx만</b>(라이브 읽기전용). 코드→이름 · 필수=불량일자·스크랩중량.</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">불량기간</label><input class="inp" id="sc-from" type="date" value="${esc(st.from)}" style="width:140px"> ~ <input class="inp" id="sc-to" type="date" value="${esc(st.to)}" style="width:140px">
@@ -369,9 +369,9 @@ SCREEN.scrapraw=(host)=>{
        <label class="tl">품번</label><input class="inp" id="sc-item" value="${esc(st.item)}" placeholder="P/No" style="width:130px">
        <label class="tl">원천</label><select class="inp" id="sc-src" style="width:110px">
          <option value="" ${st.src===''?'selected':''}>합집합</option><option value="L" ${st.src==='L'?'selected':''}>라이브</option><option value="N" ${st.src==='N'?'selected':''}>신규(nx)</option></select>
-       <button class="btn" id="sc-search">🔍 조회</button>
-       ${ed?`<button class="btn" id="sc-new" style="background:#1c7c3a;color:#fff">➕ 추가</button>
-       <button class="btn" id="sc-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
+       <button class="btn" id="sc-search">조회</button>
+       ${ed?`<button class="btn" id="sc-new" style="background:#1c7c3a;color:#fff">추가</button>
+       <button class="btn" id="sc-del">선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`}
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -389,7 +389,7 @@ SCREEN.scrapraw=(host)=>{
         <td title="${esc(r.work)}">${esc(r.work_desc||r.work)}</td><td>${esc(r.worker)}</td><td>${esc(r.soje)}</td>
         <td class="cap" title="${esc(r.err_desc)}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(r.err_desc)}</td>
         <td title="${esc(r.pcode)}">${esc(r.proc_desc||r.pcode)}</td><td class="num">${_kg(r.wt)}</td>
-        <td class="center">${ed?`${r.src==='N'?`<button class="btn sc-edit" data-idx="${i}" style="padding:1px 5px;font-size:10px">수정</button>`:''}<button class="btn sc-copy" data-idx="${i}" style="padding:1px 5px;font-size:10px">복사</button>`:''}</td></tr>`).join(''):`<tr><td colspan="13" class="empty">조회 결과 없음${ed?' (➕추가로 등록)':''}</td></tr>`}</tbody>
+        <td class="center">${ed?`${r.src==='N'?`<button class="btn sc-edit" data-idx="${i}" style="padding:1px 5px;font-size:10px">수정</button>`:''}<button class="btn sc-copy" data-idx="${i}" style="padding:1px 5px;font-size:10px">복사</button>`:''}</td></tr>`).join(''):`<tr><td colspan="13" class="empty">조회 결과 없음${ed?' (추가로 등록)':''}</td></tr>`}</tbody>
       <tfoot><tr style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #c9d3e0">
         <td></td><td class="center">합계</td><td colspan="9" style="text-align:right">건수 ${won(st.cnt)}건 · 총중량</td><td class="num">${_kg(st.total_wt)}</td><td></td></tr></tfoot></table></div>`;
     const g=s=>host.querySelector(s);
@@ -429,7 +429,7 @@ SCREEN.scrapraw=(host)=>{
        </div>
        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
          <span style="color:#c0392b;font-size:11px">* 불량일자·스크랩중량(kg,&gt;0)은 필수. 라이브 자료는 복사 후 편집.</span>
-         <span><button class="btn" id="sc-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="sc-cancel">닫기</button></span></div>
+         <span><button class="btn" id="sc-save" style="background:#1b6ec2;color:#fff">저장</button> <button class="btn" id="sc-cancel">닫기</button></span></div>
      </div></div>`;
   const save=async()=>{
     const f=st.form;
@@ -444,12 +444,12 @@ SCREEN.scrapraw=(host)=>{
   const del=async(ids)=>{if(!ids.length){alert('삭제할 신규(nx) 행을 체크하세요 (라이브는 삭제불가)');return;}
     if(!confirm(ids.length+'건을 삭제하시겠습니까?'))return;
     try{const r=await fetch(`${API}/api/scrap/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
-      const j=await r.json();if(r.ok&&j.ok){st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}else alert('삭제 실패: '+(j.detail||JSON.stringify(j)));}
+      const j=await r.json();if(r.ok&&j.ok){st.msg=''+j.deleted+'건 삭제완료';st.sel.clear();await load();}else alert('삭제 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('삭제 오류: '+e);}
   };
   const copy=async(id)=>{
     try{const r=await fetch(`${API}/api/scrap/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
-      const j=await r.json();if(r.ok&&j.ok){st.msg='📋 복사완료 → '+esc(j.id)+' (신규 nx). 필요시 수정하세요.';await load();}else alert('복사 실패: '+(j.detail||JSON.stringify(j)));}
+      const j=await r.json();if(r.ok&&j.ok){st.msg='복사완료 → '+esc(j.id)+' (신규 nx). 필요시 수정하세요.';await load();}else alert('복사 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('복사 오류: '+e);}
   };
   load();
