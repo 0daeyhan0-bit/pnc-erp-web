@@ -2595,7 +2595,7 @@ SCREEN.unifybom=(c,ro)=>{
        <span style="color:#8a5a1a;font-size:11px">※ 대분류 미설정 시 부품 가공비가 누락됩니다(공정 필터).</span>
      </div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}${(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<button class="btn bm-usetgl" data-it="${esc(r.item)}" data-use="${r.use_flag}" style="float:right;padding:0 6px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용':'중지'}</button>`:(r.use_flag?'':'<span style="float:right;color:#adb5bd;font-size:10px">중지</span>')}</div>`).join('')}</div>`:''}
+     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}${(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<button class="btn bm-usetgl" data-it="${esc(r.item)}" data-use="${r.use_flag}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);padding:0 6px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용':'중지'}</button>`:(r.use_flag?'':'<span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#adb5bd;font-size:10px">중지</span>')}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
      ${item&&!loading&&viewTree&&!editMode?candSelector('bom'):''}
      ${item&&!loading?((viewTree&&!editMode)?`
@@ -2716,7 +2716,7 @@ SCREEN.unifybom=(c,ro)=>{
      .bm-tab{border:1px solid #d3ddec;border-bottom:none;background:#f1f5fb;color:#5a6b82;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0}
      .bm-tab.on{background:#fff;color:#1c47a0;border-color:#bcd;position:relative;top:2px}
      .bm-results{border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin:6px 0 0;max-height:calc(100vh - 250px);overflow:auto;background:#fff;box-shadow:0 3px 12px rgba(30,45,70,.10)}
-     .bm-r{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;display:flow-root}
+     .bm-r{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;position:relative;padding-right:56px}
      .bm-r:last-child{border-bottom:none}.bm-r:hover{background:#eef4ff}
      .bm-tbl{font-size:12px}.bm-tbl th,.bm-tbl td{padding:3px 6px;white-space:nowrap}
      .bm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}
