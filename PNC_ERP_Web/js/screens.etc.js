@@ -130,7 +130,7 @@ SCREEN.perm=(c)=>{
           <span style="margin-left:auto"><span class="k">조회</span> <b id="dnv">${nv}</b> · <span class="k">수정</span> <b id="dne">${ne}</b> / 전체 ${progs.length}</span>
         </div>
         <div class="toolbar">
-          ${admin?'<span class="badge">시스템관리자 = 전권(설정 불가)</span>':`<button class="btn" id="psave">저장</button>`}
+          ${admin?'<span class="badge">시스템관리자 = 전권(설정 불가)</span>':`<button class="btn" id="psave">💾 저장</button>`}
           <div class="spacer"></div>
           <button class="btn ${PERM.userId===selUid?'':'ghost'}" id="plogin">${PERM.userId===selUid?'✅ 현재 로그인':'🔓 이 사용자로 로그인'}</button></div>
         <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead><tr><th>부문</th><th>프로그램</th><th class="center" style="width:64px">조회</th><th class="center" style="width:64px">수정</th></tr></thead><tbody id="ptb"></tbody></table></div>`;
@@ -170,9 +170,9 @@ SCREEN.users=(c)=>{
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">👤 사용자관리</div>
-     <div class="page-sub">계정 · 필수: <b>ID·비밀번호·이름·구분·역할</b> · 내부직원 ~60명 + 협력사 · <span class="neg">비번은 프로토타입 평문(실서비스 bcrypt 해시 예정)</span> · 프로그램별 조회/수정 권한은 「권한관리」 · 수정 시 편집</div>
+     <div class="page-sub">계정 · 필수: <b>ID·비밀번호·이름·구분·역할</b> · 내부직원 ~60명 + 협력사 · <span class="neg">비번은 프로토타입 평문(실서비스 bcrypt 해시 예정)</span> · 프로그램별 조회/수정 권한은 「권한관리」 · ✎수정 시 편집</div>
      <div class="toolbar"><input class="inp" id="q" placeholder="ID·이름·부서·협력사">
-       ${editMode?`<button class="btn" id="add">추가</button><button class="btn" id="save">저장</button><button class="btn ghost" id="cancel">✖ 취소</button>`:(PERM.canEdit('users')?`<button class="btn" id="edit">수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}
+       ${editMode?`<button class="btn" id="add">➕ 추가</button><button class="btn" id="save">💾 저장</button><button class="btn ghost" id="cancel">✖ 취소</button>`:(PERM.canEdit('users')?`<button class="btn" id="edit">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}
        <div class="spacer"></div><span class="rowcount" id="cnt"></span></div>
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr>${cols.map(cc=>`<th>${cc.h}</th>`).join('')}${editMode?'<th class="center">삭제</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`;
     const disp=(cc,u)=>{ if(cc.pw)return '••••'; if(cc.roles)return (u.roles||[]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' '); return esc(''+(u[cc.f]||'')); };
@@ -190,7 +190,7 @@ SCREEN.users=(c)=>{
         c.querySelectorAll('#tb input[data-role]').forEach(el=>el.onchange=()=>{const u=users[+el.dataset.i];u.roles=u.roles||[];const r=el.dataset.role;if(el.checked){if(!u.roles.includes(r))u.roles.push(r);}else u.roles=u.roles.filter(x=>x!==r);});
         c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{users.splice(+b.dataset.del,1);rend();});
       }
-      c.querySelector('#cnt').textContent=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length}) · ${editMode?'수정중':'읽기전용'}`;
+      c.querySelector('#cnt').textContent=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length}) · ${editMode?'✎수정중':'읽기전용'}`;
     };
     if(editMode){
       c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'1234',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'});rend();};
@@ -260,7 +260,7 @@ SCREEN.setinreq=(c)=>{
       .bc img{height:56px;display:block}.bt{font-family:monospace;font-size:13px;font-weight:700;margin-top:2px}
       .sp{width:210px}.sp td{border:1px solid #000;text-align:center;padding:2px}.sp .bx{height:40px}
       @media print{.noprint{display:none}}</style></head>
-      <body><div class="noprint" style="margin-bottom:6px"><button onclick="window.print()">인쇄</button> <button onclick="window.close()">닫기</button></div>
+      <body><div class="noprint" style="margin-bottom:6px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button></div>
       <div class="wrap">${copy("공급자")}${copy("공급받는자")}</div></body></html>`);
     w.document.close();
   };
@@ -281,7 +281,7 @@ SCREEN.setinreq=(c)=>{
     // 자도번 축약: 앞번호(마지막 -세그먼트 제외)가 같으면 -[1,2,3]로 묶음
     const jl=s=>{const a=(s||"").split(",").filter(Boolean);if(!a.length)return "";const m={};a.forEach(cd=>{const g2=cd.match(/^(.*)-([^-]+)$/);if(g2){(m[g2[1]]=m[g2[1]]||[]).push(g2[2]);}else{m[cd]=m[cd]||[];}});return Object.entries(m).map(([b,t])=>t.length?b+"-["+t.join(",")+"]":b).join(" · ");};
     c.innerHTML=`
-     <div class="page-title">거래명세서 발행</div>
+     <div class="page-title">🧾 거래명세서 발행</div>
      <div class="page-sub">협력사가 요청수량에 <b>납품수량 입력 → 완성분 체크 → 송장발행</b> · 여러 도번을 하나의 <b>SET바코드</b>로 묶어 거래명세표 인쇄 · 우측=일자별 생산계획 · 레거시 <code>w_pr_outside_420</code></div>
      <div class="toolbar">
        <label class="tl">협력사</label>
@@ -290,8 +290,8 @@ SCREEN.setinreq=(c)=>{
        <label class="tl" style="margin-left:8px">기준일자</label><input class="inp" type="date" id="si-base" value="${esc(st.base)}">
        <label class="tl" style="margin-left:8px">기간(협력사)</label><input class="inp" id="si-period" value="${esc(st.period)}" style="width:44px;text-align:center">일
        <label class="tl" style="margin-left:6px">직납</label><input class="inp" id="si-jiknab" value="${esc(st.jiknab)}" style="width:44px;text-align:center">일
-       <button class="btn" id="si-go">조회</button>
-       <button class="btn" id="si-issue" style="background:#2e86de;color:#fff">송장발행 (${chkn})</button>
+       <button class="btn" id="si-go">🔍 조회</button>
+       <button class="btn" id="si-issue" style="background:#2e86de;color:#fff">🧾 송장발행 (${chkn})</button>
        <button class="btn" id="si-cancel">발행취소</button>
        ${st.loading?'<span style="color:var(--muted)">조회중…</span>':""}
      </div>
@@ -322,7 +322,7 @@ SCREEN.setinreq=(c)=>{
     g("#si-issue").onclick=()=>issue(false);
     g("#si-cancel").onclick=()=>issue(true);
     const all=g("#si-all");if(all)all.onclick=e=>{st.groups.forEach(gg=>{if(gg.status==="00"||gg.status==="10")st.chk[gg.key]=e.target.checked;});draw();};
-    c.querySelectorAll(".si-ck").forEach(x=>x.onchange=e=>{st.chk[e.target.dataset.k]=e.target.checked;const b=c.querySelector("#si-issue");if(b)b.textContent=`송장발행 (${st.groups.filter(gg=>st.chk[gg.key]).length})`;});
+    c.querySelectorAll(".si-ck").forEach(x=>x.onchange=e=>{st.chk[e.target.dataset.k]=e.target.checked;const b=c.querySelector("#si-issue");if(b)b.textContent=`🧾 송장발행 (${st.groups.filter(gg=>st.chk[gg.key]).length})`;});
     c.querySelectorAll(".si-qty").forEach(x=>x.oninput=e=>{st.qty[e.target.dataset.k]=e.target.value;});
     // UI규칙7: 모든 컬럼 우측경계 드래그=너비조절 + data-key 컬럼 더블클릭=정렬
     c.querySelectorAll("thead th").forEach(th=>{addResizer(th);const k=th.dataset.key;if(k){th.style.cursor="pointer";th.title="더블클릭하여 정렬 · 우측 경계 드래그로 너비조절";th.ondblclick=()=>{st.sortDir=(st.sortKey===k&&st.sortDir===1)?-1:1;st.sortKey=k;draw();};}});
@@ -411,7 +411,7 @@ SCREEN.deliv420=(c)=>{
       .bc img{height:56px;display:block}.bt{font-family:monospace;font-size:13px;font-weight:700;margin-top:2px}
       .sp{width:210px}.sp td{border:1px solid #000;text-align:center;padding:2px}.sp .bx{height:40px}
       @media print{.noprint{display:none}}</style></head>
-      <body><div class="noprint" style="margin-bottom:6px"><button onclick="window.print()">인쇄</button> <button onclick="window.close()">닫기</button></div>
+      <body><div class="noprint" style="margin-bottom:6px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button></div>
       <div class="wrap">${copy('공급자')}${copy('공급받는자')}</div></body></html>`);
     w.document.close();
   };
@@ -440,7 +440,7 @@ SCREEN.deliv420=(c)=>{
       .rw{display:flex;justify-content:space-between;font-size:10px;margin-top:.5mm}.rw b{font-size:12px}
       .bc{text-align:center;margin-top:1mm}.bc img{height:12mm;max-width:100%}.bt{font-family:monospace;font-size:11px;font-weight:700}
       @media print{.noprint{display:none}.lbl{border:none;margin:0;page-break-after:always}}</style></head>
-      <body><div class="noprint" style="text-align:center;padding:6px"><button onclick="window.print()">스티커 인쇄 (${labels.length}매 · ${(+LBL.w||100)}×${(+LBL.h||50)}mm)</button> <button onclick="window.close()">닫기</button> <span style="font-size:11px;color:#555">프린터: ${esc(LBL.printer)}</span></div>
+      <body><div class="noprint" style="text-align:center;padding:6px"><button onclick="window.print()">🖨️ 스티커 인쇄 (${labels.length}매 · ${(+LBL.w||100)}×${(+LBL.h||50)}mm)</button> <button onclick="window.close()">닫기</button> <span style="font-size:11px;color:#555">프린터: ${esc(LBL.printer)}</span></div>
       ${labels.map(cell).join('')}</body></html>`);
     w.document.close();
   };
@@ -469,7 +469,7 @@ SCREEN.deliv420=(c)=>{
       alert(`스티커 라벨 설정 저장 — ${LBL.w}×${LBL.h}mm · 도번당 ${LBL.copies}매`);};
   };
   const openPrinterSetup=()=>{
-    const d=openModal(`<div style="font-weight:700;font-size:15px;margin-bottom:8px">프린터 설정</div>
+    const d=openModal(`<div style="font-weight:700;font-size:15px;margin-bottom:8px">🖨️ 프린터 설정</div>
       <div style="font-size:12px;color:#555;line-height:1.5;margin-bottom:10px">웹 환경에서는 실제 프린터 선택이 <b>브라우저 인쇄 대화상자</b>에서 이루어집니다(스티커=라벨 프린터, 거래명세표=일반 프린터 지정).<br>아래는 화면 표시용 프린터 이름입니다.</div>
       <label class="tl">프린터 이름(표시용)</label><input id="mp-name" class="inp" value="${esc(LBL.printer)}" style="width:100%;margin:4px 0 12px">
       <div style="text-align:right"><button class="btn" id="mp-cancel">취소</button> <button class="btn" id="mp-save" style="background:#2e86de;color:#fff">저장</button></div>`);
@@ -491,7 +491,7 @@ SCREEN.deliv420=(c)=>{
       <style>body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;margin:12px;font-size:12px}h2{text-align:center;letter-spacing:4px}
       table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:3px 5px;text-align:center}.l{text-align:left}.r{text-align:right}
       thead th{background:#eee}@media print{.np{display:none}}</style></head><body>
-      <div class="np" style="margin-bottom:8px"><button onclick="window.print()">인쇄</button> <button onclick="window.close()">닫기</button></div>
+      <div class="np" style="margin-bottom:8px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button></div>
       <h2>자 재 부 품 표</h2><div style="margin:4px 0">협력사: ${esc(custName)} · 출력일: ${iso(new Date())}${blank?' · (빈양식)':''}</div>
       <table><thead><tr><th>No</th><th>도번(ASSY)</th><th>품명</th><th>자도번 LIST</th><th>납품수량</th><th>SERIAL-NO</th></tr></thead><tbody>${body}</tbody></table>
       </body></html>`); w.document.close();
@@ -522,22 +522,22 @@ SCREEN.deliv420=(c)=>{
     const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}${dates.map(()=>`<col style="width:${DW}px">`).join('')}</colgroup>`;
     const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="6">${nf(data.cnt)}건</td><td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td><td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td><td class="num"><b>${nf(S.issued||0)}</b></td><td colspan="11"></td>${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
-     <div class="page-title">거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독 · 발행=nx</span></div>
+     <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독 · 발행=nx</span></div>
      <div class="page-sub">완료된 도번 <b>체크 → 납품/포장/SERIAL/HEAT 입력 → [납품처리]</b>(발행은 <b>nx.deliv_issue</b>에만 기록, 라이브 미기록). 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 요청수량=계획−완료−발행분.
        <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
      <div class="toolbar">
        <label class="tl">협력사</label><input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명 입력" autocomplete="off" style="width:170px"><datalist id="d4l-cust">${custOpts}</datalist>
        <label class="tl" style="margin-left:6px">기준일자</label>${legacyDateHTML('d4-base',F.from)}
        <label class="tl" style="margin-left:6px">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:40px;text-align:center">일
-       <button class="btn" id="d4-search">조회</button>
-       <button class="btn" id="d4-issue" style="background:#2e86de;color:#fff" ${busy?'disabled':''}>납품처리 (${chkn})</button>
+       <button class="btn" id="d4-search">🔍 조회</button>
+       <button class="btn" id="d4-issue" style="background:#2e86de;color:#fff" ${busy?'disabled':''}>📦 납품처리 (${chkn})</button>
        <button class="btn" id="d4-cancel">발행취소</button>
-       <button class="btn" id="d4-prt">자재부품표</button>
+       <button class="btn" id="d4-prt">🖨️ 자재부품표</button>
        <button class="btn" id="d4-blank">빈양식</button>
-       <button class="btn" id="d4-invoice" title="발행번호로 거래명세표 재출력">거래명세표</button>
+       <button class="btn" id="d4-invoice" title="발행번호로 거래명세표 재출력">🧾 거래명세표</button>
        <button class="btn" id="d4-sticker" title="발행번호로 스티커(바코드) 재출력">🏷️ 스티커</button>
-       <button class="btn" id="d4-lblset" title="라벨 규격·매수 설정">스티커설정</button>
-       <button class="btn" id="d4-prnset" title="프린터 설정">프린터설정</button>
+       <button class="btn" id="d4-lblset" title="라벨 규격·매수 설정">⚙️ 스티커설정</button>
+       <button class="btn" id="d4-prnset" title="프린터 설정">🖨 프린터설정</button>
        ${loading?'<span style="color:var(--muted)">조회중…</span>':''}
      </div>
      <div class="toolbar" style="margin-top:2px">
@@ -591,7 +591,7 @@ SCREEN.deliv420=(c)=>{
     g('#d4-lblset').onclick=openLabelSetup;
     g('#d4-prnset').onclick=openPrinterSetup;
     const all=g('#d4-all');if(all)all.onclick=e=>{rows.forEach(r=>{if(r.status!=='90'&&Number(r.req)>0)F.chk[r.assy]=e.target.checked;});draw();};
-    c.querySelectorAll('.d4-ck').forEach(x=>x.onchange=e=>{F.chk[e.target.dataset.k]=e.target.checked;const b=g('#d4-issue');if(b)b.textContent=`납품처리 (${rows.filter(r=>F.chk[r.assy]).length})`;});
+    c.querySelectorAll('.d4-ck').forEach(x=>x.onchange=e=>{F.chk[e.target.dataset.k]=e.target.checked;const b=g('#d4-issue');if(b)b.textContent=`📦 납품처리 (${rows.filter(r=>F.chk[r.assy]).length})`;});
     c.querySelectorAll('.d4-dv').forEach(x=>x.oninput=e=>{F.deliv[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('.d4-pk').forEach(x=>x.oninput=e=>{F.pack[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('.d4-sn').forEach(x=>x.oninput=e=>{F.serial[e.target.dataset.k]=e.target.value;});
@@ -634,16 +634,16 @@ SCREEN.setstock=(c)=>{
     const totq=st.rows.reduce((a,r)=>a+(+r.maint_qty||0),0);
     const inf=st.info;
     c.innerHTML=`
-     <div class="page-title">자재세트입고관리</div>
+     <div class="page-title">📦 자재세트입고관리</div>
      <div class="page-sub">협력사 세트 <b>SET바코드 스캔/장부입고</b> → 세트입고 실적 + 입고완료분 <b>자도번 재고파생</b>(TAG='S') · 검사품=입고대기 · 레거시 <code>w_pu_stock_140</code></div>
      <div class="panel" style="border:2px solid #2e86de"><div class="panel-h">세트 입고처리</div><div class="panel-b">
        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
          <label class="tl"><input type="radio" name="sm" ${st.mode==="bc"?"checked":""} id="m-bc"> SET바코드</label>
          <label class="tl"><input type="radio" name="sm" ${st.mode==="manual"?"checked":""} id="m-man"> 장부입고(수동)</label>
          ${st.mode==="bc"
-           ?`<input class="inp" id="sc-bc" value="${esc(st.scan)}" placeholder="SET바코드 스캔/입력" style="width:200px"><button class="btn" id="sc-go">송장조회</button>`
+           ?`<input class="inp" id="sc-bc" value="${esc(st.scan)}" placeholder="SET바코드 스캔/입력" style="width:200px"><button class="btn" id="sc-go">🔍 송장조회</button>`
            :`<input class="inp" id="sc-man" value="${esc(st.manual)}" placeholder="장부입고 SET바코드 번호" style="width:200px">`}
-         <button class="btn" id="sc-recv" style="background:#27ae60;color:#fff" ${st.busy?"disabled":""}>${st.busy?"처리중…":"입고처리"}</button>
+         <button class="btn" id="sc-recv" style="background:#27ae60;color:#fff" ${st.busy?"disabled":""}>${st.busy?"처리중…":"📥 입고처리"}</button>
        </div>
        ${inf?`<div style="margin-top:8px;padding:10px;background:var(--soft);border-radius:6px;font-size:13px">
          <b>협력사:</b> ${esc(inf.custnm||inf.cust)} · <b>SET바코드:</b> SET${esc(inf.barcode)} · <b>도번 ${inf.rows.length}종</b>
@@ -655,7 +655,7 @@ SCREEN.setstock=(c)=>{
        <div class="toolbar" style="padding:8px 10px">
          <label class="tl">입고기간</label><input class="inp" type="date" id="f-fr" value="${esc(st.fr)}"> ~ <input class="inp" type="date" id="f-to" value="${esc(st.to)}">
          <label class="tl" style="margin-left:8px">도번</label><input class="inp" id="f-item" value="${esc(st.item)}" placeholder="도번" style="width:130px">
-         <button class="btn" id="f-go">조회</button></div>
+         <button class="btn" id="f-go">🔍 조회</button></div>
        <div class="grid-wrap" style="max-height:440px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th data-key="maint_ymd">입고일자</th><th class="num" data-key="maint_seq">SEQ</th><th data-key="custnm">협력사</th><th data-key="item_code">도번</th><th data-key="itemnm">품명</th>
          <th class="num" data-key="maint_qty">입고수량</th><th data-key="sheet_no">SET바코드</th><th class="center" data-key="status">상태</th><th class="center" data-key="derived_flag">재고파생</th><th>구분</th></tr></thead>
@@ -717,7 +717,7 @@ SCREEN.sagubadjust=(c)=>{
        <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="h-mat" value="${esc(st.hmat)}" placeholder="자도번/품명" style="width:150px">
        <label class="tl" style="margin-left:8px">보유수량</label>
        <select class="inp" id="h-sign"><option value="">전체</option><option value="1" ${st.hsign==="1"?"selected":""}>(+)보유</option><option value="-1" ${st.hsign==="-1"?"selected":""}>(−)마이너스</option><option value="0" ${st.hsign==="0"?"selected":""}>0</option></select>
-       <button class="btn" id="h-go">조회</button>
+       <button class="btn" id="h-go">🔍 조회</button>
      </div>
      <div class="panel"><div class="panel-h">협력사 보유 사급재고 ${st.hloading?"(조회중…)":`(${st.hrows.length}건)`} · <span style="font-weight:400;color:var(--muted)">라이브 정본(읽기전용)</span></div><div class="panel-b" style="padding:0">
        <div class="grid-wrap" style="max-height:400px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
@@ -734,12 +734,12 @@ SCREEN.sagubadjust=(c)=>{
        <tr class="grandtot"><td colspan="4" class="center">합계 ${st.hrows.length}건</td><td class="num">${won(htotq)}</td><td colspan="4"></td></tr>
        </tbody></table></div></div></div>
      <div class="toolbar" style="margin-top:12px">
-       <label class="tl">재고조정 &nbsp;수정기간</label><input class="inp" type="date" id="sa-fr" value="${esc(st.fr)}"> ~ <input class="inp" type="date" id="sa-to" value="${esc(st.to)}">
+       <label class="tl">📋 재고조정 &nbsp;수정기간</label><input class="inp" type="date" id="sa-fr" value="${esc(st.fr)}"> ~ <input class="inp" type="date" id="sa-to" value="${esc(st.to)}">
        <label class="tl" style="margin-left:8px">사급업체</label>
        <select class="inp" id="sa-cust"><option value="">전체</option>${st.custs.map(o=>`<option value="${esc(o.code)}" ${st.cust===o.code?"selected":""}>${esc(o.nm||o.code)}</option>`).join("")}</select>
        <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="sa-mat" value="${esc(st.mat)}" placeholder="자도번(코드/이름)" style="width:150px">
-       <button class="btn" id="sa-go">조회</button>
-       <button class="btn" id="sa-add" style="background:#2e86de;color:#fff">조정추가</button>
+       <button class="btn" id="sa-go">🔍 조회</button>
+       <button class="btn" id="sa-add" style="background:#2e86de;color:#fff">➕ 조정추가</button>
      </div>
      ${e?`<div class="panel" style="border:2px solid #2e86de"><div class="panel-h">${e.id?"수정":"신규"} 조정 전표</div><div class="panel-b">
        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
@@ -747,7 +747,7 @@ SCREEN.sagubadjust=(c)=>{
          <label class="tl">자도번<span style="color:red">*</span></label><input class="inp" id="e-mat" value="${esc(e.mat_code||"")}" placeholder="자도번" style="width:150px">
          <label class="tl">수정수량<span style="color:red">*</span></label><input class="inp" id="e-qty" value="${esc(e.maint_qty??"")}" placeholder="음수 가능" style="width:100px;text-align:right">
          <label class="tl">비고</label><input class="inp" id="e-rmk" value="${esc(e.remarks||"")}" placeholder="사유" style="width:200px">
-         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">저장</button>
+         <button class="btn" id="e-save" style="background:#27ae60;color:#fff">💾 저장</button>
          <button class="btn" id="e-cancel">취소</button>
        </div><div style="font-size:11px;color:var(--muted);margin-top:4px">* 필수. 실사 조정(음수=차감). 조정은 nx 원장 기록(컷오버 후 재고 반영).</div></div></div>`:""}
      <div class="panel"><div class="panel-h">재고조정 내역 ${st.loading?"(조회중…)":""}</div><div class="panel-b" style="padding:0">
@@ -816,7 +816,7 @@ SCREEN.modelbom=(c)=>{
       </div>
       <div style="flex:1;min-width:0">
        ${sel?`<div class="toolbar"><span style="font-weight:700;color:#1c47a0">${esc(sel)}</span>
-         <div class="spacer"></div>${(by==='model'&&canW)?(editMode?`<button class="btn" id="mb-add">＋행추가</button><button class="btn" id="mb-save" style="background:#1c47a0;color:#fff">저장</button><button class="btn ghost" id="mb-cancel">✖ 취소</button>`:`<button class="btn" id="mb-edit">신규등록/수정(nx)</button>`):(by==='model'?`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`:'')}</div>
+         <div class="spacer"></div>${(by==='model'&&canW)?(editMode?`<button class="btn" id="mb-add">＋행추가</button><button class="btn" id="mb-save" style="background:#1c47a0;color:#fff">💾 저장</button><button class="btn ghost" id="mb-cancel">✖ 취소</button>`:`<button class="btn" id="mb-edit">✎ 신규등록/수정(nx)</button>`):(by==='model'?`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`:'')}</div>
         <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
          ${(!editMode)?`<table class="tbl" style="font-size:12px"><thead><tr>${by==='item'?'<th>모델</th>':''}<th>도번</th><th>품명</th><th class="num">사용수량</th><th>유효시작</th><th>유효종료</th><th>작업장/업체</th><th>소스</th></tr></thead>
           <tbody>${loading?spinRow(7):(R.length?R.map(r=>`<tr>${by==='item'?`<td><b>${esc(r.model)}</b></td>`:''}<td><b>${esc(r.item)}</b></td><td class="bcap" title="${esc(r.nm)}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="num">${r.use_qty}</td><td class="center">${ymd(r.from)}</td><td class="center">${ymd(r.to)}</td><td class="center">${esc(r.wc)}</td><td class="center"><span style="font-size:10px;color:${r.src==='nx'?'#1c7c3a':'#888'}">${r.src==='nx'?'nx등록':'라이브'}</span></td></tr>`).join(''):`<tr><td colspan="${by==='item'?8:7}" class="empty">매핑 없음 — ${by==='model'?'신규등록/수정(nx)으로 추가':''}</td></tr>`)}</tbody></table>`
@@ -918,7 +918,7 @@ SCREEN.partnerplan=(c)=>{
     </style>
     <div style="display:flex;flex-direction:column;height:100%">
      <div style="flex:0 0 auto">
-     <div class="page-title">협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 자도번작업처·도번·자도번LIST·일자별 (당김 반영)</span></div>
+     <div class="page-title">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 자도번작업처·도번·자도번LIST·일자별 (당김 반영)</span></div>
      <div class="page-sub">레거시 <code>w_pr_outside_410</code> 4주간 계획수량 컬럼 동일(1:1 대조용). 당김=<code>PR_M_LINE_NO.CUST_MAINT_DAY</code>(회사근무일, 협력사계획 SP가 <code>part_plan_ymd</code>에 반영). 첫 일자컬럼=기준일 이전 누적. ${F.src==='legacy'?'🔴 <b>레거시 라이브</b>(PR_T_PLAN_PART_MAT) 직독':'🟢 우리편성(nx.plan_part_mat)'}</div>
      <div class="toolbar">
        <label class="tl">소스</label>
@@ -928,7 +928,7 @@ SCREEN.partnerplan=(c)=>{
        <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('pn-base',F.from)}
        <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="pn-days" value="${esc(F.days)}" style="width:42px;text-align:center">일
        <label class="tl" style="margin-left:8px">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명 입력" autocomplete="off" style="width:180px"><datalist id="pnl-wc">${wcOpts}</datalist>
-       <button class="btn" id="pn-search">조회</button>
+       <button class="btn" id="pn-search">🔍 조회</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
        <label class="tl">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:120px" placeholder="자도번" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
@@ -984,14 +984,14 @@ SCREEN.dailypurissue=(c)=>{
     // 매출요약 행(상반기/하반기/합계) — 0은 '-'
     const mrow=(lbl,o,bold)=>{const d=o||{h1:0,h2:0,tot:0};const z=v=>v?wonI(v):'-';return `<tr${bold?' style="font-weight:700"':''}><td>${lbl}</td><td class="num">${z(d.h1)}</td><td class="num">${z(d.h2)}</td><td class="num">${z(d.tot)}</td></tr>`;};
     c.innerHTML=`
-     <div class="page-title">일일 영업/매입 현황 <span style="font-size:12px;color:var(--muted);font-weight:400">확정입고·불출 마감기준 · 구분별 누적/당일/총 · 단위 원(공급가, VAT제외)</span></div>
+     <div class="page-title">📋 일일 영업/매입 현황 <span style="font-size:12px;color:var(--muted);font-weight:400">확정입고·불출 마감기준 · 구분별 누적/당일/총 · 단위 원(공급가, VAT제외)</span></div>
      <div class="page-sub">조회일 선택 → 마감월초~전일=<b>누적</b>, 조회일=<b>당일</b>, 누적+당일=<b>총</b>. 매입=확정입고(CUST_TYPE+사급원소재), 불출=자재불출, 실매입=매입−불출.</div>
      <div class="toolbar">
        <label class="tl">조회일</label><input type="date" class="inp" id="dp-d" value="${y2d(day)}" style="width:150px">
-       <button class="btn" id="dp-go">조회</button>
+       <button class="btn" id="dp-go">🔍 조회</button>
        <div class="spacer"></div>
        ${F?`<span class="rowcount">${esc(F.date||'')} 기준</span>`:''}
-       <button class="btn xls" id="dp-xls">엑셀</button>
+       <button class="btn xls" id="dp-xls">📥 엑셀</button>
      </div>
      ${loading?`<div style="padding:20px;color:#b8860b">불러오는 중…</div>`:(F?`
      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">

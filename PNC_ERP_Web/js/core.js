@@ -28,7 +28,7 @@ async function nxDerivedView(c, nxUrl, opts){
   c.innerHTML=`<div class="page-title">${esc(opts.title||'nx 원장 파생')} <span style="font-size:12px;color:var(--muted);font-weight:400">nx원장 파생(대조용)</span></div>
    <div class="page-sub">✏️ 단일원장 <code>nx.stock_ledger</code> 파생(잔량=기초+ΣMAINT) · 병행운영 대조 · <b>기본값은 라이브</b></div>
    <div class="toolbar"><button class="btn" id="nxback">← 라이브로</button><span id="nxinfo" style="font-size:12px;color:var(--muted)"></span>
-     <div class="spacer"></div><button class="btn xls" id="nxxls">엑셀</button></div>
+     <div class="spacer"></div><button class="btn xls" id="nxxls">📥 엑셀</button></div>
    <div class="summary-bar" id="nxsum"></div>
    <div class="grid-wrap" style="max-height:500px;overflow:auto"><table class="tbl fit"><thead id="nxth"></thead><tbody id="nxbody"><tr><td class="empty"><span class="lspin"></span> nx 원장 파생 조회 중…</td></tr></tbody></table></div>
    <div class="rowcount" id="nxcnt"></div>`;
@@ -576,7 +576,7 @@ function itemLiveView(c, mat){
        <label class="tl">소분류</label><select class="inp" id="it-sg" style="width:auto"><option value="">전체</option>${st.sgroups.map(o=>`<option value="${esc(o.code)}" ${st.sg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">성격</label><select class="inp" id="it-nat" style="width:auto"><option value="">전체</option>${st.natures.map(o=>`<option value="${esc(o.code)}" ${st.nat===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl" title="LG 리시빙 2501~ 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="it-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
-       <button class="btn" id="it-go">조회</button>
+       <button class="btn" id="it-go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건${st.cnt>=3000?'(상한)':''}</span>
      </div>
      <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
@@ -623,7 +623,7 @@ function priceHistView(host){
        <label class="tl">거래처</label><input class="inp" id="ph-cust" list="ph-custdl" autocomplete="off" value="${esc(F.cust)}" placeholder="거래처명/코드" style="width:120px"><datalist id="ph-custdl"></datalist>
        <label class="tl">구분</label><select class="inp" id="ph-tag"><option value="">전체</option><option value="1"${F.tag==='1'?' selected':''}>매입</option><option value="E"${F.tag==='E'?' selected':''}>판매(수출)</option><option value="S"${F.tag==='S'?' selected':''}>판매(내수)</option></select>
        <label class="tl" style="cursor:pointer"><input type="checkbox" id="ph-chg" ${F.changed?'checked':''}> 변동분만</label>
-       <button class="btn" id="ph-search">조회</button>
+       <button class="btn" id="ph-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건${F.changed?'':` · 변동 ${won(data.changed)}`}</span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -665,7 +665,7 @@ function priceHistSections(rows){
        <td class="num"><b>${won(r.item_cost)}</b></td><td class="num">${won(r.mat_cost)}</td><td class="num">${won(r.proc_cost)}</td><td class="num">${won(r.other_cost)}</td>
        <td class="cap" title="${esc(r.remarks)}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td></tr>`).join('')}</tbody></table>`;
   const sec=(title,color,list)=>`<div class="section-t" style="margin:6px 0 3px;font-weight:700;color:${color}">${title} <span class="muted" style="font-weight:400">(${list.length}건)</span></div>${list.length?tbl(list):'<div class="empty" style="padding:6px">없음</div>'}`;
-  return sec('🛒 매입단가','#1c47a0',buy)+sec('판매단가 (수출/내수)','#b12a2a',sale);
+  return sec('🛒 매입단가','#1c47a0',buy)+sec('💹 판매단가 (수출/내수)','#b12a2a',sale);
 }
 /* 품목별 단가조회(기존) */
 /* 품목별 단가조회 — 라이브 PR_M_ITEM_COST (거래처별·적용월 시계열, 레거시 w_pr_master_150) */
@@ -741,7 +741,7 @@ function priceItemView(c){
           body=`${(pe.subs.length||purch.length)?'':'<div class="empty" style="font-size:12px">이 후보는 외주 SUB/매입 사급 부품이 없습니다(단품·제작만 — 매입 마스터/원가 자동).</div>'}
             ${asy}${sag}${madeCnt>0?`<div style="font-size:11px;color:#8aa0bd">※ 제작(가공품) ${madeCnt}건은 원가 자동(입력 대상 아님). 예외 비우면 공통 사용.</div>`:'<div style="font-size:11px;color:#8aa0bd">※ 예외 비우면 공통 사용(COALESCE).</div>'}
             ${pe.msg?`<div style="font-size:12px;color:#c0392b;font-weight:600">${esc(pe.msg)}</div>`:''}
-            <div style="margin-top:4px;display:flex;gap:6px"><button class="btn pp-save" data-ri="${rt.route_id}" style="background:#8a6d1c;color:#fff" ${pe.saving?'disabled':''}>계획단가 저장</button><button class="btn ghost pp-cancel">취소</button></div>`;
+            <div style="margin-top:4px;display:flex;gap:6px"><button class="btn pp-save" data-ri="${rt.route_id}" style="background:#8a6d1c;color:#fff" ${pe.saving?'disabled':''}>💾 계획단가 저장</button><button class="btn ghost pp-cancel">취소</button></div>`;
         }
       }else{
         const asyR=(rt.assy_subs&&rt.assy_subs.length)?rt.assy_subs.map(a=>`<span style="font-size:11px;white-space:nowrap;margin-right:10px">🧩 ${esc(a.sub_name||a.sub_item)} ${(a.overrides&&a.overrides.length)?a.overrides.map(o=>`<b>${esc(o.vendor_name||o.vendor_code)}:${o.assy_price==null?'-':won(o.assy_price)}</b>`).join(' '):'<span style="color:#c9d1dc">미입력</span>'}</span>`).join(''):'';
@@ -820,7 +820,7 @@ function priceDetail(c,cd){
   c.querySelector('#pr-detail').innerHTML=`<div class="panel-h">단가 히스토리 ${tbadge(it.type)}</div><div class="panel-b">
      <div class="detail-title">${esc(it.nm)}</div><div class="detail-code">${esc(it.cd)} · ${esc(it.cat)||'-'} · ${esc(it.uom)}</div>
      <div class="section-t">🛒 구매처별 구매단가 <span class="muted">(${buy.length}건)</span></div>${buyTbl}
-     <div class="section-t">매출처별 판매단가 (수출/내수) <span class="muted">(${sale.length}건)</span></div>${saleTbl}</div>`;
+     <div class="section-t">💹 매출처별 판매단가 (수출/내수) <span class="muted">(${sale.length}건)</span></div>${saleTbl}</div>`;
 }
 
 /* ===== 재고 공용 (엑셀다운로드 / 단계별 그리드) ===== */
@@ -841,7 +841,7 @@ function stockGrid(c, opt){
      <select class="sel" id="type"><option value="">전체유형</option>${Object.entries(TYPE_NM).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
      ${opt.showLine?`<select class="sel" id="line"><option value="">전체라인</option>${lines.map(l=>`<option value="${esc(l)}">${esc(lineName(l))}</option>`).join('')}</select>`:''}
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-     <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
+     <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
    </div>
    <div class="summary-bar" id="sum"></div>
    <div class="grid-wrap" style="max-height:540px"><table class="tbl"><thead><tr>
@@ -928,13 +928,13 @@ const _DEMO_unifybom_UNUSED=(c)=>{
     M.kit.forEach(t=>rows.push({lv:1,code:t.code,name:t.name,spec:'',sagub:0,qty:t.qty,dg:t.tag,price:t.cost,amt:Math.round(t.qty*t.cost)}));
 
     c.innerHTML=`
-     <div class="page-title">통합 BOM (${esc(M.part.code)})</div>
+     <div class="page-title">🔀 통합 BOM (${esc(M.part.code)})</div>
      <div class="page-sub"><b>품번 1개</b> + 원가구분(내부용 / 실원가=태국 F&T)으로 전환 · 현재 BOM에 물린 서브(태국 F&T active)와 내부용 대조용 · PARTNER_ERP 실측 단가</div>
      <div class="toolbar">
        <label class="tl">PART-NO</label><input class="inp" id="q_pno" value="${esc(pno)}" style="width:150px">
        <label class="tl">품명</label><input class="inp" id="q_pnm" value="${esc(pnm)}" placeholder="품명 검색" style="width:150px">
        <label class="tl">단가기준일</label><input class="inp" type="date" id="q_bd" value="${esc(bdate)}" style="width:150px">
-       <button class="btn" id="q_go">조회</button>
+       <button class="btn" id="q_go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">단가 기준일 <b>${esc(bdate)}</b> 적용</span></div>
      <div class="summary-bar">
        <div class="s-item"><span>품번</span><b>${esc(M.part.code)}</b></div>
@@ -1105,12 +1105,12 @@ function stockScreen(sid){
          <label class="tl">기간</label><input class="inp" id="stk-from" type="date" value="${fromV}" style="width:150px">
          <span class="mut">~</span><input class="inp" id="stk-to" type="date" value="${toV}" style="width:150px">
          <label class="tl">자도번/거래처</label><input class="inp" id="stk-q" value="${esc(q)}" placeholder="코드 일부" style="width:150px">
-         <button class="btn" id="stk-go">조회</button>
+         <button class="btn" id="stk-go">🔍 조회</button>
          ${CFG.retn&&!editMode?`<button class="btn ${retMode?'':'ghost'}" id="stk-ret" style="${retMode?'background:#c0392b;color:#fff;border-color:#c0392b':''}">↩ ${retMode?'입고로 전환':'반품'}</button>`:''}
          ${editMode
-           ?`<button class="btn" id="stk-add">＋ ${retMode?'반품행':'행추가'}</button><button class="btn" id="stk-save">저장</button><button class="btn ghost" id="stk-cancel">✖ 취소</button>`
+           ?`<button class="btn" id="stk-add">＋ ${retMode?'반품행':'행추가'}</button><button class="btn" id="stk-save">💾 저장</button><button class="btn ghost" id="stk-cancel">✖ 취소</button>`
            :`${PERM.canEdit(sid)?`<button class="btn" id="stk-edit">✎ ${retMode?'반품등록/수정':'등록/수정'}</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}`}
-         <button class="btn" id="stk-xls">엑셀</button>
+         <button class="btn" id="stk-xls">⬇ 엑셀</button>
          <div class="spacer"></div><span class="rowcount">${rows.length}건 · 수량합 <b>${_nf(totQ)}</b></span>
        </div>
        <datalist id="${dl}"></datalist><datalist id="${cdl}"></datalist>
@@ -1303,7 +1303,7 @@ const _mkMagam=(CFG)=>(c)=>{
        <label class="tl">마감년월</label><input type="month" class="inp" id="sm-ym" value="${esc(ymToInput(ym))}" style="min-width:120px">
        <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명/담당자" style="width:180px">
        <label class="tl">분류</label><select class="inp" id="sm-ct" style="width:auto"><option value="">전체</option>${cts.map(t=>`<option value="${esc(t)}" ${ctf===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
-       <button class="btn" id="sm-go">조회</button>
+       <button class="btn" id="sm-go">🔍 조회</button>
        <div class="spacer"></div>
        <span class="rowcount">${cur.length}업체 · 마감 ${nClosed}/${cur.length} · 금액 <b>${won0(tAmt)}</b> → 최종 <b>${won0(tFin)}</b>${tAdj?` (조정 ${won0(tAdj)})`:''}</span>
      </div>
@@ -1316,8 +1316,8 @@ const _mkMagam=(CFG)=>(c)=>{
        ${rowMid(r)}
        <td class="center">${r.close_flag?'<span class="sm-badge on">🔒 마감</span>':'<span class="sm-badge">미마감</span>'}</td>
        <td class="center" style="white-space:nowrap">
-         <button class="btn sm-mini sm-open" data-cc="${esc(r.cc)}" data-nm="${esc(r.nm)}">${(r.close_flag||!canW)?'상세':'마감'}</button>
-         <button class="btn sm-mini ghost" title="계산서 발행(추후 구현)" disabled>계산서</button>
+         <button class="btn sm-mini sm-open" data-cc="${esc(r.cc)}" data-nm="${esc(r.nm)}">${(r.close_flag||!canW)?'상세':'✎ 마감'}</button>
+         <button class="btn sm-mini ghost" title="계산서 발행(추후 구현)" disabled>🧾 계산서</button>
        </td></tr>`).join('')+`<tr class="grandtot"><td colspan="4" class="right">총계 (${cur.length}업체)</td><td class="num">${num(cur.reduce((a,b)=>a+(+b.qty||0),0))}</td><td class="num">${won0(tAmt)}</td>${gtMid}<td colspan="2"></td></tr>`:`<tr><td colspan="${NC}" class="empty">해당 마감월 ${CFG.verb} 없음</td></tr>`)}</tbody></table></div>
      </div>
      <div id="sm-modal"></div>
@@ -1437,7 +1437,7 @@ const _mkMagam=(CFG)=>(c)=>{
         <div class="spacer"></div>
         ${!canW?`<span style="color:#c0392b;font-size:12px;margin-right:auto">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span><button class="btn" id="sm-close2">닫기</button>`
           :mClosed?`<button class="btn ghost" id="sm-reopen">🔓 마감취소</button><button class="btn" id="sm-close2">닫기</button>`
-          :`<button class="btn ghost" id="sm-save">조정저장</button><button class="btn" id="sm-confirm" style="background:#1c7a37;color:#fff">🔒 마감확정</button><button class="btn ghost" id="sm-close2">닫기</button>`}
+          :`<button class="btn ghost" id="sm-save">💾 조정저장</button><button class="btn" id="sm-confirm" style="background:#1c7a37;color:#fff">🔒 마감확정</button><button class="btn ghost" id="sm-close2">닫기</button>`}
       </div>
     </div></div>`;
     m.querySelector('#sm-x').onclick=closeModal;
@@ -1567,9 +1567,9 @@ function wrCrud(host, cfg){
        <label class="tl">${cfg.dateLabel||'기간'}</label>
        <input class="inp" type="date" id="wr-from" value="${st.F.from}"> ~ <input class="inp" type="date" id="wr-to" value="${st.F.to}">
        ${qfFields(cfg.filters,st.F,'wr-f-')}
-       <button class="btn" id="wr-search">조회</button>
-       ${ed?`<button class="btn" id="wr-new" style="background:#1c7c3a;color:#fff">신규</button>
-       <button class="btn" id="wr-del">선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="wr-search">🔍 조회</button>
+       ${ed?`<button class="btn" id="wr-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
+       <button class="btn" id="wr-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
        <div class="spacer"></div><span class="rowcount">${nf(d.cnt||0)}건${cfg.sum?(' · '+cfg.sum(d)):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${(st.msg.includes('실패')||st.msg.includes('오류'))?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -1584,14 +1584,14 @@ function wrCrud(host, cfg){
           </div>
           <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center;gap:10px">
             <span style="color:#c0392b;font-size:11px;text-align:left">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span>
-            <span style="white-space:nowrap"><button class="btn" id="wr-save" style="background:#1b6ec2;color:#fff">저장</button>
+            <span style="white-space:nowrap"><button class="btn" id="wr-save" style="background:#1b6ec2;color:#fff">💾 저장</button>
             <button class="btn" id="wr-cancel">닫기</button></span></div>
         </div></div>`:(editing?`<div style="background:#f2f8ff;border:1px solid #b9d3ef;border-radius:8px;padding:10px;margin:8px 0">
-        <div style="font-weight:600;margin-bottom:6px">${st.form.id?'✏️ 수정 (id '+st.form.id+')':'신규 등록'}</div>
+        <div style="font-weight:600;margin-bottom:6px">${st.form.id?'✏️ 수정 (id '+st.form.id+')':'➕ 신규 등록'}</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center">
         ${cfg.form.map(f=>`<label class="tl">${f.label}${_req(f)?'<span style="color:#c0392b">*</span>':''}</label>${fld(f)}`).join('')}
         </div>
-        <div style="margin-top:8px"><button class="btn" id="wr-save" style="background:#1b6ec2;color:#fff">저장</button>
+        <div style="margin-top:8px"><button class="btn" id="wr-save" style="background:#1b6ec2;color:#fff">💾 저장</button>
         <button class="btn" id="wr-cancel">취소</button></div>
       </div>`:'')}
      <div class="grid-wrap" style="max-height:calc(100vh - ${(editing&&!cfg.modal)?430:330}px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
@@ -1599,7 +1599,7 @@ function wrCrud(host, cfg){
       <tbody>${st.loading?spinRow(cfg.cols.length+2):((d.rows&&d.rows.length)?d.rows.map((r,i)=>`<tr>
         <td class="center">${ed&&r.ID?`<input type="checkbox" class="wr-chk" data-id="${r.ID}" ${st.sel.has(String(r.ID))?'checked':''}>`:''}</td>
         ${cfg.cols.map(col=>`<td class="${col.cls||''}" ${col.title?`title="${esc(r[col.title]||'')}"`:''} ${col.cap?'style="max-width:150px;overflow:hidden;text-overflow:ellipsis"':''}>${col.fmt?col.fmt(r):esc(r[col.k]??'')}</td>`).join('')}
-        <td class="center">${ed&&(r.ID||cfg.editAll)?`<button class="btn wr-edit" data-idx="${i}" style="padding:1px 6px">수정</button>`:`<span style="color:#8aa0bd;font-size:10px">${r.ID?'':'📁이력'}</span>`}</td></tr>`).join(''):`<tr><td colspan="${cfg.cols.length+2}" class="empty">조회 결과 없음${ed?' (신규로 등록)':''}</td></tr>`)}</tbody></table></div>`;
+        <td class="center">${ed&&(r.ID||cfg.editAll)?`<button class="btn wr-edit" data-idx="${i}" style="padding:1px 6px">수정</button>`:`<span style="color:#8aa0bd;font-size:10px">${r.ID?'':'📁이력'}</span>`}</td></tr>`).join(''):`<tr><td colspan="${cfg.cols.length+2}" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const doSearch=()=>{st.F.from=g('#wr-from').value;st.F.to=g('#wr-to').value;qfRead(host,cfg.filters,st.F,'wr-f-');load();};
     g('#wr-search').onclick=doSearch;
@@ -1682,7 +1682,7 @@ function wrLiveLedger(body, kind){
        <label class="tl">${isAdj?'수정기간':'출고기간'}</label><input class="inp" type="date" id="ad-from" value="${F.from}"> ~ <input class="inp" type="date" id="ad-to" value="${F.to}">
        <label class="tl">자도번</label><input class="inp" id="ad-part" value="${esc(F.part)}" style="width:120px">
        <label class="tl">작업처</label><input class="inp" id="ad-wc" value="${esc(F.wc)}" style="width:70px">
-       <button class="btn" id="ad-search">조회</button>
+       <button class="btn" id="ad-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · ${isAdj?'조정':'출고'}수량합 <b>${nf(data.sum_qty)}</b></span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -1753,9 +1753,9 @@ function custMaint(host){
        <label class="tl">검색</label><input class="inp" id="cm-q" value="${esc(st.q)}" placeholder="코드/명/대표자" style="width:150px">
        <label class="tl">거래처구분</label><select class="inp" id="cm-ct" style="width:auto"><option value="">전체</option>${opts.cust_type.map(o=>`<option value="${esc(o.code)}" ${st.ctype===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl">사용</label><select class="inp" id="cm-use" style="width:auto"><option value="">전체</option><option value="1" ${st.use==='1'?'selected':''}>사용</option><option value="0" ${st.use==='0'?'selected':''}>중지</option></select>
-       <button class="btn" id="cm-search">조회</button>
-       ${ed?`<button class="btn" id="cm-new" style="background:#1c7c3a;color:#fff">신규</button>
-       <button class="btn" id="cm-del">선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="cm-search">🔍 조회</button>
+       ${ed?`<button class="btn" id="cm-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>
+       <button class="btn" id="cm-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -1770,7 +1770,7 @@ function custMaint(host){
          </div>
          <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
            <span style="color:#c0392b;font-size:11px">* 거래처명·거래처구분·역할(매입/매출/외주 최소1)·사업자번호는 검증됩니다.</span>
-           <span><button class="btn" id="cm-save" style="background:#1b6ec2;color:#fff">저장</button> <button class="btn" id="cm-cancel">닫기</button></span></div>
+           <span><button class="btn" id="cm-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="cm-cancel">닫기</button></span></div>
        </div></div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr><th style="width:26px"></th>
@@ -1780,7 +1780,7 @@ function custMaint(host){
         <td><b>${esc(r.cust_code)}</b></td><td class="cap" title="${esc(r.cust_name)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.cust_name)}</td>
         <td>${esc(r.biz_no)}</td><td>${esc(r.owner_name)}</td><td>${esc(r.cust_type_nm)}</td><td>${esc(r.roles)}</td><td>${esc(r.biztag_nm)}</td>
         <td>${esc(r.tel)}</td><td>${esc(r.charge_name)}</td><td class="center">${r.use_flag?'<span class="bdg ok">사용</span>':'<span class="bdg off">중지</span>'}</td>
-        <td class="center">${ed?`<button class="btn cm-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="12" class="empty">조회 결과 없음${ed?' (신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
+        <td class="center">${ed?`<button class="btn cm-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="12" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#cm-search').onclick=()=>{st.q=g('#cm-q').value;st.ctype=g('#cm-ct').value;st.use=g('#cm-use').value;load();};
     g('#cm-q').onkeyup=e=>{if(e.key==='Enter')g('#cm-search').click();};
@@ -1847,8 +1847,8 @@ function mstCrud(host, cfg){
     host.innerHTML=`
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">검색</label><input class="inp" id="ms-q" value="${esc(st.q)}" placeholder="코드/명" style="width:150px">
-       <button class="btn" id="ms-search">조회</button>
-       ${cfg.readOnly?'<span style="color:#8aa0bd;font-size:12px">🔎 조회 전용 (편집은 개발›원가/BOM기준정보)</span>':(ed?`<button class="btn" id="ms-new" style="background:#1c7c3a;color:#fff">신규</button><button class="btn" id="ms-del">선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`)}
+       <button class="btn" id="ms-search">🔍 조회</button>
+       ${cfg.readOnly?'<span style="color:#8aa0bd;font-size:12px">🔎 조회 전용 (편집은 개발›원가/BOM기준정보)</span>':(ed?`<button class="btn" id="ms-new" style="background:#1c7c3a;color:#fff">➕ 신규</button><button class="btn" id="ms-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`)}
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -1862,14 +1862,14 @@ function mstCrud(host, cfg){
              h+=`<tr>${cell(a)}${cell(b)}</tr>`;}return h;})()}</tbody></table>
          </div>
          <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:flex-end;gap:8px">
-           <button class="btn" id="ms-save" style="background:#1b6ec2;color:#fff">저장</button><button class="btn" id="ms-cancel">닫기</button></div>
+           <button class="btn" id="ms-save" style="background:#1b6ec2;color:#fff">💾 저장</button><button class="btn" id="ms-cancel">닫기</button></div>
        </div></div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>${ed?'<th style="width:26px"></th>':''}${cfg.cols.map(col=>`<th class="${col.cls||''}">${col.h}</th>`).join('')}${ed?'<th style="width:46px">작업</th>':''}</tr></thead>
       <tbody>${st.rows.length?st.rows.map((r,i)=>`<tr>
         ${ed?`<td class="center"><input type="checkbox" class="ms-chk" data-code="${esc(r[kf])}" ${st.sel.has(r[kf])?'checked':''}></td>`:''}
         ${cfg.cols.map((col,ci)=>`<td class="${col.cls||''}" ${col.cap?`title="${esc(r[col.k]||'')}" style="max-width:${col.cap===true?150:col.cap}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"`:''}>${ci===0?'<b>':''}${col.fmt?col.fmt(r):esc(r[col.k]??'')}${ci===0?'</b>':''}</td>`).join('')}
-        ${ed?`<td class="center"><button class="btn ms-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button></td>`:''}</tr>`).join(''):`<tr><td colspan="${cfg.cols.length+(ed?2:0)}" class="empty">조회 결과 없음${ed?' (신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
+        ${ed?`<td class="center"><button class="btn ms-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button></td>`:''}</tr>`).join(''):`<tr><td colspan="${cfg.cols.length+(ed?2:0)}" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#ms-search').onclick=()=>{st.q=g('#ms-q').value;load();};
     g('#ms-q').onkeyup=e=>{if(e.key==='Enter')g('#ms-search').click();};
@@ -1961,7 +1961,7 @@ function lineCalView(host){
      <div class="toolbar" style="gap:6px">
        <label class="tl">시작주(월)</label><input class="inp" type="date" id="lc-from" value="${st.from}" style="width:150px">
        <label class="tl">기간</label><select class="inp" id="lc-weeks" style="width:auto"><option value="4" ${st.weeks==4?'selected':''}>4주</option><option value="6" ${st.weeks==6?'selected':''}>6주</option><option value="8" ${st.weeks==8?'selected':''}>8주</option></select>
-       <button class="btn" id="lc-go">조회</button>
+       <button class="btn" id="lc-go">🔍 조회</button>
        <span class="page-sub" style="margin:0 0 0 8px">B=<b style="color:#e23b3b">잔업3h</b> · A=<b style="color:#0aa">잔업2h</b> · E=잔업없음 · 빈칸=휴무</span>
        <div class="spacer"></div><span class="rowcount">${d?d.from+'~'+d.to:''}</span>
      </div>
@@ -2021,9 +2021,9 @@ function wcalView(host,kind){
      <div class="toolbar" style="gap:6px;flex-wrap:wrap">
        <label class="tl">시작주(월)</label><input class="inp" type="date" id="wc-from" value="${st.from}" style="width:150px">
        <label class="tl">기간</label><select class="inp" id="wc-weeks" style="width:auto"><option value="4" ${st.weeks==4?'selected':''}>4주</option><option value="6" ${st.weeks==6?'selected':''}>6주</option><option value="8" ${st.weeks==8?'selected':''}>8주</option></select>
-       <button class="btn" id="wc-go">조회</button>
-       ${st.edit?`<button class="btn" id="wc-save" style="background:#1b6ec2;color:#fff">저장</button><button class="btn" id="wc-cancel">취소</button>`
-         :(ed?`<button class="btn" id="wc-edit" style="background:#1c7c3a;color:#fff">수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`)}
+       <button class="btn" id="wc-go">🔍 조회</button>
+       ${st.edit?`<button class="btn" id="wc-save" style="background:#1b6ec2;color:#fff">💾 저장</button><button class="btn" id="wc-cancel">취소</button>`
+         :(ed?`<button class="btn" id="wc-edit" style="background:#1c7c3a;color:#fff">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음</span>`)}
        <span class="page-sub" style="margin:0 0 0 8px">정상/잔업=<b style="color:#2f9e55">근무</b> · <b style="color:#e05a5a">일</b> · <b style="color:#8a95a5">휴</b> ${st.edit?'· <b>셀 클릭→선택</b>':''}</span>
        <div class="spacer"></div><span class="rowcount">${d?d.from+'~'+d.to:''}</span>
      </div>
@@ -2072,7 +2072,7 @@ function qcRead(host, cfg){
        <label class="tl">${cfg.dateLabel||'기간'}</label>
        <input class="inp" type="date" id="qr-from" value="${st.F.from}"> ~ <input class="inp" type="date" id="qr-to" value="${st.F.to}">
        ${qfFields(cfg.filters,st.F,'qr-f-')}
-       <button class="btn" id="qr-search">조회</button>
+       <button class="btn" id="qr-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${_wnf(d.cnt||0)}건${cfg.sum?(' · '+cfg.sum(d)):''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}

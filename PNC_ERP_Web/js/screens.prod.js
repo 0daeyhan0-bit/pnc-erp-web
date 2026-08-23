@@ -45,7 +45,7 @@ window.openPrintWin=(kind,name,feat)=>new Promise(resolve=>{
 });
 
 /* ===== Spec Sheet(BOM) 출력 — ★최상위 공용 함수 =====
-   준비실적처리(키팅) [BOM출력] → A4 가로 미리보기 → 인쇄.
+   준비실적처리(키팅) [🖨 BOM출력] → A4 가로 미리보기 → 인쇄.
    레거시 w_pr_input_460 Print미리보기 양식 재현(2026-08-19):
      헤더 : 공정(용접) · 파트명 · Spec Sheet(BOM) · 도번 · 품명 · 시방예정(수기) · 지그보관구역
      본문 : 레벨|품목코드|소분류|체크|대표매입처|재고취처|재고|소요량|품명|규격|지름|두께|길이
@@ -173,7 +173,7 @@ window.printBomSheet=async(item,gpc)=>{
   <div class="tb"><b>Spec Sheet(BOM)</b>
     <span>${esc2(j.item)} · ${esc2(j.nm||'')} · ${nf(j.cnt)}건 · ${pages.length}쪽</span>
     <span style="flex:1"></span>
-    <button onclick="window.print()">출력</button>
+    <button onclick="window.print()">🖨 출력</button>
     <button onclick="window.close()">닫기</button></div>
   <div class="sp"></div>${html}</body></html>`);
   w.document.close();
@@ -254,7 +254,7 @@ window.printWeldSheet=async(sheetNo)=>{
       }
     </style></head><body>
     <div class="noprint" style="margin-bottom:6px">
-      <button onclick="window.print()" style="padding:6px 16px;font-size:13px">인쇄</button>
+      <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button></div>
     <div class="sheet">
     <table>
@@ -347,7 +347,7 @@ SCREEN.prodinout=(c)=>{
     const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
-   <div class="page-title">생산입출고현황</div>
+   <div class="page-title">🔁 생산입출고현황</div>
    <div class="page-sub" id="pio-sub">파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 nx(이월기준 2502) · 0재고 숨김</div>
    <div class="toolbar">
      <label class="tl">수불기간</label><input type="date" class="inp" id="frm" value="${esc(ymd2d(frm))}" style="min-width:130px"><span style="color:var(--muted);align-self:center">~</span><input type="date" class="inp" id="to" value="${esc(ymd2d(to))}" style="min-width:130px">
@@ -355,8 +355,8 @@ SCREEN.prodinout=(c)=>{
      <input class="inp" id="q" placeholder="자도번/품명">
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-     <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">nx원장 파생</button>
-     <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
+     <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
+     <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
    </div>
    <div style="display:flex;gap:10px;align-items:flex-start">
      <div style="flex:0 0 46%;min-width:0">
@@ -443,7 +443,7 @@ SCREEN.prodstock=(c)=>{
                GAGONG:`가공(P0001) 재공 · 원장 9-union · 🟢 수불기간 ${_per}`,
                WELD: bomMode?'용접 BOM풀기(하위품번 전개) · ⚠️스냅샷(SP, 라이브 예정)':`용접(가공제외) 재공 · 라인별 · 🟢 수불기간 ${_per}`}[stage];
     c.innerHTML=`
-     <div class="page-title">생산재고조회</div><div class="page-sub">${sub}</div>
+     <div class="page-title">🏭 생산재고조회</div><div class="page-sub">${sub}</div>
      <div class="toolbar">
        <div class="toggle-group">${STAGES.map(([k,v])=>`<button data-stage="${k}" class="${stage===k?'on':''}">${v}</button>`).join('')}</div>
        ${isWeld?`<div class="toggle-group" style="margin-left:6px"><button data-w="agg" class="${wmode==='agg'?'on':''}">집계</button><button data-w="bom" class="${wmode==='bom'?'on':''}">BOM풀기</button></div>`:''}
@@ -453,8 +453,8 @@ SCREEN.prodstock=(c)=>{
        ${showLine?`<select class="sel" id="line"><option value="">전체라인</option>${lines.map(l=>`<option value="${esc(l)}">${esc(lineName(l))}</option>`).join('')}</select>`:''}
        <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-       <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">nx원장 파생</button>
-       <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
+       <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
+       <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
      <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:510px;overflow:auto"><table class="tbl fit"><thead id="th"></thead><tbody id="body"></tbody></table></div>
@@ -469,7 +469,7 @@ SCREEN.prodstock=(c)=>{
         <div class="s-item">재고수량 합계 <b>${won(qty)}</b></div>
         <div class="s-item ${amt<0?'neg':''}">재고금액 합계 <b>${wonI(amt)} 원</b></div>`;
       c.querySelector('#sum').innerHTML=html;
-      const bs=c.querySelector('#botsum');if(bs)bs.innerHTML=`<div class="s-item" style="font-weight:700">합계</div>${html}`;};
+      const bs=c.querySelector('#botsum');if(bs)bs.innerHTML=`<div class="s-item" style="font-weight:700">📊 합계</div>${html}`;};
     function wire(apply){
       c.querySelector('#go').onclick=()=>{ if(live) load(); else apply(); };
       c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
@@ -527,7 +527,7 @@ SCREEN.stweld=(c)=>{
        <input class="inp" id="q" placeholder="${mode==='agg'?'품목코드/품명':'ASSY/자재품번/품명'}">
        ${mode==='agg'?`<select class="sel" id="line"><option value="">전체라인</option>${lines.map(l=>`<option value="${esc(l)}">${esc(lineName(l))}</option>`).join('')}</select>`:''}
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-       <div class="spacer"></div><button class="btn xls" id="xls">엑셀 다운로드</button>
+       <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
      <div class="summary-bar" id="sum"></div>
      <div class="grid-wrap" style="max-height:520px"><table class="tbl"><thead id="th"></thead><tbody id="body"></tbody></table></div>
@@ -594,7 +594,7 @@ SCREEN.orderupload=(c)=>{
   const draw=()=>{
     const canW=(typeof PERM!=='undefined')?PERM.canEdit('orderupload'):true;   // 수정권한 게이트(규칙#16)
     c.innerHTML=`
-     <div class="page-title">주문업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">LG PU-SCS Purchase Order → 주문원장</span></div>
+     <div class="page-title">📥 주문업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">LG PU-SCS Purchase Order → 주문원장</span></div>
      <div class="page-sub">LG Open PO 엑셀(Material·PO No·Delivery Date·Order/Open Qty·P/S Order·Order Date·Unit Price)을 업로드합니다. 저장 <code>nx.recv_dtl</code> · 레거시 <code>SP_LGE_RECV_ORDER</code>/w_pr_plan_010 실검증(품번·단가·워크오더·납기·CR 0불일치)</div>
      <div class="toolbar">
        <label class="tl">주문기간</label><input class="inp" type="date" id="o-from" value="${F.from}"> ~ <input class="inp" type="date" id="o-to" value="${F.to}">
@@ -605,11 +605,11 @@ SCREEN.orderupload=(c)=>{
        <label class="tl">품번</label><input class="inp" id="o-item" value="${esc(F.item)}" style="width:130px">
        <label class="tl">W/O</label><input class="inp" id="o-wo" value="${esc(F.wo)}" style="width:110px">
        <label class="tl">구분</label><select class="inp" id="o-cr"><option value=""${F.cr===''?' selected':''}>전체</option><option value="C"${F.cr==='C'?' selected':''}>C(SAC)</option><option value="R"${F.cr==='R'?' selected':''}>R(RAC)</option></select>
-       <button class="btn" id="o-search">조회</button>
+       <button class="btn" id="o-search">🔍 조회</button>
        <div class="spacer"></div>
        ${canW?`<label class="tl">업로드</label><select class="inp" id="o-upcr"><option value="C"${upcr==='C'?' selected':''}>C(SAC)</option><option value="R"${upcr==='R'?' selected':''}>R(RAC)</option></select>
        <input type="file" id="o-file" accept=".xls,.xlsx" style="width:200px">
-       <button class="btn" id="o-upload" style="background:#1c47a0;color:#fff">주문UPLOAD</button>`:`<span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="o-upload" style="background:#1c47a0;color:#fff">📥 주문UPLOAD</button>`:`<span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="toolbar" style="margin-top:2px"><span class="rowcount">총 <b>${nf(data.count)}</b>건 · 수량 <b>${nf(data.sum_qty)}</b> · 금액 <b>${nf(data.sum_amt)}</b>원${data.count>=5000?' <span style="color:#c0392b">(상위 5,000건)</span>':''}</span></div>
@@ -659,7 +659,7 @@ SCREEN.planupload=(c)=>{
     const dates=data.dates||[];
     const canW=(typeof PERM!=='undefined')?PERM.canEdit('planupload'):true;   // 수정권한 게이트(규칙#16)
     c.innerHTML=`
-     <div class="page-title">생산계획업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">LG PU-SCS Production Plan Status → 생산계획</span></div>
+     <div class="page-title">📅 생산계획업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">LG PU-SCS Production Plan Status → 생산계획</span></div>
      <div class="page-sub">LG 생산계획 엑셀(Line·P/S Order·Material·일자별 수량)을 업로드합니다. 일별 컬럼을 (제번,일자)로 전개. 저장 <code>nx.plan_dtl</code> · 레거시 w_pr_plan_020 실검증(WO총량 100% 일치)</div>
      <div class="toolbar">
        <label class="tl">계획기간</label><input class="inp" type="date" id="p-from" value="${F.from}"> ~ <input class="inp" type="date" id="p-to" value="${F.to}">
@@ -668,14 +668,14 @@ SCREEN.planupload=(c)=>{
        <label class="tl">W/O</label><input class="inp" id="p-wo" value="${esc(F.wo)}" style="width:100px">
        <label class="tl">모델</label><input class="inp" id="p-model" value="${esc(F.model)}" style="width:120px">
        <label class="tl">구분</label><select class="inp" id="p-cr"><option value=""${F.cr===''?' selected':''}>전체</option><option value="C"${F.cr==='C'?' selected':''}>C</option><option value="R"${F.cr==='R'?' selected':''}>R</option></select>
-       <button class="btn" id="p-search">조회</button>
+       <button class="btn" id="p-search">🔍 조회</button>
      </div>
      <div class="toolbar" style="margin-top:2px">
        <div class="spacer"></div>
        ${canW?`<label class="tl">업로드</label><select class="inp" id="p-upcr"><option value="C"${upcr==='C'?' selected':''}>C(SAC)</option><option value="R"${upcr==='R'?' selected':''}>R(RAC)</option></select>
        <input type="file" id="p-file" accept=".xls,.xlsx" style="width:200px">
-       <button class="btn" id="p-upload" style="background:#1c47a0;color:#fff">생산계획UPLOAD</button>
-       <button class="btn" id="p-compmat" style="background:#7a4ca0;color:#fff" title="레거시 STEP5→6→7 충실이식 정본 자재소요 + 조달 프로파일 오버레이 (수량100% 검증)">자재소요·조달 편성</button>`:`<span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="p-upload" style="background:#1c47a0;color:#fff">📅 생산계획UPLOAD</button>
+       <button class="btn" id="p-compmat" style="background:#7a4ca0;color:#fff" title="레거시 STEP5→6→7 충실이식 정본 자재소요 + 조달 프로파일 오버레이 (수량100% 검증)">🧾 자재소요·조달 편성</button>`:`<span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="toolbar" style="margin-top:2px"><span class="rowcount">WO <b>${nf(data.wo_count)}</b> · 계획수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}개</span></div>
@@ -700,7 +700,7 @@ SCREEN.planupload=(c)=>{
         if(jj.ok)alert(`자재소요·조달 편성 완료\n품목계획 ${nf(jj.item_lines)} · 자재소요 ${nf(jj.mat_lines)}(제번 ${nf(jj.mat_work_orders)}) · 조달소요 ${nf(jj.sourcing_lines)}\n\n→ 「자재소요·조달 조회」 화면에서 확인`);
         else alert('편성 실패: '+(jj.error||jj.detail||JSON.stringify(jj)));}
       catch(e){alert('편성 실패: '+e);}
-      cm.disabled=false;cm.textContent='자재소요·조달 편성';};
+      cm.disabled=false;cm.textContent='🧾 자재소요·조달 편성';};
     ['#p-wo','#p-model','#p-line'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#p-search').click();});
   };
   load();
@@ -1037,7 +1037,7 @@ SCREEN.partplan=(c)=>{
        <label class="tl">구분</label>${seg('pp-vw',st.view,['상세','집계','제번'])}
        <label class="tl">적용일수</label><select class="inp" id="pp-gigan" style="width:62px">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
        <label class="tl">소스</label><select class="inp" id="pp-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>라이브 대사</option></select>
-       <button class="btn" id="pp-go">조회</button>
+       <button class="btn" id="pp-go">🔍 조회</button>
        <div style="flex-basis:100%;height:0"></div>
        <label class="tl">라인</label><select class="inp" id="pp-line" style="width:90px"><option value="">전체</option>${st.lines.map(l=>`<option value="${esc(l.code)}"${st.line===String(l.code)?' selected':''}>${esc(l.nm||l.code)}</option>`).join('')}</select>
        <label class="tl">제번</label><input class="inp" id="pp-wo" value="${esc(st.wo)}" style="width:90px" placeholder="제번" autocomplete="off">
@@ -1181,7 +1181,7 @@ SCREEN.prodresult=(c)=>{
       ? `<tfoot><tr class="grandtot"><td colspan="4" class="center">합계 ${nf(data.cnt)}건</td><td class="num">${nf(data.sum_qty)}</td><td class="num">${nf1(data.sum_st)}</td><td></td></tr></tfoot>`
       : `<tfoot><tr class="grandtot"><td colspan="2" class="center">합계 ${nf(data.cnt)}건</td><td class="num">${nf(data.sum_lot)}</td><td class="num">${nf(data.sum_qty)}</td><td class="num">${nf1(data.sum_st)}</td><td></td></tr></tfoot>`):'';
     c.innerHTML=`
-     <div class="page-title">생산실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">${detail?'도번별 상세':'작업장별 일별 집계'} · 레거시 w_pr_list_010</span></div>
+     <div class="page-title">📊 생산실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">${detail?'도번별 상세':'작업장별 일별 집계'} · 레거시 w_pr_list_010</span></div>
      <div class="page-sub">필요ST=Σ(품목ST×생산수량)/60${detail?'':' · LOT수량=품목종수'}. 🟢 nx · 원본 <code>PR_T_PROD_DTL</code></div>
      <div class="toolbar">
        <label class="tl">생산기간</label><input class="inp" type="date" id="pr-from" value="${F.from}" style="width:130px"> ~ <input class="inp" type="date" id="pr-to" value="${F.to}" style="width:130px">
@@ -1190,7 +1190,7 @@ SCREEN.prodresult=(c)=>{
        <label class="tl">양산/셀</label><select class="inp" id="pr-tag" style="width:70px"><option value=""${F.tag===''?' selected':''}>전체</option><option value="1"${F.tag==='1'?' selected':''}>양산</option><option value="2"${F.tag==='2'?' selected':''}>셀</option></select>
        <label class="tl">도번</label><input class="inp" id="pr-item" list="pr-itemdl" autocomplete="off" value="${esc(F.item)}" style="width:104px;text-transform:uppercase"><datalist id="pr-itemdl"></datalist>
        <label class="tl">조회종류</label><select class="inp" id="pr-gubun" style="width:132px"><option value="1"${F.gubun==='1'?' selected':''}>작업장별 집계</option><option value="2"${F.gubun==='2'?' selected':''}>도번별 상세</option></select>
-       <button class="btn" id="pr-search">조회</button>
+       <button class="btn" id="pr-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건${detail?'':` · LOT <b>${nf(data.sum_lot)}</b>`} · 생산수량 <b>${nf(data.sum_qty)}</b> · 필요ST <b>${nf1(data.sum_st)}</b></span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -1251,7 +1251,7 @@ SCREEN.partresult=(c)=>{
     const desc={'1':'파트별 일별 집계','2':'파트·도번별 상세','7':'바코드실적처리(공정단위)','5':'가간판(가상설비 GP)','6':'스티커(실설비 00)'}[m]||'';
     const src=wide?'PR_T_PROD_DTL_STICKER + WELD_SHEET_DTL(공정ST)':'PROC(조립) ∪ STICKER(용접) ∪ CUTTING(가공)';
     c.innerHTML=`
-     <div class="page-title">파트별 생산실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">${desc} · 레거시 w_pr_list_090</span></div>
+     <div class="page-title">📈 파트별 생산실적현황 <span style="font-size:12px;color:var(--muted);font-weight:400">${desc} · 레거시 w_pr_list_090</span></div>
      <div class="page-sub">${wide?'공정ST'+(m==='7'?'=TOT_ST×수량':'=TOT_ST×수량/60')+' · 바코드단위 공정실적':'생산수량=Σ·필요ST=Σ(파트별 공정ST×수량)/60'+(m==='2'?'':'·품목수=품목종수')+' · 필요ST 합계=시간(Σ분/60)'}. 🟢 nx · 원본 <code>${src}</code></div>
      <div class="toolbar">
        <label class="tl">생산기간</label><input class="inp" type="date" id="pt-from" value="${F.from}" style="width:130px"> ~ <input class="inp" type="date" id="pt-to" value="${F.to}" style="width:130px">
@@ -1259,7 +1259,7 @@ SCREEN.partresult=(c)=>{
        <label class="tl">파트</label><select class="inp" id="pt-part" style="width:140px">${partOpts}</select>
        <label class="tl">작업자</label><input class="inp" id="pt-worker" value="${esc(F.worker)}" style="width:72px">
        <label class="tl">조회종류</label><select class="inp" id="pt-gubun" style="width:172px">${gubunOpts}</select>
-       <button class="btn" id="pt-search">조회</button>
+       <button class="btn" id="pt-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 생산수량 <b>${nf(data.sum_qty)}</b> · ${stLbl} <b>${stVal}</b></span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -1321,7 +1321,7 @@ SCREEN.partstockadj=(c)=>{
 /* ===== 생산 ⑧: 생산자재출고관리 (w_pr_stock_150) — PR_T_STOCK_MAINT_MAT 창고이동/출고 ===== */
 SCREEN.partissue=(c)=>{
   wrShell(c,{sid:'partissue', nxOnly:true,
-    title:`생산자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재출고(창고간 이동, 등록·수정·삭제)</span>`,
+    title:`📤 생산자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재출고(창고간 이동, 등록·수정·삭제)</span>`,
     sub:`파트 창고간 이동(FROM파트→TO파트, net-0). 조회=📁미러이력(<code>PR_T_STOCK_MAINT_MAT</code> 창고이동)∪웹편집(<code>nx.stock_ledger</code> MV). 레거시 라이브 없음(컷오버).`,
     default:'edit',
     live:(body)=>wrLiveLedger(body,'issue'),
@@ -1400,7 +1400,7 @@ SCREEN.planinput=(host)=>{
        </div>
        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
          <span style="color:#c0392b;font-size:11px">* 계획일자(YYMMDD)·라인·품번·수량 필수. 시각은 HHMM.</span>
-         <span><button class="btn" id="pi-save" style="background:#1b6ec2;color:#fff">저장</button> <button class="btn" id="pi-cancel">닫기</button></span></div>
+         <span><button class="btn" id="pi-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="pi-cancel">닫기</button></span></div>
      </div></div>`;
   const render=()=>{
     const editing=st.form!==null, f=st.form||{}, bulking=st.bulk!==null;
@@ -1409,7 +1409,7 @@ SCREEN.planinput=(host)=>{
     const wke=wd=>wd===5?'color:#1b6ec2':(wd===6?'color:#c0392b':'');  // 토 파랑 / 일 빨강
     const dhead=D.map(d=>`<th class="num" style="min-width:36px;${wke(d.wd)}" title="${esc(d.ymd)}">${esc(d.mmdd)}<br><span style="font-size:9px">${esc(d.dow)}</span></th>`).join('');
     host.innerHTML=`
-     <div class="page-title">생산계획추가입력 <span style="font-size:12px;color:var(--muted);font-weight:400">일자별 계획 매트릭스 · nx.prod_plan_input(레거시 PR_T_PLAN_INPUT 이관본)</span></div>
+     <div class="page-title">➕ 생산계획추가입력 <span style="font-size:12px;color:var(--muted);font-weight:400">일자별 계획 매트릭스 · nx.prod_plan_input(레거시 PR_T_PLAN_INPUT 이관본)</span></div>
      <div class="page-sub">레거시 <code>w_pr_plan_060 / dw_pr_plan_060_1</code> 재현. 좌측 고정컬럼 + <b>기준일 기준 최근 4주</b> 일자매트릭스(기준일=우측 끝 컬럼, 셀=계획수량, 하단 일자합계). 추가는 <b>엑셀 붙여넣기</b>. <span style="color:#c0392b">대체·출하수량은 원천 미보유(공란)</span>.</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">기준일자</label>
@@ -1419,9 +1419,9 @@ SCREEN.planinput=(host)=>{
        <label class="tl" style="margin-left:6px"><input type="checkbox" id="pi-prev" ${st.prevDay?'checked':''}> 전일기준</label>
        <label class="tl">라인</label><select class="inp" id="pi-line" style="width:${lineW()}">${lineOpts(st.line,true)}</select>
        <label class="tl">검색</label><input class="inp" id="pi-q" value="${esc(st.q)}" placeholder="품번/제번" style="width:140px" autocomplete="off">
-       <button class="btn" id="pi-search">조회</button>
-       ${ed?`<button class="btn" id="pi-add" style="background:#1c7c3a;color:#fff">추가(엑셀붙여넣기)</button>
-       <button class="btn" id="pi-del">선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="pi-search">🔍 조회</button>
+       ${ed?`<button class="btn" id="pi-add" style="background:#1c7c3a;color:#fff">➕ 추가(엑셀붙여넣기)</button>
+       <button class="btn" id="pi-del">🗑 선택삭제</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
        <div class="spacer"></div><span class="rowcount">${won(st.mx.cnt||0)}행 · 합계 ${won(st.mx.total||0)}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -1444,7 +1444,7 @@ SCREEN.planinput=(host)=>{
         <td>${esc(r.item_type)}</td>
         <td class="num"><b>${won(r.total||0)}</b></td><td class="num" style="color:#b8c2cf"></td><td class="num" style="color:#b8c2cf"></td>
         <td class="num">${esc(hmfmt(r.output_hm))}</td>
-        ${cells}</tr>`;}).join(''):`<tr><td colspan="${12+D.length}" class="empty">조회 결과 없음${ed?' (추가로 등록)':''}</td></tr>`}</tbody>
+        ${cells}</tr>`;}).join(''):`<tr><td colspan="${12+D.length}" class="empty">조회 결과 없음${ed?' (➕추가로 등록)':''}</td></tr>`}</tbody>
       ${R.length?`<tfoot><tr style="position:sticky;bottom:0;background:#f0f4fa;font-weight:700">
         <td></td><td colspan="7" style="text-align:right">일자별 합계 ▶</td>
         <td class="num">${won(st.mx.total||0)}</td><td></td><td></td><td></td>
@@ -1485,7 +1485,7 @@ SCREEN.planinput=(host)=>{
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 10px">
      <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.34);width:1060px;max-width:94vw">
        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c7c3a;color:#fff;border-radius:10px 10px 0 0">
-         <b>생산계획 추가 — 엑셀 붙여넣기(날짜·품번·수량)</b><span id="pb-x" style="cursor:pointer;font-size:17px">✕</span></div>
+         <b>➕ 생산계획 추가 — 엑셀 붙여넣기(날짜·품번·수량)</b><span id="pb-x" style="cursor:pointer;font-size:17px">✕</span></div>
        <div style="padding:12px 16px">
          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;font-size:12px">
            <label class="tl">기본 계획일자</label><input class="inp" id="pb-ymd" value="${esc(b.plan_ymd)}" placeholder="YYMMDD" style="width:8ch" autocomplete="off" title="행별 계획일자가 비면 이 값으로 채웁니다">
@@ -1512,7 +1512,7 @@ SCREEN.planinput=(host)=>{
        </div>
        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
          <span style="color:#c0392b;font-size:11px">* 라인·시각 공통 적용. 각 행 품번·수량 필수. 계획일자=행별 우선(비면 기본일자).</span>
-         <span><button class="btn" id="pb-save" style="background:#1c7c3a;color:#fff">일괄저장</button> <button class="btn" id="pb-cancel">닫기</button></span></div>
+         <span><button class="btn" id="pb-save" style="background:#1c7c3a;color:#fff">💾 일괄저장</button> <button class="btn" id="pb-cancel">닫기</button></span></div>
      </div></div>`;
   };
   // 다열 붙여넣기 자동분배: start행부터 fields 순서대로 셀 매핑(부족 행은 추가). 날짜=정규화·수량=숫자만.
@@ -1727,7 +1727,7 @@ SCREEN.kitting=(host)=>{
     host.querySelectorAll('.kt-cell.kt-sel').forEach(td=>paintOne(td,false));
     st.cellSel.clear();paintCnt();};
   // ★도번 칸 선택(2026-08-19) — 레거시처럼 도번 셀 자체가 반전(검정바탕/흰글씨)되고,
-  //   그 상태로 [BOM출력] 을 누르면 그 도번의 Spec Sheet(BOM) 이 나옴.
+  //   그 상태로 [🖨 BOM출력] 을 누르면 그 도번의 Spec Sheet(BOM) 이 나옴.
   //   일자셀 드래그선택(st.cellSel)과는 별개 상태(st.itemSel). 서로 지우지 않음.
   //   ★2026-08-20 두 가지 개선(사용자 요청):
   //   (1) 같은 도번이 집계행+상세행에 여러 번 나와도 "클릭한 그 칸 하나"만 표시.
@@ -2132,7 +2132,7 @@ SCREEN.kitting=(host)=>{
      <!-- ★기능버튼은 맨 위 별도 줄(레거시 배치). 아래 필터 툴바는 파트별 생산계획과 동일 2줄 구성.
           (3종 중 [생산창고 재고과부족 확인]은 미구현이라 2026-08-19 숨김) -->
      <div class="toolbar" style="flex-wrap:wrap;gap:4px;margin-bottom:4px">
-       <button class="btn ghost" id="kt-bom">BOM출력</button>
+       <button class="btn ghost" id="kt-bom">🖨 BOM출력</button>
        <button class="btn ghost" id="kt-move">🚚 생산이동표 강제발행</button>
        <!-- ★[⚠ 생산창고 재고과부족 확인] 숨김(2026-08-19) — 기능 미구현(레거시 연동 예정).
             나중에 되살릴 때 아래 주석만 풀면 됨. 핸들러(#kt-short)는 가드로 남겨둠.
@@ -2146,7 +2146,7 @@ SCREEN.kitting=(host)=>{
        <label class="tl">자도번작업처</label><select class="inp" id="kt-wc" style="width:88px"><option value="">전체</option>${[...wcM].map(([v,n])=>`<option value="${esc(v)}"${st.wc===v?' selected':''}>${esc(n)}</option>`).join('')}</select>
        <label class="tl">파트</label><select class="inp" id="kt-part" style="width:130px">${partOpts}</select>
        <label class="tl">기간</label><select class="inp" id="kt-gigan" style="width:62px">${[1,2,3,4,5,6,7,8].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
-       <button class="btn" id="kt-go">조회</button>
+       <button class="btn" id="kt-go">🔍 조회</button>
        <button class="btn ghost" id="kt-setchk" title="셀을 드래그 선택한 뒤 클릭 — 자도번별 재고/세트가능수량 확인(조회전용)">🔎 세트가능 확인</button>
        ${ed?`<button class="btn" id="kt-reg" style="background:#1c7c3a;color:#fff">✅ 확인(준비등록)</button><button class="btn ghost" id="kt-can">⏪ 준비취소</button>`:`<span style="color:#c0392b;font-size:12px">🔒 권한 없음</span>`}
        <div style="flex-basis:100%;height:0"></div>
@@ -2494,7 +2494,7 @@ SCREEN.prodsheet=(host)=>{
           ${pv.warn?`<div style="background:#fff6e5;border:1px solid #f0d9a8;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a6d1f;margin-bottom:8px">⚠ ${esc(pv.warn)}</div>`:''}
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
             <b style="font-size:12px">발행 예정 ${parts.length}장</b>
-            <button class="btn ghost" id="kb-redo" style="padding:2px 10px;font-size:11px">가간판 다시 작성</button>
+            <button class="btn ghost" id="kb-redo" style="padding:2px 10px;font-size:11px">🔄 가간판 다시 작성</button>
             <div style="flex:1"></div>
             <span style="font-size:11px;color:var(--muted)">합계 ${nf(parts.reduce((s,x)=>s+x,0))}</span></div>
           <div class="grid-wrap" style="max-height:230px;overflow:auto;border:1px solid var(--line-2,#c9d3e0);border-radius:6px">
@@ -2507,7 +2507,7 @@ SCREEN.prodsheet=(host)=>{
         </div>
         <div style="padding:10px 14px;border-top:1px solid #e3e9f0;display:flex;gap:6px;justify-content:flex-end">
           <button class="btn ghost" id="kb-close">닫기</button>
-          <button class="btn" id="kb-print" ${parts.length?'':'disabled'} style="background:${parts.length?'#1c7c3a':'#c0c8d2'};color:#fff">인쇄(저장+출력)</button></div>
+          <button class="btn" id="kb-print" ${parts.length?'':'disabled'} style="background:${parts.length?'#1c7c3a':'#c0c8d2'};color:#fff">🖨 인쇄(저장+출력)</button></div>
       </div>`;
       const q=id=>ov.querySelector(id);
       q('#kb-x').onclick=close;q('#kb-close').onclick=close;
@@ -2530,8 +2530,8 @@ SCREEN.prodsheet=(host)=>{
             st.msg=`🏷 가간판 ${j.cnt}장 발행 — 간판번호 ${j.issued.map(x=>x.box_no).slice(0,4).join(', ')}${j.cnt>4?` 외 ${j.cnt-4}장`:''}`;
             printKanban(j.issued.map(x=>x.box_no));
             await load();
-          }else{alert('발행 실패: '+(j.detail||''));btn.disabled=false;btn.textContent='인쇄(저장+출력)';}
-        }catch(e){alert('발행 오류: '+e);btn.disabled=false;btn.textContent='인쇄(저장+출력)';}
+          }else{alert('발행 실패: '+(j.detail||''));btn.disabled=false;btn.textContent='🖨 인쇄(저장+출력)';}
+        }catch(e){alert('발행 오류: '+e);btn.disabled=false;btn.textContent='🖨 인쇄(저장+출력)';}
       };
     };
     draw();document.body.appendChild(ov);
@@ -2583,7 +2583,7 @@ SCREEN.prodsheet=(host)=>{
         </div>
         <div style="padding:10px 14px;border-top:1px solid #e3e9f0;display:flex;gap:6px;justify-content:flex-end">
           <button class="btn ghost" id="lb-close">닫기</button>
-          <button class="btn" id="lb-save" style="background:#b8860b;color:#fff">저장+인쇄</button></div>
+          <button class="btn" id="lb-save" style="background:#b8860b;color:#fff">🖨 저장+인쇄</button></div>
       </div>`;
       const g=id=>ov.querySelector(id);
       g('#lb-x').onclick=close;g('#lb-close').onclick=close;
@@ -2607,8 +2607,8 @@ SCREEN.prodsheet=(host)=>{
             st.msg=`🔖 제품스티커 ${nf(j.qty)}장 발행 — 라벨번호 ${j.print_seq} (${j.qr_from} ~ ${j.qr_to})`;
             printLabel(j.print_seq);
             await load();
-          }else{alert('발행 실패: '+(j.detail||''));btn.disabled=false;btn.textContent='저장+인쇄';}
-        }catch(e){alert('발행 오류: '+e);btn.disabled=false;btn.textContent='저장+인쇄';}
+          }else{alert('발행 실패: '+(j.detail||''));btn.disabled=false;btn.textContent='🖨 저장+인쇄';}
+        }catch(e){alert('발행 오류: '+e);btn.disabled=false;btn.textContent='🖨 저장+인쇄';}
       };
     };
     draw();document.body.appendChild(ov);
@@ -2658,7 +2658,7 @@ SCREEN.prodsheet=(host)=>{
       </div>
       <div style="padding:10px 14px;border-top:1px solid #e3e9f0;display:flex;gap:6px;justify-content:flex-end">
         <button class="btn ghost" id="rp-close">닫기</button>
-        <button class="btn" id="rp-print" style="background:#b8860b;color:#fff">재출력</button></div>
+        <button class="btn" id="rp-print" style="background:#b8860b;color:#fff">🖨 재출력</button></div>
     </div>`;
     const g=id=>ov.querySelector(id);
     g('#rp-x').onclick=close;g('#rp-close').onclick=close;
@@ -2725,7 +2725,7 @@ SCREEN.prodsheet=(host)=>{
       @media print{.noprint{display:none}}
     </style></head><body>
     <div class="noprint" style="margin-bottom:6px">
-      <button onclick="window.print()" style="padding:6px 16px;font-size:13px">인쇄</button>
+      <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
       <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×20mm</span>
       <div style="margin-top:6px;padding:6px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:4px;font-size:12px">
@@ -2931,7 +2931,7 @@ SCREEN.prodsheet=(host)=>{
       @media print{.noprint{display:none}}
     </style></head><body>
     <div class="noprint" style="margin-bottom:6px">
-      <button onclick="window.print()" style="padding:6px 16px;font-size:13px">인쇄</button>
+      <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
       <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span>
       <div style="margin-top:6px;padding:6px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;font-size:12px">
@@ -2966,16 +2966,16 @@ SCREEN.prodsheet=(host)=>{
      <style>#ps-lbody tr.ps-on{background:#cdeef7 !important;font-weight:600}
             #ps-lbody tr:hover{background:#f2f8fd}</style>
      <div style="display:flex;flex-direction:column;height:100%">
-     <div class="page-title" style="flex:0 0 auto">생산전표출력관리 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_490 · 전표 기준 가간판/제품스티커 발행</span></div>
+     <div class="page-title" style="flex:0 0 auto">🖨️ 생산전표출력관리 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_490 · 전표 기준 가간판/제품스티커 발행</span></div>
      <!-- ★프린터 2대 지정(레거시 490 상단과 동일 위치) — 이름은 내 브라우저에 저장 -->
      <div style="flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px;
                  margin:0 0 6px;padding:7px 10px;border:1px solid #d6dee8;border-left:4px solid #5b7fa6;
                  border-radius:6px;background:linear-gradient(180deg,#fbfdff,#f1f5fa)">
-       <span style="font-size:12px;font-weight:700;color:#41546b">프린터 설정</span>
+       <span style="font-size:12px;font-weight:700;color:#41546b">🖨 프린터 설정</span>
        ${prnPick('l','🔖 제품스티커','40×20',PRN.label,'#fff7e6','#ffd591','#a06a00','#b08a4a',178)}
        ${prnPick('k','🏷 가간판·전표','210×110 / A4',PRN.kanban,'#e6f7ff','#91d5ff','#0d6b9a','#4a92b5',200)}
        <button class="btn" id="ps-prn-r" style="height:24px;padding:0 8px;font-size:11px"
-               title="ERP서버에 설치된 프린터 목록을 다시 읽습니다">목록</button>
+               title="ERP서버에 설치된 프린터 목록을 다시 읽습니다">🔄 목록</button>
        <span id="ps-prn-msg" style="font-size:11px;color:#8a94a6">${
          st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
          :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.'}</span>
@@ -2995,7 +2995,7 @@ SCREEN.prodsheet=(host)=>{
        <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="" ${st.fin===''?'checked':''}> 전체</label>
        <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="N" ${st.fin==='N'?'checked':''}> 미완료</label>
        <label class="tl" style="font-weight:400"><input type="radio" name="ps-fin" value="Y" ${st.fin==='Y'?'checked':''}> 완료</label>
-       <button class="btn" id="ps-go">조회</button>
+       <button class="btn" id="ps-go">🔍 조회</button>
      </div>
      <div class="toolbar" style="flex:0 0 auto;margin-top:2px;gap:4px;flex-wrap:wrap">
        <label class="tl">전표번호</label><input class="inp" id="ps-sn" value="${esc(st.sheetNo)}" style="min-width:0;width:90px" autocomplete="off">
@@ -3321,7 +3321,7 @@ SCREEN.procbarcode=(host)=>{
        <label class="tl">설비코드</label>
        <select class="sel" id="pb-mach" style="min-width:0;width:110px"><option value="">-</option>
          ${st.machs.map(m=>`<option value="${esc(m.code)}" ${st.mach===m.code?'selected':''}>${esc(m.code)}</option>`).join('')}</select>
-       <button class="btn" id="pb-go">조회</button>
+       <button class="btn" id="pb-go">🔍 조회</button>
      </div>
      <!-- ★스캔 + 처리부 (팝업 없이 한 화면) -->
      <!-- ★대기중(1회 스캔 완료)이면 빨간 테두리 — 한 번 더 찍으면 등록 -->
@@ -3491,7 +3491,7 @@ SCREEN.readystock=(host)=>{
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">공정</label><select class="inp" id="rs-proc" style="width:auto"><option value="">전체</option>${st.procs.map(o=>`<option value="${esc(o.code)}" ${st.proc===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl">검색</label><input class="inp" id="rs-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:170px">
-       <button class="btn" id="rs-search">조회</button>
+       <button class="btn" id="rs-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건 · 재고합 <b>${won(Math.round(st.total))}</b></span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b;font-weight:600">${esc(st.msg)}</div>`:''}
@@ -3536,7 +3536,7 @@ SCREEN.prodplanstatus=(c)=>{
     const psWoOpts=[...psWo].map(v=>`<option value="${esc(v)}"></option>`).join('');
     const psModelOpts=[...psModel].map(v=>`<option value="${esc(v)}"></option>`).join('');
     c.innerHTML=`
-     <div class="page-title">생산계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">현행 LG 생산계획(제번×일자)</span></div>
+     <div class="page-title">📋 생산계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">현행 LG 생산계획(제번×일자)</span></div>
      <div class="page-sub">현행 생산계획을 <b>제번(WO)×일자</b>로 조회(라이브·읽기전용). 원본 <code>SA_T_PLAN_DTL</code> · 업로드본(nx)은 생산계획업로드에서 대조 · C=확정/R=변경</div>
      <div class="toolbar">
        <label class="tl">계획기간</label><input class="inp" type="date" id="pp-from" value="${F.from}"> ~ <input class="inp" type="date" id="pp-to" value="${F.to}">
@@ -3544,7 +3544,7 @@ SCREEN.prodplanstatus=(c)=>{
        <label class="tl">제번</label><input class="inp" id="pp-wo" list="ppst-wo" value="${esc(F.wo)}" style="width:110px" placeholder="제번 입력" autocomplete="off"><datalist id="ppst-wo">${psWoOpts}</datalist>
        <label class="tl">모델</label><input class="inp" id="pp-model" list="ppst-model" value="${esc(F.model)}" style="width:120px" placeholder="모델명 입력" autocomplete="off"><datalist id="ppst-model">${psModelOpts}</datalist>
        <label class="tl">구분</label><select class="inp" id="pp-cr"><option value="">전체</option><option value="C"${F.cr==='C'?' selected':''}>확정(C)</option><option value="R"${F.cr==='R'?' selected':''}>변경(R)</option></select>
-       <button class="btn" id="pp-search">조회</button>
+       <button class="btn" id="pp-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">제번 ${won(data.wo_count)} · 계획합 <b>${won(data.sum_qty)}</b> · 일자 ${dates.length}</span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -3600,7 +3600,7 @@ SCREEN.gongsu=(c)=>{
     catch(e){alert('저장 오류: '+e);}};
   const delRow=async(id)=>{if(!confirm('이 공수 기록을 삭제할까요?'))return;
     try{const r=await fetch(`${API}/api/gongsu/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id]})});
-      const j=await r.json();if(j.ok){msg='삭제 완료';await load();}else alert('삭제 실패');}
+      const j=await r.json();if(j.ok){msg='🗑 삭제 완료';await load();}else alert('삭제 실패');}
     catch(e){alert('삭제 오류: '+e);}};
   const entryPanel=()=>{const ed=canEd();
     return `<div style="background:#f4f8ff;border:1px solid #cddcf3;border-radius:8px;padding:10px;margin:6px 0">
@@ -3610,9 +3610,9 @@ SCREEN.gongsu=(c)=>{
         <label class="tl">구분</label><select class="inp" id="gs-egubun" style="width:80px">${['근무','지원'].map(g=>`<option${entry.gubun===g?' selected':''}>${g}</option>`).join('')}</select>
         <label class="tl">투입파트</label>
         <select class="inp" id="gs-epart" style="min-width:200px"><option value=""${entry.part===''?' selected':''}>전체</option>${parts.map(p=>`<option value="${esc(p.code)}"${entry.part===p.code?' selected':''}>${esc(p.code)}${p.nm?' · '+esc(p.nm):''}</option>`).join('')}</select>
-        <button class="btn" id="gs-call" style="background:#1c47a0;color:#fff">인원정보호출</button>
+        <button class="btn" id="gs-call" style="background:#1c47a0;color:#fff">📥 인원정보호출</button>
         ${entry.rows.length?`<div style="flex:1"></div><span style="color:#5a6b82">선택 ${entry.rows.filter(r=>r._sel).length}/${entry.rows.length}명</span>
-        ${ed?`<button class="btn" id="gs-bulksave" style="background:#1c7c3a;color:#fff">선택 일괄저장</button>`:''}`:''}
+        ${ed?`<button class="btn" id="gs-bulksave" style="background:#1c7c3a;color:#fff">💾 선택 일괄저장</button>`:''}`:''}
         <button class="btn ghost" id="gs-eclose">닫기</button>
       </div>
       ${entry.loading?'<div class="page-sub">불러오는 중…</div>':(entry.rows.length?`
@@ -3628,7 +3628,7 @@ SCREEN.gongsu=(c)=>{
         <td class="num"><input class="inp gs-f" data-i="${i}" data-k="work_hr" value="${r.work_hr}" style="width:44px;text-align:right;font-size:12px;padding:1px 3px"></td>
         <td class="center"><select class="inp gs-f" data-i="${i}" data-k="hr_check" style="font-size:12px;padding:1px">${HRCHK.map(([v,t])=>`<option value="${v}"${r.hr_check===v?' selected':''}>${t}</option>`).join('')}</select></td>
         <td style="text-align:left"><input class="inp gs-f" data-i="${i}" data-k="remarks" value="${esc(r.remarks||'')}" style="width:100%;font-size:12px;padding:1px 3px"></td>
-        <td class="center">${r.exists?'<span style="color:#c0392b;font-size:11px">이미등록</span>':'<span style="color:#1c7c3a;font-size:11px">신규</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="page-sub" style="margin-top:6px;color:#8aa0bd">파트를 선택하고 인원정보호출을 누르면 등록 작업자가 채워집니다.</div>')}
+        <td class="center">${r.exists?'<span style="color:#c0392b;font-size:11px">이미등록</span>':'<span style="color:#1c7c3a;font-size:11px">신규</span>'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="page-sub" style="margin-top:6px;color:#8aa0bd">파트를 선택하고 📥 인원정보호출을 누르면 등록 작업자가 채워집니다.</div>')}
     </div>`;};
   const draw=()=>{if(!body)return;const ed=canEd();
     body.innerHTML=`
@@ -3637,7 +3637,7 @@ SCREEN.gongsu=(c)=>{
        <label class="tl">구분</label><input class="inp" id="gs-gubun" value="${esc(F.gubun)}" style="width:60px">
        <label class="tl">부서</label><input class="inp" id="gs-dept" value="${esc(F.dept)}" style="width:70px">
        <label class="tl">작업자</label><input class="inp" id="gs-user" value="${esc(F.user)}" style="width:90px">
-       <button class="btn" id="gs-search">조회</button>
+       <button class="btn" id="gs-search">🔍 조회</button>
        ${ed?`<button class="btn" id="gs-newentry" style="background:#1c7c3a;color:#fff">👥 근무공수등록</button>`:''}
        <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 공수합 <b>${_wnf(data.sum_hr)}</b>h</span>
      </div>
@@ -3693,13 +3693,13 @@ SCREEN.daycheck=(c)=>{
     loading=false;draw();};
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">일일체크리스트 <span style="font-size:12px;color:var(--muted);font-weight:400">부서간 일일 이슈/체크</span></div>
+     <div class="page-title">📋 일일체크리스트 <span style="font-size:12px;color:var(--muted);font-weight:400">부서간 일일 이슈/체크</span></div>
      <div class="page-sub">부서간 일일 이슈·체크 공유(라이브·읽기전용). 원본 <code>DAY_CHECK_LIST</code>.</div>
      ${data.note?`<div class="page-sub" style="color:#b8860b">ℹ ${esc(data.note)} (최신 ${esc(_wymd(data.max_ymd))})</div>`:''}
      <div class="toolbar">
        <label class="tl">일자</label><input class="inp" type="date" id="dc-from" value="${F.from}"> ~ <input class="inp" type="date" id="dc-to" value="${F.to}">
        <label class="tl">부서</label><input class="inp" id="dc-dept" value="${esc(F.dept)}" style="width:120px">
-       <button class="btn" id="dc-search">조회</button>
+       <button class="btn" id="dc-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건</span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -3737,7 +3737,7 @@ SCREEN.procresult=(c)=>{
          <label class="tl">공정</label><input class="inp" id="pc-sw" value="${esc(F.swork)}" style="width:70px">
          <label class="tl">라인</label><input class="inp" id="pc-line" value="${esc(F.line)}" style="width:60px">
          <label class="tl">품번</label><input class="inp" id="pc-item" value="${esc(F.item)}" style="width:120px">
-         <button class="btn" id="pc-search">조회</button>
+         <button class="btn" id="pc-search">🔍 조회</button>
          <div class="spacer"></div><span class="rowcount">${_wnf(data.cnt)}건 · 생산수량합 <b>${_wnf(data.sum_qty)}</b></span>
        </div>
        ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}

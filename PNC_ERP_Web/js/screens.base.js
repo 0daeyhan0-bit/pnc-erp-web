@@ -19,9 +19,9 @@ SCREEN.dash=(c)=>{
      ${kpi('단가 이력',d.price_records,'시계열','💰')}
      ${kpi('생산경로',d.routes,'경로별 손익','🛤️')}</div>
    <div class="charts">
-     <div class="panel"><div class="panel-h">품목 유형별 분포</div><div class="panel-b">${bars(d.items_by_type.map(x=>({name:TYPE_NM[x.type]||x.type,cnt:x.cnt})))}</div></div>
+     <div class="panel"><div class="panel-h">📦 품목 유형별 분포</div><div class="panel-b">${bars(d.items_by_type.map(x=>({name:TYPE_NM[x.type]||x.type,cnt:x.cnt})))}</div></div>
      <div class="panel"><div class="panel-h">🤝 거래처 업무분류별 분포</div><div class="panel-b">${bars(d.partners_by_class)}</div></div></div>
-   <div class="panel"><div class="panel-h">역할 분포 (N:M — 매입·매출 동시)</div><div class="panel-b">${bars(d.partners_by_role)}
+   <div class="panel"><div class="panel-h">🔗 역할 분포 (N:M — 매입·매출 동시)</div><div class="panel-b">${bars(d.partners_by_role)}
      <div class="recon">✔ 상단 메뉴에서 모듈을 고르면 좌측에 하위메뉴가 나타납니다. 자재 조회부터 하나씩 추가하며 기존 ERP와 값을 대조하십시오.</div></div></div>`;
 };
 
@@ -97,16 +97,16 @@ SCREEN.lgbomview=(c)=>{
     if(st.msortKey){const k=st.msortKey,d=st.msortDir||1;st.models.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*d;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*d;});}
     const totq=st.tree.reduce((a,r)=>a+(+r.qty||0),0);
     c.innerHTML=`
-     <div class="page-title">LG BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 + 엑셀 업로드(신규 BOM 등록 전 사전적재)</span></div>
-     <div class="page-sub">LG 원본 BOM Explosion(<code>nx.lg_bom</code>) · 모델(완제품) 검색 → 전 레벨 트리 전개 · werks <b>DMZ=SAC / DGZ=RAC</b> · <b>업로드=LG BOM Explosion 엑셀→모델별 적재</b>(그 후 「품목BOM관리 › 신규 BOM 등록 › LG BOM 불러오기」에서 사용)</div>
+     <div class="page-title">🔀 LG BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 + 엑셀 업로드(신규 BOM 등록 전 사전적재)</span></div>
+     <div class="page-sub">LG 원본 BOM Explosion(<code>nx.lg_bom</code>) · 모델(완제품) 검색 → 전 레벨 트리 전개 · werks <b>DMZ=SAC / DGZ=RAC</b> · <b>📤업로드=LG BOM Explosion 엑셀→모델별 적재</b>(그 후 「품목BOM관리 › 신규 BOM 등록 › LG BOM 불러오기」에서 사용)</div>
      <div class="toolbar">
        <label class="tl">모델/품번</label><input class="inp" id="lb-q" value="${esc(st.q)}" placeholder="상위품번(예: 3127A20114B)" style="width:220px">
        <label class="tl" style="margin-left:8px">공장</label><select class="inp" id="lb-wk"><option value="">전체</option><option value="DMZ" ${st.werks==="DMZ"?"selected":""}>DMZ(SAC)</option><option value="DGZ" ${st.werks==="DGZ"?"selected":""}>DGZ(RAC)</option></select>
-       <button class="btn" id="lb-go">조회</button>
+       <button class="btn" id="lb-go">🔍 조회</button>
        <div class="spacer"></div>
-       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #8fb4d6;border-radius:8px;padding:6px 12px;background:#f4f9fe;color:#5a7597;font-size:12px;white-space:nowrap;cursor:pointer">엑셀을 여기로 <b>드래그&드롭</b></span>
+       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #8fb4d6;border-radius:8px;padding:6px 12px;background:#f4f9fe;color:#5a7597;font-size:12px;white-space:nowrap;cursor:pointer">📥 엑셀을 여기로 <b>드래그&드롭</b></span>
        <input type="file" id="lb-file" accept=".xlsx,.xls" style="display:none">
-       <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 업로드중…':'LG BOM 업로드'}</button>
+       <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 업로드중…':'📤 LG BOM 업로드'}</button>
      </div>
      ${st.upmsg?`<div class="page-sub" style="color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.upmsg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
@@ -219,7 +219,7 @@ SCREEN.drawingdoc=(host)=>{
     const a=document.createElement('a');a.href=base+'&disp=attach';a.download=r.filename||'';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500);};  // 다운로드 동시
   const del=async(r)=>{if(!confirm(r.filename+' 를 삭제할까요?'))return;
     try{const rr=await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+r.key})});const j=await rr.json();
-      if(j.ok){st.msg='삭제완료';await load();}else alert('삭제 불가:\n'+(j.errors||[]).join('\n'));}
+      if(j.ok){st.msg='🗑 삭제완료';await load();}else alert('삭제 불가:\n'+(j.errors||[]).join('\n'));}
     catch(e){alert('삭제 오류: '+e);}
   };
   const render=()=>{
@@ -229,8 +229,8 @@ SCREEN.drawingdoc=(host)=>{
      <div class="page-sub">품번별 도면. <b>일반도면=개발(업로드·삭제 가능)</b> · <b>시방도면=품질(시방변경관리에서 업로드/삭제)</b>. 신규 저장=NAS(현재 <code>F:\\NEW_ERP_FILES</code>), 기존은 레거시 blob 다운로드.</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">품번·파일명</label><input class="inp" id="dd-item" value="${esc(st.item)}" placeholder="품번/파일명 검색 (빈칸=전체 최근)" style="width:230px">
-       <button class="btn" id="dd-go">조회</button>
-       ${ed?`<div class="spacer"></div><label class="tl">일반도면 업로드</label><input type="file" id="dd-file" style="width:210px"><button class="btn" id="dd-up" style="background:#1c47a0;color:#fff">업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="dd-go">🔍 조회</button>
+       ${ed?`<div class="spacer"></div><label class="tl">일반도면 업로드</label><input type="file" id="dd-file" style="width:210px"><button class="btn" id="dd-up" style="background:#1c47a0;color:#fff">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div class="toolbar" style="margin-top:2px"><span class="rowcount">${won(st.cnt)}건${st.item.trim()?'':' — 품번을 조회하세요'}</span></div>
@@ -243,7 +243,7 @@ SCREEN.drawingdoc=(host)=>{
         <td>${esc(r.spec_no||r.rev||'')}</td><td>${esc(r.user)}</td><td class="mut">${esc(String(r.dt||'').slice(0,19).replace('T',' '))}</td>
         <td class="num">${fmt(r.size)}</td>
         <td class="center"><button class="btn dd-dl" data-i="${i}" style="padding:1px 8px">⬇</button></td>
-        ${ed?`<td class="center">${r.editable?`<button class="btn dd-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="시방도면은 시방변경관리에서 삭제">시방</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?8:7}" class="empty">${st.item.trim()?'검색 결과 없음':'조회를 누르면 최근 파일이 표시됩니다 (품번·파일명으로 검색)'}</td></tr>`)}</tbody></table></div>`;
+        ${ed?`<td class="center">${r.editable?`<button class="btn dd-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="시방도면은 시방변경관리에서 삭제">시방</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?8:7}" class="empty">${st.item.trim()?'검색 결과 없음':'🔍 조회를 누르면 최근 파일이 표시됩니다 (품번·파일명으로 검색)'}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#dd-go').onclick=()=>{st.item=g('#dd-item').value;load();};
     g('#dd-item').onkeyup=e=>{if(e.key==='Enter')g('#dd-go').click();};
@@ -284,7 +284,7 @@ SCREEN.itemspec=(host)=>{
     const a=document.createElement('a');a.href=base+'&disp=attach';a.download=r.filename||'';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500);};
   const del=async(r)=>{if(!confirm(r.filename+' 를 삭제할까요?'))return;
     try{const rr=await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+r.key})});const j=await rr.json();
-      if(j.ok){st.msg='삭제완료';await load();}else alert('삭제 불가:\n'+(j.errors||[]).join('\n'));}
+      if(j.ok){st.msg='🗑 삭제완료';await load();}else alert('삭제 불가:\n'+(j.errors||[]).join('\n'));}
     catch(e){alert('삭제 오류: '+e);}
   };
   const render=()=>{
@@ -294,8 +294,8 @@ SCREEN.itemspec=(host)=>{
      <div class="page-sub">품번별 첨부문서. <b>시방(PPT)</b>=DRAWING.PR_M_SIBANG · <b>품목첨부 14종</b>(Q-map·QC공정도·XRF·작업표준서·검사성적서·도면 등, PR010) · 신규=nx.doc(<code>F:\\NEW_ERP_FILES</code>). 기존은 레거시 blob 다운로드.</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">품목번호</label><input class="inp" id="is-item" value="${esc(st.item)}" placeholder="품번" style="width:200px">
-       <button class="btn" id="is-go">조회</button>
-       ${ed?`<div class="spacer"></div><label class="tl">첨부 업로드</label><input type="file" id="is-file" style="width:210px"><button class="btn" id="is-up" style="background:#1c47a0;color:#fff">업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <button class="btn" id="is-go">🔍 조회</button>
+       ${ed?`<div class="spacer"></div><label class="tl">첨부 업로드</label><input type="file" id="is-file" style="width:210px"><button class="btn" id="is-up" style="background:#1c47a0;color:#fff">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div class="toolbar" style="margin-top:2px"><span class="rowcount">${won(st.cnt)}건${st.item.trim()?'':' — 품번을 조회하세요'}</span></div>
@@ -378,7 +378,7 @@ SCREEN.basemaster=(c)=>{
       const nm=kind==='cal_work'?'근무 달력관리':'공장운영 달력관리';
       const sub=kind==='cal_work'?'근무팀 가동/휴무 캘린더':'파트별 가동/휴무 캘린더 (공통=근무달력) · PART→파트';
       c.innerHTML=`<div class="page-title">🗂️ 기준 마스터 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">${nm}</span></div>
-       <div class="page-sub">${sub} · WORK_STATS(정상/잔업/일요일/휴무) · <b>기본 조회, 수정</b> · 권한게이트(PERM)</div>
+       <div class="page-sub">${sub} · WORK_STATS(정상/잔업/일요일/휴무) · <b>기본 조회, ✎수정</b> · 권한게이트(PERM)</div>
        <div class="toolbar" style="gap:4px;flex-wrap:wrap">${TABS.map(t=>`<button class="btn ${kind===t.k?'':'ghost'}" data-k="${t.k}" style="${kind===t.k?'background:#1c47a0;color:#fff':''}">${t.t}</button>`).join('')}</div>
        <div id="bm-wc"></div>`;
       c.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{kind=b.dataset.k;q='';cal.ent='';sortIdx=-1;load();});
@@ -393,7 +393,7 @@ SCREEN.basemaster=(c)=>{
      ${cal_?`<div class="toolbar" style="margin-top:2px">
         <label class="tl">${esc(data.entlbl||'대상')}</label><select class="inp" id="bm-ent" style="min-width:120px"><option value="">전체</option>${(data.ents||[]).map(e=>`<option value="${esc(e)}"${cal.ent===e?' selected':''}>${esc(e)}</option>`).join('')}</select>
         <label class="tl">기간</label><input class="inp" type="date" id="bm-from" value="${cal.from}"> ~ <input class="inp" type="date" id="bm-to" value="${cal.to}">
-        <button class="btn" id="bm-cgo">조회</button>
+        <button class="btn" id="bm-cgo">🔍 조회</button>
         <div class="spacer"></div><span class="rowcount">${won(data.cnt)}건 · 근무일 <b>${won(data.work_days)}</b></span>
       </div>`:`<div class="toolbar" style="margin-top:2px">
         <div class="spacer"></div><input class="inp" id="bm-q" value="${esc(q)}" placeholder="코드/명 검색" style="width:160px"><button class="btn" id="bm-go">🔍</button>
@@ -440,7 +440,7 @@ SCREEN.partmaster=(c)=>{
     catch(e){alert('저장 오류: '+e);}};
   const del=async(code)=>{if(!confirm(`파트 [${code}] 삭제할까요?`))return;
     try{const r=await fetch(`${API}/api/partmaster/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
-      const j=await r.json();if(j.ok){st.msg='삭제 완료';await load();}else alert('삭제 실패: '+(j.detail||''));}
+      const j=await r.json();if(j.ok){st.msg='🗑 삭제 완료';await load();}else alert('삭제 실패: '+(j.detail||''));}
     catch(e){alert('삭제 오류: '+e);}};
   // 파트별 작업자 리스트 통째 편집 (레거시 w_pr_master_350 하단그리드)
   const wEnter=(addBlank)=>{st.wdraft=st.workers.map(w=>({worker:w.worker,real:w.real}));if(addBlank)st.wdraft.push({worker:'',real:true});st.wmode='edit';draw();};
@@ -458,12 +458,12 @@ SCREEN.partmaster=(c)=>{
   const draw=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('partmaster'):true;
     c.innerHTML=`
-     <div class="page-title">파트 마스터 <span style="font-size:12px;color:var(--muted);font-weight:400">PR_M_PROC_GAGONG · 생산효율(=키팅 회수율)</span></div>
+     <div class="page-title">🔧 파트 마스터 <span style="font-size:12px;color:var(--muted);font-weight:400">PR_M_PROC_GAGONG · 생산효율(=키팅 회수율)</span></div>
      <div class="page-sub">파트별 <b>생산효율(회수율)</b>·연동창고·정렬키 관리. 원가·계획·키팅이 공유하는 마스터(nx 편집). <span style="color:#b8860b">노란=생산효율≠100</span></div>
      <div class="toolbar">
        <label class="tl">파트/파트명</label><input class="inp" id="pm-q" value="${esc(st.q)}" placeholder="파트코드/파트명" autocomplete="off" style="width:160px">
-       <button class="btn" id="pm-go">조회</button>
-       ${ed?`<button class="btn" id="pm-new" style="background:#1c7c3a;color:#fff">신규</button>`:`<span style="color:#c0392b;font-size:12px">🔒 조회권한</span>`}
+       <button class="btn" id="pm-go">🔍 조회</button>
+       ${ed?`<button class="btn" id="pm-new" style="background:#1c7c3a;color:#fff">➕ 신규</button>`:`<span style="color:#c0392b;font-size:12px">🔒 조회권한</span>`}
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
@@ -483,11 +483,11 @@ SCREEN.partmaster=(c)=>{
         <div style="font-weight:700;font-size:13px;color:#33507d">👷 파트별 작업자 ${st.sel?`— <b style="color:#1c47a0">${esc(st.sel)}</b> <span style="color:#8aa0bd;font-weight:400">${st.wload?'…':(st.wmode==='edit'?st.wdraft.length:st.workers.length)+'명'}</span>`:'<span style="color:#8aa0bd;font-weight:400">— 좌측 파트 클릭</span>'}</div>
         <div style="flex:1"></div>
         ${ed&&st.sel?(st.wmode==='edit'
-          ?`<button class="btn" id="pm-waddrow" style="background:#1c7c3a;color:#fff;padding:2px 9px;font-size:12px">작업자</button>
-            <button class="btn" id="pm-wsaveall" style="background:#1c47a0;color:#fff;padding:2px 9px;font-size:12px">저장</button>
+          ?`<button class="btn" id="pm-waddrow" style="background:#1c7c3a;color:#fff;padding:2px 9px;font-size:12px">➕ 작업자</button>
+            <button class="btn" id="pm-wsaveall" style="background:#1c47a0;color:#fff;padding:2px 9px;font-size:12px">💾 저장</button>
             <button class="btn ghost" id="pm-wcancel" style="padding:2px 9px;font-size:12px">취소</button>`
-          :`<button class="btn" id="pm-wnew" style="background:#1c7c3a;color:#fff;padding:2px 9px;font-size:12px">작업자</button>
-            <button class="btn" id="pm-wedit" style="padding:2px 9px;font-size:12px">수정</button>`):''}
+          :`<button class="btn" id="pm-wnew" style="background:#1c7c3a;color:#fff;padding:2px 9px;font-size:12px">➕ 작업자</button>
+            <button class="btn" id="pm-wedit" style="padding:2px 9px;font-size:12px">✎ 수정</button>`):''}
        </div>
        <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         ${st.wmode==='edit'
@@ -495,7 +495,7 @@ SCREEN.partmaster=(c)=>{
           <tbody>${st.wdraft.length?st.wdraft.map((w,i)=>`<tr>
             <td style="text-align:left"><input class="inp pm-wname" data-i="${i}" value="${esc(w.worker)}" maxlength="30" autocomplete="off" placeholder="작업자명" style="width:100%;box-sizing:border-box;font-size:12px;padding:2px 5px"></td>
             <td class="center"><span class="pm-wreal" data-i="${i}" title="클릭하여 실작업자 토글" style="cursor:pointer;font-weight:700;font-size:15px;color:${w.real?'#1c7c3a':'#c8d0dc'}">${w.real?'✔':'—'}</span></td>
-            <td class="center"><button class="btn ghost pm-wrm" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button></td></tr>`).join(''):`<tr><td colspan="3" class="empty">작업자 없음 — 작업자로 추가</td></tr>`}</tbody></table>`
+            <td class="center"><button class="btn ghost pm-wrm" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button></td></tr>`).join(''):`<tr><td colspan="3" class="empty">작업자 없음 — ➕ 작업자로 추가</td></tr>`}</tbody></table>`
         :`<table class="tbl fit" style="font-size:12px"><thead><tr><th style="text-align:left">작업자</th><th class="center">실작업자</th><th>등록자</th><th>등록시각</th><th>수정자</th><th>수정시각</th></tr></thead>
           <tbody>${st.wload?spinRow(6):(st.workers.length?st.workers.map(w=>`<tr><td style="text-align:left"><b>${esc(w.worker)}</b></td><td class="center">${w.real?'<span style="color:#1c7c3a;font-weight:700">✔</span>':'<span style="color:#c8d0dc">—</span>'}</td><td>${esc(w.ins_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.ins_dt)}</td><td>${esc(w.upd_user)}</td><td style="font-size:11px;color:#8aa0bd">${esc(w.upd_dt)}</td></tr>`).join(''):`<tr><td colspan="6" class="empty">${st.sel?'등록된 작업자 없음':'좌측에서 파트를 선택하세요'}</td></tr>`)}</tbody></table>`}</div>
       </div>
@@ -530,7 +530,7 @@ SCREEN.partmaster=(c)=>{
     const f=(lbl,key,attrs='')=>`<label class="tl" style="display:block;margin:6px 0 2px">${lbl}</label><input class="inp" id="pm-f-${key}" value="${esc(r[key]!=null?r[key]:'')}" ${attrs} style="width:100%;box-sizing:border-box">`;
     return `<div style="position:fixed;inset:0;background:rgba(20,40,80,.4);display:flex;align-items:center;justify-content:center;z-index:900">
      <div style="background:#fff;border-radius:12px;padding:20px;width:420px;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(10,25,55,.4)">
-       <div style="font-weight:700;font-size:16px;margin-bottom:10px">${r._new?'파트 신규':'파트 수정'}</div>
+       <div style="font-weight:700;font-size:16px;margin-bottom:10px">${r._new?'➕ 파트 신규':'✎ 파트 수정'}</div>
        <label class="tl" style="display:block;margin:6px 0 2px">파트코드 *</label><input class="inp" id="pm-f-code" value="${esc(r.code)}" ${r._new?'':'readonly'} style="width:100%;box-sizing:border-box;${r._new?'':'background:#eef'}">
        ${f('파트명 *','nm')}
        <label class="tl" style="display:block;margin:6px 0 2px">구분</label><select class="inp" id="pm-f-gubun" style="width:100%">${GUBUN.map(([v,n])=>`<option value="${v}"${r.gubun===v?' selected':''}>${n}</option>`).join('')}</select>
@@ -538,7 +538,7 @@ SCREEN.partmaster=(c)=>{
        ${f('연동창고(코드)','wh')}${f('정렬키','sortkey','type="number"')}
        ${f('★생산효율(회수율 %)','rate','type="number" step="0.1"')}
        ${f('파트그룹','grp')}${f('자동창고IP','ip')}${f('RACK개수','rack','type="number"')}
-       <div style="margin-top:14px;text-align:right"><button class="btn ghost" id="pm-cancel">취소</button> <button class="btn" id="pm-save" style="background:#1c47a0;color:#fff">저장</button></div>
+       <div style="margin-top:14px;text-align:right"><button class="btn ghost" id="pm-cancel">취소</button> <button class="btn" id="pm-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
      </div></div>`;};
   const wireModal=()=>{if(!st.edit)return;const g=id=>c.querySelector(id);
     ['code','nm','gubun','wc','wh','sortkey','rate','grp','ip','rack'].forEach(k=>{const el=g('#pm-f-'+k);if(el)el.oninput=()=>{st.edit[k]=el.value;};});
@@ -586,12 +586,12 @@ SCREEN.prodinfo=(c)=>{
       #pi-assy .tbl th,#pi-assy .tbl td,#pi-single .tbl th,#pi-single .tbl td,#pi-tabs .tbl th,#pi-tabs .tbl td{padding:2px 6px}
       #pi-assy .tbl input.inp,#pi-single .tbl input.inp,#pi-tabs .tbl input.inp{height:24px}
      </style>
-     <div class="page-title">생산정보등록 <span style="font-size:12px;color:var(--muted);font-weight:400">품번별 조립·단품 공정 + 생산공정순서 · 레거시 w_pr_master_090</span></div>
+     <div class="page-title">⚙️ 생산정보등록 <span style="font-size:12px;color:var(--muted);font-weight:400">품번별 조립·단품 공정 + 생산공정순서 · 레거시 w_pr_master_090</span></div>
      <div class="page-sub">품번 검색 → ① 조립(공정수) ② 하단탭(LOB·양산준비·지그·수율·생산공정순서). 조회·편집/저장=<code>nx</code>(TEST3) · ${ed()?'<span style="color:#1c7c3a">편집권한</span>':'<span style="color:#c0392b">조회권한(읽기)</span>'}</div>
      <div class="toolbar">
        <label class="tl">품번</label><input class="inp" id="pi-q" list="pi-dl" value="${esc(st.q)}" placeholder="품번/품명 타이핑(자동완성)" style="width:230px" autocomplete="off">
        <datalist id="pi-dl">${(st.dlrows||[]).map(r=>`<option value="${esc(r.item)}">${esc(r.item)} · ${esc(r.name)}</option>`).join('')}</datalist>
-       <button class="btn" id="pi-go">검색</button>
+       <button class="btn" id="pi-go">🔍 검색</button>
        ${st.results.length?`<select class="inp" id="pi-pick" style="min-width:280px"><option value="">— 검색결과 ${st.results.length}건 —</option>${st.results.map(r=>`<option value="${esc(r.item)}"${r.item===st.item?' selected':''}>${esc(r.item)} · ${esc(r.name)}</option>`).join('')}</select>`:''}
        <div class="spacer"></div>
        ${h?`<span class="rowcount">회수율 <b>${num(h.prod_rate,1)}%</b></span>`:''}
@@ -639,7 +639,7 @@ SCREEN.prodinfo=(c)=>{
     host.innerHTML=`<div class="panel"><div class="panel-h">① 조립(공정수)
        <span style="float:right;font-weight:400;font-size:11px">
         <label style="cursor:pointer"><input type="checkbox" id="pi-assyall" ${st.assyall?'checked':''}> 전체공정(${won(st.data.assy_master_cnt)})</label>
-        ${canEd?'<button class="btn" id="pi-assy-save" style="padding:1px 8px;margin-left:6px;background:#1c47a0;color:#fff">저장</button>':''}</span></div>
+        ${canEd?'<button class="btn" id="pi-assy-save" style="padding:1px 8px;margin-left:6px;background:#1c47a0;color:#fff">💾 저장</button>':''}</span></div>
      <div class="panel-b" style="padding:0"><div class="grid-wrap" style="max-height:300px;overflow:auto">
       <table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr>
         <th>공정명</th><th class="num">공정수</th><th class="num">표준ST</th><th class="num">ST</th><th class="center">구분</th></tr></thead>
@@ -672,7 +672,7 @@ SCREEN.prodinfo=(c)=>{
     const wname=wc=>{const w=(st.opts&&st.opts.works||[]).find(x=>x.code===wc);return w?w.name:wc;};
     host.innerHTML=`<div class="panel"><div class="panel-h">② 단품(공정수) · 외경별 표준ST
        <span style="float:right;font-weight:400;font-size:11px;color:var(--muted)">전사 공유 마스터(PR_M_WORK_SINGLE) · ∅4.76/5.00 원천부재(공란)
-        ${canEd?`<button class="btn" id="pi-sg-edit" style="padding:1px 8px;margin-left:6px;${em?'background:#b8860b;color:#fff':''}">${em?'편집중':'편집'}</button>${em?'<button class="btn" id="pi-sg-save" style="padding:1px 8px;margin-left:4px;background:#1c47a0;color:#fff">저장</button>':''}`:''}</span></div>
+        ${canEd?`<button class="btn" id="pi-sg-edit" style="padding:1px 8px;margin-left:6px;${em?'background:#b8860b;color:#fff':''}">${em?'✎ 편집중':'✎ 편집'}</button>${em?'<button class="btn" id="pi-sg-save" style="padding:1px 8px;margin-left:4px;background:#1c47a0;color:#fff">💾 저장</button>':''}`:''}</span></div>
      <div class="panel-b" style="padding:0"><div class="grid-wrap" style="max-height:300px;overflow:auto">
       <table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>
         <th>작업처</th><th>공정명</th><th class="num">임율</th>
@@ -721,7 +721,7 @@ SCREEN.prodinfo=(c)=>{
     body.innerHTML=`<div class="toolbar" style="margin:0 0 6px">
        <span style="font-size:12px;color:var(--muted)">라우팅 원천: <b>${st.data.proc_src==='nx'?'nx.prodinfo_proc(편집본)':'라이브 PR_M_ITEM_PROC_GAGONG'}</b> · 저장=nx</span>
        <div class="spacer"></div>
-       ${canEd?`<button class="btn" id="pi-proc-add" style="background:#1c7c3a;color:#fff">행추가</button><button class="btn" id="pi-proc-save" style="background:#1c47a0;color:#fff">저장</button>`:'<span style="color:#c0392b;font-size:12px">🔒 읽기전용</span>'}</div>
+       ${canEd?`<button class="btn" id="pi-proc-add" style="background:#1c7c3a;color:#fff">➕ 행추가</button><button class="btn" id="pi-proc-save" style="background:#1c47a0;color:#fff">💾 저장</button>`:'<span style="color:#c0392b;font-size:12px">🔒 읽기전용</span>'}</div>
      <div class="grid-wrap" style="max-height:360px;overflow:auto"><table class="tbl" style="font-size:11px;white-space:nowrap"><thead><tr>${cols.map(h=>`<th class="${/SEQ|횟수|초|CT|인원|Hr/.test(h)?'num':'center'}">${h}</th>`).join('')}</tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>{const wc=r.work_code;
         const cell=(k,w=44,step='0.001')=>canEd?`<input class="inp pi-pc" data-i="${i}" data-k="${k}" type="number" step="${step}" value="${r[k]==null?'':r[k]}" style="width:${w}px;min-width:0;text-align:right;padding:1px 3px">`:num(r[k],3);
@@ -738,7 +738,7 @@ SCREEN.prodinfo=(c)=>{
         <td class="num">${cell('human_st',44)}</td><td class="num" style="background:#f3f8ff">${cell('tot_st',48)}</td>
         <td class="num">${cell('lt_hr',44)}</td>
         <td>${canEd?`<select class="inp pi-pc" data-i="${i}" data-k="jp_proc_method" style="min-width:80px">${Object.entries(O.jp_methods||{}).map(([k,v])=>`<option value="${k}"${r.jp_proc_method===k?' selected':''}>${esc(v)}</option>`).join('')}</select>`:esc((O.jp_methods||{})[r.jp_proc_method]||r.jp_proc_method)}</td>
-        </tr>`;}).join(''):`<tr><td colspan="14" class="empty">생산공정순서 없음${canEd?' — [행추가]로 등록':''}</td></tr>`}
+        </tr>`;}).join(''):`<tr><td colspan="14" class="empty">생산공정순서 없음${canEd?' — [➕ 행추가]로 등록':''}</td></tr>`}
       </tbody><tfoot><tr class="grandtot"><td colspan="11" class="center">공정 ${rows.length}행 · ST(초) 합계</td><td class="num" style="font-weight:800">${num(totSt,3)}</td><td colspan="2"></td></tr></tfoot></table></div>`;
     if(!canEd){body.querySelectorAll('thead th').forEach(addResizer);return;}
     // 텍스트/숫자 셀: state만 갱신(재렌더X → 포커스 유지)
@@ -795,7 +795,7 @@ SCREEN.prodinfo=(c)=>{
        ${lobPanel('«가공공정» (작업처 P2)',gagong)}
      </div>
      <div class="panel"><div class="panel-h" style="font-size:12px">생산구분별 투입인원·생산능력(CAPA) · PR_M_ITEM_ST → nx.prodinfo_item_st · 능력산정
-       <span style="float:right;font-weight:400">${canEd?`<button class="btn" id="pi-lob-add" style="padding:1px 8px;background:#1c7c3a;color:#fff">행추가</button> <button class="btn" id="pi-lob-save" style="padding:1px 8px;background:#1c47a0;color:#fff">저장</button>`:''}</span></div>
+       <span style="float:right;font-weight:400">${canEd?`<button class="btn" id="pi-lob-add" style="padding:1px 8px;background:#1c7c3a;color:#fff">➕ 행추가</button> <button class="btn" id="pi-lob-save" style="padding:1px 8px;background:#1c47a0;color:#fff">💾 저장</button>`:''}</span></div>
      <div class="panel-b" style="padding:0"><div class="grid-wrap" style="max-height:240px;overflow:auto"><table class="tbl" style="font-size:12px"><thead><tr>
        <th></th><th>생산구분</th><th class="num">투입인원</th><th class="num">CAPA</th><th class="center">원천</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`<tr>
@@ -843,13 +843,13 @@ SCREEN.prodinfo=(c)=>{
       catch(e){flash('업로드 실패(연결)');}};
     body.querySelectorAll('.pi-ys-del').forEach(b=>b.onclick=async()=>{if(!confirm('첨부를 삭제할까요?'))return;
       const j=await post('/api/prodinfo/yangsan/delete',{yid:+b.dataset.yid});
-      if(j.ok){flash('첨부 삭제');loadItem(st.item);}else flash('삭제 실패: '+(j.detail||''));});};
+      if(j.ok){flash('🗑 첨부 삭제');loadItem(st.item);}else flash('삭제 실패: '+(j.detail||''));});};
 
   // ---------- 탭: 지그정보 = CRUD(nx.prodinfo_jig) + 레거시 단건 참조 ----------
   const renderJig=(body)=>{
     const canEd=ed();const rows=st.data.jig||[];const lg=st.data.jig_legacy||{};
     body.innerHTML=`<div class="page-sub" style="margin:0 0 6px">지그정보 · 편집=nx.prodinfo_jig · <span style="color:var(--muted)">레거시참조: 지그코드 <b>${esc(lg.jig_code||'-')}</b> · 적치 ${esc(lg.jig_area||'-')} · 수량 ${won(lg.zig_qty)}</span>
-       <span style="float:right">${canEd?`<button class="btn" id="pi-jig-add" style="padding:1px 8px;background:#1c7c3a;color:#fff">행추가</button> <button class="btn" id="pi-jig-save" style="padding:1px 8px;background:#1c47a0;color:#fff">저장</button>`:''}</span></div>
+       <span style="float:right">${canEd?`<button class="btn" id="pi-jig-add" style="padding:1px 8px;background:#1c7c3a;color:#fff">➕ 행추가</button> <button class="btn" id="pi-jig-save" style="padding:1px 8px;background:#1c47a0;color:#fff">💾 저장</button>`:''}</span></div>
      <div class="grid-wrap" style="max-height:300px;overflow:auto"><table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr>
        <th></th><th>지그구분</th><th class="num">수량</th><th>보관위치(RACK)</th><th class="center">제작일</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`<tr>
@@ -858,7 +858,7 @@ SCREEN.prodinfo=(c)=>{
         <td class="num">${canEd?`<input class="inp pi-jigc" data-i="${i}" data-k="jig_qty" type="number" value="${r.jig_qty==null?'':r.jig_qty}" style="width:64px;min-width:0;text-align:right;padding:1px 4px">`:won(r.jig_qty)}</td>
         <td>${canEd?`<input class="inp pi-jigc" data-i="${i}" data-k="rack_loc" value="${esc(r.rack_loc||'')}" style="width:140px;padding:1px 4px">`:esc(r.rack_loc||'')}</td>
         <td class="center">${canEd?`<input class="inp pi-jigc" data-i="${i}" data-k="make_ymd" value="${esc(r.make_ymd||'')}" placeholder="YYYYMMDD" maxlength="8" style="width:100px;min-width:0;text-align:center;padding:1px 4px">`:esc(r.make_ymd||'')}</td>
-        </tr>`).join(''):`<tr><td colspan="5" class="empty">지그 없음${canEd?' — [행추가]로 등록':''}</td></tr>`}
+        </tr>`).join(''):`<tr><td colspan="5" class="empty">지그 없음${canEd?' — [➕ 행추가]로 등록':''}</td></tr>`}
       </tbody></table></div>`;
     if(!canEd)return;
     body.querySelectorAll('.pi-jigc').forEach(el=>el.oninput=()=>{st.data.jig[+el.dataset.i][el.dataset.k]=el.value;});
@@ -874,7 +874,7 @@ SCREEN.prodinfo=(c)=>{
     const canEd=ed();const h=st.data.head;const rows=st.data.yield||[];
     const totQ=rows.reduce((a,r)=>a+(+r.proc_qty||0),0),totSt=rows.reduce((a,r)=>a+(+r.st||0),0);
     body.innerHTML=`<div class="page-sub" style="margin:0 0 6px">수율(공정수) · 편집=nx.prodinfo_yield · 품목회수율 <b>${num(h.prod_rate,1)}%</b>(PR_M_ITEM.PROD_RATE §5-4) · 소요=표준÷(회수율/100)
-       <span style="float:right">${canEd?`<button class="btn" id="pi-yld-add" style="padding:1px 8px;background:#1c7c3a;color:#fff">행추가</button> <button class="btn" id="pi-yld-save" style="padding:1px 8px;background:#1c47a0;color:#fff">저장</button>`:''}</span></div>
+       <span style="float:right">${canEd?`<button class="btn" id="pi-yld-add" style="padding:1px 8px;background:#1c7c3a;color:#fff">➕ 행추가</button> <button class="btn" id="pi-yld-save" style="padding:1px 8px;background:#1c47a0;color:#fff">💾 저장</button>`:''}</span></div>
      <div class="grid-wrap" style="max-height:300px;overflow:auto"><table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr>
        <th></th><th>수율공정</th><th class="num">공정수</th><th class="num">표준ST</th><th class="num">ST</th></tr></thead>
       <tbody>${rows.length?rows.map((r,i)=>`<tr>
@@ -883,7 +883,7 @@ SCREEN.prodinfo=(c)=>{
         <td class="num">${canEd?`<input class="inp pi-yldc" data-i="${i}" data-k="proc_qty" type="number" step="0.1" value="${r.proc_qty==null?'':r.proc_qty}" style="width:64px;min-width:0;text-align:right;padding:1px 4px">`:num(r.proc_qty,1)}</td>
         <td class="num">${canEd?`<input class="inp pi-yldc" data-i="${i}" data-k="std_st" type="number" step="0.001" value="${r.std_st==null?'':r.std_st}" style="width:72px;min-width:0;text-align:right;padding:1px 4px">`:num(r.std_st,3)}</td>
         <td class="num">${canEd?`<input class="inp pi-yldc" data-i="${i}" data-k="st" type="number" step="0.001" value="${r.st==null?'':r.st}" style="width:72px;min-width:0;text-align:right;padding:1px 4px">`:num(r.st,3)}</td>
-        </tr>`).join(''):`<tr><td colspan="5" class="empty">수율공정 없음${canEd?' — [행추가]로 등록':''}</td></tr>`}
+        </tr>`).join(''):`<tr><td colspan="5" class="empty">수율공정 없음${canEd?' — [➕ 행추가]로 등록':''}</td></tr>`}
       </tbody><tfoot><tr class="grandtot"><td colspan="2" class="center">합계</td><td class="num">${num(totQ,1)}</td><td></td><td class="num">${num(totSt,3)}</td></tr></tfoot></table></div>`;
     if(!canEd)return;
     body.querySelectorAll('.pi-yldc').forEach(el=>el.oninput=()=>{st.data.yield[+el.dataset.i][el.dataset.k]=el.value;
