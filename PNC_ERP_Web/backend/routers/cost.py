@@ -718,6 +718,85 @@ def cost_analysis_cache_save(p: dict = Body(...)):
         cn.close()
 
 
+# ===================== ★V2 캐시 서버배치(엔진·맵 1회 warm → 캐시 채움. 화면은 조회만=즉시) =====================
+_regen_ca = {"running": False, "done": 0, "total": 0, "ym": "", "ymd": "", "error": "", "sec": 0}
+
+def _regen_ca_worker(ym, ymd):
+    """리시빙 전 품목 V1+V2 원가를 warm 엔진 1개씩·맵 1회 빌드로 계산 → nx.cost_analysis_cache 저장.
+    ★클라 청크(매번 맵 재구축·cold엔진) 대체 = 병목 제거. 정확도=검증엔진 출력 그대로."""
+    global _regen_ca
+    t0 = _time.time(); e1 = e2 = None; cn = None
+    try:
+        import nx_cost_v2 as _V2
+        cn = _nx(); cur = cn.cursor()
+        cur.execute("SELECT r.ITEM_CODE, SUM(CONVERT(float,ISNULL(r.RECV_QTY,0))) FROM nx.SA_T_LG_RECEIVING_DTL r WHERE LEFT(r.RECEIVING_YMD,4)=? GROUP BY r.ITEM_CODE", ym)
+        items = [(str(r[0]).strip(), float(r[1] or 0)) for r in cur.fetchall() if str(r[0]).strip()]
+        _regen_ca['total'] = len(items)
+        e1 = NxCostEngine(); e2 = NxCostEngine()
+        _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]), _V2.build_fallback_map(e2.cur, ymd[:4]))
+        smap = {}
+        try: smap = _sagub_diff_map(e1.cur, ym)
+        except Exception: smap = {}
+        sag_items = set()
+        try:
+            e1.cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
+            sag_items = set(r[0] for r in e1.cur.fetchall())
+        except Exception: pass
+        buf = []
+        for it, qty in items:
+            try:
+                s = e1.silwon(it, ymd); sp = e1.material_split(it, ymd); s2 = e2.silwon(it, ymd)
+                buf.append({'part': it, 'qty': qty,
+                    'jae': round(float(s.get('jae', 0) or 0), 2), 'lg': round(float(s.get('lg', 0) or 0), 2),
+                    'silwon': round(float(s.get('silwon', 0) or 0), 2), 'sonik': round(float(s.get('sonik', 0) or 0), 2),
+                    'sagub': (e1.sagub_sum(it, smap) if smap else 0.0),
+                    'won': sp['won'], 'bu': sp['bu'], 'sa': sp['sa'],
+                    'gagong': round(float(s.get('gagong', 0) or 0), 2), 'ilban': round(float(s.get('ilban', 0) or 0), 2),
+                    'unban': round(float(s.get('unban', 0) or 0), 2), 'profit': round(float(s.get('profit', 0) or 0), 2),
+                    'silsagub': (e1.sagub_whole(it, ymd) if (it in sag_items) else 0.0),
+                    'v2_silwon': round(float(s2.get('silwon', 0) or 0), 2), 'v2_sonik': round(float(s2.get('sonik', 0) or 0), 2),
+                    'v2_delta': round(float(s2.get('silwon', 0) or 0) - float(s.get('silwon', 0) or 0), 2)})
+            except Exception:
+                pass
+            _regen_ca['done'] += 1
+        _ca_ddl(cur)
+        cur.execute("DELETE FROM nx.cost_analysis_cache WHERE ym=? AND ymd=?", ym, ymd)
+        cols = "ym,ymd,part," + ",".join(_CA_FIELDS) + ",upd_dt"
+        ph = "?,?,?," + ",".join("?" * len(_CA_FIELDS)) + ",getdate()"
+        data = [[ym, ymd, r['part']] + [float(r.get(f) or 0) for f in _CA_FIELDS] for r in buf]
+        try: cur.fast_executemany = True
+        except Exception: pass
+        BATCH = 90   # (3+17)파라미터×90=1800 < 2100
+        for i in range(0, len(data), BATCH):
+            cur.executemany("INSERT INTO nx.cost_analysis_cache(%s) VALUES(%s)" % (cols, ph), data[i:i + BATCH])
+        cn.commit()
+    except Exception as e:
+        _regen_ca['error'] = str(e)[:200]
+    finally:
+        try:
+            if e1: e1.close()
+            if e2: e2.close()
+            if cn: cn.close()
+        except Exception: pass
+        _regen_ca['sec'] = round(_time.time() - t0); _regen_ca['running'] = False
+
+@router.post("/api/cost/analysis/regen")
+def cost_analysis_regen(p: dict = Body(...)):
+    """★V2 캐시 서버배치 트리거(백그라운드). ym(리시빙월)·ymd(단가적용일)로 전품목 V1+V2 계산→캐시. status 폴링."""
+    global _regen_ca
+    if _regen_ca.get('running'): raise HTTPException(409, "이미 재계산 중")
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    ym, ymd = _ca_norm(p.get('ym'), p.get('ymd'))
+    if not ym or not ymd: raise HTTPException(400, "ym/ymd 필요")
+    _regen_ca = {"running": True, "done": 0, "total": 0, "ym": ym, "ymd": ymd, "error": "", "sec": 0}
+    threading.Thread(target=_regen_ca_worker, args=(ym, ymd), daemon=True).start()
+    return {"ok": True, "ym": ym, "ymd": ymd}
+
+@router.get("/api/cost/analysis/regen/status")
+def cost_analysis_regen_status():
+    return _regen_ca
+
+
 # ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================
 #  ★체결·포장·용접 조립공정 ST는 용접봉(RAC) carrier에 p_item=부모(node)로 저장(레거시 carrier 모델). 여기서 전 공정군 편집.
 #   가공공정 = item_code=node, p_item=''  /  조립공정 = item_code=용접봉, p_item=node. calc_gubun 보존. 단가는 마감때만(제외).
