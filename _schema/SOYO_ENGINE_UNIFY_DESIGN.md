@@ -87,6 +87,10 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **유지보수**: BOM 변경 시 1엔진만. bom_save가 통일엔진 캐시 무효화 트리거([[BOM_PROGRAM_MASTER §9 C11]] 갱신갭 해결).
 - **클린전환 기반**: 통일엔진이 nx.bom(정규 SUB)으로 소스 전환할 단일 지점.
 
+## 5-1. ★검증 스코프 = 사용중 BOM (사용자 확정 2026-08-23)
+- **스코프 = 리시빙 실적 있는 BOM**(사용중으로 정리됨). 완성품 = sa_t_recv_dtl 리시빙 제품 **1052개**(order_ymd 260102~260823, 2025데이터 없음), BOM 전개 = **~8790 items**(메모리 "LG리시빙2501~ 8790"). nx.item에 use_flag/active/use_gubun 컬럼 존재.
+- **소요엔진 diff0는 전 사용중 스코프(1052 제품 전수)로** — 원가분석 V2의 상위25%(263)보다 넓게. 다수 프로그램이 쓰므로 부분검증 금지.
+
 ## 6. ★검증-우선 원칙 (사용자 지시 2026-08-23)
 > "이 엔진은 내부원가·실원가 R01~Rnn·협력사 사급원소재 수불정산·OSP vs 리시빙·자재소요/매입검증·용접봉 수불정산에서 많이 쓰니 정확도가 매우 중요. **검증을 항상 하면서 진행**하고 통합문서에 정확히 기록."
 - **규칙**: 각 walker 구현 즉시 현행 구현과 **diff0 전수 대조**. 통과 못 하면 전환 금지·원인 규명. 부분 통과도 금지(정확도 최우선).
@@ -96,7 +100,8 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 ## 7. 진행·검증 로그 (착수 시 채움)
 | 일자 | 단계 | 스코프 | diff0 결과 | 잔차/조치 |
 |---|---|---|---|---|
-| 2026-08-23 | 설계 확정 | — | — | explode+원가walker부터 착수 예정 |
+| 2026-08-23 | 설계 확정 | — | — | explode+원가walker부터 착수 |
+| 2026-08-23 | **explode()+원가 walker(cost_material)** 구축 | 리시빙 상위 45제품 | **DIFF0 PASS 45/45**(FAIL0·ERR0) | `_harness/nx_soyo_engine.py`. 통일엔진 cost_material==엔진 material() 전수 일치. 데이터층=엔진 프리미티브 공유(lines/_load_item/_leaf_val). 재료비+LME. 다음=생산 walker(plan_part_mat diff0) |
 
 ## 관련
 [[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]]
