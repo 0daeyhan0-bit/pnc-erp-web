@@ -1252,8 +1252,8 @@ SCREEN.costanalysis_v2=(c)=>{
        <div class="ca-card pos"><span>손익 Impact</span><b>+${eok(A.impact||0)}억</b></div>
        <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>
      </div>
-     <div class="toolbar">
-       <label class="tl">리시빙 기간</label>
+     <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto;align-items:center">
+       <label class="tl" style="white-space:nowrap">리시빙 기간</label>
        <input class="inp" type="date" id="ca-from" value="${_MFIRST}" style="width:140px"><span style="color:var(--muted)">~</span>
        <input class="inp" type="date" id="ca-to" value="${_TODAY}" style="width:140px">
        <span class="badge" title="최대 조회기간 1개월">최대 1개월</span>
@@ -1262,7 +1262,7 @@ SCREEN.costanalysis_v2=(c)=>{
        ${(typeof PERM==='undefined'||PERM.canEdit('costanalysis'))?`<label class="tl" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율로 전체 재계산">💲 단가 적용일자</label>
        <input class="inp" type="date" id="ca-ymd" value="${ymd2date(rvYmd)}" style="width:150px">
        <button class="btn" id="ca-regen" title="지정 단가일자로 nx엔진 재계산">🔄 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
-       <span class="badge" style="background:#eef6ee;color:#1f8a5a;margin-left:10px" title="가공비 ST회수율(효율) - 전 품목 일괄. 실가공비=표준가공비×(100/효율). 일반관리·이윤도 자동 전파. 100=반영 안 함">🎯 회수율</span>
+       <label class="tl" style="margin-left:10px;white-space:nowrap" title="가공비 ST회수율(효율) - 전 품목 일괄. 실가공비=표준가공비×(100/효율). 일반관리·이윤도 자동 전파. 100=반영 안 함">회수율</label>
        <input class="inp" type="number" id="ca-recov" value="${recovery}" min="1" max="300" step="1" style="width:64px;text-align:right" title="ST효율(%) - 전 품목 일괄 적용. 예: 55 입력 시 가공비×(100/55)">
        <span style="color:var(--muted);font-size:12px">%</span>
        <button class="btn" id="ca-recov-go" title="회수율 적용 후 재조회">적용</button>
