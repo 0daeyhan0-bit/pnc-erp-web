@@ -1252,7 +1252,7 @@ SCREEN.costanalysis_v2=(c)=>{
        <div class="ca-card pos"><span>손익 Impact</span><b>+${eok(A.impact||0)}억</b></div>
        <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>
      </div>
-     <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto;align-items:center">
+     <div class="toolbar catbar" style="flex-wrap:nowrap;overflow-x:auto;align-items:center;white-space:nowrap;gap:6px">
        <label class="tl" style="white-space:nowrap">리시빙 기간</label>
        <input class="inp" type="date" id="ca-from" value="${_MFIRST}" style="width:140px"><span style="color:var(--muted)">~</span>
        <input class="inp" type="date" id="ca-to" value="${_TODAY}" style="width:140px">
@@ -1278,6 +1278,7 @@ SCREEN.costanalysis_v2=(c)=>{
      ${recvBar()}
      <div class="grid-wrap ca-wrap"><table class="tbl ca-tbl">${headHTML()}<tbody id="ca-body"></tbody><tfoot id="ca-foot"></tfoot></table></div>
      <style>
+       .catbar>*{flex-shrink:0}
        .ca-modes{display:flex;margin:10px 0 2px;border:1px solid var(--line);border-radius:8px;overflow:hidden;width:fit-content}
        .ca-mode{padding:7px 18px;border:none;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
        .ca-mode.on{background:#2f5aa8;color:#fff}
