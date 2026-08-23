@@ -70,6 +70,21 @@ def _expandable(eng, node, info, seen):
     return kids or None
 
 
+def cost_material_nae(eng, item, ymd):
+    """[내부원가 walker] 전공정 자체 가정 — INNER_PROD 무관 전개(매입/외주도 뚫음), LME 없음.
+    현행 nx_cost_engine.material_nae()와 diff0 대상. explode()가 이미 full 깊이라 지원.
+    엔진 _value_node_nae 재현: cg!=3 & _expandable_nae면 전개, else _leaf_val_nae."""
+    ymcut = '20' + ymd[:4]
+
+    def value(node, q, seen):
+        info = eng._load_item(node)
+        if info['cost_gubun'] != '3' and eng._expandable_nae(node, seen):
+            return sum(value(c, qty * q, seen | {node}) for c, qty, cx, f, t, lx in eng.lines(node) if not cx)
+        return eng._leaf_val_nae(node, info, q, ymd, ymcut)
+
+    return round(value(item, 1.0, set()), 2)
+
+
 # ============================ 생산 소요 walker ============================
 # soyo STEP5~7(nx.v_pr_bom, except_flag)의 BOM 전개를 explode 트리 위에서 재현.
 # 정지=사급/최하위, 필터=except_flag(생산·PR축), 용접봉(RAC)=자재소요 제외.
