@@ -166,3 +166,13 @@ AJR75563402 (base, bom_id 3998) — 자식3
 - 파일럿 백업 이미 존재: `nx.bom_header_bak_pilot_AJR30012009`·`nx.bom_line_bak_pilot_AJR30012009` (이전 세션 착수 흔적).
 
 **상태**: 구조 대조 완료(위). 다음 = R01 조달경로 테이블 위치·매핑 확인 → 클린+route 원가/소요 재구성기 설계.
+
+### 9-4. R01_REBUILD 대조 + ★드리프트 정황 (2026-08-24, 검증 필요)
+정본 재독(`BOM_PROGRAM_MASTER`08-23·`BOM_STRUCTURE_CANON`·`R01_REBUILD_DESIGN`) 후 대조하니 **08-12 완료 상태와 현 DB가 어긋나는 정황 2건**:
+
+1. **route 테이블 드리프트**: R01_REBUILD §4는 "전 납품제품 1,357 R01 route 빌드(note='R01'), sourcing_route_line 16,262행, 재료비 diff0 1,357/1,357"라 기록. 그러나 현 `nx.sourcing_route WHERE item_code='AJR75563402'` = **route_no=2(R02) 1건뿐**(route_id 1536, note="BASE BOM 평면 재료·SUB 해체 가져오기"). **note='R01' 클린 route 없음.** → 이후 **조달프로파일 재설계(PR#25, [[newerp-sourceprofile-route1-select]])**가 R01 route를 교체/삭제한 것으로 추정.
+
+2. **원가 앵커 어긋남**: R01_REBUILD §5e "AJR75563402 실원가 **5722.2** 앵커 불변". 현 엔진(`NxCostEngine.silwon('AJR75563402','20260731')`) = **855.96**(jae 111.96·gagong 632·ilban40·unban25·profit47). 재료비 111.96은 완성부품(5006AR4091C·3A00375E)+제작동관 포함 12리프치고 과소 → **미러 `nx.bom_line` 트림/드리프트 정황**(base bom_id 3998 자식=3개뿐, 은납SUB+키팅2와 일치).
+
+**해석**: nx.bom_line(미러)·sourcing_route가 08-12 이후 다른 작업(조달프로파일 재설계·flag 재싱크·ECO 반영 등)으로 **변형됨**. 이는 마스터 §9 **C10(미러가 진실이나 드리프트 주의)·C11(bom_save↔R01 재빌드 미연동 갱신갭)** 의 실증. → **클린전환 대조의 선행조건 = 현 미러/route 상태가 레거시와 여전히 diff0인지부터 재확인**(cost_oracle 레거시 SP vs 엔진). 5722.2가 stale인지, 855.96이 드리프트 결과인지 판별 필요.
+**미해결/사용자 확인 대기**: 이 드리프트를 (a)파고들어 재검증할지 (b)다른 우선순위인지.
