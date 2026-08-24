@@ -217,7 +217,7 @@
 ## §F. 미해결 과제 통합 (도메인별)
 
 - **BOM 클린전환**: nx.bom 평면→SUB 충전(enabler) → 프로그램 CS/PR 직독 은퇴 → 단일 nx.bom. "옆에짓고 diff0 증명 후"(MIRROR_DEBT). C11 갱신갭(bom_save↔소요/R01 재빌드).
-- **소요엔진 통일**(SOYO_ENGINE_UNIFY §13): ①원가 전환(#1/#2) **운영 배포 완료**(behavior-identical·PR#38). ②**★진짜 통일(explode 공유 아키텍처) Phase 1 = 전수 diff0 완료(2026-08-24)**: 원가·내부·생산·중량 4 walker가 nx.bom_line 단일소스(explode 2트랙: 원가용 eng.lines·생산중량용 explode_bomline)로 **사용중 완제품 2081 전수 diff0**. `_harness/soyo_explode_shared.py`+`soyo_unify_verify.py`(하네스). 배포엔진 무변경·옆에짓고. ★전수가 30표본 놓친 버그2(내부원가cg5·생산qty_pr) 검출. **남음=Phase2 캐시·plan walker·Phase3 프로덕션 전환(전수게이트·생산은 계획조율후).** ★최상위 요구=[[feedback-protect-production-plan]] 생산계획·협력사계획 레거시 diff0(LG라인).
+- **소요엔진 통일**(SOYO_ENGINE_UNIFY §13): ①원가 전환(#1/#2) **운영 배포 완료**(behavior-identical·PR#38). ②**★진짜 통일(explode 공유 아키텍처) Phase 1 = 전수 diff0 완료(2026-08-24)**: 원가·내부·생산·중량 4 walker가 nx.bom_line 단일소스(explode 2트랙: 원가용 eng.lines·생산중량용 explode_bomline)로 **사용중 완제품 2081 전수 diff0**. `_harness/soyo_explode_shared.py`+`soyo_unify_verify.py`(하네스). 배포엔진 무변경·옆에짓고. ★전수가 30표본 놓친 버그2(내부원가cg5·생산qty_pr) 검출. **Phase 0(하네스)·1(explode공유 전수diff0·일원화)·2(캐시=원가 월별amortize 실이득·생산중량 trivial) 완료.** **남음=plan walker·Phase3 프로덕션 전환(전수게이트·생산은 계획조율+승인후).** ★최상위 요구=[[feedback-protect-production-plan]] 생산계획·협력사계획 레거시 diff0(LG라인).
 - **플래그**: current_order EXCEPT_FLAG 준수 교정(버그). 정기 flag 싱크 파이프라인(ECO).
 - **원가 V2**: 판가 리시빙실적 토글·회수율 라인별·매입SUB·용접공정분리. dev·미배포.
 - **재고/마감**: 게이트 실운영 ON(컷오버). 키팅 백플러시. mat_stock_daily 조회일화.

@@ -178,7 +178,9 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 
 ### 13-3. Phase 2 — explode 캐시 (성능) — ✅원가 착수 2026-08-24
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**
-- **★원가 구현**: `cost_leaves(eng,item)` = 원가 leaf 리스트 [(leaf,cum_qty)] **단가무관 구조 item별 캐시** + `cost_material_cached(eng,item,ymd)` = 캐시구조 + 월별 `_leaf_val` 곱셈. = **"explode 1회 + 월별 단가"**(설계 §5). **검증: cost_material_cached vs 현행 = 260630·260731·260531 각 40/40 diff0**(캐시가 월별 재계산서 정확). 재사용=구조 amortize→다월 배치 near-instant(V2 월별손익 가속). soyo_explode_shared.py. **남음**: 생산/중량 캐시(구조 leaf 리스트 캐시 동형), lme 구조 캐시, Phase 3 전환.
+- **★원가 구현**: `cost_leaves(eng,item)` = 원가 leaf 리스트 [(leaf,cum_qty)] **단가무관 구조 item별 캐시** + `cost_material_cached(eng,item,ymd)` = 캐시구조 + 월별 `_leaf_val` 곱셈. = **"explode 1회 + 월별 단가"**(설계 §5). **검증: cost_material_cached vs 현행 = 260630·260731·260531 각 40/40 diff0**(캐시가 월별 재계산서 정확). 재사용=구조 amortize→다월 배치 near-instant(V2 월별손익 가속). soyo_explode_shared.py.
+- **★생산/중량 캐시 — 정직한 결론(2026-08-24)**: explode/explode_bomline에 item별 트리 캐시 추가(4 walker diff0 유지 40/40). **단 생산/중량은 트리캐시 이득 미미(1.0배)** — `_lines_bl`이 이미 bom_id별 라인 캐시라 트리 재빌드가 싸고, 병목은 트리가 아니라 leaf 조회(_wt_meta 등). 생산/중량은 **ymd 없어 amortize 대상 없음**(결과 자체가 구조). **∴ Phase 2 실질 이득 = 원가 월별 캐시(cost_leaves, ymd별 재계산 amortize)**. 트리캐시는 correct·harmless·"1 explode+N walker" semantic 제공이나 성능이득은 원가 한정. **= Phase 2 완결(과장 없이).**
+- **Phase 3 전환**만 남음(배포코드·생산계획 접촉·조율·승인).
 
 ### 13-4. Phase 3 — 프로덕션 전환 (하나씩·diff0 게이트·순서 중요)
 1. **원가**(이미 위임) → explode-공유 walker로 재전환. **계획 무관·안전.**
