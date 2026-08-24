@@ -205,6 +205,18 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **R02가 실제 운영(조달프로파일에서 선택)에 들어오면** → **route-aware walker 하나를 통일엔진에 추가**. R02 = 외주완성SUB에서 **전개 정지**(하위자재=업체 조달=우리 소요 아님) + 그 SUB 통째 매입 소요·ASSY매입단가 원가. **= route마다 정지규칙 다름(walker 파라미터).** 소요·원가 둘 다 route별로 바뀜.
 - **★통일 payoff**: R02 지원 = route walker **한 곳** 추가로 원가·소요·발주 전 소비자 반영(통일 안 됐으면 7곳 수정). = 유지보수 단일점 실증. 근거=[[SOURCING_COST_INTEGRATION]] route/cost·[[newerp-sourceprofile-route1-select]]. **R02 운영화 시점의 후속 과제.**
 
+### 13-4c. ★재고차감(backflush)은 별개 축 = 중량·증분·다단계 (2026-08-24 규명, 사용자 "원소재 관점")
+사내 생산 시 **원소재 재고차감 = `routers/backflush.py` `_backflush_core`** (트리거=바코드 생산실적 완성공정·INNER_PROD=1). **소스 = `nx.bom` 전개**(`_backflush_bom`) — nx.bom_line(소요/원가) 아님.
+- **★nx.bom `role='원소재'` qty = 소비 중량(kg)** — 개수 아님. 실측: 원소재 role qty<1이 98.8%(6488/6569, 다른 role 개수형과 확연); 같은 동관 부모마다 qty 다름(=잘라 쓴 중량); 예 `7072AR9374K`(3m관 ITEM_WEIGHT 3.34kg)→부모 소비 0.198kg. **∴ 원소재는 중량으로 차감**(동관 재고=kg관리와 정합).
+- **★재고차감 vs 소요/원가는 다른 질문 = 직접 대조 부적합**:
+  | | 계산 대상 | 동 표현 | 소스 |
+  |---|---|---|---|
+  | 재고차감 backflush | **이 생산단계 증분** | 재고 반제품=EA / 최하위 동=**중량kg** | nx.bom(role·is_lowest) |
+  | 소요 prod_soyo·원가 cost_material | **완제품 총 함량** | 끝까지 전개 | nx.bom_line |
+- **다단계·이중차감 방지**: nx.bom `is_lowest=Y` 반제품은 정지→반제품 단위 차감(그 동은 반제품 생산 때 이미 차감). 예 AJJ75178301 = 자식 전부 반제품/완성부품 low=Y(동 0)이나 하위 반제품에 동 있음=정상. MJU66471701 원소재 0.0279kg ≈ 엔진 0.0272kg 일치.
+- **∴ 원소재는 (중량·다단계로) 맞게 떨어지도록 설계됨.** 내 초기 "bf vs prod_soyo 25/30 불일치"는 **증분(kg) vs 총량(개수) 대조 착오**(방법론 오류, 정직 기록). backflush를 prod_soyo로 통일하려던 방향은 **축이 달라 부적합.**
+- **★남은 진짜 검증**: 다단계 체인 정합 — `is_lowest=Y` 반제품이 실제로 별도 생산·재고되어 그 동이 자기 단계에서 차감되는가(같은 런에서 만드는데 low=Y면 그 동 누락 가능). = 생산체인 재고정합 별건. 통일 관점 잔여 = 중량 축(backflush kg ↔ 원가/정산 동중량) 단일소스화(선택). [[newerp-stock-ledger-engine]] [[newerp-weld-settlement-roadmap]]
+
 ### 13-5. Phase 4 — 현행 전개기 은퇴 + 단일 유지보수점
 - 전 소비자 전환 후 구 전개기 제거 → 소요 로직 **한 곳.** bom_save→엔진 캐시 무효화([[BOM_PROGRAM_MASTER §9 C11]] 갱신갭 해결).
 
