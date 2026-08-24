@@ -134,5 +134,33 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **#3~#5 = 점진 채택으로 이월**. 이유: #3 weight_calc(딕셔너리 배치선적·live 중량정산), #4 soyo(SQL CTE 프로덕션 파이프라인), #5 캐시(walker explode() 채택 선행)는 **다른 모듈·아키텍처 불일치·고리스크 리팩터**. 통일 walker는 diff0 증명된 정본 라이브러리로 존치, 각 모듈 리팩터 시점에 별도 승인·검증 사이클로 채택. **최근 깨짐 다발 감안 = 안전 우선.**
 - **미배포 상태**: 이 전환은 dev nx_cost_engine.py에만 있음(=nx_cost_engine.py는 backend가 `_harness`서 import). 배포 시 별도 승인.
 
+## 13. ★★진짜 통일 계획 — explode 공유 아키텍처 (2026-08-24 교정)
+
+### 13-0. 교정 배경 (내 오해 정정)
+- 앞선 #1/#2("원가 전환")는 **"원가를 한 walker(cost_material)에 위임"했을 뿐**, 진짜 통일 아님. **실측 확인**: `explode()`는 정의만·**어느 walker도 안 씀**(호출 0), 각 walker가 **자기 재귀**(eng.lines), 프로덕션 soyo.py(SQL CTE)·weight_calc(배치)는 **별개 코드**. 공유되는 건 **데이터층(eng.lines/_load_item/_leaf_val)뿐**, 트리 순회는 따로.
+- **진짜 통일 = 1 explode 공유 + 캐시 + 프로덕션 전환.** 이득(사용자 확정 2026-08-24) = **유지보수 단일점 + "쓰면서 나올 문제" 단일수정**(지금 소요로직 7곳 분산→하나 고치면 전부 반영, 누락위험 제거). ★통일=결과 같음이 아니라 "전개 1회 공유 + 모드별 다른 결과"(모드마다 소요 다른 게 정상: 원가=INNER경계·생산=사급경계·중량=sagub).
+
+### 13-1. Phase 0 — 검증 하네스 (읽기전용, 먼저)
+- 각 모드: **현행 출력 vs 신 explode-walker 출력 diff0 비교기**. 모든 단계의 게이트. 스코프=사용중 BOM.
+
+### 13-2. Phase 1 — explode 정본화 + walker 공유 (옆에짓고·dev·읽기전용)
+- **explode()를 모드무관 full tree로 교정**: 현재 explode()가 `cs_calc_except=1` 자식을 스킵(=원가전용 필터) → **필터 제거하고 전 flag(cs_calc_except·except_flag·sagub·lme·kitting) 태깅만.** 필터는 각 walker로 이동.
+- 각 walker(원가·내부원가·생산·중량·용접봉)를 **explode 노드리스트 소비형**으로 리팩터(자기 재귀 제거). **현행 walker와 diff0 재검증**(현행 무변경, 옆에).
+
+### 13-3. Phase 2 — explode 캐시 (성능)
+- explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**
+
+### 13-4. Phase 3 — 프로덕션 전환 (하나씩·diff0 게이트·순서 중요)
+1. **원가**(이미 위임) → explode-공유 walker로 재전환. **계획 무관·안전.**
+2. **중량(weight_calc)** → weight_explode. 협력사 중량정산 diff0. **계획 무관.**
+3. **발주(autoorder/manorder)** = plan_mat_source 소비 = 간접 반영.
+4. **★생산소요(soyo.py STEP5/6)** → plan_explode/plan_gagong = **생산계획 파이프라인 접촉** → **[[feedback-protect-production-plan]] 하드룰: 타인 계획수정 완료 + 조율 + 별도 승인 후 · 맨 마지막.** Stage3(plan_part_mat 최종)=STEP7 존치(plan-결합).
+
+### 13-5. Phase 4 — 현행 전개기 은퇴 + 단일 유지보수점
+- 전 소비자 전환 후 구 전개기 제거 → 소요 로직 **한 곳.** bom_save→엔진 캐시 무효화([[BOM_PROGRAM_MASTER §9 C11]] 갱신갭 해결).
+
+### 13-6. 전 단계 게이트·제약
+- **diff0 필수**(통과 못 하면 전환 금지·롤백). **생산계획 미접촉**(Phase3-4 생산분만 조율 후). **검증하며·기록**(§7 로그). 클린전환(미러부채)은 **별건**(이 통일은 nx.bom_line 현행 위, 클린은 후속). 성급한 일반화 금지·MASTER 먼저 읽기.
+
 ## 관련
-[[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]]
+[[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]] [[feedback-protect-production-plan]]
