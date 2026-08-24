@@ -8,6 +8,14 @@
 - 용접봉(RAC)=별도축(nx.proc_weld) → 재료 평면전개서 제외.
 - ★검증: AJR75563402 = 화면 10 재료 leaf **정확 재현**(누락0·초과0·5006AR4091**H**).
 
+## 1-1. ★원가소스화 = cost_stop (real=1 정지레벨) 부착 (2026-08-24)
+- 문제: 재료표(expandbuy)와 실원가(NxCostEngine real=1)는 전개 다름(재료표 매입SUB 전개 vs 원가 매입SUB=leaf·매입가). bom_flat이 원가 소스가 되려면 real=1 정지점 보존 필요.
+- 해법: 각 재료 leaf에 **cost_stop = real=1 전개의 정지 조상**(경로상 첫 make_type≠1 매입SUB, 없으면 self) + **leaf_make_type** 부착.
+  - 재료표 view = DISTINCT leaf_code. 원가 view = **GROUP BY cost_stop**(=real=1 실원가 전개 leaf).
+- ★grain = **(item_code, leaf_code, cost_stop)** occurrence(★leaf당 아님 — 같은 자재가 여러 SUB밑=다른 cost_stop, leaf키로 뭉치면 stop유실. 실추적 규명 AJR77224520/MAZ64571803).
+- 빈 매입SUB(자식 전부 cs_except) 처리: real=1처럼 SUB자체=leaf.
+- ★검증 필수완료: **전 사용중 제품 3,728 = cost_stop집합 == real=1 직접전개 leaf 100% 일치**.
+
 ## 2. 축(각 재료 leaf에 부착)
 | 컬럼 | 내용 | 소스 |
 |---|---|---|
