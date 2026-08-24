@@ -645,6 +645,72 @@ def cost_nx_bulk_v2(p: dict = Body(...)):
     return {"ymd": ymd, "ym": ym, "costs": out}
 
 
+@router.post("/api/cost/nx/bulk_actual")
+def cost_nx_bulk_actual(p: dict = Body(...)):
+    """★실제손익(월별매칭 · COSTANALYSIS_V2 §10~12) — 원가분석 '실제' 모드. 이론(bulk_v2 단일 as-of)의 대응.
+       판가 = 그달 리시빙 실적 가중평균(PARTNER_ERP.dbo.sa_t_recv_dtl: Σ order_qty×item_cost / Σ order_qty).
+       원가 = 그달 이동평균(nx.mat_stock_daily) 재료비 + 가공/일반/운반/이윤. 판가·원가 같은달 매칭(§11 논리필수).
+       from_ym~to_ym(YYMM). 검증 = §12 actual2 diff0(dev만). 로직정본 = _harness 배치 actual2.py 이식."""
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    import calendar as _cal
+    parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
+    from_ym = str(p.get("from_ym") or '2602').strip()
+    to_ym = str(p.get("to_ym") or '2608').strip()
+    theory_ymd = str(p.get("ymd") or '260630').strip()
+    def _months(a, b):
+        y, m = 2000 + int(a[:2]), int(a[2:]); yb, mb = 2000 + int(b[:2]), int(b[2:]); r = []
+        while (y, m) <= (yb, mb):
+            ym = '%02d%02d' % (y - 2000, m)
+            r.append((ym, '%s%02d' % (ym, _cal.monthrange(y, m)[1])))
+            m += 1
+            if m > 12: m = 1; y += 1
+        return r
+    months = _months(from_ym, to_ym)
+    out = {}
+    e = NxCostEngine()
+    try:
+        mavc = {}
+        def mav_at(ym):
+            e.cur.execute("""SELECT mat_code, avg_cost FROM (
+              SELECT mat_code, avg_cost, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn
+              FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<=? AND CONVERT(float,ISNULL(avg_cost,0))>0) t WHERE rn=1""", ym + '31')
+            return {str(r[0]).strip(): float(r[1] or 0) for r in e.cur.fetchall()}
+        for it in parts:
+            try:
+                tot_qty = tot_rev = tot_cost = 0.0
+                for ym, ymd in months:
+                    e.cur.execute("""SELECT SUM(CONVERT(float,ISNULL(order_qty,0))) q,
+                          SUM(CONVERT(float,ISNULL(order_qty,0))*CONVERT(float,ISNULL(item_cost,0))) rev
+                        FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE RTRIM(item_code)=? AND LEFT(order_ymd,4)=?""", it, ym)
+                    q, rev = e.cur.fetchone()
+                    if not q or float(q) <= 0: continue
+                    q = float(q); rev = float(rev or 0)
+                    if ym not in mavc: mavc[ym] = mav_at(ym)
+                    mav = mavc[ym]
+                    nodes = e.silwon_nodes(it, ymd)['rows']; agg = e.silwon(it, ymd)
+                    ma_jae = 0.0
+                    for n in nodes:
+                        mc = str(n.get('code', '')).strip(); mat = float(n.get('mat', 0) or 0)
+                        if mat <= 0: continue
+                        wt = float(n.get('weight', 0) or 0); nq = float(n.get('qty', 0) or 0); unit = str(n.get('unit', '')).strip()
+                        av = mav.get(mc, 0)
+                        ma_jae += (av * wt * nq if unit == 'KG' else av * nq) if av > 0 else mat
+                    unitcost = ma_jae + agg['gagong'] + agg['ilban'] + agg['unban'] + agg['profit']
+                    tot_qty += q; tot_rev += rev; tot_cost += unitcost * q
+                theory = e.silwon(it, theory_ymd)['sonik']
+                out[it] = {
+                    "qty": round(tot_qty, 2), "actual_rev": round(tot_rev, 2), "actual_cost": round(tot_cost, 2),
+                    "actual_sonik": round(tot_rev - tot_cost, 2),
+                    "actual_sonik_unit": round((tot_rev - tot_cost) / tot_qty, 2) if tot_qty else 0.0,
+                    "theory_sonik": round(theory, 2),
+                }
+            except Exception as ex:
+                out[it] = {"error": str(ex)[:80]}
+    finally:
+        e.close()
+    return {"from_ym": from_ym, "to_ym": to_ym, "mode": "actual", "months": [m[0] for m in months], "costs": out}
+
+
 # ===================== 품목별 원가분석 결과 캐시 (첫 로드 즉시화) =====================
 #  프론트가 nx엔진으로 계산한 결과(품목별 원가/손익)를 (ym=리시빙월, ymd=단가일)별로 저장 → 다음 진입/타 사용자 즉시 로드.
 #  엔진 자체는 안 건드림. 재계산 버튼=강제 재계산 후 재저장. buildRow가 쓰는 13필드+qty만 보관.
