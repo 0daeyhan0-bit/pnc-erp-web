@@ -195,3 +195,11 @@
 - 결론: route기반 plan편성 = **(제작SUB정지+내부동관qty롤업) 재료 + 용접봉 별도축**. 샘플로 grain 2건 규명.
 
 **남음**: ①수량규칙 보정후 AJR77263007 완전 diff0 재검증 ②변형SUB 샘플(AJR30004702 -20-1/-3-1) 검증 ③나머지 샘플 ④전품목 R01 실체화·전수 diff0 게이트 ⑤plan이 활성route 읽게 배선(dev). ★라이브plan 미접촉.
+
+## §15-1. 100+ 샘플 검증(2026-08-24·정직) — 단순 route규칙 재현 불가 규명
+사용자 "100+ 특이케이스 검증하며 확대" 지시로 실측:
+- **cost_stop(make_type) vs plan 150제품**: 완전일치 **0%**·Jaccard0.69. cost_stop은 plan과 코드/grain 다름(변형SUB). AAA31179501=cost_stop 2개 vs plan 14(완전깨짐). →cost_stop은 plan 기반 아님(확정).
+- **except_flag-full 전개 vs plan 200제품**: assy자기·용접봉 제외해도 **34%만 일치**. 특이케이스: 5211A10305J→plan은 **-S6-2/-S6-3 변형SUB**·ADM72950714→plan은 **AJR73724004 중간서브어셈블리**서 정지인데 내 전개는 더깊이(MJU raw).
+- ★**결론**: plan grain = cost_stop도 except_flag-full도 아닌 **STEP6 파이프라인 고유**(중간 제작SUB레벨 정지 + 변형SUB -S{n} 채번 + 공정전이). AJR77263007이 맞았던건 그 route를 **손으로 그 grain에 실체화**했기 때문(일반화 불가).
+- **함의**: route기반 plan편성 = 단순 BOM 정지규칙 아님. **route를 STEP6 grain(레벨·변형SUB)에 맞춰 실체화하는 빌더**가 필요(=대작업). 또는 route를 STEP6 결과(plan_part_dtl)에서 역실체화. **먼저 route materializer가 plan grain 재현하는지가 게이트.**
+- 다음: sourcing.py route materializer 코드 확인→plan grain 재현하도록→100+ diff0. ★현행 plan은 정상(§14 결론)이니 급하지 않음·라이브 무접촉.
