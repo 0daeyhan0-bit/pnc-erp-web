@@ -134,7 +134,19 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **#3~#5 = 점진 채택으로 이월**. 이유: #3 weight_calc(딕셔너리 배치선적·live 중량정산), #4 soyo(SQL CTE 프로덕션 파이프라인), #5 캐시(walker explode() 채택 선행)는 **다른 모듈·아키텍처 불일치·고리스크 리팩터**. 통일 walker는 diff0 증명된 정본 라이브러리로 존치, 각 모듈 리팩터 시점에 별도 승인·검증 사이클로 채택. **최근 깨짐 다발 감안 = 안전 우선.**
 - **미배포 상태**: 이 전환은 dev nx_cost_engine.py에만 있음(=nx_cost_engine.py는 backend가 `_harness`서 import). 배포 시 별도 승인.
 
-## 13. ★★진짜 통일 계획 — explode 공유 아키텍처 (2026-08-24 교정)
+## 13. ★★진짜 통일 — explode 공유 아키텍처
+
+> **★★★현재 상태 요약 (2026-08-24 정리) — Phase 3 착수 전 필독**
+> **진행**: Phase 0(하네스)·1(explode 공유·전수 diff0·일원화)·2(캐시) **완료**. **Phase 3(프로덕션 전환)만 남음.**
+> **아키텍처** = `_harness/soyo_explode_shared.py` (★배포 nx_soyo_engine 무변경·옆에 검증). **2 explode 트랙**(둘 다 nx.bom_line 소스, 용접봉 RAC 처리차로 분리):
+>   ① `explode`(eng.lines·cs_calc_except·RAC→proc_weld) → `cost_material_ex`·`cost_material_nae_ex` (원가·내부원가)
+>   ② `explode_bomline`(nx.bom_line raw 1회·qty·qty_pr·except_flag·sagub_default·RAC포함) → `prod_soyo_ex`(qty_pr·except)·`weight_explode_ex`(qty·sagub)
+>   + 용접봉 `weld_soyo` = flat primitive(CS_T_ITEM_WELD×1.5·BOM전개 아님) = 통일 불필요.
+>   + Phase 2 캐시: `cost_leaves`/`cost_material_cached`(원가 구조/단가 분리·월별 amortize). 생산/중량 캐시=이득 미미(라인 이미 캐시).
+> **검증** = 4 walker(원가·내부·생산·중량) 전부 **사용중 완제품 2081 전수 diff0 PASS**. 하네스 = `soyo_unify_verify.py`(일치PASS·불일치FAIL 자기검증됨).
+> **★전수가 30표본 놓친 버그 2건 검출·수정(전수·부분검증금지 원칙 가치)**: ①내부원가 `_expandable_nae`=직납(cg5) 제외 ②**생산소요=`qty_pr`(생산수량=v_pr_bom.USE_QTY_PR)** — ★생산계획 직결.
+> **하드룰(Phase 3)**: 프로덕션 전환 전 = **전수 diff0 게이트**(부분검증금지·§5-1). 생산분 = [[feedback-protect-production-plan]] **계획작업 조율+별도 승인 후·맨 마지막**(LG라인 안전). 각 단계 검증·기록·롤백가능.
+> ↓ 아래 13-0~13-6 = 상세 진행 로그(감사추적).
 
 ### 13-0. 교정 배경 (내 오해 정정)
 - 앞선 #1/#2("원가 전환")는 **"원가를 한 walker(cost_material)에 위임"했을 뿐**, 진짜 통일 아님. **실측 확인**: `explode()`는 정의만·**어느 walker도 안 씀**(호출 0), 각 walker가 **자기 재귀**(eng.lines), 프로덕션 soyo.py(SQL CTE)·weight_calc(배치)는 **별개 코드**. 공유되는 건 **데이터층(eng.lines/_load_item/_leaf_val)뿐**, 트리 순회는 따로.
