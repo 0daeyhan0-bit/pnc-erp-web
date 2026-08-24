@@ -557,34 +557,38 @@ function itemLiveView(c, mat){
       const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;if(j.lgroups)st.lgroups=j.lgroups;if(j.sgroups)st.sgroups=j.sgroups;if(j.natures)st.natures=j.natures;}
     catch(e){st.rows=[];}
     st.loading=false;draw();};
-  const COLS=[['item_code','품번'],['nm','품명',180],['nature','성격'],['spec','규격',110],['lgroup','대분류'],['sgroup','소분류'],['pipe_kind','품목형태'],['unit','단위'],
-    ['in_cust','매입처',120]].concat(mat?[['item_cost','표준원가','n']]:[]).concat([
-    ['diam','외경','n'],['thick','두께','n'],['length','길이','n'],['weight','단위중량','n'],['metal','재질'],['work','작업처'],
-    ['make_type','제작유형'],['status','상태'],['safe_min','안전min','n'],['safe_max','안전max','n'],['kitting_min','키팅최소','n'],
-    ['weld_in','용접IN','n'],['weld_out','용접OUT','n'],['tariff','관세율','n'],['remarks','비고',140]]);
+  // [key, label, align('n'=우측숫자), width(px)] — table-layout:fixed+colgroup 폭. 헤더 우측경계 드래그로 조절.
+  const COLS=[['item_code','품번','',95],['nm','품명','',150],['nature','성격','',68],['spec','규격','',75],['lgroup','대분류','',55],['sgroup','소분류','',60],['pipe_kind','품목형태','',62],['unit','단위','',44],
+    ['in_cust','매입처','',92]].concat(mat?[['item_cost','표준원가','n',72]]:[]).concat([
+    ['diam','외경','n',48],['thick','두께','n',48],['length','길이','n',48],['weight','단위중량','n',62],['metal','재질','',46],['work','작업처','',60],
+    ['make_type','제작유형','',66],['status','상태','',46],['safe_min','안전min','n',54],['safe_max','안전max','n',54],['kitting_min','키팅최소','n',58],
+    ['weld_in','용접IN','n',52],['weld_out','용접OUT','n',56],['tariff','관세율','n',54],['remarks','비고','',110]]);
   // tbody만 렌더(정렬 시 헤더 유지·화살표 보존용) — draw와 재사용
   const rowsHTML=()=> st.loading?spinRow(COLS.length):(st.rows.length?st.rows.map(r=>`<tr>${COLS.map((x,i)=>{const v=r[x[0]];
-        if(x[0]==='nature')return `<td style="white-space:nowrap"><span style="font-size:10px;color:#33507d">${esc(String(v||'').replace(/^\d+\./,''))}</span>${r.active===0?' <span title="정리대상 후보" style="color:#c0392b;font-weight:700">▲</span>':''}</td>`;
-        return `<td class="${x[2]==='n'?'num':''} ${typeof x[2]==='number'?'cap':''}" ${typeof x[2]==='number'?`title="${esc(v)}" style="max-width:${x[2]}px;overflow:hidden;text-overflow:ellipsis"`:''}>${i===0?`<b>${esc(v)}</b>`:(x[2]==='n'?won(v):esc(v))}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${COLS.length}" class="empty">조회 결과 없음</td></tr>`);
+        if(x[0]==='nature')return `<td style="overflow:hidden;text-overflow:ellipsis"><span style="font-size:10px;color:#33507d">${esc(String(v||'').replace(/^\d+\./,''))}</span>${r.active===0?' <span title="정리대상 후보" style="color:#c0392b;font-weight:700">▲</span>':''}</td>`;
+        if(x[0]==='status')return `<td style="overflow:hidden;text-overflow:ellipsis">${v==='사용'?'':esc(v)}</td>`;
+        return `<td class="${x[2]==='n'?'num':''}" title="${esc(v)}" style="overflow:hidden;text-overflow:ellipsis">${i===0?`<b>${esc(v)}</b>`:(x[2]==='n'?won(v):esc(v))}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${COLS.length}" class="empty">조회 결과 없음</td></tr>`);
   const draw=()=>{
     c.innerHTML=`
-     <div class="page-title">📦 ${mat?'자재 목록 조회':'품목 조회'} <span style="font-size:12px;color:var(--muted);font-weight:400">라이브 · ${mat?'구매 대상 자재':'레거시 w_pr_master_010'}</span></div>
-     <div class="page-sub">${mat?'구매 자재(원자재·부자재·소모품·사급) + <b>표준원가·매입처</b>':'전 컬럼 라이브 조회'}(코드→이름: 대/소분류·품목형태·단위·재질·매입처·작업처·제작유형). 원본 <code>PR_M_ITEM</code> · 빈컬럼(밸브/형상 등) 미표시</div>
+     <div class="page-title">${mat?'자재 목록 조회':'품목 조회'} <span style="font-size:12px;color:var(--muted);font-weight:400">라이브 · ${mat?'구매 대상 자재':'레거시 w_pr_master_010'}</span></div>
+     ${mat?`<div class="page-sub">구매 자재(원자재·부자재·소모품·사급) + <b>표준원가·매입처</b>(코드→이름: 대/소분류·품목형태·단위·재질·매입처·작업처·제작유형). 원본 <code>PR_M_ITEM</code> · 빈컬럼(밸브/형상 등) 미표시</div>`:''}
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <input class="inp" id="it-q" value="${esc(st.q)}" placeholder="품번/품명 검색" style="width:170px">
        <label class="tl">대분류</label><select class="inp" id="it-lg" style="width:auto"><option value="">전체</option>${st.lgroups.map(o=>`<option value="${esc(o.code)}" ${st.lg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">소분류</label><select class="inp" id="it-sg" style="width:auto"><option value="">전체</option>${st.sgroups.map(o=>`<option value="${esc(o.code)}" ${st.sg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">성격</label><select class="inp" id="it-nat" style="width:auto"><option value="">전체</option>${st.natures.map(o=>`<option value="${esc(o.code)}" ${st.nat===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl" title="LG 리시빙 2501~ 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="it-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
-       <button class="btn" id="it-go">🔍 조회</button>
+       <button class="btn" id="it-go" style="background:#1c7c3a;color:#fff">조회</button>
+       <button class="btn" id="it-xls" style="background:#1c7c3a;color:#fff">엑셀</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건${st.cnt>=3000?'(상한)':''}</span>
      </div>
      <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit" style="font-size:11px"><thead><tr>${COLS.map(x=>`<th class="${x[2]==='n'?'num':''}">${x[1]}</th>`).join('')}</tr></thead>
+      <table class="tbl" style="font-size:11px;table-layout:fixed;width:100%"><colgroup>${COLS.map(x=>`<col style="width:${x[3]}px">`).join('')}</colgroup><thead><tr>${COLS.map(x=>`<th class="${x[2]==='n'?'num':''}">${x[1]}</th>`).join('')}</tr></thead>
       <tbody>${rowsHTML()}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     g('#it-go').onclick=()=>{st.q=g('#it-q').value;st.lg=g('#it-lg').value;st.sg=g('#it-sg').value;st.nat=g('#it-nat').value;st.use=g('#it-use').value;load();};
     g('#it-q').onkeyup=e=>{if(e.key==='Enter')g('#it-go').click();};
+    g('#it-xls').onclick=()=>{const hd=COLS.map(x=>x[1]);const out=st.rows.map(r=>COLS.map(x=>x[0]==='status'?(r[x[0]]==='사용'?'':(r[x[0]]||'')):(r[x[0]]==null?'':r[x[0]])));downloadCSV((mat?'자재목록':'품목목록')+'.csv',hd,out);};
     // ★UI규칙: 헤더 더블클릭=정렬(enableSort) + 컬럼폭 드래그(addResizer 내장). tbody만 갱신해 헤더/화살표 보존
     enableSort(c, COLS.map(x=>x[0]), ()=>st.rows, ()=>{const tb=c.querySelector('tbody'); if(tb)tb.innerHTML=rowsHTML();});
   };
