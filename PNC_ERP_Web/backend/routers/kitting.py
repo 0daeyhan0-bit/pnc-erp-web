@@ -331,8 +331,12 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             #   화면 '생산재고' 컬럼과 동일 원천이라 "재고가 있으면 채워진다"가 성립한다.
             if km not in _mid_pool: _mid_pool[km] = max(prdirect.get(g["item"], 0.0) + matwh.get(g["item"], 0.0), 0.0)
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # 2) ASSY 현재고
-        # ★도번고정재고(fixstk)는 완료풀에서 제외 — 레거시 SP(준비등록_NEW) 완료=sale+assy_stock+pr_stock+ready뿐(도번고정 별도풀 없음).
-        #   재귀BOM롤업 fixstk가 SUB를 부풀려 과다(AJJ30041901-SUB SP5 vs 웹295)였음. plan_part410도 fixstk 미사용.
+        # ★2026-08-23 도번고정재고(상위도번 재고 ×use_qty)를 완료풀에 포함 — 410 과 동일.
+        #   화면엔 표시되면서 충당엔 빠져 "재고가 있는데 안 채워지던" 문제(실측 AJR30027711-SUB
+        #   ASSY293+도번고정97=계획390, 웹 22/119 → 레거시 119/119).
+        #   과거 제외 사유였던 SUB 과다(AJJ30041901-SUB)는 현재 fix=0 이라 재현되지 않음.
+        #   초과 방지는 _shared 의 jan(=계획−완료) 상한이 담보한다.
+        _shared(lambda g: (g["upper"], g["item"], g["gpc"]), _fix_pool, 70, 'finish')               # 2-1) 도번고정재고
         _shared(lambda g: (g["item"], g["gpc"]), _mid_pool, 70, 'finish')                           # 2-2) 중간공정 파트재고(=SP pr_stock)
         _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')                               # 3) 준비재고(→ready, 색tag50)
         # 4) ★nx 셀단위 준비 flag 오버레이(우리 확인분, 셀별) — 라이브 PU와 별도 합산(이중가산X), 커버 시 tag50 녹
@@ -771,14 +775,21 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                         if force or tag > c["tag"] or c["tag"] == 0: c["tag"] = tag   # force=레거시 last-write(J 전표가 준비 태그 덮어씀)
         # ★생산완료(70): 레거시 SP_..._NEW2_오전오후 재현 = ASSY재고(×use) + 중간파트재고 2풀. (PROD_DTL 아님 — 완료전표는 이미 재고로 잡힘)
         # ★풀 그룹키에 gpc 포함 = 레거시 SP 그룹경계(A:assy,bomlvl,upper,item,PROC · B:item,PROC_SEQ) 이식. proc_seq↔gpc(파트) → 파트별 독립 풀(전체조회시 파트간 공유 방지, 파트필터시 동일).
-        _assy_pool = {}; _part_pool = {}
+        _assy_pool = {}; _part_pool = {}; _fixp = {}
         for g in rows:
             ka = (g["assy"], g["upper"], g["item"], g["gpc"])
             if ka not in _assy_pool: _assy_pool[ka] = assystk.get(g["assy"], 0.0) * g["use_qty"]   # 제품(ASSY)재고 = SA_T_ITEM_STOCK(도번)×use_qty
             kp = (g["item"], g["gpc"])
             if kp not in _part_pool: _part_pool[kp] = partstk.get(g["item"], 0.0)                   # 중간파트재고(자도번, 파트별 독립)
+            # ★2026-08-23 도번고정재고(상위도번 재고 ×use_qty) 충당 추가.
+            #   화면에는 표시되면서 충당에는 빠져 있어 "재고가 있는데 안 채워지는" 문제.
+            #   실측 AJR30027711-SUB: ASSY재고 293 + 도번고정 97 = 계획 390 전량 충당돼야 한다
+            #   (웹 22/119 → 레거시 119/119). 풀 단위 = (상위도번, 자도번, 파트).
+            kx = (g["upper"], g["item"], g["gpc"])
+            if kx not in _fixp: _fixp[kx] = max(fixstk.get((g["upper"], g["item"]), 0.0), 0.0)
         # ★레거시 pool 적용순서 A→B→C→J 완전이식: 준비재고(C)를 전표(J)보다 먼저 소진 → 키팅부품이 작업중전표로 먼저 빠지고 남은 준비재고만 녹색(이중 녹색표시 방지).
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # A: 제품(ASSY)재고
+        _shared(lambda g: (g["upper"], g["item"], g["gpc"]), _fixp, 70, 'finish')                   # A-2: 도번고정재고(상위도번 재고)
         _shared(lambda g: (g["item"], g["gpc"]), _part_pool, 70, 'finish')                          # B: 중간공정 파트재고(PR+PU_T_MAT_STOCK_WH by 자도번)
         _shared(lambda g: (g["item"], g["gpc"]), rstock, 50, 'ready')                      # C: 준비재고 → 색(녹)만·미생산 판정 제외 (전표보다 먼저 소진)
         _shared(lambda g: (g["item"], g["gpc"]), jpstk, 40, 'finish', force=True)          # J: 작업중 전표재고(용접시트, 라이브) → finish 가산, 준비 태그 덮어씀(레거시 last-write)

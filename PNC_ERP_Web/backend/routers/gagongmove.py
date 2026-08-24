@@ -211,7 +211,9 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
             "prior_done": (min(_pdone + _pweb, _pplan) if _pplan > 0 else _pdone),
             "prior_webpr": _pweb,   # 당일이전 칸에서 웹이 발행한 미확정분
             "prior_color": _prior_color,
+            # 재고 3종(레거시 580 컬럼) = 자재재고 / 생산재고 / 도번고정재고. SP 원값 그대로.
             "stock": _f(r.get("stock_qty")), "pr_stock": _f(r.get("pr_stock_qty")),
+            "fix_stock": _f(r.get("fix_stock_qty")),
             "days": days, "doneday": done, "colorday": colors, "webpr": webpr,
             "gagong_proc": (r.get("gagong_proc_code") or "").strip(),
             "gole_proc": (r.get("GOLE_GAGONG_PROC_CODE") or "").strip(),
@@ -414,7 +416,13 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT u.MAINT_YMD, u.MAINT_GROUP_SEQ, u.MAINT_SEQ,
-              COALESCE(pg.GAGONG_PROC_DESC, u.PR_PART_CODE, cc.CUST_DESC, '') line,
+              -- ★2026-08-24 외주(사급) 출고분 라인칸 빈값 수정.
+              --   PR_PART_CODE 가 NULL 이 아니라 ''(빈문자열)이라 COALESCE 가 거기서 멈춰
+              --   뒤의 거래처명까지 못 갔다. NULLIF 로 빈문자열을 NULL 로 바꿔 건너뛰게 한다.
+              --   (실측 MJU66763703: PR_PART_CODE='' / SAGUB_CUST_CODE=2148 → 대원산업)
+              COALESCE(NULLIF(LTRIM(RTRIM(pg.GAGONG_PROC_DESC)),''),
+                       NULLIF(LTRIM(RTRIM(u.PR_PART_CODE)),''),
+                       NULLIF(LTRIM(RTRIM(cc.CUST_DESC)),''), '') line,
               u.ITEM_CODE, u.MAT_CODE, ISNULL(su.RACK_NO,'') rack, u.MAINT_QTY
             FROM (
               SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY

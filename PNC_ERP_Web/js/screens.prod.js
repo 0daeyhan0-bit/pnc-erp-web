@@ -3586,12 +3586,36 @@ SCREEN.gongsu=(c)=>{
   const API=API_BASE;
   const canEd=()=>(typeof PERM!=='undefined')?PERM.canEdit('gongsu'):true;
   const uname=()=>(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자');
-  const HRCHK=[['0','정상'],['1','연차'],['2','반차'],['3','조퇴']];
+  // ★2026-08-23 근태 확장 — 반차를 오전/오후로 분리.
+  //   ※코드 선정 주의: 레거시 HR_M_WORK_INFO.HR_CHECK_POINT 는 4(38,374건)·5(3,948건)·6·7·10~14 를
+  //     이미 다른 의미로 쓰고 있다. 반면 '2'(반차)는 레거시 0건이라 안전 →
+  //     오전반차='2'(기존 '반차' 라벨 재사용), 오후반차='8'(레거시 미사용).
+  //   근태를 고르면 시작·종료·근무h가 규칙대로 자동세팅되고, 시작/종료를 직접 고치면 근무h 재계산.
+  //   잔업 = 정규(8h) + N시간. 저녁휴게 17:00~17:30 뒤부터 시작하므로 종료 = 17:30 + N.
+  //   레거시 미사용 코드 20~25 배정(4~7·10~14 는 레거시 사용중이라 회피).
+  const HRCHK=[['0','정상'],['1','연차'],['2','오전반차'],['8','오후반차'],['3','조퇴'],
+               ['20','잔업1'],['21','잔업1.5'],['22','잔업2'],['23','잔업2.5'],['24','잔업3'],['25','잔업3.5']];
+  const HRPRE={'0':['0800','1700'],'1':['0000','0000'],'2':['0800','1200'],'8':['1300','1700'],
+               '20':['0800','1830'],'21':['0800','1900'],'22':['0800','1930'],
+               '23':['0800','2000'],'24':['0800','2030'],'25':['0800','2100']};   // 조퇴는 수기
+  // 시작~종료 → 근무h. 정규 08:00~17:00, 휴게 = 점심 12:00~13:00 + 저녁 17:00~17:30.
+  //   근무구간에 걸친 휴게만 공제하고 30분 단위로 정리. 종료<=시작이면 0.
+  //   (08:00~17:00 → 9h−1h = 8h / 08:00~12:00 → 4h / 13:00~17:00 → 4h / 08:00~18:00 → 10−1−0.5 = 8.5h)
+  const _hm=s=>{s=String(s||'').replace(/\D/g,'').padStart(4,'0');const h=+s.slice(0,2),m=+s.slice(2,4);
+    return (h>=0&&h<48&&m>=0&&m<60)?h*60+m:null;};
+  const BRK=[[12*60,13*60],[17*60,17*60+30]];        // 점심 · 저녁
+  const calcHr=(st,et)=>{const a=_hm(st),b=_hm(et);if(a==null||b==null||b<=a)return 0;
+    let mi=b-a;
+    BRK.forEach(([p,q])=>{mi-=Math.max(0,Math.min(b,q)-Math.max(a,p));});
+    return Math.max(0,Math.round(mi/15)/4);};      // 15분(0.25h) 단위
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   let body=null;
-  let F={from:iso(new Date(T.getFullYear(),T.getMonth(),1)),to:iso(T),gubun:'',dept:'',user:''};
+  // ★2026-08-23 근무일 기본 = 당일(기존 당월1일~오늘). 기간을 넓히면 백엔드가
+  //   WORK_YMD DESC, DEPT_CODE 순으로 주므로 최근 날짜부터 부서별로 묶여 보인다.
+  let F={from:iso(T),to:iso(T),gubun:'',dept:'',user:''};
   let data={rows:[],cnt:0,sum_hr:0}, loading=false, msg='';
+  let editId=null;                                // ★인라인 수정 중인 행 ID
   let parts=[];                                   // 투입파트 드롭다운
   let entry={open:false,ymd:iso(T),part:'',gubun:'근무',rows:[],loading:false};   // 인원정보호출 입력
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/partmaster/list`);parts=(await r.json()).rows||[];}catch(e){parts=[];}};
@@ -3663,7 +3687,19 @@ SCREEN.gongsu=(c)=>{
       <table class="tbl" style="font-size:12px"><thead><tr>
        <th class="center">구분</th><th class="center">근무일</th><th>부서</th><th>작업자</th><th class="center">라인</th>
        <th class="center">시작</th><th class="center">종료</th><th class="num">근무h</th><th class="center">지원h</th><th class="center">근태</th><th>비고</th><th class="center">출처</th>${ed?'<th></th>':''}</tr></thead>
-      <tbody>${loading?spinRow(ed?13:12):((data.rows&&data.rows.length)?data.rows.map(r=>`<tr>
+      <tbody>${loading?spinRow(ed?13:12):((data.rows&&data.rows.length)?data.rows.map(r=>(editId&&r.ID===editId)?`<tr style="background:#fffbea">
+        <td class="center"><select class="inp ge-gubun" style="width:64px;padding:1px 2px"><option value="근무"${r.gubun!=='지원'?' selected':''}>근무</option><option value="지원"${r.gubun==='지원'?' selected':''}>지원</option></select></td>
+        <td class="center"><input class="inp ge-ymd" type="date" value="${esc(_wiso(r.work_ymd))}" style="width:130px;padding:1px 2px"></td>
+        <td>${esc(r.dept_nm||r.dept_code)}</td><td>${esc(r.user_id)}</td>
+        <td class="center"><input class="inp ge-line" value="${esc(r.line||'')}" style="width:52px;padding:1px 2px"></td>
+        <td class="center"><input class="inp ge-st" value="${esc(r.start_time||'')}" style="width:48px;padding:1px 2px" placeholder="0800"></td>
+        <td class="center"><input class="inp ge-et" value="${esc(r.end_time||'')}" style="width:48px;padding:1px 2px" placeholder="1700"></td>
+        <td class="num"><input class="inp ge-hr" type="number" step="any" value="${r.work_hr??''}" style="width:56px;padding:1px 2px;text-align:right"></td>
+        <td class="center"><input class="inp ge-shr" type="number" step="any" value="${r.support_hr??''}" style="width:52px;padding:1px 2px;text-align:right"></td>
+        <td class="center"><select class="inp ge-chk" style="width:64px;padding:1px 2px">${HRCHK.map(([v,n])=>`<option value="${v}"${String(r.hr_check||'0')===v?' selected':''}>${n}</option>`).join('')}</select></td>
+        <td><input class="inp ge-rmk" value="${esc(r.remarks||'')}" style="width:100%;padding:1px 2px"></td>
+        <td class="center"><span style="color:#1c7c3a;font-size:11px">웹</span></td>
+        <td class="center" style="white-space:nowrap"><button class="btn ge-save" data-id="${r.ID}" style="padding:1px 6px;background:#1c7c3a;color:#fff">저장</button> <button class="btn ghost ge-cancel" style="padding:1px 5px">✖</button></td></tr>`:`<tr>
         <td class="center">${r.gubun==='지원'?'<span class="bdg" style="background:#e7f0ff;color:#1c47a0">지원</span>':'<span class="bdg ok">근무</span>'}</td>
         <td class="center">${esc(_wymd(r.work_ymd))}</td><td>${esc(r.dept_nm||r.dept_code)}</td><td>${esc(r.user_id)}</td><td class="center">${esc(r.line)}</td>
         <td class="center">${esc(r.start_time)}</td><td class="center">${esc(r.end_time)}</td><td class="num">${_wnf(r.work_hr)}</td>
@@ -3671,12 +3707,36 @@ SCREEN.gongsu=(c)=>{
         <td class="center">${r.hr_check_nm==='정상'?'':`<span style="color:#c0392b">${esc(r.hr_check_nm)}</span>`}</td>
         <td class="bcap" title="${esc(r.remarks)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.remarks)}</td>
         <td class="center">${r.editable?'<span style="color:#1c7c3a;font-size:11px">웹</span>':'<span style="color:#8aa0bd;font-size:11px">📁이력</span>'}</td>
-        ${ed?`<td class="center">${r.editable&&r.ID?`<button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b">🗑</button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?13:12}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
+        ${ed?`<td class="center" style="white-space:nowrap">${r.editable&&r.ID?`<button class="btn ghost gs-edit" data-id="${r.ID}" style="padding:1px 6px;color:#2f6db3">✎</button> <button class="btn ghost gs-del" data-id="${r.ID}" style="padding:1px 6px;color:#c0392b">🗑</button>`:''}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?13:12}" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>`;
     const g=id=>body.querySelector(id);
     g('#gs-search').onclick=()=>{F.from=g('#gs-from').value;F.to=g('#gs-to').value;F.gubun=g('#gs-gubun').value;F.dept=g('#gs-dept').value;F.user=g('#gs-user').value;load();};
     ['#gs-gubun','#gs-dept','#gs-user'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#gs-search').click();};});
     const nb=g('#gs-newentry');if(nb)nb.onclick=()=>{if(!entry.open){entry.part='';entry.rows=[];}entry.open=!entry.open;draw();};   // 열 때마다 투입파트=전체로 초기화
     body.querySelectorAll('.gs-del').forEach(b=>b.onclick=()=>delRow(+b.dataset.id));
+    // ★행 수정(인라인) — ✎ 클릭 시 편집모드. 근태선택=시간·근무h 자동, 시간수정=근무h 재계산.
+    body.querySelectorAll('.gs-edit').forEach(b=>b.onclick=()=>{editId=+b.dataset.id;draw();});
+    const ec=body.querySelector('.ge-cancel');if(ec)ec.onclick=()=>{editId=null;draw();};
+    if(editId){
+      const q=s=>body.querySelector(s);
+      const chk=q('.ge-chk'), st=q('.ge-st'), et=q('.ge-et'), hr=q('.ge-hr');
+      const sync=()=>{if(hr)hr.value=calcHr(st&&st.value,et&&et.value);};
+      if(chk)chk.onchange=()=>{const p=HRPRE[chk.value];
+        if(p){if(st)st.value=p[0];if(et)et.value=p[1];if(hr)hr.value=(chk.value==='1')?0:calcHr(p[0],p[1]);}};
+      [st,et].forEach(el=>{if(el)el.onchange=sync;});
+      const sv=q('.ge-save');
+      if(sv)sv.onclick=async()=>{
+        const row=(data.rows||[]).find(x=>x.ID===editId)||{};
+        const body2={id:editId, gubun:q('.ge-gubun').value, work_ymd:(q('.ge-ymd').value||'').replace(/-/g,'').slice(2),
+          dept_code:row.dept_code||'', user_id:row.user_id||'', line:q('.ge-line').value,
+          start_time:q('.ge-st').value, end_time:q('.ge-et').value, work_hr:+q('.ge-hr').value||0,
+          support_line:row.support_line||'', support_start:row.support_start||'', support_end:row.support_end||'',
+          support_hr:+q('.ge-shr').value||0, hr_check:q('.ge-chk').value, remarks:q('.ge-rmk').value, uuser:uname()};
+        sv.disabled=true;sv.textContent='저장중…';
+        try{const r=await fetch(`${API}/api/gongsu/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body2)});
+          const j=await r.json();
+          if(j.ok){editId=null;load();}else{alert('수정 실패: '+(j.detail||JSON.stringify(j)));sv.disabled=false;sv.textContent='저장';}}
+        catch(e){alert('수정 실패: '+e);sv.disabled=false;sv.textContent='저장';}};
+    }
     // 인원정보호출 패널 와이어
     if(entry.open){
       const ey=g('#gs-eymd');if(ey)ey.onchange=()=>{entry.ymd=ey.value;};
@@ -3687,7 +3747,25 @@ SCREEN.gongsu=(c)=>{
       const bs=g('#gs-bulksave');if(bs)bs.onclick=saveBulk;
       const all=g('#gs-all');if(all)all.onchange=()=>{entry.rows.forEach(r=>r._sel=all.checked);draw();};
       body.querySelectorAll('.gs-sel').forEach(x=>x.onchange=()=>{entry.rows[+x.dataset.i]._sel=x.checked;draw();});
-      body.querySelectorAll('.gs-f').forEach(inp=>inp.oninput=()=>{entry.rows[+inp.dataset.i][inp.dataset.k]=inp.value;});
+      // ★2026-08-23 근태·시간 연동(수정행과 동일 규칙)
+      //   근태 선택 → 시작/종료/근무h 자동세팅, 시작·종료 직접수정 → 근무h 재계산.
+      const _rowEls=i=>({st:body.querySelector(`.gs-f[data-i="${i}"][data-k="start_time"]`),
+                         et:body.querySelector(`.gs-f[data-i="${i}"][data-k="end_time"]`),
+                         hr:body.querySelector(`.gs-f[data-i="${i}"][data-k="work_hr"]`)});
+      body.querySelectorAll('.gs-f').forEach(inp=>{
+        const i=+inp.dataset.i, k=inp.dataset.k;
+        const apply=()=>{entry.rows[i][k]=inp.value;
+          const e=_rowEls(i);
+          if(k==='hr_check'){const p=HRPRE[inp.value];
+            if(p){if(e.st){e.st.value=p[0];entry.rows[i].start_time=p[0];}
+                  if(e.et){e.et.value=p[1];entry.rows[i].end_time=p[1];}
+                  const h=(inp.value==='1')?0:calcHr(p[0],p[1]);
+                  if(e.hr){e.hr.value=h;}entry.rows[i].work_hr=h;}}
+          else if(k==='start_time'||k==='end_time'){
+            const h=calcHr(e.st&&e.st.value, e.et&&e.et.value);
+            if(e.hr){e.hr.value=h;}entry.rows[i].work_hr=h;}};
+        inp.oninput=apply; if(inp.tagName==='SELECT')inp.onchange=apply;
+      });
     }
   };
   wrShell(c,{sid:'gongsu', nxOnly:true,

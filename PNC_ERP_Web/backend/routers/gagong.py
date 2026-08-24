@@ -815,6 +815,7 @@ def gagong_sheet_issue(payload: dict = Body(...)):
                            "length": float(m[2] or 0),
                            "weight": round(float(m[3] or 0) * it["qty"], 3),
                            "whnm": whnm, "lineno": lineno,
+                           "ymd": ymd,          # ★2026-08-24 현장 생산일자(=PR_T_INDI_CUTTING.PLAN_YMD) 전표 표시용
                            "cat": _sheet_cat(cur, it["jado"]),
                            "draw": _sheet_draw(cur, it["jado"]),
                            "procs": procs})
