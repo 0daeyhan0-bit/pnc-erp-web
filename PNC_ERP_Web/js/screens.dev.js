@@ -1819,7 +1819,7 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="bcap" title="${esc(r.custnm||r.cust||'')}" style="max-width:130px;text-align:left;color:#5a6b82">${esc(r.custnm||r.cust||'')}</td>
         <td class="num">${q4(r.qty)}</td></tr>`;}).join('')||'<tr><td colspan=7 class="empty">후보 구성 없음</td></tr>';
     return `<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#8e44ad">후보 R${String(routeTree.route_no).padStart(2,'0')}</b> ${esc(routeTree.route_name||'')} · 조달경로 구조(SUB 포함) · <span style="color:#8a94a6">공급처=조달프로파일</span></div></div>
-      <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto"><table class="tbl bm-tbl">
+      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl bm-tbl">
       <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th style="text-align:left">공급처</th><th class="num">소요량</th></tr></thead>
       <tbody>${body}</tbody></table></div>`;};
   // 후보 실원가(실원가 탭, routeSel>0) — route/cost. 현행 대비 손익 diff.
@@ -2735,7 +2735,7 @@ SCREEN.unifybom=(c,ro)=>{
     try{const r=await fetch(`${API}/api/bom/tree?item=${encodeURIComponent(item)}&real=1&expandbuy=1`); const j=await r.json(); routeFull=j.rows||[]; routeFullFor=item;}
     catch(e){routeFull=[]; routeFullFor=item;}
     routeBusy=false; draw(); };
-  const routeRowsTbl=(rows,head)=>`${head}<div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl bm-tbl">
+  const routeRowsTbl=(rows,head)=>`${head}<div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl bm-tbl">
     <thead><tr><th>레벨</th><th style="text-align:left">품번</th><th style="text-align:left">품명</th><th>규격</th><th class="center">사급</th><th style="text-align:left">매입처</th><th class="num">소요량</th></tr></thead>
     <tbody>${rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
       const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
@@ -2753,12 +2753,16 @@ SCREEN.unifybom=(c,ro)=>{
     else if(!item){ content=`<div class="empty">품번을 조회하세요.</div>`; }
     else{ const head=`<div class="summary-bar" style="flex-wrap:wrap"><div class="s-item"><b style="color:#1c47a0">현행 실사용 BOM</b> · ROUTING(실제 조달·매입중단) 구성 · <span style="color:#8a94a6">원가 미표시</span></div></div>`;
       content = routeRowsTbl(routeFull||[], head); }
-    c.innerHTML=`
-     <div class="page-title">🔀 품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">라우팅(조달경로 구성 BOM · 원가 미표시)</span></div>
+    c.innerHTML=`<div class="bmv-root" style="display:flex;flex-direction:column;height:100%">
+     <div class="bmv-head" style="flex:0 0 auto">
+     <div class="page-title">품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">라우팅(조달경로 구성 BOM · 원가 미표시)</span></div>
      ${tabbar('route')}
      <div class="toolbar"><span class="rowcount"><b>${esc(item)}</b> · ${esc(name)}</span><div class="spacer"></div></div>
      ${candSelector('route')}
-     ${content}${naeCss()}`;
+     </div>
+     <div class="bmv-body" style="flex:1;min-height:0;display:flex;flex-direction:column">
+     ${content}</div>
+     ${naeCss()}</div>`;
     bindTabs();bindCandSel();
   };
   const draw=()=>{
