@@ -192,7 +192,7 @@ SCREEN.bomview=(c)=>SCREEN.unifybom(c,true);
 
 /* ===== 도면/문서 관리 — 탭 통합(설계도면 / 품목시방). 조회+관리 = 권한 분기 ===== */
 SCREEN.docmgr=(c)=>{
-  const TABS=[['dwg','📐 설계도면'],['itemspec','📎 품목시방']];
+  const TABS=[['dwg','설계도면'],['itemspec','품목시방']];
   let tab='dwg';
   c.innerHTML=`<div id="dm-tabs" style="display:flex;gap:4px;padding:6px 0 0;border-bottom:2px solid #dce3ee;margin-bottom:10px"></div><div id="dm-body"></div>`;
   const tb=c.querySelector('#dm-tabs'), body=c.querySelector('#dm-body');
