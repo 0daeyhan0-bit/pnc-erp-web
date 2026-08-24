@@ -211,3 +211,9 @@
 - ★**결정적 규명**: plan은 **제작단위(+용접링·-N-N 자도번=자기 라우팅 보유)서 정지 + 순수 조립그룹(-SUB·은납) 해체**. 구분기준=**BOM구조 아니라 라우팅 보유여부**=STEP6 고유(공정전이 기반). → **어떤 단순 BOM 정지규칙으로도 plan 재현 불가 확정**.
 - ★**올바른 길 = STEP6 결과에서 역실체화**: route grain을 STEP6(plan_part_dtl)의 실제 grain에서 파생하면 R01=plan 재현 **구성상 보장**. plan_part_dtl(item_code·mat_code·bom_level·proc)이 grain의 진실. product레벨 grain=그BOM+routing 조합(STEP6로직) → route materializer가 이걸 그대로 써야.
 - 다음: route materializer를 STEP6 grain(라우팅 보유=제작단위 정지·무보유 조립그룹 해체)에 맞추거나, plan_part_dtl에서 product별 grain 추출→route 실체화. R01 전수 diff0 게이트. ★현행plan정상(§14·§15-2)이라 급성없음·라이브무접촉.
+
+## §15-3. 역실체화 확정(2026-08-24) — plan grain 제품레벨 안정·R01 diff0 구성상보장
+- **4규칙 최종성적 vs plan**: cost_stop 0%·except_flag-full 34%·naewon 30%·**라우팅기준 45%**(최고이나 부족·AJJ76418702-SUB 라우팅有인데 plan은 해체). → 노드속성 규칙 전부 실패 확정.
+- ★**plan grain 제품레벨 안정성 = 100%**(다WO 제품 200/200이 work_order 무관 동일 mat집합). = plan grain은 제품별로 결정적·STEP6가 매번 같은 구조 생성.
+- ★★**확정 아키텍처 = 역실체화**: 제품별 plan구조(plan_part_dtl/mat의 item→mat·bom_level·proc)를 **route_line으로 굳힘** → R01=plan **재현 구성상 보장**(동일구조). Rnn=이 route 편집→다른 plan. plan_part_mat 커버=661 현재계획품(직접 역실체화 가능). 미계획품=STEP6 grain로직을 그BOM에 적용(=기존 STEP6 실행).
+- 구현: ①역실체화 materializer(plan_part_dtl→sourcing_route_line, node_kind/parent_line/proc 포함) ②plan 파이프라인이 활성route 있으면 그 구조로 STEP6 전개(없으면 현행 BOM전개=R01 fallback=현행 그대로 diff0) ③전수 diff0 게이트 ④dev. ★현행plan 무변경·라이브무접촉·매일rebuild 자기갱신.
