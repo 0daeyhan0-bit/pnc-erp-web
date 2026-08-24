@@ -18,7 +18,12 @@ Phase 0 하네스(soyo_unify_verify)로 **현행 walker와 전수 diff0** 증명
 # ===================== 원가·내부원가 트랙 (explode = eng.lines·cs_calc_except) =====================
 def explode(eng, item):
     """원가축 full 전개. RAC 용접봉은 eng.lines가 proc_weld로 주입. 반환 (nodes, kids).
-      kids[parent] = [(child, qty, cs_calc_except, lme_except)] — eng.lines 1회·부모별 dedup."""
+      kids[parent] = [(child, qty, cs_calc_except, lme_except)] — eng.lines 1회·부모별 dedup.
+      ★Phase 2: (nodes, kids) 구조를 item별 캐시(단가무관) → 반복호출 트리 재빌드 제거."""
+    if not hasattr(eng, '_explode_cache'):
+        eng._explode_cache = {}
+    if item in eng._explode_cache:
+        return eng._explode_cache[item]
     nodes = []
     kids = {}
     hasbom = eng._load_hasbom()
@@ -35,6 +40,7 @@ def explode(eng, item):
                 walk(c, cum_q * qty, lvl + 1, node, qty, cx, lx, seen | {node})
 
     walk(item, 1.0, 0, '', 1.0, False, False, set())
+    eng._explode_cache[item] = (nodes, kids)
     return nodes, kids
 
 
@@ -111,7 +117,13 @@ def _lines_bl(eng, item):
 
 
 def explode_bomline(eng, item):
-    """★통합 explode(생산+중량) — nx.bom_line raw 1회. kids[u]=[(child_u,qty,qty_pr,except,sagub)]. upper키."""
+    """★통합 explode(생산+중량) — nx.bom_line raw 1회. kids[u]=[(child_u,qty,qty_pr,except,sagub)]. upper키.
+    ★Phase 2: kids를 item별 캐시 → 같은 품목의 생산+중량이 트리 1회만 빌드(1 explode + N walker)."""
+    if not hasattr(eng, '_explode_bl_cache'):
+        eng._explode_bl_cache = {}
+    ik = item.strip().upper()
+    if ik in eng._explode_bl_cache:
+        return eng._explode_bl_cache[ik]
     kids = {}
 
     def build(node):
@@ -123,6 +135,7 @@ def explode_bomline(eng, item):
         for c, q, qp, ex, sag in ch:
             build(c)
     build(item)
+    eng._explode_bl_cache[ik] = kids
     return kids
 
 
@@ -197,3 +210,36 @@ def weight_explode_ex(eng, item):
 
     rk, wk = walk(item)
     return (round(rk, 6), round(wk, 6))
+
+
+# ===================== Phase 2 — explode 캐시 (구조/단가 분리, §13-3) =====================
+# explode 구조(원가 leaf 리스트·단가무관)를 item별 캐시 → 월별 단가만 재적용(explode 1회+단가곱셈).
+def cost_leaves(eng, item):
+    """원가 leaf 리스트 [(leaf_node, cum_qty)] — ★단가무관 구조. item별 캐시. cost_material_ex의 구조부."""
+    if not hasattr(eng, '_cost_leaves_cache'):
+        eng._cost_leaves_cache = {}
+    if item in eng._cost_leaves_cache:
+        return eng._cost_leaves_cache[item]
+    _, kids = explode(eng, item)
+    leaves = []
+
+    def value(node, q, seen):
+        info = eng._load_item(node)
+        expandable = (info['cost_gubun'] != '3' or info['make_type'] == '1') and _expandable_ex(eng, node, info, kids, seen)
+        if expandable:
+            for c, qty, cx, lx in kids.get(node, []):
+                if cx:
+                    continue
+                value(c, qty * q, seen | {node})
+        else:
+            leaves.append((node, q))
+    value(item, 1.0, set())
+    eng._cost_leaves_cache[item] = leaves
+    return leaves
+
+
+def cost_material_cached(eng, item, ymd):
+    """[원가 walker · 캐시] = 캐시된 구조(cost_leaves) + 월별 단가 곱셈. cost_material_ex와 diff0."""
+    ymcut = '20' + ymd[:4]
+    base = sum(eng._leaf_val(leaf, eng._load_item(leaf), q, ymd, ymcut) for leaf, q in cost_leaves(eng, item))
+    return round(base + eng.lme_u(item, ymd), 2)

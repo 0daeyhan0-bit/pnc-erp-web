@@ -174,10 +174,11 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 
 ### 13-2d. ★통합 explode(생산+중량 단일소스) (2026-08-24)
 `soyo_explode_shared.py`: **`explode_bomline`**(nx.bom_line raw 1회 읽기·전 컬럼 [child·qty·qty_pr·except_flag·sagub_default]·RAC포함·upper키 일관) + `prod_soyo_ex2`(qty_pr·except)·`weight_explode_ex2`(qty·sagub). **검증: 현행 prod_soyo·weight_explode vs 통합 = 샘플 40/40 → ★전수 생산 2081/2081·중량 2081/2081 diff0 PASS**(525초). → **생산+중량이 explode 1개(explode_bomline)로 통합 확정**(explode_pr·explode_wt 대체 가능). **원가는 RAC→proc_weld 차이로 eng.lines 기반 explode 유지**(별 트랙). = **3 explode → 2 explode(원가용·생산중량용)로 수렴 완료.** 최종 남음=원가 트랙을 explode_bomline+proc_weld overlay로 흡수할지(선택·복잡)—현재도 원가는 전수 diff0라 필수 아님.
-- **★코드 정리(일원화) 완료 (2026-08-24)**: `soyo_explode_shared.py` 재작성 — 중복(`_lines_pr`·`explode_pr`·`explode_wt`·구v1 walker·`_ex2`) 제거, **2 트랙만 남김**: ①`explode`+`cost_material_ex`/`cost_material_nae_ex`(원가·내부) ②`explode_bomline`+`prod_soyo_ex`/`weight_explode_ex`(생산·중량). 정리후 4 walker 샘플 40/40 diff0·전수 재확인. **= Phase 1 코드 정돈 완결(캐시 준비).**
+- **★코드 정리(일원화) 완료 (2026-08-24)**: `soyo_explode_shared.py` 재작성 — 중복(`_lines_pr`·`explode_pr`·`explode_wt`·구v1 walker·`_ex2`) 제거, **2 트랙만 남김**: ①`explode`+`cost_material_ex`/`cost_material_nae_ex`(원가·내부) ②`explode_bomline`+`prod_soyo_ex`/`weight_explode_ex`(생산·중량). 정리후 4 walker 샘플 40/40 → **★정리된 통합본 전수 재확인 = 원가·내부·생산·중량 각 2081/2081 diff0 PASS(483초)**. **= Phase 1 완전 완결(아키텍처 전수 증명·코드 일원화·기록).** 다음=Phase 2 캐시.
 
-### 13-3. Phase 2 — explode 캐시 (성능)
+### 13-3. Phase 2 — explode 캐시 (성능) — ✅원가 착수 2026-08-24
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**
+- **★원가 구현**: `cost_leaves(eng,item)` = 원가 leaf 리스트 [(leaf,cum_qty)] **단가무관 구조 item별 캐시** + `cost_material_cached(eng,item,ymd)` = 캐시구조 + 월별 `_leaf_val` 곱셈. = **"explode 1회 + 월별 단가"**(설계 §5). **검증: cost_material_cached vs 현행 = 260630·260731·260531 각 40/40 diff0**(캐시가 월별 재계산서 정확). 재사용=구조 amortize→다월 배치 near-instant(V2 월별손익 가속). soyo_explode_shared.py. **남음**: 생산/중량 캐시(구조 leaf 리스트 캐시 동형), lme 구조 캐시, Phase 3 전환.
 
 ### 13-4. Phase 3 — 프로덕션 전환 (하나씩·diff0 게이트·순서 중요)
 1. **원가**(이미 위임) → explode-공유 walker로 재전환. **계획 무관·안전.**
