@@ -97,16 +97,16 @@ SCREEN.lgbomview=(c)=>{
     if(st.msortKey){const k=st.msortKey,d=st.msortDir||1;st.models.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*d;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*d;});}
     const totq=st.tree.reduce((a,r)=>a+(+r.qty||0),0);
     c.innerHTML=`
-     <div class="page-title">🔀 LG BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 + 엑셀 업로드(신규 BOM 등록 전 사전적재)</span></div>
-     <div class="page-sub">LG 원본 BOM Explosion(<code>nx.lg_bom</code>) · 모델(완제품) 검색 → 전 레벨 트리 전개 · werks <b>DMZ=SAC / DGZ=RAC</b> · <b>📤업로드=LG BOM Explosion 엑셀→모델별 적재</b>(그 후 「품목BOM관리 › 신규 BOM 등록 › LG BOM 불러오기」에서 사용)</div>
+     <div class="page-title">LG BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 + 엑셀 업로드(신규 BOM 등록 전 사전적재)</span></div>
      <div class="toolbar">
-       <label class="tl">모델/품번</label><input class="inp" id="lb-q" value="${esc(st.q)}" placeholder="상위품번(예: 3127A20114B)" style="width:220px">
+       <label class="tl">모델/품번</label><input class="inp" id="lb-q" value="${esc(st.q)}" placeholder="모델/품번 검색" style="width:220px">
        <label class="tl" style="margin-left:8px">공장</label><select class="inp" id="lb-wk"><option value="">전체</option><option value="DMZ" ${st.werks==="DMZ"?"selected":""}>DMZ(SAC)</option><option value="DGZ" ${st.werks==="DGZ"?"selected":""}>DGZ(RAC)</option></select>
        <button class="btn" id="lb-go">🔍 조회</button>
        <div class="spacer"></div>
-       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #8fb4d6;border-radius:8px;padding:6px 12px;background:#f4f9fe;color:#5a7597;font-size:12px;white-space:nowrap;cursor:pointer">📥 엑셀을 여기로 <b>드래그&드롭</b></span>
+       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #1c7c3a;border-radius:8px;padding:14px 30px;min-width:560px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer">엑셀을 여기로 <b>드래그&드롭</b></span>
        <input type="file" id="lb-file" accept=".xlsx,.xls" style="display:none">
-       <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 업로드중…':'📤 LG BOM 업로드'}</button>
+       <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'업로드중…':'⬆ LG BOM 업로드'}</button>
+       <button class="btn xls" id="lb-xls">⬇ 엑셀</button>
      </div>
      ${st.upmsg?`<div class="page-sub" style="color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.upmsg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
@@ -138,6 +138,17 @@ SCREEN.lgbomview=(c)=>{
     g("#lb-wk").onchange=x=>st.werks=x.target.value;g("#lb-go").onclick=search;
     const fe=g("#lb-file"),ub=g("#lb-upload"),dz=g("#lb-drop");
     if(ub&&fe){ub.onclick=()=>fe.click();fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value="";};}
+    {const xb=g("#lb-xls");if(xb)xb.onclick=()=>{
+      if(st.sel&&st.tree.length){
+        const hd=['Lv','자재코드','품명','규격','수량','단위','공급','최하위','상태','유효시작','유효종료'];
+        const out=st.tree.map(r=>[(r.stufe!=null?r.stufe:(r.depth||0)+1),r.child_code,(r.child_desc||r.nx_desc||''),(r.child_spec||''),(r.qty==null?'':r.qty),(r.unit||''),(r.supply_type||''),(r.lowest_flg==='Y'?'Y':''),(r.mmsta||''),(r.valid_from||''),(r.valid_to||'')]);
+        downloadCSV(`LGBOM_${st.sel.model}.csv`,hd,out);
+      }else if(st.models.length){
+        const hd=['모델','품명','공장','구성수'];
+        const out=st.models.map(m=>[m.model,(m.modelnm||''),(WK[m.werks]||m.werks),m.child_cnt]);
+        downloadCSV('LGBOM_모델목록.csv',hd,out);
+      }else alert('내보낼 데이터가 없습니다 — 먼저 조회하세요.');
+    };}
     if(dz&&fe){dz.onclick=()=>fe.click();
       dz.ondragover=e=>{e.preventDefault();dz.style.background="#e3f0ff";dz.style.borderColor="#1c7c3a";dz.style.color="#1c7c3a";};
       dz.ondragleave=()=>{dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";};
