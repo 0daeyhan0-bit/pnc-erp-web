@@ -236,15 +236,13 @@ SCREEN.drawingdoc=(host)=>{
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('drawingdoc'):true;
     host.innerHTML=`
-     <div class="page-title">📐 설계도면조회 <span style="font-size:12px;color:var(--muted);font-weight:400">도면 파일 조회·다운로드·업로드 · w_pr_master_200</span></div>
-     <div class="page-sub">품번별 도면. <b>일반도면=개발(업로드·삭제 가능)</b> · <b>시방도면=품질(시방변경관리에서 업로드/삭제)</b>. 신규 저장=NAS(현재 <code>F:\\NEW_ERP_FILES</code>), 기존은 레거시 blob 다운로드.</div>
+     <div class="page-title">설계도면조회 <span style="font-size:12px;color:var(--muted);font-weight:400">도면 파일 조회·다운로드·업로드 · w_pr_master_200</span></div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
-       <label class="tl">품번·파일명</label><input class="inp" id="dd-item" value="${esc(st.item)}" placeholder="품번/파일명 검색 (빈칸=전체 최근)" style="width:230px">
-       <button class="btn" id="dd-go">🔍 조회</button>
-       ${ed?`<div class="spacer"></div><label class="tl">일반도면 업로드</label><input type="file" id="dd-file" style="width:210px"><button class="btn" id="dd-up" style="background:#1c47a0;color:#fff">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <label class="tl">품번·파일명</label><input class="inp" id="dd-item" value="${esc(st.item)}" placeholder="품번/파일명" style="width:230px">
+       <button class="btn" id="dd-go">조회</button>
+       ${ed?`<div class="spacer"></div><span id="dd-drop" title="도면 파일을 여기로 끌어다 놓거나 클릭" style="border:2px dashed #1c7c3a;border-radius:8px;padding:10px 24px;min-width:260px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer">${st.file?esc(st.file.name):'도면을 여기로 드래그&드롭'}</span><input type="file" id="dd-file" style="display:none"><button class="btn xls" id="dd-up">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="toolbar" style="margin-top:2px"><span class="rowcount">${won(st.cnt)}건${st.item.trim()?'':' — 품번을 조회하세요'}</span></div>
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
         <th>구분</th><th>파일명</th><th>시방관리번호</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
@@ -259,8 +257,13 @@ SCREEN.drawingdoc=(host)=>{
     g('#dd-go').onclick=()=>{st.item=g('#dd-item').value;load();};
     g('#dd-item').onkeyup=e=>{if(e.key==='Enter')g('#dd-go').click();};
     if(ed){
-      const fe=g('#dd-file');if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;};
-      const ub=g('#dd-up');if(ub)ub.onclick=upload;
+      const fe=g('#dd-file'),ub=g('#dd-up'),dz=g('#dd-drop');
+      if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;render();};
+      if(ub)ub.onclick=upload;
+      if(dz&&fe){dz.onclick=()=>fe.click();
+        dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0df';};
+        dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
+        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;render();}};}
     }
     host.querySelectorAll('.dd-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.dd-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));
@@ -301,15 +304,13 @@ SCREEN.itemspec=(host)=>{
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('itemspec'):true;
     host.innerHTML=`
-     <div class="page-title">📎 품목시방관리 <span style="font-size:12px;color:var(--muted);font-weight:400">품목 시방(PPT)·첨부문서 · w_pr_master_210</span></div>
-     <div class="page-sub">품번별 첨부문서. <b>시방(PPT)</b>=DRAWING.PR_M_SIBANG · <b>품목첨부 14종</b>(Q-map·QC공정도·XRF·작업표준서·검사성적서·도면 등, PR010) · 신규=nx.doc(<code>F:\\NEW_ERP_FILES</code>). 기존은 레거시 blob 다운로드.</div>
+     <div class="page-title">품목시방관리 <span style="font-size:12px;color:var(--muted);font-weight:400">품목 시방(PPT)·첨부문서 · w_pr_master_210</span></div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
-       <label class="tl">품목번호</label><input class="inp" id="is-item" value="${esc(st.item)}" placeholder="품번" style="width:200px">
-       <button class="btn" id="is-go">🔍 조회</button>
-       ${ed?`<div class="spacer"></div><label class="tl">첨부 업로드</label><input type="file" id="is-file" style="width:210px"><button class="btn" id="is-up" style="background:#1c47a0;color:#fff">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <label class="tl">품번·파일명</label><input class="inp" id="is-item" value="${esc(st.item)}" placeholder="품번/파일명" style="width:230px">
+       <button class="btn" id="is-go">조회</button>
+       ${ed?`<div class="spacer"></div><span id="is-drop" title="첨부 파일을 여기로 끌어다 놓거나 클릭" style="border:2px dashed #1c7c3a;border-radius:8px;padding:10px 24px;min-width:260px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer">${st.file?esc(st.file.name):'첨부를 여기로 드래그&드롭'}</span><input type="file" id="is-file" style="display:none"><button class="btn xls" id="is-up">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="toolbar" style="margin-top:2px"><span class="rowcount">${won(st.cnt)}건${st.item.trim()?'':' — 품번을 조회하세요'}</span></div>
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
         <th>첨부유형</th><th>파일명</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
@@ -324,8 +325,13 @@ SCREEN.itemspec=(host)=>{
     g('#is-go').onclick=()=>{st.item=g('#is-item').value;load();};
     g('#is-item').onkeyup=e=>{if(e.key==='Enter')g('#is-go').click();};
     if(ed){
-      const fe=g('#is-file');if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;};
-      const ub=g('#is-up');if(ub)ub.onclick=upload;
+      const fe=g('#is-file'),ub=g('#is-up'),dz=g('#is-drop');
+      if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;render();};
+      if(ub)ub.onclick=upload;
+      if(dz&&fe){dz.onclick=()=>fe.click();
+        dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0df';};
+        dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
+        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;render();}};}
     }
     host.querySelectorAll('.is-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.is-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));

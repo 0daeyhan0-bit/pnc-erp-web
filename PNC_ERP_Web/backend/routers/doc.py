@@ -74,7 +74,7 @@ def doc_list(item_code: str = Query("")):
         cn.close()
     # ★레거시 동일: 일반+시방 통합 후 파일일시 내림차순(최신 시방이 최상단)
     rows.sort(key=lambda x: x.get("dt") or "", reverse=True)
-    return {"rows": rows, "cnt": len(rows)}
+    return {"rows": rows[:500], "cnt": len(rows), "shown": min(500, len(rows))}   # 속도개선: 최신 500건만 반환
 
 @router.get("/api/doc/download")
 def doc_download(src: str = Query(...), key: str = Query(...), disp: str = Query("attach")):

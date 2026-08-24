@@ -173,7 +173,7 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 → **explode 공유 아키텍처 = 단일 nx.bom_line 소스로 4모드 전부 전수 등가 증명.** 배포 엔진 무변경(옆에 soyo_explode_shared.py). **★전수가 30표본이 놓친 생산 12건(qty_pr) 버그를 검출** = 사용자 전수요구·부분검증금지 원칙의 가치 실증. **남음**: 용접봉(flat primitive)·plan walker·통합 explode 1개 수렴·Phase2 캐시·Phase3 프로덕션 전환(각 전수 게이트·생산분은 계획작업 조율 후).
 
 ### 13-2d. ★통합 explode(생산+중량 단일소스) (2026-08-24)
-`soyo_explode_shared.py`: **`explode_bomline`**(nx.bom_line raw 1회 읽기·전 컬럼 [child·qty·qty_pr·except_flag·sagub_default]·RAC포함·upper키 일관) + `prod_soyo_ex2`(qty_pr·except)·`weight_explode_ex2`(qty·sagub). **검증: 현행 prod_soyo·weight_explode vs 통합 = 샘플 40/40·40/40 diff0** (전수 진행). → **생산+중량이 explode 1개(explode_bomline)로 통합**(explode_pr·explode_wt 대체 가능). **원가는 RAC→proc_weld 차이로 eng.lines 기반 explode 유지**(별 트랙). = 3 explode → 2 explode(원가용·생산중량용)로 수렴.
+`soyo_explode_shared.py`: **`explode_bomline`**(nx.bom_line raw 1회 읽기·전 컬럼 [child·qty·qty_pr·except_flag·sagub_default]·RAC포함·upper키 일관) + `prod_soyo_ex2`(qty_pr·except)·`weight_explode_ex2`(qty·sagub). **검증: 현행 prod_soyo·weight_explode vs 통합 = 샘플 40/40 → ★전수 생산 2081/2081·중량 2081/2081 diff0 PASS**(525초). → **생산+중량이 explode 1개(explode_bomline)로 통합 확정**(explode_pr·explode_wt 대체 가능). **원가는 RAC→proc_weld 차이로 eng.lines 기반 explode 유지**(별 트랙). = **3 explode → 2 explode(원가용·생산중량용)로 수렴 완료.** 최종 남음=원가 트랙을 explode_bomline+proc_weld overlay로 흡수할지(선택·복잡)—현재도 원가는 전수 diff0라 필수 아님.
 
 ### 13-3. Phase 2 — explode 캐시 (성능)
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**
