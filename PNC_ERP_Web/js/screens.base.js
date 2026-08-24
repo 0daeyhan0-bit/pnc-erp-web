@@ -106,6 +106,7 @@ SCREEN.lgbomview=(c)=>{
        <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #1c7c3a;border-radius:8px;padding:14px 30px;min-width:280px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer">엑셀을 여기로 <b>드래그&드롭</b></span>
        <input type="file" id="lb-file" accept=".xlsx,.xls" style="display:none">
        <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'업로드중…':'⬆ LG BOM 업로드'}</button>
+       <button class="btn xls" id="lb-xls">⬇ 엑셀</button>
      </div>
      ${st.upmsg?`<div class="page-sub" style="color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.upmsg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
@@ -137,6 +138,17 @@ SCREEN.lgbomview=(c)=>{
     g("#lb-wk").onchange=x=>st.werks=x.target.value;g("#lb-go").onclick=search;
     const fe=g("#lb-file"),ub=g("#lb-upload"),dz=g("#lb-drop");
     if(ub&&fe){ub.onclick=()=>fe.click();fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value="";};}
+    {const xb=g("#lb-xls");if(xb)xb.onclick=()=>{
+      if(st.sel&&st.tree.length){
+        const hd=['Lv','자재코드','품명','규격','수량','단위','공급','최하위','상태','유효시작','유효종료'];
+        const out=st.tree.map(r=>[(r.stufe!=null?r.stufe:(r.depth||0)+1),r.child_code,(r.child_desc||r.nx_desc||''),(r.child_spec||''),(r.qty==null?'':r.qty),(r.unit||''),(r.supply_type||''),(r.lowest_flg==='Y'?'Y':''),(r.mmsta||''),(r.valid_from||''),(r.valid_to||'')]);
+        downloadCSV(`LGBOM_${st.sel.model}.csv`,hd,out);
+      }else if(st.models.length){
+        const hd=['모델','품명','공장','구성수'];
+        const out=st.models.map(m=>[m.model,(m.modelnm||''),(WK[m.werks]||m.werks),m.child_cnt]);
+        downloadCSV('LGBOM_모델목록.csv',hd,out);
+      }else alert('내보낼 데이터가 없습니다 — 먼저 조회하세요.');
+    };}
     if(dz&&fe){dz.onclick=()=>fe.click();
       dz.ondragover=e=>{e.preventDefault();dz.style.background="#e3f0ff";dz.style.borderColor="#1c7c3a";dz.style.color="#1c7c3a";};
       dz.ondragleave=()=>{dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";};
