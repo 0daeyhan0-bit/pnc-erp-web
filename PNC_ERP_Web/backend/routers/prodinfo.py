@@ -576,8 +576,12 @@ def _ensure_linecal():
 async def linecal_upload(file: UploadFile = File(...), anchor_ymd: str = Form(...)):
     """LG 라인스케줄 엑셀 업로드. anchor_ymd(YYYY-MM-DD, 기준일)로 날짜 앵커링 → '잔업' 시트 파싱 → 덮어쓰기."""
     import sys as _sys, os as _os, datetime as _dt
-    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', '..', '_schema'))
-    from linecal_parser import parse_line_schedule
+    # _schema는 프로젝트 루트(NEW_ERP_1/_schema): routers→backend→PNC_ERP_Web→NEW_ERP_1 (..×3)
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', '..', '..', '_schema'))
+    try:
+        from linecal_parser import parse_line_schedule
+    except Exception as e:
+        raise HTTPException(500, f"파서 로드 실패(_schema 경로 확인): {e}")
     d = "".join(ch for ch in str(anchor_ymd) if ch.isdigit())
     if len(d) != 8: raise HTTPException(400, "기준일(YYYY-MM-DD)을 입력하세요.")
     anchor = _dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
