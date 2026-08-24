@@ -375,3 +375,16 @@
 - ★원인: rid=1580 sourcing_route_line이 **+용접링을 SUB로 한단계 더 전개**(→MJU pipe)했으나 plan grain은 **제작단위(+용접링)서 정지**(§15-2). = 그 route가 잘못된 grain으로 실체화됨(다리는 충실변환). 
 - ★남은정밀: ①materialize-current(naewon기반 sourcing.py)가 제작동관 단위(+용접링)서 정지하도록(plan grain 정합) or 다리가 제작SUB 정지 처리 ②sourcing_route_line→route_edges 다리 함수화 ③gubun/vendor→sourcing_profile 다리(협력사).
 - ∴ **다리 구조는 작동(108/110)·grain 정밀만 남음.** Rnn 편집→계획반영의 마지막 연결.
+
+## §18-4. ★★다리 함수 구현·검증 완료(2026-08-25) — 편집UI→계획반영 연결
+- **구현**: sourcing.py `_materialize_route_from_line(cur, route_id)` + 엔드포인트 `POST /api/sourcing/route/materialize_from_line`.
+- **입력**: nx.sourcing_route_line(편집UI 산출·gubun/vendor). **출력**: nx.route_edges(구조) + nx.sourcing_profile(route_id·협력사).
+- **규칙(확정)**: route_edges = v_pr_bom 활성엣지(R01 grain·except제외) 기반, sourcing_route_line 외주/매입/사급 노드에서 추가정지(subtree 제거=협력사 통째납품 leaf). sourcing_profile = 그 노드별 (supply_gubun 2외주/3매입, vendor).
+- **★검증(무거운 STEP7 대신 엣지집합 대조·본세션)**:
+  - T1 무편집(rid=1580) route-active vs baseline = **110/110 diff0**(별도 STEP7 실행).
+  - T2 제작→외주(AJR77263007-4-1 정지) = subtree 제거·SUB leaf화(5210A22409B 하위 사라짐).
+  - **실함수 대조**: `_materialize_route_from_line(1580)` route_edges = `_materialize_r01_edges` base **완전동일(47=47·base만0·다리만0)** → **diff0 상속**(무편집). stops=9(매입, v_pr_bom서 이미 leaf=무영향).
+- **★grain 안전**: base=v_pr_bom active(제작단위 +용접링 leaf정지)라 sourcing_route_line 구조 과전개(rid=1580의 +용접링 SUB전개) **무시**=diff0 유지. = §18-3 grain 이슈 해소.
+- **★한계(정직)**: **정지방향(제작→외주/매입=외주화)만 이 다리 담당.** 외주→제작 강제전개(except=1 자식 되살림)는 make_type 오탐(+용접링 make_type=3) 위험이라 미포함 — 별도 explicit-edge(§18-2 5/5). 외주화가 지배적 케이스.
+- **상태**: sourcing.py DEV·compile OK·DB 롤백(무변경). 배포=승인후. 활성화는 별도(route_alloc·current_flag, 기존 조달프로파일 화면).
+- **∴ 편집UI(존재) → 다리(_materialize_route_from_line) → soyo STEP7 route-aware(배포완) → 생산+협력사 계획 자동반영. 연결 완성(외주화 방향).**
