@@ -458,8 +458,12 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
         cur_a = sum(float(x.get(amtk) or 0) for x in rows)
         base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
         return round(base_a - cur_a)
-    try: jaego_prod = _sdelta(_prodstock(ym, m0, d6))   # ★조회일 기준(기초=7월말=조회월기초, 현재고=월초~조회일). 설계문서 "원장 날짜컷" 반영
-    except Exception: jaego_prod = 0
+    try:   # ★조회일 기준. stage=GAGONG(line P0001)/WELD(그외)로 생산 재고조정 분리
+        _psrows = _prodstock(ym, m0, d6)
+        jaego_gagong = _sdelta([r for r in _psrows if r.get('stage') == 'GAGONG'])
+        jaego_weld = _sdelta([r for r in _psrows if r.get('stage') == 'WELD'])
+        jaego_prod = jaego_gagong + jaego_weld
+    except Exception: jaego_prod = jaego_gagong = jaego_weld = 0
     try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
     except Exception: jaego_sales = 0
     try:   # 자재수불(자재재고): matledger 월기준(일별마감 없음). rows에 basic/curr/amt(금액)
@@ -548,7 +552,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
             # ③ 재고조정 (기초−현재고, 재고증가면 음수). 자재는 8월 스냅샷 없어 0(원장계산 예정).
-            "jaego": {"prod": jaego_prod, "sales": jaego_sales, "mat": jaego_mat, "total": jaego, "mat_pending": jaego_mat == 0},
+            "jaego": {"gagong": jaego_gagong, "weld": jaego_weld, "prod": jaego_prod, "sales": jaego_sales, "mat": jaego_mat, "total": jaego, "mat_pending": jaego_mat == 0},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
