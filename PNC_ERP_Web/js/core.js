@@ -2089,12 +2089,14 @@ function lineCalView(host){
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date(), mon=new Date(T); mon.setDate(T.getDate()-((T.getDay()+6)%7));
   const st={data:null,from:iso(mon),weeks:4,anchor:iso(T),msg:'',busy:false};
-  const codeSty=(v)=>{const c=(v||'').trim().toUpperCase();
-    if(c==='B')return 'background:#e23b3b;color:#fff';
-    if(c==='A'||c==='D')return 'background:#37cde6;color:#04303a';
-    if(c==='E')return 'background:#232a33;color:#fff';
-    if(!c)return 'background:#eaedf1;color:#c2c8d0';
-    return 'background:#f3b0dd;color:#3a0b30';};   // 특수(SKD/rac이동/CC지원)
+  const codeSty=(v)=>{const s=(v||'').trim();
+    if(!s)return 'background:#eaedf1;color:#c2c8d0';     // 빈칸=휴무
+    const n=parseFloat(s);
+    if(!isNaN(n)){
+      if(n>10) return 'background:#e23b3b;color:#fff';    // 10 초과(10.5·11) = 빨강
+      if(n>=9) return 'background:#37cde6;color:#04303a'; // 9~10 = 하늘색
+    }
+    return 'background:#232a33;color:#fff';};             // 나머지(8·7.5·재작업·SKD·rac이동 등) = 검정
   const load=async()=>{
     try{const r=await fetch(`${API}/api/linecal/matrix?from_ymd=${st.from}&weeks=${st.weeks}`);st.data=await r.json();}
     catch(e){st.msg='백엔드 연결 실패';}
@@ -2128,7 +2130,6 @@ function lineCalView(host){
        <label class="tl">시작주(월)</label><input class="inp" type="date" id="lc-from" value="${st.from}" style="width:150px">
        <label class="tl">기간</label><select class="inp" id="lc-weeks" style="width:auto"><option value="4" ${st.weeks==4?'selected':''}>4주</option><option value="6" ${st.weeks==6?'selected':''}>6주</option><option value="8" ${st.weeks==8?'selected':''}>8주</option></select>
        <button class="btn" id="lc-go">🔍 조회</button>
-       <span class="page-sub" style="margin:0 0 0 8px">B=<b style="color:#e23b3b">잔업3h</b> · A=<b style="color:#0aa">잔업2h</b> · E=잔업없음 · 빈칸=휴무</span>
        <div class="spacer"></div><span class="rowcount">${d?d.from+'~'+d.to:''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}

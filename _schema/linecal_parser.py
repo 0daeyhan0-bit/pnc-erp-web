@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""LG 라인스케줄 '잔업' 시트 파서 (백엔드/적재 공용). parse_line_schedule(path_or_bytes, anchor_date)->dict."""
+"""LG 라인스케줄 '잔업' 시트 파서 (백엔드/적재 공용). parse_line_schedule(path_or_bytes, anchor_date)->dict.
+   2026-08 신형식: 주 생산라인(No.=CAC##)만 추출(추가라인 1층/2층 조립·공청기 제외).
+   셀값은 보여지는대로 저장(B/A/E·잔업시간숫자·SKD/rac이동/CC지원 등). 구 '특수일 행(row15)'은 폐지(이제 데이터라인이라 오독)."""
 import re, datetime, io
 import openpyxl
 
@@ -14,9 +16,9 @@ def parse_line_schedule(src, anchor_date):
     if '잔업' not in wb.sheetnames:
         raise ValueError("'잔업' 시트가 없습니다.")
     ws = wb['잔업']
-    rows = list(ws.iter_rows(min_row=1, max_row=16, max_col=131, values_only=True))
+    rows = list(ws.iter_rows(min_row=1, max_row=40, max_col=131, values_only=True))
     def cell(r, c): return rows[r-1][c-1] if r-1 < len(rows) and c-1 < len(rows[r-1]) else None
-    # 날짜열
+    # 날짜열 (행5 = 일자: '29일' 등)
     day_of = {}
     for c in range(6, 132):
         v = cell(5, c)
@@ -24,7 +26,7 @@ def parse_line_schedule(src, anchor_date):
             mm = re.search(r'(\d+)', str(v))
             if mm: day_of[c] = int(mm.group(1))
     cols = sorted(day_of)
-    if not cols: raise ValueError("날짜열을 찾을 수 없습니다.")
+    if not cols: raise ValueError("날짜열(행5)을 찾을 수 없습니다.")
     def build(ac): return {c: anchor_date + datetime.timedelta(days=(c - ac)) for c in cols}
     best = None
     for ac in [c for c in cols if day_of[c] == anchor_date.day]:
@@ -32,24 +34,21 @@ def parse_line_schedule(src, anchor_date):
         if all(dd[c].day == day_of[c] for c in cols): best = ac; break
     if best is None: best = cols[0]  # 폴백
     dates = build(best)
-    # 데이터행 (col3=라인)
-    recs = []; meta = []
-    for r in range(7, 15):
-        line = cell(r, 3)
+    # 데이터행: 주 생산라인만(No.=CAC## 패턴). 추가라인(1층/2층 조립·공청기 등)은 제외 → 위치 이동에도 견고.
+    recs = []; meta = []; ord_ = 0
+    for r in range(7, 41):
+        line = cell(r, 3); no = str(cell(r, 4) or '').strip()
         if not line: continue
-        line = str(line).strip()
-        meta.append({"line_no": line, "sort_ord": r - 6, "gubun": str(cell(r, 2) or '').strip(),
-                     "model_no": str(cell(r, 4) or '').strip(), "jindo": str(cell(r, 5) or '').strip()})
+        if not re.match(r'^CAC\d+', no, re.I): continue  # 주 생산라인만
+        line = str(line).strip(); ord_ += 1
+        meta.append({"line_no": line, "sort_ord": ord_, "gubun": str(cell(r, 2) or '').strip(),
+                     "model_no": no, "jindo": str(cell(r, 5) or '').strip()})
         for c in cols:
             v = cell(r, c)
             if v is not None and str(v).strip():
                 recs.append({"line_no": line, "ymd": dates[c], "code": str(v).strip().replace('\n', '/')[:20]})
-    # 특수일(row15)
+    # 특수일 행 폐지(신형식엔 전용 행 없음)
     events = []
-    for c in cols:
-        v = cell(15, c)
-        if v is not None and str(v).strip():
-            events.append({"ymd": dates[c], "event": str(v).strip().replace('\n', '/')[:50]})
     return {"recs": recs, "meta": meta, "events": events,
             "date_from": dates[cols[0]], "date_to": dates[cols[-1]], "anchor": anchor_date}
 
