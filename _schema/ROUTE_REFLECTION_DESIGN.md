@@ -235,3 +235,9 @@
 - ★**route 구조 경험적 전수검증**(스칼라=데이터도출 비례): **다WO 제품 437 전부 = 100% diff0**(mat집합안정+비례·실패류0). route(대표WO 단위)가 전WO plan 완전재현 확정.
 - ∴ materializer 로직 검증완료. 실제 recompose는 STEP7 공식 재사용→diff0(공식 재구현 금지). 테스트테이블 정리.
 - **단계2(다음)**: soyo.py STEP7이 활성route 있으면 route구조 전개(자기 CEILING/prod_rate 공식으로)·없으면 현행 v_pr_bom(R01 fallback). dev·라이브 plan_part_mat 미접촉·per-product 멱등.
+
+## §15-7. 단계2a — 661 route materialize(테스트테이블)(2026-08-24)
+- **nx.route_line_test**(assy·bom_level·upper_item·prod_item·mat·unit_qty) = 654제품·8148행 materialize(7 skip=plan_qty스칼라없음). ★실제 sourcing_route/plan 미접촉(테스트테이블).
+- 검증: **mat수 일치 654/654**(route mat구성=plan_part_mat). 구조 완전.
+- unit_qty=part_plan_qty/scalar(scalar=CEILING(plan_qty×use_qty×prod_rate/100), 대표WO). 대표WO 정확재현·타WO는 STEP7공식이 정확도 담당(§15-6 437/437 비례증명).
+- **단계2b(다음)**: soyo.py STEP7 route-aware — 활성route(route_line_test/실route) 있으면 seed×route_unit 전개(STEP7 자기 CEILING seed 재사용), 없으면 v_pr_bom fallback. dev·copy plan테이블에 재생성·전661 diff0 게이트. ★라이브 무접촉.
