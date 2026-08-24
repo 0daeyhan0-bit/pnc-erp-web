@@ -466,9 +466,11 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     except Exception: jaego_prod = jaego_gagong = jaego_weld = 0
     try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
     except Exception: jaego_sales = 0
-    try:   # 자재수불(자재재고): matledger 월기준(일별마감 없음). rows에 basic/curr/amt(금액)
-        _mr = matledger(period='month', ymd=ym).get('rows', [])
-        jaego_mat = round(sum(float(x.get('basic_amt') or 0) for x in _mr) - sum(float(x.get('amt') or x.get('curr_amt') or 0) for x in _mr))
+    try:   # ★자재 재고조정 = 자재일마감(이동평균) 정본 nx.mat_stock_daily: 기초금액(월초前 최신) − 현재금액(조회일 최신)
+        _c8, _mb = _rows(f"SELECT SUM(stock_amt) a FROM (SELECT stock_amt, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<'{m0}') t WHERE rn=1")
+        _c9, _me = _rows(f"SELECT SUM(stock_amt) a FROM (SELECT stock_amt, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<='{d6}') t WHERE rn=1")
+        _mbase = float((_mb[0]['a'] if _mb and _mb[0]['a'] is not None else 0)); _mcur = float((_me[0]['a'] if _me and _me[0]['a'] is not None else 0))
+        jaego_mat = round(_mbase - _mcur)
     except Exception: jaego_mat = 0
     jaego = jaego_prod + jaego_sales + jaego_mat
     silrae = net_t['tot'] - jaego   # 실재고(조정후) = 실매입 − 재고조정

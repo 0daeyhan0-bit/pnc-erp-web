@@ -200,6 +200,12 @@ AJR75563402 (base, bom_id 3998) — 자식3
 - **★교훈(방법론)**: leaf/최하위 정의는 "bom_header 여부"가 아니라 **"비-except 자식 유무"**로 해야 실제 소요 엔진과 일치. self-baseline 비교 전 leaf 정의 대칭성 검증 필수. **사용자 "검증 필수" 지적이 유령 부채를 차단**.
 - **현재 미러 소요 부채 상태 = 미확정(내 파일럿은 방법론 오류로 무효)**. 진짜 현재 −2.7% 여부는 **실제 소요 파이프라인(compose_mat/plan_part_mat vs 레거시)** 기준으로만 판정 가능(PLAN_UPLOAD가 그 방식). 라이브 plan 미접촉·타인 계획수정중이라 지금 재측정 보류.
 
+### ★9-6c. 생산소요 BOM레벨 diff0 재측정 (2026-08-24, 올바른 방법·읽기전용)
+**최상위 요구([[feedback-protect-production-plan]]): 생산계획·협력사계획=레거시 diff0(LG라인 안전).** 그 관점 재측정:
+- **사용중 완제품 30표본**(체리픽 아님·결정적 분산), **올바른 leaf 정의**(비-except 자식 없으면 leaf), nx.bom_line vs 레거시 PR: **30/30 diff0·총비율 1.00000·불일치 0.** → **−2.7%가 BOM 레벨·이 표본에선 미관측.**
+- **★일반화 금지**: 30표본≠전체, BOM레벨≠plan레벨. "−2.7% 사라졌다" 단정 불가. PLAN_UPLOAD −2.7%는 **plan 파이프라인 레벨**(compose_mat vs plan_part_mat) — BOM diff0여도 plan레벨 차(STEP0 stale·LOT 반올림·변형SUB flag)는 별개.
+- **확인된 사실 = "BOM 기반 소요는 이 30표본에서 nx.bom_line==레거시 PR diff0"** 뿐. **권위측정(plan레벨 compose_mat vs 레거시 PR_T_PLAN_PART_MAT)은 미실시**(계획테이블 접촉·타인 계획수정중 → 조율/작업완료 후). flag-sync(08-19)가 BOM레벨 과다분 닫은 정황과 정합.
+
 ### 9-5. ★교정 — "R01 드리프트"는 오진 (2026-08-24, 코드+사용자 확인)
 9-4의 "R01 드리프트" 진단은 **틀렸음**. 실체:
 - **R01(현행) = 저장 안 되는 읽기전용 라이브 합성**. `sourcing.py sourcing_routes()`(:621)가 화면 열 때 `_route_baseline_lines(item)`(:472)로 **실사용 BOM 직하위를 라이브 직독**해 `route_id=0·route_no=1·route_name="현행(실사용 BOM)"·baseline=True`로 즉석 생성(:651-659, 120s 캐시). **nx.sourcing_route 테이블엔 R02+(사용자 저장 대안)만** — 그래서 조회시 1행(R02).
