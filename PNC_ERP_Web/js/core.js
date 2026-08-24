@@ -1937,12 +1937,14 @@ function lineCalView(host){
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date(), mon=new Date(T); mon.setDate(T.getDate()-((T.getDay()+6)%7));
   const st={data:null,from:iso(mon),weeks:4,anchor:iso(T),msg:'',busy:false};
-  const codeSty=(v)=>{const c=(v||'').trim().toUpperCase();
-    if(c==='B')return 'background:#e23b3b;color:#fff';
-    if(c==='A'||c==='D')return 'background:#37cde6;color:#04303a';
-    if(c==='E')return 'background:#232a33;color:#fff';
-    if(!c)return 'background:#eaedf1;color:#c2c8d0';
-    return 'background:#f3b0dd;color:#3a0b30';};   // 특수(SKD/rac이동/CC지원)
+  const codeSty=(v)=>{const s=(v||'').trim();
+    if(!s)return 'background:#eaedf1;color:#c2c8d0';     // 빈칸=휴무
+    const n=parseFloat(s);
+    if(!isNaN(n)){
+      if(n>10) return 'background:#e23b3b;color:#fff';    // 10 초과(10.5·11) = 빨강
+      if(n>=9) return 'background:#37cde6;color:#04303a'; // 9~10 = 하늘색
+    }
+    return 'background:#232a33;color:#fff';};             // 나머지(8·7.5·재작업·SKD·rac이동 등) = 검정
   const load=async()=>{
     try{const r=await fetch(`${API}/api/linecal/matrix?from_ymd=${st.from}&weeks=${st.weeks}`);st.data=await r.json();}
     catch(e){st.msg='백엔드 연결 실패';}
