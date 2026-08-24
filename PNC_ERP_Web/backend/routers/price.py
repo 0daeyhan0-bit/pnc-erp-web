@@ -186,7 +186,7 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
         if nature.strip(): w.append("nx.nature=?"); p.append(nature.strip())
         if use.strip() == "1": w.append("ISNULL(nx.use_flag,1)=1")      # 사용중
         elif use.strip() == "0": w.append("ISNULL(nx.use_flag,1)=0")    # 사용중지
-        cur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
+        cur.execute(f"""SELECT TOP {max(1,min(int(limit),30000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
               ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, ISNULL(i.PIPE_KIND,'') pk, ISNULL(i.UNIT,'') un,
               i.ITEM_DIAM, i.ITEM_THICK, i.ITEM_LENGTH, i.ITEM_WEIGHT, ISNULL(i.METAL_GUBUN,'') metal, ISNULL(i.IN_CUST_CODE,'') incust,
               ISNULL(i.WORK_CODE,'') work, ISNULL(i.MAKE_TYPE,'') mk, ISNULL(i.COST_GUBUN,'') cg, ISNULL(i.ITEM_STATUS,'') status,

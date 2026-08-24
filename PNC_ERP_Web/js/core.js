@@ -94,7 +94,7 @@ function enableSort(c, keys, getRows, render){
 /* ---- 모듈(상단) → 하위메뉴(좌측) 구성 ---- */
 const MODULES=[
  {id:'base',nm:'기준정보 관리',ic:'📦',subs:[
-   {id:'items',ic:'📦',nm:'품목 조회',cnt:DB.dashboard.items_total},
+   {id:'items',ic:'📦',nm:'품목 조회'},
    {id:'bomview',ic:'🔀',nm:'품목 BOM 조회'},
    {id:'lgbomview',ic:'🔀',nm:'LG BOM 관리'},
    {id:'docmgr',ic:'📐',nm:'도면/문서 조회'},
@@ -588,7 +588,17 @@ function itemLiveView(c, mat){
     const g=id=>c.querySelector(id);
     g('#it-go').onclick=()=>{st.q=g('#it-q').value;st.lg=g('#it-lg').value;st.sg=g('#it-sg').value;st.nat=g('#it-nat').value;st.use=g('#it-use').value;load();};
     g('#it-q').onkeyup=e=>{if(e.key==='Enter')g('#it-go').click();};
-    g('#it-xls').onclick=()=>{const hd=COLS.map(x=>x[1]);const out=st.rows.map(r=>COLS.map(x=>x[0]==='status'?(r[x[0]]==='사용'?'':(r[x[0]]||'')):(r[x[0]]==null?'':r[x[0]])));downloadCSV((mat?'자재목록':'품목목록')+'.csv',hd,out);};
+    g('#it-xls').onclick=async()=>{   // 화면(500)이 아닌 조회조건 전량을 재조회해 다운로드
+      const b=g('#it-xls'), t0=b.textContent; b.textContent='내보내는 중…'; b.disabled=true;
+      try{
+        const r=await fetch(`${API}/api/item/list?q=${encodeURIComponent(st.q)}&lgroup=${encodeURIComponent(st.lg)}&sgroup=${encodeURIComponent(st.sg)}&nature=${encodeURIComponent(st.nat)}&use=${encodeURIComponent(st.use)}&mat=${mat?'1':''}&limit=30000`);
+        const j=await r.json(); const rows=j.rows||[];
+        const hd=COLS.map(x=>x[1]);
+        const out=rows.map(r2=>COLS.map(x=>x[0]==='status'?(r2[x[0]]==='사용'?'':(r2[x[0]]||'')):(r2[x[0]]==null?'':r2[x[0]])));
+        downloadCSV((mat?'자재목록':'품목목록')+'.csv',hd,out);
+      }catch(e){alert('엑셀 내보내기 실패: '+e);}
+      finally{b.textContent=t0; b.disabled=false;}
+    };
     // ★UI규칙: 헤더 더블클릭=정렬(enableSort) + 컬럼폭 드래그(addResizer 내장). tbody만 갱신해 헤더/화살표 보존
     enableSort(c, COLS.map(x=>x[0]), ()=>st.rows, ()=>{const tb=c.querySelector('tbody'); if(tb)tb.innerHTML=rowsHTML();});
   };
