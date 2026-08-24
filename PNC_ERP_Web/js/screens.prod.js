@@ -835,7 +835,7 @@ SCREEN.partplan=(c)=>{
       //     bodyHtml의 블록분할(연속 item)과 똑같이 구간별로 집계.
       // ★블록키 = 파트(gpc)+도번(item). 도번만 쓰면 같은 도번의 S5(용접)/S5-2(조립)가 한 집계행으로 합쳐져
       //   파트명·앞공정·현재공정이 대표행(첫 공정) 값만 표시됨. bodyHtml 블록분할과 동일 규칙. 2026-08-19 수정.
-      const bkey0=r=>(r.gpc||'')+''+(r.item||'');
+      const bkey0=r=>(r.gpc||'')+''+(r.item||'')+''+(r.line||'');
       const out=[];
       for(let i=0;i<base.length;){
         const it=bkey0(base[i]); let j=i; const blk=[];
@@ -972,7 +972,7 @@ SCREEN.partplan=(c)=>{
         return kids+rowHtml(r,i+1,true,r._gkey,open);}).join('');
       // ★그룹키 = 파트(gpc)+도번(item). 도번만 쓰면 같은 도번의 S5(용접)/S5-2(조립)가 한 블록으로 묶여
       //   파트명이 첫 행에만 찍히고 아래 조립행이 용접행처럼 보임(앞공정 6이 용접에 붙은 것으로 오독). 2026-08-19 수정.
-      const bkey=r=>(r.gpc||'')+''+(r.item||'');
+      const bkey=r=>(r.gpc||'')+''+(r.item||'')+''+(r.line||'');
       if(st.view!=='상세')return disp.map((r,i)=>rowHtml(r,i+1,i===0||bkey(disp[i-1])!==bkey(r))).join('');
       // ★상세: 블록(연속 파트+도번) 단위 접기/펼치기. 상세행·소계행 아무 데나 클릭하면 그 블록이 접힘(집계처럼 소계만 보임).
       //   st.expand에 담긴 키 = "접힌" 블록(집계뷰에선 "펼친" 의미라 반대지만, 각 뷰 전환시 clear하므로 충돌 없음)
@@ -2024,9 +2024,10 @@ SCREEN.kitting=(host)=>{
       // ★파트별 생산계획과 동일: "연속된 같은 도번" 블록 단위로 집계행 생성(전역 Map이면 상세와 순서가 어긋남).
       //   집계행 = 청록 배경 + 클릭시 상세 드릴다운(상세는 집계행 "위"에 표시). 색상은 rollF(관련색 우선) 사용.
       for(let i=0;i<passed.length;){
-        const it=passed[i].r.item; let j=i; const blk=[];
-        while(j<passed.length&&passed[j].r.item===it){blk.push(passed[j]);j++;}
-        const r0=blk[0].r, gk=it+'@'+i, open=st.fold.has(gk);
+        const bk=x=>(x.r.item||'')+'\x01'+(x.r.line||'');
+        const it=bk(passed[i]); let j=i; const blk=[];
+        while(j<passed.length&&bk(passed[j])===it){blk.push(passed[j]);j++;}
+        const r0=blk[0].r, gk=it.replace('\x01','|')+'@'+i, open=st.fold.has(gk);
         const g={item:r0.item,gpc:r0.gpc,gpcnm:r0.gpcnm,line:r0.line,inhm:r0.inhm,part_ymd:r0.part_ymd,wo:'',swo:'',assy:r0.assy,
                  use_qty:r0.use_qty,days:{},dcov:{},dfin:{},drdy:{},
                  prior_plan:0,prior_cover:0,prior_ready:0,prior_fin:'0',plan_qty:0,finish:0,ready_qty:0,
@@ -2051,9 +2052,10 @@ SCREEN.kitting=(host)=>{
       // ★상세뷰: 파트별 생산계획처럼 "연속된 같은 도번" 블록마다 청록 소계행(t:'s') 추가 + 블록 접기 지원.
       if(st.view==='상세'){
         for(let i=0;i<passed.length;){
-          const it=passed[i].r.item; let j=i; const blk=[];
-          while(j<passed.length&&passed[j].r.item===it){blk.push(passed[j]);j++;}
-          const gk=it+'@'+i, folded=st.fold.has(gk);
+          const bk=x=>(x.r.item||'')+'\x01'+(x.r.line||'');
+        const it=bk(passed[i]); let j=i; const blk=[];
+          while(j<passed.length&&bk(passed[j])===it){blk.push(passed[j]);j++;}
+          const gk=it.replace('\x01','|')+'@'+i, folded=st.fold.has(gk);
           if(!folded) blk.forEach(({r,i:ri})=>{seq++;flat.push({t:'m',r,idxs:[ri],seq});});
           flat.push({t:'s',blk:blk.map(o=>o.r),gk,folded});
           i=j;
