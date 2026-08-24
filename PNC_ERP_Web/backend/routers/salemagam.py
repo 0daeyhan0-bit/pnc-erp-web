@@ -109,6 +109,80 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
         nx.close()
     return {"ym": y, "cc": cc, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
 
+@router.get("/api/salemagam/lines")
+def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
+                    q: str = Query(""), cust: str = Query(""), cust_code: str = Query("")):
+    """★2026-08-23 레거시 w_pu_sale_010 형태 = 집계를 P/No 단위로 펼친 목록(거래처×자도번×단가).
+    basis='magam'(마감기준: 거래처별 마감일 창) | 'input'(입고기준: fr~to 일자범위, 기본 당월1일~오늘).
+    일자별 수량 피벗(byday) 포함 → 프론트에서 일자 컬럼으로 전개. 거래처 그룹 소계는 프론트에서 계산."""
+    y = _dig4(ym) or _cur_ym()
+    if basis == "input":
+        f6 = "".join(ch for ch in str(fr or "") if ch.isdigit())[:6]
+        t6 = "".join(ch for ch in str(to or "") if ch.isdigit())[:6]
+        if not (len(f6) == 6 and len(t6) == 6):
+            raise HTTPException(400, "입고기준은 fr/to(YYMMDD) 필요")
+        win = f"A.MAINT_YMD>='{f6}' AND A.MAINT_YMD<='{t6}'"
+        lo, hi = f6, t6
+    else:
+        _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
+        if _pm == 0: _pm = 12; _py -= 1
+        win = _sale_win().format(ym=y)
+        lo, hi = f"{_py:02d}{_pm:02d}00", f"{y}99"
+    where = [f"A.MAINT_TAG='5'", f"A.MAINT_YMD>='{lo}'", f"A.MAINT_YMD<='{hi}'", win]
+    pf = []
+    if cust_code.strip():
+        where.append("A.CUST_CODE=?"); pf.append(cust_code.strip())
+    elif cust.strip():
+        where.append("(A.CUST_CODE=? OR C.CUST_DESC LIKE ?)"); pf += [cust.strip(), f"%{cust.strip()}%"]
+    if q.strip():
+        where.append("(A.MAT_CODE LIKE ? OR M.ITEM_DESC LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT A.CUST_CODE cc, MAX(C.CUST_DESC) cnm, A.MAT_CODE mat, ISNULL(A.ITEM_CODE,'') moda,
+            MAX(ISNULL(M.ITEM_DESC,'')) nm, MAX(ISNULL(M.ITEM_SPEC,'')) spec, MAX(ISNULL(M.UNIT,'')) unit,
+            A.MAINT_COST cost, A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
+          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A
+            JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE
+            JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE
+          WHERE {' AND '.join(where)}
+          GROUP BY A.CUST_CODE, A.MAT_CODE, ISNULL(A.ITEM_CODE,''), A.MAINT_COST, A.MAINT_YMD""", *pf)
+        raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+    finally:
+        cn.close()
+    return _magam_lines_shape(raw, y, basis)
+
+def _magam_lines_shape(raw, y, basis):
+    """(cc,모도번,자도번,단가) 단위로 묶고 일자별 수량 피벗. 거래처→금액순 정렬, 거래처 안은 모도번·자도번순.
+    ★모도번(ITEM_CODE)이 다르면 별개 행 — 레거시 w_pu_sale_010 동일(같은 자도번이라도 상위품번별로 분리)."""
+    keyed = {}; days = set()
+    for r in raw:
+        ymd = str(r["ymd"] or "")
+        moda = str(r.get("moda") or "").strip()
+        k = (r["cc"], moda, str(r["mat"] or "").strip(), float(r["cost"] or 0))
+        days.add(ymd)
+        it = keyed.setdefault(k, {"cc": r["cc"], "cnm": r["cnm"], "mat": k[2], "moda": moda,
+                                  "nm": r["nm"], "spec": r["spec"], "unit": r["unit"],
+                                  "cost": k[3], "qty": 0.0, "amt": 0.0, "byday": {}})
+        qv = float(r["q"] or 0); av = float(r["amt"] or 0)
+        it["qty"] += qv; it["amt"] += av
+        it["byday"][ymd] = it["byday"].get(ymd, 0.0) + qv
+    lines = list(keyed.values())
+    for it in lines:
+        it["qty"] = round(it["qty"], 2); it["amt"] = round(it["amt"], 2)
+    # 거래처 정렬 = 금액 큰 순(집계화면과 동일), 거래처 안은 자도번순
+    camt = {}
+    for it in lines:
+        camt[it["cc"]] = camt.get(it["cc"], 0.0) + it["amt"]
+    # ★집계화면(HAVING SUM(amt)<>0)과 동일하게 금액 0원 거래처는 제외 — 펼침합=집계합 보장
+    lines = [it for it in lines if round(camt.get(it["cc"], 0.0), 2) != 0]
+    lines.sort(key=lambda x: (-abs(camt.get(x["cc"], 0)), x["cc"], x["moda"], x["mat"], x["cost"]))
+    return {"ym": y, "basis": basis, "days": sorted(days), "rows": lines,
+            "cnt": len(lines),
+            "totqty": round(sum(i["qty"] for i in lines), 2),
+            "totamt": round(sum(i["amt"] for i in lines), 2)}
+
 @router.get("/api/salemagam/reasons")
 def salemagam_reasons():
     nx = _nx(); nc = nx.cursor()

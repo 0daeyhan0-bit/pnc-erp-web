@@ -656,12 +656,16 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for b, c in g["_cells"].items():
                     sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
                     # ★배분순서 = 레거시 SP 커서 order by (part_plan_ymd, part_output_hm, plan_ymd, output_hm, work_order, split_work_order) 완전이식 → 동순위 행 충당 일치
-                    grp.setdefault(keyfn(g), []).append((c, sd, g.get("inhm") or '', g.get("plan_ymd") or '', g.get("output_hm") or g.get("inhm") or '', g.get("wo") or '', g.get("swo") or ''))
+                    #   ★2026-08-23 lgh(LG OUTPUT시간) 추가 = work_order 앞. 당일이전 칸은 part_ymd·inhm·plan_ymd·ohm 이
+                    #   전부 같은 행이 여러 건 몰려(동일 제번 분할) work_order 문자열순으로 갈리던 탓에
+                    #   OUTPUT 13:15 건이 08:30 건보다 먼저 충당되는 역전이 났다. 최종납기=LG OUTPUT시간이라 이른 건이 먼저.
+                    #   (화면 정렬 rows.sort 는 이미 lgh 를 wo 앞에 두고 있어 표시순서와도 일치)
+                    grp.setdefault(keyfn(g), []).append((c, sd, g.get("inhm") or '', g.get("plan_ymd") or '', g.get("output_hm") or g.get("inhm") or '', g.get("lgh") or '', g.get("wo") or '', g.get("swo") or ''))
             for k, lst in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
-                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6]))
-                for c, sd, hm, _py, _ohm, _wo, _swo in lst:
+                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6], x[7]))
+                for c, sd, hm, _py, _ohm, _lgh, _wo, _swo in lst:
                     if pool <= 0: break
                     jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
                     if jan <= 0: continue
