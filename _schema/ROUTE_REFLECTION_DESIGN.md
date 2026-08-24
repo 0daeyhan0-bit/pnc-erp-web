@@ -302,3 +302,12 @@
 - ★실측(AJR30125602, route-aware STEP7): **R01 mat 111 → R02 mat 137(+26 내부자재)**. R02 추가분=외주SUB(AJR30125602-A-S-1/AJR30125601-A-S-4, except=1)를 내부제작하며 생긴 동관컴포넌트(MJU00752701·MJU00776504…). R01전용=0(R02=R01 내부제작 상위확장). **정확한 내부제작 결과 확인.**
 - ∴ **R02 활성→생산계획 내부제작 기준 생성 실측완료.** 협력사계획=plan_part_mat 재사용→자동반영. route-aware STEP7이 R01(diff0)·R02(내부제작) 둘 다 정확.
 - **남은 적용(dev, 사용자 "이 프로그램 적용되어야"):** route_edges 테이블(route_id별 R01=v_pr_bom활성·R02=전엣지 or 편집) + soyo.py STEP7 재귀멤버 route리졸버(활성route_id의 route_edges 조인) + Rnn편집UI. 매일rebuild 자기갱신·라이브 무접촉.
+
+## §16-2. 협력사계획 규명(2026-08-24) — 2시스템 일관 필요
+- 협력사계획 = `nx.plan_mat_source`(plan_part_mat 읽음)에서 SUPPLY_GUBUN∈{외주가공/유상사급/매입}. 현행 분포: 매입49223·유상사급25289·외주가공13972·자체10068.
+- ★except SUB=외주 자재(협력사 잡힘). 37제품의 except SUB 62종중 11종이 협력사(외주가공/유상사급/매입).
+- ★규명: **외주→제작은 "제거"가 아니라 "재분류"**. X를 제작화=X가 협력사(외주)→생산(제작) 재분류 + X 원자재 신규등장. X가 사라지는게 아님.
+- ★★**2축 함께 필요**: ①route_edges(내구현·전개)=X 원자재 등장 ②route_alloc/sourcing_profile(기존·공급방식)=X 외주→제작 재분류. 내 R02테스트는 route_edges만 → X 안빠짐(재분류 미적용).
+- **plan_mat_source가 plan_part_mat를 읽으므로**(soyo.py 123) route_edges 변경은 협력사에 자동 전파되나, 공급방식 재분류는 route_alloc/profile이 route별로 걸려야 정확.
+- 검증완료: 생산계획 축(route_edges) 외주→제작 37/37 내부자재추가(+646)·R01 diff0 100%. **남은=route_edges↔route_alloc/profile 일관 등록**(제작↔외주 스왑시 둘 동시) + 100건 양방향 협력사+생산 검증.
+- ★현행 supply_gubun 라벨=구(외주가공/유상사급/자체)·make_type 5way(제작/외주/구매/사급/외주직납)와 별개=라벨통일 필요(별건).
