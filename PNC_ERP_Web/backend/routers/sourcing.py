@@ -383,7 +383,13 @@ def subvariant_include(payload: dict = Body(...)):
 # 상단=우리 기준 BOM(전 공정 우리가 만든다, bom/tree real=0). 하단=조달경로 후보 CRUD(경로1=현행 baseline·경로2..=대안).
 # 승인게이트: 저장/편집 시 approve_flag=0 → 개발 승인(approve)해야 조달프로파일 후보로 노출(단일 소스 정합).
 _ROUTE_GUBUN = ["자체", "매입", "외주유상", "외주무상"]          # 경로 헤더 구분
-_LINE_GUBUN = ["제작", "매입", "사급"]                            # 라인 구분
+_LINE_GUBUN = ["제작", "외주", "구매", "사급", "외주직납"]        # 라인 구분 = 생산구분(make_type) 5-way (2026-08-24)
+_MK_GUBUN = {"1": "제작", "2": "외주", "3": "구매", "4": "사급", "5": "외주직납"}
+def _mk5(mk, has_bom=False):
+    """★생산구분(make_type) → 구분 5-way(레거시 견적 생산구분 그대로). 공백=BOM有→제작/無→구매.
+       ★SAGUB_FLAG(우리가 업체에 주는 사급·중량정산용)는 별개 축이라 구분엔 미사용."""
+    g = _MK_GUBUN.get(str(mk or "").strip())
+    return g if g else ("제작" if has_bom else "구매")
 
 _SCHEMA_READY = False   # ★속도: 스키마 멱등체크는 프로세스당 1회만(매 요청 11 메타 라운드트립 ~104ms 제거). 스키마는 런타임 불변.
 def _ensure_route_tbl(cur):
@@ -484,7 +490,8 @@ def _route_baseline_lines(item):
               ISNULL(m.ITEM_DESC,'') nm, ISNULL(m.MAKE_TYPE,'') mk, ISNULL(m.IN_CUST_CODE,'') cust,
               ISNULL(c.CUST_DESC,'') custnm, ISNULL(m.METAL_GUBUN,'') metal,
               ISNULL(m.ITEM_DIAM,0) diam, ISNULL(m.ITEM_THICK,0) thick, ISNULL(m.ITEM_LENGTH,0) len,
-              ISNULL(b.BOM_SEQ,0) sq
+              ISNULL(b.BOM_SEQ,0) sq,
+              CASE WHEN EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom bb WHERE LTRIM(RTRIM(bb.ITEM_CODE))=LTRIM(RTRIM(b.MAT_CODE))) THEN 1 ELSE 0 END has_bom
             FROM PARTNER_ERP_TEST3.nx.v_cs_bom b
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=b.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
@@ -493,7 +500,7 @@ def _route_baseline_lines(item):
               AND b.MAT_CODE NOT LIKE 'RAC%' ORDER BY b.BOM_SEQ""", item.strip())
         out = []
         for i, r in enumerate(cur.fetchall(), 1):
-            gub = "사급" if str(r.sag) == '1' else ("제작" if str(r.mk) == '1' else "매입")
+            gub = _mk5(r.mk, bool(r.has_bom))   # ★생산구분(make_type) 5-way (SAGUB 미사용)
             out.append({"line_id": 0, "sort_seq": i, "child_item": r.child, "child_name": r.nm, "qty": float(r.q or 0),
                         "gubun": gub, "vendor_code": str(r.cust).strip(), "vendor_name": r.custnm,
                         "is_rawmat": 1 if str(r.metal).strip() else 0, "diam": float(r.diam or 0), "thick": float(r.thick or 0),
@@ -896,6 +903,14 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
         except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
     rows = d.get("rows", []) if isinstance(d, dict) else []
     n = len(rows); stack = {0: None}; seq = 0; cnt = 0
+    # ★구분 = 생산구분(make_type) 5-way 룩업 (cost_gubun/하드코딩 폐기, 2026-08-24)
+    _mkmap = {}
+    _codes = list({str(r.get("code", "")).strip().upper() for r in rows if str(r.get("code", "")).strip()})
+    for _i in range(0, len(_codes), 500):
+        _ck = _codes[_i:_i + 500]; _ph = ",".join("?" * len(_ck))
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(MAKE_TYPE,\'\') FROM nx.PR_M_ITEM WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN (" + _ph + ")", *_ck)
+        for _rr in cur.fetchall():
+            _mkmap[_rr[0]] = str(_rr[1]).strip()
     for i, r in enumerate(rows):
         L = int(r.get("level", 0) or 0)
         if L == 0: continue                                     # ASSY 루트(자식 parent_line=None)
@@ -906,16 +921,17 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
         parent_line = stack.get(L - 1)
         if has_child:                                           # 중간노드 = SUB
             seq += 1; cnt += 1
+            _sgub = _mk5(_mkmap.get(code.upper()), True)        # ★SUB 구분 = SUB 품번 생산구분(하드코딩 '자체' 폐기)
             cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,node_kind,sub_item,parent_line)
-                OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,N'자체','SUB',?,?)""",
-                rid, seq, _cap(code, 60), _cap(name, 120), _cap(code, 60), parent_line)
+                OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,?,'SUB',?,?)""",
+                rid, seq, _cap(code, 60), _cap(name, 120), _sgub, _cap(code, 60), parent_line)
             stack[L] = int(cur.fetchone()[0])
         else:                                                   # leaf
             mat = float(r.get("mat", 0) or 0)
             if mat <= 0: continue                               # phantom/mat=0
             if code.upper().startswith("RAC") and "용접링" not in name: continue   # 용접봉 제외·용접링 유지
             metal = str(r.get("metal", "") or "").strip()
-            gub = "제작" if str(r.get("cost_gubun", "") or "") == "3" else "매입"
+            gub = _mk5(_mkmap.get(code.upper()), False)         # ★리프 구분 = 생산구분(make_type) (cost_gubun 폐기)
             seq += 1; cnt += 1
             cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
                 vendor_code,is_rawmat,diam,thick,len_val,material,spec,note,node_kind,parent_line)
