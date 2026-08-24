@@ -17,10 +17,16 @@
 | fin_diam/thick/length | 치수 | bom_dim |
 | **weight_actual** | **우리 실측 중량=원소재소요량** = weight_calc(치수) | bom_dim.fin_weight |
 | **raw_lg_kg** | **LG 인증 원소재 kg**(정산 LME차액용) | nx.bom 원소재 edge |
-| gagong_proc | 공정코드 | bom_line.gagong_proc |
 | dim_src | 치수출처 | bom_dim |
 
 - **중량=원소재소요량=1축**(동관kg), 값 2개: 우리실측(weight_calc=fin_weight) / LG인증(edge). 차이=사급정산 근거. [[newerp-weight-source-lg-vs-actual]]
+- ★공정/라우팅은 **bom_flat 컬럼 아님**(gagong_proc 제거 2026-08-24). 3축 분리 설계 준수 = §3-2 별도축.
+
+## 3-2. 공정/라우팅 축 = 별도 테이블 (route-aware, 3축분리 설계)
+- **R01 현행** = `nx.routing`(173,104행·node_item별 proc_code·work_qty·prod_uph·sort_seq). 제작동관 leaf 3,989/4,136(96.4%) 커버.
+- **Rnn 대체** = `nx.sourcing_route_proc`(route_id·node_item별, 현재 32행).
+- 용접도 동일 분리: proc_weld(R01)/sourcing_route_weld(Rnn). 소싱=sourcing_route.
+- → BOM(재료)=bom_flat / Routing(공정)=routing / Weld=proc_weld / Sourcing=sourcing_route, 각 R01∥Rnn.
 
 ## 3. 실측 결과 (2026-08-24)
 - **31,746행 · 사용중 제품 3,689** (use_flag=1 ∩ bom_header).
