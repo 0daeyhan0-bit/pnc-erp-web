@@ -580,31 +580,42 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             except Exception: pass
             # ★ASSY(완제품) 재고 = 라이브 + 웹실적(2026-08-20) — 키팅 grid 와 동일 규칙.
             #   라이브 + max(nx−라이브, 0). 중복 감수(테스트 단계) — 상세 사유는 grid 쪽 주석 참조.
+            # ★2026-08-24 소스 분기 추가: src=live 면 라이브만 본다(키팅과 동일).
+            #   기존엔 분기가 없어 '라이브 대사' 를 골라도 nx 가 섞여, 미러가 멈춘 동안
+            #   낡은 nx 가 살아남았다(실측 AJR30122602: 라이브 40@08-24 15:35 /
+            #   nx 150@08-22 → 웹 150, 레거시 40).
             try:
                 _lv = {}; _nxv = {}
                 cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                 for rr in cur.fetchall(): _lv[rr[0]] = float(rr[1] or 0)
-                try:
-                    cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
-                    for rr in cur.fetchall(): _nxv[rr[0]] = float(rr[1] or 0)
-                except Exception: pass
-                assystk = dict(_lv)
-                for k, v in _nxv.items():
-                    assystk[k] = _lv.get(k, 0.0) + max(v - _lv.get(k, 0.0), 0.0)
+                if _ck == "live":
+                    assystk = dict(_lv)
+                else:
+                    try:
+                        cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                        for rr in cur.fetchall(): _nxv[rr[0]] = float(rr[1] or 0)
+                    except Exception: pass
+                    assystk = dict(_lv)
+                    for k, v in _nxv.items():
+                        assystk[k] = _lv.get(k, 0.0) + max(v - _lv.get(k, 0.0), 0.0)
             except Exception: pass
             try:   # ★중간공정 파트재고(레거시 SP JOB 'B') = PR_T_MAT_STOCK_WH + PU_T_MAT_STOCK_WH by MAT_CODE(자도번), 무필터
                 #   ★PR_T_MAT_STOCK_WH = nx(키팅 line 123과 동일) — 웹 준비등록이 자재를 여기로 옮김.
                 #   ★PU_T_MAT_STOCK_WH(자재창고) = 라이브 + 웹실적(2026-08-20, ASSY와 동일 규칙).
                 #     웹 바코드실적이 BOM 자재를 nx 자재창고에서 차감하므로 그 분도 반영돼야 함.
-                cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
+                # ★2026-08-24 src=live 면 파트창고도 라이브에서 읽는다(레거시 순수 대조).
+                #   기본(nx)은 웹 준비등록이 옮긴 nx 파트창고를 본다.
+                _prwh = "PARTNER_ERP.dbo" if _ck == "live" else "PARTNER_ERP_TEST3.nx"
+                cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {_prwh}.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
                 for rr in cur.fetchall(): partstk[rr[0]] = float(rr[1] or 0)
                 _ml = {}; _mn = {}
                 cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
                 for rr in cur.fetchall(): _ml[rr[0]] = float(rr[1] or 0)
-                try:
-                    cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
-                    for rr in cur.fetchall(): _mn[rr[0]] = float(rr[1] or 0)
-                except Exception: pass
+                if _ck != "live":
+                    try:
+                        cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
+                        for rr in cur.fetchall(): _mn[rr[0]] = float(rr[1] or 0)
+                    except Exception: pass
                 for _k3 in set(_ml) | set(_mn):
                     _v3 = _ml.get(_k3, 0.0) + max(_mn.get(_k3, 0.0) - _ml.get(_k3, 0.0), 0.0)
                     partstk[_k3] = partstk.get(_k3, 0.0) + _v3
@@ -674,6 +685,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): _sl[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
                 try:
+                    if _ck == "live": raise StopIteration   # ★2026-08-24 live=라이브 출하만(레거시 대조)
                     cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                     for rr in cur.fetchall(): _sn[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
                 except Exception: pass
