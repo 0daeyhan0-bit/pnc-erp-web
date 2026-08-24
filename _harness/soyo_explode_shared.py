@@ -215,3 +215,109 @@ def weight_explode_ex(eng, item):
 
     rk, wk = walk(item)
     return (round(rk, 6), round(wk, 6))
+
+
+# ===================== ★통합 explode (생산+중량 단일 nx.bom_line raw) =====================
+# 생산·중량 둘 다 nx.bom_line raw → 하나의 explode_bomline으로 통합(전 컬럼 1회 읽기·캐시).
+# 원가는 RAC→proc_weld 차이(eng.lines)로 별도 유지. upper 키 일관.
+def _lines_bl(eng, item):
+    """통합 nx.bom_line raw 직상위 [(child_u, qty, qty_pr, except'0/1', sagub int)]. RAC포함·1회캐시."""
+    bid = eng.bom_id(item)
+    if bid is None:
+        return []
+    if not hasattr(eng, '_lines_bl_cache'):
+        eng._lines_bl_cache = {}
+    if bid not in eng._lines_bl_cache:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), qty, ISNULL(qty_pr, qty),
+            ISNULL(except_flag,0), ISNULL(sagub_default,0)
+            FROM nx.bom_line WHERE bom_id=? ORDER BY seq""", bid)
+        eng._lines_bl_cache[bid] = [(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0),
+                                     '1' if r[3] else '0', int(r[4] or 0)) for r in eng.cur.fetchall()]
+    return eng._lines_bl_cache[bid]
+
+
+def explode_bomline(eng, item):
+    """★통합 explode(생산+중량) — nx.bom_line raw 1회. kids[u]=[(child_u,qty,qty_pr,except,sagub)]. upper키."""
+    kids = {}
+
+    def build(node):
+        u = node.strip().upper()
+        if u in kids:
+            return
+        ch = _lines_bl(eng, node)
+        kids[u] = ch
+        for c, q, qp, ex, sag in ch:
+            build(c)
+    build(item)
+    return kids
+
+
+def prod_soyo_ex2(eng, item):
+    """생산 walker(통합 explode_bomline) — qty_pr·except_flag. prod_soyo와 diff0 대상."""
+    import nx_soyo_engine as _se
+    kids = explode_bomline(eng, item)
+    raw = {}
+
+    def walk(node, cum_q, lvl, seen):
+        u = node.strip().upper()
+        ch = kids.get(u, []) if u not in seen else []
+        ch = [(c, qp) for (c, q, qp, ex, sag) in ch if ex != '1']
+        if ch:
+            for c, qp in ch:
+                walk(c, cum_q * qp, lvl + 1, seen | {u})
+        if not ch and lvl > 0:
+            raw.setdefault(u, []).append((lvl, cum_q))
+    walk(item, 1.0, 0, set())
+    out = {}
+    for mc, occ in raw.items():
+        if _se._is_weldrod(eng, mc):
+            continue
+        out[mc] = round(sum(q for _, q in occ), 6)
+    return out
+
+
+def weight_explode_ex2(eng, item):
+    """중량 walker(통합 explode_bomline) — qty·sagub_default. weight_explode와 diff0 대상."""
+    import nx_soyo_engine as _se
+    COOP_SET, COOPB = _se._wt_coop(eng)
+    kids = explode_bomline(eng, item)
+    memo = {}
+
+    def walk(node):
+        u = node.strip().upper()
+        if u in memo:
+            return memo[u]
+        memo[u] = (0.0, 0.0)
+        ch = kids.get(u, [])
+        if ch:
+            rk = wk = 0.0
+            for c, q, qp, ex, sag in ch:
+                if sag == 1:
+                    continue
+                cr, cw = walk(c)
+                rk += cr * q; wk += cw * q
+            if rk > 0 or wk > 0:
+                memo[u] = (rk, wk); return memo[u]
+            if u in COOP_SET:
+                memo[u] = (COOP_SET[u], 0.0); return memo[u]
+            cb = COOPB.get(u)
+            if cb:
+                rk = wk = 0.0
+                for c, q in cb:
+                    cr, cw = walk(c); rk += cr * q; wk += cw * q
+                memo[u] = (rk, wk); return memo[u]
+            return memo[u]
+        cb = COOPB.get(u)
+        if cb and u not in COOP_SET:
+            rk = wk = 0.0
+            for c, q in cb:
+                cr, cw = walk(c); rk += cr * q; wk += cw * q
+            memo[u] = (rk, wk); return memo[u]
+        if u in COOP_SET:
+            memo[u] = (COOP_SET[u], 0.0); return memo[u]
+        w, cls = _se._wt_meta(eng, node)
+        memo[u] = (w, 0.0) if cls == 'raw' else ((0.0, w) if cls == 'weld' else (0.0, 0.0))
+        return memo[u]
+
+    rk, wk = walk(item)
+    return (round(rk, 6), round(wk, 6))
