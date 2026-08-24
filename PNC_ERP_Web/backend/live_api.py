@@ -457,7 +457,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     def _sdelta(rows, basek='basic', costk='cost', amtk='amt'):
         cur_a = sum(float(x.get(amtk) or 0) for x in rows)
         base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
-        return round(base_a - cur_a)
+        return round(cur_a - base_a)   # ★재고조정 = 현재 − 기초 (재고증가=양수·감소=음수). 실재고=실매입+재고조정
     try:   # ★조회일 기준. stage=GAGONG(line P0001)/WELD(그외)로 생산 재고조정 분리
         _psrows = _prodstock(ym, m0, d6)
         jaego_gagong = _sdelta([r for r in _psrows if r.get('stage') == 'GAGONG'])
@@ -470,10 +470,10 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
         _c8, _mb = _rows(f"SELECT SUM(stock_amt) a FROM (SELECT stock_amt, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<'{m0}') t WHERE rn=1")
         _c9, _me = _rows(f"SELECT SUM(stock_amt) a FROM (SELECT stock_amt, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<='{d6}') t WHERE rn=1")
         _mbase = float((_mb[0]['a'] if _mb and _mb[0]['a'] is not None else 0)); _mcur = float((_me[0]['a'] if _me and _me[0]['a'] is not None else 0))
-        jaego_mat = round(_mbase - _mcur)
+        jaego_mat = round(_mcur - _mbase)   # 현재 − 기초 (재고감소=음수)
     except Exception: jaego_mat = 0
     jaego = jaego_prod + jaego_sales + jaego_mat
-    silrae = net_t['tot'] - jaego   # 실재고(조정후) = 실매입 − 재고조정
+    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고조정(현재−기초). 재고증가면 더함·감소면 뺌
 
     # 당사ERP 유상사급 = ①의 유상사급-원재료+부품(확정입고, 총)
     dangsa_sagub = 0
