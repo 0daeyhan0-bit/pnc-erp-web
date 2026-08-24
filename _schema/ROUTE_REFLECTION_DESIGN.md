@@ -295,3 +295,10 @@
 ## 원가·협력사계획 (동일 메커니즘)
 - 협력사계획=plan_part_mat 재사용→soyo.py 하나로 자동반영(§아키텍처).
 - 원가 walker(cost_material)=별도 1곳, 동일 route_edges 소비하도록 추후.
+
+## §16-1. ★R02(내부제작) 활성 검증완료(2026-08-24)
+- 사용자 요청: R02 활성시 생산계획·협력사계획이 R02로 생성되는지 = 진짜 끝. 기존 R02 부정확→내부제작 기준으로 신규생성 검증.
+- **R02 내부제작 route_edges = v_pr_bom 전엣지**(except_flag 무시=외주SUB도 우리가 만듦, naewon식). R01=v_pr_bom 활성(except<>1).
+- ★실측(AJR30125602, route-aware STEP7): **R01 mat 111 → R02 mat 137(+26 내부자재)**. R02 추가분=외주SUB(AJR30125602-A-S-1/AJR30125601-A-S-4, except=1)를 내부제작하며 생긴 동관컴포넌트(MJU00752701·MJU00776504…). R01전용=0(R02=R01 내부제작 상위확장). **정확한 내부제작 결과 확인.**
+- ∴ **R02 활성→생산계획 내부제작 기준 생성 실측완료.** 협력사계획=plan_part_mat 재사용→자동반영. route-aware STEP7이 R01(diff0)·R02(내부제작) 둘 다 정확.
+- **남은 적용(dev, 사용자 "이 프로그램 적용되어야"):** route_edges 테이블(route_id별 R01=v_pr_bom활성·R02=전엣지 or 편집) + soyo.py STEP7 재귀멤버 route리졸버(활성route_id의 route_edges 조인) + Rnn편집UI. 매일rebuild 자기갱신·라이브 무접촉.
