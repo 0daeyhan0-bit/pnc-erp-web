@@ -161,7 +161,8 @@ def stock_save(payload: dict = Body(...)):
                          INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
                          UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
                         VALUES(?,?,?,?,?,?,?,?,?,'web',GETDATE(),'stockadjust','web',GETDATE(),'stockadjust')""",
-                    ymd, _sq, tag, _cc, _mc, store_qty, (r.get("REMARKS") or None), _cc, _gp)
+                    ymd, _sq, ("T" if tag == "RT" else tag), _cc, _mc, store_qty, (r.get("REMARKS") or None), _cc, _gp)
+                    # ★F2: MAINT_TAG=CHAR(1) → 반품 'RT'(2글자) 잘림오류로 수불장 누락됐음 → 'T'(자재창고반품) 매핑
             except Exception: pass
             saved += 1
         return {"ok": True, "count": saved}
@@ -421,6 +422,46 @@ def stockclose_status(ym: str = Query(""), point: str = Query("")):
     finally:
         cn.close()
 
+def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
+    """★F1: 자재 원장(stock_ledger MAT) 수정/삭제 시 조회정본(자재재고 PU_T_MAT_STOCK_WH·자재수불장 PU_T_STOCK_MAINT)도 동반 반영.
+       save는 3곳 반영하나 update/delete는 원장만 고쳐 수불장·재고가 stale(F1)였음. old_q→new_q(삭제=new_q=0).
+       ★F2: PU_T_STOCK_MAINT.MAINT_TAG=CHAR(1) → 반품 'RT'(2글자)는 'T'(자재창고반품)로 매핑(truncation 방지)."""
+    mat = str(mat or "").strip()
+    if not mat: return
+    cc = (str(cc or "").strip() or "Z99990")
+    gp = (str(gp or "").strip() or "IS0001")
+    mtag = "T" if str(tag).strip() == "RT" else (str(tag or "").strip()[:1] or "2")
+    dq = new_q - old_q
+    # 1) 자재재고 잔액(버킷=MAT_CODE·CUST_CODE·GAGONG_PROC_CODE) 델타 반영
+    try:
+        cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+              UPDATE_USER_ID='web',UPDATE_DATETIME=GETDATE(),UPDATE_WINDOW=?
+              WHERE MAT_CODE=? AND CUST_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""", dq, window, mat, cc, gp)
+        if cur.rowcount == 0 and abs(dq) > 1e-9:
+            cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,STOCK_QTY,
+                  UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW) VALUES(?,?,?,?,'web',GETDATE(),?)""", mat, cc, gp, dq, window)
+    except Exception: pass
+    # 2) 자재수불장: save가 남긴 web행(INSERT_WINDOW='stockadjust') 찾으면 in-place 수정/삭제, 못찾으면 보정행 insert
+    try:
+        cur.execute("""SELECT TOP 1 MAINT_YMD,MAINT_SEQ FROM nx.PU_T_STOCK_MAINT
+              WHERE MAINT_YMD=? AND MAT_CODE=? AND ABS(MAINT_QTY-?)<0.0001 AND MAINT_TAG=?
+                AND ISNULL(WH_CUST_CODE,'')=? AND ISNULL(GAGONG_PROC_CODE,'')=? AND INSERT_WINDOW='stockadjust'
+              ORDER BY MAINT_SEQ DESC""", ymd, mat, old_q, mtag, cc, gp)
+        hit = cur.fetchone()
+        if hit and abs(new_q) < 1e-9:            # 삭제 → 그 web행 삭제(내역서 사라짐)
+            cur.execute("DELETE FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ=?", hit[0], hit[1])
+        elif hit:                                 # 수정 → 그 web행 수량 갱신
+            cur.execute("""UPDATE nx.PU_T_STOCK_MAINT SET MAINT_QTY=?,UPDATE_USER_ID='web',UPDATE_DATETIME=GETDATE(),UPDATE_WINDOW=?
+                  WHERE MAINT_YMD=? AND MAINT_SEQ=?""", new_q, window, hit[0], hit[1])
+        elif abs(dq) > 1e-9:                       # 원본 못찾음 → 보정(델타)행 기록(잔액·수불합 정합 유지)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+            nsq = int(cur.fetchone()[0] or 1)
+            cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
+                  WH_CUST_CODE,GAGONG_PROC_CODE,INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                  VALUES(?,?,?,?,?,?,?,?,?,'web',GETDATE(),?,'web',GETDATE(),?)""",
+                ymd, nsq, mtag, cc, mat, dq, "원장수정보정", cc, gp, window, window)
+    except Exception: pass
+
 @router.post("/api/stock/update")
 def stock_update(payload: dict = Body(...)):
     """기존 원장행 수정(값 필드만). 키(MAINT_YMD,MAINT_SEQ)·자도번 불변, 저장부호 보존.
@@ -437,12 +478,13 @@ def stock_update(payload: dict = Body(...)):
     qty = float(payload.get("qty") or 0)
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT MAT_CODE, MAINT_QTY FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
+        cur.execute("SELECT MAT_CODE, MAINT_QTY, ISNULL(CUST_CODE,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(MAINT_TAG,'') FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
         row = cur.fetchone()
         if not row:
             return {"ok": False, "errors": [f"대상 없음 ({ymd}/{seq})"]}
         mat = str(row[0] or "").strip()
         old_stored = float(row[1] or 0)
+        old_cc = str(row[2] or "").strip(); old_gp = str(row[3] or "").strip(); old_tag = str(row[4] or "").strip()
         errs = []
         if _closed(cur, ymd):
             errs.append(f"마감월({_ym(ymd)}) 편집 불가")
@@ -474,6 +516,8 @@ def stock_update(payload: dict = Body(...)):
             (str(payload.get("GAGONG_PROC_CODE") or "").strip() or None),
             (str(payload.get("REMARKS") or "").strip() or None),
             "web", ymd, seq)
+        # ★F1: 원장만 고치면 자재수불장·자재재고(조회정본) stale → 미러 동반 반영
+        _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, new_stored, "stockupdate")
         return {"ok": True, "stored_qty": new_stored, "stock": new_sum}
     finally:
         cn.close()
@@ -488,12 +532,13 @@ def stock_delete(payload: dict = Body(...)):
         raise HTTPException(400, "MAINT_SEQ 오류")
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT MAT_CODE, MAINT_QTY FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
+        cur.execute("SELECT MAT_CODE, MAINT_QTY, ISNULL(CUST_CODE,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(MAINT_TAG,'') FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
         row = cur.fetchone()
         if not row:
             return {"ok": False, "errors": [f"대상 없음 ({ymd}/{seq})"]}
         mat = str(row[0] or "").strip()
         old_stored = float(row[1] or 0)
+        old_cc = str(row[2] or "").strip(); old_gp = str(row[3] or "").strip(); old_tag = str(row[4] or "").strip()
         errs = []
         if _closed(cur, ymd):
             errs.append(f"마감월({_ym(ymd)}) 삭제 불가")
@@ -505,6 +550,8 @@ def stock_delete(payload: dict = Body(...)):
         if errs:
             return {"ok": False, "errors": errs}
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
+        # ★F1: 삭제도 자재수불장·자재재고(조회정본) 동반 반영(save가 남긴 web행 삭제 + 잔액 되돌림)
+        _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, 0.0, "stockdelete")
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         cn.close()
