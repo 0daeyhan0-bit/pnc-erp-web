@@ -903,6 +903,14 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
         except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
     rows = d.get("rows", []) if isinstance(d, dict) else []
     n = len(rows); stack = {0: None}; seq = 0; cnt = 0
+    # ★구분 = 생산구분(make_type) 5-way 룩업 (cost_gubun/하드코딩 폐기, 2026-08-24)
+    _mkmap = {}
+    _codes = list({str(r.get("code", "")).strip().upper() for r in rows if str(r.get("code", "")).strip()})
+    for _i in range(0, len(_codes), 500):
+        _ck = _codes[_i:_i + 500]; _ph = ",".join("?" * len(_ck))
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN (" + _ph + ")", *_ck)
+        for _rr in cur.fetchall():
+            _mkmap[_rr[0]] = str(_rr[1]).strip()
     for i, r in enumerate(rows):
         L = int(r.get("level", 0) or 0)
         if L == 0: continue                                     # ASSY 루트(자식 parent_line=None)
@@ -913,16 +921,17 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
         parent_line = stack.get(L - 1)
         if has_child:                                           # 중간노드 = SUB
             seq += 1; cnt += 1
+            _sgub = _mk5(_mkmap.get(code.upper()), True)        # ★SUB 구분 = SUB 품번 생산구분(하드코딩 '자체' 폐기)
             cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,node_kind,sub_item,parent_line)
-                OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,N'자체','SUB',?,?)""",
-                rid, seq, _cap(code, 60), _cap(name, 120), _cap(code, 60), parent_line)
+                OUTPUT INSERTED.line_id VALUES(?,?,?,?,1,?,'SUB',?,?)""",
+                rid, seq, _cap(code, 60), _cap(name, 120), _sgub, _cap(code, 60), parent_line)
             stack[L] = int(cur.fetchone()[0])
         else:                                                   # leaf
             mat = float(r.get("mat", 0) or 0)
             if mat <= 0: continue                               # phantom/mat=0
             if code.upper().startswith("RAC") and "용접링" not in name: continue   # 용접봉 제외·용접링 유지
             metal = str(r.get("metal", "") or "").strip()
-            gub = "제작" if str(r.get("cost_gubun", "") or "") == "3" else "매입"
+            gub = _mk5(_mkmap.get(code.upper()), False)         # ★리프 구분 = 생산구분(make_type) (cost_gubun 폐기)
             seq += 1; cnt += 1
             cur.execute("""INSERT INTO nx.sourcing_route_line(route_id,sort_seq,child_item,child_name,qty,gubun,
                 vendor_code,is_rawmat,diam,thick,len_val,material,spec,note,node_kind,parent_line)

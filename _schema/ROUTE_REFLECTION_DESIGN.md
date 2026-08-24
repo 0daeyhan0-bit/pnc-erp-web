@@ -139,6 +139,16 @@
 **∴ 확정: 조달후보 구분 = make_type 5-way(제작1/외주2/구매3/사급4/외주직납5). SAGUB_FLAG 무관(중량정산 유지).** make_type 100% 신뢰라 안전.
 도구: gubun_full_recon.py.
 
+## 12. STEP1 구현 완료 — 조달후보 구분 = make_type 5-way (2026-08-24, dev)
+**backend `sourcing.py`**:
+- `_LINE_GUBUN` = [제작·외주·구매·사급·외주직납] + 헬퍼 `_mk5(mk,has_bom)`(make_type→구분·공백=BOM有제작/無구매).
+- `_route_baseline_lines` L496: `_mk5(mk,has_bom)` (SAGUB 판정 제거) + 쿼리에 has_bom 추가.
+- `_insert_current_tree`: make_type 룩업 추가 → **SUB 하드코딩 'N자체' 제거→`_mk5(mk,True)`** · 리프 cost_gubun→`_mk5(mk,False)`.
+**frontend `screens.dev.js`**: gubunSel 3종→5종 + 색상(_GBC) · createFromLg 구분 make_type 5-way.
+**검증(읽기전용)**: `_route_baseline_lines('AJR77263007')` = MJU66503305 **외주**·MJX62771704 **사급**·MEG **구매**·SUB **제작** (전 make_type 정확). py_compile OK.
+**남음**: `_base_flat_lines`(R02 BASE seed)는 cost_gubun 유지=R02 후속. UI 확인=운영 배포(승인) or 로컬 dev. `AJR77263007-4-1`(make=2)→**외주**로 뜰 것(BOM 다시불러오기시 재실체화).
+**★STEP1 = 조달후보 구분 데이터 정확화(표시/발주 기반). STEP2(구분→생산계획 반영)는 별건 대작업.**
+
 ## 6. 순서·안전
 - 순서: [0]파악·설계 → 옆에짓고 [1][2] → [3]전수검증 → [4]승인배포.
 - **생산계획 미접촉**(옆에짓고 R01 diff0 증명 전 라이브 compose_mat 무변경). 성급한 일반화 금지·검증·기록.
