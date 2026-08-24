@@ -1994,7 +1994,11 @@ function mstCrud(host, cfg){
   const API=API_BASE;
   const st={rows:[],cnt:0,q:'',form:null,sel:new Set(),msg:''};
   const load=async()=>{
-    try{const r=await fetch(`${API}${cfg.listEp}?q=`+encodeURIComponent(st.q));const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;st.msg='';}
+    // ★listEp 에 이미 쿼리(?kind=)가 있으면 & 로 잇는다. 응답이 orows(객체행)면 그걸 우선 사용
+    //   (basemaster/list 는 rows=배열행 / orows=c0..cN 객체행 둘 다 준다).
+    const _sep=cfg.listEp.includes('?')?'&':'?';
+    try{const r=await fetch(`${API}${cfg.listEp}${_sep}q=`+encodeURIComponent(st.q));const j=await r.json();
+      st.rows=j.orows||j.rows||[];st.cnt=j.cnt||0;st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
     render();
   };
@@ -2019,13 +2023,17 @@ function mstCrud(host, cfg){
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      ${editing?`<div class="wr-modal" style="position:fixed;inset:0;z-index:110;background:rgba(20,30,50,.38);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
-       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:560px;max-width:96vw">
+       <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:760px;max-width:96vw">
          <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
            <b>${esc(cfg.title||'마스터')} ${st.form._edit?'— 수정 ('+esc(st.form[kf])+')':'— 신규'}</b><span id="ms-x" style="cursor:pointer;font-size:17px">✕</span></div>
          <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto">
-           <table style="border-collapse:collapse;width:100%"><tbody>${(()=>{let h='';for(let i=0;i<cfg.fields.length;i+=2){const a=cfg.fields[i],b=cfg.fields[i+1];
-             const cell=f=>f?`<td style="padding:5px 8px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:88px">${f[1]}${f[2]==='req'?'<span style="color:#c0392b">*</span>':''}</td><td style="padding:4px 8px 4px 0">${fld(f)}</td>`:'<td></td><td></td>';
+           <!-- ★2026-08-23 입력칸이 잘려 가로스크롤 생기던 것 수정: 라벨=고정폭, 입력=남는폭 채움(table-layout:fixed).
+                fld() 의 인라인 width 는 .ms-in 의 width:100% 로 덮는다(min-width 0 = flex/table 축소 허용). -->
+           <table style="border-collapse:collapse;width:100%;table-layout:fixed"><tbody>${(()=>{let h='';for(let i=0;i<cfg.fields.length;i+=2){const a=cfg.fields[i],b=cfg.fields[i+1];
+             const cell=f=>f?`<td style="padding:5px 8px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:104px">${f[1]}${f[2]==='req'?'<span style="color:#c0392b">*</span>':''}</td><td style="padding:4px 8px 4px 0">${fld(f)}</td>`:'<td style="width:104px"></td><td></td>';
              h+=`<tr>${cell(a)}${cell(b)}</tr>`;}return h;})()}</tbody></table>
+           <style>.wr-modal .inp,.wr-modal select.inp{width:100%!important;min-width:0!important;max-width:none!important;box-sizing:border-box}
+                  .wr-modal input[type=checkbox]{width:18px!important}</style>
          </div>
          <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:flex-end;gap:8px">
            <button class="btn" id="ms-save" style="background:#1b6ec2;color:#fff">💾 저장</button><button class="btn" id="ms-cancel">닫기</button></div>
@@ -2058,7 +2066,8 @@ function mstCrud(host, cfg){
   const save=async()=>{
     for(const f of cfg.fields){if(f[2]==='req'&&!String(st.form[f[0]]??'').trim()){alert(f[1]+'은(는) 필수입니다');return;}}
     if(!String(st.form[kf]??'').trim()){alert('코드는 필수입니다');return;}
-    try{const r=await fetch(`${API}${cfg.saveEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...st.form,user:'웹사용자'})});
+    // cfg.kind 가 있으면 payload 에 실어 보낸다(조립/단품 공정마스터처럼 한 엔드포인트가 종류를 받는 경우)
+    try{const r=await fetch(`${API}${cfg.saveEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...st.form,...(cfg.kind?{kind:cfg.kind}:{}),user:'웹사용자',uuser:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자')})});
       const j=await r.json();
       if(r.ok&&j.ok){st.msg=(j.mode==='insert'?'✅ 등록완료':'✅ 수정완료');st.form=null;await load();}
       else alert('저장 실패: '+(j.detail||JSON.stringify(j)));}
@@ -2066,7 +2075,7 @@ function mstCrud(host, cfg){
   };
   const del=async(codes)=>{if(!codes.length){alert('삭제할 행을 체크하세요');return;}
     if(!confirm(codes.length+'건을 삭제하시겠습니까?'))return;
-    try{const r=await fetch(`${API}${cfg.delEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes})});
+    try{const r=await fetch(`${API}${cfg.delEp}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({codes,...(cfg.kind?{kind:cfg.kind}:{})})});
       const j=await r.json();st.msg='🗑 '+j.deleted+'건 삭제완료';st.sel.clear();await load();}
     catch(e){alert('삭제 오류: '+e);}
   };
@@ -2081,6 +2090,23 @@ const MST_CFG={
     cols:[{k:'line_no',h:'라인번호',cap:140},{k:'apply_ymd',h:'적용일'},{k:'maint_day',h:'리드일',cls:'num'},{k:'maint_hhmm',h:'변경시각',cls:'center',fmt:r=>{let v=String(r.maint_hhmm||'').replace(/\D/g,'');if(!v)return '';v=v.padStart(4,'0').slice(-4);return v.slice(0,2)+':'+v.slice(2);}},{k:'link_cust_name',h:'연결거래처',cap:160,fmt:r=>esc(r.link_cust_name||r.link_cust_code||'')},{k:'cust_maint_day',h:'거래처리드',cls:'num'}],
     fields:[['line_no','라인번호','req'],['apply_ymd','적용일(YYMMDD)','text'],['maint_day','리드일','num'],['maint_hhmm','변경시각(HHMM)','text'],['link_cust_code','연결거래처코드','text'],['cust_maint_day','거래처리드','num']],
     newDefaults:{maint_day:0,maint_hhmm:'0000'}},
+  // ★2026-08-23 조립/단품 공정마스터 등록·수정·삭제 추가(기존엔 조회만 — 거래처·부서·라인만 편집 가능했음).
+  //   저장/삭제는 nx 원장(CLAUDE.md §1). 목록 컬럼키는 /api/basemaster/list 가 c0..cN 으로 주므로
+  //   listEp 를 basemaster/list?kind= 로 두고 keyField 는 코드컬럼 인덱스(c0)를 쓴다.
+  //   행/폼 키는 목록 응답과 같은 c0..cN 으로 통일(수정 시 기존값이 그대로 폼에 채워지도록).
+  //   백엔드 procmaster_save 가 c0=코드, c1.. 을 각 컬럼으로 매핑한다.
+  assem:{sid:'basemaster',title:'조립공정 마스터',kind:'assem',keyField:'c0',
+    listEp:'/api/basemaster/list?kind=assem',saveEp:'/api/procmaster/save',delEp:'/api/procmaster/delete',org:'nx.CS_M_ASSEM_PROC',
+    cols:[{k:'c0',h:'공정코드'},{k:'c1',h:'공정명',cap:200},{k:'c2',h:'표준ST',cls:'num'},{k:'c3',h:'정렬',cls:'num'},{k:'c4',h:'사용',cls:'center'}],
+    fields:[['c0','공정코드','req'],['c1','공정명','req'],['c2','표준ST','num'],['c3','정렬순서','num'],
+            ['c4','사용여부','sel',[{code:'Y',nm:'사용'},{code:'N',nm:'중지'}]]],
+    newDefaults:{c4:'Y',c3:0,c2:0}},
+  proc:{sid:'basemaster',title:'단품공정 마스터',kind:'proc',keyField:'c0',
+    listEp:'/api/basemaster/list?kind=proc',saveEp:'/api/procmaster/save',delEp:'/api/procmaster/delete',org:'nx.CS_M_PROC',
+    cols:[{k:'c0',h:'공정코드'},{k:'c1',h:'공정명',cap:200},{k:'c2',h:'대분류'},{k:'c3',h:'정렬',cls:'num'},{k:'c4',h:'표준UPH',cls:'num'},{k:'c5',h:'사용',cls:'center'}],
+    fields:[['c0','공정코드','req'],['c1','공정명','req'],['c2','대분류','text'],['c3','정렬순서','num'],['c4','표준UPH','num'],
+            ['c5','사용여부','sel',[{code:'Y',nm:'사용'},{code:'N',nm:'중지'}]]],
+    newDefaults:{c5:'Y',c3:0,c4:0}},
 };
 
 /* ===== 라인별달력 (LG 라인스케줄 매트릭스 + 엑셀 업로드) — 생산계획 가동캘린더 ===== */

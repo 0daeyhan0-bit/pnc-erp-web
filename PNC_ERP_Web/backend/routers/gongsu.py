@@ -9,7 +9,12 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 router = APIRouter()
 
 # ============ 일반업무: 공수등록(근무/지원) — HR_M_WORK_INFO(라이브)↔nx.hr_work_info ============
-_HRCHK = {"1": "연차", "2": "반차", "3": "조퇴"}  # 소스 dw_pr_worktime_001_t2(4~6은 빈 라벨=정상)
+_HRCHK = {"1": "연차", "2": "오전반차", "8": "오후반차", "3": "조퇴",
+          "20": "잔업1", "21": "잔업1.5", "22": "잔업2", "23": "잔업2.5", "24": "잔업3", "25": "잔업3.5"}
+# 소스 dw_pr_worktime_001_t2(4~6은 빈 라벨=정상).
+# ★2026-08-23 반차를 오전/오후로 분리. 레거시 HR_CHECK_POINT 는 4·5·6·7·10~14 를 이미
+#   다른 의미로 쓰고 있어(4=38,374건 등) 그 코드는 못 쓴다. '2'(레거시 0건)=오전반차,
+#   '8'(레거시 미사용)=오후반차 로 배정. 시간규칙 오전 0800~1200 / 오후 1300~1700(각 4h).
 def _hrchk(v):
     return _HRCHK.get(str(v or "").strip(), "정상")
 def _gongsu_web_rows(from_ymd, to_ymd, dept, gubun, user):

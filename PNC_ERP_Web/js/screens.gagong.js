@@ -561,7 +561,10 @@ SCREEN.gagongprog420=(c)=>{
         <tr><td class="lbl" style="width:13%">Part/No</td><td class="big" style="width:27%">${esc(s.assy||'')}</td>
           <td class="lbl" style="width:7%">SPEC</td>
           <td style="padding:0" colspan="4"><table class="sp">
-            <tr><th style="width:13%">외경(Ø)</th><th style="width:13%">두께(T)</th><th style="width:13%">길이(L)</th><th style="width:15%">중량(kg)</th><th style="width:11%">LOT</th><th style="width:35%">&nbsp;</th></tr>
+            <!-- ★2026-08-24 바코드 위 빈칸에 현장 생산일자(PLAN_YMD) 표시 — 현장 요청 -->
+            <tr><th style="width:13%">외경(Ø)</th><th style="width:13%">두께(T)</th><th style="width:13%">길이(L)</th><th style="width:15%">중량(kg)</th><th style="width:11%">LOT</th>
+                <th style="width:35%" class="pymd">${(()=>{const y=(''+(s.ymd||'')).trim();
+                  return y.length>=6?`생산일자 ${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:'&nbsp;';})()}</th></tr>
             <tr><td>${s.diam?(+s.diam).toFixed(2):''}</td><td>${s.thick?(+s.thick).toFixed(2):''}</td>
                 <td>${s.length?Math.round(s.length):''}</td><td>${s.weight||''}</td>
                 <td class="lot">${nf(s.qty||0)}</td>
@@ -604,15 +607,22 @@ SCREEN.gagongprog420=(c)=>{
       .sp th{font-weight:700;font-size:12px}
       .sp td{height:9mm}
       .lot{font-size:19px;font-weight:700;white-space:nowrap}
+      .pymd{font-size:13px;font-weight:700;white-space:nowrap}   /* 현장 생산일자 */
       /* 바코드 칸: 폭에 맞춰 축소되도록 max-width 100%(잘림 방지, 2026-08-20) */
       .bcw{padding:1px !important;overflow:visible}
       .bcw img{height:auto;width:52mm;max-width:100%;display:block;margin:0 auto}
       .bcn{font-size:9px;letter-spacing:.5px;white-space:nowrap}
       .ttl,.hd{flex:0 0 auto}
-      .bd{flex:1 1 auto;height:auto}
+      /* ★2026-08-24 도면 하단 잘림 수정.
+         .pg(196mm, overflow:hidden) 안에서 .bd 가 남는 높이를 차지하는데, 도면 img 에
+         max-height:150mm 고정이 걸려 있어 제목+헤더(≈50mm)와 합치면 196mm 를 넘겨
+         잘려 나갔다(공정행이 많은 전표일수록 심함).
+         → .bd 를 높이 0 기준 flex 로 잡고(min-height:0), 도면은 셀 높이(100%)에만 맞춘다. */
+      .bd{flex:1 1 auto;min-height:0;height:0}
       .bd>tbody>tr>td{vertical-align:top}
-      .dw{border:1px solid #000;width:45%;vertical-align:middle !important;text-align:center;padding:4px}
-      .dw img{max-width:100%;max-height:150mm;object-fit:contain}
+      .dw{border:1px solid #000;width:45%;vertical-align:middle !important;text-align:center;padding:4px;
+          overflow:hidden}
+      .dw img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;margin:0 auto}
       .pr th{font-weight:700}.pr td{height:8mm}
       </style></head><body>${sheets.map(pg).join('')}</body></html>`);
     w.document.close(); w.focus(); setTimeout(()=>w.print(),350);
@@ -719,7 +729,8 @@ SCREEN.gagongmove580=(c)=>{
   const T=new Date();
   // ★조회엔진 = 레거시 SP(SP_PR_가공창고_이동계획_260213) 직접호출. 기본 인자도 레거시와 동일(P2/IS0001/%).
   // puPart(레거시 as_pu_part_code) = 입고 자재창고. 항상 IS0001 이라 조건칸에서 뺐다(2026-08-23) — SP 인자로만 사용.
-  const st={from:iso(T),to:iso(new Date(T.getTime()+10*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:10,
+  // ★2026-08-24 기간 드롭다운 1~14일 선택 가능. 기본 2일(기준일 포함) → to = from + 1일.
+  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:2,
             gubun:'이동계획',confirm:'전체',   // gubun: 이동계획(매트릭스) / 이동전표(발행목록)
             dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,loaded:false,msg:'',exp:new Set(),
             sel:new Set(),itemSel:null,optDests:[],sheetRows:[],sheetAll:[],sheetCnt:0,
@@ -774,11 +785,12 @@ SCREEN.gagongmove580=(c)=>{
     let tNeed=0,tMoved=0,tSale=0,tAssy=0,tPrint=0,tPrior=0;const dSum={};dates.forEach(d=>dSum[d]=0);
     st.rows.forEach(r=>{tNeed+=+r.need||0;tMoved+=+r.moved||0;tSale+=+r.sale||0;tAssy+=+r.assy_stock||0;tPrint+=+r.jp_print||0;tPrior+=+r.prior||0;
       dates.forEach(d=>{dSum[d]+=(r.days&&r.days[d])||0;});});
-    const NC=13;
+    const NC=16;   // ★2026-08-24 자재재고·생산재고·도번고정재고 3컬럼 추가
     return `<div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none;text-align:center"><thead><tr>
        <th>SEQ</th><th>최종납품처</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
-       <th>이동전표발행</th><th>이동필요</th><th>출하</th><th>ASSY재고</th><th>당일이전</th>
+       <th>이동전표발행</th><th>이동필요</th><th>출하</th><th>ASSY재고</th>
+       <th>자재재고</th><th>생산재고</th><th>도번고정</th><th>당일이전</th>
        ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
@@ -796,6 +808,9 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef'}">${r.need>0?nf(r.need):'·'}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td>
         ${(()=>{const on=st.sel.has(`${i}:P`);   // 당일이전(plan_qty_00)도 선택 대상 — 키는 '행:P'
           if(!r.prior)return `<td class="center" style="color:#dfe6ef">·</td>`;
           const bg=r.prior_color||'';
@@ -818,8 +833,10 @@ SCREEN.gagongmove580=(c)=>{
       <table class="tbl fit mvs-tbl" style="font-size:11px;text-align:center"><thead><tr>
        <th style="width:34px"><input type="checkbox" id="mvs-all" title="전체선택"></th>
        <th>이동일자</th><th>이동전표번호</th><th>CHECK-LIST SEQ</th><th>출고처</th><th>ASSY품번</th><th>품번</th><th>품명</th><th>보관장소</th>
-       <th>입고수량</th><th>입고확인</th><th>확인일시</th><th>작업자</th><th>인쇄</th></tr></thead>
-      <tbody>${st.loading?spinRow(14):(rows.length?rows.map(r=>`<tr>
+       <th>입고수량</th><th>입고확인</th><th>확인일시</th><th>작업자</th><th>인쇄</th>
+       <!-- ★2026-08-24 체크=전표 전체 품번 출력 / 미체크=이 행 품번만 출력 -->
+       <th style="width:60px" title="체크: 그 전표의 전 품번 출력 / 해제: 이 행 품번만 출력">출력범위</th></tr></thead>
+      <tbody>${st.loading?spinRow(15):(rows.length?rows.map(r=>`<tr>
         <td class="center">${r.confirmed?'<span title="입고확인된 전표는 삭제할 수 없습니다" style="color:#c9d3e0">🔒</span>'
           :`<input type="checkbox" class="mvs-chk" data-ymd="${esc(r.ymd)}" data-seq="${r.seq}">`}</td>
         <td class="center">${dcol(r.ymd)}</td><td class="center"><b>${nf(r.group_seq)}</b></td><td class="center">${nf(r.check_seq)}</td>
@@ -828,9 +845,10 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center">${r.confirmed?'<span style="color:#1c7c3a">✔입고확인</span>':'<span style="color:#c0392b">미확정</span>'}</td>
         <td class="center">${r.confirmed?esc((r.confirm_dt||'').slice(0,16)):'·'}</td><td class="center">${esc(r.confirm_user)||'·'}</td>
         <td class="center" style="white-space:nowrap">
-          <button class="btn sm sheet-print" data-g="${r.group_seq}" data-k="card" title="부품납품표(개별카드)" style="padding:2px 6px;font-size:11px">🖨납품표</button>
-          <button class="btn sm sheet-print" data-g="${r.group_seq}" data-k="list" title="부품확인/납품표(묶음)" style="padding:2px 6px;font-size:11px">🖨확인표</button></td></tr>`).join('')
-        :`<tr><td colspan="14" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody></table></div>`;
+          <button class="btn sm sheet-print" data-g="${r.group_seq}" data-k="card" data-mat="${esc(r.mat||'')}" title="부품납품표(개별카드)" style="padding:2px 6px;font-size:11px">🖨납품표</button>
+          <button class="btn sm sheet-print" data-g="${r.group_seq}" data-k="list" data-mat="${esc(r.mat||'')}" title="부품확인/납품표(묶음)" style="padding:2px 6px;font-size:11px">🖨확인표</button></td>
+        <td class="center"><input type="checkbox" class="mvs-allmat" data-g="${r.group_seq}" title="체크: 이 전표의 전 품번 출력 / 해제: 이 행 품번만"></td></tr>`).join('')
+        :`<tr><td colspan="15" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody></table></div>`;
   };
   const draw=()=>{
     const dates=st.dates;
@@ -867,7 +885,8 @@ SCREEN.gagongmove580=(c)=>{
        <label class="rl"><input type="radio" name="mv-f" value="전체"${st.mv==='전체'?' checked':''}> 전체</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동필요"${st.mv==='이동필요'?' checked':''}> 이동필요</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동완료"${st.mv==='이동완료'?' checked':''}> 이동완료</label>`}
-       <label class="tl">기간</label><select class="inp" id="mv-gigan" style="max-width:78px">${[7,10,14,21,31].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
+       <!-- ★2026-08-24 기간 1~14일 전부 선택 가능(기본 2일) -->
+       <label class="tl">기간</label><select class="inp" id="mv-gigan" style="max-width:78px">${Array.from({length:14},(_,k)=>k+1).map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
        <label class="tl">구분</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동계획"${st.gubun==='이동계획'?' checked':''}> 이동계획</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
@@ -883,7 +902,8 @@ SCREEN.gagongmove580=(c)=>{
     g('#mv-search').onclick=()=>{st.from=g('#mv-from').value;st.to=g('#mv-to').value;
       if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
-    g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+st.gigan*864e5));g('#mv-search').click();};
+    // ★기간 N일 = 기준일 포함 N일치 → to = from + (N-1). (기존 +N 이라 11·15일치가 나왔음)
+    g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));g('#mv-search').click();};
     c.querySelectorAll('input[name=mv-gubun]').forEach(rd=>rd.onchange=()=>{st.gubun=rd.value;draw();});   // 전환만, 조회는 버튼으로
     ['#mv-item','#mv-part'].forEach(id=>{const el=g(id);
       el.oninput=()=>{st.item=g('#mv-item').value;st.part=g('#mv-part').value;refilter();
@@ -891,8 +911,12 @@ SCREEN.gagongmove580=(c)=>{
       el.onkeyup=e=>{if(e.key==='Enter')g('#mv-search').click();};});
     if(isSheet){
       c.querySelectorAll('input[name=mv-cf]').forEach(rd=>rd.onchange=()=>{st.confirm=rd.value;refilter();});
+      // ★같은 행의 '전체' 체크 여부로 범위 결정 — 체크=전표 전 품번 / 미체크=이 행 품번만
       c.querySelectorAll('.sheet-print').forEach(btn=>btn.onclick=()=>{
-        const k=btn.dataset.k; printMoveSheets(+btn.dataset.g,+btn.dataset.g,{card:k==='card',list:k==='list'});});
+        const k=btn.dataset.k, g0=+btn.dataset.g;
+        const tr=btn.closest('tr'), ck=tr&&tr.querySelector('.mvs-allmat');
+        const all=!!(ck&&ck.checked);
+        printMoveSheets(g0,g0,{card:k==='card',list:k==='list',onlyMat:all?'':(btn.dataset.mat||'')});});
       // 전체선택 체크박스
       const all=g('#mvs-all');
       if(all)all.onclick=()=>c.querySelectorAll('.mvs-chk').forEach(ch=>ch.checked=all.checked);
@@ -1064,9 +1088,10 @@ function openMoveModal(st,dates,onIssued){
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;padding:8px 12px;border-top:1px solid #e5e9f0;flex-wrap:wrap">
         <span style="margin-right:auto;display:flex;gap:12px;align-items:center">
+          <!-- ★2026-08-24 기본 해제 — 저장할 때마다 인쇄창이 뜨지 않게. 필요할 때만 체크해서 출력. -->
           <b style="font-size:12px;color:#555">저장 시 인쇄</b>
-          <label class="rl"><input type="checkbox" id="mm-pr-card" checked> 부품납품표(개별)</label>
-          <label class="rl"><input type="checkbox" id="mm-pr-list" checked> 부품확인/납품표(묶음)</label>
+          <label class="rl"><input type="checkbox" id="mm-pr-card"> 부품납품표(개별)</label>
+          <label class="rl"><input type="checkbox" id="mm-pr-list"> 부품확인/납품표(묶음)</label>
         </span>
         <button class="btn" id="mm-save" style="background:#1c47a0;color:#fff">✔ 저장(이동전표 발행)</button>
         <button class="btn" id="mm-close2">닫기</button></div>
@@ -1124,16 +1149,24 @@ function openMoveModal(st,dates,onIssued){
 
 /* 부품납품표(개별카드)+부품확인/납품표(그룹묶음 8행/페이지) 인쇄 — dw_pr_input_586_p1/p2 재현.
    group_from~group_to = MAINT_GROUP_SEQ 범위(단건이면 동일값). 바코드 = "MV"+8자리0패딩.
-   opt={card:bool,list:bool} — 두 전표를 각각 낼지 선택(미지정=둘 다). */
+   opt={card:bool,list:bool} — 두 전표를 각각 낼지 선택(미지정=둘 다).
+   opt.onlyMat — 지정하면 그 자도번(품번)만 출력. 전표목록에서 '전체' 미체크 시 사용.
+                 (체크=전표 전체 품번 / 미체크=클릭한 행의 품번만. 2026-08-24) */
 async function printMoveSheets(groupFrom,groupTo,opt){
   const want={card:true,list:true,...(opt||{})};
   if(!want.card&&!want.list)return;
+  const onlyMat=(opt&&opt.onlyMat)?String(opt.onlyMat).trim():'';
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   let data;
   try{data=await(await fetch(`${API}/api/gagong/move580/print?group_from=${groupFrom}&group_to=${groupTo}`)).json();}
   catch(e){alert('인쇄 데이터 조회 실패');return;}
-  const groups=data.groups||[];
+  let groups=data.groups||[];
+  // ★onlyMat 지정 시 그 품번만 남긴다(전표 전체 대신 해당 1건만 출력).
+  if(onlyMat){
+    groups=groups.map(g=>({...g,items:(g.items||[]).filter(it=>String(it.mat||'').trim()===onlyMat)}))
+                 .filter(g=>g.items.length);
+  }
   if(!groups.length){alert('인쇄할 전표 내역이 없습니다.');return;}
   const ymdw=s=>{s=(''+(s||'')).trim();if(s.length<6)return s;return `${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`;};
   const bc=(txt)=>`<div style="text-align:center;line-height:1">
@@ -1158,17 +1191,21 @@ async function printMoveSheets(groupFrom,groupTo,opt){
   groups.forEach(g=>{
     const rows=g.items.map((it,i)=>({...it,no:i+1}));
     while(rows.length%8!==0)rows.push(null);
-    for(let p=0;p<rows.length;p+=8)listPages.push({g,rows:rows.slice(p,p+8)});
+    // ★2026-08-24 전표번호·쪽수(n/N) 표시용 — 그룹 내 총 페이지수를 함께 담는다.
+    const tot=Math.max(1,Math.ceil(rows.length/8));
+    for(let p=0;p<rows.length;p+=8)listPages.push({g,rows:rows.slice(p,p+8),pno:(p/8)+1,ptot:tot});
   });
-  const listHtml=({g,rows})=>`<div class="mvl">
-    <div class="mvl-title">부품확인/납품표<span class="mvl-bc">${bc(g.sheet_no)}</span></div>
+  const listHtml=({g,rows,pno,ptot})=>`<div class="mvl">
+    <div class="mvl-title">부품확인/납품표<span class="mvl-bc">${bc(g.sheet_no)}
+      <div class="mvl-sn"><span>${esc(g.sheet_no)}</span><span>${pno} / ${ptot}</span></div></span></div>
     <div class="mvl-hd"><span>날짜 <b>${esc(ymdw(g.ymd))}</b></span><span>라인 <b>${esc(g.line)}</b></span></div>
     <table><thead><tr><th>Assy품번</th><th>No</th><th>품번</th><th>수량</th><th>보관장소</th><th>확인</th></tr></thead>
     <tbody>${rows.map(r=>r?`<tr><td>${esc(r.assy)}</td><td class="num">${r.no}</td><td>${esc(r.mat)}</td><td class="num">${nf(r.qty)}</td><td>${esc(r.rack)}</td><td class="chk"><span></span></td></tr>`
       :`<tr><td></td><td></td><td></td><td></td><td></td><td class="chk"><span></span></td></tr>`).join('')}</tbody></table>
     <div class="mvl-ft">(주)피앤씨인더스트리</div>
   </div>`;
-  // ★두 전표는 용지가 다르다(카드 100×60mm / 확인표 A4) → 각각 별도 창으로 열어 프린터도 따로 기억시킨다.
+  // ★두 전표 모두 A4 세로(2026-08-24 카드도 A4 3매/장으로 통일) — 다만 별도 창으로 열어
+  //   프린터·매수를 각각 기억시킨다(카드만/확인표만 뽑는 경우가 많음).
   // ★두 장을 함께 낼 때: window.print() 는 모달이라 첫 창에서 스크립트가 멈춘다.
   //   그러면 두번째 창을 여는 코드가 실행되지 못해 "하나만 출력"된다(2026-08-23 실측).
   //   → 창을 먼저 둘 다 열어 내용을 채우고, 인쇄는 각 창이 delay 를 달리해 스스로 띄우게 한다.
@@ -1186,7 +1223,7 @@ async function printMoveSheets(groupFrom,groupTo,opt){
   const both=want.card&&cards.length&&want.list&&listPages.length;
   // ★창 2개는 반드시 "동시에" 연다. await 로 하나씩 열면 그 사이 사용자 제스처가 만료돼
   //   두번째 window.open 이 팝업차단된다(2026-08-23 실측). Promise 를 먼저 만들고 나중에 await.
-  const pCard=(want.card&&cards.length)?openPrintWin('mvcard','pncPrnMvCard','width=760,height=620'):Promise.resolve(null);
+  const pCard=(want.card&&cards.length)?openPrintWin('mvcard','pncPrnMvCard','width=900,height=700'):Promise.resolve(null);
   const pList=(want.list&&listPages.length)?openPrintWin('mvlist','pncPrnMvList','width=900,height=700'):Promise.resolve(null);
   const [wCard,wList]=await Promise.all([pCard,pList]);
   if(want.card&&cards.length){
@@ -1195,25 +1232,26 @@ async function printMoveSheets(groupFrom,groupTo,opt){
     else{
       w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>부품납품표 (${cards.length}장)</title>
       <style>
-        /* ★용지 100×60mm(마진 3mm) → 인쇄영역 94×54mm.
-           카드가 이보다 크면 2페이지로 쪼개져 하단 회사명이 넘어간다(2026-08-23).
-           → 카드 높이를 인쇄영역 안으로 묶고, 마지막 카드에는 page-break 를 걸지 않는다. */
-        @page{size:100mm 60mm;margin:3mm}
+        /* ★2026-08-24 용지변경: 100×60mm 전용지 → A4 세로(부품확인/납품표와 동일), 1장에 3카드.
+           A4 인쇄영역 = 210-16 × 297-16 = 194×281mm → 카드 90mm × 3 = 270mm + 간격 여유.
+           page-break-inside:avoid 로 카드가 페이지 경계에서 쪼개지지 않게 하고,
+           카드마다 page-break 를 걸던 기존 규칙은 제거(그래야 한 장에 3개가 앉는다). */
+        @page{size:A4 portrait;margin:8mm}
         *{box-sizing:border-box}
         body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
-        .mvc{border:2px solid #000;page-break-inside:avoid;overflow:hidden;
-             height:53mm;display:flex;flex-direction:column}
-        .mvc+.mvc{page-break-before:always}      /* 첫 카드 앞/마지막 카드 뒤에는 빈 페이지가 안 생긴다 */
-        .mvc-title{text-align:center;font-size:16px;font-weight:800;padding:3px;border-bottom:2px solid #000;position:relative;flex:0 0 auto}
-        .mvc-no{position:absolute;right:5px;top:5px;font-size:8px;color:#666;font-weight:400}
+        .mvc{border:2px solid #000;page-break-inside:avoid;break-inside:avoid;overflow:hidden;
+             height:90mm;display:flex;flex-direction:column;margin-bottom:4mm}
+        .mvc:last-child{margin-bottom:0}
+        .mvc-title{text-align:center;font-size:20px;font-weight:800;padding:5px;border-bottom:2px solid #000;position:relative;flex:0 0 auto}
+        .mvc-no{position:absolute;right:6px;top:8px;font-size:10px;color:#666;font-weight:400}
         .mvc table{border-collapse:collapse;width:100%;flex:1 1 auto}
-        .mvc td{border:1px solid #000;padding:2px 5px;font-size:11px}
-        .mvc .lb{font-weight:700;background:#f5f5f5;width:22%}
-        .mvc .big{font-size:15px;font-weight:800}
-        .mvc-ft{text-align:center;font-size:8px;padding:2px;border-top:1px solid #000;flex:0 0 auto}
+        .mvc td{border:1px solid #000;padding:4px 8px;font-size:14px}
+        .mvc .lb{font-weight:700;background:#f5f5f5;width:20%;font-size:12px}
+        .mvc .big{font-size:19px;font-weight:800}
+        .mvc-ft{text-align:center;font-size:10px;padding:3px;border-top:1px solid #000;flex:0 0 auto}
         @media print{.noprint{display:none}}
       </style></head><body>
-      ${TOOLBAR(`부품납품표 ${cards.length}장 · 100×60mm`)}
+      ${TOOLBAR(`부품납품표 ${cards.length}장 · A4 세로(1장에 3매) · ${Math.ceil(cards.length/3)}쪽`)}
       ${cards.map(cardHtml).join('')}
       ${AUTOPRINT(250)}</body></html>`);
       w.document.close();
@@ -1231,6 +1269,10 @@ async function printMoveSheets(groupFrom,groupTo,opt){
         .mvl{page-break-inside:avoid}
         .mvl+.mvl{page-break-before:always}     /* 마지막 쪽 뒤에 빈 페이지가 안 생기게 */
         .mvl-title{font-size:26px;font-weight:800;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #000;padding-bottom:4px}
+        /* ★2026-08-24 바코드 아래 전표번호 + 쪽수(n/N) 표시 */
+        .mvl-bc{display:block;text-align:right}
+        .mvl-sn{display:flex;justify-content:space-between;gap:14px;font-size:11px;font-weight:400;
+                letter-spacing:.5px;margin-top:1px;padding:0 2px}
         .mvl-hd{display:flex;gap:20px;font-size:14px;padding:4px 0;border-bottom:1px solid #000}
         .mvl table{border-collapse:collapse;width:100%;margin-top:2px}
         .mvl th,.mvl td{border:1px solid #000;padding:4px 6px;font-size:12px;text-align:center}
