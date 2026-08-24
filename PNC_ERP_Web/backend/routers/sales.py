@@ -962,6 +962,10 @@ def _s040_dates(from_ymd, gigan):
     d0 = datetime.strptime(_d6(from_ymd) or datetime.now().strftime("%y%m%d"), "%y%m%d")
     return [(d0 + timedelta(days=i)).strftime("%y%m%d") for i in range(max(1, int(gigan or 1)))]
 
+def _s040_shift(ymd, n):
+    """YYMMDD 를 n 일 이동. 레거시 convert(varchar,convert(datetime,<ymd>,12)+n,12) 와 동일."""
+    return (datetime.strptime(ymd, "%y%m%d") + timedelta(days=int(n))).strftime("%y%m%d")
+
 @router.get("/api/sale040/grid")
 def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Query(""),
                  wo: str = Query(""), item: str = Query(""), src: str = Query("nx"),
@@ -999,9 +1003,28 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         # 대상품목 필터(레거시 동일) — pr_m_mat 제외
         # ※ 'A%' 의 % 때문에 %-포맷 금지. 함수로 조립한다.
         def TGT(col):
-            return ("(c.WORK_CODE LIKE 'A" + "%" + "' OR ISNULL(c.IN_CUST_CODE,'')>'')"
+            # ★레거시 dw_pr_input_040_t1 원문 조건 그대로:
+            #     ((work_code like 'A%') or (in_cust_code like '%%'))  ← in_cust_code 는 NULL 만 배제
+            #   and isnull((select '2' from pr_m_mat where mat_code=col),'1') like '1'   ← 자재 제외
+            # ★2026-08-24 SQL 의 like '%%' 는 NULL 만 걸러내고 빈문자열('')은 통과시킨다.
+            #   ISNULL(...)>'' 로 쓰면 빈문자열까지 배제 → 사내 P1(in_cust_code='') 1,284건이
+            #   통째로 누락되어 계획수량이 레거시보다 적게 나왔다. IS NOT NULL 이 정답.
+            return ("(c.WORK_CODE LIKE 'A" + "%" + "' OR c.IN_CUST_CODE IS NOT NULL)"
                     " AND NOT EXISTS(SELECT 1 FROM {SCH}.PR_M_MAT m WITH(NOLOCK)"
                     " WHERE m.MAT_CODE=" + col + ")")
+        # ★2026-08-24 작업처(work_center) — 레거시 dw_pr_input_040_t1 3단 fallback 이식.
+        #   ① in_cust_code 있으면 거래처명  ② work_code(단 'P1' 제외)의 작업명
+        #   ③ 둘 다 없으면(=사내 P1) 첫 공정(PROC_SEQ 최소)의 GAGONG_PROC_DESC → '03라인' 등
+        #   화면 '작업처' 컬럼이 05라인/MTS/이젠터/대원산업 으로 나오는 근거.
+        def WCTR(itemcol):
+            return ("ISNULL((CASE WHEN c.IN_CUST_CODE>'' THEN"
+                    " (SELECT cust_desc FROM {SCH}.CM_M_CUST WHERE cust_code=c.IN_CUST_CODE)"
+                    " ELSE (SELECT work_desc FROM {SCH}.PR_M_WORK"
+                    " WHERE work_code=c.WORK_CODE AND c.WORK_CODE<>'P1') END),"
+                    " (SELECT TOP 1 B1.GAGONG_PROC_DESC"
+                    " FROM {SCH}.PR_M_ITEM_PROC_GAGONG A1"
+                    " JOIN {SCH}.PR_M_PROC_GAGONG B1 ON A1.GAGONG_PROC_CODE=B1.GAGONG_PROC_CODE"
+                    " WHERE A1.ITEM_CODE=" + itemcol + " ORDER BY A1.PROC_SEQ ASC))")
         # 계획수량식(레거시 ceiling)
         def QEXP(q, u):
             return ("CEILING(CONVERT(float," + q + ") * ISNULL(" + u + ",1)"
@@ -1016,6 +1039,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    a.WORK_ORDER wo, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER) swo, a.C_ITEM_CODE item,
                    ISNULL(a.LINE_NO,'') line_no, ISNULL(a.MODEL_NO,'') model_no,
                    ISNULL(a.TOOLS_DESC,'') tools, ISNULL(c.WORK_CODE,'') work_code,
+                   {WCTR('a.C_ITEM_CODE')} work_center,
                    ISNULL(a.REMARKS2,'') rmk1, ISNULL(a.FROM_SEQ,0) fseq, ISNULL(a.TO_SEQ,0) tseq,
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.LOT_QTY,0) lot,
@@ -1026,7 +1050,12 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('a.C_ITEM_CODE')}{w1}""")
-        prm += [d1, d2] + p1
+        # ★2026-08-24 레거시 dw_pr_input_040_t1 원문:
+        #     where plan_ymd between <기준일> and <컷+10>
+        #     plan_qty = sum(case when plan_ymd > <컷> then 0 else ceiling(...) end)
+        #   즉 컷 뒤 10일까지 읽되 계획수량엔 안 넣는다(마지막 where plan_qty>0 로 탈락).
+        #   컷 = 화면 마지막일자(d2). 화면 일자칸은 d1..d2 만 쓰므로 뒤 10일은 집계에 영향 없음.
+        prm += [d1, _s040_shift(d2, 10)] + p1
 
         # ---- b2 예외생산 (분할제번 컬럼 없음 → work_order) ----
         w2, p2 = _flt("a.ITEM_CODE", "a.WORK_ORDER", "a.WORK_ORDER", "a.LINE_NO")
@@ -1036,12 +1065,13 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    a.WORK_ORDER wo, a.WORK_ORDER swo, a.ITEM_CODE item,
                    ISNULL(a.LINE_NO,'') line_no, '' model_no,
                    '' tools, ISNULL(c.WORK_CODE,'') work_code,
+                   {WCTR('a.ITEM_CODE')} work_center,
                    ISNULL(a.REMARKS,'') rmk1, 0 fseq, 0 tseq,
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.PLAN_QTY,0) lot,
-                   1 use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
+                   1 use_qty, 100 prod_rate,
                    '' change_day,
-                   {QEXP('a.PLAN_QTY','1')} planq
+                   ISNULL(a.PLAN_QTY,0) planq
               FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
@@ -1057,6 +1087,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    a.WORK_ORDER wo, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER) swo, b.C_ITEM_CODE item,
                    ISNULL(a.LINE_NO,'') line_no, ISNULL(a.MODEL_NO,'') model_no,
                    '' tools, ISNULL(c.WORK_CODE,'') work_code,
+                   {WCTR('b.C_ITEM_CODE')} work_center,
                    ISNULL(a.REMARKS2,'') rmk1, 0 fseq, 0 tseq,
                    ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
                    ISNULL(a.LOT_QTY,0) lot,
@@ -1078,8 +1109,10 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                              AND ISNULL(y.SPLIT_WORK_ORDER,'')=ISNULL(a.SPLIT_WORK_ORDER,''))""")
             prm += [yst, yst, d2] + p3 + [yst, yst]
 
+        # ★2026-08-24 정렬 = 레거시 dw_pr_input_040_t1 sort 그대로:
+        #   plan_ymd, line_no, output_hm, split_work_order, c_item_code (전부 오름차순)
         sql = ("SELECT TOP %d * FROM (\n%s\n) u WHERE u.planq > 0 "
-               "ORDER BY u.line_no, u.wo, u.item") % (int(limit) * 8, "\n            UNION ALL\n".join(parts))
+               "ORDER BY u.ymd, u.line_no, u.ohm, u.swo, u.item") % (int(limit) * 8, "\n            UNION ALL\n".join(parts))
         cur.execute(sql.format(SCH=SCH), *prm)
         cols = [d[0] for d in cur.description]
         keyed = {}
@@ -1092,6 +1125,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
             if not g:
                 g = {"wo": r["wo"], "swo": r["swo"], "item": r["item"], "line_no": r["line_no"],
                      "model_no": r["model_no"], "tools": r["tools"], "work_code": r["work_code"],
+                     "work_center": (r.get("work_center") or ""),   # ★작업처(레거시 3단 fallback)
                      "rmk1": r["rmk1"], "fseq": r["fseq"], "tseq": r["tseq"], "ohm": r["ohm"],
                      "org_ymd": r["ymd"], "org_hm": r["ohm"], "del_flag": r["del_flag"],
                      "data_gubun": r["data_gubun"],
@@ -1102,6 +1136,8 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
             g["lot"] = max(g["lot"], float(r["lot"] or 0))
             g["days"][r["ymd"]] = g["days"].get(r["ymd"], 0.0) + float(r["planq"] or 0)
         rows = list(keyed.values())
+        # 화면 일자칸(d1..d2) — b1 을 컷+10 까지 읽으므로 계획합/표시는 이 범위로 자른다.
+        _dset = set(dates)
         if not rows:
             return {"dates": dates, "rows": [], "cnt": 0}
 
@@ -1171,7 +1207,9 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         for g in rows:
             k = (g["wo"], g["swo"], g["item"])
             sq = sale.get(k, 0.0) - mvout.get(k, 0.0)
-            plan_tot = round(sum(g["days"].values()), 0)
+            # ★2026-08-24 레거시 컷: plan_qty 는 화면일자(d1..d2) 안쪽만 합산한다.
+            #   b1 을 컷+10 까지 읽으므로 여기서 안 걸러내면 창 밖 계획까지 더해진다.
+            plan_tot = round(sum(v for y, v in g["days"].items() if y in _dset), 0)
             # ── 셀 출하수량 = 레거시 ue_set_dd_color '출하수량 적용' 그대로 ──────────
             #   ll_lot_qty = ceiling(lot_qty × use_qty × prod_rate/100)
             #   ll_qty = sale_qty − (ll_lot_qty − plan_qty)   ← "지난 계획을 차감한 후 적용"
@@ -1198,16 +1236,43 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                     rest = 0
             g.update({
                 "itemnm": nm.get(g["item"], ''),
-                "prod_qty": round(prod.get(k, 0.0), 0),
+                "prod_qty": 0.0,   # ★아래에서 ASSY재고 충당으로 채운다(레거시 동일)
                 "sale_qty": round(sq, 0),
                 "stock_qty": round(astk.get(g["item"], 0.0), 0),
                 "lot": round(g["lot"], 0),
                 "plan_qty": plan_tot,
                 "wo_plan": round(woplan.get(k, plan_tot), 0),   # 제번 전체계획(살구 판정 기준)
                 "sday": sd,
-                "days": {y: round(v, 0) for y, v in g["days"].items()},
+                "days": {y: round(v, 0) for y, v in g["days"].items() if y in _dset},
             })
+            # 레거시 마지막 절 where t.plan_qty > 0 — 창 밖 계획만 있는 행은 화면에 안 나온다.
+            if plan_tot <= 0:
+                continue
             out.append(g)
+
+        # ── 생산실적 = ASSY재고 충당 (레거시 w_pr_input_040 화면스크립트) ──────────
+        #   레거시 SQL 의 prod_qty 는 상수 0 이고, 화면에서 ASSY재고를 정렬순서대로
+        #   앞 행부터 '미출하계획(계획−출하)' 만큼 채워 넣는다. 그 채워진 값이 생산실적.
+        #   → 준비실적처리(키팅)·파트별생산계획(410) 의 재고충당과 같은 방식.
+        #   ※ 도번 단위 재고풀을 공유하므로 반드시 화면 정렬순서로 순회해야 한다.
+        #     (레거시 sort: plan_ymd, line_no, output_hm, split_work_order, c_item_code)
+        _S = lambda v: "" if v is None else str(v)
+        out.sort(key=lambda g: (_S(g.get("org_ymd")), _S(g.get("line_no")), _S(g.get("ohm")),
+                                _S(g.get("swo") or g.get("wo")), _S(g.get("item"))))
+        _pool = {}
+        for g in out:
+            _pool.setdefault(g["item"], float(g.get("stock_qty") or 0))
+        for g in out:
+            need = float(g.get("plan_qty") or 0) - float(g.get("sale_qty") or 0)
+            if need <= 0:
+                continue
+            av = _pool.get(g["item"], 0.0)
+            if av <= 0:
+                continue
+            take = min(av, need)
+            _pool[g["item"]] = av - take
+            g["prod_qty"] = round(take, 0)
+
         return {"dates": dates, "rows": out, "cnt": len(out)}
     finally:
         cn.close()

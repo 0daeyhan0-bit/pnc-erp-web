@@ -49,7 +49,8 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
         cn.close(); nx.close()
 
 @router.get("/api/ready/setcheck")
-def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0)):
+def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0),
+                   src: str = Query("live")):
     """★키팅 [확인] 팝업(레거시 w_pr_input_466) — 도번의 자도번별 사용수량·재고·세트가능수량·협력사.
        ★BOM 소스 = CS_M_ITEM_BOM(웹 정본). 레거시 화면은 PR_M_ITEM_BOM을 쓰지만 실측 결과 두 테이블이
          동일(자도번·USE_QTY·KITTING_FLAG 일치)이라, 웹 다른 화면(bom.py 등)과 기준을 통일함.
@@ -69,22 +70,58 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
     cn = _conn(); cur = cn.cursor()
     try:
         # 1) BOM 자도번(키팅대상)
-        cur.execute("""
+        #    ★2026-08-24 가상도번(VIR_ITEM_FLAG='1')은 '제외'가 아니라 '한 단계 더 전개'.
+        #      레거시 BOM전개(w_pr_master_126)를 보면 가상도번은 그 자체로 자재가 아니라
+        #      묶음일 뿐이라, 그 하위 자도번들이 상위 목록으로 올라온다.
+        #      예) AJR77163102 → AJR77163102-S2-1(가상) 밑에 4A00114F·5210A22409A·
+        #          MJC62721914·MJU66366805/812/813/814·MJX63991801 9건.
+        #      구버전은 가상을 버리기만 해서 이 9건이 통째로 누락(웹 11건 vs 레거시 18건).
+        #    ★EXCEPT_FLAG='1' = 레거시 전개화면의 '제외' 열(직거래 등) → 키팅대상 아님.
+        _SQL = """
             SELECT a.MAT_CODE,
                    CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
                                ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END,'') cust_desc,
-                   ISNULL(m.ITEM_DESC,'') nm
+                   ISNULL(m.ITEM_DESC,'') nm,
+                   ISNULL(a.VIR_ITEM_FLAG,'0') vir
               FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM a WITH(NOLOCK)
               JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
              WHERE a.ITEM_CODE=?
                AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
                AND ISNULL(a.KITTING_FLAG,'0')='1'
-               AND ISNULL(a.VIR_ITEM_FLAG,'0')<>'1'
+               AND ISNULL(a.EXCEPT_FLAG,'0')<>'1'
                AND CAST(ISNULL(a.USE_QTY,0) AS float) > 0
-             ORDER BY a.MAT_CODE""", it, d6, d6)
-        bom = [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
-                "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip()} for r in cur.fetchall()]
+             ORDER BY a.MAT_CODE"""
+
+        def _lvl(code):
+            cur.execute(_SQL, code, d6, d6)
+            return [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
+                     "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip(),
+                     "vir": str(r[4] or '0')} for r in cur.fetchall()]
+
+        bom, _seen, _stack = [], set(), [(it, 1.0, 0)]
+        while _stack:
+            _code, _mult, _dep = _stack.pop(0)
+            if _dep > 8:          # 순환/과도한 깊이 방어
+                continue
+            for b in _lvl(_code):
+                if b["vir"] == '1':
+                    # 가상도번 = 묶음. 자기 자신은 목록에 넣지 않고 하위를 전개한다.
+                    #   소요량은 곱해서 내려간다(상위 use_qty × 하위 use_qty).
+                    if b["mat"] not in _seen:
+                        _seen.add(b["mat"])
+                        _stack.append((b["mat"], _mult * b["use_qty"], _dep + 1))
+                    continue
+                b["use_qty"] *= _mult
+                b.pop("vir", None)
+                bom.append(b)
+        # 같은 자도번이 여러 경로로 오면 소요량 합산(레거시 전개 동일)
+        _agg = {}
+        for b in bom:
+            e = _agg.get(b["mat"])
+            if e: e["use_qty"] += b["use_qty"]
+            else: _agg[b["mat"]] = b
+        bom = sorted(_agg.values(), key=lambda x: x["mat"])
         # 2) ★재고 = nx 스냅샷(PU_T_MAT_STOCK_WH) + 웹 원장 미반영분(nx.stock_ledger)
         #    · 스냅샷: 창고=Z99990 · 파트창고=IS0001 → 자재 입출고현황 화면의 재고와 동일.
         #      ※라이브 PARTNER_ERP.dbo 쪽은 값이 오래돼(11588O-1=5,648) 화면(714)과 다름 → nx 사용.
@@ -96,8 +133,12 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
             mats = [b["mat"] for b in bom]
             for i in range(0, len(mats), 900):
                 ch = mats[i:i+900]; ph = ",".join("?" * len(ch))
+                # ★2026-08-24 재고 스냅샷 소스 = 기본 live(레거시 정본).
+                #   nx 미러가 멈추면(8/22 이후) 낡은 값이 나와 레거시와 크게 어긋난다.
+                #   실측: 라이브 14/18 일치 vs nx 6/18 (MJU66366804 40 vs 0 등).
+                _S = "PARTNER_ERP.dbo" if str(src).strip() != "nx" else "PARTNER_ERP_TEST3.nx"
                 cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float))
-                                  FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                                  FROM {_S}.PU_T_MAT_STOCK_WH WITH(NOLOCK)
                                  WHERE MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
                                  GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *ch)
                 for r in cur.fetchall():
@@ -629,15 +670,18 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
                 proc_nm = "용접"          # 레거시 헤더 좌상단 고정표기(용접 파트)
         # BOM 다단 전개 — 레벨 유지, 가상품목만 재귀
         cur.execute("""
+            -- ★2026-08-24 정렬 = 계층 유지 + 각 레벨 안에서 품목코드 오름차순(레거시 인쇄본 순서).
+            --   구버전은 BOM_SEQ 경로순이라 레벨1이 AJR77163102-S2-1 부터 나오는 등 순서가 뒤섞였다.
+            --   경로를 코드로 쌓으면 부모 바로 뒤에 자식이 붙으면서 형제끼리는 코드순이 된다.
             WITH CTE (lvl, seq, path, mat_code, use_qty) AS (
                 SELECT 1, b.BOM_SEQ,
-                       CAST(RIGHT('0000'+CAST(b.BOM_SEQ AS varchar(4)),4) AS varchar(400)),
+                       CAST(b.MAT_CODE AS varchar(900)),
                        b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
                   FROM nx.PR_M_ITEM_BOM b WITH(NOLOCK)
                  WHERE b.ITEM_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
                 UNION ALL
                 SELECT c.lvl+1, b.BOM_SEQ,
-                       CAST(c.path+'.'+RIGHT('0000'+CAST(b.BOM_SEQ AS varchar(4)),4) AS varchar(400)),
+                       CAST(c.path+CHAR(1)+b.MAT_CODE AS varchar(900)),
                        b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
                   FROM CTE c
                   JOIN nx.PR_M_ITEM_BOM b WITH(NOLOCK) ON b.ITEM_CODE=c.mat_code

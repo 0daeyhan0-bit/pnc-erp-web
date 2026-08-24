@@ -684,7 +684,8 @@ SCREEN.lgsale=(c)=>{
   const dcls=s=>{const w=dow(s);return w===0?' s4sun':(w===6?' s4sat':'');};
   const T=new Date();
   const st={from:iso(T),gigan:4,line:'',wo:'',item:'',view:'전체',src:'nx',
-            dates:[],rows:[],cnt:0,loading:false,msg:'',lines:[],sel:new Set()};
+            dates:[],rows:[],cnt:0,loading:false,msg:'',lines:[],sel:new Set(),
+            exp:new Set()};   // ★집계뷰 펼침 블록키(클릭 토글)
 
   const loadLines=async()=>{try{const r=await fetch(`${API}/api/sale040/lines?src=${st.src}`);
     st.lines=(await r.json()).rows||[];}catch(e){st.lines=[];}};
@@ -705,11 +706,15 @@ SCREEN.lgsale=(c)=>{
       (!qw||((r.wo||'').toUpperCase().includes(qw)||(r.swo||'').toUpperCase().includes(qw)))
       &&(!qi||(r.item||'').toUpperCase().includes(qi)));
     if(st.line) rows=rows.filter(r=>(r.line_no||'')===st.line);
-    // 정렬: 라인 → 제번 → 도번
-    rows.sort((a,b)=>(a.line_no||'').localeCompare(b.line_no||'')
-                   ||(a.swo||a.wo||'').localeCompare(b.swo||b.wo||'')
-                   ||(a.item||'').localeCompare(b.item||''));
     const lnm={};(st.lines||[]).forEach(o=>{lnm[o.code]=o.nm;});
+    // ★2026-08-24 정렬 = 레거시 dw_pr_input_040_t1 sort 그대로:
+    //   plan_ymd → line_no → output_hm → split_work_order → c_item_code (전부 오름차순)
+    const S=v=>String(v==null?'':v);
+    rows.sort((a,b)=>S(a.org_ymd).localeCompare(S(b.org_ymd))
+                   ||S(a.line_no).localeCompare(S(b.line_no))
+                   ||S(a.ohm).localeCompare(S(b.ohm))
+                   ||S(a.swo||a.wo).localeCompare(S(b.swo||b.wo))
+                   ||S(a.item).localeCompare(S(b.item)));
     // 셀 = 그 일자 계획. 출하완료분은 살구색.
     // ★del_flag(0=현재계획 / 1=전일 삭제계획)를 키에 포함 — 같은 제번·도번이 양쪽에 나올 수 있다.
     const ckey=(r,d)=>`${r.del_flag||'0'}|${r.wo}|${r.swo}|${r.item}|${d}`;
@@ -755,14 +760,26 @@ SCREEN.lgsale=(c)=>{
     const CD={
       line_no:{t:'라인',cls:'center',w:78,
         h:r=>`<td class="center">${esc2((lnm[r.line_no]&&lnm[r.line_no]!==r.line_no)?(r.line_no+' '+lnm[r.line_no]):r.line_no)}</td>`,
-        s:(b,S,r0)=>`<td class="center">${esc2(r0.line_no)}</td>`},
+        // ★2026-08-24 도번 단위 블록이라 라인이 여러 개면 빈칸(하나뿐이면 그대로).
+        s:(b,S,r0)=>{const u=new Set(b.map(x=>x.line_no||''));
+          return `<td class="center">${u.size===1?esc2(r0.line_no):''}</td>`;}},
       wo:{t:'제번',cls:'center',w:96,
         h:r=>`<td class="center">${(r.del_flag||'0')==='1'?'<span style="color:#b0413e;font-weight:700" title="전일 삭제계획">✕</span> ':''}${esc2(r.swo||r.wo)}</td>`,
-        s:(b,S,r0)=>`<td class="center">${esc2(r0.swo||r0.wo)}</td>`},
+        // ★2026-08-24 소계행이 도번단위(전체/집계 공통)라 제번이 여러 건 → 빈칸(레거시 동일).
+        //   단, 블록에 제번이 하나뿐이면 그 제번을 그대로 보여준다. 제번뷰는 항상 표시.
+        s:(b,S,r0)=>{const u=new Set(b.map(x=>x.swo||x.wo||''));
+          return `<td class="center">${(st.view==='제번'||u.size===1)?esc2(r0.swo||r0.wo):''}</td>`;}},
       model_no:{t:'Model No',cls:'center',w:150,h:r=>`<td class="center">${esc2(r.model_no)}</td>`},
       tools:{t:'Tools',cls:'center',w:78,h:r=>`<td class="center">${esc2(r.tools)}</td>`},
       item:{t:'도번',cls:'center',w:104,
-        h:r=>`<td class="center" title="${esc2(r.itemnm)}"><b>${esc2(r.item)}</b></td>`},
+        h:r=>`<td class="center" title="${esc2(r.itemnm)}"><b>${esc2(r.item)}</b></td>`,
+        // ★집계행에도 도번 표시(레거시 동일) — 도번 단위 블록이라 대표값이 곧 그 도번
+        s:(b,S,r0)=>`<td class="center" title="${esc2(r0.itemnm)}"><b>${esc2(r0.item)}</b></td>`},
+      // ★2026-08-24 작업처 — 레거시 dw_pr_input_040_t1 의 work_center(도번 우측).
+      //   집계 블록키에 들어가므로 블록 대표값(r0)이 곧 그 블록의 작업처.
+      work_center:{t:'작업처',cls:'center',w:88,
+        h:r=>`<td class="center bcap" style="max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc2(r.work_center)}">${esc2(r.work_center)}</td>`,
+        s:(b,S,r0)=>`<td class="center bcap" style="max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc2(r0.work_center)}">${esc2(r0.work_center)}</td>`},
       change_day:{t:'당김,변경',cls:'center',w:62,h:r=>`<td class="center mut">${esc2(r.change_day)}</td>`},
       rmk1:{t:'비고',cls:'center',w:70,
         h:r=>`<td class="center mut bcap" style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc2(r.rmk1)}">${esc2(r.rmk1)}</td>`},
@@ -786,7 +803,7 @@ SCREEN.lgsale=(c)=>{
       plan_qty:{t:'출하계획',cls:'num',w:64,h:r=>`<td class="num">${cap(r.plan_qty)}</td>`,
         s:(b,S)=>`<td class="num">${cap(S('plan_qty'))}</td>`},
     };
-    const C_DEF=['line_no','wo','model_no','tools','item','change_day','rmk1','prod_rate',
+    const C_DEF=['line_no','wo','model_no','tools','item','work_center','change_day','rmk1','prod_rate',
                  'fseq','tseq','ohm','output','lot','prod_qty','sale_qty','stock_qty','plan_qty'];
     const C_LS='s4_colorder', W_LS='s4_colwidth';
     const cOrd=(()=>{try{const s=JSON.parse(localStorage.getItem(C_LS)||'null');
@@ -805,32 +822,75 @@ SCREEN.lgsale=(c)=>{
       +dates.map(d=>cell(r,d)).join('')+'</tr>';
 
     // 집계행(제번 블록) — 구분=집계/전체 일 때. 컬럼 순서(cOrd)를 그대로 따른다.
-    const subHtml=blk=>{const r0=blk[0];
+    // ★2026-08-24 집계뷰에서 클릭 시 상세 펼침(키팅/410 동일 UX). gk=블록키, open=펼침여부
+    const subHtml=(blk,gk,open)=>{const r0=blk[0];
       const S=k=>blk.reduce((s,x)=>s+(+x[k]||0),0);
-      return `<tr style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8">
-        ${cOrd.map(k=>CD[k].s?CD[k].s(blk,S,r0):'<td></td>').join('')}
+      const clk=gk!==undefined?` class="s4-agg" data-gk="${esc(gk)}" style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8;cursor:pointer"`
+                              :` style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8"`;
+      return `<tr${clk}>
+        ${cOrd.map((k,ci)=>{const td=CD[k].s?CD[k].s(blk,S,r0):'<td></td>';
+          // 첫 컬럼에 ▶/▼ 표시(집계뷰에서만)
+          return (ci===0&&gk!==undefined)?td.replace(/^<td([^>]*)>/,`<td$1><span style="color:#456;margin-right:3px">${open?'▼':'▶'}</span>`):td;}).join('')}
         ${dates.map(d=>{const pl=blk.reduce((s,x)=>s+((x.days&&x.days[d])||0),0);
           const sd=blk.reduce((s,x)=>s+((x.sday&&x.sday[d])||0),0);
           if(!pl&&!sd)return '<td class="num"></td>';
           const done=sd>0&&pl-sd<=0;
-          const cov=!done&&blk.some(x=>_cov[ckey(x,d)]);
+          // ★2026-08-24 소계 노랑 = 블록의 '미출하 계획 전량'이 충당됐을 때만.
+          //   구 로직은 some() 이라 62행 중 1행만 충당돼도 소계가 노랑이었다(재고 9 vs 계획 55,319).
+          const nd=blk.filter(x=>(x.del_flag||'0')!=='1'
+                    &&Math.max(0,((x.days&&x.days[d])||0)-((x.sday&&x.sday[d])||0))>0);
+          const cov=!done&&nd.length>0&&nd.every(x=>_cov[ckey(x,d)]);
           const bg=done?'#fac090':(cov?'#ffff00':'');
           return `<td class="num"${bg?` style="background:${bg}"`:''}>${nf(sd)+'/'+nf(pl)}</td>`;}).join('')}</tr>`;};
 
     const bodyHtml=()=>{
       if(!rows.length)return `<tr><td colspan="${NC+1+dates.length}" class="empty">조회 결과 없음</td></tr>`;
-      let h='',i=0;
+      let h='';
+      // ★2026-08-24 집계뷰만 도번+작업처로 묶는다(라인 무시 — 같은 도번은 한 줄).
+      //   같은 도번이 정렬상 흩어져 있어도 Map으로 모으고, 블록 순서 = 첫 등장 위치
+      //   = 레거시 정렬(일자→라인→시각→제번→도번)을 그대로 따른다.
+      if(st.view==='집계'){
+        const ord=[],grp=new Map();
+        rows.forEach(r=>{const k=(r.item||'')+'\x01'+(r.work_center||'');
+          if(!grp.has(k)){grp.set(k,[]);ord.push(k);}
+          grp.get(k).push(r);});
+        ord.forEach(k=>{const blk=grp.get(k),open=st.exp.has(k);
+          // 펼친 블록만 상세행을 집계행 "위"에 표시(레거시 배치)
+          if(open) blk.forEach(r=>{h+=rowHtml(r);});
+          h+=subHtml(blk,k,open);});
+        return h;}
+
+      // ★전체/제번뷰는 행 순서를 절대 건드리지 않는다 — 레거시 정렬 그대로 깔고,
+      //   연속된 같은 키만 소계로 묶는다(연속블록). 도번으로 모으면 정렬이 깨진다.
+      const bkey=r=>st.view==='제번'?(r.swo||r.wo)
+        :((r.item||'')+'\x01'+(r.work_center||''));
+      let i=0;
       while(i<rows.length){
-        const k=(rows[i].swo||rows[i].wo);let j=i;const blk=[];
-        while(j<rows.length&&(rows[j].swo||rows[j].wo)===k){blk.push(rows[j]);j++;}
-        if(st.view!=='집계') blk.forEach(r=>{h+=rowHtml(r);});
-        if(st.view==='전체'||st.view==='집계') h+=subHtml(blk);
+        const k=bkey(rows[i]);let j=i;const blk=[];
+        while(j<rows.length&&bkey(rows[j])===k){blk.push(rows[j]);j++;}
+        blk.forEach(r=>{h+=rowHtml(r);});
+        if(st.view==='전체') h+=subHtml(blk);
         i=j;}
       return h;};
 
     const tLot=rows.reduce((s,r)=>s+(+r.lot||0),0);
     const tSale=rows.reduce((s,r)=>s+(+r.sale_qty||0),0);
     const tStk=rows.reduce((s,r)=>s+(+r.stock_qty||0),0);
+
+    // ★2026-08-24 하단 총계행(레거시 w_pr_input_040 하단 합계 동일).
+    //   숫자컬럼만 합산하고 문자컬럼(라인·제번·도번…)은 빈칸.
+    //   일자칸은 레거시와 같이 "출하/계획" 형태.
+    const TSUM=['lot','prod_qty','sale_qty','stock_qty','plan_qty'];
+    const totHtml=()=>{
+      if(!rows.length)return '';
+      const T=k=>rows.reduce((s,r)=>s+(+r[k]||0),0);
+      return `<tr class="s4tot">
+        ${cOrd.map((k,ci)=>{
+          if(ci===0)return `<td style="text-align:center"><b>총계</b></td>`;
+          return TSUM.includes(k)?`<td class="num"><b>${nf(T(k))}</b></td>`:'<td></td>';}).join('')}
+        ${dates.map(d=>{const pl=rows.reduce((s,r)=>s+((r.days&&r.days[d])||0),0);
+          const sd=rows.reduce((s,r)=>s+((r.sday&&r.sday[d])||0),0);
+          return `<td class="num">${(pl||sd)?`<b>${nf(sd)+'/'+nf(pl)}</b>`:''}</td>`;}).join('')}</tr>`;};
     const selN=st.sel.size;
     let selQ=0;
     rows.forEach(r=>dates.forEach(d=>{if(st.sel.has(ckey(r,d))){
@@ -857,6 +917,9 @@ SCREEN.lgsale=(c)=>{
        /* 헤더 고정 — 스크롤해도 항상 보이게(§3). 배경 불투명 필수 */
        .tbl.s4tbl thead th{position:sticky;top:0;z-index:5;background:var(--head,#eef4ff);
          padding-right:10px;box-shadow:inset 0 -1px 0 var(--line,#c9d3e0)}
+       /* 총계행 고정 — 스크롤해도 하단에 항상 보이게(§3). 배경 불투명 필수 */
+       .tbl.s4tbl tfoot td{position:sticky;bottom:0;z-index:6;background:#dbe6f4;
+         font-weight:700;box-shadow:inset 0 1px 0 var(--line,#9fb3c8)}
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
@@ -891,6 +954,7 @@ SCREEN.lgsale=(c)=>{
        ${headHtml()}
        ${dates.map(d=>`<th class="num${dcls(d)}" style="width:58px;min-width:58px">${dcol(d)}</th>`).join('')}</tr></thead>
       <tbody>${st.loading?`<tr><td colspan="${NC+1+dates.length}" class="empty">조회 중…</td></tr>`:bodyHtml()}</tbody>
+      ${st.loading?'':`<tfoot>${totHtml()}</tfoot>`}
       </table></div></div>`;
 
     const g=id=>c.querySelector(id);
@@ -899,7 +963,29 @@ SCREEN.lgsale=(c)=>{
     g('#s4-gigan').onchange=()=>g('#s4-search').click();
     g('#s4-src').onchange=()=>{st.src=g('#s4-src').value;loadLines().then(load);};
     g('#s4-line').onchange=()=>{st.line=g('#s4-line').value;draw();};
-    c.querySelectorAll('input[name=s4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;draw();});
+    c.querySelectorAll('input[name=s4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;st.exp.clear();draw();});
+    // ★집계행 클릭 = 상세 펼침/접힘(키팅·410 동일). 셀 드래그선택과 겹치지 않게 집계행에만 건다.
+    //   ★2026-08-24 draw()가 innerHTML을 통째로 갈아끼우므로 스크롤이 맨 위로 튄다(§3).
+    //     펼침 전 스크롤을 기억했다가 재렌더 후 그대로 복원 — 클릭한 자리에 그대로 머문다.
+    c.querySelectorAll('tr.s4-agg').forEach(tr=>tr.onclick=(e)=>{
+      if(e.target.closest('input,button,a'))return;
+      const gk=tr.dataset.gk;
+      const wrap=c.querySelector('.grid-wrap');
+      const sy=wrap?wrap.scrollTop:0, sx=wrap?wrap.scrollLeft:0;
+      // 접힐 때는 클릭한 행이 화면에서 밀리지 않도록 그 행의 상대위치도 같이 맞춘다.
+      const off=wrap?tr.getBoundingClientRect().top-wrap.getBoundingClientRect().top:0;
+      const open=st.exp.has(gk);
+      if(open)st.exp.delete(gk);else st.exp.add(gk);
+      draw();
+      const w2=c.querySelector('.grid-wrap');
+      if(!w2)return;
+      let t2=null;  // data-gk 에 \x01 이 들어가므로 선택자 대신 값 비교로 찾는다
+      w2.querySelectorAll('tr.s4-agg').forEach(x=>{if(!t2&&x.dataset.gk===gk)t2=x;});
+      if(t2){ // 클릭한 집계행이 클릭 전과 같은 높이에 오도록 스크롤을 잡는다
+        w2.scrollLeft=sx;
+        w2.scrollTop=w2.scrollTop+(t2.getBoundingClientRect().top-w2.getBoundingClientRect().top)-off;
+      }else{w2.scrollTop=sy;w2.scrollLeft=sx;}
+    });
     ['#s4-wo','#s4-item'].forEach(id=>{const el=g(id);if(!el)return;
       el.oninput=()=>{const v=el.value,ss=el.selectionStart;
         if(id==='#s4-wo')st.wo=v.trim(); else st.item=v.trim();
