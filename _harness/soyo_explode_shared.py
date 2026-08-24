@@ -87,3 +87,63 @@ def cost_material_nae_ex(eng, item, ymd):
         return eng._leaf_val_nae(node, info, q, ymd, ymcut)
 
     return round(value(item, 1.0, set()), 2)
+
+
+# ===================== 생산 walker (explode 공유형) =====================
+# 생산축: nx.bom_line 직읽기(child·qty·except_flag, RAC 포함). 현행 prod_soyo는 v_pr_bom(USE_QTY_PR·except_flag).
+# 이 _ex가 prod_soyo와 diff0면 → nx.bom_line이 v_pr_bom을 재현(소스 등가) = 단일소스 통일 가능.
+
+def _lines_pr(eng, item):
+    """생산축 nx.bom_line 직상위 [(child_upper, qty, except_flag '0'/'1')]. RAC 포함(walker 제외)."""
+    bid = eng.bom_id(item)
+    if bid is None:
+        return []
+    if not hasattr(eng, '_lines_pr_cache'):
+        eng._lines_pr_cache = {}
+    if bid not in eng._lines_pr_cache:
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), qty, ISNULL(except_flag,0)
+            FROM nx.bom_line WHERE bom_id=? ORDER BY seq""", bid)
+        eng._lines_pr_cache[bid] = [(str(r[0]).strip(), float(r[1] or 0), '1' if r[2] else '0')
+                                    for r in eng.cur.fetchall()]
+    return eng._lines_pr_cache[bid]
+
+
+def explode_pr(eng, item):
+    """생산축 full 전개(nx.bom_line·except_flag 태깅). 반환 kids_pr[parent]=[(child,qty,except_flag)]."""
+    kids = {}
+    import nx_soyo_engine as _se
+    hasvpr = _se._has_vpr(eng)   # 현행과 동일 '자식 있음' 판정 소스
+
+    def walk(node, seen):
+        if node in kids or node in seen:
+            return
+        ch = _lines_pr(eng, node)
+        kids[node] = ch
+        for c, q, ex in ch:
+            walk(c, seen | {node})
+    walk(item, set())
+    return kids
+
+
+def prod_soyo_ex(eng, item):
+    """[생산 walker · explode 공유형] — nx_soyo_engine.prod_soyo 와 diff0 대상.
+    nx.bom_line(except_flag) 공유맵 순회. except_flag=1 제외·최하위집계·용접봉(RAC) 제외."""
+    import nx_soyo_engine as _se
+    kids = explode_pr(eng, item)
+    raw = {}
+
+    def walk(node, cum_q, lvl, seen):
+        ch = kids.get(node, []) if node not in seen else []
+        ch = [(c, q, ex) for (c, q, ex) in ch if ex != '1']
+        if ch:
+            for c, q, ex in ch:
+                walk(c, cum_q * q, lvl + 1, seen | {node})
+        if not ch and lvl > 0:
+            raw.setdefault(node, []).append((lvl, cum_q))
+    walk(item, 1.0, 0, set())
+    out = {}
+    for mc, occ in raw.items():
+        if _se._is_weldrod(eng, mc):
+            continue
+        out[mc] = round(sum(q for _, q in occ), 6)
+    return out
