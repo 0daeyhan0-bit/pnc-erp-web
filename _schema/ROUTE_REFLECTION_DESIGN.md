@@ -182,3 +182,16 @@
 - 순서: [0]파악·설계 → 옆에짓고 [1][2] → [3]전수검증 → [4]승인배포.
 - **생산계획 미접촉**(옆에짓고 R01 diff0 증명 전 라이브 compose_mat 무변경). 성급한 일반화 금지·검증·기록.
 - 이번 아님(별건): backflush 다단계 체인 정합([[newerp-backflush-rawmat-weight-axis]]), 소요 통일 Phase0-2(완료).
+
+## §15. R01 route→생산계획 편성 (2026-08-24 착수·샘플먼저)
+> 대표: except_flag 없이 R01(활성 route)로 생산계획 편성. R01 diff0 통과하면 Rnn(활성화된것) 자동적용(제네릭). 샘플→전수.
+
+**현 상태 실측**: sourcing_route=3품목 파일럿만(AJR77263007 R01=1580 current_flag=T·AJR75563402/AJR30083101 R02). 전품목 R01·plan의 route사용=**미착수**. 현행 plan=soyo.py STEP7 except_flag 직접(507행).
+
+**첫 샘플 검증(AJR77263007 R01=1580 vs 현행 plan_part_mat)**:
+- route 구조=명시적 계층(node_kind SUB/PART·parent_line·gubun). raw까지 전개.
+- ★규칙발견: **route를 "제작 SUB에서 정지"하면 plan leaf 재현**(공통22·route만0·plan만3). plan만3=용접봉(5210A22409A/B·BCUP1S)=별도 용접축(proc_weld/bom_flat_weld)이 처리.
+- ★수량 세부: 대부분 plan/route=801(plan_qty) 완전비례(diff0). **단 제작SUB(+용접링)만 어긋남**: plan MJU65517914+용접링=8811=**11×801**(내부 제작동관11 반영), route SUB정지=qty1. →**규칙보정=제작SUB 정지시 내부 제작동관 수량 롤업**.
+- 결론: route기반 plan편성 = **(제작SUB정지+내부동관qty롤업) 재료 + 용접봉 별도축**. 샘플로 grain 2건 규명.
+
+**남음**: ①수량규칙 보정후 AJR77263007 완전 diff0 재검증 ②변형SUB 샘플(AJR30004702 -20-1/-3-1) 검증 ③나머지 샘플 ④전품목 R01 실체화·전수 diff0 게이트 ⑤plan이 활성route 읽게 배선(dev). ★라이브plan 미접촉.
