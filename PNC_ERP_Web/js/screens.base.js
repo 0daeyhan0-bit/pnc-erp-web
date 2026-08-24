@@ -258,12 +258,12 @@ SCREEN.drawingdoc=(host)=>{
     g('#dd-item').onkeyup=e=>{if(e.key==='Enter')g('#dd-go').click();};
     if(ed){
       const fe=g('#dd-file'),ub=g('#dd-up'),dz=g('#dd-drop');
-      if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;render();};
+      if(fe)fe.onchange=e=>{const f=e.target.files[0]||null;if(f){st.file=f;upload();}};   // 선택 즉시 업로드(LG BOM식)
       if(ub)ub.onclick=upload;
       if(dz&&fe){dz.onclick=()=>fe.click();
         dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0df';};
         dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
-        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;render();}};}
+        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;upload();}};}   // 드롭 즉시 업로드
     }
     host.querySelectorAll('.dd-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.dd-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));
