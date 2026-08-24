@@ -30,6 +30,24 @@
 - **[3] 검증(전수)**: R01 **전수 diff0**(현행 무변, 계획·원가 둘 다) + R02 표본이 경로대로.
 - **[4] 배포**: 생산계획 접촉 → **조율 + 승인 후**. dev·옆에짓고 diff0 증명 먼저.
 
+## 7. [0] 데이터층 실측 (2026-08-24, 읽기전용)
+**데이터 모델 (확인)**:
+- `nx.sourcing_route`: route_id·item_code·route_no·**current_flag(활성경로 마커)**·gubun·vendor_code·approve_flag.
+- `nx.sourcing_route_line`: child_item·qty·**gubun(제작/매입/사급, `_LINE_GUBUN`)**·vendor_code·node_kind(PART/SUB/ASSY)·parent_line·sub_item. ← 스크린샷 "조달후보 상세편집"의 라인별 드롭다운.
+
+**★사용 현황 (실측 — 직접 사용되는가?)**:
+- **per-line 제작/매입/사급(`sourcing_route_line.gubun`)** = **bom.py(표시)·sourcing.py(관리)만 읽음. 생산계획 전개·원가·발주 안 씀.** = 표시/관리용 dormant.
+- **route 헤더+프로파일** = soyo.py **plan_mat_source(발주소스)에만** 사용: `if isc`(R01 현행)→프로파일/BOM기본, `else`(R02+)→대안 vendor(잠자는 분기·R02 미등록). = **발주 vendor 배분만.**
+- **BOM 전개(plan_part_mat=소요 구조, STEP6/7)** = **route 완전 무관**(순수 v_pr_bom 전개). ★즉 **R02=외주완성 등록해도 소요 구조는 안 바뀜**(그 SUB를 여전히 원소재까지 전개, vendor만 배분) = **핵심 gap.**
+
+**R01 route gubun 유래 (sourcing.py `_route_baseline_lines` L496)**: `사급(SAGUB_FLAG=1) / 제작(MAKE_TYPE=1) / 매입(그외)` = **마스터 파생.**
+
+**현행 전개 정지 (soyo.py STEP7 `_step7_sql` L490~511)**: 재귀 CTE가 v_pr_bom 전개, 정지 = **`except_flag=1` + 최하위집계(NOT EXISTS 하위)** 기반. **제작/매입/사급(MAKE_TYPE)을 정지에 직접 안 씀** — BOM 구조(자식 유무)로 자연정지.
+
+**★핵심 diff0 검증 과제 (착수 1순위)**: "route gubun을 정지규칙으로 적용한 전개" == "현행 구조기반 전개"인가?
+- 위험지점: **MAKE_TYPE=매입인데 v_pr_bom에 자식 있는 노드** — 현행은 전개(구조), route-gubun은 정지(매입) → 갈림.
+- → 착수 전 **R01 gubun-정지 vs 현행 전개 전수 대조**로 갈림 규모 파악(읽기전용). 0이면 안전, 있으면 규칙 조정.
+
 ## 6. 순서·안전
 - 순서: [0]파악·설계 → 옆에짓고 [1][2] → [3]전수검증 → [4]승인배포.
 - **생산계획 미접촉**(옆에짓고 R01 diff0 증명 전 라이브 compose_mat 무변경). 성급한 일반화 금지·검증·기록.
