@@ -150,6 +150,13 @@
 **★STEP1 = 조달후보 구분 데이터 정확화(표시/발주 기반). STEP2(구분→생산계획 반영)는 별건 대작업.**
 **★STEP1 배포 완료·운영 검증 (2026-08-24)**: PR #44(feat/route-gubun-v2, 최신 main 2d1f4d6 기준) main 병합 → 운영 deploy_pull → BOM 다시 불러오기. AJR75563402-19-1=외주·MJU64794xxx=외주 정상. ★배포 교훈: 브랜치는 반드시 **최신 main 기준**으로(옛 base면 deploy_pull이 main만 당겨 미반영)·Korean PR제목 API 인코딩주의(ASCII)·main 병합은 Claude 자동차단(사용자 웹 [Merge]). 백엔드 코드변경=재기동 필수(uvicorn --reload 없음).
 
+## 13. STEP2-R01 (가) 발주 supply_gubun 라벨 통일 (2026-08-24, dev·미배포)
+**목표**: 발주 supply_gubun 라벨을 조달후보 구분(제작/외주/구매/사급/외주직납)과 통일. **발주는 이미 make_type 5-way(_MKMAP)라 기능은 정확·라벨만 상이했음.**
+**매핑**: 자체→제작·외주가공→외주·매입→구매·유상사급→사급·외주완성→외주직납.
+**코드 수정(dev, 8곳·compile OK)**: soyo.py(`_MKMAP`·RHV기본값×2) · autoorder.py(`_ORDER_GUBUN`·필터 `<>'자체'`→`<>'제작'`) · screens.pur.js(색상맵×2·공급방식 드롭다운).
+**★DB migration = 배포 때 함께 (deferred)**: sourcing_profile.supply_gubun·plan_mat_source.SUPPLY_GUBUN. **공유 DB라 코드 배포 전 migrate하면 운영 옛코드(필터 '자체')가 '제작'행을 발주포함=오작동** → 시험 migrate(13064·98709행) 후 **즉시 되돌림**(운영 안전). ★교훈: 라벨 migration은 코드 배포와 원자적으로. 배포SQL = `CASE supply_gubun WHEN '자체' THEN '제작' WHEN '외주가공' THEN '외주' WHEN '매입' THEN '구매' WHEN '유상사급' THEN '사급' WHEN '외주완성' THEN '외주직납' END` (두 테이블).
+도구: scratchpad/unify_supply_gubun.py. **상태: dev 코드 완료·DB원복·배포대기(코드+DB migration 동시).**
+
 ## 6. 순서·안전
 - 순서: [0]파악·설계 → 옆에짓고 [1][2] → [3]전수검증 → [4]승인배포.
 - **생산계획 미접촉**(옆에짓고 R01 diff0 증명 전 라이브 compose_mat 무변경). 성급한 일반화 금지·검증·기록.
