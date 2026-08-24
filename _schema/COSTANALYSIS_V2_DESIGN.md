@@ -839,5 +839,10 @@ cg=5 직납 → 제외
 - 재고 commingled=사급vendor(LS메탈-사급2237·Hailiang2238)만·나머지 직거래. mat_stock_daily=mat_code단일풀=commingled 확인→이동평균=실제소비원가 정합.
 - **다음**: bulk_v2 mode=이론|실제 param + SCREEN 토글 + 실제모드 월별 집계 구현.
 
+### ★1단계 완료 — 백엔드 실제모드 엔드포인트 (2026-08-24)
+- **신규 `/api/cost/nx/bulk_actual`**(cost.py) — 실제손익 월별매칭. 파라미터 `parts[]·from_ym·to_ym(YYMM)·ymd(이론기준일)`. 판가=그달 리시빙 실적 가중평균(PARTNER_ERP.dbo.sa_t_recv_dtl Σqty×item_cost/Σqty), 원가=그달 이동평균(nx.mat_stock_daily) 재료비+가공/일반/운반/이윤, 판가·원가 같은달 매칭. 반환=품목별 {qty·actual_rev·actual_cost·actual_sonik·actual_sonik_unit·theory_sonik}. 로직정본=배치 actual2.py 이식(월말=캘린더 정확화). **이론(bulk_v2)은 무변경**(별 엔드포인트).
+- **★검증 diff0**: 엔드포인트 로직 == actual2.py 배치를 **오늘 데이터로 재실행 4/4 정확일치**(AJR30027702 +30,799,174·AJR75563503 −11,468,033·PQ060903E30 +91,138,208·AJR30133601 +29,306,062). ※옛 actual2.txt(08-23)와의 차이는 8월(현재월) 리시빙 하루치 증가=데이터 신선도(로직 정상). compile OK·dev만·미배포.
+- **☐2단계(남음)**: SCREEN.costanalysis_v2 이론/실제 토글(프론트, 백엔드 검증 후) — 취약 프론트라 신중히.
+
 ## 관련
 [[newerp-legacy-cost-algorithm]] [[newerp-legacy-bug-candidates]] [[newerp-bom-mirror-legacy-debt]] [[newerp-realcost-bom-expansion]] [[newerp-weld-cost-split]] [[newerp-routing-edge-flag-retire]] [[newerp-sourceprofile-route1-select]] [[newerp-except-flag-vendor-rule]]
