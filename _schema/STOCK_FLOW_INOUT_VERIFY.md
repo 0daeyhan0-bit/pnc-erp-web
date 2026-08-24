@@ -31,8 +31,10 @@
 | 12 | 출하(lgsale 동일 posting) | ASY − (J) | −10 | — | — | ✅ |
 | 13 | 자재반품 `stock_save(return)` | MAT − (RT) | −15 | **0** | −15 | ⚠ 수불장 미반영 |
 | 14 | 사급조정 `sagub_adjust_save/delete` | SAG ± (2) | +33→0 | — | — | ✅ 역대칭 |
+| 15 | 도입수입 `dopip_save_batch/delete` | 도입수불 C테이블 + | +80→0 | (PU_T_STOCK_MAINT_C) | — | ✅ 역대칭 |
+| 16 | 세트입고 `setstock_receive` | MAT + (S, 자도번파생) | (미실행) | — | — | ◐ 발행바코드 부재·기존 build_set_derive 검증 |
 
-전 재고점(MAT/RDY/PRD/ASY/SAG/MV) posting 검증 완료.
+전 재고점(MAT/RDY/PRD/ASY/SAG/MV) + 도입(PU_T_STOCK_MAINT_C) posting 검증 완료. 세트입고만 발행상태 바코드 부재로 실행생략(코드검토+과거검증으로 갈음).
 
 \* 자재수불장 = `nx.PU_T_STOCK_MAINT` (자재입출고현황·수불장이 읽는 원천)
 \** 자재재고 = `nx.PU_T_MAT_STOCK_WH` (잔액)
