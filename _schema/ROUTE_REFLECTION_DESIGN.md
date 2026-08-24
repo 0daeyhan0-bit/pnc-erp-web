@@ -157,6 +157,21 @@
 **★DB migration = 배포 때 함께 (deferred)**: sourcing_profile.supply_gubun·plan_mat_source.SUPPLY_GUBUN. **공유 DB라 코드 배포 전 migrate하면 운영 옛코드(필터 '자체')가 '제작'행을 발주포함=오작동** → 시험 migrate(13064·98709행) 후 **즉시 되돌림**(운영 안전). ★교훈: 라벨 migration은 코드 배포와 원자적으로. 배포SQL = `CASE supply_gubun WHEN '자체' THEN '제작' WHEN '외주가공' THEN '외주' WHEN '매입' THEN '구매' WHEN '유상사급' THEN '사급' WHEN '외주완성' THEN '외주직납' END` (두 테이블).
 도구: scratchpad/unify_supply_gubun.py. **상태: dev 코드 완료·DB원복·배포대기(코드+DB migration 동시).**
 
+## 14. STEP2-R01 (나) 생산계획 소요전개 반영 = ★전수분석 결과 "R01엔 하면 안 됨" (2026-08-24, 읽기전용)
+**전수 갈림 분석**(사용중 완제품 3728, gubun_soyo_divergence.py): 구분정지(매입3/사급4/외주직납5)를 R01 소요전개에 적용하면:
+- **갈리는 완제품 221 (5.9%)** · 갈림유발 노드 133(매입112·외주직납20·사급1).
+- 일부 파괴적: AAA31179501 현행 14 leaf→구분 1 leaf (외주직납/매입 SUB 통째 정지). = 소요 대량 누락.
+→ **생산계획 diff0 깨짐 = LG라인 위험. R01 소요전개를 구분-stop으로 바꾸면 안 됨.**
+
+**문서 정독(생산계획 전 문서 서브에이전트)도 동일 판정**:
+- make_type/구분은 **현행 소요전개 정지에 관여 안 함**(정지=except_flag+구조·최하위·사급중단=PART_DTL보유). make_type은 발주/표시만.
+- 확정방향(§9-1·SOYO_UNIFY §13-4b): **R01=except_flag 유지(diff0)·make_type 정지는 R02(대안경로 활성)에서만·가산적(R01 no-op).** R02 미운영(sourcing_route 거의 빔)이라 지금 실익 0.
+- ★진짜 최우선(feedback-protect): **현 baseline이 완전 diff0 아님(−2.7%·변형SUB 미러부채)** — 이 봉합이 make_type 반영보다 선행 순번. 미러부채는 make_type과 무관·클린전환 별건.
+- 생산 소요=**qty_pr**(원가=qty·12건갈림)·prod_rate반영. 사급=make_type4(LG)≠SAGUB_FLAG(우리→협력사·별축).
+
+**∴ (나) 판정**: "R01 전개를 구분으로" = 불가·불필요(LG diff0 게이트서 막힘). 올바른 형태 = **R02용 가산적 route-aware walker 옆에짓고 R01 전수 무변(diff0) 증명** — 단 R02 미운영이라 지금은 코드추가·미활성만 가능. 배포=로드맵 최후·조율+승인.
+도구: gubun_soyo_divergence.py. 관련 [[feedback-protect-production-plan]] SOYO_UNIFY §13-4b.
+
 ## 6. 순서·안전
 - 순서: [0]파악·설계 → 옆에짓고 [1][2] → [3]전수검증 → [4]승인배포.
 - **생산계획 미접촉**(옆에짓고 R01 diff0 증명 전 라이브 compose_mat 무변경). 성급한 일반화 금지·검증·기록.
