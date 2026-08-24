@@ -480,8 +480,9 @@ def _route_setup(cur):
     - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지. 대체경로 등록시 채움(materializer 별도). 없으면 fallback.
     - nx.plan_route_active(assy_item_code,route_id): 활성 대체경로(sourcing_route current_flag=1·route_no>1)이면서 route_edges 보유한 제품만.
       기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 100.000%)."""
+    # ★타입=plan_part_dtl.item_code(varchar20)·v_pr_bom.mat_code(varchar20) 정합(재귀CTE 앵커 타입일치 필수). nvarchar 쓰면 STEP7 재귀 타입불일치 오류.
     cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
-        route_id INT NOT NULL, item_code NVARCHAR(60) NOT NULL, mat_code NVARCHAR(60) NOT NULL,
+        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
         use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL DROP TABLE nx.plan_route_active")
     cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(h.item_code))) AS assy_item_code, MIN(h.route_id) AS route_id
