@@ -358,3 +358,12 @@
 - ∴ **R01 materializer(제품트리 v_pr_bom 활성엣지 수집→route_edges) 실증완료** = 우리BOM route_edges로 R01=현행 동일.
 - ★네트워크 주의: 50제품 배치는 WO목록 과대로 연결끊김(10054). 배치는 15~20제품/청크로.
 - 다음: materializer를 백엔드 재사용함수/엔드포인트化(R01복사) → Rnn편집UI → route_alloc/profile 거래처지정 연결.
+
+## §18-2. ★100건 제작↔외주 스왑 계획반영 검증완료(2026-08-25)
+- 사용자: R01에 제작→외주(거래처지정)·외주→제작 스왑 100건 계획반영(협력사·생산) 확인.
+- 스왑정의: 제작→외주=SUB 내부엣지 제거(route_edges·정지)→SUB=외주단위 / 외주→제작=부모→SUB except엣지+SUB서브트리 활성화(전개)→내부자재 등장.
+- ★검증(전개기반·plan=전개×수량이고 전개→plan diff0증명 §18-1): **생산축 100/100 반영**(제작→외주 95: 내부자재제거·SUB=leaf / 외주→제작 5: 내부자재 17·3·1·2·17 추가).
+- ★협력사축(plan_mat_source 대안경로 로직 soyo.py 129-143): 제작→외주 SUB **95/95 지정거래처 외주배치**(sourcing_profile(rid,SUB,외주,vendor)→PRF_ALT) / 외주→제작 SUB=제작재분류→협력사제거(§16-2규명·§16-1 AJR30125602 end-to-end실증).
+- ★내오류교정: 1차 5건 외주→제작 미반영=제품→SUB except엣지 미활성(내부엣지만 추가). 부모엣지+서브트리 함께 활성화로 5/5.
+- ★쿼리 성능: 청크15 STEP7도 WO폭발로 타임아웃 → 전개기반 인메모리 검증으로 전환(plan=전개×수량·전개→plan diff0증명 근거). materializer=_materialize_r01_edges(sourcing.py)·엔드포인트 /api/sourcing/route/materialize_edges.
+- **∴ 조달경로 스왑(제작↔외주+거래처)이 생산·협력사계획에 정확 반영 = route reflection 실증완료.** 남은=Rnn 편집UI(route_edges add/remove + sourcing_profile vendor)·배포.
