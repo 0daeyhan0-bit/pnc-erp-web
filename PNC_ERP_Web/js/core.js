@@ -578,12 +578,12 @@ function itemLiveView(c, mat){
        <label class="tl">소분류</label><select class="inp" id="it-sg" style="width:auto"><option value="">전체</option>${st.sgroups.map(o=>`<option value="${esc(o.code)}" ${st.sg===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">성격</label><select class="inp" id="it-nat" style="width:auto"><option value="">전체</option>${st.natures.map(o=>`<option value="${esc(o.code)}" ${st.nat===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl" title="LG 리시빙 2501~ 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="it-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
-       <button class="btn" id="it-go" style="background:#1c7c3a;color:#fff">조회</button>
-       <button class="btn" id="it-xls" style="background:#1c7c3a;color:#fff">엑셀</button>
+       <button class="btn" id="it-go">조회</button>
+       <button class="btn xls" id="it-xls">⬇ 엑셀</button>
        <div class="spacer"></div><span class="rowcount">${won(st.cnt)}건${st.cnt>=3000?'(상한)':''}</span>
      </div>
      <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px;table-layout:fixed;width:100%"><colgroup>${COLS.map(x=>`<col style="width:${x[3]}px">`).join('')}</colgroup><thead><tr>${COLS.map(x=>`<th class="${x[2]==='n'?'num':''}">${x[1]}</th>`).join('')}</tr></thead>
+      <table class="tbl" style="font-size:11px;table-layout:fixed;width:100%"><thead><tr>${COLS.map(x=>`<th class="${x[2]==='n'?'num':''}" style="width:${x[3]}px">${x[1]}</th>`).join('')}</tr></thead>
       <tbody>${rowsHTML()}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
     g('#it-go').onclick=()=>{st.q=g('#it-q').value;st.lg=g('#it-lg').value;st.sg=g('#it-sg').value;st.nat=g('#it-nat').value;st.use=g('#it-use').value;load();};
