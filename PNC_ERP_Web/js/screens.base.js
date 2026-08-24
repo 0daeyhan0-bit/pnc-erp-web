@@ -97,16 +97,15 @@ SCREEN.lgbomview=(c)=>{
     if(st.msortKey){const k=st.msortKey,d=st.msortDir||1;st.models.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*d;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*d;});}
     const totq=st.tree.reduce((a,r)=>a+(+r.qty||0),0);
     c.innerHTML=`
-     <div class="page-title">🔀 LG BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 + 엑셀 업로드(신규 BOM 등록 전 사전적재)</span></div>
-     <div class="page-sub">LG 원본 BOM Explosion(<code>nx.lg_bom</code>) · 모델(완제품) 검색 → 전 레벨 트리 전개 · werks <b>DMZ=SAC / DGZ=RAC</b> · <b>📤업로드=LG BOM Explosion 엑셀→모델별 적재</b>(그 후 「품목BOM관리 › 신규 BOM 등록 › LG BOM 불러오기」에서 사용)</div>
+     <div class="page-title">LG BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">조회 + 엑셀 업로드(신규 BOM 등록 전 사전적재)</span></div>
      <div class="toolbar">
-       <label class="tl">모델/품번</label><input class="inp" id="lb-q" value="${esc(st.q)}" placeholder="상위품번(예: 3127A20114B)" style="width:220px">
+       <label class="tl">모델/품번</label><input class="inp" id="lb-q" value="${esc(st.q)}" placeholder="모델/품번 검색" style="width:220px">
        <label class="tl" style="margin-left:8px">공장</label><select class="inp" id="lb-wk"><option value="">전체</option><option value="DMZ" ${st.werks==="DMZ"?"selected":""}>DMZ(SAC)</option><option value="DGZ" ${st.werks==="DGZ"?"selected":""}>DGZ(RAC)</option></select>
        <button class="btn" id="lb-go">🔍 조회</button>
        <div class="spacer"></div>
-       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #8fb4d6;border-radius:8px;padding:6px 12px;background:#f4f9fe;color:#5a7597;font-size:12px;white-space:nowrap;cursor:pointer">📥 엑셀을 여기로 <b>드래그&드롭</b></span>
+       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #1c7c3a;border-radius:8px;padding:14px 30px;min-width:280px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer">엑셀을 여기로 <b>드래그&드롭</b></span>
        <input type="file" id="lb-file" accept=".xlsx,.xls" style="display:none">
-       <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'⏳ 업로드중…':'📤 LG BOM 업로드'}</button>
+       <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'업로드중…':'⬆ LG BOM 업로드'}</button>
      </div>
      ${st.upmsg?`<div class="page-sub" style="color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.upmsg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
