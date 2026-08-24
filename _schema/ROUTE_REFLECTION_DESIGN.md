@@ -352,3 +352,9 @@
 ## §18. materializer 착수(2026-08-25) — R01 실체화 end-to-end diff0
 - ★내 오류교정(정독으로 발견): 1차 materializer 검증에서 route-active를 **stale 라이브 plan_part_mat(29mat)**과 비교해 어긋남(106vs29). §15-10 기록된 올바른법=**route-active vs 같은드라이버 baseline(fallback)**·§16-1 R01 baseline=111mat. 교훈=검증기준은 기록된 방법대로(같은드라이버 baseline, stale라이브 아님).
 - materializer 로직: 제품 A의 v_pr_bom 활성엣지(except<>1) 재귀수집 → route_edges(route_id,item,mat,use_qty_pr) 삽입. R01=활성엣지 그대로·Rnn=편집.
+
+## §18-1. materializer 검증완료(2026-08-25)
+- ★올바른검증(route-active vs 같은드라이버 baseline·stale라이브 아님): AJR30125602 단품=diff0(106=106)·배치 15제품(44 assy)=670(assy,mat) 불일치0·diff0 44/44.
+- ∴ **R01 materializer(제품트리 v_pr_bom 활성엣지 수집→route_edges) 실증완료** = 우리BOM route_edges로 R01=현행 동일.
+- ★네트워크 주의: 50제품 배치는 WO목록 과대로 연결끊김(10054). 배치는 15~20제품/청크로.
+- 다음: materializer를 백엔드 재사용함수/엔드포인트化(R01복사) → Rnn편집UI → route_alloc/profile 거래처지정 연결.

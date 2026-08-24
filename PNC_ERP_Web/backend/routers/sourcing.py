@@ -420,6 +420,11 @@ def _ensure_route_tbl(cur):
         rp_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
         proc_code NVARCHAR(10) NOT NULL, work_qty FLOAT DEFAULT 0, prod_uph FLOAT DEFAULT 0, calc_gubun NVARCHAR(4) NULL,
         ins_dt datetime DEFAULT getdate())""")
+    # ★★route_edges(2026-08-25): 경로별 BOM엣지(parent→child→USE_QTY_PR). soyo.py STEP7 route-aware가 소비.
+    #   타입=varchar(20)(plan_part_dtl.item_code·v_pr_bom.mat_code 정합·재귀CTE 앵커 타입일치 필수·nvarchar면 오류).
+    cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
+        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
+        use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
     # ★#3 후보 노드별 관경 용접점(용접ST=가공비 / 용접봉 소요량=재료). 내부원가 관경별 용접 팝업 재사용
     cur.execute("""IF OBJECT_ID('nx.sourcing_route_weld','U') IS NULL CREATE TABLE nx.sourcing_route_weld(
         rw_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
@@ -688,6 +693,54 @@ def _route_hdr_errors(p):
     # ★후보 헤더는 공급처·구분·유효일자를 받지 않는다: 구분=라인(부품)별(제작/매입/사급) · 업체=조달프로파일 배분 · 유효기간 폐지.
     #   경로는 라인 성격이 섞인 합성이라 헤더 단일 구분이 성립하지 않음(사용자 확정 2026-08-19).
     return []
+
+def _materialize_r01_edges(cur, item, route_id):
+    """★R01 실체화(2026-08-25): item 트리의 v_pr_bom 활성엣지(except_flag<>1)를 nx.route_edges(route_id)로 수집.
+       = 우리BOM으로 R01(현행). soyo.py STEP7 route-aware가 소비(활성route면 이 엣지로 전개·except_flag없이=baked-in).
+       ★검증완료(ROUTE_REFLECTION §18-1): route-active vs 같은드라이버 baseline = diff0(단품106=106·배치44/44). Rnn=이후 편집(제작↔외주 스왑)."""
+    item = str(item).strip().upper()
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
+    E = {}
+    for it, m, q, ex in cur.fetchall():
+        E.setdefault(it, []).append((m, float(q or 0), int(ex or 0)))
+    edges = {}; seen = set(); st = [item]
+    while st:
+        n = st.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        for m, q, ex in E.get(n, []):
+            if ex == 1:                        # except_flag=1=전개제외(baked-in) → 활성엣지만 실체화
+                continue
+            edges[(n, m)] = edges.get((n, m), 0) + q
+            if m in E:
+                st.append(m)
+    cur.execute("DELETE FROM nx.route_edges WHERE route_id=?", route_id)
+    rows = [(int(route_id), it[:20], m[:20], q) for (it, m), q in edges.items()]
+    if rows:
+        cur.fast_executemany = True
+        cur.executemany("INSERT INTO nx.route_edges(route_id,item_code,mat_code,use_qty_pr) VALUES(?,?,?,?)", rows)
+    return len(rows)
+
+
+@router.post("/api/sourcing/route/materialize_edges")
+def sourcing_route_materialize_edges(payload: dict = Body(...)):
+    """★R01 실체화(우리BOM route_edges): 대상 route_id에 그 품목 현행 활성 BOM엣지를 채움(멱등).
+       이후 편집(제작↔외주 스왑)→Rnn. soyo.py STEP7 route-aware가 활성route면 이 엣지로 전개(except_flag 없이). ROUTE_REFLECTION §18."""
+    p = payload
+    item = str(p.get("item_code", "")).strip()
+    route_id = int(p.get("route_id") or 0)
+    if not item or route_id <= 0:
+        raise HTTPException(400, "item_code·route_id 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        n = _materialize_r01_edges(cur, item, route_id)
+        nx.commit()
+        return {"ok": True, "route_id": route_id, "edges": n}
+    finally:
+        nx.close()
+
 
 @router.post("/api/sourcing/route/save")
 def sourcing_route_save(payload: dict = Body(...)):
