@@ -326,12 +326,12 @@ SCREEN.itemspec=(host)=>{
     g('#is-item').onkeyup=e=>{if(e.key==='Enter')g('#is-go').click();};
     if(ed){
       const fe=g('#is-file'),ub=g('#is-up'),dz=g('#is-drop');
-      if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;render();};
+      if(fe)fe.onchange=e=>{const f=e.target.files[0]||null;if(f){st.file=f;upload();}};   // 선택 즉시 업로드(LG BOM식)
       if(ub)ub.onclick=upload;
       if(dz&&fe){dz.onclick=()=>fe.click();
         dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0df';};
         dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
-        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;render();}};}
+        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;upload();}};}   // 드롭 즉시 업로드
     }
     host.querySelectorAll('.is-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.is-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));
