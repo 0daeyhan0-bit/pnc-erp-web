@@ -203,3 +203,11 @@
 - ★**결론**: plan grain = cost_stop도 except_flag-full도 아닌 **STEP6 파이프라인 고유**(중간 제작SUB레벨 정지 + 변형SUB -S{n} 채번 + 공정전이). AJR77263007이 맞았던건 그 route를 **손으로 그 grain에 실체화**했기 때문(일반화 불가).
 - **함의**: route기반 plan편성 = 단순 BOM 정지규칙 아님. **route를 STEP6 grain(레벨·변형SUB)에 맞춰 실체화하는 빌더**가 필요(=대작업). 또는 route를 STEP6 결과(plan_part_dtl)에서 역실체화. **먼저 route materializer가 plan grain 재현하는지가 게이트.**
 - 다음: sourcing.py route materializer 코드 확인→plan grain 재현하도록→100+ diff0. ★현행 plan은 정상(§14 결론)이니 급하지 않음·라이브 무접촉.
+
+## §15-2. 100+ 검증 최종규명(2026-08-24) — 3기반 모두 실패·plan grain=STEP6고유
+사용자 "이게 최우선" — route materializer가 plan grain 재현하는지 전면검증:
+- **3가지 기반 vs plan_part_mat**: cost_stop(make_type)150제품=**0%** · except_flag-full 200제품=**34%** · **naewon SUB-정지** 40제품=**30%**.
+- ★특이케이스 핵심: AJR77263007=plan이 **+용접링(제작단위)서 정지** / AJJ73040829=plan이 **-SUB(조립그룹) 해체·전개**. **같은 SUB인데 정반대**.
+- ★**결정적 규명**: plan은 **제작단위(+용접링·-N-N 자도번=자기 라우팅 보유)서 정지 + 순수 조립그룹(-SUB·은납) 해체**. 구분기준=**BOM구조 아니라 라우팅 보유여부**=STEP6 고유(공정전이 기반). → **어떤 단순 BOM 정지규칙으로도 plan 재현 불가 확정**.
+- ★**올바른 길 = STEP6 결과에서 역실체화**: route grain을 STEP6(plan_part_dtl)의 실제 grain에서 파생하면 R01=plan 재현 **구성상 보장**. plan_part_dtl(item_code·mat_code·bom_level·proc)이 grain의 진실. product레벨 grain=그BOM+routing 조합(STEP6로직) → route materializer가 이걸 그대로 써야.
+- 다음: route materializer를 STEP6 grain(라우팅 보유=제작단위 정지·무보유 조립그룹 해체)에 맞추거나, plan_part_dtl에서 product별 grain 추출→route 실체화. R01 전수 diff0 게이트. ★현행plan정상(§14·§15-2)이라 급성없음·라이브무접촉.
