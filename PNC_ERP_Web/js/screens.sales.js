@@ -549,10 +549,10 @@ SCREEN.saleout=(c)=>{
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const d8=s=>s&&s.length===8?`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`:(s||"");
   const dt=s=>String(s||"").slice(0,19).replace("T"," ");
-  let st={rows:[],custs:[],gubuns:{},cust:"",item:"",sheet:"",gubun:"",fr:iso(new Date(now.getFullYear(),now.getMonth(),1)),to:iso(now),
+  let st={rows:[],custs:[],gubuns:{},cust:"",custnm:"",custcode:"",item:"",sheet:"",gubun:"",fr:iso(new Date(now.getFullYear(),now.getMonth(),1)),to:iso(now),
           carry:iso(now),sel:{},edit:null,sortKey:"",sortDir:1,loading:false,totqty:0,totamt:0,totvat:0,sheetcnt:0};
   const load=async()=>{st.loading=true;st.sel={};draw();
-    try{const r=await fetch(`${API}/api/saleout/list?fr=${yy(st.fr)}&to=${yy(st.to)}&sheet=${encodeURIComponent(st.sheet)}&cust=${encodeURIComponent(st.cust)}&item=${encodeURIComponent(st.item)}&gubun=${st.gubun}`);
+    try{const r=await fetch(`${API}/api/saleout/list?fr=${yy(st.fr)}&to=${yy(st.to)}&sheet=${encodeURIComponent(st.sheet)}&cust=${encodeURIComponent(st.cust)}${st.custcode?`&cust_code=${encodeURIComponent(st.custcode)}`:''}&item=${encodeURIComponent(st.item)}&gubun=${st.gubun}`);
       const j=await r.json();st.rows=j.rows||[];st.custs=j.custs||[];st.gubuns=j.gubuns||{};st.totqty=j.totqty||0;st.totamt=j.totamt||0;st.totvat=j.totvat||0;st.sheetcnt=j.sheetcnt||0;}catch(e){st.rows=[];}
     st.loading=false;draw();};
   const fetchCost=async()=>{const e=st.edit;if(!e||!e.item_code||!e.out_cust)return;
@@ -580,7 +580,9 @@ SCREEN.saleout=(c)=>{
        <label class="tl">출고일자</label><input class="inp" type="date" id="o-fr" value="${esc(st.fr)}"> ~ <input class="inp" type="date" id="o-to" value="${esc(st.to)}">
        <label class="tl" style="margin-left:8px">출고증번호</label><input class="inp" id="o-sheet" value="${esc(st.sheet)}" placeholder="출고증번호" style="width:120px">
        <label class="tl" style="margin-left:8px">외주처</label>
-       <select class="inp" id="o-cust"><option value="">전체</option>${st.custs.map(o=>`<option value="${esc(o.code)}" ${st.cust===o.code?"selected":""}>${esc(o.nm||o.code)}</option>`).join("")}</select>
+       <input class="inp" id="o-cust" list="o-custdl" value="${esc(st.cust)}" placeholder="거래처코드 또는 외주처명" autocomplete="off" style="width:170px">
+       <datalist id="o-custdl">${st.custs.map(o=>`<option value="${esc(o.code)}">${esc(o.nm||o.code)}</option>`).join("")}</datalist>
+       <span class="mut" id="o-custnm" style="font-size:12px">${esc(st.custnm||"")}</span>
        <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="o-item" value="${esc(st.item)}" placeholder="품번" style="width:110px">
        <label class="tl" style="margin-left:8px">구분</label><select class="inp" id="o-gb"><option value="">전체</option>${Object.entries(st.gubuns).map(([k,v])=>`<option value="${esc(k)}" ${st.gubun===k?"selected":""}>${esc(k)}:${esc(v)}</option>`).join("")}</select>
        <button class="btn" id="o-go">🔍 조회</button>
@@ -629,7 +631,19 @@ SCREEN.saleout=(c)=>{
        </tbody></table></div></div></div>`;
     const g=id=>c.querySelector(id);
     g("#o-fr").onchange=x=>st.fr=x.target.value;g("#o-to").onchange=x=>st.to=x.target.value;
-    g("#o-sheet").oninput=x=>st.sheet=x.target.value;g("#o-cust").onchange=x=>st.cust=x.target.value;
+    g("#o-sheet").oninput=x=>st.sheet=x.target.value;
+    // ★외주처 = 입력칸(코드/외주처명 아무거나). 입력 즉시 옆에 매칭 이름 표시, Enter=조회.
+    {const ci=g("#o-cust");
+     const showNm=()=>{const el=g("#o-custnm");if(!el)return;const v=(st.cust||"").trim();
+       if(!v){st.custnm="";st.custcode="";el.textContent="";return;}
+       const byCode=st.custs.find(o=>String(o.code).toLowerCase()===v.toLowerCase());
+       const byName=st.custs.find(o=>String(o.nm||"").toLowerCase()===v.toLowerCase());
+       // 코드/이름이 정확히 맞으면 코드확정 → 그 거래처만 조회(부분입력이면 LIKE)
+       st.custcode=byCode?byCode.code:(byName?byName.code:"");
+       st.custnm=byCode?`→ ${byCode.nm||""}`:(byName?`→ ${byName.code}`:"");el.textContent=st.custnm;};
+     ci.oninput=x=>{st.cust=x.target.value;showNm();};
+     ci.onchange=x=>{st.cust=x.target.value;showNm();};
+     ci.onkeyup=x=>{if(x.key==="Enter")load();};}
     g("#o-item").oninput=x=>st.item=x.target.value;g("#o-gb").onchange=x=>st.gubun=x.target.value;
     g("#o-go").onclick=load;g("#o-del").onclick=delSel;g("#o-cv").onclick=carryover;g("#o-carry").onchange=x=>st.carry=x.target.value;
     g("#o-add").onclick=()=>{st.edit={gubun:"5",out_cust:st.cust||"",sheet_no:"",item_code:"",out_qty:"",work_order:"",remarks:""};draw();};

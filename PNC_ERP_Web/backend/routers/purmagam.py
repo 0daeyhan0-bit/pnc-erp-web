@@ -92,6 +92,57 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
         nx.close()
     return {"ym": y, "cc": cc, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
 
+def _pur_src_moda(win):
+    """_pur_src 와 동일 원천 + 모도번(ITEM_CODE) 컬럼 추가 — P/No 펼침 전용.
+    수입(_C)은 상위품번 개념이 없어 ''. 집계 금액·수량은 _pur_src 와 동일해야 한다."""
+    return f"""
+    SELECT A.CUST_CODE cc, A.MAT_CODE mat, ISNULL(A.ITEM_CODE,'') moda, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {win} AND A.MAINT_TAG IN ('9','S','C','G','H')
+       AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
+    UNION ALL
+    SELECT A.CUST_CODE, A.MAT_CODE, '', ROUND(A.MAINT_COST*A.EXCHANGE_RATE,0,1), A.MAINT_YMD, A.MAINT_QTY, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), ISNULL(A.TAXPAYERS,0)
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {win} AND A.DIVISION='P'"""
+
+@router.get("/api/purmagam/lines")
+def purmagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
+                   q: str = Query(""), cust: str = Query(""), cust_code: str = Query("")):
+    """★2026-08-23 레거시 w_pu_sale_010 형태 = 집계를 P/No 단위로 펼친 목록(거래처×자도번×단가).
+    basis='magam'(마감기준: 거래처별 마감일 창) | 'input'(입고기준: fr~to, 기본 당월1일~오늘)."""
+    from routers.salemagam import _magam_lines_shape
+    y = _dig4(ym) or _cur_ym()
+    if basis == "input":
+        f6 = "".join(ch for ch in str(fr or "") if ch.isdigit())[:6]
+        t6 = "".join(ch for ch in str(to or "") if ch.isdigit())[:6]
+        if not (len(f6) == 6 and len(t6) == 6):
+            raise HTTPException(400, "입고기준은 fr/to(YYMMDD) 필요")
+        win = f"A.MAINT_YMD>='{f6}' AND A.MAINT_YMD<='{t6}'"
+    else:
+        win = _sale_win().format(ym=y)
+    where = ["1=1"]; pf = []
+    if cust_code.strip():
+        where.append("S.cc=?"); pf.append(cust_code.strip())
+    elif cust.strip():
+        where.append("(S.cc=? OR C.CUST_DESC LIKE ?)"); pf += [cust.strip(), f"%{cust.strip()}%"]
+    if q.strip():
+        where.append("(S.mat LIKE ? OR M.ITEM_DESC LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT S.cc cc, MAX(C.CUST_DESC) cnm, S.mat mat, S.moda moda,
+            MAX(ISNULL(M.ITEM_DESC,'')) nm, MAX(ISNULL(M.ITEM_SPEC,'')) spec, MAX(ISNULL(M.UNIT,'')) unit,
+            S.cost cost, S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt
+          FROM ({_pur_src_moda(win)}) S
+            JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON S.mat=M.ITEM_CODE
+          WHERE {' AND '.join(where)}
+          GROUP BY S.cc, S.mat, S.moda, S.cost, S.ymd""", *pf)
+        raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+    finally:
+        cn.close()
+    return _magam_lines_shape(raw, y, basis)
+
 @router.post("/api/purmagam/save")
 def purmagam_save(payload: dict = Body(...)):
     """매입 조정 replace-all + 선택시 마감. 가드: 사유필수·이미마감 거부."""

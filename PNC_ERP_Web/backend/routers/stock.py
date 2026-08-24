@@ -23,7 +23,10 @@ def _ym(ymd):  # MAINT_YMD(YYMMDD/YYYYMMDD) → 마감월 YYMM
 
 @router.get("/api/stock/list")
 def stock_list(screen: str = Query("adjust"), ymd_from: str = Query(...), ymd_to: str = Query(...),
-               q: str = Query("")):
+               q: str = Query(""), cust: str = Query(""), cust_code: str = Query("")):
+    """q=자도번(품번) / cust=매입처(코드 또는 거래처명, LIKE) / cust_code=확정된 거래처코드(정확일치).
+    2026-08-23 매입처 조건 분리. 화면에서 이름을 정확히 골랐거나 코드를 친 경우 cust_code 가 와서
+    그 거래처 한 곳만 조회된다('그린산업' 입력 시 '그린산업(주)김해공장'까지 딸려오던 문제)."""
     sc = STOCK_SCREENS.get(screen)
     if not sc:
         raise HTTPException(400, "screen 오류")
@@ -31,6 +34,10 @@ def stock_list(screen: str = Query("adjust"), ymd_from: str = Query(...), ymd_to
     try:
         tags = "','".join(sc["tags"])
         like = f"%{q.strip()}%"
+        # 매입처 = 코드확정(cust_code)이면 그 거래처만, 아니면 코드/이름 LIKE(빈값이면 조건 무시)
+        ccode = cust_code.strip()
+        cs = '' if ccode else cust.strip()
+        clike = f"%{cs}%"
         sign = "-1" if sc["sign"] == -1 else "1"
         cur.execute(f"""
             SELECT TOP 500 l.MAINT_YMD, l.MAINT_SEQ, l.MAINT_TAG, tg.name AS tag_name,
@@ -45,8 +52,10 @@ def stock_list(screen: str = Query("adjust"), ymd_from: str = Query(...), ymd_to
             LEFT JOIN nx.stock_tag tg ON tg.tag = l.MAINT_TAG
             WHERE l.STOCK_POINT='MAT' AND l.MAINT_YMD BETWEEN ? AND ? AND l.MAINT_TAG IN ('{tags}')
               AND (? = '%%' OR l.MAT_CODE LIKE ? OR l.CUST_CODE LIKE ?)
+              AND (? = '' OR l.CUST_CODE = ?)
+              AND (? = '' OR l.CUST_CODE LIKE ? OR pc.partner_name LIKE ?)
             ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""",
-            ymd_from.strip(), ymd_to.strip(), like, like, like)
+            ymd_from.strip(), ymd_to.strip(), like, like, like, ccode, ccode, cs, clike, clike)
         cols = [d[0] for d in cur.description]
         rows = [{c: (v.isoformat() if hasattr(v, "isoformat") else v) for c, v in zip(cols, r)} for r in cur.fetchall()]
         return {"screen": screen, "name": sc["name"], "sign": sc["sign"], "rows": rows}

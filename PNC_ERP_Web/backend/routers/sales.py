@@ -573,7 +573,7 @@ def saleout_price(item: str = Query(...), cust: str = Query(...), ymd: str = Que
         cn.close()
 
 @router.get("/api/saleout/list")
-def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""), cust: str = Query(""), item: str = Query(""), gubun: str = Query(""), limit: int = Query(1500)):
+def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""), cust: str = Query(""), cust_code: str = Query(""), item: str = Query(""), gubun: str = Query(""), limit: int = Query(1500)):
     """판매출고 목록 = ★nx미러(nx.PU_T_STOCK_MAINT tag5, 기존이력·읽기전용) ∪ nx.saleout_maint(웹등록·편집가능).
     미러도 nx라 레거시 의존 없음(컷오버 원칙). 출고수량/금액=|값|(음수저장 불출→양수표시). src='legacy'|'web'. 코드→이름."""
     cn = _nx(); cur = cn.cursor()
@@ -582,7 +582,12 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
         if fr: w.append("m.maint_ymd>=?"); pf.append(fr)
         if to: w.append("m.maint_ymd<=?"); pf.append(to)
         if sheet: w.append("CAST(m.sheet_no AS varchar) LIKE ?"); pf.append(f"%{sheet}%")
-        if cust: w.append("m.cust_code=?"); pf.append(cust)
+        # ★2026-08-23 외주처 = 드롭다운 → 입력칸.
+        #   cust_code(화면에서 확정된 코드) 오면 그 거래처만. 아니면 코드/이름 LIKE.
+        if cust_code.strip():
+            w.append("m.cust_code=?"); pf.append(cust_code.strip())
+        elif cust:
+            w.append("(m.cust_code=? OR ISNULL(c.CUST_DESC,'') LIKE ?)"); pf += [cust, f"%{cust}%"]
         if item: w.append("m.mat_code LIKE ?"); pf.append(f"%{item}%")
         where = " AND ".join(w)
         SEL = """SELECT {idcol} id, '{src}' src, m.maint_ymd out_ymd, m.cust_code out_cust, ISNULL(c.CUST_DESC,'') custnm,
