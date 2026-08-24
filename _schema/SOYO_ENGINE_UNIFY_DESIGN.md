@@ -140,8 +140,9 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - 앞선 #1/#2("원가 전환")는 **"원가를 한 walker(cost_material)에 위임"했을 뿐**, 진짜 통일 아님. **실측 확인**: `explode()`는 정의만·**어느 walker도 안 씀**(호출 0), 각 walker가 **자기 재귀**(eng.lines), 프로덕션 soyo.py(SQL CTE)·weight_calc(배치)는 **별개 코드**. 공유되는 건 **데이터층(eng.lines/_load_item/_leaf_val)뿐**, 트리 순회는 따로.
 - **진짜 통일 = 1 explode 공유 + 캐시 + 프로덕션 전환.** 이득(사용자 확정 2026-08-24) = **유지보수 단일점 + "쓰면서 나올 문제" 단일수정**(지금 소요로직 7곳 분산→하나 고치면 전부 반영, 누락위험 제거). ★통일=결과 같음이 아니라 "전개 1회 공유 + 모드별 다른 결과"(모드마다 소요 다른 게 정상: 원가=INNER경계·생산=사급경계·중량=sagub).
 
-### 13-1. Phase 0 — 검증 하네스 (읽기전용, 먼저)
+### 13-1. Phase 0 — 검증 하네스 (읽기전용, 먼저) — ✅완료 2026-08-24
 - 각 모드: **현행 출력 vs 신 explode-walker 출력 diff0 비교기**. 모든 단계의 게이트. 스코프=사용중 BOM.
+- **구현: `_harness/soyo_unify_verify.py`** — `scope(cur,n)`(사용중 완제품 결정적 분산·체리픽금지)·`verify(mode, baseline_fn, candidate_fn, eng, items)`·제네릭 comparator(_flat: float/tuple/dict 대응·tol). **자기검증 PASS**: cost_material(float)·weight_explode(tuple) 자기대조 10/10 PASS·일부러 1%틀림 10/10 FAIL(게이트 민감도 확인). = 일치=PASS·불일치=FAIL 정상작동. 읽기전용. **이게 Phase1~4 전환 관문.**
 
 ### 13-2. Phase 1 — explode 정본화 + walker 공유 (옆에짓고·dev·읽기전용)
 - **explode()를 모드무관 full tree로 교정**: 현재 explode()가 `cs_calc_except=1` 자식을 스킵(=원가전용 필터) → **필터 제거하고 전 flag(cs_calc_except·except_flag·sagub·lme·kitting) 태깅만.** 필터는 각 walker로 이동.
