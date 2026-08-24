@@ -1793,7 +1793,7 @@ SCREEN.unifybom=(c,ro)=>{
       return `<option value="${rt.route_id}" ${rt.route_id===routeSel?'selected':''}>${esc(lbl)}</option>`;}).join('');
     const cur=routes.find(rt=>rt.route_id===routeSel);
     const desc=routeSel>0?`후보 R${cur?String(cur.route_no).padStart(2,'0'):''} 구조·실원가 보기 — 조달 업체는 <b>조달프로파일</b> 계층`:'현행(마스터 실사용 BOM) 보기';
-    return `<div class="cand-bar" style="display:flex;align-items:center;gap:8px;margin:6px 0;padding:5px 10px;background:#f6f2fb;border:1px solid #d6c3ea;border-radius:8px;flex-wrap:wrap"><b style="color:#8e44ad;font-size:12px">🔀 조달경로</b>
+    return `<div class="cand-bar" style="display:flex;align-items:center;gap:8px;margin:6px 0;padding:5px 10px;background:#f6f2fb;border:1px solid #d6c3ea;border-radius:8px;flex-wrap:wrap"><b style="color:#8e44ad;font-size:12px">조달경로</b>
        <select class="cand-sel" data-tab="${tabn}" style="min-width:230px;border:1px solid #cbb6e2;border-radius:5px;padding:3px 6px;font-size:12px;background:#fff">${opts}</select>
        <span style="color:#7a6a92;font-size:11px">${desc}</span>${routeSel>0?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">후보</span>':'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">현행</span>'}</div>`;};
   const loadRouteTree=async()=>{if(routeSel<=0){routeTree=null;return;}routeBusy=true;draw();
@@ -2032,8 +2032,8 @@ SCREEN.unifybom=(c,ro)=>{
   // ============ 탭바 ============
   // ★내부원가·실원가 탭은 개발 전용 — 품목 BOM 조회(RO)에서는 숨김(BOM구성만 노출)
   const tabbar=(act)=>`<div class="bm-tabs">
-    <div class="bm-tab bm-tab-c ${act==='bom'?'on':''}" data-t="bom">🔀 BOM구성</div>
-    <div class="bm-tab bm-tab-c ${act==='route'?'on':''}" data-t="route">🧭 라우팅</div>
+    <div class="bm-tab bm-tab-c ${act==='bom'?'on':''}" data-t="bom">BOM구성</div>
+    <div class="bm-tab bm-tab-c ${act==='route'?'on':''}" data-t="route">라우팅</div>
     ${RO?'':`<div class="bm-tab bm-tab-c ${act==='nae'?'on':''}" data-t="nae">🧮 내부원가</div>
     <div class="bm-tab bm-tab-c ${act==='sil'?'on':''}" data-t="sil">💠 실원가</div>`}</div>`;
   const bindTabs=()=>{c.querySelectorAll('.bm-tab-c').forEach(el=>el.onclick=()=>{const t=el.dataset.t;if(t===tab)return;tab=t;
@@ -2552,18 +2552,18 @@ SCREEN.unifybom=(c,ro)=>{
       if(t==='item')return `<td><input class="ce ceitem" list="bm-itemdl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="검색·선택" style="width:120px"></td>`;
       return `<td><input class="ce" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" style="width:90px"></td>`;};
     c.innerHTML=`
-     <div class="page-title">🔀 품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">${RO?'조회 전용':'nx · 백엔드 편집·저장'}</span></div>
-     <div class="page-sub">품번 검색 → BOM 구성(다단계 전개)·내부원가·실원가. 원천 단일BOM(nx.bom_line). 기본은 현행만, "과거포함" 체크 시 휴면 품번·BOM도 표시.</div>
+     <div class="page-title">품목 BOM${RO?' 조회':'관리'} <span style="font-size:12px;color:var(--muted);font-weight:400">${RO?'조회 전용':'nx · 백엔드 편집·저장'}</span></div>
+     ${RO?'':`<div class="page-sub">품번 검색 → BOM 구성(다단계 전개)·내부원가·실원가. 원천 단일BOM(nx.bom_line). 기본은 현행만, "과거포함" 체크 시 휴면 품번·BOM도 표시.</div>`}
      ${item?tabbar('bom'):''}
      <div class="toolbar">
        <label class="tl">품번</label><input class="inp" id="bm-q" value="${esc(query)}" placeholder="품번/품명 검색" style="width:220px">
-       <button class="btn" id="bm-search">🔍 검색</button>
+       <button class="btn" id="bm-search">검색</button>
        <label class="tl" style="margin-left:4px" title="LG 리시빙 2501~ 실사용+거래품목=사용중">사용여부</label><select class="inp" id="bm-use" style="width:auto;padding:1px 4px"><option value="1" ${useFilter==='1'?'selected':''}>사용중</option><option value="0" ${useFilter==='0'?'selected':''}>사용중지</option><option value="" ${useFilter===''?'selected':''}>전체</option></select>
        ${(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="bm-new" style="background:#1c7c3a;color:#fff">＋ 신규 BOM 등록</button>`:''}
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
          ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
-         :`<button class="btn ghost" id="bm-tree">${viewTree?'📄 단일레벨':'🌲 다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">🔺 역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
+         :`<button class="btn ghost" id="bm-tree">${viewTree?'단일레벨':'다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'용접봉 숨기기':'용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
        ):''}
        ${item&&!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<label class="tl" style="margin-left:6px" title="경영 대시보드·영업예상 절삭/설치 분류(품목마스터 nx.item.cut_gubun). 즉시 저장.">구분</label><select class="sel" id="bm-cut" style="width:96px">${['','절삭','설치','분지관','이지링크'].map(g=>`<option value="${g}" ${itemCut===g?'selected':''}>${g||'미분류'}</option>`).join('')}</select>`:''}
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}</span>`:''}
