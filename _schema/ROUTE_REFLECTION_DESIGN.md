@@ -367,3 +367,11 @@
 - ★내오류교정: 1차 5건 외주→제작 미반영=제품→SUB except엣지 미활성(내부엣지만 추가). 부모엣지+서브트리 함께 활성화로 5/5.
 - ★쿼리 성능: 청크15 STEP7도 WO폭발로 타임아웃 → 전개기반 인메모리 검증으로 전환(plan=전개×수량·전개→plan diff0증명 근거). materializer=_materialize_r01_edges(sourcing.py)·엔드포인트 /api/sourcing/route/materialize_edges.
 - **∴ 조달경로 스왑(제작↔외주+거래처)이 생산·협력사계획에 정확 반영 = route reflection 실증완료.** 남은=Rnn 편집UI(route_edges add/remove + sourcing_profile vendor)·배포.
+
+## §18-3. ★다리(sourcing_route_line→route_edges) 검증(2026-08-25) — Rnn 편집UI 연결
+- ★교정(사용자 "Rnn 편집 UI가 있어"): 편집UI는 이미 존재(조달경로 통합검토·sourcing_route_line·gubun/vendor/node_kind). 남은건 편집UI가 아니라 **다리=sourcing_route_line→route_edges(+sourcing_profile vendor)**.
+- 다리규칙: sourcing_route_line 각 line=(부모품번→child) 엣지(부모=parent_line의 child or assy). = route_edges 직변환. gubun/vendor(매입/외주)→sourcing_profile 협력사 attribution.
+- ★검증(rid=1580 AJR77263007 R01): 47 line→47엣지. route-active vs baseline = **108/110 diff0**. 불일치2=+용접링 SUB(base 제작동관 leaf 8272 vs route SUB전개 752=11×).
+- ★원인: rid=1580 sourcing_route_line이 **+용접링을 SUB로 한단계 더 전개**(→MJU pipe)했으나 plan grain은 **제작단위(+용접링)서 정지**(§15-2). = 그 route가 잘못된 grain으로 실체화됨(다리는 충실변환). 
+- ★남은정밀: ①materialize-current(naewon기반 sourcing.py)가 제작동관 단위(+용접링)서 정지하도록(plan grain 정합) or 다리가 제작SUB 정지 처리 ②sourcing_route_line→route_edges 다리 함수화 ③gubun/vendor→sourcing_profile 다리(협력사).
+- ∴ **다리 구조는 작동(108/110)·grain 정밀만 남음.** Rnn 편집→계획반영의 마지막 연결.
