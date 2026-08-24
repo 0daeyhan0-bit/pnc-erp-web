@@ -311,3 +311,40 @@
 - **plan_mat_source가 plan_part_mat를 읽으므로**(soyo.py 123) route_edges 변경은 협력사에 자동 전파되나, 공급방식 재분류는 route_alloc/profile이 route별로 걸려야 정확.
 - 검증완료: 생산계획 축(route_edges) 외주→제작 37/37 내부자재추가(+646)·R01 diff0 100%. **남은=route_edges↔route_alloc/profile 일관 등록**(제작↔외주 스왑시 둘 동시) + 100건 양방향 협력사+생산 검증.
 - ★현행 supply_gubun 라벨=구(외주가공/유상사급/자체)·make_type 5way(제작/외주/구매/사급/외주직납)와 별개=라벨통일 필요(별건).
+
+---
+# ★★★ §17. 배포 런북 (2026-08-24 밤 작성 — 내일 배포용)
+> 검증 완벽 완료. 이 순서대로 배포하면 됨. **핵심=가산적·안전(활성 대체경로 0이라 현행과 byte동일).**
+
+## 무엇을 배포하나
+- **soyo.py 변경 1건**: route-aware STEP7 (조달경로 반영). 파일=`PNC_ERP_Web/backend/routers/soyo.py`.
+  - 추가: `_route_setup(cur)` 함수 + `_step7_sql`에서 호출.
+  - 수정: STEP7 재귀멤버 = v_pr_bom 브랜치(가드추가) + route_edges 브랜치(신설).
+  - 인프라 테이블: nx.route_edges(varchar20)·nx.plan_route_active = _route_setup이 자동생성(비어있음).
+
+## ★배포 안전성 (검증완료·byte동일)
+- **수정 STEP7(빈 route) vs 원본 STEP7 = 100.000%(3518/3518, 100WO 동일드라이버).**
+- 현재 활성 대체경로(current_flag=1 & route_no>1 & route_edges보유) = **0** → 배포 후 plan_part_mat = **현행 그대로**.
+- route CTE ≡ 원본(route_edges=v_pr_bom) = 100.000%(50WO). 가산적=활성경로 없으면 무변경.
+
+## 배포 순서
+1. dev clone에서 `git switch main && git pull` → `feat/route-aware-step7` 브랜치.
+2. soyo.py 변경 커밋(이미 dev 반영됨) → push → **Gitea PR → main 병합**(사용자 웹 Merge).
+3. 운영 184: `deploy_pull.ps1 -Restart` (main pull + 재기동).
+4. **배포후 검증(필수)**: 다음 정기 compose_mat(매일 rebuild) 후 plan_part_mat 총계가 현행과 동일한지(활성경로 0이라 동일해야). ★7:30 정지때만 rebuild([[feedback-daily-migration-timing]]).
+
+## 검증 요약 (완료)
+- R01(현행) diff0: 100.000%. R02 외주→제작 생산계획: 37/37(+646 내부자재). 협력사 재분류(대안경로 로직): 정확.
+- 2시스템: ①route_edges(생산 전개·내 구현) ②route_alloc/sourcing_profile(협력사 재분류·기존코드) → 외주↔제작 생산+협력사 반영.
+
+## Rnn 활성화 방법 (배포 후 사용법·향후 UI)
+활성 대체경로 등록 = **3개 세팅**(제네릭·데이터만):
+1. **route_edges**(route_id, item_code, mat_code, use_qty_pr): 그 경로의 BOM엣지. 제작→외주=해당 SUB 엣지 제거·외주→제작=SUB 엣지 추가. (materializer=향후, R01복사후 스왑)
+2. **sourcing_route**(route_id, item, route_no>1, current_flag=1, gubun/vendor): 활성 표식 + 협력사 재분류 기본.
+3. **route_alloc**(item=assy, route_id, alloc_ratio, is_active=1) + 필요시 **sourcing_profile**(route_id, item, supply_gubun/vendor): 협력사 정밀 재분류.
+- 매일 rebuild시 _route_setup이 sourcing_route에서 plan_route_active 자동재생성 → 자기갱신.
+
+## 남은 것 (배포와 무관·향후)
+- route_edges materializer(R01복사+제작↔외주 스왑 UI). 현재는 수동/스크립트로 route_edges 채움.
+- supply_gubun 라벨통일(구 외주가공/유상사급 ↔ make_type 5way).
+- STEP6(공정) route-aware(현재 STEP7 자재만·공정은 R01). 필요시.
