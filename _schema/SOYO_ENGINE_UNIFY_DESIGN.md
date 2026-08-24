@@ -200,6 +200,11 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 3. **발주(autoorder/manorder)** = plan_mat_source 소비 = 간접 반영.
 4. **★생산소요(soyo.py STEP5/6)** → plan_explode/plan_gagong = **생산계획 파이프라인 접촉** → **[[feedback-protect-production-plan]] 하드룰: 타인 계획수정 완료 + 조율 + 별도 승인 후 · 맨 마지막.** Stage3(plan_part_mat 최종)=STEP7 존치(plan-결합).
 
+### 13-4b. ★후속 과제 — R02~Rnn route walker (2026-08-24 사용자 확정: R01 현행 다 하고 다음 단계)
+- **현재 스코프 = R01(현행) 통일**(사실상 모든 제품 R01 100%·R02 미운영·nx.sourcing_route 거의 빔). 통일엔진이 곧 현행 원가·소요 전부.
+- **R02가 실제 운영(조달프로파일에서 선택)에 들어오면** → **route-aware walker 하나를 통일엔진에 추가**. R02 = 외주완성SUB에서 **전개 정지**(하위자재=업체 조달=우리 소요 아님) + 그 SUB 통째 매입 소요·ASSY매입단가 원가. **= route마다 정지규칙 다름(walker 파라미터).** 소요·원가 둘 다 route별로 바뀜.
+- **★통일 payoff**: R02 지원 = route walker **한 곳** 추가로 원가·소요·발주 전 소비자 반영(통일 안 됐으면 7곳 수정). = 유지보수 단일점 실증. 근거=[[SOURCING_COST_INTEGRATION]] route/cost·[[newerp-sourceprofile-route1-select]]. **R02 운영화 시점의 후속 과제.**
+
 ### 13-5. Phase 4 — 현행 전개기 은퇴 + 단일 유지보수점
 - 전 소비자 전환 후 구 전개기 제거 → 소요 로직 **한 곳.** bom_save→엔진 캐시 무효화([[BOM_PROGRAM_MASTER §9 C11]] 갱신갭 해결).
 

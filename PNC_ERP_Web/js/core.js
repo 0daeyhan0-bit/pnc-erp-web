@@ -1976,7 +1976,6 @@ function lineCalView(host){
        <label class="tl">시작주(월)</label><input class="inp" type="date" id="lc-from" value="${st.from}" style="width:150px">
        <label class="tl">기간</label><select class="inp" id="lc-weeks" style="width:auto"><option value="4" ${st.weeks==4?'selected':''}>4주</option><option value="6" ${st.weeks==6?'selected':''}>6주</option><option value="8" ${st.weeks==8?'selected':''}>8주</option></select>
        <button class="btn" id="lc-go">🔍 조회</button>
-       <span class="page-sub" style="margin:0 0 0 8px">B=<b style="color:#e23b3b">잔업3h</b> · A=<b style="color:#0aa">잔업2h</b> · E=잔업없음 · 빈칸=휴무</span>
        <div class="spacer"></div><span class="rowcount">${d?d.from+'~'+d.to:''}</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
