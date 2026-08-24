@@ -15,7 +15,8 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                  part: str = Query(""), pgroup: str = Query(""), line: str = Query(""),
                  assy: str = Query(""), jado: str = Query(""), gigan: int = Query(2),
                  wh_part: str = Query("IS0001"),
-                 view: str = Query("전체"), unfin: str = Query("전체"), limit: int = Query(20000)):
+                 view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("nx"),
+                 limit: int = Query(20000)):
     """준비실적처리(키팅) 그리드 — ★레거시 정본 SP `SP_PR_CREATE_PLAN_파트별_생산계획계산_생산준비등록_NEW` 로직 복제(실행X, .sql 이식).
        source=PR_T_PLAN_PART_COPY, 필터 GC_GUBUN='P'(생산파트)·GAGONG_PROC_SEQ=1·투입파트(WH_GAGONG_PROC_CODE=@wh_part, 기본 IS0001, BOM CTE).
        ★본행 grain = (GAGONG_PROC_CODE, WORK_ORDER, SPLIT_WORK_ORDER, ASSY_ITEM_CODE, UPPER_ITEM_CODE, ITEM_CODE).
@@ -62,6 +63,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
               COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE) wcnm, MAX(ISNULL(a.LINE_NO,'')) line,
               a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.PART_PLAN_YMD ymd,
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, ISNULL(ib.ITEM_DESC,'') nm,
+              MAX(ISNULL(lg.lgh,'')) lgh,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd, SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
@@ -71,6 +73,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
             LEFT JOIN (SELECT ITEM_CODE, SUM(CAST(ISNULL(TOT_ST,0) AS float)) st FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG GROUP BY ITEM_CODE) st ON st.ITEM_CODE=a.ITEM_CODE
+            LEFT JOIN (SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'') swo, MIN(ORG_PLAN_YMD + ORG_OUTPUT_HM) lgh FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_DTL GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,'')) lg ON lg.WORK_ORDER=a.WORK_ORDER AND lg.swo=ISNULL(a.SPLIT_WORK_ORDER,'')
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
               a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
@@ -89,7 +92,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             if not g:
                 g = {"assy": r["assy"], "upper": r["upper"] or '', "item": r["item"], "nm": r["nm"],
                      "gpc": r["gpc"], "gpcnm": r["gpcnm"], "pgc": r["pgc"], "wc": r["wc"], "wcnm": r["wcnm"],
-                     "line": r["line"], "inhm": r["inhm"], "rate": float(r["rate"] or 100),
+                     "line": r["line"], "inhm": r["inhm"], "lgh": (r.get("lgh") or ''), "rate": float(r["rate"] or 100),
                      "item_st": float(r["st"] or 0), "use_qty": float(r["useq"] or 1),
                      "wo": r["wo"], "swo": r["swo"] or '', "plan_ymd": (r["plan_ymd"] or ''),
                      "days": {}, "prior_plan": 0.0, "plan_qty": 0.0, "_cells": {}}
@@ -106,13 +109,47 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         rows = list(keyed.values())
         capped = len(rows) >= int(limit); rows = rows[:int(limit)]
         # ── 충당 소스 조회(라이브 직독, SP 소스와 동일) ──
+        # ★src(2026-08-23) = 410과 동일한 소스 전환.
+        #   live = 라이브만(레거시 실시간) → 레거시 화면과 1:1 대사용
+        #   nx(기본) = 라이브 + 웹이 올린 분 → 실무 조회(웹 실적까지 보임)
+        _SRC_LIVE = (str(src).strip() == "live")
         rstock = {}; assystk = {}; saled = {}; nxcell = {}; midstk = {}; fixstk = {}
+        matwh = {}; prwh = {}      # 자재창고(PU_T_MAT_STOCK_WH) / 파트창고+사급(PR_T_MAT_STOCK_WH) — 생산재고 컬럼용
         try:  # 준비재고: pu_t_ready_stock cust='Z99990', (proc_gubun=파트, item)
             # ★2026-08-18: 라이브(PARTNER_ERP.dbo) → nx 로 전환.
             #   웹 준비등록(/api/ready/commit)이 nx.PU_T_READY_STOCK 에 쓰므로, 라이브를 읽으면
             #   방금 등록한 준비재고가 화면에 0으로 보임(실제 사례: AJR30027707 S4 nx=5 / 라이브=0).
-            cur.execute("SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990' GROUP BY ITEM_CODE, PROC_GUBUN")
-            for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
+            # ★2026-08-23 재교정: nx 만 보면 이번엔 반대로, 레거시(w_pr_input_520)가 라이브에 쓴
+            #   갱신분을 놓친다. nx 미러는 그 시점 이후 멈춰 있어 낡은 값이 그대로 남는다.
+            #   (실측: AJR76582505 S11 → nx 207@08-21 16:51 / 라이브 159@08-24 11:08, 레거시화면=159)
+            #   → ★2026-08-23 src 도입(사용자 확정): 410처럼 **소스를 사용자가 고른다**.
+            #        src='live' → 라이브만 = 레거시 화면과 순수 대사(검증용)
+            #        src='nx'(기본) → 라이브 + max(nx−라이브,0) = 레거시 최신값 + 웹 등록분
+            #     구조: 미러가 라이브 재고를 nx 로 복사해두고 웹이 그 nx 를 읽어 쓴다.
+            #     웹 준비등록(/api/ready/commit)도 같은 nx 테이블에 덧쓰므로 절대값만으로는
+            #     "웹이 올린 분"과 "낡은 미러값"을 구분할 수 없다.
+            #     ※미러가 멈추면(실측 2026-08-22 16:34 이후) nx 쪽에 낡은 값이 남아
+            #       nx 모드에서 과다 표시될 수 있다(준비재고 26품목 +4,135). 그때는 live 로 대사.
+            if _SRC_LIVE:
+                cur.execute("""SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY)
+                               FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
+                               GROUP BY ITEM_CODE, PROC_GUBUN""")
+                for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
+            else:
+                _lrs = {}; _nrs = {}
+                cur.execute("""SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY)
+                               FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
+                               GROUP BY ITEM_CODE, PROC_GUBUN""")
+                for rr in cur.fetchall(): _lrs[(rr[0], rr[1] or '')] = float(rr[2] or 0)
+                try:
+                    cur.execute("""SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY)
+                                   FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
+                                   GROUP BY ITEM_CODE, PROC_GUBUN""")
+                    for rr in cur.fetchall(): _nrs[(rr[0], rr[1] or '')] = float(rr[2] or 0)
+                except Exception: pass
+                rstock = dict(_lrs)
+                for k, v in _nrs.items():
+                    rstock[k] = _lrs.get(k, 0.0) + max(v - _lrs.get(k, 0.0), 0.0)
         except Exception: pass
         try:  # ASSY 현재고: sa_t_item_stock (item)
             # ★라이브 + 웹실적(2026-08-20) — 병행운영 검증용.
@@ -124,18 +161,23 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             #
             #   ※중복 감수(사용자 승인 2026-08-20): 같은 전표를 레거시·웹 양쪽에서 잡으면
             #     이중 계상될 수 있으나, 테스트 단계라 "웹 실적이 보이는 것"을 우선한다.
-            #     nx는 매일 23:59 미러로 초기화되므로 오차는 당일로 한정된다.
             #     (건단위 식별은 MAINT_SEQ 채번이 웹/레거시 각자 MAX+1 이라 충돌 → 불가)
-            _lv = {}; _nxv = {}
-            cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
-            for rr in cur.fetchall(): _lv[rr[0]] = float(rr[1] or 0)
-            try:
-                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
-                for rr in cur.fetchall(): _nxv[rr[0]] = float(rr[1] or 0)
-            except Exception: pass
-            assystk = dict(_lv)
-            for k, v in _nxv.items():
-                assystk[k] = _lv.get(k, 0.0) + max(v - _lv.get(k, 0.0), 0.0)
+            #   ★2026-08-23 src 도입: 410처럼 소스를 사용자가 고른다.
+            #     src='live' → 라이브만(레거시와 순수 대사). src='nx'(기본) → 라이브+웹실적 병합.
+            if _SRC_LIVE:
+                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
+            else:
+                _lv = {}; _nxv = {}
+                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                for rr in cur.fetchall(): _lv[rr[0]] = float(rr[1] or 0)
+                try:
+                    cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                    for rr in cur.fetchall(): _nxv[rr[0]] = float(rr[1] or 0)
+                except Exception: pass
+                assystk = dict(_lv)
+                for k, v in _nxv.items():
+                    assystk[k] = _lv.get(k, 0.0) + max(v - _lv.get(k, 0.0), 0.0)
         except Exception: pass
         prdirect = {}
         try:  # ★파트재고(pr_stock) = 레거시 SP 완료풀과 동일 = PR_T_MAT_STOCK_WH만(mat_code). midstk 재귀롤업(사급/스태커 포함)은 SUB 과다 → 직접값 사용.
@@ -147,8 +189,9 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         #   ★필터 무관 전역 재고롤업이라 색(tag70)에만 영향(값/개수/계획합계는 매요청 라이브 재조회) → 90초 TTL 캐시로 재귀비용 회피(~2초 유지).
         _cache = getattr(kitting_grid, "_rollup_cache", None)
         _now = _dt.now().timestamp()
-        if _cache and (_now - _cache["ts"] < 90) and _cache["mid"]:
+        if _cache and (_now - _cache["ts"] < 90) and _cache["mid"] and _cache.get("mwh") is not None:
             midstk = _cache["mid"]; fixstk = _cache["fix"]
+            matwh = _cache["mwh"]; prwh = _cache["pwh"]   # ★생산재고 컬럼용도 캐시에 포함(빠지면 전 행 0)
         else:
             try:
                 cur.execute("IF OBJECT_ID('tempdb..#tms') IS NOT NULL DROP TABLE #tms")   # 풀링 재사용 대비 선정리(#temp만, 가드 통과=IF 시작)
@@ -179,10 +222,16 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                     )
                     SELECT item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty INTO #tms FROM T_SUB_CTE OPTION(MAXRECURSION 0)""")
                 cur.execute("SELECT mat_code, SUM(stock_qty), SUM(pr_stock_qty) FROM #tms GROUP BY mat_code")   # 자재+생산재고(item)
-                for rr in cur.fetchall(): midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
+                for rr in cur.fetchall():
+                    midstk[rr[0]] = float(rr[1] or 0) + float(rr[2] or 0)
+                    # ★2026-08-23 생산재고 컬럼용 = 자재창고(PU_T_MAT_STOCK_WH) + 파트창고(PR_T_MAT_STOCK_WH).
+                    #   기존엔 assystk(=SA_T_ITEM_STOCK)를 그대로 써서 ASSY재고와 늘 같은 값이었고,
+                    #   레거시가 자재창고 1 을 보여주는 건에서 웹만 0 이 나왔다(AJR73803003 IS0001=1).
+                    matwh[rr[0]] = float(rr[1] or 0)     # stock_qty = 자재창고분
+                    prwh[rr[0]] = float(rr[2] or 0)      # pr_stock_qty = 파트창고+사급분
                 cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms GROUP BY upper_item_code, mat_code")  # 도번고정(upper,item)
                 for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
-                kitting_grid._rollup_cache = {"ts": _now, "mid": midstk, "fix": fixstk}
+                kitting_grid._rollup_cache = {"ts": _now, "mid": midstk, "fix": fixstk, "mwh": matwh, "pwh": prwh}
             except Exception: pass
         try:  # 출하: sa_t_sale_dtl (wo, split, item=assy, finish_flag='0') — ★결과 WORK_ORDER로 제한(전체 GROUP BY 3.7s→회피)
             wos = list({g["wo"] for g in rows if g["wo"]})
@@ -196,6 +245,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                 cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): _sl[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
                 try:
+                    if _SRC_LIVE: raise StopIteration   # live=라이브 출하만(레거시 순수 대사)
                     cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                     for rr in cur.fetchall(): _sn[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
                 except Exception: pass
@@ -203,6 +253,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                     saled[_k2] = _sl.get(_k2, 0.0) + max(_sn.get(_k2, 0.0) - _sl.get(_k2, 0.0), 0.0)
         except Exception: pass
         try:  # ★Phase1: nx 셀단위 준비 flag = 단일원장 nx.stock_ledger(STOCK_POINT='RDY') SUM. (item×wo×파트gpc×일자INPUT_YMD)
+            if _SRC_LIVE: raise StopIteration   # live=순수 레거시 대사 → 웹 셀 오버레이 제외(410 동일)
             nxc = _nx(); nc = nxc.cursor()
             nc.execute("""SELECT ITEM_CODE, ISNULL(WORK_ORDER,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(INPUT_YMD,''), ISNULL(SUM(MAINT_QTY),0)
                 FROM nx.stock_ledger WHERE STOCK_POINT='RDY'
@@ -236,12 +287,16 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             for g in rows:
                 for b, c in g["_cells"].items():
                     sd = (b if b != 'P' else (g["part_ymd"] or '999999'))
-                    grp.setdefault(keyfn(g), []).append((c, sd, g.get("inhm") or '', g.get("plan_ymd") or '', g.get("output_hm") or g.get("inhm") or '', g.get("wo") or '', g.get("swo") or ''))
+                    # ★2026-08-23 lgh(LG OUTPUT시간) 추가 = work_order 앞.
+                    #   표시 정렬(rows.sort)에는 lgh 가 들어갔는데 충당 정렬에 없으면
+                    #   "화면 위에서부터 채워지지 않는" 어긋남이 난다(제번 문자열순으로 충당).
+                    #   최종납기=LG OUTPUT시간이라 이른 건이 먼저 재고를 받는다 → 화면 순서 = 충당 순서.
+                    grp.setdefault(keyfn(g), []).append((c, sd, g.get("inhm") or '', g.get("plan_ymd") or '', g.get("output_hm") or g.get("inhm") or '', g.get("lgh") or '', g.get("wo") or '', g.get("swo") or ''))
             for k, lst in grp.items():
                 pool = max(float(poolmap.get(k, 0.0) or 0), 0.0)
                 if pool <= 0: continue
-                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6]))
-                for c, sd, hm, _py, _ohm, _wo, _swo in lst:
+                lst.sort(key=lambda x: (x[1], x[2], x[3], x[4], x[5], x[6], x[7]))
+                for c, sd, hm, _py, _ohm, _lgh, _wo, _swo in lst:
                     if pool <= 0: break
                     jan = c["plan"] - c["finish"] - (c["ready"] if key == 'ready' else 0.0)
                     if jan <= 0: continue
@@ -256,7 +311,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             kf = (g["upper"], g["item"], g["gpc"])
             if kf not in _fix_pool: _fix_pool[kf] = max(fixstk.get((g["upper"], g["item"]), 0.0), 0.0)  # 도번고정재고
             km = (g["item"], g["gpc"])
-            if km not in _mid_pool: _mid_pool[km] = max(prdirect.get(g["item"], 0.0), 0.0)             # 중간공정 파트재고=PR_T_MAT_STOCK_WH 직접(SP pr_stock 일치)
+            # ★2026-08-23 충당풀 = 파트창고(PR_T_MAT_STOCK_WH) + 자재창고(PU_T_MAT_STOCK_WH).
+            #   기존엔 파트창고만 봐서, 자재창고에만 재고가 있는 건이 충당되지 않았다.
+            #   (실측 AJR73803003: 파트창고 0 / 자재창고 1 → 웹 799/800, 레거시 800/800 노랑)
+            #   화면 '생산재고' 컬럼과 동일 원천이라 "재고가 있으면 채워진다"가 성립한다.
+            if km not in _mid_pool: _mid_pool[km] = max(prdirect.get(g["item"], 0.0) + matwh.get(g["item"], 0.0), 0.0)
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # 2) ASSY 현재고
         # ★도번고정재고(fixstk)는 완료풀에서 제외 — 레거시 SP(준비등록_NEW) 완료=sale+assy_stock+pr_stock+ready뿐(도번고정 별도풀 없음).
         #   재귀BOM롤업 fixstk가 SUB를 부풀려 과다(AJJ30041901-SUB SP5 vs 웹295)였음. plan_part410도 fixstk 미사용.
@@ -293,7 +352,10 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             g["finish"] = round(sum(c["finish"] for c in g["_cells"].values()), 2)         # 완료수량=충당 finish합(SP finish_qty)
             g["ready_stock"] = round(max(rstock.get((it, g["gpc"]), 0.0), 0.0), 2)          # 준비재고(파트버킷)
             g["ready_qty"] = round(sum(c["ready"] for c in g["_cells"].values()), 2)        # 준비수량=충당 ready합(SP ready_qty)
-            g["prod_stock"] = round(assystk.get(it, 0.0), 2)
+            # ★생산재고 = 생산(파트)창고 + 자재창고 (2026-08-23, 사용자 확정)
+            #   기존 assystk(SA_T_ITEM_STOCK)는 ASSY재고 컬럼과 중복이라 늘 같은 값이 나왔고,
+            #   자재창고에만 재고가 있는 건은 0 으로 표시됐다(AJR73803003 자재창고 1 → 웹 0).
+            g["prod_stock"] = round(prwh.get(it, 0.0) + matwh.get(it, 0.0), 2)
             g["assy_stock"] = round(assystk.get(g["assy"], 0.0), 2)
             g["sale"] = round(saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 2)
             g["need_qty"] = round(max(g["plan_qty"] - g["ready_qty"], 0.0), 2)
@@ -324,12 +386,15 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             v = x["inhm"] or ""
             if k not in _bmin or v < _bmin[k]:
                 _bmin[k] = v
+        #   ★2026-08-23 lgh(LG OUTPUT시간) 추가 = work_order 앞. PART INPUT(inhm)이 같은 행이
+        #     여럿일 때 제번 문자열순으로 갈려 레거시와 순서가 달랐다(0004→000D→0026 vs 0026→002V→000D→0004).
+        #     최종납기=LG OUTPUT시간이라 이른 건이 먼저. 파트별생산계획(410) 표시순서와도 동일해진다.
         rows.sort(key=lambda x: (x["gpc"] or "",
                                  x["part_ymd"] or "",
                                  _bmin.get((x["gpc"] or "", x["part_ymd"] or "", x["item"] or ""), ""),
                                  x["item"] or "",
                                  x["inhm"] or "",
-                                 x["plan_ymd"] or "", x["wo"] or "", x["swo"] or ""))
+                                 x["plan_ymd"] or "", x.get("lgh") or "", x["wo"] or "", x["swo"] or ""))
         note = f"⚠ 상위 {limit}건 초과 — 투입파트·작업처·도번으로 필터하세요." if capped else ""
         return {"dates": dates, "rows": rows, "cnt": len(rows),
                 "plan_sum": sum(r["plan_qty"] for r in rows), "ready_sum": sum(r["ready_qty"] for r in rows), "note": note}

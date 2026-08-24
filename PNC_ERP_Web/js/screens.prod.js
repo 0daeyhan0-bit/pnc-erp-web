@@ -1629,11 +1629,11 @@ SCREEN.kitting=(host)=>{
   const wlab=y=>{if(!y||y.length<6)return dcol(y);const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));const dow='일월화수목금토'[dt.getDay()];return `${y.slice(4,6)}${dow}`;};   // 레거시 라벨: 일자+요일 (예 19월)
   const isWkend=y=>{if(!y||y.length<6)return false;const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return dt.getDay()===0||dt.getDay()===6;};
   const T=new Date();
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:iso(T),gigan:2,wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',sel:new Set(),fold:new Set(),cellSel:new Set(),itemSel:null,loading:false,msg:''};
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:iso(T),gigan:2,src:'nx',wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',sel:new Set(),fold:new Set(),cellSel:new Set(),itemSel:null,loading:false,msg:''};
   const load=async()=>{st.loading=true;render();
     // ★항상 전체로 1회 fetch → 캐시. 파트·제번·도번·미생산·구분은 클라에서 즉시 필터(재조회 없음).
     //   서버 재조회 = 기준일자·자도번작업처·기간 변경시만. (파트별 생산계획과 동일 정책)
-    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,pgroup:st.pgroup,line:st.line,view:'상세',unfin:'전체',limit:6000});
+    const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,pgroup:st.pgroup,line:st.line,view:'상세',unfin:'전체',src:(st.src||'nx'),limit:6000});
     try{const r=await fetch(`${API}/api/kitting/grid?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.ready_sum=j.ready_sum||0;st.note=j.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];st.dates=[];}
     st.loading=false;st.sel.clear();render();};
@@ -2017,6 +2017,9 @@ SCREEN.kitting=(host)=>{
     const aggRk=f=>({'3':1,'4':2,'7':3,'6':4,'2':5,'0':9})[f]||9;
     const rollF=(fs)=>{const v=fs.filter(f=>f&&f!=='0');if(!v.length)return '0';
       return v.slice().sort((a,b)=>aggRk(a)-aggRk(b))[0];};
+    // ★2026-08-23 부분충당 소계는 무색. 하위행 중 하나라도 색이 있으면 롤업되던 탓에
+    //   48/129 처럼 미충족인데도 완전충당 색이 칠해졌다 → 합계가 계획을 다 채웠을 때만 색.
+    const rollFq=(fs,cv,pl)=>((+cv||0) >= (+pl||0)-1e-6) ? rollF(fs) : '0';
     if(st.view==='집계'){
       // ★파트별 생산계획과 동일: "연속된 같은 도번" 블록 단위로 집계행 생성(전역 Map이면 상세와 순서가 어긋남).
       //   집계행 = 청록 배경 + 클릭시 상세 드릴다운(상세는 집계행 "위"에 표시). 색상은 rollF(관련색 우선) 사용.
@@ -2085,7 +2088,9 @@ SCREEN.kitting=(host)=>{
     // ★청록 소계행(파트별 생산계획 subHtml과 동일 개념) — 도번 블록 합계 + 색상 롤업.
     //   클릭시 그 블록 상세행 접기/펼치기(▼/▶). 색 롤업 = 관련색 하나라도 있으면 그 색(녹>노랑>진주황>살구).
     // ★집계행 = 청록 배경 + ▶/▼ 클릭 드릴다운. mainRow와 같은 컬럼구조지만 행 전체가 청록.
-    const aggRow=(o)=>{const r=o.r,idxs=o.idxs||[],pfin=r.prior_fin||'0';
+    const aggRow=(o)=>{const r=o.r,idxs=o.idxs||[];
+      // ★부분충당은 무색(소계행과 동일 규칙) — 병합행도 합계가 계획을 채웠을 때만 색.
+      const pfin=rollFq([r.prior_fin||'0'], r.prior_cover||0, r.prior_plan||0);
       const cTd=(v,f)=>`<td class="center"${f&&f!=='0'?` style="background:${finBg(f)};font-weight:700${finFg(f)?';color:'+finFg(f):''}"`:''}>${v}</td>`;
       return `<tr class="kt-agg" data-gk="${esc(o.gk)}" style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8;cursor:pointer">
         <td class="center"><input type="checkbox" class="kt-chk" data-idxs="${idxs.join(',')}" ${idxs.length&&idxs.every(x=>st.sel.has(x))?'checked':''}></td>
@@ -2094,7 +2099,8 @@ SCREEN.kitting=(host)=>{
         <td class="center kt-item" data-item="${esc(r.item)}" data-gpc="${esc(r.gpc)}" title="클릭: 도번 선택 → BOM출력"><b>${esc(r.item)}</b></td>
         <td class="center">${esc(dcol(r.part_ymd||''))}</td><td class="center">${esc(r.inhm)}</td><td class="center">${esc(r.line)}</td>
         ${r.prior_plan>0?cTd(nf(r.prior_cover||0)+'/'+nf(r.prior_plan),pfin):'<td class="center"></td>'}
-        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';
+        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0;
+          const cf=rollFq([(r.dfin&&r.dfin[x])||'0'], cv, pl);
           return pl?cTd(nf(cv)+'/'+nf(pl),cf):'<td class="center"></td>';}).join('')}
         <td class="center">${nf(r.ready_stock)}</td><td class="center">${nf(r.finish)}</td>
         <td class="center" style="color:#1c7c3a"><b>${nf(r.ready_qty)}</b></td>
@@ -2104,7 +2110,7 @@ SCREEN.kitting=(host)=>{
     const subTotalRow=(o)=>{const blk=o.blk,r0=blk[0];
       const sum=k=>blk.reduce((s,r)=>s+(+r[k]||0),0);
       const sPrP=sum('prior_plan'), sPrC=sum('prior_cover');
-      const sPrF=rollF(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'));
+      const sPrF=rollFq(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'), sPrC, sPrP);
       const sTd=(v,f)=>`<td class="center"${f&&f!=='0'?` style="background:${finBg(f)};font-weight:700${finFg(f)?';color:'+finFg(f):''}"`:''}>${v}</td>`;
       return `<tr class="kt-subtot" data-gk="${esc(o.gk)}" style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8;cursor:pointer">
         <td class="center"></td><td class="center mut"><span style="color:#456">${o.folded?'▶':'▼'}</span></td>
@@ -2112,7 +2118,7 @@ SCREEN.kitting=(host)=>{
         <td class="center">${esc(dcol(r0.part_ymd||''))}</td><td class="center">${esc(r0.inhm)}</td><td class="center">${esc(r0.line)}</td>
         ${sPrP>0?sTd(nf(sPrC)+'/'+nf(sPrP),sPrF):'<td class="center"></td>'}
         ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
-          const cf=rollF(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'));
+          const cf=rollFq(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'), cv, pl);
           return pl>0?sTd(nf(cv)+'/'+nf(pl),cf):'<td class="center"></td>';}).join('')}
         <td class="center">${nf(Math.max(...blk.map(r=>+r.ready_stock||0)))}</td><td class="center">${nf(sum('finish'))}</td>
         <td class="center" style="color:#1c7c3a"><b>${nf(sum('ready_qty'))}</b></td>
@@ -2152,6 +2158,7 @@ SCREEN.kitting=(host)=>{
        <label class="tl">자도번작업처</label><select class="inp" id="kt-wc" style="width:88px"><option value="">전체</option>${[...wcM].map(([v,n])=>`<option value="${esc(v)}"${st.wc===v?' selected':''}>${esc(n)}</option>`).join('')}</select>
        <label class="tl">파트</label><select class="inp" id="kt-part" style="width:130px">${partOpts}</select>
        <label class="tl">기간</label><select class="inp" id="kt-gigan" style="width:62px">${[1,2,3,4,5,6,7,8].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
+       <label class="tl">소스</label><select class="inp" id="kt-src" style="width:110px" title="우리(nx)=라이브+웹실적(기본) / 라이브 대사=레거시 그대로 대조"><option value="nx"${st.src!=='live'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>라이브 대사</option></select>
        <button class="btn" id="kt-go">🔍 조회</button>
        <button class="btn ghost" id="kt-setchk" title="셀을 드래그 선택한 뒤 클릭 — 자도번별 재고/세트가능수량 확인(조회전용)">🔎 세트가능 확인</button>
        ${ed?`<button class="btn" id="kt-reg" style="background:#1c7c3a;color:#fff">✅ 확인(준비등록)</button><button class="btn ghost" id="kt-can">⏪ 준비취소</button>`:`<span style="color:#c0392b;font-size:12px">🔒 권한 없음</span>`}
@@ -2178,10 +2185,11 @@ SCREEN.kitting=(host)=>{
         <td class="center">${nf(fpass.reduce((s,r)=>s+(r.ready_stock||0),0))}</td><td class="center">${nf(fpass.reduce((s,r)=>s+(r.finish||0),0))}</td><td class="center">${nf(fready)}</td>
         <td></td><td></td><td class="center">${nf(fpass.reduce((s,r)=>s+(r.sale||0),0))}</td><td></td><td></td><td></td><td></td></tr>`:''}</tfoot>
       </table></div>
-     <div class="page-sub" style="text-align:left;margin-top:2px" id="kt-cnt">${st.view==='집계'?'도번':'본행'} ${nf(fcnt)}건 · 계획 ${nf(fplan)} · 준비 ${nf(fready)}</div>`;
+     <div class="page-sub" style="text-align:left;margin-top:2px" id="kt-cnt">${st.view==='집계'?'도번':'본행'} ${nf(fcnt)}건 · 계획 ${nf(fplan)} · 준비 ${nf(fready)} · ${st.src==='live'?'🔴 라이브 대사':'🟢 우리(nx)'}</div>`;
     const g=id=>host.querySelector(id);
     // ★조회(서버 재조회) = 기준일자·자도번작업처·기간만. 나머지 필터는 캐시에서 즉시필터라 재조회 불필요.
     g('#kt-go').onclick=()=>{st.base=g('#kt-base').value;st.wc=g('#kt-wc').value;st.gigan=+g('#kt-gigan').value;
+      const sv=g('#kt-src');if(sv)st.src=sv.value;
       load();};
     g('#kt-prev').onclick=()=>shiftDay(-1);g('#kt-next').onclick=()=>shiftDay(1);   // ◀▶만 즉시조회(예외)
     // ★BOM출력 = 선택 셀의 도번 → Spec Sheet(BOM) A4 가로 미리보기 → 인쇄(레거시 w_pr_input_460 동일).
