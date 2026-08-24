@@ -150,7 +150,9 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 
 - **★원가축 증명 완료 (2026-08-24)**: `_harness/soyo_explode_shared.py` — `explode()`(모드무관 full tree·정지안함·kids 공유맵 = eng.lines 1회·dedup) + `cost_material_ex`·`cost_material_nae_ex`(공유 kids 순회, 자기재귀 제거). **Phase 0 하네스 검증: 현행 cost_material·cost_material_nae vs explode공유형 = 30/30·30/30 diff0 PASS.** ★하네스가 내부원가 3건 FAIL 선검출→`_expandable_nae` 규칙 교정(직납 cg5 제외지 cg3 아님)→통과=게이트 실작동. **배포된 nx_soyo_engine 무변경(옆에 검증).** → "1 explode 공유 + 얇은 walker"가 원가 모드에서 diff0 증명됨.
 - **★생산 walker 증명 + 소스등가 발견 (2026-08-24)**: `prod_soyo_ex`(explode_pr = nx.bom_line 직읽기·except_flag 태깅·RAC포함) vs 현행 `prod_soyo`(v_pr_bom·USE_QTY_PR) = **30/30 diff0 PASS**. → **★nx.bom_line이 v_pr_bom을 재현(소스 등가) = 단일소스 통일 가능**: 원가(cs_calc_except)·생산(except_flag) **둘 다 nx.bom_line 하나**로 서빙됨(explode 하나에 두 flag 태깅). 최우선(생산계획 diff0)에 부합(생산 소요=생산축 소스 일치).
-- **남은 walker**: **중량(weight_explode·sagub·CS+coop 소스)·용접봉(weld_soyo)·plan(plan_explode/gagong)**. 중량은 소스가 CS/coop이라 nx.bom_line 등가성 별도 검증 필요(다음). 각 diff0 게이트. ※최종 explode() 통합 = nx.bom_line에서 cs_calc_except+except_flag+sagub+lme 전부 태깅.
+- **★중량 walker 증명 (2026-08-24)**: `weight_explode_ex`(explode_wt = _cs_lines_wt 공유 kids·sagub·RAC포함·COOP_SET/COOPB 폴백·geom leaf) vs 현행 `weight_explode` = **30/30 diff0 PASS**. ★내 "CS 소스" 추측 오류 — **weight_explode도 이미 nx.bom_line(_cs_lines_wt) 기반**(sagub_default). 
+- **★★핵심 BOM-전개 walker 전부 explode-공유 diff0 (2026-08-24)**: 원가·내부원가·생산·중량 = **전부 nx.bom_line 소스, 30/30 diff0.** → **단일 explode(nx.bom_line, cs_calc_except+except_flag+sagub+lme 태깅) 하나로 4모드 전부 서빙 가능** = 통일 아키텍처 핵심 증명. 배포 엔진 무변경(옆에 `soyo_explode_shared.py`).
+- **남은**: 용접봉(weld_soyo=CS_T_ITEM_WELD×1.5 flat·BOM전개 아님=별 primitive)·plan(plan_explode/gagong=계획레벨·복잡). 이후 최종 통합 explode() 1개로 수렴 + Phase 2 캐시 + Phase 3 전환(전수 게이트).
 
 ### 13-3. Phase 2 — explode 캐시 (성능)
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**

@@ -147,3 +147,70 @@ def prod_soyo_ex(eng, item):
             continue
         out[mc] = round(sum(q for _, q in occ), 6)
     return out
+
+
+# ===================== 중량 walker (explode 공유형) =====================
+# ★중량도 이미 nx.bom_line 소스(_cs_lines_wt·sagub_default·RAC포함). 공유 kids맵으로 재현 → 현행 weight_explode와 diff0.
+def explode_wt(eng, item):
+    """중량축 kids 맵 (nx.bom_line·sagub·RAC포함), 부모 upper 키. 공유 트리 소스."""
+    import nx_soyo_engine as _se
+    kids = {}
+
+    def build(node):
+        u = node.strip().upper()
+        if u in kids:
+            return
+        ch = _se._cs_lines_wt(eng, node)   # [(child, qty, sagub)]
+        kids[u] = ch
+        for c, q, s in ch:
+            build(c)
+    build(item)
+    return kids
+
+
+def weight_explode_ex(eng, item):
+    """[중량 walker · explode 공유형] — nx_soyo_engine.weight_explode 와 diff0 대상.
+    공유 kids_wt 순회. sagub_default=1 제외·COOP_SET/COOPB 폴백·geom leaf. (raw_kg, weld_kg)."""
+    import nx_soyo_engine as _se
+    COOP_SET, COOPB = _se._wt_coop(eng)
+    kids = explode_wt(eng, item)
+    memo = {}
+
+    def walk(node):
+        u = node.strip().upper()
+        if u in memo:
+            return memo[u]
+        memo[u] = (0.0, 0.0)
+        ch = kids.get(u, [])
+        if ch:
+            rk = wk = 0.0
+            for c, q, sag in ch:
+                if sag == 1:
+                    continue
+                cr, cw = walk(c)
+                rk += cr * q; wk += cw * q
+            if rk > 0 or wk > 0:
+                memo[u] = (rk, wk); return memo[u]
+            if u in COOP_SET:
+                memo[u] = (COOP_SET[u], 0.0); return memo[u]
+            cb = COOPB.get(u)
+            if cb:
+                rk = wk = 0.0
+                for c, q in cb:
+                    cr, cw = walk(c); rk += cr * q; wk += cw * q
+                memo[u] = (rk, wk); return memo[u]
+            return memo[u]
+        cb = COOPB.get(u)
+        if cb and u not in COOP_SET:
+            rk = wk = 0.0
+            for c, q in cb:
+                cr, cw = walk(c); rk += cr * q; wk += cw * q
+            memo[u] = (rk, wk); return memo[u]
+        if u in COOP_SET:
+            memo[u] = (COOP_SET[u], 0.0); return memo[u]
+        w, cls = _se._wt_meta(eng, node)
+        memo[u] = (w, 0.0) if cls == 'raw' else ((0.0, w) if cls == 'weld' else (0.0, 0.0))
+        return memo[u]
+
+    rk, wk = walk(item)
+    return (round(rk, 6), round(wk, 6))
