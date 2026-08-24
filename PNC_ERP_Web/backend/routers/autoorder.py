@@ -15,7 +15,7 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 router = APIRouter()
 
 # 발주대상 공급방식(자체 제외). 미지정은 발주업체 미확정으로 별도 표기하되 대상엔 포함.
-_ORDER_GUBUN = ("매입", "유상사급", "외주가공", "외주완성", "미지정")
+_ORDER_GUBUN = ("구매", "사급", "외주", "외주직납", "미지정")
 _AO_READY = False
 
 def _ensure_ao_tbl(cur):
@@ -41,7 +41,7 @@ def _ensure_ao_tbl(cur):
 def _mat_requirement(cur, line, cr, vendor, item, gubun):
     """정본 조달소요(nx.plan_mat_source) 집계 = (자재×공급처×공급방식) 순소요 후보(발주대상만).
        라인/CR 필터는 제번(WORK_ORDER)→nx.plan_dtl 조인(EXISTS, 정확·additive). plan_mat_source는 제번×자재 단위."""
-    w = ["s.SUPPLY_GUBUN<>N'자체'"]
+    w = ["s.SUPPLY_GUBUN<>N'제작'"]
     p = []
     if gubun.strip():
         w.append("s.SUPPLY_GUBUN=?"); p.append(gubun.strip())

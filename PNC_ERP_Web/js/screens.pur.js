@@ -1397,7 +1397,7 @@ SCREEN.matprice=(c)=>{
 SCREEN.matsource=(c)=>{
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  const GB={'매입':'#1c47a0','유상사급':'#7a4ca0','외주가공':'#b8860b','외주완성':'#8a6d00','자체':'#1c7c3a','미지정':'#c0392b'};
+  const GB={'구매':'#1c47a0','사급':'#7a4ca0','외주':'#b8860b','외주직납':'#8a6d00','제작':'#1c7c3a','미지정':'#c0392b'};
   let mode='gubun', F={gubun:'',vendor:'',mat:'',wo:''}, rows=[], loading=false, msg='';
   const load=async()=>{loading=true;draw();
     const qs=new URLSearchParams({mode,gubun:F.gubun,vendor:F.vendor,mat:F.mat,wo:F.wo});
@@ -1428,7 +1428,7 @@ SCREEN.matsource=(c)=>{
      <div class="page-sub">레거시 STEP5→6→7 충실이식 정본 자재소요(<code>nx.plan_part_mat</code>, 수량100%검증)에 조달 프로파일을 오버레이. 프로파일 없는 자재는 BOM기본(MAKE_TYPE·가공처)으로 분류. 용접봉(그룹910)·자체생산 중간품은 규칙상 제외.</div>
      <div class="toolbar">
        <label class="tl">보기</label><select class="inp" id="m-mode"><option value="gubun"${mode==='gubun'?' selected':''}>공급방식별</option><option value="vendor"${mode==='vendor'?' selected':''}>공급처별</option><option value="detail"${mode==='detail'?' selected':''}>명세(제번×자재)</option></select>
-       <label class="tl">공급방식</label><select class="inp" id="m-gubun"><option value="">전체</option>${['매입','유상사급','외주가공','외주완성','자체','미지정'].map(g=>`<option value="${g}"${F.gubun===g?' selected':''}>${g}</option>`).join('')}</select>
+       <label class="tl">공급방식</label><select class="inp" id="m-gubun"><option value="">전체</option>${['구매','사급','외주','외주직납','제작','미지정'].map(g=>`<option value="${g}"${F.gubun===g?' selected':''}>${g}</option>`).join('')}</select>
        <label class="tl">공급처</label><input class="inp" id="m-vendor" list="ms-vendorl" value="${esc(F.vendor)}" style="width:110px" placeholder="공급처코드/명" autocomplete="off"><datalist id="ms-vendorl">${vOpts}</datalist>
        <label class="tl">자재</label><input class="inp" id="m-mat" list="ms-matl" value="${esc(F.mat)}" style="width:120px" placeholder="자재코드/명" autocomplete="off"><datalist id="ms-matl">${matOpts}</datalist>
        <label class="tl">제번</label><input class="inp" id="m-wo" list="ms-wol" value="${esc(F.wo)}" style="width:100px" placeholder="제번 입력" autocomplete="off"><datalist id="ms-wol">${woOpts}</datalist>
@@ -3119,7 +3119,7 @@ SCREEN.autoorder=(c)=>{
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const won=n=>'₩'+nf(n);
   const canW=(typeof PERM!=='undefined')?PERM.canEdit('autoorder'):true;
-  const GB={'매입':'#1c47a0','유상사급':'#7a4ca0','외주가공':'#b8860b','외주완성':'#8a6d00','미지정':'#c0392b'};
+  const GB={'구매':'#1c47a0','사급':'#7a4ca0','외주':'#b8860b','외주직납':'#8a6d00','미지정':'#c0392b'};
   let tab='preview', F={line:'',cr:'',vendor:'',item:'',gubun:'',ymd:''};
   let pos=[], summary=null, loading=false, msg='', sel=new Set(), open=new Set();
   let heads=[], detail=null, dpo='';

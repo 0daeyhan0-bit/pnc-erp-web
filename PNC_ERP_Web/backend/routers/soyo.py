@@ -104,7 +104,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         for ic, sg, v, al, rid in cur.fetchall():
             ic = str(ic).strip(); rid = int(rid or 0)
             (PRF_ALT.setdefault((rid, ic), []) if rid else PRF.setdefault(ic, [])).append((str(sg).strip(), str(v).strip(), float(al or 100)))
-        _MKMAP = {'1': '자체', '2': '외주가공', '3': '매입', '4': '유상사급', '5': '외주완성'}  # '자체'=프로파일 라벨과 통일
+        _MKMAP = {'1': '제작', '2': '외주', '3': '구매', '4': '사급', '5': '외주직납'}  # ★조달후보 구분과 통일(2026-08-24)
         # ★경로 배분(nx.route_alloc, 규칙 §8·§9): 조립품(assy)별 활성경로 × route%로 부품수요 분해. ★총량 보존.
         #   현행경로(R01/route_id=0)=기존 로직(프로파일/BOM기본, 업체 재분할은 자동발주 order_vendor 담당).
         #   대안경로(R02+)=route별 프로파일 or 경로헤더 공급처, SOURCE='경로대안'(자동발주 order_vendor 재분할 제외 표식).
@@ -119,7 +119,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         if alt_rids:
             rph = ",".join("?" * len(alt_rids))
             cur.execute(f"SELECT route_id, ISNULL(vendor_code,''), ISNULL(gubun,'') FROM nx.sourcing_route WHERE route_id IN ({rph})", *alt_rids)
-            for rid, v, g in cur.fetchall(): RHV[int(rid)] = (str(v or '').strip(), str(g or '').strip() or '외주가공')
+            for rid, v, g in cur.fetchall(): RHV[int(rid)] = (str(v or '').strip(), str(g or '').strip() or '외주')
         cur.execute("SELECT work_order, ISNULL(assy_item_code,''), mat_code, SUM(CAST(part_plan_qty AS float)) FROM nx.plan_part_mat GROUP BY work_order, assy_item_code, mat_code")
         srows = []
         for wo, assy, mat, qty in cur.fetchall():
@@ -139,7 +139,7 @@ def plan_compose_mat(payload: dict = Body(...)):
                     if pa:
                         for sg, v, al in pa: srows.append((wo, mat, sg, v, q * al / 100.0, '경로대안'))
                     else:
-                        hv, hg = RHV.get(rid, ('', '외주가공'))
+                        hv, hg = RHV.get(rid, ('', '외주'))
                         srows.append((wo, mat, hg, hv, q, '경로대안'))
         cur.fast_executemany = True
         cur.executemany("INSERT INTO nx.plan_mat_source(WORK_ORDER,MAT_CODE,SUPPLY_GUBUN,VENDOR_CODE,QTY,SOURCE) VALUES(?,?,?,?,?,?)", srows)
