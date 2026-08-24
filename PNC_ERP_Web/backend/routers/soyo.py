@@ -475,6 +475,23 @@ def _step6_sql(cur):
         WHERE b.plan_ymd=a.plan_ymd AND b.work_order=a.work_order AND b.split_work_order=a.split_work_order AND b.assy_item_code=a.assy_item_code
           AND b.bom_level=a.bom_level AND b.upper_item_code=a.upper_item_code AND b.item_code=a.item_code AND b.proc_seq<a.proc_seq ORDER BY b.proc_seq DESC),'')""")
 
+def _route_setup(cur):
+    """★조달경로 반영 인프라(2026-08-24). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
+    - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지. 대체경로 등록시 채움(materializer 별도). 없으면 fallback.
+    - nx.plan_route_active(assy_item_code,route_id): 활성 대체경로(sourcing_route current_flag=1·route_no>1)이면서 route_edges 보유한 제품만.
+      기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%)."""
+    # ★타입=plan_part_dtl.item_code(varchar20)·v_pr_bom.mat_code(varchar20) 정합(재귀CTE 앵커 타입일치 필수). nvarchar 쓰면 STEP7 재귀 타입불일치 오류.
+    cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
+        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
+        use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
+    cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL DROP TABLE nx.plan_route_active")
+    cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(h.item_code))) AS assy_item_code, MIN(h.route_id) AS route_id
+        INTO nx.plan_route_active FROM nx.sourcing_route h
+        WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1
+          AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
+        GROUP BY UPPER(LTRIM(RTRIM(h.item_code)))""")
+    cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
+
 def _step7_sql(cur):
     P = _P
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
@@ -488,6 +505,9 @@ def _step7_sql(cur):
       LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
         ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
+    # ★★조달경로(route) 반영 인프라(2026-08-24, 가산적): 활성 대체경로(sourcing_route current_flag=1·route_no>1) 있으면
+    #   그 경로의 BOM엣지(route_edges)로 전개, 없으면 v_pr_bom(현행 except<>1) fallback=R01 diff0(검증: route CTE≡원본 100.000%).
+    _route_setup(cur)
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
     cur.execute(("""
     WITH CTE_BOM(plan_ymd,work_order,split_work_order,assy_item_code,bom_level,upper_item_code,item_code,proc_seq,bom_mat_code,mat_work_center_code,cum_use_qty,cum_in_cust_code,mat_flag,use_qty,part_plan_qty,gc_gubun,cust_flag) AS (
@@ -508,7 +528,20 @@ def _step7_sql(cur):
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
       FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1'
+        AND NOT EXISTS(SELECT 1 FROM nx.plan_route_active pra WHERE pra.assy_item_code=cb.assy_item_code)   -- ★가드: 활성 대체경로 없는 제품만 v_pr_bom(현행)
         AND NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
+            AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code)
+      UNION ALL
+      -- ★★route-active 브랜치: 활성 대체경로(Rnn) 있는 제품은 그 경로의 route_edges로 전개(except_flag 무관·route가 활성엣지만 보유)
+      SELECT cb.plan_ymd,cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
+         m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.use_qty_pr END),
+         CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
+         ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
+      FROM CTE_BOM cb
+        JOIN nx.plan_route_active pra ON pra.assy_item_code=cb.assy_item_code
+        JOIN nx.route_edges b ON b.route_id=pra.route_id AND b.item_code=cb.bom_mat_code
+        JOIN nx.item_ov m ON b.mat_code=m.item_code
+      WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code))
     SELECT * INTO nx.plan_part_mat_tmp FROM CTE_BOM
     WHERE CHARINDEX('||'+mat_work_center_code+'||',cum_in_cust_code)=0 AND NOT (cust_flag='0' AND gc_gubun='P') OPTION(MAXRECURSION 0)""").replace("{P}", P))
