@@ -148,6 +148,9 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **explode()를 모드무관 full tree로 교정**: 현재 explode()가 `cs_calc_except=1` 자식을 스킵(=원가전용 필터) → **필터 제거하고 전 flag(cs_calc_except·except_flag·sagub·lme·kitting) 태깅만.** 필터는 각 walker로 이동.
 - 각 walker(원가·내부원가·생산·중량·용접봉)를 **explode 노드리스트 소비형**으로 리팩터(자기 재귀 제거). **현행 walker와 diff0 재검증**(현행 무변경, 옆에).
 
+- **★원가축 증명 완료 (2026-08-24)**: `_harness/soyo_explode_shared.py` — `explode()`(모드무관 full tree·정지안함·kids 공유맵 = eng.lines 1회·dedup) + `cost_material_ex`·`cost_material_nae_ex`(공유 kids 순회, 자기재귀 제거). **Phase 0 하네스 검증: 현행 cost_material·cost_material_nae vs explode공유형 = 30/30·30/30 diff0 PASS.** ★하네스가 내부원가 3건 FAIL 선검출→`_expandable_nae` 규칙 교정(직납 cg5 제외지 cg3 아님)→통과=게이트 실작동. **배포된 nx_soyo_engine 무변경(옆에 검증).** → "1 explode 공유 + 얇은 walker"가 원가 모드에서 diff0 증명됨.
+- **남은 walker(중량·용접봉·생산)**: 원가축(cost_material/nae)은 eng.lines(nx.bom_line·cs_calc_except) 공유라 explode()가 바로 서빙. **중량(sagub)·생산(except_flag)은 다른 flag 소스**(weight_calc=CS·soyo=v_pr_bom) → explode()가 except_flag/sagub 태깅하도록 확장 필요(다음). 각 diff0 게이트.
+
 ### 13-3. Phase 2 — explode 캐시 (성능)
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**
 
@@ -162,6 +165,7 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 
 ### 13-6. 전 단계 게이트·제약
 - **diff0 필수**(통과 못 하면 전환 금지·롤백). **생산계획 미접촉**(Phase3-4 생산분만 조율 후). **검증하며·기록**(§7 로그). 클린전환(미러부채)은 **별건**(이 통일은 nx.bom_line 현행 위, 클린은 후속). 성급한 일반화 금지·MASTER 먼저 읽기.
+- **★★검증 스코프 = 전수 (부분검증 금지, §5-1)**: 개발 중 30표본은 **빠른 반복용**일 뿐. **프로덕션 전환(Phase 3) 전 게이트 = 전 사용중 스코프 전수 diff0**(1052 제품/~8790 items). 샘플 PASS ≠ 전환 자격. 전수는 DB 부하 크니 타인 계획작업 비접촉 타이밍에 실행. 하네스 scope()를 전체로 확장.
 
 ## 관련
 [[BOM_PROGRAM_MASTER]] [[BOM_EXPLOSION_RULES]] [[BOM_STRUCTURE_CANON]] [[newerp-plan-soyo-verify]] [[newerp-realcost-bom-expansion]] [[COSTANALYSIS_V2_DESIGN]] [[feedback-protect-production-plan]]
