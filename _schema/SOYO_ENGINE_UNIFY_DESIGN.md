@@ -160,7 +160,17 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **생산 prod_soyo = 2069/2081 (★12 FAIL).** = `prod_soyo_ex`(nx.bom_line·except_flag) ≠ 현행 `prod_soyo`(v_pr_bom) 12건. **∴ "nx.bom_line=v_pr_bom 소스 등가"는 12건에서 성립 안 함**(30표본으론 놓침 → 전수가 잡음, 성급한 일반화 위험 재확인·사용자 전수요구 옳음).
 - **12 FAIL 목록(leaf qty 차이)**: AET73831439/AET73831480(FAD31051901 2vs3)·AJR30012012(3A02080B 1vs2)·AJR30033101(MEG66660106 6vs4)·AJR30123001(MEV39836107 2vs1)·AJR30133605(5210A00039G 2vs1)·AJR30133606(EBF40271407 1vs2)·AJR30157301(3H01582A 2vs5) 등.
 - **★생산계획(최우선·LG라인)과 직결**: 12건에서 nx.bom_line ↔ v_pr_bom(생산소스) 갈림.
-- **★★근본원인 규명·수정 (2026-08-24)**: 두 소스 대조(3A02080B·EBF40271407) — **`nx.bom_line.qty` == `v_pr_bom.USE_QTY`(2)이나 `v_pr_bom.USE_QTY_PR`=1로 다름.** = **생산 소요는 `USE_QTY_PR`(생산수량)을 써야 하는데 내 `prod_soyo_ex`가 `qty`(=USE_QTY)를 읽음.** nx.bom_line에 **`qty_pr` 컬럼 존재**(=USE_QTY_PR) → **소스는 등가, 컬럼만 오류.** 12 FAIL = 정확히 `qty_pr≠qty` 품목. **수정**: `_lines_pr`가 `ISNULL(qty_pr, qty)` 읽게(soyo_explode_shared.py). **검증: 기존 FAIL 8건 → 8/8 PASS.** 전수 재확인 진행중. → **생산도 nx.bom_line(qty_pr·except_flag)으로 통일 가능**(소스 등가 확정, 컬럼 교정 후).
+- **★★근본원인 규명·수정 (2026-08-24)**: 두 소스 대조(3A02080B·EBF40271407) — **`nx.bom_line.qty` == `v_pr_bom.USE_QTY`(2)이나 `v_pr_bom.USE_QTY_PR`=1로 다름.** = **생산 소요는 `USE_QTY_PR`(생산수량)을 써야 하는데 내 `prod_soyo_ex`가 `qty`(=USE_QTY)를 읽음.** nx.bom_line에 **`qty_pr` 컬럼 존재**(=USE_QTY_PR) → **소스는 등가, 컬럼만 오류.** 12 FAIL = 정확히 `qty_pr≠qty` 품목. **수정**: `_lines_pr`가 `ISNULL(qty_pr, qty)` 읽게(soyo_explode_shared.py). **검증: 기존 FAIL 8건 → 8/8 PASS.** → **생산 전수 재검증 = 2081/2081 PASS (354초)** ✅. → **생산도 nx.bom_line(qty_pr·except_flag)으로 통일 가능**(소스 등가 확정).
+
+### 13-2c. ★★Phase 1 핵심 마일스톤 = 전수 diff0 완료 (2026-08-24)
+**핵심 BOM-전개 walker 4개 전부 사용중 완제품 2081 전수 diff0 PASS:**
+| walker | 소스 | 전수(2081) |
+|---|---|---|
+| 원가 cost_material | nx.bom_line(cs_calc_except) | 2081/2081 ✅ |
+| 내부원가 cost_material_nae | nx.bom_line(cs_calc_except·cg5) | 2081/2081 ✅ |
+| 생산 prod_soyo | nx.bom_line(qty_pr·except_flag) | 2081/2081 ✅ |
+| 중량 weight_explode | nx.bom_line(sagub_default) | 2081/2081 ✅ |
+→ **explode 공유 아키텍처 = 단일 nx.bom_line 소스로 4모드 전부 전수 등가 증명.** 배포 엔진 무변경(옆에 soyo_explode_shared.py). **★전수가 30표본이 놓친 생산 12건(qty_pr) 버그를 검출** = 사용자 전수요구·부분검증금지 원칙의 가치 실증. **남음**: 용접봉(flat primitive)·plan walker·통합 explode 1개 수렴·Phase2 캐시·Phase3 프로덕션 전환(각 전수 게이트·생산분은 계획작업 조율 후).
 
 ### 13-3. Phase 2 — explode 캐시 (성능)
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**
