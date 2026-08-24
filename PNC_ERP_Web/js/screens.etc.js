@@ -1007,7 +1007,7 @@ SCREEN.dailypurissue=(c)=>{
        <div style="flex:1;min-width:560px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
          <!-- 가운데: 매출 → 매입비율 → 사급율 (세로 스택, 엑셀형·흰배경·컬럼정렬) -->
          <div style="flex:1;min-width:280px">
-           <table class="tbl" style="${TS}"><colgroup><col style="width:66px"><col><col style="width:118px"><col style="width:50px"></colgroup><tbody>
+           <table class="tbl" style="${TS}"><colgroup><col style="width:60px"><col><col style="width:112px"><col style="width:64px"></colgroup><tbody>
              <tr><td rowspan="${SN1}" style="text-align:center;vertical-align:middle;font-weight:700;background:#eef2f8;color:#1c47a0;border-right:2px solid #555">매출</td><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td><td></td></tr>
              <tr><td>현매출 − 설치</td><td class="num">${wonI(F.sales.hyeon_seol)}</td><td></td></tr>
              ${F.sales.hyeon_etc?`<tr><td>현매출 − 기타 <span style="color:var(--muted);font-size:10px">(이지링크/미분류)</span></td><td class="num">${wonI(F.sales.hyeon_etc)}</td><td></td></tr>`:''}
