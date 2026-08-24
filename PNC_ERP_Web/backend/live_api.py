@@ -480,7 +480,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _yr = 2000 + int(ym[:2]); _mo = int(ym[2:4]); _ld = _cal.monthrange(_yr, _mo)[1]
     eom = ym + ("%02d" % _ld)
     _half = lambda y6: 'H1' if (str(y6)[4:6] <= '15') else 'H2'
-    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'naesu')}
+    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'sagub_part_real', 'sagub_part_exp', 'naesu')}
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
@@ -516,15 +516,16 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
       GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END, ISNULL(ymd,'')""")
     for _r in _ro5:
         _h = _half(_r['ymd']) if str(_r['ymd']) else 'H1'
-        _madd('sagub_raw' if _r['t'] == 'raw' else 'sagub_part', _h, _r['a'])
+        _madd('sagub_raw' if _r['t'] == 'raw' else 'sagub_part_real', _h, _r['a'])
     # 사급부품 예상 = forecast_sagub(다음날~월말)·half. (원재료 예상=0 — 추후 원소재식)
     if _nb <= eom:
         try:
             for _g in _soyo.sales_forecast_sagub(base=_nb, to=eom).get('rows', []):
                 _cst = float(_g.get('cost') or 0)
                 for _y, _q in (_g.get('ndays') or {}).items():
-                    _madd('sagub_part', _half(_y), float(_q or 0) * _cst)
+                    _madd('sagub_part_exp', _half(_y), float(_q or 0) * _cst)
         except Exception: pass
+    for _h9 in ('H1', 'H2'): MS['sagub_part'][_h9] = MS['sagub_part_real'][_h9] + MS['sagub_part_exp'][_h9]   # 사급부품 소계=실적+예상
     # 파생행 + LG수금 = (내수−사급예상)×10% + 유상제외(=총매출−사급예상)
     def _r3(d): h1 = round(d['H1']); h2 = round(d['H2']); return {"h1": h1, "h2": h2, "tot": h1 + h2}
     _hyeon_hab = {h: MS['hyeon_cut'][h] + MS['hyeon_seol'][h] + MS['hyeon_etc'][h] for h in ('H1', 'H2')}
@@ -534,7 +535,9 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _lgsu = {h: _chong[h] - _sagub_hab[h] + MS['naesu'][h] * 0.1 for h in ('H1', 'H2')}   # ★LG수금 = LG매출 − 사급금액 + 내수매출×10%
     maechul = {"hyeon_cut": _r3(MS['hyeon_cut']), "hyeon_seol": _r3(MS['hyeon_seol']), "hyeon_etc": _r3(MS['hyeon_etc']), "hyeon_hab": _r3(_hyeon_hab),
                "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']),
-               "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']), "sagub_hab": _r3(_sagub_hab),
+               "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']),
+               "sagub_part_real": _r3(MS['sagub_part_real']), "sagub_part_exp": _r3(MS['sagub_part_exp']),
+               "sagub_hab": _r3(_sagub_hab), "chong": _r3(_chong),
                "lg_sugum": _r3(_lgsu)}
 
     _res = {"date": d6, "ym": ym,

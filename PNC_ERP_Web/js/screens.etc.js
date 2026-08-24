@@ -984,8 +984,7 @@ SCREEN.dailypurissue=(c)=>{
     // 매출요약 행(상반기/하반기/합계) — 0은 '-'
     const mrow=(lbl,o,bold)=>{const d=o||{h1:0,h2:0,tot:0};const z=v=>v?wonI(v):'-';return `<tr${bold?' style="font-weight:700"':''}><td>${lbl}</td><td class="num">${z(d.h1)}</td><td class="num">${z(d.h2)}</td><td class="num">${z(d.tot)}</td></tr>`;};
     c.innerHTML=`
-     <div class="page-title">📋 일일 영업/매입 현황 <span style="font-size:12px;color:var(--muted);font-weight:400">확정입고·불출 마감기준 · 구분별 누적/당일/총 · 단위 원(공급가, VAT제외)</span></div>
-     <div class="page-sub">조회일 선택 → 마감월초~전일=<b>누적</b>, 조회일=<b>당일</b>, 누적+당일=<b>총</b>. 매입=확정입고(CUST_TYPE+사급원소재), 불출=자재불출, 실매입=매입−불출.</div>
+     <div class="page-title">일일 영업/매입 현황 <span style="font-size:12px;color:var(--muted);font-weight:400">확정입고·불출 마감기준 · 구분별 누적/당일/총 · 단위 원(공급가, VAT제외)</span></div>
      <div class="toolbar">
        <label class="tl">조회일</label><input type="date" class="inp" id="dp-d" value="${y2d(day)}" style="width:150px">
        <button class="btn" id="dp-go">🔍 조회</button>
@@ -1004,28 +1003,20 @@ SCREEN.dailypurissue=(c)=>{
          ${sec(F.net,F.net_tot,'실매입 (매입 − 불출)','#1c7c3a')}
        </tbody></table></div>
        </div>
-       ${F.sales?(()=>{const CG='<colgroup><col><col style="width:130px"><col style="width:54px"></colgroup>';const TS='width:100%;table-layout:fixed;background:#fff';return `
+       ${F.sales?(()=>{const CG='<colgroup><col><col style="width:130px"><col style="width:54px"></colgroup>';const TS='width:100%;table-layout:fixed;background:#fff';const SN1=3+(F.sales.hyeon_etc?1:0);return `
        <div style="flex:1;min-width:560px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
          <!-- 가운데: 매출 → 매입비율 → 사급율 (세로 스택, 엑셀형·흰배경·컬럼정렬) -->
          <div style="flex:1;min-width:280px">
-           <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">매출</div>
-           <table class="tbl" style="${TS}">${CG}<tbody>
-             <tr><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td><td></td></tr>
+           <table class="tbl" style="${TS}"><colgroup><col style="width:66px"><col><col style="width:118px"><col style="width:50px"></colgroup><tbody>
+             <tr><td rowspan="${SN1}" style="text-align:center;vertical-align:middle;font-weight:700;background:#eef2f8;color:#1c47a0;border-right:2px solid #555">매출</td><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td><td></td></tr>
              <tr><td>현매출 − 설치</td><td class="num">${wonI(F.sales.hyeon_seol)}</td><td></td></tr>
              ${F.sales.hyeon_etc?`<tr><td>현매출 − 기타 <span style="color:var(--muted);font-size:10px">(이지링크/미분류)</span></td><td class="num">${wonI(F.sales.hyeon_etc)}</td><td></td></tr>`:''}
              <tr style="font-weight:700"><td>LG매출 합계</td><td class="num">${wonI(F.sales.lg_sales)}</td><td></td></tr>
-           </tbody></table>
-           <div style="font-weight:700;color:#1c47a0;margin:10px 0 4px">매입비율</div>
-           <table class="tbl" style="${TS}">${CG}<tbody>
-             <tr><td>매입</td><td class="num">${wonI(F.ratio.pur)}</td><td class="num"><b>${F.ratio.pur_pct}%</b></td></tr>
+             <tr><td rowspan="4" style="text-align:center;vertical-align:middle;font-weight:700;background:#eef2f8;color:#1c47a0;border-top:2px solid #555;border-right:2px solid #555">매입비율</td><td style="border-top:2px solid #555">매입</td><td class="num" style="border-top:2px solid #555">${wonI(F.ratio.pur)}</td><td class="num" style="border-top:2px solid #555"><b>${F.ratio.pur_pct}%</b></td></tr>
              <tr><td>실매입(조정전)</td><td class="num">${wonI(F.ratio.net)}</td><td class="num"><b>${F.ratio.net_pct}%</b></td></tr>
              <tr><td>재고조정 ${F.jaego&&F.jaego.mat_pending?'<span style="color:#c0392b;font-size:10px">(자재 제외)</span>':''}</td><td class="num" style="color:${F.jaego&&F.jaego.total<0?'#c0392b':'#1c7c3a'}">${wonI(F.jaego?F.jaego.total:0)}</td><td></td></tr>
              <tr style="font-weight:700"><td>실재고(조정후)</td><td class="num">${wonI(F.ratio.silrae)}</td><td class="num"><b>${F.ratio.silrae_pct}%</b></td></tr>
-             <tr><td>LG매출액</td><td class="num">${wonI(F.ratio.lg_sales)}</td><td></td></tr>
-           </tbody></table>
-           <div style="font-weight:700;color:#8a5a1a;margin:10px 0 4px">사급율</div>
-           <table class="tbl" style="${TS}">${CG}<tbody>
-             <tr><td>원소재 매입</td><td class="num">${wonI(F.sagubyul.osp_raw)}</td><td class="num"><b>${F.sagubyul.raw_pct}%</b></td></tr>
+             <tr><td rowspan="5" style="text-align:center;vertical-align:middle;font-weight:700;background:#f7f1e8;color:#8a5a1a;border-top:2px solid #555;border-right:2px solid #555">사급율</td><td style="border-top:2px solid #555">원소재 매입</td><td class="num" style="border-top:2px solid #555">${wonI(F.sagubyul.osp_raw)}</td><td class="num" style="border-top:2px solid #555"><b>${F.sagubyul.raw_pct}%</b></td></tr>
              <tr><td>사급부품 매입</td><td class="num">${wonI(F.sagubyul.osp_part)}</td><td class="num"><b>${F.sagubyul.part_pct}%</b></td></tr>
              <tr><td>절삭매출</td><td class="num">${wonI(F.sagubyul.jeolsak_sales)}</td><td></td></tr>
              <tr><td>당사ERP</td><td class="num">${wonI(F.dae.dangsa)}</td><td></td></tr>
