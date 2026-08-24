@@ -241,3 +241,9 @@
 - 검증: **mat수 일치 654/654**(route mat구성=plan_part_mat). 구조 완전.
 - unit_qty=part_plan_qty/scalar(scalar=CEILING(plan_qty×use_qty×prod_rate/100), 대표WO). 대표WO 정확재현·타WO는 STEP7공식이 정확도 담당(§15-6 437/437 비례증명).
 - **단계2b(다음)**: soyo.py STEP7 route-aware — 활성route(route_line_test/실route) 있으면 seed×route_unit 전개(STEP7 자기 CEILING seed 재사용), 없으면 v_pr_bom fallback. dev·copy plan테이블에 재생성·전661 diff0 게이트. ★라이브 무접촉.
+
+## §15-8. 단계2b — standalone recompose 한계·실제 STEP7 SQL 필요(2026-08-24)
+- route-aware recompose를 standalone으로 시도: plan_item_dtl seed=70.3%·plan_part_dtl seed=55.4%. 원인=**STEP7 seed는 STEP5→6→7 다단계(회수율 prod_rate·공정전이·NOT EXISTS dedup·plan_part_dtl∪plan_item_dtl 혼합)**라 standalone 재구현 부정확(AJR30038201: 원계획200 vs 실제184 회수율차).
+- ★**확정**: route 구조=100% 검증(§15-6 437/437)이나 **정확 통합=실제 soyo.py STEP7 SQL을 route-aware로 수정해야만**(seed SQL 그대로 재사용→회수율/공정 정확). standalone 재구현 포기.
+- **실제 빌드(다음)**: soyo.py STEP7 CTE 수정 — base멤버(seed=plan_part_dtl∪plan_item_dtl) 그대로 유지, **재귀멤버(v_pr_bom 전개)를 route-active assy면 route_line 조인으로 대체**(flat 1레벨). fallback=v_pr_bom. copy 테이블 실행·전661 diff0. dev·라이브 무접촉. = 진짜 코드작업(SQL 수술).
+- 현재까지: 아키텍처확정·구조100%·materializer검증 완료. 남은건 STEP7 SQL 통합 1건.
