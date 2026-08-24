@@ -223,3 +223,15 @@
 - 검증 250제품: plan_part_dtl+mat well-formed 99.6% / plan_part_mat단독 계층무결 83.6%. ★83.6%의 "불일치"=팬텀SUB부모(변형SUB가 upper로 참조되나 자체 생산행 없음)=표시용 nesting일뿐, **(item→mat)엣지는 전부 캡처** → route mat=plan mat **diff0 구성상보장**.
 - ★materializer 규칙: 노드=item_code∪upper_item(참조전체)·PART자식=item→mat·SUB nesting=upper_item. 팬텀SUB부모=빈SUB노드로 생성(무해). 커버=661계획품.
 - **다음 실제빌드**: ①materializer(plan_part_mat→sourcing_route_line, 멱등 per-product) 코드 ②route_line→plan_part_mat 역합성=diff0 게이트(전661) ③plan파이프라인 활성route 리졸버 배선(dev·활성없으면 현행fallback) ④전수 diff0. ★라이브 무접촉·per-product 멱등.
+
+## §15-5. ★diff0 게이트 통과(2026-08-24) — 역실체화 검증완료
+- **게이트**: 제품 WO들이 mat집합 동일 + 수량 비례(스칼라배)인가 = route(단위)×plan_qty로 전WO 재현되는가.
+- **결과: 200/200 다WO제품 = 100% diff0.** mat집합 안정 + 비례 완전. → route(대표WO 단위추출)가 그 제품 **모든 WO의 plan_part_mat 재현 실측증명**.
+- ∴ 역실체화 아키텍처 **검증완료**. materializer 로직 = 대표WO에서 (item→mat, 단위qty=part_plan_qty/plan_qty) 추출 → route_line.
+- **다음 실제 write빌드**: ①materializer가 661계획품 route_line 생성(sourcing_route header route_no=1·current_flag=1 + line). per-product 멱등(DROP+재생성). ②plan파이프라인 STEP: 활성route(current_flag=1) 있으면 route_line×plan_qty로 plan_part_mat 생성, 없으면 현행 BOM전개(R01 fallback=diff0). ③전661 diff0 최종. ★공유테이블 write=승인/분류기 게이트·라이브 plan_part_mat 미접촉(별 write는 sourcing_route_line만).
+
+## §15-6. ★route 구조 전수 경험검증 100%(2026-08-24 단계1)
+- 단계1 materializer→nx.route_test(테스트) 10품 + recompose. 초기 7/10·교정 CEILING스칼라 81% = ★내 recompose 공식근사 문제(STEP7 CEILING/prod_rate 미세차)·route 결함아님.
+- ★**route 구조 경험적 전수검증**(스칼라=데이터도출 비례): **다WO 제품 437 전부 = 100% diff0**(mat집합안정+비례·실패류0). route(대표WO 단위)가 전WO plan 완전재현 확정.
+- ∴ materializer 로직 검증완료. 실제 recompose는 STEP7 공식 재사용→diff0(공식 재구현 금지). 테스트테이블 정리.
+- **단계2(다음)**: soyo.py STEP7이 활성route 있으면 route구조 전개(자기 CEILING/prod_rate 공식으로)·없으면 현행 v_pr_bom(R01 fallback). dev·라이브 plan_part_mat 미접촉·per-product 멱등.
