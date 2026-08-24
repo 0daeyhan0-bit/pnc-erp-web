@@ -254,3 +254,44 @@
 - ★★**정확 해법 = route를 트리(multi-level)로 실체화** + route-aware CTE가 **STEP7처럼 레벨별 cum_use_qty 재귀누적** → seed는 base멤버(plan_part_dtl∪plan_item_dtl)가 정확처리·route는 per-parent qty만 제공. flat-scalar 문제 회피. (기존 sourcing_route_line이 트리=node_kind SUB/PART인 이유).
 - **실제빌드(다음·정밀)**: ①route 트리 실체화(plan_part_mat의 upper_item→item→mat·bom_level, qty=part_plan_qty/부모part_plan_qty=per-parent unit) ②soyo.py STEP7 재귀멤버를 route-active면 route트리 조인(v_pr_bom 대신)·cum_use_qty 누적 동일 ③copy테이블 전661 diff0. dev·라이브무접촉.
 - 현재: 구조100%·flat recompose 94%·트리route가 마지막 정밀도. 아키텍처·경로 완전확정.
+
+## §15-10. ★★★SQL수술 검증완료 100%(2026-08-24) — route-aware STEP7 정확
+- ★재발상: route=**BOM엣지(parent→child→USE_QTY_PR)**로 저장(flat/scalar 방식폐기). R01 route_edges = **v_pr_bom 활성엣지(except_flag<>1) 복사**. STEP7 CTE 재귀멤버 v_pr_bom→route_edges 스왑(except_flag필터 제거=route에 baked-in).
+- 검증: route CTE vs 라이브 plan(공통WO) = **99.36% 행일치**(잔여=stale 라이브 스냅샷·내CTE 4281WO vs 라이브3805). ★★**route CTE vs baseline CTE(동일드라이버 50WO) = 1789/1789 = 100.000%**. = route_edges스왑 STEP7 ≡ 원본 STEP7 비트동일 증명.
+- ∴ **R01 route=v_pr_bom활성 → 생산계획 diff0 구성상보장**(실측100%). Rnn=route_edges 편집→다른계획. **"except_flag 없이 R01" 달성**(flag가 route에 baked-in·CTE는 route만 전개). 성능=route_edges(인덱스테이블)가 v_pr_bom(뷰)보다 빠름.
+- **남은 실제배포(dev)**: ①route_edges 테이블화(route_id별·R01=v_pr_bom활성 materialize) ②soyo.py STEP7 재귀멤버를 활성route면 route_edges(route_id) 조인·없으면 v_pr_bom fallback ③Rnn 편집UI 연결. ★핵심 SQL수술 검증완료·라이브 무접촉.
+
+---
+# ★★★ §16. 마일스톤 통합요약 (2026-08-24) — R01→생산계획 편성 SQL수술 검증완료
+> 다음 세션 이어가기 앵커. §15-1~10 통합.
+
+## 결론 (한 줄)
+**생산계획 소요전개를 except_flag 대신 route(조달경로)로 편성하는 SQL수술을 검증완료 — route CTE ≡ 원본 STEP7 CTE 100.000%(1789/1789 비트동일). R01=v_pr_bom활성이라 diff0 구성상보장, "except_flag 없이 R01" 달성.**
+
+## 여정 (실패도 자산)
+1. **2.7% premise 규명**: plan_part_mat vs 레거시 = 스냅샷착시(같은WO비교 −0.32%). 현행 파이프라인 정상·make_type 불필요(파괴적 0.287). §14.
+2. **BOM 정지규칙 4종 전부 실패**: cost_stop 0%·except_flag-full 34%·naewon 30%·라우팅 45%. plan grain=STEP6 공정전이서 창발(제작단위정지+조립그룹해체)·단순규칙 재현불가 확정. §15-2.
+3. **역실체화 아키텍처**: plan grain 제품레벨 안정100%(437/437). route를 plan구조/BOM엣지로 굳히면 diff0 구성상보장. §15-3~6.
+4. **★핵심 재발상(정답)**: route=**BOM엣지 테이블(parent→child→USE_QTY_PR)**. R01=v_pr_bom활성(except_flag<>1)복사. STEP7 CTE의 v_pr_bom→route_edges 스왑(except_flag필터 제거=route에 baked-in). §15-10.
+
+## 검증 (실측)
+- route CTE vs baseline CTE(동일드라이버 50WO) = **1789/1789 = 100.000%** (비트동일).
+- route CTE vs 라이브 plan(공통WO) = 99.36% 행일치(잔여=stale 라이브 스냅샷, 내CTE 4281WO vs 라이브3805).
+- route 구조 경험검증(전 다WO제품 437) = 100% 비례재현.
+
+## 아키텍처 (확정)
+- **route_edges(route_id, parent_item, child_item, qty)** = BOM엣지. R01=v_pr_bom활성 materialize·Rnn=편집.
+- **STEP7 CTE**: 재귀멤버 `JOIN v_pr_bom` → `JOIN route_edges(활성 route_id)`. except_flag 필터 제거(route가 활성엣지만 보유). 활성route 없으면 v_pr_bom fallback=R01 diff0.
+- seed(base멤버 plan_part_dtl∪plan_item_dtl)·집계·회수율·공정=**STEP7 원본 그대로**(재사용). route는 전개엣지만 교체.
+- 성능: route_edges(인덱스 테이블) > v_pr_bom(뷰). baseline은 뷰라 무거워 전량 타임아웃.
+
+## 남은 실제배포 (dev·라이브 무접촉)
+1. route_edges 테이블화: route_id별. R01 = 각 assy의 v_pr_bom 활성엣지 materialize(멱등 재빌드).
+2. soyo.py STEP7 재귀멤버 route 리졸버: 활성 route(current_flag=1) 있으면 route_edges(그 route_id) 조인·없으면 v_pr_bom fallback.
+3. copy 테이블 전661 diff0 최종게이트(공통WO 기준=스냅샷 제거).
+4. Rnn 편집 UI(sourcing_route_line) ↔ route_edges 연결.
+- ★매일 rebuild 자기갱신(compose_mat)·protect-plan(옆에짓고 증명후·라이브 plan_part_mat 미접촉).
+
+## 원가·협력사계획 (동일 메커니즘)
+- 협력사계획=plan_part_mat 재사용→soyo.py 하나로 자동반영(§아키텍처).
+- 원가 walker(cost_material)=별도 1곳, 동일 route_edges 소비하도록 추후.
