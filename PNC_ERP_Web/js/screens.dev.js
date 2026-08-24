@@ -2621,8 +2621,8 @@ SCREEN.subvariant=(c)=>{
     const cutOfPart=code=>{const arr=partCut[code];return arr?arr.reduce((a,x)=>a+(+x.wq||0),0):0;};
     const cutOfNode=np2=>np2.reduce((a,p)=>a+cutOfPart(p.child_item),0);
     // ★구분(제작/매입/사급) selector — 이 화면에서 부품/SUB별 결정(업체는 조달프로파일). 색: 제작초록·매입파랑·사급주황.
-    const _GBC={'제작':'#1c7c3a','매입':'#1c47a0','사급':'#b8860b'};
-    const gubunSel=l=>`<select class="sp-gb" data-lid="${l.line_id}" title="구분: 제작(내부)/매입(구매)/사급(유상사급)" style="font-size:10px;padding:0 2px;border:1px solid ${_GBC[l.gubun]||'#c9d3e0'};border-radius:4px;color:${_GBC[l.gubun]||'#33507d'};font-weight:600">${['제작','매입','사급'].map(g=>`<option value="${g}" ${(l.gubun||'')===g?'selected':''}>${g}</option>`).join('')}</select>`;
+    const _GBC={'제작':'#1c7c3a','외주':'#c2410c','구매':'#1c47a0','사급':'#b8860b','외주직납':'#0891b2'};
+    const gubunSel=l=>`<select class="sp-gb" data-lid="${l.line_id}" title="구분(=레거시 생산구분): 제작(사내)/외주/구매/사급(LG사급)/외주직납" style="font-size:10px;padding:0 2px;border:1px solid ${_GBC[l.gubun]||'#c9d3e0'};border-radius:4px;color:${_GBC[l.gubun]||'#33507d'};font-weight:600">${['제작','외주','구매','사급','외주직납'].map(g=>`<option value="${g}" ${(l.gubun||'')===g?'selected':''}>${g}</option>`).join('')}</select>`;
     let cutSum=0;Object.values(partCut).forEach(arr=>arr.forEach(x=>cutSum+=+x.wq||0));cutSum=Math.round(cutSum*100)/100;
     let procSum=0;(rd.procs||[]).forEach(p=>procSum+=+p.work_qty||0);procSum=Math.round(procSum*100)/100;
     const total=Math.round((cutSum+procSum)*100)/100, base=rd.base_gongsu||0, ok=Math.abs(total-base)<0.5;
@@ -3112,7 +3112,7 @@ SCREEN.subvariant=(c)=>{
     const cr=await fetch(`${API}/api/sourcing/route/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:st.routeTarget,route_name:f.name,gubun:'자체',vendor_code:'',apply_from:(f.apply_from||''),current_flag:0,user:'웹사용자'})});
     const cj=await cr.json();if(!cj.ok){alert('생성 실패:\n'+(cj.errors?cj.errors.join('\n'):JSON.stringify(cj)));return;}
     const rid=cj.route_id;let n=0;
-    for(const x of rows){const g=(x.sagub_flag?'사급':(x.make_type==='1'?'제작':'매입'));
+    for(const x of rows){const g=({'1':'제작','2':'외주','3':'구매','4':'사급','5':'외주직납'})[String(x.make_type||'').trim()]||'구매';   /* ★생산구분 5-way(SAGUB 미사용) */
       const lr=await fetch(`${API}/api/sourcing/line/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid,child_item:x.item_code,child_name:x.item_name||x.item_code,qty:(+x.unit_qty||1),gubun:g,vendor_code:x.in_cust||'',is_rawmat:x.metal_gubun?1:0,diam:(+x.diam||0),thick:(+x.thick||0),len_val:(+x.length||0),material:x.metal_gubun||'',user:'웹사용자'})});
       if((await lr.json()).ok)n++;}
     st.newForm=null;st.msg=`🔀 LG BOM 시딩 후보 생성 (라인 ${n}) — 미커밋. [등록]해야 확정.`;await loadRoutes();openDetail(rid,'edit',true);};
