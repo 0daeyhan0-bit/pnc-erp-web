@@ -152,7 +152,15 @@ nx.bom_line 재귀(cycle 방지 `seen`) + 용접봉 proc_weld 주입. **정지 �
 - **★생산 walker 증명 + 소스등가 발견 (2026-08-24)**: `prod_soyo_ex`(explode_pr = nx.bom_line 직읽기·except_flag 태깅·RAC포함) vs 현행 `prod_soyo`(v_pr_bom·USE_QTY_PR) = **30/30 diff0 PASS**. → **★nx.bom_line이 v_pr_bom을 재현(소스 등가) = 단일소스 통일 가능**: 원가(cs_calc_except)·생산(except_flag) **둘 다 nx.bom_line 하나**로 서빙됨(explode 하나에 두 flag 태깅). 최우선(생산계획 diff0)에 부합(생산 소요=생산축 소스 일치).
 - **★중량 walker 증명 (2026-08-24)**: `weight_explode_ex`(explode_wt = _cs_lines_wt 공유 kids·sagub·RAC포함·COOP_SET/COOPB 폴백·geom leaf) vs 현행 `weight_explode` = **30/30 diff0 PASS**. ★내 "CS 소스" 추측 오류 — **weight_explode도 이미 nx.bom_line(_cs_lines_wt) 기반**(sagub_default). 
 - **★★핵심 BOM-전개 walker 전부 explode-공유 diff0 (2026-08-24)**: 원가·내부원가·생산·중량 = **전부 nx.bom_line 소스, 30/30 diff0.** → **단일 explode(nx.bom_line, cs_calc_except+except_flag+sagub+lme 태깅) 하나로 4모드 전부 서빙 가능** = 통일 아키텍처 핵심 증명. 배포 엔진 무변경(옆에 `soyo_explode_shared.py`).
-- **남은**: 용접봉(weld_soyo=CS_T_ITEM_WELD×1.5 flat·BOM전개 아님=별 primitive)·plan(plan_explode/gagong=계획레벨·복잡). 이후 최종 통합 explode() 1개로 수렴 + Phase 2 캐시 + Phase 3 전환(전수 게이트).
+- **남음**: 용접봉(weld_soyo=CS_T_ITEM_WELD×1.5 flat·BOM전개 아님=별 primitive)·plan(plan_explode/gagong=계획레벨·복잡). 이후 최종 통합 explode() 1개로 수렴 + Phase 2 캐시 + Phase 3 전환(전수 게이트).
+
+### 13-2b. ★전수 diff0 검증 (2026-08-24, 사용중 완제품 2081 전수) — 사용자 요구
+`p1_full.py`(warm_all·486초). **결과**:
+- **원가 cost_material 2081/2081·내부원가 2081/2081·중량 weight_explode 2081/2081 = 전수 diff0 PASS.** → 이 3 모드 explode-공유 아키텍처 **전수 확증**.
+- **생산 prod_soyo = 2069/2081 (★12 FAIL).** = `prod_soyo_ex`(nx.bom_line·except_flag) ≠ 현행 `prod_soyo`(v_pr_bom) 12건. **∴ "nx.bom_line=v_pr_bom 소스 등가"는 12건에서 성립 안 함**(30표본으론 놓침 → 전수가 잡음, 성급한 일반화 위험 재확인·사용자 전수요구 옳음).
+- **12 FAIL 목록(leaf qty 차이)**: AET73831439/AET73831480(FAD31051901 2vs3)·AJR30012012(3A02080B 1vs2)·AJR30033101(MEG66660106 6vs4)·AJR30123001(MEV39836107 2vs1)·AJR30133605(5210A00039G 2vs1)·AJR30133606(EBF40271407 1vs2)·AJR30157301(3H01582A 2vs5) 등.
+- **★생산계획(최우선·LG라인)과 직결**: 12건에서 nx.bom_line ↔ v_pr_bom(생산소스) 갈림.
+- **★★근본원인 규명·수정 (2026-08-24)**: 두 소스 대조(3A02080B·EBF40271407) — **`nx.bom_line.qty` == `v_pr_bom.USE_QTY`(2)이나 `v_pr_bom.USE_QTY_PR`=1로 다름.** = **생산 소요는 `USE_QTY_PR`(생산수량)을 써야 하는데 내 `prod_soyo_ex`가 `qty`(=USE_QTY)를 읽음.** nx.bom_line에 **`qty_pr` 컬럼 존재**(=USE_QTY_PR) → **소스는 등가, 컬럼만 오류.** 12 FAIL = 정확히 `qty_pr≠qty` 품목. **수정**: `_lines_pr`가 `ISNULL(qty_pr, qty)` 읽게(soyo_explode_shared.py). **검증: 기존 FAIL 8건 → 8/8 PASS.** 전수 재확인 진행중. → **생산도 nx.bom_line(qty_pr·except_flag)으로 통일 가능**(소스 등가 확정, 컬럼 교정 후).
 
 ### 13-3. Phase 2 — explode 캐시 (성능)
 - explode 결과(구조·단가무관) **item별 캐시** → per-item 호출 in-memory 고속(weight_calc 배치·soyo per-item 성능 우려 해소). **캐시==비캐시 diff0.**

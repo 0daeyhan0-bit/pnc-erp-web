@@ -101,7 +101,8 @@ def _lines_pr(eng, item):
     if not hasattr(eng, '_lines_pr_cache'):
         eng._lines_pr_cache = {}
     if bid not in eng._lines_pr_cache:
-        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), qty, ISNULL(except_flag,0)
+        # ★생산 소요 qty = qty_pr(=v_pr_bom.USE_QTY_PR) 우선, 없으면 qty(=USE_QTY). (2026-08-24 전수FAIL 12건 규명)
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), ISNULL(qty_pr, qty), ISNULL(except_flag,0)
             FROM nx.bom_line WHERE bom_id=? ORDER BY seq""", bid)
         eng._lines_pr_cache[bid] = [(str(r[0]).strip(), float(r[1] or 0), '1' if r[2] else '0')
                                     for r in eng.cur.fetchall()]
