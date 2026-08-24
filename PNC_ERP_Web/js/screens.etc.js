@@ -1033,8 +1033,11 @@ SCREEN.dailypurissue=(c)=>{
              ${mrow('현매출(합계)',F.maechul.hyeon_hab,true)}
              ${mrow('추가매출(절삭)',F.maechul.chuga_cut)}
              ${mrow('추가매출(설치)',F.maechul.chuga_seol)}
+             ${mrow('총 예상매출',F.maechul.chong,true)}
              ${mrow('사급-원재료',F.maechul.sagub_raw)}
-             ${mrow('사급-부품',F.maechul.sagub_part)}
+             ${mrow('사급-부품(실적)',F.maechul.sagub_part_real)}
+             ${mrow('사급-부품(예상)',F.maechul.sagub_part_exp)}
+             ${mrow('사급-부품(소계)',F.maechul.sagub_part,true)}
              ${mrow('사급-합계',F.maechul.sagub_hab,true)}
              ${mrow('LG 수금금액',F.maechul.lg_sugum,true)}
            </tbody></table></div>`:''}
