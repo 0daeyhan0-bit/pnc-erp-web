@@ -217,3 +217,9 @@
 - ★**plan grain 제품레벨 안정성 = 100%**(다WO 제품 200/200이 work_order 무관 동일 mat집합). = plan grain은 제품별로 결정적·STEP6가 매번 같은 구조 생성.
 - ★★**확정 아키텍처 = 역실체화**: 제품별 plan구조(plan_part_dtl/mat의 item→mat·bom_level·proc)를 **route_line으로 굳힘** → R01=plan **재현 구성상 보장**(동일구조). Rnn=이 route 편집→다른 plan. plan_part_mat 커버=661 현재계획품(직접 역실체화 가능). 미계획품=STEP6 grain로직을 그BOM에 적용(=기존 STEP6 실행).
 - 구현: ①역실체화 materializer(plan_part_dtl→sourcing_route_line, node_kind/parent_line/proc 포함) ②plan 파이프라인이 활성route 있으면 그 구조로 STEP6 전개(없으면 현행 BOM전개=R01 fallback=현행 그대로 diff0) ③전수 diff0 게이트 ④dev. ★현행plan 무변경·라이브무접촉·매일rebuild 자기갱신.
+
+## §15-4. 역실체화 소스·well-formed 검증(2026-08-24)
+- **소스=plan_part_mat 단독**(assy·upper_item·item_code=생산자·mat_code·bom_level 전부보유). plan_part_dtl 불필요(일부 WO 비어 불일치=AJJ75358428).
+- 검증 250제품: plan_part_dtl+mat well-formed 99.6% / plan_part_mat단독 계층무결 83.6%. ★83.6%의 "불일치"=팬텀SUB부모(변형SUB가 upper로 참조되나 자체 생산행 없음)=표시용 nesting일뿐, **(item→mat)엣지는 전부 캡처** → route mat=plan mat **diff0 구성상보장**.
+- ★materializer 규칙: 노드=item_code∪upper_item(참조전체)·PART자식=item→mat·SUB nesting=upper_item. 팬텀SUB부모=빈SUB노드로 생성(무해). 커버=661계획품.
+- **다음 실제빌드**: ①materializer(plan_part_mat→sourcing_route_line, 멱등 per-product) 코드 ②route_line→plan_part_mat 역합성=diff0 게이트(전661) ③plan파이프라인 활성route 리졸버 배선(dev·활성없으면 현행fallback) ④전수 diff0. ★라이브 무접촉·per-product 멱등.
