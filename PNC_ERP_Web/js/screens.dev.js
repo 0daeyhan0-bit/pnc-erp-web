@@ -2157,6 +2157,7 @@ SCREEN.unifybom=(c,ro)=>{
   // 편집모델: 절삭부품(가공품)=행 [✎]→가공공정 팝업 · 제품(맨위)=[✎ 조립공정]→용접(관경별)·포장·체결 팝업 · 구매/부자재/사급=재료만(편집X)
   const naeFlatMat=(a,rows,prc)=>{
     const RW=(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')));
+    const SC=!RO;   // 원가(단위단가·재료비·비율)·등록수정 컬럼 표시 — 품목 BOM 조회(RO)에선 숨김
     const fm=flatMat(rows); const jae=(+a.jae||0);
     const prodBtn=RW?`<button class="nae-edit-btn" data-node="${esc(item)}" title="제품 조립공정(용접 관경별·포장·체결)" style="padding:2px 9px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:4px;cursor:pointer">✎ 조립공정(용접·포장·체결)</button>`:'';
     const matRow=(r)=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');const sel=naeSel===r.code;
@@ -2169,34 +2170,34 @@ SCREEN.unifybom=(c,ro)=>{
         <td class="center" style="color:#5a6b82">${esc(r.metal||'')}</td>
         <td class="center">${r.sag?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
         <td class="bcap" title="${esc(r.cust||'')}" style="max-width:140px;text-align:left;color:#5a6b82">${esc(r.cust||'')}</td>
-        <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
+        <td class="num">${q4(r.qty)}</td>${SC?`<td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
         <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td>
-        <td class="center">${canEd?`<button class="nae-edit-btn" data-node="${esc(r.code)}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button>`:''}</td></tr>`;};
+        <td class="center">${canEd?`<button class="nae-edit-btn" data-node="${esc(r.code)}" style="padding:1px 6px;font-size:11px;background:#8e44ad;color:#fff;border:none;border-radius:3px;cursor:pointer;line-height:1.3">✎</button>`:''}</td>`:''}</tr>`;};
     const weldRow=(r)=>`<tr class="nae-mrow" style="background:#fdf6f0">
         <td style="white-space:nowrap;text-align:left"><span style="color:#7a8aa0">1</span> <b>${esc(r.code)}</b> <span class="nae-tg" style="color:#a8442a;border-color:#e6c0b3">용접봉(제품조립)</span></td>
         <td class="bcap" title="${esc(r.name)}" style="max-width:200px;text-align:left">${esc(r.name)}</td>
         <td style="color:#5a6b82">${r.diam?('Ø'+r.diam):''}</td><td class="center" style="color:#5a6b82">${esc(r.metal||'')}</td>
         <td class="center"></td><td></td>
-        <td class="num">${q4(r.qty)}</td><td class="num">${r.won?M2(r.won):''}</td>
+        <td class="num">${q4(r.qty)}</td>${SC?`<td class="num">${r.won?M2(r.won):''}</td>
         <td class="num" style="color:#1c6b3a"><b>${M(r.mat)}</b></td>
-        <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td><td></td></tr>`;
+        <td class="num" style="color:#7a8aa0">${jae?((+r.mat||0)/jae*100).toFixed(1):'0.0'}%</td><td></td>`:''}</tr>`;
     // ★레벨0 제품 행 — 조립공정(용접 관경별·포장·체결) 입력 지점. [✎]=조립공정 팝업(node===item→isAssy)
     const prodRow=`<tr class="nae-trow nae-mrow" data-node="${esc(item)}" style="background:#eef3fb;font-weight:700;cursor:pointer">
         <td style="white-space:nowrap;text-align:left"><span style="color:#1c47a0">0</span> <b style="color:#1c47a0">${esc(item)}</b> <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span></td>
         <td class="bcap" title="${esc(name)}" style="max-width:200px;text-align:left">${esc(name)}</td>
-        <td></td><td></td><td></td><td></td><td class="num">1</td><td></td>
+        <td></td><td></td><td></td><td></td><td class="num">1</td>${SC?`<td></td>
         <td class="num" style="color:#1c6b3a"><b>${M(a.jae)}</b></td><td class="num" style="color:#7a8aa0">100%</td>
-        <td class="center">${prodBtn}</td></tr>`;
+        <td class="center">${prodBtn}</td>`:''}</tr>`;
     const weldBody=showWeld?fm.weldArr.map(weldRow).join(''):'';
     const body=(prodRow+fm.normal.map(matRow).join('')+weldBody);
     const weldBtn=`<button class="btn ghost" id="nae-weld" style="padding:2px 9px;font-size:11px">${showWeld?'🔧 용접봉 숨기기':`🔧 용접봉 표시${fm.weldArr.length?' ('+fm.weldArr.length+')':''}`}</button>`;
     return `<div style="display:flex;flex-direction:column;min-height:0;height:100%">
       <div class="summary-bar" style="flex:0 0 auto"><div class="s-item" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>${esc(item)}</b> ${esc(name)} <span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span> · <span style="color:#8a94a6">평면 재료표 · [✎]=공정편집</span></div><div style="flex:1"></div>${weldBtn}</div>
       <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto"><table class="tbl bm-tbl nae-tree">
-        <thead><tr><th style="text-align:left">품번(레벨)</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="center">사급</th><th style="text-align:left">매입처</th><th class="num">소요량</th><th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">등록/수정</th></tr></thead>
+        <thead><tr><th style="text-align:left">품번(레벨)</th><th style="text-align:left">품명</th><th>규격</th><th>소재</th><th class="center">사급</th><th style="text-align:left">매입처</th><th class="num">소요량</th>${SC?`<th class="num">단위단가</th><th class="num">재료비</th><th class="num">비율</th><th class="center">등록/수정</th>`:''}</tr></thead>
         <tbody>${body}</tbody>
-        <tfoot><tr class="nae-foot"><td colspan="8" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td><td></td></tr></tfoot></table></div></div>`;};
+        <tfoot>${SC?`<tr class="nae-foot"><td colspan="8" style="text-align:right">재료비 합계</td><td class="num" style="color:#1c6b3a">${M(a.jae)}</td><td class="num">100%</td><td></td></tr>`:''}</tfoot></table></div></div>`;};
   const procTable=(procList)=>{const sub=procList.reduce((s,p)=>s+(+p.amt||0),0);
     return `<div class="grid-wrap" style="max-height:${naeSel?'16vh':'34vh'};overflow:auto"><table class="tbl bm-tbl">
        <thead><tr><th style="text-align:left">공정</th><th class="num">작업량</th><th class="num">내부UPH</th><th class="num">임율</th><th>계산구분</th><th class="num">가공비</th></tr></thead>
@@ -2562,8 +2563,8 @@ SCREEN.unifybom=(c,ro)=>{
        ${(!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom')))?`<button class="btn" id="bm-new" style="background:#1c7c3a;color:#fff">＋ 신규 BOM 등록</button>`:''}
        ${item&&navStack.length?`<button class="btn ghost" id="bm-back" title="상위 레벨로 돌아가기">◀ 상위로 (${esc(navStack[navStack.length-1])})</button>`:''}
        ${item?(editMode
-         ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn" id="bm-xls">⬇ 엑셀</button>`
-         :`<button class="btn ghost" id="bm-tree">${viewTree?'단일레벨':'다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'용접봉 숨기기':'용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn" id="bm-xls">⬇ 엑셀</button>`
+         ?`<button class="btn" id="bm-add">＋ 행추가</button><button class="btn ghost" id="bm-weld">${showWeld?'🔧 용접봉 숨기기':'🔧 용접봉 표시'}</button><button class="btn" id="bm-save">💾 저장</button><button class="btn ghost" id="bm-cancel">✖ 취소</button><button class="btn xls" id="bm-xls">⬇ 엑셀</button>`
+         :`<button class="btn ghost" id="bm-tree">${viewTree?'단일레벨':'다단계 전개'}</button><button class="btn ghost" id="bm-wu" title="이 품번을 하위구성으로 쓰는 상위 품번(역전개·where-used)">역전개</button><button class="btn ghost" id="bm-weld">${showWeld?'용접봉 숨기기':'용접봉 표시'}</button>${PERM.canEdit('unifybom')?`${!RO?`<button class="btn" id="bm-edit">✎ 수정</button><button class="btn ghost" id="bm-copy" title="이 BOM을 다른 품번으로 복사">📋 복사</button><button class="btn ghost" id="bm-del" style="color:#c0392b;border-color:#e2b4b4" title="이 품번 삭제 — 구성(자식관계) 제거 후 품번을 마스터에서 삭제. 자식으로 사용중이면 불가">🗑 품번삭제</button>`:''}`:(RO?'':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}<button class="btn xls" id="bm-xls">⬇ 엑셀</button>`
        ):''}
        ${item&&!RO&&(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<label class="tl" style="margin-left:6px" title="경영 대시보드·영업예상 절삭/설치 분류(품목마스터 nx.item.cut_gubun). 즉시 저장.">구분</label><select class="sel" id="bm-cut" style="width:96px">${['','절삭','설치','분지관','이지링크'].map(g=>`<option value="${g}" ${itemCut===g?'selected':''}>${g||'미분류'}</option>`).join('')}</select>`:''}
        <div class="spacer"></div>${item?`<span class="rowcount"><b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}</span>`:''}
