@@ -247,3 +247,10 @@
 - ★**확정**: route 구조=100% 검증(§15-6 437/437)이나 **정확 통합=실제 soyo.py STEP7 SQL을 route-aware로 수정해야만**(seed SQL 그대로 재사용→회수율/공정 정확). standalone 재구현 포기.
 - **실제 빌드(다음)**: soyo.py STEP7 CTE 수정 — base멤버(seed=plan_part_dtl∪plan_item_dtl) 그대로 유지, **재귀멤버(v_pr_bom 전개)를 route-active assy면 route_line 조인으로 대체**(flat 1레벨). fallback=v_pr_bom. copy 테이블 실행·전661 diff0. dev·라이브 무접촉. = 진짜 코드작업(SQL 수술).
 - 현재까지: 아키텍처확정·구조100%·materializer검증 완료. 남은건 STEP7 SQL 통합 1건.
+
+## §15-9. scalar 일관성·트리route 필요 규명(2026-08-24)
+- 일관 scalar(plan_part_dtl 생산수량 materialize·recompose 동일) = **94%(490/521)** · 140제품 scalar없음(assy plan_part_dtl L0 부재) · 31 불일치.
+- ★근본: **flat route + 단일 scalar 방식의 한계**. seed 추출을 standalone으로 완벽히 못함(다레벨 생산·서브어셈블리).
+- ★★**정확 해법 = route를 트리(multi-level)로 실체화** + route-aware CTE가 **STEP7처럼 레벨별 cum_use_qty 재귀누적** → seed는 base멤버(plan_part_dtl∪plan_item_dtl)가 정확처리·route는 per-parent qty만 제공. flat-scalar 문제 회피. (기존 sourcing_route_line이 트리=node_kind SUB/PART인 이유).
+- **실제빌드(다음·정밀)**: ①route 트리 실체화(plan_part_mat의 upper_item→item→mat·bom_level, qty=part_plan_qty/부모part_plan_qty=per-parent unit) ②soyo.py STEP7 재귀멤버를 route-active면 route트리 조인(v_pr_bom 대신)·cum_use_qty 누적 동일 ③copy테이블 전661 diff0. dev·라이브무접촉.
+- 현재: 구조100%·flat recompose 94%·트리route가 마지막 정밀도. 아키텍처·경로 완전확정.
