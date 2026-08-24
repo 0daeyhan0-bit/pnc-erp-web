@@ -348,3 +348,7 @@
 - route_edges materializer(R01복사+제작↔외주 스왑 UI). 현재는 수동/스크립트로 route_edges 채움.
 - supply_gubun 라벨통일(구 외주가공/유상사급 ↔ make_type 5way).
 - STEP6(공정) route-aware(현재 STEP7 자재만·공정은 R01). 필요시.
+
+## §18. materializer 착수(2026-08-25) — R01 실체화 end-to-end diff0
+- ★내 오류교정(정독으로 발견): 1차 materializer 검증에서 route-active를 **stale 라이브 plan_part_mat(29mat)**과 비교해 어긋남(106vs29). §15-10 기록된 올바른법=**route-active vs 같은드라이버 baseline(fallback)**·§16-1 R01 baseline=111mat. 교훈=검증기준은 기록된 방법대로(같은드라이버 baseline, stale라이브 아님).
+- materializer 로직: 제품 A의 v_pr_bom 활성엣지(except<>1) 재귀수집 → route_edges(route_id,item,mat,use_qty_pr) 삽입. R01=활성엣지 그대로·Rnn=편집.
