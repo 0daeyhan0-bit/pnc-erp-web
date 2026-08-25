@@ -457,7 +457,7 @@ def _materialize_route_edges(cur, route_id):
     # ── 정지집합 = sourcing_route_line 조달상태(외주/매입/사급 노드) ──
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), ISNULL(gubun,'')
         FROM nx.sourcing_route_line WHERE route_id=? AND child_item IS NOT NULL AND LTRIM(RTRIM(child_item))<>''""", route_id)
-    stop = set(l[0] for l in cur.fetchall() if str(l[1]).strip() in ("외주", "매입", "사급"))
+    stop = set(l[0] for l in cur.fetchall() if str(l[1]).strip() in ("외주", "매입", "구매", "사급", "외주직납"))  # ★제작/자체=전개 / 나머지 조달=정지(5종 make_type)
     # ── v_pr_bom 활성엣지 인접리스트 ──
     cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
     E = {}
@@ -575,9 +575,12 @@ def _base_flat_lines(item, ymd="260630"):
         except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
     rows = d.get("rows", []) if isinstance(d, dict) else []
     out = []; sq = 0
-    for r in rows:
-        if int(r.get("level", 0) or 0) <= 0: continue
-        if float(r.get("mat", 0) or 0) <= 0: continue        # 재료비 계상 leaf만(=flatMat)
+    for i, r in enumerate(rows):
+        L = int(r.get("level", 0) or 0)
+        if L <= 0: continue
+        # ★구조 전부품(2026-08-25 §9): 재료비>0 필터 폐기 → 전 leaf 포함(mat=0=단가미등록도 조달대상).
+        #   중간 SUB노드(다음 행이 더 깊은 레벨=자식 보유)만 제외 = 평면 leaf. finalize 부품수 BASE와 seed 통일.
+        if i + 1 < len(rows) and int(rows[i + 1].get("level", 0) or 0) == L + 1: continue
         code = str(r.get("code", "")).strip()
         if not code: continue
         # ★RAC 중 용접봉만 제외(공정종속). 용접링(ITEM_DESC '용접링')=사급 부품 → 부품풀 유지(cost.py·price.py 규칙 일치).
@@ -983,8 +986,7 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
                 rid, seq, _cap(code, 60), _cap(name, 120), _sgub, _cap(code, 60), parent_line)
             stack[L] = int(cur.fetchone()[0])
         else:                                                   # leaf
-            mat = float(r.get("mat", 0) or 0)
-            if mat <= 0: continue                               # phantom/mat=0
+            # ★구조 전부품(2026-08-25 §9): mat=0(단가미등록) leaf도 포함 — 재료비 필터 폐기(seed=BASE 통일)
             if code.upper().startswith("RAC") and "용접링" not in name: continue   # 용접봉 제외·용접링 유지
             metal = str(r.get("metal", "") or "").strip()
             gub = _mk5(_mkmap.get(code.upper()), False)         # ★리프 구분 = 생산구분(make_type) (cost_gubun 폐기)
@@ -1532,12 +1534,13 @@ def sourcing_part_assign(payload: dict = Body(...)):
 
 @router.post("/api/sourcing/line/gubun")
 def sourcing_line_gubun(payload: dict = Body(...)):
-    """부품/SUB 라인의 구분(제작/매입/사급) 설정 — 조달경로 통합검토 SUB패널. ★제작/매입/사급은 여기서 결정(업체=조달프로파일).
-       payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB에 지정 시 그 SUB 자체 성격(사급=협력사 유상사급 조립)."""
+    """부품/SUB 라인의 구분(생산구분 make_type 5종: 제작/외주/구매/사급/외주직납) 설정 — 조달경로 통합검토 SUB패널.
+       ★구분=여기서 결정(업체=조달프로파일). payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB=그 SUB 성격(사급=협력사 유상사급 조립)."""
     rid = int(payload.get("route_id") or 0); line_id = int(payload.get("line_id") or 0)
     gubun = str(payload.get("gubun", "")).strip()[:20]
     if rid <= 0 or line_id <= 0: raise HTTPException(400, "route_id·line_id 필요")
-    if gubun not in ("제작", "매입", "사급"): raise HTTPException(400, "구분은 제작/매입/사급 중 하나")
+    # ★생산구분(make_type) 5종 = 프론트 드롭다운과 일치(제작/외주/구매/사급/외주직납). 매입=구매 레거시 별칭 허용.
+    if gubun not in ("제작", "외주", "구매", "사급", "외주직납", "매입"): raise HTTPException(400, "구분은 제작/외주/구매/사급/외주직납 중 하나")
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)

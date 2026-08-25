@@ -2648,11 +2648,11 @@ SCREEN.subvariant=(c)=>{
         <span id="sp-gate" style="font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(total)} / BASE ${base} = 절삭 ${nfq(cutSum)} + 조립 ${nfq(procSum)} ${ok?'✔':'✖ 불일치'}</span>
         <button class="btn" id="sp-validate" style="margin-left:auto;background:#1c47a0;color:#fff;padding:2px 12px" title="①모든 부품 배치(보관함 비었는지) ②부품수=BASE ③공수합=BASE 검증(저장 안 함). 실패 시 에러 표시. 저장은 하단 [저장].">🔍 BOM 검증</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-        <div class="sp-pool" style="flex:1;min-width:250px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
+        <div id="sp-pool" class="sp-pool" style="flex:1;min-width:250px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
           <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">📦 보관함 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(오른쪽 트리에서 뺀 부품 보관 · 여기로 드래그=빼기 · 우측으로 다시 드래그=배치)</span></div>
           ${pool.length?pool.map(poolRow).join(''):'<div class="empty" style="font-size:11px;color:#8a94a6">보관 부품 없음 — 모든 부품이 배치됨 ✔<br>오른쪽 트리에서 부품을 여기로 드래그하면 빼서 보관합니다.</div>'}
         </div>
-        <div style="flex:1.3;min-width:300px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
+        <div id="sp-tree" style="flex:1.3;min-width:300px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
           <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(부품 드래그 → 왼쪽 보관함(빼기) or 다른 SUB로 이동 · ASSY/SUB 노드에 드롭=배치)</span></div>
           ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat,0)}
         </div>
@@ -2879,7 +2879,12 @@ SCREEN.subvariant=(c)=>{
     // ---- ★재설계 SUB 재구성·공정배치 binds (좌 풀 → 우 트리 드래그·노드[수정]→공정팝업·전체저장 검증) ----
     const rid=st.detail.route_id;
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
-    const reloadPanel=async()=>{st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);};
+    const reloadPanel=async()=>{
+      // ★스크롤 보존(드래그·드롭 후 top 리셋 방지): 재렌더 전 저장 → 후 복원(모달은 body 렌더라 document 조회)
+      const _ts=(document.querySelector('#sp-tree')||{}).scrollTop||0, _ps=(document.querySelector('#sp-pool')||{}).scrollTop||0;
+      st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);
+      requestAnimationFrame(()=>{const t=document.querySelector('#sp-tree');if(t)t.scrollTop=_ts;const p=document.querySelector('#sp-pool');if(p)p.scrollTop=_ps;});
+    };
     // ★부품추가 버튼 제거 — 조달후보는 BASE BOM 부품만 재편성(BOM 외 부품 금지). 라인 직접수정만 유지.
     c.querySelectorAll('.sp-ledit').forEach(b=>b.onclick=e=>{e.stopPropagation();const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);if(l){st.lineForm=Object.assign({route_id:rid},l);draw();}});
     // ★드래그&드롭 = 컨테이너 이벤트 위임(재렌더에도 유지·property할당=멱등 → 재드롭/반복 SUB생성 안정).
@@ -3064,6 +3069,7 @@ SCREEN.subvariant=(c)=>{
       if(!j.ok){alert('❌ 등록 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));return;}
       // (4) 헤더 커밋 + fresh 해제(닫기=삭제 방지 → 정식 후보 확정)
       const okh=await saveHdr(true);if(okh===false)return;
+      window._spRollback=null;   // ★버그#3: 등록 확정 → 세션표식 해제(refresh 시 beacon이 삭제 못 하게)
       alert(`✅ 등록 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(승인해야 조달프로파일에 노출됩니다)`);
       await loadRoutes();
     }catch(e){alert('등록 오류: '+e.message);}};
@@ -3118,14 +3124,24 @@ SCREEN.subvariant=(c)=>{
     st.newForm=null;st.msg=`🔀 LG BOM 시딩 후보 생성 (라인 ${n}) — 미커밋. [등록]해야 확정.`;await loadRoutes();openDetail(rid,'edit',true);};
   // ---------- 상세 ----------
   const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+  // ★버그#3(2026-08-25): 저장 외 모든 종료(새로고침/탭닫기/앱크래시)도 롤백. 편집세션을 window._spRollback로 표식하고
+  //   언로드 시 sendBeacon으로 서버 롤백 호출(edit=edit_cancel 스냅샷복원 / fresh=delete 신규삭제). 리스너는 1회만 등록.
+  if(!window._spRbBound){
+    const _spBeacon=()=>{const r=window._spRollback;if(!r||!(+r.route_id>0))return;
+      try{const url=r.fresh?`${API}/api/sourcing/route/delete`:`${API}/api/sourcing/route/edit_cancel`;
+        navigator.sendBeacon(url,new Blob([JSON.stringify({route_id:+r.route_id})],{type:'application/json'}));}catch(_){}};
+    window.addEventListener('pagehide',_spBeacon);window.addEventListener('beforeunload',_spBeacon);
+    window._spRbBound=true;
+  }
   const openDetail=(rid,mode,fresh)=>{const R=routeById(rid);if(!R)return;
     st.detail={route_id:rid,mode:(R.baseline?'view':mode||'edit'),fresh:!!fresh,
       hdr:{route_name:R.route_name||'',gubun:R.gubun||'',apply_from:R.apply_from||today(),note:R.note||''}};  // 유효일자 default=오늘·공급처/현행 제거
     st.newForm=null;st.rd=null;draw();
     if(!R.baseline && st.detail.mode==='edit'){
+      window._spRollback={route_id:rid,fresh:!!fresh};   // ★편집세션 활성표식(언로드=롤백)
       if(!fresh){try{fetch(`${API}/api/sourcing/route/edit_begin`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}  // ★편집 세션 시작 스냅샷(닫기=되돌리기용)
       loadRD(rid);   // 편집모드=좌/우 패널 기본 펼침(버튼 클릭 불필요)
-    }
+    } else { window._spRollback=null; }
   };
   // 닫기(X/닫기): 신규 미커밋 드래프트면 "등록 취소?" · ★편집 세션이면 닫기=되돌리기(세션 스냅샷 복원). 저장했으면 스냅 없어 그대로.
   const closeDetail=async()=>{
@@ -3134,16 +3150,18 @@ SCREEN.subvariant=(c)=>{
       return;   // 계속 = 모달 유지
     }
     if(st.detail&&st.detail.mode==='edit'&&+st.detail.route_id>0){   // ★닫기=되돌리기(저장 안 했으면 편집 전으로 복원)
+      window._spRollback=null;   // ★버그#3: 명시 롤백 시작 → 언로드 beacon 이중발화 방지(edit_cancel 아래서 직접 복원)
       try{const r=await fetch(`${API}/api/sourcing/route/edit_cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:st.detail.route_id})});
         const j=await r.json();if(j.reverted){st.detail=null;await loadRoutes();draw();return;}}catch(e){}
     }
+    window._spRollback=null;
     st.detail=null;draw();};
   // ✖ 취소 = 미커밋 드래프트 롤백(route 삭제)+닫기 → 고아 없음·다음 번호 재사용
-  const cancelDraft=async()=>{const rid=st.detail?st.detail.route_id:0;
+  const cancelDraft=async()=>{const rid=st.detail?st.detail.route_id:0;window._spRollback=null;   // ★버그#3: 삭제=세션종료(표식해제)
     if(rid>0){try{await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}
     st.detail=null;st.msg='등록 취소 — 후보가 등록되지 않았습니다(번호 재사용).';await loadRoutes();draw();};
   // 드래프트 방치 방지: 대상 전환/신규열기 전에 미커밋 드래프트 조용히 롤백
-  const discardFreshSilent=async()=>{if(st.detail&&st.detail.fresh){const rid=st.detail.route_id;st.detail=null;
+  const discardFreshSilent=async()=>{if(st.detail&&st.detail.fresh){const rid=st.detail.route_id;st.detail=null;window._spRollback=null;   // ★버그#3
     try{await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}};
   // ---------- actions ----------
   const saveHdr=async(commit)=>{const h=st.detail.hdr;
