@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_prod_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 from routers.kitting import kitting_grid
 router = APIRouter()
@@ -80,19 +80,30 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         assys = list({g["assy"] for g in rows}); mats = list({g["item"] for g in rows})
         # 풀 로드 (nx, 전부 오라클 diff0 검증됨)
         proc = {}; assyst = {}; jae = {}; fixm = {}; sale = {}; ing = {}
-        cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.pr_t_mat_stock_wh WHERE part_code='P0001' GROUP BY MAT_CODE")
-        for a, b in cur.fetchall(): proc[a] = float(b or 0)
+        # ★2026-08-25 가공파트(P0001) 재고도 이력기준 공용계산으로 통일.
+        _psm = _prod_stock_map(cur, by_part=True)
+        for (_m, _p), _v in _psm.items():
+            if _p == 'P0001' and _v:
+                proc[_m] = proc.get(_m, 0.0) + _v
         cur.execute(f"SELECT ITEM_CODE, SUM(STOCK_QTY) FROM {S}.sa_t_item_stock GROUP BY ITEM_CODE")
         for a, b in cur.fetchall(): assyst[a] = float(b or 0)
         # ★자재+생산+사급 = 합계(jae). 2026-08-20: 화면에서 3종을 나눠 보기 위해 개별값도 함께 반환.
         #   jae_m 자재창고(pu_t_mat_stock_wh) · jae_p 생산창고(pr_t_mat_stock_wh, P0001 제외) · jae_s 사급(PU_T_SAGUB_STOCK)
         jae_m = {}; jae_p = {}; jae_s = {}
-        cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.pr_t_mat_stock_wh WHERE part_code<>'P0001' AND stock_qty<>0 GROUP BY MAT_CODE")
-        for a, b in cur.fetchall(): jae_p[a] = float(b or 0)
+        # ★2026-08-25 생산창고 = 이력기준 공용계산(410·키팅·생산입출고현황과 동일 원천).
+        #   잔액 테이블은 nx 미러가 늦으면 웹실적만 담긴 반쪽 값이 되어 값이 어긋난다.
+        #   여기선 P0001(가공파트)를 뺀 나머지 파트 합계가 필요하므로 파트별 맵을 쓴다.
+        for (_m, _p), _v in _psm.items():          # 위에서 만든 맵 재사용(재계산 방지)
+            if _p == 'P0001' or not _v:
+                continue
+            jae_p[_m] = jae_p.get(_m, 0.0) + _v
         cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.pu_t_mat_stock_wh WHERE cust_code='Z99990' AND stock_qty<>0 GROUP BY MAT_CODE")
         for a, b in cur.fetchall(): jae_m[a] = float(b or 0)
         cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {S}.PU_T_SAGUB_STOCK WHERE stock_qty<>0 GROUP BY MAT_CODE")
         for a, b in cur.fetchall(): jae_s[a] = float(b or 0)
+        # ★2026-08-25 원장 델타 가산은 쓰지 않는다 — 웹은 잔액도 함께 갱신하므로
+        #   '잔액 + 원장델타' 는 이중계상이 된다(실측 SUB1: 0 + (-2) = -2, 정답 0).
+        #   가공진척은 {S} 잔액(nx=미러+웹실적)을 그대로 쓴다.
         for _k in set(jae_m) | set(jae_p) | set(jae_s):
             jae[_k] = jae_m.get(_k, 0.0) + jae_p.get(_k, 0.0) + jae_s.get(_k, 0.0)
 

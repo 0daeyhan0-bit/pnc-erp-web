@@ -332,12 +332,16 @@ SCREEN.prodinout=(c)=>{
   let frm=_tod.slice(0,4)+'01', to=_tod;
   const ymd2d=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
   const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};
-  let sel=null, curL=[], source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  // ★2026-08-25 기본 소스를 nx(=라이브 미러 + 웹실적)로. 다른 화면(410·키팅)과 의미 통일.
+  //   구버전은 기본 live 였고, nx 를 고르면 웹 자체원장(stock_ledger) 파생뷰로 빠졌는데
+  //   그 원장에 PRD 이력이 0건이라 늘 빈 화면이었다(웹 실적은 PR_T_PROD_DTL 에 쌓임).
+  //   → nx = 일반 그리드(라이브+웹실적) / live = 라이브만. 원장 파생뷰는 source=ledger.
+  let sel=null, curL=[], source='nx';
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(5);
     const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?${qs}&source=nx`,{title:'생산입출고현황',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/prodinout?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+    if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?${qs}&source=ledger`,{title:'생산입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodinout?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};pn={};}
     loading=false;
@@ -853,7 +857,7 @@ SCREEN.partplan=(c)=>{
                  part_ymd:r0.part_ymd,plan_ymd:r0.plan_ymd,output_hm:r0.output_hm,item_st:r0.item_st,
                  change_day:r0.change_day,lot_diff:0,wo:'',swo:'',
                  // 재고류는 도번(item) 기준 값이라 블록 대표행 값 그대로(합산 아님)
-                 mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,fix_stock:r0.fix_stock,
+                 mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,sagub_stock:r0.sagub_stock,fix_stock:r0.fix_stock,
                  assy_stock:r0.assy_stock,sale_qty:r0.sale_qty,ready_stock:r0.ready_stock,
                  prev_proc:r0.prev_proc,cur_proc:r0.cur_proc,
                  plan_qty:0,finish:0,prior_plan:0,prior_cover:0,prior_fin:'0',days:{},dcov:{},dfin:{},_st:0,
@@ -896,6 +900,8 @@ SCREEN.partplan=(c)=>{
       cur_proc:  {t:'현재공정',      cls:'center mut', v:r=>stkc(r.cur_proc)},
       mat_stock: {t:'자재재고',      cls:'center mut', v:r=>stkc(r.mat_stock)},
       prod_stock:{t:'생산재고',      cls:'center mut', v:r=>stkc(r.prod_stock)},
+      // ★2026-08-25 사급(업체)재고 분리 — 업체 보유분을 따로 봐야 해서 생산재고에서 뺐다.
+      sagub_stock:{t:'사급재고',     cls:'center mut', v:r=>stkc(r.sagub_stock)},
       fix_stock: {t:'도번고정재고',  cls:'center mut', v:r=>stkc(r.fix_stock)},
       assy_stock:{t:'ASSY재고',      cls:'center mut', v:r=>stkc(r.assy_stock)},
       sale_qty:  {t:'출하',          cls:'center mut', v:r=>stkc(r.sale_qty)},
@@ -919,7 +925,7 @@ SCREEN.partplan=(c)=>{
     };
     const ALLDEF=Object.assign({},HEADDEF,TAILDEF);
     const HEAD_DEFAULT=['gpc','assy','upper','item','line','part_ymd','inhm','pull','st','plan_qty','prior'];
-    const TAIL_DEFAULT=['plan_ymd','output_hm','wo','lgh','prev_proc','cur_proc','mat_stock','prod_stock','fix_stock','assy_stock','sale_qty','ready_stock'];
+    const TAIL_DEFAULT=['plan_ymd','output_hm','wo','lgh','prev_proc','cur_proc','mat_stock','prod_stock','sagub_stock','fix_stock','assy_stock','sale_qty','ready_stock'];
     const HEAD_LSKEY='pp410_headorder', TAIL_LSKEY='pp410_tailorder';
     // 유저별 저장순서 로드(없거나 깨졌으면 기본). 신규 컬럼을 정의에 추가하면 저장순서 뒤에 자동 보충 → 기존 사용자도 안 깨짐.
     const loadOrder=(lskey,def,defs)=>{
@@ -960,7 +966,7 @@ SCREEN.partplan=(c)=>{
       const sub={gpcnm:r0.gpcnm,gpc:r0.gpc,assy:r0.assy,upper:'',item:r0.item,line:'',part_ymd:'',inhm:'',
                  lot_diff:0,change_day:'',_st:sST,plan_qty:sPl,prior_plan:sPrP,prior_cover:sPrC,prior_fin:sPrF,
                  plan_ymd:r0.plan_ymd,output_hm:r0.output_hm,wo:'',lgh:r0.lgh,
-                 mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,fix_stock:r0.fix_stock,
+                 mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,sagub_stock:r0.sagub_stock,fix_stock:r0.fix_stock,
                  assy_stock:r0.assy_stock,sale_qty:r0.sale_qty,ready_stock:r0.ready_stock,
                  prev_proc:r0.prev_proc,cur_proc:r0.cur_proc};
       return `<tr${gkey!==undefined?` class="pp-agg" data-gk="${esc(gkey)}"`:''} style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8${gkey!==undefined?';cursor:pointer':''}">
@@ -1297,8 +1303,20 @@ SCREEN.partresult=(c)=>{
 /* ===== 생산 쓰기화면 공용 CRUD 패널 (nx 미러: 등록/수정/삭제) =====
    cfg: {listEp,saveEp,delEp,days,dateLabel,filters[],buildQS,cols[],form[],newRow,fromRow,toBody,sum} */
 
+/* ★파트 드롭다운 옵션 — 쓰기화면의 파트칸은 자유입력 금지(§3 코드 직접입력칸 금지).
+   자유입력으로 두면 파트명('04라인')이 PART_CODE 에 저장돼 실제 파트(S4)에 재고가
+   안 쌓인다(2026-08-25 실사고: SUB6 조정 500개가 유실 → 520 차감이 재고 0 판정).
+   배열 객체를 그대로 form 설정에 넘기고 로드 후 내용을 채운다(fld()가 렌더시점에 읽음). */
+const _WR_PARTS=[{v:'',t:'(없음)'}];
+let _wrPartsLoaded=false;
+const wrLoadParts=async()=>{if(_wrPartsLoaded)return;_wrPartsLoaded=true;
+  try{const r=await fetch(`${API_BASE}/api/wr/parts`);const j=await r.json();
+    (j.rows||[]).forEach(p=>_WR_PARTS.push({v:p.code,t:p.nm?`${p.nm} (${p.code})`:p.code}));}
+  catch(e){_wrPartsLoaded=false;}};
+
 /* ===== 생산 ⑦: 생산파트재고조정 (w_pr_stock_470) — 라이브 조회 + nx.stock_maint 등록/수정/삭제 ===== */
 SCREEN.partstockadj=(c)=>{
+  wrLoadParts();
   wrShell(c,{sid:'partstockadj', nxOnly:true,
     title:`🛠️ 생산파트재고조정 <span style="font-size:12px;color:var(--muted);font-weight:400">자재개별재고조정(등록·수정·삭제)</span>`,
     sub:`파트재고 장부수정(조정, ±). 조회=📁미러이력(<code>PR_T_STOCK_MAINT_MAT</code> 재고조정)∪웹편집(<code>nx.stock_ledger</code> PRD). 레거시 라이브 없음(컷오버).`,
@@ -1311,7 +1329,8 @@ SCREEN.partstockadj=(c)=>{
         {h:'조정일자',cls:'center',fmt:r=>_wymd(r.MAINT_YMD)},
         {h:'구분',k:'tag_nm',cls:'center'},
         {h:'작업처',k:'work_code',cls:'center'},
-        {h:'파트',k:'part_code',cls:'center'},
+        {h:'파트',cls:'center',fmt:r=>{const p=(r.part_code||'').trim();if(!p)return '';
+          const o=_WR_PARTS.find(x=>x.v===p);return o?esc(o.t):`<span style="color:#c0392b" title="파트마스터에 없는 코드">${esc(p)} ⚠</span>`;}},
         {h:'자재',fmt:r=>`<b>${esc(r.mat_code)}</b>`},
         {h:'품명',k:'mat_nm',cap:1,title:'mat_nm'},
         {h:'도번',k:'item_code'},
@@ -1325,7 +1344,8 @@ SCREEN.partstockadj=(c)=>{
       form:[
         {k:'maint_ymd',label:'조정일자',type:'date',required:1,width:140},
         {k:'maint_tag',label:'구분',type:'select',opts:[{v:'2',t:'재고조정'},{v:'1',t:'불량'},{v:'4',t:'기타'}],width:100},
-        {k:'work_code',label:'작업처',width:60},{k:'part_code',label:'파트',width:60},
+        {k:'work_code',label:'작업처',width:60},
+        {k:'part_code',label:'파트',type:'select',opts:_WR_PARTS,width:120},
         {k:'mat_code',label:'자재',required:1,search:1,width:160},{k:'item_code',label:'도번',search:1,width:140},
         {k:'maint_qty',label:'조정수량',type:'num',width:90},{k:'maint_cost',label:'단가',type:'num',width:90},
         {k:'prod_work_code',label:'생산작업장',width:70},{k:'remarks',label:'비고',width:200},

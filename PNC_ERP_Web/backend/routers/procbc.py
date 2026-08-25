@@ -173,7 +173,7 @@ def _apply(cur, c, box, good, bad, sign, user, ymd, win):
                                   UPDATE_WINDOW=?
                             WHERE MAINT_YMD=? AND MAINT_SEQ=?""", -wgt, user, win, ymd, ex[0])
         else:
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=?", ymd)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
             seq = int(cur.fetchone()[0] or 1)
             cur.execute("""INSERT INTO nx.PR_T_STOCK_MAINT_MAT
                            (MAINT_YMD,MAINT_SEQ,MAINT_TAG,PART_CODE,WORK_CODE,PROD_WORK_CODE,ITEM_CODE,MAT_CODE,
@@ -185,8 +185,8 @@ def _apply(cur, c, box, good, bad, sign, user, ymd, win):
         moved.append(("원소재", c["won"], -wgt))
     # ④ 하위자재 차감
     if c["bom"] and good:
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
-        seq = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999) FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
+        seq = int(cur.fetchone()[0] or 19999)
         for child, use, cgpc in c["bom"]:
             seq += 1
             d = -(use * good) * sign

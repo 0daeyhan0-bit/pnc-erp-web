@@ -820,7 +820,7 @@ def _lgsale_led_post(cur, sid, ymd, item, qty, wo):
     # ★F-출하: 제품재고조회 원천(SA_T_STOCK_MAINT tag J, −)에도 동반쓰기 → 출하실적 등록시 제품재고 차감 반영(사용자 확정 (a))
     #   sid 링크=REMARKS '출하#{sid}'로 멱등(수정/삭제시 위 _del이 제거). nx.sale_dtl 기반이라 sale040(SA_T_SALE_DTL)과 이중계상 없음.
     try:
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
         msq = int(cur.fetchone()[0] or 1)
         cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_VAT,MAINT_AMT,
               WORK_ORDER,REMARKS,INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW)
@@ -1184,11 +1184,21 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
             for a, b, c, v in cur.fetchall(): mvout[(a, b, c)] = float(v or 0)
             # ※ 일자별 출하(SALE_YMD)는 쓰지 않는다 — 레거시 dw 에도 sale_ymd 가 없다.
             #   셀 출하수량은 ue_set_dd_color 가 제번 총출하를 계획셀에 배분해 만든다(아래).
+        # ★2026-08-25 ASSY재고 = 라이브·nx 잔액 중 '더 최근 갱신본'.
+        #   원장 델타 가산은 쓰지 않는다 — 웹은 잔액도 함께 갱신하므로 이중계상이 된다
+        #   (실측 SUB1: 라이브잔액 0 + 원장델타 -2 = -2, 정답 0).
+        #   웹이 건드린 품목은 nx 가 최신이라 nx 값, 아니면 라이브 값이 잡힌다.
         astk = {}
         for ck in _chunk(items):
             ph = ",".join("?" * len(ck))
-            cur.execute(f"""SELECT ITEM_CODE, SUM(ISNULL(STOCK_QTY,0)) FROM {SCH}.SA_T_ITEM_STOCK WITH(NOLOCK)
-                             WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE""", *ck)
+            cur.execute(f"""SELECT ITEM_CODE, SUM(STOCK_QTY) FROM (
+                              SELECT ISNULL(n.ITEM_CODE,l.ITEM_CODE) ITEM_CODE,
+                                     CASE WHEN n.ITEM_CODE IS NULL THEN l.STOCK_QTY
+                                          ELSE n.STOCK_QTY END STOCK_QTY
+                                FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) n
+                                FULL JOIN (SELECT * FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) l
+                                  ON l.ITEM_CODE=n.ITEM_CODE) u
+                            GROUP BY ITEM_CODE""", *(list(ck) + list(ck)))
             for a, v in cur.fetchall(): astk[str(a).strip()] = float(v or 0)
         nm = {}
         for ck in _chunk(items):
@@ -1305,8 +1315,8 @@ def sale040_confirm(payload: dict = Body(...)):
     cn = _nx_tx(); cur = cn.cursor()
     win = 'w_pr_input_040'
     try:
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
-        seq = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999) FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
+        seq = int(cur.fetchone()[0] or 19999)
         done = []; skipped = []
         # 도번별 재고 캐시(같은 도번 여러 제번 → 순서대로 소진)
         stk = {}
@@ -1415,7 +1425,7 @@ def sale040_cancel(payload: dict = Body(...)):
             cur.execute("""DELETE FROM nx.SA_T_SALE_DTL
                             WHERE WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?
                               AND SALE_YMD=? AND ISNULL(FINISH_FLAG,'0')='0'""", wo, swo, it, y)
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", y)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", y)
             sq = int(cur.fetchone()[0] or 1)
             cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT
                            (MAINT_YMD,MAINT_SEQ,MAINT_TAG,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,

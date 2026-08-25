@@ -4,9 +4,15 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg)
+from common import (_prod_stock_map, _latest_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg)
 
 router = APIRouter()
+
+
+class _RollupCached(Exception):
+    """410 재귀 BOM 롤업을 캐시로 대체할 때 그 블록만 건너뛰는 신호(에러 아님).
+       롤업이 try/except Exception 으로 감싸여 있어 조기이탈에 예외를 쓴다."""
+    pass
 
 
 # ================= 준비실적처리(키팅) 그리드 (w_pr_input_460_new ≈ dw_pr_input_410_t1_new2) =================
@@ -147,9 +153,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                                    GROUP BY ITEM_CODE, PROC_GUBUN""")
                     for rr in cur.fetchall(): _nrs[(rr[0], rr[1] or '')] = float(rr[2] or 0)
                 except Exception: pass
+                # ★2026-08-25 준비재고는 nx 가 정본(웹 준비등록이 여기에만 쓴다).
+                #   라이브 값이 있으면 그 위에 nx 를 덮어쓴다 — max() 로는 차감이 안 잡혔다.
                 rstock = dict(_lrs)
                 for k, v in _nrs.items():
-                    rstock[k] = _lrs.get(k, 0.0) + max(v - _lrs.get(k, 0.0), 0.0)
+                    rstock[k] = v
         except Exception: pass
         try:  # ASSY 현재고: sa_t_item_stock (item)
             # ★라이브 + 웹실적(2026-08-20) — 병행운영 검증용.
@@ -175,29 +183,62 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                     cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                     for rr in cur.fetchall(): _nxv[rr[0]] = float(rr[1] or 0)
                 except Exception: pass
+                # ★2026-08-25 ASSY재고 = 라이브·nx 잔액 중 '더 최근 갱신본'.
+                #   원장 델타 가산은 금지 — 웹이 잔액도 함께 갱신하므로 이중계상이 된다
+                #   (실측 SUB1: 실적+상위실적으로 잔액 0 이 정답인데 델타를 더해 -2).
                 assystk = dict(_lv)
-                for k, v in _nxv.items():
-                    assystk[k] = _lv.get(k, 0.0) + max(v - _lv.get(k, 0.0), 0.0)
+                try:
+                    cur.execute("""SELECT ITEM_CODE, SUM(STOCK_QTY) FROM (
+                                     SELECT ISNULL(l.ITEM_CODE,n.ITEM_CODE) ITEM_CODE,
+                                            CASE WHEN n.ITEM_CODE IS NULL THEN l.STOCK_QTY
+                                                 WHEN l.ITEM_CODE IS NULL THEN n.STOCK_QTY
+                                                 WHEN ISNULL(n.UPDATE_DATETIME,'19000101')>=ISNULL(l.UPDATE_DATETIME,'19000101')
+                                                      THEN n.STOCK_QTY ELSE l.STOCK_QTY END STOCK_QTY
+                                       FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK l WITH(NOLOCK)
+                                       FULL JOIN PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK n WITH(NOLOCK)
+                                         ON l.ITEM_CODE=n.ITEM_CODE) u
+                                   GROUP BY ITEM_CODE""")
+                    assystk = {}
+                    for _ra in cur.fetchall():
+                        assystk[_ra[0]] = float(_ra[1] or 0)
+                except Exception: pass
         except Exception: pass
         prdirect = {}
         try:  # ★파트재고(pr_stock) = 레거시 SP 완료풀과 동일 = PR_T_MAT_STOCK_WH만(mat_code). midstk 재귀롤업(사급/스태커 포함)은 SUB 과다 → 직접값 사용.
             # ★2026-08-18: 라이브 → nx 전환(준비재고와 동일 사유 — 웹 준비등록이 nx.PR_T_MAT_STOCK_WH 에 파트재고를 옮김)
-            cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_MAT_STOCK_WH GROUP BY MAT_CODE")
-            for rr in cur.fetchall(): prdirect[rr[0]] = float(rr[1] or 0)
+            # ★2026-08-25 410 과 동일하게 이력계산으로 전환 — nx 잔액테이블은 레거시가 만든
+            #   잔액의 행이 없어 '재고가 있는데 셀이 안 칠해지는' 원인이었다(SUB6 표시523/풀0).
+            for _mk, _mv in _prod_stock_map(cur).items():
+                if _mv: prdirect[_mk] = float(_mv)
+        except Exception: pass
+        # ★2026-08-25 사급(업체)재고를 충당풀 원천에 추가 — 410 과 동일 규칙.
+        #   화면 생산재고엔 사급이 포함되는데 충당풀엔 빠져 있어, 사급만 있는 품목이
+        #   "재고가 있는데 셀이 0/N 무색" 으로 나왔다(실측 AJJ30041902-SUB 8/25 키팅 0/2 ↔ 410 2/2).
+        sagubstk = {}
+        try:
+            cur.execute("""SELECT ISNULL(n.MAT_CODE,l.MAT_CODE), SUM(
+                             CASE WHEN n.MAT_CODE IS NULL THEN l.STOCK_QTY ELSE n.STOCK_QTY END)
+                             FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK n WITH(NOLOCK)
+                             FULL JOIN PARTNER_ERP.dbo.PU_T_SAGUB_STOCK l WITH(NOLOCK)
+                               ON l.MAT_CODE=n.MAT_CODE
+                            GROUP BY ISNULL(n.MAT_CODE,l.MAT_CODE)""")
+            for rr in cur.fetchall(): sagubstk[rr[0]] = float(rr[1] or 0)
         except Exception: pass
         # ★2026-08-23 화면표시 전용(레거시 410 과 동일 정의) — 충당(prdirect/matwh/midstk)은 손대지 않는다.
         #   자재재고 = 그 품번 자체 자재창고 / 생산재고 = 파트창고+자재창고+사급재고
         #   원천은 라이브만(nx 미러가 멈추면 낡은 값이 max 합산에 살아남아 과다표시됨)
         dsp_mat = {}; dsp_pr = {}; dsp_sg = {}
         try:
-            cur.execute("""SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH WITH(NOLOCK)
-                           WHERE CUST_CODE='Z99990' AND GAGONG_PROC_CODE NOT IN ('SA1','SA2','SB1','SB2')
-                           GROUP BY MAT_CODE""")
-            for rr in cur.fetchall(): dsp_mat[rr[0]] = float(rr[1] or 0)
-            cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PR_T_MAT_STOCK_WH WITH(NOLOCK) GROUP BY MAT_CODE")
-            for rr in cur.fetchall(): dsp_pr[rr[0]] = float(rr[1] or 0)
-            cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK WITH(NOLOCK) GROUP BY MAT_CODE")
-            for rr in cur.fetchall(): dsp_sg[rr[0]] = float(rr[1] or 0)
+            # ★2026-08-25 자재·사급재고 = 라이브∪nx 중 최신 갱신본(_latest_stock_map).
+            #   자재창고는 nx 잔액이 웹실적을 즉시 반영하면서 미러본도 유지해 정확도가 높다
+            #   (실측 7,740품목 중 7,511개=97% 가 이력계산 결과와 일치) → 잔액으로 충분.
+            dsp_mat = _latest_stock_map(cur, "PU_T_MAT_STOCK_WH", "MAT_CODE",
+                                        "CUST_CODE='Z99990' AND GAGONG_PROC_CODE NOT IN ('SA1','SA2','SB1','SB2')",
+                                        ("CUST_CODE", "GAGONG_PROC_CODE"))
+            # ★생산재고만 이력기준 공용계산 — nx 잔액이 미러 지연 시 웹실적만 담긴 반쪽 값이라
+            #   라이브·nx 를 어떻게 조합해도 SUB1(정답0)·SUB6(정답23)을 동시에 못 맞춘다.
+            dsp_pr = _prod_stock_map(cur)
+            dsp_sg = _latest_stock_map(cur, "PU_T_SAGUB_STOCK", "MAT_CODE")
         except Exception: pass
         # ★중간공정 파트재고 롤업(SP #TEMP_MAT_STOCK T_SUB_CTE): 자재/생산/사급/스태커 재고 + 재귀BOM 도번고정 → tag70.
         #   ★필터 무관 전역 재고롤업이라 색(tag70)에만 영향(값/개수/계획합계는 매요청 라이브 재조회) → 90초 TTL 캐시로 재귀비용 회피(~2초 유지).
@@ -329,7 +370,10 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             #   기존엔 파트창고만 봐서, 자재창고에만 재고가 있는 건이 충당되지 않았다.
             #   (실측 AJR73803003: 파트창고 0 / 자재창고 1 → 웹 799/800, 레거시 800/800 노랑)
             #   화면 '생산재고' 컬럼과 동일 원천이라 "재고가 있으면 채워진다"가 성립한다.
-            if km not in _mid_pool: _mid_pool[km] = max(prdirect.get(g["item"], 0.0) + matwh.get(g["item"], 0.0), 0.0)
+            #   ★2026-08-25 사급 추가 — 화면 생산재고(파트+자재+사급)와 충당풀을 일치시킨다.
+            if km not in _mid_pool:
+                _mid_pool[km] = max(prdirect.get(g["item"], 0.0) + matwh.get(g["item"], 0.0)
+                                    + sagubstk.get(g["item"], 0.0), 0.0)
         _shared(lambda g: (g["assy"], g["upper"], g["item"], g["gpc"]), _assy_pool, 70, 'finish')   # 2) ASSY 현재고
         # ★2026-08-23 도번고정재고(상위도번 재고 ×use_qty)를 완료풀에 포함 — 410 과 동일.
         #   화면엔 표시되면서 충당엔 빠져 "재고가 있는데 안 채워지던" 문제(실측 AJR30027711-SUB
@@ -373,8 +417,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             # ★생산재고 = 생산(파트)창고 + 자재창고 (2026-08-23, 사용자 확정)
             #   기존 assystk(SA_T_ITEM_STOCK)는 ASSY재고 컬럼과 중복이라 늘 같은 값이 나왔고,
             #   자재창고에만 재고가 있는 건은 0 으로 표시됐다(AJR73803003 자재창고 1 → 웹 0).
-            # ★표시는 레거시 410 정의(파트창고+자재창고+사급) — 충당풀(_mid_pool)과 별개.
+            # ★키팅 화면은 기존 정의 유지(파트창고+자재창고+사급) — 사급 분리는 410 만 적용.
+            #   화면 컬럼이 고정배열이라 여기서 빼면 187건의 생산재고가 이유 없이 줄어든다
+            #   (실측 AJJ30041902-SUB 200 → 73). 사급값은 별도 필드로도 함께 내려준다.
             g["prod_stock"] = round(dsp_pr.get(it, 0.0) + dsp_mat.get(it, 0.0) + dsp_sg.get(it, 0.0), 2)
+            g["sagub_stock"] = round(dsp_sg.get(it, 0.0), 2)      # 사급(업체)재고 — 참고용
             g["assy_stock"] = round(assystk.get(g["assy"], 0.0), 2)
             g["sale"] = round(saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 2)
             g["need_qty"] = round(max(g["plan_qty"] - g["ready_qty"], 0.0), 2)
@@ -567,10 +614,16 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
         _ck = "live" if SCH.endswith("dbo") else "nx"
         _cache = getattr(plan_part410, "_stk_cache", {})
         _ent = _cache.get(_ck); _now = _dt.now().timestamp()
-        if _ent and (_now - _ent["ts"] < 90) and _ent.get("dm") is not None:
-            rstock = _ent["r"]; assystk = _ent["a"]; midstk = _ent["m"]; fixstk = _ent["f"]; partstk = _ent.get("p", {})
-            dsp_mat = _ent["dm"]; dsp_pr = _ent["dp"]; dsp_sg = _ent["ds"]   # ★표시전용도 캐시(빠지면 전 행 0)
-        else:
+        # ★2026-08-25 캐시는 '무거운 것'만 — 재귀 BOM 롤업(midstk·fixstk, ~2초)뿐.
+        #   나머지 단순 GROUP BY 는 실측 0.02~0.09초라 캐시할 이유가 없고,
+        #   캐시에 넣으면 실적을 잡아도 최대 90초간 옛 값이 보인다(사용자 실측 ~20초 지연).
+        #     준비재고 0.02 / ASSY재고 0.02 / 자재재고 0.04 / 생산재고 0.08 / 사급재고 0.09초
+        #   → 준비재고·ASSY재고·파트재고·표시전용(dsp_*)은 매요청 재조회로 전환.
+        _hit = bool(_ent and (_now - _ent["ts"] < 90) and _ent.get("m"))
+        if _hit:
+            midstk = _ent["m"]; fixstk = _ent["f"]      # 재귀 롤업만 캐시에서 복원
+        if True:
+            # ↓ 아래 블록(준비재고~표시전용)은 캐시 히트여도 항상 실행 = 즉시 반영.
             # ★준비재고 = nx 고정(키팅 line 113과 동일). 웹 준비등록(/api/ready/commit)이
             #   nx.PU_T_READY_STOCK 에 쓰므로 라이브를 읽으면 우리 등록분이 안 보임.
             #   (src=live 대사시에도 키팅과 같은 값이어야 두 화면 비교가 성립)
@@ -595,9 +648,17 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                         cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                         for rr in cur.fetchall(): _nxv[rr[0]] = float(rr[1] or 0)
                     except Exception: pass
+                    # ★2026-08-25 웹 델타(SEQ>=20000) 가산 — max() 는 차감을 못 잡는다.
                     assystk = dict(_lv)
-                    for k, v in _nxv.items():
-                        assystk[k] = _lv.get(k, 0.0) + max(v - _lv.get(k, 0.0), 0.0)
+                    try:
+                        cur.execute("""SELECT n.ITEM_CODE, SUM(n.MAINT_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT n WITH(NOLOCK)
+                            WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT l WITH(NOLOCK)
+                                              WHERE l.MAINT_YMD=n.MAINT_YMD AND l.MAINT_SEQ=n.MAINT_SEQ
+                                                AND l.ITEM_CODE=n.ITEM_CODE AND l.MAINT_QTY=n.MAINT_QTY)
+                            GROUP BY n.ITEM_CODE""")
+                        for _ra in cur.fetchall():
+                            assystk[_ra[0]] = assystk.get(_ra[0], 0.0) + float(_ra[1] or 0)
+                    except Exception: pass
             except Exception: pass
             try:   # ★중간공정 파트재고(레거시 SP JOB 'B') = PR_T_MAT_STOCK_WH + PU_T_MAT_STOCK_WH by MAT_CODE(자도번), 무필터
                 #   ★PR_T_MAT_STOCK_WH = nx(키팅 line 123과 동일) — 웹 준비등록이 자재를 여기로 옮김.
@@ -605,9 +666,17 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 #     웹 바코드실적이 BOM 자재를 nx 자재창고에서 차감하므로 그 분도 반영돼야 함.
                 # ★2026-08-24 src=live 면 파트창고도 라이브에서 읽는다(레거시 순수 대조).
                 #   기본(nx)은 웹 준비등록이 옮긴 nx 파트창고를 본다.
-                _prwh = "PARTNER_ERP.dbo" if _ck == "live" else "PARTNER_ERP_TEST3.nx"
-                cur.execute(f"SELECT MAT_CODE, SUM(STOCK_QTY) FROM {_prwh}.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
-                for rr in cur.fetchall(): partstk[rr[0]] = float(rr[1] or 0)
+                # ★2026-08-25 nx 파트창고는 '이력계산'으로 읽는다(_prod_stock_map).
+                #   nx 잔액테이블은 레거시가 만든 잔액의 행이 없고 웹 델타만 담긴 반쪽 값이라,
+                #   화면 생산재고(이력계산)에 523 이 보이는데 충당풀은 0 이라 셀이 안 칠해졌다
+                #   (실측 AJR30027704-SUB6: 표시 523 / nx잔액 0 / 라이브잔액 25 → 셀 0/23 무색).
+                #   src=live 는 레거시 순수대조라 라이브 잔액테이블 그대로 유지.
+                if _ck == "live":
+                    cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
+                    for rr in cur.fetchall(): partstk[rr[0]] = float(rr[1] or 0)
+                else:
+                    for _mk, _mv in _prod_stock_map(cur).items():
+                        if _mv: partstk[_mk] = float(_mv)
                 _ml = {}; _mn = {}
                 cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
                 for rr in cur.fetchall(): _ml[rr[0]] = float(rr[1] or 0)
@@ -619,21 +688,35 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 for _k3 in set(_ml) | set(_mn):
                     _v3 = _ml.get(_k3, 0.0) + max(_mn.get(_k3, 0.0) - _ml.get(_k3, 0.0), 0.0)
                     partstk[_k3] = partstk.get(_k3, 0.0) + _v3
+                # ★2026-08-25 사급(업체)재고도 충당풀에 포함 — 색상 판정은 세 창고 합이어야 한다.
+                #   화면에 사급 127 이 있는데 색이 안 칠해지던 원인(충당풀에 사급이 빠져 있었음).
+                try:
+                    cur.execute("""SELECT ISNULL(n.MAT_CODE,l.MAT_CODE), SUM(
+                                     CASE WHEN n.MAT_CODE IS NULL THEN l.STOCK_QTY ELSE n.STOCK_QTY END)
+                                     FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK n WITH(NOLOCK)
+                                     FULL JOIN PARTNER_ERP.dbo.PU_T_SAGUB_STOCK l WITH(NOLOCK)
+                                       ON l.MAT_CODE=n.MAT_CODE
+                                    GROUP BY ISNULL(n.MAT_CODE,l.MAT_CODE)""")
+                    for rr in cur.fetchall():
+                        partstk[rr[0]] = partstk.get(rr[0], 0.0) + float(rr[1] or 0)
+                except Exception: pass
                 # ★2026-08-23 화면표시 전용 재고(dsp_*) — 충당(partstk/midstk)은 그대로 두고 표시만 레거시와 맞춘다.
                 #   레거시 410 기준(실측 AJJ30041902-SUB: 자재재고 0 / 생산재고 127):
                 #     자재재고 = 그 품번 자체의 자재창고(BOM 재귀롤업 아님)
                 #     생산재고 = 파트창고 + 자재창고 + 사급재고(PU_T_SAGUB_STOCK)
-                #   ※원천은 라이브만 — nx 미러가 멈추면 낡은 값이 커서 max 합산에 살아남기 때문.
-                cur.execute("""SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK)
-                               WHERE CUST_CODE='Z99990' AND GAGONG_PROC_CODE NOT IN ('SA1','SA2','SB1','SB2')
-                               GROUP BY MAT_CODE""")
-                for rr in cur.fetchall(): dsp_mat[rr[0]] = float(rr[1] or 0)
-                cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
-                for rr in cur.fetchall(): dsp_pr[rr[0]] = float(rr[1] or 0)
-                cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK WITH(NOLOCK) GROUP BY MAT_CODE")
-                for rr in cur.fetchall(): dsp_sg[rr[0]] = float(rr[1] or 0)
+                # ★2026-08-25 자재·사급재고 = 라이브∪nx 최신 갱신본(키팅과 동일 헬퍼).
+                dsp_mat = _latest_stock_map(cur, "pu_t_mat_stock_wh", "MAT_CODE",
+                                            "CUST_CODE='Z99990' AND GAGONG_PROC_CODE NOT IN ('SA1','SA2','SB1','SB2')",
+                                            ("CUST_CODE", "GAGONG_PROC_CODE"))
+                # ★생산재고만 이력기준 공용계산 — nx 잔액은 미러 지연 시 웹실적만 담긴
+                #   반쪽 값이라, 라이브·nx 를 어떻게 조합해도 SUB1(0)·SUB6(23)을 동시에 못 맞춘다.
+                #   생산입출고현황과 같은 원천을 쓰므로 두 화면 값이 일치한다.
+                dsp_pr = _prod_stock_map(cur)          # {MAT_CODE: 전 파트 합계}
+                dsp_sg = _latest_stock_map(cur, "PU_T_SAGUB_STOCK", "MAT_CODE")
             except Exception: pass
+            # ★재귀 BOM 롤업(~2초)만 캐시 대상 — 히트면 위에서 복원했으므로 건너뛴다.
             try:
+                if _hit: raise _RollupCached
                 cur.execute("IF OBJECT_ID('tempdb..#tms4') IS NOT NULL DROP TABLE #tms4")
                 cur.execute(f"""
                     ;WITH T_SUB_CTE (item_code, upper_item_code, mat_code, stock_qty, pr_stock_qty, fix_pr_stock_qty) AS (
@@ -664,9 +747,12 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 cur.execute("SELECT upper_item_code, mat_code, SUM(fix_pr_stock_qty) FROM #tms4 GROUP BY upper_item_code, mat_code")
                 for rr in cur.fetchall(): fixstk[(rr[0], rr[1])] = float(rr[2] or 0)
             except Exception: pass
-            _cache[_ck] = {"ts": _now, "r": rstock, "a": assystk, "m": midstk, "f": fixstk, "p": partstk,
-                           "dm": dsp_mat, "dp": dsp_pr, "ds": dsp_sg}
-            plan_part410._stk_cache = _cache
+            # ★캐시는 무거운 재귀 롤업(midstk·fixstk)만. 나머지는 매요청 재조회하므로
+            #   여기 담아두면 낡은 값이 되살아날 여지만 생긴다(실적 반영 지연의 원인).
+            #   ★히트일 때는 다시 쓰지 않는다 — ts 가 갱신되면 캐시가 영원히 안 만료된다.
+            if not _hit:
+                _cache[_ck] = {"ts": _now, "m": midstk, "f": fixstk}
+                plan_part410._stk_cache = _cache
         # ★출하는 항상 라이브 직독(2026-08-20) — 준비실적처리(키팅 /api/kitting/grid line 160)와 동일.
         #   기존엔 {SCH}(src 따라감)라 src=nx 일 때 nx.SA_T_SALE_DTL 을 봤는데, 최근 출하가 nx에
         #   아직 안 넘어와(실측: 라이브 305,335건 vs nx 305,285건) 같은 행이 두 화면에서
@@ -837,9 +923,15 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             #   자재재고 = 그 품번 자체 자재창고(기존 midstk 는 BOM 재귀롤업이라 213 처럼 부풀었음)
             #   생산재고 = 파트창고 + 자재창고 + 사급재고(기존 partstk 는 사급 누락 + nx 낡은값 혼입)
             #   실측 AJJ30041902-SUB: 레거시 자재 0 / 생산 127(=사급) ↔ 기존 웹 213 / 86
-            g["mat_stock"]   = round(dsp_mat.get(g["item"], 0.0), 2)                      # 자재재고(자재창고 직접)
-            g["prod_stock"]  = round(dsp_pr.get(g["item"], 0.0) + dsp_mat.get(g["item"], 0.0)
-                                     + dsp_sg.get(g["item"], 0.0), 2)                     # 생산재고(파트+자재+사급)
+            # ★2026-08-25 세 컬럼을 창고별로 완전히 분리 — 서로 겹치지 않게 한다.
+            #   구버전은 생산재고 = 파트창고+자재창고(+사급) 이라 파트창고가 0 이면
+            #   자재재고와 똑같은 값이 두 컬럼에 표시됐다(실측 AJJ30041902-SUB 둘 다 73).
+            #     자재재고 = 자재창고(PU_T_MAT_STOCK_WH)
+            #     생산재고 = 파트창고(PR_T_MAT_STOCK_WH) — 이력기준 계산
+            #     사급재고 = 사급(PU_T_SAGUB_STOCK)
+            g["mat_stock"]   = round(dsp_mat.get(g["item"], 0.0), 2)                      # 자재재고(자재창고)
+            g["prod_stock"]  = round(dsp_pr.get(g["item"], 0.0), 2)                       # 생산재고(파트창고만)
+            g["sagub_stock"] = round(dsp_sg.get(g["item"], 0.0), 2)                       # 사급(업체)재고
             g["fix_stock"]   = round(fixstk.get((g["upper"], g["item"]), 0.0), 2)         # 도번고정재고(upper,item)
             g["assy_stock"]  = round(assystk.get(g["assy"], 0.0), 2)                      # ASSY재고(제품재고)
             g["sale_qty"]    = round(saled.get((g["wo"], g["swo"], g["assy"]), 0.0), 2)   # 출하(미마감 SALE_DTL)

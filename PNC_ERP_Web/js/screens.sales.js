@@ -11,12 +11,13 @@ SCREEN.prodinvout=(c)=>{
   let frm=_tod.slice(0,4)+'01', to=_tod;   // YYMMDD 수불기간
   const ymd2d=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
   const d2ymd=v=>{v=(''+(v||'')).trim();return v.length>=10?v.slice(2,4)+v.slice(5,7)+v.slice(8,10):'';};
-  let sel=null, curL=[], source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  // ★2026-08-25 source 의미 통일: nx=라이브+웹실적(기본) / live=라이브만 / ledger=웹원장 파생
+  let sel=null, curL=[], source='nx';
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(4);
     const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinvout?${qs}&source=nx`,{title:'제품입출고현황',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/prodinvout?${qs}`);if(!r.ok)throw new Error('HTTP '+r.status);
+    if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinvout?${qs}&source=ledger`,{title:'제품입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
+    try{const r=await fetch(`${API}/api/live/prodinvout?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];mv={};}
     loading=false;
@@ -664,11 +665,39 @@ SCREEN.saleout=(c)=>{
   load();
 };
 
+/* ★출하실적등록 확인/취소 버튼 — 파일 로드시 문서에 딱 한 번 캡처단계로 건다.
+   화면함수(SCREEN.lgsale) 안에서 걸면, 이미 열려 있던 탭은 그 함수가 다시 실행되지 않아
+   새 코드가 영영 안 걸린다(2026-08-25: alert 조차 안 뜨던 진짜 원인).
+   실제 핸들러는 각 화면 인스턴스가 자기 컨테이너의 _s4Fn 에 최신값을 꽂아둔다. */
+if(!window._S4_CLICK_BOUND){
+  window._S4_CLICK_BOUND=1;
+  document.addEventListener('click',ev=>{
+    const b=ev.target&&ev.target.closest?ev.target.closest('#s4-ok,#s4-cancel'):null;
+    if(!b)return;
+    ev.preventDefault(); ev.stopPropagation();
+    if(b.disabled){alert('처리 중입니다. 잠시 후 다시 눌러주세요.');return;}
+    // 버튼이 속한 화면 컨테이너를 위로 올라가며 찾는다(_s4Fn 을 들고 있는 요소).
+    let host=b, fn=null;
+    while(host){ if(host._s4Fn){fn=host._s4Fn;break;} host=host.parentElement; }
+    if(!fn){alert('화면이 준비되지 않았습니다.\n[조회]를 눌러 다시 불러온 뒤 시도해 주세요.');return;}
+    const f=(b.id==='s4-ok')?fn.ok:fn.no;
+    if(!f){alert('처리 함수를 찾지 못했습니다. [조회] 후 다시 시도해 주세요.');return;}
+    try{ f(); }
+    catch(e){ alert('출하처리 중 오류\n\n'+(e&&e.stack?e.stack:e)); }
+  },true);
+}
+
 /* 영업 > 출하실적등록 (레거시 w_pr_input_040) — 제번단위 출하실적.
    드래그로 계획셀 선택 → 우클릭 [확인] = ASSY재고 있는 만큼만 출하처리(재고차감).
    구분 4종(전체/집계/제번/라인) · 라인 드롭다운 · 출하완료셀=살구색. */
 SCREEN.lgsale=(c)=>{
   const API=API_BASE;
+  // ★확인/취소 버튼은 화면 진입 시 딱 한 번 위임으로 건다(draw 안이 아니라 여기).
+  //   draw() 가 중간에 실패하면 draw 안의 바인딩은 전부 날아가 "눌러도 무반응"이 되는데,
+  //   여기에 걸어두면 렌더가 깨져도 출하처리는 살아있다(2026-08-25 무반응 사고).
+  //   실제 핸들러는 draw 마다 c._s4Fn 으로 최신화 — 옛 rows/dates 클로저를 잡지 않게.
+  // 버튼 클릭은 파일 상단에서 문서 전체에 이미 걸어뒀다(_S4_CLICK_BOUND).
+  // 여기서는 draw() 끝에서 c._s4Fn 에 최신 핸들러만 꽂아준다.
   const pad=n=>String(n).padStart(2,"0");
   const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   const nf=v=>(+v||0).toLocaleString('ko-KR');
@@ -685,7 +714,9 @@ SCREEN.lgsale=(c)=>{
   const T=new Date();
   const st={from:iso(T),gigan:4,line:'',wo:'',item:'',view:'전체',src:'nx',
             dates:[],rows:[],cnt:0,loading:false,msg:'',lines:[],sel:new Set(),
-            exp:new Set()};   // ★집계뷰 펼침 블록키(클릭 토글)
+            exp:new Set(),    // ★집계뷰 펼침 블록키(클릭 토글)
+            qov:new Map()};   // ★셀별 출하수량 오버라이드(셀키→수량) — 부분출하(2개중 1개)용.
+                              //   더블클릭으로 조정, 비우면 잔여 전량. 조회하면 초기화.
 
   const loadLines=async()=>{try{const r=await fetch(`${API}/api/sale040/lines?src=${st.src}`);
     st.lines=(await r.json()).rows||[];}catch(e){st.lines=[];}};
@@ -693,11 +724,21 @@ SCREEN.lgsale=(c)=>{
     const qs=new URLSearchParams({from_ymd:st.from,gigan:st.gigan,line:st.line,
                                   wo:st.wo,item:st.item,src:st.src,limit:4000});
     try{const r=await fetch(`${API}/api/sale040/grid?${qs}`);const d=await r.json();
-      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.msg='';st.sel.clear();}
+      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.msg='';st.sel.clear();st.qov.clear();}
     catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.rows=[];st.cnt=0;}
     st.loading=false;draw();};
 
-  const draw=()=>{
+  // ★draw 안에서 예외가 나면 버튼 바인딩(#s4-ok)까지 못 가서 "확인 눌러도 무반응"이 된다.
+  //   그런데 예외가 rAF/이벤트 밖이면 콘솔에도 안 남는 경우가 있어 원인 추적이 불가능했다.
+  //   → 래퍼로 잡아 화면 상단에 그대로 띄운다(2026-08-25 무반응 사고).
+  const draw=(...a)=>{try{return _draw(...a);}
+    catch(e){try{console.error('[040] draw 실패',e);}catch(_){}
+      const box=c.querySelector('#s4-msg');
+      const t='화면 렌더 오류 — '+(e&&e.stack?e.stack:e);
+      if(box)box.innerHTML='<span style="color:#c0392b;white-space:pre-wrap">'+t.replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]))+'</span>';
+      else alert(t);
+      throw e;}};
+  const _draw=()=>{
     const dates=st.dates;
     // 필터(클라 즉시) — 제번·도번
     const q=s=>(s||'').trim().toUpperCase();
@@ -741,11 +782,17 @@ SCREEN.lgsale=(c)=>{
       const done=sd>0&&rem<=0;                              // 그 셀 전량출하 = 살구
       const bg=del?'#eceff1':(done?'#fac090':(_cov[k]?'#ffff00':''));  // 재고충당 = 노랑
       const lock=del||(rem<=0&&sd<=0);                      // 출하분은 취소해야 하므로 선택가능
-      return `<td class="num s4c${lock?' s4lock':''}${st.sel.has(k)?' s4sel':''}"`
+      // ★부분출하 오버라이드 — 잔여보다 적게 잡아둔 셀은 파란 밑줄로 표시
+      const ov=(!lock&&rem>0&&st.qov.has(k))?st.qov.get(k):null;
+      const hasOv=ov!==null&&ov<rem;
+      return `<td class="num s4c${lock?' s4lock':''}${st.sel.has(k)?' s4sel':''}${hasOv?' s4ov':''}"`
         +`${lock?'':` data-k="${esc2(k)}" data-rem="${rem}" data-sd="${sd}"`}`
         +` style="white-space:nowrap${bg?';background:'+bg:''}"`
-        +` title="${del?'전일 삭제계획(참고용) — 출하대상 아님':(done?('출하 '+nf(sd)+'/'+nf(pl)+' — 우클릭: 확인/취소'):'우클릭: 확인/취소')}"`
-        +`>${sd?nf(sd)+'/'+nf(pl):nf(pl)}</td>`;};
+        +` title="${del?'전일 삭제계획(참고용) — 출하대상 아님'
+             :(hasOv?('출하수량 '+nf(ov)+' / 잔여 '+nf(rem)+' — 더블클릭: 수량조정 · 우클릭: 확인/취소')
+             :(done?('출하 '+nf(sd)+'/'+nf(pl)+' — 우클릭: 확인/취소')
+                   :'더블클릭: 수량조정 · 우클릭: 확인/취소'))}"`
+        +`>${hasOv?('<b>'+nf(ov)+'</b>/'+nf(rem)):(sd?nf(sd)+'/'+nf(pl):nf(pl))}</td>`;};
 
     const NC=16;   // 고정컬럼 17개 → colspan 은 NC+1+dates.length
     // Output = 계획일자 + 출력시각 (레거시 '26/08/21 21:00' 형식)
@@ -905,6 +952,9 @@ SCREEN.lgsale=(c)=>{
        .s4c.s4sel{background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72));
                   outline:2px solid #4a86e8;outline-offset:-2px;font-weight:700}
        .s4c.s4lock{cursor:default}
+       /* 부분출하(수량조정) 셀 — 잔여보다 적게 잡아둔 칸 */
+       .s4c.s4ov{box-shadow:inset 0 -3px 0 #1d4ed8}
+       .s4c.s4ov b{color:#1d4ed8}
        /* 드래그 선택은 계획셀(.s4c)에서만 막는다. 나머지 칸은 Ctrl+C 복사 가능 */
        .s4tbl tbody td{user-select:text;-webkit-user-select:text}
        .s4tbl tbody td.s4c{user-select:none;-webkit-user-select:none}
@@ -923,7 +973,7 @@ SCREEN.lgsale=(c)=>{
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
-     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · ${st.src==='live'?'🔴 레거시(라이브 직독·대사용)':'🟢 nx'}</div>
+     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <b>더블클릭</b>=수량조정(부분출하) ·<span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · ${st.src==='live'?'🔴 레거시(라이브 직독·대사용)':'🟢 nx'}</div>
      <div class="toolbar" style="flex:0 0 auto">
        <label class="tl">기준일자</label><input class="inp" type="date" id="s4-from" value="${st.from}">
        <label class="tl">라인</label>
@@ -1069,10 +1119,15 @@ SCREEN.lgsale=(c)=>{
     // 드래그 중엔 매 프레임 DOM 을 건드리지 않도록 rAF 로 합친다.
     let _siReq=0;
     const selInfoNow=()=>{const e=g('#s4-selinfo');if(!e)return;
-      let q=0; st.sel.forEach(k=>{q+=_remOf.get(k)||0;});
+      // ★수량조정(qov)한 셀은 조정수량으로 센다 — 안 그러면 "1/2 인데 수량 2"로 표시된다.
+      let q=0; st.sel.forEach(k=>{const rm=_remOf.get(k)||0;
+        q+=st.qov.has(k)?Math.max(0,Math.min(rm,+st.qov.get(k)||0)):rm;});
       e.innerHTML=st.sel.size?`선택 <b>${nf(st.sel.size)}</b>칸 · 수량 <b>${nf(q)}</b>`:'';};
     const selInfo=()=>{if(_siReq)return;
       _siReq=requestAnimationFrame(()=>{_siReq=0;selInfoNow();});};
+    // ★이 블록에서 예외가 나면 아래 버튼 바인딩(#s4-ok)까지 못 가서 "확인 눌러도 무반응"이 된다.
+    //   드래그선택은 부가기능이므로 실패해도 출하처리는 살아있어야 한다 → try 로 격리(2026-08-25).
+    try{
     if(tb&&gw){
       // 계획셀(.s4c)에서 시작한 드래그만 선택을 막는다 — 그 외 칸은 Ctrl+C 복사 가능
       gw.onselectstart=e=>{const t=e.target;return !(t&&t.closest&&t.closest('td.s4c'));};
@@ -1136,6 +1191,66 @@ SCREEN.lgsale=(c)=>{
           const td=cellAt(_mvXY.x,_mvXY.y)||_last;
           if(td){_last=td;applyRect(td);}});});
       document.addEventListener('mouseup',_stop);
+      // ★더블클릭 = 수량조정(레거시 w_pr_input_015 수량조정 팝업)
+      //   2개 계획 중 1개만 출하하는 경우가 있어 셀 단위로 출하량을 정할 수 있게 한다.
+      //   모달은 body 에 렌더(§3 — .content 안에 fixed 를 넣으면 잘린다).
+      const qtyDlg=(k,rem)=>{
+        const old=document.getElementById('s4-qov'); if(old)old.remove();
+        const cur=st.qov.has(k)?Math.max(0,Math.min(rem,+st.qov.get(k)||0)):rem;
+        const ov=document.createElement('div'); ov.id='s4-qov';
+        ov.style.cssText='position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center';
+        ov.innerHTML=`<div style="background:#fff;border:1px solid #90a4bd;border-radius:6px;min-width:330px;box-shadow:0 6px 22px rgba(0,0,0,.3);font-size:13px">
+          <div style="background:#2f6fb3;color:#fff;padding:6px 10px;font-weight:600;display:flex;justify-content:space-between">
+            <span>수량조정 (범위 0 ~ ${nf(rem)})</span><span id="s4q-x" style="cursor:pointer">✕</span></div>
+          <div style="padding:20px 22px;display:flex;align-items:center;gap:12px;justify-content:center">
+            <label style="background:#dbe6f2;border:1px solid #b8c8dc;padding:4px 14px;font-weight:600">수량</label>
+            <input id="s4q-v" type="number" min="0" max="${rem}" step="1" value="${cur}"
+                   style="width:120px;padding:5px 8px;border:1px solid #90a4bd;text-align:right;font-size:15px">
+            <span style="color:#7a8aa0">/ ${nf(rem)}</span></div>
+          <div style="padding:0 22px 16px;display:flex;gap:8px;justify-content:flex-end">
+            <button id="s4q-no" class="btn">닫기</button>
+            <button id="s4q-ok" class="btn" style="background:#1c7c3a;color:#fff">✔ 이 수량으로 출하처리</button></div></div>`;
+        document.body.appendChild(ov);
+        const inp=ov.querySelector('#s4q-v');
+        inp.focus(); inp.select();
+        const close=()=>ov.remove();
+        const save=()=>{
+          let v=Math.floor(+inp.value||0);
+          if(!(v>=0)){msg('수량은 0 이상 숫자여야 합니다.',false);return;}
+          if(v>rem){msg(`잔여계획(${nf(rem)})보다 많이 출하할 수 없습니다.`,false);return;}
+          if(v>=rem)st.qov.delete(k); else st.qov.set(k,v);   // 전량이면 오버라이드 해제
+          // ★수량조정한 셀은 반드시 '선택' 상태로 만든다.
+          //   더블클릭은 mousedown 을 2번 발생시키는데, 2번째가 선택토글 분기(위 mousedown
+          //   핸들러: 이미 선택된 단일셀이면 해제)에 걸려 선택이 풀린다. 그대로 두면
+          //   조정만 하고 [확인]을 눌러도 선택이 없어 아무것도 출하되지 않는다
+          //   (2026-08-25 실측: 2개중 1개 조정 후 확인 → SA_T_SALE_DTL 0행).
+          if(v>0)st.sel.add(k); else st.sel.delete(k);
+          close();
+          if(v<=0){
+            const w0=c.querySelector('.grid-wrap');const sy=w0?w0.scrollTop:0,sx=w0?w0.scrollLeft:0;
+            draw();
+            const w1=c.querySelector('.grid-wrap');if(w1){w1.scrollTop=sy;w1.scrollLeft=sx;}
+            msg('수량 0 — 이 칸은 출하되지 않습니다.',true);
+            return;}
+          // ★여기서 곧바로 출하처리까지 끝낸다.
+          //   조정만 해두고 별도로 [확인]을 누르게 하면 그 사이 선택이 풀리거나
+          //   버튼이 안 먹는 경우가 있어 "조정했는데 실적이 안 잡힌다"가 반복됐다
+          //   (2026-08-25). 사용자가 수량을 정한 순간이 곧 출하 의사표시다.
+          doConfirm();};
+        ov.querySelector('#s4q-ok').onclick=save;
+        ov.querySelector('#s4q-no').onclick=close;
+        ov.querySelector('#s4q-x').onclick=close;
+        ov.onclick=e=>{if(e.target===ov)close();};
+        inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save();}
+                          else if(e.key==='Escape'){e.preventDefault();close();}};};
+      // ★qtyDlg 정의 뒤에 바인딩(TDZ 회피 — core.js/이 화면에서 반복된 함정)
+      tb.addEventListener('dblclick',ev=>{
+        const td=ev.target.closest('td.s4c[data-k]'); if(!td)return;
+        ev.preventDefault();
+        const rem=+td.getAttribute('data-rem')||0;
+        if(rem<=0){msg('출하할 잔여계획이 없는 칸입니다.',false);return;}
+        qtyDlg(td.getAttribute('data-k'),rem);});
+
       // 우클릭 = 확인/취소 메뉴(생산준비등록과 동일). body 에 렌더(§3)
       gw.oncontextmenu=(ev)=>{
         const td=ev.target.closest('td.s4c[data-k]'); if(!td)return;
@@ -1143,9 +1258,12 @@ SCREEN.lgsale=(c)=>{
         if(!st.sel.has(td.getAttribute('data-k'))){clearAll();
           st.sel.add(td.getAttribute('data-k'));td.classList.add('s4sel');selInfo();}
         let qOk=0,qNo=0;
-        rows.forEach(r=>dates.forEach(d=>{if(!st.sel.has(ckey(r,d)))return;
+        rows.forEach(r=>dates.forEach(d=>{const kk=ckey(r,d); if(!st.sel.has(kk))return;
           const pl=(r.days&&r.days[d])||0, s2=(r.sday&&r.sday[d])||0;
-          const rm=Math.max(0,pl-s2); if(rm>0)qOk+=rm; if(s2>0)qNo+=s2;}));
+          const rm=Math.max(0,pl-s2);
+          // ★수량조정한 셀은 조정수량으로 집계
+          if(rm>0)qOk+=st.qov.has(kk)?Math.max(0,Math.min(rm,+st.qov.get(kk)||0)):rm;
+          if(s2>0)qNo+=s2;}));
         const canC=qOk>0, canX=qNo>0;
         const old=document.getElementById('s4-ctxmenu'); if(old)old.remove();
         const mn=document.createElement('div'); mn.id='s4-ctxmenu';
@@ -1167,6 +1285,7 @@ SCREEN.lgsale=(c)=>{
           const x=document.getElementById('s4-ctxmenu');if(x)x.remove();},{once:true}),0);
       };
     }
+    }catch(_e){try{console.error('[040] 드래그선택 바인딩 실패(출하처리는 계속 동작)',_e);}catch(__){}}
 
     // 선택셀 → 처리대상
     const picked=()=>{const out=[];
@@ -1174,7 +1293,11 @@ SCREEN.lgsale=(c)=>{
         if(!st.sel.has(ckey(r,d)))return;
         const pl=(r.days&&r.days[d])||0,sd=(r.sday&&r.sday[d])||0;
         const rem=Math.max(0,pl-sd);
-        if(rem>0)out.push({wo:r.wo,swo:r.swo,item:r.item,line_no:r.line_no,ymd:d,qty:rem});}));
+        if(rem<=0)return;
+        // ★수량조정(더블클릭)한 셀은 그 수량만, 없으면 잔여 전량
+        const k=ckey(r,d);
+        const q=st.qov.has(k)?Math.max(0,Math.min(rem,+st.qov.get(k)||0)):rem;
+        if(q>0)out.push({wo:r.wo,swo:r.swo,item:r.item,line_no:r.line_no,ymd:d,qty:q});}));
       return out;};
     const msg=(t,ok)=>{const e=g('#s4-msg');if(e)e.innerHTML=`<span style="color:${ok?'#1c7c3a':'#c0392b'}">${esc2(t)}</span>`;};
     // 부분갱신 — 서버 done[] 을 st.rows 에 반영하고 표만 다시 그린다(재조회 X, 스크롤 유지)
@@ -1188,6 +1311,7 @@ SCREEN.lgsale=(c)=>{
         if(x.left!==undefined&&x.left!==null)left[x.item]=+x.left;});
       st.rows.forEach(r=>{if(r.item in left)r.stock_qty=left[r.item];});
       st.sel.clear();
+      st.qov.clear();   // 처리 끝난 셀의 수량조정은 소멸(남은 잔여는 다시 전량 기준)
       const w0=c.querySelector('.grid-wrap');const sy=w0?w0.scrollTop:0,sx=w0?w0.scrollLeft:0;
       draw();
       const w1=c.querySelector('.grid-wrap');if(w1){w1.scrollTop=sy;w1.scrollLeft=sx;}};
@@ -1195,7 +1319,13 @@ SCREEN.lgsale=(c)=>{
     const doConfirm=async()=>{
       if(st.src==='live'){msg('레거시 대사 모드에서는 출하처리를 할 수 없습니다(읽기전용). 소스를 우리(nx)로 바꾸세요.',false);return;}
       const cells=picked();
-      if(!cells.length){msg('출하처리할 셀을 선택하세요(계획 남은 칸).',false);return;}
+      try{console.log('[040 확인] 선택',st.sel.size,'칸 / 조정',st.qov.size,'건 → 전송',cells);}catch(e){}
+      if(!cells.length){
+        msg('출하처리할 셀을 선택하세요(계획 남은 칸).',false);
+        alert('출하할 셀이 선택되지 않았습니다.\n\n'
+             +`선택 ${st.sel.size}칸 / 수량조정 ${st.qov.size}건\n\n`
+             +'계획 칸을 클릭해 선택한 뒤 다시 눌러주세요.');
+        return;}
       // ★ASSY재고 부족 사전점검 — 서버는 "재고만큼만" 출하하므로, 선택량을 다 못 잡는 경우
       //   무엇이 얼마나 모자란지 먼저 알리고 진행여부를 묻는다.
       //   같은 도번을 여러 셀이 함께 쓰면 재고를 나눠 쓰므로 도번 단위로 합산해 판정.
@@ -1221,8 +1351,11 @@ SCREEN.lgsale=(c)=>{
         const d=await(await fetch(`${API}/api/sale040/confirm`,{method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({cells:cells,user:'웹',ymd:st.from})})).json();
-        if(d.ok){applyLocal(d.done||[],+1);msg('✔ '+d.msg,true);} else msg(d.msg||'출하처리 실패',false);
-      }catch(e){msg('출하처리 실패',false);}
+        if(d.ok){applyLocal(d.done||[],+1);msg('✔ '+d.msg,true);}
+        else {msg(d.msg||'출하처리 실패',false);alert('출하처리 실패\n\n'+(d.msg||JSON.stringify(d)));}
+      }catch(e){try{console.error('[040 확인] 실패',e);}catch(_){}
+        msg('출하처리 실패 — '+(e&&e.message?e.message:e),false);
+        alert('출하처리 요청 실패\n\n'+(e&&e.stack?e.stack:e));}
       finally{const b=c.querySelector('#s4-ok');if(b)b.disabled=false;}};
 
     const doCancel=async()=>{
@@ -1243,8 +1376,9 @@ SCREEN.lgsale=(c)=>{
       }catch(e){msg('취소 실패',false);}
       finally{const b=c.querySelector('#s4-cancel');if(b)b.disabled=false;}};
 
-    g('#s4-ok').onclick=doConfirm;
-    g('#s4-cancel').onclick=doCancel;
+    // ★버튼 클릭은 화면 진입 시 위임으로 이미 걸려 있다(SCREEN.lgsale 상단).
+    //   여기서는 실행할 핸들러만 최신으로 갈아끼운다 — draw 가 깨져도 버튼은 죽지 않는다.
+    c._s4Fn={ok:doConfirm,no:doCancel};
     selInfo();
   };
   (async()=>{await loadLines();load();})();
