@@ -114,6 +114,30 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
     finally:
         nx.close()
 
+def _prd_mirror_ins(cur, ymd, part, mat, item, tag, qty, cost, amt, rem):
+    """★생산재고조회(w_pr_stock_480, _prodstock)는 PR_T_STOCK_MAINT_MAT를 읽음 → 생산파트조정이 여기에도 써야 조회 반영.
+       tag: 조정='2'/불량='1'(조회에서 조정 etc열), 자체 SEQ 채번(당일 MAX+1). INSERT_WINDOW='stockmaint'로 웹행 식별(수정/삭제 매칭용)."""
+    try:
+        mtag = str(tag or '2').strip()[:1] or '2'
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=?", ymd)
+        msq = int(cur.fetchone()[0] or 1)
+        cur.execute("""INSERT INTO nx.PR_T_STOCK_MAINT_MAT
+              (MAINT_YMD,MAINT_SEQ,MAINT_TAG,PART_CODE,MAT_CODE,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,
+               INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW)
+              VALUES(?,?,?,?,?,?,?,?,?,?,'web',GETDATE(),'stockmaint')""",
+            ymd, msq, mtag, (part or None), mat, (item or None), qty, cost, amt, (rem or None))
+    except Exception: pass
+def _prd_mirror_del(cur, ymd, part, mat, tag, qty):
+    """생산파트조정 수정/삭제 시 대응 미러행(웹생성) 제거 — 시그니처 매칭 TOP 1."""
+    try:
+        mtag = str(tag or '2').strip()[:1] or '2'
+        cur.execute("""SELECT TOP 1 MAINT_YMD,MAINT_SEQ FROM nx.PR_T_STOCK_MAINT_MAT
+              WHERE MAINT_YMD=? AND MAT_CODE=? AND ISNULL(PART_CODE,'')=? AND MAINT_TAG=? AND ABS(MAINT_QTY-?)<0.0001
+                AND INSERT_WINDOW='stockmaint' ORDER BY MAINT_SEQ DESC""", ymd, mat, (part or ''), mtag, qty)
+        h = cur.fetchone()
+        if h: cur.execute("DELETE FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ=?", h[0], h[1])
+    except Exception: pass
+
 @router.post("/api/stockmaint/save")
 def stockmaint_save(payload: dict = Body(...)):
     p = payload
@@ -146,7 +170,11 @@ def stockmaint_save(payload: dict = Body(...)):
                 oy, osq = str(mid).split("-"); osq = int(osq)
                 if _closed(cur, oy):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
+                # ★기존 미러행 제거용 옛값 읽기(삭제 전)
+                cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
+                _o = cur.fetchone()
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
+                if _o: _prd_mirror_del(cur, oy, str(_o[0]).strip(), str(_o[1]).strip(), str(_o[2]).strip(), float(_o[3] or 0))
             except (ValueError, AttributeError):
                 pass
         cur.execute("""INSERT INTO nx.stock_ledger
@@ -155,6 +183,8 @@ def stockmaint_save(payload: dict = Body(...)):
             VALUES('PRD',?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE())""",
             ymd, seq, led_tag, (part or None), (work or None), (pwc or None),
             mat, (item or None), qty, cost, amt, (rem or None), usr)
+        # ★F-생산: 조회원천(PR_T_STOCK_MAINT_MAT)에도 반영 → 생산재고조회에 보이게
+        _prd_mirror_ins(cur, ymd, part, mat, item, led_tag, qty, cost, amt, rem)
         return {"ok": True, "id": f"{ymd}-{seq}", "mode": ("update" if mid else "insert")}
     finally:
         nx.close()
@@ -174,8 +204,12 @@ def stockmaint_delete(payload: dict = Body(...)):
                 continue
             if _closed(cur, y):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
+            # ★삭제 전 옛값 읽어 조회원천 미러행도 제거
+            cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
+            _o = cur.fetchone()
             cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
             dl += cur.rowcount
+            if _o: _prd_mirror_del(cur, y, str(_o[0]).strip(), str(_o[1]).strip(), str(_o[2]).strip(), float(_o[3] or 0))
         return {"ok": True, "deleted": dl}
     finally:
         nx.close()

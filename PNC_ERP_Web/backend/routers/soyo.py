@@ -18,6 +18,18 @@ _P = "nx."   # ★nx전환 확정(2026-08-12). ★단일BOM 통일(2026-08-13): 
 def plan_compose_mat(payload: dict = Body(...)):
     nx = _nx(); cur = nx.cursor()
     try:
+        # ── ★D 사전검증(§19-D·2026-08-25): 활성 지정된 대체경로(Rnn)가 게이트(승인·구조·업체·단가) 미충족이면
+        #    생산계획 편성 자체를 중단(어떤 DML도 전·plan_part_mat 미접촉) + 어느 품번/경로가 무엇이 빠졌는지 정확히 통지.
+        #    활성 지정 Rnn 없거나(=현행 R01만) 전부 완비면 통과 → 정상 편성. 협력사계획은 plan_part_mat 재사용이라 자연 차단.
+        _gate_bad = _route_gate_incomplete(cur)
+        if _gate_bad:
+            _lines = ["· 품번 {} 경로 R{:02d}{}: {}".format(
+                          b["item"], b["route_no"],
+                          "(" + b["route_name"] + ")" if b["route_name"] else "",
+                          ", ".join(b["missing"])) for b in _gate_bad]
+            raise HTTPException(400, "생산계획 편성 불가 — 활성 지정된 대체경로(Rnn) {}건이 미완성입니다.\n".format(len(_gate_bad))
+                + "아래 경로를 완료(승인·업체·단가 등록)하거나 현행(R01)로 되돌린 뒤 다시 편성하세요:\n"
+                + "\n".join(_lines))
         # ── STEP M 신규모델생성(주문⋈계획 제번조인, use=CEILING(order/lot), 3중제외) ──
         cur.execute("DELETE FROM nx.model_bom WHERE REMARKS='신규모델자동'")
         cur.execute("""INSERT INTO nx.model_bom(MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO,REMARKS,INS_DT)
@@ -475,11 +487,52 @@ def _step6_sql(cur):
         WHERE b.plan_ymd=a.plan_ymd AND b.work_order=a.work_order AND b.split_work_order=a.split_work_order AND b.assy_item_code=a.assy_item_code
           AND b.bom_level=a.bom_level AND b.upper_item_code=a.upper_item_code AND b.item_code=a.item_code AND b.proc_seq<a.proc_seq ORDER BY b.proc_seq DESC),'')""")
 
+# ★★활성 게이트(§19-C·2026-08-25 사용자 확정): 활성 지정 Rnn(current_flag=1·route_no>1)이 아래 4개 다 갖춰야 계획 활성.
+#   ①승인 approve_flag=1 ②구조 route_edges ③업체 sourcing_profile.vendor ④단가 buy_price/sagub_price.
+#   ★한 곳 정의(_ROUTE_GATE_SQL) → _route_setup(생산·협력사 plan_route_active)·_route_gate_incomplete(편성 사전검증 D)·원가 공유.
+#   미완성 Rnn은 어디서도 안 켜짐 → R01(route_no=1) 현행 그대로. h=nx.sourcing_route 별칭 전제.
+_ROUTE_GATE_SQL = """ISNULL(h.approve_flag,0)=1
+      AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
+      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>'')
+      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))"""
+
+
+def _ensure_profile_price(cur):
+    """게이트 SQL이 참조하는 sourcing_profile 단가컬럼 멱등 보장(신선 nx 대비)."""
+    cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','buy_price') IS NULL ALTER TABLE nx.sourcing_profile ADD buy_price FLOAT NULL")
+    cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','sagub_price') IS NULL ALTER TABLE nx.sourcing_profile ADD sagub_price FLOAT NULL")
+
+
+def _route_gate_incomplete(cur):
+    """★D 사전검증(§19-D): 활성 지정된 Rnn(current_flag=1·route_no>1) 중 게이트(§19-C) 미충족 목록+사유.
+       반환 [{route_id,item,route_no,route_name,missing[]}]. 편성(compose)이 이걸로 업로드 실패·정확 메시지·중단."""
+    _ensure_profile_price(cur)
+    cur.execute("""SELECT h.route_id, LTRIM(RTRIM(h.item_code)), ISNULL(h.route_no,1), ISNULL(h.route_name,''),
+          ISNULL(h.approve_flag,0),
+          (SELECT COUNT(*) FROM nx.route_edges re WHERE re.route_id=h.route_id),
+          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>''),
+          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))
+        FROM nx.sourcing_route h
+        WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1""")
+    bad = []
+    for rid, item, rno, rname, appr, ne, nv, npx in cur.fetchall():
+        miss = []
+        if not int(appr or 0): miss.append("미승인")
+        if not int(ne or 0): miss.append("구조 미반영(저장 안 됨)")
+        if not int(nv or 0): miss.append("업체 미지정")
+        if not int(npx or 0): miss.append("단가 미지정")
+        if miss:
+            bad.append({"route_id": int(rid), "item": str(item).strip(), "route_no": int(rno),
+                        "route_name": str(rname).strip(), "missing": miss})
+    return bad
+
+
 def _route_setup(cur):
-    """★조달경로 반영 인프라(2026-08-24). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
-    - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지. 대체경로 등록시 채움(materializer 별도). 없으면 fallback.
-    - nx.plan_route_active(assy_item_code,route_id): 활성 대체경로(sourcing_route current_flag=1·route_no>1)이면서 route_edges 보유한 제품만.
+    """★조달경로 반영 인프라(2026-08-24, 게이트강화 2026-08-25). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
+    - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지(Rnn 저장시 자동등록·§19-A). 없으면 fallback.
+    - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만(current_flag=1·route_no>1·승인·route_edges·업체·단가).
       기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%)."""
+    _ensure_profile_price(cur)
     # ★타입=plan_part_dtl.item_code(varchar20)·v_pr_bom.mat_code(varchar20) 정합(재귀CTE 앵커 타입일치 필수). nvarchar 쓰면 STEP7 재귀 타입불일치 오류.
     cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
         route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
@@ -488,7 +541,7 @@ def _route_setup(cur):
     cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(h.item_code))) AS assy_item_code, MIN(h.route_id) AS route_id
         INTO nx.plan_route_active FROM nx.sourcing_route h
         WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1
-          AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
+          AND """ + _ROUTE_GATE_SQL + """
         GROUP BY UPPER(LTRIM(RTRIM(h.item_code)))""")
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
