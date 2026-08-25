@@ -80,3 +80,14 @@
 - **#4 seed=BASE(구조 전부품)**: `_base_flat_lines`·`_insert_current_tree`의 재료비필터→leaf판정. 검증: `_base_flat_lines`=37·현행복사 seed=37·missing0/extra0·공수합224 불변. **S1 통과.** (기존 깨진 route는 재복사 필요.)
 - **#3 새로고침/탭닫기 롤백**: screens.dev.js `window._spRollback` 세션표식 + pagehide/beforeunload에서 `sendBeacon`(edit=edit_cancel/fresh=delete). openDetail서 세팅·save/register/close/cancel서 해제. 서버측 edit_cancel/delete=기존(닫기와 동일·검증됨). **S9 = 저장 외 모든 종료=롤백 완성.**
 - 남은: S2·S4·S5·S6·S10 시나리오 전수 검증 하네스.
+
+## §11. ★시나리오 검증 하네스 통과 (2026-08-25) — 21/21 PASS
+- 하네스: `_harness/sub_workflow_harness.py`. 실제 엔드포인트 핸들러(sub_create·part_assign·sub_dissolve·finalize)를 커밋/롤백/close 무력화 프록시로 호출 → 불변식 assert → 전 롤백(라이브 무접촉).
+- **S1 현행복사 seed=BASE(37)**: 부품수=BASE·part_ok·gongsu_ok(224)·staged_ok. ✅ (#4 검증)
+- **S2 SUB 묶기**: SUB생성·선택부품 parent_line=SUB·staged=0·부품수불변·공수합보존. ✅
+- **S4 부품 이동(→평면)**: parent_line=NULL·부품수불변·공수합보존. ✅
+- **S5 SUB 해체**: SUB행삭제·하위부품 평면복귀·부품수불변·공수합보존(조립공정 ASSY이관). ✅
+- **S6 보관함**: staged=1→finalize staged_ok=False(차단)→재배치 staged=0→통과. ✅
+- **S7 저장 게이트**: part·gongsu·staged 전 통과. ✅
+- 미커버(향후): S10 승인/SUB 정본 mint(시그니처·채번), 중첩SUB(서브안의서브), 용접 포함 어셈블리.
+- ∴ **워크플로우 핵심 시나리오(S1·S2·S4·S5·S6·S7) 불변식 전수 통과.**
