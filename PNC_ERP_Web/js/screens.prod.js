@@ -766,7 +766,7 @@ SCREEN.partplan=(c)=>{
     // ★전체를 한 번만 조회해 캐시 → 파트·라인·ASSY도번·도번·제번·미생산·구분은 재조회 없이 클라이언트에서 즉시 필터(레거시 동일).
     //   재조회(=조회버튼)는 기준일·자도번작업처·적용일수·소스 변경 시만.
     const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,view:'상세',unfin:'전체',src:st.src,limit:40000});
-    try{const r=await fetch(`${API}/api/plan/part410?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.inwon=j.inwon||0;st.note=j.note||'';st.msg='';}
+    try{const r=await fetch(`${API}/api/plan/part410?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.inwon=j.inwon||0;st.inwonBy=j.inwon_by||{};st.note=j.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';st.rows=[];st.dates=[];}
     st.loading=false;render();};
   const shiftDay=n=>{const d=new Date(st.base);d.setDate(d.getDate()+n);st.base=iso(d);load();};
@@ -1014,7 +1014,11 @@ SCREEN.partplan=(c)=>{
     ppRest=_chunks?_chunks.slice(PP_PAGE):null;
     const tbodyHtml=_chunks?_chunks.slice(0,PP_PAGE).join(''):_fullBody;
     const tfootHtml=(()=>{if(!disp.length)return '';
-      const iw=st.inwon||0;const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);
+      // ★2026-08-25 인원 = 선택한 파트의 인원. 파트 미선택(전체)일 때만 전체합.
+      //   서버는 전체를 한 번만 주므로(클라이언트 필터 구조) 파트별 맵에서 골라 쓴다.
+      //   예) 01라인(용접)=S5 9명 / 05라인=S11 8명 / 전체 111명.
+      const iw=(st.part&&st.inwonBy)?(+st.inwonBy[st.part]||0):(st.inwon||0);
+      const fSTtot=fSTprior+d.reduce((s,x)=>s+fSTd(x),0);
       const footRow=(label,vals)=>{let put=false;
         return headOrder.map(k=>{
           if(vals[k]!==undefined)return `<td class="center">${vals[k]}</td>`;

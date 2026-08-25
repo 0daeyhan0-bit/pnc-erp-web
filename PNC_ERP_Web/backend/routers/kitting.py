@@ -894,17 +894,26 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     if (g["item"], g["gpc"]) in nxst: g["item_st"] = nxst[(g["item"], g["gpc"])] * 100.0 / (float(g["rate"] or 100) or 100)   # 그 파트 ST ÷ prod_rate × 100
             except Exception: pass
         # 인원(y_inwon) — 레거시: COUNT(PR_M_PROC_GAGONG⋈WORKER work_flag='1', 파트필터 gpc·part_group like)
+        # ★2026-08-25 화면은 전체를 한 번 받아 파트를 클라이언트에서 필터하므로(재조회 없음)
+        #   인원도 파트별 맵(inwon_by)으로 같이 내려준다. 안 그러면 파트를 골라도
+        #   계상근무공수가 늘 전체인원(111명)으로 나눠져 값이 틀린다.
         inwon = 0
+        inwon_by = {}
         try:
             gp = (part.strip() or '%')
             cur.execute(f"""SELECT COUNT(*) FROM {SCH}.PR_M_PROC_GAGONG a
                 JOIN {SCH}.PR_M_PROC_GAGONG_WORKER b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
                 WHERE b.WORK_FLAG='1' AND a.GAGONG_PROC_CODE LIKE ?""", gp)
             inwon = int(cur.fetchone()[0] or 0)
+            cur.execute(f"""SELECT a.GAGONG_PROC_CODE, COUNT(*) FROM {SCH}.PR_M_PROC_GAGONG a
+                JOIN {SCH}.PR_M_PROC_GAGONG_WORKER b ON a.GAGONG_PROC_CODE=b.GAGONG_PROC_CODE
+                WHERE b.WORK_FLAG='1' GROUP BY a.GAGONG_PROC_CODE""")
+            inwon_by = {str(r[0]).strip(): int(r[1] or 0) for r in cur.fetchall()}
         except Exception: pass
         note = f"⚠ 상위 {limit}건 초과 — 파트·작업처·도번으로 필터하세요." if capped else ""
         return {"dates": dates, "rows": rows, "cnt": len(rows), "src": ("live" if SCH.endswith("dbo") else "nx"),
-                "plan_sum": sum(r["plan_qty"] for r in rows), "inwon": inwon, "note": note}
+                "plan_sum": sum(r["plan_qty"] for r in rows), "inwon": inwon,
+                "inwon_by": inwon_by, "note": note}
     finally:
         cn.close()
 
