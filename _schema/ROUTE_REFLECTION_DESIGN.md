@@ -405,3 +405,8 @@
 - ★검증(실함수·rid=1580·DB롤백): route_edges=v_pr_bom active base **47=47 diff0 상속**·**sourcing_profile before0=after0 미접촉**·롤백 무변경.
 - 규칙: route_edges=v_pr_bom active base + sourcing_route_line 외주/매입/사급 노드 정지(subtree제거). grain안전(base=제작단위 leaf정지). 한계=정지방향(외주화)만·외주→제작 전개는 explicit-edge(§18-2, 향후).
 - 다음: B(조달프로파일 저장검증) → C(공통 게이트 함수) → D(편성 사전검증·협력사·원가).
+
+### §19-2. B 구현·검증 완료(2026-08-25·dev)
+- sourcing.py `sourcing_profile_save`(/api/sourcing/profile/save)에 사전검증 추가: 저장행 각각 **업체 미지정 or 단가(buy_price·sagub_price 둘다) 미입력 → 저장 거부**(gate=INCOMPLETE·사유목록). 완전 빈행/삭제행=무시.
+- ★검증(순수로직 8케이스): 업체+매입가 OK·업체+사급가 OK·업체O단가X 거부·업체X단가O 거부·빈행 통과·삭제행 통과·활성만(업체X) 거부·혼합 정확. 8/8.
+- 효과: sourcing_profile엔 업체+단가 완비행만 존재 → 게이트 C의 ③④ 판정 단순화.
