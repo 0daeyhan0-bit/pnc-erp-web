@@ -72,3 +72,11 @@
 2. **SUB 재고점 결선**: `품번_S{nn}` 재고 backfill + backflush를 SUB grain 소비로 확장(ROUTE_DIMENSION K4)
 3. **명명 조율**: 출생라벨(코드 route) vs `품번_S{nn}`+ROUTE_ID — 사용자 확정
 4. 전제: 재고인프라·구분흐름·공용1pool·sub_alias = 재사용
+
+## §9. ★확정: SUB 재고 키 (2026-08-25 사용자 확정) — C7 해소
+**결정 = 출생라벨 코드 + SUB당 재고 1 pool (route는 재고축 아님).**
+- **코드 = 출생라벨** `{첫작업ASSY}_R{첫route}_S{nn}` (태어난 자리 박제·정체성 라벨).
+- **재고 = 시그니처 identity당 1 pool.** 다른 ASSY에서 등록해도 **시그니처 동일 → 기존 SUB dedup 매핑 → 재고 풀 1개**(공용). = §7-1 dedup 설계 그대로.
+- ★**route는 재고 pool 키에 안 넣음**(CANON §9의 ROUTE_ID를 pool 분할용 미사용). 같은 물리 SUB를 R01 제작·R02 외주로 만들어도 **재고 1개**.
+- ★**route = 생산/조달 흐름축**(재고축 아님): 제작→backflush로 pool 채움 / 외주→입고로 pool 채움. 어느 경로든 **같은 SUB 재고 pool**로 귀속.
+- ∴ C7(코드route vs ROUTE_ID) 해소: **코드에 출생route 박제(라벨)** + **재고 1 pool(사용route 무관)**. CANON §9 재고키에서 SUB의 ROUTE_ID 차원은 pool분할 아닌 (필요시)추적용으로만.
