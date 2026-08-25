@@ -30,3 +30,16 @@
 - 제작 SUB의 반제품 재고 실존 여부(is_lowest·PRD 재고점).
 - 외주 SUB의 사급 흐름(−SAG) 현행 연결.
 - 공용 SUB의 재고풀 단일성.
+
+## §5. 규명 #1 — merge_map/jadoban 다리 커버리지 (2026-08-25 실측)
+- ★**nx.bom에 `jadoban` 컬럼 존재**(+merge_status·merge_cust·child_code_lg·parent_code_lg) = LG↔CS 다리가 데이터에 이미 있음. nx.bom_merge_map 18519행이 소스.
+- nx.bom 엣지를 jadoban으로 그룹 = "이 CS 자도번 SUB의 LG 원소재들". 예 AJR77263007: nx.bom child 26 → jadoban=AJR77263007-SUB(17부품·제작동관/용접봉) + 직속9(완성부품/용접봉).
+- ★**커버리지 부분적**: nx.bom distinct jadoban=1224. **CS bom_line 자도번(-N-N) 1787개 중 29%(511)만 nx.bom.jadoban 직매칭**. (형식차 감안해도 완전치 않음.)
+- ★**다리는 얕음(top 자도번만)**: route SUB 계층(AJR77263007-SUB → -4-1 → +용접링)에서 nx.bom.jadoban은 **top 1레벨(AJR77263007-SUB)만** 앎. 깊은 route SUB(-4-1)·+용접링(제작동관+용접 편성grain·실 자도번 아님)은 nx.bom에 없음.
+- ∴ **옵션A(매핑 다리)는 top 자도번 grain서 부분성립**. 완전 정합엔 (a)merge_map 커버리지 완성(29%→↑) (b)route 편성grain(+용접링)은 재료동일·표시만 → 차감은 top자도번/원소재 grain으로 충분한지 판단 필요.
+
+## §6. 규명 #2 예비 — 제작 SUB 반제품 재고 실존 (2026-08-25 실측)
+- nx.bom is_lowest: Y 35,852 / N 4,768. **제작동관 중 12,124가 자기도 parent = 반제품 다단계 재귀 존재**(backflush is_lowest 정지 전제 성립).
+- ★**stock_ledger STOCK_POINT: MAT 172,260 · RDY 14 · PRD/ASY 미적재**(NX_STOCK_LEDGER §Phase5 "PRD/ASY 컷오버 backfill 전 빈"과 일치). → **반제품(SUB) 재고점이 아직 실현 안 됨**. 출생라벨 SUB 재고화는 이 backfill과 연동 필요.
+- stock_ledger 자도번(-N-N) 564종 존재(과거 이력). 
+- (문서 종합 후 정합)
