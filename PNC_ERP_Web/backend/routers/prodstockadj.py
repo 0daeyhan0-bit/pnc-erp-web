@@ -57,6 +57,21 @@ def _next_seq(cur, ymd):
     return int(cur.fetchone()[0] or 1)
 
 
+def _pa_mirror_ins(cur, ymd, seq, tag, cust, item, qty, cost, amt, vat, wo, swo, rmk):
+    """★제품재고조회(w_pr_stock_040, _salesstock)는 SA_T_STOCK_MAINT를 읽음 → 제품재고조정이 여기에도 써야 조회 반영.
+       링크=(MAINT_YMD,MAINT_SEQ)=prod_stock_adjust와 동일 seq(_next_seq가 미러+웹 통합 max+1이라 충돌없음). INSERT_WINDOW='prodstockadj'로 웹행 식별."""
+    try:
+        cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT
+              (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_VAT,MAINT_AMT,
+               WORK_ORDER,SPLIT_WORK_ORDER,REMARKS,INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'web',GETDATE(),'prodstockadj')""",
+            ymd, seq, str(tag or '2').strip()[:1] or '2', cust, item, qty, cost, vat, amt, wo, swo, rmk)
+    except Exception: pass
+def _pa_mirror_del(cur, ymd, seq):
+    try:
+        cur.execute("DELETE FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ=? AND INSERT_WINDOW='prodstockadj'", ymd, int(seq))
+    except Exception: pass
+
 @router.post("/api/prodstockadj/save")
 def prodstockadj_save(payload: dict = Body(...)):
     """추가/수정 — nx.prod_stock_adjust. id 있으면 수정, 없으면 추가(채번). 금액=trunc(수량×단가)."""
@@ -87,12 +102,18 @@ def prodstockadj_save(payload: dict = Body(...)):
     cn = _nx_tx(); cur = cn.cursor()
     try:
         if rid:  # 수정
+            # ★기존 미러행 제거용 옛 (ymd,seq) 읽기
+            cur.execute("SELECT maint_ymd, maint_seq FROM nx.prod_stock_adjust WHERE id=?", int(rid))
+            _o = cur.fetchone()
             cur.execute("""UPDATE nx.prod_stock_adjust SET maint_ymd=?, maint_tag=?, cust_code=?, item_code=?,
                   maint_qty=?, maint_cost=?, maint_amt=?, maint_vat=?, work_order=?, split_work_order=?, remarks=?,
                   upd_user=?, update_datetime=GETDATE() WHERE id=?""",
                 ymd, tag, cust, item, qty, cost, amt, vat, wo, swo, rmk, user, int(rid))
             if cur.rowcount == 0:
                 cn.rollback(); raise HTTPException(404, "수정 대상이 없습니다.")
+            if _o:  # 옛 미러 제거 후 새 미러(같은 seq, 새 ymd/값)
+                _pa_mirror_del(cur, str(_o[0]).strip(), _o[1]); seq = int(_o[1])
+                _pa_mirror_ins(cur, ymd, seq, tag, cust, item, qty, cost, amt, vat, wo, swo, rmk)
         else:    # 추가
             seq = _next_seq(cur, ymd)
             cur.execute("""INSERT INTO nx.prod_stock_adjust
@@ -100,6 +121,8 @@ def prodstockadj_save(payload: dict = Body(...)):
                    work_order, split_work_order, remarks, insert_user_id, insert_datetime)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE())""",
                 ymd, seq, tag, cust, item, qty, cost, amt, vat, wo, swo, rmk, user)
+            # ★F-영업: 조회원천(SA_T_STOCK_MAINT)에도 반영 → 제품재고조회에 보이게
+            _pa_mirror_ins(cur, ymd, seq, tag, cust, item, qty, cost, amt, vat, wo, swo, rmk)
         cn.commit()
         return {"ok": True}
     except HTTPException:
@@ -119,8 +142,12 @@ def prodstockadj_delete(payload: dict = Body(...)):
         raise HTTPException(400, "삭제할 행을 선택해 주세요.")
     cn = _nx_tx(); cur = cn.cursor()
     try:
+        # ★삭제 전 (ymd,seq) 읽어 조회원천 미러행도 제거
         q = ",".join("?" * len(ids))
+        cur.execute(f"SELECT maint_ymd, maint_seq FROM nx.prod_stock_adjust WHERE id IN ({q})", *ids)
+        _rows = [(str(r[0]).strip(), r[1]) for r in cur.fetchall()]
         cur.execute(f"DELETE FROM nx.prod_stock_adjust WHERE id IN ({q})", *ids)
+        for _y, _s in _rows: _pa_mirror_del(cur, _y, _s)
         n = cur.rowcount; cn.commit()
         return {"ok": True, "deleted": n}
     except Exception as e:
