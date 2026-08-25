@@ -22,6 +22,24 @@ def wr_itemsearch(q: str = Query("")):
     finally:
         cn.close()
 
+@router.get("/api/wr/parts")
+def wr_parts():
+    """파트(생산창고) 목록 — PR_M_PROC_GAGONG.
+       ★재고조정 등 쓰기화면의 파트칸은 반드시 이 드롭다운으로(코드 저장·이름 표시).
+         자유입력으로 두면 '04라인' 같은 표시명이 PART_CODE 에 들어가
+         재고가 없는 파트에 쌓인다(2026-08-25 실사고: SUB6 조정 500개가 S4 대신
+         '04라인'에 들어가 520 차감이 재고 0 으로 판정)."""
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') nm
+                         FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WITH(NOLOCK)
+                        WHERE ISNULL(GAGONG_PROC_CODE,'')<>''
+                        ORDER BY GAGONG_PROC_CODE""")
+        rows = [{"code": str(r[0]).strip(), "nm": str(r[1] or '').strip()} for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
+    finally:
+        cn.close()
+
 @router.get("/api/wr/works")
 def wr_works():
     """작업장 목록 (PR_M_WORK)"""
@@ -119,7 +137,7 @@ def _prd_mirror_ins(cur, ymd, part, mat, item, tag, qty, cost, amt, rem):
        tag: 조정='2'/불량='1'(조회에서 조정 etc열), 자체 SEQ 채번(당일 MAX+1). INSERT_WINDOW='stockmaint'로 웹행 식별(수정/삭제 매칭용)."""
     try:
         mtag = str(tag or '2').strip()[:1] or '2'
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=?", ymd)
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
         msq = int(cur.fetchone()[0] or 1)
         cur.execute("""INSERT INTO nx.PR_T_STOCK_MAINT_MAT
               (MAINT_YMD,MAINT_SEQ,MAINT_TAG,PART_CODE,MAT_CODE,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,
@@ -163,6 +181,19 @@ def stockmaint_save(payload: dict = Body(...)):
     try:
         if _closed(cur, ymd):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
+        # ★파트는 반드시 코드여야 한다 — 표시명('04라인')이 들어가면 그 파트에 재고가
+        #   쌓여 실제 파트(S4)에서 안 보인다(2026-08-25 실사고).
+        if part:
+            cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+                            WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?""", part)
+            if not cur.fetchone():
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+                                WITH(NOLOCK) WHERE ISNULL(GAGONG_PROC_DESC,'')=?""", part)
+                _alt = cur.fetchone()
+                raise HTTPException(400,
+                    f"파트코드 '{part}' 가 없습니다."
+                    + (f" 파트명 대신 코드 '{str(_alt[0]).strip()}' 를 선택하세요." if _alt
+                       else " 파트 드롭다운에서 선택하세요."))
         cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
         seq = cur.fetchone()[0]   # 삭제 전 채번 → 수정 시 신규 SEQ(기존과 상이)
         if mid:  # 수정 = 기존행 삭제 후 신규(재키)

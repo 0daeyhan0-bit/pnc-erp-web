@@ -14,7 +14,8 @@ SCREEN.matinout=(c)=>{
   const ymd2iso=y=>{y=(''+(y||'')).trim();return y.length>=6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';};
   const todayIso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const m1Iso=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;};
-  let sel=null, curL=[], curFrom='', curTo='', source='live';   // ★Phase5 데이터원(기본 라이브 무변경)
+  // ★2026-08-25 기본 소스 nx(=라이브 미러 + 웹실적). 생산·제품 입출고와 통일.
+  let sel=null, curL=[], curFrom='', curTo='', source='nx';
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(5);
     const sc=(c.querySelector('#whcust')?c.querySelector('#whcust').value:'Z99990')||'Z99990';
@@ -23,8 +24,9 @@ SCREEN.matinout=(c)=>{
     const t6=iso2ymd(c.querySelector('#dto')?c.querySelector('#dto').value:'')||iso2ymd(todayIso());
     const qv=(c.querySelector('#q')?c.querySelector('#q').value:'').trim();   // ★품번(자도번/품명): 입력 시 서버 스코프
     curFrom=f6;curTo=t6;   // ★요청 기간을 먼저 반영 → 조회 실패(타임아웃)해도 날짜 안 되돌아감
-    if(source==='nx'){loading=false;return nxDerivedView(c,`${API}/api/live/matinout?from_ymd=${f6}&to_ymd=${t6}&source=nx`,{title:'자재입출고현황',onBack:()=>{source='live';load();}});}
-    try{const r=await fetch(`${API}/api/live/matinout?from_ymd=${f6}&to_ymd=${t6}&stock_cust=${encodeURIComponent(sc)}&part_wh=${encodeURIComponent(pw)}`+(qv?`&q=${encodeURIComponent(qv)}`:''));if(!r.ok)throw new Error('HTTP '+r.status);
+    // ★2026-08-25 source 의미 통일: nx=라이브+웹실적(일반그리드) / live=라이브만 / ledger=웹원장 파생
+    if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/matinout?from_ymd=${f6}&to_ymd=${t6}&source=ledger`,{title:'자재입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
+    try{const r=await fetch(`${API}/api/live/matinout?from_ymd=${f6}&to_ymd=${t6}&stock_cust=${encodeURIComponent(sc)}&part_wh=${encodeURIComponent(pw)}&source=${encodeURIComponent(source)}`+(qv?`&q=${encodeURIComponent(qv)}`:''));if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();curFrom=j.from_ymd||f6;curTo=j.to_ymd||t6;stockAll=j.stock||[];moves=j.moves||[];
       stock=stockAll.filter(s=>Math.abs(+s.stock||0)>0.0001);
       bfMap={};stockAll.forEach(s=>bfMap[s.mat]=+s.bf||0);

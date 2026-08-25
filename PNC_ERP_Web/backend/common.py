@@ -372,6 +372,151 @@ def _sale_win():
     return "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
 
 
+# ── ★2026-08-25 웹 전용 SEQ 대역 (라이브와 키 충돌 방지) ──────────────────
+#   문제: MAINT_SEQ 는 일자별 채번인데 라이브·nx 가 독립 증가한다.
+#         같은 (MAINT_YMD, MAINT_SEQ) 가 서로 다른 행이 되어, 두 DB 를 합쳐 조회할 때
+#         중복배제가 불가능하다. 실측 260825 seq646 = 라이브 EAD62115301 / nx AJR30027704-12-1.
+#         이 때문에 nx 648행이 통째로 배제돼 웹 실적이 화면에서 사라졌다.
+#   해법: 웹이 쓰는 행은 WEB_SEQ_BASE(20000) 이상으로만 채번한다.
+#         → 레거시(1~19,999)와 절대 겹치지 않으므로 (YMD,SEQ) 만으로 출처 판별·중복배제 가능.
+#   ※ MAINT_SEQ 가 smallint(최대 32,767) 라 20000 대역이 한계다(일자별 웹 12,767건 수용).
+#     레거시 일자별 최대는 7,791 이라 19,999 안에서 충분하다.
+WEB_SEQ_BASE = 20000
+
+def _web_seq(cur, table, ymd, col="MAINT_SEQ", ymd_col="MAINT_YMD"):
+    """레거시 공유 테이블에 웹이 쓸 때 쓰는 다음 SEQ. 항상 WEB_SEQ_BASE 이상.
+       table 은 'nx.PR_T_STOCK_MAINT_MAT' 처럼 스키마 포함 문자열(호출부 상수)."""
+    cur.execute(f"SELECT ISNULL(MAX({col}),0) FROM {table} WHERE {ymd_col}=? AND {col}>=?",
+                ymd, WEB_SEQ_BASE)
+    mx = int(cur.fetchone()[0] or 0)
+    return max(mx + 1, WEB_SEQ_BASE)
+
+
+# ── ★2026-08-25 생산창고 재고 = '이력 기준' 공용 계산 ─────────────────────
+#   왜 잔액 테이블을 못 쓰나:
+#     nx 잔액은 '라이브 미러 + 웹실적' 이 아니라, 미러가 늦으면 웹실적만 담긴 반쪽 값이 된다.
+#     실측 AJR30027704-SUB6 → 라이브 25(미러본) / nx 0(미러 못 받고 웹 -2만 적용) / 정답 23.
+#     라이브·nx 잔액을 어떻게 조합해도(합·최댓값·최신본) 두 케이스를 동시에 못 맞춘다.
+#       · 라이브+원장델타 = 이중계상 (웹이 잔액도 갱신하므로) → SUB1 -2 (정답 0)
+#       · nx 잔액 단독    = 미러 미반영분 누락        → SUB6 0  (정답 23)
+#   해법: 2502 마감 스냅샷 + 그 이후 모든 이동을 누적한다(라이브 ∪ nx, 중복배제).
+#         생산입출고현황(live_api._prodinout)이 이 방식으로 SUB1=0·SUB6=23·12-1=62 를 정확히 낸다.
+#   ※반드시 (MAT_CODE, PART_CODE) 파트 단위로 집계할 것. 파트를 빼고 합치면 값이 무너진다.
+
+def _u_tbl(tbl, keys):
+    """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는 인라인뷰."""
+    on = " AND ".join(f"ISNULL(l.{k},'')=ISNULL(n.{k},'')" for k in keys)
+    return (f"(SELECT * FROM PARTNER_ERP.dbo.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
+            f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.{tbl} l WHERE {on}))")
+
+
+def _prod_stock_sql():
+    """생산창고(파트창고) 재고를 이력으로 계산하는 SQL. 컬럼 = mat, part, q.
+       원천·부호는 live_api._prodinout(생산입출고현황, 검증완료)과 1:1 동일하게 유지할 것.
+       하나라도 빠지면 값이 통째로 어긋난다(실측: 자재창고입고 누락 시 1,493/1,582행 불일치)."""
+    PUSM = _u_tbl("PU_T_STOCK_MAINT", ["MAINT_YMD", "MAINT_SEQ", "MAT_CODE", "MAINT_QTY", "MAINT_TAG"])
+    PRPD = _u_tbl("PR_T_PROD_DTL", ["PROD_YMD", "PROD_HMS", "ITEM_CODE", "WORK_ORDER", "SPLIT_WORK_ORDER"])
+    PRSM = _u_tbl("PR_T_STOCK_MAINT_MAT", ["MAINT_YMD", "MAINT_SEQ", "MAT_CODE", "PART_CODE", "MAINT_QTY"])
+    SASM = _u_tbl("SA_T_STOCK_MAINT", ["MAINT_YMD", "MAINT_SEQ", "ITEM_CODE", "MAINT_QTY"])
+    CUT = ("(SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n"
+           " WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l"
+           " WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS))")
+    INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
+    return f"""
+ SELECT mat, part, SUM(q) q FROM (
+   -- 2502 마감 스냅샷
+   SELECT UPPER(a.mat_code) mat, a.gagong_proc_code part, a.stock_qty q
+     FROM PARTNER_ERP.dbo.PR_T_MONTH_STOCK_WH a WITH(NOLOCK) WHERE a.stock_yymm='2502'
+   -- 자재창고→생산창고 입고 (maint_qty 가 음수로 적재되어 부호 반전)
+   UNION ALL
+   SELECT UPPER(a.mat_code), a.TO_GAGONG_PROC_CODE, a.maint_qty*-1
+     FROM {PUSM} a WHERE a.maint_ymd>'250299' AND a.maint_tag='B'
+      AND ISNULL(a.out_wh_gubun,'1')='1' AND {INSP} AND ISNULL(a.TO_GAGONG_PROC_CODE,'')>''
+   -- 자재창고 반품(출고)
+   UNION ALL
+   SELECT UPPER(a.mat_code), a.TO_GAGONG_PROC_CODE, a.maint_qty
+     FROM {PUSM} a WHERE a.maint_ymd>'250299' AND a.maint_tag='T'
+      AND ISNULL(a.out_wh_gubun,'3')='3' AND ISNULL(a.TO_GAGONG_PROC_CODE,'')>''
+   -- 가공부품이동(출고)
+   UNION ALL
+   SELECT UPPER(a.mat_code), a.TO_GAGONG_PROC_CODE, a.maint_qty*-1
+     FROM {PUSM} a WHERE a.maint_ymd>'250299' AND a.maint_tag='C'
+      AND ISNULL(a.TO_GAGONG_PROC_CODE,'')>''
+   -- 가공생산입고
+   UNION ALL
+   SELECT UPPER(a.mat_code), a.gagong_proc_code, a.cut_qty
+     FROM {CUT} a WHERE a.cut_ymd>'250299' AND ISNULL(a.gagong_proc_code,'')>'' AND a.cut_qty<>0
+   -- SUB생산실적(바코드) — 같은 건이 sa_t_stock_maint 에도 있으면 제외
+   UNION ALL
+   SELECT UPPER(a.item_code), a.STOCK_PART_CODE, a.prod_qty
+     FROM {PRPD} a
+    WHERE a.prod_ymd>'250299' AND ISNULL(a.STOCK_PART_CODE,'')>''
+      AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint s WITH(NOLOCK)
+                      WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code
+                        AND (s.in_part_code=a.stock_part_code
+                             -- ★최종품(ASSY) 실적은 in_part_code 가 비어 있다. 520 바코드가
+                             --   PR_T_PROD_DTL 에도 STOCK_PART_CODE 를 채우므로, 이 조건이
+                             --   없으면 같은 실적이 ASSY재고 + 생산재고로 두 번 잡힌다
+                             --   (실측 AEG74589807: ASSY 22 인데 생산재고에도 22).
+                             OR (ISNULL(s.in_part_code,'')='' AND s.maint_tag='P')))
+   -- 생산실적(제품수불 경유분)
+   UNION ALL
+   SELECT UPPER(a.ITEM_CODE), a.IN_PART_CODE, a.MAINT_QTY
+     FROM {SASM} a WHERE a.MAINT_YMD>'250299' AND ISNULL(a.IN_PART_CODE,'')>''
+   -- 생산사용(출고)·재고조정·기초 — PR_T_STOCK_MAINT_MAT 전 태그
+   UNION ALL
+   SELECT UPPER(a.MAT_CODE), a.PART_CODE, a.MAINT_QTY
+     FROM {PRSM} a WHERE a.MAINT_YMD>'250299' AND ISNULL(a.PART_CODE,'')>''
+ ) t GROUP BY mat, part"""
+
+
+def _latest_stock_map(cur, tbl, key, where="", extra_on=()):
+    """잔액 테이블을 'nx 우선, 없으면 라이브' 로 읽는다. {키: 재고}.
+
+       nx 가 정본이다 — 웹 실적/조정은 nx 에만 쌓이므로 라이브를 보면 웹에서 한 작업이
+       화면에 안 나타나고 프로세스 검증이 불가능하다.
+       미러가 늦어 nx 에 행이 아직 없는 품목만 라이브 값으로 채운다(목록 누락 방지).
+
+       ★갱신시각(UPDATE_DATETIME) 비교는 쓰지 않는다 — 레거시가 계속 가동돼
+         라이브가 거의 항상 더 최신이라(실측 라이브 16:36 vs nx 11:42) 그 규칙으로는
+         웹 실적이 통째로 묻힌다.
+       ※생산창고(PR_T_MAT_STOCK_WH)만 예외 — 거긴 nx 잔액이 미러 지연 시 웹실적만 담긴
+         반쪽 값이 되므로 _prod_stock_map(이력기준)을 써야 한다."""
+    w = (" WHERE " + where) if where else ""
+    on = " AND ".join([f"l.{key}=n.{key}"] + [f"ISNULL(l.{c},'')=ISNULL(n.{c},'')" for c in extra_on])
+    sql = f"""
+ SELECT k, SUM(q) q FROM (
+   SELECT ISNULL(n.{key}, l.{key}) k,
+          CASE WHEN n.{key} IS NULL THEN l.STOCK_QTY ELSE n.STOCK_QTY END q
+     FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} WITH(NOLOCK){w}) n
+     FULL JOIN (SELECT * FROM PARTNER_ERP.dbo.{tbl} WITH(NOLOCK){w}) l ON {on}
+ ) u GROUP BY k"""
+    out = {}
+    try:
+        cur.execute(sql)
+        for r in cur.fetchall():
+            out[str(r[0] or "").strip()] = float(r[1] or 0)
+    except Exception:
+        pass
+    return out
+
+
+def _prod_stock_map(cur, by_part=False):
+    """생산창고 재고 맵. by_part=False → {mat: 합계} / True → {(mat,part): 재고}."""
+    out = {}
+    try:
+        cur.execute(_prod_stock_sql())
+        for r in cur.fetchall():
+            m = str(r[0] or "").strip(); p = str(r[1] or "").strip(); v = float(r[2] or 0)
+            if by_part:
+                out[(m, p)] = out.get((m, p), 0.0) + v
+            else:
+                out[m] = out.get(m, 0.0) + v
+    except Exception:
+        pass
+    return out
+
+
 # ── 도메인간 공유(문서저장/매출마감 SQL, app.py에서 이관) ──
 import os as _os, hashlib as _hashlib, mimetypes as _mimetypes
 from urllib.parse import quote as _urlquote

@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map)
 
 from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod
 router = APIRouter()
@@ -703,6 +703,85 @@ def _bom_expand(cur, item, gpc_like):
     return [(str(r[0]).strip(), str(r[1] or '').strip(), float(r[2] or 0), str(r[3] or '').strip())
             for r in cur.fetchall()]
 
+def _prod_dest(cur, item, upper_item=None):
+    """★2026-08-25 생산실적 입고처 판정 (사용자 확정 규칙).
+
+       ★판정 근거는 오직 전표의 UPPER_ITEM_CODE(upper_item 인자).
+         · upper 가 비었거나 자기 자신 → 영업창고(ASSY). 최종품이거나 단품/직납분.
+         · upper 가 다른 품번(=서브품)  → 그 상위를 보고 결정
+             - 상위가 업체(IN_CUST_CODE 있음) → 자재창고
+             - 상위가 사내                     → 생산창고 = **상위의 파트**
+             - 상위에 파트가 없으면(가상 등)   → 더 위로 올라가 재판정
+
+       왜 상위 파트인가: 서브품 실적은 그 상위를 만드는 파트의 재고가 되어야
+       나중에 상위 실적을 잡을 때 그 파트에서 차감된다. 자기 파트에 쌓으면
+       상위 실적 시 차감할 재고가 없다.
+       (구버전은 GC_GUBUN W/K 만 자재창고, 나머지 전부 ASSY → 서브품이 영업창고로
+        새어나갔다.)
+
+       ★BOM 역추적 폴백은 쓰지 않는다. 같은 품번이 서브품으로도, 단품/직납으로도
+         쓰이는 경우가 있어(5006AR4091G·AJR74482401 등) "BOM 에 상위가 있다"는
+         이유로 생산창고에 보내면 직납분이 영업창고에서 사라진다.
+         이번 실적이 어느 상위를 위한 것인지는 전표만 안다.
+         (실측: 최근 전표 6,792건 중 4,955건이 upper=자기자신)
+
+       반환: ('ASSY', None) | ('PART', 파트코드) | ('MAT', None)
+    """
+    it = str(item or "").strip()
+    if not it:
+        return ("ASSY", None)
+    seen = set()
+    # ★전표 상위품번이 자기 자신이 아니면 그것이 곧 상위 — 그 상위부터 판정한다.
+    _up = str(upper_item or "").strip()
+    if _up and _up != it:
+        cur.execute("""SELECT ISNULL(m.IN_CUST_CODE,''),
+                              ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                                       WHERE b.MAT_CODE=? ),'0')
+                         FROM nx.PR_M_ITEM m WITH(NOLOCK) WHERE m.ITEM_CODE=?""", _up, _up)
+        _r = cur.fetchone()
+        _ic = str(_r[0] or '').strip() if _r else ''
+        if _ic:
+            return ("MAT", None)                 # 상위가 업체
+        cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+                        WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
+                        ORDER BY PROC_SEQ DESC""", _up)
+        _r2 = cur.fetchone()
+        _gp = str(_r2[0] or '').strip() if _r2 else ''
+        if _gp:
+            return ("PART", _gp)                 # 상위의 파트
+        seen.add(_up)
+        stack = [_up]                            # 상위가 가상 등으로 파트가 없으면 더 위로
+        depth = 0
+        while stack and depth <= 8:
+            depth += 1
+            _c = stack.pop(0)
+            cur.execute("""SELECT b.ITEM_CODE, ISNULL(b.VIR_ITEM_FLAG,'0'), ISNULL(m.IN_CUST_CODE,'')
+                             FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                             LEFT JOIN nx.PR_M_ITEM m WITH(NOLOCK) ON m.ITEM_CODE=b.ITEM_CODE
+                            WHERE b.MAT_CODE=?""", _c)
+            for p, vir, incust in [(str(r[0] or '').strip(), str(r[1] or '0'), str(r[2] or '').strip())
+                                   for r in cur.fetchall()]:
+                if incust:
+                    return ("MAT", None)
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+                                WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
+                                ORDER BY PROC_SEQ DESC""", p)
+                _r3 = cur.fetchone()
+                _g3 = str(_r3[0] or '').strip() if _r3 else ''
+                if _g3:
+                    return ("PART", _g3)
+                if p not in seen:
+                    seen.add(p); stack.append(p)
+        return ("ASSY", None)
+    # ★2026-08-25 전표에 상위가 없거나 자기 자신이면 ASSY(영업창고).
+    #   BOM 역추적 폴백을 쓰지 않는다 — 같은 품번이 서브품으로도, 단품/직납으로도
+    #   쓰이는 경우가 있어(예: 5006AR4091G, AJR74482401) BOM 에 상위가 있다는 이유로
+    #   생산창고로 보내면 직납분이 영업창고에서 사라진다.
+    #   "이번 실적이 어느 상위를 위한 것인가"는 전표만 알고, 전표가 자기 자신이면
+    #   그 자체로 출하 대상이다. (실측: 최근 전표 6,792건 중 4,955건이 upper=자기자신)
+    return ("ASSY", None)
+
+
 def _set_mat_stock_wh(cur, win, part_code, mat_code, qty, user):
     """파트창고 재고 가감 — 레거시 f_pr_set_mat_stock_wh (PART_CODE 기준)."""
     cur.execute("""UPDATE nx.PR_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
@@ -1167,17 +1246,47 @@ def procbc_save(payload: dict = Body(...)):
         #   PR_T_MAT_STOCK_WH(S5) 로 입고, SA_T_ITEM_STOCK 무변동).
         #   → 이 품목의 마지막 공정을 끝낸 것이면(=완제품 완성) STOCK_GPC 와 무관하게 ASSY 영업창고.
         #     중간공정 품목(자기 뒤에 공정이 더 있는 경우)만 파트/자재창고 입고.
-        #   ※여기까지 온 시점에 이미 proc_seq == max_proc_seq (마지막 공정) 이 보장되지만,
-        #     "그 품목 자체가 중간품인가"는 STOCK_GPC 의 GC_GUBUN 으로만 구분 가능 →
-        #     W/K(자재창고行)만 예외로 두고 나머지는 ASSY 로 보낸다.
+        #   ※여기까지 온 시점에 이미 proc_seq == max_proc_seq (마지막 공정) 이 보장된다.
+        # ★2026-08-25 재수정 — 위 판정(GC_GUBUN W/K 만 자재창고, 나머지 전부 ASSY)이
+        #   서브품까지 영업창고로 보내고 있었다. 서브품 실적은 '상위를 만드는 파트'의
+        #   생산재고가 되어야 나중에 상위 실적 시 그 파트에서 차감된다.
+        #   → BOM 상위 유무로 판정(_prod_dest): 상위없음=ASSY / 사내상위=그 상위의 파트 /
+        #     가상상위=더 위로 / 업체상위=자재창고.
+        #   실측 피해: 서브품 31품번이 영업창고에 적재(5006AR4091G 11,219 등).
+        # ★전표의 상위품번(UPPER_ITEM_CODE)을 우선 근거로 — 공용 자도번은 BOM 만으로
+        #   상위를 특정할 수 없다(상위가 A·B 둘 다일 수 있음). 전표엔 이번 실적이
+        #   어느 상위를 위한 것인지 남아 있다.
+        _upper = ''
+        if sheet_ref:
+            try:
+                cur.execute("SELECT ISNULL(UPPER_ITEM_CODE,'') FROM nx.PR_T_INDI_WELD_SHEET WHERE SHEET_NO=?", sheet_ref)
+                _ru = cur.fetchone()
+                _upper = str(_ru[0] or '').strip() if _ru else ''
+            except Exception: pass
+        _dk, _dp = _prod_dest(cur, item, _upper)
         _gc = ''
         if stock_gpc:
             cur.execute("SELECT ISNULL(GC_GUBUN,'') FROM nx.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?", stock_gpc)
             _r = cur.fetchone()
             _gc = str(_r[0] or '').strip() if _r else ''
-        if stock_gpc and _gc in ('W', 'K'):
-            # 자재창고 입고(용접봉 등 자재성 공정)
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", today6)
+        if _dk == "PART" and _dp:
+            # ★서브품 → 상위 파트의 생산창고(PR_T_MAT_STOCK_WH). 영업창고 아님.
+            #   ★2026-08-25 PR_T_STOCK_MAINT_MAT 에 별도 원장행을 넣지 않는다.
+            #     생산입출고현황(live_api._prodinout)은 이미 pr_t_prod_dtl.STOCK_PART_CODE 를
+            #     'SUB생산실적' 입고로 읽고 있어(833줄) 원장행을 또 넣으면 이중계상된다.
+            #     게다가 그 화면은 PR_T_STOCK_MAINT_MAT tag='4' 를 무조건 '생산사용(출고)'로
+            #     보고 부호를 뒤집어(*-1) 읽으므로, 입고를 tag='4' 로 넣으면 재고가 되레 늘었다
+            #     (실측 AJR30027704-SUB1: 잔액 2인데 화면 4).
+            #   → 잔액 테이블만 갱신하고, 이력은 PR_T_PROD_DTL(STOCK_PART_CODE)로 남긴다.
+            _set_mat_stock_wh(cur, win, _dp, item, qty, who)
+            stock["kind"] = f"생산창고입고({_dp})"
+        elif _dk == "MAT" or (stock_gpc and _gc in ('W', 'K')):
+            # 자재창고 입고(용접봉 등 자재성 공정 / 상위가 업체인 서브품)
+            # ★상위가 업체라 여기로 온 경우엔 전표 STOCK_GPC 가 비어 있을 수 있다.
+            #   그때는 기본 자재창고 파트(IS0001)로 넣는다 — 키팅 466 재고와 같은 버킷.
+            if not stock_gpc:
+                stock_gpc = 'IS0001'
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
             sq = int(cur.fetchone()[0] or 1)
             cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,
                               WORK_CODE,MAT_CODE,MAINT_QTY,REF_MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,
@@ -1191,8 +1300,10 @@ def procbc_save(payload: dict = Body(...)):
             stock["kind"] = "자재창고입고"
         else:
             # ASSY → 영업창고
+            # ★웹이 만든 행(SEQ>=20000)만 찾아 합산한다 — 레거시 행을 잡아 수정하면 안 된다.
             cur.execute("""SELECT MAX(MAINT_SEQ) FROM nx.SA_T_STOCK_MAINT
-                            WHERE MAINT_YMD=? AND ITEM_CODE=? AND MAINT_TAG='P' AND WORK_ORDER='BARCODE'""",
+                            WHERE MAINT_YMD=? AND ITEM_CODE=? AND MAINT_TAG='P' AND WORK_ORDER='BARCODE'
+                              AND MAINT_SEQ>=20000""",
                         today6, item)
             sseq = cur.fetchone()[0]
             if sseq:
@@ -1200,7 +1311,7 @@ def procbc_save(payload: dict = Body(...)):
                                   UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
                                 WHERE MAINT_YMD=? AND MAINT_SEQ=?""", int(qty), who, win, today6, int(sseq))
             else:
-                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", today6)
+                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
                 nseq = int(cur.fetchone()[0] or 1)
                 cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,MAINT_QTY,
                                   MAINT_COST,MAINT_AMT,REMARKS,ITEM_CODE,WORK_ORDER,SPLIT_WORK_ORDER,
@@ -1213,23 +1324,26 @@ def procbc_save(payload: dict = Body(...)):
 
         # ⑦ BOM 전개 → 파트별 자재 차감 (Q1000/Q2000 공용창고는 제외 — 운영방침 변경)
         boms = _bom_expand(cur, item, '%')
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=?", today6)
-        mseq = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999) FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
+        mseq = int(cur.fetchone()[0] or 19999)
         # ★자재 재고부족 사전검증(2026-08-20) — 음수재고 금지.
         #   실적 수량 × BOM 소요 > 파트창고 재고 이면 실적을 잡지 않고 거부한다.
         #   (기존엔 검증 없이 차감해 파트창고가 0/음수가 됐고, 생산입출고현황에서
         #    해당 품번이 사라져 보였음 — 실측 AJR30038201 실적54 → 자재 216 차감)
         #   ※취소(qty<0)는 되돌리는 동작이므로 검증 제외.
         if qty > 0:
+            # ★재고 판정기준 = 이력계산(라이브∪nx) — 재고표시 화면들과 동일.
+            #   nx 잔액테이블(PR_T_MAT_STOCK_WH)만 읽으면 안 된다: 레거시가 만든 잔액은
+            #   nx 에 행 자체가 없고 웹 델타만 담긴 '반쪽 값'이라 재고 0 으로 오판한다
+            #   (2026-08-25 실사고: S4 에 SUB6 23개가 있는데 nx 행이 없어 "재고 0" 거부).
+            _hist = _prod_stock_map(cur, by_part=True)
             _short = []
             for mat, mwc, use, mgpc in boms:
                 if use <= 0 or (mgpc or '').upper() in ('Q1000', 'Q2000'):
                     continue
                 _need = qty * use
                 _pc = mgpc or proc
-                cur.execute("""SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.PR_T_MAT_STOCK_WH WITH(NOLOCK)
-                                WHERE MAT_CODE=? AND PART_CODE=?""", mat, _pc)
-                _have = float(cur.fetchone()[0] or 0)
+                _have = float(_hist.get((str(mat).upper(), _pc), 0.0))
                 if _have < _need:
                     _short.append({"mat": mat, "part": _pc, "need": round(_need, 4),
                                    "have": round(_have, 4), "lack": round(_need - _have, 4)})

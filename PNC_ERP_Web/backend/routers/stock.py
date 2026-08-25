@@ -153,7 +153,7 @@ def stock_save(payload: dict = Body(...)):
             #   잔액은 맞는데 "입출고 내역"에는 안 잡힌다.
             #   ★WH_CUST_CODE·GAGONG_PROC_CODE 필수 — 공백이면 창고 필터에서 빠져 조회 누락됨.
             try:
-                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
                 _sq = int(cur.fetchone()[0] or 1)
                 cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT
                         (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
@@ -454,7 +454,7 @@ def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
             cur.execute("""UPDATE nx.PU_T_STOCK_MAINT SET MAINT_QTY=?,UPDATE_USER_ID='web',UPDATE_DATETIME=GETDATE(),UPDATE_WINDOW=?
                   WHERE MAINT_YMD=? AND MAINT_SEQ=?""", new_q, window, hit[0], hit[1])
         elif abs(dq) > 1e-9:                       # 원본 못찾음 → 보정(델타)행 기록(잔액·수불합 정합 유지)
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
             nsq = int(cur.fetchone()[0] or 1)
             cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
                   WH_CUST_CODE,GAGONG_PROC_CODE,INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)

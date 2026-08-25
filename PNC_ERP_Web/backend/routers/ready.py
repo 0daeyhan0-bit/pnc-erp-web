@@ -50,7 +50,7 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
 
 @router.get("/api/ready/setcheck")
 def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0),
-                   src: str = Query("live")):
+                   src: str = Query("nx")):
     """★키팅 [확인] 팝업(레거시 w_pr_input_466) — 도번의 자도번별 사용수량·재고·세트가능수량·협력사.
        ★BOM 소스 = CS_M_ITEM_BOM(웹 정본). 레거시 화면은 PR_M_ITEM_BOM을 쓰지만 실측 결과 두 테이블이
          동일(자도번·USE_QTY·KITTING_FLAG 일치)이라, 웹 다른 화면(bom.py 등)과 기준을 통일함.
@@ -138,14 +138,33 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
             mats = [b["mat"] for b in bom]
             for i in range(0, len(mats), 900):
                 ch = mats[i:i+900]; ph = ",".join("?" * len(ch))
-                # ★2026-08-24 재고 스냅샷 소스 = 기본 live(레거시 정본).
-                #   nx 미러가 멈추면(8/22 이후) 낡은 값이 나와 레거시와 크게 어긋난다.
-                #   실측: 라이브 14/18 일치 vs nx 6/18 (MJU66366804 40 vs 0 등).
-                _S = "PARTNER_ERP.dbo" if str(src).strip() != "nx" else "PARTNER_ERP_TEST3.nx"
-                cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float))
-                                  FROM {_S}.PU_T_MAT_STOCK_WH WITH(NOLOCK)
-                                 WHERE MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
-                                 GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *ch)
+                # ★2026-08-25 재고 = 라이브∪nx 중 '더 최근 갱신본'(다른 화면과 동일 규칙).
+                #   nx 가 정본이다 — 웹 실적/조정이 nx 에만 쌓이므로 라이브만 보면
+                #   웹에서 한 작업이 팝업에 안 나타나 프로세스 검증이 불가능하다.
+                #   미러가 늦어 nx 에 없는 품목은 라이브 값이 잡힌다(누락 방지).
+                #   (구버전은 기본 live 라 웹 실적이 안 보였다 — 실측 466 팝업 18건 중
+                #    6건이 라이브 값으로 표시돼 nx 실적과 어긋남.)
+                _lv = "PARTNER_ERP.dbo"; _nxs = "PARTNER_ERP_TEST3.nx"
+                if str(src).strip() == "live":
+                    _sel = f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float))
+                                 FROM {_lv}.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                                WHERE MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
+                                GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))"""
+                    cur.execute(_sel, *ch)
+                else:
+                    # ★nx 우선. 갱신시각 비교는 쓰지 않는다 — 레거시가 계속 돌아
+                    #   라이브가 항상 더 최신이라(실측 라이브 16:36 vs nx 11:42) 항상 라이브가
+                    #   선택돼 웹 실적이 묻혔다. nx 에 행이 없을 때만 라이브로 채운다.
+                    _w = f"MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'"
+                    cur.execute(f"""SELECT k, SUM(q) FROM (
+                        SELECT UPPER(LTRIM(RTRIM(ISNULL(n.MAT_CODE,l.MAT_CODE)))) k,
+                               CAST(CASE WHEN n.MAT_CODE IS NULL THEN l.STOCK_QTY
+                                         ELSE n.STOCK_QTY END AS float) q
+                          FROM (SELECT * FROM {_nxs}.PU_T_MAT_STOCK_WH WITH(NOLOCK) WHERE {_w}) n
+                          FULL JOIN (SELECT * FROM {_lv}.PU_T_MAT_STOCK_WH WITH(NOLOCK) WHERE {_w}) l
+                            ON l.MAT_CODE=n.MAT_CODE AND l.CUST_CODE=n.CUST_CODE
+                           AND ISNULL(l.GAGONG_PROC_CODE,'')=ISNULL(n.GAGONG_PROC_CODE,'')
+                        ) u GROUP BY k""", *(list(ch) + list(ch)))
                 for r in cur.fetchall():
                     stkmap[str(r[0] or '').strip()] = float(r[1] or 0)
             # ★2026-08-20: 웹 원장 가산 제거 — 스냅샷(PU_T_MAT_STOCK_WH)이 정본.
@@ -455,7 +474,7 @@ def ready_commit(payload: dict = Body(...)):
             mat = b["mat"]; need = float(b["use_qty"]) * qty      # 소요량 × 세트수량
             # ② 자재창고 출고(tag='B', 음수) / 취소시 +
             #    ★MAINT_YMD = today6(실제 발생일). 계획일자(d6)가 아님 — 재고 수불은 오늘 기준.
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", today6)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
             seq = int(cur.fetchone()[0] or 1)
             # ★TO_GAGONG_PROC_CODE(도착 파트창고) 필수 — 생산입출고현황의 '생산창고입고' 라인이
             #   tag='B' AND OUT_WH_GUBUN='1' AND TO_GAGONG_PROC_CODE>'' 조건으로 집계함(live_api._prodinout).
