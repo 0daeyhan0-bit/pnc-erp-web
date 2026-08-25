@@ -80,3 +80,16 @@
 - ★**route는 재고 pool 키에 안 넣음**(CANON §9의 ROUTE_ID를 pool 분할용 미사용). 같은 물리 SUB를 R01 제작·R02 외주로 만들어도 **재고 1개**.
 - ★**route = 생산/조달 흐름축**(재고축 아님): 제작→backflush로 pool 채움 / 외주→입고로 pool 채움. 어느 경로든 **같은 SUB 재고 pool**로 귀속.
 - ∴ C7(코드route vs ROUTE_ID) 해소: **코드에 출생route 박제(라벨)** + **재고 1 pool(사용route 무관)**. CANON §9 재고키에서 SUB의 ROUTE_ID 차원은 pool분할 아닌 (필요시)추적용으로만.
+
+## §10. ★다리 C 규명·방향 (2026-08-25 실측) — 부품레벨 정합
+- **SUB-레벨 jadoban 다리는 얕음(29%)·CS 자도번 대부분 nx.bom에 없음**(샘플 85% 둘다없음). SUB 통째를 nx.bom에 매칭 불가.
+- ★**부품-레벨은 성립**: 자도번SUB 30개의 직하위 부품 69개 중 **nx.bom 직접존재 87%**(child_code/child_code_lg)·merge_map 30%. 둘다없음 13%는 **전부 중첩 SUB(자도번형)** = 재귀전개 대상.
+- ★**∴ 다리 C = SUB 자재풋프린트 = Σ(SUB의 부품 → nx.bom 원소재, 중첩SUB 재귀)**. SUB 통째 매핑(jadoban 29%) 대신 **부품 단위 매핑(87%)+재귀**로 near-complete.
+- nx.sub_alias(388행)=잔여 variant 주석(canonical/sig=None 다수)·자도번→S 매핑은 sub_code_map(3418). ★문서 종합의 "sub_alias 1854행 100%적재"는 stale(1468 정리됨 [[newerp-sub-name-registry]]) — 실 매핑=sub_code_map.
+
+## §11. ∴ 통합 설계 방향 (규명 종합)
+1. **SUB 재고 키** = 출생라벨 코드·시그니처 1 pool·route=흐름축(§9 확정).
+2. **다리 C(자재정합)** = SUB→부품→nx.bom 원소재(부품레벨 87%+재귀). backflush를 이 풋프린트로 SUB grain 소비.
+3. **재고점 결선** = SUB(`출생라벨`) 반제품 재고 backfill + backflush가 SUB 완성시 +SUB / 상위소비시 −SUB(is_lowest 정지처럼).
+4. **구분 구동** = 제작→다리C로 원소재 −+SUB / 외주→−SAG+입고 / 매입→입고 / 사급→지급(기존 §11 흐름 재사용).
+5. 재사용: 재고인프라·구분흐름·공용1pool·시그니처dedup·mint = 이미 있음. **신규 = 다리C(부품레벨 재귀 매핑) + SUB재고 backfill + backflush SUB-grain 확장.**
