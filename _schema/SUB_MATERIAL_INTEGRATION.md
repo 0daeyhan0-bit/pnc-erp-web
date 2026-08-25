@@ -120,3 +120,10 @@
 - ★**컬럼 주의**: nx.bom.is_lowest = VARCHAR **'Y'/'N'**(int 아님). nx.bom엔 weight 컬럼 없음(중량축=weight_calc/bom_dim 별도).
 - ★nx.bom.jadoban 예: 'AJR77263007-SUB'(제품-SUB, parent=제품·child=제작동관MJU/용접봉·is_lowest='Y'). 깊은SUB(-4-1)는 jadoban 미포함→부품레벨 재귀 fallback(§10, 필요시).
 - **구현 산출**: `_sub_raw_footprint(cur, sub) -> {원소재: qty}` (읽기전용·새 함수·backflush 무접촉=옆에짓고). #2 재고 backfill·#3 backflush 결선의 기반.
+
+## §15. ★★#1 다리 C 구현·검증 완료 (2026-08-26·dev) — 옆에짓고 diff0 100%
+- **구현**: `backflush.py`에 `_sub_footprints_by_jadoban(nxc, product) -> {jadoban: {원소재: cum_qty}}` + `_sub_raw_footprint(nxc, product, jadoban)`(단건 파생). **읽기전용·새 함수·기존 backflush(_backflush_bom·_backflush_core·backflush_post) 무접촉.**
+- **★설계 확정**: 처음 `is_lowest='Y'` 필터는 backflush 실제 leaf규칙(자식없음 OR is_lowest='Y' + 제작서브 재귀전개)과 달라 81.7%만 일치 → **`_backflush_bom`과 동일 walk로 재작성**(용접봉 role 별도제외·경로 최상위 jadoban 전파). = 구조적 diff0.
+- **★검증(옆에짓고 diff0)**: 제품표본 60개, **Σ(전 jadoban SUB분해) == `_backflush_bom` comps(자재) = 60/60 완전일치(100%)**. scratchpad/bridge_c_diff0.py. 앞서 보존검증 54/54(§14)와 정합. ∴ **SUB grain은 귀속 라벨만 추가·원소재 차감 총량 불변** — #3 backflush 결선 시 diff0 보장.
+- **★nx.bom flat 확정**: SUB 노드 없음·jadoban=제품 직속 엣지의 그룹라벨. 용접봉=공정종속(backflush 별도 −W)이라 자재풋프린트서 제외.
+- **다음 = #2 SUB 재고점 backfill**(`출생라벨` 반제품 재고·stock_ledger PRD 현재 0행) → #3 backflush를 SUB grain(+SUB/−SUB)으로 결선. 배포=승인후.
