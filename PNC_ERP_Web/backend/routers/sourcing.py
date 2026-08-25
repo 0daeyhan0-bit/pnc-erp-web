@@ -428,7 +428,63 @@ def _ensure_route_tbl(cur):
     # ★후보번호 단조증가(high-water-mark): 삭제해도 route_no 재사용 안 함. item별 마지막 채번번호.
     cur.execute("""IF OBJECT_ID('nx.route_seq','U') IS NULL CREATE TABLE nx.route_seq(
         item_code NVARCHAR(60) PRIMARY KEY, last_no INT NOT NULL DEFAULT 1)""")
+    # ★★route_edges(2026-08-25 다리): 경로별 BOM엣지(parent→child→USE_QTY_PR). soyo.py STEP7 route-aware가 소비.
+    #   ★타입정합 필수: plan_part_dtl.item_code=varchar(20)·v_pr_bom.mat_code=varchar(20)와 재귀 CTE 타입 일치(varchar20).
+    cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
+        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
+        use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
     _SCHEMA_READY = True
+
+
+def _materialize_route_edges(cur, route_id):
+    """★A(2026-08-25): Rnn 저장(finalize commit)마다 자동 호출 — nx.sourcing_route_line(편집구조) → nx.route_edges.
+       ★구조 전용(설계 A): 업체/단가(sourcing_profile)는 조달프로파일 화면이 담당 — 여기선 손대지 않음.
+       = "다리"를 별도 단계로 두지 않고 저장에 흡수. Rnn 저장하면 계획전개용 구조가 항상 최신.
+
+       규칙(ROUTE_REFLECTION_DESIGN §18-3~5·검증완료):
+       - route_edges = v_pr_bom 활성엣지(R01 grain·제작SUB leaf정지) 기반, 단 sourcing_route_line에서
+         외주/매입/사급으로 표시된 노드에서 추가 정지(그 하위 subtree 제거=협력사 통째납품 leaf).
+         · 무편집(라인 조달상태=현행) → base 그대로 = R01 diff0 보장(검증: 함수결과=v_pr_bom base 47=47).
+         · 제작→외주 편집 → 그 SUB subtree 제거·SUB leaf화(T2·100/100 §18-2).
+       ★grain 안전: base=v_pr_bom active(+용접링 등 제작단위 leaf정지)라 sourcing_route_line 구조 과전개(있어도) 무시=diff0 유지.
+       ★한계: 외주→제작 강제전개(except=1 자식 되살림)는 make_type 오탐 위험(+용접링)이라 미포함 — 별도 explicit-edge(§18-2). 정지방향(외주화)만 담당.
+       반환: {"edges": n, "stops": k}."""
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.sourcing_route WHERE route_id=?", route_id)
+    hr = cur.fetchone()
+    if not hr:
+        raise HTTPException(404, f"route 없음(route_id={route_id})")
+    assy = str(hr[0]).strip()
+    # ── 정지집합 = sourcing_route_line 조달상태(외주/매입/사급 노드) ──
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), ISNULL(gubun,'')
+        FROM nx.sourcing_route_line WHERE route_id=? AND child_item IS NOT NULL AND LTRIM(RTRIM(child_item))<>''""", route_id)
+    stop = set(l[0] for l in cur.fetchall() if str(l[1]).strip() in ("외주", "매입", "구매", "사급", "외주직납"))  # ★제작/자체=전개 / 나머지 조달=정지(5종 make_type)
+    # ── v_pr_bom 활성엣지 인접리스트 ──
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
+    E = {}
+    for it, m, q, ex in cur.fetchall():
+        E.setdefault(it, []).append((m, float(q or 0), int(ex or 0)))
+    # ── route_edges = base(except<>1) + 외주/매입/사급 노드 정지 ──
+    edges = {}; seen = set(); st = [assy]
+    while st:
+        n = st.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        if n != assy and n in stop:              # 조달정지 노드 = leaf(subtree 미전개)
+            continue
+        for m, q, ex in E.get(n, []):
+            if ex == 1:                          # R01 grain=except제외(제작SUB 내부 baked-in)
+                continue
+            edges[(n[:20], m[:20])] = edges.get((n[:20], m[:20]), 0) + q
+            if m in E:
+                st.append(m)
+    cur.execute("DELETE FROM nx.route_edges WHERE route_id=?", route_id)   # 근거키(route_id) 스코프 전체교체=멱등
+    rows = [(int(route_id), it, m, q) for (it, m), q in edges.items()]
+    if rows:
+        cur.fast_executemany = True
+        cur.executemany("INSERT INTO nx.route_edges(route_id,item_code,mat_code,use_qty_pr) VALUES(?,?,?,?)", rows)
+    return {"edges": len(rows), "stops": len(stop)}
+
 
 def _approved_hwm(cur, item):
     """승인 후보 high-water-mark = max(현재 승인후보 route_no, route_seq.last_no, 1).
@@ -519,9 +575,12 @@ def _base_flat_lines(item, ymd="260630"):
         except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
     rows = d.get("rows", []) if isinstance(d, dict) else []
     out = []; sq = 0
-    for r in rows:
-        if int(r.get("level", 0) or 0) <= 0: continue
-        if float(r.get("mat", 0) or 0) <= 0: continue        # 재료비 계상 leaf만(=flatMat)
+    for i, r in enumerate(rows):
+        L = int(r.get("level", 0) or 0)
+        if L <= 0: continue
+        # ★구조 전부품(2026-08-25 §9): 재료비>0 필터 폐기 → 전 leaf 포함(mat=0=단가미등록도 조달대상).
+        #   중간 SUB노드(다음 행이 더 깊은 레벨=자식 보유)만 제외 = 평면 leaf. finalize 부품수 BASE와 seed 통일.
+        if i + 1 < len(rows) and int(rows[i + 1].get("level", 0) or 0) == L + 1: continue
         code = str(r.get("code", "")).strip()
         if not code: continue
         # ★RAC 중 용접봉만 제외(공정종속). 용접링(ITEM_DESC '용접링')=사급 부품 → 부품풀 유지(cost.py·price.py 규칙 일치).
@@ -927,8 +986,7 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
                 rid, seq, _cap(code, 60), _cap(name, 120), _sgub, _cap(code, 60), parent_line)
             stack[L] = int(cur.fetchone()[0])
         else:                                                   # leaf
-            mat = float(r.get("mat", 0) or 0)
-            if mat <= 0: continue                               # phantom/mat=0
+            # ★구조 전부품(2026-08-25 §9): mat=0(단가미등록) leaf도 포함 — 재료비 필터 폐기(seed=BASE 통일)
             if code.upper().startswith("RAC") and "용접링" not in name: continue   # 용접봉 제외·용접링 유지
             metal = str(r.get("metal", "") or "").strip()
             gub = _mk5(_mkmap.get(code.upper()), False)         # ★리프 구분 = 생산구분(make_type) (cost_gubun 폐기)
@@ -1476,12 +1534,13 @@ def sourcing_part_assign(payload: dict = Body(...)):
 
 @router.post("/api/sourcing/line/gubun")
 def sourcing_line_gubun(payload: dict = Body(...)):
-    """부품/SUB 라인의 구분(제작/매입/사급) 설정 — 조달경로 통합검토 SUB패널. ★제작/매입/사급은 여기서 결정(업체=조달프로파일).
-       payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB에 지정 시 그 SUB 자체 성격(사급=협력사 유상사급 조립)."""
+    """부품/SUB 라인의 구분(생산구분 make_type 5종: 제작/외주/구매/사급/외주직납) 설정 — 조달경로 통합검토 SUB패널.
+       ★구분=여기서 결정(업체=조달프로파일). payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB=그 SUB 성격(사급=협력사 유상사급 조립)."""
     rid = int(payload.get("route_id") or 0); line_id = int(payload.get("line_id") or 0)
     gubun = str(payload.get("gubun", "")).strip()[:20]
     if rid <= 0 or line_id <= 0: raise HTTPException(400, "route_id·line_id 필요")
-    if gubun not in ("제작", "매입", "사급"): raise HTTPException(400, "구분은 제작/매입/사급 중 하나")
+    # ★생산구분(make_type) 5종 = 프론트 드롭다운과 일치(제작/외주/구매/사급/외주직납). 매입=구매 레거시 별칭 허용.
+    if gubun not in ("제작", "외주", "구매", "사급", "외주직납", "매입"): raise HTTPException(400, "구분은 제작/외주/구매/사급/외주직납 중 하나")
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
@@ -1614,6 +1673,25 @@ def sourcing_profile_save(payload: dict = Body(...)):
             return {"ok": False, "gate": "NOT_APPROVED", "msg": "승인된 후보만 업체 매핑 가능(먼저 승인하세요)."}
         # 정규화 + 배분검증(활성·비내부·배분% 입력 대상)
         _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)   # 계획단가 파싱(공란=NULL)
+        # ★B(2026-08-25 설계): 업체·단가 완비 강제 — 업체 미지정 또는 단가(매입/사급 둘 다) 미입력 행은 저장 거부.
+        #   근거=활성 게이트(§19-C ③업체 ④단가). 소스에서 미완성 상태 차단 → sourcing_profile엔 완비행만.
+        bad = []
+        for r in rows:
+            if r.get("_delete"):
+                continue
+            vc0 = str(r.get("vendor_code", "")).strip()
+            bp0 = _pfloat(r.get("buy_price")); sp0 = _pfloat(r.get("sagub_price"))
+            touched = bool(vc0) or (bp0 is not None) or (sp0 is not None) or bool(r.get("is_active"))
+            if not touched:
+                continue  # 완전 빈 행 = 무시(등록 대상 아님)
+            if not vc0:
+                bad.append("업체 미지정 행 — 업체를 지정해야 저장됩니다")
+            elif bp0 is None and sp0 is None:
+                bad.append(f"{vc0}: 단가 미입력 — 매입가 또는 사급가를 입력해야 저장됩니다")
+        if bad:
+            nx.rollback()
+            return {"ok": False, "gate": "INCOMPLETE", "errors": list(dict.fromkeys(bad)),
+                    "msg": "업체·단가를 모두 입력해야 저장됩니다."}
         norm = []; act = []
         for r in rows:
             if r.get("_delete"):
@@ -2750,15 +2828,27 @@ def sourcing_route_finalize(payload: dict = Body(...)):
             errors.append(f"보관함(왼쪽 풀)에 미배치 부품 {len(staged_parts)}건: {', '.join(staged_parts[:8])}{'…' if len(staged_parts) > 8 else ''} — 모두 ASSY/SUB에 배치해야 저장됩니다")
         ok = gongsu_ok and part_ok and staged_ok
         # 신규 SUB mint(정본 S 발급)는 finalize 아닌 ★승인(route/approve) 시점에 수행 — 레지스트리 청결(승인된 SUB만 정본코드).
+        edges_n = None
         if ok and commit:
             cur.execute("UPDATE nx.sourcing_route SET upd_dt=getdate() WHERE route_id=?", rid)
+            # ★A(2026-08-25 설계): 저장(commit)마다 route_edges 자동 등록(구조 전용) — "다리"를 저장에 흡수.
+            #   Rnn(route_no>1)만 대상. R01(route_no=1)=현행 v_pr_bom 직접전개라 route_edges 불필요(생성해도 plan_route_active 미포함=무효).
+            #   활성화(계획 반영)는 별도 게이트(승인·업체·단가) 통과 후 — 여기선 구조만 최신화. sourcing_profile(업체/단가)=조달프로파일 담당.
+            cur.execute("SELECT ISNULL(route_no,1) FROM nx.sourcing_route WHERE route_id=?", rid)
+            _rn = cur.fetchone()
+            if _rn and int(_rn[0] or 1) > 1:
+                try:
+                    edges_n = _materialize_route_edges(cur, rid)
+                except Exception as _e:
+                    raise HTTPException(500, f"route_edges 자동등록 오류: {_e}")
             _snap_clear(cur, rid)   # ★전체저장 확정 → 편집 세션 스냅샷 폐기(이후 닫기=되돌릴 것 없음)
             nx.commit()
         else:
             nx.rollback()   # 검증전용(commit=0) 또는 실패 → reuse 변경 롤백
         return {"ok": ok, "gongsu_ok": gongsu_ok, "part_ok": part_ok, "staged_ok": staged_ok, "cand_gongsu": cand, "base_gongsu": base,
                 "cut_sum": cut_sum, "proc_sum": proc_sum, "base_part_count": len(base_parts), "route_part_count": len(route_parts),
-                "missing": missing, "extra": extra, "staged": staged_parts, "reused": reused, "committed": bool(ok and commit), "errors": errors}
+                "missing": missing, "extra": extra, "staged": staged_parts, "reused": reused, "committed": bool(ok and commit),
+                "route_edges": edges_n, "errors": errors}
     except HTTPException:
         nx.rollback(); raise
     except Exception:
