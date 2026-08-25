@@ -388,3 +388,20 @@
 - **★한계(정직)**: **정지방향(제작→외주/매입=외주화)만 이 다리 담당.** 외주→제작 강제전개(except=1 자식 되살림)는 make_type 오탐(+용접링 make_type=3) 위험이라 미포함 — 별도 explicit-edge(§18-2 5/5). 외주화가 지배적 케이스.
 - **상태**: sourcing.py DEV·compile OK·DB 롤백(무변경). 배포=승인후. 활성화는 별도(route_alloc·current_flag, 기존 조달프로파일 화면).
 - **∴ 편집UI(존재) → 다리(_materialize_route_from_line) → soyo STEP7 route-aware(배포완) → 생산+협력사 계획 자동반영. 연결 완성(외주화 방향).**
+
+## §19. ★★활성 게이트 + 다리 저장흡수 설계 (2026-08-25 사용자 확정) — 구현 진행중
+사용자 규칙(정본): **R01은 수정잠금. Rnn만 신규등록. Rnn은 수정→승인→조달프로파일 업체지정→단가지정, 4개 다 통과해야 계획서가 그 경로로 돌아감. 이 규칙이 관련 모든 프로그램에 동일 반영.**
+
+### 확정 설계 (A~E)
+- **A. 다리 소멸(저장 흡수)**: "다리"를 별도 단계/버튼으로 두지 않음. **Rnn 저장(finalize commit)마다 route_edges 자동 등록**(구조 전용). sourcing_profile(업체/단가)은 다리서 제외 — 조달프로파일 화면 담당.
+- **B. 조달프로파일 저장 검증**: 업체 or 단가(buy_price/sagub_price) **미입력이면 저장 거부**(둘 다 있어야). → sourcing_profile엔 완비행만.
+- **C. 활성 게이트(공통 1곳)**: 활성 지정 Rnn(current_flag=1·route_no>1)이 4개 전부 — ①승인 approve_flag=1 ②route_edges 존재 ③업체(sourcing_profile.vendor_code) ④단가(buy_price/sagub_price). 하나라도 미충족=활성자격 없음.
+- **D. 편성 사전검증(백스톱)**: 생산계획 편성(compose_mat 맨앞)에서 C 검사. 미충족 → **업로드 실패 + 정확한 메시지(제품·경로·빠진항목) + 편성 중단**(plan_part_mat 미접촉). 협력사는 plan_part_mat 재사용이라 자연 차단. 원가 엔진도 같은 게이트 공유.
+- **E. R01**: route_no=1이라 게이트/route_edges 무관·현행 그대로.
+
+### §19-1. A 구현·검증 완료(2026-08-25·dev)
+- sourcing.py: `_materialize_route_edges(cur, route_id)` 신설(구조 전용=route_edges만·sourcing_profile 미접촉). 별도 엔드포인트 `/materialize_from_line` 제거(저장 흡수).
+- 훅: `sourcing_route_finalize`(=saveWithGate/registerWithGate 호출처) commit블록에 추가 — **route_no>1(Rnn)만** `_materialize_route_edges` 호출(멱등·route_id 스코프). R01(route_no=1) 제외.
+- ★검증(실함수·rid=1580·DB롤백): route_edges=v_pr_bom active base **47=47 diff0 상속**·**sourcing_profile before0=after0 미접촉**·롤백 무변경.
+- 규칙: route_edges=v_pr_bom active base + sourcing_route_line 외주/매입/사급 노드 정지(subtree제거). grain안전(base=제작단위 leaf정지). 한계=정지방향(외주화)만·외주→제작 전개는 explicit-edge(§18-2, 향후).
+- 다음: B(조달프로파일 저장검증) → C(공통 게이트 함수) → D(편성 사전검증·협력사·원가).
