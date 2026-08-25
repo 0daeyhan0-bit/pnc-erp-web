@@ -410,3 +410,15 @@
 - sourcing.py `sourcing_profile_save`(/api/sourcing/profile/save)에 사전검증 추가: 저장행 각각 **업체 미지정 or 단가(buy_price·sagub_price 둘다) 미입력 → 저장 거부**(gate=INCOMPLETE·사유목록). 완전 빈행/삭제행=무시.
 - ★검증(순수로직 8케이스): 업체+매입가 OK·업체+사급가 OK·업체O단가X 거부·업체X단가O 거부·빈행 통과·삭제행 통과·활성만(업체X) 거부·혼합 정확. 8/8.
 - 효과: sourcing_profile엔 업체+단가 완비행만 존재 → 게이트 C의 ③④ 판정 단순화.
+
+### §19-3. C 구현·검증 완료(2026-08-25·dev)
+- soyo.py: `_ROUTE_GATE_SQL`(공통 게이트 조건·한 곳 정의) + `_route_gate_incomplete(cur)`(미충족 목록+사유) + `_route_setup` 게이트 강화(plan_route_active = 게이트 통과 Rnn만) + `_ensure_profile_price`(단가컬럼 멱등).
+- 게이트 4조건: ①approve_flag=1 ②EXISTS route_edges ③EXISTS sourcing_profile.vendor ④EXISTS buy_price/sagub_price.
+- ★검증(합성 Rnn·실품번 AJR77263007·롤백): 완비→plan_route_active 포함(활성)·미충족0 / 단가제거→즉시 제외+"단가 미지정" / 미승인·구조X·업체X·단가X→제외+4사유(품번 표시). 현재 활성지정0→plan_route_active0=현행 diff0 안전.
+- ∴ 생산·협력사(plan_route_active 공유)가 동일 게이트. 다음 D=편성 사전검증(compose_mat)이 _route_gate_incomplete로 업로드 실패·정확메시지(품번+Rnn+사유)·중단.
+
+### §19-4. D 구현·검증 완료(2026-08-25·dev)
+- soyo.py `plan_compose_mat`(/api/plan/compose_mat) 맨 앞(첫 DML STEP M 전)에 사전검증: `_route_gate_incomplete(cur)` 비어있지 않으면 **HTTPException(400) + 정확 메시지 + 편성 중단**(어떤 DML도 전·plan_part_mat 미접촉).
+- 메시지: "생산계획 편성 불가 — 활성 지정된 대체경로(Rnn) N건 미완성" + 각 행 "· 품번 XXX 경로 R0n(경로명): 미승인, 구조 미반영, 업체 미지정, 단가 미지정" (빠진 것만). ★사용자 요구=품번+Rnn 정보 표현 충족.
+- ★검증(합성 미완성 2건·실품번·롤백): 현재상태(활성0)→편성 통과 / 미완성 2건→2건 잡힘+품번·R08·4사유 정확 표시. 협력사는 plan_part_mat 재사용이라 자연 차단(별도 경고 불필요).
+- ∴ §19 A~D 전부 dev 구현·검증완료. **남은=원가 walker route-aware**(nx_soyo_engine.py:53 가산 삽입·plan_route_active 공유·게이트 자동상속·diff0). 배포=승인후.
