@@ -903,7 +903,14 @@ SCREEN.gagongmove580=(c)=>{
       if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
     // ★기간 N일 = 기준일 포함 N일치 → to = from + (N-1). (기존 +N 이라 11·15일치가 나왔음)
-    g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));g('#mv-search').click();};
+    //   ★2026-08-25 st.to 만 고치고 조회를 누르면 #mv-search 핸들러가 첫 줄에서
+    //     st.to = 입력칸값 으로 되돌려버려(입력칸은 아직 옛 날짜) 항상 2일치만 나왔다.
+    //     → 종료일 입력칸도 같이 갱신한 뒤 조회한다. 기준일 변경 시에도 기간을 따라가게 함.
+    const syncTo=()=>{const f=g('#mv-from');if(f)st.from=f.value;
+      st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));
+      const t=g('#mv-to');if(t)t.value=st.to;};
+    g('#mv-gigan').onchange=()=>{st.gigan=+g('#mv-gigan').value;syncTo();g('#mv-search').click();};
+    { const fr=g('#mv-from'); if(fr) fr.onchange=()=>{syncTo();}; }
     c.querySelectorAll('input[name=mv-gubun]').forEach(rd=>rd.onchange=()=>{st.gubun=rd.value;draw();});   // 전환만, 조회는 버튼으로
     ['#mv-item','#mv-part'].forEach(id=>{const el=g(id);
       el.oninput=()=>{st.item=g('#mv-item').value;st.part=g('#mv-part').value;refilter();

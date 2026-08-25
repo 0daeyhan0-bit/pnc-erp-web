@@ -827,9 +827,14 @@ SCREEN.partplan=(c)=>{
     //   무색('0'=미키팅/전표)은 판정 대상에서 제외. 색이 하나도 없으면 무색. (소계행·집계뷰 공통)
     const rollFin=(fs)=>{const v=fs.filter(f=>f&&f!=='0');if(!v.length)return '0';
       return v.slice().sort((a,b)=>aggRank(a)-aggRank(b))[0];};
-    // ★2026-08-24 부분충당 소계는 무색. 하위행 중 하나만 색이 있어도 롤업되던 탓에
-    //   충당 0/35 인데 소계가 녹색으로 나왔다(합계행은 0/35 로 정상표시) → 합계가 계획을 다 채웠을 때만 색.
-    const rollFinQ=(fs,cv,pl)=>((+cv||0) >= (+pl||0)-1e-6) ? rollFin(fs) : '0';
+    // ★2026-08-25 소계 색상 = "하위행이 전부 같은 색일 때만" 그 색(사용자 규칙).
+    //   구버전은 cover>=plan 을 요구했는데, 백엔드가 prior_fin='3'(키팅완료)로 이미 판정한
+    //   행이라도 prior_cover=0 이면 무색이 되어 상세(녹)와 소계(무색)가 어긋났다.
+    //   판정기준을 상세행과 통일 — fin 값 자체로만 본다. 하나라도 다르면(무색 포함) 무색.
+    const rollFinQ=(fs)=>{const v=fs.map(f=>f||'0');
+      if(!v.length)return '0';
+      const a=v[0];
+      return v.every(f=>f===a)?(a==='0'?'0':a):'0';};
     // ── 구분(view): 집계=도번(item)단위 롤업 / 전체·제번=제번(WO)단위 상세 ──
     let disp=base;
     if(st.view==='집계'){
@@ -862,8 +867,8 @@ SCREEN.partplan=(c)=>{
         });
         // 색상 = 소계행과 동일(계획>0인 행만 대상, aggRank: 녹3 > 노랑4 > 주황6).
         //   ★부분충당이면 무색(rollFinQ) — 합계가 계획을 다 채웠을 때만 칠한다.
-        g.prior_fin=rollFinQ(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'), g.prior_cover, g.prior_plan);
-        d.forEach(x=>{g.dfin[x]=rollFinQ(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'), g.dcov[x]||0, g.days[x]||0);});
+        g.prior_fin=rollFinQ(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'));
+        d.forEach(x=>{g.dfin[x]=rollFinQ(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'));});
         out.push(g); i=j;
       }
       disp=out;
@@ -948,7 +953,7 @@ SCREEN.partplan=(c)=>{
     const subHtml=(blk,gkey,folded)=>{const r0=blk[0];
       const sPl=blk.reduce((s,r)=>s+(+r.plan_qty||0),0), sST=blk.reduce((s,r)=>s+Math.round(rowST(r)*100)/100,0);
       const sPrP=blk.reduce((s,r)=>s+(+r.prior_plan||0),0), sPrC=blk.reduce((s,r)=>s+(+r.prior_cover||0),0);
-      const sPrF=rollFinQ(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'), sPrC, sPrP);
+      const sPrF=rollFinQ(blk.filter(r=>(+r.prior_plan||0)>0).map(r=>r.prior_fin||'0'));
       const subTd=(v,f)=>`<td class="center"${f&&f!=='0'?` style="background:${finBg(f)};font-weight:700${finFg(f)?';color:'+finFg(f):''}"`:''}>${v}</td>`;   // ★가운데정렬
       // ★소계행도 headOrder(유저 컬럼순서)를 따라야 하므로, 합계값을 담은 가상행을 만들어 headTd에 넘김.
       //   소계에 표시 안 하는 컬럼(상위도번·LineNo·PART일자·PART INPUT·당김)은 빈값 처리.
@@ -961,7 +966,7 @@ SCREEN.partplan=(c)=>{
       return `<tr${gkey!==undefined?` class="pp-agg" data-gk="${esc(gkey)}"`:''} style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8${gkey!==undefined?';cursor:pointer':''}">
         <td class="center mut">${gkey!==undefined?`<span style="color:#456">${folded?'▶':'▼'}</span>`:''}</td>${headTd(sub,true)}
         ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
-          const cf=rollFinQ(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'), cv, pl);
+          const cf=rollFinQ(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'));
           return pl>0?subTd(nf(cv)+'/'+nf(pl),cf):`<td class="center"></td>`;}).join('')}${tailTd(sub)}</tr>`;};
     // tbody: 상세=도번블록별 상세행+청록소계, 집계=집계행(클릭시 상세 펼침), 제번=집계행만
     // 전체 컬럼수 = SEQ(1) + 앞쪽컬럼(headOrder) + 일자컬럼(d) + 후행컬럼(tailOrder). colspan/스피너 계산용.
