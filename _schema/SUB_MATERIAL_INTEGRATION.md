@@ -127,3 +127,20 @@
 - **★검증(옆에짓고 diff0)**: 제품표본 60개, **Σ(전 jadoban SUB분해) == `_backflush_bom` comps(자재) = 60/60 완전일치(100%)**. scratchpad/bridge_c_diff0.py. 앞서 보존검증 54/54(§14)와 정합. ∴ **SUB grain은 귀속 라벨만 추가·원소재 차감 총량 불변** — #3 backflush 결선 시 diff0 보장.
 - **★nx.bom flat 확정**: SUB 노드 없음·jadoban=제품 직속 엣지의 그룹라벨. 용접봉=공정종속(backflush 별도 −W)이라 자재풋프린트서 제외.
 - **다음 = #2 SUB 재고점 backfill**(`출생라벨` 반제품 재고·stock_ledger PRD 현재 0행) → #3 backflush를 SUB grain(+SUB/−SUB)으로 결선. 배포=승인후.
+
+## §16. ★#2 규명 — 기존 SUB 재고 baseline 소스·시산 (2026-08-26·읽기전용, 사용자 "기존 서브 실적 챙겨봐")
+- **완성 실적 소스** = `PR_T_INDI_CUTTING`(가공바코드 전표·자도번/품번별 PLAN/CUT/PROD_QTY·PROD_FLAG·공정). 15,105전표·PROD_QTY>0 14,196(합 287만). ITEM_CODE=제작동관(MJU)+자도번SUB(-N-N/-은납/-저압) 혼재. 사용자 확정 "공정별로 찍음(SUB완성 포함)".
+- **반제품 재고 직독원** = `PR_T_MONTH_STOCK_WH`(생산재고·CUST_CODE='Z99990'·MAT_CODE=자도번·GAGONG_PROC_CODE 공정별·STOCK_QTY). 자도번 SUB 재고 실존(AJJ76418723-SUB=29·AJR74263316-은납=234).
+- **시산(2502 마감월)**: 자도번SUB 재고 **305품번·32,073개**, 출생라벨S(sub_code_map) 매칭 **272/305=89%**, 음수이상치 23행(-29 소량), 다중공정 재고점 4품번.
+- **★★중대 발견 = 월마감 stale**: PR_T_MONTH_STOCK_WH 라이브 **최신월도 2502(2025-02)** = 1년+ 정체. ∴ 이 스냅샷=현재 baseline 부적합. **현행 반제품 재고는 라이브 트랜잭션(PU_T_CUT_DTL·PR_T_PROD_DTL) 파생 필요.**
+- **∴ baseline 방향 확정** = **현행 생산재고조회(prodstock) 산식 재사용**(diff0 정합 [[newerp-prodstock-period-diff0]])을 SUB(자도번)로 필터 = 현재값. 스테일 월마감 직독 금지.
+- **재고 키**: MAT_CODE(자도번)→sub_code_map→출생라벨S(89%)·1 pool(§9). 공정별 재고점은 SUB pool로 합산(다중공정 4품번 소수).
+- **다음**: 현행 prodstock live 산식 정독 → SUB baseline 현재값 시산·검증(읽기전용). 쓰기(stock_ledger PRD backfill)=승인후.
+
+## §17. ★★#2 baseline 현재값 시산·확정 (2026-08-26·읽기전용·검증완료)
+- **산식 확정** = `live_api._prodstock(ym)` (레거시 w_pr_stock_480 동일): **PR_T_MONTH_STOCK_WH '2502' 앵커 + 라이브 트랜잭션 rollforward**(PU_T_CUT_DTL 가공실적·PR_T_PROD_DTL 생산실적·PU_T_STOCK_MAINT B/T/C 이동·SA_T_STOCK_MAINT·PR_T_STOCK_MAINT_MAT). qty=basic+inq−outq+adj, group by (mat_code, gagong_proc_code). ∴ 스테일 월마감은 앵커일뿐 현재값 산출.
+- **시산(2608·라이브 RO)**: prodstock 3,375행. 자도번SUB 재고 335행/58,714개.
+- **★진짜 SUB baseline = 270 출생라벨 pool + 2 미매핑 = 매핑률 99.3%**(~20,730개). sub_code_map(자도번→S) 1 pool 집계. 상위 S00638=825·S02158=796.
+- **미매핑 정체 분류(중요)**: 겉보기 35% 미매핑은 **용접봉/은납(BCUP/BAG 12개 35,094)+제작동관(MJU·RAC·피어싱 22개)** = SUB 아님·정상제외(공정종속/원소재). **진짜 미매핑 SUB=단 2개**(AJR30008101-SUB·AJR30125602-3-1). → sub_code_map 확장 사소.
+- **이상치**: 음수재고 14행 = backfill 시 점검(레거시 데이터 노이즈).
+- **∴ #2 baseline 확정**: 현행 prodstock rollforward → sub_code_map 99.3% → 출생라벨 1 pool. **다음 = #2 구현(nx.item INTERNAL_SUB 등록 + stock_ledger PRD backfill) = 쓰기 → 승인 후.** 그 다음 #3 backflush SUB-grain(+SUB/−SUB, §15 다리C 총량불변 근거).
