@@ -428,7 +428,96 @@ def _ensure_route_tbl(cur):
     # ★후보번호 단조증가(high-water-mark): 삭제해도 route_no 재사용 안 함. item별 마지막 채번번호.
     cur.execute("""IF OBJECT_ID('nx.route_seq','U') IS NULL CREATE TABLE nx.route_seq(
         item_code NVARCHAR(60) PRIMARY KEY, last_no INT NOT NULL DEFAULT 1)""")
+    # ★★route_edges(2026-08-25 다리): 경로별 BOM엣지(parent→child→USE_QTY_PR). soyo.py STEP7 route-aware가 소비.
+    #   ★타입정합 필수: plan_part_dtl.item_code=varchar(20)·v_pr_bom.mat_code=varchar(20)와 재귀 CTE 타입 일치(varchar20).
+    cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
+        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
+        use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
     _SCHEMA_READY = True
+
+
+def _materialize_route_from_line(cur, route_id):
+    """★★다리(2026-08-25): 편집UI 산출 nx.sourcing_route_line(조달상태 gubun/vendor) → nx.route_edges + nx.sourcing_profile.
+       = Rnn 편집(제작↔외주 스왑)을 계획반영 엔진(soyo STEP7 route-aware)이 소비하는 형태로 변환.
+
+       규칙(ROUTE_REFLECTION_DESIGN §18-3~4·검증완료):
+       - route_edges = v_pr_bom 활성엣지(R01 grain·제작SUB leaf정지) 기반, 단 sourcing_route_line에서
+         외주/매입/사급으로 표시된 노드에서 추가 정지(그 하위 subtree 제거=협력사 통째납품 leaf).
+         · 무편집(라인 조달상태=현행) → base 그대로 = R01 diff0 보장(검증: 함수결과=_materialize base 47=47).
+         · 제작→외주 편집 → 그 SUB subtree 제거·SUB leaf화(T2 검증·100/100 §18-2).
+       - sourcing_profile(route_id) = 외주/매입/사급 노드별 (supply_gubun 2=외주/3=매입, vendor). soyo PRF_ALT가 협력사 재분류.
+       ★grain 안전: base=v_pr_bom active(+용접링 등 제작단위 leaf정지)라 sourcing_route_line 구조 과전개(있어도) 무시=diff0 유지.
+       ★한계: 외주→제작 강제전개(except=1 자식 되살림)는 make_type 오탐 위험(+용접링)이라 이 다리 미포함 — 별도 explicit-edge(§18-2). 정지방향(외주화)만 이 다리 담당."""
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.sourcing_route WHERE route_id=?", route_id)
+    hr = cur.fetchone()
+    if not hr:
+        raise HTTPException(404, f"route 없음(route_id={route_id})")
+    assy = str(hr[0]).strip()
+    # ── 정지집합·업체 = sourcing_route_line 조달상태 ──
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), ISNULL(gubun,''), ISNULL(vendor_code,'')
+        FROM nx.sourcing_route_line WHERE route_id=? AND child_item IS NOT NULL AND LTRIM(RTRIM(child_item))<>''""", route_id)
+    stop = set(); prof = {}                      # prof: node -> (supply_gubun, vendor)
+    for ch, gb, ven in cur.fetchall():
+        g = str(gb).strip()
+        if g in ("외주", "매입", "사급"):
+            stop.add(ch)
+            sg = "3" if g == "매입" else "2"     # 2=외주(유상사급)·3=매입 (사급도 2=유상)
+            prof[ch] = (sg, str(ven).strip())
+    # ── v_pr_bom 활성엣지 인접리스트 ──
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
+    E = {}
+    for it, m, q, ex in cur.fetchall():
+        E.setdefault(it, []).append((m, float(q or 0), int(ex or 0)))
+    # ── route_edges = base(except<>1) + 외주/매입/사급 노드 정지 ──
+    edges = {}; seen = set(); st = [assy]
+    while st:
+        n = st.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        if n != assy and n in stop:              # 조달정지 노드 = leaf(subtree 미전개)
+            continue
+        for m, q, ex in E.get(n, []):
+            if ex == 1:                          # R01 grain=except제외(제작SUB 내부 baked-in)
+                continue
+            edges[(n[:20], m[:20])] = edges.get((n[:20], m[:20]), 0) + q
+            if m in E:
+                st.append(m)
+    cur.execute("DELETE FROM nx.route_edges WHERE route_id=?", route_id)
+    rows = [(int(route_id), it, m, q) for (it, m), q in edges.items()]
+    if rows:
+        cur.fast_executemany = True
+        cur.executemany("INSERT INTO nx.route_edges(route_id,item_code,mat_code,use_qty_pr) VALUES(?,?,?,?)", rows)
+    # ── sourcing_profile(route_id) = 협력사 attribution(외주/매입/사급 노드) ──
+    cur.execute("DELETE FROM nx.sourcing_profile WHERE route_id=?", route_id)   # 근거키 스코프 전체교체
+    pn = 0
+    for node, (sg, ven) in prof.items():
+        if not ven:                              # 업체 미지정이면 프로파일 생략(구조만 반영·업체는 기존화면서 매핑)
+            continue
+        cur.execute("""INSERT INTO nx.sourcing_profile(item_code,profile_name,supply_gubun,vendor_code,lme_flag,
+              apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,route_id)
+            VALUES(?,?,?,?,0,'2000-01-01',NULL,1,0,100,NULL,?)""",
+            node, (ven + " 경로매핑")[:100], sg, ven, int(route_id))
+        pn += 1
+    return {"edges": len(rows), "profiles": pn, "stops": len(stop)}
+
+
+@router.post("/api/sourcing/route/materialize_from_line")
+def sourcing_route_materialize_from_line(payload: dict = Body(...)):
+    """★다리 엔드포인트: 편집된 nx.sourcing_route_line → route_edges + sourcing_profile(멱등·route_id 스코프).
+       Rnn 편집(제작↔외주 스왑)을 계획반영 형태로 굳힘. 활성화는 별도(route_alloc·current_flag). ROUTE_REFLECTION_DESIGN §18-3~4."""
+    route_id = int(payload.get("route_id") or 0)
+    if route_id <= 0:
+        raise HTTPException(400, "route_id 필요")
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_route_tbl(cur)
+        r = _materialize_route_from_line(cur, route_id)
+        nx.commit()
+        return {"ok": True, "route_id": route_id, **r}
+    finally:
+        nx.close()
+
 
 def _approved_hwm(cur, item):
     """승인 후보 high-water-mark = max(현재 승인후보 route_no, route_seq.last_no, 1).
