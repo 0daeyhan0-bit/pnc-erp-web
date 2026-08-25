@@ -806,6 +806,9 @@ def lgsale_list(fr: str = Query(""), to: str = Query(""), wo: str = Query(""), i
 # ★출하(−ASY) 결선: 출하실적(nx.sale_dtl) → stock_ledger −ASY(tag 'J', MAINT_GROUP_SEQ=sale_dtl id 링크). 완성(+ASY)과 정합.
 def _lgsale_led_del(cur, sid):
     cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='ASY' AND MAINT_TAG='J' AND MAINT_GROUP_SEQ=?", int(sid))
+    # ★제품재고조회(_salesstock)는 SA_T_STOCK_MAINT를 읽음 → 출하분 미러행도 함께 제거(링크=REMARKS 토큰)
+    try: cur.execute("DELETE FROM nx.SA_T_STOCK_MAINT WHERE MAINT_TAG='J' AND INSERT_WINDOW='lgsale' AND REMARKS=?", f"출하#{int(sid)}")
+    except Exception: pass
 
 def _lgsale_led_post(cur, sid, ymd, item, qty, wo):
     _lgsale_led_del(cur, sid)   # 수정 시 기존 링크행 제거 후 재게시(1행)
@@ -814,6 +817,16 @@ def _lgsale_led_post(cur, sid, ymd, item, qty, wo):
     cur.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_GROUP_SEQ,MAINT_TAG,ITEM_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
         VALUES('ASY',?,?,?, 'J', ?,?,?, '출하(−ASY)','web',GETDATE())""",
         ymd, seq, int(sid), item, (wo or None), -abs(float(qty)))
+    # ★F-출하: 제품재고조회 원천(SA_T_STOCK_MAINT tag J, −)에도 동반쓰기 → 출하실적 등록시 제품재고 차감 반영(사용자 확정 (a))
+    #   sid 링크=REMARKS '출하#{sid}'로 멱등(수정/삭제시 위 _del이 제거). nx.sale_dtl 기반이라 sale040(SA_T_SALE_DTL)과 이중계상 없음.
+    try:
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", ymd)
+        msq = int(cur.fetchone()[0] or 1)
+        cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_VAT,MAINT_AMT,
+              WORK_ORDER,REMARKS,INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW)
+              VALUES(?,?, 'J', ?,?,0,0,0,?,?,'web',GETDATE(),'lgsale')""",
+            ymd, msq, item, -abs(float(qty)), (wo or None), f"출하#{int(sid)}")
+    except Exception: pass
 
 @router.post("/api/lgsale/save")
 def lgsale_save(payload: dict = Body(...)):
