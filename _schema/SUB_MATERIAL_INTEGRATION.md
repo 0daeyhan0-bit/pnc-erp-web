@@ -112,3 +112,11 @@
 - **원인**: CS=자도번(`base-N1-N2`/`-S6-2`, 거래처/공정 접미사) 그룹핑 vs nx.bom=LG구조(제작동관 직접)+leaf. **두 BOM 중간 그룹핑 방식이 다름** → SUB 코드 직매칭 실패. base 정규화도 부분적(자도번 base가 종종 모델/ASSY(parent)라 leaf 아님).
 - ★**자재 손실 아님**: SUB 코드는 이름일 뿐, 실제 자재(leaf)는 **제작 100% nx.bom 존재**(§12). backflush는 leaf 차감(SUB코드 차감 아님). **정리할 진짜 갭 없음.**
 - ★교훈: 커버리지 측정은 "무엇을(자재 leaf vs SUB 코드)" 명시. 다리 C 근거 = **제작 leaf 자재 100%**(§12) — 이게 유일한 관련 지표.
+
+## §14. ★★다리 C 최종 확정 = nx.bom.jadoban grain, 보존 100% (2026-08-26 실측)
+- ★**보존 검증**: 제품 표본 54개, **Σ(jadoban SUB별 원소재 풋프린트) == 제품 전체 is_lowest 원소재 = 54/54 손실0(100%)**. scratchpad/bridge_c_conserve.py.
+- ★**∴ 다리 C(원소재 차감축) = `nx.bom WHERE jadoban=<SUB> AND is_lowest='Y'`** — nx.bom.jadoban 컬럼이 이미 제품 원소재를 SUB별로 손실없이 분해. §5의 "29%"는 *CS자도번→jadoban 이름매칭* 문제이지 **backflush 축(nx.bom) 내 보존과 무관**.
+- ★**핵심 분리(설계 명료화)**: backflush **소비**(원소재 얼마)=jadoban grain 100%준비·S코드 불필요 / SUB **재고풀 정체성**(어느 pool)=출생라벨 S코드 필요(#2 과제, sub_code_map/merge_map 29%직매칭). 두 축 독립.
+- ★**컬럼 주의**: nx.bom.is_lowest = VARCHAR **'Y'/'N'**(int 아님). nx.bom엔 weight 컬럼 없음(중량축=weight_calc/bom_dim 별도).
+- ★nx.bom.jadoban 예: 'AJR77263007-SUB'(제품-SUB, parent=제품·child=제작동관MJU/용접봉·is_lowest='Y'). 깊은SUB(-4-1)는 jadoban 미포함→부품레벨 재귀 fallback(§10, 필요시).
+- **구현 산출**: `_sub_raw_footprint(cur, sub) -> {원소재: qty}` (읽기전용·새 함수·backflush 무접촉=옆에짓고). #2 재고 backfill·#3 backflush 결선의 기반.

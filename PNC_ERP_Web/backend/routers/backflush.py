@@ -56,6 +56,31 @@ def _backflush_bom(nxc, root, cro=None):
     walk(root, 1.0, 0)
     return list(out.items()), weld
 
+def _sub_raw_footprint(nxc, product, jadoban):
+    """★다리 C(SUB 원소재 풋프린트·읽기전용·2026-08-26): 제품 내 특정 SUB(nx.bom.jadoban 라벨)의
+       backflush 원소재 = nx.bom WHERE parent_code=product AND jadoban AND is_lowest='Y'.
+       근거=SUB_MATERIAL_INTEGRATION §14 보존검증 54/54(Σ jadoban 풋프린트 == 제품 전체 원소재, 손실0).
+       ★nx.bom은 제품레벨 flat(SUB 노드 없음)·jadoban=그룹라벨. is_lowest=VARCHAR 'Y'.
+       반환 {원소재_child_code: qty}. #2 SUB재고 backfill·#3 backflush SUB-grain 결선의 기반(기존 backflush 무접촉).
+       주의: 총량 불변(원소재 차감 총합=제품 전체와 동일)이므로 SUB grain 결선 시 옆에짓고 diff0 가능."""
+    c = nxc.cursor()
+    c.execute("""SELECT child_code, SUM(CAST(qty AS float)) FROM nx.bom
+        WHERE parent_code=? AND ISNULL(jadoban,'')=? AND is_lowest='Y'
+        GROUP BY child_code""", product, jadoban)
+    return {str(r[0]).strip(): float(r[1] or 0) for r in c.fetchall()}
+
+def _sub_footprints_by_jadoban(nxc, product):
+    """제품 전체 원소재를 jadoban(SUB)별로 분해 → {jadoban: {원소재: qty}}. '(직속)'=SUB 아닌 직속 원소재.
+       Σ == 제품 전체 is_lowest 원소재(보존 §14). 읽기전용."""
+    c = nxc.cursor()
+    c.execute("""SELECT ISNULL(NULLIF(LTRIM(RTRIM(jadoban)),''),'(직속)'), child_code, SUM(CAST(qty AS float))
+        FROM nx.bom WHERE parent_code=? AND is_lowest='Y'
+        GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(jadoban)),''),'(직속)'), child_code""", product)
+    g = {}
+    for jad, ch, q in c.fetchall():
+        g.setdefault(str(jad).strip(), {})[str(ch).strip()] = float(q or 0)
+    return g
+
 def _weld_proc_code(nxc, base_rac):
     """용접봉 투입공정(GAGONG_PROC_CODE) — nx.bom_line 대표값(Q1000/Q2000 용접봉창고), 없으면 'Q1000' 기본."""
     c = nxc.cursor()
