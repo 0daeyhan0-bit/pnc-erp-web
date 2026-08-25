@@ -1617,7 +1617,8 @@ def sourcing_line_gubun(payload: dict = Body(...)):
     rid = int(payload.get("route_id") or 0); line_id = int(payload.get("line_id") or 0)
     gubun = str(payload.get("gubun", "")).strip()[:20]
     if rid <= 0 or line_id <= 0: raise HTTPException(400, "route_id·line_id 필요")
-    if gubun not in ("제작", "매입", "사급"): raise HTTPException(400, "구분은 제작/매입/사급 중 하나")
+    # ★생산구분(make_type) 5종 = 프론트 드롭다운과 일치(제작/외주/구매/사급/외주직납). 매입=구매 레거시 별칭 허용.
+    if gubun not in ("제작", "외주", "구매", "사급", "외주직납", "매입"): raise HTTPException(400, "구분은 제작/외주/구매/사급/외주직납 중 하나")
     nx = _nx_tx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)

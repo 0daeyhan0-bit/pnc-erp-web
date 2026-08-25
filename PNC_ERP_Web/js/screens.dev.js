@@ -2943,11 +2943,11 @@ SCREEN.subvariant=(c)=>{
         <span id="sp-gate" style="font-size:11px;color:${ok?'#1c7c3a':'#c0392b'}">공수합 ${nfq(total)} / BASE ${base} = 절삭 ${nfq(cutSum)} + 조립 ${nfq(procSum)} ${ok?'✔':'✖ 불일치'}</span>
         <button class="btn" id="sp-validate" style="margin-left:auto;background:#1c47a0;color:#fff;padding:2px 12px" title="①모든 부품 배치(보관함 비었는지) ②부품수=BASE ③공수합=BASE 검증(저장 안 함). 실패 시 에러 표시. 저장은 하단 [저장].">🔍 BOM 검증</button></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-        <div class="sp-pool" style="flex:1;min-width:250px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
+        <div id="sp-pool" class="sp-pool" style="flex:1;min-width:250px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #d6c3ea;border-radius:8px;padding:8px;background:#faf7ff">
           <div style="display:flex;align-items:center;font-size:12px;font-weight:600;margin-bottom:4px">📦 보관함 <span style="color:#8a94a6;font-weight:400;margin-left:5px">(오른쪽 트리에서 뺀 부품 보관 · 여기로 드래그=빼기 · 우측으로 다시 드래그=배치)</span></div>
           ${pool.length?pool.map(poolRow).join(''):'<div class="empty" style="font-size:11px;color:#8a94a6">보관 부품 없음 — 모든 부품이 배치됨 ✔<br>오른쪽 트리에서 부품을 여기로 드래그하면 빼서 보관합니다.</div>'}
         </div>
-        <div style="flex:1.3;min-width:300px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
+        <div id="sp-tree" style="flex:1.3;min-width:300px;min-height:420px;max-height:56vh;overflow:auto;border:1px solid #cfe0ff;border-radius:8px;padding:8px;background:#f7faff">
           <div style="font-size:12px;font-weight:600;margin-bottom:4px">ASSY 계층 트리 <span style="color:#8a94a6;font-weight:400">(부품 드래그 → 왼쪽 보관함(빼기) or 다른 SUB로 이동 · ASSY/SUB 노드에 드롭=배치)</span></div>
           ${nodeBox(ASSY,'▣ '+ASSY+' (레벨0·ASSY)','#1c47a0',0,flat,0)}
         </div>
@@ -3176,7 +3176,12 @@ SCREEN.subvariant=(c)=>{
     // ---- ★재설계 SUB 재구성·공정배치 binds (좌 풀 → 우 트리 드래그·노드[수정]→공정팝업·전체저장 검증) ----
     const rid=st.detail.route_id;
     {const b=g('#sp-open');if(b)b.onclick=()=>loadRD(rid);}
-    const reloadPanel=async()=>{st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);};
+    const reloadPanel=async()=>{
+      // ★스크롤 보존(드래그·드롭 후 top 리셋 방지): 재렌더 전 저장 → 후 복원(모달은 body 렌더라 document 조회)
+      const _ts=(document.querySelector('#sp-tree')||{}).scrollTop||0, _ps=(document.querySelector('#sp-pool')||{}).scrollTop||0;
+      st.rdProc=null;await loadRD(rid);await dissolveEmptySubs(rid);
+      requestAnimationFrame(()=>{const t=document.querySelector('#sp-tree');if(t)t.scrollTop=_ts;const p=document.querySelector('#sp-pool');if(p)p.scrollTop=_ps;});
+    };
     // ★부품추가 버튼 제거 — 조달후보는 BASE BOM 부품만 재편성(BOM 외 부품 금지). 라인 직접수정만 유지.
     c.querySelectorAll('.sp-ledit').forEach(b=>b.onclick=e=>{e.stopPropagation();const l=(R.lines||[]).find(y=>y.line_id==b.dataset.lid);if(l){st.lineForm=Object.assign({route_id:rid},l);draw();}});
     // ★드래그&드롭 = 컨테이너 이벤트 위임(재렌더에도 유지·property할당=멱등 → 재드롭/반복 SUB생성 안정).
