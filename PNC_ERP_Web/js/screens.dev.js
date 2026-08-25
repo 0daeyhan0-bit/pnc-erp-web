@@ -2749,7 +2749,9 @@ SCREEN.subvariant=(c)=>{
       ? `<button class="btn" id="dt-close">닫기</button>`
       : (fresh
           ? `<button class="btn" id="dt-cancel" style="color:#c0392b">✖ 취소</button> <button class="btn" id="dt-register" style="background:#1c7c3a;color:#fff">✔ 등록</button>`
-          : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`);
+          : (isCur   // ★R01(현행) 편집=저장 없음(닫기만·실사용 BOM 자체라 저장 대상 아님) / Rnn 대안후보 수정=저장 유지
+              ? `<button class="btn" id="dt-close">닫기</button>`
+              : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`));
     return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1.5vh 10px">
       <div style="background:#fff;border-radius:12px;width:1320px;max-width:98vw;height:97vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
         <div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:12px 18px;background:${R.baseline?'#1c7c3a':'#1c47a0'};color:#fff;border-radius:12px 12px 0 0">
