@@ -58,6 +58,7 @@
 
 | # | 기존작업 | 유형 | 위치 | 무엇 | **인덱스 후 판정** |
 |---|---|---|---|---|---|
+| 0 | **r_add_indexes.py** | 인덱스 배치 | _migration/sub_norm | 마스터키 6 UNIQUE(pr_m_item·cm_m_cust·pr_m_proc_gagong·pr_m_mat·PU_T_MONTH_STOCK_WH(_DAILY)) | ★**상보·역할분리**(마스터키UNIQUE 소유). nx_perf_maintain은 거래heap+원가/BOM. **겹침=PR_M_ITEM 1건→중복제거·카탈로그서 제외** |
 | 1 | **nx.cost_analysis_cache + cache/build** | materialized 배치 | cost.py | **품목별 원가분석 전품목 사전계산→즉시서빙**(V1+V2) | ★**유지 + Layer-2 통합기반**(신규 안 만듦, 이걸 일반화) |
 | 2 | price.py 캐시무효화 | invalidation | price.py | 단가변경→cost_analysis_cache DELETE | 유지(통합 무효화규칙) |
 | 3 | 원가엔진 warm 캐시 | in-mem compute | common.py | cold 5-9s→warm 0.58s | 유지(인덱스=cold가속·캐시=warm보완, 상호보완) |
@@ -86,7 +87,11 @@
 ---
 
 ## 4. 단계 계획
-- **Phase 1 (인프라·효과증명)**: `nx_perf_maintain.py` 작성 → 대용량 거래테이블 인덱스 생성 → **원가엔진 cold·품목BOM before/after 실측**. 효과 확인 후 전체 카탈로그.
+- **✅ Phase 1 완료 (2026-08-25, nx dev)**: `nx_perf_maintain.py`(durable `_migration/sub_norm/`, 멱등·컬럼검증·이름 ix_nxp_* 스킵) commit=**29 NONCLUSTERED 인덱스**(대용량 heap+원가/BOM)+UPDATE STATISTICS, ~60초 off-hours. 측정=`nx_perf_measure.py`.
+  - **효과(before→after 동일세션, median ms)**: 대표10쿼리 합 **684.8→331.1(2.1×)** · **BOM 재귀CTE(원가전개 병목) 200.7→22.0(9.1×)** · 전형 selective heap 필터 2~3.5×(PU_STOCK 73→22·SA_SALE 75→21·PR_M_ITEM_COST 50→20·PR_STOCK_MAINT_MAT 62→31).
+  - **주의(측정교훈)**: 최빈값(비선택적, MAT 34898행=1.76M의 2%)은 옵티마이저가 **정상적으로 스캔 유지** → 인덱스는 selective 쿼리(대다수 실사용)에서 이득. 초기 "개선0"은 최빈필터 아티팩트였음.
+  - **잔여**: git PR→운영배포(승인후) / 원가엔진 cold(5~9s)는 백엔드 재기동시 관측(구성 lookup 전부 인덱스됨) / 2차 카탈로그(PR_T_INDI_SHEET2 등).
+- **Phase 1 (원설계)**: `nx_perf_maintain.py` 작성 → 대용량 거래테이블 인덱스 생성 → **원가엔진 cold·품목BOM before/after 실측**. 효과 확인 후 전체 카탈로그.
 - **Phase 2 (컴퓨트 통합)**: cost_analysis_cache 프레임 일반화 → 품목BOM 내부/실원가 편입. #5~8 우회캐시 재점검·제거.
 - **Phase 3 (통합·자동화)**: sync에 perf_maintain+precompute 결선(백그라운드). 모니터링 리포트.
 
