@@ -77,6 +77,11 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         #          MJC62721914·MJU66366805/812/813/814·MJX63991801 9건.
         #      구버전은 가상을 버리기만 해서 이 9건이 통째로 누락(웹 11건 vs 레거시 18건).
         #    ★EXCEPT_FLAG='1' = 레거시 전개화면의 '제외' 열(직거래 등) → 키팅대상 아님.
+        #    ★2026-08-25 KITTING_FLAG='1' 조건을 가상도번에는 적용하지 않는다.
+        #      가상도번은 그 자체가 자재가 아니라 묶음이라 KITTING_FLAG=0 인 게 정상인데,
+        #      이 조건에 걸려 전개도 못 하고 탈락 → 그 하위가 통째로 누락됐다.
+        #      실증: AJR76582505-2(kit=0·vir=1) 밑 AJR76582505-4-1·MJU66958506 2건 누락
+        #            (레거시 21건 vs 웹 19건).
         _SQL = """
             SELECT a.MAT_CODE,
                    CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
@@ -88,7 +93,7 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
               JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
              WHERE a.ITEM_CODE=?
                AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
-               AND ISNULL(a.KITTING_FLAG,'0')='1'
+               AND (ISNULL(a.KITTING_FLAG,'0')='1' OR ISNULL(a.VIR_ITEM_FLAG,'0')='1')
                AND ISNULL(a.EXCEPT_FLAG,'0')<>'1'
                AND CAST(ISNULL(a.USE_QTY,0) AS float) > 0
              ORDER BY a.MAT_CODE"""
