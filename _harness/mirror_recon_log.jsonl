@@ -11,3 +11,4 @@
 {"stamp": "2026-08-24 07:13", "tx_total": 38, "tx_match": 37, "tx_bad": ["PR_T_INDI_CUTTING"], "green": false, "ms_diff": ["PR_M_ITEM_SUB"]}
 {"stamp": "2026-08-24 07:30", "tx_total": 38, "tx_match": 37, "tx_bad": ["PR_T_INDI_CUTTING"], "green": false, "ms_diff": ["PR_M_ITEM", "PR_M_ITEM_SUB"]}
 {"stamp": "2026-08-24 07:32", "tx_total": 38, "tx_match": 37, "tx_bad": ["PR_T_INDI_SHEET2"], "green": false, "ms_diff": []}
+{"stamp": "2026-08-25 12:52", "tx_total": 38, "tx_match": 38, "tx_bad": [], "green": true, "ms_diff": []}
