@@ -43,3 +43,32 @@
 - ★**stock_ledger STOCK_POINT: MAT 172,260 · RDY 14 · PRD/ASY 미적재**(NX_STOCK_LEDGER §Phase5 "PRD/ASY 컷오버 backfill 전 빈"과 일치). → **반제품(SUB) 재고점이 아직 실현 안 됨**. 출생라벨 SUB 재고화는 이 backfill과 연동 필요.
 - stock_ledger 자도번(-N-N) 564종 존재(과거 이력). 
 - (문서 종합 후 정합)
+
+## §7. ★★기존 설계 종합 (2026-08-25 정본 10종 정독) — 설계는 90% 완료, 다리 하나만 남음
+
+### 이미 확정·설계·(상당부분)구현·검증된 것
+1. **재고 인프라**: nx.stock_ledger + STOCK_POINT(MAT/RDY/PRD/ASY/SAG), 잔량=Σ파생. 백플러시 엔진+자동트리거(바코드 완성공정1회·완성=+ASY/반제품=+PRD·용접봉 공정종속). Phase0~5 구현·검증 완료 (NX_STOCK_LEDGER_DESIGN §B6·§13).
+2. **구분별 자재흐름 완료**: 제작=backflush(INNER_PROD=1) / 외주·사급 유무상(유상=매출out tag5 / 무상=창고이동 −MAT/+SAG G1·회수 G2·마스터 nx.sagub_free_vendor) / 매입·직납=입고단독 / 세트입고=자도번단위 +입고(tag S). (NX_STOCK_LEDGER §11·§12·Phase4)
+3. **★SUB 재고 identity 모델 확정 (BOM_STRUCTURE_CANON §9-2~9-4)**: SUB=`품번_S{nn}`을 nx.item에 item_source='INTERNAL_SUB'·is_lg=0 등록. **재고점 = (ITEM_CODE=`품번_S{nn}`, ROUTE_ID=공급원, STOCK_POINT)**. 전품목 균일원장(특별관리 아님).
+4. **★공용 SUB = 재고 1 pool 확정+실증**: 여러 LG버전이 같은 `품번_S{nn}` 참조=단일풀(버전복제 아님). 실증 AJR30012009_S01=15 LG버전 공유(MIGRATION_ISSUES §G:202·공용 197 SUB).
+5. **sub_alias 정규화 100% 적재**: 자도번→`품번_S{nn}`·route·vendor 1,854행·route미상0 (MIGRATION_ISSUES §G-11).
+6. **jadoban/merge_map 다리** 데이터 구축 93% 자동 (NX_BOM_SCHEMA §79-83).
+7. **출생라벨 명명 정본** `{첫ASSY}_R{첫route}_S{nn}` + 시그니처 dedup·mint(정체성계층 구현) (SUB_CODE_MASKS §7-1·§8).
+8. **route 차원(ROUTE_ID)** Phase0(DDL)·Phase2(back-stamp) 완료 (ROUTE_DIMENSION_INVENTORY_PL_DESIGN).
+
+### ⚠ 유일한 미완 = route SUB(CS 자도번 축) ↔ nx.bom(LG 중량 backflush 축) 다리
+- backflush가 nx.bom 평면을 SUB 구조 무시하고 차감(§2). merge_map 커버리지 29%·다리 얕음(§5).
+- 재고 실물 미실현: stock_ledger `_S{nn}` **0행**(CANON §9-1)·PRD/ASY 미적재(§6). = SUB 재고점 backfill+backflush를 SUB grain으로 결선하면 됨.
+
+### ★설계 조율점 (충돌 확인)
+- **SUB 코드 형식**: SUB_CODE_MASKS §7-1=출생라벨 `{ASSY}_R{route}_S{nn}`(코드에 route) vs BOM_STRUCTURE_CANON §9=`품번_S{nn}`(코드)+ROUTE_ID(별도 재고차원). → **코드에 route 넣나 vs ROUTE_ID 차원 분리하나** 두 정본이 다름=사용자 확정 필요(충돌표 C7).
+- C9: nx.bom vs nx.bom_line 별개(현행 원가정본=bom_line 미러·목표=nx.bom SUB충전 후 단일화). C13: 자재 현재고 정본=nx.mat_stock_daily(이동평균)·stock_ledger MAT 8월 미동기(검증 source 주의).
+
+### ★사고 경고 (구현 시 필수)
+- nx.stock_ledger 태그/기간 대량삭제 절대금지(근거키 스코프만·Phase4 baseline훼손 사고). 이중차감 경계(backflush=INNER_PROD=1 사내만). SUB 정규화 시 원가 diff0 유지(CS강제정합 롤백사고).
+
+## §8. ∴ 이 과제 = 다리 하나 + 재고점 결선 + 명명 조율
+1. **route SUB → nx.bom 서브트리 다리** 완성(merge_map 29%→↑·깊은 grain 처리)
+2. **SUB 재고점 결선**: `품번_S{nn}` 재고 backfill + backflush를 SUB grain 소비로 확장(ROUTE_DIMENSION K4)
+3. **명명 조율**: 출생라벨(코드 route) vs `품번_S{nn}`+ROUTE_ID — 사용자 확정
+4. 전제: 재고인프라·구분흐름·공용1pool·sub_alias = 재사용
