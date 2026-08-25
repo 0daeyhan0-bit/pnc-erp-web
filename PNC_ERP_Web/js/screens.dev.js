@@ -3420,14 +3420,24 @@ SCREEN.subvariant=(c)=>{
     st.newForm=null;st.msg=`🔀 LG BOM 시딩 후보 생성 (라인 ${n}) — 미커밋. [등록]해야 확정.`;await loadRoutes();openDetail(rid,'edit',true);};
   // ---------- 상세 ----------
   const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+  // ★버그#3(2026-08-25): 저장 외 모든 종료(새로고침/탭닫기/앱크래시)도 롤백. 편집세션을 window._spRollback로 표식하고
+  //   언로드 시 sendBeacon으로 서버 롤백 호출(edit=edit_cancel 스냅샷복원 / fresh=delete 신규삭제). 리스너는 1회만 등록.
+  if(!window._spRbBound){
+    const _spBeacon=()=>{const r=window._spRollback;if(!r||!(+r.route_id>0))return;
+      try{const url=r.fresh?`${API}/api/sourcing/route/delete`:`${API}/api/sourcing/route/edit_cancel`;
+        navigator.sendBeacon(url,new Blob([JSON.stringify({route_id:+r.route_id})],{type:'application/json'}));}catch(_){}};
+    window.addEventListener('pagehide',_spBeacon);window.addEventListener('beforeunload',_spBeacon);
+    window._spRbBound=true;
+  }
   const openDetail=(rid,mode,fresh)=>{const R=routeById(rid);if(!R)return;
     st.detail={route_id:rid,mode:(R.baseline?'view':mode||'edit'),fresh:!!fresh,
       hdr:{route_name:R.route_name||'',gubun:R.gubun||'',apply_from:R.apply_from||today(),note:R.note||''}};  // 유효일자 default=오늘·공급처/현행 제거
     st.newForm=null;st.rd=null;draw();
     if(!R.baseline && st.detail.mode==='edit'){
+      window._spRollback={route_id:rid,fresh:!!fresh};   // ★편집세션 활성표식(언로드=롤백)
       if(!fresh){try{fetch(`${API}/api/sourcing/route/edit_begin`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}  // ★편집 세션 시작 스냅샷(닫기=되돌리기용)
       loadRD(rid);   // 편집모드=좌/우 패널 기본 펼침(버튼 클릭 불필요)
-    }
+    } else { window._spRollback=null; }
   };
   // 닫기(X/닫기): 신규 미커밋 드래프트면 "등록 취소?" · ★편집 세션이면 닫기=되돌리기(세션 스냅샷 복원). 저장했으면 스냅 없어 그대로.
   const closeDetail=async()=>{
