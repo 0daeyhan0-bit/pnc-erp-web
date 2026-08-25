@@ -3366,6 +3366,7 @@ SCREEN.subvariant=(c)=>{
       if(!j.ok){alert('❌ 등록 거부(검증 실패):\n'+((j.errors||[]).join('\n')||JSON.stringify(j)));return;}
       // (4) 헤더 커밋 + fresh 해제(닫기=삭제 방지 → 정식 후보 확정)
       const okh=await saveHdr(true);if(okh===false)return;
+      window._spRollback=null;   // ★버그#3: 등록 확정 → 세션표식 해제(refresh 시 beacon이 삭제 못 하게)
       alert(`✅ 등록 완료\n공수합 ${nfq(j.cand_gongsu)} = BASE ${nfq(j.base_gongsu)} (절삭 ${nfq(j.cut_sum)} + 조립 ${nfq(j.proc_sum)})\n부품수 ${j.route_part_count}/${j.base_part_count}${(j.reused&&j.reused.length)?'\n재사용 SUB: '+j.reused.map(x=>x.old+'→'+x.new).join(', '):''}\n(승인해야 조달프로파일에 노출됩니다)`);
       await loadRoutes();
     }catch(e){alert('등록 오류: '+e.message);}};
@@ -3443,19 +3444,21 @@ SCREEN.subvariant=(c)=>{
   const closeDetail=async()=>{
     if(st.detail&&st.detail.fresh){
       if(confirm('등록을 취소하시겠습니까?\n확인 시 이 후보는 등록되지 않습니다(삭제·번호 재사용).')) await cancelDraft();
-      return;   // 계속 = 모달 유지
+      return;   // 계속(취소) = 모달 유지 · _spRollback 유지(refresh 시 여전히 롤백)
     }
     if(st.detail&&st.detail.mode==='edit'&&+st.detail.route_id>0){   // ★닫기=되돌리기(저장 안 했으면 편집 전으로 복원)
+      window._spRollback=null;   // ★버그#3: 명시 롤백 시작 → 언로드 beacon 이중발화 방지(edit_cancel 아래서 직접 복원)
       try{const r=await fetch(`${API}/api/sourcing/route/edit_cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:st.detail.route_id})});
         const j=await r.json();if(j.reverted){st.detail=null;await loadRoutes();draw();return;}}catch(e){}
     }
+    window._spRollback=null;
     st.detail=null;draw();};
   // ✖ 취소 = 미커밋 드래프트 롤백(route 삭제)+닫기 → 고아 없음·다음 번호 재사용
-  const cancelDraft=async()=>{const rid=st.detail?st.detail.route_id:0;
+  const cancelDraft=async()=>{const rid=st.detail?st.detail.route_id:0;window._spRollback=null;   // ★버그#3: 삭제=세션종료(표식해제)
     if(rid>0){try{await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}
     st.detail=null;st.msg='등록 취소 — 후보가 등록되지 않았습니다(번호 재사용).';await loadRoutes();draw();};
   // 드래프트 방치 방지: 대상 전환/신규열기 전에 미커밋 드래프트 조용히 롤백
-  const discardFreshSilent=async()=>{if(st.detail&&st.detail.fresh){const rid=st.detail.route_id;st.detail=null;
+  const discardFreshSilent=async()=>{if(st.detail&&st.detail.fresh){const rid=st.detail.route_id;st.detail=null;window._spRollback=null;   // ★버그#3
     try{await fetch(`${API}/api/sourcing/route/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({route_id:rid})});}catch(e){}}};
   // ---------- actions ----------
   const saveHdr=async(commit)=>{const h=st.detail.hdr;

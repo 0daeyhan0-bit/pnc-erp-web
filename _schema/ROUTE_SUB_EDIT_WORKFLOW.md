@@ -75,3 +75,8 @@
 - **수정 2곳(국소)**: `_base_flat_lines`(:529)·`_insert_current_tree`(:1065)의 `mat<=0 continue` → `leaf 판정`으로 교체(중간 SUB만 제외·mat0 leaf 포함).
 - **불변(검증완)**: 공수합(`_base_gongsu`=proc_grid 기반·부품셋 독립)·원가(`_base_flat_lines` 사용처=seed+finalize 2곳뿐, 원가표시 무관)·route_edges(A~D, v_pr_bom 기반)·스냅샷/승인/채번.
 - **부수**: mat=0 부품 기본구분=매입(cost_gubun 공란)·화면 33→37 표시. 품번복사(v_cs level1)는 별도소스=별도확인.
+
+## §10. 버그#3·#4 구현완료 (2026-08-25)
+- **#4 seed=BASE(구조 전부품)**: `_base_flat_lines`·`_insert_current_tree`의 재료비필터→leaf판정. 검증: `_base_flat_lines`=37·현행복사 seed=37·missing0/extra0·공수합224 불변. **S1 통과.** (기존 깨진 route는 재복사 필요.)
+- **#3 새로고침/탭닫기 롤백**: screens.dev.js `window._spRollback` 세션표식 + pagehide/beforeunload에서 `sendBeacon`(edit=edit_cancel/fresh=delete). openDetail서 세팅·save/register/close/cancel서 해제. 서버측 edit_cancel/delete=기존(닫기와 동일·검증됨). **S9 = 저장 외 모든 종료=롤백 완성.**
+- 남은: S2·S4·S5·S6·S10 시나리오 전수 검증 하네스.
