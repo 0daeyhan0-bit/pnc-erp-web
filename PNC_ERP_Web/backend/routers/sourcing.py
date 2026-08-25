@@ -524,9 +524,12 @@ def _base_flat_lines(item, ymd="260630"):
         except Exception: d = _get_cost_engine(fresh=True).naewon_nodes(item, ymd)
     rows = d.get("rows", []) if isinstance(d, dict) else []
     out = []; sq = 0
-    for r in rows:
-        if int(r.get("level", 0) or 0) <= 0: continue
-        if float(r.get("mat", 0) or 0) <= 0: continue        # 재료비 계상 leaf만(=flatMat)
+    for i, r in enumerate(rows):
+        L = int(r.get("level", 0) or 0)
+        if L <= 0: continue
+        # ★구조 전부품(2026-08-25 §9): 재료비>0 필터 폐기 → 전 leaf 포함(mat=0=단가미등록도 조달대상).
+        #   중간 SUB노드(다음 행이 더 깊은 레벨=자식 보유)만 제외 = 평면 leaf. finalize 부품수 BASE와 seed 통일.
+        if i + 1 < len(rows) and int(rows[i + 1].get("level", 0) or 0) == L + 1: continue
         code = str(r.get("code", "")).strip()
         if not code: continue
         # ★RAC 중 용접봉만 제외(공정종속). 용접링(ITEM_DESC '용접링')=사급 부품 → 부품풀 유지(cost.py·price.py 규칙 일치).
@@ -1063,8 +1066,7 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
                 rid, seq, _cap(code, 60), _cap(name, 120), _sgub, _cap(code, 60), parent_line)
             stack[L] = int(cur.fetchone()[0])
         else:                                                   # leaf
-            mat = float(r.get("mat", 0) or 0)
-            if mat <= 0: continue                               # phantom/mat=0
+            # ★구조 전부품(2026-08-25 §9): mat=0(단가미등록) leaf도 포함 — 재료비 필터 폐기(seed=BASE 통일)
             if code.upper().startswith("RAC") and "용접링" not in name: continue   # 용접봉 제외·용접링 유지
             metal = str(r.get("metal", "") or "").strip()
             gub = _mk5(_mkmap.get(code.upper()), False)         # ★리프 구분 = 생산구분(make_type) (cost_gubun 폐기)
