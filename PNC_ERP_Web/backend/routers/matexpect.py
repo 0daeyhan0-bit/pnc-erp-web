@@ -142,7 +142,7 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
         def _row(mat, vendor):
             k = (mat, vendor)
             if k not in agg:
-                agg[k] = {"mat": mat, "vendor": vendor, "exp": 0.0, "act": 0.0}
+                agg[k] = {"mat": mat, "vendor": vendor, "exp": 0.0, "act": 0.0, "buy": 0.0}
             return agg[k]
 
         # ── ②-a 예상소요: 날짜필터 plan_part_mat × plan_mat_source 업체배분비율 ──
@@ -236,6 +236,26 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
             return {r[0]: float(r[1] or 0) for r in cur.fetchall()}
         base_stock = _stock_map(m01, "<")     # 기초재고(필요수량 기준점·이중계상 방지)
         cur_stock = _stock_map(tod6, "<=")    # 현재고(참고)
+
+        # ── ③-b 매입실적(실제 구매입고): 원소재·그외=자재창고입고(tag9)+수입(_C P) / 사급=세트입고(tag S). 내부이동 C·G·H 제외 ──
+        dL = "%s%s%02d" % (yy, mm, _last_day(int(ym[:4]), int(mm)))
+        buy_to = min(tod6, dL)
+        if m01 <= buy_to:
+            lv2 = _conn(); lc2 = lv2.cursor()
+            try:
+                for tag in ("9", "S"):
+                    lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
+                                "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
+                                "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", tag, m01, buy_to)
+                    for mc, cc, q in lc2.fetchall():
+                        _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
+                lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
+                            "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
+                            "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", m01, buy_to)
+                for mc, cc, q in lc2.fetchall():
+                    _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
+            finally:
+                lv2.close()
 
         # ── 조립: 분류·이름·필터 ──
         rows = []
