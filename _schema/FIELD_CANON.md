@@ -37,11 +37,11 @@
 
 | 역할 | 정본 필드 (위치) | grain | 우리BOM 유입 | 용도 | 근거 |
 |---|---|---|---|---|---|
-| **우리 실측** | `bom_dim.fin_weight`(=nx.item.net_weight, 97%일치) | 부품 개당중량 | ✅ 정본 | 원가·소요·중량가공비 | 동관공식 π(D−T)T·L·8.96, dim_src='견적원가(우리)' |
+| **우리 실측** | **`nx.item.net_weight`** (= 레거시 `f_get_weight3`) | 부품 개당중량 | ✅ 정본 | 원가·소요·중량가공비 | π(D−T)T·L·**재질별 비중(PR019)**/1e6. ★`bom_dim.fin_weight`는 8.96 하드코딩 버그(STS/AL/FE 틀림)·아무도 안 읽는 dormant → 은퇴 |
 | **LG 인증** | `nx.lg_bom`(unit='KG' 원소재 Tube,Raw 행 qty) / `nx.bom` 원소재 edge | 원소재 소요 KG(BOM레벨) | ❌ **안 넣음**(LG BOM에 그대로·참조) | **사급 LME 차액 정산** | 사용자 확정 2026-08-26 "우리 BOM에 넣을 필요 없음". 예 MJU66386101=3.1975KG |
 | **협력사 정산** | `coop_quote_part`(unit_wt, 협의0.65) / `bom_dim.coop`-geom | 부품 개당중량 | 협력사 마스터 | 협력사 원소재 수불정산(차액) | [[newerp-coop-rawmat-settlement]] 협의두께 |
 
-**규칙**: 원가엔진=fin(우리) / 사급LME=nx.bom edge(LG) / 협력사정산=coop. **서로 안 섞음**. 은퇴대상: 원가엔진이 `PR_M_ITEM.ITEM_WEIGHT` 직독하던 것 → `bom_dim.fin_weight`(=nx.item.net_weight)로 통일(우리 실측 정본).
+**규칙**: 원가엔진=`nx.item.net_weight`(우리, 이미 읽는 중) / 사급LME=nx.bom edge(LG) / 협력사정산=coop. **서로 안 섞음**. net_weight 최신유지=편집시 CRUD 재계산(common._geom_weight)+일sync(r_item_sync→r_geom_weight). ★은퇴: `bom_dim.fin_weight`(8.96버그·dormant)·`PR_M_ITEM.ITEM_WEIGHT`(태반0).
 **미확정**: 협력사 개당중량 정본이 coop_quote_part인지 bom_dim.coop인지(둘 다 협의0.65) — 협력사 정산 도메인에서 확정.
 
 ### 3-2. 품목 식별·표시 (MIRROR_CLEAN §1 쌍1)
