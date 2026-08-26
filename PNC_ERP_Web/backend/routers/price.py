@@ -14,6 +14,7 @@ def _invalidate_cost_cache(cur, min_ymd: str) -> int:
     """단가(LG판가/사급가) 변경 시 원가분석 결과캐시(nx.cost_analysis_cache) 무효화.
        기준일(ymd) >= 최소 적용일인 행만 삭제 — 그보다 이전 기준일 분석은 새 단가에 영향받지 않음.
        사급가는 BOM 통해 상위 조립품 원가에도 전파되므로 품목단위가 아닌 기준일 범위로 통삭제. 삭제행수 반환."""
+    _reset_cost_engine()   # ★단가변경 → persistent 원가엔진(가격 lazy캐시)도 무효화 → 다음 요청 최신 재-warm(stale단가 방지)
     min_ymd = (min_ymd or '').strip()
     if not min_ymd:
         return 0

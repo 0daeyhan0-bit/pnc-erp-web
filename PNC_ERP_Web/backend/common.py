@@ -21,6 +21,14 @@ except Exception:
 import threading as _threading
 _COST_ENG = None
 _COST_LOCK = _threading.RLock()
+def _new_cost_engine():
+    """persistent 원가엔진 생성 + ★글로벌 벌크예열(warm_all): silwon 즉시화(16~96ms)·naewon 구조전개 in-memory화
+       (per-node DB왕복 N+1 제거). warm_all은 diff0 검증됨(값 불변)·실패 시 lazy 폴백(무해). one-time ~4.7s.
+       미적용 시 신규 품목 조회마다 ~3.5s(품목BOM 조회 지연의 근본)."""
+    e = NxCostEngine()
+    try: e.warm_all()
+    except Exception: pass
+    return e
 def _get_cost_engine(fresh=False):
     global _COST_ENG
     if fresh and _COST_ENG is not None:
@@ -28,7 +36,7 @@ def _get_cost_engine(fresh=False):
         except Exception: pass
         _COST_ENG = None
     if _COST_ENG is None:
-        _COST_ENG = NxCostEngine()
+        _COST_ENG = _new_cost_engine()
     elif not fresh:
         # ★커넥션 헬스체크: FastAPI 스레드풀 전환/유휴로 pyodbc 커넥션이 죽으면(10054) 커넥션만 재연결(메모캐시 보존).
         #   미적용 시 caller의 예외폴백 fresh=True가 엔진을 통째 버려 빈캐시 재적재(수초/요청) 발생 → 화면 열림 지연의 근본원인.
@@ -38,7 +46,7 @@ def _get_cost_engine(fresh=False):
             except Exception:
                 try: _COST_ENG.close()
                 except Exception: pass
-                _COST_ENG = NxCostEngine()
+                _COST_ENG = _new_cost_engine()
     return _COST_ENG
 def _reset_cost_engine():
     """원가 입력(공정/BOM/단가) 변경 후 캐시 무효화 → 다음 계산은 최신 DB 반영."""
