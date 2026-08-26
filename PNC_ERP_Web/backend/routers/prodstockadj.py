@@ -25,11 +25,11 @@ def prodstockadj_list(fr: str = Query(""), to: str = Query(""), tag: str = Query
         if item: w.append("m.item_code LIKE ?"); pf.append(f"%{item}%")
         where = " AND ".join(w)
         SEL = """SELECT {idcol} id, '{src}' src, m.maint_ymd, m.maint_seq, m.maint_tag,
-              m.item_code, ISNULL(i.ITEM_DESC,'') itemnm, m.cust_code,
+              m.item_code, ISNULL(i.item_name,'') itemnm, m.cust_code,
               ISNULL(m.maint_qty,0) maint_qty, ISNULL(m.maint_cost,0) maint_cost, ISNULL(m.maint_amt,0) maint_amt,
               ISNULL(m.remarks,'') remarks, m.work_order, m.split_work_order,
               m.insert_user_id reg_user, {upd} upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt
-            FROM {tbl} m LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=m.item_code
+            FROM {tbl} m LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=m.item_code
             WHERE {where}"""
         leg_sel = SEL.format(idcol="NULL", src="legacy", upd="m.update_user_id",
                              tbl="PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT", where=where)
