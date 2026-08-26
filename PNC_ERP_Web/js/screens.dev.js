@@ -2302,7 +2302,7 @@ SCREEN.unifybom=(c,ro)=>{
        <span style="color:#8a5a1a;font-size:11px">※ 대분류 미설정 시 부품 가공비가 누락됩니다(공정 필터).</span>
      </div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}${(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<button class="btn bm-usetgl" data-it="${esc(r.item)}" data-use="${r.use_flag}" style="float:right;padding:0 6px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용':'중지'}</button>`:(r.use_flag?'':'<span style="float:right;color:#adb5bd;font-size:10px">중지</span>')}</div>`).join('')}</div>`:''}
+     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
      ${item&&!loading&&viewTree&&!editMode&&!RO?candSelector('bom'):''}
      </div>
@@ -2319,9 +2319,6 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
     qi.onkeyup=e=>{if(e.key==='Enter')doSearch(qi.value);};
     {const uu=c.querySelector('#bm-use');if(uu)uu.onchange=()=>{useFilter=uu.value;doSearch(qi.value);};}
-    c.querySelectorAll('.bm-usetgl').forEach(b=>b.onclick=async e=>{e.stopPropagation();const code=b.dataset.it,nu=(+b.dataset.use)?0:1;
-      try{const r=await fetch(`${API}/api/itemmaster/use_flag`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:code,use:nu})});
-        const j=await r.json();if(j.ok)doSearch(query);else alert('전환 실패');}catch(err){alert('전환 오류: '+err);}});
     if(item)bindTabs();
     bindCandSel();
     c.querySelectorAll('.bm-r').forEach(el=>el.onclick=()=>{navStack=[];load(el.dataset.it);});
