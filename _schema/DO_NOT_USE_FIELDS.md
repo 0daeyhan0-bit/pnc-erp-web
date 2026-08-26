@@ -14,6 +14,7 @@
 | 1 | `CS_T_ITEM_WELD`(그리드), `PR_M_ITEM_BOM.use_qty` | **`CS_M_ITEM_BOM.USE_QTY`** (RAC, CS_CALC_EXCEPT_FLAG≠'1') | 용접봉/재료 원가 |
 | 2 | `PR_M_ITEM_BOM` | **`CS_M_ITEM_BOM`** (유효일자·CS_CALC_EXCEPT_FLAG) | 재료비 전개 전반 |
 | 14 | `nx.PR_M_ITEM`(품목 미러) | **`nx.item`(정본)** | 품목 마스터 조회 전반 |
+| 15 | `nx.partner`(4컬럼 stub·저adoption) | **`nx.CM_M_CUST`(기존 거래처)** | 거래처명 조회 |
 | 3 | `EXCEPT_FLAG` | **`CS_CALC_EXCEPT_FLAG`** | BOM 전개 필터 |
 | 4 | `nx.weld_rate`, `nx.coop_rate`(실험치) | **`nx.item_weld`+`nx.weld_diam`** 정본 | 용접봉 원단위 |
 | 5 | `PARTNER_ERP` 직접 INSERT/UPDATE/DELETE | **nx(PARTNER_ERP_TEST3)만 쓰기** | 라이브 쓰기 |
@@ -127,6 +128,14 @@
 - **예외(보존)**: `PARTNER_ERP.dbo.PR_M_ITEM`(라이브 직독, soyo STEP7 routing_edge 등)은 미러 아님 → 은퇴 대상 아님.
 - **최종 drop**: 컷오버 시 `nx.PR_M_ITEM` 테이블 삭제(전형태 코드잔여 0 확인됨).
 - **근거**: `NX_ITEM_READER_MIGRATION.md`(교훈10). [[newerp-nxitem-reader-migration]] [[newerp-mirror-clean-dual-table-audit]].
+
+## 15. 거래처 — `nx.partner`(클린 stub) 은퇴, 조회는 `CM_M_CUST` (2026-08-26)
+
+- **금지**: 신규 프로그램에서 거래처명 조회에 `nx.partner`(partner_code/name/type/remark 4컬럼) 사용.
+- **왜**: nx.partner는 재설계 미완 stub(4컬럼)·실사용 이름조회 3파일뿐·전부 CM_M_CUST 폴백=실질 기여 미미. 미러/클린 병존 혼동만 유발. → 3파일을 CM_M_CUST로 되돌려 단일화(PR#78·값동일 검증).
+- **올바른 대체**: **`nx.CM_M_CUST`**(기존 거래처·라이브 미러·CUST_CODE→CUST_DESC). partner_name=CUST_DESC 값동일·CM_M_CUST 상위집합.
+- **★물리 drop 보류**: nx.partner는 **FK 2개 참조 대상**(`FK__price_lme__vendo`·`FK__sourcing___vendo` = price_lme·sourcing_profile.vendor_code). 즉 벤더차원 FK 타깃이라 단순 drop 불가 → **B(WEHAGO/identity 재설계)에서 벤더차원 재구성 시 FK 재지정+drop**. 지금은 거버넌스(조회금지)만.
+- **근거**: [[newerp-mirror-clean-dual-table-audit]] 쌍2 · [[newerp-partner-identity-rationalize]].
 
 ---
 
