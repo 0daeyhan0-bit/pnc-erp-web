@@ -25,6 +25,9 @@ COLS = [
     ("tariff_rate",      "numeric(18,2)","TARIFF_RATE"),
     ("remarks",          "varchar(100)", "REMARKS"),
     ("item_cost",        "numeric(18,4)","ITEM_COST"),
+    # ITEM_WEIGHT = 레거시 단중(엔진이 이 값으로 원가/전개 판정). net_weight(f_get_weight3 우리실측)와 별개축.
+    # 미러값 그대로 복사(대문자 ITEM_WEIGHT 읽기가 case-insensitive로 해석) → 원가 diff0 보존. net_weight 미접촉.
+    ("item_weight",      "numeric(18,4)","ITEM_WEIGHT"),
 ]
 
 # 1) 부재 컬럼만 ADD(멱등)
