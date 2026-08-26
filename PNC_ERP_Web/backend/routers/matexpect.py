@@ -329,7 +329,7 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
             s = summ.setdefault(r["grp"], {"grp": r["grp"], "mats": 0, "tot": 0.0, "need": 0.0, "buy": 0.0, "fit": 0.0})
             s["mats"] += 1; s["tot"] += r["tot_qty"]; s["need"] += r["need_qty"]; s["buy"] += r["buy_qty"]; s["fit"] += r["fit_qty"]
         return {
-            "ym": ym, "axis": axis,
+            "frm": frm, "to": to, "axis": axis, "days": days,
             "act_range": act_rng, "exp_range": exp_rng,
             "rows": rows, "cnt": len(rows), "summary": list(summ.values()),
             "note": "②소요(예상 plan_part_mat + 실적 제품입고P/출하×prod_soyo 캐시) + ③넷팅(재고 mat_stock_daily·상시보유 리드타임×일평균·매입 tag9/S/수입·필요수량 max(0,소요+상시보유−기초−미착)·적정성 매입−필요). 자재×업체 세분·재고는 소요비율 배분(Σ=자재).",
