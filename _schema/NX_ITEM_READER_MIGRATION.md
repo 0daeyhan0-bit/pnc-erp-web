@@ -38,6 +38,10 @@ safe_stock_min/max·weld_point_in/out·tariff_rate·remarks·item_cost. → 아�
 - batch1/2: `stock · prodstockadj · purmagam · setin · stockval` (PR #66/#67)
 - batch3: `order · manorder · qc · prod · gagongmove · planinput · coopplan` (PR #68)
 - batch4: `prodinfo · kitting · ready` (갭 컬럼 해소 후 이관 — JIG_*·SAGUB_STOCK_FLAG nx.item서 해석)
+- batch5: `coopquote · coopquote2 · dopip · esticost · lgsagub · modelbom · partplan · partplandtl · pricemgmt` (PR #70)
+
+### 이관 대기(ITEM_WEIGHT 무관·다량 쿼리 — 신중 per-query)
+`prodsheet(14) · prodwrite(9) · sourcing(9)` — 갭 없음이나 쿼리 많고 생산/조달 민감 → 다음 트랜치
 
 ### ★ITEM_WEIGHT 보류 (의미 확정 필요) — 이관 불가
 `price · procbc · gagong · salemagam` + 엔진군(nx_cost_engine·nx_soyo_engine·weight_calc·soyo·sales·bom·cost).
