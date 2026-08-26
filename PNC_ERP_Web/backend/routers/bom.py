@@ -332,7 +332,12 @@ def _bom_tree_nx(item, real, expandbuy=0):
             seen.add(code)
             for e in edges.get(code, []):
                 ci = info.get(e["child"], {})
-                out.append({"level": lvl, "code": subdisp(e["child"]), "raw": e["child"], "parent": code, "pseq": e.get("sq", 0), "nm": ci.get("nm", ""), "spec": ci.get("spec", ""),
+                _dcode = subdisp(e["child"]); _nm = ci.get("nm", "")
+                # ★기존 서브품번을 품명 시작부에 병기(사용자 확정·2026-08-26): SUB 코드가 _S{nn}로 개명되어도
+                #   사용자는 기존 자도번(서브품번)에 익숙 → 품명 앞에 원 자도번 병기해 식별. 중복 방지.
+                if (e["child"] in edges) and _dcode != e["child"] and e["child"] not in (_nm or ""):
+                    _nm = (str(e["child"]).strip() + " " + (_nm or "")).strip()
+                out.append({"level": lvl, "code": _dcode, "raw": e["child"], "parent": code, "pseq": e.get("sq", 0), "nm": _nm, "spec": ci.get("spec", ""),
                     "qty": e["q"], "cust": ci.get("cust", ""), "custnm": ci.get("custnm", ""),
                     "sag": e["sag"], "se": e["se"], "kt": e["kt"], "vir": e["vir"], "ce": e["ce"], "le": e["le"],
                     "gp": e["gp"], "sw": e["sw"], "metal": ci.get("metal", ""),
