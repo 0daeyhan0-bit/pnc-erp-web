@@ -16,8 +16,8 @@ def wr_itemsearch(q: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
         like = f"%{q}%"
-        cur.execute("""SELECT TOP 40 ITEM_CODE, ISNULL(ITEM_DESC,'') nm, ISNULL(ITEM_SGROUP,'') sg
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
+        cur.execute("""SELECT TOP 40 ITEM_CODE, ISNULL(item_name,'') nm, ISNULL(sgroup,'') sg
+            FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE LIKE ? OR item_name LIKE ? ORDER BY ITEM_CODE""", like, like)
         return {"rows": [{"item": r[0], "nm": r[1], "sg": r[2]} for r in cur.fetchall()]}
     finally:
         cn.close()
@@ -88,13 +88,13 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
             if wc.strip():   w.append("(l.WORK_CODE=? OR l.TO_GAGONG_PROC_CODE=?)"); p += [wc.strip(), wc.strip()]
             cur.execute(f"""SELECT TOP 3000 l.MAINT_YMD, l.MAINT_SEQ, ISNULL(l.MAINT_TAG,'') tag,
                   ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.GAGONG_PROC_CODE,'') part_code,
-                  ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
-                  ISNULL(l.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
+                  ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
+                  ISNULL(l.ITEM_CODE,'') item_code, ISNULL(ii.item_name,'') item_nm,
                   l.MAINT_QTY, l.MAINT_COST, l.MAINT_AMT, ISNULL(l.REMARKS,'') remarks,
                   ISNULL(l.TO_GAGONG_PROC_CODE,'') prod_work_code, ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
                 FROM nx.stock_ledger l
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=l.ITEM_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=l.MAT_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=l.ITEM_CODE
                 WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""", *p)
             cols = [d[0] for d in cur.description]
             for r in cur.fetchall():
@@ -111,13 +111,13 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
             if mat.strip():  wm.append("(m.MAT_CODE LIKE ? OR m.ITEM_CODE LIKE ?)"); pm += [f"%{mat.strip()}%"]*2
             if wc.strip():   wm.append("(m.WORK_CODE=? OR m.PROD_WORK_CODE=?)"); pm += [wc.strip(), wc.strip()]
             cur.execute(f"""SELECT TOP 3000 m.MAINT_YMD, m.MAINT_SEQ, ISNULL(m.WORK_CODE,'') work_code,
-                  ISNULL(m.PART_CODE,'') part_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
-                  ISNULL(m.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
+                  ISNULL(m.PART_CODE,'') part_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
+                  ISNULL(m.ITEM_CODE,'') item_code, ISNULL(ii.item_name,'') item_nm,
                   m.MAINT_QTY, m.MAINT_COST, m.MAINT_AMT, ISNULL(m.REMARKS,'') remarks,
                   ISNULL(m.PROD_WORK_CODE,'') prod_work_code, ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
                 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=m.MAT_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=m.ITEM_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=m.MAT_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=m.ITEM_CODE
                 WHERE {' AND '.join(wm)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *pm)
             cols = [d[0] for d in cur.description]
             for r in cur.fetchall():
@@ -263,11 +263,11 @@ def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str 
         if item.strip():  w.append("d.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if wo.strip():    w.append("d.WORK_ORDER LIKE ?"); p.append(f"%{wo.strip()}%")
         cur.execute(f"""SELECT TOP 3000 d.ID, d.PROD_YMD, d.PROD_HMS, ISNULL(d.WORK_ORDER,'') wo,
-              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.ITEM_DESC,'') nm,
+              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.item_name,'') nm,
               ISNULL(d.LINE_NO,'') line, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, d.PROD_QTY,
               ISNULL(d.WORK_CODE,'') work_code, ISNULL(d.FINISH_FLAG,'') fin, ISNULL(d.PROD_USER_ID,'') usr,
               d.INSERT_DATETIME
-            FROM nx.proc_result d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            FROM nx.proc_result d LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC, d.ID DESC""", *p)
         cols = [dd[0] for dd in cur.description]
         for r in cur.fetchall():
@@ -284,10 +284,10 @@ def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str 
         if item.strip():  wm.append("d.ITEM_CODE LIKE ?"); pm.append(f"%{item.strip()}%")
         if wo.strip():    wm.append("d.WORK_ORDER LIKE ?"); pm.append(f"%{wo.strip()}%")
         cur.execute(f"""SELECT TOP 3000 d.PROD_YMD, d.PROD_HMS, ISNULL(d.WORK_ORDER,'') wo,
-              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.ITEM_DESC,'') nm,
+              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.item_name,'') nm,
               ISNULL(d.LINE_NO,'') line, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, d.PROD_QTY,
               ISNULL(d.WORK_CODE,'') work_code, ISNULL(d.FINISH_FLAG,'') fin, ISNULL(d.PROD_USER_ID,'') usr
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(wm)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC""", *pm)
         cols = [dd[0] for dd in cur.description]
         for r in cur.fetchall():
@@ -370,10 +370,10 @@ def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str =
         if topart.strip():   w.append("l.TO_GAGONG_PROC_CODE=?"); p.append(topart.strip())
         cur.execute(f"""SELECT TOP 3000 l.MAINT_YMD ISSUE_YMD, l.MAINT_GROUP_SEQ,
               ISNULL(l.GAGONG_PROC_CODE,'') frompart, ISNULL(l.TO_GAGONG_PROC_CODE,'') topart,
-              ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+              ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
               ISNULL(l.ITEM_CODE,'') item_code, ABS(l.MAINT_QTY) ISSUE_QTY, ISNULL(l.REMARKS,'') remarks,
               ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
+            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_GROUP_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
         for r in cur.fetchall():
@@ -390,10 +390,10 @@ def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str =
         if topart.strip():   wm.append("m.PART_CODE=?"); pm.append(topart.strip())
         cur.execute(f"""SELECT TOP 3000 m.MAINT_YMD ISSUE_YMD, m.MAINT_SEQ,
               ISNULL(m.FROM_PART_CODE,'') frompart, ISNULL(m.PART_CODE,'') topart,
-              ISNULL(m.WORK_CODE,'') work_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+              ISNULL(m.WORK_CODE,'') work_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
               ISNULL(m.ITEM_CODE,'') item_code, ABS(m.MAINT_QTY) ISSUE_QTY, ISNULL(m.REMARKS,'') remarks,
               ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
-            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=m.MAT_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=m.MAT_CODE
             WHERE {' AND '.join(wm)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *pm)
         cols = [d[0] for d in cur.description]
         for r in cur.fetchall():

@@ -80,7 +80,7 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         nm = {}; il = [x for x in items if x]
         for i in range(0, len(il), 900):
             ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         pn = {}; gl = [x for x in gpcs if x]
         if gl:
@@ -205,8 +205,8 @@ def prodsheet_packinfo(item: str = Query(...)):
     try:
         cur.execute("""SELECT ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0), ISNULL(s.CUST_PACK_QTY,0),
                           ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''), ISNULL(s.STICKER_COLOR,''),
-                          ISNULL(i.ITEM_DESC,''), ISNULL(i.ITEM_SPEC,'')
-                        FROM nx.PR_M_ITEM i WITH(NOLOCK)
+                          ISNULL(i.item_name,''), ISNULL(i.item_spec,'')
+                        FROM nx.item i WITH(NOLOCK)
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=i.ITEM_CODE
                        WHERE i.ITEM_CODE=?""", ic)
         r = cur.fetchone()
@@ -247,12 +247,12 @@ def prodsheet_kanban_preview(sheet_no: str = Query(...), pack_qty: int = Query(0
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT h.ITEM_CODE, h.PLAN_YMD, h.PLAN_QTY, ISNULL(h.LINE_NO,''),
-                          ISNULL(h.STOCK_GAGONG_PROC_CODE,''), ISNULL(i.ITEM_DESC,''),
+                          ISNULL(h.STOCK_GAGONG_PROC_CODE,''), ISNULL(i.item_name,''),
                           ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
                           ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
                           ISNULL(h.PROD_FIN_FLAG,'0')
                         FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         r = cur.fetchone()
@@ -416,10 +416,10 @@ def prodsheet_kanban_print(box_no: str = Query(...)):
     try:
         cur.execute("""SELECT b.BOX_NO, b.ITEM_CODE, b.PLAN_YMD, ISNULL(b.LINE_NO,''), b.PLAN_QTY,
                           b.ORG_PLAN_QTY, b.SHEET_NO, ISNULL(b.PRINT_USER_ID,''), b.PRINT_DATETIME,
-                          ISNULL(i.ITEM_DESC,''), ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
+                          ISNULL(i.item_name,''), ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
                           ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,'')
                         FROM nx.PR_T_INDI_SHEET2 b WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=b.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=b.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=b.ITEM_CODE
                        WHERE b.BOX_NO=?""", int(bn))
         r = cur.fetchone()
@@ -484,10 +484,10 @@ def prodsheet_label_preview(sheet_no: str = Query(...), qty: float = Query(0)):
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT h.ITEM_CODE, h.PLAN_QTY, h.PLAN_YMD, ISNULL(h.LINE_NO,''),
-                          ISNULL(i.ITEM_DESC,''), ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
+                          ISNULL(i.item_name,''), ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
                           ISNULL(s.STICKER_COLOR,'')
                         FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         r = cur.fetchone()
@@ -584,9 +584,9 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
                           ISNULL(s.QR_BARCODE_FROM,''), ISNULL(s.QR_BARCODE_TO,''),
                           ISNULL(s.WORK_CODE,''), ISNULL(s.WORKER_CODE,''),
                           s.SHEET_NO, ISNULL(s.PRINT_USER_ID,''), s.PRINT_DATETIME,
-                          ISNULL(i.ITEM_DESC,''), ISNULL(m.PROD_WORKER,''), ISNULL(m.INSP_WORKER,'')
+                          ISNULL(i.item_name,''), ISNULL(m.PROD_WORKER,''), ISNULL(m.INSP_WORKER,'')
                         FROM nx.PR_T_PRINT_STICKER s WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=s.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=s.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB m WITH(NOLOCK) ON m.ITEM_CODE=s.ITEM_CODE
                        WHERE s.PRINT_SEQ=?""", int(ps))
         r = cur.fetchone()
@@ -682,16 +682,16 @@ def _bom_expand(cur, item, gpc_like):
         SELECT b.mat_code, b.use_qty, m.work_code, ISNULL(b.SAGUB_FLAG,'0'),
                b.GAGONG_PROC_CODE, b.vir_item_flag
           FROM nx.pr_m_item_bom b
-          JOIN nx.pr_m_item i ON b.item_code=i.item_code
-          JOIN nx.pr_m_item m ON b.mat_code =m.item_code
+          JOIN nx.item i ON b.item_code=i.item_code
+          JOIN nx.item m ON b.mat_code =m.item_code
          WHERE b.item_code=? AND ISNULL(b.except_flag,'0')<>'1'
         UNION ALL
         SELECT b.mat_code, cb.cum_use_qty*b.use_qty, m.work_code, ISNULL(b.SAGUB_FLAG,'0'),
                b.GAGONG_PROC_CODE, b.vir_item_flag
           FROM CTE_BOM cb
           JOIN nx.pr_m_item_bom b ON cb.mat_code=b.item_code
-          JOIN nx.pr_m_item i ON b.item_code=i.item_code
-          JOIN nx.pr_m_item m ON b.mat_code =m.item_code
+          JOIN nx.item i ON b.item_code=i.item_code
+          JOIN nx.item m ON b.mat_code =m.item_code
          WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.vir_item_flag='1'
     )
     SELECT mat_code, MAX(ISNULL(work_code,'')) work_code, SUM(cum_use_qty) mat_use_qty,
@@ -734,10 +734,10 @@ def _prod_dest(cur, item, upper_item=None):
     # ★전표 상위품번이 자기 자신이 아니면 그것이 곧 상위 — 그 상위부터 판정한다.
     _up = str(upper_item or "").strip()
     if _up and _up != it:
-        cur.execute("""SELECT ISNULL(m.IN_CUST_CODE,''),
+        cur.execute("""SELECT ISNULL(m.in_cust,''),
                               ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
                                        WHERE b.MAT_CODE=? ),'0')
-                         FROM nx.PR_M_ITEM m WITH(NOLOCK) WHERE m.ITEM_CODE=?""", _up, _up)
+                         FROM nx.item m WITH(NOLOCK) WHERE m.ITEM_CODE=?""", _up, _up)
         _r = cur.fetchone()
         _ic = str(_r[0] or '').strip() if _r else ''
         if _ic:
@@ -755,9 +755,9 @@ def _prod_dest(cur, item, upper_item=None):
         while stack and depth <= 8:
             depth += 1
             _c = stack.pop(0)
-            cur.execute("""SELECT b.ITEM_CODE, ISNULL(b.VIR_ITEM_FLAG,'0'), ISNULL(m.IN_CUST_CODE,'')
+            cur.execute("""SELECT b.ITEM_CODE, ISNULL(b.VIR_ITEM_FLAG,'0'), ISNULL(m.in_cust,'')
                              FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
-                             LEFT JOIN nx.PR_M_ITEM m WITH(NOLOCK) ON m.ITEM_CODE=b.ITEM_CODE
+                             LEFT JOIN nx.item m WITH(NOLOCK) ON m.ITEM_CODE=b.ITEM_CODE
                             WHERE b.MAT_CODE=?""", _c)
             for p, vir, incust in [(str(r[0] or '').strip(), str(r[1] or '0'), str(r[2] or '').strip())
                                    for r in cur.fetchall()]:
@@ -938,7 +938,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
                     kind, meth = "용접전표", "J"
         if not item:
             return {"found": False, "msg": "바코드를 찾을 수 없습니다 (전표 8자리 / 간판 GP… / 라벨 QR)"}
-        c2.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
+        c2.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         rr = c2.fetchone(); nm = rr[0] if rr else ""
         # ★기처리수량 = 이 바코드+공정의 STICKER 누적(레거시 w_pr_input_527 동일 기준).
         #   취소분(음수)이 함께 합산되므로 취소하면 자동으로 잔여가 늘어남.
@@ -1490,7 +1490,7 @@ def procbc_list(ymd: str = Query(""), part: str = Query(""), swork: str = Query(
         nm = {}; il = [x for x in items if x]
         for i in range(0, len(il), 900):
             ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-            c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            c2.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in c2.fetchall(): nm[str(a).strip()] = b
         for x in rows: x["nm"] = nm.get(x["item_code"], "")
         return {"rows": rows, "cnt": len(rows),

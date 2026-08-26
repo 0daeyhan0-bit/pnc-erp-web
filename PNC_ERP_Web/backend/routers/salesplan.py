@@ -184,7 +184,7 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
                 for i in range(0, len(codes), 900):
                     ck = codes[i:i + 900]
                     ph = ",".join("?" * len(ck))
-                    c3.execute("SELECT ITEM_CODE FROM pr_m_item WHERE ITEM_CODE IN (%s)" % ph, *ck)
+                    c3.execute("SELECT ITEM_CODE FROM nx.item WHERE ITEM_CODE IN (%s)" % ph, *ck)
                     for r in c3.fetchall(): alive.add(str(r[0]).strip())
             except Exception:
                 alive = set(codes)     # 조회 실패시 필터하지 않음(데이터 누락 방지)

@@ -80,14 +80,14 @@ _NX_POINT_NOTE = {
 def _nx_derive(point, from6, to6, limit=8000):
     """단일원장 파생 재고 그리드. 잔량=기초(<from)+ΣMAINT(<=to). 입고=+, 출고=−(양수표시). 근거키 삭제/쓰기 없음(순수 SELECT)."""
     sql = f"""SELECT TOP {int(limit)}
-        COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE) cd, MAX(i.ITEM_DESC) nm, MAX(i.ITEM_SPEC) spec,
+        COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE) cd, MAX(i.item_name) nm, MAX(i.ITEM_SPEC) spec,
         ISNULL(L.GAGONG_PROC_CODE,'') gpc, ISNULL(L.CUST_CODE,'') cust,
         SUM(CASE WHEN L.MAINT_YMD<? THEN L.MAINT_QTY ELSE 0 END) base,
         SUM(CASE WHEN L.MAINT_YMD BETWEEN ? AND ? AND L.MAINT_QTY>0 THEN L.MAINT_QTY ELSE 0 END) inq,
         SUM(CASE WHEN L.MAINT_YMD BETWEEN ? AND ? AND L.MAINT_QTY<0 THEN -L.MAINT_QTY ELSE 0 END) outq,
         SUM(CASE WHEN L.MAINT_YMD<=? THEN L.MAINT_QTY ELSE 0 END) endq
       FROM nx.stock_ledger L
-      LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE)
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE)
       WHERE L.STOCK_POINT=?
       GROUP BY COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE), ISNULL(L.GAGONG_PROC_CODE,''), ISNULL(L.CUST_CODE,'')
       HAVING SUM(CASE WHEN L.MAINT_YMD<=? THEN L.MAINT_QTY ELSE 0 END)<>0
@@ -128,9 +128,9 @@ def _nx_screen(point, from6, to6):
 # 일수불=PU_T_MONTH_STOCK_WH_DAILY(일자별 스냅샷), 월수불=PU_T_MONTH_STOCK_WH(마감월).
 # 원천/집계는 export_web_data.py 의 q_live 쿼리와 동일. 일자/월만 파라미터화.
 _LEDGER_SELECT = """
-select t.mat_code cd, max(m.item_desc) nm, max(m.item_spec) spec,
-  isnull(max(m.item_sgroup),'') sg, max(m.unit) unit,
-  isnull(max(m.in_cust_code),'') custcd, isnull(max(c.cust_desc),'') cust, isnull(max(c.cust_type),'') ctype,
+select t.mat_code cd, max(M.item_name) nm, max(m.item_spec) spec,
+  isnull(max(M.sgroup),'') sg, max(m.unit) unit,
+  isnull(max(M.in_cust),'') custcd, isnull(max(c.cust_desc),'') cust, isnull(max(c.cust_type),'') ctype,
   {lastin} lastin,
   sum(t.basic_qty) bq,  sum(t.basic_amt) ba,
   sum(t.input_qty) iq,  sum(t.input_amt) ia,
@@ -138,9 +138,9 @@ select t.mat_code cd, max(m.item_desc) nm, max(m.item_spec) spec,
   sum(t.trans_qty) tq,  sum(t.trans_amt) ta,
   sum(t.stock_qty) sq,  sum(t.stock_amt) sa
 from {tbl} t
-join PARTNER_ERP_TEST3.nx.pr_m_item m on t.mat_code=m.item_code
+join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
 join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
-left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust_code=c.cust_code
+left join PARTNER_ERP_TEST3.nx.cm_m_cust c on M.in_cust=c.cust_code
 where t.cust_code='Z99990' and t.{col}=?
 group by t.mat_code
 order by t.mat_code
@@ -220,7 +220,7 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
         FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd < ?) x WHERE rn=1),
     keys AS (SELECT cd FROM per UNION SELECT cd FROM endd UNION SELECT cd FROM beg)
     SELECT k.cd,
-      MAX(m.item_desc) nm, MAX(m.item_spec) spec, MAX(m.unit) unit,
+      MAX(M.item_name) nm, MAX(m.item_spec) spec, MAX(m.unit) unit,
       MAX(ISNULL(i.sgroup,'')) sg, MAX(ISNULL(sd.DETAIL_DESC,'')) sgnm, MAX(ISNULL(i.cut_gubun,'')) cut,
       MAX(ISNULL(b.sq,0)) bq, MAX(ISNULL(b.sa,0)) ba,
       MAX(ISNULL(p.iq,0)) iq, MAX(ISNULL(p.ia,0)) ia,
@@ -230,7 +230,7 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
     LEFT JOIN per p ON p.cd=k.cd
     LEFT JOIN endd e ON e.cd=k.cd
     LEFT JOIN beg b ON b.cd=k.cd
-    LEFT JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON UPPER(m.item_code)=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON UPPER(m.item_code)=k.cd
     LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON UPPER(i.item_code)=k.cd
     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
     GROUP BY k.cd ORDER BY k.cd
@@ -270,26 +270,26 @@ def _def_range(dfrom, dto):
 def _dispatch_inner(dc):
     return f"""
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC) CUST_DESC, C2.CUST_TYPE, A.MAT_CODE, A.MAINT_COST, A.MAINT_COST KRW_MAINT_COST, A.ITEM_CODE,
-     MAX(M.ITEM_DESC) ITEM_DESC, MAX(M.ITEM_SPEC) ITEM_SPEC, MAX(M.UNIT) UNIT, M.ITEM_LGROUP, M.ITEM_SGROUP,
+     MAX(M.item_name) ITEM_DESC, MAX(M.ITEM_SPEC) ITEM_SPEC, MAX(M.UNIT) UNIT, M.lgroup ITEM_LGROUP, M.sgroup ITEM_SGROUP,
      SUM(-A.MAINT_QTY) MAINT_QTY, SUM(-A.MAINT_AMT) MAINT_AMT, SUM(-A.MAINT_AMT) KRW_MAINT_AMT, SUM(-A.MAINT_VAT) MAINT_VAT, SUM(-A.MAINT_VAT) KRW_MAINT_VAT,
-     1 EXCHANGE_RATE, MAX(M.IN_CUST_CODE) IN_CUST_CODE, 'KRW' CURRENCY, MAX(M.ITEM_WEIGHT) ITEM_WEIGHT
-    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
+     1 EXCHANGE_RATE, MAX(M.in_cust) IN_CUST_CODE, 'KRW' CURRENCY, MAX(M.ITEM_WEIGHT) ITEM_WEIGHT
+    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.MAINT_TAG IN ('5')
-    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.GAGONG_PROC_CODE,A.MAT_CODE,A.ITEM_CODE,C2.CUST_TYPE,A.MAINT_COST,M.ITEM_LGROUP,M.ITEM_SGROUP
+    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.GAGONG_PROC_CODE,A.MAT_CODE,A.ITEM_CODE,C2.CUST_TYPE,A.MAINT_COST,M.lgroup,M.sgroup
    UNION ALL
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC), C2.CUST_TYPE, A.ITEM_CODE, A.MAINT_COST, A.MAINT_COST, '',
-     MAX(M.ITEM_DESC), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.ITEM_LGROUP, M.ITEM_SGROUP,
-     SUM(-A.MAINT_QTY), SUM(-A.MAINT_AMT), SUM(-A.MAINT_AMT), SUM(-A.MAINT_VAT), SUM(-A.MAINT_VAT), 1, MAX(M.IN_CUST_CODE), 'KRW', MAX(M.ITEM_WEIGHT)
-    FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.ITEM_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
+     MAX(M.item_name), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.lgroup, M.sgroup,
+     SUM(-A.MAINT_QTY), SUM(-A.MAINT_AMT), SUM(-A.MAINT_AMT), SUM(-A.MAINT_VAT), SUM(-A.MAINT_VAT), 1, MAX(M.in_cust), 'KRW', MAX(M.ITEM_WEIGHT)
+    FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.ITEM_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.MAINT_TAG IN ('R')
-    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,M.ITEM_LGROUP,M.ITEM_SGROUP
+    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,M.lgroup,M.sgroup
    UNION ALL
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC), C2.CUST_TYPE, A.MAT_CODE, A.MAINT_COST, (A.MAINT_COST*A.EXCHANGE_RATE), A.ITEM_CODE,
-     MAX(M.ITEM_DESC), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.ITEM_LGROUP, M.ITEM_SGROUP,
-     SUM(A.MAINT_QTY), SUM(A.MAINT_AMT), SUM(ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1)), 0, 0, A.EXCHANGE_RATE, MAX(M.IN_CUST_CODE), A.CURRENCY, MAX(M.ITEM_WEIGHT)
-    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
+     MAX(M.item_name), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.lgroup, M.sgroup,
+     SUM(A.MAINT_QTY), SUM(A.MAINT_AMT), SUM(ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1)), 0, 0, A.EXCHANGE_RATE, MAX(M.in_cust), A.CURRENCY, MAX(M.ITEM_WEIGHT)
+    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.DIVISION='Q'
-    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,A.EXCHANGE_RATE,M.ITEM_LGROUP,M.ITEM_SGROUP,A.CURRENCY"""
+    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,A.EXCHANGE_RATE,M.lgroup,M.sgroup,A.CURRENCY"""
 
 def _dispatch(dc, ref_ym):
     magam = f"""WITH MAGAM (CUST_CODE, JUN_YYMM, JUN_MAGAM_DAY, MAGAM_DAY) AS (
@@ -329,18 +329,18 @@ def dispatch(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Quer
 def _receipt_inner(dc):
     return f"""
   SELECT A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct, A.ITEM_CODE ic, A.MAT_CODE mat,
-    M.ITEM_DESC nm, M.ITEM_SPEC spec, M.ITEM_LGROUP lg, M.ITEM_SGROUP sg, M.ITEM_WEIGHT wt, M.UNIT unit,
+    M.item_name nm, M.ITEM_SPEC spec, M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit,
     'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost,
     A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_AMT kamt, A.MAINT_VAT vat, A.MAINT_VAT kvat
-   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
    WHERE {dc} AND A.MAINT_TAG IN ('9','S','C','G','H')
      AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
   UNION ALL
   SELECT A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE, A.ITEM_CODE, A.MAT_CODE,
-    M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
+    M.item_name, M.ITEM_SPEC, M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT,
     A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE,
     A.MAINT_QTY, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0, 0
-   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
    WHERE {dc} AND A.DIVISION IN ('P')"""
 
 def _receipt(dc, ref_ym):
@@ -586,7 +586,7 @@ def _receiptdetail(dc, ref_ym, q=""):
     q = (q or "").strip()
     if q:
         qe = q.replace("'", "''")
-        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.pr_m_item WHERE item_code LIKE '%{qe}%' OR item_desc LIKE '%{qe}%'")
+        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.item WHERE item_code LIKE '%{qe}%' OR item_name LIKE '%{qe}%'")
         _codes = [r["c"] for r in _mr if r.get("c")]
         if _codes:
             _inl = ",".join("'" + c.replace("'", "''") + "'" for c in _codes)
@@ -595,18 +595,18 @@ def _receiptdetail(dc, ref_ym, q=""):
             MF = f" AND A.MAT_CODE LIKE '%{qe}%'"
     sql = f"""{_MAGAM(ref_ym)}
 SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct,
-  A.MAT_CODE mat, M.ITEM_DESC nm, M.ITEM_SPEC spec, M.ITEM_DIAM diam, M.ITEM_THICK thick, M.ITEM_LENGTH length,
-  M.ITEM_LGROUP lg, M.ITEM_SGROUP sg, M.ITEM_WEIGHT wt, M.UNIT unit,
+  A.MAT_CODE mat, M.item_name nm, M.ITEM_SPEC spec, M.diam diam, M.thick thick, M.length length,
+  M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit,
   A.MAINT_QTY qty, 'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost, A.MAINT_AMT amt, A.MAINT_AMT kamt, A.MAINT_VAT vat
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('9','S','C','G','H')
    AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= '')){MF}
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
-  A.MAT_CODE, M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_DIAM, M.ITEM_THICK, M.ITEM_LENGTH,
-  M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
+  A.MAT_CODE, M.item_name, M.ITEM_SPEC, M.diam, M.thick, M.length,
+  M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT,
   A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
  WHERE {dc} AND A.DIVISION IN ('P'){MF}"""
     _cols, rows = _rows(sql)
     return rows
@@ -635,24 +635,24 @@ def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str =
 def _dispatchdetail(dc, ref_ym):
     sql = f"""{_MAGAM(ref_ym)}
 SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct,
-  A.MAT_CODE mat, A.ITEM_CODE ic, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE) incust,
-  M.ITEM_LGROUP lg, M.ITEM_SGROUP sg, M.ITEM_WEIGHT wt, M.UNIT unit, M.ITEM_DESC nm, M.ITEM_SPEC spec,
+  A.MAT_CODE mat, A.ITEM_CODE ic, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust) incust,
+  M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit, M.item_name nm, M.ITEM_SPEC spec,
   -A.MAINT_QTY qty, 'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost, -A.MAINT_AMT amt, -A.MAINT_AMT kamt, -A.MAINT_VAT vat
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('5')
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
-  A.ITEM_CODE, '', (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE),
-  M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT, M.ITEM_DESC, M.ITEM_SPEC,
+  A.ITEM_CODE, '', (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust),
+  M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT, M.item_name, M.ITEM_SPEC,
   -A.MAINT_QTY, 'KRW', 1.0, A.MAINT_COST, A.MAINT_COST, -A.MAINT_AMT, -A.MAINT_AMT, -A.MAINT_VAT
- FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.ITEM_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.ITEM_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('5')
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
-  A.MAT_CODE, A.ITEM_CODE, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE),
-  M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT, M.ITEM_DESC, M.ITEM_SPEC,
+  A.MAT_CODE, A.ITEM_CODE, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust),
+  M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT, M.item_name, M.ITEM_SPEC,
   A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.DIVISION='Q'"""
     _cols, rows = _rows(sql)
     return rows
@@ -701,7 +701,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
     q = (q or "").strip()
     if q:
         qe = q.replace("'", "''")
-        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.pr_m_item WHERE item_code LIKE '%{qe}%' OR item_desc LIKE '%{qe}%'")
+        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.item WHERE item_code LIKE '%{qe}%' OR item_name LIKE '%{qe}%'")
         _codes = [r["c"] for r in _mr if r.get("c")]
         if _codes:
             _inl = ",".join("'" + c.replace("'", "''") + "'" for c in _codes)
@@ -740,7 +740,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
 """
     _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo, ISNULL(itm,'') itm, ISNULL(wt,'') wt FROM ({LINES}) x")
     _c2, bfrows = _rows(f"SELECT mat, SUM(sq) bf FROM ({BF}) b GROUP BY mat")
-    _c3, nmrows = _rows("SELECT UPPER(item_code) c, item_desc d, ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=i.in_cust_code),'') v FROM PARTNER_ERP_TEST3.nx.pr_m_item i")
+    _c3, nmrows = _rows("SELECT UPPER(item_code) c, item_name d, ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=i.in_cust),'') v FROM PARTNER_ERP_TEST3.nx.item i")
     nm = {r["c"]: r["d"] for r in nmrows}
     vend = {r["c"]: (r["v"] or "") for r in nmrows}   # 매입처(IN_CUST_CODE→거래처명)
     bfm = {r["mat"]: float(r["bf"] or 0) for r in bfrows}
@@ -805,7 +805,7 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
     sql = f"""
       SELECT a.maint_ymd ymd, a.maint_seq seq,
         ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.gagong_proc_code),a.gagong_proc_code) from_wh,
-        a.item_code pn, ISNULL((SELECT item_desc FROM PARTNER_ERP_TEST3.nx.pr_m_item i WHERE i.item_code=a.item_code),'') pn_nm,
+        a.item_code pn, ISNULL((SELECT item_name FROM PARTNER_ERP_TEST3.nx.item i WHERE i.item_code=a.item_code),'') pn_nm,
         CASE ISNULL(a.out_wh_gubun,'') WHEN '1' THEN '생산창고' WHEN '2' THEN '영업창고' ELSE '' END out_wh_nm,
         ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) to_wh,
         a.mat_code mat, (a.maint_qty*-1) qty, ISNULL(a.maint_cost,0) cost, ISNULL(a.maint_amt,0) amt, ISNULL(a.remarks,'') remarks,
@@ -901,7 +901,7 @@ def _prodinout(ym, frm=None, to=None, src="nx"):
     _c1, uni = _rows(_UNI)
     _c2, bfrows = _rows(f"SELECT part, mat, SUM(sq) bf FROM ({BF}) b GROUP BY part, mat")
     _c3, moves = _rows(f"SELECT part, mat, ymd, inq, outq, etc, div, tag FROM ({CUR}) x")
-    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_desc, item_spec, item_sgroup FROM cm_m_item")
+    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_name, item_spec, item_sgroup FROM cm_m_item")
     _c5, sgrows = _rows("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR006'")
     _c6, pnrows = _rows("SELECT gagong_proc_code code, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
     im = {r["mat"]: r for r in itrows}
@@ -923,7 +923,7 @@ def _prodinout(ym, frm=None, to=None, src="nx"):
         if abs(st) <= 0.0001:
             continue
         it = im.get(u["mat"], {}); sg = str(it.get("item_sgroup") or "").strip()
-        stock.append([u["part"], u["mat"], (it.get("item_desc") or ""), (it.get("item_spec") or ""),
+        stock.append([u["part"], u["mat"], (it.get("item_name") or ""), (it.get("item_spec") or ""),
                       sgm.get(sg, sg), round(st, 3), round(bf, 3)])
     keys = {r[0] + "||" + r[1] for r in stock}
     mv = {}
@@ -983,7 +983,7 @@ def _prodinvout(ym, frm=None, to=None):
          ) u GROUP BY item""")
     _c2, bfrows = _rows(f"SELECT item, SUM(q) bf FROM ({BF}) t GROUP BY item")
     _c3, moves = _rows(f"SELECT item, ymd, inq, outq, etc, div, cust FROM ({L1}) x")
-    _c4, inforows = _rows("""SELECT UPPER(item_code) item, item_desc, (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust c WHERE c.cust_code=i.in_cust_code) work_nm FROM PARTNER_ERP_TEST3.nx.pr_m_item i""")
+    _c4, inforows = _rows("""SELECT UPPER(item_code) item, item_name, (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust c WHERE c.cust_code=i.in_cust) work_nm FROM PARTNER_ERP_TEST3.nx.item i""")
     info = {r["item"]: r for r in inforows}
     bfm = {r["item"]: float(r["bf"] or 0) for r in bfrows}
     net = {}
@@ -1000,7 +1000,7 @@ def _prodinvout(ym, frm=None, to=None):
         if abs(stv) <= 0.0001:
             continue
         d = info.get(it, {})
-        stock.append([it, (d.get("item_desc") or ""), (d.get("work_nm") or ""), round(stv, 3), round(bf, 3)])
+        stock.append([it, (d.get("item_name") or ""), (d.get("work_nm") or ""), round(stv, 3), round(bf, 3)])
     keys = {r[0] for r in stock}
     mv = {}
     for r in moves:
@@ -1034,9 +1034,9 @@ SELECT a.SALE_YMD ymd, a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.ITEM_CODE item
   ISNULL((SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.pr_m_item_cost WHERE item_code=a.item_code AND cost_apply_ymd<=a.sale_ymd AND cost_tag='S' AND cust_code IN ('1010','1020') ORDER BY cost_apply_ymd DESC),0) mcost,
   a.SALE_USER_ID usr, a.SALE_HMS hms,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END wc,
-  m.item_desc nm, pi.REMARKS remarks
-FROM PARTNER_ERP_TEST3.nx.sa_t_sale_dtl a JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON a.item_code=m.item_code
+       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc,
+  M.item_name nm, pi.REMARKS remarks
+FROM PARTNER_ERP_TEST3.nx.sa_t_sale_dtl a JOIN PARTNER_ERP_TEST3.nx.item m ON a.item_code=m.item_code
  OUTER APPLY (SELECT TOP 1 REMARKS FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT WHERE WORK_ORDER=a.WORK_ORDER) pi
 WHERE a.sale_ymd BETWEEN '{f}' AND '{t}'
 """
@@ -1082,13 +1082,13 @@ select UPPER(a.mat_code),a.maint_qty*-1,0,0,0 from PARTNER_ERP_TEST3.nx.pu_t_sto
 """
     sql = f"""
 ;WITH t AS ({S040})
-SELECT t.mat cd, max(m.item_desc) nm, max(m.item_spec) spec, max(m.item_class) cls,
+SELECT t.mat cd, max(M.item_name) nm, max(m.item_spec) spec, max(m.item_class) cls,
    sum(t.basic) basic, sum(t.inq) inq, sum(t.outq) outq, sum(t.etc) adj,
    sum(t.basic+t.inq-t.etc-t.outq) qty,
    (select top 1 item_cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost where item_code=t.mat and cost_apply_ymd<='{t}' and cost_tag in ('S','E') order by cost_apply_ymd desc) cost,
    case when max(m.work_code)>'' then (select work_desc from PARTNER_ERP_TEST3.nx.pr_m_work where work_code=max(m.work_code))
-        else (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust where cust_code=max(m.in_cust_code)) end wc
-FROM t JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON t.mat=m.item_code
+        else (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust where cust_code=max(M.in_cust)) end wc
+FROM t JOIN PARTNER_ERP_TEST3.nx.item m ON t.mat=m.item_code
 GROUP BY t.mat
 """
     _c, rows = _rows(sql)
@@ -1125,10 +1125,10 @@ WHERE a.receiving_ymd BETWEEN '{fr6}' AND '{to6}'
 GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
 SELECT m.item_code item,
-  CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END wcc,
+  CASE WHEN m.work_code>'' THEN m.work_code ELSE M.in_cust END wcc,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END wc
-FROM PARTNER_ERP_TEST3.nx.pr_m_item m
+       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc
+FROM PARTNER_ERP_TEST3.nx.item m
 WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
     return {"fr": fr6, "to": to6, "ym": fr6[:4], "cells": cells, "items": items}
 
@@ -1148,10 +1148,10 @@ UNION ALL SELECT A.stock_part_code,a.item_code,iif(a.prod_ymd<'{y01}',a.prod_qty
 UNION ALL SELECT A.IN_PART_CODE,a.item_code,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint a WHERE A.maint_ymd>'250299' and A.MAINT_YMD<='{y99}' and a.in_part_code>''
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='3'
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,0,iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG in ('2','1')
-UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
+UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
 """
     # ★단가 상관서브쿼리를 OUTER APPLY로 1회만 계산(기존엔 cost·amt에 2회 → 품목당 2배). 값 동일·성능개선.
-    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust_code end order by q.cost_apply_ymd desc"
+    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust end order by q.cost_apply_ymd desc"
     sql = f"""
 ;WITH agg AS (
   SELECT LTRIM(RTRIM(t.mat)) mat, ISNULL(LTRIM(RTRIM(t.gpc)),'') line,
@@ -1162,10 +1162,10 @@ UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0
 )
 SELECT CASE WHEN agg.line='P0001' THEN 'GAGONG' ELSE 'WELD' END stage,
   CASE WHEN agg.line='P0001' THEN '' ELSE agg.line END loc,
-  agg.mat cd, pi.item_desc nm, ISNULL(pi.item_class,'') type,
+  agg.mat cd, pi.item_name nm, ISNULL(pi.item_class,'') type,
   agg.basic, agg.inq, agg.outq, agg.adj, agg.qty,
   cc.cost cost, CAST(ROUND(agg.qty*ISNULL(cc.cost,0),0) AS DECIMAL(18,0)) amt
-FROM agg JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.item_code=agg.mat
+FROM agg JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.item_code=agg.mat
   OUTER APPLY ({C2A}) cc
 """
     _c, rows = _rows(sql)
