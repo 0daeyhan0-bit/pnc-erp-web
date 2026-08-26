@@ -267,12 +267,13 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
             if grp and grp != "전체" and g != grp:
                 continue
             tot = v["exp"] + v["act"]
-            if abs(tot) < 1e-9:
+            if abs(tot) + abs(v["buy"]) < 1e-9:
                 continue
             rows.append({
                 "mat_code": mat, "mat_name": itnm.get(mat, ""),
                 "vendor_code": vendor, "vendor_name": cnm, "grp": g,
                 "exp_qty": round(v["exp"], 2), "act_qty": round(v["act"], 2), "tot_qty": round(tot, 2),
+                "buy_qty": round(v["buy"], 2),                     # 매입실적(실제 구매입고)
                 "base_qty": round(base_stock.get(mat, 0.0), 2),   # 기초재고(월초)
                 "cur_qty": round(cur_stock.get(mat, 0.0), 2),     # 현재고(참고)
             })
