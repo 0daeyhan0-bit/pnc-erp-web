@@ -3317,17 +3317,22 @@ SCREEN.lgsagub=(c)=>{
     if(!L) return `<div style="font-size:12px;color:#8aa0bd">월별 수불 로딩…</div>`;
     const rs=L.rows||[];
     const yl=y=>y?`${y.slice(0,2)}.${y.slice(2)}`:y;
-    const rowsH=rs.map(r=>`<tr>
-        <td><b>${yl(r.ym)}</b></td>
-        <td class="num">${wonI(Math.round(r.open_kg))}</td>
-        <td class="num" style="color:#1c7c3a">${wonI(Math.round(r.in_kg))}</td>
-        <td class="num" style="color:#1c47a0">${wonI(Math.round(r.soyo_kg))}</td>
-        <td class="num" style="font-weight:700;color:${r.close_kg<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r.close_kg))}</td>
-        <td class="num" style="color:#5a7597">${wonI(Math.round(r.close_amt))}</td></tr>`).join('');
-    return `<div style="font-weight:700;color:#1c47a0;font-size:12.5px;margin-bottom:5px;flex:0 0 auto">월별 동 원소재 수불</div>
-      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl" style="font-size:12px"><thead><tr>
+    // 소요/기말 키만 달리해 LG인증·BOM기준 두 표 생성 (기초·입고는 공통 입고)
+    const tbl=(title,ok,sk,ck,ak,color)=>`
+      <div style="font-weight:700;color:${color};font-size:12px;margin:4px 0 3px;flex:0 0 auto">${title}</div>
+      <table class="tbl fit lg-tbl" style="font-size:11.5px"><thead><tr>
         <th>월</th><th class="num">기초</th><th class="num">입고</th><th class="num">소요</th><th class="num">기말</th><th class="num">기말금액</th>
-      </tr></thead><tbody>${rowsH||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table></div>`;
+      </tr></thead><tbody>${rs.map(r=>`<tr>
+        <td><b>${yl(r.ym)}</b></td>
+        <td class="num">${wonI(Math.round(r[ok]||0))}</td>
+        <td class="num" style="color:#1c7c3a">${wonI(Math.round(r.in_kg))}</td>
+        <td class="num" style="color:#1c47a0">${wonI(Math.round(r[sk]||0))}</td>
+        <td class="num" style="font-weight:700;color:${(r[ck]||0)<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r[ck]||0))}</td>
+        <td class="num" style="color:#5a7597">${wonI(Math.round(r[ak]||0))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>`;
+    return `<div style="flex:1;min-height:0;overflow:auto">
+      ${tbl('월별 동 수불 · LG인증 기준','open_kg','soyo_kg','close_kg','close_amt','#1c47a0')}
+      ${tbl('월별 동 수불 · BOM 기준','open_bom_kg','soyo_bom_kg','close_bom_kg','close_bom_amt','#1c7c3a')}
+    </div>`;
   };
   // ── 원단위 관리(업로드·적용월·목록) ──
   const loadSettle=async()=>{st.s_loading=true;drawSettle();

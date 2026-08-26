@@ -683,7 +683,15 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
         while m <= to and guard < 120:
             months.append(m); m = ym_next(m); guard += 1
 
-        rows = []; bal_kg = 0.0; bal_amt = 0.0
+        # BOM기준 소요용: 규격별 동중량 캐시(전량 로드) + 절삭재료비 신규단가(as-of)
+        _ensure_dong_cache(cur)
+        pm_pre = _matcost_asof('202606'); pm_post = _matcost_asof('202612')
+        dong_all = {}
+        cur.execute("SELECT item_code,metal,diam,thick,per_unit FROM nx.item_dong_spec")
+        for ic, mtl, dd, tt, ww in cur.fetchall():
+            if mtl != '~':
+                dong_all.setdefault(str(ic).strip().upper(), {})[(mtl, float(dd), float(tt))] = float(ww)
+        rows = []; bal_kg = 0.0; bal_amt = 0.0; bal_bom_kg = 0.0; bal_bom_amt = 0.0
         for M in months:
             cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, SUM(ISNULL(weight,0)) w,
                              SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c
@@ -698,20 +706,30 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
                  -SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) net
                 FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=?
                 GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", M)
-            soyo_kg = 0.0; soyo_amt = 0.0
-            for it, net in cur.fetchall():
-                net = f(net)
-                soyo_kg += usg.get(it, 0.0) * net
-                soyo_amt += usc.get(it, 0.0) * net
+            recvlist = [(r[0], f(r[1])) for r in cur.fetchall()]
+            soyo_kg = sum(usg.get(it, 0.0) * net for it, net in recvlist)
+            soyo_amt = sum(usc.get(it, 0.0) * net for it, net in recvlist)
+            pmM = pm_post if M >= '2608' else pm_pre        # 인상후(8월~) / 인상전
+            soyo_bom_kg = 0.0; soyo_bom_amt = 0.0
+            for it, net in recvlist:
+                for sp, w in dong_all.get(it, {}).items():
+                    if sp in pm_post:                        # LG인증(절삭재료비 有) 규격만
+                        soyo_bom_kg += w * net
+                        soyo_bom_amt += w * net * (pmM.get(sp) or pm_post[sp])
             cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
                            WHERE ym=? AND UPPER(item_name) LIKE '%TUBE%'""", M)
             r = cur.fetchone(); in_kg = f(r[0]); in_amt = f(r[1])
             open_kg = bal_kg; open_amt = bal_amt
             bal_kg = open_kg + in_kg - soyo_kg
             bal_amt = open_amt + in_amt - soyo_amt
+            open_bom_kg = bal_bom_kg; open_bom_amt = bal_bom_amt
+            bal_bom_kg = open_bom_kg + in_kg - soyo_bom_kg
+            bal_bom_amt = open_bom_amt + in_amt - soyo_bom_amt
             rows.append({"ym": M, "open_kg": open_kg, "open_amt": open_amt,
                          "in_kg": in_kg, "in_amt": in_amt, "soyo_kg": soyo_kg, "soyo_amt": soyo_amt,
-                         "close_kg": bal_kg, "close_amt": bal_amt})
+                         "close_kg": bal_kg, "close_amt": bal_amt,
+                         "open_bom_kg": open_bom_kg, "soyo_bom_kg": soyo_bom_kg, "close_bom_kg": bal_bom_kg,
+                         "soyo_bom_amt": soyo_bom_amt, "close_bom_amt": bal_bom_amt})
         return {"settle_ym": sy, "from_ym": frm, "to_ym": to, "osp_min": osp_min, "rows": rows}
     finally:
         nx.close()
