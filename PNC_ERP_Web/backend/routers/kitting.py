@@ -578,8 +578,8 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               SUM(CAST(ISNULL(a.LAST_LOT_QTY,0) AS float)) last_lot_qty,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM {PLAN_T} a WITH(NOLOCK)
-            JOIN {SCH}.pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
-            JOIN {SCH}.pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
+            JOIN PARTNER_ERP_TEST3.nx.item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
+            JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
             LEFT JOIN {SCH}.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN {SCH}.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
