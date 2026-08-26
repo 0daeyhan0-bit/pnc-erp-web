@@ -1094,6 +1094,42 @@ def sourcing_route_edit_cancel(payload: dict = Body(...)):
     finally:
         nx.close()
 
+def _cleanup_orphan_subs(cur, rid):
+    """★route 삭제 시 이 route가 승인·mint한 SUB 중 **다른 곳에서 안 쓰이는 고아만** 근거키 정리(재발방지).
+       대상 = 이 route의 SUB노드 코드(S#####/_S{nn}) + 그 rep_item/매핑코드.
+       보존(skip) = 타 route_line·nx.bom_line·nx.bom_header 어디서든 참조되면 정리 안 함.
+       정리 = nx.sub_registry·nx.sub_code_map·nx.item(item_source IS NULL=드래프트 고아만). 반환=정리된 코드.
+       ★반드시 sourcing_route_line DELETE **전에** 호출(자기 route 제외 판정 성립). 대량삭제 아님=근거키."""
+    cur.execute("SELECT DISTINCT LTRIM(RTRIM(ISNULL(sub_item, child_item))) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
+    codes = [str(r[0]).strip() for r in cur.fetchall() if r[0] and str(r[0]).strip()]
+    cleaned = []
+    for sc in codes:
+        rel = {sc}
+        cur.execute("SELECT rep_item FROM nx.sub_registry WHERE sub_code=?", sc)
+        rr = cur.fetchone()
+        if rr and rr[0]: rel.add(str(rr[0]).strip())
+        cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE raw_item=?", sc)
+        mr = cur.fetchone()
+        if mr and mr[0]: rel.add(str(mr[0]).strip())
+        rel = [x for x in rel if x]
+        ph = ",".join("?" * len(rel))
+        used = 0
+        cur.execute(f"SELECT COUNT(*) FROM nx.sourcing_route_line WHERE route_id<>? AND (LTRIM(RTRIM(sub_item)) IN ({ph}) OR LTRIM(RTRIM(child_item)) IN ({ph}))", rid, *rel, *rel)
+        used += int(cur.fetchone()[0] or 0)
+        cur.execute(f"SELECT COUNT(*) FROM nx.bom_line WHERE LTRIM(RTRIM(child_item)) IN ({ph})", *rel)
+        used += int(cur.fetchone()[0] or 0)
+        cur.execute(f"SELECT COUNT(*) FROM nx.bom_header WHERE LTRIM(RTRIM(item_code)) IN ({ph})", *rel)
+        used += int(cur.fetchone()[0] or 0)
+        if used:
+            continue                                   # 다른 곳에서 사용 중 → 보존
+        for x in rel:                                  # 완전 고아 → 근거키 정리
+            cur.execute("DELETE FROM nx.sub_registry WHERE sub_code=? OR rep_item=?", x, x)
+            cur.execute("DELETE FROM nx.sub_code_map WHERE raw_item=? OR sub_code=?", x, x)
+            cur.execute("DELETE FROM nx.item WHERE item_code=? AND item_source IS NULL", x)
+        cleaned.append(sc)
+    return cleaned
+
+
 @router.post("/api/sourcing/route/delete")
 def sourcing_route_delete(payload: dict = Body(...)):
     """경로 삭제(헤더+라인+공정+용접). 현행 baseline(route_id=0)은 삭제 불가.
@@ -1116,12 +1152,13 @@ def sourcing_route_delete(payload: dict = Body(...)):
             nx.rollback()
             return {"ok": False, "guard": "IN_USE", "profiles": nprof,
                     "msg": f"조달 프로파일에서 사용 중({nprof}개 업체 매핑) — 매핑 해제 후 삭제하세요."}
+        orphan_subs = _cleanup_orphan_subs(cur, rid)   # ★삭제 전: 이 route mint 고아SUB 정리(재발방지·근거키)
         cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route WHERE route_id=?", rid)
         nx.commit()
-        return {"ok": True, "deleted": rid}   # route_no는 route_seq(high-water)에 남아 재사용 안 됨
+        return {"ok": True, "deleted": rid, "orphan_subs_cleaned": orphan_subs}   # route_no는 route_seq(high-water)에 남아 재사용 안 됨
     except Exception:
         nx.rollback(); raise
     finally:
