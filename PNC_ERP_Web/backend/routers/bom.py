@@ -258,7 +258,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
        ★expandbuy=1(real=1과 함께): 현행필터(cs_calc_except=0)는 유지하되 MAKE_TYPE 게이트 제거 → 매입 SUB(예 명진 -19-1) 하위도 전개(비현행 변형 태국 -F&T=cs_except1은 여전히 제외). 라우팅 화면 '현행 전체전개'용.
        구조/수량=nx.bom_line, 상세(품명·매입처·치수)=라이브 PR_M_ITEM(자도번 코드 기준, 표시코드만 정규화)."""
     exc = "AND ISNULL(bl.cs_calc_except,0)=0" if real else ""
-    mk = "" if (not real or expandbuy) else "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'"
+    mk = "" if (not real or expandbuy) else "JOIN PARTNER_ERP_TEST3.nx.item pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'"
     cn = _nx(); cur = cn.cursor()
     try:
         # ★성능(2026-08-13): 13컬럼 CAST를 재귀 안에서 계산하면 525ms. 재귀는 (부모,자식)만 슬림 전개(~10ms) →
@@ -298,10 +298,10 @@ def _bom_tree_nx(item, real, expandbuy=0):
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]
             inl = ",".join("N'" + str(x).replace("'", "''") + "'" for x in chunk)   # ★성능: 파라미터 IN(524ms)→N인라인(11ms). pyodbc param 오버헤드 회피
-            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
-                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
-                  ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
+                  ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                  ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -366,7 +366,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
         return _bom_tree_nx(item, real, int(expandbuy or 0))   # ★#1 이관: 단일 정규화 BOM(nx.bom_line). src=cs면 아래 현행 CS 전개(대조·롤백)
     exc_a = "AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""      # 원가제외 라인 스킵
     exc_r = "AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""
-    mk_gate = "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
+    mk_gate = "JOIN PARTNER_ERP_TEST3.nx.item pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
     cn = _conn(); cur = cn.cursor()  # live PARTNER_ERP
     try:
         cur.execute(f"""WITH tree AS (
@@ -399,10 +399,10 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
             nl = list(nodes)
             for i in range(0, len(nl), 900):
                 chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
-                cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
-                      ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
-                      ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
+                      ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                      ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
+                    FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                     WHERE m.ITEM_CODE IN ({ph})""", *chunk)
                 for r in cur.fetchall():
                     info[r[0]] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -469,10 +469,10 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]
             inl = ",".join("N'" + str(x).replace("'", "''") + "'" for x in chunk)   # ★성능: 파라미터 IN→N인라인(524ms→11ms)
-            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
-                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
-                  ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
+                  ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                  ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -587,9 +587,9 @@ def sub_impact(item: str = Query(..., description="SUB의 raw코드 또는 정�
             cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE raw_item=?", item)
             r = cur.fetchone(); scode = ((r[0] or '').strip() if r else None); target_raw = item
         # direct = 이 raw를 직속 자식으로 갖는 부모(자동전파 대상) + 이름
-        cur.execute("""SELECT DISTINCT h.item_code, ISNULL(m.ITEM_DESC,'')
+        cur.execute("""SELECT DISTINCT h.item_code, ISNULL(m.item_name,'')
                        FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id
-                       LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=h.item_code
+                       LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON m.ITEM_CODE=h.item_code
                        WHERE bl.child_item=?""", target_raw)
         direct = [{"code": (x[0] or '').strip(), "name": x[1] or ''} for x in cur.fetchall() if (x[0] or '').strip()]
         return {"item": item, "sub_code": scode, "target_raw": target_raw,
@@ -868,8 +868,8 @@ def lgbom_search(q: str = Query(""), werks: str = Query(""), limit: int = Query(
         if q: w.append("(b.model LIKE ? OR b.parent_code LIKE ?)"); p += [f"%{q}%", f"%{q}%"]
         if werks: w.append("b.werks=?"); p.append(werks)
         cur.execute(f"""SELECT TOP {int(limit)} b.model, b.werks, MAX(b.parent_code) parent_code,
-              MAX(ISNULL(pi.ITEM_DESC,'')) modelnm, COUNT(*) child_cnt, MAX(b.valid_from) valid_from
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.ITEM_CODE=b.model
+              MAX(ISNULL(pi.item_name,'')) modelnm, COUNT(*) child_cnt, MAX(b.valid_from) valid_from
+            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.ITEM_CODE=b.model
             WHERE {' AND '.join(w)} GROUP BY b.model, b.werks ORDER BY b.model""", *p)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -885,13 +885,13 @@ def lgbom_tree(model: str = Query(...), werks: str = Query("")):
         if werks: w.append("b.werks=?"); p.append(werks)
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
-              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.ITEM_DESC,'') nx_desc
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
+              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
+            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         # 최상위 parent(model) 정보
-        cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", model)
+        cur.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", model)
         mn = cur.fetchone()
         return {"model": model, "modelnm": (mn[0] if mn else ""), "rows": rows}
     finally:
