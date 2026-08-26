@@ -3314,11 +3314,9 @@ SCREEN.lgsagub=(c)=>{
     if(st.tab==='compare')drawCompare();};
   const ledgerHtml=()=>{
     const L=st.ledger;
-    if(!L) return `<div style="font-size:12px;color:#8aa0bd;margin-bottom:8px">📦 월별 동 재고 수불 로딩…</div>`;
-    const rs=L.rows||[]; const cur=rs.length?rs[rs.length-1]:null;
+    if(!L) return `<div style="font-size:12px;color:#8aa0bd">월별 수불 로딩…</div>`;
+    const rs=L.rows||[];
     const yl=y=>y?`${y.slice(0,2)}.${y.slice(2)}`:y;
-    const sumIn=rs.reduce((a,r)=>a+r.in_kg,0), sumSoyo=rs.reduce((a,r)=>a+r.soyo_kg,0);
-    const pct=sumSoyo?Math.abs((sumIn-sumSoyo)/sumSoyo*100):0;
     const rowsH=rs.map(r=>`<tr>
         <td><b>${yl(r.ym)}</b></td>
         <td class="num">${wonI(Math.round(r.open_kg))}</td>
@@ -3326,15 +3324,10 @@ SCREEN.lgsagub=(c)=>{
         <td class="num" style="color:#1c47a0">${wonI(Math.round(r.soyo_kg))}</td>
         <td class="num" style="font-weight:700;color:${r.close_kg<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r.close_kg))}</td>
         <td class="num" style="color:#5a7597">${wonI(Math.round(r.close_amt))}</td></tr>`).join('');
-    return `<details open style="margin-bottom:10px;border:1px solid #dbe5f2;border-radius:8px;background:#fbfdff">
-      <summary style="cursor:pointer;padding:8px 12px;font-size:12.5px;font-weight:700;color:#1c47a0">📦 월별 동 원소재 수불 &nbsp;<span style="font-weight:400;color:#8aa0bd">기초 + 입고 − 소요 = 기말 · ${yl(L.from_ym)}부터 기초0(첫 OSP월)</span></summary>
-      <div style="padding:0 10px 8px"><table class="tbl fit lg-tbl" style="font-size:12px"><thead><tr>
-        <th>월</th><th class="num">기초(kg)</th><th class="num">입고(kg)</th><th class="num">소요(kg)</th><th class="num">기말(kg)</th><th class="num">기말금액(원)</th>
-      </tr></thead><tbody>${rowsH||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>
-      <div style="font-size:11px;color:#456;margin-top:5px;padding:5px 8px;background:#f0f7f0;border:1px solid #cfe6cf;border-radius:5px">
-        ✔ 누적 입고 <b>${wonI(Math.round(sumIn))}kg</b> ≈ 소요 <b>${wonI(Math.round(sumSoyo))}kg</b> → 최종 기말 <b style="color:${cur&&cur.close_kg<0?'#a03d2c':'#1c7c3a'}">${cur?wonI(Math.round(cur.close_kg)):0}kg</b> (차이 ${pct.toFixed(2)}%) = <b>사급 동 균형</b>, 기초0 검증.
-        <span style="color:#8aa0bd">월별 ±는 손실 아니라 <b>OSP 입고 인식 시차</b>(예: 3월 대량입고가 2월 생산분 커버)로 인한 재고 증감.</span></div>
-      </div></details>`;
+    return `<div style="font-weight:700;color:#1c47a0;font-size:12.5px;margin-bottom:5px;flex:0 0 auto">월별 동 원소재 수불</div>
+      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl" style="font-size:12px"><thead><tr>
+        <th>월</th><th class="num">기초</th><th class="num">입고</th><th class="num">소요</th><th class="num">기말</th><th class="num">기말금액</th>
+      </tr></thead><tbody>${rowsH||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table></div>`;
   };
   // ── 원단위 관리(업로드·적용월·목록) ──
   const loadSettle=async()=>{st.s_loading=true;drawSettle();
@@ -3442,23 +3435,30 @@ SCREEN.lgsagub=(c)=>{
         <td class="num">${wonI(T.rc)}</td><td class="num" style="color:#a03d2c">${wonI(T.rr)}</td>
         <td class="num" style="color:#1c47a0">${wonI(T.soyo)}</td><td class="num" style="color:#1c47a0">${wonI(T.amt)}</td></tr></tfoot>`:'';
     c.innerHTML=`
-     <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
-     ${tabBar()}
-     ${ledgerHtml()}
-     <div class="page-sub"><b>완제품별</b> 사급소요량(리시빙 수량 × 원단위 개당소요 = <b style="color:#1c47a0">LG인정 사급동</b>) vs <b style="color:#1c7c3a">LG 입고중량(OSP)</b> 총계 대사. ★<b>차이 = 합계(리시빙×소요) − LG입고</b> · LG입고는 raw tube 총량이라 품목매칭 불가 → 총계로만 비교 · <span style="color:#8aa0bd">원단위 업로드는 '원소재 마스터 › 동정산 원단위'</span></div>
-     ${st.c_msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px">${esc(st.c_msg)}</div>`:''}
-     <div class="toolbar" style="margin-bottom:8px">
-       <label class="tl">리시빙 기간</label><input type="date" class="inp" id="c-df" value="${ymd2date(st.c_from)}" style="width:150px"> ~ <input type="date" class="inp" id="c-dt" value="${ymd2date(st.c_to)}" style="width:150px">
-       <label class="tl">원단위 기준월</label><input type="month" class="inp" id="c-sy2" value="${ym2m(st.c_sy)}" style="width:140px">
-       <button class="btn" id="c-go">🔍 대사조회</button>
-       <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
-       <div class="spacer"></div><span class="rowcount">${cop?`리시빙×원단위(${esc(m.settle_ym)})`:'조회 전'}</span>
+     <div style="display:flex;flex-direction:column;height:100%">
+      <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
+      <div style="flex:0 0 auto">${tabBar()}</div>
+      ${st.c_msg?`<div style="padding:6px 10px;background:#eef6ff;border:1px solid #cfe0f5;border-radius:6px;margin-bottom:8px;font-size:12px;flex:0 0 auto">${esc(st.c_msg)}</div>`:''}
+      <div class="toolbar" style="margin-bottom:8px;flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto">
+        <label class="tl">리시빙 기간</label><input type="date" class="inp" id="c-df" value="${ymd2date(st.c_from)}" style="width:150px"> ~ <input type="date" class="inp" id="c-dt" value="${ymd2date(st.c_to)}" style="width:150px">
+        <label class="tl">원단위 기준월</label><input type="month" class="inp" id="c-sy2" value="${ym2m(st.c_sy)}" style="width:140px">
+        <button class="btn" id="c-go">대사조회</button>
+        <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
+        <div class="spacer"></div>
+        ${cop?`<span class="rowcount">합계 ${wonI(cop.out_sagub_net)}kg − OSP ${wonI(cop.in_osp_kg)}kg = <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">차이 ${wonI(chai)}kg</b></span>`:'<span class="rowcount">조회 전</span>'}
+      </div>
+      <div style="display:flex;gap:10px;flex:1;min-height:0">
+        <div style="flex:0 0 340px;display:flex;flex-direction:column;min-height:0;border:1px solid #dbe5f2;border-radius:8px;padding:8px;background:#fbfdff">
+          ${ledgerHtml()}
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+          <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+            ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','입고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
+            ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
+           <tbody>${rowsH}</tbody>${foot}</table></div>
+        </div>
+      </div>
      </div>
-     ${summ}
-     <div class="grid-wrap" style="max-height:calc(100vh - 500px);min-height:180px;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
-        ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','입고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
-        ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
-       <tbody>${rowsH}</tbody>${foot}</table></div>
      <style>.lg-tbl thead th{position:sticky;top:0;background:#f1f5fb;z-index:4}.lg-tbl tfoot .lg-foot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;border-top:2px solid #b9cbe6;z-index:3}</style>`;
     wireTabs();
     c.querySelector('#c-sy2').oninput=e=>{st.c_sy=m2ym(e.target.value);};
