@@ -3453,7 +3453,7 @@ SCREEN.lgsagub=(c)=>{
         </div>
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
           <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
-            ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','입고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
+            ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
             ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
            <tbody>${rowsH}</tbody>${foot}</table></div>
         </div>
