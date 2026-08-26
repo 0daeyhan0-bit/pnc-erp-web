@@ -41,7 +41,7 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
         nm = {}; pl = [x for x in parts if x]
         for i in range(0, len(pl), 900):
             ch = pl[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         for x in rows: x["nm"] = nm.get(x["item_code"], "")
         return {"rows": rows, "cnt": len(rows)}
@@ -86,11 +86,11 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
             SELECT a.MAT_CODE,
                    CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END,'') cust_desc,
-                   ISNULL(m.ITEM_DESC,'') nm,
+                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
+                   ISNULL(m.item_name,'') nm,
                    ISNULL(a.VIR_ITEM_FLAG,'0') vir
               FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM a WITH(NOLOCK)
-              JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
              WHERE a.ITEM_CODE=?
                AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
                AND (ISNULL(a.KITTING_FLAG,'0')='1' OR ISNULL(a.VIR_ITEM_FLAG,'0')='1')
@@ -290,7 +290,7 @@ def ready_sheet(sheet_no: str = Query(...)):
          완성품 이동창고  = STOCK_GAGONG_PROC_CODE 또는 투입파트 명칭
          상위도번/도번    = UPPER_ITEM_CODE / ITEM_CODE
          수량(대형)       = PLAN_QTY
-         품명            = PR_M_ITEM.ITEM_DESC
+         품명            = PR_M_ITEM.item_name
          생산일자/투입시간 = PLAN_YMD / DS_INPUT_HM
          SEQ표(10줄고정)  = DTL: 파트(GAGONG_PROC_DESC) · 공정(S_WORK 명) · 바코드
        ★조회 전용. nx 우선, 없으면 라이브(읽기) 폴백."""
@@ -302,9 +302,9 @@ def ready_sheet(sheet_no: str = Query(...)):
                           ISNULL(h.DS_INPUT_HM,'') hm, ISNULL(h.LINE_NO,'') line, h.PLAN_QTY,
                           ISNULL(h.WH_GAGONG_PROC_CODE,'') wh, ISNULL(h.STOCK_GAGONG_PROC_CODE,'') stk,
                           ISNULL(h.PRINT_USER_ID,'') usr, h.PRINT_DATETIME, ISNULL(h.PROD_FIN_FLAG,'0') fin,
-                          ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec
+                          ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec
                         FROM {sch}.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
-                        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        LEFT JOIN PARTNER_ERP_TEST3.nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         return cur.fetchone()
     nx = _nx(); ncur = nx.cursor()
@@ -678,8 +678,8 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
     cn = _conn(); c2 = cn.cursor()
     try:
         # 헤더 — 도번 품명 / 지그보관구역 / 파트명
-        cur.execute("""SELECT ISNULL(ITEM_DESC,''), ISNULL(JIG_KEEP_AREA,'')
-                         FROM nx.PR_M_ITEM WITH(NOLOCK) WHERE ITEM_CODE=?""", it)
+        cur.execute("""SELECT ISNULL(item_name,''), ISNULL(JIG_KEEP_AREA,'')
+                         FROM nx.item WITH(NOLOCK) WHERE ITEM_CODE=?""", it)
         h = cur.fetchone()
         nm  = str(h[0]).strip() if h else ""
         jig = str(h[1]).strip() if h else ""
@@ -713,11 +713,11 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
                    AND c.lvl < 10                    -- 순환 BOM 방어(실측 최대 3레벨)
             )
             SELECT c.lvl, c.mat_code, c.use_qty,
-                   ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''), ISNULL(m.ITEM_SGROUP,''),
-                   ISNULL(m.IN_CUST_CODE,''), ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0),
-                   ISNULL(m.ITEM_LENGTH,0), ISNULL(s.RACK_NO,''), ISNULL(k.stk,0)
+                   ISNULL(m.item_name,''), ISNULL(m.item_spec,''), ISNULL(m.sgroup,''),
+                   ISNULL(m.in_cust,''), ISNULL(m.diam,0), ISNULL(m.thick,0),
+                   ISNULL(m.length,0), ISNULL(s.RACK_NO,''), ISNULL(k.stk,0)
               FROM CTE c
-              LEFT JOIN nx.PR_M_ITEM m     WITH(NOLOCK) ON m.ITEM_CODE=c.mat_code
+              LEFT JOIN nx.item m     WITH(NOLOCK) ON m.ITEM_CODE=c.mat_code
               LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=c.mat_code
               LEFT JOIN (SELECT MAT_CODE, SUM(STOCK_QTY) stk
                            FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK) GROUP BY MAT_CODE) k
