@@ -144,3 +144,10 @@
 - **미매핑 정체 분류(중요)**: 겉보기 35% 미매핑은 **용접봉/은납(BCUP/BAG 12개 35,094)+제작동관(MJU·RAC·피어싱 22개)** = SUB 아님·정상제외(공정종속/원소재). **진짜 미매핑 SUB=단 2개**(AJR30008101-SUB·AJR30125602-3-1). → sub_code_map 확장 사소.
 - **이상치**: 음수재고 14행 = backfill 시 점검(레거시 데이터 노이즈).
 - **∴ #2 baseline 확정**: 현행 prodstock rollforward → sub_code_map 99.3% → 출생라벨 1 pool. **다음 = #2 구현(nx.item INTERNAL_SUB 등록 + stock_ledger PRD backfill) = 쓰기 → 승인 후.** 그 다음 #3 backflush SUB-grain(+SUB/−SUB, §15 다리C 총량불변 근거).
+
+## §18. ★★접미사 품명병기 규칙 설계·검증 완료 (2026-08-26·읽기전용) — 컷오버 부담0 원칙
+- **결정(사용자)**: 사용자가 기존 서브품번(자도번)에 익숙 → SUB 품명 앞에 **접미사** 병기해 식별. **실시간 표시 아님**(전 화면 반복+조회 속도부담) → **컷오버 때가 아니라 지금 매일 sync 직후 멱등 스크립트로 nx 마스터에 박아넣음**(컷오버 부담0 원칙, CUTOVER_MUST_AND_DAILY_MIGRATION §D).
+- **규칙**: 접미사 = 코드 첫 '-' 뒤 전부(예 `5210A13011H-15-1`→`15-1`·`-은납`→`은납`·`-S6-2`→`S6-2`). `{접미사} {품명}` prepend. **skip 4종**: ①접미사없음(clean코드) ②품명에 코드포함(`4849A20069M-7-1`=품명) ③이미 `접미사 `로 시작(멱등) ④품명=접미사시작(`은납-SUB`). **재실행 멱등 검증됨.**
+- **실측(sub_code_map raw_item 3,418)**: ★prepend **1,975** / skip=접미사없음1,227·코드포함131·멱등65·접미사시작18·품명없음2. 미리보기 `Tube,Connector`→`15-1 Tube,Connector`·`사내 SUB`→`S6-2 사내 SUB`.
+- **편입 지점**: `r_delta_sync.py` 마스터=전체재복사(TRUNCATE+INSERT)라 매 sync가 `nx.PR_M_ITEM.ITEM_DESC`를 라이브로 덮음 → **sync 직후 멱등 스크립트 `r_sub_desc_suffix.py`(신규) 실행**(일 루틴 §A 2-a 패턴). 대상=nx.PR_M_ITEM(displays 품명 원천).
+- **다음 = 구현**: `r_sub_desc_suffix.py`(멱등 UPDATE nx.PR_M_ITEM) 작성 → 일 루틴 편입. = 쓰기(nx) → 승인 후. scratchpad/suffix_rule_probe.py 검증됨.
