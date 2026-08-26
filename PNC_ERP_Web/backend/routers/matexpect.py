@@ -105,8 +105,12 @@ def _grp_bom(mat, mkmap, rolemap):
         return "사급"                         # 사급부품(LG 지급)
     if mt in ("2", "5"):
         return "협력사"                       # 외주가공(가공비 축·제외)
+    if mt == "1":
+        return "제작"                         # 자체제작(EA는 매입 아님·소비 원소재는 중량축 추후)
+    if mt == "3":
+        return "그외"                         # 구매(비원소재) = 부자재·소모품·이지링크
     if role in _ETC_ROLES:
-        return "그외"                         # 부자재·소모품
+        return "그외"
     if role == "반제품":
         return "반제품"                       # 중간 반제품(추후 전개/판단)
     return "미분류"
@@ -160,9 +164,14 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
     nx = _nx(); cur = nx.cursor()
     try:
         itnm, cust = _name_maps(cur)
-        # 자재 매입처(정본 in_cust) — 분류·실적귀속 공통 (설계 §4)
+        # 자재 매입처(정본 in_cust) — 실적귀속 (설계 §4)
         cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
         incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
+        # ★분류 근본 = BOM (MAKE_TYPE + nx.bom.role)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM")
+        mkmap = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(child_code))), MAX(role) FROM nx.bom GROUP BY UPPER(LTRIM(RTRIM(child_code)))")
+        rolemap = {r[0]: (r[1] or "") for r in cur.fetchall()}
         agg = {}  # (mat, vendor) → {exp, act, buy}
 
         def _row(mat, vendor):
@@ -285,9 +294,8 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
         rows = []
         for (mat, vendor), v in agg.items():
             cnm, _cty = cust.get(vendor, ("", ""))       # 표시용 vendor명(소요/매입처)
-            ic = incust.get(mat, "")                      # 자재 매입처(정본 in_cust)
-            g = _grp(cust.get(ic, ("", ""))[1], ic)       # ★분류 = 자재 매입처 기준(vendor 무관·전자재 커버)
-            if g == "협력사":            # 가공비 축 제외
+            g = _grp_bom(mat, mkmap, rolemap)             # ★분류 = BOM 근본(MAKE_TYPE + role)
+            if g in ("협력사", "용접봉", "제작"):           # 가공비축·용접봉공정·자체제작(EA) = 매입뷰 제외
                 continue
             if grp and grp != "전체" and g != grp:
                 continue
