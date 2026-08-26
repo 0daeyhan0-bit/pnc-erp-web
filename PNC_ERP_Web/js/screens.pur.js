@@ -3957,17 +3957,13 @@ SCREEN.matexpect=(c)=>{
        <label class="rl"><input type="radio" name="me-ax" value="prod"${st.axis==='prod'?' checked':''}> 생산실적</label>
        <label class="rl"><input type="radio" name="me-ax" value="sale"${st.axis==='sale'?' checked':''}> 영업실적</label>
        <label class="tl" style="margin-left:8px">기간</label><input type="date" class="inp" id="me-frm" value="${st.frm}" style="min-width:128px"><span style="color:var(--muted)">~</span><input type="date" class="inp" id="me-to" value="${st.to}" style="min-width:128px">
-       <label class="tl" style="margin-left:8px">분류</label><select class="sel" id="me-grp">${['전체','원소재','사급','부자재','반제품'].map(g=>`<option${st.grp===g?' selected':''}>${g}</option>`).join('')}</select>
+       <label class="tl" style="margin-left:8px">분류</label><select class="sel" id="me-grp">${['전체','유상사급-원재료','유상사급-부품','절삭-원자재','설치-원자재','절삭-협력사','절삭-부자재','설치-부자재','소모품','이지링크','미분류'].map(g=>`<option${st.grp===g?' selected':''}>${g}</option>`).join('')}</select>
        <input class="inp" id="me-q" placeholder="품번/품명/업체" value="${esc(st.q)}" style="width:150px">
        <button class="btn" id="me-go">조회</button>
        <button class="btn xls" id="me-xls">엑셀</button>
        <div class="spacer"></div><div class="s-item">자재 <b>${nf(rows.length)}</b></div>
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(st.msg)}</div>`:''}
-     <div style="display:flex;gap:8px;flex:0 0 auto;margin:2px 0 6px;flex-wrap:wrap">
-       ${st.summary.map(s=>`<div style="border:1px solid #cfe0f5;border-radius:8px;padding:5px 12px;background:#fbfdff;font-size:12px">
-          <b>${esc(s.grp)}</b> · 자재 ${nf(s.mats)} · 소요 ${nf(s.tot)} · 필요 ${nf(s.need)} · 매입 ${nf(s.buy)} · 적정성 <span style="color:${fitc(s.fit)};font-weight:600">${nf(s.fit)}</span></div>`).join('')||'<span style="color:var(--muted);font-size:12px">요약 없음</span>'}
-     </div>
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr style="position:sticky;top:0;background:#eef3fb;z-index:2">
         ${cols.map(([k,l,n])=>`<th class="${n?'num':''}" data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${l}${ind(k)}</th>`).join('')}</tr></thead>

@@ -116,6 +116,24 @@ def _grp_bom(mat, mkmap, rolemap):
     return "미분류"
 
 
+# ── ★매입유형 분류 (확정입고집계표/경영리포트 정본과 동일) — 업체 CUST_TYPE + mgmt_vendor_gubun override ──
+#   확정입고집계표(live_api receipt)·일일영업매입현황(dailypurissue)이 쓰는 _CT_NAME + _vgubun 그대로 재사용.
+_CT_NAME = {"1": "유상사급-부품", "4": "절삭-원자재", "5": "설치-원자재", "6": "절삭-협력사",
+            "7": "절삭-부자재", "8": "설치-부자재", "9": "소모품", "A": "이지링크"}
+
+
+def _gubun(vendor, ov, custmap):
+    """매입유형 = mgmt_vendor_gubun override(유상사급-원재료 등) ▷ 업체 CUST_TYPE(_CT_NAME)."""
+    v = str(vendor or "").strip()
+    if not v:
+        return "미분류"
+    g = ov.get(v)
+    if g:
+        return g
+    ct = custmap.get(v, ("", ""))[1]
+    return _CT_NAME.get(ct, ("기타(" + ct + ")") if ct else "미분류")
+
+
 def _last_day(y, m):
     return 31 if m in (1, 3, 5, 7, 8, 10, 12) else (30 if m != 2 else (29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28))
 
@@ -161,11 +179,12 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
         # 자재 매입처(정본 in_cust) — 실적귀속 (설계 §4)
         cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
         incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
-        # ★분류 근본 = BOM (MAKE_TYPE + nx.bom.role)
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM")
-        mkmap = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(child_code))), MAX(role) FROM nx.bom GROUP BY UPPER(LTRIM(RTRIM(child_code)))")
-        rolemap = {r[0]: (r[1] or "") for r in cur.fetchall()}
+        # ★분류 = 매입유형 (확정입고집계표 정본): 업체 CUST_TYPE(cust맵) + mgmt_vendor_gubun override
+        try:
+            cur.execute("SELECT cust_code, override_gubun FROM nx.mgmt_vendor_gubun")
+            ov = {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall()}
+        except Exception:
+            ov = {}
         agg = {}  # (mat, vendor) → {exp, act, buy}
 
         def _row(mat, vendor):
@@ -284,9 +303,7 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
         rows = []
         for (mat, vendor), v in agg.items():
             cnm, _cty = cust.get(vendor, ("", ""))       # 표시용 vendor명(소요/매입처)
-            g = _grp_bom(mat, mkmap, rolemap)             # ★분류 = BOM 근본(MAKE_TYPE + role)
-            if g in ("협력사", "용접봉", "제작"):           # 가공비축·용접봉공정·자체제작(EA) = 매입뷰 제외
-                continue
+            g = _gubun(vendor, ov, cust)                  # ★분류 = 매입유형(업체 CUST_TYPE + override), 확정입고집계표 동일
             if grp and grp != "전체" and g != grp:
                 continue
             tot = v["exp"] + v["act"]
