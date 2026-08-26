@@ -261,8 +261,9 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
         # ── 조립: 분류·이름·필터 ──
         rows = []
         for (mat, vendor), v in agg.items():
-            cnm, cty = cust.get(vendor, ("", ""))
-            g = _grp(cty, vendor)
+            cnm, _cty = cust.get(vendor, ("", ""))       # 표시용 vendor명(소요/매입처)
+            ic = incust.get(mat, "")                      # 자재 매입처(정본 in_cust)
+            g = _grp(cust.get(ic, ("", ""))[1], ic)       # ★분류 = 자재 매입처 기준(vendor 무관·전자재 커버)
             if g == "협력사":            # 가공비 축 제외
                 continue
             if grp and grp != "전체" and g != grp:
