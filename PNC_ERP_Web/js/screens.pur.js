@@ -3411,29 +3411,24 @@ SCREEN.lgsagub=(c)=>{
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
     const price=cop?(cop.eff_price||cop.osp_price):0;
-    // 완제품별 사급소요량 = 개당소요(원단위)×(리시빙 순수량 C−R). 금액 = 개당소재비(등급별 단가)×순수량.
-    filt.forEach(r=>{const net=(r.recv_c||0)-(r.recv_r||0);r.soyo=Math.round((r.per_sagub||0)*net);r.amt=Math.round((r.per_sagub_amt||0)*net);});
-    const T={rc:0,rr:0,soyo:0,amt:0};
-    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.soyo+=r.soyo;T.amt+=r.amt;});
-    const chai=cop?(cop.out_sagub_net-cop.in_osp_kg):0;          // 합계(리시빙×소요) − LG입고
-    const chai_amt=cop?(cop.out_sagub_net_amt-cop.in_osp_amt):0;
-    // 총계 요약: 합계(리시빙×소요) − LG입고중량 = 차이. (LG입고는 raw tube 총량이라 완제품별 배분 불가)
-    const summ=cop?`<div style="font-size:12.5px;color:#334;margin-bottom:8px;padding:7px 12px;background:#f4f8ff;border:1px solid #dbe5f2;border-radius:6px">
-        합계 <b style="color:#1c47a0">사급소요량(리시빙×소요) ${wonI(cop.out_sagub_net)}kg · ${wonI(cop.out_sagub_net_amt)}원</b>
-        − <b style="color:#1c7c3a">LG 입고중량(OSP) ${wonI(cop.in_osp_kg)}kg · ${wonI(cop.in_osp_amt)}원</b>
-        = 차이 <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">${wonI(chai)}kg · ${wonI(chai_amt)}원</b>
-        <span style="color:#8aa0bd">· 등급반영 단가 ${wonI(price)}/kg(일반/고강도 각 mat_cost) · 원단위 ${esc(m.settle_ym||'?')} · ★LG입고는 raw tube 총량(완제품 품목매칭 불가)</span></div>`:'';
+    // LG인증(중량=원단위 사급·금액=신규 사급가) / BOM기준(중량=BOM 전개·금액=신규 사급가, LG미인증 규격 제외) — 백엔드 계산값 직접 사용
+    const T={rc:0,rr:0,lg_kg:0,lg_amt:0,bom_kg:0,bom_amt:0};
+    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.lg_kg+=(r.lg_kg||0);T.lg_amt+=(r.lg_amt||0);T.bom_kg+=(r.bom_kg||0);T.bom_amt+=(r.bom_amt||0);});
+    const chai=cop?((cop.bom_net||0)-cop.in_osp_kg):0;           // BOM기준 − OSP입고
     const csh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.c_sort.k===k?(st.c_sort.dir<0?' ▼':' ▲'):''}</th>`;
-    const rowsH=st.c_loading?spinRow(6):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
-        <td><b>${esc(r.item)}</b>${!r.matched?' <span style="color:#a03d2c;font-size:10px">미매칭</span>':''}</td>
-        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
+    const rowsH=st.c_loading?spinRow(8):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
+        <td><b>${esc(r.item)}</b>${!r.matched?' <span style="color:#a03d2c;font-size:10px">LG미인증</span>':''}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
         <td class="num">${wonI(r.recv_c)}</td><td class="num" style="color:#a03d2c">${r.recv_r?wonI(r.recv_r):''}</td>
-        <td class="num" style="color:#1c47a0;font-weight:600">${r.soyo?wonI(r.soyo):'-'}</td>
-        <td class="num" style="color:#1c47a0">${r.amt?wonI(r.amt):'-'}</td></tr>`).join('')
-      :`<tr><td colspan="6" class="empty">데이터 없음 — 원단위 업로드('원소재 마스터'>동정산 원단위) 후 조회</td></tr>`);
+        <td class="num" style="color:#1c47a0;font-weight:600">${r.lg_kg?wonI(r.lg_kg):'-'}</td>
+        <td class="num" style="color:#1c47a0">${r.lg_amt?wonI(r.lg_amt):'-'}</td>
+        <td class="num" style="color:#1c7c3a;font-weight:600">${r.bom_kg?wonI(r.bom_kg):'-'}</td>
+        <td class="num" style="color:#1c7c3a">${r.bom_amt?wonI(r.bom_amt):'-'}</td></tr>`).join('')
+      :`<tr><td colspan="8" class="empty">데이터 없음 — 대사조회를 눌러주세요</td></tr>`);
     const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
         <td class="num">${wonI(T.rc)}</td><td class="num" style="color:#a03d2c">${wonI(T.rr)}</td>
-        <td class="num" style="color:#1c47a0">${wonI(T.soyo)}</td><td class="num" style="color:#1c47a0">${wonI(T.amt)}</td></tr></tfoot>`:'';
+        <td class="num" style="color:#1c47a0">${wonI(T.lg_kg)}</td><td class="num" style="color:#1c47a0">${wonI(T.lg_amt)}</td>
+        <td class="num" style="color:#1c7c3a">${wonI(T.bom_kg)}</td><td class="num" style="color:#1c7c3a">${wonI(T.bom_amt)}</td></tr></tfoot>`:'';
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%">
       <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
@@ -3445,7 +3440,7 @@ SCREEN.lgsagub=(c)=>{
         <button class="btn" id="c-go">대사조회</button>
         <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
         <div class="spacer"></div>
-        ${cop?`<span class="rowcount">합계 ${wonI(cop.out_sagub_net)}kg − OSP ${wonI(cop.in_osp_kg)}kg = <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">차이 ${wonI(chai)}kg</b></span>`:'<span class="rowcount">조회 전</span>'}
+        ${cop?`<span class="rowcount">LG인증 ${wonI(cop.out_sagub_net)}kg · BOM ${wonI(cop.bom_net)}kg − OSP ${wonI(cop.in_osp_kg)}kg = <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">차이 ${wonI(chai)}kg</b></span>`:'<span class="rowcount">조회 전</span>'}
       </div>
       <div style="display:flex;gap:10px;flex:1;min-height:0">
         <div style="flex:0 0 340px;display:flex;flex-direction:column;min-height:0;border:1px solid #dbe5f2;border-radius:8px;padding:8px;background:#fbfdff">
@@ -3454,7 +3449,7 @@ SCREEN.lgsagub=(c)=>{
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
           <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
             ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
-            ${csh('soyo','사급소요량(kg)','num')}${csh('amt','금액','num')}</tr></thead>
+            ${csh('lg_kg','LG인증 중량(kg)','num')}${csh('lg_amt','LG인증 금액','num')}${csh('bom_kg','BOM 중량(kg)','num')}${csh('bom_amt','BOM 금액','num')}</tr></thead>
            <tbody>${rowsH}</tbody>${foot}</table></div>
         </div>
       </div>
