@@ -319,7 +319,9 @@ SCREEN.modelbomhist=(c)=>{
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   let tab='hist';                                  // hist | except
-  let F={ymd:iso(new Date(T.getTime()-30*864e5)), model:'', item:''};
+  // ★기준일자 = 당일(2026-08-27 요청). 백엔드는 INSERT_DATETIME>=기준일자 로 필터하므로
+  //   당일이면 '오늘 등록·수정된 모델BOM'만 보인다. 과거분은 날짜를 내려서 조회.
+  let F={ymd:iso(T), model:'', item:''};
   let rows=[], models=[], sel='', loading=false, msg='', pick=new Set();
 
   const load=async()=>{
