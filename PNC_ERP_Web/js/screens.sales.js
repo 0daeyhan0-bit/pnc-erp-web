@@ -1713,25 +1713,30 @@ SCREEN.muldong=(c)=>{
   const ymL=y=>{y=(''+(y||'')).trim();return y.length>=4?`${y.slice(0,2)}/${y.slice(2,4)}`:y;};
   const st={upBiz:'', biz:'', q:'', rows:[], months:[], sum:[], msg:'', loading:false, uploading:false};
   const loadSum=async()=>{try{const j=await(await fetch(`${API}/api/muldong/summary`)).json();st.sum=j.rows||[];}catch(e){st.sum=[];}};
-  const load=async()=>{st.loading=true;draw();
+  let _seq=0;
+  const load=async()=>{const my=++_seq;st.loading=true;draw();
     try{const j=await(await fetch(`${API}/api/muldong/list?biz=${encodeURIComponent(st.biz)}&q=${encodeURIComponent(st.q)}`)).json();
-      st.rows=j.rows||[];st.months=j.months||[];st.msg='';}
-    catch(e){st.rows=[];st.months=[];st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
-    st.loading=false;draw();};
+      if(my!==_seq)return;st.rows=j.rows||[];st.months=j.months||[];st.msg='';}
+    catch(e){if(my!==_seq)return;st.rows=[];st.months=[];st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
+    if(my!==_seq)return;st.loading=false;draw();};
   const upload=async(file)=>{
-    if(st.upBiz!=='RAC'&&st.upBiz!=='SAC'){alert('업로드 사업부(RAC/SAC)를 먼저 선택하세요.');return;}
+    if(st.upBiz!=='RAC'&&st.upBiz!=='SAC'){st.msg='업로드할 사업부(RAC/SAC)를 먼저 선택하세요.';draw();return;}
     st.uploading=true;st.msg='업로드 중…';draw();
     try{const fd=new FormData();fd.append('file',file);
       const j=await(await fetch(`${API}/api/muldong/upload?biz=${encodeURIComponent(st.upBiz)}`,{method:'POST',body:fd})).json();
-      st.msg=j.ok?`${j.biz} 업로드 완료 — 모델 ${nf(j.models)} · ${nf(j.rows)}행 · 월 ${ymL(j.months[0])}~${ymL(j.months[j.months.length-1])}`
-                 :'업로드 실패: '+(j.error||'');}
+      if(j.ok){st.biz=st.upBiz;st.msg=`${j.biz} 업로드 완료 — 모델 ${nf(j.models)} · ${nf(j.rows)}행 · 월 ${ymL(j.months[0])}~${ymL(j.months[j.months.length-1])}`;}
+      else{st.msg='업로드 실패: '+(j.error||j.detail||'파일/사업부 확인');}}
     catch(e){st.msg='업로드 오류: '+e.message;}
-    st.uploading=false;await loadSum();st.biz=st.upBiz;await load();};
+    st.uploading=false;await loadSum();await load();};
   const draw=()=>{
     const months=st.months.slice();
     const map={};
     st.rows.forEach(r=>{const k=r.biz+'|'+r.model;if(!map[k])map[k]={biz:r.biz,model:r.model,tool:r.tool,m:{},tot:0};map[k].m[r.ym]=(map[k].m[r.ym]||0)+r.qty;map[k].tot+=r.qty;});
-    const list=Object.values(map).sort((a,b)=>b.tot-a.tot);
+    const list=Object.values(map);
+    const curK=st.sortKey||'tot', curD=st.sortKey?st.sortDir:-1;
+    const sval=p=> curK==='biz'?p.biz : curK==='model'?p.model : curK==='tool'?(p.tool||'') : curK==='tot'?p.tot : (p.m[curK]||0);
+    list.sort((a,b)=>{const va=sval(a),vb=sval(b);return typeof va==='string'?curD*va.localeCompare(vb,'ko'):curD*((va||0)-(vb||0));});
+    const ind=k=> curK===k?(curD===1?' ▲':' ▼'):'';
     const colTot={};let gtot=0;list.forEach(p=>{gtot+=p.tot;months.forEach(mm=>colTot[mm]=(colTot[mm]||0)+(p.m[mm]||0));});
     const sumTxt=st.sum.length?st.sum.map(s=>`${esc(s.biz)} 모델 ${nf(s.models)}·${ymL(s.ym0)}~${ymL(s.ym1)}`).join(' / '):'업로드된 물동 없음';
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
@@ -1742,7 +1747,7 @@ SCREEN.muldong=(c)=>{
          <div style="font-size:11px;color:#5a7597;margin-bottom:5px">업로드 사업부 <span style="color:#c0392b">*</span></div>
          <div style="display:flex;gap:14px"><label class="rl"><input type="radio" name="md-upbiz" value="RAC"${st.upBiz==='RAC'?' checked':''}> RAC(DGZ)</label><label class="rl"><input type="radio" name="md-upbiz" value="SAC"${st.upBiz==='SAC'?' checked':''}> SAC(DMZ)</label></div></div>
        <div id="md-dz" style="flex:1;min-width:300px;border:2px dashed #8fb4d6;border-radius:8px;padding:8px;background:#f4f9fe;color:#5a7597;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px">
-         LG 물동 엑셀 <b style="margin:0 5px">드래그&드롭 또는 클릭</b> <span style="color:#8aa0bd;margin-left:6px">(사업부 선택 후 · LG_RAC/SAC_26년물동.xls)</span>
+         LG 물동 엑셀 <b style="margin:0 5px">드래그&드롭 또는 클릭</b> <span style="color:#8aa0bd;margin-left:6px">(업로드 사업부 선택 후 · LG_RAC/SAC_26년물동.xls)</span>
          <input type="file" id="md-f" accept=".xlsx,.xls" style="display:none"></div>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.indexOf('완료')>=0?'#1c7c3a':'#c0392b'};flex:0 0 auto">${esc(st.msg)}</div>`:''}
@@ -1754,11 +1759,11 @@ SCREEN.muldong=(c)=>{
      </div>
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr style="position:sticky;top:0;background:#eef3fb;z-index:2">
-        <th>사업부</th><th>모델</th><th>TOOL</th><th class="num">합계</th>${months.map(mm=>`<th class="num">${ymL(mm)}</th>`).join('')}</tr></thead>
+        <th data-sk="biz" style="cursor:pointer" title="더블클릭 정렬">사업부${ind('biz')}</th><th data-sk="model" style="cursor:pointer" title="더블클릭 정렬">모델${ind('model')}</th><th data-sk="tool" style="cursor:pointer" title="더블클릭 정렬">TOOL${ind('tool')}</th><th class="num" data-sk="tot" style="cursor:pointer" title="더블클릭 정렬">합계${ind('tot')}</th>${months.map(mm=>`<th class="num" data-sk="${mm}" style="cursor:pointer" title="더블클릭 정렬">${ymL(mm)}${ind(mm)}</th>`).join('')}</tr></thead>
        <tbody>${st.loading?`<tr><td colspan="${months.length+4}" class="empty">불러오는 중…</td></tr>`:(list.length?list.map(p=>`<tr>
          <td class="center">${esc(p.biz)}</td><td><b>${esc(p.model)}</b></td><td class="cap">${esc(p.tool||'')}</td><td class="num"><b>${nf(p.tot)}</b></td>
          ${months.map(mm=>`<td class="num">${p.m[mm]?nf(p.m[mm]):''}</td>`).join('')}</tr>`).join('')
-         :`<tr><td colspan="${months.length+4}" class="empty">데이터 없음 — 사업부 선택 후 엑셀 업로드</td></tr>`)}</tbody>
+         :`<tr><td colspan="${months.length+4}" class="empty">데이터 없음 — 업로드 사업부 선택 후 엑셀 업로드</td></tr>`)}</tbody>
        ${list.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc"><td colspan="3" class="right">총계 (${nf(list.length)} 모델)</td><td class="num"><b>${nf(gtot)}</b></td>${months.map(mm=>`<td class="num">${nf(colTot[mm]||0)}</td>`).join('')}</tr></tfoot>`:''}
       </table>
      </div>
@@ -1772,6 +1777,8 @@ SCREEN.muldong=(c)=>{
       dz.ondrop=e=>{e.preventDefault();dz.style.background='#f4f9fe';dz.style.borderColor='#8fb4d6';if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0]);};}
     const go=c.querySelector('#md-go');if(go)go.onclick=()=>{st.biz=c.querySelector('#md-biz').value;st.q=c.querySelector('#md-q').value.trim();load();};
     const qi=c.querySelector('#md-q');if(qi)qi.onkeyup=e=>{if(e.key==='Enter'){st.biz=c.querySelector('#md-biz').value;st.q=qi.value.trim();load();}};
+    c.querySelectorAll('th[data-sk]').forEach(th=>th.ondblclick=()=>{const k=th.dataset.sk;if((st.sortKey||'tot')===k){st.sortDir=-(st.sortKey?st.sortDir:-1);}else{st.sortDir=(k==='biz'||k==='model'||k==='tool')?1:-1;}st.sortKey=k;draw();});
   };
-  loadSum().then(()=>load());
+  const boot=async(t)=>{await loadSum();await load();if((!st.rows||!st.rows.length)&&(t||0)<4){setTimeout(()=>boot((t||0)+1),700);}};
+  boot(0);
 };
