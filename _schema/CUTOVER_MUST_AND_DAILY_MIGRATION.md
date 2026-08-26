@@ -16,6 +16,7 @@
 1. **recon (읽기전용)** — `mirror_recon.py` 실행. 라우터가 읽는 `nx.<TABLE>` 자동수집→트랜잭션(_T_)만 `COUNT_BIG + CHECKSUM_AGG(BINARY_CHECKSUM(*))`로 nx 미러 vs dbo 라이브 대조 → GREEN/RED. 로그 `mirror_recon_log.jsonl`.
 2. **RED면 델타 싱크** — `r_delta_sync.py`(DRY 확인 먼저) → `--commit`으로 라이브 date > nx max date 분만 INSERT/갱신. DROP+전체복사 아님(하루치만).
 2-a. **★성능 인덱스 재보장(2026-08-26 추가)** — 싱크 후 `nx_perf_maintain.py commit` + `r_add_indexes.py --commit`(둘 다 멱등, 수초) 재실행. **거래=윈도우(DELETE+INSERT)라 인덱스 생존, 마스터=DROP+SELECT INTO면 유실** → 재보장으로 콜드조회 지연 방지. (실측 2026-08-26: 대부분 생존·plan_part_mat만 재생성. Phase3에서 sync에 결선 예정.)
+2-b. **★SUB 접미사 품명병기 재실행(2026-08-26 추가)** — 싱크 후 `_migration/sub_norm/r_sub_desc_suffix.py --commit`(멱등, 수초) 재실행. **마스터=전체재복사라 매 sync가 nx.PR_M_ITEM 품명을 라이브로 덮음** → 이 스크립트가 SUB(자도번) 품명 앞에 `[-{접미사}]` 재병기(원품명=라이브 직독, 프리픽스 누적 없음). 실측: 1,975건 병기·재실행 변경0. 사용자 확정=기존 서브품번 익숙(§D-1). **컷오버 때 별도 작업 0**(이 루틴이 항상 유지).
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
 4. **로그 남김** (recon 결과·타임스탬프).
 
