@@ -2271,10 +2271,16 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         price = {}
         for i in range(0, len(oc), 900):
             ch = oc[i:i+900]; ph = ",".join("?" * len(ch))
+            # ★2026-08-26 버그수정: 발주업체(품목 in_cust)와 단가 거래처 불일치 교정. in_cust 거래처 단가 우선,
+            #   없으면(빈 in_cust or 그 거래처 단가 없음) 대표단가(MAIN_FLAG)/최신 폴백. 실측 10%(1029건) 불일치만 교정·49%/41% 불변.
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
-                SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr, ISNULL(CUST_CODE,'') cust,
-                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)) ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC) rn
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=? AND LTRIM(RTRIM(ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+                SELECT LTRIM(RTRIM(pc.ITEM_CODE)) ITEM_CODE, pc.ITEM_COST, pc.COST_APPLY_YMD apply, ISNULL(pc.CURRENCY,'') curr, ISNULL(pc.CUST_CODE,'') cust,
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.ITEM_CODE))
+                    ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.CUST_CODE))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
+                             ISNULL(pc.MAIN_FLAG,'') DESC, pc.COST_APPLY_YMD DESC) rn
+                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST pc
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code COLLATE DATABASE_DEFAULT=LTRIM(RTRIM(pc.ITEM_CODE)) COLLATE DATABASE_DEFAULT
+                WHERE pc.COST_TAG='1' AND pc.COST_APPLY_YMD<=? AND LTRIM(RTRIM(pc.ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
             for r in cur.fetchall():
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
     finally:
