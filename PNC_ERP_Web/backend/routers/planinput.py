@@ -267,11 +267,11 @@ def readystock_list(q: str = Query(""), proc: str = Query(""), limit: int = Quer
         w = ["ISNULL(r.STOCK_QTY,0)<>0"]; p = []
         if q.strip(): w.append("(r.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"); p += [f"%{q.strip()}%"] * 2
         if proc.strip(): w.append("r.PROC_GUBUN=?"); p.append(proc.strip())
-        cur.execute(f"""SELECT TOP {max(1,min(int(limit),5000))} r.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
+        cur.execute(f"""SELECT TOP {max(1,min(int(limit),5000))} r.ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
               ISNULL(r.PROC_GUBUN,'') proc_code, ISNULL(g.GAGONG_PROC_DESC,'') proc_nm,
               ISNULL(r.CUST_CODE,'') cust_code, ISNULL(c.CUST_DESC,'') cust_nm, r.STOCK_QTY, r.UPDATE_DATETIME
             FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK r
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=r.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=r.ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=r.PROC_GUBUN
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY r.ITEM_CODE, r.PROC_GUBUN""", *p)
