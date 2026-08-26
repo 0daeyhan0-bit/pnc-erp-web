@@ -104,10 +104,9 @@ def bom_get(item: str = Query(..., description="품번")):
                    l.proc_gubun, l.gagong_proc, l.s_work, l.wh_gagong, l.in_gagong, l.cust_code, l.remarks,
                    ci.item_spec, ci.metal_gubun, ci.diam, ci.thick, ci.length, ci.item_type AS child_type,
                    ci.net_weight, ci.unit, ci.sgroup, ci.lgroup, ci.make_type, ci.cost_gubun, ci.status,
-                   ISNULL(ci.in_cust,'') AS in_cust, ISNULL(pv.partner_name, pc.CUST_DESC) AS cust_name
+                   ISNULL(ci.in_cust,'') AS in_cust, ISNULL(pc.CUST_DESC,'') AS cust_name
             FROM nx.bom_line l
             LEFT JOIN nx.item ci ON ci.item_code = l.child_item
-            LEFT JOIN nx.partner pv ON pv.partner_code = ci.in_cust
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = ci.in_cust
             WHERE l.bom_id = ? ORDER BY l.seq""", bom_id)
         cols = [d[0] for d in cur.description]
@@ -147,7 +146,7 @@ def codes():
 
 @router.get("/api/item/vendorsearch")
 def item_vendorsearch(q: str = Query("")):
-    """매입처(거래처) 검색 — nx.partner + 라이브 CM_M_CUST."""
+    """매입처(거래처) 검색 — CM_M_CUST(기존 거래처 단일소스). nx.partner 재설계는 별도(WEHAGO/identity)."""
     cn = _nx(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
