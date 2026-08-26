@@ -17,6 +17,7 @@
 2. **RED면 델타 싱크** — `r_delta_sync.py`(DRY 확인 먼저) → `--commit`으로 라이브 date > nx max date 분만 INSERT/갱신. DROP+전체복사 아님(하루치만).
 2-a. **★성능 인덱스 재보장(2026-08-26 추가)** — 싱크 후 `nx_perf_maintain.py commit` + `r_add_indexes.py --commit`(둘 다 멱등, 수초) 재실행. **거래=윈도우(DELETE+INSERT)라 인덱스 생존, 마스터=DROP+SELECT INTO면 유실** → 재보장으로 콜드조회 지연 방지. (실측 2026-08-26: 대부분 생존·plan_part_mat만 재생성. Phase3에서 sync에 결선 예정.)
 2-b. **★원가엔진 무효화(2026-08-26 추가)** — nx **원가테이블(bom_line·routing·price_item·item·bom_header·proc_weld 등)을 재빌드**한 경우(BOM 클린전환·routing_edge·단가 스냅샷 갱신 등)엔 실행 중 백엔드에 **`POST /api/cost/reset` 1회 호출**(또는 재기동). ★서빙 원가엔진은 생성시점 warm_all 스냅샷을 메모리에 들고 있어(→조회 즉시화) 이런 **웹편집 외(out-of-band) 변경엔 stale** → reset로 다음 요청이 최신 재-warm. ※**매일 sync(r_delta_sync)는 클린 원가테이블 미접촉**(대문자 미러만 갱신)이라 불필요 — nx 원가테이블을 실제 재빌드했을 때만. (웹 BOM/원가/단가 편집은 이미 자동 reset.)
+2-c. **★SUB 접미사 품명병기 재실행(2026-08-26 추가)** — 싱크 후 `_migration/sub_norm/r_sub_desc_suffix.py --commit`(멱등, 수초) 재실행. **마스터=전체재복사라 매 sync가 nx.PR_M_ITEM 품명을 라이브로 덮음** → 이 스크립트가 SUB(자도번) 품명 앞에 `[-{접미사}]` 재병기(원품명=라이브 직독, 프리픽스 누적 없음). 실측: 1,975건 병기·재실행 변경0. 사용자 확정=기존 서브품번 익숙(§D-1). **컷오버 때 별도 작업 0**(이 루틴이 항상 유지).
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
 4. **로그 남김** (recon 결과·타임스탬프).
 
@@ -66,3 +67,22 @@
 ## C. 상태 (2026-08-19)
 - **매일 마이그(A)**: 관행 확립(r_delta_sync+recon). 실측 반전=미러 대체로 최신(트랜잭션 바이트동일 다수), recon으로 drift 감시중.
 - **컷오버(B)**: 대부분 분석·설계·dev 검증 완료. 실 전환(flip·게이트 하드ON·실시간정본)은 **컷오버 당일**. 미러 2테이블 편입·완제품 ASY 게이트·실시간 자재정본이 남은 구현.
+
+---
+
+## D. SUB 명명·자재통합 (2026-08-26 진행중) — ★원칙: "컷오버 부담 최소 = 지금 sync/빌드에 미리 편입, 컷오버는 flip만"
+
+> 사용자 확정(2026-08-26): **컷오버 때 큰 변환/backfill을 몰아넣지 않는다.** 마스터/재고 정본화 항목은 **지금 돌아가는 멱등 sync/빌드에 편입**해 nx가 항상 준비된 상태를 유지 → 컷오버 순간엔 라이브 sync 중단 + flip만. 상세 정본 = `SUB_MATERIAL_INTEGRATION.md`.
+
+### D-1. 🟢 지금 (병행운영 중·라이브 무접촉·읽기전용/설계/검증 + 멱등 sync 편입)
+1. **다리 C**(SUB 원소재 풋프린트) — ✅ 완료: `backflush.py _sub_footprints_by_jadoban`(읽기전용, 기존 backflush와 diff0 60/60). SUB grain=라벨만·원소재 총량 불변.
+2. **SUB 재고 baseline 규명·시산** — ✅ 완료(읽기전용): 현행 `live_api._prodstock` rollforward(2502 앵커+가공/생산실적) → 자도번SUB → sub_code_map(출생라벨S) **270 pool·매핑 99.3%**. 미매핑=용접봉/제작동관 노이즈(정상제외)·진짜 2건.
+3. **접미사 품명 병기** — ★**실시간 표시 아님**(전 화면 반복+조회 속도부담) → **item 마스터 sync 변환단계에 멱등 편입**. 매 sync가 자도번SUB item_desc 앞에 접미사 prepend(중복스킵). 미러가 라이브로 덮어도 sync가 다시 붙임 → 컷오버 때 별도 작업 0. (규칙 설계·검증=지금 / 편입=지금 sync에)
+4. **backflush 2단계(+SUB/−SUB)** — 로직 설계·diff0 검증(지금·읽기전용) → nx에서 shadow 가동 준비. 실 전환은 재고 원장 nx전환(컷오버)이나, 로직·검증은 지금 완비.
+
+### D-2. 🔴 컷오버 때 (flip만 — 위를 지금 해두면 부담 없음)
+- 라이브 sync 중단 → nx authoritative flip. **SUB 관련 추가 변환/backfill 없음**(전부 D-1의 sync/빌드로 이미 준비).
+- SUB 재고점(PRD)은 §B-2 재고 기초 스냅샷 심기와 **한 흐름**(별도 부담 아님): baseline이 이미 nx stock_ledger PRD 빌드에 멱등 편입돼 있으면 flip 시 그대로 유효.
+
+### D-3. 상태
+- 다리 C·baseline 규명 = 완료(dev·읽기전용). 접미사 병기 규칙·sync 편입 지점·backflush shadow = 다음 착수. **원칙: 컷오버 당일 할 일을 지금 sync에 옮긴다.**
