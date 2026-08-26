@@ -233,7 +233,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
             cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP.dbo.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
             for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(IN_CUST_CODE,''), ISNULL(WORK_CODE,''), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(in_cust,''), ISNULL(WORK_CODE,''), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'0'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): msub[str(r[0])] = (str(r[1] or '0'), int(r[2] or 0))
@@ -250,7 +250,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
                 cur.execute(f"""SELECT a.work_order, a.split_work_order, b.c_item_code,
                       SUM(CEILING(CONVERT(float,a.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
                     FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL a JOIN PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b ON a.model_no=b.model_no
-                    JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON b.c_item_code=c.item_code
+                    JOIN PARTNER_ERP_TEST3.nx.item c ON b.c_item_code=c.item_code
                     WHERE a.plan_ymd>? AND a.work_order IN ({ph})
                     GROUP BY a.work_order, a.split_work_order, b.c_item_code""", to_ymd, *ch)
                 for r in cur.fetchall(): over[(str(r[0]), str(r[1]), str(r[2]))] = int(float(r[3] or 0))
@@ -399,7 +399,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         workm = _batch(wccodes, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
         custm = _batch(wccodes, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
         # 도번 마스터(작업처=assy의 work/incust, 품명, 규격)
-        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})")
+        assym = _batch(assycodes, "SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,''), ISNULL(in_cust,''), ISNULL(item_spec,''), ISNULL(diam,0), ISNULL(thick,0), ISNULL(length,0) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})")
         # assy 작업처 코드도 이름 필요 → 추가 조회
         awc = {str(v[2]).strip() for v in assym.values() if str(v[2]).strip()}
         aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
@@ -514,16 +514,16 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
         CAP = 4000
         try:
             cur.execute(f"""SELECT TOP {CAP} pp.PLAN_YMD, pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm,
-                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, pp.MAT_CODE, ISNULL(i.ITEM_DESC,'') nm,
+                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, pp.MAT_CODE, ISNULL(i.item_name,'') nm,
                   ISNULL(pd.LINE_NO,'') line, ISNULL(pd.MODEL_NO,'') model, SUM(CAST(pp.PART_PLAN_QTY AS float)) q
                 FROM nx.plan_part_mat pp
                 LEFT JOIN (SELECT WORK_ORDER, MAX(LINE_NO) LINE_NO, MAX(MODEL_NO) MODEL_NO FROM nx.plan_dtl GROUP BY WORK_ORDER) pd ON pd.WORK_ORDER=pp.WORK_ORDER
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE{C}=pp.MAT_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE{C}=pp.MAT_CODE{C}
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.PLAN_YMD, pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE),
-                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, pp.MAT_CODE, i.ITEM_DESC, pd.LINE_NO, pd.MODEL_NO
+                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, pp.MAT_CODE, i.item_name, pd.LINE_NO, pd.MODEL_NO
                 ORDER BY wcnm, pp.WORK_ORDER, pp.MAT_CODE""", *p)
         except Exception as e:
             return {"dates": [], "rows": [], "cnt": 0, "sum_qty": 0, "note": "편성 먼저 실행(생산계획업로드 → 🧾자재소요·조달 편성). 오류: " + str(e)[:120]}
@@ -634,7 +634,7 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         nmm = {}
         for i in range(0, len(assys), 900):
             ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2])
         custnm = _custnm_map(cur, {cust})
         wccodes = {m["work_code"] or m["in_cust"] for m in merged}
@@ -840,7 +840,7 @@ def partner_deliv420_invoice(barcode: str = Query(...)):
         nmm = {}
         for i in range(0, len(assys), 900):
             ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2], rr[3])
     finally:
         cn.close()

@@ -16,9 +16,9 @@ def gagong_move580_opts():
         cur.execute("""SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
                        ORDER BY SORT_KEY, GAGONG_PROC_CODE""")
         parts = [{"code": r[0], "nm": r[1] or r[0]} for r in cur.fetchall()]
-        cur.execute("""SELECT DISTINCT c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m
-                       JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
-                       WHERE ISNULL(m.IN_CUST_CODE,'')<>'' ORDER BY c.CUST_DESC""")
+        cur.execute("""SELECT DISTINCT c.CUST_CODE, c.CUST_DESC FROM PARTNER_ERP_TEST3.nx.item m
+                       JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
+                       WHERE ISNULL(m.in_cust,'')<>'' ORDER BY c.CUST_DESC""")
         sagubs = [{"code": r[0], "nm": r[1] or r[0]} for r in cur.fetchall()]
         return {"parts": parts, "sagubs": sagubs}
     finally:
@@ -292,8 +292,8 @@ def gagong_move580_issue(payload: dict = Body(...)):
     try:
         for i in range(0, len(itemset), 900):
             ck = itemset[i:i + 900]; ph = ",".join("?" * len(ck))
-            cur.execute(f"""SELECT ITEM_CODE, ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,'')
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *ck)
+            cur.execute(f"""SELECT ITEM_CODE, ISNULL(WORK_CODE,''), ISNULL(in_cust,'')
+                FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})""", *ck)
             for r in cur.fetchall():
                 wkinfo[str(r[0]).strip()] = {"work_code": r[1], "in_cust": r[2]}
     finally:
@@ -392,7 +392,7 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))}
               u.MAINT_YMD, u.MAINT_SEQ, u.MAINT_GROUP_SEQ, u.CHECK_LIST_SEQ,
               COALESCE(pg.GAGONG_PROC_DESC, u.PR_PART_CODE, cc.CUST_DESC, '') dest,
-              u.ITEM_CODE, u.MAT_CODE, ISNULL(mi.ITEM_DESC,'') nm, ISNULL(su.RACK_NO,'') rack,
+              u.ITEM_CODE, u.MAT_CODE, ISNULL(mi.item_name,'') nm, ISNULL(su.RACK_NO,'') rack,
               u.MAINT_QTY, u.IN_CONFIRM_FLAG, ISNULL(u.IN_CONFIRM_DATETIME,'') confirm_dt,
               ISNULL(u.IN_CONFIRM_USER_ID,'') confirm_user
             FROM (
@@ -404,7 +404,7 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
                      m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
                 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
             ) u
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM mi ON mi.ITEM_CODE=u.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE

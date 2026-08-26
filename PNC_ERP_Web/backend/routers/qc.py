@@ -52,8 +52,8 @@ def qc_opt(kind: str = Query("part"), q: str = Query("")):
         elif kind == "line":
             cur.execute("SELECT TOP 50 LINE_NO code, LINE_NO nm FROM PARTNER_ERP_TEST3.nx.PR_M_LINE_NO WHERE LINE_NO LIKE ? ORDER BY LINE_NO", like)
         elif kind == "item":
-            cur.execute("""SELECT TOP 50 ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM
-                WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
+            cur.execute("""SELECT TOP 50 ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item
+                WHERE ITEM_CODE LIKE ? OR item_name LIKE ? ORDER BY ITEM_CODE""", like, like)
         else:
             raise HTTPException(400, "알 수 없는 kind")
         return {"rows": [{"code": str(r[0]).strip(), "name": str(r[1]).strip()} for r in cur.fetchall()]}
@@ -90,7 +90,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
         if src in ("all", "legacy"):
             parts.append(f"""SELECT 'legacy' src, CAST(e.SEQ AS NVARCHAR(20)) key_id, ISNULL(e.ERROR_TAG,'') tag,
                 ISNULL(e.CUST_LINE,'') cust_line, ISNULL(e.DIVISION_DESC,'') division, ISNULL(e.PG_REG_INFO,'') pg_reg,
-                e.ERROR_YMD error_ymd, e.ITEM_CODE item_code, ISNULL(i.ITEM_DESC,'') item_desc,
+                e.ERROR_YMD error_ymd, e.ITEM_CODE item_code, ISNULL(i.item_name,'') item_desc,
                 ISNULL(e.WORK_CODE,'') work_code, ISNULL(e.PROC_CODE,'') proc_code, ISNULL(pg.GAGONG_PROC_DESC,'') part_nm,
                 ISNULL(e.MACH_CODE,'') mach_code, ISNULL(m.MACH_DESC,'') mach_nm, ISNULL(e.WORK_CUST_CODE,'') partner_code,
                 ISNULL(c.CUST_DESC,'') partner_nm, ISNULL(e.INSPECTOR_MEMBER_NAME,'') inspector, ISNULL(e.ERROR_MEMBER_NAME,'') error_member,
@@ -101,14 +101,14 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 ISNULL(e.RE_INSP_CHECK,'') reinsp_flag, ISNULL(e.FINISH_FLAG,'') finish_flag, ISNULL(e.CHARGE_NAME,'') charge,
                 CAST(e.SEQ AS INT) lseq,
                 0 f_attach, 0 f_plan1, 0 f_plan2   -- 레거시행은 웹첨부 대상 아님(nx 행에만 첨부 가능)
-                FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=e.ITEM_CODE
+                FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=e.ITEM_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=e.PROC_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m ON m.MACH_CODE=e.MACH_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=e.WORK_CUST_CODE WHERE {wl}{dedup}""")
         if src in ("all", "nx"):
             parts.append(f"""SELECT 'nx' src, CAST(n.id AS NVARCHAR(20)) key_id, ISNULL(n.error_tag,'') tag,
                 ISNULL(n.cust_line,'') cust_line, ISNULL(n.division,'') division, ISNULL(n.pg_reg,'') pg_reg,
-                n.error_ymd error_ymd, n.item_code item_code, ISNULL(i2.ITEM_DESC,'') item_desc,
+                n.error_ymd error_ymd, n.item_code item_code, ISNULL(i2.item_name,'') item_desc,
                 ISNULL(n.work_code,'') work_code, ISNULL(n.proc_code,'') proc_code, ISNULL(pg2.GAGONG_PROC_DESC,'') part_nm,
                 ISNULL(n.mach_code,'') mach_code, ISNULL(m2.MACH_DESC,'') mach_nm, ISNULL(n.partner_code,'') partner_code,
                 ISNULL(c2.CUST_DESC,'') partner_nm, ISNULL(n.inspector,'') inspector, ISNULL(n.error_member,'') error_member,
@@ -119,7 +119,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 CAST(ISNULL(n.reinsp_flag,0) AS NVARCHAR(1)) reinsp_flag, CAST(ISNULL(n.finish_flag,0) AS NVARCHAR(1)) finish_flag,
                 ISNULL(n.charge_name,'') charge, ISNULL(n.legacy_seq,0) lseq,
                 ISNULL(n.attach_doc_id,0) f_attach, ISNULL(n.plan1_doc_id,0) f_plan1, ISNULL(n.plan2_doc_id,0) f_plan2
-                FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i2 ON i2.ITEM_CODE=n.item_code
+                FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.item i2 ON i2.ITEM_CODE=n.item_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg2 ON pg2.GAGONG_PROC_CODE=n.proc_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m2 ON m2.MACH_CODE=n.mach_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c2 ON c2.CUST_CODE=n.partner_code WHERE {wn}""")
@@ -377,20 +377,20 @@ def qc_spec_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str =
         parts = []
         if src in ("all", "legacy"):
             parts.append(f"""SELECT 'legacy' src, s.REV_YYMD+'-'+CAST(s.REV_NO AS NVARCHAR(10)) key_id, s.REV_YYMD rev_ymd, s.REV_NO rev_no,
-                ISNULL(s.CST_REV_NO,'') cst_no, ISNULL(s.ECO_NO,'') eco, s.ITEM_CODE item_code, ISNULL(i.ITEM_DESC,'') nm, ISNULL(s.REV_MARK,'') mark,
+                ISNULL(s.CST_REV_NO,'') cst_no, ISNULL(s.ECO_NO,'') eco, s.ITEM_CODE item_code, ISNULL(i.item_name,'') nm, ISNULL(s.REV_MARK,'') mark,
                 ISNULL(s.REV_DESC,'') rdesc, ISNULL(s.ISSUE_YYMD,'') issue, ISNULL(s.DEPT_NAME,'') dept,
                 ISNULL(s.CHARGE_NAME,'') charge, ISNULL(s.APPLY_YYMD,'') apply_ymd, ISNULL(s.APPLY_TYPE,'') atype,
                 ISNULL(s.APPLY_STOCK,'') apply_stock, ISNULL(s.DRAWING_FILE,'') drawing, ISNULL(s.SPECS_FILE,'') specs,
                 ISNULL(s.COST_CHANGE_FLAG,'') cost_f, ISNULL(s.LG_COST_CHANGE_FLAG,'') lg_cost_f, ISNULL(s.BOM_FLAG,'') bom_f, ISNULL(s.REMARKS,'') remarks
-                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV s LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=s.ITEM_CODE WHERE {wl}""")
+                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV s LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=s.ITEM_CODE WHERE {wl}""")
         if src in ("all", "nx"):
             parts.append(f"""SELECT 'nx' src, CAST(n.id AS NVARCHAR(20)) key_id, n.rev_ymd rev_ymd, n.rev_no rev_no,
-                ISNULL(n.cst_rev_no,'') cst_no, ISNULL(n.eco_no,'') eco, n.item_code item_code, ISNULL(i2.ITEM_DESC,'') nm, ISNULL(n.rev_mark,'') mark,
+                ISNULL(n.cst_rev_no,'') cst_no, ISNULL(n.eco_no,'') eco, n.item_code item_code, ISNULL(i2.item_name,'') nm, ISNULL(n.rev_mark,'') mark,
                 ISNULL(n.rev_desc,'') rdesc, ISNULL(n.issue_ymd,'') issue, ISNULL(n.dept_name,'') dept, ISNULL(n.charge_name,'') charge,
                 ISNULL(n.apply_ymd,'') apply_ymd, ISNULL(n.apply_type,'') atype, ISNULL(n.apply_stock,'') apply_stock,
                 ISNULL(n.drawing_file,'') drawing, ISNULL(n.specs_file,'') specs, CAST(ISNULL(n.cost_change,0) AS NVARCHAR(4)) cost_f,
                 CAST(ISNULL(n.lg_cost_change,0) AS NVARCHAR(4)) lg_cost_f, CAST(ISNULL(n.bom_change,0) AS NVARCHAR(4)) bom_f, ISNULL(n.remarks,'') remarks
-                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev n LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i2 ON i2.ITEM_CODE=n.item_code WHERE {wn}""")
+                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev n LEFT JOIN PARTNER_ERP_TEST3.nx.item i2 ON i2.ITEM_CODE=n.item_code WHERE {wn}""")
         sql = "SELECT TOP 3000 * FROM (\n" + "\nUNION ALL\n".join(parts) + "\n) q ORDER BY rev_ymd DESC, rev_no DESC"
         cur.execute(sql, *(p * len(parts)))
         cols = [d[0] for d in cur.description]
@@ -457,20 +457,20 @@ def qc_spec_apply(rev_ymd: str = Query(...), rev_no: str = Query(...), item: str
     cn = _conn(); cur = cn.cursor()
     try:
         if src == "nx":
-            cur.execute("""SELECT a.item_code item, ISNULL(i.ITEM_DESC,'') nm, ISNULL(a.apply_flag,0) apply_flag,
+            cur.execute("""SELECT a.item_code item, ISNULL(i.item_name,'') nm, ISNULL(a.apply_flag,0) apply_flag,
                   ISNULL(a.input_ymd,'') input_ymd, ISNULL(a.prod_ymd,'') prod_ymd, ISNULL(a.output_ymd,'') output_ymd
-                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev_apply a LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=a.item_code
+                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev_apply a LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=a.item_code
                 WHERE a.rev_ymd=? AND a.rev_no=? ORDER BY a.item_code""", y, no)
         else:
-            cur.execute("""SELECT a.ITEM_CODE item, ISNULL(i.ITEM_DESC,'') nm, ISNULL(a.APPLY_FLAG,'') apply_flag,
+            cur.execute("""SELECT a.ITEM_CODE item, ISNULL(i.item_name,'') nm, ISNULL(a.APPLY_FLAG,'') apply_flag,
                   ISNULL(a.INPUT_YYMD,'') input_ymd, ISNULL(a.PROD_YYMD,'') prod_ymd, ISNULL(a.OUTPUT_YYMD,'') output_ymd
-                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV_APPLY a LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=a.ITEM_CODE
+                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV_APPLY a LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=a.ITEM_CODE
                 WHERE a.REV_YYMD=? AND a.REV_NO=? ORDER BY a.ITEM_CODE""", y, no)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows: r["apply_flag"] = _b(r["apply_flag"])
         if not rows and item.strip() and src != "nx":
-            cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item.strip())
+            cur.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item.strip())
             g = cur.fetchone()
             rows = [{"item": item.strip(), "nm": (g[0] if g else ""), "apply_flag": 1,
                      "input_ymd": "", "prod_ymd": "", "output_ymd": ""}]
@@ -535,11 +535,11 @@ def qc_iqc_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str = 
         if to_ymd:   w.append("h.OQC_YMD<=?"); p.append(_d6(to_ymd))
         if item.strip(): w.append("h.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if cust.strip(): w.append("h.CUST_CODE LIKE ?"); p.append(f"%{cust.strip()}%")
-        cur.execute(f"""SELECT TOP 2000 h.OQC_YMD oqc_ymd, h.OQC_SEQ oqc_seq, h.ITEM_CODE item_code, ISNULL(i.ITEM_DESC,'') nm,
+        cur.execute(f"""SELECT TOP 2000 h.OQC_YMD oqc_ymd, h.OQC_SEQ oqc_seq, h.ITEM_CODE item_code, ISNULL(i.item_name,'') nm,
             ISNULL(h.MAT_CODE,'') mat, ISNULL(h.CUST_CODE,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
             ISNULL(h.LINE,'') line, ISNULL(h.INSP_QTY,0) insp_qty, ISNULL(h.ERR_TEXT,'') err_text,
             ISNULL(h.RESULT_OK,0) ok
-            FROM PARTNER_ERP_TEST3.nx.QA_T_CUST_IQC_HEAD h LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=h.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.QA_T_CUST_IQC_HEAD h LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=h.ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY h.OQC_YMD DESC, h.OQC_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
