@@ -7,6 +7,70 @@ from common import _nx, _conn
 
 router = APIRouter()
 
+# ── BOM기준 동 소요(규격별) + 절삭재료비 신규 사급가 as-of (LG사급현황 대사) ──
+try:
+    import nx_soyo_engine as _soyo            # common.py가 _harness를 sys.path에 추가
+    from nx_cost_engine import NxCostEngine
+except Exception:
+    _soyo = None; NxCostEngine = None
+_WENG = None
+
+
+def _weng():
+    global _WENG
+    if _WENG is None:
+        _WENG = NxCostEngine()
+    return _WENG
+
+
+def _bom_sig(cur):
+    cur.execute("SELECT COUNT(*), ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(bom_id,child_item,qty,ISNULL(qty_pr,qty),ISNULL(except_flag,0))),0) FROM nx.bom_line")
+    r = cur.fetchone()
+    return "%s:%s" % (r[0], r[1])
+
+
+def _ensure_dong_cache(cur):
+    """완제품 규격별 동중량 캐시 + BOM 서명가드(변경시 무효)."""
+    global _WENG
+    cur.execute("""IF OBJECT_ID('nx.item_dong_spec') IS NULL CREATE TABLE nx.item_dong_spec(
+        item_code varchar(30) NOT NULL, metal varchar(20) NOT NULL, diam float NOT NULL, thick float NOT NULL, per_unit float,
+        CONSTRAINT pk_item_dong_spec PRIMARY KEY(item_code,metal,diam,thick))""")
+    cur.execute("IF OBJECT_ID('nx.item_dong_spec_meta') IS NULL CREATE TABLE nx.item_dong_spec_meta(id int PRIMARY KEY, bom_sig varchar(80), built_dt datetime)")
+    sig = _bom_sig(cur)
+    cur.execute("SELECT bom_sig FROM nx.item_dong_spec_meta WHERE id=1")
+    r = cur.fetchone()
+    if (not r) or (r[0] != sig):
+        _WENG = None
+        cur.execute("TRUNCATE TABLE nx.item_dong_spec")
+        cur.execute("DELETE FROM nx.item_dong_spec_meta WHERE id=1")
+        cur.execute("INSERT INTO nx.item_dong_spec_meta(id,bom_sig,built_dt) VALUES(1,?,getdate())", sig)
+
+
+def _dong_of(cur, item):
+    """완제품 규격별 동중량 {(metal,diam,thick): per_unit} — 캐시 우선, miss시 copper_by_spec 계산+캐시(lazy)."""
+    cur.execute("SELECT metal,diam,thick,per_unit FROM nx.item_dong_spec WHERE item_code=?", item)
+    rows = cur.fetchall()
+    if rows:
+        return {(r[0], float(r[1]), float(r[2])): float(r[3]) for r in rows if r[0] != '~'}
+    spec = _soyo.copper_by_spec(_weng(), item) if _soyo else {}
+    if spec:
+        cur.executemany("INSERT INTO nx.item_dong_spec(item_code,metal,diam,thick,per_unit) VALUES(?,?,?,?,?)",
+                        [(item, m, float(d), float(t), float(w)) for (m, d, t), w in spec.items()])
+    else:
+        cur.execute("INSERT INTO nx.item_dong_spec(item_code,metal,diam,thick,per_unit) VALUES(?,'~',0,0,0)", item)
+    return spec
+
+
+def _matcost_asof(ym6):
+    """절삭재료비 신규 사급가 as-of: {(metal,diam,thick): TOT_COST}, APPLY_YYYYMM ≤ ym6(YYYYMM) 최신."""
+    c2 = _conn(); cu = c2.cursor()
+    try:
+        cu.execute("""SELECT METAL_GUBUN,ITEM_DIAM,ITEM_THICK,TOT_COST FROM PARTNER_ERP.dbo.CS_M_METERIAL_COST
+            WHERE APPLY_YYYYMM=(SELECT MAX(APPLY_YYYYMM) FROM PARTNER_ERP.dbo.CS_M_METERIAL_COST WHERE APPLY_YYYYMM<=?)""", ym6)
+        return {(str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)): float(r[3] or 0) for r in cu.fetchall()}
+    finally:
+        c2.close()
+
 _DDL = """IF OBJECT_ID('nx.lg_sagub_actual') IS NULL
 CREATE TABLE nx.lg_sagub_actual(
   id int IDENTITY(1,1) PRIMARY KEY, ym varchar(4), ymd varchar(8), biz varchar(4), item_code varchar(50), item_name nvarchar(200),
