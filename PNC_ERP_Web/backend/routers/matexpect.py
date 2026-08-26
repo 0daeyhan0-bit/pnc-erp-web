@@ -201,14 +201,28 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
             _ensure_soyo_cache(cur)   # ★BOM 서명 가드: 변경(sync/bom_save)시 캐시·엔진 무효→재빌드
             cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
             incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
-            for it, dq in driver.items():
+            items = [it for it, dq in driver.items() if dq]
+            smap = {}; cached = set()
+            for i in range(0, len(items), 1000):     # 배치 캐시읽기(IN, 파라미터 청크)
+                chunk = items[i:i + 1000]
+                ph = ",".join("?" * len(chunk))
+                cur.execute("SELECT item_code, mat_code, per_unit FROM nx.item_mat_soyo WHERE item_code IN (%s)" % ph, *chunk)
+                for it, mc, per in cur.fetchall():
+                    cached.add(it)
+                    if mc:
+                        smap.setdefault(it, {})[mc] = per
+            for it in items:                          # miss(prewarm 밖)만 lazy 계산+저장
+                if it not in cached:
+                    try:
+                        so = _soyo_of(cur, it)
+                        if so:
+                            smap[it] = so
+                    except Exception:
+                        pass
+            for it, dq in driver.items():             # 집계
                 if not dq:
                     continue
-                try:
-                    soyo = _soyo_of(cur, it)   # 캐시 우선·miss시 prod_soyo lazy 계산+저장
-                except Exception:
-                    continue
-                for mc, per in soyo.items():
+                for mc, per in smap.get(it, {}).items():
                     _row(mc, incust.get(mc, ""))["act"] += per * dq
 
         # ── 조립: 분류·이름·필터 ──
