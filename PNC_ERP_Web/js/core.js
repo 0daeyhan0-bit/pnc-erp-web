@@ -111,6 +111,7 @@ const MODULES=[
    {id:'receipt',ic:'📥',nm:'자재입고집계표'},
    {id:'lgsagub',ic:'📊',nm:'LG사급현황'},
    {id:'matverify',ic:'🔍',nm:'자재 소요-매입 검증'},
+   {id:'matexpect',ic:'📈',nm:'자재예상매입'},
    {id:'matkanban',ic:'📊',nm:'자재입고현황',hide:true},
    {sep:true},
    {id:'dopippur',ic:'🚢',nm:'도입-수입입력'},

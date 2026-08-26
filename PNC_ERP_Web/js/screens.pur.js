@@ -3926,3 +3926,70 @@ SCREEN.dongunit=(host)=>{
   SCREEN.dopippur=(c)=>dopipView(c,'pur');
   SCREEN.dopipsale=(c)=>dopipView(c,'sale');
 })();
+
+/* ==== 자재예상매입 (구매/자재) — MRP 조달계획: 소요 vs 매입 적정성. /api/matexpect. 조회전용 ==== */
+SCREEN.matexpect=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const td=new Date(); const curYm=`${td.getFullYear()}${String(td.getMonth()+1).padStart(2,'0')}`;
+  const st={axis:'prod', ym:curYm, grp:'전체', q:'', rows:[], summary:[], meta:null, loading:false, msg:'', sortKey:'tot_qty', sortDir:-1};
+  const fitc=v=>v>0?'#1c6fd0':(v<0?'#c0392b':'');   // +과매입 파랑 / −부족 빨강
+  const load=async()=>{st.loading=true;draw();
+    try{const j=await(await fetch(`${API}/api/matexpect?axis=${st.axis}&ym=${st.ym}&grp=${encodeURIComponent(st.grp)}`)).json();
+      st.rows=j.rows||[]; st.summary=j.summary||[]; st.meta={act:j.act_range,exp:j.exp_range,note:j.note}; st.msg='';}
+    catch(e){st.rows=[];st.summary=[];st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
+    st.loading=false;draw();};
+  const draw=()=>{
+    let rows=st.rows;
+    if(st.q){const q=st.q.toLowerCase();rows=rows.filter(r=>(r.mat_code||'').toLowerCase().includes(q)||(r.mat_name||'').toLowerCase().includes(q)||(r.vendor_name||'').toLowerCase().includes(q));}
+    const k=st.sortKey,d=st.sortDir;
+    rows=[...rows].sort((a,b)=>{const va=a[k],vb=b[k];return (typeof va==='string')?d*String(va).localeCompare(String(vb),'ko'):d*((+va||0)-(+vb||0));});
+    const SUMK=['tot_qty','base_qty','cur_qty','safety_qty','need_qty','buy_qty','fit_qty'];
+    const T=rows.reduce((t,r)=>{SUMK.forEach(x=>t[x]=(t[x]||0)+(+r[x]||0));return t;},{});
+    const ind=key=>st.sortKey===key?(st.sortDir===1?' ▲':' ▼'):'';
+    const cols=[['mat_name','품명',0],['vendor_name','업체',0],['grp','분류',0],['tot_qty','총소요',1],['base_qty','기초재고',1],['cur_qty','현재고',1],['safety_qty','상시보유',1],['need_qty','필요수량',1],['buy_qty','매입실적',1],['fit_qty','적정성',1],['lead_days','L/T',1]];
+    const rng=m=>m?`${(''+m[0]).slice(0,2)}/${(''+m[0]).slice(2,4)}/${(''+m[0]).slice(4,6)}~${(''+m[1]).slice(4,6)}`:'-';
+    c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="margin-bottom:2px">자재예상매입 <span style="font-size:12px;color:var(--muted);font-weight:400">MRP 조달계획 — 소요 vs 매입 적정성 (자재×업체×분류)</span></div>
+     <div class="page-sub" style="margin-bottom:6px">실적[1일~전일]+예상[오늘~말일] 소요. 필요수량=max(0,총소요+상시보유−기초재고−미착). 적정성=매입−필요(<span style="color:#1c6fd0">+과매입</span>/<span style="color:#c0392b">−부족</span>). ${st.meta?`실적 ${rng(st.meta.act)}·예상 ${rng(st.meta.exp)}`:''} · ★원소재 중량축·금액 추후</div>
+     <div class="toolbar" style="gap:6px;flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto">
+       <label class="tl">기준축</label>
+       <label class="rl"><input type="radio" name="me-ax" value="prod"${st.axis==='prod'?' checked':''}> 생산실적</label>
+       <label class="rl"><input type="radio" name="me-ax" value="sale"${st.axis==='sale'?' checked':''}> 영업실적</label>
+       <label class="tl" style="margin-left:8px">월</label><input type="month" class="inp" id="me-ym" value="${st.ym.slice(0,4)}-${st.ym.slice(4,6)}" style="min-width:120px">
+       <label class="tl" style="margin-left:8px">분류</label><select class="sel" id="me-grp">${['전체','원소재','사급','그외','반제품'].map(g=>`<option${st.grp===g?' selected':''}>${g}</option>`).join('')}</select>
+       <input class="inp" id="me-q" placeholder="품번/품명/업체" value="${esc(st.q)}" style="width:150px">
+       <button class="btn" id="me-go">조회</button>
+       <button class="btn xls" id="me-xls">엑셀</button>
+       <div class="spacer"></div><div class="s-item">자재 <b>${nf(rows.length)}</b></div>
+     </div>
+     ${st.msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(st.msg)}</div>`:''}
+     <div style="display:flex;gap:8px;flex:0 0 auto;margin:2px 0 6px;flex-wrap:wrap">
+       ${st.summary.map(s=>`<div style="border:1px solid #cfe0f5;border-radius:8px;padding:5px 12px;background:#fbfdff;font-size:12px">
+          <b>${esc(s.grp)}</b> · 자재 ${nf(s.mats)} · 소요 ${nf(s.tot)} · 필요 ${nf(s.need)} · 매입 ${nf(s.buy)} · 적정성 <span style="color:${fitc(s.fit)};font-weight:600">${nf(s.fit)}</span></div>`).join('')||'<span style="color:var(--muted);font-size:12px">요약 없음</span>'}
+     </div>
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+      <table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr style="position:sticky;top:0;background:#eef3fb;z-index:2">
+        ${cols.map(([k,l,n])=>`<th class="${n?'num':''}" data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${l}${ind(k)}</th>`).join('')}</tr></thead>
+       <tbody>${st.loading?`<tr><td colspan="11" class="empty">불러오는 중…</td></tr>`:(rows.length?rows.map(r=>`<tr>
+         <td class="cap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.mat_code)} ${esc(r.mat_name||'')}"><b>${esc(r.mat_name||r.mat_code)}</b></td>
+         <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.vendor_code||'')}">${esc(r.vendor_name||r.vendor_code||'-')}</td>
+         <td class="center">${esc(r.grp)}</td>
+         <td class="num">${nf(r.tot_qty)}</td><td class="num">${nf(r.base_qty)}</td><td class="num">${nf(r.cur_qty)}</td>
+         <td class="num">${nf(r.safety_qty)}</td><td class="num"><b>${nf(r.need_qty)}</b></td><td class="num">${nf(r.buy_qty)}</td>
+         <td class="num" style="color:${fitc(r.fit_qty)};font-weight:600">${nf(r.fit_qty)}</td><td class="num">${r.lead_days||0}</td></tr>`).join('')
+         :`<tr><td colspan="11" class="empty">데이터 없음</td></tr>`)}</tbody>
+       ${rows.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc"><td colspan="3" class="right">합계 (${nf(rows.length)}자재)</td><td class="num"><b>${nf(T.tot_qty)}</b></td><td class="num">${nf(T.base_qty)}</td><td class="num">${nf(T.cur_qty)}</td><td class="num">${nf(T.safety_qty)}</td><td class="num"><b>${nf(T.need_qty)}</b></td><td class="num">${nf(T.buy_qty)}</td><td class="num" style="color:${fitc(T.fit_qty)}"><b>${nf(T.fit_qty)}</b></td><td></td></tr></tfoot>`:''}
+      </table>
+     </div>
+    </div>`;
+    c.querySelectorAll('input[name=me-ax]').forEach(r=>r.onchange=e=>{st.axis=e.target.value;load();});
+    const ym=c.querySelector('#me-ym');if(ym)ym.onchange=e=>{st.ym=(e.target.value||'').replace('-','')||st.ym;load();};
+    const gs=c.querySelector('#me-grp');if(gs)gs.onchange=e=>{st.grp=e.target.value;load();};
+    const go=c.querySelector('#me-go');if(go)go.onclick=()=>{st.q=c.querySelector('#me-q').value.trim();draw();};
+    const qi=c.querySelector('#me-q');if(qi)qi.onkeyup=e=>{if(e.key==='Enter'){st.q=qi.value.trim();draw();}};
+    c.querySelectorAll('th[data-sk]').forEach(th=>th.ondblclick=()=>{const k=th.dataset.sk;if(st.sortKey===k)st.sortDir=-st.sortDir;else{st.sortKey=k;st.sortDir=(k==='mat_name'||k==='vendor_name'||k==='grp')?1:-1;}draw();});
+    const xb=c.querySelector('#me-xls');if(xb)xb.onclick=()=>downloadCSV(`자재예상매입_${st.ym}_${st.axis}.csv`,['품번','품명','업체','분류','총소요','기초재고','현재고','상시보유','필요수량','매입실적','적정성','LT'],rows.map(r=>[r.mat_code,r.mat_name,r.vendor_name,r.grp,r.tot_qty,r.base_qty,r.cur_qty,r.safety_qty,r.need_qty,r.buy_qty,r.fit_qty,r.lead_days]));
+  };
+  load();
+};
