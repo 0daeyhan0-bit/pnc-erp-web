@@ -43,7 +43,7 @@
 | C5 | 판가 | **실제손익=리시빙 실적 수량가중**(엔진 단일 as-of는 과대) | COSTANALYSIS_V2, MASTER C5 |
 | C6 | set_profile 테이블 | **없음**(NX_BOM_SCHEMA 초안오류). set입고 grain=자도번 | CANON §7-C, MASTER C6 |
 | C7 | SUB 코드 형식 | **출생라벨 `{ASSY}_R{route}_S{nn}`**(08-15 확정) | SUB_CODE_MASKS §7-1 |
-| C8 | routing_edge | **은퇴**(U2, 08-22). 생산처=마스터직독, 조달경로=조달프로파일 단독 | MASTER C8 |
+| C8 | routing_edge | ⚠**정정(08-26): "은퇴" stale** — `_step7_sql`이 실제 JOIN(생산처)·계획편성 필수. 08-22 rename 은퇴→500사고→**테이블 복원**. `_routing_edge_sync`만 no-op | [[newerp-routing-edge-restore]] |
 | C9 | nx.bom vs nx.bom_line | **별개 테이블**. 현행 원가정본=bom_line(미러), 목표=nx.bom에 SUB충전 후 단일화 | MASTER C9 |
 | C10 | nx.bom_line 성격 | **레거시 CS 미러**(레거시병 재현). 클린전환=옆에짓고 오라클 diff0 증명 후 | BOM_MIRROR_DEBT, MASTER C10 |
 | C11 | BOM↔R01 연동 | **갱신 갭 실재**(bom_save가 R01/소요 재빌드 트리거 안 함) | MASTER C11 |
@@ -56,6 +56,13 @@
 | **C18** | **용접봉 소요** | **ITEM_USE_QTY×1.5**(CS_M_ITEM_BOM). backflush/weight_calc 값 둘다 틀림 | WELD_COOP_SETTLEMENT |
 | **C19** | **원소재 두께** | **협의두께(0.65 등)**가 정산정본, LG치수(0.70)는 원가용. 축 분리 | WONJAE_RECON_PENDING, W_CS_ESTI_010 |
 | **C20** | **Gitea org명** | ⚠불일치: 런북=`pnc` vs ONBOARDING/CLAUDE=`pncind`. **실사용=pncind 추정, 런북 갱신 필요** | GITEA_RUNBOOK vs DEV_ONBOARDING |
+| **C21** | **품목마스터 미러 vs 클린** | `nx.PR_M_ITEM`(미러) vs `nx.item`(클린·재구축 목표). ★중량(net_weight geom 드리프트)·매입처(in_cust 561 FAIL)는 미러 직독 정본. 화면마다 갈림(접미사 불일치 증상) | **MIRROR_CLEAN_DUAL_TABLE_AUDIT 쌍1/A1/A2** |
+| **C22** | **거래처 미러 vs 클린** | `nx.CM_M_CUST`(미러·표시명 다수) vs `nx.partner`(클린·3파일만). 커버리지 얕음·bom.py 매입처검색 union | MIRROR_CLEAN_DUAL_TABLE_AUDIT 쌍2 |
+| **C23** | **단가 미러 vs 클린** | `PR_M_ITEM_COST`(미러·정산불변) vs `nx.price_item/price_metal/item_price`(클린). price.py 한 화면 병존·규약방어중 | MIRROR_CLEAN_DUAL_TABLE_AUDIT 쌍5 |
+| **C24** | **공정마스터 클린 부재** | 파트/공정마스터는 미러 `PR_M_PROC_GAGONG`만·클린 `nx.proc_gagong` 없음. partmaster.py가 미러 복제본에 CRUD write | MIRROR_CLEAN_DUAL_TABLE_AUDIT 쌍4 |
+| **C25** | **QC이력 미러∪클린** | qc.py가 `QA_T_ERROR/SPEC_REV`(미러) UNION `qc_error/qc_spec_rev`(클린) 동시조회(신구합침) | MIRROR_CLEAN_DUAL_TABLE_AUDIT A4 |
+
+> ★★★**미러 vs 재구축본 병존 전면감사 = `MIRROR_CLEAN_DUAL_TABLE_AUDIT.md`(2026-08-26)** — 6쌍+추가6, 위험등급·수렴계획. C9/C10/C13/C14와 동일 주제 통합. **"같은 개념 2테이블" 작업 전 필독.**
 
 **미해결 버그(코드 교정 대기)**:
 - ~~current_order가 EXCEPT_FLAG 무시~~ → **✅해소(08-20 수정·08-24 검증)**: current_order가 v_pr_bom+EXCEPT<>1 전개, MJU 전개제외·명진 SUB 통째귀속 라이브 확인. route_order 상속. (autoorder/manorder=plan_mat_source 소비, 별도 확인 여지)
