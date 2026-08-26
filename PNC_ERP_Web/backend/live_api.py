@@ -199,7 +199,9 @@ def matclose_dates():
 @live_router.get("/matclose")
 def matclose(dfrom: str = Query(""), dto: str = Query("")):
     """자재 수불장(우리 이동평균). 기간 [dfrom,dto]: 기초(직전잔량)+Σ입고−Σ출고=기말. 품목별."""
-    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    # ★기본 To는 '오늘'까지로 캡 — 다음달 이월 등 미래일자 전표로 MAX(ymd)가 미래여도 기본 조회기간이 미래로 튀지 않게.
+    #   dto를 직접 지정하면 그 값을 존중(미래 이월도 원하면 조회 가능). fr은 to에서 파생되어 자동 교정됨.
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd <= CONVERT(varchar(6), GETDATE(), 12)")
     to = _ymd6(dto, hi)
     fr = _ymd6(dfrom, to[:4] + "01")   # 미지정시 해당월 1일
     sql = """
