@@ -270,7 +270,9 @@ def _step5_item(cur):
     cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO FROM nx.model_bom")
     for m, ci, uq, my, ty in cur.fetchall(): mbom[str(m).strip()].append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
     recvmap = _dd(set)
-    cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
+    # ★2026-08-27 라이브 직독 → nx 미러. 실측 대사 동일(양쪽 64,714행·63,006조합)이라
+    #   산출물 변화 없이 라이브 의존만 제거된다(§1 라이브 접근 최소화).
+    cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP_TEST3.nx.SA_T_RECV_DTL WHERE WORK_ORDER>''")
     for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
     prate = {}
     cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
@@ -324,14 +326,16 @@ def _step5_item(cur):
             lot[wos] = max(lot[wos], rq or pq)       # ★REMAIN_QTY 우선, 없으면 종전 방식
     for rr in irows: rr[5] = lot[rr[1]]
     # ── STEP5-AS: A/S(WO) 계획 앵커 (레거시 compose 3번째 앵커, 우리 누락분 반영) ──
-    #   소스=라이브 PR_T_PLAN_INPUT(w_pr_plan_060 수기 A/S/긴급, LINE SVC/AR). ITEM_CODE=완성품 직접(모델매핑 없음),
+    #   소스=PR_T_PLAN_INPUT(w_pr_plan_060 수기 A/S/긴급, LINE SVC/AR). ITEM_CODE=완성품 직접(모델매핑 없음),
     #   prod_rate=100(WO 특례, SP substring(work_order,1,2)='WO'), plan_ymd>=생산계획 최소일자(@as_from_ymd).
-    #   ★병행기간=라이브 직독(주문 sa_t_recv_dtl 직독과 동일 패턴). 컷오버 후=웹 A/S입력→nx.plan_input.
+    #   ★2026-08-27 라이브 직독 → nx 미러. 실측 대사 동일(양쪽 791행·수량합 443,772·차집합 0/0,
+    #     최종등록시각도 동일)이라 산출물 변화 없이 라이브 의존만 제거된다.
+    #     컷오버 후 = 웹 A/S입력(nx.prod_plan_input)으로 repoint 예정.
     cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
     _asfrom = str(cur.fetchone()[0] or '').strip()
     cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
             MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
-          FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
+          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a
           JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
           WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
           GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
@@ -867,7 +871,9 @@ def planrev_job_log(limit: int = Query(100), code: str = Query("")):
 def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: str = Query(""),
                           limit: int = Query(300)):
     """모델BOM 변경이력 — 기준일자 이후 등록/수정된 (모델, 도번). 좌=모델 / 우=상세.
-       라이브 PR_M_MODEL_BOM 직독(읽기전용) + nx.model_bom(웹 자동생성분) 합집합."""
+       ★nx.PR_M_MODEL_BOM(미러) 읽기 + nx.model_bom(웹 자동생성분) 합집합.
+         2026-08-27 라이브 직독 → nx 로 전환. 실측 대사 결과 동일(양쪽 62,894행·차집합 0/0)이라
+         결과 변화 없이 라이브 의존만 제거된다(§1 라이브는 조회도 최소화)."""
     nx = _nx(); cur = nx.cursor()
     try:
         d8 = "".join(ch for ch in str(ymd or "") if ch.isdigit())
@@ -883,7 +889,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
               ISNULL(a.INSERT_IP,''), ISNULL(a.INSERT_COMPUTER,''), ISNULL(a.INSERT_WINDOW,''),
               ISNULL(a.UPDATE_USER_ID,''), CONVERT(varchar(19),a.UPDATE_DATETIME,120),
               ISNULL(RTRIM(i.ITEM_DESC),'')
-            FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM a WITH(NOLOCK)
+            FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM a WITH(NOLOCK)
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=a.C_ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=i.IN_CUST_CODE
@@ -891,7 +897,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
             max(1, min(int(limit or 300), 3000)), wh), *p)
         rows = [{"model": r[0], "item": r[1], "make_ymd": r[2], "to_ymd": r[3], "use_qty": float(r[4] or 0),
                  "wc": r[5], "by": r[6], "dt": r[7], "ip": r[8], "pc": r[9], "win": r[10],
-                 "upd_by": r[11], "upd_dt": r[12], "item_desc": r[13], "src": "라이브"}
+                 "upd_by": r[11], "upd_dt": r[12], "item_desc": r[13], "src": "nx"}
                 for r in cur.fetchall()]
         # 웹 자동생성분(nx.model_bom) — STEP M 산출
         w2, p2 = [], []
@@ -1087,11 +1093,12 @@ def _ensure_line_pull(cur):
     #   LG_INPUT_YMD/HM 은 레거시가 라인당김을 계산해 저장해 둔 결과 컬럼이다.
     #   웹 산식은 이를 98.43%(일자)/91.29%(시각)까지 재현하므로, 미러가 있으면 미러를,
     #   없으면 산식을 쓴다(RF2 등 LG 미기록 72건은 산식이 72/72 일치).
-    #   ★원천 우선순위: 라이브 > nx미러. 미러(r_delta_sync)는 하루 뒤처질 수 있어
-    #     실측 15건이 어긋났다(미러 260903 vs 라이브 260901 — 양쪽 각각은 LG=PLAN 일관).
-    #     라이브는 §1 에 따라 **읽기 전용**으로만 접근한다.
+    #   ★2026-08-27 원천 nx 우선으로 전환(사용자 지시 "레거시 연동보다 nx로").
+    #     2026-08-26 시점엔 미러가 하루 뒤처져 15건이 어긋났으나(미러 260903 vs 라이브 260901),
+    #     sync 후 재측정 결과 4,166행 전부 동일(LGy·LGhm 100.00%, 차집합 0) — nx 로 충분하다.
+    #     라이브는 미러 미존재/공백 시에만 폴백으로 읽는다(§1 읽기 전용).
     _lg = {}
-    for _srcq in ("PARTNER_ERP.dbo.PR_T_PLAN_DTL", "nx.PR_T_PLAN_DTL"):
+    for _srcq in ("nx.PR_T_PLAN_DTL", "PARTNER_ERP.dbo.PR_T_PLAN_DTL"):
         try:
             cur.execute("""SELECT RTRIM(WORK_ORDER), ISNULL(ORG_PLAN_YMD,''),
                      ISNULL(LG_INPUT_YMD,''), ISNULL(LG_INPUT_HM,'')
