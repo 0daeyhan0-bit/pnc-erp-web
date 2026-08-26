@@ -21,7 +21,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                  part: str = Query(""), pgroup: str = Query(""), line: str = Query(""),
                  assy: str = Query(""), jado: str = Query(""), gigan: int = Query(2),
                  wh_part: str = Query("IS0001"),
-                 view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("nx"),
+                 view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("new"),
                  limit: int = Query(20000)):
     """준비실적처리(키팅) 그리드 — ★레거시 정본 SP `SP_PR_CREATE_PLAN_파트별_생산계획계산_생산준비등록_NEW` 로직 복제(실행X, .sql 이식).
        source=PR_T_PLAN_PART_COPY, 필터 GC_GUBUN='P'(생산파트)·GAGONG_PROC_SEQ=1·투입파트(WH_GAGONG_PROC_CODE=@wh_part, 기본 IS0001, BOM CTE).
@@ -33,6 +33,13 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
     def _yadd(y6, n):
         try: return (_dt.strptime('20' + y6, '%Y%m%d') + _td(days=n)).strftime('%y%m%d')
         except Exception: return y6
+    # ★소스 3종(2026-08-26) — 410 과 동일 규칙.
+    #   live = 레거시 라이브 · nx = 레거시 미러(nx) · new = ★웹 자체편성(신규DB, 기본값)
+    #   계획 원천만 바꾸고 마스터·재고·실적은 nx 그대로 → '계획' 차이만 순수 비교.
+    _src = str(src).strip()
+    _PSCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
+    PLAN_T = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _src == "new"
+              else f"{_PSCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
     try:
         d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
@@ -43,10 +50,10 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         #   (재귀CTE를 메인 GROUP 조인에 인라인하면 재구체화로 ~5초. 분리 시 ~1.5초. 값·색 로직 불변)
         keys = set()
         try:
-            cur.execute("""
+            cur.execute(f"""
                 ;WITH CTE (ITEM_CODE, MAT_CODE, GAGONG_PROC_CODE, WH_GAGONG_PROC_CODE, VIR_ITEM_FLAG) AS (
                      SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
-                       FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_COPY a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
+                       FROM {PLAN_T} a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item_bom B WITH(NOLOCK) ON A.ITEM_CODE=B.ITEM_CODE
                       WHERE a.part_plan_ymd BETWEEN '' AND ? AND a.GC_GUBUN='P'
                      UNION ALL
                      SELECT a.ITEM_CODE, B.MAT_CODE, B.GAGONG_PROC_CODE, B.WH_GAGONG_PROC_CODE, B.VIR_ITEM_FLAG
@@ -72,7 +79,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
               MAX(ISNULL(lg.lgh,'')) lgh,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd, SUM(CAST(a.PART_PLAN_QTY AS float)) pl
-            FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+            FROM {PLAN_T} a WITH(NOLOCK)
             JOIN PARTNER_ERP_TEST3.nx.pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
@@ -463,20 +470,25 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                                  x["plan_ymd"] or "", x.get("lgh") or "", x["wo"] or "", x["swo"] or ""))
         note = f"⚠ 상위 {limit}건 초과 — 투입파트·작업처·도번으로 필터하세요." if capped else ""
         return {"dates": dates, "rows": rows, "cnt": len(rows),
+                "src": (_src if _src in ("live", "nx", "new") else "nx"),
+                "plan_src": PLAN_T,          # ★어느 계획테이블을 읽었는지 명시(대조용)
                 "plan_sum": sum(r["plan_qty"] for r in rows), "ready_sum": sum(r["ready_qty"] for r in rows), "note": note}
     finally:
         cn.close()
 
 # ================= 파트별 생산계획 (w_pr_input_410_new) — 키팅과 동일 SP grain·색상, 410 컬럼 =================
 @router.get("/api/plan/part410/lines")
-def plan_part410_lines(src: str = Query("nx")):
+def plan_part410_lines(src: str = Query("new")):
     """파트별 생산계획 라인(LINE_NO) 드롭다운 — 실사용값(PR_T_PLAN_PART_COPY.LINE_NO) distinct.
        ★/api/planinput/lines(PR003 주문구분: 설치/이지링크/CKD 등)와는 다른 코드체계이므로 별도 소스 필요.
        CA/CM/GR 등 part410 그리드의 실제 Line No 컬럼값 그대로."""
-    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    _s = str(src).strip()
+    SCH = "PARTNER_ERP.dbo" if _s == "live" else "PARTNER_ERP_TEST3.nx"
+    _t = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _s == "new"
+          else f"{SCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(LINE_NO)) v FROM {SCH}.PR_T_PLAN_PART_COPY WITH(NOLOCK)
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(LINE_NO)) v FROM {_t} WITH(NOLOCK)
                         WHERE ISNULL(LTRIM(RTRIM(LINE_NO)),'')<>'' ORDER BY v""")
         rows = [{"code": r[0], "nm": r[0]} for r in cur.fetchall()]
         return {"rows": rows}
@@ -487,7 +499,7 @@ def plan_part410_lines(src: str = Query("nx")):
 def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Query(""),
                  part: str = Query(""), line: str = Query(""), assy: str = Query(""), jado: str = Query(""),
                  wo: str = Query(""),
-                 view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("nx"),
+                 view: str = Query("전체"), unfin: str = Query("전체"), src: str = Query("new"),
                  wh_part: str = Query("IS0001"), limit: int = Query(20000)):
     """파트별 생산계획 그리드 — 레거시 SP `SP_PR_CREATE_PLAN_파트별_생산계획계산_생산준비등록_NEW` 로직 복제.
        ★키팅(/api/kitting/grid)과 동일 grain(gpc·wo·swo·assy·upper·item, 날짜피벗)·동일 충당·색상.
@@ -506,7 +518,14 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
     def _yadd(y6, n):
         try: return (_dt.strptime('20' + y6, '%Y%m%d') + _td(days=n)).strftime('%y%m%d')
         except Exception: return y6
-    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
+    # ★소스 3종(2026-08-26)
+    #   live = 레거시 라이브 · nx = 레거시 미러(nx) · new = ★웹 자체편성(신규DB)
+    #   new 는 계획 원천만 nx.v_plan_part_copy_new(=nx.plan_part_dtl 호환뷰)로 바꾸고,
+    #   마스터·재고·실적은 nx 그대로 쓴다 → 레거시와 '계획' 차이만 순수 비교 가능.
+    _src = str(src).strip()
+    SCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
+    PLAN_T = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _src == "new"
+              else f"{SCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
     try:
         d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
@@ -558,7 +577,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               MAX(ISNULL(a.CHANGE_DAY,'')) change_day, SUM(CAST(ISNULL(a.LOT_QTY,0) AS float)) lot_qty,
               SUM(CAST(ISNULL(a.LAST_LOT_QTY,0) AS float)) last_lot_qty,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
-            FROM {SCH}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+            FROM {PLAN_T} a WITH(NOLOCK)
             JOIN {SCH}.pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
             JOIN {SCH}.pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
@@ -1003,7 +1022,9 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             inwon_by = {str(r[0]).strip(): int(r[1] or 0) for r in cur.fetchall()}
         except Exception: pass
         note = f"⚠ 상위 {limit}건 초과 — 파트·작업처·도번으로 필터하세요." if capped else ""
-        return {"dates": dates, "rows": rows, "cnt": len(rows), "src": ("live" if SCH.endswith("dbo") else "nx"),
+        return {"dates": dates, "rows": rows, "cnt": len(rows),
+                "src": (_src if _src in ("live", "nx", "new") else "nx"),
+                "plan_src": PLAN_T,          # ★어느 계획테이블을 읽었는지 명시(대조용)
                 "plan_sum": sum(r["plan_qty"] for r in rows), "inwon": inwon,
                 "inwon_by": inwon_by, "note": note}
     finally:

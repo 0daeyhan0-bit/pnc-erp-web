@@ -149,15 +149,18 @@ SCREEN.gagongprog420=(c)=>{
   const dcls=s=>{const w=dow(s);return w===0?' g4sun':(w===6?' g4sat':'');};
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',view:'상세',gigan:2,src:'nx',
+  // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx/sp 로 바꿔서 본다(2026-08-26).
+  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',view:'상세',gigan:2,src:'new',
             dates:[],allrows:[],parts:[],note:'',loading:false,msg:'',sel:new Set()};
   const load=async()=>{st.loading=true;draw();
     // ★nx 재현(prog420nx) 기본 · sp=레거시 암호화SP 비교용. 전체 1회 조회·캐시 → 미생산/미키팅 토글은 클라 즉시필터.
     const ep=st.src==='sp'?'prog420':'prog420nx';
     // ★도번·자도번은 서버에 안 보냄 — 전체 1회 조회 후 클라 즉시필터(2026-08-20 사용자요청)
+    // ★new = nx재현 엔진 그대로, 계획원천만 웹편성(plansrc=new)으로 교체.
     const qs=st.src==='sp'
       ? new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,item:'',jado:'',unfin:'전체',limit:8000})
-      : new URLSearchParams({from_ymd:st.from,gigan:st.gigan,wc:st.wc,item:'',jado:'',unfin:'전체',limit:8000});
+      : new URLSearchParams({from_ymd:st.from,gigan:st.gigan,wc:st.wc,item:'',jado:'',unfin:'전체',
+                             plansrc:(st.src==='new'?'new':'nx'),limit:8000});
     try{const r=await fetch(`${API}/api/gagong/${ep}?${qs}`);const d=await r.json();
       st.dates=d.dates||[];st.allrows=d.rows||[];st.parts=d.parts||st.parts;st.note=d.note||'';st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.allrows=[];}
@@ -294,7 +297,7 @@ SCREEN.gagongprog420=(c)=>{
        .g4tbl th.g4sun{color:#c0392b}
        .g4tbl td.g4wk{background:#f4f6f9}</style>
      <div class="page-title">🏭 가공생산진척관리(전표발행) <span style="font-size:12px;color:var(--muted);font-weight:400">Assy도번·자도번별 생산진척</span></div>
-     <div class="page-sub">${st.src==='sp'?'레거시 암호화SP 직접실행(대사용)':'<b>nx 재현</b>(암호화SP 탈피)'} · 그레인=(도번,가공컴포넌트) · 셀색 90주황출하/70·30노랑재고/20민트가공창고/10녹전표 · 당일이전=기준일 이전 · ${st.src==='sp'?'🔴 라이브':'🟢 nx'}</div>
+     <div class="page-sub">${st.src==='sp'?'레거시 암호화SP 직접실행(대사용)':(st.src==='new'?'<b>nx 재현</b> + <b>계획=웹편성</b>(nx.plan_part_dtl)':'<b>nx 재현</b>(암호화SP 탈피)')} · 그레인=(도번,가공컴포넌트) · 셀색 90주황출하/70·30노랑재고/20민트가공창고/10녹전표 · 당일이전=기준일 이전 · ${st.src==='sp'?'🔴 라이브':(st.src==='new'?'🟣 신규DB(웹계획)':'🟢 nx')}</div>
      <div class="toolbar">
       <label class="tl">기준일자</label><input class="inp" type="date" id="g4-from" value="${st.from}">
       <!-- ★자도번작업처 = P2 가공 고정이므로 숨김(2026-08-20). st.wc 값·핸들러는 그대로 유지 -->
@@ -303,7 +306,7 @@ SCREEN.gagongprog420=(c)=>{
       <label class="tl">미생산</label>
       <label class="rl"><input type="radio" name="g4-uf" value="전체"${st.unfin==='전체'?' checked':''}> 전체</label>
       <label class="rl"><input type="radio" name="g4-uf" value="미생산"${st.unfin==='미생산'?' checked':''}> 미생산</label>
-      <label class="tl">소스</label><select class="inp" id="g4-src" style="width:110px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="sp"${st.src==='sp'?' selected':''}>레거시 대사</option></select>
+      <label class="tl">소스</label><select class="inp src-new" id="g4-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=계획을 웹 자체편성(nx.plan_part_dtl)으로 갈아끼움 / 우리(nx)=레거시 편성 미러 · nx재현 / 레거시 대사=암호화SP 직접실행"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src==='nx'?' selected':''}>🟢 우리(nx)</option><option value="sp"${st.src==='sp'?' selected':''}>🔴 레거시 대사</option></select>
       <button class="btn" id="g4-search">🔍 조회</button>
       <div class="spacer"></div>
       <span class="rowcount" id="g4-selinfo" style="margin-right:8px"></span>
@@ -318,7 +321,7 @@ SCREEN.gagongprog420=(c)=>{
       <label class="rl"><input type="radio" name="g4-vw" value="집계"${st.view==='집계'?' checked':''}> 집계</label>
       <label class="rl"><input type="radio" name="g4-vw" value="제번"${st.view==='제번'?' checked':''}> 제번</label>
       <label class="tl">기간</label><select class="inp" id="g4-gigan" style="max-width:70px">${[1,2,3,4,5,6,7,8].map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
-      <div class="spacer"></div><span class="rowcount">행 <b>${nf(disp.length)}</b> · 생산계획합 <b>${nf(tPlan)}</b> · 완료합 <b>${nf(tFin)}</b> · ${st.src==='sp'?'🔴 라이브':'🟢 nx'}</span>
+      <div class="spacer"></div><span class="rowcount">행 <b>${nf(disp.length)}</b> · 생산계획합 <b>${nf(tPlan)}</b> · 완료합 <b>${nf(tFin)}</b> · ${st.src==='sp'?'🔴 라이브':(st.src==='new'?'🟣 신규DB(웹계획)':'🟢 nx')}</span>
     </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
@@ -351,7 +354,8 @@ SCREEN.gagongprog420=(c)=>{
     g('#g4-gigan').onchange=()=>{st.gigan=+g('#g4-gigan').value;st.to=iso(new Date(new Date(st.from).getTime()+(st.gigan-1)*864e5));g('#g4-search').click();};
     c.querySelectorAll('input[name=g4-uf]').forEach(rd=>rd.onchange=()=>{st.unfin=rd.value;draw();});  // ★캐시 즉시필터(재조회 없음)
     c.querySelectorAll('input[name=g4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;draw();});  // 구분: 상세/집계/제번 즉시전환
-    g('#g4-src').onchange=()=>{st.src=g('#g4-src').value;load();};
+    g('#g4-src').onchange=(e)=>{e.target.dataset.src=e.target.value;   // 고르는 즉시 색 반영
+      st.src=g('#g4-src').value;load();};
     g('#g4-part').onchange=()=>{st.part=g('#g4-part').value;draw();};   // 출고처 = 캐시 즉시필터
     g('#g4-wc').onchange=()=>g('#g4-search').click();
     g('#g4-part').onkeyup=e=>{if(e.key==='Enter')g('#g4-search').click();};   // 도번·자도번은 즉시필터(위)
@@ -730,7 +734,8 @@ SCREEN.gagongmove580=(c)=>{
   // ★조회엔진 = 레거시 SP(SP_PR_가공창고_이동계획_260213) 직접호출. 기본 인자도 레거시와 동일(P2/IS0001/%).
   // puPart(레거시 as_pu_part_code) = 입고 자재창고. 항상 IS0001 이라 조건칸에서 뺐다(2026-08-23) — SP 인자로만 사용.
   // ★2026-08-24 기간 드롭다운 1~14일 선택 가능. 기본 2일(기준일 포함) → to = from + 1일.
-  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:2,
+  // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx 로 바꿔서 본다(2026-08-26).
+  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:2,src:'new',
             gubun:'이동계획',confirm:'전체',   // gubun: 이동계획(매트릭스) / 이동전표(발행목록)
             dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,loaded:false,msg:'',exp:new Set(),
             sel:new Set(),itemSel:null,optDests:[],sheetRows:[],sheetAll:[],sheetCnt:0,
@@ -757,7 +762,8 @@ SCREEN.gagongmove580=(c)=>{
     st.loading=true;draw();
     // mv(이동필요)는 서버에 안 넘긴다 — 클라이언트 필터로 즉시 전환하기 위해 항상 '전체'로 받아둔다.
     // 납품처·이동필요는 넘기지 않는다(클라이언트 즉시필터). 서버는 기간/가공창고/자재파트만.
-    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:'%',pu_part:st.puPart,sagub:'',mv:'전체',limit:2500});
+    // ★src(2026-08-26): nx=레거시 SP / new=복제 SP(계획만 웹편성)
+    const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,pr_part:'%',pu_part:st.puPart,sagub:'',mv:'전체',src:(st.src||'nx'),limit:2500});
     try{const r=await fetch(`${API}/api/gagong/move580?${qs}`);const d=await r.json();
       st.all=d.rows||[];st.allDates=d.dates||[];st.optDests=d.dests||[];st.plan_sum=d.plan_sum||0;st.note=d.note||'';st.msg='';st.loaded=true;
       if(st.dest&&!st.optDests.some(o=>o.key===st.dest))st.dest='';   // 새 조회에 없는 납품처면 해제
@@ -865,7 +871,9 @@ SCREEN.gagongmove580=(c)=>{
        .mv-tbl tr.jado-exp td{text-align:left!important}
      </style>
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
-     <div class="page-sub">조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일. 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행. 🔴 라이브 조회 / 🟢 발행은 nx</div>
+     <div class="page-sub">${st.src==='new'
+       ?'조회엔진 = <b>복제 SP</b> <code>SP_PR_가공창고_이동계획_WEBPLAN</code> — <b>계획원천만 웹편성</b>(<code>nx.plan_part_dtl</code>)으로 치환, 색상·자도번LIST·재고충당 로직은 레거시 그대로.'
+       :'조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일.'} 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행. ${st.src==='new'?'🟣 신규DB(웹계획)':'🔴 라이브 조회'} / 🟢 발행은 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">기준일자</label><input class="inp" type="date" id="mv-from" value="${st.from}"> ~ <input class="inp" type="date" id="mv-to" value="${st.to}">
        <label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"${isSheet?' disabled':''}><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
@@ -890,6 +898,7 @@ SCREEN.gagongmove580=(c)=>{
        <label class="tl">구분</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동계획"${st.gubun==='이동계획'?' checked':''}> 이동계획</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
+       <label class="tl">소스</label><select class="inp src-new" id="mv-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=복제 SP(계획원천만 웹편성 nx.plan_part_dtl, 나머지 로직은 레거시 그대로) / 우리(nx)=레거시 SP 직접호출"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src!=='new'?' selected':''}>🟢 우리(nx)</option></select>
        <button class="btn" id="mv-search">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
      </div>
@@ -900,8 +909,11 @@ SCREEN.gagongmove580=(c)=>{
     // 서버 재조회 = 기간·가공창고·생산파트·사급업체 변경 시에만. 그 외(도번/자도번/이동필요/입고확인)는 즉시 클라이언트 필터.
     const refilter=()=>{isSheet?applySheetFilter():applyFilter();draw();};
     g('#mv-search').onclick=()=>{st.from=g('#mv-from').value;st.to=g('#mv-to').value;
-      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();}
+      if(!isSheet){st.wc=g('#mv-wc').value.trim();st.dest=g('#mv-dest').value.trim();
+        const sv=g('#mv-src');if(sv)st.src=sv.value;}
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
+    // 소스는 고르는 즉시 색을 바꾼다(실제 반영은 [조회]).
+    {const sv=g('#mv-src');if(sv)sv.onchange=e=>{e.target.dataset.src=e.target.value;};}
     // ★기간 N일 = 기준일 포함 N일치 → to = from + (N-1). (기존 +N 이라 11·15일치가 나왔음)
     //   ★2026-08-25 st.to 만 고치고 조회를 누르면 #mv-search 핸들러가 첫 줄에서
     //     st.to = 입력칸값 으로 되돌려버려(입력칸은 아직 옛 날짜) 항상 2일치만 나왔다.

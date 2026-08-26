@@ -108,6 +108,14 @@ select.inp,select.sel{min-width:0;width:auto}
 .btn.ghost{background:#eef2f8;color:#3a4757}.btn.ghost:hover{background:#e2e8f2}
 .spacer{flex:1}
 
+/* 계획 소스 선택(파트별생산계획·준비실적처리) — 지금 어느 계획을 보는지 한눈에.
+   신규DB=웹이 자체 편성한 계획(대조용) / nx·라이브=레거시 편성. 값에 따라 색을 바꾼다. */
+select.inp.src-new{font-weight:700;border-width:2px}
+select.inp.src-new[data-src="new"]{background:#f3e8ff;border-color:#7c3aed;color:#5b21b6}
+select.inp.src-new[data-src="nx"]{background:#e8f6ec;border-color:#1c7c3a;color:#14532d}
+select.inp.src-new[data-src="live"],
+select.inp.src-new[data-src="sp"]{background:#fdecec;border-color:#c0392b;color:#7f1d1d}
+
 /* Tables */
 .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 /* 넓은 리포트 표: 내용폭으로 축소(빈공간 stretch 방지) → 한 페이지에 최대한 표시 */

@@ -981,14 +981,21 @@ def _s040_shift(ymd, n):
 
 @router.get("/api/sale040/grid")
 def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Query(""),
-                 wo: str = Query(""), item: str = Query(""), src: str = Query("nx"),
+                 wo: str = Query(""), item: str = Query(""), src: str = Query("new"),
                  limit: int = Query(4000)):
     """출하실적등록 그리드. 그레인=(제번, 분할제번, 도번)."""
     dates = _s040_dates(from_ymd, gigan)
     d1, d2 = dates[0], dates[-1]
     # ★소스 토글(키팅·410 과 동일): nx=우리 재현 / live=레거시 라이브 직독(대사용, 읽기전용)
-    SCH = "PARTNER_ERP.dbo" if str(src).strip() == "live" else "PARTNER_ERP_TEST3.nx"
-    cn = _conn() if str(src).strip() == "live" else _nx()
+    #   ★new(2026-08-26) = 신규DB(웹계획). b1(LG계획)만 웹 STEP5(nx.plan_item_dtl)로 바꾼다.
+    #     예외생산(PR_T_PLAN_INPUT)·전일계획잔여(SA_T_PLAN_DTL_DAILY)는 웹에 대응물이
+    #     아예 없으므로(편성 미구현) 그 두 갈래는 레거시 원천을 그대로 쓴다.
+    #     → 화면에서 'LG계획 부분만' 웹편성으로 갈아끼워 레거시와 대조하는 용도.
+    _src = str(src).strip()
+    SCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
+    PLAN_B1 = ("PARTNER_ERP_TEST3.nx.v_plan_item_dtl_new" if _src == "new"
+               else "{SCH}.SA_T_PLAN_ITEM_DTL")
+    cn = _conn() if _src == "live" else _nx()
     cur = cn.cursor()
     try:
         # ── 계획원천 = 레거시 dw_pr_input_040_t1 3-UNION ──────────────────
@@ -1059,7 +1066,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.USE_QTY,1) use_qty, ISNULL(c.PROD_RATE,100) prod_rate,
                    ISNULL(a.CHANGE_DAY,'') change_day,
                    {QEXP('a.PLAN_QTY','a.USE_QTY')} planq
-              FROM {{SCH}}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
+              FROM {PLAN_B1} a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('a.C_ITEM_CODE')}{w1}""")
@@ -1152,7 +1159,9 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         # 화면 일자칸(d1..d2) — b1 을 컷+10 까지 읽으므로 계획합/표시는 이 범위로 자른다.
         _dset = set(dates)
         if not rows:
-            return {"dates": dates, "rows": [], "cnt": 0}
+            return {"dates": dates, "rows": [], "cnt": 0,
+                    "src": (_src if _src in ("live", "nx", "new") else "nx"),
+                    "plan_src": PLAN_B1.format(SCH=SCH)}
 
         # ---- 실적 4종 + ASSY재고 (제번·도번 단위) ----
         keys = [(g["wo"], g["swo"], g["item"]) for g in rows]
@@ -1296,7 +1305,9 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
             _pool[g["item"]] = av - take
             g["prod_qty"] = round(take, 0)
 
-        return {"dates": dates, "rows": out, "cnt": len(out)}
+        return {"dates": dates, "rows": out, "cnt": len(out),
+                "src": (_src if _src in ("live", "nx", "new") else "nx"),
+                "plan_src": PLAN_B1.format(SCH=SCH)}   # ★어느 계획을 읽었는지(대조용)
     finally:
         cn.close()
 

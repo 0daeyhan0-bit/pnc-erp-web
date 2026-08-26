@@ -2,8 +2,12 @@
 """품질(qc) 도메인 라우터 — 불량관리·시방변경·IQC조회. 조회=레거시QA_+nx 합집합, 쓰기=nx.
    app.py에서 분리. 공유헬퍼는 common.py. ★_b·_d8은 이 도메인 로컬(common의 _b와 다름=FINISH_FLAG용)."""
 from datetime import datetime
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, HTTPException, UploadFile, File, Form
 from common import _conn, _nx, _nx_tx, _d6, _num
+# ★품질불량 첨부파일(3종) — 기존 문서저장소(nx.doc + NAS)를 그대로 재사용한다.
+#   경로정책·백업이 도면첨부와 같아지도록 doc.py 와 동일한 DOC_STORAGE_PATH 를 쓴다.
+import os as _os, hashlib as _hashlib
+from routers.doc import DOC_STORAGE_PATH
 
 router = APIRouter()
 
@@ -95,7 +99,8 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 ISNULL(e.ERROR_QTY,0) error_qty, ISNULL(e.REAL_ERROR_QTY,0) real_qty, ISNULL(e.ERROR_CAUSE,'') error_cause,
                 ISNULL(e.PROGRESS_STATS,'') progress, ISNULL(e.WATER_CHECK_FLAG,'') water_flag,
                 ISNULL(e.RE_INSP_CHECK,'') reinsp_flag, ISNULL(e.FINISH_FLAG,'') finish_flag, ISNULL(e.CHARGE_NAME,'') charge,
-                CAST(e.SEQ AS INT) lseq
+                CAST(e.SEQ AS INT) lseq,
+                0 f_attach, 0 f_plan1, 0 f_plan2   -- 레거시행은 웹첨부 대상 아님(nx 행에만 첨부 가능)
                 FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=e.ITEM_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=e.PROC_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m ON m.MACH_CODE=e.MACH_CODE
@@ -112,7 +117,8 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 ISNULL(n.error_qty,0) error_qty, ISNULL(n.real_error_qty,0) real_qty, ISNULL(n.error_cause,'') error_cause,
                 ISNULL(n.progress_stats,'') progress, CAST(ISNULL(n.susu_flag,0) AS NVARCHAR(1)) water_flag,
                 CAST(ISNULL(n.reinsp_flag,0) AS NVARCHAR(1)) reinsp_flag, CAST(ISNULL(n.finish_flag,0) AS NVARCHAR(1)) finish_flag,
-                ISNULL(n.charge_name,'') charge, ISNULL(n.legacy_seq,0) lseq
+                ISNULL(n.charge_name,'') charge, ISNULL(n.legacy_seq,0) lseq,
+                ISNULL(n.attach_doc_id,0) f_attach, ISNULL(n.plan1_doc_id,0) f_plan1, ISNULL(n.plan2_doc_id,0) f_plan2
                 FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i2 ON i2.ITEM_CODE=n.item_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg2 ON pg2.GAGONG_PROC_CODE=n.proc_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m2 ON m2.MACH_CODE=n.mach_code
@@ -130,6 +136,8 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
             r["tag_nm"] = _ERRTAG.get(str(r["tag"]).strip(), str(r["tag"]))
             r["work_nm"] = _WORKNM.get(str(r["work_code"]).strip(), str(r["work_code"]))
             r["ID"] = int(r["key_id"]) if r["src"] == "nx" and str(r["key_id"]).isdigit() else None
+            # 첨부 3칸 중 몇 개가 붙어있나(그리드 📎 표시용)
+            r["n_files"] = sum(1 for k in ("f_attach", "f_plan1", "f_plan2") if int(r.get(k) or 0))
         return {"rows": rows, "cnt": len(rows),
                 "sum_err": sum(r["error_qty"] for r in rows), "sum_lot": sum(r["lot_qty"] for r in rows)}
     finally:
@@ -185,6 +193,100 @@ def qc_error_delete(payload: dict = Body(...)):
     try:
         cur.execute(f"DELETE FROM nx.qc_error WHERE id IN ({','.join('?'*len(ids))})", *ids)
         return {"ok": True, "deleted": cur.rowcount}
+    finally:
+        nx.close()
+
+# ---------- 품질불량관리 첨부파일 3종 (레거시 w_qa_input_025: 첨부파일#1·대책서#1·대책서#2) ----------
+# ★파일 실체는 기존 문서저장소(nx.doc + NAS DOC_STORAGE_PATH)를 그대로 재사용한다.
+#   qc_error 에는 doc_id 만 들고, 다운로드는 기존 /api/doc/download?src=doc&key=<doc_id> 로 처리.
+#   → 저장소를 새로 만들지 않으므로 백업·경로정책이 도면첨부와 동일하게 유지된다.
+_QC_SLOT = {"attach": "attach_doc_id", "plan1": "plan1_doc_id", "plan2": "plan2_doc_id"}
+_QC_SLOT_NM = {"attach": "첨부파일#1", "plan1": "대책서#1", "plan2": "대책서#2"}
+
+@router.get("/api/qc/error/files")
+def qc_error_files(id: int = Query(...)):
+    """그 불량건의 첨부 3칸 현황(슬롯별 파일명·크기·업로더)."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT ISNULL(e.attach_doc_id,0), ISNULL(e.plan1_doc_id,0), ISNULL(e.plan2_doc_id,0)
+                         FROM nx.qc_error e WHERE e.id=?""", int(id))
+        r = cur.fetchone()
+        if not r: raise HTTPException(404, "불량건 없음")
+        out = {}
+        for slot, did in zip(("attach", "plan1", "plan2"), r):
+            info = {"slot": slot, "label": _QC_SLOT_NM[slot], "doc_id": None,
+                    "filename": "", "size": 0, "user": "", "dt": ""}
+            if did:
+                cur.execute("""SELECT orig_filename, byte_size, insert_user, insert_dt
+                                 FROM nx.doc WHERE doc_id=? AND del_flag=0""", int(did))
+                d = cur.fetchone()
+                if d:
+                    info.update({"doc_id": int(did), "filename": d[0], "size": int(d[1] or 0),
+                                 "user": d[2] or "",
+                                 "dt": (d[3].isoformat() if hasattr(d[3], "isoformat") else str(d[3] or "")).replace("T", " ")[:19]})
+            out[slot] = info
+        return {"ok": True, "id": int(id), "files": out}
+    finally:
+        nx.close()
+
+@router.post("/api/qc/error/file_upload")
+async def qc_error_file_upload(file: UploadFile = File(...), id: int = Form(...),
+                               slot: str = Form("attach"), user: str = Form("웹사용자")):
+    """첨부 업로드 — 슬롯(attach/plan1/plan2) 1칸당 파일 1개. 재업로드하면 이전 것은 삭제표시."""
+    slot = str(slot).strip()
+    if slot not in _QC_SLOT:
+        raise HTTPException(400, "slot 은 attach/plan1/plan2 중 하나여야 합니다.")
+    raw = await file.read()
+    if not raw: raise HTTPException(400, "빈 파일입니다.")
+    fname = file.filename or "file"
+    ext = ((fname.rsplit(".", 1)[-1] if "." in fname else "") or "").lower()[:10]
+    sha = _hashlib.sha256(raw).hexdigest()
+    sub = _os.path.join("QC_ERROR", str(int(id)))
+    d = _os.path.join(DOC_STORAGE_PATH, sub)
+    try:
+        _os.makedirs(d, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(500, f"저장경로 생성 실패({DOC_STORAGE_PATH}): {e}")
+    safe = f"{slot}_{sha[:12]}_{fname}"
+    with open(_os.path.join(d, safe), "wb") as fp: fp.write(raw)
+    rel = _os.path.join(sub, safe)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        col = _QC_SLOT[slot]
+        cur.execute(f"SELECT ISNULL({col},0) FROM nx.qc_error WHERE id=?", int(id))
+        r = cur.fetchone()
+        if not r: raise HTTPException(404, "불량건 없음 — 먼저 저장한 뒤 첨부하세요.")
+        old = int(r[0] or 0)
+        cur.execute("""INSERT INTO nx.doc(doc_kind,item_code,orig_filename,storage_uri,ext,byte_size,sha256,insert_user,insert_dt)
+            OUTPUT INSERTED.doc_id VALUES('QC_ERROR',?,?,?,?,?,?,?,GETDATE())""",
+            str(int(id)), fname, rel, ext, len(raw), sha, (user or "웹사용자")[:20])
+        did = int(cur.fetchone()[0])
+        cur.execute(f"UPDATE nx.qc_error SET {col}=?, upd_user=?, upd_dt=getdate() WHERE id=?",
+                    did, (user or "웹사용자")[:40], int(id))
+        if old:      # 같은 칸의 이전 파일은 삭제표시(실파일은 남겨 복구 가능)
+            cur.execute("UPDATE nx.doc SET del_flag=1 WHERE doc_id=?", old)
+        return {"ok": True, "doc_id": did, "slot": slot, "filename": fname, "size": len(raw)}
+    finally:
+        nx.close()
+
+@router.post("/api/qc/error/file_delete")
+def qc_error_file_delete(payload: dict = Body(...)):
+    """첨부 삭제(파일삭제 체크) — 슬롯을 비운다. 실파일은 남기고 doc 만 삭제표시."""
+    try: rid = int(payload.get("id"))
+    except Exception: raise HTTPException(400, "id 필요")
+    slot = str(payload.get("slot", "")).strip()
+    if slot not in _QC_SLOT:
+        raise HTTPException(400, "slot 은 attach/plan1/plan2 중 하나여야 합니다.")
+    col = _QC_SLOT[slot]
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute(f"SELECT ISNULL({col},0) FROM nx.qc_error WHERE id=?", rid)
+        r = cur.fetchone()
+        if not r: return {"ok": False, "errors": ["불량건 없음"]}
+        did = int(r[0] or 0)
+        cur.execute(f"UPDATE nx.qc_error SET {col}=NULL, upd_dt=getdate() WHERE id=?", rid)
+        if did: cur.execute("UPDATE nx.doc SET del_flag=1 WHERE doc_id=?", did)
+        return {"ok": True, "slot": slot, "deleted_doc_id": (did or None)}
     finally:
         nx.close()
 
