@@ -338,7 +338,10 @@ SCREEN.itemspec=(host)=>{
 SCREEN.basemaster=(c)=>{
   const API=API_BASE;
   const TABS=[{k:'partner',t:'거래처 마스터'},{k:'dept',t:'부서 마스터'},{k:'line',t:'라인 마스터'},{k:'assem',t:'조립공정 마스터'},{k:'proc',t:'단품공정 마스터'},
-              {k:'partmaster',t:'파트 마스터'},{k:'cal_line',t:'라인별달력',cal:1},{k:'cal_part',t:'공장운영 달력관리',cal:1}];
+              {k:'partmaster',t:'파트 마스터'},{k:'cal_line',t:'라인별달력',cal:1},
+              // ★근무달력(HR_M_CALENDAR) — 화면·API 는 이미 있었는데 탭 등록만 누락돼 있었다(2026-08-26).
+              //   레거시 w_hr_master_060 대응. 계획 당김·조회기간 산출의 근무일 판정 기준.
+              {k:'cal_work',t:'근무 달력관리',cal:1},{k:'cal_part',t:'공장운영 달력관리',cal:1}];
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   let kind='partner', q='', data={headers:[],rows:[],cnt:0,title:'',table:''}, loading=false, msg='';

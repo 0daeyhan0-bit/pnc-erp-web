@@ -163,6 +163,10 @@ from routers import setstock as _r_setstock  # 가공세트재고관리(w_pu_sto
 app.include_router(_r_setstock.router)
 from routers import qareview as _r_qareview  # 품질 반성회일지(w_pr_input_590 + 등록 595)
 app.include_router(_r_qareview.router)
+# ★생산계획업로드(검토) — soyo.py 파이프라인 사본 + 레거시식 단계별 실행(/api/planrev/*).
+#   현행 soyo.py·screens.prod.js 무변경. 검증 후 승격 여부 결정. (2026-08-26)
+from routers import planrev as _r_planrev
+app.include_router(_r_planrev.router)
 from routers import muldong as _r_muldong  # LG 물동량(영업) 업로드+조회 → nx.lg_muldong (자재예상매입 4주초과 소요원)
 app.include_router(_r_muldong.router)
 import weight_calc  # 무게정산(중량조정) 계산

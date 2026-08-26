@@ -100,6 +100,9 @@ const MODULES=[
    {id:'docmgr',ic:'📐',nm:'도면/문서 조회'},
    {id:'basemaster',ic:'🗂️',nm:'기준 마스터 관리'},
    {id:'prodinfo',ic:'⚙️',nm:'생산정보등록'},
+   // ★검토용(2026-08-26) — ① 신규모델 검색·생성 결과 확인 + 제외조건 등록(레거시 w_pr_master_050/070).
+   //   삭제=일회성(다음 편성에 재생성) / 제외조건=영구차단. 편성 STEP M 의 3중 NOT EXISTS 중 하나.
+   {id:'modelbomhist',ic:'🧪',nm:'모델BOM 이력·제외',tag:'검토'},
  ]},
  {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
    {id:'mat',ic:'📦',nm:'자재목록조회'},
@@ -142,6 +145,9 @@ const MODULES=[
    {sep:true},
    {id:'orderupload',ic:'📥',nm:'주문업로드'},
    {id:'planupload',ic:'📅',nm:'생산계획업로드'},
+   // ★검토용(2026-08-26) — 레거시식 단계별 실행. 편성로직은 사본(동일), 실행방식만 다름. 기존분과 병행.
+   //   tag:'검토' = 사이드바에 주황 배지 + 글자색으로 구분(검토중 메뉴임을 한눈에).
+   {id:'planuploadrev',ic:'🧪',nm:'생산계획업로드',tag:'검토'},
    {id:'planinput',ic:'➕',nm:'생산계획추가입력'},
    {id:'prodsheet',ic:'🖨️',nm:'생산전표출력관리'},
    {id:'partplan',ic:'🧩',nm:'파트별 생산계획'},
@@ -221,7 +227,19 @@ function applyMenuOrder(){
     const used=new Set(), out=[];
     saved.forEach(tok=>{ if(tok==='__sep__')out.push({sep:true});
       else if(byId[tok]&&!used.has(tok)){out.push(byId[tok]);used.add(tok);} });
-    m.subs.forEach(it=>{if(!it.sep&&!used.has(it.id)){out.push(it);used.add(it.id);}});  // 신규(미저장) 항목은 뒤에
+    // ★신규(미저장) 항목은 '정의상 바로 앞 항목' 뒤에 끼운다(2026-08-26 수정).
+    //   예전엔 무조건 맨 뒤로 밀어서, 메뉴를 한 번이라도 드래그한 사용자는 새 메뉴가
+    //   엉뚱한 위치(맨 아래)에 나타났다. 이제 개발자가 의도한 자리에 들어간다.
+    m.subs.forEach((it,i)=>{
+      if(it.sep||used.has(it.id))return;
+      let at=out.length;                                  // 기본=맨 뒤(앞 항목이 전부 신규면)
+      for(let k=i-1;k>=0;k--){                            // 정의상 바로 앞의 '이미 배치된' 항목을 찾아
+        const p=m.subs[k]; if(p.sep||!used.has(p.id))continue;
+        const pos=out.findIndex(o=>!o.sep&&o.id===p.id);
+        if(pos>=0){at=pos+1;break;}
+      }
+      out.splice(at,0,it); used.add(it.id);
+    });
     if(out.some(it=>!it.sep))m.subs=out;
   });
 }
@@ -237,7 +255,14 @@ function resetMenuOrder(){ localStorage.removeItem(MENU_ORDER_KEY); location.rel
 function buildTree(){
   applyMenuOrder();
   if(!document.getElementById('menuDragCss')){const st=document.createElement('style');st.id='menuDragCss';
-    st.textContent='.tree-leaf[draggable=true]{cursor:grab}.tree-leaf.dragging{opacity:.45}.tree-leaf.drop-before{box-shadow:inset 0 2px 0 #1c47a0}.tree-leaf.drop-after{box-shadow:inset 0 -2px 0 #1c47a0}.menu-reset{font-size:11px;color:#8aa0bd;cursor:pointer;padding:6px 12px}.menu-reset:hover{color:#1c47a0;text-decoration:underline}';
+    st.textContent='.tree-leaf[draggable=true]{cursor:grab}.tree-leaf.dragging{opacity:.45}.tree-leaf.drop-before{box-shadow:inset 0 2px 0 #1c47a0}.tree-leaf.drop-after{box-shadow:inset 0 -2px 0 #1c47a0}.menu-reset{font-size:11px;color:#8aa0bd;cursor:pointer;padding:6px 12px}.menu-reset:hover{color:#1c47a0;text-decoration:underline}'
+      /* ★검토중 메뉴 강조(2026-08-26) — 운영메뉴와 시각적으로 확실히 구분.
+         메뉴명이 길어도 배지가 줄바꿈되지 않게 flex + nowrap. 배지는 우측 정렬. */
+      +'.tree-leaf-tag{color:#b45309!important;font-weight:600;background:linear-gradient(90deg,#fff7ec,transparent);border-left:3px solid #e08a1c;'
+      +'display:flex;align-items:center;gap:6px;white-space:nowrap}'
+      +'.tree-leaf-tag:hover{background:linear-gradient(90deg,#ffeed4,transparent)}'
+      +'.tag-chip{flex:0 0 auto;margin-left:auto;padding:0 6px;border-radius:8px;background:#e08a1c;color:#fff;'
+      +'font-size:10px;font-weight:700;line-height:16px;letter-spacing:-.3px}';
     document.head.appendChild(st);}
   const sb=document.getElementById('sidebar');
   let h=`<div class="tree"><div class="tree-leaf" data-id="dash">대시보드</div>`;
@@ -249,8 +274,9 @@ function buildTree(){
       <div class="tree-children">`;
     subs.forEach(it=>{
        if(it.sep){h+=`<div class="tree-sep" data-sep="1" style="height:1px;background:#d5dde8;margin:6px 12px"></div>`;return;}
-       h+=`<div class="tree-leaf" draggable="true" data-id="${it.id}">${it.nm}
-       ${it.cnt!=null?`<span class="badge">${won(it.cnt)}</span>`:''}${it.soon?'<span class="badge">준비</span>':''}</div>`;});
+       // ★tag 붙은 메뉴(검토중 등)는 색상·배지로 구분 — 운영메뉴와 헷갈리지 않게(2026-08-26)
+       h+=`<div class="tree-leaf${it.tag?' tree-leaf-tag':''}" draggable="true" data-id="${it.id}"${it.tag?` title="${it.tag}중인 메뉴 — 운영메뉴와 병행"`:''}>${it.nm}
+       ${it.tag?`<span class="tag-chip">${it.tag}</span>`:''}${it.cnt!=null?`<span class="badge">${won(it.cnt)}</span>`:''}${it.soon?'<span class="badge">준비</span>':''}</div>`;});
     h+=`</div></div>`;
   });
   h+=`<div class="menu-reset" title="드래그로 바꾼 메뉴 순서를 기본값으로 되돌립니다">↺ 메뉴 순서 초기화</div>`;
