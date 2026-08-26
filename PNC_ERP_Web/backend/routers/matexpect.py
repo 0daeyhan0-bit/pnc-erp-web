@@ -137,7 +137,10 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
     nx = _nx(); cur = nx.cursor()
     try:
         itnm, cust = _name_maps(cur)
-        agg = {}  # (mat, vendor) → {exp, act}
+        # 자재 매입처(정본 in_cust) — 분류·실적귀속 공통 (설계 §4)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+        incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
+        agg = {}  # (mat, vendor) → {exp, act, buy}
 
         def _row(mat, vendor):
             k = (mat, vendor)
@@ -199,8 +202,6 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
         # 완제품 완성수량 × per-unit 소요(사전계산 캐시) → 자재소요. 실적 vendor 귀속 = PR_M_ITEM.in_cust_code(설계 §4)
         if driver:
             _ensure_soyo_cache(cur)   # ★BOM 서명 가드: 변경(sync/bom_save)시 캐시·엔진 무효→재빌드
-            cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
-            incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
             items = [it for it, dq in driver.items() if dq]
             smap = {}; cached = set()
             for i in range(0, len(items), 1000):     # 배치 캐시읽기(IN, 파라미터 청크)
@@ -277,17 +278,39 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
                 "base_qty": round(base_stock.get(mat, 0.0), 2),   # 기초재고(월초)
                 "cur_qty": round(cur_stock.get(mat, 0.0), 2),     # 현재고(참고)
             })
+        # ── ③-c 상시보유·필요수량·적정성 (자재×업체 세분 유지·재고는 소요비율 배분→Σ=자재레벨 일치) ──
+        cur.execute("SELECT cust_code, ISNULL(lead_time_days,0) FROM nx.cust")
+        lead_cust = {str(r[0]).strip(): (r[1] or 0) for r in cur.fetchall()}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(pur_lead_time,0) FROM nx.item_sub")
+        lead_item = {r[0]: (r[1] or 0) for r in cur.fetchall()}
+        days = max(1, int(dL[-2:]))                       # 기간일(월 일수) — 일평균소요 분모
+        tot_mat = {}
+        for r in rows:
+            tot_mat[r["mat_code"]] = tot_mat.get(r["mat_code"], 0.0) + r["tot_qty"]
+        for r in rows:
+            tm = tot_mat.get(r["mat_code"], 0.0)
+            ratio = (r["tot_qty"] / tm) if tm > 1e-9 else 0.0
+            base_v = r["base_qty"] * ratio                # 재고 소요비율 배분(Σ_업체 = 자재 기초재고)
+            cur_v = r["cur_qty"] * ratio
+            lt = lead_item.get(r["mat_code"]) or lead_cust.get(r["vendor_code"], 0) or 0   # 품목 override ▷ 거래처 기본
+            safety = lt * (r["tot_qty"] / days)           # 상시보유 = 리드타임 × 일평균소요
+            need = max(0.0, r["tot_qty"] + safety - base_v - 0.0)   # 필요수량 = max(0, 총소요+상시보유−기초재고−미착(0))
+            r["base_qty"] = round(base_v, 2); r["cur_qty"] = round(cur_v, 2)
+            r["lead_days"] = int(lt); r["safety_qty"] = round(safety, 2); r["misak_qty"] = 0.0
+            r["need_qty"] = round(need, 2)
+            r["fit_qty"] = round(r["buy_qty"] - need, 2)  # 적정성 = 매입실적 − 필요수량 (+과매입 / −부족)
+
         rows.sort(key=lambda r: -r["tot_qty"])
         # 분류 요약
         summ = {}
         for r in rows:
-            s = summ.setdefault(r["grp"], {"grp": r["grp"], "mats": 0, "tot": 0.0})
-            s["mats"] += 1; s["tot"] += r["tot_qty"]
+            s = summ.setdefault(r["grp"], {"grp": r["grp"], "mats": 0, "tot": 0.0, "need": 0.0, "buy": 0.0, "fit": 0.0})
+            s["mats"] += 1; s["tot"] += r["tot_qty"]; s["need"] += r["need_qty"]; s["buy"] += r["buy_qty"]; s["fit"] += r["fit_qty"]
         return {
             "ym": ym, "axis": axis,
             "act_range": act_rng, "exp_range": exp_rng,
             "rows": rows, "cnt": len(rows), "summary": list(summ.values()),
-            "note": "②-a 예상(plan_part_mat 배분)+②-b 실적(생산=제품입고P+설치/이지링크 출하·영업=출하 × prod_soyo). 넷팅(③) 후속.",
+            "note": "②소요(예상 plan_part_mat + 실적 제품입고P/출하×prod_soyo 캐시) + ③넷팅(재고 mat_stock_daily·상시보유 리드타임×일평균·매입 tag9/S/수입·필요수량 max(0,소요+상시보유−기초−미착)·적정성 매입−필요). 자재×업체 세분·재고는 소요비율 배분(Σ=자재).",
         }
     finally:
         nx.close()
