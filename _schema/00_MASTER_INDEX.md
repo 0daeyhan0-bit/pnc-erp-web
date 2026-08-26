@@ -110,12 +110,13 @@
 | ESTI_COST_MGMT_DESIGN | 07-28 | ◻ | 견적원가관리신규(승인게이트). 구현예정 |
 | GAGONG_4PROGRAMS_ANALYSIS | 07-31 | ✓ | ★가공"진척"화면(원가 아님·혼동주의) |
 
-### C-3. 소요/계획/생산/키팅 (10)
+### C-3. 소요/계획/생산/키팅 (11)
 | 문서 | 날짜 | 상태 | 한줄 |
 |---|---|---|---|
 | SOYO_ENGINE_UNIFY_DESIGN | 08-23 | ★ | 통일소요엔진(explode1회+walker) diff0 |
 | PLAN_PROGRAM_MASTER | 08-23 | ★ | 계획 착수앵커+P1~P12. partplan retire |
 | PLAN_UPLOAD_PIPELINE_ANALYSIS | 08-14 | ★ | STEP0~8 재현스펙. 소요99.984% |
+| PLAN_UPLOAD_LEGACY_VS_WEB | 08-26 | ★ | 생산계획업로드 레거시↔웹 실측대사(한대윤). ★당김0%·휴무906건·SUB컷버그·GUBUN정정(X·M·H·L·I·K·S·Z). 자재예상매입 상류 |
 | PARTPLAN_410_LEGACY_MATCH_PLAYBOOK | 08-16 | ✓ | 410 diff0 방법론(4풀 A90→B→C50→J40) |
 | KITTING_GRID_VERIFY | 08-16 | ✓ | 키팅 diff0(ASSY work_code축) |
 | PLAN_ENGINE_UNIFY_INITIATIVE | 08-16 | ◻ | 정본2엔진(plan_part410·prog420nx) |
