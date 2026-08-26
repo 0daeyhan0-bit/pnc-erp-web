@@ -710,13 +710,27 @@ def planrev_step_linetime(payload: dict = Body(...)):
 
 @router.post("/api/planrev/step/part")
 def planrev_step_part(payload: dict = Body(...)):
-    """④ 파트별 계획생성 — STEP5(I) + STEP6(K). 로그는 I·K 2행."""
+    """④ 파트별 계획생성 — STEP5(I) + STEP6(K) + 리드타임당김(L2). 로그는 I·K·L2 3행.
+
+    ★STEP6 는 `DROP TABLE + SELECT INTO` 로 nx.plan_part_dtl 을 재생성한다(planrev.py:153).
+      그때 당김 컬럼(part_plan_ymd·part_output_hm…)이 통째로 사라지므로,
+      ④ 단독 실행 뒤에는 반드시 리드타임 당김을 다시 얹어야 한다.
+      (안 그러면 410 파트별생산계획의 PART INPUT·당일이전계획이 빈칸이 된다 — 2026-08-26 실측)"""
     user = _by(payload)
     def _f(cur):
         t1 = time.time()
         r = _step5_item(cur)
         _job_log(cur, "I", user, int(time.time() - t1), "OK", "", r.get("item_lines"))
         r.update(_step6_part(cur))
+        # ★리드타임 당김을 이어서 — 라인당김 맵이 있을 때만(없으면 ③을 먼저 눌러야 한다).
+        t2 = time.time()
+        cur.execute("SELECT CASE WHEN OBJECT_ID('nx.plan_line_pull') IS NULL THEN 0 ELSE 1 END")
+        if int(cur.fetchone()[0] or 0):
+            r2 = _stepL_pull(cur)
+            r.update(r2)
+            _job_log(cur, "L2", user, int(time.time() - t2), "OK", "", r2.get("pull_lines"))
+        else:
+            r["warn_pull"] = "라인당김 맵이 없어 리드타임 당김을 건너뛰었습니다 — ③을 먼저 실행하세요."
         return r
     return _run_step("K", _f, user)
 
