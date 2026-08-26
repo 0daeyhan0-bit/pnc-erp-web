@@ -331,11 +331,10 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
             ratio = (r["tot_qty"] / tm) if tm > 1e-9 else 0.0
             base_v = r["base_qty"] * ratio                # 재고 소요비율 배분(Σ_업체 = 자재 기초재고)
             cur_v = r["cur_qty"] * ratio
-            lt = lead_item.get(r["mat_code"]) or lead_cust.get(r["vendor_code"], 0) or 0   # 품목 override ▷ 거래처 기본
-            safety = lt * (r["tot_qty"] / days)           # 상시보유 = 리드타임 × 일평균소요
-            need = max(0.0, r["tot_qty"] + safety - base_v - 0.0)   # 필요수량 = max(0, 총소요+상시보유−기초재고−미착(0))
+            lt = lead_item.get(r["mat_code"]) or lead_cust.get(r["vendor_code"], 0) or 0   # 품목 override ▷ 거래처 기본(L/T 표시용)
+            need = max(0.0, r["tot_qty"] - base_v - 0.0)   # 필요수량 = max(0, 총소요 − 기초재고 − 미착(0)) ★상시보유 개념 제거
             r["base_qty"] = round(base_v, 2); r["cur_qty"] = round(cur_v, 2)
-            r["lead_days"] = int(lt); r["safety_qty"] = round(safety, 2); r["misak_qty"] = 0.0
+            r["lead_days"] = int(lt); r["safety_qty"] = 0.0; r["misak_qty"] = 0.0
             r["need_qty"] = round(need, 2)
             r["fit_qty"] = round(r["buy_qty"] - need, 2)  # 적정성 = 매입실적 − 필요수량 (+과매입 / −부족)
 
