@@ -59,7 +59,7 @@ def modelbom_get(model: str = Query(""), item: str = Query("")):
         if codes:
             for i in range(0, len(codes), 900):
                 ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-                cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(IN_CUST_CODE,''), LTRIM(RTRIM(ISNULL(WORK_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+                cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(in_cust,''), LTRIM(RTRIM(ISNULL(WORK_CODE,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
                 for x in cur.fetchall(): nm[x[0]] = {"nm": x[1], "wc": (x[3] if x[3] else x[2])}
         for r in rows:
             info = nm.get(r["item"], {}); r["nm"] = info.get("nm", ""); r["wc"] = info.get("wc", "")

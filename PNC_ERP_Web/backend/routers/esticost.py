@@ -68,9 +68,9 @@ def esticost_expand(item: str = Query(..., description="상위품번(LG BOM mode
             try:
                 for i in range(0, len(miss), 900):
                     chunk = miss[i:i+900]; ph = ",".join("?" * len(chunk))
-                    lcur.execute(f"""SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0),
-                          ISNULL(ITEM_LENGTH,0), ISNULL(METAL_GUBUN,''), ISNULL(IN_CUST_CODE,''), ISNULL(MAKE_TYPE,'')
-                        FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *chunk)
+                    lcur.execute(f"""SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(diam,0), ISNULL(thick,0),
+                          ISNULL(length,0), ISNULL(METAL_GUBUN,''), ISNULL(in_cust,''), ISNULL(MAKE_TYPE,'')
+                        FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})""", *chunk)
                     for r in lcur.fetchall():
                         info.setdefault(r[0], {"nm": r[1], "diam": float(r[2] or 0), "thick": float(r[3] or 0),
                             "length": float(r[4] or 0), "metal": str(r[5]).strip(), "wt": 0.0, "cost_gubun": "",

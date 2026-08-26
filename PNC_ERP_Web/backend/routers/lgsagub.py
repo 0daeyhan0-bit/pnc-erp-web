@@ -635,7 +635,7 @@ def _parts_maps(cur):
     ch = {}
     for p, c2, q in cur.fetchall():
         ch.setdefault(p, []).append((c2, float(q or 0)))
-    cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
     sg310 = set(r[0] for r in cur.fetchall())
     _PARTS_MAPS = (ch, sg310)
     return _PARTS_MAPS
