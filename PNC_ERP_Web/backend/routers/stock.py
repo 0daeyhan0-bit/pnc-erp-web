@@ -41,19 +41,19 @@ def stock_list(screen: str = Query("adjust"), ymd_from: str = Query(...), ymd_to
         sign = "-1" if sc["sign"] == -1 else "1"
         cur.execute(f"""
             SELECT TOP 500 l.MAINT_YMD, l.MAINT_SEQ, l.MAINT_TAG, tg.name AS tag_name,
-                   l.CUST_CODE, pc.partner_name AS cust_name, l.GAGONG_PROC_CODE,
+                   l.CUST_CODE, pc.CUST_DESC AS cust_name, l.GAGONG_PROC_CODE,
                    l.MAT_CODE, i.item_name, i.item_spec, l.ITEM_CODE,
                    (l.MAINT_QTY * {sign}) AS qty, l.MAINT_COST, l.MAINT_AMT, l.REMARKS,
                    l.SHEET_NO, l.INSP_FLAG, l.WORK_CODE, l.TO_GAGONG_PROC_CODE, l.OUT_WH_GUBUN,
                    l.INSERT_USER_ID, l.INSERT_DATETIME
             FROM nx.stock_ledger l
             LEFT JOIN nx.item i ON i.item_code = l.MAT_CODE
-            LEFT JOIN nx.partner pc ON pc.partner_code = l.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = l.CUST_CODE
             LEFT JOIN nx.stock_tag tg ON tg.tag = l.MAINT_TAG
             WHERE l.STOCK_POINT='MAT' AND l.MAINT_YMD BETWEEN ? AND ? AND l.MAINT_TAG IN ('{tags}')
               AND (? = '%%' OR l.MAT_CODE LIKE ? OR l.CUST_CODE LIKE ?)
               AND (? = '' OR l.CUST_CODE = ?)
-              AND (? = '' OR l.CUST_CODE LIKE ? OR pc.partner_name LIKE ?)
+              AND (? = '' OR l.CUST_CODE LIKE ? OR pc.CUST_DESC LIKE ?)
             ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""",
             ymd_from.strip(), ymd_to.strip(), like, like, like, ccode, ccode, cs, clike, clike)
         cols = [d[0] for d in cur.description]
