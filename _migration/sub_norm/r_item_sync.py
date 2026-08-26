@@ -61,7 +61,7 @@ c.execute(f"""UPDATE i SET
    i.in_cust=LTRIM(RTRIM(p.IN_CUST_CODE)), i.item_spec=p.ITEM_SPEC, i.work_code=LTRIM(RTRIM(p.WORK_CODE)),
    i.sgroup=LTRIM(RTRIM(p.ITEM_SGROUP)), i.lgroup=LTRIM(RTRIM(p.ITEM_LGROUP)),
    i.item_status=LTRIM(RTRIM(p.ITEM_STATUS)), i.prod_rate=p.PROD_RATE,
-   i.unit=ISNULL(NULLIF(LTRIM(RTRIM(p.UNIT)),''),'EA')
+   i.unit=ISNULL(LTRIM(RTRIM(p.UNIT)),'')
    FROM {J}""")
 print("리더 컬럼 동기화 완료(item_name=접미사 보존 위해 제외).")
 n.close()

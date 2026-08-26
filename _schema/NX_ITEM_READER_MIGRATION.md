@@ -69,7 +69,11 @@ A `cost·salemagam·app·procbc·_sp_4wk` / B `weight_calc·price·bom` / C `pro
 ## 3. 잔여 파일 — 없음 (전-백엔드 미러 리더 이관 완료)
 전형태 코드잔여 0. soyo dbo.PR_M_ITEM(STEP7 라이브 629/630/636)만 보존(미러 아님).
 
-## 4. 은퇴 절차(예정)
-1. §1 갭 컬럼 nx.item 추가 + r_item_sync/일마감에 채움 → 갭 대기 파일 이관.
-2. 잔여 0 확인(대소문자무시 `nx.pr_m_item` grep = 0).
-3. DO_NOT_USE_FIELDS.md 등록 + 컷오버 시 미러 PR_M_ITEM drop.
+## 4. 은퇴 절차 — 진행상태
+1. ✅ 갭 컬럼 12개 + item_weight 추가·backfill (`r_item_gapcols`).
+2. ✅ 전형태 리더 이관 완료 (PR #68~74·재이관 A~F). `PR_M_ITEM\b` 전형태 코드잔여 0.
+3. ✅ **동기화 실행·드리프트 0** (2026-08-26): `r_item_sync` 전 리더/원가 컬럼 nx.item=live 완전일치 검증. unit NULL→'' 처리(NOT NULL·parity). item_name만 SUB 접미사 보존 위해 제외(비-SUB 9건은 클린 정정명 허용).
+4. ✅ **DO_NOT_USE_FIELDS.md §14 등록** — 신규코드 미러 읽기 금지(전형태)·nx.item 정본.
+5. ☐ **컷오버 시 `nx.PR_M_ITEM` drop** (되돌리기 어려워 컷오버까지 보류. 잔여0 확인됨).
+
+→ **코드·데이터·거버넌스 완료. 물리 drop만 컷오버 대기.**
