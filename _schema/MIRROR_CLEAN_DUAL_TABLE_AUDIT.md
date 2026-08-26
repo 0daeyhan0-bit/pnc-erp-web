@@ -110,4 +110,26 @@ nx 테이블은 **설계상 두 갈래**(CUTOVER_DELTA §2):
 - **기등록 연계**: C9(BOM)·C10(bom_line 미러)·C13(재고)·C14(공정명)은 이 감사의 쌍3/쌍6/쌍4와 동일 주제.
 
 ---
+
+## 5. ★쌍1 nx.item 단일정본화 규명 (2026-08-26·읽기전용·근본해결 착수)
+> 사용자 지시: "B(근본) 우선·정확히·컷오버 부담 제거·미래 모든 프로그램도 그렇게(CLAUDE.md §1-9 규칙화)."
+
+**nx.item 현황**: 46컬럼(19코어 + Phase② ADD 완료: item_group/class/work_code/sale_cust/pur_gubun/obtain_gubun/prod_rate/kitting_min/... + 우리추가 nature/active/use_flag/cut_gubun/item_source). 25,354행.
+
+**필드별 드리프트 실측 (nx.item vs PR_M_ITEM 공통품번, scratchpad/item_master_drift.py):**
+- ✅ **정합(~0%)**: diam·thick·length·unit·metal_gubun·lgroup·sgroup·make_type·cost_gubun·item_spec·**in_cust(0.05%, "561 FAIL" 해소됨)**.
+- ⚠ **item_name 8.23%(1,984)** = **접미사 병기 때문 확정**(1,975가 PR 접미사 떼면 nx.item과 동일). → 접미사를 nx.item에도 병기하면 해소(스크립트 확장완료).
+- ⚠ **net_weight 12.57%(1,334)** = **정당한 2축**(비율 distinct 97=개별 실측차, 단위차 아님). nx.item.net_weight=geom/실측 vs PR_M_ITEM.ITEM_WEIGHT=LG인증([[newerp-weight-source-lg-vs-actual]]). **버그 아님** — 목적별 정본 다름(원가/정산=LG중량, nx_soyo_engine이 PR_M_ITEM 직독으로 diff0). → nx.item에 `lg_weight` 컬럼 추가해 단일소스화 검토.
+- ✅ **status 100% "드리프트"는 착시** — nx.item에 `status`(재설계 한글 사용/휴면)+`item_status`(미러코드 1/2/3/5) **둘 다 보유**. item_status=미러 ITEM_STATUS와 24,100/24,113 동일. 비교대상 오류였음.
+
+**커버리지**: nx.item 25,354 · PR_M_ITEM 24,120 · nx만 1,241(SUB/신규) · **미러만 7**(채울 갭).
+
+**∴ 정본화 계획(작음·컷오버 부담↓)**:
+1. **접미사 → nx.item.item_name** 병기(r_sub_desc_suffix.py 이미 양쪽 대상 확장). 일 루틴 편입.
+2. **중량 축 명확화**: nx.item에 `lg_weight`(=ITEM_WEIGHT) 추가 → 원가/정산이 nx.item 단일소스. net_weight=실측 축 유지.
+3. **미러만 7건** nx.item 편입.
+4. **리더 점진 이관**: PR_M_ITEM 읽는 ~35파일 → nx.item(엔드포인트별 before/after diff0 검증·옆에짓고). 일 sync 편입으로 컷오버=flip.
+5. 검증: 이관 엔드포인트 결과 불변(diff0)·nx.item 필드 정합 상시감시.
+
+---
 *이 감사는 살아있는 문서. 수렴/은퇴가 진행되면 갱신. 코드매핑 원본 = Explore 스캔(2026-08-26).*
