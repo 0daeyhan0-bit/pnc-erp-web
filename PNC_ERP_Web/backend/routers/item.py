@@ -196,7 +196,7 @@ def itemmaster_get(item: str = Query(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         allc = ["item_code"] + _IM_CORE + [c for c in _IM_BIZ]
-        cur.execute(f"SELECT {','.join(allc)},silver_flag,has_gagong,nature,active,prod_group,prod_line FROM nx.item WHERE item_code=?", code)
+        cur.execute(f"SELECT {','.join(allc)},silver_flag,has_gagong,nature,active,prod_group,prod_line,ISNULL(cut_gubun,'') cut_gubun FROM nx.item WHERE item_code=?", code)
         r = cur.fetchone()
         if not r: raise HTTPException(404, "품목 없음")
         cols = [d[0] for d in cur.description]
