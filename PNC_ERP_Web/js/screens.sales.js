@@ -1483,14 +1483,13 @@ SCREEN.muldong=(c)=>{
     catch(e){st.rows=[];st.months=[];st.msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';}
     st.loading=false;draw();};
   const upload=async(file)=>{
-    if(st.upBiz!=='RAC'&&st.upBiz!=='SAC'){alert('업로드 사업부(RAC/SAC)를 먼저 선택하세요.');return;}
     st.uploading=true;st.msg='업로드 중…';draw();
     try{const fd=new FormData();fd.append('file',file);
-      const j=await(await fetch(`${API}/api/muldong/upload?biz=${encodeURIComponent(st.upBiz)}`,{method:'POST',body:fd})).json();
-      st.msg=j.ok?`${j.biz} 업로드 완료 — 모델 ${nf(j.models)} · ${nf(j.rows)}행 · 월 ${ymL(j.months[0])}~${ymL(j.months[j.months.length-1])}`
-                 :'업로드 실패: '+(j.error||'');}
+      const j=await(await fetch(`${API}/api/muldong/upload?biz=${encodeURIComponent(st.biz)}`,{method:'POST',body:fd})).json();
+      if(j.ok){st.biz=j.biz;st.msg=`${j.biz} 업로드 완료 — 모델 ${nf(j.models)} · ${nf(j.rows)}행 · 월 ${ymL(j.months[0])}~${ymL(j.months[j.months.length-1])}`;}
+      else{st.msg='업로드 실패: '+(j.error||j.detail||'파일/사업부 확인');}}
     catch(e){st.msg='업로드 오류: '+e.message;}
-    st.uploading=false;await loadSum();st.biz=st.upBiz;await load();};
+    st.uploading=false;await loadSum();await load();};
   const draw=()=>{
     const months=st.months.slice();
     const map={};
@@ -1503,15 +1502,14 @@ SCREEN.muldong=(c)=>{
      <div class="page-sub" style="margin-bottom:6px">RAC/SAC 물동 엑셀(모델명+월별 수량) 업로드 → 자재예상매입의 4주 초과 장기 소요 산출에 사용. 재업로드=해당 사업부 전체 교체. 보유: ${esc(sumTxt)}</div>
      <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:8px;flex-wrap:wrap;flex:0 0 auto">
        <div style="flex:0 0 auto;border:1px solid #cfe0f5;border-radius:8px;padding:8px 14px;background:#fbfdff;display:flex;flex-direction:column;justify-content:center">
-         <div style="font-size:11px;color:#5a7597;margin-bottom:5px">업로드 사업부 <span style="color:#c0392b">*</span></div>
-         <div style="display:flex;gap:14px"><label class="rl"><input type="radio" name="md-upbiz" value="RAC"${st.upBiz==='RAC'?' checked':''}> RAC(DGZ)</label><label class="rl"><input type="radio" name="md-upbiz" value="SAC"${st.upBiz==='SAC'?' checked':''}> SAC(DMZ)</label></div></div>
+         <div style="font-size:11px;color:#5a7597;margin-bottom:5px">사업부 (선택 즉시 조회)</div>
+         <div style="display:flex;gap:14px"><label class="rl"><input type="radio" name="md-biz" value=""${st.biz===''?' checked':''}> 전체</label><label class="rl"><input type="radio" name="md-biz" value="RAC"${st.biz==='RAC'?' checked':''}> RAC(DGZ)</label><label class="rl"><input type="radio" name="md-biz" value="SAC"${st.biz==='SAC'?' checked':''}> SAC(DMZ)</label></div></div>
        <div id="md-dz" style="flex:1;min-width:300px;border:2px dashed #8fb4d6;border-radius:8px;padding:8px;background:#f4f9fe;color:#5a7597;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px">
-         LG 물동 엑셀 <b style="margin:0 5px">드래그&드롭 또는 클릭</b> <span style="color:#8aa0bd;margin-left:6px">(사업부 선택 후 · LG_RAC/SAC_26년물동.xls)</span>
+         LG 물동 엑셀 <b style="margin:0 5px">드래그&드롭 또는 클릭</b> <span style="color:#8aa0bd;margin-left:6px">(LG_RAC/SAC_26년물동.xls · 파일명으로 사업부 자동인식)</span>
          <input type="file" id="md-f" accept=".xlsx,.xls" style="display:none"></div>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.indexOf('완료')>=0?'#1c7c3a':'#c0392b'};flex:0 0 auto">${esc(st.msg)}</div>`:''}
      <div class="toolbar" style="gap:6px;flex:0 0 auto">
-       <label class="tl">사업부</label><select class="sel" id="md-biz"><option value="">전체</option><option value="RAC"${st.biz==='RAC'?' selected':''}>RAC</option><option value="SAC"${st.biz==='SAC'?' selected':''}>SAC</option></select>
        <input class="inp" id="md-q" placeholder="모델/TOOL 검색" value="${esc(st.q)}" style="width:180px">
        <button class="btn" id="md-go">조회</button>
        <div class="spacer"></div><div class="s-item">모델 <b>${nf(list.length)}</b></div><div class="s-item">Σ수량 <b>${nf(gtot)}</b></div>
@@ -1522,20 +1520,21 @@ SCREEN.muldong=(c)=>{
        <tbody>${st.loading?`<tr><td colspan="${months.length+4}" class="empty">불러오는 중…</td></tr>`:(list.length?list.map(p=>`<tr>
          <td class="center">${esc(p.biz)}</td><td><b>${esc(p.model)}</b></td><td class="cap">${esc(p.tool||'')}</td><td class="num"><b>${nf(p.tot)}</b></td>
          ${months.map(mm=>`<td class="num">${p.m[mm]?nf(p.m[mm]):''}</td>`).join('')}</tr>`).join('')
-         :`<tr><td colspan="${months.length+4}" class="empty">데이터 없음 — 사업부 선택 후 엑셀 업로드</td></tr>`)}</tbody>
+         :`<tr><td colspan="${months.length+4}" class="empty">데이터 없음 — LG 물동 엑셀을 업로드하세요</td></tr>`)}</tbody>
        ${list.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc"><td colspan="3" class="right">총계 (${nf(list.length)} 모델)</td><td class="num"><b>${nf(gtot)}</b></td>${months.map(mm=>`<td class="num">${nf(colTot[mm]||0)}</td>`).join('')}</tr></tfoot>`:''}
       </table>
      </div>
     </div>`;
-    c.querySelectorAll('input[name=md-upbiz]').forEach(r=>r.onchange=e=>{st.upBiz=e.target.value;});
+    c.querySelectorAll('input[name=md-biz]').forEach(r=>r.onchange=e=>{st.biz=e.target.value;load();});
     const dz=c.querySelector('#md-dz'),fi=c.querySelector('#md-f');
     if(dz&&fi){dz.onclick=()=>fi.click();
       fi.onchange=e=>{if(e.target.files[0])upload(e.target.files[0]);e.target.value='';};
       dz.ondragover=e=>{e.preventDefault();dz.style.background='#e3f0ff';dz.style.borderColor='#1c7c3a';};
       dz.ondragleave=()=>{dz.style.background='#f4f9fe';dz.style.borderColor='#8fb4d6';};
       dz.ondrop=e=>{e.preventDefault();dz.style.background='#f4f9fe';dz.style.borderColor='#8fb4d6';if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0]);};}
-    const go=c.querySelector('#md-go');if(go)go.onclick=()=>{st.biz=c.querySelector('#md-biz').value;st.q=c.querySelector('#md-q').value.trim();load();};
-    const qi=c.querySelector('#md-q');if(qi)qi.onkeyup=e=>{if(e.key==='Enter'){st.biz=c.querySelector('#md-biz').value;st.q=qi.value.trim();load();}};
+    const go=c.querySelector('#md-go');if(go)go.onclick=()=>{st.q=c.querySelector('#md-q').value.trim();load();};
+    const qi=c.querySelector('#md-q');if(qi)qi.onkeyup=e=>{if(e.key==='Enter'){st.q=qi.value.trim();load();}};
   };
-  loadSum().then(()=>load());
+  const boot=async(t)=>{await loadSum();await load();if((!st.rows||!st.rows.length)&&(t||0)<4){setTimeout(()=>boot((t||0)+1),700);}};
+  boot(0);
 };
