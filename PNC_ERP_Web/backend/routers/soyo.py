@@ -55,7 +55,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
         for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
         prate = {}
-        cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.item")
         for ic, pr in cur.fetchall(): prate[str(ic).strip()] = float(pr or 100)
         cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
             PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
@@ -87,7 +87,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
                 MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
               FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
-              JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
               WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
               GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
         for wo, it, pq, ymd, ohm, ln in cur.fetchall():
@@ -108,7 +108,7 @@ def plan_compose_mat(payload: dict = Body(...)):
             QTY decimal(18,3),SOURCE varchar(10),COMPOSE_DT datetime DEFAULT getdate())""")
         cur.execute("DELETE FROM nx.plan_mat_source")
         MKF = {}; INCF = {}
-        cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(IN_CUST_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(in_cust,'') FROM PARTNER_ERP_TEST3.nx.item")
         for ic, mkt, inc in cur.fetchall(): ic = str(ic).strip(); MKF[ic] = str(mkt).strip(); INCF[ic] = str(inc).strip()
         PRF = {}       # 현행경로(route_id 0/무관) 프로파일: item -> [(sg,v,al)]
         PRF_ALT = {}   # 대안경로(route_id>0) 프로파일: (route_id,item) -> [(sg,v,al)]
@@ -181,9 +181,9 @@ def plan_sourcing(mode: str = Query("gubun"), gubun: str = Query(""), vendor: st
                     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} GROUP BY s.SUPPLY_GUBUN, s.VENDOR_CODE, cu.CUST_DESC ORDER BY SUM(s.QTY) DESC""", p)
             elif mode == "detail":
-                cur.execute(f"""SELECT TOP 2000 s.WORK_ORDER, s.MAT_CODE, ISNULL(it.ITEM_DESC,'') mname, s.SUPPLY_GUBUN,
+                cur.execute(f"""SELECT TOP 2000 s.WORK_ORDER, s.MAT_CODE, ISNULL(it.item_name,'') mname, s.SUPPLY_GUBUN,
                     s.VENDOR_CODE, ISNULL(cu.CUST_DESC,'') vname, s.QTY, s.SOURCE FROM nx.plan_mat_source s
-                    LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.item it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
                     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} ORDER BY s.QTY DESC""", p)
             else:  # gubun
@@ -282,7 +282,7 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         for ic, ct in cur.fetchall():
             k = str(ic).strip()
             if k not in cost: cost[k] = float(ct or 0)
-        cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM nx.item")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
         # 절삭/설치 구분 = nx.item.cut_gubun(품목마스터 속성, 크로스DB). 절삭/설치/분지관/이지링크.
@@ -379,7 +379,7 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0,
                     "n_parts": 0, "asof": asof, "priced": len(sac)}
         base_ymd = min(y for _, y, _, _ in src)
-        cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM nx.item")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
         cutm = {}
@@ -422,11 +422,11 @@ def sales_forecast_sagub_rebuild():
         asof = _t.strftime('%y%m%d')
         cur.execute("""IF OBJECT_ID('nx.item_sagub_cost') IS NULL
             CREATE TABLE nx.item_sagub_cost(item_code varchar(50) PRIMARY KEY, sa_cost float, asof_ymd varchar(8), upd_dt datetime)""")
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
         sag = set(x[0] for x in cur.fetchall())
         cur.execute("SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
-        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
+        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'),
             prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
             expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
              UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
@@ -460,27 +460,27 @@ def _step6_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
-      SELECT DISTINCT a.c_item_code,0,a.c_item_code,a.c_item_code,a.c_item_code,CONVERT(decimal(18,5),1),ISNULL(c.in_cust_code,''),'0',CONVERT(varchar(500),'{'+a.c_item_code+'}')
-      FROM nx.plan_item_dtl a JOIN {P}PR_M_ITEM c ON a.c_item_code=c.item_code
+      SELECT DISTINCT a.c_item_code,0,a.c_item_code,a.c_item_code,a.c_item_code,CONVERT(decimal(18,5),1),ISNULL(c.in_cust,''),'0',CONVERT(varchar(500),'{'+a.c_item_code+'}')
+      FROM nx.plan_item_dtl a JOIN {P}item c ON a.c_item_code=c.item_code
       WHERE NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=a.c_item_code)
       UNION ALL
       SELECT cb.assy_item_code,cb.level_no+1,b.item_code,CASE cb.vir_item_flag WHEN '1' THEN cb.p_item_code ELSE b.item_code END,
-             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust_code,''),
+             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust,''),
              CASE b.vir_item_flag WHEN '1' THEN '1' ELSE '0' END,CONVERT(varchar(500),cb.cum_item_code+'{'+b.mat_code+'}')
-      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}PR_M_ITEM c ON b.mat_code=c.item_code
+      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}item c ON b.mat_code=c.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.level_no<10 AND NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=b.mat_code))
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
     cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    JOIN {P}item_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
       b.line_no,a.cum_use_qty AS use_qty,b.lot_qty,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100) AS plan_qty,
       a.gagong_proc_code,a.gagong_proc_seq,a.s_work_code,a.lt_hr,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100)*a.cum_use_qty AS part_plan_qty
-    INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}PR_M_ITEM c ON a.assy_item_code=c.item_code""").replace("{P}", P))
+    INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}item c ON a.assy_item_code=c.item_code""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_dtl') IS NOT NULL DROP TABLE nx.plan_part_dtl")
     cur.execute("""SELECT a.* INTO nx.plan_part_dtl FROM nx.plan_part_swork a
       WHERE a.gagong_proc_code <> ISNULL((SELECT TOP 1 b.gagong_proc_code FROM nx.plan_part_swork b
@@ -552,9 +552,9 @@ def _step7_sql(cur):
     #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
     #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
-    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust_code, c.prod_rate,
-        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END) AS ov_wc
-      INTO nx.item_ov FROM {P}PR_M_ITEM c
+    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust, c.prod_rate,
+        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust,'') END) AS ov_wc
+      INTO nx.item_ov FROM {P}item c
       LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
         ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
@@ -605,7 +605,7 @@ def _step7_sql(cur):
         SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code
     INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
-      AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
+      AND NOT EXISTS(SELECT 1 FROM {P}item wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_name,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
 
 def _routing_edge_sync(cur):
@@ -666,15 +666,15 @@ def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Quer
         if assy.strip(): w.append("pp.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{assy.strip()}%")
         try:
             cur.execute(f"""SELECT pp.PLAN_YMD, pp.ASSY_ITEM_CODE, pp.MAT_CODE, pp.MAT_WORK_CENTER_CODE,
-                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm, ISNULL(i.ITEM_DESC,'') nm,
+                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm, ISNULL(i.item_name,'') nm,
                   SUM(CAST(pp.PART_PLAN_QTY AS float)) q
                 FROM nx.plan_part_mat pp
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.PLAN_YMD, pp.ASSY_ITEM_CODE, pp.MAT_CODE, pp.MAT_WORK_CENTER_CODE,
-                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE), i.ITEM_DESC""", *p)
+                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE), i.item_name""", *p)
         except Exception:
             return {"dates": [], "rows": [], "part_count": 0, "sum_qty": 0, "note": "편성 먼저 실행(/compose_mat)"}
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
