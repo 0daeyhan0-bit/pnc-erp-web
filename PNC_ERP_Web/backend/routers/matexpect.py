@@ -120,26 +120,16 @@ def _last_day(y, m):
     return 31 if m in (1, 3, 5, 7, 8, 10, 12) else (30 if m != 2 else (29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28))
 
 
-def _ranges(ym):
-    """ym=YYYYMM → (실적구간[fr,to], 예상구간[fr,to]) YYMMDD. 없으면 None.
-       현재월: 실적[1~어제]+예상[오늘~말일]. 과거월: 전부 실적. 미래월: 전부 예상."""
-    y, m = int(ym[:4]), int(ym[4:6])
-    yy = ym[2:4]
-    d1 = f"{yy}{m:02d}01"
-    dL = f"{yy}{m:02d}{_last_day(y, m):02d}"
+def _ranges2(fr6, to6):
+    """일자범위(YYMMDD) → (실적구간, 예상구간). 실적=[From~min(어제,To)]·예상=[max(오늘,From)~To]."""
     tod = _dt.date.today()
-    tod6 = f"{tod.year % 100:02d}{tod.month:02d}{tod.day:02d}"
-    ymmm = int(ym[:6])
-    cur = tod.year * 100 + tod.month
-    if ymmm < cur:                       # 과거월: 전부 실적
-        return (d1, dL), None
-    if ymmm > cur:                       # 미래월: 전부 예상
-        return None, (d1, dL)
-    # 현재월
+    tod6 = "%02d%02d%02d" % (tod.year % 100, tod.month, tod.day)
     yest = tod - _dt.timedelta(days=1)
-    yest6 = f"{yest.year % 100:02d}{yest.month:02d}{yest.day:02d}"
-    act = (d1, yest6) if yest6 >= d1 else None      # 1일이 오늘이면 실적 없음
-    exp = (tod6, dL)
+    yest6 = "%02d%02d%02d" % (yest.year % 100, yest.month, yest.day)
+    a_to = min(yest6, to6)
+    act = (fr6, a_to) if fr6 <= a_to else None      # 실적[From~어제(또는 To)]
+    e_fr = max(tod6, fr6)
+    exp = (e_fr, to6) if e_fr <= to6 else None       # 예상[오늘(또는 From)~To]
     return act, exp
 
 
@@ -153,14 +143,18 @@ def _name_maps(cur):
 
 
 @router.get("/api/matexpect")
-def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("")):
-    """자재예상매입 소요 (②-a 예상소요 우선). axis=prod|sale · ym=YYYYMM · grp=원소재|사급|그외|전체.
-       현재: 예상구간 소요(plan_part_mat×plan_mat_source 업체배분, 날짜필터) → 자재×업체×분류.
-       ②-b(실적)·③(넷팅)은 후속. act_qty는 현재 0(스텁)."""
-    if not ym:
-        t = _dt.date.today(); ym = f"{t.year}{t.month:02d}"
-    ym = ym.replace("-", "")[:6]
-    act_rng, exp_rng = _ranges(ym)
+def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query(""), grp: str = Query("")):
+    """자재예상매입 소요/넷팅. axis=prod|sale · frm~to=일자범위(YYYY-MM-DD) · grp.
+       기초재고=From 직전 / 기말재고=To까지 / 소요·매입=From~To(실적[~어제]+예상[오늘~To])."""
+    t = _dt.date.today()
+    if not frm:
+        frm = "%04d-%02d-01" % (t.year, t.month)
+    if not to:
+        to = t.isoformat()
+    fr6 = frm.replace("-", "")[2:8]; to6 = to.replace("-", "")[2:8]
+    tod6 = "%02d%02d%02d" % (t.year % 100, t.month, t.day)
+    days = max(1, (_dt.date(int(to[:4]), int(to[5:7]), int(to[8:10])) - _dt.date(int(frm[:4]), int(frm[5:7]), int(frm[8:10]))).days + 1)
+    act_rng, exp_rng = _ranges2(fr6, to6)
     nx = _nx(); cur = nx.cursor()
     try:
         itnm, cust = _name_maps(cur)
@@ -258,33 +252,29 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
                 for mc, per in smap.get(it, {}).items():
                     _row(mc, incust.get(mc, ""))["act"] += per * dq
 
-        # ── ③-a 재고(nx.mat_stock_daily·C13 정본): 기초재고(월초 직전 최신)·현재고(최신 ≤ 오늘) ──
-        yy = ym[2:4]; mm = ym[4:6]; m01 = "%s%s01" % (yy, mm)
-        _t = _dt.date.today(); tod6 = "%02d%02d%02d" % (_t.year % 100, _t.month, _t.day)
-
+        # ── ③-a 재고(nx.mat_stock_daily·C13 정본): 기초재고(From 직전)·기말재고(To 일자까지·미래면 오늘) ──
         def _stock_map(bound, op):
             cur.execute("SELECT mat_code, stock_qty FROM (SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, stock_qty, "
                         "ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(mat_code))) ORDER BY ymd DESC) rn "
                         "FROM nx.mat_stock_daily WHERE ymd %s ?) t WHERE rn=1" % op, bound)
             return {r[0]: float(r[1] or 0) for r in cur.fetchall()}
-        base_stock = _stock_map(m01, "<")     # 기초재고(필요수량 기준점·이중계상 방지)
-        cur_stock = _stock_map(tod6, "<=")    # 현재고(참고)
+        base_stock = _stock_map(fr6, "<")               # 기초재고(From 직전·필요수량 기준점·이중계상 방지)
+        cur_stock = _stock_map(min(to6, tod6), "<=")    # 기말재고(To 일자까지)
 
-        # ── ③-b 매입실적(실제 구매입고): 원소재·그외=자재창고입고(tag9)+수입(_C P) / 사급=세트입고(tag S). 내부이동 C·G·H 제외 ──
-        dL = "%s%s%02d" % (yy, mm, _last_day(int(ym[:4]), int(mm)))
-        buy_to = min(tod6, dL)
-        if m01 <= buy_to:
+        # ── ③-b 매입실적(실제 구매입고): 원소재·부자재=자재창고입고(tag9)+수입(_C P) / 사급=세트입고(tag S). 내부이동 C·G·H 제외 ──
+        buy_to = min(to6, tod6)
+        if fr6 <= buy_to:
             lv2 = _conn(); lc2 = lv2.cursor()
             try:
                 for tag in ("9", "S"):
                     lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
                                 "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
-                                "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", tag, m01, buy_to)
+                                "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", tag, fr6, buy_to)
                     for mc, cc, q in lc2.fetchall():
                         _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
                 lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
                             "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
-                            "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", m01, buy_to)
+                            "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", fr6, buy_to)
                 for mc, cc, q in lc2.fetchall():
                     _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
             finally:
@@ -315,7 +305,7 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
         lead_cust = {str(r[0]).strip(): (r[1] or 0) for r in cur.fetchall()}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(pur_lead_time,0) FROM nx.item_sub")
         lead_item = {r[0]: (r[1] or 0) for r in cur.fetchall()}
-        days = max(1, int(dL[-2:]))                       # 기간일(월 일수) — 일평균소요 분모
+        # days(기간일수) = 상단에서 계산(일평균소요 분모)
         tot_mat = {}
         for r in rows:
             tot_mat[r["mat_code"]] = tot_mat.get(r["mat_code"], 0.0) + r["tot_qty"]
