@@ -47,10 +47,21 @@ GAP = [("sagub_stock_flag","varchar(1)","SAGUB_STOCK_FLAG"),("std_won_mat_flag",
        ("jig_code","varchar(20)","JIG_CODE"),("jig_keep_area","varchar(20)","JIG_KEEP_AREA"),
        ("safe_stock_min","smallint","SAFE_STOCK_MIN"),("safe_stock_max","smallint","SAFE_STOCK_MAX"),
        ("weld_point_in","tinyint","WELD_POINT_IN"),("weld_point_out","tinyint","WELD_POINT_OUT"),
-       ("tariff_rate","numeric(18,2)","TARIFF_RATE"),("remarks","varchar(100)","REMARKS"),("item_cost","numeric(18,4)","ITEM_COST")]
+       ("tariff_rate","numeric(18,2)","TARIFF_RATE"),("remarks","varchar(100)","REMARKS"),("item_cost","numeric(18,4)","ITEM_COST"),
+       ("item_weight","numeric(18,4)","ITEM_WEIGHT")]  # 레거시 단중(엔진용)·net_weight와 별개축·미러값 복사(diff0)
 for cl, ddl, _mir in GAP:
     if c.execute("SELECT COL_LENGTH('nx.item',?)", cl).fetchone()[0] is None:
         c.execute(f"ALTER TABLE nx.item ADD {cl} {ddl} NULL"); print(f"  갭컬럼 ADD {cl}")
 c.execute(f"UPDATE i SET {', '.join(f'i.{cl}=p.{mir}' for cl,_d,mir in GAP)} FROM {J}")
 print("갭 컬럼 동기화 완료(리더 이관 지원).")
+
+# ── 리더 컬럼(엔진/화면이 읽는 객관 마스터필드) 동기화 — 이관 diff0 관문.
+#    ★item_name은 제외(SUB 접미사 [-xxx] 보존 — 접미사 스텝이 별도 관리). 나머지는 live 추종.
+c.execute(f"""UPDATE i SET
+   i.in_cust=LTRIM(RTRIM(p.IN_CUST_CODE)), i.item_spec=p.ITEM_SPEC, i.work_code=LTRIM(RTRIM(p.WORK_CODE)),
+   i.sgroup=LTRIM(RTRIM(p.ITEM_SGROUP)), i.lgroup=LTRIM(RTRIM(p.ITEM_LGROUP)),
+   i.item_status=LTRIM(RTRIM(p.ITEM_STATUS)), i.prod_rate=p.PROD_RATE,
+   i.unit=ISNULL(NULLIF(LTRIM(RTRIM(p.UNIT)),''),'EA')
+   FROM {J}""")
+print("리더 컬럼 동기화 완료(item_name=접미사 보존 위해 제외).")
 n.close()
