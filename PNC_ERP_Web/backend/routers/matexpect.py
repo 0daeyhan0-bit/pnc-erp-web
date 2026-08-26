@@ -225,6 +225,18 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
                 for mc, per in smap.get(it, {}).items():
                     _row(mc, incust.get(mc, ""))["act"] += per * dq
 
+        # ── ③-a 재고(nx.mat_stock_daily·C13 정본): 기초재고(월초 직전 최신)·현재고(최신 ≤ 오늘) ──
+        yy = ym[2:4]; mm = ym[4:6]; m01 = "%s%s01" % (yy, mm)
+        _t = _dt.date.today(); tod6 = "%02d%02d%02d" % (_t.year % 100, _t.month, _t.day)
+
+        def _stock_map(bound, op):
+            cur.execute("SELECT mat_code, stock_qty FROM (SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, stock_qty, "
+                        "ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(mat_code))) ORDER BY ymd DESC) rn "
+                        "FROM nx.mat_stock_daily WHERE ymd %s ?) t WHERE rn=1" % op, bound)
+            return {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+        base_stock = _stock_map(m01, "<")     # 기초재고(필요수량 기준점·이중계상 방지)
+        cur_stock = _stock_map(tod6, "<=")    # 현재고(참고)
+
         # ── 조립: 분류·이름·필터 ──
         rows = []
         for (mat, vendor), v in agg.items():
@@ -241,6 +253,8 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
                 "mat_code": mat, "mat_name": itnm.get(mat, ""),
                 "vendor_code": vendor, "vendor_name": cnm, "grp": g,
                 "exp_qty": round(v["exp"], 2), "act_qty": round(v["act"], 2), "tot_qty": round(tot, 2),
+                "base_qty": round(base_stock.get(mat, 0.0), 2),   # 기초재고(월초)
+                "cur_qty": round(cur_stock.get(mat, 0.0), 2),     # 현재고(참고)
             })
         rows.sort(key=lambda r: -r["tot_qty"])
         # 분류 요약
