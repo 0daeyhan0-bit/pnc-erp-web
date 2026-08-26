@@ -3205,7 +3205,7 @@ SCREEN.itemmaster=(host)=>{
     ['item_spec','규격','text'],
     ['sgroup','품목유형 판정(소분류)','sel','sgroup'],
     ['pipe_kind','품목형태','sel','pipe_kind'],['metal_gubun','재질','sel','metal'],
-    ['unit','단위','sel','unit'],['status','사용상태','sel','status'],
+    ['unit','단위','sel','unit'],['status','사용상태','sel','status'],['cut_gubun','절삭/설치 구분','sel','cutgubun'],
     ['diam','외경','num'],['thick','두께','num'],['length','길이','num'],['net_weight','중량','num'],
     ['item_pipe_id','내경(자동)','ro'],['item_status','품목상태','text'],
     // ── 서브(item_sub) ──
@@ -3223,7 +3223,7 @@ SCREEN.itemmaster=(host)=>{
   };
   const fld=(f)=>{
     const [k,label,type,ok]=f, v=st.form[k]??'';
-    if(type==='sel'){const os=opts[ok]||[];return `<select class="inp" data-fk="${k}" style="min-width:90px;width:auto;max-width:230px"><option value="">선택</option>${os.map(o=>`<option value="${esc(o.code)}" ${String(o.code)===String(v)?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>`;}
+    if(type==='sel'){const os=opts[ok]||(ok==='cutgubun'?[{code:'절삭',nm:'절삭'},{code:'설치',nm:'설치'},{code:'분지관',nm:'분지관'},{code:'이지링크',nm:'이지링크'}]:[]);return `<select class="inp" data-fk="${k}" style="min-width:90px;width:auto;max-width:230px"><option value="">선택</option>${os.map(o=>`<option value="${esc(o.code)}" ${String(o.code)===String(v)?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>`;}
     if(type==='chk')return `<input type="checkbox" data-fk="${k}" ${(v===1||v==='1'||v===true)?'checked':''} style="width:18px;height:18px">`;
     if(type==='ro')return `<input class="inp" data-fk="${k}" value="${esc(v)}" readonly style="width:90px;background:#eef2f7" title="외경-두께×2 자동계산">`;
     return `<input class="inp" data-fk="${k}" value="${esc(v)}" ${type==='num'?'inputmode="decimal" style="width:90px"':'style="width:160px"'}>`;
@@ -3315,7 +3315,7 @@ SCREEN.itemmaster=(host)=>{
     for(const k of REQ){if(!String(f[k]||'').trim()){alert(({item_code:'품번',item_name:'품명',lgroup:'대분류',sgroup:'소분류',unit:'단위'})[k]+'은(는) 필수입니다');return;}}
     try{const r=await fetch(`${API}/api/itemmaster/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...f,user:'웹사용자'})});
       const j=await r.json();
-      if(r.ok&&j.ok){st.msg=(j.renamed?'✅ 품번변경 완료 → ':(j.mode==='insert'?'✅ 등록완료 ':'✅ 수정완료 '))+j.item_code+(j.nature?' ['+j.nature+']':'')+((j.warnings&&j.warnings.length)?'  ⚠ 권장항목 미입력: '+j.warnings.join(', '):'');st.form=null;await load();}
+      if(r.ok&&j.ok){try{await fetch(`${API}/api/item/cutgubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:j.item_code||f.item_code,cut_gubun:f.cut_gubun||''})});}catch(e){}st.msg=(j.renamed?'✅ 품번변경 완료 → ':(j.mode==='insert'?'✅ 등록완료 ':'✅ 수정완료 '))+j.item_code+(j.nature?' ['+j.nature+']':'')+((j.warnings&&j.warnings.length)?'  ⚠ 권장항목 미입력: '+j.warnings.join(', '):'');st.form=null;await load();}
       else alert('저장 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('저장 오류: '+e);}
   };

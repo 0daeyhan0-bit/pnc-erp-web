@@ -377,6 +377,46 @@ def weight_explode(eng, item):
     return (round(rk, 6), round(wk, 6))
 
 
+def _wt_spec(eng, code):
+    """중량 leaf 규격 (metal_gubun, diam, thick) — 절삭재료비(CS_M_METERIAL_COST) 규격별 단가 조회용. 캐시."""
+    if not hasattr(eng, '_wtspec'):
+        eng._wtspec = {}
+    u = code.strip().upper()
+    if u not in eng._wtspec:
+        eng.cur.execute("SELECT ISNULL(METAL_GUBUN,''),ISNULL(ITEM_DIAM,0),ISNULL(ITEM_THICK,0) FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", code)
+        r = eng.cur.fetchone()
+        eng._wtspec[u] = (str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)) if r else ('', 0.0, 0.0)
+    return eng._wtspec[u]
+
+
+def copper_by_spec(eng, item):
+    """[중량 walker·규격분해] 완제품 1개 → {(metal,diam,thick): 동중량kg}. weight_explode와 동일 walk(사급 sag=1 제외)이나
+    규격별로 분해(절삭재료비 규격별 단가 곱하기용). ★coop 폴백 미적용 = 순수 BOM 동관 leaf(규격 있는 것만·단가매칭용)."""
+    memo = {}
+
+    def walk(node):
+        u = node.strip().upper()
+        if u in memo:
+            return memo[u]
+        memo[u] = {}   # cycle guard
+        ch = _cs_lines_wt(eng, node)
+        if ch:
+            acc = {}
+            for c, q, sag in ch:
+                if sag == 1:
+                    continue
+                for spec, w in walk(c).items():
+                    acc[spec] = acc.get(spec, 0.0) + w * q
+            memo[u] = acc
+            return acc
+        w, cls = _wt_meta(eng, node)
+        if cls == 'raw' and w > 0:
+            memo[u] = {_wt_spec(eng, node): w}
+        return memo[u]
+
+    return walk(item)
+
+
 # ========================= 용접봉 소요 (geom/원가/재고 트랙, =weight_calc._load_weld 재현) =========================
 # 용접봉 소요(CS_T_ITEM_WELD.ITEM_USE_QTY 관경별 × 1.5, 품목별 flat) = ★원가/재고소비 트랙 primitive. 15/15검증(레거시 w_cs_esti ×1.5룰).
 #   ★주의: 협력사 "수불정산"의 용접봉 소요 정본은 이게 아님 — **협력사 견적서 기준**(coop_quote_part_v2 ptype_v2='용접봉' soyo, compute_quote).
