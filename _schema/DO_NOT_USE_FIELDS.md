@@ -13,6 +13,7 @@
 |---|---|---|---|
 | 1 | `CS_T_ITEM_WELD`(그리드), `PR_M_ITEM_BOM.use_qty` | **`CS_M_ITEM_BOM.USE_QTY`** (RAC, CS_CALC_EXCEPT_FLAG≠'1') | 용접봉/재료 원가 |
 | 2 | `PR_M_ITEM_BOM` | **`CS_M_ITEM_BOM`** (유효일자·CS_CALC_EXCEPT_FLAG) | 재료비 전개 전반 |
+| 14 | `nx.PR_M_ITEM`(품목 미러) | **`nx.item`(정본)** | 품목 마스터 조회 전반 |
 | 3 | `EXCEPT_FLAG` | **`CS_CALC_EXCEPT_FLAG`** | BOM 전개 필터 |
 | 4 | `nx.weld_rate`, `nx.coop_rate`(실험치) | **`nx.item_weld`+`nx.weld_diam`** 정본 | 용접봉 원단위 |
 | 5 | `PARTNER_ERP` 직접 INSERT/UPDATE/DELETE | **nx(PARTNER_ERP_TEST3)만 쓰기** | 라이브 쓰기 |
@@ -117,6 +118,15 @@
 - **왜**: `CS_M_ITEM_BOM.MAT_CODE`에 끝 `\n`, `PR_M_ITEM_COST`에 앞뒤 공백 코드 37개 → 조인실패·이관누락(매입가 −37품목).
 - **올바른 대체**: `REPLACE(CHAR(13)/CHAR(10),'')+LTRIM/RTRIM` 후 사용. 플래그 varchar '0'/'1'/'None'→bit는 '1'만 1.
 - **근거**: MIGRATION_ISSUES.md C-33·34·35행.
+
+## 14. 품목 마스터 — 미러 `nx.PR_M_ITEM` 은퇴 (2026-08-26)
+
+- **금지**: 신규 프로그램·엔진·쿼리에서 품목 마스터를 미러 `nx.PR_M_ITEM`(레거시 충실복제·일마감 sync)에서 읽기. `{SCH}./{S}./{P}./{NX}./{T3}.`·무접두·소문자 등 **전형태 금지**.
+- **왜**: 미러 vs 정본 `nx.item` 병존이 화면마다 다른 값(SUB 접미사 561 등 드리프트)·혼동의 원천. 전-백엔드 리더를 nx.item으로 이관 완료(2026-08-26, PR #68~74·재이관 A~F).
+- **올바른 대체**: **`nx.item`**(정본). 컬럼명 매핑: `ITEM_DESC→item_name·ITEM_SPEC→item_spec·ITEM_DIAM/THICK/LENGTH→diam/thick/length·IN_CUST_CODE→in_cust·ITEM_S/LGROUP→sgroup/lgroup`. 동명(ITEM_CODE·WORK_CODE·PROD_RATE·UNIT·MAKE_TYPE·COST_GUBUN·METAL_GUBUN·ITEM_STATUS·ITEM_WEIGHT→item_weight·갭컬럼)은 case-insensitive 무변경. nx.item은 `r_item_sync`가 매일 live와 동기화(전 리더/원가 컬럼 드리프트 0 검증·item_name은 SUB 접미사 보존 위해 제외).
+- **예외(보존)**: `PARTNER_ERP.dbo.PR_M_ITEM`(라이브 직독, soyo STEP7 routing_edge 등)은 미러 아님 → 은퇴 대상 아님.
+- **최종 drop**: 컷오버 시 `nx.PR_M_ITEM` 테이블 삭제(전형태 코드잔여 0 확인됨).
+- **근거**: `NX_ITEM_READER_MIGRATION.md`(교훈10). [[newerp-nxitem-reader-migration]] [[newerp-mirror-clean-dual-table-audit]].
 
 ---
 
