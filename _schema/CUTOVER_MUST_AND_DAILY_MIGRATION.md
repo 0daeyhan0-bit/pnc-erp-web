@@ -16,6 +16,7 @@
 1. **recon (읽기전용)** — `mirror_recon.py` 실행. 라우터가 읽는 `nx.<TABLE>` 자동수집→트랜잭션(_T_)만 `COUNT_BIG + CHECKSUM_AGG(BINARY_CHECKSUM(*))`로 nx 미러 vs dbo 라이브 대조 → GREEN/RED. 로그 `mirror_recon_log.jsonl`.
 2. **RED면 델타 싱크** — `r_delta_sync.py`(DRY 확인 먼저) → `--commit`으로 라이브 date > nx max date 분만 INSERT/갱신. DROP+전체복사 아님(하루치만).
 2-a. **★성능 인덱스 재보장(2026-08-26 추가)** — 싱크 후 `nx_perf_maintain.py commit` + `r_add_indexes.py --commit`(둘 다 멱등, 수초) 재실행. **거래=윈도우(DELETE+INSERT)라 인덱스 생존, 마스터=DROP+SELECT INTO면 유실** → 재보장으로 콜드조회 지연 방지. (실측 2026-08-26: 대부분 생존·plan_part_mat만 재생성. Phase3에서 sync에 결선 예정.)
+2-b. **★원가엔진 무효화(2026-08-26 추가)** — nx **원가테이블(bom_line·routing·price_item·item·bom_header·proc_weld 등)을 재빌드**한 경우(BOM 클린전환·routing_edge·단가 스냅샷 갱신 등)엔 실행 중 백엔드에 **`POST /api/cost/reset` 1회 호출**(또는 재기동). ★서빙 원가엔진은 생성시점 warm_all 스냅샷을 메모리에 들고 있어(→조회 즉시화) 이런 **웹편집 외(out-of-band) 변경엔 stale** → reset로 다음 요청이 최신 재-warm. ※**매일 sync(r_delta_sync)는 클린 원가테이블 미접촉**(대문자 미러만 갱신)이라 불필요 — nx 원가테이블을 실제 재빌드했을 때만. (웹 BOM/원가/단가 편집은 이미 자동 reset.)
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
 4. **로그 남김** (recon 결과·타임스탬프).
 

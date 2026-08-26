@@ -871,3 +871,13 @@ def weld_save(payload: dict = Body(...)):
                 "use_qty": use_qty, "unit_qty": unit, "inner_st": sum_st, "uph": uph, "loss_factor": lf}
     finally:
         nx.close()
+
+
+@router.post("/api/cost/reset")
+def cost_engine_reset():
+    """persistent 원가엔진 캐시 강제 무효화 → 다음 요청이 최신 nx 데이터로 재-warm.
+       ★용도: nx 원가테이블(bom_line·routing·price_item·item 등)이 **웹편집 외 경로**로 바뀐 뒤 호출.
+         - nx 재빌드(BOM 클린전환·routing_edge·단가 스냅샷 갱신) / 매일마이그 후 재빌드 / DB 직접변경.
+       warm 엔진은 생성시점 스냅샷을 들고 있어 out-of-band 변경엔 stale → 이 훅으로 즉시 해소(재기동 불필요)."""
+    _reset_cost_engine()
+    return {"ok": True, "reset": True}
