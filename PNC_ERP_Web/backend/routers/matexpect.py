@@ -89,6 +89,29 @@ def _grp(cust_type, cust_code):
     return "미분류"
 
 
+# ── ★BOM 근본 분류 (MAKE_TYPE + nx.bom.role) — soyo/BOM 단일 기반 (사용자 2026-08-26) ──
+#   MAKE_TYPE: 1제작·2외주·3구매·4사급·5외주직납 (soyo _MKMAP). role: nx.bom.role(원소재/부자재/완성부품/…).
+_RAW_ROLES = {"제작동관", "매입동관", "판재강판"}                       # 원소재(원재료)
+_ETC_ROLES = {"단열재", "체결부자재", "포장재", "전장부품", "매입기타"}   # 부자재(그외)
+
+
+def _grp_bom(mat, mkmap, rolemap):
+    role = rolemap.get(mat, ""); mt = mkmap.get(mat, "")
+    if role in _RAW_ROLES:
+        return "원소재"                       # 동관·강판 = 원소재(사급/구매/제작 무관)
+    if role == "용접봉":
+        return "용접봉"                       # 공정 처리(자재소요 제외)
+    if mt == "4" or role == "완성부품":
+        return "사급"                         # 사급부품(LG 지급)
+    if mt in ("2", "5"):
+        return "협력사"                       # 외주가공(가공비 축·제외)
+    if role in _ETC_ROLES:
+        return "그외"                         # 부자재·소모품
+    if role == "반제품":
+        return "반제품"                       # 중간 반제품(추후 전개/판단)
+    return "미분류"
+
+
 def _last_day(y, m):
     return 31 if m in (1, 3, 5, 7, 8, 10, 12) else (30 if m != 2 else (29 if (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)) else 28))
 
