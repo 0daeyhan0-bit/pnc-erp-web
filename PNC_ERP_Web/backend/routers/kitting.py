@@ -578,6 +578,8 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               SUM(CAST(ISNULL(a.LAST_LOT_QTY,0) AS float)) last_lot_qty,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM {PLAN_T} a WITH(NOLOCK)
+            -- ★품목마스터는 소스토글과 무관하게 nx.item 고정(§1-9 클린 정본).
+            --   {SCH}.item 으로 두면 src=live 에서 PARTNER_ERP.dbo.item(미존재) 을 찾아 500.
             JOIN PARTNER_ERP_TEST3.nx.item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN {SCH}.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE

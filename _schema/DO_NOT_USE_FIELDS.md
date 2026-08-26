@@ -13,6 +13,9 @@
 |---|---|---|---|
 | 1 | `CS_T_ITEM_WELD`(그리드), `PR_M_ITEM_BOM.use_qty` | **`CS_M_ITEM_BOM.USE_QTY`** (RAC, CS_CALC_EXCEPT_FLAG≠'1') | 용접봉/재료 원가 |
 | 2 | `PR_M_ITEM_BOM` | **`CS_M_ITEM_BOM`** (유효일자·CS_CALC_EXCEPT_FLAG) | 재료비 전개 전반 |
+| 14 | `nx.PR_M_ITEM`(품목 미러) | **`nx.item`(정본)** | 품목 마스터 조회 전반 |
+| 15 | `nx.partner`(4컬럼 stub·저adoption) | **`nx.CM_M_CUST`(기존 거래처)** | 거래처명 조회 |
+| 16 | `nx.stock_ledger` MAT(미동기·stale) | **`nx.mat_stock_daily`(이동평균 정본)** | 자재 가용판정 (RDY/SAG/PRD/ASY는 ledger 정당) |
 | 3 | `EXCEPT_FLAG` | **`CS_CALC_EXCEPT_FLAG`** | BOM 전개 필터 |
 | 4 | `nx.weld_rate`, `nx.coop_rate`(실험치) | **`nx.item_weld`+`nx.weld_diam`** 정본 | 용접봉 원단위 |
 | 5 | `PARTNER_ERP` 직접 INSERT/UPDATE/DELETE | **nx(PARTNER_ERP_TEST3)만 쓰기** | 라이브 쓰기 |
@@ -117,6 +120,33 @@
 - **왜**: `CS_M_ITEM_BOM.MAT_CODE`에 끝 `\n`, `PR_M_ITEM_COST`에 앞뒤 공백 코드 37개 → 조인실패·이관누락(매입가 −37품목).
 - **올바른 대체**: `REPLACE(CHAR(13)/CHAR(10),'')+LTRIM/RTRIM` 후 사용. 플래그 varchar '0'/'1'/'None'→bit는 '1'만 1.
 - **근거**: MIGRATION_ISSUES.md C-33·34·35행.
+
+## 14. 품목 마스터 — 미러 `nx.PR_M_ITEM` 은퇴 (2026-08-26)
+
+- **금지**: 신규 프로그램·엔진·쿼리에서 품목 마스터를 미러 `nx.PR_M_ITEM`(레거시 충실복제·일마감 sync)에서 읽기. `{SCH}./{S}./{P}./{NX}./{T3}.`·무접두·소문자 등 **전형태 금지**.
+- **왜**: 미러 vs 정본 `nx.item` 병존이 화면마다 다른 값(SUB 접미사 561 등 드리프트)·혼동의 원천. 전-백엔드 리더를 nx.item으로 이관 완료(2026-08-26, PR #68~74·재이관 A~F).
+- **올바른 대체**: **`nx.item`**(정본). 컬럼명 매핑: `ITEM_DESC→item_name·ITEM_SPEC→item_spec·ITEM_DIAM/THICK/LENGTH→diam/thick/length·IN_CUST_CODE→in_cust·ITEM_S/LGROUP→sgroup/lgroup`. 동명(ITEM_CODE·WORK_CODE·PROD_RATE·UNIT·MAKE_TYPE·COST_GUBUN·METAL_GUBUN·ITEM_STATUS·ITEM_WEIGHT→item_weight·갭컬럼)은 case-insensitive 무변경. nx.item은 `r_item_sync`가 매일 live와 동기화(전 리더/원가 컬럼 드리프트 0 검증·item_name은 SUB 접미사 보존 위해 제외).
+- **예외(보존)**: `PARTNER_ERP.dbo.PR_M_ITEM`(라이브 직독, soyo STEP7 routing_edge 등)은 미러 아님 → 은퇴 대상 아님.
+- **최종 drop**: 컷오버 시 `nx.PR_M_ITEM` 테이블 삭제(전형태 코드잔여 0 확인됨).
+- **근거**: `NX_ITEM_READER_MIGRATION.md`(교훈10). [[newerp-nxitem-reader-migration]] [[newerp-mirror-clean-dual-table-audit]].
+
+## 15. 거래처 — `nx.partner`(클린 stub) 은퇴, 조회는 `CM_M_CUST` (2026-08-26)
+
+- **금지**: 신규 프로그램에서 거래처명 조회에 `nx.partner`(partner_code/name/type/remark 4컬럼) 사용.
+- **왜**: nx.partner는 재설계 미완 stub(4컬럼)·실사용 이름조회 3파일뿐·전부 CM_M_CUST 폴백=실질 기여 미미. 미러/클린 병존 혼동만 유발. → 3파일을 CM_M_CUST로 되돌려 단일화(PR#78·값동일 검증).
+- **올바른 대체**: **`nx.CM_M_CUST`**(기존 거래처·라이브 미러·CUST_CODE→CUST_DESC). partner_name=CUST_DESC 값동일·CM_M_CUST 상위집합.
+- **★물리 drop 보류**: nx.partner는 **FK 2개 참조 대상**(`FK__price_lme__vendo`·`FK__sourcing___vendo` = price_lme·sourcing_profile.vendor_code). 즉 벤더차원 FK 타깃이라 단순 drop 불가 → **B(WEHAGO/identity 재설계)에서 벤더차원 재구성 시 FK 재지정+drop**. 지금은 거버넌스(조회금지)만.
+- **근거**: [[newerp-mirror-clean-dual-table-audit]] 쌍2 · [[newerp-partner-identity-rationalize]].
+
+## 16. 재고 — 자재(MAT) 가용판정에 `stock_ledger` 금지, `mat_stock_daily` 정본 (2026-08-26·§4-C 공식화)
+
+- **금지**: 자재 **현재고/가용판정**을 `nx.stock_ledger`(STOCK_POINT='MAT')에서 SUM. (실측: stock_ledger MAT 미동기·표본 mat_daily 442,938 vs ledger 0 = 45% 오차·대부분 빈값.)
+- **왜**: 재고 3소스 병존(쌍6). stock_ledger는 웹 쓰기 단일원장이나 **MAT은 컷오버 전 미실현/stale**. 이걸로 가용판정하면 마이너스/오판.
+- **올바른 대체**: **자재 현재고 = `nx.mat_stock_daily`(이동평균 일마감·99.95%)** — `common._mat_avail()` 사용. 스냅샷 `P*_T_MONTH_STOCK_WH`는 생산재고(PRD) rollforward 앵커 전용.
+- **예외(정당)**: `STOCK_POINT IN ('RDY','SAG','PRD','ASY')`(준비·사급·생산·완성)는 **stock_ledger가 유일 소스**(mat_stock_daily에 없음) → 이들은 stock_ledger SUM이 정답.
+- **이중계상 금지**: 스냅샷+원장 미반영분 합산 후 원장 또 더하기 금지(ready.py:172 가드). 라이브잔액+원장델타 이중(common.py:408).
+- **수렴(컷오버)**: stock_ledger 실시간 정본 승격 + 스냅샷 은퇴. mat_stock_daily 빌더 자동화(현재 수동·보류).
+- **근거**: [[newerp-matclose-movavg]] [[newerp-stock-ledger-engine]] [[newerp-mirror-clean-dual-table-audit]] 쌍6·C13.
 
 ---
 

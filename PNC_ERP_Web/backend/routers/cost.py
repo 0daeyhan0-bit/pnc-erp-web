@@ -83,14 +83,14 @@ def cost_sil(item: str = Query(..., description="품번"),
         d = eng.silwon_nodes(item, ymd)
         pg = eng.silwon_proc_grid(item, ymd)   # {proc_code:{wq,amt,uph,cg,labor}} — 합=가공비
         procs = _nae_proc_grid(pg)             # CS_M_PROC 공정명·정렬·그룹 매핑(내부원가와 공유)
-        # 거래처(매입처)명 매핑 — nx.partner 우선, CM_M_CUST 폴백
+        # 거래처(매입처)명 매핑 — CM_M_CUST(기존 거래처 단일소스). nx.partner 재설계는 별도.
         codes = sorted({r["in_cust"] for r in d["rows"] if r.get("in_cust")})
         vmap = {}
         if codes:
             try:
                 for i in range(0, len(codes), 900):
                     ch = codes[i:i + 900]; ph = ",".join("?" * len(ch))
-                    eng.cur.execute(f"SELECT partner_code, ISNULL(partner_name,'') FROM nx.partner WHERE partner_code IN ({ph})", *ch)
+                    eng.cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
                     for r in eng.cur.fetchall(): vmap[str(r[0]).strip()] = str(r[1]).strip()
             except Exception:
                 pass
@@ -213,9 +213,8 @@ def cost_nae(item: str = Query(..., description="품번"),
             custm = {}
             for i in range(0, len(codes), 400):
                 ck = codes[i:i+400]; ph = ",".join("?" * len(ck))
-                eng.cur.execute(f"""SELECT it.item_code, ISNULL(pv.partner_name, pc.CUST_DESC)
+                eng.cur.execute(f"""SELECT it.item_code, ISNULL(pc.CUST_DESC,'')
                     FROM nx.item it
-                    LEFT JOIN nx.partner pv ON pv.partner_code = it.in_cust
                     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = it.in_cust
                     WHERE it.item_code IN ({ph})""", *ck)
                 for r in eng.cur.fetchall():
@@ -519,10 +518,10 @@ def _sagub_diff_map(cur, ym):
     outb AS (SELECT MAT_CODE mat, SUM(CAST(MAINT_AMT AS FLOAT)) amt, SUM(CAST(MAINT_QTY AS FLOAT)) qty
       FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' AND MAINT_COST>0 GROUP BY MAT_CODE)
     SELECT i.mat, CAST((o.amt/NULLIF(o.qty,0)) - (i.amt/NULLIF(i.qty,0)) AS FLOAT) diff
-    FROM inb i JOIN outb o ON i.mat=o.mat JOIN nx.PR_M_ITEM m ON m.ITEM_CODE=i.mat
+    FROM inb i JOIN outb o ON i.mat=o.mat JOIN nx.item m ON m.ITEM_CODE=i.mat
     WHERE o.qty<>0 AND i.qty<>0 AND (o.amt/NULLIF(o.qty,0))>0
-      AND ( m.ITEM_SGROUP NOT IN ({exsg}) OR m.ITEM_DESC LIKE N'%용접링%' )
-      AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.ITEM_DESC LIKE N'%용접링%' )""", ym, ym)
+      AND ( m.sgroup NOT IN ({exsg}) OR m.item_name LIKE N'%용접링%' )
+      AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.item_name LIKE N'%용접링%' )""", ym, ym)
     m = {}
     for r in cur.fetchall():
         if r[1] is not None: m[str(r[0]).strip()] = float(r[1])

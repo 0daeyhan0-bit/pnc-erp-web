@@ -270,7 +270,7 @@ UNION ALL SELECT A.stock_part_code,a.item_code,a.prod_qty FROM {T3}pr_t_prod_dtl
 UNION ALL SELECT A.IN_PART_CODE,a.item_code,a.MAINT_QTY FROM {T3}sa_t_stock_maint a WHERE A.maint_ymd>'250299' and A.MAINT_YMD<='{asof}' and a.in_part_code>''
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG='3'
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG in ('2','1')
-UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A JOIN {T3}PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG='4'
+UNION ALL SELECT A.PART_CODE,A.MAT_CODE,a.MAINT_QTY FROM {T3}PR_T_STOCK_MAINT_MAT A JOIN {T3}item M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND A.MAINT_TAG='4'
 """
     cur.execute(f"""SELECT ISNULL(SUM(t.q),0) FROM ({U}) t
         WHERE ISNULL(LTRIM(RTRIM(t.gpc)),'')=? AND UPPER(LTRIM(RTRIM(t.mat)))=?""", line, mat)
@@ -596,3 +596,38 @@ def _geom_weight(metal_gubun, diam, thick, length):
     if not dens or d <= 0 or t <= 0 or l <= 0:
         return None
     return round(math.pi * (d - t) * t * l * dens / 1e6, 6)
+
+
+# ── SUB(자도번) 품명 접미사 병기 (배치 r_sub_desc_suffix 정합·CRUD 저장 시 적용) ──────────
+#   병행운영=배치가 매 sync 후 재병기 / 컷오버 후=레거시 신규 없음→CRUD 저장경로가 이걸로 자동부착.
+#   (net_weight _geom_weight 자동재계산과 동일 패턴. 정본 = _schema/CUTOVER_MUST_AND_DAILY_MIGRATION §A 2-b·§B-1 3-a)
+def _sub_desc_suffix(code, name):
+    """SUB(자도번) 품명 앞에 '[-{접미사}] ' 병기(멱등·self-heal). 접미사=코드 첫 '-' 뒤 전부.
+       스킵(원품명 유지): 접미사없음 / 원품명에 코드포함 / 원품명이 접미사로 시작.
+       ★순수 문자열 변환 — 호출 전 code가 SUB(_is_sub_code)인지 확인. 배치 r_sub_desc_suffix와 동일 규칙."""
+    code = (code or '').strip(); name = (name or '').strip()
+    if '-' not in code:
+        return name
+    suf = code.split('-', 1)[1]
+    pref = f"[-{suf}] "
+    if name.startswith(pref):                       # self-heal: 이미 이 접미사 프리픽스 → 원품명
+        base = name[len(pref):]
+    elif name.startswith("[-") and "] " in name:    # 다른 프리픽스 잔재 → 제거
+        base = name.split("] ", 1)[1]
+    else:
+        base = name
+    if code in base:                                # 원품명에 코드포함 → 유지
+        return base
+    if base == suf or base.startswith(suf + "/") or base.startswith(suf + "-") or base.startswith(suf + " "):
+        return base                                 # 원품명이 접미사로 시작 → 유지
+    return f"[-{suf}] {base}"
+
+
+def _is_sub_code(cur, code):
+    """code가 등록된 SUB(자도번)인가 = nx.sub_code_map.raw_item 존재. CRUD 접미사 병기 스코프(비SUB 무변경)."""
+    try:
+        r = cur.execute("SELECT 1 FROM PARTNER_ERP_TEST3.nx.sub_code_map WHERE LTRIM(RTRIM(raw_item))=?",
+                        (code or '').strip()).fetchone()
+        return r is not None
+    except Exception:
+        return False

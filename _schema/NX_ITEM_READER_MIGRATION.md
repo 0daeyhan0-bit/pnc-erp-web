@@ -45,9 +45,14 @@ safe_stock_min/max·weld_point_in/out·tariff_rate·remarks·item_cost. → 아�
 `r_item_sync.py`: 갭컬럼 + 리더컬럼(in_cust·item_spec·work_code·sgroup·lgroup·item_status·prod_rate·unit) 동기화 통합.
 → **ITEM_WEIGHT 관문 해소**: item_weight 복사로 엔진 ITEM_WEIGHT 읽기가 case-insensitive 해석·원가 diff0 보존.
 
-### ★남은 heavy 파일 (dedicated 재이관 필요 — 아래 교훈 준수)
-`cost · salemagam · app · procbc · sales · weight_calc · _sp_4wk · price · bom · soyo · live_api · prodwrite · prodsheet · gagong · sourcing`
-2026-08-26 1차 시도했으나 **불완전 이관으로 되돌림**(미병합 상태). 원가/소요 critical → diff0 검증 없이 배포 금지.
+### heavy 15 재이관 완료 (PR #73, 전형태·검증)
+A `cost·salemagam·app·procbc·_sp_4wk` / B `weight_calc·price·bom` / C `prodwrite·prodsheet·sourcing·gagong` / D `sales·soyo` / E `live_api`
++ F 미발견 4 `common·kitting({SCH})·setstock·salesplan`.
+전형태({SCH}/{S}/{P}/{NX}/{T3}/무접두/소문자) 잔여0·서브쿼리출력명 복원·INSERT 동명보호·alias 오버로드 disjoint·soyo dbo STEP7 라이브 보존.
+★kitting 버그수정: batch4가 ib.item_name은 렌더했으나 `{SCH}.pr_m_item` 테이블 미변경→미러(item_name 부재) 읽어 깨짐 → {SCH}.item.
+
+### ★★전-백엔드 미러 리더 이관 완료 (2026-08-26)
+`PR_M_ITEM\b` 전형태 코드잔여 **0**(soyo dbo.PR_M_ITEM STEP7 라이브 3만 의도적 보존·미러 아님). 남은 검증=**post-sync 원가 diff0(cost_oracle)** + 미러 은퇴(§4).
 
 ### ★★교훈 (heavy 재이관시 필수)
 1. **테이블 형태 다양**: `nx.PR_M_ITEM` 뿐 아니라 `{SCH}.PR_M_ITEM`·`{S}.PR_M_ITEM`·`{P}PR_M_ITEM`·`FROM PR_M_ITEM`(무접두)·소문자 모두 존재. 잔여검사는 `PR_M_ITEM\b`(모든형태·대소문자무시)로. `nx.PR_M_ITEM`만 세면 오탐(=거짓 잔여0).
@@ -58,13 +63,17 @@ safe_stock_min/max·weld_point_in/out·tariff_rate·remarks·item_cost. → 아�
 6. **Python 딕셔너리 키/결과별칭 보존**: `r.get('ITEM_DESC')`·`MAX(x) ITEM_DESC`는 SQL소스만 바꾸고 키/별칭은 유지.
 7. **INSERT 컬럼목록**: 대상테이블(PU_T_CUT_DTL 등)의 동명 ITEM_DIAM 등은 rename 금지(nx.item 아님).
 8. **검증**: 이관후 `PR_M_ITEM\b` 전수0 + 원가 diff0(cost_oracle, post-sync nx.item) + alias.대문자 잔여 스캔.
+9. **파일 discovery도 전형태로**: 초기 파일목록을 `nx.pr_m_item`(대소문자민감)으로 뽑아 `{SCH}/{NX}/{T3}/무접두`형태만 쓰는 파일(common·salesplan·setstock)을 통째로 놓쳤음. discovery도 `PR_M_ITEM\b` 전형태·CI로.
+10. **benign 잔여 분류**: alias.대문자 잔여는 (a)서브쿼리 출력명(별칭보존) (b)타테이블(ic=CUTTING·pg=PROC_GAGONG·s=SET_GAGONG_STOCK) (c)dbo라이브 — 바인딩 확인해 판별.
 
-## 3. 잔여 파일 (28, 대소문자무시 기준)
-bom · coopplan · coopquote · coopquote2 · cost · dopip · esticost · gagong · gagongmove ·
-kitting · lgsagub · modelbom · partplan · partplandtl · planinput · price · pricemgmt ·
-procbc · prod · prodinfo · prodsheet · prodwrite · qc · ready · salemagam · sales · sourcing · soyo
+## 3. 잔여 파일 — 없음 (전-백엔드 미러 리더 이관 완료)
+전형태 코드잔여 0. soyo dbo.PR_M_ITEM(STEP7 라이브 629/630/636)만 보존(미러 아님).
 
-## 4. 은퇴 절차(예정)
-1. §1 갭 컬럼 nx.item 추가 + r_item_sync/일마감에 채움 → 갭 대기 파일 이관.
-2. 잔여 0 확인(대소문자무시 `nx.pr_m_item` grep = 0).
-3. DO_NOT_USE_FIELDS.md 등록 + 컷오버 시 미러 PR_M_ITEM drop.
+## 4. 은퇴 절차 — 진행상태
+1. ✅ 갭 컬럼 12개 + item_weight 추가·backfill (`r_item_gapcols`).
+2. ✅ 전형태 리더 이관 완료 (PR #68~74·재이관 A~F). `PR_M_ITEM\b` 전형태 코드잔여 0.
+3. ✅ **동기화 실행·드리프트 0** (2026-08-26): `r_item_sync` 전 리더/원가 컬럼 nx.item=live 완전일치 검증. unit NULL→'' 처리(NOT NULL·parity). item_name만 SUB 접미사 보존 위해 제외(비-SUB 9건은 클린 정정명 허용).
+4. ✅ **DO_NOT_USE_FIELDS.md §14 등록** — 신규코드 미러 읽기 금지(전형태)·nx.item 정본.
+5. ☐ **컷오버 시 `nx.PR_M_ITEM` drop** (되돌리기 어려워 컷오버까지 보류. 잔여0 확인됨).
+
+→ **코드·데이터·거버넌스 완료. 물리 drop만 컷오버 대기.**

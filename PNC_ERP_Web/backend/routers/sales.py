@@ -22,11 +22,11 @@ def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Quer
         if cust: w.append("l.CUST_CODE=?"); p.append(cust)
         if mat: w.append("l.MAT_CODE LIKE ?"); p.append(f"%{mat}%")
         cur.execute(f"""SELECT TOP {int(limit)} l.MAINT_YMD maint_ymd, l.MAINT_SEQ maint_seq, l.CUST_CODE cust_code,
-              ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code, ISNULL(i.ITEM_DESC,'') matnm,
+              ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code, ISNULL(i.item_name,'') matnm,
               l.MAINT_QTY maint_qty, ISNULL(l.MAINT_COST,0) maint_cost, ISNULL(l.MAINT_AMT,0) maint_amt,
               ISNULL(l.REMARKS,'') remarks, ISNULL(l.INSERT_USER_ID,'') insert_user_id, l.INSERT_DATETIME insert_datetime
             FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=l.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ ASC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -107,16 +107,16 @@ def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = 
     try:
         w = []; p = []
         if cust: w.append("s.CUST_CODE=?"); p.append(cust)
-        if mat: w.append("(s.MAT_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
+        if mat: w.append("(s.MAT_CODE LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
         if sign == "1": w.append("s.STOCK_QTY>0")
         elif sign == "-1": w.append("s.STOCK_QTY<0")
         elif sign == "0": w.append("s.STOCK_QTY=0")
         cur.execute(f"""SELECT TOP {int(limit)} s.CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, s.MAT_CODE,
-              ISNULL(i.ITEM_DESC,'') matnm, ISNULL(i.ITEM_CLASS,'') item_class, s.STOCK_QTY, s.REF_STOCK_QTY,
+              ISNULL(i.item_name,'') matnm, ISNULL(i.ITEM_CLASS,'') item_class, s.STOCK_QTY, s.REF_STOCK_QTY,
               ISNULL(s.UPDATE_USER_ID,'') upd_user, s.UPDATE_DATETIME upd_dt, ISNULL(s.UPDATE_WINDOW,'') upd_win
             FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=s.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=s.MAT_CODE
             {('WHERE '+' AND '.join(w)) if w else ''}
             ORDER BY custnm, s.MAT_CODE""", *p)
         cols = [d[0] for d in cur.description]
@@ -142,11 +142,11 @@ def sagub_stock_list(cust: str = Query(""), mat: str = Query(""), sign: str = Qu
         if sign == "1": hav = "HAVING SUM(l.MAINT_QTY)>0"
         elif sign == "-1": hav = "HAVING SUM(l.MAINT_QTY)<0"
         cur.execute(f"""SELECT TOP {int(limit)} l.CUST_CODE cust_code, ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code,
-              ISNULL(i.ITEM_DESC,'') matnm, SUM(l.MAINT_QTY) stock_qty, ISNULL(MAX(i.ITEM_CLASS),'A') item_class
+              ISNULL(i.item_name,'') matnm, SUM(l.MAINT_QTY) stock_qty, ISNULL(MAX(i.ITEM_CLASS),'A') item_class
             FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=l.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)}
-            GROUP BY l.CUST_CODE, c.CUST_DESC, l.MAT_CODE, i.ITEM_DESC
+            GROUP BY l.CUST_CODE, c.CUST_DESC, l.MAT_CODE, i.item_name
             {hav} ORDER BY custnm, l.MAT_CODE""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -198,13 +198,13 @@ def sagub_output_list(cust: str = Query(""), mat: str = Query(""), fin: str = Qu
         if mat: w.append("r.mat_code LIKE ?"); p.append(f"%{mat}%")
         if fin: w.append("ISNULL(r.finish_flag,'0')=?"); p.append(fin)
         cur.execute(f"""SELECT TOP {int(limit)} r.id, r.req_ymd, r.req_seq, r.cust_code, ISNULL(c.CUST_DESC,'') custnm,
-              r.item_code, ISNULL(pi.ITEM_DESC,'') itemnm, r.mat_code, ISNULL(mi.ITEM_DESC,'') matnm,
+              r.item_code, ISNULL(pi.item_name,'') itemnm, r.mat_code, ISNULL(mi.item_name,'') matnm,
               r.req_qty, r.out_qty, ISNULL(r.finish_flag,'0') finish_flag, ISNULL(r.remarks,'') remarks,
               ISNULL(sg.stock_qty,0) sagub_stock, r.insert_user_id, r.insert_datetime
             FROM nx.sagub_output_req r
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=r.cust_code
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.ITEM_CODE=r.item_code
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM mi ON mi.ITEM_CODE=r.mat_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.ITEM_CODE=r.item_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=r.mat_code
             LEFT JOIN (SELECT cust_code, mat_code, SUM(maint_qty) stock_qty FROM nx.sagub_maint GROUP BY cust_code, mat_code) sg
               ON sg.cust_code=r.cust_code AND sg.mat_code=r.mat_code
             {('WHERE '+' AND '.join(w)) if w else ''} ORDER BY r.req_ymd DESC, r.req_seq, r.mat_code""", *p)
@@ -591,12 +591,12 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
         if item: w.append("m.mat_code LIKE ?"); pf.append(f"%{item}%")
         where = " AND ".join(w)
         SEL = """SELECT {idcol} id, '{src}' src, m.maint_ymd out_ymd, m.cust_code out_cust, ISNULL(c.CUST_DESC,'') custnm,
-              CAST(m.sheet_no AS varchar) sheet_no, m.maint_seq out_seq, m.mat_code item_code, ISNULL(i.ITEM_DESC,'') itemnm,
+              CAST(m.sheet_no AS varchar) sheet_no, m.maint_seq out_seq, m.mat_code item_code, ISNULL(i.item_name,'') itemnm,
               ABS(ISNULL(m.maint_qty,0)) out_qty, ISNULL(m.maint_cost,0) cost, ABS(ISNULL(m.maint_amt,0)) amt, ABS(ISNULL(m.maint_vat,0)) vat,
               ISNULL(m.remarks,'') remarks, m.insert_user_id reg_user, {upd} upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt,
               m.work_order, m.split_work_order, NULL sale_ymd, NULL sale_hms, {pf_col} print_flag
             FROM {tbl} m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=m.mat_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=m.mat_code
             WHERE {where}"""
         web_sel = SEL.format(idcol="m.id", src="web", upd="m.upd_user", pf_col="ISNULL(m.print_flag,'0')",
                              tbl="nx.saleout_maint", where=where)
@@ -793,10 +793,10 @@ def lgsale_list(fr: str = Query(""), to: str = Query(""), wo: str = Query(""), i
         if item: w.append("s.item_code LIKE ?"); p.append(f"%{item}%")
         if fin: w.append("ISNULL(s.songjang_print_flag,'0')=?"); p.append(fin)
         cur.execute(f"""SELECT TOP {int(limit)} s.id, s.work_order, s.split_work_order, s.item_code,
-              ISNULL(i.ITEM_DESC,'') itemnm, s.sale_ymd, s.sale_hms, s.sale_qty,
+              ISNULL(i.item_name,'') itemnm, s.sale_ymd, s.sale_hms, s.sale_qty,
               ISNULL(s.songjang_print_flag,'0') print_flag, s.songjang_maint_ymd, s.songjang_maint_seq, s.sheet_no,
               ISNULL(s.remarks,'') remarks, s.insert_user_id, s.insert_datetime
-            FROM nx.sale_dtl s LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=s.item_code
+            FROM nx.sale_dtl s LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=s.item_code
             WHERE {' AND '.join(w)} ORDER BY s.sale_ymd DESC, s.sale_hms DESC, s.id DESC""", *p)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -1029,7 +1029,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
             # ★2026-08-24 SQL 의 like '%%' 는 NULL 만 걸러내고 빈문자열('')은 통과시킨다.
             #   ISNULL(...)>'' 로 쓰면 빈문자열까지 배제 → 사내 P1(in_cust_code='') 1,284건이
             #   통째로 누락되어 계획수량이 레거시보다 적게 나왔다. IS NOT NULL 이 정답.
-            return ("(c.WORK_CODE LIKE 'A" + "%" + "' OR c.IN_CUST_CODE IS NOT NULL)"
+            return ("(c.WORK_CODE LIKE 'A" + "%" + "' OR c.in_cust IS NOT NULL)"
                     " AND NOT EXISTS(SELECT 1 FROM {SCH}.PR_M_MAT m WITH(NOLOCK)"
                     " WHERE m.MAT_CODE=" + col + ")")
         # ★2026-08-24 작업처(work_center) — 레거시 dw_pr_input_040_t1 3단 fallback 이식.
@@ -1037,8 +1037,8 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         #   ③ 둘 다 없으면(=사내 P1) 첫 공정(PROC_SEQ 최소)의 GAGONG_PROC_DESC → '03라인' 등
         #   화면 '작업처' 컬럼이 05라인/MTS/이젠터/대원산업 으로 나오는 근거.
         def WCTR(itemcol):
-            return ("ISNULL((CASE WHEN c.IN_CUST_CODE>'' THEN"
-                    " (SELECT cust_desc FROM {SCH}.CM_M_CUST WHERE cust_code=c.IN_CUST_CODE)"
+            return ("ISNULL((CASE WHEN c.in_cust>'' THEN"
+                    " (SELECT cust_desc FROM {SCH}.CM_M_CUST WHERE cust_code=c.in_cust)"
                     " ELSE (SELECT work_desc FROM {SCH}.PR_M_WORK"
                     " WHERE work_code=c.WORK_CODE AND c.WORK_CODE<>'P1') END),"
                     " (SELECT TOP 1 B1.GAGONG_PROC_DESC"
@@ -1067,7 +1067,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.CHANGE_DAY,'') change_day,
                    {QEXP('a.PLAN_QTY','a.USE_QTY')} planq
               FROM {PLAN_B1} a WITH(NOLOCK)
-              JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
+              JOIN {{SCH}}.item c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('a.C_ITEM_CODE')}{w1}""")
         # ★2026-08-24 레거시 dw_pr_input_040_t1 원문:
@@ -1093,7 +1093,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    '' change_day,
                    ISNULL(a.PLAN_QTY,0) planq
               FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
-              JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
+              JOIN {{SCH}}.item c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('a.ITEM_CODE')}{w2}""")
         prm += [d1, d2] + p2
@@ -1117,7 +1117,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
               FROM {{SCH}}.SA_T_PLAN_DTL_DAILY a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_MODEL_BOM b WITH(NOLOCK)
                    ON a.MODEL_NO=b.MODEL_NO AND a.PLAN_YMD BETWEEN b.MAKE_YMD AND b.TO_APPLY_YMD
-              JOIN {{SCH}}.PR_M_ITEM c WITH(NOLOCK) ON b.C_ITEM_CODE=c.ITEM_CODE
+              JOIN {{SCH}}.item c WITH(NOLOCK) ON b.C_ITEM_CODE=c.ITEM_CODE
              WHERE a.WORK_YMD=? AND a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('b.C_ITEM_CODE')}{w3}
                AND EXISTS(SELECT 1 FROM {{SCH}}.SA_T_PLAN_DTL_DAILY x WITH(NOLOCK)
@@ -1212,7 +1212,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         nm = {}
         for ck in _chunk(items):
             ph = ",".join("?" * len(ck))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM {SCH}.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ck)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM {SCH}.item WHERE ITEM_CODE IN ({ph})", *ck)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
 
         # 제번 전체계획(조회기간 밖 포함) — 살구색(제번 전량출하) 판정용.
@@ -1227,7 +1227,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                                    SUM(CEILING(CONVERT(float,a.PLAN_QTY)*ISNULL(a.USE_QTY,1)
                                                *ISNULL(c.PROD_RATE,100)/100))
                               FROM {SCH}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
-                              JOIN {SCH}.PR_M_ITEM c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
+                              JOIN {SCH}.item c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
                              WHERE ({oc})
                              GROUP BY a.WORK_ORDER, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER),
                                       a.C_ITEM_CODE""", *pv)

@@ -65,11 +65,11 @@ def setstock_list(cust: str = Query(""), item: str = Query(""), gubun: str = Que
         if item.strip(): w.append("s.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         cur.execute(f"""SELECT TOP {max(1, min(int(limit), 20000))}
               s.IN_CUST_CODE, ISNULL(c.CUST_DESC,''), ISNULL(c.CHARGE_USER_ID,''),
-              s.ITEM_CODE, ISNULL(i.ITEM_DESC,''), s.STOCK_QTY,
+              s.ITEM_CODE, ISNULL(i.item_name,''), s.STOCK_QTY,
               ISNULL(s.UPDATE_USER_ID,''), s.UPDATE_DATETIME
             FROM {LIVE}.PU_T_SET_GAGONG_STOCK s
             LEFT JOIN {NX}.CM_M_CUST c ON c.CUST_CODE=s.IN_CUST_CODE
-            LEFT JOIN {NX}.PR_M_ITEM i ON i.ITEM_CODE=s.ITEM_CODE
+            LEFT JOIN {NX}.item i ON i.ITEM_CODE=s.ITEM_CODE
             WHERE {' AND '.join(w)}
             ORDER BY ISNULL(c.CUST_DESC,''), s.ITEM_CODE""", *p)
         rows = []

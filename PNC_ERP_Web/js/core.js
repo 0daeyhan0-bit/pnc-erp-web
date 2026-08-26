@@ -172,6 +172,7 @@ const MODULES=[
    {id:'shipment',ic:'🚚',nm:'출하실적현황'},
    {id:'salesforecast',ic:'📅',nm:'영업예상매출현황'},
    {id:'salesplan',ic:'🗓️',nm:'영업계획현황'},
+   {id:'muldong',ic:'📊',nm:'LG 물동량'},
    {id:'lgrecv',ic:'🏢',nm:'LG리시빙관리'},
  ]},
  {id:'gagong',nm:'가공',ic:'⚙️',subs:[
