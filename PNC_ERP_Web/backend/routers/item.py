@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 import re as _re
-from common import _ITEM_MAKE, _geom_weight
+from common import _ITEM_MAKE, _geom_weight, _sub_desc_suffix, _is_sub_code
 router = APIRouter()
 
 # ===================== 품목마스터 CRUD (Phase②) — nx.item + item_sub/valve/his =====================
@@ -296,6 +296,10 @@ def itemmaster_save(payload: dict = Body(...)):
             miss = (dval(f) in (None, 0) or dval(f) == 0.0) if f in _IM_NUM else (not str(p.get(f, "") or "").strip())
             if miss: warnings.append(_FIELD_LABEL.get(f, f))
 
+        # ★SUB(자도번) 품명 접미사 병기 — 컷오버 후 CRUD 이사(배치 r_sub_desc_suffix 대체, §B-1 3-a).
+        #   병행운영=배치가 매 sync 재병기 / 컷오버 후=이 저장이 자동부착. self-heal이라 UI 왕복도 멱등.
+        if _is_sub_code(cur, code):
+            p["item_name"] = _sub_desc_suffix(code, name)
         # ── nx.item 코어+업무 upsert (NOT NULL 컬럼은 미전송 시 기존값 보존/기본값) ──
         _DEF = {"item_type": "제품", "unit": "EA", "status": "사용"}   # NOT NULL 컬럼 기본값
         allcols = _IM_CORE + _IM_BIZ
