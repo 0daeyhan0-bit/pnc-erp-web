@@ -13,7 +13,7 @@ def _is_inner_prod(cro, item):
     """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(PR_M_ITEM_PROC_GAGONG) 보유. 라이브 RO."""
     c = cro.cursor()
     try:
-        c.execute("SELECT ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
+        c.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", item)
         r = c.fetchone()
         if r and str(r[0]).strip() == '1': return True
         c.execute("SELECT COUNT(*) FROM nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?", item)
@@ -37,7 +37,7 @@ def _backflush_bom(nxc, root, cro=None):
         if cro is None: return True
         n = str(node).strip()
         if n not in _mkc:
-            cc = cro.cursor(); cc.execute("SELECT ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", n)
+            cc = cro.cursor(); cc.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", n)
             r = cc.fetchone(); _mkc[n] = bool(r and str(r[0]).strip() == '1')
         return _mkc[n]
     out = {}; weld = {}
