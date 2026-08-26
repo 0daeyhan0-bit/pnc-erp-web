@@ -426,3 +426,20 @@ def _route01_ratio(ncur, item_codes):
         except Exception:
             pass
     return out
+
+# ── 원소재 기하중량 (레거시 f_get_weight3 정합) ─────────────────────────────
+_METAL_DENS = {'고강도': 8.94, 'CU': 8.94, 'AL': 2.7, 'FE': 7.85, 'STS': 7.93}  # CM_M_MASTER_DETAIL PR019 비중
+
+def _geom_weight(metal_gubun, diam, thick, length):
+    """원소재 기하중량 = π(D−T)·T·L·비중(재질별)/1e6. 레거시 f_get_weight3(PR019 비중)와 정합.
+       cg='3' 원소재는 SP가 저장 중량 무시하고 항상 기하계산 → 편집/sync 시 이 값으로 재계산.
+       비중 미상·치수 0이면 None(재계산 안 함)."""
+    import math
+    dens = _METAL_DENS.get(str(metal_gubun or '').strip())
+    try:
+        d, t, l = float(diam or 0), float(thick or 0), float(length or 0)
+    except Exception:
+        return None
+    if not dens or d <= 0 or t <= 0 or l <= 0:
+        return None
+    return round(math.pi * (d - t) * t * l * dens / 1e6, 6)
