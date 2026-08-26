@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 import re as _re
-from common import _ITEM_MAKE, _geom_weight
+from common import _ITEM_MAKE, _geom_weight, _sub_desc_suffix, _is_sub_code
 router = APIRouter()
 
 # ===================== 품목마스터 CRUD (Phase②) — nx.item + item_sub/valve/his =====================

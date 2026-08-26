@@ -3947,7 +3947,7 @@ SCREEN.matexpect=(c)=>{
     const SUMK=['tot_qty','base_qty','cur_qty','safety_qty','need_qty','buy_qty','fit_qty'];
     const T=rows.reduce((t,r)=>{SUMK.forEach(x=>t[x]=(t[x]||0)+(+r[x]||0));return t;},{});
     const ind=key=>st.sortKey===key?(st.sortDir===1?' ▲':' ▼'):'';
-    const cols=[['mat_name','품명',0],['vendor_name','업체',0],['grp','분류',0],['tot_qty','총소요',1],['base_qty','기초재고',1],['cur_qty','현재고',1],['safety_qty','상시보유',1],['need_qty','필요수량',1],['buy_qty','매입실적',1],['fit_qty','적정성',1],['lead_days','L/T',1]];
+    const cols=[['mat_code','품번',0],['mat_name','품명',0],['vendor_name','업체',0],['grp','분류',0],['tot_qty','총소요',1],['base_qty','기초재고',1],['cur_qty','현재고',1],['safety_qty','상시보유',1],['need_qty','필요수량',1],['buy_qty','매입실적',1],['fit_qty','적정성',1],['lead_days','L/T',1]];
     const rng=m=>m?`${(''+m[0]).slice(0,2)}/${(''+m[0]).slice(2,4)}/${(''+m[0]).slice(4,6)}~${(''+m[1]).slice(4,6)}`:'-';
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="margin-bottom:2px">자재예상매입 <span style="font-size:12px;color:var(--muted);font-weight:400">MRP 조달계획 — 소요 vs 매입 적정성 (자재×업체×분류)</span></div>
@@ -3957,7 +3957,7 @@ SCREEN.matexpect=(c)=>{
        <label class="rl"><input type="radio" name="me-ax" value="prod"${st.axis==='prod'?' checked':''}> 생산실적</label>
        <label class="rl"><input type="radio" name="me-ax" value="sale"${st.axis==='sale'?' checked':''}> 영업실적</label>
        <label class="tl" style="margin-left:8px">월</label><input type="month" class="inp" id="me-ym" value="${st.ym.slice(0,4)}-${st.ym.slice(4,6)}" style="min-width:120px">
-       <label class="tl" style="margin-left:8px">분류</label><select class="sel" id="me-grp">${['전체','원소재','사급','그외','반제품'].map(g=>`<option${st.grp===g?' selected':''}>${g}</option>`).join('')}</select>
+       <label class="tl" style="margin-left:8px">분류</label><select class="sel" id="me-grp">${['전체','원소재','사급','부자재','반제품'].map(g=>`<option${st.grp===g?' selected':''}>${g}</option>`).join('')}</select>
        <input class="inp" id="me-q" placeholder="품번/품명/업체" value="${esc(st.q)}" style="width:150px">
        <button class="btn" id="me-go">조회</button>
        <button class="btn xls" id="me-xls">엑셀</button>
@@ -3971,15 +3971,16 @@ SCREEN.matexpect=(c)=>{
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:12px;white-space:nowrap"><thead><tr style="position:sticky;top:0;background:#eef3fb;z-index:2">
         ${cols.map(([k,l,n])=>`<th class="${n?'num':''}" data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${l}${ind(k)}</th>`).join('')}</tr></thead>
-       <tbody>${st.loading?`<tr><td colspan="11" class="empty">불러오는 중…</td></tr>`:(rows.length?rows.map(r=>`<tr>
-         <td class="cap" style="max-width:210px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.mat_code)} ${esc(r.mat_name||'')}"><b>${esc(r.mat_name||r.mat_code)}</b></td>
+       <tbody>${st.loading?`<tr><td colspan="12" class="empty">불러오는 중…</td></tr>`:(rows.length?rows.map(r=>`<tr>
+         <td><b>${esc(r.mat_code)}</b></td>
+         <td class="cap" style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.mat_name||'')}">${esc(r.mat_name||'')}</td>
          <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.vendor_code||'')}">${esc(r.vendor_name||r.vendor_code||'-')}</td>
          <td class="center">${esc(r.grp)}</td>
          <td class="num">${nf(r.tot_qty)}</td><td class="num">${nf(r.base_qty)}</td><td class="num">${nf(r.cur_qty)}</td>
          <td class="num">${nf(r.safety_qty)}</td><td class="num"><b>${nf(r.need_qty)}</b></td><td class="num">${nf(r.buy_qty)}</td>
          <td class="num" style="color:${fitc(r.fit_qty)};font-weight:600">${nf(r.fit_qty)}</td><td class="num">${r.lead_days||0}</td></tr>`).join('')
-         :`<tr><td colspan="11" class="empty">데이터 없음</td></tr>`)}</tbody>
-       ${rows.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc"><td colspan="3" class="right">합계 (${nf(rows.length)}자재)</td><td class="num"><b>${nf(T.tot_qty)}</b></td><td class="num">${nf(T.base_qty)}</td><td class="num">${nf(T.cur_qty)}</td><td class="num">${nf(T.safety_qty)}</td><td class="num"><b>${nf(T.need_qty)}</b></td><td class="num">${nf(T.buy_qty)}</td><td class="num" style="color:${fitc(T.fit_qty)}"><b>${nf(T.fit_qty)}</b></td><td></td></tr></tfoot>`:''}
+         :`<tr><td colspan="12" class="empty">데이터 없음</td></tr>`)}</tbody>
+       ${rows.length?`<tfoot><tr class="grandtot" style="position:sticky;bottom:0;background:#f4f7fc"><td colspan="4" class="right">합계 (${nf(rows.length)}자재)</td><td class="num"><b>${nf(T.tot_qty)}</b></td><td class="num">${nf(T.base_qty)}</td><td class="num">${nf(T.cur_qty)}</td><td class="num">${nf(T.safety_qty)}</td><td class="num"><b>${nf(T.need_qty)}</b></td><td class="num">${nf(T.buy_qty)}</td><td class="num" style="color:${fitc(T.fit_qty)}"><b>${nf(T.fit_qty)}</b></td><td></td></tr></tfoot>`:''}
       </table>
      </div>
     </div>`;

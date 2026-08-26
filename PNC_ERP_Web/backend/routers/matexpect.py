@@ -83,7 +83,7 @@ def _grp(cust_type, cust_code):
     if ct == "1":
         return "사급"
     if ct in ("7", "8", "9", "A"):
-        return "그외"
+        return "부자재"
     if ct == "6":
         return "협력사"  # 가공비 축 — 매입액 아님(집계 제외 대상)
     return "미분류"
@@ -108,9 +108,9 @@ def _grp_bom(mat, mkmap, rolemap):
     if mt == "1":
         return "제작"                         # 자체제작(EA는 매입 아님·소비 원소재는 중량축 추후)
     if mt == "3":
-        return "그외"                         # 구매(비원소재) = 부자재·소모품·이지링크
+        return "부자재"                         # 구매(비원소재) = 부자재·소모품·이지링크
     if role in _ETC_ROLES:
-        return "그외"
+        return "부자재"
     if role == "반제품":
         return "반제품"                       # 중간 반제품(추후 전개/판단)
     return "미분류"
