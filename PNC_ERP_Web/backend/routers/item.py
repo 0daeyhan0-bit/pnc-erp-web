@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 import re as _re
-from common import _ITEM_MAKE
+from common import _ITEM_MAKE, _geom_weight
 router = APIRouter()
 
 # ===================== 품목마스터 CRUD (Phase②) — nx.item + item_sub/valve/his =====================
@@ -252,6 +252,12 @@ def itemmaster_save(payload: dict = Body(...)):
     diam, thick = dval("diam"), dval("thick")
     if diam is not None and thick is not None and not p.get("item_pipe_id"):
         p["item_pipe_id"] = round(diam - thick * 2, 4)
+    # ★net_weight 자동 재계산(원소재 cg='3': 치수·재질로 기하중량 = 레거시 f_get_weight3).
+    #   SP가 저장 중량 무시하고 항상 기하계산 → 편집 시 재계산해야 stale 방지(컷오버 후 CRUD·병행운영 sync 양쪽 정합).
+    if str(p.get("cost_gubun", "")).strip() == "3":
+        _gw = _geom_weight(p.get("metal_gubun"), diam, thick, dval("length"))
+        if _gw is not None:
+            p["net_weight"] = _gw
     # make_type=4 → LG사급 자동
     if str(p.get("make_type", "")).strip() == "4":
         p["lg_obtain_flag"] = "1"
