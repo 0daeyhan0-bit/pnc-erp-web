@@ -146,8 +146,7 @@ from routers import gongsu as _r_gongsu
 app.include_router(_r_gongsu.router)
 from routers import daycheck as _r_daycheck
 app.include_router(_r_daycheck.router)
-from routers import autoorder as _r_autoorder
-app.include_router(_r_autoorder.router)
+# autoorder 폐기(2026-08-26): 미사용(프론트/타백엔드 소비 0)·AI개발본. 라우팅 해제+파일제거. 복구=git. 대체=자재예상매입(MRP, 설계단계) [[newerp-matexpect-initiative]]
 from routers import lgsagub as _r_lgsagub
 app.include_router(_r_lgsagub.router)
 from routers import dopip as _r_dopip
