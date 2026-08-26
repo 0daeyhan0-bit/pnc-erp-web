@@ -207,13 +207,13 @@ def matrecv_po_pending(cust: str = Query(""), item: str = Query(""), sheet: str 
         if from_ymd.strip(): w.append("p.PUR_YMD>=?"); pr.append(_d6(from_ymd))
         if to_ymd.strip(): w.append("p.PUR_YMD<=?"); pr.append(_d6(to_ymd))
         cur.execute(f"""SELECT TOP 800 p.PUR_YMD, p.PUR_SEQ, p.PUR_SEQ_ROW, p.CUST_CODE, ISNULL(cu.CUST_DESC,'') cust_nm,
-              p.ITEM_CODE, ISNULL(it.ITEM_DESC,'') nm, ISNULL(it.ITEM_SPEC,'') spec, ISNULL(it.UNIT,'') unit, p.DLVY_YMD,
+              p.ITEM_CODE, ISNULL(it.item_name,'') nm, ISNULL(it.item_spec,'') spec, ISNULL(it.unit,'') unit, p.DLVY_YMD,
               p.PUR_QTY, ISNULL(p.IN_QTY,0) in_qty, ISNULL(p.CANCEL_QTY,0) cancel_qty, ISNULL(nx.q,0) nx_in,
               ISNULL(p.PUR_COST,0) pur_cost, ISNULL(p.MAT_INSPECTION,'') insp,
               (p.PUR_QTY - ISNULL(p.IN_QTY,0) - ISNULL(p.CANCEL_QTY,0) - ISNULL(nx.q,0)) remain
             FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL p
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=p.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON it.ITEM_CODE=p.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item it ON it.item_code=p.ITEM_CODE
             LEFT JOIN (SELECT PUR_YMD,PUR_SEQ,PUR_SEQ_ROW,SUM(MAINT_QTY) q FROM nx.stock_ledger
                        WHERE MAINT_TAG='9' AND ISNULL(PUR_YMD,'')<>'' GROUP BY PUR_YMD,PUR_SEQ,PUR_SEQ_ROW) nx
               ON nx.PUR_YMD{C}=p.PUR_YMD{C} AND nx.PUR_SEQ{C}=p.PUR_SEQ{C} AND nx.PUR_SEQ_ROW=p.PUR_SEQ_ROW
@@ -299,11 +299,11 @@ def matrecv_gagong_pending(sheet: str = Query(""), item: str = Query("")):
             gs = "".join(ch for ch in sheet.strip() if ch.isdigit())
             w.append("g.MAINT_GROUP_SEQ=?"); pr.append(int(gs) if gs else -1)
         if item.strip(): w.append("g.MAT_CODE LIKE ?"); pr.append(f"%{item.strip()}%")
-        cur.execute(f"""SELECT TOP 500 g.MAINT_GROUP_SEQ, g.MAT_CODE, ISNULL(it.ITEM_DESC,'') nm, ISNULL(it.ITEM_SPEC,'') spec,
-              ISNULL(it.UNIT,'') unit, g.ITEM_CODE upper_code, g.MAINT_QTY, g.GAGONG_PROC_CODE, g.TO_GAGONG_PROC_CODE,
+        cur.execute(f"""SELECT TOP 500 g.MAINT_GROUP_SEQ, g.MAT_CODE, ISNULL(it.item_name,'') nm, ISNULL(it.item_spec,'') spec,
+              ISNULL(it.unit,'') unit, g.ITEM_CODE upper_code, g.MAINT_QTY, g.GAGONG_PROC_CODE, g.TO_GAGONG_PROC_CODE,
               g.MAINT_YMD, ISNULL(nx.q,0) nx_in
             FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE g
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON it.ITEM_CODE{C}=g.MAT_CODE{C}
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item it ON it.item_code{C}=g.MAT_CODE{C}
             LEFT JOIN (SELECT MAINT_GROUP_SEQ, SUM(MAINT_QTY) q FROM nx.stock_ledger WHERE MAINT_TAG='C' AND MAINT_GROUP_SEQ IS NOT NULL GROUP BY MAINT_GROUP_SEQ) nx
               ON nx.MAINT_GROUP_SEQ=g.MAINT_GROUP_SEQ
             WHERE {' AND '.join(w)}

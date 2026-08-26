@@ -59,9 +59,9 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
-          SELECT S.mat mat, MAX(M.ITEM_DESC) nm, MAX(M.ITEM_SPEC) spec, MAX(M.UNIT) unit, S.cost cost,
+          SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit, S.cost cost,
             CAST(RIGHT(S.ymd,2) AS INT) d, SUM(S.qty) q, SUM(S.amt) amt
-          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON S.mat=M.ITEM_CODE
+          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
           WHERE S.cc=? GROUP BY S.mat, S.cost, CAST(RIGHT(S.ymd,2) AS INT)""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
@@ -126,16 +126,16 @@ def purmagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Q
     elif cust.strip():
         where.append("(S.cc=? OR C.CUST_DESC LIKE ?)"); pf += [cust.strip(), f"%{cust.strip()}%"]
     if q.strip():
-        where.append("(S.mat LIKE ? OR M.ITEM_DESC LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
+        where.append("(S.mat LIKE ? OR M.item_name LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT S.cc cc, MAX(C.CUST_DESC) cnm, S.mat mat, S.moda moda,
-            MAX(ISNULL(M.ITEM_DESC,'')) nm, MAX(ISNULL(M.ITEM_SPEC,'')) spec, MAX(ISNULL(M.UNIT,'')) unit,
+            MAX(ISNULL(M.item_name,'')) nm, MAX(ISNULL(M.item_spec,'')) spec, MAX(ISNULL(M.unit,'')) unit,
             S.cost cost, S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt
           FROM ({_pur_src_moda(win)}) S
             JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON S.mat=M.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
           WHERE {' AND '.join(where)}
           GROUP BY S.cc, S.mat, S.moda, S.cost, S.ymd""", *pf)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
