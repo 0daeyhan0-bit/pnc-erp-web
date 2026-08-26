@@ -162,6 +162,8 @@ from routers import assywork as _r_assywork  # 체결 매트릭스(품목별 체
 app.include_router(_r_assywork.router)
 from routers import matverify as _r_matverify  # 자재 소요-매입 검증(업체별 과입고 진단)
 app.include_router(_r_matverify.router)
+from routers import muldong as _r_muldong  # LG 물동량(영업) 업로드+조회 → nx.lg_muldong (자재예상매입 4주초과 소요원)
+app.include_router(_r_muldong.router)
 import weight_calc  # 무게정산(중량조정) 계산
 # 도메인간 공유헬퍼 — 로컬 def가 있으면 그게 shadow, 해당 도메인 라우터 이동 후엔 common판 사용(잔류 엔드포인트 보호)
 from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win
