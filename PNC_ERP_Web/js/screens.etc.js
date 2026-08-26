@@ -795,6 +795,20 @@ SCREEN.modelbom=(c)=>{
     try{const r=await fetch(`${API}/api/modelbom/get?${p}`);data=await r.json();}catch(e){data={rows:[]};}loading=false;draw();};
   const startEdit=()=>{editMode=true;erows=data.rows.filter(r=>r.src==='nx').map(r=>({...r}));if(!erows.length)erows=[{item:'',use_qty:1,from:'',to:'',remarks:''}];draw();};
   const addRow=()=>{erows.push({item:'',use_qty:1,from:'',to:'',remarks:''});draw();};
+  // ★신규 모델 등록(2026-08-27) — 기존 매핑이 없는 모델은 검색으로 찾을 수 없어
+  //   등록 진입점 자체가 없었다. 모델번호를 직접 입력받아 바로 편집모드로 들어간다.
+  const newModel=async()=>{
+    const m=(prompt('신규 등록할 LG 모델번호를 입력하세요.\n(이미 매핑이 있으면 그 내용을 불러옵니다)','')||'').trim();
+    if(!m)return;
+    by='model';q=m;sel=m;
+    // 기존 매핑이 있으면 nx 등록분을 이어서 편집, 없으면 빈 행 하나로 시작
+    try{const r=await fetch(`${API}/api/modelbom/get?model=${encodeURIComponent(m)}`);data=await r.json();}
+    catch(e){data={rows:[]};}
+    erows=(data.rows||[]).filter(r=>r.src==='nx').map(r=>({...r}));
+    if(!erows.length)erows=[{item:'',use_qty:1,from:'',to:'',remarks:''}];
+    editMode=true;draw();
+    search();            // 좌측 목록 갱신(비동기 — 끝나면 draw 재호출)
+  };
   const save=async()=>{
     try{const r=await fetch(`${API}/api/modelbom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:sel,rows:erows})});
       const j=await r.json();if(j.ok){alert(`모델BOM 저장 완료 — ${j.count}건 (nx 신규등록)`);load(sel);return;}alert('저장 실패: '+(j.detail||JSON.stringify(j)));}
@@ -804,11 +818,13 @@ SCREEN.modelbom=(c)=>{
     const canW=(typeof PERM!=='undefined')?PERM.canEdit('modelbom'):true;   // 수정권한 게이트(규칙#16)
     c.innerHTML=`
      <div class="page-title">🧬 모델BOM 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">LG모델 → 우리 도번 매핑 (편성 커버리지)</span></div>
-     <div class="page-sub">LG 모델번호를 우리 ASSY 도번으로 매핑. 편성(협력사계획)이 이 매핑으로 모델→도번을 전개. 조회=<code>PR_M_MODEL_BOM</code>(라이브) ∪ <code>nx.model_bom</code>(신규등록). 미매핑 신규모델을 여기서 등록.</div>
+     <div class="page-sub">LG 모델번호를 우리 ASSY 도번으로 매핑. 편성(협력사계획)이 이 매핑으로 모델→도번을 전개. 조회=<code>nx.PR_M_MODEL_BOM</code> ∪ <code>nx.model_bom</code>(신규등록). <b>미매핑 신규모델은 좌측 「＋ 신규 모델 등록」</b>으로 추가.</div>
      <div style="display:flex;gap:14px;align-items:flex-start">
       <div style="flex:0 0 300px">
        <div class="toolbar"><select class="inp" id="mb-by"><option value="model"${by==='model'?' selected':''}>모델→도번</option><option value="item"${by==='item'?' selected':''}>도번→모델(역)</option></select>
          <input class="inp" id="mb-q" value="${esc(q)}" placeholder="${by==='item'?'도번':'모델'} 검색" style="width:150px"><button class="btn" id="mb-search">🔍</button></div>
+       ${canW?`<div class="toolbar" style="margin-top:2px"><button class="btn" id="mb-new" style="background:#1c7c3a;color:#fff;width:100%">＋ 신규 모델 등록</button></div>
+       <div class="page-sub" style="margin:2px 0 6px;font-size:11px;color:#8aa0bd">※ 매핑이 아직 없는 모델은 검색되지 않습니다 — 위 버튼으로 모델번호를 직접 입력해 등록하세요.</div>`:''}
        <div class="grid-wrap" style="max-height:calc(100vh - 240px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
         <table class="tbl" style="font-size:12px"><thead><tr><th>${by==='item'?'도번':'모델'}</th><th class="num">${by==='item'?'모델수':'도번수'}</th></tr></thead>
         <tbody>${searching?spinRow(2):(slist.length?slist.map(s=>`<tr class="mb-row${sel===s.code?' sel':''}" data-c="${esc(s.code)}" style="cursor:pointer"><td><b>${esc(s.code)}</b></td><td class="num">${s.n}</td></tr>`).join(''):`<tr><td colspan="2" class="empty">검색</td></tr>`)}</tbody></table>
@@ -819,7 +835,7 @@ SCREEN.modelbom=(c)=>{
          <div class="spacer"></div>${(by==='model'&&canW)?(editMode?`<button class="btn" id="mb-add">＋행추가</button><button class="btn" id="mb-save" style="background:#1c47a0;color:#fff">💾 저장</button><button class="btn ghost" id="mb-cancel">✖ 취소</button>`:`<button class="btn" id="mb-edit">✎ 신규등록/수정(nx)</button>`):(by==='model'?`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`:'')}</div>
         <div class="grid-wrap" style="max-height:calc(100vh - 250px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
          ${(!editMode)?`<table class="tbl" style="font-size:12px"><thead><tr>${by==='item'?'<th>모델</th>':''}<th>도번</th><th>품명</th><th class="num">사용수량</th><th>유효시작</th><th>유효종료</th><th>작업장/업체</th><th>소스</th></tr></thead>
-          <tbody>${loading?spinRow(7):(R.length?R.map(r=>`<tr>${by==='item'?`<td><b>${esc(r.model)}</b></td>`:''}<td><b>${esc(r.item)}</b></td><td class="bcap" title="${esc(r.nm)}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="num">${r.use_qty}</td><td class="center">${ymd(r.from)}</td><td class="center">${ymd(r.to)}</td><td class="center">${esc(r.wc)}</td><td class="center"><span style="font-size:10px;color:${r.src==='nx'?'#1c7c3a':'#888'}">${r.src==='nx'?'nx등록':'라이브'}</span></td></tr>`).join(''):`<tr><td colspan="${by==='item'?8:7}" class="empty">매핑 없음 — ${by==='model'?'신규등록/수정(nx)으로 추가':''}</td></tr>`)}</tbody></table>`
+          <tbody>${loading?spinRow(7):(R.length?R.map(r=>`<tr>${by==='item'?`<td><b>${esc(r.model)}</b></td>`:''}<td><b>${esc(r.item)}</b></td><td class="bcap" title="${esc(r.nm)}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}</td><td class="num">${r.use_qty}</td><td class="center">${ymd(r.from)}</td><td class="center">${ymd(r.to)}</td><td class="center">${esc(r.wc)}</td><td class="center"><span style="font-size:10px;color:${r.src==='nx'?'#1c7c3a':'#888'}">${r.src==='nx'?'nx등록':'nx기존'}</span></td></tr>`).join(''):`<tr><td colspan="${by==='item'?8:7}" class="empty">매핑 없음 — ${by==='model'?'신규등록/수정(nx)으로 추가':''}</td></tr>`)}</tbody></table>`
          :`<table class="tbl" style="font-size:12px"><thead><tr><th>도번</th><th class="num">사용수량</th><th>유효시작(YYMMDD)</th><th>유효종료</th><th>비고</th><th>삭제</th></tr></thead>
           <tbody>${erows.map((r,i)=>`<tr><td><input class="ce" data-i="${i}" data-k="item" value="${esc(r.item||'')}" placeholder="도번" style="width:130px"></td>
            <td><input class="ce" type="number" step="any" data-i="${i}" data-k="use_qty" value="${r.use_qty??1}" style="width:60px"></td>
@@ -839,6 +855,7 @@ SCREEN.modelbom=(c)=>{
     g('#mb-search').onclick=()=>{q=g('#mb-q').value;search();};
     g('#mb-q').onkeyup=e=>{if(e.key==='Enter'){q=e.target.value;search();}};
     c.querySelectorAll('.mb-row').forEach(el=>el.onclick=()=>load(el.dataset.c));
+    const nw=g('#mb-new');if(nw)nw.onclick=newModel;
     const ed=g('#mb-edit');if(ed)ed.onclick=startEdit;
     const ad=g('#mb-add');if(ad)ad.onclick=addRow;
     const sv=g('#mb-save');if(sv)sv.onclick=save;
