@@ -205,7 +205,10 @@ SCREEN.planuploadrev=(c)=>{
       if(j.ok){alert(`생산계획 UPLOAD 작업을 완료했습니다.\n\nUPLOAD 건수=${nf(j.total)}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} (구분 ${j.cr})`);
         // ★input.value 를 비워야 같은 파일 재선택 시에도 onchange 가 다시 뜬다(자동업로드 전제).
         upfile=null;const _fi=c.querySelector('#p-file');if(_fi)_fi.value='';
-        await loadJobs();load();return;}
+        // ★그리드 자동조회 안 함(2026-08-26 요청) — 조회는 [🔍 조회] 버튼을 누를 때만.
+        //   업로드 직후엔 SAC/RAC 박스·단계 상태만 갱신한다(4,564행 조회가 매번 도는 게 무겁다).
+        msg=`업로드 완료 — 조회하려면 [🔍 조회] 를 누르세요.`;
+        await loadJobs();draw();return;}
       alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){pgClose();alert('업로드 실패: '+e);}
     msg='';draw();};
