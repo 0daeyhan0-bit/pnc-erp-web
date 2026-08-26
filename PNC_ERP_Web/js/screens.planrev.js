@@ -203,7 +203,9 @@ SCREEN.planuploadrev=(c)=>{
       const j=await r.json();
       pgClose();
       if(j.ok){alert(`생산계획 UPLOAD 작업을 완료했습니다.\n\nUPLOAD 건수=${nf(j.total)}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} (구분 ${j.cr})`);
-        upfile=null;await loadJobs();load();return;}
+        // ★input.value 를 비워야 같은 파일 재선택 시에도 onchange 가 다시 뜬다(자동업로드 전제).
+        upfile=null;const _fi=c.querySelector('#p-file');if(_fi)_fi.value='';
+        await loadJobs();load();return;}
       alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){pgClose();alert('업로드 실패: '+e);}
     msg='';draw();};
@@ -272,12 +274,19 @@ SCREEN.planuploadrev=(c)=>{
       const uc=g('#p-upcr'); if(uc)uc.onchange=e=>upcr=e.target.value;
       const uf=g('#p-file'); if(uf)uf.onchange=e=>{
         upfile=e.target.files[0]||null;
+        if(!upfile)return;
         // ★파일명으로 SAC/RAC 자동판정(레거시 동일 기준): lg_sac→C, lg_rac→R
-        if(upfile){const fn=(upfile.name||'').toLowerCase();
-          const hit=/rac/.test(fn)?'R':(/sac/.test(fn)?'C':'');
-          if(hit&&hit!==upcr){upcr=hit;const sel=g('#p-upcr');if(sel)sel.value=hit;
-            msg=`파일명에서 ${hit==='C'?'SAC':'RAC'} 로 자동 판정했습니다 — ${upfile.name}`;draw();}
-          else if(!hit){msg=`⚠ 파일명에 sac/rac 가 없어 구분을 자동판정하지 못했습니다 — 드롭다운을 확인하세요.`;draw();}
+        const fn=(upfile.name||'').toLowerCase();
+        const hit=/rac/.test(fn)?'R':(/sac/.test(fn)?'C':'');
+        if(hit){
+          if(hit!==upcr){upcr=hit;const sel=g('#p-upcr');if(sel)sel.value=hit;}
+          // ★파일 선택 즉시 업로드(2026-08-26 요청) — 구분이 파일명으로 확정된 경우만.
+          msg=`${hit==='C'?'SAC':'RAC'} 로 판정 — 업로드를 시작합니다 (${upfile.name})`;
+          doUpload();
+        }else{
+          // 판정 실패 = 구분을 확신할 수 없음 → 자동실행하지 않고 드롭다운 확인을 받는다.
+          msg=`⚠ 파일명에 sac/rac 가 없어 구분을 자동판정하지 못했습니다 — 드롭다운 확인 후 [생산계획UPLOAD] 를 누르세요.`;
+          draw();
         }};
       const ub=g('#p-upload'); if(ub)ub.onclick=doUpload;
       c.querySelectorAll('.p-step').forEach(b=>b.onclick=()=>runStep(b.getAttribute('data-c')));

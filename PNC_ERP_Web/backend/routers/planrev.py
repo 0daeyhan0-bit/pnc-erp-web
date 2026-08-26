@@ -808,7 +808,16 @@ def planrev_job_status():
             if g in steps: steps[g]["ok_dt"] = dt
         cur.execute("SELECT CONVERT(varchar(19),MAX(UPLOAD_DT),120), COUNT(*) FROM nx.plan_dtl")
         up, n = cur.fetchone()
-        return {"ok": True, "steps": steps, "upload_dt": up, "plan_rows": int(n or 0)}
+        # ★SAC/RAC 녹색박스 소스 — CR_FLAG 별 최종 업로드시각·행수(레거시 동일 표기).
+        #   C=SAC · R=RAC. 화면(screens.planrev.js:104)이 j.src 를 읽는다.
+        src = {}
+        cur.execute("""SELECT RTRIM(ISNULL(CR_FLAG,'')), CONVERT(varchar(8),MAX(UPLOAD_DT),108),
+                 CONVERT(varchar(19),MAX(UPLOAD_DT),120), COUNT(*)
+            FROM nx.plan_dtl GROUP BY RTRIM(ISNULL(CR_FLAG,''))""")
+        for _cf, _hms, _dt, _n in cur.fetchall():
+            _k = {"C": "SAC", "R": "RAC"}.get(str(_cf or "").strip().upper())
+            if _k: src[_k] = {"hms": _hms, "dt": _dt, "rows": int(_n or 0)}
+        return {"ok": True, "steps": steps, "upload_dt": up, "plan_rows": int(n or 0), "src": src}
     finally:
         nx.close()
 
