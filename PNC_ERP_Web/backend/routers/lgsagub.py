@@ -591,6 +591,10 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
             FROM nx.SA_T_LG_RECEIVING_DTL WHERE {rwh}
             GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE))), CASE WHEN RECEIVING_YMD >= '{_CUT}' THEN 1 ELSE 0 END""", *rp)
         recvrows = [(r[0], int(r[1] or 0), f(r[2]), f(r[3]), f(r[4])) for r in cur.fetchall()]
+        # ★절삭만 = LG 사급(동 정합 대상). 설치·이지링크·미분류 = 직거래(PNC 자체구매) → 제외 (nx.item.cut_gubun)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE cut_gubun=N'절삭'")
+        cutset = set(r[0] for r in cur.fetchall())
+        recvrows = [row for row in recvrows if row[0] in cutset]
         # 품명 매핑
         nm = {}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -691,6 +695,8 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
         for ic, mtl, dd, tt, ww in cur.fetchall():
             if mtl != '~':
                 dong_all.setdefault(str(ic).strip().upper(), {})[(mtl, float(dd), float(tt))] = float(ww)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE cut_gubun=N'절삭'")
+        cutset = set(r[0] for r in cur.fetchall())   # ★절삭만 = LG 사급, 설치/이지링크=직거래 제외
         rows = []; bal_kg = 0.0; bal_amt = 0.0; bal_bom_kg = 0.0; bal_bom_amt = 0.0
         for M in months:
             cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, SUM(ISNULL(weight,0)) w,
@@ -707,6 +713,7 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
                 FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=?
                 GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", M)
             recvlist = [(r[0], f(r[1])) for r in cur.fetchall()]
+            recvlist = [(it, net) for it, net in recvlist if it in cutset]   # ★절삭만(LG사급)
             soyo_kg = sum(usg.get(it, 0.0) * net for it, net in recvlist)
             soyo_amt = sum(usc.get(it, 0.0) * net for it, net in recvlist)
             pmM = pm_post if M >= '2608' else pm_pre        # 인상후(8월~) / 인상전
