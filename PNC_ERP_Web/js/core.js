@@ -149,7 +149,9 @@ const MODULES=[
    {id:'procresult',ic:'✅',nm:'공정별 생산실적등록'},
    {id:'procbarcode',ic:'🔫',nm:'공정별 바코드생산실적'},
    {id:'partresult',ic:'📈',nm:'파트별 생산실적현황'},
-   {id:'prodresult',ic:'📊',nm:'생산실적현황'},
+   // ★2026-08-26 메뉴에서만 숨김(사용자 요청) — 나중에 쓸 수 있어 화면(SCREEN.prodresult,
+   //   screens.prod.js)과 API 는 그대로 둔다. 되살리려면 이 줄의 주석만 풀면 됨.
+   // {id:'prodresult',ic:'📊',nm:'생산실적현황'},
    {id:'gongsu',ic:'⏱️',nm:'공수등록(근무/지원)'},
    {sep:true},
    {id:'partstockadj',ic:'🛠️',nm:'생산파트재고조정'},
@@ -1747,6 +1749,10 @@ function wrCrud(host, cfg){
               flush();
               return html+'</table>';
             })()}
+            ${/* ★확장영역 — 폼 필드로 표현 못하는 UI(파일첨부 등)를 화면쪽에서 끼워넣는다.
+                  cfg.modalExtra(form) 이 HTML 을 돌려주면 폼 아래에 붙는다. 이벤트는
+                  cfg.modalExtraBind(root, form, reload) 에서 건다(2026-08-26 품질불량 첨부). */
+              (cfg.modalExtra? (cfg.modalExtra(st.form)||'') : '')}
           </div>
           <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center;gap:10px">
             <span style="color:#c0392b;font-size:11px;text-align:left">* 필수항목 제외품목들을 사용해보고 전산담당에게 알려주세요.</span>
@@ -1778,6 +1784,9 @@ function wrCrud(host, cfg){
       g('#wr-cancel').onclick=()=>{st.form=null;render();};
       const xb=g('#wr-x'); if(xb)xb.onclick=()=>{st.form=null;render();};
       g('#wr-save').onclick=save;
+      // ★확장영역 이벤트 바인딩(cfg.modalExtra 와 짝). 실패해도 폼 저장은 살아있게 try 로 격리.
+      if(cfg.modalExtraBind){try{cfg.modalExtraBind(host,st.form,()=>{render();});}
+                             catch(e){try{console.error('[wrShell] modalExtraBind 실패',e);}catch(_){}}}
       host.querySelectorAll('[data-fk]').forEach(el=>{
         el.oninput=()=>{st.form[el.dataset.fk]=el.value;
           const f=cfg.form.find(x=>x.k===el.dataset.fk);
@@ -2321,6 +2330,14 @@ function bindLegacyDate(root,id,getIso,onSet){
   if(disp)disp.onclick=function(){try{cal.showPicker();}catch(err){cal.focus();cal.click();}};
 }
 // 조회 그리드 전체 컬럼(레거시 순서, 전부 이름)
+// 첨부 슬롯 셀 — 붙어있으면 파일명 링크(클릭=내려받기), 없으면 공란. 레거시 w_qa_input_020 동일 배치.
+const _qcFileCell=(docId,label)=>{
+  const id=+docId||0;
+  if(!id)return '';
+  return `<a href="${API_BASE}/api/doc/download?src=doc&key=${id}" target="_blank"
+     onclick="event.stopPropagation()" title="${label} — 클릭하면 내려받습니다"
+     style="color:#1c47a0;font-weight:600;text-decoration:underline">파일#1</a>`;
+};
 const qcCols=[
   {h:'구분',k:'tag_nm',cls:'center'},
   {h:'고객사라인',k:'cust_line',cls:'center'},
@@ -2345,6 +2362,11 @@ const qcCols=[
   {h:'수몰여부',cls:'center',fmt:r=>r.water_flag?'✔':''},
   {h:'재검사',cls:'center',fmt:r=>r.reinsp_flag?'✔':''},
   {h:'완료여부',cls:'center',fmt:r=>r.finish_flag?'✔':''},
+  // ★첨부 3칸 — 레거시 w_qa_input_020 과 동일 배치(맨 오른쪽).
+  //   등록/교체는 행 [수정] 팝업 하단의 📎 영역에서.
+  {h:'첨부파일#1',cls:'center',fmt:r=>_qcFileCell(r.f_attach,'첨부파일#1')},
+  {h:'대책서#1',cls:'center',fmt:r=>_qcFileCell(r.f_plan1,'대책서#1')},
+  {h:'대책서#2',cls:'center',fmt:r=>_qcFileCell(r.f_plan2,'대책서#2')},
 ];
 const _all=o=>[{v:'',t:'전체'},...o];
 const qcFilters=[{k:'tag',label:'불량구분',type:'select',opts:_all(QC_TAG)},{k:'cust_line',label:'고객사라인',type:'auto',optKind:'line',width:120},

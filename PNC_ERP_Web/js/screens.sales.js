@@ -712,7 +712,8 @@ SCREEN.lgsale=(c)=>{
     return new Date(2000+ +s.slice(0,2),+s.slice(2,4)-1,+s.slice(4,6)).getDay();};
   const dcls=s=>{const w=dow(s);return w===0?' s4sun':(w===6?' s4sat':'');};
   const T=new Date();
-  const st={from:iso(T),gigan:4,line:'',wo:'',item:'',view:'전체',src:'nx',
+  // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
+  const st={from:iso(T),gigan:4,line:'',wo:'',item:'',view:'전체',src:'new',
             dates:[],rows:[],cnt:0,loading:false,msg:'',lines:[],sel:new Set(),
             exp:new Set(),    // ★집계뷰 펼침 블록키(클릭 토글)
             qov:new Map()};   // ★셀별 출하수량 오버라이드(셀키→수량) — 부분출하(2개중 1개)용.
@@ -973,7 +974,7 @@ SCREEN.lgsale=(c)=>{
      </style>
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">🚚 출하실적등록 <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_input_040 · 제번단위 출하실적(ASSY재고 차감)</span></div>
-     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <b>더블클릭</b>=수량조정(부분출하) ·<span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · ${st.src==='live'?'🔴 레거시(라이브 직독·대사용)':'🟢 nx'}</div>
+     <div class="page-sub" style="flex:0 0 auto">계획셀 <b>드래그 선택 → 우클릭 [확인]</b> = 완제품(ASSY)재고 있는 만큼만 출하처리 · <b>더블클릭</b>=수량조정(부분출하) ·<span style="background:#fac090;padding:0 4px">살구</span>=출하완료 · ${st.src==='live'?'🔴 레거시(라이브 직독·대사용)':(st.src==='new'?'🟣 신규DB(웹계획) — LG계획만 웹편성(예외생산·전일잔여는 웹 미구현→레거시)':'🟢 nx')}</div>
      <div class="toolbar" style="flex:0 0 auto">
        <label class="tl">기준일자</label><input class="inp" type="date" id="s4-from" value="${st.from}">
        <label class="tl">라인</label>
@@ -984,7 +985,7 @@ SCREEN.lgsale=(c)=>{
        <label class="tl">구분</label>
        ${['전체','집계','제번'].map(v=>`<label class="rl"><input type="radio" name="s4-vw" value="${v}"${st.view===v?' checked':''}> ${v}</label>`).join('')}
        <label class="tl">소스</label>
-       <select class="inp" id="s4-src" style="width:112px"><option value="nx"${st.src==='nx'?' selected':''}>우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>레거시 대사</option></select>
+       <select class="inp src-new" id="s4-src" data-src="${esc2(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=웹 STEP5(nx.plan_item_dtl)로 LG계획을 갈아끼움 — 예외생산·전일잔여는 웹에 대응물이 없어 레거시 그대로 / 우리(nx)=레거시 미러 / 레거시 대사=라이브 직독"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src==='nx'?' selected':''}>🟢 우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>🔴 레거시 대사</option></select>
        <button class="btn" id="s4-search">🔍 조회</button>
        <div class="spacer"></div>
        <span class="rowcount" id="s4-selinfo">${selN?`선택 <b>${nf(selN)}</b>칸 · 수량 <b>${nf(selQ)}</b>`:''}</span>
@@ -1011,7 +1012,8 @@ SCREEN.lgsale=(c)=>{
     g('#s4-search').onclick=()=>{st.from=g('#s4-from').value;st.gigan=+g('#s4-gigan').value;
       st.line=g('#s4-line').value;st.src=g('#s4-src').value;load();};
     g('#s4-gigan').onchange=()=>g('#s4-search').click();
-    g('#s4-src').onchange=()=>{st.src=g('#s4-src').value;loadLines().then(load);};
+    g('#s4-src').onchange=(e)=>{e.target.dataset.src=e.target.value;   // 고르는 즉시 색 반영
+      st.src=g('#s4-src').value;loadLines().then(load);};
     g('#s4-line').onchange=()=>{st.line=g('#s4-line').value;draw();};
     c.querySelectorAll('input[name=s4-vw]').forEach(rd=>rd.onchange=()=>{st.view=rd.value;st.exp.clear();draw();});
     // ★집계행 클릭 = 상세 펼침/접힘(키팅·410 동일). 셀 드래그선택과 겹치지 않게 집계행에만 건다.

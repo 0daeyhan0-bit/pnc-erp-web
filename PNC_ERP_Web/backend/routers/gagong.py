@@ -12,7 +12,8 @@ router = APIRouter()
 # ===== 가공생산진척관리 nx 재현본(레거시 암호화 SP 탈피) — 확정사양 _legacy_analysis/GAGONGPROG_420_NX_REBUILD_PLAN.md =====
 @router.get("/api/gagong/prog420nx")
 def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Query("P2"),
-                     item: str = Query(""), jado: str = Query(""), unfin: str = Query("전체"), limit: int = Query(8000)):
+                     item: str = Query(""), jado: str = Query(""), unfin: str = Query("전체"),
+                     plansrc: str = Query("new"), limit: int = Query(8000)):
     """가공생산진척관리 nx 재현. 그레인=(assy도번, 가공컴포넌트 item), WO집계.
        base=PR_T_PLAN_PART_COPY GC_GUBUN='Q' AND WORK_CODE=@wc GROUP BY (assy,item), 날짜피벗.
        finish=출하90(×use)→가공창고20(mat공유)→ASSY재고70(×use,행별)→자재30(pr+sg+stock,mat공유)→fix / 공유풀 assy정렬.
@@ -22,6 +23,11 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         try: return (_dt.strptime('20' + y6, '%Y%m%d') + _td(days=n)).strftime('%y%m%d')
         except Exception: return y6
     S = "PARTNER_ERP_TEST3.nx"
+    # ★계획원천 토글(2026-08-26) — 410·키팅·040 과 동일 규칙.
+    #   nx(기본) = 레거시 편성 미러 / new = 웹 자체편성(신규DB, nx.plan_part_dtl 호환뷰)
+    #   계획만 갈아끼우고 재고·실적은 그대로 → '계획' 차이만 순수 비교.
+    _psrc = str(plansrc).strip()
+    PLAN_T = (f"{S}.v_plan_part_copy_new" if _psrc == "new" else f"{S}.PR_T_PLAN_PART_COPY")
     wcc = (wc.strip() or 'P2')
     cn = _conn(); cur = cn.cursor()
     try:
@@ -57,7 +63,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
               MAX(ISNULL(a.PART_OUTPUT_HM,'')) phm, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.WORK_ORDER,'')) wo,
               MAX(ISNULL(a.LINE_NO,'')) line_no, MAX(ISNULL(a.TUIP_GAGONG_PROC_CODE,'')) tuip,
               SUM(CAST(a.PART_PLAN_QTY AS float)) pl
-            FROM {S}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+            FROM {PLAN_T} a WITH(NOLOCK)
             WHERE {' AND '.join(w)}
             GROUP BY a.ASSY_ITEM_CODE, a.ITEM_CODE, ISNULL(a.UPPER_ITEM_CODE,''), a.PART_PLAN_YMD""", *p)
         cols = [d[0] for d in cur.description]
@@ -151,7 +157,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
             cur.execute(f"""SELECT a.ASSY_ITEM_CODE, a.ITEM_CODE,
                        MIN(ISNULL(t.ORG_PLAN_YMD,  a.PLAN_YMD))  oy,
                        MIN(ISNULL(t.ORG_OUTPUT_HM, a.OUTPUT_HM)) oh
-                  FROM {S}.PR_T_PLAN_PART_COPY a WITH(NOLOCK)
+                  FROM {PLAN_T} a WITH(NOLOCK)
                   LEFT JOIN {S}.PR_T_PLAN_ITEM_DTL t WITH(NOLOCK)
                          ON a.PLAN_YMD=t.PLAN_YMD AND a.WORK_ORDER=t.WORK_ORDER
                         AND ISNULL(a.SPLIT_WORK_ORDER,'')=ISNULL(t.SPLIT_WORK_ORDER,'')
@@ -174,7 +180,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
               FROM (SELECT p.ASSY_ITEM_CODE assy, p.ITEM_CODE item, p.WORK_ORDER wo, ISNULL(p.SPLIT_WORK_ORDER,'') swo,
                            SUM(CAST(p.PART_PLAN_QTY AS float)) wo_plan, MAX(CAST(ISNULL(p.USE_QTY,1) AS float)) useq,
                            ISNULL(MAX(sd.saleqty),0) wo_sale
-                      FROM {S}.PR_T_PLAN_PART_COPY p WITH(NOLOCK)
+                      FROM {PLAN_T} p WITH(NOLOCK)
                       LEFT JOIN (SELECT WORK_ORDER wo, ISNULL(SPLIT_WORK_ORDER,'') swo, ITEM_CODE, SUM(SALE_QTY) saleqty
                                  FROM {S}.SA_T_SALE_DTL WITH(NOLOCK) WHERE FINISH_FLAG='0'
                                  GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE) sd
@@ -191,7 +197,7 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
               FROM (SELECT p.ASSY_ITEM_CODE assy, p.ITEM_CODE item,
                            SUM(CAST(p.PART_PLAN_QTY AS float)) wo_plan,
                            ISNULL(MAX(sd.saleqty),0) wo_sale
-                      FROM {S}.PR_T_PLAN_PART_COPY p WITH(NOLOCK)
+                      FROM {PLAN_T} p WITH(NOLOCK)
                       LEFT JOIN (SELECT WORK_ORDER wo, ISNULL(SPLIT_WORK_ORDER,'') swo, ITEM_CODE, SUM(SALE_QTY) saleqty
                                  FROM {S}.SA_T_SALE_DTL WITH(NOLOCK) WHERE FINISH_FLAG='0'
                                  GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE) sd
@@ -396,7 +402,10 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
         _pc = sorted({r["wcd"] for r in out if r.get("wcd")})
         parts = [{"code": c, "nm": c} for c in _pc]
         return {"dates": dates, "rows": out, "cnt": len(out),
-                "plan_sum": sum(r["plan_qty"] for r in out), "done_sum": sum(r["finish"] for r in out), "note": "nx재현", "parts": parts}
+                "plan_sum": sum(r["plan_qty"] for r in out), "done_sum": sum(r["finish"] for r in out),
+                "note": ("nx재현·신규DB계획" if _psrc == "new" else "nx재현"),
+                "plansrc": _psrc, "plan_src": PLAN_T,   # ★어느 계획을 읽었는지(대조용)
+                "parts": parts}
     finally:
         cn.close()
 

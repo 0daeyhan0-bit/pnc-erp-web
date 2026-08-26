@@ -30,6 +30,11 @@ def gagong_move580_opts():
 #   → 계획/완료 자·모, 색상(color_00~31), 자도번LIST(mat_list), 재고 컬럼 전부 레거시 정답을 그대로 받는다.
 #   조회 = 라이브(PARTNER_ERP) 읽기전용. 쓰기(이동전표 발행)는 여전히 nx 만(§1 절대규칙).
 SP_MOVE580 = "SP_PR_가공창고_이동계획_260213"
+# ★2026-08-26 신규DB(웹계획) 소스 — 위 SP 의 nx 평문사본을 복제하고
+#   계획원천 PR_T_PLAN_PART_COPY → nx.v_plan_part_copy_new(웹 자체편성) 한 곳만 치환한 것.
+#   나머지 로직(색상·자도번LIST·재고충당)은 레거시 그대로 → '계획' 차이만 순수 대조.
+#   반환 컬럼 174개가 원본과 동일함을 실측 확인(2026-08-26).
+SP_MOVE580_NEW = "SP_PR_가공창고_이동계획_WEBPLAN"
 
 # PowerBuilder 색상정수(BGR) → CSS. 실측 분포: 16777215(흰=없음) / 39270(초록=확정) / 65535(노랑) / 9486586(회청)
 def _pbcolor(v):
@@ -49,14 +54,21 @@ def _f(v):
 @router.get("/api/gagong/move580")
 def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query("P2"),
                    pr_part: str = Query("%"), pu_part: str = Query("IS0001"), sagub: str = Query(""),
-                   item: str = Query(""), part: str = Query(""), mv: str = Query("전체"), limit: int = Query(2500)):
+                   item: str = Query(""), part: str = Query(""), mv: str = Query("전체"),
+                   src: str = Query("new"), limit: int = Query(2500)):
     """레거시 SP 직접호출. 인자 = (as_from_ymd, as_to_ymd, as_work_code, as_pu_part_code, as_pr_part_code, as_sagub_cust_code).
-       도번(item)·자도번(part)·이동필요(mv) 필터는 SP 인자에 없으므로 결과에서 파이썬 필터."""
+       도번(item)·자도번(part)·이동필요(mv) 필터는 SP 인자에 없으므로 결과에서 파이썬 필터.
+       ★src(2026-08-26): nx=레거시 SP(라이브 계획) / new=복제 SP(계획만 웹편성).
+         SP 가 암호화라 인자로 계획원천을 못 바꾼다 → nx 평문사본을 복제해 계획테이블만
+         치환한 SP_..._WEBPLAN 을 호출한다(반환 174컬럼 동일)."""
     d6a = _d6(from_ymd) if from_ymd else ""
     d6b = _d6(to_ymd) if to_ymd else ""
+    _src = str(src).strip()
+    _SPQ = ("[PARTNER_ERP_TEST3].[nx].[" + SP_MOVE580_NEW + "]" if _src == "new"
+            else "[dbo].[" + SP_MOVE580 + "]")
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SET NOCOUNT ON; EXEC [dbo].[" + SP_MOVE580 + "] ?,?,?,?,?,?",
+        cur.execute("SET NOCOUNT ON; EXEC " + _SPQ + " ?,?,?,?,?,?",
                     d6a, d6b, (wc or "").strip(), (pu_part or "").strip(),
                     (pr_part or "%").strip() or "%", (sagub or "").strip())
         while cur.description is None:
@@ -251,6 +263,8 @@ def gagong_move580(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str =
     rows = rows[:int(limit)]
     note = ("⚠ 상위 %d건만 표시 — 조건으로 좁혀주세요." % limit) if capped else ""
     return {"dates": dates, "rows": rows, "cnt": len(rows), "dests": dests,
+            "src": (_src if _src in ("nx", "new") else "nx"),
+            "plan_src": _SPQ,          # ★어느 SP(계획원천)로 조회했는지(대조용)
             "plan_sum": sum(r["plan_qty"] for r in rows),
             "need_sum": sum(r["need"] for r in rows),
             "moved_sum": sum(r["moved"] for r in rows), "note": note}

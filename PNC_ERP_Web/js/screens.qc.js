@@ -309,9 +309,84 @@ SCREEN.qcerror=(c)=>{
       newRow:F=>({id:null,error_ymd:F.to,error_tag:'8',division:'',cust_line:'',pg_reg:'',item_code:'',work_code:'P2',proc_code:'',mach_code:'',partner_code:'',inspector:'',error_member:'',error_item1:'',error_item2:'',error_item3:'',error_desc:'',color:'1',lot_qty:'',error_qty:'',real_error_qty:'',scrap_weight:'',error_cause:'',progress_stats:'',charge_name:'',water_flag:'0',reinsp_flag:'0',finish_flag:'0'}),
       fromRow:r=>({id:r.ID,error_ymd:_y6(r.error_ymd),error_tag:r.tag,division:r.division,cust_line:r.cust_line,cust_line__nm:r.cust_line,pg_reg:r.pg_reg,item_code:r.item_code,work_code:r.work_code,proc_code:r.proc_code,proc_code__nm:r.part_nm,mach_code:r.mach_code,mach_code__nm:r.mach_nm,partner_code:r.partner_code,partner_code__nm:r.partner_nm,inspector:r.inspector,error_member:r.error_member,error_item1:r.ei1,error_item2:r.ei2,error_item3:r.ei3,error_desc:r.error_desc,color:r.color||'1',lot_qty:r.lot_qty,error_qty:r.error_qty,real_error_qty:r.real_qty,scrap_weight:r.scrap_weight,error_cause:r.error_cause,progress_stats:r.progress,charge_name:r.charge,water_flag:r.water_flag?'1':'0',reinsp_flag:r.reinsp_flag?'1':'0',finish_flag:r.finish_flag?'1':'0'}),
       toBody:f=>{const b={...f,user:'웹사용자'};Object.keys(b).forEach(k=>{if(k.endsWith('__nm'))delete b[k];});return b;},
+      // ★첨부파일 3종(레거시 w_qa_input_025: 첨부파일#1·대책서#1·대책서#2)
+      //   파일 실체는 기존 문서저장소(nx.doc + NAS) 재사용, qc_error 는 doc_id 만 보관.
+      //   ※신규건은 id 가 없어 첨부 불가 → 저장 후 다시 열어 첨부하라고 안내한다.
+      modalExtra:f=>qcFileBoxHtml(f),
+      modalExtraBind:(root,f,reload)=>qcFileBoxBind(root,f,reload),
     }
   });
 };
+
+/* ===== 품질불량 첨부파일 3칸 (모달 확장영역) ===== */
+const QC_SLOTS=[{k:'attach',t:'첨부파일#1'},{k:'plan1',t:'대책서#1'},{k:'plan2',t:'대책서#2'}];
+function qcFileBoxHtml(f){
+  const rows=QC_SLOTS.map(s=>`
+    <tr data-slot="${s.k}">
+      <td style="padding:4px 8px 4px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:104px">${s.t}</td>
+      <td style="padding:3px 0">
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="file" class="qcf-file" data-slot="${s.k}" style="font-size:11px;max-width:230px">
+          <span class="qcf-cur" data-slot="${s.k}" style="font-size:11px;color:#456;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+          <button type="button" class="btn ghost qcf-del" data-slot="${s.k}" style="padding:1px 8px;font-size:11px" disabled>파일삭제</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  return `<div style="margin-top:10px;border-top:1px solid #e2e8f2;padding-top:8px">
+     <div style="font-weight:600;font-size:12px;color:#33507d;margin-bottom:4px">📎 첨부파일
+       <span style="font-weight:400;color:#7a8aa0;font-size:11px">— 칸당 파일 1개(다시 올리면 교체) · 파일명 클릭=내려받기</span></div>
+     ${f&&f.id?'':'<div style="color:#c0392b;font-size:11px;margin-bottom:4px">※ 신규 등록건은 먼저 [저장] 한 뒤 다시 열어서 첨부하세요.</div>'}
+     <table style="border-collapse:collapse;width:100%">${rows}</table>
+     <div id="qcf-msg" style="font-size:11px;margin-top:4px"></div></div>`;
+}
+function qcFileBoxBind(root,f,reload){
+  const API=API_BASE;
+  const q=s=>root.querySelector(s), qa=s=>[...root.querySelectorAll(s)];
+  const msg=(t,ok)=>{const e=q('#qcf-msg');if(e)e.innerHTML=`<span style="color:${ok?'#1c7c3a':'#c0392b'}">${esc(t)}</span>`;};
+  const id=f&&f.id;
+  if(!id){qa('.qcf-file').forEach(el=>el.disabled=true);return;}
+  const kb=n=>n>=1048576?(n/1048576).toFixed(1)+'MB':Math.max(1,Math.round(n/1024))+'KB';
+  const paint=async()=>{
+    try{
+      const d=await (await fetch(`${API}/api/qc/error/files?id=${id}`)).json();
+      QC_SLOTS.forEach(s=>{
+        const info=(d.files||{})[s.k]||{}, cur=q(`.qcf-cur[data-slot="${s.k}"]`), del=q(`.qcf-del[data-slot="${s.k}"]`);
+        if(!cur)return;
+        if(info.doc_id){
+          cur.innerHTML=`<a href="${API}/api/doc/download?src=doc&key=${info.doc_id}" target="_blank"
+             title="${esc(info.filename)} · ${kb(info.size)} · ${esc(info.user)} ${esc(info.dt)}">${esc(info.filename)}</a>
+             <span style="color:#7a8aa0">(${kb(info.size)})</span>`;
+          if(del)del.disabled=false;
+        }else{cur.textContent='—';if(del)del.disabled=true;}
+      });
+    }catch(e){msg('첨부 조회 실패',false);}
+  };
+  qa('.qcf-file').forEach(el=>el.onchange=async()=>{
+    const fl=el.files&&el.files[0]; if(!fl)return;
+    const fd=new FormData();
+    fd.append('file',fl); fd.append('id',id); fd.append('slot',el.dataset.slot); fd.append('user','웹사용자');
+    msg('업로드 중…',true); el.disabled=true;
+    try{
+      const r=await fetch(`${API}/api/qc/error/file_upload`,{method:'POST',body:fd});
+      const d=await r.json();
+      if(d.ok){msg(`✔ ${d.filename} 첨부 완료`,true);el.value='';await paint();}
+      else msg(d.detail||d.errors||'업로드 실패',false);
+    }catch(e){msg('업로드 실패: '+(e&&e.message||e),false);}
+    finally{el.disabled=false;}
+  });
+  qa('.qcf-del').forEach(b=>b.onclick=async()=>{
+    if(!confirm('이 첨부파일을 삭제하시겠습니까?'))return;
+    b.disabled=true;
+    try{
+      const d=await (await fetch(`${API}/api/qc/error/file_delete`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id:id,slot:b.dataset.slot})})).json();
+      if(d.ok){msg('✔ 삭제되었습니다.',true);await paint();}
+      else msg(d.errors||'삭제 실패',false);
+    }catch(e){msg('삭제 실패',false);}
+  });
+  paint();
+}
 SCREEN.qcspec=(c)=>{
   const scols=[
     {h:'접수일',cls:'center',fmt:r=>_d8disp(r.rev_ymd)},
