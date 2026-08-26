@@ -8,7 +8,8 @@
 """
 import datetime as _dt
 from fastapi import APIRouter, Query
-from common import _nx, _conn
+from common import _nx, _conn, _get_cost_engine
+import nx_soyo_engine as _soyo  # 공용 소요엔진(prod_soyo) — 재구현 금지
 
 router = APIRouter()
 
@@ -111,8 +112,51 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
             for mat, vendor, qty in cur.fetchall():
                 _row(mat, str(vendor or "").strip())["exp"] += float(qty or 0)
 
-        # ── ②-b 실적소요: 후속 구현(드라이버=완제품 완성수량 정의 필요) ──
-        # TODO: axis별 PR_T_PROD_DTL / SA_T_SALE_DTL 완성수량 × prod_soyo(eng,item)
+        # ── ②-b 실적소요: 완제품 완성수량 × prod_soyo(per-unit) ──
+        #   드라이버(완제품 완성수량, 사용자 확정 2026-08-26):
+        #     생산축(prod) = 제품입고(SA_T_STOCK_MAINT tag P = 바코드 가공 완제품 완성) + 설치·이지링크(출하 중 P에 없는 완제품)
+        #     영업축(sale) = 출하실적(SA_T_SALE_DTL 전 완제품)
+        #   ★제품입고 P = 완제품(ASSY)만 잡혀 SUB 이중계상 없음(생산완성→제품창고). 설치·이지링크는 바코드 미경유→출하로 보완.
+        driver = {}
+        if act_rng:
+            lv = _conn(); lc = lv.cursor()
+            try:
+                if axis == "sale":
+                    lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float))
+                        FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE SALE_YMD BETWEEN ? AND ?
+                        GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", act_rng[0], act_rng[1])
+                    for it, q in lc.fetchall():
+                        driver[it] = driver.get(it, 0.0) + float(q or 0)
+                else:  # 생산축
+                    lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(MAINT_QTY AS float))
+                        FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT WHERE MAINT_TAG='P' AND MAINT_YMD BETWEEN ? AND ?
+                        GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", act_rng[0], act_rng[1])
+                    pset = set()
+                    for it, q in lc.fetchall():
+                        driver[it] = driver.get(it, 0.0) + float(q or 0); pset.add(it)
+                    # 설치·이지링크 = 출하 중 제품입고(P)에 없는 완제품
+                    lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float))
+                        FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE SALE_YMD BETWEEN ? AND ?
+                        GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", act_rng[0], act_rng[1])
+                    for it, q in lc.fetchall():
+                        if it not in pset:
+                            driver[it] = driver.get(it, 0.0) + float(q or 0)
+            finally:
+                lv.close()
+        # 완제품 완성수량 × prod_soyo(per-unit) → 자재소요. 실적 vendor 귀속 = PR_M_ITEM.in_cust_code(설계 §4)
+        if driver:
+            eng = _get_cost_engine()
+            cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+            incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
+            for it, dq in driver.items():
+                if not dq:
+                    continue
+                try:
+                    soyo = _soyo.prod_soyo(eng, it)
+                except Exception:
+                    continue
+                for mc, per in soyo.items():
+                    _row(mc, incust.get(mc, ""))["act"] += per * dq
 
         # ── 조립: 분류·이름·필터 ──
         rows = []
@@ -141,7 +185,7 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
             "ym": ym, "axis": axis,
             "act_range": act_rng, "exp_range": exp_rng,
             "rows": rows, "cnt": len(rows), "summary": list(summ.values()),
-            "note": "②-a 예상소요만(plan_part_mat 업체배분). 실적(②-b)·넷팅(③) 후속.",
+            "note": "②-a 예상(plan_part_mat 배분)+②-b 실적(생산=제품입고P+설치/이지링크 출하·영업=출하 × prod_soyo). 넷팅(③) 후속.",
         }
     finally:
         nx.close()
