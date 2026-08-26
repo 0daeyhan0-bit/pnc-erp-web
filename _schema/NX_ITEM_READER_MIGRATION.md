@@ -12,8 +12,11 @@
 - **ITEM_WEIGHT 금지**: 엔진들이 의도적으로 ITEM_WEIGHT 의미로 읽음(≠ net_weight). blanket 매핑 금지.
 - 참조 탐지는 **대소문자 무시**(`nx.pr_m_item` 소문자 참조 존재 — 예: kitting.py, gagong.py:608).
 
-## 1. ★미러 은퇴를 막는 컬럼 갭 (nx.item에 없는데 코드가 PR_M_ITEM에서 읽음)
-이관/은퇴 전 **nx.item에 컬럼 추가 + 일마감 sync 채우기** 선행 필요. (nx.item 현재 46컬럼, 미러 107컬럼)
+## 1. 컬럼 갭 (nx.item에 없던 PR_M_ITEM 읽기 컬럼) — ★11개 해소완(2026-08-26)
+`r_item_gapcols.py` 로 nx.item에 11컬럼 ADD + live PR_M_ITEM backfill(25362품목). `r_item_sync.py`에 통합(일마감 유지).
+추가 컬럼(동명 lower·case-insensitive): sagub_stock_flag·std_won_mat_flag·jig_code·jig_keep_area·
+safe_stock_min/max·weld_point_in/out·tariff_rate·remarks·item_cost. → 아래 표 파일 이관 가능해짐.
+**단 `ITEM_WEIGHT`는 미해소(보류)** — 의미 상이(net_weight≠). ITEM_WEIGHT 읽는 파일은 계속 보류.
 
 | 갭 컬럼 | 읽는 파일 | 용도 | 조치 |
 |---|---|---|---|
@@ -31,16 +34,17 @@
 → 갭 미해소 파일: **price, procbc, prodinfo, gagong, kitting, salemagam**(+ITEM_WEIGHT 엔진군). 이관 보류(미러 유지).
 
 ## 2. 진행 상태
-### 이관완료 (nx.item 직독, 검증 diff0)
-- batch1/2: `stock · prodstockadj · purmagam · setin · stockval` (PR #66/#67 병합)
-- batch3: `order · manorder` (커밋 9d2aeb9, 잔여0·컴파일OK)
+### 이관완료 (nx.item 직독, 검증 잔여0·컴파일OK)
+- batch1/2: `stock · prodstockadj · purmagam · setin · stockval` (PR #66/#67)
+- batch3: `order · manorder · qc · prod · gagongmove · planinput · coopplan` (PR #68)
+- batch4: `prodinfo · kitting · ready` (갭 컬럼 해소 후 이관 — JIG_*·SAGUB_STOCK_FLAG nx.item서 해석)
 
-### 이관 가능(갭 컬럼 없음 — 매핑 컬럼만) — 대기열
-`qc · prod · gagongmove · coopplan · planinput · ready(부분·:682 JIG제외) · order외 조회계열`
-→ alias 스코프 + bare 단일테이블만 매핑. 파일별 정밀편집(스크립트 blanket 금지: bare/타테이블 충돌).
+### ★ITEM_WEIGHT 보류 (의미 확정 필요) — 이관 불가
+`price · procbc · gagong · salemagam` + 엔진군(nx_cost_engine·nx_soyo_engine·weight_calc·soyo·sales·bom·cost).
+ITEM_WEIGHT(레거시 단중)를 net_weight로 대체할지, nx.item에 별도 legacy_item_weight 컬럼을 둘지 결정 필요.
 
-### 갭 대기(§1 해소 후) — 보류
-`price · procbc · prodinfo · gagong · kitting · salemagam · (ITEM_WEIGHT 엔진: nx_cost_engine·nx_soyo_engine·weight_calc·soyo·sales·bom·cost 등)`
+### 미검토(clean 여부 확인 대기)
+`coopquote · coopquote2 · dopip · esticost · lgsagub · modelbom · partplan · partplandtl · pricemgmt · prodsheet · prodwrite · sourcing`
 
 ## 3. 잔여 파일 (28, 대소문자무시 기준)
 bom · coopplan · coopquote · coopquote2 · cost · dopip · esticost · gagong · gagongmove ·

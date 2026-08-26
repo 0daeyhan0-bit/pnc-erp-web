@@ -75,13 +75,13 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
               ISNULL(pg.PART_GROUP_CODE,'') pgc, a.WORK_CODE wc,
               COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE) wcnm, MAX(ISNULL(a.LINE_NO,'')) line,
               a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.PART_PLAN_YMD ymd,
-              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, ISNULL(ib.ITEM_DESC,'') nm,
+              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, ISNULL(ib.item_name,'') nm,
               MAX(ISNULL(lg.lgh,'')) lgh,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd, SUM(CAST(a.PART_PLAN_QTY AS float)) pl
             FROM {PLAN_T} a WITH(NOLOCK)
-            JOIN PARTNER_ERP_TEST3.nx.pr_m_item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
-            JOIN PARTNER_ERP_TEST3.nx.pr_m_item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
+            JOIN PARTNER_ERP_TEST3.nx.item b WITH(NOLOCK) ON a.ASSY_ITEM_CODE=b.ITEM_CODE
+            JOIN PARTNER_ERP_TEST3.nx.item ib WITH(NOLOCK) ON a.ITEM_CODE=ib.ITEM_CODE
             JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg WITH(NOLOCK) ON a.GAGONG_PROC_CODE=pg.GAGONG_PROC_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wk WITH(NOLOCK) ON wk.WORK_CODE=a.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=pg.IN_CUST_CODE
@@ -90,7 +90,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
               a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
-              a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.ITEM_DESC,''),
+              a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.item_name,''),
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
         raw = [d for d in (dict(zip(cols, r)) for r in cur.fetchall()) if (d["item"], d["gpc"]) in keys]   # ★투입파트 KEYS 필터
@@ -269,7 +269,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                                    FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
                                    FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
                                           ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
                                  UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
                                         ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
                                    FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
@@ -568,7 +568,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               ISNULL(pg.PART_GROUP_CODE,'') pgc, a.WORK_CODE wc,
               COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE) wcnm, MAX(ISNULL(a.LINE_NO,'')) line,
               a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.PART_PLAN_YMD ymd,
-              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, MAX(ISNULL(a.OUTPUT_HM,'')) output_hm, MAX(ISNULL(lg.lgh,'')) lgh, ISNULL(ib.ITEM_DESC,'') nm,
+              MAX(ISNULL(a.PART_OUTPUT_HM,'')) inhm, MAX(ISNULL(a.OUTPUT_HM,'')) output_hm, MAX(ISNULL(lg.lgh,'')) lgh, ISNULL(ib.item_name,'') nm,
               ISNULL(pg.PROD_RATE,100) rate, ISNULL(st.st,0) st, MAX(CAST(ISNULL(a.USE_QTY,1) AS float)) useq,
               MIN(ISNULL(a.PLAN_YMD,'')) plan_ymd,
               -- ★앞공정/현재공정 컬럼용(레거시 SP_..._NEW_250826 1285줄): PROC_SEQ=1이면 앞공정 0, 아니면 앞공정전표재고−현재공정전표재고
@@ -588,7 +588,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             WHERE {' AND '.join(w)}
             GROUP BY a.GAGONG_PROC_CODE, COALESCE(pg.GAGONG_PROC_DESC, a.GAGONG_PROC_CODE), ISNULL(pg.PART_GROUP_CODE,''),
               a.WORK_CODE, COALESCE(wk.WORK_DESC, cu.CUST_DESC, a.WORK_CODE), a.WORK_ORDER, a.SPLIT_WORK_ORDER,
-              a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.ITEM_DESC,''),
+              a.ASSY_ITEM_CODE, a.UPPER_ITEM_CODE, a.ITEM_CODE, a.PART_PLAN_YMD, ISNULL(ib.item_name,''),
               ISNULL(pg.PROD_RATE,100), ISNULL(st.st,0)""", *p)
         cols = [d[0] for d in cur.description]
         raw = list(dict(zip(cols, r)) for r in cur.fetchall())   # ★keys(투입파트 WH='IS0001') 필터 제거 — 레거시 SP는 전 SEQ=1 GC_GUBUN='P' 포함(S5-2 등 gpc≠BOM gpc 케이스 탈락 방지)
@@ -747,7 +747,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                                    FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
                                    FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
                                           ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.pr_m_item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
                                  UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
                                         ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
                                    FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l

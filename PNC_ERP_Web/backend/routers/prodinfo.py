@@ -47,10 +47,10 @@ def prodinfo_search(q: str = Query("")):
     cn = _nx(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute("""SELECT TOP 60 ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''),
-              ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(PROD_RATE,100)
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM
-            WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
+        cur.execute("""SELECT TOP 60 ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''),
+              ISNULL(diam,0), ISNULL(thick,0), ISNULL(length,0), ISNULL(PROD_RATE,100)
+            FROM PARTNER_ERP_TEST3.nx.item
+            WHERE ITEM_CODE LIKE ? OR item_name LIKE ? ORDER BY ITEM_CODE""", like, like)
         rows = [{"item": r[0], "name": r[1], "spec": r[2], "diam": float(r[3] or 0),
                  "thick": float(r[4] or 0), "length": float(r[5] or 0), "prod_rate": float(r[6] or 0)}
                 for r in cur.fetchall()]
@@ -94,9 +94,9 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(ITEM_DIAM,0),
-              ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(PROD_RATE,100), ISNULL(JIG_CODE,''), ISNULL(JIG_KEEP_AREA,'')
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?""", item)
+        cur.execute("""SELECT ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(diam,0),
+              ISNULL(thick,0), ISNULL(length,0), ISNULL(PROD_RATE,100), ISNULL(JIG_CODE,''), ISNULL(JIG_KEEP_AREA,'')
+            FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?""", item)
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품번 {item} 없음")

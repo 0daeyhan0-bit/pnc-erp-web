@@ -40,4 +40,17 @@ c.execute(f"""UPDATE i SET
    diam=p.ITEM_DIAM, thick=p.ITEM_THICK, length=p.ITEM_LENGTH
    FROM {J} WHERE {where}""")
 print("동기화 완료. 되돌리기: nx.item_costfld_bak")
+
+# ── 갭 컬럼(리더가 미러에서 읽던 것) 동기화 — 미러 은퇴 관문. 멱등 ALTER + 항상 최신 backfill.
+#    (미러 UPPER→클린 lower 동명·case-insensitive. ITEM_WEIGHT는 의미상이 보류.)
+GAP = [("sagub_stock_flag","varchar(1)","SAGUB_STOCK_FLAG"),("std_won_mat_flag","varchar(1)","STD_WON_MAT_FLAG"),
+       ("jig_code","varchar(20)","JIG_CODE"),("jig_keep_area","varchar(20)","JIG_KEEP_AREA"),
+       ("safe_stock_min","smallint","SAFE_STOCK_MIN"),("safe_stock_max","smallint","SAFE_STOCK_MAX"),
+       ("weld_point_in","tinyint","WELD_POINT_IN"),("weld_point_out","tinyint","WELD_POINT_OUT"),
+       ("tariff_rate","numeric(18,2)","TARIFF_RATE"),("remarks","varchar(100)","REMARKS"),("item_cost","numeric(18,4)","ITEM_COST")]
+for cl, ddl, _mir in GAP:
+    if c.execute("SELECT COL_LENGTH('nx.item',?)", cl).fetchone()[0] is None:
+        c.execute(f"ALTER TABLE nx.item ADD {cl} {ddl} NULL"); print(f"  갭컬럼 ADD {cl}")
+c.execute(f"UPDATE i SET {', '.join(f'i.{cl}=p.{mir}' for cl,_d,mir in GAP)} FROM {J}")
+print("갭 컬럼 동기화 완료(리더 이관 지원).")
 n.close()
