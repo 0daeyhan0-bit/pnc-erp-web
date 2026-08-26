@@ -23,18 +23,18 @@ def partplan_list(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         if part.strip(): w.append("p.MAT_CODE LIKE ?"); pr.append(f"%{part.strip()}%")
         if assy.strip(): w.append("p.ASSY_ITEM_CODE LIKE ?"); pr.append(f"%{assy.strip()}%")
         if line.strip(): w.append("p.LINE_NO=?"); pr.append(line.strip())
-        if diam.strip():  w.append("i.ITEM_DIAM=?"); pr.append(float(diam))
-        if thick.strip(): w.append("i.ITEM_THICK=?"); pr.append(float(thick))
-        if pipe == '1':   w.append("i.METAL_GUBUN IN ('CU','고강도') AND ISNULL(i.ITEM_DIAM,0)>0")  # 동파이프만
+        if diam.strip():  w.append("i.diam=?"); pr.append(float(diam))
+        if thick.strip(): w.append("i.thick=?"); pr.append(float(thick))
+        if pipe == '1':   w.append("i.METAL_GUBUN IN ('CU','고강도') AND ISNULL(i.diam,0)>0")  # 동파이프만
         cur.execute(f"""SELECT p.PART_PLAN_YMD, p.ASSY_ITEM_CODE, p.MAT_CODE, MAX(p.LINE_NO) line,
               p.MAT_WORK_CENTER_CODE wc,
-              MAX(COALESCE(w.WORK_DESC, cu.CUST_DESC, '')) wcnm, MAX(ISNULL(i.ITEM_DESC,'')) nm,
-              MAX(ISNULL(i.ITEM_DIAM,0)) diam, MAX(ISNULL(i.ITEM_THICK,0)) thick, MAX(ISNULL(i.ITEM_LENGTH,0)) length,
+              MAX(COALESCE(w.WORK_DESC, cu.CUST_DESC, '')) wcnm, MAX(ISNULL(i.item_name,'')) nm,
+              MAX(ISNULL(i.diam,0)) diam, MAX(ISNULL(i.thick,0)) thick, MAX(ISNULL(i.length,0)) length,
               MAX(p.CUM_USE_QTY) useq, SUM(p.PART_PLAN_QTY) pq
             FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_PART_MAT p
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=p.MAT_WORK_CENTER_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=p.MAT_WORK_CENTER_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=p.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=p.MAT_CODE
             WHERE {' AND '.join(w)}
             GROUP BY p.PART_PLAN_YMD, p.ASSY_ITEM_CODE, p.MAT_CODE, p.MAT_WORK_CENTER_CODE""", *pr)
         cols = [d[0] for d in cur.description]

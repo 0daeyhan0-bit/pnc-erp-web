@@ -14,7 +14,7 @@ router = APIRouter()
 def _compose_maps():
     cn = _nx(); cur = cn.cursor()   # ★nx전환: nx 충실복제 읽기
     try:
-        cur.execute("SELECT ITEM_CODE, LTRIM(RTRIM(ISNULL(WORK_CODE,''))), ISNULL(IN_CUST_CODE,'') FROM nx.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, LTRIM(RTRIM(ISNULL(WORK_CODE,''))), ISNULL(in_cust,'') FROM nx.item")
         WCEN = {}
         for ic, wc, inc in cur.fetchall():
             WCEN[ic] = wc if wc > '' else str(inc).strip()

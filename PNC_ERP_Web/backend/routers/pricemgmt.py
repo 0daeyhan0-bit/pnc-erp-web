@@ -14,12 +14,12 @@ def pm_items(q: str = Query(""), lg: str = Query(""), sg: str = Query(""), limit
     cn = _nx(); cur = cn.cursor()
     try:
         w = ["1=1"]; p = []
-        if q.strip():  w.append("(i.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"); p += [f"%{q.strip()}%", f"%{q.strip()}%"]
-        if lg.strip(): w.append("i.ITEM_LGROUP=?"); p.append(lg.strip())
-        if sg.strip(): w.append("i.ITEM_SGROUP=?"); p.append(sg.strip())
+        if q.strip():  w.append("(i.ITEM_CODE LIKE ? OR i.item_name LIKE ?)"); p += [f"%{q.strip()}%", f"%{q.strip()}%"]
+        if lg.strip(): w.append("i.lgroup=?"); p.append(lg.strip())
+        if sg.strip(): w.append("i.sgroup=?"); p.append(sg.strip())
         n = max(1, min(int(limit), 3000))
-        cur.execute(f"""SELECT TOP {n} i.ITEM_CODE, ISNULL(i.ITEM_DESC,''), ISNULL(i.ITEM_SGROUP,''), ISNULL(pc.cnt,0)
-            FROM nx.PR_M_ITEM i
+        cur.execute(f"""SELECT TOP {n} i.ITEM_CODE, ISNULL(i.item_name,''), ISNULL(i.sgroup,''), ISNULL(pc.cnt,0)
+            FROM nx.item i
             LEFT JOIN (SELECT ITEM_CODE, COUNT(*) cnt FROM nx.PR_M_ITEM_COST GROUP BY ITEM_CODE) pc ON pc.ITEM_CODE=i.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY (CASE WHEN ISNULL(pc.cnt,0)>0 THEN 0 ELSE 1 END), i.ITEM_CODE""", *p)
         rows = [{"item": str(r[0]).strip(), "nm": str(r[1]).strip(), "sg": str(r[2]).strip(), "cnt": int(r[3] or 0)}

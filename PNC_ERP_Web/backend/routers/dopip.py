@@ -121,10 +121,10 @@ def dopip_items(kind: str = Query("pur"), cust: str = Query(""), q: str = Query(
     cn = _nx(); cur = cn.cursor()
     try:
         cur.execute("""SELECT mat, nm, cost, cur FROM (
-              SELECT a.MAT_CODE mat, ISNULL(i.ITEM_DESC,'') nm, ISNULL(a.MAINT_COST,0) cost, ISNULL(a.CURRENCY,'') cur,
+              SELECT a.MAT_CODE mat, ISNULL(i.item_name,'') nm, ISNULL(a.MAINT_COST,0) cost, ISNULL(a.CURRENCY,'') cur,
                 ROW_NUMBER() OVER(PARTITION BY a.MAT_CODE ORDER BY a.MAINT_YMD DESC, a.MAINT_SEQ DESC) rn
-              FROM nx.PU_T_STOCK_MAINT_C a LEFT JOIN nx.PR_M_ITEM i ON i.ITEM_CODE=a.MAT_CODE
-              WHERE a.DIVISION=? AND a.CUST_CODE=? AND a.MAT_CODE>'' AND (a.MAT_CODE LIKE ? OR ISNULL(i.ITEM_DESC,'') LIKE ?)
+              FROM nx.PU_T_STOCK_MAINT_C a LEFT JOIN nx.item i ON i.ITEM_CODE=a.MAT_CODE
+              WHERE a.DIVISION=? AND a.CUST_CODE=? AND a.MAT_CODE>'' AND (a.MAT_CODE LIKE ? OR ISNULL(i.item_name,'') LIKE ?)
             ) x WHERE rn=1 ORDER BY mat""", tag, cust, qq, qq)
         rows = [{"mat": str(r[0]).strip(), "nm": str(r[1]).strip(), "cost": float(r[2] or 0), "cur": str(r[3] or '').strip()} for r in cur.fetchall()]
         return {"rows": rows[:40]}

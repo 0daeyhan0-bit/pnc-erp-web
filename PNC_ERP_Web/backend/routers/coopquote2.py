@@ -457,9 +457,9 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         nl = list(nodes)
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
-            cur.execute(f"""SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,''), ISNULL(METAL_GUBUN,''),
-                  ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_LENGTH,0), ISNULL(IN_CUST_CODE,''), ISNULL(COST_GUBUN,'')
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})""", *chunk)
+            cur.execute(f"""SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(METAL_GUBUN,''),
+                  ISNULL(diam,0), ISNULL(thick,0), ISNULL(length,0), ISNULL(in_cust,''), ISNULL(COST_GUBUN,'')
+                FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})""", *chunk)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "metal": str(r[3]).strip(),
                     "diam": float(r[4] or 0), "thick": float(r[5] or 0), "length": float(r[6] or 0),
@@ -831,7 +831,7 @@ def _coop_soyo(item):
         nl = list(nodes)
         for i in range(0, len(nl), 900):
             ch = nl[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(METAL_GUBUN,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(METAL_GUBUN,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): metal[str(r[0]).strip()] = str(r[1]).strip()
     finally:
         cn.close()
