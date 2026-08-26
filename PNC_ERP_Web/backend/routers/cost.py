@@ -519,10 +519,10 @@ def _sagub_diff_map(cur, ym):
     outb AS (SELECT MAT_CODE mat, SUM(CAST(MAINT_AMT AS FLOAT)) amt, SUM(CAST(MAINT_QTY AS FLOAT)) qty
       FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' AND MAINT_COST>0 GROUP BY MAT_CODE)
     SELECT i.mat, CAST((o.amt/NULLIF(o.qty,0)) - (i.amt/NULLIF(i.qty,0)) AS FLOAT) diff
-    FROM inb i JOIN outb o ON i.mat=o.mat JOIN nx.PR_M_ITEM m ON m.ITEM_CODE=i.mat
+    FROM inb i JOIN outb o ON i.mat=o.mat JOIN nx.item m ON m.ITEM_CODE=i.mat
     WHERE o.qty<>0 AND i.qty<>0 AND (o.amt/NULLIF(o.qty,0))>0
-      AND ( m.ITEM_SGROUP NOT IN ({exsg}) OR m.ITEM_DESC LIKE N'%용접링%' )
-      AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.ITEM_DESC LIKE N'%용접링%' )""", ym, ym)
+      AND ( m.sgroup NOT IN ({exsg}) OR m.item_name LIKE N'%용접링%' )
+      AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.item_name LIKE N'%용접링%' )""", ym, ym)
     m = {}
     for r in cur.fetchall():
         if r[1] is not None: m[str(r[0]).strip()] = float(r[1])

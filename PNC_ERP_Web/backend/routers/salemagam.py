@@ -75,9 +75,9 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
-          SELECT A.MAT_CODE mat, MAX(M.ITEM_DESC) nm, MAX(M.ITEM_SPEC) spec, MAX(M.UNIT) unit, A.MAINT_COST cost,
+          SELECT A.MAT_CODE mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.UNIT) unit, A.MAINT_COST cost,
             CAST(RIGHT(A.MAINT_YMD,2) AS INT) d, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
-          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
           WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win().format(ym=y)}
           GROUP BY A.MAT_CODE, A.MAINT_COST, CAST(RIGHT(A.MAINT_YMD,2) AS INT)""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
@@ -135,17 +135,17 @@ def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = 
     elif cust.strip():
         where.append("(A.CUST_CODE=? OR C.CUST_DESC LIKE ?)"); pf += [cust.strip(), f"%{cust.strip()}%"]
     if q.strip():
-        where.append("(A.MAT_CODE LIKE ? OR M.ITEM_DESC LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
+        where.append("(A.MAT_CODE LIKE ? OR M.item_name LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT A.CUST_CODE cc, MAX(C.CUST_DESC) cnm, A.MAT_CODE mat, ISNULL(A.ITEM_CODE,'') moda,
-            MAX(ISNULL(M.ITEM_DESC,'')) nm, MAX(ISNULL(M.ITEM_SPEC,'')) spec, MAX(ISNULL(M.UNIT,'')) unit,
+            MAX(ISNULL(M.item_name,'')) nm, MAX(ISNULL(M.item_spec,'')) spec, MAX(ISNULL(M.UNIT,'')) unit,
             A.MAINT_COST cost, A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A
             JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE
             JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE
           WHERE {' AND '.join(where)}
           GROUP BY A.CUST_CODE, A.MAT_CODE, ISNULL(A.ITEM_CODE,''), A.MAINT_COST, A.MAINT_YMD""", *pf)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]

@@ -24,7 +24,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 																		and a.c_item_code = t.item_code
 
-				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK)				on a.c_item_code	= c.item_code
+				join PARTNER_ERP_TEST3.nx.item c  WITH (NOLOCK)				on a.c_item_code	= c.item_code
 
 			  WHERE a.c_item_code			like @@ITEM@@
 
@@ -54,7 +54,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 																		and a.item_code = t.item_code
 
-				join PARTNER_ERP_TEST3.nx.pr_m_item c WITH (NOLOCK) 				on a.item_code	= c.item_code
+				join PARTNER_ERP_TEST3.nx.item c WITH (NOLOCK) 				on a.item_code	= c.item_code
 
 			  WHERE a.item_code		like @@ITEM@@
 
@@ -76,11 +76,11 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_ITEM_DTL a WITH (NOLOCK)
 
-				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK) on a.C_ITEM_CODE	= c.item_code
+				join PARTNER_ERP_TEST3.nx.item c  WITH (NOLOCK) on a.C_ITEM_CODE	= c.item_code
 
 				WHERE A.PLAN_YMD		>= @@FROM@@
 
-				  AND C.IN_CUST_CODE > ''
+				  AND C.in_cust > ''
 
 
 
@@ -96,11 +96,11 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a WITH (NOLOCK)
 
-				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
+				join PARTNER_ERP_TEST3.nx.item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
 
 				WHERE A.PLAN_YMD		>= @@FROM@@
 
-				  AND C.IN_CUST_CODE > ''
+				  AND C.in_cust > ''
 
 
 
@@ -116,7 +116,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 				FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a WITH (NOLOCK)
 
-				join PARTNER_ERP_TEST3.nx.pr_m_item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
+				join PARTNER_ERP_TEST3.nx.item c  WITH (NOLOCK) on a.ITEM_CODE	= c.item_code
 
 				WHERE A.PLAN_YMD		>= @@FROM@@
 
@@ -150,19 +150,19 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 									c.work_code,
 
-									c.in_cust_code,
+									c.in_cust,
 
-									case when c.work_code > '' then c.work_code else c.in_cust_code end as mat_work_center_code,
+									case when c.work_code > '' then c.work_code else c.in_cust end as mat_work_center_code,
 
 									convert(decimal(18,5),1) as cum_use_qty,
 
-									convert(varchar(500),'||' + case when c.work_code > '' then c.work_code else c.in_cust_code end + '|') as cum_in_cust_code,
+									convert(varchar(500),'||' + case when c.work_code > '' then c.work_code else c.in_cust end + '|') as cum_in_cust_code,
 
 									isnull((select '2' from PARTNER_ERP_TEST3.nx.pr_m_mat where mat_code = a.c_item_code),'1') as mat_flag
 
 							FROM TEMP_PLAN a
 
-							join PARTNER_ERP_TEST3.nx.pr_m_item c 				on a.c_item_code	= c.item_code
+							join PARTNER_ERP_TEST3.nx.item c 				on a.c_item_code	= c.item_code
 
 							WHERE a.plan_ymd 		<= convert(varchar,convert(datetime,@@TO@@) + 10,12)
 
@@ -186,15 +186,15 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 						m.work_code,
 
-						m.in_cust_code,
+						m.in_cust,
 
-						case when m.work_code > '' then m.work_code else m.in_cust_code end as mat_work_center_code,
+						case when m.work_code > '' then m.work_code else m.in_cust end as mat_work_center_code,
 
 						convert(decimal(18,5),case when cb.cum_use_qty = 0 then 0
 
 												else CONVERT(decimal(18,5), cb.cum_use_qty * b.use_qty) end) cum_use_qty,
 
-						convert(varchar(500),cb.cum_in_cust_code + '|' + case when m.work_code > '' then m.work_code else m.in_cust_code end + '|') as cum_in_cust_code,
+						convert(varchar(500),cb.cum_in_cust_code + '|' + case when m.work_code > '' then m.work_code else m.in_cust end + '|') as cum_in_cust_code,
 
 						isnull((select '2' from PARTNER_ERP_TEST3.nx.pr_m_mat where mat_code = b.mat_code),'1') as mat_flag
 
@@ -202,7 +202,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 				join PARTNER_ERP_TEST3.nx.pr_m_item_bom b			on cb.mat_code	= b.item_code
 
-				join PARTNER_ERP_TEST3.nx.pr_m_item m 				on b.mat_code 	= m.item_code
+				join PARTNER_ERP_TEST3.nx.item m 				on b.mat_code 	= m.item_code
 
 				WHERE isnull(b.EXCEPT_FLAG,'0') = '0'
 
@@ -234,7 +234,7 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 					a.c_item_code as c_item_code,
 
-					isnull((case when c.in_cust_code>'' then (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust WITH (NOLOCK) where cust_code=c.in_cust_code)
+					isnull((case when c.in_cust>'' then (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust WITH (NOLOCK) where cust_code=c.in_cust)
 
 																	else (select top 1 b1.gagong_proc_desc from PARTNER_ERP_TEST3.nx.pr_m_item_proc_gagong a1
 
@@ -246,9 +246,9 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 					c.work_code as work_code,
 
-					c.in_cust_code as in_cust_code,
+					c.in_cust as in_cust_code,
 
-					(case when c.in_cust_code>'' then c.in_cust_code else c.work_code end) as work_center_code,
+					(case when c.in_cust>'' then c.in_cust else c.work_code end) as work_center_code,
 
 					min(a.plan_ymd) as plan_ymd,
 
@@ -352,11 +352,11 @@ SQL_4WK = r'''WITH TEMP_PLAN (PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_COD
 
 					group by item_code, mat_code, mat_spec, work_code, in_cust_code, mat_work_center_code) m on a.c_item_code = m.item_code
 
-			join PARTNER_ERP_TEST3.nx.pr_m_item c 				on a.c_item_code	= c.item_code
+			join PARTNER_ERP_TEST3.nx.item c 				on a.c_item_code	= c.item_code
 
 			where a.plan_ymd 		<= @@TO@@
 
-			group by m.work_code, a.line_no, a.work_order, a.split_work_order, a.output_hm, a.c_item_code, c.work_code, c.in_cust_code
+			group by m.work_code, a.line_no, a.work_order, a.split_work_order, a.output_hm, a.c_item_code, c.work_code, c.in_cust
 
 		) T
 

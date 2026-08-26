@@ -313,16 +313,16 @@ def _warmup_heavy_queries():
         _t.sleep(3)   # 기동 안정 후
         warm = [
             # 자재수불장 일/월 최신 — 실제 조인·집계 플랜 예열
-            """select t.mat_code, max(m.item_desc), isnull(max(c.cust_desc),''), sum(t.stock_qty)
+            """select t.mat_code, max(m.item_name), isnull(max(c.cust_desc),''), sum(t.stock_qty)
                  from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY t
-                 join PARTNER_ERP_TEST3.nx.pr_m_item m on t.mat_code=m.item_code
+                 join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
                  join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
-                 left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust_code=c.cust_code
+                 left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust=c.cust_code
                  where t.cust_code='Z99990' and t.STOCK_YMD=(SELECT MAX(STOCK_YMD) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH_DAILY WHERE cust_code='Z99990')
                  group by t.mat_code""",
-            """select t.mat_code, max(m.item_desc), sum(t.stock_qty)
+            """select t.mat_code, max(m.item_name), sum(t.stock_qty)
                  from PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH t
-                 join PARTNER_ERP_TEST3.nx.pr_m_item m on t.mat_code=m.item_code
+                 join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
                  where t.cust_code='Z99990' and t.STOCK_YYMM=(SELECT MAX(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE cust_code='Z99990')
                  group by t.mat_code""",
         ]

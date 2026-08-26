@@ -42,10 +42,10 @@ def _bc_ctx(cur, box):
          "prod_qty": int(r[4] or 0), "prod_flag": r[5], "wh": r[6], "line_no": r[7],
          "mix": int(r[8] or 0), "del_flag": r[9]}
     # 자도번 규격/단중 + 작업처
-    cur.execute("""SELECT ISNULL(ITEM_DIAM,0), ISNULL(ITEM_THICK,0), ISNULL(ITEM_WEIGHT,0),
+    cur.execute("""SELECT ISNULL(diam,0), ISNULL(thick,0), ISNULL(ITEM_WEIGHT,0),
                           ISNULL(METAL_GUBUN,''), ISNULL(PIPE_KIND,''), ISNULL(ITEM_PIPE_MATERIAL,''),
-                          ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,''), ISNULL(ITEM_DESC,'')
-                     FROM nx.PR_M_ITEM WHERE ITEM_CODE=?""", c["mat"])
+                          ISNULL(WORK_CODE,''), ISNULL(in_cust,''), ISNULL(item_name,'')
+                     FROM nx.item WHERE ITEM_CODE=?""", c["mat"])
     m = cur.fetchone()
     if m:
         c.update({"diam": float(m[0] or 0), "thick": float(m[1] or 0), "weight": float(m[2] or 0),
@@ -55,14 +55,14 @@ def _bc_ctx(cur, box):
         c.update({"diam": 0, "thick": 0, "weight": 0, "metal": "", "pipe_kind": "",
                   "pipe_mat": "", "mat_work": "", "mat_cust": "", "matnm": ""})
     for k, code in (("item", c["item"]), ("assy", c["assy"])):
-        cur.execute("SELECT ISNULL(WORK_CODE,''), ISNULL(IN_CUST_CODE,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", code)
+        cur.execute("SELECT ISNULL(WORK_CODE,''), ISNULL(in_cust,'') FROM nx.item WHERE ITEM_CODE=?", code)
         w = cur.fetchone()
         c[k + "_work"], c[k + "_cust"] = (w[0], w[1]) if w else ("", "")
     # 표준원소재(규격 동일). 레거시: PIPE_KIND=isnull(B.PIPE_KIND,'1')
     c["won"] = None
     if c["weight"]:
-        cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.PR_M_ITEM
-                        WHERE STD_WON_MAT_FLAG='1' AND ITEM_DIAM=? AND ITEM_THICK=?
+        cur.execute("""SELECT TOP 1 ITEM_CODE FROM nx.item
+                        WHERE STD_WON_MAT_FLAG='1' AND diam=? AND thick=?
                           AND METAL_GUBUN=? AND PIPE_KIND=? AND ITEM_PIPE_MATERIAL=?""",
                     c["diam"], c["thick"], c["metal"], (c["pipe_kind"] or '1'), c["pipe_mat"])
         w = cur.fetchone()
