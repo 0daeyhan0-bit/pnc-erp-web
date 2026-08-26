@@ -8,10 +8,63 @@
 """
 import datetime as _dt
 from fastapi import APIRouter, Query
-from common import _nx, _conn, _get_cost_engine
+from common import _nx, _conn, NxCostEngine
 import nx_soyo_engine as _soyo  # 공용 소요엔진(prod_soyo) — 재구현 금지
 
 router = APIRouter()
+
+# ── per-item prod_soyo 사전계산 캐시(nx.item_mat_soyo) + BOM 서명 가드 ──
+#   캐시=완제품별 per-unit 자재소요(BOM 안정→BOM 변경시만 무효). 완성수량·재고·매입은 라이브.
+#   ★sync 비종속(nx.bom_line 소스 종속)→컷오버 후에도 유효. 서명가드로 stale 원천차단(무접촉).
+_ENG = None
+
+
+def _eng():
+    global _ENG
+    if _ENG is None:
+        _ENG = NxCostEngine()   # bare(warm 불요·prod_soyo는 v_pr_bom lazy만 사용)
+    return _ENG
+
+
+def _bom_sig(cur):
+    """nx.bom_line 서명(행수+체크섬). 어떤 변경이든(sync/bom_save) 감지."""
+    cur.execute("SELECT COUNT(*), ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(bom_id,child_item,qty,ISNULL(qty_pr,qty),ISNULL(except_flag,0))),0) FROM nx.bom_line")
+    r = cur.fetchone()
+    return "%s:%s" % (r[0], r[1])
+
+
+def _ensure_soyo_cache(cur):
+    """캐시테이블 보장 + BOM 서명 대조. 변경시 캐시·엔진 무효(비움)→lazy 재빌드 유도."""
+    global _ENG
+    cur.execute("""IF OBJECT_ID('nx.item_mat_soyo') IS NULL CREATE TABLE nx.item_mat_soyo(
+        item_code varchar(30) NOT NULL, mat_code varchar(30) NOT NULL, per_unit float,
+        CONSTRAINT pk_item_mat_soyo PRIMARY KEY(item_code,mat_code))""")
+    cur.execute("IF OBJECT_ID('nx.item_mat_soyo_meta') IS NULL CREATE TABLE nx.item_mat_soyo_meta(id int PRIMARY KEY, bom_sig varchar(80), built_dt datetime)")
+    sig = _bom_sig(cur)
+    cur.execute("SELECT bom_sig FROM nx.item_mat_soyo_meta WHERE id=1")
+    r = cur.fetchone()
+    if (not r) or (r[0] != sig):
+        _ENG = None                              # 엔진 in-memory BOM 캐시도 무효(stale 방지)
+        cur.execute("TRUNCATE TABLE nx.item_mat_soyo")
+        cur.execute("DELETE FROM nx.item_mat_soyo_meta WHERE id=1")
+        cur.execute("INSERT INTO nx.item_mat_soyo_meta(id,bom_sig,built_dt) VALUES(1,?,getdate())", sig)
+    return sig
+
+
+def _soyo_of(cur, item):
+    """완제품 per-unit 자재소요 {mat:per} — 캐시 우선, miss시 prod_soyo 계산+캐시(lazy).
+       빈 결과(leaf/무BOM)는 sentinel('')로 마킹해 재계산 방지."""
+    cur.execute("SELECT mat_code, per_unit FROM nx.item_mat_soyo WHERE item_code=?", item)
+    rows = cur.fetchall()
+    if rows:
+        return {r[0]: r[1] for r in rows if r[0]}
+    so = _soyo.prod_soyo(_eng(), item)
+    if so:
+        cur.executemany("INSERT INTO nx.item_mat_soyo(item_code,mat_code,per_unit) VALUES(?,?,?)",
+                        [(item, mc, float(per)) for mc, per in so.items()])
+    else:
+        cur.execute("INSERT INTO nx.item_mat_soyo(item_code,mat_code,per_unit) VALUES(?,'',0)", item)
+    return so
 
 # ── 3분류 (설계 §3): CUST_TYPE(PR011) + LG 원재료사급(동) override ──
 #   원소재 = 4 절삭원자재·5 설치원자재 + LG 원재료사급(동) / 사급 = 1 유상사급부품 / 그외 = 7·8·9·A / 협력사 6 = 가공비축(매입 아님)
@@ -143,16 +196,16 @@ def matexpect(axis: str = Query("prod"), ym: str = Query(""), grp: str = Query("
                             driver[it] = driver.get(it, 0.0) + float(q or 0)
             finally:
                 lv.close()
-        # 완제품 완성수량 × prod_soyo(per-unit) → 자재소요. 실적 vendor 귀속 = PR_M_ITEM.in_cust_code(설계 §4)
+        # 완제품 완성수량 × per-unit 소요(사전계산 캐시) → 자재소요. 실적 vendor 귀속 = PR_M_ITEM.in_cust_code(설계 §4)
         if driver:
-            eng = _get_cost_engine()
+            _ensure_soyo_cache(cur)   # ★BOM 서명 가드: 변경(sync/bom_save)시 캐시·엔진 무효→재빌드
             cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
             incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
             for it, dq in driver.items():
                 if not dq:
                     continue
                 try:
-                    soyo = _soyo.prod_soyo(eng, it)
+                    soyo = _soyo_of(cur, it)   # 캐시 우선·miss시 prod_soyo lazy 계산+저장
                 except Exception:
                     continue
                 for mc, per in soyo.items():
