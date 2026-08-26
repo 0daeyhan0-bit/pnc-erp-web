@@ -40,15 +40,24 @@ safe_stock_min/max·weld_point_in/out·tariff_rate·remarks·item_cost. → 아�
 - batch4: `prodinfo · kitting · ready` (갭 컬럼 해소 후 이관 — JIG_*·SAGUB_STOCK_FLAG nx.item서 해석)
 - batch5: `coopquote · coopquote2 · dopip · esticost · lgsagub · modelbom · partplan · partplandtl · pricemgmt` (PR #70)
 
-### 이관 대기(ITEM_WEIGHT 무관·다량 쿼리 — 신중 per-query)
-`prodsheet(14) · prodwrite(9) · sourcing(9)` — 갭 없음이나 쿼리 많고 생산/조달 민감 → 다음 트랜치
+### 인프라 완료 (모든 컬럼 갭 해소)
+`r_item_gapcols.py`: nx.item에 11 갭컬럼 + `item_weight`(레거시단중 복사·불일치0·net_weight와 별개축) 추가+backfill.
+`r_item_sync.py`: 갭컬럼 + 리더컬럼(in_cust·item_spec·work_code·sgroup·lgroup·item_status·prod_rate·unit) 동기화 통합.
+→ **ITEM_WEIGHT 관문 해소**: item_weight 복사로 엔진 ITEM_WEIGHT 읽기가 case-insensitive 해석·원가 diff0 보존.
 
-### ★ITEM_WEIGHT 보류 (의미 확정 필요) — 이관 불가
-`price · procbc · gagong · salemagam` + 엔진군(nx_cost_engine·nx_soyo_engine·weight_calc·soyo·sales·bom·cost).
-ITEM_WEIGHT(레거시 단중)를 net_weight로 대체할지, nx.item에 별도 legacy_item_weight 컬럼을 둘지 결정 필요.
+### ★남은 heavy 파일 (dedicated 재이관 필요 — 아래 교훈 준수)
+`cost · salemagam · app · procbc · sales · weight_calc · _sp_4wk · price · bom · soyo · live_api · prodwrite · prodsheet · gagong · sourcing`
+2026-08-26 1차 시도했으나 **불완전 이관으로 되돌림**(미병합 상태). 원가/소요 critical → diff0 검증 없이 배포 금지.
 
-### 미검토(clean 여부 확인 대기)
-`coopquote · coopquote2 · dopip · esticost · lgsagub · modelbom · partplan · partplandtl · pricemgmt · prodsheet · prodwrite · sourcing`
+### ★★교훈 (heavy 재이관시 필수)
+1. **테이블 형태 다양**: `nx.PR_M_ITEM` 뿐 아니라 `{SCH}.PR_M_ITEM`·`{S}.PR_M_ITEM`·`{P}PR_M_ITEM`·`FROM PR_M_ITEM`(무접두)·소문자 모두 존재. 잔여검사는 `PR_M_ITEM\b`(모든형태·대소문자무시)로. `nx.PR_M_ITEM`만 세면 오탐(=거짓 잔여0).
+2. **PARTNER_ERP.dbo.PR_M_ITEM = 라이브 직독**(예: soyo STEP7 629~636). 미러 아님 → 이관대상 여부 별도판단(STEP7=한대윤/routing_edge 민감).
+3. **alias 대소문자**: `c`로 JOIN하고 `C.IN_CUST_CODE`로 참조(SQL은 CI). alias 목록은 원본에서 정규식 전수추출(대소문자무시).
+4. **bare 컬럼**: SELECT뿐 아니라 WHERE `OR ITEM_DESC LIKE`·`LTRIM(RTRIM(ITEM_SGROUP))` 형태도. ISNULL-형만으론 부족.
+5. **서브쿼리 출력명**: bare(무별칭) 컬럼을 rename하면 파생테이블 출력컬럼명이 바뀜 → 외부 `T.ITEM_LGROUP` 참조 깨짐. rename시 출력별칭 명시(`M.lgroup ITEM_LGROUP`).
+6. **Python 딕셔너리 키/결과별칭 보존**: `r.get('ITEM_DESC')`·`MAX(x) ITEM_DESC`는 SQL소스만 바꾸고 키/별칭은 유지.
+7. **INSERT 컬럼목록**: 대상테이블(PU_T_CUT_DTL 등)의 동명 ITEM_DIAM 등은 rename 금지(nx.item 아님).
+8. **검증**: 이관후 `PR_M_ITEM\b` 전수0 + 원가 diff0(cost_oracle, post-sync nx.item) + alias.대문자 잔여 스캔.
 
 ## 3. 잔여 파일 (28, 대소문자무시 기준)
 bom · coopplan · coopquote · coopquote2 · cost · dopip · esticost · gagong · gagongmove ·
