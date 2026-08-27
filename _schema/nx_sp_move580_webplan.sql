@@ -1,21 +1,22 @@
 /* nx.SP_PR_가공창고_이동계획_WEBPLAN — 가공이동580 '신규DB(웹계획)' 소스 전용.
-   레거시 dbo.SP_PR_가공창고_이동계획_260213 의 평문사본에서 **계획 테이블만** 웹으로 치환.
-   (SP 가 암호화라 인자로 계획원천을 못 바꾼다 → 사본 방식. 반환 174컬럼 동일)
+   레거시 dbo.SP_PR_가공창고_이동계획_260213 의 평문사본에서 계획·재고 원천을 nx 로 치환.
+   (SP 가 암호화라 인자로 원천을 못 바꾼다 → 사본 방식. 반환 174컬럼 동일)
 
-   ★계획 3갈래 — 2026-08-27 전부 웹 전환 완료:
-     ① 파트별   PR_T_PLAN_PART_COPY  → nx.v_plan_part_copy_new      (기존)
-     ② 품목별   PR_T_PLAN_ITEM_DTL   → nx.v_plan_item_dtl_new       (2026-08-27)
-     ③ 예외생산 PR_T_PLAN_INPUT      → nx.v_prod_plan_input_new     (2026-08-27, 2곳)
+   ★계획 3갈래 — 2026-08-27 전부 웹 전환:
+     ① 파트별   PR_T_PLAN_PART_COPY  → nx.v_plan_part_copy_new
+     ② 품목별   PR_T_PLAN_ITEM_DTL   → nx.v_plan_item_dtl_new
+     ③ 예외생산 PR_T_PLAN_INPUT      → nx.v_prod_plan_input_new  (2곳)
    종전엔 ①만 웹이라 레거시 계획이 섞여 파트별계획과 결과가 달랐다.
-   ③ 전환 전제였던 데이터 공백은 nx.prod_plan_input 이관 1,402행으로 해소. */
-
-
-
-
-
-
-
-
+
+   ★가공세트재고 — 2026-08-27:
+     PU_T_SET_GAGONG_STOCK 만 nx 에 없어 무접두 참조가 PARTNER_ERP_TEST3.dbo 로 빠졌다
+     (1,468행/43,113 vs 라이브 1,511행/43,623 → 전표발행 JP_PRINT_QTY 차이).
+     nx 에 테이블 신설·라이브 복사 후 nx 를 명시적으로 참조하도록 변경.
+
+   ※SP 는 nx 스키마 소속이라 무접두 테이블은 nx→dbo 순으로 해석된다.
+     나머지 재고(pr_t_mat_stock_wh·pu_t_mat_stock_wh·sa_t_item_stock·
+     PU_T_STOCK_MAINT_GAGONG_MOVE)는 이미 nx 미러가 있어 그대로 nx 를 읽는다.
+     단 미러 sync 지연(테이블별 8분~10시간)이 있어 값이 라이브와 다를 수 있다 — 별도 과제. */
 CREATE PROC nx.SP_PR_가공창고_이동계획_WEBPLAN
 		@as_from_ymd				varchar(6),
 		@as_to_ymd					varchar(6),
@@ -957,7 +958,7 @@ BEGIN
 		UPDATE A
 			SET JP_PRINT_QTY		= T.STOCK_QTY
 		  FROM #TEMP_MAT_MOVE_PLAN A
-		  join PU_T_SET_GAGONG_STOCK T WITH (NOLOCK) ON A.ITEM_CODE = T.ITEM_CODE AND A.GOLE_CODE = T.IN_CUST_CODE
+		  join PARTNER_ERP_TEST3.nx.PU_T_SET_GAGONG_STOCK T WITH (NOLOCK) ON A.ITEM_CODE = T.ITEM_CODE AND A.GOLE_CODE = T.IN_CUST_CODE
 
 		/*이동전표발행분 세팅*/
 		UPDATE A
