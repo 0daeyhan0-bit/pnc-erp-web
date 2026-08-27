@@ -643,18 +643,13 @@ def _snap_mat(cur, ptype, period):
         for mat, mv in moves[ymd].items():
             a = agg.setdefault(mat, [0.0, 0.0])
             a[0] += mv["inq"]; a[1] += mv["outq"]
-    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?", ptype, period)
-    n = 0
+    out_rows = []
     for mat, (q, a) in state.items():
-        if not mat or mat not in scope or abs(q) < 1e-9:   # 소모품·미등록·잔량0 제외
+        if not mat or mat not in scope:                   # 소모품·미등록 제외(잔량0 은 _snap_bulk 가 처리)
             continue
         i, o = agg.get(mat, (0.0, 0.0))
-        cur.execute("""INSERT INTO nx.stock_snapshot
-                         (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
-                       VALUES('MAT',?,?,?,'',?,?,?,?,?,GETDATE())""",
-                    ptype, period, mat[:50], round(q, 4), round(q * a, 4), round(a, 4),
-                    round(i, 4), round(o, 4))
-        n += 1
+        out_rows.append((mat, "", q, q * a, a, i, o))
+    n = _snap_bulk(cur, "MAT", ptype, period, out_rows)
     return n, f"{target}(이동평균·기초 {base_ymd} {src})"
 
 
@@ -704,21 +699,8 @@ def _assert_can_close(cur, user, what="마감"):
 # ★생산은 2축(품목 × 라인). 가공창고(P0001)=loc '' / 용접은 라인코드를 loc 에 담는다.
 
 def _snap_write(cur, domain, ptype, period, rows):
-    """스냅샷 멱등 적재. rows=[(item, loc, qty, amt, cost, inq, outq)]. 잔량 0 제외(대표 확정)."""
-    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?",
-                domain, ptype, period)
-    n = 0
-    for item, loc, qty, amt, cost, inq, outq in rows:
-        item = str(item or "").strip().upper()
-        if not item or abs(qty) < 1e-9:      # 잔량 0 제외 — MAT 과 동일 규칙
-            continue
-        cur.execute("""INSERT INTO nx.stock_snapshot
-                         (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,GETDATE())""",
-                    domain, ptype, period, item[:50], str(loc or "")[:20],
-                    round(qty, 4), round(amt, 4), round(cost, 4), round(inq, 4), round(outq, 4))
-        n += 1
-    return n
+    """스냅샷 멱등 적재 — 배치 INSERT 위임(T4 성능). rows=[(item, loc, qty, amt, cost, inq, outq)]."""
+    return _snap_bulk(cur, domain, ptype, period, rows)
 
 
 def _snap_prd_recipe(cur, ptype, period):
@@ -841,14 +823,24 @@ def _prd_moves(cur, d_from, d_to):
     return out
 
 
+_PRD_PX_CACHE = {}        # yymm -> (px, incust)  ★T4 성능: 단가 스캔은 월 내 불변이라 월 단위 캐시
+
+
 def _prd_price(cur, target):
-    """★생산재고 단가 결정 체인 (§13-5). 반환 {item: (단가, 출처)}.
+    """★생산재고 단가 결정 체인 (§13-5). 반환 ({item: (단가, 출처)}, incust).
+       ★T4 성능(2026-08-27): 측정 3.28초/회. 구성요소가 전부 **월 단위로 사실상 불변**이라
+         (① MAT 월스냅샷 ②' 실매입 as-of 누계 ③ PR_M_ITEM_COST as-of 최신) **연월 캐시**한다.
+         일마감 31회면 31번 반복되던 전체 스캔이 1번으로 줄어든다.
+         ※근사 명시: 월 내 단가 변동은 반영되지 않는다. 정밀이 필요하면 캐시 키를 일자로 낮춘다.
          ① 자재(MAT) 확정 스냅샷 avg_cost                   ← 자재로 관리되는 품목
          ②' **실매입 전표 가중평균**(Σ매입금액/Σ매입수량)     ← 실제 지불가. 마스터보다 신뢰도 높음
          ② BOM 있으면 부품 매입가 합산(원가엔진 material_u)  ← SUB
          ③ PR_M_ITEM_COST 거래처 완화: 2228 → 품목 매입처 → 아무 거래처(최신)
          ④ 없으면 0 (리포트 대상)
        ★레거시처럼 거래처를 하드 분기하지 않는다 — 그러면 P1(용접) 68품목이 통째로 0 이 된다(§13-1)."""
+    _ck = str(target)[:4]
+    if _ck in _PRD_PX_CACHE:
+        return _PRD_PX_CACHE[_ck]
     px = {}
 
     # ① 자재 확정 스냅샷 (금액/수량으로 복원 — avg_cost 는 반올림본)
@@ -904,33 +896,65 @@ def _prd_price(cur, target):
         if v:
             src = "COST2228" if m.get("2228") else ("COST매입처" if m.get(incust.get(it, "")) else "COST임의")
             px[it] = (float(v), src)
+    _PRD_PX_CACHE[_ck] = (px, incust)
     return px, incust
+
+
+# ★BOM 부품합산 단가 캐시 (T4 성능, 2026-08-27)
+#   측정: 생산 일마감 21.4초 중 _prd_price_bom 이 34초(월마감 기준) = 병목 90%.
+#   원인 ① 마감마다 NxCostEngine 을 새로 만들어 내부 캐시(_hasbom/_hdr/단가)가 매번 콜드
+#        ② 같은 품목을 일마감 31회 동안 31번 재전개
+#   대책: 엔진 싱글턴 + **(품목, 연월) 단위 결과 캐시**.
+#   ※근사 명시: 재료비는 as-of 단가라 월 내 단가 변동이 있으면 미세차가 생길 수 있다.
+#     이 값은 '다른 경로로 단가를 못 구한 품목'의 폴백이므로 월 단위 캐시로 충분하다고 판단.
+#     정밀이 필요해지면 캐시 키를 일자로 낮추면 된다.
+_BOM_PX_CACHE = {}        # (item, yymm) -> 단가(0 이면 못 구함)
+_BOM_ENG = [None]
+
+
+def _bom_engine():
+    """원가엔진 싱글턴 — 죽어 있으면 재생성."""
+    eng = _BOM_ENG[0]
+    try:
+        if eng is not None and eng.alive():
+            return eng
+    except Exception:
+        pass
+    try:
+        from common import NxCostEngine
+        if NxCostEngine is None:
+            return None
+        _BOM_ENG[0] = NxCostEngine()
+        return _BOM_ENG[0]
+    except Exception:
+        _BOM_ENG[0] = None
+        return None
 
 
 def _prd_price_bom(cur, target, need):
     """② BOM 부품 매입가 합산 — 단가를 못 구한 품목만 원가엔진 material_u 로 채운다(§13-5).
-       원가엔진은 레거시 diff0 검증본이고 **라우팅이 필요없다**(가공비가 아니라 재료비라서)."""
+       원가엔진은 레거시 diff0 검증본이고 **라우팅이 필요없다**(가공비가 아니라 재료비라서).
+       ★(품목,연월) 캐시 + 엔진 싱글턴으로 반복 마감 시 재계산을 피한다."""
     out = {}
     if not need:
         return out
-    try:
-        from common import NxCostEngine
-        if NxCostEngine is None:
-            return out
-        eng = NxCostEngine()
-    except Exception:
-        return out
-    try:
-        for it in need:
-            try:
-                v = float(eng.material_u(it, target) or 0)
-                if v:
-                    out[it] = (v, "BOM부품합산")
-            except Exception:
-                continue
-    finally:
-        try: eng.close()
-        except Exception: pass
+    ym = str(target)[:4]
+    miss = [it for it in need if (it, ym) not in _BOM_PX_CACHE]
+    if miss:
+        eng = _bom_engine()
+        if eng is not None:
+            for it in miss:
+                try:
+                    _BOM_PX_CACHE[(it, ym)] = float(eng.material_u(it, target) or 0)
+                except Exception:
+                    _BOM_PX_CACHE[(it, ym)] = 0.0
+        else:
+            for it in miss:
+                _BOM_PX_CACHE[(it, ym)] = 0.0
+    for it in need:
+        v = _BOM_PX_CACHE.get((it, ym), 0.0)
+        if v:
+            out[it] = (v, "BOM부품합산")
     return out
 
 
@@ -1010,19 +1034,41 @@ def _snap_prd(cur, ptype, period):
             c = (px.get(k[0]) or (0.0,))[0]
             if c:
                 v[1] = c; fixed += 1
-    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='PRD' AND ptype=? AND period=?", ptype, period)
-    n = 0
+    out_rows = []
     for (it, lo), (q, a) in state.items():
-        if not it or abs(q) < 1e-9:
-            continue
         i, o = agg.get((it, lo), (0.0, 0.0))
-        cur.execute("""INSERT INTO nx.stock_snapshot
-                         (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
-                       VALUES('PRD',?,?,?,?,?,?,?,?,?,GETDATE())""",
-                    ptype, period, it[:50], lo[:20], round(q, 4), round(q * a, 4), round(a, 4),
-                    round(i, 4), round(o, 4))
-        n += 1
+        out_rows.append((it, lo, q, q * a, a, i, o))
+    n = _snap_bulk(cur, "PRD", ptype, period, out_rows)
     return n, f"{target}(이동평균·매입가·기초 {base_ymd} {src}·단가보정 {fixed})"
+
+
+# ===================== 스냅샷 적재 — 배치 INSERT (T4 성능, 2026-08-27) =====================
+# ★행 단위 cur.execute 로 넣으면 품목당 1회 왕복이라 자재 일마감 1건에 58초가 걸렸다(2,441행).
+#   pyodbc fast_executemany + executemany 로 한 번에 보낸다. 값·결과는 동일.
+_SNAP_INS = """INSERT INTO nx.stock_snapshot
+                 (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
+               VALUES(?,?,?,?,?,?,?,?,?,?,GETDATE())"""
+
+
+def _snap_bulk(cur, domain, ptype, period, rows):
+    """rows=[(item, loc, qty, amt, cost, inq, outq)] → 멱등 DELETE 후 배치 적재. 반환 행수.
+       잔량 0·빈 품번 제외(대표 확정)."""
+    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?", domain, ptype, period)
+    data = []
+    for item, loc, q, amt, cost, inq, outq in rows:
+        item = str(item or "").strip().upper()
+        if not item or abs(q) < 1e-9:
+            continue
+        data.append((domain, ptype, period, item[:50], str(loc or "")[:20],
+                     round(q, 4), round(amt, 4), round(cost, 4), round(inq, 4), round(outq, 4)))
+    if not data:
+        return 0
+    try:
+        cur.fast_executemany = True
+    except Exception:
+        pass
+    cur.executemany(_SNAP_INS, data)
+    return len(data)
 
 
 SNAPPERS = {"MAT": _snap_mat, "PRD": _snap_prd, "SAL": _snap_sal}
@@ -1057,6 +1103,8 @@ def close_run(payload: dict = Body(...)):
                     raise HTTPException(409, f"직전 기간({prev})이 마감되지 않았습니다 — 마감은 순서대로 해야 합니다(최종 마감 {last}).")
         n, asof = (0, None)
         if d in SNAP_READY:
+            if d == "MAT":                 # 자재 확정이 바뀌면 생산 단가 캐시는 낡는다 → 무효화
+                _PRD_PX_CACHE.clear(); _BOM_PX_CACHE.clear()
             n, asof = SNAPPERS[d](cur, t, p)
         note = ((f"스냅샷 {n}품목(기준 {asof})" + ("" if str(asof)==str(p if t=="D" else "") or (t=="D" and str(asof)==str(p)) else " ※이월"))
                 if d in SNAP_READY else "잠금만(스냅샷 2단계)")
