@@ -572,6 +572,36 @@ def _mv_step(state, moves, scope):
         state[mat] = [q0 + mv["net"], avg]
 
 
+_MAT_BUY_CACHE = {}       # yymm -> {item: 실매입 가중평균단가}   ★T4 성능: 월 단위 캐시
+
+
+def _mv_buyprice(cur, target):
+    """실매입 전표 가중평균단가 = Σ매입금액 / Σ매입수량 (as-of target).
+       ★용도: 이동평균 전개 후에도 단가가 0 인 품목의 **보정**.
+         전개구간에 매입이 없으면 기초 단가가 그대로 유지되는데, 레거시 기초에 금액이 0 으로
+         들어온 품목은 영원히 0 이 된다(실측 2026-08-27: 자재 단가0 170건 중 73건이 이 경우).
+         재고자산을 0 으로 누락시키는 것보다 **실제 지불가로 계상**하는 것이 정확하다.
+       ※이동평균법 자체를 바꾸는 것이 아니라 **결함 기초를 보정**하는 것이다."""
+    ck = str(target)[:4]
+    if ck in _MAT_BUY_CACHE:
+        return _MAT_BUY_CACHE[ck]
+    ph_in = ','.join('?' * len(TA_IN_TAGS))
+    cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
+                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                    WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
+                      AND a.MAINT_TAG IN ({ph_in})
+                      AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
+                    GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE)))""", target, *TA_IN_TAGS)
+    px = {}
+    for it, q, amt in cur.fetchall():
+        q = float(q or 0); amt = float(amt or 0)
+        if q > 0 and amt > 0:
+            px[str(it)] = amt / q
+    _MAT_BUY_CACHE[ck] = px
+    return px
+
+
 def _mv_base(cur, target):
     """기초 = target 직전의 가장 최근 확정 스냅샷(일·월 통합). 없으면 레거시 월마감 시드.
        반환 (state{mat:[qty,avg]}, base_ymd, 출처)."""
@@ -635,6 +665,16 @@ def _snap_mat(cur, ptype, period):
     for ymd in sorted(moves):
         if ymd <= target:
             _mv_step(state, moves[ymd], scope)
+    # ★단가 보정 — 전개 후에도 0 인 품목은 **실매입 전표 가중평균**으로 채운다(위 _mv_buyprice 주석).
+    #   실측(2026-08-27): 자재 단가0 170건 중 73건이 '매입 이력은 있는데 전개구간에 매입이 없어
+    #   레거시 기초 금액0 이 그대로 굳은' 경우였다.
+    buypx = _mv_buyprice(cur, target)
+    fixed = 0
+    for mat, v in state.items():
+        if abs(v[1]) < 1e-9 and abs(v[0]) > 1e-9:
+            c = buypx.get(mat, 0.0)
+            if c:
+                v[1] = c; fixed += 1
     # 그 기간 입·출 누계(스냅샷 참고컬럼)
     agg = {}
     for ymd in sorted(moves):
@@ -650,7 +690,7 @@ def _snap_mat(cur, ptype, period):
         i, o = agg.get(mat, (0.0, 0.0))
         out_rows.append((mat, "", q, q * a, a, i, o))
     n = _snap_bulk(cur, "MAT", ptype, period, out_rows)
-    return n, f"{target}(이동평균·기초 {base_ymd} {src})"
+    return n, f"{target}(이동평균·기초 {base_ymd} {src}·단가보정 {fixed})"
 
 
 
@@ -1103,8 +1143,12 @@ def close_run(payload: dict = Body(...)):
                     raise HTTPException(409, f"직전 기간({prev})이 마감되지 않았습니다 — 마감은 순서대로 해야 합니다(최종 마감 {last}).")
         n, asof = (0, None)
         if d in SNAP_READY:
-            if d == "MAT":                 # 자재 확정이 바뀌면 생산 단가 캐시는 낡는다 → 무효화
-                _PRD_PX_CACHE.clear(); _BOM_PX_CACHE.clear()
+            if d == "MAT":
+                # ★자재 확정이 바뀌면 **자재 단가를 참조하는 캐시만** 낡는다 → 그것만 무효화.
+                #   _BOM_PX_CACHE(BOM 부품합산)는 원가엔진이 단가마스터를 읽으므로 자재 마감과 무관하다.
+                #   이걸 같이 지웠더니 자재 마감마다 생산이 콜드 재계산(241초)돼
+                #   트랜잭션 커넥션이 유휴로 끊기는 사고가 났다(2026-08-27). 범위를 좁힌다.
+                _PRD_PX_CACHE.clear(); _MAT_BUY_CACHE.clear()
             n, asof = SNAPPERS[d](cur, t, p)
         note = ((f"스냅샷 {n}품목(기준 {asof})" + ("" if str(asof)==str(p if t=="D" else "") or (t=="D" and str(asof)==str(p)) else " ※이월"))
                 if d in SNAP_READY else "잠금만(스냅샷 2단계)")
