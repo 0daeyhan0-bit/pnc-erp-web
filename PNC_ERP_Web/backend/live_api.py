@@ -901,7 +901,7 @@ def _prodinout(ym, frm=None, to=None, src="nx"):
     _c1, uni = _rows(_UNI)
     _c2, bfrows = _rows(f"SELECT part, mat, SUM(sq) bf FROM ({BF}) b GROUP BY part, mat")
     _c3, moves = _rows(f"SELECT part, mat, ymd, inq, outq, etc, div, tag FROM ({CUR}) x")
-    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_name, item_spec, item_sgroup FROM cm_m_item")
+    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_desc AS item_name, item_spec, item_sgroup FROM cm_m_item")
     _c5, sgrows = _rows("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR006'")
     _c6, pnrows = _rows("SELECT gagong_proc_code code, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
     im = {r["mat"]: r for r in itrows}

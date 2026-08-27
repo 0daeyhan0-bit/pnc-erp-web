@@ -1067,7 +1067,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    ISNULL(a.CHANGE_DAY,'') change_day,
                    {QEXP('a.PLAN_QTY','a.USE_QTY')} planq
               FROM {PLAN_B1} a WITH(NOLOCK)
-              JOIN {{SCH}}.item c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('a.C_ITEM_CODE')}{w1}""")
         # ★2026-08-24 레거시 dw_pr_input_040_t1 원문:
@@ -1093,7 +1093,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                    '' change_day,
                    ISNULL(a.PLAN_QTY,0) planq
               FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
-              JOIN {{SCH}}.item c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
              WHERE a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('a.ITEM_CODE')}{w2}""")
         prm += [d1, d2] + p2
@@ -1117,7 +1117,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
               FROM {{SCH}}.SA_T_PLAN_DTL_DAILY a WITH(NOLOCK)
               JOIN {{SCH}}.PR_M_MODEL_BOM b WITH(NOLOCK)
                    ON a.MODEL_NO=b.MODEL_NO AND a.PLAN_YMD BETWEEN b.MAKE_YMD AND b.TO_APPLY_YMD
-              JOIN {{SCH}}.item c WITH(NOLOCK) ON b.C_ITEM_CODE=c.ITEM_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON b.C_ITEM_CODE=c.ITEM_CODE
              WHERE a.WORK_YMD=? AND a.PLAN_YMD BETWEEN ? AND ?
                AND {TGT('b.C_ITEM_CODE')}{w3}
                AND EXISTS(SELECT 1 FROM {{SCH}}.SA_T_PLAN_DTL_DAILY x WITH(NOLOCK)
@@ -1212,7 +1212,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         nm = {}
         for ck in _chunk(items):
             ph = ",".join("?" * len(ck))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM {SCH}.item WHERE ITEM_CODE IN ({ph})", *ck)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ck)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
 
         # 제번 전체계획(조회기간 밖 포함) — 살구색(제번 전량출하) 판정용.
@@ -1227,7 +1227,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                                    SUM(CEILING(CONVERT(float,a.PLAN_QTY)*ISNULL(a.USE_QTY,1)
                                                *ISNULL(c.PROD_RATE,100)/100))
                               FROM {SCH}.SA_T_PLAN_ITEM_DTL a WITH(NOLOCK)
-                              JOIN {SCH}.item c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
+                              JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON a.C_ITEM_CODE=c.ITEM_CODE
                              WHERE ({oc})
                              GROUP BY a.WORK_ORDER, ISNULL(a.SPLIT_WORK_ORDER,a.WORK_ORDER),
                                       a.C_ITEM_CODE""", *pv)

@@ -104,8 +104,10 @@ SCREEN.salesforecast=(c)=>{
     const qs=[];if(base)qs.push('base='+encodeURIComponent(base));if(to)qs.push('to='+encodeURIComponent(to));
     const ep=myMetric==='sagub'?'forecast_sagub':'forecast';
     let d;
-    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);d=await r.json();if(!d||!d.rows)d={days:[],rows:[],base:''};}
-    catch(e){d={days:[],rows:[],base:'',_err:'백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요'};}
+    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);
+      if(!r.ok)throw new Error('서버 오류 HTTP '+r.status);   // ★HTTP 상태를 그대로 노출 — 예전엔 500도 '백엔드 연결 실패'로 표시돼 원인 오인(2026-08-27)
+      d=await r.json();if(!d||!d.rows)d={days:[],rows:[],base:''};}
+    catch(e){d={days:[],rows:[],base:'',_err:'조회 실패 — '+((e&&e.message)||e)};}
     if(mySeq!==reqSeq)return;   // 더 최신 요청이 있으면 이 응답은 폐기
     F=d;loading=false;draw();};
   const draw=()=>{
