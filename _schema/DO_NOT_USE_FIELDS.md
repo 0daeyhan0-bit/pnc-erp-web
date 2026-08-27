@@ -147,6 +147,7 @@
 - **이중계상 금지**: 스냅샷+원장 미반영분 합산 후 원장 또 더하기 금지(ready.py:172 가드). 라이브잔액+원장델타 이중(common.py:408).
 - **수렴(컷오버)**: stock_ledger 실시간 정본 승격 + 스냅샷 은퇴. mat_stock_daily 빌더 자동화(현재 수동·보류).
 - **근거**: [[newerp-matclose-movavg]] [[newerp-stock-ledger-engine]] [[newerp-mirror-clean-dual-table-audit]] 쌍6·C13.
+- **★다른 세션 필독**: 이 규칙이 과도기인 이유·지금 지킬 결선·미결(자재단가 회계방식)은 **`_schema/STOCK_CLOSE_HANDOFF.md`** (2026-08-27, 재고/마감 담당 세션 인계문서). 요약 = **게이트는 `mat_stock_daily`, 쓰기는 `stock_ledger`, 음수는 경고 아닌 차단**. ★`mat_stock_daily.avg_cost` 는 레거시와 78% 만 일치 → **단가를 원가·정산에 쓸 때 '레거시 일치' 가정 금지**(수량은 100% 신뢰 가능).
 
 ---
 
