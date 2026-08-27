@@ -304,7 +304,7 @@ def _ta_build(cur, d_from, d_to, basic):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT a.MAT_CODE, SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
                       FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
-                      JOIN PARTNER_ERP.dbo.PR_M_ITEM m ON a.MAT_CODE = m.ITEM_CODE
+                      JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
                        AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
@@ -335,7 +335,7 @@ def _ta_build(cur, d_from, d_to, basic):
 
     cur.execute("""SELECT a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
-                     JOIN PARTNER_ERP.dbo.PR_M_ITEM m ON a.MAT_CODE = m.ITEM_CODE
+                     JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = 'T' GROUP BY a.MAT_CODE""", d_from, d_to)
     for m, q in cur.fetchall():
         slot(m)["tq"] += float(q or 0)
@@ -346,7 +346,7 @@ def _ta_build(cur, d_from, d_to, basic):
         slot(m)["tq"] += float(q or 0)
 
     # 소모품(ITEM_SGROUP >= '990') 제외 + 품목마스터 미등록 탈락 (레거시 WHERE/JOIN 동일)
-    cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_SGROUP,'') FROM PARTNER_ERP.dbo.PR_M_ITEM")
+    cur.execute("SELECT ITEM_CODE, ISNULL(sgroup,'') FROM PARTNER_ERP_TEST3.nx.item")
     sg = {str(r[0]).strip().upper(): str(r[1]) for r in cur.fetchall()}
     R = {m: d for m, d in R.items() if m and m in sg and sg[m] < '990'}
     R = {m: d for m, d in R.items()          # 레거시 HAVING — 전부 0 이면 제외
@@ -497,7 +497,7 @@ def _mv_moves(cur, d_from, d_to):
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE,
                            SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
                       FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
-                      JOIN PARTNER_ERP.dbo.PR_M_ITEM m ON a.MAT_CODE = m.ITEM_CODE
+                      JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
                        AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
@@ -529,7 +529,7 @@ def _mv_moves(cur, d_from, d_to):
 
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
-                     JOIN PARTNER_ERP.dbo.PR_M_ITEM m ON a.MAT_CODE = m.ITEM_CODE
+                     JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = 'T'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
     for y, m, q in cur.fetchall():
@@ -548,8 +548,12 @@ def _mv_moves(cur, d_from, d_to):
 
 
 def _mv_scope(cur):
-    """평가 대상 품목 집합 = 품목마스터 등록 + 소모품(ITEM_SGROUP>='990') 제외. 레거시 정본과 동일."""
-    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ISNULL(ITEM_SGROUP,'') < '990'")
+    """평가 대상 품목 집합 = 품목마스터 등록 + 소모품(sgroup>='990') 제외.
+       ★소스 = nx.item (정본). 레거시 PR_M_ITEM 이 아니다 —
+         sgroup 소유권이 nx.item 으로 이관됐고(PR#84, r_item_sync 에서 sgroup 제외)
+         용접봉 240 신설·용접링 230 통합 같은 재분류가 레거시엔 반영되지 않는다.
+       실측(2026-08-27): 이 전환으로 현재 스냅샷에서 빠지는 품목 0건 = 안전."""
+    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.item WHERE ISNULL(sgroup,'') < '990'")
     return {str(r[0]).strip().upper() for r in cur.fetchall()}
 
 
@@ -838,8 +842,16 @@ def _prd_moves(cur, d_from, d_to):
 
 
 def _prd_price(cur, target):
-    """생산창고 입고 단가 = 그 품목의 자재(MAT) 확정 스냅샷 avg_cost, 없으면 pr_m_item_cost(tag'1') 최신."""
+    """★생산재고 단가 결정 체인 (§13-5). 반환 {item: (단가, 출처)}.
+         ① 자재(MAT) 확정 스냅샷 avg_cost                   ← 자재로 관리되는 품목
+         ②' **실매입 전표 가중평균**(Σ매입금액/Σ매입수량)     ← 실제 지불가. 마스터보다 신뢰도 높음
+         ② BOM 있으면 부품 매입가 합산(원가엔진 material_u)  ← SUB
+         ③ PR_M_ITEM_COST 거래처 완화: 2228 → 품목 매입처 → 아무 거래처(최신)
+         ④ 없으면 0 (리포트 대상)
+       ★레거시처럼 거래처를 하드 분기하지 않는다 — 그러면 P1(용접) 68품목이 통째로 0 이 된다(§13-1)."""
     px = {}
+
+    # ① 자재 확정 스냅샷 (금액/수량으로 복원 — avg_cost 는 반올림본)
     cur.execute("""SELECT TOP 1 period FROM nx.period_close
                     WHERE domain='MAT' AND ptype='M' AND close_flag=1 AND period <= ? ORDER BY period DESC""",
                 target[:4])
@@ -849,16 +861,77 @@ def _prd_price(cur, target):
                          FROM nx.stock_snapshot WHERE domain='MAT' AND ptype='M' AND period=?""", r[0])
         for it, q, amt, av in cur.fetchall():
             q = float(q or 0); amt = float(amt or 0)
-            px[str(it)] = (amt / q) if q else float(av or 0)
-    cur.execute("""SELECT ITEM_CODE, ITEM_COST FROM (
-                     SELECT ITEM_CODE, CAST(ITEM_COST AS float) ITEM_COST,
-                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE ORDER BY COST_APPLY_YMD DESC) rn
+            v = (amt / q) if q else float(av or 0)
+            if v:
+                px[str(it)] = (v, "MAT스냅샷")
+
+    # ★②' 실매입 전표 가중평균 (Σ매입금액 / Σ매입수량, as-of target)
+    #    단가 마스터(PR_M_ITEM_COST)보다 **실제로 지불한 가격**이 신뢰도가 높다.
+    #    실증(2026-08-27): 용접링 BCUP 단가0 7품목 중 6품목이 실매입 전표를 갖고 있었다
+    #    (신성소재 2204·성보스프링 2274 매입). 마스터에는 없어서 놓치던 것.
+    ph_in = ','.join('?' * len(TA_IN_TAGS))
+    cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
+                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                    WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
+                      AND a.MAINT_TAG IN ({ph_in})
+                      AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
+                    GROUP BY UPPER(LTRIM(RTRIM(a.MAT_CODE)))""", target, *TA_IN_TAGS)
+    for it, q, amt in cur.fetchall():
+        k = str(it)
+        if k in px:
+            continue
+        q = float(q or 0); amt = float(amt or 0)
+        if q > 0 and amt > 0:
+            px[k] = (amt / q, "실매입전표")
+
+    # ③ PR_M_ITEM_COST — 거래처 우선순위 2228 → 매입처 → 아무 거래처 (각각 as-of 최신)
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(i.item_code))), LTRIM(RTRIM(ISNULL(i.in_cust,'')))
+                     FROM PARTNER_ERP_TEST3.nx.item i""")
+    incust = {str(a): b for a, b in cur.fetchall()}
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), LTRIM(RTRIM(ISNULL(CUST_CODE,''))), ITEM_COST FROM (
+                     SELECT ITEM_CODE, CUST_CODE, CAST(ITEM_COST AS float) ITEM_COST,
+                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE, CUST_CODE ORDER BY COST_APPLY_YMD DESC) rn
                        FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
                       WHERE COST_TAG='1' AND COST_APPLY_YMD <= ?) t WHERE rn=1""", target)
-    for it, c in cur.fetchall():
-        k = str(it).strip().upper()
-        px.setdefault(k, float(c or 0))        # 자재 스냅샷 우선, 없을 때만 폴백
-    return px
+    bycust = {}
+    for it, cu, c in cur.fetchall():
+        bycust.setdefault(str(it), {})[str(cu)] = float(c or 0)
+    for it, m in bycust.items():
+        if it in px:
+            continue
+        v = m.get("2228") or m.get(incust.get(it, "")) or next((x for x in m.values() if x), 0.0)
+        if v:
+            src = "COST2228" if m.get("2228") else ("COST매입처" if m.get(incust.get(it, "")) else "COST임의")
+            px[it] = (float(v), src)
+    return px, incust
+
+
+def _prd_price_bom(cur, target, need):
+    """② BOM 부품 매입가 합산 — 단가를 못 구한 품목만 원가엔진 material_u 로 채운다(§13-5).
+       원가엔진은 레거시 diff0 검증본이고 **라우팅이 필요없다**(가공비가 아니라 재료비라서)."""
+    out = {}
+    if not need:
+        return out
+    try:
+        from common import NxCostEngine
+        if NxCostEngine is None:
+            return out
+        eng = NxCostEngine()
+    except Exception:
+        return out
+    try:
+        for it in need:
+            try:
+                v = float(eng.material_u(it, target) or 0)
+                if v:
+                    out[it] = (v, "BOM부품합산")
+            except Exception:
+                continue
+    finally:
+        try: eng.close()
+        except Exception: pass
+    return out
 
 
 def _prd_base(cur, target):
@@ -885,11 +958,11 @@ def _prd_base(cur, target):
                      FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
                     GROUP BY UPPER(LTRIM(RTRIM(A.MAT_CODE))), ISNULL(A.gagong_proc_code,'')""")
     seed = cur.fetchall()          # ★같은 커서로 _prd_price 를 호출하기 전에 결과를 반드시 소진할 것
-    px = _prd_price(cur, '250228') #   (안 그러면 pending result set 이 날아가 기초가 빈다 — 실제 겪음)
+    px, _ic = _prd_price(cur, '250228')  # (안 그러면 pending result set 이 날아가 기초가 빈다 — 실제 겪음)
     st = {}
     for it, lo, q in seed:
         lo = "" if str(lo).strip() == "P0001" else str(lo).strip()
-        st[(str(it), lo)] = [float(q or 0), px.get(str(it), 0.0)]
+        st[(str(it), lo)] = [float(q or 0), (px.get(str(it)) or (0.0,))[0]]
     if not st:
         raise HTTPException(400, "생산 기초를 찾을 수 없습니다 — 레거시 2502 생산 월마감도 없습니다.")
     return st, '250228', "레거시 2502 생산 월마감 시드"
@@ -905,8 +978,12 @@ def _snap_prd(cur, ptype, period):
         start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
     except ValueError:
         start = base_ymd
-    px = _prd_price(cur, target)
+    px, _ic = _prd_price(cur, target)
     moves = _prd_moves(cur, start, target) if start <= target else {}
+    # ★② BOM 부품합산 — ①③ 으로 못 채운 품목만 원가엔진으로 보강(§13-5)
+    need = sorted({k[0] for ymd in moves for k in moves[ymd] if k[0] not in px}
+                  | {k[0] for k in state if k[0] not in px})
+    px.update(_prd_price_bom(cur, target, need))
     agg = {}
     for ymd in sorted(moves):
         if ymd > target:
@@ -915,13 +992,24 @@ def _snap_prd(cur, ptype, period):
             q0, a0 = state.get(k, [0.0, 0.0])
             pq = mv["inq"]
             if pq > 0:                                    # 입고 = 그 시점 자재단가로 가중평균
-                c = px.get(k[0], a0)
+                c = (px.get(k[0]) or (a0,))[0]
                 avg = ((q0 * a0 + pq * c) / (q0 + pq)) if q0 > 0 else c
             else:
                 avg = a0
             state[k] = [q0 + mv["net"], avg]
             a = agg.setdefault(k, [0.0, 0.0])
             a[0] += mv["inq"]; a[1] += mv["outq"]
+    # ★단가 보정 — 전개구간에 생산창고 입고가 없어 기초 단가(0)가 그대로 굳은 품목은
+    #   **자재(MAT) 단가를 그대로 받는다**. 생산재고 단가의 원천은 자재이므로 자재가 먼저 값을 갖고
+    #   생산은 그것을 받는 것이 옳다(대표 지적 2026-08-27).
+    #   실증: BCUP1S-2.4*20.2(OD) 는 자재 단가 158.51 이 있는데 2502 이후 생산창고 입고가 0건이라
+    #        기초 시드 0 이 유지돼 생산에서만 단가0 이었다.
+    fixed = 0
+    for k, v in state.items():
+        if abs(v[1]) < 1e-9:
+            c = (px.get(k[0]) or (0.0,))[0]
+            if c:
+                v[1] = c; fixed += 1
     cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='PRD' AND ptype=? AND period=?", ptype, period)
     n = 0
     for (it, lo), (q, a) in state.items():
@@ -934,7 +1022,7 @@ def _snap_prd(cur, ptype, period):
                     ptype, period, it[:50], lo[:20], round(q, 4), round(q * a, 4), round(a, 4),
                     round(i, 4), round(o, 4))
         n += 1
-    return n, f"{target}(이동평균·매입가·기초 {base_ymd} {src})"
+    return n, f"{target}(이동평균·매입가·기초 {base_ymd} {src}·단가보정 {fixed})"
 
 
 SNAPPERS = {"MAT": _snap_mat, "PRD": _snap_prd, "SAL": _snap_sal}
