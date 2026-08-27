@@ -226,7 +226,10 @@ def _month_end(period):
     return f"{period}{_cal.monthrange(y, m)[1]:02d}"
 
 
-def _snap_mat_movavg(cur, ptype, period):   # ★DEPRECATED(§9 총평균 채택) — 대조·롤백용 보존
+def _snap_mat_movavg_old(cur, ptype, period):
+    # ★★사용 금지 — 구 이동평균(오류 6개 포함: 입고tag 9,S만 / 수입 MAINT_AMT×환율 /
+    #   검사미통과 미제외 / 소모품 LIKE '99%' / 마스터 미조인 / 품목키 미정규화).
+    #   정본은 아래 _snap_mat (§12-3 교정본). 이 함수는 '교정 전후 대조' 목적으로만 남긴다.
     """★마감 = f(전표). 기초(직전 확정) + 그 기간 이동을 이동평균 전개 → target 시점 확정.
        멱등(같은 키 DELETE 후 재삽입). 반환 (행수, 기준일)."""
     target = period if ptype == "D" else _month_end(period)
@@ -417,7 +420,7 @@ def _ta_basic(cur, yymm):
     return {str(r[0]): (float(r[1] or 0), float(r[2] or 0)) for r in rows}, prev, f"레거시 월마감 {prev} 시드"
 
 
-def _snap_mat_month(cur, period):
+def _snap_mat_month_totalavg(cur, period):   # ★총평균(레거시 방식) — 차이 리포트·대조용 보존
     """자재 월마감 = 총평균법. 반환 (행수, 기준설명)."""
     basic, prev, src = _ta_basic(cur, period)
     R = _ta_build(cur, period + '01', _month_end(period), basic)
@@ -435,7 +438,7 @@ def _snap_mat_month(cur, period):
     return n, f"{_month_end(period)}(총평균법·기초 {prev} {src})"
 
 
-def _snap_mat_day(cur, period):
+def _snap_mat_day_totalavg(cur, period):     # ★총평균 일 평가 — 대조용 보존
     """자재 일마감 = **수량 확정 + 직전 확정 월단가로 평가**(총평균법의 표준 처리).
        단가는 월말에 1회 확정되므로, 월중 일마감은 그 시점 수량을 굳히고 금액은 월단가로 매긴다.
        반환 (행수, 기준설명)."""
@@ -464,9 +467,191 @@ def _snap_mat_day(cur, period):
     return n, f"{period}(수량확정·단가는 {prev} 월확정단가)"
 
 
+def _snap_mat_totalavg(cur, ptype, period):   # ★총평균 디스패처 — 대조용 보존
+    return _snap_mat_month_totalavg(cur, period) if ptype == "M" else _snap_mat_day_totalavg(cur, period)
+
+
+
+# ===================== 이동평균법(신고 평가방법) — 확정 §12 =====================
+# 세무사 확인: 신고된 재고자산 평가방법 = **이동평균법 + 저가법**.
+#   ★레거시(w_pu_stock_160)는 총평균으로 돈다 = 신고 방법과 불일치.
+#     따라서 자재 단가는 레거시 diff0 대상이 아니다(차이는 리포트로 노출 — §12-1).
+#   ★분류 축·데이터 원천·제외기준은 총평균 작업에서 규명한 레거시 정본을 그대로 쓴다(§12-3).
+#     기존 우리 이동평균의 오류 6개(입고tag 9,S만 / 수입 MAINT_AMT×환율 / 검사미통과 미제외 /
+#     소모품 LIKE '99%' / 마스터 미조인 / 품목키 미정규화)를 여기서 교정한다.
+#   ★일 단위 묶음 = 건별과 동일: (q0·a0+Σamt)/(q0+Σqty) 는 순차적용과 결과가 같고
+#     출고는 평균을 바꾸지 않는다. 그래서 일 단위 전개로 충분하다.
+#   저가법(NRV)은 별도 레이어 — 미구현(§12-4, 재무제표용은 추후).
+
+def _mv_moves(cur, d_from, d_to):
+    """[d_from,d_to] 일자별 자재 이동 → {ymd: {mat: {net,inq,outq,trans,pq,pamt}}}.
+       pq/pamt = **평균단가를 갱신하는 입고**(레거시 입고 tag + 수입). 그 외는 평균 불변."""
+    out = {}
+
+    def slot(y, m):
+        m = str(m or "").strip().upper()
+        return out.setdefault(y, {}).setdefault(
+            m, {"net": 0.0, "inq": 0.0, "outq": 0.0, "trans": 0.0, "pq": 0.0, "pamt": 0.0})
+
+    ph_in = ','.join('?' * len(TA_IN_TAGS))
+    cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE,
+                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
+                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      JOIN PARTNER_ERP.dbo.PR_M_ITEM m ON a.MAT_CODE = m.ITEM_CODE
+                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
+                       AND a.MAINT_TAG IN ({ph_in})
+                       AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
+                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to, *TA_IN_TAGS)
+    for y, m, q, amt in cur.fetchall():
+        d = slot(y, m); q = float(q or 0)
+        d["inq"] += q; d["pq"] += q; d["pamt"] += float(amt or 0)
+
+    # 수입(도입): DIVISION<>'Q' = 입고(금액 TAXPAYERS, 이미 원화·평균갱신) / 'Q' = 수출출고
+    cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, a.DIVISION,
+                          SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(ISNULL(a.TAXPAYERS,0) AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C a
+                    WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.WH_CUST_CODE = 'Z99990'
+                    GROUP BY a.MAINT_YMD, a.MAT_CODE, a.DIVISION""", d_from, d_to)
+    for y, m, div, q, tax in cur.fetchall():
+        d = slot(y, m); q = float(q or 0)
+        if str(div or "").strip() == 'Q':
+            d["outq"] += q
+        else:
+            d["inq"] += q; d["pq"] += q; d["pamt"] += float(tax or 0)
+
+    ph_out = ','.join('?' * len(TA_OUT_TAGS))
+    cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
+                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ({ph_out})
+                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to, *TA_OUT_TAGS)
+    for y, m, q in cur.fetchall():
+        slot(y, m)["outq"] += float(q or 0)
+
+    cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     JOIN PARTNER_ERP.dbo.PR_M_ITEM m ON a.MAT_CODE = m.ITEM_CODE
+                    WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = 'T'
+                    GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
+    for y, m, q in cur.fetchall():
+        slot(y, m)["trans"] += float(q or 0)
+    cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(CAST(a.MAINT_QTY AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                    WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = '2'
+                    GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
+    for y, m, q in cur.fetchall():
+        slot(y, m)["trans"] += float(q or 0)
+
+    for y in out:
+        for d in out[y].values():
+            d["net"] = d["inq"] - d["outq"] + d["trans"]
+    return out
+
+
+def _mv_scope(cur):
+    """평가 대상 품목 집합 = 품목마스터 등록 + 소모품(ITEM_SGROUP>='990') 제외. 레거시 정본과 동일."""
+    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE ISNULL(ITEM_SGROUP,'') < '990'")
+    return {str(r[0]).strip().upper() for r in cur.fetchall()}
+
+
+def _mv_step(state, moves, scope):
+    """하루 이동평균 전개. state={mat:[qty,avg]} in-place.
+       ★재고<=0 에서 매입 refill = 단가 리셋(마이너스재고 평균폭발 방지 — 검증된 우리 규칙)."""
+    for mat, mv in moves.items():
+        if mat not in scope:                 # 소모품·미등록 = 평가 대상 아님
+            continue
+        q0, a0 = state.get(mat, [0.0, 0.0])
+        pq, pamt = mv["pq"], mv["pamt"]
+        if pq > 0:
+            avg = ((q0 * a0 + pamt) / (q0 + pq)) if q0 > 0 else (pamt / pq)
+        else:
+            avg = a0
+        state[mat] = [q0 + mv["net"], avg]
+
+
+def _mv_base(cur, target):
+    """기초 = target 직전의 가장 최근 확정 스냅샷(일·월 통합). 없으면 레거시 월마감 시드.
+       반환 (state{mat:[qty,avg]}, base_ymd, 출처)."""
+    cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                    WHERE domain='MAT' AND ptype='D' AND close_flag=1 AND period < ?
+                    ORDER BY period DESC""", target)
+    r = cur.fetchone()
+    cand = [(r[0], "D", r[0])] if r else []
+    cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                    WHERE domain='MAT' AND ptype='M' AND close_flag=1
+                    ORDER BY period DESC""")
+    r = cur.fetchone()
+    if r and _month_end(r[0]) < target:
+        cand.append((_month_end(r[0]), "M", r[0]))
+    if cand:
+        ymd, pt, per = max(cand, key=lambda x: x[0])
+        # ★단가는 stock_amt/stock_qty 로 복원한다 — avg_cost 는 decimal(18,4) 반올림본이라
+        #   그걸 그대로 기초로 쓰면 매 기간 반올림 오차가 누적된다(금액 항등식 위반 29건 실측).
+        #   금액이 정본, 단가는 파생. qty=0 이면 저장 단가로 폴백.
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), stock_qty, stock_amt, avg_cost
+                         FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?""", pt, per)
+        st = {}
+        for x in cur.fetchall():
+            q = float(x[1] or 0); amt = float(x[2] or 0)
+            st[str(x[0])] = [q, (amt / q) if q else float(x[3] or 0)]
+        if st:
+            return st, ymd, f"확정 스냅샷({'일' if pt == 'D' else '월'}마감 {per})"
+    # 최초 시드 = 레거시 월마감(직전월 기말). ★레거시는 총평균이라 시드 단가만 총평균 기준이다.
+    #   이후는 우리 이동평균으로 전개되므로 시간이 지나며 이동평균 기준으로 수렴한다(§12-1).
+    y, m = int(target[:2]), int(target[2:4])
+    m -= 1
+    if m == 0:
+        m = 12; y -= 1
+    prev = f"{y:02d}{m:02d}"
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float)), SUM(CAST(STOCK_AMT AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_MONTH_STOCK_WH
+                    WHERE STOCK_YYMM=? AND CUST_CODE='Z99990' AND MAT_CODE IS NOT NULL
+                    GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", prev)
+    st = {}
+    for mat, q, a in cur.fetchall():
+        q = float(q or 0); a = float(a or 0)
+        st[str(mat)] = [q, (a / q) if q else 0.0]
+    if not st:
+        raise HTTPException(400, f"기초를 찾을 수 없습니다 — 직전 확정 스냅샷도 레거시 월마감({prev})도 없습니다.")
+    return st, _month_end(prev), f"레거시 월마감 {prev} 시드"
+
+
 def _snap_mat(cur, ptype, period):
-    """자재 스냅샷 디스패처 — 월=총평균 확정 / 일=수량확정+직전 월단가 평가."""
-    return _snap_mat_month(cur, period) if ptype == "M" else _snap_mat_day(cur, period)
+    """★자재 마감 = 이동평균법(신고 평가방법 §12). 기초(직전 확정) + 그 기간 전표를 일자별 전개.
+       월마감 = 그 달 말일까지 전개(= 말일 일마감과 동일). 멱등. 반환 (행수, 기준설명)."""
+    import datetime as _dt
+    target = period if ptype == "D" else _month_end(period)
+    state, base_ymd, src = _mv_base(cur, target)
+    try:
+        b = _dt.date(2000 + int(base_ymd[:2]), int(base_ymd[2:4]), int(base_ymd[4:6])) + _dt.timedelta(days=1)
+        start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
+    except ValueError:
+        start = base_ymd
+    scope = _mv_scope(cur)
+    moves = _mv_moves(cur, start, target) if start <= target else {}
+    for ymd in sorted(moves):
+        if ymd <= target:
+            _mv_step(state, moves[ymd], scope)
+    # 그 기간 입·출 누계(스냅샷 참고컬럼)
+    agg = {}
+    for ymd in sorted(moves):
+        if ymd > target:
+            continue
+        for mat, mv in moves[ymd].items():
+            a = agg.setdefault(mat, [0.0, 0.0])
+            a[0] += mv["inq"]; a[1] += mv["outq"]
+    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?", ptype, period)
+    n = 0
+    for mat, (q, a) in state.items():
+        if not mat or mat not in scope or abs(q) < 1e-9:   # 소모품·미등록·잔량0 제외
+            continue
+        i, o = agg.get(mat, (0.0, 0.0))
+        cur.execute("""INSERT INTO nx.stock_snapshot
+                         (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
+                       VALUES('MAT',?,?,?,'',?,?,?,?,?,GETDATE())""",
+                    ptype, period, mat[:50], round(q, 4), round(q * a, 4), round(a, 4),
+                    round(i, 4), round(o, 4))
+        n += 1
+    return n, f"{target}(이동평균·기초 {base_ymd} {src})"
 
 
 
