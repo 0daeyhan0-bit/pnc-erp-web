@@ -507,15 +507,15 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
         import math as _math
         cur.execute(f"""SELECT c_item_code, work_order, split_work_order, ISNULL(line_no,'') line_no, plan_ymd, ISNULL(use_qty,1) use_qty, plan_qty, ISNULL(prod_rate,100) prod_rate FROM (
           SELECT T.PART_PLAN_YMD plan_ymd, A.C_ITEM_CODE c_item_code, A.WORK_ORDER work_order, A.SPLIT_WORK_ORDER split_work_order, A.LINE_NO line_no, A.USE_QTY use_qty, A.PLAN_QTY plan_qty, C.PROD_RATE prod_rate
-            FROM {S}.PR_T_PLAN_PART_DTL_FOR_CUST t JOIN {S}.pr_t_plan_item_dtl a ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order AND a.split_work_order=t.split_work_order AND a.c_item_code=t.item_code JOIN {S}.item c ON a.c_item_code=c.item_code WHERE t.proc_seq=1 AND t.gc_gubun='P'
+            FROM {S}.PR_T_PLAN_PART_DTL_FOR_CUST t JOIN {S}.pr_t_plan_item_dtl a ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order AND a.split_work_order=t.split_work_order AND a.c_item_code=t.item_code JOIN PARTNER_ERP_TEST3.nx.item c ON a.c_item_code=c.item_code WHERE t.proc_seq=1 AND t.gc_gubun='P'
           UNION ALL SELECT T.PART_PLAN_YMD, A.ITEM_CODE, A.WORK_ORDER, A.WORK_ORDER, A.LINE_NO, 1, A.PLAN_QTY, C.PROD_RATE
-            FROM {S}.PR_T_PLAN_PART_DTL_FOR_CUST t JOIN {S}.PR_T_PLAN_INPUT a ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order AND a.work_order=t.split_work_order AND a.item_code=t.item_code JOIN {S}.item c ON a.item_code=c.item_code WHERE t.proc_seq=1 AND t.gc_gubun='P'
+            FROM {S}.PR_T_PLAN_PART_DTL_FOR_CUST t JOIN {S}.PR_T_PLAN_INPUT a ON a.plan_ymd=t.plan_ymd AND a.work_order=t.work_order AND a.work_order=t.split_work_order AND a.item_code=t.item_code JOIN PARTNER_ERP_TEST3.nx.item c ON a.item_code=c.item_code WHERE t.proc_seq=1 AND t.gc_gubun='P'
           UNION ALL SELECT a.PLAN_YMD, A.C_ITEM_CODE, A.WORK_ORDER, A.SPLIT_WORK_ORDER, A.LINE_NO, A.USE_QTY, A.PLAN_QTY, C.PROD_RATE
-            FROM {S}.PR_T_PLAN_ITEM_DTL a JOIN {S}.item c ON a.c_item_code=c.item_code WHERE a.PLAN_YMD>=? AND c.in_cust>''
+            FROM {S}.PR_T_PLAN_ITEM_DTL a JOIN PARTNER_ERP_TEST3.nx.item c ON a.c_item_code=c.item_code WHERE a.PLAN_YMD>=? AND c.in_cust>''
           UNION ALL SELECT a.PLAN_YMD, A.ITEM_CODE, A.WORK_ORDER, A.WORK_ORDER, A.LINE_NO, 1, A.PLAN_QTY, C.PROD_RATE
-            FROM {S}.PR_T_PLAN_INPUT a JOIN {S}.item c ON a.item_code=c.item_code WHERE a.PLAN_YMD>=? AND c.in_cust>''
+            FROM {S}.PR_T_PLAN_INPUT a JOIN PARTNER_ERP_TEST3.nx.item c ON a.item_code=c.item_code WHERE a.PLAN_YMD>=? AND c.in_cust>''
           UNION ALL SELECT a.PLAN_YMD, A.ITEM_CODE, A.WORK_ORDER, A.WORK_ORDER, A.LINE_NO, 1, A.PLAN_QTY, C.PROD_RATE
-            FROM {S}.PR_T_PLAN_INPUT a JOIN {S}.item c ON a.item_code=c.item_code WHERE a.PLAN_YMD>=? AND C.WORK_CODE=?
+            FROM {S}.PR_T_PLAN_INPUT a JOIN PARTNER_ERP_TEST3.nx.item c ON a.item_code=c.item_code WHERE a.PLAN_YMD>=? AND C.WORK_CODE=?
         ) x""", d6f, d6f, d6f, wcp)
         tprows = cur.fetchall()
         dobset = sorted({str(r[0]).strip() for r in tprows if r[0]})
@@ -532,14 +532,14 @@ def gagong_plan4w(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = 
                    CONVERT(varchar(20),CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust END) mwc,
                    CONVERT(varchar(500),'||'+CASE WHEN c.work_code>'' THEN c.work_code ELSE c.in_cust END+'|') cum,
                    CONVERT(decimal(18,5),1) cum_use
-                FROM SEED s JOIN {S}.item c ON c.item_code=s.item_code
+                FROM SEED s JOIN PARTNER_ERP_TEST3.nx.item c ON c.item_code=s.item_code
                 UNION ALL
                 SELECT cb.level_no+1, cb.item_code, CONVERT(varchar(50),b.mat_code),
                    CONVERT(varchar(20),m.work_code), CONVERT(varchar(20),m.in_cust),
                    CONVERT(varchar(20),CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust END),
                    CONVERT(varchar(500),cb.cum+'|'+CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust END+'|'),
                    CONVERT(decimal(18,5),cb.cum_use*b.use_qty)
-                FROM CTE_BOM cb JOIN {S}.pr_m_item_bom b ON cb.mat_code=b.item_code JOIN {S}.item m ON b.mat_code=m.item_code
+                FROM CTE_BOM cb JOIN {S}.pr_m_item_bom b ON cb.mat_code=b.item_code JOIN PARTNER_ERP_TEST3.nx.item m ON b.mat_code=m.item_code
                 WHERE ISNULL(b.EXCEPT_FLAG,'0')='0' AND cb.level_no<10)
               SELECT item_code, mat_code, SUM(CONVERT(float,cum_use)) q FROM CTE_BOM cte
               WHERE work_code=? AND in_cust_code='' AND charindex('||'+mwc+'||',cum)=0

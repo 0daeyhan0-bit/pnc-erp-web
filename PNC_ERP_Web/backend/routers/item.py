@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
 
 import re as _re
-from common import _ITEM_MAKE, _geom_weight, _sub_desc_suffix, _is_sub_code
+from common import _ITEM_MAKE, _geom_weight
 router = APIRouter()
 
 # ===================== 품목마스터 CRUD (Phase②) — nx.item + item_sub/valve/his =====================
@@ -36,14 +36,14 @@ _VALVE_F = ["item_od", "item_id", "valve_type", "s_w_type", "h_s_type", "n_s_typ
 
 # ── 품목 성격(nature) 6그룹 — 소분류 + 공정/BOM 신호로 파생 판정 (실측 24,093건 재분류) ──
 _NATURE_MAT = {"210": "1.원소재", "220": "1.원소재",
-               "230": "2.부자재/소모품", "910": "2.부자재/소모품", "991": "2.부자재/소모품",
-               "992": "2.부자재/소모품", "993": "2.부자재/소모품", "310": "3.사급자재"}
+               "230": "2.부자재/소모품", "240": "2.부자재/소모품", "910": "2.부자재/소모품", "991": "2.부자재/소모품",
+               "992": "2.부자재/소모품", "993": "2.부자재/소모품", "310": "3.사급자재"}  # 240=용접봉(2026-08-27 신설, 재고평가 대상)
 _NATURE_ALL = ["1.원소재", "2.부자재/소모품", "3.사급자재", "4.가공품", "5.용접·조립품", "6.구매·부품"]
 # 제품군(대분류) 표시 순서 — 규모/공정흐름 순 (사용자 지정)
 _PROD_GROUP_ORDER = ["튜브(절삭단품)", "완제품ASSY", "원소재", "설치자재", "부자재", "서포터", "사급부품", "소모품", "기타"]
 # ★파생방식: 코드(접두어+소분류)가 진실, 제품군/제품계열은 조회시 파생(저장 안 함).
 _SG_PRODGROUP = {"110": ("완제품ASSY", "완제품ASSY"), "120": ("완제품ASSY", "SUB ASSY"), "130": ("튜브(절삭단품)", "가공품"),
-                 "210": ("원소재", "원소재"), "220": ("원소재", "원자재"), "230": ("부자재", "부자재"), "310": ("사급부품", "사급"),
+                 "210": ("원소재", "원소재"), "220": ("원소재", "원자재"), "230": ("부자재", "부자재"), "240": ("부자재", "용접봉"), "310": ("사급부품", "사급"),
                  "910": ("소모품", "소모품"), "991": ("소모품", "생산소모"), "992": ("소모품", "일반소모"), "993": ("소모품", "수불예외")}
 
 def _load_prefix_map(cur):
@@ -196,7 +196,7 @@ def itemmaster_get(item: str = Query(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         allc = ["item_code"] + _IM_CORE + [c for c in _IM_BIZ]
-        cur.execute(f"SELECT {','.join(allc)},silver_flag,has_gagong,nature,active,prod_group,prod_line FROM nx.item WHERE item_code=?", code)
+        cur.execute(f"SELECT {','.join(allc)},silver_flag,has_gagong,nature,active,prod_group,prod_line,ISNULL(cut_gubun,'') cut_gubun FROM nx.item WHERE item_code=?", code)
         r = cur.fetchone()
         if not r: raise HTTPException(404, "품목 없음")
         cols = [d[0] for d in cur.description]
@@ -296,10 +296,6 @@ def itemmaster_save(payload: dict = Body(...)):
             miss = (dval(f) in (None, 0) or dval(f) == 0.0) if f in _IM_NUM else (not str(p.get(f, "") or "").strip())
             if miss: warnings.append(_FIELD_LABEL.get(f, f))
 
-        # ★SUB(자도번) 품명 접미사 병기 — 컷오버 후 CRUD 이사(배치 r_sub_desc_suffix 대체, §B-1 3-a).
-        #   병행운영=배치가 매 sync 재병기 / 컷오버 후=이 저장이 자동부착. self-heal이라 UI 왕복도 멱등.
-        if _is_sub_code(cur, code):
-            p["item_name"] = _sub_desc_suffix(code, name)
         # ── nx.item 코어+업무 upsert (NOT NULL 컬럼은 미전송 시 기존값 보존/기본값) ──
         _DEF = {"item_type": "제품", "unit": "EA", "status": "사용"}   # NOT NULL 컬럼 기본값
         allcols = _IM_CORE + _IM_BIZ

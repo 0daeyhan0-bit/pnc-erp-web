@@ -77,3 +77,38 @@ A `cost·salemagam·app·procbc·_sp_4wk` / B `weight_calc·price·bom` / C `pro
 5. ☐ **컷오버 시 `nx.PR_M_ITEM` drop** (되돌리기 어려워 컷오버까지 보류. 잔여0 확인됨).
 
 → **코드·데이터·거버넌스 완료. 물리 drop만 컷오버 대기.**
+
+## 5. ★사후 결함 — 라이브 커넥션에서 `nx.item` 미한정 (2026-08-27 발견·수정)
+
+**증상**: 운영(184:8010) **영업예상매출현황**이 `백엔드 연결 실패 — uvicorn ... 실행 필요` 표시.
+백엔드는 정상(openapi 200)이었고 해당 API만 **HTTP 500**. 프론트가 500과 접속불가를 구분하지 않아 오진 유발.
+
+**근본원인**: 이관 중 `PR_M_ITEM` → `item` 으로 **테이블명만** 바꾸고 **스키마 한정을 놓친** 형태.
+- `_conn()` = `DATABASE=PARTNER_ERP` → 거기서 `nx.item` / `{SCH}.item`(SCH=`PARTNER_ERP.dbo`)은
+  **PARTNER_ERP 안의 nx/dbo 스키마**로 해석 → `개체 이름 'nx.item'이 유효하지 않습니다 (208)`.
+- nx 커넥션(`_nx()`, DATABASE=PARTNER_ERP_TEST3)에선 같은 문자열이 정상 → **라이브를 읽는 코드에서만** 터짐.
+
+**수정 (전부 `PARTNER_ERP_TEST3.nx.item` 절대한정)**
+
+| 파일 | 위치 | 증상 | 영향 화면 |
+|---|---|---|---|
+| `routers/soyo.py` | `sales_forecast`, `sales_forecast_sagub` | 500 | 영업예상매출현황 / 예상LG사급금액 |
+| `routers/gagong.py` | `gagong_plan4w` `{S}.item` 7곳 (S=`PARTNER_ERP.dbo`) | 500 | 4주간 가공계획현황 |
+| `routers/sales.py` | `sale040_grid` `{SCH}.item`·`{{SCH}}.item` 5곳 | `src=live` 500 | 출하실적등록(레거시 대사) |
+| `routers/salesplan.py` | `salesplan` 존재필터 | try/except 삼킴 → **조용한 필터 무효화** | 영업계획(품목 존재검증) |
+| `live_api.py` | `_prodinout` `cm_m_item.item_name` | 500 (컬럼명 208→207) | 생산 자재수불 |
+
+`cm_m_item`은 `item_desc`가 정식 컬럼(`item_name` 없음) → **소비측 키 유지 위해 `item_desc AS item_name`**. (테이블 자체는 3행뿐 — 별건 점검거리)
+
+**검증**
+- 파라미터 없는 GET **187개 전수** 호출: 수정 전 500 3건(forecast·plan4w·prodinout) → **수정 후 0건**.
+- `src` 토글 엔드포인트 36조합: `sale040/grid` live/nx/new 전부 200. (qc `src=live/new`는 이 API가 `all/legacy/nx`만 받는 값오류 → 별건)
+- 드리프트 확인: `PR_M_ITEM` vs `nx.item` **작업처 불일치 0**(forecast 작업처공백 178은 원본 특성). 품명은 실질차 1,984건 = 클린본 정정명(의도된 변화).
+
+**교훈 11 — 스키마 한정**: 미러→클린 이관 시 **테이블명만 치환하면 안 된다.**
+`nx.*`는 nx 커넥션에서만 해석된다. 라이브(`_conn()`)에서 읽는 코드는 **반드시 `PARTNER_ERP_TEST3.nx.` 절대한정**.
+탐지법 = 커서변수→커넥션 출처 추적 정적스캔 + **파라미터 없는 GET 전수 호출**(정적스캔만으론 `{{SCH}}` 이스케이프형을 놓침).
+
+**교훈 12 — 오류메시지가 진단을 망친다**: `catch(e)` 하나로 접속실패·HTTP500·JSON파싱실패를 모두
+`백엔드 연결 실패 — uvicorn 실행 필요`로 표시 → 서버는 멀쩡한데 서버부터 뒤지게 됨.
+→ `if(!r.ok) throw new Error('서버 오류 HTTP '+r.status)` 로 **상태코드 노출**(영업예상매출현황 적용). 나머지 화면은 동일 패턴 잔존 = 후속과제.
