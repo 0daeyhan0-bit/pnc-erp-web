@@ -2185,8 +2185,11 @@ function lineCalView(host){
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('basemaster'):true;
     const d=st.data;
+    // ★스크롤 1개만(CLAUDE.md §3) — 화면 루트를 flex 컬럼으로,
+    //   업로드박스·툴바는 flex:0 0 auto, 표 영역만 flex:1;min-height:0;overflow:auto.
+    host.style.cssText='display:flex;flex-direction:column;height:100%;min-height:0';
     host.innerHTML=`
-     ${ed?`<div id="lc-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:12px 14px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+     ${ed?`<div id="lc-drop" style="flex:0 0 auto;border:2px dashed #8fb4d6;border-radius:9px;padding:12px 14px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
         <span style="font-size:20px">📤</span>
         <b>LG 라인스케줄 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
         <button class="btn" id="lc-pick">📁 파일 선택</button>
@@ -2194,23 +2197,31 @@ function lineCalView(host){
         <span style="margin-left:auto"></span>
         <label class="tl">기준일(적용날짜)</label><input class="inp" type="date" id="lc-anchor" value="${st.anchor}" style="width:150px">
         ${st.busy?'<span style="color:#1c47a0">⏳ 처리중…</span>':''}
-      </div>`:`<div class="page-sub">🔒 업로드는 수정권한 필요 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</div>`}
-     <div class="toolbar" style="gap:6px">
+      </div>`:`<div class="page-sub" style="flex:0 0 auto">🔒 업로드는 수정권한 필요 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</div>`}
+     <div class="toolbar" style="gap:6px;flex:0 0 auto">
        <label class="tl">시작주(월)</label><input class="inp" type="date" id="lc-from" value="${st.from}" style="width:150px">
        <label class="tl">기간</label><select class="inp" id="lc-weeks" style="width:auto"><option value="4" ${st.weeks==4?'selected':''}>4주</option><option value="6" ${st.weeks==6?'selected':''}>6주</option><option value="8" ${st.weeks==8?'selected':''}>8주</option></select>
        <button class="btn" id="lc-go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${d?d.from+'~'+d.to:''}</span>
      </div>
-     ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       ${d?`<table class="tbl" style="font-size:11px;border-collapse:collapse">
         <thead>
-         <tr><th style="position:sticky;left:0;background:#eef2f7;z-index:2">구분</th><th>라인</th><th>No.</th><th>진도</th>
-           ${d.dates.map(x=>`<th class="center" style="min-width:26px;${x.dow==='토'?'color:#2a6ad6':(x.dow==='일'?'color:#d63a3a':'')}">${x.mon}/${x.day}<br><span style="font-weight:400">${x.dow}</span></th>`).join('')}</tr>
-         <tr><th colspan="4" style="position:sticky;left:0;background:#fff7e0;z-index:2;text-align:right;font-weight:600">특수일 ▶</th>
-           ${d.dates.map(x=>`<td class="center" title="${esc((x.events||[]).join(','))}" style="font-size:9px;background:${x.events&&x.events.length?'#ffe9a8':'#fafbfc'};max-width:26px;overflow:hidden">${(x.events||[]).map(e=>esc(e.slice(0,2))).join('')}</td>`).join('')}</tr>
+         <tr><th style="position:sticky;left:0;top:0;background:#eef2f7;z-index:4">구분</th>
+           <th style="position:sticky;top:0;background:#eef2f7;z-index:3">라인</th>
+           <th style="position:sticky;top:0;background:#eef2f7;z-index:3">No.</th>
+           <th style="position:sticky;top:0;background:#eef2f7;z-index:3">진도</th>
+           ${d.dates.map(x=>`<th class="center" style="position:sticky;top:0;background:#eef2f7;z-index:3;min-width:26px;${x.dow==='토'?'color:#2a6ad6':(x.dow==='일'?'color:#d63a3a':'')}">${x.mon}/${x.day}<br><span style="font-weight:400">${x.dow}</span></th>`).join('')}</tr>
         </thead>
-        <tbody>${d.lines.length?d.lines.map(L=>`<tr${L.common?' style="background:#fff7e0;font-weight:600"':(L.lg?'':' style="background:#fcfdff"')}>
+        <tbody>${d.lines.length?(()=>{
+          // ★3그룹으로 나눠 보여준다(2026-08-27 사용자 요청 — "공통 맨 위, 선 아래는 수기").
+          //   ① 공통(기준)  ② LG 엑셀 업로드 라인  ③ 수기 입력 라인
+          //   그룹 경계에 헤더행을 끼워 넣어 어디까지가 자동/수기인지 한눈에 보이게 한다.
+          const G1=d.lines.filter(L=>L.common), G2=d.lines.filter(L=>!L.common&&L.lg), G3=d.lines.filter(L=>!L.common&&!L.lg);
+          const NC=4+d.dates.length;
+          const sep=(txt,bg,fg)=>`<tr><td colspan="${NC}" style="position:sticky;left:0;z-index:2;background:${bg};color:${fg};font-weight:700;font-size:11px;padding:3px 8px;border-top:2px solid ${fg}">${esc(txt)}</td></tr>`;
+          const row=L=>`<tr${L.common?' style="background:#fff7e0;font-weight:600"':(L.lg?'':' style="background:#fcfdff"')}>
           <td style="position:sticky;left:0;background:${L.common?'#fff7e0':'#fff'};white-space:nowrap">${esc(L.gubun)}</td>
           <td class="center"><b>${esc(L.line_no)}</b>${L.common?'':(L.lg?'':'<span class="bdg" style="font-size:8px;margin-left:3px;background:#eef2f8;color:#5a6b80;border:1px solid #d3dceb;border-radius:5px;padding:0 3px" title="LG 엑셀에 없는 라인 — 수기 입력 대상">수기</span>')}</td><td class="center">${esc(L.model_no)}</td><td class="center">${esc(L.jindo)}</td>
           ${d.dates.map(x=>{let v=L.cells[x.ymd]||'',sc=(L.srcs||{})[x.ymd]||'',inh=0;
@@ -2220,9 +2231,18 @@ function lineCalView(host){
              const isC=sc!=='LG'&&WS_STY[v];
              let sty=isC?`background:${WS_STY[v].c};color:#fff`:codeSty(v);
              if(inh)sty+=';opacity:.38';
-             const tx=isC?WS_STY[v].t:v, canEd=ed&&sc!=='LG'&&!L.common;
-             return `<td class="center lc-cell" data-ln="${esc(L.line_no)}" data-ymd="${esc(x.ymd)}" data-src="${esc(inh?'':sc)}" title="${esc(x.ymd)} ${esc(v)}${inh?' [공통 상속]':(sc?' ['+esc(sc)+']':'')}${canEd?' · 클릭하여 수정':''}" style="${sty};font-size:10px;padding:2px${canEd?';cursor:pointer':''}">${esc(tx)}</td>`;}).join('')}
-        </tr>`).join(''):`<tr><td colspan="${4+d.dates.length}" class="empty">데이터 없음 — 엑셀을 업로드하세요</td></tr>`}</tbody></table>`
+             // ★LG 업로드 라인도 수정 가능(2026-08-27) — 가동시간은 보존되고 근무유형 코드만 바뀐다.
+             const tx=isC?WS_STY[v].t:v, canEd=ed&&!L.common;
+             // ⛔근무유형 배지는 넣지 않는다(2026-08-27) — 가동시간 11 옆에 '정상'(코드2)이 붙어
+             //   "11이 왜 정상?" 처럼 읽혀 혼란만 준다. 셀은 **원본 값 그대로** 보여준다.
+             //   지정된 근무유형은 툴팁과 편집 팝업에서 확인한다.
+             const ws2=(L.stats||{})[x.ymd]||'';
+             return `<td class="center lc-cell" data-ln="${esc(L.line_no)}" data-ymd="${esc(x.ymd)}" data-src="${esc(inh?'':sc)}" title="${esc(x.ymd)} ${esc(v)}${inh?' [공통 상속]':(sc?' ['+esc(sc)+']':'')}${(sc==='LG'&&ws2&&WS_STY[ws2])?' · 근무유형 '+WS_STY[ws2].t:''}${canEd?' · 클릭하여 수정':''}" style="${sty};font-size:10px;padding:2px${canEd?';cursor:pointer':''}">${esc(tx)}</td>`;}).join('')}
+        </tr>`;
+          return (G1.length?sep('■ 기준 — 공통 달력 (라인에 값이 없으면 이 값을 따름)','#fff2cc','#8a6d00')+G1.map(row).join(''):'')
+               + (G2.length?sep('■ LG 라인스케줄 (엑셀 자동 업로드 · 편집 불가)','#e6f0fb','#1c47a0')+G2.map(row).join(''):'')
+               + (G3.length?sep('■ 수기 입력 라인 (LG 엑셀에 없음 · 셀 클릭하여 입력)','#eef6ee','#1c7c3a')+G3.map(row).join(''):'');
+        })():`<tr><td colspan="${4+d.dates.length}" class="empty">데이터 없음 — 엑셀을 업로드하세요</td></tr>`}</tbody></table>`
        :`<div class="empty" style="padding:30px">불러오는 중…</div>`}</div>`;
     const g=id=>host.querySelector(id);
     g('#lc-go').onclick=()=>{st.from=g('#lc-from').value;st.weeks=+g('#lc-weeks').value;load();};
@@ -2235,20 +2255,27 @@ function lineCalView(host){
       drop.ondragleave=()=>{drop.style.background='#f4f9fe';};
       drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';const f=e.dataTransfer.files[0];if(f){autoAnchor(f.name);doUpload(f);}};
       // ★셀 클릭 = 수기 입력(2026-08-27). LG 엑셀은 8개 라인만 들어오므로 나머지는 수기로 채운다.
-      //   LG 업로드분(src='LG')은 자동이 우선이라 편집 불가 — 서버에서도 막는다.
+      //   ★LG 업로드 라인도 편집 가능 — 서버가 work_code(가동시간)는 보존하고
+      //     work_stats(근무유형 코드)만 갱신한다. 특근처럼 엑셀에 없는 정보를 찍어야
+      //     편성 근무일이 맞기 때문(예: C1 260829 '정상').
       host.querySelectorAll('.lc-cell').forEach(td=>{
-        if(td.dataset.src==='LG')return;
         td.onclick=()=>openCell(td);
       });
     }
   };
   // 셀 편집 팝업 — 근무유형 드롭다운(WS_OPTS). body 에 렌더(CLAUDE.md §3 모달규칙)
   const openCell=(td)=>{
-    const ln=td.dataset.ln, ymd=td.dataset.ymd;
+    const ln=td.dataset.ln, ymd=td.dataset.ymd, src=td.dataset.src||'';
+    const _L=st.data.lines.find(x=>x.line_no===ln)||{cells:{}};
+    const _cur=(_L.cells||{})[ymd]||'';
+    const isLG=src==='LG';            // LG 가동시간이 들어있는 칸
     const ov=document.createElement('div');
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:1200;display:flex;align-items:center;justify-content:center';
-    ov.innerHTML=`<div style="background:#fff;border-radius:10px;padding:16px 18px;min-width:280px;box-shadow:0 8px 30px rgba(0,0,0,.25)">
-      <div style="font-weight:700;margin-bottom:10px">라인 <b>${esc(ln)}</b> · ${esc(ymd)}</div>
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;padding:16px 18px;min-width:300px;box-shadow:0 8px 30px rgba(0,0,0,.25)">
+      <div style="font-weight:700;margin-bottom:${isLG?'6px':'10px'}">라인 <b>${esc(ln)}</b> · ${esc(ymd)}</div>
+      ${isLG?`<div style="font-size:11px;color:#5a6b80;background:#eef4fb;border:1px solid #d3e0ef;border-radius:6px;padding:6px 8px;margin-bottom:10px;line-height:1.5">
+         LG 가동시간 <b>${esc(_cur)}</b> 은 <b>그대로 유지</b>되고 근무유형만 저장됩니다.<br>
+         <span style="color:#8a6d00">※ 근무일 판정의 정본은 근무유형입니다(특근·휴무를 여기서 지정).</span></div>`:''}
       <label class="tl">근무유형</label>
       <select class="inp" id="lcx-ws" style="width:100%;margin:4px 0 12px">
         ${WS_OPTS.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>
@@ -2257,7 +2284,8 @@ function lineCalView(host){
         <button class="btn" id="lcx-ok">저장</button></div></div>`;
     document.body.appendChild(ov);
     const sel=ov.querySelector('#lcx-ws');
-    const cur=(st.data.lines.find(L=>L.line_no===ln)||{cells:{}}).cells[ymd]||'';
+    // ★현재 근무유형 코드 = stats(별도 필드) 우선. LG 칸은 표시값이 가동시간이라 코드가 가려진다.
+    const cur=((_L.stats||{})[ymd])||(isLG?'':_cur);
     if([...sel.options].some(o=>o.value===cur))sel.value=cur;
     const close=()=>ov.remove();
     ov.querySelector('#lcx-cancel').onclick=close;

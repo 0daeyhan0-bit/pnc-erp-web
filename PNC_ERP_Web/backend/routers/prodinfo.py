@@ -663,13 +663,19 @@ def linecal_matrix(from_ymd: str = Query(""), weeks: int = Query(4)):
                     metas.append({"line_no": ln, "gubun": "", "model_no": "", "jindo": "", "lg": 0})
         except Exception:
             pass
+        # ★work_stats(근무유형 코드)를 별도 필드 stats 로도 내려보낸다(2026-08-27).
+        #   표시값(cells)은 LG 가동시간 우선이라 코드가 가려지는데, 셀 편집 팝업이
+        #   현재 코드를 선택 상태로 열려면 원래 코드가 필요하다.
         cur.execute("""SELECT line_no,CONVERT(varchar(10),cal_ymd,120),
-                  ISNULL(NULLIF(work_code,''), ISNULL(work_stats,'')), ISNULL(src,'LG')
+                  ISNULL(NULLIF(work_code,''), ISNULL(work_stats,'')), ISNULL(src,'LG'),
+                  ISNULL(work_stats,'')
                 FROM nx.line_calendar WHERE cal_ymd BETWEEN ? AND ?""", start.isoformat(), end.isoformat())
-        cells = {}; srcs = {}
+        cells = {}; srcs = {}; stats = {}
         for r in cur.fetchall():
             cells.setdefault(r[0], {})[r[1]] = r[2]
             srcs.setdefault(r[0], {})[r[1]] = r[3]
+            if str(r[4] or '').strip():
+                stats.setdefault(r[0], {})[r[1]] = str(r[4]).strip()
         # ★공통달력 — 라인값이 없으면 이걸 따른다(편성 _wd_of 와 동일 규칙).
         #   ★정본 = nx.line_calendar 의 line_no='공통' 행. 미러(HR_M_CALENDAR)는 폴백.
         #   화면 맨 위 '공통' 행으로 보여주고, 값 없는 라인 셀은 공통값을 흐리게 상속표시한다.
@@ -699,6 +705,7 @@ def linecal_matrix(from_ymd: str = Query(""), weeks: int = Query(4)):
         for m in metas:
             m["cells"] = cells.get(m["line_no"], {})
             m["srcs"] = srcs.get(m["line_no"], {})
+            m["stats"] = stats.get(m["line_no"], {})
         metas.insert(0, {"line_no": "공통", "gubun": "기준", "model_no": "", "jindo": "",
                          "lg": 0, "common": 1, "cells": dict(base),
                          "srcs": {k: "COMMON" for k in base}})
@@ -734,9 +741,12 @@ def linecal_save(payload: dict = Body(...)):
 
     LG 엑셀은 8개 라인만 들어오므로 나머지(CC·CD·RQ·PA·SG…)는 수기로 채워야
     라인당김 근무일 계산이 정확해진다.
-    ★LG 업로드분(src='LG')은 덮어쓰지 않는다 — 자동이 우선.
+    ★LG 업로드 라인(src='LG')도 수정 가능하다(2026-08-27 사용자 요청).
+      단 work_code(LG 가동시간)는 **보존**하고 work_stats(근무유형 코드)만 갱신한다 —
+      두 컬럼은 서로 다른 정보이고, 근무일 판정의 정본은 work_stats 다.
+      (특근처럼 LG 엑셀에 없는 정보를 라인 셀에 직접 찍을 수 있어야 편성이 맞는다)
       items: [{line_no, ymd(YYYY-MM-DD 또는 YYMMDD), ws(1~7), note?}]
-      ws 를 비우면 그 (라인,일자)의 수기분 삭제.
+      ws 를 비우면 그 (라인,일자)의 수기 코드만 지운다(가동시간은 유지).
     """
     items = payload.get("items") or []
     if not items:
@@ -754,22 +764,34 @@ def linecal_save(payload: dict = Body(...)):
             if not ln or len(d) < 6: continue
             ymd = f"20{d[-6:-4]}-{d[-4:-2]}-{d[-2:]}" if len(d) == 6 else f"{d[:4]}-{d[4:6]}-{d[6:8]}"
             ws = str(it.get("ws", "") or "").strip()[:1]
-            # LG 업로드분은 건드리지 않는다
-            cur.execute("SELECT ISNULL(src,'LG') FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
-            r = cur.fetchone()
-            if r and str(r[0]).strip() == 'LG':
+            if ws and ws not in ok:
                 skipped += 1; continue
-            cur.execute("DELETE FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
+            note = str(it.get("note", "") or "").strip()[:50] or None
+            # ★기존 행이 있으면 UPDATE — work_code(LG 가동시간)는 건드리지 않는다.
+            cur.execute("SELECT ISNULL(work_code,'') FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
+            r = cur.fetchone()
+            if r is not None:
+                has_wc = str(r[0] or '').strip() != ''
+                if not ws and not has_wc:
+                    # 코드도 비우고 가동시간도 없으면 행 자체를 지운다
+                    cur.execute("DELETE FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
+                    deleted += 1; continue
+                cur.execute("""UPDATE nx.line_calendar
+                                  SET work_stats=?, note=?, upd_dt=getdate(),
+                                      src=CASE WHEN ISNULL(work_code,'')<>'' THEN 'LG' ELSE 'MANUAL' END
+                                WHERE line_no=? AND cal_ymd=?""",
+                            (ws or None), note, ln, ymd)
+                if ws: saved += 1
+                else:  deleted += 1
+                continue
             if not ws:
                 deleted += 1; continue
-            if ws not in ok:
-                skipped += 1; continue
             cur.execute("""INSERT INTO nx.line_calendar(line_no,cal_ymd,work_code,work_stats,note,src,upd_dt)
                            VALUES(?,?,NULL,?,?,'MANUAL',getdate())""",
-                        ln, ymd, ws, str(it.get("note", "") or "").strip()[:50] or None)
+                        ln, ymd, ws, note)
             saved += 1
         return {"ok": True, "saved": saved, "deleted": deleted, "skipped": skipped,
-                "note": f"저장 {saved} · 삭제 {deleted}" + (f" · LG업로드분 보호 {skipped}" if skipped else "")}
+                "note": f"저장 {saved} · 삭제 {deleted}" + (f" · 무시 {skipped}" if skipped else "")}
     finally:
         nx.close()
 

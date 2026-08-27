@@ -515,7 +515,7 @@ SCREEN.deliv420=(c)=>{
     const itemOpts=[...itS].slice(0,500).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     const ptS=new Set(); rows.forEach(r=>(r.mat_list||'').split(/[,\r\n]/).forEach(x=>{const m=x.split('{')[0].split('[')[0].trim();if(m)ptS.add(m);}));
     const partOpts=[...ptS].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
-    const FIX=26;   // 고정컬럼 수(레거시 순서 재배치·품목정보 추가·발행 제거 반영 2026-08-27)
+    const FIX=23;   // 고정컬럼 수 — SERIAL-NO·HEAT-NO·품목정보 제거로 26→23 (2026-08-27)
     const S=data.sum||{};
     const badge=s=>`<span style="padding:1px 5px;border-radius:3px;font-size:10px;background:${STC[s]||'#8aa0bd'};color:#fff">${ST[s]||s}</span>`;
     // 일자셀=완료/계획+색(가공4주간 동일 표준): 생산완료 노랑·출하완료 주황·키팅완료 녹
@@ -529,14 +529,15 @@ SCREEN.deliv420=(c)=>{
     //   체크박스는 요청수량 바로 뒤(납품수량 앞) = 레거시 위치.
     //   SEQ·자도번작업처·작업처·도번·LineNo·구분·품명·자도번LIST·사급·LOT·자재·완료·요청
     //   ·[체크]·납품·포장·SERIAL·HEAT·품목정보·출하실적·생산실적·세트재고·입고대기·ASSY재고·검사·상태 = 26
-    const CW=[28,86,66,96,44,56,120,300,38,52,52,52,52,  30,  52,52,74,74,90,54,54,54,54,54,38,52], DW=48;
+    // ★SERIAL-NO·HEAT-NO·품목정보 3컬럼 제거(2026-08-27) → 26 → 23개
+    const CW=[28,86,66,96,44,56,120,300,38,52,52,52,52,  30,  52,52,54,54,54,54,54,38,52], DW=48;
     const totalW=CW.reduce((a,b)=>a+b,0)+dates.length*DW;
     const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}${dates.map(()=>`<col style="width:${DW}px">`).join('')}</colgroup>`;
     // 합계행: 계(1) + 안내(2~9=8칸) + LOT·자재·완료·요청(10~13) + 체크(14) + 나머지(15~26=12칸) + 일자
     const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="8">${nf(data.cnt)}건</td>`
       +`<td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td>`
       +`<td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td>`
-      +`<td></td><td class="num" title="발행"><b>${nf(S.issued||0)}</b></td><td colspan="11"></td>`
+      +`<td></td><td class="num" title="발행"><b>${nf(S.issued||0)}</b></td><td colspan="8"></td>`
       +`${dates.map(d=>`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}</tr>`:'';
     c.innerHTML=`
      <div class="page-title">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 라이브 직독 · 발행=nx</span></div>
@@ -555,31 +556,47 @@ SCREEN.deliv420=(c)=>{
        <span class="rowcount">${nf(data.cnt||0)}건 · 완료 <b>${nf(S.done||0)}</b>/계획 ${nf(S.plan||0)} · 발행 ${nf(S.issued||0)}</span>
        ${loading?'<span style="color:var(--muted)">조회중…</span>':''}
      </div>
-     <div class="toolbar" style="margin-top:2px">
+     <!-- ★조건문 2줄 배치(2026-08-27 — 레거시 거래명세서발행 화면 동일).
+            1줄 = 기준일자 · 구분 · 기간 · 직납 · 입고일자
+            2줄 = 도번 · 자도번 · 자도번작업처[코드🔍이름] · 정렬 + 조회
+            라벨은 레거시처럼 회색칸(.tl)으로 폭을 맞춘다. -->
+     <style>
+      .d4-r{display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:nowrap}
+      .d4-r .tl{background:#eaf0f8;border:1px solid #cdd9e8;border-radius:4px;
+        padding:3px 8px;font-size:12px;color:#33507d;font-weight:600;text-align:center;
+        white-space:nowrap;min-width:66px}
+     </style>
+     <div class="toolbar d4-r">
        <label class="tl">기준일자</label>${legacyDateHTML('d4-base',F.from)}
-       <label class="tl" style="margin-left:8px">구분</label>
-       <label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="d4gb" id="d4-gb-g" value="ganpan" ${F.gubun==='ganpan'?'checked':''}>일반간판</label>
-       <label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="d4gb" id="d4-gb-o" value="order" ${F.gubun!=='ganpan'?'checked':''}>주문</label>
-       <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:44px;min-width:44px;text-align:center" title="납품일자 기준 조회일수">일
-       <label class="tl" style="margin-left:8px">직납</label><input class="inp" id="d4-dnp" value="${esc(F.dnp)}" style="width:44px;min-width:44px;text-align:center" title="직납품 조회일수(레거시 '직납')">일
-       <label class="tl" style="margin-left:8px">입고일자</label>${legacyDateHTML('d4-in',F.inymd)}
-       <button class="btn" id="d4-search">🔍 조회</button>
+       <label class="tl">구분</label>
+       <span style="display:inline-flex;gap:10px;padding:0 4px">
+         <label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="d4gb" id="d4-gb-g" value="ganpan" ${F.gubun==='ganpan'?'checked':''}>일반간판</label>
+         <label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="d4gb" id="d4-gb-o" value="order" ${F.gubun!=='ganpan'?'checked':''}>주문</label></span>
+       <label class="tl">기간</label><input class="inp" id="d4-days" value="${esc(F.days)}" style="width:48px;min-width:48px;text-align:center" title="납품일자 기준 조회일수"><span style="font-size:12px;color:#5a6b80">일</span>
+       <label class="tl">직납</label><input class="inp" id="d4-dnp" value="${esc(F.dnp)}" style="width:48px;min-width:48px;text-align:center" title="직납품 조회일수(레거시 '직납')"><span style="font-size:12px;color:#5a6b80">일</span>
+       <label class="tl" style="margin-left:10px">입고일자</label>${legacyDateHTML('d4-in',F.inymd)}
+       <div class="spacer"></div>
      </div>
-     <div class="toolbar" style="margin-top:2px">
+     <div class="toolbar d4-r">
        <label class="tl">도번</label><input class="inp" id="d4-item" list="d4l-item" value="${esc(F.item)}" style="width:130px;min-width:130px" placeholder="도번(ASSY)/품명" autocomplete="off"><datalist id="d4l-item">${itemOpts}</datalist>
        <label class="tl">자도번</label><input class="inp" id="d4-part" list="d4l-part" value="${esc(F.part)}" style="width:130px;min-width:130px" placeholder="자도번" autocomplete="off"><datalist id="d4l-part">${partOpts}</datalist>
-       <!-- ★자도번작업처 = 필수 입력(미선택시 조회 불가) → 레거시처럼 강조(파란 배경·굵은 테두리) -->
-       <label class="tl" style="margin-left:8px;color:#1c47a0;font-weight:700">자도번작업처</label><input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명 입력" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:180px;min-width:180px;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="d4l-cust">${custOpts}</datalist>
-       <label class="tl" style="margin-left:8px">정렬</label>
-       <select class="inp" id="d4-sort" style="width:auto"><option value="doban" ${F.sort==='doban'?'selected':''}>도번별정렬</option><option value="time" ${F.sort==='time'?'selected':''}>시간별정렬</option></select>
+       <!-- ★자도번작업처 = 레거시처럼 [코드][🔍][업체명] — 필수라 강조 -->
+       <label class="tl" style="color:#1c47a0;background:#dceaff;border-color:#9dc0ea;min-width:88px">자도번작업처</label>
+       <input class="inp" id="d4-custcode" value="${esc(F.cust)}" placeholder="코드" autocomplete="off" title="자도번작업처 코드 — 직접 입력 후 Enter" style="width:74px;min-width:74px;text-align:center;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:700">
+       <button class="btn" id="d4-custfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>
+       <input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:150px;min-width:150px;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="d4l-cust">${custOpts}</datalist>
+       <button class="btn" id="d4-search" style="margin-left:4px">🔍 조회</button>
+       <div class="spacer"></div>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <!-- ★flex:0 1 auto + max-height:100% (4787a13 확정) — 고정 max-height 는 표 아래 여백을 남긴다. -->
+     <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
        <th class="center">SEQ</th><th>자도번작업처</th><th>작업처</th><th>도번</th><th class="center">Line No</th><th class="center">구분</th><th>품명</th><th>자도번LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th>
        <th class="center"><input type="checkbox" id="d4-all"></th>
-       <th class="num">납품수량</th><th class="num">포장수량</th><th>SERIAL-NO</th><th>HEAT-NO</th><th>품목정보</th>
+       <!-- ★SERIAL-NO·HEAT-NO·품목정보 제거(2026-08-27 사용자 요청) -->
+       <th class="num">납품수량</th><th class="num">포장수량</th>
        <th class="num">출하실적</th><th class="num">생산실적</th><th class="num">세트재고</th><th class="num">입고대기</th><th class="num">ASSY재고</th><th class="center">검사</th><th class="center">상태</th>
        ${dates.map(d=>`<th class="center"${wkbg(d)}>${esc(wlab(d))}</th>`).join('')}</tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r,ri)=>{const ed=(r.status!=='90'&&Number(r.req)>0);const dv=(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv);const pk=(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack);return `<tr>
@@ -596,16 +613,16 @@ SCREEN.deliv420=(c)=>{
         <td class="center"><input type="checkbox" class="d4-ck" data-k="${esc(r.assy)}" ${F.chk[r.assy]?'checked':''} ${ed?'':'disabled'}></td>
         <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-dv" data-k="${esc(r.assy)}" value="${dv}" ${ed?'':'disabled'} style="width:40px;min-width:0;height:24px;text-align:right;background:#eafaea;padding:1px 3px;font-size:11px"></td>
         <td class="num" style="background:#eafaea;padding:1px 2px"><input class="inp d4-pk" data-k="${esc(r.assy)}" value="${pk}" ${ed?'':'disabled'} style="width:40px;min-width:0;height:24px;text-align:right;background:#eafaea;padding:1px 3px;font-size:11px"></td>
-        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-sn" data-k="${esc(r.assy)}" value="${esc(F.serial[r.assy]||'')}" ${ed?'':'disabled'} style="width:70px;min-width:0;height:24px;background:#eafaea;padding:1px 3px;font-size:11px"></td>
-        <td style="background:#eafaea;padding:1px 2px"><input class="inp d4-hn" data-k="${esc(r.assy)}" value="${esc(F.heat[r.assy]||'')}" ${ed?'':'disabled'} style="width:70px;min-width:0;height:24px;background:#eafaea;padding:1px 3px;font-size:11px"></td>
-        <td class="bcap" title="${esc(r.spec||'')}" style="overflow:hidden;text-overflow:ellipsis">${esc(r.spec||'')}</td>
         <td class="num" style="color:#2e86de">${nf(r.sale)}</td><td class="num" style="color:#8e44ad">${nf(r.prod)}</td>
         <td class="num">${nf(r.iset_stk)}</td><td class="num">${nf(r.ireq)}</td><td class="num">${nf(r.assy_stock)}</td>
         <td class="center">${r.insp==='1'?'<span class="bdg sagub">검사</span>':''}</td>
         <td class="center">${badge(r.status)}</td>
         ${dates.map(d=>dcell(r,d)).join('')}</tr>`;}).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
-    const sync=()=>{const cn=g('#d4-cust').value.trim();F.cust=(custs.find(w=>(w.nm||w.cc)===cn)||{}).cc||(cn?F.cust:'');
+    // ★자도번작업처 = [코드][🔍][업체명] 연동(2026-08-27 레거시 동일).
+    const sync=()=>{const cn=g('#d4-cust').value.trim(), ccd=(g('#d4-custcode')||{value:''}).value.trim();
+      const byNm=custs.find(w=>(w.nm||w.cc)===cn);
+      if(byNm) F.cust=byNm.cc; else if(ccd) F.cust=ccd; else if(!cn) F.cust='';
       F.days=g('#d4-days').value||2;F.item=g('#d4-item').value.trim();F.part=g('#d4-part').value.trim();
       const dn=g('#d4-dnp');if(dn)F.dnp=dn.value||2;
       const gg=g('#d4-gb-g');F.gubun=(gg&&gg.checked)?'ganpan':'order';
@@ -615,7 +632,14 @@ SCREEN.deliv420=(c)=>{
     g('#d4-search').onclick=()=>{sync();load();};
     ['#d4-gb-g','#d4-gb-o'].forEach(id=>{const el=g(id);if(el)el.onchange=()=>{sync();load();};});
     const so=g('#d4-sort');if(so)so.onchange=()=>{sync();draw();};
-    ['#d4-cust','#d4-item','#d4-part','#d4-days','#d4-dnp'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
+    ['#d4-cust','#d4-custcode','#d4-item','#d4-part','#d4-days','#d4-dnp'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
+    // 코드 ↔ 업체명 양방향 채움
+    const cCode=g('#d4-custcode');
+    if(cCode)cCode.onchange=()=>{const w=custs.find(x=>x.cc===cCode.value.trim());if(w)g('#d4-cust').value=w.nm||w.cc;};
+    const cName=g('#d4-cust');
+    if(cName)cName.onchange=()=>{const w=custs.find(x=>(x.nm||x.cc)===cName.value.trim());if(w&&cCode)cCode.value=w.cc;};
+    const cFind=g('#d4-custfind');
+    if(cFind)cFind.onclick=()=>{if(cName){cName.focus();cName.select();}};
     g('#d4-issue').onclick=()=>issue(rows);
     g('#d4-cancel').onclick=cancelIssue;
     g('#d4-prt').onclick=()=>printView(rows,false);
@@ -955,9 +979,9 @@ SCREEN.partnerplan=(c)=>{
     const dcell=(r,d)=>{const pl=Number((r.days&&r.days[d])||0);if(!frac)return `<td class="num"${pl?'':' style="color:#dfe6ef"'}>${pl?nf(pl):'·'}</td>`;
       const dn=Number((r.donedays&&r.donedays[d])||0),bg=(r.colors&&r.colors[d])||'';if(!pl&&!dn)return '<td class="num" style="color:#dfe6ef">·</td>';
       return `<td class="num" style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
-    const FIX=12;
+    const FIX=11;   // ★품목정보 컬럼 제거(2026-08-27 사용자 요청) — 12 → 11
     const gcell=d=>frac?`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gDay[d]||0)}</b></td>`:`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`;
-    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td><td></td>${dates.map(d=>gcell(d)).join('')}</tr>`:'';
+    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td>${dates.map(d=>gcell(d)).join('')}</tr>`:'';
     const rowTr=r=>`<tr>
         <td class="num" style="color:#8aa0bd">${r.seq}</td>
         <td><b>${esc(r.wcnm)}</b>${r.alloc_note?` <span class="bdg" style="font-size:9px;background:#eaf3ff;color:#1c47a0;border:1px solid #bcd;border-radius:6px;padding:0 4px" title="조달 프로파일 발주업체 배분 반영">${esc(r.alloc_note)}</span>`:''}</td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
@@ -967,7 +991,6 @@ SCREEN.partnerplan=(c)=>{
         <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
         <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
         <td class="num">${nn(r.reqq)}</td>
-        <td class="bcap" title="${esc(r.nm)} ${esc(r.spec)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm)}${r.spec?' <span style="color:var(--muted)">'+esc(r.spec)+'</span>':''}</td>
         ${dates.map(d=>dcell(r,d)).join('')}</tr>`;
     const bodyHTML=()=>loading?spinRow(FIX+dates.length):(rowsCur.length?(rowsCur.map(rowTr).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`);
     // ★<style> 은 반드시 .pn-root 안에 둔다 — 탭 컨테이너(#pg-*, height:100%)의 형제로 두면
@@ -999,20 +1022,34 @@ SCREEN.partnerplan=(c)=>{
      <div class="pn-head" style="flex:0 0 auto">
      <div class="page-title" style="margin-bottom:4px">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 도번·자도번LIST·일자별 (당김 반영)</span>
        <span style="font-size:11px;font-weight:400;margin-left:8px" title="${F.src==='legacy'?'레거시 라이브 PR_T_PLAN_PART_MAT 직독. 당김=PR_M_LINE_NO.CUST_MAINT_DAY(회사근무일).':'웹 편성 결과만 사용(라이브 미참조): 계획업로드→④파트별→⑤자재소요. 기간=소요일자(part_plan_ymd·당김반영), 수량=도번 계획수량(plan_item_dtl). 그레인=레거시 w_pr_outside_410 동일(도번 1행·제번 합산).'}">${F.src==='legacy'?'🔴 <b>레거시 라이브</b>':'🟢 <b>우리편성(nx)</b>'}</span></div>
-     <div class="toolbar">
+     <!-- ★조건문 2줄 배치(2026-08-27 사용자 요청 — 레거시 w_pr_outside_410 동일).
+            1줄 = 소스 · 기준일자 · 기간   /   2줄 = 도번 · 자도번 · 자도번작업처 · 라인 + 조회
+            레거시는 라벨을 회색칸에 넣어 폭을 맞춘다 → .tl 을 고정폭으로 정렬. -->
+     <style>
+      .pn-head .pn-r{display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:nowrap}
+      .pn-head .pn-r .tl{background:#eaf0f8;border:1px solid #cdd9e8;border-radius:4px;
+        padding:3px 8px;font-size:12px;color:#33507d;font-weight:600;text-align:center;
+        white-space:nowrap;min-width:74px}
+     </style>
+     <div class="toolbar pn-r" style="margin-top:2px">
        <label class="tl">소스</label>
-       <select class="inp" id="pn-src" style="width:auto">
+       <select class="inp" id="pn-src" style="width:auto;min-width:158px">
          <option value="nx" ${F.src==='nx'?'selected':''}>우리편성 (nx)</option>
          <option value="legacy" ${F.src==='legacy'?'selected':''}>레거시 라이브 (당김반영)</option></select>
-       <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('pn-base',F.from)}
-       <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="pn-days" value="${esc(F.days)}" style="width:52px;min-width:52px;text-align:center" title="조회 기간(일). 레거시 4주간 화면 기본=31일">일
-       <!-- ★자도번작업처 = 필수 입력(미선택시 조회 불가) → 420 과 동일하게 강조 -->
-       <label class="tl" style="margin-left:8px;color:#1c47a0;font-weight:700">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명 입력" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:180px;min-width:180px;background:${F.wc?'#eaf3ff':'#fff7e6'};border:2px solid ${F.wc?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="pnl-wc">${wcOpts}</datalist>
-       <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:120px;min-width:120px" placeholder="자도번" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
-       <label class="tl">도번</label><input class="inp" id="pn-assy" list="pnl-assy" value="${esc(F.assy)}" style="width:120px;min-width:120px" placeholder="도번(ASSY)" autocomplete="off"><datalist id="pnl-assy">${pnAssyOpts}</datalist>
-       <label class="tl">라인</label><input class="inp" id="pn-line" list="pnl-line" value="${esc(F.line)}" style="width:60px;min-width:60px" placeholder="라인" autocomplete="off"><datalist id="pnl-line">${pnLineOpts}</datalist>
-       <button class="btn" id="pn-search">🔍 조회</button>
+       <label class="tl">기준일자</label>${legacyDateHTML('pn-base',F.from)}
+       <label class="tl">기간</label><input class="inp" id="pn-days" value="${esc(F.days)}" style="width:52px;min-width:52px;text-align:center" title="조회 기간(일). 레거시 4주간 화면 기본=31일"><span style="font-size:12px;color:#5a6b80">일</span>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 자재수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}</span>
+     </div>
+     <div class="toolbar pn-r">
+       <label class="tl">도번</label><input class="inp" id="pn-assy" list="pnl-assy" value="${esc(F.assy)}" style="width:130px;min-width:130px" placeholder="도번(ASSY)" autocomplete="off"><datalist id="pnl-assy">${pnAssyOpts}</datalist>
+       <label class="tl">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:130px;min-width:130px" placeholder="자도번" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
+       <!-- ★자도번작업처 = 레거시처럼 [코드][🔍][업체명] — 필수 입력이라 강조 -->
+       <label class="tl" style="color:#1c47a0;background:#dceaff;border-color:#9dc0ea;min-width:88px">자도번작업처</label>
+       <input class="inp" id="pn-wccode" value="${esc(F.wc)}" placeholder="코드" autocomplete="off" title="자도번작업처 코드 — 직접 입력 후 Enter" style="width:74px;min-width:74px;text-align:center;background:${F.wc?'#eaf3ff':'#fff7e6'};border:2px solid ${F.wc?'#7fa8e8':'#f0b429'};font-weight:700">
+       <button class="btn" id="pn-wcfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>
+       <input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:150px;min-width:150px;background:${F.wc?'#eaf3ff':'#fff7e6'};border:2px solid ${F.wc?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="pnl-wc">${wcOpts}</datalist>
+       <button class="btn" id="pn-search" style="margin-left:4px">🔍 조회</button>
+       <div class="spacer"></div>
      </div>
      ${(frac||msg||data.note)?`<div class="page-sub" style="font-size:11px;margin:2px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
        ${frac?`<span>일자셀=<b>완료/계획</b> · <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#669900;color:#fff;padding:0 5px;border-radius:3px">키팅완료</span></span>`:''}
@@ -1024,21 +1061,39 @@ SCREEN.partnerplan=(c)=>{
      <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl pn-grid" style="font-size:11px;white-space:nowrap"><thead><tr>
        <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th style="min-width:400px;width:400px">자도번LIST</th><th class="center">사급</th>
-       <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th><th>품목정보</th>
+       <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th>
        ${dates.map(d=>`<th class="center"${isWkend(d)?' style="color:#c0392b"':''}>${esc(wlab(d))}</th>`).join('')}</tr></thead>
       <tbody>${bodyHTML()}</tbody></table></div>
     </div>`;
     const g=id=>c.querySelector(id);
-    const syncInputs=()=>{const wn=g('#pn-wc').value.trim();F.wc=(wcs.find(w=>(w.nm||w.cc)===wn)||{}).cc||(wn?F.wc:'');F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;F.line=g('#pn-line').value;};
+    // ★자도번작업처 = [코드][🔍][업체명] 2칸 연동(2026-08-27 레거시 동일).
+    //   업체명이 목록에 있으면 그 코드를, 없으면 코드칸 입력값을 쓴다.
+    const syncInputs=()=>{
+      const wn=g('#pn-wc').value.trim(), wcd=(g('#pn-wccode')||{value:''}).value.trim();
+      const byNm=wcs.find(w=>(w.nm||w.cc)===wn);
+      if(byNm) F.wc=byNm.cc;
+      else if(wcd) F.wc=wcd;                       // 코드 직접 입력
+      else if(!wn) F.wc='';
+      F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;};
+    // 코드 입력 → 업체명 자동 채움
+    const wcCode=g('#pn-wccode');
+    if(wcCode)wcCode.onchange=()=>{const cd=wcCode.value.trim();const w=wcs.find(x=>x.cc===cd);
+      if(w)g('#pn-wc').value=w.nm||w.cc;};
+    // 업체명 선택 → 코드 자동 채움
+    const wcName2=g('#pn-wc');
+    if(wcName2)wcName2.onchange=()=>{const w=wcs.find(x=>(x.nm||x.cc)===wcName2.value.trim());
+      if(w&&wcCode)wcCode.value=w.cc;};
+    const wcFind=g('#pn-wcfind');
+    if(wcFind)wcFind.onclick=()=>{const el=g('#pn-wc');if(el){el.focus();el.select();}};
     const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};
     // 레거시 기준일자 위젯: 전일/익일/달력 → 자동 재조회
     bindLegacyDate(c,'pn-base',()=>F.from,(v)=>{F.from=v;syncInputs();load();});
     g('#pn-days').onchange=()=>{syncInputs();load();};
     g('#pn-search').onclick=()=>{syncInputs();load();};
-    ['#pn-part','#pn-assy','#pn-line','#pn-wc'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
+    ['#pn-part','#pn-assy','#pn-wc','#pn-wccode'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
     // ★헤더 더블클릭 정렬(고정 12컬럼 + 일자 피벗) — tbody만 재렌더로 화살표·리사이저 보존. 합계행은 bodyHTML이 항상 맨끝에 붙임.
     if(!loading&&rowsCur.length){
-      const KEYS=['seq','wcnm','line','workcenter','assy','jado','sagub','lot','matq','doneq','reqq','nm'].concat(dates.map(d=>'d_'+d));
+      const KEYS=['seq','wcnm','line','workcenter','assy','jado','sagub','lot','matq','doneq','reqq'].concat(dates.map(d=>'d_'+d));
       enableSort(c,KEYS,()=>rowsCur,()=>{const tb=c.querySelector('tbody');if(tb)tb.innerHTML=bodyHTML();});
     }
   };

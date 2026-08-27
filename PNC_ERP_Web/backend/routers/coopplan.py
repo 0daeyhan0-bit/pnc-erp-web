@@ -227,10 +227,24 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             ph = ",".join("?"*len(ch))
             cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
             for r in cur.fetchall(): astk[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
+            # ★자재창고(Z99990) — 레거시 원본 r3_mat 서브쿼리는 **PU_T_MAT_STOCK** 이다
+            #   (dw_pr_outside_420_t1: from pu_t_mat_stock where cust_code='Z99990').
+            #   ⛔PU_T_MAT_STOCK_WH(창고별 분할)와 값이 크게 다르다 — 실측 Z99990 합계
+            #     PU_T_MAT_STOCK 5,435,926 vs _WH 8,964,610 (품목별로도 부호까지 다름).
+            #   2026-08-27 PBL 원본 확인 후 교체.
+            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
             for r in cur.fetchall(): z99[str(r[0])] = float(r[1] or 0)
             cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
             for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
+            # ★세트입고대기 — 레거시 원본(dw_pr_outside_420_t1) r5 서브쿼리 그대로:
+            #     from PU_T_SET_INPUT_REQ
+            #      where input_ymd = convert(varchar,getdate(),12)   ← ★오늘 고정
+            #        and confirm_flag = '0'
+            #      group by item_code, in_cust_code, am_pm
+            #   업무흐름: 420 「납품처리」 → 대기 생성 → 자재입고 바코드 처리 → confirm_flag='1'
+            #     → 세트재고로 전환. 화면은 **오늘 접수분 중 아직 입고 안 된 것**만 대기로 본다.
+            #   ⚠날짜조건을 빼면 과거 미확정분(실측 51건·2,630개)까지 붙어 레거시와 어긋난다
+            #     — 2026-08-27 PBL 원본 확인 후 원복.
             cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP.dbo.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
             for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
             cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(in_cust,''), ISNULL(WORK_CODE,''), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
@@ -405,8 +419,15 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
         workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
         custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        # ★파트 마스터(PR_M_PROC_GAGONG) — 사내 납품은 여기 이름이 「05라인」·「06라인」이다.
+        #   레거시 w_pr_outside_410 「작업처」 컬럼이 이 값을 쓴다(2026-08-27 실측).
+        #   PR_M_WORK 에는 라인이 하나도 없어(P1=용접·P2=가공) 사내 라인이 표시되지 않았다.
+        #     S11=05라인 · RAC=06라인 · S4=04라인 · S1=02라인 · P0002=11라인(가공) …
+        _pgcodes = set(wccodes) | awc | aic
+        procm = _batch(_pgcodes, "SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})")
         def nm_of(code):
             c = str(code or "").strip()
+            if c in procm and str(procm[c][1] or "").strip(): return str(procm[c][1]).strip()
             if c in workm: return workm[c][1]
             if c in custm: return custm[c][1]
             if c in workm2: return workm2[c][1]
@@ -531,8 +552,15 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                   pp.WORK_ORDER, pp.ASSY_ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
                   -- ★라인은 plan_item_dtl 우선(A/S·긴급 SVC/AP 제번은 plan_dtl 에 없어 41건 빈칸이 됐다)
                   ISNULL(NULLIF(MAX(ISNULL(d.LINE_NO,'')),''), ISNULL(pd.LINE_NO,'')) line, ISNULL(pd.MODEL_NO,'') model,
-                  -- 작업처 = 도번 마스터의 내부공정(work_code) 없으면 사내외주처(in_cust)
-                  COALESCE(NULLIF(wi.WORK_DESC,''), NULLIF(ci.CUST_DESC,''), NULLIF(RTRIM(i.work_code),''), NULLIF(RTRIM(i.in_cust),''), '') workcenter,
+                  -- ★작업처 = **도번의 공정 파트코드**(gagong_proc_code) 이름이 1순위(2026-08-27).
+                  --   레거시 화면의 「05라인」·「06라인」이 이 값이다:
+                  --     S11=05라인 · RAC=06라인 · S4=04라인 · S1=02라인 · P0002=11라인(가공) …
+                  --   ⛔도번 마스터 work_code 를 먼저 보면 P1→「용접」이 나와 레거시와 다르다
+                  --     (PR_M_WORK 에는 라인이 하나도 없다). 사내 납품처를 라인으로 보여주려면
+                  --     PR_M_PROC_GAGONG.GAGONG_PROC_DESC 를 써야 한다.
+                  --   파트코드가 없을 때만 종전 순서(내부공정 → 사내외주처)로 폴백.
+                  COALESCE(NULLIF(pg.GAGONG_PROC_DESC,''), NULLIF(wi.WORK_DESC,''), NULLIF(ci.CUST_DESC,''),
+                           NULLIF(RTRIM(i.work_code),''), NULLIF(RTRIM(i.in_cust),''), '') workcenter,
                   MAX(CAST(ISNULL(d.LOT_QTY,0) AS float)) lot,
                   MAX(CEILING(CAST(ISNULL(d.PLAN_QTY,0) AS float)*ISNULL(d.USE_QTY,1)*ISNULL(d.PROD_RATE,100)/100.0)) q,
                   COUNT(DISTINCT pp.MAT_CODE) matn,
@@ -550,10 +578,17 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                 LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wi ON wi.WORK_CODE{C}=RTRIM(i.work_code){C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST ci ON ci.CUST_CODE{C}=RTRIM(i.in_cust){C}
+                -- ★도번(ASSY)의 공정 파트코드 → 파트 마스터 이름(「05라인」…)
+                --   ④ 파트별계획(plan_part_dtl)의 최상위행(bom_level=0)이 그 도번의 파트다.
+                LEFT JOIN (SELECT assy_item_code, MIN(RTRIM(gagong_proc_code)) pc
+                             FROM nx.plan_part_dtl
+                            WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
+                            GROUP BY assy_item_code) ap ON ap.assy_item_code{C}=pp.ASSY_ITEM_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE{C}=ap.pc{C}
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE),
                   pp.WORK_ORDER, pp.SPLIT_WORK_ORDER, pp.ASSY_ITEM_CODE, i.item_name, i.item_spec, pd.LINE_NO, pd.MODEL_NO,
-                  wi.WORK_DESC, ci.CUST_DESC, i.work_code, i.in_cust
+                  wi.WORK_DESC, ci.CUST_DESC, i.work_code, i.in_cust, pg.GAGONG_PROC_DESC
                 ORDER BY wcnm, pp.WORK_ORDER, pp.ASSY_ITEM_CODE""", *p)
         except Exception as e:
             return {"dates": [], "rows": [], "cnt": 0, "sum_qty": 0, "note": "편성 먼저 실행(생산계획업로드 → 🧾자재소요·조달 편성). 오류: " + str(e)[:120]}
@@ -744,6 +779,23 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             for rr in cur.fetchall(): wcnm[str(rr[0]).strip()] = rr[1]
             cur.execute(f"SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): wcnm.setdefault(str(rr[0]).strip(), rr[1])
+        # ★작업처 = 도번의 공정 파트코드 이름(「04라인」·「05라인」) — 410 과 동일 규칙(2026-08-27).
+        #   레거시 420 화면도 사내 납품을 라인명으로 보여준다.
+        #   PR_M_WORK 에는 라인이 없어(P1=용접) 그대로 두면 '용접'이 나온다.
+        pgnm = {}
+        for i in range(0, len(assys), 900):
+            ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
+            cur.execute(f"""SELECT a.assy_item_code, g.GAGONG_PROC_DESC
+                              FROM (SELECT assy_item_code, MIN(RTRIM(gagong_proc_code)) pc
+                                      FROM PARTNER_ERP_TEST3.nx.plan_part_dtl
+                                     WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
+                                       AND assy_item_code IN ({ph})
+                                     GROUP BY assy_item_code) a
+                              JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+                                ON g.GAGONG_PROC_CODE=a.pc""", *ch)
+            for rr in cur.fetchall():
+                _v = str(rr[1] or '').strip()
+                if _v: pgnm[str(rr[0]).strip()] = _v
     finally:
         cn.close()
     # 발행분(nx.deliv_issue) 반영 — 발행완료 수량 차감·상태(라이브 미기록·nx만).
@@ -765,13 +817,19 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         wcc = m["work_code"] or m["in_cust"]
         iss = issued.get(str(m["assy"]).strip(), 0.0)
         req0 = m["req"]; remain = max(0.0, req0 - iss)
-        # ★구분(레거시 420 '구분' 컬럼) — 세트재고/입고대기가 있으면 세트입고, 아니면 직납.
-        #   레거시는 직납품을 세트재고 없이 자재·물류창고 재고로 본다(SP_LIVE 533·539행 주석).
-        _gb = "세트입고" if (m["iset_stk"] or m["ireq"]) else ("직납" if not m["work_code"] else "")
+        # ★구분(레거시 420 '구분' 컬럼) — dw_pr_outside_420_t1 원본 확인(2026-08-27).
+        #   TEMP_CTE 가 도번을 두 갈래로 나눈다:
+        #     /*직납품 검색*/     ... and c.in_cust_code  = :as_cust   ← 도번 자체가 그 협력사 납품
+        #     /*직납아닌품 검색*/ ... and c.in_cust_code <> :as_cust   ← 세트로 묶여 들어가는 하위
+        #   즉 **품목마스터 in_cust 가 조회 협력사와 같으면 직납, 다르면 세트입고**다.
+        #   ⛔종전엔 "세트재고/입고대기가 있으면 세트입고"로 추정해 재고 유무에 따라 흔들렸다
+        #     (대기가 0 이면 전부 '직납'으로 뒤집힘 — 실측 92건 전건 오판).
+        _gb = "직납" if (m["in_cust"] and m["in_cust"] == cust) else "세트입고"
         # ★작업처 = 내부공정(work_code)명 없으면 사내외주처(in_cust)명. 코드가 아니라 이름 표시(CLAUDE.md §3).
         #   종전엔 m["work_center"] 만 봐서 전부 빈칸이었다(2026-08-27 수정).
         #   wcc 가 비면(품목마스터에 work_code·in_cust 둘 다 없음) 조회 협력사명으로 대체 — 레거시도 그 칸에 협력사명.
-        _wcnm = m["work_center"] or wcnm.get(wcc, "") or wcc or custnm.get(m["cust"], m["cust"])
+        #   ★파트 마스터 이름(「04라인」…)이 1순위 — 410 과 동일(2026-08-27).
+        _wcnm = pgnm.get(str(m["assy"]).strip(), "") or m["work_center"] or wcnm.get(wcc, "") or wcc or custnm.get(m["cust"], m["cust"])
         out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"], "line": m["line"],
             "nm": nm, "spec": spec, "workcenter": _wcnm,
             "work_center": _wcnm, "in_cust": m["in_cust"] or "", "gubun": _gb,

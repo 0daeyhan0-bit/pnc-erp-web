@@ -361,6 +361,8 @@ SCREEN.basemaster=(c)=>{
     loading=false;draw();};
   const wsBadge=w=>w==='근무'?'<span class="bdg ok">근무</span>':(w==='휴무'?'<span class="bdg" style="background:#f4d3d3;color:#a33">휴무</span>':`<span class="bdg" style="background:#eee;color:#777">기타</span>`);
   const draw=()=>{
+    // ★cal_line 에서 넣은 flex 레이아웃(스크롤 1개용)을 다른 탭으로 갈 때 원복.
+    if(kind!=='cal_line') c.style.cssText='';
     if(kind==='partmaster'){   // 파트 마스터(PR_M_PROC_GAGONG)를 탭으로 편입 — SCREEN.partmaster 재사용
       c.innerHTML=`<div class="toolbar" style="gap:4px;flex-wrap:wrap;margin-bottom:4px">${TABS.map(t=>`<button class="btn ${kind===t.k?'':'ghost'}" data-k="${t.k}" style="${kind===t.k?'background:#1c47a0;color:#fff':''}">${t.t}</button>`).join('')}</div><div id="bm-pm"></div>`;
       c.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{kind=b.dataset.k;q='';cal.ent='';sortIdx=-1;load();});
@@ -380,10 +382,13 @@ SCREEN.basemaster=(c)=>{
       return;
     }
     if(kind==='cal_line'){
-      c.innerHTML=`<div class="page-title">🗂️ 기준 마스터 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">라인별달력 (LG 라인스케줄)</span></div>
-       <div class="page-sub">LG 라인스케줄 엑셀 업로드 → 라인×날짜 가동/잔업 매트릭스 · <b>생산계획 가동캘린더</b>(휴무·잔업 기준) · 드래그&드롭/파일선택 · 기준일 입력</div>
-       <div class="toolbar" style="gap:4px;flex-wrap:wrap">${TABS.map(t=>`<button class="btn ${kind===t.k?'':'ghost'}" data-k="${t.k}" style="${kind===t.k?'background:#1c47a0;color:#fff':''}">${t.t}</button>`).join('')}</div>
-       <div id="bm-lc"></div>`;
+      // ★스크롤 1개(CLAUDE.md §3): .content 를 flex 컬럼으로 두고 표 영역(#bm-lc)만 늘린다.
+      //   종전엔 .content 스크롤 + grid-wrap 의 max-height 스크롤이 겹쳐 2개였다.
+      c.style.cssText='display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden';
+      c.innerHTML=`<div class="page-title" style="flex:0 0 auto">🗂️ 기준 마스터 관리 <span style="font-size:12px;color:var(--muted);font-weight:400">라인별달력 (LG 라인스케줄)</span></div>
+       <div class="page-sub" style="flex:0 0 auto;margin-bottom:8px">LG 라인스케줄 엑셀 업로드 → 라인×날짜 가동/잔업 매트릭스 · <b>생산계획 가동캘린더</b>(휴무·잔업 기준) · 드래그&드롭/파일선택 · 기준일 입력</div>
+       <div class="toolbar" style="gap:4px;flex-wrap:wrap;flex:0 0 auto">${TABS.map(t=>`<button class="btn ${kind===t.k?'':'ghost'}" data-k="${t.k}" style="${kind===t.k?'background:#1c47a0;color:#fff':''}">${t.t}</button>`).join('')}</div>
+       <div id="bm-lc" style="flex:1;min-height:0"></div>`;
       c.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{kind=b.dataset.k;q='';cal.ent='';sortIdx=-1;load();});
       lineCalView(c.querySelector('#bm-lc'));
       return;
