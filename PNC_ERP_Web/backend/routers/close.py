@@ -110,16 +110,18 @@ def _snap_mat(cur, ptype, period):
     """자재 스냅샷 확정 = nx.mat_stock_daily 의 해당 시점 잔량을 그대로 박는다(freeze).
        일마감=그 날 · 월마감=그 달 말일 시점. 재적재 멱등(같은 키 DELETE 후 재삽입).
        ★검증: 이 값이 레거시 PU_T_MONTH_STOCK_WH 와 2606/2607 전수 100.00% 일치(2026-08-27)."""
+    # ★기준일 = 그 시점 이하의 마지막 '데이터가 있는' 일자.
+    #   일별잔량은 이동이 있던 날만 저장(sparse) → 주말·휴일은 행이 없다(예 2607의 12·17·18·19).
+    #   그 날은 '재고 이동이 없던 날'이므로 직전 잔량을 그대로 이월해 확정한다(연쇄 유지·캘린더 연속).
     if ptype == "D":
-        asof = period
-    else:                      # 월마감 = 그 달의 마지막 '데이터가 있는' 일자
-        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily WHERE LEFT(ymd,4)=?", period)
-        asof = cur.fetchone()[0]
-        if not asof:
-            raise HTTPException(400, f"{period} 월의 자재 일별잔량이 없습니다 — 일마감 빌더 실행 후 월마감하세요.")
-    cur.execute("SELECT COUNT(*) FROM nx.mat_stock_daily WHERE ymd=?", asof)
-    if not cur.fetchone()[0]:
-        raise HTTPException(400, f"{asof} 자재 일별잔량이 없습니다 — 일마감 빌더(matclose_movavg_build.py) 실행 후 마감하세요.")
+        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily WHERE ymd<=?", period)
+    else:                      # 월마감 = 그 달 말일 시점(= 그 달의 마지막 데이터 일자)
+        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily WHERE ymd<=?", period + "99")
+    r = cur.fetchone()
+    asof = r[0] if r else None
+    if not asof:
+        raise HTTPException(400, f"{period} 이전의 자재 일별잔량이 없습니다 — "
+                                 f"일마감 빌더(matclose_movavg_build.py) 실행 후 마감하세요.")
     cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?", ptype, period)
     cur.execute("""INSERT INTO nx.stock_snapshot(domain,ptype,period,item_code,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
         SELECT 'MAT', ?, ?, UPPER(mat_code), SUM(stock_qty), SUM(stock_amt), MAX(avg_cost), SUM(in_qty), SUM(out_qty), GETDATE()
@@ -156,7 +158,8 @@ def close_run(payload: dict = Body(...)):
         n, asof = (0, None)
         if d in SNAP_READY:
             n, asof = _snap_mat(cur, t, p)
-        note = (f"스냅샷 {n}품목(기준 {asof})" if d in SNAP_READY else "잠금만(스냅샷 2단계)")
+        note = ((f"스냅샷 {n}품목(기준 {asof})" + ("" if str(asof)==str(p if t=="D" else "") or (t=="D" and str(asof)==str(p)) else " ※이월"))
+                if d in SNAP_READY else "잠금만(스냅샷 2단계)")
         # ★UPSERT — 해제 후 재마감이 가능해야 한다(PK=domain+ptype+period, 기존행은 flag=0으로 남아있음)
         cur.execute("""UPDATE nx.period_close SET close_flag=1, close_user=?, close_dt=GETDATE(),
                               reopen_user=NULL, reopen_dt=NULL, note=?
