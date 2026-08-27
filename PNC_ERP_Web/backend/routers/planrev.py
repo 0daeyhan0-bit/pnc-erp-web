@@ -794,35 +794,46 @@ def planrev_step_part(payload: dict = Body(...)):
     return _run_step("K", _f, user)
 
 
+def _coop_check(cur):
+    """협력사 점검 — plan_part_mat 작업처 집계 + 마스터 미매핑 리포트(쓰기 0).
+
+    ★2026-08-27 ⑥ 단계를 ⑤ 로 흡수. 종전 ⑥「협력사계획 편성」은 이름과 달리
+      쓰기가 0이고 조회 2번(0초)뿐이라 '편성'이 아니었다. 레거시
+      SP_PR_CREATE_PLAN_협력사계획_생성 이 만드는 자재소요는 웹에선 ⑤(STEP7)가
+      이미 만들고, 그 SP 의 또다른 산출물 PR_T_PLAN_PART_MAT_BY_ITEM 은
+      웹·레거시 어디에서도 읽지 않아(참조 0건) 만들 필요가 없다.
+      → 검증 로직만 ⑤ 끝에 붙이고 단계는 없앤다."""
+    cur.execute("""SELECT COUNT(*), COUNT(DISTINCT ISNULL(mat_work_center_code,'')),
+                          COUNT(DISTINCT work_order) FROM nx.plan_part_mat""")
+    n, wc, wo = cur.fetchone()
+    cur.execute("""SELECT TOP 30 ISNULL(a.mat_work_center_code,'') wc, COUNT(*) n
+                     FROM nx.plan_part_mat a
+                    WHERE ISNULL(a.mat_work_center_code,'')<>''
+                      AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
+                      AND NOT EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE=a.mat_work_center_code)
+                    GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
+    unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
+    return {"coop_lines": int(n or 0), "coop_wc": int(wc or 0),
+            "coop_work_orders": int(wo or 0), "unmapped_wc": unmapped}
+
+
 @router.post("/api/planrev/step/mat")
 def planrev_step_mat(payload: dict = Body(...)):
-    """⑤ 자재소요·조달 편성 — STEP7 + 조달 오버레이."""
+    """⑤ 자재소요·조달 편성 — STEP7 + 조달 오버레이 + 협력사 점검(구 ⑥ 흡수)."""
     def _f(cur):
         _gate_or_raise(cur)          # ★라우팅을 실제로 쓰는 단계 → 재검증
         r = _step7_mat(cur)
         r.update(_step_source(cur))
+        r.update(_coop_check(cur))   # ★구 ⑥ — 작업처 집계·미매핑 리포트
         return r
     return _run_step("T", _f, _by(payload))
 
 
 @router.post("/api/planrev/step/coop")
 def planrev_step_coop(payload: dict = Body(...)):
-    """⑥ 협력사계획 편성 — ★읽기전용 검증단계(쓰기 0).
-       plan_part_mat 을 작업처별로 집계하고 마스터에 없는 작업처를 리포트한다."""
-    def _f(cur):
-        cur.execute("""SELECT COUNT(*), COUNT(DISTINCT ISNULL(mat_work_center_code,'')),
-                              COUNT(DISTINCT work_order) FROM nx.plan_part_mat""")
-        n, wc, wo = cur.fetchone()
-        cur.execute("""SELECT TOP 30 ISNULL(a.mat_work_center_code,'') wc, COUNT(*) n
-                         FROM nx.plan_part_mat a
-                        WHERE ISNULL(a.mat_work_center_code,'')<>''
-                          AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
-                          AND NOT EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE=a.mat_work_center_code)
-                        GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
-        unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
-        return {"coop_lines": int(n or 0), "coop_wc": int(wc or 0),
-                "coop_work_orders": int(wo or 0), "unmapped_wc": unmapped}
-    return _run_step("S", _f, _by(payload))
+    """(폐지) ⑥ 협력사계획 편성 → ⑤ 에 흡수(2026-08-27).
+       구 버전 화면·북마크 호환용으로 엔드포인트만 남긴다. 점검 결과를 그대로 반환."""
+    return _run_step("S", _coop_check, _by(payload))
 
 
 @router.post("/api/planrev/compose_all")
@@ -845,16 +856,15 @@ def planrev_compose_all(payload: dict = Body(...)):
            ("K", lambda cur: dict(_step5_item(cur), **_step6_part(cur))),
            ("L2", _stepL_pull),                                          # 그 위에 리드타임당김
            ("H2", lambda cur: _stepH_history(cur, "")),                  # ★040 원천 확정
-           ("T", lambda cur: (_gate_or_raise(cur), dict(_step7_mat(cur), **_step_source(cur)))[1])]
+           # ★T 가 협력사 점검(구 ⑥)까지 포함한다 — 별도 S 단계 호출 없음(2026-08-27).
+           ("T", lambda cur: (_gate_or_raise(cur),
+                              dict(_step7_mat(cur), **_step_source(cur), **_coop_check(cur)))[1])]
     done = []; t0 = time.time(); agg = {}
     for code, fn in seq:
         r = _run_step(code, fn, user, batch)
         agg.update({k: v for k, v in r.items() if k not in ("ok", "step", "warns")})
         done.append({"code": code, "name": _JOB_NAME.get(code, code),
                      "done_hms": r.get("done_hms"), "elapsed": r.get("elapsed")})
-    r6 = planrev_step_coop({"by": user})
-    done.append({"code": "S", "name": _JOB_NAME["S"], "done_hms": r6.get("done_hms"), "elapsed": r6.get("elapsed")})
-    agg.update({k: v for k, v in r6.items() if k not in ("ok", "step", "warns")})
     nx = _nx(); cur = nx.cursor()
     try: _job_log(cur, "Z", user, int(time.time() - t0), "OK", "", None, batch)
     finally: nx.close()
