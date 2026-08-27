@@ -493,10 +493,11 @@ class NxCostEngine:
 
     def material_split(self, item, ymd):
         """재료비(base, LME제외)를 최말단 leaf의 sgroup별로 분리 — SP WON/BU/SA_JAI_AMT 정합(SP 860-862).
-           원자재(won)=110/120/130/220, 부자재(bu)=230/910, 사급(sa)=310, 기타(210 등)→won 캐치올. won+bu+sa=material base."""
+           원자재(won)=110/120/130/220, 부자재(bu)=230/240/910, 사급(sa)=310, 기타(210 등)→won 캐치올. won+bu+sa=material base.
+           ★240=용접봉(2026-08-27 신설)은 부자재(bu) — 레거시 SP는 라이브 sgroup(910/230)로 bu 분류하므로 정합 유지."""
         ymcut='20'+ymd[:4]; b={'won':0.0,'bu':0.0,'sa':0.0}
         def acc(sg, v):
-            if sg in ('230','910'): b['bu']+=v
+            if sg in ('230','240','910'): b['bu']+=v
             elif sg=='310': b['sa']+=v
             else: b['won']+=v
         def walk(node, q, seen):

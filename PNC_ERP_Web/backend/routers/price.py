@@ -168,7 +168,7 @@ def _kindmap(cur, kind):
     cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
     return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
 
-_MAT_SGROUP = ('210', '220', '230', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/사급/잡자재/소모품)
+_MAT_SGROUP = ('210', '220', '230', '240', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/용접봉/사급/잡자재/소모품). 240=용접봉(2026-08-27)
 @router.get("/api/item/list")
 def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query(""), mat: str = Query(""),
               nature: str = Query(""), use: str = Query("", description="사용여부(nx.item.use_flag): ''전체/'1'사용중/'0'사용중지"), limit: int = Query(500)):
@@ -423,7 +423,8 @@ def price_lgprice_list(q: str = Query(""), biz: str = Query("")):
 # ============ 특이 단가목록: 실 입고가 > 실 유상사급 출고가(판가 역전) ============
 # 해당월에 실제 입고(자재입고명세서)되고 유상사급 출고(자재불출명세서)된 품목 중, 실 입고가 > 실 출고가(비싸게 사서 싸게 사급) = 손해.
 # 입고=PU_T_STOCK_MAINT(9,S,C,G,H) · 출고=PU_T_STOCK_MAINT(tag'5', 출고가>0=유상). 원소재·용접봉·소모품 제외(용접링 유지). 상위 Assy=BOM 역전개.
-_INV_EXCL_SG = ('210', '220', '910', '991', '992', '993')  # 원소재/원자재/잡자재(용접봉·나이프)/생산소모품/일반소모품/수불예외
+_INV_EXCL_SG = ('210', '220', '910', '991', '992', '993')  # 원소재/원자재/잡자재(나이프 등)/생산소모품/일반소모품/수불예외
+# ★240(용접봉)은 의도적으로 미포함 — 용접봉=재고평가 대상이라 재고에 포함(2026-08-27 용접봉을 910에서 240으로 분리)
 @router.get("/api/price/inversion")
 def price_inversion(ym: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
     """특이 단가목록: 해당월(ym=YYMM, 미지정=당월) 실 입고가 > 실 유상사급 출고가 역전 부품. 입고/출고 둘 다 있는 품목만.
