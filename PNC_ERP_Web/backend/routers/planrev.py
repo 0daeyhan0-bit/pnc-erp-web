@@ -269,8 +269,15 @@ def _step7_sql(cur):
       FROM CTE_BOM cb JOIN nx.plan_bom_snap b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1'
         AND NOT EXISTS(SELECT 1 FROM nx.plan_route_active pra WHERE pra.assy_item_code=cb.assy_item_code)   -- ★가드: 활성 대체경로 없는 제품만 v_pr_bom(현행)
-        AND NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
-            AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code)
+        -- ★SUB 예외(2026-08-27): 사내 SUB(-SUB)는 파트별에 노드가 있어도 **자재행으로도 남긴다**.
+        --   레거시 PR_T_PLAN_PART_MAT 은 SUB 를 512행 갖는데 웹은 6행뿐이었다.
+        --   원인 = 아래 NOT EXISTS(파트별에 같은 노드가 있으면 자재행 생략). 실측으로
+        --   이 조건이 지우는 건 **정확히 SUB 506행뿐이고 일반자재는 0행**이었다
+        --   (파트별 SUB 노드수는 웹·라이브 모두 1,199 로 동일 = 파트별 전개는 맞다).
+        --   즉 레거시는 SUB 에 한해 파트별·자재소요 이중 등재를 허용한다.
+        AND (b.mat_code LIKE '%-SUB'
+             OR NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
+            AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code))
       UNION ALL
       -- ★★route-active 브랜치: 활성 대체경로(Rnn) 있는 제품은 그 경로의 route_edges로 전개(except_flag 무관·route가 활성엣지만 보유)
       SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
@@ -282,8 +289,9 @@ def _step7_sql(cur):
         JOIN nx.plan_route_active pra ON pra.assy_item_code=cb.assy_item_code
         JOIN nx.route_edges b ON b.route_id=pra.route_id AND b.item_code=cb.bom_mat_code
         JOIN nx.item_ov m ON b.mat_code=m.item_code
-      WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
-            AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code))
+      WHERE (b.mat_code LIKE '%-SUB'          -- ★SUB 예외 — 위 v_pr_bom 브랜치와 동일 규칙
+             OR NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
+            AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code)))
     SELECT * INTO nx.plan_part_mat_tmp FROM CTE_BOM
     WHERE CHARINDEX('||'+mat_work_center_code+'||',cum_in_cust_code)=0 AND NOT (cust_flag='0' AND gc_gubun='P') OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_mat') IS NOT NULL DROP TABLE nx.plan_part_mat")
@@ -424,17 +432,21 @@ def _step5_item(cur):
     # ── STEP5-AS: A/S(WO) 계획 앵커 (레거시 compose 3번째 앵커, 우리 누락분 반영) ──
     #   소스=PR_T_PLAN_INPUT(w_pr_plan_060 수기 A/S/긴급, LINE SVC/AR). ITEM_CODE=완성품 직접(모델매핑 없음),
     #   prod_rate=100(WO 특례, SP substring(work_order,1,2)='WO'), plan_ymd>=생산계획 최소일자(@as_from_ymd).
-    #   ★2026-08-27 라이브 직독 → nx 미러. 실측 대사 동일(양쪽 791행·수량합 443,772·차집합 0/0,
-    #     최종등록시각도 동일)이라 산출물 변화 없이 라이브 의존만 제거된다.
-    #     컷오버 후 = 웹 A/S입력(nx.prod_plan_input)으로 repoint 예정.
+    #   ★2026-08-27 라이브 직독 → nx 미러 → **웹 정본 nx.prod_plan_input 으로 repoint**.
+    #     미러(nx.PR_T_PLAN_INPUT)가 낡아 최신 A/S 제번이 빠졌다:
+    #       미러 782키 · 라이브 791키 · 웹정본 797키 (WO1094126SS 등 15건이 미러에 없음)
+    #     그 결과 자재소요에서 165행(수량 8,305)이 통째로 누락됐다.
+    #     nx.prod_plan_input 은 planinput.py 가 정본으로 선언한 웹 자체 테이블이고
+    #     CRUD 화면(생산계획추가입력)까지 붙어 있다 = CLAUDE.md §1-9 클린본 원칙.
+    #     ⚠컬럼명이 소문자다(plan_ymd/item_code/…). 미러는 대문자였다.
     cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
     _asfrom = str(cur.fetchone()[0] or '').strip()
-    cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
-            MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
-          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a
-          JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
-          WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
-          GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
+    cur.execute("""SELECT LTRIM(RTRIM(a.work_order)) wo, LTRIM(RTRIM(a.item_code)) it, SUM(CAST(a.plan_qty AS int)) pq,
+            MIN(a.plan_ymd) ymd, MAX(ISNULL(a.output_hm,'')) ohm, MAX(ISNULL(a.line_no,'')) ln
+          FROM nx.prod_plan_input a
+          JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.item_code))=c.ITEM_CODE
+          WHERE a.plan_ymd>=? AND a.plan_qty>0
+          GROUP BY LTRIM(RTRIM(a.work_order)), LTRIM(RTRIM(a.item_code)), a.plan_ymd""", _asfrom)
     for wo, it, pq, ymd, ohm, ln in cur.fetchall():
         wos=str(wo).strip(); it=str(it).strip(); pq=int(pq or 0); ymd=str(ymd).strip()
         ohm=(str(ohm).strip() or '0800'); ln=(str(ln or '').strip())[:6]
