@@ -229,9 +229,13 @@ def _weld_backflush(cro, nx, item, prod_qty, wo, mode, user, ref_key):
             if (gc.fetchone()[0] or 0) > 0:   # _tracked: 추적 용접봉만 게이트(미추적은 오차단 방지 통과)
                 av = _mat_avail(gc, br)
                 if wneed > av + 1e-6:
-                    short.append(f"용접봉 {br}(가용 {av:g} < 소요 {wneed:g})")
+                    # ★사용자에게 왜 실적이 막혔는지 명확히: 용접봉 이름(코드→이름, §3) + 가용/필요
+                    gc.execute("SELECT TOP 1 ISNULL(item_name,'') FROM nx.item WHERE item_code=?", br)
+                    _r = gc.fetchone(); _nm = (str(_r[0]).strip() if _r and _r[0] else br)
+                    short.append(f"용접봉 '{_nm}'({br}) 재고부족 — 가용 {av:g} < 필요 {wneed:g}")
         if short:
-            return {"ok": False, "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8])}
+            return {"ok": False, "shortage": True,
+                    "detail": "용접봉 재고부족으로 생산실적을 잡을 수 없습니다. " + " / ".join(short[:8])}
     # ── posting: 용접봉 −W(tag W, MAT점, base RAC, 투입공정) / reverse=+W ──
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
