@@ -3197,7 +3197,7 @@ SCREEN.subvariant=(c)=>{
 SCREEN.itemmaster=(host)=>{
   const API=API_BASE;
   let opts={};
-  const st={rows:[],cnt:0,q:'',status:'',nature:'',prod_group:'',use:'1',form:null,sel:new Set(),msg:''};   // use=사용여부(1사용중/0사용중지/''전체) 기본 사용중
+  const st={rows:[],cnt:0,q:'',status:'',nature:'',prod_group:'',sgroup:'',use:'1',form:null,sel:new Set(),msg:''};   // use=사용여부(1사용중/0사용중지/''전체) 기본 사용중. sgroup=소분류 필터
   // [key,label,type,optkey] · type: req/text/num/date/sel/chk/ro
   // ★3층 원칙: 품목마스터는 "고정 속성"만. 조달·거래·운영 필드는 분리(백엔드 _IM_CORE/_IM_BIZ/_SUB와 일치).
   const F=[
@@ -3215,7 +3215,7 @@ SCREEN.itemmaster=(host)=>{
   const REQ=new Set(['item_code','item_name','sgroup','unit']);   // 하드필수(전 그룹 공통). 성격별 소프트권장은 저장 후 경고.
   const softField=()=>{const nat=st.form&&st.form.nature; return (nat&&opts.nature_soft&&opts.nature_soft[nat])||[];};
   const load=async()=>{
-    const qs=new URLSearchParams({q:st.q,status:st.status,nature:st.nature,prod_group:st.prod_group,use:st.use,limit:500});
+    const qs=new URLSearchParams({q:st.q,status:st.status,nature:st.nature,prod_group:st.prod_group,sgroup:st.sgroup,use:st.use,limit:500});
     try{const r=await fetch(`${API}/api/itemmaster/list?${qs}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;
       if(j.natures)opts.nature_f=j.natures; if(j.prod_groups)opts.prod_groups=j.prod_groups;}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
@@ -3237,6 +3237,7 @@ SCREEN.itemmaster=(host)=>{
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">검색</label><input class="inp" id="im-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
        <label class="tl">제품군</label><select class="inp" id="im-pg" style="width:auto"><option value="">전체</option>${(opts.prod_groups||[]).map(o=>`<option value="${esc(o.code)}" ${st.prod_group===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl">소분류</label><select class="inp" id="im-sg" style="width:auto"><option value="">전체</option>${(opts.sgroup||[]).map(o=>`<option value="${esc(o.code)}" ${st.sgroup===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">품목유형</label><select class="inp" id="im-nat"><option value="">전체</option>${(opts.nature_f||opts.nature||[]).map(o=>`<option value="${esc(o.code)}" ${st.nature===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl" title="LG 리시빙 2501~ 스코프 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="im-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
        <button class="btn" id="im-search">🔍 조회</button>
@@ -3281,7 +3282,7 @@ SCREEN.itemmaster=(host)=>{
         <td class="center">${ed?`<button class="btn im-usetgl" data-code="${esc(r.item_code)}" data-use="${r.use_flag}" style="padding:1px 8px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용중':'중지'}</button>`:(r.use_flag?'<span class="bdg ok">사용중</span>':'<span class="bdg off">중지</span>')}</td>
         <td class="center">${ed?`<button class="btn im-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="13" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
-    g('#im-search').onclick=()=>{st.q=g('#im-q').value;st.nature=g('#im-nat').value;st.prod_group=g('#im-pg').value;st.use=g('#im-use').value;load();};
+    g('#im-search').onclick=()=>{st.q=g('#im-q').value;st.nature=g('#im-nat').value;st.prod_group=g('#im-pg').value;st.sgroup=g('#im-sg').value;st.use=g('#im-use').value;load();};
     {const u=g('#im-use');if(u)u.onchange=()=>{st.use=u.value;load();};}
     g('#im-q').onkeyup=e=>{if(e.key==='Enter')g('#im-search').click();};
     if(ed){
