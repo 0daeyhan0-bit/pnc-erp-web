@@ -2124,8 +2124,13 @@ const MST_CFG={
     fields:[['dept_code','부서코드','text'],['dept_desc','부서명','req'],['sort_key','정렬순서','num'],['use_flag','사용여부','chk'],['dept_desch','한자명','text'],['dept_from_ymd','적용시작','text'],['dept_to_ymd','적용종료','text'],['fin_dept_code','재무부서','text'],['fin_from_ymd','재무시작','text'],['fin_to_ymd','재무종료','text'],['enterprise_dept','전사부서','text'],['wh_code','창고','text'],['remarks','비고','text']],
     newDefaults:{use_flag:1,sort_key:0}},
   line:{sid:'basemaster',title:'라인 마스터',keyField:'line_no',listEp:'/api/line/list',saveEp:'/api/line/save',delEp:'/api/line/delete',org:'nx.line_no',
-    cols:[{k:'line_no',h:'라인번호',cap:140},{k:'apply_ymd',h:'적용일'},{k:'maint_day',h:'리드일',cls:'num'},{k:'maint_hhmm',h:'변경시각',cls:'center',fmt:r=>{let v=String(r.maint_hhmm||'').replace(/\D/g,'');if(!v)return '';v=v.padStart(4,'0').slice(-4);return v.slice(0,2)+':'+v.slice(2);}},{k:'link_cust_name',h:'연결거래처',cap:160,fmt:r=>esc(r.link_cust_name||r.link_cust_code||'')},{k:'cust_maint_day',h:'거래처리드',cls:'num'}],
-    fields:[['line_no','라인번호','req'],['apply_ymd','적용일(YYMMDD)','text'],['maint_day','리드일','num'],['maint_hhmm','변경시각(HHMM)','text'],['link_cust_code','연결거래처코드','text'],['cust_maint_day','거래처리드','num']],
+    // ★명칭·구성을 레거시 「LINE-NO MASTER」와 동일하게(2026-08-27).
+    //   maint_day/maint_hhmm = 라인당김(변경일자·변경시간)
+    //   cust_maint_day = 직납당김 — 파트별계획 없는 직납품에 추가로 적용되는 당김일수(CA=1).
+    //     STEP7 의 nx.plan_direct_pull 이 이 값을 읽는다.
+    //   ⛔연결거래처(link_cust_code)는 미사용 항목이라 제외(사용자 확인).
+    cols:[{k:'line_no',h:'라인번호',cap:140},{k:'apply_ymd',h:'적용일'},{k:'maint_day',h:'변경일자',cls:'num'},{k:'maint_hhmm',h:'변경시간',cls:'center',fmt:r=>{let v=String(r.maint_hhmm||'').replace(/\D/g,'');if(!v)return '';v=v.padStart(4,'0').slice(-4);return v.slice(0,2)+':'+v.slice(2);}},{k:'cust_maint_day',h:'직납당김',cls:'num'}],
+    fields:[['line_no','라인번호','req'],['apply_ymd','적용일(YYMMDD)','text'],['maint_day','변경일자','num'],['maint_hhmm','변경시간(HHMM)','text'],['cust_maint_day','직납당김','num']],
     newDefaults:{maint_day:0,maint_hhmm:'0000'}},
   // ★2026-08-23 조립/단품 공정마스터 등록·수정·삭제 추가(기존엔 조회만 — 거래처·부서·라인만 편집 가능했음).
   //   저장/삭제는 nx 원장(CLAUDE.md §1). 목록 컬럼키는 /api/basemaster/list 가 c0..cN 으로 주므로
