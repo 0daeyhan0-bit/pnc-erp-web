@@ -247,7 +247,10 @@ def _snap_mat(cur, ptype, period):
     cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?", ptype, period)
     n = 0
     for mat, (q, a) in state.items():
-        if not mat:
+        # ★잔량 0 품목은 스냅샷에서 제외(대표 확정 2026-08-27). 빌더(mat_stock_daily)와 동일 규칙.
+        #   state 에는 남겨 이월시키되 '확정 재고'로는 적재하지 않는다. 0에서 재입고시 단가는
+        #   어차피 리셋(재고<=0 refill 규칙)이라 avg 유실 없음. 음수는 실재고이므로 유지.
+        if not mat or abs(q) < 1e-9:
             continue
         cur.execute("""INSERT INTO nx.stock_snapshot(domain,ptype,period,item_code,stock_qty,stock_amt,avg_cost,close_dt)
                        VALUES('MAT',?,?,?,?,?,?,GETDATE())""",
