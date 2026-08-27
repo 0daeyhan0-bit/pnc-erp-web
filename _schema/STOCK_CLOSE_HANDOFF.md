@@ -144,3 +144,87 @@ STOCK_COST = (BASIC_AMT + INPUT_AMT) / (BASIC_QTY + INPUT_QTY)     ← 월 1회
 | `_schema/DO_NOT_USE_FIELDS.md` §16 | 자재 가용판정에 stock_ledger 금지 |
 | `_schema/MIRROR_CLEAN_DUAL_TABLE_AUDIT.md` | 미러/클린 병존 쌍6·C13 |
 | `src_extracted/sa_stock_01/w_pu_stock_160.srw` | **레거시 월마감 원본(총평균법)** |
+
+---
+
+## 7. ★수불장 설계방식 (2026-08-27 추가 — 옆 세션 착수용)
+
+### 7-1. 한 줄 요약
+**수불장은 원장이 아니라 "확정 스냅샷(기초) + 그 기간 전표(이동)"의 파생 뷰다.**
+저장하지 않고 **매번 계산**한다. 그래서 드리프트가 구조적으로 생길 수 없다.
+
+```
+기말 = 기초(직전 확정 스냅샷) + 입고 − 출고 ± 조정
+       └ nx.stock_snapshot           └ 전표(PU_T_STOCK_MAINT 등) 를 tag 로 분류
+```
+
+### 7-2. 불변식 (모든 재고점 공통 · 어기면 버그)
+```
+기초 + 입고 − 출고 ± 조정 = 기말
+```
+- **전 품목 균일 적용.** 어떤 부품도 특별관리하지 않는다(`CLAUDE.md` §1-8).
+- 화면별 조정(adj) **부호 규약이 다를 수 있다** — 반드시 그 화면 규약으로 검사할 것:
+  - 생산 480 : `기말 = 기초 + 입 − 출 **+** 조정`
+  - 제품 040 : `기말 = 기초 + 입 **−** 조정 − 출`
+  같은 식으로 검사하면 오탐 난다(실제로 SAL 19건 오탐 겪음).
+
+### 7-3. tag 분류 = 레거시 정본 (`w_pu_stock_160.srw`)
+자재(MAT) 기준. **이 분류가 수불장의 축이다.**
+
+| 구분 | tag | 비고 |
+|---|---|---|
+| **입고** | `3, 9, C, G, H, S, P, R` | 검사 미통과분 제외: `NOT(insp_flag IN('S','F') AND insp_proc_flag<>'1')` |
+| **수입 입고** | `PU_T_STOCK_MAINT_C` `DIVISION<>'Q'` | 금액 = **`TAXPAYERS`(과세표준, 이미 원화)** — `MAINT_AMT×환율` 아님 |
+| **수출 출고** | `PU_T_STOCK_MAINT_C` `DIVISION='Q'` | |
+| **출고** | `1, 4, 5, 6, 8, A, B, J` | |
+| **생산창고 반납** | `T` | 부호 반전 |
+| **재고조정** | `2` | |
+| 제외 | `ITEM_SGROUP >= '990'`(소모품) · `PR_M_ITEM` 미등록 | 레거시 `WHERE`/`JOIN` 동일 |
+
+★ 우리가 예전에 쓰던 "매입 = tag `9,S` 만" 은 **틀린 축약**이었다. 위 8개가 정본.
+
+### 7-4. 단가 = 총평균법 (대표 결정 2026-08-27)
+```
+STOCK_COST = FLOOR(STOCK_AMT / STOCK_QTY)          ← 월 1회 확정
+STOCK_QTY  = BASIC_QTY + INPUT_QTY - OUTPUT_QTY + TRANS_QTY
+STOCK_AMT  = BASIC_AMT + INPUT_AMT - OUTPUT_AMT + TRANS_AMT
+```
+- **기간 = 역월 1개월.** 이동평균은 **은퇴**.
+- **일마감** = 수량만 확정, 금액은 **직전 월확정 단가로 평가**(총평균법 표준).
+- 구현 = `routers/close.py` `_ta_build()` / `_snap_mat_month()` / `_snap_mat_day()`.
+- 검증기 = `_migration/legacy_total_avg_verify.py` (읽기전용).
+
+### 7-5. 재고점(STOCK_POINT)별 소스 — 지금 무엇을 읽어야 하나
+
+| 재고점 | 수불장 소스 | 상태 |
+|---|---|---|
+| **MAT** 자재 | 전표 `PU_T_STOCK_MAINT`(+`_C`) + 확정 스냅샷 기초 | ✅ 총평균 구현·검증 |
+| **PRD** 생산 | `live_api._prodstock` (레거시 480 재현) | ✅ 스냅샷 확정 diff0 |
+| **SAL** 완성 | `live_api.salesstock` (레거시 040 재현) | ✅ 스냅샷 확정 diff0 |
+| **RDY** 준비 · **SAG** 사급 | `nx.stock_ledger` (유일 소스) | 스냅샷 미구현 |
+
+★ `nx.stock_ledger` 실측(2026-08-27): MAT 172,333 · RDY 19 · **PRD 1 · ASY 7 · NULL 10**.
+→ **PRD/ASY 는 사실상 비어 있다.** 원장으로 생산·완성 수불장을 만들 수 없다(그래서 위 recipe 를 쓴다).
+
+### 7-6. 지금 화면이 읽는 것 (전환 예정)
+`live_api.matledger`(자재수불장)는 아직 **레거시 임시테이블**을 읽는다:
+- 월 = `PU_T_MONTH_STOCK_WH`
+- 일 = `PU_T_MONTH_STOCK_WH_DAILY` ← ★**레거시 `w_pu_stock_260` 이 조회할 때마다 `TRUNCATE` 하는 임시테이블**
+
+즉 **일자 수불장은 "누가 언제 조회했느냐"에 따라 내용이 바뀐다.** 이게 C7(수불장을 확정 스냅샷 기반으로 전환)의 이유다.
+→ **신규 수불장·재고 화면은 이 두 테이블을 새로 참조하지 말 것.** `nx.stock_snapshot` + 전표로 파생하라.
+
+### 7-7. 새 수불장/재고 화면을 만들 때 지켜야 할 것
+1. **기초는 반드시 확정 스냅샷에서** — `nx.stock_snapshot(domain, ptype, period, item_code, loc)`.
+   레거시 잔량테이블(`PU_T_MAT_STOCK` 등) 직복사 금지(드리프트 있음).
+2. **이중계상 금지** — 기초는 확정 시점, 델타는 **그 다음날부터**. 날짜필터로 분리한다.
+3. **품목키는 항상 `UPPER(LTRIM(RTRIM()))`** — 레거시는 CI 콜레이션이라 `동Body`/`동BODY` 를 한 품목으로 합친다. 파이썬 dict 는 안 합쳐서 수량이 갈라진다(같은 사고 3회).
+4. **잔량 0 은 스냅샷에 적재하지 않는다**(대표 확정). 음수는 실재고이므로 유지.
+5. **쓰기 전 잠금 확인** — `common._assert_open(cur, ymd, "MAT", "자재출고")`.
+6. **음수 차단** — `common._neg_stock_msg()`. 경고 아니라 **차단**(대표 확정).
+7. **마감된 기간의 전표는 바꾸지 않는다.** 레거시는 마감 후에도 원장이 바뀌어 확정값과 어긋났다
+   (2606 마감 1시간 뒤 수정된 전표 실측). 소급은 **당월 소급조정**으로.
+
+### 7-8. 컷오버 후 최종형
+`nx.stock_ledger` 가 실시간 정본이 되면 수불장은 **기초 스냅샷 + 원장 델타**로 통일된다(§1 영구재고 모델).
+그때 `mat_stock_daily`·레거시 임시테이블·재현 recipe 는 모두 은퇴한다. **지금 만드는 화면도 그 형태를 전제로 짜라.**
