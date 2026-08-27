@@ -111,3 +111,32 @@ backflush는 **role(nx.bom)만 읽고 sgroup을 안 읽음**(backflush.py sgroup
   - GATE: qty=1e6 차단(가용180<소요2800)·행0, qty=10 통과 ✓
 - **차단 헬퍼 정렬 후속**: `_neg_stock_msg`(옆 세션 feat/close-mgmt·main 미병합) 병합 시 게이트를 그걸로 교체. 현재는 `_mat_avail` 직접 비교(동일 정본·§2 부합).
 - **남음(2단계)**: procbc_save 완성공정 훅(수량+ post / 수량− reverse). 생산실적 핵심경로라 결선 전 재확인.
+
+## 12. ★최종 설계 확정 (2026-08-27, 대표 결정) — 생산창고 2단계 모델
+
+대표 결정: **"용접봉은 자재에서 생산창고로 이동시키고, 생산창고 용접봉재고를 차감하는 방식."** + **"자재출고에서 작업자가 용접봉을 불출."**
+
+```
+① 자재출고(matissue) [기존 기능 그대로]: 작업자가 용접봉을 자재→생산창고(Q1000) 불출
+      → stock_ledger MV +Q1000 (prodwrite.py matissue_save, 파트별 재고=SUM(stock_ledger·gpc))
+② 생산실적 backflush [신규 결선]: 생산창고 용접봉 −차감 (tag W @ Q1000)
+③ 게이트: 생산창고(Q1000) 재고 = SUM(stock_ledger MAT·gpc) < 소요 → 실적거부 (★실시간 원장sum)
+```
+
+### 핵심 이점
+- **실시간 게이트 문제 해결**: 생산창고 재고=stock_ledger 실시간 sum(스냅샷 아님). 아까 "mat_stock_daily 마감스냅샷이라 실시간 불가" 문제가 이 모델로 사라짐.
+- **§16 부합**: §16이 금지한 건 "일반 자재 MAT(레거시 미동기)" 가용을 stock_ledger로 보는 것. Q1000 생산창고는 **웹전용**(matissue 입·backflush 출)이라 stock_ledger가 정확. matissue도 이미 이 방식(prodwrite.py:444).
+- **기존 기능 재사용**: 자재출고(matissue)가 이미 창고간 이동(MV)이라 용접봉 Q1000 불출에 그대로 사용. 신규는 생산실적 −차감 결선뿐.
+
+### 구현
+- **`backflush.py:_weld_consume(cro,nx,item,signed_qty,wo,user)`** (신규, `_weld_backflush`서 정비): 부호수량(⑦ 병렬)·게이트=생산창고 재고(`_weld_stock_at`=stock_ledger sum)·−W posting·로그없음(스캔별). shortage=⑦ _short 형식(procbc_save가 자재부족과 합쳐 표시).
+- **`_weld_stock_at(cur, base_rac, gpc)`**: 생산창고 실시간 재고 = SUM(stock_ledger MAT·gpc).
+- **procbc_save 결선**(2단계, is_last 블록): ⑦ 자재게이트 옆에 용접봉 게이트 합류(같은 _short/메시지) + −Q1000 posting(부호수량).
+- **매입입고→자재→불출→생산소비** 전 구간 stock_ledger 통일(장기), 병행운영 중엔 용접봉만 이 경로.
+
+### 12-1. _weld_consume 검증 (2026-08-27, 전부 롤백)
+대상 5211A21789C(용접봉 RAC30599303 @Q1000). 시드+100(불출 시뮬)→소비→취소→게이트:
+- 소비 qty=100 → 생산창고 100→99.72, 생성행 tag W·−0.28·Q1000 ✓
+- 취소 qty=−100 → 99.72→100 복원 ✓
+- 게이트 qty=1e6 → ok=False "용접봉 BCUP-1S 2.4ØX700(1% 원봉)(RAC30599303) 필요2800/재고100→부족2700", 행0 ✓
+- ★cro=nx(같은 커넥션) 필수: 게이트가 자기 쓰는 stock_ledger를 읽어 별도커넥션이면 미커밋행 SUM 교착. procbc_save 결선도 cro=nx.

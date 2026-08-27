@@ -193,73 +193,64 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
             "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
 
 
-def _weld_backflush(cro, nx, item, prod_qty, wo, mode, user, ref_key):
-    """★용접봉 전용 백플러시(−W만) — 생산실적(procbc_save 완성공정) 결선용. 2026-08-27.
-       배경: procbc_save는 자재(tag4)·생산품(SA_T_STOCK_MAINT)을 레거시로 처리하되 용접봉(Q1000/Q2000)은 통째 제외 →
-             용접봉만 nx.stock_ledger(tag W)로 소비/복원. 자재·생산품은 여기서 손대지 않음(이중차감 없음).
-       규칙(STOCK_CLOSE_HANDOFF §2): 게이트=_mat_avail(mat_stock_daily)·음수차단, 쓰기=stock_ledger. 용접봉도 예외 없음.
-       용접봉 소요=_backflush_bom weld(사내한정 _sanae 내장: 외주는 사급출고tag5로 이미−). base RAC 집계, INNER_PROD=1만.
-       멱등=ref_key(용접봉 전용 네임스페이스로 호출측이 전달, 예 'WELD:BC:{barcode}:{proc}'). mode=post/reverse.
-       ※_neg_stock_msg(옆 세션 feat/close-mgmt 미병합)로 게이트 정렬은 병합 후 후속."""
+def _weld_stock_at(cur, base_rac, gpc):
+    """생산창고(투입공정 gpc, 예 Q1000) 용접봉 현재고 = SUM(stock_ledger MAT · 그 공정).
+       ★실시간 원장sum(스냅샷 아님). Q1000은 웹전용(matissue 입 · backflush 출)이라 stock_ledger가 정확(§16 예외)."""
+    cur.execute("""SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger
+        WHERE STOCK_POINT='MAT' AND MAT_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""", base_rac, gpc)
+    return float(cur.fetchone()[0] or 0)
+
+
+def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
+    """★용접봉 소비/복원 (부호수량, ⑦ 병렬) — 생산실적(procbc_save 완성공정) 결선용. 2026-08-27.
+       모델(대표 확정): 자재출고(matissue)로 작업자가 용접봉을 자재→생산창고(Q1000) 불출(+Q1000) →
+                        생산실적 시 생산창고 용접봉 −차감(−Q1000, tag W). 자재/생산품은 레거시가 처리(이중차감 없음).
+       signed_qty>0=소비(−Q1000), <0=취소(+Q1000 복원). 스캔별 실적이라 멱등/로그 없음(⑦와 동일=부호수량 누적).
+       ★게이트(소비=signed_qty>0만): 생산창고(Q1000=투입공정) 재고 < 소요 → shortage(⑦ _short 형식으로 반환,
+         procbc_save가 자재부족과 합쳐 한 메시지로 표시). 재고=_weld_stock_at(실시간 stock_ledger sum).
+       용접봉 소요=_backflush_bom weld(사내한정 _sanae 내장). base RAC 집계, INNER_PROD=1 사내만.
+       반환 {ok, shortage:[{mat,part,need,have,lack}]?, weld_kinds, weld_consumed}."""
     nc = nx.cursor()
-    if not item or prod_qty <= 0:
-        return {"ok": False, "detail": "item·수량(>0) 필수"}
+    if not item or signed_qty == 0:
+        return {"ok": True, "weld_kinds": 0}
     if not _is_inner_prod(cro, item):
-        return {"ok": True, "skipped": "사내생산(INNER_PROD=1) 아님 — 용접봉 소비 없음", "weld_kinds": 0}
-    _comps, weld = _backflush_bom(nx, item, cro)   # 용접봉만 사용(comps=자재는 레거시 처리라 무시)
+        return {"ok": True, "weld_kinds": 0}   # 사내생산 아님 = 용접봉 소비 없음(스킵)
+    _comps, weld = _backflush_bom(nx, item, cro)   # 용접봉만 사용(자재/생산품은 레거시)
     if not weld:
-        return {"ok": True, "weld_kinds": 0, "weld_consumed": 0.0, "skipped": "용접봉 없는 품목"}
+        return {"ok": True, "weld_kinds": 0, "weld_consumed": 0.0}
     import datetime as _d
     ymd6 = _d.datetime.now().strftime('%y%m%d')
-    nc.execute("SELECT bf_id FROM nx.backflush_log WHERE ref_key=? AND state='posted'", ref_key)
-    ex = nc.fetchone()
-    if mode == "post" and ex:
-        return {"ok": False, "detail": f"이미 용접봉 백플러시됨(중복방지) — ref {ref_key}"}
-    if mode == "reverse" and not ex:
-        return {"ok": True, "skipped": "되돌릴 용접봉 백플러시 없음", "weld_kinds": 0}
-    f = -1.0 if mode == "reverse" else 1.0
-    # ── 게이트(post만): 용접봉 부족이면 실적 차단(음수 원천차단, mat_stock_daily 추적품만) ──
-    if mode == "post":
+    # ── 게이트(소비 signed_qty>0만): 생산창고 용접봉 재고 부족이면 실적거부(음수 원천차단) ──
+    if do_gate and signed_qty > 0:
         gc = cro.cursor(); short = []
         for br, wq in weld.items():
-            wneed = wq * prod_qty
+            wneed = wq * signed_qty
             if wneed <= 0:
                 continue
-            gc.execute("SELECT COUNT(*) FROM nx.mat_stock_daily WHERE UPPER(mat_code)=?", str(br).strip().upper())
-            if (gc.fetchone()[0] or 0) > 0:   # _tracked: 추적 용접봉만 게이트(미추적은 오차단 방지 통과)
-                av = _mat_avail(gc, br)
-                if wneed > av + 1e-6:
-                    # ★사용자에게 왜 실적이 막혔는지 명확히: 용접봉 이름(코드→이름, §3) + 가용/필요
-                    gc.execute("SELECT TOP 1 ISNULL(item_name,'') FROM nx.item WHERE item_code=?", br)
-                    _r = gc.fetchone(); _nm = (str(_r[0]).strip() if _r and _r[0] else br)
-                    short.append(f"용접봉 '{_nm}'({br}) 재고부족 — 가용 {av:g} < 필요 {wneed:g}")
+            gpc = _weld_proc_code(nx, br)                 # 투입공정(Q1000/Q2000)
+            have = _weld_stock_at(gc, br, gpc)            # 생산창고 실시간 재고
+            if wneed > have + 1e-6:
+                gc.execute("SELECT TOP 1 ISNULL(item_name,'') FROM nx.item WHERE item_code=?", br)
+                _r = gc.fetchone(); _nm = (str(_r[0]).strip() if _r and _r[0] else br)
+                short.append({"mat": f"용접봉 {_nm}({br})", "part": gpc,
+                              "need": round(wneed, 4), "have": round(have, 4), "lack": round(wneed - have, 4)})
         if short:
-            return {"ok": False, "shortage": True,
-                    "detail": "용접봉 재고부족으로 생산실적을 잡을 수 없습니다. " + " / ".join(short[:8])}
-    # ── posting: 용접봉 −W(tag W, MAT점, base RAC, 투입공정) / reverse=+W ──
+            return {"ok": False, "shortage": short}
+    # ── 소비/복원: dq = −(원단위×부호수량) → tag W @ 투입공정 (소비=−, 취소=+) ──
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
         return int(nc.fetchone()[0] or 1)
-    seq_from = _seq(); weld_consumed = 0.0
+    weld_consumed = 0.0
     for br, wq in weld.items():
-        wneed = wq * prod_qty
-        if abs(wneed) < 1e-9:
+        dq = -(wq * signed_qty)
+        if abs(dq) < 1e-9:
             continue
         nc.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAT_CODE,
               GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
             VALUES('MAT',?,?,'W','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
-            ymd6, _seq(), br, _weld_proc_code(nx, br), (wo or None), -wneed * f, '용접봉 생산소비(공정종속)', user)
-        weld_consumed += wneed
-    nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
-    seq_to = int(nc.fetchone()[0] or 0)
-    if mode == "post":
-        nc.execute("""INSERT INTO nx.backflush_log(prod_ymd,work_order,item_code,gpc,prod_qty,ref_key,state,maint_ymd,seq_from,seq_to,ins_user)
-            VALUES(?,?,?,NULL,?,?, 'posted', ?,?,?,?)""",
-            ymd6, (wo or None), item, prod_qty, ref_key, ymd6, seq_from, seq_to, user)
-    else:
-        nc.execute("UPDATE nx.backflush_log SET state='reversed' WHERE bf_id=?", ex[0])
-    return {"ok": True, "mode": mode, "item": item, "weld_kinds": len(weld),
-            "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
+            ymd6, _seq(), br, _weld_proc_code(nx, br), (wo or None), dq, '용접봉 생산소비(공정종속)', user)
+        weld_consumed += wq * signed_qty
+    return {"ok": True, "item": item, "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4)}
 
 
 @router.post("/api/backflush/post")
