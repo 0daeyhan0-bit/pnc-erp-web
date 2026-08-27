@@ -17,7 +17,15 @@ SCREEN.close=(c)=>{
   const fmtYmd=y=>{y=(''+(y||''));return y.length>=6?('20'+y.slice(0,2)+'/'+y.slice(2,4)+'/'+y.slice(4,6)):'-';};
   const ymIn=v=>(''+(v||'')).slice(2).replace('-','');
   const ymdIn=v=>(''+(v||'')).slice(2).replace(/-/g,'');
-  const who=()=>{try{return (PERM&&PERM.user)||'web';}catch(e){return 'web';}};
+  const who=()=>{try{return (PERM&&PERM.userId)||'web';}catch(e){return 'web';}};   // ★PERM 필드명은 userId — 'user' 로 읽으면 항상 'web' 이 되어 백엔드 권한게이트에 차단됨(2026-08-27 수정)
+  // ★C5 권한 게이트 — 마감/해제는 회계 확정/되돌리기라 명시 권한자만. 백엔드가 최종 판정(403)하고, 여기선 오조작 방지용 UI 차단.
+  // ★백엔드 _assert_can_close 와 동일 규칙(deny by default). PERM.isAdmin() 은 쓰지 않는다 —
+  //   core.js currentUser() 가 미등록 사용자를 '시스템관리자'로 기본 반환(fail-open)해서 게이트가 열림.
+  const canClose=()=>{try{
+    const u=(typeof getUsers==='function')?getUsers().find(x=>x.id===PERM.userId):null;
+    if(u&&(u.roles||[]).includes('시스템관리자'))return true;
+    const pm=(PERM.perms[PERM.userId]||{})['close']; return !!(pm&&pm.edit);
+  }catch(e){return false;}};
   const call=async(path,body)=>{
     if(busy)return null; busy=true;
     try{
@@ -56,9 +64,10 @@ SCREEN.close=(c)=>{
     h+='<div class="toolbar"><label class="tl">영역</label><select class="inp" id="dom">'
      + DOM.map(d=>'<option value="'+d[0]+'"'+(dom===d[0]?' selected':'')+'>'+d[1]+'</option>').join('')+'</select>';
     h+='<label class="tl" style="margin-left:8px">일마감 대상일</label><input type="date" class="inp" id="dday" value="'+dday+'" style="min-width:135px">';
-    h+='<button class="btn" id="runday">일마감 실행</button><button class="btn ghost" id="canday">일마감 해제</button><span style="width:14px"></span>';
+    h+=canClose()?'<button class="btn" id="runday">일마감 실행</button><button class="btn ghost" id="canday">일마감 해제</button>':'<span style="color:#c0392b;font-size:12px">🔒 마감 권한 없음</span>';
+    h+='<span style="width:14px"></span>';
     h+='<label class="tl">월마감 대상월</label><input type="month" class="inp" id="dmon" value="'+dmon+'" style="min-width:120px">';
-    h+='<button class="btn" id="runmon">월마감 실행</button><button class="btn ghost" id="canmon">월마감 해제</button></div>';
+    h+=(canClose()?'<button class="btn" id="runmon">월마감 실행</button><button class="btn ghost" id="canmon">월마감 해제</button>':'')+'</div>';
     h+='<div class="page-sub" style="color:var(--muted);margin:4px 0 10px">마감은 <b>순서대로</b>만 됩니다(직전 기간이 마감돼 있어야 함). 해제는 <b>최근 기간부터</b> 역순 — 후속 기간이 마감돼 있으면 거부됩니다.'
      + (st.mat_daily_max?(' · 자재 일별잔량 최신 <b>'+esc(fmtYmd(st.mat_daily_max))+'</b> (일마감은 이 데이터가 있는 날만 가능)'):'')+'</div>';
     h+='<div class="page-sub" style="font-weight:700;margin:16px 0 6px">일자별 마감 캘린더 <span style="font-weight:400;color:var(--muted)">— '+esc(domNm)+'</span></div>';
@@ -74,10 +83,10 @@ SCREEN.close=(c)=>{
     g('#dday').onchange=e=>{dday=e.target.value;};
     g('#dmon').onchange=e=>{dmon=e.target.value;};
     g('#calm').onchange=e=>{calm=e.target.value;load();};
-    g('#runday').onclick=()=>call('/api/close/run',{domain:dom,ptype:'D',period:ymdIn(dday),user:who()});
-    g('#canday').onclick=()=>{if(confirm('일마감을 해제합니다. 확정 스냅샷도 함께 제거됩니다.'))call('/api/close/cancel',{domain:dom,ptype:'D',period:ymdIn(dday),user:who()});};
-    g('#runmon').onclick=()=>call('/api/close/run',{domain:dom,ptype:'M',period:ymIn(dmon),user:who()});
-    g('#canmon').onclick=()=>{if(confirm('월마감을 해제합니다. 확정 스냅샷도 함께 제거됩니다.'))call('/api/close/cancel',{domain:dom,ptype:'M',period:ymIn(dmon),user:who()});};
+    if(g('#runday'))g('#runday').onclick=()=>call('/api/close/run',{domain:dom,ptype:'D',period:ymdIn(dday),user:who()});
+    if(g('#canday'))g('#canday').onclick=()=>{if(confirm('일마감을 해제합니다. 확정 스냅샷도 함께 제거됩니다.'))call('/api/close/cancel',{domain:dom,ptype:'D',period:ymdIn(dday),user:who()});};
+    if(g('#runmon'))g('#runmon').onclick=()=>call('/api/close/run',{domain:dom,ptype:'M',period:ymIn(dmon),user:who()});
+    if(g('#canmon'))g('#canmon').onclick=()=>{if(confirm('월마감을 해제합니다. 확정 스냅샷도 함께 제거됩니다.'))call('/api/close/cancel',{domain:dom,ptype:'M',period:ymIn(dmon),user:who()});};
     attachResizers(c);
   };
   const renderCal=()=>{

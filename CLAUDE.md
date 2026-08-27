@@ -29,7 +29,7 @@
 |---|---|---|
 | 기존 엔드포인트 수정 | `backend/routers/<도메인>.py` 하나 | ❌ |
 | 기존 도메인에 엔드포인트 추가 | `backend/routers/<도메인>.py`에 `@router.get(...)` | ❌ |
-| 새 도메인 추가 | `backend/routers/새파일.py` 생성 | ⚠️ app.py 끝에 2줄 append |
+| 새 도메인 추가 | `backend/routers/새파일.py` 생성 | ⚠️ app.py **include_router 블록**에 2줄 (★끝 아님) |
 | 공용 헬퍼 | `backend/common.py` (끝에 append, 꼭 필요할 때만) | ⚠️ |
 | 프론트 화면 | `js/screens.<도메인>.js` | — |
 
@@ -38,7 +38,10 @@
   → 만질 땐 **읽고 → 끝에 append → 즉시 저장**. 오래 열어두지 말 것(그 사이 옆 세션이 저장하면 덮어씀).
 - **공유헬퍼는 웬만하면 도메인 로컬 `def`로.** 여러 도메인이 진짜로 함께 쓸 때만 `common.py`에 올림.
 - **엔드포인트가 어느 라우터에 있는지 찾기:** `grep "/api/경로" backend/routers/`
-- 새 도메인 추가 시 app.py 끝(include 목록)에:
+- 새 도메인 추가 시 app.py **기존 `include_router` 블록 안**에 (★"파일 끝에 append" 아님):
+  > **왜 중요한가(2026-08-27 실제 사고)**: app.py 끝에는 `app.mount("/", StaticFiles(...))` 가 있다.
+  > 마운트 뒤에 등록한 라우터는 `/openapi.json` 에는 보이지만 **호출하면 StaticFiles 가 먼저 잡아 404** 가 난다.
+  > 반드시 **`app.mount` 보다 위**(기존 include 목록 옆)에 넣을 것.
   ```python
   from routers import 새파일 as _r_새파일
   app.include_router(_r_새파일.router)

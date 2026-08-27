@@ -378,6 +378,16 @@ def stockclose_run(payload: dict = Body(...)):
     user = (str(payload.get("user", "")).strip() or "web")[:30]
     if len(ym) != 4 or point not in ("MAT", "PRD", "ASY", "RDY", "SAG"):
         raise HTTPException(400, "ym=YYMM(4자)·point=MAT/PRD/ASY/RDY/SAG 필수")
+    # ★C4(2026-08-27) 사용중단 — 마감관리(/api/close/*)로 일원화.
+    #   MAT/PRD/ASY 는 새 마감이 정본이며, 이 API 는 (a)MAT 을 stock_ledger 로 계산해 45.88% 부정확
+    #   (b)nx.stock_close 를 세워 새 잠금(nx.period_close)과 이중 잠금원이 된다 → 차단.
+    #   RDY/SAG 는 아직 대체 스냅샷이 없어 스냅샷 산출만 남겨두되 잠금(lock)은 금지한다.
+    if point in ("MAT", "PRD", "ASY"):
+        raise HTTPException(410, f"사용중단된 API 입니다({point}) — 마감관리 /api/close/run 을 사용하세요"
+                                 f" (domain MAT=자재 · PRD=생산 · SAL=영업).")
+    if lock:
+        raise HTTPException(400, "잠금(lock)은 마감관리 /api/close/run 으로 일원화되었습니다"
+                                 " — 여기서는 스냅샷 산출만 가능합니다.")
     y01, y99 = ym + "01", ym + "99"
     cn = _nx(); cur = cn.cursor()
     try:

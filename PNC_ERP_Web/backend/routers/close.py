@@ -21,7 +21,7 @@ from common import _nx, _nx_tx, _conn
 router = APIRouter()
 
 DOMAINS = {"MAT": "자재", "PRD": "생산", "SAL": "영업"}
-SNAP_READY = ("MAT",)      # 스냅샷 확정이 가능한 도메인(1단계). 그 외는 잠금만.
+SNAP_READY = ("MAT", "PRD", "SAL")   # 스냅샷 확정 가능 도메인(PRD·SAL = 2026-08-27 추가, C2)
 
 
 def _norm(domain, ptype, period):
@@ -259,6 +259,105 @@ def _snap_mat(cur, ptype, period):
     return n, f"{target}({src}·기초 {base_ymd})"
 
 
+
+
+# ===================== 마감/해제 권한 게이트 — C5 (2026-08-27) =====================
+# 마감·해제는 회계 확정/되돌리기다 → **명시 권한자만**(deny by default).
+#   ① 시스템관리자 role(nx.web_user 의 roles) → 허용
+#   ② nx.user_perm 에 (user, sid='close', can_edit=1) 행이 있으면 허용
+#   ③ 그 외 전부 거부(403)
+# ★한계(정직히 기록): 이 앱은 세션 인증이 없고 사용자 식별은 프론트 localStorage 다.
+#   즉 payload 의 user 는 위조 가능하며, 이 게이트는 **오조작 방지**지 보안 인증이 아니다.
+#   진짜 인증은 로그인/세션 도입 시 함께 해결해야 한다(별도 과제).
+PERM_SID = "close"
+
+def _assert_can_close(cur, user, what="마감"):
+    u = str(user or "").strip()
+    if not u:
+        raise HTTPException(403, f"{what} 권한을 확인할 수 없습니다 — 사용자 정보가 없습니다.")
+    # ① 시스템관리자
+    try:
+        cur.execute("SELECT udata FROM nx.web_user WHERE user_id='__ALL__'")
+        r = cur.fetchone()
+        if r and r[0]:
+            import json as _json
+            for x in (_json.loads(r[0]) or []):
+                if str(x.get("id", "")).strip() == u and "시스템관리자" in (x.get("roles") or []):
+                    return "시스템관리자"
+    except Exception:
+        pass          # 계정 테이블이 아직 없으면 ②로 판정(권한 없으면 어차피 거부)
+    # ② 개별 부여 권한
+    try:
+        cur.execute("""SELECT can_edit FROM nx.user_perm WHERE user_id=? AND sid=?""", u, PERM_SID)
+        r = cur.fetchone()
+        if r and int(r[0] or 0) == 1:
+            return "개별권한"
+    except Exception:
+        pass
+    raise HTTPException(403, f"{what} 권한이 없습니다({u}) — 시스템관리자 또는 '마감관리' 수정권한이 필요합니다.")
+
+
+# ===================== 생산(PRD) · 영업(SAL) 스냅샷 — C2 (2026-08-27) =====================
+# ★소스 선택 근거: nx.stock_ledger 는 PRD/ASY 가 0행(§4-C 실측) → 원장으로는 스냅샷을 만들 수 없다.
+#   대신 게이팅 캐논 §4-C 표가 정본으로 지정한 **레거시 재현 recipe** 를 그대로 쓴다.
+#     · 생산 = live_api._prodstock  (레거시 w_pr_stock_480 · 2026-08-19 diff0 검증)
+#     · 완성 = live_api.salesstock  (레거시 w_pr_stock_040 · 2026-08-19 diff0 검증)
+#   즉 자재와 동일한 원칙 — "확정 스냅샷은 검증된 정본 recipe 를 그 시점으로 굳힌다".
+# ★생산은 2축(품목 × 라인). 가공창고(P0001)=loc '' / 용접은 라인코드를 loc 에 담는다.
+
+def _snap_write(cur, domain, ptype, period, rows):
+    """스냅샷 멱등 적재. rows=[(item, loc, qty, amt, cost, inq, outq)]. 잔량 0 제외(대표 확정)."""
+    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?",
+                domain, ptype, period)
+    n = 0
+    for item, loc, qty, amt, cost, inq, outq in rows:
+        item = str(item or "").strip().upper()
+        if not item or abs(qty) < 1e-9:      # 잔량 0 제외 — MAT 과 동일 규칙
+            continue
+        cur.execute("""INSERT INTO nx.stock_snapshot
+                         (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,GETDATE())""",
+                    domain, ptype, period, item[:50], str(loc or "")[:20],
+                    round(qty, 4), round(amt, 4), round(cost, 4), round(inq, 4), round(outq, 4))
+        n += 1
+    return n
+
+
+def _snap_prd(cur, ptype, period):
+    """생산 스냅샷 = 생산재고조회(480) recipe 를 target 시점으로 확정. 반환 (행수, 기준일)."""
+    from live_api import _prodstock
+    target = period if ptype == "D" else _month_end(period)
+    rows = _prodstock(target[:4], frm=target[:4] + "01", to=target)
+    out = []
+    for r in rows:
+        # stage=GAGONG/WELD · loc=용접 라인코드(가공은 '')
+        loc = ("" if str(r.get("stage")) == "GAGONG" else str(r.get("loc") or ""))
+        qty = float(r.get("qty") or 0)
+        cost = float(r.get("cost") or 0)
+        out.append((r.get("cd"), loc, qty, qty * cost, cost,
+                    float(r.get("inq") or 0), float(r.get("outq") or 0)))
+    n = _snap_write(cur, "PRD", ptype, period, out)
+    return n, f"{target}(생산재고조회 480 recipe)"
+
+
+def _snap_sal(cur, ptype, period):
+    """완성/제품 스냅샷 = 제품재고조회(040) recipe 를 target 시점으로 확정. 반환 (행수, 기준일)."""
+    from live_api import salesstock
+    target = period if ptype == "D" else _month_end(period)
+    res = salesstock(dfrom=target[:4] + "01", dto=target, source="live", zero="1")
+    out = []
+    for r in (res.get("rows") or []):
+        qty = float(r.get("qty") or 0)
+        cost = float(r.get("cost") or 0)
+        out.append((r.get("cd") or r.get("mat"), "", qty, qty * cost, cost,
+                    float(r.get("inq") or 0), float(r.get("outq") or 0)))
+    n = _snap_write(cur, "SAL", ptype, period, out)
+    return n, f"{target}(제품재고조회 040 recipe)"
+
+
+SNAPPERS = {"MAT": _snap_mat, "PRD": _snap_prd, "SAL": _snap_sal}
+
+
 # ===================== 마감 실행 / 해제 =====================
 @router.post("/api/close/run")
 def close_run(payload: dict = Body(...)):
@@ -269,6 +368,7 @@ def close_run(payload: dict = Body(...)):
     # ★원자성: 스냅샷 확정과 잠금은 한 트랜잭션(부분실패 시 스냅샷만 남는 사고 방지 — 게이트C에서 실제 발생)
     cn = _nx_tx(); cur = cn.cursor()
     try:
+        _assert_can_close(cur, user, "마감")
         if _is_closed(cur, d, t, p):
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 이미 마감되었습니다.")
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd'), FORMAT(GETDATE(),'yyMM')")
@@ -287,7 +387,7 @@ def close_run(payload: dict = Body(...)):
                     raise HTTPException(409, f"직전 기간({prev})이 마감되지 않았습니다 — 마감은 순서대로 해야 합니다(최종 마감 {last}).")
         n, asof = (0, None)
         if d in SNAP_READY:
-            n, asof = _snap_mat(cur, t, p)
+            n, asof = SNAPPERS[d](cur, t, p)
         note = ((f"스냅샷 {n}품목(기준 {asof})" + ("" if str(asof)==str(p if t=="D" else "") or (t=="D" and str(asof)==str(p)) else " ※이월"))
                 if d in SNAP_READY else "잠금만(스냅샷 2단계)")
         # ★UPSERT — 해제 후 재마감이 가능해야 한다(PK=domain+ptype+period, 기존행은 flag=0으로 남아있음)
@@ -312,6 +412,7 @@ def close_cancel(payload: dict = Body(...)):
     user = str(payload.get("user", "") or "web").strip()
     cn = _nx_tx(); cur = cn.cursor()      # ★원자성: 스냅샷 제거 + 잠금해제 동시
     try:
+        _assert_can_close(cur, user, "마감 해제")
         if not _is_closed(cur, d, t, p):
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 마감 상태가 아닙니다.")
         cur.execute("""SELECT TOP 1 period FROM nx.period_close
