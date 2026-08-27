@@ -3,7 +3,7 @@
    app.py에서 분리. 공유헬퍼는 common.py."""
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open
 
 router = APIRouter()
 
@@ -182,6 +182,8 @@ def setstock_receive(payload: dict = Body(...)):
         raise HTTPException(400, "SET바코드가 필요합니다.")
     cn = _nx(); cur = cn.cursor()
     try:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
+        _assert_open(cur, cur.fetchone()[0], "MAT", "세트입고")   # ★마감잠금(입고일=오늘)
         cur.execute("""SELECT h.sheet_no, h.item_code, ISNULL(h.deliver_qty,h.input_req_qty) qty, h.in_cust_code,
               ISNULL(h.insp_flag,'0') insp FROM nx.set_input_req h WHERE h.barcode_no=? AND h.status IN ('10','30')""", bc)
         reqs = cur.fetchall()

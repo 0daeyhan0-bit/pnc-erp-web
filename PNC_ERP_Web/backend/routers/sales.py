@@ -5,7 +5,7 @@
 import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open
 
 router = APIRouter()
 
@@ -241,6 +241,7 @@ def sagub_output_save(payload: dict = Body(...)):
         else:
             cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
             ymd = cur.fetchone()[0]
+            _assert_open(cur, ymd, "MAT", "사급출고 요청")   # ★마감잠금
             cur.execute("SELECT ISNULL(MAX(req_seq),0)+1 FROM nx.sagub_output_req WHERE req_ymd=?", ymd)
             seq = int(cur.fetchone()[0])
             cur.execute("""INSERT INTO nx.sagub_output_req(req_ymd,req_seq,cust_code,mat_code,item_code,req_qty,out_qty,finish_flag,remarks,insert_user_id,insert_datetime)
@@ -309,6 +310,7 @@ def sagub_output_confirm(payload: dict = Body(...)):
         cust, mat = row[0], row[1]
         cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         ymd = cur.fetchone()[0]
+        _assert_open(cur, ymd, "MAT", "사급출고 확정")   # ★마감잠금
         free = _is_free_sagub(cur, cust, ymd)
         if free:
             _sagub_move(cur, ymd, cust, mat, outq, wh, "out", f"무상사급출고(req#{rid})")
@@ -851,10 +853,12 @@ def lgsale_save(payload: dict = Body(...)):
                 raise HTTPException(409, "LG송장 발행완료 건은 수정 불가(먼저 송장취소)")
             cur.execute("SELECT sale_ymd FROM nx.sale_dtl WHERE id=?", int(rid))
             sy = str(cur.fetchone()[0] or "").strip()
+            _assert_open(cur, sy, "SAL", "출하실적 수정")   # ★마감잠금(기존 출하일자)
             _lgsale_led_post(cur, int(rid), sy, item, qty, wo)   # ★재고 −ASY 재게시
         else:
             cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6), RIGHT(CONVERT(varchar(14),GETDATE(),120),6)")
             ymd, hms = cur.fetchone()
+            _assert_open(cur, ymd, "SAL", "출하실적 등록")   # ★마감잠금
             cur.execute("""INSERT INTO nx.sale_dtl(work_order,split_work_order,item_code,sale_ymd,sale_hms,sale_qty,songjang_print_flag,remarks,insert_user_id,insert_datetime)
                 OUTPUT INSERTED.id VALUES(?,?,?,?,?,?,'0',?,'web',getdate())""", wo, split, item, ymd, hms, qty, remarks)
             newid = int(cur.fetchone()[0])
@@ -874,6 +878,9 @@ def lgsale_delete(payload: dict = Body(...)):
         raise HTTPException(400, "id 필요")
     cn = _nx_tx(); cur = cn.cursor()
     try:
+        cur.execute("SELECT sale_ymd FROM nx.sale_dtl WHERE id=?", int(rid))
+        _r = cur.fetchone()
+        if _r: _assert_open(cur, str(_r[0] or "").strip(), "SAL", "출하실적 삭제")   # ★마감잠금
         cur.execute("DELETE FROM nx.sale_dtl WHERE id=? AND ISNULL(songjang_print_flag,'0')='0'", int(rid))
         n = cur.rowcount
         if n == 0:
@@ -1324,6 +1331,7 @@ def sale040_confirm(payload: dict = Body(...)):
     if not cells:
         return {"ok": False, "msg": "출하처리할 셀을 선택하세요."}
     cn = _nx_tx(); cur = cn.cursor()
+    _assert_open(cur, ymd, "SAL", "출하처리")   # ★마감잠금
     win = 'w_pr_input_040'
     try:
         cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999) FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)

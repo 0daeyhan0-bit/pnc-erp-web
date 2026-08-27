@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _assert_open)
 
 router = APIRouter()
 
@@ -449,6 +449,7 @@ def ready_commit(payload: dict = Body(...)):
         return {"ok": False, "detail": f"자재부족 — 세트가능 {chk.get('set_able')} < 요청 {qty:g}"}
 
     tx = _nx_tx(); cur = tx.cursor()
+    _assert_open(cur, d6, "MAT", "생산준비 실적등록")   # ★마감잠금
     try:
         WIN = 'w_pr_input_460_new'
         # ★취소 잔량 검증 — 준비재고보다 많이 취소하면 재고가 음수로 내려감(중복취소 방지).
@@ -621,6 +622,8 @@ def ready_register(payload: dict = Body(...)):
     tag = "K2" if mode == "cancel" else "K1"; remk = "키팅취소" if mode == "cancel" else "키팅확인"
     nx = _nx(); cur = nx.cursor()
     try:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
+        _assert_open(cur, cur.fetchone()[0], "MAT", "준비등록")   # ★마감잠금(등록일=오늘)
         n = 0; skipped = 0
         for r in rows:
             ic = str(r.get("item_code", "") or "").strip()

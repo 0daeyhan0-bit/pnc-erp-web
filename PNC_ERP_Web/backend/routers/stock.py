@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail, _assert_open, _lock_msg)
 
 router = APIRouter()
 
@@ -82,7 +82,11 @@ def stock_save(payload: dict = Body(...)):
             qty = float(r.get("qty") or 0)
             if not ymd or len(ymd) < 6:
                 errs.append(f"{idx}행: 일자 필요"); continue
-            if _ym(ymd) in closed:
+            # ★마감잠금 = 공용 게이트(nx.period_close: 일마감+월마감+도메인). 구 nx.stock_close 는 폴백으로 유지.
+            _lm = _lock_msg(cur, ymd, "MAT")
+            if _lm:
+                errs.append(f"{idx}행: {_lm}")
+            elif _ym(ymd) in closed:
                 errs.append(f"{idx}행: 마감월({_ym(ymd)}) 편집 불가")
             if not mat:
                 errs.append(f"{idx}행: 자도번 필요"); continue
