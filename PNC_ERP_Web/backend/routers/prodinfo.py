@@ -594,10 +594,31 @@ async def linecal_upload(file: UploadFile = File(...), anchor_ymd: str = Form(..
     nx = _nx(); cur = nx.cursor()
     try:
         df, dt = res["date_from"].isoformat(), res["date_to"].isoformat()
-        cur.execute("DELETE FROM nx.line_calendar WHERE cal_ymd BETWEEN ? AND ?", df, dt)
+        # ★LG 업로드는 **자기 출처(src='LG')만** 지운다 — 미러 이관분·수기 입력분 보존(2026-08-27).
+        #   종전엔 기간 전체를 DELETE 해서 다른 출처 데이터까지 날아갔다.
+        #   ★단 work_stats(근무유형 코드)가 붙은 행은 지우지 않고 work_code 만 비운다 —
+        #     코드는 근무일 판정의 정본이라 LG 재업로드로 사라지면 안 된다.
+        cur.execute("""UPDATE nx.line_calendar SET work_code=NULL
+                        WHERE cal_ymd BETWEEN ? AND ? AND ISNULL(src,'LG')='LG'
+                          AND ISNULL(work_stats,'')<>''""", df, dt)
+        cur.execute("""DELETE FROM nx.line_calendar
+                        WHERE cal_ymd BETWEEN ? AND ? AND ISNULL(src,'LG')='LG'
+                          AND ISNULL(work_stats,'')=''""", df, dt)
         cur.execute("DELETE FROM nx.line_cal_event WHERE cal_ymd BETWEEN ? AND ?", df, dt)
         for x in res["recs"]:
-            cur.execute("INSERT INTO nx.line_calendar(line_no,cal_ymd,work_code) VALUES(?,?,?)", x["line_no"], x["ymd"].isoformat(), x["code"])
+            # ★UPSERT — work_code(가동시간)만 갱신하고 **work_stats(근무유형 코드)는 보존**한다.
+            #   두 컬럼은 서로 다른 정보다:
+            #     work_code  = LG 라인스케줄 가동시간(8·11·재작업 …)  → 종업시각 참고
+            #     work_stats = 근무유형 코드 1~7                      → ★근무일 판정의 정본
+            #   종전엔 DELETE 후 INSERT 라 LG 를 올릴 때마다 그 (라인,일자)의 work_stats 가
+            #   같이 날아갔다. 그래서 코드2(정상근무)가 찍힌 토요일 특근(C1·CJ 260829·260905)이
+            #   휴무로 바뀌어 당김이 어긋났다 — C1 일자 정합 74% 의 원인(2026-08-27).
+            cur.execute("""UPDATE nx.line_calendar SET work_code=?, src='LG', upd_dt=getdate()
+                            WHERE line_no=? AND cal_ymd=?""",
+                        x["code"], x["line_no"], x["ymd"].isoformat())
+            if cur.rowcount == 0:
+                cur.execute("INSERT INTO nx.line_calendar(line_no,cal_ymd,work_code,src) VALUES(?,?,?,'LG')",
+                            x["line_no"], x["ymd"].isoformat(), x["code"])
         for x in res["events"]:
             cur.execute("INSERT INTO nx.line_cal_event(cal_ymd,event) VALUES(?,?)", x["ymd"].isoformat(), x["event"])
         for x in res["meta"]:
@@ -619,26 +640,136 @@ def linecal_matrix(from_ymd: str = Query(""), weeks: int = Query(4)):
         if len(dd) >= 8:
             start = _dt.date(int(dd[:4]), int(dd[4:6]), int(dd[6:8]))
         else:
-            cur.execute("SELECT MIN(cal_ymd) FROM nx.line_calendar WHERE cal_ymd >= DATEADD(day,-7,CAST(GETDATE() AS DATE))")
-            base = cur.fetchone()[0]
-            base = base if base else _dt.date.today()
-            if not isinstance(base, _dt.date): base = _dt.date.fromisoformat(str(base)[:10])
-            start = base - _dt.timedelta(days=base.weekday())
+            start = _dt.date.today()      # ★기본 시작일 = 당일(2026-08-27 요청). 월요일 보정 안 함.
         weeks = max(1, min(int(weeks or 4), 8))
         dates = [start + _dt.timedelta(days=i) for i in range(weeks * 7)]
         end = dates[-1]
         cur.execute("SELECT CONVERT(varchar(10),cal_ymd,120),event FROM nx.line_cal_event WHERE cal_ymd BETWEEN ? AND ?", start.isoformat(), end.isoformat())
         ev = {}
         for r in cur.fetchall(): ev.setdefault(r[0], []).append(r[1])
+        # ★라인 목록 = LG 메타(8개) + **계획에 쓰이는 전 라인**(2026-08-27).
+        #   종전엔 LG 엑셀에 나온 8개만 보여 CC·CD·RQ·PA·SG 등은 화면에서 아예 안 보였고,
+        #   그래서 수기 입력할 대상조차 확인할 수 없었다.
         cur.execute("SELECT line_no,ISNULL(sort_ord,0),ISNULL(gubun,''),ISNULL(model_no,''),ISNULL(jindo,'') FROM nx.line_cal_meta ORDER BY sort_ord,line_no")
-        metas = [{"line_no": r[0], "gubun": r[2], "model_no": r[3], "jindo": r[4]} for r in cur.fetchall()]
-        cur.execute("SELECT line_no,CONVERT(varchar(10),cal_ymd,120),work_code FROM nx.line_calendar WHERE cal_ymd BETWEEN ? AND ?", start.isoformat(), end.isoformat())
-        cells = {}
-        for r in cur.fetchall(): cells.setdefault(r[0], {})[r[1]] = r[2]
-        for m in metas: m["cells"] = cells.get(m["line_no"], {})
+        metas = [{"line_no": r[0], "gubun": r[2], "model_no": r[3], "jindo": r[4], "lg": 1} for r in cur.fetchall()]
+        _have = {m["line_no"] for m in metas}
+        try:      # 라인마스터(nx.line_no) + 계획에 실제 쓰인 라인
+            cur.execute("""SELECT DISTINCT ln FROM (
+                     SELECT RTRIM(line_no) ln FROM nx.line_no
+                     UNION SELECT RTRIM(ISNULL(LINE_NO,'')) FROM nx.plan_dtl) t
+                    WHERE ln>'' AND ln<>N'공통' ORDER BY ln""")
+            for (ln,) in cur.fetchall():
+                if ln not in _have:
+                    metas.append({"line_no": ln, "gubun": "", "model_no": "", "jindo": "", "lg": 0})
+        except Exception:
+            pass
+        cur.execute("""SELECT line_no,CONVERT(varchar(10),cal_ymd,120),
+                  ISNULL(NULLIF(work_code,''), ISNULL(work_stats,'')), ISNULL(src,'LG')
+                FROM nx.line_calendar WHERE cal_ymd BETWEEN ? AND ?""", start.isoformat(), end.isoformat())
+        cells = {}; srcs = {}
+        for r in cur.fetchall():
+            cells.setdefault(r[0], {})[r[1]] = r[2]
+            srcs.setdefault(r[0], {})[r[1]] = r[3]
+        # ★공통달력 — 라인값이 없으면 이걸 따른다(편성 _wd_of 와 동일 규칙).
+        #   ★정본 = nx.line_calendar 의 line_no='공통' 행. 미러(HR_M_CALENDAR)는 폴백.
+        #   화면 맨 위 '공통' 행으로 보여주고, 값 없는 라인 셀은 공통값을 흐리게 상속표시한다.
+        base = {}
+        try:
+            cur.execute("""SELECT CONVERT(varchar(10),cal_ymd,120), ISNULL(work_stats,'')
+                             FROM nx.line_calendar
+                            WHERE line_no=N'공통' AND ISNULL(work_stats,'')<>''
+                              AND cal_ymd BETWEEN ? AND ?""",
+                        start.isoformat(), end.isoformat())
+            for _d, _w in cur.fetchall():
+                base[str(_d).strip()] = str(_w or '').strip()
+        except Exception:
+            pass
+        if not base:                       # 폴백: 미러 직독(정본이 비었을 때만)
+            try:
+                cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.HR_M_CALENDAR
+                                WHERE work_team='A' AND time_type='A'
+                                  AND calendar_yymd BETWEEN ? AND ?""",
+                            '20' + start.strftime('%y%m%d'), '20' + end.strftime('%y%m%d'))
+                for _y, _w in cur.fetchall():
+                    _y = str(_y).strip()
+                    if len(_y) == 6:
+                        base[f"20{_y[:2]}-{_y[2:4]}-{_y[4:6]}"] = str(_w or '').strip()
+            except Exception:
+                pass
+        for m in metas:
+            m["cells"] = cells.get(m["line_no"], {})
+            m["srcs"] = srcs.get(m["line_no"], {})
+        metas.insert(0, {"line_no": "공통", "gubun": "기준", "model_no": "", "jindo": "",
+                         "lg": 0, "common": 1, "cells": dict(base),
+                         "srcs": {k: "COMMON" for k in base}})
         return {"dates": [{"ymd": d.isoformat(), "dow": _WD_KO[d.weekday()], "day": d.day, "mon": d.month,
                            "events": ev.get(d.isoformat(), [])} for d in dates],
-                "lines": metas, "from": start.isoformat(), "to": end.isoformat(), "weeks": weeks}
+                "lines": metas, "base": base,
+                "from": start.isoformat(), "to": end.isoformat(), "weeks": weeks}
+    finally:
+        nx.close()
+
+
+# ★근무유형 코드(수기 입력용) — PR_M_LINE_CALENDAR 코드마스터와 동일.
+#   종업시각 = 17:00 + 저녁 0:30 + 잔업N시간 (17:00~17:30 은 저녁시간이라 제외)
+LINECAL_STATS = [
+    {"code": "1", "name": "출근(잔업2시간)", "end": "19:30"},
+    {"code": "2", "name": "출근(정상근무)",  "end": "17:00"},
+    {"code": "3", "name": "일요일",          "end": ""},
+    {"code": "4", "name": "휴무",            "end": ""},
+    {"code": "5", "name": "출근(잔업3시간)", "end": "20:30"},
+    {"code": "6", "name": "출근(잔업4시간)", "end": "21:30"},
+    {"code": "7", "name": "출근(4시간근무)", "end": "12:00"},
+]
+
+@router.get("/api/linecal/stats")
+def linecal_stats():
+    """수기 입력 드롭다운용 근무유형 코드 목록."""
+    return {"rows": LINECAL_STATS}
+
+
+@router.post("/api/linecal/save")
+def linecal_save(payload: dict = Body(...)):
+    """라인별달력 수기 입력 — nx.line_calendar 에 src='MANUAL' 로 저장.
+
+    LG 엑셀은 8개 라인만 들어오므로 나머지(CC·CD·RQ·PA·SG…)는 수기로 채워야
+    라인당김 근무일 계산이 정확해진다.
+    ★LG 업로드분(src='LG')은 덮어쓰지 않는다 — 자동이 우선.
+      items: [{line_no, ymd(YYYY-MM-DD 또는 YYMMDD), ws(1~7), note?}]
+      ws 를 비우면 그 (라인,일자)의 수기분 삭제.
+    """
+    items = payload.get("items") or []
+    if not items:
+        return {"ok": True, "saved": 0, "deleted": 0, "skipped": 0}
+    _ensure_linecal()
+    nx = _nx(); cur = nx.cursor()
+    try:
+        for c, t in (("work_stats", "varchar(1)"), ("src", "varchar(8)")):
+            cur.execute(f"IF COL_LENGTH('nx.line_calendar','{c}') IS NULL ALTER TABLE nx.line_calendar ADD {c} {t} NULL")
+        ok = {r["code"] for r in LINECAL_STATS}
+        saved = deleted = skipped = 0
+        for it in items:
+            ln = str(it.get("line_no", "") or "").strip()[:20]
+            d = "".join(ch for ch in str(it.get("ymd", "") or "") if ch.isdigit())
+            if not ln or len(d) < 6: continue
+            ymd = f"20{d[-6:-4]}-{d[-4:-2]}-{d[-2:]}" if len(d) == 6 else f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+            ws = str(it.get("ws", "") or "").strip()[:1]
+            # LG 업로드분은 건드리지 않는다
+            cur.execute("SELECT ISNULL(src,'LG') FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
+            r = cur.fetchone()
+            if r and str(r[0]).strip() == 'LG':
+                skipped += 1; continue
+            cur.execute("DELETE FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
+            if not ws:
+                deleted += 1; continue
+            if ws not in ok:
+                skipped += 1; continue
+            cur.execute("""INSERT INTO nx.line_calendar(line_no,cal_ymd,work_code,work_stats,note,src,upd_dt)
+                           VALUES(?,?,NULL,?,?,'MANUAL',getdate())""",
+                        ln, ymd, ws, str(it.get("note", "") or "").strip()[:50] or None)
+            saved += 1
+        return {"ok": True, "saved": saved, "deleted": deleted, "skipped": skipped,
+                "note": f"저장 {saved} · 삭제 {deleted}" + (f" · LG업로드분 보호 {skipped}" if skipped else "")}
     finally:
         nx.close()
 

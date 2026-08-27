@@ -1209,27 +1209,129 @@ def _ensure_line_pull(cur):
     WORK_END_BY = {'1': 1170, '2': 1020, '5': 1230, '6': 1290, '7': 720}
     WORK_END = WORK_END_BY['1']        # 기본값(코드 미상) = 잔업2시간 19:30
 
-    # ★라인별 근무일 달력 — 공통(HR_M_CALENDAR)을 라인달력(PR_M_LINE_CALENDAR)이 덮어쓴다.
-    #   사용자: "라인이 비워있는건 공통정보를 보도록 되어있어"
-    #   실측: 공통만 96.0% → 라인별 덮어쓰기 98.5%
-    cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.HR_M_CALENDAR
-                    WHERE work_team='A' AND time_type='A' ORDER BY calendar_yymd""")
-    _co = [(r[0], r[1]) for r in cur.fetchall()]
-    cur.execute("SELECT RTRIM(LINE_NO), CALENDAR_YMD, WORK_STATS FROM nx.PR_M_LINE_CALENDAR")
+    # ★라인별 근무일 달력 — 공통 행을 라인 행이 덮어쓴다(SP f_get_relative_work_day 와 동일).
+    #   ★정본 = nx.line_calendar 의 line_no='공통' 행. 미러(HR_M_CALENDAR)는 **폴백**일 뿐.
+    #     (2026-08-27 실측: 정본 '공통' 3,926행 · 미러 HR_M_CALENDAR 와 차이 0건 확인)
+    #   근무유형 코드는 LG 엑셀에 안 들어오므로 「라인별달력」 화면에서 수기 입력한다
+    #   (src='MANUAL', prodinfo.linecal_save). LG 업로드는 work_code 만 갱신하고 코드는 보존.
+    _co = []
+    try:
+        cur.execute("""SELECT CONVERT(varchar(6),cal_ymd,12), ISNULL(work_stats,'')
+                         FROM nx.line_calendar
+                        WHERE line_no=N'공통' AND ISNULL(work_stats,'')<>''
+                        ORDER BY cal_ymd""")
+        _co = [(str(r[0]).strip(), str(r[1] or '').strip()) for r in cur.fetchall()]
+    except Exception:
+        pass
+    if not _co:                        # 폴백: 미러 직독(정본이 비었을 때만)
+        cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.HR_M_CALENDAR
+                        WHERE work_team='A' AND time_type='A' ORDER BY calendar_yymd""")
+        _co = [(r[0], r[1]) for r in cur.fetchall()]
+    # ★정본 = nx.line_calendar (웹 자체). 레거시 미러 nx.PR_M_LINE_CALENDAR 는 여기로 이관됨
+    #   (_schema/nx_line_calendar_merge.sql · 2026-08-27 · 18,247행 이관 → 총 18,897행·37라인).
+    #   CLAUDE.md §1-9 "마스터 정본 = 재구축 클린본, 레거시 미러 아님".
+    #   미러 직독은 폴백으로만 남긴다(정본이 비었을 때).
     _lncal = {}
-    for _ln, _y, _w in cur.fetchall():
-        _lncal.setdefault(str(_ln).strip(), {})[str(_y).strip()] = str(_w or '').strip()
+    try:
+        cur.execute("""SELECT line_no, CONVERT(varchar(6),cal_ymd,12), ISNULL(work_stats,'')
+                         FROM nx.line_calendar WHERE ISNULL(work_stats,'')<>''""")
+        for _ln, _y, _w in cur.fetchall():
+            _lncal.setdefault(str(_ln).strip(), {})[str(_y).strip()] = str(_w or '').strip()
+    except Exception:
+        pass
+    if not _lncal:                     # 폴백: 미러 직독
+        cur.execute("SELECT RTRIM(LINE_NO), CALENDAR_YMD, WORK_STATS FROM nx.PR_M_LINE_CALENDAR")
+        for _ln, _y, _w in cur.fetchall():
+            _lncal.setdefault(str(_ln).strip(), {})[str(_y).strip()] = str(_w or '').strip()
     _WORKING = ('1', '2', '5', '6', '7')
     _codict = dict(_co)          # 공통달력 ymd→work_stats (종업시각 판정용)
 
+    # ★LG 라인스케줄 가동시간 → 종업시각(2026-08-27).
+    #   nx.line_calendar(LG 엑셀 업로드본)의 work_code 가 실제 가동시간이다(8·11·10.5·9.5·7.5…).
+    #   웹 「라인별달력」 화면에 보이는 그 숫자. WORK_STATS(코드 1~7)보다 정밀하다.
+    #   ★가동시간 = 8h + 잔업시간. 종업 = 17:00 + 저녁 0:30 + 잔업h (17:00~17:30 저녁 제외)
+    #       8    → 잔업0    → 17:00
+    #       9.5  → 잔업1.5h → 19:00      10   → 잔업2h   → 19:30
+    #       10.5 → 잔업2.5h → 20:00      11   → 잔업3h   → 20:30
+    #     ★8h 미만(7·7.5)도 8h 로 본다(사용자 확인 2026-08-27 — "크게 의미 없다").
+    #   ★숫자가 아닌 코드(2026-08-27 사용자 확인): 재작업·E·A·B·SKD·CC/지원·rac/이동 등은
+    #     **모두 가동일이며 8시간으로 본다**(종업 17:00). 실측으로도 전부 평일이고 공통달력 코드1(근무).
+    #     단 'SKD/11'·'생산8/재3' 처럼 숫자가 섞이면 그 숫자를 가동시간으로 쓴다.
+    #
+    # ══════════════════════════════════════════════════════════════════════════
+    # ★★2026-08-27 — 레거시 원문 SP_LG_SCHEDULE 확보로 아래 전부 확정(추정 종료).
+    #   보조함수 2개도 평문 확보: f_get_relative_work_day · f_get_end_hhmm_lg_plan
+    #
+    #   f_get_relative_work_day(라인, 일자, N):
+    #       PR_M_LINE_CALENDAR 의 **line_no='공통' 행**을 기준으로 하고
+    #       같은 라인 행이 있으면 그 날만 덮어쓴다(ISNULL(b.work_stats, a.work_stats)).
+    #       work_stats IN ('1','2','5','6','7') 인 날만 근무일로 세고, @as_ymd 이하에서
+    #       역순 N번째(row_num=N)를 돌려준다. 반환 = 일자6 + work_stats1 (7자리).
+    #       ⛔**LG 가동시간(work_code)은 어디에도 안 쓴다.** 근무일 판정은 오직 코드.
+    #
+    #   f_get_end_hhmm_lg_plan(일자, 라인, 코드):
+    #       코드1→1930 · 2→1700 · 5→2030 · 6→2130 · 7→1200 · 그외→1700
+    #       그리고 **그날 같은 라인 계획의 MAX(ORG_OUTPUT_HM) 이 더 크면 그 값으로 상향**.
+    #       (18:03·17:59 같은 종업 이후 시각이 보존되던 이유가 이것)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # ★근무일 달력 = PR_M_LINE_CALENDAR '공통' 행 + 라인 행 덮어쓰기 (SP 원문 그대로).
+    #   정본 nx.line_calendar 에 '공통'/라인 코드가 있으면 그것을, 없으면 미러를 읽는다.
+    #   ⛔LG 가동시간(work_code)은 근무일·종업시각 **어디에도 쓰지 않는다** —
+    #     C1 260912·260919(토)는 가동 8h 가 있어도 '공통'=4(휴무)라 레거시가 건너뛰고,
+    #     260829·260905(토)는 C1 행에 코드2 가 있어 근무로 센다. 실측과 정확히 일치.
+    _base_cal = dict(_co)                      # ymd → 공통 work_stats (위에서 정본 '공통' 행으로 로드됨)
+    _codict = _base_cal                        # 종업시각 판정도 같은 기준
+    _cal_ymds = sorted(_base_cal.keys())       # 달력 전체 일자(오름차순)
+
     _wdcache = {}
     def _wd_of(line):
-        """라인별 근무일 목록 — 라인달력이 공통을 덮어씀. 라인값 없으면 공통."""
+        """라인별 근무일 목록 = f_get_relative_work_day 의 달력 부분.
+           '공통' 행을 라인 행이 덮어쓰고, work_stats IN (1,2,5,6,7) 인 날만 근무일."""
         _k = line or ''
         if _k not in _wdcache:
             _ov = _lncal.get(_k, {})
-            _wdcache[_k] = [_y for _y, _w in _co if _ov.get(_y, _w) in _WORKING]
+            _wdcache[_k] = [_y for _y in _cal_ymds
+                            if str(_ov.get(_y, _base_cal.get(_y, ''))).strip() in _WORKING]
         return _wdcache[_k]
+
+    # ★종업시각 상향 — f_get_end_hhmm_lg_plan 의 MAX(ORG_OUTPUT_HM) 부분.
+    #   (일자, 라인) → 그날 그 라인 계획의 최대 원본시각(분). 코드 기준 종업보다 크면 이걸 쓴다.
+    _maxorg = {}
+    try:
+        # ⚠nx.plan_dtl 의 시각 컬럼은 START_HM 이다(OUTPUT_HM 아님 — 그 이름을 쓰면
+        #   쿼리가 예외로 빠져 _maxorg 가 통째로 비고 상향이 죽는다. 2026-08-27 실측 140건)
+        # ★제번당 **최소일자 1행**만 집계한다 — SP 맨 앞의 병합 블록과 같은 효과.
+        #     ---- 여러일자로 걸쳐잇는 같은 W/O일 경우 1개로 합친다.
+        #     update ... set plan_qty = a.plan_qty + b.plan_qty ... / delete ... PLAN_YMD > min_plan_ymd
+        #   레거시는 계산 전에 제번을 1행으로 합치므로 MAX 집계에 뒷일자 행이 안 들어간다.
+        #   웹은 (제번,일자) 그레인이라 167행이 더 있고, 그대로 MAX 를 잡으면 종업 캡이
+        #   과대평가된다(CJ 260910 웹 20:28 vs 레거시 19:32 → 20건 어긋남. 2026-08-27).
+        #   ⚠웹 원본은 건드리지 않는다 — 집계할 때만 대표행으로 제한한다.
+        cur.execute("""WITH R AS (
+                         SELECT ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD) ymd,
+                                RTRIM(ISNULL(LINE_NO,'')) ln,
+                                ISNULL(NULLIF(ORG_OUTPUT_HM,''), START_HM) hm,
+                                ROW_NUMBER() OVER(PARTITION BY RTRIM(WORK_ORDER)
+                                  ORDER BY ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD),
+                                           ISNULL(NULLIF(ORG_OUTPUT_HM,''), START_HM)) rn
+                           FROM nx.plan_dtl)
+                       SELECT ymd, ln, MAX(hm) FROM R WHERE rn=1 GROUP BY ymd, ln""")
+        for _y, _l, _hm in cur.fetchall():
+            _s = str(_hm or '').strip()
+            if len(_s) == 4 and _s.isdigit():
+                _maxorg[(str(_y).strip(), str(_l).strip())] = int(_s[:2]) * 60 + int(_s[2:])
+    except Exception:
+        pass
+
+    def _end_of(line, ymd):
+        """종업시각(분) = f_get_end_hhmm_lg_plan.
+           코드별 고정값(1→19:30 …)을 잡고, 그날 그 라인 계획의 MAX(ORG_OUTPUT_HM) 이 더 크면 상향."""
+        if not ymd: return WORK_END
+        _w = _lncal.get(line or '', {}).get(ymd) or _base_cal.get(ymd, '1')
+        _m = WORK_END_BY.get(str(_w).strip(), WORK_END_BY['2'])   # SP: else '1700'
+        _mx = _maxorg.get((ymd, line or ''))
+        return _mx if (_mx is not None and _mx > _m) else _m
 
     _wd = _wd_of('')          # 공통(폴백용)
     _rn = {y: i for i, y in enumerate(_wd)}
@@ -1256,14 +1358,37 @@ def _ensure_line_pull(cur):
         except Exception: pass
         return None
 
-    cur.execute("""SELECT d.WORK_ORDER, d.PLAN_YMD, ISNULL(NULLIF(d.START_HM,''),'0800'),
+    # ★입력 = 원본(ORG_*) — SP 는 @db_org_plan_ymd/@db_org_output_hm 로 계산한다.
+    #   (SP 앞부분에서 ORG_* 를 PLAN_*/OUTPUT_* 로 백업해 두고 항상 원본에서 재계산)
+    # ★라인마스터도 SP 와 동일하게 **APPLY_YMD <= ORG_PLAN_YMD 중 가장 이른 행**을 쓴다
+    #   (SP: TOP 1 ... WHERE APPLY_YMD <= ORG_PLAN_YMD ORDER BY APPLY_YMD).
+    cur.execute("""SELECT d.WORK_ORDER, ISNULL(NULLIF(d.ORG_PLAN_YMD,''), d.PLAN_YMD),
+             ISNULL(NULLIF(d.ORG_OUTPUT_HM,''), ISNULL(NULLIF(d.START_HM,''),'0800')),
              ISNULL(l.MAINT_DAY,0), ISNULL(l.MAINT_HHMM,''), RTRIM(ISNULL(d.LINE_NO,''))
         FROM nx.plan_dtl d
-        LEFT JOIN nx.PR_M_LINE_NO l ON RTRIM(l.LINE_NO)=RTRIM(d.LINE_NO)""")
+        OUTER APPLY (SELECT TOP 1 m.MAINT_DAY, m.MAINT_HHMM
+                       FROM nx.PR_M_LINE_NO m
+                      WHERE RTRIM(m.LINE_NO)=RTRIM(d.LINE_NO)
+                        AND m.APPLY_YMD <= ISNULL(NULLIF(d.ORG_PLAN_YMD,''), d.PLAN_YMD)
+                      ORDER BY m.APPLY_YMD) l""")
     _src = cur.fetchall()
-    cur.execute("SELECT ISNULL(MIN(PLAN_YMD),'') FROM nx.plan_dtl")
+    # ★편성 기준일 @as_fr_ymd — SP 마지막 블록이 이 날짜로 클램프한다.
+    #     if @ls_plan_ymd < @as_fr_ymd → set @ls_plan_ymd=@as_fr_ymd, @ls_output_hm='0750'
+    #   원본(ORG_PLAN_YMD) 최소일자를 기준일로 본다. MIN(PLAN_YMD) 은 이미 당겨진 값이라
+    #   클램프가 걸리지 않아 07:50 건 115개가 어긋났다(2026-08-27).
+    cur.execute("SELECT ISNULL(MIN(ISNULL(NULLIF(ORG_PLAN_YMD,''), PLAN_YMD)),'') FROM nx.plan_dtl")
     _base = str(cur.fetchone()[0] or '').strip()
     _bi = 0
+
+    # ★라인별 강제 하한(SP_LG_SCHEDULE 원문 하드코딩) — 2026-08-27 확정.
+    #     /*C1,C3라인은 강제로 17:00으로 변경하여 늦게 작업하도록 강제 편성*/
+    #     if @db_line_no in ('C1','C3') and @ls_output_hm < '1700' → '1700'
+    #     /*C2라인은 강제로 15:00 … 17.11.29*/  → '1500'
+    #   ⛔MD 와 무관한 **라인 이름 예외**다. 종전엔 이걸 "MD>=2 면 17:00 리셋" 으로 추정해
+    #     C1(MD=2)에만 우연히 맞고 CP2(MD=2)·SG(MD=3)에서 어긋났다.
+    _FLOOR_HM = {'C1': 1020, 'C3': 1020, 'C2': 900}
+
+    _LUNCH = ((1020, 1050), (720, 780))        # 저녁 17:00~17:30 · 점심 12:00~13:00
 
     _out = []
     for _wo, _org, _shm, _md, _mh, _lno in _src:
@@ -1271,31 +1396,75 @@ def _ensure_line_pull(cur):
         _md = int(_md or 0); _mm = _mins(str(_mh or '').strip()) or 0
         _t0 = _mins(str(_shm or '').strip())
         if _t0 is None: _t0 = DAY_START
-        # (1) 근무일 카운트 — ★라인별 달력, 비근무일이면 그 이후 첫 근무일부터
-        _L = _wd_of(str(_lno or '').strip())
         _lk = str(_lno or '').strip()
-        _i = _nidx(_L, _org)
-        # (2) 시각 당김 — 점심 보정 없음
-        _t1 = _t0 - _mm
-        _carry = 0
-        if _t1 < DAY_START:
-            # (3) 하루 더 당기고 **전일 종업시각**에서 부족분만큼.
-            #     ★종업시각은 그날 근무유형에 따라 다르다(사용자 확인·「라인별 달력관리」 화면):
-            #       코드1 = 출근(잔업2시간) → 19:30   코드2 = 출근(정상근무) → 17:00
-            #     종전엔 WORK_END(19:30) 하나로 고정해 정상근무일 전일이 어긋났다.
-            _carry = 1
-            _pj = _i - _md - _carry            # 당김 도착일(=전일) 인덱스
-            _pd = _L[_pj] if 0 <= _pj < len(_L) else None
-            # 라인달력이 공통을 덮어씀. 값 없으면 공통, 그것도 없으면 코드1(잔업2시간).
-            _ws = (_lncal.get(_lk, {}).get(_pd) or _codict.get(_pd, '1')) if _pd else '1'
-            _end = WORK_END_BY.get(str(_ws).strip(), WORK_END)
-            _t1 = _end - (DAY_START - _t1)
-        _j = _i - _md - _carry
-        if _j < 0: _j = 0
-        _py = _L[_j] if _j < len(_L) else _org
-        # ※MD>=2 종업시각 리셋을 시도했으나 전체가 나빠져 되돌림(2026-08-27):
-        #   C1 시각 20.33%→24.00% 로 올랐지만 SG 100%→47.06% 로 급락, 전체 91.90%→91.72%.
-        #   C1 의 근본 문제는 시각이 아니라 **일자 57.67%** 다(아래 참조).
+        _L = _wd_of(_lk)
+        if not _L:
+            _out.append((_wo, _org, _md, _mm, _org, "%02d%02d" % (_t0 // 60, _t0 % 60)))
+            continue
+
+        # (1) 계획일이 휴무면 그 이전 근무일의 종업시각부터 시작 (SP 앞부분).
+        #     f_get_relative_work_day(...,0) 이 @as_ymd 이하 첫 근무일을 주므로,
+        #     그 값이 원래 일자보다 작으면 = 휴무였다는 뜻.
+        _i = _bis.bisect_right(_L, _org) - 1
+        if _i < 0:
+            _i = 0
+            _cur_d = _L[0]
+        else:
+            _cur_d = _L[_i]
+        if _cur_d < _org:                      # 계획일이 휴무 → 이전 근무일 종업으로
+            _t0 = max(_t0, _end_of(_lk, _cur_d))
+
+        # (2) 일수 당김 — 근무일 달력에서 MAINT_DAY 칸 앞 (시각은 그대로 들고 감)
+        #   ★달력 앞으로 벗어난 경우(_under)를 기억한다. SP 는 @ldt_org_time 을 실제 날짜로
+        #     빼므로 기준일보다 앞선 일자가 나오고 최종 블록에서 07:50 으로 클램프된다.
+        #     웹은 근무일 리스트 인덱스가 0 에서 멈춰 기준일에 걸터앉으므로,
+        #     "0 아래로 내려가려 했다"는 사실 자체를 클램프 조건에 써야 한다.
+        _under = False
+        if _md > 0:
+            _ni = _i - _md
+            if _ni < 0: _under = True
+            _i = max(0, _ni)
+            _cur_d = _L[_i]
+
+        # (3) 시각 당김 — MAINT_HHMM 만큼 그대로 뺀다.
+        #   ⛔SP 의 점심(12~13)·저녁(17:00~17:30) 보정 블록은 **실행되지 않는 죽은 코드**다:
+        #       if @ldt_org_time > convert(datetime, '17:00') ...
+        #     @ldt_org_time 은 날짜가 붙은 datetime(2026-08-27 19:07)인데
+        #     convert(datetime,'17:00') 은 **1900-01-01 17:00** 이라 비교가 항상 참/거짓으로
+        #     고정된다(1900년보다 크므로 첫 조건은 늘 참, 두 번째 `< 17:30` 은 늘 거짓).
+        #     → 결과적으로 보정이 한 번도 적용되지 않는다.
+        #   실측 확증: CA(Mmin=360) 6I0M01J8 ORG 19:07 → 레거시 13:07 = 정확히 −6:00,
+        #     보정 0분. 보정을 넣었더니 −60분 793건이 어긋났다(2026-08-27).
+        _t1 = _t0
+        _rest = 0
+        if _mm > 0:
+            _minus = _mm
+            _avail = _t1 - DAY_START           # 그날 08:00 까지 남은 분
+            if _minus <= _avail:
+                _t1 -= _minus
+            else:
+                _rest = _minus - _avail        # 전일로 넘길 잔여
+                _i = max(0, _i - 1)            # SP: @ldt_org_time - 1 (달력일 −1 → 이후 근무일 보정)
+                _cur_d = _L[_i]
+                _t1 = 1439                     # 23:59
+
+        # (4) 도착일 종업시각으로 캡 → 남은 잔여분 차감 (SP 후반부)
+        _end = _end_of(_lk, _cur_d)
+        if _t1 > _end: _t1 = _end
+        if _rest > 0: _t1 -= _rest
+        if _t1 < 0: _t1 = 0
+
+        # (5) 라인 강제 하한 (C1/C3=17:00 · C2=15:00)
+        _fl = _FLOOR_HM.get(_lk)
+        if _fl is not None and _t1 < _fl: _t1 = _fl
+
+        _py = _cur_d
+        # (6) ★기준일 클램프 — SP 최종 블록. **라인 하한(5)보다 뒤**에 온다.
+        #       if @ls_plan_ymd < @as_fr_ymd → @ls_plan_ymd=@as_fr_ymd, @ls_output_hm='0750'
+        #     기준일보다 앞으로 당겨진 건은 기준일 07:50(시업 10분전)에 몰아 넣는다.
+        #     ⛔순서가 중요하다: C1 하한(17:00)을 먼저 적용해도 이 클램프가 07:50 으로 덮는다.
+        if _base and (_py < _base or _under):
+            _py, _t1 = max(_py, _base), 470    # 07:50
         _phm = "%02d%02d" % (_t1 // 60, _t1 % 60)
         # ⛔레거시 값 채택 제거(2026-08-27) — **웹 산식 결과를 그대로 쓴다.**
         #   종전엔 여기서 LG_INPUT_YMD/HM 으로 _py/_phm 을 덮어썼다. 그런데 그 컬럼은
@@ -1304,12 +1473,6 @@ def _ensure_line_pull(cur):
         #       화면 'LG OUTPUT시간' = ORG_PLAN_YMD/ORG_OUTPUT_HM  260827 11:35 (엑셀원본)
         #       화면 'LG INPUT'      = PLAN_YMD/OUTPUT_HM          260827 07:50 ← ★라인당김 결과
         #       LG_INPUT_YMD/HM                                    260825 18:05 (화면에 없음·별개)
-        #     웹 산식은 260827 07:50 을 정확히 계산한다.
-        #   올바른 기준(PLAN_YMD·OUTPUT_HM)으로 재측정: 일자 99.84% · 시각 100.00%.
-        #   _lg/_lgw 는 검증용으로만 남긴다(결과 미반영).
-        # (4) 기준일 이전 → 기준일 + 0750 (당일이전계획). 7a94326 확정 동작.
-        if _base and _py < _base:
-            _py, _phm = _base, '0750'
         _out.append((_wo, _org, _md, _mm, _py, _phm))
 
     cur.execute("IF OBJECT_ID('nx.plan_line_pull') IS NOT NULL DROP TABLE nx.plan_line_pull")
@@ -1337,13 +1500,28 @@ def _stepL_pull(cur):
                     " EXEC('ALTER TABLE nx.plan_part_dtl ADD ' + ? + ' " + typ + "')", col, col)
     _ensure_workday_tbl(cur)
 
-    # ── 1) OUTPUT_HM 시드 = 계획원본 시각(START_HM). 없으면 0800 ──
-    #   ★STEP5(plan_item_dtl.OUTPUT_HM) 가 라인당김 적용된 시각을 갖고 있다 — 그걸 시드로 쓴다.
-    #     (레거시 PR_T_PLAN_DTL.OUTPUT_HM = 라인당김 후 시각. ORG_OUTPUT_HM 이 원본)
+    # ── 1) OUTPUT_HM 시드 = ★③ 라인당김 결과(nx.plan_line_pull) ──
+    #   레거시 대응: PR_T_PLAN_PART_DTL.OUTPUT_HM = PR_T_PLAN_DTL.OUTPUT_HM (실측 100.0% 일치).
+    #     즉 파트별계획은 **라인당김 후 시각**을 그대로 물려받는다.
+    #   ⛔plan_item_dtl 을 시드로 쓰면 안 된다 — 라인당김 반영이 99.6% 에 그쳐
+    #     기준일 클램프(07:50) 건들이 옛 시각(1700)으로 남는다.
+    #     실측(2026-08-27): 그 0.4% 가 ④ 시각 불일치 281건 + 일자 불일치 다수의 원인이었다.
+    #     (레거시 미러 PR_T_PLAN_ITEM_DTL 도 이전 편성분 260826 1700 을 들고 있어 같은 함정)
+    #   ★제번당 대표행(최소 org) 기준 — ③ 과 동일 규칙.
+    cur.execute("""UPDATE a SET a.output_hm = ISNULL(NULLIF(d.pulled_hm,''),'0800')
+                     FROM nx.plan_part_dtl a
+                     JOIN (SELECT wo, pulled_hm FROM (
+                             SELECT RTRIM(wo) wo, pulled_hm,
+                                    ROW_NUMBER() OVER(PARTITION BY RTRIM(wo) ORDER BY org) rn
+                               FROM nx.plan_line_pull) x WHERE rn=1) d
+                       ON d.wo=RTRIM(a.work_order)""")
+    # 폴백: ③ 결과에 없는 제번(A/S 추가계획 등)은 STEP5 시각을 쓴다
     cur.execute("""UPDATE a SET a.output_hm = ISNULL(NULLIF(d.OUTPUT_HM,''),'0800')
                      FROM nx.plan_part_dtl a
                      JOIN (SELECT WORK_ORDER, MAX(ISNULL(NULLIF(OUTPUT_HM,''),'0800')) OUTPUT_HM
-                             FROM nx.plan_item_dtl GROUP BY WORK_ORDER) d ON d.WORK_ORDER=a.work_order""")
+                             FROM nx.plan_item_dtl GROUP BY WORK_ORDER) d ON d.WORK_ORDER=a.work_order
+                    WHERE ISNULL(a.output_hm,'')=''
+                      AND NOT EXISTS (SELECT 1 FROM nx.plan_line_pull p WHERE RTRIM(p.wo)=RTRIM(a.work_order))""")
     cur.execute("UPDATE nx.plan_part_dtl SET output_hm='0800' WHERE ISNULL(output_hm,'')=''")
 
     # ── 2) CUM_LT_HR ──
@@ -1394,9 +1572,15 @@ def _stepL_pull(cur):
     d AS (
       SELECT *,
              -- 08:00(480분) 미만이면 하루 이월: 전일 17:00(1020분) 에서 부족분만큼 더 뺀다.
-             -- ★이월된 값에는 점심보정을 다시 적용하지 않는다(전일 오후로 넘어가므로).
              CASE WHEN t1 < 480 THEN 1 ELSE 0 END AS carry,
-             CASE WHEN t1 < 480 THEN 1020 - (480 - t1) ELSE t1 END AS t2
+             -- ★이월분에도 점심 통과 보정을 적용한다(2026-08-27 라이브 실측 5건).
+             --   전일 17:00 에서 역산하므로 결과가 13:00 미만이면 점심(12~13)을 지나간 것.
+             --   실측: 상위 08:59 · pull_hr=6.00 → 이월 후 웹 11:59 / 레거시 10:59 (+60분 어긋남).
+             --     17:00 − 5:01 = 11:59 이고 점심을 통과하니 10:59 가 맞다.
+             --   ⚠전일 17:00 은 항상 13:00 초과이므로 시작조건(>780)은 자동 충족된다.
+             CASE WHEN t1 < 480
+                  THEN 1020 - (480 - t1) - CASE WHEN (1020 - (480 - t1)) < 780 THEN 60 ELSE 0 END
+                  ELSE t1 END AS t2
         FROM c)
     UPDATE a
        SET a.pull_day = a.pull_day + d.carry,

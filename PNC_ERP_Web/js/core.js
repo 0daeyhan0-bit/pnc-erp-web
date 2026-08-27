@@ -2155,8 +2155,9 @@ const MST_CFG={
 function lineCalView(host){
   const API=API_BASE;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
-  const T=new Date(), mon=new Date(T); mon.setDate(T.getDate()-((T.getDay()+6)%7));
-  const st={data:null,from:iso(mon),weeks:4,anchor:iso(T),msg:'',busy:false};
+  // ★시작주 = 당일(2026-08-27 요청). 종전엔 그 주 월요일로 맞춰 지난 날짜가 앞에 붙었다.
+  const T=new Date();
+  const st={data:null,from:iso(T),weeks:4,anchor:iso(T),msg:'',busy:false};
   const codeSty=(v)=>{const s=(v||'').trim();
     if(!s)return 'background:#eaedf1;color:#c2c8d0';     // 빈칸=휴무
     const n=parseFloat(s);
@@ -2177,7 +2178,7 @@ function lineCalView(host){
     try{const r=await fetch(`${API}/api/linecal/upload`,{method:'POST',body:fd});const j=await r.json();
       if(r.ok&&j.ok){st.msg=`✅ 업로드 완료: ${j.recs}건·특수일 ${j.events} (${j.date_from}~${j.date_to})`;
         // 업로드 기준일 주 월요일로 창 이동
-        const a=new Date(j.anchor);a.setDate(a.getDate()-((a.getDay()+6)%7));st.from=iso(a);await load();}
+        st.from=j.anchor;await load();}   // ★업로드 기준일 그대로(월요일 보정 안 함)
       else{alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}}
     catch(e){alert('업로드 오류: '+e);}
     st.busy=false;render();};
@@ -2209,10 +2210,18 @@ function lineCalView(host){
          <tr><th colspan="4" style="position:sticky;left:0;background:#fff7e0;z-index:2;text-align:right;font-weight:600">특수일 ▶</th>
            ${d.dates.map(x=>`<td class="center" title="${esc((x.events||[]).join(','))}" style="font-size:9px;background:${x.events&&x.events.length?'#ffe9a8':'#fafbfc'};max-width:26px;overflow:hidden">${(x.events||[]).map(e=>esc(e.slice(0,2))).join('')}</td>`).join('')}</tr>
         </thead>
-        <tbody>${d.lines.length?d.lines.map(L=>`<tr>
-          <td style="position:sticky;left:0;background:#fff;white-space:nowrap">${esc(L.gubun)}</td>
-          <td class="center"><b>${esc(L.line_no)}</b></td><td class="center">${esc(L.model_no)}</td><td class="center">${esc(L.jindo)}</td>
-          ${d.dates.map(x=>{const v=L.cells[x.ymd]||'';return `<td class="center" title="${esc(x.ymd)} ${esc(v)}" style="${codeSty(v)};font-size:10px;padding:2px">${esc(v)}</td>`;}).join('')}
+        <tbody>${d.lines.length?d.lines.map(L=>`<tr${L.common?' style="background:#fff7e0;font-weight:600"':(L.lg?'':' style="background:#fcfdff"')}>
+          <td style="position:sticky;left:0;background:${L.common?'#fff7e0':'#fff'};white-space:nowrap">${esc(L.gubun)}</td>
+          <td class="center"><b>${esc(L.line_no)}</b>${L.common?'':(L.lg?'':'<span class="bdg" style="font-size:8px;margin-left:3px;background:#eef2f8;color:#5a6b80;border:1px solid #d3dceb;border-radius:5px;padding:0 3px" title="LG 엑셀에 없는 라인 — 수기 입력 대상">수기</span>')}</td><td class="center">${esc(L.model_no)}</td><td class="center">${esc(L.jindo)}</td>
+          ${d.dates.map(x=>{let v=L.cells[x.ymd]||'',sc=(L.srcs||{})[x.ymd]||'',inh=0;
+             // ★값이 없으면 공통달력을 상속(편성 규칙과 동일) — 흐리게 표시해 '기본값'임을 구분.
+             if(!v&&!L.common){const b=(d.base||{})[x.ymd]||'';if(b){v=b;sc='COMMON';inh=1;}}
+             // 수기(MANUAL)/미러(MIRROR)/공통은 근무유형 코드(1~7) → 라벨. LG 는 가동시간 숫자 그대로.
+             const isC=sc!=='LG'&&WS_STY[v];
+             let sty=isC?`background:${WS_STY[v].c};color:#fff`:codeSty(v);
+             if(inh)sty+=';opacity:.38';
+             const tx=isC?WS_STY[v].t:v, canEd=ed&&sc!=='LG'&&!L.common;
+             return `<td class="center lc-cell" data-ln="${esc(L.line_no)}" data-ymd="${esc(x.ymd)}" data-src="${esc(inh?'':sc)}" title="${esc(x.ymd)} ${esc(v)}${inh?' [공통 상속]':(sc?' ['+esc(sc)+']':'')}${canEd?' · 클릭하여 수정':''}" style="${sty};font-size:10px;padding:2px${canEd?';cursor:pointer':''}">${esc(tx)}</td>`;}).join('')}
         </tr>`).join(''):`<tr><td colspan="${4+d.dates.length}" class="empty">데이터 없음 — 엑셀을 업로드하세요</td></tr>`}</tbody></table>`
        :`<div class="empty" style="padding:30px">불러오는 중…</div>`}</div>`;
     const g=id=>host.querySelector(id);
@@ -2225,7 +2234,43 @@ function lineCalView(host){
       drop.ondragover=e=>{e.preventDefault();drop.style.background='#e3f0ff';};
       drop.ondragleave=()=>{drop.style.background='#f4f9fe';};
       drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';const f=e.dataTransfer.files[0];if(f){autoAnchor(f.name);doUpload(f);}};
+      // ★셀 클릭 = 수기 입력(2026-08-27). LG 엑셀은 8개 라인만 들어오므로 나머지는 수기로 채운다.
+      //   LG 업로드분(src='LG')은 자동이 우선이라 편집 불가 — 서버에서도 막는다.
+      host.querySelectorAll('.lc-cell').forEach(td=>{
+        if(td.dataset.src==='LG')return;
+        td.onclick=()=>openCell(td);
+      });
     }
+  };
+  // 셀 편집 팝업 — 근무유형 드롭다운(WS_OPTS). body 에 렌더(CLAUDE.md §3 모달규칙)
+  const openCell=(td)=>{
+    const ln=td.dataset.ln, ymd=td.dataset.ymd;
+    const ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:1200;display:flex;align-items:center;justify-content:center';
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;padding:16px 18px;min-width:280px;box-shadow:0 8px 30px rgba(0,0,0,.25)">
+      <div style="font-weight:700;margin-bottom:10px">라인 <b>${esc(ln)}</b> · ${esc(ymd)}</div>
+      <label class="tl">근무유형</label>
+      <select class="inp" id="lcx-ws" style="width:100%;margin:4px 0 12px">
+        ${WS_OPTS.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn ghost" id="lcx-cancel">취소</button>
+        <button class="btn" id="lcx-ok">저장</button></div></div>`;
+    document.body.appendChild(ov);
+    const sel=ov.querySelector('#lcx-ws');
+    const cur=(st.data.lines.find(L=>L.line_no===ln)||{cells:{}}).cells[ymd]||'';
+    if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+    const close=()=>ov.remove();
+    ov.querySelector('#lcx-cancel').onclick=close;
+    ov.onclick=e=>{if(e.target===ov)close();};
+    ov.querySelector('#lcx-ok').onclick=async()=>{
+      try{
+        const r=await fetch(`${API}/api/linecal/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({items:[{line_no:ln,ymd:ymd,ws:sel.value}]})});
+        const j=await r.json();
+        st.msg=j.ok?`✅ ${esc(ln)} ${esc(ymd)} ${j.note||''}`:'저장 실패';
+      }catch(e){st.msg='저장 오류: '+e;}
+      close();await load();
+    };
   };
   const autoAnchor=(name)=>{const m=(name||'').match(/(20\d{6})/);if(m){const s=m[1];st.anchor=`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;}};
   load();
