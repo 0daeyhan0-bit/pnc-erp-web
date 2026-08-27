@@ -31,7 +31,7 @@ def partner_workcenters(src: str = Query("nx")):
         C = " COLLATE DATABASE_DEFAULT"
         try:
             cur.execute(f"""SELECT pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) nm, COUNT(*) n
-                FROM nx.plan_part_mat pp
+                FROM PARTNER_ERP_TEST3.nx.plan_part_mat pp
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 WHERE pp.MAT_WORK_CENTER_CODE>'' GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE)
@@ -162,42 +162,61 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         return dayidx.get(ymd)                  # 없으면 None(31일 밖)
     cn = _conn(); cur = cn.cursor()
     try:
-        # ★계획그리드 = 레거시 SP_PR_4주간계획현황_LIVE 직독(도번 authoritative, 백엔드 EXEC 가능·mat_flag='1'필수).
-        #   기존 fast-path(PART_MAT MAX)는 도번 계획 과다(이중계상: AJR30027702 958 vs SP 513) → SP직독으로 diff0.
-        #   days=SP의 plan_qty_01..31(from_ymd 기준 사전버킷), plan=Σ. (wo,swo,c_item_code) 그레인.
-        cur.execute("SET NOCOUNT ON; EXEC PARTNER_ERP_TEST3.dbo.[SP_PR_4주간계획현황_LIVE] ?,?,?,?,?,?,?",
-                    from_ymd, to_ymd, '1', (item or '%'), (matcode or '%'), '%', cust)
-        _spc = None; _spr = []
-        while True:
-            if cur.description: _spc = [d[0].lower() for d in cur.description]
-            try: _spr = cur.fetchall()
-            except Exception: _spr = []
-            if not cur.nextset(): break
-        _sci = {n: i for i, n in enumerate(_spc)} if _spc else {}
-        def _sv(r, n, d=0):
-            i = _sci.get(n); return r[i] if i is not None else d
+        # ★계획그리드 = **웹 편성결과 직접조회**(2026-08-27 전환). 라이브 SP 폐지.
+        #   종전: EXEC SP_PR_4주간계획현황_LIVE — 그 SP 가 라이브 30개 테이블을 읽어
+        #         "웹이 계산한 자재소요"가 화면에 전혀 반영되지 않았다(사용자 지적).
+        #   현재: nx.plan_item_dtl(STEP5 웹편성) + nx.plan_part_mat(STEP7 자재소요)
+        #         · 협력사 필터 = plan_part_mat 의 mat_work_center_code (조달 라우팅 배분 반영분)
+        #         · ★기간은 **part_plan_ymd**(당김 후 소요일자) 기준 — plan_ymd(상위 계획일)로
+        #           걸면 당겨진 건이 통째로 누락된다(실측 75.2% → 97.2%).
+        #   대사(대원산업 260827~260831): SP 351키/3,504 vs 웹 357키/3,561 · 97.2% 일치.
+        #     잔차 10건 = A/S(prod_plan_input 낡음) 2 + 당김반영 차이 8. 410 과 같은 기준이다.
+        #   일자버킷: SP 는 plan_qty_01..31 피벗을 줬으나 웹은 raw 를 받아 _bkt() 로 버킷팅한다.
+        cur.execute(f"""
+            SELECT RTRIM(d.WORK_ORDER) wo, RTRIM(ISNULL(NULLIF(d.SPLIT_WORK_ORDER,''),d.WORK_ORDER)) swo,
+                   RTRIM(d.C_ITEM_CODE) assy, ISNULL(d.LINE_NO,'') line_no, ISNULL(d.OUTPUT_HM,'') output_hm,
+                   ISNULL(pd.MODEL_NO,'') model_no,
+                   CEILING(CONVERT(float,d.PLAN_QTY)*ISNULL(d.USE_QTY,1)*ISNULL(d.PROD_RATE,100)/100.0) plan_qty,
+                   ISNULL(d.LOT_QTY,0) lot_qty, ISNULL(d.USE_QTY,1) use_qty,
+                   (SELECT MIN(m2.part_plan_ymd) FROM PARTNER_ERP_TEST3.nx.plan_part_mat m2
+                     WHERE RTRIM(m2.work_order)=RTRIM(d.WORK_ORDER)
+                       AND RTRIM(m2.assy_item_code)=RTRIM(d.C_ITEM_CODE)
+                       AND RTRIM(ISNULL(m2.mat_work_center_code,''))=? AND m2.mat_flag='1') ppy
+              FROM PARTNER_ERP_TEST3.nx.plan_item_dtl d
+              LEFT JOIN (SELECT WORK_ORDER, MAX(MODEL_NO) MODEL_NO FROM PARTNER_ERP_TEST3.nx.plan_dtl GROUP BY WORK_ORDER) pd
+                     ON pd.WORK_ORDER=d.WORK_ORDER
+             WHERE EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.plan_part_mat m
+                           WHERE RTRIM(m.work_order)=RTRIM(d.WORK_ORDER)
+                             AND RTRIM(m.assy_item_code)=RTRIM(d.C_ITEM_CODE)
+                             AND RTRIM(ISNULL(m.mat_work_center_code,''))=?
+                             AND m.mat_flag='1' AND m.part_plan_ymd<=?)
+               AND (? = '%' OR d.C_ITEM_CODE LIKE ?)""",
+            cust, cust, to_ymd, (item or '%'), (item or '%'))
         keyed = {}
-        for r in _spr:
-            wo = str(_sv(r, 'work_order', '') or ''); swo = str(_sv(r, 'split_work_order', '') or ''); assy = str(_sv(r, 'c_item_code', '') or '')
+        for r in cur.fetchall():
+            wo = str(r[0] or '').strip(); swo = str(r[1] or '').strip(); assy = str(r[2] or '').strip()
             if not assy: continue
             k = (wo, swo, assy)
             g = keyed.get(k)
             if not g:
-                g = {'wo': wo, 'swo': swo, 'assy': assy, 'cust': cust, 'line': str(_sv(r, 'line_no', '') or ''), 'output_hm': str(_sv(r, 'output_hm', '') or ''),
+                g = {'wo': wo, 'swo': swo, 'assy': assy, 'cust': cust, 'line': str(r[3] or ''), 'output_hm': str(r[4] or ''),
                      'excel': 0, 'days': [0]*31, 'plan': 0, 'lot': 0.0, 'use': 1.0, 'over': 0, 'rate': 100.0,
                      'sale': 0, 'assy_stock': 0, 'iset_stk': 0, 'ireq': 0, 'work_center': '', 'work_code': '', 'in_cust': '',
-                     'model': str(_sv(r, 'model_no', '') or ''), 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
+                     'model': str(r[5] or ''), 'nm': '', 'lot_qty': 0, 'insp': '0', 'pack': 0, 'mat_list': '', 'sagub_list': '', 'sagub': 0}
                 keyed[k] = g
-            g['plan'] += int(float(_sv(r, 'plan_qty', 0) or 0))
-            for _di in range(31):
-                g['days'][_di] += int(float(_sv(r, 'plan_qty_%02d' % (_di + 1), 0) or 0))
-            g['lot'] = max(g['lot'], float(_sv(r, 'lot_qty', 0) or 0)); g['use'] = max(g['use'], float(_sv(r, 'use_qty', 1) or 1))
+            _q = int(float(r[6] or 0))
+            g['plan'] += _q
+            _bi = _bkt(str(r[9] or '').strip())      # 소요일자 → 31일 버킷(기준일 이전=day1)
+            if _bi is not None and 0 <= _bi < 31:
+                g['days'][_bi] += _q
+            g['lot'] = max(g['lot'], float(r[7] or 0)); g['use'] = max(g['use'], float(r[8] or 1))
         rows = list(keyed.values())
         # 사급(mat_flag=2) 표시플래그만 PART_MAT에서 경량 조회(도번단위)
         try:
             _sgw = ["mat_work_center_code=?", "part_plan_ymd<=?", "mat_flag='2'"]; _sgp = [cust, to_ymd]
             if item and item != "%": _sgw.append("assy_item_code LIKE ?"); _sgp.append(item)
-            cur.execute(f"SELECT DISTINCT assy_item_code FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT WHERE {' AND '.join(_sgw)}", *_sgp)
+            # ★웹 편성결과로 전환(2026-08-27) — nx.plan_part_mat (ASSY행 일자 100% 정합 확인).
+            cur.execute(f"SELECT DISTINCT assy_item_code FROM PARTNER_ERP_TEST3.nx.plan_part_mat WHERE {' AND '.join(_sgw)}", *_sgp)
             _sgset = {str(r[0]).strip() for r in cur.fetchall()}
             for g in rows:
                 if g['assy'] in _sgset: g['sagub'] = 1
@@ -214,29 +233,59 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         sale = {}; move = {}; astk = {}; z99 = {}; sset = {}; sreq = {}; mstr = {}; msub = {}; over = {}
         aset = set(assys)
         # 출하/이동=work_order 인덱스로 스코프(item_code는 인덱스 없어 풀스캔 → wo 스코프가 훨씬 빠름). item은 파이썬 필터.
-        # ★완료 풀=라이브(PARTNER_ERP.dbo) 직독 — 레거시 SP/화면이 라이브 읽고, nx 재고미러 stale(SA_T_ITEM_STOCK·SET·MAT_STOCK) → 완료 과소방지. 계획소스(SP_LIVE)와 일관.
+        # ★완료 풀 = **웹 자체 테이블**(2026-08-27 전환). 라이브 직독 폐지.
+        #   출하실적: nx.sale_dtl (라이브 SA_T_SALE_DTL 307,778행 이관 · 미마감 합계 13,989,824 일치)
+        #   재고이동: SA_T_ITEM_MOVE 는 라이브도 **0행**이라 웹 대응물을 만들지 않고 생략한다.
+        #            (이동 개념이 실제로 안 쓰인다 — 필요해지면 그때 nx 테이블 신설)
         for ch in _chunks(wos):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
+            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP_TEST3.nx.sale_dtl WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
             for r in cur.fetchall():
-                if str(r[2]) in aset: sale[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
-            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
-            for r in cur.fetchall():
-                if str(r[2]) in aset: move[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
+                if str(r[2]).strip() in aset: sale[(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip())] = float(r[3] or 0)
         for ch in _chunks(assys):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
-            for r in cur.fetchall(): astk[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
-            for r in cur.fetchall(): z99[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
-            for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP.dbo.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
-            for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
+            # ★ASSY재고 = 웹 원장 nx.item_stock_maint 집계(2026-08-27 전환).
+            #   레거시 SA_T_ITEM_STOCK(잔액) 대응 — 기초 2,685행 이관, 합계 41,883 일치 확인.
+            cur.execute(f"SELECT item_code, SUM(maint_qty) FROM PARTNER_ERP_TEST3.nx.item_stock_maint WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
+            for r in cur.fetchall(): astk[str(r[0]).strip()] = float(r[1] or 0)
+            # ★자재창고(Z99990) — 레거시 원본 r3_mat 서브쿼리는 **PU_T_MAT_STOCK** 이다
+            #   (dw_pr_outside_420_t1: from pu_t_mat_stock where cust_code='Z99990').
+            #   ⛔PU_T_MAT_STOCK_WH(창고별 분할)와 값이 크게 다르다 — 실측 Z99990 합계
+            #     PU_T_MAT_STOCK 5,435,926 vs _WH 8,964,610 (품목별로도 부호까지 다름).
+            #   2026-08-27 PBL 원본 확인 후 교체.
+            # ★자재창고(Z99990) = 웹 원장 nx.mat_stock_maint 집계(2026-08-27 전환).
+            #   레거시 PU_T_MAT_STOCK 대응 — 기초 7,900행 이관, Z99990 합계 5,435,927 일치 확인.
+            cur.execute(f"SELECT mat_code, SUM(maint_qty) FROM PARTNER_ERP_TEST3.nx.mat_stock_maint WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
+            for r in cur.fetchall(): z99[str(r[0]).strip()] = float(r[1] or 0)
+            # ★세트재고 = **웹 원장** nx.set_stock_maint 집계(2026-08-27 전환).
+            #   레거시 PU_T_SET_MAT_STOCK(잔액테이블) 대응 — 웹은 원장 SUM 으로 도출한다.
+            #     tag 9=기초이관 · 2=입고(setin.py 바코드입고) · 3=출고(procbc.py 생산실적 차감)
+            #   기초 4,148행을 라이브에서 이관해 잔액 일치 확인(대원산업 −1,335,595 동일).
+            #   ⚠이 블록은 라이브 커넥션(_conn)에서 돌므로 **3부분 이름**으로 지정해야 한다.
+            cur.execute(f"SELECT item_code, SUM(maint_qty) FROM PARTNER_ERP_TEST3.nx.set_stock_maint WHERE cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
+            for r in cur.fetchall(): sset[str(r[0]).strip()] = float(r[1] or 0)
+            # ★세트입고대기 — 레거시 원본(dw_pr_outside_420_t1) r5 서브쿼리 그대로:
+            #     from PU_T_SET_INPUT_REQ
+            #      where input_ymd = convert(varchar,getdate(),12)   ← ★오늘 고정
+            #        and confirm_flag = '0'
+            #      group by item_code, in_cust_code, am_pm
+            #   업무흐름: 420 「납품처리」 → 대기 생성 → 자재입고 바코드 처리 → confirm_flag='1'
+            #     → 세트재고로 전환. 화면은 **오늘 접수분 중 아직 입고 안 된 것**만 대기로 본다.
+            #   ⚠날짜조건을 빼면 과거 미확정분(실측 51건·2,630개)까지 붙어 레거시와 어긋난다
+            #     — 2026-08-27 PBL 원본 확인 후 원복.
+            #   ★웹 원장 nx.set_input_req 로 전환(2026-08-27). 레거시 confirm_flag='0' ↔ 웹 status:
+            #     00=대기(발행전) · 10=발행완료 · 30=입고대기(검사) · 90=입고완료(=confirm_flag '1')
+            #   → 미입고(00·10·30)가 레거시의 confirm_flag='0' 에 해당한다.
+            #   ⚠라이브 커넥션(_conn)에서 도는 블록이라 3부분 이름 필수.
+            cur.execute(f"SELECT item_code, SUM(ISNULL(deliver_qty,input_req_qty)) FROM PARTNER_ERP_TEST3.nx.set_input_req WHERE in_cust_code=? AND input_ymd=? AND status IN ('00','10','30') AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
+            for r in cur.fetchall(): sreq[str(r[0]).strip()] = float(r[1] or 0)
             cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(in_cust,''), ISNULL(WORK_CODE,''), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'0'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
-            for r in cur.fetchall(): msub[str(r[0])] = (str(r[1] or '0'), int(r[2] or 0))
+            # ★검사 = INSP_FLAG IN ('S','F') → '1' 로 정규화(프론트는 '1'/'0' 으로 판정).
+            #   ⛔종전엔 원값을 그대로 실어 프론트의 '1' 비교가 전건 실패 → 검사칸 항상 빈칸.
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N'), ISNULL(PACK_QTY,0) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            for r in cur.fetchall():
+                msub[str(r[0])] = ('1' if str(r[1] or 'N').strip() in ('S', 'F') else '0', int(r[2] or 0))
         # 자도번LIST(레거시 f_find_cust_mat_list2 = PR_M_CUST_MAT_LIST 조회, '(1)' 제거)
         matlist = {}
         for ch in _chunks(assys):
@@ -247,12 +296,15 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         try:
             for ch in _chunks(wos):
                 ph = ",".join("?"*len(ch))
-                cur.execute(f"""SELECT a.work_order, a.split_work_order, b.c_item_code,
-                      SUM(CEILING(CONVERT(float,a.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
-                    FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL a JOIN PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b ON a.model_no=b.model_no
+                # ★웹 편성결과로 전환(2026-08-27) — nx.plan_dtl.
+                #   nx.plan_dtl 에는 SPLIT_WORK_ORDER 컬럼이 없다 → WORK_ORDER 를 분할제번
+                #   자리에도 쓴다. **분할제번 = 제번**이라 값이 같다(사용자 확인 2026-08-27).
+                cur.execute(f"""SELECT a.WORK_ORDER, a.WORK_ORDER, b.c_item_code,
+                      SUM(CEILING(CONVERT(float,a.PLAN_QTY)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
+                    FROM PARTNER_ERP_TEST3.nx.plan_dtl a JOIN PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b ON a.MODEL_NO=b.model_no
                     JOIN PARTNER_ERP_TEST3.nx.item c ON b.c_item_code=c.item_code
-                    WHERE a.plan_ymd>? AND a.work_order IN ({ph})
-                    GROUP BY a.work_order, a.split_work_order, b.c_item_code""", to_ymd, *ch)
+                    WHERE a.PLAN_YMD>? AND a.WORK_ORDER IN ({ph})
+                    GROUP BY a.WORK_ORDER, b.c_item_code""", to_ymd, *ch)
                 for r in cur.fetchall(): over[(str(r[0]), str(r[1]), str(r[2]))] = int(float(r[3] or 0))
         except Exception:
             over = {}
@@ -405,8 +457,15 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         aic = {str(v[3]).strip() for v in assym.values() if str(v[3]).strip()}
         workm2 = _batch(awc, "SELECT WORK_CODE, WORK_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_WORK WHERE WORK_CODE IN ({ph})")
         custm2 = _batch(aic, "SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})")
+        # ★파트 마스터(PR_M_PROC_GAGONG) — 사내 납품은 여기 이름이 「05라인」·「06라인」이다.
+        #   레거시 w_pr_outside_410 「작업처」 컬럼이 이 값을 쓴다(2026-08-27 실측).
+        #   PR_M_WORK 에는 라인이 하나도 없어(P1=용접·P2=가공) 사내 라인이 표시되지 않았다.
+        #     S11=05라인 · RAC=06라인 · S4=04라인 · S1=02라인 · P0002=11라인(가공) …
+        _pgcodes = set(wccodes) | awc | aic
+        procm = _batch(_pgcodes, "SELECT GAGONG_PROC_CODE, GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE IN ({ph})")
         def nm_of(code):
             c = str(code or "").strip()
+            if c in procm and str(procm[c][1] or "").strip(): return str(procm[c][1]).strip()
             if c in workm: return workm[c][1]
             if c in custm: return custm[c][1]
             if c in workm2: return workm2[c][1]
@@ -531,29 +590,43 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                   pp.WORK_ORDER, pp.ASSY_ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
                   -- ★라인은 plan_item_dtl 우선(A/S·긴급 SVC/AP 제번은 plan_dtl 에 없어 41건 빈칸이 됐다)
                   ISNULL(NULLIF(MAX(ISNULL(d.LINE_NO,'')),''), ISNULL(pd.LINE_NO,'')) line, ISNULL(pd.MODEL_NO,'') model,
-                  -- 작업처 = 도번 마스터의 내부공정(work_code) 없으면 사내외주처(in_cust)
-                  COALESCE(NULLIF(wi.WORK_DESC,''), NULLIF(ci.CUST_DESC,''), NULLIF(RTRIM(i.work_code),''), NULLIF(RTRIM(i.in_cust),''), '') workcenter,
+                  -- ★작업처 = **도번의 공정 파트코드**(gagong_proc_code) 이름이 1순위(2026-08-27).
+                  --   레거시 화면의 「05라인」·「06라인」이 이 값이다:
+                  --     S11=05라인 · RAC=06라인 · S4=04라인 · S1=02라인 · P0002=11라인(가공) …
+                  --   ⛔도번 마스터 work_code 를 먼저 보면 P1→「용접」이 나와 레거시와 다르다
+                  --     (PR_M_WORK 에는 라인이 하나도 없다). 사내 납품처를 라인으로 보여주려면
+                  --     PR_M_PROC_GAGONG.GAGONG_PROC_DESC 를 써야 한다.
+                  --   파트코드가 없을 때만 종전 순서(내부공정 → 사내외주처)로 폴백.
+                  COALESCE(NULLIF(pg.GAGONG_PROC_DESC,''), NULLIF(wi.WORK_DESC,''), NULLIF(ci.CUST_DESC,''),
+                           NULLIF(RTRIM(i.work_code),''), NULLIF(RTRIM(i.in_cust),''), '') workcenter,
                   MAX(CAST(ISNULL(d.LOT_QTY,0) AS float)) lot,
                   MAX(CEILING(CAST(ISNULL(d.PLAN_QTY,0) AS float)*ISNULL(d.USE_QTY,1)*ISNULL(d.PROD_RATE,100)/100.0)) q,
                   COUNT(DISTINCT pp.MAT_CODE) matn,
-                  STUFF((SELECT DISTINCT ','+RTRIM(x.MAT_CODE) FROM nx.plan_part_mat x
+                  STUFF((SELECT DISTINCT ','+RTRIM(x.MAT_CODE) FROM PARTNER_ERP_TEST3.nx.plan_part_mat x
                           WHERE x.WORK_ORDER=pp.WORK_ORDER AND x.SPLIT_WORK_ORDER=pp.SPLIT_WORK_ORDER
                             AND x.ASSY_ITEM_CODE=pp.ASSY_ITEM_CODE
                             AND x.MAT_WORK_CENTER_CODE=pp.MAT_WORK_CENTER_CODE
                           FOR XML PATH('')),1,1,'') mats
-                FROM nx.plan_part_mat pp
+                FROM PARTNER_ERP_TEST3.nx.plan_part_mat pp
                 JOIN nx.plan_item_dtl d ON d.WORK_ORDER{C}=pp.WORK_ORDER{C}
                      AND d.SPLIT_WORK_ORDER{C}=pp.SPLIT_WORK_ORDER{C} AND d.C_ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
-                LEFT JOIN (SELECT WORK_ORDER, MAX(LINE_NO) LINE_NO, MAX(MODEL_NO) MODEL_NO FROM nx.plan_dtl GROUP BY WORK_ORDER) pd ON pd.WORK_ORDER=pp.WORK_ORDER
+                LEFT JOIN (SELECT WORK_ORDER, MAX(LINE_NO) LINE_NO, MAX(MODEL_NO) MODEL_NO FROM PARTNER_ERP_TEST3.nx.plan_dtl GROUP BY WORK_ORDER) pd ON pd.WORK_ORDER=pp.WORK_ORDER
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wi ON wi.WORK_CODE{C}=RTRIM(i.work_code){C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST ci ON ci.CUST_CODE{C}=RTRIM(i.in_cust){C}
+                -- ★도번(ASSY)의 공정 파트코드 → 파트 마스터 이름(「05라인」…)
+                --   ④ 파트별계획(plan_part_dtl)의 최상위행(bom_level=0)이 그 도번의 파트다.
+                LEFT JOIN (SELECT assy_item_code, MIN(RTRIM(gagong_proc_code)) pc
+                             FROM nx.plan_part_dtl
+                            WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
+                            GROUP BY assy_item_code) ap ON ap.assy_item_code{C}=pp.ASSY_ITEM_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE{C}=ap.pc{C}
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE),
                   pp.WORK_ORDER, pp.SPLIT_WORK_ORDER, pp.ASSY_ITEM_CODE, i.item_name, i.item_spec, pd.LINE_NO, pd.MODEL_NO,
-                  wi.WORK_DESC, ci.CUST_DESC, i.work_code, i.in_cust
+                  wi.WORK_DESC, ci.CUST_DESC, i.work_code, i.in_cust, pg.GAGONG_PROC_DESC
                 ORDER BY wcnm, pp.WORK_ORDER, pp.ASSY_ITEM_CODE""", *p)
         except Exception as e:
             return {"dates": [], "rows": [], "cnt": 0, "sum_qty": 0, "note": "편성 먼저 실행(생산계획업로드 → 🧾자재소요·조달 편성). 오류: " + str(e)[:120]}
@@ -744,6 +817,23 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             for rr in cur.fetchall(): wcnm[str(rr[0]).strip()] = rr[1]
             cur.execute(f"SELECT CUST_CODE, CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): wcnm.setdefault(str(rr[0]).strip(), rr[1])
+        # ★작업처 = 도번의 공정 파트코드 이름(「04라인」·「05라인」) — 410 과 동일 규칙(2026-08-27).
+        #   레거시 420 화면도 사내 납품을 라인명으로 보여준다.
+        #   PR_M_WORK 에는 라인이 없어(P1=용접) 그대로 두면 '용접'이 나온다.
+        pgnm = {}
+        for i in range(0, len(assys), 900):
+            ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
+            cur.execute(f"""SELECT a.assy_item_code, g.GAGONG_PROC_DESC
+                              FROM (SELECT assy_item_code, MIN(RTRIM(gagong_proc_code)) pc
+                                      FROM PARTNER_ERP_TEST3.nx.plan_part_dtl
+                                     WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
+                                       AND assy_item_code IN ({ph})
+                                     GROUP BY assy_item_code) a
+                              JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+                                ON g.GAGONG_PROC_CODE=a.pc""", *ch)
+            for rr in cur.fetchall():
+                _v = str(rr[1] or '').strip()
+                if _v: pgnm[str(rr[0]).strip()] = _v
     finally:
         cn.close()
     # 발행분(nx.deliv_issue) 반영 — 발행완료 수량 차감·상태(라이브 미기록·nx만).
@@ -751,7 +841,14 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
     try:
         nx = _nx(); nc = nx.cursor()
         _ensure_deliv_issue(nc)
-        nc.execute("SELECT item_code, SUM(deliver_qty) FROM nx.deliv_issue WHERE cust_code=? AND status<>'99' GROUP BY item_code", cust)
+        # ★조회기간(issue_ymd) 안의 발행분만 차감한다 (2026-08-27 버그수정).
+        #   ⛔종전엔 기간조건이 없어 협력사의 **전 기간 발행분**을 합산 차감했다.
+        #     → 한 번 발행한 품목이 어느 기간을 조회해도 req=0·status=90 이 되어
+        #       체크박스가 영구히 잠겼고(재발행 불가), 같은 발행 1건이 기간을 옮길 때마다
+        #       반복 차감됐다(AJR77224505: 8/27~31 에서 1 차감 → 9/1~2 에서 또 1 차감).
+        nc.execute("""SELECT item_code, SUM(deliver_qty) FROM nx.deliv_issue
+                       WHERE cust_code=? AND status<>'99'
+                         AND issue_ymd BETWEEN ? AND ? GROUP BY item_code""", cust, from_ymd, to_ymd)
         for rr in nc.fetchall(): issued[str(rr[0]).strip()] = float(rr[1] or 0)
         nx.close()
     except Exception:
@@ -765,13 +862,19 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         wcc = m["work_code"] or m["in_cust"]
         iss = issued.get(str(m["assy"]).strip(), 0.0)
         req0 = m["req"]; remain = max(0.0, req0 - iss)
-        # ★구분(레거시 420 '구분' 컬럼) — 세트재고/입고대기가 있으면 세트입고, 아니면 직납.
-        #   레거시는 직납품을 세트재고 없이 자재·물류창고 재고로 본다(SP_LIVE 533·539행 주석).
-        _gb = "세트입고" if (m["iset_stk"] or m["ireq"]) else ("직납" if not m["work_code"] else "")
+        # ★구분(레거시 420 '구분' 컬럼) — dw_pr_outside_420_t1 원본 확인(2026-08-27).
+        #   TEMP_CTE 가 도번을 두 갈래로 나눈다:
+        #     /*직납품 검색*/     ... and c.in_cust_code  = :as_cust   ← 도번 자체가 그 협력사 납품
+        #     /*직납아닌품 검색*/ ... and c.in_cust_code <> :as_cust   ← 세트로 묶여 들어가는 하위
+        #   즉 **품목마스터 in_cust 가 조회 협력사와 같으면 직납, 다르면 세트입고**다.
+        #   ⛔종전엔 "세트재고/입고대기가 있으면 세트입고"로 추정해 재고 유무에 따라 흔들렸다
+        #     (대기가 0 이면 전부 '직납'으로 뒤집힘 — 실측 92건 전건 오판).
+        _gb = "직납" if (m["in_cust"] and m["in_cust"] == cust) else "세트입고"
         # ★작업처 = 내부공정(work_code)명 없으면 사내외주처(in_cust)명. 코드가 아니라 이름 표시(CLAUDE.md §3).
         #   종전엔 m["work_center"] 만 봐서 전부 빈칸이었다(2026-08-27 수정).
         #   wcc 가 비면(품목마스터에 work_code·in_cust 둘 다 없음) 조회 협력사명으로 대체 — 레거시도 그 칸에 협력사명.
-        _wcnm = m["work_center"] or wcnm.get(wcc, "") or wcc or custnm.get(m["cust"], m["cust"])
+        #   ★파트 마스터 이름(「04라인」…)이 1순위 — 410 과 동일(2026-08-27).
+        _wcnm = pgnm.get(str(m["assy"]).strip(), "") or m["work_center"] or wcnm.get(wcc, "") or wcc or custnm.get(m["cust"], m["cust"])
         out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"], "line": m["line"],
             "nm": nm, "spec": spec, "workcenter": _wcnm,
             "work_center": _wcnm, "in_cust": m["in_cust"] or "", "gubun": _gb,
@@ -844,7 +947,7 @@ def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: 
         # 기본: 라이브 최소 계획일자 ~ +4근무일 horizon
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT MIN(plan_ymd) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WHERE plan_ymd>'000000'")
+            cur.execute("SELECT MIN(PLAN_YMD) FROM PARTNER_ERP_TEST3.nx.plan_dtl WHERE PLAN_YMD>'000000'")
             mn = cur.fetchone()[0]
         finally:
             cn.close()
@@ -857,7 +960,11 @@ def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: 
     mc = f"%{matcode.strip()}%" if matcode.strip() else "%"
     try:
         res = _deliv420_rows(cust.strip(), d6f, d6t, it, mc)
-        res["note"] = f"레거시 거래명세서(w_pr_outside_420) 동일 · SP_LIVE 라이브 직독 · 완료=출하+완제품재고+세트/입고대기 재고배분(510창). 기준 {d6f}~{d6t}."
+        # ★실제 조회기준을 응답에 실어 준다 — 발행(issue) 검증이 **같은 기간**으로
+        #   재조회해야 요청수량(잔량)이 화면과 일치한다(2026-08-27).
+        #   프론트는 이 값을 그대로 issue 에 되돌려 보낸다.
+        res["base_from"] = d6f; res["base_to"] = d6t
+        res["note"] = f"레거시 거래명세서(w_pr_outside_420) 동일 · 웹편성(nx) 직독 · 완료=출하+완제품재고+세트/입고대기 재고배분(510창). 기준 {d6f}~{d6t}."
         return res
     except Exception as e:
         return {"dates": [], "rows": [], "cnt": 0, "note": f"⚠ 조회 오류: {str(e)[:150]}"}
@@ -872,17 +979,33 @@ def partner_deliv420_issue(body: dict = Body(...)):
     preview = _b(body.get("preview", 0))
     if not cust: return {"ok": False, "msg": "협력사를 선택하세요."}
     if not items: return {"ok": False, "msg": "발행할 도번(완성분)을 선택하세요."}
-    # 잔여 요청수량 검증용 재조회(라이브, 읽기전용)
+    # 잔여 요청수량 검증용 재조회
+    #   ★조회화면과 **같은 기간**이어야 한다(2026-08-27). 화면은 gigan(일수)을
+    #     _wd_horizon() 으로 근무일 지평으로 늘려 넘기는데(260827+2일 → 260902),
+    #     발행검증이 받은 to_ymd(260831)를 그대로 쓰면 기간이 짧아 req=0 이 되어
+    #     "요청(잔량) 0 초과" 로 전건 차단됐다.
     d6f = _d6(body.get("from_ymd", "")) or None
     d6t = _d6(body.get("to_ymd", "")) or None
-    if not d6f or not d6t:
+    if not d6f:
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT MIN(plan_ymd) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WHERE plan_ymd>'000000'"); mn = cur.fetchone()[0]
+            cur.execute("SELECT MIN(PLAN_YMD) FROM PARTNER_ERP_TEST3.nx.plan_dtl WHERE PLAN_YMD>'000000'"); d6f = cur.fetchone()[0]
         finally: cn.close()
+    # ★조회 응답의 base_to 를 그대로 받으면 그것이 최우선(화면과 100% 동일 기간).
+    _bt = _d6(body.get("base_to", "")) or None
+    _bf = _d6(body.get("base_from", "")) or None
+    if _bf: d6f = _bf
+    if _bt:
+        d6t = _bt
+    else:
+        try:
+            _g = int(body.get("gigan", 0) or 0)
+        except Exception:
+            _g = 0
+        if _g > 0: d6t = _wd_horizon(d6f, _g)
+    if not d6t:
         import datetime as _di
-        d6f = d6f or mn
-        d6t = d6t or (_di.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _di.timedelta(days=6)).strftime('%y%m%d')
+        d6t = (_di.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _di.timedelta(days=6)).strftime('%y%m%d')
     res = _deliv420_rows(cust, d6f, d6t)
     remain = {str(r["assy"]).strip(): float(r["req"] or 0) for r in res["rows"]}  # 잔여 요청(발행분 차감 후)
     packmap = {str(r["assy"]).strip(): float(r["pack"] or 0) for r in res["rows"]}
@@ -915,10 +1038,39 @@ def partner_deliv420_issue(body: dict = Body(...)):
         _ensure_deliv_issue(cur)
         cur.execute("SELECT ISNULL(MAX(CAST(barcode_no AS int)),700000)+1 FROM nx.deliv_issue WHERE ISNUMERIC(barcode_no)=1")
         bc = str(cur.fetchone()[0])
+        _usr = str(body.get("user", "web"))
+        # ★납품처리 = 발행기록 + **세트입고대기 생성**(2026-08-27).
+        #   사용자 확정: "납품발행하면 요청수량은 사라지고 입고대기로 가게 되어있어"
+        #   레거시 확인(pr_outside_01.pbl · w_pr_outside_420):
+        #     갱신용 DW 「자재세트납품처리갱신용」·「자재납품요청갱신용」이
+        #     **PU_T_SET_INPUT_REQ (+ _DTL)** 에 기록한다.
+        #     키 = INPUT_YMD · INPUT_HMS · IN_CUST_CODE · ITEM_CODE · LINE_NO
+        #          · ITEM_GUBUN · PLAN_YMD · AM_PM
+        #   흐름: 420 납품처리 → nx.set_input_req(대기·status='10'·barcode_no)
+        #         → 자재입고 바코드(setin.py) → nx.set_stock_maint(+) = 세트재고
+        #         → 생산실적(procbc.py)       → nx.set_stock_maint(−)
+        #   요청수량은 deliv_issue 발행분 차감으로 줄고(_deliv420_rows), 그 물량이 입고대기(ireq)에 잡힌다.
+        _rmap = {str(r["assy"]).strip(): r for r in res["rows"]}
+        cur.execute("SELECT ISNULL(MAX(CAST(sheet_no AS bigint)),900000)+1 FROM nx.set_input_req WHERE ISNUMERIC(sheet_no)=1")
+        _sh = int(cur.fetchone()[0])
+        _hms = _di2.datetime.now().strftime('%H%M%S')
         for p in plan:
             cur.execute("""INSERT INTO nx.deliv_issue(issue_ymd, barcode_no, cust_code, item_code, deliver_qty, pack_qty, serial_no, heat_no, status, ins_user)
                 VALUES(?,?,?,?,?,?,?,?, '10', ?)""",
-                ymd, bc, cust, p["assy"], p["deliver_qty"], p["pack_qty"], p["serial_no"], p["heat_no"], str(body.get("user", "web")))
+                ymd, bc, cust, p["assy"], p["deliver_qty"], p["pack_qty"], p["serial_no"], p["heat_no"], _usr)
+            _r = _rmap.get(p["assy"], {})
+            _hm = str(_r.get("output_hm") or "").strip()
+            cur.execute("""INSERT INTO nx.set_input_req
+                   (sheet_no, input_ymd, input_hms, in_cust_code, item_code, item_gubun,
+                    plan_ymd, am_pm, input_req_qty, deliver_qty, pack_qty, insp_flag,
+                    status, barcode_no, issue_ymd, remarks, insert_user_id, insert_datetime)
+                   VALUES(?,?,?,?,?, '1', ?,?,?,?,?,?, '10', ?, ?, 'DELIV420', ?, getdate())""",
+                str(_sh), ymd, _hms, cust, p["assy"],
+                (str(_r.get("plan_ymd") or "") or ymd),
+                ('A' if (_hm and _hm < '1200') else 'P'),
+                p["deliver_qty"], p["deliver_qty"], p["pack_qty"],
+                str(_r.get("insp") or '0'), bc, ymd, _usr)
+            _sh += 1
         nx.commit()
         return {"ok": True, "barcode": bc, "count": len(plan), "total_qty": _qint(sum(p["deliver_qty"] for p in plan))}
     except Exception as e:
@@ -928,14 +1080,23 @@ def partner_deliv420_issue(body: dict = Body(...)):
 
 @router.post("/api/partner/deliv420/cancel")
 def partner_deliv420_cancel(body: dict = Body(...)):
-    """발행취소 — 해당 바코드 발행행 status='99'(nx만)."""
+    """발행취소 — 발행행 status='99' + **세트입고대기 회수**(발행의 역동작).
+       ⚠이미 바코드 입고된 건(status 30/90)은 세트재고가 잡혔으므로 취소하지 않는다."""
     bc = str(body.get("barcode", "")).strip()
     if not bc: return {"ok": False, "msg": "바코드가 필요합니다."}
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_deliv_issue(cur)
         cur.execute("UPDATE nx.deliv_issue SET status='99' WHERE barcode_no=? AND status<>'99'", bc)
-        return {"ok": True, "cancelled": cur.rowcount}
+        _c = cur.rowcount
+        # 입고 전(10)인 대기분만 삭제 — 입고완료(90)·검사대기(30)는 재고에 반영돼 손대지 않는다.
+        _d = 0
+        try:
+            cur.execute("DELETE FROM nx.set_input_req WHERE barcode_no=? AND status='10' AND remarks='DELIV420'", bc)
+            _d = cur.rowcount
+        except Exception:
+            pass
+        return {"ok": True, "cancelled": _c, "req_removed": _d}
     finally:
         nx.close()
 
@@ -985,13 +1146,77 @@ def partner_deliv420_invoice(barcode: str = Query(...)):
         buyer = {"biz": _fmtbiz(b[0]), "nm": (b[1] or '').strip(), "owner": (b[2] or '').strip(),
                  "addr": (b[3] or '').strip(), "tel": (b[4] or '').strip(), "fax": (b[5] or '').strip(),
                  "btype": (b[6] or '').strip(), "bkind": (b[7] or '').strip()}
-        # 품목명/규격 배치조회(라이브)
+        # 품목명/규격 배치조회
         assys = sorted({str(r[1]).strip() for r in drows if r[1]})
         nmm = {}
+        subs = {}      # 도번 → [(하위P/No., 품명, 소요수)]
+        inspm = {}     # 도번 → 검사플래그
         for i in range(0, len(assys), 900):
             ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2], rr[3])
+            # ★하위 P/No. — 레거시 거래명세표는 도번 아래에 하위 자재를 펼친다.
+            #   자도번LIST = PR_M_CUST_MAT_LIST.MAT_LIST **문자열**이다(컬럼 아님):
+            #     "AJR30027702-12-1{1},MJU66801001{1}"  → 콤마 분리 · {n} 소요수 제거
+            cur.execute(f"""SELECT ITEM_CODE, ISNULL(MAT_LIST,'')
+                              FROM PARTNER_ERP_TEST3.nx.PR_M_CUST_MAT_LIST
+                             WHERE CUST_CODE=? AND ITEM_CODE IN ({ph})""", cust, *ch)
+            for rr in cur.fetchall():
+                _it = str(rr[0]).strip()
+                for _tok in str(rr[1] or '').split(','):
+                    _m = _tok.split('{')[0].split('[')[0].strip()
+                    if _m: subs.setdefault(_it, []).append(_m)
+            # ★검사 판정 = INSP_FLAG IN ('S','F') (2026-08-27 버그수정).
+            #   ⛔종전엔 '1' 과 비교해 전건 무검사로 떨어졌고 출하검사성적서가 아예 출력되지 않았다.
+            #   실제 값은 F=전수검사 · S=샘플검사 · N/''/'(' = 무검사 (item.py:16 _INSP,
+            #   common.py:342·purmagam.py:18 등 코드베이스 전반이 ('S','F') 를 검사대상으로 쓴다).
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
+        # 하위 자재 품명 보강(자도번은 위 assys 에 없으므로 따로 조회)
+        _mats = sorted({m for v in subs.values() for m in v if m and m not in nmm})
+        for i in range(0, len(_mats), 900):
+            ch = _mats[i:i+900]; ph = ",".join("?"*len(ch))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2], rr[3])
+        # ★납품표(2번 출력물)용 — 작업처·입고구분·생산계획일·SVC
+        _wcm = {}; _gbm = {}; _pym = {}; _lym = {}; _svc = set()
+        for i in range(0, len(assys), 900):
+            ch = assys[i:i+900]; ph = ",".join("?"*len(ch))
+            # 작업처 = 도번의 공정 파트코드 이름(410/420 화면과 동일 규칙)
+            cur.execute(f"""SELECT a.assy_item_code, g.GAGONG_PROC_DESC
+                              FROM (SELECT assy_item_code, MIN(RTRIM(gagong_proc_code)) pc
+                                      FROM PARTNER_ERP_TEST3.nx.plan_part_dtl
+                                     WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
+                                       AND assy_item_code IN ({ph})
+                                     GROUP BY assy_item_code) a
+                              JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE=a.pc""", *ch)
+            for rr in cur.fetchall():
+                _v = str(rr[1] or '').strip()
+                if _v: _wcm[str(rr[0]).strip()] = _v
+            # 입고구분 = 품목 in_cust 가 이 협력사면 '직납', 아니면 '세트'
+            cur.execute(f"SELECT ITEM_CODE, RTRIM(ISNULL(in_cust,'')) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall():
+                _gbm[str(rr[0]).strip()] = '직납' if str(rr[1] or '').strip() == cust else '세트'
+            # 생산계획일 / LG 원본일자
+            cur.execute(f"""SELECT C_ITEM_CODE, MIN(PLAN_YMD), MIN(ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD))
+                              FROM PARTNER_ERP_TEST3.nx.plan_item_dtl
+                             WHERE C_ITEM_CODE IN ({ph}) GROUP BY C_ITEM_CODE""", *ch)
+            for rr in cur.fetchall():
+                _k = str(rr[0]).strip()
+                def _f6(s):
+                    s = str(s or '').strip()
+                    return f"{s[:2]}/{s[2:4]}/{s[4:6]}" if len(s) == 6 else ''
+                _pym[_k] = _f6(rr[1]); _lym[_k] = _f6(rr[2])
+            # ★SVC 판정 — 계획 라인번호가 'SVC'(A/S용). 레거시는 SVC 를 별도 분리 출력한다.
+            #   근거: nx.plan_item_dtl.LINE_NO='SVC' 188건 · 제번도 WO…SVC 접미(WO1094009SVC).
+            #   ⚠set_input_req 에는 제번이 없어(item_code 단위) 품목으로만 판정할 수 있다.
+            #     그래서 **SVC 전용 품목**(계획 라인이 전부 SVC)만 분리한다 —
+            #     SVC·일반을 겸하는 품목을 SVC 로 몰면 일반 납품분까지 잘못 분리된다.
+            cur.execute(f"""SELECT C_ITEM_CODE FROM PARTNER_ERP_TEST3.nx.plan_item_dtl
+                             WHERE C_ITEM_CODE IN ({ph})
+                             GROUP BY C_ITEM_CODE
+                            HAVING SUM(CASE WHEN LINE_NO='SVC' THEN 0 ELSE 1 END)=0""", *ch)
+            for rr in cur.fetchall(): _svc.add(str(rr[0]).strip())
     finally:
         cn.close()
     rows = []; tot = 0.0
@@ -999,9 +1224,29 @@ def partner_deliv420_invoice(barcode: str = Query(...)):
         item = str(item).strip()
         nm, spec, unit = nmm.get(item, ("", "", "EA"))
         q = float(dq or 0); tot += q
-        rows.append({"doban": item, "nm": (nm or '').strip(), "spec": (spec or '').strip(),
+        _in = '검사' if inspm.get(item) in ('S', 'F') else ''
+        # 도번 행 — 납품표(2번 출력물)용 필드도 함께 싣는다.
+        #   subs=자도번LIST · wc=작업처 · gubun=입고구분 · plan_ymd/lg_ymd=생산계획
+        _sb = subs.get(item, [])
+        rows.append({"doban": item, "sub": "", "nm": (nm or '').strip(), "spec": (spec or '').strip(),
                      "unit": (unit or 'EA').strip(), "qty": _qint(q), "pack": _qint(pk or 0),
+                     "insp": _in, "note": "",
+                     "subs": [f"{m}(1)" for m in _sb],
+                     "wc": _wcm.get(item, ""), "gubun": _gbm.get(item, "세트"),
+                     "plan_ymd": _pym.get(item, ""), "lg_ymd": _lym.get(item, ""),
+                     "svc": 1 if item in _svc else 0,
                      "serial": (sn or '').strip(), "heat": (hn or '').strip()})
+        # 하위 자재 행(레거시 동일 — Assy 칸 비우고 하위 P/No. 만)
+        for mat in subs.get(item, []):
+            if not mat: continue
+            _mnm = nmm.get(mat, ("", "", ""))[0]
+            rows.append({"doban": "", "sub": mat, "nm": (_mnm or '').strip(), "spec": "", "unit": "",
+                         "qty": _qint(q), "pack": 0, "insp": "", "note": "",
+                         "svc": 1 if item in _svc else 0,
+                         "serial": "", "heat": ""})
+    # 납품표 제목 식별자 — 레거시는 "PNC_260806_00:05" 형태(회사_발행일_시각)
+    _tt = f"PNC_{issue_ymd}" if issue_ymd else "PNC"
     return {"barcode": "SET" + bcnum, "raw": bcnum, "code": "SET" + bcnum, "ymd": ymd_disp,
+            "title": _tt,
             "custnm": supplier["nm"] or cust, "cust": cust,
             "supplier": supplier, "buyer": buyer, "rows": rows, "total": _qint(tot), "count": len(rows)}
