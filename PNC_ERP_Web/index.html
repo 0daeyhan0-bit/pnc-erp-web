@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PNC ERP — 차세대 웹 ERP</title>
-<link rel="stylesheet" href="css/app.css?v=260826src">
+<link rel="stylesheet" href="css/app.css?v=260827h100">
 </head>
 <body>
 <div id="app">
   <!-- Header -->
   <header class="hd">
     <div class="hd-left">
+      <button class="sb-toggle" id="sbToggle" title="메뉴 숨김/열기 (Ctrl+B)">☰</button>
       <div class="brand"><span class="brand-mark">P</span> PNC<span class="brand-sub">ERP</span></div>
       <div class="hd-company">피앤씨인더스트리 ▾</div>
     </div>
@@ -24,8 +25,8 @@
     </div>
   </header>
 
-  <div class="body">
-    <!-- Sidebar: collapsible tree menu -->
+  <div class="body" id="appBody">
+    <!-- Sidebar: collapsible tree menu (열고 닫기 = 헤더 버튼 / Ctrl+B) -->
     <aside class="sb" id="sidebar"></aside>
 
     <!-- Workspace -->
@@ -37,7 +38,7 @@
 </div>
 <script src="js/data.js?v=260804i"></script>
 <script src="js/costdata.js?v=260804i"></script>
-<script src="js/core.js?v=260826mbomuldong"></script>
+<script src="js/core.js?v=260827h100"></script>
 <script src="js/screens.base.js?v=260826calwork"></script>
 <script src="js/screens.pur.js?v=260825io"></script>
 <script src="js/screens.prod.js?v=260826def"></script>
@@ -46,7 +47,7 @@
 <script src="js/screens.sales.js?v=260826muldong3"></script>
 <script src="js/screens.qc.js?v=260826qcfile"></script>
 <script src="js/screens.dev.js?v=260826bomui"></script>
-<script src="js/screens.etc.js?v=260827mbnew"></script>
+<script src="js/screens.etc.js?v=260827d420b"></script>
 <script src="js/boot.js?v=260804i"></script>
 </body>
 </html>

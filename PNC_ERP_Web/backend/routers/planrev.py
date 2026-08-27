@@ -201,6 +201,37 @@ def _step7_sql(cur):
     # ★★조달경로(route) 반영 인프라(2026-08-24, 가산적): 활성 대체경로(sourcing_route current_flag=1·route_no>1) 있으면
     #   그 경로의 BOM엣지(route_edges)로 전개, 없으면 v_pr_bom(현행 except<>1) fallback=R01 diff0(검증: route CTE≡원본 100.000%).
     _route_setup(cur)
+    # ★★직납품 당김(2026-08-27) — 레거시 「LINE-NO MASTER」의 '직납품당김일자'(PR_M_LINE_NO.CUST_MAINT_DAY).
+    #   파트별계획이 없는 도번(=직납품)은 라인의 CUST_MAINT_DAY 만큼 **근무일 기준으로 추가 당김**된다.
+    #   레거시 SP_PR_4주간계획현황_LIVE 167행과 동일 산식:
+    #     IIF(L.CUST_MAINT_DAY>0, f_reld_doosung_live(a.plan_ymd, L.CUST_MAINT_DAY*-1), a.plan_ymd)
+    #   실측 근거: ASSY행 불일치 619건 중 516건이 라인 CA — CA 가 CUST_MAINT_DAY=1 을 가진 유일한 라인,
+    #             그중 420건이 정확히 +1일 차이였다.
+    #   근무일 = 공통달력(HR_M_CALENDAR 팀A·주간, work_stats 1/2/5/6/7). 직납품은 파트가 없으므로 공통 사용.
+    cur.execute("IF OBJECT_ID('tempdb..#wd') IS NOT NULL DROP TABLE #wd")
+    cur.execute("""SELECT ymd6, ROW_NUMBER() OVER(ORDER BY ymd6) rn INTO #wd FROM
+        (SELECT SUBSTRING(calendar_yymd,3,6) ymd6, work_stats FROM nx.HR_M_CALENDAR
+          WHERE work_team='A' AND time_type='A') c
+        WHERE work_stats IN ('1','2','5','6','7')""")
+    cur.execute("CREATE INDEX ix_wd ON #wd(ymd6)")
+    cur.execute("CREATE INDEX ix_wd_rn ON #wd(rn)")
+    #   ⚠출발점은 **라인당김이 적용된 일자**(plan_line_pull.pulled)여야 한다 — STEP5(384행)와 같은 기준.
+    #     plan_dtl.PLAN_YMD(원본)에서 당기면 라인당김이 빠져 어긋난다(실측: 웹 dtl 이 라이브보다 +1/+3/+5일).
+    cur.execute("IF OBJECT_ID('nx.plan_direct_pull') IS NOT NULL DROP TABLE nx.plan_direct_pull")
+    _has_lp = int(cur.execute(
+        "SELECT CASE WHEN OBJECT_ID('nx.plan_line_pull') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
+    _base = "ISNULL(p.pulled, d.PLAN_YMD)" if _has_lp else "d.PLAN_YMD"
+    _lpj = ("LEFT JOIN nx.plan_line_pull p ON p.wo=d.WORK_ORDER AND p.org=d.PLAN_YMD"
+            if _has_lp else "")
+    cur.execute(("""SELECT RTRIM(d.WORK_ORDER) AS work_order, w2.ymd6 AS pull_ymd
+      INTO nx.plan_direct_pull
+      FROM nx.plan_dtl d
+      {LPJ}
+      JOIN {P}PR_M_LINE_NO L ON RTRIM(L.LINE_NO)=RTRIM(d.LINE_NO) AND ISNULL(L.CUST_MAINT_DAY,0)>0
+      JOIN #wd w1 ON w1.ymd6={BASE}
+      JOIN #wd w2 ON w2.rn=w1.rn-CAST(L.CUST_MAINT_DAY AS int)
+     WHERE ISNULL(d.PLAN_YMD,'')<>''""").replace("{P}", P).replace("{LPJ}", _lpj).replace("{BASE}", _base))
+    cur.execute("CREATE INDEX ix_plan_direct_pull ON nx.plan_direct_pull(work_order)")
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
     # ★★자재소요 일자 = **당김 후**(part_plan_ymd) — 2026-08-27 추가.
     #   레거시 PR_T_PLAN_PART_MAT 은 날짜를 2벌 갖는다:
@@ -220,11 +251,14 @@ def _step7_sql(cur):
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CONVERT(float,a.part_plan_qty)/NULLIF(a.use_qty,0),a.gc_gubun,'0'
       FROM nx.plan_part_dtl a JOIN nx.item_ov c ON a.item_code=c.item_code WHERE a.proc_seq=1
       UNION ALL
-      SELECT a.plan_ymd,a.plan_ymd,ISNULL(a.OUTPUT_HM,''),
+      -- ★직납품(파트별계획 없음) 앵커: 소요일자에 라인 CUST_MAINT_DAY(직납품당김일자) 적용.
+      --   plan_ymd(상위 계획일)는 그대로 두고 part_plan_ymd 만 당긴다.
+      SELECT a.plan_ymd,ISNULL(dp.pull_ymd,a.plan_ymd),ISNULL(a.OUTPUT_HM,''),
          a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
          c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CEILING(CONVERT(float,a.plan_qty)*ISNULL(a.use_qty,1)*ISNULL(CASE WHEN a.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100),'','1'
       FROM nx.plan_item_dtl a JOIN nx.item_ov c ON a.c_item_code=c.item_code
+      LEFT JOIN nx.plan_direct_pull dp ON dp.work_order=RTRIM(a.work_order)
       WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.item_code=a.c_item_code)
       UNION ALL
       SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
@@ -265,11 +299,18 @@ def _step7_sql(cur):
     #       과거 계획으로 재편성해도 그때 기준으로 재현된다.
     cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
     _mat_base = str(cur.fetchone()[0] or "").strip()
+    #     ★예외(2026-08-27): **직납품 당김분(CUST_MAINT_DAY)** 은 클램프하지 않는다.
+    #       직납품은 당일보다 이른 소요일이 실제로 존재한다(라이브 ASSY행 88건이 B 이전).
+    #       클램프가 당김값을 되돌려 CA 라인 77건이 어긋났다 → ASSY행 83.82%→86.87%.
     cur.execute(("""SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code AS mat_code,
         SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code,
-        CASE WHEN MIN(a.part_plan_ymd) < '{B}' THEN '{B}' ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
-        CASE WHEN MIN(a.part_plan_ymd) < '{B}' THEN '0750' ELSE MIN(a.part_output_hm) END AS part_output_hm
-    INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a""".replace("{B}", _mat_base) + """
+        CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '{B}'
+             ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
+        CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '0750'
+             ELSE MIN(a.part_output_hm) END AS part_output_hm
+    INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
+    LEFT JOIN nx.plan_direct_pull dpx ON dpx.work_order=RTRIM(a.work_order)
+         AND a.bom_level=0 AND a.bom_mat_code=a.assy_item_code""".replace("{B}", _mat_base) + """
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
@@ -743,6 +784,18 @@ def planrev_step_model(payload: dict = Body(...)):
     return _run_step("M", _f, _by(payload))
 
 
+# ⛔제번 병합(/api/planrev/step/mergewo) — 2026-08-27 시도 후 **폐기**.
+#   가설: 업로드(order.py:52 `k=(wo,ymd)`)가 엑셀 일자컬럼을 펼쳐 165제번이 다중행이 되는데,
+#         라이브 PR_T_PLAN_DTL 은 제번당 1행이라 이 구조 차이가 420 부정확의 원인일 것이다.
+#   결과: **틀렸다.** 4,334→4,166 행으로 라이브와 같은 구조가 됐지만 정합이 오히려 무너졌다.
+#         ④파트별 99.86%→95.39% · ⑤자재행 99.88%→96.23% · ★ASSY행 100.00%→97.22%
+#         (일자를 LG_INPUT 으로 덮은 1차 시도는 더 나빴다: 자재행 43.32%·ASSY 22.57%)
+#   원인: STEP5 가 제번을 이미 합쳐 처리하므로 plan_dtl 이 몇 행이든 결과가 같다.
+#         병합은 得이 없고, MIN(일자)로 접으면서 라인당김 출발점만 어긋났다.
+#   ★결론: **웹의 (제번,일자) 그레인이 정답이다.** 라이브와 행 구조가 달라도 무방하다.
+#         420 ASSY행은 병합 없이 100.00% 다(직납품당김일자 적용 + LG 라이브 우선).
+
+
 @router.post("/api/planrev/step/history")
 def planrev_step_history(payload: dict = Body(...)):
     """② 생산계획이력생성 (H) — nx.sale_plan + nx.plan_snap"""
@@ -1170,19 +1223,27 @@ def _ensure_line_pull(cur):
     #   LG_INPUT_YMD/HM 은 레거시가 라인당김을 계산해 저장해 둔 결과 컬럼이다.
     #   웹 산식은 이를 98.43%(일자)/91.29%(시각)까지 재현하므로, 미러가 있으면 미러를,
     #   없으면 산식을 쓴다(RF2 등 LG 미기록 72건은 산식이 72/72 일치).
-    #   ★2026-08-27 원천 nx 우선으로 전환(사용자 지시 "레거시 연동보다 nx로").
-    #     2026-08-26 시점엔 미러가 하루 뒤처져 15건이 어긋났으나(미러 260903 vs 라이브 260901),
-    #     sync 후 재측정 결과 4,166행 전부 동일(LGy·LGhm 100.00%, 차집합 0) — nx 로 충분하다.
-    #     라이브는 미러 미존재/공백 시에만 폴백으로 읽는다(§1 읽기 전용).
+    #   ★2026-08-27(2차) 라이브 우선 — 대사 기준을 라이브로 잡기 때문.
+    #     실측: 미러 ORG(260831) = 웹 plan_dtl ORG(260831) 로 같고, 라이브만 ORG=260901.
+    #       예) 6I3M0022  웹 PLAN/ORG=260831 · 미러 ORG=260831 LG=260827 · 라이브 ORG=260901 LG=260829
+    #     제번수는 셋 다 4,166 이고 차집합 0 — 미러 지연이 아니라 **ORG 기준 자체가 다르다**.
+    #     420/410 대사 상대가 라이브 PR_T_PLAN_PART_MAT 이므로 LG 도 라이브를 봐야 앞뒤가 맞는다.
+    #     LG_INPUT 은 **읽기 전용 참조**라 라이브 직독이 §1 에 저촉되지 않는다(§5 실측 우선).
     _lg = {}
-    for _srcq in ("nx.PR_T_PLAN_DTL", "PARTNER_ERP.dbo.PR_T_PLAN_DTL"):
+    _lgw = {}                        # ★제번 단위 폴백 — (제번,ORG) 키가 안 맞을 때 사용
+    for _srcq in ("PARTNER_ERP.dbo.PR_T_PLAN_DTL", "nx.PR_T_PLAN_DTL"):
         try:
             cur.execute("""SELECT RTRIM(WORK_ORDER), ISNULL(ORG_PLAN_YMD,''),
                      ISNULL(LG_INPUT_YMD,''), ISNULL(LG_INPUT_HM,'')
                 FROM """ + _srcq + """
                WHERE ISNULL(LG_INPUT_YMD,'')<>'' AND ISNULL(ORG_PLAN_YMD,'')<>''""")
             for _w, _o, _y, _h in cur.fetchall():
-                _lg[(str(_w).strip(), str(_o).strip())] = (str(_y).strip(), str(_h or '').strip())
+                _k = (str(_w).strip(), str(_o).strip())
+                _v = (str(_y).strip(), str(_h or '').strip())
+                _lg[_k] = _v
+                # 제번당 여러 행이면 가장 이른 LG_INPUT 을 대표로(레거시는 제번당 1행이라 통상 1건)
+                _pv = _lgw.get(_k[0])
+                if _pv is None or _v[0] < _pv[0]: _lgw[_k[0]] = _v
             if _lg: break            # 라이브에서 읽혔으면 미러는 보지 않는다
         except Exception:
             continue                 # 접근 불가 시 다음 원천, 최종적으로 산식만으로 동작
@@ -1233,7 +1294,12 @@ def _ensure_line_pull(cur):
         # (5) ★레거시 LG_INPUT 이 있으면 그 값을 채택(실측 100.00%).
         #     산식은 LG 를 98.43% 재현하며, 남은 차이는 근무유형별 종업시각
         #     (코드1=잔업2시간 19:30 / 코드2=정상근무 17:00) 보정분 82건이다.
-        _hit = _lg.get((_wo, _org))
+        #     ★2026-08-27 폴백 추가: (제번,ORG) 키가 안 맞으면 **제번만**으로 다시 찾는다.
+        #       웹 plan_dtl.PLAN_YMD 는 업로드 원본(엑셀 첫 일자)이라 라이브 ORG_PLAN_YMD 와
+        #       97.46% 만 같다(불일치 106건: 웹이 -1일 52·-2일 35…). 키가 어긋나면 LG 를 못 찾아
+        #       산식으로 떨어지고, 출발점이 다르니 결과도 어긋났다.
+        #       실측: C1 라인 MJU63357501 48건 등 — 웹 260831→260827 vs 라이브 260901→260829.
+        _hit = _lg.get((_wo, _org)) or _lgw.get(_wo)
         if _hit and _hit[0]:
             _py, _phm = _hit[0], (_hit[1] or _phm)
         # (4) 기준일 이전 → 기준일 + 0750 (당일이전계획)

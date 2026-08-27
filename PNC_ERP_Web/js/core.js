@@ -329,6 +329,7 @@ function openTab(id,nm){
     // ★height:100% 를 쓰는 화면(대부분의 조회화면)이 정상 작동하려면 이 컨테이너부터
     //   확정된 높이를 가져야 한다. display:block 인 채로는 자식의 height:100% 가
     //   전달되지 않아, 내용이 짧은 화면은 표가 화면 아래까지 안 늘어나는 문제가 생긴다.
+    //   ※c52de04(2026-08-21) 로 확정된 구조 — 바꾸지 말 것. flex 로 대체 시도했다가 되돌림(2026-08-27).
     const c=document.createElement('div');c.id='pg-'+id;c.style.cssText='display:none;height:100%';
     $content.appendChild(c);tabs[id].pg=c;
     (SCREEN[id]||SCREEN._na)(c,id);
@@ -2418,3 +2419,37 @@ function updateHeaderUser(){
 }
 function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
   sessionStorage.removeItem('perm_authed'); location.reload(); }
+
+/* ================= 사이드바 숨김/열기 (2026-08-27) =================
+   넓은 그리드 화면(협력사계획현황 등)에서 본문 폭 확보용.
+   ☰(헤더) 또는 Ctrl+B = 고정 토글. 숨김상태의 왼쪽 손잡이: hover=임시펼침(peek), 클릭=다시 고정.
+   peek 는 사이드바를 본문 위에 띄우므로 레이아웃이 흔들리지 않는다. 상태는 localStorage 유지. */
+(function initSidebarToggle(){
+  const KEY='sb_hidden';
+  const start=()=>{
+    const body=document.getElementById('appBody'), btn=document.getElementById('sbToggle'),
+          hd=document.getElementById('sbHandle'), sb=document.getElementById('sidebar');
+    if(!body||!btn) return;
+    let hidden=false;
+    try{ hidden = localStorage.getItem(KEY)==='1'; }catch(e){}
+    const apply=()=>{ body.classList.toggle('sb-off',hidden);
+      if(!hidden) body.classList.remove('sb-peek');
+      btn.innerHTML = hidden
+        ? '<span style="font-size:14px">☰</span><span class="sb-toggle-tx">메뉴</span>'
+        : '<span style="font-size:14px">✕</span><span class="sb-toggle-tx">메뉴숨김</span>';
+      btn.title = (hidden?'메뉴 열기':'메뉴 숨김')+' (Ctrl+B)';
+      try{ localStorage.setItem(KEY, hidden?'1':'0'); }catch(e){}
+      window.dispatchEvent(new Event('resize'));   // 그리드 폭 재계산
+    };
+    const setHidden=v=>{ hidden=v; apply(); };
+    btn.onclick=()=>setHidden(!hidden);
+    // ★hover 펼침(peek) 없음 — 그리드 보다가 마우스가 왼쪽으로 가면 메뉴가 튀어나와 방해됨(2026-08-27 사용자 요청).
+    //   열고 닫기는 상단 버튼(또는 Ctrl+B)으로만.
+    if(hd) hd.remove();
+    document.addEventListener('keydown',e=>{
+      if((e.ctrlKey||e.metaKey)&&(e.key==='b'||e.key==='B')){ e.preventDefault(); setHidden(!hidden); }
+    });
+    apply();
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+})();
