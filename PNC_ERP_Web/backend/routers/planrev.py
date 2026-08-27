@@ -173,20 +173,33 @@ def _step7_sql(cur):
     #   그 경로의 BOM엣지(route_edges)로 전개, 없으면 v_pr_bom(현행 except<>1) fallback=R01 diff0(검증: route CTE≡원본 100.000%).
     _route_setup(cur)
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
+    # ★★자재소요 일자 = **당김 후**(part_plan_ymd) — 2026-08-27 추가.
+    #   레거시 PR_T_PLAN_PART_MAT 은 날짜를 2벌 갖는다:
+    #     PLAN_YMD/OUTPUT_HM/AMPM           = 상위 계획(당김 전)
+    #     PART_PLAN_YMD/PART_OUTPUT_HM/...  = ★당김 후 소요일시  ← 자재는 이걸 봐야 한다
+    #   실측: 레거시 MAT 안에서 두 컬럼이 81.53% 다르고, MAT.PART_PLAN_YMD 는
+    #        PART.PART_PLAN_YMD 와 72.95% 일치(나머지는 하위전개분).
+    #   종전 웹은 plan_ymd 하나뿐이라 당김이 자재로 전달되지 않았다(사용자 지적).
+    #   → CTE 에 part_plan_ymd·part_output_hm 을 함께 실어 최하위까지 내려보낸다.
+    #     상위앵커(plan_part_dtl)는 자기 당김값, 재귀 하위는 부모값을 그대로 상속한다
+    #     (레거시도 하위자재는 그 부모 파트의 소요일시를 따른다).
     cur.execute(("""
-    WITH CTE_BOM(plan_ymd,work_order,split_work_order,assy_item_code,bom_level,upper_item_code,item_code,proc_seq,bom_mat_code,mat_work_center_code,cum_use_qty,cum_in_cust_code,mat_flag,use_qty,part_plan_qty,gc_gubun,cust_flag) AS (
-      SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.item_code,
+    WITH CTE_BOM(plan_ymd,part_plan_ymd,part_output_hm,work_order,split_work_order,assy_item_code,bom_level,upper_item_code,item_code,proc_seq,bom_mat_code,mat_work_center_code,cum_use_qty,cum_in_cust_code,mat_flag,use_qty,part_plan_qty,gc_gubun,cust_flag) AS (
+      SELECT a.plan_ymd,ISNULL(NULLIF(a.part_plan_ymd,''),a.plan_ymd),ISNULL(a.part_output_hm,''),
+         a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.item_code,
          c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CONVERT(float,a.part_plan_qty)/NULLIF(a.use_qty,0),a.gc_gubun,'0'
       FROM nx.plan_part_dtl a JOIN nx.item_ov c ON a.item_code=c.item_code WHERE a.proc_seq=1
       UNION ALL
-      SELECT a.plan_ymd,a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
+      SELECT a.plan_ymd,a.plan_ymd,ISNULL(a.OUTPUT_HM,''),
+         a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
          c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CEILING(CONVERT(float,a.plan_qty)*ISNULL(a.use_qty,1)*ISNULL(CASE WHEN a.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100),'','1'
       FROM nx.plan_item_dtl a JOIN nx.item_ov c ON a.c_item_code=c.item_code
       WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.item_code=a.c_item_code)
       UNION ALL
-      SELECT cb.plan_ymd,cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
+      SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
+         cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
          m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.USE_QTY_PR END),
          CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
@@ -197,7 +210,8 @@ def _step7_sql(cur):
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code)
       UNION ALL
       -- ★★route-active 브랜치: 활성 대체경로(Rnn) 있는 제품은 그 경로의 route_edges로 전개(except_flag 무관·route가 활성엣지만 보유)
-      SELECT cb.plan_ymd,cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
+      SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
+         cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
          m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.use_qty_pr END),
          CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
@@ -212,8 +226,11 @@ def _step7_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_mat') IS NOT NULL DROP TABLE nx.plan_part_mat")
     # 최하위집계 + ★용접봉(RAC, proc_weld 별도)만 제외. ★2026-08-19 교정: 레거시 SP엔 sgroup910 제외 없음 →
     #   910 일괄제외는 우리 오추가(4930 등 910 오분류 실 매입부품까지 제외). RAC(용접봉)만 공정처리로 제외, 용접링은 사급으로 유지(RACX 일치).
+    #   ★part_plan_ymd/part_output_hm 도 함께 집계(최소값 = 가장 이른 소요일시).
+    #     같은 자재가 여러 파트에 걸리면 제일 빠른 시점에 준비돼야 하므로 MIN 이 맞다.
     cur.execute(("""SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code AS mat_code,
-        SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code
+        SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code,
+        MIN(a.part_plan_ymd) AS part_plan_ymd, MIN(a.part_output_hm) AS part_output_hm
     INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
