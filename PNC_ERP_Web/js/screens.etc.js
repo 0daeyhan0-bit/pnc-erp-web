@@ -515,7 +515,7 @@ SCREEN.deliv420=(c)=>{
     const itemOpts=[...itS].slice(0,500).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     const ptS=new Set(); rows.forEach(r=>(r.mat_list||'').split(/[,\r\n]/).forEach(x=>{const m=x.split('{')[0].split('[')[0].trim();if(m)ptS.add(m);}));
     const partOpts=[...ptS].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
-    const FIX=23;   // 고정컬럼 수 — SERIAL-NO·HEAT-NO·품목정보 제거로 26→23 (2026-08-27)
+    const FIX=22;   // 고정컬럼 수 — SERIAL-NO·HEAT-NO·품목정보·품명 제거로 26→22 (2026-08-27)
     const S=data.sum||{};
     const badge=s=>`<span style="padding:1px 5px;border-radius:3px;font-size:10px;background:${STC[s]||'#8aa0bd'};color:#fff">${ST[s]||s}</span>`;
     // 일자셀=완료/계획+색(가공4주간 동일 표준): 생산완료 노랑·출하완료 주황·키팅완료 녹
@@ -529,12 +529,12 @@ SCREEN.deliv420=(c)=>{
     //   체크박스는 요청수량 바로 뒤(납품수량 앞) = 레거시 위치.
     //   SEQ·자도번작업처·작업처·도번·LineNo·구분·품명·자도번LIST·사급·LOT·자재·완료·요청
     //   ·[체크]·납품·포장·SERIAL·HEAT·품목정보·출하실적·생산실적·세트재고·입고대기·ASSY재고·검사·상태 = 26
-    // ★SERIAL-NO·HEAT-NO·품목정보 3컬럼 제거(2026-08-27) → 26 → 23개
-    const CW=[28,86,66,96,44,56,120,300,38,52,52,52,52,  30,  52,52,54,54,54,54,54,38,52], DW=48;
+    // ★SERIAL-NO·HEAT-NO·품목정보·품명 제거(2026-08-27) → 26 → 22개
+    const CW=[28,86,66,96,44,56,300,38,52,52,52,52,  30,  52,52,54,54,54,54,54,38,52], DW=48;
     const totalW=CW.reduce((a,b)=>a+b,0)+dates.length*DW;
     const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}${dates.map(()=>`<col style="width:${DW}px">`).join('')}</colgroup>`;
     // 합계행: 계(1) + 안내(2~9=8칸) + LOT·자재·완료·요청(10~13) + 체크(14) + 나머지(15~26=12칸) + 일자
-    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="8">${nf(data.cnt)}건</td>`
+    const grand=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td colspan="7">${nf(data.cnt)}건</td>`
       +`<td class="num"><b>${nf(S.lot||0)}</b></td><td class="num"><b>${nf(S.plan||0)}</b></td>`
       +`<td class="num" style="color:#1c7c3a"><b>${nf(S.done||0)}</b></td><td class="num"><b>${nf(S.req||0)}</b></td>`
       +`<td></td><td class="num" title="발행"><b>${nf(S.issued||0)}</b></td><td colspan="8"></td>`
@@ -592,7 +592,8 @@ SCREEN.deliv420=(c)=>{
      <!-- ★flex:0 1 auto + max-height:100% (4787a13 확정) — 고정 max-height 는 표 아래 여백을 남긴다. -->
      <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
-       <th class="center">SEQ</th><th>자도번작업처</th><th>작업처</th><th>도번</th><th class="center">Line No</th><th class="center">구분</th><th>품명</th><th>자도번LIST</th><th class="center">사급</th>
+       <!-- ★품명 제거(2026-08-27 사용자 요청) -->
+       <th class="center">SEQ</th><th class="center">자도번작업처</th><th class="center">작업처</th><th class="center">도번</th><th class="center">Line No</th><th class="center">구분</th><th>자도번LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th>
        <th class="center"><input type="checkbox" id="d4-all"></th>
        <!-- ★SERIAL-NO·HEAT-NO·품목정보 제거(2026-08-27 사용자 요청) -->
@@ -601,10 +602,9 @@ SCREEN.deliv420=(c)=>{
        ${dates.map(d=>`<th class="center"${wkbg(d)}>${esc(wlab(d))}</th>`).join('')}</tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r,ri)=>{const ed=(r.status!=='90'&&Number(r.req)>0);const dv=(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv);const pk=(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack);return `<tr>
         <td class="num" style="color:#8aa0bd">${ri+1}</td>
-        <td><b>${esc(r.workcenter||'')}</b></td><td>${esc(r.work_center||r.in_cust||'')}</td>
-        <td><b>${esc(r.assy)}</b></td><td class="center">${esc(r.line||'')}</td>
+        <td class="center"><b>${esc(r.workcenter||'')}</b></td><td class="center">${esc(r.work_center||r.in_cust||'')}</td>
+        <td class="center"><b>${esc(r.assy)}</b></td><td class="center">${esc(r.line||'')}</td>
         <td class="center">${esc(r.gubun||'')}</td>
-        <td class="bcap" title="${esc(r.nm||'')} ${esc(r.spec||'')}" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
         <td><div style="width:100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
         <td class="center">${r.sagub_list?'<span class="bdg sagub" style="font-size:10px" title="'+esc(r.sagub_list)+'">사급</span>':''}</td>
         <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.plan)}</td>

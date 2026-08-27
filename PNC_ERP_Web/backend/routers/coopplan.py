@@ -197,7 +197,8 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         try:
             _sgw = ["mat_work_center_code=?", "part_plan_ymd<=?", "mat_flag='2'"]; _sgp = [cust, to_ymd]
             if item and item != "%": _sgw.append("assy_item_code LIKE ?"); _sgp.append(item)
-            cur.execute(f"SELECT DISTINCT assy_item_code FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT WHERE {' AND '.join(_sgw)}", *_sgp)
+            # ★웹 편성결과로 전환(2026-08-27) — nx.plan_part_mat (ASSY행 일자 100% 정합 확인).
+            cur.execute(f"SELECT DISTINCT assy_item_code FROM PARTNER_ERP_TEST3.nx.plan_part_mat WHERE {' AND '.join(_sgw)}", *_sgp)
             _sgset = {str(r[0]).strip() for r in cur.fetchall()}
             for g in rows:
                 if g['assy'] in _sgset: g['sagub'] = 1
@@ -214,28 +215,37 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         sale = {}; move = {}; astk = {}; z99 = {}; sset = {}; sreq = {}; mstr = {}; msub = {}; over = {}
         aset = set(assys)
         # 출하/이동=work_order 인덱스로 스코프(item_code는 인덱스 없어 풀스캔 → wo 스코프가 훨씬 빠름). item은 파이썬 필터.
-        # ★완료 풀=라이브(PARTNER_ERP.dbo) 직독 — 레거시 SP/화면이 라이브 읽고, nx 재고미러 stale(SA_T_ITEM_STOCK·SET·MAT_STOCK) → 완료 과소방지. 계획소스(SP_LIVE)와 일관.
+        # ★완료 풀 = **웹 자체 테이블**(2026-08-27 전환). 라이브 직독 폐지.
+        #   출하실적: nx.sale_dtl (라이브 SA_T_SALE_DTL 307,778행 이관 · 미마감 합계 13,989,824 일치)
+        #   재고이동: SA_T_ITEM_MOVE 는 라이브도 **0행**이라 웹 대응물을 만들지 않고 생략한다.
+        #            (이동 개념이 실제로 안 쓰인다 — 필요해지면 그때 nx 테이블 신설)
         for ch in _chunks(wos):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
+            cur.execute(f"SELECT work_order, split_work_order, item_code, SUM(sale_qty) FROM PARTNER_ERP_TEST3.nx.sale_dtl WHERE finish_flag='0' AND work_order IN ({ph}) GROUP BY work_order, split_work_order, item_code", *ch)
             for r in cur.fetchall():
-                if str(r[2]) in aset: sale[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
-            cur.execute(f"SELECT fr_work_order, fr_split_work_order, item_code, SUM(move_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_MOVE WHERE fr_finish_flag='0' AND MOVE_TAG='3' AND fr_work_order IN ({ph}) GROUP BY fr_work_order, fr_split_work_order, item_code", *ch)
-            for r in cur.fetchall():
-                if str(r[2]) in aset: move[(str(r[0]), str(r[1]), str(r[2]))] = float(r[3] or 0)
+                if str(r[2]).strip() in aset: sale[(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip())] = float(r[3] or 0)
         for ch in _chunks(assys):
             ph = ",".join("?"*len(ch))
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
-            for r in cur.fetchall(): astk[str(r[0])] = float(r[1] or 0)
+            # ★ASSY재고 = 웹 원장 nx.item_stock_maint 집계(2026-08-27 전환).
+            #   레거시 SA_T_ITEM_STOCK(잔액) 대응 — 기초 2,685행 이관, 합계 41,883 일치 확인.
+            cur.execute(f"SELECT item_code, SUM(maint_qty) FROM PARTNER_ERP_TEST3.nx.item_stock_maint WHERE item_code IN ({ph}) GROUP BY item_code", *ch)
+            for r in cur.fetchall(): astk[str(r[0]).strip()] = float(r[1] or 0)
             # ★자재창고(Z99990) — 레거시 원본 r3_mat 서브쿼리는 **PU_T_MAT_STOCK** 이다
             #   (dw_pr_outside_420_t1: from pu_t_mat_stock where cust_code='Z99990').
             #   ⛔PU_T_MAT_STOCK_WH(창고별 분할)와 값이 크게 다르다 — 실측 Z99990 합계
             #     PU_T_MAT_STOCK 5,435,926 vs _WH 8,964,610 (품목별로도 부호까지 다름).
             #   2026-08-27 PBL 원본 확인 후 교체.
-            cur.execute(f"SELECT mat_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
-            for r in cur.fetchall(): z99[str(r[0])] = float(r[1] or 0)
-            cur.execute(f"SELECT item_code, SUM(stock_qty) FROM PARTNER_ERP.dbo.PU_T_SET_MAT_STOCK WHERE in_cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
-            for r in cur.fetchall(): sset[str(r[0])] = float(r[1] or 0)
+            # ★자재창고(Z99990) = 웹 원장 nx.mat_stock_maint 집계(2026-08-27 전환).
+            #   레거시 PU_T_MAT_STOCK 대응 — 기초 7,900행 이관, Z99990 합계 5,435,927 일치 확인.
+            cur.execute(f"SELECT mat_code, SUM(maint_qty) FROM PARTNER_ERP_TEST3.nx.mat_stock_maint WHERE cust_code='Z99990' AND mat_code IN ({ph}) GROUP BY mat_code", *ch)
+            for r in cur.fetchall(): z99[str(r[0]).strip()] = float(r[1] or 0)
+            # ★세트재고 = **웹 원장** nx.set_stock_maint 집계(2026-08-27 전환).
+            #   레거시 PU_T_SET_MAT_STOCK(잔액테이블) 대응 — 웹은 원장 SUM 으로 도출한다.
+            #     tag 9=기초이관 · 2=입고(setin.py 바코드입고) · 3=출고(procbc.py 생산실적 차감)
+            #   기초 4,148행을 라이브에서 이관해 잔액 일치 확인(대원산업 −1,335,595 동일).
+            #   ⚠이 블록은 라이브 커넥션(_conn)에서 돌므로 **3부분 이름**으로 지정해야 한다.
+            cur.execute(f"SELECT item_code, SUM(maint_qty) FROM PARTNER_ERP_TEST3.nx.set_stock_maint WHERE cust_code=? AND item_code IN ({ph}) GROUP BY item_code", cust, *ch)
+            for r in cur.fetchall(): sset[str(r[0]).strip()] = float(r[1] or 0)
             # ★세트입고대기 — 레거시 원본(dw_pr_outside_420_t1) r5 서브쿼리 그대로:
             #     from PU_T_SET_INPUT_REQ
             #      where input_ymd = convert(varchar,getdate(),12)   ← ★오늘 고정
@@ -245,7 +255,11 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             #     → 세트재고로 전환. 화면은 **오늘 접수분 중 아직 입고 안 된 것**만 대기로 본다.
             #   ⚠날짜조건을 빼면 과거 미확정분(실측 51건·2,630개)까지 붙어 레거시와 어긋난다
             #     — 2026-08-27 PBL 원본 확인 후 원복.
-            cur.execute(f"SELECT item_code, SUM(input_req_qty) FROM PARTNER_ERP.dbo.PU_T_SET_INPUT_REQ WHERE in_cust_code=? AND input_ymd=? AND confirm_flag='0' AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
+            #   ★웹 원장 nx.set_input_req 로 전환(2026-08-27). 레거시 confirm_flag='0' ↔ 웹 status:
+            #     00=대기(발행전) · 10=발행완료 · 30=입고대기(검사) · 90=입고완료(=confirm_flag '1')
+            #   → 미입고(00·10·30)가 레거시의 confirm_flag='0' 에 해당한다.
+            #   ⚠라이브 커넥션(_conn)에서 도는 블록이라 3부분 이름 필수.
+            cur.execute(f"SELECT item_code, SUM(ISNULL(deliver_qty,input_req_qty)) FROM PARTNER_ERP_TEST3.nx.set_input_req WHERE in_cust_code=? AND input_ymd=? AND status IN ('00','10','30') AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
             for r in cur.fetchall(): sreq[str(r[0])] = float(r[1] or 0)
             cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(in_cust,''), ISNULL(WORK_CODE,''), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
@@ -261,12 +275,15 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         try:
             for ch in _chunks(wos):
                 ph = ",".join("?"*len(ch))
-                cur.execute(f"""SELECT a.work_order, a.split_work_order, b.c_item_code,
-                      SUM(CEILING(CONVERT(float,a.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
-                    FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL a JOIN PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b ON a.model_no=b.model_no
+                # ★웹 편성결과로 전환(2026-08-27) — nx.plan_dtl.
+                #   nx.plan_dtl 에는 SPLIT_WORK_ORDER 컬럼이 없다 → WORK_ORDER 를 분할제번
+                #   자리에도 쓴다. **분할제번 = 제번**이라 값이 같다(사용자 확인 2026-08-27).
+                cur.execute(f"""SELECT a.WORK_ORDER, a.WORK_ORDER, b.c_item_code,
+                      SUM(CEILING(CONVERT(float,a.PLAN_QTY)*ISNULL(b.use_qty,1)*ISNULL(c.prod_rate,100)/100))
+                    FROM PARTNER_ERP_TEST3.nx.plan_dtl a JOIN PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM b ON a.MODEL_NO=b.model_no
                     JOIN PARTNER_ERP_TEST3.nx.item c ON b.c_item_code=c.item_code
-                    WHERE a.plan_ymd>? AND a.work_order IN ({ph})
-                    GROUP BY a.work_order, a.split_work_order, b.c_item_code""", to_ymd, *ch)
+                    WHERE a.PLAN_YMD>? AND a.WORK_ORDER IN ({ph})
+                    GROUP BY a.WORK_ORDER, b.c_item_code""", to_ymd, *ch)
                 for r in cur.fetchall(): over[(str(r[0]), str(r[1]), str(r[2]))] = int(float(r[3] or 0))
         except Exception:
             over = {}
@@ -902,7 +919,7 @@ def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: 
         # 기본: 라이브 최소 계획일자 ~ +4근무일 horizon
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT MIN(plan_ymd) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WHERE plan_ymd>'000000'")
+            cur.execute("SELECT MIN(PLAN_YMD) FROM PARTNER_ERP_TEST3.nx.plan_dtl WHERE PLAN_YMD>'000000'")
             mn = cur.fetchone()[0]
         finally:
             cn.close()
@@ -936,7 +953,7 @@ def partner_deliv420_issue(body: dict = Body(...)):
     if not d6f or not d6t:
         cn = _conn(); cur = cn.cursor()
         try:
-            cur.execute("SELECT MIN(plan_ymd) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WHERE plan_ymd>'000000'"); mn = cur.fetchone()[0]
+            cur.execute("SELECT MIN(PLAN_YMD) FROM PARTNER_ERP_TEST3.nx.plan_dtl WHERE PLAN_YMD>'000000'"); mn = cur.fetchone()[0]
         finally: cn.close()
         import datetime as _di
         d6f = d6f or mn
