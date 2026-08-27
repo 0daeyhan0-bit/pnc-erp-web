@@ -88,12 +88,13 @@ def _sub_raw_footprint(nxc, product, jadoban):
     """다리 C 단건: 제품 내 특정 SUB(jadoban)의 원소재 풋프린트 {원소재: qty}. _sub_footprints_by_jadoban 파생."""
     return _sub_footprints_by_jadoban(nxc, product).get(str(jadoban).strip(), {})
 
-def _weld_proc_code(nxc, base_rac):
-    """용접봉 투입공정(GAGONG_PROC_CODE) — nx.bom_line 대표값(Q1000/Q2000 용접봉창고), 없으면 'Q1000' 기본."""
-    c = nxc.cursor()
-    c.execute("SELECT TOP 1 ISNULL(gagong_proc,'') FROM nx.bom_line WHERE child_item LIKE ? AND ISNULL(gagong_proc,'')<>'' ORDER BY seq", base_rac + '%')
-    r = c.fetchone()
-    return (str(r[0]).strip() if r and r[0] else 'Q1000')
+WELD_WAREHOUSE = 'Q1000'   # ★용접봉 단일 생산창고 (대표 확정 2026-08-27). 공정별 창고 분리 안 함.
+
+def _weld_proc_code(nxc, base_rac=None):
+    """용접봉 투입공정(=생산창고 GAGONG_PROC_CODE) — ★단일창고 Q1000 (대표 확정 2026-08-27).
+       전 용접봉을 하나의 생산창고(Q1000)로: 자재출고 불출·생산실적 차감·게이트 모두 Q1000 기준.
+       (nx.bom_line.gagong_proc 실측 100% 미기입 → 공정별 분리 불가·불필요. 향후 분리 원하면 이 함수와 매핑을 함께 변경.)"""
+    return WELD_WAREHOUSE
 
 def _final_proc_code(cro, item):
     """완성공정(최종) gagong_proc_code = MAX(PROC_SEQ). method 무관·PROC_SEQ 최댓값. 라이브 RO."""
