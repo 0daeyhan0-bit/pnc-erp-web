@@ -717,8 +717,8 @@ def _snap_write(cur, domain, ptype, period, rows):
     return n
 
 
-def _snap_prd(cur, ptype, period):
-    """생산 스냅샷 = 생산재고조회(480) recipe 를 target 시점으로 확정. 반환 (행수, 기준일)."""
+def _snap_prd_recipe(cur, ptype, period):
+    """★DEPRECATED(§12-8 이동평균 채택) — 480 recipe 직확정. 수량 대조용으로 보존."""
     from live_api import _prodstock
     target = period if ptype == "D" else _month_end(period)
     rows = _prodstock(target[:4], frm=target[:4] + "01", to=target)
@@ -747,6 +747,194 @@ def _snap_sal(cur, ptype, period):
                     float(r.get("inq") or 0), float(r.get("outq") or 0)))
     n = _snap_write(cur, "SAL", ptype, period, out)
     return n, f"{target}(제품재고조회 040 recipe)"
+
+
+# ===================== 생산(PRD) 이동평균 — 매입가 기반 (§12-8) =====================
+# 축 = (품목 × 재고위치). 가공창고 P0001 = loc '' · 용접은 라인코드.
+# 이동 원천 = 레거시 생산재고조회 480(`live_api._prodstock`) 과 **같은 UNION 분기**를 일자별로 편 것.
+#   ★480 은 기간 요약이라 일자별 전개가 안 된다 → 같은 분기·같은 부호로 일자 컬럼을 살려 재작성.
+#     분기·부호가 480 과 일치하는지는 검증 게이트(수량 diff0)로 확인한다.
+# 단가 = 그 품목의 자재(MAT) 확정 스냅샷 avg_cost, 없으면 pr_m_item_cost(cost_tag='1') 최신.
+#   ※MAT avg_cost 는 월말값이라 월중 입고엔 근사(§12-8 기록).
+
+def _prd_moves(cur, d_from, d_to):
+    """[d_from,d_to] 일자별 생산창고 이동 → {ymd: {(item,loc): {net,inq,outq,adj}}}."""
+    T3 = "PARTNER_ERP_TEST3.nx."
+    out = {}
+
+    def slot(y, item, loc):
+        k = (str(item or "").strip().upper(), "" if str(loc or "").strip() == "P0001" else str(loc or "").strip())
+        return out.setdefault(y, {}).setdefault(k, {"net": 0.0, "inq": 0.0, "outq": 0.0, "adj": 0.0})
+
+    # ① 자재→생산 이동(tag B, 자재출고라 음수 → 생산창고 입고)
+    cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, a.to_gagong_proc_code, SUM(-CAST(a.MAINT_QTY AS float))
+                      FROM {T3}PU_T_STOCK_MAINT a
+                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1'
+                     GROUP BY a.MAINT_YMD, a.MAT_CODE, a.to_gagong_proc_code""", d_from, d_to)
+    for y, it, lo, q in cur.fetchall():
+        slot(y, it, lo)["inq"] += float(q or 0)
+
+    # ② 절단 입고
+    cur.execute(f"""SELECT a.cut_ymd, a.mat_code, a.gagong_proc_code, SUM(CAST(a.cut_QTY AS float))
+                      FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl
+                            UNION ALL SELECT n.* FROM {T3}pu_t_cut_dtl n
+                             WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l
+                                               WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a
+                     WHERE a.cut_ymd BETWEEN ? AND ?
+                     GROUP BY a.cut_ymd, a.mat_code, a.gagong_proc_code""", d_from, d_to)
+    for y, it, lo, q in cur.fetchall():
+        slot(y, it, lo)["inq"] += float(q or 0)
+
+    # ③ 생산창고 반납(tag T) — 480 과 동일 부호(outq = −MAINT_QTY)
+    cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, a.to_gagong_proc_code, SUM(-CAST(a.MAINT_QTY AS float))
+                      FROM {T3}PU_T_STOCK_MAINT a
+                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.maint_tag='T' AND ISNULL(a.out_wh_gubun,'3')='3'
+                     GROUP BY a.MAINT_YMD, a.MAT_CODE, a.to_gagong_proc_code""", d_from, d_to)
+    for y, it, lo, q in cur.fetchall():
+        slot(y, it, lo)["outq"] += float(q or 0)
+
+    # ④ tag C 출고
+    cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, a.to_gagong_proc_code, SUM(CAST(a.MAINT_QTY AS float))
+                      FROM {T3}PU_T_STOCK_MAINT a
+                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.maint_tag='C'
+                     GROUP BY a.MAINT_YMD, a.MAT_CODE, a.to_gagong_proc_code""", d_from, d_to)
+    for y, it, lo, q in cur.fetchall():
+        slot(y, it, lo)["outq"] += float(q or 0)
+
+    # ⑤ 생산실적(제품입고 중복분 제외)
+    cur.execute(f"""SELECT a.prod_ymd, a.item_code, a.stock_part_code, SUM(CAST(a.prod_qty AS float))
+                      FROM {T3}pr_t_prod_dtl a
+                     WHERE a.prod_ymd BETWEEN ? AND ? AND a.stock_part_code>''
+                       AND NOT EXISTS(SELECT 1 FROM {T3}sa_t_stock_maint s
+                                       WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code
+                                         AND s.in_part_code=a.stock_part_code)
+                     GROUP BY a.prod_ymd, a.item_code, a.stock_part_code""", d_from, d_to)
+    for y, it, lo, q in cur.fetchall():
+        slot(y, it, lo)["inq"] += float(q or 0)
+
+    # ⑥ 제품수불 in_part 입고
+    cur.execute(f"""SELECT a.maint_ymd, a.item_code, a.IN_PART_CODE, SUM(CAST(a.MAINT_QTY AS float))
+                      FROM {T3}sa_t_stock_maint a
+                     WHERE a.maint_ymd BETWEEN ? AND ? AND a.in_part_code>''
+                     GROUP BY a.maint_ymd, a.item_code, a.IN_PART_CODE""", d_from, d_to)
+    for y, it, lo, q in cur.fetchall():
+        slot(y, it, lo)["inq"] += float(q or 0)
+
+    # ⑦⑧⑨ 생산 자재수불(PR_T_STOCK_MAINT_MAT) — tag3 입고 / tag1·2 조정 / tag4 출고
+    cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, a.PART_CODE, a.MAINT_TAG, SUM(CAST(a.MAINT_QTY AS float))
+                      FROM {T3}PR_T_STOCK_MAINT_MAT a
+                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ('1','2','3','4')
+                     GROUP BY a.MAINT_YMD, a.MAT_CODE, a.PART_CODE, a.MAINT_TAG""", d_from, d_to)
+    for y, it, lo, tg, q in cur.fetchall():
+        d = slot(y, it, lo); q = float(q or 0); tg = str(tg).strip()
+        if tg == '3':   d["inq"] += q
+        elif tg == '4': d["outq"] += -q
+        else:           d["adj"] += q          # '1','2'
+
+    for y in out:
+        for d in out[y].values():
+            d["net"] = d["inq"] - d["outq"] + d["adj"]
+    return out
+
+
+def _prd_price(cur, target):
+    """생산창고 입고 단가 = 그 품목의 자재(MAT) 확정 스냅샷 avg_cost, 없으면 pr_m_item_cost(tag'1') 최신."""
+    px = {}
+    cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                    WHERE domain='MAT' AND ptype='M' AND close_flag=1 AND period <= ? ORDER BY period DESC""",
+                target[:4])
+    r = cur.fetchone()
+    if r:
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), stock_qty, stock_amt, avg_cost
+                         FROM nx.stock_snapshot WHERE domain='MAT' AND ptype='M' AND period=?""", r[0])
+        for it, q, amt, av in cur.fetchall():
+            q = float(q or 0); amt = float(amt or 0)
+            px[str(it)] = (amt / q) if q else float(av or 0)
+    cur.execute("""SELECT ITEM_CODE, ITEM_COST FROM (
+                     SELECT ITEM_CODE, CAST(ITEM_COST AS float) ITEM_COST,
+                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE ORDER BY COST_APPLY_YMD DESC) rn
+                       FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
+                      WHERE COST_TAG='1' AND COST_APPLY_YMD <= ?) t WHERE rn=1""", target)
+    for it, c in cur.fetchall():
+        k = str(it).strip().upper()
+        px.setdefault(k, float(c or 0))        # 자재 스냅샷 우선, 없을 때만 폴백
+    return px
+
+
+def _prd_base(cur, target):
+    """기초 = 직전 확정 PRD 스냅샷. 없으면 레거시 2502 생산 월마감 시드."""
+    cur.execute("""SELECT TOP 1 ptype, period FROM nx.period_close
+                    WHERE domain='PRD' AND close_flag=1
+                      AND (ptype='D' AND period < ? OR ptype='M')
+                    ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""", target)
+    r = cur.fetchone()
+    if r:
+        pt, per = r[0], r[1]
+        end = per if pt == 'D' else _month_end(per)
+        if end < target:
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(loc,''), stock_qty, stock_amt, avg_cost
+                             FROM nx.stock_snapshot WHERE domain='PRD' AND ptype=? AND period=?""", pt, per)
+            st = {}
+            for it, lo, q, amt, av in cur.fetchall():
+                q = float(q or 0); amt = float(amt or 0)
+                st[(str(it), str(lo))] = [q, (amt / q) if q else float(av or 0)]
+            if st:
+                return st, end, f"확정 스냅샷({'일' if pt=='D' else '월'}마감 {per})"
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(A.MAT_CODE))), ISNULL(A.gagong_proc_code,''),
+                          SUM(CAST(A.STOCK_QTY AS float))
+                     FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
+                    GROUP BY UPPER(LTRIM(RTRIM(A.MAT_CODE))), ISNULL(A.gagong_proc_code,'')""")
+    seed = cur.fetchall()          # ★같은 커서로 _prd_price 를 호출하기 전에 결과를 반드시 소진할 것
+    px = _prd_price(cur, '250228') #   (안 그러면 pending result set 이 날아가 기초가 빈다 — 실제 겪음)
+    st = {}
+    for it, lo, q in seed:
+        lo = "" if str(lo).strip() == "P0001" else str(lo).strip()
+        st[(str(it), lo)] = [float(q or 0), px.get(str(it), 0.0)]
+    if not st:
+        raise HTTPException(400, "생산 기초를 찾을 수 없습니다 — 레거시 2502 생산 월마감도 없습니다.")
+    return st, '250228', "레거시 2502 생산 월마감 시드"
+
+
+def _snap_prd(cur, ptype, period):
+    """★생산 마감 = 이동평균법(매입가 기반, §12-8). 축=(품목×재고위치). 반환 (행수, 기준설명)."""
+    import datetime as _dt
+    target = period if ptype == "D" else _month_end(period)
+    state, base_ymd, src = _prd_base(cur, target)
+    try:
+        b = _dt.date(2000 + int(base_ymd[:2]), int(base_ymd[2:4]), int(base_ymd[4:6])) + _dt.timedelta(days=1)
+        start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
+    except ValueError:
+        start = base_ymd
+    px = _prd_price(cur, target)
+    moves = _prd_moves(cur, start, target) if start <= target else {}
+    agg = {}
+    for ymd in sorted(moves):
+        if ymd > target:
+            continue
+        for k, mv in moves[ymd].items():
+            q0, a0 = state.get(k, [0.0, 0.0])
+            pq = mv["inq"]
+            if pq > 0:                                    # 입고 = 그 시점 자재단가로 가중평균
+                c = px.get(k[0], a0)
+                avg = ((q0 * a0 + pq * c) / (q0 + pq)) if q0 > 0 else c
+            else:
+                avg = a0
+            state[k] = [q0 + mv["net"], avg]
+            a = agg.setdefault(k, [0.0, 0.0])
+            a[0] += mv["inq"]; a[1] += mv["outq"]
+    cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='PRD' AND ptype=? AND period=?", ptype, period)
+    n = 0
+    for (it, lo), (q, a) in state.items():
+        if not it or abs(q) < 1e-9:
+            continue
+        i, o = agg.get((it, lo), (0.0, 0.0))
+        cur.execute("""INSERT INTO nx.stock_snapshot
+                         (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
+                       VALUES('PRD',?,?,?,?,?,?,?,?,?,GETDATE())""",
+                    ptype, period, it[:50], lo[:20], round(q, 4), round(q * a, 4), round(a, 4),
+                    round(i, 4), round(o, 4))
+        n += 1
+    return n, f"{target}(이동평균·매입가·기초 {base_ymd} {src})"
 
 
 SNAPPERS = {"MAT": _snap_mat, "PRD": _snap_prd, "SAL": _snap_sal}
