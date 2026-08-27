@@ -56,12 +56,16 @@ c.execute(f"UPDATE i SET {', '.join(f'i.{cl}=p.{mir}' for cl,_d,mir in GAP)} FRO
 print("갭 컬럼 동기화 완료(리더 이관 지원).")
 
 # ── 리더 컬럼(엔진/화면이 읽는 객관 마스터필드) 동기화 — 이관 diff0 관문.
-#    ★item_name은 제외(SUB 접미사 [-xxx] 보존 — 접미사 스텝이 별도 관리). 나머지는 live 추종.
+#    ★item_name은 제외(SUB 접미사 [-xxx] 보존 — 접미사 스텝이 별도 관리).
+#    ★sgroup(소분류)도 제외(2026-08-27) — 소분류는 nx.item이 소유하는 우리 분류(용접봉 240 등 클린 재분류).
+#      라이브 ITEM_SGROUP로 덮으면 재분류가 매일 원복됨 → item_name과 동일 사유로 보존.
+#      (lgroup은 원가엔진이 top으로 읽어 diff0 리스크 → 판매축 정리 전까지는 계속 live 추종.)
+#    나머지는 live 추종.
 c.execute(f"""UPDATE i SET
    i.in_cust=LTRIM(RTRIM(p.IN_CUST_CODE)), i.item_spec=p.ITEM_SPEC, i.work_code=LTRIM(RTRIM(p.WORK_CODE)),
-   i.sgroup=LTRIM(RTRIM(p.ITEM_SGROUP)), i.lgroup=LTRIM(RTRIM(p.ITEM_LGROUP)),
+   i.lgroup=LTRIM(RTRIM(p.ITEM_LGROUP)),
    i.item_status=LTRIM(RTRIM(p.ITEM_STATUS)), i.prod_rate=p.PROD_RATE,
    i.unit=ISNULL(LTRIM(RTRIM(p.UNIT)),'')
    FROM {J}""")
-print("리더 컬럼 동기화 완료(item_name=접미사 보존 위해 제외).")
+print("리더 컬럼 동기화 완료(item_name·sgroup=우리소유 보존 위해 제외).")
 n.close()

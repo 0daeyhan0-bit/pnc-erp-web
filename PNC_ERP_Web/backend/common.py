@@ -357,9 +357,14 @@ def _custnm_map(cur, codes):
     return m
 
 # ── 도메인간 공유(app.py에서 추출) ──
+# nx 전용 확장 코드(라이브 코드마스터엔 없고 우리가 추가한 클린 분류) — 미러 재복사(r_bulk_copy)에도 코드로 보존.
+_KINDMAP_EXT = {'PR006': {'240': '용접봉'}}  # 소분류 240=용접봉(재고평가 대상), 2026-08-27 신설
 def _kindmap(cur, kind):
     cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
-    return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
+    m = {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
+    for k, v in _KINDMAP_EXT.get(kind, {}).items():
+        m[k] = v   # 우리 소유 코드(240 등) — 우리 라벨이 정본
+    return m
 
 
 # ── 도메인간 공유(추출) ──
