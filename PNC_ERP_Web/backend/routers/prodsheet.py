@@ -6,7 +6,7 @@ from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map)
 
-from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod
+from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod, _weld_consume
 router = APIRouter()
 
 # ===================== 생산전표출력관리 (w_pr_input_490) — 전표 기준 마스터-디테일 =====================
@@ -1415,6 +1415,21 @@ def procbc_save(payload: dict = Body(...)):
                             today6, rseq, item, pc, (sheet_ref or ''), bc, -qty, who, win, who, win)
             _set_ready_stock(cur, win, item, 'Z99990', pc, -qty, who)
             stock["ready"].append({"part": pc, "qty": round(-qty, 4)})
+
+        # ⑨ 용접봉 생산창고 소비(−Q1000, tag W) — 레거시가 제외한 용접봉만 nx.stock_ledger로 (2026-08-27).
+        #   모델: 자재출고(matissue)로 작업자가 용접봉을 자재→생산창고(Q1000) 불출(+Q1000) → 여기서 −Q1000 차감.
+        #   부호수량(qty>0 소비·qty<0 취소복원). 생산창고(Q1000) 재고부족이면 실적거부(음수차단, 실시간 원장sum).
+        #   cro=nx(같은 커넥션 — 게이트가 자기 쓰는 stock_ledger 읽어 별도커넥션시 미커밋행 SUM 교착).
+        _wr = _weld_consume(nx, nx, item, qty, (work_code or bc), who)
+        if not _wr.get("ok"):
+            nx.rollback()
+            _ws = _wr.get("shortage", [])
+            _wmsg = "용접봉 생산창고 재고가 부족합니다. (자재출고에서 용접봉을 생산창고로 불출하세요)\n\n" + "\n".join(
+                f"· {s['mat']} ({s['part']})  필요 {s['need']:g} / 재고 {s['have']:g}  → 부족 {s['lack']:g}"
+                for s in _ws[:10])
+            return {"ok": False, "shortage": _ws, "errors": [_wmsg]}
+        if _wr.get("weld_consumed"):
+            stock["weld"] = {"consumed": _wr["weld_consumed"], "kinds": _wr.get("weld_kinds", 0)}
 
         nx.commit()
         return {"ok": True, "action": ("취소" if qty < 0 else "등록"), "qty": qty,
