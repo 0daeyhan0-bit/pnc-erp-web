@@ -228,10 +228,19 @@ def _step7_sql(cur):
     #   910 일괄제외는 우리 오추가(4930 등 910 오분류 실 매입부품까지 제외). RAC(용접봉)만 공정처리로 제외, 용접링은 사급으로 유지(RACX 일치).
     #   ★part_plan_ymd/part_output_hm 도 함께 집계(최소값 = 가장 이른 소요일시).
     #     같은 자재가 여러 파트에 걸리면 제일 빠른 시점에 준비돼야 하므로 MIN 이 맞다.
+    #   ★★당일 클램프 — 자재는 당일 이전으로 편성되지 않는다(실측 100.00%, 85,990/85,990).
+    #     계획은 매일 '당일~+31일'로 업로드되므로 당일보다 이른 소요일은 존재할 수 없다.
+    #     파트별 PART_PLAN_YMD < 당일  → 당일 + '0750'
+    #     파트별 PART_PLAN_YMD >= 당일 → 파트별 값 그대로(69,463행 100.00%)
+    #     ※기준일은 nx.plan_dtl 의 최소 PLAN_YMD(=업로드 시작일=당일). GETDATE 대신 이걸 쓰면
+    #       과거 계획으로 재편성해도 그때 기준으로 재현된다.
+    cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
+    _mat_base = str(cur.fetchone()[0] or "").strip()
     cur.execute(("""SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code AS mat_code,
         SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code,
-        MIN(a.part_plan_ymd) AS part_plan_ymd, MIN(a.part_output_hm) AS part_output_hm
-    INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
+        CASE WHEN MIN(a.part_plan_ymd) < '{B}' THEN '{B}' ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
+        CASE WHEN MIN(a.part_plan_ymd) < '{B}' THEN '0750' ELSE MIN(a.part_output_hm) END AS part_output_hm
+    INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a""".replace("{B}", _mat_base) + """
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
