@@ -100,3 +100,14 @@ backflush는 **role(nx.bom)만 읽고 sgroup을 안 읽음**(backflush.py sgroup
 - **INNER_PROD 게이트**: `_is_inner_prod`(backflush.py:12)= make_type='1' **또는** PR_M_ITEM_PROC_GAGONG 보유. make_type='1'만으론 부족(사급회수·매입·직납 제외). cro는 `_nx()`여야 nx.item 조회 성공.
 - **★재고 소스 분리(핵심 갭)**: 게이트 가용=`nx.mat_stock_daily`(레거시 일스냅샷) ≠ −출고 대상=`nx.stock_ledger`(tag W). → −W 소비가 mat_stock_daily에 반영 안 됨(같은날 반복생산시 소진 미감지). **옵션1 정확성 조건 = 용접봉 재고 단일소스**: (a) 게이트가 nx.stock_ledger 용접봉잔량(기초+ΣW) 읽기 or (b) 용접봉 기초재고 nx.stock_ledger 적재 + 실시간정본. 갭4와 동일 뿌리.
 - **커버리지**: mat_stock_daily 추적 용접봉 14개만 게이트 적용, 나머지 통과.
+
+## 11. ★1단계 구현·검증 (2026-08-27) — `_weld_backflush` 신규함수
+
+옵션1(용접봉 −W만) 착수. 옆 세션 인계문서 `STOCK_CLOSE_HANDOFF.md` §2 규칙 준수 확인 후 진행.
+- **신규 `backflush.py:_weld_backflush(cro,nx,item,qty,wo,mode,user,ref_key)`**: 용접봉 −W만(자재/생산품 미접촉·이중차감 없음). 게이트=`_mat_avail`(mat_stock_daily)·음수차단, 쓰기=stock_ledger tag W(base RAC·투입공정·사내한정 _sanae). 멱등=backflush_log ref_key(용접봉 네임스페이스). INNER_PROD=1만.
+- **검증 3케이스 PASS**(전부 롤백·nx무변경, 대상 5211A21789C×100):
+  - POST: 생성행 1개=**tag W만**(RAC30599303 −0.28 Q1000), 자재P4·생산품P7 **없음** ✓
+  - REVERSE: W순합 0.0, log reversed ✓
+  - GATE: qty=1e6 차단(가용180<소요2800)·행0, qty=10 통과 ✓
+- **차단 헬퍼 정렬 후속**: `_neg_stock_msg`(옆 세션 feat/close-mgmt·main 미병합) 병합 시 게이트를 그걸로 교체. 현재는 `_mat_avail` 직접 비교(동일 정본·§2 부합).
+- **남음(2단계)**: procbc_save 완성공정 훅(수량+ post / 수량− reverse). 생산실적 핵심경로라 결선 전 재확인.

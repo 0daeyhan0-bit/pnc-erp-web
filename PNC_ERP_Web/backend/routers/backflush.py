@@ -192,6 +192,72 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
             "components": len(comps), "consumed_qty": round(consumed, 3),
             "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
 
+
+def _weld_backflush(cro, nx, item, prod_qty, wo, mode, user, ref_key):
+    """★용접봉 전용 백플러시(−W만) — 생산실적(procbc_save 완성공정) 결선용. 2026-08-27.
+       배경: procbc_save는 자재(tag4)·생산품(SA_T_STOCK_MAINT)을 레거시로 처리하되 용접봉(Q1000/Q2000)은 통째 제외 →
+             용접봉만 nx.stock_ledger(tag W)로 소비/복원. 자재·생산품은 여기서 손대지 않음(이중차감 없음).
+       규칙(STOCK_CLOSE_HANDOFF §2): 게이트=_mat_avail(mat_stock_daily)·음수차단, 쓰기=stock_ledger. 용접봉도 예외 없음.
+       용접봉 소요=_backflush_bom weld(사내한정 _sanae 내장: 외주는 사급출고tag5로 이미−). base RAC 집계, INNER_PROD=1만.
+       멱등=ref_key(용접봉 전용 네임스페이스로 호출측이 전달, 예 'WELD:BC:{barcode}:{proc}'). mode=post/reverse.
+       ※_neg_stock_msg(옆 세션 feat/close-mgmt 미병합)로 게이트 정렬은 병합 후 후속."""
+    nc = nx.cursor()
+    if not item or prod_qty <= 0:
+        return {"ok": False, "detail": "item·수량(>0) 필수"}
+    if not _is_inner_prod(cro, item):
+        return {"ok": True, "skipped": "사내생산(INNER_PROD=1) 아님 — 용접봉 소비 없음", "weld_kinds": 0}
+    _comps, weld = _backflush_bom(nx, item, cro)   # 용접봉만 사용(comps=자재는 레거시 처리라 무시)
+    if not weld:
+        return {"ok": True, "weld_kinds": 0, "weld_consumed": 0.0, "skipped": "용접봉 없는 품목"}
+    import datetime as _d
+    ymd6 = _d.datetime.now().strftime('%y%m%d')
+    nc.execute("SELECT bf_id FROM nx.backflush_log WHERE ref_key=? AND state='posted'", ref_key)
+    ex = nc.fetchone()
+    if mode == "post" and ex:
+        return {"ok": False, "detail": f"이미 용접봉 백플러시됨(중복방지) — ref {ref_key}"}
+    if mode == "reverse" and not ex:
+        return {"ok": True, "skipped": "되돌릴 용접봉 백플러시 없음", "weld_kinds": 0}
+    f = -1.0 if mode == "reverse" else 1.0
+    # ── 게이트(post만): 용접봉 부족이면 실적 차단(음수 원천차단, mat_stock_daily 추적품만) ──
+    if mode == "post":
+        gc = cro.cursor(); short = []
+        for br, wq in weld.items():
+            wneed = wq * prod_qty
+            if wneed <= 0:
+                continue
+            gc.execute("SELECT COUNT(*) FROM nx.mat_stock_daily WHERE UPPER(mat_code)=?", str(br).strip().upper())
+            if (gc.fetchone()[0] or 0) > 0:   # _tracked: 추적 용접봉만 게이트(미추적은 오차단 방지 통과)
+                av = _mat_avail(gc, br)
+                if wneed > av + 1e-6:
+                    short.append(f"용접봉 {br}(가용 {av:g} < 소요 {wneed:g})")
+        if short:
+            return {"ok": False, "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8])}
+    # ── posting: 용접봉 −W(tag W, MAT점, base RAC, 투입공정) / reverse=+W ──
+    def _seq():
+        nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
+        return int(nc.fetchone()[0] or 1)
+    seq_from = _seq(); weld_consumed = 0.0
+    for br, wq in weld.items():
+        wneed = wq * prod_qty
+        if abs(wneed) < 1e-9:
+            continue
+        nc.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAT_CODE,
+              GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
+            VALUES('MAT',?,?,'W','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
+            ymd6, _seq(), br, _weld_proc_code(nx, br), (wo or None), -wneed * f, '용접봉 생산소비(공정종속)', user)
+        weld_consumed += wneed
+    nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
+    seq_to = int(nc.fetchone()[0] or 0)
+    if mode == "post":
+        nc.execute("""INSERT INTO nx.backflush_log(prod_ymd,work_order,item_code,gpc,prod_qty,ref_key,state,maint_ymd,seq_from,seq_to,ins_user)
+            VALUES(?,?,?,NULL,?,?, 'posted', ?,?,?,?)""",
+            ymd6, (wo or None), item, prod_qty, ref_key, ymd6, seq_from, seq_to, user)
+    else:
+        nc.execute("UPDATE nx.backflush_log SET state='reversed' WHERE bf_id=?", ex[0])
+    return {"ok": True, "mode": mode, "item": item, "weld_kinds": len(weld),
+            "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
+
+
 @router.post("/api/backflush/post")
 def backflush_post(payload: dict = Body(...)):
     """수기 백플러시(테스트/보정). 실운영 자동트리거=바코드생산실적(procbc_save 완성공정). mode=post/reverse. INNER_PROD=1만. 쓰기 nx만."""
