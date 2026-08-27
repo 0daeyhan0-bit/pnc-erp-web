@@ -493,7 +493,10 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                        gubun: str = Query("외주"), src: str = Query("nx")):
     """협력사(납품업체)별 자도번 일자계획. gubun: 외주(협력사=CUST, 기본)/자체(내부공정=WORK)/전체.
        src=legacy → 라이브 PR_T_PLAN_PART_MAT(레거시 4주간 계획수량 w_pr_outside_410, 당김반영) 직독.
-       src=nx(기본) → 우리 편성 nx.plan_part_mat(레거시 STEP5→6→7 100%검증). 가공처=mat_work_center_code, 자도번=mat_code."""
+       src=nx(기본) → ★웹 편성 결과만 사용(라이브 미참조): nx.plan_part_mat(⑤ 자재소요) + nx.plan_item_dtl(④ 계획수량)
+         + nx.plan_dtl(라인/모델). 그레인=(가공처,제번,분할제번,모품목) — 레거시 w_pr_outside_410 과 동일.
+         기간=PART_PLAN_YMD(당김 반영 소요일자), 수량=CEILING(PLAN_QTY×USE_QTY×PROD_RATE/100).
+         자재는 집계에서 접히지만 mats/matn 으로 보존(화면 툴팁)."""
     if src == "legacy":
         return _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun)
     nx = _nx(); cur = nx.cursor()
@@ -501,48 +504,93 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
         cur.execute("IF OBJECT_ID('nx.plan_part_mat') IS NULL SELECT 1 WHERE 1=0")
         C = " COLLATE DATABASE_DEFAULT"
         w = ["1=1"]; p = []
-        if from_ymd: w.append("pp.PLAN_YMD>=?"); p.append(_d6(from_ymd))
-        if to_ymd:   w.append("pp.PLAN_YMD<=?"); p.append(_d6(to_ymd))
+        # ★기간필터는 소요일자(PART_PLAN_YMD) 기준 — 상위 계획일자(PLAN_YMD)가 아니다(2026-08-27).
+        #   PART_PLAN_YMD = 웹 편성이 리드타임 당김을 반영해 계산한 실제 자재 소요일. 대원산업 실측 2,325건 중
+        #   PLAN_YMD 와 같은 건 827건뿐(36%) → PLAN_YMD 로 걸면 당김분이 기간 밖으로 새거나 잘못 들어온다.
+        if from_ymd: w.append("pp.PART_PLAN_YMD>=?"); p.append(_d6(from_ymd))
+        if to_ymd:   w.append("pp.PART_PLAN_YMD<=?"); p.append(_d6(to_ymd))
         if wc.strip():   w.append("pp.MAT_WORK_CENTER_CODE=?"); p.append(wc.strip())
         if part.strip(): w.append("pp.MAT_CODE LIKE ?"); p.append(f"%{part.strip()}%")
         if assy.strip(): w.append("pp.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{assy.strip()}%")
         if line.strip(): w.append("pd.LINE_NO=?"); p.append(line.strip())
         if gubun == "외주":   w.append("w.WORK_CODE IS NULL AND cu.CUST_CODE IS NOT NULL")  # 거래처(협력사)만
         elif gubun == "자체": w.append("w.WORK_CODE IS NOT NULL")                            # 내부공정(P1/P2)
-        # ★정본 nx.plan_part_mat은 자재단위라 행수가 큼(외주 5만+) → 브라우저 과부하 방지: 자도번(part)×가공처 단위로 먼저 집계(일자는 유지)
-        #   후 상한(CAP). 필터(가공처/제번/자도번) 걸면 좁혀짐.
+        # ★집계 그레인 = (가공처, 제번, 분할제번, 모품목) — 레거시 w_pr_outside_410 과 동일(2026-08-27).
+        #   레거시 SP_PR_4주간계획현황_LIVE 는 결과에 MAT_CODE 컬럼이 아예 없다: 자재는 'distinct in_cust_code,item_code'
+        #   로 "이 모품목이 이 업체에 걸리는가" 판정에만 쓰고 최종 group by 에서 빠진다.
+        #   → 자재단위로 펼치면 같은 모품목이 자재 N개면 N배 계상된다(실측 대원산업 26,820 vs 19,723).
+        #      예) 6I1M0BZN/AJR30117401 = 자재 -12-1(157) + -12-2(1,099) 인데 모품목 계획수량은 157.
+        #   수량은 nx.plan_item_dtl 의 계획수량(PLAN_QTY×USE_QTY×PROD_RATE/100) — 웹이 계산한 값만 쓴다.
+        #   자재목록(mats)은 버리지 않고 STRING_AGG 로 보존해 화면 툴팁에 표시.
         CAP = 4000
         try:
-            cur.execute(f"""SELECT TOP {CAP} pp.PLAN_YMD, pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm,
-                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, pp.MAT_CODE, ISNULL(i.item_name,'') nm,
-                  ISNULL(pd.LINE_NO,'') line, ISNULL(pd.MODEL_NO,'') model, SUM(CAST(pp.PART_PLAN_QTY AS float)) q
+            # ★키당 일자 1개로 귀속 = MIN(PART_PLAN_YMD). 한 모품목의 자재들이 리드타임이 달라 소요일자가
+            #   갈리면(실측 142/1,599키) 일자별로 계획수량이 통째로 붙어 중복 계상된다(20,838 vs 19,723).
+            #   가장 이른 소요일 = 그 모품목을 그날까지 준비해야 하는 날 → 레거시 SP 도 키당 1행.
+            cur.execute(f"""SELECT TOP {CAP} MIN(pp.PART_PLAN_YMD) PART_PLAN_YMD, pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm,
+                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
+                  -- ★라인은 plan_item_dtl 우선(A/S·긴급 SVC/AP 제번은 plan_dtl 에 없어 41건 빈칸이 됐다)
+                  ISNULL(NULLIF(MAX(ISNULL(d.LINE_NO,'')),''), ISNULL(pd.LINE_NO,'')) line, ISNULL(pd.MODEL_NO,'') model,
+                  -- 작업처 = 도번 마스터의 내부공정(work_code) 없으면 사내외주처(in_cust)
+                  COALESCE(NULLIF(wi.WORK_DESC,''), NULLIF(ci.CUST_DESC,''), NULLIF(RTRIM(i.work_code),''), NULLIF(RTRIM(i.in_cust),''), '') workcenter,
+                  MAX(CAST(ISNULL(d.LOT_QTY,0) AS float)) lot,
+                  MAX(CEILING(CAST(ISNULL(d.PLAN_QTY,0) AS float)*ISNULL(d.USE_QTY,1)*ISNULL(d.PROD_RATE,100)/100.0)) q,
+                  COUNT(DISTINCT pp.MAT_CODE) matn,
+                  STUFF((SELECT DISTINCT ','+RTRIM(x.MAT_CODE) FROM nx.plan_part_mat x
+                          WHERE x.WORK_ORDER=pp.WORK_ORDER AND x.SPLIT_WORK_ORDER=pp.SPLIT_WORK_ORDER
+                            AND x.ASSY_ITEM_CODE=pp.ASSY_ITEM_CODE
+                            AND x.MAT_WORK_CENTER_CODE=pp.MAT_WORK_CENTER_CODE
+                          FOR XML PATH('')),1,1,'') mats
                 FROM nx.plan_part_mat pp
+                JOIN nx.plan_item_dtl d ON d.WORK_ORDER{C}=pp.WORK_ORDER{C}
+                     AND d.SPLIT_WORK_ORDER{C}=pp.SPLIT_WORK_ORDER{C} AND d.C_ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
                 LEFT JOIN (SELECT WORK_ORDER, MAX(LINE_NO) LINE_NO, MAX(MODEL_NO) MODEL_NO FROM nx.plan_dtl GROUP BY WORK_ORDER) pd ON pd.WORK_ORDER=pp.WORK_ORDER
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
-                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE{C}=pp.MAT_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK wi ON wi.WORK_CODE{C}=RTRIM(i.work_code){C}
+                LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST ci ON ci.CUST_CODE{C}=RTRIM(i.in_cust){C}
                 WHERE {' AND '.join(w)}
-                GROUP BY pp.PLAN_YMD, pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE),
-                  pp.WORK_ORDER, pp.ASSY_ITEM_CODE, pp.MAT_CODE, i.item_name, pd.LINE_NO, pd.MODEL_NO
-                ORDER BY wcnm, pp.WORK_ORDER, pp.MAT_CODE""", *p)
+                GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE),
+                  pp.WORK_ORDER, pp.SPLIT_WORK_ORDER, pp.ASSY_ITEM_CODE, i.item_name, i.item_spec, pd.LINE_NO, pd.MODEL_NO,
+                  wi.WORK_DESC, ci.CUST_DESC, i.work_code, i.in_cust
+                ORDER BY wcnm, pp.WORK_ORDER, pp.ASSY_ITEM_CODE""", *p)
         except Exception as e:
             return {"dates": [], "rows": [], "cnt": 0, "sum_qty": 0, "note": "편성 먼저 실행(생산계획업로드 → 🧾자재소요·조달 편성). 오류: " + str(e)[:120]}
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
         capped = len(raw) >= CAP
-        dates = sorted({r["PLAN_YMD"] for r in raw})
+        dates = sorted({r["PART_PLAN_YMD"] for r in raw})
         keyed = {}
         for r in raw:
-            k = (r["MAT_WORK_CENTER_CODE"], r["WORK_ORDER"], r["ASSY_ITEM_CODE"], r["MAT_CODE"])
+            # ★키 = (가공처, 도번) — 레거시 w_pr_outside_410 과 동일 그레인.
+            #   MAT_CODE 제외: 레거시 SP 결과에 자재 컬럼이 없다(자재는 mats/matn 으로 보존 → 툴팁).
+            #   WORK_ORDER 제외: 레거시는 도번 1행에 제번 전체를 합산(f_set_addnumber=SUM).
+            #     실측 AJJ76418705 = 제번 46개 · LOT합 316 = 레거시 화면 316 과 일치.
+            k = (r["MAT_WORK_CENTER_CODE"], r["ASSY_ITEM_CODE"])
             g = keyed.get(k)
             if not g:
                 g = {"wc": r["MAT_WORK_CENTER_CODE"], "wcnm": r["wcnm"], "wo": r["WORK_ORDER"], "assy": r["ASSY_ITEM_CODE"],
-                     "part": r["MAT_CODE"], "nm": r["nm"], "line": r["line"], "model": r["model"], "days": {}, "tot": 0}
+                     "part": r["ASSY_ITEM_CODE"], "nm": r["nm"], "spec": r.get("spec") or "",
+                     "line": r["line"], "model": r["model"], "workcenter": r.get("workcenter") or "",
+                     "lot": 0.0, "_mset": set(), "_wos": set(), "days": {}, "tot": 0}
                 keyed[k] = g
-            q = float(r["q"] or 0); g["days"][r["PLAN_YMD"]] = g["days"].get(r["PLAN_YMD"], 0) + q; g["tot"] += q
-        rows = sorted(keyed.values(), key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
+            q = float(r["q"] or 0); g["days"][r["PART_PLAN_YMD"]] = g["days"].get(r["PART_PLAN_YMD"], 0) + q; g["tot"] += q
+            g["lot"] += float(r.get("lot") or 0)
+            g["_wos"].add(str(r["WORK_ORDER"]).strip())
+            g["_mset"].update(m for m in (r.get("mats") or "").split(",") if m)
+            if not g["line"] and r.get("line"): g["line"] = r["line"]
+            if not g["workcenter"] and r.get("workcenter"): g["workcenter"] = r["workcenter"]
+        for g in keyed.values():                 # 도번 롤업 마무리: 자재목록·제번수 확정
+            ms = sorted(g.pop("_mset", set()) or []); ws = g.pop("_wos", set()) or set()
+            g["mats"] = ", ".join(ms); g["matn"] = len(ms); g["wocnt"] = len(ws)
+        rows = sorted(keyed.values(), key=lambda x: (x["wcnm"] or "", x["line"], x["part"]))
         # ★조달 배분 반영(규칙 §5): 자도번(part)에 발주업체 배분(order_vendor)+경로계수(route01)가 있으면 협력사(발주업체)별로 분할.
         #   실배분비율 = route01% × 업체비율. 배분 없는 자도번은 그대로(무회귀). 현재 route01=100.
-        parts = sorted({r["part"] for r in rows if r.get("part")})
+        # ★그레인이 모품목이 된 뒤(2026-08-27)로는 배분 조회키를 그 행의 실제 자재목록(mats)으로 쓴다.
+        #   part=모품목 으로 조회하면 order_vendor 에 안 걸려 배분이 통째로 사라진다.
+        for r in rows:
+            r["_mats"] = [m.strip() for m in (r.get("mats") or "").split(",") if m.strip()]
+        parts = sorted({m for r in rows for m in r["_mats"]})
         ov = {}   # part -> [(vendor, ratio|None)]
         if parts:
             try:
@@ -561,7 +609,10 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
             vend_nm = _custnm_map(cur, {v for lst in ov.values() for (v, _) in lst})
             newrows = []
             for r in rows:
-                p = r.get("part"); rf = route01.get(p, 100.0) / 100.0; lst = ov.get(p)
+                # ★모품목행의 자재 중 배분이 걸린 첫 자재를 대표로 사용(자재 1개인 행이 82% — 실측 1,314/1,741).
+                _ms = r.get("_mats") or []
+                p = next((m for m in _ms if m in ov), (_ms[0] if _ms else r.get("part")))
+                rf = route01.get(p, 100.0) / 100.0; lst = ov.get(p)
                 if not lst:                                   # 배분 없음 → route01만 스케일(현재 1.0=무변경)
                     if rf == 1.0: newrows.append(r)
                     else: newrows.append(dict(r, days={d: round(q*rf, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*rf, 3)))
@@ -576,9 +627,56 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                     newrows.append(dict(r, wc=vc, wcnm=vend_nm.get(vc, vc),
                         days={d: round(q*f, 3) for d, q in r["days"].items()}, tot=round(r["tot"]*f, 3),
                         alloc_note=f"배분 {round(frac*100)}%"))
-            rows = sorted(newrows, key=lambda x: (x["wcnm"] or "", x["line"], x["wo"], x["part"]))
+            rows = sorted(newrows, key=lambda x: (x["wcnm"] or "", x["line"], x["part"]))
         note = f"⚠ 결과가 많아 상위 {CAP}건만 표시했습니다. 협력사(가공처)·제번·자도번으로 필터하세요." if capped else ""
-        return {"dates": dates, "rows": rows, "cnt": len(rows), "sum_qty": sum(r["tot"] for r in rows), "note": note}
+        # ★완료수량·색상(2026-08-27): legacy 경로(위 _planstatus_legacy)와 동일한 _fulfillment 엔진을 도번단위로 적용.
+        #   완료수량은 '계획'이 아니라 출하실적·재고 = 실적이므로 라이브 조회가 맞다(계획은 nx 그대로 유지).
+        #   ⚠legacy 는 days(계획)까지 _fulfillment 값으로 덮어쓰지만 nx 는 덮지 않는다 — 웹 편성 계획을 지켜야 하므로
+        #     donedays/colors/doneq/reqq 만 입힌다.
+        frac = False
+        for r in rows: r["doneq"] = None; r["reqq"] = None
+        if gubun == "외주" and wc.strip() and to_ymd:
+            try:
+                import datetime as _dtp
+                _f6, _t6 = _d6(from_ymd), _d6(to_ymd)
+                per_key, _m = _fulfillment(wc.strip(), _f6, _t6)
+                fb = _dtp.date(2000+int(_f6[:2]), int(_f6[2:4]), int(_f6[4:6]))
+                tb = _dtp.date(2000+int(_t6[:2]), int(_t6[2:4]), int(_t6[4:6]))
+                ndays = min(31, (tb - fb).days + 1) if tb >= fb else 31
+                axis = [(fb + _dtp.timedelta(days=i)).strftime('%y%m%d') for i in range(ndays)]
+                pk_assy = {}
+                for (swo, a), v in per_key.items():
+                    e = pk_assy.setdefault(str(a), [0.0, 0.0, 0.0]); e[0] += v[0]; e[1] += v[1]; e[2] += v[2]
+                fmap = {}
+                for fr in _m:
+                    a = str(fr["assy"]); e = fmap.get(a)
+                    if not e: e = {"dn": [0]*31, "tg": [0]*31}; fmap[a] = e
+                    for i in range(31):
+                        e["dn"][i] += fr["done_days"][i]
+                        if fr["tg"][i] > e["tg"][i]: e["tg"][i] = fr["tg"][i]
+                nmatch = 0
+                for g in rows:
+                    hit = pk_assy.get(str(g["assy"]))
+                    if hit is not None: g["doneq"] = _qint(hit[0]); g["reqq"] = _qint(hit[1]); nmatch += 1
+                    else: g["doneq"] = 0; g["reqq"] = 0
+                    fm = fmap.get(str(g["assy"]))
+                    if fm:   # 계획일자(g["days"])는 그대로 두고 완료/색만 축에 맞춰 입힘
+                        g["donedays"] = {axis[i]: _qint(fm["dn"][i]) for i in range(ndays) if fm["dn"][i]}
+                        g["colors"] = {axis[i]: _TAGCOLOR.get(fm["tg"][i], '') for i in range(ndays)
+                                       if fm["tg"][i] and (g["days"].get(axis[i]) or fm["dn"][i])}
+                    else: g["donedays"] = {}; g["colors"] = {}
+                frac = True
+                note += f" 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번단위, 매칭 {nmatch}/{len(rows)}건). 일자셀=완료/계획+색."
+            except Exception as e:
+                note += f" ⚠완료수량 계산 오류: {str(e)[:90]}"
+        else:
+            note += " 완료수량=협력사(외주) 지정 시 표시."
+        for i, r in enumerate(rows, 1):
+            r.pop("_mats", None)                 # 내부 계산용 키 제거
+            r["lot"] = _qint(r.get("lot") or 0); r["tot"] = _qint(r["tot"]); r["seq"] = i
+            r["days"] = {k2: _qint(v2) for k2, v2 in r["days"].items()}
+        return {"dates": dates, "rows": rows, "cnt": len(rows), "frac": frac,
+                "sum_qty": sum(r["tot"] for r in rows), "note": note}
     finally:
         nx.close()
 
@@ -667,8 +765,16 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         wcc = m["work_code"] or m["in_cust"]
         iss = issued.get(str(m["assy"]).strip(), 0.0)
         req0 = m["req"]; remain = max(0.0, req0 - iss)
+        # ★구분(레거시 420 '구분' 컬럼) — 세트재고/입고대기가 있으면 세트입고, 아니면 직납.
+        #   레거시는 직납품을 세트재고 없이 자재·물류창고 재고로 본다(SP_LIVE 533·539행 주석).
+        _gb = "세트입고" if (m["iset_stk"] or m["ireq"]) else ("직납" if not m["work_code"] else "")
+        # ★작업처 = 내부공정(work_code)명 없으면 사내외주처(in_cust)명. 코드가 아니라 이름 표시(CLAUDE.md §3).
+        #   종전엔 m["work_center"] 만 봐서 전부 빈칸이었다(2026-08-27 수정).
+        #   wcc 가 비면(품목마스터에 work_code·in_cust 둘 다 없음) 조회 협력사명으로 대체 — 레거시도 그 칸에 협력사명.
+        _wcnm = m["work_center"] or wcnm.get(wcc, "") or wcc or custnm.get(m["cust"], m["cust"])
         out.append({"cust": m["cust"], "custnm": custnm.get(m["cust"], m["cust"]), "assy": m["assy"], "line": m["line"],
-            "nm": nm, "spec": spec, "workcenter": m["work_center"] or wcnm.get(wcc, wcc),
+            "nm": nm, "spec": spec, "workcenter": _wcnm,
+            "work_center": _wcnm, "in_cust": m["in_cust"] or "", "gubun": _gb,
             "mat_list": m["mat_list"], "sagub_list": m["sagub_list"], "lot": _qint(m["lot"]),
             "plan": _qint(m["plan"]), "done": _qint(m["done"]), "req": _qint(remain), "req_org": _qint(req0),
             "issued": _qint(iss), "status": ("90" if iss >= req0 and iss > 0 else ("10" if iss > 0 else "00")),
@@ -681,15 +787,59 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
                     "done": _qint(sum(x["done"] for x in out)), "req": _qint(sum(x["req"] for x in out)),
                     "issued": _qint(sum(x["issued"] for x in out))}}
 
+def _wd_horizon(d6a, gigan):
+    """★기간 N일 → 조회 종료일(근무일 기준). 레거시 w_pr_outside_420 실측 산식.
+         종료일 = 기준일(d6a) **초과 (N-1)번째 근무일**  (kitting.py:543 과 동일한 rn=gigan-1).
+       실측(2026-08-27 대조): 기준 260827(목)·기간 2 → rn=1 → 260831(31월)
+             → 표시 컬럼 = 27목·28금·29토·30일·31월 (5개) = 레거시 화면과 일치.
+       ※260828(금)은 달력상 work_stats=4(휴무)라 근무일이 아니다 — 그래서 27목 다음 근무일이
+         바로 31월이고, 그 사이 28·29·30 이 전부 컬럼으로 나와 범위가 늘어난다.
+         "휴무만큼 +해서 조회된다"는 사용자 설명이 이 동작.
+       근무일 = HR_M_CALENDAR(work_team='A', time_type='A', work_stats IN 1/2/5/6)
+                ∩ pr_m_line_calendar(work_stats<>4).  (kitting.py:537 검증 쿼리 동일)
+       달력 조회 실패시 주말만 제외하는 fallback."""
+    n = max(1, int(gigan or 1)) - 1
+    if n <= 0: return d6a                        # 기간 1일 = 기준일 당일만
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
+            (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
+               FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
+              WHERE work_team='A' AND calendar_yymd > ? AND time_type='A'
+                AND work_stats IN ('1','2','5','6')
+                AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK)
+                            WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
+            WHERE rn = ?""", '20' + d6a, n)
+        r = cur.fetchone()
+        if r and r[0]: return str(r[0])
+    except Exception:
+        pass
+    finally:
+        cn.close()
+    import datetime as _dt3                      # fallback: 주말 제외 카운트
+    d = _dt3.date(2000+int(d6a[:2]), int(d6a[2:4]), int(d6a[4:6])); c = 0
+    for _ in range(90):
+        d += _dt3.timedelta(days=1)
+        if d.weekday() < 5:
+            c += 1
+            if c >= n: break
+    return d.strftime('%y%m%d')
+
 @router.get("/api/partner/deliv420")
 def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: str = Query(""),
-                     item: str = Query(""), matcode: str = Query("")):
+                     item: str = Query(""), matcode: str = Query(""), gigan: int = Query(0)):
     """거래명세서 발행 조회 — 레거시 w_pr_outside_420 동일(SP_LIVE 라이브 직독+510 완료배분).
-       cust=협력사코드(필수). from/to=기준일자~horizon. 완료수량=출하+완제품재고+세트/입고대기 재고배분."""
+       cust=협력사코드(필수). 완료수량=출하+완제품재고+세트/입고대기 재고배분.
+       ★gigan(기간 N일)이 오면 to_ymd 를 **근무일** 기준으로 계산한다(달력일 아님).
+         종료일 = 기준일 초과 N번째 근무일. 표시 컬럼은 그 사이 전체 달력일(휴무 포함)
+         → 휴무(토·일·공휴)만큼 조회범위가 자동 연장된다.
+         레거시 실측: 기준 260827(목)·기간 2 → 28금·31월(근무 2일) → 컬럼 27목·28금·29토·30일·31월."""
     if not cust.strip():
         return {"dates": [], "rows": [], "cnt": 0, "note": "협력사를 선택하세요."}
     d6f = _d6(from_ymd) if from_ymd else None
     d6t = _d6(to_ymd) if to_ymd else None
+    if d6f and gigan and int(gigan) > 0:
+        d6t = _wd_horizon(d6f, int(gigan))      # ★근무일 지평 우선(프론트 달력일 계산 무시)
     if not d6f or not d6t:
         # 기본: 라이브 최소 계획일자 ~ +4근무일 horizon
         cn = _conn(); cur = cn.cursor()

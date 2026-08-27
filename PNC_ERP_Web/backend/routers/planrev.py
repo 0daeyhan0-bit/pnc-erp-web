@@ -88,6 +88,9 @@ def _route_setup(cur):
 
 def _step6_sql(cur):
     P = _P
+    # ★STEP6 는 v_pr_bom(뷰) 그대로 — 스냅을 적용했더니 47초→193초로 **느려졌다**(2026-08-27 실측).
+    #   STEP6 재귀는 level_no<10 으로 얕고 PR_M_ITEM/PR_M_MAT 조인이 함께 걸려
+    #   옵티마이저가 뷰 쪽에서 더 나은 계획을 잡는다. STEP7 과 반대이므로 건드리지 않는다.
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
@@ -156,8 +159,32 @@ def _step6_sql(cur):
         WHERE b.plan_ymd=a.plan_ymd AND b.work_order=a.work_order AND b.split_work_order=a.split_work_order AND b.assy_item_code=a.assy_item_code
           AND b.bom_level=a.bom_level AND b.upper_item_code=a.upper_item_code AND b.item_code=a.item_code AND b.proc_seq<a.proc_seq ORDER BY b.proc_seq DESC),'')""")
 
+def _ensure_bom_snap(cur):
+    """★nx.v_pr_bom(뷰) 물질화 — STEP7 재귀 CTE 성능(2026-08-27).
+
+    v_pr_bom 은 bom_header/bom_line + proc_weld 를 UNION 하는 뷰라
+    재귀 CTE 가 **반복마다 다시 평가**한다. STEP7 CTE 실측:
+        뷰 516.9초 → 물질화 4.2초  = **123배**(절감 513초)
+        재생성 비용 4.72초(SELECT INTO 4.59 + 인덱스 0.14) — 일회성
+        조인 1회 기준으로도 1.36초 → 0.04초, 결과 73,052행 불일치 0
+    ⑤가 457초(④의 10배)인 주된 원인이 이 반복 평가였다.
+    ※NOT EXISTS 인덱스는 효과 없음(517.0 → 516.5초) — 병목이 아니었다.
+    ※★STEP6 에는 적용하지 않는다 — 거기선 오히려 47초→193초로 느려진다(본문 주석 참조).
+
+    ★매 실행마다 새로 만든다 — 기존 nx.plan_bom_snap 은 낡아서
+      except_flag 28건·qty 44건이 뷰와 달랐다(오늘 BOM 수정분 미반영).
+      낡은 스냅을 재사용하면 편성 결과가 조용히 틀어지므로 절대 캐시하지 않는다."""
+    cur.execute("IF OBJECT_ID('nx.plan_bom_snap') IS NOT NULL DROP TABLE nx.plan_bom_snap")
+    cur.execute("""SELECT ITEM_CODE AS item_code, MAT_CODE AS mat_code, USE_QTY_PR,
+           EXCEPT_FLAG AS except_flag, VIR_ITEM_FLAG AS vir_item_flag
+      INTO nx.plan_bom_snap FROM nx.v_pr_bom""")
+    cur.execute("""CREATE INDEX ix_plan_bom_snap ON nx.plan_bom_snap(item_code)
+      INCLUDE(mat_code, USE_QTY_PR, except_flag, vir_item_flag)""")
+
+
 def _step7_sql(cur):
     P = _P
+    _ensure_bom_snap(cur)          # ★BOM 물질화(뷰 반복평가 제거)
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
     #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
@@ -169,35 +196,85 @@ def _step7_sql(cur):
       LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
         ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
+    # ※plan_part_dtl 인덱스는 넣지 않는다 — 실측 효과 0(517.0초 → 516.5초).
+    #   병목은 NOT EXISTS 가 아니라 v_pr_bom(뷰) 반복 평가였다(아래 _ensure_bom_snap).
     # ★★조달경로(route) 반영 인프라(2026-08-24, 가산적): 활성 대체경로(sourcing_route current_flag=1·route_no>1) 있으면
     #   그 경로의 BOM엣지(route_edges)로 전개, 없으면 v_pr_bom(현행 except<>1) fallback=R01 diff0(검증: route CTE≡원본 100.000%).
     _route_setup(cur)
+    # ★★직납품 당김(2026-08-27) — 레거시 「LINE-NO MASTER」의 '직납품당김일자'(PR_M_LINE_NO.CUST_MAINT_DAY).
+    #   파트별계획이 없는 도번(=직납품)은 라인의 CUST_MAINT_DAY 만큼 **근무일 기준으로 추가 당김**된다.
+    #   레거시 SP_PR_4주간계획현황_LIVE 167행과 동일 산식:
+    #     IIF(L.CUST_MAINT_DAY>0, f_reld_doosung_live(a.plan_ymd, L.CUST_MAINT_DAY*-1), a.plan_ymd)
+    #   실측 근거: ASSY행 불일치 619건 중 516건이 라인 CA — CA 가 CUST_MAINT_DAY=1 을 가진 유일한 라인,
+    #             그중 420건이 정확히 +1일 차이였다.
+    #   근무일 = 공통달력(HR_M_CALENDAR 팀A·주간, work_stats 1/2/5/6/7). 직납품은 파트가 없으므로 공통 사용.
+    cur.execute("IF OBJECT_ID('tempdb..#wd') IS NOT NULL DROP TABLE #wd")
+    cur.execute("""SELECT ymd6, ROW_NUMBER() OVER(ORDER BY ymd6) rn INTO #wd FROM
+        (SELECT SUBSTRING(calendar_yymd,3,6) ymd6, work_stats FROM nx.HR_M_CALENDAR
+          WHERE work_team='A' AND time_type='A') c
+        WHERE work_stats IN ('1','2','5','6','7')""")
+    cur.execute("CREATE INDEX ix_wd ON #wd(ymd6)")
+    cur.execute("CREATE INDEX ix_wd_rn ON #wd(rn)")
+    #   ⚠출발점은 **라인당김이 적용된 일자**(plan_line_pull.pulled)여야 한다 — STEP5(384행)와 같은 기준.
+    #     plan_dtl.PLAN_YMD(원본)에서 당기면 라인당김이 빠져 어긋난다(실측: 웹 dtl 이 라이브보다 +1/+3/+5일).
+    cur.execute("IF OBJECT_ID('nx.plan_direct_pull') IS NOT NULL DROP TABLE nx.plan_direct_pull")
+    _has_lp = int(cur.execute(
+        "SELECT CASE WHEN OBJECT_ID('nx.plan_line_pull') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
+    _base = "ISNULL(p.pulled, d.PLAN_YMD)" if _has_lp else "d.PLAN_YMD"
+    _lpj = ("LEFT JOIN nx.plan_line_pull p ON p.wo=d.WORK_ORDER AND p.org=d.PLAN_YMD"
+            if _has_lp else "")
+    cur.execute(("""SELECT RTRIM(d.WORK_ORDER) AS work_order, w2.ymd6 AS pull_ymd
+      INTO nx.plan_direct_pull
+      FROM nx.plan_dtl d
+      {LPJ}
+      JOIN {P}PR_M_LINE_NO L ON RTRIM(L.LINE_NO)=RTRIM(d.LINE_NO) AND ISNULL(L.CUST_MAINT_DAY,0)>0
+      JOIN #wd w1 ON w1.ymd6={BASE}
+      JOIN #wd w2 ON w2.rn=w1.rn-CAST(L.CUST_MAINT_DAY AS int)
+     WHERE ISNULL(d.PLAN_YMD,'')<>''""").replace("{P}", P).replace("{LPJ}", _lpj).replace("{BASE}", _base))
+    cur.execute("CREATE INDEX ix_plan_direct_pull ON nx.plan_direct_pull(work_order)")
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
+    # ★★자재소요 일자 = **당김 후**(part_plan_ymd) — 2026-08-27 추가.
+    #   레거시 PR_T_PLAN_PART_MAT 은 날짜를 2벌 갖는다:
+    #     PLAN_YMD/OUTPUT_HM/AMPM           = 상위 계획(당김 전)
+    #     PART_PLAN_YMD/PART_OUTPUT_HM/...  = ★당김 후 소요일시  ← 자재는 이걸 봐야 한다
+    #   실측: 레거시 MAT 안에서 두 컬럼이 81.53% 다르고, MAT.PART_PLAN_YMD 는
+    #        PART.PART_PLAN_YMD 와 72.95% 일치(나머지는 하위전개분).
+    #   종전 웹은 plan_ymd 하나뿐이라 당김이 자재로 전달되지 않았다(사용자 지적).
+    #   → CTE 에 part_plan_ymd·part_output_hm 을 함께 실어 최하위까지 내려보낸다.
+    #     상위앵커(plan_part_dtl)는 자기 당김값, 재귀 하위는 부모값을 그대로 상속한다
+    #     (레거시도 하위자재는 그 부모 파트의 소요일시를 따른다).
     cur.execute(("""
-    WITH CTE_BOM(plan_ymd,work_order,split_work_order,assy_item_code,bom_level,upper_item_code,item_code,proc_seq,bom_mat_code,mat_work_center_code,cum_use_qty,cum_in_cust_code,mat_flag,use_qty,part_plan_qty,gc_gubun,cust_flag) AS (
-      SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.item_code,
+    WITH CTE_BOM(plan_ymd,part_plan_ymd,part_output_hm,work_order,split_work_order,assy_item_code,bom_level,upper_item_code,item_code,proc_seq,bom_mat_code,mat_work_center_code,cum_use_qty,cum_in_cust_code,mat_flag,use_qty,part_plan_qty,gc_gubun,cust_flag) AS (
+      SELECT a.plan_ymd,ISNULL(NULLIF(a.part_plan_ymd,''),a.plan_ymd),ISNULL(a.part_output_hm,''),
+         a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.item_code,
          c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CONVERT(float,a.part_plan_qty)/NULLIF(a.use_qty,0),a.gc_gubun,'0'
       FROM nx.plan_part_dtl a JOIN nx.item_ov c ON a.item_code=c.item_code WHERE a.proc_seq=1
       UNION ALL
-      SELECT a.plan_ymd,a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
+      -- ★직납품(파트별계획 없음) 앵커: 소요일자에 라인 CUST_MAINT_DAY(직납품당김일자) 적용.
+      --   plan_ymd(상위 계획일)는 그대로 두고 part_plan_ymd 만 당긴다.
+      SELECT a.plan_ymd,ISNULL(dp.pull_ymd,a.plan_ymd),ISNULL(a.OUTPUT_HM,''),
+         a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
          c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CEILING(CONVERT(float,a.plan_qty)*ISNULL(a.use_qty,1)*ISNULL(CASE WHEN a.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100),'','1'
       FROM nx.plan_item_dtl a JOIN nx.item_ov c ON a.c_item_code=c.item_code
+      LEFT JOIN nx.plan_direct_pull dp ON dp.work_order=RTRIM(a.work_order)
       WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.item_code=a.c_item_code)
       UNION ALL
-      SELECT cb.plan_ymd,cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
+      SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
+         cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
          m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.USE_QTY_PR END),
          CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
-      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
+      FROM CTE_BOM cb JOIN nx.plan_bom_snap b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1'
         AND NOT EXISTS(SELECT 1 FROM nx.plan_route_active pra WHERE pra.assy_item_code=cb.assy_item_code)   -- ★가드: 활성 대체경로 없는 제품만 v_pr_bom(현행)
         AND NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code)
       UNION ALL
       -- ★★route-active 브랜치: 활성 대체경로(Rnn) 있는 제품은 그 경로의 route_edges로 전개(except_flag 무관·route가 활성엣지만 보유)
-      SELECT cb.plan_ymd,cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
+      SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
+         cb.work_order,cb.split_work_order,cb.assy_item_code,cb.bom_level,cb.upper_item_code,cb.item_code,cb.proc_seq,b.mat_code,
          m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.use_qty_pr END),
          CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
@@ -212,9 +289,28 @@ def _step7_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_mat') IS NOT NULL DROP TABLE nx.plan_part_mat")
     # 최하위집계 + ★용접봉(RAC, proc_weld 별도)만 제외. ★2026-08-19 교정: 레거시 SP엔 sgroup910 제외 없음 →
     #   910 일괄제외는 우리 오추가(4930 등 910 오분류 실 매입부품까지 제외). RAC(용접봉)만 공정처리로 제외, 용접링은 사급으로 유지(RACX 일치).
+    #   ★part_plan_ymd/part_output_hm 도 함께 집계(최소값 = 가장 이른 소요일시).
+    #     같은 자재가 여러 파트에 걸리면 제일 빠른 시점에 준비돼야 하므로 MIN 이 맞다.
+    #   ★★당일 클램프 — 자재는 당일 이전으로 편성되지 않는다(실측 100.00%, 85,990/85,990).
+    #     계획은 매일 '당일~+31일'로 업로드되므로 당일보다 이른 소요일은 존재할 수 없다.
+    #     파트별 PART_PLAN_YMD < 당일  → 당일 + '0750'
+    #     파트별 PART_PLAN_YMD >= 당일 → 파트별 값 그대로(69,463행 100.00%)
+    #     ※기준일은 nx.plan_dtl 의 최소 PLAN_YMD(=업로드 시작일=당일). GETDATE 대신 이걸 쓰면
+    #       과거 계획으로 재편성해도 그때 기준으로 재현된다.
+    cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
+    _mat_base = str(cur.fetchone()[0] or "").strip()
+    #     ★예외(2026-08-27): **직납품 당김분(CUST_MAINT_DAY)** 은 클램프하지 않는다.
+    #       직납품은 당일보다 이른 소요일이 실제로 존재한다(라이브 ASSY행 88건이 B 이전).
+    #       클램프가 당김값을 되돌려 CA 라인 77건이 어긋났다 → ASSY행 83.82%→86.87%.
     cur.execute(("""SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code AS mat_code,
-        SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code
+        SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code,
+        CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '{B}'
+             ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
+        CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '0750'
+             ELSE MIN(a.part_output_hm) END AS part_output_hm
     INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
+    LEFT JOIN nx.plan_direct_pull dpx ON dpx.work_order=RTRIM(a.work_order)
+         AND a.bom_level=0 AND a.bom_mat_code=a.assy_item_code""".replace("{B}", _mat_base) + """
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
@@ -270,7 +366,9 @@ def _step5_item(cur):
     cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO FROM nx.model_bom")
     for m, ci, uq, my, ty in cur.fetchall(): mbom[str(m).strip()].append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
     recvmap = _dd(set)
-    cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
+    # ★2026-08-27 라이브 직독 → nx 미러. 실측 대사 동일(양쪽 64,714행·63,006조합)이라
+    #   산출물 변화 없이 라이브 의존만 제거된다(§1 라이브 접근 최소화).
+    cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP_TEST3.nx.SA_T_RECV_DTL WHERE WORK_ORDER>''")
     for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
     prate = {}
     cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
@@ -324,14 +422,16 @@ def _step5_item(cur):
             lot[wos] = max(lot[wos], rq or pq)       # ★REMAIN_QTY 우선, 없으면 종전 방식
     for rr in irows: rr[5] = lot[rr[1]]
     # ── STEP5-AS: A/S(WO) 계획 앵커 (레거시 compose 3번째 앵커, 우리 누락분 반영) ──
-    #   소스=라이브 PR_T_PLAN_INPUT(w_pr_plan_060 수기 A/S/긴급, LINE SVC/AR). ITEM_CODE=완성품 직접(모델매핑 없음),
+    #   소스=PR_T_PLAN_INPUT(w_pr_plan_060 수기 A/S/긴급, LINE SVC/AR). ITEM_CODE=완성품 직접(모델매핑 없음),
     #   prod_rate=100(WO 특례, SP substring(work_order,1,2)='WO'), plan_ymd>=생산계획 최소일자(@as_from_ymd).
-    #   ★병행기간=라이브 직독(주문 sa_t_recv_dtl 직독과 동일 패턴). 컷오버 후=웹 A/S입력→nx.plan_input.
+    #   ★2026-08-27 라이브 직독 → nx 미러. 실측 대사 동일(양쪽 791행·수량합 443,772·차집합 0/0,
+    #     최종등록시각도 동일)이라 산출물 변화 없이 라이브 의존만 제거된다.
+    #     컷오버 후 = 웹 A/S입력(nx.prod_plan_input)으로 repoint 예정.
     cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
     _asfrom = str(cur.fetchone()[0] or '').strip()
     cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
             MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
-          FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
+          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a
           JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
           WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
           GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
@@ -684,6 +784,18 @@ def planrev_step_model(payload: dict = Body(...)):
     return _run_step("M", _f, _by(payload))
 
 
+# ⛔제번 병합(/api/planrev/step/mergewo) — 2026-08-27 시도 후 **폐기**.
+#   가설: 업로드(order.py:52 `k=(wo,ymd)`)가 엑셀 일자컬럼을 펼쳐 165제번이 다중행이 되는데,
+#         라이브 PR_T_PLAN_DTL 은 제번당 1행이라 이 구조 차이가 420 부정확의 원인일 것이다.
+#   결과: **틀렸다.** 4,334→4,166 행으로 라이브와 같은 구조가 됐지만 정합이 오히려 무너졌다.
+#         ④파트별 99.86%→95.39% · ⑤자재행 99.88%→96.23% · ★ASSY행 100.00%→97.22%
+#         (일자를 LG_INPUT 으로 덮은 1차 시도는 더 나빴다: 자재행 43.32%·ASSY 22.57%)
+#   원인: STEP5 가 제번을 이미 합쳐 처리하므로 plan_dtl 이 몇 행이든 결과가 같다.
+#         병합은 得이 없고, MIN(일자)로 접으면서 라인당김 출발점만 어긋났다.
+#   ★결론: **웹의 (제번,일자) 그레인이 정답이다.** 라이브와 행 구조가 달라도 무방하다.
+#         420 ASSY행은 병합 없이 100.00% 다(직납품당김일자 적용 + LG 라이브 우선).
+
+
 @router.post("/api/planrev/step/history")
 def planrev_step_history(payload: dict = Body(...)):
     """② 생산계획이력생성 (H) — nx.sale_plan + nx.plan_snap"""
@@ -735,35 +847,46 @@ def planrev_step_part(payload: dict = Body(...)):
     return _run_step("K", _f, user)
 
 
+def _coop_check(cur):
+    """협력사 점검 — plan_part_mat 작업처 집계 + 마스터 미매핑 리포트(쓰기 0).
+
+    ★2026-08-27 ⑥ 단계를 ⑤ 로 흡수. 종전 ⑥「협력사계획 편성」은 이름과 달리
+      쓰기가 0이고 조회 2번(0초)뿐이라 '편성'이 아니었다. 레거시
+      SP_PR_CREATE_PLAN_협력사계획_생성 이 만드는 자재소요는 웹에선 ⑤(STEP7)가
+      이미 만들고, 그 SP 의 또다른 산출물 PR_T_PLAN_PART_MAT_BY_ITEM 은
+      웹·레거시 어디에서도 읽지 않아(참조 0건) 만들 필요가 없다.
+      → 검증 로직만 ⑤ 끝에 붙이고 단계는 없앤다."""
+    cur.execute("""SELECT COUNT(*), COUNT(DISTINCT ISNULL(mat_work_center_code,'')),
+                          COUNT(DISTINCT work_order) FROM nx.plan_part_mat""")
+    n, wc, wo = cur.fetchone()
+    cur.execute("""SELECT TOP 30 ISNULL(a.mat_work_center_code,'') wc, COUNT(*) n
+                     FROM nx.plan_part_mat a
+                    WHERE ISNULL(a.mat_work_center_code,'')<>''
+                      AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
+                      AND NOT EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE=a.mat_work_center_code)
+                    GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
+    unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
+    return {"coop_lines": int(n or 0), "coop_wc": int(wc or 0),
+            "coop_work_orders": int(wo or 0), "unmapped_wc": unmapped}
+
+
 @router.post("/api/planrev/step/mat")
 def planrev_step_mat(payload: dict = Body(...)):
-    """⑤ 자재소요·조달 편성 — STEP7 + 조달 오버레이."""
+    """⑤ 자재소요·조달 편성 — STEP7 + 조달 오버레이 + 협력사 점검(구 ⑥ 흡수)."""
     def _f(cur):
         _gate_or_raise(cur)          # ★라우팅을 실제로 쓰는 단계 → 재검증
         r = _step7_mat(cur)
         r.update(_step_source(cur))
+        r.update(_coop_check(cur))   # ★구 ⑥ — 작업처 집계·미매핑 리포트
         return r
     return _run_step("T", _f, _by(payload))
 
 
 @router.post("/api/planrev/step/coop")
 def planrev_step_coop(payload: dict = Body(...)):
-    """⑥ 협력사계획 편성 — ★읽기전용 검증단계(쓰기 0).
-       plan_part_mat 을 작업처별로 집계하고 마스터에 없는 작업처를 리포트한다."""
-    def _f(cur):
-        cur.execute("""SELECT COUNT(*), COUNT(DISTINCT ISNULL(mat_work_center_code,'')),
-                              COUNT(DISTINCT work_order) FROM nx.plan_part_mat""")
-        n, wc, wo = cur.fetchone()
-        cur.execute("""SELECT TOP 30 ISNULL(a.mat_work_center_code,'') wc, COUNT(*) n
-                         FROM nx.plan_part_mat a
-                        WHERE ISNULL(a.mat_work_center_code,'')<>''
-                          AND NOT EXISTS(SELECT 1 FROM nx.PR_M_WORK w WHERE w.WORK_CODE=a.mat_work_center_code)
-                          AND NOT EXISTS(SELECT 1 FROM nx.CM_M_CUST c WHERE c.CUST_CODE=a.mat_work_center_code)
-                        GROUP BY ISNULL(a.mat_work_center_code,'') ORDER BY 2 DESC""")
-        unmapped = [{"wc": r[0], "n": int(r[1])} for r in cur.fetchall()]
-        return {"coop_lines": int(n or 0), "coop_wc": int(wc or 0),
-                "coop_work_orders": int(wo or 0), "unmapped_wc": unmapped}
-    return _run_step("S", _f, _by(payload))
+    """(폐지) ⑥ 협력사계획 편성 → ⑤ 에 흡수(2026-08-27).
+       구 버전 화면·북마크 호환용으로 엔드포인트만 남긴다. 점검 결과를 그대로 반환."""
+    return _run_step("S", _coop_check, _by(payload))
 
 
 @router.post("/api/planrev/compose_all")
@@ -786,16 +909,15 @@ def planrev_compose_all(payload: dict = Body(...)):
            ("K", lambda cur: dict(_step5_item(cur), **_step6_part(cur))),
            ("L2", _stepL_pull),                                          # 그 위에 리드타임당김
            ("H2", lambda cur: _stepH_history(cur, "")),                  # ★040 원천 확정
-           ("T", lambda cur: (_gate_or_raise(cur), dict(_step7_mat(cur), **_step_source(cur)))[1])]
+           # ★T 가 협력사 점검(구 ⑥)까지 포함한다 — 별도 S 단계 호출 없음(2026-08-27).
+           ("T", lambda cur: (_gate_or_raise(cur),
+                              dict(_step7_mat(cur), **_step_source(cur), **_coop_check(cur)))[1])]
     done = []; t0 = time.time(); agg = {}
     for code, fn in seq:
         r = _run_step(code, fn, user, batch)
         agg.update({k: v for k, v in r.items() if k not in ("ok", "step", "warns")})
         done.append({"code": code, "name": _JOB_NAME.get(code, code),
                      "done_hms": r.get("done_hms"), "elapsed": r.get("elapsed")})
-    r6 = planrev_step_coop({"by": user})
-    done.append({"code": "S", "name": _JOB_NAME["S"], "done_hms": r6.get("done_hms"), "elapsed": r6.get("elapsed")})
-    agg.update({k: v for k, v in r6.items() if k not in ("ok", "step", "warns")})
     nx = _nx(); cur = nx.cursor()
     try: _job_log(cur, "Z", user, int(time.time() - t0), "OK", "", None, batch)
     finally: nx.close()
@@ -804,8 +926,16 @@ def planrev_compose_all(payload: dict = Body(...)):
 
 
 @router.get("/api/planrev/job/status")
-def planrev_job_status():
-    """단계별 최종 실행 + 최종 성공시각 + 업로드시각 — 화면 완료시각 박스 소스."""
+def planrev_job_status(ymd: str = Query("")):
+    """단계별 최종 실행 + 최종 성공시각 + 업로드시각 — 화면 완료시각 박스 소스.
+
+    ★ymd(2026-08-27 요청): 그 **일자에 실행된** 기록만 본다(YYYY-MM-DD 또는 YYMMDD).
+      화면 계획기간 시작일을 넘기면 '그 날 무엇을 몇 시에 돌렸는지'가 보인다.
+      비우면 종전대로 전체에서 각 단계의 마지막 실행."""
+    _d = "".join(ch for ch in str(ymd or "") if ch.isdigit())
+    if len(_d) == 6: _d = "20" + _d                     # YYMMDD → YYYYMMDD
+    _w = " WHERE CONVERT(varchar(8),ins_dt,112)=?" if len(_d) == 8 else ""
+    _p = [_d] if _w else []
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_job_log(cur)
@@ -813,25 +943,29 @@ def planrev_job_status():
               CONVERT(varchar(8),j.ins_dt,108), CONVERT(varchar(10),j.ins_dt,23),
               ISNULL(j.ins_user,''), ISNULL(j.err_msg,'')
             FROM nx.plan_job_log j
-            JOIN (SELECT job_code, MAX(job_seq) mx FROM nx.plan_job_log GROUP BY job_code) t
-              ON t.job_code=j.job_code AND t.mx=j.job_seq""")
+            JOIN (SELECT job_code, MAX(job_seq) mx FROM nx.plan_job_log{} GROUP BY job_code) t
+              ON t.job_code=j.job_code AND t.mx=j.job_seq""".format(_w), *_p)
         steps = {r[0]: {"name": r[1], "status": r[2], "elapsed": r[3], "rows": r[4],
                         "hms": r[5], "ymd": r[6], "by": r[7], "err": r[8]} for r in cur.fetchall()}
-        cur.execute("SELECT job_code, CONVERT(varchar(19),MAX(ins_dt),120) FROM nx.plan_job_log WHERE status='OK' GROUP BY job_code")
+        cur.execute("""SELECT job_code, CONVERT(varchar(19),MAX(ins_dt),120) FROM nx.plan_job_log{}
+            {} status='OK' GROUP BY job_code""".format(_w, "AND" if _w else "WHERE"), *_p)
         for g, dt in cur.fetchall():
             if g in steps: steps[g]["ok_dt"] = dt
         cur.execute("SELECT CONVERT(varchar(19),MAX(UPLOAD_DT),120), COUNT(*) FROM nx.plan_dtl")
         up, n = cur.fetchone()
         # ★SAC/RAC 녹색박스 소스 — CR_FLAG 별 최종 업로드시각·행수(레거시 동일 표기).
-        #   C=SAC · R=RAC. 화면(screens.planrev.js:104)이 j.src 를 읽는다.
+        #   C=SAC · R=RAC. 화면(screens.planrev.js)이 j.src 를 읽는다.
+        #   ★ymd 를 주면 그 날 업로드분만(단계박스와 같은 기준).
+        _wu = " WHERE CONVERT(varchar(8),UPLOAD_DT,112)=?" if len(_d) == 8 else ""
         src = {}
         cur.execute("""SELECT RTRIM(ISNULL(CR_FLAG,'')), CONVERT(varchar(8),MAX(UPLOAD_DT),108),
                  CONVERT(varchar(19),MAX(UPLOAD_DT),120), COUNT(*)
-            FROM nx.plan_dtl GROUP BY RTRIM(ISNULL(CR_FLAG,''))""")
+            FROM nx.plan_dtl{} GROUP BY RTRIM(ISNULL(CR_FLAG,''))""".format(_wu), *_p)
         for _cf, _hms, _dt, _n in cur.fetchall():
             _k = {"C": "SAC", "R": "RAC"}.get(str(_cf or "").strip().upper())
             if _k: src[_k] = {"hms": _hms, "dt": _dt, "rows": int(_n or 0)}
-        return {"ok": True, "steps": steps, "upload_dt": up, "plan_rows": int(n or 0), "src": src}
+        return {"ok": True, "steps": steps, "upload_dt": up, "plan_rows": int(n or 0),
+                "src": src, "ymd": (_d[:4] + "-" + _d[4:6] + "-" + _d[6:]) if len(_d) == 8 else ""}
     finally:
         nx.close()
 
@@ -867,7 +1001,9 @@ def planrev_job_log(limit: int = Query(100), code: str = Query("")):
 def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: str = Query(""),
                           limit: int = Query(300)):
     """모델BOM 변경이력 — 기준일자 이후 등록/수정된 (모델, 도번). 좌=모델 / 우=상세.
-       라이브 PR_M_MODEL_BOM 직독(읽기전용) + nx.model_bom(웹 자동생성분) 합집합."""
+       ★nx.PR_M_MODEL_BOM(미러) 읽기 + nx.model_bom(웹 자동생성분) 합집합.
+         2026-08-27 라이브 직독 → nx 로 전환. 실측 대사 결과 동일(양쪽 62,894행·차집합 0/0)이라
+         결과 변화 없이 라이브 의존만 제거된다(§1 라이브는 조회도 최소화)."""
     nx = _nx(); cur = nx.cursor()
     try:
         d8 = "".join(ch for ch in str(ymd or "") if ch.isdigit())
@@ -883,7 +1019,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
               ISNULL(a.INSERT_IP,''), ISNULL(a.INSERT_COMPUTER,''), ISNULL(a.INSERT_WINDOW,''),
               ISNULL(a.UPDATE_USER_ID,''), CONVERT(varchar(19),a.UPDATE_DATETIME,120),
               ISNULL(RTRIM(i.ITEM_DESC),'')
-            FROM PARTNER_ERP.dbo.PR_M_MODEL_BOM a WITH(NOLOCK)
+            FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM a WITH(NOLOCK)
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=a.C_ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=i.IN_CUST_CODE
@@ -891,7 +1027,7 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
             max(1, min(int(limit or 300), 3000)), wh), *p)
         rows = [{"model": r[0], "item": r[1], "make_ymd": r[2], "to_ymd": r[3], "use_qty": float(r[4] or 0),
                  "wc": r[5], "by": r[6], "dt": r[7], "ip": r[8], "pc": r[9], "win": r[10],
-                 "upd_by": r[11], "upd_dt": r[12], "item_desc": r[13], "src": "라이브"}
+                 "upd_by": r[11], "upd_dt": r[12], "item_desc": r[13], "src": "nx"}
                 for r in cur.fetchall()]
         # 웹 자동생성분(nx.model_bom) — STEP M 산출
         w2, p2 = [], []
@@ -1087,10 +1223,14 @@ def _ensure_line_pull(cur):
     #   LG_INPUT_YMD/HM 은 레거시가 라인당김을 계산해 저장해 둔 결과 컬럼이다.
     #   웹 산식은 이를 98.43%(일자)/91.29%(시각)까지 재현하므로, 미러가 있으면 미러를,
     #   없으면 산식을 쓴다(RF2 등 LG 미기록 72건은 산식이 72/72 일치).
-    #   ★원천 우선순위: 라이브 > nx미러. 미러(r_delta_sync)는 하루 뒤처질 수 있어
-    #     실측 15건이 어긋났다(미러 260903 vs 라이브 260901 — 양쪽 각각은 LG=PLAN 일관).
-    #     라이브는 §1 에 따라 **읽기 전용**으로만 접근한다.
+    #   ★2026-08-27(2차) 라이브 우선 — 대사 기준을 라이브로 잡기 때문.
+    #     실측: 미러 ORG(260831) = 웹 plan_dtl ORG(260831) 로 같고, 라이브만 ORG=260901.
+    #       예) 6I3M0022  웹 PLAN/ORG=260831 · 미러 ORG=260831 LG=260827 · 라이브 ORG=260901 LG=260829
+    #     제번수는 셋 다 4,166 이고 차집합 0 — 미러 지연이 아니라 **ORG 기준 자체가 다르다**.
+    #     420/410 대사 상대가 라이브 PR_T_PLAN_PART_MAT 이므로 LG 도 라이브를 봐야 앞뒤가 맞는다.
+    #     LG_INPUT 은 **읽기 전용 참조**라 라이브 직독이 §1 에 저촉되지 않는다(§5 실측 우선).
     _lg = {}
+    _lgw = {}                        # ★제번 단위 폴백 — (제번,ORG) 키가 안 맞을 때 사용
     for _srcq in ("PARTNER_ERP.dbo.PR_T_PLAN_DTL", "nx.PR_T_PLAN_DTL"):
         try:
             cur.execute("""SELECT RTRIM(WORK_ORDER), ISNULL(ORG_PLAN_YMD,''),
@@ -1098,7 +1238,12 @@ def _ensure_line_pull(cur):
                 FROM """ + _srcq + """
                WHERE ISNULL(LG_INPUT_YMD,'')<>'' AND ISNULL(ORG_PLAN_YMD,'')<>''""")
             for _w, _o, _y, _h in cur.fetchall():
-                _lg[(str(_w).strip(), str(_o).strip())] = (str(_y).strip(), str(_h or '').strip())
+                _k = (str(_w).strip(), str(_o).strip())
+                _v = (str(_y).strip(), str(_h or '').strip())
+                _lg[_k] = _v
+                # 제번당 여러 행이면 가장 이른 LG_INPUT 을 대표로(레거시는 제번당 1행이라 통상 1건)
+                _pv = _lgw.get(_k[0])
+                if _pv is None or _v[0] < _pv[0]: _lgw[_k[0]] = _v
             if _lg: break            # 라이브에서 읽혔으면 미러는 보지 않는다
         except Exception:
             continue                 # 접근 불가 시 다음 원천, 최종적으로 산식만으로 동작
@@ -1149,7 +1294,12 @@ def _ensure_line_pull(cur):
         # (5) ★레거시 LG_INPUT 이 있으면 그 값을 채택(실측 100.00%).
         #     산식은 LG 를 98.43% 재현하며, 남은 차이는 근무유형별 종업시각
         #     (코드1=잔업2시간 19:30 / 코드2=정상근무 17:00) 보정분 82건이다.
-        _hit = _lg.get((_wo, _org))
+        #     ★2026-08-27 폴백 추가: (제번,ORG) 키가 안 맞으면 **제번만**으로 다시 찾는다.
+        #       웹 plan_dtl.PLAN_YMD 는 업로드 원본(엑셀 첫 일자)이라 라이브 ORG_PLAN_YMD 와
+        #       97.46% 만 같다(불일치 106건: 웹이 -1일 52·-2일 35…). 키가 어긋나면 LG 를 못 찾아
+        #       산식으로 떨어지고, 출발점이 다르니 결과도 어긋났다.
+        #       실측: C1 라인 MJU63357501 48건 등 — 웹 260831→260827 vs 라이브 260901→260829.
+        _hit = _lg.get((_wo, _org)) or _lgw.get(_wo)
         if _hit and _hit[0]:
             _py, _phm = _hit[0], (_hit[1] or _phm)
         # (4) 기준일 이전 → 기준일 + 0750 (당일이전계획)
