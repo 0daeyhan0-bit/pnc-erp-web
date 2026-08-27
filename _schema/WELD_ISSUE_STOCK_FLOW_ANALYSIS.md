@@ -84,3 +84,19 @@ backflush는 **role(nx.bom)만 읽고 sgroup을 안 읽음**(backflush.py sgroup
 - ② reverse: +W 복원 + state=reversed, net0
 - ③ gate: 가용<소요 → ok:false·행 0(rollback), 충분하면 통과. mat_stock_daily 미추적품은 게이트 통과(커버리지 한계 재현)
 - 대상선정: `nx.bom role='용접봉' RAC` × `make_type='1'` 사내제작품, base RAC가 mat_stock_daily 추적.
+
+## 9. ★엔진 검증 결과 (2026-08-27, 전부 롤백·nx무변경)
+
+대상 `5211A21789C`(용접봉 RAC30599303 base, bom_qty 0.0028, 가용 180). `_backflush_core` 직접호출, cro=`_nx()`(★실엔드포인트도 _nx()를 cro로 넘김, backflush.py:204 — _conn 라이브 아님).
+
+- **① POST(prod_qty=100)**: ok=True. nx.stock_ledger 5행 생성 = 자재 3×tag P4(−100) + **용접봉 tag W(MAT=RAC30599303, −0.28, gpc=Q1000)** + 생산품 tag P7(+100). backflush_log=posted. ✅
+- **② REVERSE**: ok=True. 용접봉 W 순합=0.0(−0.28+0.28), log state=reversed. ✅
+- **③ GATE**: qty=1e6 → ok=False "자재부족으로 생산실적 불가 — 용접봉 RAC30599303(가용 180 < 소요 2800)", 생성행 0(rollback). qty=10 충분 → 통과(−0.028). ✅
+
+**결론: 엔진 3기능(−출고·복원·부족차단) 정확 작동. 유일 문제=procbc_save 미배선.** 옵션1(재배선) 안전성 실증.
+
+## 10. ★검증이 드러낸 정합 이슈 (옵션1 필수 반영)
+
+- **INNER_PROD 게이트**: `_is_inner_prod`(backflush.py:12)= make_type='1' **또는** PR_M_ITEM_PROC_GAGONG 보유. make_type='1'만으론 부족(사급회수·매입·직납 제외). cro는 `_nx()`여야 nx.item 조회 성공.
+- **★재고 소스 분리(핵심 갭)**: 게이트 가용=`nx.mat_stock_daily`(레거시 일스냅샷) ≠ −출고 대상=`nx.stock_ledger`(tag W). → −W 소비가 mat_stock_daily에 반영 안 됨(같은날 반복생산시 소진 미감지). **옵션1 정확성 조건 = 용접봉 재고 단일소스**: (a) 게이트가 nx.stock_ledger 용접봉잔량(기초+ΣW) 읽기 or (b) 용접봉 기초재고 nx.stock_ledger 적재 + 실시간정본. 갭4와 동일 뿌리.
+- **커버리지**: mat_stock_daily 추적 용접봉 14개만 게이트 적용, 나머지 통과.
