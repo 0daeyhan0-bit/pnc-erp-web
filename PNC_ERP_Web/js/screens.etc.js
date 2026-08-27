@@ -1006,7 +1006,8 @@ SCREEN.partnerplan=(c)=>{
          <option value="legacy" ${F.src==='legacy'?'selected':''}>레거시 라이브 (당김반영)</option></select>
        <label class="tl" style="margin-left:8px">기준일자</label>${legacyDateHTML('pn-base',F.from)}
        <label class="tl" style="margin-left:8px">기간</label><input class="inp" id="pn-days" value="${esc(F.days)}" style="width:52px;min-width:52px;text-align:center" title="조회 기간(일). 레거시 4주간 화면 기본=31일">일
-       <label class="tl" style="margin-left:8px">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명 입력" autocomplete="off" style="width:180px;min-width:180px"><datalist id="pnl-wc">${wcOpts}</datalist>
+       <!-- ★자도번작업처 = 필수 입력(미선택시 조회 불가) → 420 과 동일하게 강조 -->
+       <label class="tl" style="margin-left:8px;color:#1c47a0;font-weight:700">자도번작업처</label><input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명 입력" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:180px;min-width:180px;background:${F.wc?'#eaf3ff':'#fff7e6'};border:2px solid ${F.wc?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="pnl-wc">${wcOpts}</datalist>
        <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:120px;min-width:120px" placeholder="자도번" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
        <label class="tl">도번</label><input class="inp" id="pn-assy" list="pnl-assy" value="${esc(F.assy)}" style="width:120px;min-width:120px" placeholder="도번(ASSY)" autocomplete="off"><datalist id="pnl-assy">${pnAssyOpts}</datalist>
        <label class="tl">라인</label><input class="inp" id="pn-line" list="pnl-line" value="${esc(F.line)}" style="width:60px;min-width:60px" placeholder="라인" autocomplete="off"><datalist id="pnl-line">${pnLineOpts}</datalist>
