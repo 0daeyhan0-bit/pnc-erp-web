@@ -7,9 +7,10 @@
   · nextgen-erp-material-close   : "마감 시점에 스냅샷 생성 = 다음달 기초재고. 월마감·일마감 동일 개념."
   · STOCK_GATING_CLOSE_LOCK_RULES: 규칙B 마감된 기간 CRUD 금지
 
-검증 근거(2026-08-27 전수대조): nx.mat_stock_daily 월말잔량 == 레거시 PU_T_MONTH_STOCK_WH
-  2606 2,342/2,342 · 2607 2,534/2,534 = 100.00%, '레거시만' 1,195품목은 전부 재고0 → 갭 무해.
-  ∴ 자재 스냅샷은 mat_stock_daily 를 확정(freeze)한다.
+★재설계(2026-08-27): 자재 스냅샷은 **마감이 직접 전표에서 파생**한다(원설계 복귀).
+  기초(직전 확정 스냅샷 · 최초는 레거시 월마감 시드) + 그 기간 이동을 이동평균 전개 → 확정.
+  이전에는 nx.mat_stock_daily(임시본)에서 복사했다 → 중복 저장·원천이 임시라 폐기.
+  ⟹ mat_stock_daily · 빌더 · 임시화면이 불필요해진다(은퇴 대상).
 
 1단계 범위 = 자재(MAT) 월·일 (스냅샷 확정 + 잠금) + 전 도메인 잠금.
   생산(PRD)·영업(SAL) 스냅샷은 tag 파생식 규명 후 2단계 — 지금은 잠금만 가능.
@@ -82,7 +83,7 @@ def close_status():
                              "last": (r[0] if r else None), "user": (r[1] if r else None),
                              "dt": (str(r[2]) if r and r[2] else None),
                              "snap_ready": 1 if d in SNAP_READY else 0})
-        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily")
+        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily")   # 참고표시용(은퇴 예정)
         mat_src = cur.fetchone()[0]
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')"); asof = cur.fetchone()[0]
         return {"rows": rows, "asof": asof, "mat_daily_max": mat_src, "domains": DOMAINS}
@@ -105,28 +106,154 @@ def close_calendar(domain: str = Query("MAT"), ym: str = Query("")):
         cn.close()
 
 
-# ===================== 스냅샷 확정 (마감 = f(원장) 확정) =====================
-def _snap_mat(cur, ptype, period):
-    """자재 스냅샷 확정 = nx.mat_stock_daily 의 해당 시점 잔량을 그대로 박는다(freeze).
-       일마감=그 날 · 월마감=그 달 말일 시점. 재적재 멱등(같은 키 DELETE 후 재삽입).
-       ★검증: 이 값이 레거시 PU_T_MONTH_STOCK_WH 와 2606/2607 전수 100.00% 일치(2026-08-27)."""
-    # ★기준일 = 그 시점 이하의 마지막 '데이터가 있는' 일자.
-    #   일별잔량은 이동이 있던 날만 저장(sparse) → 주말·휴일은 행이 없다(예 2607의 12·17·18·19).
-    #   그 날은 '재고 이동이 없던 날'이므로 직전 잔량을 그대로 이월해 확정한다(연쇄 유지·캘린더 연속).
-    if ptype == "D":
-        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily WHERE ymd<=?", period)
-    else:                      # 월마감 = 그 달 말일 시점(= 그 달의 마지막 데이터 일자)
-        cur.execute("SELECT MAX(ymd) FROM nx.mat_stock_daily WHERE ymd<=?", period + "99")
+# ===================== 자재 스냅샷 = f(전표)  ★재설계 2026-08-27 =====================
+# 원설계 복귀([[nextgen-erp-material-close]]): "스냅샷 = f(원장) — 마감 시 그 기간 수불을 실거래에서
+#   파생 → 확정. 언제든 재계산 대사 가능 → 드리프트 구조적 차단."
+# 이전 구현은 nx.mat_stock_daily(임시본)에서 '복사'했다 → 같은 값이 두 곳에 존재하고 원천이 임시.
+#   이제 마감이 직접 이동평균을 전개한다 ⟹ mat_stock_daily·빌더·임시화면 불필요.
+#
+# 이동평균 규칙(빌더 matclose_movavg_build.py 에서 이사 — 우리 버그 4건 수정 포함):
+#   · 매입(PU_T_STOCK_MAINT tag 9·S + 도입 PU_T_STOCK_MAINT_C DIVISION='P' ×환율) = 평균단가 갱신
+#     new_avg = (전일qty×전일avg + 매입amt) / (전일qty + 매입qty)
+#   · 이동·반품·가공·출고·조정 = 현재 평균 불변 (net 만 반영)
+#   · ★재고 ≤ 0 에서 매입 refill = 단가 리셋(잔재 폐기) — 마이너스재고 평균 폭발 방지
+#   · 도입 수입은 외화 → ×EXCHANGE_RATE 로 KRW 환산
+#   · 소모품(sgroup 99%)은 신규 진입 제외(기존 보유분은 유지)
+#   · amt = qty × avg 강제
+# ★소스 = 라이브 dbo (nx 미러는 sync 지연으로 stale — 기록 [[newerp-matclose-movavg]])
+
+def _mat_consum(cur):
+    """소모품 집합(신규 진입 제외용)."""
+    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_SGROUP LIKE '99%'")
+    return {str(r[0]).strip().upper() for r in cur.fetchall()}
+
+
+# ★품번은 UPPER+TRIM 로 정규화한다. 테이블마다 표기가 달라(시드 '-F&T' vs 이동 '-f&t')
+#   정규화 없이 dict 키를 만들면 SQL Server(대소문자 무구분) PK 와 충돌한다 — 2026-08-27 실제 발생.
+def _mat_moves(cur, d_from, d_to):
+    """[d_from, d_to] 일자별 자재 이동 → {ymd: {mat: {net,pos,neg,pq,pamt}}}. 소스=라이브 dbo."""
+    out = {}
+
+    def slot(y, m):
+        return out.setdefault(y, {}).setdefault(
+            m, {"net": 0.0, "pos": 0.0, "neg": 0.0, "pq": 0.0, "pamt": 0.0})
+
+    cur.execute("""SELECT MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE))),
+          SUM(CAST(MAINT_QTY AS float)),
+          SUM(CASE WHEN MAINT_QTY>0 THEN CAST(MAINT_QTY AS float) ELSE 0 END),
+          SUM(CASE WHEN MAINT_QTY<0 THEN -CAST(MAINT_QTY AS float) ELSE 0 END),
+          SUM(CASE WHEN MAINT_TAG IN('9','S') THEN CAST(MAINT_QTY AS float) ELSE 0 END),
+          SUM(CASE WHEN MAINT_TAG IN('9','S') THEN CAST(MAINT_AMT AS float) ELSE 0 END)
+        FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+        WHERE MAINT_YMD BETWEEN ? AND ? AND MAT_CODE IS NOT NULL
+        GROUP BY MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE)))""", d_from, d_to)
+    for y, m, net, pos, neg, pq, pamt in cur.fetchall():
+        d = slot(y, m)
+        d["net"] += net or 0; d["pos"] += pos or 0; d["neg"] += neg or 0
+        d["pq"] += pq or 0;   d["pamt"] += pamt or 0
+
+    # 도입: P=수입입고(매입, 외화→KRW) / 그 외(Q)=수출출고
+    cur.execute("""SELECT MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE))), DIVISION,
+          SUM(CAST(MAINT_QTY AS float)),
+          SUM(CAST(MAINT_AMT AS float)*ISNULL(CAST(EXCHANGE_RATE AS float),1))
+        FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C
+        WHERE MAINT_YMD BETWEEN ? AND ? AND MAT_CODE IS NOT NULL
+        GROUP BY MAINT_YMD, UPPER(LTRIM(RTRIM(MAT_CODE))), DIVISION""", d_from, d_to)
+    for y, m, div, q, amtk in cur.fetchall():
+        d = slot(y, m); q = q or 0; amtk = amtk or 0
+        if str(div or "").strip() == "P":
+            d["net"] += q; d["pos"] += q; d["pq"] += q; d["pamt"] += amtk
+        else:
+            d["net"] -= q; d["neg"] += q
+    return out
+
+
+def _mat_step(state, moves, consum):
+    """하루 전개(이동평균). state={mat:[qty,avg]} in-place 갱신, 반환={mat:(qty,amt,avg,in,out)}."""
+    res = {}
+    for mat in set(state) | set(moves):
+        q0, a0 = state.get(mat, [0.0, 0.0])
+        mv = moves.get(mat) or {"net": 0.0, "pos": 0.0, "neg": 0.0, "pq": 0.0, "pamt": 0.0}
+        if mat in consum and mat not in state:      # 신규 소모품 제외(기존 보유분은 유지)
+            continue
+        pq, pamt = mv["pq"], mv["pamt"]
+        if pq > 0:
+            # ★재고>0 이면 가중평균, 재고≤0 이면 단가 리셋(마이너스재고 평균폭발 방지)
+            avg = ((q0 * a0 + pamt) / (q0 + pq)) if q0 > 0 else (pamt / pq)
+        else:
+            avg = a0
+        qty = q0 + mv["net"]
+        state[mat] = [qty, avg]
+        res[mat] = (qty, qty * avg, avg, mv["pos"], mv["neg"])
+    return res
+
+
+def _mat_base(cur, target):
+    """기초 상태 = target 직전의 가장 최근 확정 스냅샷. 없으면 레거시 월마감으로 시드.
+       반환 (state, base_ymd, source)."""
+    cur.execute("""SELECT TOP 1 period FROM nx.stock_snapshot
+                   WHERE domain='MAT' AND ptype='D' AND period < ? ORDER BY period DESC""", target)
     r = cur.fetchone()
-    asof = r[0] if r else None
-    if not asof:
-        raise HTTPException(400, f"{period} 이전의 자재 일별잔량이 없습니다 — "
-                                 f"일마감 빌더(matclose_movavg_build.py) 실행 후 마감하세요.")
+    if r:
+        base = r[0]
+        cur.execute("""SELECT item_code, stock_qty, avg_cost FROM nx.stock_snapshot
+                       WHERE domain='MAT' AND ptype='D' AND period=?""", base)
+        return ({str(x[0]).strip().upper(): [float(x[1] or 0), float(x[2] or 0)] for x in cur.fetchall()},
+                base, "확정 스냅샷")
+    # ★최초 마감 시드 = 레거시 월마감(직전월 기말). 빌더의 기초(2606 월말 픽스)와 동일 기준.
+    y, m = int(target[:2]), int(target[2:4])
+    m -= 1
+    if m == 0:
+        m = 12; y -= 1
+    prev_ym = f"{y:02d}{m:02d}"
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float)), SUM(CAST(STOCK_AMT AS float))
+                     FROM PARTNER_ERP.dbo.PU_T_MONTH_STOCK_WH
+                    WHERE STOCK_YYMM=? AND CUST_CODE='Z99990' AND MAT_CODE IS NOT NULL
+                    GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", prev_ym)
+    st = {}
+    for mat, q, a in cur.fetchall():
+        q = float(q or 0); a = float(a or 0)
+        st[mat] = [q, (a / q) if q else 0.0]
+    if not st:
+        raise HTTPException(400, f"기초를 찾을 수 없습니다 — 직전 확정 스냅샷도, 레거시 월마감({prev_ym})도 없습니다.")
+    return st, prev_ym + "말", f"레거시 월마감 {prev_ym} 시드"
+
+
+def _month_end(period):
+    """YYMM → 그 달 말일 YYMMDD."""
+    import calendar as _cal
+    y, m = 2000 + int(period[:2]), int(period[2:])
+    return f"{period}{_cal.monthrange(y, m)[1]:02d}"
+
+
+def _snap_mat(cur, ptype, period):
+    """★마감 = f(전표). 기초(직전 확정) + 그 기간 이동을 이동평균 전개 → target 시점 확정.
+       멱등(같은 키 DELETE 후 재삽입). 반환 (행수, 기준일)."""
+    target = period if ptype == "D" else _month_end(period)
+    state, base_ymd, src = _mat_base(cur, target)
+    d_from = base_ymd[:6]
+    # 기초 다음날부터 target 까지 전개 (기초일 자체는 이미 반영된 상태)
+    import datetime as _dt
+    try:
+        b = _dt.date(2000 + int(d_from[:2]), int(d_from[2:4]), int(d_from[4:6])) + _dt.timedelta(days=1)
+        start = f"{b.year % 100:02d}{b.month:02d}{b.day:02d}"
+    except ValueError:                       # 시드('...말') → 그 달 다음날부터
+        start = f"{int(d_from[:4]) + 1:04d}01" if int(d_from[2:4]) < 12 else f"{int(d_from[:2]) + 1:02d}0101"
+    consum = _mat_consum(cur)
+    moves = _mat_moves(cur, start, target) if start <= target else {}
+    for ymd in sorted(moves):                # 이동이 있는 날만 전개(없는 날은 상태 불변 = 이월)
+        if ymd <= target:
+            _mat_step(state, moves[ymd], consum)
     cur.execute("DELETE FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?", ptype, period)
-    cur.execute("""INSERT INTO nx.stock_snapshot(domain,ptype,period,item_code,stock_qty,stock_amt,avg_cost,in_qty,out_qty,close_dt)
-        SELECT 'MAT', ?, ?, UPPER(mat_code), SUM(stock_qty), SUM(stock_amt), MAX(avg_cost), SUM(in_qty), SUM(out_qty), GETDATE()
-          FROM nx.mat_stock_daily WHERE ymd=? GROUP BY UPPER(mat_code)""", ptype, period, asof)
-    return cur.rowcount, asof
+    n = 0
+    for mat, (q, a) in state.items():
+        if not mat:
+            continue
+        cur.execute("""INSERT INTO nx.stock_snapshot(domain,ptype,period,item_code,stock_qty,stock_amt,avg_cost,close_dt)
+                       VALUES('MAT',?,?,?,?,?,?,GETDATE())""",
+                    ptype, period, mat[:50], round(q, 4), round(q * a, 4), round(a, 4))
+        n += 1
+    return n, f"{target}({src}·기초 {base_ymd})"
 
 
 # ===================== 마감 실행 / 해제 =====================
