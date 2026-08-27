@@ -88,6 +88,9 @@ def _route_setup(cur):
 
 def _step6_sql(cur):
     P = _P
+    # ★STEP6 는 v_pr_bom(뷰) 그대로 — 스냅을 적용했더니 47초→193초로 **느려졌다**(2026-08-27 실측).
+    #   STEP6 재귀는 level_no<10 으로 얕고 PR_M_ITEM/PR_M_MAT 조인이 함께 걸려
+    #   옵티마이저가 뷰 쪽에서 더 나은 계획을 잡는다. STEP7 과 반대이므로 건드리지 않는다.
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
@@ -156,8 +159,32 @@ def _step6_sql(cur):
         WHERE b.plan_ymd=a.plan_ymd AND b.work_order=a.work_order AND b.split_work_order=a.split_work_order AND b.assy_item_code=a.assy_item_code
           AND b.bom_level=a.bom_level AND b.upper_item_code=a.upper_item_code AND b.item_code=a.item_code AND b.proc_seq<a.proc_seq ORDER BY b.proc_seq DESC),'')""")
 
+def _ensure_bom_snap(cur):
+    """★nx.v_pr_bom(뷰) 물질화 — STEP7 재귀 CTE 성능(2026-08-27).
+
+    v_pr_bom 은 bom_header/bom_line + proc_weld 를 UNION 하는 뷰라
+    재귀 CTE 가 **반복마다 다시 평가**한다. STEP7 CTE 실측:
+        뷰 516.9초 → 물질화 4.2초  = **123배**(절감 513초)
+        재생성 비용 4.72초(SELECT INTO 4.59 + 인덱스 0.14) — 일회성
+        조인 1회 기준으로도 1.36초 → 0.04초, 결과 73,052행 불일치 0
+    ⑤가 457초(④의 10배)인 주된 원인이 이 반복 평가였다.
+    ※NOT EXISTS 인덱스는 효과 없음(517.0 → 516.5초) — 병목이 아니었다.
+    ※★STEP6 에는 적용하지 않는다 — 거기선 오히려 47초→193초로 느려진다(본문 주석 참조).
+
+    ★매 실행마다 새로 만든다 — 기존 nx.plan_bom_snap 은 낡아서
+      except_flag 28건·qty 44건이 뷰와 달랐다(오늘 BOM 수정분 미반영).
+      낡은 스냅을 재사용하면 편성 결과가 조용히 틀어지므로 절대 캐시하지 않는다."""
+    cur.execute("IF OBJECT_ID('nx.plan_bom_snap') IS NOT NULL DROP TABLE nx.plan_bom_snap")
+    cur.execute("""SELECT ITEM_CODE AS item_code, MAT_CODE AS mat_code, USE_QTY_PR,
+           EXCEPT_FLAG AS except_flag, VIR_ITEM_FLAG AS vir_item_flag
+      INTO nx.plan_bom_snap FROM nx.v_pr_bom""")
+    cur.execute("""CREATE INDEX ix_plan_bom_snap ON nx.plan_bom_snap(item_code)
+      INCLUDE(mat_code, USE_QTY_PR, except_flag, vir_item_flag)""")
+
+
 def _step7_sql(cur):
     P = _P
+    _ensure_bom_snap(cur)          # ★BOM 물질화(뷰 반복평가 제거)
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
     #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
@@ -169,6 +196,8 @@ def _step7_sql(cur):
       LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
         ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
+    # ※plan_part_dtl 인덱스는 넣지 않는다 — 실측 효과 0(517.0초 → 516.5초).
+    #   병목은 NOT EXISTS 가 아니라 v_pr_bom(뷰) 반복 평가였다(아래 _ensure_bom_snap).
     # ★★조달경로(route) 반영 인프라(2026-08-24, 가산적): 활성 대체경로(sourcing_route current_flag=1·route_no>1) 있으면
     #   그 경로의 BOM엣지(route_edges)로 전개, 없으면 v_pr_bom(현행 except<>1) fallback=R01 diff0(검증: route CTE≡원본 100.000%).
     _route_setup(cur)
@@ -203,7 +232,7 @@ def _step7_sql(cur):
          m.ov_wc,CONVERT(decimal(18,5),CASE WHEN cb.cum_use_qty=0 THEN 0 ELSE cb.cum_use_qty*b.USE_QTY_PR END),
          CONVERT(varchar(500),cb.cum_in_cust_code+'|'+m.ov_wc+'|'),
          ISNULL((SELECT '2' FROM {P}PR_M_MAT WHERE mat_code=b.mat_code),'1'),cb.use_qty,cb.part_plan_qty,'','1'
-      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
+      FROM CTE_BOM cb JOIN nx.plan_bom_snap b ON cb.bom_mat_code=b.item_code JOIN nx.item_ov m ON b.mat_code=m.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1'
         AND NOT EXISTS(SELECT 1 FROM nx.plan_route_active pra WHERE pra.assy_item_code=cb.assy_item_code)   -- ★가드: 활성 대체경로 없는 제품만 v_pr_bom(현행)
         AND NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
