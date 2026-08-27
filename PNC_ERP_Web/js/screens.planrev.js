@@ -85,11 +85,15 @@ SCREEN.planuploadrev=(c)=>{
     {c:'T', no:'⑤', nm:'자재소요·조달 편성',  ep:'/api/planrev/step/mat',      bg:'#7a4ca0'},
   ];
   const PREV={M:[],H:['M'],L:['M'],K:['M'],T:['K'],S:['T']};   // 낡음 판정용 선행단계
-  let jobs={}, jobUp='', planRows=0, running='', srcDt={};   // srcDt={SAC:{hms,rows},RAC:{...}}
+  let jobs={}, jobUp='', planRows=0, running='', srcDt={}, jobYmd='';   // srcDt={SAC:{hms,rows},RAC:{...}}
 
+  // ★단계 완료시각은 **계획기간 시작일(F.from)에 실행된 기록**을 본다(2026-08-27 요청).
+  //   날짜를 바꾸면 그 날 무엇을 몇 시에 돌렸는지가 그대로 보인다.
   const loadJobs=async()=>{
-    try{const r=await fetch(`${API}/api/planrev/job/status`);const j=await r.json();
-      jobs=j.steps||{}; jobUp=j.upload_dt||''; planRows=j.plan_rows||0; srcDt=j.src||{};}
+    try{const r=await fetch(`${API}/api/planrev/job/status?ymd=${encodeURIComponent(F.from||'')}`);
+      const j=await r.json();
+      jobs=j.steps||{}; jobUp=j.upload_dt||''; planRows=j.plan_rows||0; srcDt=j.src||{};
+      jobYmd=j.ymd||'';}
     catch(e){jobs={};}
   };
   const load=async()=>{loading=true;draw();
@@ -126,7 +130,8 @@ SCREEN.planuploadrev=(c)=>{
     const j=jobs[s.c];
     if(running===s.c)  return {bg:'#e8f0fe',fg:'#1c47a0',tx:'실행중…',ti:''};
     if(running==='ALL'&&!s.todo) return {bg:'#e8f0fe',fg:'#1c47a0',tx:'대기…',ti:'일괄작업 진행 중'};
-    if(!j)             return {bg:'#f1f3f5',fg:'#adb5bd',tx:'미실행',ti:'아직 실행한 적 없습니다'};
+    if(!j)             return {bg:'#f1f3f5',fg:'#adb5bd',tx:'미실행',
+                               ti:jobYmd?`${jobYmd} 에 이 단계를 실행한 기록이 없습니다`:'아직 실행한 적 없습니다'};
     // ★오늘이 아니면 색을 죽여(회색) '오래된 결과'임을 한눈에 보이게 한다.
     const old=!!(j.ymd&&j.ymd!==todayIso());
     if(j.status!=='OK')return {bg:'#fdeaea',fg:'#c0392b',tx:'실패 '+stamp(j),ti:j.err||'실패'};
@@ -291,6 +296,8 @@ SCREEN.planuploadrev=(c)=>{
     const g=id=>c.querySelector(id);
     g('#p-search').onclick=()=>{F.from=g('#p-from').value;F.to=g('#p-to').value;
       F.wo=g('#p-wo').value;F.model=g('#p-model').value;F.cr=g('#p-cr').value;load();};
+    // ★계획기간 시작일을 바꾸면 그 날의 실행이력으로 즉시 갱신(그리드는 [조회] 때만).
+    const pf=g('#p-from'); if(pf)pf.onchange=async e=>{F.from=e.target.value;await loadJobs();draw();};
     if(canW){
       const uc=g('#p-upcr'); if(uc)uc.onchange=e=>upcr=e.target.value;
       const uf=g('#p-file'); if(uf)uf.onchange=e=>{

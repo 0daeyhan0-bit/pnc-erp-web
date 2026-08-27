@@ -873,8 +873,16 @@ def planrev_compose_all(payload: dict = Body(...)):
 
 
 @router.get("/api/planrev/job/status")
-def planrev_job_status():
-    """단계별 최종 실행 + 최종 성공시각 + 업로드시각 — 화면 완료시각 박스 소스."""
+def planrev_job_status(ymd: str = Query("")):
+    """단계별 최종 실행 + 최종 성공시각 + 업로드시각 — 화면 완료시각 박스 소스.
+
+    ★ymd(2026-08-27 요청): 그 **일자에 실행된** 기록만 본다(YYYY-MM-DD 또는 YYMMDD).
+      화면 계획기간 시작일을 넘기면 '그 날 무엇을 몇 시에 돌렸는지'가 보인다.
+      비우면 종전대로 전체에서 각 단계의 마지막 실행."""
+    _d = "".join(ch for ch in str(ymd or "") if ch.isdigit())
+    if len(_d) == 6: _d = "20" + _d                     # YYMMDD → YYYYMMDD
+    _w = " WHERE CONVERT(varchar(8),ins_dt,112)=?" if len(_d) == 8 else ""
+    _p = [_d] if _w else []
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_job_log(cur)
@@ -882,25 +890,29 @@ def planrev_job_status():
               CONVERT(varchar(8),j.ins_dt,108), CONVERT(varchar(10),j.ins_dt,23),
               ISNULL(j.ins_user,''), ISNULL(j.err_msg,'')
             FROM nx.plan_job_log j
-            JOIN (SELECT job_code, MAX(job_seq) mx FROM nx.plan_job_log GROUP BY job_code) t
-              ON t.job_code=j.job_code AND t.mx=j.job_seq""")
+            JOIN (SELECT job_code, MAX(job_seq) mx FROM nx.plan_job_log{} GROUP BY job_code) t
+              ON t.job_code=j.job_code AND t.mx=j.job_seq""".format(_w), *_p)
         steps = {r[0]: {"name": r[1], "status": r[2], "elapsed": r[3], "rows": r[4],
                         "hms": r[5], "ymd": r[6], "by": r[7], "err": r[8]} for r in cur.fetchall()}
-        cur.execute("SELECT job_code, CONVERT(varchar(19),MAX(ins_dt),120) FROM nx.plan_job_log WHERE status='OK' GROUP BY job_code")
+        cur.execute("""SELECT job_code, CONVERT(varchar(19),MAX(ins_dt),120) FROM nx.plan_job_log{}
+            {} status='OK' GROUP BY job_code""".format(_w, "AND" if _w else "WHERE"), *_p)
         for g, dt in cur.fetchall():
             if g in steps: steps[g]["ok_dt"] = dt
         cur.execute("SELECT CONVERT(varchar(19),MAX(UPLOAD_DT),120), COUNT(*) FROM nx.plan_dtl")
         up, n = cur.fetchone()
         # ★SAC/RAC 녹색박스 소스 — CR_FLAG 별 최종 업로드시각·행수(레거시 동일 표기).
-        #   C=SAC · R=RAC. 화면(screens.planrev.js:104)이 j.src 를 읽는다.
+        #   C=SAC · R=RAC. 화면(screens.planrev.js)이 j.src 를 읽는다.
+        #   ★ymd 를 주면 그 날 업로드분만(단계박스와 같은 기준).
+        _wu = " WHERE CONVERT(varchar(8),UPLOAD_DT,112)=?" if len(_d) == 8 else ""
         src = {}
         cur.execute("""SELECT RTRIM(ISNULL(CR_FLAG,'')), CONVERT(varchar(8),MAX(UPLOAD_DT),108),
                  CONVERT(varchar(19),MAX(UPLOAD_DT),120), COUNT(*)
-            FROM nx.plan_dtl GROUP BY RTRIM(ISNULL(CR_FLAG,''))""")
+            FROM nx.plan_dtl{} GROUP BY RTRIM(ISNULL(CR_FLAG,''))""".format(_wu), *_p)
         for _cf, _hms, _dt, _n in cur.fetchall():
             _k = {"C": "SAC", "R": "RAC"}.get(str(_cf or "").strip().upper())
             if _k: src[_k] = {"hms": _hms, "dt": _dt, "rows": int(_n or 0)}
-        return {"ok": True, "steps": steps, "upload_dt": up, "plan_rows": int(n or 0), "src": src}
+        return {"ok": True, "steps": steps, "upload_dt": up, "plan_rows": int(n or 0),
+                "src": src, "ymd": (_d[:4] + "-" + _d[4:6] + "-" + _d[6:]) if len(_d) == 8 else ""}
     finally:
         nx.close()
 
