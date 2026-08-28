@@ -132,10 +132,12 @@ def sagub_parts_soyo(eng, item, stop_set):
     stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
     ★CS_M_ITEM_BOM 직접전개(ad-hoc)는 변형SUB 이중계상(예 AJR30012008→EBF64570401 2배). v_pr_bom은 except로 1회 = 엔진 정본."""
     memo = {}
-    def walk(node):
+    def walk(node, depth):
         if node in memo:
             return memo[node]
-        memo[node] = {}
+        memo[node] = {}            # cycle guard
+        if depth > 25:             # 깊이 폭주 방지
+            return memo[node]
         acc = {}
         for c, q, ex, vf in _vpr_full(eng, node):
             if ex == '1' or q <= 0:
@@ -144,11 +146,11 @@ def sagub_parts_soyo(eng, item, stop_set):
                 if not _is_weldrod(eng, c):
                     acc[c] = acc.get(c, 0.0) + q
             else:
-                for k, v in walk(c).items():
+                for k, v in walk(c, depth + 1).items():
                     acc[k] = acc.get(k, 0.0) + v * q
         memo[node] = acc
         return acc
-    return walk(item.strip().upper())
+    return walk(item.strip().upper(), 0)
 
 
 # ===================== 생산계획 walker (STEP6/7 재현) =====================
