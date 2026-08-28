@@ -179,7 +179,7 @@ def stockmaint_save(payload: dict = Body(...)):
     mid = p.get("id")
     nx = _nx(); cur = nx.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "PRD"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
         # ★파트는 반드시 코드여야 한다 — 표시명('04라인')이 들어가면 그 파트에 재고가
         #   쌓여 실제 파트(S4)에서 안 보인다(2026-08-25 실사고).
@@ -199,7 +199,7 @@ def stockmaint_save(payload: dict = Body(...)):
         if mid:  # 수정 = 기존행 삭제 후 신규(재키)
             try:
                 oy, osq = str(mid).split("-"); osq = int(osq)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "PRD"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 # ★기존 미러행 제거용 옛값 읽기(삭제 전)
                 cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
@@ -233,7 +233,7 @@ def stockmaint_delete(payload: dict = Body(...)):
                 y, sq = x.split("-"); sq = int(sq)
             except ValueError:
                 continue
-            if _closed(cur, y):
+            if _closed(cur, y, "PRD"):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
             # ★삭제 전 옛값 읽어 조회원천 미러행도 제거
             cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
@@ -454,14 +454,14 @@ def matissue_save(payload: dict = Body(...)):
         raise HTTPException(400, "FROM파트와 TO파트가 같습니다.")
     nx = _nx_tx(); cur = nx.cursor()   # ★원자성: MV 이동 2행(±) 그룹 트랜잭션
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
         cur.execute("SELECT ISNULL(MAX(MAINT_GROUP_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_TAG='MV'")
         gseq = cur.fetchone()[0]   # 삭제 전 채번 → 수정 시 신규 그룹번호(기존과 상이)
         if mid:  # 수정 = 기존 그룹(2행) 삭제 후 재생성
             try:
                 oy, og = str(mid).split("-"); og = int(og)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "MAT"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='MV' AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", oy, og)
             except (ValueError, AttributeError):
@@ -500,7 +500,7 @@ def matissue_delete(payload: dict = Body(...)):
                 y, g = x.split("-"); g = int(g)
             except ValueError:
                 continue
-            if _closed(cur, y):
+            if _closed(cur, y, "MAT"):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
             cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='MV' AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", y, g)
             dl += cur.rowcount

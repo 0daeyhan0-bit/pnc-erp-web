@@ -189,10 +189,16 @@ def _ym(ymd):  # MAINT_YMD(YYMMDD/YYYYMMDD) → 마감월 YYMM. 공유: sales(�
 
 
 # ── 도메인간 공유(app.py에서 추출) ──
-def _closed(cur, ymd):
-    cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", _ym(ymd))
-    r = cur.fetchone()
-    return bool(r and r[0])
+def _closed(cur, ymd, domain="MAT"):
+    """마감 여부(bool). ★공용 게이트 `_lock_msg` 에 위임한다.
+
+       ★2026-08-28 결함수정: 종전엔 구 전역 월잠금 `nx.stock_close` 만 봤다.
+         우리 마감은 `nx.period_close` 에 기록되므로 **마감된 달의 전표가 그대로 저장**됐다
+         (TestBed 확장이 발견 — 생산파트재고조정·발주입고이 마감월 2607 로 통과).
+         게이팅 캐논 §0-★ = 예외 없음 → 마감잠금도 전 화면이 같은 판정을 써야 한다.
+       `_lock_msg` 는 ① 일마감 ② 월마감 ③ 구 stock_close(하위호환) 순으로 보므로
+       종전 동작을 포함하면서 우리 마감까지 잡는다."""
+    return bool(_lock_msg(cur, ymd, domain))
 
 # ===== 전 도메인 공통 가드 (마감 일자 잠금 + 재고 가용성 게이팅) — 정본 _schema/STOCK_GATING_CLOSE_LOCK_RULES.md =====
 def _lock_msg(cur, ymd, domain="MAT"):
@@ -220,8 +226,16 @@ def _lock_msg(cur, ymd, domain="MAT"):
                     else f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가")
     except Exception:
         pass          # period_close 미생성 환경(구 배포본) → 하위호환 경로로
-    if _closed(cur, ymd):
-        return f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가"
+    # ③ 하위호환 = 구 전역 월잠금. ★_closed() 를 부르면 안 된다 —
+    #   _closed 가 다시 _lock_msg 로 위임하므로 **무한 재귀**가 된다(2026-08-28 실측).
+    #   여기서는 원천을 직접 읽는다.
+    try:
+        cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", ym)
+        r = cur.fetchone()
+        if r and r[0]:
+            return f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가"
+    except Exception:
+        pass
     return None
 
 def _mat_avail(cur, item):

@@ -64,7 +64,7 @@ def sagub_adjust_save(payload: dict = Body(...)):
         if rid:  # 수정 = 기존행 삭제 후 신규(재키)
             try:
                 oy, osq = str(rid).split("-"); osq = int(osq)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "SAL"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='SAG' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
             except (ValueError, AttributeError):
@@ -87,7 +87,7 @@ def sagub_adjust_delete(payload: dict = Body(...)):
             y, sq = str(rid).split("-"); sq = int(sq)
         except ValueError:
             raise HTTPException(400, "id 형식 오류")
-        if _closed(cur, y):
+        if _closed(cur, y, "SAL"):
             raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
         cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='SAG' AND MAINT_TAG='2' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
         return {"ok": True, "deleted": cur.rowcount}
@@ -345,7 +345,7 @@ def sagub_recover(payload: dict = Body(...)):
     try:
         cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         ymd = cur.fetchone()[0]
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "SAL"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 회수 불가")
         free = _is_free_sagub(cur, cust, ymd)
         if free:  # 무상 = 이동복귀(−SAG / +PRD). SAG 잔량 가드.
@@ -382,7 +382,7 @@ def sagub_move_delete(payload: dict = Body(...)):
         raise HTTPException(400, "id 형식 오류")
     cn = _nx(); cur = cn.cursor()
     try:
-        if _closed(cur, y):
+        if _closed(cur, y, "SAL"):
             raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_TAG=? AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", tag, y, g)
         return {"ok": True, "deleted": cur.rowcount}
@@ -1501,7 +1501,7 @@ def shipment_cost(payload: dict = Body(...)):
     try:
         # 마감월 보호 — 마감 후 금액이 바뀌면 원가/매출 집계가 어긋난다
         try:
-            if _closed(cur, ymd):
+            if _closed(cur, ymd, "SAL"):
                 cn.rollback()
                 return {"ok": False,
                         "msg": "마감된 월(20%s-%s)의 출하건은 수정할 수 없습니다." % (ymd[:2], ymd[2:4])}

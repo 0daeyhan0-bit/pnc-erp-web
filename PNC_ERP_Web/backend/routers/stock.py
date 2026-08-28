@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail, _assert_open, _lock_msg)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail, _assert_open, _lock_msg, _closed)
 
 router = APIRouter()
 
@@ -249,7 +249,7 @@ def matrecv_receive(payload: dict = Body(...)):
         raise HTTPException(400, "입고일자 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             return {"ok": False, "errors": [f"마감월({_ym(ymd)}) 입고 불가"]}
         errs = []
         # 검증: 품목등록·발주잔량 초과
@@ -333,7 +333,7 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
         raise HTTPException(400, "입고일자 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             return {"ok": False, "errors": [f"마감월({_ym(ymd)}) 입고 불가"]}
         errs = []; saved = 0
         for idx, r in enumerate(rows, 1):
@@ -359,10 +359,8 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
     finally:
         cn.close()
 
-def _closed(cur, ymd):
-    cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", _ym(ymd))
-    r = cur.fetchone()
-    return bool(r and r[0])
+# ★로컬 _closed 제거(2026-08-28) — 구 stock_close 만 보던 사본이 common 의 공용 게이트를 가렸다.
+#   이제 common._closed(=_lock_msg 위임)를 그대로 쓴다.
 
 # ===================== ★Phase5: nx 재고 월마감 스냅샷 (STOCK_POINT별 기초→기말=기초+ΣMAINT) =====================
 # 기말 스냅샷=다음달 기초 연속성·마감후 파생 고정. 잠금=기존 nx.stock_close(ym) 플래그 재사용(옵션).
@@ -500,7 +498,7 @@ def stock_update(payload: dict = Body(...)):
         old_stored = float(row[1] or 0)
         old_cc = str(row[2] or "").strip(); old_gp = str(row[3] or "").strip(); old_tag = str(row[4] or "").strip()
         errs = []
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             errs.append(f"마감월({_ym(ymd)}) 편집 불가")
         if screen == "adjust":
             # 조정=부호 그대로(불량·개발불출 −, 장부수정 ±). 음수재고는 아래 new_sum 검증에서 차단.
@@ -554,7 +552,7 @@ def stock_delete(payload: dict = Body(...)):
         old_stored = float(row[1] or 0)
         old_cc = str(row[2] or "").strip(); old_gp = str(row[3] or "").strip(); old_tag = str(row[4] or "").strip()
         errs = []
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             errs.append(f"마감월({_ym(ymd)}) 삭제 불가")
         cur.execute("SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE MAT_CODE=?", mat)
         cur_sum = float(cur.fetchone()[0] or 0)
