@@ -64,6 +64,21 @@ FIXTURES = [
      lambda ctx, r: ctx.update(kit_item=str(r[0]), kit_gpc=str(r[1]).strip(),
                                kit_wo=str(r[2] or "").strip())),
 
+    # ★완제품(ASY) 게이트용 — '지금' 잔량이 있는 품목. 2502 기초만 큰 품목을 고르면
+    #   이후 다 소진돼 오차단으로 오판한다(2026-08-29 실측: 5006AR4091D 기초 10,051 · 현재 0).
+    #   ⟹ 제품재고조회 화면과 같은 식으로 현재 잔량을 계산해 고른다.
+    ("asy", """WITH MV AS (
+                 SELECT UPPER(item_code) it, maint_qty q FROM nx.sa_t_stock_maint
+                  WHERE maint_ymd>'250299'
+                    AND ((maint_tag='P' AND ISNULL(in_part_code,'')='') OR maint_tag IN ('B','V','J','8','R','2'))
+                 UNION ALL
+                 SELECT UPPER(mat_code), maint_qty*-1 FROM nx.pu_t_stock_maint
+                  WHERE maint_ymd>'250299' AND ISNULL(out_wh_gubun,'1')='2'
+                 UNION ALL
+                 SELECT UPPER(item_code), stock_qty FROM nx.sa_t_month_stock WHERE stock_yymm='2502')
+               SELECT TOP 1 it, SUM(q) FROM MV GROUP BY it HAVING SUM(q) > 50 ORDER BY SUM(q) DESC""",
+     lambda ctx, r: ctx.update(asy_item=str(r[0]).strip(), asy_qty=float(r[1] or 0))),
+
     ("sale_cust", """SELECT TOP 1 cust_code FROM nx.saleout_maint WHERE maint_tag='5'
                       GROUP BY cust_code ORDER BY COUNT(*) DESC""",
      lambda ctx, r: ctx.update(sale_cust=str(r[0]).strip())),
@@ -176,6 +191,13 @@ CASES = [
                            "prod_qty": 9999999, "user": "flowverify"}),
 
     # ══ [R] 규칙 : 입력 유효성 ════════════════════════════════════════
+    # ── 완제품(ASY) 재고 게이트 (2026-08-29 신설) ──────────────────────────
+    #   정본 = common._finished_avail() = 제품재고조회 화면과 **동일 계산**.
+    #   전수 대조: 잔량≠0 267품목 **불일치 0건**. 사전 차단율 0.05%(8월 1,876건 중 1건).
+    dict(kind="R", name="출하실적 — 완제품 재고부족 차단", method="POST", path="/api/lgsale/save",
+         keyword="재고부족", skip_if=lambda ctx: "asy_item" not in ctx,
+         body=lambda ctx: {"work_order": "GATETEST", "item_code": ctx["asy_item"],
+                           "sale_qty": ctx["asy_qty"] + 100000, "user": "flowverify"}),
     dict(kind="R", name="미등록 품목 차단", method="POST", path="/api/stock/save",
          keyword="미등록", body=_save("receipt", 10, mat="ZZ_NOT_EXIST_9999")),
     dict(kind="R", name="수량 0 차단", method="POST", path="/api/stock/save",
@@ -188,6 +210,11 @@ CASES = [
          keyword="screen", body=lambda ctx: {"screen": "bogus", "rows": []}),
     # ══ [F] 흐름 : 생산 파트재고·창고이동 (2026-08-28 확장) ═══════════
     #   재고를 실제로 움직이는데 검증에 없던 화면들. 218개 쓰기 중 재고 이동 경로부터 채운다.
+    dict(kind="F", name="출하실적 — 잔량 이내는 통과 (−ASY)", method="POST", path="/api/lgsale/save",
+         probe="원장ASY", delta=-1, mirror=False,
+         skip_if=lambda ctx: "asy_item" not in ctx,
+         body=lambda ctx: {"work_order": "GATETEST", "item_code": ctx["asy_item"],
+                           "sale_qty": 1, "user": "flowverify"}),
     dict(kind="F", name="생산파트재고조정 (stockmaint/save)", method="POST", path="/api/stockmaint/save",
          probe="원장PRD", delta=+40, mirror=False,
          body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",

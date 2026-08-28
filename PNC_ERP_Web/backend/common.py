@@ -316,11 +316,23 @@ def _finished_avail(cur, item, asof=None):
         return 0.0
     if not asof:
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')"); asof = cur.fetchone()[0]
+    # ★2026-08-29 화면(제품재고조회 `live_api.salesstock`) recipe 와 **버킷까지 동일**하게 정렬.
+    #   화면 항등식 = 기초 + 입고 − 출고 − 조정
+    #     입고 = 완성 P(in_part='') + (B,V)  +  **직납 자재출고(pu out_wh='2') 의 −qty**
+    #     출고 = 완성 (J,8,R) 의 −qty
+    #     조정 = 완성 (2) 의 −qty
+    #   ★직납이 '입고' 인 이유: 협력사 차량이 LG 에 못 들어가서 **우리 창고를 거쳐** 나간다.
+    #     (대표 확인 2026-08-29). 그래서 자재축 직납 출고가 곧 제품 입고다.
+    #   ★부호 함정: 조정은 ×(−1) 로 담긴다. 가용에 더하려면 **빼야** 한다.
+    #     (MJU63357501 8/10 조정 +1,500 을 반대로 넣었더니 가용이 −1,498 로 나와 정상출고가 막혔다)
     cur.execute("""SELECT
-        (SELECT ISNULL(SUM(stock_qty),0) FROM PARTNER_ERP_TEST3.nx.sa_t_month_stock WHERE stock_yymm='2502' AND UPPER(item_code)=?)
-      + (SELECT ISNULL(SUM(maint_qty),0) FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint WHERE UPPER(item_code)=? AND maint_ymd BETWEEN '250299' AND ?
-           AND ((maint_tag='P' AND ISNULL(in_part_code,'')='') OR maint_tag IN ('B','V','J','8','R','2')))
-      - (SELECT ISNULL(SUM(maint_qty),0) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint WHERE UPPER(mat_code)=? AND maint_ymd BETWEEN '250299' AND ? AND ISNULL(out_wh_gubun,'1')='2')
+        (SELECT ISNULL(SUM(stock_qty),0) FROM PARTNER_ERP_TEST3.nx.sa_t_month_stock
+          WHERE stock_yymm='2502' AND UPPER(item_code)=?)
+      + (SELECT ISNULL(SUM(maint_qty),0) FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint
+          WHERE UPPER(item_code)=? AND maint_ymd BETWEEN '250299' AND ?
+            AND ((maint_tag='P' AND ISNULL(in_part_code,'')='') OR maint_tag IN ('B','V','J','8','R','2')))
+      - (SELECT ISNULL(SUM(maint_qty),0) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint
+          WHERE UPPER(mat_code)=? AND maint_ymd BETWEEN '250299' AND ? AND ISNULL(out_wh_gubun,'1')='2')
     """, item, item, asof, item, asof)
     r = cur.fetchone()
     return float(r[0] or 0)
@@ -332,7 +344,9 @@ def _finished_short_msg(cur, item, need, label="출고"):
         return None
     avail = _finished_avail(cur, item)
     if need > avail + 1e-6:
-        return f"재고부족 ({item} 완성재고 {avail:g} < {label} {need:g})"
+        # ★왜 안 되는지 밝힌다(§0-★). 완성재고 = 제품재고조회 화면과 같은 계산.
+        return (f"재고부족 — {item}: {label} {need:g} > 완성재고 {avail:g}"
+                f" (제품재고조회 기준: 기초+입고−출고−조정. 부족 {need-avail:g})")
     return None
 
 # 생산재고조회(_prodstock, dw_pr_stock_480) recipe U — 단일품목 현재고용(라인=P0001 가공/그외 용접). live_api와 동일 정본, {asof}까지 누적.

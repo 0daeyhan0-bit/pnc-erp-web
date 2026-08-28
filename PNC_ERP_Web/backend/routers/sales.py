@@ -5,7 +5,7 @@
 import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed, _finished_short_msg
 
 router = APIRouter()
 
@@ -821,6 +821,26 @@ def lgsale_list(fr: str = Query(""), to: str = Query(""), wo: str = Query(""), i
     finally:
         cn.close()
 
+# ══ 완제품(ASY) 재고 게이트 ══════════════════════════════════════════════════
+# 대표 규칙 §0-★: 음수재고는 경고가 아니라 **차단**이고 **예외가 없다**.
+# 정본 = common._finished_avail() = 제품재고조회 화면과 **동일 계산**
+#        (기초 + 입고 − 출고 − 조정 · 입고에 직납 자재출고 포함).
+#        전수 대조 실측 2026-08-29: 잔량≠0 267품목 **불일치 0건**.
+# 사전 실측(8월 완성출고 1,876건): 차단 1건 = 0.05%.
+#        그 1건 `MJU63357501` 8/18 = 재고 80 인데 94 출고 = **진짜 음수재고**.
+#        ⟹ 정상 출하는 막지 않는다.
+# ★측정 함정 3가지(모두 실제로 겪음, 반복 금지):
+#   ① 출하 '이후' 재고와 비교하면 차단율이 부풀려진다(42.5% 오판)
+#   ② 품목마다 _finished_avail() 호출하면 3중 서브쿼리가 수백 번 → 안 끝난다. 집합으로 펴라
+#   ③ 직납 입고를 '출하일 이전'만 세면 같은 날 입고가 빠진다(19.6% 오판)
+#   ④ 조정(tag 2)은 ×(−1) 로 담긴다 — 가용에 더하려면 **빼야** 한다
+def _asy_gate(cur, item, qty, label="출하"):
+    """완제품 재고가 부족하면 차단. 사유(품목·소요·가용)를 실어 400."""
+    msg = _finished_short_msg(cur, item, float(qty or 0), label)
+    if msg:
+        raise HTTPException(400, msg)
+
+
 # ★출하(−ASY) 결선: 출하실적(nx.sale_dtl) → stock_ledger −ASY(tag 'J', MAINT_GROUP_SEQ=sale_dtl id 링크). 완성(+ASY)과 정합.
 def _lgsale_led_del(cur, sid):
     cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='ASY' AND MAINT_TAG='J' AND MAINT_GROUP_SEQ=?", int(sid))
@@ -870,11 +890,16 @@ def lgsale_save(payload: dict = Body(...)):
             cur.execute("SELECT sale_ymd FROM nx.sale_dtl WHERE id=?", int(rid))
             sy = str(cur.fetchone()[0] or "").strip()
             _assert_open(cur, sy, "SAL", "출하실적 수정")   # ★마감잠금(기존 출하일자)
+            # ★완제품 재고 게이트 — 기존 −ASY 를 **지운 뒤** 판정한다.
+            #   지우기 전에 재면 자기 자신이 이미 빠져 있어 정상 수정도 막힌다.
+            _lgsale_led_del(cur, int(rid))
+            _asy_gate(cur, item, qty, "출하")
             _lgsale_led_post(cur, int(rid), sy, item, qty, wo)   # ★재고 −ASY 재게시
         else:
             cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6), RIGHT(CONVERT(varchar(14),GETDATE(),120),6)")
             ymd, hms = cur.fetchone()
             _assert_open(cur, ymd, "SAL", "출하실적 등록")   # ★마감잠금
+            _asy_gate(cur, item, qty, "출하")                # ★완제품 재고 게이트
             cur.execute("""INSERT INTO nx.sale_dtl(work_order,split_work_order,item_code,sale_ymd,sale_hms,sale_qty,songjang_print_flag,remarks,insert_user_id,insert_datetime)
                 OUTPUT INSERTED.id VALUES(?,?,?,?,?,?,'0',?,'web',getdate())""", wo, split, item, ymd, hms, qty, remarks)
             newid = int(cur.fetchone()[0])
