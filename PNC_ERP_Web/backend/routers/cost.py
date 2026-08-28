@@ -3,7 +3,7 @@
    app.py에서 분리. 공유헬퍼는 common.py에서 import."""
 import os
 from fastapi import APIRouter, Query, Body, HTTPException, Response
-from common import (_conn, _nx, _num, _run_sp, _shape, _get_cost_engine, _reset_cost_engine,
+from common import (_conn, _nx, _nx_tx, _num, _run_sp, _shape, _get_cost_engine, _reset_cost_engine,
                     _COST_LOCK, SP_SIL, SP_NAE, _HERE, NxCostEngine)
 
 router = APIRouter()
@@ -868,6 +868,76 @@ def weld_save(payload: dict = Body(...)):
         _reset_cost_engine()
         return {"ok": True, "node": node, "weld_item": wi, "diams": len(cnt), "total_points": sum_cnt,
                 "use_qty": use_qty, "unit_qty": unit, "inner_st": sum_st, "uph": uph, "loss_factor": lf}
+    finally:
+        nx.close()
+
+
+@router.post("/api/weld/save_node")
+def weld_save_node(payload: dict = Body(...)):
+    """★용접봉 다종 저장 — 한 노드의 전 용접봉 유형을 원자 교체(노드당 2~3종 지원. 예: 일반1% + 은납3/5%).
+       payload: {node, types:[{weld_item, proc_code?('51'용접/'28'은납), rows:[{pipe_diam, weld_qty}]}], loss_factor?(1.5)}.
+       노드의 item_weld/proc_weld/routing(51·28) 전체 삭제 후 유형별 재삽입(원자=_nx_tx). 산식=weld_save 동일(WELD_PROC_TABLES_SPEC).
+       ★무변경 저장 시 결과 동일=원가 diff0. 단가 미변경."""
+    node = str(payload.get("node", "")).strip()
+    types = payload.get("types", []) or []
+    if not node:
+        raise HTTPException(400, "node 필요")
+    lf = payload.get("loss_factor", None)
+    lf = float(lf) if (lf is not None and str(lf).strip() != "") else 1.5
+    from collections import defaultdict as _dd
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT pipe_diam,MIN(std_use_qty),MIN(std_st) FROM nx.weld_diam GROUP BY pipe_diam")
+        STDU = {}; STDS = {}
+        for r in cur.fetchall():
+            d = round(float(r[0]), 2); STDU[d] = float(r[1] or 0); STDS[d] = float(r[2] or 0)
+        # ★노드 전체 용접봉 원자 삭제(다종 교체)
+        cur.execute("DELETE FROM nx.item_weld WHERE item_code=?", node)
+        cur.execute("DELETE FROM nx.proc_weld WHERE parent_item=?", node)
+        cur.execute("DELETE FROM nx.routing WHERE p_item=? AND proc_code IN ('51','28')", node)
+        saved = []
+        for t in types:
+            wi = str(t.get("weld_item", "")).strip()
+            if not wi:
+                continue
+            pc = str(t.get("proc_code", "51")).strip() or "51"
+            if pc not in _PROC_WELD:
+                pc = "51"
+            cnt = _dd(float)
+            for r in (t.get("rows", []) or []):
+                try:
+                    d = round(float(r.get("pipe_diam") or 0), 2); q = float(r.get("weld_qty") or 0)
+                except Exception:
+                    continue
+                if d > 0 and q > 0:
+                    cnt[d] += q
+            bad = [d for d in cnt if d not in STDU]
+            if bad:
+                raise HTTPException(400, f"weld_diam에 없는 관경: {bad} (용접봉 {wi})")
+            sum_use = sum(STDU[d] * q for d, q in cnt.items())
+            sum_cnt = sum(cnt.values())
+            sum_st = sum(STDS[d] * q for d, q in cnt.items())
+            if sum_cnt <= 0:
+                continue
+            use_qty = round(sum_use * lf, 6)
+            unit = round(sum_use / sum_cnt, 8) if sum_cnt else 0.0
+            diam_rep = max(cnt.items(), key=lambda kv: kv[1])[0]
+            uph = round(sum_cnt * 3600.0 / sum_st, 4) if sum_st > 0 else 0.0
+            for d, q in sorted(cnt.items()):
+                cur.execute("INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty) VALUES(?,?,?,?,?)",
+                            node, wi, d, q, round(STDU[d] * q, 6))
+            cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,
+                  loss_factor,meta_ok,cs_calc_except,lme_except,tag,src,upd_dt)
+                VALUES(?,?,?,?,?,?,?,?,1,0,0,'W','weld_save_node',getdate())""",
+                node, wi, wi.split('-')[0], diam_rep, sum_cnt, unit, use_qty, lf)
+            cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+                VALUES(?,?,?,?,?,'3',0)""", node, wi, pc, sum_cnt, uph)
+            saved.append({"weld_item": wi, "proc_code": pc, "points": sum_cnt, "use_qty": use_qty})
+        nx.commit()
+        _reset_cost_engine()
+        return {"ok": True, "node": node, "types": saved, "count": len(saved)}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 

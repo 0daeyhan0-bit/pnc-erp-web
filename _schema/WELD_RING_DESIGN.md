@@ -278,3 +278,15 @@ BOM 관리(품목BOM관리 내부원가) 조립공정 팝업의 "용접봉 종�
 - **미매핑 정리 필요**: proc_weld 활성 비용접봉 잔재(RAC31704701/702 실리콘·36134101 구리스) 제거 + RAC32977302(1%)·30823003(?) 매핑.
 
 **BOM화면 이슈(누적·별도 트랙)**: #1 단일레벨 일관성·#2 수정문제·#3 공정수정·용접링=부품추가(품목마스터). 용접봉 다종이 최난이도 덩어리(설계 확정).
+
+## 27. ★용접봉 다종 저장 백엔드 구현·검증 (2026-08-28)
+
+BOM 관리 [ASSY/SUB 공정수정] 팝업의 "용접봉 종류(노드당 1개)" → 다종 지원. 아키텍처(base=flat·R01=SUB)는 이미 구현됨(Explore 확정) → 남은 건 용접봉 %유형·다종 입력.
+
+**신규 `/api/weld/save_node`** (cost.py): 한 노드의 **전 용접봉 유형 원자 교체**(_nx_tx). payload={node, types:[{weld_item, proc_code(51용접/28은납), rows:[관경·횟수]}], loss_factor}. 노드 item_weld/proc_weld/routing(51·28) 전삭제→유형별 재삽입. 산식=weld_save 동일.
+- **검증**(no-commit 몽키패치·롤백): 5211A21789C에 2종(RAC30599301-1 51 + RAC30599327 28) 저장 → proc_weld 2행(0.006·0.003)·count=2 ✅. **다종 저장 작동.**
+- 기존 weld/save(단일 node+weld_item)는 유지. save_node=다종 원자.
+
+**★검증이 드러낸 데이터 이슈 (팝업 LOAD 선결)**: 일부 레거시 노드 **item_weld(관경 detail) ≠ proc_weld(use_qty)**. 예 AJR73980318: proc_weld=RAC30599301-1 0.0234(+327 0.0018) but item_weld 관경 재계산=0.0156, RAC30599327은 **item_weld에 아예 없음**(proc_weld엔 있음). 원인=proc_weld가 CS_M_ITEM_BOM 화면값으로 이관·item_weld 미갱신([[newerp-weld-cost-split]] WELD_PROC §9-14, 371노드 divergence).
+- **함의**: 팝업이 weld/get(item_weld)로 LOAD → 관경 기반 SAVE 시 proc_weld 변동(0.0234→0.0156) = **무편집 저장인데 원가 변동**. → **다종 팝업 안전 = item_weld↔proc_weld 일치 선결**(divergent 노드는 편집저장 주의). meta_ok=1 노드만 안전, 나머지는 데이터 정합 후.
+- **다음**: ①프론트 다중 매트릭스(LOAD=weld/get·SAVE=save_node) ②divergent 노드 처리(경고 or item_weld 재구축).
