@@ -69,40 +69,61 @@ def _dong_of(cur, item):
 
 
 def _lg_ap_all(cur, ver_date):
-    """LG BOM 버전(point-in-time)에서 사급(Assembly Pull) 동 원소재 소요 = {model: {(metal,diam,thick): per_unit_kg}}.
-       동 원소재 = matkl='MJU0631'(Tube,Raw 전 접두사 통합)·supply_type='Assembly Pull'·ALUMINUM 제외.
-       point-in-time = model·werks별 ver_from<=ver_date 최신 버전. werks는 MAX(양공장 동일값·중복방지).
-       ★Supplier(매입 직구매)·사급부품(matkl≠MJU0631)은 자동 제외. 규격/재질은 nx.item 우선, 없으면 spec 파싱."""
+    """LG BOM 버전(point-in-time) 사급(Assembly Pull) 동 원소재 소요 = {model: {(metal,diam,thick): per_unit_kg}}.
+       ★LG전자 사급 소요 산출방식 = LG BOM 다단계 트리전개(롤업): 동이 L2(서브 밑)면 L1 서브 수량을 곱해 누적.
+         (구 flat합은 L1 수량 미곱 → 과소. 예 AJR30004702 P7.0 L1 ×7 반영.)
+       동 원소재 = matkl='MJU0631'·supply_type='Assembly Pull'·ALUMINUM 제외. Supplier·사급부품(matkl≠)은 전개 관통만 하고 미계상.
+       point-in-time = model·werks별 ver_from<=ver_date 최신 버전. werks 다중이면 전개합 MAX(양공장 중복방지).
+       규격/재질 = nx.item 우선, 없으면 child_spec 파싱. root = model(STUFE1 부모=model)."""
+    from collections import defaultdict as _dd
     cur.execute("""
       WITH latest AS (
         SELECT model, ISNULL(werks,'') w, MAX(ver_from) mv
         FROM nx.lg_bom_ver WHERE ver_from<=? GROUP BY model, ISNULL(werks,''))
-      SELECT UPPER(LTRIM(RTRIM(r.model))) model, UPPER(LTRIM(RTRIM(r.child_code))) child, MAX(r.child_spec) spec,
-             ISNULL(r.werks,'') w, SUM(CONVERT(float,ISNULL(r.qty,0))) qty,
-             MAX(ISNULL(ic.metal_gubun,'')) mg, MAX(ISNULL(ic.diam,0)) idiam, MAX(ISNULL(ic.thick,0)) ithick
+      SELECT UPPER(LTRIM(RTRIM(r.model))), ISNULL(r.werks,''),
+             UPPER(LTRIM(RTRIM(r.parent_code))), UPPER(LTRIM(RTRIM(r.child_code))),
+             r.matkl, LTRIM(RTRIM(ISNULL(r.supply_type,''))), ISNULL(r.child_spec,''), CONVERT(float,ISNULL(r.qty,0)),
+             ISNULL(ic.metal_gubun,''), ISNULL(ic.diam,0), ISNULL(ic.thick,0)
       FROM nx.lg_bom_ver r
       JOIN latest l ON l.model=r.model AND l.w=ISNULL(r.werks,'') AND r.ver_from=l.mv
       LEFT JOIN nx.item ic ON UPPER(LTRIM(RTRIM(ic.item_code)))=UPPER(LTRIM(RTRIM(r.child_code)))
-      WHERE r.matkl='MJU0631' AND r.supply_type='Assembly Pull' AND ISNULL(r.child_spec,'') NOT LIKE '%ALUMINUM%'
-      GROUP BY UPPER(LTRIM(RTRIM(r.model))), UPPER(LTRIM(RTRIM(r.child_code))), ISNULL(r.werks,'')
     """, ver_date)
-    # (model,child)별 werks MAX → 규격키로 집계
-    tmp = {}  # (model, child) -> (best_qty, spec, mg, diam, thick)
-    for model, child, spec, w, qty, mg, idiam, ithick in cur.fetchall():
-        k = (model, child)
-        if (k not in tmp) or (qty > tmp[k][0]):
-            tmp[k] = (float(qty or 0), spec or '', (mg or '').strip(), float(idiam or 0), float(ithick or 0))
-    out = {}
-    for (model, child), (qty, spec, mg, idiam, ithick) in tmp.items():
+    MW = _dd(lambda: _dd(list))    # model -> werks -> [(parent,child,matkl,sup,spec,qty,mg,diam,thick)]
+    for md, w, p, c, mk, sup, spec, q, mg, idiam, ithick in cur.fetchall():
+        MW[md][w].append((p, c, mk, sup, spec, float(q or 0), (mg or '').strip(), float(idiam or 0), float(ithick or 0)))
+
+    def _key(spec, mg, idiam, ithick):
         od = idiam if idiam > 0 else None; thk = ithick if ithick > 0 else None
         if od is None:
             m = _re.search(r'P(\d+(?:\.\d+)?)', spec); od = float(m.group(1)) if m else 0.0
         if thk is None:
             m = _re.search(r'T(\d+(?:\.\d+)?)', spec); thk = float(m.group(1)) if m else 0.0
         metal = mg if mg else ('고강도' if '고강도' in spec else 'CU')
-        key = (metal, float(od), float(thk))
-        d = out.setdefault(model, {})
-        d[key] = d.get(key, 0.0) + qty
+        return (metal, float(od), float(thk))
+
+    out = {}
+    for md, wmap in MW.items():
+        best = None; best_tot = -1.0
+        for w, edges in wmap.items():
+            ch = _dd(list)
+            for e in edges:
+                ch[e[0]].append(e)
+            acc = _dd(float); tot = [0.0]
+
+            def dfs(node, mult, depth, path):
+                if depth > 25:
+                    return
+                for (p, c, mk, sup, spec, q, mg, idiam, ithick) in ch.get(node, ()):
+                    if mk == 'MJU0631' and sup == 'Assembly Pull' and 'ALUMINUM' not in spec.upper():
+                        cv = q * mult
+                        acc[_key(spec, mg, idiam, ithick)] += cv; tot[0] += cv
+                    if c != node and c not in path:       # EA 중간노드=수량 곱해 관통, 동 leaf=자식없어 종료, cycle 방지
+                        dfs(c, mult * q, depth + 1, path | {c})
+            dfs(md, 1.0, 0, {md})
+            if tot[0] > best_tot:
+                best_tot = tot[0]; best = dict(acc)
+        if best:
+            out[md] = best
     return out
 
 
