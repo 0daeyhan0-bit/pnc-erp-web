@@ -673,3 +673,39 @@ pricemgmt CRUD 왕복          insert → 조회 → update → 삭제 → 롤�
 price API 6종                전부 200
 은퇴 미러 가드               nx.PR_M_ITEM 잔여 5곳(planrev, 별건)
 ```
+
+---
+
+## 12·13번 — 배포 경로 전제 확인 (2026-08-29)
+
+### 12. `db_client.py` 배치
+| 확인 | 결과 |
+|---|---|
+| 개발 PC 위치 | `Projects/New_ERP/db_client.py` ✅ 존재 |
+| repo 에 커밋됐나 | **0건** ✅ (커밋 금지 — 접속정보) |
+| 코드가 찾는 경로 | `common.py:12` → `_HERE/../../../New_ERP` |
+
+`_HERE` = `<repo>/PNC_ERP_Web/backend` 이므로 실제 해석 경로는 **`<repo>/../../New_ERP/db_client.py`**.
+운영폴더가 `D:\ERP\Projects\NEW_ERP_1` 이면 ⟹ **`D:\ERP\Projects\New_ERP\db_client.py`** 가 있어야 한다.
+
+### 13. 운영폴더 = main clone · pull 배포
+`deploy_pull.ps1` 이 전제하는 구조:
+```
+repo    = D:\ERP\Projects\NEW_ERP_1        (Gitea clone · git pull --ff-only origin main)
+기동    = D:\ERP\START_SERVER.ps1           ($repo\..\..\START_SERVER.ps1)
+헬스체크 = http://127.0.0.1:8010  (/openapi.json → /) · 비종료 · 최대 40초 폴링
+```
+`--ff-only` 라 **운영폴더에 로컬 커밋이 있으면 pull 이 중단된다** = 직접수정 금지 원칙이 스크립트로 강제돼 있다. 좋다.
+
+### ☐ 남은 확인 — **운영 서버에서 직접 봐야 한다**
+개발 PC(사외망)에서 `\\ERP\ERP` · `\\200.200.200.184\ERP` **둘 다 접근 불가**라 아래는 확인 못 했다.
+컷오버 전에 **서버에서** 확인할 것:
+
+```powershell
+Test-Path D:\ERP\Projects\New_ERP\db_client.py      # 12번 — 없으면 백엔드 기동 불가
+Test-Path D:\ERP\Projects\NEW_ERP_1\.git            # 13번 — clone 이어야 pull 배포 가능
+Test-Path D:\ERP\START_SERVER.ps1                    # 재기동 스크립트
+git -C D:\ERP\Projects\NEW_ERP_1 status --short     # 로컬 변경 0 이어야 --ff-only 통과
+git -C D:\ERP\Projects\NEW_ERP_1 remote -v          # origin = Gitea
+```
+⟹ 하나라도 어긋나면 **컷오버 당일 배포가 막힌다.** 미리 확인해 둘 것.
