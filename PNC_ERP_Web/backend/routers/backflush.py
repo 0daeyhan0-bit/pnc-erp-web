@@ -249,7 +249,10 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
     if not _is_inner_prod(cro, item):
         return {"ok": True, "weld_kinds": 0}   # 사내생산 아님 = 용접봉 소비 없음(스킵)
     _comps, weld = _backflush_bom(nx, item, cro)   # 용접봉만 사용(자재/생산품은 레거시)
-    if not weld:
+    ring = _ring_collect(nx, item)                 # ★용접링(bom_line 정본, nx.bom엔 없음) — 봉과 동일 Q1000 모델
+    if ring and weld:                              # 링 있는 노드 = 봉 대체 → 봉 skip(중복차감 방지)
+        weld = {}
+    if not weld and not ring:
         return {"ok": True, "weld_kinds": 0, "weld_consumed": 0.0}
     import datetime as _d
     ymd6 = _d.datetime.now().strftime('%y%m%d')
@@ -267,6 +270,16 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
                 _r = gc.fetchone(); _nm = (str(_r[0]).strip() if _r and _r[0] else br)
                 short.append({"mat": f"용접봉 {_nm}({br})", "part": gpc,
                               "need": round(wneed, 4), "have": round(have, 4), "lack": round(wneed - have, 4)})
+        for rc, rq in ring.items():                   # ★용접링 게이트 = 생산창고(Q1000) 재고
+            rneed = rq * signed_qty
+            if rneed <= 0:
+                continue
+            have = _weld_stock_at(gc, rc, WELD_WAREHOUSE)
+            if rneed > have + 1e-6:
+                gc.execute("SELECT TOP 1 ISNULL(item_name,'') FROM nx.item WHERE item_code=?", rc)
+                _r = gc.fetchone(); _nm = (str(_r[0]).strip() if _r and _r[0] else rc)
+                short.append({"mat": f"용접링 {_nm}({rc})", "part": WELD_WAREHOUSE,
+                              "need": round(rneed, 4), "have": round(have, 4), "lack": round(rneed - have, 4)})
         if short:
             return {"ok": False, "shortage": short}
     # ── 소비/복원: dq = −(원단위×부호수량) → tag W @ 투입공정 (소비=−, 취소=+) ──
@@ -283,7 +296,18 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
             VALUES('MAT',?,?,'W','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
             ymd6, _seq(), br, _weld_proc_code(nx, br), (wo or None), dq, '용접봉 생산소비(공정종속)', user)
         weld_consumed += wq * signed_qty
-    return {"ok": True, "item": item, "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4)}
+    ring_consumed = 0.0                            # ★용접링 소비/복원 (−R @ Q1000, 부호수량)
+    for rc, rq in ring.items():
+        dq = -(rq * signed_qty)
+        if abs(dq) < 1e-9:
+            continue
+        nc.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAT_CODE,
+              GAGONG_PROC_CODE,WORK_ORDER,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
+            VALUES('MAT',?,?,'R','Z99990',NULL,?,?,?,?,?,?,GETDATE())""",
+            ymd6, _seq(), rc, WELD_WAREHOUSE, (wo or None), dq, '용접링 생산소비(공정종속)', user)
+        ring_consumed += rq * signed_qty
+    return {"ok": True, "item": item, "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4),
+            "ring_kinds": len(ring), "ring_consumed": round(ring_consumed, 4)}
 
 
 @router.post("/api/backflush/post")
