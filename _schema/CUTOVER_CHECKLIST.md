@@ -289,3 +289,58 @@ AJR75645201-SUB2(2011,2272) · AJR76462903-은납(2016) · AJR30105801-19-1(2306
 
 > **폴백 금지**(CLAUDE.md §1-9-1). "클린에 없으면 미러" 로 짜면 컷오버에 그대로 죽는다.
 > 없으면 **없는 것**이고, 없어서 안 되는 값이면 **갭을 먼저 메운다.**
+
+---
+
+## ★★ 컷오버 축소 — 승인 없이 미리 끝낸 항목 (2026-08-28)
+
+### ✅ 항목 2 — 참조 테이블 nx 존재 감사
+**도구로 남겼다**: `_migration/cutover_ref_audit.py` (컷오버 당일 다시 짜지 않는다)
+
+```
+SQL 이 참조하는 nx.<객체> 236종 · DB 의 nx 객체 843종
+★DB 에 없는 참조: 2종
+   nx.sourcing_sagub_price_new  ← routers/sourcing.py
+   nx.sourcing_sub_price_new    ← routers/sourcing.py
+```
+두 건 모두 **스키마 자가 마이그** 코드다 — `_new` 테이블을 만들어 데이터를 옮기고
+곧바로 `sp_rename` 으로 본명을 뺏는다. 마이그가 이미 끝나 없는 게 정상.
+⟹ **실제 결손 0. flip 해도 깨지는 참조는 없다.**
+
+> **감사 방법 주의**: 단순히 `nx.` 로 뽑으면 안 된다. `nx.commit`·`nx.cursor`·`nx.rollback`
+> (커넥션 메서드)과 `nx.item_code` 같은 **별칭 컬럼**이 섞여 "없는 참조" 25종이 오탐으로 나온다.
+> SQL 문맥(`FROM|JOIN|INTO|UPDATE|DELETE FROM|EXEC`)에서만 뽑아야 한다.
+
+#### 컷오버 표면 = 미러형 64종
+백엔드 SQL 이 부르는 `nx.<대문자>` 64종이 **컷오버 후 죽는 표면**이다(클린형은 172종).
+```
+CM_M_COMPANY · CM_M_CUST_MAGAM · CM_M_MASTER_DETAIL · CS_M_ITEM_BOM · CS_M_PROC · CS_T_ITEM_WELD
+HR_M_CALENDAR · HR_M_DEPT · HR_M_WORK_INFO · PR_M_CUST_MAT_LIST · PR_M_ITEM · PR_M_ITEM_ASSY_RT
+PR_M_ITEM_BLOB · PR_M_ITEM_ST · PR_M_ITEM_SUB · PR_M_LINE_NO · PR_M_MODEL_BOM · PR_M_MODEL_BOM_EXCEPT
+PR_M_PART_CALENDAR · PR_M_PROC_GAGONG_WORKER · PR_M_WORK_ASSY · PR_M_WORK_SINGLE
+PR_T_DAILY_ISSUE_REVIEW(+_FILE) · PR_T_INDI_CUTTING · PR_T_INDI_SHEET2 · PR_T_INDI_WELD_SHEET(+_DTL)
+PR_T_MAT_STOCK · PR_T_MONTH_STOCK_WH · PR_T_PLAN_DTL · PR_T_PLAN_INPUT · PR_T_PLAN_PART_COPY
+PR_T_PLAN_PART_DTL_FOR_CUST · PR_T_PLAN_PART_MAT · PR_T_PRINT_STICKER · PR_T_PROD_DTL_GAGONG
+PR_T_PROD_DTL_PROC · PR_T_PROD_DTL_STICKER · PR_T_STOCK_MAINT_MAT · PU_T_MAT_STOCK(+_WH)
+PU_T_MONTH_STOCK_WH(+_DAILY) · PU_T_PURCHASE_DTL · PU_T_READY_STOCK(+_MAINT) · PU_T_SAGUB_STOCK
+PU_T_SET_STOCK_MAINT_GAGONG · PU_T_STOCK_MAINT_C · PU_T_STOCK_MAINT_GAGONG_MOVE · PU_T_STOCK_MOVE
+QA_M_MACHINE · QA_T_CUST_IQC_DTL(+_HEAD) · QA_T_ERROR · QA_T_RAW_ERROR
+QA_T_SPEC_REV(+_APPLY,+_BLOB) · SA_T_ITEM_STOCK · SA_T_LG_RECEIVING_DTL · SA_T_PLAN_DTL · SA_T_RECV_DTL
+```
+※ `PR_M_ITEM` 은 리더 이관이 끝나 코드 잔여 0 이어야 하는데 목록에 남아 있다 —
+   `soyo.py` STEP7 보존분으로 보인다(의도된 잔여, [[newerp-nxitem-reader-migration]]). **재확인 대상.**
+
+### ✅ 항목 14 — `_migration` 컷오버 도구 추적 확인 → **결함 발견·수정**
+`.gitignore` 가 `_migration/*` 를 통째로 제외하고 `sub_norm/*.py`·`flow_*.py` 만 예외로 뒀다.
+그 결과 **컷오버 도구 4개가 untracked** 로 빠져 있었다 — 운영 clone 에 없다.
+
+| 파일 | 성격 | 없으면 |
+|---|---|---|
+| `create_period_close.py` | **마감 스키마 DDL**(`nx.period_close`·`nx.stock_snapshot`) | 컷오버가 그 자리에서 막힌다 |
+| `alter_snapshot_loc.py` | 스냅샷 `loc` 축 DDL(생산 2축) | 생산 마감 불가 |
+| `verify_close_prd_sal.py` | 마감 검증 게이트 4종 | 검증 없이 넘어간다 |
+| `legacy_total_avg_verify.py` | 레거시 총평균법 대조 | 단가 근거 소실 |
+
+**수정**: `.gitignore` 에 `!_migration/*.py` · `!_migration/*.md` 추가.
+제외하려던 것은 대용량 **산출물**(csv/xlsx/json)이지 도구·문서가 아니다.
+⟹ 4개 + 신규 `cutover_ref_audit.py` 추적 전환.
