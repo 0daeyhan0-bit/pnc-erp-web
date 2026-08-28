@@ -62,6 +62,16 @@ FIXTURES = [
                       GROUP BY cust_code ORDER BY COUNT(*) DESC""",
      lambda ctx, r: ctx.update(sale_cust=str(r[0]).strip())),
 
+    # 창고간이동 검증용 — FROM 파트(P0001 가공창고)에 실제 재고가 있는 자재
+    # ★가드가 보는 소스와 **같은 소스**로 고른다 — matissue 는 원장(stock_ledger) SUM 을 본다.
+    #   미러(PR_T_MAT_STOCK_WH)에서 고르면 "가용 0" 으로 걸린다(2026-08-28 실측).
+    ("mv_mat", """SELECT TOP 1 UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(MAINT_QTY AS float))
+                    FROM nx.stock_ledger
+                   WHERE STOCK_POINT='MAT' AND ISNULL(GAGONG_PROC_CODE,'')='P0001' AND MAT_CODE IS NOT NULL
+                   GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))
+                  HAVING SUM(CAST(MAINT_QTY AS float)) > 100 ORDER BY 2 DESC""",
+     lambda ctx, r: ctx.update(mv_mat=str(r[0]), mv_avail=float(r[1]))),
+
     ("prod_item", """SELECT TOP 1 b.parent_code, COUNT(*)
                        FROM nx.bom b JOIN nx.item i ON i.item_code = b.parent_code
                       WHERE ISNULL(i.make_type,'') = '1'
@@ -170,6 +180,61 @@ CASES = [
          keyword="일자", body=_save("receipt", 10, ymd="")),
     dict(kind="R", name="screen 오류 차단", method="POST", path="/api/stock/save",
          keyword="screen", body=lambda ctx: {"screen": "bogus", "rows": []}),
+    # ══ [F] 흐름 : 생산 파트재고·창고이동 (2026-08-28 확장) ═══════════
+    #   재고를 실제로 움직이는데 검증에 없던 화면들. 218개 쓰기 중 재고 이동 경로부터 채운다.
+    dict(kind="F", name="생산파트재고조정 (stockmaint/save)", method="POST", path="/api/stockmaint/save",
+         probe="원장PRD", delta=+40, mirror=False,
+         body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "P0001", "maint_qty": 40, "maint_cost": 100,
+                           "remarks": "flowverify", "user": "flowverify"}),
+    dict(kind="F", name="자재 창고간이동 (matissue/save)", method="POST", path="/api/matissue/save",
+         probe="원장PRD", delta=0, mirror=False,
+         skip_if=lambda ctx: "mv_mat" not in ctx,
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mv_mat"],
+                           "from_part_code": "P0001", "part_code": "P0002",
+                           "issue_qty": 5, "remarks": "flowverify", "user": "flowverify"}),
+    dict(kind="F", name="키팅 취소 (준비실적처리 cell-cancel)", method="POST", path="/api/kitting/cell-cancel",
+         probe="원장RDY", delta=-10, mirror=False,
+         skip_if=lambda ctx: "kit_item" not in ctx,
+         body=lambda ctx: {"item": ctx["kit_item"], "gpc": ctx["kit_gpc"], "wo": ctx["kit_wo"],
+                           "ymd": YMD, "qty": 10, "user": "flowverify"}),
+
+    # ══ [R] 규칙 : 위 화면들도 같은 규칙을 지키는가 ════════════════════
+    dict(kind="R", name="생산파트재고조정 — 수량 0 차단", method="POST", path="/api/stockmaint/save",
+         keyword="0일 수 없",
+         body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "P0001", "maint_qty": 0, "user": "flowverify"}),
+    dict(kind="R", name="생산파트재고조정 — 마감기간 잠금", method="POST", path="/api/stockmaint/save",
+         keyword="마감", skip_if=lambda ctx: not ctx.get("closed_period"),
+         body=lambda ctx: {"maint_ymd": _locked_ymd(ctx), "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "P0001", "maint_qty": 10, "user": "flowverify"}),
+    dict(kind="R", name="생산파트재고조정 — 파트코드 오류 차단", method="POST", path="/api/stockmaint/save",
+         keyword="파트코드",
+         body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "없는파트", "maint_qty": 10, "user": "flowverify"}),
+    dict(kind="R", name="자재 창고간이동 — FROM파트 재고부족 차단", method="POST", path="/api/matissue/save",
+         keyword="재고부족",
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mat"],
+                           "from_part_code": "P0001", "part_code": "P0002",
+                           "issue_qty": 99999999, "user": "flowverify"}),
+    dict(kind="R", name="자재 창고간이동 — 같은 파트 차단", method="POST", path="/api/matissue/save",
+         keyword="같습니다",
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mat"],
+                           "from_part_code": "P0001", "part_code": "P0001",
+                           "issue_qty": 1, "user": "flowverify"}),
+    dict(kind="R", name="자재 창고간이동 — 수량 0 차단", method="POST", path="/api/matissue/save",
+         keyword="0보다",
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mat"],
+                           "from_part_code": "P0001", "part_code": "P0002",
+                           "issue_qty": 0, "user": "flowverify"}),
+    dict(kind="R", name="발주입고 — 미등록품목 차단", method="POST", path="/api/matrecv/receive",
+         keyword="미등록",
+         body=lambda ctx: {"ymd": YMD, "wh": "IS0001",
+                           "rows": [{"item": "ZZ_NOT_EXIST_9999", "qty": 10}], "user": "flowverify"}),
+    dict(kind="R", name="발주입고 — 마감기간 잠금", method="POST", path="/api/matrecv/receive",
+         keyword="마감", skip_if=lambda ctx: not ctx.get("closed_period"),
+         body=lambda ctx: {"ymd": _locked_ymd(ctx), "wh": "IS0001",
+                           "rows": [{"item": ctx["mat"], "qty": 10}], "user": "flowverify"}),
 ]
 
 
