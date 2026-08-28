@@ -953,12 +953,22 @@ def _parse_cu_spec(spec):
     return od, thk, metal, form
 
 
+def _num(v):
+    try:
+        f = float(v)
+        return f if f > 0 else None
+    except Exception:
+        return None
+
+
 @router.get("/api/lgsagub/sagub_convert")
 def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"),
-                          mt: str = Query("1,2,5"), q: str = Query(""), limit: int = Query(5000)):
+                          mt: str = Query("1,2,5"), q: str = Query(""), limit: int = Query(6000)):
     """원소재 사급전환율: LG BOM의 동 원소재(child_desc='Tube,Raw')가 사급(Assembly Pull)으로
        전환됐는지 대조. Supplier=미전환(우리가 구매)·Assembly Pull=전환(LG 사급).
-       기본=미전환(Supplier)·제작품(parent) 제작유형 1/2/5. ASSY·제작품·동규격(외경/두께/재질)·소요중량 표시."""
+       기본=미전환(Supplier)·제작품(parent) 제작유형 1/2/5.
+       ★치수·재질은 우리 정본 nx.item(diam/thick/length/net_weight/metal_gubun) 우선,
+         없으면 LG child_spec 파싱(BOM 정본: LG 치수·bom_dim.fin_weight는 부정확)."""
     nx = _nx(); cur = nx.cursor()
     try:
         # 전환율 요약 (전체 Tube,Raw edge 기준)
@@ -978,31 +988,42 @@ def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"
         if q.strip():
             wh.append("(r.model LIKE ? OR r.parent_code LIKE ? OR r.child_code LIKE ? OR im.item_name LIKE ? OR ip.item_name LIKE ?)")
             qq = "%" + q.strip() + "%"; p += [qq] * 5
-        sql = ("""SELECT r.werks, r.model, im.item_name, r.parent_code, ip.item_name, ip.make_type,
-                         r.child_code, MAX(r.child_spec), SUM(CONVERT(float, ISNULL(r.qty,0))), MAX(r.unit),
-                         r.supply_type, COUNT(*)
+        sql = ("""SELECT r.werks, r.model, im.item_name,
+                         r.parent_code, ip.item_name, ISNULL(ip.make_type,''), ISNULL(ip.lgroup,''), ISNULL(ip.cut_gubun,''),
+                         r.child_code, ic.item_name, r.supply_type,
+                         ic.diam, ic.thick, ic.length, ic.net_weight, ic.metal_gubun,
+                         MAX(r.child_spec), SUM(CONVERT(float, ISNULL(r.qty,0))), MAX(r.unit), COUNT(*)
                   FROM nx.lg_bom r
                   LEFT JOIN nx.item im ON UPPER(LTRIM(RTRIM(im.item_code)))=UPPER(LTRIM(RTRIM(r.model)))
                   LEFT JOIN nx.item ip ON UPPER(LTRIM(RTRIM(ip.item_code)))=UPPER(LTRIM(RTRIM(r.parent_code)))
+                  LEFT JOIN nx.item ic ON UPPER(LTRIM(RTRIM(ic.item_code)))=UPPER(LTRIM(RTRIM(r.child_code)))
                   WHERE """ + " AND ".join(wh) + """
-                  GROUP BY r.werks, r.model, im.item_name, r.parent_code, ip.item_name, ip.make_type,
-                           r.child_code, r.supply_type
+                  GROUP BY r.werks, r.model, im.item_name, r.parent_code, ip.item_name, ip.make_type, ip.lgroup, ip.cut_gubun,
+                           r.child_code, ic.item_name, r.supply_type, ic.diam, ic.thick, ic.length, ic.net_weight, ic.metal_gubun
                   ORDER BY r.model, r.parent_code, r.child_code""")
         cur.execute(sql, *p)
         rows = []
         for r in cur.fetchall():
-            od, thk, metal, form = _parse_cu_spec(r[7])
+            spec = r[16] or ""
+            od, thk, metal, form = _parse_cu_spec(spec)
+            # ★치수: 우리 정본(nx.item) 우선, 없으면 LG spec 파싱
+            i_od, i_thk, i_len, i_wt, i_metal = _num(r[11]), _num(r[12]), _num(r[13]), _num(r[14]), (r[15] or "")
+            dim_src = "우리" if (i_od or i_thk) else ("LG" if (od or thk) else "")
             rows.append({
                 "werks": r[0] or "", "model": r[1] or "", "model_name": r[2] or "",
-                "parent": r[3] or "", "parent_name": r[4] or "", "make_type": (r[5] or ""),
-                "child": r[6] or "", "spec": r[7] or "",
-                "od": od, "thk": thk, "metal": metal, "form": form,
-                "qty": float(r[8] or 0), "unit": r[9] or "",
+                "parent": r[3] or "", "parent_name": r[4] or "",
+                "make_type": r[5] or "", "lgroup": r[6] or "", "cut_gubun": r[7] or "",
+                "child": r[8] or "", "child_name": r[9] or "",
+                "od": i_od if i_od else (float(od) if od else None),
+                "thk": i_thk if i_thk else (float(thk) if thk else None),
+                "length": i_len,
+                "weight": i_wt,
+                "metal": i_metal or metal, "form": form, "dim_src": dim_src,
+                "qty": float(r[17] or 0), "unit": r[18] or "",
                 "status": "미전환" if r[10] == "Supplier" else ("전환" if r[10] == "Assembly Pull" else (r[10] or "")),
-                "cnt": r[11],
+                "spec": spec, "cnt": r[19],
             })
         total = len(rows)
-        # 대상(필터반영) 통계
         models = len(set(x["model"] for x in rows))
         parents = len(set((x["model"], x["parent"]) for x in rows))
         return {"rate": rate, "pull": pull, "supplier": sup,
