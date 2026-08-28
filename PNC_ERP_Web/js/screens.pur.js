@@ -3231,7 +3231,7 @@ SCREEN.lgsagub=(c)=>{
           c_from:_M1,c_to:_TD,c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
           p_from:_M1,p_to:_TD,pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},
           s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:'',
-          cv_status:'supplier',cv_mt:'1,2,5',cv_werks:'',cv_scope:'all',cv_q:'',cvdata:null,cv_loading:false,cv_sort:{k:'',dir:-1}};
+          cv_status:'supplier',cv_mt:'1,2,5',cv_werks:'',cv_scope:'all',cv_cutg:'절삭',cv_q:'',cvdata:null,cv_loading:false,cv_sort:{k:'',dir:-1}};
   const sortItems=(arr,sort)=>{if(!sort.k||!arr.length)return arr;const {k,dir}=sort;const num=typeof arr[0][k]==='number';
     return arr.slice().sort((a,b)=>num?(((a[k]||0)-(b[k]||0))*dir):((''+(a[k]||'')).localeCompare(''+(b[k]||''))*dir));};
   const ymd2date=s=>{s=''+(s||'');return s.length>=6?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';};  // 260703→2026-07-03
@@ -3412,7 +3412,7 @@ SCREEN.lgsagub=(c)=>{
   const WLAB={DGZ:'RAC',DMZ:'SAC'};                       // 공장→사업부
   const MTLAB={'1':'자체','2':'외주','3':'매입','4':'사급','5':'외주완성'};
   const loadConvert=async()=>{st.cv_loading=true;drawConvert();
-    try{const qs=[`status=${st.cv_status}`,`mt=${encodeURIComponent(st.cv_mt)}`,`scope=${st.cv_scope}`];
+    try{const qs=[`status=${st.cv_status}`,`mt=${encodeURIComponent(st.cv_mt)}`,`scope=${st.cv_scope}`,`cutg=${encodeURIComponent(st.cv_cutg)}`];
       if(st.cv_werks)qs.push('werks='+st.cv_werks);
       if(st.cv_q)qs.push('q='+encodeURIComponent(st.cv_q));
       const j=await(await fetch(`${API}/api/lgsagub/sagub_convert?${qs.join('&')}`)).json();st.cvdata=j;}
@@ -3431,6 +3431,7 @@ SCREEN.lgsagub=(c)=>{
     const badge=(txt,bg,fg)=>`<span style="font-size:11px;padding:1px 7px;border-radius:8px;background:${bg};color:${fg};white-space:nowrap">${txt}</span>`;
     const body=st.cv_loading?spinRow(12):(rows.length?rows.map(r=>`<tr${r.status==='미전환'?' style="background:#fff4f0"':''}>
         <td><b>${esc(r.model)}</b><div style="font-size:11px;color:#8aa0bd;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.model_name)}</div></td>
+        <td class="num">${r.recv_prev?`<b>${wonI(r.recv_prev)}</b>`:'<span style="color:#c9d3df">0</span>'}</td>
         <td>${esc(r.parent)}<div style="font-size:11px;color:#8aa0bd;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.parent_name)}">${esc(r.parent_name)}</div></td>
         <td class="center" style="font-size:11px">${esc(r.make_type)}·${esc(MTLAB[r.make_type]||'')}</td>
         <td>${esc(r.child)}</td>
@@ -3439,13 +3440,16 @@ SCREEN.lgsagub=(c)=>{
         <td class="center">${r.dim_src==='우리'?badge('우리','#e6f7ea','#1c7c3a'):(r.dim_src==='LG'?badge('LG','#fdf0e3','#b5651d'):'-')}</td>
         <td class="num">${n4(r.qty)}</td><td class="center" style="font-size:11px">${esc(WLAB[r.werks]||r.werks||'')}</td>
         <td class="center">${r.status==='미전환'?badge('미전환','#fbe0da','#c0392b'):badge('전환','#e0ecfb','#1c47a0')}</td></tr>`).join('')
-      :`<tr><td colspan="13" class="empty">${m._err?('오류: '+esc(m._err)):'대상 없음 — 필터를 조정하세요'}</td></tr>`);
+      :`<tr><td colspan="14" class="empty">${m._err?('오류: '+esc(m._err)):'대상 없음 — 필터를 조정하세요'}</td></tr>`);
     const statusOpt=[['supplier','미전환(Supplier)'],['pull','전환(Assembly Pull)'],['all','전체']]
       .map(([k,l])=>`<option value="${k}"${st.cv_status===k?' selected':''}>${l}</option>`).join('');
     const werksOpt=[['','전체 사업부'],['DMZ','SAC(DMZ)'],['DGZ','RAC(DGZ)']]
       .map(([k,l])=>`<option value="${k}"${st.cv_werks===k?' selected':''}>${l}</option>`).join('');
     const scopeOpt=[['all','전체'],['active','사용중(리시빙 25.1~)']]
       .map(([k,l])=>`<option value="${k}"${st.cv_scope===k?' selected':''}>${l}</option>`).join('');
+    const cutgOpt=[['절삭','절삭'],['설치','설치'],['분지관','분지관'],['이지링크','이지링크'],['(없음)','(미분류)'],['all','전체']]
+      .map(([k,l])=>`<option value="${k}"${st.cv_cutg===k?' selected':''}>${l}</option>`).join('');
+    const pym=m.prev_ym?`전월(${m.prev_ym.slice(0,2)}.${m.prev_ym.slice(2)}) 리시빙`:'전월 리시빙';
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">원소재 사급전환율</span></div>
@@ -3458,6 +3462,7 @@ SCREEN.lgsagub=(c)=>{
      </div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto">
        <label class="tl">범위</label><select class="sel" id="cv-scope" style="width:160px">${scopeOpt}</select>
+       <label class="tl" style="margin-left:6px">제품군</label><select class="sel" id="cv-cutg" style="width:110px">${cutgOpt}</select>
        <label class="tl" style="margin-left:6px">상태</label><select class="sel" id="cv-status" style="width:160px">${statusOpt}</select>
        <label class="tl" style="margin-left:6px">사업부</label><select class="sel" id="cv-werks" style="width:120px">${werksOpt}</select>
        <label class="tl" style="margin-left:8px">제작유형</label><span style="white-space:nowrap">${mtChk}</span>
@@ -3467,13 +3472,14 @@ SCREEN.lgsagub=(c)=>{
        <div class="spacer"></div><span class="rowcount">${st.cv_loading?'조회 중…':`${wonI(rows.length)}행`}</span>
      </div>
      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
-        ${cvh('model','ASSY 품번')}${cvh('parent','제작품(하위)')}${cvh('make_type','제작유형','center')}${cvh('child','동원소재')}
+        ${cvh('model','ASSY 품번')}${cvh('recv_prev',pym,'num')}${cvh('parent','제작품(하위)')}${cvh('make_type','제작유형','center')}${cvh('child','동원소재')}
         ${cvh('od','외경','num')}${cvh('thk','두께','num')}${cvh('length','길이','num')}${cvh('weight','단위중량','num')}
         <th class="center">재질</th><th class="center">치수출처</th>${cvh('qty','소요중량(KG)','num')}<th class="center">사업부</th>${cvh('status','사급전환','center')}</tr></thead>
        <tbody>${body}</tbody></table></div>
      </div>`;
     wireTabs();
     c.querySelector('#cv-scope').onchange=e=>{st.cv_scope=e.target.value;loadConvert();};
+    c.querySelector('#cv-cutg').onchange=e=>{st.cv_cutg=e.target.value;loadConvert();};
     c.querySelector('#cv-status').onchange=e=>{st.cv_status=e.target.value;loadConvert();};
     c.querySelector('#cv-werks').onchange=e=>{st.cv_werks=e.target.value;loadConvert();};
     c.querySelectorAll('.cv-mt').forEach(cb=>cb.onchange=()=>{
@@ -3483,8 +3489,8 @@ SCREEN.lgsagub=(c)=>{
     c.querySelectorAll('[data-cvk]').forEach(th=>th.ondblclick=()=>{const k=th.dataset.cvk;
       st.cv_sort=(st.cv_sort.k===k)?{k,dir:-st.cv_sort.dir}:{k,dir:1};drawConvert();});
     const xb=c.querySelector('#cv-xls');if(xb)xb.onclick=()=>{
-      const H=['ASSY품번','ASSY품명','제작품','제작품명','제작유형','동원소재','외경','두께','길이','단위중량','재질','형태','치수출처','소요중량(KG)','공장','사급전환'];
-      const R=rows.map(r=>[r.model,r.model_name,r.parent,r.parent_name,r.make_type+'·'+(MTLAB[r.make_type]||''),r.child,r.od,r.thk,r.length,r.weight,r.metal,r.form,r.dim_src,r.qty,WLAB[r.werks]||r.werks||'',r.status]);
+      const H=['ASSY품번','ASSY품명',pym,'제작품','제작품명','제작유형','동원소재','외경','두께','길이','단위중량','재질','형태','치수출처','소요중량(KG)','사업부','사급전환'];
+      const R=rows.map(r=>[r.model,r.model_name,r.recv_prev,r.parent,r.parent_name,r.make_type+'·'+(MTLAB[r.make_type]||''),r.child,r.od,r.thk,r.length,r.weight,r.metal,r.form,r.dim_src,r.qty,WLAB[r.werks]||r.werks||'',r.status]);
       downloadCSV(`원소재사급전환율_${st.cv_status}_${st.cv_scope}.csv`,H,R);};
     attachResizers(c);
   };
