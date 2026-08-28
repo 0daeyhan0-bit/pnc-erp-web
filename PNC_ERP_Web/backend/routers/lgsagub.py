@@ -10,10 +10,11 @@ router = APIRouter()
 
 # ── BOM기준 동 소요(규격별) + 절삭재료비 신규 사급가 as-of (LG사급현황 대사) ──
 try:
-    import nx_soyo_engine as _soyo            # common.py가 _harness를 sys.path에 추가
+    import nx_soyo_engine as _soyo            # common.py가 _harness를 sys.path에 추가 (우리 BOM 소요엔진)
+    import nx_lgbom_engine as _lgbom          # LG BOM 소요엔진(별도 운영·§1-10)
     from nx_cost_engine import NxCostEngine
 except Exception:
-    _soyo = None; NxCostEngine = None
+    _soyo = None; _lgbom = None; NxCostEngine = None
 _WENG = None
 
 
@@ -87,139 +88,13 @@ def _dong_of_batch(cur, items):
     return out
 
 
-def _model_in_sql(models):
-    """models(set/iterable) → ' AND UPPER(LTRIM(RTRIM(model))) IN (...)' 조각. 성능: 필요 모델만 전개.
-       코드 안전문자(영숫자·-_)만 통과(인젝션 방지). 비면 빈문자."""
-    if not models:
-        return ""
-    safe = [str(m).strip().upper() for m in models if m and all(c.isalnum() or c in '-_' for c in str(m).strip())]
-    if not safe:
-        return ""
-    return " AND UPPER(LTRIM(RTRIM(model))) IN (" + ",".join("'" + m + "'" for m in safe) + ")"
-
-
+# ── LG BOM 동 소요 = 별도 엔진(nx_lgbom_engine) 위임 (§1-10, 별도 운영) ──
 def _lg_ap_all(cur, ver_date, models=None):
-    """LG BOM 버전(point-in-time) 사급(Assembly Pull) 동 원소재 소요 = {model: {(metal,diam,thick): per_unit_kg}}.
-       ★LG전자 사급 소요 산출방식 = LG BOM 다단계 트리전개(롤업): 동이 L2(서브 밑)면 L1 서브 수량을 곱해 누적.
-         (구 flat합은 L1 수량 미곱 → 과소. 예 AJR30004702 P7.0 L1 ×7 반영.)
-       동 원소재 = matkl='MJU0631'·supply_type='Assembly Pull'·ALUMINUM 제외. Supplier·사급부품(matkl≠)은 전개 관통만 하고 미계상.
-       point-in-time = model·werks별 ver_from<=ver_date 최신 버전. werks 다중이면 전개합 MAX(양공장 중복방지).
-       규격/재질 = nx.item 우선, 없으면 child_spec 파싱. root = model(STUFE1 부모=model).
-       ★models(대문자 set) 지정시 그 모델만 전개(성능: 전 모델 전개 회피)."""
-    from collections import defaultdict as _dd
-    minl = _model_in_sql(models)
-    cur.execute(f"""
-      WITH latest AS (
-        SELECT model, ISNULL(werks,'') w, MAX(ver_from) mv
-        FROM nx.lg_bom_ver WHERE ver_from<=? {minl} GROUP BY model, ISNULL(werks,''))
-      SELECT UPPER(LTRIM(RTRIM(r.model))), ISNULL(r.werks,''),
-             UPPER(LTRIM(RTRIM(r.parent_code))), UPPER(LTRIM(RTRIM(r.child_code))),
-             r.matkl, LTRIM(RTRIM(ISNULL(r.supply_type,''))), ISNULL(r.child_spec,''), CONVERT(float,ISNULL(r.qty,0)),
-             ISNULL(ic.metal_gubun,''), ISNULL(ic.diam,0), ISNULL(ic.thick,0)
-      FROM nx.lg_bom_ver r
-      JOIN latest l ON l.model=r.model AND l.w=ISNULL(r.werks,'') AND r.ver_from=l.mv
-      LEFT JOIN nx.item ic ON UPPER(LTRIM(RTRIM(ic.item_code)))=UPPER(LTRIM(RTRIM(r.child_code)))
-    """, ver_date)
-    MW = _dd(lambda: _dd(list))    # model -> werks -> [(parent,child,matkl,sup,spec,qty,mg,diam,thick)]
-    for md, w, p, c, mk, sup, spec, q, mg, idiam, ithick in cur.fetchall():
-        MW[md][w].append((p, c, mk, sup, spec, float(q or 0), (mg or '').strip(), float(idiam or 0), float(ithick or 0)))
-
-    def _key(spec, mg, idiam, ithick):
-        od = idiam if idiam > 0 else None; thk = ithick if ithick > 0 else None
-        if od is None:
-            m = _re.search(r'P(\d+(?:\.\d+)?)', spec); od = float(m.group(1)) if m else 0.0
-        if thk is None:
-            m = _re.search(r'T(\d+(?:\.\d+)?)', spec); thk = float(m.group(1)) if m else 0.0
-        metal = mg if mg else ('고강도' if '고강도' in spec else 'CU')
-        return (metal, float(od), float(thk))
-
-    out = {}
-    for md, wmap in MW.items():
-        best = None; best_tot = -1.0
-        for w, edges in wmap.items():
-            ch = _dd(list)
-            for e in edges:
-                ch[e[0]].append(e)
-            acc = _dd(float); tot = [0.0]
-
-            def dfs(node, mult, depth, path):
-                if depth > 25:
-                    return
-                for (p, c, mk, sup, spec, q, mg, idiam, ithick) in ch.get(node, ()):
-                    # ★q=1.0(정확값) 동 = LG 데이터 플레이스홀더(검증 6모델: 정상 0.008~0.5인데 1.0). 제외.
-                    if mk == 'MJU0631' and sup == 'Assembly Pull' and 'ALUMINUM' not in spec.upper() and abs(q - 1.0) > 1e-9:
-                        cv = q * mult
-                        acc[_key(spec, mg, idiam, ithick)] += cv; tot[0] += cv
-                    if c != node and c not in path:       # EA 중간노드=수량 곱해 관통, 동 leaf=자식없어 종료, cycle 방지
-                        dfs(c, mult * q, depth + 1, path | {c})
-            dfs(md, 1.0, 0, {md})
-            if tot[0] > best_tot:
-                best_tot = tot[0]; best = dict(acc)
-        if best:
-            out[md] = best
-    return out
+    return _lgbom.lg_ap_all(cur, ver_date, models)
 
 
 def _lg_ap_split(cur, ver_date, models=None, jjset=None):
-    """★B: LG BOM AP 동 소요(=전체 사급 동, 우리가 협력사에 사급 주는 소재 포함)를 **분할**(2중계상 없음, 전체=우리절삭+협력사사급).
-       분할 기준 = 각 동(Tube,Raw)의 부모(절단관)가 **우리 제작동관(bom_flat role='제작동관', 우리가 깎음)** 이면 '우리절삭', 아니면(사급 SUB=협력사가 깎음, 우리가 소재 사급) '협력사사급'.
-       반환 {model: {'our':{spec:kg}, 'coop':{spec:kg}}}. 전개·롤업·플레이스홀더제외는 _lg_ap_all과 동일. models 지정시 그 모델만(성능)."""
-    from collections import defaultdict as _dd
-    # 우리 제작동관 코드집합(우리가 직접 깎는 절단관). jjset 주면 재사용(월별 반복 성능).
-    if jjset is None:
-        cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(leaf_code))) FROM nx.bom_flat WHERE role=N'제작동관'")
-        jjset = set(r[0] for r in cur.fetchall())
-    minl = _model_in_sql(models)
-    cur.execute(f"""
-      WITH latest AS (
-        SELECT model, ISNULL(werks,'') w, MAX(ver_from) mv
-        FROM nx.lg_bom_ver WHERE ver_from<=? {minl} GROUP BY model, ISNULL(werks,''))
-      SELECT UPPER(LTRIM(RTRIM(r.model))), ISNULL(r.werks,''),
-             UPPER(LTRIM(RTRIM(r.parent_code))), UPPER(LTRIM(RTRIM(r.child_code))),
-             r.matkl, LTRIM(RTRIM(ISNULL(r.supply_type,''))), ISNULL(r.child_spec,''), CONVERT(float,ISNULL(r.qty,0)),
-             ISNULL(ic.metal_gubun,''), ISNULL(ic.diam,0), ISNULL(ic.thick,0)
-      FROM nx.lg_bom_ver r
-      JOIN latest l ON l.model=r.model AND l.w=ISNULL(r.werks,'') AND r.ver_from=l.mv
-      LEFT JOIN nx.item ic ON UPPER(LTRIM(RTRIM(ic.item_code)))=UPPER(LTRIM(RTRIM(r.child_code)))
-    """, ver_date)
-    MW = _dd(lambda: _dd(list))
-    for md, w, p, c, mk, sup, spec, q, mg, idiam, ithick in cur.fetchall():
-        MW[md][w].append((p, c, mk, sup, spec, float(q or 0), (mg or '').strip(), float(idiam or 0), float(ithick or 0)))
-
-    def _key(spec, mg, idiam, ithick):
-        od = idiam if idiam > 0 else None; thk = ithick if ithick > 0 else None
-        if od is None:
-            m = _re.search(r'P(\d+(?:\.\d+)?)', spec); od = float(m.group(1)) if m else 0.0
-        if thk is None:
-            m = _re.search(r'T(\d+(?:\.\d+)?)', spec); thk = float(m.group(1)) if m else 0.0
-        metal = mg if mg else ('고강도' if '고강도' in spec else 'CU')
-        return (metal, float(od), float(thk))
-
-    out = {}
-    for md, wmap in MW.items():
-        best = None; best_tot = -1.0
-        for w, edges in wmap.items():
-            ch = _dd(list)
-            for e in edges:
-                ch[e[0]].append(e)
-            our = _dd(float); coop = _dd(float); tot = [0.0]
-
-            def dfs(node, mult, depth, path):
-                if depth > 25:
-                    return
-                for (p, c, mk, sup, spec, q, mg, idiam, ithick) in ch.get(node, ()):
-                    if mk == 'MJU0631' and sup == 'Assembly Pull' and 'ALUMINUM' not in spec.upper() and abs(q - 1.0) > 1e-9:
-                        cv = q * mult; k = _key(spec, mg, idiam, ithick)
-                        (our if node in jjset else coop)[k] += cv    # node=이 동의 부모(절단관). 우리 제작동관이면 우리절삭
-                        tot[0] += cv
-                    if c != node and c not in path:
-                        dfs(c, mult * q, depth + 1, path | {c})
-            dfs(md, 1.0, 0, {md})
-            if tot[0] > best_tot:
-                best_tot = tot[0]; best = {'our': dict(our), 'coop': dict(coop)}
-        if best:
-            out[md] = best
-    return out
+    return _lgbom.lg_ap_split(cur, ver_date, models, jjset)
 
 
 def _matcost_asof(ym6):
