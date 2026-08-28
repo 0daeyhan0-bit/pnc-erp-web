@@ -56,18 +56,66 @@ def _short_reason(code, need, rdy, mat, prd_wh, src, label=""):
     return msg
 
 
+def _avail_bulk(nx, codes):
+    """축별 가용을 **일괄 조회**. {code: (rdy, mat, prd_wh, src)}.
+       ★자식마다 쿼리 3회를 돌면 BOM 이 큰 품목에서 저장이 수십 초 걸린다(2026-08-28 실측).
+         화면에서 저장 버튼을 누르고 기다리는 경로이므로 축당 1회로 묶는다."""
+    codes = [c for c in {str(x or "").strip().upper() for x in codes} if c]
+    out = {c: [0.0, None, 0.0, ""] for c in codes}
+    if not codes:
+        return {}
+    c = nx.cursor()
+    CH = 500                                   # pyodbc 파라미터 상한(2100) 여유
+    for i in range(0, len(codes), CH):
+        part = codes[i:i + CH]
+        ph = ",".join("?" * len(part))
+        c.execute(f"""SELECT UPPER(ITEM_CODE), SUM(CAST(MAINT_QTY AS float))
+                        FROM nx.stock_ledger WHERE STOCK_POINT='RDY' AND UPPER(ITEM_CODE) IN ({ph})
+                       GROUP BY UPPER(ITEM_CODE)""", *part)
+        for k, v in c.fetchall():
+            out[k][0] = max(float(v or 0), 0.0)
+        # 자재재고 정본 = mat_stock_daily 최신일
+        c.execute(f"""SELECT UPPER(mat_code), CAST(stock_qty AS float) FROM (
+                        SELECT mat_code, stock_qty,
+                               ROW_NUMBER() OVER (PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
+                          FROM nx.mat_stock_daily WHERE UPPER(mat_code) IN ({ph})) z
+                      WHERE rn=1""", *part)
+        for k, v in c.fetchall():
+            out[k][1] = max(float(v or 0), 0.0); out[k][3] = "자재일마감"
+        c.execute(f"""SELECT UPPER(MAT_CODE), SUM(CAST(STOCK_QTY AS float))
+                        FROM nx.PU_T_MAT_STOCK_WH WHERE UPPER(MAT_CODE) IN ({ph})
+                       GROUP BY UPPER(MAT_CODE)""", *part)
+        for k, v in c.fetchall():
+            if out[k][1] is None:              # mat_stock_daily 미등록 → 자재창고 미러로 대체
+                out[k][1] = max(float(v or 0), 0.0); out[k][3] = "자재창고"
+        c.execute(f"""SELECT UPPER(MAT_CODE), SUM(CAST(STOCK_QTY AS float))
+                        FROM nx.PR_T_MAT_STOCK_WH WHERE UPPER(MAT_CODE) IN ({ph})
+                       GROUP BY UPPER(MAT_CODE)""", *part)
+        for k, v in c.fetchall():
+            out[k][2] = float(v or 0)
+    # ★어디에도 없으면 0 — '판정 불가'를 통과로 바꾸지 않는다(§0-★ 규칙 A-0)
+    return {k: (v[0], (v[1] or 0.0), v[2], (v[3] or "재고 없음")) for k, v in out.items()}
+
+
 def _prod_shortages(nx, comps, weld, qty):
     """생산량 qty 에 대한 부족 목록. comps=[(child,unit_qty)] · weld={base:unit_qty}.
-       ★예외 없음 — 모든 자식·용접봉을 판정한다."""
+       ★예외 없음 — 모든 자식·용접봉을 판정한다(§0-★ 규칙 A-0)."""
+    weld = weld or {}
+    need = {}
+    for code, unit in list(comps) + list(weld.items()):
+        n = float(unit) * float(qty)
+        if n > 0:
+            code = str(code or "").strip().upper()
+            need[code] = need.get(code, 0.0) + n
+    if not need:
+        return []
+    av = _avail_bulk(nx, need.keys())
     out = []
-    for code, unit in list(comps) + [(k, v) for k, v in (weld or {}).items()]:
-        need = float(unit) * float(qty)
-        if need <= 0:
-            continue
-        lbl = "용접봉 " if (weld and code in weld) else ""
-        rdy, mat, prd_wh, src = _avail_axes(nx, code)
-        if need > rdy + mat + 1e-6:
-            out.append(_short_reason(code, need, rdy, mat, prd_wh, src, lbl))
+    for code, n in need.items():
+        rdy, mat, prd_wh, src = av.get(code, (0.0, 0.0, 0.0, "재고 없음"))
+        if n > rdy + mat + 1e-6:
+            lbl = "용접봉 " if code in {str(k).strip().upper() for k in weld} else ""
+            out.append(_short_reason(code, n, rdy, mat, prd_wh, src, lbl))
     return out
 
 

@@ -335,18 +335,18 @@ def procreg_save(payload: dict = Body(...)):
             _lm = _lock_msg(cur, ymd)                     # 마감 잠금도 함께(규칙 B)
             if _lm:
                 raise HTTPException(409, _lm)
-            from routers.backflush import _backflush_bom, _prod_shortages, _is_inner_prod
-            _cro = _conn()
-            try:
-                if _is_inner_prod(_cro, item):            # 사내생산품만 BOM 소비가 발생
-                    _comps, _weld = _backflush_bom(nx, item, _cro)
-                    _short = _prod_shortages(nx, _comps, _weld, need_qty)
-                    if _short:
-                        _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
-                        raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
-                                            + "; ".join(_short[:8]) + _more)
-            finally:
-                _cro.close()
+            # ★_is_inner_prod 로 대상을 거르지 않는다 — 그 함수는 라이브 커넥션에서
+            #   nx.item 을 읽다 실패하면 **예외를 삼키고 False** 를 돌려주어(=게이트 스킵)
+            #   또 하나의 숨은 예외가 된다(2026-08-28 하네스로 실측). §0-★ 규칙 A-0 위반.
+            #   대신 BOM 을 전개해 **소비할 것이 있으면 무조건 판정**한다.
+            #   BOM 이 비면 소비 자체가 없는 것이므로 게이트 대상이 아니다(예외가 아니라 해당 없음).
+            from routers.backflush import _backflush_bom, _prod_shortages
+            _comps, _weld = _backflush_bom(nx, item, nx)   # ★cro 도 nx — 라이브엔 nx 스키마가 없다
+            _short = _prod_shortages(nx, _comps, _weld, need_qty)
+            if _short:
+                _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
+                raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
+                                    + "; ".join(_short[:8]) + _more)
         if mid:
             cur.execute("""UPDATE nx.proc_result SET PROD_YMD=?, PROD_HMS=?, WORK_ORDER=?, SPLIT_WORK_ORDER=?,
                 ITEM_CODE=?, LINE_NO=?, PART_CODE=?, S_WORK_CODE=?, PROD_QTY=?, WORK_CODE=?, FINISH_FLAG=?,
