@@ -2,6 +2,7 @@
 """LG사급현황 — LG 사급 실적(월별 유상사급 입고) 엑셀 업로드 + 조회. 사급가 업로드와 유사 패턴.
    저장=nx.lg_sagub_actual. 실제 사급 입고(월 18~22억)를 넣어 우리 계산(예상/원가분석)과 대사용."""
 import io as _io
+import re as _re
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from common import _nx, _conn
 
@@ -931,5 +932,81 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
                         "in_qty": tot_in_q, "in_amt": tot_in_a, "parts": len(parts)},
             "items": items[:int(limit)],
         }
+    finally:
+        nx.close()
+
+
+# ===================== 원소재 사급전환율 (LG BOM Assembly Pull 대조) =====================
+def _parse_cu_spec(spec):
+    """동 원소재 규격 파싱: 'CUTTING CU P9.52 T0.7 L/W C1220T-O ALL' → 외경/두께/재질/형태."""
+    s = str(spec or "")
+    od = thk = metal = form = ""
+    m = _re.search(r'P(\d+(?:\.\d+)?)', s)
+    if m: od = m.group(1)
+    m = _re.search(r'T(\d+(?:\.\d+)?)', s)
+    if m: thk = m.group(1)
+    m = _re.search(r'C\d{3,4}[A-Z]?(?:-[A-Z])?', s)      # C1220T-O, C1220C-O
+    if m: metal = m.group(0)
+    elif "COPPER" in s.upper(): metal = "Copper Alloy"
+    if "L/W" in s: form = "L/W"           # Level Wound(코일)
+    elif "S/L" in s: form = "S/L"         # Straight Length(직관)
+    return od, thk, metal, form
+
+
+@router.get("/api/lgsagub/sagub_convert")
+def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"),
+                          mt: str = Query("1,2,5"), q: str = Query(""), limit: int = Query(5000)):
+    """원소재 사급전환율: LG BOM의 동 원소재(child_desc='Tube,Raw')가 사급(Assembly Pull)으로
+       전환됐는지 대조. Supplier=미전환(우리가 구매)·Assembly Pull=전환(LG 사급).
+       기본=미전환(Supplier)·제작품(parent) 제작유형 1/2/5. ASSY·제작품·동규격(외경/두께/재질)·소요중량 표시."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        # 전환율 요약 (전체 Tube,Raw edge 기준)
+        cur.execute("SELECT supply_type, COUNT(*) FROM nx.lg_bom WHERE child_desc='Tube,Raw' GROUP BY supply_type")
+        sm = {r[0]: r[1] for r in cur.fetchall()}
+        pull = sm.get("Assembly Pull", 0); sup = sm.get("Supplier", 0)
+        rate = round(pull * 100.0 / (pull + sup), 1) if (pull + sup) else 0.0
+
+        wh = ["r.child_desc='Tube,Raw'"]; p = []
+        if status == "supplier":  wh.append("r.supply_type='Supplier'")
+        elif status == "pull":    wh.append("r.supply_type='Assembly Pull'")
+        # status=all → 전체
+        if werks.strip(): wh.append("r.werks=?"); p.append(werks.strip())
+        mtl = [x.strip() for x in mt.split(",") if x.strip()]
+        if mtl:
+            wh.append("ISNULL(ip.make_type,'') IN (%s)" % ",".join("?" * len(mtl))); p += mtl
+        if q.strip():
+            wh.append("(r.model LIKE ? OR r.parent_code LIKE ? OR r.child_code LIKE ? OR im.item_name LIKE ? OR ip.item_name LIKE ?)")
+            qq = "%" + q.strip() + "%"; p += [qq] * 5
+        sql = ("""SELECT r.werks, r.model, im.item_name, r.parent_code, ip.item_name, ip.make_type,
+                         r.child_code, MAX(r.child_spec), SUM(CONVERT(float, ISNULL(r.qty,0))), MAX(r.unit),
+                         r.supply_type, COUNT(*)
+                  FROM nx.lg_bom r
+                  LEFT JOIN nx.item im ON UPPER(LTRIM(RTRIM(im.item_code)))=UPPER(LTRIM(RTRIM(r.model)))
+                  LEFT JOIN nx.item ip ON UPPER(LTRIM(RTRIM(ip.item_code)))=UPPER(LTRIM(RTRIM(r.parent_code)))
+                  WHERE """ + " AND ".join(wh) + """
+                  GROUP BY r.werks, r.model, im.item_name, r.parent_code, ip.item_name, ip.make_type,
+                           r.child_code, r.supply_type
+                  ORDER BY r.model, r.parent_code, r.child_code""")
+        cur.execute(sql, *p)
+        rows = []
+        for r in cur.fetchall():
+            od, thk, metal, form = _parse_cu_spec(r[7])
+            rows.append({
+                "werks": r[0] or "", "model": r[1] or "", "model_name": r[2] or "",
+                "parent": r[3] or "", "parent_name": r[4] or "", "make_type": (r[5] or ""),
+                "child": r[6] or "", "spec": r[7] or "",
+                "od": od, "thk": thk, "metal": metal, "form": form,
+                "qty": float(r[8] or 0), "unit": r[9] or "",
+                "status": "미전환" if r[10] == "Supplier" else ("전환" if r[10] == "Assembly Pull" else (r[10] or "")),
+                "cnt": r[11],
+            })
+        total = len(rows)
+        # 대상(필터반영) 통계
+        models = len(set(x["model"] for x in rows))
+        parents = len(set((x["model"], x["parent"]) for x in rows))
+        return {"rate": rate, "pull": pull, "supplier": sup,
+                "rows": rows[:int(limit)], "total": total, "shown": min(total, int(limit)),
+                "models": models, "parents": parents}
     finally:
         nx.close()
