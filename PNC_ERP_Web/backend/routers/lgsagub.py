@@ -590,7 +590,10 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         pm_pre = _matcost_asof('202606')      # 인상전(≤8/6) = 202605
         pm_post = _matcost_asof('202612')     # 인상후(8/7~) = 202608
         _CUT = '260807'                        # 인상후 적용 시작일(YYMMDD)
-        _ensure_dong_cache(cur)
+        # ★BOM기준 동소요 = LG BOM 사급(Assembly Pull) 동 point-in-time(nx.lg_bom_ver). eff_cut(YYMM) 시점 버전.
+        ap_ver = (f"20{ymd_to.strip()[:2]}-{ymd_to.strip()[2:4]}-{ymd_to.strip()[4:6]}" if len(ymd_to.strip()) >= 6
+                  else f"20{eff_cut[:2]}-{eff_cut[2:4]}-28")
+        ap_all = _lg_ap_all(cur, ap_ver)
         # LG인증: 원단위 Assy별 사급 중량(원래대로) + 규격(재질·외경·두께)별. ★금액은 신규 사급가로 재계산(옛 mat_cost fallback).
         cur.execute("""SELECT UPPER(LTRIM(RTRIM(assy_pn))) a, gubun1, ISNULL(gubun2,''), ISNULL(od,0), ISNULL(thk,0),
                          SUM(ISNULL(weight,0)) w, SUM(ISNULL(weight,0)*ISNULL(mat_cost,0)) c_old
@@ -614,12 +617,11 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
                 tot += (w * p) if p is not None else c_old
             return tot
 
-        def _bom_kv(it, pm):                   # BOM기준 (중량/개, 금액/개) — 인증규격(pm_post에 있는 것)만, 금액은 해당 period 단가
+        def _bom_kv(it, pm):                   # BOM기준 = LG BOM 사급동(Assembly Pull) point-in-time. 금액=절삭재료비 as-of 단가
             kg = amt = 0.0
-            for sp, w in _dong_of(cur, it).items():
-                if sp in pm_post:
-                    kg += w
-                    amt += w * (pm.get(sp) or pm_post[sp])
+            for sp, w in ap_all.get(it, {}).items():
+                kg += w
+                amt += w * (pm.get(sp) or pm_post.get(sp) or 0.0)
             return kg, amt
 
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
@@ -709,10 +711,10 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
         if not sy:
             cur.execute("SELECT MAX(ym) FROM nx.lg_settle_unit")
             r0 = cur.fetchone(); sy = (r0[0] if r0 else "") or ""
-        # ★수불 개시월 = 2603(2026.03) 사용자 확정. 그 이전 OSP 데이터 없어 기초0 시작. to_ym 기본 = OSP 최신월.
+        # ★사급 원소재 수불 개시월 = 2607(2026.07) 사용자 확정(LG BOM 버전 baseline=2026-07-01과 정합). 기초0. to_ym 기본 = OSP 최신월.
         cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) LIKE '%TUBE%'")
         r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
-        LEDGER_START = "2602"
+        LEDGER_START = "2607"
         frm = from_ym.strip() or LEDGER_START
         if osp_min and frm < osp_min:    # OSP 데이터 없는 이전달로 시작하면 입고0→마이너스 → 첫 OSP월로 클램프
             frm = osp_min
@@ -726,14 +728,10 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
         while m <= to and guard < 120:
             months.append(m); m = ym_next(m); guard += 1
 
-        # BOM기준 소요용: 규격별 동중량 캐시(전량 로드) + 절삭재료비 신규단가(as-of)
-        _ensure_dong_cache(cur)
+        # BOM기준 소요 = LG BOM 사급동(Assembly Pull) point-in-time(월별 유효 버전). 절삭재료비 신규단가(as-of)
         pm_pre = _matcost_asof('202606'); pm_post = _matcost_asof('202612')
-        dong_all = {}
-        cur.execute("SELECT item_code,metal,diam,thick,per_unit FROM nx.item_dong_spec")
-        for ic, mtl, dd, tt, ww in cur.fetchall():
-            if mtl != '~':
-                dong_all.setdefault(str(ic).strip().upper(), {})[(mtl, float(dd), float(tt))] = float(ww)
+        def _mdate(M):    # YYMM → 그 달 말(28일) date: point-in-time 버전 선택(ver_from<=)
+            return f"20{M[:2]}-{M[2:4]}-28"
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE cut_gubun=N'절삭'")
         cutset = set(r[0] for r in cur.fetchall())   # ★절삭만 = LG 사급, 설치/이지링크=직거래 제외
         rows = []; bal_kg = 0.0; bal_amt = 0.0; bal_bom_kg = 0.0; bal_bom_amt = 0.0
@@ -756,12 +754,12 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query(""), settle_
             soyo_kg = sum(usg.get(it, 0.0) * net for it, net in recvlist)
             soyo_amt = sum(usc.get(it, 0.0) * net for it, net in recvlist)
             pmM = pm_post if M >= '2608' else pm_pre        # 인상후(8월~) / 인상전
+            apM = _lg_ap_all(cur, _mdate(M))                 # ★그 월 유효 LG BOM 사급동(Assembly Pull, point-in-time)
             soyo_bom_kg = 0.0; soyo_bom_amt = 0.0
             for it, net in recvlist:
-                for sp, w in dong_all.get(it, {}).items():
-                    if sp in pm_post:                        # LG인증(절삭재료비 有) 규격만
-                        soyo_bom_kg += w * net
-                        soyo_bom_amt += w * net * (pmM.get(sp) or pm_post[sp])
+                for sp, w in apM.get(it, {}).items():
+                    soyo_bom_kg += w * net
+                    soyo_bom_amt += w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
             cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
                            WHERE ym=? AND UPPER(item_name) LIKE '%TUBE%'""", M)
             r = cur.fetchone(); in_kg = f(r[0]); in_amt = f(r[1])
