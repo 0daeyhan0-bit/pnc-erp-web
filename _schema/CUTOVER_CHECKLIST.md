@@ -519,3 +519,42 @@ coopquote(tag S) 도 같은 이유로 8건
 5. `pricemgmt`(쓰기 8) → 클린에 직접 쓰기
 6. `price.py`(이력 6) → 클린
 7. 화면 값 대조 + TestBed
+
+### ✅ 승격 실행 — 1~3단계 완료 (2026-08-29)
+
+도구 = `_migration/price_item_promote.py` (멱등 · `--commit` 없으면 계획만)
+
+```
+nx.price_item 132,148행 · 추가 컬럼 7개
+   main_flag · mkt · remarks · ins_user · ins_dt · upd_user · upd_dt   (전부 NULL 허용)
+백업 nx.price_item_bak_promote 132,148행 생성
+백필(라이브 조인) 131,135 / 132,148 = 99.23%
+```
+
+**검증**
+| 항목 | 결과 |
+|---|---|
+| 기존 6컬럼 값이 바뀌었나 (백업 대조) | **0행** — 추가만 했고 원래 값은 그대로 |
+| `main_flag` 저장값 | `'1'` 96,611 · `'0'` 34,524 · `NULL` 1,013 |
+| `NULL` 1,013 의 정체 | 거래처 `LG`(합성코드) 855 · `2089` 33 · `2306` 27 → **라이브에 없는 행**이라 NULL 이 맞다 |
+| **sourcing 정렬을 클린만으로** 돌린 값 vs 미러 | **차이 1** (승격 전 163) |
+
+남은 1건 = `MJU30514504`. 미러에 **적용일이 빈 값**인 단가행(12,186)이 있어 그게 뽑히는 것이고,
+클린은 정상 최신(260626 · 12,396)을 뽑는다. **미러 데이터 결함이고 클린이 맞다.**
+
+### ✅ 3단계 — 빌더 가드 (이게 빠지면 사고)
+`_migration/sub_norm/r_price_vendor_match.py` 는 `DELETE FROM nx.price_item WHERE price_type='매입'`
+후 라이브에서 재적재한다. **파생 조회본일 때는 맞았지만 지금은 마스터다** —
+그대로 두면 언젠가 누가 돌려서 **웹 입력 단가를 전부 날린다.**
+
+⟹ 스크립트 선두에 **실행 거부 가드**를 넣었다(동작 확인 완료).
+```
+★실행 거부 — nx.price_item 은 단가 마스터다. 이 스크립트는 매입 단가를 전부 지운다.
+  정말 필요하면 --i-know-this-deletes-the-master 를 붙일 것.
+```
+
+### ☐ 남은 단계
+4. `sourcing`(7) · `coopquote`/`coopquote2`(4) repoint + **결정적 tiebreak**(`vendor_code`) 추가
+5. `pricemgmt`(쓰기 8) → 클린에 직접 쓰기
+6. `price.py`(이력 6) → 클린
+7. 화면 값 대조 + TestBed
