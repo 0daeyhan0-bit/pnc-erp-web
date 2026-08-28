@@ -73,6 +73,12 @@ FIXTURES = [
     ("weld", """SELECT ISNULL(SUM(CAST(qty AS float)),0) FROM nx.bom
                  WHERE parent_code='5211A21789C' AND role LIKE '%용접봉%'""",
      lambda ctx, r: ctx.update(weld_ok=(abs(float(r[0] or 0) - 0.0028) < 0.0003))),
+
+    # 용접링 차감 케이스용 — 대상(AJR75786301-고주파)의 용접링 개수합이 3(1+2)일 때만 검증(아니면 SKIP)
+    ("ring", """SELECT ISNULL(SUM(CAST(bl.qty AS float)),0) FROM nx.bom_line bl
+                  JOIN nx.bom_header bh ON bh.bom_id=bl.bom_id JOIN nx.item i ON i.item_code=bl.child_item
+                 WHERE bh.item_code=N'AJR75786301-고주파' AND i.item_name LIKE N'%용접링%' AND i.sgroup='230'""",
+     lambda ctx, r: ctx.update(ring_ok=(abs(float(r[0] or 0) - 3.0) < 0.01))),
 ]
 
 
@@ -135,6 +141,12 @@ CASES = [
          probe="용접봉차감", delta=-0.28, mirror=False,
          skip_if=lambda ctx: not ctx.get("weld_ok"),
          body=lambda ctx: {"item": "5211A21789C", "prod_qty": 100, "wo": "FLOWWELD", "user": "flowverify"}),
+    #   용접링 = bom_line 정본(nx.bom엔 없음) → 완성공정서 −R(EA) 차감. probe '용접링차감'=stock_ledger MAT·tag='R'.
+    #   대상 AJR75786301-고주파(용접링 1+2=3개) × 5 = −15. 링 있으면 봉 skip(중복차감 방지).
+    dict(kind="F", name="용접링 차감 (백플러시 −R)", method="POST", path="/api/backflush/post",
+         probe="용접링차감", delta=-15, mirror=False,
+         skip_if=lambda ctx: not ctx.get("ring_ok"),
+         body=lambda ctx: {"item": "AJR75786301-고주파", "prod_qty": 5, "wo": "FLOWRING", "user": "flowverify"}),
 
     # ══ [R] 규칙 : 음수재고 차단 (예외 없음 §0-★) ═════════════════════
     dict(kind="R", name="자재출고 — 가용 초과(음수유발) 차단", method="POST", path="/api/stock/save",

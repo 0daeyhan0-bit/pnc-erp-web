@@ -112,6 +112,22 @@ def _is_final_product(nxc, item):
     c.execute("SELECT COUNT(*) FROM nx.bom WHERE child_code=?", item)
     return (c.fetchone()[0] or 0) == 0
 
+def _ring_collect(nxc, root):
+    """용접링(sg230 활성) 소비 수집 = ★bom_line 정본(nx.bom엔 용접링 없음=LG재구축 누락).
+       단위 EA. 반환 {ring_code: qty}. cs_calc_except=0만. 현 활성링은 root 직속(검증완, WELD_RING_DESIGN §15).
+       ※제작SUB 깊은 링 재귀는 후속(활성 7종 전부 직속 확인). 봉↔링 중복 방지는 호출측(_backflush_core)에서 봉 skip."""
+    c = nxc.cursor()
+    c.execute("""SELECT bl.child_item, CAST(bl.qty AS float)
+        FROM nx.bom_line bl JOIN nx.bom_header bh ON bh.bom_id = bl.bom_id
+        JOIN nx.item i ON i.item_code = bl.child_item
+        WHERE bh.item_code = ? AND i.item_name LIKE N'%용접링%' AND i.sgroup = '230'
+          AND ISNULL(bl.cs_calc_except, 0) = 0""", root)
+    ring = {}
+    for ch, q in c.fetchall():
+        ring[str(ch)] = ring.get(str(ch), 0.0) + (q or 0.0)
+    return ring
+
+
 def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_bc=None):
     """★백플러시 코어(트랜잭션 미관리 — 호출측 commit/rollback). cro=RO conn, nx=쓰기 tx conn.
        완성공정 1회 전체BOM×생산량 소비(−P4: RDY 우선 없으면 MAT) + 생산품 +ASY(최종제품)/+PRD(반제품, tag P7).
@@ -127,7 +143,10 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     if mode == "reverse" and not ex: return {"ok": False, "detail": "되돌릴 백플러시 없음"}
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
-    if not comps and not weld: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
+    ring = _ring_collect(nx, item)                # ★용접링(bom_line 정본, nx.bom엔 없음) EA
+    if ring and weld:                             # ★링 있는 노드 = 봉 대체 → 봉 skip(중복차감 방지, 노드단위·월30근사)
+        weld = {}
+    if not comps and not weld and not ring: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
     # ★자재 부족이면 생산실적 차단(사용자 확정 2026-08-19): "자재가 부족하면 생산실적이 잡히면 안돼."
     #   자재 현재고(mat_stock_daily=_mat_avail 정본) < BOM소요면 실적 거부 → 마이너스 원천차단. ★키팅과 무관(키팅=flag) — 실제 자재재고로만 판정.
     #   ★커버리지 인지: 자재재고 '관리품목'만 게이트 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 제외(오차단 방지, 정본 §4-C 검증).
@@ -149,6 +168,12 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
                 _av = _mat_avail(gc, _br)
                 if _wneed > _av + 1e-6:
                     short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
+        for _rc, _rq in ring.items():                 # ★용접링 부족 게이트(mat_stock_daily 추적품만 — 미추적=입고체계 선결)
+            _rneed = _rq * prod_qty
+            if _rneed > 0 and _tracked(_rc):
+                _av = _mat_avail(gc, _rc)
+                if _rneed > _av + 1e-6:
+                    short.append(f"용접링 {_rc}(가용 {_av:g} < 소요 {_rneed:g})")
         if short:
             more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
             return {"ok": False, "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8]) + more}
@@ -179,6 +204,12 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
         if abs(wneed) < 1e-9: continue
         _post('MAT', base_rac, -wneed * f, 'W', '백플러시 용접봉소비', gpc_over=_weld_proc_code(nx, base_rac))
         weld_consumed += wneed
+    ring_consumed = 0.0                            # ★용접링 소비(−MAT, tag 'R', EA, 생산창고 Q1000): 완성공정 1회
+    for ring_code, rq in ring.items():
+        rneed = rq * prod_qty
+        if abs(rneed) < 1e-9: continue
+        _post('MAT', ring_code, -rneed * f, 'R', '백플러시 용접링소비', gpc_over=WELD_WAREHOUSE)
+        ring_consumed += rneed
     _post(out_sp, item, prod_qty * f, 'P7', f'백플러시 생산입고({out_sp})')   # 생산품 +ASY/+PRD
     nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
     seq_to = int(nc.fetchone()[0] or 0)
@@ -191,7 +222,8 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     # 협력사 용접봉 무게정산(weight_calc) 연계는 후속(TODO) — 여기선 물리적 재고소비만.
     return {"ok": True, "mode": mode, "item": item, "prod_qty": prod_qty, "out_point": out_sp,
             "components": len(comps), "consumed_qty": round(consumed, 3),
-            "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4), "ref_key": ref_key}
+            "weld_kinds": len(weld), "weld_consumed": round(weld_consumed, 4),
+            "ring_kinds": len(ring), "ring_consumed": round(ring_consumed, 4), "ref_key": ref_key}
 
 
 def _weld_stock_at(cur, base_rac, gpc):
