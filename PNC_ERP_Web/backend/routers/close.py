@@ -1393,10 +1393,22 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         agg = {}
         for y in sorted(moves):
             for mat, mv in moves[y].items():
-                a = agg.setdefault(mat, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "trans": 0.0})
+                a = agg.setdefault(mat, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
+                                         "trans": 0.0, "transamt": 0.0})
                 a["inq"] += mv["inq"]; a["inamt"] += mv["pamt"]
                 a["outq"] += mv["outq"]; a["trans"] += mv["trans"]
             _mv_step(state, moves[y], scope)
+            # ★출고·조정 금액은 **그날 평균을 갱신한 뒤**의 단가로 잡는다.
+            #   우리 엔진은 하루를 한 묶음으로 처리한다(§7-4) — 그날 입고가 평균을 올린 뒤
+            #   그 평균으로 출고가 나간다. 갱신 전 단가를 쓰면 금액 항등식이 깨진다
+            #   (2026-08-28 실측: 기초+입−출+조정 이 기말보다 1.46억 초과).
+            #   검산: (q0+pq)·avg = q0·a0 + pamt 이므로
+            #         기말금액 = (q0+inq−outq+trans)·avg = 기초금액 + 입고금액 − outq·avg + trans·avg
+            for mat, mv in moves[y].items():
+                _av = state.get(mat, [0.0, 0.0])[1]
+                a = agg[mat]
+                a["outamt"] += mv["outq"] * _av
+                a["transamt"] += mv["trans"] * _av
         # ── 행 구성 ──────────────────────────────────────────────────────
         # 기말도 동일하게 보정(마감과 같은 순서: 전개 → 단가0 보정)
         _bpx = _mv_buyprice(cur, to6)
@@ -1409,46 +1421,79 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         rows, breaks = [], []
         for c in sorted(codes):
             bq, bavg = begin.get(c, [0.0, 0.0])
-            a = agg.get(c, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "trans": 0.0})
+            a = agg.get(c, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
+                            "trans": 0.0, "transamt": 0.0})
             eq, eavg = state.get(c, [0.0, 0.0])
             if not zero and abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9                and abs(a["trans"]) < 1e-9 and abs(eq) < 1e-9:
                 continue
             # ★불변식 검산 — 어기면 버그다(§7-2). 화면에 숨기지 말고 드러낸다.
+            #   수량축과 **금액축을 모두** 본다(금액만 깨지는 결함이 실제로 있었다).
             if abs((bq + a["inq"] - a["outq"] + a["trans"]) - eq) > 0.001:
-                breaks.append({"item": c, "기초": round(bq, 4), "입고": round(a["inq"], 4),
+                breaks.append({"item": c, "축": "수량", "기초": round(bq, 4), "입고": round(a["inq"], 4),
                                "출고": round(a["outq"], 4), "조정": round(a["trans"], 4),
                                "기말": round(eq, 4)})
-            rows.append({"cd": c, "bq": round(bq, 4), "ba": round(bq * bavg, 2),
+            # ★금액축은 "평가조정"을 명시 열로 둔다 — 숨기지 않는다.
+            #   이동평균에는 금액 항등식을 **의도적으로** 깨는 규칙이 둘 있다:
+            #     ① 단가0 보정 — 전개 후에도 단가가 0 인 품목에 실매입 가중평균을 사후 주입(§13-5)
+            #     ② 재고<=0 에서 매입 refill 시 단가 리셋 — 마이너스재고 평균폭발 방지
+            #   둘 다 "이동"이 아니라 "단가를 고쳐 끼우는" 행위라 기초+입−출±조정 으로 설명되지 않는다.
+            #   잔차를 버리거나 오차로 숨기면 화면 합계가 안 맞는다 ⟹ **평가조정(va)** 으로 드러낸다.
+            #     기초금액 + 입고 − 출고 + 조정 + 평가조정 = 기말금액   (항상 성립)
+            _ba, _ea = bq * bavg, eq * eavg
+            _va = _ea - (_ba + a["inamt"] - a["outamt"] + a["transamt"])
+            rows.append({"cd": c, "va": round(_va, 2),
+                         "bq": round(bq, 4), "ba": round(bq * bavg, 2),
                          "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
-                         "oq": round(a["outq"], 4), "tq": round(a["trans"], 4),
+                         "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
+                         "tq": round(a["trans"], 4), "ta": round(a["transamt"], 2),
                          "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4)})
-        _attach_item_info(cur, rows)
+        _attach_item_info(cur, rows, to6)
         if q:
             k = q.strip().upper()
             rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
-        tot = {f: round(sum(r[f] for r in rows), 2) for f in ("bq", "ba", "iq", "ia", "oq", "tq", "sq", "sa")}
+        tot = {f: round(sum(r[f] for r in rows), 2)
+               for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa")}
+        va_rows = [r["cd"] for r in rows if abs(r["va"]) > 1.0]
         return {"domain": d, "from": fr6, "to": to6, "count": len(rows), "rows": rows, "totals": tot,
                 "basis": f"기초 {base_ymd} {src}" + (f" → 전표이월 {pre_start}~{pre_end}" if pre_start <= pre_end else ""),
                 "invariant_breaks": breaks,
+                "valuation_adjust": {"count": len(va_rows), "amount": tot["va"], "items": va_rows[:50],
+                                     "why": "단가0 보정·마이너스재고 단가리셋 — 이동이 아니라 단가를 고쳐 끼운 분(설계상 정상)"},
                 "note": "확정 스냅샷 + 전표 파생(저장 안 함). 단가=이동평균. 레거시 임시테이블 미사용."}
     finally:
         cn.close()
 
 
-def _attach_item_info(cur, rows):
-    """품번 → 품명/규격/단위/소분류. ★정본 = nx.item(미러 아님, CLAUDE.md §1-9)."""
+def _attach_item_info(cur, rows, to6=None):
+    """품번 → 품명/규격/단위/소분류/매입처/최종입고일. ★정본 = nx.item(미러 아님, CLAUDE.md §1-9).
+       ★컬럼을 임의로 줄이지 않는다(CLAUDE.md §1-6) — 기존 자재수불장 화면이 쓰던 항목을 모두 채운다."""
     if not rows:
         return
     codes = [r["cd"] for r in rows]
-    info = {}
+    info, lastin = {}, {}
     for i in range(0, len(codes), 500):
         part = codes[i:i + 500]
         ph = ",".join("?" * len(part))
-        cur.execute(f"""SELECT UPPER(item_code), ISNULL(item_name,''), ISNULL(item_spec,''),
-                               ISNULL(unit,''), ISNULL(sgroup,'')
-                          FROM nx.item WHERE UPPER(item_code) IN ({ph})""", *part)
-        for cd, nm, sp, un, sg in cur.fetchall():
-            info[cd] = (nm, sp, un, sg)
+        cur.execute(f"""SELECT UPPER(i.item_code), ISNULL(i.item_name,''), ISNULL(i.item_spec,''),
+                               ISNULL(i.unit,''), ISNULL(i.sgroup,''), ISNULL(i.in_cust,''),
+                               ISNULL(c.cust_desc,''), ISNULL(c.cust_type,'')
+                          FROM nx.item i
+                          LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE = i.in_cust
+                         WHERE UPPER(i.item_code) IN ({ph})""", *part)
+        for cd, nm, sp, un, sg, ic, cnm, ct in cur.fetchall():
+            info[cd] = (nm, sp, un, sg, ic, cnm, ct)
+    if to6:
+        # ★최종입고일 = 입고 tag 전표의 마지막 일자(조회 종료일까지). 라이브 전표가 정본.
+        #   ★청크마다 돌리면 170만행을 8번 스캔한다 — **한 번만** 집계하고 파이썬에서 룩업한다.
+        _ph = ",".join("?" * len(TA_IN_TAGS))
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), MAX(MAINT_YMD)
+                          FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                         WHERE MAINT_YMD <= ? AND MAINT_TAG IN ({_ph}) AND MAT_CODE IS NOT NULL
+                         GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", to6, *TA_IN_TAGS)
+        for cd, ymd in cur.fetchall():
+            lastin[cd] = str(ymd or "")
     for r in rows:
-        nm, sp, un, sg = info.get(r["cd"], ("", "", "", ""))
+        nm, sp, un, sg, ic, cnm, ct = info.get(r["cd"], ("", "", "", "", "", "", ""))
         r["nm"] = nm; r["spec"] = sp; r["unit"] = un; r["sg"] = sg
+        r["custcd"] = ic; r["cust"] = cnm; r["ctype"] = ct
+        r["lastin"] = lastin.get(r["cd"], "")
