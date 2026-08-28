@@ -213,8 +213,8 @@ const priceSagubView=(host)=>{
 const priceLgView=(host)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  let st={busy:false,msg:'',rows:[],q:'',biz:'SAC'};
-  const load=async()=>{try{const r=await fetch(`${API}/api/price/lgprice_list?q=${encodeURIComponent(st.q)}&biz=${encodeURIComponent(st.biz)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
+  let st={busy:false,msg:'',rows:[],ymds:[],q:'',biz:'SAC',ymd:''};   // ymd=적용일 필터(''=전체)
+  const load=async()=>{try{const r=await fetch(`${API}/api/price/lgprice_list?q=${encodeURIComponent(st.q)}&biz=${encodeURIComponent(st.biz)}`);const j=await r.json();st.rows=j.rows||[];st.ymds=j.ymds||[];}catch(e){st.rows=[];st.ymds=[];}draw();};
   const doUpload=async(f)=>{
     if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
@@ -226,6 +226,8 @@ const priceLgView=(host)=>{
       else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
     }catch(e){st.msg='❌ 오류: '+e.message;}
     st.busy=false;draw();};
+  // 적용일 필터를 적용한 표시 행. ★기본은 전체(최신순) — 필터로 '이번 인상분만' 볼 수 있다.
+  const vrows=()=>st.ymd?st.rows.filter(r=>r.apply_ymd===st.ymd):st.rows;
   const draw=()=>{
     host.innerHTML=`
      <div class="page-sub">LG <b>PO Price</b>(LG 판가) 엑셀 업로드 → <b>사업부별</b> <code>nx.price_item</code>(SAC=vendor1010·RAC=1020, MKT <b>1→내수(TAGS)·2→수출(TAGE)</b>)에 <b>Start Date를 적용일</b>로 반영. 원가/손익의 <b>LG판가</b>로 바로 사용. 헤더: <code>Material·MKT·Unit Price·Start Date·Curr</code></div>
@@ -238,12 +240,13 @@ const priceLgView=(host)=>{
        <span style="margin-left:auto;color:#a98a4f;font-size:11px">SAC·RAC 파일 각각 (사업부 선택 후) 올리세요</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="toolbar"><label class="tl">사업부</label><select class="sel" id="lg-bf"><option value="">전체(SAC+RAC)</option><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select><label class="tl">검색</label><input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px"><button class="btn" id="lg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">LG판가 ${st.rows.length}건</span></div>
-     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">사업부</th><th class="center">구분</th><th class="center">적용일(Start)</th><th class="num">LG판가</th><th class="center">통화</th></tr></thead>
-     <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${r.vendor==='1010'?'SAC':r.vendor==='1020'?'RAC':esc(r.vendor)}</td><td class="center">${r.type==='TAGS'?'내수':r.type==='TAGE'?'수출':esc(r.type)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="7" class="empty">업로드된 LG판가 없음 — PO Price 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
+     <div class="toolbar"><label class="tl">사업부</label><select class="sel" id="lg-bf"><option value="">전체(SAC+RAC)</option><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select><label class="tl">적용일</label><select class="sel" id="lg-ymd"><option value="">전체</option>${st.ymds.map(y=>`<option value="${esc(y)}" ${st.ymd===y?'selected':''}>${esc(y)}${y===st.ymds[0]?' (최신)':''}</option>`).join('')}</select><label class="tl">검색</label><input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px"><button class="btn" id="lg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">LG판가 ${vrows().length}건 / 전체 ${st.rows.length}건</span></div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">사업부</th><th class="center">구분</th><th class="center">적용일(Start)</th><th class="num">LG판가</th><th class="num">직전판가</th><th class="num">인상액</th><th class="num">인상률</th><th class="center">통화</th></tr></thead>
+     <tbody>${vrows().map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${r.vendor==='1010'?'SAC':r.vendor==='1020'?'RAC':esc(r.vendor)}</td><td class="center">${r.type==='TAGS'?'내수':r.type==='TAGE'?'수출':esc(r.type)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num"><b>${won(r.price)}</b></td><td class="num" style="color:var(--muted)">${r.prev_price==null?'':won(r.prev_price)}</td><td class="num" ${r.diff>0?'style="color:#c0392b;font-weight:700"':(r.diff<0?'style="color:#1c6fd6;font-weight:700"':'')}>${r.diff==null?'':(r.diff>0?'+':'')+won(r.diff)}</td><td class="num" ${r.rate>0?'style="color:#c0392b"':(r.rate<0?'style="color:#1c6fd6"':'')}>${r.rate==null?'':(r.rate>0?'+':'')+r.rate+'%'}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="10" class="empty">${st.rows.length?'해당 적용일 자료 없음(필터 확인)':'업로드된 LG판가 없음 — PO Price 엑셀을 올려주세요'}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const fe=g('#lg-file'),drop=g('#lg-drop');
     g('#lg-biz').onchange=e=>{st.biz=e.target.value;};
+    g('#lg-ymd').onchange=e=>{st.ymd=e.target.value;draw();};
     g('#lg-pick').onclick=()=>fe.click();
     fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
     drop.ondragover=e=>{e.preventDefault();drop.style.background='#f5e9cf';drop.style.borderColor='#b8860b';};

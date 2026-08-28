@@ -1043,6 +1043,22 @@ def _prd_price_bom(cur, target, need):
     if not need:
         return out
     ym = str(target)[:4]
+    # ★BOM 이 없는 품목은 엔진에 넣지 않는다 — 어차피 0 이 나오는데 품목당 ~0.14초를 쓴다.
+    #   실측(2026-08-28): 310품목 42.2초 소요 · 보강 **0건**. 전부 헛돌았다.
+    #   nx.bom 에 parent 로 존재하는 것만 남기면 화면이 쓸 수 있는 속도가 된다.
+    need = list(need)
+    if need:
+        has = set()
+        for i in range(0, len(need), 500):
+            part = [str(x).strip().upper() for x in need[i:i + 500]]
+            ph = ",".join("?" * len(part))
+            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(parent_code))) FROM nx.bom
+                             WHERE UPPER(LTRIM(RTRIM(parent_code))) IN ({ph})""", *part)
+            has |= {str(r[0]) for r in cur.fetchall()}
+        skipped = [it for it in need if str(it).strip().upper() not in has]
+        for it in skipped:                      # 조회 반복을 막기 위해 0 으로 캐시
+            _BOM_PX_CACHE.setdefault((it, ym), 0.0)
+        need = [it for it in need if str(it).strip().upper() in has]
     miss = [it for it in need if (it, ym) not in _BOM_PX_CACHE]
     if miss:
         eng = _bom_engine()
@@ -1287,6 +1303,7 @@ def close_run(payload: dict = Body(...)):
     cn = _nx_tx(); cur = cn.cursor()
     try:
         _assert_can_close(cur, user, "마감")
+        _ledger_cache_clear()      # ★확정값이 바뀌므로 수불장 캐시를 버린다
         if _is_closed(cur, d, t, p):
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 이미 마감되었습니다.")
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd'), FORMAT(GETDATE(),'yyMM')")
@@ -1337,6 +1354,7 @@ def close_cancel(payload: dict = Body(...)):
     cn = _nx_tx(); cur = cn.cursor()      # ★원자성: 스냅샷 제거 + 잠금해제 동시
     try:
         _assert_can_close(cur, user, "마감 해제")
+        _ledger_cache_clear()      # ★확정값이 바뀌므로 수불장 캐시를 버린다
         if not _is_closed(cur, d, t, p):
             raise HTTPException(409, f"{DOMAINS[d]} {p} 는 마감 상태가 아닙니다.")
         cur.execute("""SELECT TOP 1 period FROM nx.period_close
@@ -1373,6 +1391,21 @@ def close_cancel(payload: dict = Body(...)):
 # ★_snap_prd 와 **같은 순서**로 돈다(기초 → 단가 → 일자 전개 → 단가0 보정).
 #   화면이 따로 계산하면 값이 갈린다 — §21 교훈. 여기서 새로 짜지 않고 같은 헬퍼만 호출한다.
 #   축 = (품목 × 재고위치). 가공창고 P0001 = loc '' · 용접은 라인코드.
+# ★수불장 결과 캐시 — 같은 (도메인,기간) 재조회를 즉시 응답한다.
+#   실측(2026-08-28) 생산 수불장 콜드 54초(단가 13 + 이동 20 + BOM 20). 화면에서 못 쓴다.
+#   ★캐시는 **조회 전용**이다. 재고를 바꾸는 쓰기가 나면 반드시 _ledger_cache_clear() 로 버린다
+#     — 안 그러면 화면이 옛 값을 보여준다(하드룰: 캐시 stale 금지, PERF_OPTIMIZATION_DESIGN).
+_LEDGER_CACHE = {}
+_LEDGER_CACHE_MAX = 12
+
+
+def _ledger_cache_clear():
+    """재고 쓰기·마감 후 호출 — 수불장 캐시를 통째로 버린다."""
+    _LEDGER_CACHE.clear()
+    _PRD_PX_CACHE.clear()
+    _SAL_PX_CACHE.clear()
+
+
 def _prd_ledger(cur, fr6, to6):
     """생산 수불장 행 목록 + 불변식 위반. 반환 (rows, breaks)."""
     state, base_ymd, src = _prd_base(cur, fr6)
@@ -1459,7 +1492,8 @@ def _prd_ledger(cur, fr6, to6):
 #   축 = 품목(위치 없음). 이동 원천 = 레거시 제품재고조회 040(`live_api.salesstock`) 과
 #   **같은 UNION 분기**를 일자별로 편 것. 040 은 기간 요약이라 일자 전개가 안 되므로
 #   분기·부호를 그대로 두고 일자 컬럼을 살려 재작성한다(생산 PRD 와 같은 방식).
-# ★단가 = pr_m_item_cost(cost_tag IN ('S','E')) as-of 최신 = 040 이 쓰는 그 단가(판가).
+# ★단가 = **nx.price_item 단일 소스**(사급가·LG판가 업로드 대상, vendor 1010/1020 · TAGS/TAGE).
+#   레거시 미러 pr_m_item_cost 는 읽지 않는다 — 폴백도 없다(하드룰 CLAUDE.md §1-9-1).
 def _sal_moves(cur, d_from, d_to):
     """[d_from,d_to] 일자별 완성품 이동 → {ymd: {item: {net,inq,outq,adj}}}. 040 분기 그대로."""
     T3 = "PARTNER_ERP_TEST3.nx."
@@ -1513,16 +1547,26 @@ _SAL_PX_CACHE = {}
 
 
 def _sal_price(cur, target):
-    """완성품 판가 = pr_m_item_cost(cost_tag IN ('S','E')) as-of 최신. 040 과 동일 소스.
-       ★월 단위 캐시(생산과 같은 이유) — 호출 시점을 마감과 맞춰야 값이 안 갈린다(§23 교훈)."""
+    """완성품 판가 = **`nx.price_item` 단일 소스** (사급가·LG판가 업로드 대상).
+       vendor 1010=SAC / 1020=RAC · price_type TAGS=내수 / TAGE=수출 · apply_ymd as-of 최신.
+
+       ★2026-08-28 교체: 종전엔 `pr_m_item_cost(S/E)`(레거시 미러)를 읽었다. 하드룰 위반이다
+         (CLAUDE.md §1-9-1 · DO_NOT_USE_FIELDS §18 — 단가는 `nx.price_*` 단일 소스).
+       ★**폴백 없음.** 미러로 되돌아가지 않는다. price_item 에 없으면 **단가 0 으로 드러낸다**
+         (LG 판가 업로드 누락이므로 업로드로 풀 일이지, 몰래 옛 값을 끌어올 일이 아니다).
+       ★왜 이게 컷오버에 필수인가: 레거시가 은퇴하면 미러 sync 자체가 사라져 `pr_m_item_cost` 는
+         그 시점 값으로 얼어붙는다. 미러를 읽으면 **컷오버 후 재고 금액이 영원히 갱신되지 않는다.**
+         실측 예고편 — AJR75712801 의 8/6 인상(275,425)이 미러에 안 와 옛 값(267,680)으로 평가됐다.
+       ★월 단위 캐시 — 호출 시점을 마감과 맞춰야 값이 안 갈린다(§23 교훈)."""
     ck = str(target)[:4]
     if ck in _SAL_PX_CACHE:
         return _SAL_PX_CACHE[ck]
-    cur.execute("""SELECT item_code, item_cost FROM (
-                     SELECT item_code, item_cost,
-                            ROW_NUMBER() OVER (PARTITION BY UPPER(item_code) ORDER BY cost_apply_ymd DESC) rn
-                       FROM PARTNER_ERP_TEST3.nx.pr_m_item_cost
-                      WHERE cost_apply_ymd <= ? AND cost_tag IN ('S','E')) z
+    cur.execute("""SELECT item_code, price FROM (
+                     SELECT item_code, price,
+                            ROW_NUMBER() OVER (PARTITION BY UPPER(item_code) ORDER BY apply_ymd DESC) rn
+                       FROM nx.price_item
+                      WHERE apply_ymd <= ? AND vendor_code IN ('1010','1020')
+                        AND price_type IN ('TAGS','TAGE')) z
                     WHERE rn=1""", target)
     px = {str(r[0]).strip().upper(): float(r[1] or 0) for r in cur.fetchall()}
     _SAL_PX_CACHE[ck] = px
@@ -1595,7 +1639,8 @@ def _sal_ledger(cur, fr6, to6):
             agg[it]["outamt"] += mv["outq"] * _av
             agg[it]["adjamt"] += mv["adj"] * _av
 
-    # 단가0 보정 — 판가가 없는 품목은 040 이 쓰는 단가로 채운다
+    # 단가0 보정 — ★같은 소스(nx.price_item) 안에서 as-of 값을 채우는 것이다.
+    #   다른 테이블로 폴백하지 않는다(하드룰 §18). price_item 에 없으면 0 으로 남겨 드러낸다.
     for st_ in (begin, state):
         for it, v in st_.items():
             if abs(v[1]) < 1e-9:
@@ -1644,7 +1689,14 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         if fr6 > to6:
             fr6, to6 = to6, fr6
         if d in ("PRD", "SAL"):
-            rows, breaks, basis = (_prd_ledger if d == "PRD" else _sal_ledger)(cur, fr6, to6)
+            _ck = (d, fr6, to6)
+            if _ck in _LEDGER_CACHE:
+                rows, breaks, basis = _LEDGER_CACHE[_ck]
+            else:
+                rows, breaks, basis = (_prd_ledger if d == "PRD" else _sal_ledger)(cur, fr6, to6)
+                if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
+                    _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
+                _LEDGER_CACHE[_ck] = (rows, breaks, basis)
             _attach_item_info(cur, rows, to6)
             if q:
                 k = q.strip().upper()
