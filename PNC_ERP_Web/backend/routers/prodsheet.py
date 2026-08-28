@@ -598,27 +598,38 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
         # QR From 끝 4자리 = 시작 일련번호
         start = int(qf[-4:]) if len(qf) >= 4 and qf[-4:].isdigit() else 1
         end = start + qty - 1
-        # ★재발행 범위(레거시 재발행 팝업의 시작/종료번호). 발행 당시 범위를 벗어나지 않게 클램프.
-        s2 = int(start_no) if int(start_no or 0) > 0 else start
-        e2 = int(end_no) if int(end_no or 0) > 0 else end
-        s2 = max(start, min(s2, end)); e2 = max(s2, min(e2, end))
+        # ★재발행 범위 = **순번(1부터)** 기준(2026-08-28 사용자 확정).
+        #   "1~50 이면 50장, 30~50 이면 30번째부터 50번째까지 21장(양끝 포함)".
+        #   ⛔종전엔 절대 QR번호(예 35~134)로 클램프해서 1~50 을 넣으면 35~50(16장)이 됐다.
+        #   내부 계산은 절대번호(abs = start + 순번-1)로 하고, 화면에는 순번을 돌려준다.
+        n1 = int(start_no) if int(start_no or 0) > 0 else 1
+        n2 = int(end_no) if int(end_no or 0) > 0 else qty
+        n1 = max(1, min(n1, qty)); n2 = max(n1, min(n2, qty))
+        s2 = start + n1 - 1          # 절대 QR 시작번호
+        e2 = start + n2 - 1          # 절대 QR 종료번호
         w2 = str(worker or '').strip() or str(r[6] or '').strip() or str(r[12] or '').strip()
         i2 = str(inspector or '').strip() or str(r[7] or '').strip() or str(r[13] or '').strip()
-        n_out = e2 - s2 + 1
+        n_out = n2 - n1 + 1
         # ★n(현재)/tot(전체)는 발행 전체 기준. 부분 재발행해도 원래 번호를 유지해야
         #   현장에서 몇 번째 라벨인지 알 수 있음(예 4~6 재출력 → 4/6, 5/6, 6/6).
-        labels = [{"n": (s2 + i) - start + 1, "seq": s2 + i,
+        labels = [{"n": n1 + i, "seq": s2 + i,
                    "qr": _qr_code(item, ymd, s2 + i),
                    "disp": f"{ymd} {int(r[0])}-{s2 + i:04d}"}
                   for i in range(n_out)]
         return {"ok": True, "print_seq": int(r[0]), "print_ymd": ymd, "item": item,
                 "qty": n_out, "org_qty": qty, "nm": str(r[11] or '').strip(),
-                "start_no": s2, "end_no": e2, "org_start": start, "org_end": end,
+                # 화면 입력칸은 순번(1~qty). abs_* 는 실제 QR 번호(참고용).
+                "start_no": n1, "end_no": n2, "org_start": 1, "org_end": qty,
+                "abs_start": s2, "abs_end": e2, "abs_org_start": start, "abs_org_end": end,
                 "worker": w2, "inspector": i2,
                 "sheet_no": str(r[8] or '').strip(),
                 "print_user": str(r[9] or '').strip(),
                 "print_dt": (str(r[10])[:19] if r[10] else ""),
-                "qr_from": qf, "qr_to": str(r[5] or '').strip(),
+                # ★QR 범위 = 지금 선택한 구간(labels 의 처음/끝). 종전엔 발행 전체 범위를
+                #   그대로 보여줘 30~50 을 골라도 35~134 로 표시됐다(2026-08-28).
+                "qr_from": (labels[0]["qr"] if labels else qf),
+                "qr_to": (labels[-1]["qr"] if labels else str(r[5] or '').strip()),
+                "qr_org_from": qf, "qr_org_to": str(r[5] or '').strip(),
                 "labels": labels}
     finally:
         nx.close()
