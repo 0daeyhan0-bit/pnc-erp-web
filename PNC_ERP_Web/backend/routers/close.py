@@ -1352,6 +1352,89 @@ def close_cancel(payload: dict = Body(...)):
 # ★엔진 재사용: 마감이 쓰는 것과 **완전히 같은** _mv_base/_mv_moves/_mv_step 을 쓴다.
 #   화면과 마감이 다른 식으로 계산하면 값이 갈린다(그게 미러/클린 드리프트의 원인이었다).
 #   그래서 여기서 다시 계산하지 않고 마감 엔진을 그대로 호출한다.
+# ===================== 생산(PRD) 수불장 — 마감과 동일 전개 =====================
+# ★_snap_prd 와 **같은 순서**로 돈다(기초 → 단가 → 일자 전개 → 단가0 보정).
+#   화면이 따로 계산하면 값이 갈린다 — §21 교훈. 여기서 새로 짜지 않고 같은 헬퍼만 호출한다.
+#   축 = (품목 × 재고위치). 가공창고 P0001 = loc '' · 용접은 라인코드.
+def _prd_ledger(cur, fr6, to6):
+    """생산 수불장 행 목록 + 불변식 위반. 반환 (rows, breaks)."""
+    state, base_ymd, src = _prd_base(cur, fr6)
+    # 기초 스냅샷 시점 ~ 조회 시작 전날까지는 전표로 이월(이중계상 금지 §7-7 #2)
+    pre_start, pre_end = _next_ymd(base_ymd), _prev_ymd(fr6)
+    # ★단가는 **조회 종료일 기준 하나**로 전 구간을 전개한다 — 마감(_snap_prd)과 동일.
+    #   _prd_price 는 as-of 일자로 매입 누계를 계산하는데 캐시는 **월 단위**다.
+    #   기간 시작일로 먼저 호출하면 '월초 as-of' 단가가 캐시에 박혀 기간 전체에 쓰이고,
+    #   같은 2607 을 마감은 월말 단가로 전개해 값이 갈린다(2026-08-28 실측: 금액차 216건,
+    #   AAA31179503 단가 2,906 vs 마감 2,699). ⟹ 호출 시점을 마감과 맞춘다.
+    px, _ic = _prd_price(cur, to6)
+
+    def _step(st, mv_day, px):
+        """하루 전개 — _snap_prd 본문과 동일 식."""
+        for k, mv in mv_day.items():
+            q0, a0 = st.get(k, [0.0, 0.0])
+            pq = mv["inq"]
+            if pq > 0:
+                c = (px.get(k[0]) or (a0,))[0]
+                avg = ((q0 * a0 + pq * c) / (q0 + pq)) if q0 > 0 else c
+            else:
+                avg = a0
+            st[k] = [q0 + mv["net"], avg]
+
+    if pre_start <= pre_end:
+        pre = _prd_moves(cur, pre_start, pre_end)
+        for y in sorted(pre):
+            _step(state, pre[y], px)
+    begin = {k: [v[0], v[1]] for k, v in state.items()}
+
+    moves = _prd_moves(cur, fr6, to6)
+    need = sorted({k[0] for y in moves for k in moves[y] if k[0] not in px}
+                  | {k[0] for k in state if k[0] not in px})
+    px.update(_prd_price_bom(cur, to6, need))
+
+    agg = {}
+    for y in sorted(moves):
+        for k, mv in moves[y].items():
+            a = agg.setdefault(k, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
+                                   "adj": 0.0, "adjamt": 0.0})
+            a["inq"] += mv["inq"]; a["outq"] += mv["outq"]; a["adj"] += mv["adj"]
+            a["inamt"] += mv["inq"] * ((px.get(k[0]) or (0.0,))[0])
+        _step(state, moves[y], px)
+        for k, mv in moves[y].items():           # 출고·조정은 갱신 후 평균으로(§22 실측)
+            _av = state.get(k, [0.0, 0.0])[1]
+            agg[k]["outamt"] += mv["outq"] * _av
+            agg[k]["adjamt"] += mv["adj"] * _av
+
+    # 단가0 보정 — 자재 단가를 승계(§14: 자재가 먼저 단가를 갖고 생산은 받는다)
+    for st_ in (begin, state):
+        for k, v in st_.items():
+            if abs(v[1]) < 1e-9:
+                c = (px.get(k[0]) or (0.0,))[0]
+                if c:
+                    v[1] = c
+
+    rows, breaks = [], []
+    for k in sorted(set(begin) | set(agg) | set(state)):
+        bq, bavg = begin.get(k, [0.0, 0.0])
+        a = agg.get(k, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0, "adj": 0.0, "adjamt": 0.0})
+        eq, eavg = state.get(k, [0.0, 0.0])
+        if (abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9
+                and abs(a["adj"]) < 1e-9 and abs(eq) < 1e-9):
+            continue
+        if abs((bq + a["inq"] - a["outq"] + a["adj"]) - eq) > 0.001:
+            breaks.append({"item": k[0], "loc": k[1], "축": "수량", "기초": round(bq, 4),
+                           "입고": round(a["inq"], 4), "출고": round(a["outq"], 4),
+                           "조정": round(a["adj"], 4), "기말": round(eq, 4)})
+        _ba, _ea = bq * bavg, eq * eavg
+        _va = _ea - (_ba + a["inamt"] - a["outamt"] + a["adjamt"])
+        rows.append({"cd": k[0], "loc": k[1], "va": round(_va, 2),
+                     "bq": round(bq, 4), "ba": round(_ba, 2),
+                     "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
+                     "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
+                     "tq": round(a["adj"], 4), "ta": round(a["adjamt"], 2),
+                     "sq": round(eq, 4), "sa": round(_ea, 2), "avg": round(eavg, 4)})
+    return rows, breaks, f"기초 {base_ymd} {src}"
+
+
 @router.get("/api/close/ledger")
 def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str = Query(""),
                  zero: int = Query(0), q: str = Query("")):
@@ -1360,14 +1443,29 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
        q = 품번/품명 부분일치 필터.
        ★불변식 기초+입−출±조정=기말 을 서버에서 검산해 breaks 로 돌려준다(0이어야 정상)."""
     d = (domain or "MAT").strip().upper()
-    if d != "MAT":
-        raise HTTPException(400, f"현재 자재(MAT)만 지원합니다 — 생산/영업은 확정 스냅샷 recipe 가 별도입니다(§7-5).")
+    if d not in ("MAT", "PRD"):
+        raise HTTPException(400, "자재(MAT)·생산(PRD)만 지원합니다 — 영업(SAL)은 040 recipe 라 별도(§7-5).")
     cn = _nx(); cur = cn.cursor()
     try:
         to6 = _d6(d_to) or _today6()
         fr6 = _d6(d_from) or (to6[:4] + "01")
         if fr6 > to6:
             fr6, to6 = to6, fr6
+        if d == "PRD":
+            rows, breaks, basis = _prd_ledger(cur, fr6, to6)
+            _attach_item_info(cur, rows, to6)
+            if q:
+                k = q.strip().upper()
+                rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
+            tot = {f: round(sum(r[f] for r in rows), 2)
+                   for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa")}
+            va_rows = [r["cd"] for r in rows if abs(r["va"]) > 1.0]
+            return {"domain": d, "from": fr6, "to": to6, "count": len(rows), "rows": rows,
+                    "totals": tot, "basis": basis, "invariant_breaks": breaks,
+                    "valuation_adjust": {"count": len(va_rows), "amount": tot["va"],
+                                         "items": va_rows[:50],
+                                         "why": "단가0 보정(자재단가 승계)·단가 리셋 — 이동이 아니라 단가를 고쳐 끼운 분"},
+                    "note": "생산 수불장 = 확정 스냅샷 기초 + 480 분기 전표 파생. 축=(품목×재고위치)."}
         # ── 기초 = fr6 직전의 확정 스냅샷까지 전개한 상태 ──────────────────
         #   ★_mv_base 는 "target 직전 확정 스냅샷"을 준다. 그 시점부터 fr6 전날까지는
         #     전표로 이어 붙여야 기초가 정확하다(이중계상 금지 — §7-7 #2).

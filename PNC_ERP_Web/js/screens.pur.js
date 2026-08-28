@@ -722,7 +722,7 @@ SCREEN.matledger=(c)=>{
   //   를 읽어 "누가 언제 조회했느냐"로 내용이 바뀌었다. 이제 마감과 **같은 엔진**을 호출한다.
   //   정본 = _schema/CLOSE_MGMT_CANON.md §20~21 · STOCK_CLOSE_HANDOFF.md §7
   const API=API_BASE;
-  let pool=[], loading=false, msg='', meta=null, cur=[];
+  let pool=[], loading=false, msg='', meta=null, cur=[], dom='MAT';   // dom=MAT 자재 / PRD 생산
   const SG=DB.sgroupNames||{}, CT=DB.custTypeNames||{}, CHG=DB.chargeMap||{};
   const sgName=s=>{const k=(''+s).trim();return SG[k]||k||'';};
   const ctName=t=>{const k=(''+t).trim();return CT[k]||k||'';};
@@ -737,21 +737,22 @@ SCREEN.matledger=(c)=>{
   let dFrom=`${_t.getFullYear()}-${pad(_t.getMonth()+1)}-01`;
   const load=async()=>{
     loading=true;msg='';draw();
-    try{const u=`${API}/api/close/ledger?domain=MAT&d_from=${date2ymd(dFrom)}&d_to=${date2ymd(dTo)}`;
+    try{const u=`${API}/api/close/ledger?domain=${dom}&d_from=${date2ymd(dFrom)}&d_to=${date2ymd(dTo)}`;
       const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
       pool=j.rows||[];meta=j;}
     catch(e){pool=[];meta=null;msg='조회 실패 — '+e.message;}
     loading=false;draw();};
   const draw=()=>{
     const brk=(meta&&meta.invariant_breaks)||[], va=(meta&&meta.valuation_adjust)||{count:0,amount:0,why:''};
-    const sub=`기초(확정 스냅샷) + 입고 − 출고 ± 조정 = 기말 · 단가=이동평균 · <b>저장하지 않고 매번 계산</b>`
+    const sub=`기초(확정 스냅샷) + 입고 − 출고 ± 조정 = 기말 · 단가=이동평균${dom==='PRD'?'(매입가 기반)':''} · <b>저장하지 않고 매번 계산</b>${dom==='PRD'?' · 축=품목×재고위치':''}`
       +(meta?` · ${esc(meta.basis||'')}`:'');
     const sgroups=[...new Set(pool.map(r=>(''+r.sg).trim()).filter(Boolean))].sort();
     const custs=[...new Set(pool.map(r=>r.cust).filter(Boolean))].sort();
     c.innerHTML=`
-     <div class="page-title">📒 자재 수불장</div>
+     <div class="page-title">📒 ${dom==='PRD'?'생산':'자재'} 수불장</div>
      <div class="page-sub">${sub}</div>
      <div class="toolbar">
+       <div class="toggle-group"><button data-dom="MAT" class="${dom==='PRD'?'':'on'}">자재</button><button data-dom="PRD" class="${dom==='PRD'?'on':''}">생산</button></div>
        <label style="font-size:12px;color:var(--muted);font-weight:600">기간</label>
        <input type="date" class="inp" id="dfrom" value="${esc(dFrom)}" style="min-width:135px">
        <span style="color:var(--muted)">~</span>
@@ -772,7 +773,7 @@ SCREEN.matledger=(c)=>{
     pool.forEach(r=>{r._su=upr(r.sa,r.sq);r._bu=upr(r.ba,r.bq);r._iu=upr(r.ia,r.iq);r._ou=upr(r.oa,r.oq);r._tu=upr(r.ta,r.tq);
       r._sgn=sgName(r.sg);r._ctn=ctName(r.ctype);r._chg=chg(r.custcd);r._lin=fmtYmd(r.lastin);});
     c.querySelector('#th').innerHTML=`<tr>
-      <th>품목코드</th><th class="cap">품명</th>
+      <th>품목코드</th><th class="cap">품명</th>${dom==='PRD'?'<th>재고위치</th>':''}
       <th class="num gstock">재고수량</th><th class="num gstock">재고단가</th><th class="num gstock">재고금액</th>
       <th>소분류</th><th>매입유형</th><th class="center">단위</th>
       <th class="num">기초재고</th><th class="num">기초단가</th><th class="num">기초금액</th>
@@ -790,7 +791,7 @@ SCREEN.matledger=(c)=>{
         <div class="s-item ${T(rows,'sa')<0?'neg':''}">재고금액 <b>${wonI(T(rows,'sa'))} 원</b></div>`;};
     const gbf=r=>{const gb=c.querySelector('#gubun').value;return gb==='all'||(gb==='plus'?r.sq>0:r.sq<0);};
     const gtRow=rows=>rows.length?`<tr class="grandtot">
-      <td colspan="2" class="right">총계 (${won(rows.length)}건)</td>
+      <td colspan="${dom==='PRD'?3:2}" class="right">총계 (${won(rows.length)}건)</td>
       <td class="num">${won(T(rows,'sq'))}</td><td></td><td class="num">${wonI(T(rows,'sa'))}</td>
       <td></td><td></td><td></td>
       <td class="num">${won(T(rows,'bq'))}</td><td></td><td class="num">${wonI(T(rows,'ba'))}</td>
@@ -800,7 +801,7 @@ SCREEN.matledger=(c)=>{
       <td class="num">${wonI(T(rows,'va'))}</td>
       <td></td><td></td><td></td></tr>`:'';
     const render=rows=>{cur=rows;c.querySelector('#body').innerHTML=rows.length?rows.map(r=>`<tr>
-      <td><b>${esc(r.cd)}</b></td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td>
+      <td><b>${esc(r.cd)}</b></td><td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td>${dom==='PRD'?`<td>${esc(r.loc)||'가공창고'}</td>`:''}
       <td class="num gstock qty"><b>${won(r.sq)}</b></td><td class="num gstock">${won(r._su)}</td><td class="num gstock amt"><b>${wonI(r.sa)}</b></td>
       <td>${esc(r._sgn)}</td><td>${esc(r._ctn)}</td><td class="center">${esc(r.unit)||''}</td>
       <td class="num">${won(r.bq)}</td><td class="num">${won(r._bu)}</td><td class="num">${wonI(r.ba)}</td>
@@ -809,7 +810,7 @@ SCREEN.matledger=(c)=>{
       <td class="num">${won(r.tq)}</td><td class="num">${won(r._tu)}</td><td class="num">${wonI(r.ta)}</td>
       <td class="num" ${Math.abs(+r.va||0)>1?'style="color:#c0392b;font-weight:700"':''} title="단가0 보정·마이너스재고 단가리셋 분">${(+r.va||0)?wonI(r.va):''}</td>
       <td>${esc(r._chg)||'-'}</td><td class="cap" title="${esc(r.cust)||''}">${esc(r.cust)||'-'}</td><td class="center">${esc(r._lin)||'-'}</td></tr>`).join('')+gtRow(rows)
-      :`<tr><td colspan="24" class="empty">${pool.length===0?'해당 기간 자료 없음':'검색 결과 없음(필터 조건 확인)'}</td></tr>`;
+      :`<tr><td colspan="${dom==='PRD'?25:24}" class="empty">${pool.length===0?'해당 기간 자료 없음':'검색 결과 없음(필터 조건 확인)'}</td></tr>`;
       sumbar(rows);c.querySelector('#cnt').textContent=`${rows.length}건 / 대상 ${pool.length}건`;};
     const cutoffYmd=()=>{const v=c.querySelector('#dto').value; if(!v)return null;
       const d=new Date(v); if(isNaN(d))return null; d.setMonth(d.getMonth()-3);
@@ -821,17 +822,18 @@ SCREEN.matledger=(c)=>{
         &&(!q||(r.cd||'').toLowerCase().includes(q)||(r.nm||'').toLowerCase().includes(q))));};
     const go=()=>{const f=c.querySelector('#dfrom').value, t2=c.querySelector('#dto').value;
       if(f!==dFrom||t2!==dTo){dFrom=f;dTo=t2;load();}else apply();};
+    c.querySelectorAll('[data-dom]').forEach(b=>b.onclick=()=>{if(dom!==b.dataset.dom){dom=b.dataset.dom;load();}});
     c.querySelector('#go').onclick=go;
     c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
     c.querySelector('#dfrom').onchange=go;c.querySelector('#dto').onchange=go;
     c.querySelector('#sg').onchange=apply;c.querySelector('#cust').onchange=apply;c.querySelector('#gubun').onchange=apply;
     c.querySelector('#longstk').onchange=apply;
     c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#sg').value='';c.querySelector('#cust').value='';c.querySelector('#gubun').value='all';c.querySelector('#longstk').checked=false;apply();};
-    c.querySelector('#xls').onclick=()=>downloadCSV(`자재수불장_${date2ymd(dFrom)}_${date2ymd(dTo)}.csv`,
+    c.querySelector('#xls').onclick=()=>downloadCSV(`${dom==='PRD'?'생산':'자재'}수불장_${date2ymd(dFrom)}_${date2ymd(dTo)}.csv`,
       ['품목코드','품명','재고수량','재고단가','재고금액','소분류','매입유형','단위','기초재고','기초단가','기초금액','입고수량','입고단가','입고금액','출고수량','출고단가','출고금액','기타수량','기타단가','기타금액','평가조정','담당자','매입처명','최종입고일'],
       cur.map(r=>[r.cd,r.nm,r.sq,r._su,Math.round(r.sa),r._sgn,r._ctn,r.unit,r.bq,r._bu,Math.round(r.ba),r.iq,r._iu,Math.round(r.ia),r.oq,r._ou,Math.round(r.oa),r.tq,r._tu,Math.round(r.ta),Math.round(r.va||0),r._chg,r.cust,r._lin]));
-    if(loading){c.querySelector('#body').innerHTML=spinRow(24);c.querySelector('#cnt').textContent='';}
-    else if(msg){c.querySelector('#body').innerHTML=`<tr><td colspan="24" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;c.querySelector('#cnt').textContent='';}
+    if(loading){c.querySelector('#body').innerHTML=spinRow(dom==='PRD'?25:24);c.querySelector('#cnt').textContent='';}
+    else if(msg){c.querySelector('#body').innerHTML=`<tr><td colspan="${dom==='PRD'?25:24}" class="empty" style="color:#c0392b">⚠ ${esc(msg)}</td></tr>`;c.querySelector('#cnt').textContent='';}
     else{render(pool);
       enableSort(c,['cd','nm','sq','_su','sa','_sgn','_ctn','unit','bq','_bu','ba','iq','_iu','ia','oq','_ou','oa','tq','_tu','ta','va','_chg','cust','lastin'],()=>cur,render);}
   };
