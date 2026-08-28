@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _assert_open)
 
 router = APIRouter()
 
@@ -301,6 +301,7 @@ def gagong_move580_issue(payload: dict = Body(...)):
     # 자재구분별 최종 전표행 조립. P2(가공)는 프론트가 넘긴 값 그대로(자기자신), 사급/사내생산은 BOM 1단계 전개.
     out_rows = []   # {item_code, mat_code, item_desc, set_qty, use_qty, maint_qty, remarks, pr_part_code, sagub_cust_code, to_gagong_proc_code}
     nxcn = _nx(); nxcur = nxcn.cursor()
+    _assert_open(nxcur, ymd, "PRD", "가공이동 발행")   # ★마감잠금
     try:
         for r in rows_in:
             item_code = str(r.get("item_code") or "").strip()
@@ -482,6 +483,7 @@ def gagong_move580_delete(payload: dict = Body(...)):
             try: seq = int(k.get("seq"))
             except Exception: continue
             if not ymd: continue
+            _assert_open(cur, ymd, "PRD", "가공이동 삭제")   # ★마감잠금
             cur.execute("""SELECT ISNULL(IN_CONFIRM_FLAG,'0'), MAINT_GROUP_SEQ
                 FROM nx.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE MAINT_YMD=? AND MAINT_SEQ=?""", ymd, seq)
             row = cur.fetchone()

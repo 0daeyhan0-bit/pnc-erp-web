@@ -4,7 +4,7 @@
 쓰기(추가/수정/삭제) = 신규 nx.prod_stock_adjust (미러 delta-sync clobber 방지). 채번 MAINT_SEQ = 일자별 max+1(미러+웹 통합).
 수정구분(MAINT_TAG): J=출하등록(w_pr_input_040 자동·음수) / P=생산입고(w_pr_input_260/520 자동·양수) / 2=재고조정(수동) / R=반품 / 1=불량."""
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _nx, _nx_tx
+from common import _nx, _nx_tx, _assert_open
 
 router = APIRouter()
 
@@ -98,9 +98,11 @@ def prodstockadj_save(payload: dict = Body(...)):
     swo = str(payload.get("split_work_order") or "").strip() or None
     rmk = str(payload.get("remarks") or "").strip() or None
     user = str(payload.get("user") or "web").strip() or "web"
+    _AO_YMD = ymd     # ★마감잠금 대상일자(아래 커서 확보 후 검사)
     rid = payload.get("id")
     cn = _nx_tx(); cur = cn.cursor()
     try:
+        _assert_open(cur, _AO_YMD, "PRD", "생산재고조정")   # ★마감잠금
         if rid:  # 수정
             # ★기존 미러행 제거용 옛 (ymd,seq) 읽기
             cur.execute("SELECT maint_ymd, maint_seq FROM nx.prod_stock_adjust WHERE id=?", int(rid))
@@ -146,6 +148,8 @@ def prodstockadj_delete(payload: dict = Body(...)):
         q = ",".join("?" * len(ids))
         cur.execute(f"SELECT maint_ymd, maint_seq FROM nx.prod_stock_adjust WHERE id IN ({q})", *ids)
         _rows = [(str(r[0]).strip(), r[1]) for r in cur.fetchall()]
+        for _y, _ in _rows:                      # ★마감잠금: 대상행 일자가 마감이면 삭제 불가
+            _assert_open(cur, _y, "PRD", "생산재고조정 삭제")
         cur.execute(f"DELETE FROM nx.prod_stock_adjust WHERE id IN ({q})", *ids)
         for _y, _s in _rows: _pa_mirror_del(cur, _y, _s)
         n = cur.rowcount; cn.commit()

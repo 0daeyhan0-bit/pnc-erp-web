@@ -42,7 +42,19 @@ git clone http://200.200.200.184:3000/pncind/new_erp_1.git
         └ db_client.py      ← 여기! (repo 폴더의 형제)
   ```
   즉 `new_erp_1` 과 `New_ERP` 가 **같은 부모 폴더 아래 나란히** 있어야 합니다.
-- **db_client.py 는 절대 커밋 금지** (.gitignore·외부폴더로 보호되지만 주의).
+- **db_client.py 는 절대 커밋 금지** (.gitignore·외부폴더로 보호되지만 주의)
+
+### 1-4b. ★프론트 데이터 파일 `js/data.js` 배치 (worktree 필수)
+`PNC_ERP_Web/js/data.js`(약 26MB)는 **`.gitignore` 대상**이라 clone·worktree 에 딸려오지 않는다.
+이 파일이 전역 `DB`(품목·거래처·대시보드·재고·단가이력 등)를 정의하므로, **없으면 그걸 참조하는 화면이
+`ReferenceError: DB is not defined` 로 통째로 안 뜬다**(예: 자재수불장 `SCREEN.matledger` — 2026-08-27 실제 발생).
+API 는 멀쩡한데 화면만 죽어서 원인 찾기 어렵다.
+
+```bash
+# 본체 clone 에서 복사 (worktree 만들 때마다)
+cp <본체>/PNC_ERP_Web/js/data.js  <worktree>/PNC_ERP_Web/js/data.js
+```
+※ 커밋 금지(.gitignore 로 이미 보호). 운영 서버에는 배치돼 있어 운영은 정상..
 
 ### 1-5. 파이썬 환경
 ```powershell
@@ -118,6 +130,24 @@ git push -u origin feat/gagong-progress
 ---
 
 ## 5. 유용한 도구
+
+### ★5-0. 흐름 TestBed — 쓰기 화면을 고쳤으면 **배포 전에 반드시 돌린다**
+우리가 개발한 화면이 부르는 **실제 API 를 구동**해서, 값이 원장·수불장·재고 3곳에
+같게 적히는지(**흐름**)와 우리 규칙이 실제로 막는지(**규칙** — 음수·마감·권한·유효성)를 검증한다.
+**오염 0**: no-commit 공유 커넥션이라 DB 에 아무것도 남지 않고, 매 실행마다 그것을 증명한다.
+
+```bash
+python _migration/flow_server.py --port 8099     # 창 1 · 롤백 백엔드
+python _migration/flow_scenarios.py              # 창 2 · 전체 (종료코드 0=전부통과)
+python _migration/flow_scenarios.py --list       # 케이스 목록만
+python _migration/flow_scenarios.py --kind R     # 규칙만
+```
+- **동시에 여러 명이 돌릴 땐 `--port` 를 나눈다**(한 서버를 둘이 쓰면 서로의 미커밋을 본다).
+- **내 프로그램 추가** = `_migration/flow_cases.py` 에 dict 하나. 하네스 본체는 안 건드린다.
+- **새 규칙을 만들면 `[R]` 케이스도 같은 커밋에 추가한다**(하드룰).
+- 자세한 사용법·판정 읽는 법·함정 8가지 = **`_schema/FLOW_TESTBED.md`**
+
+### 5-1. 그 밖
 - **미러 정합 감시**: `_harness/mirror_recon.py` — nx 미러 vs 라이브 dbo 대조(컷오버 준비).
 - **미러 재싱크**: `_migration/sub_norm/r_delta_sync.py --commit`.
 - **원가 검증**: `_harness/cost_oracle.py`, 엔진 `_harness/nx_cost_engine.py`.

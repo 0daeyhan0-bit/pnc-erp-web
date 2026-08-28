@@ -3,7 +3,7 @@
    app.py에서 분리. 공유헬퍼는 common.py."""
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open, stock_changed
 
 router = APIRouter()
 
@@ -84,6 +84,7 @@ def setin_issue(payload: dict = Body(...)):
                 WHERE sheet_no=? AND remarks='PLAN_COMPOSE' AND status IN ('00','10')""", q, batch, sh)
             ok += cur.rowcount
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "count": ok, "barcode": batch, "action": "발행"}
     finally:
         cn.close()
@@ -182,6 +183,8 @@ def setstock_receive(payload: dict = Body(...)):
         raise HTTPException(400, "SET바코드가 필요합니다.")
     cn = _nx(); cur = cn.cursor()
     try:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
+        _assert_open(cur, cur.fetchone()[0], "MAT", "세트입고")   # ★마감잠금(입고일=오늘)
         cur.execute("""SELECT h.sheet_no, h.item_code, ISNULL(h.deliver_qty,h.input_req_qty) qty, h.in_cust_code,
               ISNULL(h.insp_flag,'0') insp FROM nx.set_input_req h WHERE h.barcode_no=? AND h.status IN ('10','30')""", bc)
         reqs = cur.fetchall()
@@ -213,6 +216,7 @@ def setstock_receive(payload: dict = Body(...)):
                     posted += 1
                 cur.execute("UPDATE nx.set_stock_maint SET derived_flag='1' WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6) AND maint_seq=?", mseq)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "received": recv, "ledger_posted": posted, "barcode": "SET" + bc}
     finally:
         cn.close()

@@ -407,15 +407,35 @@ def price_lgprice_list(q: str = Query(""), biz: str = Query("")):
     nx = _nx(); cur = nx.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute(f"""SELECT p.item_code, ISNULL(i.item_name,''), p.vendor_code, p.price_type, p.apply_ymd, p.price, p.currency
-            FROM nx.price_item p LEFT JOIN nx.item i ON i.item_code=p.item_code
-            WHERE p.vendor_code IN ({vin}) AND p.price_type IN ('TAGE','TAGS')
-              AND (?='' OR p.item_code LIKE ? OR i.item_name LIKE ?)
-              AND p.apply_ymd=(SELECT MAX(x.apply_ymd) FROM nx.price_item x
-                    WHERE x.item_code=p.item_code AND x.vendor_code=p.vendor_code AND x.price_type=p.price_type)
-            ORDER BY p.item_code, p.vendor_code, p.price_type""", q.strip(), like, like)
-        rows = [{"item": r[0], "name": r[1], "vendor": r[2], "type": r[3], "apply_ymd": r[4], "price": float(r[5]), "currency": r[6]} for r in cur.fetchall()]
-        return {"rows": rows, "cnt": len(rows)}
+        # ★직전 판가를 함께 싣는다 — "얼마가 올랐는지" 를 화면에서 바로 보기 위함(2026-08-28).
+        #   종전엔 최신값만 줘서, 사급가 변동으로 판가가 올라도 화면에서 그 사실이 안 보였다.
+        #   prev = 같은 (품번·사업부·구분) 에서 최신 바로 아래 적용일의 가격.
+        cur.execute(f"""WITH r AS (
+              SELECT p.item_code, p.vendor_code, p.price_type, p.apply_ymd, p.price, p.currency,
+                     ROW_NUMBER() OVER (PARTITION BY p.item_code, p.vendor_code, p.price_type
+                                        ORDER BY p.apply_ymd DESC) rn
+                FROM nx.price_item p
+               WHERE p.vendor_code IN ({vin}) AND p.price_type IN ('TAGE','TAGS'))
+            SELECT c.item_code, ISNULL(i.item_name,''), c.vendor_code, c.price_type,
+                   c.apply_ymd, c.price, c.currency, v.apply_ymd, v.price
+              FROM r c
+              LEFT JOIN r v ON v.item_code=c.item_code AND v.vendor_code=c.vendor_code
+                           AND v.price_type=c.price_type AND v.rn=2
+              LEFT JOIN nx.item i ON i.item_code=c.item_code
+             WHERE c.rn=1 AND (?='' OR c.item_code LIKE ? OR i.item_name LIKE ?)
+             ORDER BY c.apply_ymd DESC, c.item_code, c.vendor_code, c.price_type""",
+                    q.strip(), like, like)
+        rows = []
+        for r in cur.fetchall():
+            cur_p = float(r[5]); prev_p = float(r[8]) if r[8] is not None else None
+            rows.append({"item": r[0], "name": r[1], "vendor": r[2], "type": r[3],
+                         "apply_ymd": r[4], "price": cur_p, "currency": r[6],
+                         "prev_ymd": r[7], "prev_price": prev_p,
+                         "diff": (round(cur_p - prev_p, 4) if prev_p is not None else None),
+                         "rate": (round((cur_p - prev_p) / prev_p * 100, 2) if prev_p else None)})
+        # 적용일 목록(필터 드롭다운용) — 최신순
+        ymds = sorted({r["apply_ymd"] for r in rows}, reverse=True)
+        return {"rows": rows, "cnt": len(rows), "ymds": ymds}
     finally:
         nx.close()
 

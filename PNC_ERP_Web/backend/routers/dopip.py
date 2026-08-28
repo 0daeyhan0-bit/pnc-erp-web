@@ -4,7 +4,7 @@
    금액(KRW) = ROUND(MAINT_AMT×EXCHANGE_RATE,0,1) 버림(레거시 검증). 금액=수량×단가.
    키=(MAINT_YMD,MAINT_SEQ). 채번: sheet_no=max(division)+1, maint_seq=max(ymd)+1."""
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _nx, _custnm_map, _d6, _lock_msg
+from common import _nx, _custnm_map, _d6, _lock_msg, _assert_open
 
 router = APIRouter()
 
@@ -147,6 +147,7 @@ def dopip_save_batch(p: dict = Body(...)):
     if not valid: raise HTTPException(400, "품목 행 1개 이상(품번·수량) 필요")
     cn = _nx(); c = cn.cursor()
     try:
+        _assert_open(c, ymd, "MAT", "도입 일괄입력")   # ★마감잠금
         nseq = int(c.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=?", ymd).fetchone()[0])
         sheet = int(c.execute("SELECT ISNULL(MAX(SHEET_NO),0)+1 FROM nx.PU_T_STOCK_MAINT_C WHERE DIVISION=?", tag).fetchone()[0])
         ins = 0; seqs = []
@@ -176,6 +177,7 @@ def dopip_delete(p: dict = Body(...)):
     if len(ymd) != 6 or seq <= 0: raise HTTPException(400, "일자·순번 필요")
     cn = _nx(); c = cn.cursor()
     try:
+        _assert_open(c, ymd, "MAT", "도입 삭제")   # ★마감잠금
         c.execute("DELETE FROM nx.PU_T_STOCK_MAINT_C WHERE MAINT_YMD=? AND MAINT_SEQ=? AND MAINT_TAG=?", ymd, seq, tag)
         n = c.rowcount; cn.commit()
         if n == 0: raise HTTPException(404, "삭제 대상 없음")

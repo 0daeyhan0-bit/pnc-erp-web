@@ -189,17 +189,53 @@ def _ym(ymd):  # MAINT_YMD(YYMMDD/YYYYMMDD) → 마감월 YYMM. 공유: sales(�
 
 
 # ── 도메인간 공유(app.py에서 추출) ──
-def _closed(cur, ymd):
-    cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", _ym(ymd))
-    r = cur.fetchone()
-    return bool(r and r[0])
+def _closed(cur, ymd, domain="MAT"):
+    """마감 여부(bool). ★공용 게이트 `_lock_msg` 에 위임한다.
+
+       ★2026-08-28 결함수정: 종전엔 구 전역 월잠금 `nx.stock_close` 만 봤다.
+         우리 마감은 `nx.period_close` 에 기록되므로 **마감된 달의 전표가 그대로 저장**됐다
+         (TestBed 확장이 발견 — 생산파트재고조정·발주입고이 마감월 2607 로 통과).
+         게이팅 캐논 §0-★ = 예외 없음 → 마감잠금도 전 화면이 같은 판정을 써야 한다.
+       `_lock_msg` 는 ① 일마감 ② 월마감 ③ 구 stock_close(하위호환) 순으로 보므로
+       종전 동작을 포함하면서 우리 마감까지 잡는다."""
+    return bool(_lock_msg(cur, ymd, domain))
 
 # ===== 전 도메인 공통 가드 (마감 일자 잠금 + 재고 가용성 게이팅) — 정본 _schema/STOCK_GATING_CLOSE_LOCK_RULES.md =====
-def _lock_msg(cur, ymd):
-    """마감 일자 잠금. 마감월(nx.stock_close)이면 사유메시지, 아니면 None. (비발생형 — 호출측이 return/raise 결정)"""
+def _lock_msg(cur, ymd, domain="MAT"):
+    """★마감 일자 잠금 (전 도메인 공통). 마감된 기간이면 사유메시지, 아니면 None.
+       (비발생형 — 호출측이 return/raise 결정)
+
+       판정 순서 (정본 = nx.period_close, 마감관리 화면이 기록):
+         ① 일마감  nx.period_close(domain, 'D', YYMMDD)   ← 그 날이 잠겼는가
+         ② 월마감  nx.period_close(domain, 'M', YYMM)     ← 일마감 ⊂ 월마감
+         ③ 하위호환 nx.stock_close(ym)                     ← 구 전역 월잠금(기존 동작 보존)
+       domain = MAT 자재 / PRD 생산 / SAL 영업. 미지정이면 MAT.
+       정본 = _schema/STOCK_GATING_CLOSE_LOCK_RULES.md 규칙B · nextgen-erp-close-settlement(일마감⊂월마감)."""
     ymd = str(ymd or "").strip()
-    if len(ymd) >= 6 and _closed(cur, ymd):
-        return f"{_ym(ymd)} 마감된 월입니다 — 생성/수정/삭제 불가"
+    if len(ymd) < 6:
+        return None
+    d = str(domain or "MAT").strip().upper() or "MAT"
+    ym = _ym(ymd)
+    try:
+        cur.execute("""SELECT ptype FROM nx.period_close
+                       WHERE domain=? AND close_flag=1 AND ((ptype='D' AND period=?) OR (ptype='M' AND period=?))
+                       ORDER BY ptype""", d, ymd[:6], ym)
+        r = cur.fetchone()
+        if r:
+            return (f"{ymd[:6]} 일마감된 일자입니다 — 생성/수정/삭제 불가" if r[0] == "D"
+                    else f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가")
+    except Exception:
+        pass          # period_close 미생성 환경(구 배포본) → 하위호환 경로로
+    # ③ 하위호환 = 구 전역 월잠금. ★_closed() 를 부르면 안 된다 —
+    #   _closed 가 다시 _lock_msg 로 위임하므로 **무한 재귀**가 된다(2026-08-28 실측).
+    #   여기서는 원천을 직접 읽는다.
+    try:
+        cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", ym)
+        r = cur.fetchone()
+        if r and r[0]:
+            return f"{ym} 마감된 월입니다 — 생성/수정/삭제 불가"
+    except Exception:
+        pass
     return None
 
 def _mat_avail(cur, item):
@@ -636,3 +672,28 @@ def _is_sub_code(cur, code):
         return r is not None
     except Exception:
         return False
+
+def _assert_open(cur, ymd, domain="MAT", what="이 작업"):
+    """★마감 잠금 강제(전 재고이동 쓰기 공통). 마감된 기간이면 400으로 거부.
+       규칙(사용자 확정 2026-08-27): 재고가 조금이라도 움직이면 잠근다.
+         한 엔드포인트가 재고이동과 문서발행을 겸해 분리가 어려우면 → 막는 쪽으로 지정.
+       사용: _assert_open(cur, ymd)            # 자재(기본)
+             _assert_open(cur, ymd, "PRD")     # 생산
+       정본 = _schema/STOCK_GATING_CLOSE_LOCK_RULES.md 규칙B."""
+    from fastapi import HTTPException as _HE
+    m = _lock_msg(cur, ymd, domain)
+    if m:
+        raise _HE(400, f"{m} ({what})")
+
+
+# ===== 재고 변경 훅 — 캐시 stale 금지 (2026-08-28) =====
+# ★수불장(close.py `_LEDGER_CACHE`)은 조회 전용 캐시다. 재고가 움직이면 반드시 버려야
+#   화면이 옛 값을 보여주지 않는다. 재고를 쓰는 **모든** 경로가 이 함수를 부른다.
+#   여기 두는 이유 = routers 끼리 서로 임포트하면 순환이 난다. common 은 모두가 이미 쓴다.
+def stock_changed(reason=""):
+    """재고가 바뀌었다 — 파생 캐시를 버린다. 실패해도 쓰기를 막지 않는다(조회 캐시일 뿐)."""
+    try:
+        from routers.close import _ledger_cache_clear
+        _ledger_cache_clear()
+    except Exception:
+        pass
