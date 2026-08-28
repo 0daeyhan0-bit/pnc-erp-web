@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, stock_changed)
 
 router = APIRouter()
 
@@ -179,7 +179,7 @@ def stockmaint_save(payload: dict = Body(...)):
     mid = p.get("id")
     nx = _nx(); cur = nx.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "PRD"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
         # ★파트는 반드시 코드여야 한다 — 표시명('04라인')이 들어가면 그 파트에 재고가
         #   쌓여 실제 파트(S4)에서 안 보인다(2026-08-25 실사고).
@@ -199,7 +199,7 @@ def stockmaint_save(payload: dict = Body(...)):
         if mid:  # 수정 = 기존행 삭제 후 신규(재키)
             try:
                 oy, osq = str(mid).split("-"); osq = int(osq)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "PRD"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 # ★기존 미러행 제거용 옛값 읽기(삭제 전)
                 cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
@@ -233,7 +233,7 @@ def stockmaint_delete(payload: dict = Body(...)):
                 y, sq = x.split("-"); sq = int(sq)
             except ValueError:
                 continue
-            if _closed(cur, y):
+            if _closed(cur, y, "PRD"):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
             # ★삭제 전 옛값 읽어 조회원천 미러행도 제거
             cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
@@ -321,17 +321,45 @@ def procreg_save(payload: dict = Body(...)):
     mid = p.get("id")
     nx = _nx(); cur = nx.cursor()
     try:
+        # ★생산실적 재고 게이트 — 예외 없음(정본 STOCK_GATING_CLOSE_LOCK_RULES.md §0-★).
+        #   이 화면은 종전에 게이트가 **아예 없었다**(nx.proc_result INSERT 만).
+        #   실적을 잡는다 = 그 수량만큼 만들었다 = BOM 자재를 썼다 → 자재가 없으면 실적 불가.
+        #   수정 시엔 **늘어난 수량분**만 판정한다(같은 실적을 두 번 요구하지 않기 위해).
+        #   차단 시 사유(어느 자재가 얼마 부족한지·어디에 있는지)를 그대로 돌려준다.
+        need_qty = qty
+        if mid:
+            cur.execute("SELECT CAST(ISNULL(PROD_QTY,0) AS float) FROM nx.proc_result WHERE ID=?", int(mid))
+            _r = cur.fetchone()
+            need_qty = max(0.0, qty - float(_r[0] or 0)) if _r else qty
+        if need_qty > 0:
+            _lm = _lock_msg(cur, ymd)                     # 마감 잠금도 함께(규칙 B)
+            if _lm:
+                raise HTTPException(409, _lm)
+            # ★_is_inner_prod 로 대상을 거르지 않는다 — 그 함수는 라이브 커넥션에서
+            #   nx.item 을 읽다 실패하면 **예외를 삼키고 False** 를 돌려주어(=게이트 스킵)
+            #   또 하나의 숨은 예외가 된다(2026-08-28 하네스로 실측). §0-★ 규칙 A-0 위반.
+            #   대신 BOM 을 전개해 **소비할 것이 있으면 무조건 판정**한다.
+            #   BOM 이 비면 소비 자체가 없는 것이므로 게이트 대상이 아니다(예외가 아니라 해당 없음).
+            from routers.backflush import _backflush_bom, _prod_shortages
+            _comps, _weld = _backflush_bom(nx, item, nx)   # ★cro 도 nx — 라이브엔 nx 스키마가 없다
+            _short = _prod_shortages(nx, _comps, _weld, need_qty)
+            if _short:
+                _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
+                raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
+                                    + "; ".join(_short[:8]) + _more)
         if mid:
             cur.execute("""UPDATE nx.proc_result SET PROD_YMD=?, PROD_HMS=?, WORK_ORDER=?, SPLIT_WORK_ORDER=?,
                 ITEM_CODE=?, LINE_NO=?, PART_CODE=?, S_WORK_CODE=?, PROD_QTY=?, WORK_CODE=?, FINISH_FLAG=?,
                 PROD_USER_ID=?, UPDATE_USER_ID=?, UPDATE_DATETIME=getdate() WHERE ID=?""",
                 ymd, hms, wo, swo, item, line, part, sw, qty, work, fin, usr, usr, int(mid))
+            stock_changed("procreg")          # ★생산실적 변경 → 수불장 캐시 버림
             return {"ok": True, "id": int(mid), "mode": "update"}
         cur.execute("""INSERT INTO nx.proc_result(PROD_YMD,PROD_HMS,WORK_ORDER,SPLIT_WORK_ORDER,ITEM_CODE,
             LINE_NO,PART_CODE,S_WORK_CODE,PROD_QTY,WORK_CODE,FINISH_FLAG,PROD_USER_ID,UPDATE_USER_ID)
             OUTPUT INSERTED.ID VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             ymd, hms, wo, swo, item, line, part, sw, qty, work, fin, usr, usr)
         nid = cur.fetchone()[0]
+        stock_changed("procreg")              # ★생산실적 변경 → 수불장 캐시 버림
         return {"ok": True, "id": int(nid), "mode": "insert"}
     finally:
         nx.close()
@@ -428,14 +456,14 @@ def matissue_save(payload: dict = Body(...)):
         raise HTTPException(400, "FROM파트와 TO파트가 같습니다.")
     nx = _nx_tx(); cur = nx.cursor()   # ★원자성: MV 이동 2행(±) 그룹 트랜잭션
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
         cur.execute("SELECT ISNULL(MAX(MAINT_GROUP_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_TAG='MV'")
         gseq = cur.fetchone()[0]   # 삭제 전 채번 → 수정 시 신규 그룹번호(기존과 상이)
         if mid:  # 수정 = 기존 그룹(2행) 삭제 후 재생성
             try:
                 oy, og = str(mid).split("-"); og = int(og)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "MAT"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='MV' AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", oy, og)
             except (ValueError, AttributeError):
@@ -455,6 +483,7 @@ def matissue_save(payload: dict = Body(...)):
                 VALUES('MAT',?,?,?, 'MV', ?,?,?,?,?,?,?,?,GETDATE())""",
                 ymd, seq, gseq, gpc, to_gpc, (work or None), mat, (item or None), sq, (rem or None), usr)
         nx.commit()   # ★2행(−FROM/+TO) 원자 커밋
+        stock_changed("matissue")             # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "id": f"{ymd}-{gseq}", "mode": ("update" if mid else "insert")}
     except Exception:
         nx.rollback(); raise   # 부분실패 시 net-0 불변식 보존(전체 롤백)
@@ -474,7 +503,7 @@ def matissue_delete(payload: dict = Body(...)):
                 y, g = x.split("-"); g = int(g)
             except ValueError:
                 continue
-            if _closed(cur, y):
+            if _closed(cur, y, "MAT"):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
             cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='MV' AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", y, g)
             dl += cur.rowcount

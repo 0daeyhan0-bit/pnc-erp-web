@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_prod_stock_map, _latest_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg)
+from common import (_prod_stock_map, _latest_stock_map, _conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, stock_changed)
 
 router = APIRouter()
 
@@ -1077,6 +1077,7 @@ def kitting_cell_confirm(payload: dict = Body(...)):
               WORK_ORDER,INPUT_YMD,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
             VALUES('RDY',RIGHT(CONVERT(varchar(8),GETDATE(),112),6),?,'K1','Z99990',?,?,?,?,?,'키팅확인',?,GETDATE())""",
             seq, item, gpc, (wo or None), (ymd or None), qty, user)
+        stock_changed("kitting_confirm")      # ★RDY 원장 변경 → 수불장 캐시 버림
         return {"ok": True, "qty": qty}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:200]}

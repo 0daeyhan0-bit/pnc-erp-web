@@ -2,85 +2,121 @@
 
 /* 시스템관리 > 마감관리 — 일/월마감 현황(잠금상태) + 실행·취소. 실제 마감은 쓰기라 운영DB(읽기전용)엔 불가 → 신규DB/백엔드에서 */
 SCREEN.close=(c)=>{
+  /* 시스템관리 > 마감관리 — 일/월 마감 실행·해제·현황.
+     ★마감 = ①그 시점 잔량을 스냅샷으로 확정(freeze) + ②잠금(그 기간 재고이동 전표 CRUD 차단).
+       정본 = nx.period_close(잠금) + nx.stock_snapshot(확정) · 백엔드 /api/close/*
+       ※구 /api/live/closestatus 는 레거시 임시테이블(PU_T_MONTH_STOCK_WH_DAILY, 조회시 TRUNCATE)의
+         MAX() 를 '최종마감'으로 표시해 부정확 → 사용하지 않는다. */
   const API=API_BASE;
-  c.innerHTML=`<div class="page-title">🔒 마감관리</div><div class="empty" style="padding:40px">${SPIN}마감현황 라이브 로딩…</div>`;
-  (async()=>{
-  let cs=[], asof='', cur='';
-  try{const r=await fetch(`${API}/api/live/closestatus`);if(!r.ok)throw 0;const j=await r.json();
-    cs=j.rows||[];const a=(''+(j.asof||'')).trim();asof=a.length>=6?`20${a.slice(0,2)}-${a.slice(2,4)}-${a.slice(4,6)}`:'';cur=j.curym||'';}
-  catch(e){cs=DB.closeStatus||[];asof=DB.closeAsof||'2026-07-18';cur=DB.curYm||'2607';}
-  const ymN=y=>{y=(''+(y||''));return y.length>=4?(2000+ +y.slice(0,2))*12 + +y.slice(2,4):null;};
-  const prevYm=ymN(cur)-1;   // 직전월(정상 마감 기준)
-  const fmtYm=y=>{y=(''+(y||''));return y.length>=4?`20${y.slice(0,2)}-${y.slice(2,4)}`:'-';};
-  const fmtYmd=y=>{y=(''+(y||''));return y.length>=6?`20${y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)}`:'-';};
-  const stat=r=>{
-    if(!r.last||r.last==='None'||r.last==='nan'||r.last==='NaT')return{t:'미마감',cls:'bad',behind:'—'};
-    if(r.ctype==='월'){const b=prevYm-ymN(r.last); return b<=0?{t:'정상',cls:'ok',behind:'0'}:{t:`지연 ${b}개월`,cls:'bad',behind:b};}
-    // 일마감: 기준일 근처면 정상
-    const a=(''+asof).replace(/-/g,'').slice(2); return r.last>=(''+(+a-3))?{t:'정상',cls:'ok',behind:'0'}:{t:'지연',cls:'bad',behind:'—'};
+  const DOM=[['MAT','자재'],['PRD','생산'],['SAL','영업']];
+  let dom='MAT', st=null, cal=null, busy=false;
+  // ★입력값은 상태로 보존 — draw() 가 innerHTML 을 통째로 다시 그리므로, 값을 DOM 에서만 읽으면
+  //   마감 실행 후 대상일/대상월/조회월이 오늘·이번달로 리셋된다(게이트D에서 실제 발생).
+  let dday=nowCD(), dmon=nowCM(), calm=nowCM();
+  const fmtYm=y=>{y=(''+(y||''));return y.length>=4?('20'+y.slice(0,2)+'-'+y.slice(2,4)):'-';};
+  const fmtYmd=y=>{y=(''+(y||''));return y.length>=6?('20'+y.slice(0,2)+'/'+y.slice(2,4)+'/'+y.slice(4,6)):'-';};
+  const ymIn=v=>(''+(v||'')).slice(2).replace('-','');
+  const ymdIn=v=>(''+(v||'')).slice(2).replace(/-/g,'');
+  const who=()=>{try{return (PERM&&PERM.userId)||'web';}catch(e){return 'web';}};   // ★PERM 필드명은 userId — 'user' 로 읽으면 항상 'web' 이 되어 백엔드 권한게이트에 차단됨(2026-08-27 수정)
+  // ★C5 권한 게이트 — 마감/해제는 회계 확정/되돌리기라 명시 권한자만. 백엔드가 최종 판정(403)하고, 여기선 오조작 방지용 UI 차단.
+  // ★백엔드 _assert_can_close 와 동일 규칙(deny by default). PERM.isAdmin() 은 쓰지 않는다 —
+  //   core.js currentUser() 가 미등록 사용자를 '시스템관리자'로 기본 반환(fail-open)해서 게이트가 열림.
+  const canClose=()=>{try{
+    const u=(typeof getUsers==='function')?getUsers().find(x=>x.id===PERM.userId):null;
+    if(u&&(u.roles||[]).includes('시스템관리자'))return true;
+    const pm=(PERM.perms[PERM.userId]||{})['close']; return !!(pm&&pm.edit);
+  }catch(e){return false;}};
+  const call=async(path,body)=>{
+    if(busy)return null; busy=true;
+    try{
+      const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await r.json();
+      if(!r.ok){alert('실패 — '+(j.detail||r.status));return null;}
+      alert(j.msg||'완료'); return j;
+    }catch(e){alert('통신 실패: '+e.message);return null;}
+    finally{busy=false; load();}
   };
-  const nBad=cs.filter(r=>stat(r).cls==='bad').length;
-  c.innerHTML=`
-   <div class="page-title">🔒 마감관리</div>
-   <div class="page-sub">일/월 마감 현황 및 실행 · 기준일 ${esc(asof)} · <b>마감 = 잠금</b>(마감된 기간의 전표는 수정·삭제 불가, 소급분은 당월 소급조정)</div>
-   ${nBad?`<div class="summary-bar" style="border-color:#e0b4b4;background:#fdf3f3"><div class="s-item neg">⚠ 미마감/지연 ${nBad}건 — 마감 프로세스 점검 필요 (예: 생산·영업 월마감이 2025.2에 멈춤)</div></div>`:''}
-   <div class="grid-wrap" style="max-height:340px;overflow:auto;margin-bottom:14px"><table class="tbl fit"><thead>
-     <tr><th>영역</th><th class="center">마감유형</th><th class="center">최종 마감</th><th class="center">상태</th><th>원본 테이블</th><th class="center">실행</th><th class="center">마감취소</th></tr></thead>
-     <tbody>${cs.map(r=>{const s=stat(r);const disp=r.ctype==='월'?fmtYm(r.last):fmtYmd(r.last);
-       return `<tr><td><b>${esc(r.name||r.domain)}</b></td><td class="center">${esc(r.ctype)}마감</td><td class="center">${(r.last&&r.last!=='None')?esc(disp):'<span style="color:#c0392b">없음</span>'}</td>
-        <td class="center"><span class="badge ${s.cls==='ok'?'b-green':'b-red'}">${esc(s.t)}</span></td>
-        <td><code>${esc(r.tbl)}</code></td>
-        <td class="center"><button class="btn xs act" data-run="${esc(r.name)}|${esc(r.ctype)}">마감 실행</button></td>
-        <td class="center"><button class="btn xs ghost act" data-cancel="${esc(r.name)}|${esc(r.ctype)}">취소</button></td></tr>`;}).join('')}</tbody></table></div>
-   <div class="page-sub" style="font-weight:700;margin:6px 0">수동 마감 실행</div>
-   <div class="toolbar">
-     <label class="tl">일마감 대상일</label><input type="date" class="inp" id="dday" value="${nowCD()}" style="min-width:135px">
-     <button class="btn" id="runday">일마감 실행</button><button class="btn ghost" id="canday">일마감 취소</button>
-     <span style="width:18px"></span>
-     <label class="tl">월마감 대상월</label><input type="month" class="inp" id="dmon" value="${nowCM()}" style="min-width:120px">
-     <button class="btn" id="runmon">월마감 실행</button><button class="btn ghost" id="canmon">월마감 취소</button>
-   </div>
-   <div class="page-sub" style="font-weight:700;margin:16px 0 6px">일자별 마감 캘린더</div>
-   <div class="toolbar" style="border:none;padding:0;margin-bottom:8px">
-     <label class="tl">조회월</label><input type="month" class="inp" id="calm" value="${nowCM()}" style="min-width:120px">
-     <span style="font-size:12px;color:var(--muted)">🟩 마감완료 · ⬜ 미마감 · 파란테두리=오늘 · 날짜 클릭 시 일마감 실행/취소</span>
-   </div>
-   <div class="grid-wrap" style="overflow:auto;border:none"><table class="cal"><thead><tr>${['일','월','화','수','목','금','토'].map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody id="calbody"></tbody></table></div>
-   <div class="page-sub" style="margin-top:12px;color:var(--muted)">※ 마감 실행/취소는 <b>쓰기 작업</b>입니다. 현재 운영 DB(PARTNER_ERP)는 <b>읽기 전용</b>이라 실제 실행은 차세대 ERP 신규 DB(또는 백엔드) 연결 후 활성화됩니다. 이 화면은 현재 마감 상태를 <b>가시화</b>합니다.</div>`;
-  // 일마감 캘린더
-  const dailyRow=cs.find(r=>r.ctype==='일')||{}; const dLast=(''+(dailyRow.last||'')).trim();  // 예 260717
-  const dCloseYmm=dLast.length>=6?dLast.slice(0,4):'', dCloseDay=dLast.length>=6?+dLast.slice(4,6):0;
-  const asofYmd=(''+asof).replace(/-/g,'').slice(2);  // 260718
-  const renderCal=ym=>{
-    const [Y,M]=ym.split('-').map(Number); const ymm=String(Y).slice(2)+String(M).padStart(2,'0');
+  const load=async()=>{
+    try{
+      const r=await fetch(API+'/api/close/status'); st=await r.json();
+      const r2=await fetch(API+'/api/close/calendar?domain='+dom+'&ym='+ymIn(calm)); cal=await r2.json();
+    }catch(e){ st=null; }
+    draw();
+  };
+  const draw=()=>{
+    if(!st){c.innerHTML='<div class="page-title">마감관리</div><div class="empty" style="padding:40px">마감현황을 불러오지 못했습니다 — 백엔드 확인</div>';return;}
+    const asof=fmtYmd(st.asof), rows=st.rows||[];
+    const domNm=(DOM.find(d=>d[0]===dom)||['',''])[1];
+    let h='';
+    h+='<div class="page-title">마감관리</div>';
+    h+='<div class="page-sub">일/월 마감 실행·해제 · 기준일 '+esc(asof)+' · <b>마감 = 확정 + 잠금</b>(그 시점 잔량을 스냅샷으로 확정하고, 그 기간 재고이동 전표는 생성·수정·삭제 불가)</div>';
+    h+='<div class="grid-wrap" style="max-height:300px;overflow:auto;margin-bottom:14px"><table class="tbl fit"><thead>';
+    h+='<tr><th>영역</th><th class="center">마감유형</th><th class="center">최종 마감</th><th class="center">스냅샷</th><th class="center">마감자</th><th class="center">마감일시</th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      const last = r.last ? esc(r.ptype==='M'?fmtYm(r.last):fmtYmd(r.last)) : '<span style="color:#c0392b">없음</span>';
+      const snap = r.snap_ready ? '<span class="badge b-green">확정</span>' : '<span class="badge b-red">2단계</span>';
+      h+='<tr><td><b>'+esc(r.domain_nm)+'</b></td><td class="center">'+esc(r.ptype_nm)+'</td><td class="center">'+last+'</td>'
+       + '<td class="center">'+snap+'</td><td class="center">'+esc(r.user||'')+'</td>'
+       + '<td class="center" style="font-size:11px">'+esc((r.dt||'').slice(0,19))+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+    h+='<div class="page-sub" style="font-weight:700;margin:6px 0">마감 실행 / 해제</div>';
+    h+='<div class="toolbar"><label class="tl">영역</label><select class="inp" id="dom">'
+     + DOM.map(d=>'<option value="'+d[0]+'"'+(dom===d[0]?' selected':'')+'>'+d[1]+'</option>').join('')+'</select>';
+    h+='<label class="tl" style="margin-left:8px">일마감 대상일</label><input type="date" class="inp" id="dday" value="'+dday+'" style="min-width:135px">';
+    h+=canClose()?'<button class="btn" id="runday">일마감 실행</button><button class="btn ghost" id="canday">일마감 해제</button>':'<span style="color:#c0392b;font-size:12px">🔒 마감 권한 없음</span>';
+    h+='<span style="width:14px"></span>';
+    h+='<label class="tl">월마감 대상월</label><input type="month" class="inp" id="dmon" value="'+dmon+'" style="min-width:120px">';
+    h+=(canClose()?'<button class="btn" id="runmon">월마감 실행</button><button class="btn ghost" id="canmon">월마감 해제</button>':'')+'</div>';
+    h+='<div class="page-sub" style="color:var(--muted);margin:4px 0 10px">마감은 <b>순서대로</b>만 됩니다(직전 기간이 마감돼 있어야 함). 해제는 <b>최근 기간부터</b> 역순 — 후속 기간이 마감돼 있으면 거부됩니다.'
+     + (st.mat_daily_max?(' · 자재 일별잔량 최신 <b>'+esc(fmtYmd(st.mat_daily_max))+'</b> (일마감은 이 데이터가 있는 날만 가능)'):'')+'</div>';
+    h+='<div class="page-sub" style="font-weight:700;margin:16px 0 6px">일자별 마감 캘린더 <span style="font-weight:400;color:var(--muted)">— '+esc(domNm)+'</span></div>';
+    h+='<div class="toolbar" style="border:none;padding:0;margin-bottom:8px"><label class="tl">조회월</label>'
+     + '<input type="month" class="inp" id="calm" value="'+calm+'" style="min-width:120px">'
+     + '<span style="font-size:12px;color:var(--muted)">마감완료 · 미마감 · 파란테두리=오늘 · 날짜 클릭 = 그 날 일마감 실행/해제</span></div>';
+    h+='<div class="grid-wrap" style="overflow:auto;border:none"><table class="cal"><thead><tr>'
+     + ['일','월','화','수','목','금','토'].map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody id="calbody"></tbody></table></div>';
+    c.innerHTML=h;
+    renderCal();
+    const g=id=>c.querySelector(id);
+    g('#dom').onchange=e=>{dom=e.target.value;load();};
+    g('#dday').onchange=e=>{dday=e.target.value;};
+    g('#dmon').onchange=e=>{dmon=e.target.value;};
+    g('#calm').onchange=e=>{calm=e.target.value;load();};
+    if(g('#runday'))g('#runday').onclick=()=>call('/api/close/run',{domain:dom,ptype:'D',period:ymdIn(dday),user:who()});
+    if(g('#canday'))g('#canday').onclick=()=>{if(confirm('일마감을 해제합니다. 확정 스냅샷도 함께 제거됩니다.'))call('/api/close/cancel',{domain:dom,ptype:'D',period:ymdIn(dday),user:who()});};
+    if(g('#runmon'))g('#runmon').onclick=()=>call('/api/close/run',{domain:dom,ptype:'M',period:ymIn(dmon),user:who()});
+    if(g('#canmon'))g('#canmon').onclick=()=>{if(confirm('월마감을 해제합니다. 확정 스냅샷도 함께 제거됩니다.'))call('/api/close/cancel',{domain:dom,ptype:'M',period:ymIn(dmon),user:who()});};
+    attachResizers(c);
+  };
+  const renderCal=()=>{
+    const p=calm.split('-'), Y=+p[0], M=+p[1];
+    const ymm=String(Y).slice(2)+String(M).padStart(2,'0');
+    const closedDays=new Set((cal&&cal.closed_days)||[]), monthClosed=!!(cal&&cal.month_closed);
+    const asofYmd=''+(st.asof||'');
     const first=new Date(Y,M-1,1).getDay(), days=new Date(Y,M,0).getDate();
     let cells=[]; for(let i=0;i<first;i++)cells.push('<td class="empty"></td>');
     for(let d=1;d<=days;d++){
       const ymd=ymm+String(d).padStart(2,'0');
-      let closed;
-      if(ymm<dCloseYmm)closed=true; else if(ymm===dCloseYmm)closed=(d<=dCloseDay); else closed=false;
+      const closed=monthClosed||closedDays.has(ymd);
       const future=ymd>asofYmd, today=ymd===asofYmd;
-      const dow=(first+d-1)%7; const cls=[dow===0?'sun':'',dow===6?'sat':'',closed?'closed':(future?'future':'open'),today?'today':''].filter(Boolean).join(' ');
-      const mk=closed?'<div class="mk">🟩 마감</div>':(future?'':'<div class="mk">⬜ 미마감</div>');
-      cells.push(`<td class="${cls}" ${future?'':`data-day="${ymd}"`}><span class="dn">${d}</span>${mk}</td>`);
+      const dow=(first+d-1)%7;
+      const cls=[dow===0?'sun':'',dow===6?'sat':'',closed?'closed':(future?'future':'open'),today?'today':''].filter(Boolean).join(' ');
+      const mk=closed?('<div class="mk">'+(monthClosed?'월마감':'마감')+'</div>'):(future?'':'<div class="mk">미마감</div>');
+      cells.push('<td class="'+cls+'" data-day="'+ymd+'"><span class="dn">'+d+'</span>'+mk+'</td>');
     }
     while(cells.length%7)cells.push('<td class="empty"></td>');
     let html=''; for(let i=0;i<cells.length;i+=7)html+='<tr>'+cells.slice(i,i+7).join('')+'</tr>';
     c.querySelector('#calbody').innerHTML=html;
-    c.querySelectorAll('.cal td[data-day]').forEach(td=>td.onclick=()=>{const y=td.dataset.day;const isC=td.classList.contains('closed');
-      ph(`${'20'+y.slice(0,2)}/${y.slice(2,4)}/${y.slice(4,6)} 일마감을 ${isC?'취소':'실행'}합니다.`);});
+    c.querySelectorAll('.cal td[data-day]').forEach(td=>td.onclick=()=>{
+      const y=td.dataset.day, isC=td.classList.contains('closed');
+      if(isC&&monthClosed){alert('월마감으로 잠긴 날입니다 — 월마감을 먼저 해제하세요.');return;}
+      if(isC){ if(confirm(fmtYmd(y)+' 일마감을 해제합니다.'))call('/api/close/cancel',{domain:dom,ptype:'D',period:y,user:who()}); }
+      else   { if(confirm(fmtYmd(y)+' 일마감을 실행합니다.'))call('/api/close/run',{domain:dom,ptype:'D',period:y,user:who()}); }
+    });
   };
-  c.querySelector('#calm').onchange=e=>renderCal(e.target.value);
-  renderCal(nowCM());
-  const ph=(msg)=>alert(msg+'\n\n※ 마감은 쓰기 작업이라 운영DB(읽기전용)에선 실행할 수 없습니다.\n차세대 ERP 신규 DB/백엔드 연결 후 활성화됩니다.');
-  c.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>{const[n,t]=b.dataset.run.split('|');ph(`[${n}] ${t}마감을 실행합니다.`);});
-  c.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>{const[n,t]=b.dataset.cancel.split('|');ph(`[${n}] ${t}마감을 취소(재개방)합니다.`);});
-  c.querySelector('#runday').onclick=()=>ph(`${c.querySelector('#dday').value} 일마감을 실행합니다.`);
-  c.querySelector('#canday').onclick=()=>ph(`${c.querySelector('#dday').value} 일마감을 취소합니다.`);
-  c.querySelector('#runmon').onclick=()=>ph(`${c.querySelector('#dmon').value} 월마감을 실행합니다.`);
-  c.querySelector('#canmon').onclick=()=>ph(`${c.querySelector('#dmon').value} 월마감을 취소합니다.`);
-  attachResizers(c);
-  })();
+  c.innerHTML='<div class="page-title">마감관리</div><div class="empty" style="padding:40px">'+SPIN+'마감현황 로딩…</div>';
+  load();
 };
 
 /* 시스템관리 > 권한관리 — master-detail: 우 사용자리스트 클릭 → 좌 그 사용자의 부문별/프로그램별 조회·수정 그리드 */

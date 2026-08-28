@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail, _assert_open, _lock_msg, _closed, stock_changed)
 
 router = APIRouter()
 
@@ -82,7 +82,11 @@ def stock_save(payload: dict = Body(...)):
             qty = float(r.get("qty") or 0)
             if not ymd or len(ymd) < 6:
                 errs.append(f"{idx}행: 일자 필요"); continue
-            if _ym(ymd) in closed:
+            # ★마감잠금 = 공용 게이트(nx.period_close: 일마감+월마감+도메인). 구 nx.stock_close 는 폴백으로 유지.
+            _lm = _lock_msg(cur, ymd, "MAT")
+            if _lm:
+                errs.append(f"{idx}행: {_lm}")
+            elif _ym(ymd) in closed:
                 errs.append(f"{idx}행: 마감월({_ym(ymd)}) 편집 불가")
             if not mat:
                 errs.append(f"{idx}행: 자도번 필요"); continue
@@ -165,6 +169,7 @@ def stock_save(payload: dict = Body(...)):
                     # ★F2: MAINT_TAG=CHAR(1) → 반품 'RT'(2글자) 잘림오류로 수불장 누락됐음 → 'T'(자재창고반품) 매핑
             except Exception: pass
             saved += 1
+        stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}
     finally:
         cn.close()
@@ -245,7 +250,7 @@ def matrecv_receive(payload: dict = Body(...)):
         raise HTTPException(400, "입고일자 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             return {"ok": False, "errors": [f"마감월({_ym(ymd)}) 입고 불가"]}
         errs = []
         # 검증: 품목등록·발주잔량 초과
@@ -283,6 +288,7 @@ def matrecv_receive(payload: dict = Body(...)):
                 py, ps, (int(prw) if prw is not None else None), (r.get("insp") or None),
                 (r.get("remarks") or "발주입고"), "web")
             saved += 1
+        stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}
     finally:
         cn.close()
@@ -329,7 +335,7 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
         raise HTTPException(400, "입고일자 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             return {"ok": False, "errors": [f"마감월({_ym(ymd)}) 입고 불가"]}
         errs = []; saved = 0
         for idx, r in enumerate(rows, 1):
@@ -351,14 +357,13 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
                 ymd, seq, (int(gseq) if gseq is not None else None), wh, (r.get("gagong") or None),
                 item, (r.get("upper") or None), qty, (r.get("remarks") or "가공이동입고"), "web")
             saved += 1
+        stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}
     finally:
         cn.close()
 
-def _closed(cur, ymd):
-    cur.execute("SELECT close_flag FROM nx.stock_close WHERE ym=?", _ym(ymd))
-    r = cur.fetchone()
-    return bool(r and r[0])
+# ★로컬 _closed 제거(2026-08-28) — 구 stock_close 만 보던 사본이 common 의 공용 게이트를 가렸다.
+#   이제 common._closed(=_lock_msg 위임)를 그대로 쓴다.
 
 # ===================== ★Phase5: nx 재고 월마감 스냅샷 (STOCK_POINT별 기초→기말=기초+ΣMAINT) =====================
 # 기말 스냅샷=다음달 기초 연속성·마감후 파생 고정. 잠금=기존 nx.stock_close(ym) 플래그 재사용(옵션).
@@ -374,6 +379,16 @@ def stockclose_run(payload: dict = Body(...)):
     user = (str(payload.get("user", "")).strip() or "web")[:30]
     if len(ym) != 4 or point not in ("MAT", "PRD", "ASY", "RDY", "SAG"):
         raise HTTPException(400, "ym=YYMM(4자)·point=MAT/PRD/ASY/RDY/SAG 필수")
+    # ★C4(2026-08-27) 사용중단 — 마감관리(/api/close/*)로 일원화.
+    #   MAT/PRD/ASY 는 새 마감이 정본이며, 이 API 는 (a)MAT 을 stock_ledger 로 계산해 45.88% 부정확
+    #   (b)nx.stock_close 를 세워 새 잠금(nx.period_close)과 이중 잠금원이 된다 → 차단.
+    #   RDY/SAG 는 아직 대체 스냅샷이 없어 스냅샷 산출만 남겨두되 잠금(lock)은 금지한다.
+    if point in ("MAT", "PRD", "ASY"):
+        raise HTTPException(410, f"사용중단된 API 입니다({point}) — 마감관리 /api/close/run 을 사용하세요"
+                                 f" (domain MAT=자재 · PRD=생산 · SAL=영업).")
+    if lock:
+        raise HTTPException(400, "잠금(lock)은 마감관리 /api/close/run 으로 일원화되었습니다"
+                                 " — 여기서는 스냅샷 산출만 가능합니다.")
     y01, y99 = ym + "01", ym + "99"
     cn = _nx(); cur = cn.cursor()
     try:
@@ -398,6 +413,7 @@ def stockclose_run(payload: dict = Body(...)):
             cur.execute("IF EXISTS(SELECT 1 FROM nx.stock_close WHERE ym=?) UPDATE nx.stock_close SET close_flag=1,close_user=?,close_dt=GETDATE() WHERE ym=? ELSE INSERT INTO nx.stock_close(ym,close_flag,close_user,close_dt) VALUES(?,1,?,GETDATE())", ym, user, ym, ym, user)
         cur.execute("SELECT ISNULL(SUM(end_qty),0) FROM nx.stock_close_snap WHERE ym=? AND stock_point=?", ym, point)
         endsum = float(cur.fetchone()[0] or 0)
+        stock_changed("stockclose")           # ★스냅샷 확정 → 수불장 캐시 버림
         return {"ok": True, "ym": ym, "point": point, "rows": n, "end_total": round(endsum, 3),
                 "base_from": "단일원장 누적(<ym01 = 직전월기말 동치)", "locked": lock}
     finally:
@@ -486,7 +502,7 @@ def stock_update(payload: dict = Body(...)):
         old_stored = float(row[1] or 0)
         old_cc = str(row[2] or "").strip(); old_gp = str(row[3] or "").strip(); old_tag = str(row[4] or "").strip()
         errs = []
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             errs.append(f"마감월({_ym(ymd)}) 편집 불가")
         if screen == "adjust":
             # 조정=부호 그대로(불량·개발불출 −, 장부수정 ±). 음수재고는 아래 new_sum 검증에서 차단.
@@ -518,6 +534,7 @@ def stock_update(payload: dict = Body(...)):
             "web", ymd, seq)
         # ★F1: 원장만 고치면 자재수불장·자재재고(조회정본) stale → 미러 동반 반영
         _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, new_stored, "stockupdate")
+        stock_changed("stock_update")         # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "stored_qty": new_stored, "stock": new_sum}
     finally:
         cn.close()
@@ -540,7 +557,7 @@ def stock_delete(payload: dict = Body(...)):
         old_stored = float(row[1] or 0)
         old_cc = str(row[2] or "").strip(); old_gp = str(row[3] or "").strip(); old_tag = str(row[4] or "").strip()
         errs = []
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             errs.append(f"마감월({_ym(ymd)}) 삭제 불가")
         cur.execute("SELECT ISNULL(SUM(MAINT_QTY),0) FROM nx.stock_ledger WHERE MAT_CODE=?", mat)
         cur_sum = float(cur.fetchone()[0] or 0)
@@ -552,6 +569,7 @@ def stock_delete(payload: dict = Body(...)):
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
         # ★F1: 삭제도 자재수불장·자재재고(조회정본) 동반 반영(save가 남긴 web행 삭제 + 잔액 되돌림)
         _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, 0.0, "stockdelete")
+        stock_changed("stock_delete")         # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         cn.close()

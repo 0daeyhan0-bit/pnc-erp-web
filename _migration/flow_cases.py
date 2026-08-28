@@ -250,6 +250,28 @@ REASON_CHECKS = [
 ]
 
 
+# ── 캐시 stale 검사 ────────────────────────────────────────────────────
+#   ★캐시만 붙이고 무효화를 빼면 "재고가 움직였는데 화면은 옛 값" 이 된다.
+#
+#   ★2026-08-28 실측으로 확인된 것 — **수불장은 웹 입력분을 보지 않는다.**
+#     수불장·마감 = 라이브 전표(PARTNER_ERP.dbo.PU_T_STOCK_MAINT)를 읽는다.
+#     웹 쓰기(/api/stock/save) = nx.stock_ledger 에 쓴다.   ⟹ 축이 다르다.
+#     이건 병행 테스트 기간의 **의도된 분리**다(CLOSE_MGMT_CANON §26):
+#       재고 금액은 실데이터만 반영해야 하므로 마감은 라이브만 본다.
+#     따라서 "웹 입고 → 수불장 기말 +100" 은 **성립하지 않는다.** 이 검사는 성립 조건이 없다.
+#
+#   그래서 캐시 무효화는 **값이 아니라 동작으로** 검증한다:
+#     쓰기 직후 조회가 **재계산되는가**(캐시가 버려졌는가) = 응답시간이 캐시히트보다 확연히 길어짐.
+#     ※컷오버 후 원장이 정본이 되면 그때 값 기반 검사로 바꾼다.
+CACHE_CHECKS = [
+    dict(name="캐시 무효화 — 재고 쓰기 후 수불장이 재계산되는가",
+         ledger=lambda ctx: f"/api/close/ledger?domain=MAT&d_from={YMD[:4]}01&d_to={YMD}",
+         write_path="/api/stock/save",
+         write_body=lambda ctx: _save("receipt", 100)(ctx),
+         mode="recompute"),      # 값이 아니라 '재계산 발생' 으로 판정
+]
+
+
 # ── 조회형 점검(쓰기 없음) : 리포트가 살아 있는지 ─────────────────────
 READ_CHECKS = [
     dict(name="단가0·음수 제외 리포트(/api/close/anomaly)", method="GET",

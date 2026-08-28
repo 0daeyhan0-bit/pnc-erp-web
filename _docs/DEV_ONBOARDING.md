@@ -42,7 +42,19 @@ git clone http://200.200.200.184:3000/pncind/new_erp_1.git
         └ db_client.py      ← 여기! (repo 폴더의 형제)
   ```
   즉 `new_erp_1` 과 `New_ERP` 가 **같은 부모 폴더 아래 나란히** 있어야 합니다.
-- **db_client.py 는 절대 커밋 금지** (.gitignore·외부폴더로 보호되지만 주의).
+- **db_client.py 는 절대 커밋 금지** (.gitignore·외부폴더로 보호되지만 주의)
+
+### 1-4b. ★프론트 데이터 파일 `js/data.js` 배치 (worktree 필수)
+`PNC_ERP_Web/js/data.js`(약 26MB)는 **`.gitignore` 대상**이라 clone·worktree 에 딸려오지 않는다.
+이 파일이 전역 `DB`(품목·거래처·대시보드·재고·단가이력 등)를 정의하므로, **없으면 그걸 참조하는 화면이
+`ReferenceError: DB is not defined` 로 통째로 안 뜬다**(예: 자재수불장 `SCREEN.matledger` — 2026-08-27 실제 발생).
+API 는 멀쩡한데 화면만 죽어서 원인 찾기 어렵다.
+
+```bash
+# 본체 clone 에서 복사 (worktree 만들 때마다)
+cp <본체>/PNC_ERP_Web/js/data.js  <worktree>/PNC_ERP_Web/js/data.js
+```
+※ 커밋 금지(.gitignore 로 이미 보호). 운영 서버에는 배치돼 있어 운영은 정상..
 
 ### 1-5. 파이썬 환경
 ```powershell

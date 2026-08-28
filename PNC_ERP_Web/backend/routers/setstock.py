@@ -16,7 +16,7 @@
 """
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _d6
+from common import _conn, _nx, _d6, _assert_open
 
 router = APIRouter()
 
@@ -175,6 +175,7 @@ def setstock_adjust(payload: dict = Body(...)):
         cn.close()
 
     nxcn = _nx(); nxcur = nxcn.cursor()
+    _assert_open(nxcur, ymd, "PRD", "세트재고조정")   # ★마감잠금
     try:
         # 웹 조정분도 현재고에 반영해서 장부수정 기준을 맞춘다
         for it in list(cur_stock.keys()) or []:
