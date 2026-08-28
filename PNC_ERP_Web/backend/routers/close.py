@@ -1672,6 +1672,93 @@ def _sal_ledger(cur, fr6, to6):
     return rows, breaks, f"기초 {base_ymd} {src}"
 
 
+def _mat_ledger(cur, fr6, to6, zero):
+    """자재 수불장 계산 — 캐시 대상. 반환 (rows, breaks, basis).
+       ★엔드포인트에서 직접 계산하던 것을 함수로 뺐다: PRD/SAL 과 같이 캐시에 태우기 위함.
+         (2026-08-28 실측 — 캐시 없으면 매 조회 18초)"""
+    # ── 기초 = fr6 직전의 확정 스냅샷까지 전개한 상태 ──────────────────
+    #   ★_mv_base 는 "target 직전 확정 스냅샷"을 준다. 그 시점부터 fr6 전날까지는
+    #     전표로 이어 붙여야 기초가 정확하다(이중계상 금지 — §7-7 #2).
+    state, base_ymd, src = _mv_base(cur, fr6)
+    scope = _mv_scope(cur)
+    pre_start = _next_ymd(base_ymd)
+    pre_end = _prev_ymd(fr6)
+    if pre_start <= pre_end:
+        pre = _mv_moves(cur, pre_start, pre_end)
+        for y in sorted(pre):
+            _mv_step(state, pre[y], scope)
+    begin = {k: [v[0], v[1]] for k, v in state.items()}          # 기초 스냅
+    # ── 기간 이동 ────────────────────────────────────────────────────
+    moves = _mv_moves(cur, fr6, to6)
+    # ★기초에도 단가보정을 적용한다 — 마감(_snap_mat)이 하는 것과 **같은 처리**여야
+    #   같은 기간을 조회했을 때 금액이 갈리지 않는다(2026-08-28 실측: 33건 금액차의 원인).
+    _bpx0 = _mv_buyprice(cur, _prev_ymd(fr6))
+    for _m, _v in state.items():
+        if abs(_v[1]) < 1e-9 and abs(_v[0]) > 1e-9:
+            _c = _bpx0.get(_m, 0.0)
+            if _c:
+                _v[1] = _c
+    agg = {}
+    for y in sorted(moves):
+        for mat, mv in moves[y].items():
+            a = agg.setdefault(mat, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
+                                     "trans": 0.0, "transamt": 0.0})
+            a["inq"] += mv["inq"]; a["inamt"] += mv["pamt"]
+            a["outq"] += mv["outq"]; a["trans"] += mv["trans"]
+        _mv_step(state, moves[y], scope)
+        # ★출고·조정 금액은 **그날 평균을 갱신한 뒤**의 단가로 잡는다.
+        #   우리 엔진은 하루를 한 묶음으로 처리한다(§7-4) — 그날 입고가 평균을 올린 뒤
+        #   그 평균으로 출고가 나간다. 갱신 전 단가를 쓰면 금액 항등식이 깨진다
+        #   (2026-08-28 실측: 기초+입−출+조정 이 기말보다 1.46억 초과).
+        #   검산: (q0+pq)·avg = q0·a0 + pamt 이므로
+        #         기말금액 = (q0+inq−outq+trans)·avg = 기초금액 + 입고금액 − outq·avg + trans·avg
+        for mat, mv in moves[y].items():
+            _av = state.get(mat, [0.0, 0.0])[1]
+            a = agg[mat]
+            a["outamt"] += mv["outq"] * _av
+            a["transamt"] += mv["trans"] * _av
+    # ── 행 구성 ──────────────────────────────────────────────────────
+    # 기말도 동일하게 보정(마감과 같은 순서: 전개 → 단가0 보정)
+    _bpx = _mv_buyprice(cur, to6)
+    for _m, _v in state.items():
+        if abs(_v[1]) < 1e-9 and abs(_v[0]) > 1e-9:
+            _c = _bpx.get(_m, 0.0)
+            if _c:
+                _v[1] = _c
+    codes = {c for c in set(begin) | set(agg) | set(state) if c in scope and str(c or "").strip()}
+    rows, breaks = [], []
+    for c in sorted(codes):
+        bq, bavg = begin.get(c, [0.0, 0.0])
+        a = agg.get(c, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
+                        "trans": 0.0, "transamt": 0.0})
+        eq, eavg = state.get(c, [0.0, 0.0])
+        if not zero and abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9                and abs(a["trans"]) < 1e-9 and abs(eq) < 1e-9:
+            continue
+        # ★불변식 검산 — 어기면 버그다(§7-2). 화면에 숨기지 말고 드러낸다.
+        #   수량축과 **금액축을 모두** 본다(금액만 깨지는 결함이 실제로 있었다).
+        if abs((bq + a["inq"] - a["outq"] + a["trans"]) - eq) > 0.001:
+            breaks.append({"item": c, "축": "수량", "기초": round(bq, 4), "입고": round(a["inq"], 4),
+                           "출고": round(a["outq"], 4), "조정": round(a["trans"], 4),
+                           "기말": round(eq, 4)})
+        # ★금액축은 "평가조정"을 명시 열로 둔다 — 숨기지 않는다.
+        #   이동평균에는 금액 항등식을 **의도적으로** 깨는 규칙이 둘 있다:
+        #     ① 단가0 보정 — 전개 후에도 단가가 0 인 품목에 실매입 가중평균을 사후 주입(§13-5)
+        #     ② 재고<=0 에서 매입 refill 시 단가 리셋 — 마이너스재고 평균폭발 방지
+        #   둘 다 "이동"이 아니라 "단가를 고쳐 끼우는" 행위라 기초+입−출±조정 으로 설명되지 않는다.
+        #   잔차를 버리거나 오차로 숨기면 화면 합계가 안 맞는다 ⟹ **평가조정(va)** 으로 드러낸다.
+        #     기초금액 + 입고 − 출고 + 조정 + 평가조정 = 기말금액   (항상 성립)
+        _ba, _ea = bq * bavg, eq * eavg
+        _va = _ea - (_ba + a["inamt"] - a["outamt"] + a["transamt"])
+        rows.append({"cd": c, "va": round(_va, 2),
+                     "bq": round(bq, 4), "ba": round(bq * bavg, 2),
+                     "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
+                     "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
+                     "tq": round(a["trans"], 4), "ta": round(a["transamt"], 2),
+                     "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4)})
+    _attach_item_info(cur, rows, to6)
+    return rows, breaks, (f"기초 {base_ymd} {src}" + (f" → 전표이월 {pre_start}~{pre_end}" if pre_start <= pre_end else ""))
+
+
 @router.get("/api/close/ledger")
 def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str = Query(""),
                  zero: int = Query(0), q: str = Query("")):
@@ -1694,10 +1781,12 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
                 rows, breaks, basis = _LEDGER_CACHE[_ck]
             else:
                 rows, breaks, basis = (_prd_ledger if d == "PRD" else _sal_ledger)(cur, fr6, to6)
+                # ★_attach_item_info 를 **캐시 안**에서 부른다 — 밖에 두면 최종입고일 집계(170만행)를
+                #   매 조회마다 다시 돌아 캐시가 무의미해진다(2026-08-28 실측: 2차도 11초).
+                _attach_item_info(cur, rows, to6)
                 if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
                     _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
                 _LEDGER_CACHE[_ck] = (rows, breaks, basis)
-            _attach_item_info(cur, rows, to6)
             if q:
                 k = q.strip().upper()
                 rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
@@ -1711,86 +1800,14 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
                                          "why": "단가0 보정·단가 리셋 — 이동이 아니라 단가를 고쳐 끼운 분"},
                     "note": ("생산 수불장 = 확정 스냅샷 기초 + 480 분기 전표 파생. 축=(품목×재고위치)." if d == "PRD"
                              else "영업 수불장 = 확정 스냅샷 기초 + 040 분기 전표 파생. 단가=판가 기반 이동평균.")}
-        # ── 기초 = fr6 직전의 확정 스냅샷까지 전개한 상태 ──────────────────
-        #   ★_mv_base 는 "target 직전 확정 스냅샷"을 준다. 그 시점부터 fr6 전날까지는
-        #     전표로 이어 붙여야 기초가 정확하다(이중계상 금지 — §7-7 #2).
-        state, base_ymd, src = _mv_base(cur, fr6)
-        scope = _mv_scope(cur)
-        pre_start = _next_ymd(base_ymd)
-        pre_end = _prev_ymd(fr6)
-        if pre_start <= pre_end:
-            pre = _mv_moves(cur, pre_start, pre_end)
-            for y in sorted(pre):
-                _mv_step(state, pre[y], scope)
-        begin = {k: [v[0], v[1]] for k, v in state.items()}          # 기초 스냅
-        # ── 기간 이동 ────────────────────────────────────────────────────
-        moves = _mv_moves(cur, fr6, to6)
-        # ★기초에도 단가보정을 적용한다 — 마감(_snap_mat)이 하는 것과 **같은 처리**여야
-        #   같은 기간을 조회했을 때 금액이 갈리지 않는다(2026-08-28 실측: 33건 금액차의 원인).
-        _bpx0 = _mv_buyprice(cur, _prev_ymd(fr6))
-        for _m, _v in state.items():
-            if abs(_v[1]) < 1e-9 and abs(_v[0]) > 1e-9:
-                _c = _bpx0.get(_m, 0.0)
-                if _c:
-                    _v[1] = _c
-        agg = {}
-        for y in sorted(moves):
-            for mat, mv in moves[y].items():
-                a = agg.setdefault(mat, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
-                                         "trans": 0.0, "transamt": 0.0})
-                a["inq"] += mv["inq"]; a["inamt"] += mv["pamt"]
-                a["outq"] += mv["outq"]; a["trans"] += mv["trans"]
-            _mv_step(state, moves[y], scope)
-            # ★출고·조정 금액은 **그날 평균을 갱신한 뒤**의 단가로 잡는다.
-            #   우리 엔진은 하루를 한 묶음으로 처리한다(§7-4) — 그날 입고가 평균을 올린 뒤
-            #   그 평균으로 출고가 나간다. 갱신 전 단가를 쓰면 금액 항등식이 깨진다
-            #   (2026-08-28 실측: 기초+입−출+조정 이 기말보다 1.46억 초과).
-            #   검산: (q0+pq)·avg = q0·a0 + pamt 이므로
-            #         기말금액 = (q0+inq−outq+trans)·avg = 기초금액 + 입고금액 − outq·avg + trans·avg
-            for mat, mv in moves[y].items():
-                _av = state.get(mat, [0.0, 0.0])[1]
-                a = agg[mat]
-                a["outamt"] += mv["outq"] * _av
-                a["transamt"] += mv["trans"] * _av
-        # ── 행 구성 ──────────────────────────────────────────────────────
-        # 기말도 동일하게 보정(마감과 같은 순서: 전개 → 단가0 보정)
-        _bpx = _mv_buyprice(cur, to6)
-        for _m, _v in state.items():
-            if abs(_v[1]) < 1e-9 and abs(_v[0]) > 1e-9:
-                _c = _bpx.get(_m, 0.0)
-                if _c:
-                    _v[1] = _c
-        codes = {c for c in set(begin) | set(agg) | set(state) if c in scope and str(c or "").strip()}
-        rows, breaks = [], []
-        for c in sorted(codes):
-            bq, bavg = begin.get(c, [0.0, 0.0])
-            a = agg.get(c, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
-                            "trans": 0.0, "transamt": 0.0})
-            eq, eavg = state.get(c, [0.0, 0.0])
-            if not zero and abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9                and abs(a["trans"]) < 1e-9 and abs(eq) < 1e-9:
-                continue
-            # ★불변식 검산 — 어기면 버그다(§7-2). 화면에 숨기지 말고 드러낸다.
-            #   수량축과 **금액축을 모두** 본다(금액만 깨지는 결함이 실제로 있었다).
-            if abs((bq + a["inq"] - a["outq"] + a["trans"]) - eq) > 0.001:
-                breaks.append({"item": c, "축": "수량", "기초": round(bq, 4), "입고": round(a["inq"], 4),
-                               "출고": round(a["outq"], 4), "조정": round(a["trans"], 4),
-                               "기말": round(eq, 4)})
-            # ★금액축은 "평가조정"을 명시 열로 둔다 — 숨기지 않는다.
-            #   이동평균에는 금액 항등식을 **의도적으로** 깨는 규칙이 둘 있다:
-            #     ① 단가0 보정 — 전개 후에도 단가가 0 인 품목에 실매입 가중평균을 사후 주입(§13-5)
-            #     ② 재고<=0 에서 매입 refill 시 단가 리셋 — 마이너스재고 평균폭발 방지
-            #   둘 다 "이동"이 아니라 "단가를 고쳐 끼우는" 행위라 기초+입−출±조정 으로 설명되지 않는다.
-            #   잔차를 버리거나 오차로 숨기면 화면 합계가 안 맞는다 ⟹ **평가조정(va)** 으로 드러낸다.
-            #     기초금액 + 입고 − 출고 + 조정 + 평가조정 = 기말금액   (항상 성립)
-            _ba, _ea = bq * bavg, eq * eavg
-            _va = _ea - (_ba + a["inamt"] - a["outamt"] + a["transamt"])
-            rows.append({"cd": c, "va": round(_va, 2),
-                         "bq": round(bq, 4), "ba": round(bq * bavg, 2),
-                         "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
-                         "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
-                         "tq": round(a["trans"], 4), "ta": round(a["transamt"], 2),
-                         "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4)})
-        _attach_item_info(cur, rows, to6)
+        _ck = (d, fr6, to6, zero)
+        if _ck in _LEDGER_CACHE:
+            rows, breaks, basis = _LEDGER_CACHE[_ck]
+        else:
+            rows, breaks, basis = _mat_ledger(cur, fr6, to6, zero)
+            if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
+                _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
+            _LEDGER_CACHE[_ck] = (rows, breaks, basis)
         if q:
             k = q.strip().upper()
             rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
@@ -1798,7 +1815,7 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
                for f in ("bq", "ba", "iq", "ia", "oq", "oa", "tq", "ta", "va", "sq", "sa")}
         va_rows = [r["cd"] for r in rows if abs(r["va"]) > 1.0]
         return {"domain": d, "from": fr6, "to": to6, "count": len(rows), "rows": rows, "totals": tot,
-                "basis": f"기초 {base_ymd} {src}" + (f" → 전표이월 {pre_start}~{pre_end}" if pre_start <= pre_end else ""),
+                "basis": basis,
                 "invariant_breaks": breaks,
                 "valuation_adjust": {"count": len(va_rows), "amount": tot["va"], "items": va_rows[:50],
                                      "why": "단가0 보정·마이너스재고 단가리셋 — 이동이 아니라 단가를 고쳐 끼운 분(설계상 정상)"},

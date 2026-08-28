@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, stock_changed)
 
 router = APIRouter()
 
@@ -352,12 +352,14 @@ def procreg_save(payload: dict = Body(...)):
                 ITEM_CODE=?, LINE_NO=?, PART_CODE=?, S_WORK_CODE=?, PROD_QTY=?, WORK_CODE=?, FINISH_FLAG=?,
                 PROD_USER_ID=?, UPDATE_USER_ID=?, UPDATE_DATETIME=getdate() WHERE ID=?""",
                 ymd, hms, wo, swo, item, line, part, sw, qty, work, fin, usr, usr, int(mid))
+            stock_changed("procreg")          # ★생산실적 변경 → 수불장 캐시 버림
             return {"ok": True, "id": int(mid), "mode": "update"}
         cur.execute("""INSERT INTO nx.proc_result(PROD_YMD,PROD_HMS,WORK_ORDER,SPLIT_WORK_ORDER,ITEM_CODE,
             LINE_NO,PART_CODE,S_WORK_CODE,PROD_QTY,WORK_CODE,FINISH_FLAG,PROD_USER_ID,UPDATE_USER_ID)
             OUTPUT INSERTED.ID VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             ymd, hms, wo, swo, item, line, part, sw, qty, work, fin, usr, usr)
         nid = cur.fetchone()[0]
+        stock_changed("procreg")              # ★생산실적 변경 → 수불장 캐시 버림
         return {"ok": True, "id": int(nid), "mode": "insert"}
     finally:
         nx.close()
@@ -481,6 +483,7 @@ def matissue_save(payload: dict = Body(...)):
                 VALUES('MAT',?,?,?, 'MV', ?,?,?,?,?,?,?,?,GETDATE())""",
                 ymd, seq, gseq, gpc, to_gpc, (work or None), mat, (item or None), sq, (rem or None), usr)
         nx.commit()   # ★2행(−FROM/+TO) 원자 커밋
+        stock_changed("matissue")             # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "id": f"{ymd}-{gseq}", "mode": ("update" if mid else "insert")}
     except Exception:
         nx.rollback(); raise   # 부분실패 시 net-0 불변식 보존(전체 롤백)

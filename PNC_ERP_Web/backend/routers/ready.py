@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _assert_open)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _assert_open, stock_changed)
 
 router = APIRouter()
 
@@ -549,6 +549,7 @@ def ready_commit(payload: dict = Body(...)):
                         sheet_no, item, d6, qty, qty, gpc, _ln, _assy, _upr, _hm, user)
             _insert_sheet_dtl(cur, sheet_no, item, user)
         tx.commit()
+        stock_changed("ready")                # ★준비재고 변경 → 수불장 캐시 버림
         # weld_print = A4 인쇄창을 띄울지 여부(전표 등록 자체와 무관). 프론트가 이 값으로 판단.
         return {"ok": True, "mode": mode, "item": item, "gpc": gpc, "qty": qty,
                 "sheet_no": sheet_no, "weld_print": weld_print, "moved": moved}
@@ -603,6 +604,7 @@ def ready_force_sheet(payload: dict = Body(...)):
             _insert_sheet_dtl(cur, sheet_no, item, user)   # SEQ 공정상세도 함께(A4 전표용)
             issued.append({"sheet_no": sheet_no, "item": item, "gpc": gpc, "ymd": d6, "qty": qty})
         tx.commit()
+        stock_changed("ready")                # ★준비재고 변경 → 수불장 캐시 버림
         return {"ok": True, "issued": issued, "cnt": len(issued), "skipped": skipped}
     except Exception as e:
         try: tx.rollback()

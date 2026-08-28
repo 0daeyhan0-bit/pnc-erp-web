@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, _mat_avail)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, _mat_avail, stock_changed)
 
 router = APIRouter()
 
@@ -306,6 +306,8 @@ def backflush_post(payload: dict = Body(...)):
         if lm: return {"ok": False, "detail": lm}
         r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)   # ★재고부족이면 차단됨(예외 없음 §0-★) — 사유는 r['shortage']
         nx.commit() if r.get("ok") else nx.rollback()
+        if r.get("ok"):
+            stock_changed("backflush")        # ★소비·생산입고 → 수불장 캐시 버림
         return r
     except Exception as e:
         try: nx.rollback()

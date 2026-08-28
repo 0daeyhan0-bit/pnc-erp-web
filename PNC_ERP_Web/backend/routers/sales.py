@@ -5,7 +5,7 @@
 import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed
 
 router = APIRouter()
 
@@ -247,6 +247,7 @@ def sagub_output_save(payload: dict = Body(...)):
             cur.execute("""INSERT INTO nx.sagub_output_req(req_ymd,req_seq,cust_code,mat_code,item_code,req_qty,out_qty,finish_flag,remarks,insert_user_id,insert_datetime)
                 VALUES(?,?,?,?,?,?,0,'0',?,'web',getdate())""", ymd, seq, cust, mat, item, req, remarks)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True}
     finally:
         cn.close()
@@ -362,6 +363,7 @@ def sagub_recover(payload: dict = Body(...)):
         amt = float(int(qty * cost))
         seq = _led_ins(cur, "PRD", ymd, "9", None, cust, item, qty, wh, (remarks or "유상사급회수 매입입고"), cost, amt)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "gubun": "유상사급", "id": f"{ymd}-{seq}", "cost": cost, "amt": amt,
                 "note": f"유상 매입입고 완료(+PRD@{wh}, 구매단가 {cost:g})"}
     except Exception:
@@ -398,6 +400,7 @@ def sagub_output_delete(payload: dict = Body(...)):
     try:
         cur.execute("DELETE FROM nx.sagub_output_req WHERE id=? AND ISNULL(finish_flag,'0')='0'", int(rid))
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         cn.close()
@@ -432,6 +435,7 @@ def perm_save(payload: dict = Body(...)):
                     1 if (pe or {}).get("view") else 0, 1 if (pe or {}).get("edit") else 0, by)
                 cnt += 1
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "users": len(perms), "rows": cnt}
     finally:
         cn.close()
@@ -470,6 +474,7 @@ def perm_users_save(payload: dict = Body(...)):
             WHEN NOT MATCHED THEN INSERT(user_id,udata,upd_user,upd_dt) VALUES('__ALL__',?,?,getdate());""",
             blob, by, blob, by)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "count": len(users)}
     finally:
         cn.close()
@@ -701,6 +706,7 @@ def saleout_save(payload: dict = Body(...)):
             newid = int(cur.fetchone()[0])
             _saleout_led_post(cur, newid, out_ymd, cust, item, qty, cost, amt, vat, sheet, wo)  # ★재고 −MAT 게시
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "cost": cost, "amt": amt, "vat": vat}
     finally:
         cn.close()
@@ -724,6 +730,7 @@ def saleout_delete(payload: dict = Body(...)):
         for x in ids:
             _saleout_led_del(cur, int(x))   # ★Phase4: 링크된 재고 −MAT 원장행 동반삭제
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": n}
     finally:
         cn.close()
@@ -753,6 +760,7 @@ def saleout_copy(payload: dict = Body(...)):
         newid = int(cur.fetchone()[0])
         _saleout_led_post(cur, newid, r[0], r[1], r[3], abs(float(r[4] or 0)), r[5], r[6], r[7], r[2], r[9])  # ★재고 −MAT 게시
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True}
     finally:
         cn.close()
@@ -778,6 +786,7 @@ def saleout_carryover(payload: dict = Body(...)):
         for x in ids:  # ★Phase4: 링크된 재고 −MAT 원장 출고일자 동반이월
             cur.execute("UPDATE nx.stock_ledger SET MAINT_YMD=? WHERE STOCK_POINT='MAT' AND MAINT_TAG='5' AND MAINT_GROUP_SEQ=?", ymd, int(x))
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "carried": n, "to": ymd}
     finally:
         cn.close()
@@ -864,6 +873,7 @@ def lgsale_save(payload: dict = Body(...)):
             newid = int(cur.fetchone()[0])
             _lgsale_led_post(cur, newid, ymd, item, qty, wo)     # ★재고 −ASY 게시
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True}
     except Exception:
         cn.rollback(); raise
@@ -888,6 +898,7 @@ def lgsale_delete(payload: dict = Body(...)):
             raise HTTPException(409, "발행완료 건은 삭제 불가(송장취소 먼저)")
         _lgsale_led_del(cur, int(rid))   # ★링크 −ASY 동반삭제
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": n}
     except Exception:
         cn.rollback(); raise
@@ -924,6 +935,7 @@ def lgsale_issue(payload: dict = Body(...)):
         if issued == 0:
             raise HTTPException(409, "발행 가능한(미발행) 건이 없습니다.")
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "issued": issued, "sheet_no": sheet}
     finally:
         cn.close()
@@ -947,6 +959,7 @@ def lgsale_cancel(payload: dict = Body(...)):
         else:
             raise HTTPException(400, "sheet_no 또는 id 필요")
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "canceled": n}
     finally:
         cn.close()
@@ -1403,6 +1416,7 @@ def sale040_confirm(payload: dict = Body(...)):
                 msg += " (" + ", ".join("%s %s:%s" % (x["wo"], x["item"], x["why"]) for x in skipped[:4]) + ")"
             return {"ok": False, "skipped": skipped, "msg": msg}
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         tot = sum(x["qty"] for x in done)
         msg = "출하처리 %d건 · 수량 %d" % (len(done), tot)
         # 재고가 모자라 일부만 잡힌 경우(6개 계획 → 재고 3개 = 3개만)도 명시한다.
@@ -1464,6 +1478,7 @@ def sale040_cancel(payload: dict = Body(...)):
             cn.rollback()
             return {"ok": False, "msg": "취소할 출하실적이 없습니다."}
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "done": done,
                 "msg": "출하취소 %d건 · 수량 %d" % (len(done), sum(x["qty"] for x in done))}
     except Exception:
@@ -1526,6 +1541,7 @@ def shipment_cost(payload: dict = Body(...)):
             cn.rollback()
             return {"ok": False, "msg": "수정 대상이 %d건 — 중단했습니다." % cur.rowcount}
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "qty": qty, "cost": cost, "amt": amt, "old_cost": old,
                 "msg": "출하단가 {:,.2f} → {:,.2f} · 금액 {:,.0f}".format(old, cost, amt)}
     except Exception as e:

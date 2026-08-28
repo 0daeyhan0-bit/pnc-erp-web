@@ -3,7 +3,7 @@
    app.py에서 분리. 공유헬퍼는 common.py."""
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open, stock_changed
 
 router = APIRouter()
 
@@ -84,6 +84,7 @@ def setin_issue(payload: dict = Body(...)):
                 WHERE sheet_no=? AND remarks='PLAN_COMPOSE' AND status IN ('00','10')""", q, batch, sh)
             ok += cur.rowcount
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "count": ok, "barcode": batch, "action": "발행"}
     finally:
         cn.close()
@@ -215,6 +216,7 @@ def setstock_receive(payload: dict = Body(...)):
                     posted += 1
                 cur.execute("UPDATE nx.set_stock_maint SET derived_flag='1' WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6) AND maint_seq=?", mseq)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "received": recv, "ledger_posted": posted, "barcode": "SET" + bc}
     finally:
         cn.close()

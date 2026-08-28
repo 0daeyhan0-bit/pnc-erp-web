@@ -684,3 +684,16 @@ def _assert_open(cur, ymd, domain="MAT", what="이 작업"):
     m = _lock_msg(cur, ymd, domain)
     if m:
         raise _HE(400, f"{m} ({what})")
+
+
+# ===== 재고 변경 훅 — 캐시 stale 금지 (2026-08-28) =====
+# ★수불장(close.py `_LEDGER_CACHE`)은 조회 전용 캐시다. 재고가 움직이면 반드시 버려야
+#   화면이 옛 값을 보여주지 않는다. 재고를 쓰는 **모든** 경로가 이 함수를 부른다.
+#   여기 두는 이유 = routers 끼리 서로 임포트하면 순환이 난다. common 은 모두가 이미 쓴다.
+def stock_changed(reason=""):
+    """재고가 바뀌었다 — 파생 캐시를 버린다. 실패해도 쓰기를 막지 않는다(조회 캐시일 뿐)."""
+    try:
+        from routers.close import _ledger_cache_clear
+        _ledger_cache_clear()
+    except Exception:
+        pass

@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail, _assert_open, _lock_msg, _closed)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _mat_avail, _assert_open, _lock_msg, _closed, stock_changed)
 
 router = APIRouter()
 
@@ -169,6 +169,7 @@ def stock_save(payload: dict = Body(...)):
                     # ★F2: MAINT_TAG=CHAR(1) → 반품 'RT'(2글자) 잘림오류로 수불장 누락됐음 → 'T'(자재창고반품) 매핑
             except Exception: pass
             saved += 1
+        stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}
     finally:
         cn.close()
@@ -287,6 +288,7 @@ def matrecv_receive(payload: dict = Body(...)):
                 py, ps, (int(prw) if prw is not None else None), (r.get("insp") or None),
                 (r.get("remarks") or "발주입고"), "web")
             saved += 1
+        stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}
     finally:
         cn.close()
@@ -355,6 +357,7 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
                 ymd, seq, (int(gseq) if gseq is not None else None), wh, (r.get("gagong") or None),
                 item, (r.get("upper") or None), qty, (r.get("remarks") or "가공이동입고"), "web")
             saved += 1
+        stock_changed("stock_save")           # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "count": saved}
     finally:
         cn.close()
@@ -410,6 +413,7 @@ def stockclose_run(payload: dict = Body(...)):
             cur.execute("IF EXISTS(SELECT 1 FROM nx.stock_close WHERE ym=?) UPDATE nx.stock_close SET close_flag=1,close_user=?,close_dt=GETDATE() WHERE ym=? ELSE INSERT INTO nx.stock_close(ym,close_flag,close_user,close_dt) VALUES(?,1,?,GETDATE())", ym, user, ym, ym, user)
         cur.execute("SELECT ISNULL(SUM(end_qty),0) FROM nx.stock_close_snap WHERE ym=? AND stock_point=?", ym, point)
         endsum = float(cur.fetchone()[0] or 0)
+        stock_changed("stockclose")           # ★스냅샷 확정 → 수불장 캐시 버림
         return {"ok": True, "ym": ym, "point": point, "rows": n, "end_total": round(endsum, 3),
                 "base_from": "단일원장 누적(<ym01 = 직전월기말 동치)", "locked": lock}
     finally:
@@ -530,6 +534,7 @@ def stock_update(payload: dict = Body(...)):
             "web", ymd, seq)
         # ★F1: 원장만 고치면 자재수불장·자재재고(조회정본) stale → 미러 동반 반영
         _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, new_stored, "stockupdate")
+        stock_changed("stock_update")         # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "stored_qty": new_stored, "stock": new_sum}
     finally:
         cn.close()
@@ -564,6 +569,7 @@ def stock_delete(payload: dict = Body(...)):
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
         # ★F1: 삭제도 자재수불장·자재재고(조회정본) 동반 반영(save가 남긴 web행 삭제 + 잔액 되돌림)
         _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, 0.0, "stockdelete")
+        stock_changed("stock_delete")         # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         cn.close()
