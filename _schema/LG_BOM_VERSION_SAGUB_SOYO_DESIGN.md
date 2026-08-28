@@ -48,3 +48,4 @@
 - ★**ver_from = 일자(date)** — 리시빙 실적이 일자라 대조 위해 날짜 단위. point-in-time = `ver_from ≤ 대상시점`의 최신.
 - ★**최초 시드 ver_from = 2026-07-01** — 재다운로드분(현 nx.lg_bom)을 7/1자 버전으로 넣음.
 - 서명 범위 = supply_type + 구조(child/qty)까지(사급전환 추적 목적, supply_type 필수). ※일단 이대로, 필요시 조정.
+- ★**업로드 버전 방식 = A(서명 비교): 다르면 새 버전(ver_from=업로드일) append, 같으면 스킵**(중복 버전 방지). 사용자 확정 2026-08-28. (서명 부담 없음 확인 = CHECKSUM_AGG 밀리초.) 서명 = model·werks별 `CHECKSUM_AGG(BINARY_CHECKSUM(child_code,parent_code,qty,supply_type,stufe,posnr,child_spec,uit,unit))` 등 의미컬럼 전체.
