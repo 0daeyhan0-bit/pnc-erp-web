@@ -3145,7 +3145,8 @@ SCREEN.lgsagub=(c)=>{
           df:'',dt:'',ymdMin:'',ymdMax:'',biz:'',cls:'',q:'',upBiz:'',sort:{k:'amt',dir:-1},loading:false,msg:'',
           c_from:_M1,c_to:_TD,c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
           p_from:_M1,p_to:_TD,pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},
-          s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:''};
+          s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:'',
+          cv_status:'supplier',cv_mt:'1,2,5',cv_werks:'',cv_scope:'all',cv_q:'',cvdata:null,cv_loading:false,cv_sort:{k:'',dir:-1}};
   const sortItems=(arr,sort)=>{if(!sort.k||!arr.length)return arr;const {k,dir}=sort;const num=typeof arr[0][k]==='number';
     return arr.slice().sort((a,b)=>num?(((a[k]||0)-(b[k]||0))*dir):((''+(a[k]||'')).localeCompare(''+(b[k]||''))*dir));};
   const ymd2date=s=>{s=''+(s||'');return s.length>=6?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';};  // 260703→2026-07-03
@@ -3205,7 +3206,7 @@ SCREEN.lgsagub=(c)=>{
   const sh=(k,label,cls)=>`<th data-sk="${k}"${cls?' class="'+cls+'"':''} style="cursor:pointer" title="더블클릭 정렬">${label}${st.sort.k===k?(st.sort.dir<0?' ▼':' ▲'):''}</th>`;
 
   // ═══════════ 리시빙 비교 탭 ═══════════
-  const TABS=[['status','📊 사급입고 현황'],['compare','⚖ 리시빙비교(원소재)'],['parts','🔩 리시빙비교(부품)']];
+  const TABS=[['status','📊 사급입고 현황'],['compare','⚖ 리시빙비교(원소재)'],['parts','🔩 리시빙비교(부품)'],['convert','원소재사급전환율']];
   const tabBar=()=>`<div style="display:flex;gap:3px;margin:4px 0 10px;border-bottom:2px solid #dbe5f2;flex-wrap:wrap">
     ${TABS.map(([k,l])=>`<div class="lg-tab" data-tab="${k}" style="padding:7px 15px;cursor:pointer;font-weight:600;font-size:13px;border:1px solid #dbe5f2;border-bottom:none;border-radius:7px 7px 0 0;margin-bottom:-2px;${st.tab===k?'background:#fff;color:#1c47a0;border-bottom:2px solid #fff':'background:#eef3fa;color:#5a7597'}">${l}</div>`).join('')}
    </div>`;
@@ -3213,6 +3214,7 @@ SCREEN.lgsagub=(c)=>{
     if(st.tab==='compare')return st.cmp?drawCompare():loadCompare();
     if(st.tab==='parts')return st.pcmp?drawParts():loadParts();
     if(st.tab==='settle')return st.slist?drawSettle():loadSettle();
+    if(st.tab==='convert')return st.cvdata?drawConvert():loadConvert();
     return draw();
   };
   const wireTabs=()=>c.querySelectorAll('.lg-tab').forEach(t=>t.onclick=()=>{if(st.tab!==t.dataset.tab){st.tab=t.dataset.tab;routeTab();}});
@@ -3319,6 +3321,86 @@ SCREEN.lgsagub=(c)=>{
     c.querySelector('#s-copy').onclick=settleCopy;
     c.querySelector('#s-go').onclick=()=>{st.s_q=c.querySelector('#s-q').value.trim();loadSettle();};
     c.querySelector('#s-q').onkeyup=e=>{if(e.key==='Enter'){st.s_q=e.target.value.trim();loadSettle();}};
+    attachResizers(c);
+  };
+  // ═══════════ 원소재 사급전환율 탭 (LG BOM Assembly Pull 대조) ═══════════
+  const WLAB={DGZ:'RAC',DMZ:'SAC'};                       // 공장→사업부
+  const MTLAB={'1':'자체','2':'외주','3':'매입','4':'사급','5':'외주완성'};
+  const loadConvert=async()=>{st.cv_loading=true;drawConvert();
+    try{const qs=[`status=${st.cv_status}`,`mt=${encodeURIComponent(st.cv_mt)}`,`scope=${st.cv_scope}`];
+      if(st.cv_werks)qs.push('werks='+st.cv_werks);
+      if(st.cv_q)qs.push('q='+encodeURIComponent(st.cv_q));
+      const j=await(await fetch(`${API}/api/lgsagub/sagub_convert?${qs.join('&')}`)).json();st.cvdata=j;}
+    catch(e){st.cvdata={rows:[],_err:e.message};}
+    st.cv_loading=false;drawConvert();};
+  const drawConvert=()=>{
+    const m=st.cvdata||{};
+    let rows=(m.rows||[]).slice();
+    rows=sortItems(rows,st.cv_sort);
+    const n2=v=>(v==null||v==='')?'-':(+v).toFixed(2);
+    const n4=v=>(v==null||v==='')?'-':(+v).toFixed(4);
+    const wI=v=>(v==null||v==='')?'-':Math.round(+v);
+    const cvh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-cvk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.cv_sort.k===k?(st.cv_sort.dir<0?' ▼':' ▲'):''}</th>`;
+    const mtChk=['1','2','5','3','4'].map(x=>{const on=st.cv_mt.split(',').includes(x);
+      return `<label style="font-size:12px;margin-right:8px;cursor:pointer"><input type="checkbox" class="cv-mt" value="${x}"${on?' checked':''}> ${x}·${MTLAB[x]}</label>`;}).join('');
+    const badge=(txt,bg,fg)=>`<span style="font-size:11px;padding:1px 7px;border-radius:8px;background:${bg};color:${fg};white-space:nowrap">${txt}</span>`;
+    const body=st.cv_loading?spinRow(12):(rows.length?rows.map(r=>`<tr${r.status==='미전환'?' style="background:#fff4f0"':''}>
+        <td><b>${esc(r.model)}</b><div style="font-size:11px;color:#8aa0bd;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.model_name)}</div></td>
+        <td>${esc(r.parent)}<div style="font-size:11px;color:#8aa0bd;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.parent_name)}">${esc(r.parent_name)}</div></td>
+        <td class="center" style="font-size:11px">${esc(r.make_type)}·${esc(MTLAB[r.make_type]||'')}</td>
+        <td>${esc(r.child)}</td>
+        <td class="num">${n2(r.od)}</td><td class="num">${n2(r.thk)}</td><td class="num">${wI(r.length)}</td>
+        <td class="num">${n4(r.weight)}</td><td class="center" style="font-size:11px">${esc(r.metal)}${r.form?(' '+esc(r.form)):''}</td>
+        <td class="center">${r.dim_src==='우리'?badge('우리','#e6f7ea','#1c7c3a'):(r.dim_src==='LG'?badge('LG','#fdf0e3','#b5651d'):'-')}</td>
+        <td class="num">${n4(r.qty)}</td><td class="center" style="font-size:11px">${esc(WLAB[r.werks]||r.werks||'')}</td>
+        <td class="center">${r.status==='미전환'?badge('미전환','#fbe0da','#c0392b'):badge('전환','#e0ecfb','#1c47a0')}</td></tr>`).join('')
+      :`<tr><td colspan="13" class="empty">${m._err?('오류: '+esc(m._err)):'대상 없음 — 필터를 조정하세요'}</td></tr>`);
+    const statusOpt=[['supplier','미전환(Supplier)'],['pull','전환(Assembly Pull)'],['all','전체']]
+      .map(([k,l])=>`<option value="${k}"${st.cv_status===k?' selected':''}>${l}</option>`).join('');
+    const werksOpt=[['','전체 사업부'],['DMZ','SAC(DMZ)'],['DGZ','RAC(DGZ)']]
+      .map(([k,l])=>`<option value="${k}"${st.cv_werks===k?' selected':''}>${l}</option>`).join('');
+    const scopeOpt=[['all','전체'],['active','사용중(리시빙 25.1~)']]
+      .map(([k,l])=>`<option value="${k}"${st.cv_scope===k?' selected':''}>${l}</option>`).join('');
+    c.innerHTML=`
+     <div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">원소재 사급전환율</span></div>
+     <div style="flex:0 0 auto">${tabBar()}</div>
+     <div class="page-sub" style="flex:0 0 auto">LG BOM(<code>nx.lg_bom</code>)의 동 원소재(Tube,Raw)가 <b>사급(Assembly Pull)</b>으로 전환됐는지 우리 BOM과 대조. <b style="color:#c0392b">Supplier=미전환</b>(아직 우리가 구매)·Assembly Pull=전환(LG 사급). 치수·재질은 우리 정본 <code>nx.item</code> 우선(없으면 LG spec).</div>
+     <div style="flex:0 0 auto;display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+       ${card('전환율(전체 동원소재)',(m.rate!=null?m.rate:'-')+'%',`사급 ${wonI(m.pull||0)} / 미전환 ${wonI(m.supplier||0)} edge`,'#1c47a0')}
+       ${card('대상 완제품(ASSY)',wonI(m.models||0),`제작품 ${wonI(m.parents||0)}종`,'#5a7597')}
+       ${card('표시 행',`${wonI(m.shown||0)}${(m.total>m.shown)?(' / '+wonI(m.total)):''}`,'필터 반영','#b5651d')}
+     </div>
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto">
+       <label class="tl">범위</label><select class="sel" id="cv-scope" style="width:160px">${scopeOpt}</select>
+       <label class="tl" style="margin-left:6px">상태</label><select class="sel" id="cv-status" style="width:160px">${statusOpt}</select>
+       <label class="tl" style="margin-left:6px">사업부</label><select class="sel" id="cv-werks" style="width:120px">${werksOpt}</select>
+       <label class="tl" style="margin-left:8px">제작유형</label><span style="white-space:nowrap">${mtChk}</span>
+       <input class="inp" id="cv-q" value="${esc(st.cv_q)}" placeholder="ASSY·제작품·동원소재 품번/품명" style="width:210px;margin-left:6px">
+       <button class="btn" id="cv-go">조회</button>
+       <button class="btn xls" id="cv-xls" style="margin-left:4px">엑셀 다운로드</button>
+       <div class="spacer"></div><span class="rowcount">${st.cv_loading?'조회 중…':`${wonI(rows.length)}행`}</span>
+     </div>
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+        ${cvh('model','ASSY 품번')}${cvh('parent','제작품(하위)')}${cvh('make_type','제작유형','center')}${cvh('child','동원소재')}
+        ${cvh('od','외경','num')}${cvh('thk','두께','num')}${cvh('length','길이','num')}${cvh('weight','단위중량','num')}
+        <th class="center">재질</th><th class="center">치수출처</th>${cvh('qty','소요중량(KG)','num')}<th class="center">사업부</th>${cvh('status','사급전환','center')}</tr></thead>
+       <tbody>${body}</tbody></table></div>
+     </div>`;
+    wireTabs();
+    c.querySelector('#cv-scope').onchange=e=>{st.cv_scope=e.target.value;loadConvert();};
+    c.querySelector('#cv-status').onchange=e=>{st.cv_status=e.target.value;loadConvert();};
+    c.querySelector('#cv-werks').onchange=e=>{st.cv_werks=e.target.value;loadConvert();};
+    c.querySelectorAll('.cv-mt').forEach(cb=>cb.onchange=()=>{
+      st.cv_mt=[...c.querySelectorAll('.cv-mt:checked')].map(x=>x.value).join(',');loadConvert();});
+    c.querySelector('#cv-go').onclick=()=>{st.cv_q=c.querySelector('#cv-q').value.trim();loadConvert();};
+    c.querySelector('#cv-q').onkeyup=e=>{if(e.key==='Enter'){st.cv_q=e.target.value.trim();loadConvert();}};
+    c.querySelectorAll('[data-cvk]').forEach(th=>th.ondblclick=()=>{const k=th.dataset.cvk;
+      st.cv_sort=(st.cv_sort.k===k)?{k,dir:-st.cv_sort.dir}:{k,dir:1};drawConvert();});
+    const xb=c.querySelector('#cv-xls');if(xb)xb.onclick=()=>{
+      const H=['ASSY품번','ASSY품명','제작품','제작품명','제작유형','동원소재','외경','두께','길이','단위중량','재질','형태','치수출처','소요중량(KG)','공장','사급전환'];
+      const R=rows.map(r=>[r.model,r.model_name,r.parent,r.parent_name,r.make_type+'·'+(MTLAB[r.make_type]||''),r.child,r.od,r.thk,r.length,r.weight,r.metal,r.form,r.dim_src,r.qty,WLAB[r.werks]||r.werks||'',r.status]);
+      downloadCSV(`원소재사급전환율_${st.cv_status}_${st.cv_scope}.csv`,H,R);};
     attachResizers(c);
   };
   const card=(title,val,sub,color)=>`<div style="flex:1;min-width:150px;border:1px solid #dbe5f2;border-left:4px solid ${color};border-radius:8px;padding:10px 14px;background:#fff">
