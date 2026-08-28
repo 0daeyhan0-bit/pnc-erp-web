@@ -613,3 +613,63 @@ AJR73952502   미러 7,533 [E / 1010 / 260806]    클린 6,260 [매입 / LG / 25
 | `coopquote.py`/`coopquote2.py` | 2+2 | **보류**(위 30건 확인 대기) |
 | `close.py` | 1 | `_ta_build` 레거시 재현 오라클 — **유지** |
 | `dtrade.py` | 1 | 라이브 대사 — 컷오버와 함께 은퇴 |
+
+### ✅ 4~6단계 완료 — 단가 이관 끝 (2026-08-29)
+
+#### 4단계 잔여 — coopquote 매입가 4곳 (대표 승인 후 반영)
+`coopquote.py` 2 · `coopquote2.py` 2 → `nx.price_item`.
+값이 30건 바뀐다. 근거는 위 "보류" 절 그대로 —
+클린의 **웹 업로드 사급가**(`vendor='LG'`·`매입`·855행)를 집게 되고,
+미러가 집던 **거래처 1010 판가**는 `COOP_QUOTE_MATCOST_RULES.md` 가 *"협력사 사급가 아님 → 제외"* 라고 한 값이다.
+정렬에 `vendor_code` tiebreak 도 넣어 동점 비결정성을 제거했다.
+
+#### 5단계 — `pricemgmt.py` 단가관리 CRUD (9곳)
+정본에 **직접 읽고 쓴다.** 화면·API 의 tag(`1`/`E`/`S`)는 그대로 두고 DB 값만 매핑(`_T2P`) → **프론트 무변경**.
+
+승격 2차로 컬럼 4개를 더 얹었다(화면 무손실 왕복):
+| 컬럼 | 라이브 실데이터 | 판단 |
+|---|---|---|
+| `mat_unit` | **5,303행** | 필요 |
+| `mat_cost` / `proc_cost` / `other_cost` | 2 / 1 / 0행 | 화면이 입력·표시하므로 저장만. **§9 — 이걸 '원가분해'로 해석하는 것은 여전히 금지** |
+| `PUR_RATE` | **0행** | 정본에 두지 않음 → `price.py` 에서 NULL 고정 |
+
+**CRUD 왕복 검증(롤백 서버, 오염 0)**
+```
+① 저장(insert)  ok · mode=insert
+② 조회          tag=1(매입) cust=9999 cost=1234.5 main=1 mkt=TEST remarks='flowverify 왕복' usr=flowverify
+③ 저장(update)  ok · mode=update
+④ 수정 확인     cost=9876.0 · remarks='flowverify 수정'
+⑤ 삭제          ok · deleted=1
+⑥ 삭제 확인     남은 행 0
+⑦ 롤백          clean=true (기동시점 행수 불변)
+```
+
+#### 6단계 — `price.py` 단가변동 피드 · 단가이력 (5곳)
+`LAG()` 직전단가 계산도 정본 기준으로 옮겼다.
+
+**API 실호출 — 전부 200**
+```
+/api/price/history      200  MCQ68044401 · tag S · 썬텍코리아
+/api/price/search       200  10635O · cnt 1
+/api/price/item         200  10635O · 거래처 2038 조인테크
+/api/price/sagub_list   200  3A02080B · 260720 · 14,804
+/api/price/lgprice_list 200  ADM72950707 · 1010 · TAGE · 774,832
+/api/price/inversion    200  5210A23344B · 매입 4,712 vs 사급 2,210
+```
+
+#### 최종 상태 — `PR_M_ITEM_COST` SQL 참조
+| 위치 | 성격 |
+|---|---|
+| `close.py:386` `_ta_build` | **레거시 총평균 재현 오라클** — 레거시를 읽는 게 목적. 유지 |
+| `dtrade.py:117` | **라이브 대사** 기능 — 컷오버와 함께 은퇴 |
+
+**그 외 전부 `nx.price_item` 정본으로 이관 완료.**
+(`sales` 3 · `close._prd_price` 1 · `sourcing` 7 · `coopquote`/`2` 4 · `pricemgmt` 9 · `price` 5 = **29곳**)
+
+#### 전체 검증
+```
+TestBed flow_scenarios.py   PASS 39 · FAIL 0 · SKIP 1 · 오염 0
+pricemgmt CRUD 왕복          insert → 조회 → update → 삭제 → 롤백 clean
+price API 6종                전부 200
+은퇴 미러 가드               nx.PR_M_ITEM 잔여 5곳(planrev, 별건)
+```

@@ -248,9 +248,17 @@ def coopquote_set_role(payload: dict = Body(...)):
             mat = round(cur_mat)   # 용접봉 재료비 유지
         else:  # 사급부품 = 최신 매입가 × 소요
             cn = _conn(); cc = cn.cursor()
-            cc.execute("""SELECT TOP 1 ITEM_COST FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE UPPER(LTRIM(RTRIM(ITEM_CODE)))=? AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0
-                ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC""", part.upper())
+            # ★2026-08-29 단가정본 이관(대표 승인): 미러 nx.PR_M_ITEM_COST → nx.price_item(§18).
+            #   ★값이 30건 바뀐다 — 정렬이 아니라 데이터 차이다.
+            #     클린에는 vendor_code='LG' + price_type='매입' 행 855개가 있다(웹 업로드 사급가, price.py:226).
+            #     미러엔 그 행이 없어 매입행을 못 찾고 **판가(tag E/S · 거래처 1010)** 로 넘어가고 있었다.
+            #     COOP_QUOTE_MATCOST_RULES.md: "직거래(1010) 가격은 협력사 사급가 아님 → 제외"
+            #     ⟹ 미러 쪽이 규칙 위반이었고, 클린(업로드 사급가)이 맞다.
+            #   ★vendor_code tiebreak 추가 — 동점 시 비결정적이던 것을 고정한다.
+            cc.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE UPPER(LTRIM(RTRIM(item_code)))=? AND LTRIM(RTRIM(ISNULL(vendor_code,'')))<>'2228' AND price>0
+                ORDER BY (CASE WHEN price_type='매입' THEN 0 ELSE 1 END), apply_ymd DESC,
+                         LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC""", part.upper())
             pr = cc.fetchone(); cn.close()
             pur = float(pr[0]) if (pr and pr[0]) else 0
             mat = round(pur * soyo)
@@ -424,12 +432,15 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         for i in range(0, len(nl), 900):
             chunk = [c.replace("'", "") for c in nl[i:i+900]]; inl = "','".join(chunk)
             cur.execute(f"""WITH C AS (
-                  SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST, COST_APPLY_YMD,
-                    ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
-                      ORDER BY (CASE WHEN COST_TAG='1' THEN 0 ELSE 1 END), COST_APPLY_YMD DESC) rn
-                  FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                  WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                    AND LTRIM(RTRIM(CUST_CODE))<>'2228' AND ITEM_COST>0)
+            # ★2026-08-29 단가정본 이관(대표 승인) — 위 단건과 같은 규칙의 일괄판.
+            #   미러는 매입행이 없으면 판가(1010)로 넘어갔다. 클린은 업로드 사급가(vendor='LG')를 집는다.
+                  SELECT UPPER(LTRIM(RTRIM(item_code))) ic, price ITEM_COST, apply_ymd COST_APPLY_YMD,
+                    ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(item_code)))
+                      ORDER BY (CASE WHEN price_type='매입' THEN 0 ELSE 1 END), apply_ymd DESC,
+                               LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC) rn
+                  FROM PARTNER_ERP_TEST3.nx.price_item
+                  WHERE UPPER(LTRIM(RTRIM(item_code))) IN ('{inl}')
+                    AND LTRIM(RTRIM(ISNULL(vendor_code,'')))<>'2228' AND price>0)
                 SELECT ic, ITEM_COST FROM C WHERE rn=1""")
             for r in cur.fetchall():
                 pur[str(r[0]).strip().upper()] = float(r[1] or 0)

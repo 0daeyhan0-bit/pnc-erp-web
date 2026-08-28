@@ -38,7 +38,13 @@ from common import _nx
 DRY = '--commit' not in sys.argv
 NEWCOLS = [("main_flag", "NVARCHAR(1)"), ("mkt", "NVARCHAR(10)"), ("remarks", "NVARCHAR(500)"),
            ("ins_user", "NVARCHAR(30)"), ("ins_dt", "DATETIME"),
-           ("upd_user", "NVARCHAR(30)"), ("upd_dt", "DATETIME")]
+           ("upd_user", "NVARCHAR(30)"), ("upd_dt", "DATETIME"),
+           # ★2026-08-29 2차 — 단가관리 화면(pricemgmt)이 쓰는 나머지.
+           #   mat_unit 만 실데이터가 있다(5,303행). mat/proc/other_cost 는 2·1·0 행뿐이지만
+           #   화면이 입력·표시하므로 **무손실 왕복**을 위해 같이 둔다.
+           #   ※ DO_NOT_USE §9 — 이 셋을 '원가분해'로 해석하는 것은 여전히 금지. 저장만 한다.
+           ("mat_unit", "NVARCHAR(20)"), ("mat_cost", "FLOAT"),
+           ("proc_cost", "FLOAT"), ("other_cost", "FLOAT")]
 
 TAGMAP = "CASE p.price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END"
 JOIN = f"""FROM nx.price_item p
@@ -78,7 +84,11 @@ c.execute(f"""UPDATE p SET p.main_flag = LTRIM(RTRIM(ISNULL(L.MAIN_FLAG,''))),
                            p.ins_user  = LTRIM(RTRIM(ISNULL(L.INSERT_USER_ID,''))),
                            p.ins_dt    = L.INSERT_DATETIME,
                            p.upd_user  = LTRIM(RTRIM(ISNULL(L.UPDATE_USER_ID,''))),
-                           p.upd_dt    = L.UPDATE_DATETIME
+                           p.upd_dt    = L.UPDATE_DATETIME,
+                           p.mat_unit  = LTRIM(RTRIM(ISNULL(L.MAT_UNIT,''))),
+                           p.mat_cost  = L.MAT_COST,
+                           p.proc_cost = L.PROC_COST,
+                           p.other_cost= L.OTHER_COST
               {JOIN}""")
 n = c.execute("SELECT COUNT(*) FROM nx.price_item WHERE main_flag IS NOT NULL").fetchone()[0]
 print(f"백필 완료 — main_flag 채워진 행 {n:,} / {tot:,}  ({n*100.0/tot:.2f}%)")
