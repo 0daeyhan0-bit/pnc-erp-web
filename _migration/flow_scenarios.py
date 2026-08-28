@@ -22,7 +22,7 @@
 """
 import sys, os, io, json, urllib.request, urllib.error
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'PNC_ERP_Web', 'backend'))
 
@@ -194,8 +194,10 @@ def main():
     # 방금 넣은 입고행 키 → 수정/삭제
     # 공유(미커밋) 커넥션으로 조회해야 한다 — 별도 커넥션에는 아직 안 보인다.
     _, q = call("POST", "/api/_flow/sql", {
+        # ★INSERT_USER_ID 는 'web' 로 하드코딩된다(payload user 는 원장에 안 남는다) →
+        #   사용자로 못 거르므로 방금 넣은 입고수량(+100)으로 특정한다.
         "sql": "SELECT TOP 1 MAINT_YMD, MAINT_SEQ FROM nx.stock_ledger "
-               "WHERE MAINT_YMD=? AND MAT_CODE=? AND STOCK_POINT='MAT' AND INSERT_USER_ID='flowverify' "
+               "WHERE MAINT_YMD=? AND MAT_CODE=? AND STOCK_POINT='MAT' AND MAINT_QTY=100 "
                "ORDER BY MAINT_SEQ DESC", "args": [YMD, MAT]})
     rows = q.get("rows") or []
     if rows:
@@ -203,7 +205,7 @@ def main():
         print(f"           (대상 원장행 {kymd}/{kseq})")
         flow("자재수정 stock_update", "POST", "/api/stock/update",
              {"screen": "receipt", "MAINT_YMD": kymd, "MAINT_SEQ": kseq, "qty": 150,
-              "MAT_CODE": MAT, "user": "flowverify"}, "원장MAT", +140)
+              "MAT_CODE": MAT, "user": "flowverify"}, "원장MAT", +50)   # 100 → 150 = +50
         flow("자재삭제 stock_delete", "POST", "/api/stock/delete",
              {"MAINT_YMD": kymd, "MAINT_SEQ": kseq, "user": "flowverify"}, "원장MAT", -150)
     else:
@@ -250,9 +252,16 @@ def main():
              save("receipt", 10, ymd=locked_ymd), "마감")
         rule("키팅 — 마감기간 잠금", "POST", "/api/kitting/cell-confirm",
              {"item": MAT, "gpc": "P1", "ymd": locked_ymd, "qty": 1, "user": "flowverify"}, "마감")
-        rule("마감 중복 실행 차단", "POST", "/api/close/run",
+        # 권한 게이트가 먼저 걸리므로 두 규칙을 분리해 각각 확인한다.
+        rule("마감 권한 게이트 (무권한 사용자)", "POST", "/api/close/run",
              {"domain": "MAT", "ptype": f["closed_ptype"], "period": p, "user": "flowverify"},
+             "권한이 없습니다")
+        rule("마감 중복 실행 차단 (관리자)", "POST", "/api/close/run",
+             {"domain": "MAT", "ptype": f["closed_ptype"], "period": p, "user": "admin"},
              "이미 마감")
+        rule("마감 해제 권한 게이트 (조회전용 사용자)", "POST", "/api/close/cancel",
+             {"domain": "MAT", "ptype": f["closed_ptype"], "period": p, "user": "kdev"},
+             "권한이 없습니다")
     else:
         _rec("R", "마감 잠금", "SKIP", "마감된 기간이 없음")
 

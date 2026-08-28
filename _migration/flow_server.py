@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BE = os.path.join(HERE, '..', 'PNC_ERP_Web', 'backend')
 sys.path.insert(0, BE)
 os.chdir(BE)
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 import common                     # db_client 경로를 sys.path 에 넣어준다
 import pyodbc, db_client
@@ -84,6 +84,23 @@ PROBES = [
 PROBES_MAT = [
     ("자재재고", "SELECT ISNULL(SUM(CAST(STOCK_QTY AS float)),0) FROM nx.PU_T_MAT_STOCK_WH WHERE MAT_CODE=?"),
 ]
+
+# ★기동 시점 행수 = 오염 0 판정 기준(쓰기 전에 잡아야 잠금에 안 걸린다)
+ROLLBACK_TABS = ("nx.stock_ledger", "nx.PU_T_STOCK_MAINT", "nx.PU_T_MAT_STOCK_WH",
+                 "nx.SA_T_STOCK_MAINT", "nx.SA_T_ITEM_STOCK",
+                 "nx.proc_result", "nx.saleout_maint")
+_ROWS0 = {}
+
+
+def _snap_rows0():
+    c = pyodbc.connect(CS, autocommit=True).cursor()
+    for t in ROLLBACK_TABS:
+        try:
+            c.execute(f"SELECT COUNT(*) FROM {t}"); _ROWS0[t] = c.fetchone()[0]
+        except Exception:
+            _ROWS0[t] = None
+    c.close()
+
 
 _BASE = {}
 _SCOPE = {"ymd": "260828", "mat": ""}
@@ -151,22 +168,20 @@ def _flow_sql(payload: dict = Body(default={})):
 
 @APP.app.post("/api/_flow/rollback")
 def _flow_rollback():
-    """전체 롤백 + 오염 0 검증(독립 커넥션으로 행수 재확인)."""
-    before = {}
-    chk = pyodbc.connect(CS, autocommit=True).cursor()
-    tabs = ("nx.stock_ledger", "nx.PU_T_STOCK_MAINT", "nx.PU_T_MAT_STOCK_WH",
-            "nx.SA_T_STOCK_MAINT", "nx.SA_T_ITEM_STOCK",
-            "nx.proc_result", "nx.saleout_maint")
-    for t in tabs:
-        chk.execute(f"SELECT COUNT(*) FROM {t}"); before[t] = chk.fetchone()[0]
+    """전체 롤백 + 오염 0 검증.
+       ★검증 기준은 **서버 기동 시점**에 잡아둔 행수(_ROWS0)다.
+         롤백 전에 별도 커넥션으로 COUNT 하면 우리 자신의 미커밋 잠금에 걸려
+         영원히 멈춘다(2026-08-28 실측 — 하네스가 멎던 진짜 원인)."""
     RAW.rollback()
     after = {}
-    for t in tabs:
+    chk = pyodbc.connect(CS, autocommit=True).cursor()
+    for t in ROLLBACK_TABS:
         chk.execute(f"SELECT COUNT(*) FROM {t}"); after[t] = chk.fetchone()[0]
-    clean = all(before[t] == after[t] for t in tabs)
+    clean = all(_ROWS0.get(t) == after[t] for t in ROLLBACK_TABS)
     return {"ok": True, "rolled_back": True, "clean": clean,
-            "rows_before_rollback": before, "rows_after_rollback": after,
-            "note": "독립 커넥션 기준 — 미커밋이라 롤백 전후 동일해야 정상"}
+            "rows_at_start": _ROWS0, "rows_after_rollback": after,
+            "diff": {t: after[t] - _ROWS0.get(t, 0) for t in ROLLBACK_TABS
+                     if after[t] != _ROWS0.get(t)}}
 
 
 # ★app.mount("/", StaticFiles) 가 먼저 매칭되므로 제어 라우트를 **맨 앞으로** 옮긴다.
@@ -182,6 +197,8 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8099)
     a = ap.parse_args()
+    _snap_rows0()
+    print(f"   기동시점 행수 스냅 완료(오염 0 기준)")
     print(f"★FLOW 검증 서버(롤백 모드) — 포트 {a.port} · 몽키패치 {_patched}곳")
     print("  커밋 무력화됨: 화면을 실제로 조작해도 DB 에 확정되지 않는다.")
     print(f"  제어: GET /api/_flow/probe · POST /api/_flow/mark · POST /api/_flow/rollback")
