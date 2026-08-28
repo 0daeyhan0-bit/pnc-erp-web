@@ -69,10 +69,10 @@ FIXTURES = [
      lambda ctx, r: ctx.update(prod_item=str(r[0]).strip())),
 
     # 용접봉 차감 케이스용 — 대상 품목의 용접봉 소요가 기대값(0.0028)과 맞을 때만 검증(아니면 SKIP)
-    # 현 backflush 는 nx.bom(role='용접봉') 기준으로 차감(≠proc_weld). 그 값이 안정적일 때만 검증.
-    ("weld", """SELECT ISNULL(SUM(CAST(qty AS float)),0) FROM nx.bom
-                 WHERE parent_code='5211A21789C' AND role LIKE '%용접봉%'""",
-     lambda ctx, r: ctx.update(weld_ok=(abs(float(r[0] or 0) - 0.0028) < 0.0003))),
+    # backflush 봉 정본=proc_weld(=CS오라클, 2026-08-28 ③전환). 그 값 안정시만 검증.
+    ("weld", """SELECT ISNULL(SUM(CAST(use_qty AS float)),0) FROM nx.proc_weld
+                 WHERE parent_item='5211A21789C' AND ISNULL(use_qty,0)>0""",
+     lambda ctx, r: ctx.update(weld_ok=(abs(float(r[0] or 0) - 0.00158) < 0.0002))),
 
     # 용접링 차감 케이스용 — 대상(AJR75786301-고주파)의 용접링 개수합이 3(1+2)일 때만 검증(아니면 SKIP)
     ("ring", """SELECT ISNULL(SUM(CAST(bl.qty AS float)),0) FROM nx.bom_line bl
@@ -135,10 +135,9 @@ CASES = [
     # ══ [F] 흐름 : 용접봉 (공정종속 자재 — 생산실적 백플러시 −W) ═══════════
     #   용접봉은 BOM 아닌 공정종속 자재 → 완성공정 백플러시서 생산창고(Q1000) −W 차감.
     #   probe '용접봉차감' = stock_ledger MAT·tag='W' 합(용접봉만 격리). 다른 세션도 이 probe 재사용.
-    #   대상 5211A21789C × 100. 현 코드=nx.bom(RAC30599303 0.0028)→ −0.28.
-    #   ★소스불일치: proc_weld=RAC30599301-1 0.00158(−0.158). ③봉소스 proc_weld 전환 시 이 delta를 −0.158로 갱신.
+    #   대상 5211A21789C × 100 = −0.158 (봉 정본 proc_weld RAC30599301-1 0.00158·③전환 후·CS오라클 일치).
     dict(kind="F", name="용접봉 차감 (백플러시 −W)", method="POST", path="/api/backflush/post",
-         probe="용접봉차감", delta=-0.28, mirror=False,
+         probe="용접봉차감", delta=-0.158, mirror=False,
          skip_if=lambda ctx: not ctx.get("weld_ok"),
          body=lambda ctx: {"item": "5211A21789C", "prod_qty": 100, "wo": "FLOWWELD", "user": "flowverify"}),
     #   용접링 = bom_line 정본(nx.bom엔 없음) → 완성공정서 −R(EA) 차감. probe '용접링차감'=stock_ledger MAT·tag='R'.

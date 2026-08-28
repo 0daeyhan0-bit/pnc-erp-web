@@ -41,14 +41,21 @@ def _backflush_bom(nxc, root, cro=None):
             r = cc.fetchone(); _mkc[n] = bool(r and str(r[0]).strip() == '1')
         return _mkc[n]
     out = {}; weld = {}
+    pwc = nxc.cursor()
+    def _node_weld(node, mult):
+        # ★용접봉 정본 = nx.proc_weld(=CS_M_ITEM_BOM 오라클·생산BOM 일치). nx.bom 봉엣지는 stale(코드·값 상이)라 불사용.
+        #   ★풀코드 유지(뭉개기 금지): RAC30599301(은납)≠RAC30599301-1(용접봉)=별품목([[newerp-gagong-routing-migration]]).
+        if not _sanae(node): return                        # 사내 용접만(외주=사급출고tag5로 이미 −재고)
+        pwc.execute("SELECT weld_item, use_qty FROM nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0", str(node).strip())
+        for wi, uq in pwc.fetchall():
+            weld[str(wi)] = weld.get(str(wi), 0.0) + float(uq or 0) * mult
     def walk(node, mult, depth):
         if depth > 15: return
+        _node_weld(node, mult)                              # ★노드별 proc_weld 봉 합산(트리 롤업)
         for ch, q, role, low in kids.get(node, []):
             cq = mult * q
-            if '용접봉' in (role or ''):                    # ★용접봉=공정종속
-                if str(ch).upper().startswith('RAC') and _sanae(node):   # RAC + 사내용접만 −W(외주=사급출고 이미 −재고)
-                    weld[str(ch).split('-')[0]] = weld.get(str(ch).split('-')[0], 0.0) + cq
-                continue                                    # 그 외 role=용접봉(3H·용접SUB)·외주용접봉 = 스킵
+            if '용접봉' in (role or ''):                    # nx.bom 봉엣지 = 무시(proc_weld가 정본)
+                continue
             if ch in kids and str(low) != 'Y':             # 제작 서브 → 전개
                 walk(ch, cq, depth + 1)
             else:                                          # 소비 leaf(자재/구매품)

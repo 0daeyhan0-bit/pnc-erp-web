@@ -214,6 +214,14 @@
 - **∴ 봉·링 동일 Q1000 모델 완성**: 자재→matissue(Q1000 불출)→생산실적(Q1000 −차감·게이트)→취소(복원). 봉='W'/링='R'.
 - **남음**: procbc_save 반환요약에 ring 노출(선택) · FLOW procbc 링 게이트 R케이스 · ③봉소스 · 용접링 입고 운영(현 게이트=실재고, 입고는 matissue). **전부 dev·미배포**.
 
+## 22. ★③ 봉 재고차감 소스 proc_weld 전환 (2026-08-28) — 정확도 핵심
+
+**문제**: backflush 봉 차감이 **nx.bom 기준(stale)** — 코드·값 둘 다 틀림. 실측 5211A21789C: nx.bom=RAC30599303 0.28 vs **정본 proc_weld=RAC30599301-1 0.158**(=CS_M_ITEM_BOM 오라클=PR_M_ITEM_BOM 생산BOM). **재고 1.77배 과다·엉뚱코드 차감**.
+- 기록확인: [[newerp-gagong-routing-migration]] proc_weld=CS오라클 정본(저복사 갭 수정완)·**"base 뭉개기 금지"(RAC30599301은납≠-1용접봉)**. [[newerp-backflush-rawmat-weight-axis]] comps(원소재)=nx.bom 중량축은 유지.
+- **변경**: `_backflush_bom` 봉 수집 = nx.bom role 엣지(split base) → **proc_weld 정본**(노드별 트리롤업·풀코드·사내한정 _sanae). comps(원소재)는 nx.bom 유지(축 다름). 양 경로(_backflush_core·_weld_consume) 자동 적용.
+- **검증**: ①정확도 3/3 오라클 일치(5211A21789C 0.158·AJR30012009 0.0426·AJR73327007-은납 0.0018). ②**회귀 0**: 봉 잃는 431품목 **전부 오라클에 봉 없음**(nx.bom stale=드롭 정당·진짜 잃음 0). 봉 얻는 2602품목=proc_weld 정본(정당). ③FLOW PASS(용접봉 −0.158·용접링 −15·오염0).
+- ∴ **봉 재고 차감 정확도 확보**(맞는 코드·맞는 양·오라클 일치). dev·미배포.
+
 ## 13. 다음 단계 (검증하며 하나씩)
 
 - [x] #7-5 사내 조정대상 전수 특정 = 8품목(봉+링 공존), 20품목 봉0
