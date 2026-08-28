@@ -744,15 +744,15 @@ SCREEN.matledger=(c)=>{
     loading=false;draw();};
   const draw=()=>{
     const brk=(meta&&meta.invariant_breaks)||[], va=(meta&&meta.valuation_adjust)||{count:0,amount:0,why:''};
-    const sub=`기초(확정 스냅샷) + 입고 − 출고 ± 조정 = 기말 · 단가=이동평균${dom==='PRD'?'(매입가 기반)':''} · <b>저장하지 않고 매번 계산</b>${dom==='PRD'?' · 축=품목×재고위치':''}`
+    const sub=`기초(확정 스냅샷) + 입고 − 출고 ± 조정 = 기말 · 단가=이동평균${dom==='PRD'?'(매입가 기반)':(dom==='SAL'?'(판가 기반)':'')} · <b>저장하지 않고 매번 계산</b>${dom==='PRD'?' · 축=품목×재고위치':''}`
       +(meta?` · ${esc(meta.basis||'')}`:'');
     const sgroups=[...new Set(pool.map(r=>(''+r.sg).trim()).filter(Boolean))].sort();
     const custs=[...new Set(pool.map(r=>r.cust).filter(Boolean))].sort();
     c.innerHTML=`
-     <div class="page-title">📒 ${dom==='PRD'?'생산':'자재'} 수불장</div>
+     <div class="page-title">📒 ${({MAT:'자재',PRD:'생산',SAL:'영업'})[dom]} 수불장</div>
      <div class="page-sub">${sub}</div>
      <div class="toolbar">
-       <div class="toggle-group"><button data-dom="MAT" class="${dom==='PRD'?'':'on'}">자재</button><button data-dom="PRD" class="${dom==='PRD'?'on':''}">생산</button></div>
+       <div class="toggle-group"><button data-dom="MAT" class="${dom==='MAT'?'on':''}">자재</button><button data-dom="PRD" class="${dom==='PRD'?'on':''}">생산</button><button data-dom="SAL" class="${dom==='SAL'?'on':''}">영업</button></div>
        <label style="font-size:12px;color:var(--muted);font-weight:600">기간</label>
        <input type="date" class="inp" id="dfrom" value="${esc(dFrom)}" style="min-width:135px">
        <span style="color:var(--muted)">~</span>
@@ -829,7 +829,7 @@ SCREEN.matledger=(c)=>{
     c.querySelector('#sg').onchange=apply;c.querySelector('#cust').onchange=apply;c.querySelector('#gubun').onchange=apply;
     c.querySelector('#longstk').onchange=apply;
     c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#sg').value='';c.querySelector('#cust').value='';c.querySelector('#gubun').value='all';c.querySelector('#longstk').checked=false;apply();};
-    c.querySelector('#xls').onclick=()=>downloadCSV(`${dom==='PRD'?'생산':'자재'}수불장_${date2ymd(dFrom)}_${date2ymd(dTo)}.csv`,
+    c.querySelector('#xls').onclick=()=>downloadCSV(`${({MAT:'자재',PRD:'생산',SAL:'영업'})[dom]}수불장_${date2ymd(dFrom)}_${date2ymd(dTo)}.csv`,
       ['품목코드','품명','재고수량','재고단가','재고금액','소분류','매입유형','단위','기초재고','기초단가','기초금액','입고수량','입고단가','입고금액','출고수량','출고단가','출고금액','기타수량','기타단가','기타금액','평가조정','담당자','매입처명','최종입고일'],
       cur.map(r=>[r.cd,r.nm,r.sq,r._su,Math.round(r.sa),r._sgn,r._ctn,r.unit,r.bq,r._bu,Math.round(r.ba),r.iq,r._iu,Math.round(r.ia),r.oq,r._ou,Math.round(r.oa),r.tq,r._tu,Math.round(r.ta),Math.round(r.va||0),r._chg,r.cust,r._lin]));
     if(loading){c.querySelector('#body').innerHTML=spinRow(dom==='PRD'?25:24);c.querySelector('#cnt').textContent='';}

@@ -807,8 +807,9 @@ def _snap_prd_recipe(cur, ptype, period):
     return n, f"{target}(생산재고조회 480 recipe)"
 
 
-def _snap_sal(cur, ptype, period):
-    """완성/제품 스냅샷 = 제품재고조회(040) recipe 를 target 시점으로 확정. 반환 (행수, 기준일)."""
+def _snap_sal_recipe(cur, ptype, period):
+    """★DEPRECATED — 040 recipe 직확정(단가 = as-of 판가 × 수량). **이동평균이 아니다.**
+       수량 대조용으로만 보존. 확정은 아래 `_snap_sal`(이동평균) 을 쓴다."""
     from live_api import salesstock
     target = period if ptype == "D" else _month_end(period)
     res = salesstock(dfrom=target[:4] + "01", dto=target, source="live", zero="1")
@@ -819,7 +820,23 @@ def _snap_sal(cur, ptype, period):
         out.append((r.get("cd") or r.get("mat"), "", qty, qty * cost, cost,
                     float(r.get("inq") or 0), float(r.get("outq") or 0)))
     n = _snap_write(cur, "SAL", ptype, period, out)
-    return n, f"{target}(제품재고조회 040 recipe)"
+    return n, f"{target}(제품재고조회 040 recipe·DEPRECATED)"
+
+
+def _snap_sal(cur, ptype, period):
+    """★영업 마감 = **판가 기반 이동평균**(신고 평가방법 §7-4, 대표 확정 2026-08-27).
+
+       ★2026-08-28 결함수정: 종전엔 040 recipe 를 그대로 확정해 **as-of 판가 × 수량** 이었다.
+         판가가 오르면 **기초 재고까지 전량 신규 판가로 재평가**된다 = 이동평균이 아니다.
+         실측(2607): 7/9 판가 인상 품목 33건에서 수불장(이동평균)과 금액이 갈렸다.
+           6851A20037L  기초단가 36,786 → 판가 37,597
+             마감 940×37,597 = 35,341,180  vs  이동평균 34,578,840
+         ⟹ 수불장과 **같은 엔진(_sal_ledger)** 을 호출해 확정한다(§21: 같은 값은 한 곳에서)."""
+    target = period if ptype == "D" else _month_end(period)
+    rows, _breaks, basis = _sal_ledger(cur, target[:4] + "01", target)
+    out = [(r["cd"], "", r["sq"], r["sa"], r["avg"], r["iq"], r["oq"]) for r in rows]
+    n = _snap_bulk(cur, "SAL", ptype, period, out)
+    return n, f"{target}(판가 이동평균·{basis})"
 
 
 # ===================== 생산(PRD) 이동평균 — 매입가 기반 (§12-8) =====================
@@ -1437,6 +1454,179 @@ def _prd_ledger(cur, fr6, to6):
     return rows, breaks, f"기초 {base_ymd} {src}"
 
 
+# ===================== 영업(SAL) 수불장 — 판가 기반 이동평균 =====================
+# ★정본: STOCK_CLOSE_HANDOFF.md §7-4 — 영업은 **판가 기반 이동평균**(대표 확정 2026-08-27).
+#   축 = 품목(위치 없음). 이동 원천 = 레거시 제품재고조회 040(`live_api.salesstock`) 과
+#   **같은 UNION 분기**를 일자별로 편 것. 040 은 기간 요약이라 일자 전개가 안 되므로
+#   분기·부호를 그대로 두고 일자 컬럼을 살려 재작성한다(생산 PRD 와 같은 방식).
+# ★단가 = pr_m_item_cost(cost_tag IN ('S','E')) as-of 최신 = 040 이 쓰는 그 단가(판가).
+def _sal_moves(cur, d_from, d_to):
+    """[d_from,d_to] 일자별 완성품 이동 → {ymd: {item: {net,inq,outq,adj}}}. 040 분기 그대로."""
+    T3 = "PARTNER_ERP_TEST3.nx."
+    out = {}
+
+    def slot(y, item):
+        return out.setdefault(str(y), {}).setdefault(
+            str(item or "").strip().upper(), {"net": 0.0, "inq": 0.0, "outq": 0.0, "adj": 0.0})
+
+    # ① 생산입고(tag P, in_part 없음)  ② 창고입고(tag B,V)
+    cur.execute(f"""SELECT a.maint_ymd, UPPER(a.item_code), SUM(CAST(a.maint_qty AS float))
+                      FROM {T3}sa_t_stock_maint a
+                     WHERE a.maint_ymd BETWEEN ? AND ? AND a.maint_qty<>0
+                       AND ((a.maint_tag='P' AND ISNULL(a.in_part_code,'')='') OR a.maint_tag IN ('B','V'))
+                     GROUP BY a.maint_ymd, UPPER(a.item_code)""", d_from, d_to)
+    for y, it, q in cur.fetchall():
+        slot(y, it)["inq"] += float(q or 0)
+
+    # ③ 직납 자재입고(out_wh_gubun='2') — 부호 반전
+    cur.execute(f"""SELECT a.maint_ymd, UPPER(a.mat_code), SUM(-CAST(a.maint_qty AS float))
+                      FROM {T3}pu_t_stock_maint a
+                     WHERE a.maint_ymd BETWEEN ? AND ? AND ISNULL(a.out_wh_gubun,'1')='2'
+                     GROUP BY a.maint_ymd, UPPER(a.mat_code)""", d_from, d_to)
+    for y, it, q in cur.fetchall():
+        slot(y, it)["inq"] += float(q or 0)
+
+    # ④ 창고출하(tag J,8,R)
+    cur.execute(f"""SELECT a.maint_ymd, UPPER(a.item_code), SUM(-CAST(a.maint_qty AS float))
+                      FROM {T3}sa_t_stock_maint a
+                     WHERE a.maint_ymd BETWEEN ? AND ? AND a.maint_tag IN ('J','8','R') AND a.maint_qty<>0
+                     GROUP BY a.maint_ymd, UPPER(a.item_code)""", d_from, d_to)
+    for y, it, q in cur.fetchall():
+        slot(y, it)["outq"] += float(q or 0)
+
+    # ⑤ 재고조정(tag 2) — ★040 은 `qty = basic+inq-etc-outq` 로 **etc 를 뺀다**.
+    #   여기서는 adj 를 더하는 형태로 통일하되 부호를 040 과 맞춘다(etc = −maint_qty 이므로 adj = +maint_qty).
+    cur.execute(f"""SELECT a.maint_ymd, UPPER(a.item_code), SUM(CAST(a.maint_qty AS float))
+                      FROM {T3}sa_t_stock_maint a
+                     WHERE a.maint_ymd BETWEEN ? AND ? AND a.maint_tag='2' AND a.maint_qty<>0
+                     GROUP BY a.maint_ymd, UPPER(a.item_code)""", d_from, d_to)
+    for y, it, q in cur.fetchall():
+        slot(y, it)["adj"] += float(q or 0)
+
+    for y in out:
+        for d in out[y].values():
+            d["net"] = d["inq"] - d["outq"] + d["adj"]
+    return out
+
+
+_SAL_PX_CACHE = {}
+
+
+def _sal_price(cur, target):
+    """완성품 판가 = pr_m_item_cost(cost_tag IN ('S','E')) as-of 최신. 040 과 동일 소스.
+       ★월 단위 캐시(생산과 같은 이유) — 호출 시점을 마감과 맞춰야 값이 안 갈린다(§23 교훈)."""
+    ck = str(target)[:4]
+    if ck in _SAL_PX_CACHE:
+        return _SAL_PX_CACHE[ck]
+    cur.execute("""SELECT item_code, item_cost FROM (
+                     SELECT item_code, item_cost,
+                            ROW_NUMBER() OVER (PARTITION BY UPPER(item_code) ORDER BY cost_apply_ymd DESC) rn
+                       FROM PARTNER_ERP_TEST3.nx.pr_m_item_cost
+                      WHERE cost_apply_ymd <= ? AND cost_tag IN ('S','E')) z
+                    WHERE rn=1""", target)
+    px = {str(r[0]).strip().upper(): float(r[1] or 0) for r in cur.fetchall()}
+    _SAL_PX_CACHE[ck] = px
+    return px
+
+
+def _sal_base(cur, target):
+    """기초 = target 직전 확정 SAL 스냅샷(∪제외분). 없으면 040 recipe 로 target 직전까지 계산."""
+    cur.execute("""SELECT ptype, period FROM nx.period_close
+                    WHERE domain='SAL' AND close_flag=1 AND (ptype='D' OR ptype='M')
+                    ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""")
+    for pt, per in cur.fetchall():
+        end = per if pt == 'D' else _month_end(per)
+        if end < target:
+            st = {}
+            for it, _lo, q, amt, av in _snapshot_rows(cur, 'SAL', pt, per):
+                q = float(q or 0); amt = float(amt or 0)
+                st[str(it)] = [q, (amt / q) if q else float(av or 0)]
+            if st:
+                return st, end, f"확정 스냅샷({'일' if pt == 'D' else '월'}마감 {per})"
+    # 시드 = 040 recipe 를 target 직전까지 굴린 값(레거시 월기초 2502 부터)
+    from live_api import salesstock
+    prev = _prev_ymd(target)
+    res = salesstock(dfrom=prev[:4] + "01", dto=prev, source="live", zero="1")
+    px = _sal_price(cur, prev)
+    st = {}
+    for r in (res.get("rows") or []):
+        cd = str(r.get("cd") or r.get("mat") or "").strip().upper()
+        if not cd:
+            continue
+        q = float(r.get("qty") or 0)
+        st[cd] = [q, px.get(cd, float(r.get("cost") or 0))]
+    return st, prev, "040 recipe 시드"
+
+
+def _sal_ledger(cur, fr6, to6):
+    """영업 수불장 행 + 불변식 위반. 반환 (rows, breaks, basis)."""
+    state, base_ymd, src = _sal_base(cur, fr6)
+    px = _sal_price(cur, to6)                      # ★종료일 기준 단일 단가(§23 교훈)
+
+    def _step(st, mv_day):
+        for it, mv in mv_day.items():
+            q0, a0 = st.get(it, [0.0, 0.0])
+            pq = mv["inq"]
+            if pq > 0:                             # 입고 = 그 시점 판가로 가중평균
+                c = px.get(it, a0)
+                avg = ((q0 * a0 + pq * c) / (q0 + pq)) if q0 > 0 else c
+            else:
+                avg = a0
+            st[it] = [q0 + mv["net"], avg]
+
+    pre_start, pre_end = _next_ymd(base_ymd), _prev_ymd(fr6)
+    if pre_start <= pre_end:
+        pre = _sal_moves(cur, pre_start, pre_end)
+        for y in sorted(pre):
+            _step(state, pre[y])
+    begin = {k: [v[0], v[1]] for k, v in state.items()}
+
+    moves = _sal_moves(cur, fr6, to6)
+    agg = {}
+    for y in sorted(moves):
+        for it, mv in moves[y].items():
+            a = agg.setdefault(it, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0,
+                                    "adj": 0.0, "adjamt": 0.0})
+            a["inq"] += mv["inq"]; a["outq"] += mv["outq"]; a["adj"] += mv["adj"]
+            a["inamt"] += mv["inq"] * px.get(it, 0.0)
+        _step(state, moves[y])
+        for it, mv in moves[y].items():            # 출고·조정은 갱신 후 평균으로
+            _av = state.get(it, [0.0, 0.0])[1]
+            agg[it]["outamt"] += mv["outq"] * _av
+            agg[it]["adjamt"] += mv["adj"] * _av
+
+    # 단가0 보정 — 판가가 없는 품목은 040 이 쓰는 단가로 채운다
+    for st_ in (begin, state):
+        for it, v in st_.items():
+            if abs(v[1]) < 1e-9:
+                c = px.get(it, 0.0)
+                if c:
+                    v[1] = c
+
+    rows, breaks = [], []
+    for it in sorted(set(begin) | set(agg) | set(state)):
+        if not str(it or "").strip():
+            continue
+        bq, bavg = begin.get(it, [0.0, 0.0])
+        a = agg.get(it, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0, "adj": 0.0, "adjamt": 0.0})
+        eq, eavg = state.get(it, [0.0, 0.0])
+        if (abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9
+                and abs(a["adj"]) < 1e-9 and abs(eq) < 1e-9):
+            continue
+        if abs((bq + a["inq"] - a["outq"] + a["adj"]) - eq) > 0.001:
+            breaks.append({"item": it, "축": "수량", "기초": round(bq, 4), "입고": round(a["inq"], 4),
+                           "출고": round(a["outq"], 4), "조정": round(a["adj"], 4), "기말": round(eq, 4)})
+        _ba, _ea = bq * bavg, eq * eavg
+        _va = _ea - (_ba + a["inamt"] - a["outamt"] + a["adjamt"])
+        rows.append({"cd": it, "loc": "", "va": round(_va, 2),
+                     "bq": round(bq, 4), "ba": round(_ba, 2),
+                     "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
+                     "oq": round(a["outq"], 4), "oa": round(a["outamt"], 2),
+                     "tq": round(a["adj"], 4), "ta": round(a["adjamt"], 2),
+                     "sq": round(eq, 4), "sa": round(_ea, 2), "avg": round(eavg, 4)})
+    return rows, breaks, f"기초 {base_ymd} {src}"
+
+
 @router.get("/api/close/ledger")
 def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str = Query(""),
                  zero: int = Query(0), q: str = Query("")):
@@ -1445,16 +1635,16 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
        q = 품번/품명 부분일치 필터.
        ★불변식 기초+입−출±조정=기말 을 서버에서 검산해 breaks 로 돌려준다(0이어야 정상)."""
     d = (domain or "MAT").strip().upper()
-    if d not in ("MAT", "PRD"):
-        raise HTTPException(400, "자재(MAT)·생산(PRD)만 지원합니다 — 영업(SAL)은 040 recipe 라 별도(§7-5).")
+    if d not in ("MAT", "PRD", "SAL"):
+        raise HTTPException(400, "자재(MAT)·생산(PRD)·영업(SAL)만 지원합니다.")
     cn = _nx(); cur = cn.cursor()
     try:
         to6 = _d6(d_to) or _today6()
         fr6 = _d6(d_from) or (to6[:4] + "01")
         if fr6 > to6:
             fr6, to6 = to6, fr6
-        if d == "PRD":
-            rows, breaks, basis = _prd_ledger(cur, fr6, to6)
+        if d in ("PRD", "SAL"):
+            rows, breaks, basis = (_prd_ledger if d == "PRD" else _sal_ledger)(cur, fr6, to6)
             _attach_item_info(cur, rows, to6)
             if q:
                 k = q.strip().upper()
@@ -1466,8 +1656,9 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
                     "totals": tot, "basis": basis, "invariant_breaks": breaks,
                     "valuation_adjust": {"count": len(va_rows), "amount": tot["va"],
                                          "items": va_rows[:50],
-                                         "why": "단가0 보정(자재단가 승계)·단가 리셋 — 이동이 아니라 단가를 고쳐 끼운 분"},
-                    "note": "생산 수불장 = 확정 스냅샷 기초 + 480 분기 전표 파생. 축=(품목×재고위치)."}
+                                         "why": "단가0 보정·단가 리셋 — 이동이 아니라 단가를 고쳐 끼운 분"},
+                    "note": ("생산 수불장 = 확정 스냅샷 기초 + 480 분기 전표 파생. 축=(품목×재고위치)." if d == "PRD"
+                             else "영업 수불장 = 확정 스냅샷 기초 + 040 분기 전표 파생. 단가=판가 기반 이동평균.")}
         # ── 기초 = fr6 직전의 확정 스냅샷까지 전개한 상태 ──────────────────
         #   ★_mv_base 는 "target 직전 확정 스냅샷"을 준다. 그 시점부터 fr6 전날까지는
         #     전표로 이어 붙여야 기초가 정확하다(이중계상 금지 — §7-7 #2).
