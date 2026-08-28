@@ -100,6 +100,9 @@ const MODULES=[
    {id:'docmgr',ic:'📐',nm:'도면/문서 조회'},
    {id:'basemaster',ic:'🗂️',nm:'기준 마스터 관리'},
    {id:'prodinfo',ic:'⚙️',nm:'생산정보등록'},
+   // ★검토용(2026-08-26) — ① 신규모델 검색·생성 결과 확인 + 제외조건 등록(레거시 w_pr_master_050/070).
+   //   삭제=일회성(다음 편성에 재생성) / 제외조건=영구차단. 편성 STEP M 의 3중 NOT EXISTS 중 하나.
+   {id:'modelbomhist',ic:'🧪',nm:'모델BOM 이력·제외',tag:'검토'},
  ]},
  {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
    {id:'mat',ic:'📦',nm:'자재목록조회'},
@@ -142,6 +145,9 @@ const MODULES=[
    {sep:true},
    {id:'orderupload',ic:'📥',nm:'주문업로드'},
    {id:'planupload',ic:'📅',nm:'생산계획업로드'},
+   // ★검토용(2026-08-26) — 레거시식 단계별 실행. 편성로직은 사본(동일), 실행방식만 다름. 기존분과 병행.
+   //   tag:'검토' = 사이드바에 주황 배지 + 글자색으로 구분(검토중 메뉴임을 한눈에).
+   {id:'planuploadrev',ic:'🧪',nm:'생산계획업로드',tag:'검토'},
    {id:'planinput',ic:'➕',nm:'생산계획추가입력'},
    {id:'prodsheet',ic:'🖨️',nm:'생산전표출력관리'},
    {id:'partplan',ic:'🧩',nm:'파트별 생산계획'},
@@ -221,7 +227,19 @@ function applyMenuOrder(){
     const used=new Set(), out=[];
     saved.forEach(tok=>{ if(tok==='__sep__')out.push({sep:true});
       else if(byId[tok]&&!used.has(tok)){out.push(byId[tok]);used.add(tok);} });
-    m.subs.forEach(it=>{if(!it.sep&&!used.has(it.id)){out.push(it);used.add(it.id);}});  // 신규(미저장) 항목은 뒤에
+    // ★신규(미저장) 항목은 '정의상 바로 앞 항목' 뒤에 끼운다(2026-08-26 수정).
+    //   예전엔 무조건 맨 뒤로 밀어서, 메뉴를 한 번이라도 드래그한 사용자는 새 메뉴가
+    //   엉뚱한 위치(맨 아래)에 나타났다. 이제 개발자가 의도한 자리에 들어간다.
+    m.subs.forEach((it,i)=>{
+      if(it.sep||used.has(it.id))return;
+      let at=out.length;                                  // 기본=맨 뒤(앞 항목이 전부 신규면)
+      for(let k=i-1;k>=0;k--){                            // 정의상 바로 앞의 '이미 배치된' 항목을 찾아
+        const p=m.subs[k]; if(p.sep||!used.has(p.id))continue;
+        const pos=out.findIndex(o=>!o.sep&&o.id===p.id);
+        if(pos>=0){at=pos+1;break;}
+      }
+      out.splice(at,0,it); used.add(it.id);
+    });
     if(out.some(it=>!it.sep))m.subs=out;
   });
 }
@@ -237,7 +255,14 @@ function resetMenuOrder(){ localStorage.removeItem(MENU_ORDER_KEY); location.rel
 function buildTree(){
   applyMenuOrder();
   if(!document.getElementById('menuDragCss')){const st=document.createElement('style');st.id='menuDragCss';
-    st.textContent='.tree-leaf[draggable=true]{cursor:grab}.tree-leaf.dragging{opacity:.45}.tree-leaf.drop-before{box-shadow:inset 0 2px 0 #1c47a0}.tree-leaf.drop-after{box-shadow:inset 0 -2px 0 #1c47a0}.menu-reset{font-size:11px;color:#8aa0bd;cursor:pointer;padding:6px 12px}.menu-reset:hover{color:#1c47a0;text-decoration:underline}';
+    st.textContent='.tree-leaf[draggable=true]{cursor:grab}.tree-leaf.dragging{opacity:.45}.tree-leaf.drop-before{box-shadow:inset 0 2px 0 #1c47a0}.tree-leaf.drop-after{box-shadow:inset 0 -2px 0 #1c47a0}.menu-reset{font-size:11px;color:#8aa0bd;cursor:pointer;padding:6px 12px}.menu-reset:hover{color:#1c47a0;text-decoration:underline}'
+      /* ★검토중 메뉴 강조(2026-08-26) — 운영메뉴와 시각적으로 확실히 구분.
+         메뉴명이 길어도 배지가 줄바꿈되지 않게 flex + nowrap. 배지는 우측 정렬. */
+      +'.tree-leaf-tag{color:#b45309!important;font-weight:600;background:linear-gradient(90deg,#fff7ec,transparent);border-left:3px solid #e08a1c;'
+      +'display:flex;align-items:center;gap:6px;white-space:nowrap}'
+      +'.tree-leaf-tag:hover{background:linear-gradient(90deg,#ffeed4,transparent)}'
+      +'.tag-chip{flex:0 0 auto;margin-left:auto;padding:0 6px;border-radius:8px;background:#e08a1c;color:#fff;'
+      +'font-size:10px;font-weight:700;line-height:16px;letter-spacing:-.3px}';
     document.head.appendChild(st);}
   const sb=document.getElementById('sidebar');
   let h=`<div class="tree"><div class="tree-leaf" data-id="dash">대시보드</div>`;
@@ -249,8 +274,9 @@ function buildTree(){
       <div class="tree-children">`;
     subs.forEach(it=>{
        if(it.sep){h+=`<div class="tree-sep" data-sep="1" style="height:1px;background:#d5dde8;margin:6px 12px"></div>`;return;}
-       h+=`<div class="tree-leaf" draggable="true" data-id="${it.id}">${it.nm}
-       ${it.cnt!=null?`<span class="badge">${won(it.cnt)}</span>`:''}${it.soon?'<span class="badge">준비</span>':''}</div>`;});
+       // ★tag 붙은 메뉴(검토중 등)는 색상·배지로 구분 — 운영메뉴와 헷갈리지 않게(2026-08-26)
+       h+=`<div class="tree-leaf${it.tag?' tree-leaf-tag':''}" draggable="true" data-id="${it.id}"${it.tag?` title="${it.tag}중인 메뉴 — 운영메뉴와 병행"`:''}>${it.nm}
+       ${it.tag?`<span class="tag-chip">${it.tag}</span>`:''}${it.cnt!=null?`<span class="badge">${won(it.cnt)}</span>`:''}${it.soon?'<span class="badge">준비</span>':''}</div>`;});
     h+=`</div></div>`;
   });
   h+=`<div class="menu-reset" title="드래그로 바꾼 메뉴 순서를 기본값으로 되돌립니다">↺ 메뉴 순서 초기화</div>`;
@@ -303,6 +329,7 @@ function openTab(id,nm){
     // ★height:100% 를 쓰는 화면(대부분의 조회화면)이 정상 작동하려면 이 컨테이너부터
     //   확정된 높이를 가져야 한다. display:block 인 채로는 자식의 height:100% 가
     //   전달되지 않아, 내용이 짧은 화면은 표가 화면 아래까지 안 늘어나는 문제가 생긴다.
+    //   ※c52de04(2026-08-21) 로 확정된 구조 — 바꾸지 말 것. flex 로 대체 시도했다가 되돌림(2026-08-27).
     const c=document.createElement('div');c.id='pg-'+id;c.style.cssText='display:none;height:100%';
     $content.appendChild(c);tabs[id].pg=c;
     (SCREEN[id]||SCREEN._na)(c,id);
@@ -2097,8 +2124,13 @@ const MST_CFG={
     fields:[['dept_code','부서코드','text'],['dept_desc','부서명','req'],['sort_key','정렬순서','num'],['use_flag','사용여부','chk'],['dept_desch','한자명','text'],['dept_from_ymd','적용시작','text'],['dept_to_ymd','적용종료','text'],['fin_dept_code','재무부서','text'],['fin_from_ymd','재무시작','text'],['fin_to_ymd','재무종료','text'],['enterprise_dept','전사부서','text'],['wh_code','창고','text'],['remarks','비고','text']],
     newDefaults:{use_flag:1,sort_key:0}},
   line:{sid:'basemaster',title:'라인 마스터',keyField:'line_no',listEp:'/api/line/list',saveEp:'/api/line/save',delEp:'/api/line/delete',org:'nx.line_no',
-    cols:[{k:'line_no',h:'라인번호',cap:140},{k:'apply_ymd',h:'적용일'},{k:'maint_day',h:'리드일',cls:'num'},{k:'maint_hhmm',h:'변경시각',cls:'center',fmt:r=>{let v=String(r.maint_hhmm||'').replace(/\D/g,'');if(!v)return '';v=v.padStart(4,'0').slice(-4);return v.slice(0,2)+':'+v.slice(2);}},{k:'link_cust_name',h:'연결거래처',cap:160,fmt:r=>esc(r.link_cust_name||r.link_cust_code||'')},{k:'cust_maint_day',h:'거래처리드',cls:'num'}],
-    fields:[['line_no','라인번호','req'],['apply_ymd','적용일(YYMMDD)','text'],['maint_day','리드일','num'],['maint_hhmm','변경시각(HHMM)','text'],['link_cust_code','연결거래처코드','text'],['cust_maint_day','거래처리드','num']],
+    // ★명칭·구성을 레거시 「LINE-NO MASTER」와 동일하게(2026-08-27).
+    //   maint_day/maint_hhmm = 라인당김(변경일자·변경시간)
+    //   cust_maint_day = 직납당김 — 파트별계획 없는 직납품에 추가로 적용되는 당김일수(CA=1).
+    //     STEP7 의 nx.plan_direct_pull 이 이 값을 읽는다.
+    //   ⛔연결거래처(link_cust_code)는 미사용 항목이라 제외(사용자 확인).
+    cols:[{k:'line_no',h:'라인번호',cap:140},{k:'apply_ymd',h:'적용일'},{k:'maint_day',h:'변경일자',cls:'num'},{k:'maint_hhmm',h:'변경시간',cls:'center',fmt:r=>{let v=String(r.maint_hhmm||'').replace(/\D/g,'');if(!v)return '';v=v.padStart(4,'0').slice(-4);return v.slice(0,2)+':'+v.slice(2);}},{k:'cust_maint_day',h:'직납당김',cls:'num'}],
+    fields:[['line_no','라인번호','req'],['apply_ymd','적용일(YYMMDD)','text'],['maint_day','변경일자','num'],['maint_hhmm','변경시간(HHMM)','text'],['cust_maint_day','직납당김','num']],
     newDefaults:{maint_day:0,maint_hhmm:'0000'}},
   // ★2026-08-23 조립/단품 공정마스터 등록·수정·삭제 추가(기존엔 조회만 — 거래처·부서·라인만 편집 가능했음).
   //   저장/삭제는 nx 원장(CLAUDE.md §1). 목록 컬럼키는 /api/basemaster/list 가 c0..cN 으로 주므로
@@ -2123,8 +2155,9 @@ const MST_CFG={
 function lineCalView(host){
   const API=API_BASE;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
-  const T=new Date(), mon=new Date(T); mon.setDate(T.getDate()-((T.getDay()+6)%7));
-  const st={data:null,from:iso(mon),weeks:4,anchor:iso(T),msg:'',busy:false};
+  // ★시작주 = 당일(2026-08-27 요청). 종전엔 그 주 월요일로 맞춰 지난 날짜가 앞에 붙었다.
+  const T=new Date();
+  const st={data:null,from:iso(T),weeks:4,anchor:iso(T),msg:'',busy:false};
   const codeSty=(v)=>{const s=(v||'').trim();
     if(!s)return 'background:#eaedf1;color:#c2c8d0';     // 빈칸=휴무
     const n=parseFloat(s);
@@ -2145,15 +2178,18 @@ function lineCalView(host){
     try{const r=await fetch(`${API}/api/linecal/upload`,{method:'POST',body:fd});const j=await r.json();
       if(r.ok&&j.ok){st.msg=`✅ 업로드 완료: ${j.recs}건·특수일 ${j.events} (${j.date_from}~${j.date_to})`;
         // 업로드 기준일 주 월요일로 창 이동
-        const a=new Date(j.anchor);a.setDate(a.getDate()-((a.getDay()+6)%7));st.from=iso(a);await load();}
+        st.from=j.anchor;await load();}   // ★업로드 기준일 그대로(월요일 보정 안 함)
       else{alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}}
     catch(e){alert('업로드 오류: '+e);}
     st.busy=false;render();};
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('basemaster'):true;
     const d=st.data;
+    // ★스크롤 1개만(CLAUDE.md §3) — 화면 루트를 flex 컬럼으로,
+    //   업로드박스·툴바는 flex:0 0 auto, 표 영역만 flex:1;min-height:0;overflow:auto.
+    host.style.cssText='display:flex;flex-direction:column;height:100%;min-height:0';
     host.innerHTML=`
-     ${ed?`<div id="lc-drop" style="border:2px dashed #8fb4d6;border-radius:9px;padding:12px 14px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+     ${ed?`<div id="lc-drop" style="flex:0 0 auto;border:2px dashed #8fb4d6;border-radius:9px;padding:12px 14px;background:#f4f9fe;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
         <span style="font-size:20px">📤</span>
         <b>LG 라인스케줄 엑셀</b>을 여기로 <b>드래그&드롭</b> 하거나
         <button class="btn" id="lc-pick">📁 파일 선택</button>
@@ -2161,27 +2197,52 @@ function lineCalView(host){
         <span style="margin-left:auto"></span>
         <label class="tl">기준일(적용날짜)</label><input class="inp" type="date" id="lc-anchor" value="${st.anchor}" style="width:150px">
         ${st.busy?'<span style="color:#1c47a0">⏳ 처리중…</span>':''}
-      </div>`:`<div class="page-sub">🔒 업로드는 수정권한 필요 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</div>`}
-     <div class="toolbar" style="gap:6px">
+      </div>`:`<div class="page-sub" style="flex:0 0 auto">🔒 업로드는 수정권한 필요 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</div>`}
+     <div class="toolbar" style="gap:6px;flex:0 0 auto">
        <label class="tl">시작주(월)</label><input class="inp" type="date" id="lc-from" value="${st.from}" style="width:150px">
        <label class="tl">기간</label><select class="inp" id="lc-weeks" style="width:auto"><option value="4" ${st.weeks==4?'selected':''}>4주</option><option value="6" ${st.weeks==6?'selected':''}>6주</option><option value="8" ${st.weeks==8?'selected':''}>8주</option></select>
        <button class="btn" id="lc-go">🔍 조회</button>
        <div class="spacer"></div><span class="rowcount">${d?d.from+'~'+d.to:''}</span>
      </div>
-     ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:${st.msg.includes('실패')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       ${d?`<table class="tbl" style="font-size:11px;border-collapse:collapse">
         <thead>
-         <tr><th style="position:sticky;left:0;background:#eef2f7;z-index:2">구분</th><th>라인</th><th>No.</th><th>진도</th>
-           ${d.dates.map(x=>`<th class="center" style="min-width:26px;${x.dow==='토'?'color:#2a6ad6':(x.dow==='일'?'color:#d63a3a':'')}">${x.mon}/${x.day}<br><span style="font-weight:400">${x.dow}</span></th>`).join('')}</tr>
-         <tr><th colspan="4" style="position:sticky;left:0;background:#fff7e0;z-index:2;text-align:right;font-weight:600">특수일 ▶</th>
-           ${d.dates.map(x=>`<td class="center" title="${esc((x.events||[]).join(','))}" style="font-size:9px;background:${x.events&&x.events.length?'#ffe9a8':'#fafbfc'};max-width:26px;overflow:hidden">${(x.events||[]).map(e=>esc(e.slice(0,2))).join('')}</td>`).join('')}</tr>
+         <tr><th style="position:sticky;left:0;top:0;background:#eef2f7;z-index:4">구분</th>
+           <th style="position:sticky;top:0;background:#eef2f7;z-index:3">라인</th>
+           <th style="position:sticky;top:0;background:#eef2f7;z-index:3">No.</th>
+           <th style="position:sticky;top:0;background:#eef2f7;z-index:3">진도</th>
+           ${d.dates.map(x=>`<th class="center" style="position:sticky;top:0;background:#eef2f7;z-index:3;min-width:26px;${x.dow==='토'?'color:#2a6ad6':(x.dow==='일'?'color:#d63a3a':'')}">${x.mon}/${x.day}<br><span style="font-weight:400">${x.dow}</span></th>`).join('')}</tr>
         </thead>
-        <tbody>${d.lines.length?d.lines.map(L=>`<tr>
-          <td style="position:sticky;left:0;background:#fff;white-space:nowrap">${esc(L.gubun)}</td>
-          <td class="center"><b>${esc(L.line_no)}</b></td><td class="center">${esc(L.model_no)}</td><td class="center">${esc(L.jindo)}</td>
-          ${d.dates.map(x=>{const v=L.cells[x.ymd]||'';return `<td class="center" title="${esc(x.ymd)} ${esc(v)}" style="${codeSty(v)};font-size:10px;padding:2px">${esc(v)}</td>`;}).join('')}
-        </tr>`).join(''):`<tr><td colspan="${4+d.dates.length}" class="empty">데이터 없음 — 엑셀을 업로드하세요</td></tr>`}</tbody></table>`
+        <tbody>${d.lines.length?(()=>{
+          // ★3그룹으로 나눠 보여준다(2026-08-27 사용자 요청 — "공통 맨 위, 선 아래는 수기").
+          //   ① 공통(기준)  ② LG 엑셀 업로드 라인  ③ 수기 입력 라인
+          //   그룹 경계에 헤더행을 끼워 넣어 어디까지가 자동/수기인지 한눈에 보이게 한다.
+          const G1=d.lines.filter(L=>L.common), G2=d.lines.filter(L=>!L.common&&L.lg), G3=d.lines.filter(L=>!L.common&&!L.lg);
+          const NC=4+d.dates.length;
+          const sep=(txt,bg,fg)=>`<tr><td colspan="${NC}" style="position:sticky;left:0;z-index:2;background:${bg};color:${fg};font-weight:700;font-size:11px;padding:3px 8px;border-top:2px solid ${fg}">${esc(txt)}</td></tr>`;
+          const row=L=>`<tr${L.common?' style="background:#fff7e0;font-weight:600"':(L.lg?'':' style="background:#fcfdff"')}>
+          <td style="position:sticky;left:0;background:${L.common?'#fff7e0':'#fff'};white-space:nowrap">${esc(L.gubun)}</td>
+          <td class="center"><b>${esc(L.line_no)}</b>${L.common?'':(L.lg?'':'<span class="bdg" style="font-size:8px;margin-left:3px;background:#eef2f8;color:#5a6b80;border:1px solid #d3dceb;border-radius:5px;padding:0 3px" title="LG 엑셀에 없는 라인 — 수기 입력 대상">수기</span>')}</td><td class="center">${esc(L.model_no)}</td><td class="center">${esc(L.jindo)}</td>
+          ${d.dates.map(x=>{let v=L.cells[x.ymd]||'',sc=(L.srcs||{})[x.ymd]||'',inh=0;
+             // ★값이 없으면 공통달력을 상속(편성 규칙과 동일) — 흐리게 표시해 '기본값'임을 구분.
+             if(!v&&!L.common){const b=(d.base||{})[x.ymd]||'';if(b){v=b;sc='COMMON';inh=1;}}
+             // 수기(MANUAL)/미러(MIRROR)/공통은 근무유형 코드(1~7) → 라벨. LG 는 가동시간 숫자 그대로.
+             const isC=sc!=='LG'&&WS_STY[v];
+             let sty=isC?`background:${WS_STY[v].c};color:#fff`:codeSty(v);
+             if(inh)sty+=';opacity:.38';
+             // ★LG 업로드 라인도 수정 가능(2026-08-27) — 가동시간은 보존되고 근무유형 코드만 바뀐다.
+             const tx=isC?WS_STY[v].t:v, canEd=ed&&!L.common;
+             // ⛔근무유형 배지는 넣지 않는다(2026-08-27) — 가동시간 11 옆에 '정상'(코드2)이 붙어
+             //   "11이 왜 정상?" 처럼 읽혀 혼란만 준다. 셀은 **원본 값 그대로** 보여준다.
+             //   지정된 근무유형은 툴팁과 편집 팝업에서 확인한다.
+             const ws2=(L.stats||{})[x.ymd]||'';
+             return `<td class="center lc-cell" data-ln="${esc(L.line_no)}" data-ymd="${esc(x.ymd)}" data-src="${esc(inh?'':sc)}" title="${esc(x.ymd)} ${esc(v)}${inh?' [공통 상속]':(sc?' ['+esc(sc)+']':'')}${(sc==='LG'&&ws2&&WS_STY[ws2])?' · 근무유형 '+WS_STY[ws2].t:''}${canEd?' · 클릭하여 수정':''}" style="${sty};font-size:10px;padding:2px${canEd?';cursor:pointer':''}">${esc(tx)}</td>`;}).join('')}
+        </tr>`;
+          return (G1.length?sep('■ 기준 — 공통 달력 (라인에 값이 없으면 이 값을 따름)','#fff2cc','#8a6d00')+G1.map(row).join(''):'')
+               + (G2.length?sep('■ LG 라인스케줄 (엑셀 자동 업로드 · 편집 불가)','#e6f0fb','#1c47a0')+G2.map(row).join(''):'')
+               + (G3.length?sep('■ 수기 입력 라인 (LG 엑셀에 없음 · 셀 클릭하여 입력)','#eef6ee','#1c7c3a')+G3.map(row).join(''):'');
+        })():`<tr><td colspan="${4+d.dates.length}" class="empty">데이터 없음 — 엑셀을 업로드하세요</td></tr>`}</tbody></table>`
        :`<div class="empty" style="padding:30px">불러오는 중…</div>`}</div>`;
     const g=id=>host.querySelector(id);
     g('#lc-go').onclick=()=>{st.from=g('#lc-from').value;st.weeks=+g('#lc-weeks').value;load();};
@@ -2193,7 +2254,51 @@ function lineCalView(host){
       drop.ondragover=e=>{e.preventDefault();drop.style.background='#e3f0ff';};
       drop.ondragleave=()=>{drop.style.background='#f4f9fe';};
       drop.ondrop=e=>{e.preventDefault();drop.style.background='#f4f9fe';const f=e.dataTransfer.files[0];if(f){autoAnchor(f.name);doUpload(f);}};
+      // ★셀 클릭 = 수기 입력(2026-08-27). LG 엑셀은 8개 라인만 들어오므로 나머지는 수기로 채운다.
+      //   ★LG 업로드 라인도 편집 가능 — 서버가 work_code(가동시간)는 보존하고
+      //     work_stats(근무유형 코드)만 갱신한다. 특근처럼 엑셀에 없는 정보를 찍어야
+      //     편성 근무일이 맞기 때문(예: C1 260829 '정상').
+      host.querySelectorAll('.lc-cell').forEach(td=>{
+        td.onclick=()=>openCell(td);
+      });
     }
+  };
+  // 셀 편집 팝업 — 근무유형 드롭다운(WS_OPTS). body 에 렌더(CLAUDE.md §3 모달규칙)
+  const openCell=(td)=>{
+    const ln=td.dataset.ln, ymd=td.dataset.ymd, src=td.dataset.src||'';
+    const _L=st.data.lines.find(x=>x.line_no===ln)||{cells:{}};
+    const _cur=(_L.cells||{})[ymd]||'';
+    const isLG=src==='LG';            // LG 가동시간이 들어있는 칸
+    const ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:1200;display:flex;align-items:center;justify-content:center';
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;padding:16px 18px;min-width:300px;box-shadow:0 8px 30px rgba(0,0,0,.25)">
+      <div style="font-weight:700;margin-bottom:${isLG?'6px':'10px'}">라인 <b>${esc(ln)}</b> · ${esc(ymd)}</div>
+      ${isLG?`<div style="font-size:11px;color:#5a6b80;background:#eef4fb;border:1px solid #d3e0ef;border-radius:6px;padding:6px 8px;margin-bottom:10px;line-height:1.5">
+         LG 가동시간 <b>${esc(_cur)}</b> 은 <b>그대로 유지</b>되고 근무유형만 저장됩니다.<br>
+         <span style="color:#8a6d00">※ 근무일 판정의 정본은 근무유형입니다(특근·휴무를 여기서 지정).</span></div>`:''}
+      <label class="tl">근무유형</label>
+      <select class="inp" id="lcx-ws" style="width:100%;margin:4px 0 12px">
+        ${WS_OPTS.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn ghost" id="lcx-cancel">취소</button>
+        <button class="btn" id="lcx-ok">저장</button></div></div>`;
+    document.body.appendChild(ov);
+    const sel=ov.querySelector('#lcx-ws');
+    // ★현재 근무유형 코드 = stats(별도 필드) 우선. LG 칸은 표시값이 가동시간이라 코드가 가려진다.
+    const cur=((_L.stats||{})[ymd])||(isLG?'':_cur);
+    if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+    const close=()=>ov.remove();
+    ov.querySelector('#lcx-cancel').onclick=close;
+    ov.onclick=e=>{if(e.target===ov)close();};
+    ov.querySelector('#lcx-ok').onclick=async()=>{
+      try{
+        const r=await fetch(`${API}/api/linecal/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({items:[{line_no:ln,ymd:ymd,ws:sel.value}]})});
+        const j=await r.json();
+        st.msg=j.ok?`✅ ${esc(ln)} ${esc(ymd)} ${j.note||''}`:'저장 실패';
+      }catch(e){st.msg='저장 오류: '+e;}
+      close();await load();
+    };
   };
   const autoAnchor=(name)=>{const m=(name||'').match(/(20\d{6})/);if(m){const s=m[1];st.anchor=`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;}};
   load();
@@ -2392,3 +2497,37 @@ function updateHeaderUser(){
 }
 function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
   sessionStorage.removeItem('perm_authed'); location.reload(); }
+
+/* ================= 사이드바 숨김/열기 (2026-08-27) =================
+   넓은 그리드 화면(협력사계획현황 등)에서 본문 폭 확보용.
+   ☰(헤더) 또는 Ctrl+B = 고정 토글. 숨김상태의 왼쪽 손잡이: hover=임시펼침(peek), 클릭=다시 고정.
+   peek 는 사이드바를 본문 위에 띄우므로 레이아웃이 흔들리지 않는다. 상태는 localStorage 유지. */
+(function initSidebarToggle(){
+  const KEY='sb_hidden';
+  const start=()=>{
+    const body=document.getElementById('appBody'), btn=document.getElementById('sbToggle'),
+          hd=document.getElementById('sbHandle'), sb=document.getElementById('sidebar');
+    if(!body||!btn) return;
+    let hidden=false;
+    try{ hidden = localStorage.getItem(KEY)==='1'; }catch(e){}
+    const apply=()=>{ body.classList.toggle('sb-off',hidden);
+      if(!hidden) body.classList.remove('sb-peek');
+      btn.innerHTML = hidden
+        ? '<span style="font-size:14px">☰</span><span class="sb-toggle-tx">메뉴</span>'
+        : '<span style="font-size:14px">✕</span><span class="sb-toggle-tx">메뉴숨김</span>';
+      btn.title = (hidden?'메뉴 열기':'메뉴 숨김')+' (Ctrl+B)';
+      try{ localStorage.setItem(KEY, hidden?'1':'0'); }catch(e){}
+      window.dispatchEvent(new Event('resize'));   // 그리드 폭 재계산
+    };
+    const setHidden=v=>{ hidden=v; apply(); };
+    btn.onclick=()=>setHidden(!hidden);
+    // ★hover 펼침(peek) 없음 — 그리드 보다가 마우스가 왼쪽으로 가면 메뉴가 튀어나와 방해됨(2026-08-27 사용자 요청).
+    //   열고 닫기는 상단 버튼(또는 Ctrl+B)으로만.
+    if(hd) hd.remove();
+    document.addEventListener('keydown',e=>{
+      if((e.ctrlKey||e.metaKey)&&(e.key==='b'||e.key==='B')){ e.preventDefault(); setHidden(!hidden); }
+    });
+    apply();
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+})();

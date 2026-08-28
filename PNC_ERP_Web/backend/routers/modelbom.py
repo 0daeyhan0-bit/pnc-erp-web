@@ -19,19 +19,29 @@ def _ensure_modelbom(cur):
 
 @router.get("/api/modelbom/search")
 def modelbom_search(q: str = Query(""), by: str = Query("model")):
-    """by=model: 모델검색 / by=item: 도번(역방향) 검색."""
-    cn = _conn(); cur = cn.cursor()
+    """by=model: 모델검색 / by=item: 도번(역방향) 검색.
+
+    ★2026-08-27: nx.PR_M_MODEL_BOM(미러) ∪ nx.model_bom(웹 신규등록) 합집합.
+      종전엔 미러만 봐서 여기서 새로 등록한 모델이 좌측 목록에 뜨지 않았다
+      (등록은 되는데 다시 찾을 수 없는 상태). get/save 와 같은 원천을 보게 맞춘다.
+      ※_conn()=RO 커넥션은 nx 쓰기테이블 접근이 제한되므로 _nx() 를 쓴다."""
+    nx = _nx(); cur = nx.cursor()
     try:
+        _ensure_modelbom(cur)
         like = f"%{q.strip()}%"
         if by == "item":
-            cur.execute("""SELECT TOP 100 C_ITEM_CODE cd, COUNT(DISTINCT MODEL_NO) n FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM
-                WHERE C_ITEM_CODE LIKE ? GROUP BY C_ITEM_CODE ORDER BY C_ITEM_CODE""", like)
+            cur.execute("""SELECT TOP 100 cd, COUNT(DISTINCT mdl) n FROM (
+                    SELECT C_ITEM_CODE cd, MODEL_NO mdl FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WHERE C_ITEM_CODE LIKE ?
+                    UNION      SELECT C_ITEM_CODE, MODEL_NO FROM nx.model_bom WHERE C_ITEM_CODE LIKE ?) z
+                GROUP BY cd ORDER BY cd""", like, like)
             return {"by": "item", "rows": [{"code": r[0], "n": r[1]} for r in cur.fetchall()]}
-        cur.execute("""SELECT TOP 100 MODEL_NO cd, COUNT(*) n FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM
-            WHERE MODEL_NO LIKE ? GROUP BY MODEL_NO ORDER BY MODEL_NO""", like)
+        cur.execute("""SELECT TOP 100 cd, COUNT(DISTINCT it) n FROM (
+                SELECT MODEL_NO cd, C_ITEM_CODE it FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WHERE MODEL_NO LIKE ?
+                UNION      SELECT MODEL_NO, C_ITEM_CODE FROM nx.model_bom WHERE MODEL_NO LIKE ?) z
+            GROUP BY cd ORDER BY cd""", like, like)
         return {"by": "model", "rows": [{"code": r[0], "n": r[1]} for r in cur.fetchall()]}
     finally:
-        cn.close()
+        nx.close()
 
 @router.get("/api/modelbom/get")
 def modelbom_get(model: str = Query(""), item: str = Query("")):
@@ -40,12 +50,12 @@ def modelbom_get(model: str = Query(""), item: str = Query("")):
     try:
         _ensure_modelbom(cur)
         if item.strip():  # 역방향
-            cur.execute("""SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, CONVERT(varchar,MAKE_YMD), CONVERT(varchar,TO_APPLY_YMD), 'live'
+            cur.execute("""SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, CONVERT(varchar,MAKE_YMD), CONVERT(varchar,TO_APPLY_YMD), 'mirror'
                   FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WHERE C_ITEM_CODE=?
                 UNION ALL SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, APPLY_FROM, APPLY_TO, 'nx' FROM nx.model_bom WHERE C_ITEM_CODE=?
                 ORDER BY 1""", item.strip(), item.strip())
         else:
-            cur.execute("""SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, CONVERT(varchar,MAKE_YMD), CONVERT(varchar,TO_APPLY_YMD), 'live'
+            cur.execute("""SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, CONVERT(varchar,MAKE_YMD), CONVERT(varchar,TO_APPLY_YMD), 'mirror'
                   FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WHERE MODEL_NO=?
                 UNION ALL SELECT MODEL_NO, C_ITEM_CODE, USE_QTY, APPLY_FROM, APPLY_TO, 'nx' FROM nx.model_bom WHERE MODEL_NO=?
                 ORDER BY 2""", model.strip(), model.strip())

@@ -231,6 +231,7 @@ print(f"salesStock(제품재고): {len(DB['salesStock'])}건  기초={_agg('basi
 # ---- 자재 일수불장 (구매/자재, dw_pu_stock_260) — 기초/입고/출고/기타/재고 × 수량·금액 ----
 # 일수불장은 클라이언트가 계산하는 구조(DB SP 없음). 라이브 PU_T_MONTH_STOCK_WH_DAILY 는 당일 스냅샷(현재 260717)만 유지 → 라이브를 '읽기전용'으로 가져옴.
 DB['sgroupNames'] = {r['cd']:r['nm'] for r in q("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM CM_M_MASTER_DETAIL WHERE KIND_CODE='PR006'")}
+DB['sgroupNames']['240'] = '용접봉'  # nx 전용 확장(common._KINDMAP_EXT PR006 정합) — 라이브 코드마스터 미등록분(2026-08-27)
 # 거래처분류(조달구분) PR011: 1유상사급/4절삭-원자재/6절삭-협력사/7절삭-부자재 ...
 DB['custTypeNames'] = {r['cd']:r['nm'] for r in q("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM CM_M_MASTER_DETAIL WHERE KIND_CODE='PR011'")}
 # 자재 담당자 = 매입처별 별도 관리 매핑(퇴사/변경 대비 하드코딩 금지). 지금은 매입처 담당자로 시드 → 추후 편집가능 테이블(예: CM_M_CHARGE_ASSIGN).

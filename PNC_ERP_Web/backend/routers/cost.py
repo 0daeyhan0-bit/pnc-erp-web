@@ -505,7 +505,7 @@ def cost_analysis_list(ym: str = Query('', description="YYMM(미지정=최신월
 
 # 사급차액 맵: 해당월 부품별 (실출고가 − 실입고가). 음수=손해(비싸게사서 싸게사급). 원소재·용접봉·소모품 제외(용접링 유지). 월별 캐시.
 _SAGUB_MAP_CACHE = {}
-_SAGUB_EXCL_SG = ('210', '220', '910', '991', '992', '993')
+_SAGUB_EXCL_SG = ('210', '220', '240', '910', '991', '992', '993')  # 240=용접봉 제외(용접링=230은 유지, 2026-08-27)
 def _sagub_diff_map(cur, ym):
     ym = "".join(ch for ch in str(ym or '') if ch.isdigit())
     ym = ym[2:6] if len(ym) >= 6 else ym[:4]

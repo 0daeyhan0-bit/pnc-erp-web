@@ -61,4 +61,14 @@ for t in TABLES:
         print(f"  ✖ {t}: 복제오류 {str(e)[:80]}"); FAIL.append(t)
 if DRY: print("\nDRY (--commit 실행)")
 else: print(f"\n충실 복제 완료 (스킵 {SKIP}, 실패 {len(FAIL)}: {FAIL})")
+
+# ── nx 전용 확장 코드 재주입(라이브 코드마스터엔 없는 우리 클린분류 — 미러 재복사가 덮으므로 복원) ──
+#    common._KINDMAP_EXT 와 정합. 컷오버 후 미러 은퇴 시 함께 정리.
+if not DRY:
+    NX_CODE_EXT = [('PR006', '240', '용접봉', 240)]  # 소분류 240=용접봉(2026-08-27, 재고평가 대상)
+    for _kd, _cd, _ds, _sq in NX_CODE_EXT:
+        if not c.execute("SELECT COUNT(*) FROM nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=? AND DETAIL_CODE=?", _kd, _cd).fetchone()[0]:
+            c.execute("""INSERT INTO nx.CM_M_MASTER_DETAIL (KIND_CODE,DETAIL_CODE,APPLY_YMD,DETAIL_DESC,SORT_SEQ,USE_FLAG,UPDATE_USER_ID,UPDATE_DATETIME)
+                VALUES (?,?,'20260827',?,?,'1','MASTER',GETDATE())""", _kd, _cd, _ds, _sq)
+            print(f"  nx코드확장 재주입: {_kd}.{_cd}={_ds}")
 cn.close()

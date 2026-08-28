@@ -282,7 +282,7 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         for ic, ct in cur.fetchall():
             k = str(ic).strip()
             if k not in cost: cost[k] = float(ct or 0)
-        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM nx.item")
+        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.item")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
         # 절삭/설치 구분 = nx.item.cut_gubun(품목마스터 속성, 크로스DB). 절삭/설치/분지관/이지링크.
@@ -379,7 +379,7 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0,
                     "n_parts": 0, "asof": asof, "priced": len(sac)}
         base_ymd = min(y for _, y, _, _ in src)
-        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM nx.item")
+        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.item")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
         cutm = {}

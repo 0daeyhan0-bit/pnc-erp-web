@@ -6,7 +6,7 @@ from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _geom_weight, _sub_desc_suffix, _is_sub_code)
 
-from common import _ITEM_MAKE
+from common import _ITEM_MAKE, _KINDMAP_EXT
 router = APIRouter()
 
 @router.get("/api/bom/search")
@@ -135,6 +135,10 @@ def codes():
                 FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=? AND ISNULL(USE_FLAG,'1')='1'
                 ORDER BY SORT_SEQ, DETAIL_CODE""", grp)
             out[key] = [{"code": r[0], "name": r[1]} for r in cur.fetchall()]
+            # nx 전용 확장코드(240 용접봉 등) 병합 — 품목마스터 편집(_kindmap)과 일관, 미러 미등록시 누락 방지
+            _have = {o["code"] for o in out[key]}
+            for _c, _nm in _KINDMAP_EXT.get(grp, {}).items():
+                if _c not in _have: out[key].append({"code": _c, "name": _nm})
         out["make_type"] = [{"code": k, "name": v} for k, v in _ITEM_MAKE.items() if k]   # 통일: _ITEM_MAKE(품목조회 일치)
         out["cost_gubun"] = [{"code": "2", "name": "구매단가"}, {"code": "3", "name": "소재단가"},
                              {"code": "1", "name": "내부단가"}, {"code": "5", "name": "기타"}]

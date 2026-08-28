@@ -104,8 +104,10 @@ SCREEN.salesforecast=(c)=>{
     const qs=[];if(base)qs.push('base='+encodeURIComponent(base));if(to)qs.push('to='+encodeURIComponent(to));
     const ep=myMetric==='sagub'?'forecast_sagub':'forecast';
     let d;
-    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);d=await r.json();if(!d||!d.rows)d={days:[],rows:[],base:''};}
-    catch(e){d={days:[],rows:[],base:'',_err:'백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요'};}
+    try{const r=await fetch(`${API}/api/sales/${ep}${qs.length?('?'+qs.join('&')):''}`);
+      if(!r.ok)throw new Error('서버 오류 HTTP '+r.status);   // ★HTTP 상태를 그대로 노출 — 예전엔 500도 '백엔드 연결 실패'로 표시돼 원인 오인(2026-08-27)
+      d=await r.json();if(!d||!d.rows)d={days:[],rows:[],base:''};}
+    catch(e){d={days:[],rows:[],base:'',_err:'조회 실패 — '+((e&&e.message)||e)};}
     if(mySeq!==reqSeq)return;   // 더 최신 요청이 있으면 이 응답은 폐기
     F=d;loading=false;draw();};
   const draw=()=>{
@@ -932,13 +934,15 @@ SCREEN.lgsale=(c)=>{
     const totHtml=()=>{
       if(!rows.length)return '';
       const T=k=>rows.reduce((s,r)=>s+(+r[k]||0),0);
-      return `<tr class="s4tot">
+      // ★총계행 하단 고정(CLAUDE.md §3) — 스크롤해도 항상 보이게. 배경색 필수.
+      const TS='position:sticky;bottom:0;background:#eef2f7;border-top:2px solid #b8c4d4';
+      return `<tr class="s4tot" style="${TS};font-weight:700">
         ${cOrd.map((k,ci)=>{
-          if(ci===0)return `<td style="text-align:center"><b>총계</b></td>`;
-          return TSUM.includes(k)?`<td class="num"><b>${nf(T(k))}</b></td>`:'<td></td>';}).join('')}
+          if(ci===0)return `<td style="${TS};text-align:center"><b>총계</b></td>`;
+          return TSUM.includes(k)?`<td class="num" style="${TS}"><b>${nf(T(k))}</b></td>`:`<td style="${TS}"></td>`;}).join('')}
         ${dates.map(d=>{const pl=rows.reduce((s,r)=>s+((r.days&&r.days[d])||0),0);
           const sd=rows.reduce((s,r)=>s+((r.sday&&r.sday[d])||0),0);
-          return `<td class="num">${(pl||sd)?`<b>${nf(sd)+'/'+nf(pl)}</b>`:''}</td>`;}).join('')}</tr>`;};
+          return `<td class="num" style="${TS}">${(pl||sd)?`<b>${nf(sd)+'/'+nf(pl)}</b>`:''}</td>`;}).join('')}</tr>`;};
     const selN=st.sel.size;
     let selQ=0;
     rows.forEach(r=>dates.forEach(d=>{if(st.sel.has(ckey(r,d))){
@@ -1000,7 +1004,10 @@ SCREEN.lgsale=(c)=>{
      </div>
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc2(st.msg)}</div>`:''}
      <div id="s4-msg" class="page-sub" style="flex:0 0 auto;margin:0;padding:0;line-height:1.5"></div>
-     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <!-- ★표 아래 여백 제거 확정해법(커밋 4787a13) — flex:1 이면 행이 적어도 화면 끝까지
+          늘어나 흰 여백이 남는다. flex:0 1 auto + max-height:100% 로 두면
+          행이 적을 땐 내용 크기만큼만 줄고, 넘칠 때만 스크롤이 생긴다. -->
+     <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit s4tbl" style="font-size:11px"><thead><tr>
        ${headHtml()}
        ${dates.map(d=>`<th class="num${dcls(d)}" style="width:58px;min-width:58px">${dcol(d)}</th>`).join('')}</tr></thead>

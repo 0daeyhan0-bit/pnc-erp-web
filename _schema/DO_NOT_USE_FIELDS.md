@@ -138,6 +138,48 @@
 - **★물리 drop 보류**: nx.partner는 **FK 2개 참조 대상**(`FK__price_lme__vendo`·`FK__sourcing___vendo` = price_lme·sourcing_profile.vendor_code). 즉 벤더차원 FK 타깃이라 단순 drop 불가 → **B(WEHAGO/identity 재설계)에서 벤더차원 재구성 시 FK 재지정+drop**. 지금은 거버넌스(조회금지)만.
 - **근거**: [[newerp-mirror-clean-dual-table-audit]] 쌍2 · [[newerp-partner-identity-rationalize]].
 
+## 17. 품목 분류(sgroup/lgroup) — 레거시·미러에서 읽기 금지, 정본은 `nx.item` (2026-08-27)
+
+- **금지**: 품목 소분류를 **`PARTNER_ERP.dbo.PR_M_ITEM.ITEM_SGROUP`** 또는 **미러 `nx.PR_M_ITEM.ITEM_SGROUP`** 에서 읽기.
+- **정본**: **`nx.item.sgroup`** (대분류도 `nx.item.lgroup`).
+- **왜**: **sgroup 소유권이 `nx.item` 으로 이관됐다**(PR #84, 커밋 `944bbff`).
+  `r_item_sync` 에서 **sgroup 을 동기화 대상에서 제외**했기 때문에, 재분류를 해도 **레거시/미러에는 영원히 반영되지 않는다.**
+  (`item_name` 이 먼저 같은 방식으로 이관된 선례가 있다.)
+  실제 재분류: **용접봉 64품목 → 신설 소분류 `240`** · **용접링 34품목 → `230` 통합**.
+
+### 17-1. 실측 — 이미 벌어진 드리프트 (2026-08-27)
+
+| 항목 | 값 |
+|---|---|
+| `nx.item.sgroup` vs `PR_M_ITEM.ITEM_SGROUP` **불일치** | **82건** |
+| 주요 이동 | `230→240` 24 · `910→240` 24 · `910→230` 15 · `220→240` 8 · `(공백)→240` 4 · `310→230` 1 |
+
+**★실제 버그 1건 확인** — `routers/lgsagub.py:760`
+```sql
+SELECT ... FROM nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'   -- ★미러 읽음
+```
+LG사급 품목(소분류 310) 집합을 미러에서 뽑는다. 실측: **미러 592 vs 정본 591**.
+차이 1건 = **`BCUP1S-1.6*9.6`** — 정본에선 `230`(용접링)으로 재분류됐는데 미러가 `310`(LG사급) 그대로라
+**LG사급 대상에 잘못 포함**된다. → `nx.item` 으로 전환 필요.
+
+### 17-2. 같이 고친 사례 — 마감(`routers/close.py`)
+자재 마감이 소모품 제외 기준(`sgroup < '990'`)과 품목마스터 조인을 `PARTNER_ERP.dbo.PR_M_ITEM` 에서 읽고 있었다.
+전환 시 영향 실측 = **현재 스냅샷에서 빠지는 품목 0건**(불일치 82건이 모두 990 경계를 넘지 않음) → **안전할 때 선제 전환**.
+⟹ **지금 영향이 0이라도 고쳐야 한다.** 어떤 품목을 990대(소모품)로 재분류하는 순간 마감이 그걸 못 따라간다.
+
+### 17-3. 자가진단 방법 (신규·수정 프로그램 필수)
+```sql
+-- 내가 쓰는 소스가 정본과 어긋나는가
+SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.item i
+  JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE = i.item_code
+ WHERE ISNULL(i.sgroup,'') <> ISNULL(m.ITEM_SGROUP,'')     -- 현재 82건
+```
+코드 스캔: `grep -rn "ITEM_SGROUP" backend/` → 레거시/미러 테이블에서 읽고 있으면 **전부 전환 대상**.
+
+- **근거**: PR #84 `944bbff` · `_schema/ITEM_MASTER_CLASSIFY_DESIGN.md` · `CLAUDE.md` §1-9(마스터 정본=클린본).
+
+---
+
 ## 16. 재고 — 자재(MAT) 가용판정에 `stock_ledger` 금지, `mat_stock_daily` 정본 (2026-08-26·§4-C 공식화)
 
 - **금지**: 자재 **현재고/가용판정**을 `nx.stock_ledger`(STOCK_POINT='MAT')에서 SUM. (실측: stock_ledger MAT 미동기·표본 mat_daily 442,938 vs ledger 0 = 45% 오차·대부분 빈값.)
@@ -147,6 +189,7 @@
 - **이중계상 금지**: 스냅샷+원장 미반영분 합산 후 원장 또 더하기 금지(ready.py:172 가드). 라이브잔액+원장델타 이중(common.py:408).
 - **수렴(컷오버)**: stock_ledger 실시간 정본 승격 + 스냅샷 은퇴. mat_stock_daily 빌더 자동화(현재 수동·보류).
 - **근거**: [[newerp-matclose-movavg]] [[newerp-stock-ledger-engine]] [[newerp-mirror-clean-dual-table-audit]] 쌍6·C13.
+- **★다른 세션 필독**: 이 규칙이 과도기인 이유·지금 지킬 결선·미결(자재단가 회계방식)은 **`_schema/STOCK_CLOSE_HANDOFF.md`** (2026-08-27, 재고/마감 담당 세션 인계문서). 요약 = **게이트는 `mat_stock_daily`, 쓰기는 `stock_ledger`, 음수는 경고 아닌 차단**. ★`mat_stock_daily.avg_cost` 는 레거시와 78% 만 일치 → **단가를 원가·정산에 쓸 때 '레거시 일치' 가정 금지**(수량은 100% 신뢰 가능).
 
 ---
 
