@@ -103,6 +103,8 @@ def run_flow(c, ctx):
     st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx))
     a = probe()
     d = {k: round(a.get(k, 0) - b.get(k, 0), 4) for k in b}
+    if st == 404:
+        rec("F", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)"); return
     if st != 200 or (isinstance(res, dict) and res.get("ok") is False):
         detail = res.get("errors") or res.get("detail") or res.get("_err") or res
         rec("F", c["name"], "FAIL", f"호출 거부 {st} — {str(detail)[:130]}"); return
@@ -127,6 +129,11 @@ def run_rule(c, ctx):
     a = probe()
     d = {k: round(a.get(k, 0) - b.get(k, 0), 4) for k in b}
     body = json.dumps(res, ensure_ascii=False)
+    # ★404 를 '차단'으로 세면 안 된다 — 그 엔드포인트가 이 브랜치에 없을 뿐이다.
+    #   (예: 마감 도메인은 feat/close-mgmt 에만 있다. main 에서 돌리면 404 가 난다.)
+    if st == 404:
+        rec("R", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)")
+        return
     blocked = (st >= 400) or (isinstance(res, dict) and res.get("ok") is False)
     wrote = any(abs(v) > 0.001 for v in d.values())
     if not blocked:
@@ -211,9 +218,11 @@ def main():
             if ARG.only and ARG.only not in c["name"]:
                 continue
             st, res = call(c["method"], path_of(c, ctx))
-            ok = (st == 200)
             note = json.dumps(res.get("summary") or res.get("totals") or res, ensure_ascii=False)[:150]
-            rec("R", c["name"], "PASS" if ok else "FAIL", f"{st} · {note}")
+            if st == 404:
+                rec("R", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)")
+            else:
+                rec("R", c["name"], "PASS" if st == 200 else "FAIL", f"{st} · {note}")
 
     # ── 롤백 + 오염 0 ────────────────────────────────────────────────
     print("── 롤백 & 오염 0 증명 " + "─" * 40)
