@@ -758,7 +758,12 @@ def _parts_maps(cur):
     ch = {}
     for p, c2, q in cur.fetchall():
         ch.setdefault(p, []).append((c2, float(q or 0)))
-    cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+    # ★소분류 정본 = nx.item.sgroup (DO_NOT_USE §17). 미러 nx.PR_M_ITEM 은 재분류를 못 따라온다 —
+    #   sgroup 소유권이 nx.item 으로 이관되면서(PR#84) r_item_sync 가 sgroup 을 동기화하지 않기 때문.
+    #   실측(§17-1 에 이미 버그로 등재): 미러 592 vs 정본 591.
+    #   차이 1건 = 'BCUP1S-1.6*9.6' — 품명이 '1%용접링' 이고 정본은 230(용접링)인데
+    #   미러는 310(LG사급) 그대로여서 **LG사급 대상에 잘못 포함**되고 있었다.
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
     sg310 = set(r[0] for r in cur.fetchall())
     _PARTS_MAPS = (ch, sg310)
     return _PARTS_MAPS
