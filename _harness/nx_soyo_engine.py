@@ -127,6 +127,30 @@ def prod_soyo(eng, item):
     return out
 
 
+def sagub_parts_soyo(eng, item, stop_set):
+    """[사급부품 walker] per-unit 완제품 1개 → {stop_set 부품: 소요개수}. v_pr_bom(=nx.bom_line·except≠1) 재귀,
+    stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
+    ★CS_M_ITEM_BOM 직접전개(ad-hoc)는 변형SUB 이중계상(예 AJR30012008→EBF64570401 2배). v_pr_bom은 except로 1회 = 엔진 정본."""
+    memo = {}
+    def walk(node):
+        if node in memo:
+            return memo[node]
+        memo[node] = {}
+        acc = {}
+        for c, q, ex, vf in _vpr_full(eng, node):
+            if ex == '1' or q <= 0:
+                continue
+            if c in stop_set:
+                if not _is_weldrod(eng, c):
+                    acc[c] = acc.get(c, 0.0) + q
+            else:
+                for k, v in walk(c).items():
+                    acc[k] = acc.get(k, 0.0) + v * q
+        memo[node] = acc
+        return acc
+    return walk(item.strip().upper())
+
+
 # ===================== 생산계획 walker (STEP6/7 재현) =====================
 # plan_part_mat = 가공공정 전이 grain. Stage1=plan_part_temp(CTE_BOM), Stage2=가공공정JOIN, Stage3=전이+최하위.
 
