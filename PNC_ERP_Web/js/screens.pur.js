@@ -3331,9 +3331,9 @@ SCREEN.lgsagub=(c)=>{
         <td class="num" style="font-weight:700;color:${(r[ck]||0)<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r[ck]||0))}</td>
         <td class="num" style="color:#5a7597">${wonI(Math.round(r[ak]||0))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>`;
     return `<div style="flex:1;min-height:0;overflow:auto">
-      ${tbl('월별 동 수불 · LG BOM 기준(전체 사급 AP)','open_bom_kg','soyo_bom_kg','close_bom_kg','close_bom_amt','#1c7c3a')}
-      ${tbl('월별 동 수불 · 우리 BOM 기준(우리 실측절삭 + 협력사 사급)','open_our_kg','soyo_our_kg','close_our_kg','close_our_amt','#a06a1c')}
-      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">입고=OSP(LG 사급 raw 동) · 소요 = 우리절삭+협력사사급. LG기준=우리절삭 LG인증값 / 우리기준=우리 실측값(차이=정산차액)</div>
+      ${tbl('월별 동 수불 · LG BOM 기준 (LG 정산 소요)','open_bom_kg','soyo_bom_kg','close_bom_kg','close_bom_amt','#1c7c3a')}
+      ${tbl('월별 동 수불 · 우리 BOM 기준 (협력사 포함)','open_our_kg','soyo_our_kg','close_our_kg','close_our_amt','#a06a1c')}
+      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">입고=OSP(LG 사급 raw 동) · 소요=우리 동소요(협력사 사급분 포함). 두 기준 차이 = 우리절삭 동의 LG인증중량 vs 우리 실측중량 = 정산차액</div>
     </div>`;
   };
   // ── 원단위 관리(업로드·적용월·목록) ──
