@@ -114,7 +114,8 @@ def _lg_ap_all(cur, ver_date):
                 if depth > 25:
                     return
                 for (p, c, mk, sup, spec, q, mg, idiam, ithick) in ch.get(node, ()):
-                    if mk == 'MJU0631' and sup == 'Assembly Pull' and 'ALUMINUM' not in spec.upper():
+                    # ★q=1.0(정확값) 동 = LG 데이터 플레이스홀더(검증 6모델: 정상 0.008~0.5인데 1.0). 제외.
+                    if mk == 'MJU0631' and sup == 'Assembly Pull' and 'ALUMINUM' not in spec.upper() and abs(q - 1.0) > 1e-9:
                         cv = q * mult
                         acc[_key(spec, mg, idiam, ithick)] += cv; tot[0] += cv
                     if c != node and c not in path:       # EA 중간노드=수량 곱해 관통, 동 leaf=자식없어 종료, cycle 방지
