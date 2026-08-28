@@ -994,8 +994,8 @@ def _recv_where(ym, ymd_from, ymd_to):
 
 @router.get("/api/lgsagub/recvcompare_parts")
 def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Query(""), limit: int = Query(3000)):
-    """리시빙 비교(부품): 기간 리시빙 × BOM 사급부품(310) 소요개수 = OUT vs OSP 사급부품입고 IN.
-       ★부품=개수 단위. 소비=C(정상)만(R은 반품 아님→차감안함). BOM=CS_M_ITEM_BOM 전체(원가제외필터 미적용).
+    """리시빙 비교(부품): 기간 리시빙 × BOM 사급부품 소요개수 = OUT vs OSP 사급부품입고 IN.
+       ★부품=개수 단위. 소비=C+R 전부(R은 반품 아니라 정상 리시빙 다른구분). BOM=CS_M_ITEM_BOM(CS_CALC_EXCEPT_FLAG<>'1' 필터=변형SUB 이중계상 방지). 전개 정지=OSP 사급부품 목록.
        기간(ymd_from~ymd_to) 우선, 없으면 월(ym)."""
     f = lambda v: float(v or 0)
     nx = _nx(); cur = nx.cursor()
