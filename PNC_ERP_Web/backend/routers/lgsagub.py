@@ -645,12 +645,11 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         for it, post, qc, qr, ac in recvrows:
             total_qc += qc
             pm = pm_post if post else pm_pre
-            sg = u_sg.get(it); jk = u_jk.get(it)
-            has = (sg is not None) or (jk is not None)
-            sg = sg or 0.0; jk = jk or 0.0
+            sg = u_sg.get(it) or 0.0; jk = u_jk.get(it) or 0.0
             net = qc - qr
-            lg_amt_per = _lg_amt(it, pm)                 # LG인증 금액/개(신규단가)
-            bom_kg_per, bom_amt_per = _bom_kv(it, pm)    # BOM기준 중량·금액/개
+            lg_amt_per = _lg_amt(it, pm)                 # (참고) 원단위 금액/개
+            bom_kg_per, bom_amt_per = _bom_kv(it, pm)    # LG BOM 사급(AP) 중량·금액/개
+            has = bom_kg_per > 0                          # ★LG인정 = LG BOM 사급(Assembly Pull) 동 보유(원단위 기준 폐기)
             d = agg.get(it)
             if d is None:
                 d = agg[it] = {"item": it, "name": nm.get(it, ""), "recv_c": 0.0, "recv_r": 0.0, "recv_amt": 0.0,
@@ -677,7 +676,7 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         in_raw = osp.get("원소재", {"qty": 0, "amt": 0})
         price = (in_raw["amt"] / in_raw["qty"]) if in_raw["qty"] else 0.0   # OSP 원소재 평균단가(참고)
         eff_price = (LG_AMT / LG_KG) if LG_KG else 0.0                       # LG인증 신규단가 평균
-        items.sort(key=lambda x: -x["lg_kg"])
+        items.sort(key=lambda x: -x["bom_kg"])
         return {
             "ym": ym.strip(), "settle_ym": sy,
             "copper": {
