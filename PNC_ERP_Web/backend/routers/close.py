@@ -559,15 +559,22 @@ def _mv_scope(cur):
 
 def _mv_step(state, moves, scope):
     """하루 이동평균 전개. state={mat:[qty,avg]} in-place.
-       ★재고<=0 에서 매입 refill = 단가 리셋(마이너스재고 평균폭발 방지 — 검증된 우리 규칙)."""
+       ★규칙1 재고<=0 에서 매입 refill = 단가 리셋(마이너스재고 평균폭발 방지 — 검증된 우리 규칙).
+       ★규칙2 **금액 0 인 입고는 단가에 영향을 주지 않는다**(대표 확정 2026-08-28).
+          무상입고(사급 반입 등)는 **수량만** 늘리고 단가는 그대로 둔다.
+          이유: 취득원가가 없는 입고가 기존 재고의 평가를 바꿀 근거가 없다. 오히려 가중평균
+          분모만 키워 단가를 희석시킨다.
+          ★실증(2026-08-28): MJU63057401 이 기초 235.71 → 7월 무상입고 반복으로
+            47.14 → 23.57 → 0.62 → 0.00 으로 소멸. MJU63156803 도 757.55 → 0.
+            단가0 99건 중 '무상입고' 분류 75건이 이 경로일 수 있다."""
     for mat, mv in moves.items():
         if mat not in scope:                 # 소모품·미등록 = 평가 대상 아님
             continue
         q0, a0 = state.get(mat, [0.0, 0.0])
         pq, pamt = mv["pq"], mv["pamt"]
-        if pq > 0:
+        if pq > 0 and pamt > 0:              # ★금액이 있는 입고만 평균 갱신
             avg = ((q0 * a0 + pamt) / (q0 + pq)) if q0 > 0 else (pamt / pq)
-        else:
+        else:                                # 입고 없음 · 또는 금액0(무상) → 단가 불변
             avg = a0
         state[mat] = [q0 + mv["net"], avg]
 
@@ -1055,10 +1062,13 @@ def _snap_prd(cur, ptype, period):
         for k, mv in moves[ymd].items():
             q0, a0 = state.get(k, [0.0, 0.0])
             pq = mv["inq"]
-            if pq > 0:                                    # 입고 = 그 시점 자재단가로 가중평균
-                c = (px.get(k[0]) or (a0,))[0]
+            c = (px.get(k[0]) or (0.0,))[0]
+            if pq > 0 and c > 0:                          # ★단가가 있는 입고만 평균 갱신
                 avg = ((q0 * a0 + pq * c) / (q0 + pq)) if q0 > 0 else c
-            else:
+            else:                                         # 입고 없음·단가0 입고 → 단가 불변
+                #   ★단가0 입고가 분모만 키워 기존 단가를 희석시키는 것을 막는다(자재 _mv_step 규칙2 동일).
+                #     대표 확정 2026-08-28 "0원이 재고가격에 영향을 주면 안 된다".
+
                 avg = a0
             state[k] = [q0 + mv["net"], avg]
             a = agg.setdefault(k, [0.0, 0.0])
@@ -1115,6 +1125,66 @@ SNAPPERS = {"MAT": _snap_mat, "PRD": _snap_prd, "SAL": _snap_sal}
 
 
 # ===================== 마감 실행 / 해제 =====================
+@router.get("/api/close/anomaly")
+def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: str = Query("")):
+    """★확정 스냅샷 이상치 리포트 (§16-5·§14-4).
+       마감은 됐지만 **사람이 봐야 하는 것**을 드러낸다. 마감을 막지는 않는다.
+         ① 단가0  — 단가 원천이 없어 재고금액이 0 으로 계상된 품목
+         ② 음수재고 — 실물이 음수일 수 없다(미기록 입고 또는 과대 출고). 컷오버 정리대상(X1)
+       각 항목에 **원인 분류**를 붙여 조치 주체를 알 수 있게 한다."""
+    d, t, p = _norm(domain, ptype, period or None) if period.strip() else (
+        str(domain).strip().upper(), str(ptype).strip().upper(), "")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        if not p:                       # 기간 미지정 = 그 도메인의 최종 확정 기간
+            cur.execute("""SELECT TOP 1 period FROM nx.period_close
+                            WHERE domain=? AND ptype=? AND close_flag=1 ORDER BY period DESC""", d, t)
+            r = cur.fetchone()
+            if not r:
+                return {"domain": d, "ptype": t, "period": None, "rows": [], "summary": {}}
+            p = r[0]
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(loc,''), stock_qty, stock_amt, avg_cost
+                         FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?""", d, t, p)
+        snap = [(str(a), str(b), float(c), float(e), float(f or 0)) for a, b, c, e, f in cur.fetchall()]
+        zero = [x for x in snap if x[4] == 0]
+        neg = [x for x in snap if x[2] < 0]
+        # 원인 분류 — 매입 전표 유무/금액 유무
+        buy = {}
+        if zero:
+            ph = ','.join('?' * len(TA_IN_TAGS))
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))),
+                                   SUM(CAST(MAINT_QTY AS float)), SUM(CAST(MAINT_AMT AS float))
+                              FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                             WHERE MAINT_TAG IN ({ph}) GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *TA_IN_TAGS)
+            buy = {str(a): (float(b or 0), float(c or 0)) for a, b, c in cur.fetchall()}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item")
+        nm = {str(a): b for a, b in cur.fetchall()}
+
+        def cause(it):
+            b = buy.get(it)
+            if b and b[0] > 0 and b[1] > 0: return "회수가능(실매입 단가 있음)"
+            if b and b[0] > 0:              return "무상입고(매입 금액0)"
+            if not b:                       return "매입이력 없음"
+            return "기타"
+
+        rows = []
+        for it, lo, q, amt, c in sorted(zero, key=lambda x: -abs(x[2]))[:500]:
+            rows.append({"kind": "단가0", "item": it, "nm": nm.get(it, ""), "loc": lo,
+                         "qty": round(q, 3), "amt": round(amt, 0), "cost": c, "cause": cause(it)})
+        for it, lo, q, amt, c in sorted(neg, key=lambda x: x[2])[:500]:
+            rows.append({"kind": "음수재고", "item": it, "nm": nm.get(it, ""), "loc": lo,
+                         "qty": round(q, 3), "amt": round(amt, 0), "cost": c, "cause": "컷오버 정리대상(X1)"})
+        from collections import Counter
+        cc = Counter(r["cause"] for r in rows if r["kind"] == "단가0")
+        return {"domain": d, "ptype": t, "period": p, "total": len(snap),
+                "summary": {"단가0": len(zero), "음수재고": len(neg),
+                            "단가0_원인별": dict(cc),
+                            "음수금액": round(sum(x[3] for x in neg), 0)},
+                "rows": rows}
+    finally:
+        cn.close()
+
+
 @router.post("/api/close/run")
 def close_run(payload: dict = Body(...)):
     """마감 실행 = ①스냅샷 확정(가능 도메인) + ②잠금.
