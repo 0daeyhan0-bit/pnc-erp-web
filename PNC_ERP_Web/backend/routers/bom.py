@@ -649,16 +649,13 @@ def bom_save(payload: dict = Body(...)):
             bom_id = cur.fetchone()[0]
         # 전체 교체 — ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 → nx.proc_weld로 라우팅(bom_line 제외)
         cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", bom_id)
-        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+        # ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 = nx.proc_weld/item_weld/routing로 [조립공정 팝업(weld/save_node)]이 전담.
+        #   bom_save는 proc_weld를 절대 건드리지 않음(과거 DELETE+RAC재생성 로직 제거 — 그리드 저장 시 용접봉 다종 데이터 파괴 방지).
+        #   그리드의 RAC행은 bom_line에 안 넣고 skip(용접봉은 팝업에서만 편집).
         seq = 0; nweld = 0
         for ln in lines:
             ch = str(ln.get("child_item", "")).strip()
-            if ch.upper().startswith("RAC"):   # 용접봉 → proc_weld(공정종속 자재)
-                cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
-                    VALUES(?,?,?,?,?,?,?,?,'W','bom_save')""",
-                    item, ch, ch.split('-')[0], float(ln.get("qty") or 0),
-                    _b(ln.get("cs_calc_except")), _b(ln.get("lme_except")),
-                    (ln.get("from_ymd") or None), (ln.get("to_ymd") or None))
+            if ch.upper().startswith("RAC"):   # 용접봉 → 팝업 전담. bom_line/proc_weld 미기록(skip).
                 nweld += 1; continue
             seq += 1
             cur.execute("""INSERT INTO nx.bom_line

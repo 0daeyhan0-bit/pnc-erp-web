@@ -38,7 +38,9 @@ def _label(ymd):
 @router.get("/api/salesplan")
 def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Query("2"),
               cust: str = Query(""), line: str = Query(""), model: str = Query(""),
-              wo: str = Query(""), item: str = Query("")):
+              wo: str = Query(""), item: str = Query(""), src: str = Query("nx")):
+    # ★src: nx(기본)=웹 DB / live=레거시 라이브(대조용)
+    _live = str(src or "").strip().lower() == "live"
     fr = _d6(from_ymd)
     if len(fr) != 6: raise HTTPException(400, "기준일자(YYMMDD) 필요")
     days = max(1, min(int(days or 7), 31))
@@ -48,13 +50,25 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
            ':as_model_no': "'%s'" % _like(model), ':as_work_order': "'%s'" % _like(wo),
            ':as_item_code': "'%s'" % _like(item)}
     # ★조회부(raw+line_nm) 캐시 — gubun은 캐시키 제외(같은 필터서 구분전환 즉시). 캐시 히트시 복사본으로 gubun 처리(원본보존).
-    ckey = (fr, days, _like(cust), _like(line), _like(model), _like(wo), _like(item))
+    ckey = (fr, days, _like(cust), _like(line), _like(model), _like(wo), _like(item), _live)
     cached = _cache_get(ckey)
     if cached is not None:
         rows = [dict(x, d=x["d"][:]) for x in cached]   # 깊은복사(gubun 변형 방지)
     else:
         sql = _BASE_SQL
         for k, v in sub.items(): sql = sql.replace(k, v)
+        # ★원천 전환(2026-08-28): 기본 = **웹(nx)**. 레거시 대조용으로 src=live 를 남긴다.
+        #   sql_plan050.txt 는 스키마 없이 테이블명만 써서 접속 DB 를 그대로 따른다.
+        #   → nx 모드에서는 각 테이블 앞에 PARTNER_ERP_TEST3.nx. 를 붙인다.
+        #   ※nx.PR_V_MODEL_BOM 은 라이브 뷰가 WITH ENCRYPTION 이라 복제 불가 →
+        #     같은 컬럼셋으로 nx 에 새로 만들었다(PR_M_MODEL_BOM 기반, 62,897행 일치).
+        if not _live:
+            import re as _re
+            for _t in ("sa_t_plan_dtl", "sa_t_plan_item_dtl", "pr_t_plan_input",
+                       "pr_v_model_bom", "pr_m_item", "pr_m_work", "cm_m_cust",
+                       "PR_M_ITEM_PROC_GAGONG", "PR_M_PROC_GAGONG"):
+                sql = _re.sub(r"(?i)(?<![\w\.\[])" + _t + r"(?![\w\]])",
+                              "PARTNER_ERP_TEST3.nx." + _t, sql)
         # ★성능(2026-08-21 실측): 바깥에서 컬럼을 명시하고 ISNULL 로 감싸면 SQL Server 가
         #   실행계획을 다시 짜면서 3.4초가 걸린다. SELECT * 로 그대로 받으면 0.6초.
         #   (같은 결과, 5배 차이) → NULL 처리·정렬은 파이썬에서 한다.
@@ -214,7 +228,7 @@ def salesplan_opts():
     now = time.time()
     if _OPT_CACHE["v"] is not None and (now - _OPT_CACHE["t"]) < 300:
         return _OPT_CACHE["v"]
-    lines = []
+    lines = []; wcs = []
     cn = _conn(); cur = cn.cursor()
     try:
         # ① 계획에 실제 쓰인 라인코드(최근 3개월)
@@ -234,12 +248,14 @@ def salesplan_opts():
             if code and code not in seen:
                 seen.add(code)
                 lines.append({"code": code, "nm": str(b).strip()})
-        # ※작업처는 드롭다운을 만들지 않는다 — work_center_code 체계가 정리돼 있지 않아
-        #   (사내공정코드와 사급거래처코드가 섞임) 목록이 무의미하다. 화면에서 검색(부분일치)으로 처리.
+        # ※작업처 드롭다운은 **조회결과에서 프론트가 수집**한다(2026-08-28).
+        #   SA_T_PLAN_DTL 에는 작업처 컬럼이 없고(WORK_ORDER/SPLIT_WORK_ORDER 뿐),
+        #   화면의 work_center 는 SP 가 조인해 만든 값이라 마스터로는 목록을 못 만든다.
+        #   → screens.sales.js 가 st.rows 의 wc 를 모아 드롭다운을 채운다.
     except Exception as e:
-        return {"lines": lines, "err": str(e)[:200]}
+        return {"lines": lines, "wcs": wcs, "err": str(e)[:200]}
     finally:
         cn.close()
-    v = {"lines": lines}
+    v = {"lines": lines, "wcs": wcs}
     _OPT_CACHE["t"] = now; _OPT_CACHE["v"] = v
     return v

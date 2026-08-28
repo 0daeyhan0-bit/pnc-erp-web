@@ -303,10 +303,26 @@ def _step7_sql(cur):
     #     계획은 매일 '당일~+31일'로 업로드되므로 당일보다 이른 소요일은 존재할 수 없다.
     #     파트별 PART_PLAN_YMD < 당일  → 당일 + '0750'
     #     파트별 PART_PLAN_YMD >= 당일 → 파트별 값 그대로(69,463행 100.00%)
-    #     ※기준일은 nx.plan_dtl 의 최소 PLAN_YMD(=업로드 시작일=당일). GETDATE 대신 이걸 쓰면
-    #       과거 계획으로 재편성해도 그때 기준으로 재현된다.
-    cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
+    #     ※기준일 = **업로드 파일의 일자축 첫날**(nx.plan_upload_axis) — 2026-08-28 교정.
+    #       종전엔 MIN(PLAN_YMD)만 썼는데, 그날 수량이 전부 0이면 계획행이 없어
+    #       기준일이 다음날로 밀리고 **그날 컬럼이 통째로 사라졌다**.
+    #       실측: 파일 축은 08/28~ 인데 08/28 열이 전 행 0(3,671행) → 웹 기준일 260829.
+    #             레거시 기준일 260828 → 자재소요 12,330건이 28일(0750)에 모임.
+    #       수량 0 은 계획행으로 저장할 게 없지만(0 저장 시 행수 30배), 그날이
+    #       편성 기준일은 되어야 한다 — 저장 여부와 기준일은 별개다(사용자 지적).
+    #       클램프는 근무일과 무관하다 — 28일이 회사달력상 휴무여도 레거시는 28일에 모은다.
+    #       ※폴백: 축 정보가 없으면(구 업로드분) 종전대로 MIN(PLAN_YMD).
+    cur.execute("""SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12))
+                     FROM nx.plan_dtl WHERE PLAN_QTY>0""")
     _mat_base = str(cur.fetchone()[0] or "").strip()
+    try:
+        cur.execute("""SELECT MIN(axis_from) FROM nx.plan_upload_axis
+                        WHERE ISNULL(axis_from,'')<>''""")
+        _axis = str((cur.fetchone() or [None])[0] or "").strip()
+        if _axis and _axis < _mat_base:
+            _mat_base = _axis
+    except Exception:
+        pass
     #     ★예외(2026-08-27): **직납품 당김분(CUST_MAINT_DAY)** 은 클램프하지 않는다.
     #       직납품은 당일보다 이른 소요일이 실제로 존재한다(라이브 ASSY행 88건이 B 이전).
     #       클램프가 당김값을 되돌려 CA 라인 77건이 어긋났다 → ASSY행 83.82%→86.87%.
@@ -439,12 +455,28 @@ def _step5_item(cur):
     #     nx.prod_plan_input 은 planinput.py 가 정본으로 선언한 웹 자체 테이블이고
     #     CRUD 화면(생산계획추가입력)까지 붙어 있다 = CLAUDE.md §1-9 클린본 원칙.
     #     ⚠컬럼명이 소문자다(plan_ymd/item_code/…). 미러는 대문자였다.
+    #     ★게이트 기준일 = **업로드 파일의 일자축 첫날**(nx.plan_upload_axis) — 2026-08-28 교정.
+    #       STEP7 클램프(:315)는 이미 이 폴백을 쓰는데 여기만 빠져 있었다.
+    #       MIN(PLAN_YMD)만 쓰면 그날 수량이 전부 0일 때 기준일이 다음날로 밀리고
+    #       **당일자 예외생산이 통째로 사라진다**(실측: 오늘 260828 인데 게이트가 260829,
+    #       17제번·수량 480 이 편성에서 누락 → 레거시는 259행·7,927 로 편성).
+    #       ※폴백: 축 정보가 없으면(구 업로드분) 종전대로 MIN(PLAN_YMD).
+    #     ★조인 = nx.item(클린 정본). 종전 nx.PR_M_ITEM(미러)에서 전환 — CLAUDE.md §1-9,
+    #       현행 soyo.py:90 과 동일. 실측 전환 영향 0제번(양방향 차이 없음).
     cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
     _asfrom = str(cur.fetchone()[0] or '').strip()
+    try:
+        cur.execute("""SELECT MIN(axis_from) FROM nx.plan_upload_axis
+                        WHERE ISNULL(axis_from,'')<>''""")
+        _ax = str((cur.fetchone() or [None])[0] or "").strip()
+        if _ax and _ax < _asfrom:
+            _asfrom = _ax
+    except Exception:
+        pass
     cur.execute("""SELECT LTRIM(RTRIM(a.work_order)) wo, LTRIM(RTRIM(a.item_code)) it, SUM(CAST(a.plan_qty AS int)) pq,
             MIN(a.plan_ymd) ymd, MAX(ISNULL(a.output_hm,'')) ohm, MAX(ISNULL(a.line_no,'')) ln
           FROM nx.prod_plan_input a
-          JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.item_code))=c.ITEM_CODE
+          JOIN PARTNER_ERP_TEST3.nx.item c ON LTRIM(RTRIM(a.item_code))=c.item_code
           WHERE a.plan_ymd>=? AND a.plan_qty>0
           GROUP BY LTRIM(RTRIM(a.work_order)), LTRIM(RTRIM(a.item_code)), a.plan_ymd""", _asfrom)
     for wo, it, pq, ymd, ohm, ln in cur.fetchall():

@@ -824,7 +824,7 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
 # ================= 생산입출고현황 (생산, dw_pr_stock_460) — 파트×자도번 마스터-디테일 =================
 # 유니버스=pr_t_mat_stock_wh(part,mat), BF=2502마감+2502~당월 이동(생산월마감이 2502에 멈춤=고정base), 당월=[ym01,ym99].
 # patch_460c.py 이식, FR/BFT만 월 파라미터화(2502 base 고정).
-def _prodinout(ym, frm=None, to=None, src="nx"):
+def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     """★2026-08-25 src 분기 추가.
          nx(기본) = nx 스키마(= 라이브 미러 + 웹실적) — 웹에서 잡은 실적이 보인다.
          live     = 라이브 스키마만 — 레거시와 순수 대조용.
@@ -920,7 +920,9 @@ def _prodinout(ym, frm=None, to=None, src="nx"):
     for u in uni:
         k = (u["part"], u["mat"]); bf = bfm.get(k, 0)
         st = bf + net.get(k, 0)
-        if abs(st) <= 0.0001:
+        # ★0재고 숨김/표시 — inc_zero=1 이면 0 도 남긴다(2026-08-28 사용자요청).
+        #   0 이어도 기간 중 입·출고가 있었으면 이력을 봐야 한다(가공이동으로 0 이 된 품목 등).
+        if abs(st) <= 0.0001 and not inc_zero:
             continue
         it = im.get(u["mat"], {}); sg = str(it.get("item_sgroup") or "").strip()
         stock.append([u["part"], u["mat"], (it.get("item_name") or ""), (it.get("item_spec") or ""),
@@ -937,7 +939,8 @@ def _prodinout(ym, frm=None, to=None, src="nx"):
     return stock, mv, partNames
 
 @live_router.get("/prodinout")
-def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
+def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live"),
+              inc_zero: int = Query(0)):
     """생산입출고현황. 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환).
 
        ★2026-08-25 source 의미를 다른 화면(410·키팅)과 통일.
@@ -951,8 +954,9 @@ def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), so
     y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
     if source == "ledger":   # 웹 자체원장(stock_ledger)만 — 진단용
         r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
-    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None, src=source)
-    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves, "partNames": partNames}
+    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None, src=source, inc_zero=bool(inc_zero))
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves,
+            "partNames": partNames, "inc_zero": bool(inc_zero)}
 
 # ================= 제품입출고현황 (영업, dw_pr_stock_110) — 제품(P/N) 마스터-디테일 =================
 # 유니버스=SA_T_ITEM_STOCK, BF=2502마감+2502~당월(고정base), 당월=[ym01,ym99]. patch_110.py 이식.

@@ -336,10 +336,10 @@ SCREEN.prodinout=(c)=>{
   //   구버전은 기본 live 였고, nx 를 고르면 웹 자체원장(stock_ledger) 파생뷰로 빠졌는데
   //   그 원장에 PRD 이력이 0건이라 늘 빈 화면이었다(웹 실적은 PR_T_PROD_DTL 에 쌓임).
   //   → nx = 일반 그리드(라이브+웹실적) / live = 라이브만. 원장 파생뷰는 source=ledger.
-  let sel=null, curL=[], source='nx';
+  let sel=null, curL=[], source='nx', incZero=false;   // incZero: 0재고 표시 토글
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(5);
-    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
+    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}&inc_zero=${incZero?1:0}`;
     if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?${qs}&source=ledger`,{title:'생산입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
     try{const r=await fetch(`${API}/api/live/prodinout?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};}
@@ -348,7 +348,7 @@ SCREEN.prodinout=(c)=>{
     const fi=c.querySelector('#frm'),ti=c.querySelector('#to');if(fi)fi.value=ymd2d(frm);if(ti)ti.value=ymd2d(to);
     const ps=[...new Set(rows.map(r=>r[0]))].sort((a,b)=>pName(a).localeCompare(pName(b),'ko'));
     const psel=c.querySelector('#part');if(psel){const v=psel.value;psel.innerHTML='<option value="">전체</option>'+ps.map(p=>`<option value="${esc(p)}">${esc(pName(p))}</option>`).join('');psel.value=v;}
-    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
+    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · ${incZero?'<b style="color:#1c47a0">0재고 포함</b>':'0재고 숨김'}`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 생산입출고현황</div>
@@ -360,6 +360,11 @@ SCREEN.prodinout=(c)=>{
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
+     <!-- ★0재고 표시 토글(2026-08-28 사용자요청) — 기본은 숨김.
+          0 이어도 기간 중 입·출고가 있었으면 이력을 봐야 한다(가공이동으로 0 이 된 품목 등). -->
+     <label class="tl" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"
+            title="재고 0 인 품목도 목록에 표시합니다">
+       <input type="checkbox" id="zero" ${incZero?'checked':''} style="margin:0"> 0재고 표시</label>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
    </div>
    <div style="display:flex;gap:10px;align-items:flex-start">
@@ -395,7 +400,7 @@ SCREEN.prodinout=(c)=>{
     c.querySelector('#lbody').innerHTML=curL.length?lb:`<tr><td colspan="5" class="empty">결과 없음</td></tr>`;
     c.querySelector('#lbody').querySelectorAll('tr[data-mat]').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.part+'||'+tr.dataset.mat;c.querySelectorAll('#lbody tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');renderRight(tr.dataset.part,tr.dataset.mat);});
     c.querySelector('#lsum').innerHTML=`<div class="s-item">품목 <b>${won(curL.length)}</b></div><div class="s-item">재고 합계 <b>${won(tot)}</b></div>`;
-    c.querySelector('#lcnt').textContent=`${curL.length}품목 (0재고 제외)`;
+    c.querySelector('#lcnt').textContent=`${curL.length}품목 ${incZero?'(0재고 포함)':'(0재고 제외)'}`;
     attachResizers(c);
   };
   // ★검색 = 서버 재조회(load) — renderLeft(캐시 필터)만 하면 화면을 연 뒤 발생한 실적/이동이 반영되지 않음.
@@ -405,6 +410,8 @@ SCREEN.prodinout=(c)=>{
   c.querySelector('#go').onclick=_reload;
   c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
+  // ★0재고 표시 토글 — 서버 필터라 재조회한다(2026-08-28)
+  {const z=c.querySelector('#zero');if(z)z.onchange=e=>{incZero=e.target.checked;load();};}
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#part').onchange=renderLeft;
   c.querySelector('#frm').onchange=_reload;c.querySelector('#to').onchange=_reload;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#part').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
@@ -764,7 +771,9 @@ SCREEN.partplan=(c)=>{
   const finBg=f=>f==='6'?'#fac090':(f==='7'?'#ed7d31':(f==='4'?'#ffff00':(f==='3'?'#669900':'')));
   const finFg=f=>(f==='3'||f==='7')?'#ffffff':'';   // 진한 녹·주황 배경엔 흰 글자(가독)
   // ★기본 소스 = 신규DB(웹편성). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'new',lines:[],loading:false,msg:'',expand:new Set()};
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정).
+  //   당일 기준이면 업로드 전날이 잡혀, 미출하분이 재편성되며 충당된 재고와 어긋난다.
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:planBaseIso(),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'new',lines:[],loading:false,msg:'',expand:new Set()};
   // ★라인 드롭다운 = 이 그리드 Line No 컬럼 실사용값(PR_T_PLAN_PART_COPY.LINE_NO distinct, CA/CM/GR 등). PR003 주문구분과는 다른 코드체계.
   const loadLines=async()=>{try{const r=await fetch(`${API}/api/plan/part410/lines?src=${st.src}`);const j=await r.json();st.lines=j.rows||[];}catch(e){st.lines=[];}};
   const load=async()=>{st.loading=true;render();
@@ -1167,7 +1176,9 @@ SCREEN.partplan=(c)=>{
         _typeT=setTimeout(()=>{st[key]=v;redrawBody();},180);};});
     if(typeof attachResizers==='function')attachResizers(c);
   };
-  (async()=>{await loadLines();render();await load();})();
+  // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 조회 — 2026-08-28
+  (async()=>{try{const b=await planBase();if(b&&b.iso)st.base=b.iso;}catch(_){}
+             await loadLines();render();await load();})();
 };
 // 색 우선순위(낮을수록 완료단계 높음): 출하6 < 생산4 < 키팅3 < 자재2 < 미키팅0
 function finRank(f){return {'6':1,'4':2,'3':3,'2':4,'0':9}[f]||9;}
@@ -2697,9 +2708,12 @@ SCREEN.prodsheet=(host)=>{
             <td class="center">1</td><td><b>${esc(j.item)}</b></td>
             <td class="cap" style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${esc(j.nm)}">${esc(j.nm)}</td>
             <td class="num"><b id="rp-cnt">${nf(j.qty)}</b></td>
-            <td class="num"><input class="inp" id="rp-s" type="number" min="${j.org_start}" max="${j.org_end}" value="${j.start_no}"
+            <!-- ★시작/종료 = 순번(1부터). 1~50 이면 50장, 30~50 이면 21장(2026-08-28) -->
+            <td class="num"><input class="inp" id="rp-s" type="number" min="1" max="${j.org_qty}" value="${j.start_no}"
+                 title="몇 번째 라벨부터 (1 ~ ${j.org_qty})"
                  style="width:78px;min-width:0;height:26px;text-align:right;background:#ffffcc;font-weight:700"></td>
-            <td class="num"><input class="inp" id="rp-e" type="number" min="${j.org_start}" max="${j.org_end}" value="${j.end_no}"
+            <td class="num"><input class="inp" id="rp-e" type="number" min="1" max="${j.org_qty}" value="${j.end_no}"
+                 title="몇 번째 라벨까지 (1 ~ ${j.org_qty})"
                  style="width:78px;min-width:0;height:26px;text-align:right"></td>
             <td><input class="inp" id="rp-w" value="${esc(j.worker||'')}" style="width:112px;min-width:0;height:26px"></td>
             <td><input class="inp" id="rp-i" value="${esc(j.inspector||'')}" style="width:112px;min-width:0;height:26px"></td>
@@ -2707,7 +2721,7 @@ SCREEN.prodsheet=(host)=>{
               <option value="QR3" selected>QR3</option></select></td></tr></tbody></table></div>
         <table class="tbl" style="width:100%;font-size:12px">
           <tr><th class="lbl" style="width:90px;background:#f2f6fb">출력일자</th><td>${esc(dcol(j.print_ymd))}</td>
-              <th class="lbl" style="width:90px;background:#f2f6fb">발행범위</th><td>${j.org_start} ~ ${j.org_end} (총 ${nf(j.org_qty)}장)</td></tr>
+              <th class="lbl" style="width:90px;background:#f2f6fb">발행범위</th><td id="rp-rng">1 ~ ${nf(j.org_qty)} (총 ${nf(j.org_qty)}장) <span style="color:#888">· QR ${esc(j.abs_org_start)}~${esc(j.abs_org_end)}</span></td></tr>
           <tr><th class="lbl" style="background:#f2f6fb">QR 범위</th><td colspan="3" id="rp-qr" style="font-family:monospace;font-size:11px">${esc(j.qr_from)} ~ ${esc(j.qr_to)}</td></tr>
         </table>
         <div style="font-size:11px;color:#888;margin-top:6px">※재발행은 <b>새 채번 없이</b> 같은 QR로 다시 인쇄합니다(실적 연결 유지).</div>
@@ -2719,15 +2733,16 @@ SCREEN.prodsheet=(host)=>{
     const g=id=>ov.querySelector(id);
     g('#rp-x').onclick=close;g('#rp-close').onclick=close;
     const sync=async()=>{
-      let s=+g('#rp-s').value||j.org_start, e=+g('#rp-e').value||j.org_end;
-      s=Math.max(j.org_start,Math.min(s,j.org_end));
-      e=Math.max(s,Math.min(e,j.org_end));
+      // ★순번 기준(1 ~ 총장수). 서버도 같은 규칙으로 클램프한다.
+      let s=+g('#rp-s').value||1, e=+g('#rp-e').value||j.org_qty;
+      s=Math.max(1,Math.min(s,j.org_qty));
+      e=Math.max(s,Math.min(e,j.org_qty));
       try{const r=await fetch(`${API}/api/prodsheet/label-print?print_seq=${encodeURIComponent(printSeq)}&start_no=${s}&end_no=${e}`);
         const k=await r.json();
         if(k&&k.ok){g('#rp-cnt').textContent=nf(k.qty);g('#rp-qr').textContent=`${k.qr_from} ~ ${k.qr_to}`;}}catch(e2){}};
     g('#rp-s').oninput=sync;g('#rp-e').oninput=sync;
     g('#rp-print').onclick=()=>{
-      const s=+g('#rp-s').value||j.org_start, e=+g('#rp-e').value||j.org_end;
+      const s=+g('#rp-s').value||1, e=+g('#rp-e').value||j.org_qty;   // 순번 기준
       close();
       printLabel(printSeq,{start:s,end:e,worker:g('#rp-w').value.trim(),inspector:g('#rp-i').value.trim()});
     };
@@ -2965,17 +2980,18 @@ SCREEN.prodsheet=(host)=>{
     if(!w){alert('팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도하세요.');return;}
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>가간판 ${esc(cards[0].item)} (${cards.length}장)</title>
     <style>
-      /* ★용지 = 190 × 110mm — 실제 간판 용지크기(2026-08-21, 폭 -2cm 조정).
-         이전 A4 portrait 는 세로 297mm 를 다 잡아 아래 2/3 가 빈 채로 출력됐다.
+      /* ★용지 = 210 × 110mm (A4 가로폭 그대로, 세로 3등분) — 2026-08-28 교정.
+         이전엔 180mm 였는데 실물 용지는 A4 폭(210mm)이라 좌우가 남았다.
+         여백도 4mm → 상하 2mm / 좌우 3mm 로 줄여 표를 넓게 쓴다.
+         ★상단 잘림 수정: .kb 의 min-height:90mm 가 쓸 수 있는 높이(110-4=106mm)와
+           맞물려 내용이 위로 밀려 첫 행 테두리가 잘려 나갔다 → min-height 제거.
          간판 1장 = 1페이지. */
-      @page{size:180mm 110mm;margin:4mm}
+      @page{size:210mm 110mm;margin:2mm 3mm}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
-      /* ★A4 1/3 폭 기준. 높이는 내용에 맞춤(고정 X — 아래쪽 빈칸 방지).
-         한 페이지에 3장까지 자연스럽게 들어감. */
       /* 간판 1장 = 1페이지. 레거시 실물처럼 표는 위쪽에 모으고 아래는 비운다
          (표를 억지로 늘려 채우지 않음 — 2026-08-20 레거시 대조). */
-      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden;min-height:90mm;display:flex;flex-direction:column}
+      .kb{border:2px solid #000;page-break-inside:avoid;overflow:hidden;display:flex;flex-direction:column}
       .kb+.kb{page-break-before:always}
       .kb table{border-collapse:collapse;width:100%}
       /* 레거시 실물 대조: 글자·행높이를 키우고 라벨칸 음영은 없앤다(전부 흰 바탕) */
@@ -2984,12 +3000,18 @@ SCREEN.prodsheet=(host)=>{
       .kb .lb{font-weight:700;white-space:nowrap}
       .kb .ft{display:flex;justify-content:space-between;padding:2px 4px;font-size:9px;
               font-weight:700;border-top:1px solid #000;margin-top:auto}
-      @media print{.noprint{display:none}}
+      /* ★인쇄 시 화면용 안내(.noprint)를 완전히 들어낸다 — display:none 만으로는
+         일부 브라우저가 첫 페이지 상단에 여백을 남겨 간판 첫 행이 잘렸다(2026-08-28). */
+      @media print{
+        .noprint{display:none !important;height:0 !important;margin:0 !important;padding:0 !important}
+        html,body{margin:0 !important;padding:0 !important}
+        .kb{margin:0 !important}
+      }
     </style></head><body>
     <div class="noprint" style="margin-bottom:6px">
       <button onclick="window.print()" style="padding:6px 16px;font-size:13px">🖨 인쇄</button>
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
-      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분)</span>
+      <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분) — 인쇄창에서 <b>여백 없음</b>·<b>배율 100%</b> 확인</span>
       <div style="margin-top:6px;padding:6px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;font-size:12px">
         🖨 <b>프린터: ${esc(PRN.kanban||'(가간판 프린터 미지정)')}</b>
         <span style="color:#1a6a99">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>

@@ -7,7 +7,9 @@ SCREEN.partplanproc=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  let F={from:iso(T),to:iso(new Date(T.getTime()+27*864e5)),wc:'',part:'',assy:'',diam:'',thick:'',pipe:'1'};
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정)
+  const _pb0=planBaseIso(), _pbT=new Date(_pb0+'T00:00:00');
+  let F={from:_pb0,to:iso(new Date(_pbT.getTime()+27*864e5)),wc:'',part:'',assy:'',diam:'',thick:'',pipe:'1'};
   let data={dates:[],rows:[],part_count:0,sum_qty:0}, wcs=[], loading=false, msg='';
   const loadWc=async()=>{try{const r=await fetch(`${API}/api/partplan/workcenters`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
   const load=async()=>{loading=true;draw();
@@ -52,7 +54,10 @@ SCREEN.partplanproc=(c)=>{
     g('#gp-search').onclick=()=>{F.from=g('#gp-from').value;F.to=g('#gp-to').value;F.wc=g('#gp-wc').value;F.pipe=g('#gp-pipe').checked?'1':'';F.part=g('#gp-part').value;F.diam=g('#gp-diam').value;F.thick=g('#gp-thick').value;load();};
     ['#gp-part','#gp-diam','#gp-thick'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#gp-search').click();});
   };
-  loadWc().then(load);
+  // ★계획 기준일 반영 후 조회 — 2026-08-28
+  planBase().then(b=>{if(b&&b.iso){F.from=b.iso;
+      F.to=iso(new Date(new Date(b.iso+'T00:00:00').getTime()+27*864e5));}}).catch(()=>{})
+    .then(()=>loadWc()).then(load);
 };
 
 /* ===== 생산: 4주간 가공계획현황 (w_pr_outside_410_work) — 도번×라인×작업처, 자도번LIST 묶기 ===== */
@@ -62,7 +67,10 @@ SCREEN.gagongplan4w=(c)=>{
   const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
-  const st={from:iso(T),to:iso(new Date(T.getTime()+30*864e5)),wc:'P2',item:'',part:'',gigan:31,
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정).
+  //   당일 기준이면 업로드 전날이 잡혀 미출하 재편성분과 재고 충당이 어긋난다.
+  const _b0=planBaseIso(), _bT=new Date(_b0+'T00:00:00');
+  const st={from:_b0,to:iso(new Date(_bT.getTime()+30*864e5)),wc:'P2',item:'',part:'',gigan:31,
             dates:[],rows:[],cnt:0,plan_sum:0,done_sum:0,note:'',loading:false,msg:'',exp:new Set()};
   const load=async()=>{st.loading=true;draw();
     const qs=new URLSearchParams({from_ymd:st.from,to_ymd:st.to,wc:st.wc,item:st.item,part:st.part,limit:2500});
@@ -130,7 +138,9 @@ SCREEN.gagongplan4w=(c)=>{
     ['#p4-wc','#p4-item','#p4-part'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#p4-search').click();});
     c.querySelectorAll('.jado-cell').forEach(el=>el.onclick=()=>{const i=+el.dataset.i;st.exp.has(i)?st.exp.delete(i):st.exp.add(i);draw();});
   };
-  load();
+  // ★계획 기준일 반영 후 조회(첫 진입 시 캐시 미로드 대비) — 2026-08-28
+  planBase().then(b=>{if(b&&b.iso){st.from=b.iso;
+      st.to=iso(new Date(new Date(b.iso+'T00:00:00').getTime()+30*864e5));}}).catch(()=>{}).then(load);
 };
 
 /* ===== 생산: 가공생산진척관리(전표발행) (w_pr_input_420_new) — PR_T_PLAN_PART_DTL 스냅샷 직독 ===== */
@@ -150,7 +160,9 @@ SCREEN.gagongprog420=(c)=>{
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx/sp 로 바꿔서 본다(2026-08-26).
-  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',view:'상세',gigan:2,src:'new',
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정)
+  const _gb0=planBaseIso(), _gbT=new Date(_gb0+'T00:00:00');
+  const st={from:_gb0,to:iso(new Date(_gbT.getTime()+1*864e5)),wc:'P2',part:'',item:'',jado:'',unfin:'미생산',view:'상세',gigan:2,src:'new',
             dates:[],allrows:[],parts:[],note:'',loading:false,msg:'',sel:new Set()};
   const load=async()=>{st.loading=true;draw();
     // ★nx 재현(prog420nx) 기본 · sp=레거시 암호화SP 비교용. 전체 1회 조회·캐시 → 미생산/미키팅 토글은 클라 즉시필터.
@@ -579,7 +591,7 @@ SCREEN.gagongprog420=(c)=>{
           <td style="width:8%">${esc(s.lineno||'')}</td>
           <td class="lbl" style="width:10%">신규도면</td><td class="lbl" style="width:12%">총중량(kg)</td></tr></table>
       <table class="bd"><tr>
-        <td class="dw">${s.draw?`<img src="${esc(s.draw)}">`:''}</td>
+        <td class="dw">${s.draw?`<div class="dwbox"><img src="${esc(s.draw)}"></div>`:''}</td>
         <td style="padding:0;vertical-align:top"><table class="pr">
           <tr><th style="width:8%">순서</th><th style="width:18%">공정명</th><th>SPEC</th><th style="width:9%">완료<br>수량</th><th style="width:9%">불량<br>수량</th></tr>
           ${Array.from({length:10},(_,i)=>{const p=(s.procs||[])[i]||{};
@@ -626,10 +638,34 @@ SCREEN.gagongprog420=(c)=>{
       .bd>tbody>tr>td{vertical-align:top}
       .dw{border:1px solid #000;width:45%;vertical-align:middle !important;text-align:center;padding:4px;
           overflow:hidden}
+      /* ★도면 이미지 — td 안에서 남는 높이에만 맞춘다(2026-08-28 보강).
+         td 는 높이가 내용에 따라 늘어나므로 max-height:100% 만으로는 기준이 안 잡힐 수 있다.
+         → 이미지를 감싼 블록에 100% 를 주고 img 는 그 안에서 contain 시킨다. */
+      .dw>.dwbox{height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
       .dw img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;margin:0 auto}
       .pr th{font-weight:700}.pr td{height:8mm}
-      </style></head><body>${sheets.map(pg).join('')}</body></html>`);
-    w.document.close(); w.focus(); setTimeout(()=>w.print(),350);
+      </style></head><body>${sheets.map(pg).join('')}
+      <script>
+      /* ★도면 이미지 로드를 기다렸다가 인쇄한다(2026-08-28).
+         종전엔 setTimeout 350ms 고정이라 도면이 큰 전표는 이미지가 덜 그려진 채로
+         인쇄창이 떠서 **아래가 회색 박스로 덮여** 나왔다(어떤 건 되고 어떤 건 안 되는 이유).
+         .dw td 의 max-height:100% 도 이미지 크기가 확정돼야 계산되므로 로드 완료가 전제. */
+      (function(){
+        var imgs=[].slice.call(document.images), left=imgs.length;
+        function go(){ setTimeout(function(){ window.print(); }, 250); }
+        if(!left) return go();
+        var fired=false;
+        function done(){ if(--left<=0 && !fired){ fired=true; go(); } }
+        imgs.forEach(function(im){
+          if(im.complete && im.naturalWidth>0) done();
+          else { im.addEventListener('load',done); im.addEventListener('error',done); }
+        });
+        /* 안전망: 이미지가 끝내 안 오면 3초 뒤 그냥 인쇄 */
+        setTimeout(function(){ if(!fired){ fired=true; window.print(); } }, 3000);
+      })();
+      <\/script>
+      </body></html>`);
+    w.document.close(); w.focus();
   };
   /* 가공바코드실적처리 팝업 (레거시 w_pr_input_018) — 스캔→정보조회→양품/불량→처리바코드 재스캔→등록/취소 */
   const openBcModal=()=>{
@@ -708,7 +744,9 @@ SCREEN.gagongprog420=(c)=>{
     render(); document.body.appendChild(ov); requestAnimationFrame(()=>{
       const el=ov.querySelector('#bc-scan1');if(el){el.focus();el.select();}});
   };
-  load();
+  // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 조회 — 2026-08-28
+  planBase().then(b=>{if(b&&b.iso){st.from=b.iso;
+      st.to=iso(new Date(new Date(b.iso+'T00:00:00').getTime()+(st.gigan-1)*864e5));}}).catch(()=>{}).then(load);
 };
 
 /* ===== 생산: 가공창고 이동계획 (w_pr_input_580) — 도번×라인, 자도번LIST + 이동필요/완료 =====
@@ -735,7 +773,9 @@ SCREEN.gagongmove580=(c)=>{
   // puPart(레거시 as_pu_part_code) = 입고 자재창고. 항상 IS0001 이라 조건칸에서 뺐다(2026-08-23) — SP 인자로만 사용.
   // ★2026-08-24 기간 드롭다운 1~14일 선택 가능. 기본 2일(기준일 포함) → to = from + 1일.
   // ★기본 소스 = 신규DB(웹계획). 레거시 대조는 소스를 nx 로 바꿔서 본다(2026-08-26).
-  const st={from:iso(T),to:iso(new Date(T.getTime()+1*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:2,src:'new',
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정)
+  const _mb0=planBaseIso(), _mbT=new Date(_mb0+'T00:00:00');
+  const st={from:_mb0,to:iso(new Date(_mbT.getTime()+1*864e5)),wc:'P2',dest:'',puPart:'IS0001',item:'',part:'',mv:'이동필요',gigan:2,src:'new',
             gubun:'이동계획',confirm:'전체',   // gubun: 이동계획(매트릭스) / 이동전표(발행목록)
             dates:[],rows:[],cnt:0,plan_sum:0,need_sum:0,moved_sum:0,note:'',loading:false,loaded:false,msg:'',exp:new Set(),
             sel:new Set(),itemSel:null,optDests:[],sheetRows:[],sheetAll:[],sheetCnt:0,
@@ -805,7 +845,10 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.dest)}</td>
         ${(()=>{const on=st.itemSel===i;   // ★도번칸 = 별도 선택상태(키팅 itemSel 패턴). 재클릭=해제
           const sty=on?'background:#dbeafe;color:#123a6b;font-weight:700;outline:2px solid #4a86e8;outline-offset:-2px':'';
-          return `<td class="center mv-item" data-i="${i}" style="cursor:pointer;${sty}" title="클릭=이 도번 선택/해제 (그 행 날짜셀 전체선택)"><b>${esc(r.assy)}</b></td>`;})()}
+          // ★도번 = 가공품번(item, 예 AJR74942626-고압) — 레거시 580 도번컬럼과 동일(2026-08-28).
+          //   ASSY 도번(r.assy)만 쓰면 고압/저압 등이 같은 값으로 보여 중복행처럼 읽힌다.
+          const dno=r.item||r.assy;
+          return `<td class="center mv-item" data-i="${i}" style="cursor:pointer;${sty}" title="${esc(dno)}&#10;ASSY: ${esc(r.assy)}&#10;클릭=이 도번 선택/해제 · Ctrl+클릭=여러 행 추가선택"><b>${esc(dno)}</b></td>`;})()}
         <td class="center jado-cell" data-i="${i}" title="${esc(r.jado)}&#10;더블클릭=자도번 펼치기" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:#1c66c9">${esc(jshort)} <span style="color:#8aa">(${r.matcnt})</span></td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${dcol(r.part_ymd)}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.hm)}</td>
@@ -873,7 +916,7 @@ SCREEN.gagongmove580=(c)=>{
      <div class="page-title">🚚 가공창고 이동계획 <span style="font-size:12px;color:var(--muted);font-weight:400">가공창고→자재창고 이동필요 · 자도번LIST 묶음</span></div>
      <div class="page-sub">${st.src==='new'
        ?'조회엔진 = <b>복제 SP</b> <code>SP_PR_가공창고_이동계획_WEBPLAN</code> — <b>계획원천만 웹편성</b>(<code>nx.plan_part_dtl</code>)으로 치환, 색상·자도번LIST·재고충당 로직은 레거시 그대로.'
-       :'조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일.'} 셀 <b>드래그 선택</b> 후 "가공자재 이동처리"로 이동전표 발행. ${st.src==='new'?'🟣 신규DB(웹계획)':'🔴 라이브 조회'} / 🟢 발행은 nx</div>
+       :'조회엔진 = <b>레거시 SP</b> <code>SP_PR_가공창고_이동계획_260213</code> 직접호출 → 값·색상·자도번LIST 모두 레거시와 동일.'} 셀 <b>드래그 선택</b>(<b>Ctrl+클릭/드래그</b>=여러 곳 추가선택 · 도번칸 클릭=그 행 전체) 후 "가공자재 이동처리"로 이동전표 발행. 선택하면 <b>계획·미이동 수량</b>이 우측에 합산됩니다. ${st.src==='new'?'🟣 신규DB(웹계획)':'🔴 라이브 조회'} / 🟢 발행은 nx</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:6px;align-items:center">
        <label class="tl">기준일자</label><input class="inp" type="date" id="mv-from" value="${st.from}"> ~ <input class="inp" type="date" id="mv-to" value="${st.to}">
        <label class="tl">가공창고</label><select class="inp" id="mv-wc" style="width:100px"${isSheet?' disabled':''}><option value="">% 전체</option><option value="P1"${st.wc==='P1'?' selected':''}>P1 가공</option><option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option></select>
@@ -900,7 +943,7 @@ SCREEN.gagongmove580=(c)=>{
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
        <label class="tl">소스</label><select class="inp src-new" id="mv-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=복제 SP(계획원천만 웹편성 nx.plan_part_dtl, 나머지 로직은 레거시 그대로) / 우리(nx)=레거시 SP 직접호출"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src!=='new'?' selected':''}>🟢 우리(nx)</option></select>
        <button class="btn" id="mv-search">🔍 조회</button>
-       <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
+       <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 <span id="mv-selqty" style="color:#1c47a0"></span> · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
@@ -972,34 +1015,57 @@ SCREEN.gagongmove580=(c)=>{
     const paintOne=(el,on)=>{const s=el.style;
       s.outline=on?'2px solid #4a86e8':''; s.outlineOffset=on?'-2px':'';
       s.backgroundImage=on?SELBG:'';};
+    // ★선택 셀의 **계획수량 합계**를 즉시 계산해 보여준다(2026-08-28 사용자요청).
+    //   계획 = 그 셀의 계획수량 · 미이동 = 계획−이동완료(전표발행 시 채워질 수량).
+    const selSum=()=>{let pl=0,rem=0;
+      st.sel.forEach(k=>{const p=k.indexOf(':'),ri=+k.slice(0,p),ax=k.slice(p+1),r=st.rows[ri];if(!r)return;
+        const q=ax==='P'?(+r.prior||0):(+((r.days||{})[ax])||0);
+        const dn=ax==='P'?(+r.prior_done||0):(+((r.doneday||{})[ax])||0);
+        pl+=q; rem+=Math.max(0,q-dn);});
+      return {pl,rem};};
     const paint=()=>{c.querySelectorAll('.mv-cell[data-key]').forEach(el=>paintOne(el,st.sel.has(el.dataset.key)));
-      const b=c.querySelector('#mv-selcnt'); if(b)b.textContent=st.sel.size;};
+      const b=c.querySelector('#mv-selcnt'); if(b)b.textContent=st.sel.size;
+      const q=c.querySelector('#mv-selqty');
+      if(q){const s=selSum();
+        q.innerHTML=st.sel.size?`(계획 <b>${nf(s.pl)}</b> · 미이동 <b>${nf(s.rem)}</b>)`:'';}};
     // 날짜축 = 당일이전('P') + 실제 일자들. 사각범위 선택에 당일이전도 포함된다.
     const AX=['P'].concat(dates);
     const cellQty=(ri,ax)=>ax==='P'?((st.rows[ri]||{}).prior||0):(((st.rows[ri]||{}).days||{})[ax]||0);
-    const applySel=(r1,r2,a1,a2)=>{const i1=AX.indexOf(a1),i2=AX.indexOf(a2);
+    // ★Ctrl(⌘)+드래그 = 기존 선택에 **추가**(2026-08-28 사용자요청). keep 이면 지우지 않는다.
+    const applySel=(r1,r2,a1,a2,keep)=>{const i1=AX.indexOf(a1),i2=AX.indexOf(a2);
       const rlo=Math.min(r1,r2),rhi=Math.max(r1,r2),alo=Math.min(i1,i2),ahi=Math.max(i1,i2);
-      st.sel.clear();
+      if(!keep)st.sel.clear();
       for(let ri=rlo;ri<=rhi;ri++)for(let ai=alo;ai<=ahi;ai++){const ax=AX[ai];if(cellQty(ri,ax))st.sel.add(`${ri}:${ax}`);}};
-    // ★도번칸 = 별도 선택상태(키팅 itemSel). 클릭=그 행 날짜셀 전체선택 + 도번칸 반전, 재클릭=해제.
-    c.querySelectorAll('.mv-item').forEach(el=>el.onclick=()=>{
-      const i=+el.dataset.i;
-      if(st.itemSel===i){st.itemSel=null;st.sel.clear();}
-      else{st.itemSel=i;st.sel.clear();AX.forEach(ax=>{if(cellQty(i,ax))st.sel.add(`${i}:${ax}`);});}
+    // ★도번칸 = 행 전체선택. 클릭=그 행 날짜셀 전체선택(재클릭 해제) / **Ctrl+클릭=여러 행 누적**.
+    c.querySelectorAll('.mv-item').forEach(el=>el.onclick=(e)=>{
+      const i=+el.dataset.i, add=(e.ctrlKey||e.metaKey);
+      const rowKeys=AX.filter(ax=>cellQty(i,ax)).map(ax=>`${i}:${ax}`);
+      const on=rowKeys.length&&rowKeys.every(k=>st.sel.has(k));
+      if(add){                                   // 누적: 이 행만 토글, 나머지 선택 유지
+        if(on)rowKeys.forEach(k=>st.sel.delete(k));
+        else  rowKeys.forEach(k=>st.sel.add(k));
+        st.itemSel=on?null:i;
+      }else if(st.itemSel===i&&on){st.itemSel=null;st.sel.clear();}
+      else{st.itemSel=i;st.sel.clear();rowKeys.forEach(k=>st.sel.add(k));}
       draw();});
     c.querySelectorAll('.mv-cell[data-key]').forEach(el=>{
       // ★왼쪽 버튼(e.button===0)일 때만 드래그. 우클릭/휠클릭은 무시(브라우저 기본동작 유지).
       el.addEventListener('mousedown',e=>{
         if(e.button!==0)return;
-        dragging=true;startCell={i:+el.dataset.i,d:el.dataset.d};
+        const key=el.dataset.key, add=(e.ctrlKey||e.metaKey);
+        // ★Ctrl 없이 이미 선택된 단일 셀을 다시 누르면 해제(420 g4 그리드와 동일 동작)
+        if(!add&&st.sel.has(key)&&st.sel.size===1){st.sel.delete(key);paint();e.preventDefault();return;}
+        dragging=true;startCell={i:+el.dataset.i,d:el.dataset.d,add:add};
         st.itemSel=null;                        // 셀 드래그 시작 = 도번선택 해제(둘이 동시에 남지 않게)
         c.querySelectorAll('.mv-item').forEach(t=>{t.style.background='';t.style.color='';t.style.fontWeight='';t.style.outline='';});
-        if(!(e.ctrlKey||e.metaKey))st.sel.clear();
-        applySel(startCell.i,startCell.i,startCell.d,startCell.d);paint();e.preventDefault();});
+        // Ctrl+드래그면 기존 선택 유지(누적), 아니면 새로 시작
+        applySel(startCell.i,startCell.i,startCell.d,startCell.d,add);paint();e.preventDefault();});
       el.addEventListener('mouseover',e=>{
-        if(dragging&&startCell&&(e.buttons&1)){applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d);paint();}});
+        if(dragging&&startCell&&(e.buttons&1)){
+          applySel(startCell.i,+el.dataset.i,startCell.d,el.dataset.d,startCell.add);paint();}});
     });
     if(!c._mvUp){c._mvUp=true;document.addEventListener('mouseup',()=>{dragging=false;});}
+    paint();   // ★재렌더 후 선택표시·선택수량 복원(도번칸 Ctrl+클릭 누적분 포함)
     // ★발행 직후 화면 반영 — 서버 재조회 없이 st.all 의 해당 셀을 직접 올린다(사용자요청 2026-08-23).
     //   applied = [{assy, ymd('P'=당일이전), qty}] — 발행한 수량만큼 분자(완료)를 올리고 색을 칠한다.
     const applyIssued=(applied)=>{
@@ -1028,7 +1094,9 @@ SCREEN.gagongmove580=(c)=>{
     g('#mv-move').onclick=()=>openMoveModal(st,dates,applyIssued);
   };
   // ★화면 진입 시 자동조회 안 함(조건 잡고 조회 버튼을 눌렀을 때만) — 2026-08-22 사용자요청.
-  draw();
+  // ★계획 기준일 반영 후 그린다(조회는 여전히 사용자가) — 2026-08-28
+  planBase().then(b=>{if(b&&b.iso){st.from=b.iso;
+      st.to=iso(new Date(new Date(b.iso+'T00:00:00').getTime()+(st.gigan-1)*864e5));}}).catch(()=>{}).then(draw);
 };
 
 /* 가공자재 이동처리 팝업 (w_pr_input_586 "자재개별일괄출고") — 선택셀 자동채움 or 수동 행추가.
@@ -1354,7 +1422,7 @@ SCREEN.gagongjeohist=(c)=>{
      ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
      <div style="display:flex;gap:8px;align-items:stretch">
       <div class="grid-wrap" style="flex:0 0 60%;max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-       <table class="tbl fit" style="font-size:11px"><thead><tr><th>선택</th><th>번호</th><th>바코드번호</th><th>상위도번</th><th>자도번</th><th class="num">계획수량</th><th class="num">실적수량</th><th class="center">실적</th><th>작업처</th><th>작업처명</th><th class="num">지름</th><th class="num">두께</th><th title="원천 미확정 — 담당확인">검사완료시간※</th><th class="center">컷팅완료</th><th>컷팅작업자</th><th>컷팅작업일시</th><th>ASSY도번</th><th>ASSY작업처</th><th>상위도번작업처</th><th>입고창고</th></tr></thead>
+       <table class="tbl fit" style="font-size:11px"><thead><tr><th>선택</th><th>번호</th><th>바코드번호</th><th>상위도번</th><th>자도번</th><th class="num">계획수량</th><th class="num">실적수량</th><th class="center">실적</th><th>작업처</th><th>작업처명</th><th class="num">지름</th><th class="num">두께</th><th title="원천 미확정 — 담당확인">검사완료시간※</th><th class="center">컷팅완료</th><th>컷팅작업자</th><th>컷팅작업일시</th><th>ASSY도번</th><th>ASSY작업처</th><th>상위도번작업처</th><th>입고창고</th><th class="center">발행일시</th><th>발행자</th></tr></thead>
        <tbody>${st.loading?spinRow(20):(st.rows.length?st.rows.map((r,i)=>{
          const locked=(+r.prod_qty||0)>0||String(r.prod_flag)==='1';   // 실적있음 = 삭제불가
          return `<tr class="jh-row" data-box="${esc(r.BOX_NO)}" style="cursor:pointer${st.sel===r.BOX_NO?';background:#dcebff':''}">
@@ -1366,7 +1434,9 @@ SCREEN.gagongjeohist=(c)=>{
          <td class="center">${esc(r.wcen)||''}</td><td class="center">${esc(r.wcennm)||''}</td>
          <td class="num">${esc(r.diam)||''}</td><td class="num">${esc(r.thick)||''}</td>
          <td class="center">${esc(r.inspdt)||DAM}</td><td class="center">${esc(r.cutflag)}</td><td class="center">${esc(r.cutuser)||''}</td><td class="center">${esc(r.cutdt)||''}</td>
-         <td>${esc(r.assy)}</td><td class="center">${esc(r.assywc)||''}</td><td class="center">${esc(r.dobanwc)||''}</td><td class="center">${esc(r.inwh)||''}</td></tr>`;}).join(''):`<tr><td colspan="20" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
+         <td>${esc(r.assy)}</td><td class="center">${esc(r.assywc)||''}</td><td class="center">${esc(r.dobanwc)||''}</td><td class="center">${esc(r.inwh)||''}</td>
+         <!-- ★발행일시(전표 출력일시)·발행자 — 2026-08-28 사용자요청. 백엔드가 prt/prtuser 로 이미 내려준다 -->
+         <td class="center" style="white-space:nowrap">${esc(r.prt)||''}</td><td class="center">${esc(r.prtuser)||''}</td></tr>`;}).join(''):`<tr><td colspan="22" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
       <div class="grid-wrap" style="flex:1;max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
        <table class="tbl fit" style="font-size:11px"><thead><tr><th>번호</th><th>바코드</th><th class="num">공정순서</th><th>파트</th><th>가공공정</th><th>가공설비</th><th class="num">생산완료</th><th class="num" title="INDI_CUTTING_PROC_GAGONG 보충·부재시 담당확인">공정횟수※</th><th title="INDI_CUTTING_PROC_GAGONG 보충·부재시 담당확인">작업표준※</th></tr></thead>
        <tbody id="jh-dtl-body">${detailHTML()}</tbody></table></div>
