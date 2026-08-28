@@ -238,18 +238,67 @@ def _lock_msg(cur, ymd, domain="MAT"):
         pass
     return None
 
+# ===== 자재 현재고 정본 — 실시간 승격 (G-1, 2026-08-28) =====
+# ★종전: nx.mat_stock_daily(일 스냅샷) 최신일 값.
+#   그 테이블을 채우는 빌더(_migration/sub_norm/matclose_movavg_build.py)는 **사람이 손으로 돌린다.**
+#   자동 실행 지점이 설계상 정의된 적이 없어(백엔드·배치·스케줄러·SQL Agent 전부 없음)
+#   실제로 8/25 에 멈춰 있었고, **133품목이 "재고 있음" 으로 오판**되어 음수재고를 통과시켰다.
+#   (5210A22409A — 게이트 2,241 vs 실제 −2,659)
+# ★지금: **확정 스냅샷 + 그 이후 전표** = 마감·수불장과 **같은 엔진**으로 계산한다.
+#   - 빌더 의존이 사라진다(누가 언제 돌리는지 문제 자체가 없어진다).
+#   - 컷오버 항목 5번(실시간 자재정본 승격)이 미리 끝난다.
+#   - 실측: 3,694품목 0.75초 · 음수 40(실시간) vs 139(구방식) — 구방식이 과소평가하고 있었다.
+# ★게이트 전용 SQL 을 새로 짜지 않는다. 손으로 다시 짜면 반드시 하나를 빠뜨린다 —
+#   실제로 검산용 SQL 이 **수입 전표(PU_T_STOCK_MAINT_C)를 놓쳐** 수불장과 56건 갈렸다
+#   (AJR30057201: 기초 376 + 수입 2,000 = 2,376 인데 376 으로 계산). CUTOVER_CHECKLIST G-4.
+_AVAIL_MAP = {"key": None, "map": {}, "at": 0.0}
+_AVAIL_TTL = 60.0    # 초
+
+
+def _mat_avail_map(cur, force=False):
+    """자재 현재고 맵 {품번: 수량} — 확정 스냅샷 기초 + 그 이후 전표(오늘까지).
+       ★프로세스 캐시(산출 약 1.2초). 두 겹으로 낡지 않게 지킨다:
+         ① 웹에서 재고를 바꾸는 쓰기 → stock_changed() 가 즉시 버린다.
+         ② 웹 밖에서 DB 가 바뀌는 경우(매일 7:30 마이그 r_delta_sync 등) → TTL 60초.
+            ①만 두면 마이그가 직접 쓴 뒤 게이트가 **하루 종일 낡은 값**을 본다.
+       ★워커 1개 전제(uvicorn app:app, --workers 없음). 다중 워커로 가면 이 캐시는 못 쓴다
+         — 한 워커의 무효화가 다른 워커에 가지 않기 때문. 그때는 공용 캐시로 옮길 것."""
+    import datetime as _dt, time as _t
+    today = _dt.date.today().strftime("%y%m%d")
+    if (not force and _AVAIL_MAP["key"] == today and _AVAIL_MAP["map"]
+            and (_t.time() - _AVAIL_MAP["at"]) < _AVAIL_TTL):
+        return _AVAIL_MAP["map"]
+    try:
+        from routers.close import _mv_base, _mv_moves, _mv_step, _mv_scope, _next_ymd
+    except Exception:
+        return _AVAIL_MAP["map"] or {}
+    state, base_ymd, _src = _mv_base(cur, today)
+    scope = _mv_scope(cur)
+    start = _next_ymd(base_ymd)
+    if start <= today:
+        moves = _mv_moves(cur, start, today)
+        for y in sorted(moves):
+            _mv_step(state, moves[y], scope)
+    m = {k: float(v[0]) for k, v in state.items()}
+    import time as _t2
+    _AVAIL_MAP["key"], _AVAIL_MAP["map"], _AVAIL_MAP["at"] = today, m, _t2.time()
+    return m
+
+
 def _mat_avail(cur, item):
-    """자재 현재고 정본 = nx.mat_stock_daily 최신일 stock_qty. (★nx.stock_ledger은 최근이동 미동기화로 부정확 → 사용금지, 정본 §4-C)
-       mat_stock_daily = 2607스냅샷 + 레거시 PU_T_STOCK_MAINT 이동(QTY 99.85% 검증). 없으면 0."""
+    """자재 현재고(가용) — 실시간 정본. 없으면 0.
+       ★음수재고 차단(§0-★)의 판정 기준. 정본 = STOCK_GATING_CLOSE_LOCK_RULES §0-★★★."""
     item = str(item or "").strip().upper()
     if not item:
         return 0.0
-    cur.execute("SELECT TOP 1 stock_qty FROM nx.mat_stock_daily WHERE UPPER(mat_code)=? ORDER BY ymd DESC", item)
-    r = cur.fetchone()
-    return float(r[0] or 0) if r else 0.0
+    try:
+        return float(_mat_avail_map(cur).get(item, 0.0))
+    except Exception:
+        # 엔진 호출 실패 시에도 **폴백하지 않는다**(하드룰 §1-9-1) — 판정 불가는 통과가 아니라 0.
+        return 0.0
 
 def _mat_short_msg(cur, item, need, label="출고"):
-    """자재 재고 가용 게이트(정본=mat_stock_daily). 부족하면 사유메시지, 아니면 None. 마이너스 원천차단."""
+    """자재 재고 가용 게이트(정본=실시간 자재정본 _mat_avail). 부족하면 사유메시지, 아니면 None. 마이너스 원천차단."""
     item = str(item or "").strip(); need = float(need or 0)
     if not item or need <= 0:
         return None
@@ -691,7 +740,12 @@ def _assert_open(cur, ymd, domain="MAT", what="이 작업"):
 #   화면이 옛 값을 보여주지 않는다. 재고를 쓰는 **모든** 경로가 이 함수를 부른다.
 #   여기 두는 이유 = routers 끼리 서로 임포트하면 순환이 난다. common 은 모두가 이미 쓴다.
 def stock_changed(reason=""):
-    """재고가 바뀌었다 — 파생 캐시를 버린다. 실패해도 쓰기를 막지 않는다(조회 캐시일 뿐)."""
+    """재고가 바뀌었다 — 파생 캐시를 버린다. 실패해도 쓰기를 막지 않는다(조회 캐시일 뿐).
+       ★게이트 가용재고 맵(_AVAIL_MAP)도 함께 버린다 — 안 버리면 방금 쓴 재고를 게이트가 못 본다."""
+    try:
+        _AVAIL_MAP["key"] = None; _AVAIL_MAP["map"] = {}; _AVAIL_MAP["at"] = 0.0
+    except Exception:
+        pass
     try:
         from routers.close import _ledger_cache_clear
         _ledger_cache_clear()
