@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg)
 
 router = APIRouter()
 
@@ -321,6 +321,32 @@ def procreg_save(payload: dict = Body(...)):
     mid = p.get("id")
     nx = _nx(); cur = nx.cursor()
     try:
+        # ★생산실적 재고 게이트 — 예외 없음(정본 STOCK_GATING_CLOSE_LOCK_RULES.md §0-★).
+        #   이 화면은 종전에 게이트가 **아예 없었다**(nx.proc_result INSERT 만).
+        #   실적을 잡는다 = 그 수량만큼 만들었다 = BOM 자재를 썼다 → 자재가 없으면 실적 불가.
+        #   수정 시엔 **늘어난 수량분**만 판정한다(같은 실적을 두 번 요구하지 않기 위해).
+        #   차단 시 사유(어느 자재가 얼마 부족한지·어디에 있는지)를 그대로 돌려준다.
+        need_qty = qty
+        if mid:
+            cur.execute("SELECT CAST(ISNULL(PROD_QTY,0) AS float) FROM nx.proc_result WHERE ID=?", int(mid))
+            _r = cur.fetchone()
+            need_qty = max(0.0, qty - float(_r[0] or 0)) if _r else qty
+        if need_qty > 0:
+            _lm = _lock_msg(cur, ymd)                     # 마감 잠금도 함께(규칙 B)
+            if _lm:
+                raise HTTPException(409, _lm)
+            from routers.backflush import _backflush_bom, _prod_shortages, _is_inner_prod
+            _cro = _conn()
+            try:
+                if _is_inner_prod(_cro, item):            # 사내생산품만 BOM 소비가 발생
+                    _comps, _weld = _backflush_bom(nx, item, _cro)
+                    _short = _prod_shortages(nx, _comps, _weld, need_qty)
+                    if _short:
+                        _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
+                        raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
+                                            + "; ".join(_short[:8]) + _more)
+            finally:
+                _cro.close()
         if mid:
             cur.execute("""UPDATE nx.proc_result SET PROD_YMD=?, PROD_HMS=?, WORK_ORDER=?, SPLIT_WORK_ORDER=?,
                 ITEM_CODE=?, LINE_NO=?, PART_CODE=?, S_WORK_CODE=?, PROD_QTY=?, WORK_CODE=?, FINISH_FLAG=?,

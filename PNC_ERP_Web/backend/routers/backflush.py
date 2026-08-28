@@ -8,6 +8,69 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 
 router = APIRouter()
 
+# ===================== 생산실적 재고 게이트 (예외 없음) =====================
+# ★대표 지시 2026-08-28: "생산실적도 막아라. 우리 시스템은 예외가 없다.
+#   대신 경고 메시지를 주고 왜 안 되는지 알려줘라."
+#   이전 게이트는 mat_stock_daily 에 없는 품목(=nx.bom 소비대상 자식의 70.2%, 대부분
+#   사내 가공품 sgroup 130)을 **통째로 건너뛰었다** → 그 품목들은 음수가 그대로 났다.
+#   그 예외를 제거하고, 판정축을 **백플러시가 실제로 빼가는 축**과 일치시킨다.
+#     소비 1순위 RDY(준비재고, 원장) → 2순위 MAT(자재재고)
+#   ★생산창고(PR_T_MAT_STOCK_WH)는 백플러시 소비축이 아니다. 여기 재고가 있어도
+#     가용으로 세지 않는다 — 대신 사유 메시지에 실어 "어디에 있는데 왜 못 쓰는지"를 알린다.
+def _avail_axes(nx, code):
+    """소비 가능 재고를 축별로 집계. 반환 (rdy, mat, prd_wh, mat_src).
+         rdy    준비재고 = nx.stock_ledger STOCK_POINT='RDY' 잔량   ← 소비 1순위
+         mat    자재재고 = mat_stock_daily(정본), 미등록이면 자재창고 미러 PU_T_MAT_STOCK_WH ← 소비 2순위
+         prd_wh 생산창고 PR_T_MAT_STOCK_WH 잔량                      ← 소비축 아님(안내용)
+       ★mat_stock_daily 미등록을 '무제한'으로 보지 않는다(그게 종전 예외의 정체)."""
+    c = nx.cursor(); code = str(code or "").strip().upper()
+    if not code:
+        return 0.0, 0.0, 0.0, "-"
+    c.execute("SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0) FROM nx.stock_ledger "
+              "WHERE STOCK_POINT='RDY' AND UPPER(ITEM_CODE)=?", code)
+    rdy = max(float(c.fetchone()[0] or 0), 0.0)
+    c.execute("SELECT TOP 1 CAST(stock_qty AS float) FROM nx.mat_stock_daily "
+              "WHERE UPPER(mat_code)=? ORDER BY ymd DESC", code)
+    r = c.fetchone()
+    if r:
+        mat, src = float(r[0] or 0), "자재일마감"
+    else:
+        c.execute("SELECT ISNULL(SUM(CAST(STOCK_QTY AS float)),0) FROM nx.PU_T_MAT_STOCK_WH "
+                  "WHERE UPPER(MAT_CODE)=?", code)
+        mat, src = float(c.fetchone()[0] or 0), "자재창고"
+    c.execute("SELECT ISNULL(SUM(CAST(STOCK_QTY AS float)),0) FROM nx.PR_T_MAT_STOCK_WH "
+              "WHERE UPPER(MAT_CODE)=?", code)
+    prd_wh = float(c.fetchone()[0] or 0)
+    return rdy, max(mat, 0.0), prd_wh, src
+
+
+def _short_reason(code, need, rdy, mat, prd_wh, src, label=""):
+    """부족 사유 1줄 — **왜 안 되는지**가 보이게 축별로 밝힌다."""
+    avail = rdy + mat
+    msg = (f"{label}{code}: 소요 {need:g} > 가용 {avail:g}"
+           f" (준비재고 {rdy:g} + 자재재고 {mat:g}[{src}])")
+    if prd_wh > 0:
+        msg += f" · 생산창고에 {prd_wh:g} 있으나 백플러시 소비축이 아님"
+    elif avail <= 0:
+        msg += " · 어느 창고에도 재고 없음(입고·키팅 먼저)"
+    return msg
+
+
+def _prod_shortages(nx, comps, weld, qty):
+    """생산량 qty 에 대한 부족 목록. comps=[(child,unit_qty)] · weld={base:unit_qty}.
+       ★예외 없음 — 모든 자식·용접봉을 판정한다."""
+    out = []
+    for code, unit in list(comps) + [(k, v) for k, v in (weld or {}).items()]:
+        need = float(unit) * float(qty)
+        if need <= 0:
+            continue
+        lbl = "용접봉 " if (weld and code in weld) else ""
+        rdy, mat, prd_wh, src = _avail_axes(nx, code)
+        if need > rdy + mat + 1e-6:
+            out.append(_short_reason(code, need, rdy, mat, prd_wh, src, lbl))
+    return out
+
+
 # ================= ★Phase2: 생산실적 백플러시 엔진 (실사용BOM×생산량 소비, 회수율 제외) =================
 def _is_inner_prod(cro, item):
     """사내생산(INNER_PROD=1) 판정: MAKE_TYPE='1' 또는 가공공정(PR_M_ITEM_PROC_GAGONG) 보유. 라이브 RO."""
@@ -127,30 +190,18 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
     if not comps and not weld: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
-    # ★자재 부족이면 생산실적 차단(사용자 확정 2026-08-19): "자재가 부족하면 생산실적이 잡히면 안돼."
-    #   자재 현재고(mat_stock_daily=_mat_avail 정본) < BOM소요면 실적 거부 → 마이너스 원천차단. ★키팅과 무관(키팅=flag) — 실제 자재재고로만 판정.
-    #   ★커버리지 인지: 자재재고 '관리품목'만 게이트 — 비키팅품(케이블타이·비닐)·사급포함품은 mat_stock_daily 미추적 → 제외(오차단 방지, 정본 §4-C 검증).
-    #   ★한계: mat_stock_daily=레거시 일스냅샷 → 당일 입고/연속차감 미반영. 컷오버시 실시간 자재정본으로 승격 필요(§4 step4) — 그래야 당일 입고분 오차단 없음.
+    # ★생산실적 재고 게이트 — **예외 없음**(정본 STOCK_GATING_CLOSE_LOCK_RULES.md §0-★, 2026-08-28)
+    #   종전엔 mat_stock_daily 미등록 품목을 _tracked() 로 **판정 없이 통과**시켰다.
+    #   실측 결과 그 예외가 nx.bom 소비대상 자식의 70.2%(6,988/9,955, 대부분 사내 가공품)를
+    #   덮어 게이트가 사실상 무효였다 → 예외 제거. 판정할 수 없으면 통과가 아니라 차단이다.
+    #   판정축 = 실제 소비축(RDY 준비재고 → MAT 자재재고). 생산창고는 소비축이 아니므로
+    #   가용으로 세지 않되 **사유 메시지에 실어** 어디에 있는지 알린다(규칙 A-0-1 사유 고지).
     if mode == "post":
-        gc = cro.cursor(); short = []
-        def _tracked(code):
-            gc.execute("SELECT COUNT(*) FROM nx.mat_stock_daily WHERE UPPER(mat_code)=?", str(code or "").strip().upper())
-            return (gc.fetchone()[0] or 0) > 0
-        for _ch, _cq in comps:
-            _need = _cq * prod_qty
-            if _need > 0 and _tracked(_ch):
-                _av = _mat_avail(gc, _ch)
-                if _need > _av + 1e-6:
-                    short.append(f"{_ch}(가용 {_av:g} < 소요 {_need:g})")
-        for _br, _wq in weld.items():
-            _wneed = _wq * prod_qty
-            if _wneed > 0 and _tracked(_br):
-                _av = _mat_avail(gc, _br)
-                if _wneed > _av + 1e-6:
-                    short.append(f"용접봉 {_br}(가용 {_av:g} < 소요 {_wneed:g})")
+        short = _prod_shortages(nx, comps, weld, prod_qty)
         if short:
             more = f" 외 {len(short)-8}건" if len(short) > 8 else ""
-            return {"ok": False, "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8]) + more}
+            return {"ok": False, "shortage": short,
+                    "detail": "자재부족으로 생산실적 불가 — " + "; ".join(short[:8]) + more}
     out_sp = 'ASY' if _is_final_product(nx, item) else 'PRD'   # ★완성=최종제품 ASY / 반제품 PRD
     def _seq():
         nc.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd6)
@@ -205,7 +256,7 @@ def backflush_post(payload: dict = Body(...)):
     try:
         lm = _lock_msg(cn.cursor(), _d.datetime.now().strftime('%y%m%d'))   # ★공통 마감잠금(생산일=당월)
         if lm: return {"ok": False, "detail": lm}
-        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)   # ★실적은 재고부족으로 차단 안 함(경고 stock_warn만)
+        r = _backflush_core(cn, nx, item, prod_qty, wo, gpc, mode, user, ref_key)   # ★재고부족이면 차단됨(예외 없음 §0-★) — 사유는 r['shortage']
         nx.commit() if r.get("ok") else nx.rollback()
         return r
     except Exception as e:

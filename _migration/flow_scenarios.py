@@ -159,6 +159,15 @@ def fixture():
     r = cur.fetchone()
     if r:
         f["sale_cust"] = str(r[0]).strip()
+    # 생산실적 게이트(§0-★) 검증용 — BOM 이 있는 사내생산품(make_type='1')
+    cur.execute("""SELECT TOP 1 b.parent_code, COUNT(*)
+                     FROM nx.bom b JOIN nx.item i ON i.item_code = b.parent_code
+                    WHERE ISNULL(i.make_type,'') = '1'
+                    GROUP BY b.parent_code
+                   HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC""")
+    r = cur.fetchone()
+    if r:
+        f["prod_item"] = str(r[0]).strip()
     cur.close()          # ★쓰기 시작 전에 닫는다 — 잠금 대기 원천 차단
     return f, None
 
@@ -264,6 +273,26 @@ def main():
              "권한이 없습니다")
     else:
         _rec("R", "마감 잠금", "SKIP", "마감된 기간이 없음")
+
+    print("\n── [R] 규칙 : 생산실적 재고 게이트 (예외 없음 §0-★) ─────────")
+    if f.get("prod_item"):
+        PI = f["prod_item"]
+        print(f"           (대상 생산품 {PI})")
+        rule("백플러시 — 자재부족 차단", "POST", "/api/backflush/post",
+             {"item": PI, "prod_qty": 9999999, "wo": "FLOWTEST", "user": "flowverify"},
+             "자재부족으로 생산실적 불가")
+        rule("공정별생산실적 — 자재부족 차단", "POST", "/api/procreg/save",
+             {"prod_ymd": YMD, "item_code": PI, "prod_qty": 9999999, "user": "flowverify"},
+             "자재부족으로 생산실적 등록 불가")
+        # 사유에 축별 내역(준비재고·자재재고)이 실려야 한다 — 규칙 A-0-1 사유 고지
+        st_, res_ = call("POST", "/api/backflush/post",
+                         {"item": PI, "prod_qty": 9999999, "wo": "FLOWTEST", "user": "flowverify"})
+        body_ = json.dumps(res_, ensure_ascii=False)
+        ok_ = ("준비재고" in body_ and "자재재고" in body_ and "소요" in body_)
+        _rec("R", "차단 사유 고지 (어느 자재·얼마 부족·어디 있는지)",
+             "PASS" if ok_ else "FAIL", body_[:200])
+    else:
+        _rec("R", "생산실적 재고 게이트", "SKIP", "BOM 보유 사내생산품을 못 찾음")
 
     print("\n── [R] 규칙 : 입력 유효성 ────────────────────────────────────")
     rule("미등록 품목 차단", "POST", "/api/stock/save",
