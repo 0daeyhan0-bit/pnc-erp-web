@@ -165,29 +165,37 @@ def _prmmat_set(eng):
     return eng._prmmat
 
 
+import threading as _threading
+_VPR_CACHE = None                 # ★모듈 공유 캐시 {item: [(mat,qty,except,vir)]} (전 요청 공유·읽기전용=스레드안전)
+_VPR_LOCK = _threading.Lock()
+
+
 def warm_vpr(eng):
-    """★성능: v_pr_bom 전 엣지 1쿼리 프리로드 → eng._vprf. 전수 전개(사급부품/생산 walker)시 노드별 쿼리 회피.
-    이후 _vpr_full은 캐시에 없으면 leaf([])로 간주(재쿼리 안함)."""
-    if getattr(eng, '_vpr_warmed', False):
+    """★성능·동시성: v_pr_bom 전 엣지를 **모듈 캐시(_VPR_CACHE)** 로 1회 프리로드(락). 이후 _vpr_full은 연결 없이 캐시 읽기.
+    → 요청마다 재로드 없음 + 싱글톤 엔진 연결 동시사용(대사+수불) 충돌 없음. (BOM 변경 반영은 백엔드 재기동 or 후속 sig가드.)"""
+    global _VPR_CACHE
+    if _VPR_CACHE is not None:
         return
-    d = {}
-    eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY),
-             ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
-           FROM nx.v_pr_bom ORDER BY item_code, BOM_SEQ""")
-    for it, mat, uq, ex, vf in eng.cur.fetchall():
-        d.setdefault(str(it).strip(), []).append((str(mat).strip(), float(uq or 0), str(ex).strip(), str(vf).strip()))
-    eng._vprf = d
-    eng._vpr_warmed = True
+    with _VPR_LOCK:
+        if _VPR_CACHE is not None:
+            return
+        d = {}
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY),
+                 ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
+               FROM nx.v_pr_bom ORDER BY item_code, BOM_SEQ""")
+        for it, mat, uq, ex, vf in eng.cur.fetchall():
+            d.setdefault(str(it).strip(), []).append((str(mat).strip(), float(uq or 0), str(ex).strip(), str(vf).strip()))
+        _VPR_CACHE = d
 
 
 def _vpr_full(eng, item):
-    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). 캐시. warm_vpr 후엔 미존재=leaf."""
+    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). warm_vpr 후엔 모듈캐시 읽기(연결無)."""
+    k = item.strip().upper()
+    if _VPR_CACHE is not None:
+        return _VPR_CACHE.get(k, [])        # 프리로드 = 미존재는 leaf([])
     if not hasattr(eng, '_vprf'):
         eng._vprf = {}
-    k = item.strip().upper()
     if k not in eng._vprf:
-        if getattr(eng, '_vpr_warmed', False):
-            return []      # 프리로드 완료 = 캐시에 없으면 자식없음(leaf), 재쿼리 안함
         eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY), ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
             FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? ORDER BY BOM_SEQ""", k)
         eng._vprf[k] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip(), str(r[3]).strip()) for r in eng.cur.fetchall()]
