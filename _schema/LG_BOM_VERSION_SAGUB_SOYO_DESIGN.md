@@ -49,3 +49,20 @@
 - ★**최초 시드 ver_from = 2026-07-01** — 재다운로드분(현 nx.lg_bom)을 7/1자 버전으로 넣음.
 - 서명 범위 = supply_type + 구조(child/qty)까지(사급전환 추적 목적, supply_type 필수). ※일단 이대로, 필요시 조정.
 - ★**업로드 버전 방식 = A(서명 비교): 다르면 새 버전(ver_from=업로드일) append, 같으면 스킵**(중복 버전 방지). 사용자 확정 2026-08-28. (서명 부담 없음 확인 = CHECKSUM_AGG 밀리초.) 서명 = model·werks별 `CHECKSUM_AGG(BINARY_CHECKSUM(child_code,parent_code,qty,supply_type,stufe,posnr,child_spec,uit,unit))` 등 의미컬럼 전체.
+
+## 7. 리시빙비교(원소재) 2축 재구성 + copper_by_spec 2배 과다 규명 (2026-08-28, 사용자 확정)
+> 사용자 방향 전환: 원단위(nx.lg_settle_unit 수기) 축은 **제거**하고, **우리 BOM 기준 vs LG BOM 기준** 두 소요를 나란히 비교(리시빙비교 원소재 탭). 목적 = 우리 BOM이 LG BOM과 어긋난 품목 = 정교화 대상 발견.
+
+### 7-1. 화면/엔드포인트 구조 (구현완, dev 8012)
+- `recvcompare`(대사표): 품목별 **우리 BOM 중량/금액(our_*) · LG BOM 중량/금액(lgbom_*)** + 출고/반품. copper={our_net,lgbom_net,in_osp_kg}. 원단위(settle_ym·lg_kg·out_sagub) 전부 제거.
+- `recvcompare_ledger`(수불): **위=우리 BOM 기준(open/soyo/close_our_*), 아래=LG BOM 기준(open/soyo/close_bom_*)** 2표. 원단위 제거.
+- 하이라이트: `우리<LG`(우리가 덜 잡음)·`LG미인증`(LG BOM AP 없음). coverage.under_items.
+
+### 7-2. ★근본원인: copper_by_spec(=화면 우리 BOM 소스) 다단계 2배 과다 — 데이터 확정
+- 검증(AJR30004702): 규격은 **일치**(P9.52·P7.0·P15.88)하나 **우리 중량만 정확히 2×**.
+  - `copper_by_spec`(nx_soyo_engine, 소스=**nx.bom_line**)가 **변형 SUB 두 경로**(`AJR30004702-3-1`, `AJR30004702-20-1`)로 같은 동(MJU00697402/501/502)을 **각 1회씩 = 2회 계상** → 0.3493×2=0.6986.
+  - **LG BOM = 1회**(werks MAX), **nx.bom_flat = 1회**(변형 dedup·검증정본, weight_actual=우리실측). bom_flat P15.88 0.3493 ≈ LG 0.3464.
+  - 2608 절삭 집계: bom_flat 43,171kg(LG 39,613의 **1.09×**·잔차=직거래분) vs copper_by_spec 51,836(**1.31×**=변형중복 과다).
+  - = 기록의 nx.bom_line 평탄화/변형SUB 중복(LME 과다·subvariant와 동일 계열). 엔진 로직버그 아님 = **소스(nx.bom_line) 구조/copper_by_spec가 변형경로 미dedup**.
+- **결정: 화면 우리 BOM 소요 소스 = copper_by_spec → nx.bom_flat**(검증정본·변형dedup·LG와 정합). `_dong_of`를 bom_flat 기반으로. 원가엔진의 copper_by_spec 2배는 별도 큰 이슈(원가 영향)라 이 화면과 분리.
+- (부차) `_lg_ap_all` 다단계 롤업: LG BOM 동이 L2(서브 밑, 예 MJU00697501 ×7)일 때 L1 수량 미곱 → LG 소폭 과소. bom_flat은 이미 롤업됨. 별도 보정 검토.
