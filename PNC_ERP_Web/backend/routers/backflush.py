@@ -142,19 +142,37 @@ def _is_final_product(nxc, item):
     c.execute("SELECT COUNT(*) FROM nx.bom WHERE child_code=?", item)
     return (c.fetchone()[0] or 0) == 0
 
-def _ring_collect(nxc, root):
-    """용접링(sg230 활성) 소비 수집 = ★bom_line 정본(nx.bom엔 용접링 없음=LG재구축 누락).
-       단위 EA. 반환 {ring_code: qty}. cs_calc_except=0만. 현 활성링은 root 직속(검증완, WELD_RING_DESIGN §15).
-       ※제작SUB 깊은 링 재귀는 후속(활성 7종 전부 직속 확인). 봉↔링 중복 방지는 호출측(_backflush_core)에서 봉 skip."""
-    c = nxc.cursor()
-    c.execute("""SELECT bl.child_item, CAST(bl.qty AS float)
-        FROM nx.bom_line bl JOIN nx.bom_header bh ON bh.bom_id = bl.bom_id
-        JOIN nx.item i ON i.item_code = bl.child_item
-        WHERE bh.item_code = ? AND i.item_name LIKE N'%용접링%' AND i.sgroup = '230'
-          AND ISNULL(bl.cs_calc_except, 0) = 0""", root)
-    ring = {}
-    for ch, q in c.fetchall():
-        ring[str(ch)] = ring.get(str(ch), 0.0) + (q or 0.0)
+def _ring_collect(nxc, root, cro=None):
+    """용접링(sg230) 소비 = ★bom_line **트리 롤업**(root+SUB, 봉과 동일 전개). nx.bom엔 용접링 없음(LG재구축 누락).
+       단위 EA. cs_calc_except=0·사내한정(외주SUB 링=협력사 매입가 처리). 반환 {ring_code: cum_qty}.
+       ★root직속만 잡으면 SUB의 링 누락(실측 117/135 링노드가 SUB) → bom_line 트리 전개 필수. 봉skip은 호출측."""
+    c = nxc.cursor(); _mkc = {}
+    def _sanae(node):
+        if node == root: return True
+        if cro is None: return True
+        if node not in _mkc:
+            cc = cro.cursor(); cc.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", node)
+            r = cc.fetchone(); _mkc[node] = bool(r and str(r[0]).strip() == '1')
+        return _mkc[node]
+    ring = {}; seen = set()
+    def walk(node, mult, depth):
+        if depth > 15 or node in seen: return
+        seen.add(node)
+        if not _sanae(node): return                        # 외주 SUB 링=협력사 매입가 처리(사내만 −재고)
+        c.execute("""SELECT bl.child_item, CAST(bl.qty AS float)
+            FROM nx.bom_line bl JOIN nx.bom_header bh ON bh.bom_id = bl.bom_id
+            JOIN nx.item i ON i.item_code = bl.child_item
+            WHERE bh.item_code = ? AND i.item_name LIKE N'%용접링%' AND i.sgroup = '230'
+              AND ISNULL(bl.cs_calc_except, 0) = 0""", str(node).strip())
+        for ch, q in c.fetchall():
+            ring[str(ch)] = ring.get(str(ch), 0.0) + (q or 0.0) * mult
+        c.execute("""SELECT bl.child_item, CAST(bl.qty AS float)
+            FROM nx.bom_line bl JOIN nx.bom_header bh ON bh.bom_id = bl.bom_id
+            WHERE bh.item_code = ? AND ISNULL(bl.cs_calc_except, 0) = 0
+              AND EXISTS(SELECT 1 FROM nx.bom_header h2 WHERE h2.item_code = bl.child_item)""", str(node).strip())
+        for ch, q in c.fetchall():
+            walk(str(ch).strip(), mult * (q or 0), depth + 1)
+    walk(str(root).strip(), 1.0, 0)
     return ring
 
 
@@ -173,7 +191,7 @@ def _backflush_core(cro, nx, item, prod_qty, wo, gpc, mode, user, ref_key, ref_b
     if mode == "reverse" and not ex: return {"ok": False, "detail": "되돌릴 백플러시 없음"}
     f = -1.0 if mode == "reverse" else 1.0
     comps, weld = _backflush_bom(nx, item, cro)   # ★cro=라이브RO(용접봉 사내한정 판정)
-    ring = _ring_collect(nx, item)                # ★용접링(bom_line 정본, nx.bom엔 없음) EA
+    ring = _ring_collect(nx, item, cro)           # ★용접링(bom_line 트리롤업, nx.bom엔 없음) EA·사내한정
     if ring and weld:                             # ★링 있는 노드 = 봉 대체 → 봉 skip(중복차감 방지, 노드단위·월30근사)
         weld = {}
     if not comps and not weld and not ring: return {"ok": False, "detail": "nx.bom 전개결과 없음(소비 BOM 없음)"}
@@ -279,7 +297,7 @@ def _weld_consume(cro, nx, item, signed_qty, wo, user, do_gate=True):
     if not _is_inner_prod(cro, item):
         return {"ok": True, "weld_kinds": 0}   # 사내생산 아님 = 용접봉 소비 없음(스킵)
     _comps, weld = _backflush_bom(nx, item, cro)   # 용접봉만 사용(자재/생산품은 레거시)
-    ring = _ring_collect(nx, item)                 # ★용접링(bom_line 정본, nx.bom엔 없음) — 봉과 동일 Q1000 모델
+    ring = _ring_collect(nx, item, cro)            # ★용접링(bom_line 트리롤업) — 봉과 동일 Q1000 모델·사내한정
     if ring and weld:                              # 링 있는 노드 = 봉 대체 → 봉 skip(중복차감 방지)
         weld = {}
     if not weld and not ring:
