@@ -66,3 +66,14 @@
   - = 기록의 nx.bom_line 평탄화/변형SUB 중복(LME 과다·subvariant와 동일 계열). 엔진 로직버그 아님 = **소스(nx.bom_line) 구조/copper_by_spec가 변형경로 미dedup**.
 - **결정: 화면 우리 BOM 소요 소스 = copper_by_spec → nx.bom_flat**(검증정본·변형dedup·LG와 정합). `_dong_of`를 bom_flat 기반으로. 원가엔진의 copper_by_spec 2배는 별도 큰 이슈(원가 영향)라 이 화면과 분리.
 - (부차) `_lg_ap_all` 다단계 롤업: LG BOM 동이 L2(서브 밑, 예 MJU00697501 ×7)일 때 L1 수량 미곱 → LG 소폭 과소. bom_flat은 이미 롤업됨. 별도 보정 검토.
+
+### 7-3. STS 오염 제거 + 최종 검증 (2026-08-28, dev 8012)
+- **2차 발견**: bom_flat `role LIKE '%동%'`는 **STS(스테인리스) 제작동관까지** 포함(STS 22.2×1.0 2,557kg·28.0×1.0 1,951kg 등) → 동 아닌 것이 우리 BOM에 섞이고 절삭재료비(동 단가표) 미매칭 14.7%. LG BOM은 matkl='MJU0631'(동만)이라 STS 제외.
+- **수정**: `_dong_of` 필터를 role → **metal_gubun IN ('CU','고강도')**(=`_WT_COPPER`, copper_by_spec와 동일 기준). STS·AL 자동 제외.
+- **검증(2608 절삭 리시빙, copper-only 동일기준)**:
+  - 우리 BOM(bom_flat·copper) **37,354kg** vs LG BOM(AP) **39,613kg** = **0.94×** (전 copper_by_spec 51,836=1.31× 과다 → 정상화).
+  - 단가 미매칭 14.7% → **0.5%**(184kg). AJR30004702 우리 1,956 ≈ LG 1,787.
+  - 수불: 2607 우리46,416/LG48,319 · 2608 우리37,354/LG39,613.
+- **남은 정교화 신호**: 우리<LG 약 140품목(우리 BOM이 동을 덜 잡음) = BOM 점검 대상 = 이 화면의 목적. `_lg_ap_all` 롤업 보정 시 LG 더 커져 갭 확대(우리 과소 더 드러남).
+- **구현 위치**: `_dong_of`(bom_flat+metal), `recvcompare`/`recvcompare_ledger`(our_*/lgbom_* 2축), `screens.pur.js`(우리 BOM|LG BOM 2컬럼·수불 위아래 2표·우리<LG 하이라이트). ★소스: copper_by_spec/원단위 전부 제거.
+- ★★**배포 주의**: 브랜치 `feat/rawmat-soyo-lg-certified`가 main보다 187 뒤처짐 + main에 타 세션이 같은 파일(lgsagub·screens.pur·bom·screens.base) 수정(리더이관·재고출하·품질자재 등). **통째 병합 금지 → 최신 main에 이 2축 변경분만 외과적 이식**(deploy/* 패턴). 이식은 승인 후.
