@@ -34,7 +34,14 @@
 > 트랜잭션 읽기는 병행운영 중 **라이브 유지**(사용자 1:1 대조용), 하드컷오버 시점에 **일괄 nx 미러전환**. 아래는 그 전환 전/시점에 반드시.
 
 ### B-1. 미러 완결성 (안 하면 컷오버 후 stale)
-1. **미러 없는 2테이블 r_delta_sync 대상 편입** — `PR_T_INDI_WELD_SHEET`(베이스, kitting part410) · `SA_T_PLAN_ITEM_DTL`(soyo forecast). 현재 **1회성 SELECT INTO 복사만** → 지속 델타싱크에 추가해야 함. (TRANSACTION_CUTOVER_DESIGN §9-1/§9-2)
+1. ~~미러 없는 2테이블 r_delta_sync 대상 편입~~ — ✅ **2026-08-29 확인: 이미 해소됨**.
+   `r_delta_sync.py` 가 접두사 자동수집 + 날짜컬럼 자동판별로 바뀌면서 둘 다 정상 대상이다
+   (`PR_T_INDI_WELD_SHEET` 2,792행 · `SA_T_PLAN_ITEM_DTL` 12,176행, PLAN_YMD 윈도우). 항목 종료.
+   ★단, 확인 중 **더 큰 위험**을 찾았다 — `do_full()` 이 TRUNCATE+전량INSERT 인데 대상에
+     웹이 쓰는 재고 잔량 테이블(`PU_T_MAT_STOCK_WH` 10곳 등)이 있다. **컷오버 후 돌리면 웹 재고가 지워진다.**
+     ⟹ 컷오버 마커(`_migration/cutover_mark.py`) + 자가 거부 가드 신설.
+     **컷오버 절차에 `cutover_mark.py --set --commit` 추가.**
+     상세 = `CUTOVER_CHECKLIST.md` "1번 … 더 큰 위험 발견".
 2. **참조 테이블 nx 존재 감사** — flip 전 INFORMATION_SCHEMA.TABLES+VIEWS+synonyms로 라우터의 nx.<TABLE> 참조 전수 존재확인(blanket 치환은 미러 불완전 테이블서 조용히 깨짐).
 3. **며칠 연속 mirror_recon GREEN** 확보(A 루틴) = seamless 전환 근거.
 3-a. ★**SUB 접미사 품명 = 생성경로 이사(컷오버 전 구현 필요, 2026-08-26 검증)** — 병행운영 중엔 배치 `r_sub_desc_suffix`(§A 2-b)가 SUB 품명에 `[-{접미사}]` 병기하나, **컷오버 후엔 레거시 신규 안 옴 → 배치 중단 → 신규 SUB은 nx 앱 생성**(item.py `itemmaster_save`·bom.py `item_save`·sourcing.py sub mint). ∴ **CRUD 저장 시 item_name에 접미사 자동부착 로직 필요**(net_weight `common._geom_weight` 자동재계산과 동일 패턴). ★**실측 미구현**: CRUD는 현재 net_weight만 자동재계산·**접미사는 배치뿐**(sourcing suffix는 코드채번용≠품명병기). 컷오버 절차: ①컷오버 직전 §A 2-b/2-c 배치 마지막 1회(nx.item=라이브+접미사 완비 출발) ②배치(r_item_sync·r_sub_desc_suffix) 중단 ③CRUD 접미사 이사분 가동 ④미러 nx.PR_M_ITEM 은퇴·물리drop(DO_NOT_USE §14). 정본 규칙=코드 첫 '-' 뒤 전부, 품명=`[-{접미사}] {원품명}`(멱등 self-heal). ([[newerp-sub-name-registry]] [[newerp-now-active-task]])
