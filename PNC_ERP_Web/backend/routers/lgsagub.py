@@ -964,7 +964,7 @@ def _num(v):
 @router.get("/api/lgsagub/sagub_convert")
 def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"),
                           mt: str = Query("1,2,5"), scope: str = Query("all"),
-                          q: str = Query(""), limit: int = Query(6000)):
+                          cutg: str = Query("절삭"), q: str = Query(""), limit: int = Query(6000)):
     """원소재 사급전환율: LG BOM의 동 원소재(child_desc='Tube,Raw')가 사급(Assembly Pull)으로
        전환됐는지 대조. Supplier=미전환(우리가 구매)·Assembly Pull=전환(LG 사급).
        기본=미전환(Supplier)·제작품(parent) 제작유형 1/2/5.
@@ -985,6 +985,11 @@ def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"
         if werks.strip(): wh.append("r.werks=?"); p.append(werks.strip())
         if scope == "active":   # 사용중 = LG 리시빙(완제품 출하) 2025.01~ 실적 있는 ASSY만
             wh.append("r.model IN (SELECT DISTINCT ITEM_CODE FROM nx.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD>='250101')")
+        if cutg.strip() and cutg != "all":   # 제품군 = 완제품(model) cut_gubun (절삭/설치/분지관/이지링크/(없음))
+            if cutg == "(없음)":
+                wh.append("ISNULL(im.cut_gubun,'')=''")
+            else:
+                wh.append("im.cut_gubun=?"); p.append(cutg.strip())
         mtl = [x.strip() for x in mt.split(",") if x.strip()]
         if mtl:
             wh.append("ISNULL(ip.make_type,'') IN (%s)" % ",".join("?" * len(mtl))); p += mtl
@@ -1026,10 +1031,29 @@ def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"
                 "status": "미전환" if r[10] == "Supplier" else ("전환" if r[10] == "Assembly Pull" else (r[10] or "")),
                 "spec": spec, "cnt": r[19],
             })
+        # 전월(직전 월) LG 리시빙 수량 per model(완제품) — 우선순위/정렬용(GUBUN C+R = 소비 전량)
+        import datetime as _dt
+        _td = _dt.date.today()
+        _py = _td.year if _td.month > 1 else _td.year - 1
+        _pm = _td.month - 1 or 12
+        prev_ym = "%02d%02d" % (_py % 100, _pm)   # 전월 YYMM (예 2607)
+        recv = {}
+        mset = list({(x["model"] or "").upper().strip() for x in rows if x["model"]})
+        for i in range(0, len(mset), 800):
+            ck = mset[i:i + 800]
+            ph = ",".join("?" * len(ck))
+            cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CONVERT(float,ISNULL(RECV_QTY,0))) "
+                        "FROM nx.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD LIKE ? AND UPPER(LTRIM(RTRIM(ITEM_CODE))) IN (%s) "
+                        "GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))" % ph, prev_ym + "%", *ck)
+            for r in cur.fetchall():
+                recv[r[0]] = float(r[1] or 0)
+        for x in rows:
+            x["recv_prev"] = recv.get((x["model"] or "").upper().strip(), 0)
+        rows.sort(key=lambda x: -x["recv_prev"])   # 기본 = 전월 리시빙 많은 순
         total = len(rows)
         models = len(set(x["model"] for x in rows))
         parents = len(set((x["model"], x["parent"]) for x in rows))
-        return {"rate": rate, "pull": pull, "supplier": sup,
+        return {"rate": rate, "pull": pull, "supplier": sup, "prev_ym": prev_ym,
                 "rows": rows[:int(limit)], "total": total, "shown": min(total, int(limit)),
                 "models": models, "parents": parents}
     finally:
