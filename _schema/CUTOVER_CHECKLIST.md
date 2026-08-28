@@ -709,3 +709,71 @@ git -C D:\ERP\Projects\NEW_ERP_1 status --short     # 로컬 변경 0 이어야 
 git -C D:\ERP\Projects\NEW_ERP_1 remote -v          # origin = Gitea
 ```
 ⟹ 하나라도 어긋나면 **컷오버 당일 배포가 막힌다.** 미리 확인해 둘 것.
+
+---
+
+## 16. 롤백 계획 (2026-08-29 수립)
+
+도구 = `_migration/cutover_rollback.py`
+
+### ★전제부터 바로잡는다 — "코드만 되돌리면 된다" 는 틀렸다
+컷오버는 코드 flip(`PARTNER_ERP.dbo.` 읽기 → `PARTNER_ERP_TEST3.nx.` 읽기)만이 아니다.
+**그 순간부터 웹 입력이 nx 에만 쌓인다. 레거시에는 그 데이터가 없다.**
+⟹ 롤백 판단의 첫 질문은 *"지금 되돌리면 몇 건이 사라지는가"* 다. **그 수를 모르면 결정할 수 없다.**
+
+### 절차
+| 단계 | 언제 | 무엇을 |
+|---|---|---|
+| **R-0** | **컷오버 직전** | `python _migration/cutover_rollback.py --snapshot`<br>21개 쓰기 테이블의 행수·최대키를 파일로 남긴다. **이걸 안 남기면 롤백 판단 자체가 불가능하다.** |
+| **R-1** | 문제 발생 시 | `--diff` → **유실 후보 행수** 확인. 이게 롤백 비용이다 |
+| **R-2** | 판단 | 유실 후보가 **0 이면** 코드만 되돌리면 끝. **0 이 아니면** 그 데이터를 어디로 옮길지 먼저 정한다 |
+| **R-3** | 코드 되돌리기 | 운영폴더는 `--ff-only` pull 전용이라 **자동 되돌림이 안 된다** — 아래 참조 |
+| **R-4** | 데이터 | **자동 복구하지 않는다.** 사람이 판단·승인(하드룰: 원장 대량삭제 금지) |
+
+### R-3 상세 — 코드는 어떻게 되돌리나
+`deploy_pull.ps1` 은 `git pull --ff-only origin main` 이다. **되감기(rewind)가 안 된다.**
+⟹ 롤백은 **`main` 에 revert 커밋을 올려서 앞으로 감는** 방식이어야 한다.
+```
+# 개발 PC (운영폴더에서 직접 git 조작 금지)
+git revert --no-edit <컷오버 커밋>..HEAD      # 또는 되돌릴 범위
+git push zt main
+# 운영 서버
+powershell -File D:\ERP\Projects\NEW_ERP_1\deploy_pull.ps1 -Restart
+```
+> **운영폴더에서 `git reset` 하지 말 것.** 다음 pull 이 `--ff-only` 로 막혀 배포가 죽는다.
+
+### 대상 테이블 (웹이 실제로 쓰는 것 21개)
+```
+stock_ledger · stock_snapshot · period_close        ← 재고·마감
+sale_dtl · saleout_maint · proc_result              ← 출하·판매·생산실적
+price_item                                          ← ★단가 마스터(2026-08-29 승격)
+item · bom_line · model_bom · routing · proc_weld   ← 마스터
+sourcing_route(+_line) · sourcing_profile           ← 조달
+coop_quote · coop_quote_v2                          ← 협력사 견적
+PU_T_STOCK_MAINT · SA_T_STOCK_MAINT
+PU_T_MAT_STOCK_WH · PR_T_STOCK_MAINT_MAT            ← 웹 쓰기 겸용 미러
+```
+조회 전용 미러는 뺐다 — 되돌려도 잃을 게 없다.
+
+### 기준선 (2026-08-29 07:57 실측)
+```
+stock_ledger        172,450    stock_snapshot     6,668    period_close       6
+sale_dtl            307,778    saleout_maint          8    proc_result        0
+price_item          132,148    item              25,367    bom_line      37,560
+routing             173,109    proc_weld          5,518    sourcing_profile 13,064
+PU_T_STOCK_MAINT  1,766,214    SA_T_STOCK_MAINT 664,122
+PR_T_STOCK_MAINT_MAT 1,385,519
+```
+`--diff` 동작 확인: 증감 0 · 유실 후보 **0행** (아직 컷오버 전이므로 정상).
+
+### ★이미 확보된 되돌림 지점
+| 대상 | 백업 | 만든 시점 |
+|---|---|---|
+| `nx.price_item` (단가 마스터 승격) | `nx.price_item_bak_promote` 132,148행 | 2026-08-29 |
+| 그 외 | `nx.*_bak_*` **76개** (BOM·routing·soyo 등 작업별) | 각 작업 시 |
+
+### 남은 결정
+- **유실 후보가 0 이 아닐 때 그 데이터를 어디로 보낼지** — 레거시 역이관인지, 보관 후 재입력인지.
+  이건 업무 결정이라 컷오버 전에 정해 둬야 한다.
+- **롤백 판단 기한** — 컷오버 후 며칠까지 되돌릴 수 있다고 볼 것인지.
+  시간이 갈수록 nx 전용 데이터가 쌓여 되돌림 비용이 커진다.
