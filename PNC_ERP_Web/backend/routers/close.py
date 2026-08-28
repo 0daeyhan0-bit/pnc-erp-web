@@ -988,11 +988,14 @@ def _prd_price(cur, target):
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(i.item_code))), LTRIM(RTRIM(ISNULL(i.in_cust,'')))
                      FROM PARTNER_ERP_TEST3.nx.item i""")
     incust = {str(a): b for a, b in cur.fetchall()}
-    cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), LTRIM(RTRIM(ISNULL(CUST_CODE,''))), ITEM_COST FROM (
-                     SELECT ITEM_CODE, CUST_CODE, CAST(ITEM_COST AS float) ITEM_COST,
-                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE, CUST_CODE ORDER BY COST_APPLY_YMD DESC) rn
-                       FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
-                      WHERE COST_TAG='1' AND COST_APPLY_YMD <= ?) t WHERE rn=1""", target)
+    # ★단가정본 = nx.price_item '매입' (DO_NOT_USE §18). 종전엔 라이브 dbo.PR_M_ITEM_COST 직독 —
+    #   컷오버에 죽는 코드였다. 정렬은 원본 그대로 **적용일 기준**(MAIN_FLAG 미사용)이라 클린으로 그대로 옮겨진다.
+    #   실측(거래처별 as-of 최신): 공통 16,875 중 **실제 값차이 0**(112건은 전부 반올림 ≤0.001).
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), LTRIM(RTRIM(ISNULL(vendor_code,''))), price FROM (
+                     SELECT item_code, vendor_code, CAST(price AS float) price,
+                            ROW_NUMBER() OVER(PARTITION BY item_code, vendor_code ORDER BY apply_ymd DESC) rn
+                       FROM PARTNER_ERP_TEST3.nx.price_item
+                      WHERE price_type='매입' AND apply_ymd <= ?) t WHERE rn=1""", target)
     bycust = {}
     for it, cu, c in cur.fetchall():
         bycust.setdefault(str(it), {})[str(cu)] = float(c or 0)

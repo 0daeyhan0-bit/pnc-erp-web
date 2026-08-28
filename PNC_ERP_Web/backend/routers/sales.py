@@ -279,9 +279,11 @@ def _sagub_move(cur, ymd, cust, mat, qty, wh, direction, remarks):
     return gseq
 
 def _pur_price(cur, item, cust, ymd):
-    """구매단가 = PR_M_ITEM_COST 최신유효(cost_tag='1', 매입처). 유상 회수=매입입고 단가."""
-    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-        WHERE item_code=? AND cust_code=? AND cost_tag='1' AND cost_apply_ymd<=? ORDER BY cost_apply_ymd DESC""",
+    """구매단가 = 단가정본 nx.price_item '매입' 최신유효(매입처). 유상 회수=매입입고 단가.
+       ★2026-08-28 미러(PR_M_ITEM_COST tag'1') → 클린 이관(DO_NOT_USE §18 단일소스).
+         실측: 거래처별 as-of 최신 비교에서 **실제 값차이 0**(112건은 전부 반올림 ≤0.001)."""
+    cur.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+        WHERE item_code=? AND vendor_code=? AND price_type='매입' AND apply_ymd<=? ORDER BY apply_ymd DESC""",
         item, cust, ymd)
     r = cur.fetchone()
     return float(r[0]) if r and r[0] is not None else 0.0
@@ -329,7 +331,7 @@ def sagub_output_confirm(payload: dict = Body(...)):
 @router.post("/api/sagub/recover")
 def sagub_recover(payload: dict = Body(...)):
     """사급 회수. ★Phase4 자동판정: 유상=매입입고(+PRD, tag '9', 구매단가) / 무상=이동복귀(−SAG@사급처 / +PRD@우리, tag G2).
-    무상 복귀는 SAG 잔량 이내 가드. 유상 단가=override 또는 PR_M_ITEM_COST(cost_tag='1')."""
+    무상 복귀는 SAG 잔량 이내 가드. 유상 단가=override 또는 nx.price_item('매입')."""
     cust = str(payload.get("cust_code", "")).strip()
     mat = str(payload.get("mat_code", "")).strip()
     item = str(payload.get("item_code", "")).strip() or mat
@@ -481,7 +483,7 @@ def perm_users_save(payload: dict = Body(...)):
 
 # ===================== 판매및출고등록 (w_pu_output_010/015, nx.stock_maint tag='5') — 구매→협력사 판매출고 =====================
 # ★역분석 확정(2026-07-28, dw_pu_input_140_t2 retrieve + 라이브대사 98%): 판매출고 정본 = PU_T_STOCK_MAINT(자재수불) MAINT_TAG='5'.
-#   maint_cost=사급단가(f_get_item_cost 'S'=PR_M_ITEM_COST cost_tag='S' 유효일자최신), amt=trunc(qty×cost), vat=trunc(amt×0.1)=매출/부가세.
+#   maint_cost=사급단가(f_get_item_cost 'S' 이식 = nx.price_item 'TAGS' 유효일자최신), amt=trunc(qty×cost), vat=trunc(amt×0.1)=매출/부가세.
 #   ★부호: 판매/불출=음수 저장(집계 SUM(-AMT) 부호반전=사급매출). nx.stock_maint(자재수불 원장)→사급매출집계·수불장 파생.
 _SALEOUT_GUBUN = {"5": "협력업체판매", "0": "일반", "9": "완성품"}
 
@@ -523,9 +525,14 @@ def _sale_close_lookup(cur):
     return is_closed
 
 def _sagub_price(cur, item, cust, ymd):
-    """사급단가 = f_get_item_cost(item,cust,'S',ymd) 정확이식: PR_M_ITEM_COST 최신유효(cost_tag='S')."""
-    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-        WHERE item_code=? AND cust_code=? AND cost_tag='S' AND cost_apply_ymd<=? ORDER BY cost_apply_ymd DESC""",
+    """사급단가 = 단가정본 nx.price_item 'TAGS' 최신유효(=f_get_item_cost(item,cust,'S',ymd) 이식).
+       ★2026-08-28 미러 → 클린 이관. 정렬은 레거시 f_get_item_cost 그대로 **적용일 기준**이다
+         (coopquote 는 MAIN_FLAG 우선이라 8건이 갈렸다 — 그쪽이 비표준).
+       실측 차이 2건은 **미러가 낡은 것**이고 클린이 맞다:
+         AJR75712801   미러 267,680(260727) vs 클린 275,425(260806) ← 8/6 사급가 인상분
+         3H00627C-5000 미러   8,492(200101) vs 클린  22,000(251226)"""
+    cur.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+        WHERE item_code=? AND vendor_code=? AND price_type='TAGS' AND apply_ymd<=? ORDER BY apply_ymd DESC""",
         item, cust, ymd)
     r = cur.fetchone()
     return float(r[0]) if r and r[0] is not None else 0.0
@@ -1372,10 +1379,13 @@ def sale040_confirm(payload: dict = Body(...)):
             if qty <= 0:
                 skipped.append({"wo": swo or wo, "item": it, "why": "재고부족"})
                 continue
-            cur.execute("""SELECT TOP 1 ISNULL(ITEM_COST,0) FROM nx.PR_M_ITEM_COST
-                            WHERE ITEM_CODE=? AND CUST_CODE IN ('1010','1020')
-                              AND COST_TAG IN ('S','E') AND COST_APPLY_YMD<=?
-                            ORDER BY COST_APPLY_YMD DESC, CUST_CODE ASC, COST_TAG DESC""", it, ymd)
+            # ★단가정본 = nx.price_item (DO_NOT_USE §18). 미러 PR_M_ITEM_COST 는 컷오버에 죽는다.
+            #   태그 매핑 S→TAGS · E→TAGE(§9). 실측 차이 1건 = AJR75712801
+            #   미러 267,680 vs 클린 275,425 = **8/6 사급가 인상분**이고 미러가 낡은 것.
+            cur.execute("""SELECT TOP 1 ISNULL(price,0) FROM nx.price_item
+                            WHERE item_code=? AND vendor_code IN ('1010','1020')
+                              AND price_type IN ('TAGS','TAGE') AND apply_ymd<=?
+                            ORDER BY apply_ymd DESC, vendor_code ASC, price_type DESC""", it, ymd)
             cr = cur.fetchone()
             cost = float(cr[0] or 0) if cr else 0.0
             cur.execute("""INSERT INTO nx.SA_T_SALE_DTL
