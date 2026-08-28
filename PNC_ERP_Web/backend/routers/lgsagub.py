@@ -1093,8 +1093,10 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
         price = {k: (a / q if q else 0.0) for k, (q, a) in osp_all.items()}
         cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) NOT LIKE '%TUBE%'")
         r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
-        LEDGER_START = "2601"                 # ★사용자: 1월부터
+        LEDGER_START = "2602"                 # ★사용자: 2월부터(OSP 데이터 시작월)
         frm = from_ym.strip() or LEDGER_START
+        if osp_min and frm < osp_min:          # OSP 없는 이전달로 시작하면 입고0→마이너스 → 첫 OSP월로 클램프
+            frm = osp_min
         to = to_ym.strip() or osp_max or frm
 
         def ym_next(y):
