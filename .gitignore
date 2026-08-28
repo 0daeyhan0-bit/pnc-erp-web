@@ -13,6 +13,9 @@ _migration/*
 _migration/sub_norm/*
 !_migration/sub_norm/*.py
 !_migration/sub_norm/*.md
+# 흐름 TestBed 하네스는 추적 — _migration/* 제외에 걸려 untracked 로 두면
+#   과거 scratchpad 하네스 소실 사고와 같은 조건이 된다(2026-08-28).
+!_migration/flow_*.py
 LG_FILES/
 LG_BOM_download/
 source_analysis_txt_full/
