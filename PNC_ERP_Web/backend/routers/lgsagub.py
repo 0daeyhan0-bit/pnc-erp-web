@@ -1021,8 +1021,10 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
             FROM nx.SA_T_LG_RECEIVING_DTL WHERE {rwh} GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", *rp)
         recv = [(r[0], f(r[1]), f(r[2])) for r in cur.fetchall()]
         out_c = {}; out_r = {}   # 사급부품별 OUT 소요개수
+        _soyo.warm_vpr(_weng())  # v_pr_bom 1쿼리 프리로드(전수 전개 성능)
+        _sps_memo = {}           # 요청 전체 공유(공유SUB 1회 전개=성능)
         for it, qc, qr in recv:
-            pmap = _soyo.sagub_parts_soyo(_weng(), it, osp_set)   # ★통일 소요엔진(v_pr_bom·정지=OSP·변형SUB 이중계상 없음)
+            pmap = _soyo.sagub_parts_soyo(_weng(), it, osp_set, _sps_memo)   # ★통일 소요엔진(v_pr_bom·정지=OSP·변형SUB 이중계상 없음)
             for part, per in pmap.items():
                 out_c[part] = out_c.get(part, 0.0) + qc * per
                 out_r[part] = out_r.get(part, 0.0) + qr * per
@@ -1106,6 +1108,8 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             months.append(m); m = ym_next(m); guard += 1
 
         rows = []; bal_q = 0.0; bal_a = 0.0
+        _soyo.warm_vpr(_weng())  # v_pr_bom 1쿼리 프리로드
+        _sps_memo = {}           # 전 월/품목 공유(per-unit·stop_set 동일=성능)
         for M in months:
             cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
                            WHERE ym=? AND UPPER(item_name) NOT LIKE '%TUBE%'""", M)
@@ -1117,7 +1121,7 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
                 GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", M)
             out_q = out_a = 0.0
             for it, qty in [(r[0], f(r[1])) for r in cur.fetchall()]:
-                for part, per in _soyo.sagub_parts_soyo(_weng(), it, osp_set).items():   # ★통일 소요엔진
+                for part, per in _soyo.sagub_parts_soyo(_weng(), it, osp_set, _sps_memo).items():   # ★통일 소요엔진
                     out_q += qty * per
                     out_a += qty * per * price.get(part, 0.0)
             open_q = bal_q; open_a = bal_a

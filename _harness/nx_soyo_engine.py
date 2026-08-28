@@ -127,11 +127,13 @@ def prod_soyo(eng, item):
     return out
 
 
-def sagub_parts_soyo(eng, item, stop_set):
+def sagub_parts_soyo(eng, item, stop_set, memo=None):
     """[사급부품 walker] per-unit 완제품 1개 → {stop_set 부품: 소요개수}. v_pr_bom(=nx.bom_line·except≠1) 재귀,
     stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
-    ★CS_M_ITEM_BOM 직접전개(ad-hoc)는 변형SUB 이중계상(예 AJR30012008→EBF64570401 2배). v_pr_bom은 except로 1회 = 엔진 정본."""
-    memo = {}
+    ★CS_M_ITEM_BOM 직접전개(ad-hoc)는 변형SUB 이중계상(예 AJR30012008→EBF64570401 2배). v_pr_bom은 except로 1회 = 엔진 정본.
+    ★memo(dict) 넘기면 요청 전체 공유 = 공유SUB 1회만 전개(성능). ★stop_set 동일 전제(요청내)."""
+    if memo is None:
+        memo = {}
     def walk(node, depth):
         if node in memo:
             return memo[node]
@@ -163,12 +165,29 @@ def _prmmat_set(eng):
     return eng._prmmat
 
 
+def warm_vpr(eng):
+    """★성능: v_pr_bom 전 엣지 1쿼리 프리로드 → eng._vprf. 전수 전개(사급부품/생산 walker)시 노드별 쿼리 회피.
+    이후 _vpr_full은 캐시에 없으면 leaf([])로 간주(재쿼리 안함)."""
+    if getattr(eng, '_vpr_warmed', False):
+        return
+    d = {}
+    eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY),
+             ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
+           FROM nx.v_pr_bom ORDER BY item_code, BOM_SEQ""")
+    for it, mat, uq, ex, vf in eng.cur.fetchall():
+        d.setdefault(str(it).strip(), []).append((str(mat).strip(), float(uq or 0), str(ex).strip(), str(vf).strip()))
+    eng._vprf = d
+    eng._vpr_warmed = True
+
+
 def _vpr_full(eng, item):
-    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). 캐시."""
+    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). 캐시. warm_vpr 후엔 미존재=leaf."""
     if not hasattr(eng, '_vprf'):
         eng._vprf = {}
     k = item.strip().upper()
     if k not in eng._vprf:
+        if getattr(eng, '_vpr_warmed', False):
+            return []      # 프리로드 완료 = 캐시에 없으면 자식없음(leaf), 재쿼리 안함
         eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY), ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
             FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? ORDER BY BOM_SEQ""", k)
         eng._vprf[k] = [(str(r[0]).strip(), float(r[1] or 0), str(r[2]).strip(), str(r[3]).strip()) for r in eng.cur.fetchall()]
