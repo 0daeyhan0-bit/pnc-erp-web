@@ -68,6 +68,25 @@ def _dong_of(cur, item):
     return out
 
 
+def _dong_of_batch(cur, items):
+    """★성능: 여러 완제품의 우리 실측 동중량(bom_flat 제작동관·CU/고강도)을 1쿼리로 = {item: {(metal,diam,thick): kg}}.
+       _dong_of 개별 N회(느림) 대체."""
+    out = {}
+    safe = [str(m).strip().upper() for m in (items or []) if m and all(c.isalnum() or c in '-_' for c in str(m).strip())]
+    if not safe:
+        return out
+    inl = ",".join("'" + m + "'" for m in safe)
+    cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(bf.item_code))), LTRIM(RTRIM(i.metal_gubun)),
+                     ISNULL(bf.fin_diam,0), ISNULL(bf.fin_thick,0), SUM(ISNULL(bf.weight_actual,0)*ISNULL(bf.qty,0))
+                   FROM nx.bom_flat bf JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(bf.leaf_code)))
+                   WHERE UPPER(LTRIM(RTRIM(bf.item_code))) IN ({inl}) AND ISNULL(bf.weight_actual,0)>0
+                     AND LTRIM(RTRIM(i.metal_gubun)) IN (N'CU', N'고강도')
+                   GROUP BY UPPER(LTRIM(RTRIM(bf.item_code))), LTRIM(RTRIM(i.metal_gubun)), ISNULL(bf.fin_diam,0), ISNULL(bf.fin_thick,0)""")
+    for it, mg, d, t, w in cur.fetchall():
+        out.setdefault(it, {})[((mg or '').strip(), float(d or 0), float(t or 0))] = float(w or 0)
+    return out
+
+
 def _model_in_sql(models):
     """models(set/iterable) → ' AND UPPER(LTRIM(RTRIM(model))) IN (...)' 조각. 성능: 필요 모델만 전개.
        코드 안전문자(영숫자·-_)만 통과(인젝션 방지). 비면 빈문자."""
@@ -692,7 +711,7 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
                   else f"20{eff_cut[:2]}-{eff_cut[2:4]}-28")
         # ★B: 전체 사급 동소요 = LG BOM AP(우리가 협력사에 사급 주는 소재 포함). 분할 = 우리 직접절삭 + 협력사 사급분(2중계상 없음).
         #   split은 리시빙 품목만 전개(성능) — recvrows 확정 후 아래에서 계산.
-        split = {}
+        split = {}; our_map = {}     # recvrows 확정 후 배치로딩(성능)
         #   규격키 (metal,diam,thick) 동일, 금액 = 절삭재료비 as-of 단가(pm, 없으면 인상후 fallback).
         def _kv(spec, pm):                     # {(metal,diam,thick): 중량} → (중량합, 금액합)
             kg = amt = 0.0
@@ -700,12 +719,8 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
                 kg += w
                 amt += w * (pm.get(sp) or pm_post.get(sp) or 0.0)
             return kg, amt
-        _our_cache = {}
-        def _actual_kv(it, pm):                # (참고) 우리 실측 중량(bom_flat 제작동관) — 정산차액용
-            sp = _our_cache.get(it)
-            if sp is None:
-                sp = _our_cache[it] = _dong_of(cur, it)
-            return _kv(sp, pm)
+        def _actual_kv(it, pm):                # (참고) 우리 실측 중량(bom_flat 제작동관·배치) — 정산차액용
+            return _kv(our_map.get(it, {}), pm)
         def _split_kv(it, pm):                 # LG BOM 분할: (우리절삭kg/amt, 협력사사급kg/amt)
             d = split.get(it, {"our": {}, "coop": {}})
             ok, oa = _kv(d.get("our", {}), pm); ck, ca = _kv(d.get("coop", {}), pm)
@@ -723,8 +738,10 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE cut_gubun=N'절삭'")
         cutset = set(r[0] for r in cur.fetchall())
         recvrows = [row for row in recvrows if row[0] in cutset]
-        # ★성능: 리시빙에 실제 등장한 완제품만 LG BOM 전개(전 모델 전개 회피)
-        split = _lg_ap_split(cur, ap_ver, models=set(row[0] for row in recvrows))
+        # ★성능: 리시빙에 실제 등장한 완제품만 LG BOM 전개 + 우리 실측 배치로딩(개별 N쿼리 회피)
+        _rec_models = set(row[0] for row in recvrows)
+        split = _lg_ap_split(cur, ap_ver, models=_rec_models)
+        our_map = _dong_of_batch(cur, _rec_models)
         # 품명 매핑
         nm = {}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -834,11 +851,8 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             pmM = pm_post if M >= '2608' else pm_pre        # 인상후(8월~) / 인상전
             apM = _lg_ap_all(cur, _mdate(M), models=set(it for it, _ in recvlist))  # ★그 월 리시빙 품목만 전개(성능)
             soyo_our_kg = soyo_our_amt = 0.0; soyo_bom_kg = soyo_bom_amt = 0.0
-            for it, net in recvlist:
-                for sp, w in _our_spec(it).items():          # 우리 BOM
-                    soyo_our_kg += w * net
-                    soyo_our_amt += w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
-                for sp, w in apM.get(it, {}).items():        # LG BOM 사급(AP)
+            for it, net in recvlist:                         # 전체 사급(LG BOM AP)만 = 화면 수불표 소요
+                for sp, w in apM.get(it, {}).items():
                     soyo_bom_kg += w * net
                     soyo_bom_amt += w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
             cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
