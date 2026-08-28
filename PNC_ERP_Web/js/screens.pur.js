@@ -929,6 +929,245 @@ SCREEN.saguboutput=(c)=>{
 
 /* 협력사 > 협력사사급재고관리 (★작업3 재구축) — 메인=협력사 보유 사급재고 현황(정본 레거시 PU_T_SAGUB_STOCK RO), 부가=재고조정(nx.sagub_maint TAG='B' CRUD, 실사±).
    보유잔량 = Σ사급출고(원자재) − Σ(완성/세트입고 × 상위품 BOM소요량) − 조정. 레거시 트리거가 net유지한 STOCK_QTY를 정본으로 표시. */
+/* ══ 자재개별일괄출고 팝업 (레거시 w_pu_stock_156) ═══════════════════════════
+   ★자재창고의 **단품을 다른 창고로 내보내는** 화면이다(2026-08-28 사용자 확정).
+     BOM 전개가 아니다 — 자도번을 직접 입력해서 출고한다.
+   상단: 출고일자 ◀▶ · FROM파트창고 · TO창고구분(생산/영업) · TO파트 · TO작업처
+   그리드: SEQ · 자도번 · 품명 · 규격 · 단위 · 재고수량 · 출고수량 · 비고
+   ·행추가 50행씩, 입력된 행만 저장. 엑셀 붙여넣기 지원.
+   ·저장 = nx.stock_ledger MAINT_TAG='B'(자재개별출고) · 재고 차감.                */
+function openMatIssuePopup(opt){
+  const API=API_BASE, onSaved=opt.onSaved||(()=>{});
+  const ROWSTEP=50;
+  const pad=n=>String(n).padStart(2,'0');
+  const isoT=(d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`)(new Date());
+  const nf=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
+  const yy=s=>s?s.slice(2).replace(/-/g,''):'';
+  let ymd=opt.ymd||isoT, fromWh='IS0001', outGubun='1', toWh='';
+  let rows=[], busy=false, info={};
+  let whs=opt.whs||[];
+  const blank=()=>({mat:'',nm:'',spec:'',unit:'',stock:'',qty:'',rmk:'',bad:0});
+  const addRows=n=>{for(let i=0;i<n;i++)rows.push(blank());};
+  addRows(ROWSTEP);
+  const filled=()=>rows.filter(r=>(r.mat||'').trim()&&Number(r.qty)>0);
+
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:1300;background:rgba(20,30,48,.45);display:flex;align-items:center;justify-content:center';
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.onclick=e=>{if(e.target===ov&&!busy&&!filled().length)close();};
+
+  const bodyHtml=()=>rows.map((r,i)=>`<tr data-i="${i}" class="${(r.mat||'').trim()?'on':''} ${r.bad?'bad':''}">
+      <td class="center mut">${i+1}</td>
+      <td><input class="mi-mat" data-i="${i}" value="${esc(r.mat)}" autocomplete="off" list="mi-mdl"></td>
+      <td class="cap" title="${esc(r.nm)}">${esc(r.nm)}</td>
+      <td class="cap mut" title="${esc(r.spec||'')}">${esc(r.spec||'')}</td>
+      <td class="center mut">${esc(r.unit||'')}</td>
+      <td class="num ${(r.mat&&r.stock!==''&&!(Number(r.stock)>0))?'mi-ng':'mut'}">${r.stock===''?'':nf(r.stock)}</td>
+      <td><input class="mi-qty" data-i="${i}" type="number" step="any" min="0" value="${esc(r.qty)}" style="text-align:right"></td>
+      <td><input class="mi-rmk" data-i="${i}" value="${esc(r.rmk)}"></td>
+      <td class="center"><span class="mi-del" data-i="${i}" title="행 비우기">✖</span></td>
+    </tr>`).join('')+`<datalist id="mi-mdl"></datalist>`;
+
+  const foot=()=>{const f=filled();
+    return `입력 <b>${f.length}</b>건 · 출고수량 <b>${nf(f.reduce((s,r)=>s+Number(r.qty||0),0))}</b>`
+         +` <span class="mut">/ ${rows.length}행</span>`;};
+
+  const redrawBody=()=>{
+    const ae=document.activeElement;
+    const keep=(ae&&ov.contains(ae)&&ae.dataset&&ae.dataset.i!==undefined)
+      ?{cls:[...ae.classList].find(x=>x.startsWith('mi-')),i:ae.dataset.i,s:ae.selectionStart,e:ae.selectionEnd}:null;
+    const tb=ov.querySelector('#mi-tb');if(tb){tb.innerHTML=bodyHtml();wireRows();}
+    const ft=ov.querySelector('#mi-foot');if(ft)ft.innerHTML=foot();
+    if(keep&&keep.cls){const el=ov.querySelector(`.${keep.cls}[data-i="${keep.i}"]`);
+      if(el){el.focus();try{el.setSelectionRange(keep.s,keep.e);}catch(x){}}}};
+
+  const draw=()=>{
+    ov.innerHTML=`
+     <div class="mip">
+       <div class="mip-h"><span>📤 자재개별일괄출고 — 등 록</span><span class="mip-x" id="mi-x">✕</span></div>
+       <div class="mip-tb">
+         <label class="tl">출고일자</label>
+         <button class="btn ghost mip-nav" id="mi-prev" title="전일">◀</button>
+         <input type="date" class="inp mip-w" id="mi-ymd" value="${ymd}" style="width:140px">
+         <button class="btn ghost mip-nav" id="mi-next" title="익일">▶</button>
+         <label class="tl">FROM파트창고</label>
+         <select class="inp mip-w" id="mi-fw" style="width:150px">
+           ${(whs.length?whs:[{code:'IS0001',nm:'자재창고'}]).map(w=>`<option value="${esc(w.code)}" ${w.code===fromWh?'selected':''}>${esc(w.code)} ${esc(w.nm||'')}</option>`).join('')}
+         </select>
+         <label class="tl">TO창고구분</label>
+         <select class="inp mip-w" id="mi-og" style="width:110px">
+           <option value="1" ${outGubun==='1'?'selected':''}>생산창고</option>
+           <option value="2" ${outGubun==='2'?'selected':''}>영업창고</option>
+         </select>
+         <!-- ★PBL w_pu_stock_156 ue_save_after 원문 기준(2026-08-28 실측 확정)
+              구분1 생산창고 → TO파트(to_gagong_proc_code) **필수**, 헤더값 1개를 전 행 일괄저장
+                              + 받는 파트에 입고(f_pr_set_mat_stock_wh → nx.PR_T_MAT_STOCK_WH)
+              구분2 영업창고 → TO파트 미사용(라이브 8,120건 중 채움 0)
+                              + 영업창고 입고(f_sa_set_item_stock → nx.item_stock_maint)
+              ※거래처 컬럼은 두지 않는다 — 이 화면은 **제품 이동만** 한다(2026-08-28 사용자 확정) -->
+         <label class="tl" ${outGubun==='2'?'style="opacity:.42"':''}>TO파트</label>
+         <select class="inp mip-w" id="mi-tw" style="width:170px" ${outGubun==='2'?'disabled':''}>
+           <option value="">(선택)</option>
+           ${(opt.wcs||[]).map(w=>`<option value="${esc(w.code)}" ${w.code===toWh?'selected':''}>${esc(w.nm||w.code)}</option>`).join('')}
+         </select>
+         ${outGubun==='2'
+            ?'<span class="mip-note">영업창고 = 파트창고 없음</span>'
+            :'<span class="mip-note">생산창고 = TO파트 필수(전 행 일괄)</span>'}
+       </div>
+       <div class="mip-tb">
+         <span class="mip-hint">💡 <b>자도번</b>칸에 엑셀 셀을 <b>Ctrl+V</b> 하면 여러 행이 채워집니다(자도번↹수량↹비고).</span>
+         <div class="spacer"></div>
+         <span class="rowcount" id="mi-foot">${foot()}</span>
+       </div>
+       <div class="mip-grid"><table class="tbl mip-tbl"><thead><tr>
+         <th style="width:44px">SEQ</th><th style="width:170px">자도번</th><th style="width:230px">품명</th>
+         <th style="width:150px">규격</th><th style="width:50px">단위</th>
+         <th style="width:90px">재고수량</th><th style="width:90px">출고수량</th>
+         <th>비고</th><th style="width:32px"></th></tr></thead>
+         <tbody id="mi-tb">${bodyHtml()}</tbody></table></div>
+       <div class="mip-f">
+         <button class="btn" id="mi-add">☰＋ 행추가 (${ROWSTEP})</button>
+         <button class="btn ghost" id="mi-clr">☰− 빈행정리</button>
+         <div class="spacer"></div>
+         <span class="mut" style="font-size:12px">가드: 마감월 잠금 · 재고부족 차단</span>
+         <button class="btn" id="mi-save" style="background:#1c7c3a;color:#fff" ${busy?'disabled':''}>✔ 저장</button>
+         <button class="btn ghost" id="mi-close">✖ 닫기</button>
+       </div>
+     </div>
+     <style>
+      .mip{background:#fff;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,48,.35);
+           width:min(1280px,97vw);height:min(88vh,900px);display:flex;flex-direction:column;overflow:hidden}
+      .mip-h{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+             padding:9px 14px;background:#1c47a0;color:#fff;font-weight:700;font-size:14px}
+      .mip-x{cursor:pointer;opacity:.85}.mip-x:hover{opacity:1}
+      .mip-tb{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:7px 12px;flex-wrap:wrap}
+      .mip-tb:first-of-type{border-bottom:1px solid #e6ecf5}
+      .mip-tb:nth-of-type(2){border-bottom:1px solid #c9d3e0;background:#f7f9fd}
+      .mip-w{min-width:0}
+      .mip-nav{padding:2px 7px;min-width:0}
+      .mip-ci{background:#fff8dc;border-color:#e0c97a}
+      .mip-ci:focus{background:#fffdf2;border-color:#c9a227;outline:none}
+      .mip-cbtn{padding:3px 8px;min-width:0;background:#2f6db3;color:#fff;border-color:#2f6db3}
+      .mip-hint{color:#2f5aa8;background:#eef4ff;border-radius:6px;padding:3px 9px;font-size:11.5px}
+      .mip-note{color:#8a6d1f;background:#fdf6e3;border:1px solid #ecd9a0;border-radius:6px;padding:2px 8px;font-size:11.5px}
+      .mip-grid{flex:1 1 auto;min-height:0;overflow:auto;margin:0 12px;border:1px solid #c9d3e0;border-radius:6px}
+      .mip-tbl{font-size:12px;table-layout:fixed;width:100%}
+      .mip-tbl th,.mip-tbl td{padding:2px 5px;white-space:nowrap;border-bottom:1px solid #eef1f6}
+      .mip-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2;text-align:center;border-bottom:1px solid #c9d3e0}
+      .mip-tbl input{border:1px solid transparent;border-radius:3px;padding:2px 4px;font-size:12px;width:100%;background:transparent}
+      .mip-tbl input:focus{border-color:#2f6db3;background:#fff;outline:none}
+      .mip-tbl tr.on{background:#f4fbf6}.mip-tbl tr.bad input.mi-mat{background:#ffecec;border-color:#c0392b;color:#c0392b}
+      .mip-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+      .mip-tbl td.mi-ng{text-align:right;color:#c0392b;font-weight:700;background:#fff2f2}
+      .mip-tbl td.mut{color:var(--muted)}.mip-tbl td.cap{overflow:hidden;text-overflow:ellipsis}
+      .mip-f{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:9px 12px;border-top:1px solid #c9d3e0;background:#f7f9fd}
+      .mi-del{cursor:pointer;color:#c0392b;opacity:.55}.mi-del:hover{opacity:1}
+     </style>`;
+    wire();};
+
+  const trace=async(codes)=>{
+    codes=[...new Set(codes.map(x=>(x||'').trim().toUpperCase()).filter(Boolean))].filter(x=>info[x]===undefined);
+    if(!codes.length)return;
+    try{const r=await fetch(`${API}/api/stock/matinfo`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({codes})});
+      ((await r.json()).rows||[]).forEach(x=>{info[(x.mat||'').toUpperCase()]=x;});}catch(e){}};
+  const applyInfo=()=>{rows.forEach(r=>{const k=(r.mat||'').trim().toUpperCase();if(!k)return;
+    const v=info[k];if(!v)return;
+    r.nm=v.nm||'';r.spec=v.spec||'';r.unit=v.unit||'';r.stock=v.stock;r.bad=v.unknown?1:0;});};
+
+  function wireRows(){
+    const g=s=>ov.querySelectorAll(s);
+    g('.mi-mat').forEach(el=>{
+      el.onchange=async()=>{const i=+el.dataset.i;rows[i].mat=el.value.trim().toUpperCase();
+        await trace([rows[i].mat]);applyInfo();redrawBody();};
+      el.onpaste=async ev=>{
+        const t=(ev.clipboardData||window.clipboardData).getData('text');
+        if(!t||!/[\t\r\n]/.test(t))return;
+        ev.preventDefault();
+        const start=+el.dataset.i;
+        const lines=t.replace(/\r/g,'').split('\n').filter(x=>x.trim()!=='');
+        while(rows.length<start+lines.length)addRows(ROWSTEP);
+        // 열 순서: 자도번 ↹ 수량 ↹ 비고
+        lines.forEach((ln,k)=>{const cl=ln.split('\t'),r=rows[start+k];
+          r.mat=(cl[0]||'').trim().toUpperCase();
+          if(cl.length>1){const q=parseFloat(String(cl[1]).replace(/,/g,''));if(!isNaN(q))r.qty=q;}
+          if(cl.length>2)r.rmk=(cl[2]||'').trim();});
+        await trace(lines.map(l=>l.split('\t')[0]));applyInfo();redrawBody();};
+      let t=null;
+      el.oninput=()=>{const v=el.value.trim();clearTimeout(t);if(v.length<2)return;
+        t=setTimeout(async()=>{try{const r=await fetch(`${API}/api/bom/search?q=${encodeURIComponent(v)}&all_active=1`);
+          const dl=ov.querySelector('#mi-mdl');
+          if(dl)dl.innerHTML=((await r.json()).rows||[]).map(x=>`<option value="${esc(x.item)}">${esc(x.name||'')}</option>`).join('');
+        }catch(e){}},220);};});
+    // 수량 입력은 재렌더 없이 합계만(커서 튐 방지)
+    g('.mi-qty').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;rows[i].qty=el.value;
+      const ft=ov.querySelector('#mi-foot');if(ft)ft.innerHTML=foot();});
+    g('.mi-rmk').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].rmk=el.value;});
+    g('.mi-del').forEach(el=>el.onclick=()=>{rows[+el.dataset.i]=blank();redrawBody();});
+  }
+
+  function wire(){
+    const g=id=>ov.querySelector(id);
+    g('#mi-x').onclick=g('#mi-close').onclick=()=>{
+      if(filled().length&&!confirm(`입력한 ${filled().length}건이 저장되지 않았습니다. 닫을까요?`))return;close();};
+    g('#mi-ymd').onchange=e=>{ymd=e.target.value;};
+    const shift=d=>{const t=new Date(ymd);t.setDate(t.getDate()+d);
+      ymd=`${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`;draw();};
+    g('#mi-prev').onclick=()=>shift(-1);g('#mi-next').onclick=()=>shift(1);
+    g('#mi-fw').onchange=e=>{fromWh=e.target.value;};
+    // ★영업창고는 파트창고가 없어 TO파트를 쓰지 않는다(2026-08-28 사용자 확정)
+    g('#mi-og').onchange=e=>{outGubun=e.target.value;
+      if(outGubun==='2') toWh='';
+      draw();};
+    g('#mi-tw').onchange=e=>{toWh=e.target.value;};
+    g('#mi-add').onclick=()=>{addRows(ROWSTEP);redrawBody();};
+    g('#mi-clr').onclick=()=>{rows=rows.filter(r=>(r.mat||'').trim());if(rows.length<ROWSTEP)addRows(ROWSTEP-rows.length);redrawBody();};
+    g('#mi-save').onclick=save;
+    wireRows();
+  }
+
+  async function save(){
+    if(busy)return;
+    const sel=filled();
+    if(!sel.length){alert('입력된 행이 없습니다. 자도번과 출고수량을 입력하세요.');return;}
+    const bad=sel.filter(r=>r.bad);
+    if(bad.length){alert(`미등록 품목 ${bad.length}건:\n`+bad.slice(0,10).map(r=>r.mat).join(', '));return;}
+    const short=sel.filter(r=>{const s=Number(r.stock);return !(s>0)||Number(r.qty)>s;});
+    if(short.length&&!confirm(
+        `재고가 부족한 품목이 ${short.length}건 있습니다:\n\n`
+        +short.slice(0,8).map(r=>`  ${r.mat}  재고 ${nf(r.stock||0)} < 출고 ${nf(r.qty)}`).join('\n')
+        +`\n\n그래도 저장할까요? (백엔드 재고 가드에서 막힐 수 있습니다)`))return;
+    // ★레거시 가드 원문(ue_save_after): 생산파트출고면 TO파트 필수
+    if(outGubun==='1'&&!toWh){
+      alert('생산파트출고일 경우 출고할 생산파트를 선택해 주십시오.');
+      const el=ov.querySelector('#mi-tw');if(el)el.focus();return;}
+    const _to=(outGubun==='1')
+      ?('생산창고 '+((((opt.wcs||[]).find(w=>w.code===toWh)||{}).nm)||toWh))
+      :'영업창고';
+    if(!confirm(`${sel.length}건 · 출고수량 ${nf(sel.reduce((s,r)=>s+Number(r.qty||0),0))}\n`
+      +`출고일 ${ymd} · ${fromWh} → ${_to}\n\n저장할까요? (재고 차감)`))return;
+    busy=true;draw();
+    try{
+      // 구분1=TO파트 전 행 일괄·거래처 공백 / 구분2=TO파트 공백·거래처 행별 (PBL 원문)
+      const _tw=(outGubun==='1')?(toWh||null):null;
+      const body={screen:'issue', user:_curUserNm(), rows:sel.map(r=>({
+        MAINT_YMD:yy(ymd), MAT_CODE:r.mat, MAINT_TAG:'B', qty:Number(r.qty),
+        GAGONG_PROC_CODE:fromWh||null, TO_GAGONG_PROC_CODE:_tw,
+        OUT_WH_GUBUN:outGubun||null,
+        CUST_CODE:null,                    // 제품 이동만 — 거래처 개념 없음(2026-08-28 사용자 확정)
+        REMARKS:(r.rmk||'').trim()||null}))};
+      const rr=await fetch(`${API}/api/stock/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j=await rr.json();
+      if(!j.ok){alert('저장 거부 (백엔드 가드):\n'+(j.errors||[]).join('\n'));busy=false;draw();return;}
+      alert(`✅ 저장 완료 — ${j.count}건 출고 (재고 차감)`);
+      close();onSaved();
+    }catch(e){alert('저장 실패: '+e.message);busy=false;draw();}
+  }
+  draw();
+  setTimeout(()=>{const f=ov.querySelector('.mi-mat');if(f)f.focus();},60);
+}
+
 SCREEN.stockissue=(c)=>{
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:4});
@@ -950,23 +1189,39 @@ SCREEN.stockissue=(c)=>{
     loading=false;draw();};
   const draw=()=>{
     const opt=(list,sel)=>['<option value="">%% 전체</option>'].concat(list.map(x=>`<option value="${esc(x.code)}" ${sel===x.code?'selected':''}>${esc(x.nm||x.code)}</option>`)).join('');
+    // ★표 아래 여백 제거 확정구조(커밋 4787a13) + 조건문 2줄(자재입고관리·판매출고와 동일 형식)
     c.innerHTML=`
-     <div class="page-title">📤 자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재개별출고 (레거시 w_pu_stock_150)</span></div>
-     <div class="page-sub">자재창고 → 생산/영업창고 개별출고(파트출고) 조회. 🟢 nx <code>PU_T_STOCK_MAINT</code> (MAINT_TAG in '4'축관·'B'개별출고) · 건수·수량합은 전체 집계.</div>
-     <div class="toolbar">
-       <label class="tl">출고기간</label><input type="date" class="inp" id="si-from" value="${esc(ymd2iso(tot._f)||m1Iso())}" style="min-width:130px"> ~ <input type="date" class="inp" id="si-to" value="${esc(ymd2iso(tot._t)||todayIso())}" style="min-width:130px">
-       <label class="tl">FROM파트창고</label><select class="sel" id="si-fw">${opt(fw,F.fromwh)}</select>
-       <input class="inp" id="si-pn" value="${esc(F._pn||'')}" placeholder="P/N 입력" style="width:130px">
-       <input class="inp" id="si-mat" value="${esc(F._mat||'')}" placeholder="자도번 입력" style="width:130px">
-       <label class="tl">TO창고구분</label><select class="sel" id="si-out"><option value="">전체</option><option value="1" ${F.out==='1'?'selected':''}>생산창고</option><option value="2" ${F.out==='2'?'selected':''}>영업창고</option></select>
-       <label class="tl">TO작업장</label><select class="sel" id="si-tw">${opt(tw,F.towh)}</select>
-       <button class="btn" id="si-go">🔍 조회</button>
-       <div class="spacer"></div><button class="btn xls" id="si-xls">📥 엑셀</button>
+     <div class="si-root" style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">📤 자재출고관리 <span style="font-size:12px;color:var(--muted);font-weight:400">자재개별출고 (레거시 w_pu_stock_150)</span></div>
+     <div class="page-sub" style="flex:0 0 auto">자재창고 → 생산/영업창고 개별출고(파트출고) 조회. 🟢 nx <code>PU_T_STOCK_MAINT</code> (MAINT_TAG in '4'축관·'B'개별출고) · 건수·수량합은 전체 집계.</div>
+     <div class="si-cond" style="flex:0 0 auto">
+       <div class="si-row">
+         <label class="tl">출고기간</label>
+         <input type="date" class="inp si-w" id="si-from" value="${esc(ymd2iso(tot._f)||m1Iso())}" style="width:140px">
+         <span class="mut">~</span>
+         <input type="date" class="inp si-w" id="si-to" value="${esc(ymd2iso(tot._t)||todayIso())}" style="width:140px">
+         <label class="tl">P/N</label>
+         <input class="inp si-ci si-w" id="si-pn" value="${esc(F._pn||'')}" placeholder="P/N" style="width:130px">
+         <label class="tl">자도번</label>
+         <input class="inp si-ci si-w" id="si-mat" value="${esc(F._mat||'')}" placeholder="자도번" style="width:130px">
+       </div>
+       <div class="si-row">
+         <label class="tl">FROM파트창고</label><select class="sel" id="si-fw">${opt(fw,F.fromwh)}</select>
+         <label class="tl">TO창고구분</label>
+         <select class="sel" id="si-out"><option value="">전체</option><option value="1" ${F.out==='1'?'selected':''}>생산창고</option><option value="2" ${F.out==='2'?'selected':''}>영업창고</option></select>
+         <label class="tl">TO작업장</label><select class="sel" id="si-tw">${opt(tw,F.towh)}</select>
+         <button class="btn" id="si-go">🔍 조회</button>
+         <span class="si-act">
+           <button class="btn" id="si-add" style="background:#1c47a0;color:#fff" title="레거시 w_pu_stock_156 — ASSY도번 BOM 전개 일괄출고">➕ 등록(출고)</button>
+           <button class="btn" id="si-xls">⬇ 엑셀</button>
+         </span>
+         <div class="spacer"></div>
+         <span class="rowcount">총 <b>${nfq(tot.cnt)}</b>건 · 출고수량합 <b>${nf(tot.qty)}</b>${tot.pages>1?` · ${page}/${tot.pages}페이지(2000건씩)`:''}</span>
+         ${tot.pages>1?`<button class="btn ghost" id="si-prev" ${page<=1?'disabled':''}>◀ 이전</button><button class="btn ghost" id="si-next" ${page>=tot.pages?'disabled':''}>다음 ▶</button>`:''}
+       </div>
      </div>
-     ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     <div class="toolbar" style="margin-top:0"><span class="rowcount">총 <b>${nfq(tot.cnt)}</b>건 · 출고수량합 <b>${nf(tot.qty)}</b>${tot.pages>1?` · ${page}/${tot.pages}페이지(2000건씩)`:''}</span>
-       ${tot.pages>1?`<div class="spacer"></div><button class="btn ghost" id="si-prev" ${page<=1?'disabled':''}>◀ 이전</button><button class="btn ghost" id="si-next" ${page>=tot.pages?'disabled':''}>다음 ▶</button>`:''}</div>
-     <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     ${msg?`<div class="page-sub" style="flex:0 0 auto;color:#c0392b">⚠ ${esc(msg)}</div>`:''}
+     <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
      <table class="tbl fit" style="font-size:12px"><thead><tr>
        <th class="center">출고일자</th><th class="num">출고SEQ</th><th>FROM파트창고</th><th>P/N</th><th>TO창고구분</th><th>TO파트창고</th><th>자도번</th>
        <th class="num">출고수량</th><th class="num">출고단가</th><th class="num">출고금액</th><th>비고</th><th>작업자</th><th class="center">작업일시</th></tr></thead>
@@ -975,10 +1230,34 @@ SCREEN.stockissue=(c)=>{
        <td class="cap" title="${esc(r.pn_nm||'')}"><b>${esc(r.pn||'')}</b></td><td>${esc(r.out_wh_nm||'')}</td><td>${esc(r.to_wh||'')}</td><td><b>${esc(r.mat||'')}</b></td>
        <td class="num qty">${nf(r.qty)}</td><td class="num">${nf(r.cost)}</td><td class="num">${nfq(r.amt)}</td><td class="cap" title="${esc(r.remarks||'')}">${esc(r.remarks||'')}</td><td>${esc(r.usr||'')}</td><td class="center">${esc(fmtDt(r.dt))}</td></tr>`).join('')
        :`<tr><td colspan="13" class="empty">${loading?'':'결과 없음'}</td></tr>`)}
-       ${rows.length?`<tr class="grandtot"><td colspan="7" class="right">총계 (전체 ${nfq(tot.cnt)}건, 현재페이지 ${rows.length}건)</td><td class="num">${nf(tot.qty)}</td><td colspan="5"></td></tr>`:''}</tbody></table></div>`;
+       ${rows.length?`<tr class="grandtot"><td colspan="7" class="right">총계 (전체 ${nfq(tot.cnt)}건, 현재페이지 ${rows.length}건)</td><td class="num">${nf(tot.qty)}</td><td colspan="5"></td></tr>`:''}</tbody></table></div>
+     <style>
+       .si-cond{background:#f7f9fd;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;
+                padding:7px 10px;margin:6px 0 8px}
+       .si-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+       .si-row+.si-row{margin-top:6px}
+       .si-w{min-width:0}                                  /* app.css .inp{min-width:200px} 해제 */
+       .si-ci{background:#fff8dc;border-color:#e0c97a}
+       .si-ci:focus{background:#fffdf2;border-color:#c9a227;outline:none}
+       .si-act{display:inline-flex;align-items:center;gap:6px;margin-left:12px;
+               padding-left:12px;border-left:1px solid #cfdcf2}
+       .si-root .grid-wrap thead th{text-align:center}     /* 헤더 가운데정렬(공통 규칙) */
+       .si-root tr.grandtot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;
+                               z-index:2;border-top:2px solid #cdd9ef}
+     </style>
+     </div>`;
     const gv=id=>{const e=c.querySelector(id);return e?e.value.trim():'';};
     const doGo=()=>{F.out=gv('#si-out');F.fromwh=gv('#si-fw');F.towh=gv('#si-tw');F._pn=gv('#si-pn');F._mat=gv('#si-mat');tot._f=iso2ymd(gv('#si-from'));tot._t=iso2ymd(gv('#si-to'));page=1;load();};
     c.querySelector('#si-go').onclick=doGo;
+    // ★등록 팝업(레거시 w_pu_stock_156) = **수동출고 전용**.
+    //   평소 출고(생산 준비실적·판매 등)는 각 업무화면에서 자동 생성되고 여기엔 조회만 된다.
+    {const ad=c.querySelector('#si-add');
+     if(ad)ad.onclick=async()=>{
+       let whs=[], wcs=[];
+       try{const j=await (await fetch(`${API}/api/stock/warehouses`)).json();
+         whs=(j.rows||[]).map(x=>({code:x.wh,nm:x.nm})); wcs=j.wcs||[];}catch(e){}
+       openMatIssuePopup({ymd:(gv('#si-to')||todayIso()),
+         whs:(whs.length?whs:fw), wcs:(wcs.length?wcs:tw), onSaved:load});};}
     ['#si-pn','#si-mat'].forEach(id=>{const e=c.querySelector(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter')doGo();};});
     ['#si-out','#si-fw','#si-tw','#si-from','#si-to'].forEach(id=>{const e=c.querySelector(id);if(e)e.onchange=doGo;});
     const pv=c.querySelector('#si-prev');if(pv)pv.onclick=()=>{if(page>1){page--;load();}};

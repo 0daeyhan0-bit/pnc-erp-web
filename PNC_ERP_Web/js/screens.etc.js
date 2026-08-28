@@ -345,7 +345,10 @@ SCREEN.deliv420=(c)=>{
   const T=new Date();
   const ST={"00":"요청","10":"발행","90":"발행완료"}, STC={"00":"#8aa0bd","10":"#2e86de","90":"#27ae60"};
   // gubun: 'order'(주문, 기본) | 'ganpan'(일반간판) — 레거시 라디오. dnp=직납 일수. inymd=입고일자.
-  let F={cust:'',from:iso(T),days:2,dnp:2,inymd:iso(T),gubun:'order',item:'',part:'',sort:'doban',
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정).
+  //   요청수량이 계획 기준이라 당일로 잡으면 재편성 전 기준이 되어 어긋난다.
+  //   ※입고일자(inymd)는 실제 입고일이므로 당일 그대로 둔다.
+  let F={cust:'',from:planBaseIso(),days:2,dnp:2,inymd:iso(T),gubun:'order',item:'',part:'',sort:'doban',
          deliv:{},pack:{},serial:{},heat:{},chk:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, busy=false, msg='';
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   // ── 스티커/프린터 설정(localStorage 저장) — 레거시 스티커설정=라벨규격·프린터설정=프린터선택 대응 ──
@@ -915,7 +918,9 @@ SCREEN.deliv420=(c)=>{
     c.querySelectorAll('.d4-hn').forEach(x=>x.oninput=e=>{F.heat[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('thead th').forEach(th=>addResizer(th));
   };
-  loadCusts().then(draw);
+  // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 그린다 — 2026-08-28
+  planBase().then(b=>{if(b&&b.iso)F.from=b.iso;}).catch(()=>{})
+    .then(()=>loadCusts()).then(draw);
 };
 
 /* 협력사 > 자재세트입고관리 (레거시 w_pu_stock_140) — SET바코드 스캔/장부입고 → 세트입고 실적 + 자도번 재고파생(TAG='S'). 반품포함. */
@@ -1194,7 +1199,9 @@ SCREEN.partnerplan=(c)=>{
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   // ★기본 소스=nx(우리편성). 레거시는 1:1 대조용 선택지로 남김(2026-08-27).
-  let F={from:iso(T),days:31,wc:'',part:'',assy:'',line:'',gubun:'외주',src:'nx'};
+  // ★기준일 = **마지막 계획업로드의 일자축 첫날**(planBaseIso, 2026-08-28 사용자 확정).
+  //   당일로 잡으면 업로드 전날 기준이 되어, 미출하분이 재편성되며 충당된 재고와 어긋난다.
+  let F={from:planBaseIso(),days:31,wc:'',part:'',assy:'',line:'',gubun:'외주',src:'nx'};
   let data={dates:[],rows:[],cnt:0,sum_qty:0,note:''}, wcs=[], loading=false, msg='';
   let rowsCur=[];   // ★헤더 더블클릭 정렬용 영속 행배열(enableSort가 in-place 정렬, tbody만 재렌더)
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||31))-1);
@@ -1353,7 +1360,9 @@ SCREEN.partnerplan=(c)=>{
       enableSort(c,KEYS,()=>rowsCur,()=>{const tb=c.querySelector('tbody');if(tb)tb.innerHTML=bodyHTML();});
     }
   };
-  loadWc().then(draw);   // ★자동 전체조회 금지 — 협력사 선택 후 [조회]
+  // ★계획 기준일이 아직 캐시에 없으면(첫 진입) 받아서 반영한 뒤 그린다 — 2026-08-28.
+  planBase().then(b=>{if(b&&b.iso)F.from=b.iso;}).catch(()=>{})
+    .then(()=>loadWc()).then(draw);   // ★자동 전체조회 금지 — 협력사 선택 후 [조회]
 };
 
 /* ===== 일일 영업/매입 현황 (경영) — 조회화면(엑셀형). ① 매입/불출/실매입 by 구분 · 마감기준 · 공급가(원) ===== */

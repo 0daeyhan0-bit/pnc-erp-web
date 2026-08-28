@@ -336,10 +336,10 @@ SCREEN.prodinout=(c)=>{
   //   구버전은 기본 live 였고, nx 를 고르면 웹 자체원장(stock_ledger) 파생뷰로 빠졌는데
   //   그 원장에 PRD 이력이 0건이라 늘 빈 화면이었다(웹 실적은 PR_T_PROD_DTL 에 쌓임).
   //   → nx = 일반 그리드(라이브+웹실적) / live = 라이브만. 원장 파생뷰는 source=ledger.
-  let sel=null, curL=[], source='nx';
+  let sel=null, curL=[], source='nx', incZero=false;   // incZero: 0재고 표시 토글
   const load=async()=>{loading=true;msg='';sel=null;
     const st=c.querySelector('#lbody');if(st)st.innerHTML=spinRow(5);
-    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}`;
+    const qs=`frm=${encodeURIComponent(frm)}&to=${encodeURIComponent(to)}&inc_zero=${incZero?1:0}`;
     if(source==='ledger'){loading=false;return nxDerivedView(c,`${API}/api/live/prodinout?${qs}&source=ledger`,{title:'생산입출고현황(웹원장)',onBack:()=>{source='nx';load();}});}
     try{const r=await fetch(`${API}/api/live/prodinout?${qs}&source=${encodeURIComponent(source)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();curYm=j.ym||to.slice(0,4)||'';rows=j.stock||[];mv=j.moves||{};pn=j.partNames||{};}
@@ -348,7 +348,7 @@ SCREEN.prodinout=(c)=>{
     const fi=c.querySelector('#frm'),ti=c.querySelector('#to');if(fi)fi.value=ymd2d(frm);if(ti)ti.value=ymd2d(to);
     const ps=[...new Set(rows.map(r=>r[0]))].sort((a,b)=>pName(a).localeCompare(pName(b),'ko'));
     const psel=c.querySelector('#part');if(psel){const v=psel.value;psel.innerHTML='<option value="">전체</option>'+ps.map(p=>`<option value="${esc(p)}">${esc(pName(p))}</option>`).join('');psel.value=v;}
-    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · 0재고 숨김`;
+    const sub=c.querySelector('#pio-sub');if(sub)sub.innerHTML=`파트별 생산재고 + 선택품목 입출고이력(누적재고) · 원본 <code>PR_T_STOCK_MAINT_MAT</code> 외 · 🟢 수불기간 ${esc(ymd2d(frm))}~${esc(ymd2d(to))}(이월기준 2502) · ${incZero?'<b style="color:#1c47a0">0재고 포함</b>':'0재고 숨김'}`;
     renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.innerHTML=`
    <div class="page-title">🔁 생산입출고현황</div>
@@ -360,6 +360,11 @@ SCREEN.prodinout=(c)=>{
      <select class="sel" id="gubun"><option value="all">전체</option><option value="plus">(+)재고</option><option value="minus">(-)재고</option></select>
      <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
      <button class="btn ghost" id="nxsrc" title="nx 단일원장 파생(대조용)">🔀 nx원장 파생</button>
+     <!-- ★0재고 표시 토글(2026-08-28 사용자요청) — 기본은 숨김.
+          0 이어도 기간 중 입·출고가 있었으면 이력을 봐야 한다(가공이동으로 0 이 된 품목 등). -->
+     <label class="tl" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"
+            title="재고 0 인 품목도 목록에 표시합니다">
+       <input type="checkbox" id="zero" ${incZero?'checked':''} style="margin:0"> 0재고 표시</label>
      <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
    </div>
    <div style="display:flex;gap:10px;align-items:flex-start">
@@ -395,7 +400,7 @@ SCREEN.prodinout=(c)=>{
     c.querySelector('#lbody').innerHTML=curL.length?lb:`<tr><td colspan="5" class="empty">결과 없음</td></tr>`;
     c.querySelector('#lbody').querySelectorAll('tr[data-mat]').forEach(tr=>tr.onclick=()=>{sel=tr.dataset.part+'||'+tr.dataset.mat;c.querySelectorAll('#lbody tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');renderRight(tr.dataset.part,tr.dataset.mat);});
     c.querySelector('#lsum').innerHTML=`<div class="s-item">품목 <b>${won(curL.length)}</b></div><div class="s-item">재고 합계 <b>${won(tot)}</b></div>`;
-    c.querySelector('#lcnt').textContent=`${curL.length}품목 (0재고 제외)`;
+    c.querySelector('#lcnt').textContent=`${curL.length}품목 ${incZero?'(0재고 포함)':'(0재고 제외)'}`;
     attachResizers(c);
   };
   // ★검색 = 서버 재조회(load) — renderLeft(캐시 필터)만 하면 화면을 연 뒤 발생한 실적/이동이 반영되지 않음.
@@ -405,6 +410,8 @@ SCREEN.prodinout=(c)=>{
   c.querySelector('#go').onclick=_reload;
   c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
+  // ★0재고 표시 토글 — 서버 필터라 재조회한다(2026-08-28)
+  {const z=c.querySelector('#zero');if(z)z.onchange=e=>{incZero=e.target.checked;load();};}
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#part').onchange=renderLeft;
   c.querySelector('#frm').onchange=_reload;c.querySelector('#to').onchange=_reload;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#part').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
@@ -764,7 +771,9 @@ SCREEN.partplan=(c)=>{
   const finBg=f=>f==='6'?'#fac090':(f==='7'?'#ed7d31':(f==='4'?'#ffff00':(f==='3'?'#669900':'')));
   const finFg=f=>(f==='3'||f==='7')?'#ffffff':'';   // 진한 녹·주황 배경엔 흰 글자(가독)
   // ★기본 소스 = 신규DB(웹편성). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:iso(T),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'new',lines:[],loading:false,msg:'',expand:new Set()};
+  // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정).
+  //   당일 기준이면 업로드 전날이 잡혀, 미출하분이 재편성되며 충당된 재고와 어긋난다.
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:planBaseIso(),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'new',lines:[],loading:false,msg:'',expand:new Set()};
   // ★라인 드롭다운 = 이 그리드 Line No 컬럼 실사용값(PR_T_PLAN_PART_COPY.LINE_NO distinct, CA/CM/GR 등). PR003 주문구분과는 다른 코드체계.
   const loadLines=async()=>{try{const r=await fetch(`${API}/api/plan/part410/lines?src=${st.src}`);const j=await r.json();st.lines=j.rows||[];}catch(e){st.lines=[];}};
   const load=async()=>{st.loading=true;render();
@@ -1167,7 +1176,9 @@ SCREEN.partplan=(c)=>{
         _typeT=setTimeout(()=>{st[key]=v;redrawBody();},180);};});
     if(typeof attachResizers==='function')attachResizers(c);
   };
-  (async()=>{await loadLines();render();await load();})();
+  // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 조회 — 2026-08-28
+  (async()=>{try{const b=await planBase();if(b&&b.iso)st.base=b.iso;}catch(_){}
+             await loadLines();render();await load();})();
 };
 // 색 우선순위(낮을수록 완료단계 높음): 출하6 < 생산4 < 키팅3 < 자재2 < 미키팅0
 function finRank(f){return {'6':1,'4':2,'3':3,'2':4,'0':9}[f]||9;}

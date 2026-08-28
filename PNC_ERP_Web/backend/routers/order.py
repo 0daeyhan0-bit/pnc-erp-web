@@ -30,11 +30,20 @@ def _po_rows(ws, cr):
     return out
 
 def _plan_rows(rows, cr):
-    """Production Plan Status 행들 → plan 튜플(WO,일자별). 일별 컬럼(MM/DD) 전개."""
+    """Production Plan Status 행들 → plan 튜플(WO,일자별). 일별 컬럼(MM/DD) 전개.
+
+    ★반환 = (recs, axis_from) — axis_from 은 **파일 일자축의 첫날**이다(2026-08-28 신설).
+      수량 0인 셀은 계획행으로 저장하지 않지만(의미 없는 행 30배 증가), 그날이
+      **편성 기준일**이 되어야 한다. 저장된 행의 MIN(PLAN_YMD)로 기준일을 역산하면
+      첫날 수량이 전부 0일 때 기준일이 통째로 밀린다.
+      실측 2026-08-28: 파일 축은 08/28~ 인데 08/28 열이 전 행 0(3,671행) 이라
+      저장분 최소일이 260829 가 됐고, 당일 클램프가 29일로 잡혀 28일 컬럼이 사라졌다.
+      (레거시 기준일 = 260828 → 자재소요 12,330건이 28일에 모임)"""
     import re as _re
     def cymd(h):
         m = _re.match(r'(\d\d)/(\d\d)', str(h)); return ('26'+m.group(1)+m.group(2)) if m else None
     hdr = rows[0]; dcol = {i: cymd(hdr[i]) for i in range(len(hdr)) if cymd(hdr[i])}
+    axis_from = min(dcol.values()) if dcol else ""
     agg = {}
     for r in rows[1:]:
         if not r or r[3] is None: continue
@@ -54,7 +63,7 @@ def _plan_rows(rows, cr):
                     p = list(agg[k]); p[6] += q; agg[k] = tuple(p)
                 else:
                     agg[k] = (ymd, wo, model, buyer, line, sg, q, tot, rem, sh, tool[:40], fs[:20], ts[:20], cr)
-    return list(agg.values())
+    return list(agg.values()), axis_from
 
 def _load_xlsx(b64):
     import base64, io as _io, openpyxl
@@ -164,7 +173,7 @@ def plan_upload(payload: dict = Body(...)):
     except Exception as e:
         raise HTTPException(400, f"엑셀 파싱 실패: {e}")
     ws = wb[wb.sheetnames[0]]; rows = list(ws.iter_rows(values_only=True)); wb.close()
-    recs = _plan_rows(rows, cr)
+    recs, axis_from = _plan_rows(rows, cr)
     if not recs:
         return {"ok": True, "inserted": 0, "updated": 0, "total": 0, "cr": cr}
     nx = _nx(); cur = nx.cursor()
@@ -185,7 +194,61 @@ def plan_upload(payload: dict = Body(...)):
             TOTAL_QTY,REMAIN_QTY,START_HM,TOOL,FROM_SEQ,TO_SEQ,CR_FLAG,UPLOAD_DT)
             SELECT PLAN_YMD,WORK_ORDER,MODEL_NO,BUYER_MODEL,LINE_NO,SCHED_GROUP,PLAN_QTY,TOTAL_QTY,REMAIN_QTY,START_HM,
                    TOOL,FROM_SEQ,TO_SEQ,CR_FLAG,getdate() FROM #p""")
+        # ★파일 일자축의 첫날을 기록한다 — 편성의 **당일 클램프 기준일**(planrev._step7_sql).
+        #   그날 수량이 전부 0이면 계획행이 없어 MIN(PLAN_YMD)로는 알 수 없다(2026-08-28).
+        cur.execute("""IF OBJECT_ID('nx.plan_upload_axis') IS NULL
+                       CREATE TABLE nx.plan_upload_axis(
+                         cr_flag varchar(1) NOT NULL PRIMARY KEY,
+                         axis_from varchar(6) NULL,
+                         upload_dt datetime NOT NULL DEFAULT getdate())""")
+        if axis_from:
+            cur.execute("UPDATE nx.plan_upload_axis SET axis_from=?, upload_dt=getdate() WHERE cr_flag=?",
+                        axis_from, cr)
+            if cur.rowcount == 0:
+                cur.execute("INSERT INTO nx.plan_upload_axis(cr_flag,axis_from) VALUES(?,?)", cr, axis_from)
         # full-replace(cr별): 기존 upd행 삭제 후 recs행 재적재
-        return {"ok": True, "inserted": len(recs), "replaced": upd, "total": len(recs), "cr": cr, "from_ymd": fmin}
+        return {"ok": True, "inserted": len(recs), "replaced": upd, "total": len(recs), "cr": cr,
+                "from_ymd": fmin, "axis_from": axis_from}
+    finally:
+        nx.close()
+
+
+@router.get("/api/plan/basedate")
+def plan_basedate():
+    """★계획 계열 화면의 공통 기준일 = **마지막 업로드 파일의 일자축 첫날**(2026-08-28 신설).
+
+    왜 오늘(GETDATE)이 아니라 업로드 일자인가 — 사용자 확정:
+      27일 기준으로 보던 계획을 28일 업로드 후에 다시 보면, 27일 미출하분이 28일로
+      재편성되면서 재고가 그쪽에 충당된다. 즉 27일 기준 화면은 이미 '그때의 재고반영'이
+      아니게 되어 재고가 실제보다 많이 채워져 보인다. 28일(업로드 일자)로 조회하면
+      그 재편성분에 재고가 채워지므로 정합이 맞는다.
+      (출하가 다 끝난 날은 무관하지만, 미출하가 남으면 반드시 어긋난다)
+
+    쓰는 화면: 파트별계획 · 자재소요 · 영업계획 · 가공계획 · 가공이동계획 · 협력사계획.
+    폴백 순서: plan_upload_axis(파일 축) → MIN(PLAN_YMD)(구 업로드분) → 오늘."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        base = ""
+        try:
+            cur.execute("""SELECT MIN(axis_from) FROM nx.plan_upload_axis
+                            WHERE ISNULL(axis_from,'')<>''""")
+            base = str((cur.fetchone() or [None])[0] or "").strip()
+        except Exception:
+            pass
+        src = "upload_axis"
+        if not base:
+            cur.execute("SELECT MIN(PLAN_YMD) FROM nx.plan_dtl WHERE PLAN_QTY>0")
+            base = str((cur.fetchone() or [None])[0] or "").strip(); src = "min_plan_ymd"
+        if not base:
+            from datetime import datetime as _d
+            base = _d.now().strftime("%y%m%d"); src = "today"
+        up = None
+        try:
+            cur.execute("SELECT MAX(upload_dt) FROM nx.plan_upload_axis")
+            up = cur.fetchone()[0]
+        except Exception:
+            pass
+        return {"base_ymd": base, "base_iso": (f"20{base[:2]}-{base[2:4]}-{base[4:6]}" if len(base) >= 6 else ""),
+                "src": src, "upload_dt": (str(up)[:19] if up else None)}
     finally:
         nx.close()

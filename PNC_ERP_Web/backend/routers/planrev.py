@@ -303,10 +303,26 @@ def _step7_sql(cur):
     #     계획은 매일 '당일~+31일'로 업로드되므로 당일보다 이른 소요일은 존재할 수 없다.
     #     파트별 PART_PLAN_YMD < 당일  → 당일 + '0750'
     #     파트별 PART_PLAN_YMD >= 당일 → 파트별 값 그대로(69,463행 100.00%)
-    #     ※기준일은 nx.plan_dtl 의 최소 PLAN_YMD(=업로드 시작일=당일). GETDATE 대신 이걸 쓰면
-    #       과거 계획으로 재편성해도 그때 기준으로 재현된다.
-    cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl WHERE PLAN_QTY>0")
+    #     ※기준일 = **업로드 파일의 일자축 첫날**(nx.plan_upload_axis) — 2026-08-28 교정.
+    #       종전엔 MIN(PLAN_YMD)만 썼는데, 그날 수량이 전부 0이면 계획행이 없어
+    #       기준일이 다음날로 밀리고 **그날 컬럼이 통째로 사라졌다**.
+    #       실측: 파일 축은 08/28~ 인데 08/28 열이 전 행 0(3,671행) → 웹 기준일 260829.
+    #             레거시 기준일 260828 → 자재소요 12,330건이 28일(0750)에 모임.
+    #       수량 0 은 계획행으로 저장할 게 없지만(0 저장 시 행수 30배), 그날이
+    #       편성 기준일은 되어야 한다 — 저장 여부와 기준일은 별개다(사용자 지적).
+    #       클램프는 근무일과 무관하다 — 28일이 회사달력상 휴무여도 레거시는 28일에 모은다.
+    #       ※폴백: 축 정보가 없으면(구 업로드분) 종전대로 MIN(PLAN_YMD).
+    cur.execute("""SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12))
+                     FROM nx.plan_dtl WHERE PLAN_QTY>0""")
     _mat_base = str(cur.fetchone()[0] or "").strip()
+    try:
+        cur.execute("""SELECT MIN(axis_from) FROM nx.plan_upload_axis
+                        WHERE ISNULL(axis_from,'')<>''""")
+        _axis = str((cur.fetchone() or [None])[0] or "").strip()
+        if _axis and _axis < _mat_base:
+            _mat_base = _axis
+    except Exception:
+        pass
     #     ★예외(2026-08-27): **직납품 당김분(CUST_MAINT_DAY)** 은 클램프하지 않는다.
     #       직납품은 당일보다 이른 소요일이 실제로 존재한다(라이브 ASSY행 88건이 B 이전).
     #       클램프가 당김값을 되돌려 CA 라인 77건이 어긋났다 → ASSY행 83.82%→86.87%.
