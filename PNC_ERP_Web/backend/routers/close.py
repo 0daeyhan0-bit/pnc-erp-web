@@ -654,12 +654,16 @@ def _mv_base(cur, target):
                     ORDER BY period DESC""", target)
     r = cur.fetchone()
     cand = [(r[0], "D", r[0])] if r else []
-    cur.execute("""SELECT TOP 1 period FROM nx.period_close
+    # ★"가장 최신 월마감" 하나만 보고 target 보다 뒤면 버리면 안 된다 — 그러면 그 아래
+    #   쓸 수 있는 월마감이 있는데도 **레거시 시드로 떨어진다**(2026-08-28 실측).
+    #   같은 기간을 마감엔진과 수불장이 서로 다른 기초로 계산해 금액이 394건 갈렸다.
+    #   ⟹ target 보다 앞선 월마감 중 **가장 최신**을 고른다.
+    cur.execute("""SELECT period FROM nx.period_close
                     WHERE domain='MAT' AND ptype='M' AND close_flag=1
                     ORDER BY period DESC""")
-    r = cur.fetchone()
-    if r and _month_end(r[0]) < target:
-        cand.append((_month_end(r[0]), "M", r[0]))
+    for (per,) in cur.fetchall():
+        if _month_end(per) < target:
+            cand.append((_month_end(per), "M", per)); break
     if cand:
         ymd, pt, per = max(cand, key=lambda x: x[0])
         # ★단가는 stock_amt/stock_qty 로 복원한다 — avg_cost 는 decimal(18,4) 반올림본이라
@@ -1043,13 +1047,13 @@ def _prd_price_bom(cur, target, need):
 
 def _prd_base(cur, target):
     """기초 = 직전 확정 PRD 스냅샷. 없으면 레거시 2502 생산 월마감 시드."""
-    cur.execute("""SELECT TOP 1 ptype, period FROM nx.period_close
+    # ★TOP 1 을 뽑고 나서 target 조건을 검사하면, 그 아래 쓸 수 있는 마감이 있어도
+    #   레거시 시드로 떨어진다(MAT 에서 실측된 것과 같은 결함 — §19). 후보를 훑어 첫 유효분을 쓴다.
+    cur.execute("""SELECT ptype, period FROM nx.period_close
                     WHERE domain='PRD' AND close_flag=1
                       AND (ptype='D' AND period < ? OR ptype='M')
                     ORDER BY CASE WHEN ptype='D' THEN period ELSE period+'99' END DESC""", target)
-    r = cur.fetchone()
-    if r:
-        pt, per = r[0], r[1]
+    for pt, per in cur.fetchall():
         end = per if pt == 'D' else _month_end(per)
         if end < target:
             st = {}
@@ -1378,6 +1382,14 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         begin = {k: [v[0], v[1]] for k, v in state.items()}          # 기초 스냅
         # ── 기간 이동 ────────────────────────────────────────────────────
         moves = _mv_moves(cur, fr6, to6)
+        # ★기초에도 단가보정을 적용한다 — 마감(_snap_mat)이 하는 것과 **같은 처리**여야
+        #   같은 기간을 조회했을 때 금액이 갈리지 않는다(2026-08-28 실측: 33건 금액차의 원인).
+        _bpx0 = _mv_buyprice(cur, _prev_ymd(fr6))
+        for _m, _v in state.items():
+            if abs(_v[1]) < 1e-9 and abs(_v[0]) > 1e-9:
+                _c = _bpx0.get(_m, 0.0)
+                if _c:
+                    _v[1] = _c
         agg = {}
         for y in sorted(moves):
             for mat, mv in moves[y].items():
@@ -1386,6 +1398,13 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
                 a["outq"] += mv["outq"]; a["trans"] += mv["trans"]
             _mv_step(state, moves[y], scope)
         # ── 행 구성 ──────────────────────────────────────────────────────
+        # 기말도 동일하게 보정(마감과 같은 순서: 전개 → 단가0 보정)
+        _bpx = _mv_buyprice(cur, to6)
+        for _m, _v in state.items():
+            if abs(_v[1]) < 1e-9 and abs(_v[0]) > 1e-9:
+                _c = _bpx.get(_m, 0.0)
+                if _c:
+                    _v[1] = _c
         codes = {c for c in set(begin) | set(agg) | set(state) if c in scope}
         rows, breaks = [], []
         for c in sorted(codes):
