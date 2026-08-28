@@ -3331,7 +3331,7 @@ SCREEN.lgsagub=(c)=>{
         <td class="num" style="font-weight:700;color:${(r[ck]||0)<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r[ck]||0))}</td>
         <td class="num" style="color:#5a7597">${wonI(Math.round(r[ak]||0))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>`;
     return `<div style="flex:1;min-height:0;overflow:auto">
-      ${tbl('월별 동 수불 · LG BOM 사급(Assembly Pull) 소요','open_bom_kg','soyo_bom_kg','close_bom_kg','close_bom_amt','#1c7c3a')}
+      ${tbl('월별 동 수불 · LG BOM 기준(사급/Assembly Pull)','open_bom_kg','soyo_bom_kg','close_bom_kg','close_bom_amt','#1c7c3a')}
     </div>`;
   };
   // ── 원단위 관리(업로드·적용월·목록) ──
@@ -3536,7 +3536,7 @@ SCREEN.lgsagub=(c)=>{
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
           <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
             ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
-            ${csh('bom_kg','소요 중량(kg)','num')}${csh('bom_amt','소요 금액','num')}</tr></thead>
+            ${csh('bom_kg','LG BOM 중량(kg)','num')}${csh('bom_amt','LG BOM 금액','num')}</tr></thead>
            <tbody>${rowsH}</tbody>${foot}</table></div>
         </div>
       </div>
