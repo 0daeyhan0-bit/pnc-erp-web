@@ -3229,7 +3229,7 @@ SCREEN.lgsagub=(c)=>{
   let st={tab:'status',by_ym:[],by_biz:[],files:[],rows:[],sel:'',selName:'',detail:[],dloading:false,
           df:'',dt:'',ymdMin:'',ymdMax:'',biz:'',cls:'',q:'',upBiz:'',sort:{k:'amt',dir:-1},loading:false,msg:'',
           c_from:_M1,c_to:_TD,c_sy:'',cmp:null,c_msg:'',c_loading:false,c_only:'',c_sort:{k:'',dir:-1},
-          p_from:_M1,p_to:_TD,pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},
+          p_from:_M1,p_to:_TD,pcmp:null,p_loading:false,p_only:'',p_sort:{k:'',dir:-1},pledger:null,
           s_ym:'',slist:null,s_loading:false,s_q:'',s_msg:'',
           cv_status:'supplier',cv_mt:'1,2,5',cv_werks:'',cv_scope:'all',cv_cutg:'절삭',cv_q:'',cvdata:null,cv_loading:false,cv_sort:{k:'',dir:-1}};
   const sortItems=(arr,sort)=>{if(!sort.k||!arr.length)return arr;const {k,dir}=sort;const num=typeof arr[0][k]==='number';
@@ -3557,11 +3557,33 @@ SCREEN.lgsagub=(c)=>{
   };
 
   // ── 리시빙비교(부품) ──
-  const loadParts=async()=>{st.p_loading=true;drawParts();
+  const loadParts=async()=>{st.p_loading=true;drawParts();if(!st.pledger)loadPartsLedger();
     try{const qs=[];if(st.p_from)qs.push('ymd_from='+st.p_from);if(st.p_to)qs.push('ymd_to='+st.p_to);
       const j=await(await fetch(`${API}/api/lgsagub/recvcompare_parts${qs.length?('?'+qs.join('&')):''}`)).json();st.pcmp=j;}
     catch(e){st.pcmp=null;}
     st.p_loading=false;drawParts();};
+  // 월별 사급부품 수불(원소재와 동일 형태·1월부터): 기초+입고(OSP)−소요(리시빙×BOM)=기말
+  const loadPartsLedger=async()=>{
+    try{const j=await(await fetch(`${API}/api/lgsagub/recvcompare_parts_ledger`)).json();st.pledger=j;}
+    catch(e){st.pledger=null;}
+    if(st.tab==='parts')drawParts();};
+  const partsLedgerHtml=()=>{
+    const L=st.pledger;
+    if(!L)return `<div style="font-size:12px;color:#8aa0bd">월별 수불 로딩…</div>`;
+    const rs=L.rows||[]; const yl=y=>y?`${y.slice(0,2)}.${y.slice(2)}`:y;
+    return `<div style="flex:1;min-height:0;overflow:auto">
+      <div style="font-weight:700;color:#1c7c3a;font-size:12px;margin:4px 0 3px">월별 사급부품 수불 (개수·1월부터)</div>
+      <table class="tbl fit lg-tbl" style="font-size:11.5px"><thead><tr>
+        <th>월</th><th class="num">기초</th><th class="num">입고</th><th class="num">소요</th><th class="num">기말</th><th class="num">기말금액</th>
+      </tr></thead><tbody>${rs.map(r=>`<tr>
+        <td><b>${yl(r.ym)}</b></td>
+        <td class="num">${wonI(Math.round(r.open_bom_kg||0))}</td>
+        <td class="num" style="color:#1c7c3a">${wonI(Math.round(r.in_kg))}</td>
+        <td class="num" style="color:#8a5a1a">${wonI(Math.round(r.soyo_bom_kg||0))}</td>
+        <td class="num" style="font-weight:700;color:${(r.close_bom_kg||0)<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r.close_bom_kg||0))}</td>
+        <td class="num" style="color:#5a7597">${wonI(Math.round(r.close_bom_amt||0))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>
+      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">입고=LG OSP 사급부품 · 소요=리시빙×BOM. 1월 음수=OSP 데이터 2월부터(시차)</div>
+    </div>`;};
   const psh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.p_sort.k===k?(st.p_sort.dir<0?' ▼':' ▲'):''}</th>`;
   const drawParts=()=>{
     const m=st.pcmp, s=m&&m.summary;

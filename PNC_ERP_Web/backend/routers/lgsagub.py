@@ -1075,6 +1075,63 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         nx.close()
 
 
+@router.get("/api/lgsagub/recvcompare_parts_ledger")
+def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
+    """사급부품 월별 수불(원소재 수불과 동일 형태): 기초 + 입고(OSP 사급부품) − 소요(리시빙×BOM 부품) = 기말. 개수 단위·1월(2601)부터.
+       입고=nx.lg_sagub_actual(NOT TUBE) 월합. 소요=리시빙(C+R)×_explode_parts(정지=OSP 사급부품). 금액=개수×전기간 평균단가."""
+    f = lambda v: float(v or 0)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        _prep(cur)
+        ch, sg310 = _parts_maps(cur)
+        # 사급부품 정의(전개 정지점) + 평균단가 = 전기간 OSP(NOT TUBE)
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0))
+                       FROM nx.lg_sagub_actual WHERE UPPER(item_name) NOT LIKE '%TUBE%'
+                       GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
+        osp_all = {r[0]: (f(r[1]), f(r[2])) for r in cur.fetchall()}
+        osp_set = set(osp_all)
+        price = {k: (a / q if q else 0.0) for k, (q, a) in osp_all.items()}
+        cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) NOT LIKE '%TUBE%'")
+        r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
+        LEDGER_START = "2601"                 # ★사용자: 1월부터
+        frm = from_ym.strip() or LEDGER_START
+        to = to_ym.strip() or osp_max or frm
+
+        def ym_next(y):
+            yy = int(y[:2]); mm = int(y[2:]) + 1
+            if mm > 12: mm = 1; yy += 1
+            return f"{yy:02d}{mm:02d}"
+        months = []; m = frm; guard = 0
+        while m <= to and guard < 120:
+            months.append(m); m = ym_next(m); guard += 1
+
+        memo = {}
+        rows = []; bal_q = 0.0; bal_a = 0.0
+        for M in months:
+            cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
+                           WHERE ym=? AND UPPER(item_name) NOT LIKE '%TUBE%'""", M)
+            r = cur.fetchone(); in_q = f(r[0]); in_a = f(r[1])
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
+                  SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END)
+                 +SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qty
+                FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)=?
+                GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", M)
+            out_q = out_a = 0.0
+            for it, qty in [(r[0], f(r[1])) for r in cur.fetchall()]:
+                for part, per in _explode_parts(it, ch, osp_set, memo).items():
+                    out_q += qty * per
+                    out_a += qty * per * price.get(part, 0.0)
+            open_q = bal_q; open_a = bal_a
+            bal_q = open_q + in_q - out_q
+            bal_a = open_a + in_a - out_a
+            rows.append({"ym": M, "in_kg": in_q, "in_amt": in_a,
+                         "open_bom_kg": open_q, "soyo_bom_kg": out_q, "close_bom_kg": bal_q,
+                         "soyo_bom_amt": out_a, "close_bom_amt": bal_a})
+        return {"from_ym": frm, "to_ym": to, "osp_min": osp_min, "rows": rows}
+    finally:
+        nx.close()
+
+
 # ===================== 원소재 사급전환율 (LG BOM Assembly Pull 대조) =====================
 def _parse_cu_spec(spec):
     """동 원소재 규격 파싱: 'CUTTING CU P9.52 T0.7 L/W C1220T-O ALL' → 외경/두께/재질/형태."""
