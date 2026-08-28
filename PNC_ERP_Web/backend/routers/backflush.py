@@ -21,6 +21,36 @@ def _is_inner_prod(cro, item):
     except Exception:
         return False
 
+def _weld_rollup_bl(nxc, root, cro=None):
+    """★용접봉 소요 정본 롤업 = proc_weld를 **bom_line 트리**로 전개(=원가엔진 동일). 풀코드·사내한정.
+       nx.bom 트리는 bom_line에만 있는 SUB의 봉을 놓침(실측 704/2697품목·7.79kg 누락) → bom_line 사용.
+       cro=라이브RO(사내판정), None=전량. 반환 {weld_item: cum_use_qty}."""
+    c = nxc.cursor(); _mkc = {}
+    def _sanae(node):
+        if node == root: return True
+        if cro is None: return True
+        if node not in _mkc:
+            cc = cro.cursor(); cc.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", node)
+            r = cc.fetchone(); _mkc[node] = bool(r and str(r[0]).strip() == '1')
+        return _mkc[node]
+    weld = {}; seen = set()
+    def walk(node, mult, depth):
+        if depth > 15 or node in seen: return
+        seen.add(node)
+        if not _sanae(node): return                        # 사내 용접만(외주=사급출고tag5 이미 −재고)
+        c.execute("SELECT weld_item, use_qty FROM nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0", str(node).strip())
+        for wi, uq in c.fetchall():
+            weld[str(wi)] = weld.get(str(wi), 0.0) + float(uq or 0) * mult
+        c.execute("""SELECT bl.child_item, CAST(bl.qty AS float)
+            FROM nx.bom_line bl JOIN nx.bom_header bh ON bh.bom_id=bl.bom_id
+            WHERE bh.item_code=? AND ISNULL(bl.cs_calc_except,0)=0
+              AND EXISTS(SELECT 1 FROM nx.bom_header h2 WHERE h2.item_code=bl.child_item)""", str(node).strip())
+        for ch, q in c.fetchall():                         # 자체BOM 보유 SUB만 재귀(원가엔진 전개와 동일)
+            walk(str(ch).strip(), mult * (q or 0), depth + 1)
+    walk(str(root).strip(), 1.0, 0)
+    return weld
+
+
 def _backflush_bom(nxc, root, cro=None):
     """실사용BOM 전개(nx.bom): 제작서브(children보유·is_lowest≠Y) 전개, 최말단 자재/구매품 소비.
        용접봉(role='용접봉')=공정종속 → ★별도수집(완성공정 1회 함께 소비, base RAC 코드별 종류별. 정본 qty=nx.bom 재빌드된 CS_M_ITEM_BOM.USE_QTY=ITEM_USE_QTY×1.5).
@@ -40,27 +70,20 @@ def _backflush_bom(nxc, root, cro=None):
             cc = cro.cursor(); cc.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", n)
             r = cc.fetchone(); _mkc[n] = bool(r and str(r[0]).strip() == '1')
         return _mkc[n]
-    out = {}; weld = {}
-    pwc = nxc.cursor()
-    def _node_weld(node, mult):
-        # ★용접봉 정본 = nx.proc_weld(=CS_M_ITEM_BOM 오라클·생산BOM 일치). nx.bom 봉엣지는 stale(코드·값 상이)라 불사용.
-        #   ★풀코드 유지(뭉개기 금지): RAC30599301(은납)≠RAC30599301-1(용접봉)=별품목([[newerp-gagong-routing-migration]]).
-        if not _sanae(node): return                        # 사내 용접만(외주=사급출고tag5로 이미 −재고)
-        pwc.execute("SELECT weld_item, use_qty FROM nx.proc_weld WHERE parent_item=? AND ISNULL(use_qty,0)>0", str(node).strip())
-        for wi, uq in pwc.fetchall():
-            weld[str(wi)] = weld.get(str(wi), 0.0) + float(uq or 0) * mult
+    out = {}
     def walk(node, mult, depth):
         if depth > 15: return
-        _node_weld(node, mult)                              # ★노드별 proc_weld 봉 합산(트리 롤업)
         for ch, q, role, low in kids.get(node, []):
             cq = mult * q
-            if '용접봉' in (role or ''):                    # nx.bom 봉엣지 = 무시(proc_weld가 정본)
+            if '용접봉' in (role or ''):                    # nx.bom 봉엣지 = 무시(봉은 _weld_rollup_bl=proc_weld/bom_line 정본)
                 continue
             if ch in kids and str(low) != 'Y':             # 제작 서브 → 전개
                 walk(ch, cq, depth + 1)
-            else:                                          # 소비 leaf(자재/구매품)
+            else:                                          # 소비 leaf(자재/구매품, 원소재=nx.bom 중량축)
                 out[ch] = out.get(ch, 0.0) + cq
     walk(root, 1.0, 0)
+    # ★용접봉 = bom_line 트리 롤업(원가엔진 동일, nx.bom 트리는 SUB봉 누락) / comps(원소재)만 nx.bom 중량축
+    weld = _weld_rollup_bl(nxc, root, cro)
     return list(out.items()), weld
 
 def _sub_footprints_by_jadoban(nxc, product):
