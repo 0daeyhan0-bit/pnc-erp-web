@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, _mat_avail, stock_changed)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _stock_short_msg, _mat_avail, _mat_avail_map, stock_changed)
 
 router = APIRouter()
 
@@ -20,20 +20,21 @@ router = APIRouter()
 def _avail_axes(nx, code):
     """소비 가능 재고를 축별로 집계. 반환 (rdy, mat, prd_wh, mat_src).
          rdy    준비재고 = nx.stock_ledger STOCK_POINT='RDY' 잔량   ← 소비 1순위
-         mat    자재재고 = mat_stock_daily(정본), 미등록이면 자재창고 미러 PU_T_MAT_STOCK_WH ← 소비 2순위
+         mat    자재재고 = **실시간 자재정본**(확정스냅샷+이후전표, 마감·수불장과 같은 엔진),
+                          정본 밖(=자재가 아닌 사내가공품 등)이면 자재창고 PU_T_MAT_STOCK_WH ← 소비 2순위
          prd_wh 생산창고 PR_T_MAT_STOCK_WH 잔량                      ← 소비축 아님(안내용)
-       ★mat_stock_daily 미등록을 '무제한'으로 보지 않는다(그게 종전 예외의 정체)."""
+       ★정본 밖을 '무제한'으로 보지 않는다(그게 종전 예외의 정체). 없으면 0 이다."""
     c = nx.cursor(); code = str(code or "").strip().upper()
     if not code:
         return 0.0, 0.0, 0.0, "-"
     c.execute("SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0) FROM nx.stock_ledger "
               "WHERE STOCK_POINT='RDY' AND UPPER(ITEM_CODE)=?", code)
     rdy = max(float(c.fetchone()[0] or 0), 0.0)
-    c.execute("SELECT TOP 1 CAST(stock_qty AS float) FROM nx.mat_stock_daily "
-              "WHERE UPPER(mat_code)=? ORDER BY ymd DESC", code)
-    r = c.fetchone()
-    if r:
-        mat, src = float(r[0] or 0), "자재일마감"
+    # ★2026-08-28 G-1: mat_stock_daily(손으로 돌리는 빌더 산출물) → 실시간 정본으로 승격.
+    #   빌더가 8/25 에 멈춰 있어 133품목이 '재고 있음'으로 오판됐다(5210A22409A 2,241 vs 실제 −2,659).
+    avail_map = _mat_avail_map(c)
+    if code in avail_map:
+        mat, src = float(avail_map[code]), "자재정본"
     else:
         c.execute("SELECT ISNULL(SUM(CAST(STOCK_QTY AS float)),0) FROM nx.PU_T_MAT_STOCK_WH "
                   "WHERE UPPER(MAT_CODE)=?", code)
@@ -65,6 +66,7 @@ def _avail_bulk(nx, codes):
     if not codes:
         return {}
     c = nx.cursor()
+    avail_map = _mat_avail_map(c)              # ★자재정본 맵 1회(캐시). 청크마다 다시 만들지 않는다.
     CH = 500                                   # pyodbc 파라미터 상한(2100) 여유
     for i in range(0, len(codes), CH):
         part = codes[i:i + CH]
@@ -74,19 +76,15 @@ def _avail_bulk(nx, codes):
                        GROUP BY UPPER(ITEM_CODE)""", *part)
         for k, v in c.fetchall():
             out[k][0] = max(float(v or 0), 0.0)
-        # 자재재고 정본 = mat_stock_daily 최신일
-        c.execute(f"""SELECT UPPER(mat_code), CAST(stock_qty AS float) FROM (
-                        SELECT mat_code, stock_qty,
-                               ROW_NUMBER() OVER (PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
-                          FROM nx.mat_stock_daily WHERE UPPER(mat_code) IN ({ph})) z
-                      WHERE rn=1""", *part)
-        for k, v in c.fetchall():
-            out[k][1] = max(float(v or 0), 0.0); out[k][3] = "자재일마감"
+        # 자재재고 정본 = 실시간(확정 스냅샷 + 이후 전표) — 맵은 프로세스당 1회만 만든다.
+        for k in part:
+            if k in avail_map:
+                out[k][1] = max(float(avail_map[k]), 0.0); out[k][3] = "자재정본"
         c.execute(f"""SELECT UPPER(MAT_CODE), SUM(CAST(STOCK_QTY AS float))
                         FROM nx.PU_T_MAT_STOCK_WH WHERE UPPER(MAT_CODE) IN ({ph})
                        GROUP BY UPPER(MAT_CODE)""", *part)
         for k, v in c.fetchall():
-            if out[k][1] is None:              # mat_stock_daily 미등록 → 자재창고 미러로 대체
+            if out[k][1] is None:              # 자재정본 밖(사내가공품 등) → 자재창고로 대체
                 out[k][1] = max(float(v or 0), 0.0); out[k][3] = "자재창고"
         c.execute(f"""SELECT UPPER(MAT_CODE), SUM(CAST(STOCK_QTY AS float))
                         FROM nx.PR_T_MAT_STOCK_WH WHERE UPPER(MAT_CODE) IN ({ph})

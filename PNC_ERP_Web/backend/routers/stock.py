@@ -316,12 +316,12 @@ def stock_save(payload: dict = Body(...)):
                     errs.append(f"{idx}행: 거래처(매입처)가 필요합니다")
             # 재고 음수방지: 출고·반품(가용 이내) / 조정 감소(결과재고 ≥ 0). 현재고=원장 SUM.
             if mat and screen in ("issue", "return"):
-                avail = _mat_avail(cur, mat)   # ★정본=mat_stock_daily(레거시 실재고). nx.stock_ledger(미동기화·테스트오염) 금지 §4-C
+                avail = _mat_avail(cur, mat)   # ★정본=실시간(확정스냅샷+이후전표, 마감·수불장과 같은 엔진). G-1 승격 2026-08-28
                 if qty > avail:
                     lbl = "반품" if screen == "return" else "출고"
                     errs.append(f"{idx}행: 재고부족 ({mat} 가용 {avail:g} < {lbl} {qty:g}) — 다음공정 이동분은 반품 불가")
             elif mat and screen == "adjust" and qty < 0:
-                avail = _mat_avail(cur, mat)   # ★정본=mat_stock_daily(레거시 실재고). nx.stock_ledger(미동기화·테스트오염) 금지 §4-C
+                avail = _mat_avail(cur, mat)   # ★정본=실시간(확정스냅샷+이후전표, 마감·수불장과 같은 엔진). G-1 승격 2026-08-28
                 if avail + qty < 0:
                     errs.append(f"{idx}행: 음수재고 유발 ({mat} 결과재고 {avail+qty:g} < 0)")
         if errs:

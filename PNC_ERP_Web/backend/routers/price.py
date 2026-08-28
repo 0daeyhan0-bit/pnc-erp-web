@@ -44,13 +44,16 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
         if cust.strip(): w.append("(H.cust LIKE ? OR c.CUST_DESC LIKE ?)"); p += [f"%{cust.strip()}%"] * 2
         if changed == "1": w.append("H.prev IS NOT NULL AND H.cost<>H.prev")
         cur.execute(f"""WITH H AS (
-            SELECT ITEM_CODE item, COST_TAG tag, ISNULL(CUST_CODE,'') cust, ISNULL(MKT,'') mkt,
-                   ISNULL(CURRENCY,'') curr, COST_APPLY_YMD apply_ymd, ITEM_COST cost, MAT_COST mat,
-                   PROC_COST procc, OTHER_COST oth, PUR_RATE rate, ISNULL(INSERT_USER_ID,'') usr,
-                   INSERT_DATETIME idt, ISNULL(REMARKS,'') remarks,
-                   LAG(ITEM_COST) OVER (PARTITION BY ITEM_CODE,COST_TAG,ISNULL(CUST_CODE,''),ISNULL(MKT,'')
-                                        ORDER BY COST_APPLY_YMD, INSERT_DATETIME) prev
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST)
+            -- ★2026-08-29 단가 소스 이관: 미러 PR_M_ITEM_COST → 정본 nx.price_item (DO_NOT_USE §18).
+            --   화면 tag(1/E/S)는 그대로 두고 price_type 을 매핑해 되돌린다(프론트 무변경).
+            --   PUR_RATE 는 라이브 전 행이 0 이라 정본에 두지 않았다 → NULL 로 고정(§9 취지 동일).
+            SELECT item_code item, CASE price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END tag, ISNULL(vendor_code,'') cust, ISNULL(mkt,'') mkt,
+                   ISNULL(currency,'') curr, apply_ymd apply_ymd, price cost, mat_cost mat,
+                   proc_cost procc, other_cost oth, CAST(NULL AS FLOAT) rate, ISNULL(ins_user,'') usr,
+                   ins_dt idt, ISNULL(remarks,'') remarks,
+                   LAG(price) OVER (PARTITION BY item_code,price_type,ISNULL(vendor_code,''),ISNULL(mkt,'')
+                                    ORDER BY apply_ymd, ins_dt) prev
+            FROM PARTNER_ERP_TEST3.nx.price_item)
           SELECT TOP 3000 H.item, ISNULL(i.item_name,'') nm, H.tag, H.cust, ISNULL(c.CUST_DESC,'') cust_nm,
                  H.mkt, H.curr, H.apply_ymd, H.cost, H.mat, H.procc, H.oth, H.rate, H.prev, H.usr,
                  H.idt, H.remarks
@@ -85,15 +88,15 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
         if lgroup.strip(): w += " AND i.lgroup=?"; p.append(lgroup.strip())
         if sgroup.strip(): w += " AND i.sgroup=?"; p.append(sgroup.strip())
         # 거래처 필터: 해당 거래처(코드=오토컴플리트값 / 명칭 LIKE) 단가가 있는 품목만 (AND)
-        cust_cond = "EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE"
+        cust_cond = "EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE"
         if cust.strip():
-            cust_cond += " AND (x.CUST_CODE=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c WHERE c.CUST_CODE=x.CUST_CODE AND c.CUST_DESC LIKE ?))"
+            cust_cond += " AND (x.vendor_code=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c WHERE c.CUST_CODE=x.vendor_code AND c.CUST_DESC LIKE ?))"
             p2 = [cust.strip(), f"%{cust.strip()}%"]
         else:
             p2 = []
         cust_cond += ")"
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),1000))} i.ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
-              ISNULL(i.lgroup,'') lg, ISNULL(i.sgroup,'') sg, (SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE) cnt
+              ISNULL(i.lgroup,'') lg, ISNULL(i.sgroup,'') sg, (SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE) cnt
             FROM PARTNER_ERP_TEST3.nx.item i
             WHERE {cust_cond}{w}
             ORDER BY i.ITEM_CODE""", *(p2 + p))
@@ -105,7 +108,7 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
             d["sg_nm"] = dSG.get(str(d.get("sg", "")).strip(), str(d.get("sg", "")).strip())
             rows.append(d)
         cur.execute("""SELECT DISTINCT ISNULL(i.lgroup,'') lg, ISNULL(i.sgroup,'') sg FROM PARTNER_ERP_TEST3.nx.item i
-            WHERE EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE)""")
+            WHERE EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE)""")
         lgs, sgs = set(), set()
         for r in cur.fetchall():
             if str(r[0]).strip(): lgs.add(str(r[0]).strip())
@@ -125,11 +128,11 @@ def price_item(item: str = Query("")):
     try:
         cur.execute("SELECT ISNULL(item_name,''), ISNULL(item_spec,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         r0 = cur.fetchone(); nm, spec = (r0[0], r0[1]) if r0 else ("", "")
-        cur.execute("""SELECT h.COST_TAG, ISNULL(h.CUST_CODE,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
-              h.COST_APPLY_YMD, ISNULL(h.CURRENCY,'') curr, ISNULL(h.MAIN_FLAG,'') main_flag, ISNULL(h.MKT,'') mkt,
-              h.ITEM_COST, h.MAT_COST, h.PROC_COST, h.OTHER_COST, ISNULL(h.REMARKS,'') remarks
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
-            WHERE h.ITEM_CODE=? ORDER BY h.COST_APPLY_YMD DESC, h.COST_TAG, h.CUST_CODE""", item)
+        cur.execute(f"""SELECT CASE h.price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END COST_TAG, ISNULL(h.vendor_code,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
+              h.apply_ymd COST_APPLY_YMD, ISNULL(h.currency,'') curr, ISNULL(h.main_flag,'') main_flag, ISNULL(h.mkt,'') mkt,
+              h.price ITEM_COST, h.mat_cost MAT_COST, h.proc_cost PROC_COST, h.other_cost OTHER_COST, ISNULL(h.remarks,'') remarks
+            FROM PARTNER_ERP_TEST3.nx.price_item h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.vendor_code
+            WHERE h.item_code=? ORDER BY h.apply_ymd DESC, h.price_type, h.vendor_code""", item)
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():

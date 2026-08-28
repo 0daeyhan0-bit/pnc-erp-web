@@ -33,7 +33,13 @@
 ──────────────────────────────────────────────────────────────────────────
 """
 
-YMD = "260828"          # 검증 일자(미마감 구간)
+# ★검증 일자 — **오늘**로 자동 계산한다. 하드코딩하지 말 것.
+#   2026-08-29 실측 사고: 여기가 "260828" 로 박혀 있었는데 날짜가 하루 넘어가자
+#   케이스는 28일로 쓰고 서버 프로브(flow_server.PROBES 는 스코프 일자 = 오늘)는 29일을 봐서
+#   **키팅 2건이 delta 0 으로 FAIL** 했다. 코드는 멀쩡한데 하네스가 거짓 실패를 낸 것이다.
+#   거짓 실패는 진짜 실패보다 나쁘다 — 다음 사람이 하네스를 못 믿게 된다.
+import datetime as _dt
+YMD = _dt.date.today().strftime("%y%m%d")     # 검증 일자(미마감 구간 = 오늘)
 
 
 # ── 픽스처 : 케이스에서 쓸 실데이터를 **쓰기 시작 전에** 모아둔다 ────────
@@ -57,6 +63,28 @@ FIXTURES = [
                 ORDER BY MAINT_YMD DESC""",
      lambda ctx, r: ctx.update(kit_item=str(r[0]), kit_gpc=str(r[1]).strip(),
                                kit_wo=str(r[2] or "").strip())),
+
+    # ★완제품(ASY) 게이트용 — '지금' 잔량이 있는 품목. 2502 기초만 큰 품목을 고르면
+    #   이후 다 소진돼 오차단으로 오판한다(2026-08-29 실측: 5006AR4091D 기초 10,051 · 현재 0).
+    #   ⟹ 제품재고조회 화면과 같은 식으로 현재 잔량을 계산해 고른다.
+    # ★자재입고는 거래처(매입처) 필수다(다른 세션이 2026-08-28 검증 추가:
+    #   "매입처 없는 입고는 매입마감·수불에서 누락된다"). 케이스가 안 따라가 FAIL 났다.
+    ("matcust", """SELECT TOP 1 LTRIM(RTRIM(ISNULL(CUST_CODE,''))) FROM nx.PU_T_STOCK_MAINT
+                    WHERE MAINT_TAG='9' AND ISNULL(CUST_CODE,'')<>''
+                    GROUP BY LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COUNT(*) DESC""",
+     lambda ctx, r: ctx.update(matcust=str(r[0]).strip())),
+
+    ("asy", """WITH MV AS (
+                 SELECT UPPER(item_code) it, maint_qty q FROM nx.sa_t_stock_maint
+                  WHERE maint_ymd>'250299'
+                    AND ((maint_tag='P' AND ISNULL(in_part_code,'')='') OR maint_tag IN ('B','V','J','8','R','2'))
+                 UNION ALL
+                 SELECT UPPER(mat_code), maint_qty*-1 FROM nx.pu_t_stock_maint
+                  WHERE maint_ymd>'250299' AND ISNULL(out_wh_gubun,'1')='2'
+                 UNION ALL
+                 SELECT UPPER(item_code), stock_qty FROM nx.sa_t_month_stock WHERE stock_yymm='2502')
+               SELECT TOP 1 it, SUM(q) FROM MV GROUP BY it HAVING SUM(q) > 50 ORDER BY SUM(q) DESC""",
+     lambda ctx, r: ctx.update(asy_item=str(r[0]).strip(), asy_qty=float(r[1] or 0))),
 
     ("sale_cust", """SELECT TOP 1 cust_code FROM nx.saleout_maint WHERE maint_tag='5'
                       GROUP BY cust_code ORDER BY COUNT(*) DESC""",
@@ -84,9 +112,14 @@ def _save(screen, qty, ymd=None, mat=None):
     """자재 3화면 공통 payload — {screen, rows:[{MAINT_YMD, MAT_CODE, qty}]}
        ★ymd/mat 는 **None 일 때만** 기본값으로 채운다. `or` 를 쓰면 빈 문자열이
          기본값으로 되돌아가 '일자 누락' 같은 음성 케이스를 만들 수 없다(2026-08-28 실측)."""
-    return lambda ctx: {"screen": screen, "user": "flowverify",
-                        "rows": [{"MAINT_YMD": YMD if ymd is None else ymd,
-                                  "MAT_CODE": (ctx["mat"] if mat is None else mat), "qty": qty}]}
+    def _b(ctx):
+        row = {"MAINT_YMD": YMD if ymd is None else ymd,
+               "MAT_CODE": (ctx["mat"] if mat is None else mat), "qty": qty}
+        # ★입고 계열은 거래처(매입처) 필수 — 없으면 "거래처(매입처)가 필요합니다" 로 거부된다.
+        if screen == "receipt" and ctx.get("matcust"):
+            row["CUST_CODE"] = ctx["matcust"]
+        return {"screen": screen, "user": "flowverify", "rows": [row]}
+    return _b
 
 
 def _locked_ymd(ctx):
@@ -170,6 +203,13 @@ CASES = [
                            "prod_qty": 9999999, "user": "flowverify"}),
 
     # ══ [R] 규칙 : 입력 유효성 ════════════════════════════════════════
+    # ── 완제품(ASY) 재고 게이트 (2026-08-29 신설) ──────────────────────────
+    #   정본 = common._finished_avail() = 제품재고조회 화면과 **동일 계산**.
+    #   전수 대조: 잔량≠0 267품목 **불일치 0건**. 사전 차단율 0.05%(8월 1,876건 중 1건).
+    dict(kind="R", name="출하실적 — 완제품 재고부족 차단", method="POST", path="/api/lgsale/save",
+         keyword="재고부족", skip_if=lambda ctx: "asy_item" not in ctx,
+         body=lambda ctx: {"work_order": "GATETEST", "item_code": ctx["asy_item"],
+                           "sale_qty": ctx["asy_qty"] + 100000, "user": "flowverify"}),
     dict(kind="R", name="미등록 품목 차단", method="POST", path="/api/stock/save",
          keyword="미등록", body=_save("receipt", 10, mat="ZZ_NOT_EXIST_9999")),
     dict(kind="R", name="수량 0 차단", method="POST", path="/api/stock/save",
@@ -182,6 +222,11 @@ CASES = [
          keyword="screen", body=lambda ctx: {"screen": "bogus", "rows": []}),
     # ══ [F] 흐름 : 생산 파트재고·창고이동 (2026-08-28 확장) ═══════════
     #   재고를 실제로 움직이는데 검증에 없던 화면들. 218개 쓰기 중 재고 이동 경로부터 채운다.
+    dict(kind="F", name="출하실적 — 잔량 이내는 통과 (−ASY)", method="POST", path="/api/lgsale/save",
+         probe="원장ASY", delta=-1, mirror=False,
+         skip_if=lambda ctx: "asy_item" not in ctx,
+         body=lambda ctx: {"work_order": "GATETEST", "item_code": ctx["asy_item"],
+                           "sale_qty": 1, "user": "flowverify"}),
     dict(kind="F", name="생산파트재고조정 (stockmaint/save)", method="POST", path="/api/stockmaint/save",
          probe="원장PRD", delta=+40, mirror=False,
          body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",

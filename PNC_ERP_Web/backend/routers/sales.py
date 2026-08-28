@@ -5,7 +5,7 @@
 import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed, _finished_short_msg
 
 router = APIRouter()
 
@@ -279,9 +279,11 @@ def _sagub_move(cur, ymd, cust, mat, qty, wh, direction, remarks):
     return gseq
 
 def _pur_price(cur, item, cust, ymd):
-    """구매단가 = PR_M_ITEM_COST 최신유효(cost_tag='1', 매입처). 유상 회수=매입입고 단가."""
-    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-        WHERE item_code=? AND cust_code=? AND cost_tag='1' AND cost_apply_ymd<=? ORDER BY cost_apply_ymd DESC""",
+    """구매단가 = 단가정본 nx.price_item '매입' 최신유효(매입처). 유상 회수=매입입고 단가.
+       ★2026-08-28 미러(PR_M_ITEM_COST tag'1') → 클린 이관(DO_NOT_USE §18 단일소스).
+         실측: 거래처별 as-of 최신 비교에서 **실제 값차이 0**(112건은 전부 반올림 ≤0.001)."""
+    cur.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+        WHERE item_code=? AND vendor_code=? AND price_type='매입' AND apply_ymd<=? ORDER BY apply_ymd DESC""",
         item, cust, ymd)
     r = cur.fetchone()
     return float(r[0]) if r and r[0] is not None else 0.0
@@ -329,7 +331,7 @@ def sagub_output_confirm(payload: dict = Body(...)):
 @router.post("/api/sagub/recover")
 def sagub_recover(payload: dict = Body(...)):
     """사급 회수. ★Phase4 자동판정: 유상=매입입고(+PRD, tag '9', 구매단가) / 무상=이동복귀(−SAG@사급처 / +PRD@우리, tag G2).
-    무상 복귀는 SAG 잔량 이내 가드. 유상 단가=override 또는 PR_M_ITEM_COST(cost_tag='1')."""
+    무상 복귀는 SAG 잔량 이내 가드. 유상 단가=override 또는 nx.price_item('매입')."""
     cust = str(payload.get("cust_code", "")).strip()
     mat = str(payload.get("mat_code", "")).strip()
     item = str(payload.get("item_code", "")).strip() or mat
@@ -481,7 +483,7 @@ def perm_users_save(payload: dict = Body(...)):
 
 # ===================== 판매및출고등록 (w_pu_output_010/015, nx.stock_maint tag='5') — 구매→협력사 판매출고 =====================
 # ★역분석 확정(2026-07-28, dw_pu_input_140_t2 retrieve + 라이브대사 98%): 판매출고 정본 = PU_T_STOCK_MAINT(자재수불) MAINT_TAG='5'.
-#   maint_cost=사급단가(f_get_item_cost 'S'=PR_M_ITEM_COST cost_tag='S' 유효일자최신), amt=trunc(qty×cost), vat=trunc(amt×0.1)=매출/부가세.
+#   maint_cost=사급단가(f_get_item_cost 'S' 이식 = nx.price_item 'TAGS' 유효일자최신), amt=trunc(qty×cost), vat=trunc(amt×0.1)=매출/부가세.
 #   ★부호: 판매/불출=음수 저장(집계 SUM(-AMT) 부호반전=사급매출). nx.stock_maint(자재수불 원장)→사급매출집계·수불장 파생.
 _SALEOUT_GUBUN = {"5": "협력업체판매", "0": "일반", "9": "완성품"}
 
@@ -523,9 +525,14 @@ def _sale_close_lookup(cur):
     return is_closed
 
 def _sagub_price(cur, item, cust, ymd):
-    """사급단가 = f_get_item_cost(item,cust,'S',ymd) 정확이식: PR_M_ITEM_COST 최신유효(cost_tag='S')."""
-    cur.execute("""SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-        WHERE item_code=? AND cust_code=? AND cost_tag='S' AND cost_apply_ymd<=? ORDER BY cost_apply_ymd DESC""",
+    """사급단가 = 단가정본 nx.price_item 'TAGS' 최신유효(=f_get_item_cost(item,cust,'S',ymd) 이식).
+       ★2026-08-28 미러 → 클린 이관. 정렬은 레거시 f_get_item_cost 그대로 **적용일 기준**이다
+         (coopquote 는 MAIN_FLAG 우선이라 8건이 갈렸다 — 그쪽이 비표준).
+       실측 차이 2건은 **미러가 낡은 것**이고 클린이 맞다:
+         AJR75712801   미러 267,680(260727) vs 클린 275,425(260806) ← 8/6 사급가 인상분
+         3H00627C-5000 미러   8,492(200101) vs 클린  22,000(251226)"""
+    cur.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+        WHERE item_code=? AND vendor_code=? AND price_type='TAGS' AND apply_ymd<=? ORDER BY apply_ymd DESC""",
         item, cust, ymd)
     r = cur.fetchone()
     return float(r[0]) if r and r[0] is not None else 0.0
@@ -993,6 +1000,26 @@ def lgsale_list(fr: str = Query(""), to: str = Query(""), wo: str = Query(""), i
     finally:
         cn.close()
 
+# ══ 완제품(ASY) 재고 게이트 ══════════════════════════════════════════════════
+# 대표 규칙 §0-★: 음수재고는 경고가 아니라 **차단**이고 **예외가 없다**.
+# 정본 = common._finished_avail() = 제품재고조회 화면과 **동일 계산**
+#        (기초 + 입고 − 출고 − 조정 · 입고에 직납 자재출고 포함).
+#        전수 대조 실측 2026-08-29: 잔량≠0 267품목 **불일치 0건**.
+# 사전 실측(8월 완성출고 1,876건): 차단 1건 = 0.05%.
+#        그 1건 `MJU63357501` 8/18 = 재고 80 인데 94 출고 = **진짜 음수재고**.
+#        ⟹ 정상 출하는 막지 않는다.
+# ★측정 함정 3가지(모두 실제로 겪음, 반복 금지):
+#   ① 출하 '이후' 재고와 비교하면 차단율이 부풀려진다(42.5% 오판)
+#   ② 품목마다 _finished_avail() 호출하면 3중 서브쿼리가 수백 번 → 안 끝난다. 집합으로 펴라
+#   ③ 직납 입고를 '출하일 이전'만 세면 같은 날 입고가 빠진다(19.6% 오판)
+#   ④ 조정(tag 2)은 ×(−1) 로 담긴다 — 가용에 더하려면 **빼야** 한다
+def _asy_gate(cur, item, qty, label="출하"):
+    """완제품 재고가 부족하면 차단. 사유(품목·소요·가용)를 실어 400."""
+    msg = _finished_short_msg(cur, item, float(qty or 0), label)
+    if msg:
+        raise HTTPException(400, msg)
+
+
 # ★출하(−ASY) 결선: 출하실적(nx.sale_dtl) → stock_ledger −ASY(tag 'J', MAINT_GROUP_SEQ=sale_dtl id 링크). 완성(+ASY)과 정합.
 def _lgsale_led_del(cur, sid):
     cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='ASY' AND MAINT_TAG='J' AND MAINT_GROUP_SEQ=?", int(sid))
@@ -1042,11 +1069,16 @@ def lgsale_save(payload: dict = Body(...)):
             cur.execute("SELECT sale_ymd FROM nx.sale_dtl WHERE id=?", int(rid))
             sy = str(cur.fetchone()[0] or "").strip()
             _assert_open(cur, sy, "SAL", "출하실적 수정")   # ★마감잠금(기존 출하일자)
+            # ★완제품 재고 게이트 — 기존 −ASY 를 **지운 뒤** 판정한다.
+            #   지우기 전에 재면 자기 자신이 이미 빠져 있어 정상 수정도 막힌다.
+            _lgsale_led_del(cur, int(rid))
+            _asy_gate(cur, item, qty, "출하")
             _lgsale_led_post(cur, int(rid), sy, item, qty, wo)   # ★재고 −ASY 재게시
         else:
             cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6), RIGHT(CONVERT(varchar(14),GETDATE(),120),6)")
             ymd, hms = cur.fetchone()
             _assert_open(cur, ymd, "SAL", "출하실적 등록")   # ★마감잠금
+            _asy_gate(cur, item, qty, "출하")                # ★완제품 재고 게이트
             cur.execute("""INSERT INTO nx.sale_dtl(work_order,split_work_order,item_code,sale_ymd,sale_hms,sale_qty,songjang_print_flag,remarks,insert_user_id,insert_datetime)
                 OUTPUT INSERTED.id VALUES(?,?,?,?,?,?,'0',?,'web',getdate())""", wo, split, item, ymd, hms, qty, remarks)
             newid = int(cur.fetchone()[0])
@@ -1551,10 +1583,13 @@ def sale040_confirm(payload: dict = Body(...)):
             if qty <= 0:
                 skipped.append({"wo": swo or wo, "item": it, "why": "재고부족"})
                 continue
-            cur.execute("""SELECT TOP 1 ISNULL(ITEM_COST,0) FROM nx.PR_M_ITEM_COST
-                            WHERE ITEM_CODE=? AND CUST_CODE IN ('1010','1020')
-                              AND COST_TAG IN ('S','E') AND COST_APPLY_YMD<=?
-                            ORDER BY COST_APPLY_YMD DESC, CUST_CODE ASC, COST_TAG DESC""", it, ymd)
+            # ★단가정본 = nx.price_item (DO_NOT_USE §18). 미러 PR_M_ITEM_COST 는 컷오버에 죽는다.
+            #   태그 매핑 S→TAGS · E→TAGE(§9). 실측 차이 1건 = AJR75712801
+            #   미러 267,680 vs 클린 275,425 = **8/6 사급가 인상분**이고 미러가 낡은 것.
+            cur.execute("""SELECT TOP 1 ISNULL(price,0) FROM nx.price_item
+                            WHERE item_code=? AND vendor_code IN ('1010','1020')
+                              AND price_type IN ('TAGS','TAGE') AND apply_ymd<=?
+                            ORDER BY apply_ymd DESC, vendor_code ASC, price_type DESC""", it, ymd)
             cr = cur.fetchone()
             cost = float(cr[0] or 0) if cr else 0.0
             cur.execute("""INSERT INTO nx.SA_T_SALE_DTL
