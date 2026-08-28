@@ -877,16 +877,20 @@ def lgbom_search(q: str = Query(""), werks: str = Query(""), limit: int = Query(
         cn.close()
 
 @router.get("/api/lgbom/tree")
-def lgbom_tree(model: str = Query(...), werks: str = Query("")):
-    """선택 모델의 LG BOM 전개(전 레벨). stufe/posnr 순. 프론트에서 parent_code→child_code 트리 조립."""
+def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = Query("")):
+    """선택 모델의 LG BOM 전개(전 레벨). stufe/posnr 순. 프론트에서 parent_code→child_code 트리 조립.
+       ver_from(일자) 주면 그 버전(nx.lg_bom_ver) 전개, 없으면 현재판(nx.lg_bom)."""
     cn = _nx(); cur = cn.cursor()
     try:
+        src = "nx.lg_bom"
         w = ["b.model=?"]; p = [model]
         if werks: w.append("b.werks=?"); p.append(werks)
+        if ver_from.strip():
+            src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
               b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.ITEM_DESC,'') nx_desc
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
+            FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -894,6 +898,21 @@ def lgbom_tree(model: str = Query(...), werks: str = Query("")):
         cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", model)
         mn = cur.fetchone()
         return {"model": model, "modelnm": (mn[0] if mn else ""), "rows": rows}
+    finally:
+        cn.close()
+
+@router.get("/api/lgbom/versions")
+def lgbom_versions(model: str = Query(...), werks: str = Query("")):
+    """선택 모델의 LG BOM 버전(일자별) 목록 — nx.lg_bom_ver.ver_from distinct. 이력 추적용."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        if cur.execute("SELECT CASE WHEN OBJECT_ID('nx.lg_bom_ver') IS NULL THEN 0 ELSE 1 END").fetchone()[0] == 0:
+            return {"rows": []}
+        w = ["model=?"]; p = [model]
+        if werks: w.append("werks=?"); p.append(werks)
+        cur.execute(f"""SELECT CONVERT(varchar(10),ver_from,120) ver_from, COUNT(*) child_cnt
+            FROM nx.lg_bom_ver WHERE {' AND '.join(w)} GROUP BY ver_from ORDER BY ver_from DESC""", *p)
+        return {"rows": [{"ver_from": r[0], "child_cnt": r[1]} for r in cur.fetchall()]}
     finally:
         cn.close()
 

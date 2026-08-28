@@ -62,7 +62,7 @@ SCREEN.lgbomview=(c)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
   const WK={DMZ:"DMZ(SAC)",DGZ:"DGZ(RAC)"};
-  let st={q:"",werks:"",models:[],sel:null,modelnm:"",tree:[],msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
+  let st={q:"",werks:"",models:[],sel:null,modelnm:"",tree:[],vers:[],selVer:"",msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
   const doUpload=async(f)=>{if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||"")){st.upmsg="❌ 엑셀 파일(.xlsx/.xls)만 업로드할 수 있습니다";draw();return;}
     st.uploading=true;st.upmsg="";draw();
@@ -77,10 +77,14 @@ SCREEN.lgbomview=(c)=>{
     try{const r=await fetch(`${API}/api/lgbom/search?q=${encodeURIComponent(st.q)}&werks=${st.werks}`);
       const j=await r.json();st.models=j.rows||[];}catch(e){st.models=[];}
     st.loading=false;draw();};
-  const openTree=async(m)=>{st.sel=m;st.tree=[];st.tloading=true;draw();
-    try{const r=await fetch(`${API}/api/lgbom/tree?model=${encodeURIComponent(m.model)}&werks=${encodeURIComponent(m.werks)}`);
+  const openTree=async(m,ver)=>{st.sel=m;st.selVer=ver||"";st.tree=[];st.tloading=true;draw();
+    try{const qs=`model=${encodeURIComponent(m.model)}&werks=${encodeURIComponent(m.werks)}`+(ver?`&ver_from=${encodeURIComponent(ver)}`:"");
+      const r=await fetch(`${API}/api/lgbom/tree?${qs}`);
       const j=await r.json();st.modelnm=j.modelnm||"";st.tree=buildTree(j.rows||[],m.model);}catch(e){st.tree=[];}
     st.tloading=false;draw();};
+  const loadVers=async(m)=>{st.vers=[];
+    try{const r=await fetch(`${API}/api/lgbom/versions?model=${encodeURIComponent(m.model)}&werks=${encodeURIComponent(m.werks)}`);st.vers=(await r.json()).rows||[];}catch(e){st.vers=[];}
+    draw();};
   // parent_code→child_code 로 트리 조립 후 DFS 평탄화(depth 포함)
   const buildTree=(rows,model)=>{
     const byParent={};rows.forEach(r=>{(byParent[r.parent_code]=byParent[r.parent_code]||[]).push(r);});
@@ -110,13 +114,19 @@ SCREEN.lgbomview=(c)=>{
      </div>
      ${st.upmsg?`<div class="page-sub" style="color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.upmsg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
-      <div class="panel" style="flex:0 0 380px;min-width:0"><div class="panel-h">모델 ${st.loading?"(조회중…)":`(${st.models.length})`}</div><div class="panel-b" style="padding:0">
-       <div class="grid-wrap" style="max-height:560px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
+      <div style="flex:0 0 380px;min-width:0;display:flex;flex-direction:column;gap:10px">
+      <div class="panel"><div class="panel-h">모델 ${st.loading?"(조회중…)":`(${st.models.length})`}</div><div class="panel-b" style="padding:0">
+       <div class="grid-wrap" style="max-height:370px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th data-key="model">모델</th><th class="center" data-key="werks">공장</th><th class="num" data-key="child_cnt">구성수</th></tr></thead>
        <tbody>${st.models.map(m=>`<tr class="rowsel ${st.sel&&st.sel.model===m.model&&st.sel.werks===m.werks?'on':''}" data-m="${esc(m.model)}" data-w="${esc(m.werks)}" style="cursor:pointer">
          <td><b>${esc(m.model)}</b>${m.modelnm?`<div class="cap" style="font-size:11px;color:var(--muted);max-width:230px;overflow:hidden;text-overflow:ellipsis" title="${esc(m.modelnm)}">${esc(m.modelnm)}</div>`:""}</td>
          <td class="center">${WK[m.werks]||m.werks}</td><td class="num">${m.child_cnt}</td></tr>`).join("")||`<tr><td colspan="3" style="padding:16px;color:var(--muted)">${st.loading?"":"조회 결과 없음 — 상위품번으로 검색"}</td></tr>`}
        </tbody></table></div></div></div>
+      <div class="panel"><div class="panel-h">일자별 BOM 버전 ${st.sel?`— ${esc(st.sel.model)}`:""} ${st.vers.length?`(${st.vers.length})`:""} <span style="font-size:11px;color:var(--muted);font-weight:400">이력 추적</span></div><div class="panel-b" style="padding:0">
+       <div class="grid-wrap" style="max-height:170px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr><th>유효일자</th><th class="num">구성수</th></tr></thead>
+       <tbody>${st.sel?(st.vers.map(v=>`<tr class="verrow ${st.selVer===v.ver_from?'on':''}" data-v="${esc(v.ver_from)}" style="cursor:pointer"><td><b>${esc(v.ver_from)}</b>${st.selVer===v.ver_from?' <span style="color:#1c47a0;font-size:11px">◀ 조회중</span>':''}</td><td class="num">${v.child_cnt}</td></tr>`).join("")||`<tr><td colspan="2" style="padding:12px;color:var(--muted)">버전 이력 없음</td></tr>`):`<tr><td colspan="2" style="padding:12px;color:var(--muted)">← 모델 선택 시 일자별 버전 표시</td></tr>`}
+       </tbody></table></div></div></div>
+      </div>
       <div class="panel" style="flex:1;min-width:0"><div class="panel-h">BOM 전개 ${st.sel?`— ${esc(st.sel.model)} ${st.modelnm?"("+esc(st.modelnm)+")":""}`:""} ${st.tloading?"(전개중…)":st.tree.length?`(${st.tree.length}행)`:""}</div><div class="panel-b" style="padding:0">
        ${st.sel?`<div class="grid-wrap" style="max-height:560px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th class="center">Lv</th><th>자재코드</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="center">단위</th><th class="center">공급</th><th class="center">최하위</th><th class="center">상태</th><th class="center">유효기간</th></tr></thead>
@@ -153,7 +163,8 @@ SCREEN.lgbomview=(c)=>{
       dz.ondragover=e=>{e.preventDefault();dz.style.background="#e3f0ff";dz.style.borderColor="#1c7c3a";dz.style.color="#1c7c3a";};
       dz.ondragleave=()=>{dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";};
       dz.ondrop=e=>{e.preventDefault();dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};}
-    c.querySelectorAll("tr.rowsel").forEach(tr=>tr.onclick=()=>{const m=st.models.find(v=>v.model===tr.dataset.m&&v.werks===tr.dataset.w);if(m)openTree(m);});
+    c.querySelectorAll("tr.rowsel").forEach(tr=>tr.onclick=()=>{const m=st.models.find(v=>v.model===tr.dataset.m&&v.werks===tr.dataset.w);if(m){openTree(m);loadVers(m);}});
+    c.querySelectorAll("tr.verrow").forEach(tr=>tr.onclick=()=>{if(st.sel)openTree(st.sel,tr.dataset.v);});
     c.querySelectorAll("thead th").forEach(th=>{addResizer(th);const k=th.dataset.key;if(k){th.style.cursor="pointer";th.title="더블클릭 정렬·경계드래그 너비조절";th.ondblclick=()=>{st.msortDir=(st.msortKey===k&&st.msortDir===1)?-1:1;st.msortKey=k;draw();};}});
   };
   draw();
