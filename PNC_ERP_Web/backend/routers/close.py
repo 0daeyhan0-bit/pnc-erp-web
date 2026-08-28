@@ -1187,10 +1187,13 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
         nm = {str(a): b for a, b in cur.fetchall()}
 
         def cause(it, reason):
+            # ★라벨 주의: buy 는 **전 기간** 매입 이력이다. 마감 시점(as-of) 단가와 다르다.
+            #   실측(2026-08-28): 단가0 제외분 56건은 **레거시 월마감도 전부 단가 0**
+            #   = 우리가 못 채운 게 아니라 애초에 단가원이 없다. "회수가능" 표현은 오해를 부른다.
             if reason == "음수수량":
-                return "음수재고 — 미기록 입고 또는 과대 출고. 컷오버 미이관(X1)"
+                return "음수재고 — 미기록 입고 또는 과대 출고. 컷오버 미이관"
             b = buy.get(it)
-            if b and b[0] > 0 and b[1] > 0: return "단가0 — 회수가능(실매입 단가 있음)"
+            if b and b[0] > 0 and b[1] > 0: return "단가0 — 과거 매입이력은 있으나 마감시점 단가 없음"
             if b and b[0] > 0:              return "단가0 — 금액0 입고만 있음"
             if not b:                       return "단가0 — 매입이력 없음"
             return "단가0 — 기타"
