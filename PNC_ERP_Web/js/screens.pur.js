@@ -3445,27 +3445,24 @@ SCREEN.lgsagub=(c)=>{
     const werksOpt=[['','전체 공장'],['DMZ','SAC(DMZ)'],['DGZ','RAC(DGZ)']]
       .map(([k,l])=>`<option value="${k}"${st.cv_werks===k?' selected':''}>${l}</option>`).join('');
     c.innerHTML=`
-     <div class="page-title">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">원소재 사급전환율</span></div>
-     ${tabBar()}
-     <div class="page-sub">LG BOM(<code>nx.lg_bom</code>)의 동 원소재(Tube,Raw)가 <b>사급(Assembly Pull)</b>으로 전환됐는지 우리 BOM과 대조. <b style="color:#c0392b">Supplier=미전환</b>(아직 우리가 구매)·Assembly Pull=전환(LG 사급). 치수·재질은 우리 정본 <code>nx.item</code> 우선(없으면 LG spec).</div>
-     <div style="display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap">
-       ${card('전환율(전체 동원소재)',(m.rate!=null?m.rate:'-')+'%',`사급 ${wonI(m.pull||0)} / 미전환 ${wonI(m.supplier||0)} edge`,'#1c47a0')}
-       ${card('대상 완제품(ASSY)',wonI(m.models||0),`제작품 ${wonI(m.parents||0)}종`,'#5a7597')}
-       ${card('표시 행',`${wonI(m.shown||0)}${(m.total>m.shown)?(' / '+wonI(m.total)):''}`,'필터 반영','#b5651d')}
-     </div>
-     <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto">
+     <div style="display:flex;flex-direction:column;height:100%">
+     <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">원소재 사급전환율</span></div>
+     <div style="flex:0 0 auto">${tabBar()}</div>
+     <div class="toolbar" style="flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto">
        <label class="tl">상태</label><select class="sel" id="cv-status" style="width:170px">${statusOpt}</select>
        <label class="tl" style="margin-left:6px">공장</label><select class="sel" id="cv-werks" style="width:120px">${werksOpt}</select>
        <label class="tl" style="margin-left:8px">제작유형</label><span style="white-space:nowrap">${mtChk}</span>
-       <input class="inp" id="cv-q" value="${esc(st.cv_q)}" placeholder="ASSY·제작품·동원소재 품번/품명" style="width:230px;margin-left:6px">
+       <input class="inp" id="cv-q" value="${esc(st.cv_q)}" placeholder="ASSY·제작품·동원소재 품번/품명" style="width:220px;margin-left:6px">
        <button class="btn" id="cv-go">조회</button>
-       <div class="spacer"></div><span class="rowcount">${st.cv_loading?'조회 중…':`${wonI(rows.length)}행`}</span>
+       <button class="btn xls" id="cv-xls" style="margin-left:4px">엑셀 다운로드</button>
+       <div class="spacer"></div><span class="rowcount">${st.cv_loading?'조회 중…':`전환율 ${m.rate!=null?m.rate:'-'}% · 미전환 ${wonI(m.supplier||0)}edge · 표시 ${wonI(rows.length)}행`}</span>
      </div>
-     <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
+     <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
         ${cvh('model','ASSY 품번')}${cvh('parent','제작품(하위)')}${cvh('make_type','제작유형','center')}${cvh('child','동원소재')}
         ${cvh('od','외경','num')}${cvh('thk','두께','num')}${cvh('length','길이','num')}${cvh('weight','단위중량','num')}
         <th class="center">재질</th><th class="center">치수출처</th>${cvh('qty','소요중량(KG)','num')}<th class="center">공장</th>${cvh('status','사급전환','center')}</tr></thead>
-       <tbody>${body}</tbody></table></div>`;
+       <tbody>${body}</tbody></table></div>
+     </div>`;
     wireTabs();
     c.querySelector('#cv-status').onchange=e=>{st.cv_status=e.target.value;loadConvert();};
     c.querySelector('#cv-werks').onchange=e=>{st.cv_werks=e.target.value;loadConvert();};
@@ -3475,6 +3472,10 @@ SCREEN.lgsagub=(c)=>{
     c.querySelector('#cv-q').onkeyup=e=>{if(e.key==='Enter'){st.cv_q=e.target.value.trim();loadConvert();}};
     c.querySelectorAll('[data-cvk]').forEach(th=>th.ondblclick=()=>{const k=th.dataset.cvk;
       st.cv_sort=(st.cv_sort.k===k)?{k,dir:-st.cv_sort.dir}:{k,dir:1};drawConvert();});
+    const xb=c.querySelector('#cv-xls');if(xb)xb.onclick=()=>{
+      const H=['ASSY품번','ASSY품명','제작품','제작품명','제작유형','동원소재','외경','두께','길이','단위중량','재질','형태','치수출처','소요중량(KG)','공장','사급전환'];
+      const R=rows.map(r=>[r.model,r.model_name,r.parent,r.parent_name,r.make_type+'·'+(MTLAB[r.make_type]||''),r.child,r.od,r.thk,r.length,r.weight,r.metal,r.form,r.dim_src,r.qty,WLAB[r.werks]||r.werks||'',r.status]);
+      downloadCSV(`원소재사급전환율_${st.cv_status}_${st.cv_scope}.csv`,H,R);};
     attachResizers(c);
   };
   const card=(title,val,sub,color)=>`<div style="flex:1;min-width:150px;border:1px solid #dbe5f2;border-left:4px solid ${color};border-radius:8px;padding:10px 14px;background:#fff">

@@ -963,7 +963,8 @@ def _num(v):
 
 @router.get("/api/lgsagub/sagub_convert")
 def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"),
-                          mt: str = Query("1,2,5"), q: str = Query(""), limit: int = Query(6000)):
+                          mt: str = Query("1,2,5"), scope: str = Query("all"),
+                          q: str = Query(""), limit: int = Query(6000)):
     """원소재 사급전환율: LG BOM의 동 원소재(child_desc='Tube,Raw')가 사급(Assembly Pull)으로
        전환됐는지 대조. Supplier=미전환(우리가 구매)·Assembly Pull=전환(LG 사급).
        기본=미전환(Supplier)·제작품(parent) 제작유형 1/2/5.
@@ -982,6 +983,8 @@ def lgsagub_sagub_convert(werks: str = Query(""), status: str = Query("supplier"
         elif status == "pull":    wh.append("r.supply_type='Assembly Pull'")
         # status=all → 전체
         if werks.strip(): wh.append("r.werks=?"); p.append(werks.strip())
+        if scope == "active":   # 사용중 = LG 리시빙(완제품 출하) 2025.01~ 실적 있는 ASSY만
+            wh.append("r.model IN (SELECT DISTINCT ITEM_CODE FROM nx.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD>='250101')")
         mtl = [x.strip() for x in mt.split(",") if x.strip()]
         if mtl:
             wh.append("ISNULL(ip.make_type,'') IN (%s)" % ",".join("?" * len(mtl))); p += mtl
