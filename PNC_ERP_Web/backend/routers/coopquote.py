@@ -441,13 +441,17 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
                 for i in range(0, len(nl), 900):
                     chunk = [c.replace("'", "") for c in nl[i:i+900]]; inl = "','".join(chunk)
                     cur.execute(f"""WITH S AS (
-                          SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) ic, ITEM_COST,
-                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(ITEM_CODE)))
-                              ORDER BY ISNULL(MAIN_FLAG,'0') DESC, COST_APPLY_YMD DESC) rn
-                          FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                          WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN ('{inl}')
-                            AND COST_TAG='S' AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=?
-                            AND COST_APPLY_YMD<=? AND ITEM_COST>0)
+                          -- ★2026-08-29 단가정본 이관: 미러 nx.PR_M_ITEM_COST → nx.price_item(DO_NOT_USE §18).
+                          --   tag 'S' → price_type 'TAGS'. main_flag 는 승격 시 라이브에서 백필됨.
+                          --   실측 차이 2건 = 3H00627C-5000 · 5210A30998B-1 — 둘 다 **미러가 낡은 것**이고 클린이 최신.
+                          SELECT UPPER(LTRIM(RTRIM(item_code))) ic, price ITEM_COST,
+                            ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(item_code)))
+                              ORDER BY ISNULL(main_flag,'0') DESC, apply_ymd DESC,
+                                       LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC) rn
+                          FROM PARTNER_ERP_TEST3.nx.price_item
+                          WHERE UPPER(LTRIM(RTRIM(item_code))) IN ('{inl}')
+                            AND price_type='TAGS' AND LTRIM(RTRIM(ISNULL(vendor_code,'')))=?
+                            AND apply_ymd<=? AND price>0)
                         SELECT ic, ITEM_COST FROM S WHERE rn=1""", vcode, cut)
                     for r in cur.fetchall():
                         tgt[str(r[0]).strip().upper()] = float(r[1] or 0)

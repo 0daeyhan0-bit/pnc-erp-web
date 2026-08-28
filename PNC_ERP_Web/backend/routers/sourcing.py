@@ -1923,6 +1923,11 @@ def _ensure_sub_price_tbl(cur):
     # else: 이미 vendor_code 보유(override 가능 스키마) → 유지
     _SUB_PRICE_READY = True
 
+# ★2026-08-29 단가 소스 이관: 매입단가 조회 7곳을 미러 nx.PR_M_ITEM_COST →
+#   **정본 nx.price_item('매입')** 으로 옮겼다(DO_NOT_USE §18). main_flag 는 승격 시 백필됨.
+#   ★정렬에 vendor_code tiebreak 를 추가했다 — 종전 정렬(in_cust→main_flag→적용일)은
+#     셋 다 동점인 품목에서 **비결정적**이었다(EAD37660027: 거래처 2197/2198/2326 이
+#     같은날·같은 flag·매입처 미지정 → 3,683 vs 2.81 = 1,300배가 실행마다 갈릴 수 있었다).
 # ============ ★★통합 단가 테이블 nx.item_price (레거시 PR_M_ITEM_COST 계승) ============
 # 흩어진 nx 단가(sub_price=ASSY매입 · sagub_price=사급 · profile 가격칸)를 하나로 통합.
 # 컬럼: item_code · vendor_code(''=공통/지정=업체예외) · price_gubun(매입/판매/사급) · apply_ym(적용월 시계열) · price · currency · note.
@@ -2312,12 +2317,13 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             #   없으면(빈 in_cust or 그 거래처 단가 없음) 대표단가(MAIN_FLAG)/최신 폴백. 실측 10%(1029건) 불일치만 교정·49%/41% 불변.
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
                 SELECT LTRIM(RTRIM(pc.ITEM_CODE)) ITEM_CODE, pc.ITEM_COST, pc.COST_APPLY_YMD apply, ISNULL(pc.CURRENCY,'') curr, ISNULL(pc.CUST_CODE,'') cust,
-                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.ITEM_CODE))
-                    ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.CUST_CODE))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
-                             ISNULL(pc.MAIN_FLAG,'') DESC, pc.COST_APPLY_YMD DESC) rn
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST pc
-                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code COLLATE DATABASE_DEFAULT=LTRIM(RTRIM(pc.ITEM_CODE)) COLLATE DATABASE_DEFAULT
-                WHERE pc.COST_TAG='1' AND pc.COST_APPLY_YMD<=? AND LTRIM(RTRIM(pc.ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.item_code))
+                    ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.vendor_code))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
+                             ISNULL(pc.main_flag,'') DESC, pc.apply_ymd DESC,
+                             LTRIM(RTRIM(ISNULL(pc.vendor_code,''))) ASC) rn
+                FROM PARTNER_ERP_TEST3.nx.price_item pc
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code COLLATE DATABASE_DEFAULT=LTRIM(RTRIM(pc.item_code)) COLLATE DATABASE_DEFAULT
+                WHERE pc.price_type='매입' AND pc.apply_ymd<=? AND LTRIM(RTRIM(pc.item_code)) IN ({ph})) z WHERE rn=1""", asof, *ch)
             for r in cur.fetchall():
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
     finally:
@@ -2347,10 +2353,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             for i in range(0, len(pitems), 500):
                 ich = pitems[i:i+500]; iph = ",".join("?" * len(ich))
                 cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST, apply, curr FROM (
-                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr,
-                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
-                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, LTRIM(RTRIM(ISNULL(vendor_code,''))) cust, price ITEM_COST, apply_ymd apply, ISNULL(currency,'') curr,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) ORDER BY apply_ymd DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type='매입' AND apply_ymd<=?
+                      AND LTRIM(RTRIM(item_code)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})) z WHERE rn=1""",
                     asof, *ich, *pvend)
                 for r in cur2.fetchall():
                     vprice[(str(r[0]).strip(), str(r[1]).strip())] = {"cost": (float(r[2]) if r[2] is not None else None), "apply": str(r[3] or ""), "curr": r[4]}
@@ -2496,10 +2502,10 @@ def sourcing_route_order(item: str = Query(...), route_id: int = Query(...), ymd
             for i in range(0, len(saved_items), 400):
                 ich = saved_items[i:i + 400]; iph = ",".join("?" * len(ich))
                 cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST FROM (
-                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST,
-                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
-                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, LTRIM(RTRIM(ISNULL(vendor_code,''))) cust, price ITEM_COST,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) ORDER BY apply_ymd DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type='매입' AND apply_ymd<=?
+                      AND LTRIM(RTRIM(item_code)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})) z WHERE rn=1""",
                     asof, *ich, *saved_vcs)
                 for r in cur2.fetchall():
                     vprice[(str(r[0]).strip(), str(r[1]).strip())] = (float(r[2]) if r[2] is not None else None)
@@ -2609,15 +2615,15 @@ def _priced_vendors(item_code, vendors, asof=None):
     cn = _conn(); cur = cn.cursor()
     try:
         vph = ",".join("?" * len(vendors))
-        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-              AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})""", item_code, asof, *vendors)
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(vendor_code,''))) FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL
+              AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})""", item_code, asof, *vendors)
         priced = set(str(r[0]).strip() for r in cur.fetchall())
         cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item_code)
         r = cur.fetchone(); cur_vc = str(r[0]).strip() if r else ""
         if cur_vc in vendors and cur_vc not in priced:
-            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL""", item_code, asof)
+            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL""", item_code, asof)
             if cur.fetchone(): priced.add(cur_vc)
         return priced
     finally:
@@ -2632,17 +2638,18 @@ def sourcing_item_vendor_price(item: str = Query(...), vendor: str = Query(...),
     asof = _d6(ymd) if ymd.strip() else datetime.now().strftime("%y%m%d")
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-            ORDER BY COST_APPLY_YMD DESC""", item, vendor, asof)
+        cur.execute("""SELECT TOP 1 price, apply_ymd, ISNULL(currency,'') FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND LTRIM(RTRIM(ISNULL(vendor_code,'')))=? AND apply_ymd<=? AND price IS NOT NULL
+            ORDER BY apply_ymd DESC""", item, vendor, asof)
         r = cur.fetchone()
         if r: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r[0]), "apply": str(r[1] or ""), "currency": r[2]}
         cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         rr = cur.fetchone(); cur_vc = str(rr[0]).strip() if rr else ""
         if cur_vc == vendor:
-            cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-                ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC""", item, asof)
+            cur.execute("""SELECT TOP 1 price, apply_ymd, ISNULL(currency,'') FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL
+                ORDER BY ISNULL(main_flag,'') DESC, apply_ymd DESC,
+                         LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC""", item, asof)
             r2 = cur.fetchone()
             if r2: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r2[0]), "apply": str(r2[1] or ""), "currency": r2[2]}
         return {"item": item, "vendor": vendor, "reg": False, "cost": None}
