@@ -67,6 +67,13 @@ FIXTURES = [
     # ★완제품(ASY) 게이트용 — '지금' 잔량이 있는 품목. 2502 기초만 큰 품목을 고르면
     #   이후 다 소진돼 오차단으로 오판한다(2026-08-29 실측: 5006AR4091D 기초 10,051 · 현재 0).
     #   ⟹ 제품재고조회 화면과 같은 식으로 현재 잔량을 계산해 고른다.
+    # ★자재입고는 거래처(매입처) 필수다(다른 세션이 2026-08-28 검증 추가:
+    #   "매입처 없는 입고는 매입마감·수불에서 누락된다"). 케이스가 안 따라가 FAIL 났다.
+    ("matcust", """SELECT TOP 1 LTRIM(RTRIM(ISNULL(CUST_CODE,''))) FROM nx.PU_T_STOCK_MAINT
+                    WHERE MAINT_TAG='9' AND ISNULL(CUST_CODE,'')<>''
+                    GROUP BY LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COUNT(*) DESC""",
+     lambda ctx, r: ctx.update(matcust=str(r[0]).strip())),
+
     ("asy", """WITH MV AS (
                  SELECT UPPER(item_code) it, maint_qty q FROM nx.sa_t_stock_maint
                   WHERE maint_ymd>'250299'
@@ -105,9 +112,14 @@ def _save(screen, qty, ymd=None, mat=None):
     """자재 3화면 공통 payload — {screen, rows:[{MAINT_YMD, MAT_CODE, qty}]}
        ★ymd/mat 는 **None 일 때만** 기본값으로 채운다. `or` 를 쓰면 빈 문자열이
          기본값으로 되돌아가 '일자 누락' 같은 음성 케이스를 만들 수 없다(2026-08-28 실측)."""
-    return lambda ctx: {"screen": screen, "user": "flowverify",
-                        "rows": [{"MAINT_YMD": YMD if ymd is None else ymd,
-                                  "MAT_CODE": (ctx["mat"] if mat is None else mat), "qty": qty}]}
+    def _b(ctx):
+        row = {"MAINT_YMD": YMD if ymd is None else ymd,
+               "MAT_CODE": (ctx["mat"] if mat is None else mat), "qty": qty}
+        # ★입고 계열은 거래처(매입처) 필수 — 없으면 "거래처(매입처)가 필요합니다" 로 거부된다.
+        if screen == "receipt" and ctx.get("matcust"):
+            row["CUST_CODE"] = ctx["matcust"]
+        return {"screen": screen, "user": "flowverify", "rows": [row]}
+    return _b
 
 
 def _locked_ymd(ctx):
