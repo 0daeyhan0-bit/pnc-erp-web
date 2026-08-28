@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _assert_open)
 
 router = APIRouter()
 
@@ -301,6 +301,7 @@ def gagong_move580_issue(payload: dict = Body(...)):
     # 자재구분별 최종 전표행 조립. P2(가공)는 프론트가 넘긴 값 그대로(자기자신), 사급/사내생산은 BOM 1단계 전개.
     out_rows = []   # {item_code, mat_code, item_desc, set_qty, use_qty, maint_qty, remarks, pr_part_code, sagub_cust_code, to_gagong_proc_code}
     nxcn = _nx(); nxcur = nxcn.cursor()
+    _assert_open(nxcur, ymd, "PRD", "가공이동 발행")   # ★마감잠금
     try:
         for r in rows_in:
             item_code = str(r.get("item_code") or "").strip()
@@ -378,7 +379,12 @@ def gagong_move580_issue(payload: dict = Body(...)):
 def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
                           item: str = Query(""), part: str = Query(""), confirm: str = Query("전체"), limit: int = Query(2500)):
     """구분=이동전표 모드 — MAINT_GROUP_SEQ 단위로 발행된 전표 목록(확정여부 포함).
-       ★라이브(레거시 발행분) + nx(웹 발행분) 합산 조회. 쓰기는 nx만(§1)."""
+
+    ★원천 = **nx 단독**(2026-08-28 사용자 확정 "라이브는 없애자, nx로 할건데").
+      종전엔 라이브+nx UNION 이었다. 라이브 전표 34,927행을 nx 로 전량 복사해 정본을
+      nx 로 옮겼으므로 UNION 은 중복만 만든다(nx 는 원래 이 테이블의 미러라 34,883행이
+      이미 동일했고, 미복사분 44행 = 그날 레거시 발행분만 넣으면 됐다).
+      입고확인·완료표시(IN_CONFIRM_FLAG)도 nx 에 쓰므로 조회·상태가 한 곳에서 끝난다."""
     nx = _nx(); cur = nx.cursor()
     try:
         w = ["m.MAINT_TAG='B'"]; p = []
@@ -398,17 +404,13 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
             FROM (
               SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_GROUP_SEQ,m.CHECK_LIST_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,
                      m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
-                FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
-              UNION ALL
-              SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_GROUP_SEQ,m.CHECK_LIST_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,
-                     m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
                 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
             ) u
             LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
-            ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *(p + p))
+            ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():
@@ -481,6 +483,7 @@ def gagong_move580_delete(payload: dict = Body(...)):
             try: seq = int(k.get("seq"))
             except Exception: continue
             if not ymd: continue
+            _assert_open(cur, ymd, "PRD", "가공이동 삭제")   # ★마감잠금
             cur.execute("""SELECT ISNULL(IN_CONFIRM_FLAG,'0'), MAINT_GROUP_SEQ
                 FROM nx.PU_T_STOCK_MAINT_GAGONG_MOVE WHERE MAINT_YMD=? AND MAINT_SEQ=?""", ymd, seq)
             row = cur.fetchone()

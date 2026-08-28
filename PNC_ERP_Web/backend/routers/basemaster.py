@@ -13,9 +13,14 @@ _BASEMASTER = {
     "dept":  {"t": "HR_M_DEPT", "title": "부서MASTER", "src": "HR_M_DEPT", "order": "SORT_KEY",
               "cols": [("DEPT_CODE", "부서코드"), ("DEPT_DESC", "부서명"), ("SORT_KEY", "정렬"),
                        ("ENTERPRISE_DEPT", "전사부서"), ("WH_CODE", "창고"), ("USE_FLAG", "사용")]},
+    # ★라벨은 레거시 「LINE-NO MASTER」 화면과 동일하게(2026-08-27).
+    #   MAINT_DAY/MAINT_HHMM = 라인당김(변경일자·변경시간)
+    #   CUST_MAINT_DAY = **직납품당김일자** — 파트별계획 없는 직납품에 추가 적용되는 당김일수(CA=1).
+    #     STEP7 의 nx.plan_direct_pull 이 이 값을 쓴다. 종전 라벨 '거래처리드'는 레거시에 없는 이름.
+    #   ⛔LINK_CUST_CODE(연결거래처) 는 미사용 항목이라 화면에서 제외(사용자 확인).
     "line":  {"t": "PR_M_LINE_NO", "title": "LINE-NO MASTER", "src": "PR_M_LINE_NO", "order": "LINE_NO",
-              "cols": [("LINE_NO", "라인번호"), ("APPLY_YMD", "적용일"), ("MAINT_DAY", "리드(일)"),
-                       ("MAINT_HHMM", "시각"), ("LINK_CUST_CODE", "연계거래처"), ("CUST_MAINT_DAY", "거래처리드")]},
+              "cols": [("LINE_NO", "라인번호"), ("APPLY_YMD", "적용일"), ("MAINT_DAY", "변경일자"),
+                       ("MAINT_HHMM", "변경시간"), ("CUST_MAINT_DAY", "직납당김")]},
     # ★2026-08-23 assem/proc 은 웹에서 등록·수정·삭제하므로 조회도 nx 로(쓰기와 같은 원장).
     #   라이브만 보면 웹 추가분이 목록에 안 나온다(실측 CS_M_PROC nx 116 vs 라이브 95).
     "assem": {"t": "PARTNER_ERP_TEST3.nx.CS_M_ASSEM_PROC", "title": "조립공정MASTER", "src": "nx.CS_M_ASSEM_PROC", "order": "SORT_SEQ",

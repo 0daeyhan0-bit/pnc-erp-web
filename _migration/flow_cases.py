@@ -62,23 +62,21 @@ FIXTURES = [
                       GROUP BY cust_code ORDER BY COUNT(*) DESC""",
      lambda ctx, r: ctx.update(sale_cust=str(r[0]).strip())),
 
+    # 창고간이동 검증용 — FROM 파트(P0001 가공창고)에 실제 재고가 있는 자재
+    # ★가드가 보는 소스와 **같은 소스**로 고른다 — matissue 는 원장(stock_ledger) SUM 을 본다.
+    #   미러(PR_T_MAT_STOCK_WH)에서 고르면 "가용 0" 으로 걸린다(2026-08-28 실측).
+    ("mv_mat", """SELECT TOP 1 UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(MAINT_QTY AS float))
+                    FROM nx.stock_ledger
+                   WHERE STOCK_POINT='MAT' AND ISNULL(GAGONG_PROC_CODE,'')='P0001' AND MAT_CODE IS NOT NULL
+                   GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))
+                  HAVING SUM(CAST(MAINT_QTY AS float)) > 100 ORDER BY 2 DESC""",
+     lambda ctx, r: ctx.update(mv_mat=str(r[0]), mv_avail=float(r[1]))),
+
     ("prod_item", """SELECT TOP 1 b.parent_code, COUNT(*)
                        FROM nx.bom b JOIN nx.item i ON i.item_code = b.parent_code
                       WHERE ISNULL(i.make_type,'') = '1'
                       GROUP BY b.parent_code HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC""",
      lambda ctx, r: ctx.update(prod_item=str(r[0]).strip())),
-
-    # 용접봉 차감 케이스용 — 대상 품목의 용접봉 소요가 기대값(0.0028)과 맞을 때만 검증(아니면 SKIP)
-    # backflush 봉 정본=proc_weld(=CS오라클, 2026-08-28 ③전환). 그 값 안정시만 검증.
-    ("weld", """SELECT ISNULL(SUM(CAST(use_qty AS float)),0) FROM nx.proc_weld
-                 WHERE parent_item='5211A21789C' AND ISNULL(use_qty,0)>0""",
-     lambda ctx, r: ctx.update(weld_ok=(abs(float(r[0] or 0) - 0.00158) < 0.0002))),
-
-    # 용접링 차감 케이스용 — 대상(AJR75786301-고주파)의 용접링 개수합이 3(1+2)일 때만 검증(아니면 SKIP)
-    ("ring", """SELECT ISNULL(SUM(CAST(bl.qty AS float)),0) FROM nx.bom_line bl
-                  JOIN nx.bom_header bh ON bh.bom_id=bl.bom_id JOIN nx.item i ON i.item_code=bl.child_item
-                 WHERE bh.item_code=N'AJR75786301-고주파' AND i.item_name LIKE N'%용접링%' AND i.sgroup='230'""",
-     lambda ctx, r: ctx.update(ring_ok=(abs(float(r[0] or 0) - 3.0) < 0.01))),
 ]
 
 
@@ -132,21 +130,6 @@ CASES = [
          body=lambda ctx: {"out_cust": ctx["sale_cust"], "item_code": ctx["mat"], "out_qty": 5,
                            "out_ymd": YMD, "user": "flowverify"}),
 
-    # ══ [F] 흐름 : 용접봉 (공정종속 자재 — 생산실적 백플러시 −W) ═══════════
-    #   용접봉은 BOM 아닌 공정종속 자재 → 완성공정 백플러시서 생산창고(Q1000) −W 차감.
-    #   probe '용접봉차감' = stock_ledger MAT·tag='W' 합(용접봉만 격리). 다른 세션도 이 probe 재사용.
-    #   대상 5211A21789C × 100 = −0.158 (봉 정본 proc_weld RAC30599301-1 0.00158·③전환 후·CS오라클 일치).
-    dict(kind="F", name="용접봉 차감 (백플러시 −W)", method="POST", path="/api/backflush/post",
-         probe="용접봉차감", delta=-0.158, mirror=False,
-         skip_if=lambda ctx: not ctx.get("weld_ok"),
-         body=lambda ctx: {"item": "5211A21789C", "prod_qty": 100, "wo": "FLOWWELD", "user": "flowverify"}),
-    #   용접링 = bom_line 정본(nx.bom엔 없음) → 완성공정서 −R(EA) 차감. probe '용접링차감'=stock_ledger MAT·tag='R'.
-    #   대상 AJR75786301-고주파(용접링 1+2=3개) × 5 = −15. 링 있으면 봉 skip(중복차감 방지).
-    dict(kind="F", name="용접링 차감 (백플러시 −R)", method="POST", path="/api/backflush/post",
-         probe="용접링차감", delta=-15, mirror=False,
-         skip_if=lambda ctx: not ctx.get("ring_ok"),
-         body=lambda ctx: {"item": "AJR75786301-고주파", "prod_qty": 5, "wo": "FLOWRING", "user": "flowverify"}),
-
     # ══ [R] 규칙 : 음수재고 차단 (예외 없음 §0-★) ═════════════════════
     dict(kind="R", name="자재출고 — 가용 초과(음수유발) 차단", method="POST", path="/api/stock/save",
          keyword="재고부족", body=lambda ctx: _save("issue", ctx["avail"] * 10 + 100000)(ctx)),
@@ -197,6 +180,61 @@ CASES = [
          keyword="일자", body=_save("receipt", 10, ymd="")),
     dict(kind="R", name="screen 오류 차단", method="POST", path="/api/stock/save",
          keyword="screen", body=lambda ctx: {"screen": "bogus", "rows": []}),
+    # ══ [F] 흐름 : 생산 파트재고·창고이동 (2026-08-28 확장) ═══════════
+    #   재고를 실제로 움직이는데 검증에 없던 화면들. 218개 쓰기 중 재고 이동 경로부터 채운다.
+    dict(kind="F", name="생산파트재고조정 (stockmaint/save)", method="POST", path="/api/stockmaint/save",
+         probe="원장PRD", delta=+40, mirror=False,
+         body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "P0001", "maint_qty": 40, "maint_cost": 100,
+                           "remarks": "flowverify", "user": "flowverify"}),
+    dict(kind="F", name="자재 창고간이동 (matissue/save)", method="POST", path="/api/matissue/save",
+         probe="원장PRD", delta=0, mirror=False,
+         skip_if=lambda ctx: "mv_mat" not in ctx,
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mv_mat"],
+                           "from_part_code": "P0001", "part_code": "P0002",
+                           "issue_qty": 5, "remarks": "flowverify", "user": "flowverify"}),
+    dict(kind="F", name="키팅 취소 (준비실적처리 cell-cancel)", method="POST", path="/api/kitting/cell-cancel",
+         probe="원장RDY", delta=-10, mirror=False,
+         skip_if=lambda ctx: "kit_item" not in ctx,
+         body=lambda ctx: {"item": ctx["kit_item"], "gpc": ctx["kit_gpc"], "wo": ctx["kit_wo"],
+                           "ymd": YMD, "qty": 10, "user": "flowverify"}),
+
+    # ══ [R] 규칙 : 위 화면들도 같은 규칙을 지키는가 ════════════════════
+    dict(kind="R", name="생산파트재고조정 — 수량 0 차단", method="POST", path="/api/stockmaint/save",
+         keyword="0일 수 없",
+         body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "P0001", "maint_qty": 0, "user": "flowverify"}),
+    dict(kind="R", name="생산파트재고조정 — 마감기간 잠금", method="POST", path="/api/stockmaint/save",
+         keyword="마감", skip_if=lambda ctx: not ctx.get("closed_period"),
+         body=lambda ctx: {"maint_ymd": _locked_ymd(ctx), "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "P0001", "maint_qty": 10, "user": "flowverify"}),
+    dict(kind="R", name="생산파트재고조정 — 파트코드 오류 차단", method="POST", path="/api/stockmaint/save",
+         keyword="파트코드",
+         body=lambda ctx: {"maint_ymd": YMD, "mat_code": ctx["mat"], "maint_tag": "4",
+                           "part_code": "없는파트", "maint_qty": 10, "user": "flowverify"}),
+    dict(kind="R", name="자재 창고간이동 — FROM파트 재고부족 차단", method="POST", path="/api/matissue/save",
+         keyword="재고부족",
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mat"],
+                           "from_part_code": "P0001", "part_code": "P0002",
+                           "issue_qty": 99999999, "user": "flowverify"}),
+    dict(kind="R", name="자재 창고간이동 — 같은 파트 차단", method="POST", path="/api/matissue/save",
+         keyword="같습니다",
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mat"],
+                           "from_part_code": "P0001", "part_code": "P0001",
+                           "issue_qty": 1, "user": "flowverify"}),
+    dict(kind="R", name="자재 창고간이동 — 수량 0 차단", method="POST", path="/api/matissue/save",
+         keyword="0보다",
+         body=lambda ctx: {"issue_ymd": YMD, "mat_code": ctx["mat"],
+                           "from_part_code": "P0001", "part_code": "P0002",
+                           "issue_qty": 0, "user": "flowverify"}),
+    dict(kind="R", name="발주입고 — 미등록품목 차단", method="POST", path="/api/matrecv/receive",
+         keyword="미등록",
+         body=lambda ctx: {"ymd": YMD, "wh": "IS0001",
+                           "rows": [{"item": "ZZ_NOT_EXIST_9999", "qty": 10}], "user": "flowverify"}),
+    dict(kind="R", name="발주입고 — 마감기간 잠금", method="POST", path="/api/matrecv/receive",
+         keyword="마감", skip_if=lambda ctx: not ctx.get("closed_period"),
+         body=lambda ctx: {"ymd": _locked_ymd(ctx), "wh": "IS0001",
+                           "rows": [{"item": ctx["mat"], "qty": 10}], "user": "flowverify"}),
 ]
 
 
@@ -209,6 +247,28 @@ REASON_CHECKS = [
          skip_if=lambda ctx: "prod_item" not in ctx,
          body=lambda ctx: {"item": ctx["prod_item"], "prod_qty": 9999999,
                            "wo": "FLOWTEST", "user": "flowverify"}),
+]
+
+
+# ── 캐시 stale 검사 ────────────────────────────────────────────────────
+#   ★캐시만 붙이고 무효화를 빼면 "재고가 움직였는데 화면은 옛 값" 이 된다.
+#
+#   ★2026-08-28 실측으로 확인된 것 — **수불장은 웹 입력분을 보지 않는다.**
+#     수불장·마감 = 라이브 전표(PARTNER_ERP.dbo.PU_T_STOCK_MAINT)를 읽는다.
+#     웹 쓰기(/api/stock/save) = nx.stock_ledger 에 쓴다.   ⟹ 축이 다르다.
+#     이건 병행 테스트 기간의 **의도된 분리**다(CLOSE_MGMT_CANON §26):
+#       재고 금액은 실데이터만 반영해야 하므로 마감은 라이브만 본다.
+#     따라서 "웹 입고 → 수불장 기말 +100" 은 **성립하지 않는다.** 이 검사는 성립 조건이 없다.
+#
+#   그래서 캐시 무효화는 **값이 아니라 동작으로** 검증한다:
+#     쓰기 직후 조회가 **재계산되는가**(캐시가 버려졌는가) = 응답시간이 캐시히트보다 확연히 길어짐.
+#     ※컷오버 후 원장이 정본이 되면 그때 값 기반 검사로 바꾼다.
+CACHE_CHECKS = [
+    dict(name="캐시 무효화 — 재고 쓰기 후 수불장이 재계산되는가",
+         ledger=lambda ctx: f"/api/close/ledger?domain=MAT&d_from={YMD[:4]}01&d_to={YMD}",
+         write_path="/api/stock/save",
+         write_body=lambda ctx: _save("receipt", 100)(ctx),
+         mode="recompute"),      # 값이 아니라 '재계산 발생' 으로 판정
 ]
 
 

@@ -5,7 +5,7 @@
 import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed
+from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed
 
 router = APIRouter()
 
@@ -64,7 +64,7 @@ def sagub_adjust_save(payload: dict = Body(...)):
         if rid:  # 수정 = 기존행 삭제 후 신규(재키)
             try:
                 oy, osq = str(rid).split("-"); osq = int(osq)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "SAL"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='SAG' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
             except (ValueError, AttributeError):
@@ -87,7 +87,7 @@ def sagub_adjust_delete(payload: dict = Body(...)):
             y, sq = str(rid).split("-"); sq = int(sq)
         except ValueError:
             raise HTTPException(400, "id 형식 오류")
-        if _closed(cur, y):
+        if _closed(cur, y, "SAL"):
             raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
         cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='SAG' AND MAINT_TAG='2' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
         return {"ok": True, "deleted": cur.rowcount}
@@ -241,11 +241,13 @@ def sagub_output_save(payload: dict = Body(...)):
         else:
             cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
             ymd = cur.fetchone()[0]
+            _assert_open(cur, ymd, "MAT", "사급출고 요청")   # ★마감잠금
             cur.execute("SELECT ISNULL(MAX(req_seq),0)+1 FROM nx.sagub_output_req WHERE req_ymd=?", ymd)
             seq = int(cur.fetchone()[0])
             cur.execute("""INSERT INTO nx.sagub_output_req(req_ymd,req_seq,cust_code,mat_code,item_code,req_qty,out_qty,finish_flag,remarks,insert_user_id,insert_datetime)
                 VALUES(?,?,?,?,?,?,0,'0',?,'web',getdate())""", ymd, seq, cust, mat, item, req, remarks)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True}
     finally:
         cn.close()
@@ -309,6 +311,7 @@ def sagub_output_confirm(payload: dict = Body(...)):
         cust, mat = row[0], row[1]
         cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         ymd = cur.fetchone()[0]
+        _assert_open(cur, ymd, "MAT", "사급출고 확정")   # ★마감잠금
         free = _is_free_sagub(cur, cust, ymd)
         if free:
             _sagub_move(cur, ymd, cust, mat, outq, wh, "out", f"무상사급출고(req#{rid})")
@@ -343,7 +346,7 @@ def sagub_recover(payload: dict = Body(...)):
     try:
         cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         ymd = cur.fetchone()[0]
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "SAL"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 회수 불가")
         free = _is_free_sagub(cur, cust, ymd)
         if free:  # 무상 = 이동복귀(−SAG / +PRD). SAG 잔량 가드.
@@ -360,6 +363,7 @@ def sagub_recover(payload: dict = Body(...)):
         amt = float(int(qty * cost))
         seq = _led_ins(cur, "PRD", ymd, "9", None, cust, item, qty, wh, (remarks or "유상사급회수 매입입고"), cost, amt)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "gubun": "유상사급", "id": f"{ymd}-{seq}", "cost": cost, "amt": amt,
                 "note": f"유상 매입입고 완료(+PRD@{wh}, 구매단가 {cost:g})"}
     except Exception:
@@ -380,7 +384,7 @@ def sagub_move_delete(payload: dict = Body(...)):
         raise HTTPException(400, "id 형식 오류")
     cn = _nx(); cur = cn.cursor()
     try:
-        if _closed(cur, y):
+        if _closed(cur, y, "SAL"):
             raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_TAG=? AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", tag, y, g)
         return {"ok": True, "deleted": cur.rowcount}
@@ -396,6 +400,7 @@ def sagub_output_delete(payload: dict = Body(...)):
     try:
         cur.execute("DELETE FROM nx.sagub_output_req WHERE id=? AND ISNULL(finish_flag,'0')='0'", int(rid))
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         cn.close()
@@ -430,6 +435,7 @@ def perm_save(payload: dict = Body(...)):
                     1 if (pe or {}).get("view") else 0, 1 if (pe or {}).get("edit") else 0, by)
                 cnt += 1
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "users": len(perms), "rows": cnt}
     finally:
         cn.close()
@@ -468,6 +474,7 @@ def perm_users_save(payload: dict = Body(...)):
             WHEN NOT MATCHED THEN INSERT(user_id,udata,upd_user,upd_dt) VALUES('__ALL__',?,?,getdate());""",
             blob, by, blob, by)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "count": len(users)}
     finally:
         cn.close()
@@ -592,6 +599,7 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
         where = " AND ".join(w)
         SEL = """SELECT {idcol} id, '{src}' src, m.maint_ymd out_ymd, m.cust_code out_cust, ISNULL(c.CUST_DESC,'') custnm,
               CAST(m.sheet_no AS varchar) sheet_no, m.maint_seq out_seq, m.mat_code item_code, ISNULL(i.item_name,'') itemnm,
+              ISNULL(i.item_spec,'') itemspec, ISNULL(i.UNIT,'EA') unit,
               ABS(ISNULL(m.maint_qty,0)) out_qty, ISNULL(m.maint_cost,0) cost, ABS(ISNULL(m.maint_amt,0)) amt, ABS(ISNULL(m.maint_vat,0)) vat,
               ISNULL(m.remarks,'') remarks, m.insert_user_id reg_user, {upd} upd_user, ISNULL(m.update_datetime,m.insert_datetime) work_dt,
               m.work_order, m.split_work_order, NULL sale_ymd, NULL sale_hms, {pf_col} print_flag
@@ -602,13 +610,24 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
                              tbl="nx.saleout_maint", where=where)
         leg_sel = SEL.format(idcol="NULL", src="legacy", upd="m.update_user_id", pf_col="'0'",
                              tbl="PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT", where=where)
+        # ★정렬: 출고일자 → 작업일시 **모두 최신이 위**(2026-08-28 사용자 요청).
+        #   종전엔 같은 일자 안에서 출고증번호·SEQ 오름차순이라 오래된 게 위로 올라왔다.
         cur.execute(f"""SELECT TOP {int(limit)} * FROM ({web_sel} UNION ALL {leg_sel}) u
-            ORDER BY out_ymd DESC, sheet_no, out_seq""", *(pf + pf))
+            ORDER BY out_ymd DESC, work_dt DESC, sheet_no DESC, out_seq DESC""", *(pf + pf))
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         is_closed = _sale_close_lookup(cur)   # ★작업1: 매출마감된 자료 잠금 플래그(웹편집 차단용)
+        # ★사급 여부 = 그 판매출고가 만든 사급원장행 존재 여부(remarks_src='saleout:<id>')
+        _sg = set()
+        try:
+            cur.execute("""SELECT DISTINCT remarks_src FROM nx.sagub_maint
+                            WHERE maint_tag='5' AND remarks_src LIKE 'saleout:%'""")
+            _sg = {str(r[0]).split(":")[-1] for r in cur.fetchall()}
+        except Exception:
+            pass
         for r in rows:
             r["gubun"] = "5"; r["gubunnm"] = _SALEOUT_GUBUN["5"]
+            r["sagub"] = 1 if (r.get("id") is not None and str(r["id"]) in _sg) else 0
             r["closed"] = 1 if is_closed(r.get("out_cust"), r.get("out_ymd")) else 0
             # 편집가능 = 웹등록분(src=web, id 있음) AND 미마감. 미러(이력)행은 읽기전용.
             r["editable"] = 1 if (r.get("src") == "web" and r.get("id") is not None and not r["closed"]) else 0
@@ -630,6 +649,38 @@ def saleout_list(fr: str = Query(""), to: str = Query(""), sheet: str = Query(""
 #   매출 amt/vat 정본=nx.saleout_maint(유지), 재고 −정본=stock_ledger(단일). 이중계상 방지=재고 posting은 여기 1곳뿐.
 def _saleout_led_del(cur, sid):
     cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='5' AND MAINT_GROUP_SEQ=?", int(sid))
+
+# ★사급재고(업체 보유분) 원장 — 2026-08-28 신설.
+#   레거시 f_pu_set_sagub_stock(pr_com.pbl) 원문:
+#       UPDATE PU_T_SAGUB_STOCK SET STOCK_QTY = STOCK_QTY + :ad_qty
+#        WHERE MAT_CODE=:mat AND CUST_CODE=:cust      (없으면 INSERT)
+#   호출부(w_pu_output_015 ue_save):
+#       f_pu_set_mat_stock (…, 'Z99990', maint_qty, '')        ← 자재재고
+#       f_pu_set_sagub_stock(…, cust_code, maint_qty * -1, '')  ← 사급재고
+#   ★maint_qty 는 **이미 음수**(자재 출고분)라 * -1 → 사급잔액은 **증가**한다.
+#     실측 확인: w_pu_output_015 가 만진 잔액 총합 +943,484 (양수).
+#   의미 = "우리 사급재고는 없다. 자재에서 빠지고, 그만큼 업체가 보유한다."
+#   ⚠라이브는 잔액테이블만 갱신해 원장과 어긋난 키가 있다(2157/MCD62328405: 423,252 vs -10,520).
+#     웹은 CLAUDE.md §1-8 대로 **원장 단일**: 잔액 = SUM(maint_qty) GROUP BY (cust_code, mat_code).
+def _sagub_led_del(cur, sid):
+    """판매출고 1건이 만든 사급행 제거(수정·삭제 시 역진행)."""
+    cur.execute("DELETE FROM nx.sagub_maint WHERE maint_tag='5' AND remarks_src=?", f"saleout:{int(sid)}")
+
+def _sagub_led_post(cur, sid, ymd, cust, item, qty, cost, amt, vat, sheet):
+    """판매출고 → 업체 사급재고 +qty (qty=출고수량 양수). 재게시(기존 링크행 삭제 후 1행)."""
+    _sagub_led_del(cur, sid)
+    if not cust or not item or not qty:
+        return
+    cur.execute("SELECT ISNULL(MAX(maint_seq),0)+1 FROM nx.sagub_maint WHERE maint_ymd=?", ymd)
+    seq = int(cur.fetchone()[0] or 1)
+    cur.execute("""INSERT INTO nx.sagub_maint
+        (maint_ymd, maint_seq, maint_tag, cust_code, mat_code, maint_qty,
+         maint_cost, maint_amt, maint_vat, sheet_no, remarks, remarks_src,
+         insert_user_id, insert_datetime)
+        VALUES(?,?, '5', ?,?,?, ?,?,?, ?, N'판매출고(업체 사급재고 증가)', ?, 'web', getdate())""",
+        ymd, seq, cust, item, abs(float(qty)), float(cost or 0), float(amt or 0), float(vat or 0),
+        (sheet or None), f"saleout:{int(sid)}")
+
 
 def _saleout_led_post(cur, sid, ymd, cust, item, qty, cost, amt, vat, sheet, wo):
     _saleout_led_del(cur, sid)   # 재게시(수정/복사 시 기존 링크행 제거 후 1행 재생성)
@@ -656,6 +707,9 @@ def saleout_save(payload: dict = Body(...)):
     split = str(payload.get("split_work_order", "")).strip()
     out_ymd = str(payload.get("out_ymd", "")).strip()
     cost_override = payload.get("cost")
+    # ★사급 체크박스(레거시 015 그리드 「사급」 열) — 체크된 행만 업체 사급재고가 움직인다.
+    #   기본 1(사급) — 판매출고는 대부분 유상사급이라 레거시도 체크 상태로 들어온다.
+    sagub = str(payload.get("sagub", "1")).strip() not in ("0", "", "false", "False")
     try:
         qty = abs(float(payload.get("out_qty")))
     except Exception:
@@ -669,6 +723,23 @@ def saleout_save(payload: dict = Body(...)):
         # ★Phase4 무상 차단: 무상거래처(문영/경성)는 매출 아님(창고이동) → 사급이동으로 처리
         if _is_free_sagub(cur, cust, out_ymd):
             raise HTTPException(400, "무상사급 거래처는 매출출고가 아닙니다 — 무상사급이동(/api/sagub/move)으로 처리하세요.")
+        # ★출고증번호 자동채번(2026-08-28) — 비어 있으면 발번한다.
+        #   레거시는 (출고일자+거래업체) 한 묶음이 같은 출고증번호를 갖는다.
+        #   같은 날·같은 거래처로 이미 발번된 게 있으면 그 번호를 재사용, 없으면 max+1.
+        if not sheet:
+            cur.execute("""SELECT TOP 1 sheet_no FROM nx.saleout_maint
+                            WHERE maint_tag='5' AND maint_ymd=? AND cust_code=?
+                              AND ISNULL(sheet_no,'')<>'' ORDER BY id DESC""", out_ymd, cust)
+            _ex = cur.fetchone()
+            if _ex and str(_ex[0] or "").strip():
+                sheet = str(_ex[0]).strip()
+            else:
+                cur.execute("""SELECT ISNULL(MAX(CAST(sheet_no AS bigint)),0)+1 FROM (
+                        SELECT sheet_no FROM nx.saleout_maint WHERE ISNUMERIC(sheet_no)=1
+                        UNION ALL
+                        SELECT CAST(sheet_no AS varchar) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
+                         WHERE MAINT_TAG='5' AND sheet_no IS NOT NULL) t""")
+                sheet = str(int(cur.fetchone()[0] or 1))
         # 사급단가: override 있으면 사용, 없으면 자동조회
         cost = float(cost_override) if (cost_override not in (None, "")) else _sagub_price(cur, item, cust, out_ymd)
         amt = float(int(qty * cost))          # truncate(qty*cost) — 레거시 산식
@@ -686,6 +757,8 @@ def saleout_save(payload: dict = Body(...)):
                   maint_cost=?,maint_amt=?,maint_vat=?,remarks=?,work_order=?,split_work_order=?,upd_user='web',update_datetime=getdate()
                 WHERE id=? AND maint_tag='5'""", out_ymd, cust, sheet, item, ledger_qty, cost, amt, vat, remarks, wo, split, int(rid))
             _saleout_led_post(cur, int(rid), out_ymd, cust, item, qty, cost, amt, vat, sheet, wo)  # ★재고 −MAT 재게시
+            if sagub: _sagub_led_post(cur, int(rid), out_ymd, cust, item, qty, cost, amt, vat, sheet)
+            else:     _sagub_led_del(cur, int(rid))        # 사급 체크 해제 시 기존 사급행 제거
         else:
             if sheet:
                 cur.execute("SELECT ISNULL(MAX(maint_seq),0)+1 FROM nx.saleout_maint WHERE sheet_no=?", sheet)
@@ -698,10 +771,123 @@ def saleout_save(payload: dict = Body(...)):
                 out_ymd, seq, cust, sheet, item, ledger_qty, cost, amt, vat, remarks, wo, split)
             newid = int(cur.fetchone()[0])
             _saleout_led_post(cur, newid, out_ymd, cust, item, qty, cost, amt, vat, sheet, wo)  # ★재고 −MAT 게시
+            if sagub: _sagub_led_post(cur, newid, out_ymd, cust, item, qty, cost, amt, vat, sheet)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "cost": cost, "amt": amt, "vat": vat}
     finally:
         cn.close()
+
+@router.get("/api/saleout/slipinfo")
+def saleout_slipinfo(cust: str = Query("")):
+    """★출고증(거래명세표) 머리글 정보 — 공급자(자사) + 공급받는자(거래처).
+       거래처 상세(등록번호·대표자·주소·업태/종목)는 nx.CM_M_CUST 에서 가져온다.
+       (웹 정본 nx.partner 는 코드·명·구분 4컬럼뿐이라 명세표에 필요한 항목이 없다.)"""
+    def _biz(v):
+        v = "".join(ch for ch in str(v or "") if ch.isdigit())
+        return f"{v[:3]}-{v[3:5]}-{v[5:]}" if len(v) == 10 else str(v or "")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        # 공급자 = 자사
+        sup = {}
+        try:
+            cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''), ISNULL(COMPANY_DESCK,''),
+                     ISNULL(OWNER_NAME,''), LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),
+                     ISNULL(BUSI_TYPE,''), ISNULL(BUSI_KIND,''), ISNULL(PHONE_NO,''), ISNULL(FAX_NO,'')
+                  FROM PARTNER_ERP_TEST3.nx.CM_M_COMPANY""")
+            r = cur.fetchone() or ("",) * 8
+            sup = {"biz": _biz(r[0]), "nm": (r[1] or "").strip(), "owner": (r[2] or "").strip(),
+                   "addr": (r[3] or "").strip(), "btype": (r[4] or "").strip(),
+                   "bkind": (r[5] or "").strip(), "tel": (r[6] or "").strip(), "fax": (r[7] or "").strip()}
+        except Exception:
+            pass
+        # 공급받는자 = 거래처
+        buy = {}
+        c = str(cust or "").strip()
+        if c:
+            try:
+                cur.execute("""SELECT TOP 1 ISNULL(BUSINESS_NO,''), ISNULL(CUST_DESC,''),
+                         ISNULL(OWNER_NAME,''), LTRIM(ISNULL(ADDRESS,'')+' '+ISNULL(ADDRESS_DTL,'')),
+                         ISNULL(BUSI_TYPE,''), ISNULL(BUSI_KIND,''), ISNULL(PHONE_NO,''), ISNULL(FAX_NO,'')
+                      FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE RTRIM(CUST_CODE)=?""", c)
+                r = cur.fetchone()
+                if r:
+                    buy = {"biz": _biz(r[0]), "nm": (r[1] or "").strip(), "owner": (r[2] or "").strip(),
+                           "addr": (r[3] or "").strip(), "btype": (r[4] or "").strip(),
+                           "bkind": (r[5] or "").strip(), "tel": (r[6] or "").strip(),
+                           "fax": (r[7] or "").strip()}
+            except Exception:
+                pass
+        return {"supplier": sup, "buyer": buy}
+    finally:
+        cn.close()
+
+
+@router.get("/api/saleout/sagubflag")
+def saleout_sagubflag(item: str = Query(...), cust: str = Query(...)):
+    """★사급 자동체크 — 레거시 w_pu_output_015 `wf_sagub_check()` 원문 이식(2026-08-28).
+
+    원문(사용자 제공):
+        select isnull(max(sagub_flag),'0') into :ls_sagub_flag
+          from pr_m_item_bom a
+          join pr_m_item b on a.item_code = b.item_code
+         where a.mat_code   = :ls_item_code     -- 출고하려는 자재
+           and b.in_cust_code = :ls_cust_code;  -- 그 거래처가 납품처인 도번
+        dw_data.setitem(ai_row, 'sagub_flag', ls_sagub_flag)
+
+    의미 = "이 자재가, **그 거래처가 만드는 도번**의 BOM 에 사급으로 등록돼 있는가".
+    ★웹 정본만 읽는다(CLAUDE.md §1-9 · 사용자 확정 2026-08-28 "웹 기준으로 해야 해,
+      라이브는 오로지 비교 용도"): pr_m_item_bom → nx.v_pr_bom · pr_m_item → **nx.item**.
+      미러(nx.PR_M_ITEM)를 쓰지 않는다.
+    ★검증(2026-08-28): 8월 판매출고 1,560건 대사 **99.10% 일치**(1,546건).
+      불일치 14건은 전부 원장=1/BOM=0 방향 — nx.item.in_cust 교정 진행분(§1-9 명시)과
+      출고 후 BOM 변경분. 미러 기준은 99.68%지만 **정본을 쓴다**(값 드리프트 방지).
+      ⛔종전엔 (거래처,품번) 직전 출고 이력으로 추정했는데, 원문은 BOM 판정이라 교체했다.
+    """
+    item = str(item or "").strip(); cust = str(cust or "").strip()
+    if not item or not cust:
+        return {"sagub": 0, "src": ""}
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT ISNULL(MAX(a.SAGUB_FLAG),'0')
+              FROM nx.v_pr_bom a
+              JOIN nx.item b ON RTRIM(a.ITEM_CODE)=RTRIM(b.item_code)
+             WHERE RTRIM(a.MAT_CODE)=? AND RTRIM(ISNULL(b.in_cust,''))=?""", item, cust)
+        r = cur.fetchone()
+        return {"sagub": 1 if str((r[0] if r else "0") or "0").strip() == "1" else 0, "src": "bom"}
+    except Exception as e:
+        return {"sagub": 0, "src": "err", "_err": str(e)[:200]}
+    finally:
+        cn.close()
+
+
+@router.get("/api/sagub/stock")
+def sagub_stock(cust: str = Query(""), mat: str = Query(""), nonzero: int = Query(1)):
+    """★업체 사급재고 잔액 — 웹 정본 nx.sagub_maint 집계(원장 단일, CLAUDE.md §1-8).
+       잔액 = SUM(maint_qty) GROUP BY (cust_code, mat_code). 라이브 미조회."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        w = []; p = []
+        if cust.strip(): w.append("m.cust_code=?"); p.append(cust.strip())
+        if mat.strip():  w.append("m.mat_code LIKE ?"); p.append(f"%{mat.strip()}%")
+        where = (" WHERE " + " AND ".join(w)) if w else ""
+        having = " HAVING ABS(SUM(CONVERT(float,m.maint_qty)))>0.0001" if nonzero else ""
+        cur.execute(f"""SELECT TOP 3000 m.cust_code, ISNULL(c.CUST_DESC,'') custnm,
+                   m.mat_code, ISNULL(i.item_name,'') itemnm,
+                   SUM(CONVERT(float,m.maint_qty)) bal, COUNT(*) cnt
+              FROM nx.sagub_maint m
+              LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
+              LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=m.mat_code
+              {where}
+             GROUP BY m.cust_code, ISNULL(c.CUST_DESC,''), m.mat_code, ISNULL(i.item_name,'')
+             {having}
+             ORDER BY ABS(SUM(CONVERT(float,m.maint_qty))) DESC""", *p)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows), "total": sum(float(r["bal"] or 0) for r in rows)}
+    finally:
+        cn.close()
+
 
 @router.post("/api/saleout/delete")
 def saleout_delete(payload: dict = Body(...)):
@@ -721,7 +907,9 @@ def saleout_delete(payload: dict = Body(...)):
         n = cur.rowcount
         for x in ids:
             _saleout_led_del(cur, int(x))   # ★Phase4: 링크된 재고 −MAT 원장행 동반삭제
+            _sagub_led_del(cur, int(x))     # ★사급재고 원장행도 동반삭제(대칭 역진행)
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": n}
     finally:
         cn.close()
@@ -751,6 +939,7 @@ def saleout_copy(payload: dict = Body(...)):
         newid = int(cur.fetchone()[0])
         _saleout_led_post(cur, newid, r[0], r[1], r[3], abs(float(r[4] or 0)), r[5], r[6], r[7], r[2], r[9])  # ★재고 −MAT 게시
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True}
     finally:
         cn.close()
@@ -776,6 +965,7 @@ def saleout_carryover(payload: dict = Body(...)):
         for x in ids:  # ★Phase4: 링크된 재고 −MAT 원장 출고일자 동반이월
             cur.execute("UPDATE nx.stock_ledger SET MAINT_YMD=? WHERE STOCK_POINT='MAT' AND MAINT_TAG='5' AND MAINT_GROUP_SEQ=?", ymd, int(x))
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "carried": n, "to": ymd}
     finally:
         cn.close()
@@ -851,15 +1041,18 @@ def lgsale_save(payload: dict = Body(...)):
                 raise HTTPException(409, "LG송장 발행완료 건은 수정 불가(먼저 송장취소)")
             cur.execute("SELECT sale_ymd FROM nx.sale_dtl WHERE id=?", int(rid))
             sy = str(cur.fetchone()[0] or "").strip()
+            _assert_open(cur, sy, "SAL", "출하실적 수정")   # ★마감잠금(기존 출하일자)
             _lgsale_led_post(cur, int(rid), sy, item, qty, wo)   # ★재고 −ASY 재게시
         else:
             cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6), RIGHT(CONVERT(varchar(14),GETDATE(),120),6)")
             ymd, hms = cur.fetchone()
+            _assert_open(cur, ymd, "SAL", "출하실적 등록")   # ★마감잠금
             cur.execute("""INSERT INTO nx.sale_dtl(work_order,split_work_order,item_code,sale_ymd,sale_hms,sale_qty,songjang_print_flag,remarks,insert_user_id,insert_datetime)
                 OUTPUT INSERTED.id VALUES(?,?,?,?,?,?,'0',?,'web',getdate())""", wo, split, item, ymd, hms, qty, remarks)
             newid = int(cur.fetchone()[0])
             _lgsale_led_post(cur, newid, ymd, item, qty, wo)     # ★재고 −ASY 게시
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True}
     except Exception:
         cn.rollback(); raise
@@ -874,6 +1067,9 @@ def lgsale_delete(payload: dict = Body(...)):
         raise HTTPException(400, "id 필요")
     cn = _nx_tx(); cur = cn.cursor()
     try:
+        cur.execute("SELECT sale_ymd FROM nx.sale_dtl WHERE id=?", int(rid))
+        _r = cur.fetchone()
+        if _r: _assert_open(cur, str(_r[0] or "").strip(), "SAL", "출하실적 삭제")   # ★마감잠금
         cur.execute("DELETE FROM nx.sale_dtl WHERE id=? AND ISNULL(songjang_print_flag,'0')='0'", int(rid))
         n = cur.rowcount
         if n == 0:
@@ -881,6 +1077,7 @@ def lgsale_delete(payload: dict = Body(...)):
             raise HTTPException(409, "발행완료 건은 삭제 불가(송장취소 먼저)")
         _lgsale_led_del(cur, int(rid))   # ★링크 −ASY 동반삭제
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": n}
     except Exception:
         cn.rollback(); raise
@@ -917,6 +1114,7 @@ def lgsale_issue(payload: dict = Body(...)):
         if issued == 0:
             raise HTTPException(409, "발행 가능한(미발행) 건이 없습니다.")
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "issued": issued, "sheet_no": sheet}
     finally:
         cn.close()
@@ -940,6 +1138,7 @@ def lgsale_cancel(payload: dict = Body(...)):
         else:
             raise HTTPException(400, "sheet_no 또는 id 필요")
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "canceled": n}
     finally:
         cn.close()
@@ -1324,6 +1523,7 @@ def sale040_confirm(payload: dict = Body(...)):
     if not cells:
         return {"ok": False, "msg": "출하처리할 셀을 선택하세요."}
     cn = _nx_tx(); cur = cn.cursor()
+    _assert_open(cur, ymd, "SAL", "출하처리")   # ★마감잠금
     win = 'w_pr_input_040'
     try:
         cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999) FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
@@ -1395,6 +1595,7 @@ def sale040_confirm(payload: dict = Body(...)):
                 msg += " (" + ", ".join("%s %s:%s" % (x["wo"], x["item"], x["why"]) for x in skipped[:4]) + ")"
             return {"ok": False, "skipped": skipped, "msg": msg}
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         tot = sum(x["qty"] for x in done)
         msg = "출하처리 %d건 · 수량 %d" % (len(done), tot)
         # 재고가 모자라 일부만 잡힌 경우(6개 계획 → 재고 3개 = 3개만)도 명시한다.
@@ -1456,6 +1657,7 @@ def sale040_cancel(payload: dict = Body(...)):
             cn.rollback()
             return {"ok": False, "msg": "취소할 출하실적이 없습니다."}
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "done": done,
                 "msg": "출하취소 %d건 · 수량 %d" % (len(done), sum(x["qty"] for x in done))}
     except Exception:
@@ -1493,7 +1695,7 @@ def shipment_cost(payload: dict = Body(...)):
     try:
         # 마감월 보호 — 마감 후 금액이 바뀌면 원가/매출 집계가 어긋난다
         try:
-            if _closed(cur, ymd):
+            if _closed(cur, ymd, "SAL"):
                 cn.rollback()
                 return {"ok": False,
                         "msg": "마감된 월(20%s-%s)의 출하건은 수정할 수 없습니다." % (ymd[:2], ymd[2:4])}
@@ -1518,6 +1720,7 @@ def shipment_cost(payload: dict = Body(...)):
             cn.rollback()
             return {"ok": False, "msg": "수정 대상이 %d건 — 중단했습니다." % cur.rowcount}
         cn.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "qty": qty, "cost": cost, "amt": amt, "old_cost": old,
                 "msg": "출하단가 {:,.2f} → {:,.2f} · 금액 {:,.0f}".format(old, cost, amt)}
     except Exception as e:

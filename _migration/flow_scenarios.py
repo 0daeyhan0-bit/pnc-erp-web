@@ -224,6 +224,29 @@ def main():
             else:
                 rec("R", c["name"], "PASS" if st == 200 else "FAIL", f"{st} · {note}")
 
+    # ── 캐시 무효화 검사 ────────────────────────────────────────────────
+    #   ★값이 아니라 **재계산 발생**으로 판정한다(이유 = flow_cases.CACHE_CHECKS 주석).
+    #     수불장은 라이브 전표를 읽고 웹 쓰기는 nx 원장에 쓴다 — 축이 달라 값으로는 못 잰다.
+    import time as _t
+    for c in getattr(FC, "CACHE_CHECKS", []):
+        if ARG.only and ARG.only not in c["name"]:
+            continue
+        print("── [R] 캐시 정합 " + "─" * 44)
+        path = c["ledger"](ctx)
+        call("GET", path)                                   # ① 캐시 채움
+        _s = _t.time(); call("GET", path); hit = _t.time() - _s      # ② 캐시 히트 시간
+        st, res = call("POST", c["write_path"], c["write_body"](ctx))
+        wrote = (st == 200 and not (isinstance(res, dict) and res.get("ok") is False))
+        _s = _t.time(); call("GET", path); after = _t.time() - _s    # ③ 쓰기 후 조회
+        if not wrote:
+            rec("R", c["name"], "SKIP", f"선행 쓰기 실패 — {str(res)[:100]}")
+        elif after > max(hit * 3, hit + 1.0):
+            rec("R", c["name"], "PASS",
+                f"캐시가 버려져 재계산됨 — 캐시히트 {hit:.2f}s → 쓰기후 {after:.2f}s")
+        else:
+            rec("R", c["name"], "FAIL",
+                f"★캐시 stale — 쓰기 후에도 캐시히트({hit:.2f}s → {after:.2f}s). 무효화 미연결")
+
     # ── 롤백 + 오염 0 ────────────────────────────────────────────────
     print("── 롤백 & 오염 0 증명 " + "─" * 40)
     st, rb = call("POST", "/api/_flow/rollback")

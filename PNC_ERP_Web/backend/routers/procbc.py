@@ -200,6 +200,60 @@ def _apply(cur, c, box, good, bad, sign, user, ymd, win):
             _upd_stock(cur, "PU_T_MAT_STOCK_WH",
                        [("MAT_CODE", child), ("CUST_CODE", WH_CUST), ("GAGONG_PROC_CODE", cgpc)], d, user, win)
             moved.append(("하위자재", child, d))
+    # ⑤ ★자재세트재고 차감(2026-08-27 사용자 확정 규칙)
+    #    "생산실적을 잡으면 세트재고가 차감되고, 하위재고는 BOM 기준으로 차감된다."
+    #    ④가 하위자재(BOM)를 이미 차감하므로, 여기서는 **세트(도번) 계정**만 내린다.
+    #
+    #    세트재고 = 가상창고다(실물 아님). 세트로 들어온 도번을 생산에 쓰면 그만큼 계정이 줄고,
+    #    입고보다 생산이 많으면 음수가 된다(레거시 실측: 대원산업 320건 합계 −1,335,595).
+    #
+    #    대칭성: setin.py 의 입고가 maint_tag='2'(+) 로 넣으므로 차감은 '3'(−).
+    #      레거시 PU_T_SET_STOCK_MAINT 태그 체계와 동일 — 2=입고 · 3=출고 · 1=조정.
+    #    ⚠세트로 관리되는 도번(nx.set_input_req 에 이력이 있는 것)만 대상.
+    #      세트 계정이 없는 도번까지 음수로 만들면 잔액이 오염된다.
+    #    ★거래처 = **그 도번에 걸린 세트 거래처 전부**. 하나로 특정하지 않는다.
+    #      레거시 w_pr_input_520 원문(pr_prod_04.pbl) 그대로:
+    #          dw_7.retrieve(is_item_code)                    ← 도번의 세트 거래처 목록
+    #          for ll_row2 = 1 to dw_7.rowcount()             ← ★거래처마다 반복
+    #              dw_8 … PU_T_SET_OUTPUT_DTL (세트사용실적)
+    #              f_pu_set_set_mat_stock(win, ymd, item, in_cust, -barcode_qty, '')
+    #          next
+    #      즉 한 도번이 3개 협력사에 세트로 걸려 있으면 **3곳 모두 전량 차감**한다
+    #      (실측: 같은 도번 복수 협력사 31종/181종. AHQ73469301 = 2067·2096·2266).
+    #      세트재고가 크게 음수인 이유가 이것이다(가상창고).
+    #    ⛔전표(PR_T_INDI_CUTTING)에 거래처 컬럼이 없고, 품목마스터 in_cust 로는
+    #      set_input_req 와 213쌍 중 0쌍 일치라 특정 자체가 불가능하다 —
+    #      레거시도 특정하지 않으므로 원문대로 전 거래처 차감이 맞다.
+    _sq = good * sign
+    if c.get("assy") and _sq:
+        try:
+            cur.execute("""SELECT in_cust_code FROM nx.set_input_req
+                            WHERE item_code=? AND ISNULL(in_cust_code,'')<>''
+                            GROUP BY in_cust_code""", c["assy"])
+            _custs = [str(x[0]).strip() for x in cur.fetchall()]
+            if _custs:
+                cur.execute("SELECT ISNULL(MAX(maint_seq),0) FROM nx.set_stock_maint WHERE maint_ymd=?", ymd)
+                _ms = int(cur.fetchone()[0] or 0)
+                _hms = datetime.now().strftime("%H%M%S")
+                for _cust in _custs:
+                    _ms += 1
+                    cur.execute("""INSERT INTO nx.set_stock_maint
+                           (maint_ymd,maint_seq,maint_tag,in_tag,cust_code,item_code,maint_qty,
+                            item_gubun,status,derived_flag,remarks,insert_user_id,insert_datetime)
+                           VALUES(?,?,'3','2',?,?,?,'1','90','1',?,?,getdate())""",
+                                ymd, _ms, _cust, c["assy"], -_sq,
+                                ("생산실적 세트차감(box %s)" % box)[:100], user)
+                    # 세트사용실적(레거시 PU_T_SET_OUTPUT_DTL 대응) — work_order=바코드
+                    cur.execute("""INSERT INTO nx.set_output_dtl
+                           (work_order,split_work_order,item_code,in_cust_code,output_ymd,output_hms,
+                            set_qty,line_no,work_code,finish_flag,output_user_id,remarks)
+                           VALUES(?,'',?,?,?,?,?,?,?,'0',?,?)""",
+                                str(box), c["assy"], _cust, ymd, _hms, -_sq,
+                                c.get("line_no") or '', c.get("assy_work") or '',
+                                user, ("생산실적(box %s)" % box)[:100])
+                    moved.append(("세트재고", "%s/%s" % (c["assy"], _cust), -_sq))
+        except Exception:
+            pass       # 세트 테이블 미비 시 생산실적 자체는 막지 않는다
     return moved
 
 @router.post("/api/gagong/barcode/register")

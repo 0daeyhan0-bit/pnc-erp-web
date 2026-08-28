@@ -78,15 +78,22 @@ SCREEN.planuploadrev=(c)=>{
     {c:'H', no:'②', nm:'생산계획이력생성',       ep:'/api/planrev/step/history',  bg:'#155e75'},
     {c:'L', no:'③', nm:'라인별 투입시간조정', ep:'/api/planrev/step/linetime', bg:'#b8860b'},
     {c:'K', no:'④', nm:'파트별 계획생성',     ep:'/api/planrev/step/part',     bg:'#1c7c3a'},
+    // ★⑤ 가 협력사 점검(구 ⑥)까지 수행한다(2026-08-27).
+    //   구 ⑥「협력사계획 편성」은 이름과 달리 쓰기 0·조회 2번(0초)뿐이라 '편성'이 아니었다.
+    //   레거시 SP_PR_CREATE_PLAN_협력사계획_생성 이 만드는 자재소요는 ⑤(STEP7)가 이미 만들고,
+    //   그 SP 의 또다른 산출물 PR_T_PLAN_PART_MAT_BY_ITEM 은 웹·레거시 어디서도 안 읽는다(참조 0건).
     {c:'T', no:'⑤', nm:'자재소요·조달 편성',  ep:'/api/planrev/step/mat',      bg:'#7a4ca0'},
-    {c:'S', no:'⑥', nm:'협력사계획 편성',     ep:'/api/planrev/step/coop',     bg:'#a0521c'},
   ];
   const PREV={M:[],H:['M'],L:['M'],K:['M'],T:['K'],S:['T']};   // 낡음 판정용 선행단계
-  let jobs={}, jobUp='', planRows=0, running='', srcDt={};   // srcDt={SAC:{hms,rows},RAC:{...}}
+  let jobs={}, jobUp='', planRows=0, running='', srcDt={}, jobYmd='';   // srcDt={SAC:{hms,rows},RAC:{...}}
 
+  // ★단계 완료시각은 **계획기간 시작일(F.from)에 실행된 기록**을 본다(2026-08-27 요청).
+  //   날짜를 바꾸면 그 날 무엇을 몇 시에 돌렸는지가 그대로 보인다.
   const loadJobs=async()=>{
-    try{const r=await fetch(`${API}/api/planrev/job/status`);const j=await r.json();
-      jobs=j.steps||{}; jobUp=j.upload_dt||''; planRows=j.plan_rows||0; srcDt=j.src||{};}
+    try{const r=await fetch(`${API}/api/planrev/job/status?ymd=${encodeURIComponent(F.from||'')}`);
+      const j=await r.json();
+      jobs=j.steps||{}; jobUp=j.upload_dt||''; planRows=j.plan_rows||0; srcDt=j.src||{};
+      jobYmd=j.ymd||'';}
     catch(e){jobs={};}
   };
   const load=async()=>{loading=true;draw();
@@ -109,15 +116,30 @@ SCREEN.planuploadrev=(c)=>{
         <b>${k}</b><span>${on?esc(d.hms):'--:--:--'}</span></div>`;};
     return `<div style="display:flex;flex-direction:column;gap:2px;margin-left:8px">${one('SAC')}${one('RAC')}</div>`;
   };
+  // ★일자 표기(2026-08-27 요청) — 시각만 있으면 어제 것인지 알 수 없다.
+  //   오늘이면 시각만, 다른 날이면 'MM/DD HH:MM:SS' 로 날짜를 함께 보여준다.
+  const todayIso=()=>{const t=new Date();
+    return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;};
+  const stamp=(j)=>{
+    const y=j&&j.ymd, h=(j&&j.hms)||'';
+    if(!y)return h;
+    if(y===todayIso())return h;                       // 오늘 → 시각만
+    return `${y.slice(5).replace('-','/')} ${h}`;     // 다른 날 → MM/DD HH:MM:SS
+  };
   const boxOf=(s)=>{
     const j=jobs[s.c];
     if(running===s.c)  return {bg:'#e8f0fe',fg:'#1c47a0',tx:'실행중…',ti:''};
     if(running==='ALL'&&!s.todo) return {bg:'#e8f0fe',fg:'#1c47a0',tx:'대기…',ti:'일괄작업 진행 중'};
-    if(!j)             return {bg:'#f1f3f5',fg:'#adb5bd',tx:'미실행',ti:'아직 실행한 적 없습니다'};
-    if(j.status!=='OK')return {bg:'#fdeaea',fg:'#c0392b',tx:'실패 '+(j.hms||''),ti:j.err||'실패'};
-    if(stale(s.c))     return {bg:'#fff4e0',fg:'#b06a00',tx:'⚠ '+(j.hms||''),
+    if(!j)             return {bg:'#f1f3f5',fg:'#adb5bd',tx:'미실행',
+                               ti:jobYmd?`${jobYmd} 에 이 단계를 실행한 기록이 없습니다`:'아직 실행한 적 없습니다'};
+    // ★오늘이 아니면 색을 죽여(회색) '오래된 결과'임을 한눈에 보이게 한다.
+    const old=!!(j.ymd&&j.ymd!==todayIso());
+    if(j.status!=='OK')return {bg:'#fdeaea',fg:'#c0392b',tx:'실패 '+stamp(j),ti:j.err||'실패'};
+    if(stale(s.c))     return {bg:'#fff4e0',fg:'#b06a00',tx:'⚠ '+stamp(j),
                                ti:'선행단계가 이후에 다시 실행됨 — 이 단계도 다시 실행하는 것이 안전합니다'};
-    return {bg:'#e6f4ea',fg:'#1c7c3a',tx:j.hms||'',
+    if(old)            return {bg:'#eef1f4',fg:'#6b7785',tx:stamp(j),
+                               ti:`${j.ymd} ${j.hms} · ${j.elapsed||0}초 · ${nf(j.rows||0)}행 · ${j.by||''}\n※오늘 실행분이 아닙니다.`};
+    return {bg:'#e6f4ea',fg:'#1c7c3a',tx:stamp(j),
             ti:`${j.ymd||''} ${j.hms||''} · ${j.elapsed||0}초 · ${nf(j.rows||0)}행 · ${j.by||''}`};
   };
 
@@ -125,8 +147,9 @@ SCREEN.planuploadrev=(c)=>{
     M:()=>`신규모델 ${nf(j.model_rows)}건`,
     H:()=>`LG계획 ${nf(j.sale_plan_rows)}행 · 이력 ${nf(j.snap_rows)}행 (기준 ${j.base_ymd||''})`,
     K:()=>`품목계획 ${nf(j.item_lines)} · 파트계획 ${nf(j.part_lines)}(제번 ${nf(j.part_work_orders)})`,
-    T:()=>`자재소요 ${nf(j.mat_lines)}(제번 ${nf(j.mat_work_orders)}) · 조달 ${nf(j.sourcing_lines)}`,
-    S:()=>`자재 ${nf(j.coop_lines)}행 · 작업처 ${nf(j.coop_wc)}`
+    // ★⑤ 에 협력사 점검(구 ⑥) 결과를 함께 표시
+    T:()=>`자재소요 ${nf(j.mat_lines)}(제번 ${nf(j.mat_work_orders)}) · 조달 ${nf(j.sourcing_lines)}`
+        +(j.coop_wc!==undefined?` · 협력사 작업처 ${nf(j.coop_wc)}`:'')
         +((j.unmapped_wc&&j.unmapped_wc.length)?`\n⚠ 미매핑 작업처 ${j.unmapped_wc.length}종: `
           +j.unmapped_wc.slice(0,8).map(x=>x.wc).join(', '):''),
   }[code]||(()=>''))();
@@ -164,20 +187,20 @@ SCREEN.planuploadrev=(c)=>{
 
   const runAll=async()=>{
     if(running)return;
-    if(!confirm('생산계획 일괄작업\n\n①신규모델 → ②생산계획이력생성 → ③라인별 투입시간조정 → ④파트별 → ⑤자재소요·조달 → ⑥협력사\n'
-      +'를 순차 실행합니다.\n\n'
+    if(!confirm('생산계획 일괄작업\n\n①신규모델 → ②생산계획이력생성 → ③라인별 투입시간조정 → ④파트별 → ⑤자재소요·조달\n'
+      +'를 순차 실행합니다. (⑤가 협력사 점검까지 수행합니다)\n\n'
       +'수 분 걸릴 수 있습니다. 진행할까요?'))return;
     running='ALL'; draw();
     // 예상시간 = 각 단계 과거 소요의 합(없으면 0 → 흐르는 바)
-    const estAll=['M','H','L','K','T','S'].reduce((a,c)=>a+estOf(c),0);
+    const estAll=['M','H','L','K','T'].reduce((a,c)=>a+estOf(c),0);
     pgOpen('생산계획 일괄작업 진행 중', estAll);
     // ★일괄은 단계별 확인창을 띄우지 않는다(레거시 동일). 대신 팝업 문구로 현재 단계를 알린다.
     //   서버가 한 요청으로 처리하므로 실제 단계 전환은 job/status 폴링으로 감지한다.
     let poll=setInterval(async()=>{
       try{const q=await fetch(`${API}/api/planrev/job/status`);const st=(await q.json()).steps||{};
-        const cur=['S','T','K','L','H','M'].find(c=>st[c]&&st[c].status==='OK'&&st[c].ok_dt);
+        const cur=['T','K','L','H','M'].find(c=>st[c]&&st[c].status==='OK'&&st[c].ok_dt);
         const nextNm={M:'② 생산계획이력생성',H:'③ 라인별 투입시간조정',L:'④ 파트별 계획생성',
-                      K:'⑤ 자재소요·조달 편성',T:'⑥ 협력사계획 편성'}[cur];
+                      K:'⑤ 자재소요·조달 편성'}[cur];
         if(nextNm)pgText('일괄작업 — '+nextNm+' 진행 중');
       }catch(e){}
     },5000);
@@ -242,7 +265,7 @@ SCREEN.planuploadrev=(c)=>{
         <div style="display:flex;flex-direction:column;gap:3px;min-width:152px">
           <button class="btn" id="p-all"${running?' disabled':''}
             style="background:#c0392b;color:#fff;font-size:12px;padding:6px 9px;white-space:nowrap">⚡ 생산계획 일괄작업</button>
-          <div style="text-align:center;font-size:11px;color:var(--muted)">${running==='ALL'?'실행 중… (수 분)':'①②④⑤⑥ 순차'}</div>
+          <div style="text-align:center;font-size:11px;color:var(--muted)">${running==='ALL'?'실행 중… (수 분)':'①②③④⑤ 순차'}</div>
         </div>
         <div style="width:1px;background:var(--line-2,#c9d3e0);align-self:stretch;margin:0 5px"></div>
         ${STEPS.map(s=>{const b=boxOf(s);const dis=(running&&!s.todo)?' disabled':'';
@@ -273,6 +296,8 @@ SCREEN.planuploadrev=(c)=>{
     const g=id=>c.querySelector(id);
     g('#p-search').onclick=()=>{F.from=g('#p-from').value;F.to=g('#p-to').value;
       F.wo=g('#p-wo').value;F.model=g('#p-model').value;F.cr=g('#p-cr').value;load();};
+    // ★계획기간 시작일을 바꾸면 그 날의 실행이력으로 즉시 갱신(그리드는 [조회] 때만).
+    const pf=g('#p-from'); if(pf)pf.onchange=async e=>{F.from=e.target.value;await loadJobs();draw();};
     if(canW){
       const uc=g('#p-upcr'); if(uc)uc.onchange=e=>upcr=e.target.value;
       const uf=g('#p-file'); if(uf)uf.onchange=e=>{
@@ -319,7 +344,9 @@ SCREEN.modelbomhist=(c)=>{
   const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
   const T=new Date();
   let tab='hist';                                  // hist | except
-  let F={ymd:iso(new Date(T.getTime()-30*864e5)), model:'', item:''};
+  // ★기준일자 = 당일(2026-08-27 요청). 백엔드는 INSERT_DATETIME>=기준일자 로 필터하므로
+  //   당일이면 '오늘 등록·수정된 모델BOM'만 보인다. 과거분은 날짜를 내려서 조회.
+  let F={ymd:iso(T), model:'', item:''};
   let rows=[], models=[], sel='', loading=false, msg='', pick=new Set();
 
   const load=async()=>{
