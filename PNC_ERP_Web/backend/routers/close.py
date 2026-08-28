@@ -560,21 +560,15 @@ def _mv_scope(cur):
 def _mv_step(state, moves, scope):
     """하루 이동평균 전개. state={mat:[qty,avg]} in-place.
        ★규칙1 재고<=0 에서 매입 refill = 단가 리셋(마이너스재고 평균폭발 방지 — 검증된 우리 규칙).
-       ★규칙2 **금액 0 인 입고는 단가에 영향을 주지 않는다**(대표 확정 2026-08-28).
-          무상입고(사급 반입 등)는 **수량만** 늘리고 단가는 그대로 둔다.
-          이유: 취득원가가 없는 입고가 기존 재고의 평가를 바꿀 근거가 없다. 오히려 가중평균
-          분모만 키워 단가를 희석시킨다.
-          ★실증(2026-08-28): MJU63057401 이 기초 235.71 → 7월 무상입고 반복으로
-            47.14 → 23.57 → 0.62 → 0.00 으로 소멸. MJU63156803 도 757.55 → 0.
-            단가0 99건 중 '무상입고' 분류 75건이 이 경로일 수 있다."""
+       """
     for mat, mv in moves.items():
         if mat not in scope:                 # 소모품·미등록 = 평가 대상 아님
             continue
         q0, a0 = state.get(mat, [0.0, 0.0])
         pq, pamt = mv["pq"], mv["pamt"]
-        if pq > 0 and pamt > 0:              # ★금액이 있는 입고만 평균 갱신
+        if pq > 0:
             avg = ((q0 * a0 + pamt) / (q0 + pq)) if q0 > 0 else (pamt / pq)
-        else:                                # 입고 없음 · 또는 금액0(무상) → 단가 불변
+        else:
             avg = a0
         state[mat] = [q0 + mv["net"], avg]
 
@@ -1062,13 +1056,10 @@ def _snap_prd(cur, ptype, period):
         for k, mv in moves[ymd].items():
             q0, a0 = state.get(k, [0.0, 0.0])
             pq = mv["inq"]
-            c = (px.get(k[0]) or (0.0,))[0]
-            if pq > 0 and c > 0:                          # ★단가가 있는 입고만 평균 갱신
+            if pq > 0:                                    # 입고 = 그 시점 자재단가로 가중평균
+                c = (px.get(k[0]) or (a0,))[0]
                 avg = ((q0 * a0 + pq * c) / (q0 + pq)) if q0 > 0 else c
-            else:                                         # 입고 없음·단가0 입고 → 단가 불변
-                #   ★단가0 입고가 분모만 키워 기존 단가를 희석시키는 것을 막는다(자재 _mv_step 규칙2 동일).
-                #     대표 확정 2026-08-28 "0원이 재고가격에 영향을 주면 안 된다".
-
+            else:
                 avg = a0
             state[k] = [q0 + mv["net"], avg]
             a = agg.setdefault(k, [0.0, 0.0])
@@ -1102,15 +1093,44 @@ _SNAP_INS = """INSERT INTO nx.stock_snapshot
 
 def _snap_bulk(cur, domain, ptype, period, rows):
     """rows=[(item, loc, qty, amt, cost, inq, outq)] → 멱등 DELETE 후 배치 적재. 반환 행수.
-       잔량 0·빈 품번 제외(대표 확정)."""
+
+       ★확정 스냅샷 제외 규칙 (대표 확정)
+         ① 빈 품번 · 잔량 0
+         ② **단가 0**   — 단가 원천이 없는 것은 **잘못된 재고일 확률이 높다**(2026-08-28).
+         ③ **음수 수량** — 실물이 음수일 수 없다. 컷오버 정리대상(X1).
+       ★②③ 은 **수량·금액 모두** 스냅샷에서 뺀다(행 자체를 적재하지 않음).
+         빠진 것들은 `/api/close/anomaly` 리포트로 노출되어 사라지지 않는다.
+       ※이 규칙 때문에 레거시(단가0·음수 포함)와 수량 대조 시 범위를 맞춰야 한다
+         — 레거시 중 "잔량>0 AND 단가<>0" 과 비교."""
     cur.execute("DELETE FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?", domain, ptype, period)
-    data = []
+    cur.execute("IF OBJECT_ID('nx.stock_snapshot_drop','U') IS NOT NULL DELETE FROM nx.stock_snapshot_drop "
+                "WHERE domain=? AND ptype=? AND period=?", domain, ptype, period)
+    data = []; drop = []
     for item, loc, q, amt, cost, inq, outq in rows:
         item = str(item or "").strip().upper()
-        if not item or abs(q) < 1e-9:
+        if not item or abs(q) < 1e-9:          # ① 빈 품번·잔량0
             continue
+        rc = round(cost, 4)                    # ★저장되는 값(반올림 후)으로 판정해야 한다.
+        if q < 0:                              # ③ 음수 수량 → 제외 + 기록
+            drop.append((item, str(loc or ""), q, amt, rc, "음수수량")); continue
+        if abs(rc) < 1e-9:                     # ② 단가0 → 제외 + 기록. 반올림 전 값으로 보면
+            drop.append((item, str(loc or ""), q, amt, rc, "단가0")); continue
         data.append((domain, ptype, period, item[:50], str(loc or "")[:20],
-                     round(q, 4), round(amt, 4), round(cost, 4), round(inq, 4), round(outq, 4)))
+                     round(q, 4), round(amt, 4), rc, round(inq, 4), round(outq, 4)))
+    # ★제외분 보존 — '잘못된 재고'가 조용히 사라지지 않게 남긴다(대표 확정 2026-08-28).
+    #   컷오버 때 이 목록은 **이관하지 않는다**(X1). 매달 무엇을 인식하지 않았는지 추적 가능.
+    cur.execute("""IF OBJECT_ID('nx.stock_snapshot_drop','U') IS NULL
+        CREATE TABLE nx.stock_snapshot_drop(
+          domain varchar(10) NOT NULL, ptype char(1) NOT NULL, period varchar(6) NOT NULL,
+          item_code varchar(50) NOT NULL, loc varchar(20) NOT NULL CONSTRAINT DF_drop_loc DEFAULT(''),
+          stock_qty decimal(18,4) NULL, stock_amt decimal(18,4) NULL, avg_cost decimal(18,4) NULL,
+          reason varchar(20) NULL, close_dt datetime NULL)""")
+    if drop:
+        cur.executemany("""INSERT INTO nx.stock_snapshot_drop
+              (domain,ptype,period,item_code,loc,stock_qty,stock_amt,avg_cost,reason,close_dt)
+            VALUES(?,?,?,?,?,?,?,?,?,GETDATE())""",
+            [(domain, ptype, period, it[:50], lo[:20], round(q, 4), round(a, 4), c, rs)
+             for it, lo, q, a, c, rs in drop])
     if not data:
         return 0
     try:
@@ -1127,13 +1147,15 @@ SNAPPERS = {"MAT": _snap_mat, "PRD": _snap_prd, "SAL": _snap_sal}
 # ===================== 마감 실행 / 해제 =====================
 @router.get("/api/close/anomaly")
 def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: str = Query("")):
-    """★확정 스냅샷 이상치 리포트 (§16-5·§14-4).
-       마감은 됐지만 **사람이 봐야 하는 것**을 드러낸다. 마감을 막지는 않는다.
-         ① 단가0  — 단가 원천이 없어 재고금액이 0 으로 계상된 품목
-         ② 음수재고 — 실물이 음수일 수 없다(미기록 입고 또는 과대 출고). 컷오버 정리대상(X1)
-       각 항목에 **원인 분류**를 붙여 조치 주체를 알 수 있게 한다."""
-    d, t, p = _norm(domain, ptype, period or None) if period.strip() else (
-        str(domain).strip().upper(), str(ptype).strip().upper(), "")
+    """★확정 스냅샷 **제외분** 리포트 — "무엇을 재고로 인식하지 않았는가".
+
+       마감 계산은 당월 입·출고를 전부 반영한다. 그 **결과**가 아래면 확정 재고에서 뺀다:
+         ② **단가 0**   — 단가 원천이 없다 = 잘못된 재고일 확률이 높다
+         ③ **음수 수량** — 우리 시스템은 음수를 허용하지 않는다(`_neg_stock_msg` 차단)
+       뺀 것은 `nx.stock_snapshot_drop` 에 보존되어 **여기서 드러난다**(대표 확정 2026-08-28
+       "잘못된 것이 보여지게 하는 것이 맞다"). **컷오버 때 이 재고는 이관하지 않는다**(X1).
+       각 항목에 원인 분류를 붙여 조치 주체를 알 수 있게 한다."""
+    d = str(domain).strip().upper(); t = str(ptype).strip().upper(); p = str(period).strip()
     cn = _nx(); cur = cn.cursor()
     try:
         if not p:                       # 기간 미지정 = 그 도메인의 최종 확정 기간
@@ -1143,14 +1165,18 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
             if not r:
                 return {"domain": d, "ptype": t, "period": None, "rows": [], "summary": {}}
             p = r[0]
-        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(loc,''), stock_qty, stock_amt, avg_cost
-                         FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?""", d, t, p)
-        snap = [(str(a), str(b), float(c), float(e), float(f or 0)) for a, b, c, e, f in cur.fetchall()]
-        zero = [x for x in snap if x[4] == 0]
-        neg = [x for x in snap if x[2] < 0]
+        cur.execute("SELECT COUNT(*), ISNULL(SUM(stock_qty),0), ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot "
+                    "WHERE domain=? AND ptype=? AND period=?", d, t, p)
+        kn, kq, ka = cur.fetchone()
+        cur.execute("""IF OBJECT_ID('nx.stock_snapshot_drop','U') IS NULL SELECT TOP 0 '' item_code, '' loc,
+                          CAST(0 AS decimal(18,4)) stock_qty, CAST(0 AS decimal(18,4)) stock_amt,
+                          CAST(0 AS decimal(18,4)) avg_cost, '' reason
+                       ELSE SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(loc,''), stock_qty, stock_amt, avg_cost, ISNULL(reason,'')
+                              FROM nx.stock_snapshot_drop WHERE domain=? AND ptype=? AND period=?""", d, t, p)
+        drops = [(str(a), str(b), float(c or 0), float(e or 0), float(f or 0), str(g)) for a, b, c, e, f, g in cur.fetchall()]
         # 원인 분류 — 매입 전표 유무/금액 유무
         buy = {}
-        if zero:
+        if drops:
             ph = ','.join('?' * len(TA_IN_TAGS))
             cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))),
                                    SUM(CAST(MAINT_QTY AS float)), SUM(CAST(MAINT_AMT AS float))
@@ -1160,26 +1186,27 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item")
         nm = {str(a): b for a, b in cur.fetchall()}
 
-        def cause(it):
+        def cause(it, reason):
+            if reason == "음수수량":
+                return "음수재고 — 미기록 입고 또는 과대 출고. 컷오버 미이관(X1)"
             b = buy.get(it)
-            if b and b[0] > 0 and b[1] > 0: return "회수가능(실매입 단가 있음)"
-            if b and b[0] > 0:              return "무상입고(매입 금액0)"
-            if not b:                       return "매입이력 없음"
-            return "기타"
+            if b and b[0] > 0 and b[1] > 0: return "단가0 — 회수가능(실매입 단가 있음)"
+            if b and b[0] > 0:              return "단가0 — 금액0 입고만 있음"
+            if not b:                       return "단가0 — 매입이력 없음"
+            return "단가0 — 기타"
 
-        rows = []
-        for it, lo, q, amt, c in sorted(zero, key=lambda x: -abs(x[2]))[:500]:
-            rows.append({"kind": "단가0", "item": it, "nm": nm.get(it, ""), "loc": lo,
-                         "qty": round(q, 3), "amt": round(amt, 0), "cost": c, "cause": cause(it)})
-        for it, lo, q, amt, c in sorted(neg, key=lambda x: x[2])[:500]:
-            rows.append({"kind": "음수재고", "item": it, "nm": nm.get(it, ""), "loc": lo,
-                         "qty": round(q, 3), "amt": round(amt, 0), "cost": c, "cause": "컷오버 정리대상(X1)"})
+        rows = [{"kind": rs, "item": it, "nm": nm.get(it, ""), "loc": lo,
+                 "qty": round(q, 3), "amt": round(a, 0), "cost": c, "cause": cause(it, rs)}
+                for it, lo, q, a, c, rs in sorted(drops, key=lambda x: -abs(x[2]))[:1000]]
         from collections import Counter
-        cc = Counter(r["cause"] for r in rows if r["kind"] == "단가0")
-        return {"domain": d, "ptype": t, "period": p, "total": len(snap),
-                "summary": {"단가0": len(zero), "음수재고": len(neg),
-                            "단가0_원인별": dict(cc),
-                            "음수금액": round(sum(x[3] for x in neg), 0)},
+        return {"domain": d, "ptype": t, "period": p,
+                "kept": {"품목": kn, "수량": round(float(kq), 3), "금액": round(float(ka), 0)},
+                "summary": {"제외 총건": len(drops),
+                            "단가0": sum(1 for x in drops if x[5] == "단가0"),
+                            "음수수량": sum(1 for x in drops if x[5] == "음수수량"),
+                            "제외 수량": round(sum(x[2] for x in drops), 3),
+                            "제외 금액": round(sum(x[3] for x in drops), 0),
+                            "원인별": dict(Counter(r["cause"] for r in rows))},
                 "rows": rows}
     finally:
         cn.close()
