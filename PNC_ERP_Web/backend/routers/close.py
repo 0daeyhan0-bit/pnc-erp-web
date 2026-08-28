@@ -124,7 +124,10 @@ def close_calendar(domain: str = Query("MAT"), ym: str = Query("")):
 
 def _mat_consum(cur):
     """소모품 집합(신규 진입 제외용)."""
-    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_SGROUP LIKE '99%'")
+    # ★소스 = nx.item(정본). 종전엔 은퇴 대상 미러 nx.PR_M_ITEM 를 읽었다 —
+    #   리더 이관(PR#66~75)이 끝난 뒤 새로 쓴 코드에 다시 들어온 회귀였다(2026-08-27).
+    #   실측: 소모품 집합 226 = 226, 양쪽 차 0 ⟹ 값 변화 없음.
+    cur.execute("SELECT item_code FROM PARTNER_ERP_TEST3.nx.item WHERE sgroup LIKE '99%'")
     return {str(r[0]).strip().upper() for r in cur.fetchall()}
 
 
