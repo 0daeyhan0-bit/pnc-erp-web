@@ -1343,12 +1343,19 @@ const PROC_MODAL_HTML=(pd)=>{
   const wTypes=[...new Set([...(pd.weldTypes||[]),'RAC30599301-1','RAC30599327','RAC30599328','RAC30599303'])];
   const wLabel=w=>({'RAC30599301-1':'1% 용접봉','RAC30599327':'3% 용접봉','RAC30599328':'30% BAG','RAC30599303':'BCUP'}[w]||w);
   const fmtU=v=>{if(!v)return '';const s=(+v).toFixed(5);return s.replace(/0+$/,'').replace(/\.$/,'');};
-  // %유형 드롭다운 옵션(nx.weld_type_map 활성) — 없으면 하드코드 4종 fallback
-  const wtl=pd.weldTypeList||[];
-  const wtOpts=(sel)=>wtl.length
-    ? wtl.map(t=>`<option value="${esc(t.code)}" ${t.code===sel?'selected':''}>${esc(t.weld_type||'')} · ${esc(t.code)}${t.name?' ('+esc(t.name)+')':''}</option>`).join('')
-      +(sel&&!wtl.some(t=>t.code===sel)?`<option value="${esc(sel)}" selected>${esc(sel)} (미등록)</option>`:'')
-    : wTypes.map(w=>`<option value="${esc(w)}" ${w===sel?'selected':''}>${esc(w)} · ${esc(wLabel(w))}</option>`).join('');
+  // ★%유형 드롭다운(개별코드 아님) — value=%유형(weld_type), 저장은 대표코드로 자동 매핑. 없으면 코드 fallback.
+  const wtl=pd.weldTypeList||[];              // [{weld_type,rep_code,codes}]
+  const c2t=pd.weldCode2Type||{};
+  const wtOpts=(selType,selCode)=>{           // selType=%유형(있으면 우선), selCode=저장코드(유형 못 찾을 때 표시)
+    const st = selType || c2t[selCode] || '';
+    if(wtl.length){
+      let o = wtl.map(t=>`<option value="${esc(t.weld_type)}" ${t.weld_type===st?'selected':''}>${esc(t.weld_type)}</option>`).join('');
+      if(!st && selCode) o = `<option value="" selected>— 미분류 (${esc(selCode)}) —</option>`+o;
+      else if(st && !wtl.some(t=>t.weld_type===st)) o = `<option value="${esc(st)}" selected>${esc(st)}</option>`+o;
+      return o;
+    }
+    return wTypes.map(w=>`<option value="${esc(w)}" ${w===selCode?'selected':''}>${esc(w)} · ${esc(wLabel(w))}</option>`).join('');
+  };
   const procOpts=(sel)=>['51','28'].map(p=>`<option value="${p}" ${String(sel)===p?'selected':''}>${p==='51'?'용접':'은납'}</option>`).join('');
   // ── 다종 매트릭스(pd.weldMulti = [{weld_item,proc_code,counts:{diam2dp:qty}}]) ──
   const weldMultiTable=()=>{
@@ -1363,9 +1370,10 @@ const PROC_MODAL_HTML=(pd)=>{
       gUse+=tUse;gSt+=tSt;
       return `<tr style="background:${ti%2?'#faf7ff':'#fff'}">
         <td style="text-align:left;white-space:nowrap">
-          <select class="wm-mtype" data-ti="${ti}" style="font-size:11px;max-width:210px">${wtOpts(t.weld_item)}</select>
+          <select class="wm-mtype" data-ti="${ti}" style="font-size:11px" title="용접봉 %유형 선택 — 저장은 대표코드로 자동 매핑">${wtOpts(t.weld_type,t.weld_item)}</select>
           <select class="wm-mproc" data-ti="${ti}" style="font-size:11px" title="용접(51)/은납(28) 공정구분">${procOpts(t.proc_code||'51')}</select>
-          <span class="wm-mdel" data-ti="${ti}" title="이 유형 삭제" style="cursor:pointer;color:#c0392b;font-weight:700;padding:0 3px">✖</span></td>
+          <span class="wm-mdel" data-ti="${ti}" title="이 유형 삭제" style="cursor:pointer;color:#c0392b;font-weight:700;padding:0 3px">✖</span>
+          <span style="color:#b7c0cd;font-size:9px" title="저장 대표코드">${esc(t.weld_item||'')}</span></td>
         <td class="num" title="소요량 ${fmtU(tUse)} · 내부ST ${tSt} · 점 ${tCnt}"><b style="color:#1c6b3a">${fmtU(tUse)}</b><div style="font-size:9px;color:#8a5a1a">ST ${tSt}·${tCnt}점</div></td>
         ${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-mq" data-ti="${ti}" data-diam="${k}" type="number" min="0" step="1" value="${cts[k]||''}" style="width:32px;text-align:center"></td>`;}).join('')}</tr>`;}).join('');
     const totRow=`<tr style="background:#eef4ff;font-weight:700"><td style="text-align:left;color:#1c47a0">합계 (전 유형 ${WM.length}종)</td><td class="num" style="color:#1c6b3a">${fmtU(gUse)}<div style="font-size:9px;color:#8a5a1a">ST ${gSt}</div></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=gPer[k]||0;return `<td class="num" style="color:#40567a">${q||''}</td>`;}).join('')}</tr>`;
@@ -1491,7 +1499,9 @@ SCREEN.unifybom=(c,ro)=>{
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let fastenD=null, fastenFor='';   // 체결 매트릭스(품목별 체결 공정횟수 입력→가공비). /api/assywork
-  let weldTypeList=[];   // 용접봉 %유형 목록(nx.weld_type_map 활성) — 다종 팝업 드롭다운(1회 로드 캐시)
+  let weldTypeList=[];   // 용접봉 %유형 목록 [{weld_type,rep_code,codes}] — 드롭다운(%유형으로 선택). 1회 로드 캐시
+  let weldCode2Type={};  // 저장코드→%유형 역매핑(기존 노드 표시용)
+  const weldRep=(wt)=>{const t=weldTypeList.find(x=>x.weld_type===wt);return t?t.rep_code:wt;};   // %유형→대표코드
   let naeProcLoading=false;         // 조립공정 팝업 로딩(사외망 DB 지연 대비 즉시 표시)
   const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
     try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
@@ -1965,7 +1975,7 @@ SCREEN.unifybom=(c,ro)=>{
   const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeProcLoading=true;if(openModal)naeModal=true;draw();  // ★즉시 로딩모달 표시(사외망 지연 대비)
     const enc=encodeURIComponent(node);
     // ★4개 fetch 순차(≈9초)→병렬(≈3초). 사외망 DB 지연시 체감 크게 개선
-    if(!weldTypeList.length){try{const tj=await fetch(`${API}/api/weld/types`).then(r=>r.json());weldTypeList=(tj&&tj.rows)||[];}catch(e){}}
+    if(!weldTypeList.length){try{const tj=await fetch(`${API}/api/weld/types`).then(r=>r.json());weldTypeList=(tj&&tj.types)||[];weldCode2Type=(tj&&tj.code2type)||{};}catch(e){}}
     // ★roll=0 = 노드 자체 용접(다종 편집·저장 라운드트립=diff0). 롤업(roll=1)은 표시전용이라 저장에 부적합.
     const [,,wj,j]=await Promise.all([
       loadWeldDiams(),
@@ -1999,11 +2009,11 @@ SCREEN.unifybom=(c,ro)=>{
       // 선택 종류의 관경별 횟수 맵
       const weldCounts={};
       weldPoints.forEach(w=>{if(w.weld_item===weldItem && w.pipe_diam)weldCounts[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});
-      // ★다종 편집 모델: 노드 자체 용접봉 유형별(weld_item)로 그룹핑 → weldMulti. 유형=item_weld(횟수) ∪ carrier(proc_weld). proc_code=weld/get.proc.
+      // ★다종 편집 모델: 노드 자체 용접봉 유형별(weld_item)로 그룹핑 → weldMulti. weld_type=%유형(표시·선택), weld_item=저장코드(라운드트립). proc_code=weld/get.proc.
       const wproc=(wj.proc)||{};
       const wm={};
-      (wj.welds||[]).forEach(w=>{const wi=w.weld_item;if(!wm[wi])wm[wi]={weld_item:wi,proc_code:String(w.proc_code||wproc[wi]||'51'),counts:{}};(w.rows||[]).forEach(x=>{if(x.pipe_diam)wm[wi].counts[(+x.pipe_diam).toFixed(2)]=(+x.weld_qty||0);});});
-      (weldCarriers||[]).forEach(wi=>{if(wi&&!wm[wi])wm[wi]={weld_item:wi,proc_code:String(wproc[wi]||'51'),counts:{}};});
+      (wj.welds||[]).forEach(w=>{const wi=w.weld_item;if(!wm[wi])wm[wi]={weld_item:wi,weld_type:(weldCode2Type[wi]||''),proc_code:String(w.proc_code||wproc[wi]||'51'),counts:{}};(w.rows||[]).forEach(x=>{if(x.pipe_diam)wm[wi].counts[(+x.pipe_diam).toFixed(2)]=(+x.weld_qty||0);});});
+      (weldCarriers||[]).forEach(wi=>{if(wi&&!wm[wi])wm[wi]={weld_item:wi,weld_type:(weldCode2Type[wi]||''),proc_code:String(wproc[wi]||'51'),counts:{}};});
       const weldMulti=Object.values(wm);
       naeProcD={node,pipe_diam:j.pipe_diam,own,carriers,isAssy,weldPoints,catalog:cat,weldTypes,weldItem,weldCounts,weldMulti};
       if(openModal)naeModal=true;
@@ -2044,16 +2054,18 @@ SCREEN.unifybom=(c,ro)=>{
       onWeldType:(v)=>{if(!naeProcD)return;naeProcD.weldItem=v;const cnt={};(naeProcD.weldPoints||[]).forEach(w=>{if(w.weld_item===v&&w.pipe_diam)cnt[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});naeProcD.weldCounts=cnt;draw();},
       // ── 다종 용접 매트릭스 write-back ──
       onWeldMultiCount:(ti,d,v)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;const val=+v||0;const cts=naeProcD.weldMulti[ti].counts;if(val>0)cts[d]=val;else delete cts[d];draw();},
-      onWeldMultiType:(ti,v)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;naeProcD.weldMulti[ti].weld_item=v;
-        // %유형이 은납계열(3%/5%/BAG/BCUP)이면 공정 기본 은납(28), 아니면 용접(51) 제안(사용자 변경가능)
-        const t=(weldTypeList.find(x=>x.code===v)||{}).weld_type||'';
-        if(/은납|BAG|BCUP|3%|5%|30%/i.test(t+v))naeProcD.weldMulti[ti].proc_code='28';
+      onWeldMultiType:(ti,wt)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;
+        // ★%유형 선택 → weld_type 저장 + 대표코드로 weld_item 자동 매핑(무변경 유형은 이 콜백 안 타므로 diff0 보존)
+        naeProcD.weldMulti[ti].weld_type=wt;
+        naeProcD.weldMulti[ti].weld_item=weldRep(wt);
+        // 은납계열(링/3%/5%/30%/BAG/BCUP)이면 공정 기본 은납(28) 제안(변경가능)
+        if(/은납|링|BAG|BCUP|3%|5%|30%/i.test(wt))naeProcD.weldMulti[ti].proc_code='28';
         draw();},
       onWeldMultiProc:(ti,v)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;naeProcD.weldMulti[ti].proc_code=String(v);},
       onWeldAddType:()=>{if(!naeProcD)return;naeProcD.weldMulti=naeProcD.weldMulti||[];
-        const used=new Set(naeProcD.weldMulti.map(t=>t.weld_item));
-        const cand=(weldTypeList.find(x=>!used.has(x.code))||weldTypeList[0]||{}).code||'RAC30599301-1';
-        naeProcD.weldMulti.push({weld_item:cand,proc_code:'51',counts:{}});draw();},
+        const used=new Set(naeProcD.weldMulti.map(t=>t.weld_type));
+        const pick=(weldTypeList.find(x=>!used.has(x.weld_type))||weldTypeList[0]||{});
+        naeProcD.weldMulti.push({weld_type:pick.weld_type||'',weld_item:pick.rep_code||'RAC30599301-1',proc_code:'51',counts:{}});draw();},
       onWeldDelType:(ti)=>{if(!naeProcD||!naeProcD.weldMulti)return;naeProcD.weldMulti.splice(ti,1);draw();},
     });
     // 레거시 procEditPanel 잔여(.pu/.pl) — 현재 모달엔 없어 no-op이나 보존(회귀 방지)
@@ -2176,7 +2188,7 @@ SCREEN.unifybom=(c,ro)=>{
     const cols=[];
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
-    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,weldMulti:naeProcD.weldMulti,weldTypeList,cols,fastenHtml:fastenMatrix(true)});};  // ★fastenMatrix는 클로저 로컬 → 여기서 만들어 pd로 전달(전역 PROC_MODAL_HTML은 접근불가). weldMulti=다종 용접
+    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,weldMulti:naeProcD.weldMulti,weldTypeList,weldCode2Type,cols,fastenHtml:fastenMatrix(true)});};  // ★fastenMatrix는 클로저 로컬 → 여기서 만들어 pd로 전달(전역 PROC_MODAL_HTML은 접근불가). weldMulti=다종 용접(%유형 선택)
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
        <tbody>${(rows||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>

@@ -808,14 +808,40 @@ def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 
 
 @router.get("/api/weld/types")
 def weld_types():
-    """용접봉 %유형 목록(nx.weld_type_map 활성) — 다종 팝업 드롭다운. code·weld_type(1%봉/3%봉/은납…)·품명."""
+    """용접봉 %유형 목록 — 다종 팝업 드롭다운은 **%유형(1%봉/3%봉/은납…)으로 선택**(개별코드 아님).
+       각 %유형 → 대표코드(rep_code) 1개로 자동 매핑(저장은 대표코드로). code2type=기존 저장코드→유형 역매핑(표시용).
+       대표코드 규칙: 활성코드 중 ①proc_weld 최다사용 ②RAC접두 ③알파벳 최소."""
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT code, ISNULL(weld_type,''), ISNULL(item_name,'')
-                       FROM nx.weld_type_map WHERE ISNULL(active,0)=1
-                       ORDER BY weld_type, code""")
-        return {"rows": [{"code": str(r[0]).strip(), "weld_type": str(r[1]).strip(), "name": str(r[2]).strip()}
-                         for r in cur.fetchall()]}
+                       FROM nx.weld_type_map WHERE ISNULL(active,0)=1""")
+        rows = [(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip()) for r in cur.fetchall()]
+        # 사용빈도(proc_weld) 로드 → 대표코드 선정
+        cur.execute("SELECT weld_item, COUNT(*) FROM nx.proc_weld GROUP BY weld_item")
+        used = {str(a).strip(): int(b) for a, b in cur.fetchall()}
+        by_type = {}
+        code2type = {}
+        for code, wt, nm in rows:
+            if not wt:
+                continue
+            by_type.setdefault(wt, []).append((code, nm))
+            code2type[code] = wt
+        types = []
+        for wt, members in by_type.items():
+            # 대표코드: 최다사용 → RAC접두 → 알파벳 최소
+            rep = sorted(members, key=lambda cn: (-used.get(cn[0], 0), 0 if cn[0].upper().startswith("RAC") else 1, cn[0]))[0][0]
+            types.append({"weld_type": wt, "rep_code": rep,
+                          "codes": [c for c, _ in members], "member_count": len(members)})
+        # %숫자 오름차순 정렬(봉<와이어), 파싱 실패는 뒤로
+        def _key(t):
+            import re as _re
+            m = _re.match(r"(\d+)", t["weld_type"])
+            pct = int(m.group(1)) if m else 999
+            wire = 1 if ("와이어" in t["weld_type"] or "wire" in t["weld_type"].lower()) else 0
+            return (pct, wire, t["weld_type"])
+        types.sort(key=_key)
+        return {"types": types, "code2type": code2type,
+                "rows": [{"code": c, "weld_type": w, "name": n} for c, w, n in rows]}  # rows=하위호환
     finally:
         nx.close()
 
