@@ -3503,26 +3503,27 @@ SCREEN.lgsagub=(c)=>{
     const showOnly=st.c_only;
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
-    // ★B: 전체 사급 동소요(LG BOM AP) = 우리 직접절삭 + 협력사 사급분(우리가 협력사에 사급 주는 동). 2중계상 없음. 우리 실측은 참고(정산차액).
+    // ★B: 우리 직접절삭(우리 실측) + 협력사 사급분 = 우리 BOM 기준. LG BOM 기준 = LG 정산 소요(우리절삭 LG인증 + 협력사). 차이=정산차액. 2중계상 없음.
+    filt.forEach(r=>{r.ourbom_kg=(r.actual_kg||0)+(r.coop_kg||0);});   // 우리 BOM 기준 = 우리 실측절삭 + 협력사
     const isCoop=r=>((r.coop_kg||0)>0.001);
-    const T={rc:0,rr:0,total_kg:0,ourcut_kg:0,coop_kg:0,actual_kg:0,total_amt:0};
-    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.total_kg+=(r.total_kg||0);T.ourcut_kg+=(r.ourcut_kg||0);T.coop_kg+=(r.coop_kg||0);T.actual_kg+=(r.actual_kg||0);T.total_amt+=(r.total_amt||0);});
+    const T={rc:0,rr:0,actual_kg:0,coop_kg:0,ourbom_kg:0,total_kg:0,total_amt:0};
+    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.actual_kg+=(r.actual_kg||0);T.coop_kg+=(r.coop_kg||0);T.ourbom_kg+=(r.ourbom_kg||0);T.total_kg+=(r.total_kg||0);T.total_amt+=(r.total_amt||0);});
     const csh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.c_sort.k===k?(st.c_sort.dir<0?' ▼':' ▲'):''}</th>`;
     const rowsH=st.c_loading?spinRow(9):(filt.length?filt.map(r=>{const cp=isCoop(r);return `<tr${cp?' style="background:#fff7e8"':(!r.matched?' style="background:#fff4f0"':'')}>
         <td><b>${esc(r.item)}</b>${cp?' <span style="color:#a06a1c;font-size:10px">협력사사급</span>':(!r.matched?' <span style="color:#a03d2c;font-size:10px">LG미인증</span>':'')}</td>
         <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
         <td class="num">${wonI(r.recv_c)}</td><td class="num" style="color:#a03d2c">${r.recv_r?wonI(r.recv_r):''}</td>
-        <td class="num" style="color:#16324f;font-weight:700">${r.total_kg?wonI(r.total_kg):'-'}</td>
-        <td class="num" style="color:#1c7c3a;font-weight:600">${r.ourcut_kg?wonI(r.ourcut_kg):'-'}</td>
+        <td class="num" style="color:#1c7c3a;font-weight:600">${r.actual_kg?wonI(r.actual_kg):'-'}</td>
         <td class="num" style="color:#a06a1c;font-weight:600">${r.coop_kg?wonI(r.coop_kg):'-'}</td>
-        <td class="num" style="color:#8aa0bd">${r.actual_kg?wonI(r.actual_kg):'-'}</td>
-        <td class="num" style="color:#5a7597">${r.total_amt?wonI(r.total_amt):'-'}</td></tr>`;}).join('')
+        <td class="num" style="color:#16324f;font-weight:700">${r.ourbom_kg?wonI(r.ourbom_kg):'-'}</td>
+        <td class="num" style="color:#5a7597">${r.total_kg?wonI(r.total_kg):'-'}</td>
+        <td class="num" style="color:#8aa0bd">${r.total_amt?wonI(r.total_amt):'-'}</td></tr>`;}).join('')
       :`<tr><td colspan="9" class="empty">데이터 없음 — 대사조회를 눌러주세요</td></tr>`);
     const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
         <td class="num">${wonI(T.rc)}</td><td class="num" style="color:#a03d2c">${wonI(T.rr)}</td>
-        <td class="num" style="color:#16324f">${wonI(T.total_kg)}</td><td class="num" style="color:#1c7c3a">${wonI(T.ourcut_kg)}</td>
-        <td class="num" style="color:#a06a1c">${wonI(T.coop_kg)}</td><td class="num" style="color:#8aa0bd">${wonI(T.actual_kg)}</td>
-        <td class="num" style="color:#5a7597">${wonI(T.total_amt)}</td></tr></tfoot>`:'';
+        <td class="num" style="color:#1c7c3a">${wonI(T.actual_kg)}</td><td class="num" style="color:#a06a1c">${wonI(T.coop_kg)}</td>
+        <td class="num" style="color:#16324f">${wonI(T.ourbom_kg)}</td><td class="num" style="color:#5a7597">${wonI(T.total_kg)}</td>
+        <td class="num" style="color:#8aa0bd">${wonI(T.total_amt)}</td></tr></tfoot>`:'';
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%">
       <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
@@ -3533,7 +3534,7 @@ SCREEN.lgsagub=(c)=>{
         <button class="btn" id="c-go">대사조회</button>
         <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
         <div class="spacer"></div>
-        ${cop?`<span class="rowcount">전체 사급소요 <b style="color:#16324f">${wonI(cop.total_net)}</b>kg = 우리절삭 <b style="color:#1c7c3a">${wonI(cop.ourcut_net)}</b> + 협력사사급 <b style="color:#a06a1c">${wonI(cop.coop_net)}</b> · OSP 입고 ${wonI(cop.in_osp_kg)}kg${m.coverage&&m.coverage.coop_items?` · 협력사 ${wonI(m.coverage.coop_items)}품목`:''}</span>`:'<span class="rowcount">조회 전</span>'}
+        ${cop?`<span class="rowcount">우리 BOM 기준 <b style="color:#16324f">${wonI((cop.actual_net||0)+(cop.coop_net||0))}</b>kg (우리절삭 <b style="color:#1c7c3a">${wonI(cop.actual_net)}</b> + 협력사 <b style="color:#a06a1c">${wonI(cop.coop_net)}</b>) · LG BOM 기준 ${wonI(cop.total_net)}kg · OSP 입고 ${wonI(cop.in_osp_kg)}kg</span>`:'<span class="rowcount">조회 전</span>'}
       </div>
       <div style="display:flex;gap:10px;flex:1;min-height:0">
         <div style="flex:0 0 340px;display:flex;flex-direction:column;min-height:0;border:1px solid #dbe5f2;border-radius:8px;padding:8px;background:#fbfdff">
@@ -3542,7 +3543,7 @@ SCREEN.lgsagub=(c)=>{
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
           <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
             ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
-            ${csh('total_kg','전체 사급소요(kg)','num')}${csh('ourcut_kg','우리 직접절삭(kg)','num')}${csh('coop_kg','협력사 사급분(kg)','num')}${csh('actual_kg','우리 실측(kg)','num')}${csh('total_amt','전체 금액','num')}</tr></thead>
+            ${csh('actual_kg','우리 직접절삭(kg)','num')}${csh('coop_kg','협력사 사급분(kg)','num')}${csh('ourbom_kg','우리 BOM 기준(kg)','num')}${csh('total_kg','LG BOM 기준(kg)','num')}${csh('total_amt','금액','num')}</tr></thead>
            <tbody>${rowsH}</tbody>${foot}</table></div>
         </div>
       </div>
