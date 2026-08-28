@@ -68,18 +68,31 @@ def _dong_of(cur, item):
     return out
 
 
-def _lg_ap_all(cur, ver_date):
+def _model_in_sql(models):
+    """models(set/iterable) → ' AND UPPER(LTRIM(RTRIM(model))) IN (...)' 조각. 성능: 필요 모델만 전개.
+       코드 안전문자(영숫자·-_)만 통과(인젝션 방지). 비면 빈문자."""
+    if not models:
+        return ""
+    safe = [str(m).strip().upper() for m in models if m and all(c.isalnum() or c in '-_' for c in str(m).strip())]
+    if not safe:
+        return ""
+    return " AND UPPER(LTRIM(RTRIM(model))) IN (" + ",".join("'" + m + "'" for m in safe) + ")"
+
+
+def _lg_ap_all(cur, ver_date, models=None):
     """LG BOM 버전(point-in-time) 사급(Assembly Pull) 동 원소재 소요 = {model: {(metal,diam,thick): per_unit_kg}}.
        ★LG전자 사급 소요 산출방식 = LG BOM 다단계 트리전개(롤업): 동이 L2(서브 밑)면 L1 서브 수량을 곱해 누적.
          (구 flat합은 L1 수량 미곱 → 과소. 예 AJR30004702 P7.0 L1 ×7 반영.)
        동 원소재 = matkl='MJU0631'·supply_type='Assembly Pull'·ALUMINUM 제외. Supplier·사급부품(matkl≠)은 전개 관통만 하고 미계상.
        point-in-time = model·werks별 ver_from<=ver_date 최신 버전. werks 다중이면 전개합 MAX(양공장 중복방지).
-       규격/재질 = nx.item 우선, 없으면 child_spec 파싱. root = model(STUFE1 부모=model)."""
+       규격/재질 = nx.item 우선, 없으면 child_spec 파싱. root = model(STUFE1 부모=model).
+       ★models(대문자 set) 지정시 그 모델만 전개(성능: 전 모델 전개 회피)."""
     from collections import defaultdict as _dd
-    cur.execute("""
+    minl = _model_in_sql(models)
+    cur.execute(f"""
       WITH latest AS (
         SELECT model, ISNULL(werks,'') w, MAX(ver_from) mv
-        FROM nx.lg_bom_ver WHERE ver_from<=? GROUP BY model, ISNULL(werks,''))
+        FROM nx.lg_bom_ver WHERE ver_from<=? {minl} GROUP BY model, ISNULL(werks,''))
       SELECT UPPER(LTRIM(RTRIM(r.model))), ISNULL(r.werks,''),
              UPPER(LTRIM(RTRIM(r.parent_code))), UPPER(LTRIM(RTRIM(r.child_code))),
              r.matkl, LTRIM(RTRIM(ISNULL(r.supply_type,''))), ISNULL(r.child_spec,''), CONVERT(float,ISNULL(r.qty,0)),
@@ -128,18 +141,19 @@ def _lg_ap_all(cur, ver_date):
     return out
 
 
-def _lg_ap_split(cur, ver_date):
+def _lg_ap_split(cur, ver_date, models=None):
     """★B: LG BOM AP 동 소요(=전체 사급 동, 우리가 협력사에 사급 주는 소재 포함)를 **분할**(2중계상 없음, 전체=우리절삭+협력사사급).
        분할 기준 = 각 동(Tube,Raw)의 부모(절단관)가 **우리 제작동관(bom_flat role='제작동관', 우리가 깎음)** 이면 '우리절삭', 아니면(사급 SUB=협력사가 깎음, 우리가 소재 사급) '협력사사급'.
-       반환 {model: {'our':{spec:kg}, 'coop':{spec:kg}}}. 전개·롤업·플레이스홀더제외는 _lg_ap_all과 동일."""
+       반환 {model: {'our':{spec:kg}, 'coop':{spec:kg}}}. 전개·롤업·플레이스홀더제외는 _lg_ap_all과 동일. models 지정시 그 모델만(성능)."""
     from collections import defaultdict as _dd
     # 우리 제작동관 코드집합(우리가 직접 깎는 절단관)
     cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(leaf_code))) FROM nx.bom_flat WHERE role=N'제작동관'")
     jjset = set(r[0] for r in cur.fetchall())
-    cur.execute("""
+    minl = _model_in_sql(models)
+    cur.execute(f"""
       WITH latest AS (
         SELECT model, ISNULL(werks,'') w, MAX(ver_from) mv
-        FROM nx.lg_bom_ver WHERE ver_from<=? GROUP BY model, ISNULL(werks,''))
+        FROM nx.lg_bom_ver WHERE ver_from<=? {minl} GROUP BY model, ISNULL(werks,''))
       SELECT UPPER(LTRIM(RTRIM(r.model))), ISNULL(r.werks,''),
              UPPER(LTRIM(RTRIM(r.parent_code))), UPPER(LTRIM(RTRIM(r.child_code))),
              r.matkl, LTRIM(RTRIM(ISNULL(r.supply_type,''))), ISNULL(r.child_spec,''), CONVERT(float,ISNULL(r.qty,0)),
@@ -677,7 +691,8 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         ap_ver = (f"20{ymd_to.strip()[:2]}-{ymd_to.strip()[2:4]}-{ymd_to.strip()[4:6]}" if len(ymd_to.strip()) >= 6
                   else f"20{eff_cut[:2]}-{eff_cut[2:4]}-28")
         # ★B: 전체 사급 동소요 = LG BOM AP(우리가 협력사에 사급 주는 소재 포함). 분할 = 우리 직접절삭 + 협력사 사급분(2중계상 없음).
-        split = _lg_ap_split(cur, ap_ver)
+        #   split은 리시빙 품목만 전개(성능) — recvrows 확정 후 아래에서 계산.
+        split = {}
         #   규격키 (metal,diam,thick) 동일, 금액 = 절삭재료비 as-of 단가(pm, 없으면 인상후 fallback).
         def _kv(spec, pm):                     # {(metal,diam,thick): 중량} → (중량합, 금액합)
             kg = amt = 0.0
@@ -708,6 +723,8 @@ def recvcompare(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: str = Qu
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE cut_gubun=N'절삭'")
         cutset = set(r[0] for r in cur.fetchall())
         recvrows = [row for row in recvrows if row[0] in cutset]
+        # ★성능: 리시빙에 실제 등장한 완제품만 LG BOM 전개(전 모델 전개 회피)
+        split = _lg_ap_split(cur, ap_ver, models=set(row[0] for row in recvrows))
         # 품명 매핑
         nm = {}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), MAX(item_name) FROM nx.item GROUP BY UPPER(LTRIM(RTRIM(item_code)))")
@@ -815,7 +832,7 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             recvlist = [(r[0], f(r[1])) for r in cur.fetchall()]
             recvlist = [(it, net) for it, net in recvlist if it in cutset]   # ★절삭만(LG사급)
             pmM = pm_post if M >= '2608' else pm_pre        # 인상후(8월~) / 인상전
-            apM = _lg_ap_all(cur, _mdate(M))                 # ★그 월 유효 LG BOM 사급동(Assembly Pull, point-in-time)
+            apM = _lg_ap_all(cur, _mdate(M), models=set(it for it, _ in recvlist))  # ★그 월 리시빙 품목만 전개(성능)
             soyo_our_kg = soyo_our_amt = 0.0; soyo_bom_kg = soyo_bom_amt = 0.0
             for it, net in recvlist:
                 for sp, w in _our_spec(it).items():          # 우리 BOM
