@@ -51,18 +51,19 @@ def _dong_of(cur, item):
     """완제품 규격별 동중량 {(metal,diam,thick): per_unit} — ★nx.bom_flat(검증정본·변형SUB dedup) 기반.
        ★copper_by_spec(nx_soyo_engine, 소스 nx.bom_line)는 변형 SUB 두 경로(-3-1/-20-1 등)로 같은 동을 2중계상(정확히 2배 과다)해서 폐기.
          (AJR30004702: copper_by_spec 0.6986 = bom_flat 0.3493×2. LG BOM·bom_flat은 1회.) 기록 §7·LME과다·subvariant 계열.
-       중량=bom_flat.weight_actual(우리실측)×qty, 규격=(metal_gubun[nx.item], fin_diam, fin_thick). 동 = role LIKE '%동%'."""
-    cur.execute("""SELECT ISNULL(i.metal_gubun,'') mg, ISNULL(bf.fin_diam,0) d, ISNULL(bf.fin_thick,0) t,
+       중량=bom_flat.weight_actual(우리실측)×qty, 규격=(metal_gubun[nx.item], fin_diam, fin_thick).
+       ★동 재질만 = metal_gubun IN ('CU','고강도')(_WT_COPPER). role LIKE '%동%'는 STS 제작동관까지 잡아 오염(STS 22.2×1 등 절삭재료비 미매칭)→ 재질필터로 교체."""
+    cur.execute("""SELECT LTRIM(RTRIM(i.metal_gubun)) mg, ISNULL(bf.fin_diam,0) d, ISNULL(bf.fin_thick,0) t,
                      SUM(ISNULL(bf.weight_actual,0)*ISNULL(bf.qty,0)) w
                    FROM nx.bom_flat bf
-                   LEFT JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(bf.leaf_code)))
-                   WHERE UPPER(LTRIM(RTRIM(bf.item_code)))=? AND bf.role LIKE N'%동%' AND ISNULL(bf.weight_actual,0)>0
-                   GROUP BY ISNULL(i.metal_gubun,''), ISNULL(bf.fin_diam,0), ISNULL(bf.fin_thick,0)""",
+                   JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(bf.leaf_code)))
+                   WHERE UPPER(LTRIM(RTRIM(bf.item_code)))=? AND ISNULL(bf.weight_actual,0)>0
+                     AND LTRIM(RTRIM(i.metal_gubun)) IN (N'CU', N'고강도')
+                   GROUP BY LTRIM(RTRIM(i.metal_gubun)), ISNULL(bf.fin_diam,0), ISNULL(bf.fin_thick,0)""",
                 item.strip().upper())
     out = {}
     for mg, d, t, w in cur.fetchall():
-        metal = (mg or '').strip() or 'CU'
-        k = (metal, float(d or 0), float(t or 0))
+        k = ((mg or '').strip(), float(d or 0), float(t or 0))
         out[k] = out.get(k, 0.0) + float(w or 0)
     return out
 
