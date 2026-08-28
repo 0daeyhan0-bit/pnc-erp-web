@@ -1414,6 +1414,8 @@ def _prd_ledger(cur, fr6, to6):
 
     rows, breaks = [], []
     for k in sorted(set(begin) | set(agg) | set(state)):
+        if not str(k[0] or "").strip():      # 빈 품번 제외 — 마감(_snap_bulk)과 같은 규칙
+            continue
         bq, bavg = begin.get(k, [0.0, 0.0])
         a = agg.get(k, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "outamt": 0.0, "adj": 0.0, "adjamt": 0.0})
         eq, eavg = state.get(k, [0.0, 0.0])
@@ -1515,7 +1517,7 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
                 _c = _bpx.get(_m, 0.0)
                 if _c:
                     _v[1] = _c
-        codes = {c for c in set(begin) | set(agg) | set(state) if c in scope}
+        codes = {c for c in set(begin) | set(agg) | set(state) if c in scope and str(c or "").strip()}
         rows, breaks = [], []
         for c in sorted(codes):
             bq, bavg = begin.get(c, [0.0, 0.0])
