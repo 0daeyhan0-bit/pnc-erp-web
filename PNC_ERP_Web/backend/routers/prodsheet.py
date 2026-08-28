@@ -42,7 +42,16 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         f8, t8 = d8(from_ymd), d8(to_ymd)
         if f8: w.append("CONVERT(varchar(8),h.PRINT_DATETIME,112)>=?"); p.append(f8)
         if t8: w.append("CONVERT(varchar(8),h.PRINT_DATETIME,112)<=?"); p.append(t8)
-        if part.strip():     w.append("ISNULL(h.STOCK_GAGONG_PROC_CODE,'')=?"); p.append(part.strip())
+        # 파트 필터도 표시와 같은 기준(DTL 첫 공정, 없으면 헤더)으로 — 안 그러면
+        # 화면엔 08라인인데 06라인으로 조회해야 나오는 어긋남이 생긴다.
+        if part.strip():
+            w.append("""ISNULL((SELECT TOP 1 d2.GAGONG_PROC_CODE
+                                  FROM nx.PR_T_INDI_WELD_SHEET_DTL d2 WITH(NOLOCK)
+                                 WHERE d2.SHEET_NO=h.SHEET_NO
+                                   AND ISNULL(d2.GAGONG_PROC_CODE,'')<>''
+                                   AND ISNULL(d2.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                                 ORDER BY d2.PROC_SEQ), ISNULL(h.STOCK_GAGONG_PROC_CODE,''))=?""")
+            p.append(part.strip())
         if item.strip():     w.append("h.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if sheet_no.strip(): w.append("CAST(h.SHEET_NO AS varchar(20)) LIKE ?"); p.append(f"%{sheet_no.strip()}%")
         # 생산완료 필터 = PROD_FIN_FLAG
@@ -56,8 +65,20 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         if label_no.strip():
             w.append("EXISTS(SELECT 1 FROM nx.PR_T_PRINT_STICKER s WITH(NOLOCK) WHERE s.SHEET_NO=h.SHEET_NO AND CAST(s.PRINT_SEQ AS varchar(20)) LIKE ?)")
             p.append(f"%{label_no.strip()}%")
+        # ★투입파트 = 전표 DTL 의 실제 공정(첫 공정). 헤더 STOCK_GAGONG_PROC_CODE 는
+        #   상위 P/No 기준값이라 -SUB·은납 등 하위품목이 전부 상위라인(예: RAC=06라인)으로
+        #   잘못 보였다. 실측(8/24~28 전표 649건): 헤더=DTL 12건뿐, 다름 412 · 헤더만 225.
+        #   DTL 은 발행방법(JP_PROC_METHOD J=전표/G=가간판) 무관하게 공정이 들어있으므로
+        #   method 로 거르지 않고 PROC_SEQ 최소 행을 쓴다. 가공파트(P00xx)는 별도 화면 소관이라 제외.
+        #   DTL 이 아예 없는 전표만 헤더값으로 폴백.  2026-08-28
         ncur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))}
-              h.SHEET_NO, ISNULL(h.UPPER_ITEM_CODE,''), ISNULL(h.STOCK_GAGONG_PROC_CODE,''),
+              h.SHEET_NO, ISNULL(h.UPPER_ITEM_CODE,''),
+              ISNULL((SELECT TOP 1 d.GAGONG_PROC_CODE
+                        FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
+                       WHERE d.SHEET_NO=h.SHEET_NO
+                         AND ISNULL(d.GAGONG_PROC_CODE,'')<>''
+                         AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                       ORDER BY d.PROC_SEQ), ISNULL(h.STOCK_GAGONG_PROC_CODE,'')),
               h.PLAN_YMD, h.PLAN_QTY, h.ITEM_CODE, ISNULL(h.PROD_FIN_FLAG,'0'),
               ISNULL(h.LINE_NO,''), ISNULL(h.DS_INPUT_HM,''), ISNULL(h.PRINT_USER_ID,''), h.PRINT_DATETIME,
               (SELECT COUNT(*) FROM nx.PR_T_INDI_SHEET2 b WITH(NOLOCK)
@@ -176,13 +197,21 @@ def prodsheet_detail(sheet_no: str = Query(...)):
 
 @router.get("/api/prodsheet/parts")
 def prodsheet_parts():
-    """파트 드롭다운(투입파트) — 전표에 실제 쓰인 STOCK_GAGONG_PROC_CODE만."""
+    """파트 드롭다운(투입파트) — 전표에 실제 쓰인 공정만.
+       ★목록/필터와 같은 기준(DTL 첫 공정, 없으면 헤더). 2026-08-28"""
     nx = _nx(); cur = nx.cursor()
     cn = _conn(); c2 = cn.cursor()
     try:
-        cur.execute("""SELECT DISTINCT ISNULL(STOCK_GAGONG_PROC_CODE,'') c
-                         FROM nx.PR_T_INDI_WELD_SHEET WITH(NOLOCK)
-                        WHERE ISNULL(STOCK_GAGONG_PROC_CODE,'')<>''""")
+        cur.execute("""SELECT DISTINCT c FROM (
+                         SELECT ISNULL((SELECT TOP 1 d.GAGONG_PROC_CODE
+                                          FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
+                                         WHERE d.SHEET_NO=h.SHEET_NO
+                                           AND ISNULL(d.GAGONG_PROC_CODE,'')<>''
+                                           AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                                         ORDER BY d.PROC_SEQ),
+                                       ISNULL(h.STOCK_GAGONG_PROC_CODE,'')) c
+                           FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)) X
+                        WHERE ISNULL(c,'')<>''""")
         codes = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
         nm = {}
         if codes:
@@ -598,27 +627,38 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
         # QR From 끝 4자리 = 시작 일련번호
         start = int(qf[-4:]) if len(qf) >= 4 and qf[-4:].isdigit() else 1
         end = start + qty - 1
-        # ★재발행 범위(레거시 재발행 팝업의 시작/종료번호). 발행 당시 범위를 벗어나지 않게 클램프.
-        s2 = int(start_no) if int(start_no or 0) > 0 else start
-        e2 = int(end_no) if int(end_no or 0) > 0 else end
-        s2 = max(start, min(s2, end)); e2 = max(s2, min(e2, end))
+        # ★재발행 범위 = **순번(1부터)** 기준(2026-08-28 사용자 확정).
+        #   "1~50 이면 50장, 30~50 이면 30번째부터 50번째까지 21장(양끝 포함)".
+        #   ⛔종전엔 절대 QR번호(예 35~134)로 클램프해서 1~50 을 넣으면 35~50(16장)이 됐다.
+        #   내부 계산은 절대번호(abs = start + 순번-1)로 하고, 화면에는 순번을 돌려준다.
+        n1 = int(start_no) if int(start_no or 0) > 0 else 1
+        n2 = int(end_no) if int(end_no or 0) > 0 else qty
+        n1 = max(1, min(n1, qty)); n2 = max(n1, min(n2, qty))
+        s2 = start + n1 - 1          # 절대 QR 시작번호
+        e2 = start + n2 - 1          # 절대 QR 종료번호
         w2 = str(worker or '').strip() or str(r[6] or '').strip() or str(r[12] or '').strip()
         i2 = str(inspector or '').strip() or str(r[7] or '').strip() or str(r[13] or '').strip()
-        n_out = e2 - s2 + 1
+        n_out = n2 - n1 + 1
         # ★n(현재)/tot(전체)는 발행 전체 기준. 부분 재발행해도 원래 번호를 유지해야
         #   현장에서 몇 번째 라벨인지 알 수 있음(예 4~6 재출력 → 4/6, 5/6, 6/6).
-        labels = [{"n": (s2 + i) - start + 1, "seq": s2 + i,
+        labels = [{"n": n1 + i, "seq": s2 + i,
                    "qr": _qr_code(item, ymd, s2 + i),
                    "disp": f"{ymd} {int(r[0])}-{s2 + i:04d}"}
                   for i in range(n_out)]
         return {"ok": True, "print_seq": int(r[0]), "print_ymd": ymd, "item": item,
                 "qty": n_out, "org_qty": qty, "nm": str(r[11] or '').strip(),
-                "start_no": s2, "end_no": e2, "org_start": start, "org_end": end,
+                # 화면 입력칸은 순번(1~qty). abs_* 는 실제 QR 번호(참고용).
+                "start_no": n1, "end_no": n2, "org_start": 1, "org_end": qty,
+                "abs_start": s2, "abs_end": e2, "abs_org_start": start, "abs_org_end": end,
                 "worker": w2, "inspector": i2,
                 "sheet_no": str(r[8] or '').strip(),
                 "print_user": str(r[9] or '').strip(),
                 "print_dt": (str(r[10])[:19] if r[10] else ""),
-                "qr_from": qf, "qr_to": str(r[5] or '').strip(),
+                # ★QR 범위 = 지금 선택한 구간(labels 의 처음/끝). 종전엔 발행 전체 범위를
+                #   그대로 보여줘 30~50 을 골라도 35~134 로 표시됐다(2026-08-28).
+                "qr_from": (labels[0]["qr"] if labels else qf),
+                "qr_to": (labels[-1]["qr"] if labels else str(r[5] or '').strip()),
+                "qr_org_from": qf, "qr_org_to": str(r[5] or '').strip(),
                 "labels": labels}
     finally:
         nx.close()

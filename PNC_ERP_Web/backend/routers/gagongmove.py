@@ -379,7 +379,12 @@ def gagong_move580_issue(payload: dict = Body(...)):
 def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
                           item: str = Query(""), part: str = Query(""), confirm: str = Query("전체"), limit: int = Query(2500)):
     """구분=이동전표 모드 — MAINT_GROUP_SEQ 단위로 발행된 전표 목록(확정여부 포함).
-       ★라이브(레거시 발행분) + nx(웹 발행분) 합산 조회. 쓰기는 nx만(§1)."""
+
+    ★원천 = **nx 단독**(2026-08-28 사용자 확정 "라이브는 없애자, nx로 할건데").
+      종전엔 라이브+nx UNION 이었다. 라이브 전표 34,927행을 nx 로 전량 복사해 정본을
+      nx 로 옮겼으므로 UNION 은 중복만 만든다(nx 는 원래 이 테이블의 미러라 34,883행이
+      이미 동일했고, 미복사분 44행 = 그날 레거시 발행분만 넣으면 됐다).
+      입고확인·완료표시(IN_CONFIRM_FLAG)도 nx 에 쓰므로 조회·상태가 한 곳에서 끝난다."""
     nx = _nx(); cur = nx.cursor()
     try:
         w = ["m.MAINT_TAG='B'"]; p = []
@@ -399,17 +404,13 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
             FROM (
               SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_GROUP_SEQ,m.CHECK_LIST_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,
                      m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
-                FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
-              UNION ALL
-              SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_GROUP_SEQ,m.CHECK_LIST_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,
-                     m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY,m.IN_CONFIRM_FLAG,m.IN_CONFIRM_DATETIME,m.IN_CONFIRM_USER_ID
                 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m WHERE {wsql}
             ) u
             LEFT JOIN PARTNER_ERP_TEST3.nx.item mi ON mi.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
-            ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *(p + p))
+            ORDER BY u.MAINT_GROUP_SEQ DESC, u.MAINT_SEQ""", *p)
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():

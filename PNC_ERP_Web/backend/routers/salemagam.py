@@ -262,6 +262,15 @@ def salemagam_reopen(payload: dict = Body(...)):
     finally:
         nx.close()
 
+@router.post("/api/salemagam/recalc_cost")
+def salemagam_recalc_cost(payload: dict = Body(...)):
+    """매출기간 매출단가 재계산 — 레거시 w_pu_sale_020 'cost_calc' 이식.
+    협력사판매(MAINT_TAG='5'), 매출단가(레거시 COST_TAG IN ('S','E') = 웹 'TAGS','TAGE').
+    실행부·단가원천 주석은 purmagam._recalc_cost 참조(매입과 공통)."""
+    from routers.purmagam import _recalc_cost, _COST_CLEAN
+    return _recalc_cost(payload, cost_sql=_COST_CLEAN.format(types="'TAGS','TAGE'"),
+                        maint_tags=("5",), window="w_pu_sale_020(web)")
+
 @router.get("/api/salemagam/weight")
 def salemagam_weight(ym: str = Query("")):
     """무게정산(중량조정): 업체별 원소재/용접봉 출고−업체가공입고=차액, ×(시세−사급가).

@@ -632,7 +632,23 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
             return {"dates": [], "rows": [], "cnt": 0, "sum_qty": 0, "note": "편성 먼저 실행(생산계획업로드 → 🧾자재소요·조달 편성). 오류: " + str(e)[:120]}
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]
         capped = len(raw) >= CAP
+        # ★일자축 = 기준일(from_ymd)부터 to_ymd 까지 **연속 달력일**(2026-08-28 사용자 지적).
+        #   종전엔 sorted({PART_PLAN_YMD}) 즉 "계획이 실제로 있는 날"만 컬럼으로 깔았다.
+        #   → 기준일 28일에 계획이 0건이면 28일 컬럼이 통째로 사라져 29일부터 시작되고,
+        #     중간의 계획 없는 날(일요일 등)도 빠져 달력이 끊긴다(레거시는 휴무일도 컬럼을 깐다).
+        #   레거시 소스 경로(_planstatus_legacy, line 508)와 동일하게 축을 고정한다.
         dates = sorted({r["PART_PLAN_YMD"] for r in raw})
+        _f6, _t6 = (_d6(from_ymd) if from_ymd else ""), (_d6(to_ymd) if to_ymd else "")
+        if _f6:
+            try:
+                _fb = datetime.strptime(_f6, "%y%m%d")
+                # 종료 = to_ymd, 없으면 데이터 최대일. 컬럼 폭주 방지로 최대 62일.
+                _te = _t6 or (dates[-1] if dates else _f6)
+                _tb = datetime.strptime(_te, "%y%m%d")
+                _n = min(62, (_tb - _fb).days + 1) if _tb >= _fb else 1
+                dates = [(_fb + timedelta(days=i)).strftime("%y%m%d") for i in range(_n)]
+            except Exception:
+                pass
         keyed = {}
         for r in raw:
             # ★키 = (가공처, 도번) — 레거시 w_pr_outside_410 과 동일 그레인.
@@ -744,6 +760,9 @@ def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: s
                 note += f" ⚠완료수량 계산 오류: {str(e)[:90]}"
         else:
             note += " 완료수량=협력사(외주) 지정 시 표시."
+        # ★도번순 정렬(2026-08-28 사용자 요청) — 작업처 안에서 도번(ASSY) 오름차순.
+        #   SQL ORDER BY 는 WORK_ORDER 가 먼저라 같은 도번이 제번별로 흩어져 보였다.
+        rows.sort(key=lambda x: ((x.get("workcenter") or ""), (x.get("assy") or "")))
         for i, r in enumerate(rows, 1):
             r.pop("_mats", None)                 # 내부 계산용 키 제거
             r["lot"] = _qint(r.get("lot") or 0); r["tot"] = _qint(r["tot"]); r["seq"] = i
