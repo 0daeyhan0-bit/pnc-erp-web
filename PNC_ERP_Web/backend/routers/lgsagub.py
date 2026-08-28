@@ -160,14 +160,15 @@ def _lg_ap_all(cur, ver_date, models=None):
     return out
 
 
-def _lg_ap_split(cur, ver_date, models=None):
+def _lg_ap_split(cur, ver_date, models=None, jjset=None):
     """★B: LG BOM AP 동 소요(=전체 사급 동, 우리가 협력사에 사급 주는 소재 포함)를 **분할**(2중계상 없음, 전체=우리절삭+협력사사급).
        분할 기준 = 각 동(Tube,Raw)의 부모(절단관)가 **우리 제작동관(bom_flat role='제작동관', 우리가 깎음)** 이면 '우리절삭', 아니면(사급 SUB=협력사가 깎음, 우리가 소재 사급) '협력사사급'.
        반환 {model: {'our':{spec:kg}, 'coop':{spec:kg}}}. 전개·롤업·플레이스홀더제외는 _lg_ap_all과 동일. models 지정시 그 모델만(성능)."""
     from collections import defaultdict as _dd
-    # 우리 제작동관 코드집합(우리가 직접 깎는 절단관)
-    cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(leaf_code))) FROM nx.bom_flat WHERE role=N'제작동관'")
-    jjset = set(r[0] for r in cur.fetchall())
+    # 우리 제작동관 코드집합(우리가 직접 깎는 절단관). jjset 주면 재사용(월별 반복 성능).
+    if jjset is None:
+        cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(leaf_code))) FROM nx.bom_flat WHERE role=N'제작동관'")
+        jjset = set(r[0] for r in cur.fetchall())
     minl = _model_in_sql(models)
     cur.execute(f"""
       WITH latest AS (
@@ -827,18 +828,18 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
         while m <= to and guard < 120:
             months.append(m); m = ym_next(m); guard += 1
 
-        # 두 소요 축: 우리 BOM(_dong_of, 월무관·캐시) / LG BOM 사급(Assembly Pull, point-in-time). 절삭재료비 신규단가(as-of)
+        # ★두 소요 기준(수불): (LG BOM기준)=LG BOM AP 전체(우리절삭LG+협력사)  (우리 BOM기준)=우리 실측절삭(bom_flat)+협력사사급. 협력사분 공통.
         pm_pre = _matcost_asof('202606'); pm_post = _matcost_asof('202612')
         def _mdate(M):    # YYMM → 그 달 말(28일) date: point-in-time 버전 선택(ver_from<=)
             return f"20{M[:2]}-{M[2:4]}-28"
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE cut_gubun=N'절삭'")
         cutset = set(r[0] for r in cur.fetchall())   # ★절삭만 = LG 사급, 설치/이지링크=직거래 제외
-        _our_cache = {}
-        def _our_spec(it):
-            sp = _our_cache.get(it)
-            if sp is None:
-                sp = _our_cache[it] = _dong_of(cur, it)
-            return sp
+        # ★성능: 우리 실측(bom_flat) + 제작동관셋 1회 배치로딩(월별 재쿼리 회피)
+        cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM nx.SA_T_LG_RECEIVING_DTL WHERE LEFT(RECEIVING_YMD,4)>=? AND LEFT(RECEIVING_YMD,4)<=?", frm, to)
+        allitems = set(r[0] for r in cur.fetchall()) & cutset
+        our_map = _dong_of_batch(cur, allitems)
+        cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(leaf_code))) FROM nx.bom_flat WHERE role=N'제작동관'")
+        jjset = set(r[0] for r in cur.fetchall())
         rows = []; bal_our_kg = 0.0; bal_our_amt = 0.0; bal_bom_kg = 0.0; bal_bom_amt = 0.0
         for M in months:
             cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
@@ -849,12 +850,19 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             recvlist = [(r[0], f(r[1])) for r in cur.fetchall()]
             recvlist = [(it, net) for it, net in recvlist if it in cutset]   # ★절삭만(LG사급)
             pmM = pm_post if M >= '2608' else pm_pre        # 인상후(8월~) / 인상전
-            apM = _lg_ap_all(cur, _mdate(M), models=set(it for it, _ in recvlist))  # ★그 월 리시빙 품목만 전개(성능)
+            spM = _lg_ap_split(cur, _mdate(M), models=set(it for it, _ in recvlist), jjset=jjset)  # 우리절삭/협력사 분할
             soyo_our_kg = soyo_our_amt = 0.0; soyo_bom_kg = soyo_bom_amt = 0.0
-            for it, net in recvlist:                         # 전체 사급(LG BOM AP)만 = 화면 수불표 소요
-                for sp, w in apM.get(it, {}).items():
-                    soyo_bom_kg += w * net
-                    soyo_bom_amt += w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
+            for it, net in recvlist:
+                sd = spM.get(it, {"our": {}, "coop": {}})
+                for sp, w in sd.get("our", {}).items():         # LG기준 우리절삭(LG인증값)
+                    cva = w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
+                    soyo_bom_kg += w * net; soyo_bom_amt += cva
+                for sp, w in sd.get("coop", {}).items():        # 협력사 사급분(양 기준 공통)
+                    cvv = w * net; cva = w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
+                    soyo_bom_kg += cvv; soyo_bom_amt += cva
+                    soyo_our_kg += cvv; soyo_our_amt += cva
+                for sp, w in our_map.get(it, {}).items():       # 우리기준 우리절삭(우리 실측값)
+                    soyo_our_kg += w * net; soyo_our_amt += w * net * (pmM.get(sp) or pm_post.get(sp) or 0.0)
             cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
                            WHERE ym=? AND UPPER(item_name) LIKE '%TUBE%'""", M)
             r = cur.fetchone(); in_kg = f(r[0]); in_amt = f(r[1])
