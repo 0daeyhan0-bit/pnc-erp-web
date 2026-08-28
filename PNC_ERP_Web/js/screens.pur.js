@@ -3331,6 +3331,7 @@ SCREEN.lgsagub=(c)=>{
         <td class="num" style="font-weight:700;color:${(r[ck]||0)<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r[ck]||0))}</td>
         <td class="num" style="color:#5a7597">${wonI(Math.round(r[ak]||0))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>`;
     return `<div style="flex:1;min-height:0;overflow:auto">
+      ${tbl('월별 동 수불 · 우리 BOM 기준','open_our_kg','soyo_our_kg','close_our_kg','close_our_amt','#a06a1c')}
       ${tbl('월별 동 수불 · LG BOM 기준(사급/Assembly Pull)','open_bom_kg','soyo_bom_kg','close_bom_kg','close_bom_amt','#1c7c3a')}
     </div>`;
   };
@@ -3502,21 +3503,24 @@ SCREEN.lgsagub=(c)=>{
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
     const price=cop?(cop.eff_price||cop.osp_price):0;
-    // 소요 = LG BOM 사급(Assembly Pull) 전개(중량 kg·금액=as-of 소재단가). 원단위(수기) 축은 제거 — LG BOM과 직접 비교
-    const T={rc:0,rr:0,bom_kg:0,bom_amt:0};
-    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.bom_kg+=(r.bom_kg||0);T.bom_amt+=(r.bom_amt||0);});
-    const chai=cop?((cop.bom_net||0)-cop.in_osp_kg):0;           // LG BOM 소요 − OSP입고
+    // 두 소요 축: 우리 BOM(nx 전개, LG 미인정분 포함) vs LG BOM 사급(Assembly Pull). 우리<LG = 우리 BOM이 동을 덜 잡은 정교화 대상.
+    const isUnder=r=>(r.lgbom_kg>0.001&&r.our_kg<r.lgbom_kg-0.001);
+    const T={rc:0,rr:0,our_kg:0,our_amt:0,lgbom_kg:0,lgbom_amt:0};
+    filt.forEach(r=>{T.rc+=r.recv_c;T.rr+=r.recv_r;T.our_kg+=(r.our_kg||0);T.our_amt+=(r.our_amt||0);T.lgbom_kg+=(r.lgbom_kg||0);T.lgbom_amt+=(r.lgbom_amt||0);});
     const csh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.c_sort.k===k?(st.c_sort.dir<0?' ▼':' ▲'):''}</th>`;
-    const rowsH=st.c_loading?spinRow(8):(filt.length?filt.map(r=>`<tr${!r.matched?' style="background:#fff4f0"':''}>
-        <td><b>${esc(r.item)}</b>${!r.matched?' <span style="color:#a03d2c;font-size:10px">LG미인증</span>':''}</td>
+    const rowsH=st.c_loading?spinRow(8):(filt.length?filt.map(r=>{const und=isUnder(r);return `<tr${und?' style="background:#fff7e8"':(!r.matched?' style="background:#fff4f0"':'')}>
+        <td><b>${esc(r.item)}</b>${und?' <span style="color:#a06a1c;font-size:10px">우리&lt;LG</span>':(!r.matched?' <span style="color:#a03d2c;font-size:10px">LG미인증</span>':'')}</td>
         <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.name)}">${esc(r.name)}</td>
         <td class="num">${wonI(r.recv_c)}</td><td class="num" style="color:#a03d2c">${r.recv_r?wonI(r.recv_r):''}</td>
-        <td class="num" style="color:#1c7c3a;font-weight:600">${r.bom_kg?wonI(r.bom_kg):'-'}</td>
-        <td class="num" style="color:#1c7c3a">${r.bom_amt?wonI(r.bom_amt):'-'}</td></tr>`).join('')
-      :`<tr><td colspan="6" class="empty">데이터 없음 — 대사조회를 눌러주세요</td></tr>`);
+        <td class="num" style="color:#a06a1c;font-weight:600">${r.our_kg?wonI(r.our_kg):'-'}</td>
+        <td class="num" style="color:#a06a1c">${r.our_amt?wonI(r.our_amt):'-'}</td>
+        <td class="num" style="color:#1c7c3a;font-weight:600">${r.lgbom_kg?wonI(r.lgbom_kg):'-'}</td>
+        <td class="num" style="color:#1c7c3a">${r.lgbom_amt?wonI(r.lgbom_amt):'-'}</td></tr>`;}).join('')
+      :`<tr><td colspan="8" class="empty">데이터 없음 — 대사조회를 눌러주세요</td></tr>`);
     const foot=filt.length?`<tfoot><tr class="lg-foot"><td colspan="2" class="right">합계 ${wonI(filt.length)}종</td>
         <td class="num">${wonI(T.rc)}</td><td class="num" style="color:#a03d2c">${wonI(T.rr)}</td>
-        <td class="num" style="color:#1c7c3a">${wonI(T.bom_kg)}</td><td class="num" style="color:#1c7c3a">${wonI(T.bom_amt)}</td></tr></tfoot>`:'';
+        <td class="num" style="color:#a06a1c">${wonI(T.our_kg)}</td><td class="num" style="color:#a06a1c">${wonI(T.our_amt)}</td>
+        <td class="num" style="color:#1c7c3a">${wonI(T.lgbom_kg)}</td><td class="num" style="color:#1c7c3a">${wonI(T.lgbom_amt)}</td></tr></tfoot>`:'';
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%">
       <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">리시빙 비교 · 원소재(동 kg)</span></div>
@@ -3527,7 +3531,7 @@ SCREEN.lgsagub=(c)=>{
         <button class="btn" id="c-go">대사조회</button>
         <label class="rl" style="margin-left:10px"><input type="checkbox" id="c-unm"${st.c_only==='unmatched'?' checked':''}> 미매칭만</label>
         <div class="spacer"></div>
-        ${cop?`<span class="rowcount">LG BOM 소요 ${wonI(cop.bom_net)}kg − OSP 입고 ${wonI(cop.in_osp_kg)}kg = <b style="color:${chai>=0?'#a03d2c':'#1c7c3a'}">차이 ${wonI(chai)}kg</b></span>`:'<span class="rowcount">조회 전</span>'}
+        ${cop?`<span class="rowcount">우리 BOM <b style="color:#a06a1c">${wonI(cop.our_net)}</b>kg · LG BOM <b style="color:#1c7c3a">${wonI(cop.lgbom_net)}</b>kg · OSP 입고 ${wonI(cop.in_osp_kg)}kg${m.coverage&&m.coverage.under_items?` · <b style="color:#a06a1c">우리&lt;LG ${wonI(m.coverage.under_items)}품목</b>`:''}</span>`:'<span class="rowcount">조회 전</span>'}
       </div>
       <div style="display:flex;gap:10px;flex:1;min-height:0">
         <div style="flex:0 0 340px;display:flex;flex-direction:column;min-height:0;border:1px solid #dbe5f2;border-radius:8px;padding:8px;background:#fbfdff">
@@ -3536,7 +3540,7 @@ SCREEN.lgsagub=(c)=>{
         <div style="flex:1;display:flex;flex-direction:column;min-height:0">
           <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl fit lg-tbl"><thead><tr>
             ${csh('item','품번(완제품)')}${csh('name','품명','cap')}${csh('recv_c','출고(리시빙)','num')}${csh('recv_r','반품(리시빙)','num')}
-            ${csh('bom_kg','LG BOM 중량(kg)','num')}${csh('bom_amt','LG BOM 금액','num')}</tr></thead>
+            ${csh('our_kg','우리 BOM 중량(kg)','num')}${csh('our_amt','우리 BOM 금액','num')}${csh('lgbom_kg','LG BOM 중량(kg)','num')}${csh('lgbom_amt','LG BOM 금액','num')}</tr></thead>
            <tbody>${rowsH}</tbody>${foot}</table></div>
         </div>
       </div>
