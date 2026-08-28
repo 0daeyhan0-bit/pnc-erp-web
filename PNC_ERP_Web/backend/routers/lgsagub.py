@@ -62,6 +62,44 @@ def _dong_of(cur, item):
     return spec
 
 
+def _lg_ap_all(cur, ver_date):
+    """LG BOM 버전(point-in-time)에서 사급(Assembly Pull) 동 원소재 소요 = {model: {(metal,diam,thick): per_unit_kg}}.
+       동 원소재 = matkl='MJU0631'(Tube,Raw 전 접두사 통합)·supply_type='Assembly Pull'·ALUMINUM 제외.
+       point-in-time = model·werks별 ver_from<=ver_date 최신 버전. werks는 MAX(양공장 동일값·중복방지).
+       ★Supplier(매입 직구매)·사급부품(matkl≠MJU0631)은 자동 제외. 규격/재질은 nx.item 우선, 없으면 spec 파싱."""
+    cur.execute("""
+      WITH latest AS (
+        SELECT model, ISNULL(werks,'') w, MAX(ver_from) mv
+        FROM nx.lg_bom_ver WHERE ver_from<=? GROUP BY model, ISNULL(werks,''))
+      SELECT UPPER(LTRIM(RTRIM(r.model))) model, UPPER(LTRIM(RTRIM(r.child_code))) child, MAX(r.child_spec) spec,
+             ISNULL(r.werks,'') w, SUM(CONVERT(float,ISNULL(r.qty,0))) qty,
+             MAX(ISNULL(ic.metal_gubun,'')) mg, MAX(ISNULL(ic.diam,0)) idiam, MAX(ISNULL(ic.thick,0)) ithick
+      FROM nx.lg_bom_ver r
+      JOIN latest l ON l.model=r.model AND l.w=ISNULL(r.werks,'') AND r.ver_from=l.mv
+      LEFT JOIN nx.item ic ON UPPER(LTRIM(RTRIM(ic.item_code)))=UPPER(LTRIM(RTRIM(r.child_code)))
+      WHERE r.matkl='MJU0631' AND r.supply_type='Assembly Pull' AND ISNULL(r.child_spec,'') NOT LIKE '%ALUMINUM%'
+      GROUP BY UPPER(LTRIM(RTRIM(r.model))), UPPER(LTRIM(RTRIM(r.child_code))), ISNULL(r.werks,'')
+    """, ver_date)
+    # (model,child)별 werks MAX → 규격키로 집계
+    tmp = {}  # (model, child) -> (best_qty, spec, mg, diam, thick)
+    for model, child, spec, w, qty, mg, idiam, ithick in cur.fetchall():
+        k = (model, child)
+        if (k not in tmp) or (qty > tmp[k][0]):
+            tmp[k] = (float(qty or 0), spec or '', (mg or '').strip(), float(idiam or 0), float(ithick or 0))
+    out = {}
+    for (model, child), (qty, spec, mg, idiam, ithick) in tmp.items():
+        od = idiam if idiam > 0 else None; thk = ithick if ithick > 0 else None
+        if od is None:
+            m = _re.search(r'P(\d+(?:\.\d+)?)', spec); od = float(m.group(1)) if m else 0.0
+        if thk is None:
+            m = _re.search(r'T(\d+(?:\.\d+)?)', spec); thk = float(m.group(1)) if m else 0.0
+        metal = mg if mg else ('고강도' if '고강도' in spec else 'CU')
+        key = (metal, float(od), float(thk))
+        d = out.setdefault(model, {})
+        d[key] = d.get(key, 0.0) + qty
+    return out
+
+
 def _matcost_asof(ym6):
     """절삭재료비 신규 사급가 as-of: {(metal,diam,thick): TOT_COST}, APPLY_YYYYMM ≤ ym6(YYYYMM) 최신."""
     c2 = _conn(); cu = c2.cursor()
