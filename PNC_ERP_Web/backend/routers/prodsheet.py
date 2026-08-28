@@ -42,7 +42,16 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         f8, t8 = d8(from_ymd), d8(to_ymd)
         if f8: w.append("CONVERT(varchar(8),h.PRINT_DATETIME,112)>=?"); p.append(f8)
         if t8: w.append("CONVERT(varchar(8),h.PRINT_DATETIME,112)<=?"); p.append(t8)
-        if part.strip():     w.append("ISNULL(h.STOCK_GAGONG_PROC_CODE,'')=?"); p.append(part.strip())
+        # 파트 필터도 표시와 같은 기준(DTL 첫 공정, 없으면 헤더)으로 — 안 그러면
+        # 화면엔 08라인인데 06라인으로 조회해야 나오는 어긋남이 생긴다.
+        if part.strip():
+            w.append("""ISNULL((SELECT TOP 1 d2.GAGONG_PROC_CODE
+                                  FROM nx.PR_T_INDI_WELD_SHEET_DTL d2 WITH(NOLOCK)
+                                 WHERE d2.SHEET_NO=h.SHEET_NO
+                                   AND ISNULL(d2.GAGONG_PROC_CODE,'')<>''
+                                   AND ISNULL(d2.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                                 ORDER BY d2.PROC_SEQ), ISNULL(h.STOCK_GAGONG_PROC_CODE,''))=?""")
+            p.append(part.strip())
         if item.strip():     w.append("h.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if sheet_no.strip(): w.append("CAST(h.SHEET_NO AS varchar(20)) LIKE ?"); p.append(f"%{sheet_no.strip()}%")
         # 생산완료 필터 = PROD_FIN_FLAG
@@ -56,8 +65,20 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         if label_no.strip():
             w.append("EXISTS(SELECT 1 FROM nx.PR_T_PRINT_STICKER s WITH(NOLOCK) WHERE s.SHEET_NO=h.SHEET_NO AND CAST(s.PRINT_SEQ AS varchar(20)) LIKE ?)")
             p.append(f"%{label_no.strip()}%")
+        # ★투입파트 = 전표 DTL 의 실제 공정(첫 공정). 헤더 STOCK_GAGONG_PROC_CODE 는
+        #   상위 P/No 기준값이라 -SUB·은납 등 하위품목이 전부 상위라인(예: RAC=06라인)으로
+        #   잘못 보였다. 실측(8/24~28 전표 649건): 헤더=DTL 12건뿐, 다름 412 · 헤더만 225.
+        #   DTL 은 발행방법(JP_PROC_METHOD J=전표/G=가간판) 무관하게 공정이 들어있으므로
+        #   method 로 거르지 않고 PROC_SEQ 최소 행을 쓴다. 가공파트(P00xx)는 별도 화면 소관이라 제외.
+        #   DTL 이 아예 없는 전표만 헤더값으로 폴백.  2026-08-28
         ncur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))}
-              h.SHEET_NO, ISNULL(h.UPPER_ITEM_CODE,''), ISNULL(h.STOCK_GAGONG_PROC_CODE,''),
+              h.SHEET_NO, ISNULL(h.UPPER_ITEM_CODE,''),
+              ISNULL((SELECT TOP 1 d.GAGONG_PROC_CODE
+                        FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
+                       WHERE d.SHEET_NO=h.SHEET_NO
+                         AND ISNULL(d.GAGONG_PROC_CODE,'')<>''
+                         AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                       ORDER BY d.PROC_SEQ), ISNULL(h.STOCK_GAGONG_PROC_CODE,'')),
               h.PLAN_YMD, h.PLAN_QTY, h.ITEM_CODE, ISNULL(h.PROD_FIN_FLAG,'0'),
               ISNULL(h.LINE_NO,''), ISNULL(h.DS_INPUT_HM,''), ISNULL(h.PRINT_USER_ID,''), h.PRINT_DATETIME,
               (SELECT COUNT(*) FROM nx.PR_T_INDI_SHEET2 b WITH(NOLOCK)
@@ -176,13 +197,21 @@ def prodsheet_detail(sheet_no: str = Query(...)):
 
 @router.get("/api/prodsheet/parts")
 def prodsheet_parts():
-    """파트 드롭다운(투입파트) — 전표에 실제 쓰인 STOCK_GAGONG_PROC_CODE만."""
+    """파트 드롭다운(투입파트) — 전표에 실제 쓰인 공정만.
+       ★목록/필터와 같은 기준(DTL 첫 공정, 없으면 헤더). 2026-08-28"""
     nx = _nx(); cur = nx.cursor()
     cn = _conn(); c2 = cn.cursor()
     try:
-        cur.execute("""SELECT DISTINCT ISNULL(STOCK_GAGONG_PROC_CODE,'') c
-                         FROM nx.PR_T_INDI_WELD_SHEET WITH(NOLOCK)
-                        WHERE ISNULL(STOCK_GAGONG_PROC_CODE,'')<>''""")
+        cur.execute("""SELECT DISTINCT c FROM (
+                         SELECT ISNULL((SELECT TOP 1 d.GAGONG_PROC_CODE
+                                          FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
+                                         WHERE d.SHEET_NO=h.SHEET_NO
+                                           AND ISNULL(d.GAGONG_PROC_CODE,'')<>''
+                                           AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                                         ORDER BY d.PROC_SEQ),
+                                       ISNULL(h.STOCK_GAGONG_PROC_CODE,'')) c
+                           FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)) X
+                        WHERE ISNULL(c,'')<>''""")
         codes = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
         nm = {}
         if codes:

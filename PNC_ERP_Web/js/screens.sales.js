@@ -2010,7 +2010,7 @@ SCREEN.salesplan=(c)=>{
   const i2d=v=>(''+(v||'')).slice(2).replace(/-/g,'');
   // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정)
   const st={from:i2d(planBaseIso()),days:7,gubun:'1',
-            wc:'',line:'',model:'',wo:'',item:'',
+            wc:'',line:'',model:'',wo:'',item:'',src:'nx',   // ★src: nx=웹DB(기본) / live=레거시 대조
             rows:[],tot:null,labels:[],loading:false,msg:'',done:false};
   // 레거시 f_like — 입력값을 %..% 로 감싼다(빈값=%)
   const lk=v=>{v=(''+(v||'')).trim();return v?('%'+v+'%'):'';};
@@ -2024,10 +2024,23 @@ SCREEN.salesplan=(c)=>{
   const loadOpts=async()=>{try{
       const j=await(await fetch(`${API}/api/salesplan/opts`)).json();
       opts.lines=j.lines||[];}catch(e){}};
+  /* ★작업처 드롭다운 = **조회결과에서 수집**(2026-08-28 사용자요청 "작업처 집계를 가지고 와서 조회").
+     SA_T_PLAN_DTL 에는 작업처 컬럼이 없고 화면의 wc 는 SP 가 조인해 만든 값이라
+     마스터로는 목록을 만들 수 없다. → 지금 조회된 행에서 실제 값만 모은다(건수순).
+     ※필터를 걸어 조회하면 목록도 그 범위로 좁혀진다 — 현재 선택값(st.wc)은 항상 남긴다. */
+  let wcKeep=[];                      // 직전 조회의 작업처 목록(필터 후에도 선택값 유지용)
+  const wcOpts=()=>{
+    const m=new Map();
+    (st.rows||[]).forEach(r=>{const v=(r.wc||'').trim();if(v)m.set(v,(m.get(v)||0)+1);});
+    let list=[...m].map(([code,cnt])=>({code,cnt})).sort((a,b)=>b.cnt-a.cnt||a.code.localeCompare(b.code,'ko'));
+    if(list.length)wcKeep=list; else list=wcKeep;          // 조회 전/0건이면 직전 목록 재사용
+    if(st.wc&&!list.some(o=>o.code===st.wc))list=[{code:st.wc,cnt:0}].concat(list);
+    return list;};
   const load=async()=>{st.loading=true;st.msg='';draw();
     // 라인만 드롭다운(정확값), 나머지 텍스트칸은 %..% 부분일치
     const qs=new URLSearchParams({from_ymd:st.from,days:st.days,gubun:st.gubun,
-      line:st.line||'',model:lk(st.model),wo:lk(st.wo),item:lk(st.item),cust:lk(st.wc)});
+      line:st.line||'',model:lk(st.model),wo:lk(st.wo),item:lk(st.item),cust:lk(st.wc),
+      src:(st.src||'nx')});   // ★기본 = 웹(nx). 레거시 대조는 live
     try{const r=await fetch(`${API}/api/salesplan?${qs}`);
       if(!r.ok)throw new Error('HTTP '+r.status);
       const j=await r.json();
@@ -2119,7 +2132,9 @@ SCREEN.salesplan=(c)=>{
        <span style="font-size:12px;color:var(--muted);font-weight:400">w_pr_plan_050 · <code>SA_T_PLAN_DTL</code> 일별 계획 · 조회전용</span></div>
      <div class="page-sub" style="flex:0 0 auto">기준일자부터 <b>일수</b>만큼의 일별 계획.
        구분 <b>상세</b>=원행 / <b>집계</b>=연속 라인·시간·제번 병합(도번 묶음) / <b>도번집계</b>=도번별 합산 ·
-       <span style="background:#fac090;padding:0 5px">주황</span>=토·일 · 🔴 라이브</div>
+       <span style="background:#fac090;padding:0 5px">주황</span>=토·일 ·
+       ${st.src==='live'?'🔴 <b>레거시(라이브)</b> — 대조용 읽기전용':'🟣 <b>웹DB(nx)</b>'} ·
+       헤더 <b>더블클릭</b>=정렬</div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px;align-items:center;min-height:44px;margin-top:8px">
        <label class="tl">기준일자</label>
        <button class="btn ghost" id="sp-prev" title="하루 앞으로">◀</button>
@@ -2130,8 +2145,14 @@ SCREEN.salesplan=(c)=>{
          ${[7,10,11,12,13,14,15,31,40].map(n=>`<option value="${n}"${st.days===n?' selected':''}>${n}일</option>`).join('')}
        </select>
        <label class="tl">작업처</label>
-       <input class="inp" id="sp-wc" value="${esc(st.wc)}" placeholder="작업처코드" style="width:110px" autocomplete="off"
-              title="작업처코드로 검색(부분일치). 코드체계가 정리되지 않아 드롭다운 대신 검색.">
+       <!-- ★작업처 = 계획에 실제 쓰인 값 목록(2026-08-28 사용자요청).
+            코드체계가 사내공정+사급거래처 혼재라 마스터가 아니라 **집계**에서 뽑는다.
+            목록 선택 + 직접입력(부분일치) 둘 다 되도록 datalist 사용. -->
+       <select class="sel" id="sp-wc" style="width:190px"
+               title="${st.done?'조회결과의 작업처(건수순)':'조회하면 목록이 채워집니다'}">
+         <option value=""${st.wc?'':' selected'}>% 전체</option>
+         ${wcOpts().map(o=>`<option value="${esc(o.code)}"${st.wc===o.code?' selected':''}>${esc(o.code)}${o.cnt?` (${nf(o.cnt)})`:''}</option>`).join('')}
+       </select>
        <button class="btn xls" id="sp-xls" style="margin-left:10px">📥 엑셀</button>
      </div>
      <!-- 두 조건줄 높이를 맞추고, 표와 붙지 않도록 아래 여백을 준다 -->
@@ -2149,6 +2170,13 @@ SCREEN.salesplan=(c)=>{
          ${[['1','상세'],['2','집계'],['3','도번집계']].map(([v,n])=>
            `<label style="font-weight:400;margin:0 6px 0 1px;white-space:nowrap"><input type="radio" name="sp-gb" value="${v}"${st.gubun===v?' checked':''}> ${n}</label>`).join('')}
        </span>
+       <!-- ★소스 = 웹DB(nx) 기본. 레거시(라이브)는 1:1 대조용(2026-08-28 전환) -->
+       <label class="tl">소스</label>
+       <select class="sel src-new" id="sp-src" style="width:auto;min-width:140px"
+               title="웹DB(nx)=우리 DB · 레거시(라이브)=대조용 읽기전용">
+         <option value="nx"${st.src!=='live'?' selected':''}>🟣 웹DB(nx)</option>
+         <option value="live"${st.src==='live'?' selected':''}>🔴 레거시(라이브)</option>
+       </select>
        <button class="btn" id="sp-go">🔍 조회</button>
        <button class="btn ghost" id="sp-reset">초기화</button>
        <span class="rowcount" id="sp-cnt" style="margin-left:10px">${st.tot?(st.tot.cnt>SP_PAGE
@@ -2187,10 +2215,15 @@ SCREEN.salesplan=(c)=>{
     g('#sp-go').onclick=()=>{sync();load();};
     spWireLazy();   // 스크롤 이어붙이기(점진 렌더)
     // 초기화 = 조건만 되돌리고 조회는 하지 않는다(조회 전 상태로 복귀)
-    g('#sp-reset').onclick=()=>{st.wc=st.line=st.model=st.wo=st.item='';st.gubun='1';st.days=7;
-      st.from=i2d(iso(new Date()));st.rows=[];st.tot=null;st.labels=[];st.done=false;st.msg='';draw();};
-    ['#sp-wc','#sp-line','#sp-model','#sp-wo','#sp-item'].forEach(id=>{
+    g('#sp-reset').onclick=()=>{st.wc=st.line=st.model=st.wo=st.item='';st.gubun='1';st.days=7;st.src='nx';
+      st.from=i2d(planBaseIso());st.rows=[];st.tot=null;st.labels=[];st.done=false;st.msg='';draw();};
+    ['#sp-model','#sp-wo','#sp-item'].forEach(id=>{
       const e=g(id);if(e)e.onkeyup=ev=>{if(ev.key==='Enter'){sync();load();}};});
+    // 작업처·라인은 드롭다운 — 고르면 바로 반영(조회 전이면 값만)
+    ['#sp-wc','#sp-line'].forEach(id=>{
+      const e=g(id);if(e)e.onchange=()=>{sync();if(st.done)load();};});
+    // 소스 전환(웹DB ↔ 레거시)
+    {const s=g('#sp-src');if(s)s.onchange=()=>{st.src=s.value;if(st.done)load();else draw();};}
     g('#sp-xls').onclick=()=>{
       const GB={'1':'상세','2':'집계','3':'도번집계'}[st.gubun]||'';
       let hd,rows;
@@ -2204,7 +2237,21 @@ SCREEN.salesplan=(c)=>{
           r.wc,r.rate,fmtHm(r.ohm),fmtOut(r),r.lot,r.total].concat(r.d.map(v=>v||'')).concat([r.remarks]));
       }
       downloadCSV(`영업계획현황_${GB}_${st.from}_${st.days}일.csv`,hd,rows);};
-    attachResizers(c);
+    // ★헤더 더블클릭 정렬(2026-08-28 사용자요청) — 고정컬럼 + 일자컬럼 모두.
+    //   일자값은 r.d[i] 배열이라 정렬키가 없다 → 합성키 d0,d1… 을 만들어 붙인다.
+    //   ※점진렌더(SP_PAGE)와 함께 쓰므로 정렬 후 처음 묶음부터 다시 그린다.
+    st.rows.forEach(r=>{(r.d||[]).forEach((v,i)=>{r['d'+i]=Number(v)||0;});});
+    const KEYS=(ITEMAGG?['item','wc','lot','total']
+                       :['line','wo','model','tool','item','wc','rate','ohm','ymd','lot','total'])
+               .concat(L.map((_,i)=>'d'+i))
+               .concat(ITEMAGG?[]:['remarks']);
+    enableSort(c,KEYS,()=>st.rows,()=>{
+      const tb=c.querySelector('.sp-tbl tbody');
+      if(tb)tb.innerHTML=bodyHtml();       // spShown 이 SP_PAGE 로 리셋됨
+      const cnt=c.querySelector('#sp-cnt');
+      if(cnt)cnt.textContent=st.rows.length>spShown
+        ? `${nf(st.rows.length)}건 (표시 ${nf(spShown)})` : `${nf(st.rows.length)}건`;
+    });
   };
   // ★화면 진입시 자동조회하지 않는다 — 레거시 SQL 이 무거워(상관서브쿼리) 6초 안팎 걸린다.
   //   조건을 다 맞춘 뒤 [조회]를 눌러야 조회되게 해서 불필요한 대기를 없앰.
