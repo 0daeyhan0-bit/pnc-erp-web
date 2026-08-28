@@ -916,6 +916,36 @@ def lgbom_versions(model: str = Query(...), werks: str = Query("")):
     finally:
         cn.close()
 
+_LGBOM_VER_COLS = ("cr,werks,model,stufe,posnr,parent_code,child_code,child_desc,child_spec,qty,unit,uit,"
+                   "supply_type,mmsta,mtstb,matty,lowest_flg,alt_item,main_mat,matkl,valid_from,valid_to,src_valid,load_dt")
+_LGBOM_SIG = ("CHECKSUM_AGG(BINARY_CHECKSUM(child_code,parent_code,qty,supply_type,stufe,posnr,child_spec,"
+              "uit,unit,lowest_flg,mmsta,matty,matkl,valid_from,valid_to))")
+
+def _lgbom_ver_append(cur, models):
+    """A안: model·werks별 현재판(nx.lg_bom) 서명이 최신 버전과 다르면 nx.lg_bom_ver에 ver_from=오늘로 append(같으면 스킵).
+       반환 = 새 버전 만든 model·werks 수. nx.lg_bom_ver 없으면 스킵(0)."""
+    if cur.execute("SELECT CASE WHEN OBJECT_ID('nx.lg_bom_ver') IS NULL THEN 0 ELSE 1 END").fetchone()[0] == 0:
+        return 0
+    added = 0
+    for (werks, model) in models:
+        if werks:
+            wc = "model=? AND werks=?"; wp = (model, werks)
+        else:
+            wc = "model=? AND ISNULL(werks,'')=''"; wp = (model,)
+        cur_sig = cur.execute(f"SELECT {_LGBOM_SIG} FROM nx.lg_bom WHERE {wc}", *wp).fetchone()[0]
+        mvr = cur.execute(f"SELECT MAX(ver_from) FROM nx.lg_bom_ver WHERE {wc}", *wp).fetchone()[0]
+        same = False
+        if mvr is not None:
+            vsig = cur.execute(f"SELECT {_LGBOM_SIG} FROM nx.lg_bom_ver WHERE {wc} AND ver_from=?", *wp, mvr).fetchone()[0]
+            same = (vsig == cur_sig)
+        if not same:
+            cur.execute(f"DELETE FROM nx.lg_bom_ver WHERE {wc} AND ver_from=CAST(GETDATE() AS date)", *wp)
+            cur.execute(f"INSERT INTO nx.lg_bom_ver ({_LGBOM_VER_COLS},ver_from) "
+                        f"SELECT {_LGBOM_VER_COLS},CAST(GETDATE() AS date) FROM nx.lg_bom WHERE {wc}", *wp)
+            added += 1
+    return added
+
+
 @router.post("/api/lgbom/upload")
 async def lgbom_upload(file: UploadFile = File(...)):
     """LG BOM Explosion 엑셀 업로드 → nx.lg_bom 적재(모델·werks별 교체). 신규 BOM 등록 전 사전업로드용.
@@ -976,8 +1006,10 @@ async def lgbom_upload(file: UploadFile = File(...)):
             (cr,werks,model,stufe,posnr,parent_code,child_code,child_desc,child_spec,qty,unit,uit,supply_type,
              mmsta,mtstb,matty,lowest_flg,alt_item,main_mat,matkl,valid_from,valid_to,src_valid,load_dt)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CONVERT(varchar(10),GETDATE(),120),GETDATE())""", recs)
+        ver_added = _lgbom_ver_append(cur, models)   # A: 변경된 model·werks만 새 버전(오늘일자)
         return {"ok": True, "rows": len(recs), "models": sorted({m for (w, m) in models}),
-                "werks": sorted({w for (w, m) in models if w}), "file": file.filename}
+                "werks": sorted({w for (w, m) in models if w}), "file": file.filename,
+                "ver_added": ver_added}
     finally:
         cn.close()
 
