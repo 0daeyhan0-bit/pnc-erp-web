@@ -16,7 +16,7 @@
   생산(PRD)·영업(SAL) 스냅샷은 tag 파생식 규명 후 2단계 — 지금은 잠금만 가능.
 """
 from fastapi import APIRouter, Query, Body, HTTPException
-from common import _nx, _nx_tx, _conn
+from common import _nx, _nx_tx, _conn, _d6
 
 router = APIRouter()
 
@@ -217,6 +217,29 @@ def _mat_base(cur, target):
     if not st:
         raise HTTPException(400, f"기초를 찾을 수 없습니다 — 직전 확정 스냅샷도, 레거시 월마감({prev_ym})도 없습니다.")
     return st, prev_ym + "말", f"레거시 월마감 {prev_ym} 시드"
+
+
+def _today6():
+    import datetime as _dt
+    return _dt.date.today().strftime("%y%m%d")
+
+
+def _shift_ymd(ymd, days):
+    """YYMMDD ± days. 파싱 불가면 원본 반환(방어)."""
+    import datetime as _dt
+    try:
+        d = _dt.date(2000 + int(ymd[:2]), int(ymd[2:4]), int(ymd[4:6])) + _dt.timedelta(days=days)
+        return f"{d.year % 100:02d}{d.month:02d}{d.day:02d}"
+    except Exception:
+        return ymd
+
+
+def _next_ymd(ymd):
+    return _shift_ymd(ymd, 1)
+
+
+def _prev_ymd(ymd):
+    return _shift_ymd(ymd, -1)
 
 
 def _month_end(period):
@@ -603,6 +626,26 @@ def _mv_buyprice(cur, target):
     return px
 
 
+# ★★기초 연쇄에는 **제외분(nx.stock_snapshot_drop)도 반드시 포함**한다 (2026-08-28 결함수정).
+#   제외(단가0·음수·잔량0)는 "재고자산 평가에서 빼는 것"이지 "없던 일로 하는 것"이 아니다.
+#   기초에서까지 빼면 다음 기간이 **0에서 시작**해 음수가 소리 없이 사라지고 재고가 늘어난 것처럼 보인다.
+#   실측: 11588O-1 은 2606 기말 −190(음수)로 제외 → 2607 이 0에서 출발해 2042(정답 1852).
+#   대표가 미리 지적한 바로 그 문제 — "당월에 반영됐고… 그럼 다음달에도 반영이 안되는거 아니야?"
+#   ⟹ 표시·평가에서만 빼고, **수량·금액의 연속성은 유지**한다.
+def _snapshot_rows(cur, domain, ptype, period, with_loc=False):
+    """확정 스냅샷 ∪ 제외분. 기초 복원 전용."""
+    cols = "UPPER(LTRIM(RTRIM(item_code))), ISNULL(loc,''), stock_qty, stock_amt, avg_cost" if with_loc            else "UPPER(LTRIM(RTRIM(item_code))), '', stock_qty, stock_amt, avg_cost"
+    sql = f"SELECT {cols} FROM nx.stock_snapshot WHERE domain=? AND ptype=? AND period=?"
+    cur.execute(sql, domain, ptype, period)
+    out = list(cur.fetchall())
+    try:
+        cur.execute(sql.replace("nx.stock_snapshot", "nx.stock_snapshot_drop"), domain, ptype, period)
+        out += list(cur.fetchall())
+    except Exception:
+        pass            # drop 테이블이 아직 없으면(구 데이터) 스냅샷만으로 진행
+    return out
+
+
 def _mv_base(cur, target):
     """기초 = target 직전의 가장 최근 확정 스냅샷(일·월 통합). 없으면 레거시 월마감 시드.
        반환 (state{mat:[qty,avg]}, base_ymd, 출처)."""
@@ -622,10 +665,9 @@ def _mv_base(cur, target):
         # ★단가는 stock_amt/stock_qty 로 복원한다 — avg_cost 는 decimal(18,4) 반올림본이라
         #   그걸 그대로 기초로 쓰면 매 기간 반올림 오차가 누적된다(금액 항등식 위반 29건 실측).
         #   금액이 정본, 단가는 파생. qty=0 이면 저장 단가로 폴백.
-        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), stock_qty, stock_amt, avg_cost
-                         FROM nx.stock_snapshot WHERE domain='MAT' AND ptype=? AND period=?""", pt, per)
         st = {}
-        for x in cur.fetchall():
+        for _it, _lo, _q, _a, _av in _snapshot_rows(cur, 'MAT', pt, per):
+            x = (_it, _q, _a, _av)
             q = float(x[1] or 0); amt = float(x[2] or 0)
             st[str(x[0])] = [q, (amt / q) if q else float(x[3] or 0)]
         if st:
@@ -1010,10 +1052,8 @@ def _prd_base(cur, target):
         pt, per = r[0], r[1]
         end = per if pt == 'D' else _month_end(per)
         if end < target:
-            cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(loc,''), stock_qty, stock_amt, avg_cost
-                             FROM nx.stock_snapshot WHERE domain='PRD' AND ptype=? AND period=?""", pt, per)
             st = {}
-            for it, lo, q, amt, av in cur.fetchall():
+            for it, lo, q, amt, av in _snapshot_rows(cur, 'PRD', pt, per, with_loc=True):
                 q = float(q or 0); amt = float(amt or 0)
                 st[(str(it), str(lo))] = [q, (amt / q) if q else float(av or 0)]
             if st:
@@ -1292,3 +1332,104 @@ def close_cancel(payload: dict = Body(...)):
                 "msg": f"{DOMAINS[d]} {'일' if t=='D' else '월'}마감 해제 완료" + (f" · 확정 스냅샷 {removed:,}품목 제거" if removed else "")}
     finally:
         cn.close()
+
+
+# ===================== C7 · 수불장 = 확정 스냅샷(기초) + 전표(이동) 파생 =====================
+# ★정본 설계 = STOCK_CLOSE_HANDOFF.md §7-1.
+#   "수불장은 원장이 아니라 **파생 뷰**다. 저장하지 않고 매번 계산한다."
+#     기말 = 기초(직전 확정 스냅샷) + 입고 − 출고 ± 조정
+#   ⟹ 저장하지 않으므로 드리프트가 구조적으로 생길 수 없다.
+#
+# ★왜 만드나(C7): 지금 자재수불장 화면(live_api.matledger)은 레거시 임시테이블을 읽는다.
+#     월 = PU_T_MONTH_STOCK_WH
+#     일 = PU_T_MONTH_STOCK_WH_DAILY  ← 레거시 w_pu_stock_260 이 **조회할 때마다 TRUNCATE** 하는 임시테이블
+#   즉 일자 수불장 내용이 "누가 언제 조회했느냐"에 따라 바뀐다. 이 화면을 여기로 옮긴다.
+#
+# ★엔진 재사용: 마감이 쓰는 것과 **완전히 같은** _mv_base/_mv_moves/_mv_step 을 쓴다.
+#   화면과 마감이 다른 식으로 계산하면 값이 갈린다(그게 미러/클린 드리프트의 원인이었다).
+#   그래서 여기서 다시 계산하지 않고 마감 엔진을 그대로 호출한다.
+@router.get("/api/close/ledger")
+def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str = Query(""),
+                 zero: int = Query(0), q: str = Query("")):
+    """수불장(파생). [d_from,d_to] 기간의 품목별 기초·입·출·조정·기말 + 이동평균 단가.
+       zero=1 이면 기초·이동·기말이 모두 0 인 품목도 표시(기본 숨김).
+       q = 품번/품명 부분일치 필터.
+       ★불변식 기초+입−출±조정=기말 을 서버에서 검산해 breaks 로 돌려준다(0이어야 정상)."""
+    d = (domain or "MAT").strip().upper()
+    if d != "MAT":
+        raise HTTPException(400, f"현재 자재(MAT)만 지원합니다 — 생산/영업은 확정 스냅샷 recipe 가 별도입니다(§7-5).")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        to6 = _d6(d_to) or _today6()
+        fr6 = _d6(d_from) or (to6[:4] + "01")
+        if fr6 > to6:
+            fr6, to6 = to6, fr6
+        # ── 기초 = fr6 직전의 확정 스냅샷까지 전개한 상태 ──────────────────
+        #   ★_mv_base 는 "target 직전 확정 스냅샷"을 준다. 그 시점부터 fr6 전날까지는
+        #     전표로 이어 붙여야 기초가 정확하다(이중계상 금지 — §7-7 #2).
+        state, base_ymd, src = _mv_base(cur, fr6)
+        scope = _mv_scope(cur)
+        pre_start = _next_ymd(base_ymd)
+        pre_end = _prev_ymd(fr6)
+        if pre_start <= pre_end:
+            pre = _mv_moves(cur, pre_start, pre_end)
+            for y in sorted(pre):
+                _mv_step(state, pre[y], scope)
+        begin = {k: [v[0], v[1]] for k, v in state.items()}          # 기초 스냅
+        # ── 기간 이동 ────────────────────────────────────────────────────
+        moves = _mv_moves(cur, fr6, to6)
+        agg = {}
+        for y in sorted(moves):
+            for mat, mv in moves[y].items():
+                a = agg.setdefault(mat, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "trans": 0.0})
+                a["inq"] += mv["inq"]; a["inamt"] += mv["pamt"]
+                a["outq"] += mv["outq"]; a["trans"] += mv["trans"]
+            _mv_step(state, moves[y], scope)
+        # ── 행 구성 ──────────────────────────────────────────────────────
+        codes = {c for c in set(begin) | set(agg) | set(state) if c in scope}
+        rows, breaks = [], []
+        for c in sorted(codes):
+            bq, bavg = begin.get(c, [0.0, 0.0])
+            a = agg.get(c, {"inq": 0.0, "inamt": 0.0, "outq": 0.0, "trans": 0.0})
+            eq, eavg = state.get(c, [0.0, 0.0])
+            if not zero and abs(bq) < 1e-9 and abs(a["inq"]) < 1e-9 and abs(a["outq"]) < 1e-9                and abs(a["trans"]) < 1e-9 and abs(eq) < 1e-9:
+                continue
+            # ★불변식 검산 — 어기면 버그다(§7-2). 화면에 숨기지 말고 드러낸다.
+            if abs((bq + a["inq"] - a["outq"] + a["trans"]) - eq) > 0.001:
+                breaks.append({"item": c, "기초": round(bq, 4), "입고": round(a["inq"], 4),
+                               "출고": round(a["outq"], 4), "조정": round(a["trans"], 4),
+                               "기말": round(eq, 4)})
+            rows.append({"cd": c, "bq": round(bq, 4), "ba": round(bq * bavg, 2),
+                         "iq": round(a["inq"], 4), "ia": round(a["inamt"], 2),
+                         "oq": round(a["outq"], 4), "tq": round(a["trans"], 4),
+                         "sq": round(eq, 4), "sa": round(eq * eavg, 2), "avg": round(eavg, 4)})
+        _attach_item_info(cur, rows)
+        if q:
+            k = q.strip().upper()
+            rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
+        tot = {f: round(sum(r[f] for r in rows), 2) for f in ("bq", "ba", "iq", "ia", "oq", "tq", "sq", "sa")}
+        return {"domain": d, "from": fr6, "to": to6, "count": len(rows), "rows": rows, "totals": tot,
+                "basis": f"기초 {base_ymd} {src}" + (f" → 전표이월 {pre_start}~{pre_end}" if pre_start <= pre_end else ""),
+                "invariant_breaks": breaks,
+                "note": "확정 스냅샷 + 전표 파생(저장 안 함). 단가=이동평균. 레거시 임시테이블 미사용."}
+    finally:
+        cn.close()
+
+
+def _attach_item_info(cur, rows):
+    """품번 → 품명/규격/단위/소분류. ★정본 = nx.item(미러 아님, CLAUDE.md §1-9)."""
+    if not rows:
+        return
+    codes = [r["cd"] for r in rows]
+    info = {}
+    for i in range(0, len(codes), 500):
+        part = codes[i:i + 500]
+        ph = ",".join("?" * len(part))
+        cur.execute(f"""SELECT UPPER(item_code), ISNULL(item_name,''), ISNULL(item_spec,''),
+                               ISNULL(unit,''), ISNULL(sgroup,'')
+                          FROM nx.item WHERE UPPER(item_code) IN ({ph})""", *part)
+        for cd, nm, sp, un, sg in cur.fetchall():
+            info[cd] = (nm, sp, un, sg)
+    for r in rows:
+        nm, sp, un, sg = info.get(r["cd"], ("", "", "", ""))
+        r["nm"] = nm; r["spec"] = sp; r["unit"] = un; r["sg"] = sg
