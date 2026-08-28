@@ -3441,15 +3441,15 @@ SCREEN.lgsagub=(c)=>{
         <td class="num">${n4(r.qty)}</td><td class="center" style="font-size:11px">${esc(WLAB[r.werks]||r.werks||'')}</td>
         <td class="center">${r.status==='미전환'?badge('미전환','#fbe0da','#c0392b'):badge('전환','#e0ecfb','#1c47a0')}</td></tr>`).join('')
       :`<tr><td colspan="14" class="empty">${m._err?('오류: '+esc(m._err)):'대상 없음 — 필터를 조정하세요'}</td></tr>`);
-    const statusOpt=[['supplier','미전환(Supplier)'],['pull','전환(Assembly Pull)'],['all','전체']]
+    const statusOpt=[['supplier','미전환'],['pull','전환'],['all','전체']]
       .map(([k,l])=>`<option value="${k}"${st.cv_status===k?' selected':''}>${l}</option>`).join('');
-    const werksOpt=[['','전체 사업부'],['DMZ','SAC(DMZ)'],['DGZ','RAC(DGZ)']]
+    const werksOpt=[['','전체'],['DMZ','SAC'],['DGZ','RAC']]
       .map(([k,l])=>`<option value="${k}"${st.cv_werks===k?' selected':''}>${l}</option>`).join('');
-    const scopeOpt=[['all','전체'],['active','사용중(리시빙 25.1~)']]
+    const scopeOpt=[['all','전체'],['active','사용중']]
       .map(([k,l])=>`<option value="${k}"${st.cv_scope===k?' selected':''}>${l}</option>`).join('');
     const cutgOpt=[['절삭','절삭'],['설치','설치'],['분지관','분지관'],['이지링크','이지링크'],['(없음)','(미분류)'],['all','전체']]
       .map(([k,l])=>`<option value="${k}"${st.cv_cutg===k?' selected':''}>${l}</option>`).join('');
-    const pym=m.prev_ym?`전월(${m.prev_ym.slice(0,2)}.${m.prev_ym.slice(2)}) 리시빙`:'전월 리시빙';
+    const pym='전월 리시빙';   // 전월은 서버가 매월 자동계산(오늘 기준 직전월)
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%">
      <div class="page-title" style="flex:0 0 auto">📊 LG사급현황 <span style="font-size:12px;color:var(--muted);font-weight:400">원소재 사급전환율</span></div>
@@ -3461,12 +3461,12 @@ SCREEN.lgsagub=(c)=>{
        ${card('표시 행',`${wonI(m.shown||0)}${(m.total>m.shown)?(' / '+wonI(m.total)):''}`,'필터 반영','#b5651d')}
      </div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:nowrap;overflow-x:auto">
-       <label class="tl">범위</label><select class="sel" id="cv-scope" style="width:160px">${scopeOpt}</select>
-       <label class="tl" style="margin-left:6px">제품군</label><select class="sel" id="cv-cutg" style="width:110px">${cutgOpt}</select>
-       <label class="tl" style="margin-left:6px">상태</label><select class="sel" id="cv-status" style="width:160px">${statusOpt}</select>
-       <label class="tl" style="margin-left:6px">사업부</label><select class="sel" id="cv-werks" style="width:120px">${werksOpt}</select>
-       <label class="tl" style="margin-left:8px">제작유형</label><span style="white-space:nowrap">${mtChk}</span>
-       <input class="inp" id="cv-q" value="${esc(st.cv_q)}" placeholder="ASSY·제작품·동원소재 품번/품명" style="width:210px;margin-left:6px">
+       <label class="tl">범위</label><select class="sel" id="cv-scope" style="width:74px">${scopeOpt}</select>
+       <label class="tl" style="margin-left:5px">제품군</label><select class="sel" id="cv-cutg" style="width:76px">${cutgOpt}</select>
+       <label class="tl" style="margin-left:5px">상태</label><select class="sel" id="cv-status" style="width:72px">${statusOpt}</select>
+       <label class="tl" style="margin-left:5px">사업부</label><select class="sel" id="cv-werks" style="width:64px">${werksOpt}</select>
+       <label class="tl" style="margin-left:6px">제작유형</label><span style="white-space:nowrap">${mtChk}</span>
+       <input class="inp" id="cv-q" value="${esc(st.cv_q)}" placeholder="품번/품명 검색" style="width:150px;margin-left:5px">
        <button class="btn" id="cv-go">조회</button>
        <button class="btn xls" id="cv-xls" style="margin-left:4px">엑셀 다운로드</button>
        <div class="spacer"></div><span class="rowcount">${st.cv_loading?'조회 중…':`${wonI(rows.length)}행`}</span>
