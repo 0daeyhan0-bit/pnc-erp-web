@@ -3502,7 +3502,6 @@ SCREEN.lgsagub=(c)=>{
     const showOnly=st.c_only;
     let filt=showOnly==='unmatched'?its.filter(x=>!x.matched):its;
     filt=sortItems(filt,st.c_sort);
-    const price=cop?(cop.eff_price||cop.osp_price):0;
     // 두 소요 축: 우리 BOM(nx 전개, LG 미인정분 포함) vs LG BOM 사급(Assembly Pull). 우리<LG = 우리 BOM이 동을 덜 잡은 정교화 대상.
     const isUnder=r=>(r.lgbom_kg>0.001&&r.our_kg<r.lgbom_kg-0.001);
     const T={rc:0,rr:0,our_kg:0,our_amt:0,lgbom_kg:0,lgbom_amt:0};
