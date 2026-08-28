@@ -41,8 +41,10 @@ proc_weld·item_weld가 **두 레거시 소스에서 따로 이관**됨(WELD_PRO
 
 ## 5. 이미 된 것 (도구 준비완)
 - `weld/save_node`(cost.py) = 용접봉 다종 원자 저장. 검증완(2종 저장). 이게 정합 입력 도구.
-- weld_type_map(1/2/3/5/30% × 봉/와이어/링) = %유형 매핑.
+- weld_type_map(1/2/3/5/30% × 봉/와이어/링) = %유형 매핑. `weld/types`(활성 18종) API로 노출.
 - 재고 차감(backflush)이 proc_weld 다종 지원 → 정합 후 자동 정확.
+- **★다종 %유형 팝업 = 완성**(2026-08-28, feat/weld-issue-analysis): 조립공정 팝업(품목BOM관리)의 관경별 용접이 유형별 다종 매트릭스([+유형추가]·은납 proc28 자동제안). loadNaeProc **roll=0(노드 자체값)** 편집.
+- **★★divergence 안전장치 = `save_node` verbatim 원상보존**: 관경 무변경 유형은 기존 proc_weld/item_weld/routing을 그대로 복원(재계산 안 함) → **divergence 노드(proc_weld 결측·중복 routing 포함)도 무편집 저장 원가 diff0**. 검증완(ADM73210516: RAC30599330 proc_weld 결측·중복 routing까지 diff0). ∴ **담당이 아무 BOM이나 열어 %유형만 지정·저장해도 원가 안 틀어짐** — 정합작업이 "관경 실제 편집한 유형만" 재계산되므로 대량 진단 없이도 안전하게 하나씩 교정 가능.
 
 ## 6. 남은 (이 과제 착수 시)
 - 프론트 다종 매트릭스 팝업(LOAD=weld/get·SAVE=weld/save_node) + 현재 관경/소요량/어긋남 표시.
