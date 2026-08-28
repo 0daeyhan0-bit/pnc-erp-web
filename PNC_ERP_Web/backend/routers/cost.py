@@ -790,8 +790,32 @@ def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 
         ph2 = ",".join("?" * len(nl))
         cur.execute(f"SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item IN ({ph2})", *nl)
         carriers = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+        # ★용접봉별 공정구분(51 용접/28 은납) — routing에서 유형별 최다 work_qty 기준(동률=51). 다종 편집 프리로드.
+        proc = {}
+        cur.execute(f"SELECT item_code, proc_code, ISNULL(SUM(work_qty),0) FROM nx.routing "
+                    f"WHERE p_item IN ({ph2}) AND proc_code IN ('51','28') GROUP BY item_code, proc_code", *nl)
+        _pw = {}
+        for r in cur.fetchall():
+            wi = str(r[0]).strip(); pc = str(r[1]).strip(); q = float(r[2] or 0)
+            _pw.setdefault(wi, {})[pc] = _pw.get(wi, {}).get(pc, 0) + q
+        for wi, m in _pw.items():
+            proc[wi] = "28" if (m.get("28", 0) > m.get("51", 0)) else "51"
         return {"node": node, "rollup": bool(roll), "nodes": len(nl),
-                "welds": [{"weld_item": k, "rows": v} for k, v in by.items()], "carriers": carriers}
+                "welds": [{"weld_item": k, "rows": v, "proc_code": proc.get(k, "51")} for k, v in by.items()],
+                "carriers": carriers, "proc": proc}
+    finally:
+        nx.close()
+
+@router.get("/api/weld/types")
+def weld_types():
+    """용접봉 %유형 목록(nx.weld_type_map 활성) — 다종 팝업 드롭다운. code·weld_type(1%봉/3%봉/은납…)·품명."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT code, ISNULL(weld_type,''), ISNULL(item_name,'')
+                       FROM nx.weld_type_map WHERE ISNULL(active,0)=1
+                       ORDER BY weld_type, code""")
+        return {"rows": [{"code": str(r[0]).strip(), "weld_type": str(r[1]).strip(), "name": str(r[2]).strip()}
+                         for r in cur.fetchall()]}
     finally:
         nx.close()
 
@@ -877,7 +901,8 @@ def weld_save_node(payload: dict = Body(...)):
     """★용접봉 다종 저장 — 한 노드의 전 용접봉 유형을 원자 교체(노드당 2~3종 지원. 예: 일반1% + 은납3/5%).
        payload: {node, types:[{weld_item, proc_code?('51'용접/'28'은납), rows:[{pipe_diam, weld_qty}]}], loss_factor?(1.5)}.
        노드의 item_weld/proc_weld/routing(51·28) 전체 삭제 후 유형별 재삽입(원자=_nx_tx). 산식=weld_save 동일(WELD_PROC_TABLES_SPEC).
-       ★무변경 저장 시 결과 동일=원가 diff0. 단가 미변경."""
+       ★★관경 무변경 유형 = 기존 proc_weld/item_weld/routing 상태를 **verbatim 원상보존**(divergence 노드도 diff0 보장·하드룰5).
+         관경이 바뀐/신규 유형만 재계산. 삭제된 유형은 제거. 단가 미변경."""
     node = str(payload.get("node", "")).strip()
     types = payload.get("types", []) or []
     if not node:
@@ -891,6 +916,23 @@ def weld_save_node(payload: dict = Body(...)):
         STDU = {}; STDS = {}
         for r in cur.fetchall():
             d = round(float(r[0]), 2); STDU[d] = float(r[1] or 0); STDS[d] = float(r[2] or 0)
+        # ── 원상보존용 이전 상태 스냅샷(관경 무변경 유형 verbatim 복원 → divergence 노드 diff0) ──
+        old_iw = {}   # wi -> {diam: (weld_qty, use_qty)}
+        cur.execute("SELECT weld_item,pipe_diam,ISNULL(weld_qty,0),ISNULL(use_qty,0) FROM nx.item_weld WHERE item_code=?", node)
+        for r in cur.fetchall():
+            wi = str(r[0]).strip(); d = round(float(r[1]), 2)
+            old_iw.setdefault(wi, {})[d] = (float(r[2]), float(r[3]))
+        old_pw = {}   # wi -> row tuple(weld_base,pipe_diam,weld_st,unit_qty,use_qty,loss_factor,meta_ok,cs_calc_except,lme_except,tag,src)
+        cur.execute("""SELECT weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,loss_factor,
+                       ISNULL(meta_ok,1),ISNULL(cs_calc_except,0),ISNULL(lme_except,0),ISNULL(tag,'W'),ISNULL(src,'')
+                       FROM nx.proc_weld WHERE parent_item=?""", node)
+        for r in cur.fetchall():
+            old_pw[str(r[0]).strip()] = tuple(r[1:])
+        old_rt = {}   # wi -> [(proc_code,work_qty,prod_uph,calc_gubun,sort_seq)]
+        cur.execute("""SELECT item_code,proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'3'),ISNULL(sort_seq,0)
+                       FROM nx.routing WHERE p_item=? AND proc_code IN ('51','28')""", node)
+        for r in cur.fetchall():
+            old_rt.setdefault(str(r[0]).strip(), []).append((str(r[1]).strip(), float(r[2]), float(r[3]), str(r[4]).strip(), int(r[5])))
         # ★노드 전체 용접봉 원자 삭제(다종 교체)
         cur.execute("DELETE FROM nx.item_weld WHERE item_code=?", node)
         cur.execute("DELETE FROM nx.proc_weld WHERE parent_item=?", node)
@@ -911,6 +953,30 @@ def weld_save_node(payload: dict = Body(...)):
                     continue
                 if d > 0 and q > 0:
                     cnt[d] += q
+            # ── 관경 무변경 판정: 들어온 counts == 이전 item_weld counts(같은 wi) → verbatim 원상보존 ──
+            oiw = old_iw.get(wi)
+            unchanged = (oiw is not None
+                         and {d: q for d, q in cnt.items()} == {d: wq for d, (wq, _uq) in oiw.items()})
+            if unchanged:
+                # item_weld 원상복원(use_qty 포함 그대로)
+                for d, (wq, uq) in sorted(oiw.items()):
+                    cur.execute("INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty) VALUES(?,?,?,?,?)",
+                                node, wi, d, wq, uq)
+                # proc_weld 원상복원(있던 경우만 — 없던 divergent는 그대로 미생성)
+                if wi in old_pw:
+                    o = old_pw[wi]
+                    cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,
+                          loss_factor,meta_ok,cs_calc_except,lme_except,tag,src,upd_dt)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,getdate())""",
+                        node, wi, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9], o[10])
+                # routing 원상복원(있던 51/28 행 그대로)
+                for (rpc, rwq, ruph, rcg, rss) in old_rt.get(wi, []):
+                    cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+                        VALUES(?,?,?,?,?,?,?)""", node, wi, rpc, rwq, ruph, rcg, rss)
+                saved.append({"weld_item": wi, "proc_code": (old_rt.get(wi, [("51",)])[0][0] if old_rt.get(wi) else pc),
+                              "points": sum(cnt.values()), "use_qty": (old_pw[wi][4] if wi in old_pw else 0.0), "preserved": True})
+                continue
+            # ── 편집/신규 유형 = 재계산 ──
             bad = [d for d in cnt if d not in STDU]
             if bad:
                 raise HTTPException(400, f"weld_diam에 없는 관경: {bad} (용접봉 {wi})")
@@ -932,7 +998,7 @@ def weld_save_node(payload: dict = Body(...)):
                 node, wi, wi.split('-')[0], diam_rep, sum_cnt, unit, use_qty, lf)
             cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
                 VALUES(?,?,?,?,?,'3',0)""", node, wi, pc, sum_cnt, uph)
-            saved.append({"weld_item": wi, "proc_code": pc, "points": sum_cnt, "use_qty": use_qty})
+            saved.append({"weld_item": wi, "proc_code": pc, "points": sum_cnt, "use_qty": use_qty, "recalc": True})
         nx.commit()
         _reset_cost_engine()
         return {"ok": True, "node": node, "types": saved, "count": len(saved)}
