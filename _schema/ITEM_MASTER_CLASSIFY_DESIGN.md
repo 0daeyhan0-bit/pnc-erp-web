@@ -114,6 +114,11 @@ sgroup별 make_type 실제 분포(라이브):
 - ★**표시 배선완**(2026-08-29): `/api/itemmaster/get` 응답에 axis3 추가(순수추가·item.py) + 품목마스터 편집모달 상단 정보박스에 3축 배지(조달 초록/생산 파랑/판매 노랑·미분류 빨강·읽기전용·이모지없음§3). ?v=260829axis3. **검증**: py_compile OK·axis3쿼리 실측(AJR30037604 생산=완제품ASSY·판매=절삭, 재분류 AJR30089619-1-2(링) 생산=SUB-ASSY 반영)·백엔드 부팅 526EP·JS서빙 6참조. HTTP는 인증게이트로 미확인. 배포=사용자.
 - ★교훈(사고): 미커밋 상태서 `git switch`(중단)+`git checkout <branch> -- files` 체인이 **미커밋 프론트 편집 덮어씀**. 재적용+명시 커밋으로 복구. 이후 브랜치 이동 전 반드시 명시 커밋.
 
+### ★step4 — 현행조달 표기(C블록) (2026-08-29)
+- **실측**: route/sourcing 테이블에 make_type 컬럼 **없음** → "route가 진실"이나 route에 미존재. make_type은 nx.item에만(1제작8407·2외주7609·3구매3416·4LG사급578·5외주완성191·공백5125).
+- ⟹ **item.make_type을 "조달방식(현행·참조)"로 표기만**: nx.v_item_axis3에 `procure_method`(제작/외주/구매/LG사급/외주완성) 추가 + /api/itemmaster/get axis3.method + 편집모달 회색 배지(참조·title="route가 진실, 마스터는 표기만"). ?v=260829axis3b.
+- 검증: 뷰 재생성·쿼리실측(MJU62788820 조달방식=외주)·py_compile OK. ★make_type은 §3-1 신뢰주의(분류유도엔 미사용, 표기만).
+
 ---
 
 ## 6. 롤백 지도
