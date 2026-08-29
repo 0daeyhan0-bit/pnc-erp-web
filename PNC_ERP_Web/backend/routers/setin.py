@@ -253,7 +253,10 @@ def setstock_scan(request: Request, barcode: str = Query(...)):
 def setstock_receive(request: Request, payload: dict = Body(...)):
     _u = staff_only(request, "세트입고")   # ★협력사 계정 거부 - 우리가 받는 행위다
     """입고처리 — SET바코드 스캔/장부입고. set_stock_maint 기록 + status(일반=입고완료90/검사=입고대기30)
-       + 입고완료분 자도번 재고파생(stock_ledger, MAINT_TAG='S'). tag: 2바코드/3장부. manual: 수동입고NO."""
+       + 입고완료분 자도번 재고파생(stock_ledger, MAINT_TAG='S'). tag: 2바코드/3장부. manual: 수동입고NO.
+       ★입고 가능 상태 = 10발행 · 20출발 · 30입고대기.
+         20(출발)은 협력사가 차에 실었다는 표시다(2026-08-29 신설) — 실제로 도착한 것이므로
+         **입고 대상에 반드시 포함**해야 한다. 빠뜨리면 출발 처리한 송장이 입고되지 않는다."""
     bc = "".join(ch for ch in str(payload.get("barcode", "")) if ch.isdigit())
     tag = str(payload.get("tag", "2")).strip() or "2"
     manual = str(payload.get("manual", "")).strip() or None
@@ -281,7 +284,7 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
                 f"추가 납품분이면 [장부수정]으로, 잘못 입고했으면 [입고취소]로 처리하세요.")
 
         cur.execute("""SELECT h.sheet_no, h.item_code, ISNULL(h.deliver_qty,h.input_req_qty) qty, h.in_cust_code,
-              ISNULL(h.insp_flag,'0') insp FROM nx.set_input_req h WHERE h.barcode_no=? AND h.status IN ('10','30')""", bc)
+              ISNULL(h.insp_flag,'0') insp FROM nx.set_input_req h WHERE h.barcode_no=? AND h.status IN ('10','20','30')""", bc)
         reqs = cur.fetchall()
         if not reqs:
             # 발행 상태가 아니다 — 왜인지 밝힌다(막연한 404 금지)
@@ -295,7 +298,7 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
             desc = " · ".join(f"{ST.get(str(a).strip(), a)} {b}건" for a, b in st)
             raise HTTPException(409,
                 f"입고할 수 없는 상태입니다 — SET바코드 {bc}: {desc}. "
-                f"발행(10) 또는 입고대기(30) 상태만 입고됩니다.")
+                f"발행(10)·출발(20)·입고대기(30) 상태만 입고됩니다.")
         recv = 0; posted = 0
         cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)"); _today = cur.fetchone()[0]
         cur.execute("SELECT ISNULL(MAX(maint_seq),0) FROM nx.set_stock_maint WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")

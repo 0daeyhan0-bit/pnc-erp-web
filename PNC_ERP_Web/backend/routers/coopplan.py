@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """coopplan 도메인 라우터 — app.py에서 분리. 공유헬퍼는 common.py."""
+import io
 import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
@@ -552,7 +553,7 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
 @router.get("/api/partner/planstatus")
 def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
                        part: str = Query(""), assy: str = Query(""), line: str = Query(""),
-                       gubun: str = Query("외주"), src: str = Query("nx")):
+                       gubun: str = Query("외주"), src: str = Query("nx"), light: int = Query(0)):
     """협력사(납품업체)별 자도번 일자계획. gubun: 외주(협력사=CUST, 기본)/자체(내부공정=WORK)/전체.
        ★소속 강제 — 협력사 계정은 작업처(wc)가 자기 거래처코드로 고정된다. 남의 계획은 보이지 않는다.
        src=legacy → 라이브 PR_T_PLAN_PART_MAT(레거시 4주간 계획수량 w_pr_outside_410, 당김반영) 직독.
@@ -593,6 +594,16 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
             # ★키당 일자 1개로 귀속 = MIN(PART_PLAN_YMD). 한 모품목의 자재들이 리드타임이 달라 소요일자가
             #   갈리면(실측 142/1,599키) 일자별로 계획수량이 통째로 붙어 중복 계상된다(20,838 vs 19,723).
             #   가장 이른 소요일 = 그 모품목을 그날까지 준비해야 하는 날 → 레거시 SP 도 키당 1행.
+            # ★light — 협력사 홈(폰)은 자재 목록이 필요 없다.
+            #   STUFF(... FOR XML PATH) 는 **행마다 도는 상관 서브쿼리**라 여기가 가장 무겁다.
+            #   축(ASSY_ITEM_CODE)·수량 산식은 그대로 두므로 **정본과 숫자가 같다**.
+            _MATN = "0 matn" if light else "COUNT(DISTINCT pp.MAT_CODE) matn"
+            _MATS = ("'' mats" if light else
+                     """STUFF((SELECT DISTINCT ','+RTRIM(x.MAT_CODE) FROM PARTNER_ERP_TEST3.nx.plan_part_mat x
+                          WHERE x.WORK_ORDER=pp.WORK_ORDER AND x.SPLIT_WORK_ORDER=pp.SPLIT_WORK_ORDER
+                            AND x.ASSY_ITEM_CODE=pp.ASSY_ITEM_CODE
+                            AND x.MAT_WORK_CENTER_CODE=pp.MAT_WORK_CENTER_CODE
+                          FOR XML PATH('')),1,1,'') mats""")
             cur.execute(f"""SELECT TOP {CAP} MIN(pp.PART_PLAN_YMD) PART_PLAN_YMD, pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm,
                   pp.WORK_ORDER, pp.ASSY_ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
                   -- ★라인은 plan_item_dtl 우선(A/S·긴급 SVC/AP 제번은 plan_dtl 에 없어 41건 빈칸이 됐다)
@@ -608,12 +619,7 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
                            NULLIF(RTRIM(i.work_code),''), NULLIF(RTRIM(i.in_cust),''), '') workcenter,
                   MAX(CAST(ISNULL(d.LOT_QTY,0) AS float)) lot,
                   MAX(CEILING(CAST(ISNULL(d.PLAN_QTY,0) AS float)*ISNULL(d.USE_QTY,1)*ISNULL(d.PROD_RATE,100)/100.0)) q,
-                  COUNT(DISTINCT pp.MAT_CODE) matn,
-                  STUFF((SELECT DISTINCT ','+RTRIM(x.MAT_CODE) FROM PARTNER_ERP_TEST3.nx.plan_part_mat x
-                          WHERE x.WORK_ORDER=pp.WORK_ORDER AND x.SPLIT_WORK_ORDER=pp.SPLIT_WORK_ORDER
-                            AND x.ASSY_ITEM_CODE=pp.ASSY_ITEM_CODE
-                            AND x.MAT_WORK_CENTER_CODE=pp.MAT_WORK_CENTER_CODE
-                          FOR XML PATH('')),1,1,'') mats
+                  {_MATN}, {_MATS}
                 FROM PARTNER_ERP_TEST3.nx.plan_part_mat pp
                 JOIN nx.plan_item_dtl d ON d.WORK_ORDER{C}=pp.WORK_ORDER{C}
                      AND d.SPLIT_WORK_ORDER{C}=pp.SPLIT_WORK_ORDER{C} AND d.C_ITEM_CODE{C}=pp.ASSY_ITEM_CODE{C}
@@ -1283,3 +1289,180 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
             "title": _tt,
             "custnm": supplier["nm"] or cust, "cust": cust,
             "supplier": supplier, "buyer": buyer, "rows": rows, "total": _qint(tot), "count": len(rows)}
+
+
+# ===================== 협력사 포털 — 홈 요약 (2026-08-29) =====================
+@router.get("/api/partner/my")
+def partner_my(request: Request, cust: str = Query(""), days: int = Query(14)):
+    """협력사 홈 — 폰을 열었을 때 보는 첫 화면.
+
+       ★소속 강제: 협력사 계정은 cust 파라미터와 무관하게 자기 것만 본다.
+         내부 담당자는 cust 로 지정해 **협력사가 보는 화면 그대로** 볼 수 있다(통화 대응).
+
+       돌려주는 것
+         plan_soon  오늘~days 일 안에 납기가 걸린 자도번 (일자·수량)
+         plan_tot   그 기간 합계 수량 · 품목수
+         inv        내 송장 상태별 건수 (00요청/10발행/20출발/30입고대기/40검사중/90입고완료/99반품)
+         ready      아직 발행하지 않은 송장(00) — **협력사가 지금 할 일**
+    """
+    import datetime as _dt
+    u = require_user(request)
+    cc = scope_cust(u, cust) or ""
+    if not cc:
+        raise HTTPException(400, "거래처를 지정하세요.")
+    today = _dt.date.today()
+    fr = today.strftime("%y%m%d")
+    to = (today + _dt.timedelta(days=max(1, min(int(days), 90)))).strftime("%y%m%d")
+
+    # ── 내 계획 ──
+    # ★정본 재사용 — 협력사 계획은 `partner_planstatus` 가 정본이다(자도번 축 = ASSY_ITEM_CODE,
+    #   수량은 plan_item_dtl 조인). 여기서 SQL 을 새로 짜면 **계획 화면과 숫자가 갈린다**.
+    #   (처음에 plan_part_mat.MAT_CODE 로 짰다가 그건 자재(원소재)라 틀렸다 — 협력사가 만드는 건 자도번이다.)
+    # ★라우트 함수를 직접 부를 때는 **모든 파라미터를 명시**해야 한다.
+    #   빠뜨리면 FastAPI 의 Query(...) 기본값 **객체**가 그대로 들어와 .strip() 에서 터진다.
+    # ★★우리 커서를 열기 **전에** 부른다 — 커서를 쥔 채 다른 함수를 부르면 그 함수가
+    #   두 번째 커서를 열고, MARS 가 꺼진 커넥션에서는 `HY000 다른 hstmt에 연결이 사용 중`
+    #   으로 터진다. 운영은 _nx() 가 매번 새 커넥션이라 안 드러나지만 TestBed(공유 커넥션)에서
+    #   바로 걸린다. 커넥션을 하나만 쥐는 편이 옳기도 하다.
+    ps = partner_planstatus(request, from_ymd=fr, to_ymd=to, wc=cc,
+                            part="", assy="", line="", gubun="외주", src="nx", light=1)
+
+    cn = _nx(); cur = cn.cursor()
+    try:
+        plan = []
+        for r in (ps.get("rows") or []):
+            part = str(r.get("assy") or r.get("part") or "").strip()
+            nm = str(r.get("nm") or "").strip()
+            for d, q in (r.get("days") or {}).items():
+                d = str(d).strip()
+                if fr <= d <= to and float(q or 0):
+                    plan.append({"ymd": d, "part": part, "nm": nm, "qty": float(q or 0)})
+        # 같은 (일자,자도번) 합치고 일자순 정렬
+        _agg = {}
+        for r in plan:
+            k = (r["ymd"], r["part"])
+            if k in _agg:
+                _agg[k]["qty"] += r["qty"]
+            else:
+                _agg[k] = r
+        plan = sorted(_agg.values(), key=lambda x: (x["ymd"], x["part"]))
+
+        # ── 내 송장 상태별 ──
+        cur.execute("""SELECT ISNULL(status,'00') st, COUNT(*) n,
+                              SUM(CAST(ISNULL(deliver_qty, input_req_qty) AS float)) q
+                         FROM nx.set_input_req WHERE in_cust_code = ?
+                        GROUP BY ISNULL(status,'00')""", cc)
+        ST = {"00": "요청", "10": "발행", "20": "출발", "30": "입고대기",
+              "40": "검사중", "90": "입고완료", "99": "반품"}
+        inv = [{"status": str(a).strip(), "nm": ST.get(str(a).strip(), str(a).strip()),
+                "cnt": int(b or 0), "qty": float(c or 0)} for a, b, c in cur.fetchall()]
+
+        # ── 아직 발행하지 않은 송장 = 협력사가 지금 할 일 ──
+        cur.execute("""SELECT TOP 100 sheet_no, input_ymd, item_code,
+                              CAST(ISNULL(deliver_qty, input_req_qty) AS float) qty
+                         FROM nx.set_input_req
+                        WHERE in_cust_code = ? AND ISNULL(status,'00') = '00'
+                          AND remarks = 'PLAN_COMPOSE'
+                        ORDER BY input_ymd DESC, sheet_no DESC""", cc)
+        ready = [{"sheet": str(a).strip(), "ymd": str(b or "").strip(),
+                  "item": str(c or "").strip(), "qty": float(d or 0)} for a, b, c, d in cur.fetchall()]
+
+        # ── 발행한 송장(바코드 단위) — QR 다시 보기·출발 처리에 쓴다 ──
+        cur.execute("""SELECT barcode_no, MAX(issue_ymd) ymd, MIN(ISNULL(status,'10')) st,
+                              COUNT(*) cnt, SUM(CAST(ISNULL(deliver_qty,input_req_qty) AS float)) q
+                         FROM nx.set_input_req
+                        WHERE in_cust_code = ? AND barcode_no IS NOT NULL
+                          AND ISNULL(status,'00') IN ('10','20','30','40')
+                        GROUP BY barcode_no ORDER BY MAX(issue_ymd) DESC, barcode_no DESC""", cc)
+        issued = [{"barcode": str(a).strip(), "ymd": str(b or "").strip(),
+                   "status": str(c2).strip(), "cnt": int(d or 0), "qty": float(e or 0)}
+                  for a, b, c2, d, e in cur.fetchall()[:60]]
+
+        cur.execute("SELECT cust_name FROM nx.cust WHERE cust_code=?", cc)
+        r = cur.fetchone()
+        return {"cust": cc, "custnm": (str(r[0]).strip() if r else ""),
+                "issued": issued,
+                "from": fr, "to": to, "days": days,
+                "plan": plan,
+                "plan_tot": {"qty": sum(x["qty"] for x in plan),
+                             "items": len({x["part"] for x in plan}),
+                             "rows": len(plan)},
+                "inv": inv,
+                "ready": ready, "ready_cnt": len(ready)}
+    finally:
+        cn.close()
+
+
+@router.post("/api/partner/depart")
+def partner_depart(request: Request, body: dict = Body(...)):
+    """송장 출발 처리 — 협력사가 차에 실었다는 표시. 상태 10발행 → 20출발.
+
+       ★왜 필요한가 — 우리 담당자가 '오늘 뭐가 오는지' 알아야 입고를 준비한다.
+         발행만 하고 며칠 뒤 오는 경우가 있어 발행과 출발을 분리한다.
+       ★소속 강제 — 협력사는 자기 바코드만. 남의 송장을 출발시킬 수 없다.
+    """
+    u = require_user(request)
+    bc = "".join(ch for ch in str(body.get("barcode", "")) if ch.isdigit())
+    if not bc:
+        raise HTTPException(400, "SET바코드가 필요합니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        assert_own_barcode(cur, u, bc)                 # 남의 송장 차단
+        cur.execute("""SELECT ISNULL(status,'00'), COUNT(*) FROM nx.set_input_req
+                        WHERE barcode_no=? GROUP BY ISNULL(status,'00')""", bc)
+        st = [(str(a).strip(), b) for a, b in cur.fetchall()]
+        if not st:
+            raise HTTPException(404, f"SET바코드 {bc} 송장을 찾을 수 없습니다.")
+        if not any(a == "10" for a, _ in st):
+            ST = {"00": "요청(미발행)", "20": "출발", "30": "입고대기",
+                  "40": "검사중", "90": "입고완료", "99": "반품"}
+            desc = " · ".join(f"{ST.get(a, a)} {b}건" for a, b in st)
+            raise HTTPException(409, f"출발 처리할 수 없는 상태입니다 — {desc}. 발행(10)만 출발됩니다.")
+        cur.execute("""UPDATE nx.set_input_req SET status='20', status_dt=GETDATE(), status_user=?
+                        WHERE barcode_no=? AND ISNULL(status,'00')='10'""",
+                    (u.get("id") or "web")[:20], bc)
+        n = cur.rowcount
+        cn.commit()
+        return {"ok": True, "barcode": bc, "departed": n,
+                "msg": f"출발 처리했습니다 — 송장 {n}건. 도착하면 담당자가 QR 을 찍어 입고합니다."}
+    finally:
+        cn.close()
+
+
+# ===================== 협력사 포털 — QR (2026-08-29) =====================
+def _qr_svg(text, scale=6, border=2):
+    """QR 을 SVG 문자열로. segno = repo 안 vendor (서버에 pip install 불필요)."""
+    import os as _os
+    import sys as _sys
+    _v = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "vendor")
+    if _v not in _sys.path:
+        _sys.path.insert(0, _v)
+    import segno
+    buf = io.BytesIO()
+    # ★make_qr() — **표준 QR 강제**. segno.make() 는 짧은 값이면 Micro QR(M3)을 고르는데
+    #   마이크로 QR 은 폰 카메라·리더기 상당수가 **못 읽는다**(현장에서 안 찍히면 치명적).
+    # error='m' = 15% 복원. 상자에 붙어 긁히거나 젖는 것을 감안한다.
+    segno.make_qr(str(text), error='m').save(buf, kind='svg', scale=scale, border=border,
+                                             dark='#000000', light='#ffffff')
+    return buf.getvalue().decode('utf-8')
+
+
+@router.get("/api/partner/qr")
+def partner_qr(request: Request, barcode: str = Query(...), scale: int = Query(6)):
+    """SET바코드 QR (SVG). ★자기 송장만 — 남의 바코드는 QR 도 못 뽑는다."""
+    from fastapi.responses import Response as _Resp
+    u = require_user(request)
+    bc = "".join(ch for ch in str(barcode) if ch.isdigit())
+    if not bc:
+        raise HTTPException(400, "SET바코드가 필요합니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        assert_own_barcode(cur, u, bc)          # 소속 강제
+        cur.execute("SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=?", bc)
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"SET바코드 {bc} 송장을 찾을 수 없습니다.")
+    finally:
+        cn.close()
+    svg = _qr_svg("SET" + bc, scale=max(2, min(int(scale), 14)))
+    return _Resp(content=svg, media_type="image/svg+xml",
+                 headers={"Cache-Control": "no-store"})

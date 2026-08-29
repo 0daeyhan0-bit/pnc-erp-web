@@ -31,7 +31,9 @@
    - 유일 소스표·경위 = `_schema/DO_NOT_USE_FIELDS.md` §18.
      단가=`nx.price_item`(사급가·LG판가)/`nx.price_metal`(원소재) · 품목=`nx.item` · BOM=`nx.bom` · 재고=단일원장/확정스냅샷.
 
-10. **★소요는 통일 소요엔진으로만(사용자 하드룰 2026-08-29).** BOM 소요/전개 계산은 **검증된 소요 엔진**으로만 = ①**우리 BOM** `_harness/nx_soyo_engine.py` walker(material·prod_soyo·**sagub_parts_soyo**·weight_explode 등)·`NxCostEngine`·자재소요 `nx.plan_part_mat`·동중량 `nx.bom_flat` ②**LG BOM(별도 엔진)** `_harness/nx_lgbom_engine.py`(lg_ap_all·lg_ap_split, LG Assembly Pull 롤업). **직접(ad-hoc) BOM 재귀·CTE로 소요 재현 금지**(`CS_M_ITEM_BOM`/`nx.bom_line`/`nx.lg_bom`/`v_pr_bom` 직접전개 금지). 이유=BOM 변형SUB 평탄화 함정을 ad-hoc가 이중계상(실측: lgsagub `_explode_parts`가 EBF64570401 2배). 엔진 한곳 고치면 전 프로그램 동시정확. **소요 엔진 안 쓰는 프로그램이 없어야 함.** 위반=엔진 마이그레이션(옆에짓고 diff0). 상세 [[feedback-soyo-engine-only]]. §1-9의 강화.
+10. **★소요는 통일 소요엔진으로만(사용자 하드룰 2026-08-29).** BOM 소요/전개 계산은 **검증된 소요 엔진**으로만 = ①**우리 BOM** `_harness/nx_soyo_engine.py` walker(material·prod_soyo·**sagub_parts_soyo**·weight_explode 등)·`NxCostEngine`·자재소요 `nx.plan_part_mat`·동중량 `nx.bom_flat` ②**LG BOM(별도 엔진)** `_harness/nx_lgbom_engine.py`(lg_ap_all·lg_ap_split, LG Assembly Pull 롤업). **직접(ad-hoc) BOM 재귀·CTE로 소요 재현 금지**(`CS_M_ITEM_BOM`/`nx.bom_line`/`nx.lg_bom`/`v_pr_bom` 직접전개 금지). 이유=BOM 변형SUB 평탄화 함정을 ad-hoc가 이중계상(실측: lgsagub `_explode_parts`가 EBF64570401 2배). 엔진 한곳 고치면 전 프로그램 동시정확. **소요 엔진 안 쓰는 프로그램이 없어야 함.** 위반=엔진 마이그레이션(옆에짓고 diff0). **★규칙 정본·엔진 API·우회 인벤토리·정확도 주의 = `_schema/SOYO_ENGINE_RULE.md`(필독).** 상세 [[feedback-soyo-engine-only]]. §1-9의 강화.
+   - **현재상태(2026-08-29 확인)**: item 통합됨(leaf=`nx.item`, item_weight≡PR_M_ITEM 불일치0 — 엔진 PR_M_ITEM 직독은 nx.item으로 리포인트 완료·전수 diff0) · proc_weld 분리됨(용접=공정 `nx.proc_weld`, BOM 재귀로 용접 계산 금지) · except_flag=BOM 전개제외 역할은 유효(생산처 라우팅만 `nx.routing_edge`로 이관).
+   - **★정확도 주의: "레거시와 diff0"≠"정답".** 현 엔진은 `nx.bom_line` 미러 부채(변형SUB 평탄화)를 상속하나, 라이브 출력은 필터(cs_calc_except·except_flag·dedup)로 정확 유지 확인(생산계획 54 2배=중복엣지+stale·원가 diff0, 변형SUB 대수술 불요). 근본 클린화=엔진 전개소스 nx.bom(추후·유지보수).
 
 ---
 

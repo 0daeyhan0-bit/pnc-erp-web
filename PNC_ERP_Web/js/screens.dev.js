@@ -3337,6 +3337,14 @@ SCREEN.itemmaster=(host)=>{
              ${st.form.prod_group?`제품군: <b style="color:#1c47a0">${esc(st.form.prod_group)}</b> › <b>${esc(st.form.prod_line||'')}</b> <span style="color:var(--muted)">(품번 접두어 자동)</span>&nbsp;·&nbsp;`:''}품목유형: <b style="color:#1c47a0">${st.form.nature?esc(st.form.nature):'저장 시 자동판정'}</b>
              ${softField().length?`&nbsp;·&nbsp;<span style="color:#b8860b">권장항목(노랑 ※)</span>: ${softField().map(k=>esc((opts.field_label&&opts.field_label[k])||k)).join(', ')} — 비어도 저장되나 경고`:''}
              ${st.form.active===0?`&nbsp;·&nbsp;<span style="color:#c0392b">▲ 정리대상 후보(BOM/공정 미연결)</span>`:''}
+             ${(st.form._axis3&&(st.form._axis3.procure||st.form._axis3.produce||st.form._axis3.sales||st.form._axis3.unclassified))?`<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #c9d6ea">
+               <span style="color:var(--muted)">3축 유도(표시·원가무관):</span>
+               ${st.form._axis3.procure?`<span style="display:inline-block;background:#eaf5ea;color:#1c7c3a;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600">조달 · ${esc(st.form._axis3.procure)}</span>`:''}
+               ${st.form._axis3.produce?`<span style="display:inline-block;background:#eaf0fb;color:#1c47a0;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600">생산 · ${esc(st.form._axis3.produce)}</span>`:''}
+               ${st.form._axis3.sales?`<span style="display:inline-block;background:#fbf3e6;color:#b8860b;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600">판매 · ${esc(st.form._axis3.sales)}</span>`:''}
+               ${st.form._axis3.method?`<span style="display:inline-block;background:#eef1f5;color:#556;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600" title="현행조달(make_type) — route가 진실, 마스터는 표기만">조달방식 · ${esc(st.form._axis3.method)} <span style="font-weight:400;font-size:10px;color:#889">(참조)</span></span>`:''}
+               ${st.form._axis3.unclassified?`<span style="color:#c0392b;font-weight:600">미분류(sgroup 없음)</span>`:''}
+             </div>`:''}
            </div>
            ${st.form._edit?`<div style="font-size:11px;color:#b8860b;margin-bottom:8px">※ 품번을 바꾸면 <b>품번변경</b>으로 처리 — BOM 모/자코드 연쇄 갱신 + 이력 기록됩니다.</div>`:''}
            <table style="border-collapse:collapse;width:100%"><tbody>${(()=>{let h='';const SF=softField();for(let i=0;i<F.length;i+=2){const a=F[i],b=F[i+1];
@@ -3375,7 +3383,7 @@ SCREEN.itemmaster=(host)=>{
           const j=await r.json();if(j.ok){st.msg=`${code} → ${nu?'사용중':'사용중지'} 전환`;load();}else alert('전환 실패');}catch(e){alert('전환 오류: '+e);}});
       host.querySelectorAll('.im-edit').forEach(b=>b.onclick=async()=>{const code=st.rows[+b.dataset.idx].item_code;
         try{const j=await(await fetch(`${API}/api/itemmaster/get?item=${encodeURIComponent(code)}`)).json();
-          st.form=Object.assign({_edit:1,_orig_code:code},j.item||{},j.sub||{});}
+          st.form=Object.assign({_edit:1,_orig_code:code,_axis3:j.axis3||{}},j.item||{},j.sub||{});}
         catch(e){alert('불러오기 실패: '+e);return;}render();});
     }
     attachResizers(host);

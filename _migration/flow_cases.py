@@ -337,12 +337,33 @@ READ_CHECKS = [
 #   운영 전환 전에 **반드시 비밀번호를 바꾼다**(바꾸면 환경변수로 넘긴다).
 #   이 계정들은 PARTNER_ERP_TEST3 의 개발 시드이며, 화면(브라우저)에는 더 이상
 #   비밀번호가 실려 나가지 않는다 — 여기 있는 것은 하네스가 로그인하기 위한 것이다.
+import io
 import os as _os
 import json as _j
+
+
+def _secret(key, env, dflt=None):
+    """하네스 자격 — ①환경변수 ②repo 밖 .flow_secrets.json ③개발시드 기본값.
+       ★비밀번호를 repo 에 넣지 않는다. 없으면 그 계정 케이스는 SKIP 된다(조용히 통과 아님)."""
+    v = _os.environ.get(env)
+    if v:
+        return v
+    try:
+        _f = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".flow_secrets.json")
+        return (_j.load(io.open(_f, encoding="utf-8")) or {}).get(key) or dflt
+    except Exception:
+        return dflt
+
+
+# ★[F]/[R] 케이스의 기본 로그인 계정.
+#   내부 API 전면 인증(2026-08-29) 이후로는 하네스도 로그인해야 화면 API 를 부를 수 있다.
+#   케이스에 as_ 를 명시하면 그것이 우선하고, as_=None 이면 **무토큰**(비로그인 재현)이다.
+DEFAULT_AS = "super"
+
 ACCOUNTS = {
-    "super":   _os.environ.get("FLOW_PW_SUPER", "super"),      # 내부 · 시스템관리자
-    "miraero": _os.environ.get("FLOW_PW_COOP", "1234"),        # 협력사(미래정밀 = 2096)
-    "kdev":    _os.environ.get("FLOW_PW_KDEV", "1234"),        # 내부 · 조회전용
+    "super":    _secret("super", "FLOW_PW_SUPER", "super"),     # 내부 · 시스템관리자
+    "flowcoop": _secret("flowcoop", "FLOW_PW_COOP"),            # ★TestBed 협력사 전용(2096) — 배포금지
+    "kdev":     _secret("kdev", "FLOW_PW_KDEV", "1234"),        # 내부 · 조회전용
 }
 COOP_CUST = "2096"          # 미래정밀 — 협력사 계정의 소속
 OTHER_CUST = "2148"         # 대원산업 — '남의 것'
@@ -399,7 +420,7 @@ AUTH_CASES = [
     dict(kind="S", name="무토큰 — 내 정보 조회", method="GET", path="/api/auth/me",
          as_=None, expect=401),
     dict(kind="S", name="협력사 로그인 — 거래처코드가 실려 오는가", method="POST",
-         path="/api/auth/login", body={"id": "miraero", "pw": ACCOUNTS["miraero"]},
+         path="/api/auth/login", body={"id": "flowcoop", "pw": ACCOUNTS["flowcoop"]},
          as_=None, expect=200,
          check=lambda res, ctx: (res.get("user", {}).get("partner_code") == COOP_CUST,
                                  f"{res.get('user',{}).get('nm')} · 유형 {res.get('user',{}).get('utype')}"
@@ -407,22 +428,22 @@ AUTH_CASES = [
 
     # ── ★소속 강제 : 협력사가 남의 코드를 넣으면 ────────────────────
     dict(kind="S", name=f"★협력사가 남의 코드({OTHER_CUST}) 로 송장목록", method="GET",
-         path=f"/api/setin/list?cust={OTHER_CUST}", as_="miraero", expect=200,
+         path=f"/api/setin/list?cust={OTHER_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: _only_mine(res, "in_cust_code", "cust_code", "cust")),
     dict(kind="S", name=f"★협력사가 남의 코드({OTHER_CUST}) 로 입고실적", method="GET",
-         path=f"/api/setstock/list?cust={OTHER_CUST}", as_="miraero", expect=200,
+         path=f"/api/setstock/list?cust={OTHER_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: _only_mine(res, "cust_code", "in_cust_code")),
     dict(kind="S", name=f"★협력사가 남의 작업처({OTHER_CUST}) 로 계획조회", method="GET",
-         path=f"/api/partner/planstatus?wc={OTHER_CUST}", as_="miraero", expect=200,
+         path=f"/api/partner/planstatus?wc={OTHER_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: _only_mine(res, "MAT_WORK_CENTER_CODE", "wc", "cust_code")),
     dict(kind="S", name="협력사가 자기 코드로 거래명세서 (비교 기준)", method="GET",
-         path=f"/api/partner/deliv420?cust={COOP_CUST}", as_="miraero", expect=200,
+         path=f"/api/partner/deliv420?cust={COOP_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: (ctx.update(
              _deliv_mine=_j.dumps(res.get("rows") or [], sort_keys=True, default=str)) or True,
              f"{len(res.get('rows') or [])}행 — 이걸 기준으로 다음 케이스와 비교한다")),
     dict(kind="S", name="★협력사가 남의 코드로 거래명세서 조회 = 자기 결과와 같은가",
          method="GET", path=f"/api/partner/deliv420?cust={OTHER_CUST}",
-         as_="miraero", expect=200,
+         as_="flowcoop", expect=200,
          check=lambda res, ctx: _deliv_same(res, ctx)),
     dict(kind="S", name="★그 결과가 내부가 보는 남의 데이터와는 다른가", method="GET",
          path=f"/api/partner/deliv420?cust={OTHER_CUST}", as_="super", expect=200,
@@ -446,35 +467,35 @@ AUTH_CASES = [
     # ── 남의 문서 (바코드·송장번호만 알면 되는 API) ─────────────────
     dict(kind="S", name="★협력사가 남의 송장 명세 열람", method="GET",
          path=lambda ctx: f"/api/setin/detail?sheet={ctx.get('other_sheet')}",
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
     dict(kind="S", name="내부는 그 송장이 열린다(회귀 없음)", method="GET",
          path=lambda ctx: f"/api/setin/detail?sheet={ctx.get('other_sheet')}",
          as_="super", expect=200, skip_if=lambda ctx: not ctx.get("other_sheet"),
          check=lambda res, ctx: (True, f"자도번 {len(res.get('rows') or [])}종")),
     dict(kind="S", name="★협력사가 남의 송장을 발행", method="POST", path="/api/setin/issue",
          body=lambda ctx: {"items": [{"sheet": ctx.get("other_sheet"), "qty": 1}]},
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
     dict(kind="S", name="★협력사가 남의 거래명세표 열람", method="GET",
          path=lambda ctx: f"/api/partner/deliv420/invoice?barcode={ctx.get('other_bc')}",
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
     dict(kind="S", name="★협력사가 남의 발행을 취소", method="POST",
          path="/api/partner/deliv420/cancel",
          body=lambda ctx: {"barcode": ctx.get("other_bc")},
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
     dict(kind="S", name="자기 거래명세표는 열린다", method="GET",
          path=lambda ctx: f"/api/partner/deliv420/invoice?barcode={ctx.get('my_bc')}",
-         as_="miraero", expect=200, skip_if=lambda ctx: not ctx.get("my_bc"),
+         as_="flowcoop", expect=200, skip_if=lambda ctx: not ctx.get("my_bc"),
          check=lambda res, ctx: (True, f"품목 {len(res.get('rows') or res.get('items') or [])}종")),
 
     # ── 입고 처리 = 우리가 받는 행위 → 협력사 거부 ──────────────────
     dict(kind="S", name="★협력사가 입고 스캔", method="GET",
-         path="/api/setstock/scan?barcode=700003", as_="miraero", expect=403),
+         path="/api/setstock/scan?barcode=700003", as_="flowcoop", expect=403),
     dict(kind="S", name="★협력사가 입고 처리", method="POST", path="/api/setstock/receive",
-         body={"barcode": "700003", "tag": "2"}, as_="miraero", expect=403),
+         body={"barcode": "700003", "tag": "2"}, as_="flowcoop", expect=403),
     dict(kind="S", name="★협력사가 입고 취소", method="POST", path="/api/setstock/cancel",
-         body={"barcode": "700003"}, as_="miraero", expect=403),
+         body={"barcode": "700003"}, as_="flowcoop", expect=403),
     dict(kind="S", name="★협력사가 입고취소 미리보기", method="GET",
-         path="/api/setstock/cancel_preview?barcode=700003", as_="miraero", expect=403),
+         path="/api/setstock/cancel_preview?barcode=700003", as_="flowcoop", expect=403),
 
     # ── 계정 API ───────────────────────────────────────────────────
     dict(kind="S", name="★계정목록에 평문 비밀번호가 나오지 않는가", method="GET",
@@ -484,14 +505,14 @@ AUTH_CASES = [
                                  f"{sum(1 for u in (res.get('users') or []) if 'pw' in u)}개 · "
                                  f"비번설정 {sum(1 for u in (res.get('users') or []) if u.get('pw_set'))}명")),
     dict(kind="S", name="협력사는 자기 계정만 본다", method="GET", path="/api/perm/users",
-         as_="miraero", expect=200,
+         as_="flowcoop", expect=200,
          check=lambda res, ctx: (len(res.get("users") or []) == 1
-                                 and (res.get("users") or [{}])[0].get("id") == "miraero",
+                                 and (res.get("users") or [{}])[0].get("id") == "flowcoop",
                                  f"{len(res.get('users') or [])}명 = "
                                  f"{[u.get('id') for u in (res.get('users') or [])]}")),
     dict(kind="S", name="★협력사가 계정을 저장", method="POST", path="/api/perm/users",
          body={"users": [{"id": "hacker", "nm": "침입", "roles": ["시스템관리자"]}]},
-         as_="miraero", expect=403),
+         as_="flowcoop", expect=403),
     dict(kind="S", name="조회전용 내부 사용자도 계정 저장 불가", method="POST",
          path="/api/perm/users",
          body={"users": [{"id": "hacker2", "nm": "침입2", "roles": ["시스템관리자"]}]},
@@ -618,3 +639,184 @@ FIXTURES += [
                   WHERE cust_code='2096' AND ISNULL(barcode_no,'')<>'' AND status<>'99'""",
      lambda ctx, r: ctx.update(my_bc=str(r[0]).strip())),
 ]
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  협력사 포털 전 구간 — 실제 사용 순서대로 + DB 확인 (2026-08-29)
+#  정본 = _schema/PARTNER_PORTAL_DESIGN.md §14~15
+#
+#  흐름: 협력사 홈 → 발행 → QR → 출발 → (담당자) 스캔 → 입고 → 취소
+#  ★응답만 믿지 않는다. 각 단계마다 ctx["_sql"] 로 **미커밋 DB 를 직접 조회**해
+#    행이 실제로 생겼는지/상태가 바뀌었는지 확인한다.
+# ══════════════════════════════════════════════════════════════════════
+
+def _sql1(ctx, q, *a):
+    """단일값 조회. 하네스 헬퍼(ctx['_sql'])는 미커밋 상태를 본다."""
+    r = ctx["_sql"](q, *a)
+    return (r[0][0] if r and r[0] else None)
+
+
+def _pf_home(res, ctx):
+    """① 협력사 홈 — 화면이 첫 화면에서 받는 것. 발행할 송장을 여기서 고른다."""
+    ready = res.get("ready") or []
+    ctx["pf_ready"] = ready[:2]
+    return (res.get("cust") == COOP_CUST and isinstance(res.get("plan"), list),
+            f"거래처 {res.get('cust')} · 계획 {len(res.get('plan') or [])}행 · "
+            f"발행대기 {res.get('ready_cnt')}건 · 발행한송장 {len(res.get('issued') or [])}건")
+
+
+def _pf_issue(res, ctx):
+    """② 발행 — ★DB 에 barcode_no 가 채번되고 상태가 00→10 이 됐는가."""
+    bc = str(res.get("barcode") or "").strip()
+    ctx["pf_bc"] = bc
+    if not bc:
+        return False, f"바코드 미채번 · {res}"
+    sheets = [x["sheet"] for x in (ctx.get("pf_ready") or [])]
+    n10 = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=? AND status='10'", bc)
+    st0 = _sql1(ctx, f"""SELECT COUNT(*) FROM nx.set_input_req
+                          WHERE sheet_no IN ({','.join('?' * len(sheets))}) AND status='00'""", *sheets) if sheets else 0
+    return (n10 == len(sheets) and st0 == 0),             f"SET{bc} · DB 확인 → 발행(10) {n10}건 / 요청(00) 잔여 {st0}건 (고른 것 {len(sheets)}건)"
+
+
+def _pf_qr(res, ctx):
+    """③ QR — SVG 가 나오는가. 마이크로 QR 이면 폰·리더기가 못 읽는다(표준 QR 강제 확인)."""
+    s = res if isinstance(res, str) else str(res)
+    # ★segno 의 SVG 는 width/height + <path> 다 — viewBox 가 없다(내 검사식이 틀렸던 부분).
+    #   ★실측(2026-08-29): 표준 v1 = 21모듈 → (21+4)*6 = **150px**
+    #                      마이크로 M3 = 15모듈 → (15+4)*6 = **114px**
+    #   마이크로 QR 은 폰 카메라·리더기 상당수가 못 읽는다 → 140px 미만이면 FAIL.
+    import re as _re
+    m = _re.search(r'width="(\d+)"', s)
+    w = int(m.group(1)) if m else 0
+    return ("<svg" in s and "<path" in s and w >= 140),            f"{len(s):,}바이트 · width={w}px ⟹ {'표준 QR(v1=150px)' if w >= 140 else '★마이크로 QR(114px) — 폰·리더기가 못 읽는다'}"
+
+
+def _pf_depart(res, ctx):
+    """④ 출발 — ★DB 상태가 10→20 이 됐는가."""
+    bc = ctx.get("pf_bc")
+    n20 = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=? AND status='20'", bc)
+    return (res.get("ok") and n20 > 0), f"{res.get('msg')} · DB 확인 → 출발(20) {n20}건"
+
+
+def _pf_scan(res, ctx):
+    """⑤ 담당자 스캔 — 확인 화면에 협력사·도번이 나오는가(즉시 입고하지 않는다)."""
+    rows = res.get("rows") or []
+    ctx["pf_scanq"] = sum(float(r.get("qty") or 0) for r in rows)
+    return (res.get("cust") == COOP_CUST and len(rows) > 0),            f"{res.get('custnm')} · 도번 {len(rows)}종 · {ctx['pf_scanq']:,.0f}개 · 경고 {res.get('warn') or '없음'}"
+
+
+def _pf_receive(res, ctx):
+    """⑥ ★입고 — 데이터가 실제로 들어갔는가. 세 곳을 전부 확인한다."""
+    bc = ctx.get("pf_bc")
+    mnt = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
+    led = _sql1(ctx, "SELECT COUNT(*) FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
+                int(bc) if str(bc).isdigit() else 0)
+    n90 = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=? AND status='90'", bc)
+    ctx["pf_led"] = led
+    return (res.get("received", 0) > 0 and mnt > 0 and n90 > 0),            (f"응답 입고 {res.get('received')}건 · 재고파생 {res.get('ledger_posted')}행\n           "
+            f"DB 확인 → 입고거래 {mnt}건 · 원장(S) {led}행 · 입고완료(90) {n90}건")
+
+
+def _pf_cancel(res, ctx):
+    """⑦ 입고취소 — 세 곳이 **전부** 되돌아갔는가."""
+    bc = ctx.get("pf_bc")
+    mnt = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
+    led = _sql1(ctx, "SELECT COUNT(*) FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
+                int(bc) if str(bc).isdigit() else 0)
+    st = ctx["_sql"]("SELECT status, COUNT(*) FROM nx.set_input_req WHERE barcode_no=? GROUP BY status", bc)
+    stat = [(str(r[0]).strip(), r[1]) for r in st]
+    ok = (mnt == 0 and led == 0 and all(a == "10" for a, _ in stat))
+    return ok, (f"{res.get('msg')}\n           "
+                f"DB 확인 → 입고거래 {mnt}건 · 원장(S) {led}행 · 송장상태 {stat}")
+
+
+def _pf_final(res, ctx):
+    """⑧ 협력사 홈에 되돌아온 것이 보이는가(화면이 다시 발행 대기로 잡는다)."""
+    inv = {x["nm"]: x["cnt"] for x in (res.get("inv") or [])}
+    return (res.get("cust") == COOP_CUST), f"상태별 {inv}"
+
+
+PORTAL_CASES = [
+    dict(kind="S", name="[포털] ① 협력사 홈 — 첫 화면 데이터", method="GET",
+         path="/api/partner/my?days=14", as_="flowcoop", expect=200, check=_pf_home),
+
+    # ── 유형별 분기 : 세트입고를 안 쓰는 협력사(76곳) 도 홈이 열려야 한다 ──
+    #   ★쓰기 케이스보다 **먼저** 둔다 — 하네스는 트랜잭션을 끝까지 열어 두므로
+    #     쓰기가 쌓인 뒤에는 plan_part_mat 스캔(=planstatus)이 급격히 느려진다.
+    dict(kind="S", name="[포털] ⑭ 세트입고 안 쓰는 협력사(부자재) 홈", method="GET",
+         path="/api/partner/my?cust=2136", as_="super", expect=200,
+         check=lambda res, ctx: (res.get("cust") == "2136",
+                                 f"{res.get('custnm')} · 계획 {len(res.get('plan') or [])}행 · "
+                                 f"발행대기 {res.get('ready_cnt')}건 "
+                                 f"⟹ 송장 탭은 화면에서 숨긴다(빈 화면 방지)")),
+
+    dict(kind="S", name="[포털] ② ★송장 발행 — DB 에 채번·상태전이 되는가", method="POST",
+         path="/api/setin/issue", as_="flowcoop", expect=200,
+         body=lambda ctx: {"items": [{"sheet": x["sheet"], "qty": x["qty"]}
+                                     for x in (ctx.get("pf_ready") or [])]},
+         skip_if=lambda ctx: not ctx.get("pf_ready"), check=_pf_issue),
+
+    dict(kind="S", name="[포털] ③ QR 발급(SVG)", method="GET",
+         path=lambda ctx: f"/api/partner/qr?barcode={ctx.get('pf_bc')}",
+         as_="flowcoop", expect=200, skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_qr),
+
+    dict(kind="S", name="[포털] ④ ★남의 바코드 QR 은 막히나", method="GET",
+         path=lambda ctx: f"/api/partner/qr?barcode={ctx.get('other_bc')}",
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+
+    dict(kind="S", name="[포털] ⑤ ★출발 처리 — DB 상태 10→20", method="POST",
+         path="/api/partner/depart", as_="flowcoop", expect=200,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc")},
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_depart),
+
+    dict(kind="S", name="[포털] ⑥ 이미 출발한 것 재처리 차단", method="POST",
+         path="/api/partner/depart", as_="flowcoop", expect=409,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc")},
+         skip_if=lambda ctx: not ctx.get("pf_bc")),
+
+    dict(kind="S", name="[포털] ⑦ ★협력사는 입고 스캔 불가(담당자 몫)", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('pf_bc')}",
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("pf_bc")),
+
+    dict(kind="S", name="[포털] ⑧ 담당자 스캔 — 확인 화면", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('pf_bc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_scan),
+
+    dict(kind="S", name="[포털] ⑨ ★입고 — 입고거래·원장·상태 3곳에 들어갔나", method="POST",
+         path="/api/setstock/receive", as_="super", expect=200,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc"), "tag": "2", "user": "flowverify"},
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_receive),
+
+    dict(kind="S", name="[포털] ⑩ ★출발한 송장도 입고되나(20 누락 재발 방지)", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('pf_bc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("pf_bc"),
+         check=lambda res, ctx: (bool(res.get("warn")),
+                                 "입고 뒤라 경고가 떠야 정상 — " + str(res.get("warn"))[:80])),
+
+    dict(kind="S", name="[포털] ⑪ 중복 입고 차단", method="POST",
+         path="/api/setstock/receive", as_="super", expect=409,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc"), "tag": "2"},
+         skip_if=lambda ctx: not ctx.get("pf_bc")),
+
+    dict(kind="S", name="[포털] ⑫ ★입고취소 — 3곳이 전부 되돌아가나", method="POST",
+         path="/api/setstock/cancel", as_="super", expect=200,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc"), "user": "flowverify", "reason": "TestBed"},
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_cancel),
+
+    dict(kind="S", name="[포털] ⑬ 협력사 홈에 반영", method="GET",
+         path="/api/partner/my?days=14", as_="flowcoop", expect=200,
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_final),
+
+    dict(kind="S", name="[포털] ⑮ 내부 계정이 cust 없이 부르면 사유가 명확한가", method="GET",
+         path="/api/partner/my", as_="super", expect=400),
+]
+
+# ★★케이스 순서 규칙 — **읽기 먼저, 쓰기 나중** (2026-08-29 실측으로 확정)
+#   하네스는 트랜잭션 하나를 끝까지 열어 둔다(no-commit). 쓰기가 쌓일수록
+#   `plan_part_mat`·`deliv_issue` 같은 큰 테이블 스캔이 급격히 느려진다
+#   (운영 0.24s / 쓰기 누적 후 45s+ 타임아웃). **제품 결함이 아니라 하네스 특성**이다.
+#   ⟹ 무거운 조회 케이스(소속강제·포털 홈)는 앞에, 쓰기 왕복은 뒤에 둔다.
+#      AUTH(조회 위주) → PORTAL(홈 조회 + 왕복) → SETIN(왕복) → [F]/[R](쓰기)
+#   ※각 케이스는 probe 델타로 판정하므로 순서를 바꿔도 판정 자체는 영향받지 않는다.
+_i = CASES.index(SETIN_CASES[0])
+CASES[_i:_i] = PORTAL_CASES

@@ -51,7 +51,13 @@ def call(method, path, payload=None, timeout=600, token=None):
     req = urllib.request.Request(BASE + path, data=data, method=method, headers=_h)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, json.loads(r.read().decode() or "{}")
+            _b = r.read().decode("utf-8", "replace")
+            # ★JSON 이 아닌 응답도 있다(QR=SVG, 인쇄=HTML). 파싱 실패를 '오류'로 세면
+            #   멀쩡한 케이스가 거짓 FAIL 이 된다 — 본문을 그대로 돌려준다.
+            try:
+                return r.status, json.loads(_b or "{}")
+            except Exception:
+                return r.status, _b
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read().decode() or "{}")
@@ -106,6 +112,13 @@ def rec(kind, name, verdict, note=""):
         print(f"           {note}")
 
 
+def tok_of(c):
+    """케이스가 쓸 토큰. ★as_ 를 **명시**하면 그것(None=무토큰), 없으면 기본 내부계정.
+       내부 API 전면 인증 이후 [F]/[R] 도 로그인해야 화면 API 를 부를 수 있다."""
+    uid = c["as_"] if "as_" in c else getattr(FC, "DEFAULT_AS", None)
+    return token_for(uid)
+
+
 def body_of(c, ctx):
     b = c.get("body")
     return b(ctx) if callable(b) else b
@@ -136,7 +149,7 @@ def fixture():
 
 def run_flow(c, ctx):
     b = probe()
-    st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx))
+    st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok_of(c))
     a = probe()
     d = delta(b, a)
     if st == 404:
@@ -161,7 +174,7 @@ def run_flow(c, ctx):
 
 def run_rule(c, ctx):
     b = probe()
-    st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx))
+    st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok_of(c))
     a = probe()
     d = delta(b, a)
     body = json.dumps(res, ensure_ascii=False)
@@ -189,7 +202,7 @@ def run_secure(c, ctx):
        [R] 은 '막혔는가'만 본다. 소속 강제는 그것으로 부족하다 —
        200 이 나오되 **자기 데이터만** 나와야 하기 때문이다.
     """
-    uid = c.get("as_")
+    uid = c["as_"] if "as_" in c else getattr(FC, "DEFAULT_AS", None)
     tok = token_for(uid)
     if uid and not tok:
         rec("S", c["name"], "SKIP", f"하네스가 {uid} 로 로그인하지 못함"); return
@@ -201,6 +214,13 @@ def run_secure(c, ctx):
     exp = c.get("expect")
     exps = tuple(exp) if isinstance(exp, (tuple, list)) else (exp,)
     ok_st = (exp is None) or (st in exps)
+
+    # ★call() 이 예외로 죽으면(status 0) 그 사유를 **먼저** 보여준다.
+    #   check 함수의 note 로 덮이면 "HTTP 0 · 값 None" 만 남아 원인을 못 찾는다(2026-08-29 실측).
+    if st == 0:
+        _e = res.get("_err") if isinstance(res, dict) else str(res)[:120]
+        rec("S", c["name"], "FAIL", f"[{uid or '무토큰'}] 호출 실패 — {_e}")
+        return
 
     ok_ck, note = True, ""
     if c.get("check"):
@@ -289,7 +309,7 @@ def main():
             if not ARG.only or ARG.only in c["name"]:
                 if c.get("skip_if") and c["skip_if"](ctx):
                     rec("R", c["name"], "SKIP", "픽스처 부족"); continue
-                _, res = call(c["method"], path_of(c, ctx), body_of(c, ctx))
+                _, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok_of(c))
                 s = json.dumps(res, ensure_ascii=False)
                 miss = [w for w in c["must_contain"] if w not in s]
                 rec("R", c["name"], "PASS" if not miss else "FAIL",
@@ -301,7 +321,7 @@ def main():
         for c in FC.READ_CHECKS:
             if ARG.only and ARG.only not in c["name"]:
                 continue
-            st, res = call(c["method"], path_of(c, ctx))
+            st, res = call(c["method"], path_of(c, ctx), token=tok_of(c))
             note = json.dumps(res.get("summary") or res.get("totals") or res, ensure_ascii=False)[:150]
             if st == 404:
                 rec("R", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)")
@@ -317,11 +337,12 @@ def main():
             continue
         print("── [R] 캐시 정합 " + "─" * 44)
         path = c["ledger"](ctx)
-        call("GET", path)                                   # ① 캐시 채움
-        _s = _t.time(); call("GET", path); hit = _t.time() - _s      # ② 캐시 히트 시간
-        st, res = call("POST", c["write_path"], c["write_body"](ctx))
+        _tk = tok_of(c)
+        call("GET", path, token=_tk)                        # ① 캐시 채움
+        _s = _t.time(); call("GET", path, token=_tk); hit = _t.time() - _s   # ② 캐시 히트 시간
+        st, res = call("POST", c["write_path"], c["write_body"](ctx), token=_tk)
         wrote = (st == 200 and not (isinstance(res, dict) and res.get("ok") is False))
-        _s = _t.time(); call("GET", path); after = _t.time() - _s    # ③ 쓰기 후 조회
+        _s = _t.time(); call("GET", path, token=_tk); after = _t.time() - _s   # ③ 쓰기 후 조회
         if not wrote:
             rec("R", c["name"], "SKIP", f"선행 쓰기 실패 — {str(res)[:100]}")
         elif after > max(hit * 3, hit + 1.0):
