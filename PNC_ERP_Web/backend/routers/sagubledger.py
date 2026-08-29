@@ -5,18 +5,21 @@
      잔량 = 보낸 − 소진. 기초0 @2026-01(용접 소재 별도 트랙 제외).
    ★조회 전용(RO). 원장 적재는 _migration/sagub_parts_ledger_ingest.py(멱등).
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from routers.auth import require_user, scope_cust
 from common import _nx
 
 router = APIRouter()
 
 
 @router.get("/api/sagubledger/list")
-def sagubledger_list(cust: str = Query(""), mat: str = Query(""), fr: str = Query(""),
+def sagubledger_list(request: Request, cust: str = Query(""), mat: str = Query(""), fr: str = Query(""),
                      to: str = Query(""), sign: str = Query(""), scope: str = Query("sent"),
                      limit: int = Query(3000)):
     """좌: (협력사×사급부품) 보낸/소진/잔량. 필터: 협력사·자도번(코드/이름)·기간·잔량부호.
-       scope='sent'(기본)=우리가 보낸 부품만(사급출고 有) · 'all'=소진만 있는 것(LG직접공급 등)까지 전체."""
+       scope='sent'(기본)=우리가 보낸 부품만(사급출고 有) · 'all'=소진만 있는 것(LG직접공급 등)까지 전체.
+       ★소속 강제 — 협력사 계정은 cust 파라미터와 무관하게 자기 거래처만 본다."""
+    cust = scope_cust(require_user(request), cust)   # 협력사=자기코드 강제 / 담당자=필터 그대로
     w = ["1=1"]; p = []
     if cust: w.append("l.cust_code=?"); p.append(cust)
     if mat:  w.append("(l.mat_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
@@ -57,8 +60,10 @@ def sagubledger_list(cust: str = Query(""), mat: str = Query(""), fr: str = Quer
 
 
 @router.get("/api/sagubledger/detail")
-def sagubledger_detail(cust: str = Query(...), mat: str = Query(...), fr: str = Query(""), to: str = Query("")):
-    """우: 선택 (협력사×사급부품) 일자별 수불 + running balance. 보낸(+)·소진(−) 구분."""
+def sagubledger_detail(request: Request, cust: str = Query(...), mat: str = Query(...), fr: str = Query(""), to: str = Query("")):
+    """우: 선택 (협력사×사급부품) 일자별 수불 + running balance. 보낸(+)·소진(−) 구분.
+       ★소속 강제 — 협력사는 남의 cust 를 넣어도 자기 것만 열린다."""
+    cust = scope_cust(require_user(request), cust)
     # 협력사 관점: 우리 창고 출고(사급출고)=협력사입고 / 우리 창고 재입고(세트입고)=협력사출고
     tagnm = {"OUT": "협력사입고", "SET": "협력사출고", "ADJ": "조정"}
     cn = _nx(); cur = cn.cursor()

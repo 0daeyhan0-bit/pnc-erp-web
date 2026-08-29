@@ -198,23 +198,31 @@ SCREEN.perm=(c)=>{
 
 /* 시스템관리 > 사용자관리 — 계정(ID/PW/이름/구분/부서/직책/역할복수/협력사/이메일/연락처/상태) */
 SCREEN.users=(c)=>{
-  const lsu='perm_users';
-  const load=()=>getUsers();
-  let users=load(), editMode=false;
+  // ★정본 = nx.app_user (2026-08-29). localStorage 는 더 이상 계정의 근거가 아니다.
+  //   비밀번호는 서버가 내주지 않는다 — pw_set(설정여부)만 온다.
+  const load=async()=>{try{const r=await fetch(API_BASE+'/api/perm/users');
+    if(!r.ok)return null; const j=await r.json(); return Array.isArray(j.users)?j.users:null;}catch(e){return null;}};
+  let users=[], editMode=false, loadErr='';
   const CT=['내부','협력사'], ST=['사용','정지'];
   const cols=[{f:'id',h:'ID'},{f:'pw',h:'비밀번호',pw:1},{f:'nm',h:'이름'},{f:'type',h:'구분',sel:CT},{f:'dept',h:'부서'},{f:'pos',h:'직책'},{f:'roles',h:'역할',roles:1},{f:'partner',h:'협력사'},{f:'email',h:'이메일'},{f:'tel',h:'연락처'},{f:'status',h:'상태',sel:ST}];
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">👤 사용자관리</div>
-     <div class="page-sub">계정 · 필수: <b>ID·비밀번호·이름·구분·역할</b> · 내부직원 ~60명 + 협력사 · <span class="neg">비번은 프로토타입 평문(실서비스 bcrypt 해시 예정)</span> · 프로그램별 조회/수정 권한은 「권한관리」 · ✎수정 시 편집</div>
+     <div class="page-sub">계정 정본 = <b>nx.app_user</b> · 비밀번호는 <b>PBKDF2 해시</b>로 저장되며 화면에 나오지 않습니다 ·
+       <b>비밀번호를 비워두면 기존 비밀번호가 그대로 유지</b>됩니다(바꿀 때만 입력) ·
+       계정을 지우려면 <b>상태를 '정지'</b>로 두세요(목록에서 빼는 것으로는 지워지지 않습니다) ·
+       협력사 칸 = <b>거래처코드</b> · 프로그램별 권한은 「권한관리」${loadErr?` · <span class="neg">${esc(loadErr)}</span>`:''}</div>
      <div class="toolbar"><input class="inp" id="q" placeholder="ID·이름·부서·협력사">
        ${editMode?`<button class="btn" id="add">➕ 추가</button><button class="btn" id="save">💾 저장</button><button class="btn ghost" id="cancel">✖ 취소</button>`:(PERM.canEdit('users')?`<button class="btn" id="edit">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}
        <div class="spacer"></div><span class="rowcount" id="cnt"></span></div>
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr>${cols.map(cc=>`<th>${cc.h}</th>`).join('')}${editMode?'<th class="center">삭제</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`;
-    const disp=(cc,u)=>{ if(cc.pw)return '••••'; if(cc.roles)return (u.roles||[]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' '); return esc(''+(u[cc.f]||'')); };
+    const disp=(cc,u)=>{ if(cc.pw)return u.pw_set?'설정됨':'<span class="neg">미설정</span>';
+      if(cc.roles)return (u.roles||[]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ');
+      return esc(''+(u[cc.f]||'')); };
     const editCell=(cc,u,i)=>{
       if(cc.sel)return `<select data-i="${i}" data-f="${cc.f}">${cc.sel.map(o=>`<option ${u[cc.f]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
       if(cc.roles)return `<div style="min-width:150px">${ROLES.map(r=>`<label style="margin-right:6px;white-space:nowrap;font-size:11px"><input type="checkbox" data-i="${i}" data-role="${esc(r)}" ${(u.roles||[]).includes(r)?'checked':''}>${esc(r)}</label>`).join('')}</div>`;
+      if(cc.pw)return `<input data-i="${i}" data-f="pw" type="password" value="" placeholder="비우면 유지" style="width:95px">`;
       return `<input data-i="${i}" data-f="${cc.f}" value="${esc(''+(u[cc.f]||''))}" style="width:${cc.f==='email'?150:95}px">`;
     };
     const rend=()=>{
@@ -224,21 +232,32 @@ SCREEN.users=(c)=>{
       if(editMode){
         c.querySelectorAll('#tb input[data-f],#tb select[data-f]').forEach(el=>el.onchange=()=>{users[+el.dataset.i][el.dataset.f]=el.value;});
         c.querySelectorAll('#tb input[data-role]').forEach(el=>el.onchange=()=>{const u=users[+el.dataset.i];u.roles=u.roles||[];const r=el.dataset.role;if(el.checked){if(!u.roles.includes(r))u.roles.push(r);}else u.roles=u.roles.filter(x=>x!==r);});
-        c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{users.splice(+b.dataset.del,1);rend();});
+        // ★목록에서 빼도 서버는 계정을 지우지 않는다(그래야 화면이 일부만 보냈을 때 계정이 증발하지 않는다).
+        //   그래서 삭제 버튼은 **상태를 '정지'** 로 바꾼다 — 실제로 로그인이 막히는 방법이다.
+        c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const u=users[+b.dataset.del];
+          u.status=(u.status==='정지')?'사용':'정지'; rend();});
       }
       c.querySelector('#cnt').textContent=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length}) · ${editMode?'✎수정중':'읽기전용'}`;
     };
     if(editMode){
-      c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'1234',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'});rend();};
-      c.querySelector('#save').onclick=async()=>{localStorage.setItem(lsu,JSON.stringify(users));
-        let sv=false;try{const r=await PERM.saveUsersToServer(users);sv=!!(r&&(await r.json()).ok);}catch(e){}
-        editMode=false;draw();alert(sv?'저장되었습니다 (전 PC 공통 — 모든 PC에서 로그인 가능).':'로컬 저장됨(서버 저장 실패 — 백엔드 확인 필요).');};
-      c.querySelector('#cancel').onclick=()=>{users=load();editMode=false;draw();};
+      c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용',pw_set:false});rend();};
+      c.querySelector('#save').onclick=async()=>{
+        let msg='';
+        try{const r=await PERM.saveUsersToServer(users); const j=await r.json();
+          msg=r.ok&&j.ok?`저장되었습니다 — 신규 ${j.new} · 수정 ${j.updated} · 비밀번호 변경 ${j.pw_changed}건`
+                        :`저장 실패 — ${(j&&j.detail)||'백엔드 확인 필요'}`;}
+        catch(e){msg='저장 실패 — 서버에 연결하지 못했습니다.';}
+        editMode=false; users=(await load())||users; draw(); alert(msg);};
+      c.querySelector('#cancel').onclick=async()=>{users=(await load())||users;editMode=false;draw();};
     } else if(c.querySelector('#edit')) c.querySelector('#edit').onclick=()=>{editMode=true;draw();};
     c.querySelector('#q').onkeyup=rend;
     rend();
   };
   draw();
+  // 최초 진입 시 서버에서 정본을 읽는다
+  (async()=>{const u=await load();
+    if(u)users=u; else loadErr='서버에서 계정을 읽지 못했습니다(권한 또는 연결 확인).';
+    draw();})();
 };
 SCREEN.setinreq=(c)=>{
   const API=API_BASE;
@@ -1234,7 +1253,7 @@ SCREEN.sagubledger=(c)=>{
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const now=new Date();
   let st={rows:[],custs:[],tot:{},cust:"",mat:"",sign:"",scope:"sent",
-          fr:"2026-01-01",to:iso(now),sortKey:"",sortDir:1,loading:false,
+          fr:"2026-07-01",to:iso(now),sortKey:"",sortDir:1,loading:false,
           sel:null,detail:[],dfinal:0,dloading:false};
   const load=async()=>{st.loading=true;st.sel=null;draw();
     try{const r=await fetch(`${API}/api/sagubledger/list?cust=${encodeURIComponent(st.cust)}&mat=${encodeURIComponent(st.mat)}&fr=${yy(st.fr)}&to=${yy(st.to)}&sign=${st.sign}&scope=${st.scope}`);
@@ -1249,7 +1268,7 @@ SCREEN.sagubledger=(c)=>{
     const s=st.sel;
     return `<div style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--line)"><b>${esc(s.custnm||s.cust_code)}</b> · <b>${esc(s.mat_code)}</b> <span class="cap" style="color:var(--muted)">${esc(s.matnm||"")}</span></div>
       <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
-        <th>일자</th><th class="center">구분</th><th class="num">전일잔량</th><th class="num">입고(보낸)</th><th class="num">출고(소진)</th><th class="num">잔량</th></tr></thead>
+        <th>일자</th><th class="center">구분</th><th class="num">전일잔량</th><th class="num">협력사입고</th><th class="num">협력사출고</th><th class="num">잔량</th></tr></thead>
       <tbody>${st.detail.map(r=>`<tr>
         <td>${esc(r.maint_ymd)}</td><td class="center">${esc(r.tagnm)}</td>
         <td class="num" style="color:var(--muted)">${won(r.prev_qty)}</td>
@@ -1266,11 +1285,11 @@ SCREEN.sagubledger=(c)=>{
      <div style="display:flex;flex-direction:column;height:100%">
       <div style="flex:0 0 auto">
        <div class="page-title">사급부품 수불장</div>
-       <div class="page-sub">우리가 협력사에 보낸 사급부품의 <b>보낸수량 − 소진(세트입고×BOM소요) = 잔량</b>. 기초 0(2026-01~) · 용접봉/은납은 별도 트랙 제외 · 소진은 통일 소요엔진 산출.</div>
+       <div class="page-sub">협력사 관점 <b>협력사입고(우리 창고 출고) − 협력사출고(세트입고로 재입고) = 잔량</b>. 기초 0(2026-01~) · 용접봉/은납 별도 트랙 제외 · 소진은 통일 소요엔진 산출.</div>
        <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto">
          <label class="tl">기간</label><input class="inp" type="date" id="sl-fr" value="${esc(st.fr)}" style="width:140px"> ~ <input class="inp" type="date" id="sl-to" value="${esc(st.to)}" style="width:140px">
-         <label class="tl" style="margin-left:8px">협력사</label>
-         <select class="inp" id="sl-cust"><option value="">전체</option>${st.custs.map(o=>`<option value="${esc(o.code)}" ${st.cust===o.code?"selected":""}>${esc(o.nm||o.code)}</option>`).join("")}</select>
+         <label class="tl" style="margin-left:8px">협력사</label><input class="inp" id="sl-cust" list="sl-custlist" value="${esc((st.custs.find(o=>o.code===st.cust)||{}).nm||"")}" placeholder="협력사명(빈칸=전체)" style="width:150px">
+         <datalist id="sl-custlist">${st.custs.map(o=>`<option value="${esc(o.nm||o.code)}">`).join("")}</datalist>
          <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="sl-mat" value="${esc(st.mat)}" placeholder="자도번/품명" style="width:140px">
          <label class="tl" style="margin-left:8px">잔량</label>
          <select class="inp" id="sl-sign"><option value="">전체</option><option value="1" ${st.sign==="1"?"selected":""}>(+)보유</option><option value="-1" ${st.sign==="-1"?"selected":""}>(−)마이너스</option><option value="0" ${st.sign==="0"?"selected":""}>0</option></select>
@@ -1281,10 +1300,10 @@ SCREEN.sagubledger=(c)=>{
       </div>
       <div style="flex:1;min-height:0;display:flex;gap:8px;margin-top:8px">
        <div class="panel" style="flex:1.3;display:flex;flex-direction:column;min-width:0">
-         <div class="panel-h" style="flex:0 0 auto">협력사·사급부품 ${st.loading?"(조회중…)":`(${st.rows.length}건)`} · 보낸 ${won(t.sent)} / 소진 ${won(t.used)} / 잔량 <b style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}">${won(t.bal)}</b></div>
+         <div class="panel-h" style="flex:0 0 auto">협력사·사급부품 ${st.loading?"(조회중…)":`(${st.rows.length}건)`} · 협력사입고 ${won(t.sent)} / 협력사출고 ${won(t.used)} / 잔량 <b style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}">${won(t.bal)}</b></div>
          <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
            <th data-key="custnm">협력사</th><th data-key="mat_code">자도번</th><th data-key="matnm">품명</th>
-           <th class="num" data-key="sent">보낸수량</th><th class="num" data-key="used">소진</th><th class="num" data-key="bal">잔량</th></tr></thead>
+           <th class="num" data-key="sent">협력사입고</th><th class="num" data-key="used">협력사출고</th><th class="num" data-key="bal">잔량</th></tr></thead>
          <tbody>${st.rows.map((r,i)=>`<tr class="sl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat_code===r.mat_code?'background:#eef4ff':''}">
            <td>${esc(r.custnm||r.cust_code)}</td><td><b>${esc(r.mat_code)}</b></td>
            <td class="cap" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.matnm||"")}">${esc(r.matnm||"")}</td>
@@ -1301,7 +1320,8 @@ SCREEN.sagubledger=(c)=>{
      </div>`;
     const g=id=>c.querySelector(id);
     g("#sl-fr").onchange=x=>st.fr=x.target.value; g("#sl-to").onchange=x=>st.to=x.target.value;
-    g("#sl-cust").onchange=x=>st.cust=x.target.value; g("#sl-mat").oninput=x=>st.mat=x.target.value;
+    g("#sl-cust").onchange=x=>{const v=x.target.value.trim();const m=st.custs.find(o=>(o.nm||o.code)===v);st.cust=m?m.code:"";};
+    g("#sl-mat").oninput=x=>st.mat=x.target.value;
     g("#sl-sign").onchange=x=>st.sign=x.target.value; g("#sl-scope").onchange=x=>st.scope=x.target.value;
     g("#sl-go").onclick=load;
     c.querySelectorAll(".sl-row").forEach(tr=>tr.onclick=()=>{const r=st.rows[+tr.dataset.i];

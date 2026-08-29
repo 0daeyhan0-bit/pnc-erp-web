@@ -4,6 +4,9 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
+from fastapi import Request
+from routers.auth import (require_user, scope_cust,
+                          assert_own_barcode)   # ★소속 강제 (2026-08-29)
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
@@ -547,15 +550,19 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         cn.close()
 
 @router.get("/api/partner/planstatus")
-def partner_planstatus(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
+def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
                        part: str = Query(""), assy: str = Query(""), line: str = Query(""),
                        gubun: str = Query("외주"), src: str = Query("nx")):
     """협력사(납품업체)별 자도번 일자계획. gubun: 외주(협력사=CUST, 기본)/자체(내부공정=WORK)/전체.
+       ★소속 강제 — 협력사 계정은 작업처(wc)가 자기 거래처코드로 고정된다. 남의 계획은 보이지 않는다.
        src=legacy → 라이브 PR_T_PLAN_PART_MAT(레거시 4주간 계획수량 w_pr_outside_410, 당김반영) 직독.
        src=nx(기본) → ★웹 편성 결과만 사용(라이브 미참조): nx.plan_part_mat(⑤ 자재소요) + nx.plan_item_dtl(④ 계획수량)
          + nx.plan_dtl(라인/모델). 그레인=(가공처,제번,분할제번,모품목) — 레거시 w_pr_outside_410 과 동일.
          기간=PART_PLAN_YMD(당김 반영 소요일자), 수량=CEILING(PLAN_QTY×USE_QTY×PROD_RATE/100).
          자재는 집계에서 접히지만 mats/matn 으로 보존(화면 툴팁)."""
+    # ★소속 강제 - 협력사 계정은 작업처(wc)를 자기 거래처코드로 고정한다.
+    #   이 화면의 협력사 축은 MAT_WORK_CENTER_CODE(=작업처) 다. cust 파라미터가 따로 없다.
+    wc = scope_cust(require_user(request), wc)
     if src == "legacy":
         return _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun)
     nx = _nx(); cur = nx.cursor()
@@ -948,7 +955,7 @@ def _wd_horizon(d6a, gigan):
     return d.strftime('%y%m%d')
 
 @router.get("/api/partner/deliv420")
-def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: str = Query(""),
+def partner_deliv420(request: Request, cust: str = Query(...), from_ymd: str = Query(""), to_ymd: str = Query(""),
                      item: str = Query(""), matcode: str = Query(""), gigan: int = Query(0)):
     """거래명세서 발행 조회 — 레거시 w_pr_outside_420 동일(SP_LIVE 라이브 직독+510 완료배분).
        cust=협력사코드(필수). 완료수량=출하+완제품재고+세트/입고대기 재고배분.
@@ -956,6 +963,7 @@ def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: 
          종료일 = 기준일 초과 N번째 근무일. 표시 컬럼은 그 사이 전체 달력일(휴무 포함)
          → 휴무(토·일·공휴)만큼 조회범위가 자동 연장된다.
          레거시 실측: 기준 260827(목)·기간 2 → 28금·31월(근무 2일) → 컬럼 27목·28금·29토·30일·31월."""
+    cust = scope_cust(require_user(request), cust) or ""   # ★소속 강제 - 협력사는 자기 것만
     if not cust.strip():
         return {"dates": [], "rows": [], "cnt": 0, "note": "협력사를 선택하세요."}
     d6f = _d6(from_ymd) if from_ymd else None
@@ -989,11 +997,11 @@ def partner_deliv420(cust: str = Query(...), from_ymd: str = Query(""), to_ymd: 
         return {"dates": [], "rows": [], "cnt": 0, "note": f"⚠ 조회 오류: {str(e)[:150]}"}
 
 @router.post("/api/partner/deliv420/issue")
-def partner_deliv420_issue(body: dict = Body(...)):
+def partner_deliv420_issue(request: Request, body: dict = Body(...)):
     """거래명세서 발행(납품처리) — ★nx.deliv_issue에만 기록(라이브 PU_T_SET_INPUT_REQ 미기록, 하드룰).
        body={cust, from_ymd, to_ymd, items:[{assy, deliver_qty, pack_qty, serial_no, heat_no}], preview:0/1}.
        검증: deliver_qty>요청수량(잔량) 차단·음수 차단. preview=1이면 검토용(무기록). 확정 시 바코드 채번·INSERT."""
-    cust = str(body.get("cust", "")).strip()
+    cust = scope_cust(require_user(request), str(body.get("cust", "")).strip())   # ★소속 강제
     items = body.get("items", []) or []
     preview = _b(body.get("preview", 0))
     if not cust: return {"ok": False, "msg": "협력사를 선택하세요."}
@@ -1098,14 +1106,17 @@ def partner_deliv420_issue(body: dict = Body(...)):
         nx.close()
 
 @router.post("/api/partner/deliv420/cancel")
-def partner_deliv420_cancel(body: dict = Body(...)):
+def partner_deliv420_cancel(request: Request, body: dict = Body(...)):
     """발행취소 — 발행행 status='99' + **세트입고대기 회수**(발행의 역동작).
        ⚠이미 바코드 입고된 건(status 30/90)은 세트재고가 잡혔으므로 취소하지 않는다."""
+    _u = require_user(request)
     bc = str(body.get("barcode", "")).strip()
     if not bc: return {"ok": False, "msg": "바코드가 필요합니다."}
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_deliv_issue(cur)
+        # ★소속 강제 - 남의 발행분을 취소하지 못하게 한다(바코드만 알면 되는 API 라 더 위험하다).
+        assert_own_barcode(cur, _u, bc, table="nx.deliv_issue", cust_col="cust_code")
         cur.execute("UPDATE nx.deliv_issue SET status='99' WHERE barcode_no=? AND status<>'99'", bc)
         _c = cur.rowcount
         # 입고 전(10)인 대기분만 삭제 — 입고완료(90)·검사대기(30)는 재고에 반영돼 손대지 않는다.
@@ -1125,11 +1136,12 @@ def _fmtbiz(b):
     return f"{b[:3]}-{b[3:5]}-{b[5:]}" if len(b) == 10 else (str(b or "").strip())
 
 @router.get("/api/partner/deliv420/invoice")
-def partner_deliv420_invoice(barcode: str = Query(...)):
+def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
     """거래명세표+스티커 데이터 — 하나의 발행바코드(nx.deliv_issue.barcode_no)에 묶인 도번 명세.
        레거시 dw_pr_outside_020_p1(입고 거래명세표) 서식 동일: 공급자(협력사)/공급받는자(당사)+품목명세+SET바코드.
        바코드=Code39, 값='SET'+발행번호(레거시 compute_105 동일). 스티커 라벨필드=도번·품명·수량·SERIAL·HEAT·발행번호·거래처·일자."""
     import datetime as _dtv
+    _u = require_user(request)
     bc = str(barcode).strip()
     bcnum = "".join(ch for ch in bc if ch.isdigit())      # SET700001 · 700001 모두 허용
     if not bcnum:
@@ -1137,6 +1149,8 @@ def partner_deliv420_invoice(barcode: str = Query(...)):
     nx = _nx(); ncur = nx.cursor()
     try:
         _ensure_deliv_issue(ncur)
+        # ★소속 강제 - 남의 거래명세표를 열지 못하게 한다(번호만 알면 되는 API 라 더 위험하다).
+        assert_own_barcode(ncur, _u, bcnum, table="nx.deliv_issue", cust_col="cust_code")
         ncur.execute("""SELECT cust_code, item_code, deliver_qty, pack_qty, ISNULL(serial_no,''), ISNULL(heat_no,''), issue_ymd, status
             FROM nx.deliv_issue WHERE barcode_no=? AND status<>'99' ORDER BY item_code""", bcnum)
         drows = ncur.fetchall()

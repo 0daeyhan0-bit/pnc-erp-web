@@ -54,6 +54,54 @@ def do_window(t, dc, live_cnt=None):
     except Exception:
         cn.rollback(); do_full(t)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ★★★ 컷오버 후 실행 금지 가드 (2026-08-29 신설)
+#
+# 이 스크립트의 `do_full()` 은 **TRUNCATE + 라이브 전량 INSERT** 다.
+# 대상에 **웹이 쓰는 재고 잔량 테이블**이 들어 있다:
+#     PU_T_MAT_STOCK_WH(웹 쓰기 10곳) · PR_T_MAT_STOCK_WH(8곳)
+#     PU_T_READY_STOCK(4곳) · PU_T_MAT_STOCK(2곳) · PR_T_MAT_STOCK(2곳)
+#
+# **컷오버 전(지금)은 정상이다.** 이 테이블의 주인은 레거시이고 웹이 건드린 행은 7건뿐이다
+# (실측 2026-08-29: UPDATE_WINDOW 가 전부 w_pr_input_* 등 레거시 화면).
+# ⟹ 레거시 값으로 맞추는 게 맞다.
+#
+# **컷오버 후에는 정반대다.** 주인이 웹으로 바뀌므로, 이걸 한 번이라도 돌리면
+# **웹에서 입력한 재고가 통째로 라이브 값으로 되돌아간다.**
+# (단가 빌더 `r_price_vendor_match.py` 와 똑같은 구조 — 그쪽도 같은 이유로 막아 뒀다.)
+#
+# ⟹ 컷오버 시 `nx.period_close` 에 컷오버 마커가 들어오면 이 스크립트는 **스스로 거부**한다.
+#    강제로 돌려야 하면 `--after-cutover-i-know` 를 함께 준다.
+# ══════════════════════════════════════════════════════════════════════════════
+def _cutover_guard():
+    if '--after-cutover-i-know' in sys.argv:
+        return
+    try:
+        _c = cn.cursor()
+        _c.execute("""SELECT COUNT(*) FROM PARTNER_ERP_TEST3.INFORMATION_SCHEMA.TABLES
+                       WHERE TABLE_SCHEMA='nx' AND TABLE_NAME='cutover_state'""")
+        if not _c.fetchone()[0]:
+            return                      # 마커 테이블 없음 = 컷오버 전
+        _c.execute("SELECT TOP 1 done_at FROM nx.cutover_state WHERE done_flag=1")
+        r = _c.fetchone()
+        if not r:
+            return
+        print("=" * 78)
+        print("★실행 거부 — 컷오버가 완료됐다(%s)." % r[0])
+        print("  이 스크립트는 TRUNCATE + 라이브 전량 INSERT 를 한다.")
+        print("  대상에 웹이 쓰는 재고 잔량 테이블(PU_T_MAT_STOCK_WH 등)이 있어,")
+        print("  지금 돌리면 **웹에서 입력한 재고가 라이브 값으로 되돌아간다.**")
+        print("  근거 = _schema/CUTOVER_CHECKLIST.md '델타싱크 컷오버 가드'")
+        print("=" * 78)
+        sys.exit(1)
+    except SystemExit:
+        raise
+    except Exception:
+        return                          # 판정 불가 시엔 막지 않는다(컷오버 전 정상운영 방해 금지)
+
+
+_cutover_guard()
+
 def cnt(sql):
     try: return c.execute(sql).fetchone()[0]
     except Exception as e: return 'ERR:'+str(e)[:24]

@@ -14,7 +14,7 @@ from nx_cost_engine import NxCostEngine
 import pyodbc, db_client
 
 COMMIT = '--commit' in sys.argv
-START = "260101"
+START = "260701"          # ★수불 개시 = 2026-07(사용자 확정 2026-08-29). 기초0.
 SRC = "rebuild260829"
 
 def live_cur():

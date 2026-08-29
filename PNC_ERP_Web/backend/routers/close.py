@@ -746,7 +746,7 @@ def _snap_mat(cur, ptype, period):
 
 # ===================== 마감/해제 권한 게이트 — C5 (2026-08-27) =====================
 # 마감·해제는 회계 확정/되돌리기다 → **명시 권한자만**(deny by default).
-#   ① 시스템관리자 role(nx.web_user 의 roles) → 허용
+#   ① 시스템관리자 role(nx.app_user 의 roles) → 허용
 #   ② nx.user_perm 에 (user, sid='close', can_edit=1) 행이 있으면 허용
 #   ③ 그 외 전부 거부(403)
 # ★한계(정직히 기록): 이 앱은 세션 인증이 없고 사용자 식별은 프론트 localStorage 다.
@@ -758,15 +758,14 @@ def _assert_can_close(cur, user, what="마감"):
     u = str(user or "").strip()
     if not u:
         raise HTTPException(403, f"{what} 권한을 확인할 수 없습니다 — 사용자 정보가 없습니다.")
-    # ① 시스템관리자
+    # ① 시스템관리자 — 정본 nx.app_user (2026-08-29 이관. 예전 nx.web_user JSON 은 은퇴)
     try:
-        cur.execute("SELECT udata FROM nx.web_user WHERE user_id='__ALL__'")
+        cur.execute("SELECT roles FROM nx.app_user WHERE user_id=? AND ISNULL(status,'사용')='사용'", u)
         r = cur.fetchone()
         if r and r[0]:
             import json as _json
-            for x in (_json.loads(r[0]) or []):
-                if str(x.get("id", "")).strip() == u and "시스템관리자" in (x.get("roles") or []):
-                    return "시스템관리자"
+            if "시스템관리자" in (_json.loads(r[0]) or []):
+                return "시스템관리자"
     except Exception:
         pass          # 계정 테이블이 아직 없으면 ②로 판정(권한 없으면 어차피 거부)
     # ② 개별 부여 권한
