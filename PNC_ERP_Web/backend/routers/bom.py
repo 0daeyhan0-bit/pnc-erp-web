@@ -510,9 +510,11 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
         cn.close()
 
 
-def _sub_signature(cur, children, weld):
-    """SUB 시그니처(레지스트리와 동일 규칙): children[RAC%제외, 자식SUB는 자기 sig로]+weld[weld_item·st·use_qty] → 'S:'+md5[:12].
-       children=[{item,qty}], weld=[{weld_item,weld_st,use_qty}]. cur=nx 커서(자식 sig 조회용)."""
+def _sub_signature(cur, children, weld, own_mk=''):
+    """SUB 시그니처(정체성): children[RAC%제외, 자식SUB는 자기 sig로]+weld[weld_item·st·use_qty]+본인make_type → 'S:'+md5[:12].
+       ★2026-08-30 정본(사장님 확정): 동일 품목(구성) + 공정(용접) + 제작처(본인 make_type 사내1/외주2)면 동일 SUB=무조건 재사용.
+       own_mk = 이 SUB 노드 자신의 make_type(제작처). 자식 make_type은 자식 sig에 이미 인코딩(B=C 검증)이라 미포함.
+       children=[{item,qty}], weld=[{weld_item,weld_st,use_qty}], own_mk=str. cur=nx 커서(자식 sig 조회용)."""
     codes = [str(c.get("item", "")).strip() for c in children
              if str(c.get("item", "")).strip() and not str(c.get("item", "")).upper().startswith('RAC')]
     keymap = {}   # 자식코드 -> 'S:xxxx'(SUB) ; 없으면 리프
@@ -536,7 +538,8 @@ def _sub_signature(cur, children, weld):
     wl = sorted((str(w.get("weld_item", "")).strip(), round(float(w.get("weld_st", 0) or 0), 4),
                  round(float(w.get("use_qty", 0) or 0), 6)) for w in (weld or []))
     weldstr = ';'.join(f"{wi}|{st}|{uq}" for wi, st, uq in wl)
-    raw = f"C[{','.join(parts)}]W[{weldstr}]"
+    mk = str(own_mk or '').strip()
+    raw = f"C[{','.join(parts)}]W[{weldstr}]MK[{mk}]"
     return 'S:' + hashlib.md5(raw.encode('utf-8')).hexdigest()[:12]
 
 

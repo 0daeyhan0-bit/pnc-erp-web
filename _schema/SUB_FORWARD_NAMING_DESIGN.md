@@ -50,6 +50,14 @@
 - 방법: 유지 2280 구조로 새 sig 재계산 → `sub_registry.sig` UPDATE. **DRY 실측(sub_code_map 기준·정정): 분할 8 sub_code·repoint 8 raw_item**(앞선 forest "5"는 과소). 갈래별 신규 S + `sub_code_map` repoint. ★분할 8 중 일부는 make_type 아니라 **재귀구조 차이**(old sig 과다병합을 새 재귀 sig가 분리, 예 S01292=601-19-11 vs 602-19-11 둘다 mk2). ∴"make_type만 분할"로 단정 금지.
 - ✅확인완료: 분할 8건 관련 raw코드 **sourcing_route_line 참조 0행**(19코드 전부 sub_code_map 등록) → repoint 안전(sub_code_map만·route/계획 무영향).
 
+## ★제작처(make_type) 소스 규명 (2026-08-30, 구현 중 발견·sub_mk_source/sub_mksrc_probe)
+정체성 3축 "제작처"를 어디서 읽나 = dedup 정합 핵심. 실측:
+- route gubun ↔ nx.item.make_type **불일치 12/25**·신규합성SUB(S02884~) make_type 없음.
+- Q1 gubun route변동=0(코드당 하나). Q2 불일치는 **make_type이 정확**(AJR77263007-4-1 gubun자체인데 make_type2·in_cust=미래정밀 외주처有 → 실제 외주). **gubun 느슨(자체 오표기).** Q3 route SUB 24/25 레지스트리 등록.
+- **결론: authoritative=nx.item.make_type(in_cust로 검증). gubun 신뢰불가.**
+- **☐확정 필요(사장님)**: mint 시 제작처 = ①품목 make_type 있으면 사용 ②없으면(진짜 신규) gubun→make_type 변환·저장(제작1/외주2/구매3/사급4/외주직납5). 이 방식이면 기존 정확·신규 일관.
+- 진행: S1 스키마 완료 · `_sub_signature`에 own_mk(본인 make_type) 축 추가(코드). 재계산·mint은 이 확정 후.
+
 ## ★밤 작업 요약 (2026-08-29 야간, 라이브 무변경·읽기전용 검증만)
 **완료(전부 커밋)**: B 재검증(정체성 공식 확정)·make_type 난이도(저위험)·구분 신뢰도(본인make_type만)·재스코프(2280유지/613탈락)·DRY 재계산 미리보기(분할 8·repoint 8·route참조 0)·SUB 등록지점 전수·설계문서.
 **나는 밤사이 nx 변경/배포/코드구현 안 함**(성급한 일반화 금지). 전부 읽기전용 측정+기록.
