@@ -195,6 +195,12 @@ def setstock_receive(payload: dict = Body(...)):
         mseq = int(cur.fetchone()[0])
         for sheet, doban, qty, cust, insp in reqs:
             qty = float(qty or 0); mseq += 1
+            # ★★이 분기를 지우지 말 것 (대표 확정 2026-08-29 "수입검사는 추후 추가").
+            #   지금은 insp_flag 가 전부 '0' 이라 **항상 90(즉시 입고완료)** 으로만 흐른다.
+            #   "안 쓰니까 단순화하자" 며 없애면, 나중에 검사를 도입할 때 입고 로직을 다시 뜯어야 한다.
+            #   ⟹ 나중에 insp_flag 를 '1' 로 채우는 것만으로 검사 경로가 살아난다(코드 수정 불필요).
+            #   상태 30(입고대기)·40(검사중) 도 같은 이유로 보존한다.
+            #   설계 = _schema/PARTNER_PORTAL_DESIGN.md §4-1
             newstat = "30" if insp == "1" else "90"   # 검사품=입고대기, 일반=입고완료
             cur.execute("""INSERT INTO nx.set_stock_maint(maint_ymd,maint_seq,maint_tag,in_tag,cust_code,item_code,maint_qty,
                   sheet_no,manual_sheet_no,item_gubun,status,derived_flag,insert_user_id,insert_datetime)
