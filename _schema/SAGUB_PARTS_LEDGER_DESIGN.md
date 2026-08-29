@@ -28,8 +28,9 @@
 - 협력사 = 세트입고 in_cust. → per (in_cust, 사급부품, in_ymd) 소진(−).
 - ★ad-hoc BOM 전개 금지(변형SUB 이중계상). 반드시 엔진.
 
-## 4. stop_set (사급부품 universe)
-- = `nx.bom_line`에서 `SAGUB_FLAG='1'`(=sagub_default)인 distinct child item_code. (레거시 SAGUB_FLAG 대응.)
+## 4. stop_set (사급부품 universe) + 용접 제외
+- = `nx.v_pr_bom`에서 `SAGUB_FLAG='1'`인 distinct child item_code(600종). (레거시 SAGUB_FLAG 대응.)
+- **★용접 소재는 별도 트랙 = 제외**(사용자 2026-08-29 "용접봉은 별개야"): 용접봉(RAC*)·용접링/은납(BCUP*, item_name '1%용접링')·이름 '용접' 포함 233종 → 입고·소진 양쪽에서 제외. (용접봉/용접링 정산은 별도 프로그램.)
 
 ## 5. 화면 (협력사 > 사급 수불장, 신규)
 - 좌 = (협력사·자도번) 현황: 기초0·입고(보낸것)·출고(소진)·잔량. 필터: 협력사·자도번·기간·(+/−/0)잔량.

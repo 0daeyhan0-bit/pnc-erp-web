@@ -29,10 +29,16 @@ def f(x):
     except: return 0.0
 
 t0=time.time()
+# ── 용접 소재(용접봉 RAC · 용접링/은납 BCUP · 이름 '용접') = 별도 트랙 → 제외 ──
+cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item
+    WHERE item_code LIKE 'RAC%' OR item_code LIKE 'BCUP%' OR item_name LIKE '%용접%'""")
+weld_excl = set(r[0].strip() for r in cur.fetchall())
+print(f"[제외] 용접 소재(용접봉·용접링·은납) {len(weld_excl)}종")
+
 # ── stop_set = 사급부품 universe (v_pr_bom SAGUB_FLAG='1' distinct child) ──
 cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM nx.v_pr_bom WHERE SAGUB_FLAG='1' AND ISNULL(MAT_CODE,'')<>''")
 stop_set = set(r[0].strip() for r in cur.fetchall())
-print(f"[stop_set] 사급부품 {len(stop_set)}종")
+print(f"[stop_set] 사급부품 {len(stop_set)}종(용접 포함) → 소진에서 용접 제외")
 
 # ── 입고(+) = 사급출고 tag5 (부품만, Jan~) per (cust, part) ──
 lcur.execute("""SELECT UPPER(LTRIM(RTRIM(CUST_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(MAINT_QTY AS float))
@@ -43,7 +49,7 @@ in_all=0; in_part=0
 for c,m,q in lcur.fetchall():
     if not c or not m: continue
     in_all += 1
-    if m in stop_set:
+    if m in stop_set and m not in weld_excl:
         inp[(c,m)] = inp.get((c,m),0.0) + abs(f(q))   # 불출 음수 → 보유 +
         in_part += 1
 print(f"[입고] tag5 (cust,part) {in_all}쌍 중 부품 {in_part}쌍 · Σ보낸 {sum(inp.values()):,.0f}")
@@ -62,6 +68,7 @@ for c, it, qty in setrows:
     pmap = soyo.sagub_parts_soyo(eng, it, stop_set, memo)
     if not pmap: miss_soyo += 1
     for part, per in pmap.items():
+        if part in weld_excl: continue          # 용접 소재는 별도 트랙
         out[(c,part)] = out.get((c,part),0.0) + per*qty
 print(f"[출고] 소진 (cust,part) {len(out)}쌍 · Σ소진 {sum(out.values()):,.0f} · 소요0완제품 {miss_soyo}")
 
