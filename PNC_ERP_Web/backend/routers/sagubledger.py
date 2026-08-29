@@ -59,7 +59,8 @@ def sagubledger_list(cust: str = Query(""), mat: str = Query(""), fr: str = Quer
 @router.get("/api/sagubledger/detail")
 def sagubledger_detail(cust: str = Query(...), mat: str = Query(...), fr: str = Query(""), to: str = Query("")):
     """우: 선택 (협력사×사급부품) 일자별 수불 + running balance. 보낸(+)·소진(−) 구분."""
-    tagnm = {"OUT": "사급출고", "SET": "세트소진", "ADJ": "조정"}
+    # 협력사 관점: 우리 창고 출고(사급출고)=협력사입고 / 우리 창고 재입고(세트입고)=협력사출고
+    tagnm = {"OUT": "협력사입고", "SET": "협력사출고", "ADJ": "조정"}
     cn = _nx(); cur = cn.cursor()
     try:
         cur.execute("""SELECT l.maint_ymd, l.tag,
