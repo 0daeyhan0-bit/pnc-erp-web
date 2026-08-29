@@ -66,4 +66,5 @@
 - 세트입고 배선: `routers/setin.py` `_post_sagub_out`(§10 소요엔진) → setstock/receive 입고완료시 협력사출고 posting
 - 테스트베드 `_migration/sagub_flow_testbed.py`: 협력사입고(saleout 3품목 +40·매출) + 피앤씨입고(setstock 700003, 6품목 협력사출고=소요 정확·36행 −704) **전부 ✅·오염0**
 
-**남은 일**: ①setstock/**cancel** 에 협력사출고 역posting(취소 반영) ②협력사사급재고관리 조정→sagub_maint(tag B) 이관 ③재고 tag S(자도번파생)는 set_input_req_dtl 있는 송장서 매입 반영 확인 ④`sagub_parts_ledger` 테이블·구 ingest 폐기(컷오버시 drop) ⑤배포(승인후).
+**진행(검증완)**: ①setstock/**cancel** 협력사출고 역posting(36행 원복·오염0) ✅ ②협력사사급재고관리 **조정→sagub_maint(tag B)** 이관(조정 3함수 sales.py·수불장 잔량 +100 즉시반영·오염0) ✅.
+**남은 일**: ③재고 tag S(자도번파생)는 set_input_req_dtl 있는 송장서 매입 반영 확인 ④`sagub_parts_ledger` 테이블·구 ingest 폐기(컷오버시 drop) ⑤배포(승인후).
