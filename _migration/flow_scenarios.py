@@ -51,7 +51,13 @@ def call(method, path, payload=None, timeout=600, token=None):
     req = urllib.request.Request(BASE + path, data=data, method=method, headers=_h)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, json.loads(r.read().decode() or "{}")
+            _b = r.read().decode("utf-8", "replace")
+            # ★JSON 이 아닌 응답도 있다(QR=SVG, 인쇄=HTML). 파싱 실패를 '오류'로 세면
+            #   멀쩡한 케이스가 거짓 FAIL 이 된다 — 본문을 그대로 돌려준다.
+            try:
+                return r.status, json.loads(_b or "{}")
+            except Exception:
+                return r.status, _b
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read().decode() or "{}")
@@ -208,6 +214,13 @@ def run_secure(c, ctx):
     exp = c.get("expect")
     exps = tuple(exp) if isinstance(exp, (tuple, list)) else (exp,)
     ok_st = (exp is None) or (st in exps)
+
+    # ★call() 이 예외로 죽으면(status 0) 그 사유를 **먼저** 보여준다.
+    #   check 함수의 note 로 덮이면 "HTTP 0 · 값 None" 만 남아 원인을 못 찾는다(2026-08-29 실측).
+    if st == 0:
+        _e = res.get("_err") if isinstance(res, dict) else str(res)[:120]
+        rec("S", c["name"], "FAIL", f"[{uid or '무토큰'}] 호출 실패 — {_e}")
+        return
 
     ok_ck, note = True, ""
     if c.get("check"):
