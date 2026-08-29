@@ -89,7 +89,10 @@ PROBES_MAT = [
 # ★기동 시점 행수 = 오염 0 판정 기준(쓰기 전에 잡아야 잠금에 안 걸린다)
 ROLLBACK_TABS = ("nx.stock_ledger", "nx.PU_T_STOCK_MAINT", "nx.PU_T_MAT_STOCK_WH",
                  "nx.SA_T_STOCK_MAINT", "nx.SA_T_ITEM_STOCK",
-                 "nx.proc_result", "nx.saleout_maint")
+                 "nx.proc_result", "nx.saleout_maint",
+                 # 협력사 세트입고(2026-08-29) — 송장/입고거래도 오염 0 대상이다.
+                 #   입고취소는 이 두 테이블을 지우므로, 여기 없으면 "깨끗하다"가 거짓말이 된다.
+                 "nx.set_input_req", "nx.set_input_req_dtl", "nx.set_stock_maint")
 _ROWS0 = {}
 
 

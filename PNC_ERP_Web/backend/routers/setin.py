@@ -270,3 +270,91 @@ def setstock_receive(payload: dict = Body(...)):
         return {"ok": True, "received": recv, "ledger_posted": posted, "barcode": "SET" + bc}
     finally:
         cn.close()
+
+
+@router.get("/api/setstock/cancel_preview")
+def setstock_cancel_preview(barcode: str = Query(...)):
+    """입고취소 전 미리보기 — 무엇이 되돌아가는지 보여준다(되돌리기 전에 눈으로 확인)."""
+    bc = "".join(ch for ch in str(barcode) if ch.isdigit())
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT maint_ymd, maint_seq, item_code, CAST(maint_qty AS float),
+                              LTRIM(RTRIM(ISNULL(insert_user_id,''))), status
+                         FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'
+                        ORDER BY maint_ymd, maint_seq""", bc)
+        cols = [d[0] for d in cur.description]
+        recv = [dict(zip(cols, r)) for r in cur.fetchall()]
+        if not recv:
+            raise HTTPException(404, f"SET바코드 {bc} 의 입고 내역이 없습니다.")
+        cur.execute("""SELECT MAINT_YMD, MAINT_SEQ, MAT_CODE, CAST(MAINT_QTY AS float)
+                         FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'
+                        ORDER BY MAINT_YMD, MAINT_SEQ""", int(bc) if bc.isdigit() else None)
+        led = [{"ymd": a, "seq": b, "mat": str(c2).strip(), "qty": float(d or 0)}
+               for a, b, c2, d in cur.fetchall()]
+        return {"barcode": bc, "recv": recv, "recv_cnt": len(recv),
+                "ledger": led, "ledger_cnt": len(led),
+                "ledger_qty": sum(x["qty"] for x in led)}
+    finally:
+        cn.close()
+
+
+@router.post("/api/setstock/cancel")
+def setstock_cancel(payload: dict = Body(...)):
+    """★입고취소 — 잘못 스캔한 입고를 되돌린다 (대표 확정 2026-08-29).
+
+       믿고 받는 구조(세지 않고 송장대로 입고)에서는 **되돌리는 길이 반드시 있어야 한다.**
+       스캔 1회로 도번 최대 35종이 들어가므로, 잘못 찍으면 통째로 잘못 들어간다.
+
+       되돌리는 것 = 입고가 만든 것 **셋 전부**
+         ① nx.set_stock_maint      입고 거래행 삭제
+         ② nx.set_input_req.status 90/30 → 10(발행)으로 복귀 + deliver 유지
+         ③ nx.stock_ledger         자도번 재고 파생분(MAINT_TAG='S') 삭제
+       ★셋 중 하나만 지우면 장부가 어긋난다. 한 트랜잭션으로 묶는다.
+
+       ★마감 잠금: 마감된 기간의 입고는 취소할 수 없다(재고가 움직이므로 규칙B).
+    """
+    bc = "".join(ch for ch in str(payload.get("barcode", "")) if ch.isdigit())
+    user = (str(payload.get("user") or "web")[:20])
+    reason = str(payload.get("reason", "")).strip()
+    if not bc:
+        raise HTTPException(400, "SET바코드가 필요합니다.")
+    cn = _nx_tx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT maint_ymd, maint_seq, sheet_no, item_code, CAST(maint_qty AS float)
+                         FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'""", bc)
+        rows = cur.fetchall()
+        if not rows:
+            raise HTTPException(404, f"SET바코드 {bc} 의 입고 내역이 없습니다. 취소할 것이 없습니다.")
+
+        # ★마감 잠금 — 입고일자 기준. 마감된 달의 재고는 되돌릴 수 없다.
+        for ymd, _seq, _sh, _it, _q in {(r[0], r[1], r[2], r[3], r[4]) for r in rows}:
+            _assert_open(cur, str(ymd).strip(), "MAT", "세트입고 취소")
+
+        # ③ 재고 파생분 먼저 제거 (원장 → 거래 → 상태 순서로 되돌린다)
+        led = 0
+        try:
+            cur.execute("DELETE FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
+                        int(bc) if bc.isdigit() else None)
+            led = cur.rowcount
+        except Exception:
+            led = 0
+
+        # ① 입고 거래행 제거
+        cur.execute("DELETE FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
+        recv = cur.rowcount
+
+        # ② 송장 상태를 발행(10)으로 되돌린다 — 다시 스캔할 수 있게
+        cur.execute("""UPDATE nx.set_input_req SET status='10', status_dt=GETDATE(), status_user=?
+                        WHERE barcode_no=? AND status IN ('30','40','90')""", user, bc)
+        req = cur.rowcount
+
+        cn.commit()
+        stock_changed()      # ★재고 변경 → 파생 캐시 무효화
+        return {"ok": True, "barcode": bc, "recv_deleted": recv,
+                "ledger_deleted": led, "req_reverted": req,
+                "msg": f"입고취소 완료 — 입고 {recv}건 · 재고파생 {led}행 되돌림. "
+                       f"송장 {req}건이 발행(10) 상태로 돌아가 다시 스캔할 수 있습니다."}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
