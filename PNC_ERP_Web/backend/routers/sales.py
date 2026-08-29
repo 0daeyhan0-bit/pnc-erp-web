@@ -98,32 +98,36 @@ def sagub_adjust_delete(payload: dict = Body(...)):
 # ===================== 협력사 보유 사급재고 현황 (★작업3 메인, 정본=레거시 PU_T_SAGUB_STOCK RO) =====================
 @router.get("/api/sagub/holding/list")
 def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = Query(""), limit: int = Query(3000)):
-    """★작업3 '협력사가 보유중이어야 할 사급재고 리스트' = 레거시 PU_T_SAGUB_STOCK(자도번×사급업체) 라이브 RO 정본.
-    STOCK_QTY = 협력사 보유 사급 잔량. 레거시 사급출고 프로그램(w_pu_output_010/011/015)이 트리거로 net 유지:
-      잔량 = Σ사급출고(원자재 d) − Σ(완성/세트 입고 × 상위품 BOM상 d 소요량) − 조정.
-    ★코드레벨 정합: 사급출고=원자재레벨, 회수=완성/세트=상위레벨 → 코드가 안 맞아 단순 netting 불가하나,
-      레거시가 상위품 BOM전개 소요량으로 이미 net한 결과가 PU_T_SAGUB_STOCK.STOCK_QTY (오늘도 갱신되는 살아있는 정본).
-    REF_STOCK_QTY=관리품(중량관리 item_class J) 참조수량. sign: 1양수/-1음수/0=제로/공백전체."""
-    cn = _conn(); cur = cn.cursor()
+    """★협력사 보유 사급재고 = 수불장 잔량(nx.sagub_maint 파생). STOCK_QTY = 협력사입고(사급출고+) − 협력사출고(세트소진−) ± 조정.
+    ★단일원장(레거시 PU_T_SAGUB_STOCK 대체 — 조정 즉시반영·수불장과 동일값). 기초0@2026-07(migration snapshot 제외)이라 이월로 −잔량 가능 → 조정(협력사사급재고관리)으로 실사 보정.
+    ★용접봉/은납 별도 트랙 제외·사급부품(v_pr_bom SAGUB_FLAG=1)만. sign: 1양수/-1음수/0=제로/공백전체."""
+    cn = _nx(); cur = cn.cursor()
     try:
-        w = []; p = []
-        if cust: w.append("s.CUST_CODE=?"); p.append(cust)
-        if mat: w.append("(s.MAT_CODE LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
-        if sign == "1": w.append("s.STOCK_QTY>0")
-        elif sign == "-1": w.append("s.STOCK_QTY<0")
-        elif sign == "0": w.append("s.STOCK_QTY=0")
-        cur.execute(f"""SELECT TOP {int(limit)} s.CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, s.MAT_CODE,
-              ISNULL(i.item_name,'') matnm, ISNULL(i.ITEM_CLASS,'') item_class, s.STOCK_QTY, s.REF_STOCK_QTY,
-              ISNULL(s.UPDATE_USER_ID,'') upd_user, s.UPDATE_DATETIME upd_dt, ISNULL(s.UPDATE_WINDOW,'') upd_win
-            FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=s.MAT_CODE
-            {('WHERE '+' AND '.join(w)) if w else ''}
-            ORDER BY custnm, s.MAT_CODE""", *p)
+        w = ["ISNULL(l.remarks_src,'')<>'migration'",
+             "EXISTS(SELECT 1 FROM nx.v_pr_bom v WHERE UPPER(LTRIM(RTRIM(v.MAT_CODE)))=UPPER(LTRIM(RTRIM(l.mat_code))) AND v.SAGUB_FLAG='1')",
+             "NOT EXISTS(SELECT 1 FROM nx.item wi WHERE wi.item_code=l.mat_code AND (wi.item_code LIKE 'RAC%' OR wi.item_code LIKE 'BCUP%' OR wi.item_name LIKE '%용접%'))"]; p = []
+        if cust: w.append("l.cust_code=?"); p.append(cust)
+        if mat: w.append("(l.mat_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
+        hav = ""
+        if sign == "1": hav = "HAVING SUM(l.maint_qty)>0.5"
+        elif sign == "-1": hav = "HAVING SUM(l.maint_qty)<-0.5"
+        elif sign == "0": hav = "HAVING ABS(SUM(l.maint_qty))<=0.5"
+        cur.execute(f"""SELECT TOP {int(limit)} l.cust_code CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, l.mat_code MAT_CODE,
+              ISNULL(i.item_name,'') matnm, ISNULL(MAX(i.ITEM_CLASS),'A') item_class,
+              SUM(l.maint_qty) STOCK_QTY, NULL REF_STOCK_QTY,
+              MAX(ISNULL(l.insert_user_id,'')) upd_user, MAX(l.insert_datetime) upd_dt, '사급수불장' upd_win
+            FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            LEFT JOIN nx.item i ON i.ITEM_CODE=l.mat_code
+            WHERE {' AND '.join(w)}
+            GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name
+            {hav} ORDER BY custnm, l.mat_code""", *p)
         cols = [d[0] for d in cur.description]
         rows = [{k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in zip(cols, r)} for r in cur.fetchall()]
-        cur.execute("""SELECT s.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE GROUP BY s.CUST_CODE, c.CUST_DESC ORDER BY 2""")
+        for r in rows:
+            r["STOCK_QTY"] = float(r["STOCK_QTY"] or 0)
+        cur.execute("""SELECT DISTINCT l.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_maint l
+            LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            WHERE ISNULL(l.remarks_src,'')<>'migration' AND l.cust_code IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         totq = sum(float(r["STOCK_QTY"] or 0) for r in rows)
         return {"rows": rows, "custs": custs, "totqty": totq}
