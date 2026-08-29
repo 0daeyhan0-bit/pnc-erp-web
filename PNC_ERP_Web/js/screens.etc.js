@@ -1247,7 +1247,7 @@ SCREEN.sagubadjust=(c)=>{
 /* ===== 협력사: 사급 수불장 (탭: 사급부품·원소재·용접봉) ===== */
 SCREEN.sagubledger=(c)=>{
   let tab=(c.__satab||'part');
-  const set=t=>{c.__satab=t;draw();};
+  const set=t=>{tab=t;c.__satab=t;draw();};
   const draw=()=>{
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
       <div style="flex:0 0 auto;display:flex;gap:2px;border-bottom:2px solid var(--line);padding:4px 2px 0">
