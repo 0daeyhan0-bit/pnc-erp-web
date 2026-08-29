@@ -479,10 +479,12 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     except Exception: jaego_mat = 0
     jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
     silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
-    # ★재료비 = 기초재고 + 매입총액 − 기말재고 (기초=7월말·기말=조회일 현재고 = 용접+가공+영업+자재 합계). %=재료비/매출.
+    # ★재료비(사용기준) = 원재료매입(매입−불출=실매입) + Σ재고사용(기초−기말). ★기말이 줄면 사용↑로 인식(차액=기초−기말).
+    #   재고 4버킷=자재/용접/가공/영업 각 기초·기말. 재료비율=재료비÷LG매출. (그 외 항목은 재료비 섹션서 제거)
     gicho = base_w + base_g + base_s + base_m   # 기초재고 합계
     gimal = cur_w + cur_g + cur_s + cur_m       # 기말재고 합계(조회일 현재고)
-    jaemat = round(gicho + pur_t['tot'] - gimal)   # 재료비
+    jae_use = gicho - gimal                     # 재고 사용(기초−기말) — 기말이 줄면 +사용
+    jaemat = round(net_t['tot'] + jae_use)      # 재료비 = 실매입(매입−불출) + 재고사용
 
     # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
     dangsa_raw = dangsa_part = 0
@@ -575,15 +577,18 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
             # ⑥ 당일 실적(조회일) — 매출(절삭/설치/기타/합계) + 사급(원소재/부품/합계)
             "today": {"hyeon_cut": t_cut, "hyeon_seol": t_seol, "hyeon_etc": t_etc, "sales_hab": t_cut + t_seol + t_etc,
                       "sagub_raw": t_raw, "sagub_part": t_part, "sagub_hab": t_raw + t_part},
-            # ② 재료비 = 기초재고 + 매입총액 − 기말재고 (기초=7월말·기말=조회일 현재고). %=재료비/매출
-            "jaemat": {"gicho": gicho, "pur": pur_t['tot'], "gimal": gimal, "jaemat": jaemat, "jaemat_pct": pct(jaemat, lg_sales)},
+            # ② 재료비(사용기준) = 원재료매입(매입−불출) + 재고사용(기초−기말). %=재료비/LG매출.
+            "jaemat": {"net": net_t['tot'], "use": jae_use, "jaemat": jaemat, "jaemat_pct": pct(jaemat, lg_sales)},
             # ⑤ 현매출 / ② 매입비율
             "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
-            # ③ 재고조정 (조회일 현재고 − 7월말 기초 = 재고증가분, 버킷별). 용접/가공/영업/자재 + 합계.
-            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego},
+            # ③ 재고 (버킷별 기초/기말 = 자재/용접/가공/영업). 차액(사용)=기초−기말은 프론트 계산.
+            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego,
+                      "base_mat": base_m, "cur_mat": cur_m, "base_weld": base_w, "cur_weld": cur_w,
+                      "base_gagong": base_g, "cur_gagong": cur_g, "base_sales": base_s, "cur_sales": cur_s,
+                      "base_total": gicho, "cur_total": gimal},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
