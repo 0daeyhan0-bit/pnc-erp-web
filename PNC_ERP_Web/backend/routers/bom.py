@@ -4,11 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-<<<<<<< HEAD
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _geom_weight)
-=======
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _geom_weight, _sub_desc_suffix, _is_sub_code)
->>>>>>> zt/main
 
 from common import _ITEM_MAKE, _KINDMAP_EXT
 router = APIRouter()
@@ -184,14 +180,10 @@ def item_save(payload: dict = Body(...)):
             if str(s("cost_gubun") or "").strip() == "3":   # ★원소재=기하중량 재계산(레거시 f_get_weight3·저장값무시)
                 _gw = _geom_weight(_mg, _d, _t, _l)
                 if _gw is not None: _nw = _gw
-<<<<<<< HEAD
-            vals = (s("item_name"), s("item_spec"), _mg, _d, _t, _l,
-=======
             _nm = s("item_name")
             if _nm and _is_sub_code(cur, code):   # ★SUB 품명 접미사 병기(§B-1 3-a·self-heal)
                 _nm = _sub_desc_suffix(code, _nm)
             vals = (_nm, s("item_spec"), _mg, _d, _t, _l,
->>>>>>> zt/main
                     _nw, s("unit"), s("in_cust"), s("sgroup"), s("lgroup"), s("make_type"),
                     s("cost_gubun"), s("status"))
             cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", code)
@@ -900,13 +892,8 @@ def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = 
             src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
-<<<<<<< HEAD
-              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.ITEM_DESC,'') nx_desc
-            FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
-=======
               b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
->>>>>>> zt/main
+            FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
