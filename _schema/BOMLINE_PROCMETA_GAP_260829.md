@@ -38,6 +38,13 @@
 - ★gagong_proc는 **로직 소비자 없음**(plan=item_PROC_GAGONG·backflush 미사용·bom.py 표시만)이라 정렬해도 무회귀. 단 non-empty 덮어쓰기라 "PR 정본" 판단 후. 정렬 시 nx.bom_line=PR 완전등가 → **prodsheet clean walker diff0 가능**.
 - 처리: PR을 gagong_proc 정본으로 확정하면 122도 PR로 정렬(백업). 미확정이면 walker가 122 divergence(0.3%) 문서화.
 
+## prodsheet walker (Step2·3, 2026-08-29)
+- 엔진 `nx_soyo_engine.prod_input_soyo(eng,item,gpc_like)` 신설 = prodsheet._bom_expand 재현(vir만 재귀·except≠1·출력 sagub=0∧gagong_proc LIKE∧vir≠1·grain(mat,gagong_proc)·USE_QTY·work_code). 소스=nx.bom_line.
+- **검증(298 표본): 292 diff0·6 다름.** 6 = **nx.bom vs PR 구조차**(walker 버그 아님):
+  - 품번 치환: PR MJX30152802 ↔ nx.bom MJX61911802·5220A20039A = LG품번↔우리품번(nx.bom=우리 clean 정본).
+  - except/sagub 축 차이 몇 건(RAC/추가 mat).
+- ★재고차감이라 6의 "어느 품번에 재고 있나"(우리 vs LG) 판단 필요 → **prodsheet 실제 교체는 6 규명·정본확정 후**. walker는 커밋(소비자 없음·안전).
+
 ## 재현
 - 대조 SQL: 최신헤더 nx.bom_line ↔ nx.pr_m_item_bom (item,mat 조인), gagong_proc/s_work 등 <> 카운트.
 - 660 출처: remarks LIKE '%soyorec%'/'%edgeadd%'.
