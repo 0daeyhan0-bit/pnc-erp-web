@@ -44,7 +44,18 @@
 ## 5. make_type 정밀도 재계산 (저위험·1회 스크립트) — ★재-스코프 실측(2026-08-29)으로 단순화
 - **레지스트리 2893 → 새 SUB정의 유지 2280 / 탈락 613**(단일가공 자식<2=385·매입완성품 mk3/5=129·make_type공백=93·BOM없음=5). §8-5 "289=매입완성품·원소재 과다포함"의 실체.
 - **★핵심: 재계산은 유지 2280만.** 탈락 613 = **무접촉**(재계산 안 함). 근거: old sig 형식 `C[]W[]` ≠ new 형식 `C[]W[]MK[]` → 신규 make_type-sig와 **절대 충돌 불가**(신규 SUB는 make_type∈{1,2}·자식≥2라 단일가공/매입완성품과 구조 동일 불가). ∴ 탈락 613·그 기존 route참조 15행 그대로 둬도 dedup 오염 0. **forward-only와 정확히 일치**(기존 무접촉).
-- 방법: 유지 2280 rep_item 구조로 새 sig 재계산 → `sub_registry.sig` UPDATE. make_type 분할 5그룹 → 갈래별 신규 S + `sub_code_map` repoint(≤12행·route참조 0).
+- 방법: 유지 2280 구조로 새 sig 재계산 → `sub_registry.sig` UPDATE. **DRY 실측(sub_code_map 기준·정정): 분할 8 sub_code·repoint 8 raw_item**(앞선 forest "5"는 과소). 갈래별 신규 S + `sub_code_map` repoint. ★분할 8 중 일부는 make_type 아니라 **재귀구조 차이**(old sig 과다병합을 새 재귀 sig가 분리, 예 S01292=601-19-11 vs 602-19-11 둘다 mk2). ∴"make_type만 분할"로 단정 금지.
+- ✅확인완료: 분할 8건 관련 raw코드 **sourcing_route_line 참조 0행**(19코드 전부 sub_code_map 등록) → repoint 안전(sub_code_map만·route/계획 무영향).
+
+## ★밤 작업 요약 (2026-08-29 야간, 라이브 무변경·읽기전용 검증만)
+**완료(전부 커밋)**: B 재검증(정체성 공식 확정)·make_type 난이도(저위험)·구분 신뢰도(본인make_type만)·재스코프(2280유지/613탈락)·DRY 재계산 미리보기(분할 8·repoint 8·route참조 0)·SUB 등록지점 전수·설계문서.
+**나는 밤사이 nx 변경/배포/코드구현 안 함**(성급한 일반화 금지). 전부 읽기전용 측정+기록.
+
+### 아침 착수 전 사장님 확인 2건 (그 외 전부 확정)
+1. **BOM 마스터 편집(bom/save·addline·copy)도 "SUB 등록"에 포함?** (§1-2) — 조달후보 편성만이면 sourcing 2곳(sub/create·approve)만, 마스터까지면 bom.py도 공용확인 추가.
+2. **탈락 613 dormant 유지 확정?** (§5) — route참조 15행 있어 그대로 두기 권장.
+
+### 착수 순서(확인 후): S1 스키마 additive → S2 계획/원가 baseline → S3 재계산(백업·shadow diff0) → S4 mint 주입+공용확인 → S5 표시 → S6 전 게이트(원가·생산계획·협력사계획 diff0·dedup·화면) → S7 승인 배포.
 - 백업: `nx.sub_registry_bak_mksig` · `nx.sub_code_map_bak_mksig`. 롤백=재적재.
 - ★sig는 SUB dedup/이름 전용 → **bom_line 무수정** → 원가·계획 diff0 자동(§6).
 - ☐확인필요(아침): 탈락 613을 (a)그대로 dormant 두기[권장·안전] vs (b)레지스트리서 정리 — 참조 15행 때문에 (a) 권장.
