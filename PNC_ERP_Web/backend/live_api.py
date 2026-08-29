@@ -458,32 +458,26 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     #    용접/가공(생산 _prodstock stage=WELD/GAGONG)·영업(salesstock)·자재(nx.mat_stock_daily 이동평균 일마감).
     #    생산·영업 기초=2502스냅샷+월초직전무브(=7월말) × 월초원가, 현재고=조회일 수량 × 월초원가. 자재=일별 이동평균.
     #    실재고(조정후) = 실매입 + 재고증가합계.
-    def _delta(rows, stage=None, basek='basic', costk='cost', amtk='amt'):
-        cur_a = base_a = 0.0
-        for x in rows:
-            if stage is not None and x.get('stage') != stage: continue
-            cur_a += float(x.get(amtk) or 0)
-            base_a += float(x.get(basek) or 0) * float(x.get(costk) or 0)
-        return round(cur_a - base_a), round(cur_a), round(base_a)   # (증감=현재고−기초, 기말현재고, 기초)
-    cur_w = base_w = cur_g = base_g = cur_s = base_s = cur_m = base_m = 0
-    try:
-        _pr = _prodstock(ym, m0, d6)   # ★조회일 기준. stage='WELD'(용접, gagong_proc≠P0001) / 'GAGONG'(가공, P0001)
-        jaego_weld, cur_w, base_w = _delta(_pr, 'WELD'); jaego_gagong, cur_g, base_g = _delta(_pr, 'GAGONG')
-    except Exception: jaego_weld = jaego_gagong = 0
-    try: jaego_sales, cur_s, base_s = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
-    except Exception: jaego_sales = 0
-    try:   # 자재: 우리 이동평균 일마감(nx.mat_stock_daily). 기초=월초직전잔량(ba)·현재고=조회일(sa)
-        _mc = matclose(dfrom=m0, dto=d6).get('rows', [])
-        cur_m = round(sum(float(x.get('sa') or 0) for x in _mc)); base_m = round(sum(float(x.get('ba') or 0) for x in _mc))
-        jaego_mat = cur_m - base_m
-    except Exception: jaego_mat = 0
-    jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
-    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
-    # ★재료비(사용기준) = 원재료매입(매입−불출=실매입) + Σ재고사용(기초−기말). ★기말이 줄면 사용↑로 인식(차액=기초−기말).
-    #   재고 4버킷=자재/용접/가공/영업 각 기초·기말. 재료비율=재료비÷LG매출. (그 외 항목은 재료비 섹션서 제거)
-    gicho = base_w + base_g + base_s + base_m   # 기초재고 합계
-    gimal = cur_w + cur_g + cur_s + cur_m       # 기말재고 합계(조회일 현재고)
-    jae_use = gicho - gimal                     # 재고 사용(기초−기말) — 기말이 줄면 +사용
+    # ★재고(기초/기말) = 자재/생산/영업 수불장(close.py MAT/PRD/SAL). ba=기초금액·sa=기말금액. ★이동평균 일마감(matclose) 아님.
+    from routers import close as _close
+    _lc = _nx(); _lcur = _lc.cursor()
+    base_m = cur_m = base_prd = cur_prd = base_s = cur_s = 0
+    def _ledsum(fn, *a):
+        rows = fn(*a)[0]
+        return round(sum(float(r.get('ba') or 0) for r in rows)), round(sum(float(r.get('sa') or 0) for r in rows))
+    try: base_m, cur_m = _ledsum(_close._mat_ledger, _lcur, m0, d6, 0)     # 자재 수불장
+    except Exception: pass
+    try: base_prd, cur_prd = _ledsum(_close._prd_ledger, _lcur, m0, d6)    # 생산 수불장(용접+가공)
+    except Exception: pass
+    try: base_s, cur_s = _ledsum(_close._sal_ledger, _lcur, m0, d6)        # 영업 수불장
+    except Exception: pass
+    _lc.close()
+    jaego = (cur_m + cur_prd + cur_s) - (base_m + base_prd + base_s)   # 재고 증감(참고)
+    silrae = net_t['tot'] + jaego   # 실재고(조정후)
+    # ★재료비(사용기준) = 원재료매입(매입−불출=실매입) + Σ재고사용(기초−기말). 기말 감소=사용↑. 재고=자재/생산/영업 수불장.
+    gicho = base_m + base_prd + base_s   # 기초재고 합계
+    gimal = cur_m + cur_prd + cur_s      # 기말재고 합계
+    jae_use = gicho - gimal              # 재고 사용(기초−기말)
     jaemat = round(net_t['tot'] + jae_use)      # 재료비 = 실매입(매입−불출) + 재고사용
 
     # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
