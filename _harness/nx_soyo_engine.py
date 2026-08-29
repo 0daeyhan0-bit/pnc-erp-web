@@ -73,15 +73,27 @@ def _expandable(eng, node, info, seen):
 
 def cost_material_nae(eng, item, ymd):
     """[내부원가 walker] 전공정 자체 가정 — INNER_PROD 무관 전개(매입/외주도 뚫음), LME 없음.
-    현행 nx_cost_engine.material_nae()와 diff0 대상. explode()가 이미 full 깊이라 지원.
-    엔진 _value_node_nae 재현: cg!=3 & _expandable_nae면 전개, else _leaf_val_nae."""
+    레거시 내부용 SP(SP_CS_견적서(내부용)_250704)와 diff0. 정본 NAEWON_COSTGUBUN3_GAP_260829.md.
+    ★2026-08-29 두 버그수정(레거시 SP 800품목 오라클게이트 로직FAIL0·회귀0·승인적용):
+      ①cg3 가드제거: cg3라도 자식있으면 전개(원소재 도달), 최말단만 _leaf_val_nae. (레거시 cg5만 정지)
+      ②EA단위 수량전파: 레거시 재료 롤업 IIF(부모.UNIT='EA',USE_QTY,1) 정합 —
+        내부노드로 내려갈 땐 qty를 unit='EA'일 때만 전파, 최말단은 use_qty 항상(SP line308·771-773)."""
     ymcut = '20' + ymd[:4]
 
-    def value(node, q, seen):
+    def value(node, mult, seen):
         info = eng._load_item(node)
-        if info['cost_gubun'] != '3' and eng._expandable_nae(node, seen):
-            return sum(value(c, qty * q, seen | {node}) for c, qty, cx, f, t, lx in eng.lines(node) if not cx)
-        return eng._leaf_val_nae(node, info, q, ymd, ymcut)
+        if eng._expandable_nae(node, seen):                     # ①cg3 가드 제거(cg5+자식없음만 정지)
+            tot = 0.0
+            for c, qty, cx, f, t, lx in eng.lines(node):
+                if cx:
+                    continue
+                if eng._expandable_nae(c, seen | {node}):       # 내부노드 → ②EA일 때만 qty 전파
+                    cm = mult * (qty if eng._load_item(c)['unit'] == 'EA' else 1.0)
+                else:                                            # 최말단 → use_qty 항상
+                    cm = mult * qty
+                tot += value(c, cm, seen | {node})
+            return tot
+        return eng._leaf_val_nae(node, info, mult, ymd, ymcut)
 
     return round(value(item, 1.0, set()), 2)
 
