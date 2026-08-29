@@ -337,12 +337,33 @@ READ_CHECKS = [
 #   운영 전환 전에 **반드시 비밀번호를 바꾼다**(바꾸면 환경변수로 넘긴다).
 #   이 계정들은 PARTNER_ERP_TEST3 의 개발 시드이며, 화면(브라우저)에는 더 이상
 #   비밀번호가 실려 나가지 않는다 — 여기 있는 것은 하네스가 로그인하기 위한 것이다.
+import io
 import os as _os
 import json as _j
+
+
+def _secret(key, env, dflt=None):
+    """하네스 자격 — ①환경변수 ②repo 밖 .flow_secrets.json ③개발시드 기본값.
+       ★비밀번호를 repo 에 넣지 않는다. 없으면 그 계정 케이스는 SKIP 된다(조용히 통과 아님)."""
+    v = _os.environ.get(env)
+    if v:
+        return v
+    try:
+        _f = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".flow_secrets.json")
+        return (_j.load(io.open(_f, encoding="utf-8")) or {}).get(key) or dflt
+    except Exception:
+        return dflt
+
+
+# ★[F]/[R] 케이스의 기본 로그인 계정.
+#   내부 API 전면 인증(2026-08-29) 이후로는 하네스도 로그인해야 화면 API 를 부를 수 있다.
+#   케이스에 as_ 를 명시하면 그것이 우선하고, as_=None 이면 **무토큰**(비로그인 재현)이다.
+DEFAULT_AS = "super"
+
 ACCOUNTS = {
-    "super":   _os.environ.get("FLOW_PW_SUPER", "super"),      # 내부 · 시스템관리자
-    "miraero": _os.environ.get("FLOW_PW_COOP", "1234"),        # 협력사(미래정밀 = 2096)
-    "kdev":    _os.environ.get("FLOW_PW_KDEV", "1234"),        # 내부 · 조회전용
+    "super":    _secret("super", "FLOW_PW_SUPER", "super"),     # 내부 · 시스템관리자
+    "flowcoop": _secret("flowcoop", "FLOW_PW_COOP"),            # ★TestBed 협력사 전용(2096) — 배포금지
+    "kdev":     _secret("kdev", "FLOW_PW_KDEV", "1234"),        # 내부 · 조회전용
 }
 COOP_CUST = "2096"          # 미래정밀 — 협력사 계정의 소속
 OTHER_CUST = "2148"         # 대원산업 — '남의 것'
@@ -399,7 +420,7 @@ AUTH_CASES = [
     dict(kind="S", name="무토큰 — 내 정보 조회", method="GET", path="/api/auth/me",
          as_=None, expect=401),
     dict(kind="S", name="협력사 로그인 — 거래처코드가 실려 오는가", method="POST",
-         path="/api/auth/login", body={"id": "miraero", "pw": ACCOUNTS["miraero"]},
+         path="/api/auth/login", body={"id": "flowcoop", "pw": ACCOUNTS["flowcoop"]},
          as_=None, expect=200,
          check=lambda res, ctx: (res.get("user", {}).get("partner_code") == COOP_CUST,
                                  f"{res.get('user',{}).get('nm')} · 유형 {res.get('user',{}).get('utype')}"
@@ -407,22 +428,22 @@ AUTH_CASES = [
 
     # ── ★소속 강제 : 협력사가 남의 코드를 넣으면 ────────────────────
     dict(kind="S", name=f"★협력사가 남의 코드({OTHER_CUST}) 로 송장목록", method="GET",
-         path=f"/api/setin/list?cust={OTHER_CUST}", as_="miraero", expect=200,
+         path=f"/api/setin/list?cust={OTHER_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: _only_mine(res, "in_cust_code", "cust_code", "cust")),
     dict(kind="S", name=f"★협력사가 남의 코드({OTHER_CUST}) 로 입고실적", method="GET",
-         path=f"/api/setstock/list?cust={OTHER_CUST}", as_="miraero", expect=200,
+         path=f"/api/setstock/list?cust={OTHER_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: _only_mine(res, "cust_code", "in_cust_code")),
     dict(kind="S", name=f"★협력사가 남의 작업처({OTHER_CUST}) 로 계획조회", method="GET",
-         path=f"/api/partner/planstatus?wc={OTHER_CUST}", as_="miraero", expect=200,
+         path=f"/api/partner/planstatus?wc={OTHER_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: _only_mine(res, "MAT_WORK_CENTER_CODE", "wc", "cust_code")),
     dict(kind="S", name="협력사가 자기 코드로 거래명세서 (비교 기준)", method="GET",
-         path=f"/api/partner/deliv420?cust={COOP_CUST}", as_="miraero", expect=200,
+         path=f"/api/partner/deliv420?cust={COOP_CUST}", as_="flowcoop", expect=200,
          check=lambda res, ctx: (ctx.update(
              _deliv_mine=_j.dumps(res.get("rows") or [], sort_keys=True, default=str)) or True,
              f"{len(res.get('rows') or [])}행 — 이걸 기준으로 다음 케이스와 비교한다")),
     dict(kind="S", name="★협력사가 남의 코드로 거래명세서 조회 = 자기 결과와 같은가",
          method="GET", path=f"/api/partner/deliv420?cust={OTHER_CUST}",
-         as_="miraero", expect=200,
+         as_="flowcoop", expect=200,
          check=lambda res, ctx: _deliv_same(res, ctx)),
     dict(kind="S", name="★그 결과가 내부가 보는 남의 데이터와는 다른가", method="GET",
          path=f"/api/partner/deliv420?cust={OTHER_CUST}", as_="super", expect=200,
@@ -446,35 +467,35 @@ AUTH_CASES = [
     # ── 남의 문서 (바코드·송장번호만 알면 되는 API) ─────────────────
     dict(kind="S", name="★협력사가 남의 송장 명세 열람", method="GET",
          path=lambda ctx: f"/api/setin/detail?sheet={ctx.get('other_sheet')}",
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
     dict(kind="S", name="내부는 그 송장이 열린다(회귀 없음)", method="GET",
          path=lambda ctx: f"/api/setin/detail?sheet={ctx.get('other_sheet')}",
          as_="super", expect=200, skip_if=lambda ctx: not ctx.get("other_sheet"),
          check=lambda res, ctx: (True, f"자도번 {len(res.get('rows') or [])}종")),
     dict(kind="S", name="★협력사가 남의 송장을 발행", method="POST", path="/api/setin/issue",
          body=lambda ctx: {"items": [{"sheet": ctx.get("other_sheet"), "qty": 1}]},
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
     dict(kind="S", name="★협력사가 남의 거래명세표 열람", method="GET",
          path=lambda ctx: f"/api/partner/deliv420/invoice?barcode={ctx.get('other_bc')}",
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
     dict(kind="S", name="★협력사가 남의 발행을 취소", method="POST",
          path="/api/partner/deliv420/cancel",
          body=lambda ctx: {"barcode": ctx.get("other_bc")},
-         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
     dict(kind="S", name="자기 거래명세표는 열린다", method="GET",
          path=lambda ctx: f"/api/partner/deliv420/invoice?barcode={ctx.get('my_bc')}",
-         as_="miraero", expect=200, skip_if=lambda ctx: not ctx.get("my_bc"),
+         as_="flowcoop", expect=200, skip_if=lambda ctx: not ctx.get("my_bc"),
          check=lambda res, ctx: (True, f"품목 {len(res.get('rows') or res.get('items') or [])}종")),
 
     # ── 입고 처리 = 우리가 받는 행위 → 협력사 거부 ──────────────────
     dict(kind="S", name="★협력사가 입고 스캔", method="GET",
-         path="/api/setstock/scan?barcode=700003", as_="miraero", expect=403),
+         path="/api/setstock/scan?barcode=700003", as_="flowcoop", expect=403),
     dict(kind="S", name="★협력사가 입고 처리", method="POST", path="/api/setstock/receive",
-         body={"barcode": "700003", "tag": "2"}, as_="miraero", expect=403),
+         body={"barcode": "700003", "tag": "2"}, as_="flowcoop", expect=403),
     dict(kind="S", name="★협력사가 입고 취소", method="POST", path="/api/setstock/cancel",
-         body={"barcode": "700003"}, as_="miraero", expect=403),
+         body={"barcode": "700003"}, as_="flowcoop", expect=403),
     dict(kind="S", name="★협력사가 입고취소 미리보기", method="GET",
-         path="/api/setstock/cancel_preview?barcode=700003", as_="miraero", expect=403),
+         path="/api/setstock/cancel_preview?barcode=700003", as_="flowcoop", expect=403),
 
     # ── 계정 API ───────────────────────────────────────────────────
     dict(kind="S", name="★계정목록에 평문 비밀번호가 나오지 않는가", method="GET",
@@ -484,14 +505,14 @@ AUTH_CASES = [
                                  f"{sum(1 for u in (res.get('users') or []) if 'pw' in u)}개 · "
                                  f"비번설정 {sum(1 for u in (res.get('users') or []) if u.get('pw_set'))}명")),
     dict(kind="S", name="협력사는 자기 계정만 본다", method="GET", path="/api/perm/users",
-         as_="miraero", expect=200,
+         as_="flowcoop", expect=200,
          check=lambda res, ctx: (len(res.get("users") or []) == 1
-                                 and (res.get("users") or [{}])[0].get("id") == "miraero",
+                                 and (res.get("users") or [{}])[0].get("id") == "flowcoop",
                                  f"{len(res.get('users') or [])}명 = "
                                  f"{[u.get('id') for u in (res.get('users') or [])]}")),
     dict(kind="S", name="★협력사가 계정을 저장", method="POST", path="/api/perm/users",
          body={"users": [{"id": "hacker", "nm": "침입", "roles": ["시스템관리자"]}]},
-         as_="miraero", expect=403),
+         as_="flowcoop", expect=403),
     dict(kind="S", name="조회전용 내부 사용자도 계정 저장 불가", method="POST",
          path="/api/perm/users",
          body={"users": [{"id": "hacker2", "nm": "침입2", "roles": ["시스템관리자"]}]},

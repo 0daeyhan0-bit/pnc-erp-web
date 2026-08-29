@@ -179,6 +179,29 @@ app.include_router(_r_matinput.router)
 #   협력사에게 열기 전에 서버가 거부해야 한다. 화면에서 숨기는 것은 보안이 아니다.
 from routers import auth as _r_auth
 app.include_router(_r_auth.router)
+
+
+# ★★내부 API 전면 인증 게이트 (2026-08-29) — PARTNER_PORTAL_DESIGN.md §13
+#   실측: 전체 530개 중 인증 결선 21개뿐. 협력사 토큰으로 cust/list·item/list·close/ledger·
+#         partner/workcenters·perm/all 이 그대로 열렸다.
+#   라우터 44개에 하나씩 붙이면 반드시 하나는 빠지고 공유파일을 44번 만진다.
+#   ⟹ 여기 한 곳에서 막는다. **앞으로 만들 엔드포인트도 자동 보호**된다.
+@app.middleware("http")
+async def _auth_gate(request, call_next):
+    from fastapi.responses import JSONResponse
+    from routers.auth import path_policy, coop_allowed, current_user
+    is_open, path = path_policy(request.url.path)
+    if is_open:
+        return await call_next(request)
+    u = current_user(request)
+    if not u:
+        return JSONResponse({"detail": "로그인이 필요합니다."}, status_code=401)
+    # 협력사는 화이트리스트만 — deny by default
+    if u.get("utype") == "협력사" and not coop_allowed(path):
+        return JSONResponse(
+            {"detail": "협력사 계정으로는 접근할 수 없는 기능입니다."}, status_code=403)
+    request.state.user = u
+    return await call_next(request)
 import weight_calc  # 무게정산(중량조정) 계산
 # 도메인간 공유헬퍼 — 로컬 def가 있으면 그게 shadow, 해당 도메인 라우터 이동 후엔 common판 사용(잔류 엔드포인트 보호)
 from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win

@@ -681,3 +681,101 @@ boot.js 서버로그인(옛 String(u.pw)!== 제거) · 사용자관리가 서버
 - 내부 담당자 17명도 각자 계정이 필요하다(§9-③ — 누가 입고했는지 남으려면).
 - 협력사에 열려 있지 않은 **내부 전용 API 는 아직 무인증**이다. 협력사 노출 API 부터 막았다.
   전면 부착은 2단계에서 화면과 함께.
+
+---
+
+## 13. ★내부 API 전면 인증 게이트 (2026-08-29)
+
+§12 는 **협력사에게 노출되는 API** 만 막았다. 그 뒤 협력사 토큰으로 내부 API 를 찔러 보니
+**그대로 열려 있었다.**
+
+### 실측 — 무엇이 열려 있었나
+```
+협력사 토큰(miraero) 으로 호출
+  ★열림  /api/cust/list            전 거래처 목록
+  ★열림  /api/item/list            품목 마스터
+  ★열림  /api/close/ledger         자재 수불장
+  ★열림  /api/partner/workcenters  전 협력사 작업처 목록
+  ★열림  /api/perm/all             권한 설정
+
+전수: 엔드포인트 530개 중 **인증 결선 21개뿐 · 509개 무방비**
+```
+화면 메뉴는 `ROLE_MOD` 에 '협력사' 항목이 없어 거의 안 보인다. 그러나
+**메뉴에서 숨기는 것은 보안이 아니다** — URL 을 직접 치면 열렸다.
+
+### 왜 미들웨어인가 (라우터마다 붙이지 않은 이유)
+| | 라우터 44개에 Depends | **미들웨어 한 곳** |
+|---|---|---|
+| 누락 | 반드시 하나는 빠진다 | 구조적으로 불가 |
+| 충돌 | 공유파일을 44번 만짐 | 1파일 |
+| 신규 | 새 엔드포인트마다 기억해야 | **자동 보호** |
+
+```python
+@app.middleware("http")
+async def _auth_gate(request, call_next):
+    is_open, path = path_policy(request.url.path)
+    if is_open: return await call_next(request)
+    u = current_user(request)
+    if not u: return 401
+    if u["utype"] == "협력사" and not coop_allowed(path): return 403
+```
+
+### 정책 — deny by default
+**무인증 허용**(이것만)
+```
+/ · /js/* · /css/*  …   정적자원(프론트)
+/openapi.json · /       ★deploy_pull.ps1 헬스체크가 친다 — 막으면 배포가 깨진다
+/api/auth/login         로그인 자체
+/api/_flow/*            TestBed 제어(롤백서버에만 존재)
+```
+**협력사 화이트리스트**(`COOP_ALLOW`) — 여기 없으면 403
+```
+auth/me · auth/logout · auth/password
+perm/users                     GET=본인 1건 / POST 는 라우터가 403
+partner/planstatus             내 계획
+partner/deliv420 (+issue/cancel/invoice)
+setin/list · detail · issue · invoice
+setstock/list                  내 납품이 입고됐는지(읽기전용·소속강제됨)
+   ※ setstock/scan·receive·cancel 은 staff_only — 입고는 우리가 받는 행위다
+```
+> **새 협력사 화면을 만들면 여기 한 줄을 추가한다.** 자동으로 열리지 않는 것이 요점이다.
+
+### 성능 — 인증을 모든 요청에 걸면 느려진다
+그대로 두면 요청마다 `SELECT×2 + UPDATE + commit` 이다. **60초 토큰 캐시**로 흡수했다.
+```
+/api/auth/me 평균 23ms/건 (20회 실측)
+```
+로그아웃 · 비밀번호 변경 · 계정 저장 시 **즉시 무효화**한다 —
+안 버리면 **끊은 세션이 캐시 안에서 계속 산다.**
+
+### 검증 24/24 PASS
+```
+① 무토큰 5종                      → 401
+② ★협력사가 내부 API 5종          → 403   (위에서 전부 ★열림이던 것)
+③ 협력사 허용 5종                 → 200
+④ 내부 사용자 7종                 → 200   회귀 없음
+⑤ 토큰캐시 23ms/건  ⑥ 로그아웃 직후 401
+헬스체크 /openapi.json · / · /js/core.js → 200 (배포 안 깨짐)
+```
+
+### ★게이트가 드러낸 것 — 하네스도 무인증이었다
+게이트를 걸자 flow TestBed 의 `[F]`·`[R]` 30여 건이 **전부 401** 이 났다.
+하네스가 토큰 없이 화면 API 를 부르고 있었던 것이다(게이트가 작동한다는 증거이기도 하다).
+```
+flow_cases.DEFAULT_AS = "super"        [F]/[R] 기본 로그인 계정
+flow_scenarios.tok_of(c)               as_ 를 **명시**하면 그것(None=무토큰), 없으면 기본계정
+```
+> `c.get("as_")` 로 짜면 안 된다 — **'미지정'과 '명시적 무토큰'이 구분되지 않아**
+> "무토큰 401" 케이스가 거짓 통과한다. `"as_" in c` 로 구분한다.
+
+러너 말미의 **직접 호출 3구간**(차단 사유 고지 · 조회 리포트 · 캐시 정합)은 케이스 루프를
+안 거쳐서 케이스만 고쳤을 때 그대로 401 이 남았다. 같은 일이 두 갈래로 갈려 있으면 이런 게
+남는다 — 총 8곳을 결선했다.
+
+**최종: PASS 83 · FAIL 0 · SKIP 1 · 오염 0**
+
+### 남은 것
+- `ROLE_MOD` 에 '협력사' 항목이 없어 프론트 메뉴가 사실상 빈 화면이다.
+  2단계에서 **협력사 전용 화면 4개**를 붙이면서 함께 정리한다.
+- 내부 사용자끼리의 세분 권한(부서별)은 종전 `PERM.can` 그대로다 — 이번 게이트는
+  **로그인 여부 + 협력사 차단**까지만이다.
