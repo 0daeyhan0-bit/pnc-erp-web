@@ -89,6 +89,34 @@ def rawmatledger_detail(request: Request, cust: str = Query(...), mat: str = Que
     return {"rows": out, "final_qty": round(bal, 1)}
 
 
+@router.get("/api/rawmatledger/weld")
+def rawmatledger_weld(request: Request, cust: str = Query(""), to_ym: str = Query(""), sign: str = Query("")):
+    """용접봉 수불(협력사별, kg): 불출(weld_out) − 소진(weld_in) = 잔량 + 정산(현물62700/사급21100).
+       ★계산부 = compute_quote_lme(ym).weld_* 재사용. 2607~선택월 누적. ★소속 강제."""
+    cust = scope_cust(require_user(request), cust)
+    to_ym = (to_ym or "").strip() or _latest_ym()
+    acc = {}
+    for ym in _months(to_ym):
+        for cc, d in _lme(ym).items():
+            e = acc.setdefault(cc, [0.0, 0.0, 0.0])
+            e[0] += (d.get("weld_out") or 0); e[1] += (d.get("weld_in") or 0); e[2] += (d.get("weld_amt") or 0)
+    rows = []
+    for cc, (o, i, a) in acc.items():
+        if cust and cc != cust:
+            continue
+        bal = round(o - i, 3)
+        if sign == "1" and not bal > 0.001: continue
+        if sign == "-1" and not bal < -0.001: continue
+        if sign == "0" and abs(bal) > 0.001: continue
+        rows.append({"cust_code": cc, "custnm": _CUSTNM.get(cc, cc), "mat": "용접봉(1%)", "od": "",
+                     "sent": round(o, 3), "used": round(i, 3), "bal": bal, "spot": 62700, "sagub": 21100, "amt": round(a)})
+    rows.sort(key=lambda r: r["custnm"])
+    custs = sorted({(cc, _CUSTNM.get(cc, cc)) for cc in acc}, key=lambda x: x[1])
+    tot = {"sent": round(sum(r["sent"] for r in rows), 3), "used": round(sum(r["used"] for r in rows), 3),
+           "bal": round(sum(r["bal"] for r in rows), 3), "amt": round(sum(r["amt"] for r in rows))}
+    return {"rows": rows, "custs": [{"code": c, "nm": n} for c, n in custs], "tot": tot, "to_ym": to_ym}
+
+
 # 협력사명 + 최신 데이터월 (weight_calc._COOP_CUST_VENDOR 기반)
 _CUSTNM = {}
 def _latest_ym():

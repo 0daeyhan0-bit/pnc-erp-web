@@ -207,7 +207,6 @@ const MODULES=[
    {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
    {id:'sagubledger',ic:'📊',nm:'사급 수불장'},
-   {id:'rawmatledger',ic:'📊',nm:'원소재 수불장'},
  ]},
  {id:'prod',nm:'생산',ic:'🏭',subs:[
    {id:'prodstock',ic:'🏭',nm:'생산재고조회'},
