@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+try:
+    import nx_soyo_engine as _soyo      # 통일 소요엔진(CLAUDE §1-10) — common.py가 _harness를 sys.path에 추가
+except Exception:
+    _soyo = None
 
 router = APIRouter()
 
@@ -422,26 +426,25 @@ def sales_forecast_sagub_rebuild():
         asof = _t.strftime('%y%m%d')
         cur.execute("""IF OBJECT_ID('nx.item_sagub_cost') IS NULL
             CREATE TABLE nx.item_sagub_cost(item_code varchar(50) PRIMARY KEY, sa_cost float, asof_ymd varchar(8), upd_dt datetime)""")
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
-        sag = set(x[0] for x in cur.fetchall())
-        cur.execute("SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
+        cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
+        sag = set(x[0] for x in cur.fetchall())   # ★대문자(엔진 stop_set·반환 대문자 정합)
+        cur.execute("SELECT it,price FROM (SELECT UPPER(LTRIM(RTRIM(item_code))) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
         cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'),
             prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
             expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
              UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
             SELECT DISTINCT e.prod FROM expl e JOIN sag s ON s.it=e.part OPTION(MAXRECURSION 30)""")
-        cand = [r[0] for r in cur.fetchall()]
-        CS = """WITH expl AS (SELECT LTRIM(RTRIM(MAT_CODE)) part, CAST(USE_QTY AS float) cum, 1 lvl FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
-            UNION ALL SELECT LTRIM(RTRIM(b.MAT_CODE)), e.cum*CAST(b.USE_QTY AS float), e.lvl+1 FROM expl e JOIN PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM b ON LTRIM(RTRIM(b.ITEM_CODE))=e.part AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1' WHERE e.lvl<8)
-            SELECT part, SUM(cum) FROM expl GROUP BY part OPTION(MAXRECURSION 30)"""
+        cand = [str(r[0]).strip().upper() for r in cur.fetchall()]
+        # ★소요엔진 이관(CLAUDE §1-10, 2026-08-29): 사급부품 소요 = nx_soyo_engine.sagub_parts_soyo
+        #   (v_pr_bom·except≠1·310 사급부품 도달 시 '통째' 계상·정지). 구 ad-hoc CS_M_ITEM_BOM 재귀CTE는
+        #   변형SUB 이중계상 + cs_calc(원가축) 오혼입 → 폐기. 옆에짓고 검증(514 후보): 502 동일·12 과다분 제거
+        #   (변형SUB 이중계상 11 + flag축 1[AJR30073601 except_flag=1 외주완성=우리사급 아님])·총 −0.41%.
+        eng = _get_cost_engine(); _soyo.warm_vpr(eng); _memo = {}
         done = 0; nz = 0; tot = 0.0
         for it in cand:
-            cur.execute(CS, it)
-            unit = 0.0
-            for part, soyo in cur.fetchall():
-                p = (part or '').strip()
-                if p in sag and p in cosp: unit += float(soyo or 0) * cosp[p]
+            pm = _soyo.sagub_parts_soyo(eng, it, sag, _memo)   # {310부품(대문자): 소요개수}
+            unit = sum(per * cosp[p] for p, per in pm.items() if p in cosp)
             cur.execute("""MERGE nx.item_sagub_cost t USING (SELECT ? item_code) s ON t.item_code=s.item_code
                 WHEN MATCHED THEN UPDATE SET sa_cost=?, asof_ymd=?, upd_dt=getdate()
                 WHEN NOT MATCHED THEN INSERT(item_code,sa_cost,asof_ymd,upd_dt) VALUES(?,?,?,getdate());""",
