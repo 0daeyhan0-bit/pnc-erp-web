@@ -458,25 +458,34 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     #    용접/가공(생산 _prodstock stage=WELD/GAGONG)·영업(salesstock)·자재(nx.mat_stock_daily 이동평균 일마감).
     #    생산·영업 기초=2502스냅샷+월초직전무브(=7월말) × 월초원가, 현재고=조회일 수량 × 월초원가. 자재=일별 이동평균.
     #    실재고(조정후) = 실매입 + 재고증가합계.
-    def _delta(rows, stage=None, basek='basic', costk='cost', amtk='amt'):
-        cur_a = base_a = 0.0
-        for x in rows:
-            if stage is not None and x.get('stage') != stage: continue
-            cur_a += float(x.get(amtk) or 0)
-            base_a += float(x.get(basek) or 0) * float(x.get(costk) or 0)
-        return round(cur_a - base_a)   # 현재고 − 기초
-    try:
-        _pr = _prodstock(ym, m0, d6)   # ★조회일 기준. stage='WELD'(용접, gagong_proc≠P0001) / 'GAGONG'(가공, P0001)
-        jaego_weld, jaego_gagong = _delta(_pr, 'WELD'), _delta(_pr, 'GAGONG')
-    except Exception: jaego_weld = jaego_gagong = 0
-    try: jaego_sales = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
-    except Exception: jaego_sales = 0
-    try:   # 자재: 우리 이동평균 일마감(nx.mat_stock_daily). 기초=월초직전잔량(ba)·현재고=조회일(sa)
-        _mc = matclose(dfrom=m0, dto=d6).get('rows', [])
-        jaego_mat = round(sum(float(x.get('sa') or 0) for x in _mc) - sum(float(x.get('ba') or 0) for x in _mc))
-    except Exception: jaego_mat = 0
-    jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
-    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
+    # ★재고(기초/기말) = 마감 확정 스냅샷 직독(nx.stock_snapshot). 기초=직전 월마감(월초 기초재고)·기말=조회일 일마감(없으면 직전 일마감).
+    #   ★replay 없음=즉시(수불장 ledger는 월전체 재생으로 30초). 일단위 조회=확정 마감값 사용(수불장 runtime과 ~0.4%p 미세차·확정값이 권위적).
+    _lc = _nxc(); _lcur = _lc.cursor()
+    base_m = cur_m = base_prd = cur_prd = base_s = cur_s = 0
+    def _snapsum(dom):
+        # 기초 = 직전 월마감(M, period<ym)
+        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+            WHERE domain=? AND ptype='M' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='M' AND period<?)""", dom, dom, ym)
+        b = float(_lcur.fetchone()[0] or 0)
+        # 기말 = 조회일 이하 최신 일마감(D, period<=d6). 없으면 기초(변동0).
+        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+            WHERE domain=? AND ptype='D' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='D' AND period<=?)""", dom, dom, d6)
+        e = float(_lcur.fetchone()[0] or 0)
+        return round(b), round(e if e else b)
+    try: base_m, cur_m = _snapsum('MAT')
+    except Exception: pass
+    try: base_prd, cur_prd = _snapsum('PRD')
+    except Exception: pass
+    try: base_s, cur_s = _snapsum('SAL')
+    except Exception: pass
+    _lc.close()
+    jaego = (cur_m + cur_prd + cur_s) - (base_m + base_prd + base_s)   # 재고 증감(참고)
+    silrae = net_t['tot'] + jaego   # 실재고(조정후)
+    # ★재료비(사용기준) = 원재료매입(매입−불출=실매입) + Σ재고사용(기초−기말). 기말 감소=사용↑. 재고=자재/생산/영업 수불장.
+    gicho = base_m + base_prd + base_s   # 기초재고 합계
+    gimal = cur_m + cur_prd + cur_s      # 기말재고 합계
+    jae_use = gicho - gimal              # 재고 사용(기초−기말)
+    jaemat = round(net_t['tot'] + jae_use)      # 재료비 = 실매입(매입−불출) + 재고사용
 
     # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
     dangsa_raw = dangsa_part = 0
@@ -550,15 +559,36 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
                "sagub_part_sum": _r3(_sagub_part_sum), "sagub_hab": _r3(_sagub_hab),
                "lg_sugum": _r3(_lgsu)}
 
+    # ⑥ 당일 실적(조회일=d6만): 매출(리시빙 cut별 절삭/설치/기타) + 사급(OSP 원소재=TUBE/부품)
+    _c, _rrt = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
+      WHERE r.RECEIVING_YMD='{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
+    _tc = {(r['cg'] or ''): float(r['amt'] or 0) for r in _rrt}
+    t_cut, t_seol = round(_tc.get('절삭', 0)), round(_tc.get('설치', 0))
+    t_etc = round(sum(v for k, v in _tc.items() if k not in ('절삭', '설치')))
+    _c, _rot = _rows(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END t, SUM(ISNULL(amt,0)) a
+      FROM PARTNER_ERP_TEST3.nx.lg_sagub_actual WHERE ym='{ym}' AND ISNULL(ymd,'')='{d6}'
+      GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END""")
+    _tsg = {r['t']: float(r['a'] or 0) for r in _rot}
+    t_raw, t_part = round(_tsg.get('raw', 0)), round(_tsg.get('part', 0))
+
     _res = {"date": d6, "ym": ym,
             "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
+            # ⑥ 당일 실적(조회일) — 매출(절삭/설치/기타/합계) + 사급(원소재/부품/합계)
+            "today": {"hyeon_cut": t_cut, "hyeon_seol": t_seol, "hyeon_etc": t_etc, "sales_hab": t_cut + t_seol + t_etc,
+                      "sagub_raw": t_raw, "sagub_part": t_part, "sagub_hab": t_raw + t_part},
+            # ② 재료비(사용기준) = 원재료매입(매입−불출) + 재고사용(기초−기말). %=재료비/LG매출.
+            "jaemat": {"net": net_t['tot'], "use": jae_use, "jaemat": jaemat, "jaemat_pct": pct(jaemat, lg_sales)},
             # ⑤ 현매출 / ② 매입비율
             "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
-            # ③ 재고조정 (조회일 현재고 − 7월말 기초 = 재고증가분, 버킷별). 용접/가공/영업/자재 + 합계.
-            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego},
+            # ③ 재고 (버킷별 기초/기말 = 자재/생산/영업 수불장). 차액(사용)=기초−기말은 프론트 계산.
+            "jaego": {"total": jaego,
+                      "base_mat": base_m, "cur_mat": cur_m, "base_prd": base_prd, "cur_prd": cur_prd,
+                      "base_sales": base_s, "cur_sales": cur_s, "base_total": gicho, "cur_total": gimal},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
