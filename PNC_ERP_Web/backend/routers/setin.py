@@ -10,6 +10,41 @@ from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open, stock_change
 
 router = APIRouter()
 
+# ── 협력사출고(사급소진) posting: 세트입고 완제품 × 사급부품 소요 → nx.sagub_maint(tag 'S', −) ──
+#    협력사 사급재고 단일 원장(SAGUB_PARTS_LEDGER_DESIGN). 소요는 통일 소요엔진(§10)만.
+#    사급출고(saleout)=협력사입고(+)의 역방향. 수불장·협력사사급재고관리가 이 원장에서 파생.
+_SAG_ENG = None; _SAG_STOP = None; _SAG_WELD = None; _SAG_MEMO = {}
+def _sag_eng():
+    global _SAG_ENG, _SAG_STOP, _SAG_WELD
+    if _SAG_ENG is None:
+        import nx_soyo_engine as _soyo
+        from nx_cost_engine import NxCostEngine
+        _SAG_ENG = NxCostEngine(); c = _SAG_ENG.cur
+        c.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE item_code LIKE 'RAC%' OR item_code LIKE 'BCUP%' OR item_name LIKE '%용접%'")
+        _SAG_WELD = set(r[0].strip() for r in c.fetchall())
+        c.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM nx.v_pr_bom WHERE SAGUB_FLAG='1' AND ISNULL(MAT_CODE,'')<>''")
+        _SAG_STOP = set(r[0].strip() for r in c.fetchall())
+        _soyo.warm_vpr(_SAG_ENG)
+    return _SAG_ENG
+
+def _post_sagub_out(cur, cust, doban, qty, ymd, ref):
+    """세트입고 완제품 doban×qty → 사급부품 소요만큼 협력사 사급재고 차감(tag 'S', −qty). 용접 제외. 소요엔진(§10)."""
+    if not cust or not doban or not qty:
+        return 0
+    import nx_soyo_engine as _soyo
+    eng = _sag_eng()
+    n = 0
+    for part, per in _soyo.sagub_parts_soyo(eng, str(doban).strip().upper(), _SAG_STOP, _SAG_MEMO).items():
+        if part in _SAG_WELD or per <= 0:
+            continue
+        cur.execute("SELECT ISNULL(MAX(maint_seq),0)+1 FROM nx.sagub_maint WHERE maint_ymd=?", ymd)
+        s = int(cur.fetchone()[0] or 1)
+        cur.execute("""INSERT INTO nx.sagub_maint(maint_ymd,maint_seq,maint_tag,cust_code,mat_code,maint_qty,remarks,remarks_src,insert_user_id,insert_datetime)
+            VALUES(?,?,'S',?,?,?,N'세트입고 협력사출고(사급소진)',?,'web',getdate())""",
+            ymd, s, cust, part, -float(per) * float(qty), f"setstock:{ref}")
+        n += 1
+    return n
+
 # ===================== 세트입고요청 (nx.set_input_req, 협력사) =====================
 @router.get("/api/setin/list")
 def setin_list(request: Request, cust: str = Query(""), fr: str = Query(""), to: str = Query(""), status: str = Query(""), limit: int = Query(800)):
@@ -262,6 +297,7 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
                 f"입고할 수 없는 상태입니다 — SET바코드 {bc}: {desc}. "
                 f"발행(10) 또는 입고대기(30) 상태만 입고됩니다.")
         recv = 0; posted = 0
+        cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)"); _today = cur.fetchone()[0]
         cur.execute("SELECT ISNULL(MAX(maint_seq),0) FROM nx.set_stock_maint WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         mseq = int(cur.fetchone()[0])
         for sheet, doban, qty, cust, insp in reqs:
@@ -292,6 +328,8 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
                         lseq, bcn, cust, str(mat).strip(), jqty, doban, mseq)
                     posted += 1
                 cur.execute("UPDATE nx.set_stock_maint SET derived_flag='1' WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6) AND maint_seq=?", mseq)
+                # ★협력사출고(사급소진) — 완제품 doban×qty 만큼 협력사 사급재고 차감(nx.sagub_maint tag S, −). 소요엔진(§10).
+                _post_sagub_out(cur, cust, doban, qty, _today, mseq)
         cn.commit()
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "received": recv, "ledger_posted": posted, "barcode": "SET" + bc}

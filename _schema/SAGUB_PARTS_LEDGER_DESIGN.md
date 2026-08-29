@@ -45,3 +45,25 @@
 2. nx 원장 인제스트(2026-01~) — 사급출고(+)·세트소진(−)을 nx 단일원장에 적재(멱등).
 3. 엔드포인트(협력사 도메인) + 화면(협력사 > 사급 수불장).
 4. 배포 = 승인 후.
+
+
+---
+
+## 8. ★통합 재설계 (2026-08-29) — 단일 원장 = nx.sagub_maint
+
+**발견(테스트베드 실증)**: 사급출고(`/api/saleout/save`)는 **이미 nx.sagub_maint(tag5, 협력사 사급재고 +)** 에 posting + 매출(saleout_maint)·재고(stock_ledger). 별도 `sagub_parts_ledger`는 이걸 재발명한 중복이었음.
+
+**통합 결정**: 협력사 사급재고 **단일 원장 = nx.sagub_maint**. 수불장·협력사사급재고관리·매출이 여기서 파생.
+- 협력사입고(+) = tag '5' 사급출고 (saleout 실시간 + 7월 이관 hist7)
+- 협력사출고(−) = tag 'S' 세트소진 (**setstock/receive 에 소요엔진 posting 배선** + 7월 이관 hist7)
+- 조정(±) = tag 'B' (협력사사급재고관리 — 추후 sagub_maint 이관)
+- 기초이관 snapshot(remarks_src='migration')은 수불장에서 **제외**(7월~ movement·기초0)
+- 매출 = nx.saleout_maint(병행, 같은 이벤트)
+
+**구현·검증(no-commit·오염0)**:
+- 이관: `_migration/sagub_maint_hist_ingest.py` → sagub_maint hist7 (협력사입고 tag5 641,732 / 협력사출고 tag S −2,797,860)
+- 수불장 재지정: `routers/sagubledger.py` = sagub_maint 파생(부호로 입/출·migration 제외·사급부품+용접제외)
+- 세트입고 배선: `routers/setin.py` `_post_sagub_out`(§10 소요엔진) → setstock/receive 입고완료시 협력사출고 posting
+- 테스트베드 `_migration/sagub_flow_testbed.py`: 협력사입고(saleout 3품목 +40·매출) + 피앤씨입고(setstock 700003, 6품목 협력사출고=소요 정확·36행 −704) **전부 ✅·오염0**
+
+**남은 일**: ①setstock/**cancel** 에 협력사출고 역posting(취소 반영) ②협력사사급재고관리 조정→sagub_maint(tag B) 이관 ③재고 tag S(자도번파생)는 set_input_req_dtl 있는 송장서 매입 반영 확인 ④`sagub_parts_ledger` 테이블·구 ingest 폐기(컷오버시 drop) ⑤배포(승인후).
