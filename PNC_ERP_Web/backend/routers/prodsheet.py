@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed, _assert_open)
 
 from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod, _weld_consume
 router = APIRouter()
@@ -1129,6 +1129,11 @@ def procbc_save(payload: dict = Body(...)):
     if qty == 0:
         return {"ok": False, "errors": ["처리수량을 입력하세요."]}
     nx = _nx_tx(); cur = nx.cursor()
+    # ★마감잠금(2026-08-29 결선) — 이 엔드포인트는 _set_mat_stock_wh() 로 **자재/파트 재고를 움직인다**
+    #   (본문 주석 ⑦⑧ 의 자재차감·준비재고 차감이 실제로 일어난다).
+    #   일자 파라미터가 없고 서버 당일로 기록하므로 **당일 기준**으로 판정한다.
+    cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
+    _assert_open(cur, str(cur.fetchone()[0]).strip(), "PRD", "바코드 생산실적")
     try:
         tot = float(p.get("total_qty") or 0)
         now = datetime.now()

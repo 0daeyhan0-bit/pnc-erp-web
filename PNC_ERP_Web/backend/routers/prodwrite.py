@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, stock_changed)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _assert_open, stock_changed)
 
 router = APIRouter()
 
@@ -372,6 +372,13 @@ def procreg_delete(payload: dict = Body(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         ph = ",".join("?" * len(ids))
+        # ★마감잠금(2026-08-29 결선) — 실적 삭제도 재고를 되돌리는 이동이다.
+        #   삭제 전에 대상 행의 생산일자로 판정한다(삭제 후엔 일자를 알 수 없다).
+        cur.execute(f"SELECT DISTINCT PROD_YMD FROM nx.proc_result WHERE ID IN ({ph})", *ids)
+        for (_y,) in cur.fetchall():
+            _y = str(_y or "").strip()
+            if _y:
+                _assert_open(cur, _y, "PRD", "생산실적 삭제")
         cur.execute(f"DELETE FROM nx.proc_result WHERE ID IN ({ph})", *ids)
         return {"ok": True, "deleted": cur.rowcount}
     finally:

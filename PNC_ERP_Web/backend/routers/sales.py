@@ -1655,6 +1655,12 @@ def sale040_cancel(payload: dict = Body(...)):
     cn = _nx_tx(); cur = cn.cursor()
     win = 'w_pr_input_040'
     try:
+        # ★마감잠금(2026-08-29 결선) — 출하취소는 SA_T_STOCK_MAINT 에 INSERT 하는 **재고 이동**이다.
+        #   규칙B: 재고가 조금이라도 움직이면 마감된 기간은 막는다(§0-★ 예외 없음).
+        for _c in cells:
+            _y = _d6(str(_c.get("ymd") or "").strip())
+            if _y:
+                _assert_open(cur, _y, "SAL", "출하취소")
         done = []
         for c in cells:
             wo = str(c.get("wo") or "").strip()
