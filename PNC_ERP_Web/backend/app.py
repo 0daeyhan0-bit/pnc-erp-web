@@ -149,6 +149,10 @@ app.include_router(_r_daycheck.router)
 # autoorder 폐기(2026-08-26): 미사용(프론트/타백엔드 소비 0)·AI개발본. 라우팅 해제+파일제거. 복구=git. 대체=자재예상매입(MRP, 설계단계) [[newerp-matexpect-initiative]]
 from routers import lgsagub as _r_lgsagub
 app.include_router(_r_lgsagub.router)
+from routers import sagubledger as _r_sagubledger   # 협력사 사급부품 수불장(신규)
+app.include_router(_r_sagubledger.router)
+from routers import rawmatledger as _r_rawmatledger   # 협력사 원소재(동관) 수불장(규격별·신규)
+app.include_router(_r_rawmatledger.router)
 from routers import dopip as _r_dopip
 app.include_router(_r_dopip.router)
 from routers import pricemgmt as _r_pricemgmt

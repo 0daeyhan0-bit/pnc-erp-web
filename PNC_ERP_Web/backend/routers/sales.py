@@ -13,30 +13,30 @@ router = APIRouter()
 # 협력사 보유 사급재고(SAG) 장부조정(±). id="YMD-SEQ"(원장 복합키). tag '2'=장부수정(±). MAT screen은 STOCK_POINT='MAT' 격리(Phase3).
 @router.get("/api/sagub/adjust/list")
 def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""), mat: str = Query(""), limit: int = Query(500)):
-    """사급재고조정 목록 = stock_ledger(STOCK_POINT='SAG', tag='2'). 코드→이름 조인."""
+    """사급재고조정 목록 = nx.sagub_maint(tag='B'·remarks_src='adjust'). ★단일원장(수불장·매출 파생과 동일). 코드→이름."""
     cn = _nx(); cur = cn.cursor()
     try:
-        w = ["l.STOCK_POINT='SAG'", "l.MAINT_TAG='2'"]; p = []
-        if fr: w.append("l.MAINT_YMD>=?"); p.append(fr)
-        if to: w.append("l.MAINT_YMD<=?"); p.append(to)
-        if cust: w.append("l.CUST_CODE=?"); p.append(cust)
-        if mat: w.append("l.MAT_CODE LIKE ?"); p.append(f"%{mat}%")
-        cur.execute(f"""SELECT TOP {int(limit)} l.MAINT_YMD maint_ymd, l.MAINT_SEQ maint_seq, l.CUST_CODE cust_code,
-              ISNULL(c.CUST_DESC,'') custnm, l.MAT_CODE mat_code, ISNULL(i.item_name,'') matnm,
-              l.MAINT_QTY maint_qty, ISNULL(l.MAINT_COST,0) maint_cost, ISNULL(l.MAINT_AMT,0) maint_amt,
-              ISNULL(l.REMARKS,'') remarks, ISNULL(l.INSERT_USER_ID,'') insert_user_id, l.INSERT_DATETIME insert_datetime
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=l.MAT_CODE
-            WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ ASC""", *p)
-        cols = [d[0] for d in cur.description]
+        w = ["l.maint_tag='B'"]; p = []
+        if fr: w.append("l.maint_ymd>=?"); p.append(fr)
+        if to: w.append("l.maint_ymd<=?"); p.append(to)
+        if cust: w.append("l.cust_code=?"); p.append(cust)
+        if mat: w.append("l.mat_code LIKE ?"); p.append(f"%{mat}%")
+        cur.execute(f"""SELECT TOP {int(limit)} l.id, l.maint_ymd, l.cust_code,
+              ISNULL(c.CUST_DESC,'') custnm, l.mat_code, ISNULL(i.item_name,'') matnm,
+              l.maint_qty, ISNULL(l.maint_cost,0) maint_cost, ISNULL(l.maint_amt,0) maint_amt,
+              ISNULL(l.remarks,'') remarks, ISNULL(l.insert_user_id,'') insert_user_id, l.insert_datetime
+            FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            LEFT JOIN nx.item i ON i.ITEM_CODE=l.mat_code
+            WHERE {' AND '.join(w)} ORDER BY l.maint_ymd DESC, l.id DESC""", *p)
+        cols = ["id", "maint_ymd", "cust_code", "custnm", "mat_code", "matnm", "maint_qty",
+                "maint_cost", "maint_amt", "remarks", "insert_user_id", "insert_datetime"]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
-            r["id"] = f'{r["maint_ymd"]}-{r["maint_seq"]}'
             r["maint_qty"] = float(r["maint_qty"] or 0)
             r["insert_datetime"] = str(r["insert_datetime"] or "")[:19]
-        cur.execute("""SELECT DISTINCT l.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM nx.stock_ledger l
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=l.CUST_CODE
-            WHERE l.STOCK_POINT='SAG' AND l.CUST_CODE IS NOT NULL ORDER BY 2""")
+        cur.execute("""SELECT DISTINCT l.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_maint l
+            LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            WHERE l.maint_tag='B' AND l.cust_code IS NOT NULL ORDER BY 2""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         return {"rows": rows, "custs": custs}
     finally:
@@ -44,7 +44,7 @@ def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Quer
 
 @router.post("/api/sagub/adjust/save")
 def sagub_adjust_save(payload: dict = Body(...)):
-    """사급재고조정 등록/수정 → stock_ledger(SAG, tag '2'). 수정수량 음수허용(강제수정). id="YMD-SEQ"면 삭제후 재키."""
+    """사급재고조정 등록/수정 → nx.sagub_maint(tag='B'·remarks_src='adjust'). 수정수량 음수허용. ★단일원장(수불장 잔량 즉시 반영)."""
     rid = payload.get("id")
     cust = str(payload.get("cust_code", "")).strip()
     mat = str(payload.get("mat_code", "")).strip()
@@ -57,39 +57,40 @@ def sagub_adjust_save(payload: dict = Body(...)):
         raise HTTPException(400, "사급업체·자도번 필수")
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
-        ymd = cur.fetchone()[0]
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
-        seq = cur.fetchone()[0]
-        if rid:  # 수정 = 기존행 삭제 후 신규(재키)
-            try:
-                oy, osq = str(rid).split("-"); osq = int(osq)
-                if _closed(cur, oy, "SAL"):
-                    raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
-                cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='SAG' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
-            except (ValueError, AttributeError):
-                pass
-        cur.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
-            VALUES('SAG',?,?,'2',?,?,?,?,'web',getdate())""", ymd, seq, cust, mat, qty, (remarks or None))
-        return {"ok": True, "id": f"{ymd}-{seq}"}
+        if rid:  # 수정 = id(IDENTITY) UPDATE
+            cur.execute("SELECT maint_ymd FROM nx.sagub_maint WHERE id=? AND maint_tag='B'", int(rid))
+            ex = cur.fetchone()
+            if not ex:
+                raise HTTPException(404, "조정 전표를 찾을 수 없습니다.")
+            if _closed(cur, str(ex[0]).strip(), "SAL"):
+                raise HTTPException(400, f"마감월({_ym(str(ex[0]).strip())}) 편집 불가")
+            cur.execute("UPDATE nx.sagub_maint SET cust_code=?,mat_code=?,maint_qty=?,remarks=?,upd_user='web',update_datetime=getdate() WHERE id=? AND maint_tag='B'",
+                        cust, mat, qty, (remarks or None), int(rid))
+            return {"ok": True, "id": int(rid)}
+        cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)"); ymd = cur.fetchone()[0]
+        cur.execute("SELECT ISNULL(MAX(maint_seq),0)+1 FROM nx.sagub_maint WHERE maint_ymd=?", ymd)
+        seq = int(cur.fetchone()[0] or 1)
+        cur.execute("""INSERT INTO nx.sagub_maint(maint_ymd,maint_seq,maint_tag,cust_code,mat_code,maint_qty,remarks,remarks_src,insert_user_id,insert_datetime)
+            OUTPUT INSERTED.id VALUES(?,?,'B',?,?,?,?,'adjust','web',getdate())""", ymd, seq, cust, mat, qty, (remarks or None))
+        return {"ok": True, "id": int(cur.fetchone()[0])}
     finally:
         cn.close()
 
 @router.post("/api/sagub/adjust/delete")
 def sagub_adjust_delete(payload: dict = Body(...)):
-    """사급재고조정 삭제(SAG)."""
+    """사급재고조정 삭제 → nx.sagub_maint(tag='B') id로 삭제."""
     rid = payload.get("id")
     if not rid:
         raise HTTPException(400, "id 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        try:
-            y, sq = str(rid).split("-"); sq = int(sq)
-        except ValueError:
-            raise HTTPException(400, "id 형식 오류")
-        if _closed(cur, y, "SAL"):
-            raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
-        cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='SAG' AND MAINT_TAG='2' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
+        cur.execute("SELECT maint_ymd FROM nx.sagub_maint WHERE id=? AND maint_tag='B'", int(rid))
+        ex = cur.fetchone()
+        if not ex:
+            return {"ok": True, "deleted": 0}
+        if _closed(cur, str(ex[0]).strip(), "SAL"):
+            raise HTTPException(400, f"마감월({_ym(str(ex[0]).strip())}) 삭제 불가")
+        cur.execute("DELETE FROM nx.sagub_maint WHERE id=? AND maint_tag='B'", int(rid))
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         cn.close()
@@ -97,35 +98,42 @@ def sagub_adjust_delete(payload: dict = Body(...)):
 # ===================== 협력사 보유 사급재고 현황 (★작업3 메인, 정본=레거시 PU_T_SAGUB_STOCK RO) =====================
 @router.get("/api/sagub/holding/list")
 def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = Query(""), limit: int = Query(3000)):
-    """★작업3 '협력사가 보유중이어야 할 사급재고 리스트' = 레거시 PU_T_SAGUB_STOCK(자도번×사급업체) 라이브 RO 정본.
-    STOCK_QTY = 협력사 보유 사급 잔량. 레거시 사급출고 프로그램(w_pu_output_010/011/015)이 트리거로 net 유지:
-      잔량 = Σ사급출고(원자재 d) − Σ(완성/세트 입고 × 상위품 BOM상 d 소요량) − 조정.
-    ★코드레벨 정합: 사급출고=원자재레벨, 회수=완성/세트=상위레벨 → 코드가 안 맞아 단순 netting 불가하나,
-      레거시가 상위품 BOM전개 소요량으로 이미 net한 결과가 PU_T_SAGUB_STOCK.STOCK_QTY (오늘도 갱신되는 살아있는 정본).
-    REF_STOCK_QTY=관리품(중량관리 item_class J) 참조수량. sign: 1양수/-1음수/0=제로/공백전체."""
-    cn = _conn(); cur = cn.cursor()
+    """★협력사 보유 사급재고 = 수불장 잔량(nx.sagub_maint 파생). STOCK_QTY = 협력사입고(사급출고+) − 협력사출고(세트소진−) ± 조정.
+    ★단일원장(레거시 PU_T_SAGUB_STOCK 대체 — 조정 즉시반영·수불장과 동일값). 기초0@2026-07(migration snapshot 제외)이라 이월로 −잔량 가능 → 조정(협력사사급재고관리)으로 실사 보정.
+    ★용접봉/은납 별도 트랙 제외·사급부품(v_pr_bom SAGUB_FLAG=1)만. sign: 1양수/-1음수/0=제로/공백전체."""
+    from routers.sagubledger import _is_part   # ★성능: 부품 판정 in-process 캐시(상관 EXISTS 제거)
+    cn = _nx(); cur = cn.cursor()
     try:
-        w = []; p = []
-        if cust: w.append("s.CUST_CODE=?"); p.append(cust)
-        if mat: w.append("(s.MAT_CODE LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
-        if sign == "1": w.append("s.STOCK_QTY>0")
-        elif sign == "-1": w.append("s.STOCK_QTY<0")
-        elif sign == "0": w.append("s.STOCK_QTY=0")
-        cur.execute(f"""SELECT TOP {int(limit)} s.CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, s.MAT_CODE,
-              ISNULL(i.item_name,'') matnm, ISNULL(i.ITEM_CLASS,'') item_class, s.STOCK_QTY, s.REF_STOCK_QTY,
-              ISNULL(s.UPDATE_USER_ID,'') upd_user, s.UPDATE_DATETIME upd_dt, ISNULL(s.UPDATE_WINDOW,'') upd_win
-            FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=s.MAT_CODE
-            {('WHERE '+' AND '.join(w)) if w else ''}
-            ORDER BY custnm, s.MAT_CODE""", *p)
+        w = ["ISNULL(l.remarks_src,'')<>'migration'"]; p = []
+        if mat: w.append("(l.mat_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
+        cur.execute(f"""SELECT l.cust_code CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, l.mat_code MAT_CODE,
+              ISNULL(i.item_name,'') matnm, ISNULL(MAX(i.ITEM_CLASS),'A') item_class,
+              SUM(l.maint_qty) STOCK_QTY, MAX(ISNULL(l.insert_user_id,'')) upd_user, MAX(l.insert_datetime) upd_dt
+            FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
+            LEFT JOIN nx.item i ON i.ITEM_CODE=l.mat_code
+            WHERE {' AND '.join(w)}
+            GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name""", *p)
         cols = [d[0] for d in cur.description]
-        rows = [{k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in zip(cols, r)} for r in cur.fetchall()]
-        cur.execute("""SELECT s.CUST_CODE, ISNULL(c.CUST_DESC,'') nm FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK s
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=s.CUST_CODE GROUP BY s.CUST_CODE, c.CUST_DESC ORDER BY 2""")
-        custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
-        totq = sum(float(r["STOCK_QTY"] or 0) for r in rows)
-        return {"rows": rows, "custs": custs, "totqty": totq}
+        allr = []
+        for r in cur.fetchall():
+            d = {k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in zip(cols, r)}
+            if not _is_part(d["MAT_CODE"]):
+                continue
+            d["STOCK_QTY"] = round(float(d["STOCK_QTY"] or 0), 2); d["REF_STOCK_QTY"] = None; d["upd_win"] = "사급수불장"
+            d["CUST_CODE"] = str(d["CUST_CODE"]).strip()
+            allr.append(d)
+        custs = sorted({(r["CUST_CODE"], (r["custnm"] or r["CUST_CODE"]).strip()) for r in allr}, key=lambda x: x[1])
+        rows = []
+        for r in allr:
+            if cust and r["CUST_CODE"] != cust: continue
+            q = r["STOCK_QTY"]
+            if sign == "1" and not q > 0.5: continue
+            if sign == "-1" and not q < -0.5: continue
+            if sign == "0" and abs(q) > 0.5: continue
+            rows.append(r)
+        rows.sort(key=lambda r: ((r["custnm"] or "").strip(), r["MAT_CODE"])); rows = rows[:int(limit)]
+        totq = sum(r["STOCK_QTY"] for r in rows)
+        return {"rows": rows, "custs": [{"code": c, "nm": n} for c, n in custs], "totqty": totq}
     finally:
         cn.close()
 
