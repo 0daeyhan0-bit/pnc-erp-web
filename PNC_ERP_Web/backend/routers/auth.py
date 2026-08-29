@@ -129,6 +129,32 @@ def enforce_cust(request, req_cust=None, required=True):
     return u, scope_cust(u, req_cust)
 
 
+def staff_only(request, what="이 작업"):
+    """★우리 담당자 전용. 협력사 계정은 거부한다.
+
+       입고 스캔·입고취소·장부수정은 **우리가 받는 행위**다. 협력사가 자기 송장을
+       스스로 입고 처리하면 아무도 물건을 확인하지 않은 채 재고가 늘어난다.
+    """
+    u = require_user(request)
+    if u.get("utype") == "협력사":
+        raise HTTPException(403, f"{what}은(는) 담당자만 할 수 있습니다.")
+    return u
+
+
+def assert_own_barcode(cur, user, barcode, table="nx.set_input_req", col="barcode_no", cust_col="in_cust_code"):
+    """★바코드가 그 협력사 것인지 확인한다.
+
+       cust 파라미터가 없는 API(바코드만 받는 것)는 소속 강제를 걸 자리가 없다.
+       그래서 **바코드의 주인**을 직접 확인한다 — 남의 송장 번호를 넣어도 열리면 안 된다.
+    """
+    if not user or user.get("utype") != "협력사":
+        return
+    mine = user.get("partner_code") or "__NONE__"
+    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=? AND {cust_col}=?", str(barcode), mine)
+    if not cur.fetchone()[0]:
+        raise HTTPException(403, "다른 협력사의 문서입니다.")
+
+
 # ===================== 로그인 =====================
 @router.post("/api/auth/login")
 def auth_login(request: Request, payload: dict = Body(...)):

@@ -3,14 +3,19 @@
    app.py에서 분리. 공유헬퍼는 common.py."""
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import Request
+from routers.auth import (require_user, scope_cust, staff_only,
+                          assert_own_barcode)   # ★소속 강제 (2026-08-29)
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open, stock_changed
 
 router = APIRouter()
 
 # ===================== 세트입고요청 (nx.set_input_req, 협력사) =====================
 @router.get("/api/setin/list")
-def setin_list(cust: str = Query(""), fr: str = Query(""), to: str = Query(""), status: str = Query(""), limit: int = Query(800)):
-    """세트입고요청 송장 목록(nx.set_input_req, 계획편성분). 협력사명·자도번수 조인."""
+def setin_list(request: Request, cust: str = Query(""), fr: str = Query(""), to: str = Query(""), status: str = Query(""), limit: int = Query(800)):
+    """세트입고요청 송장 목록(nx.set_input_req, 계획편성분). 협력사명·자도번수 조인.
+       ★소속 강제 — 협력사 계정은 cust 파라미터와 무관하게 자기 것만 본다."""
+    cust = scope_cust(require_user(request), cust)
     cn = _nx(); cur = cn.cursor()
     try:
         w = ["h.remarks='PLAN_COMPOSE'"]; p = []
@@ -40,10 +45,13 @@ def setin_list(cust: str = Query(""), fr: str = Query(""), to: str = Query(""), 
         cn.close()
 
 @router.get("/api/setin/detail")
-def setin_detail(sheet: str = Query(...)):
-    """세트입고요청 자도번 명세(nx.set_input_req_dtl)."""
+def setin_detail(request: Request, sheet: str = Query(...)):
+    """세트입고요청 자도번 명세(nx.set_input_req_dtl).
+       ★소속 강제 - 협력사는 자기 송장의 명세만 본다(송장번호를 바꿔 넣어도 열리지 않는다)."""
+    _u = require_user(request)
     cn = _nx(); cur = cn.cursor()
     try:
+        assert_own_barcode(cur, _u, sheet, col="sheet_no")
         cur.execute("""SELECT d.line_no, d.mat_code, ISNULL(i.item_name,'') matnm, d.use_qty, d.mat_qty, ISNULL(d.insp_flag,'0') insp_flag
             FROM nx.set_input_req_dtl d LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=d.mat_code
             WHERE d.sheet_no=? ORDER BY d.line_no""", sheet)
@@ -53,16 +61,29 @@ def setin_detail(sheet: str = Query(...)):
         cn.close()
 
 @router.post("/api/setin/issue")
-def setin_issue(payload: dict = Body(...)):
+def setin_issue(request: Request, payload: dict = Body(...)):
     """거래명세서(송장) 발행 — 협력사가 납품수량 입력·완성분 체크 후 발행.
        체크한 여러 도번을 ★하나의 SET바코드(barcode_no)로 묶음. 상태 00요청→10발행. cancel=1이면 되돌림.
        items=[{sheet, qty}]."""
+    _u = require_user(request)
     items = payload.get("items", []) or []
     cancel = bool(payload.get("cancel"))
     if not items:
         raise HTTPException(400, "발행할 송장이 없습니다.")
     cn = _nx(); cur = cn.cursor()
     try:
+        # ★소속 강제 - 협력사는 **자기 계획으로 만들어진 송장만** 발행한다.
+        #   (대표 확정: "계획서에서 지정된 것만 발행하도록 제한해")
+        if _u.get("utype") == "협력사":
+            mine = _u.get("partner_code") or "__NONE__"
+            for _it in items:
+                _sh = str(_it.get("sheet", "")).strip()
+                if not _sh:
+                    continue
+                cur.execute("""SELECT COUNT(*) FROM nx.set_input_req
+                                WHERE sheet_no=? AND in_cust_code=?""", _sh, mine)
+                if not cur.fetchone()[0]:
+                    raise HTTPException(403, f"다른 협력사의 송장입니다({_sh}).")
         if cancel:
             ok = 0
             for it in items:
@@ -94,11 +115,12 @@ def _fmtbiz(b):
     return f"{b[:3]}-{b[3:5]}-{b[5:]}" if len(b) == 10 else (str(b) or "")
 
 @router.get("/api/setin/invoice")
-def setin_invoice(barcode: str = Query(...)):
+def setin_invoice(request: Request, barcode: str = Query(...)):
     """거래명세표(송장) 데이터 — 하나의 SET바코드에 묶인 도번→자도번 명세 + 공급자(협력사)/공급받는자(당사)."""
     import datetime
     cn = _nx(); cur = cn.cursor()
     try:
+        assert_own_barcode(cur, require_user(request), barcode)      # ★남의 명세서 차단
         cur.execute("SELECT TOP 1 in_cust_code FROM nx.set_input_req WHERE barcode_no=?", barcode)
         rc = cur.fetchone()
         if not rc:
@@ -130,8 +152,10 @@ def setin_invoice(barcode: str = Query(...)):
 
 # ===================== 자재세트입고관리 (입고처리, w_pu_stock_140) =====================
 @router.get("/api/setstock/list")
-def setstock_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""), item: str = Query(""), tag: str = Query(""), limit: int = Query(600)):
-    """세트입고 실적 목록(nx.set_stock_maint). 반품=maint_qty<0."""
+def setstock_list(request: Request, fr: str = Query(""), to: str = Query(""), cust: str = Query(""), item: str = Query(""), tag: str = Query(""), limit: int = Query(600)):
+    """세트입고 실적 목록(nx.set_stock_maint). 반품=maint_qty<0.
+       ★소속 강제 — 협력사는 자기 입고분만."""
+    cust = scope_cust(require_user(request), cust)
     cn = _nx(); cur = cn.cursor()
     try:
         w = ["1=1"]; p = []
@@ -153,8 +177,10 @@ def setstock_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""
         cn.close()
 
 @router.get("/api/setstock/scan")
-def setstock_scan(barcode: str = Query(...)):
-    """SET바코드(발행 송장) 조회 → 입고 확인용 정보(협력사·도번들·자도번수). barcode=숫자 또는 SETnnn."""
+def setstock_scan(request: Request, barcode: str = Query(...)):
+    """SET바코드(발행 송장) 조회 → 입고 확인용 정보(협력사·도번들·자도번수). barcode=숫자 또는 SETnnn.
+       ★입고 스캔은 우리가 받는 행위다 — 담당자 전용."""
+    staff_only(request, "입고 스캔")
     bc = "".join(ch for ch in str(barcode) if ch.isdigit())
     cn = _nx(); cur = cn.cursor()
     try:
@@ -189,7 +215,8 @@ def setstock_scan(barcode: str = Query(...)):
         cn.close()
 
 @router.post("/api/setstock/receive")
-def setstock_receive(payload: dict = Body(...)):
+def setstock_receive(request: Request, payload: dict = Body(...)):
+    _u = staff_only(request, "세트입고")   # ★협력사 계정 거부 - 우리가 받는 행위다
     """입고처리 — SET바코드 스캔/장부입고. set_stock_maint 기록 + status(일반=입고완료90/검사=입고대기30)
        + 입고완료분 자도번 재고파생(stock_ledger, MAINT_TAG='S'). tag: 2바코드/3장부. manual: 수동입고NO."""
     bc = "".join(ch for ch in str(payload.get("barcode", "")) if ch.isdigit())
@@ -273,7 +300,8 @@ def setstock_receive(payload: dict = Body(...)):
 
 
 @router.get("/api/setstock/cancel_preview")
-def setstock_cancel_preview(barcode: str = Query(...)):
+def setstock_cancel_preview(request: Request, barcode: str = Query(...)):
+    staff_only(request, "입고취소 미리보기")
     """입고취소 전 미리보기 — 무엇이 되돌아가는지 보여준다(되돌리기 전에 눈으로 확인)."""
     bc = "".join(ch for ch in str(barcode) if ch.isdigit())
     cn = _nx(); cur = cn.cursor()
@@ -299,7 +327,8 @@ def setstock_cancel_preview(barcode: str = Query(...)):
 
 
 @router.post("/api/setstock/cancel")
-def setstock_cancel(payload: dict = Body(...)):
+def setstock_cancel(request: Request, payload: dict = Body(...)):
+    _u = staff_only(request, "입고취소")   # ★협력사 계정 거부 - 우리가 받는 행위다
     """★입고취소 — 잘못 스캔한 입고를 되돌린다 (대표 확정 2026-08-29).
 
        믿고 받는 구조(세지 않고 송장대로 입고)에서는 **되돌리는 길이 반드시 있어야 한다.**
