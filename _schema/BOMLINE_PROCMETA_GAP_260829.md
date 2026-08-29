@@ -45,6 +45,16 @@
   - except/sagub 축 차이 몇 건(RAC/추가 mat).
 - ★재고차감이라 6의 "어느 품번에 재고 있나"(우리 vs LG) 판단 필요 → **prodsheet 실제 교체는 6 규명·정본확정 후**. walker는 커밋(소비자 없음·안전).
 
+## ★6 divergence 규명 결론 (2026-08-29) — prodsheet 실교체 = 컷오버 바운드
+walker(prod_input_soyo) vs 현행 prodsheet 6 divergence 전수 규명:
+- **품번 치환 (2제품 AJR30027708·083102)**: nx.bom=우리품번(MJX61911802+5220A20039A) vs PR=LG품번(MJX30152802). **재고 키잉 실측: 우리품번 1360+6029 소비 vs LG 15** → **재고가 우리품번에 쌓임 = 엔진이 정확·운영 맞음**(현행 prodsheet LG품번 9건이 오히려 anomaly). 물리적으로 2개 다른 규격 밸브(31.7 vs 28)를 우리BOM이 분리(bom_flat 정본도 우리품번).
+- **sagub (3제품 MJU38273205·56925302·62066901)**: **PR SAGUB_FLAG='1'(사급) vs nx.bom_line sagub_default=0**. prodsheet은 사급 제외라 PR이 맞으면 엔진이 과다차감. ★sagub_default는 **weight_explode(중량정산) 소비자**라 gagong_proc처럼 함부로 정렬 불가(중량 영향)=별도 신중 검증 필요.
+- **RAC (1제품 AJR30087301)**: 변형SUB/except 구조.
+
+**⟹ 정확도 혼재**: 품번엔 엔진 이득(검증), sagub엔 잠재손해(flag-sync 부채·중량 얽힘). prodsheet 클린 교체가 diff0/정확하려면 sagub_default 정합(중량 무회귀 검증 동반)+품번 컷오버 필요.
+
+**결론: walker는 준비완(정본·커밋·292/298 diff0). prodsheet 실교체는 컷오버 바운드**(품번=LG→우리 재고전환, sagub=flag-sync+중량). 기록의 "운영 컷오버 대상" 분류가 실측으로 확증됨. 억지 교체 금지(재고차감 사고).
+
 ## 재현
 - 대조 SQL: 최신헤더 nx.bom_line ↔ nx.pr_m_item_bom (item,mat 조인), gagong_proc/s_work 등 <> 카운트.
 - 660 출처: remarks LIKE '%soyorec%'/'%edgeadd%'.
