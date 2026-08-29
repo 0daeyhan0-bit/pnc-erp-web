@@ -464,19 +464,25 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
             if stage is not None and x.get('stage') != stage: continue
             cur_a += float(x.get(amtk) or 0)
             base_a += float(x.get(basek) or 0) * float(x.get(costk) or 0)
-        return round(cur_a - base_a)   # 현재고 − 기초
+        return round(cur_a - base_a), round(cur_a), round(base_a)   # (증감=현재고−기초, 기말현재고, 기초)
+    cur_w = base_w = cur_g = base_g = cur_s = base_s = cur_m = base_m = 0
     try:
         _pr = _prodstock(ym, m0, d6)   # ★조회일 기준. stage='WELD'(용접, gagong_proc≠P0001) / 'GAGONG'(가공, P0001)
-        jaego_weld, jaego_gagong = _delta(_pr, 'WELD'), _delta(_pr, 'GAGONG')
+        jaego_weld, cur_w, base_w = _delta(_pr, 'WELD'); jaego_gagong, cur_g, base_g = _delta(_pr, 'GAGONG')
     except Exception: jaego_weld = jaego_gagong = 0
-    try: jaego_sales = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
+    try: jaego_sales, cur_s, base_s = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
     except Exception: jaego_sales = 0
     try:   # 자재: 우리 이동평균 일마감(nx.mat_stock_daily). 기초=월초직전잔량(ba)·현재고=조회일(sa)
         _mc = matclose(dfrom=m0, dto=d6).get('rows', [])
-        jaego_mat = round(sum(float(x.get('sa') or 0) for x in _mc) - sum(float(x.get('ba') or 0) for x in _mc))
+        cur_m = round(sum(float(x.get('sa') or 0) for x in _mc)); base_m = round(sum(float(x.get('ba') or 0) for x in _mc))
+        jaego_mat = cur_m - base_m
     except Exception: jaego_mat = 0
     jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
     silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
+    # ★재료비 = 기초재고 + 매입총액 − 기말재고 (기초=7월말·기말=조회일 현재고 = 용접+가공+영업+자재 합계). %=재료비/매출.
+    gicho = base_w + base_g + base_s + base_m   # 기초재고 합계
+    gimal = cur_w + cur_g + cur_s + cur_m       # 기말재고 합계(조회일 현재고)
+    jaemat = round(gicho + pur_t['tot'] - gimal)   # 재료비
 
     # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
     dangsa_raw = dangsa_part = 0
