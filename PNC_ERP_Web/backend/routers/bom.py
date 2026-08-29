@@ -880,16 +880,20 @@ def lgbom_search(q: str = Query(""), werks: str = Query(""), limit: int = Query(
         cn.close()
 
 @router.get("/api/lgbom/tree")
-def lgbom_tree(model: str = Query(...), werks: str = Query("")):
-    """선택 모델의 LG BOM 전개(전 레벨). stufe/posnr 순. 프론트에서 parent_code→child_code 트리 조립."""
+def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = Query("")):
+    """선택 모델의 LG BOM 전개(전 레벨). stufe/posnr 순. 프론트에서 parent_code→child_code 트리 조립.
+       ver_from(일자) 주면 그 버전(nx.lg_bom_ver) 전개, 없으면 현재판(nx.lg_bom)."""
     cn = _nx(); cur = cn.cursor()
     try:
+        src = "nx.lg_bom"
         w = ["b.model=?"]; p = [model]
         if werks: w.append("b.werks=?"); p.append(werks)
+        if ver_from.strip():
+            src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
               b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
+            FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -899,6 +903,51 @@ def lgbom_tree(model: str = Query(...), werks: str = Query("")):
         return {"model": model, "modelnm": (mn[0] if mn else ""), "rows": rows}
     finally:
         cn.close()
+
+@router.get("/api/lgbom/versions")
+def lgbom_versions(model: str = Query(...), werks: str = Query("")):
+    """선택 모델의 LG BOM 버전(일자별) 목록 — nx.lg_bom_ver.ver_from distinct. 이력 추적용."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        if cur.execute("SELECT CASE WHEN OBJECT_ID('nx.lg_bom_ver') IS NULL THEN 0 ELSE 1 END").fetchone()[0] == 0:
+            return {"rows": []}
+        w = ["model=?"]; p = [model]
+        if werks: w.append("werks=?"); p.append(werks)
+        cur.execute(f"""SELECT CONVERT(varchar(10),ver_from,120) ver_from, COUNT(*) child_cnt
+            FROM nx.lg_bom_ver WHERE {' AND '.join(w)} GROUP BY ver_from ORDER BY ver_from DESC""", *p)
+        return {"rows": [{"ver_from": r[0], "child_cnt": r[1]} for r in cur.fetchall()]}
+    finally:
+        cn.close()
+
+_LGBOM_VER_COLS = ("cr,werks,model,stufe,posnr,parent_code,child_code,child_desc,child_spec,qty,unit,uit,"
+                   "supply_type,mmsta,mtstb,matty,lowest_flg,alt_item,main_mat,matkl,valid_from,valid_to,src_valid,load_dt")
+_LGBOM_SIG = ("CHECKSUM_AGG(BINARY_CHECKSUM(child_code,parent_code,qty,supply_type,stufe,posnr,child_spec,"
+              "uit,unit,lowest_flg,mmsta,matty,matkl,valid_from,valid_to))")
+
+def _lgbom_ver_append(cur, models):
+    """A안: model·werks별 현재판(nx.lg_bom) 서명이 최신 버전과 다르면 nx.lg_bom_ver에 ver_from=오늘로 append(같으면 스킵).
+       반환 = 새 버전 만든 model·werks 수. nx.lg_bom_ver 없으면 스킵(0)."""
+    if cur.execute("SELECT CASE WHEN OBJECT_ID('nx.lg_bom_ver') IS NULL THEN 0 ELSE 1 END").fetchone()[0] == 0:
+        return 0
+    added = 0
+    for (werks, model) in models:
+        if werks:
+            wc = "model=? AND werks=?"; wp = (model, werks)
+        else:
+            wc = "model=? AND ISNULL(werks,'')=''"; wp = (model,)
+        cur_sig = cur.execute(f"SELECT {_LGBOM_SIG} FROM nx.lg_bom WHERE {wc}", *wp).fetchone()[0]
+        mvr = cur.execute(f"SELECT MAX(ver_from) FROM nx.lg_bom_ver WHERE {wc}", *wp).fetchone()[0]
+        same = False
+        if mvr is not None:
+            vsig = cur.execute(f"SELECT {_LGBOM_SIG} FROM nx.lg_bom_ver WHERE {wc} AND ver_from=?", *wp, mvr).fetchone()[0]
+            same = (vsig == cur_sig)
+        if not same:
+            cur.execute(f"DELETE FROM nx.lg_bom_ver WHERE {wc} AND ver_from=CAST(GETDATE() AS date)", *wp)
+            cur.execute(f"INSERT INTO nx.lg_bom_ver ({_LGBOM_VER_COLS},ver_from) "
+                        f"SELECT {_LGBOM_VER_COLS},CAST(GETDATE() AS date) FROM nx.lg_bom WHERE {wc}", *wp)
+            added += 1
+    return added
+
 
 @router.post("/api/lgbom/upload")
 async def lgbom_upload(file: UploadFile = File(...)):
@@ -960,8 +1009,10 @@ async def lgbom_upload(file: UploadFile = File(...)):
             (cr,werks,model,stufe,posnr,parent_code,child_code,child_desc,child_spec,qty,unit,uit,supply_type,
              mmsta,mtstb,matty,lowest_flg,alt_item,main_mat,matkl,valid_from,valid_to,src_valid,load_dt)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CONVERT(varchar(10),GETDATE(),120),GETDATE())""", recs)
+        ver_added = _lgbom_ver_append(cur, models)   # A: 변경된 model·werks만 새 버전(오늘일자)
         return {"ok": True, "rows": len(recs), "models": sorted({m for (w, m) in models}),
-                "werks": sorted({w for (w, m) in models if w}), "file": file.filename}
+                "werks": sorted({w for (w, m) in models if w}), "file": file.filename,
+                "ver_added": ver_added}
     finally:
         cn.close()
 

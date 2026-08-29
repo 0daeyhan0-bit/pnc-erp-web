@@ -150,3 +150,27 @@ def subdisp(child):
 #### 구현 범위
 - **현재 라이브 적용:** §3(실제 제품 코드 보존) — subdisp 수정 완료.
 - **마이그레이션 정본화 과제:** 출생라벨 부여·영속 저장, 저장-시 dedup(공용 강제연결), 공용 flag, 기존 `Rxx_Sxx` 재시그니처·병합. (그 전까진 미러 표시 유지)
+
+---
+## §8. ★현행 구현 검증 (2026-08-25) — 정본 §7-1 대비 갭 실측
+전 코드 매핑 + 라이브 실측 결과. "SUB 명명규칙이 전 프로그램에 올바르게 반영되는가" = **아니오(정본 설계확정·코드 미반영)**.
+
+### 정본 일치(구현완료) = 정체성 계층
+- 시그니처 = children+proc_weld Merkle (`bom.py:_sub_signature` 503-530) — 정본 정확 구현.
+- dedup 완전차단(sig UNIQUE·기존S 강제재사용) `bom.py:_mint_sub` 538-541 · `sourcing.py` 2802-2807.
+- mint 시점 = 승인(route/approve) `sourcing.py:1225-1243`.
+- 실제제품 코드보존(§3) `bom.py:317-318`(클린코드 개명금지)+raw 병기 `bom.py:335`.
+
+### 정본 미구현 = 코드/표시 계층
+1. **출생라벨 `_R{route}` 없음**: create=`{base_child}_S{nn}`(`sourcing.py:1512-1523`)·display=`{root}_S{nn}`위치(`bom.py:319-320`)·mint=전역`S#####`(`bom.py:542-543`). 어디에도 `_R` 없음. 실측 sub_registry 2894행 전부 S#####·_R포함 0.
+2. **순번 영속 아님**: create=전 route_line max+1 재계산(삭제번호 재사용·주석 1510-1511)·display=매 조회 트리순서 재계산. 정본"출생1회 박제"와 정반대(편집 시 밀림).
+3. **공용flag 없음**: sub_registry.members 항상 1 고정(`bom.py:544`·실측 max=1)·승격로직 없음.
+4. **전 프로그램 3종 공존**: BOM트리=`{root}_S{nn}`위치 / 역전개·원가(cost)·견적(coopquote)·소요(soyo)·계획(coopplan)=raw 자도번 / 승인 조달후보=전역 S#####. matverify만 sub_variant_map(변형매핑·별개). `NX_MASTER_GAP.md:89` 사용자결정("전화면 통일 보류·BOM트리+역전개만")과 일치.
+
+### 레지스트리 실측(2026-08-25)
+- nx.sub_registry 2894행(S#####·sig UNIQUE·members=1)·nx.sub_code_map 3418행(raw→S)·nx.sub_variant_map 862행(변형매핑·현흐름 미호출).
+
+### ★문서-코드 불일치(정정)
+- `_migration/sub_norm/NX_MASTER_GAP.md:94` "subdisp를 sub_code_map(S#####)로 교체 완료" = **stale**. 라이브 `bom.py:319-320`은 위치기반 `{item}_S{nn}`(2026-08-15 §3 수정이 덮음). 표시=위치기반이 현재 정답.
+
+### ∴ 남은 정본화 과제(출생라벨·순번영속·공용flag·전화면 통일) = 이 작업의 대상. 정체성 계층은 재사용 가능(시그니처·dedup·mint 그대로).

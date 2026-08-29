@@ -127,6 +127,34 @@ def prod_soyo(eng, item):
     return out
 
 
+def sagub_parts_soyo(eng, item, stop_set, memo=None):
+    """[사급부품 walker] per-unit 완제품 1개 → {stop_set 부품: 소요개수}. v_pr_bom(=nx.bom_line·except≠1) 재귀,
+    stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
+    ★CS_M_ITEM_BOM 직접전개(ad-hoc)는 변형SUB 이중계상(예 AJR30012008→EBF64570401 2배). v_pr_bom은 except로 1회 = 엔진 정본.
+    ★memo(dict) 넘기면 요청 전체 공유 = 공유SUB 1회만 전개(성능). ★stop_set 동일 전제(요청내)."""
+    if memo is None:
+        memo = {}
+    def walk(node, depth):
+        if node in memo:
+            return memo[node]
+        memo[node] = {}            # cycle guard
+        if depth > 25:             # 깊이 폭주 방지
+            return memo[node]
+        acc = {}
+        for c, q, ex, vf in _vpr_full(eng, node):
+            if ex == '1' or q <= 0:
+                continue
+            if c in stop_set:
+                if not _is_weldrod(eng, c):
+                    acc[c] = acc.get(c, 0.0) + q
+            else:
+                for k, v in walk(c, depth + 1).items():
+                    acc[k] = acc.get(k, 0.0) + v * q
+        memo[node] = acc
+        return acc
+    return walk(item.strip().upper(), 0)
+
+
 # ===================== 생산계획 walker (STEP6/7 재현) =====================
 # plan_part_mat = 가공공정 전이 grain. Stage1=plan_part_temp(CTE_BOM), Stage2=가공공정JOIN, Stage3=전이+최하위.
 
@@ -137,11 +165,36 @@ def _prmmat_set(eng):
     return eng._prmmat
 
 
+import threading as _threading
+_VPR_CACHE = None                 # ★모듈 공유 캐시 {item: [(mat,qty,except,vir)]} (전 요청 공유·읽기전용=스레드안전)
+_VPR_LOCK = _threading.Lock()
+
+
+def warm_vpr(eng):
+    """★성능·동시성: v_pr_bom 전 엣지를 **모듈 캐시(_VPR_CACHE)** 로 1회 프리로드(락). 이후 _vpr_full은 연결 없이 캐시 읽기.
+    → 요청마다 재로드 없음 + 싱글톤 엔진 연결 동시사용(대사+수불) 충돌 없음. (BOM 변경 반영은 백엔드 재기동 or 후속 sig가드.)"""
+    global _VPR_CACHE
+    if _VPR_CACHE is not None:
+        return
+    with _VPR_LOCK:
+        if _VPR_CACHE is not None:
+            return
+        d = {}
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY),
+                 ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
+               FROM nx.v_pr_bom ORDER BY item_code, BOM_SEQ""")
+        for it, mat, uq, ex, vf in eng.cur.fetchall():
+            d.setdefault(str(it).strip(), []).append((str(mat).strip(), float(uq or 0), str(ex).strip(), str(vf).strip()))
+        _VPR_CACHE = d
+
+
 def _vpr_full(eng, item):
-    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). 캐시."""
+    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). warm_vpr 후엔 모듈캐시 읽기(연결無)."""
+    k = item.strip().upper()
+    if _VPR_CACHE is not None:
+        return _VPR_CACHE.get(k, [])        # 프리로드 = 미존재는 leaf([])
     if not hasattr(eng, '_vprf'):
         eng._vprf = {}
-    k = item.strip().upper()
     if k not in eng._vprf:
         eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY), ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
             FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? ORDER BY BOM_SEQ""", k)
