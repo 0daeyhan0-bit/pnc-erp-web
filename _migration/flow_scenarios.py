@@ -34,18 +34,21 @@ import flow_cases as FC
 AP = argparse.ArgumentParser()
 AP.add_argument('--port', type=int, default=8099)
 AP.add_argument('--only', default='')
-AP.add_argument('--kind', default='', choices=['', 'F', 'R'])
+AP.add_argument('--kind', default='', choices=['', 'F', 'R', 'S'])
 AP.add_argument('--list', action='store_true')
 ARG = AP.parse_args()
 BASE = f"http://127.0.0.1:{ARG.port}"
 RESULTS = []
 
 
-def call(method, path, payload=None, timeout=600):
-    """(status, body) — 4xx/5xx 도 예외 대신 결과로 (규칙 검증은 '거부'가 정답)."""
+def call(method, path, payload=None, timeout=600, token=None):
+    """(status, body) — 4xx/5xx 도 예외 대신 결과로 (규칙 검증은 '거부'가 정답).
+       token 을 주면 Authorization 헤더를 붙인다(인증 도입 후 필수)."""
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(BASE + path, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+    _h = {"Content-Type": "application/json"}
+    if token:
+        _h["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(BASE + path, data=data, method=method, headers=_h)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode() or "{}")
@@ -60,6 +63,39 @@ def call(method, path, payload=None, timeout=600):
 
 def probe():
     return call("GET", "/api/_flow/probe")[1].get("now", {})
+
+
+def delta(before, after):
+    """프로브 델타. ★flow_server 는 프로브 쿼리가 실패하면 None 을 넣는다.
+       None - None 으로 러너가 죽으면 **멀쩡한 코드가 거짓 FAIL** 이 된다(하네스를 못 믿게 된다)."""
+    return {k: round((after.get(k) or 0) - (before.get(k) or 0), 4) for k in before}
+
+
+# ── 로그인 (인증 도입 후 하네스도 로그인해야 한다) ────────────────────
+_TOKENS = {}
+
+
+def token_for(uid):
+    """계정 id -> 토큰. None 이면 무토큰(비로그인 상황을 그대로 재현)."""
+    if not uid:
+        return None
+    if uid in _TOKENS:
+        return _TOKENS[uid]
+    pw = FC.ACCOUNTS.get(uid)
+    if pw is None:
+        _TOKENS[uid] = None
+        return None
+    st, res = call("POST", "/api/auth/login", {"id": uid, "pw": pw})
+    tok = res.get("token") if isinstance(res, dict) else None
+    if not tok:
+        print(f"   ⚠ 하네스 로그인 실패({uid}) — {st} {str(res)[:90]}")
+    _TOKENS[uid] = tok
+    return tok
+
+
+def forget_token(uid):
+    """로그아웃 검증처럼 토큰을 버려야 하는 케이스용."""
+    _TOKENS.pop(uid, None)
 
 
 def rec(kind, name, verdict, note=""):
@@ -102,7 +138,7 @@ def run_flow(c, ctx):
     b = probe()
     st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx))
     a = probe()
-    d = {k: round(a.get(k, 0) - b.get(k, 0), 4) for k in b}
+    d = delta(b, a)
     if st == 404:
         rec("F", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)"); return
     if st != 200 or (isinstance(res, dict) and res.get("ok") is False):
@@ -127,7 +163,7 @@ def run_rule(c, ctx):
     b = probe()
     st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx))
     a = probe()
-    d = {k: round(a.get(k, 0) - b.get(k, 0), 4) for k in b}
+    d = delta(b, a)
     body = json.dumps(res, ensure_ascii=False)
     # ★404 를 '차단'으로 세면 안 된다 — 그 엔드포인트가 이 브랜치에 없을 뿐이다.
     #   (예: 마감 도메인은 feat/close-mgmt 에만 있다. main 에서 돌리면 404 가 난다.)
@@ -145,6 +181,49 @@ def run_rule(c, ctx):
     kw = c.get("keyword")
     tail = f"차단 확인 — {body[:120]}" if (not kw or kw in body) else f"거부됨(문구는 다름) — {body[:120]}"
     rec("R", c["name"], "PASS", tail)
+
+
+def run_secure(c, ctx):
+    """[S] 인증·소속 강제 — **실제 응답값**을 보여주며 판정한다.
+
+       [R] 은 '막혔는가'만 본다. 소속 강제는 그것으로 부족하다 —
+       200 이 나오되 **자기 데이터만** 나와야 하기 때문이다.
+    """
+    uid = c.get("as_")
+    tok = token_for(uid)
+    if uid and not tok:
+        rec("S", c["name"], "SKIP", f"하네스가 {uid} 로 로그인하지 못함"); return
+    b = probe()
+    st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok)
+    a = probe()
+    d = delta(b, a)
+
+    exp = c.get("expect")
+    exps = tuple(exp) if isinstance(exp, (tuple, list)) else (exp,)
+    ok_st = (exp is None) or (st in exps)
+
+    ok_ck, note = True, ""
+    if c.get("check"):
+        try:
+            ok_ck, note = c["check"](res, ctx)
+        except Exception as e:
+            ok_ck, note = False, f"검사 예외 {type(e).__name__}: {str(e)[:70]}"
+
+    # ★거부한 케이스는 DB 에 아무것도 남기면 안 된다
+    wrote = [k for k, v in d.items() if abs(v) > 0.001]
+    if st >= 400 and wrote:
+        rec("S", c["name"], "FAIL", f"거부했지만 DB 에 기록됨 — {wrote}"); return
+
+    who = f"[{uid or '무토큰'}]"
+    detail = ""
+    if isinstance(res, dict) and res.get("detail"):
+        detail = " · " + str(res["detail"])[:90]
+    obs = f"{who} HTTP {st}{detail}"
+    if note:
+        obs += f"\n           ⟹ {note}"
+    if not ok_st:
+        obs += f"   ← 기대 {exp}"
+    rec("S", c["name"], "PASS" if (ok_st and ok_ck) else "FAIL", obs)
 
 
 def main():
@@ -170,6 +249,9 @@ def main():
     if "mat" not in ctx:
         print("★테스트 자재를 못 찾음"); return 1
     call("POST", "/api/_flow/scope", {"ymd": FC.YMD, "mat": ctx["mat"]})   # 관측 스코프(속도)
+    # [S] check 함수가 **미커밋 상태의 DB** 를 직접 볼 수 있게 헬퍼를 넣어준다
+    #   (별도 커넥션으로는 우리가 방금 쓴 행이 안 보인다 — 2026-08-28 교훈)
+    ctx["_sql"] = lambda q, *a: (call("POST", "/api/_flow/sql", {"sql": q, "args": list(a)})[1] or {}).get("rows", [])
     print(f"\n 대상 자재 = {ctx['mat']} (가용 {ctx['avail']:,.0f})"
           f" · 마감 {ctx.get('closed_ptype','-')}/{ctx.get('closed_period','-')}"
           f" · 생산품 {ctx.get('prod_item','-')}\n")
@@ -177,8 +259,10 @@ def main():
     last_kind = None
     for c in cases:
         if c["kind"] != last_kind:
-            print(f"── [{c['kind']}] {'흐름 — 값이 제대로 적히는가' if c['kind']=='F' else '규칙 — 제대로 막는가'} "
-                  + "─" * 24)
+            _lab = {"F": "흐름 — 값이 제대로 적히는가",
+                    "R": "규칙 — 제대로 막는가",
+                    "S": "인증·소속 — 남의 것이 보이는가"}.get(c["kind"], c["kind"])
+            print(f"── [{c['kind']}] {_lab} " + "─" * 24)
             last_kind = c["kind"]
         if c.get("skip_if") and c["skip_if"](ctx):
             rec(c["kind"], c["name"], "SKIP", "픽스처 부족 — 참조할 실데이터 없음"); continue
@@ -193,7 +277,7 @@ def main():
                 rec(c["kind"], c["name"], "SKIP", "선행 입고행을 못 찾음"); continue
             ctx["_kymd"], ctx["_kseq"] = str(rows[0][0]).strip(), int(rows[0][1])
         try:
-            (run_flow if c["kind"] == "F" else run_rule)(c, ctx)
+            {"F": run_flow, "R": run_rule, "S": run_secure}[c["kind"]](c, ctx)
         except Exception as e:
             rec(c["kind"], c["name"], "FAIL", f"케이스 실행 오류 — {type(e).__name__}: {str(e)[:90]}")
 

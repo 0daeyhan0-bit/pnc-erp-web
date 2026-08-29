@@ -4,7 +4,7 @@
    _sale_close_lookup·_saleout_led·_lgsale_led·_next_yymm)는 이 도메인 로컬(블록내). 공유는 common.py."""
 import math
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, HTTPException, Request
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed, _finished_short_msg
 
 router = APIRouter()
@@ -442,42 +442,103 @@ def perm_save(payload: dict = Body(...)):
     finally:
         cn.close()
 
-# ===================== 웹 사용자 계정(전 PC 공통) — nx.web_user 스냅샷 =====================
+# ===================== 웹 사용자 계정 — 정본 nx.app_user (2026-08-29 이관) =====================
+# ★예전: nx.web_user 한 행에 JSON 통째 + **평문 비밀번호를 GET 으로 누구에게나 내줬다.**
+#   지금: 정본 = nx.app_user(행 단위·PBKDF2 해시). web_user 는 은퇴(단일 테이블·폴백 금지).
+#   ★GET 은 비밀번호를 절대 싣지 않는다. 화면은 "설정됨/미설정"(pw_set)만 알면 된다.
+from routers.auth import require_user, hash_pw          # 인증 정본
+
+
+def _is_admin(u):
+    return bool(u) and "시스템관리자" in (u.get("roles") or [])
+
+
 @router.get("/api/perm/users")
-def perm_users_get():
-    """웹 로그인 계정목록(전 PC 공통) — 관리자 저장분. 없으면 users=null(프론트가 시드 사용)."""
+def perm_users_get(request: Request):
+    """계정목록. ★비밀번호는 나가지 않는다. 로그인 필수.
+       - 시스템관리자 : 전체 목록
+       - 그 외        : 본인 1건만(다른 사람의 계정 정보를 볼 이유가 없다)"""
+    u = require_user(request)
     cn = _nx(); cur = cn.cursor()
     try:
-        users = None
-        try:
-            cur.execute("SELECT udata FROM nx.web_user WHERE user_id='__ALL__'")
-            r = cur.fetchone()
-            if r and r[0]:
-                import json as _json
-                users = _json.loads(r[0])
-        except Exception:
-            users = None
-        return {"users": users}
+        q = """SELECT user_id,name,utype,dept,pos,roles,partner_code,email,tel,status,
+                      CASE WHEN ISNULL(pw_hash,'')='' THEN 0 ELSE 1 END pw_set, last_login
+                 FROM nx.app_user"""
+        if _is_admin(u):
+            cur.execute(q + " ORDER BY user_id")
+        else:
+            cur.execute(q + " WHERE user_id=?", u["id"])
+        import json as _json
+        out = []
+        for r in cur.fetchall():
+            try:
+                roles = _json.loads(r[5] or "[]")
+            except Exception:
+                roles = []
+            out.append({"id": str(r[0]).strip(), "nm": (r[1] or "").strip(),
+                        "type": (r[2] or "내부").strip(), "dept": (r[3] or "").strip(),
+                        "pos": (r[4] or "").strip(), "roles": roles,
+                        "partner_code": (r[6] or "").strip(), "partner": (r[6] or "").strip(),
+                        "email": (r[7] or "").strip(), "tel": (r[8] or "").strip(),
+                        "status": (r[9] or "사용").strip(), "pw_set": bool(r[10]),
+                        "last_login": str(r[11])[:19] if r[11] else ""})
+        return {"users": out}
     finally:
         cn.close()
 
+
 @router.post("/api/perm/users")
-def perm_users_save(payload: dict = Body(...)):
-    """웹 로그인 계정목록 저장(전체 스냅샷, 전 PC 공통). body {users:[...], by?}. 사용자관리 저장 시 호출."""
+def perm_users_save(request: Request, payload: dict = Body(...)):
+    """계정 저장(전체 스냅샷). ★시스템관리자만.
+       ★빈 pw = 기존 비밀번호 유지 — GET 이 비번을 안 주므로, 안 그러면 저장할 때마다 전원 비번이 날아간다.
+       ★목록에서 빠진 계정은 지우지 않는다(화면이 일부만 보냈을 때 계정이 증발하면 안 된다).
+         삭제는 status='중지' 로 한다."""
+    u = require_user(request)
+    if not _is_admin(u):
+        raise HTTPException(403, "계정 관리는 시스템관리자만 할 수 있습니다.")
     users = payload.get("users") or []
-    by = (str(payload.get("by", "web")).strip() or "web")[:40]
+    by = (str(payload.get("by") or u["id"]).strip() or "web")[:40]
     import json as _json
-    blob = _json.dumps(users, ensure_ascii=False)
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("IF OBJECT_ID('nx.web_user') IS NULL CREATE TABLE nx.web_user(user_id NVARCHAR(20) NOT NULL PRIMARY KEY, udata NVARCHAR(MAX), upd_user NVARCHAR(40), upd_dt DATETIME)")
-        cur.execute("""MERGE nx.web_user AS t USING (SELECT '__ALL__' uid) s ON t.user_id=s.uid
-            WHEN MATCHED THEN UPDATE SET udata=?, upd_user=?, upd_dt=getdate()
-            WHEN NOT MATCHED THEN INSERT(user_id,udata,upd_user,upd_dt) VALUES('__ALL__',?,?,getdate());""",
-            blob, by, blob, by)
+        n_new = n_upd = n_pw = 0
+        for x in users:
+            uid = str(x.get("id", "")).strip()
+            if not uid:
+                continue
+            pw = str(x.get("pw") or "")
+            roles = _json.dumps(x.get("roles") or [], ensure_ascii=False)
+            # partner 가 이름으로 들어오면 거래처코드로 바꾼다(이름은 동명·개명에 깨진다)
+            pc = str(x.get("partner_code") or x.get("partner") or "").strip() or None
+            if pc and not pc.isdigit():
+                cur.execute("SELECT cust_code FROM nx.cust WHERE LTRIM(RTRIM(cust_name))=?", pc)
+                hit = cur.fetchall()
+                pc = str(hit[0][0]).strip() if len(hit) == 1 else None
+            cur.execute("SELECT COUNT(*) FROM nx.app_user WHERE user_id=?", uid)
+            if cur.fetchone()[0]:
+                cur.execute("""UPDATE nx.app_user SET name=?,utype=?,dept=?,pos=?,roles=?,partner_code=?,
+                                 email=?,tel=?,status=?,upd_user=?,upd_dt=getdate() WHERE user_id=?""",
+                            str(x.get("nm", "")).strip(), str(x.get("type", "내부")).strip(),
+                            str(x.get("dept", "")).strip(), str(x.get("pos", "")).strip(), roles, pc,
+                            str(x.get("email", "")).strip(), str(x.get("tel", "")).strip(),
+                            str(x.get("status", "사용")).strip() or "사용", by, uid)
+                n_upd += 1
+            else:
+                cur.execute("""INSERT INTO nx.app_user(user_id,pw_hash,name,utype,dept,pos,roles,partner_code,
+                                 email,tel,status,fail_cnt,upd_user,upd_dt)
+                               VALUES(?,?,?,?,?,?,?,?,?,?,?,0,?,getdate())""",
+                            uid, hash_pw(pw) if pw else None, str(x.get("nm", "")).strip(),
+                            str(x.get("type", "내부")).strip(), str(x.get("dept", "")).strip(),
+                            str(x.get("pos", "")).strip(), roles, pc,
+                            str(x.get("email", "")).strip(), str(x.get("tel", "")).strip(),
+                            str(x.get("status", "사용")).strip() or "사용", by)
+                n_new += 1
+            if pw:                      # ★비밀번호는 준 경우에만 바꾼다
+                cur.execute("UPDATE nx.app_user SET pw_hash=? WHERE user_id=?", hash_pw(pw), uid)
+                cur.execute("UPDATE nx.app_session SET revoked=1 WHERE user_id=?", uid)   # 기존 로그인 해제
+                n_pw += 1
         cn.commit()
-        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
-        return {"ok": True, "count": len(users)}
+        return {"ok": True, "count": len(users), "new": n_new, "updated": n_upd, "pw_changed": n_pw}
     finally:
         cn.close()
 

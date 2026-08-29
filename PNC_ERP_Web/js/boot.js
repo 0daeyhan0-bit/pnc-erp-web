@@ -67,23 +67,28 @@ function showLogin(){
   document.body.appendChild(ov);
   const g=id=>ov.querySelector(id);
   const err=m=>{const e=g('#lg-err');e.textContent=m||'';e.style.display=m?'block':'none';};
-  const submit=()=>{
+  // ★대조는 서버에서만 한다(2026-08-29). 예전에는 여기서 String(u.pw)!==String(pw) 로 끝났다.
+  //   비밀번호가 브라우저에 있으면 그건 보안이 아니다.
+  const submit=async()=>{
     const id=g('#lg-id').value.trim(), pw=g('#lg-pw').value;
     if(!id||!pw){err('아이디와 비밀번호를 입력하세요.');return;}
-    const u=getUsers().find(x=>x.id===id);
-    if(!u||String(u.pw)!==String(pw)){err('아이디 또는 비밀번호가 올바르지 않습니다.');return;}
-    if(u.status&&u.status!=='사용'){err('사용 중지된 계정입니다. 전산담당에 문의하세요.');return;}
-    sessionStorage.setItem('perm_authed',id);
-    PERM.setUser(id);
-    ov.remove();
-    bootApp();
+    const btn=g('#lg-login'); btn.disabled=true; btn.textContent='확인 중…'; err('');
+    try{
+      const u=await AUTH.login(id,pw);
+      sessionStorage.setItem('perm_authed',id);
+      PERM.setUser(id);
+      ov.remove();
+      bootApp();
+    }catch(e){
+      err((e&&e.message)||'로그인에 실패했습니다.');
+      btn.disabled=false; btn.textContent='로그인';
+    }
   };
   g('#lg-login').onclick=submit;
   [g('#lg-id'),g('#lg-pw')].forEach(el=>el.onkeyup=e=>{if(e.key==='Enter')submit();});
   // ★슈퍼 계정 자동 입력 — 로그인 창이 뜨면 아이디/비번을 미리 채우고 로그인 버튼에 포커스(Enter 즉시 진입)
-  if(DEV_AUTOLOGIN){const su=getUsers().find(u=>u.id===DEV_AUTOLOGIN);
-    if(su){g('#lg-id').value=su.id; g('#lg-pw').value=su.pw;
-      setTimeout(()=>{const b=g('#lg-login');if(b)b.focus();},30); return;}}
+  if(DEV_AUTOLOGIN){g('#lg-id').value=DEV_AUTOLOGIN;
+    setTimeout(()=>{const f=g('#lg-pw');if(f)f.focus();},30); return;}
   setTimeout(()=>{const f=g('#lg-id');if(f)f.focus();},30);
 }
 
@@ -92,12 +97,12 @@ function showLogin(){
   ensureSuperAccount();                         // 슈퍼 계정 항상 보장
   try{await PERM.loadUsersFromServer();}catch(e){}   // ★서버 계정목록(전 PC 공통) 병합 후 로그인 — 다른 PC에서 만든 계정도 로그인 가능
   ensureSuperAccount();
-  const authed=sessionStorage.getItem('perm_authed');
-  if(authed && getUsers().some(u=>u.id===authed && (!u.status||u.status==='사용'))){
-    PERM.setUser(authed); bootApp(); return;
-  }
+  // ★자동 진입도 서버에 물어본다 — sessionStorage 만 믿으면 토큰이 만료돼도 화면이 열린다.
+  //   (열려 봐야 API 가 전부 401 이라 빈 화면이 된다. 그럴 바엔 로그인 화면이 낫다.)
+  const me=await AUTH.me();
+  if(me){ PERM.setUser(me.id); sessionStorage.setItem('perm_authed',me.id); bootApp(); return; }
+  AUTH.clear();
   // ★개발용 자동 로그인 — 로그인 화면 없이 슈퍼 계정으로 바로 진입해 메뉴 확인
-  if(DEV_AUTOLOGIN){const su=getUsers().find(u=>u.id===DEV_AUTOLOGIN && (!u.status||u.status==='사용'));
-    if(su){sessionStorage.setItem('perm_authed',su.id); PERM.setUser(su.id); bootApp(); return;}}
+  // ★DEV 자동로그인은 은퇴 — 비밀번호가 프론트에 없어서(있어서도 안 되고) 서버 대조를 건너뛸 방법이 없다.
   showLogin();
 })();

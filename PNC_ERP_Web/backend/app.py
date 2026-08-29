@@ -175,6 +175,10 @@ from routers import delivedit as _r_delivedit  # 거래명세표 수정(협력�
 app.include_router(_r_delivedit.router)
 from routers import matinput as _r_matinput    # 자재입고진행현황 — 레거시 w_pr_input_010_part
 app.include_router(_r_matinput.router)
+# ★인증·소속 강제 (협력사 포털 1단계, 2026-08-29) — PARTNER_PORTAL_DESIGN.md §1~2
+#   협력사에게 열기 전에 서버가 거부해야 한다. 화면에서 숨기는 것은 보안이 아니다.
+from routers import auth as _r_auth
+app.include_router(_r_auth.router)
 import weight_calc  # 무게정산(중량조정) 계산
 # 도메인간 공유헬퍼 — 로컬 def가 있으면 그게 shadow, 해당 도메인 라우터 이동 후엔 common판 사용(잔류 엔드포인트 보호)
 from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win

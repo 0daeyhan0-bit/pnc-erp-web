@@ -198,23 +198,31 @@ SCREEN.perm=(c)=>{
 
 /* 시스템관리 > 사용자관리 — 계정(ID/PW/이름/구분/부서/직책/역할복수/협력사/이메일/연락처/상태) */
 SCREEN.users=(c)=>{
-  const lsu='perm_users';
-  const load=()=>getUsers();
-  let users=load(), editMode=false;
+  // ★정본 = nx.app_user (2026-08-29). localStorage 는 더 이상 계정의 근거가 아니다.
+  //   비밀번호는 서버가 내주지 않는다 — pw_set(설정여부)만 온다.
+  const load=async()=>{try{const r=await fetch(API_BASE+'/api/perm/users');
+    if(!r.ok)return null; const j=await r.json(); return Array.isArray(j.users)?j.users:null;}catch(e){return null;}};
+  let users=[], editMode=false, loadErr='';
   const CT=['내부','협력사'], ST=['사용','정지'];
   const cols=[{f:'id',h:'ID'},{f:'pw',h:'비밀번호',pw:1},{f:'nm',h:'이름'},{f:'type',h:'구분',sel:CT},{f:'dept',h:'부서'},{f:'pos',h:'직책'},{f:'roles',h:'역할',roles:1},{f:'partner',h:'협력사'},{f:'email',h:'이메일'},{f:'tel',h:'연락처'},{f:'status',h:'상태',sel:ST}];
   const draw=()=>{
     c.innerHTML=`
      <div class="page-title">👤 사용자관리</div>
-     <div class="page-sub">계정 · 필수: <b>ID·비밀번호·이름·구분·역할</b> · 내부직원 ~60명 + 협력사 · <span class="neg">비번은 프로토타입 평문(실서비스 bcrypt 해시 예정)</span> · 프로그램별 조회/수정 권한은 「권한관리」 · ✎수정 시 편집</div>
+     <div class="page-sub">계정 정본 = <b>nx.app_user</b> · 비밀번호는 <b>PBKDF2 해시</b>로 저장되며 화면에 나오지 않습니다 ·
+       <b>비밀번호를 비워두면 기존 비밀번호가 그대로 유지</b>됩니다(바꿀 때만 입력) ·
+       계정을 지우려면 <b>상태를 '정지'</b>로 두세요(목록에서 빼는 것으로는 지워지지 않습니다) ·
+       협력사 칸 = <b>거래처코드</b> · 프로그램별 권한은 「권한관리」${loadErr?` · <span class="neg">${esc(loadErr)}</span>`:''}</div>
      <div class="toolbar"><input class="inp" id="q" placeholder="ID·이름·부서·협력사">
        ${editMode?`<button class="btn" id="add">➕ 추가</button><button class="btn" id="save">💾 저장</button><button class="btn ghost" id="cancel">✖ 취소</button>`:(PERM.canEdit('users')?`<button class="btn" id="edit">✎ 수정</button>`:`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`)}
        <div class="spacer"></div><span class="rowcount" id="cnt"></span></div>
      <div class="grid-wrap" style="max-height:520px;overflow:auto"><table class="tbl fit"><thead><tr>${cols.map(cc=>`<th>${cc.h}</th>`).join('')}${editMode?'<th class="center">삭제</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`;
-    const disp=(cc,u)=>{ if(cc.pw)return '••••'; if(cc.roles)return (u.roles||[]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' '); return esc(''+(u[cc.f]||'')); };
+    const disp=(cc,u)=>{ if(cc.pw)return u.pw_set?'설정됨':'<span class="neg">미설정</span>';
+      if(cc.roles)return (u.roles||[]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ');
+      return esc(''+(u[cc.f]||'')); };
     const editCell=(cc,u,i)=>{
       if(cc.sel)return `<select data-i="${i}" data-f="${cc.f}">${cc.sel.map(o=>`<option ${u[cc.f]===o?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
       if(cc.roles)return `<div style="min-width:150px">${ROLES.map(r=>`<label style="margin-right:6px;white-space:nowrap;font-size:11px"><input type="checkbox" data-i="${i}" data-role="${esc(r)}" ${(u.roles||[]).includes(r)?'checked':''}>${esc(r)}</label>`).join('')}</div>`;
+      if(cc.pw)return `<input data-i="${i}" data-f="pw" type="password" value="" placeholder="비우면 유지" style="width:95px">`;
       return `<input data-i="${i}" data-f="${cc.f}" value="${esc(''+(u[cc.f]||''))}" style="width:${cc.f==='email'?150:95}px">`;
     };
     const rend=()=>{
@@ -224,21 +232,32 @@ SCREEN.users=(c)=>{
       if(editMode){
         c.querySelectorAll('#tb input[data-f],#tb select[data-f]').forEach(el=>el.onchange=()=>{users[+el.dataset.i][el.dataset.f]=el.value;});
         c.querySelectorAll('#tb input[data-role]').forEach(el=>el.onchange=()=>{const u=users[+el.dataset.i];u.roles=u.roles||[];const r=el.dataset.role;if(el.checked){if(!u.roles.includes(r))u.roles.push(r);}else u.roles=u.roles.filter(x=>x!==r);});
-        c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{users.splice(+b.dataset.del,1);rend();});
+        // ★목록에서 빼도 서버는 계정을 지우지 않는다(그래야 화면이 일부만 보냈을 때 계정이 증발하지 않는다).
+        //   그래서 삭제 버튼은 **상태를 '정지'** 로 바꾼다 — 실제로 로그인이 막히는 방법이다.
+        c.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const u=users[+b.dataset.del];
+          u.status=(u.status==='정지')?'사용':'정지'; rend();});
       }
       c.querySelector('#cnt').textContent=`${users.length}명 (내부 ${users.filter(u=>u.type==='내부').length}·협력사 ${users.filter(u=>u.type==='협력사').length}) · ${editMode?'✎수정중':'읽기전용'}`;
     };
     if(editMode){
-      c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'1234',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'});rend();};
-      c.querySelector('#save').onclick=async()=>{localStorage.setItem(lsu,JSON.stringify(users));
-        let sv=false;try{const r=await PERM.saveUsersToServer(users);sv=!!(r&&(await r.json()).ok);}catch(e){}
-        editMode=false;draw();alert(sv?'저장되었습니다 (전 PC 공통 — 모든 PC에서 로그인 가능).':'로컬 저장됨(서버 저장 실패 — 백엔드 확인 필요).');};
-      c.querySelector('#cancel').onclick=()=>{users=load();editMode=false;draw();};
+      c.querySelector('#add').onclick=()=>{users.push({id:'',pw:'',nm:'',type:'내부',dept:'',pos:'',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용',pw_set:false});rend();};
+      c.querySelector('#save').onclick=async()=>{
+        let msg='';
+        try{const r=await PERM.saveUsersToServer(users); const j=await r.json();
+          msg=r.ok&&j.ok?`저장되었습니다 — 신규 ${j.new} · 수정 ${j.updated} · 비밀번호 변경 ${j.pw_changed}건`
+                        :`저장 실패 — ${(j&&j.detail)||'백엔드 확인 필요'}`;}
+        catch(e){msg='저장 실패 — 서버에 연결하지 못했습니다.';}
+        editMode=false; users=(await load())||users; draw(); alert(msg);};
+      c.querySelector('#cancel').onclick=async()=>{users=(await load())||users;editMode=false;draw();};
     } else if(c.querySelector('#edit')) c.querySelector('#edit').onclick=()=>{editMode=true;draw();};
     c.querySelector('#q').onkeyup=rend;
     rend();
   };
   draw();
+  // 최초 진입 시 서버에서 정본을 읽는다
+  (async()=>{const u=await load();
+    if(u)users=u; else loadErr='서버에서 계정을 읽지 못했습니다(권한 또는 연결 확인).';
+    draw();})();
 };
 SCREEN.setinreq=(c)=>{
   const API=API_BASE;
