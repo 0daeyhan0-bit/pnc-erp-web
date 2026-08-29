@@ -3342,6 +3342,7 @@ SCREEN.itemmaster=(host)=>{
                ${st.form._axis3.procure?`<span style="display:inline-block;background:#eaf5ea;color:#1c7c3a;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600">조달 · ${esc(st.form._axis3.procure)}</span>`:''}
                ${st.form._axis3.produce?`<span style="display:inline-block;background:#eaf0fb;color:#1c47a0;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600">생산 · ${esc(st.form._axis3.produce)}</span>`:''}
                ${st.form._axis3.sales?`<span style="display:inline-block;background:#fbf3e6;color:#b8860b;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600">판매 · ${esc(st.form._axis3.sales)}</span>`:''}
+               ${st.form._axis3.method?`<span style="display:inline-block;background:#eef1f5;color:#556;border-radius:4px;padding:1px 7px;margin:0 2px;font-weight:600" title="현행조달(make_type) — route가 진실, 마스터는 표기만">조달방식 · ${esc(st.form._axis3.method)} <span style="font-weight:400;font-size:10px;color:#889">(참조)</span></span>`:''}
                ${st.form._axis3.unclassified?`<span style="color:#c0392b;font-weight:600">미분류(sgroup 없음)</span>`:''}
              </div>`:''}
            </div>
