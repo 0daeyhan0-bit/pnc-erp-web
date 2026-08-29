@@ -137,3 +137,13 @@ def _load_custnm():
     except Exception:
         pass
 _load_custnm()
+
+# ★기동 시 백그라운드로 월별 compute_quote_lme 프리워밍(원소재/용접봉 탭 첫 요청 지연 제거).
+def _warm_lme():
+    try:
+        for ym in _months(_latest_ym()):
+            _lme(ym)
+    except Exception:
+        pass
+import threading as _th
+_th.Thread(target=_warm_lme, daemon=True).start()

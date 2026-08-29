@@ -101,36 +101,39 @@ def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = 
     """★협력사 보유 사급재고 = 수불장 잔량(nx.sagub_maint 파생). STOCK_QTY = 협력사입고(사급출고+) − 협력사출고(세트소진−) ± 조정.
     ★단일원장(레거시 PU_T_SAGUB_STOCK 대체 — 조정 즉시반영·수불장과 동일값). 기초0@2026-07(migration snapshot 제외)이라 이월로 −잔량 가능 → 조정(협력사사급재고관리)으로 실사 보정.
     ★용접봉/은납 별도 트랙 제외·사급부품(v_pr_bom SAGUB_FLAG=1)만. sign: 1양수/-1음수/0=제로/공백전체."""
+    from routers.sagubledger import _is_part   # ★성능: 부품 판정 in-process 캐시(상관 EXISTS 제거)
     cn = _nx(); cur = cn.cursor()
     try:
-        w = ["ISNULL(l.remarks_src,'')<>'migration'",
-             "EXISTS(SELECT 1 FROM nx.v_pr_bom v WHERE UPPER(LTRIM(RTRIM(v.MAT_CODE)))=UPPER(LTRIM(RTRIM(l.mat_code))) AND v.SAGUB_FLAG='1')",
-             "NOT EXISTS(SELECT 1 FROM nx.item wi WHERE wi.item_code=l.mat_code AND (wi.item_code LIKE 'RAC%' OR wi.item_code LIKE 'BCUP%' OR wi.item_name LIKE '%용접%'))"]; p = []
-        if cust: w.append("l.cust_code=?"); p.append(cust)
+        w = ["ISNULL(l.remarks_src,'')<>'migration'"]; p = []
         if mat: w.append("(l.mat_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
-        hav = ""
-        if sign == "1": hav = "HAVING SUM(l.maint_qty)>0.5"
-        elif sign == "-1": hav = "HAVING SUM(l.maint_qty)<-0.5"
-        elif sign == "0": hav = "HAVING ABS(SUM(l.maint_qty))<=0.5"
-        cur.execute(f"""SELECT TOP {int(limit)} l.cust_code CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, l.mat_code MAT_CODE,
+        cur.execute(f"""SELECT l.cust_code CUST_CODE, ISNULL(c.CUST_DESC,'') custnm, l.mat_code MAT_CODE,
               ISNULL(i.item_name,'') matnm, ISNULL(MAX(i.ITEM_CLASS),'A') item_class,
-              SUM(l.maint_qty) STOCK_QTY, NULL REF_STOCK_QTY,
-              MAX(ISNULL(l.insert_user_id,'')) upd_user, MAX(l.insert_datetime) upd_dt, '사급수불장' upd_win
+              SUM(l.maint_qty) STOCK_QTY, MAX(ISNULL(l.insert_user_id,'')) upd_user, MAX(l.insert_datetime) upd_dt
             FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
             LEFT JOIN nx.item i ON i.ITEM_CODE=l.mat_code
             WHERE {' AND '.join(w)}
-            GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name
-            {hav} ORDER BY custnm, l.mat_code""", *p)
+            GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name""", *p)
         cols = [d[0] for d in cur.description]
-        rows = [{k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in zip(cols, r)} for r in cur.fetchall()]
-        for r in rows:
-            r["STOCK_QTY"] = float(r["STOCK_QTY"] or 0)
-        cur.execute("""SELECT DISTINCT l.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_maint l
-            LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
-            WHERE ISNULL(l.remarks_src,'')<>'migration' AND l.cust_code IS NOT NULL ORDER BY 2""")
-        custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
-        totq = sum(float(r["STOCK_QTY"] or 0) for r in rows)
-        return {"rows": rows, "custs": custs, "totqty": totq}
+        allr = []
+        for r in cur.fetchall():
+            d = {k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in zip(cols, r)}
+            if not _is_part(d["MAT_CODE"]):
+                continue
+            d["STOCK_QTY"] = round(float(d["STOCK_QTY"] or 0), 2); d["REF_STOCK_QTY"] = None; d["upd_win"] = "사급수불장"
+            d["CUST_CODE"] = str(d["CUST_CODE"]).strip()
+            allr.append(d)
+        custs = sorted({(r["CUST_CODE"], (r["custnm"] or r["CUST_CODE"]).strip()) for r in allr}, key=lambda x: x[1])
+        rows = []
+        for r in allr:
+            if cust and r["CUST_CODE"] != cust: continue
+            q = r["STOCK_QTY"]
+            if sign == "1" and not q > 0.5: continue
+            if sign == "-1" and not q < -0.5: continue
+            if sign == "0" and abs(q) > 0.5: continue
+            rows.append(r)
+        rows.sort(key=lambda r: ((r["custnm"] or "").strip(), r["MAT_CODE"])); rows = rows[:int(limit)]
+        totq = sum(r["STOCK_QTY"] for r in rows)
+        return {"rows": rows, "custs": [{"code": c, "nm": n} for c, n in custs], "totqty": totq}
     finally:
         cn.close()
 

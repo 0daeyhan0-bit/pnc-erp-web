@@ -11,11 +11,31 @@ from common import _nx
 
 router = APIRouter()
 
-# 사급부품(v_pr_bom SAGUB_FLAG=1)이고 용접 소재가 아닌 movement 만 = 이 수불장 대상
-_PART = ("ISNULL(l.remarks_src,'')<>'migration'"
-         " AND EXISTS(SELECT 1 FROM nx.v_pr_bom v WHERE UPPER(LTRIM(RTRIM(v.MAT_CODE)))=UPPER(LTRIM(RTRIM(l.mat_code))) AND v.SAGUB_FLAG='1')"
-         " AND NOT EXISTS(SELECT 1 FROM nx.item wi WHERE wi.item_code=l.mat_code"
-         "   AND (wi.item_code LIKE 'RAC%' OR wi.item_code LIKE 'BCUP%' OR wi.item_name LIKE '%용접%'))")
+# ★성능: 사급부품 universe(v_pr_bom SAGUB_FLAG=1)와 용접 제외집합을 in-process 캐시(행마다 상관 EXISTS 제거).
+#   BOM 구조 변경은 드묾 + 재기동시 재로드. (Phase3 동적정확성: 필요시 /reset 결선.)
+_PART_SET = None; _WELD_SET = None
+def _sets():
+    global _PART_SET, _WELD_SET
+    if _PART_SET is None:
+        cn = _nx(); cur = cn.cursor()
+        try:
+            cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM nx.v_pr_bom WHERE SAGUB_FLAG='1' AND ISNULL(MAT_CODE,'')<>''")
+            _PART_SET = set(r[0].strip() for r in cur.fetchall())
+            cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE item_code LIKE 'RAC%' OR item_code LIKE 'BCUP%' OR item_name LIKE '%용접%'")
+            _WELD_SET = set(r[0].strip() for r in cur.fetchall())
+        finally:
+            cn.close()
+    return _PART_SET, _WELD_SET
+def _is_part(mat):
+    p, w = _sets(); m = str(mat or "").strip().upper()
+    return m in p and m not in w
+
+# ★기동 시 백그라운드 프리워밍(첫 요청 지연 제거). 실패해도 lazy 폴백.
+def _warm_bg():
+    try: _sets()
+    except Exception: pass
+import threading as _th
+_th.Thread(target=_warm_bg, daemon=True).start()
 
 
 @router.get("/api/sagubledger/list")
@@ -26,42 +46,44 @@ def sagubledger_list(request: Request, cust: str = Query(""), mat: str = Query("
        scope='sent'(기본)=협력사입고 있는 부품만 · 'all'=출고만 있는 것까지 전체.
        ★소속 강제 — 협력사 계정은 자기 거래처만."""
     cust = scope_cust(require_user(request), cust)
-    w = [_PART]; p = []
-    if cust: w.append("l.cust_code=?"); p.append(cust)
-    if mat:  w.append("(l.mat_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
-    if fr:   w.append("l.maint_ymd>=?"); p.append(fr)
-    if to:   w.append("l.maint_ymd<=?"); p.append(to)
-    hv = []
-    if scope != "all":  hv.append("SUM(CASE WHEN l.maint_qty>0 THEN 1 ELSE 0 END)>0")  # 협력사입고 있는 것만
-    if sign == "1":   hv.append("SUM(l.maint_qty)>0.5")
-    elif sign == "-1": hv.append("SUM(l.maint_qty)<-0.5")
-    elif sign == "0":  hv.append("ABS(SUM(l.maint_qty))<=0.5")
-    hav = ("HAVING " + " AND ".join(hv)) if hv else ""
+    # ★성능: 상관 EXISTS 제거 — GROUP BY(작은 sagub_maint)만 SQL, 부품/scope/sign/cust 는 Python 필터.
+    w = ["ISNULL(l.remarks_src,'')<>'migration'"]; p = []
+    if mat: w.append("(l.mat_code LIKE ? OR i.item_name LIKE ?)"); p += [f"%{mat}%", f"%{mat}%"]
+    if fr:  w.append("l.maint_ymd>=?"); p.append(fr)
+    if to:  w.append("l.maint_ymd<=?"); p.append(to)
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute(f"""SELECT TOP {int(limit)} l.cust_code, ISNULL(c.CUST_DESC,'') custnm, l.mat_code,
-              ISNULL(i.item_name,'') matnm,
+        cur.execute(f"""SELECT l.cust_code, ISNULL(c.CUST_DESC,'') custnm, l.mat_code, ISNULL(i.item_name,'') matnm,
               SUM(CASE WHEN l.maint_qty>0 THEN l.maint_qty ELSE 0 END) sent,
-              SUM(CASE WHEN l.maint_qty<0 THEN -l.maint_qty ELSE 0 END) used,
-              SUM(l.maint_qty) bal
+              SUM(CASE WHEN l.maint_qty<0 THEN -l.maint_qty ELSE 0 END) used, SUM(l.maint_qty) bal
             FROM nx.sagub_maint l
             LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
             LEFT JOIN nx.item i ON i.item_code=l.mat_code
             WHERE {' AND '.join(w)}
-            GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name
-            {hav} ORDER BY custnm, l.mat_code""", *p)
+            GROUP BY l.cust_code, c.CUST_DESC, l.mat_code, i.item_name""", *p)
         cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            for k in ("sent", "used", "bal"): r[k] = round(float(r[k] or 0), 2)
-        # 협력사 목록 = 원장에 거래(movement) 있는 협력사만
-        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(l.cust_code)), LTRIM(RTRIM(ISNULL(c.CUST_DESC,''))) nm
-            FROM nx.sagub_maint l LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code
-            WHERE {_PART} ORDER BY nm""")
-        custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
+        allrows = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            if not _is_part(d["mat_code"]):
+                continue
+            for k in ("sent", "used", "bal"): d[k] = round(float(d[k] or 0), 2)
+            d["cust_code"] = str(d["cust_code"]).strip()
+            allrows.append(d)
+        custs = sorted({(r["cust_code"], (r["custnm"] or r["cust_code"]).strip()) for r in allrows}, key=lambda x: x[1])
+        rows = []
+        for r in allrows:
+            if cust and r["cust_code"] != cust: continue
+            if scope != "all" and not r["sent"] > 0: continue
+            if sign == "1" and not r["bal"] > 0.5: continue
+            if sign == "-1" and not r["bal"] < -0.5: continue
+            if sign == "0" and abs(r["bal"]) > 0.5: continue
+            rows.append(r)
+        rows.sort(key=lambda r: ((r["custnm"] or "").strip(), r["mat_code"]))
+        rows = rows[:int(limit)]
         tot = {"sent": round(sum(r["sent"] for r in rows), 2), "used": round(sum(r["used"] for r in rows), 2),
                "bal": round(sum(r["bal"] for r in rows), 2)}
-        return {"rows": rows, "custs": custs, "tot": tot}
+        return {"rows": rows, "custs": [{"code": c, "nm": n} for c, n in custs], "tot": tot}
     finally:
         cn.close()
 
