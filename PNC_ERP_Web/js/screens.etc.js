@@ -1549,16 +1549,9 @@ SCREEN.dailypurissue=(c)=>{
        </div>
        ${F.sales?(()=>{const CG='<colgroup><col><col style="width:130px"><col style="width:54px"></colgroup>';const TS='width:100%;table-layout:fixed;background:#fff';return `
        <div style="flex:1;min-width:560px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-         <!-- 가운데: 매출 → 매입비율 → 사급율 (세로 스택, 엑셀형·흰배경·컬럼정렬) -->
+         <!-- 가운데: 재료비 → 사급율 (매출은 우측 '당일 실적'으로 이동·누적매출 패널 삭제) -->
          <div style="flex:1;min-width:280px">
-           <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">매출</div>
-           <table class="tbl" style="${TS}">${CG}<tbody>
-             <tr><td>현매출 − 절삭</td><td class="num">${wonI(F.sales.hyeon_cut)}</td><td></td></tr>
-             <tr><td>현매출 − 설치</td><td class="num">${wonI(F.sales.hyeon_seol)}</td><td></td></tr>
-             ${F.sales.hyeon_etc?`<tr><td>현매출 − 기타 <span style="color:var(--muted);font-size:10px">(이지링크/미분류)</span></td><td class="num">${wonI(F.sales.hyeon_etc)}</td><td></td></tr>`:''}
-             <tr style="font-weight:700"><td>LG매출 합계</td><td class="num">${wonI(F.sales.lg_sales)}</td><td></td></tr>
-           </tbody></table>
-           <div style="font-weight:700;color:#1c47a0;margin:10px 0 4px">재료비</div>
+           <div style="font-weight:700;color:#1c47a0;margin-bottom:4px">재료비</div>
            <table class="tbl" style="${TS}">${CG}<tbody>
              ${F.jaemat?`<tr style="font-weight:700;background:#f0f7f0"><td>재료비 <span style="font-weight:400;font-size:10px;color:#888">(기초+매입−기말)</span></td><td class="num">${wonI(F.jaemat.jaemat)}</td><td class="num"><b>${F.jaemat.jaemat_pct}%</b></td></tr>
              <tr><td style="padding-left:16px;color:#555">└ 기초재고 <span style="font-size:10px;color:#888">(7월말)</span></td><td class="num">${wonI(F.jaemat.gicho)}</td><td></td></tr>
