@@ -1321,11 +1321,14 @@ const _tabPart=(c)=>{
          <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
            <th data-key="custnm">협력사</th><th data-key="mat_code">자도번</th><th data-key="matnm">품명</th>
            <th class="num" data-key="sent">협력사입고</th><th class="num" data-key="used">협력사출고</th><th class="num" data-key="bal">잔량</th></tr></thead>
-         <tbody>${st.rows.map((r,i)=>`<tr class="sl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat_code===r.mat_code?'background:#eef4ff':''}">
-           <td>${esc(r.custnm||r.cust_code)}</td><td><b>${esc(r.mat_code)}</b></td>
-           <td class="cap" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.matnm||"")}">${esc(r.matnm||"")}</td>
-           <td class="num" style="color:#1f7a3d">${won(r.sent)}</td><td class="num" style="color:#c0392b">${won(r.used)}</td>
-           <td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${won(r.bal)}</b></td></tr>`).join("")||`<tr><td colspan="6" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음 — 기간/필터를 확인하세요."}</td></tr>`}
+         <tbody>${(()=>{
+           if(!st.rows.length)return `<tr><td colspan="6" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음 — 기간/필터를 확인하세요."}</td></tr>`;
+           let o='',pc=null,s={sent:0,used:0,bal:0};
+           const flush=()=>{if(pc!==null)o+=`<tr style="background:#eef2f7;font-weight:600"><td colspan="3">${esc(pc)} 소계</td><td class="num" style="color:#1f7a3d">${won(s.sent)}</td><td class="num" style="color:#c0392b">${won(s.used)}</td><td class="num"><b style="color:${s.bal<0?'#c0392b':'#1f2d3d'}">${won(s.bal)}</b></td></tr>`;};
+           st.rows.forEach((r,i)=>{const cn=r.custnm||r.cust_code;if(cn!==pc){flush();pc=cn;s={sent:0,used:0,bal:0};}
+             o+=`<tr class="sl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat_code===r.mat_code?'background:#eef4ff':''}"><td>${esc(r.custnm||r.cust_code)}</td><td><b>${esc(r.mat_code)}</b></td><td class="cap" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.matnm||"")}">${esc(r.matnm||"")}</td><td class="num" style="color:#1f7a3d">${won(r.sent)}</td><td class="num" style="color:#c0392b">${won(r.used)}</td><td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${won(r.bal)}</b></td></tr>`;
+             s.sent+=+r.sent||0;s.used+=+r.used||0;s.bal+=+r.bal||0;});
+           flush();return o;})()}
          <tr class="grandtot"><td colspan="3" class="center">합계 ${st.rows.length}건</td><td class="num">${won(t.sent)}</td><td class="num">${won(t.used)}</td><td class="num" style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}"><b>${won(t.bal)}</b></td></tr>
          </tbody></table></div>
        </div>
@@ -1406,11 +1409,14 @@ const _tabRaw=(c)=>{
            <th data-key="custnm">협력사</th><th data-key="mat">재질</th><th class="num" data-key="od">외경Ø</th>
            <th class="num" data-key="sent">불출kg</th><th class="num" data-key="used">소진kg</th><th class="num" data-key="bal">잔량kg</th>
            <th class="num" data-key="amt">정산원</th></tr></thead>
-         <tbody>${st.rows.map((r,i)=>`<tr class="rl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat===r.mat&&st.sel.od===r.od?'background:#eef4ff':''}">
-           <td>${esc(r.custnm||r.cust_code)}</td><td>${esc(r.mat)}</td><td class="num">${r.od}</td>
-           <td class="num" style="color:#1f7a3d">${kg(r.sent)}</td><td class="num" style="color:#c0392b">${kg(r.used)}</td>
-           <td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${kg(r.bal)}</b></td>
-           <td class="num" style="color:${(+r.amt<0)?'#c0392b':'#555'}">${won(r.amt)}</td></tr>`).join("")||`<tr><td colspan="7" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음"}</td></tr>`}
+         <tbody>${(()=>{
+           if(!st.rows.length)return `<tr><td colspan="7" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음"}</td></tr>`;
+           let o='',pc=null,s={sent:0,used:0,bal:0,amt:0};
+           const flush=()=>{if(pc!==null)o+=`<tr style="background:#eef2f7;font-weight:600"><td colspan="3">${esc(pc)} 소계</td><td class="num" style="color:#1f7a3d">${kg(s.sent)}</td><td class="num" style="color:#c0392b">${kg(s.used)}</td><td class="num"><b style="color:${s.bal<0?'#c0392b':'#1f2d3d'}">${kg(s.bal)}</b></td><td class="num">${won(s.amt)}</td></tr>`;};
+           st.rows.forEach((r,i)=>{const cn=r.custnm||r.cust_code;if(cn!==pc){flush();pc=cn;s={sent:0,used:0,bal:0,amt:0};}
+             o+=`<tr class="rl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat===r.mat&&st.sel.od===r.od?'background:#eef4ff':''}"><td>${esc(r.custnm||r.cust_code)}</td><td>${esc(r.mat)}</td><td class="num">${r.od}</td><td class="num" style="color:#1f7a3d">${kg(r.sent)}</td><td class="num" style="color:#c0392b">${kg(r.used)}</td><td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${kg(r.bal)}</b></td><td class="num" style="color:${(+r.amt<0)?'#c0392b':'#555'}">${won(r.amt)}</td></tr>`;
+             s.sent+=+r.sent||0;s.used+=+r.used||0;s.bal+=+r.bal||0;s.amt+=+r.amt||0;});
+           flush();return o;})()}
          <tr class="grandtot"><td colspan="3" class="center">합계 ${st.rows.length}건</td><td class="num">${kg(t.sent)}</td><td class="num">${kg(t.used)}</td><td class="num" style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}"><b>${kg(t.bal)}</b></td><td class="num">${won(t.amt)}</td></tr>
          </tbody></table></div>
        </div>
@@ -1440,11 +1446,27 @@ const _tabWeld=(c)=>{
   const ym2m=s=>s&&s.length===4?("20"+s.slice(0,2)+"-"+s.slice(2)):"";
   const kg=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  let st={rows:[],custs:[],tot:{},cust:"",sign:"",to_ym:`${String(now.getFullYear()).slice(2)}${String(now.getMonth()+1).padStart(2,'0')}`,loading:false};
-  const load=async()=>{st.loading=true;draw();
+  let st={rows:[],custs:[],tot:{},cust:"",sign:"",to_ym:`${String(now.getFullYear()).slice(2)}${String(now.getMonth()+1).padStart(2,'0')}`,loading:false,sel:null,detail:[],dfinal:0,dloading:false};
+  const load=async()=>{st.loading=true;st.sel=null;draw();
     try{const r=await fetch(`${API}/api/rawmatledger/weld?cust=${encodeURIComponent(st.cust)}&to_ym=${st.to_ym}&sign=${st.sign}`);
       const j=await r.json();st.rows=j.rows||[];st.custs=j.custs||[];st.tot=j.tot||{};}catch(e){st.rows=[];}
     st.loading=false;draw();};
+  const loadDetail=async(row)=>{st.sel=row;st.dloading=true;drawDetail();
+    try{const r=await fetch(`${API}/api/rawmatledger/weld/detail?cust=${encodeURIComponent(row.cust_code)}&to_ym=${st.to_ym}`);
+      const j=await r.json();st.detail=j.rows||[];st.dfinal=j.final_qty||0;}catch(e){st.detail=[];}
+    st.dloading=false;drawDetail();};
+  const detailHTML=()=>{
+    if(!st.sel)return '<div class="empty" style="padding:16px;color:var(--muted)">왼쪽에서 협력사를 선택하면 월별 수불이 표시됩니다.</div>';
+    return `<div style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--line)"><b>${esc(st.sel.custnm||st.sel.cust_code)}</b> · 용접봉(1%)</div>
+      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
+        <th>월</th><th class="num">전월잔량</th><th class="num">불출</th><th class="num">소진</th><th class="num">잔량</th></tr></thead>
+      <tbody>${st.detail.map(r=>`<tr>
+        <td>${esc(r.ym)}</td><td class="num" style="color:var(--muted)">${kg(r.prev_qty)}</td>
+        <td class="num" style="color:#1f7a3d">${r.in_qty?kg(r.in_qty):''}</td><td class="num" style="color:#c0392b">${r.out_qty?kg(r.out_qty):''}</td>
+        <td class="num qty" style="color:${(+r.stock_qty<0)?'#c0392b':'#1f2d3d'}"><b>${kg(r.stock_qty)}</b></td></tr>`).join("")||`<tr><td colspan="5" style="padding:14px;color:var(--muted)">${st.dloading?"조회중…":"수불 없음"}</td></tr>`}
+      <tr class="grandtot"><td colspan="4" class="center">최종 잔량(kg)</td><td class="num" style="color:${(+st.dfinal<0)?'#c0392b':'#1f7a3d'}"><b>${kg(st.dfinal)}</b></td></tr>
+      </tbody></table></div>`;};
+  const drawDetail=()=>{const d=c.querySelector("#wl-detail");if(d)d.innerHTML=detailHTML();};
   const draw=()=>{const t=st.tot||{};
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
      <div style="flex:0 0 auto">
@@ -1458,22 +1480,30 @@ const _tabWeld=(c)=>{
         <button class="btn" id="wl-go" style="margin-left:8px">조회</button>
       </div>
      </div>
-     <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column;margin-top:8px">
+     <div style="flex:1;min-height:0;display:flex;gap:8px;margin-top:8px">
+      <div class="panel" style="flex:1.2;min-height:0;display:flex;flex-direction:column;min-width:0">
        <div class="panel-h" style="flex:0 0 auto">협력사 용접봉 ${st.loading?"(조회중…)":`(${st.rows.length}건)`} · 불출 ${kg(t.sent)} / 소진 ${kg(t.used)} / 잔량 <b style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}">${kg(t.bal)}</b> kg · 정산 ${won(t.amt)}원</div>
        <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th>협력사</th><th class="num">불출kg</th><th class="num">소진kg</th><th class="num">잔량kg</th><th class="num">정산원</th></tr></thead>
-       <tbody>${st.rows.map(r=>`<tr>
+       <tbody>${st.rows.map((r,i)=>`<tr class="wl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code?'background:#eef4ff':''}">
          <td>${esc(r.custnm||r.cust_code)}</td>
          <td class="num" style="color:#1f7a3d">${kg(r.sent)}</td><td class="num" style="color:#c0392b">${kg(r.used)}</td>
          <td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${kg(r.bal)}</b></td>
          <td class="num" style="color:${(+r.amt<0)?'#c0392b':'#555'}">${won(r.amt)}</td></tr>`).join("")||`<tr><td colspan="5" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음"}</td></tr>`}
        <tr class="grandtot"><td class="center">합계 ${st.rows.length}건</td><td class="num">${kg(t.sent)}</td><td class="num">${kg(t.used)}</td><td class="num" style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}"><b>${kg(t.bal)}</b></td><td class="num">${won(t.amt)}</td></tr>
        </tbody></table></div>
+      </div>
+      <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column;min-width:0">
+       <div class="panel-h" style="flex:0 0 auto">월별 수불 (running balance)</div>
+       <div id="wl-detail" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">${detailHTML()}</div>
+      </div>
      </div></div>`;
     const g=id=>c.querySelector(id);
     g("#wl-ym").onchange=x=>{st.to_ym=m2ym(x.target.value)||st.to_ym;};
     g("#wl-cust").onchange=x=>{const v=x.target.value.trim();const m=st.custs.find(o=>(o.nm||o.code)===v);st.cust=m?m.code:"";};
     g("#wl-sign").onchange=x=>st.sign=x.target.value; g("#wl-go").onclick=load;
+    c.querySelectorAll(".wl-row").forEach(tr=>tr.onclick=()=>{const r=st.rows[+tr.dataset.i];
+      c.querySelectorAll(".wl-row").forEach(x=>x.style.background="");tr.style.background="#eef4ff";loadDetail(r);});
   };
   load();
 };

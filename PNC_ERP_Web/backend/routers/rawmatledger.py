@@ -60,11 +60,11 @@ def rawmatledger_list(request: Request, cust: str = Query(""), to_ym: str = Quer
             if sign == "-1" and not bal < -0.5: continue
             if sign == "0" and abs(bal) > 0.5: continue
             sp, sg = latest.get((cc, (m, od)), (None, None))
-            rows.append({"cust_code": cc, "custnm": _CUSTNM.get(cc, cc), "mat": m, "od": od,
+            rows.append({"cust_code": cc, "custnm": _CUSTNM.get(str(cc).strip(), str(cc).strip()), "mat": m, "od": od,
                          "sent": round(e["out"], 1), "used": round(e["in"], 1), "bal": bal,
                          "spot": sp, "sagub": sg, "amt": round(e["amt"])})
     rows.sort(key=lambda r: (r["custnm"], -abs(r["amt"])))
-    custs = sorted({(cc, _CUSTNM.get(cc, cc)) for cc in acc}, key=lambda x: x[1])
+    custs = sorted({(cc, _CUSTNM.get(str(cc).strip(), str(cc).strip())) for cc in acc}, key=lambda x: x[1])
     tot = {"sent": round(sum(r["sent"] for r in rows), 1), "used": round(sum(r["used"] for r in rows), 1),
            "bal": round(sum(r["bal"] for r in rows), 1), "amt": round(sum(r["amt"] for r in rows))}
     return {"rows": rows, "custs": [{"code": c, "nm": n} for c, n in custs], "tot": tot, "to_ym": to_ym}
@@ -108,13 +108,28 @@ def rawmatledger_weld(request: Request, cust: str = Query(""), to_ym: str = Quer
         if sign == "1" and not bal > 0.001: continue
         if sign == "-1" and not bal < -0.001: continue
         if sign == "0" and abs(bal) > 0.001: continue
-        rows.append({"cust_code": cc, "custnm": _CUSTNM.get(cc, cc), "mat": "용접봉(1%)", "od": "",
+        rows.append({"cust_code": cc, "custnm": _CUSTNM.get(str(cc).strip(), str(cc).strip()), "mat": "용접봉(1%)", "od": "",
                      "sent": round(o, 3), "used": round(i, 3), "bal": bal, "spot": 62700, "sagub": 21100, "amt": round(a)})
     rows.sort(key=lambda r: r["custnm"])
-    custs = sorted({(cc, _CUSTNM.get(cc, cc)) for cc in acc}, key=lambda x: x[1])
+    custs = sorted({(cc, _CUSTNM.get(str(cc).strip(), str(cc).strip())) for cc in acc}, key=lambda x: x[1])
     tot = {"sent": round(sum(r["sent"] for r in rows), 3), "used": round(sum(r["used"] for r in rows), 3),
            "bal": round(sum(r["bal"] for r in rows), 3), "amt": round(sum(r["amt"] for r in rows))}
     return {"rows": rows, "custs": [{"code": c, "nm": n} for c, n in custs], "tot": tot, "to_ym": to_ym}
+
+
+@router.get("/api/rawmatledger/weld/detail")
+def rawmatledger_weld_detail(request: Request, cust: str = Query(...), to_ym: str = Query("")):
+    """우: 선택 협력사 용접봉 월별 불출/소진 + running balance(기초0 @2607)."""
+    cust = scope_cust(require_user(request), cust)
+    to_ym = (to_ym or "").strip() or _latest_ym()
+    bal = 0.0; out = []
+    for ym in _months(to_ym):
+        d = _lme(ym).get(cust, {})
+        o = float(d.get("weld_out") or 0); i = float(d.get("weld_in") or 0)
+        prev = bal; bal = prev + (o - i)
+        out.append({"ym": ym, "in_qty": round(o, 2), "out_qty": round(i, 2),
+                    "prev_qty": round(prev, 2), "stock_qty": round(bal, 2)})
+    return {"rows": out, "final_qty": round(bal, 2)}
 
 
 # 협력사명 + 최신 데이터월 (weight_calc._COOP_CUST_VENDOR 기반)
@@ -127,12 +142,13 @@ def _load_custnm():
     if _CUSTNM:
         return
     try:
-        cn = W._ro(); cur = cn.cursor()
+        from common import _nx   # ★nx(PARTNER_ERP_TEST3)에 CM_M_CUST 존재. W._ro()=라이브라 nx스키마 없음(버그).
+        cn = _nx(); cur = cn.cursor()
         codes = list(W._COOP_CUST_VENDOR.keys())
         ph = ",".join("?" for _ in codes)
-        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE CUST_CODE IN ({ph})", *codes)
+        cur.execute(f"SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM nx.CM_M_CUST WHERE LTRIM(RTRIM(CUST_CODE)) IN ({ph})", *codes)
         for c, n in cur.fetchall():
-            _CUSTNM[str(c).strip()] = str(n).strip()
+            _CUSTNM[str(c).strip()] = str(n).strip() or str(c).strip()
         cn.close()
     except Exception:
         pass
