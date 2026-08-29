@@ -326,3 +326,295 @@ READ_CHECKS = [
     dict(name="생산 수불장(/api/close/ledger?domain=PRD)", method="GET",
          path=lambda ctx: f"/api/close/ledger?domain=PRD&d_from={YMD[:4]}01&d_to={YMD}"),
 ]
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  인증 · 소속 강제 · 세트입고  (협력사 포털 1단계, 2026-08-29)
+#  정본 = _schema/PARTNER_PORTAL_DESIGN.md §10~12
+# ══════════════════════════════════════════════════════════════════════
+
+# ★하네스가 쓰는 개발 시드 계정.
+#   운영 전환 전에 **반드시 비밀번호를 바꾼다**(바꾸면 환경변수로 넘긴다).
+#   이 계정들은 PARTNER_ERP_TEST3 의 개발 시드이며, 화면(브라우저)에는 더 이상
+#   비밀번호가 실려 나가지 않는다 — 여기 있는 것은 하네스가 로그인하기 위한 것이다.
+import os as _os
+import json as _j
+ACCOUNTS = {
+    "super":   _os.environ.get("FLOW_PW_SUPER", "super"),      # 내부 · 시스템관리자
+    "miraero": _os.environ.get("FLOW_PW_COOP", "1234"),        # 협력사(미래정밀 = 2096)
+    "kdev":    _os.environ.get("FLOW_PW_KDEV", "1234"),        # 내부 · 조회전용
+}
+COOP_CUST = "2096"          # 미래정밀 — 협력사 계정의 소속
+OTHER_CUST = "2148"         # 대원산업 — '남의 것'
+
+
+def _custs(res, *keys):
+    """응답 rows 에서 거래처코드 집합을 뽑는다(컬럼명이 화면마다 달라 여러 개를 본다)."""
+    out = set()
+    for r in (res.get("rows") or []) if isinstance(res, dict) else []:
+        for k in keys:
+            v = r.get(k)
+            if v is not None and str(v).strip():
+                out.add(str(v).strip())
+                break
+    return out
+
+
+def _only_mine(res, *keys):
+    got = _custs(res, *keys)
+    n = len(res.get("rows") or []) if isinstance(res, dict) else 0
+    return (got <= {COOP_CUST}), f"{n}행 · 거래처 {sorted(got) or '없음'}"
+
+
+AUTH_CASES = [
+    # ── 로그인 전 : 아무것도 보이면 안 된다 ─────────────────────────
+    dict(kind="S", name="무토큰 — 협력사 계획 조회", method="GET",
+         path=f"/api/partner/planstatus?wc={OTHER_CUST}&from_ymd={YMD}&to_ymd={YMD}",
+         as_=None, expect=401),
+    dict(kind="S", name="무토큰 — 세트입고 송장목록", method="GET",
+         path="/api/setin/list", as_=None, expect=401),
+    dict(kind="S", name="무토큰 — 세트입고 실적", method="GET",
+         path="/api/setstock/list", as_=None, expect=401),
+    dict(kind="S", name="★무토큰 — 계정목록(예전엔 평문 비밀번호가 나왔다)", method="GET",
+         path="/api/perm/users", as_=None, expect=401,
+         check=lambda res, ctx: (("users" not in res), "계정 정보가 전혀 나오지 않음")),
+    dict(kind="S", name="무토큰 — 입고 스캔", method="GET",
+         path="/api/setstock/scan?barcode=700003", as_=None, expect=401),
+
+    # ── 로그인 자체 ────────────────────────────────────────────────
+    dict(kind="S", name="로그인 — 옳은 비밀번호", method="POST", path="/api/auth/login",
+         body={"id": "super", "pw": ACCOUNTS["super"]}, as_=None, expect=200,
+         check=lambda res, ctx: (bool(res.get("token")),
+                                 f"{res.get('user',{}).get('nm')} · 유효 {res.get('expires_hours')}시간")),
+    dict(kind="S", name="로그인 — 틀린 비밀번호", method="POST", path="/api/auth/login",
+         body={"id": "super", "pw": "틀린비번!!"}, as_=None, expect=401,
+         check=lambda res, ctx: ("올바르지 않습니다" in str(res.get("detail", "")),
+                                 f"응답 = {res.get('detail')}")),
+    dict(kind="S", name="★로그인 — 없는 계정도 같은 문구(존재 여부를 흘리지 않는다)",
+         method="POST", path="/api/auth/login",
+         body={"id": "없는계정xyz", "pw": "x"}, as_=None, expect=401,
+         check=lambda res, ctx: ("올바르지 않습니다" in str(res.get("detail", ""))
+                                 and "없" not in str(res.get("detail", ""))[:10],
+                                 f"응답 = {res.get('detail')}")),
+    dict(kind="S", name="무토큰 — 내 정보 조회", method="GET", path="/api/auth/me",
+         as_=None, expect=401),
+    dict(kind="S", name="협력사 로그인 — 거래처코드가 실려 오는가", method="POST",
+         path="/api/auth/login", body={"id": "miraero", "pw": ACCOUNTS["miraero"]},
+         as_=None, expect=200,
+         check=lambda res, ctx: (res.get("user", {}).get("partner_code") == COOP_CUST,
+                                 f"{res.get('user',{}).get('nm')} · 유형 {res.get('user',{}).get('utype')}"
+                                 f" · 거래처코드 {res.get('user',{}).get('partner_code')}")),
+
+    # ── ★소속 강제 : 협력사가 남의 코드를 넣으면 ────────────────────
+    dict(kind="S", name=f"★협력사가 남의 코드({OTHER_CUST}) 로 송장목록", method="GET",
+         path=f"/api/setin/list?cust={OTHER_CUST}", as_="miraero", expect=200,
+         check=lambda res, ctx: _only_mine(res, "in_cust_code", "cust_code", "cust")),
+    dict(kind="S", name=f"★협력사가 남의 코드({OTHER_CUST}) 로 입고실적", method="GET",
+         path=f"/api/setstock/list?cust={OTHER_CUST}", as_="miraero", expect=200,
+         check=lambda res, ctx: _only_mine(res, "cust_code", "in_cust_code")),
+    dict(kind="S", name=f"★협력사가 남의 작업처({OTHER_CUST}) 로 계획조회", method="GET",
+         path=f"/api/partner/planstatus?wc={OTHER_CUST}", as_="miraero", expect=200,
+         check=lambda res, ctx: _only_mine(res, "MAT_WORK_CENTER_CODE", "wc", "cust_code")),
+    dict(kind="S", name="협력사가 자기 코드로 거래명세서 (비교 기준)", method="GET",
+         path=f"/api/partner/deliv420?cust={COOP_CUST}", as_="miraero", expect=200,
+         check=lambda res, ctx: (ctx.update(
+             _deliv_mine=_j.dumps(res.get("rows") or [], sort_keys=True, default=str)) or True,
+             f"{len(res.get('rows') or [])}행 — 이걸 기준으로 다음 케이스와 비교한다")),
+    dict(kind="S", name="★협력사가 남의 코드로 거래명세서 조회 = 자기 결과와 같은가",
+         method="GET", path=f"/api/partner/deliv420?cust={OTHER_CUST}",
+         as_="miraero", expect=200,
+         check=lambda res, ctx: _deliv_same(res, ctx)),
+    dict(kind="S", name="★그 결과가 내부가 보는 남의 데이터와는 다른가", method="GET",
+         path=f"/api/partner/deliv420?cust={OTHER_CUST}", as_="super", expect=200,
+         check=lambda res, ctx: (
+             _j.dumps(res.get("rows") or [], sort_keys=True, default=str) != ctx.get("_deliv_mine"),
+             f"내부가 본 {OTHER_CUST} = {len(res.get('rows') or [])}행 · "
+             f"협력사가 받은 것과 {'다름 = 남의 데이터가 아니었다' if _j.dumps(res.get('rows') or [], sort_keys=True, default=str) != ctx.get('_deliv_mine') else '★같음'}")),
+
+    # ── 내부 사용자는 종전대로 (회귀 없음) ──────────────────────────
+    dict(kind="S", name=f"내부 사용자는 남의 코드({OTHER_CUST}) 조회 가능", method="GET",
+         path=f"/api/setin/list?cust={OTHER_CUST}", as_="super", expect=200,
+         check=lambda res, ctx: (True,
+                                 f"{len(res.get('rows') or [])}행 · 거래처 "
+                                 f"{sorted(_custs(res,'in_cust_code','cust_code'))[:3]}")),
+    dict(kind="S", name="내부 사용자는 전체 조회 가능", method="GET",
+         path="/api/setin/list", as_="super", expect=200,
+         check=lambda res, ctx: (len(_custs(res, "in_cust_code", "cust_code")) >= 1,
+                                 f"{len(res.get('rows') or [])}행 · 거래처 "
+                                 f"{len(_custs(res,'in_cust_code','cust_code'))}곳")),
+
+    # ── 남의 문서 (바코드·송장번호만 알면 되는 API) ─────────────────
+    dict(kind="S", name="★협력사가 남의 송장 명세 열람", method="GET",
+         path=lambda ctx: f"/api/setin/detail?sheet={ctx.get('other_sheet')}",
+         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
+    dict(kind="S", name="내부는 그 송장이 열린다(회귀 없음)", method="GET",
+         path=lambda ctx: f"/api/setin/detail?sheet={ctx.get('other_sheet')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("other_sheet"),
+         check=lambda res, ctx: (True, f"자도번 {len(res.get('rows') or [])}종")),
+    dict(kind="S", name="★협력사가 남의 송장을 발행", method="POST", path="/api/setin/issue",
+         body=lambda ctx: {"items": [{"sheet": ctx.get("other_sheet"), "qty": 1}]},
+         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_sheet")),
+    dict(kind="S", name="★협력사가 남의 거래명세표 열람", method="GET",
+         path=lambda ctx: f"/api/partner/deliv420/invoice?barcode={ctx.get('other_bc')}",
+         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+    dict(kind="S", name="★협력사가 남의 발행을 취소", method="POST",
+         path="/api/partner/deliv420/cancel",
+         body=lambda ctx: {"barcode": ctx.get("other_bc")},
+         as_="miraero", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+    dict(kind="S", name="자기 거래명세표는 열린다", method="GET",
+         path=lambda ctx: f"/api/partner/deliv420/invoice?barcode={ctx.get('my_bc')}",
+         as_="miraero", expect=200, skip_if=lambda ctx: not ctx.get("my_bc"),
+         check=lambda res, ctx: (True, f"품목 {len(res.get('rows') or res.get('items') or [])}종")),
+
+    # ── 입고 처리 = 우리가 받는 행위 → 협력사 거부 ──────────────────
+    dict(kind="S", name="★협력사가 입고 스캔", method="GET",
+         path="/api/setstock/scan?barcode=700003", as_="miraero", expect=403),
+    dict(kind="S", name="★협력사가 입고 처리", method="POST", path="/api/setstock/receive",
+         body={"barcode": "700003", "tag": "2"}, as_="miraero", expect=403),
+    dict(kind="S", name="★협력사가 입고 취소", method="POST", path="/api/setstock/cancel",
+         body={"barcode": "700003"}, as_="miraero", expect=403),
+    dict(kind="S", name="★협력사가 입고취소 미리보기", method="GET",
+         path="/api/setstock/cancel_preview?barcode=700003", as_="miraero", expect=403),
+
+    # ── 계정 API ───────────────────────────────────────────────────
+    dict(kind="S", name="★계정목록에 평문 비밀번호가 나오지 않는가", method="GET",
+         path="/api/perm/users", as_="super", expect=200,
+         check=lambda res, ctx: (all("pw" not in u for u in (res.get("users") or [])),
+                                 f"{len(res.get('users') or [])}명 · pw 필드 "
+                                 f"{sum(1 for u in (res.get('users') or []) if 'pw' in u)}개 · "
+                                 f"비번설정 {sum(1 for u in (res.get('users') or []) if u.get('pw_set'))}명")),
+    dict(kind="S", name="협력사는 자기 계정만 본다", method="GET", path="/api/perm/users",
+         as_="miraero", expect=200,
+         check=lambda res, ctx: (len(res.get("users") or []) == 1
+                                 and (res.get("users") or [{}])[0].get("id") == "miraero",
+                                 f"{len(res.get('users') or [])}명 = "
+                                 f"{[u.get('id') for u in (res.get('users') or [])]}")),
+    dict(kind="S", name="★협력사가 계정을 저장", method="POST", path="/api/perm/users",
+         body={"users": [{"id": "hacker", "nm": "침입", "roles": ["시스템관리자"]}]},
+         as_="miraero", expect=403),
+    dict(kind="S", name="조회전용 내부 사용자도 계정 저장 불가", method="POST",
+         path="/api/perm/users",
+         body={"users": [{"id": "hacker2", "nm": "침입2", "roles": ["시스템관리자"]}]},
+         as_="kdev", expect=403),
+]
+
+
+def _deliv_same(res, ctx):
+    """협력사가 남의 코드로 부른 결과가 **자기 코드로 부른 결과와 같은가**.
+       같으면 요청값이 무시된 것 = 소속 강제가 걸린 것이다."""
+    mine = ctx.get("_deliv_mine")
+    got = _j.dumps(res.get("rows") or [], sort_keys=True, default=str)
+    n = len(res.get("rows") or [])
+    if mine is None:
+        return False, "기준 케이스가 먼저 돌지 않았다"
+    return (got == mine), (f"{n}행 · 자기코드({COOP_CUST}) 결과와 "
+                           f"{'동일 = 요청값이 무시됐다' if got == mine else '★다름 = 남의 것이 샜다'}")
+
+
+# ── 세트입고 왕복 : 발행 → 입고 → 중복차단 → 취소 → 재입고 ──────────
+def _keep(key):
+    def f(res, ctx):
+        ctx[key] = res
+        return True, ""
+    return f
+
+
+SETIN_CASES = [
+    dict(kind="S", name="① 송장 발행 (계획편성분)", method="POST", path="/api/setin/issue",
+         body=lambda ctx: {"items": [{"sheet": ctx.get("plan_sheet"), "qty": 10}]},
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (ctx.update(setbc=str(res.get("barcode") or "")) or
+                                 bool(res.get("barcode")),
+                                 f"SET바코드 {res.get('barcode')} 채번 · {res.get('count')}건")),
+    dict(kind="S", name="② 스캔 — 입고 전에는 경고가 없어야", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('setbc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (not res.get("warn"),
+                                 f"협력사 {res.get('custnm')} · 도번 {len(res.get('rows') or [])}종 · "
+                                 f"이미입고 {res.get('already')}건 · 경고 {res.get('warn') or '없음'}")),
+    dict(kind="S", name="③ 입고 — 재고 파생까지 생기는가", method="POST",
+         path="/api/setstock/receive",
+         body=lambda ctx: {"barcode": ctx.get("setbc"), "tag": "2", "user": "flowverify"},
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (ctx.update(posted=res.get("ledger_posted")) or
+                                 res.get("received", 0) > 0,
+                                 f"입고 {res.get('received')}건 · 자도번 재고파생 "
+                                 f"{res.get('ledger_posted')}행")),
+    dict(kind="S", name="④ ★같은 송장을 또 스캔하면 경고가 뜨는가", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('setbc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (bool(res.get("warn")),
+                                 f"이미입고 {res.get('already')}건 · 경고 = {res.get('warn')}")),
+    dict(kind="S", name="⑤ ★중복 입고는 막히는가 (재고가 두 배 되는 사고)", method="POST",
+         path="/api/setstock/receive",
+         body=lambda ctx: {"barcode": ctx.get("setbc"), "tag": "2", "user": "flowverify"},
+         as_="super", expect=409, skip_if=lambda ctx: not ctx.get("plan_sheet")),
+    dict(kind="S", name="⑥ 입고취소 미리보기 — 무엇이 되돌아가나", method="GET",
+         path=lambda ctx: f"/api/setstock/cancel_preview?barcode={ctx.get('setbc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (res.get("recv_cnt", 0) > 0,
+                                 f"입고 {res.get('recv_cnt')}건 · 재고파생 {res.get('ledger_cnt')}행 / "
+                                 f"{res.get('ledger_qty')}개")),
+    dict(kind="S", name="⑦ ★입고취소 — 3곳이 모두 되돌아가는가", method="POST",
+         path="/api/setstock/cancel",
+         body=lambda ctx: {"barcode": ctx.get("setbc"), "user": "flowverify", "reason": "검증"},
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: _cancel_check(res, ctx)),
+    dict(kind="S", name="⑧ 취소 후 경고가 사라지는가", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('setbc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (not res.get("warn") and res.get("already") == 0,
+                                 f"이미입고 {res.get('already')}건 · 경고 {res.get('warn') or '없음'}")),
+    dict(kind="S", name="⑨ 취소 후 다시 입고할 수 있는가", method="POST",
+         path="/api/setstock/receive",
+         body=lambda ctx: {"barcode": ctx.get("setbc"), "tag": "2", "user": "flowverify"},
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("plan_sheet"),
+         check=lambda res, ctx: (res.get("received", 0) > 0,
+                                 f"재입고 {res.get('received')}건 · 재고파생 {res.get('ledger_posted')}행")),
+    dict(kind="S", name="⑩ 없는 바코드 취소 — 사유가 명확한가", method="POST",
+         path="/api/setstock/cancel", body={"barcode": "999999999"},
+         as_="super", expect=404),
+]
+
+
+def _cancel_check(res, ctx):
+    """취소 후 **DB 를 직접 확인**한다 — 응답만 믿지 않는다."""
+    sql = ctx.get("_sql")
+    bc = ctx.get("setbc")
+    if not sql or not bc:
+        return bool(res.get("ok")), "DB 확인 불가"
+    mnt = sql("SELECT COUNT(*) FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
+    led = sql("SELECT COUNT(*) FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
+              int(bc) if str(bc).isdigit() else 0)
+    req = sql("SELECT status, COUNT(*) FROM nx.set_input_req WHERE barcode_no=? GROUP BY status", bc)
+    n_m = mnt[0][0] if mnt else -1
+    n_l = led[0][0] if led else -1
+    stat = [(str(r[0]).strip(), r[1]) for r in req]
+    ok = (n_m == 0) and (n_l == 0) and all(s == "10" for s, _ in stat)
+    return ok, (f"{res.get('msg')}\n           "
+                f"DB 확인 → 입고거래 {n_m}건 · 재고파생 {n_l}행 · 송장상태 {stat}")
+
+
+CASES += AUTH_CASES + SETIN_CASES
+
+# 세트입고 왕복용 픽스처 (쓰기 전에 미리 읽는다)
+FIXTURES += [
+    ("plan_sheet", """SELECT TOP 1 h.sheet_no, COUNT(d.mat_code)
+                        FROM nx.set_input_req h
+                        JOIN nx.set_input_req_dtl d ON d.sheet_no = h.sheet_no
+                       WHERE h.status='00' AND h.remarks='PLAN_COMPOSE'
+                       GROUP BY h.sheet_no ORDER BY COUNT(d.mat_code) DESC""",
+     lambda ctx, r: ctx.update(plan_sheet=str(r[0]).strip(), plan_dtl=int(r[1]))),
+
+    ("other_sheet", """SELECT TOP 1 sheet_no FROM nx.set_input_req
+                        WHERE in_cust_code<>'2096' AND ISNULL(in_cust_code,'')<>''""",
+     lambda ctx, r: ctx.update(other_sheet=str(r[0]).strip())),
+
+    ("other_bc", """SELECT TOP 1 barcode_no FROM nx.deliv_issue
+                     WHERE cust_code<>'2096' AND ISNULL(barcode_no,'')<>''""",
+     lambda ctx, r: ctx.update(other_bc=str(r[0]).strip())),
+
+    ("my_bc", """SELECT TOP 1 barcode_no FROM nx.deliv_issue
+                  WHERE cust_code='2096' AND ISNULL(barcode_no,'')<>'' AND status<>'99'""",
+     lambda ctx, r: ctx.update(my_bc=str(r[0]).strip())),
+]

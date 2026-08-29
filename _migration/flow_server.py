@@ -92,7 +92,10 @@ ROLLBACK_TABS = ("nx.stock_ledger", "nx.PU_T_STOCK_MAINT", "nx.PU_T_MAT_STOCK_WH
                  "nx.proc_result", "nx.saleout_maint",
                  # 협력사 세트입고(2026-08-29) — 송장/입고거래도 오염 0 대상이다.
                  #   입고취소는 이 두 테이블을 지우므로, 여기 없으면 "깨끗하다"가 거짓말이 된다.
-                 "nx.set_input_req", "nx.set_input_req_dtl", "nx.set_stock_maint")
+                 "nx.set_input_req", "nx.set_input_req_dtl", "nx.set_stock_maint",
+                 # 인증(2026-08-29) — 하네스가 로그인하면 세션이 생기고 실패하면 잠금이 걸린다.
+                 #   여기 없으면 "오염 0" 이 계정 테이블을 안 본 채로 통과한다.
+                 "nx.app_user", "nx.app_session")
 _ROWS0 = {}
 
 
