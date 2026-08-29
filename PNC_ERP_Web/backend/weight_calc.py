@@ -11,7 +11,22 @@
    매칭 Assy는 담당자수량과 ±5% 일치. 담당자 수기항목(전산에 없음)은 반영 안 함."""
 import sys, os, threading, math, re, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'New_ERP'))  # Projects\New_ERP
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '_harness'))        # NEW_ERP_1\_harness (통일 소요엔진)
 import pyodbc, db_client
+
+# ★소요엔진-only(CLAUDE §1-10): 중량 전개(_explode)는 통일 소요엔진 nx_soyo_engine.weight_explode로만.
+#   엔진 싱글톤+RLock 직렬화(NxCostEngine 단일 커넥션=비스레드안전, 정산은 저빈도라 직렬화 무해).
+_ENG = None; _SE = None
+_ENG_LOCK = threading.RLock()
+def _eng():
+    global _ENG, _SE
+    if _ENG is None:
+        with _ENG_LOCK:
+            if _ENG is None:
+                import nx_soyo_engine as SE
+                from nx_cost_engine import NxCostEngine
+                _SE = SE; _ENG = NxCostEngine()
+    return _ENG
 
 _lock = threading.Lock()
 _MAPS = None  # (META, CH) 캐시
@@ -109,7 +124,17 @@ def _load_maps():
         return _MAPS
 
 def _explode(item, META, CH, COOPB, COOP_SET, memo):
-    """1개 → (raw_kg, weld_kg): 업체가공(SAGUB_FLAG!=1) 경로의 동/용접봉 중량.
+    """★통일 소요엔진 위임 = nx_soyo_engine.weight_explode(동/용접봉 중량, sagub≠1·COOP_SET리프·coop_bom 폴백).
+       원본 자기재귀 = _explode_legacy(1줄 롤백·diff0 대조 보존). 소요엔진-only 하드룰(CLAUDE §1-10).
+       엔진 walker가 weight_calc._explode를 완전재현(전수 2081/2081 diff0 검증). 엔진 한곳 고치면 중량정산도 동시정확.
+       (인자 META/CH/COOPB/COOP_SET/memo = 하위호환 시그니처, 신경로 미사용.)"""
+    with _ENG_LOCK:
+        eng = _eng()                      # ★_eng() 먼저(=_SE 세팅) 후 _SE 접근
+        return _SE.weight_explode(eng, item)
+
+
+def _explode_legacy(item, META, CH, COOPB, COOP_SET, memo):
+    """[원본 보존·롤백/대조용] 1개 → (raw_kg, weld_kg): 업체가공(SAGUB_FLAG!=1) 경로의 동/용접봉 중량.
        ★coop 단품(COOP_SET)은 협력사 정산 리프 = 자기 중량으로 마감(사급 하위BOM 전개 안 함).
        CS_M_ITEM_BOM 전개가 0(동/용접봉 미도달)이면 협력사BOM(nx.coop_bom)으로 정상 전개."""
     if item in memo:
@@ -121,7 +146,7 @@ def _explode(item, META, CH, COOPB, COOP_SET, memo):
         for c, q, sag in ch:
             if sag == '1':      # 사급(우리가 가공/단품 제공) 제외 — 업체가공만 인정
                 continue
-            cr, cw = _explode(c, META, CH, COOPB, COOP_SET, memo)
+            cr, cw = _explode_legacy(c, META, CH, COOPB, COOP_SET, memo)
             rk += cr * q; wk += cw * q
         if rk > 0 or wk > 0:            # 정상 전개 → 그대로
             memo[item] = (rk, wk)
@@ -134,7 +159,7 @@ def _explode(item, META, CH, COOPB, COOP_SET, memo):
         if cb:
             rk = wk = 0.0
             for c, q in cb:
-                cr, cw = _explode(c, META, CH, COOPB, COOP_SET, memo)
+                cr, cw = _explode_legacy(c, META, CH, COOPB, COOP_SET, memo)
                 rk += cr * q; wk += cw * q
             memo[item] = (rk, wk)
             return memo[item]
@@ -144,7 +169,7 @@ def _explode(item, META, CH, COOPB, COOP_SET, memo):
     if cb and item not in COOP_SET:     # coop 단품은 리프(자기중량), 그 외만 협력사BOM 전개
         rk = wk = 0.0
         for c, q in cb:
-            cr, cw = _explode(c, META, CH, COOPB, COOP_SET, memo)
+            cr, cw = _explode_legacy(c, META, CH, COOPB, COOP_SET, memo)
             rk += cr * q; wk += cw * q
         memo[item] = (rk, wk)
         return memo[item]
