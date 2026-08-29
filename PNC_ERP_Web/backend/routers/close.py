@@ -1022,7 +1022,20 @@ _BOM_ENG = [None]
 
 
 def _bom_engine():
-    """원가엔진 싱글턴 — 죽어 있으면 재생성."""
+    """원가엔진 — ★공용 싱글턴(`common._get_cost_engine`)을 쓴다.
+
+       예전에는 여기서 `NxCostEngine()` 을 **따로** 만들었다. 그러면
+       원가 화면이 이미 데워 둔 엔진을 못 쓰고 **매 프로세스마다 콜드 스타트**를 다시 겪는다
+       (실측 2026-08-29: _prd_price_bom 1차 30.5초 / 2차 0.7초 — 차이가 전부 엔진 예열이다).
+       공용 엔진은 `warm_all()` 예열 + 커넥션 헬스체크 + 락을 갖췄다. 하나만 쓰는 것이 옳다.
+    """
+    try:
+        from common import _get_cost_engine, _COST_LOCK
+        with _COST_LOCK:
+            return _get_cost_engine()
+    except Exception:
+        pass
+    # 공용 엔진을 못 얻으면 종전 방식으로 폴백(화면이 빈손이 되지 않게)
     eng = _BOM_ENG[0]
     try:
         if eng is not None and eng.alive():
@@ -1050,15 +1063,21 @@ def _prd_price_bom(cur, target, need):
     ym = str(target)[:4]
     # ★BOM 이 없는 품목은 엔진에 넣지 않는다 — 어차피 0 이 나오는데 품목당 ~0.14초를 쓴다.
     #   실측(2026-08-28): 310품목 42.2초 소요 · 보강 **0건**. 전부 헛돌았다.
-    #   nx.bom 에 parent 로 존재하는 것만 남기면 화면이 쓸 수 있는 속도가 된다.
+    #   ★★소스 교정(2026-08-29) — 이 필터가 `nx.bom` 을 봤는데 **엔진은 `nx.bom_header` 를 쓴다**
+    #     (`NxCostEngine._load_hasbom`). SUB·은납 반제품은 `nx.bom` 에 부모로 없고
+    #     `bom_header` 에만 있어 **전부 스킵**됐다 → 단가 0 → 재고금액에서 빠졌다.
+    #     실측(용접 재고): 단가없음 98품번 중 84개 스킵 · 그중 76개는 엔진이 단가를 구할 수 있었다
+    #           = **51,657,231원이 0 으로 계상**(AJR30027712-SUB2 7.7M · AJR30004702-SUB 5.9M …).
+    #     ⟹ 필터 소스를 **엔진과 같은 `nx.bom_header`** 로 맞춘다. 헛도는 호출을 막는 목적은
+    #        그대로 두면서, 엔진이 실제로 계산할 수 있는 품목을 놓치지 않는다.
     need = list(need)
     if need:
         has = set()
         for i in range(0, len(need), 500):
             part = [str(x).strip().upper() for x in need[i:i + 500]]
             ph = ",".join("?" * len(part))
-            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(parent_code))) FROM nx.bom
-                             WHERE UPPER(LTRIM(RTRIM(parent_code))) IN ({ph})""", *part)
+            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(item_code))) FROM nx.bom_header
+                             WHERE UPPER(LTRIM(RTRIM(item_code))) IN ({ph})""", *part)
             has |= {str(r[0]) for r in cur.fetchall()}
         skipped = [it for it in need if str(it).strip().upper() not in has]
         for it in skipped:                      # 조회 반복을 막기 위해 0 으로 캐시
@@ -1409,6 +1428,27 @@ def _ledger_cache_clear():
     _LEDGER_CACHE.clear()
     _PRD_PX_CACHE.clear()
     _SAL_PX_CACHE.clear()
+
+
+def ledger_cached(cur, domain, fr6, to6):
+    """★생산/영업 수불장 — **캐시 공유 진입점**. (rows, breaks, basis) 반환.
+
+       왜 함수로 빼나 — 캐시가 엔드포인트 안에만 있으면 다른 화면(생산재고조회)이
+       같은 계산을 **처음부터 다시** 한다(실측 2026-08-29: 재고조회 41초).
+       여기로 모으면 수불장을 한 번 본 뒤 재고조회는 즉시, 반대도 같다.
+       ★캐시는 조회 전용 — 재고 쓰기 후에는 `_ledger_cache_clear()` 가 버린다.
+    """
+    ck = (domain, fr6, to6)
+    if ck in _LEDGER_CACHE:
+        return _LEDGER_CACHE[ck]
+    rows, breaks, basis = (_prd_ledger if domain == "PRD" else _sal_ledger)(cur, fr6, to6)
+    # ★_attach_item_info 를 캐시 안에서 부른다 — 밖에 두면 최종입고일 집계(170만행)를
+    #   매 조회마다 다시 돌아 캐시가 무의미해진다(2026-08-28 실측: 2차도 11초).
+    _attach_item_info(cur, rows, to6)
+    if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
+        _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
+    _LEDGER_CACHE[ck] = (rows, breaks, basis)
+    return _LEDGER_CACHE[ck]
 
 
 def _prd_ledger(cur, fr6, to6):
@@ -1781,17 +1821,8 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         if fr6 > to6:
             fr6, to6 = to6, fr6
         if d in ("PRD", "SAL"):
-            _ck = (d, fr6, to6)
-            if _ck in _LEDGER_CACHE:
-                rows, breaks, basis = _LEDGER_CACHE[_ck]
-            else:
-                rows, breaks, basis = (_prd_ledger if d == "PRD" else _sal_ledger)(cur, fr6, to6)
-                # ★_attach_item_info 를 **캐시 안**에서 부른다 — 밖에 두면 최종입고일 집계(170만행)를
-                #   매 조회마다 다시 돌아 캐시가 무의미해진다(2026-08-28 실측: 2차도 11초).
-                _attach_item_info(cur, rows, to6)
-                if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
-                    _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
-                _LEDGER_CACHE[_ck] = (rows, breaks, basis)
+            # ★재고조회와 **같은 캐시**를 쓴다(ledger_cached) — 한쪽을 본 뒤 다른 쪽은 즉시.
+            rows, breaks, basis = ledger_cached(cur, d, fr6, to6)
             if q:
                 k = q.strip().upper()
                 rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]
