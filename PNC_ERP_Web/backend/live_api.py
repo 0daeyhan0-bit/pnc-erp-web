@@ -460,16 +460,21 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     #    실재고(조정후) = 실매입 + 재고증가합계.
     # ★재고(기초/기말) = 자재/생산/영업 수불장(close.py MAT/PRD/SAL). ba=기초금액·sa=기말금액. ★이동평균 일마감(matclose) 아님.
     from routers import close as _close
-    _lc = _nx(); _lcur = _lc.cursor()
+    _lc = _nxc(); _lcur = _lc.cursor()
     base_m = cur_m = base_prd = cur_prd = base_s = cur_s = 0
-    def _ledsum(fn, *a):
-        rows = fn(*a)[0]
+    def _ledsum(domain, fn, *a):
+        # ★close.py 수불장 캐시 공유 — 수불장 화면/재조회 시 즉시(콜드만 무거움). 캐시무효화도 close가 관리.
+        ck = (domain, m0, d6)
+        hit = _close._LEDGER_CACHE.get(ck)
+        rows = hit[0] if hit else fn(*a)[0]
+        if not hit:
+            _close._LEDGER_CACHE[ck] = (rows, [], '')
         return round(sum(float(r.get('ba') or 0) for r in rows)), round(sum(float(r.get('sa') or 0) for r in rows))
-    try: base_m, cur_m = _ledsum(_close._mat_ledger, _lcur, m0, d6, 0)     # 자재 수불장
+    try: base_m, cur_m = _ledsum('MAT', _close._mat_ledger, _lcur, m0, d6, 0)   # 자재 수불장
     except Exception: pass
-    try: base_prd, cur_prd = _ledsum(_close._prd_ledger, _lcur, m0, d6)    # 생산 수불장(용접+가공)
+    try: base_prd, cur_prd = _ledsum('PRD', _close._prd_ledger, _lcur, m0, d6)  # 생산 수불장(용접+가공)
     except Exception: pass
-    try: base_s, cur_s = _ledsum(_close._sal_ledger, _lcur, m0, d6)        # 영업 수불장
+    try: base_s, cur_s = _ledsum('SAL', _close._sal_ledger, _lcur, m0, d6)      # 영업 수불장
     except Exception: pass
     _lc.close()
     jaego = (cur_m + cur_prd + cur_s) - (base_m + base_prd + base_s)   # 재고 증감(참고)
@@ -578,11 +583,10 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
-            # ③ 재고 (버킷별 기초/기말 = 자재/용접/가공/영업). 차액(사용)=기초−기말은 프론트 계산.
-            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego,
-                      "base_mat": base_m, "cur_mat": cur_m, "base_weld": base_w, "cur_weld": cur_w,
-                      "base_gagong": base_g, "cur_gagong": cur_g, "base_sales": base_s, "cur_sales": cur_s,
-                      "base_total": gicho, "cur_total": gimal},
+            # ③ 재고 (버킷별 기초/기말 = 자재/생산/영업 수불장). 차액(사용)=기초−기말은 프론트 계산.
+            "jaego": {"total": jaego,
+                      "base_mat": base_m, "cur_mat": cur_m, "base_prd": base_prd, "cur_prd": cur_prd,
+                      "base_sales": base_s, "cur_sales": cur_s, "base_total": gicho, "cur_total": gimal},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
