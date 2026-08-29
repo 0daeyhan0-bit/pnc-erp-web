@@ -13,9 +13,9 @@
 > ★**실행 시각 = 아침 7:30경, 데이터가 움직이지 않을 때**(업무 개시 전). 데이터 이동 중 실행 금지 — recon 스냅샷이 라이브와 어긋나 **가짜 드리프트**·델타 싱크가 이동 중 값 복사로 부정확. 낮/업무중엔 돌리지 말 것.
 
 **순서 (문서 TRANSACTION_CUTOVER_DESIGN §10 명시):**
-1. **recon (읽기전용)** — `mirror_recon.py` 실행. 라우터가 읽는 `nx.<TABLE>` 자동수집→트랜잭션(_T_)만 `COUNT_BIG + CHECKSUM_AGG(BINARY_CHECKSUM(*))`로 nx 미러 vs dbo 라이브 대조 → GREEN/RED. 로그 `mirror_recon_log.jsonl`.
-2. **RED면 델타 싱크** — `r_delta_sync.py`(DRY 확인 먼저) → `--commit`으로 라이브 date > nx max date 분만 INSERT/갱신. DROP+전체복사 아님(하루치만).
-2-a. **★성능 인덱스 재보장(2026-08-26 추가)** — 싱크 후 `nx_perf_maintain.py commit` + `r_add_indexes.py --commit`(둘 다 멱등, 수초) 재실행. **거래=윈도우(DELETE+INSERT)라 인덱스 생존, 마스터=DROP+SELECT INTO면 유실** → 재보장으로 콜드조회 지연 방지. (실측 2026-08-26: 대부분 생존·plan_part_mat만 재생성. Phase3에서 sync에 결선 예정.)
+1. **recon (읽기전용)** — `_harness/mirror_recon.py` 실행. 라우터가 읽는 `nx.<TABLE>` 자동수집→트랜잭션(_T_)만 `COUNT_BIG + CHECKSUM_AGG(BINARY_CHECKSUM(*))`로 nx 미러 vs dbo 라이브 대조 → GREEN/RED. 로그 `mirror_recon_log.jsonl`.
+2. **RED면 델타 싱크** — `_migration/sub_norm/r_delta_sync.py`(DRY 확인 먼저) → `--commit`으로 라이브 date > nx max date 분만 INSERT/갱신. DROP+전체복사 아님(하루치만).
+2-a. **★성능 인덱스 재보장(2026-08-26 추가)** — 싱크 후 `_migration/sub_norm/nx_perf_maintain.py commit`(★경로 주의 — `_harness/` 아님. 2026-08-29 실행 중 헤맴) + `_migration/sub_norm/r_add_indexes.py --commit`(둘 다 멱등, 수초) 재실행. **거래=윈도우(DELETE+INSERT)라 인덱스 생존, 마스터=DROP+SELECT INTO면 유실** → 재보장으로 콜드조회 지연 방지. (실측 2026-08-26: 대부분 생존·plan_part_mat만 재생성. Phase3에서 sync에 결선 예정.)
 2-b. **★SUB 접미사 품명병기 재실행(2026-08-26 추가)** — 싱크 후 `_migration/sub_norm/r_sub_desc_suffix.py --commit`(멱등, 수초) 재실행. **마스터=전체재복사라 매 sync가 nx.PR_M_ITEM 품명을 라이브로 덮음** → 이 스크립트가 SUB(자도번) 품명 앞에 `[-{접미사}]` 재병기(원품명=라이브 직독, 프리픽스 누적 없음). 실측: 1,975건 병기·재실행 변경0. 사용자 확정=기존 서브품번 익숙(§D-1). **병행운영 중 유지**(레거시 신규 유입분 매일 재병기). ★양쪽 마스터(nx.PR_M_ITEM+nx.item) 대상. ⚠**컷오버 후엔 이 배치 중단**(레거시 신규 안 옴) → 신규 SUB은 nx 앱 생성 → **CRUD 저장경로가 접미사 자동부착해야 함**(§B-1 3-a, 미구현). 중량(_geom_weight)은 이미 CRUD 이사됨·접미사만 남음.
 2-c. **★nx.item 최신화 + 중량 재계산(2026-08-26 추가·순서 필수)** — 싱크 후 **① `r_item_sync.py --commit`**(nx.item 치수·재질·cost필드 ← 라이브 PR_M_ITEM·멱등) → **② `r_geom_weight.py --commit`**(net_weight=재질별 기하중량=레거시 f_get_weight3·cg='3'·멱등). **순서 필수**(치수 갱신 후 중량 재계산). nx.item(클린)은 미러 재복사 대상 아니라 별도 → 라이브 수정 자동반영 안 됨, 이 2단계가 병행운영 중 최신유지. **컷오버 이후엔 CRUD(item.py itemmaster_save·bom.py item_save)가 저장 시 net_weight 자동 재계산**(같은 공식 `common._geom_weight`)이라 편집분도 stale 없음. 실측: r_item_sync 79건·r_geom_weight 61건 갱신 후 재실행 0/0.
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
