@@ -639,3 +639,184 @@ FIXTURES += [
                   WHERE cust_code='2096' AND ISNULL(barcode_no,'')<>'' AND status<>'99'""",
      lambda ctx, r: ctx.update(my_bc=str(r[0]).strip())),
 ]
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  협력사 포털 전 구간 — 실제 사용 순서대로 + DB 확인 (2026-08-29)
+#  정본 = _schema/PARTNER_PORTAL_DESIGN.md §14~15
+#
+#  흐름: 협력사 홈 → 발행 → QR → 출발 → (담당자) 스캔 → 입고 → 취소
+#  ★응답만 믿지 않는다. 각 단계마다 ctx["_sql"] 로 **미커밋 DB 를 직접 조회**해
+#    행이 실제로 생겼는지/상태가 바뀌었는지 확인한다.
+# ══════════════════════════════════════════════════════════════════════
+
+def _sql1(ctx, q, *a):
+    """단일값 조회. 하네스 헬퍼(ctx['_sql'])는 미커밋 상태를 본다."""
+    r = ctx["_sql"](q, *a)
+    return (r[0][0] if r and r[0] else None)
+
+
+def _pf_home(res, ctx):
+    """① 협력사 홈 — 화면이 첫 화면에서 받는 것. 발행할 송장을 여기서 고른다."""
+    ready = res.get("ready") or []
+    ctx["pf_ready"] = ready[:2]
+    return (res.get("cust") == COOP_CUST and isinstance(res.get("plan"), list),
+            f"거래처 {res.get('cust')} · 계획 {len(res.get('plan') or [])}행 · "
+            f"발행대기 {res.get('ready_cnt')}건 · 발행한송장 {len(res.get('issued') or [])}건")
+
+
+def _pf_issue(res, ctx):
+    """② 발행 — ★DB 에 barcode_no 가 채번되고 상태가 00→10 이 됐는가."""
+    bc = str(res.get("barcode") or "").strip()
+    ctx["pf_bc"] = bc
+    if not bc:
+        return False, f"바코드 미채번 · {res}"
+    sheets = [x["sheet"] for x in (ctx.get("pf_ready") or [])]
+    n10 = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=? AND status='10'", bc)
+    st0 = _sql1(ctx, f"""SELECT COUNT(*) FROM nx.set_input_req
+                          WHERE sheet_no IN ({','.join('?' * len(sheets))}) AND status='00'""", *sheets) if sheets else 0
+    return (n10 == len(sheets) and st0 == 0),             f"SET{bc} · DB 확인 → 발행(10) {n10}건 / 요청(00) 잔여 {st0}건 (고른 것 {len(sheets)}건)"
+
+
+def _pf_qr(res, ctx):
+    """③ QR — SVG 가 나오는가. 마이크로 QR 이면 폰·리더기가 못 읽는다(표준 QR 강제 확인)."""
+    s = res if isinstance(res, str) else str(res)
+    # ★segno 의 SVG 는 width/height + <path> 다 — viewBox 가 없다(내 검사식이 틀렸던 부분).
+    #   ★실측(2026-08-29): 표준 v1 = 21모듈 → (21+4)*6 = **150px**
+    #                      마이크로 M3 = 15모듈 → (15+4)*6 = **114px**
+    #   마이크로 QR 은 폰 카메라·리더기 상당수가 못 읽는다 → 140px 미만이면 FAIL.
+    import re as _re
+    m = _re.search(r'width="(\d+)"', s)
+    w = int(m.group(1)) if m else 0
+    return ("<svg" in s and "<path" in s and w >= 140),            f"{len(s):,}바이트 · width={w}px ⟹ {'표준 QR(v1=150px)' if w >= 140 else '★마이크로 QR(114px) — 폰·리더기가 못 읽는다'}"
+
+
+def _pf_depart(res, ctx):
+    """④ 출발 — ★DB 상태가 10→20 이 됐는가."""
+    bc = ctx.get("pf_bc")
+    n20 = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=? AND status='20'", bc)
+    return (res.get("ok") and n20 > 0), f"{res.get('msg')} · DB 확인 → 출발(20) {n20}건"
+
+
+def _pf_scan(res, ctx):
+    """⑤ 담당자 스캔 — 확인 화면에 협력사·도번이 나오는가(즉시 입고하지 않는다)."""
+    rows = res.get("rows") or []
+    ctx["pf_scanq"] = sum(float(r.get("qty") or 0) for r in rows)
+    return (res.get("cust") == COOP_CUST and len(rows) > 0),            f"{res.get('custnm')} · 도번 {len(rows)}종 · {ctx['pf_scanq']:,.0f}개 · 경고 {res.get('warn') or '없음'}"
+
+
+def _pf_receive(res, ctx):
+    """⑥ ★입고 — 데이터가 실제로 들어갔는가. 세 곳을 전부 확인한다."""
+    bc = ctx.get("pf_bc")
+    mnt = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
+    led = _sql1(ctx, "SELECT COUNT(*) FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
+                int(bc) if str(bc).isdigit() else 0)
+    n90 = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=? AND status='90'", bc)
+    ctx["pf_led"] = led
+    return (res.get("received", 0) > 0 and mnt > 0 and n90 > 0),            (f"응답 입고 {res.get('received')}건 · 재고파생 {res.get('ledger_posted')}행\n           "
+            f"DB 확인 → 입고거래 {mnt}건 · 원장(S) {led}행 · 입고완료(90) {n90}건")
+
+
+def _pf_cancel(res, ctx):
+    """⑦ 입고취소 — 세 곳이 **전부** 되돌아갔는가."""
+    bc = ctx.get("pf_bc")
+    mnt = _sql1(ctx, "SELECT COUNT(*) FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
+    led = _sql1(ctx, "SELECT COUNT(*) FROM nx.stock_ledger WHERE SHEET_NO=? AND MAINT_TAG='S'",
+                int(bc) if str(bc).isdigit() else 0)
+    st = ctx["_sql"]("SELECT status, COUNT(*) FROM nx.set_input_req WHERE barcode_no=? GROUP BY status", bc)
+    stat = [(str(r[0]).strip(), r[1]) for r in st]
+    ok = (mnt == 0 and led == 0 and all(a == "10" for a, _ in stat))
+    return ok, (f"{res.get('msg')}\n           "
+                f"DB 확인 → 입고거래 {mnt}건 · 원장(S) {led}행 · 송장상태 {stat}")
+
+
+def _pf_final(res, ctx):
+    """⑧ 협력사 홈에 되돌아온 것이 보이는가(화면이 다시 발행 대기로 잡는다)."""
+    inv = {x["nm"]: x["cnt"] for x in (res.get("inv") or [])}
+    return (res.get("cust") == COOP_CUST), f"상태별 {inv}"
+
+
+PORTAL_CASES = [
+    dict(kind="S", name="[포털] ① 협력사 홈 — 첫 화면 데이터", method="GET",
+         path="/api/partner/my?days=14", as_="flowcoop", expect=200, check=_pf_home),
+
+    # ── 유형별 분기 : 세트입고를 안 쓰는 협력사(76곳) 도 홈이 열려야 한다 ──
+    #   ★쓰기 케이스보다 **먼저** 둔다 — 하네스는 트랜잭션을 끝까지 열어 두므로
+    #     쓰기가 쌓인 뒤에는 plan_part_mat 스캔(=planstatus)이 급격히 느려진다.
+    dict(kind="S", name="[포털] ⑭ 세트입고 안 쓰는 협력사(부자재) 홈", method="GET",
+         path="/api/partner/my?cust=2136", as_="super", expect=200,
+         check=lambda res, ctx: (res.get("cust") == "2136",
+                                 f"{res.get('custnm')} · 계획 {len(res.get('plan') or [])}행 · "
+                                 f"발행대기 {res.get('ready_cnt')}건 "
+                                 f"⟹ 송장 탭은 화면에서 숨긴다(빈 화면 방지)")),
+
+    dict(kind="S", name="[포털] ② ★송장 발행 — DB 에 채번·상태전이 되는가", method="POST",
+         path="/api/setin/issue", as_="flowcoop", expect=200,
+         body=lambda ctx: {"items": [{"sheet": x["sheet"], "qty": x["qty"]}
+                                     for x in (ctx.get("pf_ready") or [])]},
+         skip_if=lambda ctx: not ctx.get("pf_ready"), check=_pf_issue),
+
+    dict(kind="S", name="[포털] ③ QR 발급(SVG)", method="GET",
+         path=lambda ctx: f"/api/partner/qr?barcode={ctx.get('pf_bc')}",
+         as_="flowcoop", expect=200, skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_qr),
+
+    dict(kind="S", name="[포털] ④ ★남의 바코드 QR 은 막히나", method="GET",
+         path=lambda ctx: f"/api/partner/qr?barcode={ctx.get('other_bc')}",
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("other_bc")),
+
+    dict(kind="S", name="[포털] ⑤ ★출발 처리 — DB 상태 10→20", method="POST",
+         path="/api/partner/depart", as_="flowcoop", expect=200,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc")},
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_depart),
+
+    dict(kind="S", name="[포털] ⑥ 이미 출발한 것 재처리 차단", method="POST",
+         path="/api/partner/depart", as_="flowcoop", expect=409,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc")},
+         skip_if=lambda ctx: not ctx.get("pf_bc")),
+
+    dict(kind="S", name="[포털] ⑦ ★협력사는 입고 스캔 불가(담당자 몫)", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('pf_bc')}",
+         as_="flowcoop", expect=403, skip_if=lambda ctx: not ctx.get("pf_bc")),
+
+    dict(kind="S", name="[포털] ⑧ 담당자 스캔 — 확인 화면", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('pf_bc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_scan),
+
+    dict(kind="S", name="[포털] ⑨ ★입고 — 입고거래·원장·상태 3곳에 들어갔나", method="POST",
+         path="/api/setstock/receive", as_="super", expect=200,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc"), "tag": "2", "user": "flowverify"},
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_receive),
+
+    dict(kind="S", name="[포털] ⑩ ★출발한 송장도 입고되나(20 누락 재발 방지)", method="GET",
+         path=lambda ctx: f"/api/setstock/scan?barcode={ctx.get('pf_bc')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("pf_bc"),
+         check=lambda res, ctx: (bool(res.get("warn")),
+                                 "입고 뒤라 경고가 떠야 정상 — " + str(res.get("warn"))[:80])),
+
+    dict(kind="S", name="[포털] ⑪ 중복 입고 차단", method="POST",
+         path="/api/setstock/receive", as_="super", expect=409,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc"), "tag": "2"},
+         skip_if=lambda ctx: not ctx.get("pf_bc")),
+
+    dict(kind="S", name="[포털] ⑫ ★입고취소 — 3곳이 전부 되돌아가나", method="POST",
+         path="/api/setstock/cancel", as_="super", expect=200,
+         body=lambda ctx: {"barcode": ctx.get("pf_bc"), "user": "flowverify", "reason": "TestBed"},
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_cancel),
+
+    dict(kind="S", name="[포털] ⑬ 협력사 홈에 반영", method="GET",
+         path="/api/partner/my?days=14", as_="flowcoop", expect=200,
+         skip_if=lambda ctx: not ctx.get("pf_bc"), check=_pf_final),
+
+    dict(kind="S", name="[포털] ⑮ 내부 계정이 cust 없이 부르면 사유가 명확한가", method="GET",
+         path="/api/partner/my", as_="super", expect=400),
+]
+
+# ★★케이스 순서 규칙 — **읽기 먼저, 쓰기 나중** (2026-08-29 실측으로 확정)
+#   하네스는 트랜잭션 하나를 끝까지 열어 둔다(no-commit). 쓰기가 쌓일수록
+#   `plan_part_mat`·`deliv_issue` 같은 큰 테이블 스캔이 급격히 느려진다
+#   (운영 0.24s / 쓰기 누적 후 45s+ 타임아웃). **제품 결함이 아니라 하네스 특성**이다.
+#   ⟹ 무거운 조회 케이스(소속강제·포털 홈)는 앞에, 쓰기 왕복은 뒤에 둔다.
+#      AUTH(조회 위주) → PORTAL(홈 조회 + 왕복) → SETIN(왕복) → [F]/[R](쓰기)
+#   ※각 케이스는 probe 델타로 판정하므로 순서를 바꿔도 판정 자체는 영향받지 않는다.
+_i = CASES.index(SETIN_CASES[0])
+CASES[_i:_i] = PORTAL_CASES

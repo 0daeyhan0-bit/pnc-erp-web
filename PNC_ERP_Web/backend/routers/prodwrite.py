@@ -341,8 +341,17 @@ def procreg_save(payload: dict = Body(...)):
             #   대신 BOM 을 전개해 **소비할 것이 있으면 무조건 판정**한다.
             #   BOM 이 비면 소비 자체가 없는 것이므로 게이트 대상이 아니다(예외가 아니라 해당 없음).
             from routers.backflush import _backflush_bom, _prod_shortages
+            # ★커서를 쥔 채 부르면 안 된다 — 이 함수들이 같은 커넥션(nx)에 **두 번째 커서**를 연다.
+            #   MARS 가 꺼진 ODBC 에서는 앞 커서에 미처리 행이 남아 있으면
+            #   `HY000 다른 hstmt에 연결이 사용 중` 으로 터진다(2026-08-29 TestBed 실측).
+            #   데이터에 따라 나기도 안 나기도 해서 운영에서 간헐로 보인다 — 커서를 닫고 부른다.
+            try:
+                cur.close()
+            except Exception:
+                pass
             _comps, _weld = _backflush_bom(nx, item, nx)   # ★cro 도 nx — 라이브엔 nx 스키마가 없다
             _short = _prod_shortages(nx, _comps, _weld, need_qty)
+            cur = nx.cursor()
             if _short:
                 _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
                 raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
