@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c47a0">
+<title>PNC 협력사</title>
+<!--
+  협력사 포털 (모바일 웹앱) — 2026-08-29
+  ★내부 ERP(index.html)와 **분리된 페이지**다. 이유:
+    · 협력사에게 내부 메뉴 트리를 보여줄 이유가 없다(ROLE_MOD 에 '협력사'가 없어 어차피 빈 화면)
+    · 폰에서 쓰는 화면은 레이아웃이 근본적으로 다르다(한 손·세로·큰 터치영역)
+    · 백엔드는 COOP_ALLOW 화이트리스트로 이미 막혀 있다 — 이 페이지는 그 안에서만 논다
+  정본 = _schema/PARTNER_PORTAL_DESIGN.md §3
+-->
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#fff; --line:#e3e8f0; --ink:#16305c; --sub:#7c8aa5;
+    --brand:#1c47a0; --brand2:#2f6db3; --ok:#1c8b57; --warn:#c77700; --bad:#c0392b;
+    --r:14px; --sh:0 1px 3px rgba(20,40,80,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif}
+  body{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+  .hide{display:none!important}
+
+  /* ── 상단바 ── */
+  header{position:sticky;top:0;z-index:30;background:var(--brand);color:#fff;
+    padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px}
+  header .t{font-weight:800;font-size:16px;letter-spacing:-.2px}
+  header .c{margin-left:auto;font-size:12.5px;opacity:.92;text-align:right;line-height:1.25}
+  header button{background:rgba(255,255,255,.16);color:#fff;border:0;border-radius:8px;
+    padding:6px 10px;font-size:12px;font-weight:700}
+
+  /* ── 하단 탭 ── */
+  nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);
+    display:flex;padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;background:none;border:0;padding:9px 2px 8px;color:var(--sub);
+    font-size:11.5px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px}
+  nav button .i{font-size:19px;line-height:1}
+  nav button.on{color:var(--brand)}
+
+  main{padding:12px 12px 6px;max-width:720px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--sh);padding:13px;margin-bottom:11px}
+  .card h3{margin:0 0 9px;font-size:13.5px;color:var(--sub);font-weight:700;
+    display:flex;align-items:center;gap:6px}
+  .card h3 .n{margin-left:auto;color:var(--brand);font-size:16px;font-weight:800}
+
+  .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}
+  .kpi div{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    padding:11px 8px;text-align:center;box-shadow:var(--sh)}
+  .kpi b{display:block;font-size:21px;font-weight:800;color:var(--brand);line-height:1.15}
+  .kpi span{font-size:11.5px;color:var(--sub)}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;color:var(--sub);font-weight:700;background:#fafbfd;
+    position:sticky;top:0}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{max-height:62vh;overflow:auto;margin:0 -13px;padding:0 13px}
+  .empty{padding:26px 10px;text-align:center;color:var(--sub);font-size:13.5px}
+  .part{font-weight:700;letter-spacing:-.2px}
+  .nm{color:var(--sub);font-size:11.5px;display:block;margin-top:1px}
+
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800}
+  .p00{background:#fdf3e2;color:var(--warn)}   .p10{background:#e7effb;color:var(--brand2)}
+  .p20{background:#e6f2ff;color:#2a6fb0}       .p30{background:#fff2e0;color:var(--warn)}
+  .p40{background:#f0e9fb;color:#6b4bb5}       .p90{background:#e4f5ec;color:var(--ok)}
+  .p99{background:#fdecec;color:var(--bad)}
+
+  .btn{width:100%;padding:12px;border:0;border-radius:11px;background:var(--brand);color:#fff;
+    font-size:15px;font-weight:800}
+  .btn:disabled{background:#b9c4d6}
+  .btn.g{background:#fff;color:var(--brand);border:1.5px solid var(--brand)}
+  .msg{padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:11px;font-weight:600}
+  .msg.e{background:#fdecec;color:var(--bad);border:1px solid #f3c9c9}
+  .msg.k{background:#e4f5ec;color:var(--ok);border:1px solid #bfe6d1}
+
+  /* ── 로그인 ── */
+  #login{position:fixed;inset:0;z-index:60;background:linear-gradient(160deg,#1c47a0,#2f6db3);
+    display:flex;align-items:center;justify-content:center;padding:22px}
+  #login .box{width:100%;max-width:360px;background:#fff;border-radius:16px;padding:26px 22px}
+  #login .lg{font-size:23px;font-weight:800;color:var(--brand);letter-spacing:-.4px}
+  #login .sb{font-size:12.5px;color:var(--sub);margin:3px 0 20px}
+  #login label{display:block;font-size:12px;font-weight:700;color:#43587e;margin:0 0 5px}
+  #login input{width:100%;padding:12px;font-size:16px;border:1.5px solid #d7dfea;border-radius:10px;
+    margin-bottom:13px}
+  #login input:focus{outline:0;border-color:var(--brand2)}
+  .foot{text-align:center;font-size:11.5px;color:var(--sub);padding:14px 10px 4px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <div class="lg">PNC 협력사</div>
+    <div class="sb">피앤씨인더스트리 협력사 포털</div>
+    <div id="lgerr" class="msg e hide"></div>
+    <label>아이디</label>
+    <input id="lgid" autocomplete="username" autocapitalize="off" placeholder="예) p2096">
+    <label>비밀번호</label>
+    <input id="lgpw" type="password" autocomplete="current-password" placeholder="비밀번호">
+    <button class="btn" id="lgbtn">로그인</button>
+    <div class="foot">계정 문의 · 피앤씨인더스트리 전산담당</div>
+  </div>
+</div>
+
+<header class="hide" id="hd">
+  <div class="t">PNC 협력사</div>
+  <div class="c"><b id="hcust">-</b><br><span id="huser" style="opacity:.8"></span></div>
+  <button id="out">로그아웃</button>
+</header>
+
+<main class="hide" id="app"></main>
+
+<nav class="hide" id="nav">
+  <button data-v="home" class="on"><span class="i">🏠</span>홈</button>
+  <button data-v="plan"><span class="i">📅</span>내 계획</button>
+  <button data-v="inv"><span class="i">📄</span>내 송장</button>
+</nav>
+
+<script>
+const API = location.origin;
+const T = {
+  get tok(){ try{return localStorage.getItem('ptok')||''}catch(e){return ''} },
+  set tok(v){ try{ v?localStorage.setItem('ptok',v):localStorage.removeItem('ptok') }catch(e){} },
+  get me(){ try{return JSON.parse(localStorage.getItem('pme')||'null')}catch(e){return null} },
+  set me(v){ try{ v?localStorage.setItem('pme',JSON.stringify(v)):localStorage.removeItem('pme') }catch(e){} },
+};
+const $ = s => document.querySelector(s);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => (n==null||n==='')?'-':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:0});
+const ymd = s => { s=String(s||'').trim(); return s.length===6 ? `${s.slice(2,4)}/${s.slice(4,6)}` : s; };
+const ymdF= s => { s=String(s||'').trim(); return s.length===6 ? `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}` : s; };
+const ST  = {'00':'요청','10':'발행','20':'출발','30':'입고대기','40':'검사중','90':'입고완료','99':'반품'};
+
+async function api(path, opt){
+  opt = opt||{};
+  const h = Object.assign({'Content-Type':'application/json'}, opt.headers||{});
+  if(T.tok) h['Authorization'] = 'Bearer '+T.tok;
+  const r = await fetch(API+path, Object.assign({}, opt, {headers:h}));
+  let j = null; try{ j = await r.json(); }catch(e){}
+  if(r.status===401){ T.tok=null; T.me=null; showLogin('로그인이 만료되었습니다. 다시 로그인해 주세요.'); throw new Error('401'); }
+  if(!r.ok) throw new Error((j&&j.detail)||('오류 '+r.status));
+  return j;
+}
+
+/* ───────── 로그인 ───────── */
+function showLogin(err){
+  $('#login').classList.remove('hide');
+  ['#hd','#app','#nav'].forEach(s=>$(s).classList.add('hide'));
+  const e=$('#lgerr');
+  if(err){ e.textContent=err; e.classList.remove('hide'); } else e.classList.add('hide');
+}
+async function doLogin(){
+  const id=$('#lgid').value.trim(), pw=$('#lgpw').value;
+  if(!id||!pw){ return showLogin('아이디와 비밀번호를 입력하세요.'); }
+  const b=$('#lgbtn'); b.disabled=true; b.textContent='확인 중…';
+  try{
+    const r = await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,pw})});
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.detail||'로그인에 실패했습니다.');
+    T.tok=j.token; T.me=j.user;
+    $('#login').classList.add('hide');
+    start();
+  }catch(e){ showLogin(e.message); }
+  finally{ b.disabled=false; b.textContent='로그인'; }
+}
+
+/* ───────── 화면 ───────── */
+let VIEW='home', DATA=null;
+
+async function start(){
+  const u=T.me||{};
+  $('#hcust').textContent = u.nm || u.id || '';
+  $('#huser').textContent = u.partner_code ? ('거래처 '+u.partner_code) : '';
+  ['#hd','#app','#nav'].forEach(s=>$(s).classList.remove('hide'));
+  await load();
+}
+async function load(){
+  $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
+  try{ DATA = await api('/api/partner/my?days=14'); }
+  catch(e){ if(e.message!=='401') $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
+  render();
+}
+
+function render(){
+  if(!DATA) return;
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on', b.dataset.v===VIEW));
+  $('#app').innerHTML = VIEW==='home' ? viewHome() : VIEW==='plan' ? viewPlan() : viewInv();
+  wire();
+}
+
+function viewHome(){
+  const t=DATA.plan_tot||{}, inv=DATA.inv||[];
+  const cnt = s => (inv.find(x=>x.status===s)||{}).cnt||0;
+  const soon = (DATA.plan||[]).slice(0,6);
+  return `
+  <div class="kpi">
+    <div><b>${num(t.qty)}</b><span>2주 계획수량</span></div>
+    <div><b>${num(t.items)}</b><span>품목</span></div>
+    <div><b>${num(DATA.ready_cnt)}</b><span>발행할 송장</span></div>
+  </div>
+  ${DATA.ready_cnt ? `<div class="msg k">납품하실 송장 <b>${DATA.ready_cnt}건</b>이 대기 중입니다. [내 송장]에서 발행하세요.</div>` : ''}
+  <div class="card">
+    <h3>가까운 납기<span class="n">${num((DATA.plan||[]).length)}</span></h3>
+    ${soon.length ? `<table><tbody>${soon.map(r=>`
+      <tr><td style="width:56px;color:var(--brand2);font-weight:800">${ymd(r.ymd)}</td>
+          <td><span class="part">${esc(r.part)}</span><span class="nm">${esc(r.nm||'')}</span></td>
+          <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}
+      </tbody></table>
+      ${(DATA.plan||[]).length>6?`<button class="btn g" style="margin-top:10px" data-go="plan">계획 전체 보기</button>`:''}`
+    : `<div class="empty">2주 안에 잡힌 계획이 없습니다.</div>`}
+  </div>
+  <div class="card">
+    <h3>내 송장 현황</h3>
+    ${inv.length ? `<table><tbody>${inv.map(x=>`
+      <tr><td><span class="pill p${esc(x.status)}">${esc(x.nm)}</span></td>
+          <td class="n">${num(x.cnt)}건</td><td class="n">${num(x.qty)}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">송장이 없습니다.</div>`}
+  </div>
+  <div class="foot">피앤씨인더스트리 · 문의는 담당자에게</div>`;
+}
+
+function viewPlan(){
+  const rows=DATA.plan||[];
+  const by={}; rows.forEach(r=>{ (by[r.ymd]=by[r.ymd]||[]).push(r); });
+  const keys=Object.keys(by).sort();
+  return `
+  <div class="card">
+    <h3>내 계획 · ${esc(ymdF(DATA.from))} ~ ${esc(ymdF(DATA.to))}<span class="n">${num(rows.length)}</span></h3>
+    ${keys.length ? `<div class="scroll">${keys.map(k=>{
+      const g=by[k], s=g.reduce((a,b)=>a+b.qty,0);
+      return `<table>
+        <thead><tr><th colspan="2">${esc(ymdF(k))}</th><th class="n">${num(s)}</th></tr></thead>
+        <tbody>${g.map(r=>`<tr><td colspan="2"><span class="part">${esc(r.part)}</span>
+          <span class="nm">${esc(r.nm||'')}</span></td>
+          <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}</tbody></table>`;
+    }).join('')}</div>` : `<div class="empty">기간 안에 계획이 없습니다.</div>`}
+  </div>`;
+}
+
+function viewInv(){
+  const inv=DATA.inv||[], ready=DATA.ready||[];
+  return `
+  <div class="card">
+    <h3>발행할 송장<span class="n">${num(ready.length)}</span></h3>
+    ${ready.length ? `<div class="scroll"><table>
+      <thead><tr><th>요청일</th><th>도번</th><th class="n">수량</th></tr></thead>
+      <tbody>${ready.map(r=>`<tr><td>${esc(ymd(r.ymd))}</td>
+        <td><span class="part">${esc(r.item)}</span></td>
+        <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}</tbody></table></div>
+      <div class="msg k" style="margin-top:11px">송장 발행(QR) 화면은 준비 중입니다. 지금은 기존 방식으로 발행해 주세요.</div>`
+    : `<div class="empty">발행 대기 중인 송장이 없습니다.</div>`}
+  </div>
+  <div class="card">
+    <h3>상태별 현황</h3>
+    ${inv.length ? `<table><tbody>${inv.map(x=>`
+      <tr><td><span class="pill p${esc(x.status)}">${esc(x.nm)}</span></td>
+          <td class="n">${num(x.cnt)}건</td><td class="n">${num(x.qty)}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">송장이 없습니다.</div>`}
+  </div>`;
+}
+
+function wire(){
+  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
+}
+
+/* ───────── 시작 ───────── */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
+$('#lgbtn').onclick = doLogin;
+['#lgid','#lgpw'].forEach(s=>$(s).addEventListener('keyup',e=>{ if(e.key==='Enter') doLogin(); }));
+$('#out').onclick = async()=>{
+  try{ await api('/api/auth/logout',{method:'POST',body:'{}'}); }catch(e){}
+  T.tok=null; T.me=null; showLogin();
+};
+
+(async function(){
+  if(!T.tok) return showLogin();
+  try{ const j = await api('/api/auth/me'); T.me = j.user; $('#login').classList.add('hide'); start(); }
+  catch(e){ showLogin(); }
+})();
+</script>
+</body>
+</html>

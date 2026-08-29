@@ -1283,3 +1283,124 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
             "title": _tt,
             "custnm": supplier["nm"] or cust, "cust": cust,
             "supplier": supplier, "buyer": buyer, "rows": rows, "total": _qint(tot), "count": len(rows)}
+
+
+# ===================== 협력사 포털 — 홈 요약 (2026-08-29) =====================
+@router.get("/api/partner/my")
+def partner_my(request: Request, cust: str = Query(""), days: int = Query(14)):
+    """협력사 홈 — 폰을 열었을 때 보는 첫 화면.
+
+       ★소속 강제: 협력사 계정은 cust 파라미터와 무관하게 자기 것만 본다.
+         내부 담당자는 cust 로 지정해 **협력사가 보는 화면 그대로** 볼 수 있다(통화 대응).
+
+       돌려주는 것
+         plan_soon  오늘~days 일 안에 납기가 걸린 자도번 (일자·수량)
+         plan_tot   그 기간 합계 수량 · 품목수
+         inv        내 송장 상태별 건수 (00요청/10발행/20출발/30입고대기/40검사중/90입고완료/99반품)
+         ready      아직 발행하지 않은 송장(00) — **협력사가 지금 할 일**
+    """
+    import datetime as _dt
+    u = require_user(request)
+    cc = scope_cust(u, cust) or ""
+    if not cc:
+        raise HTTPException(400, "거래처를 지정하세요.")
+    today = _dt.date.today()
+    fr = today.strftime("%y%m%d")
+    to = (today + _dt.timedelta(days=max(1, min(int(days), 90)))).strftime("%y%m%d")
+
+    cn = _nx(); cur = cn.cursor()
+    try:
+        # ── 내 계획 ──
+        # ★정본 재사용 — 협력사 계획은 `partner_planstatus` 가 정본이다(자도번 축 = ASSY_ITEM_CODE,
+        #   수량은 plan_item_dtl 조인). 여기서 SQL 을 새로 짜면 **계획 화면과 숫자가 갈린다**.
+        #   (처음에 plan_part_mat.MAT_CODE 로 짰다가 그건 자재(원소재)라 틀렸다 — 협력사가 만드는 건 자도번이다.)
+        # ★라우트 함수를 직접 부를 때는 **모든 파라미터를 명시**해야 한다.
+        #   빠뜨리면 FastAPI 의 Query(...) 기본값 **객체**가 그대로 들어와 .strip() 에서 터진다.
+        ps = partner_planstatus(request, from_ymd=fr, to_ymd=to, wc=cc,
+                                part="", assy="", line="", gubun="외주", src="nx")
+        plan = []
+        for r in (ps.get("rows") or []):
+            part = str(r.get("assy") or r.get("part") or "").strip()
+            nm = str(r.get("nm") or "").strip()
+            for d, q in (r.get("days") or {}).items():
+                d = str(d).strip()
+                if fr <= d <= to and float(q or 0):
+                    plan.append({"ymd": d, "part": part, "nm": nm, "qty": float(q or 0)})
+        # 같은 (일자,자도번) 합치고 일자순 정렬
+        _agg = {}
+        for r in plan:
+            k = (r["ymd"], r["part"])
+            if k in _agg:
+                _agg[k]["qty"] += r["qty"]
+            else:
+                _agg[k] = r
+        plan = sorted(_agg.values(), key=lambda x: (x["ymd"], x["part"]))
+
+        # ── 내 송장 상태별 ──
+        cur.execute("""SELECT ISNULL(status,'00') st, COUNT(*) n,
+                              SUM(CAST(ISNULL(deliver_qty, input_req_qty) AS float)) q
+                         FROM nx.set_input_req WHERE in_cust_code = ?
+                        GROUP BY ISNULL(status,'00')""", cc)
+        ST = {"00": "요청", "10": "발행", "20": "출발", "30": "입고대기",
+              "40": "검사중", "90": "입고완료", "99": "반품"}
+        inv = [{"status": str(a).strip(), "nm": ST.get(str(a).strip(), str(a).strip()),
+                "cnt": int(b or 0), "qty": float(c or 0)} for a, b, c in cur.fetchall()]
+
+        # ── 아직 발행하지 않은 송장 = 협력사가 지금 할 일 ──
+        cur.execute("""SELECT TOP 100 sheet_no, input_ymd, item_code,
+                              CAST(ISNULL(deliver_qty, input_req_qty) AS float) qty
+                         FROM nx.set_input_req
+                        WHERE in_cust_code = ? AND ISNULL(status,'00') = '00'
+                          AND remarks = 'PLAN_COMPOSE'
+                        ORDER BY input_ymd DESC, sheet_no DESC""", cc)
+        ready = [{"sheet": str(a).strip(), "ymd": str(b or "").strip(),
+                  "item": str(c or "").strip(), "qty": float(d or 0)} for a, b, c, d in cur.fetchall()]
+
+        cur.execute("SELECT cust_name FROM nx.cust WHERE cust_code=?", cc)
+        r = cur.fetchone()
+        return {"cust": cc, "custnm": (str(r[0]).strip() if r else ""),
+                "from": fr, "to": to, "days": days,
+                "plan": plan,
+                "plan_tot": {"qty": sum(x["qty"] for x in plan),
+                             "items": len({x["part"] for x in plan}),
+                             "rows": len(plan)},
+                "inv": inv,
+                "ready": ready, "ready_cnt": len(ready)}
+    finally:
+        cn.close()
+
+
+@router.post("/api/partner/depart")
+def partner_depart(request: Request, body: dict = Body(...)):
+    """송장 출발 처리 — 협력사가 차에 실었다는 표시. 상태 10발행 → 20출발.
+
+       ★왜 필요한가 — 우리 담당자가 '오늘 뭐가 오는지' 알아야 입고를 준비한다.
+         발행만 하고 며칠 뒤 오는 경우가 있어 발행과 출발을 분리한다.
+       ★소속 강제 — 협력사는 자기 바코드만. 남의 송장을 출발시킬 수 없다.
+    """
+    u = require_user(request)
+    bc = "".join(ch for ch in str(body.get("barcode", "")) if ch.isdigit())
+    if not bc:
+        raise HTTPException(400, "SET바코드가 필요합니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        assert_own_barcode(cur, u, bc)                 # 남의 송장 차단
+        cur.execute("""SELECT ISNULL(status,'00'), COUNT(*) FROM nx.set_input_req
+                        WHERE barcode_no=? GROUP BY ISNULL(status,'00')""", bc)
+        st = [(str(a).strip(), b) for a, b in cur.fetchall()]
+        if not st:
+            raise HTTPException(404, f"SET바코드 {bc} 송장을 찾을 수 없습니다.")
+        if not any(a == "10" for a, _ in st):
+            ST = {"00": "요청(미발행)", "20": "출발", "30": "입고대기",
+                  "40": "검사중", "90": "입고완료", "99": "반품"}
+            desc = " · ".join(f"{ST.get(a, a)} {b}건" for a, b in st)
+            raise HTTPException(409, f"출발 처리할 수 없는 상태입니다 — {desc}. 발행(10)만 출발됩니다.")
+        cur.execute("""UPDATE nx.set_input_req SET status='20', status_dt=GETDATE(), status_user=?
+                        WHERE barcode_no=? AND ISNULL(status,'00')='10'""",
+                    (u.get("id") or "web")[:20], bc)
+        n = cur.rowcount
+        cn.commit()
+        return {"ok": True, "barcode": bc, "departed": n,
+                "msg": f"출발 처리했습니다 — 송장 {n}건. 도착하면 담당자가 QR 을 찍어 입고합니다."}
+    finally:
+        cn.close()

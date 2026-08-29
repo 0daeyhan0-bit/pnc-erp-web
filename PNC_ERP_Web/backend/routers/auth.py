@@ -138,6 +138,8 @@ OPEN_PREFIX = (
 COOP_ALLOW = {
     "/api/auth/me", "/api/auth/logout", "/api/auth/password",
     "/api/perm/users",                    # GET=본인 1건 / POST 는 라우터가 403
+    "/api/partner/my",                    # 홈 요약(내 계획·내 송장·할 일)
+    "/api/partner/depart",                # 송장 출발 처리(10→20)
     "/api/partner/planstatus",            # 내 계획
     "/api/partner/deliv420",              # 거래명세서 조회
     "/api/partner/deliv420/issue",        # 발행
