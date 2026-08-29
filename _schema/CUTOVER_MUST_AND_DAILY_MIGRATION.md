@@ -80,7 +80,15 @@
 
 ### B-4. 입력 유일화 (이중계상 차단)
 10. **이중입력 차단** — 병행기간 레거시·웹 양쪽입력 금지, 입력을 **한쪽으로 강제**(유형별 웹입력 diff0 검증 후 유일화 승격). 쓰기화면=nx전용, 조회=nx미러∪웹. ([[newerp-cutover-writescreen-mirror-union]])
-11. **마감 잠금 전면 확인** — 마감월/업체별 마감 후 재수정 차단(규칙B) 전 도메인 적용 확인.
+11. ~~마감 잠금 전면 확인~~ — ✅ **2026-08-29 완료. 결함 3곳 결선**.
+   도구 `_migration/cutover_lock_audit.py`(재실행 가능). 재고이동 쓰기 33개 중 잠금 27 → **30**.
+   결선: `sale040/cancel`(SA_T_STOCK_MAINT INSERT=완성재고 복원) · `procreg/delete`(삭제 전 PROD_YMD 로 판정) ·
+        `procbc/save`(`_set_mat_stock_wh` 호출=자재/파트 재고, 일자 없어 **당일 기준**).
+   ※`prodwrite.py` 에 `_assert_open` import 자체가 없었다 — 함께 추가.
+   남은 3곳은 정당한 예외(채번 `sheet_issue` · 송장 플래그 4컬럼) — 재고 무관, 본문 확인 완료.
+   ★실증 한계: 마감월 호출이 입력검증에서 먼저 걸려 "뚫린다"는 실증은 못 했다.
+     **"잠금 코드가 없다"는 코드로 확정** — 데이터 생기면 뚫린다. 선제 결선.
+   검증: TestBed PASS 41/FAIL 0/오염 0. 상세 = `CUTOVER_CHECKLIST.md` "11번 마감잠금".
 
 ### B-5. 인프라·소스
 12. **db_client.py 배치** — repo 밖 sibling(`../New_ERP/db_client.py`)이라 clone/운영폴더에 **별도 배치**(커밋 금지). (GITEA_MIGRATION_RUNBOOK)

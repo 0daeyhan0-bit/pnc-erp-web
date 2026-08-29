@@ -124,6 +124,7 @@ python _migration\cutover_mark.py --set --commit
 |---|---|---|
 | 참조 존재 | `python _migration\cutover_ref_audit.py` | DB 에 없는 참조 = **자가 마이그 2건뿐** |
 | 은퇴 미러 | `python _migration\cutover_retired_guard.py` | 잔여 최소 |
+| 마감잠금 | `python _migration\cutover_lock_audit.py` | 재고이동 33개 중 **30 결선**(나머지 3은 채번·송장) |
 | 흐름·규칙 | `python _migration\flow_server.py --port 8099` 후 `flow_scenarios.py` | **PASS 41 / FAIL 0 / 오염 0** |
 | 재고 게이트 | 재고 없는 품목 출고 시도 | **차단 + 사유 표시** |
 | 계획 대조 | ★**같은 기준일로 편성한 뒤** 비교 | 기준일 다르면 80%/100%/77% 로 출렁인다 |

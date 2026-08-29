@@ -1131,3 +1131,54 @@ ALTER ROLE db_datawriter  ADD MEMBER ilshin;
 ### ☐ 남은 확인 (컷오버 전)
 - `ilshin` 외에 라이브에 쓰는 경로가 없는지(배치·SP·다른 계정) — **DB 감사로 확인 필요**
 - 웹 백엔드가 라이브에 쓰는 코드 0 재확인(`DO_NOT_USE §5` 준수 여부)
+
+---
+
+## 11번 마감잠금 전면 확인 — 3곳 결선 (2026-08-29)
+
+도구 = `_migration/cutover_lock_audit.py` (재실행 가능)
+
+### 감사 결과
+```
+재고 이동 쓰기 엔드포인트 33개
+   마감잠금 있음 27 → **30**
+   없음 6 → 3 (전부 정당한 예외)
+```
+
+### ★결함 3곳 — 마감된 달에 재고가 움직일 수 있었다
+| 엔드포인트 | 재고 이동 근거 | 결선 |
+|---|---|---|
+| `sales.sale040_cancel` (`/api/sale040/cancel`) | `INSERT INTO nx.SA_T_STOCK_MAINT` = **완성재고 복원** | `_assert_open(ymd, "SAL", "출하취소")` — 셀별 일자로 판정 |
+| `prodwrite.procreg_delete` (`/api/procreg/delete`) | `DELETE FROM nx.proc_result` = 실적 되돌림 | **삭제 전** 대상 행의 `PROD_YMD` 로 판정(삭제 후엔 일자를 알 수 없다) |
+| `prodsheet.procbc_save` (`/api/procbc/save`) | `_set_mat_stock_wh()` 호출 = **자재/파트 재고 증감** | 일자 파라미터가 없고 서버 당일로 기록 → **당일 기준** 판정 |
+
+`prodwrite.py` 에 `_assert_open` **import 가 없었다** — 함께 추가.
+
+### 남은 3곳은 정당한 예외 (본문 확인 완료)
+| 엔드포인트 | 실제 쓰기 | 판정 |
+|---|---|---|
+| `/api/prodsheet/issue` | `nx.sheet_issue`(전표·간판·라벨 **채번**)만 | 재고 무관 |
+| `/api/lgsale/issue` | `sale_dtl` 의 **송장 플래그 4컬럼** (`songjang_print_flag`·발행일·채번·송장번호) | 재고 무관 |
+| `/api/lgsale/cancel` | 위 4컬럼 clear | 재고 무관 |
+
+### ★감사 도구의 함정 — 주석까지 세면 오탐이 난다
+`procbc/save` 본문 주석에 *"⑦ BOM 전개 → 파트별 자재 차감(`PR_T_STOCK_MAINT_MAT` tag='4' …)"* 같은
+**설명문**이 있어 감사가 그걸 쓰기로 잡았다. ⟹ 도구에 **주석 줄 제거**를 넣었다.
+> 그래도 남는 오탐이 있다(함수 경계 밖 SQL 이 섞임). **최종 판정은 본문 확인**이다.
+> 도구는 *"봐야 할 곳"* 을 좁혀줄 뿐 자동 판정이 아니다.
+
+### 실증의 한계 (정직하게 기록)
+마감월 2607 로 실제 호출을 시도했으나 **입력검증에서 먼저 걸려** 마감 판정까지 도달하지 못했다.
+```
+procreg/delete  → nx.proc_result 0행 (테이블이 비어 있음)
+procbc/save     → 스티커 데이터 없음
+sale040/cancel  → 조회조건에서 "취소할 출하실적이 없습니다"
+```
+⟹ **"뚫린다"는 실증은 못 했지만 "잠금 코드가 없다"는 것은 코드로 확정**했다.
+   데이터가 생기면 뚫린다. 그래서 선제 결선했다.
+
+### 검증
+```
+감사 재실행       27 → 30 / 33
+TestBed           PASS 41 · FAIL 0 · SKIP 1 · 오염 0  (회귀 없음)
+```
