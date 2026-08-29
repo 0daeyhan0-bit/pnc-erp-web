@@ -1164,8 +1164,10 @@ def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
     try:
         _r = ledger_cached(cur, domain, fr6, to6)        # ★(rows, breaks, basis) 3-튜플
         lrows = _r[0] if isinstance(_r, tuple) else _r
-    except Exception:
-        import traceback as _tb; _tb.print_exc()   # ★삼키지 않는다 — 조용히 실패하면 값이 안 맞는 걸 못 본다
+    except Exception as _e:
+        # ★삼키지 않는다 — 조용히 실패하면 값이 안 맞는 걸 못 본다.
+        #   단 full traceback 은 찍지 않는다(마감 배치에서 재귀 출력으로 로그가 터졌다 2026-08-30).
+        print(f"[_apply_ledger_price] {type(_e).__name__}: {str(_e)[:150]}")
         return 0
     finally:
         cn.close()
