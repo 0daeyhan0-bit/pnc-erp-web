@@ -168,7 +168,23 @@ def setstock_scan(barcode: str = Query(...)):
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         if not rows:
             raise HTTPException(404, f"SET바코드 {barcode} 송장을 찾을 수 없습니다.")
-        return {"barcode": bc, "cust": rows[0]["in_cust_code"], "custnm": rows[0]["custnm"], "rows": rows}
+
+        # ★중복 스캔 사전 경고 (대표 확정 2026-08-29: "같은 송장 2번 입고는 치명적 오류")
+        #   찍는 순간 화면에 뜨게 한다 — 입고 버튼을 누르기 전에 알아야 한다.
+        cur.execute("""SELECT COUNT(*), MIN(maint_ymd), MAX(LTRIM(RTRIM(ISNULL(insert_user_id,'')))),
+                              SUM(CAST(maint_qty AS float))
+                         FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'""", bc)
+        dn, dymd, duser, dqty = cur.fetchone()
+        done = [r for r in rows if str(r.get("status") or "").strip() in ("90", "30", "40")]
+        warn = None
+        if dn and int(dn) > 0:
+            warn = (f"★이미 입고된 SET바코드입니다 — {dymd} · {duser or '?'} · {float(dqty or 0):,.0f}개 ({int(dn)}건). "
+                    f"중복 입고하면 재고가 실제보다 늘어납니다.")
+        elif done:
+            warn = (f"★이미 처리된 송장이 {len(done)}건 있습니다(상태 "
+                    f"{', '.join(sorted({str(r.get('status') or '').strip() for r in done}))}).")
+        return {"barcode": bc, "cust": rows[0]["in_cust_code"], "custnm": rows[0]["custnm"],
+                "rows": rows, "already": int(dn or 0), "warn": warn}
     finally:
         cn.close()
 
@@ -185,11 +201,39 @@ def setstock_receive(payload: dict = Body(...)):
     try:
         cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
         _assert_open(cur, cur.fetchone()[0], "MAT", "세트입고")   # ★마감잠금(입고일=오늘)
+        # ★★중복 입고 차단 (대표 확정 2026-08-29)
+        #   "같은 송장이 2번 찍혀서 들어오는 건 치명적 오류" — 막고, 왜 안 되는지 알린다.
+        #   믿고 받는 구조(세지 않고 송장대로 입고)에서 중복 스캔은 **재고를 그대로 두 배로** 만든다.
+        #   실측: 같은 (송장,도번) 2회 이상 = 99건 · 전부 같은 날 · 전부 바코드(tag 2).
+        #        레거시는 상태를 안 보고 찍을 때마다 한 줄씩 넣어 막지 못했다(레거시 결함, CLAUDE.md §1-7).
+        force = bool(payload.get("force"))          # 관리자가 사유를 알고 추가할 때만
+        cur.execute("""SELECT COUNT(*), MIN(maint_ymd), MAX(LTRIM(RTRIM(ISNULL(insert_user_id,'')))),
+                              SUM(CAST(maint_qty AS float))
+                         FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'""", bc)
+        dn, dymd, duser, dqty = cur.fetchone()
+        if dn and int(dn) > 0 and not force:
+            raise HTTPException(409,
+                f"중복 입고 차단 — SET바코드 {bc} 는 이미 입고되었습니다. "
+                f"({dymd} · {duser or '?'} · {float(dqty or 0):,.0f}개 · {int(dn)}건) "
+                f"다시 넣으면 재고가 실제보다 늘어납니다. "
+                f"추가 납품분이면 [장부수정]으로, 잘못 입고했으면 [입고취소]로 처리하세요.")
+
         cur.execute("""SELECT h.sheet_no, h.item_code, ISNULL(h.deliver_qty,h.input_req_qty) qty, h.in_cust_code,
               ISNULL(h.insp_flag,'0') insp FROM nx.set_input_req h WHERE h.barcode_no=? AND h.status IN ('10','30')""", bc)
         reqs = cur.fetchall()
         if not reqs:
-            raise HTTPException(404, "발행 상태의 송장이 없습니다(이미 입고완료?).")
+            # 발행 상태가 아니다 — 왜인지 밝힌다(막연한 404 금지)
+            cur.execute("""SELECT status, COUNT(*) FROM nx.set_input_req WHERE barcode_no=?
+                           GROUP BY status""", bc)
+            st = cur.fetchall()
+            if not st:
+                raise HTTPException(404, f"SET바코드 {bc} 송장을 찾을 수 없습니다. 바코드를 확인하세요.")
+            ST = {"00": "요청(미발행)", "10": "발행", "20": "출발", "30": "입고대기",
+                  "40": "검사중", "90": "입고완료", "99": "반품"}
+            desc = " · ".join(f"{ST.get(str(a).strip(), a)} {b}건" for a, b in st)
+            raise HTTPException(409,
+                f"입고할 수 없는 상태입니다 — SET바코드 {bc}: {desc}. "
+                f"발행(10) 또는 입고대기(30) 상태만 입고됩니다.")
         recv = 0; posted = 0
         cur.execute("SELECT ISNULL(MAX(maint_seq),0) FROM nx.set_stock_maint WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         mseq = int(cur.fetchone()[0])
