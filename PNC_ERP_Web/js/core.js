@@ -161,6 +161,7 @@ const MODULES=[
    // {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},   // ★2026-08-28 메뉴 숨김(요청). SCREEN.setinreq 는 유지 — 되살릴 땐 이 줄만 해제
    {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
+   {id:'sagubledger',ic:'📊',nm:'사급 수불장'},
  ]},
  {id:'prod',nm:'생산',ic:'🏭',subs:[
    {id:'prodstock',ic:'🏭',nm:'생산재고조회'},

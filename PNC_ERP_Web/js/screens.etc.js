@@ -1225,6 +1225,93 @@ SCREEN.sagubadjust=(c)=>{
   loadHold(); load();
 };
 
+/* ===== 협력사: 사급부품 수불장 (신규) — 우리가 보낸 사급부품 보낸/소진/잔량 ===== */
+SCREEN.sagubledger=(c)=>{
+  const API=API_BASE;
+  const pad=n=>String(n).padStart(2,"0");
+  const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const yy=s=>s?s.slice(2).replace(/-/g,""):"";            // 2026-01-01 → 260101
+  const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
+  const now=new Date();
+  let st={rows:[],custs:[],tot:{},cust:"",mat:"",sign:"",scope:"sent",
+          fr:"2026-01-01",to:iso(now),sortKey:"",sortDir:1,loading:false,
+          sel:null,detail:[],dfinal:0,dloading:false};
+  const load=async()=>{st.loading=true;st.sel=null;draw();
+    try{const r=await fetch(`${API}/api/sagubledger/list?cust=${encodeURIComponent(st.cust)}&mat=${encodeURIComponent(st.mat)}&fr=${yy(st.fr)}&to=${yy(st.to)}&sign=${st.sign}&scope=${st.scope}`);
+      const j=await r.json();st.rows=j.rows||[];st.custs=j.custs||[];st.tot=j.tot||{};}catch(e){st.rows=[];}
+    st.loading=false;draw();};
+  const loadDetail=async(row)=>{st.sel=row;st.dloading=true;drawDetail();
+    try{const r=await fetch(`${API}/api/sagubledger/detail?cust=${encodeURIComponent(row.cust_code)}&mat=${encodeURIComponent(row.mat_code)}&fr=${yy(st.fr)}&to=${yy(st.to)}`);
+      const j=await r.json();st.detail=j.rows||[];st.dfinal=j.final_qty||0;}catch(e){st.detail=[];}
+    st.dloading=false;drawDetail();};
+  const detailHTML=()=>{
+    if(!st.sel)return '<div class="empty" style="padding:16px;color:var(--muted)">왼쪽에서 (협력사×자도번)을 선택하면 수불이력이 표시됩니다.</div>';
+    const s=st.sel;
+    return `<div style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--line)"><b>${esc(s.custnm||s.cust_code)}</b> · <b>${esc(s.mat_code)}</b> <span class="cap" style="color:var(--muted)">${esc(s.matnm||"")}</span></div>
+      <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
+        <th>일자</th><th class="center">구분</th><th class="num">전일잔량</th><th class="num">입고(보낸)</th><th class="num">출고(소진)</th><th class="num">잔량</th></tr></thead>
+      <tbody>${st.detail.map(r=>`<tr>
+        <td>${esc(r.maint_ymd)}</td><td class="center">${esc(r.tagnm)}</td>
+        <td class="num" style="color:var(--muted)">${won(r.prev_qty)}</td>
+        <td class="num" style="color:#1f7a3d">${r.in_qty?won(r.in_qty):''}</td>
+        <td class="num" style="color:#c0392b">${r.out_qty?won(r.out_qty):''}</td>
+        <td class="num qty" style="color:${(+r.stock_qty<0)?'#c0392b':'#1f2d3d'}"><b>${won(r.stock_qty)}</b></td></tr>`).join("")||`<tr><td colspan="6" style="padding:14px;color:var(--muted)">${st.dloading?"조회중…":"수불 이력 없음"}</td></tr>`}
+      <tr class="grandtot"><td colspan="5" class="center">최종 잔량</td><td class="num" style="color:${(+st.dfinal<0)?'#c0392b':'#1f7a3d'}"><b>${won(st.dfinal)}</b></td></tr>
+      </tbody></table></div>`;};
+  const drawDetail=()=>{const d=c.querySelector("#sl-detail");if(d)d.innerHTML=detailHTML();};
+  const draw=()=>{
+    if(st.sortKey){const k=st.sortKey,dr=st.sortDir||1;st.rows.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*dr;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*dr;});}
+    const t=st.tot||{};
+    c.innerHTML=`
+     <div style="display:flex;flex-direction:column;height:100%">
+      <div style="flex:0 0 auto">
+       <div class="page-title">사급부품 수불장</div>
+       <div class="page-sub">우리가 협력사에 보낸 사급부품의 <b>보낸수량 − 소진(세트입고×BOM소요) = 잔량</b>. 기초 0(2026-01~) · 용접봉/은납은 별도 트랙 제외 · 소진은 통일 소요엔진 산출.</div>
+       <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto">
+         <label class="tl">기간</label><input class="inp" type="date" id="sl-fr" value="${esc(st.fr)}" style="width:140px"> ~ <input class="inp" type="date" id="sl-to" value="${esc(st.to)}" style="width:140px">
+         <label class="tl" style="margin-left:8px">협력사</label>
+         <select class="inp" id="sl-cust"><option value="">전체</option>${st.custs.map(o=>`<option value="${esc(o.code)}" ${st.cust===o.code?"selected":""}>${esc(o.nm||o.code)}</option>`).join("")}</select>
+         <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="sl-mat" value="${esc(st.mat)}" placeholder="자도번/품명" style="width:140px">
+         <label class="tl" style="margin-left:8px">잔량</label>
+         <select class="inp" id="sl-sign"><option value="">전체</option><option value="1" ${st.sign==="1"?"selected":""}>(+)보유</option><option value="-1" ${st.sign==="-1"?"selected":""}>(−)마이너스</option><option value="0" ${st.sign==="0"?"selected":""}>0</option></select>
+         <label class="tl" style="margin-left:8px">범위</label>
+         <select class="inp" id="sl-scope"><option value="sent" ${st.scope==="sent"?"selected":""}>우리가 보낸 부품</option><option value="all" ${st.scope==="all"?"selected":""}>전체(소진만 포함)</option></select>
+         <button class="btn" id="sl-go" style="margin-left:8px">조회</button>
+       </div>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;gap:8px;margin-top:8px">
+       <div class="panel" style="flex:1.3;display:flex;flex-direction:column;min-width:0">
+         <div class="panel-h" style="flex:0 0 auto">협력사·사급부품 ${st.loading?"(조회중…)":`(${st.rows.length}건)`} · 보낸 ${won(t.sent)} / 소진 ${won(t.used)} / 잔량 <b style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}">${won(t.bal)}</b></div>
+         <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
+           <th data-key="custnm">협력사</th><th data-key="mat_code">자도번</th><th data-key="matnm">품명</th>
+           <th class="num" data-key="sent">보낸수량</th><th class="num" data-key="used">소진</th><th class="num" data-key="bal">잔량</th></tr></thead>
+         <tbody>${st.rows.map((r,i)=>`<tr class="sl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat_code===r.mat_code?'background:#eef4ff':''}">
+           <td>${esc(r.custnm||r.cust_code)}</td><td><b>${esc(r.mat_code)}</b></td>
+           <td class="cap" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.matnm||"")}">${esc(r.matnm||"")}</td>
+           <td class="num" style="color:#1f7a3d">${won(r.sent)}</td><td class="num" style="color:#c0392b">${won(r.used)}</td>
+           <td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${won(r.bal)}</b></td></tr>`).join("")||`<tr><td colspan="6" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음 — 기간/필터를 확인하세요."}</td></tr>`}
+         <tr class="grandtot"><td colspan="3" class="center">합계 ${st.rows.length}건</td><td class="num">${won(t.sent)}</td><td class="num">${won(t.used)}</td><td class="num" style="color:${(+t.bal<0)?'#c0392b':'#1f7a3d'}"><b>${won(t.bal)}</b></td></tr>
+         </tbody></table></div>
+       </div>
+       <div class="panel" style="flex:1;display:flex;flex-direction:column;min-width:0">
+         <div class="panel-h" style="flex:0 0 auto">수불 이력 (running balance)</div>
+         <div id="sl-detail" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">${detailHTML()}</div>
+       </div>
+      </div>
+     </div>`;
+    const g=id=>c.querySelector(id);
+    g("#sl-fr").onchange=x=>st.fr=x.target.value; g("#sl-to").onchange=x=>st.to=x.target.value;
+    g("#sl-cust").onchange=x=>st.cust=x.target.value; g("#sl-mat").oninput=x=>st.mat=x.target.value;
+    g("#sl-sign").onchange=x=>st.sign=x.target.value; g("#sl-scope").onchange=x=>st.scope=x.target.value;
+    g("#sl-go").onclick=load;
+    c.querySelectorAll(".sl-row").forEach(tr=>tr.onclick=()=>{const r=st.rows[+tr.dataset.i];
+      c.querySelectorAll(".sl-row").forEach(x=>x.style.background="");tr.style.background="#eef4ff";loadDetail(r);});
+    c.querySelectorAll("thead th[data-key]").forEach(th=>{addResizer(th);const k=th.dataset.key;th.style.cursor="pointer";th.title="더블클릭 정렬";
+      th.ondblclick=()=>{st.sortDir=(st.sortKey===k&&st.sortDir===1)?-1:1;st.sortKey=k;draw();};});
+  };
+  load();
+};
+
 /* ===== 협력사: 모델BOM 관리 (w_pr_master_060/020) — 모델→도번(신규모델 등록) ===== */
 SCREEN.modelbom=(c)=>{
   const API=API_BASE;
