@@ -458,23 +458,25 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     #    용접/가공(생산 _prodstock stage=WELD/GAGONG)·영업(salesstock)·자재(nx.mat_stock_daily 이동평균 일마감).
     #    생산·영업 기초=2502스냅샷+월초직전무브(=7월말) × 월초원가, 현재고=조회일 수량 × 월초원가. 자재=일별 이동평균.
     #    실재고(조정후) = 실매입 + 재고증가합계.
-    # ★재고(기초/기말) = 자재/생산/영업 수불장(close.py MAT/PRD/SAL). ba=기초금액·sa=기말금액. ★이동평균 일마감(matclose) 아님.
-    from routers import close as _close
+    # ★재고(기초/기말) = 마감 확정 스냅샷 직독(nx.stock_snapshot). 기초=직전 월마감(월초 기초재고)·기말=조회일 일마감(없으면 직전 일마감).
+    #   ★replay 없음=즉시(수불장 ledger는 월전체 재생으로 30초). 일단위 조회=확정 마감값 사용(수불장 runtime과 ~0.4%p 미세차·확정값이 권위적).
     _lc = _nxc(); _lcur = _lc.cursor()
     base_m = cur_m = base_prd = cur_prd = base_s = cur_s = 0
-    def _ledsum(domain, fn, *a):
-        # ★close.py 수불장 캐시 공유 — 수불장 화면/재조회 시 즉시(콜드만 무거움). 캐시무효화도 close가 관리.
-        ck = (domain, m0, d6)
-        hit = _close._LEDGER_CACHE.get(ck)
-        rows = hit[0] if hit else fn(*a)[0]
-        if not hit:
-            _close._LEDGER_CACHE[ck] = (rows, [], '')
-        return round(sum(float(r.get('ba') or 0) for r in rows)), round(sum(float(r.get('sa') or 0) for r in rows))
-    try: base_m, cur_m = _ledsum('MAT', _close._mat_ledger, _lcur, m0, d6, 0)   # 자재 수불장
+    def _snapsum(dom):
+        # 기초 = 직전 월마감(M, period<ym)
+        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+            WHERE domain=? AND ptype='M' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='M' AND period<?)""", dom, dom, ym)
+        b = float(_lcur.fetchone()[0] or 0)
+        # 기말 = 조회일 이하 최신 일마감(D, period<=d6). 없으면 기초(변동0).
+        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+            WHERE domain=? AND ptype='D' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='D' AND period<=?)""", dom, dom, d6)
+        e = float(_lcur.fetchone()[0] or 0)
+        return round(b), round(e if e else b)
+    try: base_m, cur_m = _snapsum('MAT')
     except Exception: pass
-    try: base_prd, cur_prd = _ledsum('PRD', _close._prd_ledger, _lcur, m0, d6)  # 생산 수불장(용접+가공)
+    try: base_prd, cur_prd = _snapsum('PRD')
     except Exception: pass
-    try: base_s, cur_s = _ledsum('SAL', _close._sal_ledger, _lcur, m0, d6)      # 영업 수불장
+    try: base_s, cur_s = _snapsum('SAL')
     except Exception: pass
     _lc.close()
     jaego = (cur_m + cur_prd + cur_s) - (base_m + base_prd + base_s)   # 재고 증감(참고)
