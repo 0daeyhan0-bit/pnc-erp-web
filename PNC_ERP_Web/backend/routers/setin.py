@@ -10,6 +10,41 @@ from common import _conn, _nx, _nx_tx, _b, _d6, _num, _assert_open, stock_change
 
 router = APIRouter()
 
+# ── 협력사출고(사급소진) posting: 세트입고 완제품 × 사급부품 소요 → nx.sagub_maint(tag 'S', −) ──
+#    협력사 사급재고 단일 원장(SAGUB_PARTS_LEDGER_DESIGN). 소요는 통일 소요엔진(§10)만.
+#    사급출고(saleout)=협력사입고(+)의 역방향. 수불장·협력사사급재고관리가 이 원장에서 파생.
+_SAG_ENG = None; _SAG_STOP = None; _SAG_WELD = None; _SAG_MEMO = {}
+def _sag_eng():
+    global _SAG_ENG, _SAG_STOP, _SAG_WELD
+    if _SAG_ENG is None:
+        import nx_soyo_engine as _soyo
+        from nx_cost_engine import NxCostEngine
+        _SAG_ENG = NxCostEngine(); c = _SAG_ENG.cur
+        c.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE item_code LIKE 'RAC%' OR item_code LIKE 'BCUP%' OR item_name LIKE '%용접%'")
+        _SAG_WELD = set(r[0].strip() for r in c.fetchall())
+        c.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(MAT_CODE))) FROM nx.v_pr_bom WHERE SAGUB_FLAG='1' AND ISNULL(MAT_CODE,'')<>''")
+        _SAG_STOP = set(r[0].strip() for r in c.fetchall())
+        _soyo.warm_vpr(_SAG_ENG)
+    return _SAG_ENG
+
+def _post_sagub_out(cur, cust, doban, qty, ymd, ref):
+    """세트입고 완제품 doban×qty → 사급부품 소요만큼 협력사 사급재고 차감(tag 'S', −qty). 용접 제외. 소요엔진(§10)."""
+    if not cust or not doban or not qty:
+        return 0
+    import nx_soyo_engine as _soyo
+    eng = _sag_eng()
+    n = 0
+    for part, per in _soyo.sagub_parts_soyo(eng, str(doban).strip().upper(), _SAG_STOP, _SAG_MEMO).items():
+        if part in _SAG_WELD or per <= 0:
+            continue
+        cur.execute("SELECT ISNULL(MAX(maint_seq),0)+1 FROM nx.sagub_maint WHERE maint_ymd=?", ymd)
+        s = int(cur.fetchone()[0] or 1)
+        cur.execute("""INSERT INTO nx.sagub_maint(maint_ymd,maint_seq,maint_tag,cust_code,mat_code,maint_qty,remarks,remarks_src,insert_user_id,insert_datetime)
+            VALUES(?,?,'S',?,?,?,N'세트입고 협력사출고(사급소진)',?,'web',getdate())""",
+            ymd, s, cust, part, -float(per) * float(qty), f"setstock:{ref}")
+        n += 1
+    return n
+
 # ===================== 세트입고요청 (nx.set_input_req, 협력사) =====================
 @router.get("/api/setin/list")
 def setin_list(request: Request, cust: str = Query(""), fr: str = Query(""), to: str = Query(""), status: str = Query(""), limit: int = Query(800)):
@@ -265,6 +300,7 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
                 f"입고할 수 없는 상태입니다 — SET바코드 {bc}: {desc}. "
                 f"발행(10)·출발(20)·입고대기(30) 상태만 입고됩니다.")
         recv = 0; posted = 0
+        cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)"); _today = cur.fetchone()[0]
         cur.execute("SELECT ISNULL(MAX(maint_seq),0) FROM nx.set_stock_maint WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
         mseq = int(cur.fetchone()[0])
         for sheet, doban, qty, cust, insp in reqs:
@@ -295,6 +331,8 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
                         lseq, bcn, cust, str(mat).strip(), jqty, doban, mseq)
                     posted += 1
                 cur.execute("UPDATE nx.set_stock_maint SET derived_flag='1' WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6) AND maint_seq=?", mseq)
+                # ★협력사출고(사급소진) — 완제품 doban×qty 만큼 협력사 사급재고 차감(nx.sagub_maint tag S, −). 소요엔진(§10).
+                _post_sagub_out(cur, cust, doban, qty, _today, mseq)
         cn.commit()
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "received": recv, "ledger_posted": posted, "barcode": "SET" + bc}
@@ -337,11 +375,12 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
        믿고 받는 구조(세지 않고 송장대로 입고)에서는 **되돌리는 길이 반드시 있어야 한다.**
        스캔 1회로 도번 최대 35종이 들어가므로, 잘못 찍으면 통째로 잘못 들어간다.
 
-       되돌리는 것 = 입고가 만든 것 **셋 전부**
+       되돌리는 것 = 입고가 만든 것 **넷 전부**
          ① nx.set_stock_maint      입고 거래행 삭제
          ② nx.set_input_req.status 90/30 → 10(발행)으로 복귀 + deliver 유지
          ③ nx.stock_ledger         자도번 재고 파생분(MAINT_TAG='S') 삭제
-       ★셋 중 하나만 지우면 장부가 어긋난다. 한 트랜잭션으로 묶는다.
+         ④ nx.sagub_maint          협력사출고(사급소진) posting(remarks_src='setstock:mseq') 삭제
+       ★넷 중 하나만 지우면 장부가 어긋난다. 한 트랜잭션으로 묶는다.
 
        ★마감 잠금: 마감된 기간의 입고는 취소할 수 없다(재고가 움직이므로 규칙B).
     """
@@ -371,6 +410,18 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
         except Exception:
             led = 0
 
+        # ④ 협력사출고(사급소진) posting 제거 — 입고 mseq 기준(remarks_src='setstock:mseq'). 근거키 스코프.
+        sag = 0
+        try:
+            seqs = {int(r[1]) for r in rows}
+            if seqs:
+                srcs = [f"setstock:{s}" for s in seqs]
+                ph = ",".join("?" for _ in srcs)
+                cur.execute(f"DELETE FROM nx.sagub_maint WHERE maint_tag='S' AND remarks_src IN ({ph})", *srcs)
+                sag = cur.rowcount
+        except Exception:
+            sag = 0
+
         # ① 입고 거래행 제거
         cur.execute("DELETE FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
         recv = cur.rowcount
@@ -383,8 +434,8 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
         cn.commit()
         stock_changed()      # ★재고 변경 → 파생 캐시 무효화
         return {"ok": True, "barcode": bc, "recv_deleted": recv,
-                "ledger_deleted": led, "req_reverted": req,
-                "msg": f"입고취소 완료 — 입고 {recv}건 · 재고파생 {led}행 되돌림. "
+                "ledger_deleted": led, "sagub_deleted": sag, "req_reverted": req,
+                "msg": f"입고취소 완료 — 입고 {recv}건 · 재고파생 {led}행 · 협력사출고 {sag}행 되돌림. "
                        f"송장 {req}건이 발행(10) 상태로 돌아가 다시 스캔할 수 있습니다."}
     except Exception:
         cn.rollback(); raise
