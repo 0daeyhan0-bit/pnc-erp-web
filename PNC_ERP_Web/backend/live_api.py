@@ -556,8 +556,27 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
                "sagub_part_sum": _r3(_sagub_part_sum), "sagub_hab": _r3(_sagub_hab),
                "lg_sugum": _r3(_lgsu)}
 
+    # ⑥ 당일 실적(조회일=d6만): 매출(리시빙 cut별 절삭/설치/기타) + 사급(OSP 원소재=TUBE/부품)
+    _c, _rrt = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
+      WHERE r.RECEIVING_YMD='{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
+    _tc = {(r['cg'] or ''): float(r['amt'] or 0) for r in _rrt}
+    t_cut, t_seol = round(_tc.get('절삭', 0)), round(_tc.get('설치', 0))
+    t_etc = round(sum(v for k, v in _tc.items() if k not in ('절삭', '설치')))
+    _c, _rot = _rows(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END t, SUM(ISNULL(amt,0)) a
+      FROM PARTNER_ERP_TEST3.nx.lg_sagub_actual WHERE ym='{ym}' AND ISNULL(ymd,'')='{d6}'
+      GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END""")
+    _tsg = {r['t']: float(r['a'] or 0) for r in _rot}
+    t_raw, t_part = round(_tsg.get('raw', 0)), round(_tsg.get('part', 0))
+
     _res = {"date": d6, "ym": ym,
             "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
+            # ⑥ 당일 실적(조회일) — 매출(절삭/설치/기타/합계) + 사급(원소재/부품/합계)
+            "today": {"hyeon_cut": t_cut, "hyeon_seol": t_seol, "hyeon_etc": t_etc, "sales_hab": t_cut + t_seol + t_etc,
+                      "sagub_raw": t_raw, "sagub_part": t_part, "sagub_hab": t_raw + t_part},
+            # ② 재료비 = 기초재고 + 매입총액 − 기말재고 (기초=7월말·기말=조회일 현재고). %=재료비/매출
+            "jaemat": {"gicho": gicho, "pur": pur_t['tot'], "gimal": gimal, "jaemat": jaemat, "jaemat_pct": pct(jaemat, lg_sales)},
             # ⑤ 현매출 / ② 매입비율
             "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
