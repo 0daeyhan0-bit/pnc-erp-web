@@ -290,10 +290,10 @@ SCREEN.receiptdetail=(c)=>{
     cur:{h:'화폐',cls:'center',get:r=>esc(curN(r.cur))},
     rate:{h:'환율',cls:'num',get:r=>rateD(r)},
     cost:{h:'단가',cls:'num',get:r=>won(r.cost)},
-    amt:{h:'금액',cls:'num gstock',get:r=>wonI(r.amt)},
-    kamt:{h:'금액(KRW)',cls:'num',get:r=>wonI(r.kamt)},
+    amt:{h:'금액',cls:'num gstock',get:r=>wonI(r.kamt)},   // ★금액 기준=KRW(kamt)
+    kamt:{h:'금액(KRW)',cls:'num',get:r=>wonI(r.kamt)},   // (미사용·TAIL서 제외)
   };
-  const TAIL=['unit','qty','wt','cur','rate','cost','amt','kamt'];
+  const TAIL=['unit','qty','wt','cur','rate','cost','amt'];   // ★금액(=KRW)만 · 금액(KRW) 중복컬럼 제외
   const ITEM=['mat','nm','spec','diam','thick','length','lg','sg'];
   const MODES={
     day:      {label:'일자별',      lead:['ymd','seq','cnm','ct','chg','ym'].concat(ITEM), sort:['ymd','seq']},
@@ -359,7 +359,7 @@ SCREEN.receiptdetail=(c)=>{
         &&(!mq||(''+r.mat).toLowerCase().includes(mq)||(''+r.nm).toLowerCase().includes(mq)));};
     const rowHtml=r=>`<tr>${order.map(k=>{const cd=CD[k],cap=cd.cls.indexOf('cap')>=0,v=cd.get(r);return `<td class="${cd.cls}"${cap?` title="${esc((''+(k==='cnm'?r.cnm:k==='nm'?r.nm:k==='spec'?r.spec:k==='ct'?ctN(r.ct):'')))}"`:''}>${v}</td>`;}).join('')}</tr>`;
     /* receiptdetail-live */
-    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"${g==='grandtot'?' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"':''}><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
+    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"${g==='grandtot'?' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"':''}><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(k)}</td></tr>`;
     const render=()=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
@@ -405,7 +405,7 @@ SCREEN.receiptdetail=(c)=>{
     c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curMq='';curCq='';curLg='';curSg='';curCt='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h);
-      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,ym:r=>fmtYm(r.ym),cnm:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,diam:r=>r.diam,thick:r=>r.thick,length:r=>r.length,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt),kamt:r=>Math.round(r.kamt)};
+      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,ym:r=>fmtYm(r.ym),cnm:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,diam:r=>r.diam,thick:r=>r.thick,length:r=>r.length,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.kamt),kamt:r=>Math.round(r.kamt)};
       downloadCSV('확정입고명세서_'+gijun+'_'+mode+'.csv',hd,cur.map(r=>order.map(k=>raw[k](r))));
     };
     render();
@@ -439,10 +439,10 @@ SCREEN.dispatchdetail=(c)=>{
     cur:{h:'화폐',cls:'center',get:r=>esc(curN(r.cur))},
     rate:{h:'환율',cls:'num',get:r=>rateD(r)},
     cost:{h:'단가',cls:'num',get:r=>won(r.cost)},
-    amt:{h:'금액',cls:'num gstock',get:r=>wonI(r.amt)},
-    kamt:{h:'금액(KRW)',cls:'num',get:r=>wonI(r.kamt)},
+    amt:{h:'금액',cls:'num gstock',get:r=>wonI(r.kamt)},   // ★금액 기준=KRW(kamt)
+    kamt:{h:'금액(KRW)',cls:'num',get:r=>wonI(r.kamt)},   // (미사용·TAIL서 제외)
   };
-  const TAIL=['unit','qty','wt','cur','rate','cost','amt','kamt'];
+  const TAIL=['unit','qty','wt','cur','rate','cost','amt'];   // ★금액(=KRW)만 · 금액(KRW) 중복컬럼 제외
   const MODES={
     day:      {label:'일자별',       lead:['ymd','seq','cc','ct','chg','mat','nm','spec','lg','sg','incust'], sort:['ymd','seq']},
     cust:     {label:'불출처별',      lead:['cc','ct','chg','ymd','seq','mat','nm','spec','lg','sg','incust'], sort:['cc','ymd','seq'], g1:'cc',g2:'ymd',l1:'불출처소계',l2:'일계'},
@@ -504,7 +504,7 @@ SCREEN.dispatchdetail=(c)=>{
         &&(!mq||(''+r.mat).toLowerCase().includes(mq)||(''+r.nm).toLowerCase().includes(mq)));};
     const rowHtml=r=>`<tr>${order.map(k=>{const cd=CD[k],cap=cd.cls.indexOf('cap')>=0,v=cd.get(r);return `<td class="${cd.cls}"${cap?` title="${esc((''+(k==='cc'?r.cnm:k==='nm'?r.nm:k==='spec'?r.spec:k==='incust'?r.incust:k==='ct'?ctN(r.ct):'')))}"`:''}>${v}</td>`;}).join('')}</tr>`;
     /* dispatchdetail-live */
-    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"${g==='grandtot'?' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"':''}><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(a)}</td><td class="num">${wonI(k)}</td></tr>`;
+    const subRow=(label,q,a,k,g)=>`<tr class="${g||'subtot'}"${g==='grandtot'?' style="position:sticky;bottom:0;background:#e8f0fb;box-shadow:0 -1px 0 #b9cbe6;z-index:3"':''}><td colspan="${qi}" class="right">${esc(label)}</td><td class="num">${won(q)}</td><td colspan="4"></td><td class="num">${wonI(k)}</td></tr>`;
     const render=()=>{
       let lines=filt();
       lines.sort((a,b)=>{for(const k of cfg.sort){const c2=(''+(a[k]??'')).localeCompare(''+(b[k]??''),'ko',{numeric:true});if(c2)return c2;}return 0;});
@@ -552,7 +552,7 @@ SCREEN.dispatchdetail=(c)=>{
     c.querySelector('#reset').onclick=()=>{mode='day';gijun='close';curYm='';curCq='';curLg='';curSg='';curCt='';curMq='';load();};
     c.querySelector('#xls').onclick=()=>{
       const hd=order.map(k=>CD[k].h.replace(/<[^>]+>/g,''));
-      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,cc:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),ic:r=>r.ic,mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),incust:r=>r.incust,unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.amt),kamt:r=>Math.round(r.kamt)};
+      const raw={ymd:r=>fmtYmd(r.ymd),seq:r=>r.seq,cc:r=>r.cnm,ct:r=>ctN(r.ct),chg:r=>chg(r.cc),ic:r=>r.ic,mat:r=>r.mat,nm:r=>r.nm,spec:r=>r.spec,lg:r=>lgN(r.lg),sg:r=>sgN(r.sg),incust:r=>r.incust,unit:r=>r.unit,qty:r=>r.qty,wt:r=>r.wt,cur:r=>curN(r.cur),rate:r=>(''+r.cur).trim()==='KRW'?'':r.rate,cost:r=>r.cost,amt:r=>Math.round(r.kamt),kamt:r=>Math.round(r.kamt)};
       downloadCSV('자재불출명세서_'+gijun+'_'+mode+'.csv',hd,cur.map(r=>order.map(k=>raw[k](r))));
     };
     render();
