@@ -836,18 +836,21 @@ class NxCostEngine:
            재료=leaf에만 계상(누적qty), 가공=proc_amt×누적EA. overhead(일반/운반/이윤)는 agg 요약에만."""
         ymcut='20'+ymd[:4]; ym='20'+ymd[:4]
         rows=[]
-        def walk(node, cum_q, cum_ea, lvl, parent, eqty, seen):
+        # ★2026-08-29 naewon 재료 2버그수정(NAEWON_COSTGUBUN3_GAP_260829.md·cost_material_nae와 동일):
+        #   ①cg3 가드제거(cg3+자식 전개) ②EA단위 수량전파(재료 cum_qm=EA게이트, 표시 cum_q=raw 분리).
+        #   재료 mat=won×cum_qm → 합계=naewon.jae 정합. cum_ea(가공)는 기존과 동일.
+        def walk(node, cum_q, cum_qm, cum_ea, lvl, parent, eqty, seen):
             info=self._load_item(node)
             cg=info['cost_gubun']
-            expandable = bool(self._expandable_nae(node, seen)) if cg!='3' else False
+            expandable = bool(self._expandable_nae(node, seen))   # ①cg3 가드제거(cg5+자식없음만 정지)
             if cg=='3':
                 won=self.std_metal_price(info['metal'],info['diam'],info['thick'],ymcut)
-                mat = 0.0 if expandable else round(won*info['wt']*cum_q,2)
+                mat = 0.0 if expandable else round(won*info['wt']*cum_qm,2)
             elif cg=='':
                 won=0.0; mat=0.0
             else:
                 won=self.pur_price(node,ymd,info['in_cust']) or 0.0
-                mat = 0.0 if expandable else round(won*cum_q,2)
+                mat = 0.0 if expandable else round(won*cum_qm,2)
             gag=round(self.proc_amt_nae(node, info, ym, parent)*cum_ea,2)
             nproc=sum(1 for (p,wq,uph,c,pit) in self._procs(node) if pit==(parent if info['silver'] else '') and wq>0)
             rows.append({'level':lvl,'code':node,'parent':parent,'eqty':round(eqty,4),'cost_gubun':cg,'qty':round(cum_q,4),
@@ -859,8 +862,11 @@ class NxCostEngine:
                     if cx: continue
                     cinfo=self._load_item(c)
                     ea=qty if cinfo['unit']=='EA' else 1.0
-                    walk(c, cum_q*qty, cum_ea*ea, lvl+1, node, qty, seen|{node})
-        walk(item,1.0,1.0,0,'',1.0,set())
+                    # ②재료 EA게이트: 내부노드로 내려갈 땐 qty를 EA일 때만, 최말단은 항상
+                    child_leaf = not bool(self._expandable_nae(c, seen|{node}))
+                    mfac = qty if (child_leaf or cinfo['unit']=='EA') else 1.0
+                    walk(c, cum_q*qty, cum_qm*mfac, cum_ea*ea, lvl+1, node, qty, seen|{node})
+        walk(item,1.0,1.0,1.0,0,'',1.0,set())
         codes=list({r['code'] for r in rows})
         meta={}
         for i in range(0,len(codes),900):
