@@ -12,6 +12,10 @@ function ensureSuperAccount(){
 let _appBooted=false;
 function bootApp(){
   if(_appBooted)return; _appBooted=true;
+  // ★계획 기준일(마지막 업로드 파일의 일자축 첫날)을 먼저 캐시에 올린다 — 2026-08-28.
+  //   계획 계열 화면(파트별계획·자재소요·영업계획·가공계획·가공이동·협력사계획·거래명세서발행)이
+  //   planBaseIso() 로 동기 참조하므로, 첫 화면이 열리기 전에 채워져 있어야 한다.
+  try{ planBase(); }catch(_){}
   buildTree();
   openTab('dash','대시보드');
   // 서버 권한 로드(전 PC 공통) → 로드되면 메뉴 재구성

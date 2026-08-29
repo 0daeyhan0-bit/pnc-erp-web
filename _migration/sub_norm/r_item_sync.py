@@ -40,4 +40,32 @@ c.execute(f"""UPDATE i SET
    diam=p.ITEM_DIAM, thick=p.ITEM_THICK, length=p.ITEM_LENGTH
    FROM {J} WHERE {where}""")
 print("동기화 완료. 되돌리기: nx.item_costfld_bak")
+
+# ── 갭 컬럼(리더가 미러에서 읽던 것) 동기화 — 미러 은퇴 관문. 멱등 ALTER + 항상 최신 backfill.
+#    (미러 UPPER→클린 lower 동명·case-insensitive. ITEM_WEIGHT는 의미상이 보류.)
+GAP = [("sagub_stock_flag","varchar(1)","SAGUB_STOCK_FLAG"),("std_won_mat_flag","varchar(1)","STD_WON_MAT_FLAG"),
+       ("jig_code","varchar(20)","JIG_CODE"),("jig_keep_area","varchar(20)","JIG_KEEP_AREA"),
+       ("safe_stock_min","smallint","SAFE_STOCK_MIN"),("safe_stock_max","smallint","SAFE_STOCK_MAX"),
+       ("weld_point_in","tinyint","WELD_POINT_IN"),("weld_point_out","tinyint","WELD_POINT_OUT"),
+       ("tariff_rate","numeric(18,2)","TARIFF_RATE"),("remarks","varchar(100)","REMARKS"),("item_cost","numeric(18,4)","ITEM_COST"),
+       ("item_weight","numeric(18,4)","ITEM_WEIGHT")]  # 레거시 단중(엔진용)·net_weight와 별개축·미러값 복사(diff0)
+for cl, ddl, _mir in GAP:
+    if c.execute("SELECT COL_LENGTH('nx.item',?)", cl).fetchone()[0] is None:
+        c.execute(f"ALTER TABLE nx.item ADD {cl} {ddl} NULL"); print(f"  갭컬럼 ADD {cl}")
+c.execute(f"UPDATE i SET {', '.join(f'i.{cl}=p.{mir}' for cl,_d,mir in GAP)} FROM {J}")
+print("갭 컬럼 동기화 완료(리더 이관 지원).")
+
+# ── 리더 컬럼(엔진/화면이 읽는 객관 마스터필드) 동기화 — 이관 diff0 관문.
+#    ★item_name은 제외(SUB 접미사 [-xxx] 보존 — 접미사 스텝이 별도 관리).
+#    ★sgroup(소분류)도 제외(2026-08-27) — 소분류는 nx.item이 소유하는 우리 분류(용접봉 240 등 클린 재분류).
+#      라이브 ITEM_SGROUP로 덮으면 재분류가 매일 원복됨 → item_name과 동일 사유로 보존.
+#      (lgroup은 원가엔진이 top으로 읽어 diff0 리스크 → 판매축 정리 전까지는 계속 live 추종.)
+#    나머지는 live 추종.
+c.execute(f"""UPDATE i SET
+   i.in_cust=LTRIM(RTRIM(p.IN_CUST_CODE)), i.item_spec=p.ITEM_SPEC, i.work_code=LTRIM(RTRIM(p.WORK_CODE)),
+   i.lgroup=LTRIM(RTRIM(p.ITEM_LGROUP)),
+   i.item_status=LTRIM(RTRIM(p.ITEM_STATUS)), i.prod_rate=p.PROD_RATE,
+   i.unit=ISNULL(LTRIM(RTRIM(p.UNIT)),'')
+   FROM {J}""")
+print("리더 컬럼 동기화 완료(item_name·sgroup=우리소유 보존 위해 제외).")
 n.close()

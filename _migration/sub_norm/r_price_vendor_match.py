@@ -9,6 +9,27 @@ import sys, io
 sys.path.insert(0, r'd:\피앤씨인더스트리\100_AI_AGENT\Projects\New_ERP')
 import pyodbc, db_client
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# ══════════════════════════════════════════════════════════════════════════════
+# ★★★ 2026-08-29 폐기 — 실행 금지. nx.price_item 이 **단가 마스터로 승격**됐다.
+#
+# 이 스크립트는 아래에서 `DELETE FROM nx.price_item WHERE price_type='매입'` 을 한 뒤
+# 라이브에서 통째로 다시 채운다. 파생 조회본일 때는 맞는 동작이었지만,
+# 지금 nx.price_item 은 **웹 단가관리 화면이 직접 쓰는 마스터**다.
+# 지금 실행하면 **웹에서 입력·수정한 단가가 전부 사라진다.**
+#
+# 승격 근거·검증 = `_schema/CUTOVER_CHECKLIST.md` "(A)안 검증"
+#   · PK(품번·구분·거래처·적용일) = 미러 PK 와 1:1 · 중복 0 · 참조 FK 없음
+#   · main_flag 등 7컬럼을 라이브에서 백필(99.23%) → sourcing 값차이 163 → 1
+#   · 백업 = nx.price_item_bak_promote (132,148행, 2026-08-29)
+#
+# 그래도 돌려야 한다면(복구 등) `--i-know-this-deletes-the-master` 를 함께 준다.
+# ══════════════════════════════════════════════════════════════════════════════
+if '--i-know-this-deletes-the-master' not in sys.argv:
+    print("★실행 거부 — nx.price_item 은 단가 마스터다. 이 스크립트는 매입 단가를 전부 지운다.")
+    print("  근거: _schema/CUTOVER_CHECKLIST.md '(A)안 검증' · 백업 nx.price_item_bak_promote")
+    print("  정말 필요하면 --i-know-this-deletes-the-master 를 붙일 것.")
+    sys.exit(1)
+
 DRY=('--commit' not in sys.argv)
 cn=pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}', autocommit=True)
 c=cn.cursor()

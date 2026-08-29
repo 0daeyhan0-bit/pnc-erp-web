@@ -4,9 +4,13 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
+<<<<<<< HEAD
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _geom_weight)
+=======
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _geom_weight, _sub_desc_suffix, _is_sub_code)
+>>>>>>> zt/main
 
-from common import _ITEM_MAKE
+from common import _ITEM_MAKE, _KINDMAP_EXT
 router = APIRouter()
 
 @router.get("/api/bom/search")
@@ -104,10 +108,9 @@ def bom_get(item: str = Query(..., description="품번")):
                    l.proc_gubun, l.gagong_proc, l.s_work, l.wh_gagong, l.in_gagong, l.cust_code, l.remarks,
                    ci.item_spec, ci.metal_gubun, ci.diam, ci.thick, ci.length, ci.item_type AS child_type,
                    ci.net_weight, ci.unit, ci.sgroup, ci.lgroup, ci.make_type, ci.cost_gubun, ci.status,
-                   ISNULL(ci.in_cust,'') AS in_cust, ISNULL(pv.partner_name, pc.CUST_DESC) AS cust_name
+                   ISNULL(ci.in_cust,'') AS in_cust, ISNULL(pc.CUST_DESC,'') AS cust_name
             FROM nx.bom_line l
             LEFT JOIN nx.item ci ON ci.item_code = l.child_item
-            LEFT JOIN nx.partner pv ON pv.partner_code = ci.in_cust
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = ci.in_cust
             WHERE l.bom_id = ? ORDER BY l.seq""", bom_id)
         cols = [d[0] for d in cur.description]
@@ -136,6 +139,10 @@ def codes():
                 FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=? AND ISNULL(USE_FLAG,'1')='1'
                 ORDER BY SORT_SEQ, DETAIL_CODE""", grp)
             out[key] = [{"code": r[0], "name": r[1]} for r in cur.fetchall()]
+            # nx 전용 확장코드(240 용접봉 등) 병합 — 품목마스터 편집(_kindmap)과 일관, 미러 미등록시 누락 방지
+            _have = {o["code"] for o in out[key]}
+            for _c, _nm in _KINDMAP_EXT.get(grp, {}).items():
+                if _c not in _have: out[key].append({"code": _c, "name": _nm})
         out["make_type"] = [{"code": k, "name": v} for k, v in _ITEM_MAKE.items() if k]   # 통일: _ITEM_MAKE(품목조회 일치)
         out["cost_gubun"] = [{"code": "2", "name": "구매단가"}, {"code": "3", "name": "소재단가"},
                              {"code": "1", "name": "내부단가"}, {"code": "5", "name": "기타"}]
@@ -147,7 +154,7 @@ def codes():
 
 @router.get("/api/item/vendorsearch")
 def item_vendorsearch(q: str = Query("")):
-    """매입처(거래처) 검색 — nx.partner + 라이브 CM_M_CUST."""
+    """매입처(거래처) 검색 — CM_M_CUST(기존 거래처 단일소스). nx.partner 재설계는 별도(WEHAGO/identity)."""
     cn = _nx(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"
@@ -177,7 +184,14 @@ def item_save(payload: dict = Body(...)):
             if str(s("cost_gubun") or "").strip() == "3":   # ★원소재=기하중량 재계산(레거시 f_get_weight3·저장값무시)
                 _gw = _geom_weight(_mg, _d, _t, _l)
                 if _gw is not None: _nw = _gw
+<<<<<<< HEAD
             vals = (s("item_name"), s("item_spec"), _mg, _d, _t, _l,
+=======
+            _nm = s("item_name")
+            if _nm and _is_sub_code(cur, code):   # ★SUB 품명 접미사 병기(§B-1 3-a·self-heal)
+                _nm = _sub_desc_suffix(code, _nm)
+            vals = (_nm, s("item_spec"), _mg, _d, _t, _l,
+>>>>>>> zt/main
                     _nw, s("unit"), s("in_cust"), s("sgroup"), s("lgroup"), s("make_type"),
                     s("cost_gubun"), s("status"))
             cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", code)
@@ -258,7 +272,7 @@ def _bom_tree_nx(item, real, expandbuy=0):
        ★expandbuy=1(real=1과 함께): 현행필터(cs_calc_except=0)는 유지하되 MAKE_TYPE 게이트 제거 → 매입 SUB(예 명진 -19-1) 하위도 전개(비현행 변형 태국 -F&T=cs_except1은 여전히 제외). 라우팅 화면 '현행 전체전개'용.
        구조/수량=nx.bom_line, 상세(품명·매입처·치수)=라이브 PR_M_ITEM(자도번 코드 기준, 표시코드만 정규화)."""
     exc = "AND ISNULL(bl.cs_calc_except,0)=0" if real else ""
-    mk = "" if (not real or expandbuy) else "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'"
+    mk = "" if (not real or expandbuy) else "JOIN PARTNER_ERP_TEST3.nx.item pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'"
     cn = _nx(); cur = cn.cursor()
     try:
         # ★성능(2026-08-13): 13컬럼 CAST를 재귀 안에서 계산하면 525ms. 재귀는 (부모,자식)만 슬림 전개(~10ms) →
@@ -298,10 +312,10 @@ def _bom_tree_nx(item, real, expandbuy=0):
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]
             inl = ",".join("N'" + str(x).replace("'", "''") + "'" for x in chunk)   # ★성능: 파라미터 IN(524ms)→N인라인(11ms). pyodbc param 오버헤드 회피
-            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
-                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
-                  ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
+                  ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                  ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -366,7 +380,7 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
         return _bom_tree_nx(item, real, int(expandbuy or 0))   # ★#1 이관: 단일 정규화 BOM(nx.bom_line). src=cs면 아래 현행 CS 전개(대조·롤백)
     exc_a = "AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""      # 원가제외 라인 스킵
     exc_r = "AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'" if real else ""
-    mk_gate = "JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
+    mk_gate = "JOIN PARTNER_ERP_TEST3.nx.item pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'" if real else ""  # 제작품만 하위전개
     cn = _conn(); cur = cn.cursor()  # live PARTNER_ERP
     try:
         cur.execute(f"""WITH tree AS (
@@ -399,10 +413,10 @@ def bom_tree(item: str = Query(..., description="품번"), real: int = Query(1, 
             nl = list(nodes)
             for i in range(0, len(nl), 900):
                 chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
-                cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
-                      ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
-                      ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+                cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
+                      ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                      ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
+                    FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                     WHERE m.ITEM_CODE IN ({ph})""", *chunk)
                 for r in cur.fetchall():
                     info[r[0]] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -469,10 +483,10 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
         for i in range(0, len(nl), 900):
             chunk = nl[i:i+900]
             inl = ",".join("N'" + str(x).replace("'", "''") + "'" for x in chunk)   # ★성능: 파라미터 IN→N인라인(524ms→11ms)
-            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''),
-                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
-                  ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0), ISNULL(m.ITEM_LENGTH,0)
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            cur.execute(f"""SELECT m.ITEM_CODE, ISNULL(m.item_name,''), ISNULL(m.item_spec,''),
+                  ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,''), ISNULL(m.METAL_GUBUN,''),
+                  ISNULL(m.diam,0), ISNULL(m.thick,0), ISNULL(m.length,0)
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({inl})""")
             for r in cur.fetchall():
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
@@ -587,9 +601,9 @@ def sub_impact(item: str = Query(..., description="SUB의 raw코드 또는 정�
             cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE raw_item=?", item)
             r = cur.fetchone(); scode = ((r[0] or '').strip() if r else None); target_raw = item
         # direct = 이 raw를 직속 자식으로 갖는 부모(자동전파 대상) + 이름
-        cur.execute("""SELECT DISTINCT h.item_code, ISNULL(m.ITEM_DESC,'')
+        cur.execute("""SELECT DISTINCT h.item_code, ISNULL(m.item_name,'')
                        FROM nx.bom_line bl JOIN nx.bom_header h ON h.bom_id=bl.bom_id
-                       LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=h.item_code
+                       LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON m.ITEM_CODE=h.item_code
                        WHERE bl.child_item=?""", target_raw)
         direct = [{"code": (x[0] or '').strip(), "name": x[1] or ''} for x in cur.fetchall() if (x[0] or '').strip()]
         return {"item": item, "sub_code": scode, "target_raw": target_raw,
@@ -643,16 +657,13 @@ def bom_save(payload: dict = Body(...)):
             bom_id = cur.fetchone()[0]
         # 전체 교체 — ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 → nx.proc_weld로 라우팅(bom_line 제외)
         cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", bom_id)
-        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+        # ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 = nx.proc_weld/item_weld/routing로 [조립공정 팝업(weld/save_node)]이 전담.
+        #   bom_save는 proc_weld를 절대 건드리지 않음(과거 DELETE+RAC재생성 로직 제거 — 그리드 저장 시 용접봉 다종 데이터 파괴 방지).
+        #   그리드의 RAC행은 bom_line에 안 넣고 skip(용접봉은 팝업에서만 편집).
         seq = 0; nweld = 0
         for ln in lines:
             ch = str(ln.get("child_item", "")).strip()
-            if ch.upper().startswith("RAC"):   # 용접봉 → proc_weld(공정종속 자재)
-                cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
-                    VALUES(?,?,?,?,?,?,?,?,'W','bom_save')""",
-                    item, ch, ch.split('-')[0], float(ln.get("qty") or 0),
-                    _b(ln.get("cs_calc_except")), _b(ln.get("lme_except")),
-                    (ln.get("from_ymd") or None), (ln.get("to_ymd") or None))
+            if ch.upper().startswith("RAC"):   # 용접봉 → 팝업 전담. bom_line/proc_weld 미기록(skip).
                 nweld += 1; continue
             seq += 1
             cur.execute("""INSERT INTO nx.bom_line
@@ -868,8 +879,8 @@ def lgbom_search(q: str = Query(""), werks: str = Query(""), limit: int = Query(
         if q: w.append("(b.model LIKE ? OR b.parent_code LIKE ?)"); p += [f"%{q}%", f"%{q}%"]
         if werks: w.append("b.werks=?"); p.append(werks)
         cur.execute(f"""SELECT TOP {int(limit)} b.model, b.werks, MAX(b.parent_code) parent_code,
-              MAX(ISNULL(pi.ITEM_DESC,'')) modelnm, COUNT(*) child_cnt, MAX(b.valid_from) valid_from
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.ITEM_CODE=b.model
+              MAX(ISNULL(pi.item_name,'')) modelnm, COUNT(*) child_cnt, MAX(b.valid_from) valid_from
+            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.ITEM_CODE=b.model
             WHERE {' AND '.join(w)} GROUP BY b.model, b.werks ORDER BY b.model""", *p)
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -889,13 +900,18 @@ def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = 
             src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
+<<<<<<< HEAD
               b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.ITEM_DESC,'') nx_desc
             FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=b.child_code
+=======
+              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
+            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
+>>>>>>> zt/main
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         # 최상위 parent(model) 정보
-        cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", model)
+        cur.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", model)
         mn = cur.fetchone()
         return {"model": model, "modelnm": (mn[0] if mn else ""), "rows": rows}
     finally:

@@ -13,13 +13,20 @@ _BASEMASTER = {
     "dept":  {"t": "HR_M_DEPT", "title": "부서MASTER", "src": "HR_M_DEPT", "order": "SORT_KEY",
               "cols": [("DEPT_CODE", "부서코드"), ("DEPT_DESC", "부서명"), ("SORT_KEY", "정렬"),
                        ("ENTERPRISE_DEPT", "전사부서"), ("WH_CODE", "창고"), ("USE_FLAG", "사용")]},
+    # ★라벨은 레거시 「LINE-NO MASTER」 화면과 동일하게(2026-08-27).
+    #   MAINT_DAY/MAINT_HHMM = 라인당김(변경일자·변경시간)
+    #   CUST_MAINT_DAY = **직납품당김일자** — 파트별계획 없는 직납품에 추가 적용되는 당김일수(CA=1).
+    #     STEP7 의 nx.plan_direct_pull 이 이 값을 쓴다. 종전 라벨 '거래처리드'는 레거시에 없는 이름.
+    #   ⛔LINK_CUST_CODE(연결거래처) 는 미사용 항목이라 화면에서 제외(사용자 확인).
     "line":  {"t": "PR_M_LINE_NO", "title": "LINE-NO MASTER", "src": "PR_M_LINE_NO", "order": "LINE_NO",
-              "cols": [("LINE_NO", "라인번호"), ("APPLY_YMD", "적용일"), ("MAINT_DAY", "리드(일)"),
-                       ("MAINT_HHMM", "시각"), ("LINK_CUST_CODE", "연계거래처"), ("CUST_MAINT_DAY", "거래처리드")]},
-    "assem": {"t": "CS_M_ASSEM_PROC", "title": "조립공정MASTER", "src": "CS_M_ASSEM_PROC", "order": "SORT_SEQ",
+              "cols": [("LINE_NO", "라인번호"), ("APPLY_YMD", "적용일"), ("MAINT_DAY", "변경일자"),
+                       ("MAINT_HHMM", "변경시간"), ("CUST_MAINT_DAY", "직납당김")]},
+    # ★2026-08-23 assem/proc 은 웹에서 등록·수정·삭제하므로 조회도 nx 로(쓰기와 같은 원장).
+    #   라이브만 보면 웹 추가분이 목록에 안 나온다(실측 CS_M_PROC nx 116 vs 라이브 95).
+    "assem": {"t": "PARTNER_ERP_TEST3.nx.CS_M_ASSEM_PROC", "title": "조립공정MASTER", "src": "nx.CS_M_ASSEM_PROC", "order": "SORT_SEQ",
               "cols": [("ASSEM_PROC_CODE", "공정코드"), ("ASSEM_PROC_DESC", "공정명"), ("STD_ST", "표준ST"),
                        ("SORT_SEQ", "정렬"), ("USE_FLAG", "사용")]},
-    "proc":  {"t": "CS_M_PROC", "title": "단품공정MASTER", "src": "CS_M_PROC", "order": "SORT_SEQ",
+    "proc":  {"t": "PARTNER_ERP_TEST3.nx.CS_M_PROC", "title": "단품공정MASTER", "src": "nx.CS_M_PROC", "order": "SORT_SEQ",
               "cols": [("PROC_CODE", "공정코드"), ("PROC_DESC", "공정명"), ("ITEM_LGROUP", "대분류"),
                        ("SORT_SEQ", "정렬"), ("PROD_UPH", "표준UPH"), ("USE_FLAG", "사용")]},
 }
@@ -80,10 +87,94 @@ def basemaster_list(kind: str = Query("dept"), q: str = Query("")):
             p = [f"%{q.strip()}%"] * 2
         cur.execute(f"SELECT {sel} FROM {m['t']}{w} ORDER BY [{m['order']}]", *p)
         rows = [list(r) for r in cur.fetchall()]
+        # ★2026-08-23 mstCrud(공용 편집 UI)는 행을 객체로 다루므로 c0..cN 키를 함께 준다.
+        #   기존 화면(배열 그대로 그리는 조회탭)과 호환 위해 rows 는 유지하고 orows 를 추가.
+        orows = [{f"c{i}": v for i, v in enumerate(r)} for r in rows]
         return {"kind": kind, "title": m["title"], "table": m["src"],
-                "headers": [h for _, h in m["cols"]], "rows": rows, "cnt": len(rows)}
+                "headers": [h for _, h in m["cols"]], "rows": rows, "orows": orows, "cnt": len(rows)}
     finally:
         cn.close()
+
+# ============ 조립/단품 공정 마스터 등록·수정·삭제 (2026-08-23) ============
+# 쓰기는 nx 만(CLAUDE.md §1). 조회 basemaster_list 는 라이브를 보므로,
+# 웹에서 추가한 건이 목록에 보이려면 아래 _PROCM 의 t(=nx)로 저장한 뒤
+# 조회도 nx 를 보도록 _BASEMASTER 의 assem/proc 테이블을 nx 로 지정해 둔다.
+_PROCM = {
+    "assem": {"t": "PARTNER_ERP_TEST3.nx.CS_M_ASSEM_PROC", "key": "ASSEM_PROC_CODE",
+              "flds": [("ASSEM_PROC_DESC", "s", 30), ("STD_ST", "f", 0),
+                       ("SORT_SEQ", "i", 0), ("USE_FLAG", "s", 1)]},
+    # ★flds 순서 = 프론트 목록 컬럼(c1..cN) 순서와 반드시 일치시킬 것.
+    #   proc: c1=공정명 c2=대분류 c3=정렬 c4=표준UPH c5=사용  (REMARKS 는 목록에 없어 맨 뒤)
+    "proc":  {"t": "PARTNER_ERP_TEST3.nx.CS_M_PROC", "key": "PROC_CODE",
+              "flds": [("PROC_DESC", "s", 30), ("ITEM_LGROUP", "s", 10), ("SORT_SEQ", "i", 0),
+                       ("PROD_UPH", "f", 0), ("USE_FLAG", "s", 1), ("REMARKS", "s", 255)]},
+}
+
+def _pm_val(kind_fld, v):
+    _, ty, ln = kind_fld
+    if ty == "s":
+        return str(v if v is not None else "").strip()[:ln]
+    try:
+        return (int(float(v or 0)) if ty == "i" else float(v or 0))
+    except Exception:
+        return 0
+
+@router.post("/api/procmaster/save")
+def procmaster_save(payload: dict = Body(...)):
+    """조립(assem)/단품(proc) 공정마스터 등록·수정. 코드 있으면 UPDATE, 없으면 INSERT."""
+    kind = str(payload.get("kind", "")).strip()
+    m = _PROCM.get(kind)
+    if not m:
+        raise HTTPException(400, "kind 는 assem/proc 만 가능합니다.")
+    # 프론트 mstCrud 는 keyField(c0)로 코드를 담는다. code / c0 둘 다 허용.
+    code = (str(payload.get("code", "")).strip() or str(payload.get("c0", "")).strip())[:10]
+    if not code:
+        raise HTTPException(400, "공정코드는 필수입니다.")
+    # 값은 c1..cN(프론트 폼 키) 우선, 없으면 컬럼명 소문자로도 받는다.
+    vals = [_pm_val(f, payload.get(f"c{i+1}", payload.get(f[0].lower())))
+            for i, f in enumerate(m["flds"])]
+    user = str(payload.get("uuser", "") or "웹사용자")[:20]
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute(f"SELECT COUNT(*) FROM {m['t']} WHERE [{m['key']}]=?", code)
+        exists = cur.fetchone()[0] > 0
+        cols = [f[0] for f in m["flds"]]
+        if exists:
+            setp = ", ".join(f"[{c}]=?" for c in cols)
+            cur.execute(f"""UPDATE {m['t']} SET {setp}, UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(),
+                            UPDATE_WINDOW='web_procmaster' WHERE [{m['key']}]=?""", *vals, user, code)
+            return {"ok": True, "code": code, "mode": "update"}
+        ph = ",".join("?" * (len(cols) + 1))
+        cur.execute(f"""INSERT INTO {m['t']} ([{m['key']}],{','.join('['+c+']' for c in cols)},
+                        INSERT_USER_ID, INSERT_DATETIME, INSERT_WINDOW)
+                        VALUES({ph}, ?, GETDATE(), 'web_procmaster')""", code, *vals, user)
+        return {"ok": True, "code": code, "mode": "insert"}
+    finally:
+        nx.close()
+
+@router.post("/api/procmaster/delete")
+def procmaster_delete(payload: dict = Body(...)):
+    """조립/단품 공정마스터 삭제(nx만). 사용중이면 USE_FLAG='N' 을 권장."""
+    kind = str(payload.get("kind", "")).strip()
+    m = _PROCM.get(kind)
+    if not m:
+        raise HTTPException(400, "kind 는 assem/proc 만 가능합니다.")
+    # 프론트 mstCrud 는 체크박스 다건삭제라 codes 배열로 보낸다(단건 code 도 허용).
+    codes = [str(x).strip() for x in (payload.get("codes") or []) if str(x).strip()]
+    one = str(payload.get("code", "")).strip()
+    if one and one not in codes:
+        codes.append(one)
+    if not codes:
+        raise HTTPException(400, "삭제할 공정코드가 없습니다.")
+    nx = _nx(); cur = nx.cursor()
+    try:
+        n = 0
+        for c in codes:
+            cur.execute(f"DELETE FROM {m['t']} WHERE [{m['key']}]=?", c)
+            n += int(cur.rowcount or 0)
+        return {"ok": True, "deleted": n}
+    finally:
+        nx.close()
 
 # ---- 달력 마스터(근무/라인별/파트별) — 엔티티+기간 필터, 요일/근무 파생 ----
 # 소스근거(w_pr_plan_020): work_stats in('1','2','5','6')=근무일, '4'=제외(비근무). WEEKLY 1=일~7=토.

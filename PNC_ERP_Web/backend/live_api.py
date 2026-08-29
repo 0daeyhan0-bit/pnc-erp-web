@@ -80,14 +80,14 @@ _NX_POINT_NOTE = {
 def _nx_derive(point, from6, to6, limit=8000):
     """단일원장 파생 재고 그리드. 잔량=기초(<from)+ΣMAINT(<=to). 입고=+, 출고=−(양수표시). 근거키 삭제/쓰기 없음(순수 SELECT)."""
     sql = f"""SELECT TOP {int(limit)}
-        COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE) cd, MAX(i.ITEM_DESC) nm, MAX(i.ITEM_SPEC) spec,
+        COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE) cd, MAX(i.item_name) nm, MAX(i.ITEM_SPEC) spec,
         ISNULL(L.GAGONG_PROC_CODE,'') gpc, ISNULL(L.CUST_CODE,'') cust,
         SUM(CASE WHEN L.MAINT_YMD<? THEN L.MAINT_QTY ELSE 0 END) base,
         SUM(CASE WHEN L.MAINT_YMD BETWEEN ? AND ? AND L.MAINT_QTY>0 THEN L.MAINT_QTY ELSE 0 END) inq,
         SUM(CASE WHEN L.MAINT_YMD BETWEEN ? AND ? AND L.MAINT_QTY<0 THEN -L.MAINT_QTY ELSE 0 END) outq,
         SUM(CASE WHEN L.MAINT_YMD<=? THEN L.MAINT_QTY ELSE 0 END) endq
       FROM nx.stock_ledger L
-      LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE)
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE)
       WHERE L.STOCK_POINT=?
       GROUP BY COALESCE(NULLIF(L.MAT_CODE,''),L.ITEM_CODE), ISNULL(L.GAGONG_PROC_CODE,''), ISNULL(L.CUST_CODE,'')
       HAVING SUM(CASE WHEN L.MAINT_YMD<=? THEN L.MAINT_QTY ELSE 0 END)<>0
@@ -128,9 +128,9 @@ def _nx_screen(point, from6, to6):
 # 일수불=PU_T_MONTH_STOCK_WH_DAILY(일자별 스냅샷), 월수불=PU_T_MONTH_STOCK_WH(마감월).
 # 원천/집계는 export_web_data.py 의 q_live 쿼리와 동일. 일자/월만 파라미터화.
 _LEDGER_SELECT = """
-select t.mat_code cd, max(m.item_desc) nm, max(m.item_spec) spec,
-  isnull(max(m.item_sgroup),'') sg, max(m.unit) unit,
-  isnull(max(m.in_cust_code),'') custcd, isnull(max(c.cust_desc),'') cust, isnull(max(c.cust_type),'') ctype,
+select t.mat_code cd, max(M.item_name) nm, max(m.item_spec) spec,
+  isnull(max(M.sgroup),'') sg, max(m.unit) unit,
+  isnull(max(M.in_cust),'') custcd, isnull(max(c.cust_desc),'') cust, isnull(max(c.cust_type),'') ctype,
   {lastin} lastin,
   sum(t.basic_qty) bq,  sum(t.basic_amt) ba,
   sum(t.input_qty) iq,  sum(t.input_amt) ia,
@@ -138,9 +138,9 @@ select t.mat_code cd, max(m.item_desc) nm, max(m.item_spec) spec,
   sum(t.trans_qty) tq,  sum(t.trans_amt) ta,
   sum(t.stock_qty) sq,  sum(t.stock_amt) sa
 from {tbl} t
-join PARTNER_ERP_TEST3.nx.pr_m_item m on t.mat_code=m.item_code
+join PARTNER_ERP_TEST3.nx.item m on t.mat_code=m.item_code
 join PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g on t.gagong_proc_code=g.gagong_proc_code
-left join PARTNER_ERP_TEST3.nx.cm_m_cust c on m.in_cust_code=c.cust_code
+left join PARTNER_ERP_TEST3.nx.cm_m_cust c on M.in_cust=c.cust_code
 where t.cust_code='Z99990' and t.{col}=?
 group by t.mat_code
 order by t.mat_code
@@ -199,7 +199,9 @@ def matclose_dates():
 @live_router.get("/matclose")
 def matclose(dfrom: str = Query(""), dto: str = Query("")):
     """자재 수불장(우리 이동평균). 기간 [dfrom,dto]: 기초(직전잔량)+Σ입고−Σ출고=기말. 품목별."""
-    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily")
+    # ★기본 To는 '오늘'까지로 캡 — 다음달 이월 등 미래일자 전표로 MAX(ymd)가 미래여도 기본 조회기간이 미래로 튀지 않게.
+    #   dto를 직접 지정하면 그 값을 존중(미래 이월도 원하면 조회 가능). fr은 to에서 파생되어 자동 교정됨.
+    hi = _scalar("SELECT MAX(ymd) FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd <= CONVERT(varchar(6), GETDATE(), 12)")
     to = _ymd6(dto, hi)
     fr = _ymd6(dfrom, to[:4] + "01")   # 미지정시 해당월 1일
     sql = """
@@ -218,7 +220,7 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
         FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd < ?) x WHERE rn=1),
     keys AS (SELECT cd FROM per UNION SELECT cd FROM endd UNION SELECT cd FROM beg)
     SELECT k.cd,
-      MAX(m.item_desc) nm, MAX(m.item_spec) spec, MAX(m.unit) unit,
+      MAX(M.item_name) nm, MAX(m.item_spec) spec, MAX(m.unit) unit,
       MAX(ISNULL(i.sgroup,'')) sg, MAX(ISNULL(sd.DETAIL_DESC,'')) sgnm, MAX(ISNULL(i.cut_gubun,'')) cut,
       MAX(ISNULL(b.sq,0)) bq, MAX(ISNULL(b.sa,0)) ba,
       MAX(ISNULL(p.iq,0)) iq, MAX(ISNULL(p.ia,0)) ia,
@@ -228,7 +230,7 @@ def matclose(dfrom: str = Query(""), dto: str = Query("")):
     LEFT JOIN per p ON p.cd=k.cd
     LEFT JOIN endd e ON e.cd=k.cd
     LEFT JOIN beg b ON b.cd=k.cd
-    LEFT JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON UPPER(m.item_code)=k.cd
+    LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON UPPER(m.item_code)=k.cd
     LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON UPPER(i.item_code)=k.cd
     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL sd ON sd.KIND_CODE='PR006' AND sd.DETAIL_CODE=i.sgroup
     GROUP BY k.cd ORDER BY k.cd
@@ -268,26 +270,26 @@ def _def_range(dfrom, dto):
 def _dispatch_inner(dc):
     return f"""
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC) CUST_DESC, C2.CUST_TYPE, A.MAT_CODE, A.MAINT_COST, A.MAINT_COST KRW_MAINT_COST, A.ITEM_CODE,
-     MAX(M.ITEM_DESC) ITEM_DESC, MAX(M.ITEM_SPEC) ITEM_SPEC, MAX(M.UNIT) UNIT, M.ITEM_LGROUP, M.ITEM_SGROUP,
+     MAX(M.item_name) ITEM_DESC, MAX(M.ITEM_SPEC) ITEM_SPEC, MAX(M.UNIT) UNIT, M.lgroup ITEM_LGROUP, M.sgroup ITEM_SGROUP,
      SUM(-A.MAINT_QTY) MAINT_QTY, SUM(-A.MAINT_AMT) MAINT_AMT, SUM(-A.MAINT_AMT) KRW_MAINT_AMT, SUM(-A.MAINT_VAT) MAINT_VAT, SUM(-A.MAINT_VAT) KRW_MAINT_VAT,
-     1 EXCHANGE_RATE, MAX(M.IN_CUST_CODE) IN_CUST_CODE, 'KRW' CURRENCY, MAX(M.ITEM_WEIGHT) ITEM_WEIGHT
-    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
+     1 EXCHANGE_RATE, MAX(M.in_cust) IN_CUST_CODE, 'KRW' CURRENCY, MAX(M.ITEM_WEIGHT) ITEM_WEIGHT
+    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.MAINT_TAG IN ('5')
-    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.GAGONG_PROC_CODE,A.MAT_CODE,A.ITEM_CODE,C2.CUST_TYPE,A.MAINT_COST,M.ITEM_LGROUP,M.ITEM_SGROUP
+    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.GAGONG_PROC_CODE,A.MAT_CODE,A.ITEM_CODE,C2.CUST_TYPE,A.MAINT_COST,M.lgroup,M.sgroup
    UNION ALL
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC), C2.CUST_TYPE, A.ITEM_CODE, A.MAINT_COST, A.MAINT_COST, '',
-     MAX(M.ITEM_DESC), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.ITEM_LGROUP, M.ITEM_SGROUP,
-     SUM(-A.MAINT_QTY), SUM(-A.MAINT_AMT), SUM(-A.MAINT_AMT), SUM(-A.MAINT_VAT), SUM(-A.MAINT_VAT), 1, MAX(M.IN_CUST_CODE), 'KRW', MAX(M.ITEM_WEIGHT)
-    FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.ITEM_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
+     MAX(M.item_name), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.lgroup, M.sgroup,
+     SUM(-A.MAINT_QTY), SUM(-A.MAINT_AMT), SUM(-A.MAINT_AMT), SUM(-A.MAINT_VAT), SUM(-A.MAINT_VAT), 1, MAX(M.in_cust), 'KRW', MAX(M.ITEM_WEIGHT)
+    FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.ITEM_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.MAINT_TAG IN ('R')
-    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,M.ITEM_LGROUP,M.ITEM_SGROUP
+    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,M.lgroup,M.sgroup
    UNION ALL
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC), C2.CUST_TYPE, A.MAT_CODE, A.MAINT_COST, (A.MAINT_COST*A.EXCHANGE_RATE), A.ITEM_CODE,
-     MAX(M.ITEM_DESC), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.ITEM_LGROUP, M.ITEM_SGROUP,
-     SUM(A.MAINT_QTY), SUM(A.MAINT_AMT), SUM(ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1)), 0, 0, A.EXCHANGE_RATE, MAX(M.IN_CUST_CODE), A.CURRENCY, MAX(M.ITEM_WEIGHT)
-    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
+     MAX(M.item_name), MAX(M.ITEM_SPEC), MAX(M.UNIT), M.lgroup, M.sgroup,
+     SUM(A.MAINT_QTY), SUM(A.MAINT_AMT), SUM(ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1)), 0, 0, A.EXCHANGE_RATE, MAX(M.in_cust), A.CURRENCY, MAX(M.ITEM_WEIGHT)
+    FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
     WHERE {dc} AND A.DIVISION='Q'
-    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,A.EXCHANGE_RATE,M.ITEM_LGROUP,M.ITEM_SGROUP,A.CURRENCY"""
+    GROUP BY A.CUST_CODE,A.MAINT_TAG,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,A.EXCHANGE_RATE,M.lgroup,M.sgroup,A.CURRENCY"""
 
 def _dispatch(dc, ref_ym):
     magam = f"""WITH MAGAM (CUST_CODE, JUN_YYMM, JUN_MAGAM_DAY, MAGAM_DAY) AS (
@@ -327,18 +329,18 @@ def dispatch(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Quer
 def _receipt_inner(dc):
     return f"""
   SELECT A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct, A.ITEM_CODE ic, A.MAT_CODE mat,
-    M.ITEM_DESC nm, M.ITEM_SPEC spec, M.ITEM_LGROUP lg, M.ITEM_SGROUP sg, M.ITEM_WEIGHT wt, M.UNIT unit,
+    M.item_name nm, M.ITEM_SPEC spec, M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit,
     'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost,
     A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_AMT kamt, A.MAINT_VAT vat, A.MAINT_VAT kvat
-   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
    WHERE {dc} AND A.MAINT_TAG IN ('9','S','C','G','H')
      AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
   UNION ALL
   SELECT A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE, A.ITEM_CODE, A.MAT_CODE,
-    M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
+    M.item_name, M.ITEM_SPEC, M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT,
     A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE,
     A.MAINT_QTY, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0, 0
-   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
    WHERE {dc} AND A.DIVISION IN ('P')"""
 
 def _receipt(dc, ref_ym):
@@ -452,33 +454,36 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     osp_raw, osp_part = round(ospm.get('raw', 0)), round(ospm.get('part', 0))
     pct = lambda a, b: round(a / b * 100, 1) if b else 0.0
 
-    # ③ 재고조정 = 전월기말재고 − 조회일재고 (재고증가면 음수). 실재고(조정후)=실매입−재고조정=실매입+재고증가.
-    #    소스=생산재고조회(_prodstock)·제품재고조회(salesstock)·자재수불(matledger). 재고조정=Σ(기초금액 basic×cost − 현재고금액 amt).
-    def _sdelta(rows, basek='basic', costk='cost', amtk='amt'):
-        cur_a = sum(float(x.get(amtk) or 0) for x in rows)
-        base_a = sum(float(x.get(basek) or 0) * float(x.get(costk) or 0) for x in rows)
-        return round(cur_a - base_a)   # ★재고조정 = 현재 − 기초 (재고증가=양수·감소=음수). 실재고=실매입+재고조정
-    try:   # ★조회일 기준. stage=GAGONG(line P0001)/WELD(그외)로 생산 재고조정 분리
-        _psrows = _prodstock(ym, m0, d6)
-        jaego_gagong = _sdelta([r for r in _psrows if r.get('stage') == 'GAGONG'])
-        jaego_weld = _sdelta([r for r in _psrows if r.get('stage') == 'WELD'])
-        jaego_prod = jaego_gagong + jaego_weld
-    except Exception: jaego_prod = jaego_gagong = jaego_weld = 0
-    try: jaego_sales = _sdelta(salesstock(dfrom=m0, dto=d6).get('rows', []))
+    # ③ 재고조정(버킷별) = 조회일 현재고 − 7월말(=조회월초) 기초 = 재고증가분(양수=증가, 음수=감소).
+    #    용접/가공(생산 _prodstock stage=WELD/GAGONG)·영업(salesstock)·자재(nx.mat_stock_daily 이동평균 일마감).
+    #    생산·영업 기초=2502스냅샷+월초직전무브(=7월말) × 월초원가, 현재고=조회일 수량 × 월초원가. 자재=일별 이동평균.
+    #    실재고(조정후) = 실매입 + 재고증가합계.
+    def _delta(rows, stage=None, basek='basic', costk='cost', amtk='amt'):
+        cur_a = base_a = 0.0
+        for x in rows:
+            if stage is not None and x.get('stage') != stage: continue
+            cur_a += float(x.get(amtk) or 0)
+            base_a += float(x.get(basek) or 0) * float(x.get(costk) or 0)
+        return round(cur_a - base_a)   # 현재고 − 기초
+    try:
+        _pr = _prodstock(ym, m0, d6)   # ★조회일 기준. stage='WELD'(용접, gagong_proc≠P0001) / 'GAGONG'(가공, P0001)
+        jaego_weld, jaego_gagong = _delta(_pr, 'WELD'), _delta(_pr, 'GAGONG')
+    except Exception: jaego_weld = jaego_gagong = 0
+    try: jaego_sales = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
     except Exception: jaego_sales = 0
-    try:   # ★자재 재고조정 = 자재일마감(이동평균) 정본 nx.mat_stock_daily: 기초금액(월초前 최신) − 현재금액(조회일 최신)
-        _c8, _mb = _rows(f"SELECT SUM(stock_amt) a FROM (SELECT stock_amt, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<'{m0}') t WHERE rn=1")
-        _c9, _me = _rows(f"SELECT SUM(stock_amt) a FROM (SELECT stock_amt, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<='{d6}') t WHERE rn=1")
-        _mbase = float((_mb[0]['a'] if _mb and _mb[0]['a'] is not None else 0)); _mcur = float((_me[0]['a'] if _me and _me[0]['a'] is not None else 0))
-        jaego_mat = round(_mcur - _mbase)   # 현재 − 기초 (재고감소=음수)
+    try:   # 자재: 우리 이동평균 일마감(nx.mat_stock_daily). 기초=월초직전잔량(ba)·현재고=조회일(sa)
+        _mc = matclose(dfrom=m0, dto=d6).get('rows', [])
+        jaego_mat = round(sum(float(x.get('sa') or 0) for x in _mc) - sum(float(x.get('ba') or 0) for x in _mc))
     except Exception: jaego_mat = 0
-    jaego = jaego_prod + jaego_sales + jaego_mat
-    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고조정(현재−기초). 재고증가면 더함·감소면 뺌
+    jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
+    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
 
-    # 당사ERP 유상사급 = ①의 유상사급-원재료+부품(확정입고, 총)
-    dangsa_sagub = 0
+    # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
+    dangsa_raw = dangsa_part = 0
     for r in pur:
-        if r['gubun'] in ('유상사급-원재료', '유상사급-부품'): dangsa_sagub += r['tot']
+        if r['gubun'] == '유상사급-원재료': dangsa_raw += r['tot']
+        elif r['gubun'] == '유상사급-부품': dangsa_part += r['tot']
+    dangsa_sagub = dangsa_raw + dangsa_part
     lg_osp = osp_raw + osp_part   # LG전산(OSP) 총
 
     # ===== ⑤ 매출요약 (상반기 1~15 / 하반기 16~말 / 합계). 매출=조회일까지 실적(리시빙)+이후~월말 예상(forecast). 원화 =====
@@ -486,7 +491,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _yr = 2000 + int(ym[:2]); _mo = int(ym[2:4]); _ld = _cal.monthrange(_yr, _mo)[1]
     eom = ym + ("%02d" % _ld)
     _half = lambda y6: 'H1' if (str(y6)[4:6] <= '15') else 'H2'
-    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'sagub_part_real', 'sagub_part_exp', 'naesu')}
+    MS = {k: {'H1': 0.0, 'H2': 0.0} for k in ('hyeon_cut', 'hyeon_seol', 'hyeon_etc', 'chuga_cut', 'chuga_seol', 'sagub_raw', 'sagub_part', 'sagub_part_fc', 'naesu')}
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
@@ -522,28 +527,27 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
       GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END, ISNULL(ymd,'')""")
     for _r in _ro5:
         _h = _half(_r['ymd']) if str(_r['ymd']) else 'H1'
-        _madd('sagub_raw' if _r['t'] == 'raw' else 'sagub_part_real', _h, _r['a'])
-    # 사급부품 예상 = forecast_sagub(다음날~월말)·half. (원재료 예상=0 — 추후 원소재식)
+        _madd('sagub_raw' if _r['t'] == 'raw' else 'sagub_part', _h, _r['a'])
+    # 사급부품 예상 = forecast_sagub(다음날~월말)·half → sagub_part_fc(실적과 분리). (원재료 예상=0 — 추후 원소재식)
     if _nb <= eom:
         try:
             for _g in _soyo.sales_forecast_sagub(base=_nb, to=eom).get('rows', []):
                 _cst = float(_g.get('cost') or 0)
                 for _y, _q in (_g.get('ndays') or {}).items():
-                    _madd('sagub_part_exp', _half(_y), float(_q or 0) * _cst)
+                    _madd('sagub_part_fc', _half(_y), float(_q or 0) * _cst)
         except Exception: pass
-    for _h9 in ('H1', 'H2'): MS['sagub_part'][_h9] = MS['sagub_part_real'][_h9] + MS['sagub_part_exp'][_h9]   # 사급부품 소계=실적+예상
     # 파생행 + LG수금 = (내수−사급예상)×10% + 유상제외(=총매출−사급예상)
     def _r3(d): h1 = round(d['H1']); h2 = round(d['H2']); return {"h1": h1, "h2": h2, "tot": h1 + h2}
     _hyeon_hab = {h: MS['hyeon_cut'][h] + MS['hyeon_seol'][h] + MS['hyeon_etc'][h] for h in ('H1', 'H2')}
-    _sagub_hab = {h: MS['sagub_raw'][h] + MS['sagub_part'][h] for h in ('H1', 'H2')}
-    _chong = {h: _hyeon_hab[h] + MS['chuga_cut'][h] + MS['chuga_seol'][h] for h in ('H1', 'H2')}   # 총매출
+    _sagub_part_sum = {h: MS['sagub_part'][h] + MS['sagub_part_fc'][h] for h in ('H1', 'H2')}   # 사급부품 실적+예상
+    _sagub_hab = {h: MS['sagub_raw'][h] + _sagub_part_sum[h] for h in ('H1', 'H2')}
+    _chong = {h: _hyeon_hab[h] + MS['chuga_cut'][h] + MS['chuga_seol'][h] for h in ('H1', 'H2')}   # 총예상매출 = 현매출+추가매출
     _yusang = {h: _chong[h] - _sagub_hab[h] for h in ('H1', 'H2')}   # 유상제외(숨김) = LG매출(총매출)−사급금액
     _lgsu = {h: _chong[h] - _sagub_hab[h] + MS['naesu'][h] * 0.1 for h in ('H1', 'H2')}   # ★LG수금 = LG매출 − 사급금액 + 내수매출×10%
     maechul = {"hyeon_cut": _r3(MS['hyeon_cut']), "hyeon_seol": _r3(MS['hyeon_seol']), "hyeon_etc": _r3(MS['hyeon_etc']), "hyeon_hab": _r3(_hyeon_hab),
-               "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']),
-               "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']),
-               "sagub_part_real": _r3(MS['sagub_part_real']), "sagub_part_exp": _r3(MS['sagub_part_exp']),
-               "sagub_hab": _r3(_sagub_hab), "chong": _r3(_chong),
+               "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']), "chong": _r3(_chong),
+               "sagub_raw": _r3(MS['sagub_raw']), "sagub_part": _r3(MS['sagub_part']), "sagub_part_fc": _r3(MS['sagub_part_fc']),
+               "sagub_part_sum": _r3(_sagub_part_sum), "sagub_hab": _r3(_sagub_hab),
                "lg_sugum": _r3(_lgsu)}
 
     _res = {"date": d6, "ym": ym,
@@ -553,14 +557,14 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
-            # ③ 재고조정 (기초−현재고, 재고증가면 음수). 자재는 8월 스냅샷 없어 0(원장계산 예정).
-            "jaego": {"gagong": jaego_gagong, "weld": jaego_weld, "prod": jaego_prod, "sales": jaego_sales, "mat": jaego_mat, "total": jaego, "mat_pending": jaego_mat == 0},
+            # ③ 재고조정 (조회일 현재고 − 7월말 기초 = 재고증가분, 버킷별). 용접/가공/영업/자재 + 합계.
+            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
             # D 유상사급 대사 (당사ERP 확정입고 vs LG전산 OSP) — ④사급율에 당사ERP·비교(차액) 흡수
             "dae": {"dangsa": dangsa_sagub, "lg": lg_osp, "diff": dangsa_sagub - lg_osp,
-                    "lg_raw": osp_raw, "lg_part": osp_part},
+                    "lg_raw": osp_raw, "lg_part": osp_part, "dangsa_raw": dangsa_raw, "dangsa_part": dangsa_part},
             # ⑤ 매출요약 (상반기 h1 / 하반기 h2 / 합계 tot · 원화). 현매출=실적, 추가매출=예상, 사급=원재료(예상0)/부품, LG수금=(내수−사급)×10%+유상제외
             "maechul": maechul}
     _DPI_CACHE[d6] = (_time.time() + 180, _res)   # ★180초 캐시(재조회 즉시). 오늘자도 3분 이내 재계산 안 함.
@@ -582,7 +586,7 @@ def _receiptdetail(dc, ref_ym, q=""):
     q = (q or "").strip()
     if q:
         qe = q.replace("'", "''")
-        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.pr_m_item WHERE item_code LIKE '%{qe}%' OR item_desc LIKE '%{qe}%'")
+        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.item WHERE item_code LIKE '%{qe}%' OR item_name LIKE '%{qe}%'")
         _codes = [r["c"] for r in _mr if r.get("c")]
         if _codes:
             _inl = ",".join("'" + c.replace("'", "''") + "'" for c in _codes)
@@ -591,18 +595,18 @@ def _receiptdetail(dc, ref_ym, q=""):
             MF = f" AND A.MAT_CODE LIKE '%{qe}%'"
     sql = f"""{_MAGAM(ref_ym)}
 SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct,
-  A.MAT_CODE mat, M.ITEM_DESC nm, M.ITEM_SPEC spec, M.ITEM_DIAM diam, M.ITEM_THICK thick, M.ITEM_LENGTH length,
-  M.ITEM_LGROUP lg, M.ITEM_SGROUP sg, M.ITEM_WEIGHT wt, M.UNIT unit,
+  A.MAT_CODE mat, M.item_name nm, M.ITEM_SPEC spec, M.diam diam, M.thick thick, M.length length,
+  M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit,
   A.MAINT_QTY qty, 'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost, A.MAINT_AMT amt, A.MAINT_AMT kamt, A.MAINT_VAT vat
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('9','S','C','G','H')
    AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= '')){MF}
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
-  A.MAT_CODE, M.ITEM_DESC, M.ITEM_SPEC, M.ITEM_DIAM, M.ITEM_THICK, M.ITEM_LENGTH,
-  M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT,
+  A.MAT_CODE, M.item_name, M.ITEM_SPEC, M.diam, M.thick, M.length,
+  M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT,
   A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.pr_m_item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C (nolock) A JOIN PARTNER_ERP_TEST3.nx.item (nolock) M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.cm_m_cust (nolock) C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
  WHERE {dc} AND A.DIVISION IN ('P'){MF}"""
     _cols, rows = _rows(sql)
     return rows
@@ -631,24 +635,24 @@ def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str =
 def _dispatchdetail(dc, ref_ym):
     sql = f"""{_MAGAM(ref_ym)}
 SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct,
-  A.MAT_CODE mat, A.ITEM_CODE ic, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE) incust,
-  M.ITEM_LGROUP lg, M.ITEM_SGROUP sg, M.ITEM_WEIGHT wt, M.UNIT unit, M.ITEM_DESC nm, M.ITEM_SPEC spec,
+  A.MAT_CODE mat, A.ITEM_CODE ic, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust) incust,
+  M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit, M.item_name nm, M.ITEM_SPEC spec,
   -A.MAINT_QTY qty, 'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost, -A.MAINT_AMT amt, -A.MAINT_AMT kamt, -A.MAINT_VAT vat
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('5')
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
-  A.ITEM_CODE, '', (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE),
-  M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT, M.ITEM_DESC, M.ITEM_SPEC,
+  A.ITEM_CODE, '', (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust),
+  M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT, M.item_name, M.ITEM_SPEC,
   -A.MAINT_QTY, 'KRW', 1.0, A.MAINT_COST, A.MAINT_COST, -A.MAINT_AMT, -A.MAINT_AMT, -A.MAINT_VAT
- FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.ITEM_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.ITEM_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.MAINT_TAG IN ('5')
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
-  A.MAT_CODE, A.ITEM_CODE, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.IN_CUST_CODE),
-  M.ITEM_LGROUP, M.ITEM_SGROUP, M.ITEM_WEIGHT, M.UNIT, M.ITEM_DESC, M.ITEM_SPEC,
+  A.MAT_CODE, A.ITEM_CODE, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust),
+  M.lgroup, M.sgroup, M.ITEM_WEIGHT, M.UNIT, M.item_name, M.ITEM_SPEC,
   A.MAINT_QTY, A.CURRENCY, A.EXCHANGE_RATE, A.MAINT_COST, A.MAINT_COST*A.EXCHANGE_RATE, A.MAINT_AMT, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), 0
- FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.pr_m_item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
+ FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
  WHERE {dc} AND A.DIVISION='Q'"""
     _cols, rows = _rows(sql)
     return rows
@@ -678,7 +682,9 @@ def _prev_ym(ym):
     yy, mm = int(ym[:2]), int(ym[2:4])
     return f"{(yy-1):02d}12" if mm == 1 else f"{yy:02d}{(mm-1):02d}"
 
-def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q=""):
+def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx"):
+    # ★2026-08-25 src 인자 수용(현재는 원천이 nx 중심 = 라이브 미러 + 웹실적이라
+    #   nx/live 모두 동일 결과). 시그니처만 맞춰 호출부와 어긋나지 않게 한다.
     # ★레거시 dw_pu_stock_060_wh: 재고창고(stock_cust)·파트창고(part_wh) + 기간(from6~to6 YYMMDD).
     # 전기이월 = from6 직전월말 스냅샷 + from6 이전 무브. 기간 무브 = [from6, to6]. → 임의기간 재고 정확.
     sc = "".join(ch for ch in str(stock_cust or "Z99990") if ch.isalnum()) or "Z99990"
@@ -695,7 +701,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q=""):
     q = (q or "").strip()
     if q:
         qe = q.replace("'", "''")
-        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.pr_m_item WHERE item_code LIKE '%{qe}%' OR item_desc LIKE '%{qe}%'")
+        _cf, _mr = _rows(f"SELECT UPPER(item_code) c FROM PARTNER_ERP_TEST3.nx.item WHERE item_code LIKE '%{qe}%' OR item_name LIKE '%{qe}%'")
         _codes = [r["c"] for r in _mr if r.get("c")]
         if _codes:
             _inl = ",".join("'" + c.replace("'", "''") + "'" for c in _codes)
@@ -706,19 +712,21 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q=""):
             MFitem = f" AND a.item_code LIKE '%{qe}%'"
     LINES = f"""
  SELECT UPPER(a.mat_code) mat, a.maint_ymd ymd, a.maint_qty inq,CAST(0 AS decimal(18,4)) outq,CAST(0 AS decimal(18,4)) etc,CAST(0 AS decimal(18,4)) mv,
-   CASE a.maint_tag WHEN '3' THEN '기초재고' WHEN '9' THEN '자재창고입고' WHEN 'C' THEN IIF(a.maint_qty>0,'가공이동입고','가공이동취소') WHEN 'G' THEN '축관입고' WHEN 'H' THEN '가공입고' WHEN 'S' THEN '세트입고' WHEN 'P' THEN '생산'+IIF(a.maint_qty<0,'취소','') WHEN 'R' THEN '반품' ELSE '' END div, {CUST} cust, a.work_order wo
+   CASE a.maint_tag WHEN '3' THEN '기초재고' WHEN '9' THEN '자재창고입고' WHEN 'C' THEN IIF(a.maint_qty>0,'가공이동입고','가공이동취소') WHEN 'G' THEN '축관입고' WHEN 'H' THEN '가공입고' WHEN 'S' THEN '세트입고' WHEN 'P' THEN '생산'+IIF(a.maint_qty<0,'취소','') WHEN 'R' THEN '반품' ELSE '' END div, {CUST} cust, a.work_order wo,
+   ISNULL(a.item_code,'') itm, CONVERT(varchar(19),a.insert_datetime,120) wt
   FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,0,'도입-구매',{CUST},a.work_order FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='P'{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty*-1,0,0,0,'생산창고반품',{CUST},a.work_order FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('T') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,0,'자재창고입고','작업처 : 제조1팀',NULL FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,0,'재고조정',{CUST},a.work_order FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='2' AND a.maint_qty<>0 AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'' FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'{MFitem}
- UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'' FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'{MFitem}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,0,'도입-구매',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='P'{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty*-1,0,0,0,'생산창고반품',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('T') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,0,'자재창고입고','작업처 : 제조1팀',NULL,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,0,'재고조정',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='2' AND a.maint_qty<>0 AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'{MFitem}
+ UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,0,
    CASE a.maint_tag WHEN '1' THEN '불량' WHEN '4' THEN '생산사용'+IIF(a.maint_qty>0,'취소','') WHEN '5' THEN '협력업체판매' WHEN '6' THEN '일반간판출하' WHEN '8' THEN '라인무상공급' WHEN 'A' THEN '개발불출' WHEN 'B' THEN IIF(a.out_wh_gubun='1','생산창고출고','영업창고출고') WHEN 'J' THEN '출하'+IIF(a.maint_qty>0,'취소','') ELSE '' END,
-   ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code AND a.cust_code<>'{sc}'),''), a.work_order
+   ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code AND a.cust_code<>'{sc}'),''), a.work_order,
+   ISNULL(a.item_code,''), CONVERT(varchar(19),a.insert_datetime,120)
   FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND a.maint_qty<>0 AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,0,'도입-판매',{CUST},a.work_order FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='Q'{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,0,'도입-판매',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='Q'{MFmat}
 """
     BF = f"""
  SELECT UPPER(a.mat_code) mat, a.stock_qty sq FROM PARTNER_ERP_TEST3.nx.pu_t_month_stock_wh a WHERE a.stock_yymm='{pv}' AND a.cust_code='{sc}' AND ISNULL(a.gagong_proc_code,'')='{pw}'{MFmat}
@@ -730,9 +738,9 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q=""):
  UNION ALL SELECT UPPER(a.item_code), (CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END)+(CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>'{pv99}' AND a.move_ymd<'{y01}' AND ('{sc}' IN (a.fr_cust_code,a.to_cust_code)) AND ('{pw}' IN (a.fr_gagong_proc_code,a.to_gagong_proc_code)){MFitem}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND {W}{MFmat}
 """
-    _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo FROM ({LINES}) x")
+    _c1, moves = _rows(f"SELECT mat, ymd, inq i, outq o, etc e, mv, div, cust, ISNULL(wo,'') wo, ISNULL(itm,'') itm, ISNULL(wt,'') wt FROM ({LINES}) x")
     _c2, bfrows = _rows(f"SELECT mat, SUM(sq) bf FROM ({BF}) b GROUP BY mat")
-    _c3, nmrows = _rows("SELECT UPPER(item_code) c, item_desc d, ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=i.in_cust_code),'') v FROM PARTNER_ERP_TEST3.nx.pr_m_item i")
+    _c3, nmrows = _rows("SELECT UPPER(item_code) c, item_name d, ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=i.in_cust),'') v FROM PARTNER_ERP_TEST3.nx.item i")
     nm = {r["c"]: r["d"] for r in nmrows}
     vend = {r["c"]: (r["v"] or "") for r in nmrows}   # 매입처(IN_CUST_CODE→거래처명)
     bfm = {r["mat"]: float(r["bf"] or 0) for r in bfrows}
@@ -760,9 +768,11 @@ def matinout(from_ymd: str = Query(""), to_ymd: str = Query(""), stock_cust: str
     from6 = _digits(from_ymd, 6) or (to6[:4] + "01")
     if from6 > to6:
         from6, to6 = to6, from6
-    if source == "nx":
+    # ★2026-08-25 생산입출고와 동일하게 source 의미 통일.
+    #   nx(기본) = 라이브 수불 + 웹실적 / live = 라이브만 / ledger = 웹 자체원장(진단용)
+    if source == "ledger":
         return _nx_screen("MAT", from6, to6)
-    stock, moves = _matinout(from6, to6, stock_cust, part_wh, q)
+    stock, moves = _matinout(from6, to6, stock_cust, part_wh, q, src=source)
     return {"from_ymd": from6, "to_ymd": to6, "stock": stock, "moves": moves, "stock_cust": stock_cust, "part_wh": part_wh, "q": q}
 
 # ================= 자재출고관리 (구매/자재, w_pu_stock_150 / dw_pu_stock_150) — 자재개별출고 조회 =================
@@ -795,7 +805,7 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
     sql = f"""
       SELECT a.maint_ymd ymd, a.maint_seq seq,
         ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.gagong_proc_code),a.gagong_proc_code) from_wh,
-        a.item_code pn, ISNULL((SELECT item_desc FROM PARTNER_ERP_TEST3.nx.pr_m_item i WHERE i.item_code=a.item_code),'') pn_nm,
+        a.item_code pn, ISNULL((SELECT item_name FROM PARTNER_ERP_TEST3.nx.item i WHERE i.item_code=a.item_code),'') pn_nm,
         CASE ISNULL(a.out_wh_gubun,'') WHEN '1' THEN '생산창고' WHEN '2' THEN '영업창고' ELSE '' END out_wh_nm,
         ISNULL((SELECT gagong_proc_desc FROM PARTNER_ERP_TEST3.nx.pr_m_proc_gagong g WHERE g.gagong_proc_code=a.to_gagong_proc_code),a.to_gagong_proc_code) to_wh,
         a.mat_code mat, (a.maint_qty*-1) qty, ISNULL(a.maint_cost,0) cost, ISNULL(a.maint_amt,0) amt, ISNULL(a.remarks,'') remarks,
@@ -814,40 +824,84 @@ def stockissue_view(from_ymd: str = Query(""), to_ymd: str = Query(""), pn: str 
 # ================= 생산입출고현황 (생산, dw_pr_stock_460) — 파트×자도번 마스터-디테일 =================
 # 유니버스=pr_t_mat_stock_wh(part,mat), BF=2502마감+2502~당월 이동(생산월마감이 2502에 멈춤=고정base), 당월=[ym01,ym99].
 # patch_460c.py 이식, FR/BFT만 월 파라미터화(2502 base 고정).
-def _prodinout(ym, frm=None, to=None):
+def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
+    """★2026-08-25 src 분기 추가.
+         nx(기본) = nx 스키마(= 라이브 미러 + 웹실적) — 웹에서 잡은 실적이 보인다.
+         live     = 라이브 스키마만 — 레거시와 순수 대조용.
+       기존엔 원천이 nx 로 고정이라 '라이브' 를 골라도 nx 를 봤다."""
     # 레거시와 동일: 수불기간(frm~to). frm/to(YYMMDD) 우선, 없으면 ym월 전체.
     y01 = frm if frm else (ym + "01")
     y99 = to if to else (ym + "99")
+    # ★2026-08-25 이력(우측)도 좌측 재고와 같은 원천을 봐야 한다.
+    #   좌측은 라이브∪nx 잔액인데 이력만 nx 면 둘이 어긋난다
+    #   (실측 AJR30027704-SUB6: 좌측 25 / 우측 누계 0).
+    #   → nx 모드에서 각 수불테이블을 '라이브 ∪ nx(중복배제)' 인라인뷰로 바꾼다.
+    #     중복배제 키는 각 테이블의 자연키. live 모드는 라이브 테이블 그대로.
+    _live = str(src).strip() == "live"
+
+    def _U(tbl, keys):
+        """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는다."""
+        if _live:
+            return "PARTNER_ERP.dbo." + tbl
+        on = " AND ".join(f"ISNULL(l.{k},'')=ISNULL(n.{k},'')" for k in keys)
+        return (f"(SELECT * FROM PARTNER_ERP.dbo.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
+                f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.{tbl} l WHERE {on}))")
+
+    # ★2026-08-25 웹은 SEQ 20000 대역(common.WEB_SEQ_BASE)에만 쓴다 → 라이브(1~19,999)와
+    #   번호가 절대 안 겹치므로 (YMD,SEQ) 만으로 중복배제가 성립한다.
+    #   ※대역 분리 전 데이터(과거 웹 기입분)는 seq 가 겹칠 수 있어 품목/수량도 키에 남겨둔다.
+    #     대역 정착 후에는 (YMD,SEQ)만으로 줄여도 된다.
+    _PUSM = _U("PU_T_STOCK_MAINT", ["MAINT_YMD", "MAINT_SEQ", "MAT_CODE", "MAINT_QTY", "MAINT_TAG"])
+    _PRPD = _U("PR_T_PROD_DTL", ["PROD_YMD", "PROD_HMS", "ITEM_CODE", "WORK_ORDER", "SPLIT_WORK_ORDER"])
+    _SASM = _U("SA_T_STOCK_MAINT", ["MAINT_YMD", "MAINT_SEQ", "ITEM_CODE", "MAINT_QTY", "MAINT_TAG"])
+    _PRSM = _U("PR_T_STOCK_MAINT_MAT", ["MAINT_YMD", "MAINT_SEQ", "MAT_CODE", "PART_CODE", "MAINT_QTY"])
+    _S = "PARTNER_ERP.dbo" if _live else "PARTNER_ERP_TEST3.nx"
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     CUST = "ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=a.cust_code),'')"
     CUR = f"""
  SELECT a.TO_GAGONG_PROC_CODE part, UPPER(a.mat_code) mat, a.maint_ymd ymd, a.maint_qty*-1 inq,CAST(0 AS decimal(18,4)) outq,CAST(0 AS decimal(18,4)) etc,'생산창고입고' div, {CUST} tag
-   FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND a.maint_qty<>0 AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
- UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,'가공생산입고','제조1팀' FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND a.gagong_proc_code>''
- UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,'자재창고반품',{CUST} FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='T' AND ISNULL(a.out_wh_gubun,'3')='3' AND a.maint_qty<>0 AND a.TO_GAGONG_PROC_CODE>''
- UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,'가공부품이동',{CUST} FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='C' AND a.maint_qty<>0 AND a.TO_GAGONG_PROC_CODE>''
- UNION ALL SELECT a.STOCK_PART_CODE, UPPER(a.item_code), a.prod_ymd, a.prod_qty,0,0,'SUB생산실적','' FROM PARTNER_ERP_TEST3.nx.pr_t_prod_dtl a WHERE a.prod_ymd>='{y01}' AND a.prod_ymd<='{y99}' AND a.STOCK_PART_CODE>'' AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint s WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code AND s.in_part_code=a.stock_part_code)
- UNION ALL SELECT a.IN_PART_CODE, UPPER(a.item_code), a.maint_ymd, a.maint_qty,0,0,'생산실적',{CUST} FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.IN_PART_CODE>''
- UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,'기초재고',{CUST} FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag='3' AND a.maint_qty<>0
- UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,'재고조정',{CUST} FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag IN ('2','1') AND a.maint_qty<>0
- UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,'생산사용',{CUST} FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag='4' AND a.maint_qty<>0
+   FROM {_PUSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND a.maint_qty<>0 AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
+ UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,'가공생산입고','제조1팀' FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS) AND '{src}'<>'live') a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND a.gagong_proc_code>''
+ UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,'자재창고반품',{CUST} FROM {_PUSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='T' AND ISNULL(a.out_wh_gubun,'3')='3' AND a.maint_qty<>0 AND a.TO_GAGONG_PROC_CODE>''
+ UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,'가공부품이동',{CUST} FROM {_PUSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='C' AND a.maint_qty<>0 AND a.TO_GAGONG_PROC_CODE>''
+ UNION ALL SELECT a.STOCK_PART_CODE, UPPER(a.item_code), a.prod_ymd, a.prod_qty,0,0,'SUB생산실적','' FROM {_PRPD} a WHERE a.prod_ymd>='{y01}' AND a.prod_ymd<='{y99}' AND a.STOCK_PART_CODE>'' AND NOT EXISTS(SELECT 1 FROM {_SASM} s WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code AND (s.in_part_code=a.stock_part_code OR (ISNULL(s.in_part_code,'')='' AND s.maint_tag='P')))
+ UNION ALL SELECT a.IN_PART_CODE, UPPER(a.item_code), a.maint_ymd, a.maint_qty,0,0,'생산실적',{CUST} FROM {_SASM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.IN_PART_CODE>''
+ UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,'기초재고',{CUST} FROM {_PRSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag='3' AND a.maint_qty<>0
+ UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,'재고조정',{CUST} FROM {_PRSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag IN ('2','1') AND a.maint_qty<>0
+ UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,'생산사용',{CUST} FROM {_PRSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag='4' AND a.maint_qty<>0
 """
     BFT = f"'{y01}'"
+    # ★2026-08-25 기초재고(BF)는 nx 모드에서도 '라이브' 를 쓴다.
+    #   BF 는 2502 마감 + 그 이후~기간시작 전까지의 누적이라, 웹 실적이 끼어들 여지가 없는
+    #   과거 구간이다. nx 를 쓰면 미러 정지분만큼 통째로 비어 재고가 어긋난다
+    #   (실측 AJR30027704-SUB6: BF 는 라이브·nx 모두 -550 로 동일 → 라이브 고정이 안전).
+    #   기간 안 이동(CUR)만 nx 로 봐야 웹 실적이 얹힌다.
+    _B = "PARTNER_ERP.dbo"
     BF = f"""
- SELECT a.gagong_proc_code part, UPPER(a.mat_code) mat, a.stock_qty sq FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH a WHERE a.stock_yymm='2502'
- UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_qty*-1 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
- UNION ALL SELECT a.STOCK_PART_CODE, UPPER(a.item_code), a.prod_qty FROM PARTNER_ERP_TEST3.nx.pr_t_prod_dtl a WHERE a.prod_ymd>'250299' AND a.prod_ymd<{BFT} AND a.STOCK_PART_CODE>'' AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint s WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code AND s.in_part_code=a.stock_part_code)
- UNION ALL SELECT a.IN_PART_CODE, UPPER(a.item_code), a.MAINT_QTY FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.IN_PART_CODE>''
- UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>'250299' AND a.cut_ymd<{BFT} AND a.gagong_proc_code>'' AND a.cut_qty<>0
- UNION ALL SELECT a.PART_CODE, UPPER(a.MAT_CODE), a.MAINT_QTY FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.PART_CODE>'' AND a.MAINT_TAG IN ('3','2','1')
- UNION ALL SELECT a.PART_CODE, UPPER(a.MAT_CODE), a.MAINT_QTY FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.PART_CODE>'' AND a.MAINT_TAG='4'
- UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.MAINT_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.maint_tag='T' AND a.TO_GAGONG_PROC_CODE>''
- UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.MAINT_QTY*-1 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.maint_tag='C' AND a.TO_GAGONG_PROC_CODE>''
+ SELECT a.gagong_proc_code part, UPPER(a.mat_code) mat, a.stock_qty sq FROM {_B}.PR_T_MONTH_STOCK_WH a WHERE a.stock_yymm='2502'
+ UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_qty*-1 FROM {_B}.PU_T_STOCK_MAINT a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
+ UNION ALL SELECT a.STOCK_PART_CODE, UPPER(a.item_code), a.prod_qty FROM {_B}.pr_t_prod_dtl a WHERE a.prod_ymd>'250299' AND a.prod_ymd<{BFT} AND a.STOCK_PART_CODE>'' AND NOT EXISTS(SELECT 1 FROM {_B}.sa_t_stock_maint s WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code AND s.in_part_code=a.stock_part_code)
+ UNION ALL SELECT a.IN_PART_CODE, UPPER(a.item_code), a.MAINT_QTY FROM {_B}.sa_t_stock_maint a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.IN_PART_CODE>''
+ UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS) AND '{src}'<>'live') a WHERE a.cut_ymd>'250299' AND a.cut_ymd<{BFT} AND a.gagong_proc_code>'' AND a.cut_qty<>0
+ UNION ALL SELECT a.PART_CODE, UPPER(a.MAT_CODE), a.MAINT_QTY FROM {_B}.PR_T_STOCK_MAINT_MAT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.PART_CODE>'' AND a.MAINT_TAG IN ('3','2','1')
+ UNION ALL SELECT a.PART_CODE, UPPER(a.MAT_CODE), a.MAINT_QTY FROM {_B}.PR_T_STOCK_MAINT_MAT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.PART_CODE>'' AND a.MAINT_TAG='4'
+ UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.MAINT_QTY FROM {_B}.PU_T_STOCK_MAINT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.maint_tag='T' AND a.TO_GAGONG_PROC_CODE>''
+ UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.MAINT_QTY*-1 FROM {_B}.PU_T_STOCK_MAINT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.maint_tag='C' AND a.TO_GAGONG_PROC_CODE>''
 """
-    _c1, uni = _rows("SELECT part_code part, UPPER(mat_code) mat, SUM(stock_qty) snap FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)")
+    # ★2026-08-25 유니버스(좌측 목록) = 잔액 테이블 기준. nx 모드는 라이브 ∪ nx.
+    #   nx 에만 있는 품목(웹이 새로 만든 것)도, 라이브에만 있는 품목(미러 미반영)도
+    #   둘 다 목록에 떠야 한다.
+    _UNI = (f"SELECT part_code part, UPPER(mat_code) mat, SUM(stock_qty) snap FROM {_S}.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)"
+            if str(src).strip() == "live" else
+            """SELECT part, mat, MAX(snap) snap FROM (
+                 SELECT part_code part, UPPER(mat_code) mat, SUM(stock_qty) snap FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)
+                 UNION ALL
+                 SELECT part_code, UPPER(mat_code), SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)
+               ) u GROUP BY part, mat""")
+    _c1, uni = _rows(_UNI)
     _c2, bfrows = _rows(f"SELECT part, mat, SUM(sq) bf FROM ({BF}) b GROUP BY part, mat")
     _c3, moves = _rows(f"SELECT part, mat, ymd, inq, outq, etc, div, tag FROM ({CUR}) x")
-    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_desc, item_spec, item_sgroup FROM cm_m_item")
+    _c4, itrows = _rows("SELECT UPPER(item_code) mat, item_desc AS item_name, item_spec, item_sgroup FROM cm_m_item")
     _c5, sgrows = _rows("SELECT DETAIL_CODE cd, REPLACE(REPLACE(DETAIL_DESC,CHAR(13),''),CHAR(10),'') nm FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE='PR006'")
     _c6, pnrows = _rows("SELECT gagong_proc_code code, gagong_proc_desc nm FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG")
     im = {r["mat"]: r for r in itrows}
@@ -857,13 +911,21 @@ def _prodinout(ym, frm=None, to=None):
     for r in moves:
         k = (r["part"], r["mat"])
         net[k] = net.get(k, 0) + (float(r["inq"] or 0) - float(r["outq"] or 0) + float(r["etc"] or 0))
+    # ★2026-08-25 현재고 = 전월이월(BF) + 기간이동(net). 좌측·우측이 같은 근거여야 한다.
+    #   (한때 잔액 스냅샷을 정본으로 썼는데, 그러면 우측 이력 누계와 값이 어긋난다 —
+    #    실측 nx 300/1655행 불일치. 사용자는 이력이 근거라고 확인.)
+    #   nx 모드는 CUR/BF 원천을 '라이브 ∪ nx(중복배제)' 로 읽으므로 미러 지연분도 잡힌다.
+    #   유니버스는 라이브∪nx 잔액이라 어느 쪽에만 있는 품목도 목록에는 뜬다.
     stock = []
     for u in uni:
-        k = (u["part"], u["mat"]); bf = bfm.get(k, 0); st = bf + net.get(k, 0)
-        if abs(st) <= 0.0001:
+        k = (u["part"], u["mat"]); bf = bfm.get(k, 0)
+        st = bf + net.get(k, 0)
+        # ★0재고 숨김/표시 — inc_zero=1 이면 0 도 남긴다(2026-08-28 사용자요청).
+        #   0 이어도 기간 중 입·출고가 있었으면 이력을 봐야 한다(가공이동으로 0 이 된 품목 등).
+        if abs(st) <= 0.0001 and not inc_zero:
             continue
         it = im.get(u["mat"], {}); sg = str(it.get("item_sgroup") or "").strip()
-        stock.append([u["part"], u["mat"], (it.get("item_desc") or ""), (it.get("item_spec") or ""),
+        stock.append([u["part"], u["mat"], (it.get("item_name") or ""), (it.get("item_spec") or ""),
                       sgm.get(sg, sg), round(st, 3), round(bf, 3)])
     keys = {r[0] + "||" + r[1] for r in stock}
     mv = {}
@@ -877,14 +939,24 @@ def _prodinout(ym, frm=None, to=None):
     return stock, mv, partNames
 
 @live_router.get("/prodinout")
-def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live")):
-    """생산입출고현황. 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환). source=nx면 stock_ledger(PRD) 파생."""
+def prodinout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), source: str = Query("live"),
+              inc_zero: int = Query(0)):
+    """생산입출고현황. 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환).
+
+       ★2026-08-25 source 의미를 다른 화면(410·키팅)과 통일.
+         nx   = 라이브 수불 + 웹실적   ← 기본. _prodinout 이 이미 nx 테이블을 읽는다.
+         live = 라이브만(레거시 대조)
+       구버전은 nx 를 stock_ledger(PRD) 파생으로 보냈는데 그 원장에 PRD 이력이
+       0건이라(컷오버 backfill 전) 조회하면 늘 빈 화면이었다. 정작 웹 바코드실적은
+       PR_T_PROD_DTL / PR_T_MAT_STOCK_WH 에 쌓여 live 경로에서만 보였다.
+       (웹 원장만 격리해서 보려면 source=ledger)"""
     f6, t6 = _digits(frm, 6), _digits(to, 6)
     y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-    if source == "nx":
+    if source == "ledger":   # 웹 자체원장(stock_ledger)만 — 진단용
         r = _nx_screen("PRD", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
-    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None)
-    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves, "partNames": partNames}
+    stock, moves, partNames = _prodinout(y, f6 or None, t6 or None, src=source, inc_zero=bool(inc_zero))
+    return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves,
+            "partNames": partNames, "inc_zero": bool(inc_zero)}
 
 # ================= 제품입출고현황 (영업, dw_pr_stock_110) — 제품(P/N) 마스터-디테일 =================
 # 유니버스=SA_T_ITEM_STOCK, BF=2502마감+2502~당월(고정base), 당월=[ym01,ym99]. patch_110.py 이식.
@@ -906,23 +978,33 @@ def _prodinvout(ym, frm=None, to=None):
  UNION ALL SELECT UPPER(a.item_code), a.maint_ymd, 0, a.maint_qty*-1,0, CASE a.maint_tag WHEN '8' THEN '무상공급' WHEN 'R' THEN '출하반품' ELSE '출하' END, {CUST} FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('J','8','R') AND a.maint_qty<>0
  UNION ALL SELECT UPPER(a.item_code), a.maint_ymd, 0,0, a.maint_qty*-1,'재고조정', {CUST} FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='2' AND a.maint_qty<>0
 """
-    _c1, uni = _rows("SELECT UPPER(item_code) item, SUM(stock_qty) snap FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY UPPER(item_code)")
+    # ★유니버스 = 라이브 ∪ nx (큰 쪽). nx 에만 있는 웹 신규분도, 라이브에만 있는
+    #   미러 미반영분도 둘 다 보여야 한다.
+    _c1, uni = _rows("""SELECT item, MAX(snap) snap FROM (
+           SELECT UPPER(item_code) item, SUM(stock_qty) snap FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY UPPER(item_code)
+           UNION ALL
+           SELECT UPPER(item_code), SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY UPPER(item_code)
+         ) u GROUP BY item""")
     _c2, bfrows = _rows(f"SELECT item, SUM(q) bf FROM ({BF}) t GROUP BY item")
     _c3, moves = _rows(f"SELECT item, ymd, inq, outq, etc, div, cust FROM ({L1}) x")
-    _c4, inforows = _rows("""SELECT UPPER(item_code) item, item_desc, (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust c WHERE c.cust_code=i.in_cust_code) work_nm FROM PARTNER_ERP_TEST3.nx.pr_m_item i""")
+    _c4, inforows = _rows("""SELECT UPPER(item_code) item, item_name, (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust c WHERE c.cust_code=i.in_cust) work_nm FROM PARTNER_ERP_TEST3.nx.item i""")
     info = {r["item"]: r for r in inforows}
     bfm = {r["item"]: float(r["bf"] or 0) for r in bfrows}
     net = {}
     for r in moves:  # 재고 = 기초+입고-출고-기타출고(etc=maint_qty*-1 → 빼기)
         it = r["item"]
         net[it] = net.get(it, 0) + (float(r["inq"] or 0) - float(r["outq"] or 0) - float(r["etc"] or 0))
+    # ★2026-08-25 현재고 = 잔액 스냅샷(SA_T_ITEM_STOCK) 정본.
+    #   생산입출고(_prodinout)와 같은 이유 — BF+net 은 원천 하나만 미러가 늦어도
+    #   값이 통째로 어긋나고, 0 이 되면 목록에서 사라진다(실측 nx 0행).
+    #   잔액 테이블은 웹 실적/조정이 즉시 반영되는 정본이다.
     stock = []
     for u in uni:
-        it = u["item"]; bf = bfm.get(it, 0); stv = bf + net.get(it, 0)
+        it = u["item"]; bf = bfm.get(it, 0); stv = float(u.get("snap") or 0)
         if abs(stv) <= 0.0001:
             continue
         d = info.get(it, {})
-        stock.append([it, (d.get("item_desc") or ""), (d.get("work_nm") or ""), round(stv, 3), round(bf, 3)])
+        stock.append([it, (d.get("item_name") or ""), (d.get("work_nm") or ""), round(stv, 3), round(bf, 3)])
     keys = {r[0] for r in stock}
     mv = {}
     for r in moves:
@@ -938,7 +1020,9 @@ def prodinvout(ym: str = Query(""), frm: str = Query(""), to: str = Query(""), s
     """제품입출고현황(레거시 dw_pr_stock_110). 수불기간 frm~to(YYMMDD) 우선. 없으면 ym 월전체(하위호환). source=nx면 stock_ledger(ASY) 파생."""
     f6, t6 = _digits(frm, 6), _digits(to, 6)
     y = _ym4(ym) or (f6[:4] if f6 else None) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-    if source == "nx":
+    # ★2026-08-25 생산·자재입출고와 동일하게 통일.
+    #   nx(기본) = 라이브 + 웹실적 / live = 라이브만 / ledger = 웹 자체원장(진단용)
+    if source == "ledger":
         r = _nx_screen("ASY", (f6 or y + "01"), (t6 or y + "31")); r["ym"] = y; return r
     stock, moves = _prodinvout(y, f6 or None, t6 or None)
     return {"ym": y, "frm": f6 or (y + "01"), "to": t6 or (y + "99"), "stock": stock, "moves": moves}
@@ -954,9 +1038,9 @@ SELECT a.SALE_YMD ymd, a.WORK_ORDER wo, a.SPLIT_WORK_ORDER swo, a.ITEM_CODE item
   ISNULL((SELECT TOP 1 item_cost FROM PARTNER_ERP_TEST3.nx.pr_m_item_cost WHERE item_code=a.item_code AND cost_apply_ymd<=a.sale_ymd AND cost_tag='S' AND cust_code IN ('1010','1020') ORDER BY cost_apply_ymd DESC),0) mcost,
   a.SALE_USER_ID usr, a.SALE_HMS hms,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END wc,
-  m.item_desc nm, pi.REMARKS remarks
-FROM PARTNER_ERP_TEST3.nx.sa_t_sale_dtl a JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON a.item_code=m.item_code
+       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc,
+  M.item_name nm, pi.REMARKS remarks
+FROM PARTNER_ERP_TEST3.nx.sa_t_sale_dtl a JOIN PARTNER_ERP_TEST3.nx.item m ON a.item_code=m.item_code
  OUTER APPLY (SELECT TOP 1 REMARKS FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT WHERE WORK_ORDER=a.WORK_ORDER) pi
 WHERE a.sale_ymd BETWEEN '{f}' AND '{t}'
 """
@@ -1002,13 +1086,13 @@ select UPPER(a.mat_code),a.maint_qty*-1,0,0,0 from PARTNER_ERP_TEST3.nx.pu_t_sto
 """
     sql = f"""
 ;WITH t AS ({S040})
-SELECT t.mat cd, max(m.item_desc) nm, max(m.item_spec) spec, max(m.item_class) cls,
+SELECT t.mat cd, max(M.item_name) nm, max(m.item_spec) spec, max(m.item_class) cls,
    sum(t.basic) basic, sum(t.inq) inq, sum(t.outq) outq, sum(t.etc) adj,
    sum(t.basic+t.inq-t.etc-t.outq) qty,
    (select top 1 item_cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost where item_code=t.mat and cost_apply_ymd<='{t}' and cost_tag in ('S','E') order by cost_apply_ymd desc) cost,
    case when max(m.work_code)>'' then (select work_desc from PARTNER_ERP_TEST3.nx.pr_m_work where work_code=max(m.work_code))
-        else (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust where cust_code=max(m.in_cust_code)) end wc
-FROM t JOIN PARTNER_ERP_TEST3.nx.pr_m_item m ON t.mat=m.item_code
+        else (select cust_desc from PARTNER_ERP_TEST3.nx.cm_m_cust where cust_code=max(M.in_cust)) end wc
+FROM t JOIN PARTNER_ERP_TEST3.nx.item m ON t.mat=m.item_code
 GROUP BY t.mat
 """
     _c, rows = _rows(sql)
@@ -1045,10 +1129,10 @@ WHERE a.receiving_ymd BETWEEN '{fr6}' AND '{to6}'
 GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
 SELECT m.item_code item,
-  CASE WHEN m.work_code>'' THEN m.work_code ELSE m.in_cust_code END wcc,
+  CASE WHEN m.work_code>'' THEN m.work_code ELSE M.in_cust END wcc,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END wc
-FROM PARTNER_ERP_TEST3.nx.pr_m_item m
+       ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc
+FROM PARTNER_ERP_TEST3.nx.item m
 WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
     return {"fr": fr6, "to": to6, "ym": fr6[:4], "cells": cells, "items": items}
 
@@ -1068,10 +1152,10 @@ UNION ALL SELECT A.stock_part_code,a.item_code,iif(a.prod_ymd<'{y01}',a.prod_qty
 UNION ALL SELECT A.IN_PART_CODE,a.item_code,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.sa_t_stock_maint a WHERE A.maint_ymd>'250299' and A.MAINT_YMD<='{y99}' and a.in_part_code>''
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='3'
 UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,0,iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY) FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG in ('2','1')
-UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
+UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND A.MAINT_TAG='4'
 """
     # ★단가 상관서브쿼리를 OUTER APPLY로 1회만 계산(기존엔 cost·amt에 2회 → 품목당 2배). 값 동일·성능개선.
-    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust_code end order by q.cost_apply_ymd desc"
+    C2A = f"select top 1 q.item_cost cost from PARTNER_ERP_TEST3.nx.pr_m_item_cost q where q.item_code=agg.mat and q.cost_tag='1' and q.cost_apply_ymd<='{y01}' and q.cust_code=case when pi.work_code='P2' then '2228' else pi.in_cust end order by q.cost_apply_ymd desc"
     sql = f"""
 ;WITH agg AS (
   SELECT LTRIM(RTRIM(t.mat)) mat, ISNULL(LTRIM(RTRIM(t.gpc)),'') line,
@@ -1082,10 +1166,10 @@ UNION ALL SELECT A.PART_CODE,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0
 )
 SELECT CASE WHEN agg.line='P0001' THEN 'GAGONG' ELSE 'WELD' END stage,
   CASE WHEN agg.line='P0001' THEN '' ELSE agg.line END loc,
-  agg.mat cd, pi.item_desc nm, ISNULL(pi.item_class,'') type,
+  agg.mat cd, pi.item_name nm, ISNULL(pi.item_class,'') type,
   agg.basic, agg.inq, agg.outq, agg.adj, agg.qty,
   cc.cost cost, CAST(ROUND(agg.qty*ISNULL(cc.cost,0),0) AS DECIMAL(18,0)) amt
-FROM agg JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pi ON pi.item_code=agg.mat
+FROM agg JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.item_code=agg.mat
   OUTER APPLY ({C2A}) cc
 """
     _c, rows = _rows(sql)

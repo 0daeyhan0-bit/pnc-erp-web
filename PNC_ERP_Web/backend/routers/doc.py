@@ -15,6 +15,14 @@ router = APIRouter()
 import os as _os, hashlib as _hashlib, mimetypes as _mimetypes
 from urllib.parse import quote as _urlquote
 DOC_STORAGE_PATH = _os.getenv("DOC_STORAGE_PATH", r"F:\NEW_ERP_FILES")   # 배포시 NAS 마운트(\\200.200.200.15\...)로 교체
+# ★로컬 개발 폴백(2026-08-26) — 지정 경로의 드라이브가 아예 없으면(개발 PC에 F: 없음)
+#   레포 옆 _files 로 떨어뜨린다. 운영(F: 존재)에서는 아무 영향 없음.
+#   ※환경변수 DOC_STORAGE_PATH 가 설정돼 있으면 폴백하지 않는다(명시 설정 우선).
+if not _os.getenv("DOC_STORAGE_PATH"):
+    _drv = _os.path.splitdrive(DOC_STORAGE_PATH)[0]
+    if _drv and not _os.path.isdir(_drv + "\\"):
+        DOC_STORAGE_PATH = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "_files")
 _DOC_KIND = {"GENERAL_DWG": "일반도면", "SPEC_DWG": "시방도면", "SPEC_SHEET": "시방서", "ITEM_ATTACH": "품목첨부"}
 
 @router.get("/api/doc/list")

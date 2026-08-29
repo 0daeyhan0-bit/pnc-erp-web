@@ -14,6 +14,7 @@ def _invalidate_cost_cache(cur, min_ymd: str) -> int:
     """단가(LG판가/사급가) 변경 시 원가분석 결과캐시(nx.cost_analysis_cache) 무효화.
        기준일(ymd) >= 최소 적용일인 행만 삭제 — 그보다 이전 기준일 분석은 새 단가에 영향받지 않음.
        사급가는 BOM 통해 상위 조립품 원가에도 전파되므로 품목단위가 아닌 기준일 범위로 통삭제. 삭제행수 반환."""
+    _reset_cost_engine()   # ★단가변경 → persistent 원가엔진(가격 lazy캐시)도 무효화 → 다음 요청 최신 재-warm(stale단가 방지)
     min_ymd = (min_ymd or '').strip()
     if not min_ymd:
         return 0
@@ -38,22 +39,25 @@ def price_history(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
         if to_ymd:   w.append("H.apply_ymd<=?"); p.append(_d6(to_ymd))
         if item.strip(): w.append("H.item LIKE ?"); p.append(f"%{item.strip()}%")
         if tag.strip():  w.append("H.tag=?"); p.append(tag.strip())
-        if lgroup.strip(): w.append("i.ITEM_LGROUP=?"); p.append(lgroup.strip())
-        if sgroup.strip(): w.append("i.ITEM_SGROUP=?"); p.append(sgroup.strip())
+        if lgroup.strip(): w.append("i.lgroup=?"); p.append(lgroup.strip())
+        if sgroup.strip(): w.append("i.sgroup=?"); p.append(sgroup.strip())
         if cust.strip(): w.append("(H.cust LIKE ? OR c.CUST_DESC LIKE ?)"); p += [f"%{cust.strip()}%"] * 2
         if changed == "1": w.append("H.prev IS NOT NULL AND H.cost<>H.prev")
         cur.execute(f"""WITH H AS (
-            SELECT ITEM_CODE item, COST_TAG tag, ISNULL(CUST_CODE,'') cust, ISNULL(MKT,'') mkt,
-                   ISNULL(CURRENCY,'') curr, COST_APPLY_YMD apply_ymd, ITEM_COST cost, MAT_COST mat,
-                   PROC_COST procc, OTHER_COST oth, PUR_RATE rate, ISNULL(INSERT_USER_ID,'') usr,
-                   INSERT_DATETIME idt, ISNULL(REMARKS,'') remarks,
-                   LAG(ITEM_COST) OVER (PARTITION BY ITEM_CODE,COST_TAG,ISNULL(CUST_CODE,''),ISNULL(MKT,'')
-                                        ORDER BY COST_APPLY_YMD, INSERT_DATETIME) prev
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST)
-          SELECT TOP 3000 H.item, ISNULL(i.ITEM_DESC,'') nm, H.tag, H.cust, ISNULL(c.CUST_DESC,'') cust_nm,
+            -- ★2026-08-29 단가 소스 이관: 미러 PR_M_ITEM_COST → 정본 nx.price_item (DO_NOT_USE §18).
+            --   화면 tag(1/E/S)는 그대로 두고 price_type 을 매핑해 되돌린다(프론트 무변경).
+            --   PUR_RATE 는 라이브 전 행이 0 이라 정본에 두지 않았다 → NULL 로 고정(§9 취지 동일).
+            SELECT item_code item, CASE price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END tag, ISNULL(vendor_code,'') cust, ISNULL(mkt,'') mkt,
+                   ISNULL(currency,'') curr, apply_ymd apply_ymd, price cost, mat_cost mat,
+                   proc_cost procc, other_cost oth, CAST(NULL AS FLOAT) rate, ISNULL(ins_user,'') usr,
+                   ins_dt idt, ISNULL(remarks,'') remarks,
+                   LAG(price) OVER (PARTITION BY item_code,price_type,ISNULL(vendor_code,''),ISNULL(mkt,'')
+                                    ORDER BY apply_ymd, ins_dt) prev
+            FROM PARTNER_ERP_TEST3.nx.price_item)
+          SELECT TOP 3000 H.item, ISNULL(i.item_name,'') nm, H.tag, H.cust, ISNULL(c.CUST_DESC,'') cust_nm,
                  H.mkt, H.curr, H.apply_ymd, H.cost, H.mat, H.procc, H.oth, H.rate, H.prev, H.usr,
                  H.idt, H.remarks
-          FROM H LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=H.item LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=H.cust
+          FROM H LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=H.item LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=H.cust
           WHERE {' AND '.join(w)} ORDER BY H.apply_ymd DESC, H.idt DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -80,20 +84,20 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
     try:
         dLG = _kindmap(cur, "PR005"); dSG = _kindmap(cur, "PR006")
         w = ""; p = []
-        if q.strip(): w += " AND (i.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"; p += [f"%{q.strip()}%"] * 2
-        if lgroup.strip(): w += " AND i.ITEM_LGROUP=?"; p.append(lgroup.strip())
-        if sgroup.strip(): w += " AND i.ITEM_SGROUP=?"; p.append(sgroup.strip())
+        if q.strip(): w += " AND (i.ITEM_CODE LIKE ? OR i.item_name LIKE ?)"; p += [f"%{q.strip()}%"] * 2
+        if lgroup.strip(): w += " AND i.lgroup=?"; p.append(lgroup.strip())
+        if sgroup.strip(): w += " AND i.sgroup=?"; p.append(sgroup.strip())
         # 거래처 필터: 해당 거래처(코드=오토컴플리트값 / 명칭 LIKE) 단가가 있는 품목만 (AND)
-        cust_cond = "EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE"
+        cust_cond = "EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE"
         if cust.strip():
-            cust_cond += " AND (x.CUST_CODE=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c WHERE c.CUST_CODE=x.CUST_CODE AND c.CUST_DESC LIKE ?))"
+            cust_cond += " AND (x.vendor_code=? OR EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.CM_M_CUST c WHERE c.CUST_CODE=x.vendor_code AND c.CUST_DESC LIKE ?))"
             p2 = [cust.strip(), f"%{cust.strip()}%"]
         else:
             p2 = []
         cust_cond += ")"
-        cur.execute(f"""SELECT TOP {max(1,min(int(limit),1000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
-              ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, (SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE) cnt
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i
+        cur.execute(f"""SELECT TOP {max(1,min(int(limit),1000))} i.ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
+              ISNULL(i.lgroup,'') lg, ISNULL(i.sgroup,'') sg, (SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE) cnt
+            FROM PARTNER_ERP_TEST3.nx.item i
             WHERE {cust_cond}{w}
             ORDER BY i.ITEM_CODE""", *(p2 + p))
         cols = [d[0] for d in cur.description]
@@ -103,8 +107,8 @@ def price_search(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Quer
             d["lg_nm"] = dLG.get(str(d.get("lg", "")).strip(), str(d.get("lg", "")).strip())
             d["sg_nm"] = dSG.get(str(d.get("sg", "")).strip(), str(d.get("sg", "")).strip())
             rows.append(d)
-        cur.execute("""SELECT DISTINCT ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i
-            WHERE EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST x WHERE x.ITEM_CODE=i.ITEM_CODE)""")
+        cur.execute("""SELECT DISTINCT ISNULL(i.lgroup,'') lg, ISNULL(i.sgroup,'') sg FROM PARTNER_ERP_TEST3.nx.item i
+            WHERE EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.price_item x WHERE x.item_code=i.ITEM_CODE)""")
         lgs, sgs = set(), set()
         for r in cur.fetchall():
             if str(r[0]).strip(): lgs.add(str(r[0]).strip())
@@ -122,13 +126,13 @@ def price_item(item: str = Query("")):
     if not item: return {"item": item, "nm": "", "spec": "", "rows": []}
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("SELECT ISNULL(ITEM_DESC,''), ISNULL(ITEM_SPEC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
+        cur.execute("SELECT ISNULL(item_name,''), ISNULL(item_spec,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         r0 = cur.fetchone(); nm, spec = (r0[0], r0[1]) if r0 else ("", "")
-        cur.execute("""SELECT h.COST_TAG, ISNULL(h.CUST_CODE,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
-              h.COST_APPLY_YMD, ISNULL(h.CURRENCY,'') curr, ISNULL(h.MAIN_FLAG,'') main_flag, ISNULL(h.MKT,'') mkt,
-              h.ITEM_COST, h.MAT_COST, h.PROC_COST, h.OTHER_COST, ISNULL(h.REMARKS,'') remarks
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
-            WHERE h.ITEM_CODE=? ORDER BY h.COST_APPLY_YMD DESC, h.COST_TAG, h.CUST_CODE""", item)
+        cur.execute(f"""SELECT CASE h.price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END COST_TAG, ISNULL(h.vendor_code,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
+              h.apply_ymd COST_APPLY_YMD, ISNULL(h.currency,'') curr, ISNULL(h.main_flag,'') main_flag, ISNULL(h.mkt,'') mkt,
+              h.price ITEM_COST, h.mat_cost MAT_COST, h.proc_cost PROC_COST, h.other_cost OTHER_COST, ISNULL(h.remarks,'') remarks
+            FROM PARTNER_ERP_TEST3.nx.price_item h LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.vendor_code
+            WHERE h.item_code=? ORDER BY h.apply_ymd DESC, h.price_type, h.vendor_code""", item)
         cols = [d[0] for d in cur.description]
         rows = []
         for r in cur.fetchall():
@@ -167,7 +171,7 @@ def _kindmap(cur, kind):
     cur.execute("SELECT DETAIL_CODE, DETAIL_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WHERE KIND_CODE=?", kind)
     return {str(r[0]).strip(): str(r[1] or "").strip() for r in cur.fetchall()}
 
-_MAT_SGROUP = ('210', '220', '230', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/사급/잡자재/소모품)
+_MAT_SGROUP = ('210', '220', '230', '240', '310', '910', '991', '992', '993')  # 자재(원소재/원자재/부자재/용접봉/사급/잡자재/소모품). 240=용접봉(2026-08-27)
 @router.get("/api/item/list")
 def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query(""), mat: str = Query(""),
               nature: str = Query(""), use: str = Query("", description="사용여부(nx.item.use_flag): ''전체/'1'사용중/'0'사용중지"), limit: int = Query(500)):
@@ -179,21 +183,21 @@ def item_list(q: str = Query(""), lgroup: str = Query(""), sgroup: str = Query("
         cur.execute("SELECT CUST_CODE, ISNULL(CUST_DESC,'') FROM PARTNER_ERP_TEST3.nx.CM_M_CUST")
         dCust = {str(r[0]).strip(): r[1] for r in cur.fetchall()}
         w = ["1=1"]; p = []
-        if q.strip(): w.append("(i.ITEM_CODE LIKE ? OR i.ITEM_DESC LIKE ?)"); p += [f"%{q.strip()}%"] * 2
-        if lgroup.strip(): w.append("i.ITEM_LGROUP=?"); p.append(lgroup.strip())
-        if sgroup.strip(): w.append("i.ITEM_SGROUP=?"); p.append(sgroup.strip())
-        if mat == "1": w.append(f"i.ITEM_SGROUP IN ({','.join('?'*len(_MAT_SGROUP))})"); p += list(_MAT_SGROUP)
+        if q.strip(): w.append("(i.ITEM_CODE LIKE ? OR i.item_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2
+        if lgroup.strip(): w.append("i.lgroup=?"); p.append(lgroup.strip())
+        if sgroup.strip(): w.append("i.sgroup=?"); p.append(sgroup.strip())
+        if mat == "1": w.append(f"i.sgroup IN ({','.join('?'*len(_MAT_SGROUP))})"); p += list(_MAT_SGROUP)
         if nature.strip(): w.append("nx.nature=?"); p.append(nature.strip())
         if use.strip() == "1": w.append("ISNULL(nx.use_flag,1)=1")      # 사용중
         elif use.strip() == "0": w.append("ISNULL(nx.use_flag,1)=0")    # 사용중지
-        cur.execute(f"""SELECT TOP {max(1,min(int(limit),30000))} i.ITEM_CODE, ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec,
-              ISNULL(i.ITEM_LGROUP,'') lg, ISNULL(i.ITEM_SGROUP,'') sg, ISNULL(i.PIPE_KIND,'') pk, ISNULL(i.UNIT,'') un,
-              i.ITEM_DIAM, i.ITEM_THICK, i.ITEM_LENGTH, i.ITEM_WEIGHT, ISNULL(i.METAL_GUBUN,'') metal, ISNULL(i.IN_CUST_CODE,'') incust,
+        cur.execute(f"""SELECT TOP {max(1,min(int(limit),30000))} i.ITEM_CODE, ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec,
+              ISNULL(i.lgroup,'') lg, ISNULL(i.sgroup,'') sg, ISNULL(i.PIPE_KIND,'') pk, ISNULL(i.UNIT,'') un,
+              i.diam, i.thick, i.length, i.ITEM_WEIGHT, ISNULL(i.METAL_GUBUN,'') metal, ISNULL(i.in_cust,'') incust,
               ISNULL(i.WORK_CODE,'') work, ISNULL(i.MAKE_TYPE,'') mk, ISNULL(i.COST_GUBUN,'') cg, ISNULL(i.ITEM_STATUS,'') status,
               ISNULL(i.SAFE_STOCK_MIN,0), ISNULL(i.SAFE_STOCK_MAX,0), ISNULL(i.KITTING_MIN,0),
               ISNULL(i.WELD_POINT_IN,0), ISNULL(i.WELD_POINT_OUT,0), ISNULL(i.TARIFF_RATE,0), ISNULL(i.REMARKS,'') remarks, ISNULL(i.ITEM_COST,0),
               ISNULL(nx.nature,'') nature, nx.active, nx.use_flag
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i LEFT JOIN PARTNER_ERP_TEST3.nx.item nx ON nx.item_code = i.ITEM_CODE COLLATE DATABASE_DEFAULT
+            FROM PARTNER_ERP_TEST3.nx.item i LEFT JOIN PARTNER_ERP_TEST3.nx.item nx ON nx.item_code = i.ITEM_CODE COLLATE DATABASE_DEFAULT
             WHERE {' AND '.join(w)} ORDER BY i.ITEM_CODE""", *p)
         rows = []
         for r in cur.fetchall():
@@ -406,15 +410,35 @@ def price_lgprice_list(q: str = Query(""), biz: str = Query("")):
     nx = _nx(); cur = nx.cursor()
     try:
         like = f"%{q.strip()}%"
-        cur.execute(f"""SELECT p.item_code, ISNULL(i.item_name,''), p.vendor_code, p.price_type, p.apply_ymd, p.price, p.currency
-            FROM nx.price_item p LEFT JOIN nx.item i ON i.item_code=p.item_code
-            WHERE p.vendor_code IN ({vin}) AND p.price_type IN ('TAGE','TAGS')
-              AND (?='' OR p.item_code LIKE ? OR i.item_name LIKE ?)
-              AND p.apply_ymd=(SELECT MAX(x.apply_ymd) FROM nx.price_item x
-                    WHERE x.item_code=p.item_code AND x.vendor_code=p.vendor_code AND x.price_type=p.price_type)
-            ORDER BY p.item_code, p.vendor_code, p.price_type""", q.strip(), like, like)
-        rows = [{"item": r[0], "name": r[1], "vendor": r[2], "type": r[3], "apply_ymd": r[4], "price": float(r[5]), "currency": r[6]} for r in cur.fetchall()]
-        return {"rows": rows, "cnt": len(rows)}
+        # ★직전 판가를 함께 싣는다 — "얼마가 올랐는지" 를 화면에서 바로 보기 위함(2026-08-28).
+        #   종전엔 최신값만 줘서, 사급가 변동으로 판가가 올라도 화면에서 그 사실이 안 보였다.
+        #   prev = 같은 (품번·사업부·구분) 에서 최신 바로 아래 적용일의 가격.
+        cur.execute(f"""WITH r AS (
+              SELECT p.item_code, p.vendor_code, p.price_type, p.apply_ymd, p.price, p.currency,
+                     ROW_NUMBER() OVER (PARTITION BY p.item_code, p.vendor_code, p.price_type
+                                        ORDER BY p.apply_ymd DESC) rn
+                FROM nx.price_item p
+               WHERE p.vendor_code IN ({vin}) AND p.price_type IN ('TAGE','TAGS'))
+            SELECT c.item_code, ISNULL(i.item_name,''), c.vendor_code, c.price_type,
+                   c.apply_ymd, c.price, c.currency, v.apply_ymd, v.price
+              FROM r c
+              LEFT JOIN r v ON v.item_code=c.item_code AND v.vendor_code=c.vendor_code
+                           AND v.price_type=c.price_type AND v.rn=2
+              LEFT JOIN nx.item i ON i.item_code=c.item_code
+             WHERE c.rn=1 AND (?='' OR c.item_code LIKE ? OR i.item_name LIKE ?)
+             ORDER BY c.apply_ymd DESC, c.item_code, c.vendor_code, c.price_type""",
+                    q.strip(), like, like)
+        rows = []
+        for r in cur.fetchall():
+            cur_p = float(r[5]); prev_p = float(r[8]) if r[8] is not None else None
+            rows.append({"item": r[0], "name": r[1], "vendor": r[2], "type": r[3],
+                         "apply_ymd": r[4], "price": cur_p, "currency": r[6],
+                         "prev_ymd": r[7], "prev_price": prev_p,
+                         "diff": (round(cur_p - prev_p, 4) if prev_p is not None else None),
+                         "rate": (round((cur_p - prev_p) / prev_p * 100, 2) if prev_p else None)})
+        # 적용일 목록(필터 드롭다운용) — 최신순
+        ymds = sorted({r["apply_ymd"] for r in rows}, reverse=True)
+        return {"rows": rows, "cnt": len(rows), "ymds": ymds}
     finally:
         nx.close()
 
@@ -422,7 +446,8 @@ def price_lgprice_list(q: str = Query(""), biz: str = Query("")):
 # ============ 특이 단가목록: 실 입고가 > 실 유상사급 출고가(판가 역전) ============
 # 해당월에 실제 입고(자재입고명세서)되고 유상사급 출고(자재불출명세서)된 품목 중, 실 입고가 > 실 출고가(비싸게 사서 싸게 사급) = 손해.
 # 입고=PU_T_STOCK_MAINT(9,S,C,G,H) · 출고=PU_T_STOCK_MAINT(tag'5', 출고가>0=유상). 원소재·용접봉·소모품 제외(용접링 유지). 상위 Assy=BOM 역전개.
-_INV_EXCL_SG = ('210', '220', '910', '991', '992', '993')  # 원소재/원자재/잡자재(용접봉·나이프)/생산소모품/일반소모품/수불예외
+_INV_EXCL_SG = ('210', '220', '910', '991', '992', '993')  # 원소재/원자재/잡자재(나이프 등)/생산소모품/일반소모품/수불예외
+# ★240(용접봉)은 의도적으로 미포함 — 용접봉=재고평가 대상이라 재고에 포함(2026-08-27 용접봉을 910에서 240으로 분리)
 @router.get("/api/price/inversion")
 def price_inversion(ym: str = Query(""), q: str = Query(""), limit: int = Query(3000)):
     """특이 단가목록: 해당월(ym=YYMM, 미지정=당월) 실 입고가 > 실 유상사급 출고가 역전 부품. 입고/출고 둘 다 있는 품목만.
@@ -438,7 +463,7 @@ def price_inversion(ym: str = Query(""), q: str = Query(""), limit: int = Query(
         lim = max(1, min(int(limit), 8000))
         exsg = ",".join("?" * len(_INV_EXCL_SG))
         w = []; p = []
-        if q.strip(): w.append("(inb.mat LIKE ? OR m.ITEM_DESC LIKE ?)"); p += [f"%{q.strip()}%"] * 2
+        if q.strip(): w.append("(inb.mat LIKE ? OR m.item_name LIKE ?)"); p += [f"%{q.strip()}%"] * 2
         extra = (" AND " + " AND ".join(w)) if w else ""
         cur.execute(f"""
         WITH inb AS (
@@ -453,17 +478,17 @@ def price_inversion(ym: str = Query(""), q: str = Query(""), limit: int = Query(
         outc AS (SELECT mat, CUST_CODE FROM (
             SELECT MAT_CODE mat, CUST_CODE, ROW_NUMBER() OVER(PARTITION BY MAT_CODE ORDER BY SUM(CAST(MAINT_QTY AS FLOAT)) DESC) rn
             FROM nx.PU_T_STOCK_MAINT WHERE LEFT(MAINT_YMD,4)=? AND MAINT_TAG='5' GROUP BY MAT_CODE, CUST_CODE) x WHERE rn=1)
-        SELECT TOP {lim} inb.mat item, ISNULL(m.ITEM_DESC,'') nm, ISNULL(m.ITEM_SGROUP,'') sg,
+        SELECT TOP {lim} inb.mat item, ISNULL(m.item_name,'') nm, ISNULL(m.sgroup,'') sg,
           ic.CUST_CODE pur_cust, CAST(inb.amt/NULLIF(inb.q,0) AS DECIMAL(18,2)) pur, CAST(inb.q AS DECIMAL(18,2)) inq,
           oc.CUST_CODE sag_cust, CAST(outb.amt/NULLIF(outb.q,0) AS DECIMAL(18,2)) sag, CAST(-outb.q AS DECIMAL(18,2)) outq,
           CAST((inb.amt/NULLIF(inb.q,0)) - (outb.amt/NULLIF(outb.q,0)) AS DECIMAL(18,2)) diff
         FROM inb JOIN outb ON inb.mat=outb.mat
-          JOIN nx.PR_M_ITEM m ON m.ITEM_CODE=inb.mat
+          JOIN nx.item m ON m.ITEM_CODE=inb.mat
           LEFT JOIN inc ic ON ic.mat=inb.mat LEFT JOIN outc oc ON oc.mat=outb.mat
         WHERE (outb.amt/NULLIF(outb.q,0)) > 0
           AND (inb.amt/NULLIF(inb.q,0)) > (outb.amt/NULLIF(outb.q,0))
-          AND ( m.ITEM_SGROUP NOT IN ({exsg}) OR m.ITEM_DESC LIKE N'%용접링%' )
-          AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.ITEM_DESC LIKE N'%용접링%' )
+          AND ( m.sgroup NOT IN ({exsg}) OR m.item_name LIKE N'%용접링%' )
+          AND ( m.ITEM_CODE NOT LIKE 'RAC%' OR m.item_name LIKE N'%용접링%' )
           {extra}
         ORDER BY ((inb.amt/NULLIF(inb.q,0)) - (outb.amt/NULLIF(outb.q,0))) DESC""",
         ymv, ymv, ymv, ymv, *(list(_INV_EXCL_SG) + p))

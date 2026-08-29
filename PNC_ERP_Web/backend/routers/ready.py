@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _assert_open, stock_changed)
 
 router = APIRouter()
 
@@ -41,7 +41,7 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
         nm = {}; pl = [x for x in parts if x]
         for i in range(0, len(pl), 900):
             ch = pl[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         for x in rows: x["nm"] = nm.get(x["item_code"], "")
         return {"rows": rows, "cnt": len(rows)}
@@ -49,7 +49,8 @@ def ready_plan(from_ymd: str = Query(""), to_ymd: str = Query(""), line: str = Q
         cn.close(); nx.close()
 
 @router.get("/api/ready/setcheck")
-def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0)):
+def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Query(0),
+                   src: str = Query("nx")):
     """★키팅 [확인] 팝업(레거시 w_pr_input_466) — 도번의 자도번별 사용수량·재고·세트가능수량·협력사.
        ★BOM 소스 = CS_M_ITEM_BOM(웹 정본). 레거시 화면은 PR_M_ITEM_BOM을 쓰지만 실측 결과 두 테이블이
          동일(자도번·USE_QTY·KITTING_FLAG 일치)이라, 웹 다른 화면(bom.py 등)과 기준을 통일함.
@@ -69,22 +70,63 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
     cn = _conn(); cur = cn.cursor()
     try:
         # 1) BOM 자도번(키팅대상)
-        cur.execute("""
+        #    ★2026-08-24 가상도번(VIR_ITEM_FLAG='1')은 '제외'가 아니라 '한 단계 더 전개'.
+        #      레거시 BOM전개(w_pr_master_126)를 보면 가상도번은 그 자체로 자재가 아니라
+        #      묶음일 뿐이라, 그 하위 자도번들이 상위 목록으로 올라온다.
+        #      예) AJR77163102 → AJR77163102-S2-1(가상) 밑에 4A00114F·5210A22409A·
+        #          MJC62721914·MJU66366805/812/813/814·MJX63991801 9건.
+        #      구버전은 가상을 버리기만 해서 이 9건이 통째로 누락(웹 11건 vs 레거시 18건).
+        #    ★EXCEPT_FLAG='1' = 레거시 전개화면의 '제외' 열(직거래 등) → 키팅대상 아님.
+        #    ★2026-08-25 KITTING_FLAG='1' 조건을 가상도번에는 적용하지 않는다.
+        #      가상도번은 그 자체가 자재가 아니라 묶음이라 KITTING_FLAG=0 인 게 정상인데,
+        #      이 조건에 걸려 전개도 못 하고 탈락 → 그 하위가 통째로 누락됐다.
+        #      실증: AJR76582505-2(kit=0·vir=1) 밑 AJR76582505-4-1·MJU66958506 2건 누락
+        #            (레거시 21건 vs 웹 19건).
+        _SQL = """
             SELECT a.MAT_CODE,
                    CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
-                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust_code) END,'') cust_desc,
-                   ISNULL(m.ITEM_DESC,'') nm
+                               ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
+                   ISNULL(m.item_name,'') nm,
+                   ISNULL(a.VIR_ITEM_FLAG,'0') vir
               FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM a WITH(NOLOCK)
-              JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
              WHERE a.ITEM_CODE=?
                AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
-               AND ISNULL(a.KITTING_FLAG,'0')='1'
-               AND ISNULL(a.VIR_ITEM_FLAG,'0')<>'1'
+               AND (ISNULL(a.KITTING_FLAG,'0')='1' OR ISNULL(a.VIR_ITEM_FLAG,'0')='1')
+               AND ISNULL(a.EXCEPT_FLAG,'0')<>'1'
                AND CAST(ISNULL(a.USE_QTY,0) AS float) > 0
-             ORDER BY a.MAT_CODE""", it, d6, d6)
-        bom = [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
-                "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip()} for r in cur.fetchall()]
+             ORDER BY a.MAT_CODE"""
+
+        def _lvl(code):
+            cur.execute(_SQL, code, d6, d6)
+            return [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
+                     "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip(),
+                     "vir": str(r[4] or '0')} for r in cur.fetchall()]
+
+        bom, _seen, _stack = [], set(), [(it, 1.0, 0)]
+        while _stack:
+            _code, _mult, _dep = _stack.pop(0)
+            if _dep > 8:          # 순환/과도한 깊이 방어
+                continue
+            for b in _lvl(_code):
+                if b["vir"] == '1':
+                    # 가상도번 = 묶음. 자기 자신은 목록에 넣지 않고 하위를 전개한다.
+                    #   소요량은 곱해서 내려간다(상위 use_qty × 하위 use_qty).
+                    if b["mat"] not in _seen:
+                        _seen.add(b["mat"])
+                        _stack.append((b["mat"], _mult * b["use_qty"], _dep + 1))
+                    continue
+                b["use_qty"] *= _mult
+                b.pop("vir", None)
+                bom.append(b)
+        # 같은 자도번이 여러 경로로 오면 소요량 합산(레거시 전개 동일)
+        _agg = {}
+        for b in bom:
+            e = _agg.get(b["mat"])
+            if e: e["use_qty"] += b["use_qty"]
+            else: _agg[b["mat"]] = b
+        bom = sorted(_agg.values(), key=lambda x: x["mat"])
         # 2) ★재고 = nx 스냅샷(PU_T_MAT_STOCK_WH) + 웹 원장 미반영분(nx.stock_ledger)
         #    · 스냅샷: 창고=Z99990 · 파트창고=IS0001 → 자재 입출고현황 화면의 재고와 동일.
         #      ※라이브 PARTNER_ERP.dbo 쪽은 값이 오래돼(11588O-1=5,648) 화면(714)과 다름 → nx 사용.
@@ -96,10 +138,33 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
             mats = [b["mat"] for b in bom]
             for i in range(0, len(mats), 900):
                 ch = mats[i:i+900]; ph = ",".join("?" * len(ch))
-                cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float))
-                                  FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
-                                 WHERE MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
-                                 GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *ch)
+                # ★2026-08-25 재고 = 라이브∪nx 중 '더 최근 갱신본'(다른 화면과 동일 규칙).
+                #   nx 가 정본이다 — 웹 실적/조정이 nx 에만 쌓이므로 라이브만 보면
+                #   웹에서 한 작업이 팝업에 안 나타나 프로세스 검증이 불가능하다.
+                #   미러가 늦어 nx 에 없는 품목은 라이브 값이 잡힌다(누락 방지).
+                #   (구버전은 기본 live 라 웹 실적이 안 보였다 — 실측 466 팝업 18건 중
+                #    6건이 라이브 값으로 표시돼 nx 실적과 어긋남.)
+                _lv = "PARTNER_ERP.dbo"; _nxs = "PARTNER_ERP_TEST3.nx"
+                if str(src).strip() == "live":
+                    _sel = f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(CAST(STOCK_QTY AS float))
+                                 FROM {_lv}.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                                WHERE MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'
+                                GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))"""
+                    cur.execute(_sel, *ch)
+                else:
+                    # ★nx 우선. 갱신시각 비교는 쓰지 않는다 — 레거시가 계속 돌아
+                    #   라이브가 항상 더 최신이라(실측 라이브 16:36 vs nx 11:42) 항상 라이브가
+                    #   선택돼 웹 실적이 묻혔다. nx 에 행이 없을 때만 라이브로 채운다.
+                    _w = f"MAT_CODE IN ({ph}) AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'"
+                    cur.execute(f"""SELECT k, SUM(q) FROM (
+                        SELECT UPPER(LTRIM(RTRIM(ISNULL(n.MAT_CODE,l.MAT_CODE)))) k,
+                               CAST(CASE WHEN n.MAT_CODE IS NULL THEN l.STOCK_QTY
+                                         ELSE n.STOCK_QTY END AS float) q
+                          FROM (SELECT * FROM {_nxs}.PU_T_MAT_STOCK_WH WITH(NOLOCK) WHERE {_w}) n
+                          FULL JOIN (SELECT * FROM {_lv}.PU_T_MAT_STOCK_WH WITH(NOLOCK) WHERE {_w}) l
+                            ON l.MAT_CODE=n.MAT_CODE AND l.CUST_CODE=n.CUST_CODE
+                           AND ISNULL(l.GAGONG_PROC_CODE,'')=ISNULL(n.GAGONG_PROC_CODE,'')
+                        ) u GROUP BY k""", *(list(ch) + list(ch)))
                 for r in cur.fetchall():
                     stkmap[str(r[0] or '').strip()] = float(r[1] or 0)
             # ★2026-08-20: 웹 원장 가산 제거 — 스냅샷(PU_T_MAT_STOCK_WH)이 정본.
@@ -225,7 +290,7 @@ def ready_sheet(sheet_no: str = Query(...)):
          완성품 이동창고  = STOCK_GAGONG_PROC_CODE 또는 투입파트 명칭
          상위도번/도번    = UPPER_ITEM_CODE / ITEM_CODE
          수량(대형)       = PLAN_QTY
-         품명            = PR_M_ITEM.ITEM_DESC
+         품명            = PR_M_ITEM.item_name
          생산일자/투입시간 = PLAN_YMD / DS_INPUT_HM
          SEQ표(10줄고정)  = DTL: 파트(GAGONG_PROC_DESC) · 공정(S_WORK 명) · 바코드
        ★조회 전용. nx 우선, 없으면 라이브(읽기) 폴백."""
@@ -237,9 +302,9 @@ def ready_sheet(sheet_no: str = Query(...)):
                           ISNULL(h.DS_INPUT_HM,'') hm, ISNULL(h.LINE_NO,'') line, h.PLAN_QTY,
                           ISNULL(h.WH_GAGONG_PROC_CODE,'') wh, ISNULL(h.STOCK_GAGONG_PROC_CODE,'') stk,
                           ISNULL(h.PRINT_USER_ID,'') usr, h.PRINT_DATETIME, ISNULL(h.PROD_FIN_FLAG,'0') fin,
-                          ISNULL(i.ITEM_DESC,'') nm, ISNULL(i.ITEM_SPEC,'') spec
+                          ISNULL(i.item_name,'') nm, ISNULL(i.item_spec,'') spec
                         FROM {sch}.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
-                        LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        LEFT JOIN PARTNER_ERP_TEST3.nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         return cur.fetchone()
     nx = _nx(); ncur = nx.cursor()
@@ -384,6 +449,7 @@ def ready_commit(payload: dict = Body(...)):
         return {"ok": False, "detail": f"자재부족 — 세트가능 {chk.get('set_able')} < 요청 {qty:g}"}
 
     tx = _nx_tx(); cur = tx.cursor()
+    _assert_open(cur, d6, "MAT", "생산준비 실적등록")   # ★마감잠금
     try:
         WIN = 'w_pr_input_460_new'
         # ★취소 잔량 검증 — 준비재고보다 많이 취소하면 재고가 음수로 내려감(중복취소 방지).
@@ -409,7 +475,7 @@ def ready_commit(payload: dict = Body(...)):
             mat = b["mat"]; need = float(b["use_qty"]) * qty      # 소요량 × 세트수량
             # ② 자재창고 출고(tag='B', 음수) / 취소시 +
             #    ★MAINT_YMD = today6(실제 발생일). 계획일자(d6)가 아님 — 재고 수불은 오늘 기준.
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", today6)
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
             seq = int(cur.fetchone()[0] or 1)
             # ★TO_GAGONG_PROC_CODE(도착 파트창고) 필수 — 생산입출고현황의 '생산창고입고' 라인이
             #   tag='B' AND OUT_WH_GUBUN='1' AND TO_GAGONG_PROC_CODE>'' 조건으로 집계함(live_api._prodinout).
@@ -483,6 +549,7 @@ def ready_commit(payload: dict = Body(...)):
                         sheet_no, item, d6, qty, qty, gpc, _ln, _assy, _upr, _hm, user)
             _insert_sheet_dtl(cur, sheet_no, item, user)
         tx.commit()
+        stock_changed("ready")                # ★준비재고 변경 → 수불장 캐시 버림
         # weld_print = A4 인쇄창을 띄울지 여부(전표 등록 자체와 무관). 프론트가 이 값으로 판단.
         return {"ok": True, "mode": mode, "item": item, "gpc": gpc, "qty": qty,
                 "sheet_no": sheet_no, "weld_print": weld_print, "moved": moved}
@@ -537,6 +604,7 @@ def ready_force_sheet(payload: dict = Body(...)):
             _insert_sheet_dtl(cur, sheet_no, item, user)   # SEQ 공정상세도 함께(A4 전표용)
             issued.append({"sheet_no": sheet_no, "item": item, "gpc": gpc, "ymd": d6, "qty": qty})
         tx.commit()
+        stock_changed("ready")                # ★준비재고 변경 → 수불장 캐시 버림
         return {"ok": True, "issued": issued, "cnt": len(issued), "skipped": skipped}
     except Exception as e:
         try: tx.rollback()
@@ -556,6 +624,8 @@ def ready_register(payload: dict = Body(...)):
     tag = "K2" if mode == "cancel" else "K1"; remk = "키팅취소" if mode == "cancel" else "키팅확인"
     nx = _nx(); cur = nx.cursor()
     try:
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd')")
+        _assert_open(cur, cur.fetchone()[0], "MAT", "준비등록")   # ★마감잠금(등록일=오늘)
         n = 0; skipped = 0
         for r in rows:
             ic = str(r.get("item_code", "") or "").strip()
@@ -595,7 +665,7 @@ def ready_register(payload: dict = Body(...)):
 #   치수     = PR_M_ITEM.ITEM_DIAM / ITEM_THICK / ITEM_LENGTH
 # ※키팅대상 회색음영은 제외(사용자 지시).
 _SGRP = {"110": "원자재", "120": "SUB-ASSY", "130": "가공품", "210": "소재컷팅",
-         "220": "소재컷팅", "230": "부자재", "310": "LG사급", "910": "전자재",
+         "220": "소재컷팅", "230": "부자재", "240": "용접봉", "310": "LG사급", "910": "전자재",
          "991": "부자재", "992": "부자재", "993": "수불예외"}
 
 @router.get("/api/ready/bomsheet")
@@ -613,8 +683,8 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
     cn = _conn(); c2 = cn.cursor()
     try:
         # 헤더 — 도번 품명 / 지그보관구역 / 파트명
-        cur.execute("""SELECT ISNULL(ITEM_DESC,''), ISNULL(JIG_KEEP_AREA,'')
-                         FROM nx.PR_M_ITEM WITH(NOLOCK) WHERE ITEM_CODE=?""", it)
+        cur.execute("""SELECT ISNULL(item_name,''), ISNULL(JIG_KEEP_AREA,'')
+                         FROM nx.item WITH(NOLOCK) WHERE ITEM_CODE=?""", it)
         h = cur.fetchone()
         nm  = str(h[0]).strip() if h else ""
         jig = str(h[1]).strip() if h else ""
@@ -629,15 +699,18 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
                 proc_nm = "용접"          # 레거시 헤더 좌상단 고정표기(용접 파트)
         # BOM 다단 전개 — 레벨 유지, 가상품목만 재귀
         cur.execute("""
+            -- ★2026-08-24 정렬 = 계층 유지 + 각 레벨 안에서 품목코드 오름차순(레거시 인쇄본 순서).
+            --   구버전은 BOM_SEQ 경로순이라 레벨1이 AJR77163102-S2-1 부터 나오는 등 순서가 뒤섞였다.
+            --   경로를 코드로 쌓으면 부모 바로 뒤에 자식이 붙으면서 형제끼리는 코드순이 된다.
             WITH CTE (lvl, seq, path, mat_code, use_qty) AS (
                 SELECT 1, b.BOM_SEQ,
-                       CAST(RIGHT('0000'+CAST(b.BOM_SEQ AS varchar(4)),4) AS varchar(400)),
+                       CAST(b.MAT_CODE AS varchar(900)),
                        b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
                   FROM nx.PR_M_ITEM_BOM b WITH(NOLOCK)
                  WHERE b.ITEM_CODE=? AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
                 UNION ALL
                 SELECT c.lvl+1, b.BOM_SEQ,
-                       CAST(c.path+'.'+RIGHT('0000'+CAST(b.BOM_SEQ AS varchar(4)),4) AS varchar(400)),
+                       CAST(c.path+CHAR(1)+b.MAT_CODE AS varchar(900)),
                        b.MAT_CODE, CAST(ISNULL(b.USE_QTY,0) AS float)
                   FROM CTE c
                   JOIN nx.PR_M_ITEM_BOM b WITH(NOLOCK) ON b.ITEM_CODE=c.mat_code
@@ -645,11 +718,11 @@ def ready_bomsheet(item: str = Query(...), gpc: str = Query("")):
                    AND c.lvl < 10                    -- 순환 BOM 방어(실측 최대 3레벨)
             )
             SELECT c.lvl, c.mat_code, c.use_qty,
-                   ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''), ISNULL(m.ITEM_SGROUP,''),
-                   ISNULL(m.IN_CUST_CODE,''), ISNULL(m.ITEM_DIAM,0), ISNULL(m.ITEM_THICK,0),
-                   ISNULL(m.ITEM_LENGTH,0), ISNULL(s.RACK_NO,''), ISNULL(k.stk,0)
+                   ISNULL(m.item_name,''), ISNULL(m.item_spec,''), ISNULL(m.sgroup,''),
+                   ISNULL(m.in_cust,''), ISNULL(m.diam,0), ISNULL(m.thick,0),
+                   ISNULL(m.length,0), ISNULL(s.RACK_NO,''), ISNULL(k.stk,0)
               FROM CTE c
-              LEFT JOIN nx.PR_M_ITEM m     WITH(NOLOCK) ON m.ITEM_CODE=c.mat_code
+              LEFT JOIN nx.item m     WITH(NOLOCK) ON m.ITEM_CODE=c.mat_code
               LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=c.mat_code
               LEFT JOIN (SELECT MAT_CODE, SUM(STOCK_QTY) stk
                            FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK) GROUP BY MAT_CODE) k

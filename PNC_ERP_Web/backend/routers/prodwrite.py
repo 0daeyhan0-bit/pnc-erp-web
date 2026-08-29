@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, stock_changed)
 
 router = APIRouter()
 
@@ -16,9 +16,27 @@ def wr_itemsearch(q: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
         like = f"%{q}%"
-        cur.execute("""SELECT TOP 40 ITEM_CODE, ISNULL(ITEM_DESC,'') nm, ISNULL(ITEM_SGROUP,'') sg
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
+        cur.execute("""SELECT TOP 40 ITEM_CODE, ISNULL(item_name,'') nm, ISNULL(sgroup,'') sg
+            FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE LIKE ? OR item_name LIKE ? ORDER BY ITEM_CODE""", like, like)
         return {"rows": [{"item": r[0], "nm": r[1], "sg": r[2]} for r in cur.fetchall()]}
+    finally:
+        cn.close()
+
+@router.get("/api/wr/parts")
+def wr_parts():
+    """파트(생산창고) 목록 — PR_M_PROC_GAGONG.
+       ★재고조정 등 쓰기화면의 파트칸은 반드시 이 드롭다운으로(코드 저장·이름 표시).
+         자유입력으로 두면 '04라인' 같은 표시명이 PART_CODE 에 들어가
+         재고가 없는 파트에 쌓인다(2026-08-25 실사고: SUB6 조정 500개가 S4 대신
+         '04라인'에 들어가 520 차감이 재고 0 으로 판정)."""
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT GAGONG_PROC_CODE, ISNULL(GAGONG_PROC_DESC,'') nm
+                         FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WITH(NOLOCK)
+                        WHERE ISNULL(GAGONG_PROC_CODE,'')<>''
+                        ORDER BY GAGONG_PROC_CODE""")
+        rows = [{"code": str(r[0]).strip(), "nm": str(r[1] or '').strip()} for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
     finally:
         cn.close()
 
@@ -70,13 +88,13 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
             if wc.strip():   w.append("(l.WORK_CODE=? OR l.TO_GAGONG_PROC_CODE=?)"); p += [wc.strip(), wc.strip()]
             cur.execute(f"""SELECT TOP 3000 l.MAINT_YMD, l.MAINT_SEQ, ISNULL(l.MAINT_TAG,'') tag,
                   ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.GAGONG_PROC_CODE,'') part_code,
-                  ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
-                  ISNULL(l.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
+                  ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
+                  ISNULL(l.ITEM_CODE,'') item_code, ISNULL(ii.item_name,'') item_nm,
                   l.MAINT_QTY, l.MAINT_COST, l.MAINT_AMT, ISNULL(l.REMARKS,'') remarks,
                   ISNULL(l.TO_GAGONG_PROC_CODE,'') prod_work_code, ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
                 FROM nx.stock_ledger l
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=l.ITEM_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=l.MAT_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=l.ITEM_CODE
                 WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_SEQ DESC""", *p)
             cols = [d[0] for d in cur.description]
             for r in cur.fetchall():
@@ -93,13 +111,13 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
             if mat.strip():  wm.append("(m.MAT_CODE LIKE ? OR m.ITEM_CODE LIKE ?)"); pm += [f"%{mat.strip()}%"]*2
             if wc.strip():   wm.append("(m.WORK_CODE=? OR m.PROD_WORK_CODE=?)"); pm += [wc.strip(), wc.strip()]
             cur.execute(f"""SELECT TOP 3000 m.MAINT_YMD, m.MAINT_SEQ, ISNULL(m.WORK_CODE,'') work_code,
-                  ISNULL(m.PART_CODE,'') part_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
-                  ISNULL(m.ITEM_CODE,'') item_code, ISNULL(ii.ITEM_DESC,'') item_nm,
+                  ISNULL(m.PART_CODE,'') part_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
+                  ISNULL(m.ITEM_CODE,'') item_code, ISNULL(ii.item_name,'') item_nm,
                   m.MAINT_QTY, m.MAINT_COST, m.MAINT_AMT, ISNULL(m.REMARKS,'') remarks,
                   ISNULL(m.PROD_WORK_CODE,'') prod_work_code, ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
                 FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=m.MAT_CODE
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=m.ITEM_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=m.MAT_CODE
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=m.ITEM_CODE
                 WHERE {' AND '.join(wm)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *pm)
             cols = [d[0] for d in cur.description]
             for r in cur.fetchall():
@@ -113,6 +131,30 @@ def stockmaint_list(from_ymd: str = Query(""), to_ymd: str = Query(""), tag: str
                 "sum_amt": sum(r["MAINT_AMT"] for r in rows)}
     finally:
         nx.close()
+
+def _prd_mirror_ins(cur, ymd, part, mat, item, tag, qty, cost, amt, rem):
+    """★생산재고조회(w_pr_stock_480, _prodstock)는 PR_T_STOCK_MAINT_MAT를 읽음 → 생산파트조정이 여기에도 써야 조회 반영.
+       tag: 조정='2'/불량='1'(조회에서 조정 etc열), 자체 SEQ 채번(당일 MAX+1). INSERT_WINDOW='stockmaint'로 웹행 식별(수정/삭제 매칭용)."""
+    try:
+        mtag = str(tag or '2').strip()[:1] or '2'
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", ymd)
+        msq = int(cur.fetchone()[0] or 1)
+        cur.execute("""INSERT INTO nx.PR_T_STOCK_MAINT_MAT
+              (MAINT_YMD,MAINT_SEQ,MAINT_TAG,PART_CODE,MAT_CODE,ITEM_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,
+               INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW)
+              VALUES(?,?,?,?,?,?,?,?,?,?,'web',GETDATE(),'stockmaint')""",
+            ymd, msq, mtag, (part or None), mat, (item or None), qty, cost, amt, (rem or None))
+    except Exception: pass
+def _prd_mirror_del(cur, ymd, part, mat, tag, qty):
+    """생산파트조정 수정/삭제 시 대응 미러행(웹생성) 제거 — 시그니처 매칭 TOP 1."""
+    try:
+        mtag = str(tag or '2').strip()[:1] or '2'
+        cur.execute("""SELECT TOP 1 MAINT_YMD,MAINT_SEQ FROM nx.PR_T_STOCK_MAINT_MAT
+              WHERE MAINT_YMD=? AND MAT_CODE=? AND ISNULL(PART_CODE,'')=? AND MAINT_TAG=? AND ABS(MAINT_QTY-?)<0.0001
+                AND INSERT_WINDOW='stockmaint' ORDER BY MAINT_SEQ DESC""", ymd, mat, (part or ''), mtag, qty)
+        h = cur.fetchone()
+        if h: cur.execute("DELETE FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ=?", h[0], h[1])
+    except Exception: pass
 
 @router.post("/api/stockmaint/save")
 def stockmaint_save(payload: dict = Body(...)):
@@ -137,16 +179,33 @@ def stockmaint_save(payload: dict = Body(...)):
     mid = p.get("id")
     nx = _nx(); cur = nx.cursor()
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "PRD"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
+        # ★파트는 반드시 코드여야 한다 — 표시명('04라인')이 들어가면 그 파트에 재고가
+        #   쌓여 실제 파트(S4)에서 안 보인다(2026-08-25 실사고).
+        if part:
+            cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+                            WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?""", part)
+            if not cur.fetchone():
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG
+                                WITH(NOLOCK) WHERE ISNULL(GAGONG_PROC_DESC,'')=?""", part)
+                _alt = cur.fetchone()
+                raise HTTPException(400,
+                    f"파트코드 '{part}' 가 없습니다."
+                    + (f" 파트명 대신 코드 '{str(_alt[0]).strip()}' 를 선택하세요." if _alt
+                       else " 파트 드롭다운에서 선택하세요."))
         cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
         seq = cur.fetchone()[0]   # 삭제 전 채번 → 수정 시 신규 SEQ(기존과 상이)
         if mid:  # 수정 = 기존행 삭제 후 신규(재키)
             try:
                 oy, osq = str(mid).split("-"); osq = int(osq)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "PRD"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
+                # ★기존 미러행 제거용 옛값 읽기(삭제 전)
+                cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
+                _o = cur.fetchone()
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", oy, osq)
+                if _o: _prd_mirror_del(cur, oy, str(_o[0]).strip(), str(_o[1]).strip(), str(_o[2]).strip(), float(_o[3] or 0))
             except (ValueError, AttributeError):
                 pass
         cur.execute("""INSERT INTO nx.stock_ledger
@@ -155,6 +214,8 @@ def stockmaint_save(payload: dict = Body(...)):
             VALUES('PRD',?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE())""",
             ymd, seq, led_tag, (part or None), (work or None), (pwc or None),
             mat, (item or None), qty, cost, amt, (rem or None), usr)
+        # ★F-생산: 조회원천(PR_T_STOCK_MAINT_MAT)에도 반영 → 생산재고조회에 보이게
+        _prd_mirror_ins(cur, ymd, part, mat, item, led_tag, qty, cost, amt, rem)
         return {"ok": True, "id": f"{ymd}-{seq}", "mode": ("update" if mid else "insert")}
     finally:
         nx.close()
@@ -172,10 +233,14 @@ def stockmaint_delete(payload: dict = Body(...)):
                 y, sq = x.split("-"); sq = int(sq)
             except ValueError:
                 continue
-            if _closed(cur, y):
+            if _closed(cur, y, "PRD"):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
+            # ★삭제 전 옛값 읽어 조회원천 미러행도 제거
+            cur.execute("SELECT ISNULL(GAGONG_PROC_CODE,''),ISNULL(MAT_CODE,''),ISNULL(MAINT_TAG,''),MAINT_QTY FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
+            _o = cur.fetchone()
             cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
             dl += cur.rowcount
+            if _o: _prd_mirror_del(cur, y, str(_o[0]).strip(), str(_o[1]).strip(), str(_o[2]).strip(), float(_o[3] or 0))
         return {"ok": True, "deleted": dl}
     finally:
         nx.close()
@@ -198,11 +263,11 @@ def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str 
         if item.strip():  w.append("d.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if wo.strip():    w.append("d.WORK_ORDER LIKE ?"); p.append(f"%{wo.strip()}%")
         cur.execute(f"""SELECT TOP 3000 d.ID, d.PROD_YMD, d.PROD_HMS, ISNULL(d.WORK_ORDER,'') wo,
-              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.ITEM_DESC,'') nm,
+              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.item_name,'') nm,
               ISNULL(d.LINE_NO,'') line, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, d.PROD_QTY,
               ISNULL(d.WORK_CODE,'') work_code, ISNULL(d.FINISH_FLAG,'') fin, ISNULL(d.PROD_USER_ID,'') usr,
               d.INSERT_DATETIME
-            FROM nx.proc_result d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            FROM nx.proc_result d LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC, d.ID DESC""", *p)
         cols = [dd[0] for dd in cur.description]
         for r in cur.fetchall():
@@ -219,10 +284,10 @@ def procreg_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: str 
         if item.strip():  wm.append("d.ITEM_CODE LIKE ?"); pm.append(f"%{item.strip()}%")
         if wo.strip():    wm.append("d.WORK_ORDER LIKE ?"); pm.append(f"%{wo.strip()}%")
         cur.execute(f"""SELECT TOP 3000 d.PROD_YMD, d.PROD_HMS, ISNULL(d.WORK_ORDER,'') wo,
-              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.ITEM_DESC,'') nm,
+              ISNULL(d.SPLIT_WORK_ORDER,'') swo, ISNULL(d.ITEM_CODE,'') item, ISNULL(ii.item_name,'') nm,
               ISNULL(d.LINE_NO,'') line, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, d.PROD_QTY,
               ISNULL(d.WORK_CODE,'') work_code, ISNULL(d.FINISH_FLAG,'') fin, ISNULL(d.PROD_USER_ID,'') usr
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(wm)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC""", *pm)
         cols = [dd[0] for dd in cur.description]
         for r in cur.fetchall():
@@ -256,17 +321,45 @@ def procreg_save(payload: dict = Body(...)):
     mid = p.get("id")
     nx = _nx(); cur = nx.cursor()
     try:
+        # ★생산실적 재고 게이트 — 예외 없음(정본 STOCK_GATING_CLOSE_LOCK_RULES.md §0-★).
+        #   이 화면은 종전에 게이트가 **아예 없었다**(nx.proc_result INSERT 만).
+        #   실적을 잡는다 = 그 수량만큼 만들었다 = BOM 자재를 썼다 → 자재가 없으면 실적 불가.
+        #   수정 시엔 **늘어난 수량분**만 판정한다(같은 실적을 두 번 요구하지 않기 위해).
+        #   차단 시 사유(어느 자재가 얼마 부족한지·어디에 있는지)를 그대로 돌려준다.
+        need_qty = qty
+        if mid:
+            cur.execute("SELECT CAST(ISNULL(PROD_QTY,0) AS float) FROM nx.proc_result WHERE ID=?", int(mid))
+            _r = cur.fetchone()
+            need_qty = max(0.0, qty - float(_r[0] or 0)) if _r else qty
+        if need_qty > 0:
+            _lm = _lock_msg(cur, ymd)                     # 마감 잠금도 함께(규칙 B)
+            if _lm:
+                raise HTTPException(409, _lm)
+            # ★_is_inner_prod 로 대상을 거르지 않는다 — 그 함수는 라이브 커넥션에서
+            #   nx.item 을 읽다 실패하면 **예외를 삼키고 False** 를 돌려주어(=게이트 스킵)
+            #   또 하나의 숨은 예외가 된다(2026-08-28 하네스로 실측). §0-★ 규칙 A-0 위반.
+            #   대신 BOM 을 전개해 **소비할 것이 있으면 무조건 판정**한다.
+            #   BOM 이 비면 소비 자체가 없는 것이므로 게이트 대상이 아니다(예외가 아니라 해당 없음).
+            from routers.backflush import _backflush_bom, _prod_shortages
+            _comps, _weld = _backflush_bom(nx, item, nx)   # ★cro 도 nx — 라이브엔 nx 스키마가 없다
+            _short = _prod_shortages(nx, _comps, _weld, need_qty)
+            if _short:
+                _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
+                raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
+                                    + "; ".join(_short[:8]) + _more)
         if mid:
             cur.execute("""UPDATE nx.proc_result SET PROD_YMD=?, PROD_HMS=?, WORK_ORDER=?, SPLIT_WORK_ORDER=?,
                 ITEM_CODE=?, LINE_NO=?, PART_CODE=?, S_WORK_CODE=?, PROD_QTY=?, WORK_CODE=?, FINISH_FLAG=?,
                 PROD_USER_ID=?, UPDATE_USER_ID=?, UPDATE_DATETIME=getdate() WHERE ID=?""",
                 ymd, hms, wo, swo, item, line, part, sw, qty, work, fin, usr, usr, int(mid))
+            stock_changed("procreg")          # ★생산실적 변경 → 수불장 캐시 버림
             return {"ok": True, "id": int(mid), "mode": "update"}
         cur.execute("""INSERT INTO nx.proc_result(PROD_YMD,PROD_HMS,WORK_ORDER,SPLIT_WORK_ORDER,ITEM_CODE,
             LINE_NO,PART_CODE,S_WORK_CODE,PROD_QTY,WORK_CODE,FINISH_FLAG,PROD_USER_ID,UPDATE_USER_ID)
             OUTPUT INSERTED.ID VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             ymd, hms, wo, swo, item, line, part, sw, qty, work, fin, usr, usr)
         nid = cur.fetchone()[0]
+        stock_changed("procreg")              # ★생산실적 변경 → 수불장 캐시 버림
         return {"ok": True, "id": int(nid), "mode": "insert"}
     finally:
         nx.close()
@@ -305,10 +398,10 @@ def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str =
         if topart.strip():   w.append("l.TO_GAGONG_PROC_CODE=?"); p.append(topart.strip())
         cur.execute(f"""SELECT TOP 3000 l.MAINT_YMD ISSUE_YMD, l.MAINT_GROUP_SEQ,
               ISNULL(l.GAGONG_PROC_CODE,'') frompart, ISNULL(l.TO_GAGONG_PROC_CODE,'') topart,
-              ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+              ISNULL(l.WORK_CODE,'') work_code, ISNULL(l.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
               ISNULL(l.ITEM_CODE,'') item_code, ABS(l.MAINT_QTY) ISSUE_QTY, ISNULL(l.REMARKS,'') remarks,
               ISNULL(l.INSERT_USER_ID,'') usr, l.INSERT_DATETIME
-            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=l.MAT_CODE
+            FROM nx.stock_ledger l LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=l.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY l.MAINT_YMD DESC, l.MAINT_GROUP_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
         for r in cur.fetchall():
@@ -325,10 +418,10 @@ def matissue_list(from_ymd: str = Query(""), to_ymd: str = Query(""), mat: str =
         if topart.strip():   wm.append("m.PART_CODE=?"); pm.append(topart.strip())
         cur.execute(f"""SELECT TOP 3000 m.MAINT_YMD ISSUE_YMD, m.MAINT_SEQ,
               ISNULL(m.FROM_PART_CODE,'') frompart, ISNULL(m.PART_CODE,'') topart,
-              ISNULL(m.WORK_CODE,'') work_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.ITEM_DESC,'') mat_nm,
+              ISNULL(m.WORK_CODE,'') work_code, ISNULL(m.MAT_CODE,'') mat_code, ISNULL(im.item_name,'') mat_nm,
               ISNULL(m.ITEM_CODE,'') item_code, ABS(m.MAINT_QTY) ISSUE_QTY, ISNULL(m.REMARKS,'') remarks,
               ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
-            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM im ON im.ITEM_CODE=m.MAT_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.item im ON im.ITEM_CODE=m.MAT_CODE
             WHERE {' AND '.join(wm)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *pm)
         cols = [d[0] for d in cur.description]
         for r in cur.fetchall():
@@ -363,14 +456,14 @@ def matissue_save(payload: dict = Body(...)):
         raise HTTPException(400, "FROM파트와 TO파트가 같습니다.")
     nx = _nx_tx(); cur = nx.cursor()   # ★원자성: MV 이동 2행(±) 그룹 트랜잭션
     try:
-        if _closed(cur, ymd):
+        if _closed(cur, ymd, "MAT"):
             raise HTTPException(400, f"마감월({_ym(ymd)}) 편집 불가")
         cur.execute("SELECT ISNULL(MAX(MAINT_GROUP_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_TAG='MV'")
         gseq = cur.fetchone()[0]   # 삭제 전 채번 → 수정 시 신규 그룹번호(기존과 상이)
         if mid:  # 수정 = 기존 그룹(2행) 삭제 후 재생성
             try:
                 oy, og = str(mid).split("-"); og = int(og)
-                if _closed(cur, oy):
+                if _closed(cur, oy, "MAT"):
                     raise HTTPException(400, f"마감월({_ym(oy)}) 편집 불가")
                 cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='MV' AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", oy, og)
             except (ValueError, AttributeError):
@@ -390,6 +483,7 @@ def matissue_save(payload: dict = Body(...)):
                 VALUES('MAT',?,?,?, 'MV', ?,?,?,?,?,?,?,?,GETDATE())""",
                 ymd, seq, gseq, gpc, to_gpc, (work or None), mat, (item or None), sq, (rem or None), usr)
         nx.commit()   # ★2행(−FROM/+TO) 원자 커밋
+        stock_changed("matissue")             # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "id": f"{ymd}-{gseq}", "mode": ("update" if mid else "insert")}
     except Exception:
         nx.rollback(); raise   # 부분실패 시 net-0 불변식 보존(전체 롤백)
@@ -409,7 +503,7 @@ def matissue_delete(payload: dict = Body(...)):
                 y, g = x.split("-"); g = int(g)
             except ValueError:
                 continue
-            if _closed(cur, y):
+            if _closed(cur, y, "MAT"):
                 raise HTTPException(400, f"마감월({_ym(y)}) 삭제 불가")
             cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='MAT' AND MAINT_TAG='MV' AND MAINT_YMD=? AND MAINT_GROUP_SEQ=?", y, g)
             dl += cur.rowcount

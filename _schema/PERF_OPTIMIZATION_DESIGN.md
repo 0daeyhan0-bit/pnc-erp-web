@@ -63,10 +63,10 @@
 | 2 | price.py 캐시무효화 | invalidation | price.py | 단가변경→cost_analysis_cache DELETE | 유지(통합 무효화규칙) |
 | 3 | 원가엔진 warm 캐시 | in-mem compute | common.py | cold 5-9s→warm 0.58s | 유지(인덱스=cold가속·캐시=warm보완, 상호보완) |
 | 4 | _reset_cost_engine | invalidation | bom·assywork | BOM/공정/체결 편집→엔진캐시무효 | 유지(정합 필수) |
-| 5 | coopquote/2 _INCOST_CACHE(10분) | in-mem TTL | coopquote(2) | 내부원가 lookup(PR_M_ITEM_COST) | **인덱스 후 제거후보**(PR_M_ITEM_COST 인덱스로 대체) |
-| 6 | salesplan _CACHE/_OPT_CACHE(120s) | in-mem TTL | salesplan | 계획 조회 | **인덱스 후 재점검**(계획테이블 인덱스로 완화) |
-| 7 | matverify _CACHE | in-mem TTL | matverify | 매입-소비 대사 | 인덱스 후 재점검 |
-| 8 | coopplan _FUT_CACHE(180s) | in-mem TTL | coopplan | 교차DB SP_LIVE 무거움 | 인덱스 후 재점검(교차DB는 완화 제한적일 수 있음) |
+| 5 | coopquote/2 _INCOST_CACHE(10분) | in-mem TTL | coopquote(2) | 하부=**nx.coop_incost**(사전계산 materialized 3,035행) lookup | **유지**(materialized nx·함수랩 술어 UPPER(LTRIM())라 인덱스 무효·소규모. 컷오버 무관) |
+| 6 | salesplan _CACHE/_OPT_CACHE(120s) | in-mem TTL | salesplan | 계획 조회 = **라이브 dbo 직독**(_conn→PARTNER_ERP.dbo.SA_T_PLAN_DTL) | **컷오버때 재점검**(라이브읽기라 nx인덱스 무효, flip 후에야 대체가능·지금 제거=악화) |
+| 7 | matverify _CACHE | in-mem TTL | matverify | 매입-소비 대사 = **라이브 dbo**(_conn, 실측수불) | **컷오버때 재점검**(라이브라 nx인덱스 무효) |
+| 8 | coopplan _FUT_CACHE(180s) | in-mem TTL | coopplan | **교차DB SP_LIVE**(EXEC dbo.[SP]) | **유지**(라이브 SP라 nx인덱스 무관·컷오버때 재설계) |
 | 9 | sourcing _BASELINE_CACHE(120s) | in-mem TTL | sourcing | 실사용BOM 라이브RO 불변참조 | 유지(불변참조 캐시) |
 | 10 | cost _SAGUB_MAP_CACHE | in-mem | cost.py | 사급차액 맵(계산결과) | 유지(계산결과 캐시) |
 | 11 | prodsheet _PRN_CACHE | in-mem | prodsheet | 프린트 | 유지(소규모) |
@@ -74,7 +74,9 @@
 | 13 | mat_stock_daily | materialized | (빌더) | 자재 이동평균 정본 | 유지(정본·별개) |
 | 14 | stock_close_snap·sourcing_route_snap | snapshot | stock·sourcing | 마감·route존재 | 유지(기능용·성능무관) |
 
-**결론(이중중복)**: 직접 중복 = **#1(원가 사전계산)** — 새로 만들지 말고 재사용. #5~8 = 인덱스로 **대체·제거 가능한 우회캐시**(단순화 기회). 나머지 = 유지(보완/기능/정합).
+**결론(이중중복)**: 직접 중복 = **#1(원가 사전계산)** — 새로 만들지 말고 재사용. 나머지 = 유지(보완/기능/정합).
+
+**★2026-08-26 정정 (Phase 2a 실측)**: 애초 §2에서 "#5~8 = 인덱스 후 제거 가능한 우회캐시"로 봤으나, **실측 결과 #6/#7/#8은 라이브 dbo(PARTNER_ERP) 직독**(salesplan `_conn`→dbo.SA_T_PLAN_DTL, matverify `_conn` 실측수불, coopplan `EXEC dbo.[SP]` 교차DB)이다. 우리 Phase-1 인덱스는 **nx(PARTNER_ERP_TEST3)**에만 있으므로 **이 라이브-읽기 엔드포인트들은 안 빨라진다** → 캐시 제거는 **인덱스 시점이 아니라 컷오버 시점**(읽기가 live→nx로 flip된 뒤)에나 안전하다. 지금 제거하면 성능 악화. #5는 하부가 materialized nx.coop_incost + 함수랩 술어라 캐시 유지가 정상. **교훈: "인덱스 후 제거"는 그 쿼리가 nx를 읽을 때만 성립** — 라이브-읽기 캐시는 컷오버 종속.
 
 ---
 

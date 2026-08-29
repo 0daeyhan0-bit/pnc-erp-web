@@ -59,9 +59,9 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
-          SELECT S.mat mat, MAX(M.ITEM_DESC) nm, MAX(M.ITEM_SPEC) spec, MAX(M.UNIT) unit, S.cost cost,
+          SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit, S.cost cost,
             CAST(RIGHT(S.ymd,2) AS INT) d, SUM(S.qty) q, SUM(S.amt) amt
-          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM M ON S.mat=M.ITEM_CODE
+          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
           WHERE S.cc=? GROUP BY S.mat, S.cost, CAST(RIGHT(S.ymd,2) AS INT)""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
@@ -91,6 +91,57 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
     finally:
         nx.close()
     return {"ym": y, "cc": cc, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
+
+def _pur_src_moda(win):
+    """_pur_src 와 동일 원천 + 모도번(ITEM_CODE) 컬럼 추가 — P/No 펼침 전용.
+    수입(_C)은 상위품번 개념이 없어 ''. 집계 금액·수량은 _pur_src 와 동일해야 한다."""
+    return f"""
+    SELECT A.CUST_CODE cc, A.MAT_CODE mat, ISNULL(A.ITEM_CODE,'') moda, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {win} AND A.MAINT_TAG IN ('9','S','C','G','H')
+       AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
+    UNION ALL
+    SELECT A.CUST_CODE, A.MAT_CODE, '', ROUND(A.MAINT_COST*A.EXCHANGE_RATE,0,1), A.MAINT_YMD, A.MAINT_QTY, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), ISNULL(A.TAXPAYERS,0)
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {win} AND A.DIVISION='P'"""
+
+@router.get("/api/purmagam/lines")
+def purmagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
+                   q: str = Query(""), cust: str = Query(""), cust_code: str = Query("")):
+    """★2026-08-23 레거시 w_pu_sale_010 형태 = 집계를 P/No 단위로 펼친 목록(거래처×자도번×단가).
+    basis='magam'(마감기준: 거래처별 마감일 창) | 'input'(입고기준: fr~to, 기본 당월1일~오늘)."""
+    from routers.salemagam import _magam_lines_shape
+    y = _dig4(ym) or _cur_ym()
+    if basis == "input":
+        f6 = "".join(ch for ch in str(fr or "") if ch.isdigit())[:6]
+        t6 = "".join(ch for ch in str(to or "") if ch.isdigit())[:6]
+        if not (len(f6) == 6 and len(t6) == 6):
+            raise HTTPException(400, "입고기준은 fr/to(YYMMDD) 필요")
+        win = f"A.MAINT_YMD>='{f6}' AND A.MAINT_YMD<='{t6}'"
+    else:
+        win = _sale_win().format(ym=y)
+    where = ["1=1"]; pf = []
+    if cust_code.strip():
+        where.append("S.cc=?"); pf.append(cust_code.strip())
+    elif cust.strip():
+        where.append("(S.cc=? OR C.CUST_DESC LIKE ?)"); pf += [cust.strip(), f"%{cust.strip()}%"]
+    if q.strip():
+        where.append("(S.mat LIKE ? OR M.item_name LIKE ?)"); pf += [f"%{q.strip()}%", f"%{q.strip()}%"]
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT S.cc cc, MAX(C.CUST_DESC) cnm, S.mat mat, S.moda moda,
+            MAX(ISNULL(M.item_name,'')) nm, MAX(ISNULL(M.item_spec,'')) spec, MAX(ISNULL(M.unit,'')) unit,
+            S.cost cost, S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt
+          FROM ({_pur_src_moda(win)}) S
+            JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
+          WHERE {' AND '.join(where)}
+          GROUP BY S.cc, S.mat, S.moda, S.cost, S.ymd""", *pf)
+        raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+    finally:
+        cn.close()
+    return _magam_lines_shape(raw, y, basis)
 
 @router.post("/api/purmagam/save")
 def purmagam_save(payload: dict = Body(...)):
@@ -127,6 +178,96 @@ def purmagam_save(payload: dict = Body(...)):
         return {"ok": True, "closed": do_close, "adj_sum": adj_sum}
     finally:
         nx.close()
+
+# ===== 단가 재계산 공통 (매입 w_pu_sale_010 / 매출 w_pu_sale_020 'cost_calc') =====
+# 레거시 원문(PB): 체크한 행마다 (cust_code, mat_code, from~to) 로
+#   UPDATE PU_T_STOCK_MAINT SET MAINT_COST = 단가마스터 최신단가
+#                            , MAINT_AMT  = MAINT_QTY * 단가
+#                            , MAINT_VAT  = floor(MAINT_QTY * 단가 * 0.1)
+#    WHERE MAINT_TAG IN (...) AND 마스터단가 > 0     ← 0원이면 건드리지 않음
+# 단가 = '적용일자 <= 원장일자' 중 가장 최근 1건.
+#
+# ★단가 원천 = 웹 정본 nx.price_item 단일 (CLAUDE.md §1-9 클린 단일화).
+#   레거시는 PR_M_ITEM_COST(COST_TAG) 를 읽지만 웹은 price_item(price_type) 을 읽는다.
+#     COST_TAG '1'→'매입' · 'S'→'TAGS' · 'E'→'TAGE'
+#   2026-08-28 클린본이 레거시 등록분을 못 받아 매출단가 767건이 비어 있었고(그래서
+#   매출은 미러가 최신, 매입은 클린이 최신이라는 엇갈림이 있었다) → 누락 1,910행을
+#   price_item 에 보충해 양쪽을 일치시켰다(8월 매출 1,588행 불일치 0 확인).
+#   nx.item 에 없는 고아품목 47종·단가 NULL 7건은 제외(재계산은 단가>0 만 대상이라 무영향).
+# ★쓰기는 nx 만. 라이브 PARTNER_ERP 무변경.
+
+# ★통화 가드 = 원화 단가만 채택.
+#   레거시(w_pu_sale_020)는 WHERE 절 가드에만 CURRENCY='KRW' 를 두고 SET 절 서브쿼리엔
+#   빠뜨려서, 외화 단가가 더 최신이면 가드는 통과시키고 SET 은 외화값을 넣는 구멍이 있다.
+#   웹은 양쪽(단가 조회 = 대상 판정)에 동일 적용해 그 어긋남을 없앤다.
+#   실측(2026년 매출 14,605행 · 매입 69,947행): 두 방식 결과 차이 0행 = 현 데이터엔 영향 없고
+#   앞으로 외화 단가가 섞여 들어와도 원화만 쓰도록 하는 안전장치.
+_COST_CLEAN = """ISNULL((SELECT TOP 1 p.price FROM nx.price_item p
+                          WHERE p.item_code=A.MAT_CODE AND p.vendor_code=A.CUST_CODE
+                            AND p.price_type IN ({types})
+                            AND ISNULL(NULLIF(LTRIM(RTRIM(p.currency)),''),'KRW')='KRW'
+                            AND p.apply_ymd<=A.MAINT_YMD
+                          ORDER BY p.apply_ymd DESC), 0)"""
+
+def _recalc_cost(payload, *, cost_sql, maint_tags, window):
+    """단가 재계산 실행부. cost_sql=단가 서브쿼리, maint_tags=대상 MAINT_TAG."""
+    fr = _d6(payload.get("fr")); to = _d6(payload.get("to"))
+    if not (len(fr) == 6 and len(to) == 6):
+        raise HTTPException(400, "조회기간(fr/to)이 필요합니다.")
+    if fr > to:
+        fr, to = to, fr
+    items = payload.get("items") or []          # [{cc, mat}, ...] 체크한 행
+    if not items:
+        raise HTTPException(400, "재계산할 행을 먼저 선택하세요.")
+    pairs = []
+    for it in items:
+        cc = str((it or {}).get("cc", "")).strip()
+        mat = str((it or {}).get("mat", "")).strip()
+        if cc and mat and (cc, mat) not in pairs:
+            pairs.append((cc, mat))
+    if not pairs:
+        raise HTTPException(400, "거래처/자도번이 비어 있습니다.")
+    tags = ",".join("'%s'" % t for t in maint_tags)
+    nx = _nx_tx(); nc = nx.cursor()
+    scanned = updated = 0; changed = []
+    try:
+        for cc, mat in pairs:
+            base = f"""FROM nx.PU_T_STOCK_MAINT A
+                       WHERE A.MAINT_YMD BETWEEN ? AND ? AND A.CUST_CODE=? AND A.MAT_CODE=?
+                         AND A.MAINT_TAG IN ({tags}) AND {cost_sql} > 0"""
+            p = (fr, to, cc, mat)
+            # ① 변경 대상·전후값 채집(감사로그용) — 단가가 실제로 달라지는 행만
+            nc.execute(f"""SELECT A.MAINT_YMD, A.MAINT_QTY, A.MAINT_COST, {cost_sql} {base}
+                             AND A.MAINT_COST <> {cost_sql}""", *p)
+            for ymd, qty, oldc, newc in nc.fetchall():
+                if len(changed) < 200:
+                    changed.append({"cc": cc, "mat": mat, "ymd": str(ymd or ""),
+                                    "qty": float(qty or 0),
+                                    "old": float(oldc or 0), "new": float(newc or 0)})
+            nc.execute(f"SELECT COUNT(*) {base}", *p)
+            scanned += int(nc.fetchone()[0] or 0)
+            # ② 재계산 — 레거시와 동일하게 COST/AMT/VAT 3필드 동시 갱신
+            nc.execute(f"""UPDATE A SET
+                             A.MAINT_COST = {cost_sql},
+                             A.MAINT_AMT  = A.MAINT_QTY * {cost_sql},
+                             A.MAINT_VAT  = FLOOR(A.MAINT_QTY * {cost_sql} * 0.1),
+                             A.UPDATE_DATETIME = GETDATE(),
+                             A.UPDATE_WINDOW = ?
+                           {base}""", window, *p)
+            updated += max(0, nc.rowcount)
+        nx.commit()
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()
+    return {"ok": True, "fr": fr, "to": to, "pairs": len(pairs),
+            "scanned": scanned, "updated": updated, "changed": changed}
+
+@router.post("/api/purmagam/recalc_cost")
+def purmagam_recalc_cost(payload: dict = Body(...)):
+    """입고기간 매입단가 재계산 — 확정입고(9=개별, S=세트), 매입단가(클린본 '매입')."""
+    return _recalc_cost(payload, cost_sql=_COST_CLEAN.format(types="'매입'"),
+                        maint_tags=("9", "S"), window="w_pu_sale_010(web)")
 
 @router.post("/api/purmagam/reopen")
 def purmagam_reopen(payload: dict = Body(...)):

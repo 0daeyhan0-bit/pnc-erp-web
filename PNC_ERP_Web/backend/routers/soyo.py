@@ -18,6 +18,18 @@ _P = "nx."   # ★nx전환 확정(2026-08-12). ★단일BOM 통일(2026-08-13): 
 def plan_compose_mat(payload: dict = Body(...)):
     nx = _nx(); cur = nx.cursor()
     try:
+        # ── ★D 사전검증(§19-D·2026-08-25): 활성 지정된 대체경로(Rnn)가 게이트(승인·구조·업체·단가) 미충족이면
+        #    생산계획 편성 자체를 중단(어떤 DML도 전·plan_part_mat 미접촉) + 어느 품번/경로가 무엇이 빠졌는지 정확히 통지.
+        #    활성 지정 Rnn 없거나(=현행 R01만) 전부 완비면 통과 → 정상 편성. 협력사계획은 plan_part_mat 재사용이라 자연 차단.
+        _gate_bad = _route_gate_incomplete(cur)
+        if _gate_bad:
+            _lines = ["· 품번 {} 경로 R{:02d}{}: {}".format(
+                          b["item"], b["route_no"],
+                          "(" + b["route_name"] + ")" if b["route_name"] else "",
+                          ", ".join(b["missing"])) for b in _gate_bad]
+            raise HTTPException(400, "생산계획 편성 불가 — 활성 지정된 대체경로(Rnn) {}건이 미완성입니다.\n".format(len(_gate_bad))
+                + "아래 경로를 완료(승인·업체·단가 등록)하거나 현행(R01)로 되돌린 뒤 다시 편성하세요:\n"
+                + "\n".join(_lines))
         # ── STEP M 신규모델생성(주문⋈계획 제번조인, use=CEILING(order/lot), 3중제외) ──
         cur.execute("DELETE FROM nx.model_bom WHERE REMARKS='신규모델자동'")
         cur.execute("""INSERT INTO nx.model_bom(MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO,REMARKS,INS_DT)
@@ -43,7 +55,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
         for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
         prate = {}
-        cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.item")
         for ic, pr in cur.fetchall(): prate[str(ic).strip()] = float(pr or 100)
         cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
             PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
@@ -75,7 +87,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
                 MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
               FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
-              JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
+              JOIN PARTNER_ERP_TEST3.nx.item c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
               WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
               GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
         for wo, it, pq, ymd, ohm, ln in cur.fetchall():
@@ -96,7 +108,7 @@ def plan_compose_mat(payload: dict = Body(...)):
             QTY decimal(18,3),SOURCE varchar(10),COMPOSE_DT datetime DEFAULT getdate())""")
         cur.execute("DELETE FROM nx.plan_mat_source")
         MKF = {}; INCF = {}
-        cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(IN_CUST_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(in_cust,'') FROM PARTNER_ERP_TEST3.nx.item")
         for ic, mkt, inc in cur.fetchall(): ic = str(ic).strip(); MKF[ic] = str(mkt).strip(); INCF[ic] = str(inc).strip()
         PRF = {}       # 현행경로(route_id 0/무관) 프로파일: item -> [(sg,v,al)]
         PRF_ALT = {}   # 대안경로(route_id>0) 프로파일: (route_id,item) -> [(sg,v,al)]
@@ -104,7 +116,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         for ic, sg, v, al, rid in cur.fetchall():
             ic = str(ic).strip(); rid = int(rid or 0)
             (PRF_ALT.setdefault((rid, ic), []) if rid else PRF.setdefault(ic, [])).append((str(sg).strip(), str(v).strip(), float(al or 100)))
-        _MKMAP = {'1': '제작', '2': '외주', '3': '구매', '4': '사급', '5': '외주직납'}  # ★조달후보 구분과 통일(2026-08-24)
+        _MKMAP = {'1': '자체', '2': '외주가공', '3': '매입', '4': '유상사급', '5': '외주완성'}  # '자체'=프로파일 라벨과 통일
         # ★경로 배분(nx.route_alloc, 규칙 §8·§9): 조립품(assy)별 활성경로 × route%로 부품수요 분해. ★총량 보존.
         #   현행경로(R01/route_id=0)=기존 로직(프로파일/BOM기본, 업체 재분할은 자동발주 order_vendor 담당).
         #   대안경로(R02+)=route별 프로파일 or 경로헤더 공급처, SOURCE='경로대안'(자동발주 order_vendor 재분할 제외 표식).
@@ -119,7 +131,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         if alt_rids:
             rph = ",".join("?" * len(alt_rids))
             cur.execute(f"SELECT route_id, ISNULL(vendor_code,''), ISNULL(gubun,'') FROM nx.sourcing_route WHERE route_id IN ({rph})", *alt_rids)
-            for rid, v, g in cur.fetchall(): RHV[int(rid)] = (str(v or '').strip(), str(g or '').strip() or '외주')
+            for rid, v, g in cur.fetchall(): RHV[int(rid)] = (str(v or '').strip(), str(g or '').strip() or '외주가공')
         cur.execute("SELECT work_order, ISNULL(assy_item_code,''), mat_code, SUM(CAST(part_plan_qty AS float)) FROM nx.plan_part_mat GROUP BY work_order, assy_item_code, mat_code")
         srows = []
         for wo, assy, mat, qty in cur.fetchall():
@@ -139,7 +151,7 @@ def plan_compose_mat(payload: dict = Body(...)):
                     if pa:
                         for sg, v, al in pa: srows.append((wo, mat, sg, v, q * al / 100.0, '경로대안'))
                     else:
-                        hv, hg = RHV.get(rid, ('', '외주'))
+                        hv, hg = RHV.get(rid, ('', '외주가공'))
                         srows.append((wo, mat, hg, hv, q, '경로대안'))
         cur.fast_executemany = True
         cur.executemany("INSERT INTO nx.plan_mat_source(WORK_ORDER,MAT_CODE,SUPPLY_GUBUN,VENDOR_CODE,QTY,SOURCE) VALUES(?,?,?,?,?,?)", srows)
@@ -169,9 +181,9 @@ def plan_sourcing(mode: str = Query("gubun"), gubun: str = Query(""), vendor: st
                     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} GROUP BY s.SUPPLY_GUBUN, s.VENDOR_CODE, cu.CUST_DESC ORDER BY SUM(s.QTY) DESC""", p)
             elif mode == "detail":
-                cur.execute(f"""SELECT TOP 2000 s.WORK_ORDER, s.MAT_CODE, ISNULL(it.ITEM_DESC,'') mname, s.SUPPLY_GUBUN,
+                cur.execute(f"""SELECT TOP 2000 s.WORK_ORDER, s.MAT_CODE, ISNULL(it.item_name,'') mname, s.SUPPLY_GUBUN,
                     s.VENDOR_CODE, ISNULL(cu.CUST_DESC,'') vname, s.QTY, s.SOURCE FROM nx.plan_mat_source s
-                    LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
+                    LEFT JOIN PARTNER_ERP_TEST3.nx.item it ON s.MAT_CODE COLLATE DATABASE_DEFAULT=it.ITEM_CODE COLLATE DATABASE_DEFAULT
                     LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON s.VENDOR_CODE COLLATE DATABASE_DEFAULT=cu.CUST_CODE COLLATE DATABASE_DEFAULT
                     WHERE {wh} ORDER BY s.QTY DESC""", p)
             else:  # gubun
@@ -270,7 +282,7 @@ def sales_forecast(base: str = Query(""), to: str = Query("")):
         for ic, ct in cur.fetchall():
             k = str(ic).strip()
             if k not in cost: cost[k] = float(ct or 0)
-        cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.item")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
         # 절삭/설치 구분 = nx.item.cut_gubun(품목마스터 속성, 크로스DB). 절삭/설치/분지관/이지링크.
@@ -367,7 +379,7 @@ def sales_forecast_sagub(base: str = Query(""), to: str = Query("")):
             return {"base": b, "to": (t or b), "days": [], "rows": [], "gross_amt": 0, "net_amt": 0,
                     "n_parts": 0, "asof": asof, "priced": len(sac)}
         base_ymd = min(y for _, y, _, _ in src)
-        cur.execute("SELECT ITEM_CODE, ISNULL(ITEM_DESC,''), ISNULL(WORK_CODE,'') FROM PR_M_ITEM")
+        cur.execute("SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(WORK_CODE,'') FROM PARTNER_ERP_TEST3.nx.item")
         nmm = {}; wcm = {}
         for ic, d, wc in cur.fetchall(): k = str(ic).strip(); nmm[k] = d; wcm[k] = str(wc).strip()
         cutm = {}
@@ -410,11 +422,11 @@ def sales_forecast_sagub_rebuild():
         asof = _t.strftime('%y%m%d')
         cur.execute("""IF OBJECT_ID('nx.item_sagub_cost') IS NULL
             CREATE TABLE nx.item_sagub_cost(item_code varchar(50) PRIMARY KEY, sa_cost float, asof_ymd varchar(8), upd_dt datetime)""")
-        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+        cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
         sag = set(x[0] for x in cur.fetchall())
         cur.execute("SELECT it,price FROM (SELECT LTRIM(RTRIM(item_code)) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
-        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'),
+        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'),
             prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
             expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
              UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
@@ -448,38 +460,79 @@ def _step6_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
-      SELECT DISTINCT a.c_item_code,0,a.c_item_code,a.c_item_code,a.c_item_code,CONVERT(decimal(18,5),1),ISNULL(c.in_cust_code,''),'0',CONVERT(varchar(500),'{'+a.c_item_code+'}')
-      FROM nx.plan_item_dtl a JOIN {P}PR_M_ITEM c ON a.c_item_code=c.item_code
+      SELECT DISTINCT a.c_item_code,0,a.c_item_code,a.c_item_code,a.c_item_code,CONVERT(decimal(18,5),1),ISNULL(c.in_cust,''),'0',CONVERT(varchar(500),'{'+a.c_item_code+'}')
+      FROM nx.plan_item_dtl a JOIN {P}item c ON a.c_item_code=c.item_code
       WHERE NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=a.c_item_code)
       UNION ALL
       SELECT cb.assy_item_code,cb.level_no+1,b.item_code,CASE cb.vir_item_flag WHEN '1' THEN cb.p_item_code ELSE b.item_code END,
-             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust_code,''),
+             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust,''),
              CASE b.vir_item_flag WHEN '1' THEN '1' ELSE '0' END,CONVERT(varchar(500),cb.cum_item_code+'{'+b.mat_code+'}')
-      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}PR_M_ITEM c ON b.mat_code=c.item_code
+      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}item c ON b.mat_code=c.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.level_no<10 AND NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=b.mat_code))
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
     cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    JOIN {P}item_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
       b.line_no,a.cum_use_qty AS use_qty,b.lot_qty,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100) AS plan_qty,
       a.gagong_proc_code,a.gagong_proc_seq,a.s_work_code,a.lt_hr,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100)*a.cum_use_qty AS part_plan_qty
-    INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}PR_M_ITEM c ON a.assy_item_code=c.item_code""").replace("{P}", P))
+    INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}item c ON a.assy_item_code=c.item_code""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_dtl') IS NOT NULL DROP TABLE nx.plan_part_dtl")
     cur.execute("""SELECT a.* INTO nx.plan_part_dtl FROM nx.plan_part_swork a
       WHERE a.gagong_proc_code <> ISNULL((SELECT TOP 1 b.gagong_proc_code FROM nx.plan_part_swork b
         WHERE b.plan_ymd=a.plan_ymd AND b.work_order=a.work_order AND b.split_work_order=a.split_work_order AND b.assy_item_code=a.assy_item_code
           AND b.bom_level=a.bom_level AND b.upper_item_code=a.upper_item_code AND b.item_code=a.item_code AND b.proc_seq<a.proc_seq ORDER BY b.proc_seq DESC),'')""")
 
+# ★★활성 게이트(§19-C·2026-08-25 사용자 확정): 활성 지정 Rnn(current_flag=1·route_no>1)이 아래 4개 다 갖춰야 계획 활성.
+#   ①승인 approve_flag=1 ②구조 route_edges ③업체 sourcing_profile.vendor ④단가 buy_price/sagub_price.
+#   ★한 곳 정의(_ROUTE_GATE_SQL) → _route_setup(생산·협력사 plan_route_active)·_route_gate_incomplete(편성 사전검증 D)·원가 공유.
+#   미완성 Rnn은 어디서도 안 켜짐 → R01(route_no=1) 현행 그대로. h=nx.sourcing_route 별칭 전제.
+_ROUTE_GATE_SQL = """ISNULL(h.approve_flag,0)=1
+      AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
+      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>'')
+      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))"""
+
+
+def _ensure_profile_price(cur):
+    """게이트 SQL이 참조하는 sourcing_profile 단가컬럼 멱등 보장(신선 nx 대비)."""
+    cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','buy_price') IS NULL ALTER TABLE nx.sourcing_profile ADD buy_price FLOAT NULL")
+    cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','sagub_price') IS NULL ALTER TABLE nx.sourcing_profile ADD sagub_price FLOAT NULL")
+
+
+def _route_gate_incomplete(cur):
+    """★D 사전검증(§19-D): 활성 지정된 Rnn(current_flag=1·route_no>1) 중 게이트(§19-C) 미충족 목록+사유.
+       반환 [{route_id,item,route_no,route_name,missing[]}]. 편성(compose)이 이걸로 업로드 실패·정확 메시지·중단."""
+    _ensure_profile_price(cur)
+    cur.execute("""SELECT h.route_id, LTRIM(RTRIM(h.item_code)), ISNULL(h.route_no,1), ISNULL(h.route_name,''),
+          ISNULL(h.approve_flag,0),
+          (SELECT COUNT(*) FROM nx.route_edges re WHERE re.route_id=h.route_id),
+          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>''),
+          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))
+        FROM nx.sourcing_route h
+        WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1""")
+    bad = []
+    for rid, item, rno, rname, appr, ne, nv, npx in cur.fetchall():
+        miss = []
+        if not int(appr or 0): miss.append("미승인")
+        if not int(ne or 0): miss.append("구조 미반영(저장 안 됨)")
+        if not int(nv or 0): miss.append("업체 미지정")
+        if not int(npx or 0): miss.append("단가 미지정")
+        if miss:
+            bad.append({"route_id": int(rid), "item": str(item).strip(), "route_no": int(rno),
+                        "route_name": str(rname).strip(), "missing": miss})
+    return bad
+
+
 def _route_setup(cur):
-    """★조달경로 반영 인프라(2026-08-24). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
-    - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지. 대체경로 등록시 채움(materializer 별도). 없으면 fallback.
-    - nx.plan_route_active(assy_item_code,route_id): 활성 대체경로(sourcing_route current_flag=1·route_no>1)이면서 route_edges 보유한 제품만.
-      기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 100.000%)."""
+    """★조달경로 반영 인프라(2026-08-24, 게이트강화 2026-08-25). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
+    - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지(Rnn 저장시 자동등록·§19-A). 없으면 fallback.
+    - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만(current_flag=1·route_no>1·승인·route_edges·업체·단가).
+      기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%)."""
+    _ensure_profile_price(cur)
     # ★타입=plan_part_dtl.item_code(varchar20)·v_pr_bom.mat_code(varchar20) 정합(재귀CTE 앵커 타입일치 필수). nvarchar 쓰면 STEP7 재귀 타입불일치 오류.
     cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
         route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
@@ -488,24 +541,25 @@ def _route_setup(cur):
     cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(h.item_code))) AS assy_item_code, MIN(h.route_id) AS route_id
         INTO nx.plan_route_active FROM nx.sourcing_route h
         WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1
-          AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
+          AND """ + _ROUTE_GATE_SQL + """
         GROUP BY UPPER(LTRIM(RTRIM(h.item_code)))""")
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
 def _step7_sql(cur):
     P = _P
-    # ★U2(2026-08-22, routing_edge 은퇴): 생산처(work_center)=마스터 직독. 조달 라우팅 시스템 단일화=조달프로파일(sourcing_route/route_alloc) 단독.
-    #   routing_edge는 wc_user 편집 0건·wc≡마스터파생(42622/42625)이라 순수 중복 → 제거. 생산처 diff0 증명완료(item_ov ov_wc OLD vs NEW 불일치0, nx.plan_part_mat_preU2_260822 대조).
-    #   ★향후 생산처 편집은 조달프로파일에서 소유(활성경로 vendor=매입/사급 생산처). 재귀 CTE inner join 회피용 nx.item_ov는 유지(마스터 투영).
+    # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
+    #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
+    #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
+    #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
-    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust_code, c.prod_rate,
-        CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END AS ov_wc
-      INTO nx.item_ov FROM {P}PR_M_ITEM c""").replace("{P}", P))
+    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust, c.prod_rate,
+        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust,'') END) AS ov_wc
+      INTO nx.item_ov FROM {P}item c
+      LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
+        ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
     # ★★조달경로(route) 반영 인프라(2026-08-24, 가산적): 활성 대체경로(sourcing_route current_flag=1·route_no>1) 있으면
     #   그 경로의 BOM엣지(route_edges)로 전개, 없으면 v_pr_bom(현행 except<>1) fallback=R01 diff0(검증: route CTE≡원본 100.000%).
-    #   nx.route_edges(route_id,item_code,mat_code,use_qty_pr,vir_item_flag)=경로별 BOM엣지(R01=미materialize·fallback / Rnn=편집구조).
-    #   nx.plan_route_active(assy_item_code,route_id)=활성 대체경로 매핑(기본 비어있음=전 제품 현행 그대로). 매일 rebuild시 sourcing_route에서 재생성.
     _route_setup(cur)
     cur.execute("IF OBJECT_ID('nx.plan_part_mat_tmp') IS NOT NULL DROP TABLE nx.plan_part_mat_tmp")
     cur.execute(("""
@@ -551,15 +605,50 @@ def _step7_sql(cur):
         SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code
     INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
-      AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
+      AND NOT EXISTS(SELECT 1 FROM {P}item wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_name,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
+
+def _routing_edge_sync(cur):
+    """★routing_edge 생산처(wc) 정기 시드/싱크 (편집 보존 + 신규 반영). compose는 읽기만·이 함수만 씀.
+    모델: wc_live=라이브 PR_M_ITEM 시드(매싱크 갱신), wc_user=사용자 편집(NULL=미편집), 유효 wc=COALESCE(wc_user,wc_live).
+      → 미편집 엣지는 라이브 생산처 자동 추종, 편집 엣지는 보존. 신규 엣지(v_pr_bom 증가분)는 라이브 기준 시드로 INSERT."""
+    # 1) 편집추적 컬럼 보장
+    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
+    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
+    # 2) 신규 엣지 INSERT (v_pr_bom엔 있고 routing_edge엔 없는 것) — 라이브 마스터 기준 시드, wc_user=NULL
+    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,gubun,vendor_seed,route_id,src_except,src_sagub,wc_live,wc)
+      SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
+             WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
+             WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust_code,'') ELSE ISNULL(ci.in_cust_code,'') END,
+        1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
+      FROM nx.v_pr_bom b
+      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
+      WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
+        AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
+    new_cnt = cur.rowcount
+    # 3) wc_live 라이브 갱신 (편집 무관, child 생산처=work_code||in_cust)
+    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust_code,'') END
+      FROM nx.routing_edge re JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
+    # 4) 유효 wc = COALESCE(wc_user, wc_live) — 편집 보존
+    cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
+    return int(new_cnt or 0)
 
 @router.post("/api/routing/sync")
 def routing_sync():
-    """★DEPRECATED(2026-08-22, U2): routing_edge 은퇴. 생산처=조달프로파일/마스터 단일 시스템으로 통합.
-    routing_edge.wc는 wc_user 편집 0건·wc≡마스터파생이라 순수 중복이었음 → 제거. STEP7은 마스터 직독.
-    이 엔드포인트는 기존 매일 재싱크 런북 호환을 위해 no-op으로 유지(호출해도 무해)."""
-    return {"ok": True, "deprecated": "routing_edge retired (U2); 생산처=조달프로파일/마스터 단일화. no-op."}
+    """routing_edge 생산처 시드/싱크(멱등). 편집(wc_user) 보존, 미편집은 라이브 추종, 신규 엣지 INSERT."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        new_cnt = _routing_edge_sync(cur)
+        cur.execute("SELECT COUNT(*), SUM(CASE WHEN ISNULL(LTRIM(RTRIM(wc_user)),'')<>'' THEN 1 ELSE 0 END) FROM nx.routing_edge")
+        tot, edited = cur.fetchone()
+        return {"ok": True, "new_edges": new_cnt, "total_edges": int(tot or 0), "edited_edges": int(edited or 0)}
+    finally:
+        nx.close()
 
 @router.get("/api/plan/part")
 def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Query(""),
@@ -577,15 +666,15 @@ def plan_part(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Quer
         if assy.strip(): w.append("pp.ASSY_ITEM_CODE LIKE ?"); p.append(f"%{assy.strip()}%")
         try:
             cur.execute(f"""SELECT pp.PLAN_YMD, pp.ASSY_ITEM_CODE, pp.MAT_CODE, pp.MAT_WORK_CENTER_CODE,
-                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm, ISNULL(i.ITEM_DESC,'') nm,
+                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE) wcnm, ISNULL(i.item_name,'') nm,
                   SUM(CAST(pp.PART_PLAN_QTY AS float)) q
                 FROM nx.plan_part_mat pp
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE COLLATE DATABASE_DEFAULT=pp.MAT_WORK_CENTER_CODE COLLATE DATABASE_DEFAULT
-                LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE COLLATE DATABASE_DEFAULT=pp.MAT_CODE COLLATE DATABASE_DEFAULT
                 WHERE {' AND '.join(w)}
                 GROUP BY pp.PLAN_YMD, pp.ASSY_ITEM_CODE, pp.MAT_CODE, pp.MAT_WORK_CENTER_CODE,
-                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE), i.ITEM_DESC""", *p)
+                  COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE), i.item_name""", *p)
         except Exception:
             return {"dates": [], "rows": [], "part_count": 0, "sum_qty": 0, "note": "편성 먼저 실행(/compose_mat)"}
         cols = [d[0] for d in cur.description]; raw = [dict(zip(cols, r)) for r in cur.fetchall()]

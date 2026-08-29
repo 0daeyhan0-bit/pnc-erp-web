@@ -213,8 +213,8 @@ const priceSagubView=(host)=>{
 const priceLgView=(host)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  let st={busy:false,msg:'',rows:[],q:'',biz:'SAC'};
-  const load=async()=>{try{const r=await fetch(`${API}/api/price/lgprice_list?q=${encodeURIComponent(st.q)}&biz=${encodeURIComponent(st.biz)}`);st.rows=(await r.json()).rows||[];}catch(e){st.rows=[];}draw();};
+  let st={busy:false,msg:'',rows:[],ymds:[],q:'',biz:'SAC',ymd:''};   // ymd=적용일 필터(''=전체)
+  const load=async()=>{try{const r=await fetch(`${API}/api/price/lgprice_list?q=${encodeURIComponent(st.q)}&biz=${encodeURIComponent(st.biz)}`);const j=await r.json();st.rows=j.rows||[];st.ymds=j.ymds||[];}catch(e){st.rows=[];st.ymds=[];}draw();};
   const doUpload=async(f)=>{
     if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||'')){st.msg='❌ 엑셀(.xlsx/.xls) 파일만 업로드할 수 있습니다';draw();return;}
@@ -226,6 +226,8 @@ const priceLgView=(host)=>{
       else st.msg='❌ 실패: '+(j.detail||('HTTP '+r.status));
     }catch(e){st.msg='❌ 오류: '+e.message;}
     st.busy=false;draw();};
+  // 적용일 필터를 적용한 표시 행. ★기본은 전체(최신순) — 필터로 '이번 인상분만' 볼 수 있다.
+  const vrows=()=>st.ymd?st.rows.filter(r=>r.apply_ymd===st.ymd):st.rows;
   const draw=()=>{
     host.innerHTML=`
      <div class="page-sub">LG <b>PO Price</b>(LG 판가) 엑셀 업로드 → <b>사업부별</b> <code>nx.price_item</code>(SAC=vendor1010·RAC=1020, MKT <b>1→내수(TAGS)·2→수출(TAGE)</b>)에 <b>Start Date를 적용일</b>로 반영. 원가/손익의 <b>LG판가</b>로 바로 사용. 헤더: <code>Material·MKT·Unit Price·Start Date·Curr</code></div>
@@ -238,12 +240,13 @@ const priceLgView=(host)=>{
        <span style="margin-left:auto;color:#a98a4f;font-size:11px">SAC·RAC 파일 각각 (사업부 선택 후) 올리세요</span>
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="toolbar"><label class="tl">사업부</label><select class="sel" id="lg-bf"><option value="">전체(SAC+RAC)</option><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select><label class="tl">검색</label><input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px"><button class="btn" id="lg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">LG판가 ${st.rows.length}건</span></div>
-     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">사업부</th><th class="center">구분</th><th class="center">적용일(Start)</th><th class="num">LG판가</th><th class="center">통화</th></tr></thead>
-     <tbody>${st.rows.map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${r.vendor==='1010'?'SAC':r.vendor==='1020'?'RAC':esc(r.vendor)}</td><td class="center">${r.type==='TAGS'?'내수':r.type==='TAGE'?'수출':esc(r.type)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num">${won(r.price)}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="7" class="empty">업로드된 LG판가 없음 — PO Price 엑셀을 올려주세요</td></tr>`}</tbody></table></div>`;
+     <div class="toolbar"><label class="tl">사업부</label><select class="sel" id="lg-bf"><option value="">전체(SAC+RAC)</option><option value="SAC" ${st.biz==='SAC'?'selected':''}>SAC</option><option value="RAC" ${st.biz==='RAC'?'selected':''}>RAC</option></select><label class="tl">적용일</label><select class="sel" id="lg-ymd"><option value="">전체</option>${st.ymds.map(y=>`<option value="${esc(y)}" ${st.ymd===y?'selected':''}>${esc(y)}${y===st.ymds[0]?' (최신)':''}</option>`).join('')}</select><label class="tl">검색</label><input class="inp" id="lg-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:180px"><button class="btn" id="lg-go">🔍 조회</button><div class="spacer"></div><span class="rowcount">LG판가 ${vrows().length}건 / 전체 ${st.rows.length}건</span></div>
+     <div class="grid-wrap" style="max-height:calc(100vh - 360px);overflow:auto"><table class="tbl"><thead><tr><th>품번</th><th>품명</th><th class="center">사업부</th><th class="center">구분</th><th class="center">적용일(Start)</th><th class="num">LG판가</th><th class="num">직전판가</th><th class="num">인상액</th><th class="num">인상률</th><th class="center">통화</th></tr></thead>
+     <tbody>${vrows().map(r=>`<tr><td><b>${esc(r.item)}</b></td><td class="cap" style="max-width:250px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.name)}">${esc(r.name)}</td><td class="center">${r.vendor==='1010'?'SAC':r.vendor==='1020'?'RAC':esc(r.vendor)}</td><td class="center">${r.type==='TAGS'?'내수':r.type==='TAGE'?'수출':esc(r.type)}</td><td class="center">${esc(r.apply_ymd)}</td><td class="num"><b>${won(r.price)}</b></td><td class="num" style="color:var(--muted)">${r.prev_price==null?'':won(r.prev_price)}</td><td class="num" ${r.diff>0?'style="color:#c0392b;font-weight:700"':(r.diff<0?'style="color:#1c6fd6;font-weight:700"':'')}>${r.diff==null?'':(r.diff>0?'+':'')+won(r.diff)}</td><td class="num" ${r.rate>0?'style="color:#c0392b"':(r.rate<0?'style="color:#1c6fd6"':'')}>${r.rate==null?'':(r.rate>0?'+':'')+r.rate+'%'}</td><td class="center">${esc(r.currency)}</td></tr>`).join('')||`<tr><td colspan="10" class="empty">${st.rows.length?'해당 적용일 자료 없음(필터 확인)':'업로드된 LG판가 없음 — PO Price 엑셀을 올려주세요'}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     const fe=g('#lg-file'),drop=g('#lg-drop');
     g('#lg-biz').onchange=e=>{st.biz=e.target.value;};
+    g('#lg-ymd').onchange=e=>{st.ymd=e.target.value;draw();};
     g('#lg-pick').onclick=()=>fe.click();
     fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value='';};
     drop.ondragover=e=>{e.preventDefault();drop.style.background='#f5e9cf';drop.style.borderColor='#b8860b';};
@@ -1052,301 +1055,6 @@ SCREEN.costanalysis=(c)=>{
   draw();
 };
 
-// ===== 품목별 원가분석 V2 (원본 SCREEN.costanalysis 복제 — 독립 발전용, 읽기전용 API 재사용) =====
-SCREEN.costanalysis_v2=(c)=>{
-  let D=window.COSTDATA_V2||{rows:[],agg:{},ym:'',base:''};
-  let recovery=100;   // ★회수율(ST효율,%) — 헤더 입력·전 품목 일괄. 실가공비=표준×(100/효율). 100=반영안함(no-op). 백엔드 patch_recovery. §7A
-  // ★UI 날짜 규칙: 날짜범위=당월1일~당일 · 월=당월 · 일자=당일 (동적)
-  const _t=new Date(), _p=n=>String(n).padStart(2,'0');
-  const _TODAY=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-${_p(_t.getDate())}`;
-  const _MFIRST=`${_t.getFullYear()}-${_p(_t.getMonth()+1)}-01`;
-  const _CURYM=`${String(_t.getFullYear()).slice(2)}${_p(_t.getMonth()+1)}`;         // YYMM(당월)
-  const _CURDYMD=_TODAY.slice(2).replace(/-/g,'');                                    // YYMMDD(당일)
-  let R=D.rows||[], A=D.agg||{};   // ★실시간(nx): loadRecv가 재구성. 초기값=기존 스냅샷(있으면)
-  const eok=v=>(v/1e8).toFixed(1);
-  const pct=v=>(v*100).toFixed(1)+'%';
-  // [rowIdx, header, group, opts]
-  // ★컬럼 순서: 입고수량 → LG단가·손익 → 실원가 → 내부용 (인덱스는 데이터매핑이라 순서만 바뀜)
-  const NUM=[[1,'입고수량','',{}],
-    [19,'LG단가','LG단가·손익',{}],[20,'LG총금액','LG단가·손익',{}],[21,'손익','LG단가·손익',{sk:1}],[22,'Impact','LG단가·손익',{sk:1,b:1}],
-    [8,'원자재비','실원가',{}],[9,'부자재비','실원가',{}],[10,'LG사급비','실원가',{}],[24,'실사급금액','실원가',{}],[11,'재료비합계','실원가',{}],[12,'실원가','실원가',{b:1}],[13,'가공비','실원가',{}],[14,'일반관리','실원가',{}],[15,'운반비','실원가',{}],[16,'이윤','실원가',{}],[17,'사급차액','실원가',{sk:1}],[18,'재료비율','실원가',{pct:1}],
-    [25,'V2실원가','V2 실매입',{b:1}],[26,'V2손익','V2 실매입',{sk:1}],[27,'Δ실원가','V2 실매입',{sk:1}],
-    [2,'원자재비','내부용',{}],[3,'부자재비','내부용',{}],[4,'LG사급비','내부용',{}],[23,'실사급금액','내부용',{}],[5,'재료비합계','내부용',{}],[6,'원가','내부용',{b:1}],[7,'재료비율','내부용',{pct:1}]];
-  let mode='recv', q='', lossOnly=false, sortI=20, dir=-1, dItem='';   // 기본정렬=LG총금액(20) 내림차순
-  const API=API_BASE;
-  let dLive=null, dLoading=false, dErr='';   // 직접입력=라이브 조회 결과(단품)
-  let dYmd=_CURDYMD;               // 단가 적용일자(YYMMDD) — 당일(사용자 지정: 일자=당일)
-  const ymd2date=(y)=>y&&y.length===6?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
-  const date2ymd=(d)=>d?d.slice(2).replace(/-/g,''):'';                                          // date→YYMMDD
-  // 리시빙실적(벌크) 단가 적용일자 — 변경 시 nx엔진 전체 재계산(백그라운드)
-  let rvYmd=_CURDYMD, regenMsg='', regenPoll=null;   // ★단가 적용일자=당일(사용자 지정: 일자=당일)
-  const setRegenMsg=(m)=>{regenMsg=m;const el=c.querySelector('#ca-regen-msg');if(el)el.textContent=m;};
-  const doRegen=async()=>{
-    if(!confirm(`단가 적용일자 ${ymd2date(rvYmd)} 기준으로 589품목을 재계산합니다.\n수 분 소요되며 완료 후 자동 새로고침됩니다. 진행할까요?`))return;
-    try{
-      const r=await fetch(`${API}/api/cost/regen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ymd:rvYmd})});
-      if(r.status===409){setRegenMsg('이미 재계산 중…');}
-      else if(!r.ok)throw new Error('HTTP '+r.status);
-      if(regenPoll)clearInterval(regenPoll);
-      regenPoll=setInterval(async()=>{
-        try{const s=await(await fetch(`${API}/api/cost/regen/status`)).json();
-          if(s.running){setRegenMsg(`재계산 중… ${s.done}/${s.total||'?'}`);}
-          else{clearInterval(regenPoll);
-            if(s.error){setRegenMsg('오류: '+s.error);}
-            else{setRegenMsg(`완료 (${s.sec}s) — 새로고침…`);setTimeout(()=>location.reload(),900);}}
-        }catch(e){clearInterval(regenPoll);setRegenMsg('상태 조회 실패');}
-      },2000);
-    }catch(e){setRegenMsg('재계산 시작 실패 — 백엔드 확인');}
-  };
-  // /api/esti 응답 → 23컬럼 행배열 (내부용+실원가+LG+손익, 수량1 단품)
-  const estiToRow=(part,j)=>{
-    const s=(j.sil&&j.sil.agg)||{}, n=(j.nae&&j.nae.agg)||{};
-    const r=new Array(23).fill(0); r[0]=part; r[1]=1;
-    r[2]=n.WON_JAI_AMT||0; r[3]=n.BU_JAI_AMT||0; r[4]=n.SA_JAI_AMT||0; r[5]=n.JAI_COST||0; r[6]=n.TOT_AMT||0; r[7]=(n.TOT_AMT&&s.LG_COST)?n.JAI_COST/s.LG_COST:0;
-    r[8]=s.WON_JAI_AMT||0; r[9]=s.BU_JAI_AMT||0; r[10]=s.SA_JAI_AMT||0; r[11]=s.JAI_COST||0; r[12]=s.TOT_AMT||0;
-    r[13]=s.GAGONG_AMT||0; r[14]=s.ILBAN_AMT||0; r[15]=s.UNBAN_AMT||0; r[16]=s.PROFIT_AMT||0; r[17]=s.LME_CHA_AMT||0;
-    r[18]=s.LG_COST?(s.JAI_COST/s.LG_COST):0; r[19]=s.LG_COST||0; r[20]=s.LG_COST||0; r[21]=(s.LG_COST||0)-(s.TOT_AMT||0); r[22]=r[21];
-    return r;
-  };
-  const dLoad=async()=>{
-    const it=dItem.trim(); if(!it){dLive=null;renderBody();return;}
-    dLoading=true;dErr='';renderBody();
-    try{const r=await fetch(`${API}/api/esti?item=${encodeURIComponent(it)}&ymd=${encodeURIComponent(dYmd)}`);
-      if(!r.ok)throw new Error('HTTP '+r.status); const j=await r.json();
-      dLive=estiToRow(it,j);}
-    catch(e){dErr='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';dLive=null;}
-    dLoading=false;renderBody();
-  };
-  // ★리시빙실적 실시간(nx): 목록(SA_T_LG_RECEIVING_DTL)+행별 배치 원가(/api/cost/nx/bulk). 스냅샷 파일 대체·세션캐시.
-  const ym2str=(y)=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:(y||'');
-  const buildRow=(part,qty,cst)=>{const r=new Array(28).fill(0);r[0]=part;r[1]=qty;
-    if(cst&&!cst.error){const jae=cst.jae||0,lg=cst.lg||0,sil=cst.silwon||0,son=cst.sonik||0,sagub=cst.sagub||0;
-      const won=(cst.won!=null?cst.won:jae),bu=cst.bu||0,sa=cst.sa||0,matb=won+bu+sa;   // 원자재/부자재/LG사급 분리(sgroup)
-      const son2=son+sagub;   // 손익 = (LG−실원가) + 사급차액(실출고가−실입고가, 음수=손해)
-      r[2]=won;r[3]=bu;r[4]=sa;r[5]=matb;r[6]=sil;r[7]=lg?matb/lg:0;
-      r[8]=won;r[9]=bu;r[10]=sa;r[11]=matb;r[12]=sil;r[13]=cst.gagong||0;r[14]=cst.ilban||0;r[15]=cst.unban||0;r[16]=cst.profit||0;r[17]=sagub;r[18]=lg?matb/lg:0;
-      r[19]=lg;r[20]=lg*qty;r[21]=son2;r[22]=son2*qty;
-      r[23]=cst.silsagub||0;r[24]=cst.silsagub||0;   // ★실사급금액(통째,기준일사급가) — 나란히 표시(원가/손익 무영향)
-      const v2sil=(cst.v2_silwon!=null?cst.v2_silwon:sil);   // ★V2 직거래원소재 실매입가(bulk_v2). 없으면 V1과 동일(Δ0)
-      r[25]=v2sil;r[26]=(cst.v2_sonik!=null?cst.v2_sonik:son)+sagub;r[27]=v2sil-sil;}
-    return r;};
-  const cardsHTML=()=>`<div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
-       <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
-       <div class="ca-card ${(A.impact||0)>=0?'pos':'neg'}"><span>손익 Impact</span><b>${(A.impact||0)>=0?'+':''}${eok(A.impact||0)}억</b></div>
-       <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>`;
-  const recomputeAgg=()=>{let sales=0,silamt=0,impact=0,loss=0,qt=0;D.rows.forEach(r=>{sales+=r[20];silamt+=r[12]*r[1];impact+=r[22];qt+=r[1];if(r[21]<0)loss++;});
-    D.agg={cnt:D.rows.length,qty:Math.round(qt),sales:Math.round(sales),silamt:Math.round(silamt),impact:Math.round(impact),loss};A=D.agg;
-    const cd=c.querySelector('.ca-cards');if(cd)cd.innerHTML=cardsHTML();};
-  let rvBusy=false;
-  const loadRecv=async(ym,ymd,force)=>{
-    if(rvBusy)return;rvBusy=true;ymd=ymd||rvYmd;const tok=ymd+'|'+(ym||'');loadRecv._tok=tok;setRegenMsg('목록 로드…');
-    try{
-      // ★서버 결과캐시 우선(첫 로드 즉시화). force(재계산)면 스킵.
-      if(!force){
-        try{const cg=await(await fetch(`${API}/api/cost/analysis/cache/get?ym=${encodeURIComponent(ym||'')}&ymd=${encodeURIComponent(ymd)}`)).json();
-          if(cg&&cg.cached&&cg.rows&&cg.rows.length&&loadRecv._tok===tok){
-            D.ym=cg.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
-            D.rows=cg.rows.map(x=>buildRow(x.part,x.qty,x));R=D.rows;recomputeAgg();
-            window.__CA_LIVE_V2={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
-            setRegenMsg(`캐시 ${cg.upd||''} · 최신화=재계산 버튼`);
-            rvBusy=false;renderBody();return;
-          }
-        }catch(e){}
-      }
-      const lr=await(await fetch(`${API}/api/cost/analysis/list?ym=${encodeURIComponent(ym||'')}`)).json();
-      const list=lr.rows||[];D.ym=lr.ym||ym||'';D.base=ymd;dYmd=ymd;rvYmd=ymd;
-      D.rows=list.map(x=>buildRow(x.part,x.qty,null));R=D.rows;recomputeAgg();renderBody();
-      // ★속도: 청크 35 + 6개 동시(병렬) — 무거운 품목(복합SUB)을 여러 워커로 분산. + 남은시간(ETA) 표시.
-      const CH=35, PAR=6; let done=0; const t0=Date.now(); const liveCC={};
-      const chunks=[]; for(let i=0;i<list.length;i+=CH)chunks.push({start:i,items:list.slice(i,i+CH)});
-      for(let b=0;b<chunks.length;b+=PAR){
-        if(loadRecv._tok!==tok)break;
-        await Promise.all(chunks.slice(b,b+PAR).map(async(ck)=>{
-          let cc={};
-          try{cc=(await(await fetch(`${API}/api/cost/nx/bulk_v2`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({parts:ck.items.map(x=>x.part),ymd,ym:(ym||D.ym||''),recovery})})).json()).costs||{};}catch(e){}
-          ck.items.forEach((x,j)=>{liveCC[x.part]=cc[x.part]||{};D.rows[ck.start+j]=buildRow(x.part,x.qty,cc[x.part]);});
-          done+=ck.items.length;
-          // ★청크 완료마다 진행표시 갱신(라운드 끝까지 안 기다림 = 멈춘 듯 안 보임)
-          if(loadRecv._tok===tok){const el=(Date.now()-t0)/1000,eta=done?Math.ceil((list.length-done)*el/done):0;setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();}
-        }));
-        if(loadRecv._tok!==tok)break;
-        const el=(Date.now()-t0)/1000, eta=done?Math.ceil((list.length-done)*el/done):0;
-        setRegenMsg(`실시간 계산 ${done}/${list.length} · 약 ${eta}초 남음`);renderBody();
-      }
-      recomputeAgg();
-      if(loadRecv._tok===tok){
-        // ★회수율 100(기본)일 때만 캐시(클라·서버) 저장. ≠100=시나리오뷰→미저장(기본뷰·타사용자 오염 방지)
-        if(recovery===100){window.__CA_LIVE_V2={ymd,ym:D.ym,rows:D.rows,agg:D.agg};
-          try{const saveRows=list.map(x=>Object.assign({part:x.part,qty:x.qty},liveCC[x.part]||{}));
-            fetch(`${API}/api/cost/analysis/cache/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym:D.ym,ymd,rows:saveRows})});}catch(e){}
-          setRegenMsg('완료 · 캐시 저장됨');
-        }else setRegenMsg(`완료 · 회수율 ${recovery}% 적용(시나리오·캐시 미저장)`);
-      }
-    }catch(e){setRegenMsg('로드 실패 — 백엔드 확인');}
-    finally{rvBusy=false;renderBody();}
-  };
-  // 표시 컬럼: 직접입력은 입고수량(1)·LG총금액(20)·Impact(22) 제외 (수량 1 단품 관점)
-  const colsOf=()=> mode==='direct'? NUM.filter(([i])=>![1,20,22].includes(i)) : NUM;
-  const filt=()=>{
-    if(mode==='direct'){ return dLive?[dLive]:[]; }   // 직접입력=라이브 단품
-    let a=R.slice();
-    if(q){const ql=q.toLowerCase();a=a.filter(r=>r[0].toLowerCase().includes(ql));} if(lossOnly)a=a.filter(r=>r[21]<0);
-    a.sort((x,y)=>sortI<0?x[0].localeCompare(y[0])*dir:(x[sortI]-y[sortI])*dir);
-    return a;
-  };
-  const renderBody=()=>{
-    const a=filt(), cols=colsOf();
-    // ★로딩 중(리시빙): 값이 계속 바뀌어 착각하므로 값 대신 "조회 중" 전체 표시(완료 후 1회 렌더)
-    if(mode!=='direct' && rvBusy){
-      const cb=c.querySelector('#ca-body'); if(cb)cb.innerHTML=`<tr><td colspan="${cols.length+1}" class="empty" style="padding:44px 0"><span style="display:inline-flex;align-items:center;gap:10px;color:#2f5aa8;font-weight:700;font-size:15px"><span class="ca-spin"></span> 조회 중… <span style="color:#8595ad;font-weight:500;font-size:13px">${esc(regenMsg||'')}</span></span></td></tr>`;
-      const ft=c.querySelector('#ca-foot'); if(ft)ft.innerHTML='';
-      const cn=c.querySelector('#ca-cnt'); if(cn)cn.textContent='조회 중…';
-      return;
-    }
-    c.querySelector('#ca-body').innerHTML = a.map(r=>{const neg=r[21]<0;
-      return `<tr class="${neg?'lossrow':''}"><td class="pcode" title="${esc(r[0])}"><b>${esc(r[0])}</b></td>`+
-        cols.map(([i,,,op])=>{let cls='num';if(op.b)cls+=' bcol';if(op.sk&&r[i]<0)cls+=' negv';if(op.sk&&r[i]>0)cls+=' posv';
-          return `<td class="${cls}">${op.pct?pct(r[i]):wonI(r[i])}</td>`;}).join('')+`</tr>`;}).join('')
-      || `<tr><td colspan="${cols.length+1}" class="empty">${mode==='direct'?(dLoading?'라이브 계산중…':(dErr||'품번을 입력하고 조회 (라이브 · 아무 품번, 예: AJR75563503)')):(rvBusy?'<span style="display:inline-flex;align-items:center;gap:8px;color:#2f5aa8;font-weight:600"><span class="ca-spin"></span> 조회 중…</span>':'결과 없음')}</td></tr>`;
-    if(mode!=='direct'){
-      // 합계 = Σ(수량 × 단위금액). LG총금액(20)·Impact(22)는 이미 행별 총액이라 그대로 합산. 재료비율=Σ재료비/LG총매출.
-      const T={}; NUM.forEach(([i,,,o])=>{if(!o.pct)T[i]=0;});
-      a.forEach(r=>{const q2=r[1];NUM.forEach(([i,,,op])=>{if(op.pct)return;T[i]+=(i===1)?q2:(i===20||i===22)?r[i]:r[i]*q2;});});
-      const lgTot=T[20]||0, rN=lgTot?T[5]/lgTot:0, rS=lgTot?T[11]/lgTot:0;
-      c.querySelector('#ca-foot').innerHTML=`<tr class="sumrow"><td>합계 ${won(a.length)}건</td>`+
-        NUM.map(([i,,,op])=>{const v=(i===7)?pct(rN):(i===18)?pct(rS):(op.pct?'':won(Math.round(T[i])));
-          let cls='num';if(op.b)cls+=' bcol';if(op.sk&&T[i]<0)cls+=' negv';if(op.sk&&T[i]>0)cls+=' posv';
-          return `<td class="${cls}">${v}</td>`;}).join('')+`</tr>`;
-    }else c.querySelector('#ca-foot').innerHTML='';
-    const cnt=c.querySelector('#ca-cnt'); if(cnt)cnt.textContent=`${a.length}품번${mode==='direct'?' (부분일치)':(lossOnly?' · 적자만':'')}`;
-  };
-  const caExport=()=>{
-    const a=filt(), cols=colsOf();
-    const header=['PART-NO', ...cols.map(x=>x[1])];
-    const rows=a.map(r=>[r[0], ...cols.map(([i,,,op])=>op.pct?(r[i]*100).toFixed(1)+'%':r[i])]);
-    dlCSV(`품목별원가분석_V2_${mode==='recv'?'리시빙실적':'직접입력'}_${(D.base||'')}.csv`, header, rows);
-  };
-  // 헤더(그룹+컬럼) — 모드별. 직접입력은 입고수량 제외, LG그룹 2컬럼(LG단가·손익).
-  const headHTML=()=>{
-    const lgSpan=mode==='direct'?2:4;
-    let g1='<th rowspan="2">PART-NO</th>'+(mode!=='direct'?'<th rowspan="2" class="num">입고수량</th>':'');
-    g1+=`<th colspan="${lgSpan}" class="ghead">LG단가·손익</th><th colspan="12" class="ghead">실원가</th><th colspan="3" class="ghead" style="background:#eef6ee">V2 실매입</th><th colspan="7" class="ghead">내부용</th>`;
-    const h2=colsOf().filter(([i])=>i!==1).map(([i,h])=>`<th class="num sortable ${sortI===i?'sorted':''}" data-si="${i}">${h}${sortI===i?(dir<0?' ▼':' ▲'):''}</th>`).join('');
-    return `<thead><tr>${g1}</tr><tr>${h2}</tr></thead>`;
-  };
-  const directBar=()=>`
-     <div class="toolbar">
-       <label class="tl">품번</label>
-       <input class="inp" id="di-q" value="${esc(dItem)}" placeholder="PART-NO 입력 (예: AJR75563503)" style="width:220px">
-       <label class="tl" style="margin-left:8px">단가 적용일자</label>
-       <input class="inp" type="date" id="di-ymd" value="${ymd2date(dYmd)}" style="width:150px" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율 적용">
-       <button class="btn" id="di-go">🔍 라이브 조회</button>
-       <span style="color:var(--muted);font-size:12px">그 날짜 기준 단가 적용 · 아무 품번 · 수량1 단위원가·손익</span>
-       <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
-       <div class="spacer"></div><span class="rowcount" id="ca-cnt"></span>
-     </div>`;
-  const recvBar=()=>`
-     <div class="ca-cards">
-       <div class="ca-card"><span>LG 매출</span><b>${eok(A.sales||0)}억</b></div>
-       <div class="ca-card"><span>실원가 총금액</span><b>${eok(A.silamt||0)}억</b></div>
-       <div class="ca-card pos"><span>손익 Impact</span><b>+${eok(A.impact||0)}억</b></div>
-       <div class="ca-card neg"><span>적자 품번</span><b>${won(A.loss||0)}<small>/${won(A.cnt||0)}</small></b></div>
-     </div>
-     <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto;align-items:center">
-       <label class="tl" style="white-space:nowrap">리시빙 기간</label>
-       <input class="inp" type="date" id="ca-from" value="${_MFIRST}" style="width:140px"><span style="color:var(--muted)">~</span>
-       <input class="inp" type="date" id="ca-to" value="${_TODAY}" style="width:140px">
-       <span class="badge" title="최대 조회기간 1개월">최대 1개월</span>
-       <button class="btn" id="ca-go">🔍 조회</button>
-       <div class="spacer" style="max-width:20px"></div>
-       ${(typeof PERM==='undefined'||PERM.canEdit('costanalysis'))?`<label class="tl" title="이 날짜 기준 LG인정가(TAGE)·LME시세·매입가·임율로 전체 재계산">💲 단가 적용일자</label>
-       <input class="inp" type="date" id="ca-ymd" value="${ymd2date(rvYmd)}" style="width:150px">
-       <button class="btn" id="ca-regen" title="지정 단가일자로 nx엔진 재계산">🔄 재계산</button>`:`<span style="color:#c0392b;font-size:12px">🔒 재계산 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
-       <label class="tl" style="margin-left:10px;white-space:nowrap" title="가공비 ST회수율(효율) - 전 품목 일괄. 실가공비=표준가공비×(100/효율). 일반관리·이윤도 자동 전파. 100=반영 안 함">회수율</label>
-       <input class="inp" type="number" id="ca-recov" value="${recovery}" min="1" max="300" step="1" style="width:64px;text-align:right" title="ST효율(%) - 전 품목 일괄 적용. 예: 55 입력 시 가공비×(100/55)">
-       <span style="color:var(--muted);font-size:12px">%</span>
-       <button class="btn" id="ca-recov-go" title="회수율 적용 후 재조회">적용</button>
-       <label class="tl" style="margin-left:8px">품번</label><input class="inp" id="ca-q" value="${esc(q)}" placeholder="PART-NO 검색(타이핑하면 필터)" style="width:180px" autocomplete="off">
-       <label class="chk"><input type="checkbox" id="ca-loss" ${lossOnly?'checked':''}> 적자만</label>
-       <button class="btn" id="ca-xls" title="현재 목록 엑셀(CSV) 다운로드">⬇ 엑셀</button>
-       <div class="spacer"></div><span class="rowcount" id="ca-cnt"></span>
-     </div>`;
-  const draw=()=>{
-    c.innerHTML=`
-     <div class="page-title">💹 품목별 원가분석_V2</div>
-     <div class="page-sub">품목별 <b>내부원가·실원가·손익</b> · 원본 <code>w_cs_esti_020</code> · <b>nx 엔진 재계산</b>(실원가·LME·손익, <code>nx_cost_engine.py</code> 검증완료) · 라이브검증=개발›원가엔진 검증 · 기준일 ${esc(D.base||'')}</div>
-     ${recvBar()}
-     <div class="grid-wrap ca-wrap"><table class="tbl ca-tbl">${headHTML()}<tbody id="ca-body"></tbody><tfoot id="ca-foot"></tfoot></table></div>
-     <style>
-       .ca-modes{display:flex;margin:10px 0 2px;border:1px solid var(--line);border-radius:8px;overflow:hidden;width:fit-content}
-       .ca-mode{padding:7px 18px;border:none;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
-       .ca-mode.on{background:#2f5aa8;color:#fff}
-       .ca-cards{display:flex;gap:12px;margin:10px 0 4px;flex-wrap:wrap}
-       .ca-card{flex:1;min-width:130px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 14px}
-       .ca-card span{display:block;font-size:12px;color:var(--muted)}.ca-card b{font-size:22px;font-weight:800}
-       .ca-card.pos b{color:#1f8a5a}.ca-card.neg b{color:#c0392b}.ca-card small{font-size:13px;color:var(--muted);font-weight:600}
-       .ca-wrap{max-height:calc(100vh - 310px);overflow:auto;max-width:100%;width:100%;box-sizing:border-box}
-       .ca-tbl{font-size:13px;table-layout:auto}
-       .ca-tbl th,.ca-tbl td{padding:4px 6px}
-       .ca-tbl td.num,.ca-tbl th.num{white-space:nowrap}
-       .ca-tbl td.num,.ca-tbl th.num{font-variant-numeric:tabular-nums}
-       .ca-tbl th.ghead{background:#eef4ff;text-align:center;color:#2f5aa8;font-weight:700}
-       .ca-tbl th.sortable{cursor:pointer;white-space:nowrap}.ca-tbl th.sorted{background:#dfe9ff;color:#1c47a0}
-       .ca-tbl thead th{height:26px;box-sizing:border-box;white-space:nowrap;background:#f4f7fc}
-       .ca-tbl thead tr:first-child th{position:sticky;top:0;z-index:4}
-       .ca-tbl thead tr:nth-child(2) th{position:sticky;top:26px;z-index:4}
-       .ca-tbl td.bcol{background:#f6f9ff;font-weight:700}
-       .ca-tbl td.pcode{white-space:nowrap;font-weight:600}   /* ★품번 전체표시(잘림 제거) */
-       .ca-tbl td.pcode,.ca-tbl thead th:first-child{position:sticky;left:0;background:#fff;z-index:3}   /* 품번 고정(좌측) */
-       .ca-tbl thead tr:first-child th:first-child{z-index:5}
-       .ca-tbl tr.lossrow td.pcode{color:#c0392b;font-weight:600}
-       .ca-tbl td.negv{color:#c0392b;font-weight:700}.ca-tbl td.posv{color:#1f8a5a}
-       .ca-tbl tfoot td{position:sticky;bottom:0;background:#f0f4fb;font-weight:700;border-top:2px solid #cdd9ef}
-       .chk{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);margin:0 4px}
-       .ca-spin{width:16px;height:16px;border:3px solid #cdd9ef;border-top-color:#2f5aa8;border-radius:50%;display:inline-block;animation:caspin .7s linear infinite}
-       @keyframes caspin{to{transform:rotate(360deg)}}
-     </style>`;
-    renderBody();
-    {const xls=c.querySelector('#ca-xls'); if(xls)xls.onclick=caExport;}
-    c.querySelectorAll('.ca-mode').forEach(b=>b.onclick=()=>{mode=b.dataset.mode; if(mode==='recv')sortI=20; else if([1,20,22].includes(sortI))sortI=21; dir=-1; draw();});
-    // ★정렬 = 클라이언트만(draw 전체재렌더/재조회 금지). 헤더(정렬표시)만 교체+재바인딩 후 body만 갱신.
-    const bindSort=()=>c.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{
-      const si=+th.dataset.si; if(sortI===si)dir=-dir; else{sortI=si;dir=-1;}
-      const th0=c.querySelector('.ca-tbl thead'); if(th0){th0.outerHTML=headHTML();bindSort();}
-      renderBody();
-    });
-    bindSort();
-    if(mode==='recv'){
-      c.querySelector('#ca-go').onclick=()=>{
-        const f=c.querySelector('#ca-from').value;
-        const ym=f?f.slice(2,7).replace('-',''):'';   // YYYY-MM-DD → YYMM(리시빙 월)
-        loadRecv._tok=null; loadRecv(ym, rvYmd);       // 실시간 재로드(목록+원가)
-      };
-      c.querySelector('#ca-q').oninput=e=>{q=e.target.value.trim();renderBody();};
-      c.querySelector('#ca-loss').onchange=e=>{lossOnly=e.target.checked;renderBody();};
-      const cy=c.querySelector('#ca-ymd'); if(cy)cy.onchange=e=>{rvYmd=date2ymd(e.target.value);};
-      const cr=c.querySelector('#ca-regen'); if(cr)cr.onclick=()=>{loadRecv._tok=null; loadRecv(D.ym||'', rvYmd, true);};   // 재계산=캐시무시 강제 재계산+재저장
-      const rcv=c.querySelector("#ca-recov"), rcb=c.querySelector("#ca-recov-go");
-      const applyRecov=()=>{const v=parseFloat(rcv&&rcv.value);recovery=(isFinite(v)&&v>0)?v:100;if(rcv)rcv.value=recovery;loadRecv._tok=null;loadRecv(D.ym||"", rvYmd, true);};   // ★회수율 적용=전 품목 재계산(force·캐시무시)
-      if(rcb)rcb.onclick=applyRecov;
-      if(rcv)rcv.onkeydown=e=>{if(e.key==="Enter")applyRecov();};
-      // ★자동 초기로드/세션캐시: 진입 시 실시간 계산(캐시 있으면 즉시 복원)
-      if(!rvBusy && !loadRecv._tok){
-        if(window.__CA_LIVE_V2&&window.__CA_LIVE_V2.ymd===rvYmd){D.rows=window.__CA_LIVE_V2.rows;D.agg=window.__CA_LIVE_V2.agg;D.ym=window.__CA_LIVE_V2.ym;D.base=window.__CA_LIVE_V2.ymd;R=D.rows;A=D.agg;loadRecv._tok='cache';recomputeAgg();renderBody();}
-        else loadRecv(_CURYM, rvYmd);   // ★기본 당월 리시빙
-      }
-    }else{
-      const dq=c.querySelector('#di-q'), dyv=c.querySelector('#di-ymd');
-      const goLive=()=>{dItem=dq.value||'';if(dyv&&dyv.value)dYmd=date2ymd(dyv.value);dLoad();};
-      c.querySelector('#di-go').onclick=goLive;
-      dq.oninput=e=>{dItem=e.target.value;};
-      dq.onkeydown=e=>{if(e.key==='Enter')goLive();};
-      if(dyv)dyv.onchange=e=>{dYmd=date2ymd(e.target.value);if(dItem.trim())goLive();};
-    }
-  };
-  draw();
-};
-
 SCREEN.esticost=(c)=>{
   const API=API_BASE;
   const canW=(typeof PERM!=='undefined')?PERM.canEdit('esticost'):true;
@@ -1638,7 +1346,48 @@ const PROC_MODAL_HTML=(pd)=>{
   const wTypes=[...new Set([...(pd.weldTypes||[]),'RAC30599301-1','RAC30599327','RAC30599328','RAC30599303'])];
   const wLabel=w=>({'RAC30599301-1':'1% 용접봉','RAC30599327':'3% 용접봉','RAC30599328':'30% BAG','RAC30599303':'BCUP'}[w]||w);
   const fmtU=v=>{if(!v)return '';const s=(+v).toFixed(5);return s.replace(/0+$/,'').replace(/\.$/,'');};
-  const weldMatrix=!isAssy?'':`
+  // ★%유형 드롭다운(개별코드 아님) — value=%유형(weld_type), 저장은 대표코드로 자동 매핑. 없으면 코드 fallback.
+  const wtl=pd.weldTypeList||[];              // [{weld_type,rep_code,codes}]
+  const c2t=pd.weldCode2Type||{};
+  const wtOpts=(selType,selCode)=>{           // selType=%유형(있으면 우선), selCode=저장코드(유형 못 찾을 때 표시)
+    const st = selType || c2t[selCode] || '';
+    if(wtl.length){
+      let o = wtl.map(t=>`<option value="${esc(t.weld_type)}" ${t.weld_type===st?'selected':''}>${esc(t.weld_type)}</option>`).join('');
+      if(!st && selCode) o = `<option value="" selected>— 미분류 (${esc(selCode)}) —</option>`+o;
+      else if(st && !wtl.some(t=>t.weld_type===st)) o = `<option value="${esc(st)}" selected>${esc(st)}</option>`+o;
+      return o;
+    }
+    return wTypes.map(w=>`<option value="${esc(w)}" ${w===selCode?'selected':''}>${esc(w)} · ${esc(wLabel(w))}</option>`).join('');
+  };
+  const procOpts=(sel)=>['51','28'].map(p=>`<option value="${p}" ${String(sel)===p?'selected':''}>${p==='51'?'용접':'은납'}</option>`).join('');
+  // ── 다종 매트릭스(pd.weldMulti = [{weld_item,proc_code,counts:{diam2dp:qty}}]) ──
+  const weldMultiTable=()=>{
+    const WM=pd.weldMulti||[];
+    let gUse=0,gSt=0; const gPer={};
+    const stdRows=`
+      <tr><td style="text-align:left;color:#5a6b82">표준소요량</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${fmtU(STU[d.toFixed(2)]||0)}</td>`).join('')}</tr>
+      <tr><td style="text-align:left;color:#5a6b82">표준공수</td><td></td>${DIAMS.map(d=>`<td class="num" style="color:#8a94a6">${(STS[d.toFixed(2)]||0)}</td>`).join('')}</tr>`;
+    const typeRows=WM.map((t,ti)=>{
+      const cts=t.counts||{}; let tUse=0,tSt=0,tCnt=0;
+      DIAMS.forEach(d=>{const k=d.toFixed(2),q=+cts[k]||0;if(q){tUse+=(STU[k]||0)*q;tSt+=(STS[k]||0)*q;tCnt+=q;gPer[k]=(gPer[k]||0)+q;}});
+      gUse+=tUse;gSt+=tSt;
+      return `<tr style="background:${ti%2?'#faf7ff':'#fff'}">
+        <td style="text-align:left;white-space:nowrap">
+          <select class="wm-mtype" data-ti="${ti}" style="font-size:11px" title="용접봉 %유형 선택 — 저장은 대표코드로 자동 매핑">${wtOpts(t.weld_type,t.weld_item)}</select>
+          <select class="wm-mproc" data-ti="${ti}" style="font-size:11px" title="용접(51)/은납(28) 공정구분">${procOpts(t.proc_code||'51')}</select>
+          <span class="wm-mdel" data-ti="${ti}" title="이 유형 삭제" style="cursor:pointer;color:#c0392b;font-weight:700;padding:0 3px">✖</span>
+          <span style="color:#b7c0cd;font-size:9px" title="저장 대표코드">${esc(t.weld_item||'')}</span></td>
+        <td class="num" title="소요량 ${fmtU(tUse)} · 내부ST ${tSt} · 점 ${tCnt}"><b style="color:#1c6b3a">${fmtU(tUse)}</b><div style="font-size:9px;color:#8a5a1a">ST ${tSt}·${tCnt}점</div></td>
+        ${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-mq" data-ti="${ti}" data-diam="${k}" type="number" min="0" step="1" value="${cts[k]||''}" style="width:32px;text-align:center"></td>`;}).join('')}</tr>`;}).join('');
+    const totRow=`<tr style="background:#eef4ff;font-weight:700"><td style="text-align:left;color:#1c47a0">합계 (전 유형 ${WM.length}종)</td><td class="num" style="color:#1c6b3a">${fmtU(gUse)}<div style="font-size:9px;color:#8a5a1a">ST ${gSt}</div></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=gPer[k]||0;return `<td class="num" style="color:#40567a">${q||''}</td>`;}).join('')}</tr>`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;flex-wrap:wrap">
+        <b style="color:#8e44ad">🔧 관경별 용접 (다종)</b>
+        <span style="color:#8a94a6;font-size:11px">유형별(1%·은납3/5% 등) 행 추가 · 관경 아래 <b>용접횟수</b> 입력 → 소요량·내부ST 자동 (BOM반영=표시×1.5)</span>
+        <div style="flex:1"></div><button class="btn" id="wm-addtype" style="background:#8e44ad;color:#fff;padding:1px 10px;font-size:11px">＋ 용접봉 유형 추가</button></div>
+      <div style="overflow-x:auto"><table class="tbl wm wmw" style="font-size:11px">
+        <thead><tr><th style="text-align:left;min-width:150px">용접봉 유형 / 공정</th><th class="num" style="min-width:52px">소요량</th>${DIAMS.map(d=>`<th class="num">${d.toFixed(2)}</th>`).join('')}</tr></thead>
+        <tbody>${stdRows}${typeRows||`<tr><td colspan="${DIAMS.length+2}" class="empty" style="padding:8px">＋ 용접봉 유형 추가로 등록</td></tr>`}${WM.length?totRow:''}</tbody></table></div>`;};
+  const weldMatrix=!isAssy?'':(pd.weldMulti?weldMultiTable():`
       <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;flex-wrap:wrap">
         <b style="color:#8e44ad">🔧 관경별 용접</b>
         <span style="color:#8a94a6;font-size:11px">용접봉 종류(노드당 1개)</span>
@@ -1652,7 +1401,7 @@ const PROC_MODAL_HTML=(pd)=>{
           <tr style="background:#faf5ff"><td style="text-align:left;font-weight:700;color:#8e44ad">용접횟수</td><td class="num"><b>${sCnt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2);return `<td class="num"><input class="wm-q" data-diam="${k}" type="number" min="0" step="1" value="${cnt[k]||''}" style="width:32px;text-align:center"></td>`;}).join('')}</tr>
           <tr style="background:#eef4ff"><td style="text-align:left;font-weight:700;color:#1c6b3a">소요량</td><td class="num" style="color:#1c6b3a"><b>${fmtU(sUse)}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#1c6b3a">${q?fmtU((STU[k]||0)*q):''}</td>`;}).join('')}</tr>
           <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td><td class="num" style="color:#8a5a1a"><b>${sSt}</b></td>${DIAMS.map(d=>{const k=d.toFixed(2),q=+cnt[k]||0;return `<td class="num" style="color:#8a5a1a">${q?((STS[k]||0)*q):''}</td>`;}).join('')}</tr>
-        </tbody></table></div>`;
+        </tbody></table></div>`);
   const cols=pd.cols||[];
   let sWq=0;cols.forEach(cc=>sWq+=(+cc.wq||0));
   const band=(sub)=>{if(!sub.length)return '';const bsum=sub.reduce((s,cc)=>s+(+cc.wq||0),0);
@@ -1692,7 +1441,13 @@ const PROC_MODAL_BIND=(c,cbs)=>{const g=id=>c.querySelector(id);
   c.querySelectorAll('.puph').forEach(el=>{el.oninput=()=>cbs.onProcUph&&cbs.onProcUph(el.dataset.sec,+el.dataset.i,el.value,el);
     el.onchange=()=>cbs.onProcCommit&&cbs.onProcCommit(el.dataset.sec,+el.dataset.i,el.value,el);});  // ★UPH 편집(표준 자동조회+수정)
   c.querySelectorAll('.wm-q').forEach(el=>el.oninput=()=>cbs.onWeldCount&&cbs.onWeldCount(el.dataset.diam,el.value,el));
-  {const ts=g('#wm-type');if(ts)ts.onchange=()=>cbs.onWeldType&&cbs.onWeldType(ts.value);}};
+  {const ts=g('#wm-type');if(ts)ts.onchange=()=>cbs.onWeldType&&cbs.onWeldType(ts.value);}
+  // ── 다종 용접 매트릭스 바인딩 ──
+  c.querySelectorAll('.wm-mq').forEach(el=>el.oninput=()=>cbs.onWeldMultiCount&&cbs.onWeldMultiCount(+el.dataset.ti,el.dataset.diam,el.value,el));
+  c.querySelectorAll('.wm-mtype').forEach(el=>el.onchange=()=>cbs.onWeldMultiType&&cbs.onWeldMultiType(+el.dataset.ti,el.value));
+  c.querySelectorAll('.wm-mproc').forEach(el=>el.onchange=()=>cbs.onWeldMultiProc&&cbs.onWeldMultiProc(+el.dataset.ti,el.value));
+  c.querySelectorAll('.wm-mdel').forEach(el=>el.onclick=()=>cbs.onWeldDelType&&cbs.onWeldDelType(+el.dataset.ti));
+  {const at=g('#wm-addtype');if(at)at.onclick=()=>cbs.onWeldAddType&&cbs.onWeldAddType();}};
 // 공유 공정 팝업 CSS(관경/공정 매트릭스 .wm) — naeCss와 동일 규칙(subvariant 화면에 주입용).
 const PROC_MODAL_CSS=`<style>
   .wm{border-collapse:collapse;table-layout:auto}
@@ -1747,6 +1502,9 @@ SCREEN.unifybom=(c,ro)=>{
   const _naeToday=(()=>{const d=new Date();return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;})();  // YYMMDD 당일(단가기준일 기본)
   let tab='bom', naeD=null, naeFor='', naeYmd=_naeToday, naeLoad=false, naeSel='', naeProcs=[], naeProcD=null, naeEdit=false, naeView='proc', naeEditM=false, naeEdits={};
   let fastenD=null, fastenFor='';   // 체결 매트릭스(품목별 체결 공정횟수 입력→가공비). /api/assywork
+  let weldTypeList=[];   // 용접봉 %유형 목록 [{weld_type,rep_code,codes}] — 드롭다운(%유형으로 선택). 1회 로드 캐시
+  let weldCode2Type={};  // 저장코드→%유형 역매핑(기존 노드 표시용)
+  const weldRep=(wt)=>{const t=weldTypeList.find(x=>x.weld_type===wt);return t?t.rep_code:wt;};   // %유형→대표코드
   let naeProcLoading=false;         // 조립공정 팝업 로딩(사외망 DB 지연 대비 즉시 표시)
   const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
     try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
@@ -2220,10 +1978,12 @@ SCREEN.unifybom=(c,ro)=>{
   const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeProcLoading=true;if(openModal)naeModal=true;draw();  // ★즉시 로딩모달 표시(사외망 지연 대비)
     const enc=encodeURIComponent(node);
     // ★4개 fetch 순차(≈9초)→병렬(≈3초). 사외망 DB 지연시 체감 크게 개선
+    if(!weldTypeList.length){try{const tj=await fetch(`${API}/api/weld/types`).then(r=>r.json());weldTypeList=(tj&&tj.types)||[];weldCode2Type=(tj&&tj.code2type)||{};}catch(e){}}
+    // ★roll=0 = 노드 자체 용접(다종 편집·저장 라운드트립=diff0). 롤업(roll=1)은 표시전용이라 저장에 부적합.
     const [,,wj,j]=await Promise.all([
       loadWeldDiams(),
       loadFasten(node),   // ★체결 매트릭스도 팝업에 로드(노드별)
-      fetch(`${API}/api/weld/get?node=${enc}`).then(r=>r.json()).catch(()=>({})),
+      fetch(`${API}/api/weld/get?node=${enc}&roll=0`).then(r=>r.json()).catch(()=>({})),
       fetch(`${API}/api/cost/proc/get?node=${enc}`).then(r=>r.json()).catch(e=>({error:e.message}))
     ]);
     naeProcLoading=false;
@@ -2252,7 +2012,13 @@ SCREEN.unifybom=(c,ro)=>{
       // 선택 종류의 관경별 횟수 맵
       const weldCounts={};
       weldPoints.forEach(w=>{if(w.weld_item===weldItem && w.pipe_diam)weldCounts[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});
-      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers,isAssy,weldPoints,catalog:cat,weldTypes,weldItem,weldCounts};
+      // ★다종 편집 모델: 노드 자체 용접봉 유형별(weld_item)로 그룹핑 → weldMulti. weld_type=%유형(표시·선택), weld_item=저장코드(라운드트립). proc_code=weld/get.proc.
+      const wproc=(wj.proc)||{};
+      const wm={};
+      (wj.welds||[]).forEach(w=>{const wi=w.weld_item;if(!wm[wi])wm[wi]={weld_item:wi,weld_type:(weldCode2Type[wi]||''),proc_code:String(w.proc_code||wproc[wi]||'51'),counts:{}};(w.rows||[]).forEach(x=>{if(x.pipe_diam)wm[wi].counts[(+x.pipe_diam).toFixed(2)]=(+x.weld_qty||0);});});
+      (weldCarriers||[]).forEach(wi=>{if(wi&&!wm[wi])wm[wi]={weld_item:wi,weld_type:(weldCode2Type[wi]||''),proc_code:String(wproc[wi]||'51'),counts:{}};});
+      const weldMulti=Object.values(wm);
+      naeProcD={node,pipe_diam:j.pipe_diam,own,carriers,isAssy,weldPoints,catalog:cat,weldTypes,weldItem,weldCounts,weldMulti};
       if(openModal)naeModal=true;
     }catch(e){naeProcD={node,own:[],carriers:[],isAssy:false,weldPoints:[],error:e.message};}draw();};
   const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
@@ -2263,13 +2029,18 @@ SCREEN.unifybom=(c,ro)=>{
       // ★체결 매트릭스 → nx.routing(FS행) 저장(node별)
       try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
         await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:naeSel,rows:frows,user:'웹'})});}catch(e){}
-      // ★관경별 용접 매트릭스 → /api/weld/save (선택 용접봉종류 1개, node). 관경별 횟수 입력분만(weld_qty>0)
+      // ★관경별 용접 매트릭스(다종) → /api/weld/save_node (노드의 전 용접봉 유형 원자 교체). 유형별 관경 횟수(weld_qty>0)만.
       let wmsg='';
-      if(naeProcD.isAssy){
-        const wi=naeProcD.weldItem, cnt=naeProcD.weldCounts||{};
-        const rows=Object.keys(cnt).filter(d=>(+cnt[d])>0).map(d=>({pipe_diam:+d,weld_qty:+cnt[d]}));
-        if(wi && rows.length){try{const wr=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:naeSel,weld_item:wi,rows})});
-          const wj=await wr.json();if(wj.ok)wmsg+=`\n용접 ${wi}: 소요량 ${wj.use_qty} · 내부ST ${wj.inner_st} (${wj.total_points}점)`;}catch(e){}}
+      if(naeProcD.isAssy && naeProcD.weldMulti){
+        const types=(naeProcD.weldMulti||[]).map(t=>({weld_item:t.weld_item,proc_code:String(t.proc_code||'51'),
+            rows:Object.keys(t.counts||{}).filter(d=>(+t.counts[d])>0).map(d=>({pipe_diam:+d,weld_qty:+t.counts[d]}))}))
+          .filter(t=>t.weld_item && t.rows.length);
+        // 유형 중복(같은 weld_item) 방지 검증
+        const seen=new Set(),dup=[];types.forEach(t=>{if(seen.has(t.weld_item))dup.push(t.weld_item);seen.add(t.weld_item);});
+        if(dup.length){alert('용접봉 유형이 중복됩니다: '+dup.join(', ')+'\n한 노드에 같은 용접봉은 1행만 두세요.');return;}
+        try{const wr=await fetch(`${API}/api/weld/save_node`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:naeSel,types})});
+          const wj=await wr.json();if(wj.ok){wmsg='\n용접봉 '+wj.count+'종: '+(wj.types||[]).map(x=>`${x.weld_item}(${x.proc_code==='28'?'은납':'용접'}) 소요 ${x.use_qty}·${x.points}점`).join(' / ');}
+          else{alert('용접봉 저장 실패');return;}}catch(e){alert('용접봉 저장 오류: '+e.message);return;}
       }
       const rc=(j.weld_recalc||[]).map(x=>`${x.carrier} 소요 ${x.use_qty}`).join(', ');
       naeModal=false;naeSel='';naeProcD=null;alert(`공정 저장(가공 ${j.own} · 용접봉 ${j.carriers}건) · 재계산${rc?'\n용접봉 소요량(ST): '+rc:''}${wmsg}`);
@@ -2284,6 +2055,21 @@ SCREEN.unifybom=(c,ro)=>{
       onProcUph:(sec,i,v)=>{const a=rowsOf(sec);if(a&&a[i])a[i].prod_uph=+v||0;},     // ★UPH 편집 write-back(표준 자동조회+수정)
       onWeldCount:(d,v)=>{if(!naeProcD)return;const val=+v||0;if(val>0)naeProcD.weldCounts[d]=val;else delete naeProcD.weldCounts[d];draw();},
       onWeldType:(v)=>{if(!naeProcD)return;naeProcD.weldItem=v;const cnt={};(naeProcD.weldPoints||[]).forEach(w=>{if(w.weld_item===v&&w.pipe_diam)cnt[(+w.pipe_diam).toFixed(2)]=(+w.weld_qty||0);});naeProcD.weldCounts=cnt;draw();},
+      // ── 다종 용접 매트릭스 write-back ──
+      onWeldMultiCount:(ti,d,v)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;const val=+v||0;const cts=naeProcD.weldMulti[ti].counts;if(val>0)cts[d]=val;else delete cts[d];draw();},
+      onWeldMultiType:(ti,wt)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;
+        // ★%유형 선택 → weld_type 저장 + 대표코드로 weld_item 자동 매핑(무변경 유형은 이 콜백 안 타므로 diff0 보존)
+        naeProcD.weldMulti[ti].weld_type=wt;
+        naeProcD.weldMulti[ti].weld_item=weldRep(wt);
+        // 은납계열(링/3%/5%/30%/BAG/BCUP)이면 공정 기본 은납(28) 제안(변경가능)
+        if(/은납|링|BAG|BCUP|3%|5%|30%/i.test(wt))naeProcD.weldMulti[ti].proc_code='28';
+        draw();},
+      onWeldMultiProc:(ti,v)=>{if(!naeProcD||!naeProcD.weldMulti[ti])return;naeProcD.weldMulti[ti].proc_code=String(v);},
+      onWeldAddType:()=>{if(!naeProcD)return;naeProcD.weldMulti=naeProcD.weldMulti||[];
+        const used=new Set(naeProcD.weldMulti.map(t=>t.weld_type));
+        const pick=(weldTypeList.find(x=>!used.has(x.weld_type))||weldTypeList[0]||{});
+        naeProcD.weldMulti.push({weld_type:pick.weld_type||'',weld_item:pick.rep_code||'RAC30599301-1',proc_code:'51',counts:{}});draw();},
+      onWeldDelType:(ti)=>{if(!naeProcD||!naeProcD.weldMulti)return;naeProcD.weldMulti.splice(ti,1);draw();},
     });
     // 레거시 procEditPanel 잔여(.pu/.pl) — 현재 모달엔 없어 no-op이나 보존(회귀 방지)
     const rowsOf2=sec=>sec==='own'?(naeProcD&&naeProcD.own):((naeProcD&&naeProcD.carriers[+sec.slice(1)])||{}).rows;
@@ -2405,7 +2191,7 @@ SCREEN.unifybom=(c,ro)=>{
     const cols=[];
     (naeProcD.own||[]).forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'own',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
     if(naeProcD.carriers&&naeProcD.carriers[0]) naeProcD.carriers[0].rows.forEach((p,i)=>cols.push({name:p.name,code:p.proc_code,sec:'c0',idx:i,uph:p.prod_uph,cg:p.calc_gubun,wq:p.work_qty}));
-    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,cols,fastenHtml:fastenMatrix(true)});};  // ★fastenMatrix는 클로저 로컬 → 여기서 만들어 pd로 전달(전역 PROC_MODAL_HTML은 접근불가)
+    return PROC_MODAL_HTML({node,subtitle:lvl,isAssy,weldDiams,weldItem:naeProcD.weldItem,weldTypes:naeProcD.weldTypes,weldCounts:naeProcD.weldCounts,weldMulti:naeProcD.weldMulti,weldTypeList,weldCode2Type,cols,fastenHtml:fastenMatrix(true)});};  // ★fastenMatrix는 클로저 로컬 → 여기서 만들어 pd로 전달(전역 PROC_MODAL_HTML은 접근불가). weldMulti=다종 용접(%유형 선택)
   const procSecTable=(rows,sec,title,titleColor)=>`<div style="padding:4px 8px 2px;font-weight:600;color:${titleColor};font-size:11px">${title}</div>
      <table class="tbl" style="font-size:11px"><thead><tr><th>공정</th><th class="num">작업 ST</th><th class="num">내부UPH</th></tr></thead>
        <tbody>${(rows||[]).map((p,i)=>`<tr${p.work_qty>0?' style="background:#f0f7f0"':''}><td>${esc(p.name)} <span style="color:#c3c9d4;font-size:10px">${esc(p.proc_code)}</span></td>
@@ -2597,7 +2383,7 @@ SCREEN.unifybom=(c,ro)=>{
        <span style="color:#8a5a1a;font-size:11px">※ 대분류 미설정 시 부품 가공비가 누락됩니다(공정 필터).</span>
      </div>`:''}
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}${(typeof PERM==='undefined'||PERM.canEdit('unifybom'))?`<button class="btn bm-usetgl" data-it="${esc(r.item)}" data-use="${r.use_flag}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);padding:0 6px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용':'중지'}</button>`:(r.use_flag?'':'<span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#adb5bd;font-size:10px">중지</span>')}</div>`).join('')}</div>`:''}
+     ${results.length?`<div class="bm-results">${results.map(r=>`<div class="bm-r" data-it="${esc(r.item)}"><b>${esc(r.item)}</b> ${esc(r.name||'')} ${r.has_bom?'<span class="badge">BOM</span>':'<span style="color:#bbb">구성없음</span>'}${r.status==='휴면'?' <span style="color:#c0392b;font-size:11px">휴면</span>':''}</div>`).join('')}</div>`:''}
      ${loading?`<div class="empty">조회 중…</div>`:''}
      ${item&&!loading&&viewTree&&!editMode&&!RO?candSelector('bom'):''}
      </div>
@@ -2605,7 +2391,7 @@ SCREEN.unifybom=(c,ro)=>{
      ${item&&!loading?((viewTree&&!editMode)?`
        ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
-       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${(editMode&&isNew)?`<div style="margin-top:10px;padding:9px;border:1px dashed #8e44ad;border-radius:8px;background:#faf7ff"><button class="btn" id="bm-assyproc" style="background:#8e44ad;color:#fff">✎ 조립공정 입력 (관경별 용접 · 공정 · 체결)</button> <span style="font-size:11px;color:var(--muted)">내부원가와 동일한 매트릭스 팝업에서 입력·저장 (한 표=nx.routing)</span></div>`:''}`):''}
+       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${editMode?`<div style="margin-top:10px;padding:9px;border:1px dashed #8e44ad;border-radius:8px;background:#faf7ff"><button class="btn" id="bm-assyproc" style="background:#8e44ad;color:#fff">✎ 조립공정 입력 (관경별 용접봉 %유형·다종 · 공정 · 체결)</button> <span style="font-size:11px;color:var(--muted)">내부원가와 동일한 매트릭스 팝업에서 입력·저장 (용접봉=nx.proc_weld, 공정=nx.routing). ${isNew?'신규 등록':'이 품번의 공정·용접봉 편집'}</span></div>`:''}`):''}
      </div>
      ${naeModal?naeProcModal():''}
      ${(wuBusy||wuData)?wuModalHtml():''}
@@ -2614,9 +2400,6 @@ SCREEN.unifybom=(c,ro)=>{
     c.querySelector('#bm-search').onclick=()=>doSearch(qi.value);
     qi.onkeyup=e=>{if(e.key==='Enter')doSearch(qi.value);};
     {const uu=c.querySelector('#bm-use');if(uu)uu.onchange=()=>{useFilter=uu.value;doSearch(qi.value);};}
-    c.querySelectorAll('.bm-usetgl').forEach(b=>b.onclick=async e=>{e.stopPropagation();const code=b.dataset.it,nu=(+b.dataset.use)?0:1;
-      try{const r=await fetch(`${API}/api/itemmaster/use_flag`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:code,use:nu})});
-        const j=await r.json();if(j.ok)doSearch(query);else alert('전환 실패');}catch(err){alert('전환 오류: '+err);}});
     if(item)bindTabs();
     bindCandSel();
     c.querySelectorAll('.bm-r').forEach(el=>el.onclick=()=>{navStack=[];load(el.dataset.it);});
@@ -2721,7 +2504,7 @@ SCREEN.unifybom=(c,ro)=>{
      .bm-tab{border:1px solid #d3ddec;border-bottom:none;background:#f1f5fb;color:#5a6b82;padding:7px 18px;font-size:13px;font-weight:700;cursor:pointer;border-radius:8px 8px 0 0}
      .bm-tab.on{background:#fff;color:#1c47a0;border-color:#bcd;position:relative;top:2px}
      .bm-results{border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin:6px 0 0;max-height:calc(100vh - 250px);overflow:auto;background:#fff;box-shadow:0 3px 12px rgba(30,45,70,.10)}
-     .bm-r{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;position:relative;padding-right:56px}
+     .bm-r{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px}
      .bm-r:last-child{border-bottom:none}.bm-r:hover{background:#eef4ff}
      .bm-tbl{font-size:12px}.bm-tbl th,.bm-tbl td{padding:3px 6px;white-space:nowrap}
      .bm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}
@@ -3444,7 +3227,7 @@ SCREEN.subvariant=(c)=>{
   const closeDetail=async()=>{
     if(st.detail&&st.detail.fresh){
       if(confirm('등록을 취소하시겠습니까?\n확인 시 이 후보는 등록되지 않습니다(삭제·번호 재사용).')) await cancelDraft();
-      return;   // 계속(취소) = 모달 유지 · _spRollback 유지(refresh 시 여전히 롤백)
+      return;   // 계속 = 모달 유지
     }
     if(st.detail&&st.detail.mode==='edit'&&+st.detail.route_id>0){   // ★닫기=되돌리기(저장 안 했으면 편집 전으로 복원)
       window._spRollback=null;   // ★버그#3: 명시 롤백 시작 → 언로드 beacon 이중발화 방지(edit_cancel 아래서 직접 복원)
@@ -3495,7 +3278,7 @@ SCREEN.subvariant=(c)=>{
 SCREEN.itemmaster=(host)=>{
   const API=API_BASE;
   let opts={};
-  const st={rows:[],cnt:0,q:'',status:'',nature:'',prod_group:'',use:'1',form:null,sel:new Set(),msg:''};   // use=사용여부(1사용중/0사용중지/''전체) 기본 사용중
+  const st={rows:[],cnt:0,q:'',status:'',nature:'',prod_group:'',sgroup:'',use:'1',form:null,sel:new Set(),msg:''};   // use=사용여부(1사용중/0사용중지/''전체) 기본 사용중. sgroup=소분류 필터
   // [key,label,type,optkey] · type: req/text/num/date/sel/chk/ro
   // ★3층 원칙: 품목마스터는 "고정 속성"만. 조달·거래·운영 필드는 분리(백엔드 _IM_CORE/_IM_BIZ/_SUB와 일치).
   const F=[
@@ -3513,7 +3296,7 @@ SCREEN.itemmaster=(host)=>{
   const REQ=new Set(['item_code','item_name','sgroup','unit']);   // 하드필수(전 그룹 공통). 성격별 소프트권장은 저장 후 경고.
   const softField=()=>{const nat=st.form&&st.form.nature; return (nat&&opts.nature_soft&&opts.nature_soft[nat])||[];};
   const load=async()=>{
-    const qs=new URLSearchParams({q:st.q,status:st.status,nature:st.nature,prod_group:st.prod_group,use:st.use,limit:500});
+    const qs=new URLSearchParams({q:st.q,status:st.status,nature:st.nature,prod_group:st.prod_group,sgroup:st.sgroup,use:st.use,limit:500});
     try{const r=await fetch(`${API}/api/itemmaster/list?${qs}`);const j=await r.json();st.rows=j.rows||[];st.cnt=j.cnt||0;
       if(j.natures)opts.nature_f=j.natures; if(j.prod_groups)opts.prod_groups=j.prod_groups;}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];}
@@ -3535,6 +3318,7 @@ SCREEN.itemmaster=(host)=>{
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">검색</label><input class="inp" id="im-q" value="${esc(st.q)}" placeholder="품번/품명" style="width:150px">
        <label class="tl">제품군</label><select class="inp" id="im-pg" style="width:auto"><option value="">전체</option>${(opts.prod_groups||[]).map(o=>`<option value="${esc(o.code)}" ${st.prod_group===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
+       <label class="tl">소분류</label><select class="inp" id="im-sg" style="width:auto"><option value="">전체</option>${(opts.sgroup||[]).map(o=>`<option value="${esc(o.code)}" ${st.sgroup===o.code?'selected':''}>${esc(o.nm||o.code)}</option>`).join('')}</select>
        <label class="tl">품목유형</label><select class="inp" id="im-nat"><option value="">전체</option>${(opts.nature_f||opts.nature||[]).map(o=>`<option value="${esc(o.code)}" ${st.nature===o.code?'selected':''}>${esc(o.nm)}</option>`).join('')}</select>
        <label class="tl" title="LG 리시빙 2501~ 스코프 실사용 + 매입/매출/불출 거래품목=사용중">사용여부</label><select class="inp" id="im-use" style="width:auto"><option value="1" ${st.use==='1'?'selected':''}>사용중</option><option value="0" ${st.use==='0'?'selected':''}>사용중지</option><option value="" ${st.use===''?'selected':''}>전체</option></select>
        <button class="btn" id="im-search">🔍 조회</button>
@@ -3579,7 +3363,7 @@ SCREEN.itemmaster=(host)=>{
         <td class="center">${ed?`<button class="btn im-usetgl" data-code="${esc(r.item_code)}" data-use="${r.use_flag}" style="padding:1px 8px;font-size:10px;border:none;background:${r.use_flag?'#1c7c3a':'#adb5bd'};color:#fff" title="클릭: ${r.use_flag?'사용중지로':'사용으로'} 전환">${r.use_flag?'사용중':'중지'}</button>`:(r.use_flag?'<span class="bdg ok">사용중</span>':'<span class="bdg off">중지</span>')}</td>
         <td class="center">${ed?`<button class="btn im-edit" data-idx="${i}" style="padding:1px 6px;font-size:10px">수정</button>`:''}</td></tr>`).join(''):`<tr><td colspan="13" class="empty">조회 결과 없음${ed?' (➕신규로 등록)':''}</td></tr>`}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
-    g('#im-search').onclick=()=>{st.q=g('#im-q').value;st.nature=g('#im-nat').value;st.prod_group=g('#im-pg').value;st.use=g('#im-use').value;load();};
+    g('#im-search').onclick=()=>{st.q=g('#im-q').value;st.nature=g('#im-nat').value;st.prod_group=g('#im-pg').value;st.sgroup=g('#im-sg').value;st.use=g('#im-use').value;load();};
     {const u=g('#im-use');if(u)u.onchange=()=>{st.use=u.value;load();};}
     g('#im-q').onkeyup=e=>{if(e.key==='Enter')g('#im-search').click();};
     if(ed){

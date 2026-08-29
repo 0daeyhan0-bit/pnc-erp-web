@@ -57,9 +57,9 @@ def procgroup_get(base: str = Query(...), ymd: str = Query("")):
         # 변형 마스터
         # 레거시 개발품목BOM관리(w_cs_master_120)와 동일하게 전 변형 표기(status 필터 제거).
         # 실제 생산단은 아래 nk>0(현재유효 BOM 보유)로 자동 선별 → (CI적용)/예상가 더미 자동제외.
-        cur.execute("""SELECT i.ITEM_CODE, ISNULL(i.ITEM_DESC,''), ISNULL(i.IN_CUST_CODE,''),
+        cur.execute("""SELECT i.ITEM_CODE, ISNULL(i.item_name,''), ISNULL(i.in_cust,''),
               ISNULL(cu.CUST_DESC,''), ISNULL(i.MAKE_TYPE,''), ISNULL(i.ITEM_STATUS,'')
-            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM i LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=i.IN_CUST_CODE
+            FROM PARTNER_ERP_TEST3.nx.item i LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=i.in_cust
             WHERE i.ITEM_CODE LIKE ?""", base + '%')
         vs = []
         for ic, nm, cc, cnm, mk, st in cur.fetchall():
@@ -276,7 +276,7 @@ def subvariant_get(base: str = Query(...)):
         mk = {}; nm = {}
         for i in range(0, len(items), 900):
             ch = items[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mk[r[0]] = r[1]; nm[r[0]] = r[2]
         sag = {}
         for i in range(0, len(items), 900):
@@ -420,11 +420,6 @@ def _ensure_route_tbl(cur):
         rp_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
         proc_code NVARCHAR(10) NOT NULL, work_qty FLOAT DEFAULT 0, prod_uph FLOAT DEFAULT 0, calc_gubun NVARCHAR(4) NULL,
         ins_dt datetime DEFAULT getdate())""")
-    # ★★route_edges(2026-08-25): 경로별 BOM엣지(parent→child→USE_QTY_PR). soyo.py STEP7 route-aware가 소비.
-    #   타입=varchar(20)(plan_part_dtl.item_code·v_pr_bom.mat_code 정합·재귀CTE 앵커 타입일치 필수·nvarchar면 오류).
-    cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
-        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
-        use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
     # ★#3 후보 노드별 관경 용접점(용접ST=가공비 / 용접봉 소요량=재료). 내부원가 관경별 용접 팝업 재사용
     cur.execute("""IF OBJECT_ID('nx.sourcing_route_weld','U') IS NULL CREATE TABLE nx.sourcing_route_weld(
         rw_id INT IDENTITY(1,1) PRIMARY KEY, route_id INT NOT NULL, node_item NVARCHAR(60) NOT NULL,
@@ -433,7 +428,63 @@ def _ensure_route_tbl(cur):
     # ★후보번호 단조증가(high-water-mark): 삭제해도 route_no 재사용 안 함. item별 마지막 채번번호.
     cur.execute("""IF OBJECT_ID('nx.route_seq','U') IS NULL CREATE TABLE nx.route_seq(
         item_code NVARCHAR(60) PRIMARY KEY, last_no INT NOT NULL DEFAULT 1)""")
+    # ★★route_edges(2026-08-25 다리): 경로별 BOM엣지(parent→child→USE_QTY_PR). soyo.py STEP7 route-aware가 소비.
+    #   ★타입정합 필수: plan_part_dtl.item_code=varchar(20)·v_pr_bom.mat_code=varchar(20)와 재귀 CTE 타입 일치(varchar20).
+    cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
+        route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
+        use_qty_pr FLOAT NOT NULL DEFAULT 1, CONSTRAINT ix_route_edges UNIQUE(route_id,item_code,mat_code))""")
     _SCHEMA_READY = True
+
+
+def _materialize_route_edges(cur, route_id):
+    """★A(2026-08-25): Rnn 저장(finalize commit)마다 자동 호출 — nx.sourcing_route_line(편집구조) → nx.route_edges.
+       ★구조 전용(설계 A): 업체/단가(sourcing_profile)는 조달프로파일 화면이 담당 — 여기선 손대지 않음.
+       = "다리"를 별도 단계로 두지 않고 저장에 흡수. Rnn 저장하면 계획전개용 구조가 항상 최신.
+
+       규칙(ROUTE_REFLECTION_DESIGN §18-3~5·검증완료):
+       - route_edges = v_pr_bom 활성엣지(R01 grain·제작SUB leaf정지) 기반, 단 sourcing_route_line에서
+         외주/매입/사급으로 표시된 노드에서 추가 정지(그 하위 subtree 제거=협력사 통째납품 leaf).
+         · 무편집(라인 조달상태=현행) → base 그대로 = R01 diff0 보장(검증: 함수결과=v_pr_bom base 47=47).
+         · 제작→외주 편집 → 그 SUB subtree 제거·SUB leaf화(T2·100/100 §18-2).
+       ★grain 안전: base=v_pr_bom active(+용접링 등 제작단위 leaf정지)라 sourcing_route_line 구조 과전개(있어도) 무시=diff0 유지.
+       ★한계: 외주→제작 강제전개(except=1 자식 되살림)는 make_type 오탐 위험(+용접링)이라 미포함 — 별도 explicit-edge(§18-2). 정지방향(외주화)만 담당.
+       반환: {"edges": n, "stops": k}."""
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.sourcing_route WHERE route_id=?", route_id)
+    hr = cur.fetchone()
+    if not hr:
+        raise HTTPException(404, f"route 없음(route_id={route_id})")
+    assy = str(hr[0]).strip()
+    # ── 정지집합 = sourcing_route_line 조달상태(외주/매입/사급 노드) ──
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), ISNULL(gubun,'')
+        FROM nx.sourcing_route_line WHERE route_id=? AND child_item IS NOT NULL AND LTRIM(RTRIM(child_item))<>''""", route_id)
+    stop = set(l[0] for l in cur.fetchall() if str(l[1]).strip() in ("외주", "매입", "구매", "사급", "외주직납"))  # ★제작/자체=전개 / 나머지 조달=정지(5종 make_type)
+    # ── v_pr_bom 활성엣지 인접리스트 ──
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
+    E = {}
+    for it, m, q, ex in cur.fetchall():
+        E.setdefault(it, []).append((m, float(q or 0), int(ex or 0)))
+    # ── route_edges = base(except<>1) + 외주/매입/사급 노드 정지 ──
+    edges = {}; seen = set(); st = [assy]
+    while st:
+        n = st.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        if n != assy and n in stop:              # 조달정지 노드 = leaf(subtree 미전개)
+            continue
+        for m, q, ex in E.get(n, []):
+            if ex == 1:                          # R01 grain=except제외(제작SUB 내부 baked-in)
+                continue
+            edges[(n[:20], m[:20])] = edges.get((n[:20], m[:20]), 0) + q
+            if m in E:
+                st.append(m)
+    cur.execute("DELETE FROM nx.route_edges WHERE route_id=?", route_id)   # 근거키(route_id) 스코프 전체교체=멱등
+    rows = [(int(route_id), it, m, q) for (it, m), q in edges.items()]
+    if rows:
+        cur.fast_executemany = True
+        cur.executemany("INSERT INTO nx.route_edges(route_id,item_code,mat_code,use_qty_pr) VALUES(?,?,?,?)", rows)
+    return {"edges": len(rows), "stops": len(stop)}
+
 
 def _approved_hwm(cur, item):
     """승인 후보 high-water-mark = max(현재 승인후보 route_no, route_seq.last_no, 1).
@@ -492,14 +543,14 @@ def _route_baseline_lines(item):
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute("""SELECT LTRIM(RTRIM(b.MAT_CODE)) child, CAST(b.USE_QTY AS float) q, ISNULL(b.SAGUB_FLAG,'0') sag,
-              ISNULL(m.ITEM_DESC,'') nm, ISNULL(m.MAKE_TYPE,'') mk, ISNULL(m.IN_CUST_CODE,'') cust,
+              ISNULL(m.item_name,'') nm, ISNULL(m.MAKE_TYPE,'') mk, ISNULL(m.in_cust,'') cust,
               ISNULL(c.CUST_DESC,'') custnm, ISNULL(m.METAL_GUBUN,'') metal,
-              ISNULL(m.ITEM_DIAM,0) diam, ISNULL(m.ITEM_THICK,0) thick, ISNULL(m.ITEM_LENGTH,0) len,
+              ISNULL(m.diam,0) diam, ISNULL(m.thick,0) thick, ISNULL(m.length,0) len,
               ISNULL(b.BOM_SEQ,0) sq,
               CASE WHEN EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.v_cs_bom bb WHERE LTRIM(RTRIM(bb.ITEM_CODE))=LTRIM(RTRIM(b.MAT_CODE))) THEN 1 ELSE 0 END has_bom
             FROM PARTNER_ERP_TEST3.nx.v_cs_bom b
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM m ON m.ITEM_CODE=b.MAT_CODE
-            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item m ON m.ITEM_CODE=b.MAT_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
             WHERE b.ITEM_CODE=? AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101'
               AND ISNULL(b.CS_CALC_EXCEPT_FLAG,'0')<>'1'
               AND b.MAT_CODE NOT LIKE 'RAC%' ORDER BY b.BOM_SEQ""", item.strip())
@@ -696,137 +747,6 @@ def _route_hdr_errors(p):
     # ★후보 헤더는 공급처·구분·유효일자를 받지 않는다: 구분=라인(부품)별(제작/매입/사급) · 업체=조달프로파일 배분 · 유효기간 폐지.
     #   경로는 라인 성격이 섞인 합성이라 헤더 단일 구분이 성립하지 않음(사용자 확정 2026-08-19).
     return []
-
-def _materialize_r01_edges(cur, item, route_id):
-    """★R01 실체화(2026-08-25): item 트리의 v_pr_bom 활성엣지(except_flag<>1)를 nx.route_edges(route_id)로 수집.
-       = 우리BOM으로 R01(현행). soyo.py STEP7 route-aware가 소비(활성route면 이 엣지로 전개·except_flag없이=baked-in).
-       ★검증완료(ROUTE_REFLECTION §18-1): route-active vs 같은드라이버 baseline = diff0(단품106=106·배치44/44). Rnn=이후 편집(제작↔외주 스왑)."""
-    item = str(item).strip().upper()
-    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
-    E = {}
-    for it, m, q, ex in cur.fetchall():
-        E.setdefault(it, []).append((m, float(q or 0), int(ex or 0)))
-    edges = {}; seen = set(); st = [item]
-    while st:
-        n = st.pop()
-        if n in seen:
-            continue
-        seen.add(n)
-        for m, q, ex in E.get(n, []):
-            if ex == 1:                        # except_flag=1=전개제외(baked-in) → 활성엣지만 실체화
-                continue
-            edges[(n, m)] = edges.get((n, m), 0) + q
-            if m in E:
-                st.append(m)
-    cur.execute("DELETE FROM nx.route_edges WHERE route_id=?", route_id)
-    rows = [(int(route_id), it[:20], m[:20], q) for (it, m), q in edges.items()]
-    if rows:
-        cur.fast_executemany = True
-        cur.executemany("INSERT INTO nx.route_edges(route_id,item_code,mat_code,use_qty_pr) VALUES(?,?,?,?)", rows)
-    return len(rows)
-
-
-def _materialize_route_from_line(cur, route_id):
-    """★★다리(2026-08-25): 편집UI 산출 nx.sourcing_route_line(조달상태 gubun/vendor) → nx.route_edges + nx.sourcing_profile.
-       = Rnn 편집(제작↔외주 스왑)을 계획반영 엔진(soyo STEP7 route-aware)이 소비하는 형태로 변환.
-
-       규칙(ROUTE_REFLECTION §18-3~4·검증완료):
-       - route_edges = v_pr_bom 활성엣지(R01 grain·제작SUB leaf정지) 기반, 단 sourcing_route_line에서
-         외주/매입/사급으로 표시된 노드에서 추가 정지(그 하위 subtree 제거=협력사 통째납품 leaf).
-         · 무편집(라인 조달상태=현행) → base 그대로 = R01 diff0 보장(§18 검증).
-         · 제작→외주 편집 → 그 SUB subtree 제거·SUB leaf화(§18-2 100/100·본세션 T2 검증).
-       - sourcing_profile(route_id) = 외주/매입/사급 노드별 (supply_gubun 2=외주/3=매입/2사급, vendor). soyo PRF_ALT가 협력사 재분류.
-       ★grain 안전: base=v_pr_bom active(+용접링 등 제작단위 leaf정지)라 sourcing_route_line의 구조 과전개(있어도) 무시=diff0 유지.
-       ★한계: 외주→제작 강제전개(except=1 자식 되살림)는 make_type 오탐 위험(+용접링)이라 이 다리 미포함 — 별도 explicit-edge 경로(§18-2). 정지방향(외주화)만 이 다리 담당."""
-    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.sourcing_route WHERE route_id=?", route_id)
-    hr = cur.fetchone()
-    if not hr:
-        raise HTTPException(404, f"route 없음(route_id={route_id})")
-    assy = str(hr[0]).strip()
-    # ── 정지집합·업체 = sourcing_route_line 조달상태 ──
-    cur.execute("""SELECT UPPER(LTRIM(RTRIM(child_item))), ISNULL(gubun,''), ISNULL(vendor_code,'')
-        FROM nx.sourcing_route_line WHERE route_id=? AND child_item IS NOT NULL AND LTRIM(RTRIM(child_item))<>''""", route_id)
-    stop = set(); prof = {}                      # prof: node -> (supply_gubun, vendor)
-    for ch, gb, ven in cur.fetchall():
-        g = str(gb).strip()
-        if g in ("외주", "매입", "사급"):
-            stop.add(ch)
-            sg = "3" if g == "매입" else "2"     # 2=외주(유상사급)·3=매입 (사급도 2=유상)
-            prof[ch] = (sg, str(ven).strip())
-    # ── v_pr_bom 활성엣지 인접리스트 ──
-    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), CAST(USE_QTY_PR AS float), ISNULL(except_flag,0) FROM nx.v_pr_bom")
-    E = {}
-    for it, m, q, ex in cur.fetchall():
-        E.setdefault(it, []).append((m, float(q or 0), int(ex or 0)))
-    # ── route_edges = base(except<>1) + 외주/매입/사급 노드 정지 ──
-    edges = {}; seen = set(); st = [assy]
-    while st:
-        n = st.pop()
-        if n in seen:
-            continue
-        seen.add(n)
-        if n != assy and n in stop:              # 조달정지 노드 = leaf(subtree 미전개)
-            continue
-        for m, q, ex in E.get(n, []):
-            if ex == 1:                          # R01 grain=except제외(제작SUB 내부 baked-in)
-                continue
-            edges[(n[:20], m[:20])] = edges.get((n[:20], m[:20]), 0) + q
-            if m in E:
-                st.append(m)
-    cur.execute("DELETE FROM nx.route_edges WHERE route_id=?", route_id)
-    rows = [(int(route_id), it, m, q) for (it, m), q in edges.items()]
-    if rows:
-        cur.fast_executemany = True
-        cur.executemany("INSERT INTO nx.route_edges(route_id,item_code,mat_code,use_qty_pr) VALUES(?,?,?,?)", rows)
-    # ── sourcing_profile(route_id) = 협력사 attribution(외주/매입/사급 노드) ──
-    cur.execute("DELETE FROM nx.sourcing_profile WHERE route_id=?", route_id)   # 근거키 스코프 전체교체
-    pn = 0
-    for node, (sg, ven) in prof.items():
-        if not ven:                              # 업체 미지정이면 프로파일 생략(구조만 반영·업체는 기존화면서 매핑)
-            continue
-        cur.execute("""INSERT INTO nx.sourcing_profile(item_code,profile_name,supply_gubun,vendor_code,lme_flag,
-              apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,route_id,buy_price,sagub_price)
-            VALUES(?,?,?,?,0,'2000-01-01',NULL,1,0,100,NULL,?,NULL,NULL)""",
-            node, (ven + " 경로매핑")[:100], sg, ven, int(route_id))
-        pn += 1
-    return {"edges": len(rows), "profiles": pn, "stops": len(stop)}
-
-
-@router.post("/api/sourcing/route/materialize_from_line")
-def sourcing_route_materialize_from_line(payload: dict = Body(...)):
-    """★다리 엔드포인트: 편집된 nx.sourcing_route_line → route_edges + sourcing_profile(멱등·route_id 스코프).
-       Rnn 편집(제작↔외주 스왑)을 계획반영 형태로 굳힘. 활성화는 별도(route_alloc·current_flag). ROUTE_REFLECTION §18-3~4."""
-    route_id = int(payload.get("route_id") or 0)
-    if route_id <= 0:
-        raise HTTPException(400, "route_id 필요")
-    nx = _nx_tx(); cur = nx.cursor()
-    try:
-        _ensure_route_tbl(cur)
-        r = _materialize_route_from_line(cur, route_id)
-        nx.commit()
-        return {"ok": True, "route_id": route_id, **r}
-    finally:
-        nx.close()
-
-
-@router.post("/api/sourcing/route/materialize_edges")
-def sourcing_route_materialize_edges(payload: dict = Body(...)):
-    """★R01 실체화(우리BOM route_edges): 대상 route_id에 그 품목 현행 활성 BOM엣지를 채움(멱등).
-       이후 편집(제작↔외주 스왑)→Rnn. soyo.py STEP7 route-aware가 활성route면 이 엣지로 전개(except_flag 없이). ROUTE_REFLECTION §18."""
-    p = payload
-    item = str(p.get("item_code", "")).strip()
-    route_id = int(p.get("route_id") or 0)
-    if not item or route_id <= 0:
-        raise HTTPException(400, "item_code·route_id 필요")
-    nx = _nx_tx(); cur = nx.cursor()
-    try:
-        _ensure_route_tbl(cur)
-        n = _materialize_r01_edges(cur, item, route_id)
-        nx.commit()
-        return {"ok": True, "route_id": route_id, "edges": n}
-    finally:
-        nx.close()
-
 
 @router.post("/api/sourcing/route/save")
 def sourcing_route_save(payload: dict = Body(...)):
@@ -1047,7 +967,7 @@ def _insert_current_tree(cur, rid, item, ymd="260630"):
     _codes = list({str(r.get("code", "")).strip().upper() for r in rows if str(r.get("code", "")).strip()})
     for _i in range(0, len(_codes), 500):
         _ck = _codes[_i:_i + 500]; _ph = ",".join("?" * len(_ck))
-        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(MAKE_TYPE,'') FROM nx.PR_M_ITEM WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN (" + _ph + ")", *_ck)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(MAKE_TYPE,\'\') FROM nx.item WHERE UPPER(LTRIM(RTRIM(ITEM_CODE))) IN (" + _ph + ")", *_ck)
         for _rr in cur.fetchall():
             _mkmap[_rr[0]] = str(_rr[1]).strip()
     for i, r in enumerate(rows):
@@ -1174,6 +1094,42 @@ def sourcing_route_edit_cancel(payload: dict = Body(...)):
     finally:
         nx.close()
 
+def _cleanup_orphan_subs(cur, rid):
+    """★route 삭제 시 이 route가 승인·mint한 SUB 중 **다른 곳에서 안 쓰이는 고아만** 근거키 정리(재발방지).
+       대상 = 이 route의 SUB노드 코드(S#####/_S{nn}) + 그 rep_item/매핑코드.
+       보존(skip) = 타 route_line·nx.bom_line·nx.bom_header 어디서든 참조되면 정리 안 함.
+       정리 = nx.sub_registry·nx.sub_code_map·nx.item(item_source IS NULL=드래프트 고아만). 반환=정리된 코드.
+       ★반드시 sourcing_route_line DELETE **전에** 호출(자기 route 제외 판정 성립). 대량삭제 아님=근거키."""
+    cur.execute("SELECT DISTINCT LTRIM(RTRIM(ISNULL(sub_item, child_item))) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
+    codes = [str(r[0]).strip() for r in cur.fetchall() if r[0] and str(r[0]).strip()]
+    cleaned = []
+    for sc in codes:
+        rel = {sc}
+        cur.execute("SELECT rep_item FROM nx.sub_registry WHERE sub_code=?", sc)
+        rr = cur.fetchone()
+        if rr and rr[0]: rel.add(str(rr[0]).strip())
+        cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE raw_item=?", sc)
+        mr = cur.fetchone()
+        if mr and mr[0]: rel.add(str(mr[0]).strip())
+        rel = [x for x in rel if x]
+        ph = ",".join("?" * len(rel))
+        used = 0
+        cur.execute(f"SELECT COUNT(*) FROM nx.sourcing_route_line WHERE route_id<>? AND (LTRIM(RTRIM(sub_item)) IN ({ph}) OR LTRIM(RTRIM(child_item)) IN ({ph}))", rid, *rel, *rel)
+        used += int(cur.fetchone()[0] or 0)
+        cur.execute(f"SELECT COUNT(*) FROM nx.bom_line WHERE LTRIM(RTRIM(child_item)) IN ({ph})", *rel)
+        used += int(cur.fetchone()[0] or 0)
+        cur.execute(f"SELECT COUNT(*) FROM nx.bom_header WHERE LTRIM(RTRIM(item_code)) IN ({ph})", *rel)
+        used += int(cur.fetchone()[0] or 0)
+        if used:
+            continue                                   # 다른 곳에서 사용 중 → 보존
+        for x in rel:                                  # 완전 고아 → 근거키 정리
+            cur.execute("DELETE FROM nx.sub_registry WHERE sub_code=? OR rep_item=?", x, x)
+            cur.execute("DELETE FROM nx.sub_code_map WHERE raw_item=? OR sub_code=?", x, x)
+            cur.execute("DELETE FROM nx.item WHERE item_code=? AND item_source IS NULL", x)
+        cleaned.append(sc)
+    return cleaned
+
+
 @router.post("/api/sourcing/route/delete")
 def sourcing_route_delete(payload: dict = Body(...)):
     """경로 삭제(헤더+라인+공정+용접). 현행 baseline(route_id=0)은 삭제 불가.
@@ -1196,12 +1152,13 @@ def sourcing_route_delete(payload: dict = Body(...)):
             nx.rollback()
             return {"ok": False, "guard": "IN_USE", "profiles": nprof,
                     "msg": f"조달 프로파일에서 사용 중({nprof}개 업체 매핑) — 매핑 해제 후 삭제하세요."}
+        orphan_subs = _cleanup_orphan_subs(cur, rid)   # ★삭제 전: 이 route mint 고아SUB 정리(재발방지·근거키)
         cur.execute("DELETE FROM nx.sourcing_route_weld WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route_proc WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route_line WHERE route_id=?", rid)
         cur.execute("DELETE FROM nx.sourcing_route WHERE route_id=?", rid)
         nx.commit()
-        return {"ok": True, "deleted": rid}   # route_no는 route_seq(high-water)에 남아 재사용 안 됨
+        return {"ok": True, "deleted": rid, "orphan_subs_cleaned": orphan_subs}   # route_no는 route_seq(high-water)에 남아 재사용 안 됨
     except Exception:
         nx.rollback(); raise
     finally:
@@ -1382,7 +1339,7 @@ def sourcing_pending(item: str = Query(""), gubun: str = Query(""), user: str = 
                 il = list(icodes)
                 for i in range(0, len(il), 900):
                     ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-                    c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+                    c2.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
                     for r in c2.fetchall(): imap[str(r[0]).strip()] = r[1]
             finally: cn.close()
         for d in rows:
@@ -1614,8 +1571,8 @@ def sourcing_part_assign(payload: dict = Body(...)):
 
 @router.post("/api/sourcing/line/gubun")
 def sourcing_line_gubun(payload: dict = Body(...)):
-    """부품/SUB 라인의 구분(제작/매입/사급) 설정 — 조달경로 통합검토 SUB패널. ★제작/매입/사급은 여기서 결정(업체=조달프로파일).
-       payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB에 지정 시 그 SUB 자체 성격(사급=협력사 유상사급 조립)."""
+    """부품/SUB 라인의 구분(생산구분 make_type 5종: 제작/외주/구매/사급/외주직납) 설정 — 조달경로 통합검토 SUB패널.
+       ★구분=여기서 결정(업체=조달프로파일). payload {route_id, line_id, gubun}. 편집=승인 리셋. SUB=그 SUB 성격(사급=협력사 유상사급 조립)."""
     rid = int(payload.get("route_id") or 0); line_id = int(payload.get("line_id") or 0)
     gubun = str(payload.get("gubun", "")).strip()[:20]
     if rid <= 0 or line_id <= 0: raise HTTPException(400, "route_id·line_id 필요")
@@ -1753,6 +1710,25 @@ def sourcing_profile_save(payload: dict = Body(...)):
             return {"ok": False, "gate": "NOT_APPROVED", "msg": "승인된 후보만 업체 매핑 가능(먼저 승인하세요)."}
         # 정규화 + 배분검증(활성·비내부·배분% 입력 대상)
         _pfloat = lambda v: (float(v) if (v not in (None, "", "null")) else None)   # 계획단가 파싱(공란=NULL)
+        # ★B(2026-08-25 설계): 업체·단가 완비 강제 — 업체 미지정 또는 단가(매입/사급 둘 다) 미입력 행은 저장 거부.
+        #   근거=활성 게이트(§19-C ③업체 ④단가). 소스에서 미완성 상태 차단 → sourcing_profile엔 완비행만.
+        bad = []
+        for r in rows:
+            if r.get("_delete"):
+                continue
+            vc0 = str(r.get("vendor_code", "")).strip()
+            bp0 = _pfloat(r.get("buy_price")); sp0 = _pfloat(r.get("sagub_price"))
+            touched = bool(vc0) or (bp0 is not None) or (sp0 is not None) or bool(r.get("is_active"))
+            if not touched:
+                continue  # 완전 빈 행 = 무시(등록 대상 아님)
+            if not vc0:
+                bad.append("업체 미지정 행 — 업체를 지정해야 저장됩니다")
+            elif bp0 is None and sp0 is None:
+                bad.append(f"{vc0}: 단가 미입력 — 매입가 또는 사급가를 입력해야 저장됩니다")
+        if bad:
+            nx.rollback()
+            return {"ok": False, "gate": "INCOMPLETE", "errors": list(dict.fromkeys(bad)),
+                    "msg": "업체·단가를 모두 입력해야 저장됩니다."}
         norm = []; act = []
         for r in rows:
             if r.get("_delete"):
@@ -1947,6 +1923,11 @@ def _ensure_sub_price_tbl(cur):
     # else: 이미 vendor_code 보유(override 가능 스키마) → 유지
     _SUB_PRICE_READY = True
 
+# ★2026-08-29 단가 소스 이관: 매입단가 조회 7곳을 미러 nx.PR_M_ITEM_COST →
+#   **정본 nx.price_item('매입')** 으로 옮겼다(DO_NOT_USE §18). main_flag 는 승격 시 백필됨.
+#   ★정렬에 vendor_code tiebreak 를 추가했다 — 종전 정렬(in_cust→main_flag→적용일)은
+#     셋 다 동점인 품목에서 **비결정적**이었다(EAD37660027: 거래처 2197/2198/2326 이
+#     같은날·같은 flag·매입처 미지정 → 3,683 vs 2.81 = 1,300배가 실행마다 갈릴 수 있었다).
 # ============ ★★통합 단가 테이블 nx.item_price (레거시 PR_M_ITEM_COST 계승) ============
 # 흩어진 nx 단가(sub_price=ASSY매입 · sagub_price=사급 · profile 가격칸)를 하나로 통합.
 # 컬럼: item_code · vendor_code(''=공통/지정=업체예외) · price_gubun(매입/판매/사급) · apply_ym(적용월 시계열) · price · currency · note.
@@ -2298,7 +2279,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             UNION ALL
             SELECT LTRIM(RTRIM(b.MAT_CODE)), CAST(t.q*b.USE_QTY AS decimal(28,10)), CAST(ISNULL(b.SAGUB_FLAG,'0') AS int), t.lvl+1
             FROM tree t JOIN PARTNER_ERP_TEST3.nx.v_pr_bom b ON b.ITEM_CODE=t.c AND b.FROM_APPLY_YMD<='991231' AND b.TO_APPLY_YMD>='260101' AND ISNULL(b.EXCEPT_FLAG,'0')<>'1'
-            JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
+            JOIN PARTNER_ERP_TEST3.nx.item pt ON pt.ITEM_CODE=t.c AND ISNULL(pt.MAKE_TYPE,'')='1'
             WHERE t.lvl < 10)
             SELECT c, SUM(q) qty, MAX(sg) sg FROM tree GROUP BY c OPTION(MAXRECURSION 60)""", item)
         agg = {}; sagub = {}
@@ -2310,9 +2291,9 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         info = {}
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"""SELECT LTRIM(RTRIM(m.ITEM_CODE)), ISNULL(m.ITEM_DESC,''), ISNULL(m.ITEM_SPEC,''), ISNULL(m.MAKE_TYPE,''),
-                  ISNULL(m.IN_CUST_CODE,''), ISNULL(c.CUST_DESC,'')
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.IN_CUST_CODE
+            cur.execute(f"""SELECT LTRIM(RTRIM(m.ITEM_CODE)), ISNULL(m.item_name,''), ISNULL(m.item_spec,''), ISNULL(m.MAKE_TYPE,''),
+                  ISNULL(m.in_cust,''), ISNULL(c.CUST_DESC,'')
+                FROM PARTNER_ERP_TEST3.nx.item m LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.in_cust
                 WHERE m.ITEM_CODE IN ({ph})""", *ch)
             for r in cur.fetchall():
                 info[str(r[0]).strip()] = {"nm": r[1], "spec": r[2], "mk": str(r[3]).strip(), "cust": str(r[4]).strip(), "custnm": r[5]}
@@ -2332,10 +2313,17 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
         price = {}
         for i in range(0, len(oc), 900):
             ch = oc[i:i+900]; ph = ",".join("?" * len(ch))
+            # ★2026-08-26 버그수정: 발주업체(품목 in_cust)와 단가 거래처 불일치 교정. in_cust 거래처 단가 우선,
+            #   없으면(빈 in_cust or 그 거래처 단가 없음) 대표단가(MAIN_FLAG)/최신 폴백. 실측 10%(1029건) 불일치만 교정·49%/41% 불변.
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
-                SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr, ISNULL(CUST_CODE,'') cust,
-                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)) ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC) rn
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=? AND LTRIM(RTRIM(ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+                SELECT LTRIM(RTRIM(pc.ITEM_CODE)) ITEM_CODE, pc.ITEM_COST, pc.COST_APPLY_YMD apply, ISNULL(pc.CURRENCY,'') curr, ISNULL(pc.CUST_CODE,'') cust,
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.item_code))
+                    ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.vendor_code))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
+                             ISNULL(pc.main_flag,'') DESC, pc.apply_ymd DESC,
+                             LTRIM(RTRIM(ISNULL(pc.vendor_code,''))) ASC) rn
+                FROM PARTNER_ERP_TEST3.nx.price_item pc
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code COLLATE DATABASE_DEFAULT=LTRIM(RTRIM(pc.item_code)) COLLATE DATABASE_DEFAULT
+                WHERE pc.price_type='매입' AND pc.apply_ymd<=? AND LTRIM(RTRIM(pc.item_code)) IN ({ph})) z WHERE rn=1""", asof, *ch)
             for r in cur.fetchall():
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
     finally:
@@ -2365,10 +2353,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             for i in range(0, len(pitems), 500):
                 ich = pitems[i:i+500]; iph = ",".join("?" * len(ich))
                 cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST, apply, curr FROM (
-                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr,
-                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
-                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, LTRIM(RTRIM(ISNULL(vendor_code,''))) cust, price ITEM_COST, apply_ymd apply, ISNULL(currency,'') curr,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) ORDER BY apply_ymd DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type='매입' AND apply_ymd<=?
+                      AND LTRIM(RTRIM(item_code)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})) z WHERE rn=1""",
                     asof, *ich, *pvend)
                 for r in cur2.fetchall():
                     vprice[(str(r[0]).strip(), str(r[1]).strip())] = {"cost": (float(r[2]) if r[2] is not None else None), "apply": str(r[3] or ""), "curr": r[4]}
@@ -2514,10 +2502,10 @@ def sourcing_route_order(item: str = Query(...), route_id: int = Query(...), ymd
             for i in range(0, len(saved_items), 400):
                 ich = saved_items[i:i + 400]; iph = ",".join("?" * len(ich))
                 cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST FROM (
-                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST,
-                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
-                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, LTRIM(RTRIM(ISNULL(vendor_code,''))) cust, price ITEM_COST,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) ORDER BY apply_ymd DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type='매입' AND apply_ymd<=?
+                      AND LTRIM(RTRIM(item_code)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})) z WHERE rn=1""",
                     asof, *ich, *saved_vcs)
                 for r in cur2.fetchall():
                     vprice[(str(r[0]).strip(), str(r[1]).strip())] = (float(r[2]) if r[2] is not None else None)
@@ -2627,15 +2615,15 @@ def _priced_vendors(item_code, vendors, asof=None):
     cn = _conn(); cur = cn.cursor()
     try:
         vph = ",".join("?" * len(vendors))
-        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-              AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})""", item_code, asof, *vendors)
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(vendor_code,''))) FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL
+              AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})""", item_code, asof, *vendors)
         priced = set(str(r[0]).strip() for r in cur.fetchall())
-        cur.execute("SELECT LTRIM(RTRIM(ISNULL(IN_CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item_code)
+        cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item_code)
         r = cur.fetchone(); cur_vc = str(r[0]).strip() if r else ""
         if cur_vc in vendors and cur_vc not in priced:
-            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL""", item_code, asof)
+            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL""", item_code, asof)
             if cur.fetchone(): priced.add(cur_vc)
         return priced
     finally:
@@ -2650,17 +2638,18 @@ def sourcing_item_vendor_price(item: str = Query(...), vendor: str = Query(...),
     asof = _d6(ymd) if ymd.strip() else datetime.now().strftime("%y%m%d")
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-            ORDER BY COST_APPLY_YMD DESC""", item, vendor, asof)
+        cur.execute("""SELECT TOP 1 price, apply_ymd, ISNULL(currency,'') FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND LTRIM(RTRIM(ISNULL(vendor_code,'')))=? AND apply_ymd<=? AND price IS NOT NULL
+            ORDER BY apply_ymd DESC""", item, vendor, asof)
         r = cur.fetchone()
         if r: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r[0]), "apply": str(r[1] or ""), "currency": r[2]}
-        cur.execute("SELECT LTRIM(RTRIM(ISNULL(IN_CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
+        cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         rr = cur.fetchone(); cur_vc = str(rr[0]).strip() if rr else ""
         if cur_vc == vendor:
-            cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-                ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC""", item, asof)
+            cur.execute("""SELECT TOP 1 price, apply_ymd, ISNULL(currency,'') FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL
+                ORDER BY ISNULL(main_flag,'') DESC, apply_ymd DESC,
+                         LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC""", item, asof)
             r2 = cur.fetchone()
             if r2: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r2[0]), "apply": str(r2[1] or ""), "currency": r2[2]}
         return {"item": item, "vendor": vendor, "reg": False, "cost": None}
@@ -2889,15 +2878,27 @@ def sourcing_route_finalize(payload: dict = Body(...)):
             errors.append(f"보관함(왼쪽 풀)에 미배치 부품 {len(staged_parts)}건: {', '.join(staged_parts[:8])}{'…' if len(staged_parts) > 8 else ''} — 모두 ASSY/SUB에 배치해야 저장됩니다")
         ok = gongsu_ok and part_ok and staged_ok
         # 신규 SUB mint(정본 S 발급)는 finalize 아닌 ★승인(route/approve) 시점에 수행 — 레지스트리 청결(승인된 SUB만 정본코드).
+        edges_n = None
         if ok and commit:
             cur.execute("UPDATE nx.sourcing_route SET upd_dt=getdate() WHERE route_id=?", rid)
+            # ★A(2026-08-25 설계): 저장(commit)마다 route_edges 자동 등록(구조 전용) — "다리"를 저장에 흡수.
+            #   Rnn(route_no>1)만 대상. R01(route_no=1)=현행 v_pr_bom 직접전개라 route_edges 불필요(생성해도 plan_route_active 미포함=무효).
+            #   활성화(계획 반영)는 별도 게이트(승인·업체·단가) 통과 후 — 여기선 구조만 최신화. sourcing_profile(업체/단가)=조달프로파일 담당.
+            cur.execute("SELECT ISNULL(route_no,1) FROM nx.sourcing_route WHERE route_id=?", rid)
+            _rn = cur.fetchone()
+            if _rn and int(_rn[0] or 1) > 1:
+                try:
+                    edges_n = _materialize_route_edges(cur, rid)
+                except Exception as _e:
+                    raise HTTPException(500, f"route_edges 자동등록 오류: {_e}")
             _snap_clear(cur, rid)   # ★전체저장 확정 → 편집 세션 스냅샷 폐기(이후 닫기=되돌릴 것 없음)
             nx.commit()
         else:
             nx.rollback()   # 검증전용(commit=0) 또는 실패 → reuse 변경 롤백
         return {"ok": ok, "gongsu_ok": gongsu_ok, "part_ok": part_ok, "staged_ok": staged_ok, "cand_gongsu": cand, "base_gongsu": base,
                 "cut_sum": cut_sum, "proc_sum": proc_sum, "base_part_count": len(base_parts), "route_part_count": len(route_parts),
-                "missing": missing, "extra": extra, "staged": staged_parts, "reused": reused, "committed": bool(ok and commit), "errors": errors}
+                "missing": missing, "extra": extra, "staged": staged_parts, "reused": reused, "committed": bool(ok and commit),
+                "route_edges": edges_n, "errors": errors}
     except HTTPException:
         nx.rollback(); raise
     except Exception:

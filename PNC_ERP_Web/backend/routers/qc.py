@@ -2,8 +2,12 @@
 """품질(qc) 도메인 라우터 — 불량관리·시방변경·IQC조회. 조회=레거시QA_+nx 합집합, 쓰기=nx.
    app.py에서 분리. 공유헬퍼는 common.py. ★_b·_d8은 이 도메인 로컬(common의 _b와 다름=FINISH_FLAG용)."""
 from datetime import datetime
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, HTTPException, UploadFile, File, Form
 from common import _conn, _nx, _nx_tx, _d6, _num
+# ★품질불량 첨부파일(3종) — 기존 문서저장소(nx.doc + NAS)를 그대로 재사용한다.
+#   경로정책·백업이 도면첨부와 같아지도록 doc.py 와 동일한 DOC_STORAGE_PATH 를 쓴다.
+import os as _os, hashlib as _hashlib
+from routers.doc import DOC_STORAGE_PATH
 
 router = APIRouter()
 
@@ -48,8 +52,8 @@ def qc_opt(kind: str = Query("part"), q: str = Query("")):
         elif kind == "line":
             cur.execute("SELECT TOP 50 LINE_NO code, LINE_NO nm FROM PARTNER_ERP_TEST3.nx.PR_M_LINE_NO WHERE LINE_NO LIKE ? ORDER BY LINE_NO", like)
         elif kind == "item":
-            cur.execute("""SELECT TOP 50 ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM
-                WHERE ITEM_CODE LIKE ? OR ITEM_DESC LIKE ? ORDER BY ITEM_CODE""", like, like)
+            cur.execute("""SELECT TOP 50 ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item
+                WHERE ITEM_CODE LIKE ? OR item_name LIKE ? ORDER BY ITEM_CODE""", like, like)
         else:
             raise HTTPException(400, "알 수 없는 kind")
         return {"rows": [{"code": str(r[0]).strip(), "name": str(r[1]).strip()} for r in cur.fetchall()]}
@@ -86,7 +90,7 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
         if src in ("all", "legacy"):
             parts.append(f"""SELECT 'legacy' src, CAST(e.SEQ AS NVARCHAR(20)) key_id, ISNULL(e.ERROR_TAG,'') tag,
                 ISNULL(e.CUST_LINE,'') cust_line, ISNULL(e.DIVISION_DESC,'') division, ISNULL(e.PG_REG_INFO,'') pg_reg,
-                e.ERROR_YMD error_ymd, e.ITEM_CODE item_code, ISNULL(i.ITEM_DESC,'') item_desc,
+                e.ERROR_YMD error_ymd, e.ITEM_CODE item_code, ISNULL(i.item_name,'') item_desc,
                 ISNULL(e.WORK_CODE,'') work_code, ISNULL(e.PROC_CODE,'') proc_code, ISNULL(pg.GAGONG_PROC_DESC,'') part_nm,
                 ISNULL(e.MACH_CODE,'') mach_code, ISNULL(m.MACH_DESC,'') mach_nm, ISNULL(e.WORK_CUST_CODE,'') partner_code,
                 ISNULL(c.CUST_DESC,'') partner_nm, ISNULL(e.INSPECTOR_MEMBER_NAME,'') inspector, ISNULL(e.ERROR_MEMBER_NAME,'') error_member,
@@ -95,15 +99,16 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 ISNULL(e.ERROR_QTY,0) error_qty, ISNULL(e.REAL_ERROR_QTY,0) real_qty, ISNULL(e.ERROR_CAUSE,'') error_cause,
                 ISNULL(e.PROGRESS_STATS,'') progress, ISNULL(e.WATER_CHECK_FLAG,'') water_flag,
                 ISNULL(e.RE_INSP_CHECK,'') reinsp_flag, ISNULL(e.FINISH_FLAG,'') finish_flag, ISNULL(e.CHARGE_NAME,'') charge,
-                CAST(e.SEQ AS INT) lseq
-                FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=e.ITEM_CODE
+                CAST(e.SEQ AS INT) lseq,
+                0 f_attach, 0 f_plan1, 0 f_plan2   -- 레거시행은 웹첨부 대상 아님(nx 행에만 첨부 가능)
+                FROM PARTNER_ERP_TEST3.nx.QA_T_ERROR e LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=e.ITEM_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=e.PROC_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m ON m.MACH_CODE=e.MACH_CODE
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=e.WORK_CUST_CODE WHERE {wl}{dedup}""")
         if src in ("all", "nx"):
             parts.append(f"""SELECT 'nx' src, CAST(n.id AS NVARCHAR(20)) key_id, ISNULL(n.error_tag,'') tag,
                 ISNULL(n.cust_line,'') cust_line, ISNULL(n.division,'') division, ISNULL(n.pg_reg,'') pg_reg,
-                n.error_ymd error_ymd, n.item_code item_code, ISNULL(i2.ITEM_DESC,'') item_desc,
+                n.error_ymd error_ymd, n.item_code item_code, ISNULL(i2.item_name,'') item_desc,
                 ISNULL(n.work_code,'') work_code, ISNULL(n.proc_code,'') proc_code, ISNULL(pg2.GAGONG_PROC_DESC,'') part_nm,
                 ISNULL(n.mach_code,'') mach_code, ISNULL(m2.MACH_DESC,'') mach_nm, ISNULL(n.partner_code,'') partner_code,
                 ISNULL(c2.CUST_DESC,'') partner_nm, ISNULL(n.inspector,'') inspector, ISNULL(n.error_member,'') error_member,
@@ -112,8 +117,9 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
                 ISNULL(n.error_qty,0) error_qty, ISNULL(n.real_error_qty,0) real_qty, ISNULL(n.error_cause,'') error_cause,
                 ISNULL(n.progress_stats,'') progress, CAST(ISNULL(n.susu_flag,0) AS NVARCHAR(1)) water_flag,
                 CAST(ISNULL(n.reinsp_flag,0) AS NVARCHAR(1)) reinsp_flag, CAST(ISNULL(n.finish_flag,0) AS NVARCHAR(1)) finish_flag,
-                ISNULL(n.charge_name,'') charge, ISNULL(n.legacy_seq,0) lseq
-                FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i2 ON i2.ITEM_CODE=n.item_code
+                ISNULL(n.charge_name,'') charge, ISNULL(n.legacy_seq,0) lseq,
+                ISNULL(n.attach_doc_id,0) f_attach, ISNULL(n.plan1_doc_id,0) f_plan1, ISNULL(n.plan2_doc_id,0) f_plan2
+                FROM PARTNER_ERP_TEST3.nx.qc_error n LEFT JOIN PARTNER_ERP_TEST3.nx.item i2 ON i2.ITEM_CODE=n.item_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg2 ON pg2.GAGONG_PROC_CODE=n.proc_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE m2 ON m2.MACH_CODE=n.mach_code
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c2 ON c2.CUST_CODE=n.partner_code WHERE {wn}""")
@@ -130,6 +136,8 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
             r["tag_nm"] = _ERRTAG.get(str(r["tag"]).strip(), str(r["tag"]))
             r["work_nm"] = _WORKNM.get(str(r["work_code"]).strip(), str(r["work_code"]))
             r["ID"] = int(r["key_id"]) if r["src"] == "nx" and str(r["key_id"]).isdigit() else None
+            # 첨부 3칸 중 몇 개가 붙어있나(그리드 📎 표시용)
+            r["n_files"] = sum(1 for k in ("f_attach", "f_plan1", "f_plan2") if int(r.get(k) or 0))
         return {"rows": rows, "cnt": len(rows),
                 "sum_err": sum(r["error_qty"] for r in rows), "sum_lot": sum(r["lot_qty"] for r in rows)}
     finally:
@@ -138,10 +146,11 @@ def qc_error_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str 
 @router.post("/api/qc/error/save")
 def qc_error_save(payload: dict = Body(...)):
     p = payload
-    ymd = _d6(str(p.get("error_ymd", "")))
+    # ★필수는 P/No 뿐(레거시 w_qa_input_025 동일). 불량일자 미입력 시 오늘로 채운다(2026-08-23)
+    ymd = _d6(str(p.get("error_ymd", ""))) or datetime.now().strftime("%y%m%d")
     item = str(p.get("item_code", "")).strip()[:40]
-    if not ymd or not item:
-        raise HTTPException(400, "불량일자·품번은 필수입니다.")
+    if not item:
+        raise HTTPException(400, "P/No(품번)는 필수입니다.")
     def s(k, n): return str(p.get(k, "")).strip()[:n]
     def f(k):
         try: return float(p.get(k) or 0)
@@ -184,6 +193,100 @@ def qc_error_delete(payload: dict = Body(...)):
     try:
         cur.execute(f"DELETE FROM nx.qc_error WHERE id IN ({','.join('?'*len(ids))})", *ids)
         return {"ok": True, "deleted": cur.rowcount}
+    finally:
+        nx.close()
+
+# ---------- 품질불량관리 첨부파일 3종 (레거시 w_qa_input_025: 첨부파일#1·대책서#1·대책서#2) ----------
+# ★파일 실체는 기존 문서저장소(nx.doc + NAS DOC_STORAGE_PATH)를 그대로 재사용한다.
+#   qc_error 에는 doc_id 만 들고, 다운로드는 기존 /api/doc/download?src=doc&key=<doc_id> 로 처리.
+#   → 저장소를 새로 만들지 않으므로 백업·경로정책이 도면첨부와 동일하게 유지된다.
+_QC_SLOT = {"attach": "attach_doc_id", "plan1": "plan1_doc_id", "plan2": "plan2_doc_id"}
+_QC_SLOT_NM = {"attach": "첨부파일#1", "plan1": "대책서#1", "plan2": "대책서#2"}
+
+@router.get("/api/qc/error/files")
+def qc_error_files(id: int = Query(...)):
+    """그 불량건의 첨부 3칸 현황(슬롯별 파일명·크기·업로더)."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT ISNULL(e.attach_doc_id,0), ISNULL(e.plan1_doc_id,0), ISNULL(e.plan2_doc_id,0)
+                         FROM nx.qc_error e WHERE e.id=?""", int(id))
+        r = cur.fetchone()
+        if not r: raise HTTPException(404, "불량건 없음")
+        out = {}
+        for slot, did in zip(("attach", "plan1", "plan2"), r):
+            info = {"slot": slot, "label": _QC_SLOT_NM[slot], "doc_id": None,
+                    "filename": "", "size": 0, "user": "", "dt": ""}
+            if did:
+                cur.execute("""SELECT orig_filename, byte_size, insert_user, insert_dt
+                                 FROM nx.doc WHERE doc_id=? AND del_flag=0""", int(did))
+                d = cur.fetchone()
+                if d:
+                    info.update({"doc_id": int(did), "filename": d[0], "size": int(d[1] or 0),
+                                 "user": d[2] or "",
+                                 "dt": (d[3].isoformat() if hasattr(d[3], "isoformat") else str(d[3] or "")).replace("T", " ")[:19]})
+            out[slot] = info
+        return {"ok": True, "id": int(id), "files": out}
+    finally:
+        nx.close()
+
+@router.post("/api/qc/error/file_upload")
+async def qc_error_file_upload(file: UploadFile = File(...), id: int = Form(...),
+                               slot: str = Form("attach"), user: str = Form("웹사용자")):
+    """첨부 업로드 — 슬롯(attach/plan1/plan2) 1칸당 파일 1개. 재업로드하면 이전 것은 삭제표시."""
+    slot = str(slot).strip()
+    if slot not in _QC_SLOT:
+        raise HTTPException(400, "slot 은 attach/plan1/plan2 중 하나여야 합니다.")
+    raw = await file.read()
+    if not raw: raise HTTPException(400, "빈 파일입니다.")
+    fname = file.filename or "file"
+    ext = ((fname.rsplit(".", 1)[-1] if "." in fname else "") or "").lower()[:10]
+    sha = _hashlib.sha256(raw).hexdigest()
+    sub = _os.path.join("QC_ERROR", str(int(id)))
+    d = _os.path.join(DOC_STORAGE_PATH, sub)
+    try:
+        _os.makedirs(d, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(500, f"저장경로 생성 실패({DOC_STORAGE_PATH}): {e}")
+    safe = f"{slot}_{sha[:12]}_{fname}"
+    with open(_os.path.join(d, safe), "wb") as fp: fp.write(raw)
+    rel = _os.path.join(sub, safe)
+    nx = _nx(); cur = nx.cursor()
+    try:
+        col = _QC_SLOT[slot]
+        cur.execute(f"SELECT ISNULL({col},0) FROM nx.qc_error WHERE id=?", int(id))
+        r = cur.fetchone()
+        if not r: raise HTTPException(404, "불량건 없음 — 먼저 저장한 뒤 첨부하세요.")
+        old = int(r[0] or 0)
+        cur.execute("""INSERT INTO nx.doc(doc_kind,item_code,orig_filename,storage_uri,ext,byte_size,sha256,insert_user,insert_dt)
+            OUTPUT INSERTED.doc_id VALUES('QC_ERROR',?,?,?,?,?,?,?,GETDATE())""",
+            str(int(id)), fname, rel, ext, len(raw), sha, (user or "웹사용자")[:20])
+        did = int(cur.fetchone()[0])
+        cur.execute(f"UPDATE nx.qc_error SET {col}=?, upd_user=?, upd_dt=getdate() WHERE id=?",
+                    did, (user or "웹사용자")[:40], int(id))
+        if old:      # 같은 칸의 이전 파일은 삭제표시(실파일은 남겨 복구 가능)
+            cur.execute("UPDATE nx.doc SET del_flag=1 WHERE doc_id=?", old)
+        return {"ok": True, "doc_id": did, "slot": slot, "filename": fname, "size": len(raw)}
+    finally:
+        nx.close()
+
+@router.post("/api/qc/error/file_delete")
+def qc_error_file_delete(payload: dict = Body(...)):
+    """첨부 삭제(파일삭제 체크) — 슬롯을 비운다. 실파일은 남기고 doc 만 삭제표시."""
+    try: rid = int(payload.get("id"))
+    except Exception: raise HTTPException(400, "id 필요")
+    slot = str(payload.get("slot", "")).strip()
+    if slot not in _QC_SLOT:
+        raise HTTPException(400, "slot 은 attach/plan1/plan2 중 하나여야 합니다.")
+    col = _QC_SLOT[slot]
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute(f"SELECT ISNULL({col},0) FROM nx.qc_error WHERE id=?", rid)
+        r = cur.fetchone()
+        if not r: return {"ok": False, "errors": ["불량건 없음"]}
+        did = int(r[0] or 0)
+        cur.execute(f"UPDATE nx.qc_error SET {col}=NULL, upd_dt=getdate() WHERE id=?", rid)
+        if did: cur.execute("UPDATE nx.doc SET del_flag=1 WHERE doc_id=?", did)
+        return {"ok": True, "slot": slot, "deleted_doc_id": (did or None)}
     finally:
         nx.close()
 
@@ -274,20 +377,20 @@ def qc_spec_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str =
         parts = []
         if src in ("all", "legacy"):
             parts.append(f"""SELECT 'legacy' src, s.REV_YYMD+'-'+CAST(s.REV_NO AS NVARCHAR(10)) key_id, s.REV_YYMD rev_ymd, s.REV_NO rev_no,
-                ISNULL(s.CST_REV_NO,'') cst_no, ISNULL(s.ECO_NO,'') eco, s.ITEM_CODE item_code, ISNULL(i.ITEM_DESC,'') nm, ISNULL(s.REV_MARK,'') mark,
+                ISNULL(s.CST_REV_NO,'') cst_no, ISNULL(s.ECO_NO,'') eco, s.ITEM_CODE item_code, ISNULL(i.item_name,'') nm, ISNULL(s.REV_MARK,'') mark,
                 ISNULL(s.REV_DESC,'') rdesc, ISNULL(s.ISSUE_YYMD,'') issue, ISNULL(s.DEPT_NAME,'') dept,
                 ISNULL(s.CHARGE_NAME,'') charge, ISNULL(s.APPLY_YYMD,'') apply_ymd, ISNULL(s.APPLY_TYPE,'') atype,
                 ISNULL(s.APPLY_STOCK,'') apply_stock, ISNULL(s.DRAWING_FILE,'') drawing, ISNULL(s.SPECS_FILE,'') specs,
                 ISNULL(s.COST_CHANGE_FLAG,'') cost_f, ISNULL(s.LG_COST_CHANGE_FLAG,'') lg_cost_f, ISNULL(s.BOM_FLAG,'') bom_f, ISNULL(s.REMARKS,'') remarks
-                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV s LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=s.ITEM_CODE WHERE {wl}""")
+                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV s LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=s.ITEM_CODE WHERE {wl}""")
         if src in ("all", "nx"):
             parts.append(f"""SELECT 'nx' src, CAST(n.id AS NVARCHAR(20)) key_id, n.rev_ymd rev_ymd, n.rev_no rev_no,
-                ISNULL(n.cst_rev_no,'') cst_no, ISNULL(n.eco_no,'') eco, n.item_code item_code, ISNULL(i2.ITEM_DESC,'') nm, ISNULL(n.rev_mark,'') mark,
+                ISNULL(n.cst_rev_no,'') cst_no, ISNULL(n.eco_no,'') eco, n.item_code item_code, ISNULL(i2.item_name,'') nm, ISNULL(n.rev_mark,'') mark,
                 ISNULL(n.rev_desc,'') rdesc, ISNULL(n.issue_ymd,'') issue, ISNULL(n.dept_name,'') dept, ISNULL(n.charge_name,'') charge,
                 ISNULL(n.apply_ymd,'') apply_ymd, ISNULL(n.apply_type,'') atype, ISNULL(n.apply_stock,'') apply_stock,
                 ISNULL(n.drawing_file,'') drawing, ISNULL(n.specs_file,'') specs, CAST(ISNULL(n.cost_change,0) AS NVARCHAR(4)) cost_f,
                 CAST(ISNULL(n.lg_cost_change,0) AS NVARCHAR(4)) lg_cost_f, CAST(ISNULL(n.bom_change,0) AS NVARCHAR(4)) bom_f, ISNULL(n.remarks,'') remarks
-                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev n LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i2 ON i2.ITEM_CODE=n.item_code WHERE {wn}""")
+                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev n LEFT JOIN PARTNER_ERP_TEST3.nx.item i2 ON i2.ITEM_CODE=n.item_code WHERE {wn}""")
         sql = "SELECT TOP 3000 * FROM (\n" + "\nUNION ALL\n".join(parts) + "\n) q ORDER BY rev_ymd DESC, rev_no DESC"
         cur.execute(sql, *(p * len(parts)))
         cols = [d[0] for d in cur.description]
@@ -354,20 +457,20 @@ def qc_spec_apply(rev_ymd: str = Query(...), rev_no: str = Query(...), item: str
     cn = _conn(); cur = cn.cursor()
     try:
         if src == "nx":
-            cur.execute("""SELECT a.item_code item, ISNULL(i.ITEM_DESC,'') nm, ISNULL(a.apply_flag,0) apply_flag,
+            cur.execute("""SELECT a.item_code item, ISNULL(i.item_name,'') nm, ISNULL(a.apply_flag,0) apply_flag,
                   ISNULL(a.input_ymd,'') input_ymd, ISNULL(a.prod_ymd,'') prod_ymd, ISNULL(a.output_ymd,'') output_ymd
-                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev_apply a LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=a.item_code
+                FROM PARTNER_ERP_TEST3.nx.qc_spec_rev_apply a LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=a.item_code
                 WHERE a.rev_ymd=? AND a.rev_no=? ORDER BY a.item_code""", y, no)
         else:
-            cur.execute("""SELECT a.ITEM_CODE item, ISNULL(i.ITEM_DESC,'') nm, ISNULL(a.APPLY_FLAG,'') apply_flag,
+            cur.execute("""SELECT a.ITEM_CODE item, ISNULL(i.item_name,'') nm, ISNULL(a.APPLY_FLAG,'') apply_flag,
                   ISNULL(a.INPUT_YYMD,'') input_ymd, ISNULL(a.PROD_YYMD,'') prod_ymd, ISNULL(a.OUTPUT_YYMD,'') output_ymd
-                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV_APPLY a LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=a.ITEM_CODE
+                FROM PARTNER_ERP_TEST3.nx.QA_T_SPEC_REV_APPLY a LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=a.ITEM_CODE
                 WHERE a.REV_YYMD=? AND a.REV_NO=? ORDER BY a.ITEM_CODE""", y, no)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows: r["apply_flag"] = _b(r["apply_flag"])
         if not rows and item.strip() and src != "nx":
-            cur.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item.strip())
+            cur.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item.strip())
             g = cur.fetchone()
             rows = [{"item": item.strip(), "nm": (g[0] if g else ""), "apply_flag": 1,
                      "input_ymd": "", "prod_ymd": "", "output_ymd": ""}]
@@ -432,11 +535,11 @@ def qc_iqc_list(from_ymd: str = Query(""), to_ymd: str = Query(""), item: str = 
         if to_ymd:   w.append("h.OQC_YMD<=?"); p.append(_d6(to_ymd))
         if item.strip(): w.append("h.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if cust.strip(): w.append("h.CUST_CODE LIKE ?"); p.append(f"%{cust.strip()}%")
-        cur.execute(f"""SELECT TOP 2000 h.OQC_YMD oqc_ymd, h.OQC_SEQ oqc_seq, h.ITEM_CODE item_code, ISNULL(i.ITEM_DESC,'') nm,
+        cur.execute(f"""SELECT TOP 2000 h.OQC_YMD oqc_ymd, h.OQC_SEQ oqc_seq, h.ITEM_CODE item_code, ISNULL(i.item_name,'') nm,
             ISNULL(h.MAT_CODE,'') mat, ISNULL(h.CUST_CODE,'') cust, ISNULL(c.CUST_DESC,'') cust_nm,
             ISNULL(h.LINE,'') line, ISNULL(h.INSP_QTY,0) insp_qty, ISNULL(h.ERR_TEXT,'') err_text,
             ISNULL(h.RESULT_OK,0) ok
-            FROM PARTNER_ERP_TEST3.nx.QA_T_CUST_IQC_HEAD h LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i ON i.ITEM_CODE=h.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.QA_T_CUST_IQC_HEAD h LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=h.ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=h.CUST_CODE
             WHERE {' AND '.join(w)} ORDER BY h.OQC_YMD DESC, h.OQC_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]

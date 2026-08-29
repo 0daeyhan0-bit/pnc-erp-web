@@ -127,6 +127,7 @@ def prod_soyo(eng, item):
     return out
 
 
+<<<<<<< HEAD
 def sagub_parts_soyo(eng, item, stop_set, memo=None):
     """[사급부품 walker] per-unit 완제품 1개 → {stop_set 부품: 소요개수}. v_pr_bom(=nx.bom_line·except≠1) 재귀,
     stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
@@ -155,6 +156,8 @@ def sagub_parts_soyo(eng, item, stop_set, memo=None):
     return walk(item.strip().upper(), 0)
 
 
+=======
+>>>>>>> zt/main
 # ===================== 생산계획 walker (STEP6/7 재현) =====================
 # plan_part_mat = 가공공정 전이 grain. Stage1=plan_part_temp(CTE_BOM), Stage2=가공공정JOIN, Stage3=전이+최하위.
 
@@ -165,6 +168,7 @@ def _prmmat_set(eng):
     return eng._prmmat
 
 
+<<<<<<< HEAD
 import threading as _threading
 _VPR_CACHE = None                 # ★모듈 공유 캐시 {item: [(mat,qty,except,vir)]} (전 요청 공유·읽기전용=스레드안전)
 _VPR_LOCK = _threading.Lock()
@@ -195,6 +199,13 @@ def _vpr_full(eng, item):
         return _VPR_CACHE.get(k, [])        # 프리로드 = 미존재는 leaf([])
     if not hasattr(eng, '_vprf'):
         eng._vprf = {}
+=======
+def _vpr_full(eng, item):
+    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). 캐시."""
+    if not hasattr(eng, '_vprf'):
+        eng._vprf = {}
+    k = item.strip().upper()
+>>>>>>> zt/main
     if k not in eng._vprf:
         eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY), ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
             FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? ORDER BY BOM_SEQ""", k)

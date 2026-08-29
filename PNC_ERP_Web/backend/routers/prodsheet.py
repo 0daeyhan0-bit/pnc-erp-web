@@ -4,9 +4,9 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed)
 
-from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod
+from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod, _weld_consume
 router = APIRouter()
 
 # ===================== 생산전표출력관리 (w_pr_input_490) — 전표 기준 마스터-디테일 =====================
@@ -42,7 +42,16 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         f8, t8 = d8(from_ymd), d8(to_ymd)
         if f8: w.append("CONVERT(varchar(8),h.PRINT_DATETIME,112)>=?"); p.append(f8)
         if t8: w.append("CONVERT(varchar(8),h.PRINT_DATETIME,112)<=?"); p.append(t8)
-        if part.strip():     w.append("ISNULL(h.STOCK_GAGONG_PROC_CODE,'')=?"); p.append(part.strip())
+        # 파트 필터도 표시와 같은 기준(DTL 첫 공정, 없으면 헤더)으로 — 안 그러면
+        # 화면엔 08라인인데 06라인으로 조회해야 나오는 어긋남이 생긴다.
+        if part.strip():
+            w.append("""ISNULL((SELECT TOP 1 d2.GAGONG_PROC_CODE
+                                  FROM nx.PR_T_INDI_WELD_SHEET_DTL d2 WITH(NOLOCK)
+                                 WHERE d2.SHEET_NO=h.SHEET_NO
+                                   AND ISNULL(d2.GAGONG_PROC_CODE,'')<>''
+                                   AND ISNULL(d2.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                                 ORDER BY d2.PROC_SEQ), ISNULL(h.STOCK_GAGONG_PROC_CODE,''))=?""")
+            p.append(part.strip())
         if item.strip():     w.append("h.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         if sheet_no.strip(): w.append("CAST(h.SHEET_NO AS varchar(20)) LIKE ?"); p.append(f"%{sheet_no.strip()}%")
         # 생산완료 필터 = PROD_FIN_FLAG
@@ -56,8 +65,20 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         if label_no.strip():
             w.append("EXISTS(SELECT 1 FROM nx.PR_T_PRINT_STICKER s WITH(NOLOCK) WHERE s.SHEET_NO=h.SHEET_NO AND CAST(s.PRINT_SEQ AS varchar(20)) LIKE ?)")
             p.append(f"%{label_no.strip()}%")
+        # ★투입파트 = 전표 DTL 의 실제 공정(첫 공정). 헤더 STOCK_GAGONG_PROC_CODE 는
+        #   상위 P/No 기준값이라 -SUB·은납 등 하위품목이 전부 상위라인(예: RAC=06라인)으로
+        #   잘못 보였다. 실측(8/24~28 전표 649건): 헤더=DTL 12건뿐, 다름 412 · 헤더만 225.
+        #   DTL 은 발행방법(JP_PROC_METHOD J=전표/G=가간판) 무관하게 공정이 들어있으므로
+        #   method 로 거르지 않고 PROC_SEQ 최소 행을 쓴다. 가공파트(P00xx)는 별도 화면 소관이라 제외.
+        #   DTL 이 아예 없는 전표만 헤더값으로 폴백.  2026-08-28
         ncur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))}
-              h.SHEET_NO, ISNULL(h.UPPER_ITEM_CODE,''), ISNULL(h.STOCK_GAGONG_PROC_CODE,''),
+              h.SHEET_NO, ISNULL(h.UPPER_ITEM_CODE,''),
+              ISNULL((SELECT TOP 1 d.GAGONG_PROC_CODE
+                        FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
+                       WHERE d.SHEET_NO=h.SHEET_NO
+                         AND ISNULL(d.GAGONG_PROC_CODE,'')<>''
+                         AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                       ORDER BY d.PROC_SEQ), ISNULL(h.STOCK_GAGONG_PROC_CODE,'')),
               h.PLAN_YMD, h.PLAN_QTY, h.ITEM_CODE, ISNULL(h.PROD_FIN_FLAG,'0'),
               ISNULL(h.LINE_NO,''), ISNULL(h.DS_INPUT_HM,''), ISNULL(h.PRINT_USER_ID,''), h.PRINT_DATETIME,
               (SELECT COUNT(*) FROM nx.PR_T_INDI_SHEET2 b WITH(NOLOCK)
@@ -80,7 +101,7 @@ def prodsheet_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: str
         nm = {}; il = [x for x in items if x]
         for i in range(0, len(il), 900):
             ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-            cur.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in cur.fetchall(): nm[str(a).strip()] = b
         pn = {}; gl = [x for x in gpcs if x]
         if gl:
@@ -176,13 +197,21 @@ def prodsheet_detail(sheet_no: str = Query(...)):
 
 @router.get("/api/prodsheet/parts")
 def prodsheet_parts():
-    """파트 드롭다운(투입파트) — 전표에 실제 쓰인 STOCK_GAGONG_PROC_CODE만."""
+    """파트 드롭다운(투입파트) — 전표에 실제 쓰인 공정만.
+       ★목록/필터와 같은 기준(DTL 첫 공정, 없으면 헤더). 2026-08-28"""
     nx = _nx(); cur = nx.cursor()
     cn = _conn(); c2 = cn.cursor()
     try:
-        cur.execute("""SELECT DISTINCT ISNULL(STOCK_GAGONG_PROC_CODE,'') c
-                         FROM nx.PR_T_INDI_WELD_SHEET WITH(NOLOCK)
-                        WHERE ISNULL(STOCK_GAGONG_PROC_CODE,'')<>''""")
+        cur.execute("""SELECT DISTINCT c FROM (
+                         SELECT ISNULL((SELECT TOP 1 d.GAGONG_PROC_CODE
+                                          FROM nx.PR_T_INDI_WELD_SHEET_DTL d WITH(NOLOCK)
+                                         WHERE d.SHEET_NO=h.SHEET_NO
+                                           AND ISNULL(d.GAGONG_PROC_CODE,'')<>''
+                                           AND ISNULL(d.GAGONG_PROC_CODE,'') NOT LIKE 'P00%'
+                                         ORDER BY d.PROC_SEQ),
+                                       ISNULL(h.STOCK_GAGONG_PROC_CODE,'')) c
+                           FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)) X
+                        WHERE ISNULL(c,'')<>''""")
         codes = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
         nm = {}
         if codes:
@@ -205,8 +234,8 @@ def prodsheet_packinfo(item: str = Query(...)):
     try:
         cur.execute("""SELECT ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0), ISNULL(s.CUST_PACK_QTY,0),
                           ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''), ISNULL(s.STICKER_COLOR,''),
-                          ISNULL(i.ITEM_DESC,''), ISNULL(i.ITEM_SPEC,'')
-                        FROM nx.PR_M_ITEM i WITH(NOLOCK)
+                          ISNULL(i.item_name,''), ISNULL(i.item_spec,'')
+                        FROM nx.item i WITH(NOLOCK)
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=i.ITEM_CODE
                        WHERE i.ITEM_CODE=?""", ic)
         r = cur.fetchone()
@@ -247,12 +276,12 @@ def prodsheet_kanban_preview(sheet_no: str = Query(...), pack_qty: int = Query(0
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT h.ITEM_CODE, h.PLAN_YMD, h.PLAN_QTY, ISNULL(h.LINE_NO,''),
-                          ISNULL(h.STOCK_GAGONG_PROC_CODE,''), ISNULL(i.ITEM_DESC,''),
+                          ISNULL(h.STOCK_GAGONG_PROC_CODE,''), ISNULL(i.item_name,''),
                           ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
                           ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
                           ISNULL(h.PROD_FIN_FLAG,'0')
                         FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         r = cur.fetchone()
@@ -416,10 +445,10 @@ def prodsheet_kanban_print(box_no: str = Query(...)):
     try:
         cur.execute("""SELECT b.BOX_NO, b.ITEM_CODE, b.PLAN_YMD, ISNULL(b.LINE_NO,''), b.PLAN_QTY,
                           b.ORG_PLAN_QTY, b.SHEET_NO, ISNULL(b.PRINT_USER_ID,''), b.PRINT_DATETIME,
-                          ISNULL(i.ITEM_DESC,''), ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
+                          ISNULL(i.item_name,''), ISNULL(s.PACK_KIND,''), ISNULL(s.PACK_QTY,0),
                           ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,'')
                         FROM nx.PR_T_INDI_SHEET2 b WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=b.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=b.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=b.ITEM_CODE
                        WHERE b.BOX_NO=?""", int(bn))
         r = cur.fetchone()
@@ -484,10 +513,10 @@ def prodsheet_label_preview(sheet_no: str = Query(...), qty: float = Query(0)):
     nx = _nx(); cur = nx.cursor()
     try:
         cur.execute("""SELECT h.ITEM_CODE, h.PLAN_QTY, h.PLAN_YMD, ISNULL(h.LINE_NO,''),
-                          ISNULL(i.ITEM_DESC,''), ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
+                          ISNULL(i.item_name,''), ISNULL(s.PROD_WORKER,''), ISNULL(s.INSP_WORKER,''),
                           ISNULL(s.STICKER_COLOR,'')
                         FROM nx.PR_T_INDI_WELD_SHEET h WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=h.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB s WITH(NOLOCK) ON s.ITEM_CODE=h.ITEM_CODE
                        WHERE h.SHEET_NO=?""", sn)
         r = cur.fetchone()
@@ -584,9 +613,9 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
                           ISNULL(s.QR_BARCODE_FROM,''), ISNULL(s.QR_BARCODE_TO,''),
                           ISNULL(s.WORK_CODE,''), ISNULL(s.WORKER_CODE,''),
                           s.SHEET_NO, ISNULL(s.PRINT_USER_ID,''), s.PRINT_DATETIME,
-                          ISNULL(i.ITEM_DESC,''), ISNULL(m.PROD_WORKER,''), ISNULL(m.INSP_WORKER,'')
+                          ISNULL(i.item_name,''), ISNULL(m.PROD_WORKER,''), ISNULL(m.INSP_WORKER,'')
                         FROM nx.PR_T_PRINT_STICKER s WITH(NOLOCK)
-                        LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=s.ITEM_CODE
+                        LEFT JOIN nx.item i WITH(NOLOCK) ON i.ITEM_CODE=s.ITEM_CODE
                         LEFT JOIN nx.PR_M_ITEM_SUB m WITH(NOLOCK) ON m.ITEM_CODE=s.ITEM_CODE
                        WHERE s.PRINT_SEQ=?""", int(ps))
         r = cur.fetchone()
@@ -598,27 +627,38 @@ def prodsheet_label_print(print_seq: str = Query(...), start_no: int = Query(0),
         # QR From 끝 4자리 = 시작 일련번호
         start = int(qf[-4:]) if len(qf) >= 4 and qf[-4:].isdigit() else 1
         end = start + qty - 1
-        # ★재발행 범위(레거시 재발행 팝업의 시작/종료번호). 발행 당시 범위를 벗어나지 않게 클램프.
-        s2 = int(start_no) if int(start_no or 0) > 0 else start
-        e2 = int(end_no) if int(end_no or 0) > 0 else end
-        s2 = max(start, min(s2, end)); e2 = max(s2, min(e2, end))
+        # ★재발행 범위 = **순번(1부터)** 기준(2026-08-28 사용자 확정).
+        #   "1~50 이면 50장, 30~50 이면 30번째부터 50번째까지 21장(양끝 포함)".
+        #   ⛔종전엔 절대 QR번호(예 35~134)로 클램프해서 1~50 을 넣으면 35~50(16장)이 됐다.
+        #   내부 계산은 절대번호(abs = start + 순번-1)로 하고, 화면에는 순번을 돌려준다.
+        n1 = int(start_no) if int(start_no or 0) > 0 else 1
+        n2 = int(end_no) if int(end_no or 0) > 0 else qty
+        n1 = max(1, min(n1, qty)); n2 = max(n1, min(n2, qty))
+        s2 = start + n1 - 1          # 절대 QR 시작번호
+        e2 = start + n2 - 1          # 절대 QR 종료번호
         w2 = str(worker or '').strip() or str(r[6] or '').strip() or str(r[12] or '').strip()
         i2 = str(inspector or '').strip() or str(r[7] or '').strip() or str(r[13] or '').strip()
-        n_out = e2 - s2 + 1
+        n_out = n2 - n1 + 1
         # ★n(현재)/tot(전체)는 발행 전체 기준. 부분 재발행해도 원래 번호를 유지해야
         #   현장에서 몇 번째 라벨인지 알 수 있음(예 4~6 재출력 → 4/6, 5/6, 6/6).
-        labels = [{"n": (s2 + i) - start + 1, "seq": s2 + i,
+        labels = [{"n": n1 + i, "seq": s2 + i,
                    "qr": _qr_code(item, ymd, s2 + i),
                    "disp": f"{ymd} {int(r[0])}-{s2 + i:04d}"}
                   for i in range(n_out)]
         return {"ok": True, "print_seq": int(r[0]), "print_ymd": ymd, "item": item,
                 "qty": n_out, "org_qty": qty, "nm": str(r[11] or '').strip(),
-                "start_no": s2, "end_no": e2, "org_start": start, "org_end": end,
+                # 화면 입력칸은 순번(1~qty). abs_* 는 실제 QR 번호(참고용).
+                "start_no": n1, "end_no": n2, "org_start": 1, "org_end": qty,
+                "abs_start": s2, "abs_end": e2, "abs_org_start": start, "abs_org_end": end,
                 "worker": w2, "inspector": i2,
                 "sheet_no": str(r[8] or '').strip(),
                 "print_user": str(r[9] or '').strip(),
                 "print_dt": (str(r[10])[:19] if r[10] else ""),
-                "qr_from": qf, "qr_to": str(r[5] or '').strip(),
+                # ★QR 범위 = 지금 선택한 구간(labels 의 처음/끝). 종전엔 발행 전체 범위를
+                #   그대로 보여줘 30~50 을 골라도 35~134 로 표시됐다(2026-08-28).
+                "qr_from": (labels[0]["qr"] if labels else qf),
+                "qr_to": (labels[-1]["qr"] if labels else str(r[5] or '').strip()),
+                "qr_org_from": qf, "qr_org_to": str(r[5] or '').strip(),
                 "labels": labels}
     finally:
         nx.close()
@@ -682,16 +722,16 @@ def _bom_expand(cur, item, gpc_like):
         SELECT b.mat_code, b.use_qty, m.work_code, ISNULL(b.SAGUB_FLAG,'0'),
                b.GAGONG_PROC_CODE, b.vir_item_flag
           FROM nx.pr_m_item_bom b
-          JOIN nx.pr_m_item i ON b.item_code=i.item_code
-          JOIN nx.pr_m_item m ON b.mat_code =m.item_code
+          JOIN nx.item i ON b.item_code=i.item_code
+          JOIN nx.item m ON b.mat_code =m.item_code
          WHERE b.item_code=? AND ISNULL(b.except_flag,'0')<>'1'
         UNION ALL
         SELECT b.mat_code, cb.cum_use_qty*b.use_qty, m.work_code, ISNULL(b.SAGUB_FLAG,'0'),
                b.GAGONG_PROC_CODE, b.vir_item_flag
           FROM CTE_BOM cb
           JOIN nx.pr_m_item_bom b ON cb.mat_code=b.item_code
-          JOIN nx.pr_m_item i ON b.item_code=i.item_code
-          JOIN nx.pr_m_item m ON b.mat_code =m.item_code
+          JOIN nx.item i ON b.item_code=i.item_code
+          JOIN nx.item m ON b.mat_code =m.item_code
          WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.vir_item_flag='1'
     )
     SELECT mat_code, MAX(ISNULL(work_code,'')) work_code, SUM(cum_use_qty) mat_use_qty,
@@ -702,6 +742,85 @@ def _bom_expand(cur, item, gpc_like):
      GROUP BY mat_code, ISNULL(gagong_proc_code,'') OPTION(MAXRECURSION 0)""", item, gpc_like)
     return [(str(r[0]).strip(), str(r[1] or '').strip(), float(r[2] or 0), str(r[3] or '').strip())
             for r in cur.fetchall()]
+
+def _prod_dest(cur, item, upper_item=None):
+    """★2026-08-25 생산실적 입고처 판정 (사용자 확정 규칙).
+
+       ★판정 근거는 오직 전표의 UPPER_ITEM_CODE(upper_item 인자).
+         · upper 가 비었거나 자기 자신 → 영업창고(ASSY). 최종품이거나 단품/직납분.
+         · upper 가 다른 품번(=서브품)  → 그 상위를 보고 결정
+             - 상위가 업체(IN_CUST_CODE 있음) → 자재창고
+             - 상위가 사내                     → 생산창고 = **상위의 파트**
+             - 상위에 파트가 없으면(가상 등)   → 더 위로 올라가 재판정
+
+       왜 상위 파트인가: 서브품 실적은 그 상위를 만드는 파트의 재고가 되어야
+       나중에 상위 실적을 잡을 때 그 파트에서 차감된다. 자기 파트에 쌓으면
+       상위 실적 시 차감할 재고가 없다.
+       (구버전은 GC_GUBUN W/K 만 자재창고, 나머지 전부 ASSY → 서브품이 영업창고로
+        새어나갔다.)
+
+       ★BOM 역추적 폴백은 쓰지 않는다. 같은 품번이 서브품으로도, 단품/직납으로도
+         쓰이는 경우가 있어(5006AR4091G·AJR74482401 등) "BOM 에 상위가 있다"는
+         이유로 생산창고에 보내면 직납분이 영업창고에서 사라진다.
+         이번 실적이 어느 상위를 위한 것인지는 전표만 안다.
+         (실측: 최근 전표 6,792건 중 4,955건이 upper=자기자신)
+
+       반환: ('ASSY', None) | ('PART', 파트코드) | ('MAT', None)
+    """
+    it = str(item or "").strip()
+    if not it:
+        return ("ASSY", None)
+    seen = set()
+    # ★전표 상위품번이 자기 자신이 아니면 그것이 곧 상위 — 그 상위부터 판정한다.
+    _up = str(upper_item or "").strip()
+    if _up and _up != it:
+        cur.execute("""SELECT ISNULL(m.in_cust,''),
+                              ISNULL((SELECT TOP 1 b.VIR_ITEM_FLAG FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                                       WHERE b.MAT_CODE=? ),'0')
+                         FROM nx.item m WITH(NOLOCK) WHERE m.ITEM_CODE=?""", _up, _up)
+        _r = cur.fetchone()
+        _ic = str(_r[0] or '').strip() if _r else ''
+        if _ic:
+            return ("MAT", None)                 # 상위가 업체
+        cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+                        WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
+                        ORDER BY PROC_SEQ DESC""", _up)
+        _r2 = cur.fetchone()
+        _gp = str(_r2[0] or '').strip() if _r2 else ''
+        if _gp:
+            return ("PART", _gp)                 # 상위의 파트
+        seen.add(_up)
+        stack = [_up]                            # 상위가 가상 등으로 파트가 없으면 더 위로
+        depth = 0
+        while stack and depth <= 8:
+            depth += 1
+            _c = stack.pop(0)
+            cur.execute("""SELECT b.ITEM_CODE, ISNULL(b.VIR_ITEM_FLAG,'0'), ISNULL(m.in_cust,'')
+                             FROM nx.CS_M_ITEM_BOM b WITH(NOLOCK)
+                             LEFT JOIN nx.item m WITH(NOLOCK) ON m.ITEM_CODE=b.ITEM_CODE
+                            WHERE b.MAT_CODE=?""", _c)
+            for p, vir, incust in [(str(r[0] or '').strip(), str(r[1] or '0'), str(r[2] or '').strip())
+                                   for r in cur.fetchall()]:
+                if incust:
+                    return ("MAT", None)
+                cur.execute("""SELECT TOP 1 GAGONG_PROC_CODE FROM nx.PR_M_ITEM_PROC_GAGONG
+                                WHERE ITEM_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')<>''
+                                ORDER BY PROC_SEQ DESC""", p)
+                _r3 = cur.fetchone()
+                _g3 = str(_r3[0] or '').strip() if _r3 else ''
+                if _g3:
+                    return ("PART", _g3)
+                if p not in seen:
+                    seen.add(p); stack.append(p)
+        return ("ASSY", None)
+    # ★2026-08-25 전표에 상위가 없거나 자기 자신이면 ASSY(영업창고).
+    #   BOM 역추적 폴백을 쓰지 않는다 — 같은 품번이 서브품으로도, 단품/직납으로도
+    #   쓰이는 경우가 있어(예: 5006AR4091G, AJR74482401) BOM 에 상위가 있다는 이유로
+    #   생산창고로 보내면 직납분이 영업창고에서 사라진다.
+    #   "이번 실적이 어느 상위를 위한 것인가"는 전표만 알고, 전표가 자기 자신이면
+    #   그 자체로 출하 대상이다. (실측: 최근 전표 6,792건 중 4,955건이 upper=자기자신)
+    return ("ASSY", None)
+
 
 def _set_mat_stock_wh(cur, win, part_code, mat_code, qty, user):
     """파트창고 재고 가감 — 레거시 f_pr_set_mat_stock_wh (PART_CODE 기준)."""
@@ -859,7 +978,7 @@ def procbc_lookup(barcode: str = Query(...), proc_code: str = Query("")):
                     kind, meth = "용접전표", "J"
         if not item:
             return {"found": False, "msg": "바코드를 찾을 수 없습니다 (전표 8자리 / 간판 GP… / 라벨 QR)"}
-        c2.execute("SELECT ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=?", item)
+        c2.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         rr = c2.fetchone(); nm = rr[0] if rr else ""
         # ★기처리수량 = 이 바코드+공정의 STICKER 누적(레거시 w_pr_input_527 동일 기준).
         #   취소분(음수)이 함께 합산되므로 취소하면 자동으로 잔여가 늘어남.
@@ -1131,6 +1250,7 @@ def procbc_save(payload: dict = Body(...)):
         is_last = (proc_seq is not None and max_seq > 0 and proc_seq >= max_seq)
         if not is_last:
             nx.commit()
+            stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
             return {"ok": True, "action": ("취소" if qty < 0 else "등록"), "qty": qty,
                     "prod_ymd": today6, "prod_hms": hms, "progress": prog,
                     "last_proc": False, "stock": None}
@@ -1167,17 +1287,47 @@ def procbc_save(payload: dict = Body(...)):
         #   PR_T_MAT_STOCK_WH(S5) 로 입고, SA_T_ITEM_STOCK 무변동).
         #   → 이 품목의 마지막 공정을 끝낸 것이면(=완제품 완성) STOCK_GPC 와 무관하게 ASSY 영업창고.
         #     중간공정 품목(자기 뒤에 공정이 더 있는 경우)만 파트/자재창고 입고.
-        #   ※여기까지 온 시점에 이미 proc_seq == max_proc_seq (마지막 공정) 이 보장되지만,
-        #     "그 품목 자체가 중간품인가"는 STOCK_GPC 의 GC_GUBUN 으로만 구분 가능 →
-        #     W/K(자재창고行)만 예외로 두고 나머지는 ASSY 로 보낸다.
+        #   ※여기까지 온 시점에 이미 proc_seq == max_proc_seq (마지막 공정) 이 보장된다.
+        # ★2026-08-25 재수정 — 위 판정(GC_GUBUN W/K 만 자재창고, 나머지 전부 ASSY)이
+        #   서브품까지 영업창고로 보내고 있었다. 서브품 실적은 '상위를 만드는 파트'의
+        #   생산재고가 되어야 나중에 상위 실적 시 그 파트에서 차감된다.
+        #   → BOM 상위 유무로 판정(_prod_dest): 상위없음=ASSY / 사내상위=그 상위의 파트 /
+        #     가상상위=더 위로 / 업체상위=자재창고.
+        #   실측 피해: 서브품 31품번이 영업창고에 적재(5006AR4091G 11,219 등).
+        # ★전표의 상위품번(UPPER_ITEM_CODE)을 우선 근거로 — 공용 자도번은 BOM 만으로
+        #   상위를 특정할 수 없다(상위가 A·B 둘 다일 수 있음). 전표엔 이번 실적이
+        #   어느 상위를 위한 것인지 남아 있다.
+        _upper = ''
+        if sheet_ref:
+            try:
+                cur.execute("SELECT ISNULL(UPPER_ITEM_CODE,'') FROM nx.PR_T_INDI_WELD_SHEET WHERE SHEET_NO=?", sheet_ref)
+                _ru = cur.fetchone()
+                _upper = str(_ru[0] or '').strip() if _ru else ''
+            except Exception: pass
+        _dk, _dp = _prod_dest(cur, item, _upper)
         _gc = ''
         if stock_gpc:
             cur.execute("SELECT ISNULL(GC_GUBUN,'') FROM nx.PR_M_PROC_GAGONG WITH(NOLOCK) WHERE GAGONG_PROC_CODE=?", stock_gpc)
             _r = cur.fetchone()
             _gc = str(_r[0] or '').strip() if _r else ''
-        if stock_gpc and _gc in ('W', 'K'):
-            # 자재창고 입고(용접봉 등 자재성 공정)
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=?", today6)
+        if _dk == "PART" and _dp:
+            # ★서브품 → 상위 파트의 생산창고(PR_T_MAT_STOCK_WH). 영업창고 아님.
+            #   ★2026-08-25 PR_T_STOCK_MAINT_MAT 에 별도 원장행을 넣지 않는다.
+            #     생산입출고현황(live_api._prodinout)은 이미 pr_t_prod_dtl.STOCK_PART_CODE 를
+            #     'SUB생산실적' 입고로 읽고 있어(833줄) 원장행을 또 넣으면 이중계상된다.
+            #     게다가 그 화면은 PR_T_STOCK_MAINT_MAT tag='4' 를 무조건 '생산사용(출고)'로
+            #     보고 부호를 뒤집어(*-1) 읽으므로, 입고를 tag='4' 로 넣으면 재고가 되레 늘었다
+            #     (실측 AJR30027704-SUB1: 잔액 2인데 화면 4).
+            #   → 잔액 테이블만 갱신하고, 이력은 PR_T_PROD_DTL(STOCK_PART_CODE)로 남긴다.
+            _set_mat_stock_wh(cur, win, _dp, item, qty, who)
+            stock["kind"] = f"생산창고입고({_dp})"
+        elif _dk == "MAT" or (stock_gpc and _gc in ('W', 'K')):
+            # 자재창고 입고(용접봉 등 자재성 공정 / 상위가 업체인 서브품)
+            # ★상위가 업체라 여기로 온 경우엔 전표 STOCK_GPC 가 비어 있을 수 있다.
+            #   그때는 기본 자재창고 파트(IS0001)로 넣는다 — 키팅 466 재고와 같은 버킷.
+            if not stock_gpc:
+                stock_gpc = 'IS0001'
+            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
             sq = int(cur.fetchone()[0] or 1)
             cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,
                               WORK_CODE,MAT_CODE,MAINT_QTY,REF_MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,
@@ -1191,8 +1341,10 @@ def procbc_save(payload: dict = Body(...)):
             stock["kind"] = "자재창고입고"
         else:
             # ASSY → 영업창고
+            # ★웹이 만든 행(SEQ>=20000)만 찾아 합산한다 — 레거시 행을 잡아 수정하면 안 된다.
             cur.execute("""SELECT MAX(MAINT_SEQ) FROM nx.SA_T_STOCK_MAINT
-                            WHERE MAINT_YMD=? AND ITEM_CODE=? AND MAINT_TAG='P' AND WORK_ORDER='BARCODE'""",
+                            WHERE MAINT_YMD=? AND ITEM_CODE=? AND MAINT_TAG='P' AND WORK_ORDER='BARCODE'
+                              AND MAINT_SEQ>=20000""",
                         today6, item)
             sseq = cur.fetchone()[0]
             if sseq:
@@ -1200,7 +1352,7 @@ def procbc_save(payload: dict = Body(...)):
                                   UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
                                 WHERE MAINT_YMD=? AND MAINT_SEQ=?""", int(qty), who, win, today6, int(sseq))
             else:
-                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=?", today6)
+                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.SA_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
                 nseq = int(cur.fetchone()[0] or 1)
                 cur.execute("""INSERT INTO nx.SA_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,MAINT_QTY,
                                   MAINT_COST,MAINT_AMT,REMARKS,ITEM_CODE,WORK_ORDER,SPLIT_WORK_ORDER,
@@ -1213,23 +1365,26 @@ def procbc_save(payload: dict = Body(...)):
 
         # ⑦ BOM 전개 → 파트별 자재 차감 (Q1000/Q2000 공용창고는 제외 — 운영방침 변경)
         boms = _bom_expand(cur, item, '%')
-        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=?", today6)
-        mseq = int(cur.fetchone()[0] or 0)
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),19999) FROM nx.PR_T_STOCK_MAINT_MAT WHERE MAINT_YMD=? AND MAINT_SEQ>=20000", today6)
+        mseq = int(cur.fetchone()[0] or 19999)
         # ★자재 재고부족 사전검증(2026-08-20) — 음수재고 금지.
         #   실적 수량 × BOM 소요 > 파트창고 재고 이면 실적을 잡지 않고 거부한다.
         #   (기존엔 검증 없이 차감해 파트창고가 0/음수가 됐고, 생산입출고현황에서
         #    해당 품번이 사라져 보였음 — 실측 AJR30038201 실적54 → 자재 216 차감)
         #   ※취소(qty<0)는 되돌리는 동작이므로 검증 제외.
         if qty > 0:
+            # ★재고 판정기준 = 이력계산(라이브∪nx) — 재고표시 화면들과 동일.
+            #   nx 잔액테이블(PR_T_MAT_STOCK_WH)만 읽으면 안 된다: 레거시가 만든 잔액은
+            #   nx 에 행 자체가 없고 웹 델타만 담긴 '반쪽 값'이라 재고 0 으로 오판한다
+            #   (2026-08-25 실사고: S4 에 SUB6 23개가 있는데 nx 행이 없어 "재고 0" 거부).
+            _hist = _prod_stock_map(cur, by_part=True)
             _short = []
             for mat, mwc, use, mgpc in boms:
                 if use <= 0 or (mgpc or '').upper() in ('Q1000', 'Q2000'):
                     continue
                 _need = qty * use
                 _pc = mgpc or proc
-                cur.execute("""SELECT ISNULL(SUM(STOCK_QTY),0) FROM nx.PR_T_MAT_STOCK_WH WITH(NOLOCK)
-                                WHERE MAT_CODE=? AND PART_CODE=?""", mat, _pc)
-                _have = float(cur.fetchone()[0] or 0)
+                _have = float(_hist.get((str(mat).upper(), _pc), 0.0))
                 if _have < _need:
                     _short.append({"mat": mat, "part": _pc, "need": round(_need, 4),
                                    "have": round(_have, 4), "lack": round(_need - _have, 4)})
@@ -1302,7 +1457,23 @@ def procbc_save(payload: dict = Body(...)):
             _set_ready_stock(cur, win, item, 'Z99990', pc, -qty, who)
             stock["ready"].append({"part": pc, "qty": round(-qty, 4)})
 
+        # ⑨ 용접봉 생산창고 소비(−Q1000, tag W) — 레거시가 제외한 용접봉만 nx.stock_ledger로 (2026-08-27).
+        #   모델: 자재출고(matissue)로 작업자가 용접봉을 자재→생산창고(Q1000) 불출(+Q1000) → 여기서 −Q1000 차감.
+        #   부호수량(qty>0 소비·qty<0 취소복원). 생산창고(Q1000) 재고부족이면 실적거부(음수차단, 실시간 원장sum).
+        #   cro=nx(같은 커넥션 — 게이트가 자기 쓰는 stock_ledger 읽어 별도커넥션시 미커밋행 SUM 교착).
+        _wr = _weld_consume(nx, nx, item, qty, (work_code or bc), who)
+        if not _wr.get("ok"):
+            nx.rollback()
+            _ws = _wr.get("shortage", [])
+            _wmsg = "용접봉 생산창고 재고가 부족합니다. (자재출고에서 용접봉을 생산창고로 불출하세요)\n\n" + "\n".join(
+                f"· {s['mat']} ({s['part']})  필요 {s['need']:g} / 재고 {s['have']:g}  → 부족 {s['lack']:g}"
+                for s in _ws[:10])
+            return {"ok": False, "shortage": _ws, "errors": [_wmsg]}
+        if _wr.get("weld_consumed"):
+            stock["weld"] = {"consumed": _wr["weld_consumed"], "kinds": _wr.get("weld_kinds", 0)}
+
         nx.commit()
+        stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "action": ("취소" if qty < 0 else "등록"), "qty": qty,
                 "prod_ymd": today6, "prod_hms": hms, "progress": prog,
                 "last_proc": True, "stock": stock}
@@ -1376,7 +1547,7 @@ def procbc_list(ymd: str = Query(""), part: str = Query(""), swork: str = Query(
         nm = {}; il = [x for x in items if x]
         for i in range(0, len(il), 900):
             ch = il[i:i+900]; ph = ",".join("?" * len(ch))
-            c2.execute(f"SELECT ITEM_CODE, ISNULL(ITEM_DESC,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE IN ({ph})", *ch)
+            c2.execute(f"SELECT ITEM_CODE, ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for a, b in c2.fetchall(): nm[str(a).strip()] = b
         for x in rows: x["nm"] = nm.get(x["item_code"], "")
         return {"rows": rows, "cnt": len(rows),

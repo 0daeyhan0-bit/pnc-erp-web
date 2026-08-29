@@ -25,7 +25,7 @@ def prodresult_list(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: s
         gb = (gubun or "1").strip()
         if gb == "2":   # 도번(ITEM_CODE)별 상세
             cur.execute(f"""SELECT d.ITEM_CODE,
-                  ISNULL((SELECT TOP 1 ITEM_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=d.ITEM_CODE),'') inm,
+                  ISNULL((SELECT TOP 1 item_name FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=d.ITEM_CODE),'') inm,
                   d.PROD_YMD, ISNULL(d.LINE_NO,'') line, ISNULL(d.PROD_TAG,'') tag,
                   SUM(d.PROD_QTY) qty,
                   SUM(PARTNER_ERP_TEST3.dbo.f_stday_live(d.ITEM_CODE, d.PROD_YMD)*d.PROD_QTY)/60.0 st
@@ -160,7 +160,7 @@ def partresult_list(from_ymd: str = Query(""), to_ymd: str = Query(""), part: st
         params = pp + pc
         if gb == "2":   # 파트별 생산실적(도번) — 파트×도번×일자
             cur.execute(f"""SELECT z.part, ISNULL((SELECT TOP 1 GAGONG_PROC_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=z.part),'') pnm,
-                  z.item, ISNULL((SELECT TOP 1 ITEM_DESC FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_CODE=z.item),'') inm, z.ymd, z.tag, z.qty, z.st
+                  z.item, ISNULL((SELECT TOP 1 item_name FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=z.item),'') inm, z.ymd, z.tag, z.qty, z.st
                 FROM (SELECT u.part, u.item, u.ymd, u.tag, SUM(u.qty) qty, SUM(u.stq)/60.0 st
                       FROM ({union}) u GROUP BY u.part, u.item, u.ymd, u.tag) z
                 ORDER BY z.ymd, z.part, z.item""", *params)
@@ -210,10 +210,10 @@ def partledger_list(kind: str = Query("adj"), from_ymd: str = Query(""), to_ymd:
         if part.strip(): w.append("m.MAT_CODE LIKE ?"); p.append(f"%{part.strip()}%")
         if wc.strip():   w.append("(m.PROD_WORK_CODE=? OR m.WORK_CODE=?)"); p += [wc.strip(), wc.strip()]
         cur.execute(f"""SELECT TOP 2000 m.MAINT_YMD, m.MAINT_SEQ, m.MAINT_TAG, ISNULL(m.PART_CODE,'') part,
-              ISNULL(m.FROM_PART_CODE,'') frompart, ISNULL(m.MAT_CODE,'') mat, ISNULL(ii.ITEM_DESC,'') nm,
+              ISNULL(m.FROM_PART_CODE,'') frompart, ISNULL(m.MAT_CODE,'') mat, ISNULL(ii.item_name,'') nm,
               m.MAINT_QTY, m.MAINT_COST, m.MAINT_AMT, ISNULL(m.REMARKS,'') remarks, ISNULL(m.ITEM_CODE,'') dobun,
               ISNULL(m.PROD_WORK_CODE,'') pwc, ISNULL(m.INSERT_USER_ID,'') usr, m.INSERT_DATETIME
-            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=m.MAT_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_STOCK_MAINT_MAT m LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=m.MAT_CODE
             WHERE {' AND '.join(w)} ORDER BY m.MAINT_YMD DESC, m.MAINT_SEQ DESC""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -238,9 +238,9 @@ def procresult_dtl(from_ymd: str = Query(""), to_ymd: str = Query(""), swork: st
         if line.strip():  w.append("d.LINE_NO=?"); p.append(line.strip())
         if item.strip():  w.append("d.ITEM_CODE LIKE ?"); p.append(f"%{item.strip()}%")
         cur.execute(f"""SELECT TOP 2000 d.PROD_YMD, d.PROD_HMS, ISNULL(d.WORK_ORDER,'') wo, ISNULL(d.ITEM_CODE,'') item,
-              ISNULL(ii.ITEM_DESC,'') nm, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, ISNULL(d.LINE_NO,'') line,
+              ISNULL(ii.item_name,'') nm, ISNULL(d.PART_CODE,'') part, d.S_WORK_CODE sw, ISNULL(d.LINE_NO,'') line,
               d.PROD_QTY, ISNULL(d.PROD_USER_ID,'') usr
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM ii ON ii.ITEM_CODE=d.ITEM_CODE
+            FROM PARTNER_ERP_TEST3.nx.PR_T_PROD_DTL d LEFT JOIN PARTNER_ERP_TEST3.nx.item ii ON ii.ITEM_CODE=d.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY d.PROD_YMD DESC, d.PROD_HMS DESC""", *p)
         cols = [dd[0] for dd in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]

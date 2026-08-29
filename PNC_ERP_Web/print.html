@@ -12,7 +12,7 @@
   body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;color:#000}
   #_wait{display:flex;align-items:center;justify-content:center;height:100vh;
          font-size:13px;color:#666}
-  @media print{#_wait{display:none}}
+  @media print{#_wait{display:none !important}}
 </style></head>
 <body>
 <div id="_wait">인쇄 내용을 준비하고 있습니다…</div>
@@ -62,6 +62,8 @@ window.renderPrint = function (html) {
   // 인쇄창을 닫으면(인쇄 완료/취소 모두) 이 미리보기 창도 자동으로 닫는다.
   //   ※afterprint 는 인쇄대화상자가 내려간 뒤 발생. 일부 브라우저는 늦게 주므로
   //     focus 복귀도 함께 감지한다.
+  //   ※프린터 기억은 창 생존이 아니라 **URL(print.html?t=종류)** 로 유지된다.
+  //     Edge 는 사이트+URL 단위로 마지막 선택 프린터를 저장하므로 창을 닫아도 된다.
   window.__printAt = 0;          // 새 출력마다 초기화(창을 재사용해도 정상 동작)
   if (!window.__closeWired) {
     window.__closeWired = true;
