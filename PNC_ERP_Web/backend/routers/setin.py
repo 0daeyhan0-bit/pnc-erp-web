@@ -372,11 +372,12 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
        믿고 받는 구조(세지 않고 송장대로 입고)에서는 **되돌리는 길이 반드시 있어야 한다.**
        스캔 1회로 도번 최대 35종이 들어가므로, 잘못 찍으면 통째로 잘못 들어간다.
 
-       되돌리는 것 = 입고가 만든 것 **셋 전부**
+       되돌리는 것 = 입고가 만든 것 **넷 전부**
          ① nx.set_stock_maint      입고 거래행 삭제
          ② nx.set_input_req.status 90/30 → 10(발행)으로 복귀 + deliver 유지
          ③ nx.stock_ledger         자도번 재고 파생분(MAINT_TAG='S') 삭제
-       ★셋 중 하나만 지우면 장부가 어긋난다. 한 트랜잭션으로 묶는다.
+         ④ nx.sagub_maint          협력사출고(사급소진) posting(remarks_src='setstock:mseq') 삭제
+       ★넷 중 하나만 지우면 장부가 어긋난다. 한 트랜잭션으로 묶는다.
 
        ★마감 잠금: 마감된 기간의 입고는 취소할 수 없다(재고가 움직이므로 규칙B).
     """
@@ -406,6 +407,18 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
         except Exception:
             led = 0
 
+        # ④ 협력사출고(사급소진) posting 제거 — 입고 mseq 기준(remarks_src='setstock:mseq'). 근거키 스코프.
+        sag = 0
+        try:
+            seqs = {int(r[1]) for r in rows}
+            if seqs:
+                srcs = [f"setstock:{s}" for s in seqs]
+                ph = ",".join("?" for _ in srcs)
+                cur.execute(f"DELETE FROM nx.sagub_maint WHERE maint_tag='S' AND remarks_src IN ({ph})", *srcs)
+                sag = cur.rowcount
+        except Exception:
+            sag = 0
+
         # ① 입고 거래행 제거
         cur.execute("DELETE FROM nx.set_stock_maint WHERE sheet_no=? AND in_tag='1'", bc)
         recv = cur.rowcount
@@ -418,8 +431,8 @@ def setstock_cancel(request: Request, payload: dict = Body(...)):
         cn.commit()
         stock_changed()      # ★재고 변경 → 파생 캐시 무효화
         return {"ok": True, "barcode": bc, "recv_deleted": recv,
-                "ledger_deleted": led, "req_reverted": req,
-                "msg": f"입고취소 완료 — 입고 {recv}건 · 재고파생 {led}행 되돌림. "
+                "ledger_deleted": led, "sagub_deleted": sag, "req_reverted": req,
+                "msg": f"입고취소 완료 — 입고 {recv}건 · 재고파생 {led}행 · 협력사출고 {sag}행 되돌림. "
                        f"송장 {req}건이 발행(10) 상태로 돌아가 다시 스캔할 수 있습니다."}
     except Exception:
         cn.rollback(); raise

@@ -89,6 +89,16 @@ r=cur.fetchone(); print(f"  재고 자도번파생(stock_ledger tag S) 신규: {
 cur.execute("SELECT COUNT(*),SUM(CAST(maint_qty AS float)) FROM nx.sagub_maint WHERE maint_tag='S' AND remarks_src LIKE 'setstock:%'")
 r=cur.fetchone(); print(f"  협력사출고(sagub_maint setstock) 신규: {r[0]}행 Σ{float(r[1] or 0):+,.0f}")
 
+# ══ 시나리오 C: 입고취소(cancel) → 협력사출고 역posting ══
+print("\n── C. 입고취소(/api/setstock/cancel) → 협력사출고 되돌림 ──")
+cres=SI.setstock_cancel(_Req(), {'barcode':'700003','user':'tb'})
+cur.execute("SELECT COUNT(*) FROM nx.sagub_maint WHERE maint_tag='S' AND remarks_src LIKE 'setstock:%'")
+left=cur.fetchone()[0]
+cancel_after = led('2096')['tot']['used']
+okC = (left==0) and abs(cancel_after - tot_out_b) < 0.5
+print(f"  cancel 결과: 협력사출고 되돌림 {cres.get('sagub_deleted')}행 · 재고파생 {cres.get('ledger_deleted')}행")
+print(f"  {'✅' if okC else '❌'} setstock posting 잔여 {left}행(0 기대) · 수불장 협력사출고 {cancel_after:,.1f}→원복 {tot_out_b:,.1f} 기대")
+
 raw.rollback()
 cur.execute("SELECT COUNT(*) FROM nx.sagub_maint WHERE remarks_src LIKE 'setstock:%' OR remarks_src LIKE 'saleout:%'")
 print(f"\n롤백 후 신규 posting(오염0): {cur.fetchone()[0]}행")
