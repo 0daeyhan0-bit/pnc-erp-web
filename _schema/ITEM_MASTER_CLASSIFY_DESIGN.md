@@ -100,7 +100,7 @@ sgroup별 make_type 실제 분포(라이브):
 | 3 | 3축 유도 규칙 | B블록 3축을 A·BOM·공정에서 유도(뷰/파생컬럼) | 하(표시) |
 | 4 | 현행조달 표기(C) | route make_type을 마스터에 표기만(읽기) | 하 |
 | 5 | 문맥분리(D) | make_type→route, 협력사사급→BOM 명문화 | 중(문서·거버넌스) |
-| 6 | 사장필드 폐기 | 품목군(PR001 0.4%)·품목구분(PR008 0.7%) 승인후 제거 | 하 |
+| 6 | 사장필드 폐기 | 품목군(PR001 0.4%) 제거후보 · ~~품목구분(PR008 0.7%)~~ **제거금지=라이브사용**(아래 §step6) | 하 |
 
 **240 durable 문제**: nx.CM_M_MASTER_DETAIL은 미러(r_delta_sync가 덮어씀) → 240 등록은 **동기화 후 재삽입 훅 or 코드 하드코드**로 영속화 필요.
 
@@ -118,6 +118,19 @@ sgroup별 make_type 실제 분포(라이브):
 - **실측**: route/sourcing 테이블에 make_type 컬럼 **없음** → "route가 진실"이나 route에 미존재. make_type은 nx.item에만(1제작8407·2외주7609·3구매3416·4LG사급578·5외주완성191·공백5125).
 - ⟹ **item.make_type을 "조달방식(현행·참조)"로 표기만**: nx.v_item_axis3에 `procure_method`(제작/외주/구매/LG사급/외주완성) 추가 + /api/itemmaster/get axis3.method + 편집모달 회색 배지(참조·title="route가 진실, 마스터는 표기만"). ?v=260829axis3b.
 - 검증: 뷰 재생성·쿼리실측(MJU62788820 조달방식=외주)·py_compile OK. ★make_type은 §3-1 신뢰주의(분류유도엔 미사용, 표기만).
+
+### ★step5 — 문맥분리(D블록) 명문화 (2026-08-29·거버넌스·코드/데이터 무변경)
+품목마스터에서 "문맥별로 변하는 값"을 각 문맥으로 귀속시키는 규칙 확정(실측 반영):
+- **make_type(제작/외주/구매) = route(조달) 문맥.** 마스터는 **표기만**(step4 procure_method·참조). 조달방식은 route별로 변하므로 마스터 고정필드로 분류유도하지 않는다(§3-1 뒤죽박죽 근거). 진실은 route(현재 route 테이블엔 make_type 컬럼 미존재=향후 route에 명시 시 그걸 표기).
+- **협력사사급(우리→협력사, 유상/무상) = BOM 문맥.** 정본 = **nx.bom_line.sagub_default**(=1 1,395건). 유상/무상·주는지는 BOM(route)별로 변하므로 마스터 고정 아님(§3-3). 마스터의 sagub_stock_flag는 재고축(사급재고) 표시용이지 분류/원가 유도 소스 아님.
+- **LG사급(LG→우리) = A블록 고정속성.** obtain_gubun(=make_type4·sgroup310과 94.4% 정합·§3-2). 안정(거의 불변)이라 마스터 고정 정당.
+- ⟹ **거버넌스 하드룰**: 분류·원가·소요 로직은 make_type/협력사사급을 **마스터에서 유도하지 않는다**(route·BOM 문맥에서). 마스터엔 표기만. 이미 원가엔진=cost_gubun/metal/make(leaf valuation만)·소요엔진=except_flag/sagub_default(BOM)로 각 문맥 소스 사용 중(§4 안전선과 정합).
+
+### ★step6 — 사장필드 폐기 검증 (2026-08-29, 읽기전용) — **설계 전제 부분 교정**
+실측 사용률: nx.item.item_group(품목군) **98/25367=0.39%** · item_class(품목구분) **174/25367=0.69%**(설계와 일치).
+- ★**item_class = 제거 금지(라이브 사용)**: `sales.py:156` `rows=[r for r if item_class==cls]` — **item_class='J'로 중량관리 관리품 필터 실사용**(0.69%=관리품). live_api/item.py도 표시. **사장필드 아님. 제거하면 sales 중량관리 깨짐.** ⟹ 검증이 설계의 "PR008 제거" 전제 오류를 잡음.
+- **item_group = 진짜 사장 후보**(0.39%·item.py 표시만·로직 소비자 없음). 단 제거 이득 미미(98품목·display만)+item.py 참조 정리 필요 → **저우선·승인 시에만**. 지금은 유지.
+- ⟹ **step6 결론: item_class 유지(라이브), item_group은 사장이나 제거 저가치·보류.** 실질 폐기 대상 없음(전제 교정으로 안전 확보).
 
 ---
 
