@@ -248,11 +248,12 @@ def plan_explode_full(eng, item):
 
 
 def _incust(eng, code):
-    # ★소스=nx.PR_M_ITEM.in_cust_code (STEP6 CTE_BOM와 동일). nx.item.in_cust는 dbo값(2068 등)이라 갈림 → 561전수 FAIL2 원인이었음.
+    # ★소스=nx.item.in_cust (클린, item 통합 2026-08-29). 과거 PR_M_ITEM.in_cust_code 직독(nx.item.in_cust=dbo 2068 드리프트라 561 FAIL2)이었으나,
+    #   item 통합으로 드리프트 해소 → plan 트리 전 15387품목 in_cust 전수 불일치0 실측검증(nx.item이 5품목 더 완전) → 미러 은퇴·리포인트.
     if not hasattr(eng, '_incc'):
         eng._incc = {}
     if code not in eng._incc:
-        eng.cur.execute("SELECT ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM WHERE item_code=?", code)
+        eng.cur.execute("SELECT ISNULL(in_cust,'') FROM nx.item WHERE item_code=?", code)
         r = eng.cur.fetchone()
         eng._incc[code] = (str(r[0]).strip() if r else '')
     return eng._incc[code]
@@ -306,14 +307,14 @@ _WT_COPPER = {'CU', '고강도'}
 
 
 def _wt_meta(eng, code):
-    """중량 leaf META: (w, cls). raw=동(ITEM_WEIGHT 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현.
-    ★소스=nx.PR_M_ITEM(중량 정본). nx.item은 일부품목 net_weight=geom·length 드리프트(3H00627M 0.3332→0.2907 등) → PR_M_ITEM 직독으로 diff0."""
+    """중량 leaf META: (w, cls). raw=동(item_weight 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현.
+    ★소스=nx.item(클린 정본, item 통합 2026-08-29). item_weight·diam·thick·length·metal_gubun·item_name = PR_M_ITEM와 전수 등가(불일치0, 24127 매칭) 실측검증 → 미러 은퇴·리포인트. (구 주석 'nx.item net_weight 드리프트'는 net_weight 컬럼 얘기·중량엔 item_weight 사용.)"""
     if not hasattr(eng, '_wtm'):
         eng._wtm = {}
     u = code.strip().upper()
     if u not in eng._wtm:
-        eng.cur.execute("""SELECT ISNULL(ITEM_WEIGHT,0),ISNULL(ITEM_DIAM,0),ISNULL(ITEM_THICK,0),ISNULL(ITEM_LENGTH,0),
-            ISNULL(METAL_GUBUN,''),ISNULL(ITEM_DESC,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?""", code)
+        eng.cur.execute("""SELECT ISNULL(item_weight,0),ISNULL(diam,0),ISNULL(thick,0),ISNULL(length,0),
+            ISNULL(metal_gubun,''),ISNULL(item_name,'') FROM nx.item WHERE item_code=?""", code)
         r = eng.cur.fetchone()
         w = 0.0
         cls = None
@@ -431,12 +432,13 @@ def weight_explode(eng, item):
 
 
 def _wt_spec(eng, code):
-    """중량 leaf 규격 (metal_gubun, diam, thick) — 절삭재료비(CS_M_METERIAL_COST) 규격별 단가 조회용. 캐시."""
+    """중량 leaf 규격 (metal_gubun, diam, thick) — 절삭재료비(CS_M_METERIAL_COST) 규격별 단가 조회용. 캐시.
+    ★소스=nx.item(클린, item 통합·규격 PR_M_ITEM 전수 등가 검증)."""
     if not hasattr(eng, '_wtspec'):
         eng._wtspec = {}
     u = code.strip().upper()
     if u not in eng._wtspec:
-        eng.cur.execute("SELECT ISNULL(METAL_GUBUN,''),ISNULL(ITEM_DIAM,0),ISNULL(ITEM_THICK,0) FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", code)
+        eng.cur.execute("SELECT ISNULL(metal_gubun,''),ISNULL(diam,0),ISNULL(thick,0) FROM nx.item WHERE item_code=?", code)
         r = eng.cur.fetchone()
         eng._wtspec[u] = (str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)) if r else ('', 0.0, 0.0)
     return eng._wtspec[u]
