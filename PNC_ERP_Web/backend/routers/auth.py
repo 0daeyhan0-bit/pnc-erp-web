@@ -76,11 +76,30 @@ def _load_user(cur, uid):
             "tel": (r[8] or "").strip(), "status": (r[9] or "사용").strip()}
 
 
+# ★토큰 캐시 — 인증을 **모든 요청**에 걸면 요청마다 SELECT×2 + UPDATE 가 된다.
+#   그대로 두면 화면이 눈에 띄게 느려진다(측정 없이 넣지 말 것). 60초 캐시로 흡수한다.
+#   로그아웃·비밀번호 변경·계정 저장은 즉시 무효화한다(stale 로 남으면 끊은 세션이 살아 있다).
+_TOK_CACHE = {}          # token -> (user, expire_ts)
+_TOK_TTL = 60.0
+
+
+def _tok_forget(token=None):
+    """캐시 무효화. token 없으면 전부 버린다(계정 일괄 저장 등)."""
+    if token:
+        _TOK_CACHE.pop(token, None)
+    else:
+        _TOK_CACHE.clear()
+
+
 def current_user(request):
     """토큰이 있으면 사용자를, 없거나 만료면 None. **거부하지 않는다**(선택 검사용)."""
     tok = _token_of(request)
     if not tok:
         return None
+    import time as _t
+    hit = _TOK_CACHE.get(tok)
+    if hit and hit[1] > _t.time():
+        return hit[0]
     cn = _nx()
     cur = cn.cursor()
     try:
@@ -88,15 +107,63 @@ def current_user(request):
                         WHERE token=? AND revoked=0 AND expires_at > GETDATE()""", tok)
         r = cur.fetchone()
         if not r:
+            _TOK_CACHE.pop(tok, None)
             return None
         u = _load_user(cur, str(r[0]).strip())
         if not u or u["status"] != "사용":
+            _TOK_CACHE.pop(tok, None)
             return None
         cur.execute("UPDATE nx.app_session SET last_seen=GETDATE() WHERE token=?", tok)
         cn.commit()
+        _TOK_CACHE[tok] = (u, _t.time() + _TOK_TTL)
+        if len(_TOK_CACHE) > 5000:            # 폭주 방지(로그인 폭주 시 메모리)
+            _TOK_CACHE.clear()
         return u
     finally:
         cn.close()
+
+
+# ===================== ★경로 정책 (미들웨어가 쓴다) =====================
+# 무인증 허용 — 로그인 자체·정적자원·헬스체크. 그 외 /api/** 는 전부 토큰 필수.
+OPEN_PATHS = {
+    "/api/auth/login",
+    "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect",
+}
+OPEN_PREFIX = (
+    "/api/_flow/",        # TestBed 제어(롤백서버에만 존재)
+)
+
+# ★협력사 계정이 부를 수 있는 경로 — 여기 없는 것은 403.
+#   deny by default. 새 협력사 화면을 만들면 **여기 한 줄 추가**한다(의식적으로).
+COOP_ALLOW = {
+    "/api/auth/me", "/api/auth/logout", "/api/auth/password",
+    "/api/perm/users",                    # GET=본인 1건 / POST 는 라우터가 403
+    "/api/partner/planstatus",            # 내 계획
+    "/api/partner/deliv420",              # 거래명세서 조회
+    "/api/partner/deliv420/issue",        # 발행
+    "/api/partner/deliv420/cancel",       # 발행취소
+    "/api/partner/deliv420/invoice",      # 명세표 출력
+    "/api/setin/list", "/api/setin/detail",
+    "/api/setin/issue", "/api/setin/invoice",
+    "/api/setstock/list",                 # 내 납품이 입고됐는지 확인(읽기전용·소속강제됨)
+}                                          # ※ scan/receive/cancel 은 staff_only — 담당자만
+
+
+def path_policy(path):
+    """(무인증 허용?, 경로) — 미들웨어에서 쓴다."""
+    p = (path or "").split("?")[0].rstrip("/") or "/"
+    if not p.startswith("/api/"):
+        return True, p                     # 정적자원·프론트
+    if p in OPEN_PATHS or path in OPEN_PATHS:
+        return True, p
+    if any(p.startswith(x) for x in OPEN_PREFIX):
+        return True, p
+    return False, p
+
+
+def coop_allowed(path):
+    p = (path or "").split("?")[0].rstrip("/") or "/"
+    return p in COOP_ALLOW
 
 
 def require_user(request):
@@ -223,6 +290,7 @@ def auth_logout(request: Request):
         cur.execute("UPDATE nx.app_session SET revoked=1 WHERE token=?", tok)
         n = cur.rowcount
         cn.commit()
+        _tok_forget(tok)                  # ★캐시에 남아 있으면 끊은 세션이 계속 산다
         return {"ok": True, "revoked": n}
     finally:
         cn.close()
@@ -249,6 +317,7 @@ def auth_password(request: Request, payload: dict = Body(...)):
         cur.execute("UPDATE nx.app_session SET revoked=1 WHERE user_id=? AND token<>?",
                     u["id"], _token_of(request))
         cn.commit()
+        _tok_forget()                     # ★다른 기기 세션을 끊었으므로 캐시 전체를 버린다
         return {"ok": True, "msg": "비밀번호를 변경했습니다. 다른 기기의 로그인은 해제됩니다."}
     finally:
         cn.close()

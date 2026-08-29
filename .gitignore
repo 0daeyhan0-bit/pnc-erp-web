@@ -79,3 +79,7 @@ _git_snapshot.log
 
 # 웹 업로드 파일 저장소(개발 폴백) — 실파일은 커밋하지 않는다. 운영은 NAS(F:\NEW_ERP_FILES).
 PNC_ERP_Web/_files/
+
+# 하네스 자격증명 — 절대 커밋 금지 (2026-08-29)
+_migration/.flow_secrets.json
+협력사포털_계정_*.csv

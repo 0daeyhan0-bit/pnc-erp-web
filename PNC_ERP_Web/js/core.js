@@ -482,7 +482,6 @@ const SEED_USERS=[
   {id:'ysales',nm:'이영업',type:'내부',dept:'영업',pos:'과장',roles:['영업'],partner:'',email:'',tel:'',status:'사용'},
   {id:'ysales2',nm:'최영업',type:'내부',dept:'영업',pos:'사원',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'},
   {id:'jbuy',nm:'박구매',type:'내부',dept:'구매/자재',pos:'사원',roles:['구매/자재'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'miraero',nm:'미래정밀',type:'협력사',dept:'',pos:'',roles:['협력사'],partner:'미래정밀',email:'',tel:'',status:'사용'},
   {id:'TEST1',nm:'테스트1(전권)',type:'내부',dept:'전산',pos:'',roles:['시스템관리자'],partner:'',email:'',tel:'',status:'사용'},
   {id:'TEST2',nm:'테스트2(자재·협력사)',type:'내부',dept:'구매/자재',pos:'',roles:['구매/자재'],partner:'',email:'',tel:'',status:'사용'},
   {id:'TEST3',nm:'테스트3(생산)',type:'내부',dept:'생산',pos:'',roles:['생산'],partner:'',email:'',tel:'',status:'사용'},

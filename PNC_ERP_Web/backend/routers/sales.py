@@ -446,7 +446,7 @@ def perm_save(payload: dict = Body(...)):
 # ★예전: nx.web_user 한 행에 JSON 통째 + **평문 비밀번호를 GET 으로 누구에게나 내줬다.**
 #   지금: 정본 = nx.app_user(행 단위·PBKDF2 해시). web_user 는 은퇴(단일 테이블·폴백 금지).
 #   ★GET 은 비밀번호를 절대 싣지 않는다. 화면은 "설정됨/미설정"(pw_set)만 알면 된다.
-from routers.auth import require_user, hash_pw          # 인증 정본
+from routers.auth import require_user, hash_pw, _tok_forget   # 인증 정본
 
 
 def _is_admin(u):
@@ -538,6 +538,7 @@ def perm_users_save(request: Request, payload: dict = Body(...)):
                 cur.execute("UPDATE nx.app_session SET revoked=1 WHERE user_id=?", uid)   # 기존 로그인 해제
                 n_pw += 1
         cn.commit()
+        _tok_forget()      # ★역할·상태·비밀번호가 바뀌었다 — 캐시를 버려야 즉시 반영된다
         return {"ok": True, "count": len(users), "new": n_new, "updated": n_upd, "pw_changed": n_pw}
     finally:
         cn.close()
