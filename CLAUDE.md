@@ -19,11 +19,8 @@
 6. **전 컬럼 구현. 임의 축소 금지.** 비어 보이는 컬럼도 마음대로 빼지 말고 **제안→승인 후** 제거.
 7. **레거시는 정답이 아님(버그 많음).** 그대로 복제하지 말고 **검증·버그 플래그**. 단 **원가 규칙만은 100% 일치**.
 8. **어떤 부품도 특별관리 금지.** 전 품목 균일 원장 원칙: `기초 + 입고 − 출고 ± 조정 = 기말`.
-<<<<<<< HEAD
-10. **★소요는 통일 소요엔진으로만(사용자 하드룰 2026-08-29).** BOM 소요/전개 계산은 **검증된 소요 엔진**으로만 = ①**우리 BOM** `_harness/nx_soyo_engine.py` walker(material·prod_soyo·**sagub_parts_soyo**·weight_explode 등)·`NxCostEngine`·자재소요 `nx.plan_part_mat`·동중량 `nx.bom_flat` ②**LG BOM(별도 엔진)** `_harness/nx_lgbom_engine.py`(lg_ap_all·lg_ap_split, LG Assembly Pull 롤업). **직접(ad-hoc) BOM 재귀·CTE로 소요 재현 금지**(`CS_M_ITEM_BOM`/`nx.bom_line`/`nx.lg_bom`/`v_pr_bom` 직접전개 금지). 이유=BOM 변형SUB 평탄화 함정을 ad-hoc가 이중계상(실측: lgsagub `_explode_parts`가 EBF64570401 2배). 엔진 한곳 고치면 전 프로그램 동시정확. **소요 엔진 안 쓰는 프로그램이 없어야 함.** 위반=엔진 마이그레이션(옆에짓고 diff0). 상세 [[feedback-soyo-engine-only]]. §1-9의 강화.
-
 9. **★마스터 정본 = 재구축 클린본, 레거시 미러 아님.** 품목=`nx.item`(≠`nx.PR_M_ITEM`) · 거래처=`nx.partner`(≠`CM_M_CUST`) · 단가=`nx.price_*`(≠`PR_M_ITEM_COST`) · 재고=단일원장/일마감(≠스냅샷). **신규·수정 프로그램은 클린본을 읽는다**(미러 직독 신규 금지 = 은퇴 대상, 미러는 dbo repoint 호환용일 뿐). **★계산값(원가·소요·중량)은 반드시 엔진 함수(`NxCostEngine`·`nx_soyo_engine`)로만 얻는다 — 미러(PR_M_ITEM/bom_line)를 직접 SELECT해서 값 재현 금지**(엔진이 내부에서 diff0 위해 미러 읽는 건 캡슐화된 예외, 신규는 엔진만 호출하면 클린). 한 화면 미러+클린 혼독 금지(품목 in_cust 561 FAIL·SUB 접미사 불일치가 그 증상). **★착수 시 데이터 소스 선택 규칙 = `_schema/00_MASTER_INDEX.md §0`(필독)** · 병존쌍 현황 = `_schema/MIRROR_CLEAN_DUAL_TABLE_AUDIT.md`. **목표 = 미러 은퇴·클린 단일화로 컷오버 부담 제거.**
-=======
+
 9-1. **★★★컷오버 이후 = 단일 테이블 운영. 폴백·sync 없음** (대표 확정 2026-08-28 · **전 프로그램 예외 없음**).
    - **한 개념에 소스는 하나다.** `A 없으면 B` 폴백 금지 — `ISNULL(clean, mirror)`·UNION·LEFT JOIN 폴백 전부 위반.
      주 소스에 값이 없으면 **값 없음으로 드러낸다**(0 + 리포트). 몰래 다른 데서 끌어오지 않는다.
@@ -34,8 +31,7 @@
    - 유일 소스표·경위 = `_schema/DO_NOT_USE_FIELDS.md` §18.
      단가=`nx.price_item`(사급가·LG판가)/`nx.price_metal`(원소재) · 품목=`nx.item` · BOM=`nx.bom` · 재고=단일원장/확정스냅샷.
 
-9. **★마스터 정본 = 재구축 클린본, 레거시 미러 아님.** 품목=`nx.item`(≠`nx.PR_M_ITEM`) · 거래처=`nx.partner`(≠`CM_M_CUST`) · 단가=`nx.price_*`(≠`PR_M_ITEM_COST`) · 재고=단일원장/일마감(≠스냅샷). **신규·수정 프로그램은 클린본을 읽는다**(미러 직독 신규 금지 = 은퇴 대상, 미러는 dbo repoint 호환용일 뿐). 화면마다 다른 테이블 읽으면 값 드리프트로 혼동·버그(품목 in_cust 561 FAIL·SUB 접미사 불일치가 그 증상). 병존 6쌍+수렴계획·필드별 예외(nx.item 중량/매입처 교정 진행중) = **`_schema/MIRROR_CLEAN_DUAL_TABLE_AUDIT.md`**(같은개념 2테이블 작업 전 필독). **목표 = 미러 은퇴·클린 단일화로 컷오버 부담 제거.**
->>>>>>> zt/main
+10. **★소요는 통일 소요엔진으로만(사용자 하드룰 2026-08-29).** BOM 소요/전개 계산은 **검증된 소요 엔진**으로만 = ①**우리 BOM** `_harness/nx_soyo_engine.py` walker(material·prod_soyo·**sagub_parts_soyo**·weight_explode 등)·`NxCostEngine`·자재소요 `nx.plan_part_mat`·동중량 `nx.bom_flat` ②**LG BOM(별도 엔진)** `_harness/nx_lgbom_engine.py`(lg_ap_all·lg_ap_split, LG Assembly Pull 롤업). **직접(ad-hoc) BOM 재귀·CTE로 소요 재현 금지**(`CS_M_ITEM_BOM`/`nx.bom_line`/`nx.lg_bom`/`v_pr_bom` 직접전개 금지). 이유=BOM 변형SUB 평탄화 함정을 ad-hoc가 이중계상(실측: lgsagub `_explode_parts`가 EBF64570401 2배). 엔진 한곳 고치면 전 프로그램 동시정확. **소요 엔진 안 쓰는 프로그램이 없어야 함.** 위반=엔진 마이그레이션(옆에짓고 diff0). 상세 [[feedback-soyo-engine-only]]. §1-9의 강화.
 
 ---
 
