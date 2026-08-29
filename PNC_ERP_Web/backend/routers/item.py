@@ -210,7 +210,12 @@ def itemmaster_get(item: str = Query(...)):
         cur.execute(f"SELECT {','.join(_VALVE_F)} FROM nx.item_valve WHERE item_code=?", code)
         rv = cur.fetchone()
         valve_d = dict(zip(_VALVE_F, ["" if x is None else x for x in rv])) if rv else {}
-        return {"item": item_d, "sub": sub_d, "valve": valve_d, "has_valve": bool(rv)}
+        # ★3축 유도(조달/생산/판매) — nx.v_item_axis3 파생뷰(표시전용·원가로직 미참여). ITEM_MASTER_CLASSIFY_DESIGN §5 step3.
+        cur.execute("SELECT axis_procure, axis_produce, axis_sales, axis_sales_code, unclassified FROM nx.v_item_axis3 WHERE item_code=?", code)
+        ra = cur.fetchone()
+        axis3 = {"procure": ra[0] or "", "produce": ra[1] or "", "sales": ra[2] or "",
+                 "sales_code": ra[3] or "", "unclassified": bool(ra[4])} if ra else {}
+        return {"item": item_d, "sub": sub_d, "valve": valve_d, "has_valve": bool(rv), "axis3": axis3}
     finally:
         nx.close()
 
