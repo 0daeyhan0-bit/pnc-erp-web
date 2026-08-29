@@ -53,7 +53,7 @@
 
 ### 아침 착수 전 사장님 확인 2건 (그 외 전부 확정)
 1. **BOM 마스터 편집(bom/save·addline·copy)도 "SUB 등록"에 포함?** (§1-2) — 조달후보 편성만이면 sourcing 2곳(sub/create·approve)만, 마스터까지면 bom.py도 공용확인 추가.
-2. **탈락 613 dormant 유지 확정?** (§5) — route참조 15행 있어 그대로 두기 권장.
+2. ~~탈락 613 dormant 유지?~~ → **✅확정(2026-08-29 사장님 "알겠어"): dormant 유지·무접촉**(재계산 2280만).
 
 ### 착수 순서(확인 후): S1 스키마 additive → S2 계획/원가 baseline → S3 재계산(백업·shadow diff0) → S4 mint 주입+공용확인 → S5 표시 → S6 전 게이트(원가·생산계획·협력사계획 diff0·dedup·화면) → S7 승인 배포.
 - 백업: `nx.sub_registry_bak_mksig` · `nx.sub_code_map_bak_mksig`. 롤백=재적재.
