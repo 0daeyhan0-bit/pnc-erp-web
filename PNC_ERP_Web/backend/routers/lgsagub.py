@@ -956,7 +956,6 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         nx.close()
 
 
-<<<<<<< HEAD
 @router.get("/api/lgsagub/recvcompare_parts_ledger")
 def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
     """사급부품 월별 수불(원소재 수불과 동일 형태): 기초 + 입고(OSP 사급부품) − 소요(리시빙×BOM 부품) = 기말. 개수 단위·1월(2601)부터.
@@ -1016,8 +1015,6 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
         nx.close()
 
 
-=======
->>>>>>> zt/main
 # ===================== 원소재 사급전환율 (LG BOM Assembly Pull 대조) =====================
 def _parse_cu_spec(spec):
     """동 원소재 규격 파싱: 'CUTTING CU P9.52 T0.7 L/W C1220T-O ALL' → 외경/두께/재질/형태."""
