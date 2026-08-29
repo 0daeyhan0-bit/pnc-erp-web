@@ -26,6 +26,18 @@
 - **검증 게이트**: 채운 후 plan_part_gagong 561 무회귀 + 원가 무영향(gagong_proc는 원가 미참조) 확인. 그 후 prodsheet clean walker = diff0 가능.
 - ★nx.bom_line=계획/원가 소스라 plan 보호([[feedback-protect-production-plan]])·승인 후.
 
+## 적용·검증 (2026-08-29)
+- 도구 `_migration/sub_norm/r_bomline_procmeta_fill.py --commit`(백업 nx.bom_line_procmeta_bak·빈값만·PR 1:1).
+- 채움: gagong_proc 660·s_work 764·wh_gagong 522·in_gagong 44·proc_gubun 521.
+- **무회귀 검증**: prod_soyo 표본 209 변경 0(엔진 gagong_proc 미참조 확인). gagong_proc 빈값 잔여 0 PASS.
+- gagong_proc 불일치 782 → **122**(빈값 660 해소).
+
+## ★잔여 122 = 별개 소스이슈 (nx.bom vs PR 정본 판단)
+- 채움 후 남은 122 = **비어있지 않은 실차이**: nx.bom_line(대부분 remarks '기존DB' 원빌드)이 PR과 다른 공정코드(nx'S1'↔PR'S4' 40·nx'S2'↔PR'RAC' 23·nx'S2'↔PR'S11' 22 등). PR (item,mat) 중복 0(모호 아님).
+- 성격: nx.bom 원빌드의 gagong_proc가 현행 PR과 어긋남(nx.bom stale 의심 — PR=현행 생산공정).
+- ★gagong_proc는 **로직 소비자 없음**(plan=item_PROC_GAGONG·backflush 미사용·bom.py 표시만)이라 정렬해도 무회귀. 단 non-empty 덮어쓰기라 "PR 정본" 판단 후. 정렬 시 nx.bom_line=PR 완전등가 → **prodsheet clean walker diff0 가능**.
+- 처리: PR을 gagong_proc 정본으로 확정하면 122도 PR로 정렬(백업). 미확정이면 walker가 122 divergence(0.3%) 문서화.
+
 ## 재현
 - 대조 SQL: 최신헤더 nx.bom_line ↔ nx.pr_m_item_bom (item,mat 조인), gagong_proc/s_work 등 <> 카운트.
 - 660 출처: remarks LIKE '%soyorec%'/'%edgeadd%'.
