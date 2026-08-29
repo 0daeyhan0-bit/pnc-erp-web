@@ -127,6 +127,54 @@ def prod_soyo(eng, item):
     return out
 
 
+def _prodinput_lines(eng, item):
+    """생산투입(prodsheet) 엣지 = nx.bom_line (child, qty, sagub_default, gagong_proc, vir_item, except_flag)
+    + child(mat)의 work_code(nx.item). prodsheet._bom_expand 소스(pr_m_item_bom) 재현 — gagong_proc는 PR 정렬 완료. 캐시."""
+    if not hasattr(eng, '_pilines'):
+        eng._pilines = {}
+    u = item.strip().upper()
+    if u not in eng._pilines:
+        bid = eng.bom_id(item)
+        if bid is None:
+            eng._pilines[u] = []
+        else:
+            eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(b.child_item))), b.qty, ISNULL(b.sagub_default,0),
+                    ISNULL(LTRIM(RTRIM(b.gagong_proc)),''), ISNULL(b.vir_item,0), ISNULL(b.except_flag,0),
+                    ISNULL(LTRIM(RTRIM(i.work_code)),'')
+                FROM nx.bom_line b LEFT JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(b.child_item)))
+                WHERE b.bom_id=? ORDER BY b.seq""", bid)
+            eng._pilines[u] = [(str(r[0]).strip(), float(r[1] or 0), int(r[2]), str(r[3]), int(r[4]), int(r[5]), str(r[6]))
+                               for r in eng.cur.fetchall()]
+    return eng._pilines[u]
+
+
+def prod_input_soyo(eng, item, gpc_like='%'):
+    """[생산투입 walker] prodsheet._bom_expand(dw_pr_input_520_2) 재현 = 가상도번(vir_item=1)만 재귀·except_flag≠1,
+    출력=sagub_default=0 AND gagong_proc LIKE gpc AND vir≠1, grain=(mat, gagong_proc), SUM(cum_use)·MAX(work_code)·수량=USE_QTY(qty).
+    반환 {(mat, gagong_proc): (cum_use_qty, work_code)}. ★생산실적 파트별 재고차감(PR_T_STOCK_MAINT_MAT)용. qty_pr 아님(재고=CS use_qty)."""
+    import re as _re
+    pat = '(?s)^' + _re.escape(gpc_like).replace('%', '.*').replace('_', '.') + '$'
+    out = {}
+
+    def walk(node, cum, seen):
+        for (mat, q, sag, gpc, vir, ex, wc) in _prodinput_lines(eng, node):
+            if ex == 1:                    # except_flag 전개제외
+                continue
+            cu = cum * q
+            if vir != 1 and sag == 0 and _re.match(pat, gpc):   # 출력=비가상·사급아님·공정매치
+                k = (mat, gpc)
+                if k in out:
+                    out[k][0] += cu
+                    if wc > (out[k][1] or ''):
+                        out[k][1] = wc
+                else:
+                    out[k] = [cu, wc]
+            if vir == 1 and mat not in seen:                    # 가상도번만 재귀
+                walk(mat, cu, seen | {mat})
+    walk(item.strip().upper(), 1.0, set())
+    return {k: (round(v[0], 6), v[1]) for k, v in out.items()}
+
+
 def sagub_parts_soyo(eng, item, stop_set, memo=None):
     """[사급부품 walker] per-unit 완제품 1개 → {stop_set 부품: 소요개수}. v_pr_bom(=nx.bom_line·except≠1) 재귀,
     stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
