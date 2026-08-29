@@ -151,6 +151,8 @@ from routers import lgsagub as _r_lgsagub
 app.include_router(_r_lgsagub.router)
 from routers import sagubledger as _r_sagubledger   # 협력사 사급부품 수불장(신규)
 app.include_router(_r_sagubledger.router)
+from routers import rawmatledger as _r_rawmatledger   # 협력사 원소재(동관) 수불장(규격별·신규)
+app.include_router(_r_rawmatledger.router)
 from routers import dopip as _r_dopip
 app.include_router(_r_dopip.router)
 from routers import pricemgmt as _r_pricemgmt
