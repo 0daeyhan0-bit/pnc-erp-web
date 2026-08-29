@@ -48,7 +48,8 @@
 - **레지스트리 2893 → 새 SUB정의 유지 2280 / 탈락 613**(단일가공 자식<2=385·매입완성품 mk3/5=129·make_type공백=93·BOM없음=5). §8-5 "289=매입완성품·원소재 과다포함"의 실체.
 - **★핵심: 재계산은 유지 2280만.** 탈락 613 = **무접촉**(재계산 안 함). 근거: old sig 형식 `C[]W[]` ≠ new 형식 `C[]W[]MK[]` → 신규 make_type-sig와 **절대 충돌 불가**(신규 SUB는 make_type∈{1,2}·자식≥2라 단일가공/매입완성품과 구조 동일 불가). ∴ 탈락 613·그 기존 route참조 15행 그대로 둬도 dedup 오염 0. **forward-only와 정확히 일치**(기존 무접촉).
 - 방법: 유지 2280 구조로 새 sig 재계산 → `sub_registry.sig` UPDATE. **DRY 실측(sub_code_map 기준·정정): 분할 8 sub_code·repoint 8 raw_item**(앞선 forest "5"는 과소). 갈래별 신규 S + `sub_code_map` repoint. ★분할 8 중 일부는 make_type 아니라 **재귀구조 차이**(old sig 과다병합을 새 재귀 sig가 분리, 예 S01292=601-19-11 vs 602-19-11 둘다 mk2). ∴"make_type만 분할"로 단정 금지.
-- ✅확인완료: 분할 8건 관련 raw코드 **sourcing_route_line 참조 0행**(19코드 전부 sub_code_map 등록) → repoint 안전(sub_code_map만·route/계획 무영향).
+- ✅확인완료: 분할 관련 raw코드 **sourcing_route_line 참조 0행** → repoint 안전(sub_code_map만·route/계획 무영향).
+- ✅**재계산 스크립트 완성·DRY 검증**(`r_sub_mksig_recompute.py`, 2026-08-30): keep 2558→새 sig 2291 유일·**분할 6·병합 0**·sig UPDATE 2279+분할 신규 6+repoint 6. ★**self-check 8/8**(반영 후 실제 `_sub_signature`가 저장 sig 재현=mint≡재계산 정합 증명). 방식=재귀 in-memory 전체계산→일괄반영(bottom-up 순서버그 회피)→분할 소수갈래 신규코드+repoint. 백업=sub_registry_bak_mksig·sub_code_map_bak_mksig. **DRY 롤백=nx 무변경. --commit은 배포와 동시(라이브 옛코드 오dedup 방지)·승인후.**
 
 ## ★제작처(make_type) 소스 규명 (2026-08-30, 구현 중 발견·sub_mk_source/sub_mksrc_probe)
 정체성 3축 "제작처"를 어디서 읽나 = dedup 정합 핵심. 실측:
