@@ -99,6 +99,31 @@
     margin-bottom:13px}
   #login input:focus{outline:0;border-color:var(--brand2)}
   .foot{text-align:center;font-size:11.5px;color:var(--sub);padding:14px 10px 4px}
+
+  /* 발행 · 스캔 */
+  .row{display:flex;align-items:center;gap:9px;padding:10px 2px;border-bottom:1px solid var(--line)}
+  .row input[type=checkbox]{width:21px;height:21px;flex:0 0 auto}
+  .row .g{flex:1;min-width:0}
+  .row .q{width:78px;padding:8px;font-size:15px;text-align:right;border:1.5px solid #d7dfea;
+    border-radius:8px;font-variant-numeric:tabular-nums}
+  .qr{text-align:center;padding:6px 0 2px}
+  .qr svg{width:min(64vw,240px);height:auto;display:block;margin:0 auto}
+  .qrv{font-size:20px;font-weight:800;letter-spacing:1px;margin-top:8px;font-variant-numeric:tabular-nums}
+  .big{width:100%;padding:14px;font-size:19px;text-align:center;border:2px solid var(--brand);
+    border-radius:11px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums}
+  .sum{display:flex;gap:9px;margin:10px 0}
+  .sum div{flex:1;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;
+    padding:9px;text-align:center}
+  .sum b{display:block;font-size:18px;font-weight:800;color:var(--brand)}
+  .sum span{font-size:11px;color:var(--sub)}
+  .warnbox{background:#fdf3e2;border:1px solid #f0d6a8;color:#8a5600;padding:11px;
+    border-radius:10px;font-size:13px;font-weight:700;margin-bottom:11px;line-height:1.5}
+  .modal{position:fixed;inset:0;z-index:70;background:rgba(16,32,60,.55);display:flex;
+    align-items:flex-end;justify-content:center;padding:0}
+  .modal .sheet{background:#fff;width:100%;max-width:560px;border-radius:16px 16px 0 0;
+    padding:18px 15px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+  .modal h4{margin:0 0 4px;font-size:17px;font-weight:800}
+  .modal .s{color:var(--sub);font-size:12.5px;margin-bottom:13px}
 </style>
 </head>
 <body>
@@ -125,11 +150,7 @@
 
 <main class="hide" id="app"></main>
 
-<nav class="hide" id="nav">
-  <button data-v="home" class="on"><span class="i">🏠</span>홈</button>
-  <button data-v="plan"><span class="i">📅</span>내 계획</button>
-  <button data-v="inv"><span class="i">📄</span>내 송장</button>
-</nav>
+<nav class="hide" id="nav"></nav>
 
 <script>
 const API = location.origin;
@@ -197,10 +218,28 @@ async function load(){
   render();
 }
 
+/* ★유형별 분기 — 세트입고를 안 쓰는 협력사에는 송장 탭을 숨긴다.
+     실측(2026-08-29): 세트입고 송장이 있는 곳 = 절삭-협력사 9/11 · 나머지 1/76.
+     같은 화면을 전원에게 주면 대부분이 **빈 송장 화면**을 본다. */
+function tabs(){
+  const staff = (T.me||{}).utype !== '협력사';
+  const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
+  const t=[{v:'home',i:'🏠',n:'홈'},{v:'plan',i:'📅',n:'내 계획'}];
+  if(useInv) t.push({v:'inv',i:'📄',n:'내 송장'});
+  if(staff)  t.push({v:'scan',i:'📷',n:'입고'});
+  return t;
+}
 function render(){
   if(!DATA) return;
-  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on', b.dataset.v===VIEW));
-  $('#app').innerHTML = VIEW==='home' ? viewHome() : VIEW==='plan' ? viewPlan() : viewInv();
+  const T2=tabs();
+  if(!T2.some(x=>x.v===VIEW)) VIEW='home';
+  $('#nav').innerHTML = T2.map(x=>`<button data-v="${x.v}" class="${x.v===VIEW?'on':''}">
+    <span class="i">${x.i}</span>${x.n}</button>`).join('');
+  $('#nav').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
+  $('#app').innerHTML = VIEW==='home' ? viewHome()
+                      : VIEW==='plan' ? viewPlan()
+                      : VIEW==='scan' ? viewScan() : viewInv();
   wire();
 }
 
@@ -253,19 +292,46 @@ function viewPlan(){
   </div>`;
 }
 
+/* ───────── 내 송장 : 발행 → QR → 출발 ───────── */
+let SEL = {};          // sheet -> qty
+
 function viewInv(){
   const inv=DATA.inv||[], ready=DATA.ready||[];
+  const issued=(DATA.issued||[]);
   return `
   <div class="card">
     <h3>발행할 송장<span class="n">${num(ready.length)}</span></h3>
-    ${ready.length ? `<div class="scroll"><table>
-      <thead><tr><th>요청일</th><th>도번</th><th class="n">수량</th></tr></thead>
-      <tbody>${ready.map(r=>`<tr><td>${esc(ymd(r.ymd))}</td>
-        <td><span class="part">${esc(r.item)}</span></td>
-        <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}</tbody></table></div>
-      <div class="msg k" style="margin-top:11px">송장 발행(QR) 화면은 준비 중입니다. 지금은 기존 방식으로 발행해 주세요.</div>`
+    ${ready.length ? `
+      <div class="s" style="color:var(--sub);font-size:12.5px;margin-bottom:6px">
+        오늘 납품할 것을 고르고 수량을 확인한 뒤 발행하세요. 발행하면 QR 이 나옵니다.</div>
+      <div class="scroll">${ready.map(r=>`
+        <div class="row">
+          <input type="checkbox" data-sheet="${esc(r.sheet)}" ${SEL[r.sheet]!=null?'checked':''}>
+          <div class="g"><span class="part">${esc(r.item)}</span>
+            <span class="nm">요청 ${esc(ymd(r.ymd))} · 요청수량 ${num(r.qty)}</span></div>
+          <input class="q" type="number" inputmode="numeric" min="0" max="${r.qty}"
+                 data-q="${esc(r.sheet)}" value="${SEL[r.sheet]!=null?SEL[r.sheet]:r.qty}">
+        </div>`).join('')}</div>
+      <div class="sum">
+        <div><b id="selc">0</b><span>선택 도번</span></div>
+        <div><b id="selq">0</b><span>납품수량</span></div>
+      </div>
+      <button class="btn" id="issue" disabled>선택한 송장 발행</button>`
     : `<div class="empty">발행 대기 중인 송장이 없습니다.</div>`}
   </div>
+
+  ${issued.length ? `<div class="card">
+    <h3>발행한 송장<span class="n">${num(issued.length)}</span></h3>
+    <div class="scroll">${issued.map(b=>`
+      <div class="row">
+        <div class="g"><span class="part">SET${esc(b.barcode)}</span>
+          <span class="nm">${esc(ymd(b.ymd))} · 도번 ${num(b.cnt)}종 · ${num(b.qty)}개</span></div>
+        <span class="pill p${esc(b.status)}">${esc(ST[b.status]||b.status)}</span>
+        <button class="btn g" style="width:auto;padding:8px 11px;font-size:13px"
+                data-qr="${esc(b.barcode)}">QR</button>
+      </div>`).join('')}</div>
+  </div>` : ''}
+
   <div class="card">
     <h3>상태별 현황</h3>
     ${inv.length ? `<table><tbody>${inv.map(x=>`
@@ -275,12 +341,174 @@ function viewInv(){
   </div>`;
 }
 
+function recalc(){
+  const c=Object.keys(SEL).length;
+  const q=Object.values(SEL).reduce((a,b)=>a+(Number(b)||0),0);
+  const ec=$('#selc'), eq=$('#selq'), b=$('#issue');
+  if(ec) ec.textContent=num(c);
+  if(eq) eq.textContent=num(q);
+  if(b) b.disabled = !(c>0 && q>0);
+}
+
+async function doIssue(){
+  const items=Object.entries(SEL).map(([sheet,qty])=>({sheet,qty:Number(qty)||0}))
+                                 .filter(x=>x.qty>0);
+  if(!items.length) return;
+  const b=$('#issue'); b.disabled=true; b.textContent='발행 중…';
+  try{
+    const j=await api('/api/setin/issue',{method:'POST',body:JSON.stringify({items})});
+    SEL={};
+    await load();
+    if(j&&j.barcode) showQR(j.barcode, `송장 ${j.count}건을 발행했습니다.`);
+  }catch(e){ alert(e.message); b.disabled=false; b.textContent='선택한 송장 발행'; }
+}
+
+async function showQR(bc, note){
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML=`<div class="sheet">
+    <h4>SET${esc(bc)}</h4>
+    <div class="s">${esc(note||'상자에 붙이고, 담당자가 이 QR 을 찍어 입고합니다.')}</div>
+    <div class="qr" id="qrbox">불러오는 중…</div>
+    <div class="qrv">SET${esc(bc)}</div>
+    <div style="display:flex;gap:9px;margin-top:14px">
+      <button class="btn g" id="qrprint">인쇄</button>
+      <button class="btn g" id="qrdepart">출발 처리</button>
+      <button class="btn" id="qrclose">닫기</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  m.querySelector('#qrclose').onclick=()=>m.remove();
+  m.onclick=e=>{ if(e.target===m) m.remove(); };
+  m.querySelector('#qrprint').onclick=()=>{
+    const w=window.open('','_blank');
+    if(!w) return alert('팝업이 차단되었습니다. 브라우저 설정을 확인하세요.');
+    w.document.write(`<title>SET${bc}</title><body style="text-align:center;font-family:sans-serif;padding:24px">
+      ${m.querySelector('#qrbox').innerHTML}
+      <div style="font-size:26px;font-weight:800;letter-spacing:2px;margin-top:10px">SET${bc}</div>
+      </body>`);
+    w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
+  };
+  m.querySelector('#qrdepart').onclick=async()=>{
+    if(!confirm(`SET${bc} 을(를) 출발 처리할까요?`)) return;
+    try{ const j=await api('/api/partner/depart',{method:'POST',body:JSON.stringify({barcode:bc})});
+      alert(j.msg||'출발 처리했습니다.'); m.remove(); load();
+    }catch(e){ alert(e.message); }
+  };
+  try{
+    const r=await fetch(API+'/api/partner/qr?barcode='+encodeURIComponent(bc),
+      {headers:{'Authorization':'Bearer '+T.tok}});
+    m.querySelector('#qrbox').innerHTML = r.ok ? await r.text()
+      : '<div class="msg e">QR 을 만들지 못했습니다.</div>';
+  }catch(e){ m.querySelector('#qrbox').innerHTML='<div class="msg e">QR 오류</div>'; }
+}
+
+/* ───────── 입고 스캔 (담당자 전용) ───────── */
+let SCAN=null;
+function viewScan(){
+  return `
+  <div class="card">
+    <h3>입고 스캔</h3>
+    <div class="s" style="color:var(--sub);font-size:12.5px;margin-bottom:9px">
+      리더기로 찍거나 SET번호를 입력하세요. <b>확인 후에 입고</b>됩니다.</div>
+    <input class="big" id="sc" inputmode="numeric" autocomplete="off"
+           placeholder="SET바코드" value="">
+    <div style="display:flex;gap:9px;margin-top:10px">
+      <button class="btn g" id="cam">카메라로 찍기</button>
+      <button class="btn" id="go">조회</button>
+    </div>
+    <div id="scres" style="margin-top:13px"></div>
+  </div>`;
+}
+
+async function doScan(){
+  const v=($('#sc').value||'').replace(/[^0-9]/g,'');
+  const box=$('#scres');
+  if(!v){ box.innerHTML='<div class="msg e">SET바코드를 입력하세요.</div>'; return; }
+  box.innerHTML='<div class="empty">조회 중…</div>';
+  try{
+    const j=await api('/api/setstock/scan?barcode='+encodeURIComponent(v));
+    SCAN=j;
+    const rows=j.rows||[];
+    const q=rows.reduce((a,b)=>a+(Number(b.qty)||0),0);
+    box.innerHTML=`
+      ${j.warn?`<div class="warnbox">${esc(j.warn)}</div>`:''}
+      <div class="sum">
+        <div><b>${esc(j.custnm||j.cust||'')}</b><span>협력사</span></div>
+        <div><b>${num(rows.length)}</b><span>도번</span></div>
+        <div><b>${num(q)}</b><span>수량</span></div>
+      </div>
+      <div class="scroll">${rows.map(r=>`
+        <div class="row"><div class="g"><span class="part">${esc(r.item_code||'')}</span>
+          <span class="nm">${esc(r.itemnm||'')} · 상태 ${esc(ST[String(r.status||'').trim()]||r.status||'')}</span></div>
+          <div style="font-weight:800">${num(r.qty)}</div></div>`).join('')}</div>
+      <button class="btn" id="recv" style="margin-top:12px">이 내용으로 입고</button>`;
+    $('#recv').onclick=doReceive;
+  }catch(e){ box.innerHTML=`<div class="msg e">${esc(e.message)}</div>`; }
+}
+
+async function doReceive(){
+  if(!SCAN) return;
+  const n=(SCAN.rows||[]).length;
+  if(!confirm(`${SCAN.custnm||''} · 도번 ${n}종을 입고 처리할까요?`)) return;
+  const b=$('#recv'); b.disabled=true; b.textContent='입고 중…';
+  try{
+    const j=await api('/api/setstock/receive',{method:'POST',
+      body:JSON.stringify({barcode:SCAN.barcode,tag:'2'})});
+    $('#scres').innerHTML=`<div class="msg k">입고 완료 — ${num(j.received)}건 ·
+      자도번 재고 ${num(j.ledger_posted)}행</div>`;
+    $('#sc').value=''; SCAN=null;
+  }catch(e){
+    b.disabled=false; b.textContent='이 내용으로 입고';
+    $('#scres').insertAdjacentHTML('afterbegin',`<div class="msg e">${esc(e.message)}</div>`);
+  }
+}
+
+async function useCamera(){
+  if(!('BarcodeDetector' in window)){
+    alert('이 브라우저는 카메라 스캔을 지원하지 않습니다.\n리더기로 찍거나 번호를 직접 입력하세요.\n(안드로이드 크롬에서 지원)');
+    return;
+  }
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML=`<div class="sheet"><h4>QR 을 비추세요</h4>
+    <video id="v" playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    <button class="btn g" id="cx" style="margin-top:11px">닫기</button></div>`;
+  document.body.appendChild(m);
+  let stream=null, stop=false;
+  const close=()=>{ stop=true; if(stream) stream.getTracks().forEach(t=>t.stop()); m.remove(); };
+  m.querySelector('#cx').onclick=close;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const v=m.querySelector('#v'); v.srcObject=stream; await v.play();
+    const det=new BarcodeDetector({formats:['qr_code','code_39']});
+    const tick=async()=>{
+      if(stop) return;
+      try{ const c=await det.detect(v);
+        if(c && c.length){ const val=(c[0].rawValue||'').replace(/[^0-9]/g,'');
+          if(val){ close(); $('#sc').value=val; doScan(); return; } } }catch(e){}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }catch(e){ close(); alert('카메라를 열 수 없습니다 — '+e.message); }
+}
+
 function wire(){
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
+  document.querySelectorAll('[data-sheet]').forEach(cb=>cb.onchange=()=>{
+    const sh=cb.dataset.sheet, q=document.querySelector(`[data-q="${sh}"]`);
+    if(cb.checked) SEL[sh]=Number(q&&q.value)||0; else delete SEL[sh];
+    recalc();
+  });
+  document.querySelectorAll('[data-q]').forEach(q=>q.oninput=()=>{
+    const sh=q.dataset.q; if(SEL[sh]!=null) SEL[sh]=Number(q.value)||0; recalc();
+  });
+  document.querySelectorAll('[data-qr]').forEach(b=>b.onclick=()=>showQR(b.dataset.qr));
+  const is=$('#issue'); if(is) is.onclick=doIssue;
+  const g=$('#go'); if(g) g.onclick=doScan;
+  const c=$('#cam'); if(c) c.onclick=useCamera;
+  const sc=$('#sc'); if(sc){ sc.focus(); sc.onkeyup=e=>{ if(e.key==='Enter') doScan(); }; }
+  recalc();
 }
 
 /* ───────── 시작 ───────── */
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
 $('#lgbtn').onclick = doLogin;
 ['#lgid','#lgpw'].forEach(s=>$(s).addEventListener('keyup',e=>{ if(e.key==='Enter') doLogin(); }));
 $('#out').onclick = async()=>{

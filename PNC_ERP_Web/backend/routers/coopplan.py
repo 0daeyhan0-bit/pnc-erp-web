@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """coopplan 도메인 라우터 — app.py에서 분리. 공유헬퍼는 common.py."""
+import io
 import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
@@ -1356,9 +1357,21 @@ def partner_my(request: Request, cust: str = Query(""), days: int = Query(14)):
         ready = [{"sheet": str(a).strip(), "ymd": str(b or "").strip(),
                   "item": str(c or "").strip(), "qty": float(d or 0)} for a, b, c, d in cur.fetchall()]
 
+        # ── 발행한 송장(바코드 단위) — QR 다시 보기·출발 처리에 쓴다 ──
+        cur.execute("""SELECT barcode_no, MAX(issue_ymd) ymd, MIN(ISNULL(status,'10')) st,
+                              COUNT(*) cnt, SUM(CAST(ISNULL(deliver_qty,input_req_qty) AS float)) q
+                         FROM nx.set_input_req
+                        WHERE in_cust_code = ? AND barcode_no IS NOT NULL
+                          AND ISNULL(status,'00') IN ('10','20','30','40')
+                        GROUP BY barcode_no ORDER BY MAX(issue_ymd) DESC, barcode_no DESC""", cc)
+        issued = [{"barcode": str(a).strip(), "ymd": str(b or "").strip(),
+                   "status": str(c2).strip(), "cnt": int(d or 0), "qty": float(e or 0)}
+                  for a, b, c2, d, e in cur.fetchall()[:60]]
+
         cur.execute("SELECT cust_name FROM nx.cust WHERE cust_code=?", cc)
         r = cur.fetchone()
         return {"cust": cc, "custnm": (str(r[0]).strip() if r else ""),
+                "issued": issued,
                 "from": fr, "to": to, "days": days,
                 "plan": plan,
                 "plan_tot": {"qty": sum(x["qty"] for x in plan),
@@ -1404,3 +1417,42 @@ def partner_depart(request: Request, body: dict = Body(...)):
                 "msg": f"출발 처리했습니다 — 송장 {n}건. 도착하면 담당자가 QR 을 찍어 입고합니다."}
     finally:
         cn.close()
+
+
+# ===================== 협력사 포털 — QR (2026-08-29) =====================
+def _qr_svg(text, scale=6, border=2):
+    """QR 을 SVG 문자열로. segno = repo 안 vendor (서버에 pip install 불필요)."""
+    import os as _os
+    import sys as _sys
+    _v = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "vendor")
+    if _v not in _sys.path:
+        _sys.path.insert(0, _v)
+    import segno
+    buf = io.BytesIO()
+    # ★make_qr() — **표준 QR 강제**. segno.make() 는 짧은 값이면 Micro QR(M3)을 고르는데
+    #   마이크로 QR 은 폰 카메라·리더기 상당수가 **못 읽는다**(현장에서 안 찍히면 치명적).
+    # error='m' = 15% 복원. 상자에 붙어 긁히거나 젖는 것을 감안한다.
+    segno.make_qr(str(text), error='m').save(buf, kind='svg', scale=scale, border=border,
+                                             dark='#000000', light='#ffffff')
+    return buf.getvalue().decode('utf-8')
+
+
+@router.get("/api/partner/qr")
+def partner_qr(request: Request, barcode: str = Query(...), scale: int = Query(6)):
+    """SET바코드 QR (SVG). ★자기 송장만 — 남의 바코드는 QR 도 못 뽑는다."""
+    from fastapi.responses import Response as _Resp
+    u = require_user(request)
+    bc = "".join(ch for ch in str(barcode) if ch.isdigit())
+    if not bc:
+        raise HTTPException(400, "SET바코드가 필요합니다.")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        assert_own_barcode(cur, u, bc)          # 소속 강제
+        cur.execute("SELECT COUNT(*) FROM nx.set_input_req WHERE barcode_no=?", bc)
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"SET바코드 {bc} 송장을 찾을 수 없습니다.")
+    finally:
+        cn.close()
+    svg = _qr_svg("SET" + bc, scale=max(2, min(int(scale), 14)))
+    return _Resp(content=svg, media_type="image/svg+xml",
+                 headers={"Cache-Control": "no-store"})
