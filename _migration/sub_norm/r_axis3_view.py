@@ -18,6 +18,9 @@ SELECT i.item_code, i.item_name, i.sgroup, i.lgroup,
     ELSE NULL END AS axis_procure,
   CASE i.sgroup WHEN '110' THEN N'완제품ASSY' WHEN '120' THEN N'SUB-ASSY' WHEN '130' THEN N'가공품'
     ELSE NULL END AS axis_produce,
+  -- 현행조달 표기(C블록·참조) — make_type. ★route가 진실이나 route에 make_type 없음 → 마스터값 표기만(§1 C·§3-1 신뢰주의).
+  CASE i.make_type WHEN '1' THEN N'제작' WHEN '2' THEN N'외주' WHEN '3' THEN N'구매'
+    WHEN '4' THEN N'LG사급' WHEN '5' THEN N'외주완성' ELSE NULL END AS procure_method,
   CASE WHEN i.lgroup IS NOT NULL AND LTRIM(RTRIM(i.lgroup)) <> '' THEN i.lgroup ELSE NULL END AS axis_sales_code,
   lg.DETAIL_DESC AS axis_sales,
   CASE WHEN i.sgroup IS NULL OR LTRIM(RTRIM(i.sgroup)) = '' THEN 1 ELSE 0 END AS unclassified
