@@ -391,6 +391,18 @@ def _mk5(mk, has_bom=False):
     g = _MK_GUBUN.get(str(mk or "").strip())
     return g if g else ("제작" if has_bom else "구매")
 
+def _gub2mk(gub):
+    """편성 gubun(자체/제작/외주/구매/사급/외주직납) → make_type(1~5). 신규 SUB 제작처 저장용(2026-08-30).
+       ★품목 make_type이 있으면 그걸 우선(정확); 이 변환은 make_type 없는 진짜 신규 SUB에만."""
+    g = str(gub or "").strip()
+    if not g: return ""
+    if "직납" in g: return "5"
+    if "외주" in g: return "2"          # '외주','외주(유상사급)' 포함
+    if "사급" in g: return "4"
+    if "구매" in g: return "3"
+    if "자체" in g or "제작" in g: return "1"
+    return ""
+
 _SCHEMA_READY = False   # ★속도: 스키마 멱등체크는 프로세스당 1회만(매 요청 11 메타 라운드트립 ~104ms 제거). 스키마는 런타임 불변.
 def _ensure_route_tbl(cur):
     global _SCHEMA_READY
@@ -1183,16 +1195,24 @@ def sourcing_route_approve(payload: dict = Body(...)):
             _bump_approved_seq(cur, str(r0[0]).strip(), int(r0[1] or 0))
             # ★신규 SUB mint(정본 S 발급) — 승인 시점에만. dedup-safe(sig UNIQUE=중복불가). 이미 S코드면 skip.
             from routers.bom import _sub_signature, _mint_sub
-            cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
-            for a, b in [(int(x[0]), str(x[1]).strip()) for x in cur.fetchall()]:
+            b_assy = str(r0[0]).strip(); b_route = int(r0[1] or 0)   # 출생라벨 (ASSY, route)
+            cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')), ISNULL(gubun,'') FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
+            for a, b, gub in [(int(x[0]), str(x[1]).strip(), str(x[2]).strip()) for x in cur.fetchall()]:
                 if b[:1] == 'S' and b[1:].isdigit(): continue
                 cur.execute("SELECT ISNULL(child_item,''), ISNULL(qty,1) FROM nx.sourcing_route_line WHERE route_id=? AND parent_line=? AND node_kind<>'SUB'", rid, a)
                 ch = [{"item": str(x[0]).strip(), "qty": float(x[1] or 1)} for x in cur.fetchall() if str(x[0]).strip()]
                 if not ch: continue
                 cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", rid, b)
                 wd = [{"weld_item": str(x[0]).strip(), "weld_st": float(x[1] or 0), "use_qty": float(x[2] or 0)} for x in cur.fetchall()]
-                sig = _sub_signature(cur, ch, wd)
-                newcode, is_new = _mint_sub(cur, sig, b, b)
+                # ★제작처(own_mk): 품목 make_type 우선(정확·in_cust검증), 없으면 편성 gubun→make_type 변환·저장(사장님 2026-08-30)
+                cur.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", b)
+                _mr = cur.fetchone(); own_mk = ((_mr[0] or '').strip() if _mr else '')
+                if not own_mk:
+                    own_mk = _gub2mk(gub)
+                    if own_mk:
+                        cur.execute("UPDATE nx.item SET make_type=? WHERE item_code=? AND ISNULL(make_type,'')=''", own_mk, b)
+                sig = _sub_signature(cur, ch, wd, own_mk=own_mk)
+                newcode, is_new = _mint_sub(cur, sig, b, b, birth_assy=b_assy, birth_route=b_route)
                 if newcode and newcode != b:
                     cur.execute("UPDATE nx.sourcing_route_line SET child_item=?, sub_item=?, child_name=? WHERE route_id=? AND line_id=?", newcode, newcode, newcode, rid, a)
                     cur.execute("UPDATE nx.sourcing_route_proc SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, b)
@@ -2773,12 +2793,12 @@ def sourcing_sub_match(route_id: int = Query(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
-        cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", route_id)
-        my_subs = [(int(r[0]), str(r[1]).strip()) for r in cur.fetchall()]
+        cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')), ISNULL(gubun,'') FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", route_id)
+        my_subs = [(int(r[0]), str(r[1]).strip(), str(r[2]).strip()) for r in cur.fetchall()]
         cur.execute("SELECT route_id, line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE node_kind='SUB'")
         all_subs = [(int(r[0]), int(r[1]), str(r[2]).strip()) for r in cur.fetchall()]
         matches = []
-        for (sline, scode) in my_subs:
+        for (sline, scode, sgub) in my_subs:
             mem = _sub_members(cur, route_id, sline)
             if not mem: continue
             # ① 글로벌 레지스트리 시그니처 대조 (정본 S 강제재사용)
@@ -2787,12 +2807,15 @@ def sourcing_sub_match(route_id: int = Query(...)):
             cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", route_id, scode)
             wd = [{"weld_item": str(r[0]).strip(), "weld_st": float(r[1] or 0), "use_qty": float(r[2] or 0)} for r in cur.fetchall()]
             if ch:
-                sig = _sub_signature(cur, ch, wd)
-                cur.execute("SELECT sub_code FROM nx.sub_registry WHERE sig=?", sig)
+                cur.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", scode)
+                _mr = cur.fetchone(); own_mk = ((_mr[0] or '').strip() if _mr else '') or _gub2mk(sgub)
+                sig = _sub_signature(cur, ch, wd, own_mk=own_mk)
+                cur.execute("SELECT sub_code, ISNULL(birth_label,''), ISNULL(is_shared,0), ISNULL(ref_count,0) FROM nx.sub_registry WHERE sig=?", sig)
                 rr = cur.fetchone()
                 if rr and (rr[0] or '').strip() and (rr[0] or '').strip() != scode:
                     matches.append({"sub_line": sline, "sub_item": scode, "member_count": len(mem),
-                                    "match_code": (rr[0] or '').strip(), "match_route_id": 0, "match_kind": "registry"})
+                                    "match_code": (rr[0] or '').strip(), "match_route_id": 0, "match_kind": "registry",
+                                    "birth_label": (rr[1] or '').strip(), "is_shared": bool(rr[2]), "ref_count": int(rr[3] or 0)})
                     continue
             # ② 후보끼리 대조(기존)
             prc = _node_procs_map(cur, route_id, scode) if scode else {}

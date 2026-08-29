@@ -26,8 +26,9 @@
 | `sourcing.py:2767` `/api/sourcing/sub/match` (GET) | route SUB를 레지스트리 대조(읽기전용 확인) | 공용확인 헬퍼(존재)·UI 결선 강화 |
 | `bom.py:559` `/api/bom/sub/dedup` (POST) | children+weld→기존 S 조회 | 공용확인 **API**(존재)·전 등록지점서 호출 |
 
-### 1-2. ☐판단 필요 (BOM 마스터 편집 = SUB 등록으로 볼지 사장님 확인)
-`bom.py`: `/api/bom/save`(607)·`/api/bom/addline`(748)·`/api/bom/copy`(1082) = **nx.bom_line 직접 편집**(SUB 구조 생성 가능하나 레지스트리 mint 안 함). 이 마스터 편집이 "SUB 등록"에 포함돼 공용확인이 필요한지 = **아침 확인**(조달후보 편성만인지, 마스터 BOM 편집까지인지). ※성급한 일반화 금지 — 확정 전 미적용.
+### 1-2. ✅확정(2026-08-30 사장님 "공용 확인도 하고 표시도"): BOM 마스터 편집 **포함**
+`bom.py`: `/api/bom/save`(607)·`/api/bom/addline`(748)·`/api/bom/copy`(1082)도 SUB 등록지점으로 **공용확인 포함**. → 조립구조 생성/수정 시 시그니처 dedup 검사·공용 고지.
+- **공용확인 = 확인(check) + 표시(display) 둘 다** (사장님): ①등록/편성 시 시그니처 일치 검사(강제 재사용) ②SUB 나오는 모든 화면에 **공용 배지 + 공유 제품수** 표시(subdisp is_shared/ref_count).
 
 ★정체성 공식(구성+용접+본인make_type) 변경은 `_sub_signature`(bom.py:513) **한 곳** 수정으로 전 지점 동시 반영(호출부 공유). 공용확인은 각 등록 지점에서 이 시그니처로 dedup 호출.
 

@@ -313,6 +313,15 @@ def _bom_tree_nx(item, real, expandbuy=0):
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
             # ★sub_alias 쿼리 제거(성능): 정리 후 canonical 전부 NULL=매핑 없음. 필요시 재도입. 원격DB 왕복 1회 절감.
+        # ★공용확인 표시(2026-08-30): 등록된 SUB의 출생라벨({ASSY}_R{route}_S{nn})·공용 배지·공유제품수.
+        subreg = {}
+        for i in range(0, len(nl), 900):
+            chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
+            cur.execute(f"""SELECT m.raw_item, ISNULL(r.birth_label,''), ISNULL(r.is_shared,0), ISNULL(r.ref_count,0), r.sub_code
+                            FROM nx.sub_code_map m JOIN nx.sub_registry r ON r.sub_code=m.sub_code
+                            WHERE m.raw_item IN ({ph})""", *chunk)
+            for raw, bl, sh, rc, sc in cur.fetchall():
+                subreg[(raw or '').strip()] = {"birth": (bl or '').strip(), "shared": bool(sh), "ref": int(rc or 0), "code": (sc or '').strip()}
         def disp(code): return alias.get(code, code)   # 리프변형 표시(자재 canonical). SUB는 아래 tree-order.
         # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(현재 임시=위치기반). raw=원본코드(navi/edit),
         #   정본식별 S#####(nx.sub_registry/sub_code_map)은 dedup·후보채번용 내부 identity(표시 아님).
@@ -323,10 +332,14 @@ def _bom_tree_nx(item, real, expandbuy=0):
         def subdisp(child):
             if child in edges:   # 하위 보유 = SUB
                 # ★2026-08-15: 실제 제품코드(접미사 -N-N·_S 없는 깨끗한 코드)는 개명 금지 → 도면 품번 그대로 표시.
-                #   합성/변형 SUB(base-N-N·_S)만 {부모}_S{nn} 채번. (실제 ASSY가 SUB코드로 가려지던 문제 수정)
+                #   합성/변형 SUB(base-N-N·_S)만 SUB코드. (실제 ASSY가 SUB코드로 가려지던 문제 수정)
                 if ('-' not in child) and ('_' not in child):
                     return disp(child)
-                if child not in sub_map:
+                # ★2026-08-30: 등록된 출생라벨({ASSY}_R{route}_S{nn}) 있으면 그것(공용은 어디서든 동일 이름).
+                reg = subreg.get(child)
+                if reg and reg["birth"]:
+                    return reg["birth"]
+                if child not in sub_map:   # 미등록 SUB = 위치기반 폴백(기존 무회귀)
                     sub_seq[0] += 1; sub_map[child] = f"{item}_S{sub_seq[0]:02d}"
                 return sub_map[child]
             return disp(child)
@@ -347,7 +360,10 @@ def _bom_tree_nx(item, real, expandbuy=0):
                     "sag": e["sag"], "se": e["se"], "kt": e["kt"], "vir": e["vir"], "ce": e["ce"], "le": e["le"],
                     "gp": e["gp"], "sw": e["sw"], "metal": ci.get("metal", ""),
                     "diam": ci.get("diam", 0), "thick": ci.get("thick", 0), "length": ci.get("length", 0),
-                    "haskids": e["child"] in edges})
+                    "haskids": e["child"] in edges,
+                    "shared": subreg.get(e["child"], {}).get("shared", False),   # ★공용 배지
+                    "refcnt": subreg.get(e["child"], {}).get("ref", 0),
+                    "scode": subreg.get(e["child"], {}).get("code", "")})
                 walk(e["child"], lvl + 1)
             seen.discard(code)
         walk(item, 1)
@@ -543,18 +559,46 @@ def _sub_signature(cur, children, weld, own_mk=''):
     return 'S:' + hashlib.md5(raw.encode('utf-8')).hexdigest()[:12]
 
 
-def _mint_sub(cur, sig, rep_item, nm=''):
-    """레지스트리 dedup-safe 등록(append-only): sig 존재 시 기존 S반환(신규 생성 안 함=완전차단),
-       없으면 다음 S##### 발급+nx.sub_registry/sub_code_map 등록. 반환 (sub_code, is_new).
-       ★주의: 최초 시드(sub_registry_build DROP+재빌드) 이후 레지스트리는 append-only. mint된 후보SUB는 bom_line에 없으므로 DROP+재빌드 재실행 금지(코드 안정성)."""
+def _refresh_shared(cur, code):
+    """공용 flag/참조수 갱신 = 이 sub_code의 raw들을 직속자식으로 갖는 distinct 부모(제품) 수.
+       is_shared = 2개 이상 제품에서 사용(=공용). 표시 배지·강제재사용 고지에 사용."""
+    code = (code or '').strip()
+    if not code:
+        return
+    cur.execute("SELECT raw_item FROM nx.sub_code_map WHERE sub_code=?", code)
+    raws = [(x[0] or '').strip() for x in cur.fetchall() if x[0]]
+    if not raws:
+        return
+    ph = ",".join("?" * len(raws))
+    cur.execute(f"""SELECT COUNT(DISTINCT h.item_code) FROM nx.bom_line bl
+                    JOIN nx.bom_header h ON h.bom_id=bl.bom_id WHERE bl.child_item IN ({ph})""", *raws)
+    n = int(cur.fetchone()[0] or 0)
+    cur.execute("UPDATE nx.sub_registry SET ref_count=?, is_shared=? WHERE sub_code=?", n, (1 if n > 1 else 0), code)
+
+
+def _mint_sub(cur, sig, rep_item, nm='', birth_assy=None, birth_route=None):
+    """레지스트리 dedup-safe 등록 + 출생라벨. sig 존재 시 기존 S **강제재사용**(중복 완전차단=사장님 확정:
+       동일 품목+공정용접+제작처면 무조건 재사용)·공용flag 갱신. 없으면 신규 S##### 발급.
+       birth_assy/route 주어지면(route 편성) 출생라벨 {ASSY}_R{route}_S{nn}(영속번호=(assy,route)별 max+1) 부여.
+       반환 (sub_code, is_new). ★DROP+재빌드 재실행 금지(append-only)."""
     rep_item = (rep_item or '').strip()
     cur.execute("SELECT sub_code FROM nx.sub_registry WHERE sig=?", sig)
     r = cur.fetchone()
     if r:
-        return ((r[0] or '').strip(), False)
+        code = (r[0] or '').strip()
+        _refresh_shared(cur, code)     # 재사용 = 공용성 재평가
+        return (code, False)
     cur.execute("SELECT ISNULL(MAX(CAST(SUBSTRING(sub_code,2,10) AS INT)),0) FROM nx.sub_registry WHERE sub_code LIKE 'S[0-9][0-9][0-9][0-9][0-9]'")
     code = f"S{int(cur.fetchone()[0]) + 1:05d}"
-    cur.execute("INSERT INTO nx.sub_registry(sub_code,sig,rep_item,nm,members) VALUES(?,?,?,?,1)", code, sig, rep_item[:50], (nm or '')[:200])
+    ba = (str(birth_assy).strip() if birth_assy else None) or None
+    br = (int(birth_route) if str(birth_route or '').strip() != '' else None)
+    blabel = bseq = None
+    if ba and br is not None:
+        cur.execute("SELECT ISNULL(MAX(birth_seq),0) FROM nx.sub_registry WHERE birth_assy=? AND birth_route=?", ba, br)
+        bseq = int(cur.fetchone()[0]) + 1
+        blabel = f"{ba}_R{br}_S{bseq:02d}"[:60]
+    cur.execute("""INSERT INTO nx.sub_registry(sub_code,sig,rep_item,nm,members,birth_label,birth_assy,birth_route,birth_seq,is_shared,ref_count)
+                   VALUES(?,?,?,?,1,?,?,?,?,0,1)""", code, sig, rep_item[:50], (nm or '')[:200], blabel, ba, br, bseq)
     cur.execute("IF NOT EXISTS(SELECT 1 FROM nx.sub_code_map WHERE raw_item=?) INSERT INTO nx.sub_code_map(raw_item,sub_code) VALUES(?,?)", rep_item[:50], rep_item[:50], code)
     return (code, True)
 
@@ -565,16 +609,19 @@ def sub_dedup(payload: dict = Body(...)):
        동일 SUB 있으면 기존 S코드 반환(강제 재사용) → 중복 생성 차단. 읽기전용(채번은 후보 저장시)."""
     children = payload.get("children", []) or []
     weld = payload.get("weld", []) or []
+    own_mk = str(payload.get("make_type", "") or "").strip()   # ★제작처(사내1/외주2) — 정체성 축
     if not children:
         raise HTTPException(400, "children(구성) 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        sig = _sub_signature(cur, children, weld)
-        cur.execute("SELECT sub_code, rep_item, nm, members FROM nx.sub_registry WHERE sig=?", sig)
+        sig = _sub_signature(cur, children, weld, own_mk=own_mk)
+        cur.execute("""SELECT sub_code, rep_item, nm, members, ISNULL(birth_label,''), ISNULL(is_shared,0), ISNULL(ref_count,0)
+                       FROM nx.sub_registry WHERE sig=?""", sig)
         r = cur.fetchone()
         if r:
             return {"exists": True, "sub_code": (r[0] or '').strip(), "rep_item": (r[1] or '').strip(),
-                    "nm": r[2] or '', "members": int(r[3] or 0), "sig": sig}
+                    "nm": r[2] or '', "members": int(r[3] or 0), "sig": sig,
+                    "birth_label": (r[4] or '').strip(), "is_shared": bool(r[5]), "ref_count": int(r[6] or 0)}
         return {"exists": False, "sub_code": None, "sig": sig}
     finally:
         cn.close()
