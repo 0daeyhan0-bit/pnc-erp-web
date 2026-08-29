@@ -48,9 +48,10 @@ def sagubledger_list(request: Request, cust: str = Query(""), mat: str = Query("
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
             for k in ("sent", "used", "bal"): r[k] = round(float(r[k] or 0), 2)
-        # 협력사 드롭다운
-        cur.execute("""SELECT DISTINCT l.cust_code, ISNULL(c.CUST_DESC,'') nm FROM nx.sagub_parts_ledger l
-            LEFT JOIN nx.CM_M_CUST c ON c.CUST_CODE=l.cust_code ORDER BY 2""")
+        # 협력사 목록 = 협력사 마스터(절삭/부자재 CUST_TYPE 6·7·8) 전체 — 원장에 데이터 없는 협력사도 조회 가능
+        #   (원장 present 만 뽑으면 거래 없는 협력사(예 동주금속)가 목록에 안 나온다. 2026-08-29 사용자 지적.)
+        cur.execute("""SELECT LTRIM(RTRIM(CUST_CODE)), LTRIM(RTRIM(CUST_DESC)) nm FROM nx.CM_M_CUST
+            WHERE CUST_TYPE IN ('6','7','8') AND ISNULL(CUST_DESC,'')<>'' ORDER BY nm""")
         custs = [{"code": r[0], "nm": r[1]} for r in cur.fetchall()]
         tot = {"sent": round(sum(r["sent"] for r in rows), 2), "used": round(sum(r["used"] for r in rows), 2),
                "bal": round(sum(r["bal"] for r in rows), 2)}
