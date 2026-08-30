@@ -82,7 +82,7 @@
 
 ## 6. ★검증 게이트 (전부 통과해야 배포)
 1. **원가 diff0** — `_harness/cost_oracle.py`(엔진 sig 무관·bom_line 사용). 재계산 전후 실원가 표본 diff0.
-2. **★생산계획 diff0** — 재계산·주입 전 baseline 스냅샷 vs 후: `nx.plan_part_mat`(자재소요)·prodplan 산출 **완전동일**. (근거: coopplan/partplan/soyo/prodplan은 sub_registry/sub_code_map/subdisp **미참조**=0건, 구조적 무영향 + 실측 확인)
+2. **★생산계획 diff0** — 재계산·주입 전 baseline 스냅샷 vs 후: `nx.plan_part_mat`(자재소요)·prodplan 산출 **완전동일**. **★구조증명(2026-08-30 grep 실측)=원가엔진(nx_cost_engine)·소요엔진(nx_soyo_engine)·soyo·coopplan·partplan 모두 sub_registry/sub_code_map/sub_alias/subdisp 참조 0건** → sig 재계산(=sub 테이블만 변경)이 원가/계획에 영향 불가. + sandbox 실측 게이트(`sub_recompute_diff0_gate.py`: 재계산 전후 원가 diff0).
 3. **★협력사계획 diff0** — partplan(파트별 생산계획)·coopplan(협력사계획) 산출 전후 완전동일.
 4. **dedup 왕복** — 재계산 후 신규 mint가 기존 공용SUB에 정확 매칭(신규코드 오발급 0).
 5. **화면 무회귀** — 기존 SUB 표시 불변(birth_label 없는 노드), 신규만 `{ASSY}_R{route}_S{nn}`+배지.
