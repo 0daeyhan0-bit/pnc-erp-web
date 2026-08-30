@@ -1562,6 +1562,7 @@ SCREEN.manorder=(c)=>{
 
 /* ==== 협력사 발주현황 (협력사 포털·조회전용) — 협력사 로그인=자기업체만, 재고·기발주·계획4주·물동5~8주 ==== */
 SCREEN.coopporder=(c)=>{
+  const API=API_BASE;
   const nf=n=>(n==null||n==='')?'':Math.round(+n||0).toLocaleString();
   let cust='', info=null, rows=[], loading=false, msg='', vq='', vlist=[], vsearching=false;
   const parNo=ic=>{const s=String(ic||'');const i=s.indexOf('-');return i>0?s.slice(0,i):s;};
