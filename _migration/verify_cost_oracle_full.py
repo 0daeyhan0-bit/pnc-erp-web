@@ -73,6 +73,19 @@ print("\n" + "=" * 84)
 print("  대상 {:,}종 · {:.0f}초".format(len(items), time.time() - t0))
 print("  일치 {:,} · 불일치 {:,} · 오라클무값 {:,} · 오라클예외 {:,} · 엔진예외 {:,}".format(
     ok, len(diff), skip, oerr, eerr))
+# ★전체 불일치를 CSV 로 남긴다 — 상위 20 만 보면 군집 분석이 안 된다.
+if diff:
+    csvp = os.path.join(R, "_migration", "cost_diff_{}.csv".format(YMD))
+    with io.open(csvp, "w", encoding="utf-8-sig") as f:
+        f.write("item,sp_jae,engine_jae,diff" + chr(10))
+        for k, a, b, d in sorted(diff, key=lambda x: -abs(x[3])):
+            f.write("{},{:.2f},{:.2f},{:.2f}".format(k, a, b, d) + chr(10))
+    print(chr(10) + "  전체 불일치 CSV: {}".format(csvp))
+    from collections import Counter
+    cl = Counter(round(d, 2) for _, _, _, d in diff)
+    print("  ── 차이값 군집 상위 10 (같은 값이 반복되면 원인이 하나다) ──")
+    for v, n in cl.most_common(10):
+        print("    차이 {:>14,.2f} × {:>4}건".format(v, n))
 if diff:
     diff.sort(key=lambda x: -abs(x[3]))
     print("\n  ── 불일치 상위 20 (차이 큰 순) ──")
