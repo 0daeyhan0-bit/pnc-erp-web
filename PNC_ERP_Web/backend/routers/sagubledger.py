@@ -35,7 +35,14 @@ def _warm_bg():
     try: _sets()
     except Exception: pass
 import threading as _th
-_th.Thread(target=_warm_bg, daemon=True).start()
+# ★TestBed(FLOW_TESTBED=1)는 **동기로** 워밍한다 — 하네스는 커넥션이 하나라
+#   워밍 스레드가 본 스레드와 다투면 HY000(다른 hstmt 사용중)이 난다.
+#   끄면 엔진이 차가워 조회가 타임아웃하므로, 끄지 말고 요청 전에 끝낸다.
+import os as _os
+if _os.environ.get("FLOW_TESTBED"):
+    _warm_bg()
+else:
+    _th.Thread(target=_warm_bg, daemon=True).start()
 
 
 @router.get("/api/sagubledger/list")

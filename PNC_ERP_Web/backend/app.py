@@ -389,7 +389,14 @@ def _warmup_heavy_queries():
                     try: eng.naewon_nodes(_wi, "260630")
                     except Exception: pass
         except Exception: pass
-    threading.Thread(target=_run, daemon=True).start()
+    # ★TestBed(FLOW_TESTBED=1)는 예열을 **동기로** 한다 — 하네스는 커넥션이 하나라
+    #   예열 스레드가 본 스레드와 다투면 HY000 이 나고, 그렇다고 끄면 엔진이 차가워
+    #   생산재고조회가 타임아웃한다(실측 600s 초과). 요청을 받기 전에 끝낸다.
+    import os as _os
+    if _os.environ.get("FLOW_TESTBED"):
+        _run()
+    else:
+        threading.Thread(target=_run, daemon=True).start()
 
 # ===== 프론트엔드 정적 서빙 (내부망 단일 포트 운영) =====
 # ★반드시 모든 API 라우트 정의 이후(파일 최하단)에 위치. /api/* · /live/* 가 먼저 매칭되고 나머지는 정적파일로.

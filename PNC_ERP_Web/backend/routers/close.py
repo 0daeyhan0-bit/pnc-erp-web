@@ -1818,7 +1818,7 @@ def _mat_ledger(cur, fr6, to6, zero):
 
 @router.get("/api/close/ledger")
 def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str = Query(""),
-                 zero: int = Query(0), q: str = Query("")):
+                 zero: int = Query(0), q: str = Query(""), nocache: int = Query(0)):
     """수불장(파생). [d_from,d_to] 기간의 품목별 기초·입·출·조정·기말 + 이동평균 단가.
        zero=1 이면 기초·이동·기말이 모두 0 인 품목도 표시(기본 숨김).
        q = 품번/품명 부분일치 필터.
@@ -1834,6 +1834,10 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
             fr6, to6 = to6, fr6
         if d in ("PRD", "SAL"):
             # ★재고조회와 **같은 캐시**를 쓴다(ledger_cached) — 한쪽을 본 뒤 다른 쪽은 즉시.
+            #   nocache=1 = **검증 전용** 우회. 멱등성 시험은 캐시를 맞으면 무의미해진다
+            #   (같은 객체를 돌려주니 항상 '같음'이 나온다). TestBed 가 이걸 쓴다.
+            if int(nocache or 0):
+                _LEDGER_CACHE.pop((d, fr6, to6), None)
             rows, breaks, basis = ledger_cached(cur, d, fr6, to6)
             if q:
                 k = q.strip().upper()
