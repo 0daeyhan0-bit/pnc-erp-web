@@ -1420,6 +1420,7 @@ SCREEN.manorder=(c)=>{
   let vendor=null, items=[], loading=false, msg='', vq='', vlist=[], vsearching=false, buf=20, ordered=false, lead=14, expand=false;   // lead=발주리드타임(일)·expand=일별펼치기
   let editQty={}, planDates=[];   // editQty: 추가발주 사용자조정값, planDates: 우측 일자별 계획 컬럼(좌측과 동일 items 사용)
   let charge='', charges=[];      // charge=선택 담당자(CHARGE_USER_ID), charges=담당자 목록(담당자→하위 매입처 진입)
+  let onlyPlan=true, rexpand=false;   // onlyPlan=계획 있는 매입처만, rexpand=우측 일자별 펼치기(기본 주단위)
   const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const d6=d=>`${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
   const cutoffD6=()=>{const d=new Date();d.setDate(d.getDate()+(+lead||0));return d6(d);};                       // 오늘+반영일수 마감일
@@ -1431,7 +1432,7 @@ SCREEN.manorder=(c)=>{
   const ord=it=>{const e=editQty[it.ic];return (e!==undefined&&e!=='')?Math.max(0,+e||0):defAdd(it);};         // 사용자 조정 우선
   const loadCharges=async()=>{try{const r=await fetch(`${API}/api/manorder/charges`);charges=(await r.json()).rows||[];}catch(e){charges=[];}};
   const searchV=async()=>{vsearching=true;msg='';draw();
-    try{const r=await fetch(`${API}/api/manorder/vendors?q=${encodeURIComponent(vq)}&charge=${encodeURIComponent(charge)}`);vlist=(await r.json()).rows||[];}
+    try{const r=await fetch(`${API}/api/manorder/vendors?q=${encodeURIComponent(vq)}&charge=${encodeURIComponent(charge)}&only_plan=${onlyPlan?1:0}`);vlist=(await r.json()).rows||[];}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';vlist=[];}
     vsearching=false;draw();};
   const selCharge=async(ch)=>{charge=ch;vq='';vendor=null;items=[];if(!ch){vlist=[];draw();return;}await searchV();};   // 담당자 선택→그 담당자 매입처 목록
@@ -1484,11 +1485,17 @@ SCREEN.manorder=(c)=>{
     const dates=planDates||[];
     if(!items.length)return `<div style="padding:18px;color:#8aa0bd;font-size:13px">품목 없음</div>`;
     if(!dates.length)return `<div style="padding:18px;color:#8aa0bd;font-size:13px">이 매입처의 일자별 계획이 없습니다(계획월 <b>${esc(vendor.ym||'-')}</b> 기준).</div>`;
-    const dh=dates.map(d=>`<th class="num" title="${esc(d)}">${esc((''+d).slice(2,4))}/${esc((''+d).slice(4,6))}</th>`).join('');
+    // ★기본=주단위(1~4주), [일별 펼치기]=일자별. rexpand 상태로 전환.
+    const dh = rexpand
+      ? dates.map(d=>`<th class="num" title="${esc(d)}">${esc((''+d).slice(2,4))}/${esc((''+d).slice(4,6))}</th>`).join('')
+      : `<th class="num" style="width:52px">1주</th><th class="num" style="width:52px">2주</th><th class="num" style="width:52px">3주</th><th class="num" style="width:52px">4주</th>`;
     let prevPar='';
     const body=items.map((it,i)=>{const p=parNo(it.ic);const first=(p!==prevPar);prevPar=p;
-      return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${esc(it.nm||'')}</td><td class="num qty">${nf(it.plan_qty||0)}</td><td class="num" title="기발주(미입고 발주잔량)">${it.po_qty?nf(it.po_qty):''}</td>${dates.map(d=>{const q=(it.days&&it.days[d])||0;return `<td class="num">${q?nf(q):''}</td>`;}).join('')}</tr>`;}).join('');
-    return `<table class="tbl" id="mo-rtbl" style="font-size:12px"><thead><tr><th class="center" style="width:34px">No</th><th>부모도번</th><th>도번</th><th>품명</th><th class="num">계</th><th class="num">기발주</th>${dh}</tr></thead>
+      const cells = rexpand
+        ? dates.map(d=>{const q=(it.days&&it.days[d])||0;return `<td class="num">${q?nf(q):''}</td>`;}).join('')
+        : (it.week_qty||[0,0,0,0]).map(q=>`<td class="num">${q?nf(q):''}</td>`).join('');
+      return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${esc(it.nm||'')}</td><td class="num qty">${nf(it.plan_qty||0)}</td><td class="num" title="기발주(미입고 발주잔량)">${it.po_qty?nf(it.po_qty):''}</td>${cells}</tr>`;}).join('');
+    return `<table class="tbl" id="mo-rtbl" style="font-size:12px${rexpand?'':';width:100%;table-layout:fixed'}"><thead><tr><th class="center" style="width:34px">No</th><th style="width:96px">부모도번</th><th style="width:96px">도번</th><th>품명</th><th class="num" style="width:56px">계</th><th class="num" style="width:48px">기발주</th>${dh}</tr></thead>
       <tbody>${body}</tbody></table>`;
   };
   const upSum=()=>{let n=0,t=0;items.forEach(it=>{const a=ord(it);if(a>0){n++;t+=a;}});
@@ -1501,6 +1508,7 @@ SCREEN.manorder=(c)=>{
      <div class="toolbar">
        <label class="tl">담당자</label><select class="inp" id="mo-charge" style="width:132px" title="구매담당자 선택 → 담당 매입처 목록"><option value="">- 담당자 선택 -</option>${charges.map(g=>`<option value="${esc(g.charge)}"${g.charge===charge?' selected':''}>${esc(g.charge)} (${g.ncust})</option>`).join('')}</select>
        <label class="tl" style="margin-left:8px">매입처</label><input class="inp" id="mo-vq" value="${esc(vq)}" placeholder="업체명/코드" style="width:170px"><button class="btn" id="mo-vsearch">검색</button>
+       <label class="tl" style="margin-left:8px;font-weight:400;font-size:12px;cursor:pointer"><input type="checkbox" id="mo-onlyplan" ${onlyPlan?'checked':''} style="vertical-align:middle"> 계획 있는 매입처만</label>
        ${vendor?`<span style="margin-left:8px;font-weight:700;color:#1c47a0">${esc(vendor.nm)} (${esc(vendor.cc)})</span> <button class="btn ghost" id="mo-clear">변경</button>`:''}
        <div class="spacer"></div>
        ${vendor?`<button class="btn" id="mo-order">발주 진행 (선택품목 발주서)</button>`:''}
@@ -1513,18 +1521,18 @@ SCREEN.manorder=(c)=>{
          <tbody>${vsearching?spinRow(4):(vlist.length?vlist.map(v=>`<tr class="mo-vrow" data-cc="${esc(v.cc)}" style="cursor:pointer"><td><b>${esc(v.cc)}</b></td><td>${esc(v.nm)}</td><td style="color:#5a6b82">${esc(v.charge||'')}</td><td class="num">${v.items}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">${charge?'이 담당자의 매입처가 없습니다.':'담당자를 선택하거나 매입처를 검색하세요 (예: AUDY)'}</td></tr>`)}</tbody></table>
        </div>`
      :`
-       <div class="toolbar" style="margin-top:2px;flex:0 0 auto"><span class="rowcount" id="mo-sum"></span><label style="margin-left:12px;font-size:12px">여유분</label><input class="inp" id="mo-buf" type="number" min="0" max="999" value="${buf}" style="width:40px;text-align:right" title="추가발주 = 계획×(1+여유%) − 재고 − 기발주">%<span style="margin-left:10px;color:#8aa0bd;font-size:12px">☑ 발주할 품목 체크 · 추가발주 직접조정</span></div>
+       <div class="toolbar" style="margin-top:2px;flex:0 0 auto"><span class="rowcount" id="mo-sum"></span><label style="margin-left:12px;font-size:12px">여유분</label><input class="inp" id="mo-buf" type="number" min="0" max="999" value="${buf}" style="width:48px;min-width:48px;text-align:right;padding:0 6px" title="추가발주 = 계획×(1+여유%) − 재고 − 기발주">%<span style="margin-left:10px;color:#8aa0bd;font-size:12px">☑ 발주할 품목 체크 · 추가발주 직접조정</span></div>
        <div style="flex:1;min-height:0;display:flex;gap:10px;align-items:stretch">
          <div style="flex:0 0 44%;min-width:0;display:flex;flex-direction:column;min-height:0">
            <div style="font-weight:700;margin:2px 0 4px;color:#1c47a0;flex:0 0 auto">발주 계산</div>
            <div class="grid-wrap" id="mo-lwrap" style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-           <table class="tbl" id="mo-ltbl" style="font-size:12px;width:100%;table-layout:fixed"><thead><tr><th class="center" style="width:26px">No</th><th class="center" style="width:22px"><input type="checkbox" id="mo-all" checked title="전체선택"></th><th style="width:84px">품목</th><th>품명</th><th class="num" style="width:46px">현재고</th><th class="num" style="width:46px">기발주</th><th class="num" style="width:60px">LG계획<br><span style="color:#8a94a6;font-size:10px">(1~4주)</span></th><th class="num" style="white-space:nowrap;background:#f3f6fa;width:58px" title="LG 물동 5~8주 예상소요 — 참고용(부정확). 1~4주는 생산계획, 5~8주는 LG물동. 발주계산 미반영·담당 판단.">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th><th class="num" style="width:46px">여유분</th><th class="num" style="width:74px">추가발주</th></tr></thead>
+           <table class="tbl" id="mo-ltbl" style="font-size:12px;width:100%;table-layout:fixed"><thead><tr><th class="center" style="width:30px">No</th><th class="center" style="width:26px"><input type="checkbox" id="mo-all" checked title="전체선택"></th><th style="width:98px">품목</th><th style="min-width:80px">품명</th><th class="num" style="width:52px">현재고</th><th class="num" style="width:48px">기발주</th><th class="num" style="width:62px">LG계획<br><span style="color:#8a94a6;font-size:10px">(1~4주)</span></th><th class="num" style="white-space:nowrap;background:#f3f6fa;width:60px" title="LG 물동 5~8주 예상소요 — 참고용(부정확). 1~4주는 생산계획, 5~8주는 LG물동. 발주계산 미반영·담당 판단.">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th><th class="num" style="width:50px">여유분</th><th class="num" style="width:80px">추가발주</th></tr></thead>
            <tbody>${loading?spinRow(10):(items.length?items.map((it,i)=>{const a=ord(it);return `<tr><td class="center mut">${i+1}</td><td class="center"><input type="checkbox" class="mo-ck" data-ic="${esc(it.ic)}" ${a>0?'checked':''}></td><td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.ic)}${it.alloc_note?' · '+esc(it.alloc_note):''}"><b>${esc(it.ic)}</b>${it.alloc_note?'<span style="color:#7a4ca0;font-size:9px" title="조달 프로파일 배분/발주업체지정 — 이 매입처 몫만 계상"> ▸배분</span>':''}</td><td title="${esc(it.nm)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(it.nm)}</td>
              <td class="num">${nf(it.stock_qty)}</td><td class="num">${nf(it.po_qty)}</td><td class="num" title="LG계획(생산계획 소요) 1~4주 합 ${nf(it.plan_qty)}">${nf(it.plan_qty)}</td><td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고소요 — 발주계산 미반영(담당 판단)">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td><td class="num" style="color:#8aa0bd" title="여유분 ${buf}% (계획 ${nf(adjPlan(it))} 기준)">${nf(bufQty(it))}</td>
              <td class="num" title="추가발주 = max(0, 계획 ${nf(adjPlan(it))} ×(1+${buf}%) − 현재고 ${nf(it.stock_qty)} − 기발주 ${nf(it.po_qty)})"><input class="mo-add" data-ic="${esc(it.ic)}" type="number" min="0" value="${a}" style="width:68px;text-align:right;font-weight:700;color:#1c7c3a"></td></tr>`;}).join(''):`<tr><td colspan="10" class="empty">품목 없음</td></tr>`)}</tbody></table></div>
          </div>
          <div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0">
-           <div style="font-weight:700;margin:2px 0 4px;color:#1c47a0;flex:0 0 auto">협력사 일자별 계획 <span style="font-weight:400;color:#8aa0bd;font-size:12px">${esc(vendor.nm)} · ${esc(vendor.ym||'-')} (좌측과 순번 1:1)</span></div>
+           <div style="font-weight:700;margin:2px 0 4px;color:#1c47a0;flex:0 0 auto;display:flex;align-items:center;gap:8px">협력사 계획 <span style="font-weight:400;color:#8aa0bd;font-size:12px">${esc(vendor.nm)} · ${rexpand?'일별':'주별'} (좌측과 순번 1:1)</span><button class="btn ghost" id="mo-rexp" style="padding:2px 8px;font-size:12px">${rexpand?'▸ 주별 접기':'▾ 일별 펼치기'}</button></div>
            <div class="grid-wrap" id="mo-rwrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">${dpanel()}</div>
          </div>
        </div>`}
@@ -1533,6 +1541,8 @@ SCREEN.manorder=(c)=>{
        #mo-ltbl tbody tr,#mo-rtbl tbody tr{height:30px}#mo-ltbl td,#mo-rtbl td{padding-top:2px;padding-bottom:2px}#mo-ltbl .mo-add{height:22px;box-sizing:border-box}#mo-ltbl .mo-ck{margin:0}
        #mo-ltbl thead th,#mo-rtbl thead th{height:46px;box-sizing:border-box;vertical-align:middle}</style>`;
     const chg=c.querySelector('#mo-charge');if(chg)chg.onchange=e=>selCharge(e.target.value);
+    const op=c.querySelector('#mo-onlyplan');if(op)op.onchange=e=>{onlyPlan=e.target.checked;if(charge||vq)searchV();};   // 계획 있는 매입처만
+    const rx=c.querySelector('#mo-rexp');if(rx)rx.onclick=()=>{rexpand=!rexpand;draw();};   // 우측 주별↔일별
     const vs=c.querySelector('#mo-vsearch');if(vs)vs.onclick=()=>{vq=c.querySelector('#mo-vq').value;searchV();};
     const vqi=c.querySelector('#mo-vq');if(vqi)vqi.onkeyup=e=>{if(e.key==='Enter'){vq=e.target.value;searchV();}};
     c.querySelectorAll('.mo-vrow').forEach(r=>r.onclick=()=>{const v=vlist.find(x=>x.cc===r.dataset.cc);if(v)selV(v);});

@@ -24,10 +24,38 @@ def manorder_charges():
     finally:
         cn.close()
 
+def _plan_vendor_set():
+    """현재 윈도우(오늘~+1개월)에 발주계산 '행이 생기는' 매입처 집합.
+    = 소요배분(plan_mat_source×plan_part_mat, window) ∪ PU 미입고(기발주). manorder_items universe(rows>0)와 동일 기준.
+    경량 DISTINCT 2쿼리 — 매입처마다 무거운 items 계산 안 함."""
+    s = set()
+    nxn = _nx(); nc = nxn.cursor()
+    try:
+        nc.execute("SELECT FORMAT(GETDATE(),'yyMMdd'), FORMAT(DATEADD(MONTH,1,GETDATE()),'yyMMdd')")
+        from6, to6 = nc.fetchone()
+        nc.execute("""SELECT DISTINCT LTRIM(RTRIM(s.vendor_code))
+            FROM nx.plan_mat_source s
+            JOIN nx.plan_part_mat ppm ON ppm.work_order=s.work_order
+              AND UPPER(LTRIM(RTRIM(ppm.mat_code)))=UPPER(LTRIM(RTRIM(s.mat_code)))
+            WHERE ppm.plan_ymd BETWEEN ? AND ? AND LTRIM(RTRIM(ISNULL(s.vendor_code,'')))<>''""", from6, to6)
+        s |= {(r[0] or '').strip() for r in nc.fetchall()}
+    finally:
+        nxn.close()
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT DISTINCT LTRIM(RTRIM(CUST_CODE))
+            FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL
+            WHERE ISNULL(IN_FINISH_FLAG,'N')<>'Y' AND (PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0))>0""")
+        s |= {(r[0] or '').strip() for r in cur.fetchall()}
+    finally:
+        cn.close()
+    return s
+
 @router.get("/api/manorder/vendors")
-def manorder_vendors(q: str = Query(""), charge: str = Query("")):
+def manorder_vendors(q: str = Query(""), charge: str = Query(""), only_plan: int = Query(0)):
     """매입처 검색(그 업체가 납품하는 품목 보유=IN_CUST_CODE). 단일선택 코드 구분.
-    charge(담당자) 지정 시 그 담당자 매입처만(q 없이도 목록 반환)."""
+    charge(담당자) 지정 시 그 담당자 매입처만(q 없이도 목록 반환).
+    only_plan=1 → 현재 발주계산 행이 생기는(소요배분∪기발주) 매입처만."""
     cn = _conn(); cur = cn.cursor()
     try:
         like = f"%{q.strip()}%"; ch = charge.strip()
@@ -39,13 +67,17 @@ def manorder_vendors(q: str = Query(""), charge: str = Query("")):
         elif not ch:
             return {"rows": []}                       # 담당자·검색어 둘 다 없으면 빈 목록
         order = "MAX(C.CUST_DESC)" if ch and not q.strip() else "COUNT(M.item_code) DESC"
-        cur.execute(f"""SELECT TOP 100 C.CUST_CODE, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
+        cur.execute(f"""SELECT TOP 200 C.CUST_CODE, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
              COUNT(M.item_code) items, MAX(LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,'')))) charge
           FROM PARTNER_ERP_TEST3.nx.CM_M_CUST C JOIN PARTNER_ERP_TEST3.nx.item M ON M.in_cust=C.CUST_CODE AND ISNULL(M.item_status,'1') IN ('1','2')
           WHERE {' AND '.join(where)}
           GROUP BY C.CUST_CODE HAVING COUNT(M.item_code)>0
           ORDER BY {order}""", *params)
-        return {"rows": [{"cc": r[0], "nm": r[1], "ct": r[2], "items": r[3], "charge": r[4]} for r in cur.fetchall()]}
+        rows = [{"cc": r[0], "nm": r[1], "ct": r[2], "items": r[3], "charge": r[4]} for r in cur.fetchall()]
+        if only_plan:
+            pv = _plan_vendor_set()
+            rows = [v for v in rows if (v["cc"] or '').strip() in pv]
+        return {"rows": rows[:100]}
     finally:
         cn.close()
 

@@ -30,7 +30,7 @@ chk("T1 전원 이름·건수>0", all(r["charge"] and r["ncust"] > 0 for r in ch
 # ── T2: 담당자별 매입처 필터 ──
 print("\n=== T2: 담당자별 매입처 = 그 담당자만·건수 일치 ===")
 for g in ch[:3]:
-    vs = M.manorder_vendors(q="", charge=g["charge"])["rows"]
+    vs = M.manorder_vendors(q="", charge=g["charge"], only_plan=0)["rows"]
     allmine = all(v.get("charge") == g["charge"] for v in vs)
     # ncust(DISTINCT CUST_CODE)와 vendors 행수(CUST_CODE 그룹) 일치 — TOP 100 이내
     cnt_ok = (len(vs) == g["ncust"]) or (g["ncust"] > 100 and len(vs) == 100)
@@ -39,13 +39,13 @@ for g in ch[:3]:
 
 # ── T3: 매입처 검색(q) ──
 print("\n=== T3: 매입처 검색(q, charge 무관) ===")
-qs = M.manorder_vendors(q="정밀", charge="")["rows"]
+qs = M.manorder_vendors(q="정밀", charge="", only_plan=0)["rows"]
 chk("T3 검색 결과 있음", len(qs) > 0, "0건")
 chk("T3 검색결과 charge 필드 노출", all("charge" in v for v in qs), "charge 필드 없음")
 
 # ── T4: 둘 다 없음 → 빈 목록 ──
 print("\n=== T4: 담당자·검색어 없음 → 빈(전체노출 방지) ===")
-chk("T4 빈 목록", len(M.manorder_vendors(q="", charge="")["rows"]) == 0, "전체가 새어나옴")
+chk("T4 빈 목록", len(M.manorder_vendors(q="", charge="", only_plan=0)["rows"]) == 0, "전체가 새어나옴")
 
 # ── T5: 클릭 진입(담당자 매입처 → items 로드) ──
 # ★주의: vendors 의 "품목수"=마스터 in_cust 품목수. 발주계산 행=현재 윈도우 소요배분∪기발주(소요엔진 정본).
@@ -53,7 +53,7 @@ chk("T4 빈 목록", len(M.manorder_vendors(q="", charge="")["rows"]) == 0, "전
 print("\n=== T5: 담당자 매입처 클릭 → 발주계산 로드(소요행 있는 업체) ===")
 vpick = None; it = None
 for g in ch:
-    for v in sorted(M.manorder_vendors(q="", charge=g["charge"])["rows"], key=lambda z: -z["items"]):
+    for v in sorted(M.manorder_vendors(q="", charge=g["charge"], only_plan=0)["rows"], key=lambda z: -z["items"]):
         t = M.manorder_items(cc=v["cc"], ym="")
         if t["rows"]:
             vpick, it = dict(v, charge=g["charge"]), t; break
@@ -90,6 +90,24 @@ chk("T7 out 필드 완비", all(all(k in z for k in ("ic", "nm", "stock_qty", "p
 consistent = all(net4(z) == round((z["plan_qty"] or 0) - (z["stock_qty"] or 0) - (z["po_qty"] or 0)) for z in out)
 chk("T7 순소요=계획−재고−기발주", consistent, "산식 불일치")
 chk("T7 좌측(수동발주)과 동일 소스", len(out) == len(r["rows"]), f"{len(out)} vs {len(r['rows'])}")
+
+# ── T8: only_plan — 계획(발주계산 행) 있는 매입처만 ──
+print("\n=== T8: only_plan=계획 있는 매입처만(rows>0과 정합) ===")
+pv = M._plan_vendor_set()
+chk("T8 계획보유 집합 비어있지 않음", len(pv) > 0, f"{len(pv)}개")
+top2 = ch[0]["charge"]
+allv = M.manorder_vendors(q="", charge=top2, only_plan=0)["rows"]
+planv = M.manorder_vendors(q="", charge=top2, only_plan=1)["rows"]
+chk("T8 계획만 ⊆ 전체", len(planv) <= len(allv), f"{len(planv)}>{len(allv)}")
+chk("T8 계획만 전원 계획보유집합", all((v["cc"] or '').strip() in pv for v in planv), "집합 밖 포함")
+# 계획만 전원 실제 rows>0 (표본 5)
+has_ok = all(len(M.manorder_items(cc=v["cc"], ym="")["rows"]) > 0 for v in planv[:5])
+chk("T8 계획만 전원 발주계산 행>0(표본)", has_ok, "0행 포함")
+# 제외분 전원 실제 rows==0 (표본 3)
+excl = [v for v in allv if (v["cc"] or '').strip() not in {(x["cc"] or '').strip() for x in planv}]
+excl_ok = all(len(M.manorder_items(cc=v["cc"], ym="")["rows"]) == 0 for v in excl[:3])
+chk("T8 제외분 전원 발주계산 0행(표본)", excl_ok, "행 있는데 제외됨")
+print(f"  담당자 {top2}: 전체 {len(allv)} → 계획만 {len(planv)}(제외 {len(excl)})")
 
 print(f"\n=== 결과 === PASS {len(PASS)} · FAIL {len(FAIL)}")
 if FAIL: print("실패:", FAIL)
