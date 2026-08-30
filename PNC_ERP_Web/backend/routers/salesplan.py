@@ -232,7 +232,7 @@ def salesplan_opts():
     cn = _conn(); cur = cn.cursor()
     try:
         # ① 계획에 실제 쓰인 라인코드(최근 3개월)
-        cur.execute("""SELECT DISTINCT LINE_NO FROM PARTNER_ERP.dbo.SA_T_PLAN_DTL WITH(NOLOCK)
+        cur.execute("""SELECT DISTINCT LINE_NO FROM PARTNER_ERP_TEST3.nx.SA_T_PLAN_DTL WITH(NOLOCK)
                         WHERE ISNULL(LINE_NO,'')<>''
                           AND PLAN_YMD >= CONVERT(varchar(6),DATEADD(month,-3,getdate()),12)
                         ORDER BY LINE_NO""")

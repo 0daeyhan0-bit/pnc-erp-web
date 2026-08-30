@@ -522,7 +522,7 @@ def _mv_moves(cur, d_from, d_to):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE,
                            SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                       JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
@@ -535,7 +535,7 @@ def _mv_moves(cur, d_from, d_to):
     # 수입(도입): DIVISION<>'Q' = 입고(금액 TAXPAYERS, 이미 원화·평균갱신) / 'Q' = 수출출고
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, a.DIVISION,
                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(ISNULL(a.TAXPAYERS,0) AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C a
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.WH_CUST_CODE = 'Z99990'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE, a.DIVISION""", d_from, d_to)
     for y, m, div, q, tax in cur.fetchall():
@@ -547,21 +547,21 @@ def _mv_moves(cur, d_from, d_to):
 
     ph_out = ','.join('?' * len(TA_OUT_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
-                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ({ph_out})
                      GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to, *TA_OUT_TAGS)
     for y, m, q in cur.fetchall():
         slot(y, m)["outq"] += float(q or 0)
 
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                      JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = 'T'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
     for y, m, q in cur.fetchall():
         slot(y, m)["trans"] += float(q or 0)
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(CAST(a.MAINT_QTY AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = '2'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
     for y, m, q in cur.fetchall():
@@ -617,7 +617,7 @@ def _mv_buyprice(cur, target):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
                       AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
@@ -870,9 +870,9 @@ def _prd_moves(cur, d_from, d_to):
 
     # ② 절단 입고
     cur.execute(f"""SELECT a.cut_ymd, a.mat_code, a.gagong_proc_code, SUM(CAST(a.cut_QTY AS float))
-                      FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl
+                      FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl
                             UNION ALL SELECT n.* FROM {T3}pu_t_cut_dtl n
-                             WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l
+                             WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l
                                                WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a
                      WHERE a.cut_ymd BETWEEN ? AND ?
                      GROUP BY a.cut_ymd, a.mat_code, a.gagong_proc_code""", d_from, d_to)
@@ -978,7 +978,7 @@ def _prd_price(cur, target):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
                       AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
@@ -1292,7 +1292,7 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
             ph = ','.join('?' * len(TA_IN_TAGS))
             cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))),
                                    SUM(CAST(MAINT_QTY AS float)), SUM(CAST(MAINT_AMT AS float))
-                              FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
                              WHERE MAINT_TAG IN ({ph}) GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *TA_IN_TAGS)
             buy = {str(a): (float(b or 0), float(c or 0)) for a, b, c in cur.fetchall()}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item")
@@ -1899,7 +1899,7 @@ def _attach_item_info(cur, rows, to6=None):
         #   ★청크마다 돌리면 170만행을 8번 스캔한다 — **한 번만** 집계하고 파이썬에서 룩업한다.
         _ph = ",".join("?" * len(TA_IN_TAGS))
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), MAX(MAINT_YMD)
-                          FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
                          WHERE MAINT_YMD <= ? AND MAINT_TAG IN ({_ph}) AND MAT_CODE IS NOT NULL
                          GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", to6, *TA_IN_TAGS)
         for cd, ymd in cur.fetchall():

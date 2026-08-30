@@ -145,13 +145,13 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             #       nx 모드에서 과다 표시될 수 있다(준비재고 26품목 +4,135). 그때는 live 로 대사.
             if _SRC_LIVE:
                 cur.execute("""SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY)
-                               FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
+                               FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
                                GROUP BY ITEM_CODE, PROC_GUBUN""")
                 for rr in cur.fetchall(): rstock[(rr[0], rr[1] or '')] = float(rr[2] or 0)
             else:
                 _lrs = {}; _nrs = {}
                 cur.execute("""SELECT ITEM_CODE, PROC_GUBUN, SUM(STOCK_QTY)
-                               FROM PARTNER_ERP.dbo.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
+                               FROM PARTNER_ERP_TEST3.nx.PU_T_READY_STOCK WHERE CUST_CODE='Z99990'
                                GROUP BY ITEM_CODE, PROC_GUBUN""")
                 for rr in cur.fetchall(): _lrs[(rr[0], rr[1] or '')] = float(rr[2] or 0)
                 try:
@@ -180,11 +180,11 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             #   ★2026-08-23 src 도입: 410처럼 소스를 사용자가 고른다.
             #     src='live' → 라이브만(레거시와 순수 대사). src='nx'(기본) → 라이브+웹실적 병합.
             if _SRC_LIVE:
-                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                 for rr in cur.fetchall(): assystk[rr[0]] = float(rr[1] or 0)
             else:
                 _lv = {}; _nxv = {}
-                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                 for rr in cur.fetchall(): _lv[rr[0]] = float(rr[1] or 0)
                 try:
                     cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
@@ -201,7 +201,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                                                  WHEN l.ITEM_CODE IS NULL THEN n.STOCK_QTY
                                                  WHEN ISNULL(n.UPDATE_DATETIME,'19000101')>=ISNULL(l.UPDATE_DATETIME,'19000101')
                                                       THEN n.STOCK_QTY ELSE l.STOCK_QTY END STOCK_QTY
-                                       FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK l WITH(NOLOCK)
+                                       FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK l WITH(NOLOCK)
                                        FULL JOIN PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK n WITH(NOLOCK)
                                          ON l.ITEM_CODE=n.ITEM_CODE) u
                                    GROUP BY ITEM_CODE""")
@@ -226,7 +226,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
             cur.execute("""SELECT ISNULL(n.MAT_CODE,l.MAT_CODE), SUM(
                              CASE WHEN n.MAT_CODE IS NULL THEN l.STOCK_QTY ELSE n.STOCK_QTY END)
                              FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK n WITH(NOLOCK)
-                             FULL JOIN PARTNER_ERP.dbo.PU_T_SAGUB_STOCK l WITH(NOLOCK)
+                             FULL JOIN PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK l WITH(NOLOCK)
                                ON l.MAT_CODE=n.MAT_CODE
                             GROUP BY ISNULL(n.MAT_CODE,l.MAT_CODE)""")
             for rr in cur.fetchall(): sagubstk[rr[0]] = float(rr[1] or 0)
@@ -266,16 +266,16 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                           --   라이브 + max(nx-라이브,0) 를 SQL 로 구현(FULL JOIN). 사급/스태커는 웹 미사용 → 라이브만.
                           FROM ( SELECT ISNULL(l.mat_code,n.mat_code) mat_code, 0 stock_qty,
                                         ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END pr_stock_qty
-                                   FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
+                                   FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
                                    FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
                                           ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
                                  UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
                                         ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
-                                   FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
+                                   FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
                                    FULL JOIN (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) n
                                           ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP.dbo.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
                          GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
                         UNION ALL
                         SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
@@ -304,7 +304,7 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
                 #   웹에서 출하를 처리해도 화면에 보이도록 max(nx−라이브,0) 가산.
                 #   ※중복 감수(테스트 단계) — 같은 WO를 양쪽에서 잡으면 이중 계상 가능.
                 _sl = {}; _sn = {}
-                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): _sl[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
                 try:
                     if _SRC_LIVE: raise StopIteration   # live=라이브 출하만(레거시 순수 대사)
@@ -660,7 +660,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             #   nx 150@08-22 → 웹 150, 레거시 40).
             try:
                 _lv = {}; _nxv = {}
-                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
+                cur.execute("SELECT ITEM_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY ITEM_CODE")
                 for rr in cur.fetchall(): _lv[rr[0]] = float(rr[1] or 0)
                 if _ck == "live":
                     assystk = dict(_lv)
@@ -673,7 +673,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     assystk = dict(_lv)
                     try:
                         cur.execute("""SELECT n.ITEM_CODE, SUM(n.MAINT_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT n WITH(NOLOCK)
-                            WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT l WITH(NOLOCK)
+                            WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT l WITH(NOLOCK)
                                               WHERE l.MAINT_YMD=n.MAINT_YMD AND l.MAINT_SEQ=n.MAINT_SEQ
                                                 AND l.ITEM_CODE=n.ITEM_CODE AND l.MAINT_QTY=n.MAINT_QTY)
                             GROUP BY n.ITEM_CODE""")
@@ -693,13 +693,13 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 #   (실측 AJR30027704-SUB6: 표시 523 / nx잔액 0 / 라이브잔액 25 → 셀 0/23 무색).
                 #   src=live 는 레거시 순수대조라 라이브 잔액테이블 그대로 유지.
                 if _ck == "live":
-                    cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
+                    cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
                     for rr in cur.fetchall(): partstk[rr[0]] = float(rr[1] or 0)
                 else:
                     for _mk, _mv in _prod_stock_map(cur).items():
                         if _mv: partstk[_mk] = float(_mv)
                 _ml = {}; _mn = {}
-                cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
+                cur.execute("SELECT MAT_CODE, SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) GROUP BY MAT_CODE")
                 for rr in cur.fetchall(): _ml[rr[0]] = float(rr[1] or 0)
                 if _ck != "live":
                     try:
@@ -715,7 +715,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                     cur.execute("""SELECT ISNULL(n.MAT_CODE,l.MAT_CODE), SUM(
                                      CASE WHEN n.MAT_CODE IS NULL THEN l.STOCK_QTY ELSE n.STOCK_QTY END)
                                      FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK n WITH(NOLOCK)
-                                     FULL JOIN PARTNER_ERP.dbo.PU_T_SAGUB_STOCK l WITH(NOLOCK)
+                                     FULL JOIN PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK l WITH(NOLOCK)
                                        ON l.MAT_CODE=n.MAT_CODE
                                     GROUP BY ISNULL(n.MAT_CODE,l.MAT_CODE)""")
                     for rr in cur.fetchall():
@@ -746,16 +746,16 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                           -- ★파트/자재창고 = 라이브 + 웹실적(2026-08-20, 키팅 롤업과 동일 규칙)
                           FROM ( SELECT ISNULL(l.mat_code,n.mat_code) mat_code, 0 stock_qty,
                                         ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END pr_stock_qty
-                                   FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
+                                   FROM (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) l
                                    FULL JOIN (SELECT mat_code, SUM(STOCK_QTY) q FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh WITH(NOLOCK) GROUP BY mat_code) n
                                           ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP.dbo.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
+                                 UNION ALL SELECT a.mat_code,0,a.STOCK_QTY FROM PARTNER_ERP_TEST3.nx.PU_T_SAGUB_STOCK a WITH(NOLOCK) JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON a.MAT_CODE=m.ITEM_CODE WHERE m.SAGUB_STOCK_FLAG='1'
                                  UNION ALL SELECT ISNULL(l.mat_code,n.mat_code),
                                         ISNULL(l.q,0) + CASE WHEN ISNULL(n.q,0) > ISNULL(l.q,0) THEN ISNULL(n.q,0)-ISNULL(l.q,0) ELSE 0 END, 0
-                                   FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP.dbo.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
+                                   FROM (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) l
                                    FULL JOIN (SELECT mat_code, SUM(stock_qty) q FROM PARTNER_ERP_TEST3.nx.pu_t_mat_stock_wh WITH(NOLOCK) WHERE cust_code='Z99990' AND gagong_proc_code NOT IN ('SA1','SA2','SB1','SB2') GROUP BY mat_code) n
                                           ON l.mat_code=n.mat_code
-                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP.dbo.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
+                                 UNION ALL SELECT mat_code, stock_qty, 0 FROM PARTNER_ERP_TEST3.nx.PU_T_STACKER_STOCK WITH(NOLOCK) ) s
                          GROUP BY s.mat_code HAVING SUM(s.stock_qty)<>0 OR SUM(s.pr_stock_qty)<>0
                         UNION ALL
                         SELECT cb.item_code, b.item_code, b.mat_code, 0, 0,
@@ -789,7 +789,7 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
                 #   웹에서 출하를 처리해도 화면에 보이도록 max(nx−라이브,0) 가산.
                 #   ※중복 감수(테스트 단계) — 같은 WO를 양쪽에서 잡으면 이중 계상 가능.
                 _sl = {}; _sn = {}
-                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
+                cur.execute(f"SELECT WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE, SUM(SALE_QTY) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER IN ({ph}) GROUP BY WORK_ORDER, ISNULL(SPLIT_WORK_ORDER,''), ITEM_CODE", *ck)
                 for rr in cur.fetchall(): _sl[(rr[0], rr[1] or '', rr[2])] = float(rr[3] or 0)
                 try:
                     if _ck == "live": raise StopIteration   # ★2026-08-24 live=라이브 출하만(레거시 대조)
@@ -1038,7 +1038,7 @@ def _kit_cell_guard(item, wo, swo, gpc, ymd, qty, assy):
     try:
         cellm = _d6(ymd) if ymd else ''
         try:
-            cur.execute("SELECT ISNULL(MAX(stock_yymm),'0000') FROM PARTNER_ERP.dbo.pu_t_month_ready_stock")
+            cur.execute("SELECT ISNULL(MAX(stock_yymm),'0000') FROM PARTNER_ERP_TEST3.nx.pu_t_month_ready_stock")
             mclose = (cur.fetchone()[0] or '0000')
         except Exception:
             mclose = '0000'
@@ -1046,7 +1046,7 @@ def _kit_cell_guard(item, wo, swo, gpc, ymd, qty, assy):
             return (False, f"월마감({mclose}) 완료 일자 — 확인/취소 불가")
         if assy and qty > 0:   # 출하완료분 금지(sa_t_sale_dtl 미마감 출하 ≥ 셀잔량)
             try:
-                cur.execute("SELECT ISNULL(SUM(SALE_QTY),0) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?",
+                cur.execute("SELECT ISNULL(SUM(SALE_QTY),0) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE FINISH_FLAG='0' AND WORK_ORDER=? AND ISNULL(SPLIT_WORK_ORDER,'')=? AND ITEM_CODE=?",
                             wo, (swo or ''), assy)
                 if float(cur.fetchone()[0] or 0) >= qty:
                     return (False, "출하완료분 — 키팅 확인 불가")
