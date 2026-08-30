@@ -25,8 +25,9 @@
     ADM73210516→ADM74930508-12-2, AJR30125601→MJU66478501 처럼 마스터엔 없는
     실제 납품 조합이 있어 화면이 어긋난다.
 """
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, HTTPException, Request
 from common import _nx, _nx_tx, _d6
+from routers.auth import require_user, scope_cust   # ★협력사 소속강제(방어심층) — 협력사는 자기 거래처만
 
 router = APIRouter()
 
@@ -40,7 +41,7 @@ _BASE = """
 
 
 @router.get("/api/delivedit/list")
-def delivedit_list(from_ymd: str = Query(""), to_ymd: str = Query(""),
+def delivedit_list(request: Request, from_ymd: str = Query(""), to_ymd: str = Query(""),
                    cust: str = Query(""), doban: str = Query(""),
                    jadoban: str = Query(""), limit: int = Query(3000)):
     """납품내역 조회 — 좌측(납품일자·일시·세트납품서·도번·세트수량·입고완료·당일) +
@@ -50,6 +51,9 @@ def delivedit_list(from_ymd: str = Query(""), to_ymd: str = Query(""),
         raise HTTPException(400, "납품기간(from_ymd/to_ymd)이 필요합니다.")
     if f6 > t6:
         f6, t6 = t6, f6
+    cust = scope_cust(require_user(request), cust)     # ★협력사=자기 거래처 강제(내부=passthrough)
+    if cust == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     more = []; p = [f6, t6]
     cc = str(cust or "").strip()
     if cc:
@@ -125,11 +129,14 @@ def _guard(cur, sn, cc, doban, hms):
 
 
 @router.post("/api/delivedit/update")
-def delivedit_update(payload: dict = Body(...)):
+def delivedit_update(request: Request, payload: dict = Body(...)):
     """납품수량(세트수량) 수정. 자재수량은 사용수량×세트수량으로 함께 갱신.
        ★입고완료건 거부. 헤더(PU_T_SET_INPUT_REQ)도 같이 맞춘다."""
     sn = str(payload.get("sheet_no", "")).strip()
     cc = str(payload.get("cc", "")).strip()
+    cc = scope_cust(require_user(request), cc)          # ★협력사=자기 거래처 강제(남의 명세표 수정 차단)
+    if cc == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     doban = str(payload.get("doban", "")).strip()
     hms = str(payload.get("hms", "")).strip()
     if not (sn and cc and doban and hms):
@@ -166,12 +173,15 @@ def delivedit_update(payload: dict = Body(...)):
 
 
 @router.post("/api/delivedit/delete")
-def delivedit_delete(payload: dict = Body(...)):
+def delivedit_delete(request: Request, payload: dict = Body(...)):
     """납품내역 삭제(도번 단위) — ★입고완료건 거부."""
     sn = str(payload.get("sheet_no", "")).strip()
     cc = str(payload.get("cc", "")).strip()
     doban = str(payload.get("doban", "")).strip()
     hms = str(payload.get("hms", "")).strip()
+    cc = scope_cust(require_user(request), cc)          # ★협력사=자기 거래처 강제(남의 명세표 삭제 차단)
+    if cc == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     if not (sn and cc and doban and hms):
         raise HTTPException(400, "세트납품서번호/거래처/도번/납품일시가 필요합니다.")
     nx = _nx_tx(); cur = nx.cursor()
@@ -194,11 +204,14 @@ def delivedit_delete(payload: dict = Body(...)):
 
 
 @router.get("/api/delivedit/print")
-def delivedit_print(sheet_no: str = Query(...), cc: str = Query(""), hms: str = Query(""),
+def delivedit_print(request: Request, sheet_no: str = Query(...), cc: str = Query(""), hms: str = Query(""),
                     kind: str = Query("stmt")):
     """출력용 데이터 — kind: stmt=거래명세서 / tag=입고태그 / insp=출하검사성적서.
        ★입고완료건도 재인쇄 가능(레거시 동일)."""
     sn = str(sheet_no or "").strip()
+    cc = scope_cust(require_user(request), cc)          # ★협력사=자기 거래처 강제
+    if cc == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     if not sn:
         raise HTTPException(400, "세트납품서번호가 필요합니다.")
     if kind not in ("stmt", "tag", "insp"):
@@ -245,11 +258,14 @@ def delivedit_print(sheet_no: str = Query(...), cc: str = Query(""), hms: str = 
 
 
 @router.get("/api/delivedit/items")
-def delivedit_items(kind: str = Query("doban"), q: str = Query(""),
+def delivedit_items(request: Request, kind: str = Query("doban"), q: str = Query(""),
                     cust: str = Query(""), from_ymd: str = Query(""), to_ymd: str = Query("")):
     """도번/자도번 오토컴플리트 — 실제 납품내역에 있는 것만(§3 오토컴플리트 규칙).
        kind: doban=도번(ITEM_CODE) / jadoban=자도번(MAT_CODE).
        거래처·기간이 주어지면 그 범위로 좁힌다(화면 조회조건과 연동)."""
+    cust = scope_cust(require_user(request), cust)      # ★협력사=자기 거래처 강제
+    if cust == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     col = "MAT_CODE" if kind == "jadoban" else "ITEM_CODE"
     w = ["1=1"]; p = []
     f6, t6 = _d6(from_ymd), _d6(to_ymd)
@@ -279,12 +295,17 @@ def delivedit_items(kind: str = Query("doban"), q: str = Query(""),
 
 
 @router.get("/api/delivedit/custs")
-def delivedit_custs(q: str = Query("")):
-    """납품처 오토컴플리트 — 실제 납품내역이 있는 거래처만."""
+def delivedit_custs(request: Request, q: str = Query("")):
+    """납품처 오토컴플리트 — 실제 납품내역이 있는 거래처만. ★협력사는 자기 거래처만."""
+    mine = scope_cust(require_user(request), None)      # 협력사면 자기코드, 내부면 None
+    if mine == "__NONE__":
+        return {"rows": []}                              # ★코드없는 협력사=빈목록(전체노출 차단)
     nx = _nx(); cur = nx.cursor()
     try:
         w = ""; p = []
-        if q.strip():
+        if mine:
+            w = "AND c.CUST_CODE=?"; p = [mine]          # ★협력사=자기 거래처만 노출
+        elif q.strip():
             w = "AND (c.CUST_CODE LIKE ? OR c.CUST_DESC LIKE ?)"
             p = [f"%{q.strip()}%", f"%{q.strip()}%"]
         cur.execute(f"""SELECT TOP 300 c.CUST_CODE, ISNULL(c.CUST_DESC,'')
