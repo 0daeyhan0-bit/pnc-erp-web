@@ -168,6 +168,17 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
             rn2.close()
         for r in rows:
             r["muldong_soyo"] = round(mul_soyo.get(str(r["ic"]).strip(), 0.0), 1)
+        # ★기발주 = PU 미입고잔량(레거시) + nx.manual_order 미입고(신규 발주저장) 합산 → 컷오버 후 nx만(§9-1)
+        rn3 = _nx(); rc3 = rn3.cursor()
+        try:
+            _ensure_mo(rc3)
+            mo_open = _mo_open_by_cust(rc3, cc)
+        except Exception:
+            mo_open = {}
+        finally:
+            rn3.close()
+        for r in rows:
+            r["po_qty"] = round(float(r.get("po_qty") or 0) + mo_open.get(str(r["ic"]).strip(), 0.0), 3)
         cn2 = _conn(); c2 = cn2.cursor()
         try:
             c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", cc)
@@ -190,3 +201,63 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
                 "muldong_ym": f"{mt1[0:2]}/{mt1[2:4]}~{mt2[0:2]}/{mt2[2:4]}"}
     finally:
         cn.close()
+
+
+# ================= 발주 저장 (nx.manual_order) — 신규 쓰기(장리드 선발주·미착 소스, 2026-08-30) =================
+_MO_DDL = """IF OBJECT_ID('nx.manual_order','U') IS NULL
+CREATE TABLE nx.manual_order(
+  order_id INT IDENTITY(1,1) PRIMARY KEY,
+  cust_code NVARCHAR(20) NOT NULL, item_code NVARCHAR(60) NOT NULL,
+  order_qty FLOAT NOT NULL, order_ymd VARCHAR(6), expect_ymd VARCHAR(6),
+  in_qty FLOAT DEFAULT 0, cancel_flag BIT DEFAULT 0, status NVARCHAR(10) DEFAULT N'발주',
+  memo NVARCHAR(200), ins_user NVARCHAR(30), ins_dt DATETIME DEFAULT getdate())"""
+
+def _ensure_mo(cur):
+    for s in _MO_DDL.split(";"):
+        if s.strip():
+            cur.execute(s)
+
+def _mo_open_by_cust(cur, cc):
+    """이 매입처의 nx.manual_order 미입고 발주잔량 = Σ(order_qty−in_qty), cancel_flag=0. {item_code: 잔량}."""
+    out = {}
+    try:
+        cur.execute("""SELECT item_code, SUM(order_qty-ISNULL(in_qty,0)) FROM nx.manual_order
+                       WHERE cust_code=? AND ISNULL(cancel_flag,0)=0
+                       GROUP BY item_code HAVING SUM(order_qty-ISNULL(in_qty,0))>0""", cc)
+        for it, q in cur.fetchall():
+            out[(it or '').strip()] = float(q or 0)
+    except Exception:
+        pass
+    return out
+
+@router.post("/api/manorder/save")
+def manorder_save(payload: dict = Body(...)):
+    """발주 저장 → nx.manual_order. body {cust_code, order_ymd?(YYMMDD·기본 오늘), lead_days?(예정입고=발주일+리드), items:[{item_code,qty}], user?}.
+       qty>0만 저장(품목별 append=발주 이력). 저장 후 기발주 증가(_mo_open_by_cust). ★수량 발주만·단가 미기록(§1-2)."""
+    cc = str(payload.get("cust_code", "")).strip()
+    items = payload.get("items", []) or []
+    if not cc or not items:
+        raise HTTPException(400, "cust_code·items 필요")
+    lead = int(payload.get("lead_days") or 0)
+    usr = (str(payload.get("user", "")).strip() or "web")[:30]
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        _ensure_mo(cur)
+        cur.execute("SELECT FORMAT(GETDATE(),'yyMMdd'), FORMAT(DATEADD(DAY,?,GETDATE()),'yyMMdd')", lead)
+        today6, exp6 = cur.fetchone()
+        oymd = (str(payload.get("order_ymd", "")).strip() or today6)[:6]
+        saved = 0
+        for it in items:
+            ic = str(it.get("item_code", "")).strip()
+            q = float(it.get("qty", 0) or 0)
+            if not ic or q <= 0:
+                continue
+            cur.execute("""INSERT INTO nx.manual_order(cust_code,item_code,order_qty,order_ymd,expect_ymd,ins_user)
+                           VALUES(?,?,?,?,?,?)""", cc, ic, q, oymd, exp6, usr)
+            saved += 1
+        nx.commit()
+        return {"ok": True, "saved": saved, "cust_code": cc, "order_ymd": oymd, "expect_ymd": exp6}
+    except Exception:
+        nx.rollback(); raise
+    finally:
+        nx.close()

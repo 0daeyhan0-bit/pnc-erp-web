@@ -30,6 +30,14 @@
 - **표시**: 좌측 표에 컬럼 "LG물동(5~8주·참고)" — 회색/기울임 + 참고 배지. **추가발주 계산 미반영**(자동발주 금지).
 - 커버리지 각주: 물동 모델 52~57%만 매칭(참고).
 
+## 3-3. 발주 저장 (nx.manual_order) — 신규 쓰기 (사용자 확정 2026-08-30)
+- **현황**: 발주 진행 = 발주서 팝업만(PO 미기록). 기발주 안 늘어남 → 발주 저장 신설 필요(미착 소스, matexpect §1-81).
+- **테이블 `nx.manual_order`**(멱등 DDL): order_id(PK)·cust_code·item_code·order_qty·order_ymd·**expect_ymd**(발주일+리드타임=미착)·in_qty(0)·cancel_flag·status·memo·ins_user·ins_dt.
+- **저장 `/api/manorder/save`**(POST·nx 쓰기): {cust_code, order_ymd?, lead_days?, items:[{item_code,qty}]} → 품목별 INSERT(qty>0만). 근거키=cust+item+order_ymd. 재저장 정책=신규행 append(발주 이력).
+- **기발주 = PU_T_PURCHASE_DTL 미입고잔량 + nx.manual_order 미입고(order_qty−in_qty, cancel_flag=0)** 합산 → 컷오버 후 nx만(§9-1). manorder_items·우측 기발주 컬럼 동일 반영.
+- **협력사 포털**: 협력사 로그인(scope_cust) → 자기 cust_code의 nx.manual_order 조회 = "PNC가 나에게 발주한 기발주". [[newerp-partner-portal-initiative]] 연계.
+- ★단가/금액=발주 시점 기록 안 함(수량 발주만)·단가는 마감때만(§1-2).
+
 ## 4. 검증 게이트
 - 리드타임: 매입처별 로드값 = nx.cust.lead_time_days 대조(표본).
 - 물동참고: muldong_soyo 합 = (수기 SQL 조인 합)과 일치·특정 매입처 품목 몇 개 손계산 대조. item_mat_soyo 커버 품목만.
