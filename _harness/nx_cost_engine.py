@@ -532,7 +532,16 @@ class NxCostEngine:
            소요=CS_M_ITEM_BOM 전개(조달경로변형 배제=예상 사급금액과 동일 소스). 엔진 nx.bom_line은 외주완성에서 정지해
            사급부품(예 AJR30077403→MJX65072203)을 못 잡음 → CS로 완전전개해야 실제 OSP 정합."""
         if not hasattr(self, '_sag310'):
-            self.cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.PR_M_ITEM WHERE LTRIM(RTRIM(ITEM_SGROUP))='310'")
+            # ★소분류 정본 = nx.item.sgroup (00_MASTER_INDEX §0 규칙1 · DO_NOT_USE §17).
+            #   종전엔 라이브 dbo.PR_M_ITEM 직독 = 컷오버에 죽는 코드였고, 미러는 재분류를 못 따라온다
+            #   (sgroup 소유권이 nx.item 으로 이관되면서 r_item_sync 가 sgroup 을 동기화하지 않기 때문).
+            #   실측 2026-08-31: 미러 595 vs 정본 594 — 차이 1건 'BCUP1S-1.6*9.6'(품명 '1%용접링',
+            #   정본 230/미러 310)이 §17-1 에 이미 버그로 등재된 그 건이다. 리포인트로 자동 해소.
+            #   ★영향 0 — 이 품목은 CS_M_ITEM_BOM 상위 0개·OSP 실적 0행이라 계산에 들어오지 않는다.
+            #   ※재료비 분해(acc: won/bu/sa)는 레거시 SP 와 동일하게 **sgroup** 으로 판정한다
+            #     (SP_CS_견적서_실원가용_250910 L978~980 확인). make_type 으로 바꾸면 diff0 가 깨진다.
+            self.cur.execute("SELECT DISTINCT LTRIM(RTRIM(item_code)) FROM PARTNER_ERP_TEST3.nx.item "
+                             "WHERE LTRIM(RTRIM(sgroup))='310'")
             self._sag310 = set(r[0] for r in self.cur.fetchall())
         self.cur.execute("""WITH expl AS (
             SELECT LTRIM(RTRIM(MAT_CODE)) part, CAST(USE_QTY AS float) cum, 1 lvl FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM WHERE LTRIM(RTRIM(ITEM_CODE))=? AND ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'
