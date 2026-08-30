@@ -723,6 +723,27 @@ SCREEN.planupload=(c)=>{
   load();
 };
 
+/* ★파트별생산계획 드래그실적 — 확인/취소 버튼은 파일 로드시 문서에 딱 한 번 캡처단계로 건다.
+   화면함수(SCREEN.partplan) 안에서 걸면, 이미 열려 있던 탭은 그 함수가 다시 실행되지 않아
+   새 코드가 영영 안 걸린다(2026-08-30: 확인 버튼이 안 먹던 진짜 원인 — 040 에서 겪은 것과 동일).
+   실제 핸들러는 각 화면 인스턴스가 자기 컨테이너의 _dpFn 에 최신값을 꽂아둔다. */
+if(!window._DP_CLICK_BOUND){
+  window._DP_CLICK_BOUND=1;
+  document.addEventListener('click',ev=>{
+    const b=ev.target&&ev.target.closest?ev.target.closest('#pp-dp-ok,#pp-dp-clr'):null;
+    if(!b)return;
+    ev.preventDefault(); ev.stopPropagation();
+    if(b.disabled){alert('처리 중입니다. 잠시 후 다시 눌러주세요.');return;}
+    let host=b, fn=null;
+    while(host){ if(host._dpFn){fn=host._dpFn;break;} host=host.parentElement; }
+    if(!fn){alert('화면이 준비되지 않았습니다.\n[조회]를 눌러 다시 불러온 뒤 시도해 주세요.');return;}
+    const f=(b.id==='pp-dp-ok')?fn.ok:fn.no;
+    if(!f){alert('처리 함수를 찾지 못했습니다. [조회] 후 다시 시도해 주세요.');return;}
+    try{ f(); }
+    catch(e){ alert('실적처리 중 오류\n\n'+(e&&e.stack?e.stack:e)); }
+  },true);
+}
+
 SCREEN.partplan=(c)=>{
   // 파트별 생산계획 — 레거시 w_pr_input_410_new 재현. ★데이터/색상 정본 = 키팅과 동일 SP(GROUP BY gpc·wo·swo·assy·upper·item, 날짜피벗) → /api/kitting/grid 재사용(nx 직독). 값·색상 키팅과 자동일치.
   //
@@ -769,13 +790,127 @@ SCREEN.partplan=(c)=>{
   // ★색상 정본(레거시 c_color CASE = kitting finBg 이식): 90주황(출하완료)/70노랑(생산완료)/50·10녹(키팅완료)/else 백(미키팅)
   // 색: '6'=출하완료(살구) · '7'=현재공정/작업중전표(진한주황, 출하와 구분) · '4'=생산완료(노랑) · '3'=키팅완료(녹)
   const finBg=f=>f==='6'?'#fac090':(f==='7'?'#ed7d31':(f==='4'?'#ffff00':(f==='3'?'#669900':'')));
+  // 드래그 선택 셀 표시
+  if(!document.getElementById('dp-style')){
+    const stl=document.createElement('style'); stl.id='dp-style';
+    // ★선택 표시 = 키팅(준비실적처리)과 동일 — 연파랑 오버레이 + 얇은 파란 테두리.
+    //   배경'색'(녹/노랑 완료색)은 살려야 하므로 background-image 로 연한 막만 덧씌운다.
+    stl.textContent='.dp-c{cursor:cell;user-select:none}'
+      +'.dp-c:hover{outline:2px solid #9dc0e8;outline-offset:-2px}'
+      +'.dp-on{outline:2px solid #4a86e8 !important;outline-offset:-2px;font-weight:700;'
+      +'background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))}'
+      // ★일자 헤더·셀 가운데정렬 강제 — .center 가 다른 규칙에 밀리는 경우 대비
+      +'.pp-tbl th.center,.pp-tbl td.center{text-align:center !important}';
+    document.head.appendChild(stl);
+  }
   const finFg=f=>(f==='3'||f==='7')?'#ffffff':'';   // 진한 녹·주황 배경엔 흰 글자(가독)
   // ★기본 소스 = 신규DB(웹편성). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
   // ★기준일 = 마지막 계획업로드의 일자축 첫날(planBaseIso, 2026-08-28 사용자 확정).
   //   당일 기준이면 업로드 전날이 잡혀, 미출하분이 재편성되며 충당된 재고와 어긋난다.
-  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:planBaseIso(),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'new',lines:[],loading:false,msg:'',expand:new Set()};
+  const st={dates:[],rows:[],cnt:0,plan_sum:0,inwon:0,note:'',base:planBaseIso(),gigan:2,wc:'',part:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',src:'new',lines:[],loading:false,msg:'',expand:new Set(),dpConf:null,dpSel:new Map(),dpDrag:null,dpBusy:false,dpQov:new Map()};
   // ★라인 드롭다운 = 이 그리드 Line No 컬럼 실사용값(PR_T_PLAN_PART_COPY.LINE_NO distinct, CA/CM/GR 등). PR003 주문구분과는 다른 코드체계.
   const loadLines=async()=>{try{const r=await fetch(`${API}/api/plan/part410/lines?src=${st.src}`);const j=await r.json();st.lines=j.rows||[];}catch(e){st.lines=[];}};
+  /* ==== 드래그 실적처리 (레거시 w_pr_input_260 '드래그 → 확인 F12' 이식) ====
+     ★실적 단위 = 도번. 조건문에서 파트를 고르고, 그 파트가 파트마스터에
+       '생산실적' 방식(R 준비재고 / W 자재창고출고)으로 설정돼 있어야 한다.
+       R = 녹색(키팅완료) 셀만 선택 가능 · W = 색 무관 */
+  const dpOn=()=>!!(st.dpConf&&st.dpConf.enabled&&st.part);
+  const dpKey=(r,ymd)=>[r.gpc||'',r.item||'',r.wo||'',ymd].join('|');
+  /* ★잡을 수 있는 수량 = 잔여계획을 재고 상한으로 자른 값.
+       R(생산준비재고) = 준비재고(ready_stock)만큼만. 준비재고 3이면 계획이 5라도 3.
+       W(자재창고출고) = 자재창고에서 BOM만큼 빼므로 계획 잔여 전량(부족분은 서버가 판정).
+     사용자가 더블클릭으로 정한 수량(st.dpQov)이 있으면 그 값이 우선(상한 내에서). */
+  const dpCap=r=>{
+    if(!st.dpConf)return Infinity;
+    if(st.dpConf.type==='R')return Math.max(+r.ready_stock||0,0);
+    return Infinity;
+  };
+  const dpRem=(r,planRem,key)=>{
+    const cap=dpCap(r);
+    let v=Math.min(planRem,cap===Infinity?planRem:cap);
+    if(key&&st.dpQov.has(key))v=Math.min(v,Math.max(+st.dpQov.get(key)||0,0));
+    return Math.max(Math.floor(v),0);
+  };
+  const dpLoadConf=async()=>{
+    if(!st.part){st.dpConf=null;return;}
+    try{ st.dpConf=await fetch(`${API}/api/dragprod/conf?part=${encodeURIComponent(st.part)}`).then(x=>x.json()); }
+    catch(e){ st.dpConf=null; }
+  };
+  const dpClear=()=>{st.dpSel.clear();st.dpQov.clear();render();};
+  const dpConfirm=async()=>{
+    if(st.dpBusy)return;
+    if(!st.dpSel.size)return alert('실적을 잡을 셀을 드래그로 선택하세요.');
+    // ★key(gpc|item|wo|ymd)를 함께 실어 보낸다 — 처리 후 그 셀만 부분갱신하기 위함
+    const rows=[...st.dpSel.entries()].map(([k,v])=>Object.assign({key:k},v));
+    const tot=rows.reduce((a,x)=>a+(+x.qty||0),0);
+    // 사전점검
+    let chk=null;
+    try{ chk=await fetch(`${API}/api/dragprod/check`,{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})}).then(x=>x.json()); }
+    catch(e){ return alert('점검 실패: '+e); }
+    const bad=(chk.rows||[]).filter(x=>!x.ok);
+    let warn='';
+    if(bad.length){
+      warn='\n\n⚠ 실적 불가 '+bad.length+'건\n'
+          +bad.slice(0,5).map(x=>'  · '+x.item+' — '
+            +(x.lack&&x.lack.length?x.lack.slice(0,2).map(l=>l.mat+' 부족 '+nf(l.lack)).join(', '):x.reason)).join('\n');
+    }
+    // ★실적일자 = 오늘(작업일). 기준일자(st.base)는 계획을 보는 축일 뿐이라
+    //   그걸 보내면 지난 일자로 실적이 잡히고, 마감된 일자면 서버가 거부한다
+    //   (2026-08-30 실측: 기준일 260828 로 보내 "일마감된 일자" 실패). 바코드실적(520)도 오늘 기준.
+    const today6=(()=>{const t=new Date();
+      return String(t.getFullYear()).slice(2)+String(t.getMonth()+1).padStart(2,'0')+String(t.getDate()).padStart(2,'0');})();
+    if(!window.confirm(`${st.dpConf.part_nm||st.part} · ${st.dpConf.type_nm}\n`
+                      +`실적일자 ${today6.slice(0,2)}/${today6.slice(2,4)}/${today6.slice(4,6)} (오늘)\n`
+                      +`${rows.length}건 / 합계 ${nf(tot)}\n`
+                      +`\n생산실적 + BOM자재 차감 + 세트재고 차감이 함께 처리됩니다.${warn}`
+                      +`\n\n진행할까요?`))return;
+    st.dpBusy=true;render();
+    try{
+      const r=await fetch(`${API}/api/dragprod/save`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ymd:today6,rows,
+          user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})}).then(x=>x.json());
+      if(!r.ok)throw new Error(r.detail||'실패');
+      let m='실적처리 완료 — '+r.done+'건';
+      if(r.skipped)m+='\n\n제외 '+r.skipped+'건\n'
+        +(r.skips||[]).slice(0,5).map(x=>'  · '+x.item+' — '+x.reason).join('\n');
+      st.dpSel.clear(); st.dpQov.clear();   // 처리 끝난 셀의 수량조정은 소멸(040 동일)
+      /* ★전체 재조회(load) 금지 — 8,500행을 다시 받아 화면을 통째로 다시 그리면
+           스크롤·툴바가 리셋돼 "계속 새로고침되는" 것처럼 보인다(2026-08-30 지적).
+         처리된 만큼을 캐시(st.rows)에 직접 반영하고 표만 부분갱신한다.
+         반영 규칙 = 화면 표기(완료/계획)와 동일 — 잡은 수량을 '완료(cover)'에 더한다.
+           일자칸 → r.dcov[ymd] += qty · 당일이전 → r.prior_cover += qty
+         셀 색(dfin/prior_fin)은 계획을 다 채웠을 때만 '생산완료(4)'로 올린다. */
+      const bump=(key,qty)=>{
+        const p=String(key).split('|');            // gpc|item|wo|ymd
+        const [gpc,item,wo,ymd]=[p[0]||'',p[1]||'',p[2]||'',p[3]||''];
+        (st.rows||[]).forEach(r=>{
+          if((r.gpc||'')!==gpc||(r.item||'')!==item||(r.wo||'')!==wo)return;
+          if(ymd==='PRIOR'){
+            const pl=+r.prior_plan||0;
+            r.prior_cover=Math.min((+r.prior_cover||0)+qty,pl);
+            if(r.prior_cover>=pl&&pl>0&&(r.prior_fin||'0')==='3')r.prior_fin='4';
+          }else{
+            const pl=(r.days&&r.days[ymd])||0; if(!pl)return;
+            r.dcov=r.dcov||{}; r.dfin=r.dfin||{};
+            r.dcov[ymd]=Math.min((+r.dcov[ymd]||0)+qty,pl);
+            if(r.dcov[ymd]>=pl&&(r.dfin[ymd]||'0')==='3')r.dfin[ymd]='4';
+          }
+          r.finish=(+r.finish||0)+qty;
+        });
+      };
+      // 서버가 실제 처리한 수량(준비재고 상한으로 잘렸을 수 있음)만 반영
+      (r.rows||[]).forEach(x=>{ if(x.key)bump(x.key,+x.qty||0); });
+      redrawBody();
+      alert(m);
+    }catch(e){ alert('실적처리 실패: '+e.message); }
+    st.dpBusy=false;
+    // 배지(선택 건수·처리중 표시)만 갱신 — 표는 위에서 이미 부분갱신했다
+    const bd=c.querySelector('#pp-dp-cnt'); if(bd)bd.textContent=st.dpSel.size+'건';
+    const bk=c.querySelector('#pp-dp-ok');  if(bk){bk.disabled=false;bk.textContent='✅ 확인';}
+  };
+
   const load=async()=>{st.loading=true;render();
     // ★전체를 한 번만 조회해 캐시 → 파트·라인·ASSY도번·도번·제번·미생산·구분은 재조회 없이 클라이언트에서 즉시 필터(레거시 동일).
     //   재조회(=조회버튼)는 기준일·자도번작업처·적용일수·소스 변경 시만.
@@ -931,7 +1066,23 @@ SCREEN.partplan=(c)=>{
       st:       {t:'생산ST',      cls:'center', v:r=>f2(r._st!==undefined?r._st:rowST(r))},
       plan_qty: {t:'생산계획',    cls:'center', v:r=>`<b>${nf(r.plan_qty)}</b>`},
       prior:    {t:'당일이전계획',cls:'center', v:r=>r.prior_plan>0?pcell(r):'',
-                 bg:r=>r.prior_plan>0&&(r.prior_fin||'0')!=='0'?{b:finBg(r.prior_fin),f:finFg(r.prior_fin)}:null},
+                 bg:r=>r.prior_plan>0&&(r.prior_fin||'0')!=='0'?{b:finBg(r.prior_fin),f:finFg(r.prior_fin)}:null,
+                 // ★당일이전계획도 드래그 실적 대상(2026-08-30). 일자칸과 동일 규칙.
+                 dp:r=>{
+                   if(!dpOn())return null;
+                   // ★집계·소계행 제외 — 그 행들은 wo='' 로 만들어지고(blk 합산행), 상세행과
+                   //   같이 선택되면 같은 실적이 두 번 잡힌다. 실적 단위는 도번×제번.
+                   if(!r.wo||r._blk)return null;
+                   const planRem=Math.max((+r.prior_plan||0)-(+r.prior_cover||0),0);
+                   if(planRem<=0)return null;
+                   const cf=r.prior_fin||'0';
+                   if(st.dpConf.type==='R'&&cf!=='3')return null;   // 준비재고=녹색만
+                   const k=dpKey(r,'PRIOR');
+                   const rem=dpRem(r,planRem,k);   // ★준비재고 상한
+                   if(rem<=0)return null;
+                   return {k,part:r.gpc||'',item:r.item||'',
+                           wo:r.wo||'',line:r.line||'',rem};
+                 }},
     };
     const ALLDEF=Object.assign({},HEADDEF,TAILDEF);
     const HEAD_DEFAULT=['gpc','assy','upper','item','line','part_ymd','inhm','pull','st','plan_qty','prior'];
@@ -950,7 +1101,13 @@ SCREEN.partplan=(c)=>{
     const mkTd=(ks,defs,r,fg)=>ks.map(k=>{const c=defs[k];   // data-tk = 컬럼이동시 열 식별용
       const b=c.bg?c.bg(r):null;
       const stl=(c.st||'')+(c.sf?c.sf(r):'')+(b?`background:${b.b};font-weight:700${b.f?';color:'+b.f:''}`:'');
-      return `<td class="${c.cls}"${stl?` style="${stl}"`:''}>${c.v(r,fg)}</td>`;}).join('');
+      // ★드래그 실적 대상 컬럼(당일이전계획 등)
+      const dp=c.dp?c.dp(r):null;
+      const dpa=dp?` class="${c.cls} dp-c${st.dpSel.has(dp.k)?' dp-on':''}" data-dp="${esc(dp.k)}"`
+                  +` data-part="${esc(dp.part)}" data-item="${esc(dp.item)}"`
+                  +` data-wo="${esc(dp.wo)}" data-line="${esc(dp.line)}" data-rem="${dp.rem}"`
+                 :` class="${c.cls}"`;
+      return `<td${dpa}${stl?` style="${stl}"`:''}>${c.v(r,fg)}</td>`;}).join('');
     const headTh=()=>mkTh(headOrder,HEADDEF,'head');
     const tailTh=()=>mkTh(tailOrder,TAILDEF,'tail');
     const headTd=(r,fg)=>mkTd(headOrder,HEADDEF,r,fg);
@@ -963,7 +1120,26 @@ SCREEN.partplan=(c)=>{
       const aggBg = isAgg ? 'background:#cdeef7;font-weight:600;cursor:pointer;' : (childOf?'cursor:pointer;':'');
       return `<tr${tog!==undefined?` class="pp-agg" data-gk="${esc(tog)}"`:''}${(aggBg||(firstInGrp&&seq>1))?` style="${aggBg}${firstInGrp&&seq>1?'border-top:2px solid #9fb3c8':''}"`:''}>
         <td class="center mut">${isAgg?`<span style="color:#456">${open?'▼':'▶'}</span> `:''}${seq}</td>${headTd(r,firstInGrp)}
-        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';return pl?numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf)):numTd('','',false);}).join('')}${tailTd(r)}</tr>`;};
+        ${d.map(x=>{const pl=(r.days&&r.days[x])||0,cv=(r.dcov&&r.dcov[x])||0,cf=(r.dfin&&r.dfin[x])||'0';
+          if(!pl)return numTd('','',false);
+          const td=numTd(cv>0?`${nf(cv)}/${nf(pl)}`:`${nf(pl)}`,finBg(cf),cf!=='0',finFg(cf));
+          // ★드래그 실적 대상 셀 — 조건문에서 파트를 고르고 그 파트가 생산실적 설정돼 있을 때만
+          if(!dpOn()||isAgg)return td;
+          const planRem=Math.max(pl-cv,0); if(planRem<=0)return td;
+          // 준비재고(R) = 녹색(키팅완료 '3')만 / 자재창고출고(W) = 색 무관
+          if(st.dpConf.type==='R'&&cf!=='3')return td;
+          const key=dpKey(r,x);
+          // ★준비재고 상한 — 준비 3개면 계획이 5라도 3개만 잡힌다
+          const rem=dpRem(r,planRem,key); if(rem<=0)return td;
+          const on=st.dpSel.has(key);
+          // ★class 를 새로 덧붙이면 안 된다 — numTd 가 이미 class="center" 를 달고 나오므로
+          //   class 속성이 두 개가 되고, HTML 은 첫 번째만 채택해 가운데정렬이 통째로 날아간다
+          //   (그리고 classList 로 dp-on 을 토글해도 화면에 반영되지 않는다). 기존 class 에 병합한다.
+          return td.replace(/class="([^"]*)"/, (mm,cls)=>
+                   `class="${cls} dp-c${on?' dp-on':''}" data-dp="${esc(key)}"`
+                  +` data-part="${esc(r.gpc||'')}" data-item="${esc(r.item||'')}"`
+                  +` data-wo="${esc(r.wo||'')}" data-line="${esc(r.line||'')}" data-rem="${rem}"`);
+        }).join('')}${tailTd(r)}</tr>`;};
     // ★레거시 DW 도번(item) 그룹 소계행(청록, group trailer) — 완료합/계획합. 상세뷰만.
     // gkey/folded = 상세뷰 블록 접기 토글용(클릭시 그 블록 상세행 숨김). 미전달이면 기존처럼 단순 소계행.
     const subHtml=(blk,gkey,folded)=>{const r0=blk[0];
@@ -1074,16 +1250,29 @@ SCREEN.partplan=(c)=>{
        <label class="tl">적용일수</label><select class="inp" id="pp-gigan" style="width:62px">${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${st.gigan===n?' selected':''}>${n}일</option>`).join('')}</select>
        <label class="tl">소스</label><select class="inp src-new" id="pp-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=웹이 자체 편성한 계획(nx.plan_part_dtl) / 우리(nx)=레거시 편성 미러 / 라이브 대사=레거시 그대로"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src==='nx'?' selected':''}>🟢 우리(nx)</option><option value="live"${st.src==='live'?' selected':''}>🔴 라이브 대사</option></select>
        <button class="btn" id="pp-go">🔍 조회</button>
+       ${dpOn()?`<span style="display:inline-flex;gap:6px;align-items:center;margin-left:10px;padding:2px 10px;
+            border:1px solid ${st.dpConf.type==='R'?'#7cc499':'#9dc0e8'};border-radius:6px;
+            background:${st.dpConf.type==='R'?'#eafaef':'#eaf3ff'}">
+          <b style="font-size:12px;color:${st.dpConf.type==='R'?'#1c7c3a':'#1c47a0'}">🖱 드래그 실적 · ${esc(st.dpConf.type_nm)}</b>
+          <span style="font-size:11px;color:#5a6b82">선택 <b id="pp-dp-cnt">${st.dpSel.size}건</b></span>
+          <button class="btn" id="pp-dp-ok" ${st.dpBusy?'disabled':''}
+            style="background:#1c7c3a;color:#fff;padding:1px 9px;font-size:12px">${st.dpBusy?'처리중…':'✅ 확인'}</button>
+          <button class="btn ghost" id="pp-dp-clr" style="padding:1px 7px;font-size:12px">취소</button>
+          <span style="font-size:10px;color:#8aa0bd">드래그 후 <b>우클릭</b>/<b>F12</b> · <b>더블클릭</b>=수량조정</span>
+        </span>`:(st.part&&st.dpConf&&!st.dpConf.enabled
+          ?`<span style="margin-left:10px;font-size:11px;color:#c0392b">🔒 ${esc(st.dpConf.msg||'')}</span>`:'')}
        <div style="flex-basis:100%;height:0"></div>
        <label class="tl">라인</label><select class="inp" id="pp-line" style="width:90px"><option value="">전체</option>${st.lines.map(l=>`<option value="${esc(l.code)}"${st.line===String(l.code)?' selected':''}>${esc(l.nm||l.code)}</option>`).join('')}</select>
        <label class="tl">제번</label><input class="inp" id="pp-wo" value="${esc(st.wo)}" style="width:90px" placeholder="제번" autocomplete="off">
        <label class="tl">ASSY도번</label><input class="inp" id="pp-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
        <label class="tl">도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
      </div>
-     ${st.msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`:''}
+     ${st.msg?(st.msg.includes('실패')||st.msg.includes('오류')
+        ?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`
+        :`<div class="page-sub" style="color:#5a6b82">${esc(st.msg)}</div>`):''}
      ${st.note?`<div class="page-sub" style="color:#b8860b">${esc(st.note)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl fit" style="font-size:11px"><thead><tr>
+      <table class="tbl fit pp-tbl" style="font-size:11px"><thead><tr>
        <th class="center">SEQ</th>${headTh()}${d.map(x=>`<th class="center"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}${tailTh()}</tr></thead>
       <tbody>${tbodyHtml}</tbody>
       <tfoot>${tfootHtml}</tfoot>
@@ -1099,7 +1288,184 @@ SCREEN.partplan=(c)=>{
     // ★전부 redrawBody() = 표만 갱신(툴바 유지) → 2,900행에서도 즉각 반응
     c.querySelectorAll('input[name=pp-uf]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-uf]:checked');if(x){st.unfin=x.value;redrawBody();}});
     c.querySelectorAll('input[name=pp-vw]').forEach(el=>el.onchange=()=>{const x=c.querySelector('input[name=pp-vw]:checked');if(x){st.view=x.value;st.expand.clear();redrawBody();}});
-    g('#pp-part').onchange=()=>{st.part=g('#pp-part').value;redrawBody();};
+    // ★파트 변경 = 드래그 실적 가능 여부 재판정(파트마스터 설정 조회). 선택은 초기화.
+    g('#pp-part').onchange=async()=>{st.part=g('#pp-part').value;st.dpSel.clear();st.dpQov.clear();
+      await dpLoadConf(); render();};
+
+    /* ==== 드래그 선택 — 키팅(준비실적처리)과 동일한 '사각범위' 방식 ====
+       ★단순 mousemove 로 '지나간 셀'만 담으면 빠르게 끌 때 이벤트가 유실돼 중간이 빠진다.
+         시작셀~현재셀의 (행,열) 사각범위를 매 move 마다 통째로 계산한다(엑셀 감각). */
+    const gw=c.querySelector('.grid-wrap');
+    if(gw&&dpOn()){
+      gw.style.userSelect='none'; gw.style.webkitUserSelect='none';
+      gw.onselectstart=()=>false;
+      const rcOf=td=>{const tr=td.parentElement;return {r:tr?tr.rowIndex:-1,c:td.cellIndex};};
+      const cellAt=(x,y)=>{
+        const e=document.elementFromPoint(x,y); if(!e)return null;
+        const td=e.closest('.dp-c'); if(td)return td;
+        const tr=e.closest('tr');
+        if(tr){let best=null,bd=1e9;
+          tr.querySelectorAll('.dp-c').forEach(q=>{const b=q.getBoundingClientRect();
+            const d=(x<b.left)?(b.left-x):((x>b.right)?(x-b.right):0);
+            if(d<bd){bd=d;best=q;}});
+          if(best)return best;}
+        return e.closest('td');};
+      const paintCnt=()=>{const el=c.querySelector('#pp-dp-cnt');
+        if(el)el.textContent=st.dpSel.size+'건';};
+      let _a=null,_cells=null,_own=null,_on=false;
+      const applyRect=td=>{
+        if(!_a||!_cells)return;
+        const b=rcOf(td);
+        const r1=Math.min(_a.r,b.r),r2=Math.max(_a.r,b.r);
+        const c1=Math.min(_a.c,b.c),c2=Math.max(_a.c,b.c);
+        for(const it of _cells){
+          const inR=it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2;
+          const has=st.dpSel.has(it.k);
+          if(inR&&!has){st.dpSel.set(it.k,it.v);it.td.classList.add('dp-on');_own.add(it.k);}
+          else if(!inR&&has&&_own.has(it.k)){st.dpSel.delete(it.k);it.td.classList.remove('dp-on');}
+        }
+        paintCnt();};
+      gw.onmousedown=ev=>{
+        if(ev.button!==0)return;
+        const any=ev.target.closest('td'); if(!any||!any.closest('tr'))return;
+        ev.preventDefault();
+        if(!ev.ctrlKey&&!ev.metaKey){
+          st.dpSel.clear();
+          c.querySelectorAll('.dp-on').forEach(x=>x.classList.remove('dp-on'));
+        }
+        _on=true; _own=new Set();
+        _cells=[...c.querySelectorAll('.dp-c')].map(x=>{const p=rcOf(x);
+          return {td:x,r:p.r,c:p.c,k:x.dataset.dp,
+                  v:{part:x.dataset.part,item:x.dataset.item,wo:x.dataset.wo,
+                     line:x.dataset.line,qty:+x.dataset.rem||0}};});
+        _a=rcOf(any);
+        applyRect(any);
+      };
+      gw.onmousemove=ev=>{ if(!_on)return; const td=cellAt(ev.clientX,ev.clientY);
+        if(td)applyRect(td); };
+      if(!gw._dpUp){ gw._dpUp=1;
+        document.addEventListener('mouseup',()=>{_on=false;}); }
+    }
+    // ★문서 캡처 리스너(파일 상단)가 찾아 쓰는 최신 핸들러. 이미 열린 탭에서도 확인이 먹는 이유.
+    c._dpFn={ok:dpConfirm,no:dpClear};
+    const dok=g('#pp-dp-ok'); if(dok)dok.onclick=dpConfirm;   // 직접배선도 유지(이중안전)
+    const dcl=g('#pp-dp-clr'); if(dcl)dcl.onclick=dpClear;
+
+    /* ==== 더블클릭 = 수량조정 (040 출하실적등록과 동일 패턴) ====
+       계획 5개인데 3개만 실적을 잡는 경우가 있어 셀 단위로 수량을 정한다.
+       모달은 body 에 렌더(§3 — .content 안에 fixed 를 넣으면 잘린다). */
+    const dpQtyDlg=(td)=>{
+      const key=td.dataset.dp, rem=+td.dataset.rem||0;
+      if(rem<=0){alert('실적을 잡을 잔여계획이 없는 칸입니다.');return;}
+      const old=document.getElementById('pp-qov'); if(old)old.remove();
+      const cur0=st.dpQov.has(key)?Math.max(0,Math.min(rem,+st.dpQov.get(key)||0)):rem;
+      const capNm=st.dpConf.type==='R'?'준비재고':'계획잔여';
+      const ov=document.createElement('div'); ov.id='pp-qov';
+      ov.style.cssText='position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center';
+      ov.innerHTML=`<div style="background:#fff;border:1px solid #90a4bd;border-radius:6px;min-width:340px;box-shadow:0 6px 22px rgba(0,0,0,.3);font-size:13px">
+        <div style="background:#2f6fb3;color:#fff;padding:6px 10px;font-weight:600;display:flex;justify-content:space-between">
+          <span>수량조정 (범위 0 ~ ${nf(rem)})</span><span id="ppq-x" style="cursor:pointer">✕</span></div>
+        <div style="padding:8px 22px 0;color:#5a6b82;font-size:11.5px">
+          ${esc(td.dataset.item||'')} · ${esc(st.dpConf.type_nm||'')} · 상한 ${capNm} ${nf(rem)}</div>
+        <div style="padding:14px 22px;display:flex;align-items:center;gap:12px;justify-content:center">
+          <label style="background:#dbe6f2;border:1px solid #b8c8dc;padding:4px 14px;font-weight:600">수량</label>
+          <input id="ppq-v" type="number" min="0" max="${rem}" step="1" value="${cur0}"
+                 style="width:120px;padding:5px 8px;border:1px solid #90a4bd;text-align:right;font-size:15px">
+          <span style="color:#7a8aa0">/ ${nf(rem)}</span></div>
+        <div style="padding:0 22px 16px;display:flex;gap:8px;justify-content:flex-end">
+          <button id="ppq-no" class="btn">닫기</button>
+          <button id="ppq-ok" class="btn" style="background:#1c7c3a;color:#fff">✔ 이 수량으로 실적처리</button></div></div>`;
+      document.body.appendChild(ov);
+      const inp=ov.querySelector('#ppq-v');
+      inp.focus(); inp.select();
+      const close=()=>ov.remove();
+      const save=()=>{
+        let v=Math.floor(+inp.value||0);
+        if(!(v>=0)){alert('수량은 0 이상 숫자여야 합니다.');return;}
+        if(v>rem){alert(`상한(${nf(rem)})보다 많이 잡을 수 없습니다.`);return;}
+        if(v>=rem)st.dpQov.delete(key); else st.dpQov.set(key,v);
+        // ★수량조정한 셀은 반드시 '선택' 상태로 만든다.
+        //   더블클릭은 mousedown 을 2번 발생시키는데 2번째가 선택초기화 분기에 걸려
+        //   선택이 풀린다. 그대로 두면 조정만 하고 [확인]을 눌러도 아무것도 안 잡힌다
+        //   (040 에서 2026-08-25 실측된 함정 — 같은 구조라 여기도 동일하게 막는다).
+        if(v>0){ st.dpSel.set(key,{part:td.dataset.part,item:td.dataset.item,
+                   wo:td.dataset.wo,line:td.dataset.line,qty:v}); }
+        else st.dpSel.delete(key);
+        close();
+        if(v<=0){ render(); return; }
+        // ★여기서 곧바로 실적처리까지 끝낸다(040 동일). 조정만 해두고 따로 [확인]을
+        //   누르게 하면 그 사이 선택이 풀려 "조정했는데 실적이 안 잡힌다"가 반복된다.
+        dpConfirm();
+      };
+      ov.querySelector('#ppq-ok').onclick=save;
+      ov.querySelector('#ppq-no').onclick=close;
+      ov.querySelector('#ppq-x').onclick=close;
+      ov.onclick=e=>{if(e.target===ov)close();};
+      inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();save();}
+                        else if(e.key==='Escape'){e.preventDefault();close();}};};
+    // ★dpQtyDlg 정의 뒤에 바인딩(TDZ 회피 — core.js/이 화면에서 반복된 함정)
+    if(gw&&dpOn()){
+      gw.ondblclick=ev=>{
+        const td=ev.target.closest?ev.target.closest('td.dp-c[data-dp]'):null;
+        if(!td)return;
+        ev.preventDefault(); ev.stopPropagation();
+        dpQtyDlg(td);};
+    }
+
+    /* ==== 우클릭 컨텍스트 메뉴 (레거시 260 동일 — 확인 F12 / 취소 F11) ==== */
+    const dpMenuClose=()=>{const m=document.getElementById('dp-menu'); if(m)m.remove();};
+    if(gw&&dpOn()){
+      gw.oncontextmenu=ev=>{
+        ev.preventDefault(); dpMenuClose();
+        // ★선택 안 된 셀에서 우클릭하면 그 셀을 잡아준다(040 동일).
+        //   안 그러면 "메뉴는 뜨는데 전부 회색"이라 아무것도 못 한다.
+        const td0=ev.target&&ev.target.closest?ev.target.closest('td.dp-c[data-dp]'):null;
+        if(td0&&!st.dpSel.has(td0.dataset.dp)){
+          st.dpSel.clear();
+          c.querySelectorAll('.dp-on').forEach(x=>x.classList.remove('dp-on'));
+          st.dpSel.set(td0.dataset.dp,{part:td0.dataset.part,item:td0.dataset.item,
+            wo:td0.dataset.wo,line:td0.dataset.line,qty:+td0.dataset.rem||0});
+          td0.classList.add('dp-on');
+          const el=c.querySelector('#pp-dp-cnt'); if(el)el.textContent=st.dpSel.size+'건';
+        }
+        const n=st.dpSel.size;
+        const m=document.createElement('div'); m.id='dp-menu';
+        m.style.cssText='position:fixed;z-index:2000;background:#fff;border:1px solid #9fb3c8;'
+          +'border-radius:6px;box-shadow:0 8px 24px rgba(10,25,55,.28);padding:4px 0;min-width:190px;font-size:13px';
+        m.style.left=Math.min(ev.clientX,window.innerWidth-210)+'px';
+        m.style.top =Math.min(ev.clientY,window.innerHeight-140)+'px';
+        const row=(label,key,fn,dis)=>{
+          const d=document.createElement('div');
+          d.style.cssText='padding:6px 14px;display:flex;justify-content:space-between;gap:20px;'
+            +(dis?'color:#b8c4d4;cursor:default':'cursor:pointer');
+          d.innerHTML=`<span>${label}</span><span style="color:#8aa0bd;font-size:11px">${key}</span>`;
+          if(!dis){ d.onmouseenter=()=>d.style.background='#eaf3ff';
+                    d.onmouseleave=()=>d.style.background='';
+                    d.onclick=()=>{dpMenuClose();fn();}; }
+          m.appendChild(d);
+        };
+        row(`<b>확 인</b> <span style="color:#1c7c3a">${n}건</span>`,'F12',dpConfirm,!n);
+        row('취 소','F11',dpClear,!n);
+        const hr=document.createElement('div');
+        hr.style.cssText='height:1px;background:#e3e9f0;margin:4px 0'; m.appendChild(hr);
+        row('전체 해제','',()=>{st.dpSel.clear();render();},!n);
+        document.body.appendChild(m);
+        // ★바깥 클릭으로 닫기는 반드시 'click' 으로 건다(040 동일).
+        //   'mousedown' 으로 걸면 메뉴 항목을 누르는 순간 mousedown 이 먼저 떠서
+        //   메뉴가 제거되고, 이어질 click 이 사라진 요소에서 발생해 onclick 이
+        //   영영 안 불린다 — "메뉴는 뜨는데 확인이 안 먹는" 증상의 원인(2026-08-30).
+        setTimeout(()=>{document.addEventListener('click',dpMenuClose,{once:true});},0);
+      };
+    }
+    // 단축키 — F12 확인 / F11 취소 (레거시 동일)
+    if(!window._dpKey){ window._dpKey=1;
+      document.addEventListener('keydown',e=>{
+        const s2=(typeof st!=='undefined')?st:null;
+        if(!s2||!s2.dpSel||!s2.dpSel.size)return;
+        if(e.key==='F12'){e.preventDefault();dpConfirm();}
+        else if(e.key==='F11'){e.preventDefault();dpClear();}
+      });
+    }
     g('#pp-line').onchange=()=>{st.line=g('#pp-line').value;redrawBody();};
     // ★컬럼 헤더 드래그앤드롭 = 유저별 컬럼순서 변경(localStorage에 저장).
     //   사람마다 보고 싶은 순서가 달라서 각자 브라우저에 저장 — 서버/DB 미사용(다른 PC로 가면 기본순서).
@@ -1176,9 +1542,13 @@ SCREEN.partplan=(c)=>{
         _typeT=setTimeout(()=>{st[key]=v;redrawBody();},180);};});
     if(typeof attachResizers==='function')attachResizers(c);
   };
-  // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 조회 — 2026-08-28
+  // ★계획 기준일(마지막 업로드 일자축 첫날)만 잡고 화면을 그린다 — 2026-08-28
+  //   ★자동조회 안 함(2026-08-30 사용자 요청): 8,500행 조회가 진입할 때마다 걸려
+  //     느리고, 조건을 바꾸기도 전에 먼저 도는 게 불편하다. [조회] 를 눌러야 조회.
   (async()=>{try{const b=await planBase();if(b&&b.iso)st.base=b.iso;}catch(_){}
-             await loadLines();render();await load();})();
+             await loadLines();
+             st.msg='조건을 고르고 [🔍 조회] 를 누르세요.';
+             render();})();
 };
 // 색 우선순위(낮을수록 완료단계 높음): 출하6 < 생산4 < 키팅3 < 자재2 < 미키팅0
 function finRank(f){return {'6':1,'4':2,'3':3,'2':4,'0':9}[f]||9;}
@@ -3332,6 +3702,9 @@ SCREEN.procbarcode=(host)=>{
                              user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹사용자')})});
       const j=await r.json();
       if(j.ok){
+        // ★재고처리가 통째로 건너뛴 경우는 조용히 넘기지 않는다(공정정보 누락 등).
+        //   백엔드가 warn 을 실어 보낸다 — 2026-08-30.
+        if(j.warn) alert('⚠ 실적은 등록됐으나 재고처리가 생략됐습니다.\n\n'+j.warn);
         const sk=j.stock||{};
         // ★보관 시작시각 갱신 — 이 구간은 [c.sta ~ 지금]으로 확정됐으므로,
         //   잔여가 남으면 "지금"을 새 시작으로 갈아끼우고(분할=시작 리셋), 전량 끝났으면 삭제.

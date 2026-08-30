@@ -161,6 +161,12 @@ from routers import assywork as _r_assywork  # 체결 매트릭스(품목별 체
 app.include_router(_r_assywork.router)
 from routers import setstock as _r_setstock  # 가공세트재고관리(w_pu_stock_280 + 조정 285)
 app.include_router(_r_setstock.router)
+from routers import setstockio as _r_setstockio  # 자재세트재고입출고현황(w_pu_stock_070)
+app.include_router(_r_setstockio.router)
+from routers import setinstat as _r_setinstat  # 자재세트입고현황(w_pr_input_130_part)
+app.include_router(_r_setinstat.router)
+from routers import dragprod as _r_dragprod  # 파트별 생산계획 드래그 실적처리
+app.include_router(_r_dragprod.router)
 from routers import qareview as _r_qareview  # 품질 반성회일지(w_pr_input_590 + 등록 595)
 app.include_router(_r_qareview.router)
 # ★생산계획업로드(검토) — soyo.py 파이프라인 사본 + 레거시식 단계별 실행(/api/planrev/*).

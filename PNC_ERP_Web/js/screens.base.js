@@ -478,7 +478,13 @@ SCREEN.partmaster=(c)=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('partmaster'):true;
     c.innerHTML=`
      <div class="page-title">🔧 파트 마스터 <span style="font-size:12px;color:var(--muted);font-weight:400">PR_M_PROC_GAGONG · 생산효율(=키팅 회수율)</span></div>
-     <div class="page-sub">파트별 <b>생산효율(회수율)</b>·연동창고·정렬키 관리. 원가·계획·키팅이 공유하는 마스터(nx 편집). <span style="color:#b8860b">노란=생산효율≠100</span></div>
+     <div class="page-sub">파트별 <b>생산효율(회수율)</b>·연동창고·정렬키·<b>실적처리방법</b> 관리. 원가·계획·키팅이 공유하는 마스터(nx 편집). <span style="color:#b8860b">노란=생산효율≠100</span></div>
+     <div class="page-sub" style="font-size:11px;color:#5a6b82">
+       <b>실적처리방법</b> — 바코드실적은 독립(체크 시 바코드로 실적 가능) ·
+       생산실적은 <b>택1</b>: <span style="background:#dff5e3;padding:0 4px;border-radius:3px">준비재고</span>=파트별 생산계획에서 <b>녹색(키팅완료)</b> 셀을 드래그해 실적, 준비된 만큼만 ·
+       <span style="background:#e6effb;padding:0 4px;border-radius:3px">자재창고출고</span>=자재창고(Z99990)에서 BOM만큼 바로 차감.
+       두 방식 모두 BOM·세트재고 차감은 바코드실적과 동일.
+     </div>
      <div class="toolbar">
        <label class="tl">파트/파트명</label><input class="inp" id="pm-q" value="${esc(st.q)}" placeholder="파트코드/파트명" autocomplete="off" style="width:160px">
        <button class="btn" id="pm-go">🔍 조회</button>
@@ -489,14 +495,19 @@ SCREEN.partmaster=(c)=>{
      <div style="display:flex;gap:10px;align-items:flex-start">
       <div class="grid-wrap" style="flex:1 1 0;min-width:0;max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
        <table class="tbl fit" style="font-size:12px"><thead><tr>
-        <th>작업처</th><th>구분</th><th>파트</th><th>연동창고</th><th class="num">정렬</th><th class="num">생산효율</th><th>파트그룹</th><th class="num">RACK</th><th>최종작업자</th><th>최종시각</th>${ed?'<th class="pmact">수정</th>':''}</tr></thead>
-       <tbody>${st.loading?spinRow(11):(st.rows.length?st.rows.map(r=>`<tr class="pm-row${st.sel===r.code?' pm-sel':''}" data-sel="${esc(r.code)}" style="cursor:pointer">
+        <th>작업처</th><th>구분</th><th>파트</th><th>연동창고</th><th class="num">정렬</th><th class="num">생산효율</th>
+        <th class="center" style="width:62px" title="바코드로 실적을 잡을 수 있는 파트">바코드<br>실적</th>
+        <th class="center" style="width:110px" title="파트별 생산계획에서 드래그로 실적을 잡을 때 자재를 어디서 빼는가">생산실적</th>
+        <th>파트그룹</th><th class="num">RACK</th><th>최종작업자</th><th>최종시각</th>${ed?'<th class="pmact">수정</th>':''}</tr></thead>
+       <tbody>${st.loading?spinRow(13):(st.rows.length?st.rows.map(r=>`<tr class="pm-row${st.sel===r.code?' pm-sel':''}" data-sel="${esc(r.code)}" style="cursor:pointer">
         <td>${esc(r.wcnm||r.wc)}</td><td class="center">${esc(r.gubunnm)}</td><td><b>${esc(r.code)}</b>${r.nm?' <span style="color:#5a6b82">'+esc(r.nm)+'</span>':''}</td>
         <td>${esc(r.whnm||r.wh)}</td><td class="num">${r.sortkey}</td>
         <td class="num" style="${r.rate!=100?'background:#fff8d6;font-weight:700':''}">${r.rate}</td>
+        <td class="center" style="font-size:13px">${r.bc==='1'?'<span style="color:#1c7c3a">✔</span>':'<span style="color:#c9d1dc">–</span>'}</td>
+        <td class="center" style="font-size:11px;font-weight:600;${PT_BG(r.pt)}">${PT_NM(r.pt)}</td>
         <td class="center">${esc(r.grp)}</td><td class="num">${r.rack}</td>
         <td>${esc(r.uid)}</td><td style="color:#8aa0bd;font-size:11px">${esc(r.udt)}</td>
-        ${ed?`<td class="center pmact" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px">✎</button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="11" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
+        ${ed?`<td class="center pmact" style="white-space:nowrap"><button class="btn ghost" data-e="${esc(r.code)}" style="padding:1px 7px">✎</button> <button class="btn ghost" data-d="${esc(r.code)}" style="padding:1px 7px;color:#c0392b">🗑</button></td>`:''}</tr>`).join(''):`<tr><td colspan="13" class="empty">조회 결과 없음</td></tr>`)}</tbody></table></div>
       <div style="flex:1.15 1 0;min-width:420px">
        <div style="display:flex;align-items:center;gap:6px;padding:4px 2px">
         <div style="font-weight:700;font-size:13px;color:#33507d">👷 파트별 작업자 ${st.sel?`— <b style="color:#1c47a0">${esc(st.sel)}</b> <span style="color:#8aa0bd;font-weight:400">${st.wload?'…':(st.wmode==='edit'?st.wdraft.length:st.workers.length)+'명'}</span>`:'<span style="color:#8aa0bd;font-weight:400">— 좌측 파트 클릭</span>'}</div>
@@ -529,7 +540,7 @@ SCREEN.partmaster=(c)=>{
     g('#pm-q').onkeyup=e=>{if(e.key==='Enter'){st.q=e.target.value;load();}};
     c.querySelectorAll('.pm-row[data-sel]').forEach(el=>el.onclick=()=>loadWorkers(el.dataset.sel));   // 파트 클릭 → 작업자 로드
     if(ed){
-      const nb=g('#pm-new');if(nb)nb.onclick=()=>{st.edit={code:'',nm:'',gubun:'P',wc:'',wh:'Z99990',sortkey:0,rate:100,grp:'',ip:'',rack:0,_new:true};draw();};
+      const nb=g('#pm-new');if(nb)nb.onclick=()=>{st.edit={bc:'1',pt:'',code:'',nm:'',gubun:'P',wc:'',wh:'Z99990',sortkey:0,rate:100,grp:'',ip:'',rack:0,_new:true};draw();};
       c.querySelectorAll('[data-e]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();const row=st.rows.find(x=>x.code===b.dataset.e);st.edit={...row,_new:false};draw();});
       c.querySelectorAll('[data-d]').forEach(b=>b.onclick=(e)=>{e.stopPropagation();del(b.dataset.d);});
       // 작업자 리스트 편집 버튼
@@ -545,6 +556,11 @@ SCREEN.partmaster=(c)=>{
     }
     attachResizers(c);
   };
+  /* 실적처리방법 표시 — '' 없음 / R 준비재고 / W 자재창고출고 */
+  const PT_NM=v=>v==='R'?'준비재고':(v==='W'?'자재창고출고':'–');
+  const PT_BG=v=>v==='R'?'background:#dff5e3;color:#1c7c3a'
+                :(v==='W'?'background:#e6effb;color:#1c47a0':'color:#c9d1dc');
+
   const editModal=()=>{const r=st.edit;
     const f=(lbl,key,attrs='')=>`<label class="tl" style="display:block;margin:6px 0 2px">${lbl}</label><input class="inp" id="pm-f-${key}" value="${esc(r[key]!=null?r[key]:'')}" ${attrs} style="width:100%;box-sizing:border-box">`;
     return `<div style="position:fixed;inset:0;background:rgba(20,40,80,.4);display:flex;align-items:center;justify-content:center;z-index:900">
@@ -556,11 +572,33 @@ SCREEN.partmaster=(c)=>{
        <label class="tl" style="display:block;margin:6px 0 2px">작업처</label><select class="inp" id="pm-f-wc" style="width:100%"><option value="">-</option><option value="P1"${r.wc==='P1'?' selected':''}>용접 (P1)</option><option value="P2"${r.wc==='P2'?' selected':''}>가공 (P2)</option></select>
        ${f('연동창고(코드)','wh')}${f('정렬키','sortkey','type="number"')}
        ${f('★생산효율(회수율 %)','rate','type="number" step="0.1"')}
+       <div style="margin:12px 0 4px;padding:10px;border:1px solid #c9d3e0;border-radius:8px;background:#f7fafd">
+         <div style="font-weight:700;font-size:13px;color:#33507d;margin-bottom:6px">⚙ 실적처리방법</div>
+         <label style="display:block;margin:3px 0">
+           <input type="checkbox" id="pm-f-bc" ${r.bc==='1'?'checked':''}> <b>바코드실적</b>
+           <span style="color:#8aa0bd;font-size:11px">— 바코드 스캔으로 실적</span></label>
+         <div style="height:6px"></div>
+         <div style="font-size:12px;color:#5a6b82;margin-bottom:3px">생산실적 <b>(택1)</b>
+           <span style="font-size:11px">— 파트별 생산계획에서 드래그 실적</span></div>
+         <label style="display:block;margin:3px 0">
+           <input type="radio" name="pm-pt" value="" ${!r.pt?'checked':''}> 사용 안 함</label>
+         <label style="display:block;margin:3px 0">
+           <input type="radio" name="pm-pt" value="R" ${r.pt==='R'?'checked':''}>
+           <b style="background:#dff5e3;padding:0 4px;border-radius:3px">생산준비재고</b>
+           <span style="color:#8aa0bd;font-size:11px">— 녹색(키팅완료)만큼, 생산파트에서 차감</span></label>
+         <label style="display:block;margin:3px 0">
+           <input type="radio" name="pm-pt" value="W" ${r.pt==='W'?'checked':''}>
+           <b style="background:#e6effb;padding:0 4px;border-radius:3px">자재창고출고</b>
+           <span style="color:#8aa0bd;font-size:11px">— 자재창고(Z99990)에서 BOM만큼 차감</span></label>
+       </div>
        ${f('파트그룹','grp')}${f('자동창고IP','ip')}${f('RACK개수','rack','type="number"')}
        <div style="margin-top:14px;text-align:right"><button class="btn ghost" id="pm-cancel">취소</button> <button class="btn" id="pm-save" style="background:#1c47a0;color:#fff">💾 저장</button></div>
      </div></div>`;};
   const wireModal=()=>{if(!st.edit)return;const g=id=>c.querySelector(id);
     ['code','nm','gubun','wc','wh','sortkey','rate','grp','ip','rack'].forEach(k=>{const el=g('#pm-f-'+k);if(el)el.oninput=()=>{st.edit[k]=el.value;};});
+    // ★실적처리방법 — 바코드는 독립 체크, 생산실적은 라디오라 택1이 강제된다
+    const bcEl=g('#pm-f-bc'); if(bcEl)bcEl.onchange=()=>{st.edit.bc=bcEl.checked?'1':'0';};
+    c.querySelectorAll('input[name="pm-pt"]').forEach(el=>{el.onchange=()=>{st.edit.pt=el.value;};});
     g('#pm-cancel').onclick=()=>{st.edit=null;draw();};
     g('#pm-save').onclick=save;};
   load();
