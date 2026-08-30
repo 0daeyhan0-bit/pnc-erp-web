@@ -43,13 +43,24 @@ print("  원가 전수 대조 — 레거시 SP vs nx 엔진   (ymd={} · {:,}종
 print("=" * 84)
 
 t0 = time.time()
-ok = 0; diff = []; skip = 0; oerr = 0; eerr = 0
+ok = 0; diff = []; skip = 0; oerr = 0; eerr = 0; oerr_kinds = {}
 for i, it in enumerate(items, 1):
     try:
         o = CO.get_oracle(it, YMD, cur)
         oj = o['sil']['jae']
     except Exception as e:
+        # ★예외를 조용히 삼키지 않는다 — 2026-08-31 실측: 일시장애로 5,881건이
+        #   예외 처리되어 '빨리 끝난' 것처럼 보였다(앞 실행은 예외 0).
+        #   사유를 모으고, 예외가 10% 넘으면 결과 자체를 무효로 본다.
         oerr += 1
+        oerr_kinds[str(e)[:60]] = oerr_kinds.get(str(e)[:60], 0) + 1
+        if oerr <= 3:
+            print("  ★오라클예외 {} — {}".format(it, str(e)[:80]))
+        try:
+            cn.close()
+        except Exception:
+            pass
+        cn = CO._conn(); cur = cn.cursor()   # 재연결 후 계속
         continue
     if oj is None:
         skip += 1
@@ -71,6 +82,12 @@ for i, it in enumerate(items, 1):
 
 print("\n" + "=" * 84)
 print("  대상 {:,}종 · {:.0f}초".format(len(items), time.time() - t0))
+if oerr:
+    print("  ★오라클예외 사유별:")
+    for k, v in sorted(oerr_kinds.items(), key=lambda x: -x[1])[:5]:
+        print("      {:>5}건  {}".format(v, k))
+    if oerr > len(items) * 0.1:
+        print("  ★★결과 무효 — 예외가 10% 넘는다. 판단하지 말 것.")
 print("  일치 {:,} · 불일치 {:,} · 오라클무값 {:,} · 오라클예외 {:,} · 엔진예외 {:,}".format(
     ok, len(diff), skip, oerr, eerr))
 # ★전체 불일치를 CSV 로 남긴다 — 상위 20 만 보면 군집 분석이 안 된다.
