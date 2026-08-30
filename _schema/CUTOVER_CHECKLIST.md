@@ -1182,3 +1182,13 @@ sale040/cancel  → 조회조건에서 "취소할 출하실적이 없습니다"
 감사 재실행       27 → 30 / 33
 TestBed           PASS 41 · FAIL 0 · SKIP 1 · 오염 0  (회귀 없음)
 ```
+
+---
+
+## ★없는 업체·오래된 발주·음수재고 purge (2026-08-30 대표 확인 · 상세 = MIGRATION_ISSUES.md)
+
+레거시엔 발주 개념이 없으나 `PU_T_PURCHASE_DTL`에 **거래처마스터(nx.cust) 미등재 업체(제이앤아이 sub·LGE11·SW####/SWP###·P진티엔/P#### 등)의 2023년 미입고잔량**이 남아있음(48/67 vendor). 컷오버 대상:
+- ☐ **PU_T_PURCHASE_DTL 미입고잔량**: nx.cust 미등재 업체 + 2년+ 오래된(2023) 발주 = 삭제/마감(신규 ERP 발주로 대체, stale 발주 미이관).
+- ☐ **없는 업체 vendor 코드** 붙은 품목·sourcing_profile 정리(거래처 identity 통합 or 폐기).
+- ☐ **음수 재고**(nx.mat_stock_daily) 정리.
+- (임시조치 반영됨: matexpect 예상 탭이 nx.cust 미등재 vendor 기발주를 이미 제외 — 컷오버 정리되면 무해.)

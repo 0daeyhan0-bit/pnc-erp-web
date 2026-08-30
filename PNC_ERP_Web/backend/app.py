@@ -189,6 +189,9 @@ app.include_router(_r_matinput.router)
 #   협력사에게 열기 전에 서버가 거부해야 한다. 화면에서 숨기는 것은 보안이 아니다.
 from routers import auth as _r_auth
 app.include_router(_r_auth.router)
+# 자재예상매입(MRP성 조달계획, 조회전용) — MAT_EXPECTED_PURCHASE_DESIGN.md [[newerp-matexpect-initiative]]
+from routers import matexpect as _r_matexpect
+app.include_router(_r_matexpect.router)
 
 
 # ★★내부 API 전면 인증 게이트 (2026-08-29) — PARTNER_PORTAL_DESIGN.md §13

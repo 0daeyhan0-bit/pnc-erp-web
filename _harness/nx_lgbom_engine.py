@@ -100,6 +100,41 @@ def lg_ap_all(cur, ver_date, models=None):
     return out
 
 
+def lg_dong_split(cur, ver_date, models=None):
+    """LG BOM 동 원소재(matkl MJU0631)를 **supply_type별로 분리** = {model: {'sagub':{spec:kg}, 'jikmae':{spec:kg}}}.
+       ★사급 = supply_type='Assembly Pull'(LG 지급) · 직매입 = supply_type='Supplier'(공급사 조달=우리 매입).
+       ALUMINUM·q=1.0 플레이스홀더 제외. 같은 werks(주BOM=동 총량 최대)에서 둘 다 산출 → 일관.
+       (자재예상매입 원소재 사급/직매입 정본 — 원단위 gubun1/우리BOM 뺄셈 불요, LG BOM 단일소스.)"""
+    MW = _load_edges(cur, ver_date, models)
+    out = {}
+    for md, wmap in MW.items():
+        best = None; best_tot = -1.0
+        for w, edges in wmap.items():
+            ch = _dd(list)
+            for e in edges:
+                ch[e[0]].append(e)
+            sg = _dd(float); jk = _dd(float); tot = [0.0]
+
+            def dfs(node, mult, depth, path):
+                if depth > 25:
+                    return
+                for (p, c, mk, sup, spec, q, mg, idiam, ithick) in ch.get(node, ()):
+                    if mk == 'MJU0631' and 'ALUMINUM' not in spec.upper() and abs(q - 1.0) > 1e-9:
+                        cv = q * mult; k = _key(spec, mg, idiam, ithick)
+                        if sup == 'Assembly Pull':
+                            sg[k] += cv; tot[0] += cv
+                        elif sup == 'Supplier':
+                            jk[k] += cv; tot[0] += cv
+                    if c != node and c not in path:
+                        dfs(c, mult * q, depth + 1, path | {c})
+            dfs(md, 1.0, 0, {md})
+            if tot[0] > best_tot:
+                best_tot = tot[0]; best = {'sagub': dict(sg), 'jikmae': dict(jk)}
+        if best:
+            out[md] = best
+    return out
+
+
 def _jjset_load(cur):
     """우리 제작동관 코드집합(우리가 직접 깎는 절단관) = bom_flat role='제작동관'."""
     cur.execute("SELECT DISTINCT UPPER(LTRIM(RTRIM(leaf_code))) FROM nx.bom_flat WHERE role=N'제작동관'")

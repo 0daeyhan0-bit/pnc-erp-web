@@ -352,3 +352,363 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
         }
     finally:
         nx.close()
+
+
+# ================= v2 재구성: 자재매입현황(예상/실적) — MAT_EXPECTED_PURCHASE_DESIGN §11 =================
+def _ovmap(cur):
+    try:
+        cur.execute("SELECT cust_code, override_gubun FROM nx.mgmt_vendor_gubun")
+        return {str(r[0]).strip(): str(r[1]).strip() for r in cur.fetchall()}
+    except Exception:
+        return {}
+
+
+def _rawmat_set(cur):
+    """원소재(동관/강판 등) mat_code 집합 = nx.item.metal_gubun≠빈. 예상 EA에서 제외(중량 별도계산)."""
+    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE ISNULL(LTRIM(RTRIM(metal_gubun)),'')<>''")
+    return {r[0] for r in cur.fetchall()}
+
+
+def _ensure_copper_cache(cur):
+    """완제품 per-unit 규격별 동중량 캐시(nx.item_copper_spec) + BOM 서명 가드(item_mat_soyo와 동일 패턴)."""
+    cur.execute("""IF OBJECT_ID('nx.item_copper_spec') IS NULL CREATE TABLE nx.item_copper_spec(
+        item_code varchar(30) NOT NULL, metal varchar(20), diam float, thick float, kg float)""")
+    cur.execute("IF OBJECT_ID('nx.item_copper_meta') IS NULL CREATE TABLE nx.item_copper_meta(id int PRIMARY KEY, bom_sig varchar(80), built_dt datetime)")
+    sig = _bom_sig(cur)
+    cur.execute("SELECT bom_sig FROM nx.item_copper_meta WHERE id=1")
+    r = cur.fetchone()
+    if (not r) or (r[0] != sig):
+        cur.execute("TRUNCATE TABLE nx.item_copper_spec")
+        cur.execute("DELETE FROM nx.item_copper_meta WHERE id=1")
+        cur.execute("INSERT INTO nx.item_copper_meta(id,bom_sig,built_dt) VALUES(1,?,getdate())", sig)
+
+
+def _copper_of(cur, item, eng):
+    """완제품 per-unit 규격별 동중량 {(metal,diam,thick):kg} — 캐시 우선, miss시 copper_by_spec(설치 포함)."""
+    cur.execute("SELECT metal,diam,thick,kg FROM nx.item_copper_spec WHERE item_code=?", item)
+    rows = cur.fetchall()
+    if rows:
+        return {(r[0], r[1], r[2]): r[3] for r in rows if r[0] is not None}
+    sp = _soyo.copper_by_spec(eng, item)
+    if sp:
+        cur.executemany("INSERT INTO nx.item_copper_spec(item_code,metal,diam,thick,kg) VALUES(?,?,?,?,?)",
+                        [(item, str(k[0]), float(k[1] or 0), float(k[2] or 0), float(v)) for k, v in sp.items()])
+    else:
+        cur.execute("INSERT INTO nx.item_copper_spec(item_code,metal,diam,thick,kg) VALUES(?,NULL,0,0,0)", item)
+    return sp
+
+
+def _rawmat_rows(cur, driver, to6):
+    """원소재(동관/강판) 사급/직매입 rawmat_rows — 예상/실적 공용.
+       driver={완제품:수량}(예상=계획·실적=리시빙+직거래) × LG BOM supply_type(lg_dong_split):
+       사급=Assembly Pull(LG 지급) · 직매입=Supplier(공급사 조달). 단가=nx.price_metal std_price(LG사급가) as-of,
+       규격 미등록시 같은재질 최근접 폴백(동 kg단가 LME지배·price_src 정확/근접 표기)."""
+    import nx_lgbom_engine as _lgbom
+    items = [it for it, q in driver.items() if q]
+    ap_ver = "20%s-%s-%s" % (to6[:2], to6[2:4], to6[4:6])
+    dsplit = _lgbom.lg_dong_split(cur, ap_ver, models=set(items))
+    sagub_agg = {}; jik_agg = {}                        # (metal,diam,thick) -> kg
+    for it, q in driver.items():
+        if not q:
+            continue
+        d = dsplit.get(it, {}) or {}
+        for sp, w in (d.get("sagub", {}) or {}).items():
+            sagub_agg[sp] = sagub_agg.get(sp, 0.0) + w * q
+        for sp, w in (d.get("jikmae", {}) or {}).items():
+            jik_agg[sp] = jik_agg.get(sp, 0.0) + w * q
+    # ── 원소재단가 as-of(std_price=LG사급가·LME중심) + 규격 미등록시 같은재질 최근접 폴백 ──
+    ymcut = to6[:4]
+    cur.execute("SELECT LTRIM(RTRIM(metal_gubun)), diam, thick, CAST(std_price AS float), apply_ym "
+                "FROM nx.price_metal WHERE apply_ym<=? AND std_price IS NOT NULL", ymcut)
+    pm_latest = {}
+    for mg, d, th, pr, ay in cur.fetchall():
+        k = (str(mg).strip(), float(d or 0), float(th or 0)); ay = str(ay or "")
+        if k not in pm_latest or ay > pm_latest[k][0]:
+            pm_latest[k] = (ay, float(pr or 0))
+    pm = {k: v[1] for k, v in pm_latest.items()}
+    by_metal = {}
+    for (mg, d, th), pr in pm.items():
+        by_metal.setdefault(mg, []).append((d, th, pr))
+
+    def _mp(metal, diam, thick):
+        if pm.get((metal, diam, thick)):
+            return pm[(metal, diam, thick)], "정확"
+        cand = by_metal.get(metal)
+        if not cand:
+            return 0.0, "없음"
+        best = min(cand, key=lambda x: (abs(x[0] - diam), abs(x[1] - thick)))
+        return best[2], "근접"
+
+    rows = []
+    for gub, gagg in (("사급", sagub_agg), ("직매입", jik_agg)):
+        for (metal, diam, thick), kg in gagg.items():
+            if abs(kg) < 1e-6:
+                continue
+            up, psrc = _mp(metal, diam, thick)
+            rows.append({"sagub_gubun": gub, "metal": metal, "diam": round(diam, 2), "thick": round(thick, 2),
+                         "kg": round(kg, 1), "price": round(up), "amt": round(kg * up), "price_src": psrc})
+    rows.sort(key=lambda r: (r["sagub_gubun"] != "사급", -r["amt"]))
+    return rows
+
+
+def _matbuy_exp(fr6, to6, frm, to):
+    """예상 탭(계획 베이스, 설계 §11-2): 부품/부자재/사급 EA 넷팅(원소재 제외).
+       추가발주 = max(0, 소요 − 재고 − 기발주) · 총매입금액 = (기발주 + 추가발주) × 매입단가(as-of).
+       ★소요=plan_part_mat×plan_mat_source(소요엔진 STEP7) · 재고=mat_stock_daily(C13) ·
+         기발주=PU_T_PURCHASE_DTL 미입고잔량 · 단가=NxCostEngine.pur_price."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        itnm, cust = _name_maps(cur)
+        ov = _ovmap(cur)
+        rawset = _rawmat_set(cur)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+        incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
+        agg = {}
+
+        def _row(mat, vendor):
+            k = (mat, vendor)
+            if k not in agg:
+                agg[k] = {"mat": mat, "vendor": vendor, "soyo": 0.0, "po": 0.0}
+            return agg[k]
+
+        # ── 예상소요(EA) = plan_part_mat × plan_mat_source 업체배분 + SUPPLY_GUBUN(공급방식) ──
+        #   ★매입 대상 = SUPPLY_GUBUN 매입/유상사급/외주완성/미지정. 제외: 원소재(중량별도)·자체(제작·발주아님 §8)·외주가공(가공비축).
+        #   (실측 검증 2026-08-30: 자체=제작 163k=미분류의 정체 / 외주가공=가공비 10k. plan_mat_source.SUPPLY_GUBUN 정본 소비.)
+        cur.execute("""
+            SELECT UPPER(LTRIM(RTRIM(ppm.mat_code))) mat, ISNULL(r.vendor_code,'') vendor,
+                   ISNULL(r.supply_gubun,'') sg,
+                   SUM(CAST(ppm.part_plan_qty AS float) * ISNULL(r.ratio,1.0)) qty
+            FROM nx.plan_part_mat ppm
+            LEFT JOIN (
+                SELECT s.work_order, UPPER(LTRIM(RTRIM(s.mat_code))) mat_code, s.vendor_code,
+                       LTRIM(RTRIM(s.SUPPLY_GUBUN)) supply_gubun,
+                       CAST(s.qty AS float)/NULLIF(t.tot,0) ratio
+                FROM nx.plan_mat_source s
+                JOIN (SELECT work_order, UPPER(LTRIM(RTRIM(mat_code))) mat_code, SUM(CAST(qty AS float)) tot
+                      FROM nx.plan_mat_source GROUP BY work_order, UPPER(LTRIM(RTRIM(mat_code)))) t
+                  ON t.work_order=s.work_order AND t.mat_code=UPPER(LTRIM(RTRIM(s.mat_code)))
+            ) r ON r.work_order=ppm.work_order AND r.mat_code=UPPER(LTRIM(RTRIM(ppm.mat_code)))
+            WHERE ppm.plan_ymd BETWEEN ? AND ?
+            GROUP BY UPPER(LTRIM(RTRIM(ppm.mat_code))), ISNULL(r.vendor_code,''), ISNULL(r.supply_gubun,'')""", fr6, to6)
+        for mat, vendor, sg, qty in cur.fetchall():
+            if mat in rawset:
+                continue                                   # 원소재는 중량 별도(§11-2)
+            if (sg or "").strip() in ("자체", "외주가공"):
+                continue                                   # 자체=제작(발주아님)·외주가공=가공비(매입아님) — §8
+            _row(mat, str(vendor or "").strip())["soyo"] += float(qty or 0)
+        mat_soyo_set = {mat for (mat, vendor) in agg.keys()}   # 매입 소요 자재(기발주도 이 집합만)
+
+        # ── 현재고(mat_stock_daily·C13) — 오늘까지 최신 ──
+        t = _dt.date.today()
+        tod6 = "%02d%02d%02d" % (t.year % 100, t.month, t.day)
+        cur.execute("SELECT mat_code, stock_qty FROM (SELECT UPPER(LTRIM(RTRIM(mat_code))) mat_code, stock_qty, "
+                    "ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(mat_code))) ORDER BY ymd DESC) rn "
+                    "FROM nx.mat_stock_daily WHERE ymd<=?) t WHERE rn=1", tod6)
+        stock = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+
+        # ── 기발주 = PU_T_PURCHASE_DTL 미입고잔량 by (mat, vendor) ──
+        lv = _conn(); lc = lv.cursor()
+        try:
+            lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(CUST_CODE,''),
+                          SUM(CAST(PUR_QTY AS float)-CAST(ISNULL(IN_QTY,0) AS float)-CAST(ISNULL(CANCEL_QTY,0) AS float))
+                       FROM PARTNER_ERP.dbo.PU_T_PURCHASE_DTL WHERE ISNULL(IN_FINISH_FLAG,'N')<>'Y'
+                       GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE))), CUST_CODE""")
+            for mat, cc, remain in lc.fetchall():
+                rem = float(remain or 0)
+                cc = str(cc or "").strip()
+                if rem <= 0 or mat in rawset or mat not in mat_soyo_set:
+                    continue                                # 매입 소요 자재만(자체/외주가공·비계획 po-only 제외)
+                if cc and cc not in cust:
+                    continue                                # ★없는 업체(거래처마스터 미등재)=컷오버 삭제대상 오래된 발주 제외(SW/LGE/P진티엔 등 2023 stale)
+                _row(mat, cc)["po"] += rem
+        finally:
+            lv.close()
+
+        # ── 매입단가 as-of 배치 로드(price_type='매입') — 행마다 pur_price 호출(느림) 대체 ──
+        mats = list({mat for (mat, vendor) in agg.keys()})
+        price_rows = {}   # mat -> [(vendor, apply_ymd, price, cur)]
+        for i in range(0, len(mats), 1000):
+            chunk = mats[i:i + 1000]
+            ph = ",".join("?" * len(chunk))
+            cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(LTRIM(RTRIM(vendor_code)),''), ISNULL(apply_ymd,''), "
+                        "CAST(price AS float), ISNULL(LTRIM(RTRIM(currency)),'KRW') FROM nx.price_item "
+                        "WHERE price_type=N'매입' AND price IS NOT NULL AND UPPER(LTRIM(RTRIM(item_code))) IN (%s)" % ph, *chunk)
+            for it, vc, ay, pr, cc in cur.fetchall():
+                price_rows.setdefault(it, []).append((str(vc).strip(), str(ay or "").strip(), float(pr or 0), str(cc or "KRW").strip()))
+        fx = {"KRW": 1.0}
+        try:
+            cur.execute("SELECT LTRIM(RTRIM(currency)), CAST(rate AS float) FROM (SELECT currency, rate, "
+                        "ROW_NUMBER() OVER (PARTITION BY currency ORDER BY apply_ymd DESC) rn FROM nx.fx_rate) t WHERE rn=1")
+            for cc, rt in cur.fetchall():
+                fx[str(cc).strip()] = float(rt or 1)
+        except Exception:
+            pass
+
+        def _asof_price(mat, vendor, ymd):
+            lst = price_rows.get(mat)
+            if not lst:
+                return 0.0
+            cand = [x for x in lst if x[1] and x[1] <= ymd] or lst      # as-of ≤ ymd (없으면 전체)
+            vp = [x for x in cand if x[0] == vendor]                    # 지정 vendor 우선
+            pick = max(vp or cand, key=lambda x: x[1])                  # 최신 apply_ymd
+            return pick[2] * fx.get(pick[3], 1.0)                       # 외화→KRW
+
+        # ── 재고 소요비율 배분 → 넷팅 → 단가·금액 ──
+        tot_mat = {}
+        for (mat, vendor), v in agg.items():
+            tot_mat[mat] = tot_mat.get(mat, 0.0) + v["soyo"]
+        rows = []
+        for (mat, vendor), v in agg.items():
+            tm = tot_mat.get(mat, 0.0)
+            ratio = (v["soyo"] / tm) if tm > 1e-9 else 0.0
+            stk = stock.get(mat, 0.0) * ratio
+            add = max(0.0, v["soyo"] - stk - v["po"])
+            up = float(_asof_price(mat, vendor or "", to6) or 0.0)
+            buy_qty = v["po"] + add
+            rows.append({
+                "mat_code": mat, "mat_name": itnm.get(mat, ""),
+                "vendor_code": vendor, "vendor_name": cust.get(vendor, ("", ""))[0],
+                "grp": _gubun(vendor, ov, cust),
+                "soyo_qty": round(v["soyo"], 2), "stock_qty": round(stk, 2),
+                "po_qty": round(v["po"], 2), "add_qty": round(add, 2),
+                "unit_price": round(up, 2), "buy_amt": round(buy_qty * up),
+            })
+        rows = [r for r in rows if abs(r["soyo_qty"]) + abs(r["po_qty"]) > 1e-9]
+        rows.sort(key=lambda r: -r["buy_amt"])
+
+        # ── 원소재(동관/강판) 사급/직매입 = 완제품 계획(nx.plan_item_dtl) × LG BOM supply_type (공용헬퍼) ──
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(C_ITEM_CODE))), SUM(CAST(PLAN_QTY AS float)) FROM nx.plan_item_dtl "
+                    "WHERE PLAN_YMD BETWEEN ? AND ? AND PLAN_QTY>0 GROUP BY UPPER(LTRIM(RTRIM(C_ITEM_CODE)))", fr6, to6)
+        plan_fin = {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+        rawmat_rows = _rawmat_rows(cur, plan_fin, to6)
+
+        return {"tab": "exp", "frm": frm, "to": to, "rows": rows, "cnt": len(rows), "rawmat_rows": rawmat_rows,
+                "note": "예상=계획베이스 EA(plan_part_mat×배분, 원소재 제외) 넷팅 + 원소재 사급/직매입(완제품계획×LG BOM supply_type). 추가발주=max(0,소요−재고−기발주)·총매입금액=(기발주+추가발주)×매입단가."}
+    finally:
+        nx.close()
+
+
+def _matbuy_act(fr6, to6, frm, to):
+    """실적 탭(설계 §11-3): 소요 = 리시빙(절삭) + 직거래출하(설치/이지링크) × prod_soyo · vs 매입실적.
+       ★소요엔진만(prod_soyo 캐시 item_mat_soyo). 매입실적 = PU_T_STOCK_MAINT(9/S)+수입(_C P). 원소재 EA 제외."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        itnm, cust = _name_maps(cur)
+        ov = _ovmap(cur)
+        rawset = _rawmat_set(cur)
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM")
+        incust = {r[0]: str(r[1]).strip() for r in cur.fetchall()}
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(LTRIM(RTRIM(cut_gubun)),'') FROM nx.item")
+        cutg = {r[0]: r[1] for r in cur.fetchall()}
+
+        # ── 드라이버(완제품 실적): 리시빙(절삭)=RECV_QTY · 직거래(설치/이지링크)=SALE_QTY ──
+        driver = {}
+        # ★net 리시빙(출고 C − 반품 R) — LG사급현황 리시빙비교(recvcompare)와 일관.
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), "
+                    "SUM(CASE WHEN GUBUN='C' THEN CAST(RECV_QTY AS float) ELSE 0 END) "
+                    "- SUM(CASE WHEN GUBUN='R' THEN CAST(RECV_QTY AS float) ELSE 0 END) "
+                    "FROM nx.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD BETWEEN ? AND ? "
+                    "GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr6, to6)
+        for it, q in cur.fetchall():
+            if cutg.get(it, "") == "절삭":
+                driver[it] = driver.get(it, 0.0) + float(q or 0)
+        lv = _conn(); lc = lv.cursor()
+        try:
+            lc.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float)) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL "
+                       "WHERE SALE_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr6, to6)
+            for it, q in lc.fetchall():
+                if cutg.get(it, "") in ("설치", "이지링크"):
+                    driver[it] = driver.get(it, 0.0) + float(q or 0)
+        finally:
+            lv.close()
+
+        agg = {}
+
+        def _row(mat, vendor):
+            k = (mat, vendor)
+            if k not in agg:
+                agg[k] = {"soyo": 0.0, "buy": 0.0}
+            return agg[k]
+
+        # ── 실적소요 = 드라이버 × prod_soyo(per-unit 캐시) ──
+        if driver:
+            _ensure_soyo_cache(cur)
+            items = [it for it, dq in driver.items() if dq]
+            smap = {}; cached = set()
+            for i in range(0, len(items), 1000):
+                chunk = items[i:i + 1000]
+                ph = ",".join("?" * len(chunk))
+                cur.execute("SELECT item_code, mat_code, per_unit FROM nx.item_mat_soyo WHERE item_code IN (%s)" % ph, *chunk)
+                for it, mc, per in cur.fetchall():
+                    cached.add(it)
+                    if mc:
+                        smap.setdefault(it, {})[mc] = per
+            for it in items:
+                if it not in cached:
+                    try:
+                        so = _soyo_of(cur, it)
+                        if so:
+                            smap[it] = so
+                    except Exception:
+                        pass
+            nx.commit()
+            for it, dq in driver.items():
+                if not dq:
+                    continue
+                for mc, per in smap.get(it, {}).items():
+                    if mc in rawset:
+                        continue                            # 원소재는 EA 제외(중량 별도축)
+                    _row(mc, incust.get(mc, ""))["soyo"] += per * dq
+
+        # ── 매입실적 = PU_T_STOCK_MAINT(9/S) + 수입(_C DIVISION='P') by (mat, vendor) ──
+        lv2 = _conn(); lc2 = lv2.cursor()
+        try:
+            for tag in ("9", "S"):
+                lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
+                            "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
+                            "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", tag, fr6, to6)
+                for mc, cc, q in lc2.fetchall():
+                    _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
+            lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
+                        "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
+                        "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", fr6, to6)
+            for mc, cc, q in lc2.fetchall():
+                _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
+        finally:
+            lv2.close()
+
+        rows = []
+        for (mat, vendor), v in agg.items():
+            if abs(v["soyo"]) + abs(v["buy"]) < 1e-9:
+                continue
+            rows.append({"mat_code": mat, "mat_name": itnm.get(mat, ""),
+                         "vendor_code": vendor, "vendor_name": cust.get(vendor, ("", ""))[0],
+                         "grp": _gubun(vendor, ov, cust),
+                         "soyo_qty": round(v["soyo"], 2), "buy_qty": round(v["buy"], 2)})
+        rows.sort(key=lambda r: -r["soyo_qty"])
+        # ── 원소재(동관/강판) 사급/직매입 = 완제품 실적(driver) × LG BOM supply_type (예상과 동일 공용헬퍼) ──
+        rawmat_rows = _rawmat_rows(cur, driver, to6)
+        return {"tab": "act", "frm": frm, "to": to, "rows": rows, "cnt": len(rows), "rawmat_rows": rawmat_rows,
+                "note": "실적=리시빙(절삭)+직거래출하(설치/이지링크)×prod_soyo 소요 vs 매입실적(PU_T_STOCK_MAINT 9/S+수입P) + 원소재 사급/직매입(실적×LG BOM supply_type). 원소재 EA 제외."}
+    finally:
+        nx.close()
+
+
+@router.get("/api/matbuy")
+def matbuy(tab: str = Query("exp"), frm: str = Query(""), to: str = Query("")):
+    """자재매입현황(예상/실적) — 설계 §11. tab=exp(오늘~+4주 계획) | act(오늘~−4주 실적)."""
+    t = _dt.date.today()
+    if tab == "act":
+        if not to:
+            to = t.isoformat()
+        if not frm:
+            frm = (t - _dt.timedelta(days=28)).isoformat()
+    else:
+        if not frm:
+            frm = t.isoformat()
+        if not to:
+            to = (t + _dt.timedelta(days=28)).isoformat()
+    fr6 = frm.replace("-", "")[2:8]; to6 = to.replace("-", "")[2:8]
+    if tab == "act":
+        return _matbuy_act(fr6, to6, frm, to)
+    return _matbuy_exp(fr6, to6, frm, to)
