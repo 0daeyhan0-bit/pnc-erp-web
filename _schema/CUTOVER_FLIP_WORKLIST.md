@@ -27,11 +27,12 @@ soyo.py         59, 93, 434                               (3·주문/AS계획/�
 ```
 집중지점: **kitting/gagong/matexpect**(재고·출하·계획 현재값), **live_api·common**(라이브∪nx 브리지), **close `_mv_*`/`_prd_*`**(활성 평가법).
 
-## CLEAN(마스터, §9-1) 5개 — 미러 아닌 클린으로
+## CLEAN(마스터, §9-1) 5개 — ★보류(아침 사용자 논의 필요)
 ```
-lgsagub.py  104, 105        CS_M_METERIAL_COST → nx.price_*
-soyo.py     632, 633, 639   PR_M_ITEM         → nx.item
+lgsagub.py  104, 105        CS_M_METERIAL_COST → nx.price_*  (절삭재료비 사급가·price 엔진 매핑 필요)
+soyo.py     632, 633, 639   PR_M_ITEM         → nx.item      (routing_edge STEP7)
 ```
+**보류 사유(2026-08-30 밤)**: ①soyo는 컬럼명 재매핑 필요(dbo.PR_M_ITEM.in_cust_code/make_type/work_code ↔ nx.item 컬럼명 상이) ②정본 충돌 — 메모리 [[newerp-nxitem-reader-migration]] "**soyo dbo STEP7만 보존**"(리더이관 시 의도적 잔존) + nx.PR_M_ITEM 미러는 **물리drop 컷오버대기**라 미러로도 못 감 ③lgsagub는 price 엔진 매핑. → 성급한 전환 금지, **컷오버 전 사용자와 방향 확정**(nx.item 클린으로 정합 vs STEP7 예외 유지). 현재 dbo 직독이라 병행운영 중엔 정상 동작. **컷오버 차단요인 여부도 함께 판단**(마스터는 신규 품목 드물어 프로즌 영향 작음).
 
 ## KEEP 15개 — 일부러 레거시에 둠(바꾸면 안 됨)
 ```
