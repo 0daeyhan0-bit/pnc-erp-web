@@ -3,7 +3,7 @@
 import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
-from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
+from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form, Request
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
 
 router = APIRouter()
@@ -261,3 +261,22 @@ def manorder_save(payload: dict = Body(...)):
         nx.rollback(); raise
     finally:
         nx.close()
+
+
+# ================= 협력사 발주현황 (협력사 포털·조회전용, 2026-08-30) =================
+@router.get("/api/coopporder/items")
+def coopporder_items(request: Request, cust: str = Query("")):
+    """협력사가 로그인해 보는 발주현황. ★소속강제(협력사 계정=자기 업체만). 수동발주 items 재사용(같은 소스).
+       컬럼: 품목·품명·현재재고·기발주(PNC가 나에게 발주)·계획수량(4주 생산계획)·LG물동(5~8주·제외분). 조회전용."""
+    from routers.auth import require_user, scope_cust
+    cc = scope_cust(require_user(request), cust)
+    if not cc:
+        raise HTTPException(400, "매입처 필요(협력사 로그인 또는 cust 지정).")
+    r = manorder_items(cc=cc, ym="")
+    out = [{"ic": x["ic"], "nm": x["nm"], "unit": x.get("unit", "EA"),
+            "stock_qty": x["stock_qty"], "po_qty": x["po_qty"],           # 기발주=PNC 발주(PU+manual_order)
+            "plan_qty": x["plan_qty"], "muldong_soyo": x["muldong_soyo"]}  # 계획=4주, 물동=5~8주(제외분)
+           for x in r["rows"]]
+    out.sort(key=lambda z: (str(z["ic"]).split('-')[0], str(z["ic"])))
+    return {"cc": cc, "cust_name": r["cust_name"], "ym": r["ym"], "stock_ym": r["stock_ym"],
+            "muldong_ym": r["muldong_ym"], "rows": out}

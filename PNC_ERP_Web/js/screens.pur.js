@@ -1560,6 +1560,53 @@ SCREEN.manorder=(c)=>{
   draw();
 };
 
+/* ==== 협력사 발주현황 (협력사 포털·조회전용) — 협력사 로그인=자기업체만, 재고·기발주·계획4주·물동5~8주 ==== */
+SCREEN.coopporder=(c)=>{
+  const nf=n=>(n==null||n==='')?'':Math.round(+n||0).toLocaleString();
+  let cust='', info=null, rows=[], loading=false, msg='', vq='', vlist=[], vsearching=false;
+  const parNo=ic=>{const s=String(ic||'');const i=s.indexOf('-');return i>0?s.slice(0,i):s;};
+  const load=async()=>{loading=true;msg='';draw();
+    try{const r=await fetch(`${API}/api/coopporder/items?cust=${encodeURIComponent(cust||'')}`);
+      if(!r.ok){const j=await r.json().catch(()=>({}));msg=j.detail||'조회 실패(매입처를 선택하세요)';info=null;rows=[];loading=false;draw();return;}
+      const j=await r.json();info=j;rows=(j.rows||[]);cust=j.cc||cust;}
+    catch(e){msg='백엔드 연결 실패';rows=[];}
+    loading=false;draw();};
+  const searchV=async()=>{if(!vq.trim()){vlist=[];draw();return;}vsearching=true;draw();
+    try{const r=await fetch(`${API}/api/manorder/vendors?q=${encodeURIComponent(vq)}`);vlist=(await r.json()).rows||[];}
+    catch(e){vlist=[];}vsearching=false;draw();};
+  const draw=()=>{
+    c.innerHTML=`
+     <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+     <div class="page-title" style="flex:0 0 auto">협력사 발주현황 <span style="font-size:12px;color:var(--muted);font-weight:400">우리(PNC) 발주·생산계획(4주)·LG물동(5~8주·참고)을 협력사가 확인</span></div>
+     <div class="toolbar" style="flex:0 0 auto">
+       ${info?`<span style="font-weight:700;color:#1c47a0">✔ ${esc(info.cust_name||cust)} (${esc(cust)})</span>`:
+         `<label class="tl">매입처</label><input class="inp" id="cp-vq" value="${esc(vq)}" placeholder="업체명/코드" style="width:180px"><button class="btn" id="cp-vs">검색</button>`}
+       <div class="spacer"></div>
+       ${info?`<span class="rowcount">계획월 ${esc(info.ym||'-')} · 재고 ${esc(info.stock_ym||'-')} · ${nf(rows.length)}품목</span>`:''}
+     </div>
+     ${msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(msg)}</div>`:''}
+     ${!info&&!msg?`
+       <div class="grid-wrap" style="max-width:560px;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin-top:8px;flex:0 0 auto">
+         <table class="tbl"><thead><tr><th>코드</th><th>매입처</th><th class="num">품목수</th></tr></thead>
+         <tbody>${vsearching?'<tr><td colspan=3 class="empty">검색중…</td></tr>':(vlist.length?vlist.map(v=>`<tr class="cp-vrow" data-cc="${esc(v.cc)}" style="cursor:pointer"><td><b>${esc(v.cc)}</b></td><td>${esc(v.nm)}</td><td class="num">${v.items}</td></tr>`).join(''):'<tr><td colspan=3 class="empty">협력사 계정은 자동 조회됩니다 · 관리자는 매입처를 검색하세요</td></tr>')}</tbody></table>
+       </div>`:
+      info?`
+       <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin-top:6px">
+        <table class="tbl" style="font-size:12px;width:100%"><thead><tr>
+          <th class="center" style="width:34px">No</th><th>부모도번</th><th>품목</th><th>품명</th>
+          <th class="num">현재재고</th><th class="num">기발주</th><th class="num">계획수량<br><span style="color:#8a94a6;font-size:10px">(4주)</span></th>
+          <th class="num" style="background:#f3f6fa">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th></tr></thead>
+        <tbody>${loading?`<tr><td colspan=8 class="empty">불러오는 중…</td></tr>`:(rows.length?(()=>{let pp='';return rows.map((it,i)=>{const p=parNo(it.ic);const first=(p!==pp);pp=p;
+          return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:normal;word-break:break-word;line-height:1.25">${esc(it.nm||'')}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="font-weight:700;color:#1c7c3a">${it.po_qty?nf(it.po_qty):''}</td><td class="num">${nf(it.plan_qty)}</td><td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td></tr>`;}).join('');})():`<tr><td colspan=8 class="empty">품목 없음</td></tr>`)}</tbody></table>
+       </div>`:''}
+     </div>`;
+    const vs=c.querySelector('#cp-vs');if(vs)vs.onclick=()=>{vq=c.querySelector('#cp-vq').value;searchV();};
+    const vqi=c.querySelector('#cp-vq');if(vqi)vqi.onkeyup=e=>{if(e.key==='Enter'){vq=e.target.value;searchV();}};
+    c.querySelectorAll('.cp-vrow').forEach(tr=>tr.onclick=()=>{cust=tr.dataset.cc;vlist=[];load();});
+  };
+  load();   // 협력사 로그인이면 자동 스코프(빈 cust) · 관리자면 검색 유도
+};
+
 /* ==== 원소재/용접봉 월별 시세 (구매/자재) — 무게정산 단가 ==== */
 SCREEN.matprice=(c)=>{
   const API=API_BASE;

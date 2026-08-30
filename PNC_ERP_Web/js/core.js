@@ -218,6 +218,7 @@ const MODULES=[
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
    {id:'partnerplan',ic:'📋',nm:'협력사계획현황'},
+   {id:'coopporder',ic:'📦',nm:'협력사 발주현황'},
    {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
    {id:'delivedit',ic:'📝',nm:'거래명세표 수정'},
    // {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},   // ★2026-08-28 메뉴 숨김(요청). SCREEN.setinreq 는 유지 — 되살릴 땐 이 줄만 해제
