@@ -1423,6 +1423,7 @@ SCREEN.manorder=(c)=>{
   const d6=d=>`${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
   const cutoffD6=()=>{const d=new Date();d.setDate(d.getDate()+(+lead||0));return d6(d);};                       // 오늘+반영일수 마감일
   const winSum=it=>{if(!it.days)return null;const co=cutoffD6();let s=0,any=false;for(const dd in it.days){any=true;if((''+dd)<=co)s+=(+it.days[dd]||0);}return any?Math.round(s):null;};  // 오늘~오늘+N일 이내 일자별 계획합(=N일치)
+  const parNo=ic=>{const s=String(ic||'');const i=s.indexOf('-');return i>0?s.slice(0,i):s;};   // 부모 도번(접미사 앞)
   const adjPlan=it=>{const w=winSum(it);return w==null?(+it.plan_qty||0):w;};                                    // ★반영일수(N)만큼의 계획수량. 30일=전체. days없으면 월 전체계획
   const bufQty=it=>Math.round(adjPlan(it)*(buf/100));                                                           // 여유분(조정계획 기준)
   const defAdd=it=>Math.max(0,Math.round(adjPlan(it)+bufQty(it)-(+it.stock_qty||0)-(+it.po_qty||0)));           // 기본 추가발주(리드타임 반영)
@@ -1434,7 +1435,7 @@ SCREEN.manorder=(c)=>{
   const selV=async(v)=>{vendor=v;vlist=[];ordered=false;editQty={};planDates=[];await loadItems();};
   const loadItems=async()=>{loading=true;msg='';draw();
     // 좌/우 동일 소스: items(각 행에 days=부모 도번 일자별 계획) + dates. 우측 계 = 좌측 계획수량.
-    try{const r=await fetch(`${API}/api/manorder/items?cc=${encodeURIComponent(vendor.cc)}`);const j=await r.json();items=j.rows||[];vendor.ym=j.ym;vendor.stock_ym=j.stock_ym;planDates=j.dates||[];vendor.lead_days=j.lead_days||0;if(j.lead_days>0)lead=j.lead_days;}   // ★거래처 리드타임을 반영일수 기본값으로(없으면 현행 유지)
+    try{const r=await fetch(`${API}/api/manorder/items?cc=${encodeURIComponent(vendor.cc)}`);const j=await r.json();items=j.rows||[];items.sort((a,b)=>{const pa=parNo(a.ic),pb=parNo(b.ic);return pa<pb?-1:pa>pb?1:(String(a.ic)<String(b.ic)?-1:1);});vendor.ym=j.ym;vendor.stock_ym=j.stock_ym;vendor.muldong_ym=j.muldong_ym;planDates=j.dates||[];vendor.lead_days=j.lead_days||0;if(j.lead_days>0)lead=j.lead_days;}   // ★부모도번 정렬(변형 인접)·거래처 리드타임 기본값
     catch(e){msg='백엔드 연결 실패';items=[];planDates=[];}
     loading=false;draw();};
   const jsstr=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,' ');
@@ -1481,8 +1482,10 @@ SCREEN.manorder=(c)=>{
     if(!items.length)return `<div style="padding:18px;color:#8aa0bd;font-size:13px">품목 없음</div>`;
     if(!dates.length)return `<div style="padding:18px;color:#8aa0bd;font-size:13px">이 매입처의 일자별 계획이 없습니다(계획월 <b>${esc(vendor.ym||'-')}</b> 기준).</div>`;
     const dh=dates.map(d=>`<th class="num" title="${esc(d)}">${esc((''+d).slice(2,4))}/${esc((''+d).slice(4,6))}</th>`).join('');
-    const body=items.map((it,i)=>`<tr><td class="center mut">${i+1}</td><td><b>${esc(it.ic)}</b></td><td class="cap" title="${esc(it.nm||'')}">${esc(it.nm||'')}</td><td class="num qty">${nf(it.plan_qty||0)}</td>${dates.map(d=>{const q=(it.days&&it.days[d])||0;return `<td class="num">${q?nf(q):''}</td>`;}).join('')}</tr>`).join('');
-    return `<table class="tbl" id="mo-rtbl" style="font-size:12px"><thead><tr><th class="center" style="width:34px">No</th><th>도번</th><th>품명</th><th class="num">계</th>${dh}</tr></thead>
+    let prevPar='';
+    const body=items.map((it,i)=>{const p=parNo(it.ic);const first=(p!==prevPar);prevPar=p;
+      return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td class="cap" title="${esc(it.nm||'')}">${esc(it.nm||'')}</td><td class="num qty">${nf(it.plan_qty||0)}</td><td class="num" title="기발주(미입고 발주잔량)">${it.po_qty?nf(it.po_qty):''}</td>${dates.map(d=>{const q=(it.days&&it.days[d])||0;return `<td class="num">${q?nf(q):''}</td>`;}).join('')}</tr>`;}).join('');
+    return `<table class="tbl" id="mo-rtbl" style="font-size:12px"><thead><tr><th class="center" style="width:34px">No</th><th>부모도번</th><th>도번</th><th>품명</th><th class="num">계</th><th class="num">기발주</th>${dh}</tr></thead>
       <tbody>${body}</tbody></table>`;
   };
   const upSum=()=>{let n=0,t=0;items.forEach(it=>{const a=ord(it);if(a>0){n++;t+=a;}});
