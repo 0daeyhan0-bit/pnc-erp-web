@@ -3770,14 +3770,20 @@ SCREEN.lgsagub=(c)=>{
       <div style="font-weight:700;color:#1c7c3a;font-size:12px;margin:4px 0 3px">월별 사급부품 수불 (개수·2월부터)</div>
       <table class="tbl fit lg-tbl" style="font-size:11.5px"><thead><tr>
         <th>월</th><th class="num">기초</th><th class="num">입고</th><th class="num">소요</th><th class="num">기말</th><th class="num">기말금액</th>
+        <th class="num" title="총수량 뒤에 숨은 '소요&gt;입고' 품목">잔량−종</th><th class="num">잔량−수량</th><th class="num">잔량−금액</th>
       </tr></thead><tbody>${rs.map(r=>`<tr>
         <td><b>${yl(r.ym)}</b></td>
         <td class="num">${wonI(Math.round(r.open_bom_kg||0))}</td>
         <td class="num" style="color:#1c7c3a">${wonI(Math.round(r.in_kg))}</td>
         <td class="num" style="color:#8a5a1a">${wonI(Math.round(r.soyo_bom_kg||0))}</td>
         <td class="num" style="font-weight:700;color:${(r.close_bom_kg||0)<0?'#a03d2c':'#16324f'}">${wonI(Math.round(r.close_bom_kg||0))}</td>
-        <td class="num" style="color:#5a7597">${wonI(Math.round(r.close_bom_amt||0))}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">데이터 없음</td></tr>'}</tbody></table>
-      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">입고=LG OSP 사급부품 · 소요=리시빙×BOM. 2월(첫 OSP월) 기초0</div>
+        <td class="num" style="font-weight:700;color:${(r.close_bom_amt||0)<0?'#a03d2c':'#5a7597'}">${wonI(Math.round(r.close_bom_amt||0))}</td>
+        <td class="num" style="color:#a03d2c">${r.neg_cnt?wonI(r.neg_cnt):'-'}</td>
+        <td class="num" style="color:#a03d2c">${r.neg_qty?wonI(Math.round(r.neg_qty)):'-'}</td>
+        <td class="num" style="color:#a03d2c">${r.neg_amt?wonI(Math.round(r.neg_amt)):'-'}</td></tr>`).join('')||'<tr><td colspan="9" class="empty">데이터 없음</td></tr>'}</tbody></table>
+      <div style="font-size:11px;color:#8aa0bd;margin-top:4px">입고=LG OSP 사급부품 · 소요=리시빙×소요엔진. 2월(첫 OSP월) 기초0</div>
+      <div style="font-size:11px;color:#8aa0bd">금액=${esc(L.price_basis||'매입가격(매입실적)')} · 입고·소요·기말을 같은 단가로 평가</div>
+      <div style="font-size:11px;color:#a03d2c">잔량− = 총수량 뒤에 숨은 '소요&gt;입고' 품목. 총수량은 상쇄돼도 단가가 달라 금액은 상쇄되지 않는다</div>
     </div>`;};
   const psh=(k,label,cls)=>`<th${cls?' class="'+cls+'"':''} data-sk="${k}" style="cursor:pointer" title="더블클릭 정렬">${label}${st.p_sort.k===k?(st.p_sort.dir<0?' ▼':' ▲'):''}</th>`;
   const drawParts=()=>{
