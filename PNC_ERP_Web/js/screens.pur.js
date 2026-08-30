@@ -1567,9 +1567,11 @@ SCREEN.coopporder=(c)=>{
   const parNo=ic=>{const s=String(ic||'');const i=s.indexOf('-');return i>0?s.slice(0,i):s;};
   const load=async()=>{loading=true;msg='';draw();
     try{const r=await fetch(`${API}/api/coopporder/items?cust=${encodeURIComponent(cust||'')}`);
-      if(!r.ok){const j=await r.json().catch(()=>({}));msg=j.detail||'조회 실패(매입처를 선택하세요)';info=null;rows=[];loading=false;draw();return;}
-      const j=await r.json();info=j;rows=(j.rows||[]);cust=j.cc||cust;}
-    catch(e){msg='백엔드 연결 실패';rows=[];}
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){msg=j.detail||'조회 실패';info=null;rows=[];loading=false;draw();return;}
+      if(j.need_search){info=null;rows=[];loading=false;draw();return;}   // 내부직원=검색 유도(에러 아님)
+      info=j;rows=(j.rows||[]);cust=j.cc||cust;}
+    catch(e){msg='조회 실패';rows=[];}
     loading=false;draw();};
   const searchV=async()=>{if(!vq.trim()){vlist=[];draw();return;}vsearching=true;draw();
     try{const r=await fetch(`${API}/api/manorder/vendors?q=${encodeURIComponent(vq)}`);vlist=(await r.json()).rows||[];}
@@ -1585,7 +1587,7 @@ SCREEN.coopporder=(c)=>{
        ${info?`<span class="rowcount">계획월 ${esc(info.ym||'-')} · 재고 ${esc(info.stock_ym||'-')} · ${nf(rows.length)}품목</span>`:''}
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(msg)}</div>`:''}
-     ${!info&&!msg?`
+     ${!info?`
        <div class="grid-wrap" style="max-width:560px;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin-top:8px;flex:0 0 auto">
          <table class="tbl"><thead><tr><th>코드</th><th>매입처</th><th class="num">품목수</th></tr></thead>
          <tbody>${vsearching?'<tr><td colspan=3 class="empty">검색중…</td></tr>':(vlist.length?vlist.map(v=>`<tr class="cp-vrow" data-cc="${esc(v.cc)}" style="cursor:pointer"><td><b>${esc(v.cc)}</b></td><td>${esc(v.nm)}</td><td class="num">${v.items}</td></tr>`).join(''):'<tr><td colspan=3 class="empty">협력사 계정은 자동 조회됩니다 · 관리자는 매입처를 검색하세요</td></tr>')}</tbody></table>

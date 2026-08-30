@@ -269,9 +269,13 @@ def coopporder_items(request: Request, cust: str = Query("")):
     """협력사가 로그인해 보는 발주현황. ★소속강제(협력사 계정=자기 업체만). 수동발주 items 재사용(같은 소스).
        컬럼: 품목·품명·현재재고·기발주(PNC가 나에게 발주)·계획수량(4주 생산계획)·LG물동(5~8주·제외분). 조회전용."""
     from routers.auth import require_user, scope_cust
-    cc = scope_cust(require_user(request), cust)
+    u = require_user(request)
+    cc = scope_cust(u, cust)
+    if cc == "__NONE__":
+        raise HTTPException(403, "협력사 계정에 거래처코드가 없습니다.")
     if not cc:
-        raise HTTPException(400, "매입처 필요(협력사 로그인 또는 cust 지정).")
+        # ★내부직원(협력사 아님)이 cust 미지정 = 검색 유도(에러 아님). 협력사는 위에서 자기코드 강제됨.
+        return {"cc": "", "need_search": True, "rows": []}
     r = manorder_items(cc=cc, ym="")
     out = [{"ic": x["ic"], "nm": x["nm"], "unit": x.get("unit", "EA"),
             "stock_qty": x["stock_qty"], "po_qty": x["po_qty"],           # 기발주=PNC 발주(PU+manual_order)
