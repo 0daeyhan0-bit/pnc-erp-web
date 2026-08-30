@@ -93,6 +93,12 @@ def token_for(uid):
         return None
     st, res = call("POST", "/api/auth/login", {"id": uid, "pw": pw})
     tok = res.get("token") if isinstance(res, dict) else None
+    if not tok and st >= 500:
+        # ★일시적 서버오류(공유 커넥션 커서 충돌 등)로 한 번 실패하면 그 뒤 40케이스가
+        #   통째로 SKIP 된다(2026-08-30 실측). 한 번은 다시 시도한다.
+        import time as _t; _t.sleep(1.0)
+        st, res = call("POST", "/api/auth/login", {"id": uid, "pw": pw})
+        tok = res.get("token") if isinstance(res, dict) else None
     if not tok:
         print(f"   ⚠ 하네스 로그인 실패({uid}) — {st} {str(res)[:90]}")
     _TOKENS[uid] = tok
@@ -260,7 +266,8 @@ def main():
         print(f"\n   총 {len(cases)}건 (전체 {len(FC.CASES)})")
         return 0
 
-    if call("GET", "/api/_flow/probe")[0] != 200:
+    # ★준비 확인은 ping 으로 — probe(관측 쿼리 10여개)로 두들기면 기동 중 공유 커넥션이 꼬인다
+    if call("GET", "/api/_flow/ping")[0] != 200:
         print(f"★flow_server 가 :{ARG.port} 에 없습니다 — 먼저 기동하세요.\n"
               f"   python _migration/flow_server.py --port {ARG.port}")
         return 1
