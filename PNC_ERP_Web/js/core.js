@@ -212,6 +212,13 @@ const MODULES=[
    {id:'matprice',ic:'💲',nm:'원소재/용접봉 시세',hide:true},
    {id:'sourceprofile',ic:'🧭',nm:'조달 프로파일'},
    {sep:true},
+   // ★자재세트 4종(레거시 자재관리 메뉴 순서) — 2026-08-29 신설
+   {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
+   {id:'setinstat',ic:'📋',nm:'자재세트입고현황'},
+   // 자재세트재고현황은 입출고현황과 내용이 같아 제외(2026-08-29 사용자 확정)
+   {id:'setstockio',ic:'🔁',nm:'자재세트재고입출고현황'},
+   {id:'setstockadj',ic:'🛠️',nm:'자재세트재고조정'},
+   {sep:true},
    {id:'salemagam',ic:'🧾',nm:'자재매출마감'},
    {id:'purmagam',ic:'📥',nm:'자재매입마감'},
    {id:'coopquote2',ic:'💱',nm:'협력사견적관리'},
@@ -221,7 +228,7 @@ const MODULES=[
    {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
    {id:'delivedit',ic:'📝',nm:'거래명세표 수정'},
    // {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},   // ★2026-08-28 메뉴 숨김(요청). SCREEN.setinreq 는 유지 — 되살릴 땐 이 줄만 해제
-   {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
+   // 자재세트입고관리는 구매/자재 메뉴로 이동(레거시 배치와 동일) — 2026-08-29
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
    {id:'sagubledger',ic:'📊',nm:'사급 수불장'},
  ]},
@@ -238,7 +245,10 @@ const MODULES=[
    {id:'prodsheet',ic:'🖨️',nm:'생산전표출력관리'},
    {id:'partplan',ic:'🧩',nm:'파트별 생산계획'},
    {id:'kitting',ic:'🧰',nm:'준비실적처리(키팅)'},
-   {id:'procresult',ic:'✅',nm:'공정별 생산실적등록'},
+   // ★2026-08-30 메뉴에서만 숨김(사용자 요청) — 파트별 생산계획의 드래그 실적처리로
+   //   같은 일을 하게 되어 당분간 감춘다. 화면(SCREEN.procresult)·API 는 그대로 두므로
+   //   되살리려면 이 줄의 주석만 풀면 됨.
+   // {id:'procresult',ic:'✅',nm:'공정별 생산실적등록'},
    {id:'procbarcode',ic:'🔫',nm:'공정별 바코드생산실적'},
    {id:'partresult',ic:'📈',nm:'파트별 생산실적현황'},
    // ★2026-08-26 메뉴에서만 숨김(사용자 요청) — 나중에 쓸 수 있어 화면(SCREEN.prodresult,

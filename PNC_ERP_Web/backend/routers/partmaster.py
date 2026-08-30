@@ -22,7 +22,12 @@ def partmaster_list(q: str = Query(""), grp: str = Query("")):
         cur.execute(f"""SELECT g.GAGONG_PROC_CODE code, g.GAGONG_PROC_DESC nm, ISNULL(g.GC_GUBUN,'') gubun,
               ISNULL(g.WORK_CODE,'') wc, ISNULL(w.WORK_DESC,'') wcnm, ISNULL(g.IN_CUST_CODE,'') wh, ISNULL(c.CUST_DESC,'') whnm,
               ISNULL(g.SORT_KEY,0) sortkey, ISNULL(g.PROD_RATE,0) rate, ISNULL(g.PART_GROUP_CODE,'') grp,
-              ISNULL(g.WH_IP_ADDRESS,'') ip, ISNULL(g.RACK_NUMBER,0) rack, ISNULL(g.UPDATE_USER_ID,'') uid, g.UPDATE_DATETIME udt
+              ISNULL(g.WH_IP_ADDRESS,'') ip, ISNULL(g.RACK_NUMBER,0) rack,
+              -- ★실적처리방법 (2026-08-30 신설)
+              --   bc = 바코드실적 허용('1')  · 독립. 미설정도 허용(기존 동작 유지)
+              --   pt = 생산실적 방식  ''없음 / 'R'준비재고 / 'W'자재창고출고  · 한 컬럼이라 택1 강제
+              ISNULL(g.BARCODE_FLAG,'1') bc, ISNULL(g.PROD_RESULT_TYPE,'') pt,
+              ISNULL(g.UPDATE_USER_ID,'') uid, g.UPDATE_DATETIME udt
             FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w ON w.WORK_CODE=g.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=g.IN_CUST_CODE
@@ -45,18 +50,25 @@ def partmaster_save(payload: dict = Body(...)):
     try:
         cur.execute("SELECT COUNT(*) FROM nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
         exists = cur.fetchone()[0] > 0
+        # ★실적처리방법 — bc(바코드) 는 독립, pt(생산실적)는 R/W 택1
+        _bc = '1' if str(r.get('bc', '1')) in ('1', 'true', 'True', 'Y') else '0'
+        _pt = str(r.get('pt', '') or '').strip().upper()
+        if _pt not in ('R', 'W'):
+            _pt = ''
         args = (r.get('nm', '') or '', (r.get('gubun', '') or '')[:1], (r.get('grp', '') or '')[:2], (r.get('wc', '') or '')[:4],
                 (r.get('wh', '') or '')[:10], int(r.get('sortkey') or 0), float(r.get('rate') or 0),
-                (r.get('ip', '') or '')[:30], int(r.get('rack') or 0), user)
+                (r.get('ip', '') or '')[:30], int(r.get('rack') or 0), _bc, _pt, user)
         if exists:
             cur.execute("""UPDATE nx.PR_M_PROC_GAGONG SET GAGONG_PROC_DESC=?, GC_GUBUN=?, PART_GROUP_CODE=?, WORK_CODE=?,
                   IN_CUST_CODE=?, SORT_KEY=?, PROD_RATE=?, WH_IP_ADDRESS=?, RACK_NUMBER=?,
+                  BARCODE_FLAG=?, PROD_RESULT_TYPE=?,
                   UPDATE_USER_ID=?, UPDATE_DATETIME=getdate(), UPDATE_WINDOW='web_partmaster'
                 WHERE GAGONG_PROC_CODE=?""", *args, code)
         else:
             cur.execute("""INSERT INTO nx.PR_M_PROC_GAGONG(GAGONG_PROC_CODE, GAGONG_PROC_DESC, GC_GUBUN, PART_GROUP_CODE, WORK_CODE,
-                  IN_CUST_CODE, SORT_KEY, PROD_RATE, WH_IP_ADDRESS, RACK_NUMBER, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,getdate(),'web_partmaster')""", code, *args)
+                  IN_CUST_CODE, SORT_KEY, PROD_RATE, WH_IP_ADDRESS, RACK_NUMBER,
+                  BARCODE_FLAG, PROD_RESULT_TYPE, UPDATE_USER_ID, UPDATE_DATETIME, UPDATE_WINDOW)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,getdate(),'web_partmaster')""", code, *args)
         cn.commit()
         return {"ok": True, "mode": "update" if exists else "insert"}
     except Exception as e:
