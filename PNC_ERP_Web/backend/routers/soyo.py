@@ -430,11 +430,13 @@ def sales_forecast_sagub_rebuild():
         sag = set(x[0] for x in cur.fetchall())   # ★대문자(엔진 stop_set·반환 대문자 정합)
         cur.execute("SELECT it,price FROM (SELECT UPPER(LTRIM(RTRIM(item_code))) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
-        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'),
-            prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
-            expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
-             UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
-            SELECT DISTINCT e.prod FROM expl e JOIN sag s ON s.it=e.part OPTION(MAXRECURSION 30)""")
+        # ★후보 = 계획 완제품 전체(260101+). 구 ad-hoc bom_line 재귀CTE 후보필터는 소요엔진(v_pr_bom)과
+        #   불일치로 일부 완제품 누락(실측 ADM72950707 사급 532,650 누락) → 폐기. 사급부품 도달 여부는
+        #   엔진 sagub_parts_soyo가 정확 판정(비도달=빈dict=0). §1-10 완전 준수(후보찾기도 엔진 소스).
+        cur.execute("""SELECT DISTINCT item FROM (
+            SELECT UPPER(LTRIM(RTRIM(C_ITEM_CODE))) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
+            UNION SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u
+            WHERE item IS NOT NULL AND item<>''""")
         cand = [str(r[0]).strip().upper() for r in cur.fetchall()]
         # ★소요엔진 이관(CLAUDE §1-10, 2026-08-29): 사급부품 소요 = nx_soyo_engine.sagub_parts_soyo
         #   (v_pr_bom·except≠1·310 사급부품 도달 시 '통째' 계상·정지). 구 ad-hoc CS_M_ITEM_BOM 재귀CTE는
@@ -443,8 +445,10 @@ def sales_forecast_sagub_rebuild():
         eng = _get_cost_engine(); _soyo.warm_vpr(eng); _memo = {}
         done = 0; nz = 0; tot = 0.0
         for it in cand:
-            pm = _soyo.sagub_parts_soyo(eng, it, sag, _memo)   # {310부품(대문자): 소요개수}
+            pm = _soyo.sagub_parts_soyo(eng, it, sag, _memo)   # {310부품(대문자): 소요개수} — 하위 사급부품만
             unit = sum(per * cosp[p] for p, per in pm.items() if p in cosp)
+            if it in sag:                          # ★완제품 자체가 310 사급부품(직접 계획분·스페어 등)이면 자신 COSP '통째' 포함
+                unit += cosp.get(it, 0.0)          #   (sagub_parts_soyo는 하위만 계상→자기자신 누락=under-count 보정, 실측 91/93 옛값=자기COSP 일치)
             cur.execute("""MERGE nx.item_sagub_cost t USING (SELECT ? item_code) s ON t.item_code=s.item_code
                 WHEN MATCHED THEN UPDATE SET sa_cost=?, asof_ymd=?, upd_dt=getdate()
                 WHEN NOT MATCHED THEN INSERT(item_code,sa_cost,asof_ymd,upd_dt) VALUES(?,?,?,getdate());""",
