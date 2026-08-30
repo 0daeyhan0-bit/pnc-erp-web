@@ -1519,7 +1519,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                                      CASE WHEN n.ITEM_CODE IS NULL THEN l.STOCK_QTY
                                           ELSE n.STOCK_QTY END STOCK_QTY
                                 FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) n
-                                FULL JOIN (SELECT * FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) l
+                                FULL JOIN (SELECT * FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) l
                                   ON l.ITEM_CODE=n.ITEM_CODE) u
                             GROUP BY ITEM_CODE""", *(list(ck) + list(ck)))
             for a, v in cur.fetchall(): astk[str(a).strip()] = float(v or 0)

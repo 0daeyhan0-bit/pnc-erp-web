@@ -224,20 +224,20 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
             try:
                 if axis == "sale":
                     lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float))
-                        FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE SALE_YMD BETWEEN ? AND ?
+                        FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE SALE_YMD BETWEEN ? AND ?
                         GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", act_rng[0], act_rng[1])
                     for it, q in lc.fetchall():
                         driver[it] = driver.get(it, 0.0) + float(q or 0)
                 else:  # 생산축
                     lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(MAINT_QTY AS float))
-                        FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT WHERE MAINT_TAG='P' AND MAINT_YMD BETWEEN ? AND ?
+                        FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT WHERE MAINT_TAG='P' AND MAINT_YMD BETWEEN ? AND ?
                         GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", act_rng[0], act_rng[1])
                     pset = set()
                     for it, q in lc.fetchall():
                         driver[it] = driver.get(it, 0.0) + float(q or 0); pset.add(it)
                     # 설치·이지링크 = 출하 중 제품입고(P)에 없는 완제품
                     lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float))
-                        FROM PARTNER_ERP.dbo.SA_T_SALE_DTL WHERE SALE_YMD BETWEEN ? AND ?
+                        FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL WHERE SALE_YMD BETWEEN ? AND ?
                         GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))""", act_rng[0], act_rng[1])
                     for it, q in lc.fetchall():
                         if it not in pset:
@@ -287,12 +287,12 @@ def matexpect(axis: str = Query("prod"), frm: str = Query(""), to: str = Query("
             try:
                 for tag in ("9", "S"):
                     lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
-                                "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
+                                "FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
                                 "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", tag, fr6, buy_to)
                     for mc, cc, q in lc2.fetchall():
                         _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
                 lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
-                            "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
+                            "FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
                             "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", fr6, buy_to)
                 for mc, cc, q in lc2.fetchall():
                     _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
@@ -511,7 +511,7 @@ def _matbuy_exp(fr6, to6, frm, to):
         try:
             lc.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), ISNULL(CUST_CODE,''),
                           SUM(CAST(PUR_QTY AS float)-CAST(ISNULL(IN_QTY,0) AS float)-CAST(ISNULL(CANCEL_QTY,0) AS float))
-                       FROM PARTNER_ERP.dbo.PU_T_PURCHASE_DTL WHERE ISNULL(IN_FINISH_FLAG,'N')<>'Y'
+                       FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL WHERE ISNULL(IN_FINISH_FLAG,'N')<>'Y'
                        GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE))), CUST_CODE""")
             for mat, cc, remain in lc.fetchall():
                 rem = float(remain or 0)
@@ -614,7 +614,7 @@ def _matbuy_act(fr6, to6, frm, to):
                 driver[it] = driver.get(it, 0.0) + float(q or 0)
         lv = _conn(); lc = lv.cursor()
         try:
-            lc.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float)) FROM PARTNER_ERP.dbo.SA_T_SALE_DTL "
+            lc.execute("SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(CAST(SALE_QTY AS float)) FROM PARTNER_ERP_TEST3.nx.SA_T_SALE_DTL "
                        "WHERE SALE_YMD BETWEEN ? AND ? GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE)))", fr6, to6)
             for it, q in lc.fetchall():
                 if cutg.get(it, "") in ("설치", "이지링크"):
@@ -665,12 +665,12 @@ def _matbuy_act(fr6, to6, frm, to):
         try:
             for tag in ("9", "S"):
                 lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
-                            "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
+                            "FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT WHERE MAINT_TAG=? AND MAINT_YMD BETWEEN ? AND ? "
                             "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", tag, fr6, to6)
                 for mc, cc, q in lc2.fetchall():
                     _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
             lc2.execute("SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(CUST_CODE,''), SUM(CAST(MAINT_QTY AS float)) "
-                        "FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
+                        "FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C WHERE DIVISION='P' AND MAINT_YMD BETWEEN ? AND ? "
                         "GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE))), CUST_CODE", fr6, to6)
             for mc, cc, q in lc2.fetchall():
                 _row(mc, str(cc or "").strip())["buy"] += float(q or 0)
