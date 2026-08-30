@@ -1484,7 +1484,7 @@ SCREEN.manorder=(c)=>{
     const dh=dates.map(d=>`<th class="num" title="${esc(d)}">${esc((''+d).slice(2,4))}/${esc((''+d).slice(4,6))}</th>`).join('');
     let prevPar='';
     const body=items.map((it,i)=>{const p=parNo(it.ic);const first=(p!==prevPar);prevPar=p;
-      return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:normal;word-break:break-word;line-height:1.25">${esc(it.nm||'')}</td><td class="num qty">${nf(it.plan_qty||0)}</td><td class="num" title="기발주(미입고 발주잔량)">${it.po_qty?nf(it.po_qty):''}</td>${dates.map(d=>{const q=(it.days&&it.days[d])||0;return `<td class="num">${q?nf(q):''}</td>`;}).join('')}</tr>`;}).join('');
+      return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${esc(it.nm||'')}</td><td class="num qty">${nf(it.plan_qty||0)}</td><td class="num" title="기발주(미입고 발주잔량)">${it.po_qty?nf(it.po_qty):''}</td>${dates.map(d=>{const q=(it.days&&it.days[d])||0;return `<td class="num">${q?nf(q):''}</td>`;}).join('')}</tr>`;}).join('');
     return `<table class="tbl" id="mo-rtbl" style="font-size:12px"><thead><tr><th class="center" style="width:34px">No</th><th>부모도번</th><th>도번</th><th>품명</th><th class="num">계</th><th class="num">기발주</th>${dh}</tr></thead>
       <tbody>${body}</tbody></table>`;
   };
@@ -1514,7 +1514,7 @@ SCREEN.manorder=(c)=>{
            <div style="font-weight:700;margin:2px 0 4px;color:#1c47a0;flex:0 0 auto">발주 계산</div>
            <div class="grid-wrap" id="mo-lwrap" style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
            <table class="tbl fit" id="mo-ltbl" style="font-size:12px;width:100%;table-layout:fixed"><thead><tr><th class="center" style="width:28px">No</th><th class="center" style="width:24px"><input type="checkbox" id="mo-all" checked title="전체선택"></th><th style="width:92px">품목</th><th>품명</th><th class="num" style="white-space:nowrap;width:56px">4주계획<br><span style="color:#c0392b;font-size:10px" title="발주 리드타임 — 이 일수 이내 계획분은 발주로 못 바꾸므로 차감"><input class="inp" id="mo-lead" type="number" min="0" max="365" value="${lead}" style="width:44px;min-width:44px;text-align:right;padding:1px 3px;border-color:#c0392b;color:#c0392b">일</span></th><th class="num" style="white-space:nowrap;background:#f3f6fa;width:54px" title="LG 물동 5~8주 예상소요 — 참고용(부정확). 4주는 생산계획, 5~8주는 LG물동. 발주계산 미반영·담당 판단.">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th><th class="num" style="width:46px">기발주</th><th class="num" style="width:46px">현재고</th><th class="num" style="white-space:nowrap;width:50px">여유분<br><input class="inp" id="mo-buf" type="number" min="0" max="999" value="${buf}" style="width:34px;min-width:34px;text-align:right;padding:2px 2px">%</th><th class="num" style="width:80px">추가발주</th></tr></thead>
-           <tbody>${loading?spinRow(10):(items.length?items.map((it,i)=>{const a=ord(it);return `<tr><td class="center mut">${i+1}</td><td class="center"><input type="checkbox" class="mo-ck" data-ic="${esc(it.ic)}" ${a>0?'checked':''}></td><td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.ic)}"><b>${esc(it.ic)}</b></td><td title="${esc(it.nm)}" style="white-space:normal;word-break:break-word;line-height:1.25">${esc(it.nm)}</td>
+           <tbody>${loading?spinRow(10):(items.length?items.map((it,i)=>{const a=ord(it);return `<tr><td class="center mut">${i+1}</td><td class="center"><input type="checkbox" class="mo-ck" data-ic="${esc(it.ic)}" ${a>0?'checked':''}></td><td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(it.ic)}"><b>${esc(it.ic)}</b></td><td title="${esc(it.nm)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${esc(it.nm)}</td>
              <td class="num" title="반영 ${lead}일치 계획 ${nf(adjPlan(it))} (월 전체계획 ${nf(it.plan_qty)})${it.alloc_note?' · '+it.alloc_note:''}">${nf(adjPlan(it))}${adjPlan(it)!==(+it.plan_qty||0)?`<br><span style="color:#8aa0bd;font-size:10px">/${nf(it.plan_qty)}</span>`:''}${it.alloc_note?`<br><span style="color:#7a4ca0;font-size:10px" title="조달 프로파일 배분/발주업체지정 적용 — 이 매입처 몫만 계상">${esc(it.alloc_note)}</span>`:''}</td><td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고소요 — 발주계산 미반영(담당 판단)">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td><td class="num">${nf(it.po_qty)}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="color:#8aa0bd">${nf(bufQty(it))}</td>
              <td class="num"><input class="mo-add" data-ic="${esc(it.ic)}" type="number" min="0" value="${a}" style="width:74px;text-align:right;font-weight:700;color:#1c7c3a"></td></tr>`;}).join(''):`<tr><td colspan="10" class="empty">품목 없음</td></tr>`)}</tbody></table></div>
          </div>
@@ -1564,14 +1564,14 @@ SCREEN.manorder=(c)=>{
 SCREEN.coopporder=(c)=>{
   const API=API_BASE;
   const nf=n=>(n==null||n==='')?'':Math.round(+n||0).toLocaleString();
-  let cust='', info=null, rows=[], loading=false, msg='', vq='', vlist=[], vsearching=false;
+  let cust='', info=null, rows=[], loading=false, msg='', vq='', vlist=[], vsearching=false, expand=false, dates=[];
   const parNo=ic=>{const s=String(ic||'');const i=s.indexOf('-');return i>0?s.slice(0,i):s;};
   const load=async()=>{loading=true;msg='';draw();
     try{const r=await fetch(`${API}/api/coopporder/items?cust=${encodeURIComponent(cust||'')}`);
       const j=await r.json().catch(()=>({}));
       if(!r.ok){msg=j.detail||'조회 실패';info=null;rows=[];loading=false;draw();return;}
       if(j.need_search){info=null;rows=[];loading=false;draw();return;}   // 내부직원=검색 유도(에러 아님)
-      info=j;rows=(j.rows||[]);cust=j.cc||cust;}
+      info=j;rows=(j.rows||[]);dates=j.dates||[];cust=j.cc||cust;}
     catch(e){msg='조회 실패';rows=[];}
     loading=false;draw();};
   const searchV=async()=>{if(!vq.trim()){vlist=[];draw();return;}vsearching=true;draw();
@@ -1584,6 +1584,7 @@ SCREEN.coopporder=(c)=>{
      <div class="toolbar" style="flex:0 0 auto">
        ${info?`<span style="font-weight:700;color:#1c47a0">✔ ${esc(info.cust_name||cust)} (${esc(cust)})</span>`:
          `<label class="tl">매입처</label><input class="inp" id="cp-vq" value="${esc(vq)}" placeholder="업체명/코드" style="width:180px"><button class="btn" id="cp-vs">검색</button>`}
+       ${info?`<button class="btn ghost" id="cp-exp" style="margin-left:8px">${expand?'▸ 주별 접기':'▾ 일별 펼치기'}</button>`:''}
        <div class="spacer"></div>
        ${info?`<span class="rowcount">계획월 ${esc(info.ym||'-')} · 재고 ${esc(info.stock_ym||'-')} · ${nf(rows.length)}품목</span>`:''}
      </div>
@@ -1598,16 +1599,17 @@ SCREEN.coopporder=(c)=>{
         <table class="tbl" style="font-size:12px;width:100%"><thead><tr>
           <th class="center" style="width:32px">No</th><th>부모도번</th><th>품목</th><th>품명</th>
           <th class="num">현재재고</th><th class="num">기발주</th>
-          <th class="num">1주</th><th class="num">2주</th><th class="num">3주</th><th class="num">4주</th>
+          ${expand?dates.map(d=>`<th class="num" style="white-space:nowrap;font-size:11px">${esc((''+d).slice(2,4))}/${esc((''+d).slice(4,6))}</th>`).join(''):`<th class="num">1주</th><th class="num">2주</th><th class="num">3주</th><th class="num">4주</th>`}
           <th class="num" style="background:#f3f6fa">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th>
           <th class="num" style="background:#fff6ec" title="4주 순소요 = 4주계획 − 현재재고 − 기발주">4주순소요<br><span style="color:#8a94a6;font-size:10px">계획-재고-발주</span></th>
           <th class="num" style="background:#fdeef0" title="8주 순소요 = (4주계획+LG물동5~8주) − 현재재고 − 기발주">8주순소요<br><span style="color:#8a94a6;font-size:10px">+물동</span></th></tr></thead>
-        <tbody>${loading?`<tr><td colspan=13 class="empty">불러오는 중…</td></tr>`:(rows.length?(()=>{let pp='';return rows.map((it,i)=>{const p=parNo(it.ic);const first=(p!==pp);pp=p;
+        <tbody>${loading?`<tr><td colspan="${9+(expand?dates.length:4)}" class="empty">불러오는 중…</td></tr>`:(rows.length?(()=>{let pp='';return rows.map((it,i)=>{const p=parNo(it.ic);const first=(p!==pp);pp=p;
           const w=it.week_qty||[0,0,0,0];const net4=Math.round((it.plan_qty||0)-(it.stock_qty||0)-(it.po_qty||0));const net8=Math.round((it.plan_qty||0)+(it.muldong_soyo||0)-(it.stock_qty||0)-(it.po_qty||0));
           const nc=v=>v>0?'color:#c0392b;font-weight:700':'color:#9fb0c4';
-          return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:normal;word-break:break-word;line-height:1.25">${esc(it.nm||'')}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="font-weight:700;color:#1c7c3a">${it.po_qty?nf(it.po_qty):''}</td><td class="num">${w[0]?nf(w[0]):''}</td><td class="num">${w[1]?nf(w[1]):''}</td><td class="num">${w[2]?nf(w[2]):''}</td><td class="num">${w[3]?nf(w[3]):''}</td><td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td><td class="num" style="${nc(net4)};background:#fff6ec">${nf(net4)}</td><td class="num" style="${nc(net8)};background:#fdeef0">${nf(net8)}</td></tr>`;}).join('');})():`<tr><td colspan=13 class="empty">품목 없음</td></tr>`)}</tbody></table>
+          return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px">${esc(it.nm||'')}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="font-weight:700;color:#1c7c3a">${it.po_qty?nf(it.po_qty):''}</td>${expand?dates.map(d=>`<td class="num">${(it.days&&it.days[d])?nf(it.days[d]):''}</td>`).join(''):`<td class="num">${w[0]?nf(w[0]):''}</td><td class="num">${w[1]?nf(w[1]):''}</td><td class="num">${w[2]?nf(w[2]):''}</td><td class="num">${w[3]?nf(w[3]):''}</td>`}<td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td><td class="num" style="${nc(net4)};background:#fff6ec">${nf(net4)}</td><td class="num" style="${nc(net8)};background:#fdeef0">${nf(net8)}</td></tr>`;}).join('');})():`<tr><td colspan="${9+(expand?dates.length:4)}" class="empty">품목 없음</td></tr>`)}</tbody></table>
        </div>`:''}
      </div>`;
+    const ex=c.querySelector('#cp-exp');if(ex)ex.onclick=()=>{expand=!expand;draw();};
     const vs=c.querySelector('#cp-vs');if(vs)vs.onclick=()=>{vq=c.querySelector('#cp-vq').value;searchV();};
     const vqi=c.querySelector('#cp-vq');if(vqi)vqi.onkeyup=e=>{if(e.key==='Enter'){vq=e.target.value;searchV();}};
     c.querySelectorAll('.cp-vrow').forEach(tr=>tr.onclick=()=>{cust=tr.dataset.cc;vlist=[];load();});

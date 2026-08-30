@@ -239,8 +239,9 @@ def coopporder_items(request: Request, cust: str = Query("")):
     out = [{"ic": x["ic"], "nm": x["nm"], "unit": x.get("unit", "EA"),
             "stock_qty": x["stock_qty"], "po_qty": x["po_qty"],           # 기발주=PNC 발주(PU+manual_order)
             "plan_qty": x["plan_qty"], "week_qty": x.get("week_qty", [0, 0, 0, 0]),  # 계획 4주 총·주별
+            "days": x.get("days", {}),                                    # 일별(펼치기용)
             "muldong_soyo": x["muldong_soyo"]}                            # 물동=5~8주(제외분)
            for x in r["rows"]]
     out.sort(key=lambda z: (str(z["ic"]).split('-')[0], str(z["ic"])))
     return {"cc": cc, "cust_name": r["cust_name"], "ym": r["ym"], "stock_ym": r["stock_ym"],
-            "muldong_ym": r["muldong_ym"], "rows": out}
+            "muldong_ym": r["muldong_ym"], "dates": r.get("dates", []), "rows": out}
