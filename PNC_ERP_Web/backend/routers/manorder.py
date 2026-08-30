@@ -9,18 +9,43 @@ from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _IT
 router = APIRouter()
 
 # ================= 수동발주 (구매/자재, w_pr_input_410 시나리오) =================
-@router.get("/api/manorder/vendors")
-def manorder_vendors(q: str = Query("")):
-    """매입처 검색(그 업체가 납품하는 품목 보유=IN_CUST_CODE). 단일선택 코드 구분."""
+@router.get("/api/manorder/charges")
+def manorder_charges():
+    """구매담당자(CM_M_CUST.CHARGE_USER_ID = 사내 담당사원명) 목록 + 담당 매입처 수.
+    담당자 선택 → 하위 매입처 목록으로 진입(수동발주 담당자 뷰)."""
     cn = _conn(); cur = cn.cursor()
     try:
-        like = f"%{q.strip()}%"
-        cur.execute("""SELECT TOP 30 C.CUST_CODE, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct, COUNT(M.item_code) items
+        cur.execute("""SELECT LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,''))) uid, COUNT(DISTINCT C.CUST_CODE) ncust
+          FROM PARTNER_ERP_TEST3.nx.CM_M_CUST C
+          JOIN PARTNER_ERP_TEST3.nx.item M ON M.in_cust=C.CUST_CODE AND ISNULL(M.item_status,'1') IN ('1','2')
+          WHERE LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,'')))<>''
+          GROUP BY LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,''))) ORDER BY COUNT(DISTINCT C.CUST_CODE) DESC""")
+        return {"rows": [{"charge": r[0], "ncust": r[1]} for r in cur.fetchall()]}
+    finally:
+        cn.close()
+
+@router.get("/api/manorder/vendors")
+def manorder_vendors(q: str = Query(""), charge: str = Query("")):
+    """매입처 검색(그 업체가 납품하는 품목 보유=IN_CUST_CODE). 단일선택 코드 구분.
+    charge(담당자) 지정 시 그 담당자 매입처만(q 없이도 목록 반환)."""
+    cn = _conn(); cur = cn.cursor()
+    try:
+        like = f"%{q.strip()}%"; ch = charge.strip()
+        where = ["1=1"]; params = []
+        if ch:
+            where.append("LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,'')))=?"); params.append(ch)
+        if q.strip():
+            where.append("(C.CUST_CODE LIKE ? OR C.CUST_DESC LIKE ?)"); params += [like, like]
+        elif not ch:
+            return {"rows": []}                       # 담당자·검색어 둘 다 없으면 빈 목록
+        order = "MAX(C.CUST_DESC)" if ch and not q.strip() else "COUNT(M.item_code) DESC"
+        cur.execute(f"""SELECT TOP 100 C.CUST_CODE, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
+             COUNT(M.item_code) items, MAX(LTRIM(RTRIM(ISNULL(C.CHARGE_USER_ID,'')))) charge
           FROM PARTNER_ERP_TEST3.nx.CM_M_CUST C JOIN PARTNER_ERP_TEST3.nx.item M ON M.in_cust=C.CUST_CODE AND ISNULL(M.item_status,'1') IN ('1','2')
-          WHERE (C.CUST_CODE LIKE ? OR C.CUST_DESC LIKE ?)
+          WHERE {' AND '.join(where)}
           GROUP BY C.CUST_CODE HAVING COUNT(M.item_code)>0
-          ORDER BY COUNT(M.item_code) DESC""", like, like)
-        return {"rows": [{"cc": r[0], "nm": r[1], "ct": r[2], "items": r[3]} for r in cur.fetchall()]}
+          ORDER BY {order}""", *params)
+        return {"rows": [{"cc": r[0], "nm": r[1], "ct": r[2], "items": r[3], "charge": r[4]} for r in cur.fetchall()]}
     finally:
         cn.close()
 

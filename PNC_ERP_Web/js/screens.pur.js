@@ -1419,6 +1419,7 @@ SCREEN.manorder=(c)=>{
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   let vendor=null, items=[], loading=false, msg='', vq='', vlist=[], vsearching=false, buf=20, ordered=false, lead=14, expand=false;   // lead=발주리드타임(일)·expand=일별펼치기
   let editQty={}, planDates=[];   // editQty: 추가발주 사용자조정값, planDates: 우측 일자별 계획 컬럼(좌측과 동일 items 사용)
+  let charge='', charges=[];      // charge=선택 담당자(CHARGE_USER_ID), charges=담당자 목록(담당자→하위 매입처 진입)
   const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
   const d6=d=>`${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
   const cutoffD6=()=>{const d=new Date();d.setDate(d.getDate()+(+lead||0));return d6(d);};                       // 오늘+반영일수 마감일
@@ -1428,10 +1429,12 @@ SCREEN.manorder=(c)=>{
   const bufQty=it=>Math.round(adjPlan(it)*(buf/100));                                                           // 여유분(계획 기준)
   const defAdd=it=>Math.max(0,Math.round(adjPlan(it)+bufQty(it)-(+it.stock_qty||0)-(+it.po_qty||0)));           // 기본 추가발주=계획×(1+여유%)−재고−기발주
   const ord=it=>{const e=editQty[it.ic];return (e!==undefined&&e!=='')?Math.max(0,+e||0):defAdd(it);};         // 사용자 조정 우선
+  const loadCharges=async()=>{try{const r=await fetch(`${API}/api/manorder/charges`);charges=(await r.json()).rows||[];}catch(e){charges=[];}};
   const searchV=async()=>{vsearching=true;msg='';draw();
-    try{const r=await fetch(`${API}/api/manorder/vendors?q=${encodeURIComponent(vq)}`);vlist=(await r.json()).rows||[];}
+    try{const r=await fetch(`${API}/api/manorder/vendors?q=${encodeURIComponent(vq)}&charge=${encodeURIComponent(charge)}`);vlist=(await r.json()).rows||[];}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';vlist=[];}
     vsearching=false;draw();};
+  const selCharge=async(ch)=>{charge=ch;vq='';vendor=null;items=[];if(!ch){vlist=[];draw();return;}await searchV();};   // 담당자 선택→그 담당자 매입처 목록
   const selV=async(v)=>{vendor=v;vlist=[];ordered=false;editQty={};planDates=[];await loadItems();};
   const loadItems=async()=>{loading=true;msg='';draw();
     // 좌/우 동일 소스: items(각 행에 days=부모 도번 일자별 계획) + dates. 우측 계 = 좌측 계획수량.
@@ -1496,16 +1499,18 @@ SCREEN.manorder=(c)=>{
      <div class="page-title" style="flex:0 0 auto">🛒 수동발주 <span style="font-size:12px;color:var(--muted);font-weight:400">매입처 선택 → 발주계산(추가발주 조정) + 협력사 일자별 계획 → 발주서</span></div>
      <div class="page-sub">좌: 생산계획(월) 대비 현재고·기발주 반영 추가발주(직접 조정 가능) · 우: 그 매입처 협력사 일자별 계획(한달). 조달 프로파일 배분(<code>nx.sourcing_profile</code>)·발주업체지정(<code>nx.order_vendor</code>)이 설정된 품목은 <b>이 매입처 몫</b>만 계상(미설정=현행 100%). 🟢 nx (계획 <code>PR_T_PLAN_ITEM_DTL</code>·재고 <code>PU_T_MONTH_STOCK_WH</code>)</div>
      <div class="toolbar">
-       <label class="tl">매입처</label><input class="inp" id="mo-vq" value="${esc(vq)}" placeholder="업체명/코드 입력" style="width:200px"><button class="btn" id="mo-vsearch">🔍 검색</button>
-       ${vendor?`<span style="margin-left:8px;font-weight:700;color:#1c47a0">✔ ${esc(vendor.nm)} (${esc(vendor.cc)})</span> <button class="btn ghost" id="mo-clear">✖ 변경</button>`:''}
+       <label class="tl">담당자</label><select class="inp" id="mo-charge" style="width:132px" title="구매담당자 선택 → 담당 매입처 목록"><option value="">- 담당자 선택 -</option>${charges.map(g=>`<option value="${esc(g.charge)}"${g.charge===charge?' selected':''}>${esc(g.charge)} (${g.ncust})</option>`).join('')}</select>
+       <label class="tl" style="margin-left:8px">매입처</label><input class="inp" id="mo-vq" value="${esc(vq)}" placeholder="업체명/코드" style="width:170px"><button class="btn" id="mo-vsearch">검색</button>
+       ${vendor?`<span style="margin-left:8px;font-weight:700;color:#1c47a0">${esc(vendor.nm)} (${esc(vendor.cc)})</span> <button class="btn ghost" id="mo-clear">변경</button>`:''}
        <div class="spacer"></div>
-       ${vendor?`<button class="btn" id="mo-order">📋 발주 진행 (선택품목 발주서)</button>`:''}
+       ${vendor?`<button class="btn" id="mo-order">발주 진행 (선택품목 발주서)</button>`:''}
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${!vendor?`
-       <div class="grid-wrap" style="max-width:640px;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin-top:8px">
-         <table class="tbl"><thead><tr><th>코드</th><th>매입처</th><th class="num">품목수</th></tr></thead>
-         <tbody>${vsearching?spinRow(3):(vlist.length?vlist.map(v=>`<tr class="mo-vrow" data-cc="${esc(v.cc)}" style="cursor:pointer"><td><b>${esc(v.cc)}</b></td><td>${esc(v.nm)}</td><td class="num">${v.items}</td></tr>`).join(''):`<tr><td colspan="3" class="empty">매입처를 검색하세요 (예: AUDY)</td></tr>`)}</tbody></table>
+       ${charge?`<div class="page-sub" style="margin-top:6px">담당자 <b>${esc(charge)}</b> · 매입처 <b>${vlist.length}</b>개 — 행을 클릭하면 발주 계산 화면으로 들어갑니다.</div>`:''}
+       <div class="grid-wrap" style="max-width:680px;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin-top:6px">
+         <table class="tbl"><thead><tr><th>코드</th><th>매입처</th><th>담당자</th><th class="num">품목수</th></tr></thead>
+         <tbody>${vsearching?spinRow(4):(vlist.length?vlist.map(v=>`<tr class="mo-vrow" data-cc="${esc(v.cc)}" style="cursor:pointer"><td><b>${esc(v.cc)}</b></td><td>${esc(v.nm)}</td><td style="color:#5a6b82">${esc(v.charge||'')}</td><td class="num">${v.items}</td></tr>`).join(''):`<tr><td colspan="4" class="empty">${charge?'이 담당자의 매입처가 없습니다.':'담당자를 선택하거나 매입처를 검색하세요 (예: AUDY)'}</td></tr>`)}</tbody></table>
        </div>`
      :`
        <div class="toolbar" style="margin-top:2px;flex:0 0 auto"><span class="rowcount" id="mo-sum"></span><label style="margin-left:12px;font-size:12px">여유분</label><input class="inp" id="mo-buf" type="number" min="0" max="999" value="${buf}" style="width:40px;text-align:right" title="추가발주 = 계획×(1+여유%) − 재고 − 기발주">%<span style="margin-left:10px;color:#8aa0bd;font-size:12px">☑ 발주할 품목 체크 · 추가발주 직접조정</span></div>
@@ -1527,6 +1532,7 @@ SCREEN.manorder=(c)=>{
      <style>.mo-vrow:hover{background:#eef4ff}#mo-buf::-webkit-outer-spin-button,#mo-buf::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}#mo-buf{-moz-appearance:textfield;appearance:textfield}
        #mo-ltbl tbody tr,#mo-rtbl tbody tr{height:30px}#mo-ltbl td,#mo-rtbl td{padding-top:2px;padding-bottom:2px}#mo-ltbl .mo-add{height:22px;box-sizing:border-box}#mo-ltbl .mo-ck{margin:0}
        #mo-ltbl thead th,#mo-rtbl thead th{height:46px;box-sizing:border-box;vertical-align:middle}</style>`;
+    const chg=c.querySelector('#mo-charge');if(chg)chg.onchange=e=>selCharge(e.target.value);
     const vs=c.querySelector('#mo-vsearch');if(vs)vs.onclick=()=>{vq=c.querySelector('#mo-vq').value;searchV();};
     const vqi=c.querySelector('#mo-vq');if(vqi)vqi.onkeyup=e=>{if(e.key==='Enter'){vq=e.target.value;searchV();}};
     c.querySelectorAll('.mo-vrow').forEach(r=>r.onclick=()=>{const v=vlist.find(x=>x.cc===r.dataset.cc);if(v)selV(v);});
@@ -1556,7 +1562,7 @@ SCREEN.manorder=(c)=>{
         link(L,R);link(R,L);}
     }
   };
-  draw();
+  draw(); loadCharges().then(draw);   // 마운트 후 담당자 목록 로드→드롭다운 갱신
 };
 
 /* ==== 협력사 발주현황 (협력사 포털·조회전용) — 협력사 로그인=자기업체만, 재고·기발주·계획4주·물동5~8주 ==== */
