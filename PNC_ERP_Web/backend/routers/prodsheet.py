@@ -886,6 +886,112 @@ def _set_item_stock(cur, win, item, qty, user):
                           UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
                         VALUES(?,?,?,GETDATE(),?)""", item, qty, user, win)
 
+def _set_gagong_stock(cur, win, item, cust, qty, user):
+    """가공세트재고 잔액 가감 — 레거시 SP_PR_SET_가공세트재고_251231 의 잔액부.
+       (SP 본문은 미확보. 라이브 원장 실측으로 동작 확정: tag='P'·Z99990·−실적수량)"""
+    cur.execute("""UPDATE nx.PU_T_SET_GAGONG_STOCK SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                      UPDATE_USER_ID=?, UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW=?
+                    WHERE ITEM_CODE=? AND IN_CUST_CODE=?""", qty, user, win, item, cust)
+    if cur.rowcount == 0:
+        cur.execute("""INSERT INTO nx.PU_T_SET_GAGONG_STOCK(ITEM_CODE,IN_CUST_CODE,STOCK_QTY,
+                          UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                        VALUES(?,?,?,?,GETDATE(),?)""", item, cust, qty, user, win)
+
+
+def _set_target_custs(cur, item):
+    """세트재고 차감 대상 거래처 — 레거시 dw_7(dw_pr_input_020_4) 대응.
+
+       dw_7 SQL 은 추출본에 없어 라이브 실측으로 역산했다(2026-08-30):
+         · 판별식 = '최근(90일) 세트입고 이력이 있는 거래처'
+           26/08 실차감 832조합 중 611(73%) 보유 / 차감안된 615조합 중 7(1%)만 보유
+         · 복수 거래처 동시차감이 정상이다(3개월 5,756건 중 43%가 2곳 이상, 최대 7곳).
+           AHQ73469301 = 2067·2096·2266 3곳 전량 차감(33행 전부).
+         · 거래가 끊긴 옛 업체는 재고가 남아 있어도 차감되지 않는다
+           (A업체가 대던 BOM 을 D업체가 대면 D 가 차감 — 대표 확인 규칙).
+       ⛔nx.set_vendor_map(현재매핑 1:1)은 복수업체를 못 담아 정합 42% → 미사용.
+    """
+    custs = []
+    try:
+        cur.execute("""SELECT IN_CUST_CODE FROM nx.PU_T_SET_INPUT_REQ WITH(NOLOCK)
+                        WHERE ITEM_CODE=? AND ISNULL(IN_CUST_CODE,'')<>''
+                          AND INPUT_YMD >= CONVERT(varchar(6), DATEADD(day,-90,GETDATE()), 12)
+                        GROUP BY IN_CUST_CODE""", item)
+        custs = [str(r[0]).strip() for r in cur.fetchall() if r[0]]
+    except Exception:
+        pass
+    try:    # 웹 신규 세트입고분도 대상(미러에 아직 없는 건)
+        cur.execute("""SELECT in_cust_code FROM nx.set_input_req WITH(NOLOCK)
+                        WHERE item_code=? AND ISNULL(in_cust_code,'')<>''
+                        GROUP BY in_cust_code""", item)
+        for r in cur.fetchall():
+            v = str(r[0]).strip()
+            if v and v not in custs:
+                custs.append(v)
+    except Exception:
+        pass
+    return custs
+
+
+def _apply_set_stock(cur, item, qty, box, user, win, ymd, hms):
+    """세트재고 2종 차감 — 레거시 w_pr_input_520 ue_save_after_sub 이식(2026-08-30).
+
+       ⑨ 자재세트 : dw_7 루프 → 거래처마다 nx.set_stock_maint(tag 3) + nx.set_output_dtl
+       ⑩ 가공세트 : SP_PR_SET_가공세트재고 → nx.PU_T_SET_STOCK_MAINT_GAGONG(tag P, Z99990)
+
+       ★차감량은 실적수량 그대로다(BOM use_qty 곱셈 없음 — 레거시 원문 확인).
+         하위자재는 ⑦ BOM 차감이 이미 별도로 처리한다(계정이 다르다).
+       ★취소(qty<0)면 부호가 반대로 흘러 자동 복원된다.
+       세트 계정 실패가 생산실적 자체를 막지 않도록 각 블록을 개별 보호한다.
+    """
+    moved = []
+    if not item or not qty:
+        return moved
+
+    # ── ⑨ 자재세트 (협력사별 N곳)
+    try:
+        custs = _set_target_custs(cur, item)
+        if custs:
+            cur.execute("SELECT ISNULL(MAX(maint_seq),0) FROM nx.set_stock_maint WHERE maint_ymd=?", ymd)
+            mseq = int(cur.fetchone()[0] or 0)
+            for cst in custs:
+                mseq += 1
+                cur.execute("""INSERT INTO nx.set_stock_maint
+                       (maint_ymd,maint_seq,maint_tag,in_tag,cust_code,item_code,maint_qty,
+                        item_gubun,status,derived_flag,remarks,insert_user_id,insert_datetime)
+                       VALUES(?,?,'3','2',?,?,?,'1','90','1',?,?,getdate())""",
+                            ymd, mseq, cst, item, -qty,
+                            ("생산실적 세트차감(barcode %s)" % box)[:100], user)
+                # ★set_qty 는 양수 저장 후 집계 시 *-1 (레거시 dw_pu_rawstock_070_t2 규칙).
+                #   output_tag='P' = 생산실적 차감(직납출하 'S' 와 구분).
+                cur.execute("""INSERT INTO nx.set_output_dtl
+                       (work_order,split_work_order,item_code,in_cust_code,output_ymd,output_hms,
+                        set_qty,line_no,work_code,output_tag,finish_flag,output_user_id,remarks)
+                       VALUES(?,'',?,?,?,?,?,'','','P','0',?,?)""",
+                            str(box), item, cst, ymd, hms, qty, user,
+                            ("생산실적(barcode %s)" % box)[:100])
+                moved.append({"kind": "자재세트", "cust": cst, "qty": round(-qty, 4)})
+    except Exception as e:
+        moved.append({"kind": "자재세트", "error": str(e)[:120]})
+
+    # ── ⑩ 가공세트 (Z99990 고정 · 도번 단위)
+    try:
+        cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.PU_T_SET_STOCK_MAINT_GAGONG WHERE MAINT_YMD=?", ymd)
+        gseq = int(cur.fetchone()[0] or 0) + 1
+        cur.execute("""INSERT INTO nx.PU_T_SET_STOCK_MAINT_GAGONG
+               (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,ITEM_CODE,MAINT_QTY,REMARKS,
+                INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+               VALUES(?,?,'P','Z99990',?,?,?,?,GETDATE(),?,?,GETDATE(),?)""",
+                    ymd, gseq, item, -qty, ("ASSY-CODE=" + item)[:250],
+                    user, win, user, win)
+        _set_gagong_stock(cur, win, item, 'Z99990', -qty, user)
+        moved.append({"kind": "가공세트", "cust": "Z99990", "qty": round(-qty, 4)})
+    except Exception as e:
+        moved.append({"kind": "가공세트", "error": str(e)[:120]})
+
+    return moved
+
+
 @router.get("/api/procbc/masters")
 def procbc_masters(part: str = Query("")):
     """상단 드롭다운 소스 — 파트 목록 / (파트 선택시) 공정코드·설비·작업자.
@@ -1248,17 +1354,47 @@ def procbc_save(payload: dict = Body(...)):
                               AND ISNULL(PROD_TAG,'')=?""",
                         int(qty), who, win, item, today6, hms, (swork_i or 0), work_code, proc, prod_tag)
 
-        # ─── 마지막 공정이 아니면 여기서 종료(레거시 동일) ───
-        cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
-                        WHERE ITEM_CODE=?""", item)
-        max_seq = int(cur.fetchone()[0] or 0)
+        # ─── 마지막 공정이 아니면 여기서 종료(레거시 il_max_proc_seq) ───
+        #  ★판정 기준 = **전표 발행 시점의 공정 구성**(PR_T_INDI_WELD_SHEET_DTL).
+        #    품목 공정마스터(PR_M_ITEM_PROC_GAGONG)는 나중에 바뀔 수 있어
+        #    소급 적용하면 이미 발행된 전표의 실적처리가 어긋난다.
+        #    실측(2026-08-30, 최근 전표 2,000건): 마스터 기준이면 8건이 어긋났다 —
+        #      AJR73965505/506 = 전표 1공정인데 마스터 2공정 → 마지막인데 '중간'으로 판정
+        #      AJR74482401     = 마스터 자체가 없어 max_seq=0 → 영원히 재고처리 안 됨
+        #    그 8건은 ASSY재고·세트차감·BOM차감·준비재고가 통째로 조용히 스킵됐다.
+        #  ※마스터 조회는 폴백이 아니라 전표가 없는 스캔경로(라벨 등) 전용이다.
+        max_seq = 0
+        seq_src = ""
+        if sheet_ref:
+            cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.PR_T_INDI_WELD_SHEET_DTL WITH(NOLOCK)
+                            WHERE SHEET_NO=?""", sheet_ref)
+            max_seq = int((cur.fetchone() or [0])[0] or 0)
+            if max_seq:
+                seq_src = "전표"
+        if not max_seq:      # 전표가 없는 스캔경로
+            cur.execute("""SELECT ISNULL(MAX(PROC_SEQ),0) FROM nx.PR_M_ITEM_PROC_GAGONG WITH(NOLOCK)
+                            WHERE ITEM_CODE=?""", item)
+            max_seq = int((cur.fetchone() or [0])[0] or 0)
+            if max_seq:
+                seq_src = "품목마스터"
+
         is_last = (proc_seq is not None and max_seq > 0 and proc_seq >= max_seq)
         if not is_last:
+            # ★판정불가(공정정보 없음/PROC_SEQ 미상)는 조용히 넘기지 않는다 —
+            #   재고처리가 통째로 빠진 채 ok 로 끝나면 원인을 못 찾는다.
+            _warn = ""
+            if proc_seq is None:
+                _warn = "공정순번(PROC_SEQ)을 알 수 없어 재고처리를 건너뛰었습니다. 전표/공정을 확인하세요."
+            elif max_seq == 0:
+                _warn = (f"'{item}' 의 공정정보가 없어(전표·품목마스터 모두) 재고처리를 "
+                         f"건너뛰었습니다. 공정등록을 확인하세요.")
             nx.commit()
             stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
             return {"ok": True, "action": ("취소" if qty < 0 else "등록"), "qty": qty,
                     "prod_ymd": today6, "prod_hms": hms, "progress": prog,
-                    "last_proc": False, "stock": None}
+                    "last_proc": False, "stock": None,
+                    "proc_seq": proc_seq, "max_proc_seq": max_seq, "seq_src": seq_src,
+                    "warn": _warn}
 
         # ⑤ 생산실적(도번·일자·분 누적)
         stock_gpc = str(p.get("stock_gpc") or "").strip()
@@ -1466,6 +1602,8 @@ def procbc_save(payload: dict = Body(...)):
         #   모델: 자재출고(matissue)로 작업자가 용접봉을 자재→생산창고(Q1000) 불출(+Q1000) → 여기서 −Q1000 차감.
         #   부호수량(qty>0 소비·qty<0 취소복원). 생산창고(Q1000) 재고부족이면 실적거부(음수차단, 실시간 원장sum).
         #   cro=nx(같은 커넥션 — 게이트가 자기 쓰는 stock_ledger 읽어 별도커넥션시 미커밋행 SUM 교착).
+        # ★세트차감(⑩⑪)보다 먼저 둔다 — 부족 시 rollback+return 으로 빠져나가므로
+        #   뒤에 두면 세트재고만 차감된 채 실적이 거부되어 원장이 어긋난다(2026-08-30 병합).
         _wr = _weld_consume(nx, nx, item, qty, (work_code or bc), who)
         if not _wr.get("ok"):
             nx.rollback()
@@ -1476,6 +1614,14 @@ def procbc_save(payload: dict = Body(...)):
             return {"ok": False, "shortage": _ws, "errors": [_wmsg]}
         if _wr.get("weld_consumed"):
             stock["weld"] = {"consumed": _wr["weld_consumed"], "kinds": _wr.get("weld_kinds", 0)}
+
+        # ⑩⑪ 세트재고 차감 — 레거시 w_pr_input_520 ue_save_after_sub 원문(2026-08-30 이식)
+        #     원문 순서: 생산/파트재고 → dw_7 루프(자재세트) → SP(가공세트) → BOM → 준비재고.
+        #     웹은 BOM·준비재고를 먼저 처리하므로 여기서 세트 2종을 이어 붙인다(순서 무관·독립계정).
+        #     ※취소(qty<0)는 부호가 반대로 흘러 자동 복원된다.
+        _setmv = _apply_set_stock(cur, item, qty, bc, who, win, today6, hms)
+        if _setmv:
+            stock["sets"] = _setmv
 
         nx.commit()
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)

@@ -244,11 +244,15 @@ def _apply(cur, c, box, good, bad, sign, user, ymd, win):
                                 ymd, _ms, _cust, c["assy"], -_sq,
                                 ("생산실적 세트차감(box %s)" % box)[:100], user)
                     # 세트사용실적(레거시 PU_T_SET_OUTPUT_DTL 대응) — work_order=바코드
+                    # ★set_qty 는 **양수** 저장 후 집계 시 *-1 (레거시 dw_pu_rawstock_070_t2
+                    #   원문 `a.set_qty * -1`, w_pr_input_520 도 f_set_addnumber(+qty)).
+                    #   2026-08-30 부호 교정 — 종전 음수 저장은 집계에서 2중 반전됐다.
+                    #   output_tag='P' = 생산실적(직납출하 'S' 와 구분).
                     cur.execute("""INSERT INTO nx.set_output_dtl
                            (work_order,split_work_order,item_code,in_cust_code,output_ymd,output_hms,
-                            set_qty,line_no,work_code,finish_flag,output_user_id,remarks)
-                           VALUES(?,'',?,?,?,?,?,?,?,'0',?,?)""",
-                                str(box), c["assy"], _cust, ymd, _hms, -_sq,
+                            set_qty,line_no,work_code,output_tag,finish_flag,output_user_id,remarks)
+                           VALUES(?,'',?,?,?,?,?,?,?,'P','0',?,?)""",
+                                str(box), c["assy"], _cust, ymd, _hms, _sq,
                                 c.get("line_no") or '', c.get("assy_work") or '',
                                 user, ("생산실적(box %s)" % box)[:100])
                     moved.append(("세트재고", "%s/%s" % (c["assy"], _cust), -_sq))
