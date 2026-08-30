@@ -840,8 +840,19 @@ def bom_addline(payload: dict = Body(...)):
         cur.execute("SELECT ISNULL(MAX(seq),0)+1 FROM nx.bom_line WHERE bom_id=?", bom_id)
         seq = cur.fetchone()[0]
         cur.execute("INSERT INTO nx.bom_line(bom_id,seq,child_item,qty,node_type) VALUES(?,?,?,?,N'부품')", bom_id, seq, child, qty)
+        # ★공용확인(2026-08-30): 추가한 자식이 등록 SUB면 공용성 재평가 = 2번째+ 제품에 넣으면 공용 변환.
+        shared_info = None
+        cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE UPPER(LTRIM(RTRIM(raw_item)))=?", child)
+        _sc = cur.fetchone()
+        if _sc and (_sc[0] or '').strip():
+            code = (_sc[0] or '').strip()
+            _refresh_shared(cur, code)
+            cur.execute("SELECT ISNULL(birth_label,''), ISNULL(is_shared,0), ISNULL(ref_count,0) FROM nx.sub_registry WHERE sub_code=?", code)
+            _rr = cur.fetchone()
+            if _rr:
+                shared_info = {"sub_code": code, "birth_label": (_rr[0] or '').strip(), "is_shared": bool(_rr[1]), "ref_count": int(_rr[2] or 0)}
         cn.commit(); _reset_cost_engine()
-        return {"ok": True, "parent": parent, "child": child, "seq": seq, "qty": qty, "dup": dup}
+        return {"ok": True, "parent": parent, "child": child, "seq": seq, "qty": qty, "dup": dup, "shared_info": shared_info}
     finally:
         cn.close()
 
