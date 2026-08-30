@@ -32,6 +32,8 @@ CATALOG = {
     'PR_M_ITEM_BOM':         [('item', ['ITEM_CODE']), ('mat', ['MAT_CODE'])],
     'PR_M_ITEM_ASSY_RT':     [('item', ['ITEM_CODE'])],
     'plan_part_mat':         [('woitem', ['WORK_ORDER','ITEM_CODE']), ('mat', ['MAT_CODE'])],
+    # ★plan_mat_source(업체배분): soyo 계획쿼리 3중 self-join 키. 힙이면 44s→1.3s(2026-08-31 실측). 재생성 후 재보장 필수.
+    'plan_mat_source':       [('womat', ['WORK_ORDER','MAT_CODE'])],
 }
 
 cn = pyodbc.connect(f'DRIVER={{SQL Server}};SERVER={db_client.DB_SERVER},{db_client.DB_PORT};DATABASE=PARTNER_ERP_TEST3;UID={db_client.DB_USER};PWD={db_client.DB_PASSWORD}', autocommit=True)
