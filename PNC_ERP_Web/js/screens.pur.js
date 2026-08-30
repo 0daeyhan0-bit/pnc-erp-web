@@ -1535,11 +1535,19 @@ SCREEN.manorder=(c)=>{
     const ld=c.querySelector('#mo-lead');if(ld)ld.onchange=e=>{lead=Math.max(0,+e.target.value||0);editQty={};draw();};   // 리드타임 변경→계획수량·추가발주 재계산
     const all=c.querySelector('#mo-all');if(all)all.onchange=e=>{c.querySelectorAll('.mo-ck').forEach(x=>x.checked=e.target.checked);};
     c.querySelectorAll('.mo-add').forEach(inp=>inp.oninput=()=>{editQty[inp.dataset.ic]=inp.value;const ck=c.querySelector(`.mo-ck[data-ic="${inp.dataset.ic.replace(/"/g,'\\"')}"]`);if(ck&&(+inp.value||0)>0)ck.checked=true;upSum();});
-    const od=c.querySelector('#mo-order');if(od)od.onclick=()=>{
+    const od=c.querySelector('#mo-order');if(od)od.onclick=async()=>{
       const ck=new Set([...c.querySelectorAll('.mo-ck:checked')].map(x=>x.dataset.ic));
       const list=items.filter(it=>ck.has(''+it.ic)&&ord(it)>0);
       if(!list.length){alert('발주할 품목을 하나 이상 선택하고, 추가발주 수량이 0보다 커야 합니다.');return;}
-      openPO(list);
+      if(!confirm(`${vendor.nm} — ${list.length}개 품목 발주를 저장합니다.\n저장 후 기발주에 반영되고 발주서가 열립니다.`))return;
+      try{
+        const body={cust_code:vendor.cc,lead_days:lead,items:list.map(it=>({item_code:it.ic,qty:ord(it)})),user:'web'};
+        const r=await fetch(`${API}/api/manorder/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const j=await r.json();
+        if(!j.ok){alert('발주 저장 실패: '+(j.detail||j.error||''));return;}
+        openPO(list);                    // 발주서(팝업)
+        editQty={};await loadItems();    // ★기발주 반영 재조회(추가발주 감소)
+      }catch(e){alert('발주 저장 오류: '+e.message);}
     };
     if(vendor&&!loading){upSum();attachResizers&&attachResizers(c);
       // 좌우 세로 스크롤 동기화(순번 1:1 정렬 유지)
