@@ -413,7 +413,7 @@ SCREEN.prodinout=(c)=>{
   // ★0재고 표시 토글 — 서버 필터라 재조회한다(2026-08-28)
   {const z=c.querySelector('#zero');if(z)z.onchange=e=>{incZero=e.target.checked;load();};}
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#part').onchange=renderLeft;
-  c.querySelector('#frm').onchange=_reload;c.querySelector('#to').onchange=_reload;
+  bindDate(c.querySelector('#frm'),_reload);bindDate(c.querySelector('#to'),_reload);
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#part').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.querySelector('#xls').onclick=()=>downloadCSV('생산재고입출고.csv',['파트','자도번','품명','규격','소분류','재고'],curL.map(r=>[pName(r[0]),r[1],r[2],r[3],r[4],r[5]]));
   load();

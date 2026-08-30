@@ -114,8 +114,8 @@ SCREEN.matinout=(c)=>{
   c.querySelector('#qbuy').onkeyup=()=>renderLeft();
   c.querySelector('#qsell').onkeyup=()=>renderLeft();
   c.querySelector('#gubun').onchange=renderLeft;
-  c.querySelector('#dfrom').onchange=()=>load();
-  c.querySelector('#dto').onchange=()=>load();
+  bindDate(c.querySelector('#dfrom'),()=>load());
+  bindDate(c.querySelector('#dto'),()=>load());
   c.querySelector('#whcust').onchange=()=>load();
   c.querySelector('#partwh').onchange=()=>load();
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#qbuy').value='';c.querySelector('#qsell').value='';c.querySelector('#gubun').value='all';c.querySelector('#partwh').value='IS0001';c.querySelector('#whcust').value='Z99990';c.querySelector('#dfrom').value=m1Iso();c.querySelector('#dto').value=todayIso();sel=null;load();};
@@ -827,7 +827,9 @@ SCREEN.matledger=(c)=>{
     c.querySelectorAll('[data-dom]').forEach(b=>b.onclick=()=>{if(dom!==b.dataset.dom){dom=b.dataset.dom;load();}});
     c.querySelector('#go').onclick=go;
     c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
-    c.querySelector('#dfrom').onchange=go;c.querySelector('#dto').onchange=go;
+    // ★날짜칸은 디바운스로 받는다 — 즉시 조회·재렌더하면 입력칸이 갈아치워져
+    //   28일을 치려고 '2' 를 누른 순간 2일로 굳는다(core.js bindDate).
+    bindDate(c.querySelector('#dfrom'),go);bindDate(c.querySelector('#dto'),go);
     c.querySelector('#sg').onchange=apply;c.querySelector('#cust').onchange=apply;c.querySelector('#gubun').onchange=apply;
     c.querySelector('#longstk').onchange=apply;
     c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#sg').value='';c.querySelector('#cust').value='';c.querySelector('#gubun').value='all';c.querySelector('#longstk').checked=false;apply();};
@@ -1579,7 +1581,7 @@ SCREEN.matprice=(c)=>{
          <td class="num"><input class="mp-in" data-cat="${cat}" data-f="real_price" type="number" step="any" value="${si}" placeholder="시세 입력" style="width:120px;text-align:right" ${ed?'':'disabled'}></td>
          <td class="num mp-diff" data-cat="${cat}" style="font-weight:700;color:${df==null?'#aaa':(df<0?'#c0392b':'#1c7c3a')}">${df==null?'-':nf(df)}</td></tr>`;}).join('')}</tbody></table></div>
      <div class="page-sub" style="margin-top:8px;color:#8aa0bd">※ 원소재 사급가는 관경별(CU 20,000/고강도 22,000)이나 정산은 대표값. 용접봉 사급가 기본 21,100. 시세 미입력 시 정산금액 0.</div>`;
-    c.querySelector('#mp-ym').onchange=e=>load(inYm(e.target.value));
+    bindDate(c.querySelector('#mp-ym'),e=>load(inYm(e.target.value)));
     if(ed){const sb=c.querySelector('#mp-save');if(sb)sb.onclick=save;
       c.querySelectorAll('.mp-in').forEach(el=>el.oninput=()=>{edit[el.dataset.cat+'|'+el.dataset.f]=el.value;upDiff(el.dataset.cat);});}
   };

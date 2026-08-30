@@ -77,6 +77,24 @@ const planBase = async () => {
 const planBaseIso = () => (_PLAN_BASE ? _PLAN_BASE.iso : nowCD());   // 동기 접근(미로드 시 당일 폴백)
 // ★날짜 input(type=date)은 브라우저 네이티브 키보드 편집에 맡김: 세그먼트(연/월/일) 클릭 후 숫자 입력·연속 타이핑·화살표·달력 모두 네이티브 지원.
 //   (과거 전역 커스텀 핸들러가 모든 숫자키 preventDefault→ 월/일 세그먼트만 고치기 불가·YYMMDD 오인 문제. 2026-08-14 제거. 커스텀 자동채움 재도입 시 세그먼트 편집을 막지 말 것.)
+// ★날짜칸 change 는 **디바운스해서** 받는다 — bindDate(el, fn)
+//   Chrome 은 값이 유효해지는 순간마다 change 를 쏜다. 일 세그먼트에 '2' 를 치면 그 순간
+//   260802 로 유효 → change → 조회·재렌더 → **입력칸이 다시 그려져 캐럿이 날아간다**.
+//   그래서 두 자리를 치면 첫 자리만 먹었다(2026-08-30 실측: d_to 가 260801→260805→260802→
+//   260808→260828 로 매 타건마다 무거운 조회. 브라우저가 계속 도는 것도 이 증상).
+//   ⟹ 마지막 입력 후 조용해지면 실행한다. 키를 막지 않으므로 네이티브 세그먼트 편집은 그대로다.
+//   날짜/월 입력이 조회·재렌더를 유발한다면 **예외 없이 이걸 쓴다**(직접 onchange 금지).
+//   ★fn 에는 change 이벤트와 같은 모양({target:el})을 넘긴다 — 기존 `e=>...e.target.value`
+//     핸들러를 그대로 옮겨 붙일 수 있게(호출부를 안 고쳐도 된다).
+const bindDate=(el,fn,ms=800)=>{ if(!el)return el; let t=null;
+  const run=()=>{t=null;fn({target:el});};
+  el.onchange=()=>{ clearTimeout(t); t=setTimeout(run,ms); };
+  // 포커스를 벗어나면 기다리지 않고 바로(달력 선택·탭 이동 뒤 지연 체감 제거)
+  el.onblur=()=>{ if(t){clearTimeout(t);run();} };
+  return el; };
+const bindDates=(els,fn,ms=800)=>{ (els||[]).forEach(e=>bindDate(e,fn,ms)); };
+
+  window.bindDate=bindDate; window.bindDates=bindDates;   // ★날짜칸 공용 바인더(§3)
 const TYPE_NM={RAW:'원자재',SUB:'부자재',CON:'소모품',S_ASSY:'반제품',PROD:'완제품'};
 // 용접봉 판정(품명 '용접봉' 포함). 신 원칙: 용접봉=재료비지만 BOM 아닌 용접공정 종속 → 화면에서 기본 숨김(데이터는 보존). [[newerp-weld-cost-split]]
 const isWeld=nm=>/용접봉/.test(nm||'');
