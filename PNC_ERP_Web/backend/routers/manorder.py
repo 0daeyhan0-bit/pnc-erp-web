@@ -36,112 +36,60 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
             from6, to6 = y + "01", y + "99"
         cur.execute("SELECT MAX(STOCK_YYMM) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH")
         smax = cur.fetchone()[0]
-        # ── 조달 프로파일 배분(후보내 업체 배분, nx.sourcing_profile) + 발주업체 지정(nx.order_vendor) 적용 ──
-        #   ★이 매입처(cc)의 발주 몫 = 소요 × 배분율. 배분 미설정/단일=100%(현행 그대로 → 회귀0).
-        #   배분 설정된 품목은 이 매입처 몫만 계상(다른 매입처 몫은 그 매입처 선택 시 계상).
-        #   ★route_alloc(경로 R01/R02 배분)은 조립품(assy)키 → 부품(ic)엔 직접 없으므로 plan_part_mat에서 '부품→assy R01 경로계수'
-        #     (부품이 속한 assy들의 R01% 수요가중)를 산출해 곱함. 이 매입처(R01 업체) 몫 = 소요 × 업체비율 × R01경로계수.
-        #     자동발주(plan_mat_source 경로대안행)·협력사계획현황과 R01 업체 수량 정합(규칙 §8·§9).
-        wdate = f"20{from6[0:2]}-{from6[2:4]}-{from6[4:6]}"     # 배분 유효일자 판정(계획 윈도우 시작일)
-        prof = {}   # item -> [(vendor, ratio)] 활성·비내부·업체지정·유효
-        ovr = {}    # item -> [(vendor, ratio)]  (order_vendor 발주업체 지정 ★다중업체 배분)
+        # ── ★소요엔진 기반 협력사 계획 (2026-08-30 사용자 확정, 정본 PROCUREMENT_ALLOCATION_RULES·matexpect 재사용) ──
+        #   crude PR_T_PLAN_ITEM_DTL(부모도번 prefix 매칭) 폐기 → nx.plan_part_mat(소요엔진 전개·날짜별) × nx.plan_mat_source(업체배분).
+        #   ★실발주비율(R01경로 × 업체배분)이 plan_mat_source에 **이미 반영** → 재스케일 안 함(이중계상 방지·§10).
+        #   계획수량 = 이 협력사(cc)에 배분된 4주 자재소요. 일자별 = plan_ymd 분포. 품목 = 소요 자재 ∪ 기발주 품목.
+        soyo_day = {}   # UPPER(mat) -> {ymd: qty}  (이 협력사 배분 소요)
         nxn = _nx(); ncur = nxn.cursor()
         try:
-            ncur.execute("""SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))), ISNULL(alloc_ratio,100),
-                  CONVERT(varchar(10),apply_from,23), CONVERT(varchar(10),apply_to,23)
-                FROM nx.sourcing_profile WHERE is_active=1 AND is_internal=0 AND ISNULL(vendor_code,'')<>''""")
-            for ic, vc, al, af, at in ncur.fetchall():
-                if af and af > wdate: continue
-                if at and at < wdate: continue
-                prof.setdefault(str(ic).strip(), []).append((str(vc).strip(), float(al or 0)))
-            try:
-                ncur.execute("IF OBJECT_ID('nx.order_vendor','U') IS NULL SELECT 1 WHERE 1=0")
-                _has = (ncur.execute("SELECT COL_LENGTH('nx.order_vendor','alloc_ratio')").fetchone()[0] is not None)
-                _rc = "ISNULL(alloc_ratio,100)" if _has else "100"
-                ncur.execute(f"SELECT LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))), {_rc} FROM nx.order_vendor WHERE ISNULL(vendor_code,'')<>''")
-                for ic, vc, al in ncur.fetchall():
-                    ovr.setdefault(str(ic).strip(), []).append((str(vc).strip(), float(al if al is not None else 100)))
-            except Exception:
-                pass
+            ncur.execute("""
+                SELECT UPPER(LTRIM(RTRIM(ppm.mat_code))) mat, ppm.plan_ymd ymd,
+                       SUM(CAST(ppm.part_plan_qty AS float) * ISNULL(r.ratio,1.0)) qty
+                FROM nx.plan_part_mat ppm
+                LEFT JOIN (
+                    SELECT s.work_order, UPPER(LTRIM(RTRIM(s.mat_code))) mat_code, s.vendor_code,
+                           CAST(s.qty AS float)/NULLIF(t.tot,0) ratio
+                    FROM nx.plan_mat_source s
+                    JOIN (SELECT work_order, UPPER(LTRIM(RTRIM(mat_code))) mat_code, SUM(CAST(qty AS float)) tot
+                          FROM nx.plan_mat_source GROUP BY work_order, UPPER(LTRIM(RTRIM(mat_code)))) t
+                      ON t.work_order=s.work_order AND t.mat_code=UPPER(LTRIM(RTRIM(s.mat_code)))
+                ) r ON r.work_order=ppm.work_order AND r.mat_code=UPPER(LTRIM(RTRIM(ppm.mat_code)))
+                WHERE ppm.plan_ymd BETWEEN ? AND ? AND r.vendor_code=?
+                GROUP BY UPPER(LTRIM(RTRIM(ppm.mat_code))), ppm.plan_ymd""", from6, to6, cc)
+            for mat, ymd, qty in ncur.fetchall():
+                soyo_day.setdefault((mat or '').strip(), {})[str(ymd).strip()] = float(qty or 0)
         finally:
             nxn.close()
-        def _share(ic):
-            """이 매입처(cc)의 배분율(0~100). 발주업체지정(다중배분) > 프로파일 > 현행100(미설정)."""
-            ic = str(ic).strip()
-            ov = ovr.get(ic)
-            if ov:
-                if len(ov) == 1:
-                    return 100.0 if ov[0][0] == cc else 0.0        # 단일=100/0(현행 그대로 → 회귀0)
-                return sum((r or 0) for (v, r) in ov if v == cc)    # cc 몫(다중 배분%)
-            ps = prof.get(ic)
-            if ps:
-                return sum(r for (v, r) in ps if v == cc)   # cc 몫(cc 미포함이면 0 = 이 매입처 발주 아님)
-            return 100.0
-        # cc가 프로파일/발주업체지정 대상인 품목(마스터 IN_CUST≠cc여도 노출) → 다중 매입처 커버
-        extra = sorted({ic for ic, ps in prof.items() if any(v == cc for (v, r) in ps)} |
-                       {ic for ic, ov in ovr.items() if any(v == cc for (v, r) in ov)})
-        eph = ",".join("?" * len(extra)) if extra else ""
-        or_main = f" OR M.item_code IN ({eph})" if extra else ""
-        or_itm = f" OR item_code IN ({eph})" if extra else ""
-        # 계획수량: 부품 접미사 제거한 부모 도번 기준(부모별 1회 집계 후 조인=고속). 기발주=PU_T_PURCHASE_DTL 미입고잔량.
-        cur.execute(f"""
-          WITH PLANP AS (
-            SELECT LEFT(C_ITEM_CODE, CASE WHEN CHARINDEX('-',C_ITEM_CODE)>0 THEN CHARINDEX('-',C_ITEM_CODE)-1 ELSE LEN(C_ITEM_CODE) END) parent, SUM(PLAN_QTY) pq
-            FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_ITEM_DTL WHERE PLAN_YMD BETWEEN ? AND ?
-            GROUP BY LEFT(C_ITEM_CODE, CASE WHEN CHARINDEX('-',C_ITEM_CODE)>0 THEN CHARINDEX('-',C_ITEM_CODE)-1 ELSE LEN(C_ITEM_CODE) END))
-          SELECT M.item_code ic, M.item_name nm, ISNULL(M.item_spec,'') spec, ISNULL(M.unit,'EA') unit,
-            ISNULL(PP.pq,0) plan_qty, ISNULL(S.sq,0) stock_qty, ISNULL(PO.remain,0) po_qty
-          FROM PARTNER_ERP_TEST3.nx.item M
-          LEFT JOIN PLANP PP ON PP.parent = LEFT(M.item_code, CASE WHEN CHARINDEX('-',M.item_code)>0 THEN CHARINDEX('-',M.item_code)-1 ELSE LEN(M.item_code) END)
-          LEFT JOIN (SELECT MAT_CODE, SUM(STOCK_QTY) sq FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE STOCK_YYMM=? GROUP BY MAT_CODE) S ON S.MAT_CODE=M.item_code
-          LEFT JOIN (SELECT ITEM_CODE, SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0)) remain
+        # 기발주(PU 미입고) — 이 매입처
+        po_pu = {}
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0))
              FROM PARTNER_ERP_TEST3.nx.PU_T_PURCHASE_DTL WHERE CUST_CODE=? AND ISNULL(IN_FINISH_FLAG,'N')<>'Y'
-             GROUP BY ITEM_CODE HAVING SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0))>0) PO ON PO.ITEM_CODE=M.item_code
-          WHERE (M.in_cust=?{or_main}) AND ISNULL(M.item_status,'1') IN ('1','2')
-          ORDER BY ISNULL(PP.pq,0) DESC, M.item_code""", from6, to6, smax, cc, cc, *extra)
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        for r in rows:
-            r["plan_qty"] = float(r["plan_qty"] or 0); r["stock_qty"] = float(r["stock_qty"] or 0)
-            r["po_qty"] = float(r["po_qty"] or 0)  # 기발주 = PU_T_PURCHASE_DTL 미입고 발주잔량
-        # ★우측 협력사 일자별 계획 = 좌측과 동일 소스(PR_T_PLAN_ITEM_DTL). 부모 도번별 PLAN_YMD 분포 → 일자별 합 = 좌측 계획수량.
-        cur.execute(f"""
-          WITH ITM AS (SELECT DISTINCT LEFT(ITEM_CODE, CASE WHEN CHARINDEX('-',ITEM_CODE)>0 THEN CHARINDEX('-',ITEM_CODE)-1 ELSE LEN(ITEM_CODE) END) parent
-                       FROM PARTNER_ERP_TEST3.nx.item WHERE (in_cust=?{or_itm}) AND ISNULL(item_status,'1') IN ('1','2'))
-          SELECT LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END) parent,
-                 D.PLAN_YMD ymd, SUM(D.PLAN_QTY) pq
-          FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_ITEM_DTL D
-          JOIN ITM ON ITM.parent = LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END)
-          WHERE D.PLAN_YMD BETWEEN ? AND ?
-          GROUP BY LEFT(D.C_ITEM_CODE, CASE WHEN CHARINDEX('-',D.C_ITEM_CODE)>0 THEN CHARINDEX('-',D.C_ITEM_CODE)-1 ELSE LEN(D.C_ITEM_CODE) END), D.PLAN_YMD""", cc, *extra, from6, to6)
-        daily = {}; dset = set()
-        for pr, ymd, pq in cur.fetchall():
-            ymd = str(ymd).strip(); dset.add(ymd)
-            daily.setdefault(str(pr).strip(), {})[ymd] = float(pq or 0)
+             GROUP BY UPPER(LTRIM(RTRIM(ITEM_CODE))) HAVING SUM(PUR_QTY-ISNULL(IN_QTY,0)-ISNULL(CANCEL_QTY,0))>0""", cc)
+        for ic, q in cur.fetchall():
+            po_pu[(ic or '').strip()] = float(q or 0)
+        # 품목 유니버스 = 소요 자재 ∪ 기발주 품목
+        universe = sorted(set(soyo_day.keys()) | set(po_pu.keys()))
+        stock = {}; info = {}
+        for i in range(0, len(universe), 900):
+            ch = universe[i:i+900]; ph = ",".join("?" * len(ch))
+            cur.execute(f"SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), SUM(STOCK_QTY) FROM PARTNER_ERP_TEST3.nx.PU_T_MONTH_STOCK_WH WHERE STOCK_YYMM=? AND UPPER(LTRIM(RTRIM(MAT_CODE))) IN ({ph}) GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))", smax, *ch)
+            for mc, sq in cur.fetchall():
+                stock[(mc or '').strip()] = float(sq or 0)
+            cur.execute(f"SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(unit,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE UPPER(LTRIM(RTRIM(item_code))) IN ({ph})", *ch)
+            for ic, nm2, sp, un in cur.fetchall():
+                info[(ic or '').strip()] = {"nm": nm2, "spec": sp, "unit": un}
+        dset = set()
+        for d in soyo_day.values():
+            dset |= set(d.keys())
         dates = sorted(dset)
-        def _par(ic):
-            ic = str(ic or ""); i = ic.find("-"); return ic[:i] if i > 0 else ic
-        # ── 이 매입처(cc) 배분율 적용: 계획수량·일자별을 이 매입처 몫으로 스케일(배분율<100=badge, 0=제외) ──
-        #   ★실발주비율 = R01 경로비율 × 업체비율. 재고/기발주는 미스케일(po_qty는 CUST_CODE=cc 스코프, stock_qty는 물리재고).
-        rn = _nx(); rc = rn.cursor()
-        try: route01 = _route01_ratio(rc, [str(r["ic"]).strip() for r in rows])   # ★R01 경로 계수(현재 100)
-        finally: rn.close()
-        out = []
-        for r in rows:
-            r["days"] = daily.get(_par(r["ic"]), {})
-            ic = str(r["ic"]).strip()
-            ratio = _share(ic) * (route01.get(ic, 100.0) / 100.0)   # 실발주비율 = 업체비율 × route01
-            if ratio <= 0:
-                continue                        # 이 매입처 발주 아님(배분/발주업체지정/경로에서 제외)
-            r["alloc_ratio"] = round(ratio, 4)
-            r["alloc_note"] = ((f"발주업체지정 {ratio:g}%" if len(ovr.get(ic, [])) > 1 else "발주업체지정") if ic in ovr else
-                               (f"배분 {ratio:g}%" if (ratio != 100.0 or len(prof.get(ic, [])) > 1) else ""))
-            if ratio != 100.0:
-                f = ratio / 100.0
-                r["plan_qty"] = round(r["plan_qty"] * f, 3)
-                r["days"] = {d: round(q * f, 3) for d, q in (r["days"] or {}).items()}
-            out.append(r)
-        rows = out
+        rows = []
+        for mat in universe:
+            days = soyo_day.get(mat, {}); meta = info.get(mat, {})
+            rows.append({"ic": mat, "nm": meta.get("nm", ""), "spec": meta.get("spec", ""), "unit": meta.get("unit", "EA"),
+                         "plan_qty": round(sum(days.values()), 3), "stock_qty": stock.get(mat, 0.0),
+                         "po_qty": po_pu.get(mat, 0.0), "days": days, "alloc_note": ""})
+        rows.sort(key=lambda r: (-r["plan_qty"], r["ic"]))
         # ── ★5~8주 LG물동 참고 소요(2026-08-30, 컷오버-안전 nx 소스) ──
         #   물동수량 × PR_M_MODEL_BOM(모델→ASSY) × item_mat_soyo(ASSY→자재 per_unit·소요엔진 캐시, §10).
         #   4주=생산계획(위 plan_qty), 5~8주=물동(다음~다다음달). ★참고용 컬럼 — 추가발주 계산 미반영·자동발주 금지·담당 판단.
@@ -154,12 +102,12 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         try:
             for i in range(0, len(vic), 800):
                 chunk = vic[i:i+800]; iph = ",".join("?" * len(chunk))
-                rc2.execute(f"""SELECT im.mat_code, SUM(mul.qty*mb.USE_QTY*im.per_unit)
+                rc2.execute(f"""SELECT UPPER(LTRIM(RTRIM(im.mat_code))) mat, SUM(mul.qty*mb.USE_QTY*im.per_unit)
                     FROM nx.lg_muldong mul
                     JOIN nx.PR_M_MODEL_BOM mb ON LTRIM(RTRIM(mb.MODEL_NO))=LTRIM(RTRIM(mul.model))
                     JOIN nx.item_mat_soyo im ON LTRIM(RTRIM(im.item_code))=LTRIM(RTRIM(mb.C_ITEM_CODE))
-                    WHERE mul.plan_yymm IN (?,?) AND im.mat_code IN ({iph})
-                    GROUP BY im.mat_code""", mt1, mt2, *chunk)
+                    WHERE mul.plan_yymm IN (?,?) AND UPPER(LTRIM(RTRIM(im.mat_code))) IN ({iph})
+                    GROUP BY UPPER(LTRIM(RTRIM(im.mat_code)))""", mt1, mt2, *chunk)
                 for mc, sq in rc2.fetchall():
                     mul_soyo[(mc or '').strip()] = float(sq or 0)
         except Exception:
@@ -172,13 +120,13 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         rn3 = _nx(); rc3 = rn3.cursor()
         try:
             _ensure_mo(rc3)
-            mo_open = _mo_open_by_cust(rc3, cc)
+            mo_open = {k.upper(): v for k, v in _mo_open_by_cust(rc3, cc).items()}
         except Exception:
             mo_open = {}
         finally:
             rn3.close()
         for r in rows:
-            r["po_qty"] = round(float(r.get("po_qty") or 0) + mo_open.get(str(r["ic"]).strip(), 0.0), 3)
+            r["po_qty"] = round(float(r.get("po_qty") or 0) + mo_open.get(str(r["ic"]).strip().upper(), 0.0), 3)
         cn2 = _conn(); c2 = cn2.cursor()
         try:
             c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", cc)
