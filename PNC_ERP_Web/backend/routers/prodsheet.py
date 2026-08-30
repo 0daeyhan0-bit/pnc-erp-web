@@ -4,9 +4,9 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _prod_stock_map, stock_changed, _assert_open)
 
-from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod
+from routers.backflush import _backflush_core, _final_proc_code, _is_inner_prod, _weld_consume
 router = APIRouter()
 
 # ===================== 생산전표출력관리 (w_pr_input_490) — 전표 기준 마스터-디테일 =====================
@@ -1235,6 +1235,11 @@ def procbc_save(payload: dict = Body(...)):
     if qty == 0:
         return {"ok": False, "errors": ["처리수량을 입력하세요."]}
     nx = _nx_tx(); cur = nx.cursor()
+    # ★마감잠금(2026-08-29 결선) — 이 엔드포인트는 _set_mat_stock_wh() 로 **자재/파트 재고를 움직인다**
+    #   (본문 주석 ⑦⑧ 의 자재차감·준비재고 차감이 실제로 일어난다).
+    #   일자 파라미터가 없고 서버 당일로 기록하므로 **당일 기준**으로 판정한다.
+    cur.execute("SELECT RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
+    _assert_open(cur, str(cur.fetchone()[0]).strip(), "PRD", "바코드 생산실적")
     try:
         tot = float(p.get("total_qty") or 0)
         now = datetime.now()
@@ -1593,7 +1598,24 @@ def procbc_save(payload: dict = Body(...)):
             _set_ready_stock(cur, win, item, 'Z99990', pc, -qty, who)
             stock["ready"].append({"part": pc, "qty": round(-qty, 4)})
 
-        # ⑨⑩ 세트재고 차감 — 레거시 w_pr_input_520 ue_save_after_sub 원문(2026-08-30 이식)
+        # ⑨ 용접봉 생산창고 소비(−Q1000, tag W) — 레거시가 제외한 용접봉만 nx.stock_ledger로 (2026-08-27).
+        #   모델: 자재출고(matissue)로 작업자가 용접봉을 자재→생산창고(Q1000) 불출(+Q1000) → 여기서 −Q1000 차감.
+        #   부호수량(qty>0 소비·qty<0 취소복원). 생산창고(Q1000) 재고부족이면 실적거부(음수차단, 실시간 원장sum).
+        #   cro=nx(같은 커넥션 — 게이트가 자기 쓰는 stock_ledger 읽어 별도커넥션시 미커밋행 SUM 교착).
+        # ★세트차감(⑩⑪)보다 먼저 둔다 — 부족 시 rollback+return 으로 빠져나가므로
+        #   뒤에 두면 세트재고만 차감된 채 실적이 거부되어 원장이 어긋난다(2026-08-30 병합).
+        _wr = _weld_consume(nx, nx, item, qty, (work_code or bc), who)
+        if not _wr.get("ok"):
+            nx.rollback()
+            _ws = _wr.get("shortage", [])
+            _wmsg = "용접봉 생산창고 재고가 부족합니다. (자재출고에서 용접봉을 생산창고로 불출하세요)\n\n" + "\n".join(
+                f"· {s['mat']} ({s['part']})  필요 {s['need']:g} / 재고 {s['have']:g}  → 부족 {s['lack']:g}"
+                for s in _ws[:10])
+            return {"ok": False, "shortage": _ws, "errors": [_wmsg]}
+        if _wr.get("weld_consumed"):
+            stock["weld"] = {"consumed": _wr["weld_consumed"], "kinds": _wr.get("weld_kinds", 0)}
+
+        # ⑩⑪ 세트재고 차감 — 레거시 w_pr_input_520 ue_save_after_sub 원문(2026-08-30 이식)
         #     원문 순서: 생산/파트재고 → dw_7 루프(자재세트) → SP(가공세트) → BOM → 준비재고.
         #     웹은 BOM·준비재고를 먼저 처리하므로 여기서 세트 2종을 이어 붙인다(순서 무관·독립계정).
         #     ※취소(qty<0)는 부호가 반대로 흘러 자동 복원된다.

@@ -149,6 +149,10 @@ app.include_router(_r_daycheck.router)
 # autoorder 폐기(2026-08-26): 미사용(프론트/타백엔드 소비 0)·AI개발본. 라우팅 해제+파일제거. 복구=git. 대체=자재예상매입(MRP, 설계단계) [[newerp-matexpect-initiative]]
 from routers import lgsagub as _r_lgsagub
 app.include_router(_r_lgsagub.router)
+from routers import sagubledger as _r_sagubledger   # 협력사 사급부품 수불장(신규)
+app.include_router(_r_sagubledger.router)
+from routers import rawmatledger as _r_rawmatledger   # 협력사 원소재(동관) 수불장(규격별·신규)
+app.include_router(_r_rawmatledger.router)
 from routers import dopip as _r_dopip
 app.include_router(_r_dopip.router)
 from routers import pricemgmt as _r_pricemgmt
@@ -181,6 +185,33 @@ from routers import delivedit as _r_delivedit  # 거래명세표 수정(협력�
 app.include_router(_r_delivedit.router)
 from routers import matinput as _r_matinput    # 자재입고진행현황 — 레거시 w_pr_input_010_part
 app.include_router(_r_matinput.router)
+# ★인증·소속 강제 (협력사 포털 1단계, 2026-08-29) — PARTNER_PORTAL_DESIGN.md §1~2
+#   협력사에게 열기 전에 서버가 거부해야 한다. 화면에서 숨기는 것은 보안이 아니다.
+from routers import auth as _r_auth
+app.include_router(_r_auth.router)
+
+
+# ★★내부 API 전면 인증 게이트 (2026-08-29) — PARTNER_PORTAL_DESIGN.md §13
+#   실측: 전체 530개 중 인증 결선 21개뿐. 협력사 토큰으로 cust/list·item/list·close/ledger·
+#         partner/workcenters·perm/all 이 그대로 열렸다.
+#   라우터 44개에 하나씩 붙이면 반드시 하나는 빠지고 공유파일을 44번 만진다.
+#   ⟹ 여기 한 곳에서 막는다. **앞으로 만들 엔드포인트도 자동 보호**된다.
+@app.middleware("http")
+async def _auth_gate(request, call_next):
+    from fastapi.responses import JSONResponse
+    from routers.auth import path_policy, coop_allowed, current_user
+    is_open, path = path_policy(request.url.path)
+    if is_open:
+        return await call_next(request)
+    u = current_user(request)
+    if not u:
+        return JSONResponse({"detail": "로그인이 필요합니다."}, status_code=401)
+    # 협력사는 화이트리스트만 — deny by default
+    if u.get("utype") == "협력사" and not coop_allowed(path):
+        return JSONResponse(
+            {"detail": "협력사 계정으로는 접근할 수 없는 기능입니다."}, status_code=403)
+    request.state.user = u
+    return await call_next(request)
 import weight_calc  # 무게정산(중량조정) 계산
 # 도메인간 공유헬퍼 — 로컬 def가 있으면 그게 shadow, 해당 도메인 라우터 이동 후엔 common판 사용(잔류 엔드포인트 보호)
 from common import _closed, _validate_alloc, _ensure_modelbom, _pur_src, _ym, _ITEM_WORK, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win
@@ -364,7 +395,14 @@ def _warmup_heavy_queries():
                     try: eng.naewon_nodes(_wi, "260630")
                     except Exception: pass
         except Exception: pass
-    threading.Thread(target=_run, daemon=True).start()
+    # ★TestBed(FLOW_TESTBED=1)는 예열을 **동기로** 한다 — 하네스는 커넥션이 하나라
+    #   예열 스레드가 본 스레드와 다투면 HY000 이 나고, 그렇다고 끄면 엔진이 차가워
+    #   생산재고조회가 타임아웃한다(실측 600s 초과). 요청을 받기 전에 끝낸다.
+    import os as _os
+    if _os.environ.get("FLOW_TESTBED"):
+        _run()
+    else:
+        threading.Thread(target=_run, daemon=True).start()
 
 # ===== 프론트엔드 정적 서빙 (내부망 단일 포트 운영) =====
 # ★반드시 모든 API 라우트 정의 이후(파일 최하단)에 위치. /api/* · /live/* 가 먼저 매칭되고 나머지는 정적파일로.

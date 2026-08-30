@@ -313,6 +313,15 @@ def _bom_tree_nx(item, real, expandbuy=0):
                 info[(r[0] or '').strip()] = {"nm": r[1], "spec": r[2], "cust": str(r[3]).strip(), "custnm": r[4],
                       "metal": r[5], "diam": float(r[6] or 0), "thick": float(r[7] or 0), "length": float(r[8] or 0)}
             # ★sub_alias 쿼리 제거(성능): 정리 후 canonical 전부 NULL=매핑 없음. 필요시 재도입. 원격DB 왕복 1회 절감.
+        # ★공용확인 표시(2026-08-30): 등록된 SUB의 출생라벨({ASSY}_R{route}_S{nn})·공용 배지·공유제품수.
+        subreg = {}
+        for i in range(0, len(nl), 900):
+            chunk = nl[i:i+900]; ph = ",".join("?" * len(chunk))
+            cur.execute(f"""SELECT m.raw_item, ISNULL(r.birth_label,''), ISNULL(r.is_shared,0), ISNULL(r.ref_count,0), r.sub_code
+                            FROM nx.sub_code_map m JOIN nx.sub_registry r ON r.sub_code=m.sub_code
+                            WHERE m.raw_item IN ({ph})""", *chunk)
+            for raw, bl, sh, rc, sc in cur.fetchall():
+                subreg[(raw or '').strip()] = {"birth": (bl or '').strip(), "shared": bool(sh), "ref": int(rc or 0), "code": (sc or '').strip()}
         def disp(code): return alias.get(code, code)   # 리프변형 표시(자재 canonical). SUB는 아래 tree-order.
         # ★SUB 표시 = {ASSY품번}_S{순번} 트리순서(현재 임시=위치기반). raw=원본코드(navi/edit),
         #   정본식별 S#####(nx.sub_registry/sub_code_map)은 dedup·후보채번용 내부 identity(표시 아님).
@@ -323,10 +332,14 @@ def _bom_tree_nx(item, real, expandbuy=0):
         def subdisp(child):
             if child in edges:   # 하위 보유 = SUB
                 # ★2026-08-15: 실제 제품코드(접미사 -N-N·_S 없는 깨끗한 코드)는 개명 금지 → 도면 품번 그대로 표시.
-                #   합성/변형 SUB(base-N-N·_S)만 {부모}_S{nn} 채번. (실제 ASSY가 SUB코드로 가려지던 문제 수정)
+                #   합성/변형 SUB(base-N-N·_S)만 SUB코드. (실제 ASSY가 SUB코드로 가려지던 문제 수정)
                 if ('-' not in child) and ('_' not in child):
                     return disp(child)
-                if child not in sub_map:
+                # ★2026-08-30: 등록된 출생라벨({ASSY}_R{route}_S{nn}) 있으면 그것(공용은 어디서든 동일 이름).
+                reg = subreg.get(child)
+                if reg and reg["birth"]:
+                    return reg["birth"]
+                if child not in sub_map:   # 미등록 SUB = 위치기반 폴백(기존 무회귀)
                     sub_seq[0] += 1; sub_map[child] = f"{item}_S{sub_seq[0]:02d}"
                 return sub_map[child]
             return disp(child)
@@ -347,7 +360,10 @@ def _bom_tree_nx(item, real, expandbuy=0):
                     "sag": e["sag"], "se": e["se"], "kt": e["kt"], "vir": e["vir"], "ce": e["ce"], "le": e["le"],
                     "gp": e["gp"], "sw": e["sw"], "metal": ci.get("metal", ""),
                     "diam": ci.get("diam", 0), "thick": ci.get("thick", 0), "length": ci.get("length", 0),
-                    "haskids": e["child"] in edges})
+                    "haskids": e["child"] in edges,
+                    "shared": subreg.get(e["child"], {}).get("shared", False),   # ★공용 배지
+                    "refcnt": subreg.get(e["child"], {}).get("ref", 0),
+                    "scode": subreg.get(e["child"], {}).get("code", "")})
                 walk(e["child"], lvl + 1)
             seen.discard(code)
         walk(item, 1)
@@ -510,9 +526,11 @@ def bom_whereused(item: str = Query(..., description="품번 — 이 품번을 �
         cn.close()
 
 
-def _sub_signature(cur, children, weld):
-    """SUB 시그니처(레지스트리와 동일 규칙): children[RAC%제외, 자식SUB는 자기 sig로]+weld[weld_item·st·use_qty] → 'S:'+md5[:12].
-       children=[{item,qty}], weld=[{weld_item,weld_st,use_qty}]. cur=nx 커서(자식 sig 조회용)."""
+def _sub_signature(cur, children, weld, own_mk=''):
+    """SUB 시그니처(정체성): children[RAC%제외, 자식SUB는 자기 sig로]+weld[weld_item·st·use_qty]+본인make_type → 'S:'+md5[:12].
+       ★2026-08-30 정본(사장님 확정): 동일 품목(구성) + 공정(용접) + 제작처(본인 make_type 사내1/외주2)면 동일 SUB=무조건 재사용.
+       own_mk = 이 SUB 노드 자신의 make_type(제작처). 자식 make_type은 자식 sig에 이미 인코딩(B=C 검증)이라 미포함.
+       children=[{item,qty}], weld=[{weld_item,weld_st,use_qty}], own_mk=str. cur=nx 커서(자식 sig 조회용)."""
     codes = [str(c.get("item", "")).strip() for c in children
              if str(c.get("item", "")).strip() and not str(c.get("item", "")).upper().startswith('RAC')]
     keymap = {}   # 자식코드 -> 'S:xxxx'(SUB) ; 없으면 리프
@@ -536,22 +554,51 @@ def _sub_signature(cur, children, weld):
     wl = sorted((str(w.get("weld_item", "")).strip(), round(float(w.get("weld_st", 0) or 0), 4),
                  round(float(w.get("use_qty", 0) or 0), 6)) for w in (weld or []))
     weldstr = ';'.join(f"{wi}|{st}|{uq}" for wi, st, uq in wl)
-    raw = f"C[{','.join(parts)}]W[{weldstr}]"
+    mk = str(own_mk or '').strip()
+    raw = f"C[{','.join(parts)}]W[{weldstr}]MK[{mk}]"
     return 'S:' + hashlib.md5(raw.encode('utf-8')).hexdigest()[:12]
 
 
-def _mint_sub(cur, sig, rep_item, nm=''):
-    """레지스트리 dedup-safe 등록(append-only): sig 존재 시 기존 S반환(신규 생성 안 함=완전차단),
-       없으면 다음 S##### 발급+nx.sub_registry/sub_code_map 등록. 반환 (sub_code, is_new).
-       ★주의: 최초 시드(sub_registry_build DROP+재빌드) 이후 레지스트리는 append-only. mint된 후보SUB는 bom_line에 없으므로 DROP+재빌드 재실행 금지(코드 안정성)."""
+def _refresh_shared(cur, code):
+    """공용 flag/참조수 갱신 = 이 sub_code의 raw들을 직속자식으로 갖는 distinct 부모(제품) 수.
+       is_shared = 2개 이상 제품에서 사용(=공용). 표시 배지·강제재사용 고지에 사용."""
+    code = (code or '').strip()
+    if not code:
+        return
+    cur.execute("SELECT raw_item FROM nx.sub_code_map WHERE sub_code=?", code)
+    raws = [(x[0] or '').strip() for x in cur.fetchall() if x[0]]
+    if not raws:
+        return
+    ph = ",".join("?" * len(raws))
+    cur.execute(f"""SELECT COUNT(DISTINCT h.item_code) FROM nx.bom_line bl
+                    JOIN nx.bom_header h ON h.bom_id=bl.bom_id WHERE bl.child_item IN ({ph})""", *raws)
+    n = int(cur.fetchone()[0] or 0)
+    cur.execute("UPDATE nx.sub_registry SET ref_count=?, is_shared=? WHERE sub_code=?", n, (1 if n > 1 else 0), code)
+
+
+def _mint_sub(cur, sig, rep_item, nm='', birth_assy=None, birth_route=None):
+    """레지스트리 dedup-safe 등록 + 출생라벨. sig 존재 시 기존 S **강제재사용**(중복 완전차단=사장님 확정:
+       동일 품목+공정용접+제작처면 무조건 재사용)·공용flag 갱신. 없으면 신규 S##### 발급.
+       birth_assy/route 주어지면(route 편성) 출생라벨 {ASSY}_R{route}_S{nn}(영속번호=(assy,route)별 max+1) 부여.
+       반환 (sub_code, is_new). ★DROP+재빌드 재실행 금지(append-only)."""
     rep_item = (rep_item or '').strip()
     cur.execute("SELECT sub_code FROM nx.sub_registry WHERE sig=?", sig)
     r = cur.fetchone()
     if r:
-        return ((r[0] or '').strip(), False)
+        code = (r[0] or '').strip()
+        _refresh_shared(cur, code)     # 재사용 = 공용성 재평가
+        return (code, False)
     cur.execute("SELECT ISNULL(MAX(CAST(SUBSTRING(sub_code,2,10) AS INT)),0) FROM nx.sub_registry WHERE sub_code LIKE 'S[0-9][0-9][0-9][0-9][0-9]'")
     code = f"S{int(cur.fetchone()[0]) + 1:05d}"
-    cur.execute("INSERT INTO nx.sub_registry(sub_code,sig,rep_item,nm,members) VALUES(?,?,?,?,1)", code, sig, rep_item[:50], (nm or '')[:200])
+    ba = (str(birth_assy).strip() if birth_assy else None) or None
+    br = (int(birth_route) if str(birth_route or '').strip() != '' else None)
+    blabel = bseq = None
+    if ba and br is not None:
+        cur.execute("SELECT ISNULL(MAX(birth_seq),0) FROM nx.sub_registry WHERE birth_assy=? AND birth_route=?", ba, br)
+        bseq = int(cur.fetchone()[0]) + 1
+        blabel = f"{ba}_R{br}_S{bseq:02d}"[:60]
+    cur.execute("""INSERT INTO nx.sub_registry(sub_code,sig,rep_item,nm,members,birth_label,birth_assy,birth_route,birth_seq,is_shared,ref_count)
+                   VALUES(?,?,?,?,1,?,?,?,?,0,1)""", code, sig, rep_item[:50], (nm or '')[:200], blabel, ba, br, bseq)
     cur.execute("IF NOT EXISTS(SELECT 1 FROM nx.sub_code_map WHERE raw_item=?) INSERT INTO nx.sub_code_map(raw_item,sub_code) VALUES(?,?)", rep_item[:50], rep_item[:50], code)
     return (code, True)
 
@@ -562,16 +609,19 @@ def sub_dedup(payload: dict = Body(...)):
        동일 SUB 있으면 기존 S코드 반환(강제 재사용) → 중복 생성 차단. 읽기전용(채번은 후보 저장시)."""
     children = payload.get("children", []) or []
     weld = payload.get("weld", []) or []
+    own_mk = str(payload.get("make_type", "") or "").strip()   # ★제작처(사내1/외주2) — 정체성 축
     if not children:
         raise HTTPException(400, "children(구성) 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        sig = _sub_signature(cur, children, weld)
-        cur.execute("SELECT sub_code, rep_item, nm, members FROM nx.sub_registry WHERE sig=?", sig)
+        sig = _sub_signature(cur, children, weld, own_mk=own_mk)
+        cur.execute("""SELECT sub_code, rep_item, nm, members, ISNULL(birth_label,''), ISNULL(is_shared,0), ISNULL(ref_count,0)
+                       FROM nx.sub_registry WHERE sig=?""", sig)
         r = cur.fetchone()
         if r:
             return {"exists": True, "sub_code": (r[0] or '').strip(), "rep_item": (r[1] or '').strip(),
-                    "nm": r[2] or '', "members": int(r[3] or 0), "sig": sig}
+                    "nm": r[2] or '', "members": int(r[3] or 0), "sig": sig,
+                    "birth_label": (r[4] or '').strip(), "is_shared": bool(r[5]), "ref_count": int(r[6] or 0)}
         return {"exists": False, "sub_code": None, "sig": sig}
     finally:
         cn.close()
@@ -649,16 +699,13 @@ def bom_save(payload: dict = Body(...)):
             bom_id = cur.fetchone()[0]
         # 전체 교체 — ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 → nx.proc_weld로 라우팅(bom_line 제외)
         cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", bom_id)
-        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+        # ★용접봉(RAC)은 BOM구성행 아님·공정종속 자재 = nx.proc_weld/item_weld/routing로 [조립공정 팝업(weld/save_node)]이 전담.
+        #   bom_save는 proc_weld를 절대 건드리지 않음(과거 DELETE+RAC재생성 로직 제거 — 그리드 저장 시 용접봉 다종 데이터 파괴 방지).
+        #   그리드의 RAC행은 bom_line에 안 넣고 skip(용접봉은 팝업에서만 편집).
         seq = 0; nweld = 0
         for ln in lines:
             ch = str(ln.get("child_item", "")).strip()
-            if ch.upper().startswith("RAC"):   # 용접봉 → proc_weld(공정종속 자재)
-                cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
-                    VALUES(?,?,?,?,?,?,?,?,'W','bom_save')""",
-                    item, ch, ch.split('-')[0], float(ln.get("qty") or 0),
-                    _b(ln.get("cs_calc_except")), _b(ln.get("lme_except")),
-                    (ln.get("from_ymd") or None), (ln.get("to_ymd") or None))
+            if ch.upper().startswith("RAC"):   # 용접봉 → 팝업 전담. bom_line/proc_weld 미기록(skip).
                 nweld += 1; continue
             seq += 1
             cur.execute("""INSERT INTO nx.bom_line
@@ -793,8 +840,19 @@ def bom_addline(payload: dict = Body(...)):
         cur.execute("SELECT ISNULL(MAX(seq),0)+1 FROM nx.bom_line WHERE bom_id=?", bom_id)
         seq = cur.fetchone()[0]
         cur.execute("INSERT INTO nx.bom_line(bom_id,seq,child_item,qty,node_type) VALUES(?,?,?,?,N'부품')", bom_id, seq, child, qty)
+        # ★공용확인(2026-08-30): 추가한 자식이 등록 SUB면 공용성 재평가 = 2번째+ 제품에 넣으면 공용 변환.
+        shared_info = None
+        cur.execute("SELECT sub_code FROM nx.sub_code_map WHERE UPPER(LTRIM(RTRIM(raw_item)))=?", child)
+        _sc = cur.fetchone()
+        if _sc and (_sc[0] or '').strip():
+            code = (_sc[0] or '').strip()
+            _refresh_shared(cur, code)
+            cur.execute("SELECT ISNULL(birth_label,''), ISNULL(is_shared,0), ISNULL(ref_count,0) FROM nx.sub_registry WHERE sub_code=?", code)
+            _rr = cur.fetchone()
+            if _rr:
+                shared_info = {"sub_code": code, "birth_label": (_rr[0] or '').strip(), "is_shared": bool(_rr[1]), "ref_count": int(_rr[2] or 0)}
         cn.commit(); _reset_cost_engine()
-        return {"ok": True, "parent": parent, "child": child, "seq": seq, "qty": qty, "dup": dup}
+        return {"ok": True, "parent": parent, "child": child, "seq": seq, "qty": qty, "dup": dup, "shared_info": shared_info}
     finally:
         cn.close()
 
@@ -883,16 +941,20 @@ def lgbom_search(q: str = Query(""), werks: str = Query(""), limit: int = Query(
         cn.close()
 
 @router.get("/api/lgbom/tree")
-def lgbom_tree(model: str = Query(...), werks: str = Query("")):
-    """선택 모델의 LG BOM 전개(전 레벨). stufe/posnr 순. 프론트에서 parent_code→child_code 트리 조립."""
+def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = Query("")):
+    """선택 모델의 LG BOM 전개(전 레벨). stufe/posnr 순. 프론트에서 parent_code→child_code 트리 조립.
+       ver_from(일자) 주면 그 버전(nx.lg_bom_ver) 전개, 없으면 현재판(nx.lg_bom)."""
     cn = _nx(); cur = cn.cursor()
     try:
+        src = "nx.lg_bom"
         w = ["b.model=?"]; p = [model]
         if werks: w.append("b.werks=?"); p.append(werks)
+        if ver_from.strip():
+            src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
               b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
-            FROM nx.lg_bom b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
+            FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -902,6 +964,51 @@ def lgbom_tree(model: str = Query(...), werks: str = Query("")):
         return {"model": model, "modelnm": (mn[0] if mn else ""), "rows": rows}
     finally:
         cn.close()
+
+@router.get("/api/lgbom/versions")
+def lgbom_versions(model: str = Query(...), werks: str = Query("")):
+    """선택 모델의 LG BOM 버전(일자별) 목록 — nx.lg_bom_ver.ver_from distinct. 이력 추적용."""
+    cn = _nx(); cur = cn.cursor()
+    try:
+        if cur.execute("SELECT CASE WHEN OBJECT_ID('nx.lg_bom_ver') IS NULL THEN 0 ELSE 1 END").fetchone()[0] == 0:
+            return {"rows": []}
+        w = ["model=?"]; p = [model]
+        if werks: w.append("werks=?"); p.append(werks)
+        cur.execute(f"""SELECT CONVERT(varchar(10),ver_from,120) ver_from, COUNT(*) child_cnt
+            FROM nx.lg_bom_ver WHERE {' AND '.join(w)} GROUP BY ver_from ORDER BY ver_from DESC""", *p)
+        return {"rows": [{"ver_from": r[0], "child_cnt": r[1]} for r in cur.fetchall()]}
+    finally:
+        cn.close()
+
+_LGBOM_VER_COLS = ("cr,werks,model,stufe,posnr,parent_code,child_code,child_desc,child_spec,qty,unit,uit,"
+                   "supply_type,mmsta,mtstb,matty,lowest_flg,alt_item,main_mat,matkl,valid_from,valid_to,src_valid,load_dt")
+_LGBOM_SIG = ("CHECKSUM_AGG(BINARY_CHECKSUM(child_code,parent_code,qty,supply_type,stufe,posnr,child_spec,"
+              "uit,unit,lowest_flg,mmsta,matty,matkl,valid_from,valid_to))")
+
+def _lgbom_ver_append(cur, models):
+    """A안: model·werks별 현재판(nx.lg_bom) 서명이 최신 버전과 다르면 nx.lg_bom_ver에 ver_from=오늘로 append(같으면 스킵).
+       반환 = 새 버전 만든 model·werks 수. nx.lg_bom_ver 없으면 스킵(0)."""
+    if cur.execute("SELECT CASE WHEN OBJECT_ID('nx.lg_bom_ver') IS NULL THEN 0 ELSE 1 END").fetchone()[0] == 0:
+        return 0
+    added = 0
+    for (werks, model) in models:
+        if werks:
+            wc = "model=? AND werks=?"; wp = (model, werks)
+        else:
+            wc = "model=? AND ISNULL(werks,'')=''"; wp = (model,)
+        cur_sig = cur.execute(f"SELECT {_LGBOM_SIG} FROM nx.lg_bom WHERE {wc}", *wp).fetchone()[0]
+        mvr = cur.execute(f"SELECT MAX(ver_from) FROM nx.lg_bom_ver WHERE {wc}", *wp).fetchone()[0]
+        same = False
+        if mvr is not None:
+            vsig = cur.execute(f"SELECT {_LGBOM_SIG} FROM nx.lg_bom_ver WHERE {wc} AND ver_from=?", *wp, mvr).fetchone()[0]
+            same = (vsig == cur_sig)
+        if not same:
+            cur.execute(f"DELETE FROM nx.lg_bom_ver WHERE {wc} AND ver_from=CAST(GETDATE() AS date)", *wp)
+            cur.execute(f"INSERT INTO nx.lg_bom_ver ({_LGBOM_VER_COLS},ver_from) "
+                        f"SELECT {_LGBOM_VER_COLS},CAST(GETDATE() AS date) FROM nx.lg_bom WHERE {wc}", *wp)
+            added += 1
+    return added
+
 
 @router.post("/api/lgbom/upload")
 async def lgbom_upload(file: UploadFile = File(...)):
@@ -963,8 +1070,10 @@ async def lgbom_upload(file: UploadFile = File(...)):
             (cr,werks,model,stufe,posnr,parent_code,child_code,child_desc,child_spec,qty,unit,uit,supply_type,
              mmsta,mtstb,matty,lowest_flg,alt_item,main_mat,matkl,valid_from,valid_to,src_valid,load_dt)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CONVERT(varchar(10),GETDATE(),120),GETDATE())""", recs)
+        ver_added = _lgbom_ver_append(cur, models)   # A: 변경된 model·werks만 새 버전(오늘일자)
         return {"ok": True, "rows": len(recs), "models": sorted({m for (w, m) in models}),
-                "werks": sorted({w for (w, m) in models if w}), "file": file.filename}
+                "werks": sorted({w for (w, m) in models if w}), "file": file.filename,
+                "ver_added": ver_added}
     finally:
         cn.close()
 

@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, stock_changed)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _lock_msg, _assert_open, stock_changed)
 
 router = APIRouter()
 
@@ -341,8 +341,17 @@ def procreg_save(payload: dict = Body(...)):
             #   대신 BOM 을 전개해 **소비할 것이 있으면 무조건 판정**한다.
             #   BOM 이 비면 소비 자체가 없는 것이므로 게이트 대상이 아니다(예외가 아니라 해당 없음).
             from routers.backflush import _backflush_bom, _prod_shortages
+            # ★커서를 쥔 채 부르면 안 된다 — 이 함수들이 같은 커넥션(nx)에 **두 번째 커서**를 연다.
+            #   MARS 가 꺼진 ODBC 에서는 앞 커서에 미처리 행이 남아 있으면
+            #   `HY000 다른 hstmt에 연결이 사용 중` 으로 터진다(2026-08-29 TestBed 실측).
+            #   데이터에 따라 나기도 안 나기도 해서 운영에서 간헐로 보인다 — 커서를 닫고 부른다.
+            try:
+                cur.close()
+            except Exception:
+                pass
             _comps, _weld = _backflush_bom(nx, item, nx)   # ★cro 도 nx — 라이브엔 nx 스키마가 없다
             _short = _prod_shortages(nx, _comps, _weld, need_qty)
+            cur = nx.cursor()
             if _short:
                 _more = f" 외 {len(_short)-8}건" if len(_short) > 8 else ""
                 raise HTTPException(400, "자재부족으로 생산실적 등록 불가 — "
@@ -372,6 +381,13 @@ def procreg_delete(payload: dict = Body(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         ph = ",".join("?" * len(ids))
+        # ★마감잠금(2026-08-29 결선) — 실적 삭제도 재고를 되돌리는 이동이다.
+        #   삭제 전에 대상 행의 생산일자로 판정한다(삭제 후엔 일자를 알 수 없다).
+        cur.execute(f"SELECT DISTINCT PROD_YMD FROM nx.proc_result WHERE ID IN ({ph})", *ids)
+        for (_y,) in cur.fetchall():
+            _y = str(_y or "").strip()
+            if _y:
+                _assert_open(cur, _y, "PRD", "생산실적 삭제")
         cur.execute(f"DELETE FROM nx.proc_result WHERE ID IN ({ph})", *ids)
         return {"ok": True, "deleted": cur.rowcount}
     finally:

@@ -3,6 +3,51 @@
 // ★API 서버 주소: 페이지를 서빙한 서버(location.origin)로 자동 지정 → 내부망 어느 PC에서 열어도 동작.
 //   file:// 로 직접 열거나 host가 없으면 로컬 백엔드(개발용)로 폴백.
 const API_BASE=(typeof location!=='undefined' && location.protocol!=='file:' && location.host)?location.origin:'http://127.0.0.1:8010';
+/* ===== ★인증 토큰 (협력사 포털 1단계, 2026-08-29) =====
+   왜 여기인가 — fetch 호출이 524곳이다. 전부 고치면 하나는 반드시 빠진다.
+   window.fetch 를 **한 곳에서** 감싸면 지금 있는 것도, 앞으로 만들 것도 자동으로 토큰이 붙는다.
+   ★서버가 401 을 주면 토큰을 버리고 로그인 화면으로 되돌린다(만료를 조용히 무시하지 않는다). */
+const AUTH={
+  get token(){try{return localStorage.getItem('auth_token')||'';}catch(e){return '';}},
+  set token(v){try{v?localStorage.setItem('auth_token',v):localStorage.removeItem('auth_token');}catch(e){}},
+  get user(){try{return JSON.parse(localStorage.getItem('auth_user')||'null');}catch(e){return null;}},
+  set user(u){try{u?localStorage.setItem('auth_user',JSON.stringify(u)):localStorage.removeItem('auth_user');}catch(e){}},
+  async login(id,pw){
+    const r=await fetch(API_BASE+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,pw})});
+    let j={}; try{j=await r.json();}catch(e){}
+    if(!r.ok) throw new Error((j&&j.detail)||'로그인에 실패했습니다.');
+    this.token=j.token; this.user=j.user; return j.user;
+  },
+  async me(){ if(!this.token)return null;
+    try{const r=await fetch(API_BASE+'/api/auth/me');
+      if(!r.ok)return null; const j=await r.json(); this.user=j.user; return j.user;}catch(e){return null;} },
+  async logout(){ try{await fetch(API_BASE+'/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch(e){}
+    this.clear(); },
+  clear(){ this.token=null; this.user=null; try{sessionStorage.removeItem('perm_authed');}catch(e){} },
+};
+(function(){
+  const _f=window.fetch.bind(window);
+  window.fetch=function(input,init){
+    init=init||{};
+    try{
+      const url=(typeof input==='string')?input:(input&&input.url)||'';
+      // 우리 API 요청에만 붙인다(외부 주소에 토큰을 흘리지 않는다)
+      if(AUTH.token && (url.startsWith('/api/')||url.indexOf(API_BASE+'/api/')===0)){
+        const h=new Headers(init.headers||(typeof input!=='string'&&input.headers)||{});
+        if(!h.has('Authorization'))h.set('Authorization','Bearer '+AUTH.token);
+        init=Object.assign({},init,{headers:h});
+      }
+    }catch(e){}
+    return _f(input,init).then(r=>{
+      // ★만료·폐기 → 조용히 넘기지 않고 로그인 화면으로 되돌린다
+      if(r&&r.status===401&&AUTH.token){ AUTH.clear();
+        try{if(!window.__authRedirecting){window.__authRedirecting=1;
+          alert('로그인이 만료되었습니다. 다시 로그인해 주세요.'); location.reload();}}catch(e){} }
+      return r;
+    });
+  };
+})();
 const won = n => (n==null||n==='')?'-':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:2});
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // ★전역 날짜 기본값(모든 화면 통일): 일자=당일 · 월=당월 · 기간=당월1일~당일
@@ -32,6 +77,24 @@ const planBase = async () => {
 const planBaseIso = () => (_PLAN_BASE ? _PLAN_BASE.iso : nowCD());   // 동기 접근(미로드 시 당일 폴백)
 // ★날짜 input(type=date)은 브라우저 네이티브 키보드 편집에 맡김: 세그먼트(연/월/일) 클릭 후 숫자 입력·연속 타이핑·화살표·달력 모두 네이티브 지원.
 //   (과거 전역 커스텀 핸들러가 모든 숫자키 preventDefault→ 월/일 세그먼트만 고치기 불가·YYMMDD 오인 문제. 2026-08-14 제거. 커스텀 자동채움 재도입 시 세그먼트 편집을 막지 말 것.)
+// ★날짜칸 change 는 **디바운스해서** 받는다 — bindDate(el, fn)
+//   Chrome 은 값이 유효해지는 순간마다 change 를 쏜다. 일 세그먼트에 '2' 를 치면 그 순간
+//   260802 로 유효 → change → 조회·재렌더 → **입력칸이 다시 그려져 캐럿이 날아간다**.
+//   그래서 두 자리를 치면 첫 자리만 먹었다(2026-08-30 실측: d_to 가 260801→260805→260802→
+//   260808→260828 로 매 타건마다 무거운 조회. 브라우저가 계속 도는 것도 이 증상).
+//   ⟹ 마지막 입력 후 조용해지면 실행한다. 키를 막지 않으므로 네이티브 세그먼트 편집은 그대로다.
+//   날짜/월 입력이 조회·재렌더를 유발한다면 **예외 없이 이걸 쓴다**(직접 onchange 금지).
+//   ★fn 에는 change 이벤트와 같은 모양({target:el})을 넘긴다 — 기존 `e=>...e.target.value`
+//     핸들러를 그대로 옮겨 붙일 수 있게(호출부를 안 고쳐도 된다).
+const bindDate=(el,fn,ms=800)=>{ if(!el)return el; let t=null;
+  const run=()=>{t=null;fn({target:el});};
+  el.onchange=()=>{ clearTimeout(t); t=setTimeout(run,ms); };
+  // 포커스를 벗어나면 기다리지 않고 바로(달력 선택·탭 이동 뒤 지연 체감 제거)
+  el.onblur=()=>{ if(t){clearTimeout(t);run();} };
+  return el; };
+const bindDates=(els,fn,ms=800)=>{ (els||[]).forEach(e=>bindDate(e,fn,ms)); };
+
+  window.bindDate=bindDate; window.bindDates=bindDates;   // ★날짜칸 공용 바인더(§3)
 const TYPE_NM={RAW:'원자재',SUB:'부자재',CON:'소모품',S_ASSY:'반제품',PROD:'완제품'};
 // 용접봉 판정(품명 '용접봉' 포함). 신 원칙: 용접봉=재료비지만 BOM 아닌 용접공정 종속 → 화면에서 기본 숨김(데이터는 보존). [[newerp-weld-cost-split]]
 const isWeld=nm=>/용접봉/.test(nm||'');
@@ -128,7 +191,6 @@ const MODULES=[
  {id:'pur',nm:'구매/자재',ic:'🧾',subs:[
    {id:'mat',ic:'📦',nm:'자재목록조회'},
    {id:'matledger',ic:'📒',nm:'자재수불장'},
-   {id:'matclose',ic:'📗',nm:'자재 일마감(이동평균)'},
    {id:'dispatchdetail',ic:'📋',nm:'자재불출명세서'},
    {id:'dispatch',ic:'📤',nm:'자재불출집계표'},
    {id:'receiptdetail',ic:'🧾',nm:'자재입고명세서'},
@@ -168,6 +230,7 @@ const MODULES=[
    // {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},   // ★2026-08-28 메뉴 숨김(요청). SCREEN.setinreq 는 유지 — 되살릴 땐 이 줄만 해제
    // 자재세트입고관리는 구매/자재 메뉴로 이동(레거시 배치와 동일) — 2026-08-29
    {id:'sagubadjust',ic:'🛠️',nm:'협력사사급재고관리'},
+   {id:'sagubledger',ic:'📊',nm:'사급 수불장'},
  ]},
  {id:'prod',nm:'생산',ic:'🏭',subs:[
    {id:'prodstock',ic:'🏭',nm:'생산재고조회'},
@@ -437,20 +500,20 @@ function closeTab(id){
 /* ================= 권한(RBAC) ================= */
 const ROLES=['시스템관리자','원가개발','영업','구매/자재','생산','품질','조회전용','협력사'];
 // ★슈퍼 계정(전권) + 개발용 자동 로그인 계정. DEV_AUTOLOGIN을 ''로 비우면 일반 로그인으로 전환.
-const SUPER_USER={id:'super',pw:'super',nm:'슈퍼관리자',type:'내부',dept:'전산',pos:'대표',roles:['시스템관리자'],partner:'',email:'pncind@pncind.co.kr',tel:'',status:'사용'};
+/* ★비밀번호 없음 — 대조는 서버(nx.app_user)에서만 한다 */
+const SUPER_USER={id:'super',nm:'슈퍼관리자',type:'내부',dept:'전산',pos:'대표',roles:['시스템관리자'],partner:'',email:'pncind@pncind.co.kr',tel:'',status:'사용'};
 const DEV_AUTOLOGIN='';   // ''=일반 로그인(다중사용자 병행). 개발 단독확인시만 'super'
 const SEED_USERS=[
   SUPER_USER,
-  {id:'admin',pw:'1234',nm:'관리자',type:'내부',dept:'전산',pos:'관리자',roles:['시스템관리자'],partner:'',email:'admin@pncind.co.kr',tel:'',status:'사용'},
-  {id:'kdev',pw:'1234',nm:'김개발',type:'내부',dept:'원가개발',pos:'대리',roles:['원가개발','조회전용'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'ysales',pw:'1234',nm:'이영업',type:'내부',dept:'영업',pos:'과장',roles:['영업'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'ysales2',pw:'1234',nm:'최영업',type:'내부',dept:'영업',pos:'사원',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'jbuy',pw:'1234',nm:'박구매',type:'내부',dept:'구매/자재',pos:'사원',roles:['구매/자재'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'miraero',pw:'1234',nm:'미래정밀',type:'협력사',dept:'',pos:'',roles:['협력사'],partner:'미래정밀',email:'',tel:'',status:'사용'},
-  {id:'TEST1',pw:'pnc1!',nm:'테스트1(전권)',type:'내부',dept:'전산',pos:'',roles:['시스템관리자'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'TEST2',pw:'pnc2!',nm:'테스트2(자재·협력사)',type:'내부',dept:'구매/자재',pos:'',roles:['구매/자재'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'TEST3',pw:'pnc3!',nm:'테스트3(생산)',type:'내부',dept:'생산',pos:'',roles:['생산'],partner:'',email:'',tel:'',status:'사용'},
-  {id:'TEST4',pw:'pnc4!',nm:'테스트4(개발)',type:'내부',dept:'원가개발',pos:'',roles:['원가개발'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'admin',nm:'관리자',type:'내부',dept:'전산',pos:'관리자',roles:['시스템관리자'],partner:'',email:'admin@pncind.co.kr',tel:'',status:'사용'},
+  {id:'kdev',nm:'김개발',type:'내부',dept:'원가개발',pos:'대리',roles:['원가개발','조회전용'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'ysales',nm:'이영업',type:'내부',dept:'영업',pos:'과장',roles:['영업'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'ysales2',nm:'최영업',type:'내부',dept:'영업',pos:'사원',roles:['조회전용'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'jbuy',nm:'박구매',type:'내부',dept:'구매/자재',pos:'사원',roles:['구매/자재'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'TEST1',nm:'테스트1(전권)',type:'내부',dept:'전산',pos:'',roles:['시스템관리자'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'TEST2',nm:'테스트2(자재·협력사)',type:'내부',dept:'구매/자재',pos:'',roles:['구매/자재'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'TEST3',nm:'테스트3(생산)',type:'내부',dept:'생산',pos:'',roles:['생산'],partner:'',email:'',tel:'',status:'사용'},
+  {id:'TEST4',nm:'테스트4(개발)',type:'내부',dept:'원가개발',pos:'',roles:['원가개발'],partner:'',email:'',tel:'',status:'사용'},
 ];
 // 역할 → 편집권 부여 모듈(그룹). 시스템관리자=전권(별도). 미설정 모듈=조회만.
 const ROLE_MOD={'구매/자재':['pur','partner'],'생산':['prod','gagong'],'원가개발':['dev'],'영업':['sales'],'품질':['qc'],'경영':['mgmt']};
@@ -470,7 +533,11 @@ const PERM={
       localStorage.setItem('perm_users',JSON.stringify(merged));return true;}}catch(e){}return false;},
   saveUsersToServer(users){try{return fetch(API_BASE+'/api/perm/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({users,by:this.userId})});}catch(e){return Promise.resolve();}},
   setUser(id){this.userId=id;localStorage.setItem('perm_userId',id);},
-  currentUser(){return getUsers().find(u=>u.id===this.userId)||{id:'-',nm:'미지정',roles:['시스템관리자']};},
+  // ★서버가 준 사용자를 우선한다 — partner_code(거래처코드)가 여기 실려 온다.
+  //   로컬 시드는 서버 응답이 없을 때의 역할 표시용일 뿐, 권한 판정의 근거가 아니다(판정은 서버).
+  currentUser(){const a=(typeof AUTH!=='undefined')&&AUTH.user;
+    if(a&&a.id===this.userId)return a;
+    return getUsers().find(u=>u.id===this.userId)||{id:'-',nm:'미지정',roles:['시스템관리자']};},
   isAdmin(){return (this.currentUser().roles||[]).includes('시스템관리자');},
   can(sid,act){ if(this.isAdmin())return true;   // TEST1(시스템관리자)=전권
     const pm=(this.perms[this.userId]||{})[sid];

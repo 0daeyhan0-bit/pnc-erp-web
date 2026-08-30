@@ -391,6 +391,18 @@ def _mk5(mk, has_bom=False):
     g = _MK_GUBUN.get(str(mk or "").strip())
     return g if g else ("제작" if has_bom else "구매")
 
+def _gub2mk(gub):
+    """편성 gubun(자체/제작/외주/구매/사급/외주직납) → make_type(1~5). 신규 SUB 제작처 저장용(2026-08-30).
+       ★품목 make_type이 있으면 그걸 우선(정확); 이 변환은 make_type 없는 진짜 신규 SUB에만."""
+    g = str(gub or "").strip()
+    if not g: return ""
+    if "직납" in g: return "5"
+    if "외주" in g: return "2"          # '외주','외주(유상사급)' 포함
+    if "사급" in g: return "4"
+    if "구매" in g: return "3"
+    if "자체" in g or "제작" in g: return "1"
+    return ""
+
 _SCHEMA_READY = False   # ★속도: 스키마 멱등체크는 프로세스당 1회만(매 요청 11 메타 라운드트립 ~104ms 제거). 스키마는 런타임 불변.
 def _ensure_route_tbl(cur):
     global _SCHEMA_READY
@@ -1183,16 +1195,24 @@ def sourcing_route_approve(payload: dict = Body(...)):
             _bump_approved_seq(cur, str(r0[0]).strip(), int(r0[1] or 0))
             # ★신규 SUB mint(정본 S 발급) — 승인 시점에만. dedup-safe(sig UNIQUE=중복불가). 이미 S코드면 skip.
             from routers.bom import _sub_signature, _mint_sub
-            cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
-            for a, b in [(int(x[0]), str(x[1]).strip()) for x in cur.fetchall()]:
+            b_assy = str(r0[0]).strip(); b_route = int(r0[1] or 0)   # 출생라벨 (ASSY, route)
+            cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')), ISNULL(gubun,'') FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", rid)
+            for a, b, gub in [(int(x[0]), str(x[1]).strip(), str(x[2]).strip()) for x in cur.fetchall()]:
                 if b[:1] == 'S' and b[1:].isdigit(): continue
                 cur.execute("SELECT ISNULL(child_item,''), ISNULL(qty,1) FROM nx.sourcing_route_line WHERE route_id=? AND parent_line=? AND node_kind<>'SUB'", rid, a)
                 ch = [{"item": str(x[0]).strip(), "qty": float(x[1] or 1)} for x in cur.fetchall() if str(x[0]).strip()]
                 if not ch: continue
                 cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", rid, b)
                 wd = [{"weld_item": str(x[0]).strip(), "weld_st": float(x[1] or 0), "use_qty": float(x[2] or 0)} for x in cur.fetchall()]
-                sig = _sub_signature(cur, ch, wd)
-                newcode, is_new = _mint_sub(cur, sig, b, b)
+                # ★제작처(own_mk): 품목 make_type 우선(정확·in_cust검증), 없으면 편성 gubun→make_type 변환·저장(사장님 2026-08-30)
+                cur.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", b)
+                _mr = cur.fetchone(); own_mk = ((_mr[0] or '').strip() if _mr else '')
+                if not own_mk:
+                    own_mk = _gub2mk(gub)
+                    if own_mk:
+                        cur.execute("UPDATE nx.item SET make_type=? WHERE item_code=? AND ISNULL(make_type,'')=''", own_mk, b)
+                sig = _sub_signature(cur, ch, wd, own_mk=own_mk)
+                newcode, is_new = _mint_sub(cur, sig, b, b, birth_assy=b_assy, birth_route=b_route)
                 if newcode and newcode != b:
                     cur.execute("UPDATE nx.sourcing_route_line SET child_item=?, sub_item=?, child_name=? WHERE route_id=? AND line_id=?", newcode, newcode, newcode, rid, a)
                     cur.execute("UPDATE nx.sourcing_route_proc SET node_item=? WHERE route_id=? AND node_item=?", newcode, rid, b)
@@ -1923,6 +1943,11 @@ def _ensure_sub_price_tbl(cur):
     # else: 이미 vendor_code 보유(override 가능 스키마) → 유지
     _SUB_PRICE_READY = True
 
+# ★2026-08-29 단가 소스 이관: 매입단가 조회 7곳을 미러 nx.PR_M_ITEM_COST →
+#   **정본 nx.price_item('매입')** 으로 옮겼다(DO_NOT_USE §18). main_flag 는 승격 시 백필됨.
+#   ★정렬에 vendor_code tiebreak 를 추가했다 — 종전 정렬(in_cust→main_flag→적용일)은
+#     셋 다 동점인 품목에서 **비결정적**이었다(EAD37660027: 거래처 2197/2198/2326 이
+#     같은날·같은 flag·매입처 미지정 → 3,683 vs 2.81 = 1,300배가 실행마다 갈릴 수 있었다).
 # ============ ★★통합 단가 테이블 nx.item_price (레거시 PR_M_ITEM_COST 계승) ============
 # 흩어진 nx 단가(sub_price=ASSY매입 · sagub_price=사급 · profile 가격칸)를 하나로 통합.
 # 컬럼: item_code · vendor_code(''=공통/지정=업체예외) · price_gubun(매입/판매/사급) · apply_ym(적용월 시계열) · price · currency · note.
@@ -2312,12 +2337,13 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             #   없으면(빈 in_cust or 그 거래처 단가 없음) 대표단가(MAIN_FLAG)/최신 폴백. 실측 10%(1029건) 불일치만 교정·49%/41% 불변.
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
                 SELECT LTRIM(RTRIM(pc.ITEM_CODE)) ITEM_CODE, pc.ITEM_COST, pc.COST_APPLY_YMD apply, ISNULL(pc.CURRENCY,'') curr, ISNULL(pc.CUST_CODE,'') cust,
-                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.ITEM_CODE))
-                    ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.CUST_CODE))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
-                             ISNULL(pc.MAIN_FLAG,'') DESC, pc.COST_APPLY_YMD DESC) rn
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST pc
-                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code COLLATE DATABASE_DEFAULT=LTRIM(RTRIM(pc.ITEM_CODE)) COLLATE DATABASE_DEFAULT
-                WHERE pc.COST_TAG='1' AND pc.COST_APPLY_YMD<=? AND LTRIM(RTRIM(pc.ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.item_code))
+                    ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.vendor_code))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
+                             ISNULL(pc.main_flag,'') DESC, pc.apply_ymd DESC,
+                             LTRIM(RTRIM(ISNULL(pc.vendor_code,''))) ASC) rn
+                FROM PARTNER_ERP_TEST3.nx.price_item pc
+                LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code COLLATE DATABASE_DEFAULT=LTRIM(RTRIM(pc.item_code)) COLLATE DATABASE_DEFAULT
+                WHERE pc.price_type='매입' AND pc.apply_ymd<=? AND LTRIM(RTRIM(pc.item_code)) IN ({ph})) z WHERE rn=1""", asof, *ch)
             for r in cur.fetchall():
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "apply": str(r[2] or ""), "curr": r[3], "cust": str(r[4]).strip()}
     finally:
@@ -2347,10 +2373,10 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             for i in range(0, len(pitems), 500):
                 ich = pitems[i:i+500]; iph = ",".join("?" * len(ich))
                 cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST, apply, curr FROM (
-                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST, COST_APPLY_YMD apply, ISNULL(CURRENCY,'') curr,
-                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
-                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, LTRIM(RTRIM(ISNULL(vendor_code,''))) cust, price ITEM_COST, apply_ymd apply, ISNULL(currency,'') curr,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) ORDER BY apply_ymd DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type='매입' AND apply_ymd<=?
+                      AND LTRIM(RTRIM(item_code)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})) z WHERE rn=1""",
                     asof, *ich, *pvend)
                 for r in cur2.fetchall():
                     vprice[(str(r[0]).strip(), str(r[1]).strip())] = {"cost": (float(r[2]) if r[2] is not None else None), "apply": str(r[3] or ""), "curr": r[4]}
@@ -2496,10 +2522,10 @@ def sourcing_route_order(item: str = Query(...), route_id: int = Query(...), ymd
             for i in range(0, len(saved_items), 400):
                 ich = saved_items[i:i + 400]; iph = ",".join("?" * len(ich))
                 cur2.execute(f"""SELECT ITEM_CODE, cust, ITEM_COST FROM (
-                    SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, LTRIM(RTRIM(ISNULL(CUST_CODE,''))) cust, ITEM_COST,
-                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)), LTRIM(RTRIM(ISNULL(CUST_CODE,''))) ORDER BY COST_APPLY_YMD DESC) rn
-                    FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=?
-                      AND LTRIM(RTRIM(ITEM_CODE)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})) z WHERE rn=1""",
+                    SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, LTRIM(RTRIM(ISNULL(vendor_code,''))) cust, price ITEM_COST,
+                      ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)), LTRIM(RTRIM(ISNULL(vendor_code,''))) ORDER BY apply_ymd DESC) rn
+                    FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type='매입' AND apply_ymd<=?
+                      AND LTRIM(RTRIM(item_code)) IN ({iph}) AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})) z WHERE rn=1""",
                     asof, *ich, *saved_vcs)
                 for r in cur2.fetchall():
                     vprice[(str(r[0]).strip(), str(r[1]).strip())] = (float(r[2]) if r[2] is not None else None)
@@ -2609,15 +2635,15 @@ def _priced_vendors(item_code, vendors, asof=None):
     cn = _conn(); cur = cn.cursor()
     try:
         vph = ",".join("?" * len(vendors))
-        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(CUST_CODE,''))) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-              AND LTRIM(RTRIM(ISNULL(CUST_CODE,''))) IN ({vph})""", item_code, asof, *vendors)
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(ISNULL(vendor_code,''))) FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL
+              AND LTRIM(RTRIM(ISNULL(vendor_code,''))) IN ({vph})""", item_code, asof, *vendors)
         priced = set(str(r[0]).strip() for r in cur.fetchall())
         cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item_code)
         r = cur.fetchone(); cur_vc = str(r[0]).strip() if r else ""
         if cur_vc in vendors and cur_vc not in priced:
-            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL""", item_code, asof)
+            cur.execute("""SELECT TOP 1 1 FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL""", item_code, asof)
             if cur.fetchone(): priced.add(cur_vc)
         return priced
     finally:
@@ -2632,17 +2658,18 @@ def sourcing_item_vendor_price(item: str = Query(...), vendor: str = Query(...),
     asof = _d6(ymd) if ymd.strip() else datetime.now().strftime("%y%m%d")
     cn = _conn(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-            WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND LTRIM(RTRIM(ISNULL(CUST_CODE,'')))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-            ORDER BY COST_APPLY_YMD DESC""", item, vendor, asof)
+        cur.execute("""SELECT TOP 1 price, apply_ymd, ISNULL(currency,'') FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND LTRIM(RTRIM(ISNULL(vendor_code,'')))=? AND apply_ymd<=? AND price IS NOT NULL
+            ORDER BY apply_ymd DESC""", item, vendor, asof)
         r = cur.fetchone()
         if r: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r[0]), "apply": str(r[1] or ""), "currency": r[2]}
         cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item)
         rr = cur.fetchone(); cur_vc = str(rr[0]).strip() if rr else ""
         if cur_vc == vendor:
-            cur.execute("""SELECT TOP 1 ITEM_COST, COST_APPLY_YMD, ISNULL(CURRENCY,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST
-                WHERE COST_TAG='1' AND LTRIM(RTRIM(ITEM_CODE))=? AND COST_APPLY_YMD<=? AND ITEM_COST IS NOT NULL
-                ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC""", item, asof)
+            cur.execute("""SELECT TOP 1 price, apply_ymd, ISNULL(currency,'') FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL
+                ORDER BY ISNULL(main_flag,'') DESC, apply_ymd DESC,
+                         LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC""", item, asof)
             r2 = cur.fetchone()
             if r2: return {"item": item, "vendor": vendor, "reg": True, "cost": float(r2[0]), "apply": str(r2[1] or ""), "currency": r2[2]}
         return {"item": item, "vendor": vendor, "reg": False, "cost": None}
@@ -2766,12 +2793,12 @@ def sourcing_sub_match(route_id: int = Query(...)):
     nx = _nx(); cur = nx.cursor()
     try:
         _ensure_route_tbl(cur)
-        cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", route_id)
-        my_subs = [(int(r[0]), str(r[1]).strip()) for r in cur.fetchall()]
+        cur.execute("SELECT line_id, ISNULL(sub_item,ISNULL(child_item,'')), ISNULL(gubun,'') FROM nx.sourcing_route_line WHERE route_id=? AND node_kind='SUB'", route_id)
+        my_subs = [(int(r[0]), str(r[1]).strip(), str(r[2]).strip()) for r in cur.fetchall()]
         cur.execute("SELECT route_id, line_id, ISNULL(sub_item,ISNULL(child_item,'')) FROM nx.sourcing_route_line WHERE node_kind='SUB'")
         all_subs = [(int(r[0]), int(r[1]), str(r[2]).strip()) for r in cur.fetchall()]
         matches = []
-        for (sline, scode) in my_subs:
+        for (sline, scode, sgub) in my_subs:
             mem = _sub_members(cur, route_id, sline)
             if not mem: continue
             # ① 글로벌 레지스트리 시그니처 대조 (정본 S 강제재사용)
@@ -2780,12 +2807,15 @@ def sourcing_sub_match(route_id: int = Query(...)):
             cur.execute("SELECT ISNULL(weld_item,''), ISNULL(st,0), ISNULL(use_qty,0) FROM nx.sourcing_route_weld WHERE route_id=? AND node_item=?", route_id, scode)
             wd = [{"weld_item": str(r[0]).strip(), "weld_st": float(r[1] or 0), "use_qty": float(r[2] or 0)} for r in cur.fetchall()]
             if ch:
-                sig = _sub_signature(cur, ch, wd)
-                cur.execute("SELECT sub_code FROM nx.sub_registry WHERE sig=?", sig)
+                cur.execute("SELECT ISNULL(make_type,'') FROM nx.item WHERE item_code=?", scode)
+                _mr = cur.fetchone(); own_mk = ((_mr[0] or '').strip() if _mr else '') or _gub2mk(sgub)
+                sig = _sub_signature(cur, ch, wd, own_mk=own_mk)
+                cur.execute("SELECT sub_code, ISNULL(birth_label,''), ISNULL(is_shared,0), ISNULL(ref_count,0) FROM nx.sub_registry WHERE sig=?", sig)
                 rr = cur.fetchone()
                 if rr and (rr[0] or '').strip() and (rr[0] or '').strip() != scode:
                     matches.append({"sub_line": sline, "sub_item": scode, "member_count": len(mem),
-                                    "match_code": (rr[0] or '').strip(), "match_route_id": 0, "match_kind": "registry"})
+                                    "match_code": (rr[0] or '').strip(), "match_route_id": 0, "match_kind": "registry",
+                                    "birth_label": (rr[1] or '').strip(), "is_shared": bool(rr[2]), "ref_count": int(rr[3] or 0)})
                     continue
             # ② 후보끼리 대조(기존)
             prc = _node_procs_map(cur, route_id, scode) if scode else {}

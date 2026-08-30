@@ -62,7 +62,7 @@ SCREEN.lgbomview=(c)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
   const WK={DMZ:"DMZ(SAC)",DGZ:"DGZ(RAC)"};
-  let st={q:"",werks:"",models:[],sel:null,modelnm:"",tree:[],msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
+  let st={q:"",werks:"",models:[],sel:null,modelnm:"",tree:[],vers:[],selVer:"",msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
   const doUpload=async(f)=>{if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||"")){st.upmsg="❌ 엑셀 파일(.xlsx/.xls)만 업로드할 수 있습니다";draw();return;}
     st.uploading=true;st.upmsg="";draw();
@@ -77,10 +77,14 @@ SCREEN.lgbomview=(c)=>{
     try{const r=await fetch(`${API}/api/lgbom/search?q=${encodeURIComponent(st.q)}&werks=${st.werks}`);
       const j=await r.json();st.models=j.rows||[];}catch(e){st.models=[];}
     st.loading=false;draw();};
-  const openTree=async(m)=>{st.sel=m;st.tree=[];st.tloading=true;draw();
-    try{const r=await fetch(`${API}/api/lgbom/tree?model=${encodeURIComponent(m.model)}&werks=${encodeURIComponent(m.werks)}`);
+  const openTree=async(m,ver)=>{st.sel=m;st.selVer=ver||"";st.tree=[];st.tloading=true;draw();
+    try{const qs=`model=${encodeURIComponent(m.model)}&werks=${encodeURIComponent(m.werks)}`+(ver?`&ver_from=${encodeURIComponent(ver)}`:"");
+      const r=await fetch(`${API}/api/lgbom/tree?${qs}`);
       const j=await r.json();st.modelnm=j.modelnm||"";st.tree=buildTree(j.rows||[],m.model);}catch(e){st.tree=[];}
     st.tloading=false;draw();};
+  const loadVers=async(m)=>{st.vers=[];
+    try{const r=await fetch(`${API}/api/lgbom/versions?model=${encodeURIComponent(m.model)}&werks=${encodeURIComponent(m.werks)}`);st.vers=(await r.json()).rows||[];}catch(e){st.vers=[];}
+    draw();};
   // parent_code→child_code 로 트리 조립 후 DFS 평탄화(depth 포함)
   const buildTree=(rows,model)=>{
     const byParent={};rows.forEach(r=>{(byParent[r.parent_code]=byParent[r.parent_code]||[]).push(r);});
@@ -110,13 +114,19 @@ SCREEN.lgbomview=(c)=>{
      </div>
      ${st.upmsg?`<div class="page-sub" style="color:${st.upmsg.startsWith('✅')?'#1c7c3a':'#c0392b'};font-weight:600">${esc(st.upmsg)}</div>`:''}
      <div style="display:flex;gap:10px;align-items:flex-start">
-      <div class="panel" style="flex:0 0 380px;min-width:0"><div class="panel-h">모델 ${st.loading?"(조회중…)":`(${st.models.length})`}</div><div class="panel-b" style="padding:0">
-       <div class="grid-wrap" style="max-height:560px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
+      <div style="flex:0 0 380px;min-width:0;display:flex;flex-direction:column;gap:10px">
+      <div class="panel"><div class="panel-h">모델 ${st.loading?"(조회중…)":`(${st.models.length})`}</div><div class="panel-b" style="padding:0">
+       <div class="grid-wrap" style="max-height:370px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th data-key="model">모델</th><th class="center" data-key="werks">공장</th><th class="num" data-key="child_cnt">구성수</th></tr></thead>
        <tbody>${st.models.map(m=>`<tr class="rowsel ${st.sel&&st.sel.model===m.model&&st.sel.werks===m.werks?'on':''}" data-m="${esc(m.model)}" data-w="${esc(m.werks)}" style="cursor:pointer">
          <td><b>${esc(m.model)}</b>${m.modelnm?`<div class="cap" style="font-size:11px;color:var(--muted);max-width:230px;overflow:hidden;text-overflow:ellipsis" title="${esc(m.modelnm)}">${esc(m.modelnm)}</div>`:""}</td>
          <td class="center">${WK[m.werks]||m.werks}</td><td class="num">${m.child_cnt}</td></tr>`).join("")||`<tr><td colspan="3" style="padding:16px;color:var(--muted)">${st.loading?"":"조회 결과 없음 — 상위품번으로 검색"}</td></tr>`}
        </tbody></table></div></div></div>
+      <div class="panel"><div class="panel-h">일자별 BOM 버전 ${st.sel?`— ${esc(st.sel.model)}`:""} ${st.vers.length?`(${st.vers.length})`:""} <span style="font-size:11px;color:var(--muted);font-weight:400">이력 추적</span></div><div class="panel-b" style="padding:0">
+       <div class="grid-wrap" style="max-height:170px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr><th>유효일자</th><th class="num">구성수</th></tr></thead>
+       <tbody>${st.sel?(st.vers.map(v=>`<tr class="verrow ${st.selVer===v.ver_from?'on':''}" data-v="${esc(v.ver_from)}" style="cursor:pointer"><td><b>${esc(v.ver_from)}</b>${st.selVer===v.ver_from?' <span style="color:#1c47a0;font-size:11px">◀ 조회중</span>':''}</td><td class="num">${v.child_cnt}</td></tr>`).join("")||`<tr><td colspan="2" style="padding:12px;color:var(--muted)">버전 이력 없음</td></tr>`):`<tr><td colspan="2" style="padding:12px;color:var(--muted)">← 모델 선택 시 일자별 버전 표시</td></tr>`}
+       </tbody></table></div></div></div>
+      </div>
       <div class="panel" style="flex:1;min-width:0"><div class="panel-h">BOM 전개 ${st.sel?`— ${esc(st.sel.model)} ${st.modelnm?"("+esc(st.modelnm)+")":""}`:""} ${st.tloading?"(전개중…)":st.tree.length?`(${st.tree.length}행)`:""}</div><div class="panel-b" style="padding:0">
        ${st.sel?`<div class="grid-wrap" style="max-height:560px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th class="center">Lv</th><th>자재코드</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="center">단위</th><th class="center">공급</th><th class="center">최하위</th><th class="center">상태</th><th class="center">유효기간</th></tr></thead>
@@ -153,7 +163,8 @@ SCREEN.lgbomview=(c)=>{
       dz.ondragover=e=>{e.preventDefault();dz.style.background="#e3f0ff";dz.style.borderColor="#1c7c3a";dz.style.color="#1c7c3a";};
       dz.ondragleave=()=>{dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";};
       dz.ondrop=e=>{e.preventDefault();dz.style.background="#f4f9fe";dz.style.borderColor="#8fb4d6";dz.style.color="#5a7597";const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f)doUpload(f);};}
-    c.querySelectorAll("tr.rowsel").forEach(tr=>tr.onclick=()=>{const m=st.models.find(v=>v.model===tr.dataset.m&&v.werks===tr.dataset.w);if(m)openTree(m);});
+    c.querySelectorAll("tr.rowsel").forEach(tr=>tr.onclick=()=>{const m=st.models.find(v=>v.model===tr.dataset.m&&v.werks===tr.dataset.w);if(m){openTree(m);loadVers(m);}});
+    c.querySelectorAll("tr.verrow").forEach(tr=>tr.onclick=()=>{if(st.sel)openTree(st.sel,tr.dataset.v);});
     c.querySelectorAll("thead th").forEach(th=>{addResizer(th);const k=th.dataset.key;if(k){th.style.cursor="pointer";th.title="더블클릭 정렬·경계드래그 너비조절";th.ondblclick=()=>{st.msortDir=(st.msortKey===k&&st.msortDir===1)?-1:1;st.msortKey=k;draw();};}});
   };
   draw();
@@ -192,7 +203,7 @@ SCREEN.bomview=(c)=>SCREEN.unifybom(c,true);
 
 /* ===== 도면/문서 관리 — 탭 통합(설계도면 / 품목시방). 조회+관리 = 권한 분기 ===== */
 SCREEN.docmgr=(c)=>{
-  const TABS=[['dwg','📐 설계도면'],['itemspec','📎 품목시방']];
+  const TABS=[['dwg','설계도면'],['itemspec','품목시방']];
   let tab='dwg';
   c.innerHTML=`<div id="dm-tabs" style="display:flex;gap:4px;padding:6px 0 0;border-bottom:2px solid #dce3ee;margin-bottom:10px"></div><div id="dm-body"></div>`;
   const tb=c.querySelector('#dm-tabs'), body=c.querySelector('#dm-body');
@@ -236,15 +247,13 @@ SCREEN.drawingdoc=(host)=>{
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('drawingdoc'):true;
     host.innerHTML=`
-     <div class="page-title">📐 설계도면조회 <span style="font-size:12px;color:var(--muted);font-weight:400">도면 파일 조회·다운로드·업로드 · w_pr_master_200</span></div>
-     <div class="page-sub">품번별 도면. <b>일반도면=개발(업로드·삭제 가능)</b> · <b>시방도면=품질(시방변경관리에서 업로드/삭제)</b>. 신규 저장=NAS(현재 <code>F:\\NEW_ERP_FILES</code>), 기존은 레거시 blob 다운로드.</div>
+     <div class="page-title">설계도면조회 <span style="font-size:12px;color:var(--muted);font-weight:400">도면 파일 조회·다운로드·업로드 · w_pr_master_200</span></div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
-       <label class="tl">품번·파일명</label><input class="inp" id="dd-item" value="${esc(st.item)}" placeholder="품번/파일명 검색 (빈칸=전체 최근)" style="width:230px">
-       <button class="btn" id="dd-go">🔍 조회</button>
-       ${ed?`<div class="spacer"></div><label class="tl">일반도면 업로드</label><input type="file" id="dd-file" style="width:210px"><button class="btn" id="dd-up" style="background:#1c47a0;color:#fff">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <label class="tl">품번·파일명</label><input class="inp" id="dd-item" value="${esc(st.item)}" placeholder="품번/파일명" style="width:230px">
+       <button class="btn" id="dd-go">조회</button>
+       ${ed?`<div class="spacer"></div><span id="dd-drop" title="도면 파일을 여기로 끌어다 놓거나 클릭" style="border:2px dashed #1c7c3a;border-radius:8px;padding:10px 24px;min-width:260px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer">${st.file?esc(st.file.name):'도면을 여기로 드래그&드롭'}</span><input type="file" id="dd-file" style="display:none"><button class="btn xls" id="dd-up">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="toolbar" style="margin-top:2px"><span class="rowcount">${won(st.cnt)}건${st.item.trim()?'':' — 품번을 조회하세요'}</span></div>
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
         <th>구분</th><th>파일명</th><th>시방관리번호</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
@@ -259,8 +268,13 @@ SCREEN.drawingdoc=(host)=>{
     g('#dd-go').onclick=()=>{st.item=g('#dd-item').value;load();};
     g('#dd-item').onkeyup=e=>{if(e.key==='Enter')g('#dd-go').click();};
     if(ed){
-      const fe=g('#dd-file');if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;};
-      const ub=g('#dd-up');if(ub)ub.onclick=upload;
+      const fe=g('#dd-file'),ub=g('#dd-up'),dz=g('#dd-drop');
+      if(fe)fe.onchange=e=>{const f=e.target.files[0]||null;if(f){st.file=f;upload();}};   // 선택 즉시 업로드(LG BOM식)
+      if(ub)ub.onclick=upload;
+      if(dz&&fe){dz.onclick=()=>fe.click();
+        dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0df';};
+        dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
+        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;upload();}};}   // 드롭 즉시 업로드
     }
     host.querySelectorAll('.dd-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.dd-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));
@@ -301,15 +315,13 @@ SCREEN.itemspec=(host)=>{
   const render=()=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('itemspec'):true;
     host.innerHTML=`
-     <div class="page-title">📎 품목시방관리 <span style="font-size:12px;color:var(--muted);font-weight:400">품목 시방(PPT)·첨부문서 · w_pr_master_210</span></div>
-     <div class="page-sub">품번별 첨부문서. <b>시방(PPT)</b>=DRAWING.PR_M_SIBANG · <b>품목첨부 14종</b>(Q-map·QC공정도·XRF·작업표준서·검사성적서·도면 등, PR010) · 신규=nx.doc(<code>F:\\NEW_ERP_FILES</code>). 기존은 레거시 blob 다운로드.</div>
+     <div class="page-title">품목시방관리 <span style="font-size:12px;color:var(--muted);font-weight:400">품목 시방(PPT)·첨부문서 · w_pr_master_210</span></div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
-       <label class="tl">품목번호</label><input class="inp" id="is-item" value="${esc(st.item)}" placeholder="품번" style="width:200px">
-       <button class="btn" id="is-go">🔍 조회</button>
-       ${ed?`<div class="spacer"></div><label class="tl">첨부 업로드</label><input type="file" id="is-file" style="width:210px"><button class="btn" id="is-up" style="background:#1c47a0;color:#fff">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
+       <label class="tl">품번·파일명</label><input class="inp" id="is-item" value="${esc(st.item)}" placeholder="품번/파일명" style="width:230px">
+       <button class="btn" id="is-go">조회</button>
+       ${ed?`<div class="spacer"></div><span id="is-drop" title="첨부 파일을 여기로 끌어다 놓거나 클릭" style="border:2px dashed #1c7c3a;border-radius:8px;padding:10px 24px;min-width:260px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer">${st.file?esc(st.file.name):'첨부를 여기로 드래그&드롭'}</span><input type="file" id="is-file" style="display:none"><button class="btn xls" id="is-up">⬆ 업로드</button>`:`<div class="spacer"></div><span style="color:#c0392b;font-size:12px">업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
      </div>
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
-     <div class="toolbar" style="margin-top:2px"><span class="rowcount">${won(st.cnt)}건${st.item.trim()?'':' — 품번을 조회하세요'}</span></div>
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
         <th>첨부유형</th><th>파일명</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
@@ -324,8 +336,13 @@ SCREEN.itemspec=(host)=>{
     g('#is-go').onclick=()=>{st.item=g('#is-item').value;load();};
     g('#is-item').onkeyup=e=>{if(e.key==='Enter')g('#is-go').click();};
     if(ed){
-      const fe=g('#is-file');if(fe)fe.onchange=e=>{st.file=e.target.files[0]||null;};
-      const ub=g('#is-up');if(ub)ub.onclick=upload;
+      const fe=g('#is-file'),ub=g('#is-up'),dz=g('#is-drop');
+      if(fe)fe.onchange=e=>{const f=e.target.files[0]||null;if(f){st.file=f;upload();}};   // 선택 즉시 업로드(LG BOM식)
+      if(ub)ub.onclick=upload;
+      if(dz&&fe){dz.onclick=()=>fe.click();
+        dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0df';};
+        dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
+        dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;upload();}};}   // 드롭 즉시 업로드
     }
     host.querySelectorAll('.is-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.is-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));

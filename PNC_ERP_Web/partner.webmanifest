@@ -1,0 +1,15 @@
+{
+  "name": "PNC 협력사",
+  "short_name": "PNC 협력사",
+  "description": "피앤씨인더스트리 협력사 포털 — 내 계획·송장",
+  "start_url": "/partner.html",
+  "scope": "/partner.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c47a0",
+  "theme_color": "#1c47a0",
+  "lang": "ko",
+  "icons": [
+    { "src": "/partner-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

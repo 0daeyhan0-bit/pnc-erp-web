@@ -124,7 +124,10 @@ def close_calendar(domain: str = Query("MAT"), ym: str = Query("")):
 
 def _mat_consum(cur):
     """소모품 집합(신규 진입 제외용)."""
-    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM WHERE ITEM_SGROUP LIKE '99%'")
+    # ★소스 = nx.item(정본). 종전엔 은퇴 대상 미러 nx.PR_M_ITEM 를 읽었다 —
+    #   리더 이관(PR#66~75)이 끝난 뒤 새로 쓴 코드에 다시 들어온 회귀였다(2026-08-27).
+    #   실측: 소모품 집합 226 = 226, 양쪽 차 0 ⟹ 값 변화 없음.
+    cur.execute("SELECT item_code FROM PARTNER_ERP_TEST3.nx.item WHERE sgroup LIKE '99%'")
     return {str(r[0]).strip().upper() for r in cur.fetchall()}
 
 
@@ -606,7 +609,9 @@ def _mv_buyprice(cur, target):
          들어온 품목은 영원히 0 이 된다(실측 2026-08-27: 자재 단가0 170건 중 73건이 이 경우).
          재고자산을 0 으로 누락시키는 것보다 **실제 지불가로 계상**하는 것이 정확하다.
        ※이동평균법 자체를 바꾸는 것이 아니라 **결함 기초를 보정**하는 것이다."""
-    ck = str(target)[:4]
+    # ★캐시 키 = as-of 일자 전체(2026-08-30) — 값이 as-of 누계인데 월 키를 쓰면
+    #   월초에 먼저 부른 값이 그 달 전체에 박힌다(_PRD_PX_CACHE 와 같은 결함).
+    ck = str(target)
     if ck in _MAT_BUY_CACHE:
         return _MAT_BUY_CACHE[ck]
     ph_in = ','.join('?' * len(TA_IN_TAGS))
@@ -743,7 +748,7 @@ def _snap_mat(cur, ptype, period):
 
 # ===================== 마감/해제 권한 게이트 — C5 (2026-08-27) =====================
 # 마감·해제는 회계 확정/되돌리기다 → **명시 권한자만**(deny by default).
-#   ① 시스템관리자 role(nx.web_user 의 roles) → 허용
+#   ① 시스템관리자 role(nx.app_user 의 roles) → 허용
 #   ② nx.user_perm 에 (user, sid='close', can_edit=1) 행이 있으면 허용
 #   ③ 그 외 전부 거부(403)
 # ★한계(정직히 기록): 이 앱은 세션 인증이 없고 사용자 식별은 프론트 localStorage 다.
@@ -755,15 +760,14 @@ def _assert_can_close(cur, user, what="마감"):
     u = str(user or "").strip()
     if not u:
         raise HTTPException(403, f"{what} 권한을 확인할 수 없습니다 — 사용자 정보가 없습니다.")
-    # ① 시스템관리자
+    # ① 시스템관리자 — 정본 nx.app_user (2026-08-29 이관. 예전 nx.web_user JSON 은 은퇴)
     try:
-        cur.execute("SELECT udata FROM nx.web_user WHERE user_id='__ALL__'")
+        cur.execute("SELECT roles FROM nx.app_user WHERE user_id=? AND ISNULL(status,'사용')='사용'", u)
         r = cur.fetchone()
         if r and r[0]:
             import json as _json
-            for x in (_json.loads(r[0]) or []):
-                if str(x.get("id", "")).strip() == u and "시스템관리자" in (x.get("roles") or []):
-                    return "시스템관리자"
+            if "시스템관리자" in (_json.loads(r[0]) or []):
+                return "시스템관리자"
     except Exception:
         pass          # 계정 테이블이 아직 없으면 ②로 판정(권한 없으면 어차피 거부)
     # ② 개별 부여 권한
@@ -927,7 +931,13 @@ def _prd_moves(cur, d_from, d_to):
     return out
 
 
-_PRD_PX_CACHE = {}        # yymm -> (px, incust)  ★T4 성능: 단가 스캔은 월 내 불변이라 월 단위 캐시
+# ★★캐시 키 = **as-of 일자 전체**(2026-08-30 결함수정).
+#   종전엔 연월(yymm)만 키로 썼는데 **값은 as-of 일자로 계산**된다(apply_ymd<=target).
+#   그래서 일마감을 260801→260828 로 연속으로 돌리면 **260801 단가가 캐시에 박혀
+#   그 달 전체가 월초 단가로 평가**됐다 → 같은 기간을 다시 마감하면 값이 달라졌다(비멱등).
+#   실측(2026-08-30): SAL D 260828 일괄 677,272,841 vs 단독 703,546,042 (+26,273,201).
+#   ⟹ 마감은 그 시점을 확정하는 것이다. 돌릴 때마다 달라지면 어느 것이 맞는지 알 수 없다.
+_PRD_PX_CACHE = {}        # yymmdd -> (px, incust)
 
 
 def _prd_price(cur, target):
@@ -942,7 +952,7 @@ def _prd_price(cur, target):
          ③ PR_M_ITEM_COST 거래처 완화: 2228 → 품목 매입처 → 아무 거래처(최신)
          ④ 없으면 0 (리포트 대상)
        ★레거시처럼 거래처를 하드 분기하지 않는다 — 그러면 P1(용접) 68품목이 통째로 0 이 된다(§13-1)."""
-    _ck = str(target)[:4]
+    _ck = str(target)              # ★as-of 일자 전체(연월만 쓰면 월초 단가가 달 전체에 박힌다)
     if _ck in _PRD_PX_CACHE:
         return _PRD_PX_CACHE[_ck]
     px = {}
@@ -985,11 +995,14 @@ def _prd_price(cur, target):
     cur.execute("""SELECT UPPER(LTRIM(RTRIM(i.item_code))), LTRIM(RTRIM(ISNULL(i.in_cust,'')))
                      FROM PARTNER_ERP_TEST3.nx.item i""")
     incust = {str(a): b for a, b in cur.fetchall()}
-    cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), LTRIM(RTRIM(ISNULL(CUST_CODE,''))), ITEM_COST FROM (
-                     SELECT ITEM_CODE, CUST_CODE, CAST(ITEM_COST AS float) ITEM_COST,
-                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE, CUST_CODE ORDER BY COST_APPLY_YMD DESC) rn
-                       FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
-                      WHERE COST_TAG='1' AND COST_APPLY_YMD <= ?) t WHERE rn=1""", target)
+    # ★단가정본 = nx.price_item '매입' (DO_NOT_USE §18). 종전엔 라이브 dbo.PR_M_ITEM_COST 직독 —
+    #   컷오버에 죽는 코드였다. 정렬은 원본 그대로 **적용일 기준**(MAIN_FLAG 미사용)이라 클린으로 그대로 옮겨진다.
+    #   실측(거래처별 as-of 최신): 공통 16,875 중 **실제 값차이 0**(112건은 전부 반올림 ≤0.001).
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), LTRIM(RTRIM(ISNULL(vendor_code,''))), price FROM (
+                     SELECT item_code, vendor_code, CAST(price AS float) price,
+                            ROW_NUMBER() OVER(PARTITION BY item_code, vendor_code ORDER BY apply_ymd DESC) rn
+                       FROM PARTNER_ERP_TEST3.nx.price_item
+                      WHERE price_type='매입' AND apply_ymd <= ?) t WHERE rn=1""", target)
     bycust = {}
     for it, cu, c in cur.fetchall():
         bycust.setdefault(str(it), {})[str(cu)] = float(c or 0)
@@ -1009,15 +1022,30 @@ def _prd_price(cur, target):
 #   원인 ① 마감마다 NxCostEngine 을 새로 만들어 내부 캐시(_hasbom/_hdr/단가)가 매번 콜드
 #        ② 같은 품목을 일마감 31회 동안 31번 재전개
 #   대책: 엔진 싱글턴 + **(품목, 연월) 단위 결과 캐시**.
-#   ※근사 명시: 재료비는 as-of 단가라 월 내 단가 변동이 있으면 미세차가 생길 수 있다.
-#     이 값은 '다른 경로로 단가를 못 구한 품목'의 폴백이므로 월 단위 캐시로 충분하다고 판단.
-#     정밀이 필요해지면 캐시 키를 일자로 낮추면 된다.
+#   ★★2026-08-30 정정 — 위 '근사' 판단은 **틀렸다**. 실측으로 월중 변동이 확인됐다:
+#     AJR30027712-SUB2  0801/0814 110,475 → 0828 108,879
+#     AJJ73040839       0801/0814  13,049 → 0828  12,981   (표본 5개 중 2개가 변동)
+#     월 키로 캐시하면 일마감을 연속으로 돌릴 때 **월초 값이 그 달 전체에 박혀 비멱등**이 된다.
+#     ⟹ 예고대로 **캐시 키를 일자로 낮춘다**. 마감은 그 시점을 확정하는 것이므로 정확이 우선이다.
 _BOM_PX_CACHE = {}        # (item, yymm) -> 단가(0 이면 못 구함)
 _BOM_ENG = [None]
 
 
 def _bom_engine():
-    """원가엔진 싱글턴 — 죽어 있으면 재생성."""
+    """원가엔진 — ★공용 싱글턴(`common._get_cost_engine`)을 쓴다.
+
+       예전에는 여기서 `NxCostEngine()` 을 **따로** 만들었다. 그러면
+       원가 화면이 이미 데워 둔 엔진을 못 쓰고 **매 프로세스마다 콜드 스타트**를 다시 겪는다
+       (실측 2026-08-29: _prd_price_bom 1차 30.5초 / 2차 0.7초 — 차이가 전부 엔진 예열이다).
+       공용 엔진은 `warm_all()` 예열 + 커넥션 헬스체크 + 락을 갖췄다. 하나만 쓰는 것이 옳다.
+    """
+    try:
+        from common import _get_cost_engine, _COST_LOCK
+        with _COST_LOCK:
+            return _get_cost_engine()
+    except Exception:
+        pass
+    # 공용 엔진을 못 얻으면 종전 방식으로 폴백(화면이 빈손이 되지 않게)
     eng = _BOM_ENG[0]
     try:
         if eng is not None and eng.alive():
@@ -1038,22 +1066,28 @@ def _bom_engine():
 def _prd_price_bom(cur, target, need):
     """② BOM 부품 매입가 합산 — 단가를 못 구한 품목만 원가엔진 material_u 로 채운다(§13-5).
        원가엔진은 레거시 diff0 검증본이고 **라우팅이 필요없다**(가공비가 아니라 재료비라서).
-       ★(품목,연월) 캐시 + 엔진 싱글턴으로 반복 마감 시 재계산을 피한다."""
+       ★(품목,as-of일자) 캐시 + 엔진 싱글턴으로 반복 호출 시 재계산을 피한다."""
     out = {}
     if not need:
         return out
-    ym = str(target)[:4]
+    ym = str(target)          # ★as-of 일자 전체(월 키는 월초 값이 달 전체에 박힌다)
     # ★BOM 이 없는 품목은 엔진에 넣지 않는다 — 어차피 0 이 나오는데 품목당 ~0.14초를 쓴다.
     #   실측(2026-08-28): 310품목 42.2초 소요 · 보강 **0건**. 전부 헛돌았다.
-    #   nx.bom 에 parent 로 존재하는 것만 남기면 화면이 쓸 수 있는 속도가 된다.
+    #   ★★소스 교정(2026-08-29) — 이 필터가 `nx.bom` 을 봤는데 **엔진은 `nx.bom_header` 를 쓴다**
+    #     (`NxCostEngine._load_hasbom`). SUB·은납 반제품은 `nx.bom` 에 부모로 없고
+    #     `bom_header` 에만 있어 **전부 스킵**됐다 → 단가 0 → 재고금액에서 빠졌다.
+    #     실측(용접 재고): 단가없음 98품번 중 84개 스킵 · 그중 76개는 엔진이 단가를 구할 수 있었다
+    #           = **51,657,231원이 0 으로 계상**(AJR30027712-SUB2 7.7M · AJR30004702-SUB 5.9M …).
+    #     ⟹ 필터 소스를 **엔진과 같은 `nx.bom_header`** 로 맞춘다. 헛도는 호출을 막는 목적은
+    #        그대로 두면서, 엔진이 실제로 계산할 수 있는 품목을 놓치지 않는다.
     need = list(need)
     if need:
         has = set()
         for i in range(0, len(need), 500):
             part = [str(x).strip().upper() for x in need[i:i + 500]]
             ph = ",".join("?" * len(part))
-            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(parent_code))) FROM nx.bom
-                             WHERE UPPER(LTRIM(RTRIM(parent_code))) IN ({ph})""", *part)
+            cur.execute(f"""SELECT DISTINCT UPPER(LTRIM(RTRIM(item_code))) FROM nx.bom_header
+                             WHERE UPPER(LTRIM(RTRIM(item_code))) IN ({ph})""", *part)
             has |= {str(r[0]) for r in cur.fetchall()}
         skipped = [it for it in need if str(it).strip().upper() not in has]
         for it in skipped:                      # 조회 반복을 막기 위해 0 으로 캐시
@@ -1406,6 +1440,27 @@ def _ledger_cache_clear():
     _SAL_PX_CACHE.clear()
 
 
+def ledger_cached(cur, domain, fr6, to6):
+    """★생산/영업 수불장 — **캐시 공유 진입점**. (rows, breaks, basis) 반환.
+
+       왜 함수로 빼나 — 캐시가 엔드포인트 안에만 있으면 다른 화면(생산재고조회)이
+       같은 계산을 **처음부터 다시** 한다(실측 2026-08-29: 재고조회 41초).
+       여기로 모으면 수불장을 한 번 본 뒤 재고조회는 즉시, 반대도 같다.
+       ★캐시는 조회 전용 — 재고 쓰기 후에는 `_ledger_cache_clear()` 가 버린다.
+    """
+    ck = (domain, fr6, to6)
+    if ck in _LEDGER_CACHE:
+        return _LEDGER_CACHE[ck]
+    rows, breaks, basis = (_prd_ledger if domain == "PRD" else _sal_ledger)(cur, fr6, to6)
+    # ★_attach_item_info 를 캐시 안에서 부른다 — 밖에 두면 최종입고일 집계(170만행)를
+    #   매 조회마다 다시 돌아 캐시가 무의미해진다(2026-08-28 실측: 2차도 11초).
+    _attach_item_info(cur, rows, to6)
+    if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
+        _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
+    _LEDGER_CACHE[ck] = (rows, breaks, basis)
+    return _LEDGER_CACHE[ck]
+
+
 def _prd_ledger(cur, fr6, to6):
     """생산 수불장 행 목록 + 불변식 위반. 반환 (rows, breaks)."""
     state, base_ymd, src = _prd_base(cur, fr6)
@@ -1557,8 +1612,10 @@ def _sal_price(cur, target):
        ★왜 이게 컷오버에 필수인가: 레거시가 은퇴하면 미러 sync 자체가 사라져 `pr_m_item_cost` 는
          그 시점 값으로 얼어붙는다. 미러를 읽으면 **컷오버 후 재고 금액이 영원히 갱신되지 않는다.**
          실측 예고편 — AJR75712801 의 8/6 인상(275,425)이 미러에 안 와 옛 값(267,680)으로 평가됐다.
-       ★월 단위 캐시 — 호출 시점을 마감과 맞춰야 값이 안 갈린다(§23 교훈)."""
-    ck = str(target)[:4]
+       ★★캐시 키 = **as-of 일자 전체**(2026-08-30 결함수정). 종전엔 연월만 키로 썼는데
+         값은 as-of 일자다 → 일마감 연속 실행 시 월초 단가가 달 전체에 박혀 **비멱등**이었다
+         (실측: D 260828 일괄 677,272,841 vs 단독 703,546,042)."""
+    ck = str(target)
     if ck in _SAL_PX_CACHE:
         return _SAL_PX_CACHE[ck]
     cur.execute("""SELECT item_code, price FROM (
@@ -1761,7 +1818,7 @@ def _mat_ledger(cur, fr6, to6, zero):
 
 @router.get("/api/close/ledger")
 def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str = Query(""),
-                 zero: int = Query(0), q: str = Query("")):
+                 zero: int = Query(0), q: str = Query(""), nocache: int = Query(0)):
     """수불장(파생). [d_from,d_to] 기간의 품목별 기초·입·출·조정·기말 + 이동평균 단가.
        zero=1 이면 기초·이동·기말이 모두 0 인 품목도 표시(기본 숨김).
        q = 품번/품명 부분일치 필터.
@@ -1776,17 +1833,12 @@ def close_ledger(domain: str = Query("MAT"), d_from: str = Query(""), d_to: str 
         if fr6 > to6:
             fr6, to6 = to6, fr6
         if d in ("PRD", "SAL"):
-            _ck = (d, fr6, to6)
-            if _ck in _LEDGER_CACHE:
-                rows, breaks, basis = _LEDGER_CACHE[_ck]
-            else:
-                rows, breaks, basis = (_prd_ledger if d == "PRD" else _sal_ledger)(cur, fr6, to6)
-                # ★_attach_item_info 를 **캐시 안**에서 부른다 — 밖에 두면 최종입고일 집계(170만행)를
-                #   매 조회마다 다시 돌아 캐시가 무의미해진다(2026-08-28 실측: 2차도 11초).
-                _attach_item_info(cur, rows, to6)
-                if len(_LEDGER_CACHE) >= _LEDGER_CACHE_MAX:
-                    _LEDGER_CACHE.pop(next(iter(_LEDGER_CACHE)))
-                _LEDGER_CACHE[_ck] = (rows, breaks, basis)
+            # ★재고조회와 **같은 캐시**를 쓴다(ledger_cached) — 한쪽을 본 뒤 다른 쪽은 즉시.
+            #   nocache=1 = **검증 전용** 우회. 멱등성 시험은 캐시를 맞으면 무의미해진다
+            #   (같은 객체를 돌려주니 항상 '같음'이 나온다). TestBed 가 이걸 쓴다.
+            if int(nocache or 0):
+                _LEDGER_CACHE.pop((d, fr6, to6), None)
+            rows, breaks, basis = ledger_cached(cur, d, fr6, to6)
             if q:
                 k = q.strip().upper()
                 rows = [r for r in rows if k in r["cd"] or k in str(r.get("nm", "")).upper()]

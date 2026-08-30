@@ -25,15 +25,15 @@ SUB 안 부품을 처리하는 **상호배타 선택**:
 ## 실측 검증 (2026-08-19, AJR75563402-19-1)
 - 레거시: MJU64794201/202 **EXCEPT_FLAG=1**, MJU64794302=0 · 3H02717A/5210A22409B **SAGUB_FLAG=1**.
 - **우리 nx.plan_part_mat**: MJU* 전부 없음 → 미래정밀 계획 안 뜸 ✓ (compose_mat STEP5 EXCEPT제거 반영).
-- **★버그: 발주업체·배분 모달(/api/sourcing/current_order)** 은 EXCEPT_FLAG 무시 → MJU64794201/202를 **미래정밀로 나열**(전개제외 위반). (RAC 용접봉은 RACX 필터로 제외됨.)
-- ★추가확인 필요: 명진 SUB(AJR75563402-19-1) 자체가 plan_part_mat에 **통째 조달(mat_code)로 안 잡힘** — 전개제외 부품의 몫이 상위 SUB로 제대로 귀속되는지 미확인.
+- **✅수정완료(2026-08-20)·검증(2026-08-24)**: `/api/sourcing/current_order`가 `v_pr_bom`+`EXCEPT_FLAG<>'1'`(앵커·재귀 양쪽, sourcing.py:2142/2145)로 전환됨. **라이브 검증(AJR75563402@260630)**: 발주대상 6건=[3A00375E·4930A20053B·4A00742C·5006AR4091H·5410A30279K·**AJR75563402-19-1**], **MJU64794201/202 없음**(전개제외 준수)·명진 SUB가 **통째 발주단위로 귀속**(상위 SUB 조달 규칙 정확 준수). RAC 용접봉은 codes에서 제외.
+- ~~★추가확인: 명진 SUB 통째조달 미확인~~ → **해소**: current_order에서 AJR75563402-19-1이 통째 발주단위로 나옴(위 검증).
 
 ## 점검 대상 (BOM 관련 전 프로그램 — 전개제외 준수 여부)
 | 프로그램 | 전개제외 준수? | 상태 |
 |---|---|---|
 | compose_mat / plan_part_mat (생산계획) | STEP5 EXCEPT제거 | ✓ (MJU* 제외 확인) · SUB 통째조달 귀속 미확인 |
-| **current_order (발주업체·배분 모달)** | ✗ EXCEPT 무시 | ★버그 — 교정 필요 |
-| route_order (R02 업체지정, 신규) | ? | 확인 필요(같은 로직 복제) |
+| **current_order (발주업체·배분 모달)** | ✓ EXCEPT<>1 필터(v_pr_bom) | **✅수정완료 08-20·검증 08-24** |
+| route_order (R02 업체지정, 신규) | ✓(간접) | current_order/vendor가 `sourcing_current_order(rt_item)` 호출(sourcing.py:2346)→R01 리프 상속=EXCEPT 준수 |
 | coopplan (협력사계획) | plan_part_mat 소비 | ✓(간접) |
 | cost engine (NxCostEngine) | CS_CALC_EXCEPT_FLAG? | 확인 필요 |
 | bom/tree (품목BOM관리·조달경로) | ? | 확인 필요 |

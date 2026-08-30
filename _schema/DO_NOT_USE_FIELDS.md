@@ -15,7 +15,7 @@
 | 2 | `PR_M_ITEM_BOM` | **`CS_M_ITEM_BOM`** (유효일자·CS_CALC_EXCEPT_FLAG) | 재료비 전개 전반 |
 | 14 | `nx.PR_M_ITEM`(품목 미러) | **`nx.item`(정본)** | 품목 마스터 조회 전반 |
 | 15 | `nx.partner`(4컬럼 stub·저adoption) | **`nx.CM_M_CUST`(기존 거래처)** | 거래처명 조회 |
-| 16 | `nx.stock_ledger` MAT(미동기·stale) | **`nx.mat_stock_daily`(이동평균 정본)** | 자재 가용판정 (RDY/SAG/PRD/ASY는 ledger 정당) |
+| 16 | `nx.stock_ledger` MAT(미동기) · **`nx.mat_stock_daily`(수동빌더·stale)** | **실시간 자재정본 = 확정스냅샷+이후전표** (`common._mat_avail()`) | 자재 가용판정 (RDY/SAG/PRD/ASY는 ledger 정당) |
 | 3 | `EXCEPT_FLAG` | **`CS_CALC_EXCEPT_FLAG`** | BOM 전개 필터 |
 | 4 | `nx.weld_rate`, `nx.coop_rate`(실험치) | **`nx.item_weld`+`nx.weld_diam`** 정본 | 용접봉 원단위 |
 | 5 | `PARTNER_ERP` 직접 INSERT/UPDATE/DELETE | **nx(PARTNER_ERP_TEST3)만 쓰기** | 라이브 쓰기 |
@@ -180,16 +180,30 @@ SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.item i
 
 ---
 
-## 16. 재고 — 자재(MAT) 가용판정에 `stock_ledger` 금지, `mat_stock_daily` 정본 (2026-08-26·§4-C 공식화)
+## 16. 재고 — 자재(MAT) 가용판정 정본 = **실시간(확정스냅샷+이후전표)** (2026-08-28 승격 완료)
 
 - **금지**: 자재 **현재고/가용판정**을 `nx.stock_ledger`(STOCK_POINT='MAT')에서 SUM. (실측: stock_ledger MAT 미동기·표본 mat_daily 442,938 vs ledger 0 = 45% 오차·대부분 빈값.)
 - **왜**: 재고 3소스 병존(쌍6). stock_ledger는 웹 쓰기 단일원장이나 **MAT은 컷오버 전 미실현/stale**. 이걸로 가용판정하면 마이너스/오판.
-- **올바른 대체**: **자재 현재고 = `nx.mat_stock_daily`(이동평균 일마감·99.95%)** — `common._mat_avail()` 사용. 스냅샷 `P*_T_MONTH_STOCK_WH`는 생산재고(PRD) rollforward 앵커 전용.
+- **올바른 대체**: **`common._mat_avail()`** — 이 함수만 부른다. 게이트 전용 SQL 을 새로 짜지 않는다.
+- **★2026-08-28 승격 완료 — 정본이 바뀌었다.** 종전 이 자리의 정본은 `nx.mat_stock_daily` 였다.
+  그 테이블을 채우는 빌더(`_migration/sub_norm/matclose_movavg_build.py`)는 **사람이 손으로 돌린다.**
+  자동 실행 지점이 설계상 정의된 적이 없어 실제로 **8/25 에 멈춰 있었고**, 게이트가 음수재고를 통과시켰다.
+  ⟹ `_mat_avail` 을 **확정 스냅샷 + 그 이후 전표** = 마감·수불장과 **같은 엔진**으로 승격했다.
+  이것이 `STOCK_GATING_CLOSE_LOCK_RULES.md` §4-C 현재고 공식이고, 인계문서 §1 이 말한 **"마이그 5단계 4번 승격"** 이다.
+  - 실측: 게이트 정본 vs 수불장 기말 **불일치 0건**(3,681/3,681) · 최초 산출 1.17초 · 캐시 재조회 0.00초
+  - 검증: TestBed `flow_scenarios.py` **PASS 39 / FAIL 0 / 오염 0**
+  - 캐시: 재고 쓰기 33곳에서 `stock_changed()` 즉시 무효화 + **TTL 60초**(웹 밖 = 매일 7:30 마이그 대비)
+  - **전제**: uvicorn 워커 1개. 다중 워커로 가면 공용 캐시로 옮겨야 한다.
+  - ⟹ `mat_stock_daily` 는 **게이트·마감 경로에서 빠졌다.** 남은 참조는 조회화면(`live_api.py`)뿐 = 은퇴 대상.
+- **★게이트 전용 SQL 신규작성 금지**: `_mv_moves` 는 6갈래(입고tag·**수입**·수출·출고tag·생산창고반납·재고조정)를 센다.
+  손으로 다시 짜면 반드시 하나를 빠뜨린다 — 실제로 **수입 전표(`PU_T_STOCK_MAINT_C`)를 놓쳐** 수불장과 56건이 갈렸다
+  (`AJR30057201`: 기초 376 + 수입 2,000 = **2,376** 인데 손SQL 은 376). 그 잘못된 SQL 이 "오판 133품목"이라는
+  **틀린 수치**를 만들었다 — 엔진으로 재측정하면 **5건**이다.
 - **예외(정당)**: `STOCK_POINT IN ('RDY','SAG','PRD','ASY')`(준비·사급·생산·완성)는 **stock_ledger가 유일 소스**(mat_stock_daily에 없음) → 이들은 stock_ledger SUM이 정답.
 - **이중계상 금지**: 스냅샷+원장 미반영분 합산 후 원장 또 더하기 금지(ready.py:172 가드). 라이브잔액+원장델타 이중(common.py:408).
-- **수렴(컷오버)**: stock_ledger 실시간 정본 승격 + 스냅샷 은퇴. mat_stock_daily 빌더 자동화(현재 수동·보류).
+- **수렴(컷오버)**: ✅ 자재 게이트 승격은 **끝났다**(위). 남은 것 = `stock_ledger` 실시간 정본 승격 + 스냅샷 은퇴.
 - **근거**: [[newerp-matclose-movavg]] [[newerp-stock-ledger-engine]] [[newerp-mirror-clean-dual-table-audit]] 쌍6·C13.
-- **★다른 세션 필독**: 이 규칙이 과도기인 이유·지금 지킬 결선·미결(자재단가 회계방식)은 **`_schema/STOCK_CLOSE_HANDOFF.md`** (2026-08-27, 재고/마감 담당 세션 인계문서). 요약 = **게이트는 `mat_stock_daily`, 쓰기는 `stock_ledger`, 음수는 경고 아닌 차단**. ★`mat_stock_daily.avg_cost` 는 레거시와 78% 만 일치 → **단가를 원가·정산에 쓸 때 '레거시 일치' 가정 금지**(수량은 100% 신뢰 가능).
+- **★다른 세션 필독**: 이 규칙이 과도기인 이유·지금 지킬 결선·미결(자재단가 회계방식)은 **`_schema/STOCK_CLOSE_HANDOFF.md`** (2026-08-27, 재고/마감 담당 세션 인계문서). 요약 = **게이트는 `common._mat_avail()`(2026-08-28 실시간 승격), 쓰기는 `stock_ledger`, 음수는 경고 아닌 차단**. ★`mat_stock_daily.avg_cost` 는 레거시와 78% 만 일치 → **단가를 원가·정산에 쓸 때 '레거시 일치' 가정 금지**(수량은 100% 신뢰 가능).
 
 ---
 

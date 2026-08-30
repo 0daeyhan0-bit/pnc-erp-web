@@ -73,15 +73,27 @@ def _expandable(eng, node, info, seen):
 
 def cost_material_nae(eng, item, ymd):
     """[내부원가 walker] 전공정 자체 가정 — INNER_PROD 무관 전개(매입/외주도 뚫음), LME 없음.
-    현행 nx_cost_engine.material_nae()와 diff0 대상. explode()가 이미 full 깊이라 지원.
-    엔진 _value_node_nae 재현: cg!=3 & _expandable_nae면 전개, else _leaf_val_nae."""
+    레거시 내부용 SP(SP_CS_견적서(내부용)_250704)와 diff0. 정본 NAEWON_COSTGUBUN3_GAP_260829.md.
+    ★2026-08-29 두 버그수정(레거시 SP 800품목 오라클게이트 로직FAIL0·회귀0·승인적용):
+      ①cg3 가드제거: cg3라도 자식있으면 전개(원소재 도달), 최말단만 _leaf_val_nae. (레거시 cg5만 정지)
+      ②EA단위 수량전파: 레거시 재료 롤업 IIF(부모.UNIT='EA',USE_QTY,1) 정합 —
+        내부노드로 내려갈 땐 qty를 unit='EA'일 때만 전파, 최말단은 use_qty 항상(SP line308·771-773)."""
     ymcut = '20' + ymd[:4]
 
-    def value(node, q, seen):
+    def value(node, mult, seen):
         info = eng._load_item(node)
-        if info['cost_gubun'] != '3' and eng._expandable_nae(node, seen):
-            return sum(value(c, qty * q, seen | {node}) for c, qty, cx, f, t, lx in eng.lines(node) if not cx)
-        return eng._leaf_val_nae(node, info, q, ymd, ymcut)
+        if eng._expandable_nae(node, seen):                     # ①cg3 가드 제거(cg5+자식없음만 정지)
+            tot = 0.0
+            for c, qty, cx, f, t, lx in eng.lines(node):
+                if cx:
+                    continue
+                if eng._expandable_nae(c, seen | {node}):       # 내부노드 → ②EA일 때만 qty 전파
+                    cm = mult * (qty if eng._load_item(c)['unit'] == 'EA' else 1.0)
+                else:                                            # 최말단 → use_qty 항상
+                    cm = mult * qty
+                tot += value(c, cm, seen | {node})
+            return tot
+        return eng._leaf_val_nae(node, info, mult, ymd, ymcut)
 
     return round(value(item, 1.0, set()), 2)
 
@@ -127,6 +139,82 @@ def prod_soyo(eng, item):
     return out
 
 
+def _prodinput_lines(eng, item):
+    """생산투입(prodsheet) 엣지 = nx.bom_line (child, qty, sagub_default, gagong_proc, vir_item, except_flag)
+    + child(mat)의 work_code(nx.item). prodsheet._bom_expand 소스(pr_m_item_bom) 재현 — gagong_proc는 PR 정렬 완료. 캐시."""
+    if not hasattr(eng, '_pilines'):
+        eng._pilines = {}
+    u = item.strip().upper()
+    if u not in eng._pilines:
+        bid = eng.bom_id(item)
+        if bid is None:
+            eng._pilines[u] = []
+        else:
+            eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(b.child_item))), b.qty, ISNULL(b.sagub_default,0),
+                    ISNULL(LTRIM(RTRIM(b.gagong_proc)),''), ISNULL(b.vir_item,0), ISNULL(b.except_flag,0),
+                    ISNULL(LTRIM(RTRIM(i.work_code)),'')
+                FROM nx.bom_line b LEFT JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(b.child_item)))
+                WHERE b.bom_id=? ORDER BY b.seq""", bid)
+            eng._pilines[u] = [(str(r[0]).strip(), float(r[1] or 0), int(r[2]), str(r[3]), int(r[4]), int(r[5]), str(r[6]))
+                               for r in eng.cur.fetchall()]
+    return eng._pilines[u]
+
+
+def prod_input_soyo(eng, item, gpc_like='%'):
+    """[생산투입 walker] prodsheet._bom_expand(dw_pr_input_520_2) 재현 = 가상도번(vir_item=1)만 재귀·except_flag≠1,
+    출력=sagub_default=0 AND gagong_proc LIKE gpc AND vir≠1, grain=(mat, gagong_proc), SUM(cum_use)·MAX(work_code)·수량=USE_QTY(qty).
+    반환 {(mat, gagong_proc): (cum_use_qty, work_code)}. ★생산실적 파트별 재고차감(PR_T_STOCK_MAINT_MAT)용. qty_pr 아님(재고=CS use_qty)."""
+    import re as _re
+    pat = '(?s)^' + _re.escape(gpc_like).replace('%', '.*').replace('_', '.') + '$'
+    out = {}
+
+    def walk(node, cum, seen):
+        for (mat, q, sag, gpc, vir, ex, wc) in _prodinput_lines(eng, node):
+            if ex == 1:                    # except_flag 전개제외
+                continue
+            cu = cum * q
+            if vir != 1 and sag == 0 and _re.match(pat, gpc):   # 출력=비가상·사급아님·공정매치
+                k = (mat, gpc)
+                if k in out:
+                    out[k][0] += cu
+                    if wc > (out[k][1] or ''):
+                        out[k][1] = wc
+                else:
+                    out[k] = [cu, wc]
+            if vir == 1 and mat not in seen:                    # 가상도번만 재귀
+                walk(mat, cu, seen | {mat})
+    walk(item.strip().upper(), 1.0, set())
+    return {k: (round(v[0], 6), v[1]) for k, v in out.items()}
+
+
+def sagub_parts_soyo(eng, item, stop_set, memo=None):
+    """[사급부품 walker] per-unit 완제품 1개 → {stop_set 부품: 소요개수}. v_pr_bom(=nx.bom_line·except≠1) 재귀,
+    stop_set(LG OSP 사급부품 목록) 도달 시 계상 후 정지(LG 완성제공), 용접봉(RAC) 제외.
+    ★CS_M_ITEM_BOM 직접전개(ad-hoc)는 변형SUB 이중계상(예 AJR30012008→EBF64570401 2배). v_pr_bom은 except로 1회 = 엔진 정본.
+    ★memo(dict) 넘기면 요청 전체 공유 = 공유SUB 1회만 전개(성능). ★stop_set 동일 전제(요청내)."""
+    if memo is None:
+        memo = {}
+    def walk(node, depth):
+        if node in memo:
+            return memo[node]
+        memo[node] = {}            # cycle guard
+        if depth > 25:             # 깊이 폭주 방지
+            return memo[node]
+        acc = {}
+        for c, q, ex, vf in _vpr_full(eng, node):
+            if ex == '1' or q <= 0:
+                continue
+            if c in stop_set:
+                if not _is_weldrod(eng, c):
+                    acc[c] = acc.get(c, 0.0) + q
+            else:
+                for k, v in walk(c, depth + 1).items():
+                    acc[k] = acc.get(k, 0.0) + v * q
+        memo[node] = acc
+        return acc
+    return walk(item.strip().upper(), 0)
+
+
 # ===================== 생산계획 walker (STEP6/7 재현) =====================
 # plan_part_mat = 가공공정 전이 grain. Stage1=plan_part_temp(CTE_BOM), Stage2=가공공정JOIN, Stage3=전이+최하위.
 
@@ -137,11 +225,36 @@ def _prmmat_set(eng):
     return eng._prmmat
 
 
+import threading as _threading
+_VPR_CACHE = None                 # ★모듈 공유 캐시 {item: [(mat,qty,except,vir)]} (전 요청 공유·읽기전용=스레드안전)
+_VPR_LOCK = _threading.Lock()
+
+
+def warm_vpr(eng):
+    """★성능·동시성: v_pr_bom 전 엣지를 **모듈 캐시(_VPR_CACHE)** 로 1회 프리로드(락). 이후 _vpr_full은 연결 없이 캐시 읽기.
+    → 요청마다 재로드 없음 + 싱글톤 엔진 연결 동시사용(대사+수불) 충돌 없음. (BOM 변경 반영은 백엔드 재기동 or 후속 sig가드.)"""
+    global _VPR_CACHE
+    if _VPR_CACHE is not None:
+        return
+    with _VPR_LOCK:
+        if _VPR_CACHE is not None:
+            return
+        d = {}
+        eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY),
+                 ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
+               FROM nx.v_pr_bom ORDER BY item_code, BOM_SEQ""")
+        for it, mat, uq, ex, vf in eng.cur.fetchall():
+            d.setdefault(str(it).strip(), []).append((str(mat).strip(), float(uq or 0), str(ex).strip(), str(vf).strip()))
+        _VPR_CACHE = d
+
+
 def _vpr_full(eng, item):
-    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). 캐시."""
+    """v_pr_bom 직상위 자식 (mat_code, USE_QTY_PR, except_flag, vir_item_flag). warm_vpr 후엔 모듈캐시 읽기(연결無)."""
+    k = item.strip().upper()
+    if _VPR_CACHE is not None:
+        return _VPR_CACHE.get(k, [])        # 프리로드 = 미존재는 leaf([])
     if not hasattr(eng, '_vprf'):
         eng._vprf = {}
-    k = item.strip().upper()
     if k not in eng._vprf:
         eng.cur.execute("""SELECT UPPER(LTRIM(RTRIM(mat_code))), ISNULL(USE_QTY_PR,USE_QTY), ISNULL(except_flag,'0'), ISNULL(vir_item_flag,'0')
             FROM nx.v_pr_bom WHERE UPPER(LTRIM(RTRIM(item_code)))=? ORDER BY BOM_SEQ""", k)
@@ -195,11 +308,12 @@ def plan_explode_full(eng, item):
 
 
 def _incust(eng, code):
-    # ★소스=nx.PR_M_ITEM.in_cust_code (STEP6 CTE_BOM와 동일). nx.item.in_cust는 dbo값(2068 등)이라 갈림 → 561전수 FAIL2 원인이었음.
+    # ★소스=nx.item.in_cust (클린, item 통합 2026-08-29). 과거 PR_M_ITEM.in_cust_code 직독(nx.item.in_cust=dbo 2068 드리프트라 561 FAIL2)이었으나,
+    #   item 통합으로 드리프트 해소 → plan 트리 전 15387품목 in_cust 전수 불일치0 실측검증(nx.item이 5품목 더 완전) → 미러 은퇴·리포인트.
     if not hasattr(eng, '_incc'):
         eng._incc = {}
     if code not in eng._incc:
-        eng.cur.execute("SELECT ISNULL(in_cust_code,'') FROM nx.PR_M_ITEM WHERE item_code=?", code)
+        eng.cur.execute("SELECT ISNULL(in_cust,'') FROM nx.item WHERE item_code=?", code)
         r = eng.cur.fetchone()
         eng._incc[code] = (str(r[0]).strip() if r else '')
     return eng._incc[code]
@@ -253,14 +367,14 @@ _WT_COPPER = {'CU', '고강도'}
 
 
 def _wt_meta(eng, code):
-    """중량 leaf META: (w, cls). raw=동(ITEM_WEIGHT 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현.
-    ★소스=nx.PR_M_ITEM(중량 정본). nx.item은 일부품목 net_weight=geom·length 드리프트(3H00627M 0.3332→0.2907 등) → PR_M_ITEM 직독으로 diff0."""
+    """중량 leaf META: (w, cls). raw=동(item_weight 우선 else geom π(D−T)T·L·8.94/1e6), weld=용접봉, None. weight_calc _load_maps 재현.
+    ★소스=nx.item(클린 정본, item 통합 2026-08-29). item_weight·diam·thick·length·metal_gubun·item_name = PR_M_ITEM와 전수 등가(불일치0, 24127 매칭) 실측검증 → 미러 은퇴·리포인트. (구 주석 'nx.item net_weight 드리프트'는 net_weight 컬럼 얘기·중량엔 item_weight 사용.)"""
     if not hasattr(eng, '_wtm'):
         eng._wtm = {}
     u = code.strip().upper()
     if u not in eng._wtm:
-        eng.cur.execute("""SELECT ISNULL(ITEM_WEIGHT,0),ISNULL(ITEM_DIAM,0),ISNULL(ITEM_THICK,0),ISNULL(ITEM_LENGTH,0),
-            ISNULL(METAL_GUBUN,''),ISNULL(ITEM_DESC,'') FROM nx.PR_M_ITEM WHERE ITEM_CODE=?""", code)
+        eng.cur.execute("""SELECT ISNULL(item_weight,0),ISNULL(diam,0),ISNULL(thick,0),ISNULL(length,0),
+            ISNULL(metal_gubun,''),ISNULL(item_name,'') FROM nx.item WHERE item_code=?""", code)
         r = eng.cur.fetchone()
         w = 0.0
         cls = None
@@ -378,12 +492,13 @@ def weight_explode(eng, item):
 
 
 def _wt_spec(eng, code):
-    """중량 leaf 규격 (metal_gubun, diam, thick) — 절삭재료비(CS_M_METERIAL_COST) 규격별 단가 조회용. 캐시."""
+    """중량 leaf 규격 (metal_gubun, diam, thick) — 절삭재료비(CS_M_METERIAL_COST) 규격별 단가 조회용. 캐시.
+    ★소스=nx.item(클린, item 통합·규격 PR_M_ITEM 전수 등가 검증)."""
     if not hasattr(eng, '_wtspec'):
         eng._wtspec = {}
     u = code.strip().upper()
     if u not in eng._wtspec:
-        eng.cur.execute("SELECT ISNULL(METAL_GUBUN,''),ISNULL(ITEM_DIAM,0),ISNULL(ITEM_THICK,0) FROM nx.PR_M_ITEM WHERE ITEM_CODE=?", code)
+        eng.cur.execute("SELECT ISNULL(metal_gubun,''),ISNULL(diam,0),ISNULL(thick,0) FROM nx.item WHERE item_code=?", code)
         r = eng.cur.fetchone()
         eng._wtspec[u] = (str(r[0]).strip(), float(r[1] or 0), float(r[2] or 0)) if r else ('', 0.0, 0.0)
     return eng._wtspec[u]

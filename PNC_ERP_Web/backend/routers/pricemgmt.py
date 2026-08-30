@@ -1,12 +1,26 @@
 # -*- coding: utf-8 -*-
-"""품목단가 관리(w_tc_master_090) — 매출처별 판매/매입 단가 마스터 CRUD. 데이터 nx.PR_M_ITEM_COST.
-   ★단가 편집은 권한자만(프론트 게이트) + 관리화면 예외(거래/조회 화면은 여전히 읽기전용, feedback-material-price-close-only).
-   키=(ITEM_CODE,CUST_CODE,COST_TAG,COST_APPLY_YMD). COST_TAG 1=매입·E=수출판매·S=내수판매."""
+"""품목단가 관리(w_tc_master_090) — 매출처별 판매/매입 단가 마스터 CRUD.
+
+★2026-08-29 데이터 소스 이관: 미러 `nx.PR_M_ITEM_COST` → **정본 `nx.price_item`** (DO_NOT_USE §18).
+  컷오버 후 미러는 죽는다. 이 화면이 그때 갈 곳이 없어서 `nx.price_item` 을 마스터로 승격했다
+  (키 1:1 · main_flag 등 11컬럼 추가·라이브 백필 99.23% — `_schema/CUTOVER_CHECKLIST.md` "(A)안 검증").
+  ★`_migration/sub_norm/r_price_vendor_match.py` 는 이 테이블의 '매입'을 통째로 지운다 —
+    실행 거부 가드를 걸어 뒀다. 절대 풀지 말 것(웹 업로드 사급가 855행이 날아간다).
+
+★단가 편집은 권한자만(프론트 게이트) + 관리화면 예외(거래/조회 화면은 여전히 읽기전용, feedback-material-price-close-only).
+  키=(item_code, vendor_code, price_type, apply_ymd). price_type 매입 / TAGE=수출판매 / TAGS=내수판매.
+  ※화면·API 의 tag 코드(1/E/S)는 그대로 두고 **DB 값만 매핑**한다(프론트 무변경).
+"""
 from fastapi import APIRouter, Query, Body, HTTPException
 from common import _nx, _custnm_map, _d6
 
 router = APIRouter()
 _TAGNM = {"1": "매입", "E": "수출판매", "S": "내수판매"}
+
+# 화면 tag(1/E/S) ↔ 정본 price_type(매입/TAGE/TAGS). §9 의 매핑 그대로.
+_T2P = {"1": "매입", "E": "TAGE", "S": "TAGS"}
+_P2T = {v: k for k, v in _T2P.items()}
+_PTCASE = "CASE price_type WHEN 'TAGS' THEN 'S' WHEN 'TAGE' THEN 'E' ELSE '1' END"
 
 @router.get("/api/pricemgmt/items")
 def pm_items(q: str = Query(""), lg: str = Query(""), sg: str = Query(""), limit: int = Query(1000)):
@@ -20,7 +34,7 @@ def pm_items(q: str = Query(""), lg: str = Query(""), sg: str = Query(""), limit
         n = max(1, min(int(limit), 3000))
         cur.execute(f"""SELECT TOP {n} i.ITEM_CODE, ISNULL(i.item_name,''), ISNULL(i.sgroup,''), ISNULL(pc.cnt,0)
             FROM nx.item i
-            LEFT JOIN (SELECT ITEM_CODE, COUNT(*) cnt FROM nx.PR_M_ITEM_COST GROUP BY ITEM_CODE) pc ON pc.ITEM_CODE=i.ITEM_CODE
+            LEFT JOIN (SELECT item_code, COUNT(*) cnt FROM nx.price_item GROUP BY item_code) pc ON pc.item_code=i.ITEM_CODE
             WHERE {' AND '.join(w)} ORDER BY (CASE WHEN ISNULL(pc.cnt,0)>0 THEN 0 ELSE 1 END), i.ITEM_CODE""", *p)
         rows = [{"item": str(r[0]).strip(), "nm": str(r[1]).strip(), "sg": str(r[2]).strip(), "cnt": int(r[3] or 0)}
                 for r in cur.fetchall()]
@@ -34,10 +48,10 @@ def pm_detail(item: str = Query(...)):
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("""SELECT COST_TAG,CUST_CODE,ISNULL(MAIN_FLAG,'0'),COST_APPLY_YMD,ISNULL(CURRENCY,''),
-              ITEM_COST,MAT_COST,PROC_COST,OTHER_COST,ISNULL(MAT_UNIT,''),ISNULL(MKT,''),ISNULL(REMARKS,''),
-              ISNULL(UPDATE_USER_ID,ISNULL(INSERT_USER_ID,'')),CONVERT(varchar(19),ISNULL(UPDATE_DATETIME,INSERT_DATETIME),120)
-            FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? ORDER BY COST_TAG, COST_APPLY_YMD DESC""", item)
+        cur.execute(f"""SELECT {_PTCASE},vendor_code,ISNULL(main_flag,'0'),apply_ymd,ISNULL(currency,''),
+              price,mat_cost,proc_cost,other_cost,ISNULL(mat_unit,''),ISNULL(mkt,''),ISNULL(remarks,''),
+              ISNULL(upd_user,ISNULL(ins_user,'')),CONVERT(varchar(19),ISNULL(upd_dt,ins_dt),120)
+            FROM nx.price_item WHERE item_code=? ORDER BY {_PTCASE}, apply_ymd DESC""", item)
         rows = []; cch = set()
         for r in cur.fetchall():
             d = {"tag": str(r[0]).strip(), "tag_nm": _TAGNM.get(str(r[0]).strip(), str(r[0]).strip()),
@@ -74,21 +88,22 @@ def pm_save(p: dict = Body(...)):
         if old:   # 키가 실제 바뀐 경우에만 원래키 삭제(같은키 수정은 UPDATE로 감·INSERT_DATETIME 보존)
             okey = (str(old.get("cust", "")).strip(), str(old.get("tag", "")).strip(), _d6(str(old.get("ymd", "")).strip()))
             if okey != (cust, tag, ymd):
-                c.execute("DELETE FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?",
-                    item, okey[0], okey[1], okey[2])
-        ex = c.execute("SELECT COUNT(*) FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?",
-            item, cust, tag, ymd).fetchone()[0]
+                c.execute("DELETE FROM nx.price_item WHERE item_code=? AND vendor_code=? AND price_type=? AND apply_ymd=?",
+                    item, okey[0], _T2P.get(okey[1], okey[1]), okey[2])
+        pt = _T2P.get(tag, tag)
+        ex = c.execute("SELECT COUNT(*) FROM nx.price_item WHERE item_code=? AND vendor_code=? AND price_type=? AND apply_ymd=?",
+            item, cust, pt, ymd).fetchone()[0]
         if ex:
-            c.execute("""UPDATE nx.PR_M_ITEM_COST SET MAIN_FLAG=?,CURRENCY=?,ITEM_COST=?,MAT_COST=?,PROC_COST=?,OTHER_COST=?,
-                  MAT_UNIT=?,MKT=?,REMARKS=?,UPDATE_USER_ID=?,UPDATE_DATETIME=getdate()
-                WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?""",
-                main, cur_ccy, cost, mat, proc, other, matunit, mkt, remarks, by, item, cust, tag, ymd)
+            c.execute("""UPDATE nx.price_item SET main_flag=?,currency=?,price=?,mat_cost=?,proc_cost=?,other_cost=?,
+                  mat_unit=?,mkt=?,remarks=?,upd_user=?,upd_dt=getdate()
+                WHERE item_code=? AND vendor_code=? AND price_type=? AND apply_ymd=?""",
+                main, cur_ccy, cost, mat, proc, other, matunit, mkt, remarks, by, item, cust, pt, ymd)
             mode = "update"
         else:
-            c.execute("""INSERT INTO nx.PR_M_ITEM_COST(ITEM_CODE,CUST_CODE,COST_TAG,COST_APPLY_YMD,MAIN_FLAG,CURRENCY,
-                  ITEM_COST,MAT_COST,PROC_COST,OTHER_COST,MAT_UNIT,MKT,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
+            c.execute("""INSERT INTO nx.price_item(item_code,vendor_code,price_type,apply_ymd,main_flag,currency,
+                  price,mat_cost,proc_cost,other_cost,mat_unit,mkt,remarks,ins_user,ins_dt)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,getdate())""",
-                item, cust, tag, ymd, main, cur_ccy, cost, mat, proc, other, matunit, mkt, remarks, by)
+                item, cust, pt, ymd, main, cur_ccy, cost, mat, proc, other, matunit, mkt, remarks, by)
             mode = "insert"
         cn.commit(); return {"ok": True, "mode": mode}
     finally:
@@ -99,8 +114,8 @@ def pm_delete(p: dict = Body(...)):
     item, tag, cust, ymd = _valid(p)
     cn = _nx(); c = cn.cursor()
     try:
-        c.execute("DELETE FROM nx.PR_M_ITEM_COST WHERE ITEM_CODE=? AND CUST_CODE=? AND COST_TAG=? AND COST_APPLY_YMD=?",
-            item, cust, tag, ymd)
+        c.execute("DELETE FROM nx.price_item WHERE item_code=? AND vendor_code=? AND price_type=? AND apply_ymd=?",
+            item, cust, _T2P.get(tag, tag), ymd)
         n = c.rowcount; cn.commit()
         if not n: raise HTTPException(404, "삭제 대상 없음")
         return {"ok": True, "deleted": n}

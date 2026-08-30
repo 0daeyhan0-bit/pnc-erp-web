@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c47a0">
+<title>PNC 협력사</title>
+<!-- ★폰 홈 화면에 추가하면 앱처럼 전체화면으로 열린다.
+     아이폰은 '홈 화면에 추가'를 해야 알림도 받을 수 있다(3단계 웹푸시 대비). -->
+<link rel="manifest" href="/partner.webmanifest">
+<link rel="apple-touch-icon" href="/partner-icon.svg">
+<link rel="icon" href="/partner-icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PNC 협력사">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="format-detection" content="telephone=no">
+<!--
+  협력사 포털 (모바일 웹앱) — 2026-08-29
+  ★내부 ERP(index.html)와 **분리된 페이지**다. 이유:
+    · 협력사에게 내부 메뉴 트리를 보여줄 이유가 없다(ROLE_MOD 에 '협력사'가 없어 어차피 빈 화면)
+    · 폰에서 쓰는 화면은 레이아웃이 근본적으로 다르다(한 손·세로·큰 터치영역)
+    · 백엔드는 COOP_ALLOW 화이트리스트로 이미 막혀 있다 — 이 페이지는 그 안에서만 논다
+  정본 = _schema/PARTNER_PORTAL_DESIGN.md §3
+-->
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#fff; --line:#e3e8f0; --ink:#16305c; --sub:#7c8aa5;
+    --brand:#1c47a0; --brand2:#2f6db3; --ok:#1c8b57; --warn:#c77700; --bad:#c0392b;
+    --r:14px; --sh:0 1px 3px rgba(20,40,80,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",sans-serif}
+  body{padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+  .hide{display:none!important}
+
+  /* ── 상단바 ── */
+  header{position:sticky;top:0;z-index:30;background:var(--brand);color:#fff;
+    padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px}
+  header .t{font-weight:800;font-size:16px;letter-spacing:-.2px}
+  header .c{margin-left:auto;font-size:12.5px;opacity:.92;text-align:right;line-height:1.25}
+  header button{background:rgba(255,255,255,.16);color:#fff;border:0;border-radius:8px;
+    padding:6px 10px;font-size:12px;font-weight:700}
+
+  /* ── 하단 탭 ── */
+  nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);
+    display:flex;padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;background:none;border:0;padding:9px 2px 8px;color:var(--sub);
+    font-size:11.5px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px}
+  nav button .i{font-size:19px;line-height:1}
+  nav button.on{color:var(--brand)}
+
+  main{padding:12px 12px 6px;max-width:720px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--sh);padding:13px;margin-bottom:11px}
+  .card h3{margin:0 0 9px;font-size:13.5px;color:var(--sub);font-weight:700;
+    display:flex;align-items:center;gap:6px}
+  .card h3 .n{margin-left:auto;color:var(--brand);font-size:16px;font-weight:800}
+
+  .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}
+  .kpi div{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    padding:11px 8px;text-align:center;box-shadow:var(--sh)}
+  .kpi b{display:block;font-size:21px;font-weight:800;color:var(--brand);line-height:1.15}
+  .kpi span{font-size:11.5px;color:var(--sub)}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{font-size:11.5px;color:var(--sub);font-weight:700;background:#fafbfd;
+    position:sticky;top:0}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+  .scroll{max-height:62vh;overflow:auto;margin:0 -13px;padding:0 13px}
+  .empty{padding:26px 10px;text-align:center;color:var(--sub);font-size:13.5px}
+  .part{font-weight:700;letter-spacing:-.2px}
+  .nm{color:var(--sub);font-size:11.5px;display:block;margin-top:1px}
+
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800}
+  .p00{background:#fdf3e2;color:var(--warn)}   .p10{background:#e7effb;color:var(--brand2)}
+  .p20{background:#e6f2ff;color:#2a6fb0}       .p30{background:#fff2e0;color:var(--warn)}
+  .p40{background:#f0e9fb;color:#6b4bb5}       .p90{background:#e4f5ec;color:var(--ok)}
+  .p99{background:#fdecec;color:var(--bad)}
+
+  .btn{width:100%;padding:12px;border:0;border-radius:11px;background:var(--brand);color:#fff;
+    font-size:15px;font-weight:800}
+  .btn:disabled{background:#b9c4d6}
+  .btn.g{background:#fff;color:var(--brand);border:1.5px solid var(--brand)}
+  .msg{padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:11px;font-weight:600}
+  .msg.e{background:#fdecec;color:var(--bad);border:1px solid #f3c9c9}
+  .msg.k{background:#e4f5ec;color:var(--ok);border:1px solid #bfe6d1}
+
+  /* ── 로그인 ── */
+  #login{position:fixed;inset:0;z-index:60;background:linear-gradient(160deg,#1c47a0,#2f6db3);
+    display:flex;align-items:center;justify-content:center;padding:22px}
+  #login .box{width:100%;max-width:360px;background:#fff;border-radius:16px;padding:26px 22px}
+  #login .lg{font-size:23px;font-weight:800;color:var(--brand);letter-spacing:-.4px}
+  #login .sb{font-size:12.5px;color:var(--sub);margin:3px 0 20px}
+  #login label{display:block;font-size:12px;font-weight:700;color:#43587e;margin:0 0 5px}
+  #login input{width:100%;padding:12px;font-size:16px;border:1.5px solid #d7dfea;border-radius:10px;
+    margin-bottom:13px}
+  #login input:focus{outline:0;border-color:var(--brand2)}
+  .foot{text-align:center;font-size:11.5px;color:var(--sub);padding:14px 10px 4px}
+
+  /* 발행 · 스캔 */
+  .row{display:flex;align-items:center;gap:9px;padding:10px 2px;border-bottom:1px solid var(--line)}
+  .row input[type=checkbox]{width:21px;height:21px;flex:0 0 auto}
+  .row .g{flex:1;min-width:0}
+  .row .q{width:78px;padding:8px;font-size:15px;text-align:right;border:1.5px solid #d7dfea;
+    border-radius:8px;font-variant-numeric:tabular-nums}
+  .qr{text-align:center;padding:6px 0 2px}
+  .qr svg{width:min(64vw,240px);height:auto;display:block;margin:0 auto}
+  .qrv{font-size:20px;font-weight:800;letter-spacing:1px;margin-top:8px;font-variant-numeric:tabular-nums}
+  .big{width:100%;padding:14px;font-size:19px;text-align:center;border:2px solid var(--brand);
+    border-radius:11px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums}
+  .sum{display:flex;gap:9px;margin:10px 0}
+  .sum div{flex:1;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;
+    padding:9px;text-align:center}
+  .sum b{display:block;font-size:18px;font-weight:800;color:var(--brand)}
+  .sum span{font-size:11px;color:var(--sub)}
+  .warnbox{background:#fdf3e2;border:1px solid #f0d6a8;color:#8a5600;padding:11px;
+    border-radius:10px;font-size:13px;font-weight:700;margin-bottom:11px;line-height:1.5}
+  .modal{position:fixed;inset:0;z-index:70;background:rgba(16,32,60,.55);display:flex;
+    align-items:flex-end;justify-content:center;padding:0}
+  .modal .sheet{background:#fff;width:100%;max-width:560px;border-radius:16px 16px 0 0;
+    padding:18px 15px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+  .modal h4{margin:0 0 4px;font-size:17px;font-weight:800}
+  .modal .s{color:var(--sub);font-size:12.5px;margin-bottom:13px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <div class="lg">PNC 협력사</div>
+    <div class="sb">피앤씨인더스트리 협력사 포털</div>
+    <div id="lgerr" class="msg e hide"></div>
+    <label>아이디</label>
+    <input id="lgid" autocomplete="username" autocapitalize="off" placeholder="예) p2096">
+    <label>비밀번호</label>
+    <input id="lgpw" type="password" autocomplete="current-password" placeholder="비밀번호">
+    <button class="btn" id="lgbtn">로그인</button>
+    <div class="foot">계정 문의 · 피앤씨인더스트리 전산담당</div>
+  </div>
+</div>
+
+<header class="hide" id="hd">
+  <div class="t">PNC 협력사</div>
+  <div class="c"><b id="hcust">-</b><br><span id="huser" style="opacity:.8"></span></div>
+  <button id="out">로그아웃</button>
+</header>
+
+<main class="hide" id="app"></main>
+
+<nav class="hide" id="nav"></nav>
+
+<script>
+const API = location.origin;
+const T = {
+  get tok(){ try{return localStorage.getItem('ptok')||''}catch(e){return ''} },
+  set tok(v){ try{ v?localStorage.setItem('ptok',v):localStorage.removeItem('ptok') }catch(e){} },
+  get me(){ try{return JSON.parse(localStorage.getItem('pme')||'null')}catch(e){return null} },
+  set me(v){ try{ v?localStorage.setItem('pme',JSON.stringify(v)):localStorage.removeItem('pme') }catch(e){} },
+};
+const $ = s => document.querySelector(s);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = n => (n==null||n==='')?'-':Number(n).toLocaleString('ko-KR',{maximumFractionDigits:0});
+const ymd = s => { s=String(s||'').trim(); return s.length===6 ? `${s.slice(2,4)}/${s.slice(4,6)}` : s; };
+const ymdF= s => { s=String(s||'').trim(); return s.length===6 ? `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}` : s; };
+const ST  = {'00':'요청','10':'발행','20':'출발','30':'입고대기','40':'검사중','90':'입고완료','99':'반품'};
+
+async function api(path, opt){
+  opt = opt||{};
+  const h = Object.assign({'Content-Type':'application/json'}, opt.headers||{});
+  if(T.tok) h['Authorization'] = 'Bearer '+T.tok;
+  const r = await fetch(API+path, Object.assign({}, opt, {headers:h}));
+  let j = null; try{ j = await r.json(); }catch(e){}
+  if(r.status===401){ T.tok=null; T.me=null; showLogin('로그인이 만료되었습니다. 다시 로그인해 주세요.'); throw new Error('401'); }
+  if(!r.ok) throw new Error((j&&j.detail)||('오류 '+r.status));
+  return j;
+}
+
+/* ───────── 로그인 ───────── */
+function showLogin(err){
+  $('#login').classList.remove('hide');
+  ['#hd','#app','#nav'].forEach(s=>$(s).classList.add('hide'));
+  const e=$('#lgerr');
+  if(err){ e.textContent=err; e.classList.remove('hide'); } else e.classList.add('hide');
+}
+async function doLogin(){
+  const id=$('#lgid').value.trim(), pw=$('#lgpw').value;
+  if(!id||!pw){ return showLogin('아이디와 비밀번호를 입력하세요.'); }
+  const b=$('#lgbtn'); b.disabled=true; b.textContent='확인 중…';
+  try{
+    const r = await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,pw})});
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.detail||'로그인에 실패했습니다.');
+    T.tok=j.token; T.me=j.user;
+    $('#login').classList.add('hide');
+    start();
+  }catch(e){ showLogin(e.message); }
+  finally{ b.disabled=false; b.textContent='로그인'; }
+}
+
+/* ───────── 화면 ───────── */
+let VIEW='home', DATA=null;
+
+async function start(){
+  const u=T.me||{};
+  $('#hcust').textContent = u.nm || u.id || '';
+  $('#huser').textContent = u.partner_code ? ('거래처 '+u.partner_code) : '';
+  ['#hd','#app','#nav'].forEach(s=>$(s).classList.remove('hide'));
+  await load();
+}
+async function load(){
+  $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
+  try{ DATA = await api('/api/partner/my?days=14'); }
+  catch(e){ if(e.message!=='401') $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
+  render();
+}
+
+/* ★유형별 분기 — 세트입고를 안 쓰는 협력사에는 송장 탭을 숨긴다.
+     실측(2026-08-29): 세트입고 송장이 있는 곳 = 절삭-협력사 9/11 · 나머지 1/76.
+     같은 화면을 전원에게 주면 대부분이 **빈 송장 화면**을 본다. */
+function tabs(){
+  const staff = (T.me||{}).utype !== '협력사';
+  const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
+  const t=[{v:'home',i:'🏠',n:'홈'},{v:'plan',i:'📅',n:'내 계획'}];
+  if(useInv) t.push({v:'inv',i:'📄',n:'내 송장'});
+  if(staff)  t.push({v:'scan',i:'📷',n:'입고'});
+  return t;
+}
+function render(){
+  if(!DATA) return;
+  const T2=tabs();
+  if(!T2.some(x=>x.v===VIEW)) VIEW='home';
+  $('#nav').innerHTML = T2.map(x=>`<button data-v="${x.v}" class="${x.v===VIEW?'on':''}">
+    <span class="i">${x.i}</span>${x.n}</button>`).join('');
+  $('#nav').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
+  $('#app').innerHTML = VIEW==='home' ? viewHome()
+                      : VIEW==='plan' ? viewPlan()
+                      : VIEW==='scan' ? viewScan() : viewInv();
+  wire();
+}
+
+function viewHome(){
+  const t=DATA.plan_tot||{}, inv=DATA.inv||[];
+  const cnt = s => (inv.find(x=>x.status===s)||{}).cnt||0;
+  const soon = (DATA.plan||[]).slice(0,6);
+  return `
+  <div class="kpi">
+    <div><b>${num(t.qty)}</b><span>2주 계획수량</span></div>
+    <div><b>${num(t.items)}</b><span>품목</span></div>
+    <div><b>${num(DATA.ready_cnt)}</b><span>발행할 송장</span></div>
+  </div>
+  ${DATA.ready_cnt ? `<div class="msg k">납품하실 송장 <b>${DATA.ready_cnt}건</b>이 대기 중입니다. [내 송장]에서 발행하세요.</div>` : ''}
+  <div class="card">
+    <h3>가까운 납기<span class="n">${num((DATA.plan||[]).length)}</span></h3>
+    ${soon.length ? `<table><tbody>${soon.map(r=>`
+      <tr><td style="width:56px;color:var(--brand2);font-weight:800">${ymd(r.ymd)}</td>
+          <td><span class="part">${esc(r.part)}</span><span class="nm">${esc(r.nm||'')}</span></td>
+          <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}
+      </tbody></table>
+      ${(DATA.plan||[]).length>6?`<button class="btn g" style="margin-top:10px" data-go="plan">계획 전체 보기</button>`:''}`
+    : `<div class="empty">2주 안에 잡힌 계획이 없습니다.</div>`}
+  </div>
+  <div class="card">
+    <h3>내 송장 현황</h3>
+    ${inv.length ? `<table><tbody>${inv.map(x=>`
+      <tr><td><span class="pill p${esc(x.status)}">${esc(x.nm)}</span></td>
+          <td class="n">${num(x.cnt)}건</td><td class="n">${num(x.qty)}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">송장이 없습니다.</div>`}
+  </div>
+  <div class="foot">피앤씨인더스트리 · 문의는 담당자에게</div>`;
+}
+
+function viewPlan(){
+  const rows=DATA.plan||[];
+  const by={}; rows.forEach(r=>{ (by[r.ymd]=by[r.ymd]||[]).push(r); });
+  const keys=Object.keys(by).sort();
+  return `
+  <div class="card">
+    <h3>내 계획 · ${esc(ymdF(DATA.from))} ~ ${esc(ymdF(DATA.to))}<span class="n">${num(rows.length)}</span></h3>
+    ${keys.length ? `<div class="scroll">${keys.map(k=>{
+      const g=by[k], s=g.reduce((a,b)=>a+b.qty,0);
+      return `<table>
+        <thead><tr><th colspan="2">${esc(ymdF(k))}</th><th class="n">${num(s)}</th></tr></thead>
+        <tbody>${g.map(r=>`<tr><td colspan="2"><span class="part">${esc(r.part)}</span>
+          <span class="nm">${esc(r.nm||'')}</span></td>
+          <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}</tbody></table>`;
+    }).join('')}</div>` : `<div class="empty">기간 안에 계획이 없습니다.</div>`}
+  </div>`;
+}
+
+/* ───────── 내 송장 : 발행 → QR → 출발 ───────── */
+let SEL = {};          // sheet -> qty
+
+function viewInv(){
+  const inv=DATA.inv||[], ready=DATA.ready||[];
+  const issued=(DATA.issued||[]);
+  return `
+  <div class="card">
+    <h3>발행할 송장<span class="n">${num(ready.length)}</span></h3>
+    ${ready.length ? `
+      <div class="s" style="color:var(--sub);font-size:12.5px;margin-bottom:6px">
+        오늘 납품할 것을 고르고 수량을 확인한 뒤 발행하세요. 발행하면 QR 이 나옵니다.</div>
+      <div class="scroll">${ready.map(r=>`
+        <div class="row">
+          <input type="checkbox" data-sheet="${esc(r.sheet)}" ${SEL[r.sheet]!=null?'checked':''}>
+          <div class="g"><span class="part">${esc(r.item)}</span>
+            <span class="nm">요청 ${esc(ymd(r.ymd))} · 요청수량 ${num(r.qty)}</span></div>
+          <input class="q" type="number" inputmode="numeric" min="0" max="${r.qty}"
+                 data-q="${esc(r.sheet)}" value="${SEL[r.sheet]!=null?SEL[r.sheet]:r.qty}">
+        </div>`).join('')}</div>
+      <div class="sum">
+        <div><b id="selc">0</b><span>선택 도번</span></div>
+        <div><b id="selq">0</b><span>납품수량</span></div>
+      </div>
+      <button class="btn" id="issue" disabled>선택한 송장 발행</button>`
+    : `<div class="empty">발행 대기 중인 송장이 없습니다.</div>`}
+  </div>
+
+  ${issued.length ? `<div class="card">
+    <h3>발행한 송장<span class="n">${num(issued.length)}</span></h3>
+    <div class="scroll">${issued.map(b=>`
+      <div class="row">
+        <div class="g"><span class="part">SET${esc(b.barcode)}</span>
+          <span class="nm">${esc(ymd(b.ymd))} · 도번 ${num(b.cnt)}종 · ${num(b.qty)}개</span></div>
+        <span class="pill p${esc(b.status)}">${esc(ST[b.status]||b.status)}</span>
+        <button class="btn g" style="width:auto;padding:8px 11px;font-size:13px"
+                data-qr="${esc(b.barcode)}">QR</button>
+      </div>`).join('')}</div>
+  </div>` : ''}
+
+  <div class="card">
+    <h3>상태별 현황</h3>
+    ${inv.length ? `<table><tbody>${inv.map(x=>`
+      <tr><td><span class="pill p${esc(x.status)}">${esc(x.nm)}</span></td>
+          <td class="n">${num(x.cnt)}건</td><td class="n">${num(x.qty)}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">송장이 없습니다.</div>`}
+  </div>`;
+}
+
+function recalc(){
+  const c=Object.keys(SEL).length;
+  const q=Object.values(SEL).reduce((a,b)=>a+(Number(b)||0),0);
+  const ec=$('#selc'), eq=$('#selq'), b=$('#issue');
+  if(ec) ec.textContent=num(c);
+  if(eq) eq.textContent=num(q);
+  if(b) b.disabled = !(c>0 && q>0);
+}
+
+async function doIssue(){
+  const items=Object.entries(SEL).map(([sheet,qty])=>({sheet,qty:Number(qty)||0}))
+                                 .filter(x=>x.qty>0);
+  if(!items.length) return;
+  const b=$('#issue'); b.disabled=true; b.textContent='발행 중…';
+  try{
+    const j=await api('/api/setin/issue',{method:'POST',body:JSON.stringify({items})});
+    SEL={};
+    await load();
+    if(j&&j.barcode) showQR(j.barcode, `송장 ${j.count}건을 발행했습니다.`);
+  }catch(e){ alert(e.message); b.disabled=false; b.textContent='선택한 송장 발행'; }
+}
+
+async function showQR(bc, note){
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML=`<div class="sheet">
+    <h4>SET${esc(bc)}</h4>
+    <div class="s">${esc(note||'상자에 붙이고, 담당자가 이 QR 을 찍어 입고합니다.')}</div>
+    <div class="qr" id="qrbox">불러오는 중…</div>
+    <div class="qrv">SET${esc(bc)}</div>
+    <div style="display:flex;gap:9px;margin-top:14px">
+      <button class="btn g" id="qrprint">인쇄</button>
+      <button class="btn g" id="qrdepart">출발 처리</button>
+      <button class="btn" id="qrclose">닫기</button>
+    </div></div>`;
+  document.body.appendChild(m);
+  m.querySelector('#qrclose').onclick=()=>m.remove();
+  m.onclick=e=>{ if(e.target===m) m.remove(); };
+  m.querySelector('#qrprint').onclick=()=>{
+    const w=window.open('','_blank');
+    if(!w) return alert('팝업이 차단되었습니다. 브라우저 설정을 확인하세요.');
+    w.document.write(`<title>SET${bc}</title><body style="text-align:center;font-family:sans-serif;padding:24px">
+      ${m.querySelector('#qrbox').innerHTML}
+      <div style="font-size:26px;font-weight:800;letter-spacing:2px;margin-top:10px">SET${bc}</div>
+      </body>`);
+    w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
+  };
+  m.querySelector('#qrdepart').onclick=async()=>{
+    if(!confirm(`SET${bc} 을(를) 출발 처리할까요?`)) return;
+    try{ const j=await api('/api/partner/depart',{method:'POST',body:JSON.stringify({barcode:bc})});
+      alert(j.msg||'출발 처리했습니다.'); m.remove(); load();
+    }catch(e){ alert(e.message); }
+  };
+  try{
+    const r=await fetch(API+'/api/partner/qr?barcode='+encodeURIComponent(bc),
+      {headers:{'Authorization':'Bearer '+T.tok}});
+    m.querySelector('#qrbox').innerHTML = r.ok ? await r.text()
+      : '<div class="msg e">QR 을 만들지 못했습니다.</div>';
+  }catch(e){ m.querySelector('#qrbox').innerHTML='<div class="msg e">QR 오류</div>'; }
+}
+
+/* ───────── 입고 스캔 (담당자 전용) ───────── */
+let SCAN=null;
+function viewScan(){
+  return `
+  <div class="card">
+    <h3>입고 스캔</h3>
+    <div class="s" style="color:var(--sub);font-size:12.5px;margin-bottom:9px">
+      리더기로 찍거나 SET번호를 입력하세요. <b>확인 후에 입고</b>됩니다.</div>
+    <input class="big" id="sc" inputmode="numeric" autocomplete="off"
+           placeholder="SET바코드" value="">
+    <div style="display:flex;gap:9px;margin-top:10px">
+      <button class="btn g" id="cam">카메라로 찍기</button>
+      <button class="btn" id="go">조회</button>
+    </div>
+    <div id="scres" style="margin-top:13px"></div>
+  </div>`;
+}
+
+async function doScan(){
+  const v=($('#sc').value||'').replace(/[^0-9]/g,'');
+  const box=$('#scres');
+  if(!v){ box.innerHTML='<div class="msg e">SET바코드를 입력하세요.</div>'; return; }
+  box.innerHTML='<div class="empty">조회 중…</div>';
+  try{
+    const j=await api('/api/setstock/scan?barcode='+encodeURIComponent(v));
+    SCAN=j;
+    const rows=j.rows||[];
+    const q=rows.reduce((a,b)=>a+(Number(b.qty)||0),0);
+    box.innerHTML=`
+      ${j.warn?`<div class="warnbox">${esc(j.warn)}</div>`:''}
+      <div class="sum">
+        <div><b>${esc(j.custnm||j.cust||'')}</b><span>협력사</span></div>
+        <div><b>${num(rows.length)}</b><span>도번</span></div>
+        <div><b>${num(q)}</b><span>수량</span></div>
+      </div>
+      <div class="scroll">${rows.map(r=>`
+        <div class="row"><div class="g"><span class="part">${esc(r.item_code||'')}</span>
+          <span class="nm">${esc(r.itemnm||'')} · 상태 ${esc(ST[String(r.status||'').trim()]||r.status||'')}</span></div>
+          <div style="font-weight:800">${num(r.qty)}</div></div>`).join('')}</div>
+      <button class="btn" id="recv" style="margin-top:12px">이 내용으로 입고</button>`;
+    $('#recv').onclick=doReceive;
+  }catch(e){ box.innerHTML=`<div class="msg e">${esc(e.message)}</div>`; }
+}
+
+async function doReceive(){
+  if(!SCAN) return;
+  const n=(SCAN.rows||[]).length;
+  if(!confirm(`${SCAN.custnm||''} · 도번 ${n}종을 입고 처리할까요?`)) return;
+  const b=$('#recv'); b.disabled=true; b.textContent='입고 중…';
+  try{
+    const j=await api('/api/setstock/receive',{method:'POST',
+      body:JSON.stringify({barcode:SCAN.barcode,tag:'2'})});
+    $('#scres').innerHTML=`<div class="msg k">입고 완료 — ${num(j.received)}건 ·
+      자도번 재고 ${num(j.ledger_posted)}행</div>`;
+    $('#sc').value=''; SCAN=null;
+  }catch(e){
+    b.disabled=false; b.textContent='이 내용으로 입고';
+    $('#scres').insertAdjacentHTML('afterbegin',`<div class="msg e">${esc(e.message)}</div>`);
+  }
+}
+
+async function useCamera(){
+  if(!('BarcodeDetector' in window)){
+    alert('이 브라우저는 카메라 스캔을 지원하지 않습니다.\n리더기로 찍거나 번호를 직접 입력하세요.\n(안드로이드 크롬에서 지원)');
+    return;
+  }
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML=`<div class="sheet"><h4>QR 을 비추세요</h4>
+    <video id="v" playsinline style="width:100%;border-radius:12px;background:#000"></video>
+    <button class="btn g" id="cx" style="margin-top:11px">닫기</button></div>`;
+  document.body.appendChild(m);
+  let stream=null, stop=false;
+  const close=()=>{ stop=true; if(stream) stream.getTracks().forEach(t=>t.stop()); m.remove(); };
+  m.querySelector('#cx').onclick=close;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const v=m.querySelector('#v'); v.srcObject=stream; await v.play();
+    const det=new BarcodeDetector({formats:['qr_code','code_39']});
+    const tick=async()=>{
+      if(stop) return;
+      try{ const c=await det.detect(v);
+        if(c && c.length){ const val=(c[0].rawValue||'').replace(/[^0-9]/g,'');
+          if(val){ close(); $('#sc').value=val; doScan(); return; } } }catch(e){}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }catch(e){ close(); alert('카메라를 열 수 없습니다 — '+e.message); }
+}
+
+function wire(){
+  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
+  document.querySelectorAll('[data-sheet]').forEach(cb=>cb.onchange=()=>{
+    const sh=cb.dataset.sheet, q=document.querySelector(`[data-q="${sh}"]`);
+    if(cb.checked) SEL[sh]=Number(q&&q.value)||0; else delete SEL[sh];
+    recalc();
+  });
+  document.querySelectorAll('[data-q]').forEach(q=>q.oninput=()=>{
+    const sh=q.dataset.q; if(SEL[sh]!=null) SEL[sh]=Number(q.value)||0; recalc();
+  });
+  document.querySelectorAll('[data-qr]').forEach(b=>b.onclick=()=>showQR(b.dataset.qr));
+  const is=$('#issue'); if(is) is.onclick=doIssue;
+  const g=$('#go'); if(g) g.onclick=doScan;
+  const c=$('#cam'); if(c) c.onclick=useCamera;
+  const sc=$('#sc'); if(sc){ sc.focus(); sc.onkeyup=e=>{ if(e.key==='Enter') doScan(); }; }
+  recalc();
+}
+
+/* ───────── 시작 ───────── */
+$('#lgbtn').onclick = doLogin;
+['#lgid','#lgpw'].forEach(s=>$(s).addEventListener('keyup',e=>{ if(e.key==='Enter') doLogin(); }));
+$('#out').onclick = async()=>{
+  try{ await api('/api/auth/logout',{method:'POST',body:'{}'}); }catch(e){}
+  T.tok=null; T.me=null; showLogin();
+};
+
+(async function(){
+  if(!T.tok) return showLogin();
+  try{ const j = await api('/api/auth/me'); T.me = j.user; $('#login').classList.add('hide'); start(); }
+  catch(e){ showLogin(); }
+})();
+</script>
+</body>
+</html>

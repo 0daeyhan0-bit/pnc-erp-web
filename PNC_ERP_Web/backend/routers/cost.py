@@ -3,7 +3,7 @@
    app.py에서 분리. 공유헬퍼는 common.py에서 import."""
 import os
 from fastapi import APIRouter, Query, Body, HTTPException, Response
-from common import (_conn, _nx, _num, _run_sp, _shape, _get_cost_engine, _reset_cost_engine,
+from common import (_conn, _nx, _nx_tx, _num, _run_sp, _shape, _get_cost_engine, _reset_cost_engine,
                     _COST_LOCK, SP_SIL, SP_NAE, _HERE, NxCostEngine)
 
 router = APIRouter()
@@ -67,6 +67,29 @@ def cost_nx(item: str = Query(..., description="품번"),
         raise HTTPException(500, f"nx엔진 오류: {e}")
     finally:
         eng.close()
+
+@router.get("/api/cost/nx_v2")
+def cost_nx_v2(item: str = Query(..., description="품번"),
+               ymd: str = Query('260630', description="단가기준일 YYMMDD")):
+    """★품목별 원가분석 V2 — 직거래 원소재 실매입가 반영 실원가·손익(우리식 클린 계산).
+       엔진(V1=레거시충실 사급가) 원본 무변경, _leaf_val 패치로 직거래 원소재만 실매입가 override.
+       일반관리비·이윤 전파 자동 반영. 사급 원소재=엔진값 유지(사급품 V1=V2 diff0).
+       규칙·검증 정본: _schema/COSTANALYSIS_V2_DESIGN.md §5A~§6Q."""
+    if NxCostEngine is None:
+        raise HTTPException(500, "nx_cost_engine 로드 실패")
+    item = item.strip(); ymd = ymd.strip()
+    if not item:
+        raise HTTPException(400, "item(품번) 필요")
+    try:
+        import nx_cost_v2 as _V2
+    except Exception as e:
+        raise HTTPException(500, f"nx_cost_v2 로드 실패: {e}")
+    try:
+        r = _V2.cost_v2(item, ymd, engine_factory=NxCostEngine)
+        return {"item": item, "ymd": ymd, "v1": r["v1"], "v2": r["v2"],
+                "delta": r["delta"], "sonik_delta": r["sonik_delta"]}
+    except Exception as e:
+        raise HTTPException(500, f"V2 원가 오류: {e}")
 
 @router.get("/api/cost/sil")
 def cost_sil(item: str = Query(..., description="품번"),
@@ -566,11 +589,133 @@ def cost_nx_bulk(p: dict = Body(...)):
     return {"ymd": ymd, "ym": ym, "costs": out}
 
 
+@router.post("/api/cost/nx/bulk_v2")
+def cost_nx_bulk_v2(p: dict = Body(...)):
+    """★V2 배치 — 여러 품번 V1(레거시충실 사급가)+V2(직거래 원소재 실매입가) 동시 계산.
+       엔진 2개(V1·V2패치)를 배치 전체 재사용. 응답=bulk와 동일 V1 필드 + v2_silwon/v2_sonik/v2_jae/v2_delta(superset·렌더호환).
+       규칙·검증: _schema/COSTANALYSIS_V2_DESIGN.md §5A~§6Q."""
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    try:
+        import nx_cost_v2 as _V2
+    except Exception as e:
+        raise HTTPException(500, f"nx_cost_v2 로드 실패: {e}")
+    parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
+    ymd = str(p.get("ymd") or '260630').strip()
+    ym = str(p.get("ym") or '').strip()
+    recovery = p.get("recovery", 100)   # ★회수율(ST효율) — 헤더 입력값 전 품목 일괄. 기본100=no-op(V2가공비=V1). §7A
+    out = {}
+    e1 = NxCostEngine()      # V1 (엔진 그대로)
+    e2 = NxCostEngine()      # V2 (직거래 원소재 실매입 패치)
+    try:
+        try:
+            _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]), _V2.build_fallback_map(e2.cur, ymd[:4]))
+            _V2.patch_recovery(e2, recovery)   # ★가공비 회수율 곱셈(100/효율). patch_leaf와 다른 메서드(gagong_u) 패치→조합. 100=no-op
+        except Exception as ex:
+            raise HTTPException(500, f"V2 맵/패치 오류: {ex}")
+        smap = {}
+        try: smap = _sagub_diff_map(e1.cur, ym) if ym else {}
+        except Exception: smap = {}
+        sag_items = set()
+        try:
+            e1.cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
+            sag_items = set(r[0] for r in e1.cur.fetchall())
+        except Exception: sag_items = set()
+        for it in parts:
+            try:
+                s = e1.silwon(it, ymd)
+                row = {k: round(float(s.get(k, 0) or 0), 2) for k in
+                       ('jae', 'gagong', 'ilban', 'unban', 'profit', 'silwon', 'lg', 'sonik')}
+                row['lme'] = round(float(s.get('lme_total') or e1.lme_u(it, ymd) or 0), 2)
+                sp = e1.material_split(it, ymd)
+                row['won'] = sp['won']; row['bu'] = sp['bu']; row['sa'] = sp['sa']
+                row['sagub'] = e1.sagub_sum(it, smap) if smap else 0.0
+                row['silsagub'] = e1.sagub_whole(it, ymd) if (it in sag_items) else 0.0
+                # ★V2 (직거래 원소재 실매입 반영)
+                s2 = e2.silwon(it, ymd)
+                row['v2_jae'] = round(float(s2.get('jae', 0) or 0), 2)
+                row['v2_silwon'] = round(float(s2.get('silwon', 0) or 0), 2)
+                row['v2_sonik'] = round(float(s2.get('sonik', 0) or 0), 2)
+                row['v2_delta'] = round(row['v2_silwon'] - row['silwon'], 2)
+                out[it] = row
+            except Exception as e:
+                out[it] = {"error": str(e)[:60]}
+    finally:
+        e1.close(); e2.close()
+    return {"ymd": ymd, "ym": ym, "costs": out}
+
+
+@router.post("/api/cost/nx/bulk_actual")
+def cost_nx_bulk_actual(p: dict = Body(...)):
+    """★실제손익(월별매칭 · COSTANALYSIS_V2 §10~12) — 원가분석 '실제' 모드. 이론(bulk_v2 단일 as-of)의 대응.
+       판가 = 그달 리시빙 실적 가중평균(PARTNER_ERP.dbo.sa_t_recv_dtl: Σ order_qty×item_cost / Σ order_qty).
+       원가 = 그달 이동평균(nx.mat_stock_daily) 재료비 + 가공/일반/운반/이윤. 판가·원가 같은달 매칭(§11 논리필수).
+       from_ym~to_ym(YYMM). 검증 = §12 actual2 diff0(dev만). 로직정본 = _harness 배치 actual2.py 이식."""
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    import calendar as _cal
+    parts = [str(x).strip() for x in (p.get("parts") or []) if str(x).strip()][:200]
+    from_ym = str(p.get("from_ym") or '2602').strip()
+    to_ym = str(p.get("to_ym") or '2608').strip()
+    theory_ymd = str(p.get("ymd") or '260630').strip()
+    def _months(a, b):
+        y, m = 2000 + int(a[:2]), int(a[2:]); yb, mb = 2000 + int(b[:2]), int(b[2:]); r = []
+        while (y, m) <= (yb, mb):
+            ym = '%02d%02d' % (y - 2000, m)
+            r.append((ym, '%s%02d' % (ym, _cal.monthrange(y, m)[1])))
+            m += 1
+            if m > 12: m = 1; y += 1
+        return r
+    months = _months(from_ym, to_ym)
+    out = {}
+    e = NxCostEngine()
+    try:
+        mavc = {}
+        def mav_at(ym):
+            e.cur.execute("""SELECT mat_code, avg_cost FROM (
+              SELECT mat_code, avg_cost, ROW_NUMBER() OVER(PARTITION BY mat_code ORDER BY ymd DESC) rn
+              FROM PARTNER_ERP_TEST3.nx.mat_stock_daily WHERE ymd<=? AND CONVERT(float,ISNULL(avg_cost,0))>0) t WHERE rn=1""", ym + '31')
+            return {str(r[0]).strip(): float(r[1] or 0) for r in e.cur.fetchall()}
+        for it in parts:
+            try:
+                tot_qty = tot_rev = tot_cost = 0.0
+                for ym, ymd in months:
+                    e.cur.execute("""SELECT SUM(CONVERT(float,ISNULL(order_qty,0))) q,
+                          SUM(CONVERT(float,ISNULL(order_qty,0))*CONVERT(float,ISNULL(item_cost,0))) rev
+                        FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE RTRIM(item_code)=? AND LEFT(order_ymd,4)=?""", it, ym)
+                    q, rev = e.cur.fetchone()
+                    if not q or float(q) <= 0: continue
+                    q = float(q); rev = float(rev or 0)
+                    if ym not in mavc: mavc[ym] = mav_at(ym)
+                    mav = mavc[ym]
+                    nodes = e.silwon_nodes(it, ymd)['rows']; agg = e.silwon(it, ymd)
+                    ma_jae = 0.0
+                    for n in nodes:
+                        mc = str(n.get('code', '')).strip(); mat = float(n.get('mat', 0) or 0)
+                        if mat <= 0: continue
+                        wt = float(n.get('weight', 0) or 0); nq = float(n.get('qty', 0) or 0); unit = str(n.get('unit', '')).strip()
+                        av = mav.get(mc, 0)
+                        ma_jae += (av * wt * nq if unit == 'KG' else av * nq) if av > 0 else mat
+                    unitcost = ma_jae + agg['gagong'] + agg['ilban'] + agg['unban'] + agg['profit']
+                    tot_qty += q; tot_rev += rev; tot_cost += unitcost * q
+                theory = e.silwon(it, theory_ymd)['sonik']
+                out[it] = {
+                    "qty": round(tot_qty, 2), "actual_rev": round(tot_rev, 2), "actual_cost": round(tot_cost, 2),
+                    "actual_sonik": round(tot_rev - tot_cost, 2),
+                    "actual_sonik_unit": round((tot_rev - tot_cost) / tot_qty, 2) if tot_qty else 0.0,
+                    "theory_sonik": round(theory, 2),
+                }
+            except Exception as ex:
+                out[it] = {"error": str(ex)[:80]}
+    finally:
+        e.close()
+    return {"from_ym": from_ym, "to_ym": to_ym, "mode": "actual", "months": [m[0] for m in months], "costs": out}
+
+
 # ===================== 품목별 원가분석 결과 캐시 (첫 로드 즉시화) =====================
 #  프론트가 nx엔진으로 계산한 결과(품목별 원가/손익)를 (ym=리시빙월, ymd=단가일)별로 저장 → 다음 진입/타 사용자 즉시 로드.
 #  엔진 자체는 안 건드림. 재계산 버튼=강제 재계산 후 재저장. buildRow가 쓰는 13필드+qty만 보관.
 _CA_FIELDS = ('qty', 'jae', 'lg', 'silwon', 'sonik', 'sagub', 'won', 'bu', 'sa',
-              'gagong', 'ilban', 'unban', 'profit', 'silsagub')
+              'gagong', 'ilban', 'unban', 'profit', 'silsagub',
+              'v2_silwon', 'v2_sonik', 'v2_delta')   # ★V2(직거래 실매입) 편입 — 화면은 캐시 조회만(즉시)
 
 def _ca_norm(ym, ymd):
     ym = "".join(ch for ch in str(ym or '') if ch.isdigit()); ym = ym[2:6] if len(ym) >= 6 else ym[:4]
@@ -584,6 +729,9 @@ def _ca_ddl(cur):
           qty float, jae float, lg float, silwon float, sonik float, sagub float,
           won float, bu float, sa float, gagong float, ilban float, unban float, profit float, silsagub float,
           upd_dt datetime, CONSTRAINT pk_ca_cache PRIMARY KEY(ym,ymd,part))""")
+    # ★기존 테이블에 V2 컬럼 없으면 추가(멱등)
+    for _c in ('v2_silwon', 'v2_sonik', 'v2_delta'):
+        cur.execute("IF COL_LENGTH('nx.cost_analysis_cache',?) IS NULL EXEC('ALTER TABLE nx.cost_analysis_cache ADD %s float')" % _c, _c)
 
 @router.get("/api/cost/analysis/cache/get")
 def cost_analysis_cache_get(ym: str = Query(''), ymd: str = Query('')):
@@ -633,6 +781,87 @@ def cost_analysis_cache_save(p: dict = Body(...)):
         return {"ok": False, "error": str(e)[:150]}
     finally:
         cn.close()
+
+
+# ===================== ★V2 캐시 서버배치(엔진·맵 1회 warm → 캐시 채움. 화면은 조회만=즉시) =====================
+_regen_ca = {"running": False, "done": 0, "total": 0, "ym": "", "ymd": "", "error": "", "sec": 0}
+
+def _regen_ca_worker(ym, ymd):
+    """리시빙 전 품목 V1+V2 원가를 warm 엔진 1개씩·맵 1회 빌드로 계산 → nx.cost_analysis_cache 저장.
+    ★클라 청크(매번 맵 재구축·cold엔진) 대체 = 병목 제거. 정확도=검증엔진 출력 그대로."""
+    global _regen_ca
+    t0 = _time.time(); e1 = e2 = None; cn = None
+    try:
+        import nx_cost_v2 as _V2
+        cn = _nx(); cur = cn.cursor()
+        cur.execute("SELECT r.ITEM_CODE, SUM(CONVERT(float,ISNULL(r.RECV_QTY,0))) FROM nx.SA_T_LG_RECEIVING_DTL r WHERE LEFT(r.RECEIVING_YMD,4)=? GROUP BY r.ITEM_CODE", ym)
+        items = [(str(r[0]).strip(), float(r[1] or 0)) for r in cur.fetchall() if str(r[0]).strip()]
+        _regen_ca['total'] = len(items)
+        e1 = NxCostEngine(); e2 = NxCostEngine()
+        _V2.patch_leaf(e2, _V2.build_realbuy_map(e2.cur, ymd[:4]), _V2.build_fallback_map(e2.cur, ymd[:4]))
+        try: e1.warm_all(); e2.warm_all()   # ★글로벌 벌크로드(diff0 PASS·7.8배) — 노드별 DB왕복 제거
+        except Exception: pass
+        smap = {}
+        try: smap = _sagub_diff_map(e1.cur, ym)
+        except Exception: smap = {}
+        sag_items = set()
+        try:
+            e1.cur.execute("SELECT LTRIM(RTRIM(item_code)) FROM PARTNER_ERP_TEST3.nx.item_sagub_cost WHERE sa_cost>0")
+            sag_items = set(r[0] for r in e1.cur.fetchall())
+        except Exception: pass
+        buf = []
+        for it, qty in items:
+            try:
+                s = e1.silwon(it, ymd); sp = e1.material_split(it, ymd); s2 = e2.silwon(it, ymd)
+                buf.append({'part': it, 'qty': qty,
+                    'jae': round(float(s.get('jae', 0) or 0), 2), 'lg': round(float(s.get('lg', 0) or 0), 2),
+                    'silwon': round(float(s.get('silwon', 0) or 0), 2), 'sonik': round(float(s.get('sonik', 0) or 0), 2),
+                    'sagub': (e1.sagub_sum(it, smap) if smap else 0.0),
+                    'won': sp['won'], 'bu': sp['bu'], 'sa': sp['sa'],
+                    'gagong': round(float(s.get('gagong', 0) or 0), 2), 'ilban': round(float(s.get('ilban', 0) or 0), 2),
+                    'unban': round(float(s.get('unban', 0) or 0), 2), 'profit': round(float(s.get('profit', 0) or 0), 2),
+                    'silsagub': (e1.sagub_whole(it, ymd) if (it in sag_items) else 0.0),
+                    'v2_silwon': round(float(s2.get('silwon', 0) or 0), 2), 'v2_sonik': round(float(s2.get('sonik', 0) or 0), 2),
+                    'v2_delta': round(float(s2.get('silwon', 0) or 0) - float(s.get('silwon', 0) or 0), 2)})
+            except Exception:
+                pass
+            _regen_ca['done'] += 1
+        _ca_ddl(cur)
+        cur.execute("DELETE FROM nx.cost_analysis_cache WHERE ym=? AND ymd=?", ym, ymd)
+        cols = "ym,ymd,part," + ",".join(_CA_FIELDS) + ",upd_dt"
+        ph = "?,?,?," + ",".join("?" * len(_CA_FIELDS)) + ",getdate()"
+        data = [[ym, ymd, r['part']] + [float(r.get(f) or 0) for f in _CA_FIELDS] for r in buf]
+        try: cur.fast_executemany = True
+        except Exception: pass
+        BATCH = 90   # (3+17)파라미터×90=1800 < 2100
+        for i in range(0, len(data), BATCH):
+            cur.executemany("INSERT INTO nx.cost_analysis_cache(%s) VALUES(%s)" % (cols, ph), data[i:i + BATCH])
+        cn.commit()
+    except Exception as e:
+        _regen_ca['error'] = str(e)[:200]
+    finally:
+        try:
+            if e1: e1.close()
+            if e2: e2.close()
+            if cn: cn.close()
+        except Exception: pass
+        _regen_ca['sec'] = round(_time.time() - t0); _regen_ca['running'] = False
+
+@router.post("/api/cost/analysis/regen")
+def cost_analysis_regen(p: dict = Body(...)):
+    """★V2 캐시 서버배치 트리거(백그라운드). ym(리시빙월)·ymd(단가적용일)로 전품목 V1+V2 계산→캐시. status 폴링."""
+    global _regen_ca
+    if _regen_ca.get('running'): raise HTTPException(409, "이미 재계산 중")
+    if NxCostEngine is None: raise HTTPException(500, "nx엔진 로드 실패")
+    ym, ymd = _ca_norm(p.get('ym'), p.get('ymd'))
+    if not ym or not ymd: raise HTTPException(400, "ym/ymd 필요")
+    _regen_ca = {"running": True, "done": 0, "total": 0, "ym": ym, "ymd": ymd, "error": "", "sec": 0}
+    threading.Thread(target=_regen_ca_worker, args=(ym, ymd), daemon=True).start()
+    return {"ok": True, "ym": ym, "ymd": ymd}
+
+@router.get("/api/cost/analysis/regen/status")
+def cost_analysis_regen_status():
+    return _regen_ca
 
 
 # ===================== 공정 지정(내부원가 수정) — carrier-aware: 가공(node own) + 조립(용접/체결/포장, 용접봉 carrier·p_item=node) =====================
@@ -790,8 +1019,58 @@ def weld_get(node: str = Query(..., description="용접 관경별 조회 대상 
         ph2 = ",".join("?" * len(nl))
         cur.execute(f"SELECT DISTINCT weld_item FROM nx.proc_weld WHERE parent_item IN ({ph2})", *nl)
         carriers = [str(r[0]).strip() for r in cur.fetchall() if str(r[0]).strip()]
+        # ★용접봉별 공정구분(51 용접/28 은납) — routing에서 유형별 최다 work_qty 기준(동률=51). 다종 편집 프리로드.
+        proc = {}
+        cur.execute(f"SELECT item_code, proc_code, ISNULL(SUM(work_qty),0) FROM nx.routing "
+                    f"WHERE p_item IN ({ph2}) AND proc_code IN ('51','28') GROUP BY item_code, proc_code", *nl)
+        _pw = {}
+        for r in cur.fetchall():
+            wi = str(r[0]).strip(); pc = str(r[1]).strip(); q = float(r[2] or 0)
+            _pw.setdefault(wi, {})[pc] = _pw.get(wi, {}).get(pc, 0) + q
+        for wi, m in _pw.items():
+            proc[wi] = "28" if (m.get("28", 0) > m.get("51", 0)) else "51"
         return {"node": node, "rollup": bool(roll), "nodes": len(nl),
-                "welds": [{"weld_item": k, "rows": v} for k, v in by.items()], "carriers": carriers}
+                "welds": [{"weld_item": k, "rows": v, "proc_code": proc.get(k, "51")} for k, v in by.items()],
+                "carriers": carriers, "proc": proc}
+    finally:
+        nx.close()
+
+@router.get("/api/weld/types")
+def weld_types():
+    """용접봉 %유형 목록 — 다종 팝업 드롭다운은 **%유형(1%봉/3%봉/은납…)으로 선택**(개별코드 아님).
+       각 %유형 → 대표코드(rep_code) 1개로 자동 매핑(저장은 대표코드로). code2type=기존 저장코드→유형 역매핑(표시용).
+       대표코드 규칙: 활성코드 중 ①proc_weld 최다사용 ②RAC접두 ③알파벳 최소."""
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT code, ISNULL(weld_type,''), ISNULL(item_name,'')
+                       FROM nx.weld_type_map WHERE ISNULL(active,0)=1""")
+        rows = [(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip()) for r in cur.fetchall()]
+        # 사용빈도(proc_weld) 로드 → 대표코드 선정
+        cur.execute("SELECT weld_item, COUNT(*) FROM nx.proc_weld GROUP BY weld_item")
+        used = {str(a).strip(): int(b) for a, b in cur.fetchall()}
+        by_type = {}
+        code2type = {}
+        for code, wt, nm in rows:
+            if not wt:
+                continue
+            by_type.setdefault(wt, []).append((code, nm))
+            code2type[code] = wt
+        types = []
+        for wt, members in by_type.items():
+            # 대표코드: 최다사용 → RAC접두 → 알파벳 최소
+            rep = sorted(members, key=lambda cn: (-used.get(cn[0], 0), 0 if cn[0].upper().startswith("RAC") else 1, cn[0]))[0][0]
+            types.append({"weld_type": wt, "rep_code": rep,
+                          "codes": [c for c, _ in members], "member_count": len(members)})
+        # %숫자 오름차순 정렬(봉<와이어), 파싱 실패는 뒤로
+        def _key(t):
+            import re as _re
+            m = _re.match(r"(\d+)", t["weld_type"])
+            pct = int(m.group(1)) if m else 999
+            wire = 1 if ("와이어" in t["weld_type"] or "wire" in t["weld_type"].lower()) else 0
+            return (pct, wire, t["weld_type"])
+        types.sort(key=_key)
+        return {"types": types, "code2type": code2type,
+                "rows": [{"code": c, "weld_type": w, "name": n} for c, w, n in rows]}  # rows=하위호환
     finally:
         nx.close()
 
@@ -868,6 +1147,118 @@ def weld_save(payload: dict = Body(...)):
         _reset_cost_engine()
         return {"ok": True, "node": node, "weld_item": wi, "diams": len(cnt), "total_points": sum_cnt,
                 "use_qty": use_qty, "unit_qty": unit, "inner_st": sum_st, "uph": uph, "loss_factor": lf}
+    finally:
+        nx.close()
+
+
+@router.post("/api/weld/save_node")
+def weld_save_node(payload: dict = Body(...)):
+    """★용접봉 다종 저장 — 한 노드의 전 용접봉 유형을 원자 교체(노드당 2~3종 지원. 예: 일반1% + 은납3/5%).
+       payload: {node, types:[{weld_item, proc_code?('51'용접/'28'은납), rows:[{pipe_diam, weld_qty}]}], loss_factor?(1.5)}.
+       노드의 item_weld/proc_weld/routing(51·28) 전체 삭제 후 유형별 재삽입(원자=_nx_tx). 산식=weld_save 동일(WELD_PROC_TABLES_SPEC).
+       ★★관경 무변경 유형 = 기존 proc_weld/item_weld/routing 상태를 **verbatim 원상보존**(divergence 노드도 diff0 보장·하드룰5).
+         관경이 바뀐/신규 유형만 재계산. 삭제된 유형은 제거. 단가 미변경."""
+    node = str(payload.get("node", "")).strip()
+    types = payload.get("types", []) or []
+    if not node:
+        raise HTTPException(400, "node 필요")
+    lf = payload.get("loss_factor", None)
+    lf = float(lf) if (lf is not None and str(lf).strip() != "") else 1.5
+    from collections import defaultdict as _dd
+    nx = _nx_tx(); cur = nx.cursor()
+    try:
+        cur.execute("SELECT pipe_diam,MIN(std_use_qty),MIN(std_st) FROM nx.weld_diam GROUP BY pipe_diam")
+        STDU = {}; STDS = {}
+        for r in cur.fetchall():
+            d = round(float(r[0]), 2); STDU[d] = float(r[1] or 0); STDS[d] = float(r[2] or 0)
+        # ── 원상보존용 이전 상태 스냅샷(관경 무변경 유형 verbatim 복원 → divergence 노드 diff0) ──
+        old_iw = {}   # wi -> {diam: (weld_qty, use_qty)}
+        cur.execute("SELECT weld_item,pipe_diam,ISNULL(weld_qty,0),ISNULL(use_qty,0) FROM nx.item_weld WHERE item_code=?", node)
+        for r in cur.fetchall():
+            wi = str(r[0]).strip(); d = round(float(r[1]), 2)
+            old_iw.setdefault(wi, {})[d] = (float(r[2]), float(r[3]))
+        old_pw = {}   # wi -> row tuple(weld_base,pipe_diam,weld_st,unit_qty,use_qty,loss_factor,meta_ok,cs_calc_except,lme_except,tag,src)
+        cur.execute("""SELECT weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,loss_factor,
+                       ISNULL(meta_ok,1),ISNULL(cs_calc_except,0),ISNULL(lme_except,0),ISNULL(tag,'W'),ISNULL(src,'')
+                       FROM nx.proc_weld WHERE parent_item=?""", node)
+        for r in cur.fetchall():
+            old_pw[str(r[0]).strip()] = tuple(r[1:])
+        old_rt = {}   # wi -> [(proc_code,work_qty,prod_uph,calc_gubun,sort_seq)]
+        cur.execute("""SELECT item_code,proc_code,ISNULL(work_qty,0),ISNULL(prod_uph,0),ISNULL(calc_gubun,'3'),ISNULL(sort_seq,0)
+                       FROM nx.routing WHERE p_item=? AND proc_code IN ('51','28')""", node)
+        for r in cur.fetchall():
+            old_rt.setdefault(str(r[0]).strip(), []).append((str(r[1]).strip(), float(r[2]), float(r[3]), str(r[4]).strip(), int(r[5])))
+        # ★노드 전체 용접봉 원자 삭제(다종 교체)
+        cur.execute("DELETE FROM nx.item_weld WHERE item_code=?", node)
+        cur.execute("DELETE FROM nx.proc_weld WHERE parent_item=?", node)
+        cur.execute("DELETE FROM nx.routing WHERE p_item=? AND proc_code IN ('51','28')", node)
+        saved = []
+        for t in types:
+            wi = str(t.get("weld_item", "")).strip()
+            if not wi:
+                continue
+            pc = str(t.get("proc_code", "51")).strip() or "51"
+            if pc not in _PROC_WELD:
+                pc = "51"
+            cnt = _dd(float)
+            for r in (t.get("rows", []) or []):
+                try:
+                    d = round(float(r.get("pipe_diam") or 0), 2); q = float(r.get("weld_qty") or 0)
+                except Exception:
+                    continue
+                if d > 0 and q > 0:
+                    cnt[d] += q
+            # ── 관경 무변경 판정: 들어온 counts == 이전 item_weld counts(같은 wi) → verbatim 원상보존 ──
+            oiw = old_iw.get(wi)
+            unchanged = (oiw is not None
+                         and {d: q for d, q in cnt.items()} == {d: wq for d, (wq, _uq) in oiw.items()})
+            if unchanged:
+                # item_weld 원상복원(use_qty 포함 그대로)
+                for d, (wq, uq) in sorted(oiw.items()):
+                    cur.execute("INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty) VALUES(?,?,?,?,?)",
+                                node, wi, d, wq, uq)
+                # proc_weld 원상복원(있던 경우만 — 없던 divergent는 그대로 미생성)
+                if wi in old_pw:
+                    o = old_pw[wi]
+                    cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,
+                          loss_factor,meta_ok,cs_calc_except,lme_except,tag,src,upd_dt)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,getdate())""",
+                        node, wi, o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9], o[10])
+                # routing 원상복원(있던 51/28 행 그대로)
+                for (rpc, rwq, ruph, rcg, rss) in old_rt.get(wi, []):
+                    cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+                        VALUES(?,?,?,?,?,?,?)""", node, wi, rpc, rwq, ruph, rcg, rss)
+                saved.append({"weld_item": wi, "proc_code": (old_rt.get(wi, [("51",)])[0][0] if old_rt.get(wi) else pc),
+                              "points": sum(cnt.values()), "use_qty": (old_pw[wi][4] if wi in old_pw else 0.0), "preserved": True})
+                continue
+            # ── 편집/신규 유형 = 재계산 ──
+            bad = [d for d in cnt if d not in STDU]
+            if bad:
+                raise HTTPException(400, f"weld_diam에 없는 관경: {bad} (용접봉 {wi})")
+            sum_use = sum(STDU[d] * q for d, q in cnt.items())
+            sum_cnt = sum(cnt.values())
+            sum_st = sum(STDS[d] * q for d, q in cnt.items())
+            if sum_cnt <= 0:
+                continue
+            use_qty = round(sum_use * lf, 6)
+            unit = round(sum_use / sum_cnt, 8) if sum_cnt else 0.0
+            diam_rep = max(cnt.items(), key=lambda kv: kv[1])[0]
+            uph = round(sum_cnt * 3600.0 / sum_st, 4) if sum_st > 0 else 0.0
+            for d, q in sorted(cnt.items()):
+                cur.execute("INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty) VALUES(?,?,?,?,?)",
+                            node, wi, d, q, round(STDU[d] * q, 6))
+            cur.execute("""INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,
+                  loss_factor,meta_ok,cs_calc_except,lme_except,tag,src,upd_dt)
+                VALUES(?,?,?,?,?,?,?,?,1,0,0,'W','weld_save_node',getdate())""",
+                node, wi, wi.split('-')[0], diam_rep, sum_cnt, unit, use_qty, lf)
+            cur.execute("""INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+                VALUES(?,?,?,?,?,'3',0)""", node, wi, pc, sum_cnt, uph)
+            saved.append({"weld_item": wi, "proc_code": pc, "points": sum_cnt, "use_qty": use_qty, "recalc": True})
+        nx.commit()
+        _reset_cost_engine()
+        return {"ok": True, "node": node, "types": saved, "count": len(saved)}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 

@@ -458,25 +458,34 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     #    용접/가공(생산 _prodstock stage=WELD/GAGONG)·영업(salesstock)·자재(nx.mat_stock_daily 이동평균 일마감).
     #    생산·영업 기초=2502스냅샷+월초직전무브(=7월말) × 월초원가, 현재고=조회일 수량 × 월초원가. 자재=일별 이동평균.
     #    실재고(조정후) = 실매입 + 재고증가합계.
-    def _delta(rows, stage=None, basek='basic', costk='cost', amtk='amt'):
-        cur_a = base_a = 0.0
-        for x in rows:
-            if stage is not None and x.get('stage') != stage: continue
-            cur_a += float(x.get(amtk) or 0)
-            base_a += float(x.get(basek) or 0) * float(x.get(costk) or 0)
-        return round(cur_a - base_a)   # 현재고 − 기초
-    try:
-        _pr = _prodstock(ym, m0, d6)   # ★조회일 기준. stage='WELD'(용접, gagong_proc≠P0001) / 'GAGONG'(가공, P0001)
-        jaego_weld, jaego_gagong = _delta(_pr, 'WELD'), _delta(_pr, 'GAGONG')
-    except Exception: jaego_weld = jaego_gagong = 0
-    try: jaego_sales = _delta(salesstock(dfrom=m0, dto=d6).get('rows', []))
-    except Exception: jaego_sales = 0
-    try:   # 자재: 우리 이동평균 일마감(nx.mat_stock_daily). 기초=월초직전잔량(ba)·현재고=조회일(sa)
-        _mc = matclose(dfrom=m0, dto=d6).get('rows', [])
-        jaego_mat = round(sum(float(x.get('sa') or 0) for x in _mc) - sum(float(x.get('ba') or 0) for x in _mc))
-    except Exception: jaego_mat = 0
-    jaego = jaego_weld + jaego_gagong + jaego_sales + jaego_mat   # 재고증가 합계(=Σ 현재고−기초)
-    silrae = net_t['tot'] + jaego   # 실재고(조정후) = 실매입 + 재고증가합계
+    # ★재고(기초/기말) = 마감 확정 스냅샷 직독(nx.stock_snapshot). 기초=직전 월마감(월초 기초재고)·기말=조회일 일마감(없으면 직전 일마감).
+    #   ★replay 없음=즉시(수불장 ledger는 월전체 재생으로 30초). 일단위 조회=확정 마감값 사용(수불장 runtime과 ~0.4%p 미세차·확정값이 권위적).
+    _lc = _nxc(); _lcur = _lc.cursor()
+    base_m = cur_m = base_prd = cur_prd = base_s = cur_s = 0
+    def _snapsum(dom):
+        # 기초 = 직전 월마감(M, period<ym)
+        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+            WHERE domain=? AND ptype='M' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='M' AND period<?)""", dom, dom, ym)
+        b = float(_lcur.fetchone()[0] or 0)
+        # 기말 = 조회일 이하 최신 일마감(D, period<=d6). 없으면 기초(변동0).
+        _lcur.execute("""SELECT ISNULL(SUM(stock_amt),0) FROM nx.stock_snapshot
+            WHERE domain=? AND ptype='D' AND period=(SELECT MAX(period) FROM nx.stock_snapshot WHERE domain=? AND ptype='D' AND period<=?)""", dom, dom, d6)
+        e = float(_lcur.fetchone()[0] or 0)
+        return round(b), round(e if e else b)
+    try: base_m, cur_m = _snapsum('MAT')
+    except Exception: pass
+    try: base_prd, cur_prd = _snapsum('PRD')
+    except Exception: pass
+    try: base_s, cur_s = _snapsum('SAL')
+    except Exception: pass
+    _lc.close()
+    jaego = (cur_m + cur_prd + cur_s) - (base_m + base_prd + base_s)   # 재고 증감(참고)
+    silrae = net_t['tot'] + jaego   # 실재고(조정후)
+    # ★재료비(사용기준) = 원재료매입(매입−불출=실매입) + Σ재고사용(기초−기말). 기말 감소=사용↑. 재고=자재/생산/영업 수불장.
+    gicho = base_m + base_prd + base_s   # 기초재고 합계
+    gimal = cur_m + cur_prd + cur_s      # 기말재고 합계
+    jae_use = gicho - gimal              # 재고 사용(기초−기말)
+    jaemat = round(net_t['tot'] + jae_use)      # 재료비 = 실매입(매입−불출) + 재고사용
 
     # 당사ERP 유상사급 = ①의 유상사급-원재료/부품(확정입고, 총). 원소재·부품 분리(LG사급 대사용).
     dangsa_raw = dangsa_part = 0
@@ -550,15 +559,36 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
                "sagub_part_sum": _r3(_sagub_part_sum), "sagub_hab": _r3(_sagub_hab),
                "lg_sugum": _r3(_lgsu)}
 
+    # ⑥ 당일 실적(조회일=d6만): 매출(리시빙 cut별 절삭/설치/기타) + 사급(OSP 원소재=TUBE/부품)
+    _c, _rrt = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r
+      LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
+      WHERE r.RECEIVING_YMD='{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
+    _tc = {(r['cg'] or ''): float(r['amt'] or 0) for r in _rrt}
+    t_cut, t_seol = round(_tc.get('절삭', 0)), round(_tc.get('설치', 0))
+    t_etc = round(sum(v for k, v in _tc.items() if k not in ('절삭', '설치')))
+    _c, _rot = _rows(f"""SELECT CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END t, SUM(ISNULL(amt,0)) a
+      FROM PARTNER_ERP_TEST3.nx.lg_sagub_actual WHERE ym='{ym}' AND ISNULL(ymd,'')='{d6}'
+      GROUP BY CASE WHEN UPPER(item_name) LIKE '%TUBE%' THEN 'raw' ELSE 'part' END""")
+    _tsg = {r['t']: float(r['a'] or 0) for r in _rot}
+    t_raw, t_part = round(_tsg.get('raw', 0)), round(_tsg.get('part', 0))
+
     _res = {"date": d6, "ym": ym,
             "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
+            # ⑥ 당일 실적(조회일) — 매출(절삭/설치/기타/합계) + 사급(원소재/부품/합계)
+            "today": {"hyeon_cut": t_cut, "hyeon_seol": t_seol, "hyeon_etc": t_etc, "sales_hab": t_cut + t_seol + t_etc,
+                      "sagub_raw": t_raw, "sagub_part": t_part, "sagub_hab": t_raw + t_part},
+            # ② 재료비(사용기준) = 원재료매입(매입−불출) + 재고사용(기초−기말). %=재료비/LG매출.
+            "jaemat": {"net": net_t['tot'], "use": jae_use, "jaemat": jaemat, "jaemat_pct": pct(jaemat, lg_sales)},
             # ⑤ 현매출 / ② 매입비율
             "sales": {"hyeon_cut": hyeon_cut, "hyeon_seol": hyeon_seol, "hyeon_etc": hyeon_etc, "lg_sales": lg_sales},
             "ratio": {"pur_pct": pct(pur_t['tot'], lg_sales), "net_pct": pct(net_t['tot'], lg_sales),
                       "pur": pur_t['tot'], "net": net_t['tot'], "lg_sales": lg_sales,
                       "silrae": silrae, "silrae_pct": pct(silrae, lg_sales)},
-            # ③ 재고조정 (조회일 현재고 − 7월말 기초 = 재고증가분, 버킷별). 용접/가공/영업/자재 + 합계.
-            "jaego": {"weld": jaego_weld, "gagong": jaego_gagong, "sales": jaego_sales, "mat": jaego_mat, "total": jaego},
+            # ③ 재고 (버킷별 기초/기말 = 자재/생산/영업 수불장). 차액(사용)=기초−기말은 프론트 계산.
+            "jaego": {"total": jaego,
+                      "base_mat": base_m, "cur_mat": cur_m, "base_prd": base_prd, "cur_prd": cur_prd,
+                      "base_sales": base_s, "cur_sales": cur_s, "base_total": gicho, "cur_total": gimal},
             # ④ 사급율
             "sagubyul": {"osp_raw": osp_raw, "osp_part": osp_part, "jeolsak_sales": hyeon_cut,
                          "raw_pct": pct(osp_raw, hyeon_cut), "part_pct": pct(osp_part, hyeon_cut)},
@@ -1106,6 +1136,12 @@ GROUP BY t.mat
         r["amt"] = round(q * cost)
         r["qty"] = q
         out.append(r)
+    # ★단가·금액을 영업 수불장과 동일하게(대표 확정 '가' — 생산과 같은 방침).
+    #   영업 수불장 단가 = **판가 기반 이동평균**(_snap_sal · 신고 평가방법 §7-4).
+    #   여기서 as-of 판가를 그대로 쓰면 두 화면이 갈린다(실측: 단가 89건·금액 45건 불일치).
+    #   ※영업은 품번 1축이다(생산은 품번×재고위치 2축) → keyloc=False.
+    #   ※수불장에 없는 품목은 손대지 않는다 — 없는 값을 만들어내지 않는다.
+    _apply_ledger_price(out, f, t, domain="SAL", keyloc=False)
     out.sort(key=lambda r: -abs(r.get("amt") or 0))
     return {"dfrom": f, "dto": t, "count": len(out), "zero": 1 if inc_zero else 0, "rows": out}
 
@@ -1138,6 +1174,95 @@ WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.
+def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
+    """★단가·금액을 **생산 수불장과 동일**하게 맞춘다. 맞춘 행 수를 돌려준다.
+
+       왜 수불장 결과를 그대로 쓰나 — 수불장 단가는 조회값이 아니라
+       **기초 + 입고 가중평균을 일자별로 굴린 결과(avg)** 다.
+       같은 식을 여기서 다시 짜면 반드시 갈린다(§21: 화면이 따로 계산하면 값이 갈린다).
+       ⟹ `close._prd_ledger` 를 **그대로 호출**한다. 같은 함수 = 같은 값.
+       (성능은 close._LEDGER_CACHE 가 (도메인,기간) 단위로 흡수한다.)
+
+       ★대표 확정 2026-08-29: 재고조회를 수불장에 맞춘다.
+         이로써 레거시 w_pr_stock_480(마스터 단가)과는 달라진다 — 그 대가를 알고 택했다.
+    """
+    try:
+        from routers.close import ledger_cached          # ★엔드포인트와 캐시 공유
+    except Exception:
+        return 0
+    cn = _nxc(); cur = cn.cursor()
+    try:
+        _r = ledger_cached(cur, domain, fr6, to6)        # ★(rows, breaks, basis) 3-튜플
+        lrows = _r[0] if isinstance(_r, tuple) else _r
+    except Exception as _e:
+        # ★삼키지 않는다 — 조용히 실패하면 값이 안 맞는 걸 못 본다.
+        #   단 full traceback 은 찍지 않는다(마감 배치에서 재귀 출력으로 로그가 터졌다 2026-08-30).
+        print(f"[_apply_ledger_price] {type(_e).__name__}: {str(_e)[:150]}")
+        return 0
+    finally:
+        cn.close()
+    # ★생산은 (품번,재고위치) 2축, 영업은 품번 1축이다(수불장 축을 그대로 따른다)
+    def _k(r, loc_field="loc"):
+        cd = str(r.get("cd") or r.get("mat") or "").strip()
+        return (cd, str(r.get(loc_field) or "").strip()) if keyloc else cd
+    px = {}
+    for r in lrows:
+        px[_k(r)] = float(r.get("avg") or 0)
+    n = 0
+    for r in rows:
+        k = _k(r)
+        if k in px:
+            u = px[k]
+            r["cost"] = u
+            r["amt"] = float(round(float(r.get("qty") or 0) * u))
+            r["cost_src"] = "수불장(이동평균)"
+            n += 1
+    # ★수불장에 없는 품목은 **손대지 않는다** — 수불장이 단가0·음수를 스냅샷에서 빼기 때문이다
+    #   (_snap_bulk 제외규칙). 없는 값을 만들어내지 않는다.
+    return n
+
+
+def _fill_bom_price(rows, target):
+    """★단가를 못 구한 품목을 **BOM 하위 부품 합산**으로 채운다. 채운 행 수를 돌려준다.
+
+       왜 필요한가 — SUB·은납 반제품은 `pr_m_item_cost` 에 단가가 없어 **금액이 0 으로 빠진다.**
+         실측(2026-08-29 · 용접): 1,009행 중 126행 단가없음 → 재고금액이 23% 과소계상.
+       ★생산 수불장·마감(`close._prd_price_bom`)이 **이미 같은 일을 하고 있다.**
+         그래서 여기서 새로 짜지 않고 **그 함수를 그대로 부른다** —
+         따로 짜면 두 화면 금액이 갈려 비교가 안 된다(사용자 요구: 값이 동일해야 비교 가능).
+       규칙도 수불장과 같다: **못 구한 것만** 채운다. 이미 단가가 있으면 손대지 않는다.
+    """
+    need = sorted({str(r.get("cd") or "").strip() for r in rows
+                   if not float(r.get("cost") or 0) and float(r.get("qty") or 0)})
+    if not need:
+        return 0
+    try:
+        from routers.close import _prd_price_bom          # ★순환 임포트 회피 — 함수 안에서
+    except Exception:
+        return 0
+    cn = _nxc(); cur = cn.cursor()          # ★조회 전용(readonly) — _prd_price_bom 은 SELECT 만 한다
+    try:
+        px = _prd_price_bom(cur, str(target), need)
+    except Exception:
+        return 0
+    finally:
+        cn.close()
+    n = 0
+    for r in rows:
+        cd = str(r.get("cd") or "").strip()
+        hit = px.get(cd)
+        if hit and not float(r.get("cost") or 0):
+            u = float(hit[0] or 0)
+            if not u:
+                continue
+            r["cost"] = u
+            # 금액 반올림은 SQL(CAST(ROUND(...,0)))과 맞춘다
+            r["amt"] = float(round(float(r.get("qty") or 0) * u))
+            r["cost_src"] = "BOM부품합산"          # 화면이 출처를 표시할 수 있게
+            n += 1
+    return n
+
+
 def _prodstock(ym, frm=None, to=None):
     # 레거시 w_pr_stock_480과 동일: 수불기간(frm~to) 일범위. frm/to(YYMMDD) 우선, 없으면 ym월 전체.
     y01 = frm if frm else (ym + "01")
@@ -1173,6 +1298,13 @@ FROM agg JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.item_code=agg.mat
   OUTER APPLY ({C2A}) cc
 """
     _c, rows = _rows(sql)
+    # ★단가·금액을 생산 수불장과 동일하게 맞춘다(대표 확정 '가').
+    #   수불장 단가에는 BOM 하위 합산·자재단가 보정이 **이미 들어 있다** —
+    #   그래서 _fill_bom_price 를 따로 부르지 않는다(이중 적용 방지).
+    _n = _apply_ledger_price(rows, (frm or (ym + "01")), y99)
+    if not _n:
+        # 수불장을 못 얻은 경우에만 최소 보강(단가 0 인 SUB 를 BOM 합산으로) — 화면이 빈손이 되지 않게
+        _fill_bom_price(rows, y99)
     return rows
 
 @live_router.get("/prodstock")
