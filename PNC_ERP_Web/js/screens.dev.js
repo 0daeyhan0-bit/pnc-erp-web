@@ -1569,8 +1569,9 @@ SCREEN.unifybom=(c,ro)=>{
     const body=rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
       const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
       const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':(r.gubun?`<span class="nae-tg" style="color:#556;border-color:#ccc">${esc(r.gubun)}</span>`:''));
+      const shb=r.shared?`<span class="nae-tg" title="공용 SUB — ${r.refcnt||0}개 제품에서 사용" style="color:#0a7d55;border-color:#a8e0c8;background:#eafaf2">공용${r.refcnt>1?' '+r.refcnt:''}</span>`:'';
       return `<tr style="background:${bg}"><td class="center">${r.level}</td>
-        <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag}</td>
+        <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag} ${shb}</td>
         <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
         <td class="center">${r.sag==='1'?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
@@ -2523,8 +2524,9 @@ SCREEN.unifybom=(c,ro)=>{
     <tbody>${rows.map(r=>{const sp=r.diam?('Ø'+r.diam+(r.thick?'×'+r.thick:'')):(r.spec||'');
       const bg=['#fff','#f6f2fb','#efe7f8','#e7dcf4','#dfd2f0'][Math.min(r.level,4)];
       const tag=r.level===0?'<span class="nae-tg" style="color:#1c47a0;border-color:#bcd">제품</span>':(r.haskids?'<span class="nae-tg" style="color:#8e44ad;border-color:#d6c3ea">SUB</span>':'');
+      const shb=r.shared?`<span class="nae-tg" title="공용 SUB — ${r.refcnt||0}개 제품에서 사용" style="color:#0a7d55;border-color:#a8e0c8;background:#eafaf2">공용${r.refcnt>1?' '+r.refcnt:''}</span>`:'';
       return `<tr style="background:${bg}"><td class="center">${r.level}</td>
-        <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag}</td>
+        <td style="padding-left:${8+r.level*18}px;white-space:nowrap">${r.level?'<span style="color:#a9b8cc">└ </span>':''}<b>${esc(r.code)}</b> ${tag} ${shb}</td>
         <td class="bcap" title="${esc(r.nm)}" style="max-width:210px;text-align:left">${esc(r.nm)}</td>
         <td class="center" style="color:#5a6b82">${esc(sp)}</td>
         <td class="center">${r.sag==='1'?'<span class="nae-tg" style="color:#c0392b;border-color:#e6bcbc">사급</span>':''}</td>
