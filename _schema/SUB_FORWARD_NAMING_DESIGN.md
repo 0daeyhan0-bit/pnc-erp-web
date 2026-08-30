@@ -79,7 +79,7 @@
 - ✅ S5 표시: subdisp 출생라벨+공용배지(shared/refcnt/scode). 트리 API 검증.
 - ✅ **테스트베드 `sub_shared_testbed.py` 10/10 PASS(무커밋 롤백·오염0)**: T1 다른 흐름 동일SUB→강제재사용(공용대체)·T2 제작처 다르면 별개·T3 2번째 제품 addline→공용변환(is_shared)·T4 공용확인 API. 실제 핸들러(sub_create/route_approve/bom_addline/sub_dedup) 호출.
 - ✅ 프론트 공용배지 렌더(라우팅/BOM 트리, screens.dev.js ?v=260830sub).
-- ✅ **S6 게이트 PASS**: 구조증명(원가/소요 엔진·soyo·coopplan·partplan sub테이블 0참조) + 원가 실측(sandbox서 전 sig 2893 유니크교란+20 repoint 후 **원가 15/15 diff0·불변**, 무커밋 롤백). 생산계획·협력사계획=동일 0참조 구조증명으로 보장.
+- ✅ **S6 게이트 PASS(구조증명+실측)**: 구조증명(원가/소요 엔진·soyo·coopplan·partplan sub테이블 0참조). 실측(sandbox 전 sig 2893 유니크교란+20 repoint, 무커밋 롤백): **원가 15/15 diff0**(`sub_recompute_diff0_gate.py`) + **생산계획 소요 12/12 diff0**(`sub_recompute_plan_diff0_gate.py`, plan_explode). 협력사계획=동일 소요엔진/v_pr_bom·0참조 구조보장.
 - ☐ 남음: **S7 재계산 --commit + 코드 배포(동시·승인후)**. 프론트/백엔드 전부 dev 반영·검증완, 라이브는 스키마 additive+is_shared backfill만.
 
 ## 6. ★검증 게이트 (전부 통과해야 배포)
