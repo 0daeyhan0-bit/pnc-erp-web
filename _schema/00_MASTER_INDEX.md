@@ -38,6 +38,7 @@
 | 9 | **재고 원장·마감게이팅** | **NX_STOCK_LEDGER_DESIGN**(원장) + **STOCK_GATING_CLOSE_LOCK_RULES**(게이팅) | MATVERIFY, SAGUB_DIFF_DESIGN |
 | 10 | **협력사 견적** | **COOP_QUOTE_V2_RULES.md**(08-09) | (MATCOST/PRODGROUP/REBUILD은 흡수됨) |
 | 11 | **협력사 정산(동/용접봉/원재/절삭)** | **WONJAE_RECON_PENDING**(원재) + **CUTTING_SETTLE_EXCLUDE**(절삭) + **WELD_COOP_SETTLEMENT_DESIGN**(용접봉) | COOP_PLAN_DELIVERY_FORMULAS(계획) |
+| 12b | **LG사급 부품수불 금액축** | **LGSAGUB_PARTS_LEDGER_PRICE_BASIS.md**(08-30, 매입실적 단일축·품목별 굴림·neg 노출) | [[newerp-lgsagub-recvcompare]] |
 | 12 | **사급 출고·차액** | **SAGUB_OUTPUT_PROGRAMS_ANALYSIS**(출고 tag5) + **SAGUB_DIFF_DESIGN**(차액손익) | — |
 | 13 | **이관·컷오버 실행** | **CUTOVER_MUST_AND_DAILY_MIGRATION.md**(08-19) + **MIGRATION_ISSUES**(대장) | CUTOVER_DELTA_INVENTORY(토폴로지), TRANSACTION_CUTOVER_DESIGN, LEGACY_NX_SEPARATION_INVENTORY |
 | 14 | **배포·개발환경** | **DEV_ONBOARDING**(개발자) + **GITEA_MIGRATION_RUNBOOK**(서버) | CLAUDE.md §6·§8 |

@@ -757,47 +757,11 @@ def recvcompare_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
         nx.close()
 
 
-# ── 사급부품(소분류310) BOM 전개 캐시 ──
-_PARTS_MAPS = None
-def _parts_maps(cur):
-    """CS_M_ITEM_BOM 부모→자식 맵 + 사급부품(SGROUP 310) 집합. 모듈캐시(1회 로드).
-       ★CS_CALC_EXCEPT_FLAG<>'1' 필터 유지: 이 플래그는 변형SUB 이중계상 방지용.
-         예) AJR30077403은 MJX65072203을 (a)직접행(except='1') + (b)-F&T 변형서브 안 = 2경로로 가짐.
-         except 필터가 (a)를 걸러 1회만 계상. 제거하면 2배 이중계상됨(실측 확인)."""
-    global _PARTS_MAPS
-    if _PARTS_MAPS is not None:
-        return _PARTS_MAPS
-    cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))), UPPER(LTRIM(RTRIM(MAT_CODE))), ISNULL(USE_QTY,0)
-                   FROM nx.CS_M_ITEM_BOM WHERE ISNULL(CS_CALC_EXCEPT_FLAG,'0')<>'1'""")
-    ch = {}
-    for p, c2, q in cur.fetchall():
-        ch.setdefault(p, []).append((c2, float(q or 0)))
-    # ★소분류 정본 = nx.item.sgroup (DO_NOT_USE §17). 미러 nx.PR_M_ITEM 은 재분류를 못 따라온다 —
-    #   sgroup 소유권이 nx.item 으로 이관되면서(PR#84) r_item_sync 가 sgroup 을 동기화하지 않기 때문.
-    #   실측(§17-1 에 이미 버그로 등재): 미러 592 vs 정본 591.
-    #   차이 1건 = 'BCUP1S-1.6*9.6' — 품명이 '1%용접링' 이고 정본은 230(용접링)인데
-    #   미러는 310(LG사급) 그대로여서 **LG사급 대상에 잘못 포함**되고 있었다.
-    cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE LTRIM(RTRIM(sgroup))='310'")
-    sg310 = set(r[0] for r in cur.fetchall())
-    _PARTS_MAPS = (ch, sg310)
-    return _PARTS_MAPS
-
-def _explode_parts(item, ch, sg310, memo):
-    """1개 완제품 → {사급부품(310): 소요개수}. 310 도달시 계상 후 정지(LG가 완성제공)."""
-    if item in memo:
-        return memo[item]
-    memo[item] = {}
-    acc = {}
-    for c2, q in ch.get(item, []):
-        if q <= 0:
-            continue
-        if c2 in sg310:
-            acc[c2] = acc.get(c2, 0.0) + q
-        else:
-            for k, v in _explode_parts(c2, ch, sg310, memo).items():
-                acc[k] = acc.get(k, 0.0) + v * q
-    memo[item] = acc
-    return acc
+# ★_parts_maps / _explode_parts (CS_M_ITEM_BOM ad-hoc 재귀) 제거 — 2026-08-30
+#   이게 EBF64570401 을 2배 계상했던 그 코드다(CLAUDE.md §1-10 위반 잔재).
+#   recvcompare_parts 가 부르고는 있었으나 ch·sg310 을 **쓰지 않았다**(CS_M_ITEM_BOM 전체를
+#   캐시에 올리기만 하는 무용 호출). 소요는 통일 소요엔진(sagub_parts_soyo)만 쓴다.
+#   주석만 보고 되살리지 말 것.
 
 
 @router.get("/api/lgsagub/settle_list")
@@ -881,7 +845,6 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
-        ch, sg310 = _parts_maps(cur)
         rwh, rp, yms = _recv_where(ym, ymd_from, ymd_to)
         # ② IN OSP 사급부품 (lg_sagub, 품명 TUBE 아님) — 기간내 월합. ★이 OSP 목록 자체가 '사급부품 정의' = 전개 정지점.
         inl = ",".join("'" + y + "'" for y in yms) if yms else "''"
@@ -956,10 +919,49 @@ def recvcompare_parts(ym: str = Query(""), ymd_from: str = Query(""), ymd_to: st
         nx.close()
 
 
+_SAGUB_PX_CACHE = {}          # as-of ymd -> {품번: 매입단가}
+
+
+def _buyprice(cur, ymd):
+    """사급부품 매입단가 = **nx.price_item (price_type='매입', vendor_code='LG') as-of ymd**.
+
+       ★소스 근거 — DO_NOT_USE_FIELDS §18 이 **사급가 = nx.price_item** 로 단일 소스를 지정한다.
+         레거시 PU_T_STOCK_MAINT 직독은 00_MASTER_INDEX §0 규칙1 이 신규 금지(컷오버에 죽는 코드).
+       ★창(window) = 적용일 시계열의 **as-of 최신 1건**. 누적 가중평균을 쓰면 과거 매입이 섞여
+         왜곡된다 — 2026-08-30 실측: 2608 누적 8,395 vs 당월 9,539(−12%).
+       ★거래처 LG 고정 — 사급부품 공급자는 LG 다. 다른 거래처 매입가(가공외주 등)를 섞지 않는다.
+       ★폴백 없음 — 없으면 **0 으로 드러낸다**(§18). 호출부가 px_miss 로 노출한다.
+
+       실측(2026-08-30): 사급부품 243/243종 커버·단가0 0종·OSP 청구단가 대비 −0.6%~+4.8%.
+    """
+    ck = str(ymd)
+    if ck in _SAGUB_PX_CACHE:
+        return _SAGUB_PX_CACHE[ck]
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), price FROM (
+                     SELECT item_code, CAST(price AS float) price,
+                            ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn
+                       FROM nx.price_item
+                      WHERE price_type='매입' AND LTRIM(RTRIM(ISNULL(vendor_code,'')))='LG'
+                        AND apply_ymd <= ?) t WHERE rn=1""", ck)
+    px = {str(r[0]): float(r[1] or 0) for r in cur.fetchall()}
+    if len(_SAGUB_PX_CACHE) > 24:
+        _SAGUB_PX_CACHE.pop(next(iter(_SAGUB_PX_CACHE)))
+    _SAGUB_PX_CACHE[ck] = px
+    return px
+
+
 @router.get("/api/lgsagub/recvcompare_parts_ledger")
 def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
     """사급부품 월별 수불(원소재 수불과 동일 형태): 기초 + 입고(OSP 사급부품) − 소요(리시빙×BOM 부품) = 기말. 개수 단위·1월(2601)부터.
-       입고=nx.lg_sagub_actual(NOT TUBE) 월합. 소요=리시빙(C+R)×_explode_parts(정지=OSP 사급부품). 금액=개수×전기간 평균단가."""
+       입고=nx.lg_sagub_actual(NOT TUBE) 월합. 소요=리시빙(C+R)×**통일 소요엔진**(sagub_parts_soyo, 정지=OSP 사급부품).
+
+       ★금액축 = **매입가격(매입실적)** — 대표 확정 2026-08-30.
+         단가 = nx.price_item(매입·거래처 LG) **적용일 as-of 최신** — DO_NOT_USE_FIELDS §18 단일 소스.
+         입고·소요·기말을 **모두 같은 단가**로 평가한다.
+         전에는 입고만 OSP 실제금액, 소요는 전기간 OSP 평균단가여서 **축이 둘**이었고,
+         그 차이가 잔액에 쌓여 기말수량이 +인데 금액이 −로 나왔다(2602 3,098개 / −70,666,529원).
+       ★품목별로 굴린다 — 총계로 굴리면 품목별 +/− 잔량이 상쇄돼 보이지만 단가가 달라
+         금액은 상쇄되지 않는다. 숨은 마이너스 잔량은 neg_* 로 드러낸다."""
     f = lambda v: float(v or 0)
     nx = _nx(); cur = nx.cursor()
     try:
@@ -969,8 +971,8 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
                        FROM nx.lg_sagub_actual WHERE UPPER(item_name) NOT LIKE '%TUBE%'
                        GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
         osp_all = {r[0]: (f(r[1]), f(r[2])) for r in cur.fetchall()}
-        osp_set = set(osp_all)
-        price = {k: (a / q if q else 0.0) for k, (q, a) in osp_all.items()}
+        osp_set = set(osp_all)                     # ★전개 정지점(구조) — 단가와 무관
+        osp_px = {k: (a / q if q else 0.0) for k, (q, a) in osp_all.items()}   # 참고용(OSP 청구단가)
         cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) NOT LIKE '%TUBE%'")
         r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
         LEDGER_START = "2602"                 # ★사용자: 2월부터(OSP 데이터 시작월)
@@ -988,12 +990,22 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             months.append(m); m = ym_next(m); guard += 1
 
         rows = []; bal_q = 0.0; bal_a = 0.0
+        bal = {}                 # ★품목별 잔량 — 총계로만 굴리면 +/− 가 상쇄돼 금액이 어긋난다
         _soyo.warm_vpr(_weng())  # v_pr_bom 1쿼리 프리로드
         _sps_memo = {}           # 전 월/품목 공유(per-unit·stop_set 동일=성능)
         for M in months:
-            cur.execute("""SELECT SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0)) FROM nx.lg_sagub_actual
-                           WHERE ym=? AND UPPER(item_name) NOT LIKE '%TUBE%'""", M)
-            r = cur.fetchone(); in_q = f(r[0]); in_a = f(r[1])
+            # ★그 달 매입단가(as-of 월말) = Σ매입금액/Σ매입수량. 금액축의 유일한 소스다.
+            px = _buyprice(cur, M + "31")
+            cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), SUM(ISNULL(qty,0)), SUM(ISNULL(amt,0))
+                             FROM nx.lg_sagub_actual
+                            WHERE ym=? AND UPPER(item_name) NOT LIKE '%TUBE%'
+                            GROUP BY UPPER(LTRIM(RTRIM(item_code)))""", M)
+            in_q = in_a = in_osp = 0.0
+            for it, q, a in [(r[0], f(r[1]), f(r[2])) for r in cur.fetchall()]:
+                in_q += q
+                in_a += q * px.get(it, 0.0)       # ★매입가로 평가(소요와 같은 축)
+                in_osp += a                       # 참고 = LG 청구금액 그대로
+                bal[it] = bal.get(it, 0.0) + q
             cur.execute("""SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) it,
                   SUM(CASE WHEN GUBUN='C' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END)
                  +SUM(CASE WHEN GUBUN='R' THEN CONVERT(float,ISNULL(RECV_QTY,0)) ELSE 0 END) qty
@@ -1003,14 +1015,24 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             for it, qty in [(r[0], f(r[1])) for r in cur.fetchall()]:
                 for part, per in _soyo.sagub_parts_soyo(_weng(), it, osp_set, _sps_memo).items():   # ★통일 소요엔진
                     out_q += qty * per
-                    out_a += qty * per * price.get(part, 0.0)
+                    out_a += qty * per * px.get(part, 0.0)
+                    bal[part] = bal.get(part, 0.0) - qty * per
             open_q = bal_q; open_a = bal_a
             bal_q = open_q + in_q - out_q
-            bal_a = open_a + in_a - out_a
-            rows.append({"ym": M, "in_kg": in_q, "in_amt": in_a,
+            # ★기말금액 = Σ(품목 잔량 × 그 달 매입단가) — 수량과 같은 축이라 누적오차가 안 쌓인다
+            bal_a = sum(v * px.get(k, 0.0) for k, v in bal.items())
+            neg = {k: v for k, v in bal.items() if v < -0.5}
+            # ★단가가 없는 품목은 폴백하지 않고 드러낸다(§18) — 금액에 0 으로 들어가 있다
+            miss = [k for k in bal if not px.get(k)]
+            rows.append({"ym": M, "in_kg": in_q, "in_amt": in_a, "in_osp_amt": in_osp,
                          "open_bom_kg": open_q, "soyo_bom_kg": out_q, "close_bom_kg": bal_q,
-                         "soyo_bom_amt": out_a, "close_bom_amt": bal_a})
-        return {"from_ym": frm, "to_ym": to, "osp_min": osp_min, "rows": rows}
+                         "soyo_bom_amt": out_a, "close_bom_amt": bal_a,
+                         # ★총수량 뒤에 숨은 마이너스 잔량(소요>입고 품목) — 만들지 않고 드러낸다
+                         "neg_cnt": len(neg), "neg_qty": sum(neg.values()),
+                         "neg_amt": sum(v * px.get(k, 0.0) for k, v in neg.items()),
+                         "px_miss": len(miss), "px_miss_items": sorted(miss)[:20]})
+        return {"from_ym": frm, "to_ym": to, "osp_min": osp_min, "rows": rows,
+                "price_basis": "매입가격 = nx.price_item(매입·거래처 LG) 적용일 as-of 월말 · 단일 소스(§18)"}
     finally:
         nx.close()
 
