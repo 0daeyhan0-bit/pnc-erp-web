@@ -27,12 +27,13 @@ soyo.py         59, 93, 434                               (3·주문/AS계획/�
 ```
 집중지점: **kitting/gagong/matexpect**(재고·출하·계획 현재값), **live_api·common**(라이브∪nx 브리지), **close `_mv_*`/`_prd_*`**(활성 평가법).
 
-## CLEAN(마스터, §9-1) 5개 — ★보류(아침 사용자 논의 필요)
+## CLEAN(마스터, §9-1) — soyo 3 ✅완료 · lgsagub 2 ☐컷오버 후
 ```
-lgsagub.py  104, 105        CS_M_METERIAL_COST → nx.price_*  (절삭재료비 사급가·price 엔진 매핑 필요)
-soyo.py     632, 633, 639   PR_M_ITEM         → nx.item      (routing_edge STEP7)
+soyo.py     632, 633, 639   PR_M_ITEM → nx.item  ✅ (2026-08-31 사용자 권고안 승인·완료)
+lgsagub.py  104, 105        CS_M_METERIAL_COST   ☐ 컷오버 후 클린(nx.price_metal) 이관(price 스키마 상이·정적가격이라 지연 안전)
 ```
-**보류 사유(2026-08-30 밤)**: ①soyo는 컬럼명 재매핑 필요(dbo.PR_M_ITEM.in_cust_code/make_type/work_code ↔ nx.item 컬럼명 상이) ②정본 충돌 — 메모리 [[newerp-nxitem-reader-migration]] "**soyo dbo STEP7만 보존**"(리더이관 시 의도적 잔존) + nx.PR_M_ITEM 미러는 **물리drop 컷오버대기**라 미러로도 못 감 ③lgsagub는 price 엔진 매핑. → 성급한 전환 금지, **컷오버 전 사용자와 방향 확정**(nx.item 클린으로 정합 vs STEP7 예외 유지). 현재 dbo 직독이라 병행운영 중엔 정상 동작. **컷오버 차단요인 여부도 함께 판단**(마스터는 신규 품목 드물어 프로즌 영향 작음).
+**soyo CLEAN 완료·검증(2026-08-31)**: dbo.PR_M_ITEM(ci/pi/it) → nx.item, 컬럼 `in_cust_code`→`in_cust` 재매핑(make_type/work_code/item_code는 nx.item 동일). CTE 내부 in_cust_code 7개는 테이블컬럼 아니라 보존. ★**검증 diff0**: 라우팅 시드코드 15,387개 전부 nx.item 존재(dbo 15,382보다 +5 신규), make_type·in_cust·work_code 불일치 **0**, dbo전용(nx누락) 0. nx.item이 superset이라 flip 무손실. 정본충돌 해소=nx.item에 필요컬럼 전부 실측확인.
+**lgsagub 보류**: CS_M_METERIAL_COST→nx.price_metal은 스키마 상이(price 엔진 매핑). 절삭재료비 사급가=정적(마감때만)이라 컷오버 하루 프로즌 영향 미미 → 컷오버 후 별도 클린 이관. 현 dbo 직독=병행운영 정상.
 
 ## KEEP 15개 — 일부러 레거시에 둠(바꾸면 안 됨)
 ```

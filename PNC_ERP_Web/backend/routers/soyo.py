@@ -624,19 +624,19 @@ def _routing_edge_sync(cur):
         CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
              WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
              WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust_code,'') ELSE ISNULL(ci.in_cust_code,'') END,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust,'') ELSE ISNULL(ci.in_cust,'') END,
         1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END
       FROM nx.v_pr_bom b
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
+      LEFT JOIN nx.item ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+      LEFT JOIN nx.item pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
       WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
         AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
     new_cnt = cur.rowcount
     # 3) wc_live 라이브 갱신 (편집 무관, child 생산처=work_code||in_cust)
-    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust_code,'') END
-      FROM nx.routing_edge re JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
+    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust,'') END
+      FROM nx.routing_edge re JOIN nx.item it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
     # 4) 유효 wc = COALESCE(wc_user, wc_live) — 편집 보존
     cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
     return int(new_cnt or 0)
