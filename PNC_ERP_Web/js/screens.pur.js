@@ -1596,11 +1596,16 @@ SCREEN.coopporder=(c)=>{
       info?`
        <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px;margin-top:6px">
         <table class="tbl" style="font-size:12px;width:100%"><thead><tr>
-          <th class="center" style="width:34px">No</th><th>부모도번</th><th>품목</th><th>품명</th>
-          <th class="num">현재재고</th><th class="num">기발주</th><th class="num">계획수량<br><span style="color:#8a94a6;font-size:10px">(4주)</span></th>
-          <th class="num" style="background:#f3f6fa">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th></tr></thead>
-        <tbody>${loading?`<tr><td colspan=8 class="empty">불러오는 중…</td></tr>`:(rows.length?(()=>{let pp='';return rows.map((it,i)=>{const p=parNo(it.ic);const first=(p!==pp);pp=p;
-          return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:normal;word-break:break-word;line-height:1.25">${esc(it.nm||'')}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="font-weight:700;color:#1c7c3a">${it.po_qty?nf(it.po_qty):''}</td><td class="num">${nf(it.plan_qty)}</td><td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td></tr>`;}).join('');})():`<tr><td colspan=8 class="empty">품목 없음</td></tr>`)}</tbody></table>
+          <th class="center" style="width:32px">No</th><th>부모도번</th><th>품목</th><th>품명</th>
+          <th class="num">1주</th><th class="num">2주</th><th class="num">3주</th><th class="num">4주</th>
+          <th class="num">현재재고</th><th class="num">기발주</th>
+          <th class="num" style="background:#f3f6fa">LG물동<br><span style="color:#8a94a6;font-size:10px">(5~8주)</span></th>
+          <th class="num" style="background:#fff6ec" title="4주 순소요 = 4주계획 − 현재재고 − 기발주">4주순소요<br><span style="color:#8a94a6;font-size:10px">계획-재고-발주</span></th>
+          <th class="num" style="background:#fdeef0" title="8주 순소요 = (4주계획+LG물동5~8주) − 현재재고 − 기발주">8주순소요<br><span style="color:#8a94a6;font-size:10px">+물동</span></th></tr></thead>
+        <tbody>${loading?`<tr><td colspan=13 class="empty">불러오는 중…</td></tr>`:(rows.length?(()=>{let pp='';return rows.map((it,i)=>{const p=parNo(it.ic);const first=(p!==pp);pp=p;
+          const w=it.week_qty||[0,0,0,0];const net4=Math.round((it.plan_qty||0)-(it.stock_qty||0)-(it.po_qty||0));const net8=Math.round((it.plan_qty||0)+(it.muldong_soyo||0)-(it.stock_qty||0)-(it.po_qty||0));
+          const nc=v=>v>0?'color:#c0392b;font-weight:700':'color:#9fb0c4';
+          return `<tr${first?' style="border-top:2px solid #dbe3ee"':''}><td class="center mut">${i+1}</td><td style="color:#5a6b82">${first?`<b>${esc(p)}</b>`:''}</td><td><b>${esc(it.ic)}</b></td><td title="${esc(it.nm||'')}" style="white-space:normal;word-break:break-word;line-height:1.25">${esc(it.nm||'')}</td><td class="num">${w[0]?nf(w[0]):''}</td><td class="num">${w[1]?nf(w[1]):''}</td><td class="num">${w[2]?nf(w[2]):''}</td><td class="num">${w[3]?nf(w[3]):''}</td><td class="num">${nf(it.stock_qty)}</td><td class="num" style="font-weight:700;color:#1c7c3a">${it.po_qty?nf(it.po_qty):''}</td><td class="num" style="color:#8a94a6;font-style:italic;background:#fafcff" title="LG물동 5~8주 참고">${it.muldong_soyo>0?nf(it.muldong_soyo):'<span style="color:#d0d8e2">-</span>'}</td><td class="num" style="${nc(net4)};background:#fff6ec">${nf(net4)}</td><td class="num" style="${nc(net8)};background:#fdeef0">${nf(net8)}</td></tr>`;}).join('');})():`<tr><td colspan=13 class="empty">품목 없음</td></tr>`)}</tbody></table>
        </div>`:''}
      </div>`;
     const vs=c.querySelector('#cp-vs');if(vs)vs.onclick=()=>{vq=c.querySelector('#cp-vq').value;searchV();};

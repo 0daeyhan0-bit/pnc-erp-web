@@ -83,12 +83,23 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
         for d in soyo_day.values():
             dset |= set(d.keys())
         dates = sorted(dset)
+        # ★주별 경계(오늘 기준 7일 버킷) — 계획수량을 1~4주로 분할
+        cur.execute("SELECT FORMAT(DATEADD(DAY,6,GETDATE()),'yyMMdd'), FORMAT(DATEADD(DAY,13,GETDATE()),'yyMMdd'), FORMAT(DATEADD(DAY,20,GETDATE()),'yyMMdd')")
+        w1b, w2b, w3b = cur.fetchone()
+        def _wk(ymd):
+            if ymd <= w1b: return 0
+            if ymd <= w2b: return 1
+            if ymd <= w3b: return 2
+            return 3
         rows = []
         for mat in universe:
             days = soyo_day.get(mat, {}); meta = info.get(mat, {})
+            wk = [0.0, 0.0, 0.0, 0.0]
+            for ymd, q in days.items():
+                wk[_wk(ymd)] += q
             rows.append({"ic": mat, "nm": meta.get("nm", ""), "spec": meta.get("spec", ""), "unit": meta.get("unit", "EA"),
-                         "plan_qty": round(sum(days.values()), 3), "stock_qty": stock.get(mat, 0.0),
-                         "po_qty": po_pu.get(mat, 0.0), "days": days, "alloc_note": ""})
+                         "plan_qty": round(sum(days.values()), 3), "week_qty": [round(x, 1) for x in wk],
+                         "stock_qty": stock.get(mat, 0.0), "po_qty": po_pu.get(mat, 0.0), "days": days, "alloc_note": ""})
         rows.sort(key=lambda r: (-r["plan_qty"], r["ic"]))
         # ── ★5~8주 LG물동 참고 소요(2026-08-30, 컷오버-안전 nx 소스) ──
         #   물동수량 × PR_M_MODEL_BOM(모델→ASSY) × item_mat_soyo(ASSY→자재 per_unit·소요엔진 캐시, §10).
