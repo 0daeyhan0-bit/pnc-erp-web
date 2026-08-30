@@ -142,13 +142,51 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
                 r["days"] = {d: round(q * f, 3) for d, q in (r["days"] or {}).items()}
             out.append(r)
         rows = out
+        # ── ★5~8주 LG물동 참고 소요(2026-08-30, 컷오버-안전 nx 소스) ──
+        #   물동수량 × PR_M_MODEL_BOM(모델→ASSY) × item_mat_soyo(ASSY→자재 per_unit·소요엔진 캐시, §10).
+        #   4주=생산계획(위 plan_qty), 5~8주=물동(다음~다다음달). ★참고용 컬럼 — 추가발주 계산 미반영·자동발주 금지·담당 판단.
+        #   ★레거시 TT_T_MODEL_PLAN 직독 안 함 = nx.lg_muldong(우리 업로드) 사용 → 컷오버 후 무수정 작동(§9-1).
+        cur.execute("SELECT FORMAT(DATEADD(MONTH,1,GETDATE()),'yyMM'), FORMAT(DATEADD(MONTH,2,GETDATE()),'yyMM')")
+        mt1, mt2 = cur.fetchone()   # 5~8주 = 다음달·다다음달 물동
+        mul_soyo = {}
+        vic = sorted({str(r["ic"]).strip() for r in rows})
+        rn2 = _nx(); rc2 = rn2.cursor()
+        try:
+            for i in range(0, len(vic), 800):
+                chunk = vic[i:i+800]; iph = ",".join("?" * len(chunk))
+                rc2.execute(f"""SELECT im.mat_code, SUM(mul.qty*mb.USE_QTY*im.per_unit)
+                    FROM nx.lg_muldong mul
+                    JOIN nx.PR_M_MODEL_BOM mb ON LTRIM(RTRIM(mb.MODEL_NO))=LTRIM(RTRIM(mul.model))
+                    JOIN nx.item_mat_soyo im ON LTRIM(RTRIM(im.item_code))=LTRIM(RTRIM(mb.C_ITEM_CODE))
+                    WHERE mul.plan_yymm IN (?,?) AND im.mat_code IN ({iph})
+                    GROUP BY im.mat_code""", mt1, mt2, *chunk)
+                for mc, sq in rc2.fetchall():
+                    mul_soyo[(mc or '').strip()] = float(sq or 0)
+        except Exception:
+            mul_soyo = {}
+        finally:
+            rn2.close()
+        for r in rows:
+            r["muldong_soyo"] = round(mul_soyo.get(str(r["ic"]).strip(), 0.0), 1)
         cn2 = _conn(); c2 = cn2.cursor()
         try:
             c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", cc)
             rr = c2.fetchone(); nm = rr[0] if rr else cc
         finally:
             cn2.close()
+        # ★거래처 리드타임(nx.cust.lead_time_days) — 반영일수 기본값(장리드 정비 2026-08-30). 0/없으면 프론트 현행 14.
+        lead_days = 0
+        cn3 = _nx(); c3 = cn3.cursor()
+        try:
+            c3.execute("SELECT ISNULL(lead_time_days,0) FROM nx.cust WHERE cust_code=?", cc)
+            _lr = c3.fetchone(); lead_days = int(_lr[0] or 0) if _lr else 0
+        except Exception:
+            lead_days = 0
+        finally:
+            cn3.close()
         ymlbl = f"{from6[0:2]}/{from6[2:4]}/{from6[4:6]}~{to6[0:2]}/{to6[2:4]}/{to6[4:6]}"
-        return {"cc": cc, "cust_name": nm, "ym": ymlbl, "from_ymd": from6, "to_ymd": to6, "stock_ym": smax, "rows": rows, "dates": dates}
+        return {"cc": cc, "cust_name": nm, "ym": ymlbl, "from_ymd": from6, "to_ymd": to6, "stock_ym": smax,
+                "rows": rows, "dates": dates, "lead_days": lead_days,
+                "muldong_ym": f"{mt1[0:2]}/{mt1[2:4]}~{mt2[0:2]}/{mt2[2:4]}"}
     finally:
         cn.close()
