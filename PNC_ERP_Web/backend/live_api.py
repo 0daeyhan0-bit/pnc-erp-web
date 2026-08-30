@@ -1136,6 +1136,12 @@ GROUP BY t.mat
         r["amt"] = round(q * cost)
         r["qty"] = q
         out.append(r)
+    # ★단가·금액을 영업 수불장과 동일하게(대표 확정 '가' — 생산과 같은 방침).
+    #   영업 수불장 단가 = **판가 기반 이동평균**(_snap_sal · 신고 평가방법 §7-4).
+    #   여기서 as-of 판가를 그대로 쓰면 두 화면이 갈린다(실측: 단가 89건·금액 45건 불일치).
+    #   ※영업은 품번 1축이다(생산은 품번×재고위치 2축) → keyloc=False.
+    #   ※수불장에 없는 품목은 손대지 않는다 — 없는 값을 만들어내지 않는다.
+    _apply_ledger_price(out, f, t, domain="SAL", keyloc=False)
     out.sort(key=lambda r: -abs(r.get("amt") or 0))
     return {"dfrom": f, "dto": t, "count": len(out), "zero": 1 if inc_zero else 0, "rows": out}
 
@@ -1168,6 +1174,95 @@ WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
 # 원장 9-union(2502기초+당월이동), 라인별 집계. export_web_data.py prodStock 이식, 레거시 pr_m_item 조인.
+def _apply_ledger_price(rows, fr6, to6, domain="PRD", keyloc=True):
+    """★단가·금액을 **생산 수불장과 동일**하게 맞춘다. 맞춘 행 수를 돌려준다.
+
+       왜 수불장 결과를 그대로 쓰나 — 수불장 단가는 조회값이 아니라
+       **기초 + 입고 가중평균을 일자별로 굴린 결과(avg)** 다.
+       같은 식을 여기서 다시 짜면 반드시 갈린다(§21: 화면이 따로 계산하면 값이 갈린다).
+       ⟹ `close._prd_ledger` 를 **그대로 호출**한다. 같은 함수 = 같은 값.
+       (성능은 close._LEDGER_CACHE 가 (도메인,기간) 단위로 흡수한다.)
+
+       ★대표 확정 2026-08-29: 재고조회를 수불장에 맞춘다.
+         이로써 레거시 w_pr_stock_480(마스터 단가)과는 달라진다 — 그 대가를 알고 택했다.
+    """
+    try:
+        from routers.close import ledger_cached          # ★엔드포인트와 캐시 공유
+    except Exception:
+        return 0
+    cn = _nxc(); cur = cn.cursor()
+    try:
+        _r = ledger_cached(cur, domain, fr6, to6)        # ★(rows, breaks, basis) 3-튜플
+        lrows = _r[0] if isinstance(_r, tuple) else _r
+    except Exception as _e:
+        # ★삼키지 않는다 — 조용히 실패하면 값이 안 맞는 걸 못 본다.
+        #   단 full traceback 은 찍지 않는다(마감 배치에서 재귀 출력으로 로그가 터졌다 2026-08-30).
+        print(f"[_apply_ledger_price] {type(_e).__name__}: {str(_e)[:150]}")
+        return 0
+    finally:
+        cn.close()
+    # ★생산은 (품번,재고위치) 2축, 영업은 품번 1축이다(수불장 축을 그대로 따른다)
+    def _k(r, loc_field="loc"):
+        cd = str(r.get("cd") or r.get("mat") or "").strip()
+        return (cd, str(r.get(loc_field) or "").strip()) if keyloc else cd
+    px = {}
+    for r in lrows:
+        px[_k(r)] = float(r.get("avg") or 0)
+    n = 0
+    for r in rows:
+        k = _k(r)
+        if k in px:
+            u = px[k]
+            r["cost"] = u
+            r["amt"] = float(round(float(r.get("qty") or 0) * u))
+            r["cost_src"] = "수불장(이동평균)"
+            n += 1
+    # ★수불장에 없는 품목은 **손대지 않는다** — 수불장이 단가0·음수를 스냅샷에서 빼기 때문이다
+    #   (_snap_bulk 제외규칙). 없는 값을 만들어내지 않는다.
+    return n
+
+
+def _fill_bom_price(rows, target):
+    """★단가를 못 구한 품목을 **BOM 하위 부품 합산**으로 채운다. 채운 행 수를 돌려준다.
+
+       왜 필요한가 — SUB·은납 반제품은 `pr_m_item_cost` 에 단가가 없어 **금액이 0 으로 빠진다.**
+         실측(2026-08-29 · 용접): 1,009행 중 126행 단가없음 → 재고금액이 23% 과소계상.
+       ★생산 수불장·마감(`close._prd_price_bom`)이 **이미 같은 일을 하고 있다.**
+         그래서 여기서 새로 짜지 않고 **그 함수를 그대로 부른다** —
+         따로 짜면 두 화면 금액이 갈려 비교가 안 된다(사용자 요구: 값이 동일해야 비교 가능).
+       규칙도 수불장과 같다: **못 구한 것만** 채운다. 이미 단가가 있으면 손대지 않는다.
+    """
+    need = sorted({str(r.get("cd") or "").strip() for r in rows
+                   if not float(r.get("cost") or 0) and float(r.get("qty") or 0)})
+    if not need:
+        return 0
+    try:
+        from routers.close import _prd_price_bom          # ★순환 임포트 회피 — 함수 안에서
+    except Exception:
+        return 0
+    cn = _nxc(); cur = cn.cursor()          # ★조회 전용(readonly) — _prd_price_bom 은 SELECT 만 한다
+    try:
+        px = _prd_price_bom(cur, str(target), need)
+    except Exception:
+        return 0
+    finally:
+        cn.close()
+    n = 0
+    for r in rows:
+        cd = str(r.get("cd") or "").strip()
+        hit = px.get(cd)
+        if hit and not float(r.get("cost") or 0):
+            u = float(hit[0] or 0)
+            if not u:
+                continue
+            r["cost"] = u
+            # 금액 반올림은 SQL(CAST(ROUND(...,0)))과 맞춘다
+            r["amt"] = float(round(float(r.get("qty") or 0) * u))
+            r["cost_src"] = "BOM부품합산"          # 화면이 출처를 표시할 수 있게
+            n += 1
+    return n
+
+
 def _prodstock(ym, frm=None, to=None):
     # 레거시 w_pr_stock_480과 동일: 수불기간(frm~to) 일범위. frm/to(YYMMDD) 우선, 없으면 ym월 전체.
     y01 = frm if frm else (ym + "01")
@@ -1203,6 +1298,13 @@ FROM agg JOIN PARTNER_ERP_TEST3.nx.item pi ON pi.item_code=agg.mat
   OUTER APPLY ({C2A}) cc
 """
     _c, rows = _rows(sql)
+    # ★단가·금액을 생산 수불장과 동일하게 맞춘다(대표 확정 '가').
+    #   수불장 단가에는 BOM 하위 합산·자재단가 보정이 **이미 들어 있다** —
+    #   그래서 _fill_bom_price 를 따로 부르지 않는다(이중 적용 방지).
+    _n = _apply_ledger_price(rows, (frm or (ym + "01")), y99)
+    if not _n:
+        # 수불장을 못 얻은 경우에만 최소 보강(단가 0 인 SUB 를 BOM 합산으로) — 화면이 빈손이 되지 않게
+        _fill_bom_price(rows, y99)
     return rows
 
 @live_router.get("/prodstock")

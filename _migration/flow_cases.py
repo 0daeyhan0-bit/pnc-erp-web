@@ -820,3 +820,110 @@ PORTAL_CASES = [
 #   ※각 케이스는 probe 델타로 판정하므로 순서를 바꿔도 판정 자체는 영향받지 않는다.
 _i = CASES.index(SETIN_CASES[0])
 CASES[_i:_i] = PORTAL_CASES
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  ★마감 멱등성 · 화면↔수불장 일치  (2026-08-30 · CLOSE_MGMT_CANON §30)
+#
+#  같은 기간을 두 번 마감했더니 값이 달랐다(SAL D 260828: 677,272,841 vs 703,546,042).
+#  원인 = 캐시 키가 연월인데 값은 as-of 일자. **이걸 잡는 검증이 없어서 여태 안 걸렸다.**
+#  ⟹ 상설로 남긴다. 마감은 그 시점을 확정하는 것이다.
+# ══════════════════════════════════════════════════════════════════════
+
+def _tot(res, *fields):
+    """수불장/재고조회 응답에서 기말금액 합계를 뽑는다(응답 모양이 화면마다 다르다)."""
+    if not isinstance(res, dict):
+        return None
+    t = res.get("totals")
+    if isinstance(t, dict):
+        for f in fields:
+            if f in t:
+                return round(float(t[f] or 0), 0)
+    rows = res.get("rows") or []
+    for f in fields:
+        if rows and f in rows[0]:
+            return round(sum(float(r.get(f) or 0) for r in rows), 0)
+    return None
+
+
+def _keep_tot(key, *fields):
+    def chk(res, ctx):
+        v = _tot(res, *fields)
+        ctx[key] = v
+        return (v is not None), f"기말금액 {v:,.0f}" if v is not None else "합계를 못 읽음"
+    return chk
+
+
+def _same_as(key, *fields):
+    """앞서 저장한 값과 **같아야** 통과. 캐시 오염이 있으면 여기서 걸린다."""
+    def chk(res, ctx):
+        v = _tot(res, *fields)
+        b = ctx.get(key)
+        if v is None or b is None:
+            return False, f"비교 불가 (기준 {b} · 이번 {v})"
+        d = v - b
+        return (abs(d) < 1.0), (f"{v:,.0f} vs 기준 {b:,.0f} "
+                                f"({'같음' if abs(d) < 1 else f'★{d:+,.0f} 차이 — 캐시 오염 의심'})")
+    return chk
+
+
+IDEM_CASES = [
+    # ── ① 캐시 오염 재발 방지 — 짧은 기간을 먼저 조회해도 전체 결과가 안 바뀌어야 한다 ──
+    #    수정 전에는 '월초 as-of 단가'가 월 키 캐시에 박혀 이후 조회가 전부 그 단가로 평가됐다.
+    dict(kind="S", name="[마감] ① 생산 수불장 — 기준값 확보", method="GET",
+         path="/api/close/ledger?domain=PRD&d_from=260801&d_to=260828&nocache=1",
+         as_="super", expect=200, check=_keep_tot("idem_prd", "sa", "ta")),
+
+    dict(kind="S", name="[마감] ② 짧은 기간을 먼저 조회(캐시 오염 유발 시도)", method="GET",
+         path="/api/close/ledger?domain=PRD&d_from=260801&d_to=260805&nocache=1",
+         as_="super", expect=200,
+         check=lambda res, ctx: (True, f"기말금액 {_tot(res,'sa','ta'):,.0f} (오염 유발용)")),
+
+    dict(kind="S", name="[마감] ③ ★전체 기간 재조회 — 값이 그대로인가", method="GET",
+         path="/api/close/ledger?domain=PRD&d_from=260801&d_to=260828&nocache=1",
+         as_="super", expect=200, check=_same_as("idem_prd", "sa", "ta")),
+
+    dict(kind="S", name="[마감] ④ 영업 수불장 — 기준값 확보", method="GET",
+         path="/api/close/ledger?domain=SAL&d_from=260801&d_to=260828&nocache=1",
+         as_="super", expect=200, check=_keep_tot("idem_sal", "sa", "ta")),
+
+    dict(kind="S", name="[마감] ⑤ 영업 짧은 기간 먼저 조회", method="GET",
+         path="/api/close/ledger?domain=SAL&d_from=260801&d_to=260805&nocache=1",
+         as_="super", expect=200,
+         check=lambda res, ctx: (True, f"기말금액 {_tot(res,'sa','ta'):,.0f} (오염 유발용)")),
+
+    dict(kind="S", name="[마감] ⑥ ★영업 전체 재조회 — 값이 그대로인가", method="GET",
+         path="/api/close/ledger?domain=SAL&d_from=260801&d_to=260828&nocache=1",
+         as_="super", expect=200, check=_same_as("idem_sal", "sa", "ta")),
+
+    # ── ② 화면 ↔ 수불장 일치 (대표 확정 '가': 값이 같아야 비교가 된다) ──
+    dict(kind="S", name="[마감] ⑦ ★생산재고조회 = 생산 수불장", method="GET",
+         path="/api/live/prodstock?frm=260801&to=260828",
+         as_="super", expect=200,
+         check=lambda res, ctx: _cmp_screen(res, ctx, "idem_prd", "amt", only_ledger=True)),
+
+    dict(kind="S", name="[마감] ⑧ ★영업재고조회 = 영업 수불장", method="GET",
+         path="/api/live/salesstock?dfrom=260801&dto=260828&zero=1",
+         as_="super", expect=200,
+         check=lambda res, ctx: _cmp_screen(res, ctx, "idem_sal", "amt", only_ledger=True)),
+]
+
+
+def _cmp_screen(res, ctx, key, fld, only_ledger=False):
+    """화면 합계가 수불장 기준값과 같은가.
+       ★**수불장 단가를 받은 행만** 센다(`cost_src='수불장(이동평균)'`).
+         화면에는 수불장에 없는 품목(단가0·음수라 스냅샷에서 빠진 것)이 남아 있어
+         전체 합계로 비교하면 축이 달라 항상 어긋난다. 없는 값을 만들지 않는다는 설계 그대로다."""
+    rows = res.get("rows") or []
+    if only_ledger:
+        rows = [r for r in rows if r.get("cost_src") == "수불장(이동평균)"]
+    v = round(sum(float(r.get(fld) or 0) for r in rows), 0)
+    b = ctx.get(key)
+    if b is None:
+        return False, "수불장 기준값이 없다(앞 케이스 실패)"
+    d = v - b
+    return (abs(d) <= 5.0), (f"화면 {v:,.0f} vs 수불장 {b:,.0f} "
+                             f"({'일치' if abs(d) <= 5 else f'★{d:+,.0f} 차이'}) · {len(rows)}행")
+
+
+CASES += IDEM_CASES
