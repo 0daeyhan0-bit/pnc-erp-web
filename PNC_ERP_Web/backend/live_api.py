@@ -437,7 +437,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     m0 = ym + '01'   # 월초(YYMMDD)
     # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
     _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
@@ -504,7 +504,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,''), r.RECEIVING_YMD, ISNULL(r.mkt,'')""")
     for _r in _rr5:
@@ -561,7 +561,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
 
     # ⑥ 당일 실적(조회일=d6만): 매출(리시빙 cut별 절삭/설치/기타) + 사급(OSP 원소재=TUBE/부품)
     _c, _rrt = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
+      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD='{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     _tc = {(r['cg'] or ''): float(r['amt'] or 0) for r in _rrt}
