@@ -114,10 +114,52 @@ CREATE TABLE nx.lg_sagub_actual(
   src_file nvarchar(200), upload_dt datetime DEFAULT getdate())"""
 # 기존 테이블 마이그레이션: ymd(일자)·biz(사업부 RAC/SAC) 컬럼 없으면 추가
 _MIGRATE = """IF COL_LENGTH('nx.lg_sagub_actual','ymd') IS NULL ALTER TABLE nx.lg_sagub_actual ADD ymd varchar(8);
-IF COL_LENGTH('nx.lg_sagub_actual','biz') IS NULL ALTER TABLE nx.lg_sagub_actual ADD biz varchar(4);"""
+IF COL_LENGTH('nx.lg_sagub_actual','biz') IS NULL ALTER TABLE nx.lg_sagub_actual ADD biz varchar(4);
+IF COL_LENGTH('nx.lg_sagub_actual','ps_order') IS NULL ALTER TABLE nx.lg_sagub_actual ADD ps_order varchar(30);
+IF COL_LENGTH('nx.lg_sagub_actual','line_code') IS NULL ALTER TABLE nx.lg_sagub_actual ADD line_code varchar(10);
+IF COL_LENGTH('nx.lg_sagub_actual','line_name') IS NULL ALTER TABLE nx.lg_sagub_actual ADD line_name nvarchar(60);
+IF COL_LENGTH('nx.lg_sagub_actual','assembly') IS NULL ALTER TABLE nx.lg_sagub_actual ADD assembly varchar(50);
+IF COL_LENGTH('nx.lg_sagub_actual','gi_type') IS NULL ALTER TABLE nx.lg_sagub_actual ADD gi_type varchar(20);
+IF COL_LENGTH('nx.lg_sagub_actual','uit') IS NULL ALTER TABLE nx.lg_sagub_actual ADD uit varchar(4);
+IF COL_LENGTH('nx.lg_sagub_actual','market') IS NULL ALTER TABLE nx.lg_sagub_actual ADD market varchar(10);"""""
 
 def _prep(cur):
     cur.execute(_DDL); cur.execute(_MIGRATE)
+
+
+def _biz_guess(cur, items):
+    """파일 안 품번으로 사업부를 추정 → (판정, RAC수, SAC수, 미지수). 판정 불가면 (None, …).
+
+       ★OSP 파일에는 사업부 컬럼이 없고 파일명도 타임스탬프뿐이라 단서가 없다.
+         하지만 품목 구성이 사업부를 거의 결정한다 —
+         실측(2026-08-31): RAC 전용 25종 · SAC 전용 243종 · 양쪽 공통 13종(4.6%).
+       ★보수적으로 본다 — 사전에 잡힌 행이 3건 미만이거나 한쪽이 90% 미만이면 **판정하지 않는다**
+         (신규 품목만 있는 파일을 막으면 안 된다). 실파일 10개 보정: 전부 정확·모호 0건.
+    """
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(biz,''), SUM(ABS(ISNULL(qty,0)))
+                     FROM nx.lg_sagub_actual WHERE ISNULL(biz,'') IN ('RAC','SAC')
+                    GROUP BY UPPER(LTRIM(RTRIM(item_code))), ISNULL(biz,'')""")
+    agg = {}
+    for it, b, q in cur.fetchall():
+        agg.setdefault(str(it), {})[str(b)] = float(q or 0)
+    ref = {}
+    for it, d in agg.items():
+        r, s = d.get('RAC', 0.0), d.get('SAC', 0.0)
+        tot = r + s
+        if tot > 0 and max(r, s) / tot >= 0.9:      # 한쪽 90% 이상인 품목만 신뢰
+            ref[it] = 'RAC' if r > s else 'SAC'
+    nr = sum(1 for x in items if ref.get(x) == 'RAC')
+    ns = sum(1 for x in items if ref.get(x) == 'SAC')
+    unk = len(items) - nr - ns
+    tot = nr + ns
+    if tot < 3:
+        return None, nr, ns, unk
+    if nr >= tot * 0.9:
+        return 'RAC', nr, ns, unk
+    if ns >= tot * 0.9:
+        return 'SAC', nr, ns, unk
+    return None, nr, ns, unk
+
 
 def _biz_norm(v):
     """사업부 정규화: rac/dgz→RAC, sac/dmz→SAC. 그 외는 대문자 그대로."""
@@ -125,7 +167,10 @@ def _biz_norm(v):
     if not s: return ""
     if "rac" in s or "dgz" in s: return "RAC"
     if "sac" in s or "dmz" in s: return "SAC"
-    return str(v).strip().upper()[:4]
+    # ★RAC/SAC 외에는 받지 않는다 — 종전엔 모르는 값을 그대로 저장해서
+    #   파일명 osp.xlsx 로 올렸을 때 biz='OSP.' 라는 없는 사업부가 288행 만들어졌다(2026-08-31 실측).
+    #   빈값으로 돌려 호출부가 "사업부 선택 필수" 로 막게 한다.
+    return ""
 
 def _ymd6(v):
     """값에서 YYMMDD(6) 추출. 날짜/문자 모두. 실패시 ''."""
@@ -147,11 +192,22 @@ _ALIAS = {
     "ym": ["월", "기준월", "년월", "ym", "yearmonth"],
     "ymd": ["일자", "입고일", "입고일자", "적용일", "date", "ymd", "startdate", "start date", "transaction_ymd", "in_ymd"],
     "cust": ["거래처", "업체", "사업장", "매입처", "cust", "vendor", "site", "plant"],
+    # ★OSP 원본 식별컬럼(2026-08-31 추가) — 같은 (사업부·일자·품번)이 최대 1,713행까지 나온다.
+    #   P/S Order 가 있으면 (품번,일자,오더) 로 완전 유일(실측 388/388). 없는 행은 전부 UIT=G.
+    "ps_order": ["p/sorder", "psorder", "p/s order", "오더", "오더번호", "order"],
+    "line_code": ["linecode", "line code", "라인코드"],
+    "line_name": ["linename", "line name", "라인명", "라인"],
+    "assembly": ["assembly", "어셈블리", "상위품번"],
+    "gi_type": ["gr/gitype", "gr/gi type", "grgitype", "구분"],
+    "uit": ["uit"],
+    "market": ["market", "마켓"],
 }
 
 
 def _norm(h):
-    return "".join(str(h or "").strip().lower().split())
+    # ★파일에 따라 헤더에 정렬 화살표가 붙어 온다(UOM ▼ / UOM▼) — 떼고 비교한다(2026-08-31 실측)
+    s = str(h or "").replace("▼", "").replace("▲", "")
+    return "".join(s.strip().lower().split())
 
 
 def _ym_of(v):
@@ -221,6 +277,10 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
 
     forced_ym = ym.strip()
     bizv = _biz_norm(biz) or _biz_norm(file.filename)   # 사용자선택 우선, 없으면 파일명(lg_rac/lg_sac)에서 추론
+    if bizv not in ("RAC", "SAC"):
+        # ★삭제 조건이 biz+ymd 라 사업부가 틀리면 엉뚱한 사업부 데이터를 지우고 덮어쓴다. 반드시 막는다.
+        raise HTTPException(400, "업로드 사업부를 선택하세요 — RAC(DGZ) 또는 SAC(DMZ) "
+                                 "(OSP 파일에는 사업부 컬럼이 없어 시스템이 판별할 수 없습니다)")
     _SUMMARY = ("total", "합계", "subtotal", "소계", "grand total", "총계")
     recs = []
     for r in rows_all[best_hi + 1:]:
@@ -248,9 +308,26 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
                 mm = "".join(ch for ch in str(gv(r, "ym") or gv(r, "ymd") or "") if ch.isdigit())
                 rym = f"{base_year}{int(mm):02d}" if mm.isdigit() and 1 <= int(mm) <= 12 else ""
         recs.append((rym or "", rymd, bizv, it, str(gv(r, "name") or "")[:200], q, a, p,
-                     str(gv(r, "cust") or "")[:20], ""))
+                     str(gv(r, "cust") or "")[:20], "",
+                     str(gv(r, "ps_order") or "")[:30], str(gv(r, "line_code") or "")[:10],
+                     str(gv(r, "line_name") or "")[:60], str(gv(r, "assembly") or "")[:50],
+                     str(gv(r, "gi_type") or "")[:20], str(gv(r, "uit") or "")[:4],
+                     str(gv(r, "market") or "")[:10]))
     if not recs:
         return {"ok": False, "error": "데이터 행 없음", "detected": detected, "header_row": [str(x) for x in rows_all[best_hi]]}
+    # ★사업부 오선택 차단 — 파일 안 품번으로 추정해 선택과 다르면 막는다(판정 불가면 통과).
+    #   삭제 조건이 biz+ymd 라 잘못 고르면 다른 사업부의 그 날짜 데이터가 지워진다.
+    _cn0 = _nx(); _c0 = _cn0.cursor()
+    try:
+        _its = [str(x[3]).strip().upper() for x in recs if x[3]]
+        _g, _nr, _ns, _unk = _biz_guess(_c0, _its)
+    finally:
+        _cn0.close()
+    if _g and _g != bizv:
+        raise HTTPException(400,
+                            "사업부 확인 필요 — {} 로 선택하셨으나 파일 내용은 {} 입니다".format(bizv, _g)
+                            + " (근거: {}행 중 RAC품목 {} · SAC품목 {} · 미확인 {}).".format(len(_its), _nr, _ns, _unk)
+                            + " 그대로 올리면 {} 의 해당 일자 데이터가 지워지고 이 파일이 {} 로 적재됩니다.".format(bizv, bizv))
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
@@ -266,14 +343,20 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
         # ★배치 다중행 INSERT — 파라미터 2100 한도: 11컬럼 × 150 = 1650 안전
         try: cur.fast_executemany = True
         except Exception: pass
-        cols = "(ym,ymd,biz,item_code,item_name,qty,amt,price,cust_code,remarks,src_file)"
-        n = 0; BATCH = 150
+        cols = ("(ym,ymd,biz,item_code,item_name,qty,amt,price,cust_code,remarks,src_file,"
+                    " ps_order,line_code,line_name,assembly,gi_type,uit,market)")
+                # ★파라미터 2100 한도: 18컬럼 × 115 = 2,070 (컬럼 늘어 150→115)
+        n = 0; BATCH = 115
         for i in range(0, len(recs), BATCH):
             chunk = recs[i:i + BATCH]
-            vals = ",".join("(?,?,?,?,?,?,?,?,?,?,?)" for _ in chunk)
+            # 18개 = ym,ymd,biz,item_code,item_name,qty,amt,price,cust_code,remarks,src_file
+            #        + ps_order,line_code,line_name,assembly,gi_type,uit,market
+            vals = ",".join("(" + ",".join("?" * 18) + ")" for _ in chunk)
             flat = []
-            for ymv, ymdv, bzv, it, nmv, q, a, p, cst, rm in chunk:
-                flat += [ymv, ymdv, bzv, it, nmv, q, a, p, cst, rm, fn]
+            for (ymv, ymdv, bzv, it, nmv, q, a, p, cst, rm,
+                 pso, lc, ln, asm, git, uitv, mkt) in chunk:
+                flat += [ymv, ymdv, bzv, it, nmv, q, a, p, cst, rm, fn,
+                         pso, lc, ln, asm, git, uitv, mkt]
             cur.execute(f"INSERT INTO nx.lg_sagub_actual{cols} VALUES {vals}", *flat)
             n += len(chunk)
         nx.commit()
@@ -532,7 +615,7 @@ async def settle_upload(file: UploadFile = File(...), ym: str = Query(""), sheet
         try: cur.fast_executemany = True
         except Exception: pass
         cols = "(ym,coop,assy_pn,assy_desc,sub_pn,sub_desc,qty,gubun1,gubun2,od,thk,leng,weight,mat_cost,eff_ym,src_file)"
-        n = 0; BATCH = 120
+        n = 0; BATCH = 115
         for i in range(0, len(recs), BATCH):
             chunk = recs[i:i + BATCH]
             vals = ",".join("(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)" for _ in chunk)
