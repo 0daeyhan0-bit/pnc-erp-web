@@ -364,10 +364,16 @@ def stock_save(payload: dict = Body(...)):
         if errs:
             return {"ok": False, "errors": errs}
         # insert (일자별 SEQ 채번, 출고 음수 저장)
+        # ★★채번 경쟁 방지(2026-08-31). PK=(MAINT_YMD,MAINT_SEQ) 인데 채번이 MAX+1 이라
+        #   두 사람이 동시에 저장하면 같은 seq 를 받아 PK 중복 → 500(HTML) 이 나고
+        #   프론트는 그걸 JSON 으로 파싱하다 "Unexpected token 'I'" 로 표시했다.
+        #   (실측: 21:06:16~18 에 8건이 몰려 들어옴 — 먼저 커밋한 쪽만 성공)
+        #   → UPDLOCK/HOLDLOCK 으로 그 일자 키를 트랜잭션 끝까지 잠가 직렬화한다.
         saved = 0
         for r in rows:
             ymd = str(r.get("MAINT_YMD", "")).strip()
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
+            cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WITH(UPDLOCK, HOLDLOCK)
+                            WHERE MAINT_YMD=?""", ymd)
             seq = cur.fetchone()[0]
             tag = str(r.get("MAINT_TAG") or sc["tags"][0]).strip()
             qty = float(r.get("qty") or 0)
@@ -605,7 +611,9 @@ def matrecv_receive(payload: dict = Body(...)):
             cost = float(r.get("cost") or 0); vat = float(r.get("vat") or round(qty * cost * 0.1))
             py = (str(r.get("pur_ymd", "")).strip() or None); ps = (str(r.get("pur_seq", "")).strip() or None)
             prw = r.get("pur_seq_row")
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
+            # ★채번 경쟁 방지 — 위 stock_save 와 같은 이유(PK 중복 → 500).
+            cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WITH(UPDLOCK, HOLDLOCK)
+                            WHERE MAINT_YMD=?""", ymd)
             seq = cur.fetchone()[0]
             cur.execute("""INSERT INTO nx.stock_ledger
                 (STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,GAGONG_PROC_CODE,MAT_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,MAINT_VAT,
@@ -718,8 +726,9 @@ def matrecv_gagong_receive(payload: dict = Body(...)):
             wh = str(_g(r, "TO_GAGONG_PROC_CODE", "to_gagong", "wh") or in_wh).strip()
             frm = _g(r, "GAGONG_PROC_CODE", "gagong")
             upper = _g(r, "ITEM_CODE", "upper")
-            # ① 원장
-            cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", ymd)
+            # ① 원장  ★채번 경쟁 방지 — 위 stock_save 와 같은 이유(PK 중복 → 500).
+            cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WITH(UPDLOCK, HOLDLOCK)
+                            WHERE MAINT_YMD=?""", ymd)
             seq = int(cur.fetchone()[0] or 1)
             cur.execute("""INSERT INTO nx.stock_ledger
                 (STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_GROUP_SEQ,MAINT_TAG,GAGONG_PROC_CODE,TO_GAGONG_PROC_CODE,MAT_CODE,ITEM_CODE,MAINT_QTY,REMARKS,INSERT_USER_ID,INSERT_DATETIME)

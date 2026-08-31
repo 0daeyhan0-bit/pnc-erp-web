@@ -1325,8 +1325,11 @@ function openMatEditPopup(opt){
         const dl=g('#me-cdl');
         if(dl)dl.innerHTML=((await rr.json()).rows||[]).map(x=>{cmap[(x.name||'').toLowerCase()]=x.code;
           return `<option value="${esc(x.name||'')}">${esc(x.code||'')}</option>`;}).join('');}catch(e){}},220);};
-    g('#me-save').onclick=save;
-    g('#me-del').onclick=del;
+    // ★삭제모드에는 #me-save 가 렌더되지 않는다(1275~1278). 종전엔 무조건 참조해
+    //   null.onclick 에서 TypeError 가 나고 **그 다음 줄(#me-del 바인딩)이 실행되지 않아**
+    //   삭제 버튼이 먹지 않았다(2026-08-31 실사용 버그).
+    const _sv=g('#me-save');if(_sv)_sv.onclick=save;
+    const _dl=g('#me-del');if(_dl)_dl.onclick=del;
   };
 
   async function save(){

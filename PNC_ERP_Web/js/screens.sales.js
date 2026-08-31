@@ -558,13 +558,27 @@ function openSaleOutPopup(opt){
   const isoT=(d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`)(new Date());
   const nf=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const yy=s=>s?s.slice(2).replace(/-/g,''):'';
-  let ymd=opt.ymd||isoT, cust='', custnm='', sheet='', wh='IS0001', prt=true;
+  // ★수정 모드(2026-08-31) — 레거시 w_pu_output_015 처럼 **출고증 단위로 묶어** 한 팝업에서 고친다.
+  //   opt.edit = {sheet, ymd, cust, custnm, rows:[{id,mat,qty,cost,rmk,sagub}, …]}
+  //   기존 행은 id 를 그대로 실어 보내 백엔드가 UPDATE 로 처리하고(sales.py:838),
+  //   새로 넣은 행은 id 없이 INSERT, 지운 행은 /api/saleout/delete 로 제거한다.
+  const EDIT=!!opt.edit;
+  let ymd=(EDIT&&opt.edit.ymd)||opt.ymd||isoT;
+  let cust=(EDIT&&opt.edit.cust)||'', custnm=(EDIT&&opt.edit.custnm)||'';
+  let sheet=(EDIT&&opt.edit.sheet)||'', wh='IS0001', prt=!EDIT;
+  let delIds=[];                       // 수정 중 지운 기존 행 id
   let rows=[], busy=false, info={}, composing=false;
   // ★사급 기본값 = **해제**. 품번을 넣으면 그 (거래처,품번) 이력을 보고 자동 체크된다
   //   (사용자 지시 2026-08-28: "기초는 체크가 해제되어 있어야 해").
-  const blank=()=>({mat:'',nm:'',spec:'',unit:'',stock:'',qty:'',cost:'',rmk:'',sagub:false,bad:0});
+  const blank=()=>({id:null,mat:'',nm:'',spec:'',unit:'',stock:'',qty:'',cost:'',rmk:'',sagub:false,bad:0});
   const addRows=n=>{for(let i=0;i<n;i++)rows.push(blank());};
-  addRows(ROWSTEP);
+  if(EDIT){
+    // 기존 행 적재(id 보존) + 여유행
+    rows=(opt.edit.rows||[]).map(r=>({id:r.id, mat:(r.mat||'').trim(), nm:r.nm||'', spec:r.spec||'', unit:r.unit||'',
+      stock:'', qty:Math.abs(Number(r.qty||0)), cost:(r.cost==null?'':r.cost), rmk:r.rmk||'',
+      sagub:!!r.sagub, bad:0}));
+    addRows(Math.max(5, ROWSTEP-rows.length));
+  }else addRows(ROWSTEP);
   const filled=()=>rows.filter(r=>(r.mat||'').trim()&&Number(r.qty)>0);
   const amtOf=r=>Math.trunc((Number(r.qty)||0)*(Number(r.cost)||0));
   const vatOf=r=>Math.trunc(amtOf(r)*0.1);
@@ -607,7 +621,7 @@ function openSaleOutPopup(opt){
   const draw=()=>{
     ov.innerHTML=`
      <div class="sop">
-       <div class="sop-h"><span>📤 판매및출고등록 — 등 록</span><span class="sop-x" id="so-x">✕</span></div>
+       <div class="sop-h"><span>${EDIT?'✎ 판매및출고등록 — 수 정':'📤 판매및출고등록 — 등 록'}</span><span class="sop-x" id="so-x">✕</span></div>
        <div class="sop-tb">
          <label class="tl">출고일자</label><input type="date" class="inp" id="so-ymd" value="${ymd}" style="width:140px">
          <label class="tl">거래업체 <span class="sop-req">*</span></label>
@@ -615,7 +629,7 @@ function openSaleOutPopup(opt){
          <span class="sop-ccd" id="so-ccd">${esc(cust)}</span><datalist id="so-cdl"></datalist>
          <label class="tl">구분</label><span class="sop-fix">5:협력업체판매</span>
          <label class="tl">출고파트창고</label><span class="sop-fix">${esc(wh)} 자재창고</span>
-         <label class="tl">출고증번호</label><input class="inp" id="so-sheet" value="${esc(sheet)}" placeholder="자동" style="width:100px">
+         <label class="tl">출고증번호</label><input class="inp" id="so-sheet" value="${esc(sheet)}" placeholder="자동" style="width:100px" ${EDIT?'readonly title="수정 시 출고증번호는 바꿀 수 없습니다"':''}>
          <label class="tl">출고증출력</label><input type="checkbox" id="so-prt" ${prt?'checked':''}>
        </div>
        <div class="sop-tb2">
@@ -736,7 +750,10 @@ function openSaleOutPopup(opt){
     g('.so-cost').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;rows[i].cost=el.value;calcRow(i);});
     g('.so-rmk').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].rmk=el.value;});
     g('.so-sg').forEach(el=>el.onchange=()=>{rows[+el.dataset.i].sagub=el.checked;});
-    g('.so-del').forEach(el=>el.onclick=()=>{rows[+el.dataset.i]=blank();redrawBody();});
+    // ★기존 행(id 보유)을 비우면 저장 시 삭제 대상으로 기록한다(수정 모드).
+    g('.so-del').forEach(el=>el.onclick=()=>{const i=+el.dataset.i, r=rows[i];
+      if(r&&r.id&&!delIds.includes(r.id))delIds.push(r.id);
+      rows[i]=blank();redrawBody();});
   }
 
   function wire(){
@@ -790,34 +807,55 @@ function openSaleOutPopup(opt){
     const bad=sel.filter(r=>r.bad);
     if(bad.length){alert(`미등록 품목 ${bad.length}건:\n`+bad.slice(0,10).map(r=>r.mat).join(', '));return;}
     // ★재고부족 차단(2026-08-28) — 재고 0 이하이거나 출고수량 > 재고면 마이너스 재고가 된다.
-    const short=sel.filter(r=>{const s=Number(r.stock);return !(s>0)||Number(r.qty)>s;});
+    //   ※수정 모드의 **기존 행**은 이미 재고에서 빠져 있으므로 이 검사에서 제외한다
+    //     (그대로 두면 자기 자신이 뺀 수량 때문에 늘 부족으로 뜬다).
+    const short=(EDIT?sel.filter(r=>!r.id):sel).filter(r=>{const s=Number(r.stock);return !(s>0)||Number(r.qty)>s;});
     if(short.length){
       alert('재고가 부족한 품목이 있어 출고할 수 없습니다:\n\n'
         +short.slice(0,10).map(r=>`  ${r.mat}  재고 ${nf(r.stock||0)} < 출고 ${nf(r.qty)}`).join('\n')
         +(short.length>10?`\n  … 외 ${short.length-10}건`:''));
       return;}
     if(!confirm(`${sel.length}건 · 수량 ${nf(sel.reduce((s,r)=>s+Number(r.qty||0),0))}\n`
-      +`금액 ${nf(sel.reduce((s,r)=>s+amtOf(r),0))}\n출고일 ${ymd} · ${custnm}\n\n저장할까요?`))return;
+      +`금액 ${nf(sel.reduce((s,r)=>s+amtOf(r),0))}\n출고일 ${ymd} · ${custnm}`
+      +(EDIT&&delIds.length?`\n※ 삭제 ${delIds.length}건 포함`:'')
+      +`\n\n${EDIT?'수정':'저장'}할까요?`))return;
     busy=true;draw();
     let ok=0, errs=[];
+    // ★수정 모드: 비운 기존 행 먼저 삭제(원장·사급행 동반삭제는 백엔드가 처리)
+    if(EDIT&&delIds.length){
+      try{
+        const rd=await fetch(`${API}/api/saleout/delete`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ids:delIds})});
+        if(!rd.ok){const jd=await rd.json();errs.push(`삭제: ${jd.detail||rd.status}`);}
+        else delIds=[];
+      }catch(e){errs.push(`삭제: ${e.message}`);}
+    }
     for(const r of sel){
       try{
+        const body={out_ymd:yy(ymd), out_cust:cust, item_code:r.mat, out_qty:Number(r.qty),
+          cost:(r.cost===''?null:Number(r.cost)), sheet_no:sheet||'', remarks:(r.rmk||'').trim(),
+          sagub:r.sagub?'1':'0'};
+        if(r.id)body.id=r.id;              // ★기존 행 → 백엔드 UPDATE 경로
         const rs=await fetch(`${API}/api/saleout/save`,{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({out_ymd:yy(ymd), out_cust:cust, item_code:r.mat, out_qty:Number(r.qty),
-            cost:(r.cost===''?null:Number(r.cost)), sheet_no:sheet||'', remarks:(r.rmk||'').trim(),
-            sagub:r.sagub?'1':'0'})});
+          body:JSON.stringify(body)});
         const j=await rs.json();
         if(!rs.ok)errs.push(`${r.mat}: ${j.detail||rs.status}`); else ok++;
       }catch(e){errs.push(`${r.mat}: ${e.message}`);}
     }
     busy=false;
-    if(errs.length){alert(`저장 ${ok}건 · 실패 ${errs.length}건\n`+errs.slice(0,8).join('\n'));draw();return;}
-    alert(`✅ 저장 완료 — ${ok}건 (자재재고 차감 · 사급재고 반영)`);
+    if(errs.length){alert(`${EDIT?'수정':'저장'} ${ok}건 · 실패 ${errs.length}건\n`+errs.slice(0,8).join('\n'));draw();return;}
+    alert(`✅ ${EDIT?'수정':'저장'} 완료 — ${ok}건 (자재재고 차감 · 사급재고 반영)`);
     const pr=prt, pd={ymd, cust, custnm, sheet, rows:sel.map(r=>({...r, amt:amtOf(r), vat:vatOf(r)}))};
     close(); onSaved();
     if(pr) openSaleOutSlip(pd);          // ★출고증출력 체크 시 저장 직후 출력
   }
   draw();
+  // ★수정 모드: 기존 행의 품명·재고를 채운다(재고칸이 비면 「재고 없음」으로 붉게 뜬다).
+  //   applyInfo() 는 nm·stock·bad 만 갱신하므로 기존 단가·사급 체크는 그대로 보존된다.
+  if(EDIT){
+    const cs=rows.filter(r=>(r.mat||'').trim()).map(r=>r.mat);
+    if(cs.length)trace(cs).then(()=>{applyInfo();redrawBody();});
+  }
   setTimeout(()=>{const f=ov.querySelector('.so-mat');if(f)f.focus();},60);
 }
 
@@ -972,6 +1010,10 @@ SCREEN.saleout=(c)=>{
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const d8=s=>s&&s.length===8?`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`:(s||"");
   const dt=s=>String(s||"").slice(0,19).replace("T"," ");
+  // ★수정패널 출고일자용 왕복 변환(2026-08-31) — out_ymd 는 YYMMDD(6자리),
+  //   <input type="date">는 YYYY-MM-DD 를 요구한다(CLAUDE.md §3 네이티브 달력 규칙).
+  const ymd6ToISO=s=>{s=String(s||"").trim();return s.length===6?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:"";};
+  const isoToYmd6=s=>String(s||"").replace(/-/g,"").slice(2,8);
   let st={rows:[],custs:[],gubuns:{},cust:"",custnm:"",custcode:"",item:"",sheet:"",gubun:"",fr:iso(new Date(now.getFullYear(),now.getMonth(),1)),to:iso(now),
           carry:iso(now),sel:{},edit:null,sortKey:"",sortDir:1,loading:false,totqty:0,totamt:0,totvat:0,sheetcnt:0};
   const load=async()=>{st.loading=true;st.sel={};draw();
@@ -1057,8 +1099,11 @@ SCREEN.saleout=(c)=>{
        .so-root tr.grandtot td{position:sticky;bottom:0;background:#eaf1fb;font-weight:700;
                                z-index:2;border-top:2px solid #cdd9ef}
      </style>
+     <!-- ※인라인 수정패널 — 2026-08-31부터 수정은 출고증 단위 그룹 팝업(openSaleOutPopup edit)로 간다.
+          st.edit 을 세팅하는 곳이 없어 평소엔 렌더되지 않는다(코드는 폴백으로 남겨 둠). -->
      ${e?`<div class="panel" style="border:2px solid #2e86de"><div class="panel-h">${e.id?"수정":"신규"} 판매출고</div><div class="panel-b">
        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
+         <label class="tl">출고일자</label><input type="date" class="inp" id="e-ymd" value="${esc(ymd6ToISO(e.out_ymd))}" style="width:140px">
          <label class="tl">구분</label><select class="inp" id="e-gb">${Object.entries(st.gubuns).map(([k,v])=>`<option value="${esc(k)}" ${(e.gubun||'5')===k?"selected":""}>${esc(k)}:${esc(v)}</option>`).join("")}</select>
          <label class="tl">외주처<span style="color:red">*</span></label><input class="inp" id="e-cust" value="${esc(e.out_cust||"")}" placeholder="외주처코드" style="width:90px">
          <label class="tl">출고증번호</label><input class="inp" id="e-sheet" value="${esc(e.sheet_no||"")}" style="width:110px">
@@ -1075,13 +1120,17 @@ SCREEN.saleout=(c)=>{
        <div class="panel-b" style="padding:0;flex:1 1 auto;min-height:0;display:flex;flex-direction:column">
        <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th class="center" style="width:28px"><input type="checkbox" id="o-all"></th>
+         <!-- ★관리열을 맨 앞으로(2026-08-31). 종전엔 23번째 마지막 열이라 가로스크롤 밖에 있어
+              수정 버튼이 있는 줄도 모르고 "수정 기능이 없다"는 문의가 나왔다. -->
+         <th class="center" style="width:96px">관리</th>
          <th data-key="out_ymd">출고일자</th><th class="center" data-key="gubunnm">구분</th><th data-key="out_cust">외주처</th><th data-key="custnm">외주처명</th>
          <th data-key="sheet_no">출고증번호</th><th class="num" data-key="out_seq">출고SEQ</th><th data-key="item_code">품번</th><th data-key="itemnm">품명</th><th class="num" data-key="out_qty">출고수량</th>
          <th class="num" data-key="cost">사급단가</th><th class="num" data-key="amt">금액(매출)</th><th class="num" data-key="vat">부가세</th><th class="center" data-key="sagub">사급</th>
          <th data-key="remarks">비고</th><th data-key="reg_user">등록자</th><th data-key="upd_user">수정자</th><th>작업일시</th>
-         <th data-key="work_order">Work Order</th><th data-key="split_work_order">Split WO</th><th class="center">Sale Ymd</th><th class="center">Sale Hms</th><th class="center">관리</th></tr></thead>
-       <tbody>${st.rows.map(r=>`<tr${r.editable?"":' style="background:#fafbfc"'}>
+         <th data-key="work_order">Work Order</th><th data-key="split_work_order">Split WO</th><th class="center">Sale Ymd</th><th class="center">Sale Hms</th></tr></thead>
+       <tbody>${st.rows.map(r=>`<tr${r.editable?' class="o-row" data-id="'+r.id+'" title="더블클릭하면 수정합니다"':' style="background:#fafbfc"'}>
          <td class="center">${r.editable?`<input type="checkbox" class="o-ck" data-id="${r.id}" ${st.sel[r.id]?"checked":""}>`:""}</td>
+         <td class="center">${r.editable?`<button class="btn xs o-ed" data-id="${r.id}">수정</button> <button class="btn xs o-cp" data-id="${r.id}">복사</button>`:'<span style="color:#9aa6b2;font-size:11px" title="기존 이력(nx미러)·읽기전용">이력</span>'}</td>
          <td>${d8(r.out_ymd)}</td><td class="center">${r.gubun?esc(r.gubun)+":"+esc(r.gubunnm):""}</td><td>${esc(r.out_cust||"")}</td>
          <td class="cap" style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.custnm||"")}">${esc(r.custnm||"")}</td>
          <td>${esc(r.sheet_no||"")}</td><td class="num">${r.out_seq??""}</td>
@@ -1090,9 +1139,8 @@ SCREEN.saleout=(c)=>{
          <td class="center">${r.sagub?'<span title="업체 사급재고 증가분" style="color:#1c7c3a;font-weight:700">☑</span>':'<span style="color:#c9d1dc">☐</span>'}</td>
          <td class="cap" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.remarks||"")}">${esc(r.remarks||"")}</td>
          <td>${esc(r.reg_user||"")}</td><td>${esc(r.upd_user||"")}</td><td style="font-size:11px">${dt(r.work_dt)}</td>
-         <td>${esc(r.work_order||"")}</td><td>${esc(r.split_work_order||"")}</td><td class="center">${d8(r.sale_ymd)}</td><td class="center">${esc(r.sale_hms||"")}</td>
-         <td class="center">${r.editable?`<button class="btn xs o-ed" data-id="${r.id}">수정</button> <button class="btn xs o-cp" data-id="${r.id}">복사</button>`:'<span style="color:#9aa6b2;font-size:11px" title="기존 이력(nx미러)·읽기전용">📁이력</span>'}</td></tr>`).join("")||'<tr><td colspan="23" style="padding:16px;color:var(--muted)">판매출고 없음 — [등록(출고)]으로 입력</td></tr>'}
-       <tr class="grandtot"><td colspan="9" class="center">합계 ${st.rows.length}건 · 출고증 ${st.sheetcnt}건</td><td class="num">${won(st.totqty)}</td><td></td><td class="num">${won(st.totamt)}</td><td class="num">${won(st.totvat)}</td><td colspan="10"></td></tr>
+         <td>${esc(r.work_order||"")}</td><td>${esc(r.split_work_order||"")}</td><td class="center">${d8(r.sale_ymd)}</td><td class="center">${esc(r.sale_hms||"")}</td></tr>`).join("")||'<tr><td colspan="23" style="padding:16px;color:var(--muted)">판매출고 없음 — [등록(출고)]으로 입력</td></tr>'}
+       <tr class="grandtot"><td colspan="10" class="center">합계 ${st.rows.length}건 · 출고증 ${st.sheetcnt}건</td><td class="num">${won(st.totqty)}</td><td></td><td class="num">${won(st.totamt)}</td><td class="num">${won(st.totvat)}</td><td colspan="9"></td></tr>
        </tbody></table></div></div></div>
      </div>`;
     const g=id=>c.querySelector(id);
@@ -1149,6 +1197,7 @@ SCREEN.saleout=(c)=>{
     const all=g("#o-all");if(all)all.onclick=x=>{st.rows.forEach(r=>{if(r.editable)st.sel[r.id]=x.target.checked;});draw();};
     c.querySelectorAll(".o-ck").forEach(x=>x.onchange=()=>{st.sel[x.dataset.id]=x.checked;draw();});
     if(e){g("#e-gb").onchange=x=>e.gubun=x.target.value;
+      {const ey=g("#e-ymd");if(ey)ey.onchange=x=>e.out_ymd=isoToYmd6(x.target.value);}
       g("#e-cust").oninput=x=>e.out_cust=x.target.value.trim();g("#e-cust").onblur=fetchCost;
       g("#e-sheet").oninput=x=>e.sheet_no=x.target.value.trim();
       g("#e-item").oninput=x=>e.item_code=x.target.value.trim();g("#e-item").onblur=fetchCost;
@@ -1156,7 +1205,26 @@ SCREEN.saleout=(c)=>{
       // 사급단가=읽기전용(마스터 자동조회, 마감때만 변경) — 수동수정 핸들러 없음
       g("#e-wo").oninput=x=>e.work_order=x.target.value.trim();g("#e-rmk").oninput=x=>e.remarks=x.target.value;
       g("#e-save").onclick=save;g("#e-cancel").onclick=()=>{st.edit=null;draw();};}
-    c.querySelectorAll(".o-ed").forEach(x=>x.onclick=()=>{const r=st.rows.find(v=>v.id==x.dataset.id);st.edit={id:r.id,gubun:r.gubun||"5",out_cust:r.out_cust,sheet_no:r.sheet_no||"",item_code:r.item_code,out_qty:r.out_qty,work_order:r.work_order||"",remarks:r.remarks||""};draw();});
+    // ★수정 = 레거시 w_pu_output_015 처럼 **출고증 단위 그룹 팝업**(2026-08-31 사용자 지시).
+    //   한 건만 고치는 인라인 패널이 아니라, 같은 (출고일자·거래처·출고증번호) 묶음을
+    //   전부 그리드에 담아 등록 팝업과 같은 화면에서 수정한다.
+    const openEdit=id=>{
+      const r=st.rows.find(v=>v.id==id);if(!r)return;
+      // 같은 출고증 묶음(웹등록·편집가능분만) 수집
+      const grp=st.rows.filter(v=>v.editable&&v.out_ymd===r.out_ymd&&v.out_cust===r.out_cust
+                                 &&String(v.sheet_no||'')===String(r.sheet_no||''))
+                       .sort((a,b)=>(a.out_seq||0)-(b.out_seq||0));
+      openSaleOutPopup({onSaved:load, edit:{
+        sheet:String(r.sheet_no||''), ymd:ymd6ToISO(r.out_ymd),
+        cust:r.out_cust, custnm:r.custnm||'',
+        rows:grp.map(v=>({id:v.id, mat:v.item_code, nm:v.itemnm||'', spec:v.itemspec||'', unit:v.unit||'',
+                          qty:Math.abs(Number(v.out_qty||0)), cost:v.cost, rmk:v.remarks||'', sagub:!!v.sagub}))}});
+    };
+    c.querySelectorAll(".o-ed").forEach(x=>x.onclick=()=>openEdit(x.dataset.id));
+    // ★행 더블클릭으로도 수정(2026-08-31) — 버튼을 못 찾는 경우가 있었다.
+    c.querySelectorAll("tr.o-row").forEach(tr=>tr.ondblclick=e=>{
+      if(e.target.closest("input,button,a"))return;   // 체크박스·버튼 클릭은 제외
+      openEdit(tr.dataset.id);});
     c.querySelectorAll(".o-cp").forEach(x=>x.onclick=()=>copy(+x.dataset.id));
     c.querySelectorAll("thead th").forEach(th=>{addResizer(th);const k=th.dataset.key;if(k){th.style.cursor="pointer";th.title="더블클릭 정렬·경계드래그 너비조절";th.ondblclick=()=>{st.sortDir=(st.sortKey===k&&st.sortDir===1)?-1:1;st.sortKey=k;draw();};}});
   };

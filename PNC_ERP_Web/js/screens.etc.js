@@ -729,6 +729,9 @@ SCREEN.deliv420=(c)=>{
   //   ※입고일자(inymd)는 실제 입고일이므로 당일 그대로 둔다.
   let F={cust:'',from:planBaseIso(),days:2,dnp:2,inymd:iso(T),gubun:'order',item:'',part:'',sort:'doban',
          deliv:{},pack:{},serial:{},heat:{},chk:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, busy=false, msg='';
+  // ★헤더 더블클릭 정렬 + 마우스 컬럼폭 기억(2026-08-31 사용자 요청).
+  //   colw[컬럼인덱스]=px — draw() 로 다시 그려도 사용자가 조절한 폭이 유지된다.
+  let st={sortKey:'',sortDir:1,colw:{}};
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   // ── 스티커/프린터 설정(localStorage 저장) — 레거시 스티커설정=라벨규격·프린터설정=프린터선택 대응 ──
   const LBLKEY='deliv420_label';
@@ -914,8 +917,18 @@ SCREEN.deliv420=(c)=>{
     const dates=data.dates||[];
     let rows=(data.rows||[]).slice();
     // 정렬 토글: 도번별 / 시간별(라인→도번)
-    if(F.sort==='time') rows.sort((a,b)=>String(a.line||'').localeCompare(String(b.line||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
-    else rows.sort((a,b)=>String(a.workcenter||'').localeCompare(String(b.workcenter||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    // ★헤더 더블클릭 정렬이 있으면 그게 최우선(2026-08-31). 없으면 기존 토글.
+    if(st.sortKey){
+      const k=st.sortKey, d=st.sortDir||1;
+      rows.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);
+        if(x!=null&&y!=null&&x!==''&&y!==''&&!isNaN(nx)&&!isNaN(ny))return (nx-ny)*d;
+        return String(x==null?'':x).localeCompare(String(y==null?'':y),'ko')*d;});
+    }
+    // ★기본 = **도번별**(2026-08-31 사용자 요청). 종전 'doban' 은 작업처 우선이라
+    //   같은 도번이 화면 곳곳에 흩어져 보였다.
+    else if(F.sort==='time') rows.sort((a,b)=>String(a.line||'').localeCompare(String(b.line||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    else if(F.sort==='wc')   rows.sort((a,b)=>String(a.workcenter||'').localeCompare(String(b.workcenter||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    else rows.sort((a,b)=>String(a.assy||'').localeCompare(String(b.assy||''),'ko')||String(a.line||'').localeCompare(String(b.line||''),'ko'));
     const custOpts=custs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
     const custName=(custs.find(w=>w.cc===F.cust)||{}).nm||'';
     const itS=new Map(); rows.forEach(r=>{if(r.assy&&!itS.has(r.assy))itS.set(r.assy,r.nm||'');});
@@ -952,12 +965,15 @@ SCREEN.deliv420=(c)=>{
     //     앞(고정 16) = SEQ·작업처·도번·LineNo·구분·자도번LIST·사급·LOT·자재·완료·요청
     //                   ·[체크]·납품·포장·검사(38→52)·상태
     //     뒤(일자 뒤 5) = 입고대기·세트재고·생산실적·ASSY재고·출하실적
-    const CW=[40,110,96,62,56,300,38,52,52,52,52,  30,  62,52,  52,52], DW=48;
+    //   ★2026-08-31: 자도번LIST 300→420 확대(여러 자도번이 잘려 툴팁 없이는 못 읽었다).
+    const CW=[40,110,96,62,56,420,38,52,52,52,52,  30,  62,52,  52,52], DW=48;
     const TW=[54,54,54,64,54];                       // 일자 뒤 5개 폭
-    const totalW=CW.reduce((a,b)=>a+b,0)+dates.length*DW+TW.reduce((a,b)=>a+b,0);
-    const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}`
-      +`${dates.map(()=>`<col style="width:${DW}px">`).join('')}`
-      +`${TW.map(w=>`<col style="width:${w}px">`).join('')}</colgroup>`;
+    // ★사용자가 마우스로 조절한 폭을 기억한다(2026-08-31). 화면을 다시 그려도 유지.
+    //   키 = 컬럼 인덱스. addResizer 가 <col> 을 직접 늘리므로 그 값을 st 에 저장해 복원한다.
+    const _cw=(i,def)=>Number(st.colw&&st.colw[i])||def;
+    const _allW=[...CW, ...dates.map(()=>DW), ...TW].map((w,i)=>_cw(i,w));
+    const totalW=_allW.reduce((a,b)=>a+b,0);
+    const colg=`<colgroup>${_allW.map(w=>`<col style="width:${w}px">`).join('')}</colgroup>`;
     // 합계행(2026-08-28 재배치 반영):
     //   계(1)+건수(2~7=6칸) + LOT·자재·완료·요청(8~11) + 체크(12) + 납품·포장(13~14) + 검사·상태(15~16)
     //   + 일자 + 입고대기·세트재고·생산실적·ASSY재고·출하실적(5)
@@ -1025,6 +1041,14 @@ SCREEN.deliv420=(c)=>{
        <button class="btn" id="d4-custfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>
        <input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:150px;min-width:150px;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="d4l-cust">${custOpts}</datalist>
        <button class="btn" id="d4-search" style="margin-left:4px">🔍 조회</button>
+       <!-- ★정렬 선택(2026-08-31) — 기본 도번별. 헤더 더블클릭 정렬이 있으면 그쪽이 우선. -->
+       <label class="tl" style="margin-left:8px">정렬</label>
+       <select class="inp" id="d4-sort" style="width:96px;min-width:96px" title="헤더를 더블클릭해도 그 컬럼으로 정렬됩니다">
+         <option value="doban" ${F.sort==='doban'?'selected':''}>도번별</option>
+         <option value="wc" ${F.sort==='wc'?'selected':''}>작업처별</option>
+         <option value="time" ${F.sort==='time'?'selected':''}>라인별</option>
+       </select>
+       ${st.sortKey?`<button class="btn ghost" id="d4-sortclr" title="헤더 정렬 해제" style="padding:0 8px">정렬해제</button>`:''}
        <div class="spacer"></div>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -1033,16 +1057,17 @@ SCREEN.deliv420=(c)=>{
       <table class="tbl" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
        <!-- ★품명·자도번작업처 제거 · 헤더 전부 가운데 정렬(2026-08-27 사용자 요청)
             자도번작업처와 작업처가 같은 값이라 작업처만 남기고 폭을 넓혔다. -->
-       <th class="center">SEQ</th><th class="center">작업처</th><th class="center">도번</th><th class="center">Line No</th><th class="center">구분</th><th class="center">자도번LIST</th><th class="center">사급</th>
-       <th class="center">LOT수량</th><th class="center">자재수량</th><th class="center">완료수량</th><th class="center">요청수량</th>
+       <!-- ★헤더 더블클릭 정렬(2026-08-31 · CLAUDE.md §3 공통규칙). data-key = 행 필드명 -->
+       <th class="center">SEQ</th><th class="center" data-key="workcenter">작업처</th><th class="center" data-key="assy">도번</th><th class="center" data-key="line">Line No</th><th class="center" data-key="gubun">구분</th><th class="center" data-key="mat_list">자도번LIST</th><th class="center" data-key="sagub_list">사급</th>
+       <th class="center" data-key="lot">LOT수량</th><th class="center" data-key="plan">자재수량</th><th class="center" data-key="done">완료수량</th><th class="center" data-key="req">요청수량</th>
        <th class="center"><input type="checkbox" id="d4-all"></th>
        <!-- ★SERIAL-NO·HEAT-NO·품목정보 제거(2026-08-27 사용자 요청) -->
        <th class="center">납품수량</th><th class="center">포장수량</th>
-       <th class="center">검사</th><th class="center">상태</th>
+       <th class="center" data-key="insp">검사</th><th class="center" data-key="status">상태</th>
        ${dates.map(d=>`<th class="center"${wkbg(d)}>${esc(wlab(d))}</th>`).join('')}
        <!-- ★실적/재고 5종은 **일자 뒤로** 이동(2026-08-28 사용자요청).
             순서 = 입고대기 · 세트재고 · 생산실적 · ASSY재고 · 출하실적 -->
-       <th class="center">입고대기</th><th class="center">세트재고</th><th class="center">생산실적</th><th class="center">ASSY재고</th><th class="center">출하실적</th>
+       <th class="center" data-key="ireq">입고대기</th><th class="center" data-key="iset_stk">세트재고</th><th class="center" data-key="prod">생산실적</th><th class="center" data-key="assy_stock">ASSY재고</th><th class="center" data-key="sale">출하실적</th>
        </tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r,ri)=>{const ed=(r.status!=='90'&&Number(r.req)>0);
         // ★납품수량은 **체크했을 때만** 채운다(2026-08-28 사용자요청).
@@ -1092,7 +1117,9 @@ SCREEN.deliv420=(c)=>{
     bindLegacyDate(c,'d4-in',()=>F.inymd,(v)=>{F.inymd=v;});
     g('#d4-search').onclick=()=>{sync();load();};
     ['#d4-gb-g','#d4-gb-o'].forEach(id=>{const el=g(id);if(el)el.onchange=()=>{sync();load();};});
-    const so=g('#d4-sort');if(so)so.onchange=()=>{sync();draw();};
+    // 정렬 드롭다운을 바꾸면 헤더 정렬은 해제한다(둘이 겹치면 헷갈린다)
+    const so=g('#d4-sort');if(so)so.onchange=()=>{st.sortKey='';sync();draw();};
+    const sc=g('#d4-sortclr');if(sc)sc.onclick=()=>{st.sortKey='';draw();};
     ['#d4-cust','#d4-custcode','#d4-item','#d4-part','#d4-days','#d4-dnp'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
     // 코드 ↔ 업체명 양방향 채움
     const cCode=g('#d4-custcode');
@@ -1162,7 +1189,44 @@ SCREEN.deliv420=(c)=>{
     c.querySelectorAll('.d4-pk').forEach(x=>x.oninput=e=>{F.pack[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('.d4-sn').forEach(x=>x.oninput=e=>{F.serial[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('.d4-hn').forEach(x=>x.oninput=e=>{F.heat[e.target.dataset.k]=e.target.value;});
-    c.querySelectorAll('thead th').forEach(th=>addResizer(th));
+    // ★컬럼 너비 드래그 + 헤더 더블클릭 정렬(2026-08-31 사용자 요청).
+    //   이 표는 table-layout:fixed + <colgroup> 이라 공용 addResizer(th.style.width)가 먹지 않는다
+    //   — <col> 의 width 가 우선이므로 col 을 직접 조절하고 그 값을 st.colw 에 기억한다.
+    (()=>{
+      const tb=c.querySelector('.grid-wrap table.tbl');if(!tb)return;
+      const cols=tb.querySelectorAll('colgroup col');
+      tb.querySelectorAll('thead th').forEach((th,i)=>{
+        const col=cols[i];if(!col)return;
+        th.style.position='relative';
+        // 정렬(더블클릭) — data-key 있는 헤더만
+        const k=th.dataset.key;
+        if(k){
+          th.style.cursor='pointer';
+          th.title='더블클릭 정렬 · 우측 경계 드래그로 너비조절';
+          if(st.sortKey===k)th.insertAdjacentHTML('beforeend',
+            `<span style="font-size:9px;margin-left:2px">${st.sortDir===1?'▲':'▼'}</span>`);
+          th.ondblclick=e=>{if(e.target.classList.contains('d4-rz'))return;
+            st.sortDir=(st.sortKey===k&&st.sortDir===1)?-1:1;st.sortKey=k;draw();};
+        }
+        // 너비 드래그 핸들
+        const rz=document.createElement('div');
+        rz.className='d4-rz';
+        rz.style.cssText='position:absolute;top:0;right:0;width:6px;height:100%;'
+          +'cursor:col-resize;user-select:none;z-index:3';
+        rz.onmousedown=e=>{e.preventDefault();e.stopPropagation();
+          const sx=e.pageX, sw=col.offsetWidth||parseInt(col.style.width)||60;
+          const mv=ev=>{const w=Math.max(24,sw+ev.pageX-sx);
+            col.style.width=w+'px';st.colw[i]=w;};
+          const up=()=>{document.removeEventListener('mousemove',mv);
+            document.removeEventListener('mouseup',up);
+            // 표 전체폭도 다시 계산(가로스크롤 유지)
+            let t=0;cols.forEach(x=>t+=parseInt(x.style.width)||0);
+            if(t)tb.style.width=t+'px';};
+          document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);};
+        rz.ondblclick=e=>{e.stopPropagation();delete st.colw[i];draw();};   // 폭 초기화
+        th.appendChild(rz);
+      });
+    })();
   };
   // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 그린다 — 2026-08-28
   planBase().then(b=>{if(b&&b.iso)F.from=b.iso;}).catch(()=>{})

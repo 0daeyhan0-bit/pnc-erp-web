@@ -906,7 +906,16 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
               if m["days"][i] and _qint(m["dn"][i]) >= _qint(m["days"][i])}
         wcc = m["work_code"] or m["in_cust"]
         iss = issued.get(str(m["assy"]).strip(), 0.0)
-        req0 = m["req"]; remain = max(0.0, req0 - iss)
+        # ★발행분은 req 에서 다시 빼지 않는다(2026-08-31 이중차감 수정).
+        #   발행(partner_deliv420_issue)은 nx.set_input_req 에 세트입고대기를 만들고,
+        #   그 값이 _sim510 의 iset_stk/ireq 로 들어가 **이미 c_fin(완료)에 가산**된다.
+        #   따라서 req(=plan−done)에는 발행분이 이미 반영돼 있는데, 여기서 issued 를
+        #   한 번 더 빼면 두 번 깎인다.
+        #   실측(AJR74942547·2068): plan 121 · done 76 → req 45 가 맞는데
+        #     issued 73(=set_input_req 45+28, 그 73이 iset_stk 로 done 에 이미 포함)을
+        #     또 빼서 0 이 되어 발행이 잠겼다.
+        #   issued 는 상태(status) 표시용으로만 쓴다.
+        req0 = m["req"]; remain = max(0.0, req0)
         # ★구분(레거시 420 '구분' 컬럼) — dw_pr_outside_420_t1 원본 확인(2026-08-27).
         #   TEMP_CTE 가 도번을 두 갈래로 나눈다:
         #     /*직납품 검색*/     ... and c.in_cust_code  = :as_cust   ← 도번 자체가 그 협력사 납품
@@ -925,7 +934,11 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             "work_center": _wcnm, "in_cust": m["in_cust"] or "", "gubun": _gb,
             "mat_list": m["mat_list"], "sagub_list": m["sagub_list"], "lot": _qint(m["lot"]),
             "plan": _qint(m["plan"]), "done": _qint(m["done"]), "req": _qint(remain), "req_org": _qint(req0),
-            "issued": _qint(iss), "status": ("90" if iss >= req0 and iss > 0 else ("10" if iss > 0 else "00")),
+            # ★상태 = 잔량 기준(2026-08-31). 종전 `iss >= req0` 는 req0 가 이미 발행분이
+            #   반영된 잔량이라, 한 번 발행하면 남은 물량이 있어도 90(완료)으로 잠겼다.
+            #   90=더 낼 게 없음(잔량 0) · 10=일부 발행(잔량 남음) · 00=미발행.
+            "issued": _qint(iss), "status": ("90" if _qint(remain) <= 0 and iss > 0
+                                             else ("10" if iss > 0 else "00")),
             "sale": _qint(m["sale"]), "prod": _qint(m["prod"]), "assy_stock": _qint(m["assy_stock"]),
             "iset_stk": _qint(m["iset_stk"]), "ireq": _qint(m["ireq"]), "input_mat": 0,
             "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(remain), "days": d, "donedays": dn, "colors": cl})
@@ -1053,7 +1066,7 @@ def partner_deliv420_issue(request: Request, body: dict = Body(...)):
         import datetime as _di
         d6t = (_di.date(2000+int(d6f[:2]), int(d6f[2:4]), int(d6f[4:6])) + _di.timedelta(days=6)).strftime('%y%m%d')
     res = _deliv420_rows(cust, d6f, d6t)
-    remain = {str(r["assy"]).strip(): float(r["req"] or 0) for r in res["rows"]}  # 잔여 요청(발행분 차감 후)
+    remain = {str(r["assy"]).strip(): float(r["req"] or 0) for r in res["rows"]}  # 잔여 요청(=계획−완료)
     packmap = {str(r["assy"]).strip(): float(r["pack"] or 0) for r in res["rows"]}
     plan = []; errs = []
     for it in items:
@@ -1095,7 +1108,10 @@ def partner_deliv420_issue(request: Request, body: dict = Body(...)):
         #   흐름: 420 납품처리 → nx.set_input_req(대기·status='10'·barcode_no)
         #         → 자재입고 바코드(setin.py) → nx.set_stock_maint(+) = 세트재고
         #         → 생산실적(procbc.py)       → nx.set_stock_maint(−)
-        #   요청수량은 deliv_issue 발행분 차감으로 줄고(_deliv420_rows), 그 물량이 입고대기(ireq)에 잡힌다.
+        #   ★요청수량은 **입고대기(ireq/iset_stk)가 완료(done)에 가산되면서** 줄어든다.
+        #     deliv_issue 발행분을 따로 또 빼지 않는다 — 2026-08-31 이중차감 수정
+        #     (종전 주석은 "발행분 차감으로 줄고, 그 물량이 입고대기에 잡힌다"였는데
+        #      두 경로가 같은 물량이라 45가 0이 됐다. _deliv420_rows 909행 참조).
         _rmap = {str(r["assy"]).strip(): r for r in res["rows"]}
         cur.execute("SELECT ISNULL(MAX(CAST(sheet_no AS bigint)),900000)+1 FROM nx.set_input_req WHERE ISNUMERIC(sheet_no)=1")
         _sh = int(cur.fetchone()[0])
