@@ -1276,9 +1276,9 @@ def bom_copy(payload: dict = Body(...)):
 
 
 def _copy_proc(cur, source, target):
-    """생산정보(공정) 복사 = proc_weld(용접봉)·item_weld(관경별 용접)·routing(공정) 을 source→target 복제.
+    """★원가축 공정 복사 = proc_weld(용접봉)·item_weld(관경별 용접)·routing(공정=가공비) source→target 복제.
        ★정본 bom_copy(§proc/weld/routing)와 동일 로직. carrier(용접봉 RAC)는 코드 유지·p_item/item_code만 치환.
-       ★평면 신규품목 안전(원본 routing carrier=용접봉만·SUB carrier 없음, 실측 확인)."""
+       ★생산 ST축(생산정보=생산공정순서)은 _copy_prodinfo에서 별도 복사(두 축 분리)."""
     n = {"proc_weld": 0, "item_weld": 0, "routing": 0}
     # proc_weld(용접봉)
     cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", target)
@@ -1300,7 +1300,26 @@ def _copy_proc(cur, source, target):
                proc_code,work_qty,prod_uph,calc_gubun,sort_seq
         FROM nx.routing WHERE item_code=? OR p_item=?""", source, target, source, target, source, source)
     n["routing"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # ★생산 ST축(생산정보=생산공정순서)도 함께 복사(두 축 분리·사용자 확정 2026-08-31)
+    n["prodinfo_proc"] = _copy_prodinfo(cur, source, target)
     return n
+
+
+def _copy_prodinfo(cur, source, target):
+    """★생산 ST축(생산정보=생산공정순서) source→target(품번키·route_id 없음) 복사 = nx.prodinfo_proc.
+       source 유효본 = 웹편집분 nx.prodinfo_proc 있으면 그것, 없으면 레거시 PR_M_ITEM_PROC_GAGONG(prodinfo 화면 읽기 패턴과 동일).
+       ★원가축(_copy_proc)과 별개 테이블·별개 개념. 반환=복사행수."""
+    cur.execute("DELETE FROM nx.prodinfo_proc WHERE item_code=?", target)
+    cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", source)
+    if cur.fetchone()[0] > 0:   # 웹편집 클린본
+        cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
+            SELECT ?,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,'copyproc',getdate()
+            FROM nx.prodinfo_proc WHERE item_code=?""", target, source)
+    else:                        # 레거시 품번키 fallback(원본이 아직 웹편집 전)
+        cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
+            SELECT ?,PROC_SEQ,WORK_CODE,GAGONG_PROC_CODE,S_WORK_CODE,MACH_CODE,WORK_QTY,STD_SIZE,MIX_GAGONG,GAGONG_PROC_FLAG,GAGONG_PROC_SEQ,READY_ST,MACH_CT,INWON,HUMAN_ST,TOT_ST,JP_PROC_METHOD,LT_HR,KEY_ID,'copyproc',getdate()
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?""", target, source)
+    return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
 
 
 @router.post("/api/bom/copyproc")
