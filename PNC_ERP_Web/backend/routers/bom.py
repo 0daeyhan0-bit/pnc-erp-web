@@ -85,7 +85,10 @@ def bom_get(item: str = Query(..., description="품번")):
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT item_name, item_type, ISNULL(cut_gubun,'') FROM nx.item WHERE item_code=?", item)
+        cur.execute("""SELECT item_name, item_type, ISNULL(cut_gubun,''),
+                       ISNULL(lgroup,''), ISNULL(sgroup,''), ISNULL(make_type,''), ISNULL(cost_gubun,''),
+                       ISNULL(unit,'EA')
+                       FROM nx.item WHERE item_code=?""", item)   # ★top 마스터도 반환(복사→신규등록 pre-fill용)
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품목 {item} 없음")
@@ -95,7 +98,9 @@ def bom_get(item: str = Query(..., description="품번")):
         cur.execute("SELECT bom_id, version, status FROM nx.bom_header WHERE item_code=?", item)
         h = cur.fetchone()
         if not h:
-            return {"item": item, "name": pi[0], "cut_gubun": pi[2], "header": None, "lines": [], "procs": procs}
+            return {"item": item, "name": pi[0], "cut_gubun": pi[2],
+                    "lgroup": pi[3], "sgroup": pi[4], "make_type": pi[5], "cost_gubun": pi[6], "unit": pi[7],
+                    "header": None, "lines": [], "procs": procs}
         bom_id = h[0]
         cur.execute("""
             SELECT l.seq, l.child_item, ci.item_name, l.qty, l.node_type,
@@ -117,7 +122,48 @@ def bom_get(item: str = Query(..., description="품번")):
                 d[k] = bool(v) if isinstance(v, bool) else v
             lines.append(d)
         return {"item": item, "name": pi[0], "type": pi[1], "cut_gubun": pi[2],
+                "lgroup": pi[3], "sgroup": pi[4], "make_type": pi[5], "cost_gubun": pi[6], "unit": pi[7],
                 "header": {"bom_id": bom_id, "version": h[1], "status": h[2]}, "lines": lines, "procs": procs}
+    finally:
+        cn.close()
+
+
+@router.get("/api/bom/flatget")
+def bom_flatget(item: str = Query(..., description="원본 품번")):
+    """★복사→평면 신규등록용: 원본을 nx.bom_flat(평면전개정본) leaf로 펼쳐 반환(SUB 없이 완전 leaf).
+       각 leaf = 신규품번 BOM 라인 초안(child_item·item_name·qty·치수·재질·마스터). top 마스터도 pre-fill용 반환."""
+    item = item.strip()
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT item_name, ISNULL(lgroup,''), ISNULL(sgroup,''), ISNULL(make_type,''),
+                       ISNULL(cost_gubun,''), ISNULL(unit,'EA') FROM nx.item WHERE item_code=?""", item)
+        pi = cur.fetchone()
+        if not pi:
+            raise HTTPException(404, f"품목 {item} 없음")
+        # nx.bom_flat leaf + 자식 마스터(nx.item) 조인 → 신규 BOM 라인 초안
+        cur.execute("""
+            SELECT f.leaf_code, ISNULL(i.item_name,'') item_name, ISNULL(i.item_spec,'') item_spec,
+                   f.qty, ISNULL(i.metal_gubun,'') metal_gubun, ISNULL(i.diam,0) diam, ISNULL(i.thick,0) thick,
+                   ISNULL(i.length,0) length, ISNULL(i.net_weight,0) net_weight, ISNULL(i.unit,'EA') unit,
+                   ISNULL(i.in_cust,'') in_cust, ISNULL(i.sgroup,'') sgroup, ISNULL(i.lgroup,'') lgroup,
+                   ISNULL(i.make_type,'') make_type, ISNULL(i.cost_gubun,'') cost_gubun, ISNULL(i.status,'사용') status,
+                   ISNULL(pc.CUST_DESC,'') cust_name
+            FROM nx.bom_flat f
+            LEFT JOIN nx.item i ON i.item_code = f.leaf_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = i.in_cust
+            WHERE f.item_code = ? ORDER BY f.leaf_code""", item)
+        from decimal import Decimal as _Dec
+        cols = [d[0] for d in cur.description]
+        lines = []
+        for r in cur.fetchall():
+            d = {}
+            for k, v in zip(cols, r):
+                d[k] = float(v) if isinstance(v, _Dec) else v
+            d["child_item"] = str(d.pop("leaf_code") or "").strip()
+            lines.append(d)
+        return {"item": item, "name": pi[0], "lgroup": pi[1], "sgroup": pi[2],
+                "make_type": pi[3], "cost_gubun": pi[4], "unit": pi[5],
+                "lines": lines, "leaf_count": len(lines)}
     finally:
         cn.close()
 
@@ -192,9 +238,11 @@ def item_save(payload: dict = Body(...)):
                     diam=?, thick=?, length=?, net_weight=?, unit=ISNULL(?,unit), in_cust=?, sgroup=?, lgroup=?,
                     make_type=?, cost_gubun=?, status=ISNULL(?,status) WHERE item_code=?""", *vals, code)
             else:
+                # ★src = 생성출처(신규등록 시만). 'web'=웹 신규 BOM 등록(→조달경로 R01 수정가능). UPDATE는 미접촉=보존.
+                cur.execute("IF COL_LENGTH('nx.item','src') IS NULL ALTER TABLE nx.item ADD src varchar(10) NULL")
                 cur.execute("""INSERT INTO nx.item(item_code,item_name,item_spec,metal_gubun,diam,thick,length,
-                    net_weight,unit,in_cust,sgroup,lgroup,make_type,cost_gubun,status,item_type)
-                    VALUES(?,?,?,?,?,?,?,?,ISNULL(?,'EA'),?,?,?,?,?,ISNULL(?,'사용'),'부품')""", code, *vals)
+                    net_weight,unit,in_cust,sgroup,lgroup,make_type,cost_gubun,status,item_type,src)
+                    VALUES(?,?,?,?,?,?,?,?,ISNULL(?,'EA'),?,?,?,?,?,ISNULL(?,'사용'),'부품',?)""", code, *vals, s("src"))
             saved += 1
         _reset_cost_engine()   # 스펙(치수·재질·중량·조달) 변경 → 원가엔진 캐시 무효화
         return {"ok": True, "count": saved, "errors": errs}
@@ -691,6 +739,9 @@ def bom_save(payload: dict = Body(...)):
         # 헤더 확보
         cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
         h = cur.fetchone()
+        # ★신규 등록 가드(사용자 2026-08-31): new_only면 이미 BOM 있는 품번은 신규등록 거부(중복 덮어쓰기 차단).
+        if payload.get("new_only") and h:
+            return {"ok": False, "errors": [f"이미 등록된 품번입니다 ({item}) — 신규 BOM 등록 불가. 기존 BOM은 [수정]으로 편집하세요."]}
         if h:
             bom_id = h[0]
         else:
@@ -725,6 +776,78 @@ def bom_save(payload: dict = Body(...)):
     finally:
         cn.close()
 
+def _usage_blockers(cur, item):
+    """★삭제 전 사용처 전수 점검(사용자 하드룰 2026-08-31): 이 품번의 BOM/R01을 쓰는 곳이 하나라도 있으면 삭제 차단.
+       반환 [{where, detail}]. 빈 리스트=삭제 가능. 테이블 부재/오류는 '해당 사용처 없음'으로 무시(방어적)."""
+    blk = []
+    def chk(where, sql, *a):
+        try:
+            cur.execute(sql, *a); r = cur.fetchone()
+            if r and r[0]:
+                d = f"{r[0]}건" + (f" (예: {str(r[1]).strip()})" if len(r) > 1 and r[1] else "")
+                blk.append({"where": where, "detail": d})
+        except Exception:
+            pass
+    # 1) 다른 BOM의 자식(구성)으로 사용 — 상위에서 먼저 빼야 함
+    chk("다른 BOM 구성(자식)",
+        """SELECT COUNT(DISTINCT h.item_code), MIN(h.item_code) FROM nx.bom_line l
+           JOIN nx.bom_header h ON h.bom_id=l.bom_id WHERE l.child_item=? AND h.item_code<>?""", item, item)
+    # 2) 모델BOM 구성
+    chk("모델BOM 구성", "SELECT COUNT(*), MIN(MODEL_NO) FROM nx.model_bom WHERE C_ITEM_CODE=?", item)
+    # 3) 다른 품번의 조달경로(후보) 구성라인
+    chk("다른 품번 조달경로 라인",
+        """SELECT COUNT(*), MIN(h.item_code) FROM nx.sourcing_route_line l
+           JOIN nx.sourcing_route h ON h.route_id=l.route_id WHERE l.child_item=? AND h.item_code<>?""", item, item)
+    # 4) 생산계획(편성) — 품목별/자재소요에 이 품번이 등장하면 계획이 물려있음
+    chk("생산계획 품목별(plan_item_dtl)", "SELECT COUNT(*), MIN(WORK_ORDER) FROM nx.plan_item_dtl WHERE C_ITEM_CODE=?", item)
+    chk("생산계획 자재소요(plan_part_mat)", "SELECT COUNT(*), MIN(WORK_ORDER) FROM nx.plan_part_mat WHERE mat_code=? OR assy_item_code=?", item, item)
+    # 5) 주문(수주)
+    chk("주문(recv_dtl)", "SELECT COUNT(*), MIN(WORK_ORDER) FROM nx.recv_dtl WHERE ITEM_CODE=?", item)
+    return blk
+
+
+def _purge_item(cur, item):
+    """★품번의 파생 데이터 전부 정리(사용자 하드룰 2026-08-31·통제된 완전삭제). 커밋은 호출측.
+       순서: BOM구성 → 평면 → 원가공정 → 생산정보(생산 ST) → 조달경로(R02+) → 마스터. 반환 rm(테이블별 삭제행수).
+       ★삭제 안 함: 전사 공유 마스터(prodinfo_single). bom_delete·itemmaster_delete 공용."""
+    rm = {}
+    def _del(sql, *a):
+        cur.execute(sql, *a); return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # 1) BOM 구성(bom_line/header) + 평면
+    nline = 0
+    cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
+    h = cur.fetchone()
+    if h:
+        nline = _del("DELETE FROM nx.bom_line WHERE bom_id=?", h[0])
+        cur.execute("DELETE FROM nx.bom_header WHERE bom_id=?", h[0])
+    rm["bom_line"] = nline
+    rm["bom_flat"] = _del("IF OBJECT_ID('nx.bom_flat','U') IS NOT NULL DELETE FROM nx.bom_flat WHERE item_code=?", item)
+    # 2) 원가 공정(용접봉·관경·routing·서브)
+    rm["proc_weld"] = _del("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+    for t in ("item_sub", "item_valve", "item_weld"):
+        rm[t] = _del(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    # ★routing = item_code(품번레벨) + p_item(용접carrier) 둘 다. p_item만 있는 carrier행 누락 방지(_copy_proc와 대칭).
+    rm["routing"] = _del("IF OBJECT_ID('nx.routing','U') IS NOT NULL DELETE FROM nx.routing WHERE item_code=? OR p_item=?", item, item)
+    # 3) 생산정보(생산 ST축) — 품번키 + route별
+    for t in ("prodinfo_proc", "prodinfo_assy", "prodinfo_item_st", "prodinfo_jig", "prodinfo_yield"):
+        rm[t] = _del(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    rm["route_proc_gagong"] = _del("IF OBJECT_ID('nx.route_proc_gagong','U') IS NOT NULL DELETE FROM nx.route_proc_gagong WHERE item_code=?", item)
+    # 4) 조달경로(R02+ 후보·프로파일) — 이 품번(ASSY) 소유 route 전부 + 하위
+    cur.execute("SELECT OBJECT_ID('nx.sourcing_route')")
+    if cur.fetchone()[0]:
+        cur.execute("SELECT route_id FROM nx.sourcing_route WHERE item_code=?", item)
+        rids = [int(r[0]) for r in cur.fetchall()]
+        for rid in rids:
+            for t in ("sourcing_route_line", "sourcing_route_proc", "sourcing_route_weld", "sourcing_profile", "route_edges", "route_alloc"):
+                cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE route_id=?", rid)
+        rm["sourcing_route"] = _del("DELETE FROM nx.sourcing_route WHERE item_code=?", item) if rids else 0
+        for t in ("route_alloc",):
+            cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    # 5) 마스터
+    rm["item"] = _del("DELETE FROM nx.item WHERE item_code=?", item)
+    return rm
+
+
 @router.post("/api/bom/delete")
 def bom_delete(payload: dict = Body(...)):
     """품번 삭제 — 레거시 방식(하위 구성 제거 후 품번 삭제). BOM구성(자식관계)·용접공정·서브테이블 제거 후 nx.item에서 품번 삭제.
@@ -732,35 +855,28 @@ def bom_delete(payload: dict = Body(...)):
     item = str(payload.get("item", "")).strip()
     if not item:
         raise HTTPException(400, "item(품번) 필요")
-    cn = _nx(); cur = cn.cursor()
+    # ★★원자성(데이터손실 사고 2026-08-31): 트랜잭션으로 전부-또는-전무. autocommit이면 _purge_item 중간실패 시
+    #   부분삭제가 커밋돼 마스터는 남고 BOM만 소실(실사고). 반드시 원자.
+    cn = _nx_tx(); cur = cn.cursor()
     try:
         cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", item)
         if not cur.fetchone():
             return {"ok": False, "errors": [f"미등록 품번 ({item})"]}
-        # ★가드: 다른 BOM이 이 품번을 자식으로 사용 → 삭제불가(상위에서 먼저 제거해야 함)
-        cur.execute("""SELECT DISTINCT TOP 20 h.item_code FROM nx.bom_line l
-                       JOIN nx.bom_header h ON h.bom_id=l.bom_id WHERE l.child_item=?""", item)
-        used = [r[0] for r in cur.fetchall()]
-        if used:
-            more = "..." if len(used) >= 20 else ""
-            return {"ok": False, "errors": [
-                f"삭제 불가 — 이 품번을 자식(구성)으로 사용하는 BOM {len(used)}건이 있습니다. 상위 BOM에서 먼저 제거하세요:",
-                ", ".join(used[:15]) + more]}
-        # 삭제: 하위 구성(bom_line) → 헤더 → 용접공정 → 서브테이블 → 품번(마스터)
-        nline = 0
-        cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
-        h = cur.fetchone()
-        if h:
-            cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", h[0]); nline = cur.rowcount
-            cur.execute("DELETE FROM nx.bom_header WHERE bom_id=?", h[0])
-        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
-        for t in ("item_sub", "item_valve", "routing", "item_weld"):
-            cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
-        cur.execute("DELETE FROM nx.item WHERE item_code=?", item)
-        nitem = cur.rowcount
+        # ★★사용처 전수 가드(사용자 하드룰 2026-08-31): BOM 또는 R01을 쓰는 곳이 하나라도 있으면 삭제 절대 차단.
+        blk = _usage_blockers(cur, item)
+        if blk:
+            return {"ok": False, "blocked": True, "usage": blk,
+                    "errors": ["삭제 불가 — 이 품번(BOM/R01)을 사용하는 곳이 있습니다. 아래를 먼저 정리하세요:"]
+                              + [f"· {b['where']}: {b['detail']}" for b in blk]}
+        # ★통제된 완전 삭제(공용 _purge_item) — 파생 데이터 전부 정리 → 조달경로 R01·생산정보 잔존 방지.
+        rm = _purge_item(cur, item)
         cn.commit()
         _reset_cost_engine()   # 구성·품목 삭제 → 원가엔진 캐시 무효화
-        return {"ok": True, "item": item, "lines_removed": nline, "item_removed": nitem}
+        _removed = {k: v for k, v in rm.items() if v}
+        return {"ok": True, "item": item, "lines_removed": rm.get("bom_line", 0), "item_removed": rm.get("item", 0), "removed": _removed,
+                "summary": "삭제 완료 — " + (", ".join(f"{k} {v}" for k, v in _removed.items()) or "구성 없음")}
+    except Exception:
+        cn.rollback(); raise   # ★중간 실패 = 전체 롤백(부분삭제 방지)
     finally:
         cn.close()
 
@@ -953,11 +1069,22 @@ def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = 
             src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
-              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
+              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc,
+              CASE WHEN i.ITEM_CODE IS NULL THEN 0 ELSE 1 END nx_exists,
+              ISNULL(i.item_spec,'') nx_spec, i.diam nx_diam, i.thick nx_thick, i.length nx_length,
+              ISNULL(i.metal_gubun,'') nx_metal, i.net_weight nx_weight, ISNULL(i.unit,'') nx_unit,
+              ISNULL(i.lgroup,'') nx_lgroup, ISNULL(i.sgroup,'') nx_sgroup, ISNULL(i.make_type,'') nx_make,
+              ISNULL(i.cost_gubun,'') nx_cost, ISNULL(i.in_cust,'') nx_incust
             FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # ★nx.item 마스터 enrich 숫자필드 Decimal→float(JSON 직렬화). 신규등록 pre-fill용.
+        for _r in rows:
+            for _k in ("nx_diam", "nx_thick", "nx_length", "nx_weight", "qty"):
+                if _r.get(_k) is not None:
+                    try: _r[_k] = float(_r[_k])
+                    except Exception: pass
         # 최상위 parent(model) 정보
         cur.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", model)
         mn = cur.fetchone()
@@ -1288,6 +1415,73 @@ def bom_copy(payload: dict = Body(...)):
             FROM nx.routing WHERE item_code=? OR p_item=?""", source, target, source, target, source, source)
         _reset_cost_engine()   # ★신규 품번 → 엔진 캐시(_hasbom 등) 무효화(미호출 시 재료=0 발생)
         return {"ok": True, "count": seq, "weld": nweld, "source_from": src, "warn": warn}
+    finally:
+        cn.close()
+
+
+def _copy_proc(cur, source, target):
+    """★원가축 공정 복사 = proc_weld(용접봉)·item_weld(관경별 용접)·routing(공정=가공비) source→target 복제.
+       ★정본 bom_copy(§proc/weld/routing)와 동일 로직. carrier(용접봉 RAC)는 코드 유지·p_item/item_code만 치환.
+       ★생산 ST축(생산정보=생산공정순서)은 _copy_prodinfo에서 별도 복사(두 축 분리)."""
+    n = {"proc_weld": 0, "item_weld": 0, "routing": 0}
+    # proc_weld(용접봉)
+    cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", target)
+    cur.execute("""IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL
+        INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
+        SELECT ?,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,'W','copyproc' FROM nx.proc_weld WHERE parent_item=?""", target, source)
+    n["proc_weld"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # item_weld(관경별 용접 detail)
+    cur.execute("IF OBJECT_ID('nx.item_weld','U') IS NOT NULL DELETE FROM nx.item_weld WHERE item_code=?", target)
+    cur.execute("""IF OBJECT_ID('nx.item_weld','U') IS NOT NULL
+        INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty)
+        SELECT ?,weld_item,pipe_diam,weld_qty,use_qty FROM nx.item_weld WHERE item_code=?""", target, source)
+    n["item_weld"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # routing(공정=가공비) — item_code=source(품번레벨) OR p_item=source(용접carrier). source→target 치환·carrier 유지.
+    cur.execute("IF OBJECT_ID('nx.routing','U') IS NOT NULL DELETE FROM nx.routing WHERE item_code=? OR p_item=?", target, target)
+    cur.execute("""IF OBJECT_ID('nx.routing','U') IS NOT NULL
+        INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+        SELECT CASE WHEN p_item=? THEN ? ELSE p_item END, CASE WHEN item_code=? THEN ? ELSE item_code END,
+               proc_code,work_qty,prod_uph,calc_gubun,sort_seq
+        FROM nx.routing WHERE item_code=? OR p_item=?""", source, target, source, target, source, source)
+    n["routing"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # ★생산 ST축(생산정보=생산공정순서)도 함께 복사(두 축 분리·사용자 확정 2026-08-31)
+    n["prodinfo_proc"] = _copy_prodinfo(cur, source, target)
+    return n
+
+
+def _copy_prodinfo(cur, source, target):
+    """★생산 ST축(생산정보=생산공정순서) source→target(품번키·route_id 없음) 복사 = nx.prodinfo_proc.
+       source 유효본 = 웹편집분 nx.prodinfo_proc 있으면 그것, 없으면 레거시 PR_M_ITEM_PROC_GAGONG(prodinfo 화면 읽기 패턴과 동일).
+       ★원가축(_copy_proc)과 별개 테이블·별개 개념. 반환=복사행수."""
+    cur.execute("DELETE FROM nx.prodinfo_proc WHERE item_code=?", target)
+    cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", source)
+    if cur.fetchone()[0] > 0:   # 웹편집 클린본
+        cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
+            SELECT ?,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,'copyproc',getdate()
+            FROM nx.prodinfo_proc WHERE item_code=?""", target, source)
+    else:                        # 레거시 품번키 fallback(원본이 아직 웹편집 전)
+        cur.execute("""INSERT INTO nx.prodinfo_proc(item_code,proc_seq,work_code,gagong_proc_code,s_work_code,mach_code,work_qty,std_size,mix_gagong,gagong_proc_flag,gagong_proc_seq,ready_st,mach_ct,inwon,human_st,tot_st,jp_proc_method,lt_hr,key_id,upd_user,upd_at)
+            SELECT ?,PROC_SEQ,WORK_CODE,GAGONG_PROC_CODE,S_WORK_CODE,MACH_CODE,WORK_QTY,STD_SIZE,MIX_GAGONG,GAGONG_PROC_FLAG,GAGONG_PROC_SEQ,READY_ST,MACH_CT,INWON,HUMAN_ST,TOT_ST,JP_PROC_METHOD,LT_HR,KEY_ID,'copyproc',getdate()
+            FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE ITEM_CODE=?""", target, source)
+    return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+
+@router.post("/api/bom/copyproc")
+def bom_copyproc(payload: dict = Body(...)):
+    """생산정보(공정·용접·관경) 복사 — 복사→평면 신규등록의 P3. BOM(bom_line)은 별도(saveNew), 여기선 공정만.
+       source의 proc_weld·item_weld·routing → target. target은 이미 nx.item에 있어야(saveNew가 먼저 저장)."""
+    source = str(payload.get("source", "")).strip()
+    target = str(payload.get("target", "")).strip().upper()
+    if not source or not target or source == target:
+        raise HTTPException(400, "source·target(상이) 필요")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        n = _copy_proc(cur, source, target)
+        cn.commit()
+        _reset_cost_engine()
+        return {"ok": True, "copied": n}
+    except Exception:
+        cn.rollback(); raise
     finally:
         cn.close()
 

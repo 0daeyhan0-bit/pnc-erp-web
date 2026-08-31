@@ -985,7 +985,7 @@ def saleout_delete(payload: dict = Body(...)):
     ids = payload.get("ids") or ([payload["id"]] if payload.get("id") else [])
     if not ids:
         raise HTTPException(400, "id/ids 필요")
-    cn = _nx(); cur = cn.cursor()
+    cn = _nx_tx(); cur = cn.cursor()   # ★원자화(2026-08-31): 출고헤더+−MAT원장+사급원장 동반삭제를 원자. autocommit이면 원장 동반삭제 중간실패 시 헤더만 지워지고 원장 유령행 잔존.
     try:
         ph = ",".join("?" * len(ids))
         is_closed = _sale_close_lookup(cur)   # ★작업1 마감잠금: 매출마감건 삭제차단
@@ -1001,6 +1001,8 @@ def saleout_delete(payload: dict = Body(...)):
         cn.commit()
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "deleted": n}
+    except Exception:
+        cn.rollback(); raise   # ★출고+원장 중 하나라도 실패 = 전체 롤백(유령 원장행 방지)
     finally:
         cn.close()
 

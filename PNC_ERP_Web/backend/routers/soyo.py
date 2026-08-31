@@ -504,6 +504,7 @@ def _step6_sql(cur):
         "정본 = routers/planrev.py 의 _step6_sql (27컬럼) · 화면 「생산계획업로드[검토]」")
 
     P = _P
+    _route_setup(cur)   # ★P6: plan_route_active(활성 R02) 준비 — 공정 route-aware 오버레이용. STEP7도 재호출(멱등·동일결과)
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
@@ -519,9 +520,22 @@ def _step6_sql(cur):
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
+    # ★P6 공정 route-aware(생산정보 route별 소비): 활성 route(plan_route_active)를 가진 ASSY의 부품이
+    #   그 route의 생산정보(route_proc_gagong)를 보유하면 그것을, 아니면 현행 PR_M_ITEM_PROC_GAGONG를 사용.
+    #   ★identity-safe: 활성 route 없으면(plan_route_active 비면) CASE=0 → route_id=0(=PR_M_ITEM_PROC_GAGONG)만 조인
+    #     = 현행과 byte동일(route_proc_gagong 행은 route_id>0라 CASE=0에 미매치). 검증=P6 diff0 게이트.
     cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    LEFT JOIN nx.plan_route_active pra ON pra.assy_item_code=a.assy_item_code
+    JOIN (
+        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}PR_M_ITEM_PROC_GAGONG
+        UNION ALL
+        SELECT item_code, route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM nx.route_proc_gagong
+    ) b ON a.mat_code=b.item_code
+       AND b.route_id = CASE WHEN pra.route_id IS NOT NULL
+             AND EXISTS(SELECT 1 FROM nx.route_proc_gagong x WHERE x.route_id=pra.route_id AND x.item_code=a.mat_code)
+           THEN pra.route_id ELSE 0 END
+    JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
@@ -541,7 +555,8 @@ def _step6_sql(cur):
 _ROUTE_GATE_SQL = """ISNULL(h.approve_flag,0)=1
       AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
       AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>'')
-      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))"""
+      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))
+      AND EXISTS(SELECT 1 FROM nx.route_proc_gagong rp WHERE rp.route_id=h.route_id)"""
 
 
 def _ensure_profile_price(cur):
@@ -550,24 +565,45 @@ def _ensure_profile_price(cur):
     cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','sagub_price') IS NULL ALTER TABLE nx.sourcing_profile ADD sagub_price FLOAT NULL")
 
 
+def _ensure_route_proc(cur):
+    """★P4 게이트/STEP6이 참조하는 route별 생산정보(생산 ST축 route확장) 테이블 멱등 보장.
+       prodinfo.py _ensure_route_proc와 동일 스키마(route_id+품번+proc_seq 키). 게이트/편성 파싱 안전."""
+    cur.execute("""IF OBJECT_ID('nx.route_proc_gagong') IS NULL CREATE TABLE nx.route_proc_gagong(
+        route_id INT, item_code varchar(20), proc_seq tinyint, work_code varchar(10), gagong_proc_code varchar(10),
+        s_work_code smallint, mach_code varchar(10), work_qty decimal(18,5), std_size varchar(100), mix_gagong tinyint,
+        gagong_proc_flag varchar(1), gagong_proc_seq tinyint, ready_st decimal(18,5), mach_ct decimal(18,5), inwon tinyint,
+        human_st decimal(18,5), tot_st decimal(18,5), jp_proc_method varchar(1), lt_hr decimal(18,5), key_id int,
+        upd_user varchar(30), upd_at datetime DEFAULT getdate(),
+        CONSTRAINT pk_route_proc_gagong PRIMARY KEY(route_id, item_code, proc_seq))""")
+
+
 def _route_gate_incomplete(cur):
-    """★D 사전검증(§19-D): 활성 지정된 Rnn(current_flag=1·route_no>1) 중 게이트(§19-C) 미충족 목록+사유.
+    """★D 사전검증(§19-D): 활성 지정된 Rnn(route_alloc.is_active=1·route_no>1) 중 게이트(§19-C) 미충족 목록+사유.
+       ★활성지정 단일소스 = nx.route_alloc.is_active(조달프로파일 택1) — _route_setup과 동일 스위치.
        반환 [{route_id,item,route_no,route_name,missing[]}]. 편성(compose)이 이걸로 업로드 실패·정확 메시지·중단."""
     _ensure_profile_price(cur)
+    _ensure_route_proc(cur)   # ★P4: 생산정보 존재 게이트가 참조 — 파싱 안전
+    cur.execute("""IF OBJECT_ID('nx.route_alloc','U') IS NULL CREATE TABLE nx.route_alloc(
+        item_code NVARCHAR(60) NOT NULL, route_id INT NOT NULL, apply_from DATE NULL, apply_to DATE NULL,
+        is_active BIT DEFAULT 0, alloc_ratio FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_route_alloc PRIMARY KEY(item_code, route_id))""")
     cur.execute("""SELECT h.route_id, LTRIM(RTRIM(h.item_code)), ISNULL(h.route_no,1), ISNULL(h.route_name,''),
           ISNULL(h.approve_flag,0),
           (SELECT COUNT(*) FROM nx.route_edges re WHERE re.route_id=h.route_id),
           (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>''),
-          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))
+          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL)),
+          (SELECT COUNT(*) FROM nx.route_proc_gagong rp WHERE rp.route_id=h.route_id)
         FROM nx.sourcing_route h
-        WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1""")
+        JOIN nx.route_alloc ra ON ra.route_id=h.route_id AND ISNULL(ra.is_active,0)=1
+        WHERE ISNULL(h.route_no,1)>1""")
     bad = []
-    for rid, item, rno, rname, appr, ne, nv, npx in cur.fetchall():
+    for rid, item, rno, rname, appr, ne, nv, npx, nproc in cur.fetchall():
         miss = []
         if not int(appr or 0): miss.append("미승인")
         if not int(ne or 0): miss.append("구조 미반영(저장 안 됨)")
         if not int(nv or 0): miss.append("업체 미지정")
         if not int(npx or 0): miss.append("단가 미지정")
+        if not int(nproc or 0): miss.append("생산정보 미등록")   # ★P4 요구5: R02 생산정보 필수(없으면 편성 불가)
         if miss:
             bad.append({"route_id": int(rid), "item": str(item).strip(), "route_no": int(rno),
                         "route_name": str(rname).strip(), "missing": miss})
@@ -575,11 +611,19 @@ def _route_gate_incomplete(cur):
 
 
 def _route_setup(cur):
-    """★조달경로 반영 인프라(2026-08-24, 게이트강화 2026-08-25). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
+    """★조달경로 반영 인프라(2026-08-24, 게이트강화 2026-08-25, ★활성소스 통일 2026-08-31). 매일 rebuild(compose_mat)에서 STEP7 직전 호출.
     - nx.route_edges(route_id,item_code,mat_code,use_qty_pr): 경로별 BOM엣지(Rnn 저장시 자동등록·§19-A). 없으면 fallback.
-    - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만(current_flag=1·route_no>1·승인·route_edges·업체·단가).
+    - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만.
+      ★활성지정 단일소스 = nx.route_alloc.is_active(조달프로파일 택1 라디오). 구조축(여기)·배분축(plan_mat_source)이 동일 스위치를 본다.
+      (이전엔 sourcing_route.current_flag로 게이팅했으나 그 컬럼을 켜는 R02 UI가 없어 반영불가 + plan_mat_source에선 current_flag=1이 'R01 취급'으로 겹침
+       → route_alloc.is_active로 통일. 조달프로파일 택1이 곧 계획 활성.) route_no>1 + 게이트(승인·route_edges·업체·단가·생산정보) 통과분만.
       기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%)."""
     _ensure_profile_price(cur)
+    _ensure_route_proc(cur)   # ★P4: _ROUTE_GATE_SQL이 route_proc_gagong 참조 — 파싱 안전
+    cur.execute("""IF OBJECT_ID('nx.route_alloc','U') IS NULL CREATE TABLE nx.route_alloc(
+        item_code NVARCHAR(60) NOT NULL, route_id INT NOT NULL, apply_from DATE NULL, apply_to DATE NULL,
+        is_active BIT DEFAULT 0, alloc_ratio FLOAT NULL, upd_dt datetime DEFAULT getdate(),
+        CONSTRAINT PK_nx_route_alloc PRIMARY KEY(item_code, route_id))""")   # ★활성소스 — 없으면 활성경로 0 = R01 현행 diff0
     # ★타입=plan_part_dtl.item_code(varchar20)·v_pr_bom.mat_code(varchar20) 정합(재귀CTE 앵커 타입일치 필수). nvarchar 쓰면 STEP7 재귀 타입불일치 오류.
     cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
         route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
@@ -587,7 +631,8 @@ def _route_setup(cur):
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL DROP TABLE nx.plan_route_active")
     cur.execute("""SELECT DISTINCT UPPER(LTRIM(RTRIM(h.item_code))) AS assy_item_code, MIN(h.route_id) AS route_id
         INTO nx.plan_route_active FROM nx.sourcing_route h
-        WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1
+        JOIN nx.route_alloc ra ON ra.route_id=h.route_id AND ISNULL(ra.is_active,0)=1
+        WHERE ISNULL(h.route_no,1)>1
           AND """ + _ROUTE_GATE_SQL + """
         GROUP BY UPPER(LTRIM(RTRIM(h.item_code)))""")
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
