@@ -1010,8 +1010,83 @@ def _lgbom_ver_append(cur, models):
     return added
 
 
+# ★LG BOM 엑셀은 두 형식이 온다 — 컬럼 별칭으로 둘 다 받는다(2026-08-31 대표 제보).
+#   (A) 자동 다운로드(bom_download.py) = 62컬럼 SAP 코드  WERKS/MODEL/MATNR/IDNRK/…
+#   (B) LG 포털 화면 'BOM Explosion' 내보내기 = 26컬럼 영문 라벨
+#       No/Component/Level/Item Number/Description/Specification/UOM/Quantity/Supply Type/
+#       Top Material/Parent Material/…  ※헤더에 줄바꿈 포함('Item\nNumber')
+#   ★별칭은 **읽기 시점에만** 쓴다 — nx.lg_bom 적재 컬럼은 그대로다.
+_LGBOM_ALIAS = {
+    'MODEL':      ('MODEL', 'TOP MATERIAL'),
+    'MATNR':      ('MATNR', 'PARENT MATERIAL'),
+    'IDNRK':      ('IDNRK', 'COMPONENT'),
+    'STUFE':      ('STUFE', 'LEVEL'),
+    'POSNR':      ('POSNR', 'ITEM NUMBER'),
+    'OJTXP':      ('OJTXP', 'DESCRIPTION'),
+    'CHI_SPECI':  ('CHI_SPECI', 'SPECIFICATION'),
+    'MENGE':      ('MENGE', 'QUANTITY', 'REQUIRED QTY'),
+    'MEINS':      ('MEINS', 'UOM'),
+    'ETEXT':      ('ETEXT', 'SUPPLY TYPE'),
+    'MMSTA':      ('MMSTA', 'STATUS'),
+    'MTSTB':      ('MTSTB', 'STATUS DESC'),
+    'DATAB':      ('DATAB', 'VALID FROM'),
+    'DATVT':      ('DATVT', 'VALID TO'),
+    'ALT_ITEM':   ('ALT_ITEM', 'SUBSTITUTE FOR'),
+    'PAR_UIT':    ('PAR_UIT', 'PARENT UIT'),
+    'UIT':        ('UIT',),
+    'MATTY':      ('MATTY',),
+    'LOWEST_FLG': ('LOWEST_FLG',),
+    'MAIN_MAT':   ('MAIN_MAT',),
+    'MATKL':      ('MATKL', 'SVC CODE'),
+    'WERKS':      ('WERKS',),
+}
+
+
+def _lgbom_col(ix, name):
+    """정본 컬럼명 → 실제 엑셀의 열 인덱스(별칭 허용). 없으면 None."""
+    for k in _LGBOM_ALIAS.get(name, (name,)):
+        if k in ix:
+            return ix[k]
+    return None
+
+def _lgbom_find_header(wb):
+    """LG BOM 엑셀에서 헤더 행을 찾는다 → (ws, itr, ix).
+
+       ★1행만 보지 않는다 — LG 화면에서 저장하면 제목행·빈행이 앞에 붙는 경우가 있어
+         위에서 20행까지 훑는다. ★활성 시트만 보지 않는다 — 전 시트를 훑는다.
+       ★못 찾으면 **실제로 본 헤더와 시트명**을 예외 메시지에 담는다(진단 없이는 원인을 못 좁힌다).
+    """
+    need = ('MODEL', 'MATNR', 'IDNRK')
+    seen = []
+    for ws in wb.worksheets:
+        rows = []
+        for i, r in enumerate(ws.iter_rows(values_only=True)):
+            rows.append(r)
+            if i >= 19:
+                break
+        for i, r in enumerate(rows):
+            # ★헤더에 줄바꿈이 들어온다('Item\nNumber') — 공백류를 한 칸으로 정규화
+            ix = {' '.join(str(h or '').split()).upper(): j for j, h in enumerate(r)}
+            if all(_lgbom_col(ix, k) is not None for k in need):
+                # 헤더 다음 행부터 흘려보낸다(이미 읽은 rows + 나머지 스트림)
+                rest = rows[i + 1:]
+                def _itr(ws=ws, rest=rest, skip=len(rows)):
+                    for x in rest:
+                        yield x
+                    for j, x in enumerate(ws.iter_rows(values_only=True)):
+                        if j >= skip:
+                            yield x
+                return ws, _itr(), ix
+        if rows:
+            first = [str(x or '').strip() for x in rows[0][:12]]
+            seen.append('[{}] {}'.format(ws.title, ', '.join(x for x in first if x) or '(빈 행)'))
+    raise HTTPException(400,
+                        'LG BOM 형식 아님 — MODEL·MATNR·IDNRK 헤더를 못 찾음(상위 20행·전 시트 검색). '
+                        '발견된 헤더: ' + (' / '.join(seen[:3]) or '(시트 없음)') +
+                        ' — 정품은 WERKS·MODEL·…·MATNR·…·IDNRK 62컬럼이 1행에 있다')
+
 @router.post("/api/lgbom/upload")
-async def lgbom_upload(file: UploadFile = File(...)):
+async def lgbom_upload(file: UploadFile = File(...), werks: str = Form(default="")):
     """LG BOM Explosion 엑셀 업로드 → nx.lg_bom 적재(모델·werks별 교체). 신규 BOM 등록 전 사전업로드용.
        헤더 1행: MODEL/WERKS/STUFE/POSNR/MATNR(부모)/IDNRK(자식)/OJTXP(품명)/CHI_SPECI(규격)/MENGE(수량)/MEINS(단위)/ETEXT(supply_type)/MATTY/LOWEST_FLG/MATKL/DATAB/DATVT 등."""
     import io as _io
@@ -1024,17 +1099,9 @@ async def lgbom_upload(file: UploadFile = File(...)):
         wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
     except Exception as e:
         raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
-    ws = wb.active
-    itr = ws.iter_rows(values_only=True)
-    try:
-        hdr = next(itr)
-    except StopIteration:
-        raise HTTPException(400, "빈 파일")
-    ix = {str(h or '').strip().upper(): i for i, h in enumerate(hdr)}
-    if not all(k in ix for k in ('MODEL', 'MATNR', 'IDNRK')):
-        raise HTTPException(400, "LG BOM 형식 아님 — 헤더 1행에 MODEL·MATNR·IDNRK 필요")
+    ws, itr, ix = _lgbom_find_header(wb)
     def gv(r, n):
-        i = ix.get(n); v = r[i] if (i is not None and i < len(r)) else None
+        i = _lgbom_col(ix, n); v = r[i] if (i is not None and i < len(r)) else None
         return None if v in (None, '') else v
     def gs(r, n, ln=None):
         v = gv(r, n); s = '' if v is None else str(v).strip(); return s[:ln] if ln else s
@@ -1044,12 +1111,16 @@ async def lgbom_upload(file: UploadFile = File(...)):
     def gf(r, n):
         try: return float(gv(r, n) or 0)
         except Exception: return 0.0
+    werks_sel = (werks or '').strip()[:4]
     recs = []; models = set()
     for r in itr:
         if not r or not any(x not in (None, '') for x in r): continue
         model = gs(r, 'MODEL')
         if not model: continue
-        werks = gs(r, 'WERKS', 4)
+        # ★화면 내보내기(26컬럼)에는 WERKS 컬럼이 없다 → 화면에서 고른 공장을 쓴다.
+        #   실측 2026-08-31: 이 값이 없어 AJR30133610 72행이 werks='' 로 적재됐다
+        #   (전체 58,976행 중 유일). 조회·버전관리가 (model,werks) 축이라 빈값은 겉돈다.
+        werks = gs(r, 'WERKS', 4) or (werks_sel or '')
         recs.append(('C', werks, model, gi(r, 'STUFE'), gs(r, 'POSNR', 10),
             gs(r, 'MATNR', 30), gs(r, 'IDNRK', 30), gs(r, 'OJTXP', 150), gs(r, 'CHI_SPECI', 200),
             gf(r, 'MENGE'), gs(r, 'MEINS', 6), gs(r, 'PAR_UIT', 4), gs(r, 'ETEXT', 30),
@@ -1092,17 +1163,9 @@ async def lgbom_parse(file: UploadFile = File(...)):
         wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
     except Exception as e:
         raise HTTPException(400, f"엑셀 열기 실패: {str(e)[:120]}")
-    ws = wb.active
-    itr = ws.iter_rows(values_only=True)
-    try:
-        hdr = next(itr)
-    except StopIteration:
-        raise HTTPException(400, "빈 파일")
-    ix = {str(h or '').strip().upper(): i for i, h in enumerate(hdr)}
-    if not all(k in ix for k in ('MODEL', 'MATNR', 'IDNRK')):
-        raise HTTPException(400, "LG BOM 형식 아님 — 헤더에 MODEL·MATNR·IDNRK 필요")
+    ws, itr, ix = _lgbom_find_header(wb)
     def gv(r, n):
-        i = ix.get(n); v = r[i] if (i is not None and i < len(r)) else None
+        i = _lgbom_col(ix, n); v = r[i] if (i is not None and i < len(r)) else None
         return None if v in (None, '') else v
     def gs(r, n, ln=None):
         v = gv(r, n); s = '' if v is None else str(v).strip(); return s[:ln] if ln else s

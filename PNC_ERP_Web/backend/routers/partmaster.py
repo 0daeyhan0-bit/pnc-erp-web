@@ -12,10 +12,34 @@ router = APIRouter()
 # 파트(가공공정)마스터. PROD_RATE=생산효율(=키팅 회수율). 공유마스터라 라이브 직접편집(원가·계획·키팅 즉시 일관). 권한게이트=프론트.
 _GC_GUBUN = {'W': '자재창고', 'P': '생산파트', 'V': '생산창고', 'Q': '가공파트'}
 
+
+def _ensure_result_cols(cur):
+    """★실적처리방법 컬럼 멱등 보장 (2026-08-31 신설).
+
+       nx.PR_M_PROC_GAGONG 은 **대문자 미러**라 레거시 동기화·재이관이 돌면
+       우리가 추가한 컬럼이 통째로 날아간다(2026-08-30 실측: nx 초기화 후 2컬럼 소실
+       → 파트마스터 화면 "백엔드 연결 실패", 파트별 생산계획 드래그 실적 전면 불가).
+       조회·저장 진입마다 확인해 없으면 다시 만든다. 있으면 아무 일도 하지 않는다.
+
+         BARCODE_FLAG     '1'=바코드실적 허용(기본). 독립 플래그.
+         PROD_RESULT_TYPE ''=미지정 / 'R'=생산실적(준비재고) / 'W'=생산실적(자재창고출고). 택1.
+    """
+    try:
+        cur.execute("""IF COL_LENGTH('PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG','BARCODE_FLAG') IS NULL
+                         ALTER TABLE PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG ADD BARCODE_FLAG varchar(1) NULL""")
+        cur.execute("""IF COL_LENGTH('PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG','PROD_RESULT_TYPE') IS NULL
+                         ALTER TABLE PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG ADD PROD_RESULT_TYPE varchar(1) NULL""")
+        cur.execute("""UPDATE PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG SET BARCODE_FLAG='1'
+                        WHERE ISNULL(BARCODE_FLAG,'')=''""")
+    except Exception:
+        pass   # 권한 등으로 실패해도 조회 자체는 막지 않는다(ISNULL 로 방어됨)
+
+
 @router.get("/api/partmaster/list")
 def partmaster_list(q: str = Query(""), grp: str = Query("")):
     cn = _conn(); cur = cn.cursor()
     try:
+        _ensure_result_cols(cur)
         w = ["1=1"]; p = []
         if q.strip():   w.append("(g.GAGONG_PROC_CODE LIKE ? OR g.GAGONG_PROC_DESC LIKE ?)"); p += [f"%{q.strip()}%", f"%{q.strip()}%"]
         if grp.strip(): w.append("ISNULL(g.PART_GROUP_CODE,'')=?"); p.append(grp.strip())
@@ -48,6 +72,7 @@ def partmaster_save(payload: dict = Body(...)):
     if not code: return {"ok": False, "detail": "파트코드 필수"}
     cn = _nx(); cur = cn.cursor()   # ★nx전환: 가공공정 마스터 편집=nx.PR_M_PROC_GAGONG 복제본에 쓰기
     try:
+        _ensure_result_cols(cur)    # ★미러 재이관으로 컬럼이 날아갔으면 다시 만든다
         cur.execute("SELECT COUNT(*) FROM nx.PR_M_PROC_GAGONG WHERE GAGONG_PROC_CODE=?", code)
         exists = cur.fetchone()[0] > 0
         # ★실적처리방법 — bc(바코드) 는 독립, pt(생산실적)는 R/W 택1

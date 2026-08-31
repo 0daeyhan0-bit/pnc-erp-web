@@ -134,10 +134,14 @@ def _build_preview(line, cr, vendor, item, gubun, asof):
                 nm[str(r[0]).strip()] = r[1]
         for i in range(0, len(codes), 900):
             ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
+            # ★2026-08-31 단가 소스 이관: 미러 nx.PR_M_ITEM_COST → 정본 nx.price_item('매입', DO_NOT_USE §18).
+            #   COST_TAG='1' = price_type='매입'. 대표(main_flag) 우선이라 LG 사급가(vendor='LG', main_flag 빈값) 자동 후순위.
+            #   vendor_code tiebreak 로 동점 결정화. 미러 vs 클린 전품목 대조 diff0(반올림 0.0001·None↔0만).
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, curr FROM (
-                SELECT LTRIM(RTRIM(ITEM_CODE)) ITEM_CODE, ITEM_COST, ISNULL(CURRENCY,'') curr,
-                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(ITEM_CODE)) ORDER BY ISNULL(MAIN_FLAG,'') DESC, COST_APPLY_YMD DESC) rn
-                FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_COST WHERE COST_TAG='1' AND COST_APPLY_YMD<=? AND LTRIM(RTRIM(ITEM_CODE)) IN ({ph})) z WHERE rn=1""", asof, *ch)
+                SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, price ITEM_COST, ISNULL(currency,'') curr,
+                  ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)) ORDER BY ISNULL(main_flag,'') DESC, apply_ymd DESC,
+                                    LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC) rn
+                FROM PARTNER_ERP_TEST3.nx.price_item WHERE price_type=N'매입' AND apply_ymd<=? AND LTRIM(RTRIM(item_code)) IN ({ph})) z WHERE rn=1""", asof, *ch)
             for r in cur.fetchall():
                 price[str(r[0]).strip()] = {"cost": (float(r[1]) if r[1] is not None else None), "curr": r[2]}
         vmap = _custnm_map(cur, vcodes)

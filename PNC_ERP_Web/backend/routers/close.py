@@ -380,12 +380,18 @@ def _ta_build(cur, d_from, d_to, basic):
 
     # 단가 마스터 폴백(레거시 UPDATE U3/V3). 레거시는 ITEM_COST×기준환율이나 환율은 창 변수 →
     # 원화 단가만 사용(외화 품목 2건 수준 차이, 검증기록 §7-2).
+    # ★2026-08-31 단가 소스 이관: 라이브 dbo.PR_M_ITEM_COST → 정본 nx.price_item('매입', DO_NOT_USE §18).
+    #   컷오버 시 라이브 차단→폴백 금지(§1-9-1). COST_TAG='1'=price_type='매입'. LG 사급가(vendor='LG')는 실매입원가
+    #   아니므로 제외(라이브엔 없음). 라이브 vs 클린 전품목 대조: 9834/9872 동일, 잔여 38=동일데이터·같은날짜 동점
+    #   (라이브도 비결정적이던 것)·이 mcost는 최후폴백(기초0·입고0)만 쓰여 영향 극미. main_flag/vendor tiebreak 로 결정화.
     cur.execute("""SELECT ITEM_CODE, ITEM_COST FROM (
-                     SELECT ITEM_CODE, CAST(ITEM_COST AS float) ITEM_COST,
-                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE ORDER BY COST_APPLY_YMD DESC) rn
-                       FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
-                      WHERE COST_TAG = '1' AND COST_APPLY_YMD <= ?
-                        AND ISNULL(CURRENCY,'KRW') IN ('KRW','')) t WHERE rn = 1""", d_to[:4] + '99')
+                     SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, CAST(price AS float) ITEM_COST,
+                            ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)) ORDER BY apply_ymd DESC,
+                                              ISNULL(main_flag,'') DESC, LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC) rn
+                       FROM PARTNER_ERP_TEST3.nx.price_item
+                      WHERE price_type = N'매입' AND apply_ymd <= ?
+                        AND ISNULL(currency,'KRW') IN ('KRW','')
+                        AND LTRIM(RTRIM(ISNULL(vendor_code,''))) <> 'LG') t WHERE rn = 1""", d_to[:4] + '99')
     mcost = {str(r[0]).strip().upper(): float(r[1] or 0) for r in cur.fetchall()}
 
     for m, d in R.items():                   # TRANS 금액 (레거시 UPDATE 순서 U1~U4)
@@ -522,7 +528,7 @@ def _mv_moves(cur, d_from, d_to):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE,
                            SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                       JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_QTY <> 0
                        AND a.MAINT_TAG IN ({ph_in})
@@ -535,7 +541,7 @@ def _mv_moves(cur, d_from, d_to):
     # 수입(도입): DIVISION<>'Q' = 입고(금액 TAXPAYERS, 이미 원화·평균갱신) / 'Q' = 수출출고
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, a.DIVISION,
                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(ISNULL(a.TAXPAYERS,0) AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT_C a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C a
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.WH_CUST_CODE = 'Z99990'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE, a.DIVISION""", d_from, d_to)
     for y, m, div, q, tax in cur.fetchall():
@@ -547,21 +553,21 @@ def _mv_moves(cur, d_from, d_to):
 
     ph_out = ','.join('?' * len(TA_OUT_TAGS))
     cur.execute(f"""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
-                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                      WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG IN ({ph_out})
                      GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to, *TA_OUT_TAGS)
     for y, m, q in cur.fetchall():
         slot(y, m)["outq"] += float(q or 0)
 
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(-CAST(a.MAINT_QTY AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                      JOIN PARTNER_ERP_TEST3.nx.item m ON a.MAT_CODE = m.ITEM_CODE
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = 'T'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
     for y, m, q in cur.fetchall():
         slot(y, m)["trans"] += float(q or 0)
     cur.execute("""SELECT a.MAINT_YMD, a.MAT_CODE, SUM(CAST(a.MAINT_QTY AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD BETWEEN ? AND ? AND a.MAINT_TAG = '2'
                     GROUP BY a.MAINT_YMD, a.MAT_CODE""", d_from, d_to)
     for y, m, q in cur.fetchall():
@@ -617,7 +623,7 @@ def _mv_buyprice(cur, target):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
                       AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
@@ -870,9 +876,9 @@ def _prd_moves(cur, d_from, d_to):
 
     # ② 절단 입고
     cur.execute(f"""SELECT a.cut_ymd, a.mat_code, a.gagong_proc_code, SUM(CAST(a.cut_QTY AS float))
-                      FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl
+                      FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl
                             UNION ALL SELECT n.* FROM {T3}pu_t_cut_dtl n
-                             WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l
+                             WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l
                                                WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a
                      WHERE a.cut_ymd BETWEEN ? AND ?
                      GROUP BY a.cut_ymd, a.mat_code, a.gagong_proc_code""", d_from, d_to)
@@ -978,7 +984,7 @@ def _prd_price(cur, target):
     ph_in = ','.join('?' * len(TA_IN_TAGS))
     cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(a.MAT_CODE))),
                           SUM(CAST(a.MAINT_QTY AS float)), SUM(CAST(a.MAINT_AMT AS float))
-                     FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT a
+                     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT a
                     WHERE a.MAINT_YMD <= ? AND a.MAINT_QTY <> 0
                       AND a.MAINT_TAG IN ({ph_in})
                       AND NOT (ISNULL(a.INSP_FLAG,'N') IN ('S','F') AND ISNULL(a.INSP_PROC_FLAG,'0') <> '1')
@@ -1292,7 +1298,7 @@ def close_anomaly(domain: str = Query("MAT"), ptype: str = Query("M"), period: s
             ph = ','.join('?' * len(TA_IN_TAGS))
             cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))),
                                    SUM(CAST(MAINT_QTY AS float)), SUM(CAST(MAINT_AMT AS float))
-                              FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
                              WHERE MAINT_TAG IN ({ph}) GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", *TA_IN_TAGS)
             buy = {str(a): (float(b or 0), float(c or 0)) for a, b, c in cur.fetchall()}
         cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item")
@@ -1899,7 +1905,7 @@ def _attach_item_info(cur, rows, to6=None):
         #   ★청크마다 돌리면 170만행을 8번 스캔한다 — **한 번만** 집계하고 파이썬에서 룩업한다.
         _ph = ",".join("?" * len(TA_IN_TAGS))
         cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(MAT_CODE))), MAX(MAINT_YMD)
-                          FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT
                          WHERE MAINT_YMD <= ? AND MAINT_TAG IN ({_ph}) AND MAT_CODE IS NOT NULL
                          GROUP BY UPPER(LTRIM(RTRIM(MAT_CODE)))""", to6, *TA_IN_TAGS)
         for cd, ymd in cur.fetchall():

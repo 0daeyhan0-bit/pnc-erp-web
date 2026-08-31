@@ -362,7 +362,7 @@ def _prod_avail(cur, mat, line="P0001", asof=None):
     U = f"""
 SELECT a.gagong_proc_code gpc, A.MAT_CODE mat, A.STOCK_QTY q FROM {T3}PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,-A.MAINT_QTY FROM {T3}PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND a.maint_tag='B' AND isnull(a.out_wh_gubun,'1')='1'
-UNION ALL SELECT A.gagong_proc_code,a.mat_code,a.cut_QTY FROM PARTNER_ERP.dbo.pu_t_cut_dtl a WHERE A.cut_ymd>'250299' and A.cut_ymd<='{asof}'
+UNION ALL SELECT A.gagong_proc_code,a.mat_code,a.cut_QTY FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl a WHERE A.cut_ymd>'250299' and A.cut_ymd<='{asof}'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,a.MAINT_QTY FROM {T3}PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND a.maint_tag='T' and isnull(a.out_wh_gubun,'3')='3'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,-a.MAINT_QTY FROM {T3}PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{asof}' AND a.maint_tag='C'
 UNION ALL SELECT A.stock_part_code,a.item_code,a.prod_qty FROM {T3}pr_t_prod_dtl a WHERE A.prod_ymd>'250299' and A.prod_ymd<='{asof}' and a.stock_part_code>'' and not exists (select 1 from {T3}sa_t_stock_maint where maint_ymd=a.prod_ymd and item_code=a.item_code and in_part_code=a.stock_part_code)
@@ -518,8 +518,8 @@ def _web_seq(cur, table, ymd, col="MAINT_SEQ", ymd_col="MAINT_YMD"):
 def _u_tbl(tbl, keys):
     """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는 인라인뷰."""
     on = " AND ".join(f"ISNULL(l.{k},'')=ISNULL(n.{k},'')" for k in keys)
-    return (f"(SELECT * FROM PARTNER_ERP.dbo.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
-            f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.{tbl} l WHERE {on}))")
+    return (f"(SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
+            f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.{tbl} l WHERE {on}))")
 
 
 def _prod_stock_sql():
@@ -530,8 +530,8 @@ def _prod_stock_sql():
     PRPD = _u_tbl("PR_T_PROD_DTL", ["PROD_YMD", "PROD_HMS", "ITEM_CODE", "WORK_ORDER", "SPLIT_WORK_ORDER"])
     PRSM = _u_tbl("PR_T_STOCK_MAINT_MAT", ["MAINT_YMD", "MAINT_SEQ", "MAT_CODE", "PART_CODE", "MAINT_QTY"])
     SASM = _u_tbl("SA_T_STOCK_MAINT", ["MAINT_YMD", "MAINT_SEQ", "ITEM_CODE", "MAINT_QTY"])
-    CUT = ("(SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n"
-           " WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l"
+    CUT = ("(SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n"
+           " WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l"
            " WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS))")
     INSP = "NOT(ISNULL(a.insp_flag,'N') IN ('S','F') AND ISNULL(a.insp_proc_flag,'0')<>'1')"
     return f"""
@@ -601,7 +601,7 @@ def _latest_stock_map(cur, tbl, key, where="", extra_on=()):
    SELECT ISNULL(n.{key}, l.{key}) k,
           CASE WHEN n.{key} IS NULL THEN l.STOCK_QTY ELSE n.STOCK_QTY END q
      FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} WITH(NOLOCK){w}) n
-     FULL JOIN (SELECT * FROM PARTNER_ERP.dbo.{tbl} WITH(NOLOCK){w}) l ON {on}
+     FULL JOIN (SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} WITH(NOLOCK){w}) l ON {on}
  ) u GROUP BY k"""
     out = {}
     try:
@@ -725,6 +725,20 @@ def _sub_desc_suffix(code, name):
     if base == suf or base.startswith(suf + "/") or base.startswith(suf + "-") or base.startswith(suf + " "):
         return base                                 # 원품명이 접미사로 시작 → 유지
     return f"[-{suf}] {base}"
+
+
+def _sub_desc_plain(name):
+    """★_sub_desc_suffix의 역함수 — 품명에서 '[-{접미사}] ' 프리픽스를 벗겨 원품명을 돌려준다.
+       왜 필요한가(2026-08-31 실물 대조): 접미사 병기는 **화면 조회**에서 자도번을 식별하려고
+       우리가 마스터에 박아넣은 값이다(사용자 확정 2026-08-26). 그런데 거래명세표·납품서처럼
+       **레거시 서식을 그대로 찍는 출력물**은 라이브 PR_M_ITEM.ITEM_DESC 원품명으로 나와야 한다.
+         레거시 출력  AJR30078601-12-1 → '대원 SUB'
+         병기값       AJR30078601-12-1 → '[-12-1] 대원 SUB'   ← 출력물엔 이게 들어가면 안 됨
+       ★출력 시점에만 벗긴다. 마스터 값은 건드리지 않는다(화면 조회는 병기값 그대로 유지)."""
+    s = (name or '').strip()
+    if s.startswith("[-") and "] " in s:
+        return s.split("] ", 1)[1].strip()
+    return s
 
 
 def _is_sub_code(cur, code):

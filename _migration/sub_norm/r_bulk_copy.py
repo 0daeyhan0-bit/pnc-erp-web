@@ -71,4 +71,15 @@ if not DRY:
             c.execute("""INSERT INTO nx.CM_M_MASTER_DETAIL (KIND_CODE,DETAIL_CODE,APPLY_YMD,DETAIL_DESC,SORT_SEQ,USE_FLAG,UPDATE_USER_ID,UPDATE_DATETIME)
                 VALUES (?,?,'20260827',?,?,'1','MASTER',GETDATE())""", _kd, _cd, _ds, _sq)
             print(f"  nx코드확장 재주입: {_kd}.{_cd}={_ds}")
+# ── nx 전용 컬럼 재주입(라이브엔 없는 웹 신규컬럼 — SELECT * INTO 재복사가 스키마를 덮으므로 복원) ──
+#    파트마스터 공수화면(routers/partmaster.py·dragprod.py)이 read/write. 2026-08-31.
+#    ★데이터(웹 입력값)는 DROP+재복사로 초기화됨(mirror∪웹 부채·§14) — 컷오버 후 별도 side테이블 권고.
+if not DRY:
+    NX_COL_EXT = [('PR_M_PROC_GAGONG', 'BARCODE_FLAG', 'NVARCHAR(1) NULL'),
+                  ('PR_M_PROC_GAGONG', 'PROD_RESULT_TYPE', 'NVARCHAR(1) NULL')]
+    for _tb, _col, _ty in NX_COL_EXT:
+        if c.execute("SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID('nx') AND name=?", _tb).fetchone()[0] \
+           and not c.execute("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('nx.'+?) AND name=?", _tb, _col).fetchone()[0]:
+            c.execute(f"ALTER TABLE nx.{_tb} ADD {_col} {_ty}")
+            print(f"  nx컬럼확장 재주입: nx.{_tb}.{_col}")
 cn.close()

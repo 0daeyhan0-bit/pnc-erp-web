@@ -20,6 +20,29 @@ _P = "nx."   # ★nx전환 확정(2026-08-12). ★단일BOM 통일(2026-08-13): 
 
 @router.post("/api/plan/compose_mat")
 def plan_compose_mat(payload: dict = Body(...)):
+    """★은퇴한 편성 경로 — 실행 금지(2026-08-31 가드).
+
+       왜 막는가(실측 사고):
+         이 경로와 planrev.py 는 **같은 nx.plan_part_dtl 에 쓰는데 컬럼 구성이 다르다**.
+           soyo    19개 컬럼
+           planrev 27개 컬럼 (+OUTPUT_HM·AMPM·CUM_LT_HR·PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)
+         편성이 테이블을 DROP 후 재생성하므로, 이 경로를 한 번 돌리면 컬럼 6개가 사라지고
+         그 컬럼을 참조하는 뷰 nx.v_plan_part_copy_new 가 깨진다
+         → 파트별 생산계획(410)·준비실적처리(키팅)·가공생산진척(420) 조회 불가.
+         (2026-08-31 실측: 이 함수를 직접 호출해 410 이 "백엔드 연결 실패"로 막혔다)
+
+       정본 = 생산계획업로드[검토] 화면 → planrev.py (/api/planrev/step/*, /compose_all).
+       화면도 2026-08-28 에 메뉴에서 숨겨졌다(core.js: SCREEN.planupload).
+
+       되살리려면: 아래 raise 를 지우기 전에 STEP6 이 위 6개 컬럼을 함께 만들도록
+                   맞추고, v_plan_part_copy_new 로 검증할 것.
+    """
+    raise HTTPException(410,
+        "은퇴한 편성 경로입니다 — 「생산계획업로드[검토]」 화면을 사용하세요.\n\n"
+        "이 경로로 편성하면 nx.plan_part_dtl 의 컬럼 6개(OUTPUT_HM·AMPM·CUM_LT_HR·"
+        "PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)가 사라져 뷰 v_plan_part_copy_new 가 깨지고, "
+        "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회가 막힙니다.")
+
     nx = _nx(); cur = nx.cursor()
     try:
         # ── ★D 사전검증(§19-D·2026-08-25): 활성 지정된 대체경로(Rnn)가 게이트(승인·구조·업체·단가) 미충족이면
@@ -56,7 +79,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO FROM nx.model_bom")
         for m, ci, uq, my, ty in cur.fetchall(): mbom[str(m).strip()].append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
         recvmap = _dd(set)
-        cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
+        cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP_TEST3.nx.sa_t_recv_dtl WHERE WORK_ORDER>''")
         for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
         prate = {}
         cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.item")
@@ -90,7 +113,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         _asfrom = str(cur.fetchone()[0] or '').strip()
         cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
                 MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
-              FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
+              FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a
               JOIN PARTNER_ERP_TEST3.nx.item c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
               WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
               GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
@@ -433,9 +456,10 @@ def sales_forecast_sagub_rebuild():
         # ★후보 = 계획 완제품 전체(260101+). 구 ad-hoc bom_line 재귀CTE 후보필터는 소요엔진(v_pr_bom)과
         #   불일치로 일부 완제품 누락(실측 ADM72950707 사급 532,650 누락) → 폐기. 사급부품 도달 여부는
         #   엔진 sagub_parts_soyo가 정확 판정(비도달=빈dict=0). §1-10 완전 준수(후보찾기도 엔진 소스).
+        #   ★컷오버 flip: 계획 원천도 nx로(레거시 동결 대비).
         cur.execute("""SELECT DISTINCT item FROM (
-            SELECT UPPER(LTRIM(RTRIM(C_ITEM_CODE))) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
-            UNION SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u
+            SELECT UPPER(LTRIM(RTRIM(C_ITEM_CODE))) item FROM PARTNER_ERP_TEST3.nx.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
+            UNION SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM PARTNER_ERP_TEST3.nx.pr_t_plan_input WHERE PLAN_YMD>='260101') u
             WHERE item IS NOT NULL AND item<>''""")
         cand = [str(r[0]).strip().upper() for r in cur.fetchall()]
         # ★소요엔진 이관(CLAUDE §1-10, 2026-08-29): 사급부품 소요 = nx_soyo_engine.sagub_parts_soyo
@@ -463,6 +487,22 @@ def sales_forecast_sagub_rebuild():
         nx.close()
 
 def _step6_sql(cur):
+    """★은퇴 — 직접 호출 금지(2026-08-31 2차 가드).
+
+       1차 가드는 엔드포인트 plan_compose_mat 에만 걸어 두었는데, 이 **내부 함수는
+       그대로 노출**돼 있어 스크립트에서 직접 부르면 그대로 실행됐다.
+       실제로 그날 09:09 정상 편성(27컬럼) 이후 작업로그에 아무 기록 없이
+       nx.plan_part_dtl 이 19컬럼으로 되돌아가 파트별 생산계획(410)이 0건이 됐다
+       (편성 로그를 남기지 않는 = 웹 편성 화면이 아닌 경로로 불렸다는 뜻).
+       → 함수 진입에서 막는다. 정본은 planrev._step6_sql(27컬럼).
+
+       ※같은 이유로 _step7_sql 도 planrev 쪽을 쓸 것."""
+    raise RuntimeError(
+        "은퇴한 편성 함수입니다(soyo._step6_sql) — planrev 를 쓰세요.\n"
+        "이 함수는 nx.plan_part_dtl 을 19컬럼으로 재생성해 뷰 v_plan_part_copy_new 를 깨뜨리고, "
+        "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회를 막습니다.\n"
+        "정본 = routers/planrev.py 의 _step6_sql (27컬럼) · 화면 「생산계획업로드[검토]」")
+
     P = _P
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
@@ -481,7 +521,7 @@ def _step6_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
     cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}item_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
@@ -553,6 +593,12 @@ def _route_setup(cur):
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
 def _step7_sql(cur):
+    """★은퇴 — 직접 호출 금지(2026-08-31 2차 가드). _step6_sql 과 같은 이유.
+       정본 = routers/planrev.py 의 _step7_sql."""
+    raise RuntimeError(
+        "은퇴한 편성 함수입니다(soyo._step7_sql) — planrev 를 쓰세요.\n"
+        "정본 = routers/planrev.py · 화면 「생산계획업로드[검토]」")
+
     P = _P
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
@@ -628,19 +674,19 @@ def _routing_edge_sync(cur):
         CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
              WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
              WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust_code,'') ELSE ISNULL(ci.in_cust_code,'') END,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust,'') ELSE ISNULL(ci.in_cust,'') END,
         1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END
       FROM nx.v_pr_bom b
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
+      LEFT JOIN nx.item ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+      LEFT JOIN nx.item pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
       WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
         AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
     new_cnt = cur.rowcount
     # 3) wc_live 라이브 갱신 (편집 무관, child 생산처=work_code||in_cust)
-    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust_code,'') END
-      FROM nx.routing_edge re JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
+    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust,'') END
+      FROM nx.routing_edge re JOIN nx.item it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
     # 4) 유효 wc = COALESCE(wc_user, wc_live) — 편집 보존
     cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
     return int(new_cnt or 0)
