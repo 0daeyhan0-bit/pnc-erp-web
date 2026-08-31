@@ -482,7 +482,7 @@ def _step6_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
     cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}item_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
@@ -502,7 +502,8 @@ def _step6_sql(cur):
 _ROUTE_GATE_SQL = """ISNULL(h.approve_flag,0)=1
       AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
       AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>'')
-      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))"""
+      AND EXISTS(SELECT 1 FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))
+      AND EXISTS(SELECT 1 FROM nx.route_proc_gagong rp WHERE rp.route_id=h.route_id)"""
 
 
 def _ensure_profile_price(cur):
@@ -511,24 +512,39 @@ def _ensure_profile_price(cur):
     cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','sagub_price') IS NULL ALTER TABLE nx.sourcing_profile ADD sagub_price FLOAT NULL")
 
 
+def _ensure_route_proc(cur):
+    """★P4 게이트/STEP6이 참조하는 route별 생산정보(생산 ST축 route확장) 테이블 멱등 보장.
+       prodinfo.py _ensure_route_proc와 동일 스키마(route_id+품번+proc_seq 키). 게이트/편성 파싱 안전."""
+    cur.execute("""IF OBJECT_ID('nx.route_proc_gagong') IS NULL CREATE TABLE nx.route_proc_gagong(
+        route_id INT, item_code varchar(20), proc_seq tinyint, work_code varchar(10), gagong_proc_code varchar(10),
+        s_work_code smallint, mach_code varchar(10), work_qty decimal(18,5), std_size varchar(100), mix_gagong tinyint,
+        gagong_proc_flag varchar(1), gagong_proc_seq tinyint, ready_st decimal(18,5), mach_ct decimal(18,5), inwon tinyint,
+        human_st decimal(18,5), tot_st decimal(18,5), jp_proc_method varchar(1), lt_hr decimal(18,5), key_id int,
+        upd_user varchar(30), upd_at datetime DEFAULT getdate(),
+        CONSTRAINT pk_route_proc_gagong PRIMARY KEY(route_id, item_code, proc_seq))""")
+
+
 def _route_gate_incomplete(cur):
     """★D 사전검증(§19-D): 활성 지정된 Rnn(current_flag=1·route_no>1) 중 게이트(§19-C) 미충족 목록+사유.
        반환 [{route_id,item,route_no,route_name,missing[]}]. 편성(compose)이 이걸로 업로드 실패·정확 메시지·중단."""
     _ensure_profile_price(cur)
+    _ensure_route_proc(cur)   # ★P4: 생산정보 존재 게이트가 참조 — 파싱 안전
     cur.execute("""SELECT h.route_id, LTRIM(RTRIM(h.item_code)), ISNULL(h.route_no,1), ISNULL(h.route_name,''),
           ISNULL(h.approve_flag,0),
           (SELECT COUNT(*) FROM nx.route_edges re WHERE re.route_id=h.route_id),
           (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND ISNULL(p.vendor_code,'')<>''),
-          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL))
+          (SELECT COUNT(*) FROM nx.sourcing_profile p WHERE p.route_id=h.route_id AND (p.buy_price IS NOT NULL OR p.sagub_price IS NOT NULL)),
+          (SELECT COUNT(*) FROM nx.route_proc_gagong rp WHERE rp.route_id=h.route_id)
         FROM nx.sourcing_route h
         WHERE ISNULL(h.current_flag,0)=1 AND ISNULL(h.route_no,1)>1""")
     bad = []
-    for rid, item, rno, rname, appr, ne, nv, npx in cur.fetchall():
+    for rid, item, rno, rname, appr, ne, nv, npx, nproc in cur.fetchall():
         miss = []
         if not int(appr or 0): miss.append("미승인")
         if not int(ne or 0): miss.append("구조 미반영(저장 안 됨)")
         if not int(nv or 0): miss.append("업체 미지정")
         if not int(npx or 0): miss.append("단가 미지정")
+        if not int(nproc or 0): miss.append("생산정보 미등록")   # ★P4 요구5: R02 생산정보 필수(없으면 편성 불가)
         if miss:
             bad.append({"route_id": int(rid), "item": str(item).strip(), "route_no": int(rno),
                         "route_name": str(rname).strip(), "missing": miss})
@@ -541,6 +557,7 @@ def _route_setup(cur):
     - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만(current_flag=1·route_no>1·승인·route_edges·업체·단가).
       기본 비어있음=전 제품 v_pr_bom(현행) 그대로=R01 diff0(가산적). ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%)."""
     _ensure_profile_price(cur)
+    _ensure_route_proc(cur)   # ★P4: _ROUTE_GATE_SQL이 route_proc_gagong 참조 — 파싱 안전
     # ★타입=plan_part_dtl.item_code(varchar20)·v_pr_bom.mat_code(varchar20) 정합(재귀CTE 앵커 타입일치 필수). nvarchar 쓰면 STEP7 재귀 타입불일치 오류.
     cur.execute("""IF OBJECT_ID('nx.route_edges','U') IS NULL CREATE TABLE nx.route_edges(
         route_id INT NOT NULL, item_code varchar(20) NOT NULL, mat_code varchar(20) NOT NULL,
