@@ -225,7 +225,7 @@ const MODULES=[
    {id:'coopquote2',ic:'💱',nm:'협력사견적관리'},
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
-   {id:'partnerplan',ic:'📋',nm:'협력사계획현황'},
+   {id:'partnerplan',ic:'📋',nm:'협력사 계획현황'},
    {id:'coopporder',ic:'📦',nm:'협력사 발주현황(일반)'},
    {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
    {id:'delivedit',ic:'📝',nm:'거래명세표 수정'},
@@ -1253,7 +1253,7 @@ function openMatEditPopup(opt){
          ${row('거래처', `<input class="inp" id="me-cust" list="me-cdl" value="${esc(f.custnm||f.cust)}" placeholder="거래처명" autocomplete="off" style="width:230px" ${dis}><datalist id="me-cdl"></datalist>`, '', '')}
          ${row('자도번', ro(r.MAT_CODE)+' <span class="mut">'+esc(r.item_name||'')+'</span>', '직납구분', ro(r.DIRECT_ITEM_FLAG||'0'))}
          ${row('입고창고', `<select class="inp" id="me-wh" style="width:180px" ${dis}>${(opt.whs||[]).length?(opt.whs||[]).map(w=>`<option value="${esc(w.wh)}" ${w.wh===f.wh?'selected':''}>${esc(w.wh)} ${esc(w.nm||'')}</option>`).join(''):`<option value="${esc(f.wh)}">${esc(f.wh||'(없음)')}</option>`}</select>`,
-                '검사구분', ro(({'F':'전수검사','S':'샘플검사'})[(r.INSP_FLAG||'').trim()]||'무검사'))}
+                '검사구분', ro(({'F':'유검사','S':'체크검사'})[(r.INSP_FLAG||'').trim()]||'무검사'))}
          ${row('입고구분', ro(TAGN[(r.MAINT_TAG||'').trim()]||r.MAINT_TAG), '검사처리일', ro(y2d(r.INSP_PROC_YMD)||'/  /'))}
          ${row('수량', `<input class="inp" id="me-qty" type="number" step="any" min="0" value="${esc(f.qty)}" style="width:140px;text-align:right" ${dis}>`,
                 '단가', `<input class="inp" id="me-cost" type="number" step="any" min="0" value="${esc(f.cost)}" style="width:110px;text-align:right" ${CAN_COST?dis:'disabled'}>`
@@ -1608,6 +1608,9 @@ function openMatRecvPopup(opt){
        <div class="mrp-f">
          <button class="btn" id="mp-add">☰＋ 행추가 (${ROWSTEP})</button>
          <button class="btn ghost" id="mp-clr">☰− 빈행정리</button>
+         <!-- ★MASTER단가(2026-08-31) — 레거시 w_pu_stock_055 동일. 직접 고친 단가를
+              마스터값(nx.price_item 매입가, 거래처·입고일 기준)으로 되돌린다. -->
+         <button class="btn ghost" id="mp-mcost" title="입고단가를 MASTER단가로 다시 채웁니다(직접 입력분 포함)">💲 MASTER단가</button>
          <div class="spacer"></div>
          <span class="mut" style="font-size:12px">가드: 마감월 잠금 · 미등록품목 차단</span>
          <button class="btn" id="mp-save" style="background:#1c7c3a;color:#fff" ${busy?'disabled':''}>✔ 저장</button>
@@ -1627,6 +1630,13 @@ function openMatRecvPopup(opt){
       .mrp-fix{display:inline-block;padding:3px 10px;border:1px solid #c9d3e0;border-radius:4px;
                background:#eef4ff;color:#24406e;font-weight:700;font-size:12px}
       .mrp-req{color:#c0392b;font-weight:700}
+      /* ★입고단가 출처 표시(2026-08-31) — 타사단가 대체는 노랑, 직접수정은 파랑 */
+      .mp-cost.alt{background:#fffbe6;border-color:#e8c96a}
+      .mp-cost.ed{background:#eef4ff;border-color:#9dc0e8;font-weight:600}
+      .mp-cb{position:absolute;right:3px;top:50%;transform:translateY(-50%);pointer-events:none;
+             font-size:9.5px;padding:0 3px;border-radius:3px;line-height:1.5}
+      .mp-cb.alt{background:#f6d365;color:#5c4405}
+      .mp-cb.ed{background:#dbeafe;color:#1c47a0}
       .mrp-cust{background:#fff8dc;border-color:#e0c97a;min-width:0}   /* min-width 해제(app.css 200px) */
       .mrp-cust.ok{background:#f2fbf4;border-color:#7ec48f}
       .mrp-tb .inp{min-width:0}                                        /* 팝업 조건칸 폭 지정이 먹게 */
@@ -1657,7 +1667,15 @@ function openMatRecvPopup(opt){
       <td class="center mut mp-un">${esc(r.unit)}</td>
       <td class="num mut mp-st">${r.stock===''?'':_nf(r.stock)}</td>
       <td><input class="mp-qty" data-i="${i}" type="number" step="any" min="0" value="${esc(r.qty)}" style="text-align:right"></td>
-      <td><input class="mp-cost" data-i="${i}" type="number" step="any" min="0" value="${esc(r.cost)}" style="text-align:right"></td>
+      <!-- ★단가 출처 표시(2026-08-31) — 그 거래처 단가가 없어 다른 업체 단가를 가져오면
+           칸을 노랗게 + [타사] 배지. 직접 고치면 [수정]. 값 자체는 언제든 수정 가능. -->
+      <td style="position:relative">
+        <input class="mp-cost${r.costEdited?' ed':(r.costSrc==='other'?' alt':'')}" data-i="${i}"
+               type="number" step="any" min="0" value="${esc(r.cost)}" style="text-align:right"
+               title="${r.costEdited?'직접 입력한 단가':(r.costVendor?`MASTER단가 · 거래처 ${esc(r.costVendor)}${r.costYmd?' · 적용 '+esc(_fmtY(r.costYmd)):''}`:'')}">
+        ${r.costEdited?'<span class="mp-cb ed">수정</span>'
+          :(r.costSrc==='other'?`<span class="mp-cb alt" title="이 거래처 단가가 없어 ${esc(r.costVendor||'')} 단가를 가져왔습니다">타사</span>`:'')}
+      </td>
       <td><input class="mp-rmk" data-i="${i}" value="${esc(r.rmk)}"></td>
       <td class="center"><span class="mrp-del" data-i="${i}" title="행 비우기">✖</span></td>
     </tr>`).join('')+`<datalist id="mp-mdl"></datalist>`;
@@ -1676,18 +1694,27 @@ function openMatRecvPopup(opt){
       if(el){el.focus();try{el.setSelectionRange(keep.s,keep.e);}catch(e){}}
     }};
 
-  // 자도번 → 품명·규격·단위·현재고 배치추적
+  // 자도번 → 품명·규격·단위·현재고 + ★MASTER단가 배치추적
+  //   단가는 거래처·입고일자에 따라 달라지므로 함께 넘긴다(같은 자재도 업체별 단가가 다르다).
   const trace=async(codes)=>{
     codes=[...new Set(codes.map(c=>(c||'').trim().toUpperCase()).filter(Boolean))].filter(c=>info[c]===undefined);
     if(!codes.length)return;
     try{const r=await fetch(`${API}/api/stock/matinfo`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({codes})});
+        body:JSON.stringify({codes, cust:(custCode||'').trim(), ymd:_toYMD(ymd)})});
       ((await r.json()).rows||[]).forEach(x=>{info[(x.mat||'').toUpperCase()]=x;});
     }catch(e){}
   };
   const applyInfo=()=>{rows.forEach(r=>{const k=(r.mat||'').trim().toUpperCase();if(!k)return;
     const v=info[k];if(!v)return;
-    r.nm=v.nm||'';r.spec=v.spec||'';r.unit=v.unit||'';r.stock=v.stock;r.bad=v.unknown?1:0;});};
+    r.nm=v.nm||'';r.spec=v.spec||'';r.unit=v.unit||'';r.stock=v.stock;r.bad=v.unknown?1:0;
+    // ★MASTER단가 자동채움(2026-08-31) — 사용자가 이미 고쳤으면 덮지 않는다.
+    //   r.costEdited 는 입고단가칸을 직접 만졌을 때만 선다(아래 .mp-cost oninput).
+    if(!r.costEdited && (r.cost===''||r.cost===undefined||r.cost===null||Number(r.cost)===0)){
+      if(v.cost!==undefined && v.cost!==null)r.cost=v.cost;
+    }
+    r.costSrc=v.cost_src||'';        // own=그 거래처 / other=타사 대체 / any=거래처 미지정
+    r.costVendor=v.cost_vendor||'';
+    r.costYmd=v.cost_ymd||'';});};
 
   function wireRows(){
     const g=s=>ov.querySelectorAll(s);
@@ -1719,7 +1746,10 @@ function openMatRecvPopup(opt){
     g('.mp-qty').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].qty=el.value;
       const rc=ov.querySelector('.rowcount');
       if(rc)rc.innerHTML=`입력 <b>${filled().length}</b>건 · 수량합 <b>${_nf(filled().reduce((s,r)=>s+Number(r.qty||0),0))}</b> <span class="mut">/ ${rows.length}행</span>`;});
-    g('.mp-cost').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].cost=el.value;});
+    // ★단가 직접수정(2026-08-31) — costEdited 를 세워 MASTER단가 자동채움이 덮지 않게 한다.
+    //   레거시 w_pu_stock_055 도 단가칸을 직접 고칠 수 있다(MASTER단가 버튼 옆 입력칸).
+    g('.mp-cost').forEach(el=>el.oninput=()=>{
+      const r=rows[+el.dataset.i]; r.cost=el.value; r.costEdited=1;});
     g('.mp-rmk').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].rmk=el.value;});
     g('.mrp-del').forEach(el=>el.onclick=()=>{rows[+el.dataset.i]=blank();redrawBody();});
   }
@@ -1734,6 +1764,21 @@ function openMatRecvPopup(opt){
     g('#mp-wh').onchange=e=>{wh=e.target.value;};
     g('#mp-add').onclick=()=>{addRows(ROWSTEP);redrawBody();};
     g('#mp-clr').onclick=()=>{rows=rows.filter(r=>(r.mat||'').trim());if(rows.length<ROWSTEP)addRows(ROWSTEP-rows.length);redrawBody();};
+    // ★MASTER단가 — 입고일자·거래처 기준 최신 매입가로 전 행 재조회(직접 입력분도 덮는다)
+    const mc=g('#mp-mcost');
+    if(mc)mc.onclick=async()=>{
+      const cds=[...new Set(rows.map(r=>(r.mat||'').trim().toUpperCase()).filter(Boolean))];
+      if(!cds.length)return alert('자도번을 먼저 입력하세요.');
+      mc.disabled=true; const _t=mc.textContent; mc.textContent='조회중…';
+      info={};                                   // 캐시 비우고 현재 일자·거래처로 다시 받는다
+      rows.forEach(r=>{r.costEdited=0;});        // 수동수정 해제 → 마스터값으로 덮어쓴다
+      await trace(cds); applyInfo(); redrawBody();
+      mc.disabled=false; mc.textContent=_t;
+      const n=rows.filter(r=>(r.mat||'').trim()&&Number(r.cost)>0).length;
+      const miss=rows.filter(r=>(r.mat||'').trim()&&!(Number(r.cost)>0)).length;
+      alert(`MASTER단가 적용 — ${_fmtY(_toYMD(ymd))} 기준\n\n단가 있음 ${n}건`
+           +(miss?`\n단가 없음 ${miss}건 (직접 입력하세요)`:''));
+    };
     // 거래처 오토컴플리트(값=이름, 저장 시 코드매핑)
     let ct=null, cmap={}, composing=false;
     const ci=g('#mp-cust');
@@ -3484,3 +3529,179 @@ function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
   };
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
+
+/* ★색상 유지 엑셀 다운로드 — **진짜 xlsx 파일** 생성 (2026-08-31 전면교체) ────────
+   왜 바꿨나(실측 사고): 처음엔 HTML 테이블을 .xls 로 내보냈다. 그랬더니 엑셀이
+     「파일 형식 및 확장명이 일치하지 않습니다」 경고를 띄우고, [예]로 열면 HTML 파서가
+     아닌 텍스트 경로로 읽혀 **서식(배경색)이 통째로 버려졌다.** 값만 남고 색이 사라진
+     원인이 이것이다. 레거시 .xls 는 진짜 BIFF 바이너리라 색이 나온다.
+   → 라이브러리 없이(사내망·CDN 미사용) OOXML(.xlsx)을 직접 만든다.
+     xlsx = ZIP 컨테이너. ZIP 은 **무압축(stored)** 를 허용하므로 CRC32 만 직접 계산하면
+     압축기 없이 유효한 파일이 된다. 서식은 styles.xml 의 정식 fill/font 로 들어가
+     엑셀이 경고 없이 열고 색도 그대로 나온다.
+
+   인자(기존과 동일 — 호출부 수정 불필요):
+     fname · cols=[{h:'헤더', w:너비px, bg:'헤더배경'}]
+     rows=[[{v:값, bg:'#ffff00', fg:'#c0392b', b:1, al:'center', cs:병합수} | 원시값, …], …]
+     opt={sheet, title, sub, foot:[[셀…]]}
+   ※ cs(가로병합)는 mergeCells 로 반영. 숫자는 숫자로, 그 외는 문자열(inlineStr)로 넣어
+     '10/10' 이 날짜로 바뀌는 문제가 원천적으로 없다. */
+function downloadXLS(fname, cols, rows, opt){
+  opt = opt || {};
+  const X = s => String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/\x00-\x08\x0b\x0c\x0e-\x1f/g,'');
+  const norm = c => (c && typeof c === 'object' && !Array.isArray(c)) ? c : {v:c};
+  const hex = c => String(c||'').replace('#','').toUpperCase();
+
+  // ── 스타일 수집(중복 제거) ──
+  //    한 셀의 서식 = 배경(fill) + 글자색/굵기(font) + 정렬(alignment) 조합
+  const fills = ['none','gray125'];            // 0,1 은 OOXML 예약
+  const fonts = [{fg:'',b:0}];                 // 0 = 기본
+  const xfs = [{f:0,fl:0,al:''}];              // 0 = 기본
+  const keyOf = o => `${hex(o.bg)}|${hex(o.fg)}|${o.b?1:0}|${o.al||''}`;
+  const styMap = new Map([[keyOf({}),0]]);
+  const styleOf = o => {
+    const k = keyOf(o);
+    if(styMap.has(k)) return styMap.get(k);
+    let fl = 0;
+    if(o.bg){ const h = hex(o.bg); fl = fills.indexOf('S'+h); if(fl<0){ fills.push('S'+h); fl = fills.length-1; } }
+    let fn = 0;
+    if(o.fg || o.b){
+      const fk = hex(o.fg)+'|'+(o.b?1:0);
+      fn = fonts.findIndex(x => (hex(x.fg)+'|'+(x.b?1:0)) === fk);
+      if(fn<0){ fonts.push({fg:o.fg||'',b:o.b?1:0}); fn = fonts.length-1; }
+    }
+    xfs.push({f:fn, fl:fl, al:o.al||''});
+    const id = xfs.length-1; styMap.set(k,id); return id;
+  };
+
+  // ── 행 구성: (제목/부제) → 헤더 → 본문 → 합계 ──
+  const sheetRows = [];
+  if(opt.title) sheetRows.push([{v:opt.title, b:1}]);
+  if(opt.sub)   sheetRows.push([{v:opt.sub}]);
+  sheetRows.push(cols.map(c => ({v:c.h, bg:c.bg||'#DCE6F1', b:1, al:'center'})));
+  rows.forEach(r => sheetRows.push(r.map(norm)));
+  (opt.foot||[]).forEach(r => sheetRows.push(r.map(x =>
+    Object.assign({bg:'#F2F2F2', b:1}, norm(x)))));
+
+  // ── 시트 XML ──
+  const colLetter = n => { let s=''; n++; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; };
+  const merges = [];
+  let xml = '';
+  sheetRows.forEach((r, ri) => {
+    let cells = '', ci = 0;
+    r.forEach(o => {
+      const ref = colLetter(ci) + (ri+1);
+      const v = o.v;
+      const isNum = (typeof v === 'number' && isFinite(v))
+        || (typeof v === 'string' && v !== '' && /^-?\d+(\.\d+)?$/.test(v) && !/^0\d/.test(v));
+      const s = styleOf(o);
+      if(v === '' || v == null){
+        if(s) cells += `<c r="${ref}" s="${s}"/>`;
+      }else if(isNum){
+        cells += `<c r="${ref}"${s?` s="${s}"`:''}><v>${Number(v)}</v></c>`;
+      }else{
+        cells += `<c r="${ref}"${s?` s="${s}"`:''} t="inlineStr"><is><t xml:space="preserve">${X(v)}</t></is></c>`;
+      }
+      const span = Math.max(1, +o.cs || 1);
+      if(span > 1) merges.push(`${ref}:${colLetter(ci+span-1)}${ri+1}`);
+      ci += span;
+    });
+    xml += `<row r="${ri+1}">${cells}</row>`;
+  });
+  // 열 너비(px → 엑셀 문자폭 근사)
+  const colsXml = '<cols>' + cols.map((c,i) =>
+    `<col min="${i+1}" max="${i+1}" width="${Math.max(4,Math.round(((+c.w||90)/7)*10)/10)}" customWidth="1"/>`).join('') + '</cols>';
+  const headRow = (opt.title?1:0) + (opt.sub?1:0) + 1;   // 헤더가 놓인 행번호
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr/>
+<sheetViews><sheetView workbookViewId="0" tabSelected="1">
+<pane ySplit="${headRow}" topLeftCell="A${headRow+1}" activePane="bottomLeft" state="frozen"/>
+</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>
+${colsXml}<sheetData>${xml}</sheetData>
+${merges.length?`<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`:''}
+</worksheet>`;
+
+  // ── styles.xml ──
+  const fillsXml = fills.map(f => f==='none' ? '<fill><patternFill patternType="none"/></fill>'
+    : f==='gray125' ? '<fill><patternFill patternType="gray125"/></fill>'
+    : `<fill><patternFill patternType="solid"><fgColor rgb="FF${f.slice(1)}"/><bgColor indexed="64"/></patternFill></fill>`).join('');
+  const fontsXml = fonts.map(f =>
+    `<font><sz val="10"/><name val="맑은 고딕"/>${f.b?'<b/>':''}${f.fg?`<color rgb="FF${hex(f.fg)}"/>`:''}</font>`).join('');
+  const bd = '<border><left style="thin"><color rgb="FF808080"/></left><right style="thin"><color rgb="FF808080"/></right>'
+           + '<top style="thin"><color rgb="FF808080"/></top><bottom style="thin"><color rgb="FF808080"/></bottom></border>';
+  const xfsXml = xfs.map(x =>
+    `<xf numFmtId="0" fontId="${x.f}" fillId="${x.fl}" borderId="1" applyFont="1" applyFill="1" applyBorder="1"`
+    + (x.al?` applyAlignment="1"><alignment horizontal="${x.al}" vertical="center"/></xf>`
+           : `><alignment vertical="center"/></xf>`)).join('');
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="${fonts.length}">${fontsXml}</fonts>
+<fills count="${fills.length}">${fillsXml}</fills>
+<borders count="2"><border/>${bd}</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="${xfs.length}">${xfsXml}</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+
+  const shName = X(String(opt.sheet || opt.title || 'Sheet1').slice(0,31).replace(/[\\\/\?\*\[\]:]/g,'_'));
+  const files = [
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${shName}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ['xl/styles.xml', stylesXml],
+    ['xl/worksheets/sheet1.xml', sheetXml],
+  ];
+
+  // ── ZIP(무압축 stored) 조립 ──
+  const CRCT = (()=>{ const t=new Uint32Array(256);
+    for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n]=c>>>0; }
+    return t; })();
+  const crc32 = b => { let c = 0xFFFFFFFF;
+    for(let i=0;i<b.length;i++) c = CRCT[(c ^ b[i]) & 0xFF] ^ (c>>>8);
+    return (c ^ 0xFFFFFFFF) >>> 0; };
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let off = 0;
+  const u16 = n => [n&255, (n>>8)&255];
+  const u32 = n => [n&255, (n>>8)&255, (n>>16)&255, (n>>>24)&255];
+  files.forEach(([name, text]) => {
+    const nb = enc.encode(name), db = enc.encode(text), cr = crc32(db);
+    const lh = [].concat([0x50,0x4b,0x03,0x04], u16(20), u16(0x0800), u16(0), u16(0), u16(0),
+      u32(cr), u32(db.length), u32(db.length), u16(nb.length), u16(0));
+    parts.push(new Uint8Array(lh), nb, db);
+    central.push({nb, cr, len:db.length, off});
+    off += lh.length + nb.length + db.length;
+  });
+  const cd = [];
+  central.forEach(c => {
+    const h = [].concat([0x50,0x4b,0x01,0x02], u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0),
+      u32(c.cr), u32(c.len), u32(c.len), u16(c.nb.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(c.off));
+    cd.push(new Uint8Array(h), c.nb);
+  });
+  const cdLen = cd.reduce((s,x)=>s+x.length, 0);
+  const eocd = new Uint8Array([].concat([0x50,0x4b,0x05,0x06], u16(0), u16(0),
+    u16(central.length), u16(central.length), u32(cdLen), u32(off), u16(0)));
+  const blob = new Blob(parts.concat(cd, [eocd]),
+    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname.replace(/\.(xls|csv)$/i,'') + '.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}

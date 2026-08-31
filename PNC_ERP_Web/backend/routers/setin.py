@@ -8,7 +8,7 @@ from routers.auth import (require_user, scope_cust, staff_only,
                           assert_own_barcode)   # ★소속 강제 (2026-08-29)
 # ★라이브(_conn) 미import — 이 도메인은 nx 단일소스(§1-9-1). 실수로 쓰이지 않게 뺀다.
 #   (_conn·_b·_num 은 이 파일에서 실사용 0회라 병합 시 제외 — 2026-08-30)
-from common import _nx, _nx_tx, _d6, _assert_open, stock_changed
+from common import _nx, _nx_tx, _d6, _assert_open, stock_changed, _sub_desc_plain
 
 router = APIRouter()
 
@@ -180,7 +180,8 @@ def setin_invoice(request: Request, barcode: str = Query(...)):
         rows = []; tot = 0.0; lastd = None
         for doban, setq, jado, nm, uq, insp in cur.fetchall():
             qty = float(setq or 0) * float(uq or 1); tot += qty
-            rows.append({"doban": (doban if doban != lastd else ""), "jado": jado, "nm": (nm or '').strip(), "qty": qty, "insp": insp})
+            # ★품명은 SUB 접미사 병기('[-12-1] ')를 벗긴 원품명 — 레거시 출력물과 동일하게.
+            rows.append({"doban": (doban if doban != lastd else ""), "jado": jado, "nm": _sub_desc_plain(nm), "qty": qty, "insp": insp})
             lastd = doban
         return {"barcode": "SET" + barcode, "raw": barcode, "ymd": datetime.date.today().strftime('%Y-%m-%d'),
                 "supplier": supplier, "buyer": buyer, "rows": rows, "total": tot}

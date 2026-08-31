@@ -727,6 +727,20 @@ def _sub_desc_suffix(code, name):
     return f"[-{suf}] {base}"
 
 
+def _sub_desc_plain(name):
+    """★_sub_desc_suffix의 역함수 — 품명에서 '[-{접미사}] ' 프리픽스를 벗겨 원품명을 돌려준다.
+       왜 필요한가(2026-08-31 실물 대조): 접미사 병기는 **화면 조회**에서 자도번을 식별하려고
+       우리가 마스터에 박아넣은 값이다(사용자 확정 2026-08-26). 그런데 거래명세표·납품서처럼
+       **레거시 서식을 그대로 찍는 출력물**은 라이브 PR_M_ITEM.ITEM_DESC 원품명으로 나와야 한다.
+         레거시 출력  AJR30078601-12-1 → '대원 SUB'
+         병기값       AJR30078601-12-1 → '[-12-1] 대원 SUB'   ← 출력물엔 이게 들어가면 안 됨
+       ★출력 시점에만 벗긴다. 마스터 값은 건드리지 않는다(화면 조회는 병기값 그대로 유지)."""
+    s = (name or '').strip()
+    if s.startswith("[-") and "] " in s:
+        return s.split("] ", 1)[1].strip()
+    return s
+
+
 def _is_sub_code(cur, code):
     """code가 등록된 SUB(자도번)인가 = nx.sub_code_map.raw_item 존재. CRUD 접미사 병기 스코프(비SUB 무변경)."""
     try:
