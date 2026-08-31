@@ -465,6 +465,7 @@ def sales_forecast_sagub_rebuild():
 
 def _step6_sql(cur):
     P = _P
+    _route_setup(cur)   # ★P6: plan_route_active(활성 R02) 준비 — 공정 route-aware 오버레이용. STEP7도 재호출(멱등·동일결과)
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
@@ -480,9 +481,22 @@ def _step6_sql(cur):
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
+    # ★P6 공정 route-aware(생산정보 route별 소비): 활성 route(plan_route_active)를 가진 ASSY의 부품이
+    #   그 route의 생산정보(route_proc_gagong)를 보유하면 그것을, 아니면 현행 PR_M_ITEM_PROC_GAGONG를 사용.
+    #   ★identity-safe: 활성 route 없으면(plan_route_active 비면) CASE=0 → route_id=0(=PR_M_ITEM_PROC_GAGONG)만 조인
+    #     = 현행과 byte동일(route_proc_gagong 행은 route_id>0라 CASE=0에 미매치). 검증=P6 diff0 게이트.
     cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    LEFT JOIN nx.plan_route_active pra ON pra.assy_item_code=a.assy_item_code
+    JOIN (
+        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}PR_M_ITEM_PROC_GAGONG
+        UNION ALL
+        SELECT item_code, route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM nx.route_proc_gagong
+    ) b ON a.mat_code=b.item_code
+       AND b.route_id = CASE WHEN pra.route_id IS NOT NULL
+             AND EXISTS(SELECT 1 FROM nx.route_proc_gagong x WHERE x.route_id=pra.route_id AND x.item_code=a.mat_code)
+           THEN pra.route_id ELSE 0 END
+    JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_swork') IS NOT NULL DROP TABLE nx.plan_part_swork")
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
