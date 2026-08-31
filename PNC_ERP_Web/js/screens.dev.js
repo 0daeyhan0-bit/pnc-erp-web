@@ -2386,6 +2386,8 @@ SCREEN.unifybom=(c,ro)=>{
      ${(editMode&&isNew)?`<div class="page-sub" style="color:#1c7c3a;font-weight:700">＋ 신규 등록 편집: 품번 <b>${esc(item)}</b> · ${esc(name||'(품명 미입력)')} — 구성 그리드 + 아래 용접공정 입력 후 [저장]</div>
      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 8px;margin:2px 0 4px;background:#f2fbf4;border:1px solid #bfe6c8;border-radius:8px;font-size:12px">
        <b style="color:#1c7c3a">📋 제품 마스터</b>
+       <label class="tl">품번<span style="color:#c0392b">*</span></label><input class="nm-item" value="${esc(item)}" placeholder="새 품번(신규 BOM 번호)" style="width:160px;font-weight:700;color:#1c47a0" title="새로 등록할 품번 — 여기에 신규 품번을 입력하세요">
+       <label class="tl">품명</label><input class="nm-name" value="${esc(name)}" placeholder="품명" style="width:170px">
        <label class="tl">대분류<span style="color:#c0392b">*</span></label><select class="nm-fld" data-k="lgroup" style="width:130px"><option value="">-</option>${(codes.lgroup||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.lgroup?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
        <label class="tl">소분류</label><select class="nm-fld" data-k="sgroup" style="width:130px"><option value="">-</option>${(codes.sgroup||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.sgroup?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
        <label class="tl">생산구분</label><select class="nm-fld" data-k="make_type" style="width:110px"><option value="">-</option>${(codes.make_type||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.make_type?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
@@ -2446,6 +2448,8 @@ SCREEN.unifybom=(c,ro)=>{
     if(editMode&&isNew)bindWeld();
     c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});  // 신규등록 체결 횟수 입력
     c.querySelectorAll('.nm-fld').forEach(el=>el.onchange=()=>{newMaster[el.dataset.k]=el.value;});  // 제품 마스터속성 write-back
+    {const ni=c.querySelector('.nm-item');if(ni)ni.oninput=()=>{item=ni.value.trim().toUpperCase();};}  // ★새 품번 직접 입력/수정(신규 BOM 번호)
+    {const nn=c.querySelector('.nm-name');if(nn)nn.oninput=()=>{name=nn.value;};}                       // 품명 직접 입력
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
     const ed=c.querySelector('#bm-edit');if(ed)ed.onclick=()=>{editMode=true;viewTree=false;draw();};
