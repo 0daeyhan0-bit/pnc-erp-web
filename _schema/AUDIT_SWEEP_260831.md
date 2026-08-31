@@ -49,5 +49,9 @@ price_item을 옛 미러 컬럼명으로 조회하던 곳은 **sourcing 1곳뿐*
 - exit139(세그폴트) 1회는 재현 안 됨(일회성 ODBC 히컵). 2차 실행 시 `/api/cost/sil` 정상(200).
 
 ## 조치 요약
-- **수정·PR**: A1 coopquote(#→--). [B/C는 코드/스키마 결정 필요 → 미수정·보고].
-- **컷오버 체크리스트 반영 권고**: B1·B2(단가 소스 이관 마저), C1(컬럼 추가).
+- **PR #133**: A1 coopquote(#→--) + 이 감사문서.
+- **PR (2차, 2026-08-31)**: 대표 승인 "둘다 진행·타프로그램 무영향"으로 B·C 전부 처리:
+  - **B1 autoorder** → `nx.price_item('매입')` 이관. 미러 vs 클린 전품목 대조 **실질 diff0**(반올림 0.0001·None↔0만). main_flag 우선정렬이 실매입가 선택(LG 사급가 자동배제)+vendor tiebreak 결정화.
+  - **B2 close(_ta_build)** → 라이브 dbo → `nx.price_item('매입', LG제외)` 이관. 라이브 vs 클린 **9834/9872 동일**, 잔여 38=동일데이터·같은날짜 동점(라이브도 비결정적이던 것)이며 mcost는 **최후폴백(기초0·입고0)** 에만 쓰여 영향 극미. 결정적 정렬로 안정화.
+  - **C1** → `nx.PR_M_PROC_GAGONG` 에 `BARCODE_FLAG`·`PROD_RESULT_TYPE` **ALTER ADD**(공유 nx=dev·운영 공용, 즉시 반영). dragprod/conf·partmaster/list 500 해소 확인. **★bulk-copy(r_bulk_copy.py)가 DROP+SELECT INTO로 재생성 시 컬럼 소실** → 빌더에 **컬럼 재주입** 추가(기존 코드확장 재주입 패턴). 단 **데이터(웹 입력값)는 재복사로 초기화**(mirror∪웹 부채·§14) — 컷오버 후 별도 side테이블 권고.
+- 검증: 4경로 인프로세스 정상(dragprod graceful·partmaster 23행·autoorder preview OK·close 쿼리 구동).
