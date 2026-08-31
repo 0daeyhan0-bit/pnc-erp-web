@@ -85,7 +85,10 @@ def bom_get(item: str = Query(..., description="품번")):
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT item_name, item_type, ISNULL(cut_gubun,'') FROM nx.item WHERE item_code=?", item)
+        cur.execute("""SELECT item_name, item_type, ISNULL(cut_gubun,''),
+                       ISNULL(lgroup,''), ISNULL(sgroup,''), ISNULL(make_type,''), ISNULL(cost_gubun,''),
+                       ISNULL(unit,'EA')
+                       FROM nx.item WHERE item_code=?""", item)   # ★top 마스터도 반환(복사→신규등록 pre-fill용)
         pi = cur.fetchone()
         if not pi:
             raise HTTPException(404, f"품목 {item} 없음")
@@ -95,7 +98,9 @@ def bom_get(item: str = Query(..., description="품번")):
         cur.execute("SELECT bom_id, version, status FROM nx.bom_header WHERE item_code=?", item)
         h = cur.fetchone()
         if not h:
-            return {"item": item, "name": pi[0], "cut_gubun": pi[2], "header": None, "lines": [], "procs": procs}
+            return {"item": item, "name": pi[0], "cut_gubun": pi[2],
+                    "lgroup": pi[3], "sgroup": pi[4], "make_type": pi[5], "cost_gubun": pi[6], "unit": pi[7],
+                    "header": None, "lines": [], "procs": procs}
         bom_id = h[0]
         cur.execute("""
             SELECT l.seq, l.child_item, ci.item_name, l.qty, l.node_type,
@@ -117,7 +122,48 @@ def bom_get(item: str = Query(..., description="품번")):
                 d[k] = bool(v) if isinstance(v, bool) else v
             lines.append(d)
         return {"item": item, "name": pi[0], "type": pi[1], "cut_gubun": pi[2],
+                "lgroup": pi[3], "sgroup": pi[4], "make_type": pi[5], "cost_gubun": pi[6], "unit": pi[7],
                 "header": {"bom_id": bom_id, "version": h[1], "status": h[2]}, "lines": lines, "procs": procs}
+    finally:
+        cn.close()
+
+
+@router.get("/api/bom/flatget")
+def bom_flatget(item: str = Query(..., description="원본 품번")):
+    """★복사→평면 신규등록용: 원본을 nx.bom_flat(평면전개정본) leaf로 펼쳐 반환(SUB 없이 완전 leaf).
+       각 leaf = 신규품번 BOM 라인 초안(child_item·item_name·qty·치수·재질·마스터). top 마스터도 pre-fill용 반환."""
+    item = item.strip()
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT item_name, ISNULL(lgroup,''), ISNULL(sgroup,''), ISNULL(make_type,''),
+                       ISNULL(cost_gubun,''), ISNULL(unit,'EA') FROM nx.item WHERE item_code=?""", item)
+        pi = cur.fetchone()
+        if not pi:
+            raise HTTPException(404, f"품목 {item} 없음")
+        # nx.bom_flat leaf + 자식 마스터(nx.item) 조인 → 신규 BOM 라인 초안
+        cur.execute("""
+            SELECT f.leaf_code, ISNULL(i.item_name,'') item_name, ISNULL(i.item_spec,'') item_spec,
+                   f.qty, ISNULL(i.metal_gubun,'') metal_gubun, ISNULL(i.diam,0) diam, ISNULL(i.thick,0) thick,
+                   ISNULL(i.length,0) length, ISNULL(i.net_weight,0) net_weight, ISNULL(i.unit,'EA') unit,
+                   ISNULL(i.in_cust,'') in_cust, ISNULL(i.sgroup,'') sgroup, ISNULL(i.lgroup,'') lgroup,
+                   ISNULL(i.make_type,'') make_type, ISNULL(i.cost_gubun,'') cost_gubun, ISNULL(i.status,'사용') status,
+                   ISNULL(pc.CUST_DESC,'') cust_name
+            FROM nx.bom_flat f
+            LEFT JOIN nx.item i ON i.item_code = f.leaf_code
+            LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST pc ON pc.CUST_CODE = i.in_cust
+            WHERE f.item_code = ? ORDER BY f.leaf_code""", item)
+        from decimal import Decimal as _Dec
+        cols = [d[0] for d in cur.description]
+        lines = []
+        for r in cur.fetchall():
+            d = {}
+            for k, v in zip(cols, r):
+                d[k] = float(v) if isinstance(v, _Dec) else v
+            d["child_item"] = str(d.pop("leaf_code") or "").strip()
+            lines.append(d)
+        return {"item": item, "name": pi[0], "lgroup": pi[1], "sgroup": pi[2],
+                "make_type": pi[3], "cost_gubun": pi[4], "unit": pi[5],
+                "lines": lines, "leaf_count": len(lines)}
     finally:
         cn.close()
 

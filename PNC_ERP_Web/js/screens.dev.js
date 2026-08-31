@@ -1678,14 +1678,18 @@ SCREEN.unifybom=(c,ro)=>{
   const openNew=()=>{newReg={method:''};draw();};
   const closeNew=()=>{newReg=null;draw();};
   // 공통: 신규 편집 세션 진입(품번·구성·용접후보 세팅)
-  const enterNew=async(topItem,topName,newLines,weldCand)=>{
+  const enterNew=async(topItem,topName,newLines,weldCand,srcMaster)=>{
     if(!codes.metal)await loadCodes(); await loadWeldDiams();
     item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null;
-    newMaster={lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};   // 제품 마스터속성 초기화(사용자 입력)
+    // ★복사=원본 제품마스터 pre-fill(대분류 등)·신규(LG/빈폼)=기본값
+    newMaster=srcMaster?{lgroup:srcMaster.lgroup||'',sgroup:srcMaster.sgroup||'',make_type:srcMaster.make_type||'3',cost_gubun:srcMaster.cost_gubun||''}
+                       :{lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};
     results=[]; tree=[]; treeMax=0; naeFor=''; silFor='';
-    lines=(newLines||[]).map(l=>({child_item:(l.child_item||'').toUpperCase(),item_name:l.item_name||'',spec:l.item_spec||'',
-      qty:(l.qty!=null?+l.qty:1),unit:l.unit||'EA',node_type:'부품',cs_calc_except:false,sagub_default:false,kitting:false,
-      set_except:false,vir_item:false,lme_except:false,gagong_proc:'',in_cust:'',cust_name:'',remarks:(l.supply_type?('LG:'+l.supply_type):'')}));
+    // ★자식 전 필드 보존(복사=원본 자식 마스터 그대로·신규 형태로 정리, 기존 자식 마스터 안 깨짐). LG로드=supply_type→remarks.
+    lines=(newLines||[]).map(l=>({node_type:'부품',cs_calc_except:false,sagub_default:false,kitting:false,set_except:false,
+      vir_item:false,lme_except:false,gagong_proc:'',in_cust:'',cust_name:'',remarks:'', ...l,
+      child_item:(l.child_item||'').toUpperCase(),item_name:l.item_name||'',spec:(l.item_spec||l.spec||''),
+      qty:(l.qty!=null?+l.qty:1),unit:l.unit||'EA',remarks:(l.supply_type?('LG:'+l.supply_type):(l.remarks||''))}));
     // 용접봉 후보 → 용접공정 행(관경·점수는 직원입력, 기본 빈행)
     weldRows=[];
     (weldCand||[]).forEach(w=>{weldRows.push({weld_item:(w.child_item||w.weld_item||'').toUpperCase(),pipe_diam:'',weld_qty:''});});
@@ -1716,12 +1720,17 @@ SCREEN.unifybom=(c,ro)=>{
       enterNew(model, j.modelnm||'', lines, weld);
     }catch(e){alert('LG BOM 불러오기 오류: '+e.message);}
   };
-  // ②기존 복사
+  // ②기존 복사 → ★평면(leaf) 신규등록. 원본을 nx.bom_flat leaf로 완전히 펼쳐(SUB 없이) 편집세션 진입. 저장하면 새 품번=클린 flat BOM.
   const copyNew=async()=>{const src=(prompt('복사할 기존 품번(원본)을 입력','')||'').trim().toUpperCase();if(!src)return;
-    const tgt=(prompt(`「${src}」→ 새 품번(대상)을 입력`,'')||'').trim().toUpperCase();if(!tgt||tgt===src){alert('원본과 다른 새 품번 필요');return;}
-    try{const r=await fetch(`${API}/api/bom/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,target:tgt})});
-      const j=await r.json();if(!j.ok){alert('복사 실패: '+(j.error||(j.errors||[]).join('\n')));return;}
-      alert(`복사 완료 — ${tgt} 에 ${j.count}구성.${j.warn?'\n⚠ '+j.warn:''}`);newReg=null;isNew=false;load(tgt);
+    const tgt=(prompt(`「${src}」→ 새 품번(대상)을 입력\n원본을 평면(leaf)으로 완전히 펼쳐 새 품번으로 등록합니다.\n(SUB 없이 leaf 구성 · 제품마스터 pre-fill · 저장 후 R01·생산정보 등록)`,'')||'').trim().toUpperCase();
+    if(!tgt||tgt===src){alert('원본과 다른 새 품번 필요');return;}
+    try{const r=await fetch(`${API}/api/bom/flatget?item=${encodeURIComponent(src)}`);
+      if(!r.ok){alert(`원본 ${src} 평면전개 실패: HTTP ${r.status}\n(nx.bom_flat에 없으면 [기준정보]에서 평면전개 필요)`);return;}
+      const j=await r.json();
+      const leafLines=(j.lines||[]);
+      if(!leafLines.length){alert(`원본 ${src} 평면 leaf 없음(nx.bom_flat 미적재).`);return;}
+      const srcMaster={lgroup:j.lgroup||'',sgroup:j.sgroup||'',make_type:j.make_type||'',cost_gubun:j.cost_gubun||''};
+      enterNew(tgt, j.name||'', leafLines, [], srcMaster);   // ★평면 leaf·마스터 pre-fill로 편집 진입(용접봉=R01/생산정보 축)
     }catch(e){alert('복사 오류: '+e.message);}};
   // ③완전 새로
   const blankNew=async()=>{const it=(prompt('신규 품번을 입력(nx에만 저장)','')||'').trim().toUpperCase();if(!it)return;
