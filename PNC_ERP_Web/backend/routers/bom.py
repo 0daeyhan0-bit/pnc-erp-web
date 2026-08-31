@@ -1275,6 +1275,54 @@ def bom_copy(payload: dict = Body(...)):
         cn.close()
 
 
+def _copy_proc(cur, source, target):
+    """생산정보(공정) 복사 = proc_weld(용접봉)·item_weld(관경별 용접)·routing(공정) 을 source→target 복제.
+       ★정본 bom_copy(§proc/weld/routing)와 동일 로직. carrier(용접봉 RAC)는 코드 유지·p_item/item_code만 치환.
+       ★평면 신규품목 안전(원본 routing carrier=용접봉만·SUB carrier 없음, 실측 확인)."""
+    n = {"proc_weld": 0, "item_weld": 0, "routing": 0}
+    # proc_weld(용접봉)
+    cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", target)
+    cur.execute("""IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL
+        INSERT INTO nx.proc_weld(parent_item,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,tag,src)
+        SELECT ?,weld_item,weld_base,pipe_diam,weld_st,unit_qty,use_qty,cs_calc_except,lme_except,from_ymd,to_ymd,'W','copyproc' FROM nx.proc_weld WHERE parent_item=?""", target, source)
+    n["proc_weld"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # item_weld(관경별 용접 detail)
+    cur.execute("IF OBJECT_ID('nx.item_weld','U') IS NOT NULL DELETE FROM nx.item_weld WHERE item_code=?", target)
+    cur.execute("""IF OBJECT_ID('nx.item_weld','U') IS NOT NULL
+        INSERT INTO nx.item_weld(item_code,weld_item,pipe_diam,weld_qty,use_qty)
+        SELECT ?,weld_item,pipe_diam,weld_qty,use_qty FROM nx.item_weld WHERE item_code=?""", target, source)
+    n["item_weld"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # routing(공정=가공비) — item_code=source(품번레벨) OR p_item=source(용접carrier). source→target 치환·carrier 유지.
+    cur.execute("IF OBJECT_ID('nx.routing','U') IS NOT NULL DELETE FROM nx.routing WHERE item_code=? OR p_item=?", target, target)
+    cur.execute("""IF OBJECT_ID('nx.routing','U') IS NOT NULL
+        INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty,prod_uph,calc_gubun,sort_seq)
+        SELECT CASE WHEN p_item=? THEN ? ELSE p_item END, CASE WHEN item_code=? THEN ? ELSE item_code END,
+               proc_code,work_qty,prod_uph,calc_gubun,sort_seq
+        FROM nx.routing WHERE item_code=? OR p_item=?""", source, target, source, target, source, source)
+    n["routing"] = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    return n
+
+
+@router.post("/api/bom/copyproc")
+def bom_copyproc(payload: dict = Body(...)):
+    """생산정보(공정·용접·관경) 복사 — 복사→평면 신규등록의 P3. BOM(bom_line)은 별도(saveNew), 여기선 공정만.
+       source의 proc_weld·item_weld·routing → target. target은 이미 nx.item에 있어야(saveNew가 먼저 저장)."""
+    source = str(payload.get("source", "")).strip()
+    target = str(payload.get("target", "")).strip().upper()
+    if not source or not target or source == target:
+        raise HTTPException(400, "source·target(상이) 필요")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        n = _copy_proc(cur, source, target)
+        cn.commit()
+        _reset_cost_engine()
+        return {"ok": True, "copied": n}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
+
+
 # ===================== 공정(routing) = 개발 정본(품목별 공정관리, nx.routing=CS_T_ITEM_PROC) CRUD + 복사 =====================
 #  개발이 공정을 지정. 없으면 내부공정 복사 → 수정 → 등록. 협력사견적은 공정 기준 아님(단가).
 @router.get("/api/routing/get")

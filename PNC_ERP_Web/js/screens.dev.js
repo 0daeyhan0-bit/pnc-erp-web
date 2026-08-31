@@ -1608,6 +1608,7 @@ SCREEN.unifybom=(c,ro)=>{
   let newReg=null;              // {method} 모달 표시
   let isNew=false;             // 신규등록 편집 세션(저장시 마스터 생성)
   let newMaster={lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};  // ★신규등록 제품(top) 마스터속성. 대분류=가공비 필터핵심(미설정시 부품공정 누락)
+  let copySource='';   // ★복사→평면 신규등록 시 원본품번(저장 후 생산정보=공정·용접 복사에 사용). LG/빈폼=''
   let weldRows=[];             // [{weld_item,pipe_diam,weld_qty}] 관경별 용접점
   // ★관경 마스터 상수 fallback(weld_diam 정본 14관경) — API 미로드/지연에도 매트릭스 항상 채워지게(빈칸 방지)
   const WELD_DIAMS_DEFAULT=[{pipe_diam:4.76,std_use_qty:0.0007,std_st:10},{pipe_diam:5.00,std_use_qty:0.0007,std_st:10},{pipe_diam:6.35,std_use_qty:0.0008,std_st:10},{pipe_diam:7.94,std_use_qty:0.0008,std_st:10},{pipe_diam:9.52,std_use_qty:0.0008,std_st:10},{pipe_diam:12.70,std_use_qty:0.0010,std_st:15},{pipe_diam:15.88,std_use_qty:0.0012,std_st:15},{pipe_diam:19.05,std_use_qty:0.0022,std_st:23},{pipe_diam:22.00,std_use_qty:0.0028,std_st:23},{pipe_diam:25.40,std_use_qty:0.0038,std_st:29},{pipe_diam:28.00,std_use_qty:0.0047,std_st:29},{pipe_diam:31.75,std_use_qty:0.0057,std_st:29},{pipe_diam:34.90,std_use_qty:0.0066,std_st:29},{pipe_diam:38.10,std_use_qty:0.0076,std_st:29}];
@@ -1680,7 +1681,7 @@ SCREEN.unifybom=(c,ro)=>{
   // 공통: 신규 편집 세션 진입(품번·구성·용접후보 세팅)
   const enterNew=async(topItem,topName,newLines,weldCand,srcMaster)=>{
     if(!codes.metal)await loadCodes(); await loadWeldDiams();
-    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null;
+    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null; copySource='';
     // ★복사=원본 제품마스터 pre-fill(대분류 등)·신규(LG/빈폼)=기본값
     newMaster=srcMaster?{lgroup:srcMaster.lgroup||'',sgroup:srcMaster.sgroup||'',make_type:srcMaster.make_type||'3',cost_gubun:srcMaster.cost_gubun||''}
                        :{lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};
@@ -1731,6 +1732,7 @@ SCREEN.unifybom=(c,ro)=>{
       if(!leafLines.length){alert(`원본 ${src} 평면 leaf 없음(nx.bom_flat 미적재).`);return;}
       const srcMaster={lgroup:j.lgroup||'',sgroup:j.sgroup||'',make_type:j.make_type||'',cost_gubun:j.cost_gubun||''};
       enterNew(tgt, j.name||'', leafLines, [], srcMaster);   // ★평면 leaf·마스터 pre-fill로 편집 진입(용접봉=R01/생산정보 축)
+      copySource=src;   // ★저장 후 생산정보(공정·용접·관경) 복사에 사용
     }catch(e){alert('복사 오류: '+e.message);}};
   // ③완전 새로
   const blankNew=async()=>{const it=(prompt('신규 품번을 입력(nx에만 저장)','')||'').trim().toUpperCase();if(!it)return;
@@ -1784,6 +1786,12 @@ SCREEN.unifybom=(c,ro)=>{
     // 2) BOM 구성(RAC는 백엔드가 proc_weld로 라우팅) — 신규품번 헤더 자동생성(target_name)
     try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines})});
       const j=await r.json();if(!j.ok){alert('BOM 저장 거부:\n'+(j.errors||[]).join('\n'));return;}}catch(e){alert('BOM 저장 실패: '+e.message);return;}
+    // ★2-b) 생산정보(공정·용접·관경) 복사 — 원본에서(복사→평면 신규등록 P3). weldRows 비어(copy)라 아래 weld/save와 무충돌.
+    let pcopy=null;
+    if(copySource && copySource!==item){
+      try{const r=await fetch(`${API}/api/bom/copyproc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:copySource,target:item})});
+        const j=await r.json();if(j.ok)pcopy=j.copied;else console.warn('생산정보 복사 실패',j);}catch(e){console.warn('생산정보 복사 오류',e);}
+    }
     // 3) 용접공정(관경별 횟수) → item_weld+proc_weld+routing 파생 (용접봉별 그룹)
     const grp={}; weldRows.forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
     let wsum=0;
@@ -1794,8 +1802,9 @@ SCREEN.unifybom=(c,ro)=>{
     try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
       const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
       const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
-    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정`);
-    isNew=false; load(item);
+    const pmsg=pcopy?`\n★생산정보 복사(${copySource}→): 공정 ${pcopy.routing} · 용접봉 ${pcopy.proc_weld} · 관경 ${pcopy.item_weld}`:'';
+    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정${pmsg}`);
+    isNew=false; copySource=''; load(item);
   };
   // ============ 탭바 ============
   // ★내부원가·실원가 탭은 개발 전용 — 품목 BOM 조회(RO)에서는 숨김(BOM구성만 노출)
