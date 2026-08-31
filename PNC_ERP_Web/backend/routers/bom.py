@@ -238,9 +238,11 @@ def item_save(payload: dict = Body(...)):
                     diam=?, thick=?, length=?, net_weight=?, unit=ISNULL(?,unit), in_cust=?, sgroup=?, lgroup=?,
                     make_type=?, cost_gubun=?, status=ISNULL(?,status) WHERE item_code=?""", *vals, code)
             else:
+                # ★src = 생성출처(신규등록 시만). 'web'=웹 신규 BOM 등록(→조달경로 R01 수정가능). UPDATE는 미접촉=보존.
+                cur.execute("IF COL_LENGTH('nx.item','src') IS NULL ALTER TABLE nx.item ADD src varchar(10) NULL")
                 cur.execute("""INSERT INTO nx.item(item_code,item_name,item_spec,metal_gubun,diam,thick,length,
-                    net_weight,unit,in_cust,sgroup,lgroup,make_type,cost_gubun,status,item_type)
-                    VALUES(?,?,?,?,?,?,?,?,ISNULL(?,'EA'),?,?,?,?,?,ISNULL(?,'사용'),'부품')""", code, *vals)
+                    net_weight,unit,in_cust,sgroup,lgroup,make_type,cost_gubun,status,item_type,src)
+                    VALUES(?,?,?,?,?,?,?,?,ISNULL(?,'EA'),?,?,?,?,?,ISNULL(?,'사용'),'부품',?)""", code, *vals, s("src"))
             saved += 1
         _reset_cost_engine()   # 스펙(치수·재질·중량·조달) 변경 → 원가엔진 캐시 무효화
         return {"ok": True, "count": saved, "errors": errs}

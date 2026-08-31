@@ -1800,7 +1800,7 @@ SCREEN.unifybom=(c,ro)=>{
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
     // 1) 마스터 — ★제품(top) 자신 + 신규품번 포함 자식들. 제품 대분류/소분류/생산구분/단가구분 저장(가공비 필터 정상화)
     const mrows=[{item_code:item,item_name:name||item,lgroup:newMaster.lgroup,sgroup:newMaster.sgroup,
-      make_type:newMaster.make_type,cost_gubun:newMaster.cost_gubun,status:'사용'}];
+      make_type:newMaster.make_type,cost_gubun:newMaster.cost_gubun,status:'사용',src:'web'}];   // ★src=web → 조달경로 R01 수정가능(레거시 미러 아님)
     lines.filter(l=>(l.child_item||'').trim()).forEach(l=>mrows.push({item_code:l.child_item,item_name:l.item_name,item_spec:l.spec,
       metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,unit:l.unit,in_cust:l.in_cust,
       sgroup:l.sgroup,lgroup:l.lgroup,make_type:l.make_type,cost_gubun:l.cost_gubun,status:l.status}));
@@ -2767,7 +2767,7 @@ SCREEN.subvariant=(c)=>{
       if(j.error){st.matErr=j.error;st.mat=[];}else{st.mat=j.rows||[];if(!st.selNm)st.selNm=j.item||'';}}catch(e){st.matErr='내부원가 조회 실패';st.mat=[];}
     st.routeTarget=item;st.routeTargetNm=st.selNm;await loadRoutes();st.loading=false;draw();};
   const loadRoutes=async()=>{try{const r=await fetch(`${API}/api/sourcing/routes?item=${encodeURIComponent(st.routeTarget)}&show_unapproved=1&for_profile=0`);
-      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;}catch(e){st.routes=[];}};
+      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;st.nxNew=!!j.nx_new;}catch(e){st.routes=[];}};   // ★nxNew=웹 신규 품목 → R01 수정가능
   const vSearch=t=>{clearTimeout(st.acT);st.acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(t)}`);
       st.vopts=(await r.json()).rows||[];const dl=c.querySelector('#sv-vdl');if(dl)dl.innerHTML=st.vopts.map(v=>`<option value="${esc(v.code)}">${esc(v.code)} · ${esc(v.name)}</option>`).join('');}catch(e){}},180);};
   const routeById=id=>st.routes.find(r=>r.route_id===id)||(id===0?st.routes.find(r=>r.baseline):null);
@@ -2802,7 +2802,7 @@ SCREEN.subvariant=(c)=>{
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':(cur?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">현행</span>':apBadge(r))}
       <div style="flex:1"></div>
       ${cur
-        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${canW?` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`:''}`
+        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${(canW&&st.nxNew)?` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff" title="웹 신규 품목의 R01 — 수정 가능">수정</button>`:(cur&&!st.nxNew?`<span style="color:#8aa0bd;font-size:10px" title="레거시 실사용 BOM 파생 — 보호(읽기전용)">🔒 현행 보호</span>`:'')}`
         : `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="${canW?'edit':'view'}" style="padding:1px 8px;font-size:11px">${canW?'수정':'상세'}</button>${canW?` <button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'승인'}</button> <button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">삭제</button>`:''}`}
     </div>`;};
   const routesPanel=()=>{
@@ -2992,7 +2992,7 @@ SCREEN.subvariant=(c)=>{
     const fresh=ed&&!!d.fresh;   // 신규 미커밋 드래프트(가져오기로 방금 생성, [등록] 전) — 닫기=등록취소(롤백)
     const isCur=!R.baseline&&(R.current_flag||R.route_no===1);
     const footL=R.baseline
-      ? (canW?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff">현행 수정</button> <button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">이 현행으로 새 후보 만들기</button>`:'')
+      ? (canW?`${st.nxNew?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff" title="웹 신규 품목 — R01 직접 수정 가능">현행 수정</button> `:'<span style="color:#8aa0bd;font-size:11px">🔒 레거시 실사용 BOM 파생 — 현행 보호(읽기전용). 대안은 새 후보로 →</span> '}<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">이 현행으로 새 후보 만들기</button>`:'')
       : (fresh
           ? '<span style="color:#8aa0bd;font-size:11px">[등록]해야 후보가 확정됩니다 · 닫기/취소 = 등록 취소</span>'
           : (canW?(isCur
@@ -3003,8 +3003,8 @@ SCREEN.subvariant=(c)=>{
       ? `<button class="btn" id="dt-close">닫기</button>`
       : (fresh
           ? `<button class="btn" id="dt-cancel" style="color:#c0392b">✖ 취소</button> <button class="btn" id="dt-register" style="background:#1c7c3a;color:#fff">✔ 등록</button>`
-          : (isCur   // ★R01(현행) 편집=저장 없음(닫기만·실사용 BOM 자체라 저장 대상 아님) / Rnn 대안후보 수정=저장 유지
-              ? `<button class="btn" id="dt-close">닫기</button>`
+          : (isCur   // ★R01(현행): 레거시 미러=저장 없음(닫기만·실사용 BOM 보호) / 웹 신규 품목(nxNew)=저장 허용(우리가 만든 R01)
+              ? `${(canW&&ed&&st.nxNew)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff" title="웹 신규 품목의 R01 — 수정·저장 가능">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`
               : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`));
     return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1.5vh 10px">
       <div style="background:#fff;border-radius:12px;width:1320px;max-width:98vw;height:97vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
