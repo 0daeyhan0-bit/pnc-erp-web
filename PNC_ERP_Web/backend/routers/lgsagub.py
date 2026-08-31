@@ -126,6 +126,41 @@ IF COL_LENGTH('nx.lg_sagub_actual','market') IS NULL ALTER TABLE nx.lg_sagub_act
 def _prep(cur):
     cur.execute(_DDL); cur.execute(_MIGRATE)
 
+
+def _biz_guess(cur, items):
+    """파일 안 품번으로 사업부를 추정 → (판정, RAC수, SAC수, 미지수). 판정 불가면 (None, …).
+
+       ★OSP 파일에는 사업부 컬럼이 없고 파일명도 타임스탬프뿐이라 단서가 없다.
+         하지만 품목 구성이 사업부를 거의 결정한다 —
+         실측(2026-08-31): RAC 전용 25종 · SAC 전용 243종 · 양쪽 공통 13종(4.6%).
+       ★보수적으로 본다 — 사전에 잡힌 행이 3건 미만이거나 한쪽이 90% 미만이면 **판정하지 않는다**
+         (신규 품목만 있는 파일을 막으면 안 된다). 실파일 10개 보정: 전부 정확·모호 0건.
+    """
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(biz,''), SUM(ABS(ISNULL(qty,0)))
+                     FROM nx.lg_sagub_actual WHERE ISNULL(biz,'') IN ('RAC','SAC')
+                    GROUP BY UPPER(LTRIM(RTRIM(item_code))), ISNULL(biz,'')""")
+    agg = {}
+    for it, b, q in cur.fetchall():
+        agg.setdefault(str(it), {})[str(b)] = float(q or 0)
+    ref = {}
+    for it, d in agg.items():
+        r, s = d.get('RAC', 0.0), d.get('SAC', 0.0)
+        tot = r + s
+        if tot > 0 and max(r, s) / tot >= 0.9:      # 한쪽 90% 이상인 품목만 신뢰
+            ref[it] = 'RAC' if r > s else 'SAC'
+    nr = sum(1 for x in items if ref.get(x) == 'RAC')
+    ns = sum(1 for x in items if ref.get(x) == 'SAC')
+    unk = len(items) - nr - ns
+    tot = nr + ns
+    if tot < 3:
+        return None, nr, ns, unk
+    if nr >= tot * 0.9:
+        return 'RAC', nr, ns, unk
+    if ns >= tot * 0.9:
+        return 'SAC', nr, ns, unk
+    return None, nr, ns, unk
+
+
 def _biz_norm(v):
     """사업부 정규화: rac/dgz→RAC, sac/dmz→SAC. 그 외는 대문자 그대로."""
     s = str(v or "").strip().lower()
@@ -280,6 +315,19 @@ async def lgsagub_upload(file: UploadFile = File(...), ym: str = Query(""), base
                      str(gv(r, "market") or "")[:10]))
     if not recs:
         return {"ok": False, "error": "데이터 행 없음", "detected": detected, "header_row": [str(x) for x in rows_all[best_hi]]}
+    # ★사업부 오선택 차단 — 파일 안 품번으로 추정해 선택과 다르면 막는다(판정 불가면 통과).
+    #   삭제 조건이 biz+ymd 라 잘못 고르면 다른 사업부의 그 날짜 데이터가 지워진다.
+    _cn0 = _nx(); _c0 = _cn0.cursor()
+    try:
+        _its = [str(x[3]).strip().upper() for x in recs if x[3]]
+        _g, _nr, _ns, _unk = _biz_guess(_c0, _its)
+    finally:
+        _cn0.close()
+    if _g and _g != bizv:
+        raise HTTPException(400,
+                            "사업부 확인 필요 — {} 로 선택하셨으나 파일 내용은 {} 입니다".format(bizv, _g)
+                            + " (근거: {}행 중 RAC품목 {} · SAC품목 {} · 미확인 {}).".format(len(_its), _nr, _ns, _unk)
+                            + " 그대로 올리면 {} 의 해당 일자 데이터가 지워지고 이 파일이 {} 로 적재됩니다.".format(bizv, bizv))
     nx = _nx(); cur = nx.cursor()
     try:
         _prep(cur)
