@@ -1798,6 +1798,12 @@ SCREEN.unifybom=(c,ro)=>{
     lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(ch&&ch===item)errs.push(`${i+1}행 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행 중복 ${ch}`);if(ch)seen[ch]=1;});
     const bn=_reqNew();if(bn.length){alert('신규 품목 필수입력 누락 — 저장 불가:\n'+bn.join('\n')+'\n\n해당 행에 입력 후 다시 저장하세요.');return;}
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
+    // ★저장중 오버레이(마스터+BOM+공정+생산정보 복사로 수 초 소요) — 완료/오류 시 finally에서 제거
+    const _sv=document.createElement('div');
+    _sv.style.cssText='position:fixed;inset:0;z-index:2000;background:rgba(20,30,50,.45);display:flex;align-items:center;justify-content:center';
+    _sv.innerHTML='<div style="background:#fff;border-radius:12px;padding:22px 34px;box-shadow:0 10px 40px rgba(0,0,0,.35);text-align:center;font-size:15px;color:#1c3a6e;font-weight:700"><div style="width:34px;height:34px;border:4px solid #dbe6f5;border-top-color:#1c47a0;border-radius:50%;margin:0 auto 12px;animation:svspin 0.8s linear infinite"></div>저장 중입니다…<div style="font-size:11px;color:#8a94a6;font-weight:400;margin-top:6px">마스터·BOM·공정·생산정보 등록 중 (잠시만요)</div></div><style>@keyframes svspin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(_sv);
+    try{
     // 1) 마스터 — ★제품(top) 자신 + 신규품번 포함 자식들. 제품 대분류/소분류/생산구분/단가구분 저장(가공비 필터 정상화)
     const mrows=[{item_code:item,item_name:name||item,lgroup:newMaster.lgroup,sgroup:newMaster.sgroup,
       make_type:newMaster.make_type,cost_gubun:newMaster.cost_gubun,status:'사용',src:'web'}];   // ★src=web → 조달경로 R01 수정가능(레거시 미러 아님)
@@ -1836,6 +1842,7 @@ SCREEN.unifybom=(c,ro)=>{
     const pmsg=pcopy?`\n★생산정보 복사(${copySource}→): 공정 ${pcopy.routing} · 용접봉 ${pcopy.proc_weld} · 관경 ${pcopy.item_weld}`:'';
     alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정${pmsg}`);
     isNew=false; copySource=''; iprodEdit=null; load(item);
+    }finally{ if(_sv&&_sv.parentNode)_sv.parentNode.removeChild(_sv); }   // ★저장중 오버레이 제거(성공/오류/중단 모두)
   };
   // ============ 탭바 ============
   // ★내부원가·실원가 탭은 개발 전용 — 품목 BOM 조회(RO)에서는 숨김(BOM구성만 노출)
