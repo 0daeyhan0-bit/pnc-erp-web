@@ -327,10 +327,10 @@ function viewOrder(){
   <div class="card">
     <h3>발주현황(일반)<span class="n">${num(rows.length)}</span></h3>
     ${rows.length ? `<div class="scroll"><table>
-      <thead><tr><th>품목</th><th class="n">계획</th><th class="n">재고</th><th class="n">기발주</th><th class="n">순소요</th></tr></thead>
+      <thead><tr><th>품목</th><th class="n">계획</th><th class="n">재고(당사)</th><th class="n" title="대상 협력사 사급 보유재고 합산 · 참고용(계산 미반영)">협력사재고</th><th class="n">기발주</th><th class="n">순소요</th></tr></thead>
       <tbody>${rows.map(r=>{ const n=net4(r); return `<tr>
         <td><span class="part">${esc(r.ic)}</span><span class="nm">${esc(r.nm||'')}${r.muldong_soyo>0?` · 물동 ${num(r.muldong_soyo)}`:''}</span></td>
-        <td class="n">${num(r.plan_qty)}</td><td class="n">${num(r.stock_qty)}</td><td class="n">${num(r.po_qty)}</td>
+        <td class="n">${num(r.plan_qty)}</td><td class="n">${num(r.stock_qty)}</td><td class="n" style="color:#5b7fa6" title="협력사 사급 보유(참고·계산 미반영)">${r.coop_stock<0?'(음수)0':(r.coop_stock>0?num(r.coop_stock):'-')}</td><td class="n">${num(r.po_qty)}</td>
         <td class="n" style="font-weight:800;color:${n>0?'#c0392b':'#8a94a6'}">${num(n)}</td></tr>`; }).join('')}</tbody>
     </table></div>` : `<div class="empty">발주현황 품목이 없습니다.</div>`}
   </div>
