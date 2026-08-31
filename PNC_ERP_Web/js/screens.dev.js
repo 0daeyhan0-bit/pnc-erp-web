@@ -2018,41 +2018,69 @@ SCREEN.unifybom=(c,ro)=>{
   // ===== ★생산정보(생산 ST축) 팝업 — 원가 공정(loadNaeProc)과 별개 축. 품번키(route_id=0) 생산공정순서. =====
   //   복사모드(isNew&&copySource)=원본(copySource) 미리보기(읽기전용·최종저장 때 _copy_prodinfo가 복사). 기존품번=편집·저장.
   const openItemProd=async()=>{const node=(isNew&&copySource)?copySource:item; if(!node){alert('품번을 먼저 선택/입력하세요');return;}
-    iprodD={node,loading:true,rows:[],opts:null,src:'',preview:!!(isNew&&copySource)};iprodModal=true;draw();
+    iprodD={node,loading:true,proc:[],assy:[],opts:null,src:'',preview:!!(isNew&&copySource)};iprodModal=true;draw();
     try{const [gj,oj]=await Promise.all([
         fetch(`${API}/api/prodinfo/get?item=${encodeURIComponent(node)}&route_id=0`).then(r=>r.json()),
         fetch(`${API}/api/prodinfo/opts`).then(r=>r.json())]);
-      const rows=(gj.proc||[]).map(p=>({proc_seq:p.proc_seq,work_code:p.work_code||'',gagong_proc_code:p.gagong_proc_code||'',
-        s_work_code:p.s_work_code||0,tot_st:p.tot_st||0,lt_hr:p.lt_hr||0,gagong_proc_seq:p.gagong_proc_seq||1}));
-      iprodD={node,loading:false,rows,opts:oj,src:gj.proc_src||'',preview:!!(isNew&&copySource)};
-    }catch(e){iprodD={node,loading:false,rows:[],opts:null,src:'',error:e.message,preview:!!(isNew&&copySource)};}
+      iprodD={node,loading:false,proc:(gj.proc||[]),assy:(gj.assy||[]),opts:oj,src:gj.proc_src||'',preview:!!(isNew&&copySource)};
+    }catch(e){iprodD={node,loading:false,proc:[],assy:[],opts:null,src:'',error:e.message,preview:!!(isNew&&copySource)};}
     draw();};
   const itemProdModal=()=>{const np=iprodD;if(!np)return '';
-    const srcNm={route:'route',route_seed:'R01시드',nx:'품번키(nx)',legacy:'품번키(레거시)'}[np.src]||np.src;
-    const opts=np.opts||{works:[],parts:[],singles:[]};
-    const optH=(arr,val)=>`<option value="">-</option>`+(arr||[]).map(o=>`<option value="${esc(String(o.code))}" ${String(o.code)===String(val)?'selected':''}>${esc(o.name||o.code)}</option>`).join('');
     const RO=np.preview;
-    const body=np.loading?`<div style="padding:30px;text-align:center;color:#888">로딩중…</div>`:
-      `<table style="width:100%;font-size:11px;border-collapse:collapse">
-        <thead><tr style="background:#e6f2f0"><th style="width:44px">순서</th><th>작업처</th><th>가공공정(파트)</th><th>단품공정 <span style="color:#c0392b">*</span></th><th style="width:66px">표준ST</th><th style="width:60px">LT(hr)</th>${RO?'':'<th style="width:30px"></th>'}</tr></thead>
-        <tbody>${np.rows.map((r,i)=>`<tr>
-          <td>${RO?esc(String(r.proc_seq)):`<input class="ipf" data-i="${i}" data-k="proc_seq" value="${esc(String(r.proc_seq))}" style="width:38px;text-align:center">`}</td>
-          <td>${RO?esc(String(r.work_code||'-')):`<select class="ipf" data-i="${i}" data-k="work_code" style="width:100%">${optH(opts.works,r.work_code)}</select>`}</td>
-          <td>${RO?esc(String(r.gagong_proc_code||'-')):`<select class="ipf" data-i="${i}" data-k="gagong_proc_code" style="width:100%">${optH(opts.parts,r.gagong_proc_code)}</select>`}</td>
-          <td>${RO?esc(String(r.s_work_code||'-')):`<select class="ipf" data-i="${i}" data-k="s_work_code" style="width:100%">${optH(opts.singles,r.s_work_code)}</select>`}</td>
-          <td style="text-align:right">${RO?esc(String(r.tot_st)):`<input class="ipf" data-i="${i}" data-k="tot_st" value="${esc(String(r.tot_st))}" style="width:60px;text-align:right">`}</td>
-          <td style="text-align:right">${RO?esc(String(r.lt_hr)):`<input class="ipf" data-i="${i}" data-k="lt_hr" value="${esc(String(r.lt_hr))}" style="width:54px;text-align:right">`}</td>
-          ${RO?'':`<td><span class="ip-del" data-i="${i}" style="color:#c0392b;cursor:pointer">✖</span></td>`}</tr>`).join('')||`<tr><td colspan="7" style="text-align:center;color:#888;padding:12px">공정 없음${RO?'':' — ＋행추가'}</td></tr>`}</tbody></table>
-        ${RO?'':`<div style="margin-top:6px"><button class="btn" id="ip-add" style="font-size:11px">＋ 행추가</button></div>`}`;
+    const srcNm={route:'route',route_seed:'R01시드',nx:'nx편집본',legacy:'라이브 PR_M_ITEM_PROC_GAGONG'}[np.src]||np.src;
+    const O=np.opts||{works:[],parts:[],singles:[],machs:[],jp_methods:{}};
+    const opt=(list,val,disp)=>`<option value="">-</option>`+(list||[]).map(o=>`<option value="${esc(''+o.code)}"${(''+o.code)===(''+val)?' selected':''}>${esc(disp(o))}</option>`).join('');
+    const partsFor=wc=>(O.parts||[]).filter(p=>!wc||!p.work_code||p.work_code===wc);
+    const singlesFor=wc=>(O.singles||[]).filter(s=>!wc||!s.work_code||s.work_code===wc);
+    const machsFor=wc=>(O.machs||[]).filter(m=>!wc||!m.work_code||m.work_code===wc);
+    const nf=(v,d=3)=>{const n=+v;return isNaN(n)?(v==null?'':v):n.toLocaleString(undefined,{maximumFractionDigits:d});};
+    // ── ① 생산공정순서 (전체 컬럼) ──
+    const pcols=['','공정SEQ','작업처','파트','가공공정','가공설비','공정횟수','준비(초)','설비CT','인원','TT(초)','ST(초)','LT(Hr)','전표'];
+    const totSt=(np.proc||[]).reduce((a,r)=>a+(+r.tot_st||0),0);
+    const cell=(r,i,k,w=44,step='0.001')=>RO?nf(r[k]):`<input class="ipf" data-i="${i}" data-k="${k}" type="number" step="${step}" value="${r[k]==null?'':r[k]}" style="width:${w}px;text-align:right;padding:1px 3px">`;
+    const procGrid=`<div style="font-weight:700;color:#0f766e;margin:2px 0 4px">① 생산공정순서 <span style="font-size:11px;color:#8a94a6;font-weight:400">(생산계획 편성이 소비 · 단품공정=STEP6 키)</span></div>
+      <div style="max-height:300px;overflow:auto;border:1px solid #d6e6e2;border-radius:6px"><table style="width:100%;font-size:11px;white-space:nowrap;border-collapse:collapse">
+      <thead><tr style="background:#e6f2f0">${pcols.map(h=>`<th style="padding:2px 4px">${h}</th>`).join('')}</tr></thead>
+      <tbody>${(np.proc||[]).length?np.proc.map((r,i)=>{const wc=r.work_code;return `<tr>
+        <td class="center">${RO?'':`<span class="ip-pdel" data-i="${i}" style="color:#c0392b;cursor:pointer">🗑</span>`}</td>
+        <td class="num">${RO?esc(''+r.proc_seq):`<input class="ipf" data-i="${i}" data-k="proc_seq" type="number" value="${r.proc_seq}" style="width:40px;text-align:right">`}</td>
+        <td>${RO?esc((wc?wc+' ':'')+(r.work_desc||'')):`<select class="ipwc" data-i="${i}" style="min-width:60px">${opt(O.works,wc,o=>o.code+' '+o.name)}</select>`}</td>
+        <td>${RO?esc(r.part_desc||''):`<select class="ipf" data-i="${i}" data-k="gagong_proc_code" style="font-size:10px">${opt(partsFor(wc),r.gagong_proc_code,o=>o.name)}</select>`}</td>
+        <td>${RO?esc(r.s_work_desc||''):`<select class="ipf" data-i="${i}" data-k="s_work_code" style="font-size:10px">${opt(singlesFor(wc),r.s_work_code,o=>o.name)}</select>`}</td>
+        <td>${RO?esc(r.mach_desc||''):`<select class="ipf" data-i="${i}" data-k="mach_code" style="font-size:10px">${opt(machsFor(wc),r.mach_code,o=>o.name)}</select>`}</td>
+        <td class="num">${cell(r,i,'work_qty',40,'0.1')}</td>
+        <td class="num">${cell(r,i,'ready_st')}</td><td class="num">${cell(r,i,'mach_ct')}</td>
+        <td class="num">${RO?esc(''+r.inwon):`<input class="ipf" data-i="${i}" data-k="inwon" type="number" value="${r.inwon==null?'':r.inwon}" style="width:34px;text-align:right">`}</td>
+        <td class="num">${cell(r,i,'human_st')}</td><td class="num" style="background:#f3f8ff">${cell(r,i,'tot_st',48)}</td>
+        <td class="num">${cell(r,i,'lt_hr')}</td>
+        <td>${RO?esc((O.jp_methods||{})[r.jp_proc_method]||r.jp_proc_method||''):`<select class="ipf" data-i="${i}" data-k="jp_proc_method" style="min-width:74px">${Object.entries(O.jp_methods||{}).map(([k,v])=>`<option value="${k}"${r.jp_proc_method===k?' selected':''}>${esc(v)}</option>`).join('')}</select>`}</td>
+        </tr>`;}).join(''):`<tr><td colspan="14" style="text-align:center;color:#888;padding:10px">생산공정순서 없음${RO?'':' — ＋행추가'}</td></tr>`}</tbody>
+      <tfoot><tr style="background:#eef4f3;font-weight:700"><td colspan="11" style="text-align:center">공정 ${(np.proc||[]).length}행 · ST(초) 합계</td><td class="num">${nf(totSt)}</td><td colspan="2"></td></tr></tfoot></table></div>
+      ${RO?'':`<div style="margin-top:5px"><button class="btn" id="ip-add" style="font-size:11px">＋ 행추가</button></div>`}`;
+    // ── ② 조립(공정수) ──
+    const grp=x=>x==='1'?'weld':(x==='2'||x==='21')?'check':(x==='3'||x==='31')?'assy':'etc';
+    let aQ={weld:0,check:0,assy:0,etc:0},aS={weld:0,check:0,assy:0,etc:0};
+    (np.assy||[]).forEach(r=>{const q=+r.work_qty||0,s=q*(+r.work_st||0);const k=grp(r.proc_gubun);aQ[k]+=q;aS[k]+=s;});
+    const aQt=aQ.weld+aQ.check+aQ.assy+aQ.etc, aSt=aS.weld+aS.check+aS.assy+aS.etc;
+    const assyGrid=`<div style="font-weight:700;color:#8e44ad;margin:12px 0 4px">② 조립(공정수) <span style="font-size:11px;color:#8a94a6;font-weight:400">(조립 공정별 공정수·ST)</span></div>
+      <div style="max-height:220px;overflow:auto;border:1px solid #e2d6ee;border-radius:6px"><table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr style="background:#f3eefa"><th style="text-align:left;padding:2px 4px">공정명</th><th class="num">공정수</th><th class="num">표준ST</th><th class="num">ST</th><th class="center">구분</th></tr></thead>
+      <tbody>${(np.assy||[]).length?np.assy.map((r,i)=>`<tr>
+        <td>${esc(r.work_desc||'')}</td>
+        <td class="num">${RO?nf(r.work_qty,0):`<input class="ipaq" data-i="${i}" type="number" value="${r.work_qty==null?'':r.work_qty}" style="width:44px;text-align:right">`}</td>
+        <td class="num">${nf(r.work_st,2)}</td><td class="num ipast" data-i="${i}">${nf((+r.work_qty||0)*(+r.work_st||0))}</td>
+        <td class="center">${esc(r.proc_gubun_nm||'')}</td></tr>`).join(''):`<tr><td colspan="5" style="text-align:center;color:#888;padding:10px">조립공정 없음</td></tr>`}</tbody>
+      <tfoot><tr style="background:#efe6f7;font-weight:800"><td class="center">총계</td><td class="num">${nf(aQt,0)}</td><td></td><td class="num">${nf(aSt)}</td><td></td></tr></tfoot></table></div>`;
+    const body=np.loading?`<div style="padding:30px;text-align:center;color:#888">로딩중…</div>`:(procGrid+assyGrid);
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1300;display:flex;align-items:center;justify-content:center" id="iprod-bg">
-      <div style="background:#fff;border-radius:10px;padding:16px;width:min(760px,94vw);max-height:88vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.3)">
+      <div style="background:#fff;border-radius:10px;padding:16px;width:min(980px,96vw);max-height:90vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.3)">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <b style="font-size:14px">생산정보 (생산공정순서·ST) — ${esc(np.node)}</b>
+          <b style="font-size:14px">생산정보 — ${esc(np.node)}</b>
           <span style="font-size:10px;background:#0f766e;color:#fff;border-radius:8px;padding:1px 7px">생산 ST축${srcNm?' · '+esc(srcNm):''}</span>
           ${RO?'<span style="font-size:10px;background:#b8860b;color:#fff;border-radius:8px;padding:1px 7px">원본 미리보기(복사)</span>':''}
           <div style="flex:1"></div><span class="ip-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
         <div style="font-size:11px;color:#0f766e;background:#e6f2f0;border:1px solid #b7ddd6;border-radius:6px;padding:5px 8px;margin-bottom:8px">
-          생산 ST축(생산계획 편성이 소비 · 원가 공정과 별개). <b>단품공정</b>이 STEP6 편성 핵심키.${RO?' <b>복사 모드=원본 미리보기</b> — 최종 [저장] 시 새 품번으로 함께 복사됩니다(여기서 저장 안 함).':''}</div>
+          생산 ST축(생산계획 편성이 소비 · 원가 공정과 별개). 라우팅 원천 <b>PR_M_ITEM_PROC_GAGONG</b> · 저장=nx.${RO?' <b>복사 모드=원본 미리보기</b> — 최종 [저장] 시 새 품번으로 함께 복사됩니다.':''}</div>
         ${body}
         <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
           <button class="btn ip-x" style="padding:4px 14px">닫기</button>
@@ -2060,20 +2088,35 @@ SCREEN.unifybom=(c,ro)=>{
       </div></div>`;};
   const saveItemProd=async()=>{const np=iprodD;if(!np)return;
     if(np.preview){alert('복사 편집 중입니다. 여기서 저장하지 마세요.\n상단 [저장]으로 신규 품번을 등록하면 원본의 생산정보가 함께 복사됩니다.');return;}
-    const rows=(np.rows||[]).map(r=>({proc_seq:+r.proc_seq||0,work_code:r.work_code||'',gagong_proc_code:r.gagong_proc_code||'',
-      s_work_code:+r.s_work_code||0,tot_st:+r.tot_st||0,lt_hr:+r.lt_hr||0,gagong_proc_seq:+r.gagong_proc_seq||1})).filter(r=>r.proc_seq>0);
-    const seqs=new Set();for(const r of rows){if(seqs.has(r.proc_seq)){alert('공정 순서 중복: '+r.proc_seq);return;}seqs.add(r.proc_seq);
-      if(!r.s_work_code){alert('단품공정은 필수입니다(STEP6 편성 키). 순서 '+r.proc_seq);return;}}
+    const proc=(np.proc||[]).filter(r=>(+r.proc_seq||0)>0);
+    const seqs=new Set();for(const r of proc){const s=+r.proc_seq;if(seqs.has(s)){alert('공정 순서 중복: '+s);return;}seqs.add(s);
+      if(!(+r.s_work_code)){alert('단품공정은 필수입니다(STEP6 편성 키). 순서 '+s);return;}}
     try{const r=await fetch(`${API}/api/prodinfo/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({item:np.node,route_id:0,rows,user:'웹'})});
-      const j=await r.json();if(!j.ok){alert('생산정보 저장 실패: '+(j.detail||''));return;}
-      iprodModal=false;iprodD=null;alert(`생산정보 저장 ✔ ${np.node} (품번키) ${j.saved}공정`);draw();
+        body:JSON.stringify({item:np.node,route_id:0,rows:proc,user:'웹'})});
+      const j=await r.json();if(!j.ok){alert('생산공정순서 저장 실패: '+(j.detail||''));return;}
+      let amsg='';
+      try{const ar=await fetch(`${API}/api/prodinfo/assy/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({item:np.node,user:'웹',rows:(np.assy||[]).map(x=>({a_work_code:x.a_work_code,work_qty:x.work_qty}))})});
+        const aj=await ar.json();if(aj.ok)amsg=` · 조립 ${aj.saved}건`;}catch(e){}
+      iprodModal=false;iprodD=null;alert(`생산정보 저장 ✔ ${np.node} · 생산공정순서 ${j.saved}행${amsg}`);draw();
     }catch(e){alert('저장 오류: '+e.message);}};
   const bindItemProd=()=>{if(!iprodModal||!iprodD)return;const np=iprodD;const g=id=>c.querySelector(id);   // ★g는 draw 로컬이라 여기 로컬 정의(ReferenceError 방지)
-    c.querySelectorAll('#iprod-bg .ipf').forEach(el=>{el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(np.rows[i])np.rows[i][k]=el.value;};});
-    c.querySelectorAll('#iprod-bg .ip-del').forEach(el=>el.onclick=()=>{np.rows.splice(+el.dataset.i,1);draw();});
+    // 생산공정순서 셀(텍스트/숫자/셀렉트): state만 갱신(재렌더X → 포커스 유지)
+    c.querySelectorAll('#iprod-bg .ipf').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(!np.proc[i])return;
+      let v=el.value; if(el.type==='number')v=(v===''?null:v); np.proc[i][k]=v;};});
+    // 작업처 변경 → 캐스케이드(파트/공정/설비 재필터·무효값 초기화) → 재렌더
+    c.querySelectorAll('#iprod-bg .ipwc').forEach(el=>{el.onchange=()=>{const i=+el.dataset.i;const wc=el.value;const r=np.proc[i];if(!r)return;
+      r.work_code=wc; const O=np.opts||{parts:[],singles:[],machs:[]};
+      if(wc){if(!(O.parts||[]).some(p=>p.code===r.gagong_proc_code&&(!p.work_code||p.work_code===wc)))r.gagong_proc_code='';
+        if(!(O.singles||[]).some(s=>(''+s.code)===(''+r.s_work_code)&&(!s.work_code||s.work_code===wc)))r.s_work_code=0;
+        if(!(O.machs||[]).some(m=>m.code===r.mach_code&&(!m.work_code||m.work_code===wc)))r.mach_code='';}
+      draw();};});
+    c.querySelectorAll('#iprod-bg .ip-pdel').forEach(el=>el.onclick=()=>{np.proc.splice(+el.dataset.i,1);draw();});
+    // 조립 공정수 입력 → ST 셀 즉시 갱신(재렌더X)
+    c.querySelectorAll('#iprod-bg .ipaq').forEach(el=>{el.oninput=()=>{const i=+el.dataset.i;if(!np.assy[i])return;np.assy[i].work_qty=el.value;
+      const st2=c.querySelector(`#iprod-bg .ipast[data-i="${i}"]`);if(st2)st2.textContent=((+el.value||0)*(+np.assy[i].work_st||0)).toLocaleString(undefined,{maximumFractionDigits:3});};});
     c.querySelectorAll('#iprod-bg .ip-x').forEach(el=>el.onclick=()=>{iprodModal=false;iprodD=null;draw();});
-    {const a=g('#ip-add');if(a)a.onclick=()=>{const mx=np.rows.reduce((m,r)=>Math.max(m,+r.proc_seq||0),0);np.rows.push({proc_seq:mx+1,work_code:'',gagong_proc_code:'',s_work_code:0,tot_st:0,lt_hr:0,gagong_proc_seq:1});draw();};}
+    {const a=g('#ip-add');if(a)a.onclick=()=>{const mx=(np.proc||[]).reduce((m,r)=>Math.max(m,+r.proc_seq||0),0);np.proc.push({proc_seq:mx+1,work_code:'P2',gagong_proc_code:'',s_work_code:0,mach_code:'',work_qty:1,ready_st:0,mach_ct:0,inwon:0,human_st:0,tot_st:0,jp_proc_method:'J',lt_hr:0,gagong_proc_seq:1,work_desc:'',part_desc:'',s_work_desc:'',mach_desc:''});draw();};}
     {const s=g('#ip-save');if(s)s.onclick=saveItemProd;}
     {const bg=g('#iprod-bg');if(bg)bg.onclick=e=>{if(e.target===bg){iprodModal=false;iprodD=null;draw();}};}};
   const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeProcLoading=true;if(openModal)naeModal=true;draw();  // ★즉시 로딩모달 표시(사외망 지연 대비)
