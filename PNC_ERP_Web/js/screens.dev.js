@@ -1654,9 +1654,21 @@ SCREEN.unifybom=(c,ro)=>{
     loadRoutes();   // 조달경로 후보 목록(현행+승인후보) 비동기 로드
     if(enterEdit && !RO && (typeof PERM==='undefined'||PERM.canEdit('unifybom'))){editMode=true;viewTree=false;}
     loading=false;results=[];draw();};
+  // ★신규(_isnew) 자식 필수필드 검증(정본 하드필수: 공통 품명·단위 / 단품·원소재 +재질). 위반이면 저장차단·입력요청.
+  const _reqNew=()=>{const bad=[];
+    lines.forEach((l,i)=>{if(!l._isnew)return;const ch=(l.child_item||'').trim();if(!ch)return;
+      const miss=[];
+      if(!(l.item_name||'').trim())miss.push('품명');
+      if(!(l.unit||'').trim())miss.push('단위');
+      if(!(l.lgroup||'').trim())miss.push('대분류');
+      const sg=(l.sgroup||'').trim();
+      if(['130','210','220','230'].includes(sg)&&!(l.metal_gubun||'').trim())miss.push('재질');
+      if(miss.length)bad.push(`${i+1}행 신규 ${ch}: ${miss.join('·')} 미입력`);});
+    return bad;};
   const save=async()=>{const seen={},errs=[];
     lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(!ch)errs.push(`${i+1}행: 품번 필요`);
       if(ch&&ch===item)errs.push(`${i+1}행: 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행: 중복 ${ch}`);if(ch)seen[ch]=1;});
+    const bn=_reqNew();if(bn.length){alert('신규 품목 필수입력 누락 — 저장 불가:\n'+bn.join('\n')+'\n\n해당 행에 입력 후 다시 저장하세요.');return;}
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
     const mrows=lines.filter(l=>(l.child_item||'').trim()).map(l=>({item_code:l.child_item,item_name:l.item_name,
       item_spec:l.spec,metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,
@@ -1776,6 +1788,7 @@ SCREEN.unifybom=(c,ro)=>{
     if(!newMaster.lgroup){alert('제품 대분류를 선택하세요.\n(대분류 미설정 시 부품 가공비가 원가에서 누락됩니다 — 공정 필터가 대분류 기준)');return;}
     const seen={},errs=[];
     lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(ch&&ch===item)errs.push(`${i+1}행 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행 중복 ${ch}`);if(ch)seen[ch]=1;});
+    const bn=_reqNew();if(bn.length){alert('신규 품목 필수입력 누락 — 저장 불가:\n'+bn.join('\n')+'\n\n해당 행에 입력 후 다시 저장하세요.');return;}
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
     // 1) 마스터 — ★제품(top) 자신 + 신규품번 포함 자식들. 제품 대분류/소분류/생산구분/단가구분 저장(가공비 필터 정상화)
     const mrows=[{item_code:item,item_name:name||item,lgroup:newMaster.lgroup,sgroup:newMaster.sgroup,
@@ -2513,9 +2526,8 @@ SCREEN.unifybom=(c,ro)=>{
             const known=itemNames[code]||'';
             L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';L._isnew=false;
             if(known){L.item_name=known;}   // 검색목록엔 있으나 iteminfo 미발견(휴면 등) → 이름만
-            else if(confirm(`「${code}」는 등록되지 않은 신규 품번입니다.\n신규 품목으로 등록하시겠습니까?\n(품명은 다음, 재질·치수·단위·대분류 등은 이 행에서 입력 → 저장 시 품목마스터에 함께 등록)`)){
-              const inm=(prompt(`신규 품번 「${code}」 의 품명을 입력하세요.`, '')||'').trim();
-              L.item_name=inm; L._isnew=true; L.unit=L.unit||'EA';   // ★신규 플래그(표시·저장시 마스터 생성)
+            else if(confirm(`「${code}」는 등록되지 않은 신규 품번입니다.\n신규 품목으로 등록하시겠습니까?\n(확인 후 품명·재질·치수·단위·대분류 등을 이 행에서 직접 입력 → 저장 시 품목마스터에 등록)`)){
+              L.item_name=''; L._isnew=true; L.unit=L.unit||'EA';   // ★배지만 표시·품명 등은 그리드에서 직접 입력
             }else{ L.child_item=''; L.item_name=''; el.value=''; }   // 취소=코드 비움(오입력)
           }
           draw();
