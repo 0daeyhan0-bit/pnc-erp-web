@@ -2069,7 +2069,7 @@ SCREEN.unifybom=(c,ro)=>{
       const j=await r.json();if(!j.ok){alert('생산정보 저장 실패: '+(j.detail||''));return;}
       iprodModal=false;iprodD=null;alert(`생산정보 저장 ✔ ${np.node} (품번키) ${j.saved}공정`);draw();
     }catch(e){alert('저장 오류: '+e.message);}};
-  const bindItemProd=()=>{if(!iprodModal||!iprodD)return;const np=iprodD;
+  const bindItemProd=()=>{if(!iprodModal||!iprodD)return;const np=iprodD;const g=id=>c.querySelector(id);   // ★g는 draw 로컬이라 여기 로컬 정의(ReferenceError 방지)
     c.querySelectorAll('#iprod-bg .ipf').forEach(el=>{el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(np.rows[i])np.rows[i][k]=el.value;};});
     c.querySelectorAll('#iprod-bg .ip-del').forEach(el=>el.onclick=()=>{np.rows.splice(+el.dataset.i,1);draw();});
     c.querySelectorAll('#iprod-bg .ip-x').forEach(el=>el.onclick=()=>{iprodModal=false;iprodD=null;draw();});
@@ -3276,7 +3276,7 @@ SCREEN.subvariant=(c)=>{
       st.nprod=null;st.msg=`생산정보 저장 ✔ ${np.node} (${j.scope==='route'?'R02 route '+j.route_id:'품번키'}) ${j.saved}공정`;
       if(st.rd&&st.rd.route_id)await loadRD(st.rd.route_id);else draw();
     }catch(e){alert('저장 오류: '+e.message);}};
-  const bindNodeProd=()=>{if(!st.nprod)return;const np=st.nprod;
+  const bindNodeProd=()=>{if(!st.nprod)return;const np=st.nprod;const g=id=>c.querySelector(id);   // ★g는 draw 로컬이라 여기 로컬 정의(ReferenceError 방지)
     c.querySelectorAll('#nprod-bg .npf').forEach(el=>{el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(np.rows[i])np.rows[i][k]=el.value;};});
     c.querySelectorAll('#nprod-bg .np-del').forEach(el=>el.onclick=()=>{np.rows.splice(+el.dataset.i,1);draw();});
     c.querySelectorAll('#nprod-bg .np-x').forEach(el=>el.onclick=()=>{st.nprod=null;draw();});
