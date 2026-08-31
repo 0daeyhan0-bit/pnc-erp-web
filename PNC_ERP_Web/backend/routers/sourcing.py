@@ -1295,7 +1295,7 @@ def sourcing_line_delete(payload: dict = Body(...)):
     lid = int(payload.get("line_id") or 0)
     if lid <= 0: raise HTTPException(400, "line_id 필요")
     usr = (str(payload.get("user", "")).strip() or "웹사용자")[:30]
-    nx = _nx(); cur = nx.cursor()
+    nx = _nx_tx(); cur = nx.cursor()   # ★원자화(2026-08-31): DELETE+UPDATE 원자(중간실패=롤백)
     try:
         _ensure_route_tbl(cur)
         cur.execute("SELECT route_id FROM nx.sourcing_route_line WHERE line_id=?", lid)
@@ -1304,7 +1304,10 @@ def sourcing_line_delete(payload: dict = Body(...)):
         rid = int(r[0])
         cur.execute("DELETE FROM nx.sourcing_route_line WHERE line_id=?", lid)
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_user=?, upd_dt=getdate() WHERE route_id=?", usr, rid)
+        nx.commit()
         return {"ok": True, "deleted": lid}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 
