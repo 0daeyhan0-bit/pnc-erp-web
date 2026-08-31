@@ -33,12 +33,48 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'PNC_ERP_Web', 'backend'))
 
-# 대표 확정 10종 (2026-08-31 실측 · 생산+출하 거래건수 상위 완제품)
-ITEMS = ["MJU63357501", "AJJ75838625", "AJR73965506", "AJR73965505", "AJR73965606",
+# 대표 확정 10종 (2026-08-31 실측 · 생산+출하 거래건수 상위 완제품) = 고정 대조군
+FIXED = ["MJU63357501", "AJJ75838625", "AJR73965506", "AJR73965505", "AJR73965606",
          "AJR73965607", "AJR30004702", "AJR30077403", "AJR76582506", "AJR76582505"]
 
 LIMIT = int(os.environ.get("REPLAY_LIMIT", "0") or 0)
 SINCE = os.environ.get("REPLAY_SINCE", "")
+AUTO_TOP = int(os.environ.get("REPLAY_AUTO_TOP", "10") or 0)   # 오늘 도는 품번 자동 추가 수
+
+_ITEMS = {}
+
+
+def items_for(ymd):
+    """재생 대상 = **고정 10종 + 그날 실제로 도는 상위 품번**(대표 확정 2026-09-01 'C').
+
+       왜 — 고정 10종은 *어제* 많이 돈 품번이다. 오늘 그게 안 돌면 재생할 게 없다
+       (실측: 09-01 08:00 기준 10종 거래 0행, 대신 AJR30133602 계열이 돌고 있었다).
+       고정분은 **대조군**으로 남기고, 오늘 흐르는 것을 따라가야 재생이 놀지 않는다.
+    """
+    if ymd in _ITEMS:
+        return _ITEMS[ymd]
+    got = list(FIXED)
+    if AUTO_TOP > 0:
+        try:
+            cur = _cur()
+            cur.execute("""SELECT TOP (%d) x.code FROM (
+                             SELECT LTRIM(RTRIM(ITEM_CODE)) code
+                               FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT WHERE MAINT_YMD=?
+                             UNION ALL
+                             SELECT LTRIM(RTRIM(ITEM_CODE))
+                               FROM PARTNER_ERP.dbo.PU_T_READY_STOCK_MAINT WHERE MAINT_YMD=?
+                             UNION ALL
+                             SELECT LTRIM(RTRIM(ITEM_CODE))
+                               FROM PARTNER_ERP.dbo.PR_T_PROD_DTL WHERE PROD_YMD=?
+                           ) x WHERE x.code<>'' GROUP BY x.code
+                           ORDER BY COUNT(*) DESC""" % AUTO_TOP, ymd, ymd, ymd)
+            for (cd,) in cur.fetchall():
+                if cd not in got:
+                    got.append(cd)
+        except Exception as e:
+            print("  ★재생: 오늘 품번 자동수집 실패 - %s" % str(e)[:100])
+    _ITEMS[ymd] = got
+    return got
 
 # ══════════════════════════════════════════════════════════════════════
 # ★★★재생 대상 판별 — "사람이 입력한 것"만 넣는다 (2026-08-31 실측으로 확정)
@@ -75,8 +111,8 @@ MAT_DERIVED = {"B", "P"}                              # ② 파생 — 재생 �
 KIT_CONFIRM, KIT_CANCEL, KIT_DERIVED = "1", "2", "A"  # ①확인 ①취소 ②파생
 
 
-def _inl():
-    return ",".join("'" + x + "'" for x in ITEMS)
+def _inl(ymd):
+    return ",".join("'" + x + "'" for x in items_for(ymd))
 
 
 def _cur():
@@ -99,7 +135,7 @@ def _mat(cur, ymd):
                           MAINT_QTY, ISNULL(CUST_CODE,''), CONVERT(varchar(8), INSERT_DATETIME, 108)
                      FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
                     WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)%s"""
-                % (_inl(), _since("INSERT_DATETIME")), ymd)
+                % (_inl(ymd), _since("INSERT_DATETIME")), ymd)
     out, skipped, derived = [], {}, 0
     for (my, tag, mat, qty, cust, hms) in cur.fetchall():
         q = float(qty or 0)
@@ -131,7 +167,7 @@ def _kit(cur, ymd):
                           PROC_GUBUN, MAINT_QTY, CONVERT(varchar(8), INSERT_DATETIME, 108)
                      FROM PARTNER_ERP.dbo.PU_T_READY_STOCK_MAINT
                     WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)%s"""
-                % (_inl(), _since("INSERT_DATETIME")), ymd)
+                % (_inl(ymd), _since("INSERT_DATETIME")), ymd)
     out, derived = [], 0
     for (my, tag, item, wo, swo, gpc, qty, hms) in cur.fetchall():
         q = float(qty or 0)
@@ -158,7 +194,7 @@ def _prod(cur, ymd):
     cur.execute("""SELECT WORK_ORDER, SPLIT_WORK_ORDER, LTRIM(RTRIM(ITEM_CODE)), PROD_YMD, PROD_HMS,
                           LINE_NO, PROD_QTY, WORK_CODE, PART_CODE, S_WORK_CODE, FINISH_FLAG
                      FROM PARTNER_ERP.dbo.PR_T_PROD_DTL
-                    WHERE PROD_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % _inl(), ymd)
+                    WHERE PROD_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % _inl(ymd), ymd)
     out = []
     for (wo, swo, item, pymd, phms, line, qty, work, part, sw, fin) in cur.fetchall():
         q = int(float(qty or 0))
@@ -184,7 +220,7 @@ def _ship(cur, ymd):
                           MAINT_QTY, REMARKS, CONVERT(varchar(8), INSERT_DATETIME, 108)
                      FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT
                     WHERE MAINT_YMD=? AND MAINT_TAG='J' AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)%s"""
-                % (_inl(), _since("INSERT_DATETIME")), ymd)
+                % (_inl(ymd), _since("INSERT_DATETIME")), ymd)
     out = []
     for (item, wo, swo, qty, rm, hms) in cur.fetchall():
         q = abs(float(qty or 0))
@@ -225,3 +261,36 @@ def build_replay_cases(ymd):
               % (sum(skipped.values()),
                  ", ".join("tag %s×%d" % (k, v) for k, v in sorted(skipped.items(), key=lambda x: -x[1]))))
     return cases
+
+
+def expected_totals(ymd):
+    """레거시가 그날 만든 **순변화** = 우리가 내야 할 값(채점 기준).
+
+       ★왜 순합인가 — 우리는 사람 입력(①)만 재생하지만, 그걸 받은 우리 시스템은
+         파생(②)을 스스로 만든다. 그러므로 비교는 개별 행이 아니라 **원장 축의 순변화**다.
+           예) 준비재고 = 키팅확인(+) + 키팅취소(-) + 생산소진(-) 을 다 더한 값.
+       ★프로브 축(원장MAT/RDY/ASY/공정실적수량)에 맞춰 돌려준다.
+       ★안 맞으면 그 자체가 발견이다 — 재생하지 못한 유형이 있다는 뜻이거나,
+         우리 파생 계산이 레거시와 다르다는 뜻이다. 어느 쪽인지는 사람이 판단한다.
+    """
+    cur = _cur()
+    inl = _inl(ymd)
+    out = {}
+
+    def one(sql):
+        cur.execute(sql, ymd)
+        return float(cur.fetchone()[0] or 0)
+
+    out["원장RDY"] = one("""SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0)
+                              FROM PARTNER_ERP.dbo.PU_T_READY_STOCK_MAINT
+                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+    out["원장MAT"] = one("""SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0)
+                              FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
+                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+    out["원장ASY"] = one("""SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0)
+                              FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT
+                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+    out["공정실적수량"] = one("""SELECT ISNULL(SUM(CAST(PROD_QTY AS float)),0)
+                              FROM PARTNER_ERP.dbo.PR_T_PROD_DTL
+                             WHERE PROD_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+    return out
