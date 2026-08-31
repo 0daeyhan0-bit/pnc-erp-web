@@ -56,8 +56,9 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
          동일(자도번·USE_QTY·KITTING_FLAG 일치)이라, 웹 다른 화면(bom.py 등)과 기준을 통일함.
        필터(레거시 dw_pr_master_120_l02 조건 이식):
          · 유효일자: FROM_APPLY_YMD<=ymd<=TO_APPLY_YMD
-         · ★KITTING_FLAG='1' 인 것만(=키팅대상). '0'은 팝업 제외(사내SUB 등).
-         · ★VIR_ITEM_FLAG='1'(가상품목) 제외 — 도면에는 있으나 실제 사용 안 하는 품번.
+         · ★VIR_ITEM_FLAG='1'(가상도번)은 묶음 → 자기 자신 대신 하위를 전개(소요량 곱해서 내림).
+         · ★키팅목록 조건 = 투입파트(GAGONG_PROC_CODE) 있음 AND KITTING_FLAG='1'.
+           둘 중 하나라도 아니면 excluded 로 빠져 팝업 하단에 사유와 함께 참고표시된다.
          · USE_QTY>0 만(사용량 0은 소요 없음 → 제외)
          · ★재고 = 자재 입출고현황 화면(/api/live/matinout)과 동일 산식 = 전월말 스냅샷 + 수불누적.
            (구버전은 pu_t_mat_stock 스냅샷을 썼는데 그 값은 음수 누적이라 실제 재고와 달랐음 — 2026-08-18 교정)
@@ -82,18 +83,39 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         #      이 조건에 걸려 전개도 못 하고 탈락 → 그 하위가 통째로 누락됐다.
         #      실증: AJR76582505-2(kit=0·vir=1) 밑 AJR76582505-4-1·MJU66958506 2건 누락
         #            (레거시 21건 vs 웹 19건).
+        #    ★2026-08-31 투입파트(GAGONG_PROC_CODE) 미지정 자재는 키팅 대상이 아니다.
+        #      파트가 없으면 어느 파트창고로 재고를 옮길지 정해지지 않아 키팅도,
+        #      실적 재고차감도 되지 않는다(대표 확인 2026-08-31).
+        #      실증 ADM73210501(레거시 26건 vs 구버전 웹 32건 — 초과 6건이 전부 파트 빈칸):
+        #        ABA74551801(가상,파트S11) 하위 MAZ63872201·MEV64459601
+        #        ABA74570801(가상,파트S11) 하위 MAZ63872601·MEV64461001/101/201
+        #      반대로 08-24에 전개가 맞았던 케이스는 하위에 파트가 있다(같은 규칙으로 동시 설명):
+        #        AJR77163102-S2-1 하위 8건 파트=S11 · AJR76582505-2 하위 2건 파트=S11
+        #      ⟹ 전개 자체는 옳았고, '전개한 하위를 파트로 거르지 않은 것'이 버그였다.
+        #      용접봉 RAC30599301-1(파트'')도 이 규칙으로 자연히 빠진다.
+        #      검증: ADM73210501 26/26 ✔ · AJR77163102 18/18 ✔ (레거시 실측 대조)
+        #    ★키팅제외(KITTING_FLAG<>'1') = BOM관리 '키팅' 미체크. 원래도 제외였으나 WHERE 절에서
+        #      조용히 걸러져 화면에 흔적이 없었다 → WHERE 에서 빼고 excluded 로 넘겨 사유를 노출한다.
+        #      (가상도번은 KITTING_FLAG=0 이어도 전개해야 하므로 vir 판정을 먼저 한다 — 08-25 이력.)
+        #    ★SET_EXCEPT_FLAG(세트제외)는 여기서 거르지 않는다 — 실측 반증.
+        #      레거시 466 목록에 5210A23376A·MJU62096501(둘 다 세트제외='1')이 그대로 나온다.
+        #      세트제외는 BOM관리 표시용 플래그일 뿐 키팅 목록의 제외조건이 아니다.
+        #      (걸렀더니 26→24로 2건 모자랐음. 조건 추가 금지 — 재삽질 방지 메모.)
+        #    ※제외분은 버리지 않고 excluded 로 모아 팝업 하단에 참고표시한다
+        #      (BOM 마스터 미비를 숨기지 않고 드러냄 — 담당자가 파트를 채워야 할 대상).
         _SQL = """
             SELECT a.MAT_CODE,
                    CAST(ISNULL(a.USE_QTY,0) AS float) use_qty,
                    ISNULL(CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
                                ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=m.in_cust) END,'') cust_desc,
                    ISNULL(m.item_name,'') nm,
-                   ISNULL(a.VIR_ITEM_FLAG,'0') vir
+                   ISNULL(a.VIR_ITEM_FLAG,'0') vir,
+                   LTRIM(RTRIM(ISNULL(a.GAGONG_PROC_CODE,''))) gpc,
+                   ISNULL(a.KITTING_FLAG,'0') kit
               FROM PARTNER_ERP_TEST3.nx.CS_M_ITEM_BOM a WITH(NOLOCK)
               JOIN PARTNER_ERP_TEST3.nx.item m WITH(NOLOCK) ON m.ITEM_CODE=a.MAT_CODE
              WHERE a.ITEM_CODE=?
                AND a.FROM_APPLY_YMD<=? AND a.TO_APPLY_YMD>=?
-               AND (ISNULL(a.KITTING_FLAG,'0')='1' OR ISNULL(a.VIR_ITEM_FLAG,'0')='1')
                AND ISNULL(a.EXCEPT_FLAG,'0')<>'1'
                AND CAST(ISNULL(a.USE_QTY,0) AS float) > 0
              ORDER BY a.MAT_CODE"""
@@ -102,9 +124,10 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
             cur.execute(_SQL, code, d6, d6)
             return [{"mat": str(r[0] or '').strip(), "use_qty": float(r[1] or 0),
                      "cust": str(r[2] or '').strip(), "nm": str(r[3] or '').strip(),
-                     "vir": str(r[4] or '0')} for r in cur.fetchall()]
+                     "vir": str(r[4] or '0'), "gpc": str(r[5] or '').strip(),
+                     "kit": str(r[6] or '0').strip()} for r in cur.fetchall()]
 
-        bom, _seen, _stack = [], set(), [(it, 1.0, 0)]
+        bom, excluded, _seen, _stack = [], [], set(), [(it, 1.0, 0)]
         while _stack:
             _code, _mult, _dep = _stack.pop(0)
             if _dep > 8:          # 순환/과도한 깊이 방어
@@ -118,7 +141,16 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
                         _stack.append((b["mat"], _mult * b["use_qty"], _dep + 1))
                     continue
                 b["use_qty"] *= _mult
+                _kit, _gpc = b.pop("kit", '0'), b.pop("gpc", '')
                 b.pop("vir", None)
+                # 제외사유 판정(둘 다 해당되면 사유를 합쳐 표시)
+                _why = []
+                if not _gpc:     _why.append("투입파트 미지정")
+                if _kit != '1':  _why.append("키팅제외")
+                if _why:
+                    b["why"] = " · ".join(_why)
+                    excluded.append(b)
+                    continue
                 bom.append(b)
         # 같은 자도번이 여러 경로로 오면 소요량 합산(레거시 전개 동일)
         _agg = {}
@@ -186,10 +218,13 @@ def ready_setcheck(item: str = Query(...), ymd: str = Query(""), qty: float = Qu
         #   재고가 음수면 세트가능도 음수 → 실적이 안 잡히는 게 현 시점 정상 동작(사용자 확인 2026-08-18).
         set_able = min([x["set_able"] for x in rows]) if rows else 0
         need = float(qty or 0)
+        # ★키팅제외분 — 세트가능 계산에는 안 들어가지만 참고용으로 함께 내려준다(팝업 하단 표시).
+        excl = sorted(excluded, key=lambda x: x["mat"])
         return {"item": it, "ymd": d6, "rows": rows, "cnt": len(rows),
                 "set_able": set_able, "need_qty": need,
                 "ok": bool(rows) and set_able >= need and need > 0,
-                "shortage": [x for x in rows if x["set_able"] < need]}
+                "shortage": [x for x in rows if x["set_able"] < need],
+                "excluded": excl, "excl_cnt": len(excl)}
     finally:
         cn.close()
 
@@ -417,7 +452,9 @@ def ready_commit(payload: dict = Body(...)):
          · 전표는 SHEET_NO 1건만 삭제(payload.sheet_no 지정, 없으면 웹발행 최신 1건).
            생산실적이 잡힌 전표(PROD_FIN_FLAG='1')는 삭제 대상에서 제외.
 
-       ★소요량 = CS_M_ITEM_BOM(KITTING_FLAG='1', VIR_ITEM_FLAG<>'1', USE_QTY>0, 유효일자) 기준.
+       ★소요량 = ready_setcheck() 를 그대로 호출해서 얻는다(=팝업과 동일 목록·동일 규칙).
+         가상도번 전개 · 투입파트 미지정 제외 · 키팅 미체크 제외가 자동으로 함께 적용된다.
+         ※여기서 BOM을 따로 조회하지 말 것 — 팝업과 차감이 어긋나면 재고가 안 맞는다.
        ★재고부족(세트가능 < 요청)이면 등록 거부 — 프론트에서도 완료버튼 비활성이지만 서버에서도 재검증.
        ★쓰기는 nx만(CLAUDE.md §1). 라이브 PARTNER_ERP 무변경.
        ★4단계는 원자적 처리(_nx_tx) — 하나라도 실패하면 전부 롤백."""
@@ -449,7 +486,12 @@ def ready_commit(payload: dict = Body(...)):
         return {"ok": False, "detail": f"자재부족 — 세트가능 {chk.get('set_able')} < 요청 {qty:g}"}
 
     tx = _nx_tx(); cur = tx.cursor()
-    _assert_open(cur, d6, "MAT", "생산준비 실적등록")   # ★마감잠금
+    # ★마감잠금은 **재고가 실제로 움직이는 날(today6)** 로 검사한다(2026-08-31 수정).
+    #   종전엔 계획일자(d6)로 검사해, 오늘은 열려 있는데 과거 계획일이 마감됐다는 이유로
+    #   준비등록이 거부됐다("260827 일마감된 일자입니다" — 실사용 오류).
+    #   원장은 이미 MAINT_YMD=today6 로 쓴다(아래 514행 주석·524행) — 검사 기준만 어긋나 있었다.
+    #   마감의 취지 = "그 날짜 재고를 더는 못 바꾼다" 이므로 발생일 기준이 맞다.
+    _assert_open(cur, today6, "MAT", "생산준비 실적등록")   # ★마감잠금(재고발생일=오늘)
     try:
         WIN = 'w_pr_input_460_new'
         # ★취소 잔량 검증 — 준비재고보다 많이 취소하면 재고가 음수로 내려감(중복취소 방지).

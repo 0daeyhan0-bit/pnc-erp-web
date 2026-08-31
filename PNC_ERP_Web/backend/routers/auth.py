@@ -60,6 +60,13 @@ def _token_of(request):
     return (request.headers.get("x-auth-token") or "").strip()
 
 
+# ★국내 절삭협력사(사용자 지정 명단, 2026-08-31) — 이 협력사들은 '협력사 발주현황(일반)'을 보지 않고
+#   '협력사 계획현황'을 사용한다(포털 발주현황 탭 숨김). 나머지 협력사 = 일반 = 발주현황 노출.
+#   코드 = CM_M_CUST.CUST_CODE. 대원2148·명진2306·미래정밀2096·세광2142·수테크2250·썬텍코리아233·
+#   이젠터2068·중앙정밀2048·케이비2266·MTS2067·SKNT2030.
+CUTTING_COOP_CODES = {"2148", "2306", "2096", "2142", "2250", "233",
+                      "2068", "2048", "2266", "2067", "2030"}
+
 def _load_user(cur, uid):
     cur.execute("""SELECT user_id,name,utype,dept,pos,roles,partner_code,email,tel,status
                      FROM nx.app_user WHERE user_id=?""", uid)
@@ -70,10 +77,12 @@ def _load_user(cur, uid):
         roles = json.loads(r[5] or "[]")
     except Exception:
         roles = []
+    _pc = (r[6] or "").strip() or None
     return {"id": str(r[0]).strip(), "nm": (r[1] or "").strip(), "utype": (r[2] or "내부").strip(),
             "dept": (r[3] or "").strip(), "pos": (r[4] or "").strip(), "roles": roles,
-            "partner_code": (r[6] or "").strip() or None, "email": (r[7] or "").strip(),
-            "tel": (r[8] or "").strip(), "status": (r[9] or "사용").strip()}
+            "partner_code": _pc, "email": (r[7] or "").strip(),
+            "tel": (r[8] or "").strip(), "status": (r[9] or "사용").strip(),
+            "is_cutting": bool(_pc and _pc in CUTTING_COOP_CODES)}
 
 
 # ★토큰 캐시 — 인증을 **모든 요청**에 걸면 요청마다 SELECT×2 + UPDATE 가 된다.
@@ -131,6 +140,12 @@ OPEN_PATHS = {
 }
 OPEN_PREFIX = (
     "/api/_flow/",        # TestBed 제어(롤백서버에만 존재)
+    # ★바코드·QR 이미지 생성(2026-08-31 추가) — 인쇄물의 <img src> 로 로드된다.
+    #   08-29 전역 인증게이트 도입 때 예외에서 빠져 401 → 가간판·라벨·전표의 바코드/QR 이
+    #   전부 **깨진 이미지 아이콘**으로 출력됐다(그 전에는 정상 출력, 실물 확인 2026-08-31).
+    #   ※인쇄 팝업의 <img> 요청은 쿠키가 실리지 않는 경우가 있어 인증을 요구하면 안 된다.
+    #   ※입력값(text)을 그대로 그림으로 만들 뿐 DB 를 읽지 않으므로 정보노출 위험 없음.
+    "/api/barcode/",
 )
 
 # ★협력사 계정이 부를 수 있는 경로 — 여기 없는 것은 403.

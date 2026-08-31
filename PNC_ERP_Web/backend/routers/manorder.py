@@ -195,6 +195,14 @@ def manorder_items(cc: str = Query(...), ym: str = Query("")):
             rn3.close()
         for r in rows:
             r["po_qty"] = round(float(r.get("po_qty") or 0) + mo_open.get(str(r["ic"]).strip().upper(), 0.0), 3)
+        # ★협력사재고(참고용, 2026-08-31) — 대상 14협력사 사급 보유 합산(부호유지). 순소요/추가발주 계산 미반영.
+        csx = _nx(); csc = csx.cursor()
+        try:
+            csm = _coop_stock_map(csc, [r["ic"] for r in rows])
+        finally:
+            csx.close()
+        for r in rows:
+            r["coop_stock"] = csm.get(str(r["ic"]).strip().upper(), 0.0)
         cn2 = _conn(); c2 = cn2.cursor()
         try:
             c2.execute("SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=?", cc)
@@ -280,10 +288,36 @@ def manorder_save(payload: dict = Body(...)):
 
 
 # ================= 협력사 발주현황 (협력사 포털·조회전용, 2026-08-30) =================
+# ★협력사재고(참고용) 집계 대상 협력사 (사용자 확정 2026-08-31, 14곳) — 우리(PNC)가 사급 출고한 부품 보유처.
+#   국내 절삭협력사 11곳(auth.CUTTING_COOP_CODES) + FONE THAI(2337)·지성테크(2049)·시영(2023).
+#   ★참고용 표시 전용 — 순소요/추가발주 계산엔 미반영(협력사재고 정리작업 예정). 음수 잔고는 0으로.
+COOP_STOCK_CUSTS = {"2148", "2306", "2096", "2142", "2250", "233", "2068", "2048", "2266", "2067", "2030",
+                    "2337", "2049", "2023"}
+
+def _coop_stock_map(cur, mats):
+    """품번별 협력사 보유 사급재고 합산(참고용). 대상 협력사(COOP_STOCK_CUSTS)의 nx.sagub_maint 잔고.
+       ★한 품번이 여러 협력사에 있으면 **원시 합산**(부호 유지) — 협력사 재고장(sagubledger) 잔고 합과 동일.
+       음수(이력 부분성 노이즈)는 프론트에서 '(음수)0'으로 표시(정리작업 대상 가시화). migration 행 제외(수불장 정본 동일)."""
+    mm = sorted({str(m).strip().upper() for m in mats if str(m or "").strip()})
+    res = {}
+    if not mm:
+        return res
+    cph = ",".join("?" * len(COOP_STOCK_CUSTS)); cvals = list(COOP_STOCK_CUSTS)
+    for i in range(0, len(mm), 900):
+        ch = mm[i:i+900]; mph = ",".join("?" * len(ch))
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(mat_code))) mat, SUM(CAST(maint_qty AS float)) cs
+                FROM nx.sagub_maint
+               WHERE ISNULL(remarks_src,'')<>'migration' AND cust_code IN ({cph})
+                 AND UPPER(LTRIM(RTRIM(mat_code))) IN ({mph})
+               GROUP BY UPPER(LTRIM(RTRIM(mat_code)))""", *cvals, *ch)
+        for r in cur.fetchall():
+            res[str(r[0]).strip()] = round(float(r[1] or 0), 2)
+    return res
+
 @router.get("/api/coopporder/items")
 def coopporder_items(request: Request, cust: str = Query("")):
     """협력사가 로그인해 보는 발주현황. ★소속강제(협력사 계정=자기 업체만). 수동발주 items 재사용(같은 소스).
-       컬럼: 품목·품명·현재재고·기발주(PNC가 나에게 발주)·계획수량(4주 생산계획)·LG물동(5~8주·제외분). 조회전용."""
+       컬럼: 품목·품명·현재재고(당사)·협력사재고(참고·사급보유합산)·기발주·계획수량(4주)·LG물동(5~8주). 조회전용."""
     from routers.auth import require_user, scope_cust
     u = require_user(request)
     cc = scope_cust(u, cust)
@@ -295,6 +329,7 @@ def coopporder_items(request: Request, cust: str = Query("")):
     r = manorder_items(cc=cc, ym="")
     out = [{"ic": x["ic"], "nm": x["nm"], "unit": x.get("unit", "EA"),
             "stock_qty": x["stock_qty"], "po_qty": x["po_qty"],           # 기발주=PNC 발주(PU+manual_order)
+            "coop_stock": x.get("coop_stock", 0.0),                       # 협력사재고(참고·manorder_items 계산)
             "plan_qty": x["plan_qty"], "week_qty": x.get("week_qty", [0, 0, 0, 0]),  # 계획 4주 총·주별
             "days": x.get("days", {}),                                    # 일별(펼치기용)
             "muldong_soyo": x["muldong_soyo"]}                            # 물동=5~8주(제외분)

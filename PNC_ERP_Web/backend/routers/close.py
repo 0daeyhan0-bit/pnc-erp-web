@@ -380,12 +380,18 @@ def _ta_build(cur, d_from, d_to, basic):
 
     # 단가 마스터 폴백(레거시 UPDATE U3/V3). 레거시는 ITEM_COST×기준환율이나 환율은 창 변수 →
     # 원화 단가만 사용(외화 품목 2건 수준 차이, 검증기록 §7-2).
+    # ★2026-08-31 단가 소스 이관: 라이브 dbo.PR_M_ITEM_COST → 정본 nx.price_item('매입', DO_NOT_USE §18).
+    #   컷오버 시 라이브 차단→폴백 금지(§1-9-1). COST_TAG='1'=price_type='매입'. LG 사급가(vendor='LG')는 실매입원가
+    #   아니므로 제외(라이브엔 없음). 라이브 vs 클린 전품목 대조: 9834/9872 동일, 잔여 38=동일데이터·같은날짜 동점
+    #   (라이브도 비결정적이던 것)·이 mcost는 최후폴백(기초0·입고0)만 쓰여 영향 극미. main_flag/vendor tiebreak 로 결정화.
     cur.execute("""SELECT ITEM_CODE, ITEM_COST FROM (
-                     SELECT ITEM_CODE, CAST(ITEM_COST AS float) ITEM_COST,
-                            ROW_NUMBER() OVER(PARTITION BY ITEM_CODE ORDER BY COST_APPLY_YMD DESC) rn
-                       FROM PARTNER_ERP.dbo.PR_M_ITEM_COST
-                      WHERE COST_TAG = '1' AND COST_APPLY_YMD <= ?
-                        AND ISNULL(CURRENCY,'KRW') IN ('KRW','')) t WHERE rn = 1""", d_to[:4] + '99')
+                     SELECT LTRIM(RTRIM(item_code)) ITEM_CODE, CAST(price AS float) ITEM_COST,
+                            ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(item_code)) ORDER BY apply_ymd DESC,
+                                              ISNULL(main_flag,'') DESC, LTRIM(RTRIM(ISNULL(vendor_code,''))) ASC) rn
+                       FROM PARTNER_ERP_TEST3.nx.price_item
+                      WHERE price_type = N'매입' AND apply_ymd <= ?
+                        AND ISNULL(currency,'KRW') IN ('KRW','')
+                        AND LTRIM(RTRIM(ISNULL(vendor_code,''))) <> 'LG') t WHERE rn = 1""", d_to[:4] + '99')
     mcost = {str(r[0]).strip().upper(): float(r[1] or 0) for r in cur.fetchall()}
 
     for m, d in R.items():                   # TRANS 금액 (레거시 UPDATE 순서 U1~U4)

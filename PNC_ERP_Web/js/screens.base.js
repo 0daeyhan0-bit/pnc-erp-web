@@ -62,11 +62,14 @@ SCREEN.lgbomview=(c)=>{
   const API=API_BASE;
   const won=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:4});
   const WK={DMZ:"DMZ(SAC)",DGZ:"DGZ(RAC)"};
-  let st={q:"",werks:"",models:[],sel:null,modelnm:"",tree:[],vers:[],selVer:"",msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
+  let st={q:"",werks:"",upwerks:"",models:[],sel:null,modelnm:"",tree:[],vers:[],selVer:"",msortKey:"",msortDir:1,loading:false,tloading:false,uploading:false,upmsg:""};
   const doUpload=async(f)=>{if(!f)return;
     if(!/\.(xlsx|xls)$/i.test(f.name||"")){st.upmsg="❌ 엑셀 파일(.xlsx/.xls)만 업로드할 수 있습니다";draw();return;}
+      // ★공장은 파일에 없을 수 있다 — LG 화면 내보내기(26컬럼)엔 WERKS 컬럼이 없다.
+      //   조회필터(공장)를 쓰면 "전체"일 때 빈값으로 적재되므로 업로드 전용 선택을 강제한다.
+      if(!st.upwerks){st.upmsg="❌ 업로드 공장을 먼저 선택하세요 — RAC(DGZ) / SAC(DMZ)";draw();return;}
     st.uploading=true;st.upmsg="";draw();
-    try{const fd=new FormData();fd.append("file",f);
+    try{const fd=new FormData();fd.append("file",f);fd.append("werks",st.upwerks||"");   // ★업로드 전용 공장(조회필터 아님)
       const r=await fetch(`${API}/api/lgbom/upload`,{method:"POST",body:fd});
       let j={};try{j=await r.json();}catch(e){}
       if(r.ok&&j.ok){st.upmsg=`✅ 업로드 완료 — ${won(j.rows)}행 · 모델 ${(j.models||[]).length}개 적재 (${(j.models||[]).join(", ").slice(0,70)})`;st.q=(j.models||[])[0]||st.q;st.uploading=false;await search();return;}
@@ -107,7 +110,11 @@ SCREEN.lgbomview=(c)=>{
        <label class="tl" style="margin-left:8px">공장</label><select class="inp" id="lb-wk"><option value="">전체</option><option value="DMZ" ${st.werks==="DMZ"?"selected":""}>DMZ(SAC)</option><option value="DGZ" ${st.werks==="DGZ"?"selected":""}>DGZ(RAC)</option></select>
        <button class="btn" id="lb-go">🔍 조회</button>
        <div class="spacer"></div>
-       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #1c7c3a;border-radius:8px;padding:14px 30px;min-width:560px;text-align:center;background:#eaf7ef;color:#1c7c3a;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer">엑셀을 여기로 <b>드래그&드롭</b></span>
+       <div style="flex:0 0 auto;border:1px solid #cfe0f5;border-radius:8px;padding:6px 12px;background:#fbfdff;display:flex;flex-direction:column;justify-content:center;white-space:nowrap">
+         <div style="font-size:11px;color:#5a7597;margin-bottom:4px">업로드 공장 <span style="color:#c0392b">*</span></div>
+         <div style="display:flex;gap:12px"><label class="rl"><input type="radio" name="lb-upwk" value="DGZ"${st.upwerks==='DGZ'?' checked':''}> RAC(DGZ)</label><label class="rl"><input type="radio" name="lb-upwk" value="DMZ"${st.upwerks==='DMZ'?' checked':''}> SAC(DMZ)</label></div>
+       </div>
+       <span id="lb-drop" title="엑셀 파일을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed ${st.upwerks?'#1c7c3a':'#8fb4d6'};border-radius:8px;padding:14px 24px;min-width:460px;text-align:center;background:${st.upwerks?'#eaf7ef':'#f4f9fe'};color:${st.upwerks?'#1c7c3a':'#8aa0bd'};font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer">LG BOM 엑셀 <b>드래그&드롭</b> 또는 클릭 <span style="color:#8aa0bd;font-weight:400;margin-left:4px">(공장 선택 후)</span></span>
        <input type="file" id="lb-file" accept=".xlsx,.xls" style="display:none">
        <button class="btn" id="lb-upload" style="background:#1c7c3a;color:#fff"${st.uploading?' disabled':''}>${st.uploading?'업로드중…':'⬆ LG BOM 업로드'}</button>
        <button class="btn xls" id="lb-xls">⬇ 엑셀</button>
@@ -147,6 +154,7 @@ SCREEN.lgbomview=(c)=>{
     const q=g("#lb-q");q.oninput=x=>st.q=x.target.value;q.onkeydown=x=>{if(x.key==="Enter")search();};
     g("#lb-wk").onchange=x=>st.werks=x.target.value;g("#lb-go").onclick=search;
     const fe=g("#lb-file"),ub=g("#lb-upload"),dz=g("#lb-drop");
+    c.querySelectorAll('input[name="lb-upwk"]').forEach(el=>el.onchange=()=>{st.upwerks=el.value;st.upmsg="";draw();});
     if(ub&&fe){ub.onclick=()=>fe.click();fe.onchange=()=>{doUpload(fe.files&&fe.files[0]);fe.value="";};}
     {const xb=g("#lb-xls");if(xb)xb.onclick=()=>{
       if(st.sel&&st.tree.length){

@@ -432,8 +432,8 @@ def coopquote_bom_form(item: str = Query(..., description="품번(Assy)"), vendo
         for i in range(0, len(nl), 900):
             chunk = [c.replace("'", "") for c in nl[i:i+900]]; inl = "','".join(chunk)
             cur.execute(f"""WITH C AS (
-            # ★2026-08-29 단가정본 이관(대표 승인) — 위 단건과 같은 규칙의 일괄판.
-            #   미러는 매입행이 없으면 판가(1010)로 넘어갔다. 클린은 업로드 사급가(vendor='LG')를 집는다.
+            -- ★2026-08-29 단가정본 이관(대표 승인) — 위 단건과 같은 규칙의 일괄판.
+            --   미러는 매입행이 없으면 판가(1010)로 넘어갔다. 클린은 업로드 사급가(vendor='LG')를 집는다.
                   SELECT UPPER(LTRIM(RTRIM(item_code))) ic, price ITEM_COST, apply_ymd COST_APPLY_YMD,
                     ROW_NUMBER() OVER (PARTITION BY UPPER(LTRIM(RTRIM(item_code)))
                       ORDER BY (CASE WHEN price_type='매입' THEN 0 ELSE 1 END), apply_ymd DESC,

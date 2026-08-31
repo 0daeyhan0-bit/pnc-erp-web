@@ -31,6 +31,13 @@ YMD = sys.argv[1] if len(sys.argv) > 1 else "260630"
 LIM = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 TOL = 1.0
 
+def _new_engine():
+    """엔진 재생성 — 네트워크가 끊기면 싱글턴 엔진의 커넥션이 죽은 채 남는다.
+       ★common 에 이미 정식 인자가 있다: `_get_cost_engine(fresh=True)` 가 기존 엔진을 close 하고
+         새로 만든다(싱글턴 변수 `_COST_ENG`). 여기서 캐시 변수를 추측해 건드리지 않는다."""
+    return _get_cost_engine(fresh=True)
+
+
 eng = _get_cost_engine()
 cn = CO._conn(); cur = cn.cursor()
 cur.execute("SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.CS_M_ITEM_BOM ORDER BY 1")
@@ -43,13 +50,24 @@ print("  원가 전수 대조 — 레거시 SP vs nx 엔진   (ymd={} · {:,}종
 print("=" * 84)
 
 t0 = time.time()
-ok = 0; diff = []; skip = 0; oerr = 0; eerr = 0
+ok = 0; diff = []; skip = 0; oerr = 0; eerr = 0; oerr_kinds = {}; eerr_kinds = {}
 for i, it in enumerate(items, 1):
     try:
         o = CO.get_oracle(it, YMD, cur)
         oj = o['sil']['jae']
     except Exception as e:
+        # ★예외를 조용히 삼키지 않는다 — 2026-08-31 실측: 일시장애로 5,881건이
+        #   예외 처리되어 '빨리 끝난' 것처럼 보였다(앞 실행은 예외 0).
+        #   사유를 모으고, 예외가 10% 넘으면 결과 자체를 무효로 본다.
         oerr += 1
+        oerr_kinds[str(e)[:60]] = oerr_kinds.get(str(e)[:60], 0) + 1
+        if oerr <= 3:
+            print("  ★오라클예외 {} — {}".format(it, str(e)[:80]))
+        try:
+            cn.close()
+        except Exception:
+            pass
+        cn = CO._conn(); cur = cn.cursor()   # 재연결 후 계속
         continue
     if oj is None:
         skip += 1
@@ -58,9 +76,17 @@ for i, it in enumerate(items, 1):
         m = eng.material(it, YMD)
         ej = float(m['base'] if isinstance(m, dict) and 'base' in m else m)
     except Exception as e:
+        # ★엔진 커넥션도 되살린다 — 2026-08-31 실측: 네트워크가 끊겼다 붙자 오라클만 재연결되고
+        #   엔진 커넥션은 죽은 채로 남아 **1,838종이 통째로 빠졌다**(08S01 통신 연결 오류 연쇄).
+        #   한쪽만 살리면 나머지가 조용히 미검증으로 남는다.
         eerr += 1
+        eerr_kinds[str(e)[:60]] = eerr_kinds.get(str(e)[:60], 0) + 1
         if eerr <= 3:
             print("  ★엔진예외 {} — {}".format(it, str(e)[:70]))
+        try:
+            eng = _new_engine()
+        except Exception:
+            pass
         continue
     if abs(ej - float(oj)) <= TOL:
         ok += 1
@@ -71,15 +97,33 @@ for i, it in enumerate(items, 1):
 
 print("\n" + "=" * 84)
 print("  대상 {:,}종 · {:.0f}초".format(len(items), time.time() - t0))
+if oerr:
+    print("  ★오라클예외 사유별:")
+    for k, v in sorted(oerr_kinds.items(), key=lambda x: -x[1])[:5]:
+        print("      {:>5}건  {}".format(v, k))
+if eerr:
+    print("  ★엔진예외 사유별:")
+    for k, v in sorted(eerr_kinds.items(), key=lambda x: -x[1])[:5]:
+        print("      {:>5}건  {}".format(v, k))
+if True:
+    # ★미검증 = 오라클예외 + 엔진예외. 한쪽만 보면 반쪽짜리 가드다
+    #   (2026-08-31 실측: 엔진예외 1,838 인데 경고가 안 떴다).
+    _un = oerr + eerr
+    if _un > len(items) * 0.1:
+        print("  ★★결과 무효 — 미검증 {:,}종({:.1f}%). 판단하지 말 것.".format(_un, _un*100.0/len(items)))
 print("  일치 {:,} · 불일치 {:,} · 오라클무값 {:,} · 오라클예외 {:,} · 엔진예외 {:,}".format(
     ok, len(diff), skip, oerr, eerr))
 # ★전체 불일치를 CSV 로 남긴다 — 상위 20 만 보면 군집 분석이 안 된다.
 if diff:
-    csvp = os.path.join(R, "_migration", "cost_diff_{}.csv".format(YMD))
+    # ★부분실행(LIM)은 파일명을 나눠 전수 결과를 덮지 않게 한다
+    #   — 2026-08-31 실측: 40종 스모크가 605행 전수 CSV 를 덮어썬다.
+    csvp = os.path.join(R, "_migration",
+                        "cost_diff_{}{}.csv".format(YMD, "_lim{}".format(LIM) if LIM else ""))
     with io.open(csvp, "w", encoding="utf-8-sig") as f:
         f.write("item,sp_jae,engine_jae,diff" + chr(10))
         for k, a, b, d in sorted(diff, key=lambda x: -abs(x[3])):
-            f.write("{},{:.2f},{:.2f},{:.2f}".format(k, a, b, d) + chr(10))
+            # 품번에 줄바꿈이 섞인 것이 있다(PQ091503C01.AKOR) — 공백류를 없애야 CSV 가 안 깨진다
+            f.write("{},{:.2f},{:.2f},{:.2f}".format(''.join(str(k).split()), a, b, d) + chr(10))
     print(chr(10) + "  전체 불일치 CSV: {}".format(csvp))
     from collections import Counter
     cl = Counter(round(d, 2) for _, _, _, d in diff)

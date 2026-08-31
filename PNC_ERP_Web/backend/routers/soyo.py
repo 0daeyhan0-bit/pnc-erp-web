@@ -20,6 +20,29 @@ _P = "nx."   # ★nx전환 확정(2026-08-12). ★단일BOM 통일(2026-08-13): 
 
 @router.post("/api/plan/compose_mat")
 def plan_compose_mat(payload: dict = Body(...)):
+    """★은퇴한 편성 경로 — 실행 금지(2026-08-31 가드).
+
+       왜 막는가(실측 사고):
+         이 경로와 planrev.py 는 **같은 nx.plan_part_dtl 에 쓰는데 컬럼 구성이 다르다**.
+           soyo    19개 컬럼
+           planrev 27개 컬럼 (+OUTPUT_HM·AMPM·CUM_LT_HR·PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)
+         편성이 테이블을 DROP 후 재생성하므로, 이 경로를 한 번 돌리면 컬럼 6개가 사라지고
+         그 컬럼을 참조하는 뷰 nx.v_plan_part_copy_new 가 깨진다
+         → 파트별 생산계획(410)·준비실적처리(키팅)·가공생산진척(420) 조회 불가.
+         (2026-08-31 실측: 이 함수를 직접 호출해 410 이 "백엔드 연결 실패"로 막혔다)
+
+       정본 = 생산계획업로드[검토] 화면 → planrev.py (/api/planrev/step/*, /compose_all).
+       화면도 2026-08-28 에 메뉴에서 숨겨졌다(core.js: SCREEN.planupload).
+
+       되살리려면: 아래 raise 를 지우기 전에 STEP6 이 위 6개 컬럼을 함께 만들도록
+                   맞추고, v_plan_part_copy_new 로 검증할 것.
+    """
+    raise HTTPException(410,
+        "은퇴한 편성 경로입니다 — 「생산계획업로드[검토]」 화면을 사용하세요.\n\n"
+        "이 경로로 편성하면 nx.plan_part_dtl 의 컬럼 6개(OUTPUT_HM·AMPM·CUM_LT_HR·"
+        "PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)가 사라져 뷰 v_plan_part_copy_new 가 깨지고, "
+        "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회가 막힙니다.")
+
     nx = _nx(); cur = nx.cursor()
     try:
         # ── ★D 사전검증(§19-D·2026-08-25): 활성 지정된 대체경로(Rnn)가 게이트(승인·구조·업체·단가) 미충족이면
@@ -464,6 +487,22 @@ def sales_forecast_sagub_rebuild():
         nx.close()
 
 def _step6_sql(cur):
+    """★은퇴 — 직접 호출 금지(2026-08-31 2차 가드).
+
+       1차 가드는 엔드포인트 plan_compose_mat 에만 걸어 두었는데, 이 **내부 함수는
+       그대로 노출**돼 있어 스크립트에서 직접 부르면 그대로 실행됐다.
+       실제로 그날 09:09 정상 편성(27컬럼) 이후 작업로그에 아무 기록 없이
+       nx.plan_part_dtl 이 19컬럼으로 되돌아가 파트별 생산계획(410)이 0건이 됐다
+       (편성 로그를 남기지 않는 = 웹 편성 화면이 아닌 경로로 불렸다는 뜻).
+       → 함수 진입에서 막는다. 정본은 planrev._step6_sql(27컬럼).
+
+       ※같은 이유로 _step7_sql 도 planrev 쪽을 쓸 것."""
+    raise RuntimeError(
+        "은퇴한 편성 함수입니다(soyo._step6_sql) — planrev 를 쓰세요.\n"
+        "이 함수는 nx.plan_part_dtl 을 19컬럼으로 재생성해 뷰 v_plan_part_copy_new 를 깨뜨리고, "
+        "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회를 막습니다.\n"
+        "정본 = routers/planrev.py 의 _step6_sql (27컬럼) · 화면 「생산계획업로드[검토]」")
+
     P = _P
     _route_setup(cur)   # ★P6: plan_route_active(활성 R02) 준비 — 공정 route-aware 오버레이용. STEP7도 재호출(멱등·동일결과)
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
@@ -599,6 +638,12 @@ def _route_setup(cur):
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
 def _step7_sql(cur):
+    """★은퇴 — 직접 호출 금지(2026-08-31 2차 가드). _step6_sql 과 같은 이유.
+       정본 = routers/planrev.py 의 _step7_sql."""
+    raise RuntimeError(
+        "은퇴한 편성 함수입니다(soyo._step7_sql) — planrev 를 쓰세요.\n"
+        "정본 = routers/planrev.py · 화면 「생산계획업로드[검토]」")
+
     P = _P
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
