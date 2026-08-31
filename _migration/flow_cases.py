@@ -618,6 +618,19 @@ def _cancel_check(res, ctx):
 
 CASES += AUTH_CASES + SETIN_CASES
 
+# ── 재생 파일럿(2026-09-01 · 대표 지시) ─────────────────────────────────
+#   REPLAY_YMD 가 설정됐을 때만 레거시 거래를 **우리 API 로 다시 입력**하는 케이스를 덧붙인다.
+#   ★데이터를 직접 넣지 않는다 — 하네스가 HTTP 로 라우터를 부른다(그래야 게이트·검증이 걸린다).
+#   평소 스위트에는 영향이 없다(환경변수 없으면 아무것도 안 붙는다).
+import os as _os
+if _os.environ.get('REPLAY_YMD'):
+    try:
+        from replay_cases import build_replay_cases as _brc
+        CASES += _brc(_os.environ['REPLAY_YMD'])
+    except Exception as _e:
+        print('  ★재생 케이스 로드 실패: %s' % _e)
+
+
 # 세트입고 왕복용 픽스처 (쓰기 전에 미리 읽는다)
 FIXTURES += [
     ("plan_sheet", """SELECT TOP 1 h.sheet_no, COUNT(d.mat_code)
