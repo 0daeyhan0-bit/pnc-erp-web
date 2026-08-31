@@ -487,6 +487,22 @@ def sales_forecast_sagub_rebuild():
         nx.close()
 
 def _step6_sql(cur):
+    """★은퇴 — 직접 호출 금지(2026-08-31 2차 가드).
+
+       1차 가드는 엔드포인트 plan_compose_mat 에만 걸어 두었는데, 이 **내부 함수는
+       그대로 노출**돼 있어 스크립트에서 직접 부르면 그대로 실행됐다.
+       실제로 그날 09:09 정상 편성(27컬럼) 이후 작업로그에 아무 기록 없이
+       nx.plan_part_dtl 이 19컬럼으로 되돌아가 파트별 생산계획(410)이 0건이 됐다
+       (편성 로그를 남기지 않는 = 웹 편성 화면이 아닌 경로로 불렸다는 뜻).
+       → 함수 진입에서 막는다. 정본은 planrev._step6_sql(27컬럼).
+
+       ※같은 이유로 _step7_sql 도 planrev 쪽을 쓸 것."""
+    raise RuntimeError(
+        "은퇴한 편성 함수입니다(soyo._step6_sql) — planrev 를 쓰세요.\n"
+        "이 함수는 nx.plan_part_dtl 을 19컬럼으로 재생성해 뷰 v_plan_part_copy_new 를 깨뜨리고, "
+        "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회를 막습니다.\n"
+        "정본 = routers/planrev.py 의 _step6_sql (27컬럼) · 화면 「생산계획업로드[검토]」")
+
     P = _P
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
@@ -577,6 +593,12 @@ def _route_setup(cur):
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
 def _step7_sql(cur):
+    """★은퇴 — 직접 호출 금지(2026-08-31 2차 가드). _step6_sql 과 같은 이유.
+       정본 = routers/planrev.py 의 _step7_sql."""
+    raise RuntimeError(
+        "은퇴한 편성 함수입니다(soyo._step7_sql) — planrev 를 쓰세요.\n"
+        "정본 = routers/planrev.py · 화면 「생산계획업로드[검토]」")
+
     P = _P
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).

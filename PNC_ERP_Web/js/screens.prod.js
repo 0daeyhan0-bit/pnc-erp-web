@@ -1836,7 +1836,7 @@ SCREEN.planinput=(host)=>{
     const dhead=D.map(d=>`<th class="num" style="min-width:36px;${wke(d.wd)}" title="${esc(d.ymd)}">${esc(d.mmdd)}<br><span style="font-size:9px">${esc(d.dow)}</span></th>`).join('');
     host.innerHTML=`
      <div class="page-title">➕ 생산계획추가입력 <span style="font-size:12px;color:var(--muted);font-weight:400">일자별 계획 매트릭스 · nx.prod_plan_input(레거시 PR_T_PLAN_INPUT 이관본)</span></div>
-     <div class="page-sub">레거시 <code>w_pr_plan_060 / dw_pr_plan_060_1</code> 재현. 좌측 고정컬럼 + <b>기준일 기준 최근 4주</b> 일자매트릭스(기준일=우측 끝 컬럼, 셀=계획수량, 하단 일자합계). 추가는 <b>엑셀 붙여넣기</b>. <span style="color:#c0392b">대체·출하수량은 원천 미보유(공란)</span>.</div>
+     <div class="page-sub">레거시 <code>w_pr_plan_060 / dw_pr_plan_060_1</code> 재현. 좌측 고정컬럼 + <b>기준일부터 4주</b> 일자매트릭스(기준일=첫 일자컬럼, 셀=계획수량, 하단 일자합계). 추가는 <b>엑셀 붙여넣기</b>. <span style="color:#c0392b">대체·출하수량은 원천 미보유(공란)</span>.</div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
        <label class="tl">기준일자</label>
        <button class="btn" id="pi-prevd" title="전일" style="padding:1px 8px">◀</button>
@@ -1886,7 +1886,8 @@ SCREEN.planinput=(host)=>{
     g('#pi-q').onkeyup=e=>{if(e.key==='Enter')g('#pi-search').click();};
     if(ed){
       g('#pi-add').onclick=async()=>{ if(!st.lines.length)await loadLines();   // 라인 드롭다운 보장(로드 실패/레이스 방어)
-        st.bulk={plan_ymd:ymd6(st.base),line_no:st.line||(st.lines[0]&&st.lines[0].code)||'',output_hm:'2100',prod_tag:'1',work_code:'',rows:blankRows(10)};render();};
+        const _y0=ymd6(st.base);
+        st.bulk={plan_ymd:_y0,line_no:st.line||(st.lines[0]&&st.lines[0].code)||'',output_hm:'2100',prod_tag:'1',work_code:'',rows:blankRows(10,_y0)};render();};
       g('#pi-del').onclick=()=>del();
       host.querySelectorAll('.pi-chk').forEach(ch=>ch.onclick=()=>{const i=+ch.dataset.idx;ch.checked?st.sel.add(i):st.sel.delete(i);});
       host.querySelectorAll('[data-edit]').forEach(td=>td.onclick=()=>editCell(+td.dataset.edit));
@@ -1906,7 +1907,12 @@ SCREEN.planinput=(host)=>{
     catch(e){alert('행 조회 오류: '+e);}
   };
   // ── 엑셀 붙여넣기 일괄추가 ──
-  const blankRows=n=>Array.from({length:n},()=>({plan_ymd:'',item_code:'',plan_qty:'',work_order:'',remarks:''}));
+  /* ★신규행 기본값(2026-08-31 사용자 확정)
+       · 계획일자 = **기본 계획일자로 미리 채운다**(빈칸 아님). 그 자리에서 고칠 수도 있고
+         엑셀 날짜열을 붙여넣으면 덮어쓴다. 종전엔 전부 빈칸이라 매번 입력해야 했다.
+       · 제번(work_order) = **입력칸 없음** — 저장할 때 백엔드가 자동채번한다
+         (레거시 w_pr_plan_060 도 신규행 WORK-ORDER 칸이 비어 있고 저장 시 채워진다). */
+  const blankRows=(n,ymd)=>Array.from({length:n},()=>({plan_ymd:ymd||'',item_code:'',plan_qty:'',remarks:''}));
   const bulkHtml=()=>{ const b=st.bulk;
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 10px">
      <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.34);width:1060px;max-width:94vw">
@@ -1920,16 +1926,16 @@ SCREEN.planinput=(host)=>{
            <label class="tl">생산구분</label><select class="inp" id="pb-tag" style="width:auto;min-width:0;flex:none" title="1양산/2셀"><option value="1" ${b.prod_tag==='1'?'selected':''}>1 양산</option><option value="2" ${b.prod_tag==='2'?'selected':''}>2 셀</option></select>
            <label class="tl">공정</label><input class="inp" id="pb-wc" value="${esc(b.work_code)}" placeholder="P1/P2" style="width:6ch;min-width:0;flex:none" autocomplete="off">
          </div>
-         <div style="font-size:11px;color:#1c7c3a;margin-bottom:6px">💡 엑셀에서 <b>계획일자⇥품번⇥수량</b> (또는 품번만/품번⇥수량) 열을 복사해 아래 해당 칸에 <b>붙여넣기</b>하면 여러 행에 자동 분배됩니다. 계획일자 비면 상단 <b>기본 계획일자</b>로 채워집니다.</div>
+         <div style="font-size:11px;color:#1c7c3a;margin-bottom:6px">💡 엑셀에서 <b>계획일자⇥품번⇥수량</b> (또는 품번만/품번⇥수량) 열을 복사해 아래 해당 칸에 <b>붙여넣기</b>하면 여러 행에 자동 분배됩니다. 계획일자는 <b>기본 계획일자</b>로 미리 채워지며 행마다 고칠 수 있습니다. <b>제번(WORK-ORDER)은 저장 시 자동 생성</b>됩니다.</div>
          <div style="max-height:calc(100vh - 330px);overflow-y:auto;overflow-x:hidden;border:1px solid #d7dfea;border-radius:6px">
            <table class="tbl" style="font-size:11px;width:100%;table-layout:fixed"><thead><tr>
-             <th style="width:30px">#</th><th style="width:82px">계획일자 <span style="color:#1c7c3a">(붙여넣기)</span></th><th>품번 <span style="color:#1c7c3a">(붙여넣기)</span></th><th class="num" style="width:84px">계획수량</th><th style="width:120px">제번</th><th>비고</th><th style="width:30px"></th></tr></thead>
+             <!-- ★제번 열 제거(2026-08-31) — 저장 시 자동채번(WO+7자리연번+라인). 레거시 동일. -->
+             <th style="width:30px">#</th><th style="width:96px">계획일자</th><th>품번 <span style="color:#1c7c3a">(붙여넣기)</span></th><th class="num" style="width:84px">계획수량</th><th>비고</th><th style="width:30px"></th></tr></thead>
            <tbody>${b.rows.map((r,i)=>`<tr>
              <td class="center" style="color:#8aa0bd">${i+1}</td>
-             <td><input class="inp pb-ymd" data-i="${i}" value="${esc(r.plan_ymd)}" placeholder="YYMMDD" style="width:8ch" autocomplete="off"></td>
+             <td><input class="inp pb-ymd" data-i="${i}" value="${esc(r.plan_ymd)}" placeholder="YYMMDD" style="width:9ch" autocomplete="off" title="기본 계획일자로 채워집니다 — 행마다 다르면 여기서 고치거나 엑셀 날짜열을 붙여넣으세요"></td>
              <td><input class="inp pb-item" data-i="${i}" value="${esc(r.item_code)}" style="width:96%" autocomplete="off"></td>
              <td><input class="inp pb-qty" data-i="${i}" value="${esc(r.plan_qty)}" type="number" style="width:74px" autocomplete="off"></td>
-             <td><input class="inp pb-wo" data-i="${i}" value="${esc(r.work_order)}" style="width:96%" autocomplete="off"></td>
              <td><input class="inp pb-rm" data-i="${i}" value="${esc(r.remarks)}" style="width:96%" autocomplete="off"></td>
              <td class="center"><span class="pb-rmrow" data-i="${i}" style="cursor:pointer;color:#c0392b" title="행삭제">✕</span></td></tr>`).join('')}</tbody></table>
          </div>
@@ -1937,7 +1943,7 @@ SCREEN.planinput=(host)=>{
            <span style="color:#8aa0bd;font-size:11px;margin-left:8px">품번·수량(>0)·계획일자 있는 행만 저장됩니다.</span></div>
        </div>
        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
-         <span style="color:#c0392b;font-size:11px">* 라인·시각 공통 적용. 각 행 품번·수량 필수. 계획일자=행별 우선(비면 기본일자).</span>
+         <span style="color:#c0392b;font-size:11px">* 라인·시각 공통 적용. 각 행 품번·수량 필수. 계획일자=행별 우선(비면 기본일자). 제번은 자동채번(WO+연번+라인).</span>
          <span><button class="btn" id="pb-save" style="background:#1c7c3a;color:#fff">💾 일괄저장</button> <button class="btn" id="pb-cancel">닫기</button></span></div>
      </div></div>`;
   };
@@ -1947,7 +1953,7 @@ SCREEN.planinput=(host)=>{
     while(lines.length&&lines[lines.length-1]==='')lines.pop();  // 꼬리 빈줄 제거
     lines.forEach((ln,k)=>{
       const cells=ln.split('\t'), ri=start+k;
-      while(b.rows.length<=ri)b.rows.push({plan_ymd:'',item_code:'',plan_qty:'',work_order:'',remarks:''});
+      while(b.rows.length<=ri)b.rows.push({plan_ymd:b.plan_ymd||'',item_code:'',plan_qty:'',remarks:''});
       fields.forEach((f,ci)=>{
         if(ci>=cells.length)return;
         let v=(cells[ci]||'').trim(); if(v==='')return;
@@ -1964,8 +1970,8 @@ SCREEN.planinput=(host)=>{
     g('#pb-hm').oninput=e=>b.output_hm=e.target.value;
     g('#pb-tag').oninput=e=>b.prod_tag=e.target.value;
     g('#pb-wc').oninput=e=>b.work_code=e.target.value;
-    g('#pb-addrow').onclick=()=>{b.rows=b.rows.concat(blankRows(5));render();};
-    // 계획일자 열: 단일=날짜, 다열=날짜⇥품번⇥수량⇥제번⇥비고
+    g('#pb-addrow').onclick=()=>{b.rows=b.rows.concat(blankRows(5,b.plan_ymd));render();};
+    // 계획일자 열: 단일=날짜, 다열=날짜⇥품번⇥수량⇥비고 (제번은 자동채번이라 붙여넣기 대상 아님)
     host.querySelectorAll('.pb-ymd').forEach(el=>{
       el.oninput=e=>{b.rows[+e.target.dataset.i].plan_ymd=e.target.value;};
       el.onblur=e=>{const i=+e.target.dataset.i;b.rows[i].plan_ymd=ymdNorm(b.rows[i].plan_ymd);e.target.value=b.rows[i].plan_ymd;};
@@ -1973,7 +1979,7 @@ SCREEN.planinput=(host)=>{
         const txt=(e.clipboardData||window.clipboardData).getData('text');
         if(!/[\n\t]/.test(txt)){const i=+e.target.dataset.i;e.preventDefault();b.rows[i].plan_ymd=ymdNorm(txt);render();return;}
         e.preventDefault();
-        applyPaste(b,+e.target.dataset.i,txt,['plan_ymd','item_code','plan_qty','work_order','remarks']);render();
+        applyPaste(b,+e.target.dataset.i,txt,['plan_ymd','item_code','plan_qty','remarks']);render();
       };
     });
     // 품번 열: 단일=품번, 다열=품번⇥수량⇥제번
@@ -1983,13 +1989,12 @@ SCREEN.planinput=(host)=>{
         const txt=(e.clipboardData||window.clipboardData).getData('text');
         if(!/[\n\t]/.test(txt))return;               // 단일값이면 기본 붙여넣기
         e.preventDefault();
-        applyPaste(b,+e.target.dataset.i,txt,['item_code','plan_qty','work_order']);render();
+        applyPaste(b,+e.target.dataset.i,txt,['item_code','plan_qty','remarks']);render();
       };
     });
     host.querySelectorAll('.pb-qty').forEach(el=>el.oninput=e=>{b.rows[+e.target.dataset.i].plan_qty=e.target.value;});
-    host.querySelectorAll('.pb-wo').forEach(el=>el.oninput=e=>{b.rows[+e.target.dataset.i].work_order=e.target.value;});
     host.querySelectorAll('.pb-rm').forEach(el=>el.oninput=e=>{b.rows[+e.target.dataset.i].remarks=e.target.value;});
-    host.querySelectorAll('.pb-rmrow').forEach(el=>el.onclick=()=>{b.rows.splice(+el.dataset.i,1);if(!b.rows.length)b.rows=blankRows(3);render();});
+    host.querySelectorAll('.pb-rmrow').forEach(el=>el.onclick=()=>{b.rows.splice(+el.dataset.i,1);if(!b.rows.length)b.rows=blankRows(3,b.plan_ymd);render();});
   };
   const bulkSave=async()=>{ const b=st.bulk;
     if(!String(b.line_no||'').trim()){alert('라인을 선택하세요');return;}
@@ -2006,8 +2011,10 @@ SCREEN.planinput=(host)=>{
         body:JSON.stringify({plan_ymd:b.plan_ymd,line_no:b.line_no,output_hm:b.output_hm,prod_tag:b.prod_tag,work_code:b.work_code,rows:b.rows})});
       const j=await r.json();
       if(r.ok&&j.ok){st.msg=`✅ ${j.inserted}건 일괄등록${j.skipped?` (제외 ${j.skipped})`:''}`;st.bulk=null;
-        const mx=valid.map(eff).sort().pop()||base6;   // 최신 등록일자를 기준일(우측 끝)로 → backward 창에 노출
-        if(/^\d{6}$/.test(mx))st.base=`20${mx.slice(0,2)}-${mx.slice(2,4)}-${mx.slice(4,6)}`;
+        // ★forward 창이므로 **가장 이른** 등록일자를 기준일(첫 컬럼)로 → 등록분이 전부 보인다.
+        //   (종전엔 backward 창이라 가장 늦은 일자를 우측 끝으로 잡았다)
+        const mn=valid.map(eff).sort().shift()||base6;
+        if(/^\d{6}$/.test(mn))st.base=`20${mn.slice(0,2)}-${mn.slice(2,4)}-${mn.slice(4,6)}`;
         st.line=b.line_no;await load();}
       else alert('일괄저장 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('일괄저장 오류: '+e);}
