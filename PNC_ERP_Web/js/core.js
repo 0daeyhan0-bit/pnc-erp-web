@@ -195,7 +195,6 @@ const MODULES=[
    {id:'dispatch',ic:'📤',nm:'자재불출집계표'},
    {id:'receiptdetail',ic:'🧾',nm:'자재입고명세서'},
    {id:'receipt',ic:'📥',nm:'자재입고집계표'},
-   {id:'lgsagub',ic:'📊',nm:'LG사급현황'},
    {id:'matkanban',ic:'📊',nm:'자재입고현황',hide:true},
    {sep:true},
    {id:'dopippur',ic:'🚢',nm:'도입-수입입력'},
@@ -210,7 +209,6 @@ const MODULES=[
    {id:'matinout',ic:'🔁',nm:'자재 입출고현황'},
    {id:'manorder',ic:'🛒',nm:'수동발주'},
    {id:'matprice',ic:'💲',nm:'원소재/용접봉 시세',hide:true},
-   {id:'sourceprofile',ic:'🧭',nm:'조달 프로파일'},
    {sep:true},
    // ★자재세트 4종(레거시 자재관리 메뉴 순서) — 2026-08-29 신설
    {id:'setstock',ic:'📦',nm:'자재세트입고관리'},
@@ -219,12 +217,16 @@ const MODULES=[
    {id:'setstockio',ic:'🔁',nm:'자재세트재고입출고현황'},
    {id:'setstockadj',ic:'🛠️',nm:'자재세트재고조정'},
    {sep:true},
+   {id:'lgsagub',ic:'📊',nm:'LG사급현황'},
+   {id:'matexpect',ic:'📦',nm:'자재예상매입'},
+   {id:'sourceprofile',ic:'🧭',nm:'조달 프로파일'},
    {id:'salemagam',ic:'🧾',nm:'자재매출마감'},
    {id:'purmagam',ic:'📥',nm:'자재매입마감'},
    {id:'coopquote2',ic:'💱',nm:'협력사견적관리'},
  ]},
  {id:'partner',nm:'협력사',ic:'🤝',subs:[
    {id:'partnerplan',ic:'📋',nm:'협력사계획현황'},
+   {id:'coopporder',ic:'📦',nm:'협력사 발주현황'},
    {id:'deliv420',ic:'🧾',nm:'거래명세서 발행'},
    {id:'delivedit',ic:'📝',nm:'거래명세표 수정'},
    // {id:'setinreq',ic:'🏷️',nm:'거래명세서 발행(바코드)'},   // ★2026-08-28 메뉴 숨김(요청). SCREEN.setinreq 는 유지 — 되살릴 땐 이 줄만 해제

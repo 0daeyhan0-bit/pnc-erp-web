@@ -680,7 +680,7 @@ def cost_nx_bulk_actual(p: dict = Body(...)):
                 for ym, ymd in months:
                     e.cur.execute("""SELECT SUM(CONVERT(float,ISNULL(order_qty,0))) q,
                           SUM(CONVERT(float,ISNULL(order_qty,0))*CONVERT(float,ISNULL(item_cost,0))) rev
-                        FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE RTRIM(item_code)=? AND LEFT(order_ymd,4)=?""", it, ym)
+                        FROM PARTNER_ERP_TEST3.nx.sa_t_recv_dtl WHERE RTRIM(item_code)=? AND LEFT(order_ymd,4)=?""", it, ym)
                     q, rev = e.cur.fetchone()
                     if not q or float(q) <= 0: continue
                     q = float(q); rev = float(rev or 0)

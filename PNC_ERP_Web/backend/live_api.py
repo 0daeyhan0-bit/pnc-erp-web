@@ -437,7 +437,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     m0 = ym + '01'   # 월초(YYMMDD)
     # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
     _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     cutm = {(r['cg'] or ''): float(r['amt'] or 0) for r in rr}
@@ -504,7 +504,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     def _madd(k, h, v): MS[k][h] += float(v or 0)
     # 현매출 실적 = 리시빙(월초~조회일) cut별·half별 + 내수(mkt=2)
     _c, _rr5 = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, r.RECEIVING_YMD ymd, ISNULL(r.mkt,'') mkt, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD BETWEEN '{m0}' AND '{d6}' GROUP BY ISNULL(i.cut_gubun,''), r.RECEIVING_YMD, ISNULL(r.mkt,'')""")
     for _r in _rr5:
@@ -561,7 +561,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
 
     # ⑥ 당일 실적(조회일=d6만): 매출(리시빙 cut별 절삭/설치/기타) + 사급(OSP 원소재=TUBE/부품)
     _c, _rrt = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
-      FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r
+      FROM PARTNER_ERP_TEST3.nx.SA_T_LG_RECEIVING_DTL r
       LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=UPPER(LTRIM(RTRIM(r.ITEM_CODE)))
       WHERE r.RECEIVING_YMD='{d6}' GROUP BY ISNULL(i.cut_gubun,'')""")
     _tc = {(r['cg'] or ''): float(r['amt'] or 0) for r in _rrt}
@@ -747,7 +747,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
   FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty,0,0,0,'도입-구매',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_qty<>0 AND a.wh_cust_code='{sc}' AND a.part_code='{pw}' AND a.division='P'{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, a.maint_qty*-1,0,0,0,'생산창고반품',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag IN ('T') AND a.maint_qty<>0 AND {INSP} AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,0,'자재창고입고','작업처 : 제조1팀',NULL,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,0,'자재창고입고','작업처 : 제조1팀',NULL,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_ymd, 0,0,a.maint_qty,0,'재고조정',{CUST},a.work_order,ISNULL(a.item_code,''),CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='2' AND a.maint_qty<>0 AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END,'창고재고입고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}'{MFitem}
  UNION ALL SELECT UPPER(a.item_code), a.move_ymd, 0,0,0, CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END,'창고재고출고',ISNULL((SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust m WHERE m.cust_code=CASE WHEN a.to_cust_code='{sc}' THEN a.fr_cust_code ELSE a.to_cust_code END),''),'','',CONVERT(varchar(19),a.insert_datetime,120) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>='{y01}' AND a.move_ymd<='{y99}' AND a.move_qty<>0 AND a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}'{MFitem}
@@ -763,7 +763,7 @@ def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx")
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('3','9','C','G','H','S','P','R') AND {INSP} AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), IIF(a.division='Q',-a.maint_qty,a.maint_qty) FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint_c a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.wh_cust_code='{sc}' AND a.part_code='{pw}'{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty*-1 FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('T') AND {INSP} AND {W}{MFmat}
- UNION ALL SELECT UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>'{pv99}' AND a.cut_ymd<'{y01}' AND {W}{MFmat}
+ UNION ALL SELECT UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE a.cut_ymd>'{pv99}' AND a.cut_ymd<'{y01}' AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag='2' AND {W}{MFmat}
  UNION ALL SELECT UPPER(a.item_code), (CASE WHEN a.fr_cust_code='{sc}' AND a.fr_gagong_proc_code='{pw}' THEN a.move_qty*-1 ELSE 0 END)+(CASE WHEN a.to_cust_code='{sc}' AND a.to_gagong_proc_code='{pw}' THEN a.move_qty ELSE 0 END) FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MOVE a WHERE a.move_ymd>'{pv99}' AND a.move_ymd<'{y01}' AND ('{sc}' IN (a.fr_cust_code,a.to_cust_code)) AND ('{pw}' IN (a.fr_gagong_proc_code,a.to_gagong_proc_code)){MFitem}
  UNION ALL SELECT UPPER(a.mat_code), a.maint_qty FROM PARTNER_ERP_TEST3.nx.pu_t_stock_maint a WHERE a.maint_ymd>'{pv99}' AND a.maint_ymd<'{y01}' AND a.maint_tag IN ('1','4','5','6','8','A','B','J') AND {W}{MFmat}
@@ -874,8 +874,8 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
         if _live:
             return "PARTNER_ERP.dbo." + tbl
         on = " AND ".join(f"ISNULL(l.{k},'')=ISNULL(n.{k},'')" for k in keys)
-        return (f"(SELECT * FROM PARTNER_ERP.dbo.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
-                f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.{tbl} l WHERE {on}))")
+        return (f"(SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
+                f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.{tbl} l WHERE {on}))")
 
     # ★2026-08-25 웹은 SEQ 20000 대역(common.WEB_SEQ_BASE)에만 쓴다 → 라이브(1~19,999)와
     #   번호가 절대 안 겹치므로 (YMD,SEQ) 만으로 중복배제가 성립한다.
@@ -891,7 +891,7 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     CUR = f"""
  SELECT a.TO_GAGONG_PROC_CODE part, UPPER(a.mat_code) mat, a.maint_ymd ymd, a.maint_qty*-1 inq,CAST(0 AS decimal(18,4)) outq,CAST(0 AS decimal(18,4)) etc,'생산창고입고' div, {CUST} tag
    FROM {_PUSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND a.maint_qty<>0 AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
- UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,'가공생산입고','제조1팀' FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS) AND '{src}'<>'live') a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND a.gagong_proc_code>''
+ UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_ymd, a.cut_qty,0,0,'가공생산입고','제조1팀' FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS) AND '{src}'<>'live') a WHERE a.cut_ymd>='{y01}' AND a.cut_ymd<='{y99}' AND a.cut_qty<>0 AND a.gagong_proc_code>''
  UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,'자재창고반품',{CUST} FROM {_PUSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='T' AND ISNULL(a.out_wh_gubun,'3')='3' AND a.maint_qty<>0 AND a.TO_GAGONG_PROC_CODE>''
  UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty,0,'가공부품이동',{CUST} FROM {_PUSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.maint_tag='C' AND a.maint_qty<>0 AND a.TO_GAGONG_PROC_CODE>''
  UNION ALL SELECT a.STOCK_PART_CODE, UPPER(a.item_code), a.prod_ymd, a.prod_qty,0,0,'SUB생산실적','' FROM {_PRPD} a WHERE a.prod_ymd>='{y01}' AND a.prod_ymd<='{y99}' AND a.STOCK_PART_CODE>'' AND NOT EXISTS(SELECT 1 FROM {_SASM} s WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code AND (s.in_part_code=a.stock_part_code OR (ISNULL(s.in_part_code,'')='' AND s.maint_tag='P')))
@@ -912,7 +912,7 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
  UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_qty*-1 FROM {_B}.PU_T_STOCK_MAINT a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
  UNION ALL SELECT a.STOCK_PART_CODE, UPPER(a.item_code), a.prod_qty FROM {_B}.pr_t_prod_dtl a WHERE a.prod_ymd>'250299' AND a.prod_ymd<{BFT} AND a.STOCK_PART_CODE>'' AND NOT EXISTS(SELECT 1 FROM {_B}.sa_t_stock_maint s WHERE s.maint_ymd=a.prod_ymd AND s.item_code=a.item_code AND s.in_part_code=a.stock_part_code)
  UNION ALL SELECT a.IN_PART_CODE, UPPER(a.item_code), a.MAINT_QTY FROM {_B}.sa_t_stock_maint a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.IN_PART_CODE>''
- UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS) AND '{src}'<>'live') a WHERE a.cut_ymd>'250299' AND a.cut_ymd<{BFT} AND a.gagong_proc_code>'' AND a.cut_qty<>0
+ UNION ALL SELECT a.gagong_proc_code, UPPER(a.mat_code), a.cut_qty FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS) AND '{src}'<>'live') a WHERE a.cut_ymd>'250299' AND a.cut_ymd<{BFT} AND a.gagong_proc_code>'' AND a.cut_qty<>0
  UNION ALL SELECT a.PART_CODE, UPPER(a.MAT_CODE), a.MAINT_QTY FROM {_B}.PR_T_STOCK_MAINT_MAT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.PART_CODE>'' AND a.MAINT_TAG IN ('3','2','1')
  UNION ALL SELECT a.PART_CODE, UPPER(a.MAT_CODE), a.MAINT_QTY FROM {_B}.PR_T_STOCK_MAINT_MAT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.PART_CODE>'' AND a.MAINT_TAG='4'
  UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.MAINT_QTY FROM {_B}.PU_T_STOCK_MAINT a WHERE a.MAINT_YMD>'250299' AND a.MAINT_YMD<{BFT} AND a.maint_tag='T' AND a.TO_GAGONG_PROC_CODE>''
@@ -924,7 +924,7 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
     _UNI = (f"SELECT part_code part, UPPER(mat_code) mat, SUM(stock_qty) snap FROM {_S}.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)"
             if str(src).strip() == "live" else
             """SELECT part, mat, MAX(snap) snap FROM (
-                 SELECT part_code part, UPPER(mat_code) mat, SUM(stock_qty) snap FROM PARTNER_ERP.dbo.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)
+                 SELECT part_code part, UPPER(mat_code) mat, SUM(stock_qty) snap FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)
                  UNION ALL
                  SELECT part_code, UPPER(mat_code), SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.pr_t_mat_stock_wh GROUP BY part_code, UPPER(mat_code)
                ) u GROUP BY part, mat""")
@@ -1011,7 +1011,7 @@ def _prodinvout(ym, frm=None, to=None):
     # ★유니버스 = 라이브 ∪ nx (큰 쪽). nx 에만 있는 웹 신규분도, 라이브에만 있는
     #   미러 미반영분도 둘 다 보여야 한다.
     _c1, uni = _rows("""SELECT item, MAX(snap) snap FROM (
-           SELECT UPPER(item_code) item, SUM(stock_qty) snap FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK GROUP BY UPPER(item_code)
+           SELECT UPPER(item_code) item, SUM(stock_qty) snap FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY UPPER(item_code)
            UNION ALL
            SELECT UPPER(item_code), SUM(stock_qty) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK GROUP BY UPPER(item_code)
          ) u GROUP BY item""")
@@ -1270,7 +1270,7 @@ def _prodstock(ym, frm=None, to=None):
     U = f"""
 SELECT a.gagong_proc_code gpc, A.MAT_CODE mat, A.STOCK_QTY basic,0 inq,0 outq,0 etc FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH A WHERE A.STOCK_YYMM='2502'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,iif(a.maint_ymd<'{y01}',-A.MAINT_QTY,0),iif(a.maint_ymd<'{y01}',0,-A.MAINT_QTY),0,0 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND a.maint_tag='B' AND isnull(a.out_wh_gubun,'1')='1'
-UNION ALL SELECT A.gagong_proc_code,a.mat_code,iif(a.cut_ymd<'{y01}',a.cut_QTY,0),iif(a.cut_ymd<'{y01}',0,a.cut_QTY),0,0 FROM (SELECT * FROM PARTNER_ERP.dbo.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE A.cut_ymd>'250299' and A.cut_ymd<='{y99}'
+UNION ALL SELECT A.gagong_proc_code,a.mat_code,iif(a.cut_ymd<'{y01}',a.cut_QTY,0),iif(a.cut_ymd<'{y01}',0,a.cut_QTY),0,0 FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl n WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.pu_t_cut_dtl l WHERE l.BOX_NO=n.BOX_NO AND l.CUT_YMD=n.CUT_YMD AND l.CUT_HMS=n.CUT_HMS)) a WHERE A.cut_ymd>'250299' and A.cut_ymd<='{y99}'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,-a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND a.maint_tag='T' and isnull(a.out_wh_gubun,'3')='3'
 UNION ALL SELECT a.to_gagong_proc_code,A.MAT_CODE,iif(a.MAINT_YMD<'{y01}',-a.MAINT_QTY,0),0,iif(a.MAINT_YMD<'{y01}',0,a.MAINT_QTY),0 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A WHERE A.MAINT_YMD>'250299' and A.MAINT_YMD<='{y99}' AND a.maint_tag='C'
 UNION ALL SELECT A.stock_part_code,a.item_code,iif(a.prod_ymd<'{y01}',a.prod_qty,0),iif(a.prod_ymd<'{y01}',0,a.prod_qty),0,0 FROM PARTNER_ERP_TEST3.nx.pr_t_prod_dtl a WHERE A.prod_ymd>'250299' and A.prod_ymd<='{y99}' and a.stock_part_code>'' and not exists (select 1 from PARTNER_ERP_TEST3.nx.sa_t_stock_maint where maint_ymd=a.prod_ymd and item_code=a.item_code and in_part_code=a.stock_part_code)

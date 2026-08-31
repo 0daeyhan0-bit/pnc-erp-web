@@ -138,6 +138,40 @@
 
 ---
 
+## 12. ★원소재 사급/직매입 구분 (2026-08-30 사용자 확정·LG사급현황 정독 반영)
+
+> LG사급현황(lgsagub.py recvcompare) 정독으로 확정. 화면 재구성 + 원소재 사급/직매입 분리.
+
+### 12-0. 화면 레이아웃
+- **위 EA 테이블 = "부자재"** 라벨(부품/부자재/사급부품). **원소재 표는 오른쪽으로** 이동(부자재 | 원소재 좌우 배치).
+
+### 12-1. 사급 vs 직매입 (동 원소재만, 구매부품 제외) — 정본
+- **사급** = LG 유상사급 **인정동** = **LG BOM Assembly Pull** `lg_ap_split`(`nx_lgbom_engine`, 별도 LG BOM 엔진 §1-10) — **절삭 완제품**(`nx.item.cut_gubun='절삭'`). 내부 분할 = **우리절삭 + 협력사사급**(절삭협력사에 원소재 사급 주는 분, 둘 다 LG 사급). recvcompare가 쓰는 것과 동일 = 정합.
+- **직매입** = 사급 **인정 못받은 동 원소재** = (우리 BOM 동 `copper_by_spec`) − (LG BOM AP 사급동), 규격별 0미만 절사. 곧 **설치·이지링크 동 + 절삭 미인정 규격**. **동 원소재 한정(구매부품 제외 = copper_by_spec만).**
+- **최종 판정**: `nx.lg_settle_unit.gubun1`(사급/직거래)이 원단위상 정답이나, 계획 완제품 커버리지 위해 **정본=LG BOM AP(recvcompare 방식, 사용자 확정 2026-08-30)** 채택. gubun1 보정은 추후.
+- **"절삭협력사 사급 = LG 사급일 수도/아닐 수도"**: 협력사사급 분이 LG BOM AP에 잡히면 사급, 안 잡히면 직매입으로 자동 분기.
+
+### 12-2. 예상 탭 원소재 산식
+- 완제품 계획(nx.plan_item_dtl) × { 사급 = lg_ap_split(절삭 완제품, our+coop) · 직매입 = copper_by_spec − 사급 } → 규격별 kg × 원소재단가(std_metal_price=LG사급가). rawmat_rows에 `sagub_gubun`(사급/직매입) 부여.
+- 재사용: `lgsagub._lg_ap_split`·`_dong_of_batch`·`nx_soyo_engine.copper_by_spec`(캐시 nx.item_copper_spec/nx.item_dong_spec). 성능=배치·캐시.
+
+### 12-3. ★정확도 검증·수정 (2026-08-30 · 1번 검증 결과)
+- **우리 BOM 동 소스 = `_dong_of`(nx.bom_flat) 확정**(≠copper_by_spec). 검증: copper_by_spec(weight_explode)=61,040kg는 **변형SUB 이중계상**으로 LG AP 매칭 **−19.6%**. bom_flat(_dong_of·recvcompare 정본)=43,207kg는 LG AP 매칭 **−0.9%** 정합. ⟹ 원소재 우리BOM동은 반드시 bom_flat.
+- **직매입 공식 = 우리BOM동(bom_flat) − LG인정 우리절삭(ap_our)**, 규격별 0절사. (초기 버그=our−(ap_our+ap_coop)로 협력사사급 오차감 → 수정.) 사급 = ap_our + ap_coop.
+- 결과: 사급 42,119kg 8.86억 / 직매입 8,613kg 1.81억. **잔차 8.7%(4,080kg)** = bom_flat↔LG AP 규격키 차(AP만 규격 2,231kg 등)=정교화 대상.
+- **근본 완전해소(잔차0)** = 원단위 `nx.lg_settle_unit.gubun1` 단일소스(93% 커버·최신 ym=2606 stale) → **원단위 2607/2608 파일 갱신 전제**. (데이터 준비 후 2단계.)
+
+### 12-4. ★★최종 정본 = LG BOM supply_type (2026-08-30 사용자 확정 · 원단위 불필요)
+> 사용자 지적 "LG BOM supplier/Assembly Pull로 구분하는거 아니었어?" → 검증 결과 **정답**. 원단위·우리BOM 뺄셈 전부 폐기.
+- **정본**: `nx.lg_bom_ver` matkl='MJU0631'(동 Tube,Raw)의 **supply_type**. 실측: **Assembly Pull(11,392행)=사급**(LG 지급) · **Supplier(4,211행)=직매입**(공급사 조달=우리 매입).
+- **엔진**: `nx_lgbom_engine.lg_dong_split(cur, ver, models)` 신설 = {model: {'sagub':{spec:kg}, 'jikmae':{spec:kg}}}. 같은 werks(동 총량 최대 주BOM)에서 Assembly Pull/Supplier 함께 롤업(일관). ALUMINUM·q=1.0 제외.
+- **예상 탭 원소재** = 완제품 계획(nx.plan_item_dtl) × lg_dong_split → 사급/직매입 규격별 kg × std_metal_price. **LG BOM 단일소스 → 원단위(lg_settle_unit)·bom_flat 뺄셈·잔차 전부 불요.**
+- 폐기: §12-1~12-3의 "원단위 gubun1 정본"·"우리BOM−AP 뺄셈"·"weight_explode/copper_by_spec"·"잔차 8.7%" — 전부 supply_type으로 대체. (원단위 파일 갱신 전제도 불요.)
+- 결과(2026-08-30): 사급 27규격 42,122kg 8.86억 / 직매입 30규격 11,024kg. HTTP warm 3.7s.
+- ☐잔여: 직매입(Supplier) 동 단가 커버(std_metal_price=LG사급가라 Supplier 규격 일부 0 → 실매입가 필요, refine).
+
+---
+
 ## 9. 단계 구현 계획
 
 1. **리드타임 인프라**: `nx.partner.lead_time_days`+`sourcing_profile.lead_time_days` 멱등 ALTER → 거래처마스터/조달프로파일 화면 편집칸 → 사장님 CSV값 로드(기본)·나머지 0.
@@ -156,3 +190,74 @@
 5. ~~금액 단가~~ **[확정 2026-08-26]**: **단가 = 매입단가**(price_item as-of). 금액 = 수량×매입단가 전 컬럼 통일. 매입실적만 실거래금액.
 6. ~~미착·발주정책~~ **[확정 2026-08-26]**: **미착 = 컬럼·산식 지금 포함·값=0**(발주기록 아직 없음) → 컷오버 후 자동 채워짐. 필요수량 = `max(0, 월소요+상시보유−기초재고−미착)`(완성형). **발주정책 3-way**: 협력사=계획공유(발주X) / 도입·원자재(장리드)=수동발주(선발주) / **부자재=자동발주(신규 도입·autoorder 활성화)**. 미착 소스 = 수동발주+자동발주 저장분(컷오버 후).
 7. ~~LG 물동계획 데이터 갭~~ **[해소 2026-08-26]**: 소스 = 레거시 **`TT_T_MODEL_PLAN`**(물동자료업로드 w_tt_plan_010, 모델×월×C/R, ~2706). 자재소요=물동수량×PR_M_MODEL_BOM×BOM. **남은 작업**: nx 미러 편입(r_delta_sync) or 라이브 직독. 월단위→일별 안분 규칙(필요시).
+
+---
+
+## 11. ★재구성 v2 — 자재매입현황(예상/실적) (2026-08-30 사용자 확정)
+
+> 기존 단일 `자재예상매입`(SCREEN.matexpect, /api/matexpect)을 **탭 2개(예상·실적)** 로 재구성. 이름 = **자재매입현황(예상/실적)**.
+> ★핵심 전제(사용자 2026-08-30): **우리 시스템은 수주 베이스가 아니라 "계획 베이스"로 입고**시킨다. 따라서 예상은 전적으로 **생산계획**을 기준으로 소요를 산출한다(LG 주문 아님). 발주는 **수동발주** 개념으로 이뤄지며 **주로 도입(장리드) 거래처**가 대상.
+
+### 11-0. 확정 결정 (AskUserQuestion 2026-08-30)
+1. **원소재(동관/강판)** = **중량(kg) 별도계산**. 완제품 계획수량 × 소요엔진 `weight_explode`(설치품 포함) → 동관/강판 kg. 금액 = kg × 원소재단가(`nx.price_metal`, `std_metal_price`). 부품/부자재(EA)와 **분리 섹션**.
+2. **실적 소요원** = **리시빙 + 직거래출하**. 절삭·사급 = LG 리시빙(`nx.SA_T_LG_RECEIVING_DTL`), 직거래(설치·이지링크) = 출하실적(`dbo.SA_T_SALE_DTL`). 둘 다 완제품 × 소요엔진(`prod_soyo`). (직거래 전용 수량테이블 없음 → 출하+`cut_gubun` 파생.)
+3. **기발주** = **현행 발주잔량** `dbo.PU_T_PURCHASE_DTL` 미입고분(`PUR_QTY−IN_QTY−CANCEL_QTY`, `IN_FINISH_FLAG<>'Y'`). 신규 `nx.auto_po`는 0행(컷오버 후 전환).
+
+### 11-1. 공통 골격
+- **탭 2개**: 예상 / 실적. **축 토글(드롭다운)**: 품목별 / **거래처별(기본)** / 매입유형별.
+- **매입유형 분류 정본** = `nx.mgmt_vendor_gubun.override_gubun` ▷ CUST_TYPE(`_CT_NAME`) — `live_api._vgubun`/`matexpect._gubun` 재사용.
+- **금액 = 수량 × 매입단가 as-of**: 부품/부자재 = `nx.price_item`(`NxCostEngine.pur_price(item,ymd,vendor)`), 원소재 = `nx.price_metal`(`std_metal_price`). 라이브 RO(마감때만 수정). 외화→KRW.
+- **소요는 통일 소요엔진으로만**(CLAUDE.md §1-10): `prod_soyo`(부품 per-unit)·`weight_explode`(원소재 kg). ad-hoc BOM 재귀 금지.
+- **재고 = `nx.mat_stock_daily`**(C13, stock_ledger 금지). 수동발주와 정합 필요 시 `PU_T_MONTH_STOCK_WH`도 병기 검토.
+- **plan_ymd 오염 방어**: `BETWEEN ? AND ?` 상한 필수(650508/720611 6행 오염 실재).
+
+### 11-2. 예상 탭 (계획 베이스)
+- **기간 기본 = 조회일자(오늘) ~ +4주**(오늘+28일). 소스 `nx.plan_part_mat` 실측 260828~260924 커버.
+- **부품/부자재/사급 소요(EA)** = `nx.plan_part_mat`(plan_ymd 기간필터) × `nx.plan_mat_source` 업체배분비율. = 소요엔진 STEP7 산출물(계획 베이스). 원소재로 분류되는 leaf(role 제작동관/매입동관/판재강판)는 **여기서 제외**(중량 별도계산과 이중계상 방지).
+- **원소재 소요(kg, 별도 섹션)** = Σ 완제품[`PR_T_PLAN_ITEM_DTL`/`nx.plan_item_dtl` C_ITEM_CODE, PLAN_QTY, PLAN_YMD 기간] × `weight_explode(완제품)`(설치품 포함) → 동관/강판 kg. 규격별 단가는 `copper_by_spec`. 금액 = kg × `std_metal_price`.
+- **넷팅(수동발주 정합)**: 매입처별
+  `추가발주 = max(0, 소요 − 현재고 − 기발주)`, `기발주 = PU_T_PURCHASE_DTL 미입고잔량(CUST_CODE=매입처)`.
+  **예상구매(총매입금액) = (기발주 + 추가발주) × 매입단가**. ← 사용자 표기.
+- **매입처 배분** = `sourcing_profile`/`order_vendor`/`route01`(수동발주 `manorder._share`·`_route01_ratio`와 동일 공용비율, 규칙 §8 배분 일관성). **주 대상 = 도입(장리드) 거래처**.
+- 실적 vendor 귀속(참조용) = `PR_M_ITEM.in_cust_code`(설계 §4·561 FAIL 회피, 의도적 예외 — 재확인 대상).
+
+### 11-3. 실적 탭 (리시빙/직거래 베이스)
+- **기간 기본 = 조회일자(오늘) ~ −4주**(오늘−28일).
+- **소요 = 완제품 실적 × 소요엔진**:
+  - **절삭·사급** = LG 리시빙 `nx.SA_T_LG_RECEIVING_DTL`(ITEM_CODE 완제품, RECV_QTY, GUBUN C/R, RECEIVING_YMD). 절삭 원소재 동 = `recvcompare`(LG BOM Assembly Pull), 사급부품 = `recvcompare_parts`(`sagub_parts_soyo`).
+  - **직거래(설치·이지링크)** = 출하 `dbo.SA_T_SALE_DTL`(ITEM_CODE, SALE_QTY, SALE_YMD) 중 `nx.item.cut_gubun`=설치/이지링크분 × `prod_soyo`.
+- 완제품→자재 전개는 예상과 동일 엔진(`prod_soyo`/`weight_explode`). 원소재도 동일하게 중량 별도.
+- **매입실적(대사)** = `dbo.PU_T_STOCK_MAINT`(tag 9/S) + `_C`(DIVISION='P' 수입). 내부이동(C·G·H) 제외.
+- 축 토글·분류·금액 규칙은 공통(11-1).
+
+### 11-4. 엔드포인트·화면
+- 백엔드: `/api/matexpect` 확장 또는 신규 `/api/matbuy?tab=exp|act&axis=item|cust|gubun&frm=&to=`. 예상=계획넷팅, 실적=리시빙/직거래 소요. 원소재 중량 섹션은 별도 키(`rawmat_rows`)로 반환.
+- 프론트: `SCREEN.matexpect`(이름 표기 자재매입현황(예상/실적)) — 탭 2개·축 드롭다운(기본 거래처)·원소재 별도표·기발주/추가발주/총매입금액 컬럼·§3 아이콘없음·내부스크롤·sticky 총계·정렬·엑셀.
+
+### 11-5. 구현 단계
+1. 백엔드 예상 탭: 계획소요(plan_part_mat, 원소재 제외) + 원소재중량(weight_explode) + 넷팅(재고·기발주 PU_T_PURCHASE_DTL) + 금액(pur_price/std_metal_price) + 매입처배분.
+2. 백엔드 실적 탭: 리시빙(recvcompare/parts) + 직거래출하(SA_T_SALE_DTL×cut_gubun) × 소요엔진 + 매입실적 대사.
+3. 프론트: 탭2·축토글·원소재섹션·컬럼·엑셀.
+4. 검증: 예상 넷팅 = 수동발주(manorder) 매입처 diff0 대조 · 원소재 kg = weight_explode 게이트 · 실적 = lgsagub recvcompare/직거래 대조. 성급한 일반화 금지·전수검증.
+
+### 11-6. 하드룰(재확인)
+- 소요엔진만(§1-10) · 계획 베이스(수주 아님) · 재고 mat_stock_daily(C13) · 단가 as-of RO(마감때만) · plan_ymd 오염 상한필터 · 배분 공용비율(§8) · 라이브 RO · 미러/클린 원칙(§1-9).
+
+---
+
+## 14. ★자재매입 포함/제외 = plan_mat_source.SUPPLY_GUBUN (2026-08-30 실데이터 검증·사용자 지시 "추론말고 검증")
+
+> 미분류 삽질의 근본해결. 정본 = `soyo.py:123 _MKMAP` + plan_mat_source.SUPPLY_GUBUN. **분류축 두 개는 별개**: SUPPLY_GUBUN=포함/제외+공급방식(소요축) · CUST_TYPE+override=표시 매입유형(§11-1).
+
+### 14-1. SUPPLY_GUBUN 실측 분포(plan_mat_source 전체, 2026-08-30)
+매입 625mat/8.68M · 외주가공 969mat/341K · 유상사급(BOM+프로파일) 818mat/419K · **자체 822mat/252K** · 외주완성 7mat/165K · 미지정 19mat/520. ★라벨은 **'자체'**(≠'제작' — `autoorder.py:44` `<>'제작'` 필터 어휘불일치=자체 누수 버그, 별건 수정요).
+
+### 14-2. 매입현황 포함/제외 규칙(정본·검증)
+- **매입 EA 포함** = SUPPLY_GUBUN ∈ {매입, 유상사급, 외주완성, 미지정}
+- **제외** = **자체**(제작·발주아님 §8 — 실측 예상기간 163,486=미분류의 정체) · **외주가공**(가공비축·매입아님 — CUST_TYPE=6 협력사의 외주가공분 284,833 포함해 정확 제외)
+- 원소재(metal_gubun≠빈)는 별도 중량섹션(§12), 여기서도 제외.
+- ★**CUST_TYPE=6(절삭협력사) vendor라도 SUPPLY_GUBUN이 판정 기준**: 같은 협력사에서 외주가공(가공비 제외)·매입(부품 매입 포함)·유상사급(사급 포함)이 혼재(실측 매입80K/유상사급137K/외주가공284K). 즉 "협력사=무조건 제외"(설계 §3 초안)가 아니라 **SUPPLY_GUBUN=외주가공만 제외**가 정확.
+- **기발주(PU_T_PURCHASE_DTL)** = 매입 소요 자재집합(mat_soyo_set)만 계상(자체/외주가공·비계획 po-only 제외 → 미분류 편중 해소).
+
+### 14-3. 결과(검증)
+미분류 442행/169,866 → **39행/5,985**(자체 제외). EA 1668→1234행. 표시 매입유형은 CUST_TYPE+override 유지(절삭-협력사 라벨의 잔여분=협력사에서 사는 매입/사급 부품=정상 매입). 잔여 미분류 39행=매입/미지정인데 vendor 미매핑(소량) → mgmt_vendor_gubun override 등록으로 추가정리 가능(선택).

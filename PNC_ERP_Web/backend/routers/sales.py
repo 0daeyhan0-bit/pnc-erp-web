@@ -6,14 +6,18 @@ import math
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query, Body, HTTPException, Request
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK, _ym, _closed, _assert_open, stock_changed, _finished_short_msg
+from routers.auth import require_user, scope_cust   # ★협력사 소속강제(방어심층)
 
 router = APIRouter()
 
 # ===================== 사급재고조정 (w_pu_stock_090) — ★Phase4 단일원장 fold: nx.stock_ledger(STOCK_POINT='SAG', tag '2') =====================
 # 협력사 보유 사급재고(SAG) 장부조정(±). id="YMD-SEQ"(원장 복합키). tag '2'=장부수정(±). MAT screen은 STOCK_POINT='MAT' 격리(Phase3).
 @router.get("/api/sagub/adjust/list")
-def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Query(""), mat: str = Query(""), limit: int = Query(500)):
+def sagub_adjust_list(request: Request, fr: str = Query(""), to: str = Query(""), cust: str = Query(""), mat: str = Query(""), limit: int = Query(500)):
     """사급재고조정 목록 = nx.sagub_maint(tag='B'·remarks_src='adjust'). ★단일원장(수불장·매출 파생과 동일). 코드→이름."""
+    cust = scope_cust(require_user(request), cust)      # ★협력사=자기 거래처 강제
+    if cust == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     cn = _nx(); cur = cn.cursor()
     try:
         w = ["l.maint_tag='B'"]; p = []
@@ -43,10 +47,13 @@ def sagub_adjust_list(fr: str = Query(""), to: str = Query(""), cust: str = Quer
         cn.close()
 
 @router.post("/api/sagub/adjust/save")
-def sagub_adjust_save(payload: dict = Body(...)):
+def sagub_adjust_save(request: Request, payload: dict = Body(...)):
     """사급재고조정 등록/수정 → nx.sagub_maint(tag='B'·remarks_src='adjust'). 수정수량 음수허용. ★단일원장(수불장 잔량 즉시 반영)."""
     rid = payload.get("id")
     cust = str(payload.get("cust_code", "")).strip()
+    cust = scope_cust(require_user(request), cust)      # ★협력사=자기 거래처 강제(남의 사급조정 차단)
+    if cust == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     mat = str(payload.get("mat_code", "")).strip()
     remarks = str(payload.get("remarks", "")).strip()
     try:
@@ -77,17 +84,20 @@ def sagub_adjust_save(payload: dict = Body(...)):
         cn.close()
 
 @router.post("/api/sagub/adjust/delete")
-def sagub_adjust_delete(payload: dict = Body(...)):
+def sagub_adjust_delete(request: Request, payload: dict = Body(...)):
     """사급재고조정 삭제 → nx.sagub_maint(tag='B') id로 삭제."""
+    u = require_user(request)
     rid = payload.get("id")
     if not rid:
         raise HTTPException(400, "id 필요")
     cn = _nx(); cur = cn.cursor()
     try:
-        cur.execute("SELECT maint_ymd FROM nx.sagub_maint WHERE id=? AND maint_tag='B'", int(rid))
+        cur.execute("SELECT maint_ymd, cust_code FROM nx.sagub_maint WHERE id=? AND maint_tag='B'", int(rid))
         ex = cur.fetchone()
         if not ex:
             return {"ok": True, "deleted": 0}
+        if scope_cust(u, str(ex[1] or "").strip()) != str(ex[1] or "").strip():   # ★협력사=자기 전표만 삭제
+            raise HTTPException(403, "다른 거래처의 전표는 삭제할 수 없습니다.")
         if _closed(cur, str(ex[0]).strip(), "SAL"):
             raise HTTPException(400, f"마감월({_ym(str(ex[0]).strip())}) 삭제 불가")
         cur.execute("DELETE FROM nx.sagub_maint WHERE id=? AND maint_tag='B'", int(rid))
@@ -97,10 +107,13 @@ def sagub_adjust_delete(payload: dict = Body(...)):
 
 # ===================== 협력사 보유 사급재고 현황 (★작업3 메인, 정본=레거시 PU_T_SAGUB_STOCK RO) =====================
 @router.get("/api/sagub/holding/list")
-def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = Query(""), limit: int = Query(3000)):
+def sagub_holding_list(request: Request, cust: str = Query(""), mat: str = Query(""), sign: str = Query(""), limit: int = Query(3000)):
     """★협력사 보유 사급재고 = 수불장 잔량(nx.sagub_maint 파생). STOCK_QTY = 협력사입고(사급출고+) − 협력사출고(세트소진−) ± 조정.
     ★단일원장(레거시 PU_T_SAGUB_STOCK 대체 — 조정 즉시반영·수불장과 동일값). 기초0@2026-07(migration snapshot 제외)이라 이월로 −잔량 가능 → 조정(협력사사급재고관리)으로 실사 보정.
     ★용접봉/은납 별도 트랙 제외·사급부품(v_pr_bom SAGUB_FLAG=1)만. sign: 1양수/-1음수/0=제로/공백전체."""
+    cust = scope_cust(require_user(request), cust)      # ★협력사=자기 거래처 강제
+    if cust == "__NONE__":
+        raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     from routers.sagubledger import _is_part   # ★성능: 부품 판정 in-process 캐시(상관 EXISTS 제거)
     cn = _nx(); cur = cn.cursor()
     try:
@@ -122,7 +135,7 @@ def sagub_holding_list(cust: str = Query(""), mat: str = Query(""), sign: str = 
             d["STOCK_QTY"] = round(float(d["STOCK_QTY"] or 0), 2); d["REF_STOCK_QTY"] = None; d["upd_win"] = "사급수불장"
             d["CUST_CODE"] = str(d["CUST_CODE"]).strip()
             allr.append(d)
-        custs = sorted({(r["CUST_CODE"], (r["custnm"] or r["CUST_CODE"]).strip()) for r in allr}, key=lambda x: x[1])
+        custs = sorted({(r["CUST_CODE"], (r["custnm"] or r["CUST_CODE"]).strip()) for r in allr if (not cust or r["CUST_CODE"] == cust)}, key=lambda x: x[1])
         rows = []
         for r in allr:
             if cust and r["CUST_CODE"] != cust: continue
@@ -1506,7 +1519,7 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
                                      CASE WHEN n.ITEM_CODE IS NULL THEN l.STOCK_QTY
                                           ELSE n.STOCK_QTY END STOCK_QTY
                                 FROM (SELECT * FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) n
-                                FULL JOIN (SELECT * FROM PARTNER_ERP.dbo.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) l
+                                FULL JOIN (SELECT * FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WITH(NOLOCK) WHERE ITEM_CODE IN ({ph})) l
                                   ON l.ITEM_CODE=n.ITEM_CODE) u
                             GROUP BY ITEM_CODE""", *(list(ck) + list(ck)))
             for a, v in cur.fetchall(): astk[str(a).strip()] = float(v or 0)

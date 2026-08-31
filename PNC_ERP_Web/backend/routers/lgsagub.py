@@ -973,6 +973,12 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
         osp_all = {r[0]: (f(r[1]), f(r[2])) for r in cur.fetchall()}
         osp_set = set(osp_all)                     # ★전개 정지점(구조) — 단가와 무관
         osp_px = {k: (a / q if q else 0.0) for k, (q, a) in osp_all.items()}   # 참고용(OSP 청구단가)
+        # ★품목별 **사급 전환 시점**(첫 OSP 입고월) — 그 전 소요는 사급 소비가 아니다.
+        #   실측 2026-08-30: 2603 이후 전환 21종. 이 시점을 안 보면 전환 전 소요까지 사급으로 잡힌다.
+        cur.execute("""SELECT UPPER(LTRIM(RTRIM(item_code))), MIN(ym) FROM nx.lg_sagub_actual
+                        WHERE UPPER(item_name) NOT LIKE '%TUBE%' AND ISNULL(qty,0) > 0
+                        GROUP BY UPPER(LTRIM(RTRIM(item_code)))""")
+        osp_first = {str(r[0]): str(r[1] or "").strip() for r in cur.fetchall()}
         cur.execute("SELECT MIN(ym), MAX(ym) FROM nx.lg_sagub_actual WHERE UPPER(item_name) NOT LIKE '%TUBE%'")
         r0 = cur.fetchone(); osp_min = (r0[0] if r0 and r0[0] else "") or ""; osp_max = (r0[1] if r0 and r0[1] else "") or ""
         LEDGER_START = "2602"                 # ★사용자: 2월부터(OSP 데이터 시작월)
@@ -1014,6 +1020,15 @@ def recvcompare_parts_ledger(from_ym: str = Query(""), to_ym: str = Query("")):
             out_q = out_a = 0.0
             for it, qty in [(r[0], f(r[1])) for r in cur.fetchall()]:
                 for part, per in _soyo.sagub_parts_soyo(_weng(), it, osp_set, _sps_memo).items():   # ★통일 소요엔진
+                    # ★사급 전환 시점 이전 소요는 계상하지 않는다(대표 확정 2026-08-30).
+                    #   전엔 '전 기간 OSP 에 한 번이라도 등장하면 사급'이라, 8월에 처음 사급이 된
+                    #   품목의 2~7월 소요까지 사급 소비로 잡혀 마이너스가 났다.
+                    #   실측: MJX62771713 소요 1,812/입고 190(−1,622) → 전환 후만 계상하면 134/190(+56).
+                    #   ★원소재(TUBE) 쪽은 이미 원단위 eff_ym 으로 같은 point-in-time 을 한다. 부품만 빠져 있었다.
+                    #   ★계상만 빼면 정확하다 — 실측: 사급부품이 다른 사급부품을 자식으로 갖는 BOM 행 0건
+                    #     (walk 를 계속해도 그 밑에 사급 자손이 없다). stop_set 을 월마다 바꿔 재전개할 필요 없음.
+                    if osp_first.get(part, "") > M:
+                        continue
                     out_q += qty * per
                     out_a += qty * per * px.get(part, 0.0)
                     bal[part] = bal.get(part, 0.0) - qty * per

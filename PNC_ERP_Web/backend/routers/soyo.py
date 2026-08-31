@@ -56,7 +56,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         cur.execute("SELECT MODEL_NO,C_ITEM_CODE,USE_QTY,APPLY_FROM,APPLY_TO FROM nx.model_bom")
         for m, ci, uq, my, ty in cur.fetchall(): mbom[str(m).strip()].append((str(ci).strip(), float(uq or 1), str(my or '').strip(), str(ty or '').strip()))
         recvmap = _dd(set)
-        cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP.dbo.sa_t_recv_dtl WHERE WORK_ORDER>''")
+        cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP_TEST3.nx.sa_t_recv_dtl WHERE WORK_ORDER>''")
         for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
         prate = {}
         cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.item")
@@ -90,7 +90,7 @@ def plan_compose_mat(payload: dict = Body(...)):
         _asfrom = str(cur.fetchone()[0] or '').strip()
         cur.execute("""SELECT LTRIM(RTRIM(a.WORK_ORDER)) wo, LTRIM(RTRIM(a.ITEM_CODE)) it, SUM(CAST(a.PLAN_QTY AS int)) pq,
                 MIN(a.PLAN_YMD) ymd, MAX(ISNULL(a.OUTPUT_HM,'')) ohm, MAX(ISNULL(a.LINE_NO,'')) ln
-              FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT a
+              FROM PARTNER_ERP_TEST3.nx.PR_T_PLAN_INPUT a
               JOIN PARTNER_ERP_TEST3.nx.item c ON LTRIM(RTRIM(a.ITEM_CODE))=c.ITEM_CODE
               WHERE a.PLAN_YMD>=? AND a.PLAN_QTY>0
               GROUP BY LTRIM(RTRIM(a.WORK_ORDER)), LTRIM(RTRIM(a.ITEM_CODE)), a.PLAN_YMD""", _asfrom)
@@ -430,11 +430,14 @@ def sales_forecast_sagub_rebuild():
         sag = set(x[0] for x in cur.fetchall())   # ★대문자(엔진 stop_set·반환 대문자 정합)
         cur.execute("SELECT it,price FROM (SELECT UPPER(LTRIM(RTRIM(item_code))) it,price,ROW_NUMBER() OVER(PARTITION BY item_code ORDER BY apply_ymd DESC) rn FROM nx.price_item WHERE price_type=N'매입' AND vendor_code='LG') x WHERE rn=1")
         cosp = {a: float(b or 0) for a, b in cur.fetchall()}
-        cur.execute("""WITH sag AS (SELECT DISTINCT LTRIM(RTRIM(ITEM_CODE)) it FROM PARTNER_ERP_TEST3.nx.item WHERE LTRIM(RTRIM(sgroup))='310'),
-            prods AS (SELECT DISTINCT item FROM (SELECT LTRIM(RTRIM(C_ITEM_CODE)) item FROM PARTNER_ERP.dbo.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101' UNION SELECT LTRIM(RTRIM(ITEM_CODE)) FROM PARTNER_ERP.dbo.pr_t_plan_input WHERE PLAN_YMD>='260101') u),
-            expl AS (SELECT p.item prod, LTRIM(RTRIM(bl.child_item)) part,1 lvl FROM prods p JOIN nx.bom_header h ON h.item_code=p.item JOIN nx.bom_line bl ON bl.bom_id=h.bom_id
-             UNION ALL SELECT e.prod, LTRIM(RTRIM(bl.child_item)), e.lvl+1 FROM expl e JOIN nx.bom_header h ON h.item_code=e.part JOIN nx.bom_line bl ON bl.bom_id=h.bom_id WHERE e.lvl<8)
-            SELECT DISTINCT e.prod FROM expl e JOIN sag s ON s.it=e.part OPTION(MAXRECURSION 30)""")
+        # ★후보 = 계획 완제품 전체(260101+). 구 ad-hoc bom_line 재귀CTE 후보필터는 소요엔진(v_pr_bom)과
+        #   불일치로 일부 완제품 누락(실측 ADM72950707 사급 532,650 누락) → 폐기. 사급부품 도달 여부는
+        #   엔진 sagub_parts_soyo가 정확 판정(비도달=빈dict=0). §1-10 완전 준수(후보찾기도 엔진 소스).
+        #   ★컷오버 flip: 계획 원천도 nx로(레거시 동결 대비).
+        cur.execute("""SELECT DISTINCT item FROM (
+            SELECT UPPER(LTRIM(RTRIM(C_ITEM_CODE))) item FROM PARTNER_ERP_TEST3.nx.sa_t_plan_item_dtl WHERE PLAN_YMD>='260101'
+            UNION SELECT UPPER(LTRIM(RTRIM(ITEM_CODE))) FROM PARTNER_ERP_TEST3.nx.pr_t_plan_input WHERE PLAN_YMD>='260101') u
+            WHERE item IS NOT NULL AND item<>''""")
         cand = [str(r[0]).strip().upper() for r in cur.fetchall()]
         # ★소요엔진 이관(CLAUDE §1-10, 2026-08-29): 사급부품 소요 = nx_soyo_engine.sagub_parts_soyo
         #   (v_pr_bom·except≠1·310 사급부품 도달 시 '통째' 계상·정지). 구 ad-hoc CS_M_ITEM_BOM 재귀CTE는
@@ -443,8 +446,10 @@ def sales_forecast_sagub_rebuild():
         eng = _get_cost_engine(); _soyo.warm_vpr(eng); _memo = {}
         done = 0; nz = 0; tot = 0.0
         for it in cand:
-            pm = _soyo.sagub_parts_soyo(eng, it, sag, _memo)   # {310부품(대문자): 소요개수}
+            pm = _soyo.sagub_parts_soyo(eng, it, sag, _memo)   # {310부품(대문자): 소요개수} — 하위 사급부품만
             unit = sum(per * cosp[p] for p, per in pm.items() if p in cosp)
+            if it in sag:                          # ★완제품 자체가 310 사급부품(직접 계획분·스페어 등)이면 자신 COSP '통째' 포함
+                unit += cosp.get(it, 0.0)          #   (sagub_parts_soyo는 하위만 계상→자기자신 누락=under-count 보정, 실측 91/93 옛값=자기COSP 일치)
             cur.execute("""MERGE nx.item_sagub_cost t USING (SELECT ? item_code) s ON t.item_code=s.item_code
                 WHEN MATCHED THEN UPDATE SET sa_cost=?, asof_ymd=?, upd_dt=getdate()
                 WHEN NOT MATCHED THEN INSERT(item_code,sa_cost,asof_ymd,upd_dt) VALUES(?,?,?,getdate());""",
@@ -624,19 +629,19 @@ def _routing_edge_sync(cur):
         CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
              WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
              WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust_code,'') ELSE ISNULL(ci.in_cust_code,'') END,
+        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust,'') ELSE ISNULL(ci.in_cust,'') END,
         1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END,
-        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust_code,'') END
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END
       FROM nx.v_pr_bom b
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
-      LEFT JOIN PARTNER_ERP.dbo.PR_M_ITEM pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
+      LEFT JOIN nx.item ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+      LEFT JOIN nx.item pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
       WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
         AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
     new_cnt = cur.rowcount
     # 3) wc_live 라이브 갱신 (편집 무관, child 생산처=work_code||in_cust)
-    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust_code,'') END
-      FROM nx.routing_edge re JOIN PARTNER_ERP.dbo.PR_M_ITEM it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
+    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust,'') END
+      FROM nx.routing_edge re JOIN nx.item it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
     # 4) 유효 wc = COALESCE(wc_user, wc_live) — 편집 보존
     cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
     return int(new_cnt or 0)

@@ -149,6 +149,7 @@ COOP_ALLOW = {
     "/api/setin/list", "/api/setin/detail",
     "/api/setin/issue", "/api/setin/invoice",
     "/api/setstock/list",                 # 내 납품이 입고됐는지 확인(읽기전용·소속강제됨)
+    "/api/coopporder/items",              # 협력사 발주현황(내 계획·재고·기발주·순소요, 읽기전용·소속강제됨)
 }                                          # ※ scan/receive/cancel 은 staff_only — 담당자만
 
 

@@ -203,6 +203,7 @@ async function doLogin(){
 
 /* ───────── 화면 ───────── */
 let VIEW='home', DATA=null;
+let ORDER=null, ORDER_LOADING=false;   // 발주현황(coopporder) 지연로드 캐시
 
 async function start(){
   const u=T.me||{};
@@ -212,6 +213,7 @@ async function start(){
   await load();
 }
 async function load(){
+  ORDER=null; ORDER_LOADING=false;   // 재로그인/새로고침 시 발주현황 캐시 초기화
   $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
   try{ DATA = await api('/api/partner/my?days=14'); }
   catch(e){ if(e.message!=='401') $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
@@ -225,6 +227,8 @@ function tabs(){
   const staff = (T.me||{}).utype !== '협력사';
   const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
   const t=[{v:'home',i:'🏠',n:'홈'},{v:'plan',i:'📅',n:'내 계획'}];
+  const isPartner = !!((T.me||{}).partner_code);   // 소속 거래처가 있는 협력사만 발주현황(순소요) 노출
+  if(isPartner) t.push({v:'order',i:'📦',n:'발주현황'});
   if(useInv) t.push({v:'inv',i:'📄',n:'내 송장'});
   if(staff)  t.push({v:'scan',i:'📷',n:'입고'});
   return t;
@@ -239,6 +243,7 @@ function render(){
     VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
   $('#app').innerHTML = VIEW==='home' ? viewHome()
                       : VIEW==='plan' ? viewPlan()
+                      : VIEW==='order'? viewOrder()
                       : VIEW==='scan' ? viewScan() : viewInv();
   wire();
 }
@@ -290,6 +295,43 @@ function viewPlan(){
           <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}</tbody></table>`;
     }).join('')}</div>` : `<div class="empty">기간 안에 계획이 없습니다.</div>`}
   </div>`;
+}
+
+/* ───────── 발주현황 : 순소요(계획−재고−기발주) ───────── */
+function loadOrder(){
+  if(ORDER_LOADING||ORDER) return;
+  ORDER_LOADING=true;
+  api('/api/coopporder/items')
+    .then(j=>{ ORDER=j; })
+    .catch(e=>{ if(e.message!=='401') ORDER={error:e.message}; })
+    .then(()=>{ ORDER_LOADING=false; if(VIEW==='order') render(); });
+}
+const net4 = r => Math.round((+r.plan_qty||0)-(+r.stock_qty||0)-(+r.po_qty||0));   // 4주 순소요
+function viewOrder(){
+  if(!ORDER){ loadOrder(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
+  if(ORDER.error) return `<div class="msg e">${esc(ORDER.error)}</div>`;
+  if(ORDER.need_search) return `<div class="card"><div class="empty">소속 거래처가 지정되지 않았습니다. 담당자에게 문의하세요.</div></div>`;
+  const rows = ORDER.rows||[];
+  const need = rows.filter(r=>net4(r)>0).length;
+  const totNet = rows.reduce((a,r)=>a+Math.max(0,net4(r)),0);
+  return `
+  <div class="kpi">
+    <div><b>${num(rows.length)}</b><span>품목</span></div>
+    <div><b>${num(need)}</b><span>순소요 발생</span></div>
+    <div><b>${num(totNet)}</b><span>4주 순소요 계</span></div>
+  </div>
+  <div class="msg k" style="font-size:12px">순소요 = 계획(1~4주) − 현재고 − 기발주. <b>물동(5~8주)</b>은 LG 참고치이며 발주 계산에 넣지 않습니다.</div>
+  <div class="card">
+    <h3>발주현황<span class="n">${num(rows.length)}</span></h3>
+    ${rows.length ? `<div class="scroll"><table>
+      <thead><tr><th>품목</th><th class="n">계획</th><th class="n">재고</th><th class="n">기발주</th><th class="n">순소요</th></tr></thead>
+      <tbody>${rows.map(r=>{ const n=net4(r); return `<tr>
+        <td><span class="part">${esc(r.ic)}</span><span class="nm">${esc(r.nm||'')}${r.muldong_soyo>0?` · 물동 ${num(r.muldong_soyo)}`:''}</span></td>
+        <td class="n">${num(r.plan_qty)}</td><td class="n">${num(r.stock_qty)}</td><td class="n">${num(r.po_qty)}</td>
+        <td class="n" style="font-weight:800;color:${n>0?'#c0392b':'#8a94a6'}">${num(n)}</td></tr>`; }).join('')}</tbody>
+    </table></div>` : `<div class="empty">발주현황 품목이 없습니다.</div>`}
+  </div>
+  <div class="foot">피앤씨인더스트리 · 계획·물동은 생산관리 기준</div>`;
 }
 
 /* ───────── 내 송장 : 발행 → QR → 출발 ───────── */
