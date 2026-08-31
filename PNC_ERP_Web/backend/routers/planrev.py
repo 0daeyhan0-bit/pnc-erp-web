@@ -95,8 +95,10 @@ def _route_setup(cur):
         INTO nx.plan_route_active FROM nx.sourcing_route h
         JOIN nx.route_alloc ra ON ra.route_id=h.route_id AND ISNULL(ra.is_active,0)=1
         WHERE ISNULL(h.route_no,1)>1
-          AND """ + _ROUTE_GATE_SQL + """
+          AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
         GROUP BY UPPER(LTRIM(RTRIM(h.item_code)))""")
+        # ★완비검증(승인·업체·단가·생산정보)은 편성이 아니라 ★활성화(조달프로파일 택1=alloc/save)에서 강제(2026-09-01 사용자 확정).
+        #   생산·협력사 계획은 활성 R02면 구조(route_edges)만 있으면 항상 반영. 업체·단가 미비로 계획을 막지 않는다.
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
 def _step6_sql(cur):
@@ -396,19 +398,11 @@ def _step7_sql(cur):
 # ═══════════════════════════════════════════════════════════════════════
 
 def _gate_or_raise(cur):
-    """★D 사전검증 — soyo.py:21-32 복사. 메시지 문자열 원문 유지."""
-    # ── ★D 사전검증(§19-D·2026-08-25): 활성 지정된 대체경로(Rnn)가 게이트(승인·구조·업체·단가) 미충족이면
-    #    생산계획 편성 자체를 중단(어떤 DML도 전·plan_part_mat 미접촉) + 어느 품번/경로가 무엇이 빠졌는지 정확히 통지.
-    #    활성 지정 Rnn 없거나(=현행 R01만) 전부 완비면 통과 → 정상 편성. 협력사계획은 plan_part_mat 재사용이라 자연 차단.
-    _gate_bad = _route_gate_incomplete(cur)
-    if _gate_bad:
-        _lines = ["· 품번 {} 경로 R{:02d}{}: {}".format(
-                      b["item"], b["route_no"],
-                      "(" + b["route_name"] + ")" if b["route_name"] else "",
-                      ", ".join(b["missing"])) for b in _gate_bad]
-        raise HTTPException(400, "생산계획 편성 불가 — 활성 지정된 대체경로(Rnn) {}건이 미완성입니다.\n".format(len(_gate_bad))
-            + "아래 경로를 완료(승인·업체·단가 등록)하거나 현행(R01)로 되돌린 뒤 다시 편성하세요:\n"
-            + "\n".join(_lines))
+    """★편성은 막지 않는다(2026-09-01 사용자 확정) — 생산계획은 사내 계획이라 활성 R02면 항상 나와야 한다.
+       완비검증(승인·업체·단가·생산정보)은 ★활성화(조달프로파일 택1=alloc/save)에서 강제한다(미완비면 활성화 거부).
+       ⟹ 활성화를 통과한 R02는 이미 완비 → 편성은 무조건 진행. plan_route_active는 route_edges 있는 활성경로만 담아 안전.
+       (구 §19-D 편성 사전차단은 '활성인데 계획엔 안 나오는' 조용한 미반영을 유발해 폐기.)"""
+    return
 
 
 def _stepM_model(cur):
@@ -452,6 +446,13 @@ def _step5_item(cur):
         PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
         USE_QTY decimal(18,5),LOT_QTY int,PLAN_QTY int,ORG_PLAN_YMD varchar(6),LINE_NO varchar(6),OUTPUT_HM varchar(4),PROD_RATE numeric(9,2))""")
     cur.execute("DELETE FROM nx.plan_item_dtl")
+    # ★미승인 신규 BOM(src='web' AND approved=0) 편성 제외(2026-09-01 사용자): 신규는 승인 전까지 계획에 안 나온다.
+    #   현재 데이터엔 approved=0 신규가 없음 → no-op(diff0 안전). 승인(nx.item.approved=1)되면 자동 포함.
+    _unappr = set()
+    cur.execute("SELECT CASE WHEN COL_LENGTH('nx.item','approved') IS NULL THEN 0 ELSE 1 END")
+    if int(cur.fetchone()[0] or 0):
+        cur.execute("SELECT UPPER(LTRIM(RTRIM(item_code))) FROM nx.item WHERE ISNULL(src,'')='web' AND approved=0")
+        _unappr = {str(r[0]).strip() for r in cur.fetchall()}
     # ★검토본 변경: 라인별 당김(nx.plan_line_pull) 적용값으로 계획일자를 잡는다.
     #   레거시는 PR_T_PLAN_DTL.PLAN_YMD 에 라인당김이 baked 돼 있고 STEP5 가 그걸 읽는다.
     #   웹은 plan_dtl 이 원본이라(PK(WORK_ORDER,PLAN_YMD) 충돌로 수정 불가) 맵을 조인해 같은 효과.
@@ -493,6 +494,7 @@ def _step5_item(cur):
             rc = recvmap.get(wos); assys = [(a, 1.0) for a in rc] if rc else None
         if not assys: continue
         for a, mq in assys:
+            if str(a).strip().upper() in _unappr: continue   # ★미승인 신규 BOM 제외
             irows.append([ymd, wos, wos, a, mq, 0, pq, ymd, lno, ohm, prate.get(a, 100)])
             lot[wos] = max(lot[wos], rq or pq)       # ★REMAIN_QTY 우선, 없으면 종전 방식
     for rr in irows: rr[5] = lot[rr[1]]
@@ -532,6 +534,7 @@ def _step5_item(cur):
           GROUP BY LTRIM(RTRIM(a.work_order)), LTRIM(RTRIM(a.item_code)), a.plan_ymd""", _asfrom)
     for wo, it, pq, ymd, ohm, ln in cur.fetchall():
         wos=str(wo).strip(); it=str(it).strip(); pq=int(pq or 0); ymd=str(ymd).strip()
+        if it.upper() in _unappr: continue   # ★미승인 신규 BOM 제외(A/S 앵커도 동일)
         ohm=(str(ohm).strip() or '0800'); ln=(str(ln or '').strip())[:6]
         # C_ITEM_CODE=ITEM_CODE(직접 assy), USE_QTY=1, LOT_QTY=PLAN_QTY=pq, PROD_RATE=100
         irows.append([ymd, wos, wos, it, 1.0, pq, pq, ymd, ln, ohm, 100])
