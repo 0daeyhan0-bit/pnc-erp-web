@@ -705,13 +705,21 @@ SCREEN.planupload=(c)=>{
       g('#p-upload').onclick=doUpload;}
     // ★2026-08-23 소요전개기 #3 retire(PLAN_PROGRAM_MASTER §P1): 구 '협력사계획 편성'(/api/plan/compose→死 nx.plan_part) 버튼 제거.
     //   정본 소요=아래 '자재소요·조달 편성'(compose_mat→nx.plan_part_mat, STEP M 포함 상위집합).
-    const cm=g('#p-compmat');if(cm)cm.onclick=async()=>{if(!confirm('업로드된 생산계획으로 정본 자재소요(레거시 STEP5→6→7)를 산출하고\n조달 프로파일을 오버레이해 조달 소요를 편성합니다.\n(수량 100% 검증본)\n진행할까요?'))return;
+    // ★2026-08-31 이 편성 경로는 은퇴했다(서버도 410 으로 막음).
+    //   soyo 편성은 nx.plan_part_dtl 을 19개 컬럼으로 재생성해 뷰 v_plan_part_copy_new 를 깨뜨린다
+    //   → 파트별 생산계획·키팅·가공생산진척 조회 불가. 정본 = 「생산계획업로드[검토]」(planrev).
+    const cm=g('#p-compmat');if(cm)cm.onclick=async()=>{
+      alert('이 편성 경로는 은퇴했습니다.\n\n「생산계획업로드[검토]」 화면에서 단계별로 편성하세요.\n'
+           +'(이 경로로 편성하면 파트별 생산계획·키팅 화면이 조회 불가가 됩니다)');
+      return;};
+    const _cmOld=async()=>{if(!confirm('업로드된 생산계획으로 정본 자재소요(레거시 STEP5→6→7)를 산출하고\n조달 프로파일을 오버레이해 조달 소요를 편성합니다.\n(수량 100% 검증본)\n진행할까요?'))return;
       cm.disabled=true;cm.textContent='편성 중…';
       try{const r=await fetch(`${API}/api/plan/compose_mat`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const jj=await r.json();
         if(jj.ok)alert(`자재소요·조달 편성 완료\n품목계획 ${nf(jj.item_lines)} · 자재소요 ${nf(jj.mat_lines)}(제번 ${nf(jj.mat_work_orders)}) · 조달소요 ${nf(jj.sourcing_lines)}\n\n→ 「자재소요·조달 조회」 화면에서 확인`);
         else alert('편성 실패: '+(jj.error||jj.detail||JSON.stringify(jj)));}
       catch(e){alert('편성 실패: '+e);}
       cm.disabled=false;cm.textContent='🧾 자재소요·조달 편성';};
+    void _cmOld;   // 은퇴 보관용(되살리려면 위 alert 를 지우고 cm.onclick=_cmOld 로)
     ['#p-wo','#p-model','#p-line'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#p-search').click();});
   };
   load();

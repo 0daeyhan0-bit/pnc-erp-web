@@ -20,6 +20,29 @@ _P = "nx."   # ★nx전환 확정(2026-08-12). ★단일BOM 통일(2026-08-13): 
 
 @router.post("/api/plan/compose_mat")
 def plan_compose_mat(payload: dict = Body(...)):
+    """★은퇴한 편성 경로 — 실행 금지(2026-08-31 가드).
+
+       왜 막는가(실측 사고):
+         이 경로와 planrev.py 는 **같은 nx.plan_part_dtl 에 쓰는데 컬럼 구성이 다르다**.
+           soyo    19개 컬럼
+           planrev 27개 컬럼 (+OUTPUT_HM·AMPM·CUM_LT_HR·PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)
+         편성이 테이블을 DROP 후 재생성하므로, 이 경로를 한 번 돌리면 컬럼 6개가 사라지고
+         그 컬럼을 참조하는 뷰 nx.v_plan_part_copy_new 가 깨진다
+         → 파트별 생산계획(410)·준비실적처리(키팅)·가공생산진척(420) 조회 불가.
+         (2026-08-31 실측: 이 함수를 직접 호출해 410 이 "백엔드 연결 실패"로 막혔다)
+
+       정본 = 생산계획업로드[검토] 화면 → planrev.py (/api/planrev/step/*, /compose_all).
+       화면도 2026-08-28 에 메뉴에서 숨겨졌다(core.js: SCREEN.planupload).
+
+       되살리려면: 아래 raise 를 지우기 전에 STEP6 이 위 6개 컬럼을 함께 만들도록
+                   맞추고, v_plan_part_copy_new 로 검증할 것.
+    """
+    raise HTTPException(410,
+        "은퇴한 편성 경로입니다 — 「생산계획업로드[검토]」 화면을 사용하세요.\n\n"
+        "이 경로로 편성하면 nx.plan_part_dtl 의 컬럼 6개(OUTPUT_HM·AMPM·CUM_LT_HR·"
+        "PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)가 사라져 뷰 v_plan_part_copy_new 가 깨지고, "
+        "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회가 막힙니다.")
+
     nx = _nx(); cur = nx.cursor()
     try:
         # ── ★D 사전검증(§19-D·2026-08-25): 활성 지정된 대체경로(Rnn)가 게이트(승인·구조·업체·단가) 미충족이면
