@@ -3378,11 +3378,13 @@ SCREEN.prodsheet=(host)=>{
     <style>
       /* ★용지 = 210 × 110mm (A4 가로폭 그대로, 세로 3등분) — 2026-08-28 교정.
          이전엔 180mm 였는데 실물 용지는 A4 폭(210mm)이라 좌우가 남았다.
-         여백도 4mm → 상하 2mm / 좌우 3mm 로 줄여 표를 넓게 쓴다.
-         ★상단 잘림 수정: .kb 의 min-height:90mm 가 쓸 수 있는 높이(110-4=106mm)와
-           맞물려 내용이 위로 밀려 첫 행 테두리가 잘려 나갔다 → min-height 제거.
+         ★상단 잘림 재수정(2026-08-31 실물 확인): 08-28 에 여백을 4mm→상하 2mm 로 줄였는데
+           **2mm 는 프린터의 물리적 인쇄불가 영역(보통 3~5mm)보다 작다.** 그래서 첫 행
+           테두리가 다시 잘려 나왔다(그 전에는 정상 출력됐다는 사용자 확인).
+           → 상단은 6mm 로 넉넉히, 하단은 3mm. 좌우 3mm 유지.
+           표 합계 83mm + 상하여백 9mm = 92mm < 110mm 이라 한 장에 여유 있게 들어간다.
          간판 1장 = 1페이지. */
-      @page{size:210mm 110mm;margin:2mm 3mm}
+      @page{size:210mm 110mm;margin:6mm 3mm 3mm 3mm}
       *{box-sizing:border-box}
       body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10px;color:#000}
       /* 간판 1장 = 1페이지. 레거시 실물처럼 표는 위쪽에 모으고 아래는 비운다
