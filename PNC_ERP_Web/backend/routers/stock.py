@@ -372,14 +372,23 @@ def stock_save(payload: dict = Body(...)):
             tag = str(r.get("MAINT_TAG") or sc["tags"][0]).strip()
             qty = float(r.get("qty") or 0)
             store_qty = -abs(qty) if sc["sign"] == -1 else qty
+            # ★입고금액·부가세(2026-08-31 레거시 w_pu_stock_057 정합).
+            #   종전엔 MAINT_AMT 를 클라이언트가 안 보내 **0으로 저장**되고 MAINT_VAT 는
+            #   컬럼에서 아예 빠져 있었다(같은 파일 L602 개별입고 경로는 이미 채우고 있었음).
+            #   금액 = |수량| x 단가(반올림) · 부가세 = 금액의 10%. 클라이언트가 보내면 그 값 우선.
+            _cost = float(r.get("MAINT_COST") or 0)
+            _amt = r.get("MAINT_AMT")
+            _amt = float(_amt) if _amt not in (None, "") else round(abs(qty) * _cost)
+            _vat = r.get("MAINT_VAT")
+            _vat = float(_vat) if _vat not in (None, "") else round(_amt * 0.1)
             cur.execute("""INSERT INTO nx.stock_ledger
                 (STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,GAGONG_PROC_CODE,TO_GAGONG_PROC_CODE,OUT_WH_GUBUN,
-                 MAT_CODE,ITEM_CODE,WORK_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,REMARKS,SHEET_NO,INSERT_USER_ID,INSERT_DATETIME)
-                VALUES('MAT',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE())""",
+                 MAT_CODE,ITEM_CODE,WORK_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,MAINT_VAT,REMARKS,SHEET_NO,INSERT_USER_ID,INSERT_DATETIME)
+                VALUES('MAT',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE())""",
                 ymd, seq, tag, (r.get("CUST_CODE") or None), (r.get("GAGONG_PROC_CODE") or None),
                 (r.get("TO_GAGONG_PROC_CODE") or None), (r.get("OUT_WH_GUBUN") or None),
                 str(r.get("MAT_CODE", "")).strip(), (r.get("ITEM_CODE") or None), (r.get("WORK_CODE") or None),
-                store_qty, float(r.get("MAINT_COST") or 0), float(r.get("MAINT_AMT") or 0),
+                store_qty, _cost, _amt, _vat,
                 (r.get("REMARKS") or None), (r.get("SHEET_NO") or None), _usr)
             # ★자재창고 재고에도 반영(2026-08-20) — 레거시와 같은 구조.
             #   기존엔 nx.stock_ledger 에만 쌓여서 화면마다 반영이 갈렸음:

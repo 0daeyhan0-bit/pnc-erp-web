@@ -63,10 +63,14 @@ def planinput_save(payload: dict = Body(...)):
             cur.execute("""UPDATE nx.prod_plan_input SET plan_ymd=?,line_no=?,item_code=?,output_hm=?,plan_qty=?,
                 work_order=?,work_code=?,prod_tag=?,remarks=?,upd_user='web',upd_dt=GETDATE() WHERE ppi_id=?""", *vals, int(pid))
             return {"ok": True, "mode": "update", "ppi_id": int(pid)}
+        # ★신규 등록은 제번 자동채번(2026-08-31) — 사용자가 준 값이 있으면 그대로 존중한다.
+        _v = list(vals)
+        if not _v[5]:
+            _v[5] = _next_wo(cur, line, 1)[0]
         cur.execute("""INSERT INTO nx.prod_plan_input(plan_ymd,line_no,item_code,output_hm,plan_qty,work_order,
             work_code,prod_tag,remarks,src,upd_user,upd_dt) OUTPUT INSERTED.ppi_id
-            VALUES(?,?,?,?,?,?,?,?,?,'web','web',GETDATE())""", *vals)
-        return {"ok": True, "mode": "insert", "ppi_id": int(cur.fetchone()[0])}
+            VALUES(?,?,?,?,?,?,?,?,?,'web','web',GETDATE())""", *_v)
+        return {"ok": True, "mode": "insert", "ppi_id": int(cur.fetchone()[0]), "work_order": _v[5]}
     finally:
         nx.close()
 
@@ -123,6 +127,40 @@ def planinput_lines():
         pass
     return {"rows": rows, "cnt": len(rows)}
 
+def _next_wo(cur, line, n=1):
+    """제번(WORK_ORDER) 자동채번 — 레거시 w_pr_plan_060 PBL 원문 그대로(사용자 제공 2026-08-31).
+
+        is_max_work_order = 'WO' + string(long(mid(is_max_work_order,3,6))+1,'000000')
+                                 + string(rand(10) - 1)
+        ls_work_order     = is_max_work_order + ls_line_no
+
+       ⟹ **'WO' + 연번6자리 + 난수1자리(0~9) + LINE_NO**   예) WO1094373SS
+          = WO · 109437 · 3 · SS
+       ★마지막 자리는 연번이 아니라 **난수**다. 실측 15,006건에서 0~9 분포가
+         9.5~10.4% 로 완전 균등해 rand(10)-1 이 확증됐다.
+         (7자리 연번으로 오인하면 번호대가 레거시와 어긋난다 — 초안의 실수)
+       ★mid(x,3,6) = 3번째부터 6자 = 연번부. 라인 접미사는 화면 라인 드롭다운 코드
+         그대로다(SVC/KS/NG2/AR …).
+       ★레거시와 웹이 같은 번호대를 쓰므로 **라이브·웹 양쪽 최대 연번**을 함께 본다.
+         한쪽만 보면 겹친다(레거시가 계속 채번 중).
+       n개를 미리 확보해 [번호…] 로 돌려준다(일괄 등록용) — 연번은 1씩 올리고
+       난수는 매 건 새로 뽑는다(PBL 이 행마다 rand 를 호출하는 것과 동일)."""
+    import random
+    mx = 0
+    for sql in ("""SELECT MAX(CAST(SUBSTRING(work_order,3,6) AS bigint)) FROM nx.prod_plan_input
+                    WHERE work_order LIKE 'WO[0-9][0-9][0-9][0-9][0-9][0-9][0-9]%'""",
+                """SELECT MAX(CAST(SUBSTRING(WORK_ORDER,3,6) AS bigint)) FROM PARTNER_ERP.dbo.PR_T_PLAN_INPUT WITH(NOLOCK)
+                    WHERE WORK_ORDER LIKE 'WO[0-9][0-9][0-9][0-9][0-9][0-9][0-9]%'"""):
+        try:
+            v = cur.execute(sql).fetchone()[0]
+            if v:
+                mx = max(mx, int(v))
+        except Exception:
+            pass                      # 라이브 조회 실패해도 웹 최대값으로 진행(채번은 계속돼야 한다)
+    ln = (line or "").strip()
+    return [f"WO{mx + i + 1:06d}{random.randint(0, 9)}{ln}" for i in range(max(1, n))]
+
+
 @router.post("/api/planinput/bulk")
 def planinput_bulk(payload: dict = Body(...)):
     """엑셀 붙여넣기 일괄 등록. 공통값(기본 계획일자·라인·산출시각·생산구분·공정) + 행별(계획일자·품번·수량·제번·비고).
@@ -152,17 +190,22 @@ def planinput_bulk(payload: dict = Body(...)):
         rymd = _n6(r.get("plan_ymd")) or ymd0    # 행별 일자 우선, 없으면 공통
         if not item or qty <= 0 or not rymd:
             skipped += 1; continue
-        wo = str(r.get("work_order", "") or "").strip() or None
         rm = str(r.get("remarks", "") or "").strip() or None
-        recs.append((rymd, line, item, hm, qty, wo, wcode, tag, rm))
+        # ★제번은 저장 시 자동채번(2026-08-31 사용자 확정) — 화면 입력칸 제거.
+        #   레거시 w_pr_plan_060 도 신규행 WORK-ORDER 칸이 비어 있고 저장할 때 채워진다.
+        recs.append([rymd, line, item, hm, qty, None, wcode, tag, rm])
     if not recs:
         return {"ok": True, "inserted": 0, "skipped": skipped}
     nx = _nx(); cur = nx.cursor()
     try:
+        wos = _next_wo(cur, line, len(recs))          # 필요한 개수만큼 한 번에 확보
+        for i, rec in enumerate(recs):
+            rec[5] = wos[i]
         cur.executemany("""INSERT INTO nx.prod_plan_input(plan_ymd,line_no,item_code,output_hm,plan_qty,work_order,
             work_code,prod_tag,remarks,src,upd_user,upd_dt)
-            VALUES(?,?,?,?,?,?,?,?,?,'web-bulk','web',GETDATE())""", recs)
-        return {"ok": True, "inserted": len(recs), "skipped": skipped}
+            VALUES(?,?,?,?,?,?,?,?,?,'web-bulk','web',GETDATE())""", [tuple(r) for r in recs])
+        return {"ok": True, "inserted": len(recs), "skipped": skipped,
+                "work_orders": wos[:len(recs)]}
     finally:
         nx.close()
 
@@ -192,24 +235,27 @@ def planinput_matrix(base: str = Query(""), prevday: int = Query(0), days: int =
                      q: str = Query(""), line: str = Query("")):
     """생산계획추가입력 매트릭스(레거시 w_pr_plan_060 / dw_pr_plan_030_t1 재현).
     좌측고정: WORK-ORDER·작업처(work_code:공정)·양산/셀(prod_tag)·라인·품번·품목구분(item.item_type)·생산수량·대체수량·출하수량·시간.
-    우측: 기준일 기준 최근 N일(기본28≈4주) 일자매트릭스. ★기준일=마지막(우측 끝) 컬럼, 시작=기준일−(N−1).
+    우측: **기준일부터 앞으로** N일(기본28≈4주) 일자매트릭스. ★기준일=첫(좌측 시작) 컬럼.
       셀=해당일 SUM(plan_qty). 하단 일자합계.
-    ★backward 창인 이유(실측): 등록된 추가계획은 기준일 이전(과거)에 집중 분포 → forward 창은 거의 공란(기준일=오늘 forward 28일=37행).
-      레거시 w_pr_plan_060(dw_pr_plan_060_1)도 기준일에서 뒤로 약 2주 범위(≈725행)를 표시. backward로 맞춰 등록분 전부 노출.
+    ★forward 창(2026-08-31 레거시 실물 대조로 교정): 레거시 w_pr_plan_060 은 기준일(31일)이
+      **맨 왼쪽 첫 일자컬럼**이고 거기서 미래로 뻗는다. 종전 웹은 backward(기준일=우측 끝,
+      과거 28일)라 첫 컬럼이 08/04 로 나왔다 — 계획을 새로 넣고 확인할 수 없는 방향이었다.
+      ※종전 주석의 "등록분이 과거에 집중"은 그때 데이터 기준이었고, 화면 방향의 근거로는
+        레거시 실물이 우선한다(사용자 확정 2026-08-31).
     ★원천=nx.prod_plan_input 단일(=레거시 PR_T_PLAN_INPUT 이관본, src='legacy'/'web'). 라이브 병합시 이중계상되므로 병합 안함.
     ★대체수량/출하수량=PR_T_PLAN_INPUT/매트릭스源(dw_pr_plan_030_t1: lot_qty·plan_qty·prod_rate만)에 없음 → 공란(가정).
-    전일기준(prevday): 우측 끝=OFF 기준일 / ON 전일(기준일−1)."""
+    전일기준(prevday): 시작=OFF 기준일 / ON 전일(기준일−1)."""
     from datetime import datetime as _dt, timedelta as _td
     days = max(7, min(int(days), 60))
     b = (base or "").strip()
     try:
-        d_end = _dt.strptime(b, "%y%m%d")
+        d0 = _dt.strptime(b, "%y%m%d")
     except Exception:
-        d_end = _dt.today()
+        d0 = _dt.today()
     if prevday:
-        d_end = d_end - _td(days=1)
-    d0 = d_end - _td(days=days - 1)   # 시작=기준일−(N−1). 기준일이 마지막(우측 끝) 컬럼.
-    dates = []  # [{ymd(YYMMDD), mmdd, dow(0=일..6=토), key}] — 오름차순(좌:과거 → 우:기준일)
+        d0 = d0 - _td(days=1)
+    # ★기준일이 첫(좌측) 컬럼 — 거기서 앞으로 N일(레거시 동일)
+    dates = []  # [{ymd(YYMMDD), mmdd, dow(0=일..6=토), key}] — 오름차순(좌:기준일 → 우:미래)
     _dow = ["일", "월", "화", "수", "목", "금", "토"]
     for i in range(days):
         d = d0 + _td(days=i)
