@@ -1736,20 +1736,28 @@ SCREEN.unifybom=(c,ro)=>{
       let direct=rows.filter(x=>String(x.parent_code||'').trim()===model);
       if(!direct.length) direct=rows.filter(x=>(+x.stufe===1));
       const seen={},lines=[],weld=[];
+      // ★LG child_spec 치수 파싱(비존재=신규 품목용). 포맷 제각각 → 최선노력(OD/Ø·T·L·재질).
+      const _lgdim=(spec)=>{const s=String(spec||'');
+        const mOD=s.match(/(?:\bOD|Ø|∅|외경)\s*([0-9]+(?:\.[0-9]+)?)/i);
+        const mT =s.match(/(?:\bT|두께)\s*([0-9]+(?:\.[0-9]+)?)/i);
+        const mL =s.match(/(?:\bL|길이)\s*([0-9]+(?:\.[0-9]+)?)/i);
+        let m='';if(/\b(CU|copper|C1220|황동|brass|동관?)\b/i.test(s))m='CU';else if(/\b(STS|SUS|stainless|스텐|스테인)\b/i.test(s))m='SUS';else if(/\b(AL|알루미)/i.test(s))m='AL';
+        return {diam:mOD?+mOD[1]:0, thick:mT?+mT[1]:0, length:mL?+mL[1]:0, metal:m};};
       direct.forEach(x=>{const ch=String(x.child_code||'').trim();if(!ch||seen[ch])return;seen[ch]=1;
-        // ★기존 품목(nx_exists)이면 마스터값(외경·두께·재질·중량·분류·생산구분·단가구분·매입처) 끌어옴. 없으면 LG값/기본.
+        // ★기존 품목(nx_exists=1)이면 nx.item 마스터값 끌어옴. 없으면(신규) LG child_spec 치수 파싱 + 신규 표시.
         const ex=(+x.nx_exists===1);
+        const dm=ex?null:_lgdim(x.child_spec);
         const rec={child_item:ch,
           item_name:(ex?(x.nx_desc||x.child_desc):(x.child_desc||x.nx_desc))||'',
           item_spec:(ex?(x.nx_spec||x.child_spec):x.child_spec)||'',
           qty:(x.qty!=null?+x.qty:1),
           unit:(ex&&x.nx_unit)?x.nx_unit:(x.unit||'EA'),
           supply_type:x.supply_type||'',
-          diam:ex?(x.nx_diam||0):0, thick:ex?(x.nx_thick||0):0, length:ex?(x.nx_length||0):0,
-          metal_gubun:ex?(x.nx_metal||''):'', net_weight:ex?(x.nx_weight||null):null,
+          diam:ex?(x.nx_diam||0):dm.diam, thick:ex?(x.nx_thick||0):dm.thick, length:ex?(x.nx_length||0):dm.length,
+          metal_gubun:ex?(x.nx_metal||''):dm.metal, net_weight:ex?(x.nx_weight||null):null,
           lgroup:ex?(x.nx_lgroup||''):'', sgroup:ex?(x.nx_sgroup||''):'',
           make_type:ex?(x.nx_make||''):'', cost_gubun:ex?(x.nx_cost||''):'', in_cust:ex?(x.nx_incust||''):'',
-          _isnew:!ex};   // 기존에 없는 품번=신규 자식(초록 배지·필수검증)
+          _isnew:!ex};   // ★기존에 없는 품번=신규 자식(초록 배지·필수검증·LG 치수 pre-fill)
         (ch.toUpperCase().startsWith('RAC')?weld:lines).push(rec);});
       alert(`LG BOM 불러오기 — 상위 ${model} · 구성 ${lines.length} · 용접봉 ${weld.length} (전개 ${rows.length}행, nx.lg_bom)`);
       enterNew(model, j.modelnm||'', lines, weld);
