@@ -188,6 +188,16 @@ def _ensure_bom_snap(cur):
       except_flag 28건·qty 44건이 뷰와 달랐다(오늘 BOM 수정분 미반영).
       낡은 스냅을 재사용하면 편성 결과가 조용히 틀어지므로 절대 캐시하지 않는다."""
     cur.execute("IF OBJECT_ID('nx.plan_bom_snap') IS NOT NULL DROP TABLE nx.plan_bom_snap")
+    # ※EXCEPT_FLAG 를 CS_CALC_EXCEPT_FLAG 로 바꾸지 말 것 — 2026-08-31 실측으로 기각됨.
+    #   동기: 레거시 SP(_legacy_analysis/SP_CS_견적서_실원가용_250910.sql:188-193)는
+    #         where isnull(b.CS_CALC_EXCEPT_FLAG,'0') <> '1' 로 끊고,
+    #         ⑤ 자재소요가 레거시 대비 −156,329(자재 201종) 과소계상돼 있었다.
+    #   결과: 그대로 바꿨더니 오히려 +999,157 로 악화(웹에만 22,081키).
+    #         AJR30077403 에서 -F&T·-12-1·-4-2 가 동시에 열려 전 경로가 중복 계상됐다.
+    #   해석: 웹 bom_line 은 두 플래그를 상보적으로 쓴다(현행경로=except_flag, 원가제외=cs_calc_except).
+    #         한쪽만으로 끊으면 과소(ef 단독) 또는 과다(cs 단독)가 된다.
+    #         ⑤ 정합은 플래그 교체가 아니라 전개 규칙 자체를 다시 봐야 한다.
+    #   ★STEP6(_step6_sql:105)도 EXCEPT_FLAG 유지 — ④ 파트별은 전 기간 diff0 이다.
     cur.execute("""SELECT ITEM_CODE AS item_code, MAT_CODE AS mat_code, USE_QTY_PR,
            EXCEPT_FLAG AS except_flag, VIR_ITEM_FLAG AS vir_item_flag
       INTO nx.plan_bom_snap FROM nx.v_pr_bom""")
@@ -265,13 +275,22 @@ def _step7_sql(cur):
       FROM nx.plan_part_dtl a JOIN nx.item_ov c ON a.item_code=c.item_code WHERE a.proc_seq=1
       UNION ALL
       -- ★직납품(파트별계획 없음) 앵커: 소요일자에 라인 CUST_MAINT_DAY(직납품당김일자) 적용.
-      --   plan_ymd(상위 계획일)는 그대로 두고 part_plan_ymd 만 당긴다.
-      SELECT a.plan_ymd,ISNULL(dp.pull_ymd,a.plan_ymd),ISNULL(a.OUTPUT_HM,''),
+      --   ★2026-08-31 교정: plan_ymd 도 **함께** 당긴다(종전엔 part_plan_ymd 만 당겼다).
+      --   실측 — 레거시와 어긋난 레벨0 1,199건이 전부 LINE_NO='CA' · GAGONG_PROC='' 이고,
+      --          그중 1,180건이 '웹 part_plan_ymd == 레거시 plan_ymd' 였다.
+      --          즉 레거시는 직납품 앵커에서 두 컬럼을 같은 당김값으로 넣는다.
+      --          (CA = CUST_MAINT_DAY 를 가진 유일한 라인)
+      SELECT ISNULL(dp.pull_ymd,a.plan_ymd),ISNULL(dp.pull_ymd,a.plan_ymd),ISNULL(a.OUTPUT_HM,''),
          a.work_order,a.split_work_order,a.c_item_code,0,a.c_item_code,a.c_item_code,1,a.c_item_code,
          c.ov_wc,CONVERT(decimal(18,5),a.use_qty),
          CONVERT(varchar(500),'||'+c.ov_wc+'|'),'1',a.use_qty,CEILING(CONVERT(float,a.plan_qty)*ISNULL(a.use_qty,1)*ISNULL(CASE WHEN a.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100),'','1'
       FROM nx.plan_item_dtl a JOIN nx.item_ov c ON a.c_item_code=c.item_code
-      LEFT JOIN nx.plan_direct_pull dp ON dp.work_order=RTRIM(a.work_order)
+      -- ★2026-08-31: plan_direct_pull 에 제번당 2행인 것이 18개 있어 LEFT JOIN 이
+      --   앵커를 2배로 불렸다(⑤ 이중계상 — AJJ30041902-SUB 60→120 등).
+      --   MIN 으로 묶어 제번당 1행만 매칭한다(가장 이른 당김일 = 소요 기준).
+      LEFT JOIN (SELECT RTRIM(work_order) AS work_order, MIN(pull_ymd) AS pull_ymd
+                   FROM nx.plan_direct_pull GROUP BY RTRIM(work_order)) dp
+             ON dp.work_order=RTRIM(a.work_order)
       WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.item_code=a.c_item_code)
       UNION ALL
       SELECT cb.plan_ymd,cb.part_plan_ymd,cb.part_output_hm,
@@ -288,7 +307,15 @@ def _step7_sql(cur):
         --   이 조건이 지우는 건 **정확히 SUB 506행뿐이고 일반자재는 0행**이었다
         --   (파트별 SUB 노드수는 웹·라이브 모두 1,199 로 동일 = 파트별 전개는 맞다).
         --   즉 레거시는 SUB 에 한해 파트별·자재소요 이중 등재를 허용한다.
-        AND (b.mat_code LIKE '%-SUB'
+        --   ★2026-08-31 정밀화: 이 예외는 **CA 라인 · 파트별 bom_level=1** 에만 적용된다.
+        --     실측(레거시 lv=1 SUB 1,204건): CA 외 라인은 예외 0건(CE 131·C1 109·CG 94…
+        --     전부 ⑤에서 뺀다). CA 안에서도 lv=2 는 전부 뺌, lv=1 이 533남김/47뺌.
+        --     종전엔 라인 구분 없이 남겨 SUB 자재 8종·56키가 웹에만 생겼다.
+        AND (( b.mat_code LIKE '%-SUB'
+               AND EXISTS(SELECT 1 FROM nx.plan_part_dtl d2
+                           WHERE d2.work_order=cb.work_order AND d2.split_work_order=cb.split_work_order
+                             AND d2.item_code=b.mat_code AND d2.bom_level=1
+                             AND LTRIM(RTRIM(ISNULL(d2.line_no,'')))='CA') )
              OR NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WHERE d.plan_ymd=cb.plan_ymd AND d.work_order=cb.work_order AND d.split_work_order=cb.split_work_order
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code))
       UNION ALL
@@ -339,14 +366,25 @@ def _step7_sql(cur):
     #     ★예외(2026-08-27): **직납품 당김분(CUST_MAINT_DAY)** 은 클램프하지 않는다.
     #       직납품은 당일보다 이른 소요일이 실제로 존재한다(라이브 ASSY행 88건이 B 이전).
     #       클램프가 당김값을 되돌려 CA 라인 77건이 어긋났다 → ASSY행 83.82%→86.87%.
+    #     ※plan_ymd 에 당김일(part_plan_ymd)을 넣지 말 것 — 2026-08-31 실측으로 기각.
+    #       동기: 레벨0 앵커 1,158키가 레거시 대비 +1/+3/+4일 뒤로 밀려 있었고
+    #             (part_plan_ymd 는 1,139/1,158 이미 일치), 레거시는 그 행들에서
+    #             PLAN_YMD 와 PART_PLAN_YMD 가 같은 값이었다.
+    #       결과: bom_level=0 전체에 당김일을 넣었더니 밀린 키가 1,158 → 49,526 으로 폭증
+    #             (이번엔 -3/-4일 방향). 레벨0 대부분은 지금의 plan_ymd 가 맞다.
+    #       ⟹ 당김일을 쓰는 건 레벨0 중 '일부 조건'뿐이다. 그 조건을 먼저 특정해야 한다.
     cur.execute(("""SELECT a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code AS mat_code,
-        SUM(a.part_plan_qty*a.cum_use_qty) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code,
+        -- ★2026-08-31: 레거시 PART_PLAN_QTY 는 100.00% 정수(92,152/92,152)다.
+        --   웹 소수행 19건을 대조하니 전부 FLOOR(내림)로 일치했다(CEILING·ROUND 는 0건).
+        FLOOR(SUM(a.part_plan_qty*a.cum_use_qty)) AS part_plan_qty,MAX(a.mat_flag) mat_flag,MAX(a.mat_work_center_code) mat_work_center_code,
         CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '{B}'
              ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
         CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '0750'
              ELSE MIN(a.part_output_hm) END AS part_output_hm
     INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
-    LEFT JOIN nx.plan_direct_pull dpx ON dpx.work_order=RTRIM(a.work_order)
+    LEFT JOIN (SELECT RTRIM(work_order) AS work_order, MIN(pull_ymd) AS pull_ymd
+                 FROM nx.plan_direct_pull GROUP BY RTRIM(work_order)) dpx
+           ON dpx.work_order=RTRIM(a.work_order)
          AND a.bom_level=0 AND a.bom_mat_code=a.assy_item_code""".replace("{B}", _mat_base) + """
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
@@ -1289,11 +1327,18 @@ def _ensure_line_pull(cur):
     #   CLAUDE.md §1-9 "마스터 정본 = 재구축 클린본, 레거시 미러 아님".
     #   미러 직독은 폴백으로만 남긴다(정본이 비었을 때).
     _lncal = {}
+    _lnhrs = {}                        # ★라인별 LG 가동시간 (line → ymd → work_code)
     try:
-        cur.execute("""SELECT line_no, CONVERT(varchar(6),cal_ymd,12), ISNULL(work_stats,'')
-                         FROM nx.line_calendar WHERE ISNULL(work_stats,'')<>''""")
-        for _ln, _y, _w in cur.fetchall():
-            _lncal.setdefault(str(_ln).strip(), {})[str(_y).strip()] = str(_w or '').strip()
+        cur.execute("""SELECT line_no, CONVERT(varchar(6),cal_ymd,12),
+                              ISNULL(work_stats,''), ISNULL(work_code,'')
+                         FROM nx.line_calendar
+                        WHERE ISNULL(work_stats,'')<>'' OR ISNULL(work_code,'')<>''""")
+        for _ln, _y, _w, _h in cur.fetchall():
+            _ln = str(_ln).strip(); _y = str(_y).strip()
+            if str(_w or '').strip():
+                _lncal.setdefault(_ln, {})[_y] = str(_w).strip()
+            if str(_h or '').strip():
+                _lnhrs.setdefault(_ln, {})[_y] = str(_h).strip()
     except Exception:
         pass
     if not _lncal:                     # 폴백: 미러 직독
@@ -1343,13 +1388,51 @@ def _ensure_line_pull(cur):
 
     _wdcache = {}
     def _wd_of(line):
-        """라인별 근무일 목록 = f_get_relative_work_day 의 달력 부분.
-           '공통' 행을 라인 행이 덮어쓰고, work_stats IN (1,2,5,6,7) 인 날만 근무일."""
+        """라인별 근무일 목록.
+
+           ★판정 우선순위(2026-08-31 사용자 확정):
+             1) **LG 가동시간(work_code)이 있으면 근무일**(정상근무).
+                ★공통이 휴무(토요일 등)여도 가동시간이 있으면 근무 — 특근이 이 경우다.
+                  7.5 → 8시간근무 · 8 → 정상근무 · 11 → 잔업3시간
+                숫자가 아닌 값(E·A·B·SKD·재작업 등)도 "그 날 돌린다"는 뜻이므로 근무.
+                ※화면(라인별달력 팝업)은 가동시간이 있으면 근무유형 드롭다운을 잠가
+                  "가동 8h 인데 휴무" 같은 모순 데이터가 아예 안 생기게 한다.
+                  휴무로 만들려면 **가동시간을 지운다** → 그러면 2)로 내려간다.
+             2) 가동시간이 없고 **라인 근무유형(work_stats)이 지정됐으면 그 값**.
+                ★공통이 근무여도 라인이 휴무면 휴무 — 그 라인은 그날 안 돌리므로
+                  계획이 앞 근무일로 **더 당겨진다**.
+             3) 둘 다 없으면 공통 달력을 따른다(수기 라인 C2·C3… 이 여기 해당).
+
+           ⚠하면 안 되는 것(실측 사고):
+             "가동시간 없으면 무조건 휴무" — LG 엑셀은 일부 날짜만 담아서
+             C1 이 85일만 근무일이 되고 평일 대부분이 죽는다. 가동시간이 없는 날은
+             반드시 근무유형·공통으로 내려가야 한다.
+
+           ⛔레거시(f_get_relative_work_day)는 가동시간을 안 보고 work_stats 만 썼다.
+             그래서 C1 260912·260919(토)는 가동 8h 가 있어도 휴무로 처리돼 계획이
+             260909 로 당겨졌다(실측 29행·125개). 실제 업무는 그 날 가동하므로
+             레거시가 틀린 것 — 웹은 가동시간을 정본으로 삼는다."""
         _k = line or ''
         if _k not in _wdcache:
             _ov = _lncal.get(_k, {})
-            _wdcache[_k] = [_y for _y in _cal_ymds
-                            if str(_ov.get(_y, _base_cal.get(_y, ''))).strip() in _WORKING]
+            _hr = _lnhrs.get(_k, {})
+            _out = []
+            for _y in _cal_ymds:
+                if str(_hr.get(_y, '')).strip():
+                    # (1) 가동시간 있음 → 근무(정상). 공통이 휴무여도 특근으로 근무.
+                    #     화면도 이때 근무유형을 잠가 "가동 8h 인데 휴무" 모순을 못 만든다.
+                    _out.append(_y)
+                    continue
+                _w = str(_ov.get(_y, '')).strip()          # 라인에 직접 지정한 근무유형
+                if _w:
+                    # (2) 가동시간 없고 근무유형 지정됨 → 그 값(공통이 근무여도 휴무면 휴무)
+                    if _w in _WORKING:
+                        _out.append(_y)
+                    continue
+                # (3) 둘 다 없음 → 공통 달력
+                if str(_base_cal.get(_y, '')).strip() in _WORKING:
+                    _out.append(_y)
+            _wdcache[_k] = _out
         return _wdcache[_k]
 
     # ★종업시각 상향 — f_get_end_hhmm_lg_plan 의 MAX(ORG_OUTPUT_HM) 부분.
@@ -1381,12 +1464,39 @@ def _ensure_line_pull(cur):
     except Exception:
         pass
 
+    def _hrs_end(h):
+        """LG 가동시간 → 종업시각(분). 사용자 확정 규칙(2026-08-31):
+             7.5 → 8시간근무 · 8 → 정상근무(17:00) · 11 → 잔업3시간(20:30)
+           산식 = 17:00 + 저녁 0:30 + 잔업h,  잔업h = 가동시간 − 8 (8 이하는 0).
+             8→17:00 · 9.5→19:00 · 10→19:30 · 10.5→20:00 · 11→20:30
+           숫자가 아닌 값(E·A·B·SKD·재작업 등)은 가동일이며 8시간으로 본다(17:00).
+           'SKD/11'·'생산8/재3' 처럼 숫자가 섞이면 그 숫자를 쓴다."""
+        import re as _re
+        s = str(h or '').strip()
+        if not s:
+            return None
+        m = _re.search(r'(\d+(?:\.\d+)?)', s)
+        if not m:
+            return WORK_END_BY['2']            # 문자코드 = 정상근무 17:00
+        try:
+            v = float(m.group(1))
+        except Exception:
+            return WORK_END_BY['2']
+        ot = max(0.0, v - 8.0)                 # 8h 이하(7·7.5 포함)는 잔업 0
+        return int(round(1020 + (30 + ot * 60 if ot > 0 else 0)))
+
     def _end_of(line, ymd):
-        """종업시각(분) = f_get_end_hhmm_lg_plan.
-           코드별 고정값(1→19:30 …)을 잡고, 그날 그 라인 계획의 MAX(ORG_OUTPUT_HM) 이 더 크면 상향."""
+        """종업시각(분).
+           ★_wd_of 와 **같은 우선순위**를 쓴다(2026-08-31):
+             1) LG 가동시간으로 계산(_hrs_end: 7.5·8→17:00 · 11→20:30)
+             2) 없으면 라인 근무유형 코드별 고정값(1→19:30 · 2→17:00 …)
+             3) 둘 다 없으면 공통 달력 코드
+           그날 그 라인 계획의 MAX(ORG_OUTPUT_HM) 이 더 크면 그 값으로 상향(SP 원문 동일)."""
         if not ymd: return WORK_END
-        _w = _lncal.get(line or '', {}).get(ymd) or _base_cal.get(ymd, '1')
-        _m = WORK_END_BY.get(str(_w).strip(), WORK_END_BY['2'])   # SP: else '1700'
+        _m = _hrs_end(_lnhrs.get(line or '', {}).get(ymd))
+        if _m is None:
+            _w = str(_lncal.get(line or '', {}).get(ymd, '')).strip()
+            _m = WORK_END_BY.get(_w or str(_base_cal.get(ymd, '1')).strip(), WORK_END_BY['2'])
         _mx = _maxorg.get((ymd, line or ''))
         return _mx if (_mx is not None and _mx > _m) else _m
 

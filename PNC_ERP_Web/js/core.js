@@ -1325,8 +1325,11 @@ function openMatEditPopup(opt){
         const dl=g('#me-cdl');
         if(dl)dl.innerHTML=((await rr.json()).rows||[]).map(x=>{cmap[(x.name||'').toLowerCase()]=x.code;
           return `<option value="${esc(x.name||'')}">${esc(x.code||'')}</option>`;}).join('');}catch(e){}},220);};
-    g('#me-save').onclick=save;
-    g('#me-del').onclick=del;
+    // ★삭제모드에는 #me-save 가 렌더되지 않는다(1275~1278). 종전엔 무조건 참조해
+    //   null.onclick 에서 TypeError 가 나고 **그 다음 줄(#me-del 바인딩)이 실행되지 않아**
+    //   삭제 버튼이 먹지 않았다(2026-08-31 실사용 버그).
+    const _sv=g('#me-save');if(_sv)_sv.onclick=save;
+    const _dl=g('#me-del');if(_dl)_dl.onclick=del;
   };
 
   async function save(){
@@ -3264,7 +3267,7 @@ function lineCalView(host){
              return `<td class="center lc-cell" data-ln="${esc(L.line_no)}" data-ymd="${esc(x.ymd)}" data-src="${esc(inh?'':sc)}" title="${esc(x.ymd)} ${esc(v)}${inh?' [공통 상속]':(sc?' ['+esc(sc)+']':'')}${(sc==='LG'&&ws2&&WS_STY[ws2])?' · 근무유형 '+WS_STY[ws2].t:''}${canEd?' · 클릭하여 수정':''}" style="${sty};font-size:10px;padding:2px${canEd?';cursor:pointer':''}">${esc(tx)}</td>`;}).join('')}
         </tr>`;
           return (G1.length?sep('■ 기준 — 공통 달력 (라인에 값이 없으면 이 값을 따름)','#fff2cc','#8a6d00')+G1.map(row).join(''):'')
-               + (G2.length?sep('■ LG 라인스케줄 (엑셀 자동 업로드 · 편집 불가)','#e6f0fb','#1c47a0')+G2.map(row).join(''):'')
+               + (G2.length?sep('■ LG 라인스케줄 (엑셀 자동 업로드 · 셀 클릭하여 가동시간·근무유형 수정)','#e6f0fb','#1c47a0')+G2.map(row).join(''):'')
                + (G3.length?sep('■ 수기 입력 라인 (LG 엑셀에 없음 · 셀 클릭하여 입력)','#eef6ee','#1c7c3a')+G3.map(row).join(''):'');
         })():`<tr><td colspan="${4+d.dates.length}" class="empty">데이터 없음 — 엑셀을 업로드하세요</td></tr>`}</tbody></table>`
        :`<div class="empty" style="padding:30px">불러오는 중…</div>`}</div>`;
@@ -3295,29 +3298,64 @@ function lineCalView(host){
     const isLG=src==='LG';            // LG 가동시간이 들어있는 칸
     const ov=document.createElement('div');
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:1200;display:flex;align-items:center;justify-content:center';
-    ov.innerHTML=`<div style="background:#fff;border-radius:10px;padding:16px 18px;min-width:300px;box-shadow:0 8px 30px rgba(0,0,0,.25)">
-      <div style="font-weight:700;margin-bottom:${isLG?'6px':'10px'}">라인 <b>${esc(ln)}</b> · ${esc(ymd)}</div>
-      ${isLG?`<div style="font-size:11px;color:#5a6b80;background:#eef4fb;border:1px solid #d3e0ef;border-radius:6px;padding:6px 8px;margin-bottom:10px;line-height:1.5">
-         LG 가동시간 <b>${esc(_cur)}</b> 은 <b>그대로 유지</b>되고 근무유형만 저장됩니다.<br>
-         <span style="color:#8a6d00">※ 근무일 판정의 정본은 근무유형입니다(특근·휴무를 여기서 지정).</span></div>`:''}
-      <label class="tl">근무유형</label>
-      <select class="inp" id="lcx-ws" style="width:100%;margin:4px 0 12px">
+    ov.innerHTML=`<div style="background:#fff;border-radius:10px;padding:14px 16px;width:330px;max-width:92vw;box-shadow:0 8px 30px rgba(0,0,0,.25)">
+      <div style="font-weight:700;margin-bottom:8px">라인 <b>${esc(ln)}</b> · ${esc(ymd)}</div>
+      <!-- ★2026-08-31 확정 규칙(편성 planrev._wd_of 와 동일):
+             1) 가동시간이 있으면 → **근무**(정상). 이때 근무유형은 잠근다 —
+                "가동 8h 인데 휴무" 같은 모순 상태를 아예 못 만들게 한다(사용자 확정).
+             2) 가동시간을 지우면 → 근무유형을 고를 수 있고, 그 값을 따른다.
+             3) 둘 다 비면 → 공통 달력. -->
+      <div style="font-size:11px;color:#5a6b80;background:#eef4fb;border:1px solid #d3e0ef;border-radius:6px;padding:5px 8px;margin-bottom:9px;line-height:1.5">
+         가동시간 있으면 <b>근무</b>(7.5·8=정상 · 11=잔업3h) · 지우면 근무유형 선택 · 둘 다 비면 공통</div>
+      <label class="tl">가동시간</label>
+      <input class="inp" id="lcx-hrs" style="width:100%;margin:3px 0 9px" autocomplete="off"
+             placeholder="8 · 7.5 · 11" value="${esc(isLG?_cur:'')}">
+      <label class="tl">근무유형 <span style="color:#8aa0bd;font-weight:400" id="lcx-wslab"></span></label>
+      <select class="inp" id="lcx-ws" style="width:100%;margin:3px 0 9px">
         ${WS_OPTS.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select>
+      <!-- ★지금 입력값으로 편성이 어떻게 판정하는지 즉시 보여준다(오해 방지) -->
+      <div id="lcx-eff" style="font-size:11.5px;font-weight:700;padding:6px 8px;border-radius:6px;margin-bottom:10px;line-height:1.45"></div>
       <div style="display:flex;gap:6px;justify-content:flex-end">
         <button class="btn ghost" id="lcx-cancel">취소</button>
         <button class="btn" id="lcx-ok">저장</button></div></div>`;
     document.body.appendChild(ov);
     const sel=ov.querySelector('#lcx-ws');
+    // ★편성 판정 미리보기 — planrev._wd_of 와 같은 순서로 계산해 보여준다.
+    const _baseWs=(st.data&&st.data.base)?(st.data.base[ymd]||''):'';
+    const showEff=()=>{
+      const h=(ov.querySelector('#lcx-hrs').value||'').trim();
+      // ★가동시간이 있으면 근무유형은 잠근다 — 모순 상태(가동8h+휴무)를 못 만들게.
+      const lab=ov.querySelector('#lcx-wslab');
+      sel.disabled=!!h;
+      sel.style.background=h?'#f1f3f6':'';
+      sel.style.color=h?'#8aa0bd':'';
+      if(lab) lab.textContent=h?'(가동시간 우선 — 잠김)':'';
+      const w=h?'':sel.value;                       // 가동시간 있으면 근무유형 무시
+      let work,src;
+      if(h){ work=true; src='가동시간 '+h+' · 정상근무'; }
+      else if(w){ work=['1','2','5','6','7'].includes(w); src='근무유형 '+((WS_STY[w]||{}).t||w); }
+      else { work=['1','2','5','6','7'].includes(_baseWs); src='공통달력 '+((WS_STY[_baseWs]||{}).t||_baseWs||'-'); }
+      const el=ov.querySelector('#lcx-eff');
+      el.style.background=work?'#e9f7ef':'#fdecea';
+      el.style.color=work?'#1c7c3a':'#b3261e';
+      el.innerHTML=`편성 판정 <b>${work?'근무':'휴무'}</b> <span style="font-weight:400;opacity:.75">· ${esc(src)}</span>`
+        +(work?'':'<span style="font-weight:400;opacity:.75"> · 계획이 앞 근무일로 당겨짐</span>');
+    };
     // ★현재 근무유형 코드 = stats(별도 필드) 우선. LG 칸은 표시값이 가동시간이라 코드가 가려진다.
     const cur=((_L.stats||{})[ymd])||(isLG?'':_cur);
     if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+    sel.onchange=showEff; ov.querySelector('#lcx-hrs').oninput=showEff; showEff();
     const close=()=>ov.remove();
     ov.querySelector('#lcx-cancel').onclick=close;
     ov.onclick=e=>{if(e.target===ov)close();};
     ov.querySelector('#lcx-ok').onclick=async()=>{
       try{
+        // ★hrs 를 항상 함께 보낸다 — 빈 문자열이면 서버가 가동시간을 지운다.
+        //   가동시간이 있으면 근무유형은 **비워서** 저장한다(모순 상태 방지·판정은 가동시간으로).
+        const hrsEl=ov.querySelector('#lcx-hrs');
+        const _h=hrsEl?hrsEl.value.trim():'';
         const r=await fetch(`${API}/api/linecal/save`,{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({items:[{line_no:ln,ymd:ymd,ws:sel.value}]})});
+          body:JSON.stringify({items:[{line_no:ln,ymd:ymd,ws:(_h?'':sel.value),hrs:_h}]})});
         const j=await r.json();
         st.msg=j.ok?`✅ ${esc(ln)} ${esc(ymd)} ${j.note||''}`:'저장 실패';
       }catch(e){st.msg='저장 오류: '+e;}
