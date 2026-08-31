@@ -239,6 +239,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         def _chunks(seq, n=900):
             for i in range(0, len(seq), n): yield seq[i:i+n]
         sale = {}; move = {}; astk = {}; z99 = {}; sset = {}; sreq = {}; mstr = {}; msub = {}; over = {}
+        dstk = {}          # ★단품재고(자재+생산+영업 창고 합) — 세트제외 품목용, 2026-08-31
         aset = set(assys)
         # 출하/이동=work_order 인덱스로 스코프(item_code는 인덱스 없어 풀스캔 → wo 스코프가 훨씬 빠름). item은 파이썬 필터.
         # ★완료 풀 = **웹 자체 테이블**(2026-08-27 전환). 라이브 직독 폐지.
@@ -287,6 +288,25 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
             #   ⚠라이브 커넥션(_conn)에서 도는 블록이라 3부분 이름 필수.
             cur.execute(f"SELECT item_code, SUM(ISNULL(deliver_qty,input_req_qty)) FROM PARTNER_ERP_TEST3.nx.set_input_req WHERE in_cust_code=? AND input_ymd=? AND status IN ('00','10','30') AND item_code IN ({ph}) GROUP BY item_code", cust, today, *ch)
             for r in cur.fetchall(): sreq[str(r[0]).strip()] = float(r[1] or 0)
+            # ★★단품재고(레거시 420 '단품재고' = input_mat_qty) — 2026-08-31 신설.
+            #   세트제외(SET_EXCEPT_FLAG='1') 품목은 **공용품**이라 세트별 재고관리를 하지 않고
+            #   단품재고 하나로 본다(사용자 확인). 레거시도 세트재고/입고대기 칸을 비우고
+            #   이 칸에만 값을 넣는다(_schema/COOP_SETIN_PROGRAMS_ANALYSIS.md:50).
+            #   기준 = **자재 + 생산 + 영업 창고 재고합계**(사용자 확정, B-1안):
+            #     자재 nx.PU_T_MAT_STOCK_WH · 생산 nx.PR_T_MAT_STOCK_WH · 영업 nx.SA_T_ITEM_STOCK
+            #   ⚠레거시 화면값에 맞추지 않는다 — 레거시 재고가 잘못돼 있다(사용자 확인).
+            #     본체(PU_T_MAT_STOCK/PR_T_MAT_STOCK)는 음수(4A00114D −26,451)가 나와 채택 안 함.
+            for _sql, _key in (
+                (f"SELECT MAT_CODE, SUM(CAST(ISNULL(STOCK_QTY,0) AS float)) FROM PARTNER_ERP_TEST3.nx.PU_T_MAT_STOCK_WH WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE", 'mat'),
+                (f"SELECT MAT_CODE, SUM(CAST(ISNULL(STOCK_QTY,0) AS float)) FROM PARTNER_ERP_TEST3.nx.PR_T_MAT_STOCK_WH WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE", 'prd'),
+                (f"SELECT ITEM_CODE, SUM(CAST(ISNULL(STOCK_QTY,0) AS float)) FROM PARTNER_ERP_TEST3.nx.SA_T_ITEM_STOCK WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE", 'sal')):
+                try:
+                    cur.execute(_sql, *ch)
+                    for r in cur.fetchall():
+                        k = str(r[0]).strip()
+                        dstk[k] = dstk.get(k, 0.0) + float(r[1] or 0)
+                except Exception:
+                    pass
             cur.execute(f"SELECT ITEM_CODE, ISNULL(PROD_RATE,100), ISNULL(in_cust,''), ISNULL(WORK_CODE,''), ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
             for r in cur.fetchall(): mstr[str(r[0])] = (float(r[1] or 100), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
             # ★검사 = INSP_FLAG IN ('S','F') → '1' 로 정규화(프론트는 '1'/'0' 으로 판정).
@@ -335,6 +355,7 @@ def _fulfillment(cust, from_ymd, to_ymd, item="%", matcode="%", workcode="%"):
         g['over'] = over.get((g['wo'], g['swo'], a), 0)
         g['mat_list'] = matlist.get(a, '')
         g['sagub_list'] = ''   # 레거시 성능상 미표시(f_find_cust_sagub_list 주석).
+        g['setexc'] = 0; g['dan_stock'] = 0   # 도번 행은 세트제외가 아니다(별도 행으로 생성)
     _sim510(rows)
     per_key = {}
     for r in rows:
@@ -821,7 +842,10 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             m = {"cust": r["cust"], "assy": r["assy"], "work_center": r["work_center"], "work_code": r["work_code"],
                  "in_cust": r["in_cust"], "line": r["line"], "model": r["model"], "mat_list": r["mat_list"], "sagub_list": r["sagub_list"],
                  "lot": 0, "plan": 0, "done": 0, "req": 0, "sale": 0, "prod": 0, "assy_stock": r["assy_stock"],
-                 "iset_stk": r["iset_stk"], "ireq": r["ireq"], "input_mat": 0, "pack": 0, "insp": r["insp"],
+                 "iset_stk": r["iset_stk"], "ireq": r["ireq"],
+                 # ★단품재고·세트제외(2026-08-31) — 도번 단위 값이라 합산하지 않고 그대로 쓴다.
+                 "input_mat": r.get("dan_stock", 0), "setexc": r.get("setexc", 0),
+                 "pack": 0, "insp": r["insp"],
                  "days": [0]*31, "dn": [0]*31, "tg": [0]*31, "swos": []}
             mg[k] = m
         if r["line"] and not m["line"]: m["line"] = r["line"]
@@ -923,7 +947,10 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         #   즉 **품목마스터 in_cust 가 조회 협력사와 같으면 직납, 다르면 세트입고**다.
         #   ⛔종전엔 "세트재고/입고대기가 있으면 세트입고"로 추정해 재고 유무에 따라 흔들렸다
         #     (대기가 0 이면 전부 '직납'으로 뒤집힘 — 실측 92건 전건 오판).
-        _gb = "직납" if (m["in_cust"] and m["in_cust"] == cust) else "세트입고"
+        #   ★세트제외(2026-08-31 신설) — 공용품이라 세트관리를 안 하고 단품재고로만 본다.
+        #     레거시도 item_gubun='2' 로 별도 구분하고 세트재고/입고대기 칸을 비운다.
+        _gb = ("세트제외" if m.get("setexc")
+               else ("직납" if (m["in_cust"] and m["in_cust"] == cust) else "세트입고"))
         # ★작업처 = 내부공정(work_code)명 없으면 사내외주처(in_cust)명. 코드가 아니라 이름 표시(CLAUDE.md §3).
         #   종전엔 m["work_center"] 만 봐서 전부 빈칸이었다(2026-08-27 수정).
         #   wcc 가 비면(품목마스터에 work_code·in_cust 둘 다 없음) 조회 협력사명으로 대체 — 레거시도 그 칸에 협력사명.
@@ -940,13 +967,193 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
             "issued": _qint(iss), "status": ("90" if _qint(remain) <= 0 and iss > 0
                                              else ("10" if iss > 0 else "00")),
             "sale": _qint(m["sale"]), "prod": _qint(m["prod"]), "assy_stock": _qint(m["assy_stock"]),
-            "iset_stk": _qint(m["iset_stk"]), "ireq": _qint(m["ireq"]), "input_mat": 0,
+            "iset_stk": _qint(m["iset_stk"]), "ireq": _qint(m["ireq"]),
+            # ★단품재고 = 자재+생산+영업 창고 합(세트제외 품목만). 2026-08-31 신설.
+            "input_mat": _qint(m.get("input_mat", 0)), "setexc": _qint(m.get("setexc", 0)),
             "pack": _qint(m["pack"]), "insp": m["insp"], "deliv": _qint(remain), "days": d, "donedays": dn, "colors": cl})
-    out.sort(key=lambda x: (x["workcenter"] or "", x["line"] or "", x["assy"]))
+    # ══ ★세트제외(공용품) 행 생성 — 2026-08-31 신설 ══════════════════════════
+    #   레거시 w_pr_outside_420 은 도번 행과 **별개로** 세트제외 자재를 자기 행으로 만든다
+    #   (item_gubun='2' · _schema/COOP_SETIN_PROGRAMS_ANALYSIS.md:50).
+    #   세트제외 = 공용품이라 세트별 재고관리를 하지 않고 단품재고 하나로 본다(사용자 확인).
+    #     · 계획수량 = 그 자재를 쓰는 **상위 BOM 소요 합**(사용자 확인)
+    #     · 행 분할  = **상위도번의 생산라인**(line_no) 별(사용자 확인)
+    #                  검증: 케이비 2266 · 5210A23376A · SVC → 상위도번 12종이 레거시와 일치
+    #     · 자도번LIST = "상위도번:A,상위도번:B,…"
+    #     · 재고 = 단품재고(자재+생산+영업). 세트재고·입고대기는 비운다.
+    try:
+        _se = _setexc_rows(cust, from_ymd, to_ymd, dates, custnm)
+        out.extend(_se)
+    except Exception:
+        pass
+    # ★세트제외(공용품)를 맨 위로(2026-08-31 · 레거시 동일). 그 다음은 종전 순서.
+    out.sort(key=lambda x: (0 if x.get("setexc") else 1,
+                            x["workcenter"] or "", x["line"] or "", x["assy"]))
     return {"dates": dates, "rows": out, "cnt": len(out),
             "sum": {"lot": _qint(sum(x["lot"] for x in out)), "plan": _qint(sum(x["plan"] for x in out)),
                     "done": _qint(sum(x["done"] for x in out)), "req": _qint(sum(x["req"] for x in out)),
                     "issued": _qint(sum(x["issued"] for x in out))}}
+
+def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
+    """★세트제외(공용품) 행 — 레거시 420 의 item_gubun='2' 행에 대응(2026-08-31 신설).
+
+    세트제외 자재는 세트별 재고관리를 하지 않고 **단품재고 하나**로 본다(사용자 확인).
+    레거시는 도번 행과 별개로 이 자재를 자기 행으로 insert 한다
+    (_schema/COOP_SETIN_PROGRAMS_ANALYSIS.md:50 — input_mat_qty).
+
+    · 대상   = 그 협력사 자재소요(plan_part_mat) 중, 상위 BOM 링크가 **전부**
+               PR_M_ITEM_BOM.SET_EXCEPT_FLAG='1' 인 자재
+    · 계획   = 상위 BOM 소요 합(= plan_part_mat.part_plan_qty 합)
+    · 행분할 = **상위도번의 생산라인**(plan_item_dtl.line_no) 별
+               검증: 케이비 2266 · 5210A23376A · SVC 상위도번 12종이 레거시와 일치
+    · 재고   = 단품재고 = 자재 PU_T_MAT_STOCK_WH + 생산 PR_T_MAT_STOCK_WH + 영업 SA_T_ITEM_STOCK
+               (B-1안, 사용자 확정. 본체 테이블은 음수가 나와 채택 안 함)
+    · 세트재고/입고대기는 0 — 공용품이라 세트로 관리하지 않는다.
+    """
+    def _chunks(seq, n=900):
+        seq = list(seq)
+        for i in range(0, len(seq), n):
+            yield seq[i:i + n]
+    cn = _nx(); cur = cn.cursor()
+    try:
+        # ① 이 협력사 소요 중 (자재, 상위도번라인) 별 계획합 · 상위도번 목록 · 일자별
+        cur.execute("""
+            SELECT LTRIM(RTRIM(m.mat_code)) mat,
+                   LTRIM(RTRIM(ISNULL(i.line_no,''))) ln,
+                   m.plan_ymd,
+                   LTRIM(RTRIM(m.assy_item_code)) assy,
+                   SUM(CAST(m.part_plan_qty AS float)) q
+              FROM nx.plan_part_mat m WITH(NOLOCK)
+              LEFT JOIN nx.plan_item_dtl i WITH(NOLOCK)
+                     ON i.work_order=m.work_order AND i.c_item_code=m.assy_item_code
+             WHERE LTRIM(RTRIM(m.mat_work_center_code))=?
+               AND m.plan_ymd BETWEEN ? AND ?
+             GROUP BY m.mat_code, i.line_no, m.plan_ymd, m.assy_item_code""",
+            cust, from_ymd, to_ymd)
+        raw = cur.fetchall()
+        if not raw:
+            return []
+        mats = sorted({str(r[0]).strip() for r in raw})
+
+        # ② 세트제외 판정 — ★그 협력사가 실제로 대는 **경로(상위도번) 링크만** 보고
+        #   전부 SET_EXCEPT_FLAG='1' 이면 세트제외로 본다(2026-08-31 실측 확정).
+        #   ⛔전체 링크로 판정하면 안 된다: 5210A23376A 는 전체 210링크 중 203만 제외라
+        #     탈락하지만, 2266 경로 11링크는 11/11 전부 제외 → 레거시 화면엔 나온다.
+        #     (다른 협력사 경로에서는 세트로 쓰이므로 전체 기준으로는 판정 불가)
+        setexc = set()
+        for ch in _chunks(mats):
+            ph = ",".join("?" * len(ch))
+            cur.execute(f"""
+                SELECT b.mat FROM (
+                  SELECT LTRIM(RTRIM(b0.MAT_CODE)) mat,
+                         MIN(CASE WHEN ISNULL(b0.SET_EXCEPT_FLAG,'0')='1' THEN 1 ELSE 0 END) allexc,
+                         COUNT(*) n
+                    FROM nx.PR_M_ITEM_BOM b0
+                    JOIN (SELECT DISTINCT LTRIM(RTRIM(mat_code)) mat,
+                                 LTRIM(RTRIM(upper_item_code)) up
+                            FROM nx.plan_part_mat WITH(NOLOCK)
+                           WHERE LTRIM(RTRIM(mat_work_center_code))=?
+                             AND plan_ymd BETWEEN ? AND ?) p
+                      ON p.mat=LTRIM(RTRIM(b0.MAT_CODE)) AND p.up=LTRIM(RTRIM(b0.ITEM_CODE))
+                   WHERE b0.MAT_CODE IN ({ph})
+                   GROUP BY b0.MAT_CODE) b
+                 WHERE b.allexc=1 AND b.n>0""", cust, from_ymd, to_ymd, *ch)
+            for r in cur.fetchall(): setexc.add(str(r[0]).strip())
+        if not setexc:
+            return []
+
+        # ③ 단품재고(자재+생산+영업)
+        dstk = {}
+        tgt = sorted(setexc)
+        for ch in _chunks(tgt):
+            ph = ",".join("?" * len(ch))
+            for _sql in (
+                f"SELECT MAT_CODE, SUM(CAST(ISNULL(STOCK_QTY,0) AS float)) FROM nx.PU_T_MAT_STOCK_WH WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE",
+                f"SELECT MAT_CODE, SUM(CAST(ISNULL(STOCK_QTY,0) AS float)) FROM nx.PR_T_MAT_STOCK_WH WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE",
+                f"SELECT ITEM_CODE, SUM(CAST(ISNULL(STOCK_QTY,0) AS float)) FROM nx.SA_T_ITEM_STOCK WHERE ITEM_CODE IN ({ph}) GROUP BY ITEM_CODE"):
+                try:
+                    cur.execute(_sql, *ch)
+                    for r in cur.fetchall():
+                        k = str(r[0]).strip()
+                        dstk[k] = dstk.get(k, 0.0) + float(r[1] or 0)
+                except Exception:
+                    pass
+
+        # ④ 품명·검사
+        nmm = {}
+        for ch in _chunks(tgt):
+            ph = ",".join("?" * len(ch))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,'') FROM nx.item WHERE ITEM_CODE IN ({ph})", *ch)
+            for r in cur.fetchall(): nmm[str(r[0]).strip()] = (str(r[1] or ''), str(r[2] or ''))
+
+        # ⑤ 행 구성 — ★분할은 **SVC(추가계획) 여부**로만 한다(2026-08-31 사용자 확인).
+        #   레거시 화면도 Line No 칸에 SVC 만 표시하고 나머지는 공란으로 한 행에 묶는다.
+        #   (작업처도 대표 하나만 쓰고 라인으로는 나누지 않는다)
+        didx = {y: i for i, y in enumerate(dates)}
+        grp = {}
+        for mat, ln, ymd, assy, q in raw:
+            mat = str(mat).strip()
+            if mat not in setexc:
+                continue
+            _ln = 'SVC' if str(ln).strip() == 'SVC' else ''
+            k = (mat, _ln)
+            g = grp.get(k)
+            if not g:
+                g = {"mat": mat, "line": _ln, "plan": 0.0,
+                     "assys": set(), "days": [0.0] * 31}
+                grp[k] = g
+            g["plan"] += float(q or 0)
+            g["assys"].add(str(assy).strip())
+            i = didx.get(str(ymd).strip())
+            if i is not None and i < 31:
+                g["days"][i] += float(q or 0)
+
+        # ★재고 충당 — 단품재고는 **자재 단위로 하나**다(사용자 확인).
+        #   SVC/비SVC 두 행이 각각 전액을 쓰면 중복 충당된다 → 자재별 풀에서 순차 차감.
+        #   계획이 큰 행부터 채운다(레거시 배분과 동일한 방향).
+        pool = dict(dstk)
+        rows = []
+        for (mat, ln), g in sorted(grp.items(), key=lambda x: -x[1]["plan"]):
+            nm, spec = nmm.get(mat, ("", ""))
+            stk = dstk.get(mat, 0.0)             # 표시용(자재 총재고)
+            plan = _qint(g["plan"])
+            # 완료 = 남은 재고로 충당되는 만큼(공용품은 재고에서 바로 낸다)
+            _av = pool.get(mat, 0.0)
+            _give = min(_av, g["plan"]) if _av > 0 else 0.0
+            pool[mat] = _av - _give
+            done = _qint(_give)
+            # ★일자별 완료배분 — 재고 충당분을 일자 순으로 채운다(회색=세트재고 색, _TAGCOLOR[50]).
+            #   종전엔 donedays 가 비어 일자셀이 「0/34」로 보였다(2026-08-31).
+            _dd = [0.0] * 31; _cl = {}
+            _rest = _give
+            for _y, _i in sorted(didx.items(), key=lambda x: x[1]):
+                if _i >= 31 or _rest <= 0 or not g["days"][_i]:
+                    continue
+                _t = min(_rest, g["days"][_i])
+                _dd[_i] = _t; _rest -= _t
+                if _qint(_t) >= _qint(g["days"][_i]):
+                    _cl[_y] = _TAGCOLOR.get(50, '')       # 재고충당 완료 = 회색
+            rows.append({
+                "cust": cust, "custnm": custnm.get(cust, cust) if isinstance(custnm, dict) else "",
+                "assy": mat, "line": ln, "nm": nm, "spec": spec,
+                # ★작업처 = 조회 협력사명(대표 하나). 레거시도 상위도번별로 쪼개지 않는다.
+                "workcenter": (custnm.get(cust, cust) if isinstance(custnm, dict) else cust),
+                "work_center": (custnm.get(cust, cust) if isinstance(custnm, dict) else cust),
+                "in_cust": "", "gubun": "세트제외",
+                "mat_list": ",".join("상위도번:" + a for a in sorted(g["assys"])),
+                "sagub_list": "", "lot": plan, "plan": plan,
+                "done": done, "req": _qint(max(0.0, g["plan"] - done)), "req_org": _qint(max(0.0, g["plan"] - done)),
+                "issued": 0, "status": "00",
+                "sale": 0, "prod": 0, "assy_stock": 0,
+                "iset_stk": 0, "ireq": 0,               # ★공용품은 세트로 관리하지 않는다
+                "input_mat": _qint(stk), "setexc": 1,   # ★단품재고
+                "pack": 0, "insp": "0", "deliv": _qint(max(0.0, g["plan"] - done)),
+                "days": {y: _qint(g["days"][i]) for y, i in didx.items() if i < 31 and g["days"][i]},
+                "donedays": {y: _qint(_dd[i]) for y, i in didx.items() if i < 31 and _dd[i]},
+                "colors": _cl})
+        return rows
+    finally:
+        cn.close()
+
 
 def _wd_horizon(d6a, gigan):
     """★기간 N일 → 조회 종료일(근무일 기준). 레거시 w_pr_outside_420 실측 산식.
