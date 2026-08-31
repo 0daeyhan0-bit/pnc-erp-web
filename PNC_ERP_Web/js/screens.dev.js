@@ -1737,7 +1737,19 @@ SCREEN.unifybom=(c,ro)=>{
       if(!direct.length) direct=rows.filter(x=>(+x.stufe===1));
       const seen={},lines=[],weld=[];
       direct.forEach(x=>{const ch=String(x.child_code||'').trim();if(!ch||seen[ch])return;seen[ch]=1;
-        const rec={child_item:ch,item_name:x.child_desc||x.nx_desc||'',item_spec:x.child_spec||'',qty:(x.qty!=null?+x.qty:1),unit:x.unit||'EA',supply_type:x.supply_type||''};
+        // ★기존 품목(nx_exists)이면 마스터값(외경·두께·재질·중량·분류·생산구분·단가구분·매입처) 끌어옴. 없으면 LG값/기본.
+        const ex=(+x.nx_exists===1);
+        const rec={child_item:ch,
+          item_name:(ex?(x.nx_desc||x.child_desc):(x.child_desc||x.nx_desc))||'',
+          item_spec:(ex?(x.nx_spec||x.child_spec):x.child_spec)||'',
+          qty:(x.qty!=null?+x.qty:1),
+          unit:(ex&&x.nx_unit)?x.nx_unit:(x.unit||'EA'),
+          supply_type:x.supply_type||'',
+          diam:ex?(x.nx_diam||0):0, thick:ex?(x.nx_thick||0):0, length:ex?(x.nx_length||0):0,
+          metal_gubun:ex?(x.nx_metal||''):'', net_weight:ex?(x.nx_weight||null):null,
+          lgroup:ex?(x.nx_lgroup||''):'', sgroup:ex?(x.nx_sgroup||''):'',
+          make_type:ex?(x.nx_make||''):'', cost_gubun:ex?(x.nx_cost||''):'', in_cust:ex?(x.nx_incust||''):'',
+          _isnew:!ex};   // 기존에 없는 품번=신규 자식(초록 배지·필수검증)
         (ch.toUpperCase().startsWith('RAC')?weld:lines).push(rec);});
       alert(`LG BOM 불러오기 — 상위 ${model} · 구성 ${lines.length} · 용접봉 ${weld.length} (전개 ${rows.length}행, nx.lg_bom)`);
       enterNew(model, j.modelnm||'', lines, weld);

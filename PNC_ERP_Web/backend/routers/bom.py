@@ -1069,11 +1069,22 @@ def lgbom_tree(model: str = Query(...), werks: str = Query(""), ver_from: str = 
             src = "nx.lg_bom_ver"; w.append("b.ver_from=?"); p.append(ver_from.strip())
         cur.execute(f"""SELECT b.id, b.werks, b.stufe, b.posnr, b.parent_code, b.child_code,
               b.child_desc, b.child_spec, b.qty, b.unit, b.supply_type, b.mmsta, b.matty, b.lowest_flg,
-              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc
+              b.main_mat, b.matkl, b.valid_from, b.valid_to, ISNULL(i.item_name,'') nx_desc,
+              CASE WHEN i.ITEM_CODE IS NULL THEN 0 ELSE 1 END nx_exists,
+              ISNULL(i.item_spec,'') nx_spec, i.diam nx_diam, i.thick nx_thick, i.length nx_length,
+              ISNULL(i.metal_gubun,'') nx_metal, i.net_weight nx_weight, ISNULL(i.unit,'') nx_unit,
+              ISNULL(i.lgroup,'') nx_lgroup, ISNULL(i.sgroup,'') nx_sgroup, ISNULL(i.make_type,'') nx_make,
+              ISNULL(i.cost_gubun,'') nx_cost, ISNULL(i.in_cust,'') nx_incust
             FROM {src} b LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.ITEM_CODE=b.child_code
             WHERE {' AND '.join(w)} ORDER BY b.stufe, b.posnr, b.id""", *p)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        # ★nx.item 마스터 enrich 숫자필드 Decimal→float(JSON 직렬화). 신규등록 pre-fill용.
+        for _r in rows:
+            for _k in ("nx_diam", "nx_thick", "nx_length", "nx_weight", "qty"):
+                if _r.get(_k) is not None:
+                    try: _r[_k] = float(_r[_k])
+                    except Exception: pass
         # 최상위 parent(model) 정보
         cur.execute("SELECT ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", model)
         mn = cur.fetchone()
