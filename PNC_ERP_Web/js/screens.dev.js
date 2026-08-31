@@ -2358,7 +2358,7 @@ SCREEN.unifybom=(c,ro)=>{
       if(isSel)return `<td><select class="ce cesel" data-i="${i}" data-k="${k}" style="width:78px" title="${esc(codeName(grp,v))}"><option value="">-</option>${(codes[grp]||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==v?'selected':''}>${esc(o.name)}</option>`).join('')}</select></td>`;
       if(t==='vendor')return `<td><input class="ce cevendor" list="bm-vendordl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="${esc(l.cust_name||'코드/명')}" style="width:88px" title="${esc(l.cust_name||'')}"></td>`;
       if(t==='proc')return `<td><select class="ce cesel" data-i="${i}" data-k="${k}" style="width:58px" title="${esc(procMap[v]||v||'')}"><option value="">-</option>${procs.map(p=>`<option value="${esc(p.code)}" ${p.code===v?'selected':''}>${esc(p.name)}</option>`).join('')}</select></td>`;
-      if(t==='item')return `<td><input class="ce ceitem" list="bm-itemdl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="검색·선택" style="width:120px"></td>`;
+      if(t==='item')return `<td style="white-space:nowrap"><input class="ce ceitem" list="bm-itemdl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="검색·선택" style="width:110px">${l._isnew?'<span style="background:#1c7c3a;color:#fff;font-size:9px;padding:1px 4px;border-radius:3px;margin-left:2px" title="신규 품목 — 저장 시 품목마스터에 등록">신규</span>':''}</td>`;
       return `<td><input class="ce" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" style="width:90px"></td>`;};
     c.innerHTML=`<div class="bmv-root" style="display:flex;flex-direction:column;height:100%">
      <div class="bmv-head" style="flex:0 0 auto">
@@ -2509,8 +2509,14 @@ SCREEN.unifybom=(c,ro)=>{
             MK.forEach(k=>{L[k]=(d[k]==null?'':d[k]);});                 // 있으면 값·없으면 '' (잔류 방지)
             if(d.in_cust){L.in_cust=d.in_cust;L.cust_name=d.cust_name||'';}else{L.in_cust='';L.cust_name='';}
             if(L.net_weight===''||L.net_weight==null){const w=calcWeight(L);if(w!=null)L.net_weight=w;}  // 마스터 중량 없고 동관 치수 있으면 자동계산
-          }else{  // 마스터 미등록 신규 품번 → 스펙 초기화(이전 품번 값 잔류 방지)
-            L.item_name=itemNames[code]||'';L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';
+          }else{  // 마스터 미등록 신규 품번 → ★인라인 신규 등록 제안(P2)
+            const known=itemNames[code]||'';
+            L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';L._isnew=false;
+            if(known){L.item_name=known;}   // 검색목록엔 있으나 iteminfo 미발견(휴면 등) → 이름만
+            else if(confirm(`「${code}」는 등록되지 않은 신규 품번입니다.\n신규 품목으로 등록하시겠습니까?\n(품명은 다음, 재질·치수·단위·대분류 등은 이 행에서 입력 → 저장 시 품목마스터에 함께 등록)`)){
+              const inm=(prompt(`신규 품번 「${code}」 의 품명을 입력하세요.`, '')||'').trim();
+              L.item_name=inm; L._isnew=true; L.unit=L.unit||'EA';   // ★신규 플래그(표시·저장시 마스터 생성)
+            }else{ L.child_item=''; L.item_name=''; el.value=''; }   // 취소=코드 비움(오입력)
           }
           draw();
         }catch(e){}};
