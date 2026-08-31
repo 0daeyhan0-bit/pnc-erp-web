@@ -1682,12 +1682,17 @@ SCREEN.unifybom=(c,ro)=>{
   const addRow=()=>{const t=Date.now();if(t-_lastAdd<600)return;_lastAdd=t;  // ★rapid-click 가드(렌더 지연에 연타→중복행 방지)
     lines.push({child_item:'',item_name:'(저장 후 표시)',spec:'',qty:1,node_type:'부품',cs_calc_except:false,sagub_default:false,
     kitting:false,set_except:false,vir_item:false,lme_except:false,gagong_proc:'',cust_name:'',remarks:''});draw();};
+  // ★복사=등록이 아니라 '수정(편집)창'으로 진입(사용자 확정 2026-08-31): 원본을 평면 leaf로 펼쳐 편집세션.
+  //   저장(상단 [저장])을 눌러야만 등록 · 취소/닫으면 무등록. copyNew(신규등록›복사)와 동일 경로로 통일(즉시저장 /api/bom/copy 폐기).
   const doCopy=async()=>{
-    const tgt=(prompt(`「${item}」의 BOM을 복사할 새 품번을 입력하세요.\n(유사공정 협력사 변형 등 — 신규 품번은 nx에만 저장)`,'')||'').trim().toUpperCase();
+    const tgt=(prompt(`「${item}」의 BOM을 복사해 새 품번으로 수정 등록합니다.\n새 품번(대상)을 입력하세요.\n(원본을 평면 leaf로 펼쳐 편집창 진입 · 저장을 눌러야 등록 · 취소하면 무등록)`,'')||'').trim().toUpperCase();
     if(!tgt)return; if(tgt===item){alert('원본과 다른 품번을 입력하세요.');return;}
-    try{const r=await fetch(`${API}/api/bom/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:item,target:tgt})});
-      const j=await r.json(); if(!j.ok){alert('복사 실패: '+(j.error||(j.errors||[]).join('\n')));return;}
-      alert(`복사 완료 — ${tgt} 에 ${j.count}구성 저장.${j.warn?'\n\n⚠ '+j.warn:''}`); load(tgt);
+    try{const r=await fetch(`${API}/api/bom/flatget?item=${encodeURIComponent(item)}`);
+      if(!r.ok){alert(`원본 ${item} 평면전개 실패: HTTP ${r.status}\n(nx.bom_flat 미적재면 [기준정보]에서 평면전개 필요)`);return;}
+      const j=await r.json(); const leafLines=(j.lines||[]);
+      if(!leafLines.length){alert(`원본 ${item} 평면 leaf 없음(nx.bom_flat 미적재).`);return;}
+      const srcMaster={lgroup:j.lgroup||'',sgroup:j.sgroup||'',make_type:j.make_type||'',cost_gubun:j.cost_gubun||''};
+      enterNew(tgt, j.name||name||'', leafLines, [], srcMaster, item);   // ★평면 leaf·마스터 pre-fill·편집모드·무저장(저장 시에만 등록)
     }catch(e){alert('복사 오류: '+e.message);}};
   // ============ 신규 BOM 등록 (방식 ①LG업로드 ②복사 ③새로) ============
   const openNew=()=>{newReg={method:''};draw();};
