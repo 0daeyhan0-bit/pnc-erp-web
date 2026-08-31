@@ -1086,7 +1086,7 @@ def _lgbom_find_header(wb):
                         ' — 정품은 WERKS·MODEL·…·MATNR·…·IDNRK 62컬럼이 1행에 있다')
 
 @router.post("/api/lgbom/upload")
-async def lgbom_upload(file: UploadFile = File(...)):
+async def lgbom_upload(file: UploadFile = File(...), werks: str = Form(default="")):
     """LG BOM Explosion 엑셀 업로드 → nx.lg_bom 적재(모델·werks별 교체). 신규 BOM 등록 전 사전업로드용.
        헤더 1행: MODEL/WERKS/STUFE/POSNR/MATNR(부모)/IDNRK(자식)/OJTXP(품명)/CHI_SPECI(규격)/MENGE(수량)/MEINS(단위)/ETEXT(supply_type)/MATTY/LOWEST_FLG/MATKL/DATAB/DATVT 등."""
     import io as _io
@@ -1111,12 +1111,16 @@ async def lgbom_upload(file: UploadFile = File(...)):
     def gf(r, n):
         try: return float(gv(r, n) or 0)
         except Exception: return 0.0
+    werks_sel = (werks or '').strip()[:4]
     recs = []; models = set()
     for r in itr:
         if not r or not any(x not in (None, '') for x in r): continue
         model = gs(r, 'MODEL')
         if not model: continue
-        werks = gs(r, 'WERKS', 4)
+        # ★화면 내보내기(26컬럼)에는 WERKS 컬럼이 없다 → 화면에서 고른 공장을 쓴다.
+        #   실측 2026-08-31: 이 값이 없어 AJR30133610 72행이 werks='' 로 적재됐다
+        #   (전체 58,976행 중 유일). 조회·버전관리가 (model,werks) 축이라 빈값은 겉돈다.
+        werks = gs(r, 'WERKS', 4) or (werks_sel or '')
         recs.append(('C', werks, model, gi(r, 'STUFE'), gs(r, 'POSNR', 10),
             gs(r, 'MATNR', 30), gs(r, 'IDNRK', 30), gs(r, 'OJTXP', 150), gs(r, 'CHI_SPECI', 200),
             gf(r, 'MENGE'), gs(r, 'MEINS', 6), gs(r, 'PAR_UIT', 4), gs(r, 'ETEXT', 30),
