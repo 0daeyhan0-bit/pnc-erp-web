@@ -227,8 +227,11 @@ function tabs(){
   const staff = (T.me||{}).utype !== '협력사';
   const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
   const t=[{v:'home',i:'🏠',n:'홈'},{v:'plan',i:'📅',n:'내 계획'}];
-  const isPartner = !!((T.me||{}).partner_code);   // 소속 거래처가 있는 협력사만 발주현황(순소요) 노출
-  if(isPartner) t.push({v:'order',i:'📦',n:'발주현황'});
+  // ★소속 거래처가 있는 협력사 중 '일반협력사'만 발주현황(일반) 노출.
+  //   국내 절삭협력사(is_cutting, auth.CUTTING_COOP_CODES 11곳)는 '협력사 계획현황'을 사용하므로 숨김.
+  const isPartner = !!((T.me||{}).partner_code);
+  const isCutting = !!((T.me||{}).is_cutting);
+  if(isPartner && !isCutting) t.push({v:'order',i:'📦',n:'발주현황(일반)'});
   if(useInv) t.push({v:'inv',i:'📄',n:'내 송장'});
   if(staff)  t.push({v:'scan',i:'📷',n:'입고'});
   return t;
@@ -322,7 +325,7 @@ function viewOrder(){
   </div>
   <div class="msg k" style="font-size:12px">순소요 = 계획(1~4주) − 현재고 − 기발주. <b>물동(5~8주)</b>은 LG 참고치이며 발주 계산에 넣지 않습니다.</div>
   <div class="card">
-    <h3>발주현황<span class="n">${num(rows.length)}</span></h3>
+    <h3>발주현황(일반)<span class="n">${num(rows.length)}</span></h3>
     ${rows.length ? `<div class="scroll"><table>
       <thead><tr><th>품목</th><th class="n">계획</th><th class="n">재고</th><th class="n">기발주</th><th class="n">순소요</th></tr></thead>
       <tbody>${rows.map(r=>{ const n=net4(r); return `<tr>

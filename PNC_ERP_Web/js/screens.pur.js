@@ -1595,7 +1595,7 @@ SCREEN.coopporder=(c)=>{
   const draw=()=>{
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%;min-height:0">
-     <div class="page-title" style="flex:0 0 auto">협력사 발주현황 <span style="font-size:12px;color:var(--muted);font-weight:400">우리(PNC) 발주·생산계획(4주)·LG물동(5~8주·참고)을 협력사가 확인</span></div>
+     <div class="page-title" style="flex:0 0 auto">협력사 발주현황(일반) <span style="font-size:12px;color:var(--muted);font-weight:400">우리(PNC) 발주·생산계획(4주)·LG물동(5~8주·참고)을 협력사가 확인 · 일반협력사용(국내 절삭협력사는 협력사 계획현황 사용)</span></div>
      <div class="toolbar" style="flex:0 0 auto">
        ${info?`<span style="font-weight:700;color:#1c47a0">✔ ${esc(info.cust_name||cust)} (${esc(cust)})</span>`:
          `<label class="tl">매입처</label><input class="inp" id="cp-vq" value="${esc(vq)}" placeholder="업체명/코드" style="width:180px"><button class="btn" id="cp-vs">검색</button>`}
