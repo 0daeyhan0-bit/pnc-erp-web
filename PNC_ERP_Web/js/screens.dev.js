@@ -1681,9 +1681,9 @@ SCREEN.unifybom=(c,ro)=>{
   const openNew=()=>{newReg={method:''};draw();};
   const closeNew=()=>{newReg=null;draw();};
   // 공통: 신규 편집 세션 진입(품번·구성·용접후보 세팅)
-  const enterNew=async(topItem,topName,newLines,weldCand,srcMaster)=>{
+  const enterNew=async(topItem,topName,newLines,weldCand,srcMaster,srcCopy)=>{
     if(!codes.metal)await loadCodes(); await loadWeldDiams();
-    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null; copySource='';
+    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null; copySource=(srcCopy||'').trim().toUpperCase();
     // ★복사=원본 제품마스터 pre-fill(대분류 등)·신규(LG/빈폼)=기본값
     newMaster=srcMaster?{lgroup:srcMaster.lgroup||'',sgroup:srcMaster.sgroup||'',make_type:srcMaster.make_type||'3',cost_gubun:srcMaster.cost_gubun||''}
                        :{lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};
@@ -1733,8 +1733,7 @@ SCREEN.unifybom=(c,ro)=>{
       const leafLines=(j.lines||[]);
       if(!leafLines.length){alert(`원본 ${src} 평면 leaf 없음(nx.bom_flat 미적재).`);return;}
       const srcMaster={lgroup:j.lgroup||'',sgroup:j.sgroup||'',make_type:j.make_type||'',cost_gubun:j.cost_gubun||''};
-      enterNew(tgt, j.name||'', leafLines, [], srcMaster);   // ★평면 leaf·마스터 pre-fill로 편집 진입(용접봉=R01/생산정보 축)
-      copySource=src;   // ★저장 후 생산정보(공정·용접·관경) 복사에 사용
+      enterNew(tgt, j.name||'', leafLines, [], srcMaster, src);   // ★평면 leaf·마스터 pre-fill·원본(src)=생산정보 복사원본(원자적 세팅)
     }catch(e){alert('복사 오류: '+e.message);}};
   // ③완전 새로
   const blankNew=async()=>{const it=(prompt('신규 품번을 입력(nx에만 저장)','')||'').trim().toUpperCase();if(!it)return;
