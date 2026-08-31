@@ -1508,7 +1508,9 @@ SCREEN.unifybom=(c,ro)=>{
   let naeProcLoading=false;         // 조립공정 팝업 로딩(사외망 DB 지연 대비 즉시 표시)
   const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
     try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
-  const saveFasten=async()=>{ if(!fastenD)return; const it=fastenFor||item;
+  const saveFasten=async()=>{ if(!fastenD)return;
+    if(isNew&&copySource){alert('복사 편집 중입니다. 팝업에서 직접 저장하지 마세요.\n상단 [저장]으로 신규 품번을 등록하면 체결 공정도 함께 복사됩니다.\n(취소/닫으면 등록되지 않습니다)');return;}  // ★copy 모드=조기등록·원본오염 차단
+    const it=fastenFor||item;
     const rows=(fastenD.rows||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
     try{const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:it,rows,user:'웹'})});
       const j=await r.json(); if(!j.ok){alert('체결 저장 실패');return;}
@@ -1792,16 +1794,17 @@ SCREEN.unifybom=(c,ro)=>{
       try{const r=await fetch(`${API}/api/bom/copyproc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:copySource,target:item})});
         const j=await r.json();if(j.ok)pcopy=j.copied;else console.warn('생산정보 복사 실패',j);}catch(e){console.warn('생산정보 복사 오류',e);}
     }
-    // 3) 용접공정(관경별 횟수) → item_weld+proc_weld+routing 파생 (용접봉별 그룹)
-    const grp={}; weldRows.forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
-    let wsum=0;
-    try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
-      const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
-    // ★체결 매트릭스 저장(신규등록 시 함께) — nx.item_fasten
-    let fcnt=0;
-    try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
-      const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
-      const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
+    // 3) 용접공정(관경별 횟수) → item_weld+proc_weld+routing 파생. ★복사모드는 copyproc(2-b)가 용접·체결·공정 전담 → step3~4 스킵(빈값으로 copyproc 복사분 덮어쓰기 방지)
+    const grp={}; let wsum=0, fcnt=0;
+    if(!copySource){
+      weldRows.forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
+      try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
+        const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
+      // 체결 매트릭스 저장(nx.routing FS)
+      try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+        const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
+        const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
+    }
     const pmsg=pcopy?`\n★생산정보 복사(${copySource}→): 공정 ${pcopy.routing} · 용접봉 ${pcopy.proc_weld} · 관경 ${pcopy.item_weld}`:'';
     alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정${pmsg}`);
     isNew=false; copySource=''; load(item);
@@ -2041,6 +2044,7 @@ SCREEN.unifybom=(c,ro)=>{
       if(openModal)naeModal=true;
     }catch(e){naeProcD={node,own:[],carriers:[],isAssy:false,weldPoints:[],error:e.message};}draw();};
   const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
+    if(isNew&&copySource){alert('복사 편집 중입니다. 팝업에서 직접 저장하지 마세요.\n상단 [저장]으로 신규 품번을 등록하면 원본의 공정·용접·관경이 새 품번으로 함께 복사됩니다.\n(취소/닫으면 아무것도 등록되지 않습니다)');return;}  // ★copy 모드=조기등록·원본오염 차단. 최종저장(copyproc)만 기록.
     const pick=arr=>arr.filter(p=>(+p.work_qty)>0).map(p=>({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph,calc_gubun:p.calc_gubun||'3'}));
     const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,loss_factor:+cr.loss_factor||1.5,procs:pick(cr.rows||[])}))};
     try{const r=await fetch(`${API}/api/cost/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -2429,7 +2433,7 @@ SCREEN.unifybom=(c,ro)=>{
     {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
     // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
-    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 조립공정 여는 중…';loadNaeProc(item,true);};}  // ★신규등록 조립공정 = 내부원가와 동일 팝업(클릭 즉시 피드백)
+    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 조립공정 여는 중…';loadNaeProc((isNew&&copySource)?copySource:item,true);};}  // ★신규=팝업. 복사모드=원본 공정·용접 표시(읽기전용·최종저장 때 복사)
     if(naeModal)wireProcModal();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
     // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
