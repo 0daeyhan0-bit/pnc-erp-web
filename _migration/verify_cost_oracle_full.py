@@ -122,7 +122,8 @@ if diff:
     with io.open(csvp, "w", encoding="utf-8-sig") as f:
         f.write("item,sp_jae,engine_jae,diff" + chr(10))
         for k, a, b, d in sorted(diff, key=lambda x: -abs(x[3])):
-            f.write("{},{:.2f},{:.2f},{:.2f}".format(k, a, b, d) + chr(10))
+            # 품번에 줄바꿈이 섞인 것이 있다(PQ091503C01.AKOR) — 공백류를 없애야 CSV 가 안 깨진다
+            f.write("{},{:.2f},{:.2f},{:.2f}".format(''.join(str(k).split()), a, b, d) + chr(10))
     print(chr(10) + "  전체 불일치 CSV: {}".format(csvp))
     from collections import Counter
     cl = Counter(round(d, 2) for _, _, _, d in diff)
