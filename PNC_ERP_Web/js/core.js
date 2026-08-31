@@ -1599,10 +1599,14 @@ function openMatRecvPopup(opt){
        </div>
        <div class="mrp-grid">
          <table class="tbl mrp-tbl"><thead><tr>
-           <th style="width:44px">SEQ</th><th style="width:150px">자도번</th><th style="width:190px">품명</th>
-           <th style="width:120px">규격</th><th style="width:46px">단위</th><th style="width:80px">현재고</th>
-           <th style="width:86px">입고수량</th><th style="width:80px">입고단가</th><th>비고</th>
-           <th style="width:34px"></th></tr></thead>
+           <!-- ★레거시 w_pu_stock_057 컬럼 순서(2026-08-31): 자도번·품명·규격·단위·
+                (발주잔량)·입고수량·입고단가·**입고금액·입고부가세**·비고.
+                금액/부가세 두 칸을 넣느라 품명·규격·비고를 줄여 **가로스크롤 없이** 한 줄에 담았다. -->
+           <th style="width:38px">SEQ</th><th style="width:132px">자도번</th><th style="width:150px">품명</th>
+           <th style="width:96px">규격</th><th style="width:38px">단위</th><th style="width:66px">현재고</th>
+           <th style="width:76px">입고수량</th><th style="width:74px">입고단가</th>
+           <th style="width:84px">입고금액</th><th style="width:78px">입고부가세</th><th>비고</th>
+           <th style="width:28px"></th></tr></thead>
          <tbody id="mp-tb">${bodyHtml()}</tbody></table>
        </div>
        <div class="mrp-f">
@@ -1658,6 +1662,10 @@ function openMatRecvPopup(opt){
     wire();
   };
 
+  // ★입고금액 = 수량 × 단가(반올림). 둘 중 하나라도 비면 공란(레거시도 0 대신 빈칸).
+  const _amtOf=r=>{const q=Number(r.qty), c=Number(r.cost);
+    if(!(q>0)||!isFinite(c)||r.cost===''||r.cost==null)return '';
+    return Math.round(q*c);};
   function bodyHtml(){
     return rows.map((r,i)=>`<tr data-i="${i}" class="${(r.mat||'').trim()?'on':''} ${r.bad?'bad':''}">
       <td class="center mut">${i+1}</td>
@@ -1676,6 +1684,11 @@ function openMatRecvPopup(opt){
         ${r.costEdited?'<span class="mp-cb ed">수정</span>'
           :(r.costSrc==='other'?`<span class="mp-cb alt" title="이 거래처 단가가 없어 ${esc(r.costVendor||'')} 단가를 가져왔습니다">타사</span>`:'')}
       </td>
+      <!-- ★입고금액·입고부가세(2026-08-31 레거시 w_pu_stock_057 대조 — 웹에 없던 두 칸).
+           금액 = 수량 × 단가(반올림) · 부가세 = 금액 × 10%(반올림). 자동계산 = 읽기전용.
+           단가·수량이 바뀌면 redrawBody 로 함께 갱신된다. -->
+      <td class="num mut mp-amt" title="${_amtOf(r)===''?'':_nf(_amtOf(r))}">${_amtOf(r)===''?'':_nf(_amtOf(r))}</td>
+      <td class="num mut mp-vat" title="${_amtOf(r)===''?'':_nf(Math.round(_amtOf(r)*0.1))}">${_amtOf(r)===''?'':_nf(Math.round(_amtOf(r)*0.1))}</td>
       <td><input class="mp-rmk" data-i="${i}" value="${esc(r.rmk)}"></td>
       <td class="center"><span class="mrp-del" data-i="${i}" title="행 비우기">✖</span></td>
     </tr>`).join('')+`<datalist id="mp-mdl"></datalist>`;
@@ -1743,13 +1756,21 @@ function openMatRecvPopup(opt){
           if(dl)dl.innerHTML=((await r.json()).rows||[]).map(x=>`<option value="${esc(x.item)}">${esc(x.name||'')}</option>`).join('');
         }catch(e){}},220);};
     });
-    g('.mp-qty').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].qty=el.value;
+    // ★금액·부가세 갱신은 **그 행만** 고친다 — redrawBody 로 전체를 다시 그리면
+    //   입력 중 커서가 튀고 IME 조합이 깨진다(기존 주석과 같은 이유).
+    const syncAmt=i=>{const tr=ov.querySelector(`#mp-tb tr[data-i="${i}"]`); if(!tr)return;
+      const a=_amtOf(rows[i]);
+      const ea=tr.querySelector('.mp-amt'), ev=tr.querySelector('.mp-vat');
+      const sa=(a===''?'':_nf(a)), sv=(a===''?'':_nf(Math.round(a*0.1)));
+      if(ea){ea.textContent=sa; ea.title=sa;}          // 자릿수가 넘쳐도 툴팁으로 전액 확인
+      if(ev){ev.textContent=sv; ev.title=sv;}};
+    g('.mp-qty').forEach(el=>el.oninput=()=>{const i=+el.dataset.i; rows[i].qty=el.value; syncAmt(i);
       const rc=ov.querySelector('.rowcount');
       if(rc)rc.innerHTML=`입력 <b>${filled().length}</b>건 · 수량합 <b>${_nf(filled().reduce((s,r)=>s+Number(r.qty||0),0))}</b> <span class="mut">/ ${rows.length}행</span>`;});
     // ★단가 직접수정(2026-08-31) — costEdited 를 세워 MASTER단가 자동채움이 덮지 않게 한다.
     //   레거시 w_pu_stock_055 도 단가칸을 직접 고칠 수 있다(MASTER단가 버튼 옆 입력칸).
     g('.mp-cost').forEach(el=>el.oninput=()=>{
-      const r=rows[+el.dataset.i]; r.cost=el.value; r.costEdited=1;});
+      const i=+el.dataset.i, r=rows[i]; r.cost=el.value; r.costEdited=1; syncAmt(i);});
     g('.mp-rmk').forEach(el=>el.oninput=()=>{rows[+el.dataset.i].rmk=el.value;});
     g('.mrp-del').forEach(el=>el.onclick=()=>{rows[+el.dataset.i]=blank();redrawBody();});
   }
@@ -1833,10 +1854,15 @@ function openMatRecvPopup(opt){
     if(!confirm(`${sel.length}건 · 수량합 ${_nf(sel.reduce((s,r)=>s+Number(r.qty||0),0))}\n입고일 ${ymd} · 창고 ${wh}\n\n저장할까요? (재고 증가)`))return;
     busy=true;draw();
     try{
-      const body={screen:'receipt', user:_curUserNm(), rows:sel.map(r=>({
-        MAINT_YMD:_toYMD(ymd), MAT_CODE:r.mat, MAINT_TAG:tag, qty:Number(r.qty),
-        CUST_CODE:custCode||null, GAGONG_PROC_CODE:wh||null,
-        MAINT_COST:Number(r.cost||0), REMARKS:(r.rmk||'').trim()||null}))};
+      // ★금액·부가세도 함께 전송(2026-08-31) — 화면에 보이는 값과 DB 가 어긋나지 않게.
+      //   (백엔드도 같은 식으로 계산하지만, 화면 표시값을 정본으로 보낸다)
+      const body={screen:'receipt', user:_curUserNm(), rows:sel.map(r=>{
+        const a=_amtOf(r);
+        return {MAINT_YMD:_toYMD(ymd), MAT_CODE:r.mat, MAINT_TAG:tag, qty:Number(r.qty),
+          CUST_CODE:custCode||null, GAGONG_PROC_CODE:wh||null,
+          MAINT_COST:Number(r.cost||0),
+          MAINT_AMT:(a===''?0:a), MAINT_VAT:(a===''?0:Math.round(a*0.1)),
+          REMARKS:(r.rmk||'').trim()||null};})};
       const rr=await fetch(`${API}/api/stock/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const j=await rr.json();
       if(!j.ok){alert('저장 거부 (백엔드 가드):\n'+(j.errors||[]).join('\n'));busy=false;draw();return;}
