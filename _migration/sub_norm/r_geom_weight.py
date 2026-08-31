@@ -35,6 +35,10 @@ if c.execute("SELECT OBJECT_ID('nx.item_geomwt_bak','U')").fetchone()[0] is not 
     c.execute("DROP TABLE nx.item_geomwt_bak")
 c.execute("SELECT item_code, net_weight INTO nx.item_geomwt_bak FROM nx.item WHERE cost_gubun='3'")
 print("백업 nx.item_geomwt_bak(전 cg3):", c.execute("SELECT COUNT(*) FROM nx.item_geomwt_bak").fetchone()[0])
-c.executemany("UPDATE nx.item SET net_weight=? WHERE item_code=?", upd)
+# ★갱신대상 0건이면 executemany 가 터진다(pyodbc: "second parameter must not be empty").
+#   2026-09-01 매일 마이그에서 실제로 걸렸다 — 어제는 11건이라 안 걸렸고 오늘은 0건이라 exit=1.
+#   갱신할 게 없다는 건 정상(멱등 도구가 수렴한 상태)인데 루틴이 실패로 보이면 안 된다.
+if upd:
+    c.executemany("UPDATE nx.item SET net_weight=? WHERE item_code=?", upd)
 print(f"기하중량 갱신 완료 {len(upd)}건. 되돌리기: nx.item_geomwt_bak")
 n.close()
