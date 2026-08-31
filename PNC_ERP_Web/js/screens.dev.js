@@ -1806,7 +1806,7 @@ SCREEN.unifybom=(c,ro)=>{
       sgroup:l.sgroup,lgroup:l.lgroup,make_type:l.make_type,cost_gubun:l.cost_gubun,status:l.status}));
     try{if(mrows.length)await fetch(`${API}/api/item/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:mrows})});}catch(e){alert('마스터 저장 실패: '+e.message);return;}
     // 2) BOM 구성(RAC는 백엔드가 proc_weld로 라우팅) — 신규품번 헤더 자동생성(target_name)
-    try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines})});
+    try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines,new_only:true})});   // ★신규등록=new_only(동일품번 중복등록 차단)
       const j=await r.json();if(!j.ok){alert('BOM 저장 거부:\n'+(j.errors||[]).join('\n'));return;}}catch(e){alert('BOM 저장 실패: '+e.message);return;}
     // ★2-b) 생산정보(공정·용접·관경) 복사 — 원본에서(복사→평면 신규등록 P3). weldRows 비어(copy)라 아래 weld/save와 무충돌.
     let pcopy=null;

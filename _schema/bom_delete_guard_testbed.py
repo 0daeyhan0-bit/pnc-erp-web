@@ -144,6 +144,26 @@ try:
         cur.execute(f"SELECT COUNT(*) FROM nx.{t} WHERE item_code=?", NEW)
         chk(f"M2 완전삭제:{t}=0", cur.fetchone()[0] == 0)
 
+    # ══════ D1/D2: 동일 품번 신규등록 차단(사용자 2026-08-31·중복저장 방지) ══════
+    _clear(NEW); _seed_item(NEW, src='web'); _seed_bom(NEW, '4H00049C')   # 이미 BOM 있는 품번
+    r_dup = B.bom_save({"item": NEW, "target_name": NEW, "lines": [{"child_item": "4H00049C", "qty": 1}], "new_only": True})
+    chk("D1 동일 품번 신규등록(new_only) 차단", (not r_dup.get("ok")) and any('이미 등록' in e for e in r_dup.get("errors", [])), str(r_dup)[:120])
+    _clear(NEW); _seed_item(NEW, src='web')   # BOM 없는 미등록 품번
+    r_new = B.bom_save({"item": NEW, "target_name": NEW, "lines": [{"child_item": "4H00049C", "qty": 1}], "new_only": True})
+    chk("D2 BOM 없는 품번 신규등록(new_only) 허용", r_new.get("ok"), str(r_new)[:120])
+    # 수정(new_only 없음)은 기존 품번도 저장 허용(replace)
+    r_edit = B.bom_save({"item": NEW, "target_name": NEW, "lines": [{"child_item": "4H00049C", "qty": 2}]})
+    chk("D2b 수정(new_only 없음)은 기존도 replace 허용", r_edit.get("ok"), str(r_edit)[:120])
+
+    # ══════ D3: _purge_item이 routing p_item(용접carrier) 행도 정리(누락 버그 회귀) ══════
+    _clear(NEW); _seed_item(NEW, src='web')
+    cur.execute("IF OBJECT_ID('nx.routing','U') IS NOT NULL INSERT INTO nx.routing(p_item,item_code,proc_code,work_qty) VALUES(?,?,?,1)", NEW, 'RAC30599301-1', '51')
+    cur.execute("SELECT COUNT(*) FROM nx.routing WHERE p_item=?", NEW); seeded = cur.fetchone()[0]
+    B._purge_item(cur, NEW)
+    cur.execute("SELECT COUNT(*) FROM nx.routing WHERE item_code=? OR p_item=?", NEW, NEW)
+    chk("D3 _purge_item이 routing p_item(carrier) 정리", seeded > 0 and cur.fetchone()[0] == 0, "routing p_item 잔존")
+    _clear(NEW)
+
 finally:
     B._nx = common._nx; B._nx_tx = common._nx_tx
     I._nx = common._nx; I._nx_tx = common._nx_tx

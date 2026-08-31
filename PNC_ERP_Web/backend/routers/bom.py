@@ -739,6 +739,9 @@ def bom_save(payload: dict = Body(...)):
         # 헤더 확보
         cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
         h = cur.fetchone()
+        # ★신규 등록 가드(사용자 2026-08-31): new_only면 이미 BOM 있는 품번은 신규등록 거부(중복 덮어쓰기 차단).
+        if payload.get("new_only") and h:
+            return {"ok": False, "errors": [f"이미 등록된 품번입니다 ({item}) — 신규 BOM 등록 불가. 기존 BOM은 [수정]으로 편집하세요."]}
         if h:
             bom_id = h[0]
         else:
@@ -821,8 +824,10 @@ def _purge_item(cur, item):
     rm["bom_flat"] = _del("IF OBJECT_ID('nx.bom_flat','U') IS NOT NULL DELETE FROM nx.bom_flat WHERE item_code=?", item)
     # 2) 원가 공정(용접봉·관경·routing·서브)
     rm["proc_weld"] = _del("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
-    for t in ("item_sub", "item_valve", "routing", "item_weld"):
+    for t in ("item_sub", "item_valve", "item_weld"):
         rm[t] = _del(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    # ★routing = item_code(품번레벨) + p_item(용접carrier) 둘 다. p_item만 있는 carrier행 누락 방지(_copy_proc와 대칭).
+    rm["routing"] = _del("IF OBJECT_ID('nx.routing','U') IS NOT NULL DELETE FROM nx.routing WHERE item_code=? OR p_item=?", item, item)
     # 3) 생산정보(생산 ST축) — 품번키 + route별
     for t in ("prodinfo_proc", "prodinfo_assy", "prodinfo_item_st", "prodinfo_jig", "prodinfo_yield"):
         rm[t] = _del(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
