@@ -2223,6 +2223,18 @@ SCREEN.kitting=(host)=>{
       const r=await fetch(`${API}/api/ready/setcheck?item=${encodeURIComponent(item)}&ymd=${encodeURIComponent(ymd)}&qty=${qty}`);
       const j=await r.json();
       const able=j.set_able||0;
+      // ★키팅제외분 참고표시 — 기본은 닫힘(기존 모습 유지), 펼치면 목록이 보인다.
+      //   투입파트 미지정 / 키팅제외(BOM관리 '키팅' 미체크) 를 사유별로 나눠 두 블록으로 보여준다.
+      const exclBlock=(title,list)=>list.length?`<details style="margin-top:8px;border:1px solid #e3e9f0;border-radius:6px;background:#fafbfc">
+        <summary style="padding:6px 10px;cursor:pointer;color:#6b7684;font-size:11px">
+          ${esc(title)} (${nf(list.length)}건)<span style="color:#9aa3ad"> — 참고용, 세트가능 계산에서 제외됨</span></summary>
+        <table class="tbl" style="font-size:11px;width:100%;margin:0">
+          <thead><tr><th class="center">자도번</th><th class="center">품명</th><th class="center">사용수량</th><th class="center">협력사</th><th class="center">제외사유</th></tr></thead>
+          <tbody>${list.map(x=>`<tr style="color:#8a93a0">
+            <td class="center">${esc(x.mat)}</td><td class="center">${esc(x.nm||'')}</td>
+            <td class="center">${x.use_qty}</td><td class="center">${esc(x.cust||'')}</td>
+            <td class="center">${esc(x.why||'')}</td></tr>`).join('')}</tbody>
+        </table></details>`:'';
       // ★세트수량은 사용자가 수정 가능 → 입력값(want) 기준으로 판정·표시·등록. 변경시 즉시 재판정.
       const paint=()=>{
         const want=Math.max(0,+ov.querySelector('#sp-qty').value||0);
@@ -2234,12 +2246,17 @@ SCREEN.kitting=(host)=>{
             <td class="center">${esc(x.mat)}</td><td class="center">${x.use_qty}</td>
             <td class="center"${x.stock_qty<0?' style="color:#c0392b;font-weight:700"':''}>${nf(x.stock_qty)}</td>
             <td class="center"${x.set_able<want?' style="color:#c0392b;font-weight:700"':''}>${nf(x.set_able)}</td>
-            <td class="center">${esc(x.cust||'')}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">키팅 대상 자재 없음(KITTING_FLAG=1 없음)</td></tr>'}</tbody>
+            <td class="center">${esc(x.cust||'')}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">키팅 대상 자재 없음(투입파트·키팅체크 있는 자재 없음)</td></tr>'}</tbody>
+          <tfoot><tr style="background:#eef2f7;font-weight:700">
+            <td class="center">${nf((j.rows||[]).length)}건</td><td class="center"></td><td class="center"></td>
+            <td class="center"${able<0?' style="color:#c0392b"':''}>${nf(able)}</td><td class="center"></td></tr></tfoot>
         </table>
         <div style="margin-top:10px;padding:8px 10px;border-radius:6px;background:${ok?'#e8f6ec':'#fdecea'};color:${ok?'#1c7c3a':'#c0392b'};font-weight:600">
           ${ok?`✅ 세트가능 ${nf(able)} — 요청 ${nf(want)} 처리 가능`
               :`⚠ 세트가능 ${nf(able)} — 요청 ${nf(want)} 에 미달(자재부족). 실적이 잡히지 않습니다.`}
         </div>
+        ${exclBlock('투입파트 정보없음', (j.excluded||[]).filter(x=>(x.why||'').includes('투입파트')))}
+        ${exclBlock('키팅제외품', (j.excluded||[]).filter(x=>!(x.why||'').includes('투입파트')))}
         ${viewOnly?'':`<div style="margin-top:6px;color:#789;font-size:11px">
           ※ 충당 순서: 선택 범위 안에서 <b>이른 날짜부터</b> 순차로 채웁니다(계획 변동 대비, 재고 소진 방식).
           완료 시 준비재고가 증가하고 화면의 준비수량은 준비재고 기준으로 갱신됩니다.</div>`}

@@ -826,6 +826,61 @@ SCREEN.gagongmove580=(c)=>{
     catch(e){st.msg='백엔드 연결 실패';st.sheetAll=[];st.sheetRows=[];st.sheetCnt=0;}
     st.loading=false;draw();};
   const CLR={done:'#66bb6a',print:'#333',part:'#ffd54f'};   // 초록/검정/노랑
+  /* ★엑셀 다운로드 — **레거시 엑셀과 동일**하게 (2026-08-31 사용자 확정: "똑같이 나오게").
+       레거시 실물(가공창고이동계획_260831142118.xls) 대조로 맞춘 것:
+         ① 헤더 1행부터 시작(제목·부제 없음) · 헤더는 흰 배경 + 굵게 + 가운데
+         ② 컬럼명 = SEQ·최종납품처·도번·자도번LIST·PART일자·PART INPUT·Line No·
+                    이동전표발·이동필요수·출하·ASSY재고·당일이전·(일자들)
+            → 화면에만 있는 자재재고·생산재고·도번고정은 레거시에 없다(제외).
+         ③ PART일자 = **260821 6자리 원본**(화면의 '08월 21일' 변환 아님)
+         ④ 빈 셀은 완전 공백(화면의 '·' 아님) · 합계행 없음
+         ⑤ 주말 헤더는 주황(#fac090) — 레거시 05토/06일이 그 색
+         ⑥ 셀 배경 = SP 색상 그대로(#ffff00 노랑·#669900 초록·#fac090 주황)
+       ★'10/10' 이 날짜로 바뀌던 문제는 downloadXLS 의 x:str 로 차단(core.js). */
+  const _hex=s=>{const m=/background:(#[0-9a-f]{6})/i.exec(s||'');return m?m[1]:'';};
+  // ★글자색 판정은 화면 fgOn(767행)과 **같은 임계값 150** 을 쓴다 — 다르면 엑셀 색이 화면과 어긋난다.
+  const _fg=bg=>{const m=/^#([0-9a-f]{6})$/i.exec(bg||'');if(!m)return '';
+    const n=parseInt(m[1],16), L=(((n>>16)&255)*0.299+((n>>8)&255)*0.587+(n&255)*0.114);
+    return L<150?'#ffffff':'#222222';};
+  const exportXls=()=>{
+    if(!st.rows.length)return alert('조회 결과가 없습니다.');
+    const dates=st.dates;
+    const HB='#ffffff';                                  // 레거시 헤더 = 흰 배경
+    const cols=[{h:'SEQ',w:40,bg:HB},{h:'최종납품처',w:110,bg:HB},{h:'도번',w:120,bg:HB},
+      {h:'자도번LIST',w:230,bg:HB},{h:'PART일자',w:60,bg:HB},{h:'PART INPUT',w:70,bg:HB},
+      {h:'Line No',w:52,bg:HB},{h:'이동전표발',w:66,bg:HB},{h:'이동필요수',w:66,bg:HB},
+      {h:'출하',w:52,bg:HB},{h:'ASSY재고',w:64,bg:HB},{h:'당일이전',w:64,bg:HB}]
+      // 주말 헤더는 레거시처럼 주황 계열, 평일은 흰색
+      .concat(dates.map(d=>({h:wlab(d),w:56,bg:(wdow(d)===0||wdow(d)===6)?'#fac090':HB})));
+    const n0=v=>(+v||0)?(+v):'';                         // ★레거시는 빈칸(화면의 '·' 아님)
+    const rows=st.rows.map((r,i)=>{
+      const base=[{v:i+1,al:'center'},{v:r.dest,al:'center'},{v:r.item||r.assy,al:'center'},
+        {v:r.jado,al:'left'},
+        {v:String(r.part_ymd||''),al:'center'},          // ★260821 원본 6자리
+        {v:String(r.hm||''),al:'center'},{v:r.line,al:'center'},
+        {v:n0(r.jp_print),al:'center'},{v:n0(r.need),al:'center'},
+        {v:n0(r.sale),al:'center'},{v:n0(r.assy_stock),al:'center'}];
+      // 당일이전 — '완료/계획' + 충당색(레거시 L열과 동일)
+      const pb=r.prior?(r.prior_color||''):'';
+      base.push(r.prior?{v:`${+r.prior_done||0}/${+r.prior}`,al:'center',bg:pb,fg:_fg(pb)}
+                       :{v:'',al:'center'});
+      dates.forEach(d=>{
+        const plan=(r.days&&r.days[d])||0, done=(r.doneday&&r.doneday[d])||0;
+        if(!plan){ base.push({v:'',al:'center'}); return; }   // 계획 없는 날 = 완전 공백
+        const bg=(r.colorday&&r.colorday[d])||'';
+        base.push({v:`${done}/${plan}`,al:'center',bg,fg:_fg(bg)});
+      });
+      return base;
+    });
+    const wcnm=(st.wc||'전체');
+    // 파일명도 레거시 형식(가공창고이동계획_YYMMDDHHMMSS)
+    const T2=new Date(), p2=n=>String(n).padStart(2,'0');
+    const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+      +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
+    // ★파일은 진짜 xlsx 로 나간다(확장자는 downloadXLS 가 .xlsx 로 붙인다).
+    //   HTML→.xls 방식은 엑셀이 "형식·확장명 불일치" 경고를 띄우고 **서식(색)을 버려서** 폐기.
+    downloadXLS(`가공창고이동계획_${stamp}`, cols, rows, {sheet:`가공창고이동계획_${wcnm}`});
+  };
   const planGridHtml=()=>{
     const dates=st.dates;
     let tNeed=0,tMoved=0,tSale=0,tAssy=0,tPrint=0,tPrior=0;const dSum={};dates.forEach(d=>dSum[d]=0);
@@ -936,13 +991,14 @@ SCREEN.gagongmove580=(c)=>{
        <label class="rl"><input type="radio" name="mv-f" value="전체"${st.mv==='전체'?' checked':''}> 전체</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동필요"${st.mv==='이동필요'?' checked':''}> 이동필요</label>
        <label class="rl"><input type="radio" name="mv-f" value="이동완료"${st.mv==='이동완료'?' checked':''}> 이동완료</label>`}
-       <!-- ★2026-08-24 기간 1~14일 전부 선택 가능(기본 2일) -->
-       <label class="tl">기간</label><select class="inp" id="mv-gigan" style="max-width:78px">${Array.from({length:14},(_,k)=>k+1).map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
+       <!-- ★2026-08-24 기간 1~14일 전부 선택 가능(기본 2일) · 2026-08-31 31일까지 확장(사용자 요청) -->
+       <label class="tl">기간</label><select class="inp" id="mv-gigan" style="max-width:78px">${Array.from({length:31},(_,k)=>k+1).map(d=>`<option value="${d}"${st.gigan===d?' selected':''}>${d}일</option>`).join('')}</select>
        <label class="tl">구분</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동계획"${st.gubun==='이동계획'?' checked':''}> 이동계획</label>
        <label class="rl"><input type="radio" name="mv-gubun" value="이동전표"${st.gubun==='이동전표'?' checked':''}> 이동전표</label>
        <label class="tl">소스</label><select class="inp src-new" id="mv-src" data-src="${esc(st.src)}" style="width:auto;min-width:150px" title="신규DB(웹계획)=복제 SP(계획원천만 웹편성 nx.plan_part_dtl, 나머지 로직은 레거시 그대로) / 우리(nx)=레거시 SP 직접호출"><option value="new"${st.src==='new'?' selected':''}>🟣 신규DB(웹계획)</option><option value="nx"${st.src!=='new'?' selected':''}>🟢 우리(nx)</option></select>
        <button class="btn" id="mv-search">🔍 조회</button>
+       ${isSheet?'':'<button class="btn xls" id="mv-xls" title="조회 결과를 화면과 같은 색상으로 엑셀 저장">엑셀</button>'}
        <div class="spacer"></div><span class="rowcount">${isSheet?`전표 <b>${nf(st.sheetCnt)}</b>건`:`행 <b>${nf(st.cnt)}</b> · 선택 <b id="mv-selcnt">${st.sel.size}</b>셀 <span id="mv-selqty" style="color:#1c47a0"></span> · 이동필요합 <b style="color:#c0392b">${nf(st.need_sum)}</b> · 이동완료합 <b>${nf(st.moved_sum)}</b>`}</span>
      </div>
      ${st.note?`<div class="page-sub" style="color:#c0392b">${esc(st.note)}</div>`:''}
@@ -957,6 +1013,7 @@ SCREEN.gagongmove580=(c)=>{
       st.item=g('#mv-item').value.trim();st.part=g('#mv-part').value.trim();load();};
     // 소스는 고르는 즉시 색을 바꾼다(실제 반영은 [조회]).
     {const sv=g('#mv-src');if(sv)sv.onchange=e=>{e.target.dataset.src=e.target.value;};}
+    {const xb=g('#mv-xls');if(xb)xb.onclick=exportXls;}   // ★엑셀(색상 유지)
     // ★기간 N일 = 기준일 포함 N일치 → to = from + (N-1). (기존 +N 이라 11·15일치가 나왔음)
     //   ★2026-08-25 st.to 만 고치고 조회를 누르면 #mv-search 핸들러가 첫 줄에서
     //     st.to = 입력칸값 으로 되돌려버려(입력칸은 아직 옛 날짜) 항상 2일치만 나왔다.

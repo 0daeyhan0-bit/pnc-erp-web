@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile,
 from fastapi import Request
 from routers.auth import (require_user, scope_cust,
                           assert_own_barcode)   # ★소속 강제 (2026-08-29)
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _route01_ratio, _sub_desc_plain)
 
 router = APIRouter()
 
@@ -89,8 +89,12 @@ def _sp_live_rows(cur, cust, from_ymd, to_ymd, flag, item="%", matcode="%", work
             'mat_list': str(G(r, 'mat_list') or ''), 'sagub_list': str(G(r, 'sagub_list') or '')})
     return out
 
-# 날짜셀 색상 = 가공-4주간(SCREEN.gagongplan4w)과 동일 규칙: 출하완료 주황·생산완료 노랑·재고배분 녹.
-_TAGCOLOR = {90: '#fac090', 70: '#ffff00', 50: '#669900'}
+# 날짜셀 색상 — 출하완료 주황 · 생산완료(ASSY재고) 노랑 · 세트재고+입고대기 회색.
+# ★50(회색) 교정(2026-08-31): 가공-4주간의 50 은 '준비재고(키팅)'라 녹색이지만,
+#   이 화면(협력사·외주)의 50 은 _sim510 L129 대로 **세트재고+입고대기 배분**이다.
+#   협력사는 키팅과 무관한데 녹색이 나와 "키팅완료"로 오해됐다(사용자 지적).
+#   세트재고 표준색 = 회색(자재세트입고현황 §130 규칙과 동일).
+_TAGCOLOR = {90: '#fac090', 70: '#ffff00', 50: '#c0c0c0'}
 
 def _sim510(rows):
     """레거시 w_pr_outside_510 창 배분 로직 이식 → 각 행에 c_fin(완료)·c_input(요청)·prod 세팅.
@@ -533,7 +537,9 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                     if fm:
                         g["days"] = {axis[i]: _qint(fm["pl"][i]) for i in range(ndays) if fm["pl"][i]}
                         g["donedays"] = {axis[i]: _qint(fm["dn"][i]) for i in range(ndays) if fm["dn"][i]}
-                        g["colors"] = {axis[i]: _TAGCOLOR.get(fm["tg"][i], '') for i in range(ndays) if fm["pl"][i]}
+                        # ★부분충당은 무색(2026-08-31) — nx 경로와 같은 규칙(완료>=계획일 때만 칠함)
+                        g["colors"] = {axis[i]: _TAGCOLOR.get(fm["tg"][i], '') for i in range(ndays)
+                                       if fm["pl"][i] and _qint(fm["dn"][i]) >= _qint(fm["pl"][i])}
                     else:
                         g["days"] = {}; g["donedays"] = {}; g["colors"] = {}
                 dates_out = axis; frac = True
@@ -764,8 +770,13 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
                     fm = fmap.get(str(g["assy"]))
                     if fm:   # 계획일자(g["days"])는 그대로 두고 완료/색만 축에 맞춰 입힘
                         g["donedays"] = {axis[i]: _qint(fm["dn"][i]) for i in range(ndays) if fm["dn"][i]}
+                        # ★부분충당은 무색(2026-08-31) — 완료가 계획을 **다 채웠을 때만** 칠한다.
+                        #   전에는 tg 만 있으면 칠해서 10/20·19/20·15/35 처럼 덜 찬 칸도 색이 들어가
+                        #   "다 된 것"으로 보였다(사용자 지적). 파트별 생산계획 rollFinQ 와 같은 규칙.
                         g["colors"] = {axis[i]: _TAGCOLOR.get(fm["tg"][i], '') for i in range(ndays)
-                                       if fm["tg"][i] and (g["days"].get(axis[i]) or fm["dn"][i])}
+                                       if fm["tg"][i]
+                                       and _qint(fm["dn"][i]) >= _qint(g["days"].get(axis[i]) or 0)
+                                       and (g["days"].get(axis[i]) or fm["dn"][i])}
                     else: g["donedays"] = {}; g["colors"] = {}
                 frac = True
                 note += f" 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번단위, 매칭 {nmatch}/{len(rows)}건). 일자셀=완료/계획+색."
@@ -890,7 +901,9 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
         nm, spec = nmm.get(str(m["assy"]).strip(), ("", ""))
         d = {ymd: _qint(m["days"][i]) for i, ymd in enumerate(dates) if m["days"][i]}
         dn = {ymd: _qint(m["dn"][i]) for i, ymd in enumerate(dates) if m["dn"][i]}
-        cl = {ymd: _TAGCOLOR.get(m["tg"][i], '') for i, ymd in enumerate(dates) if m["days"][i]}
+        # ★부분충당은 무색(2026-08-31) — 완료가 계획을 다 채웠을 때만 칠한다(협력사 화면과 동일 규칙)
+        cl = {ymd: _TAGCOLOR.get(m["tg"][i], '') for i, ymd in enumerate(dates)
+              if m["days"][i] and _qint(m["dn"][i]) >= _qint(m["days"][i])}
         wcc = m["work_code"] or m["in_cust"]
         iss = issued.get(str(m["assy"]).strip(), 0.0)
         req0 = m["req"]; remain = max(0.0, req0 - iss)
@@ -1103,6 +1116,25 @@ def partner_deliv420_issue(request: Request, body: dict = Body(...)):
                 ('A' if (_hm and _hm < '1200') else 'P'),
                 p["deliver_qty"], p["deliver_qty"], p["pack_qty"],
                 str(_r.get("insp") or '0'), bc, ymd, _usr)
+            # ★자도번 상세 생성(2026-08-31) — 「거래명세표 수정」(delivedit)이 이걸 읽는다.
+            #   전에는 헤더만 넣어서, 발행은 됐는데 수정화면에 0건으로 나왔다(레거시 미러
+            #   PU_T_SET_INPUT_REQ_DTL 은 8/28 스냅샷이라 웹 발행분이 없다).
+            #   전개 = setin.py 의 검증된 dw_6 재귀 CTE 재사용(세트도번→그 거래처 자도번).
+            try:
+                from routers.setin import _set_bom_expand
+                for _m in _set_bom_expand(cur, p["assy"], cust, ymd):
+                    _uq = float(_m.get("use_qty") or 0)
+                    if _uq <= 0:
+                        continue
+                    cur.execute("""INSERT INTO nx.set_input_req_dtl
+                           (sheet_no, line_no, mat_code, use_qty, mat_qty, insp_flag, insert_datetime)
+                           SELECT ?, ISNULL(MAX(line_no),0)+1, ?, ?, ?, ?, getdate()
+                             FROM nx.set_input_req_dtl WHERE sheet_no=?""",
+                        str(_sh), _m["mat_code"], _uq,
+                        p["deliver_qty"] * _uq, (_m.get("insp_flag") or '0')[:1], str(_sh))
+            except Exception:
+                # 전개 실패로 발행 자체를 막지 않는다(헤더는 이미 정상). 상세는 소급 보정 가능.
+                pass
             _sh += 1
         nx.commit()
         return {"ok": True, "barcode": bc, "count": len(plan), "total_qty": _qint(sum(p["deliver_qty"] for p in plan))}
@@ -1207,16 +1239,22 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
                     if _m: subs.setdefault(_it, []).append(_m)
             # ★검사 판정 = INSP_FLAG IN ('S','F') (2026-08-27 버그수정).
             #   ⛔종전엔 '1' 과 비교해 전건 무검사로 떨어졌고 출하검사성적서가 아예 출력되지 않았다.
-            #   실제 값은 F=전수검사 · S=샘플검사 · N/''/'(' = 무검사 (item.py:16 _INSP,
+            #   실제 값은 F=유검사 · S=체크검사 · N/''/NULL = 무검사 (레거시 원화면 드롭다운 확인 2026-08-31,
             #   common.py:342·purmagam.py:18 등 코드베이스 전반이 ('S','F') 를 검사대상으로 쓴다).
             cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
             for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
         # 하위 자재 품명 보강(자도번은 위 assys 에 없으므로 따로 조회)
-        _mats = sorted({m for v in subs.values() for m in v if m and m not in nmm})
+        #   ★검사구분도 함께 읽는다(2026-08-31) — 레거시 거래명세표는 **하위 P/No. 행**에
+        #     '유검사'/'체크' 를 찍는다. 종전엔 도번(Assy)만 조회하고 하위 행 insp 를 ''
+        #     로 하드코딩해 검사칸이 늘 비어 있었다. 실측: AJR30078601-12-3 = 'F'(유검사)로
+        #     레거시 품목정보등록 화면과 일치하는 값이 이미 들어 있다.
+        _mats = sorted({m for v in subs.values() for m in v if m})
         for i in range(0, len(_mats), 900):
             ch = _mats[i:i+900]; ph = ",".join("?"*len(ch))
             cur.execute(f"SELECT ITEM_CODE, ISNULL(item_name,''), ISNULL(item_spec,''), ISNULL(UNIT,'EA') FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE IN ({ph})", *ch)
-            for rr in cur.fetchall(): nmm[str(rr[0]).strip()] = (rr[1], rr[2], rr[3])
+            for rr in cur.fetchall(): nmm.setdefault(str(rr[0]).strip(), (rr[1], rr[2], rr[3]))
+            cur.execute(f"SELECT ITEM_CODE, ISNULL(INSP_FLAG,'N') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB WHERE ITEM_CODE IN ({ph})", *ch)
+            for rr in cur.fetchall(): inspm[str(rr[0]).strip()] = str(rr[1] or 'N').strip()
         # ★납품표(2번 출력물)용 — 작업처·입고구분·생산계획일·SVC
         _wcm = {}; _gbm = {}; _pym = {}; _lym = {}; _svc = set()
         for i in range(0, len(assys), 900):
@@ -1263,24 +1301,33 @@ def partner_deliv420_invoice(request: Request, barcode: str = Query(...)):
         item = str(item).strip()
         nm, spec, unit = nmm.get(item, ("", "", "EA"))
         q = float(dq or 0); tot += q
-        _in = '검사' if inspm.get(item) in ('S', 'F') else ''
+        # ★검사칸 표기(2026-08-31 사용자 확정) = F→'유' · S→'체' 한 글자 (그 외 공백).
+        #   검사칸이 좁아 '유검사'는 잘린다. 종전엔 둘을 '검사' 한 가지로 뭉뚱그렸다.
+        _INSPTX = {'F': '유', 'S': '체'}
+        _in = _INSPTX.get(inspm.get(item), '')
         # 도번 행 — 납품표(2번 출력물)용 필드도 함께 싣는다.
         #   subs=자도번LIST · wc=작업처 · gubun=입고구분 · plan_ymd/lg_ymd=생산계획
         _sb = subs.get(item, [])
-        rows.append({"doban": item, "sub": "", "nm": (nm or '').strip(), "spec": (spec or '').strip(),
+        rows.append({"doban": item, "sub": "", "nm": _sub_desc_plain(nm), "spec": (spec or '').strip(),
                      "unit": (unit or 'EA').strip(), "qty": _qint(q), "pack": _qint(pk or 0),
                      "insp": _in, "note": "",
-                     "subs": [f"{m}(1)" for m in _sb],
+                     # ★자도번LIST = 'AJJ30041801(1)검' — 검사품이면 뒤에 '검'(레거시 실물 2026-08-31).
+                     #   종전엔 '(1)' 까지만 붙여 검사 표시가 빠졌다. 판정 = INSP_FLAG IN ('S','F').
+                     "subs": [f"{m}(1)" + ('검' if inspm.get(m) in ('S', 'F') else '') for m in _sb],
                      "wc": _wcm.get(item, ""), "gubun": _gbm.get(item, "세트"),
                      "plan_ymd": _pym.get(item, ""), "lg_ymd": _lym.get(item, ""),
                      "svc": 1 if item in _svc else 0,
                      "serial": (sn or '').strip(), "heat": (hn or '').strip()})
         # 하위 자재 행(레거시 동일 — Assy 칸 비우고 하위 P/No. 만)
+        #   ★품명은 접미사 병기를 벗긴 원품명(_sub_desc_plain) — 레거시 출력물과 동일하게.
+        #     '[-12-1] 대원 SUB' 가 아니라 '대원 SUB'. 마스터 값은 그대로 둔다(화면 조회용).
         for mat in subs.get(item, []):
             if not mat: continue
             _mnm = nmm.get(mat, ("", "", ""))[0]
-            rows.append({"doban": "", "sub": mat, "nm": (_mnm or '').strip(), "spec": "", "unit": "",
-                         "qty": _qint(q), "pack": 0, "insp": "", "note": "",
+            rows.append({"doban": "", "sub": mat, "nm": _sub_desc_plain(_mnm), "spec": "", "unit": "",
+                         "qty": _qint(q), "pack": 0,
+                         "insp": _INSPTX.get(inspm.get(mat), ''),   # ★자도번 자신의 검사구분
+                         "note": "",
                          "svc": 1 if item in _svc else 0,
                          "serial": "", "heat": ""})
     # 납품표 제목 식별자 — 레거시는 "PNC_260806_00:05" 형태(회사_발행일_시각)

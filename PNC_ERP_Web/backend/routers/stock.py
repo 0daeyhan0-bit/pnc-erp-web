@@ -255,6 +255,43 @@ def stock_matinfo(payload: dict = Body(...)):
                         out[k]["stock"] = float(r[1] or 0)
         except Exception:
             pass
+        # ★MASTER 단가(2026-08-31 요청) — 입고단가 칸의 기본값. 사용자가 고칠 수 있다.
+        #   정본 = nx.price_item(§1-9 클린본) price_type='매입', 적용일<=기준일 최신 1건.
+        #   거래처(cust)를 주면 그 거래처 단가를 우선(같은 자재라도 업체별 단가가 다르다).
+        #   /api/stock/mastercost 와 같은 규칙이되, 행마다 부르면 느려 배치 1회로 뽑는다.
+        try:
+            base = (str(payload.get("ymd") or "").strip()
+                    or datetime.now().strftime("%y%m%d"))
+            cc = str(payload.get("cust") or "").strip()
+            for i in range(0, len(codes), 900):
+                ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
+                cur.execute(f"""SELECT UPPER(p.item_code), p.price, ISNULL(p.vendor_code,''),
+                                       ISNULL(p.apply_ymd,''), ISNULL(p.currency,'KRW')
+                      FROM (SELECT item_code, price, vendor_code, apply_ymd, currency,
+                                   ROW_NUMBER() OVER(PARTITION BY UPPER(item_code)
+                                     ORDER BY CASE WHEN ?<>'' AND RTRIM(ISNULL(vendor_code,''))=?
+                                                   THEN 0 ELSE 1 END, apply_ymd DESC) rn
+                              FROM nx.price_item
+                             WHERE UPPER(item_code) IN ({ph}) AND price_type=N'매입'
+                               AND apply_ymd<=?) p
+                     WHERE p.rn=1""", cc, cc, *ch, base)
+                for r in cur.fetchall():
+                    k = str(r[0]).strip().upper()
+                    if k in out:
+                        _v = str(r[2]).strip()
+                        out[k]["cost"] = float(r[1] or 0)
+                        out[k]["cost_vendor"] = _v
+                        out[k]["cost_ymd"] = str(r[3]).strip()
+                        out[k]["currency"] = str(r[4]).strip() or 'KRW'
+                        # ★단가 출처 표시(2026-08-31 요청) — 그 거래처 단가가 없어
+                        #   다른 업체(또는 공통) 단가를 가져온 경우를 화면이 구분해 보여준다.
+                        #   'own'  = 조회 거래처의 단가
+                        #   'other'= 다른 업체 단가로 대체(★표시 대상)
+                        #   'any'  = 거래처 미지정 상태에서 가져온 최신 단가
+                        out[k]["cost_src"] = ('own' if (cc and _v == cc)
+                                              else ('other' if cc else 'any'))
+        except Exception:
+            pass   # 단가 조회 실패로 입고 자체를 막지 않는다(화면에서 직접 입력 가능)
         # 요청 순서 유지 + 미등록 코드도 돌려줌(화면에서 빨갛게 경고)
         return {"rows": [out.get(cd, {"mat": cd, "nm": "", "spec": "", "unit": "",
                                       "stock": 0, "unknown": 1})
