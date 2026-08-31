@@ -2336,7 +2336,7 @@ def sourcing_current_order(item: str = Query(...), ymd: str = Query("")):
             # ★2026-08-26 버그수정: 발주업체(품목 in_cust)와 단가 거래처 불일치 교정. in_cust 거래처 단가 우선,
             #   없으면(빈 in_cust or 그 거래처 단가 없음) 대표단가(MAIN_FLAG)/최신 폴백. 실측 10%(1029건) 불일치만 교정·49%/41% 불변.
             cur.execute(f"""SELECT ITEM_CODE, ITEM_COST, apply, curr, cust FROM (
-                SELECT LTRIM(RTRIM(pc.ITEM_CODE)) ITEM_CODE, pc.ITEM_COST, pc.COST_APPLY_YMD apply, ISNULL(pc.CURRENCY,'') curr, ISNULL(pc.CUST_CODE,'') cust,
+                SELECT LTRIM(RTRIM(pc.item_code)) ITEM_CODE, pc.price ITEM_COST, pc.apply_ymd apply, ISNULL(pc.currency,'') curr, ISNULL(pc.vendor_code,'') cust,
                   ROW_NUMBER() OVER(PARTITION BY LTRIM(RTRIM(pc.item_code))
                     ORDER BY (CASE WHEN ISNULL(LTRIM(RTRIM(i.in_cust)),'')<>'' AND LTRIM(RTRIM(pc.vendor_code))=LTRIM(RTRIM(i.in_cust)) THEN 0 ELSE 1 END),
                              ISNULL(pc.main_flag,'') DESC, pc.apply_ymd DESC,
