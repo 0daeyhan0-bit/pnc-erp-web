@@ -773,6 +773,76 @@ def bom_save(payload: dict = Body(...)):
     finally:
         cn.close()
 
+def _usage_blockers(cur, item):
+    """★삭제 전 사용처 전수 점검(사용자 하드룰 2026-08-31): 이 품번의 BOM/R01을 쓰는 곳이 하나라도 있으면 삭제 차단.
+       반환 [{where, detail}]. 빈 리스트=삭제 가능. 테이블 부재/오류는 '해당 사용처 없음'으로 무시(방어적)."""
+    blk = []
+    def chk(where, sql, *a):
+        try:
+            cur.execute(sql, *a); r = cur.fetchone()
+            if r and r[0]:
+                d = f"{r[0]}건" + (f" (예: {str(r[1]).strip()})" if len(r) > 1 and r[1] else "")
+                blk.append({"where": where, "detail": d})
+        except Exception:
+            pass
+    # 1) 다른 BOM의 자식(구성)으로 사용 — 상위에서 먼저 빼야 함
+    chk("다른 BOM 구성(자식)",
+        """SELECT COUNT(DISTINCT h.item_code), MIN(h.item_code) FROM nx.bom_line l
+           JOIN nx.bom_header h ON h.bom_id=l.bom_id WHERE l.child_item=? AND h.item_code<>?""", item, item)
+    # 2) 모델BOM 구성
+    chk("모델BOM 구성", "SELECT COUNT(*), MIN(MODEL_NO) FROM nx.model_bom WHERE C_ITEM_CODE=?", item)
+    # 3) 다른 품번의 조달경로(후보) 구성라인
+    chk("다른 품번 조달경로 라인",
+        """SELECT COUNT(*), MIN(h.item_code) FROM nx.sourcing_route_line l
+           JOIN nx.sourcing_route h ON h.route_id=l.route_id WHERE l.child_item=? AND h.item_code<>?""", item, item)
+    # 4) 생산계획(편성) — 품목별/자재소요에 이 품번이 등장하면 계획이 물려있음
+    chk("생산계획 품목별(plan_item_dtl)", "SELECT COUNT(*), MIN(WORK_ORDER) FROM nx.plan_item_dtl WHERE C_ITEM_CODE=?", item)
+    chk("생산계획 자재소요(plan_part_mat)", "SELECT COUNT(*), MIN(WORK_ORDER) FROM nx.plan_part_mat WHERE mat_code=? OR assy_item_code=?", item, item)
+    # 5) 주문(수주)
+    chk("주문(recv_dtl)", "SELECT COUNT(*), MIN(WORK_ORDER) FROM nx.recv_dtl WHERE ITEM_CODE=?", item)
+    return blk
+
+
+def _purge_item(cur, item):
+    """★품번의 파생 데이터 전부 정리(사용자 하드룰 2026-08-31·통제된 완전삭제). 커밋은 호출측.
+       순서: BOM구성 → 평면 → 원가공정 → 생산정보(생산 ST) → 조달경로(R02+) → 마스터. 반환 rm(테이블별 삭제행수).
+       ★삭제 안 함: 전사 공유 마스터(prodinfo_single). bom_delete·itemmaster_delete 공용."""
+    rm = {}
+    def _del(sql, *a):
+        cur.execute(sql, *a); return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    # 1) BOM 구성(bom_line/header) + 평면
+    nline = 0
+    cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
+    h = cur.fetchone()
+    if h:
+        nline = _del("DELETE FROM nx.bom_line WHERE bom_id=?", h[0])
+        cur.execute("DELETE FROM nx.bom_header WHERE bom_id=?", h[0])
+    rm["bom_line"] = nline
+    rm["bom_flat"] = _del("IF OBJECT_ID('nx.bom_flat','U') IS NOT NULL DELETE FROM nx.bom_flat WHERE item_code=?", item)
+    # 2) 원가 공정(용접봉·관경·routing·서브)
+    rm["proc_weld"] = _del("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
+    for t in ("item_sub", "item_valve", "routing", "item_weld"):
+        rm[t] = _del(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    # 3) 생산정보(생산 ST축) — 품번키 + route별
+    for t in ("prodinfo_proc", "prodinfo_assy", "prodinfo_item_st", "prodinfo_jig", "prodinfo_yield"):
+        rm[t] = _del(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    rm["route_proc_gagong"] = _del("IF OBJECT_ID('nx.route_proc_gagong','U') IS NOT NULL DELETE FROM nx.route_proc_gagong WHERE item_code=?", item)
+    # 4) 조달경로(R02+ 후보·프로파일) — 이 품번(ASSY) 소유 route 전부 + 하위
+    cur.execute("SELECT OBJECT_ID('nx.sourcing_route')")
+    if cur.fetchone()[0]:
+        cur.execute("SELECT route_id FROM nx.sourcing_route WHERE item_code=?", item)
+        rids = [int(r[0]) for r in cur.fetchall()]
+        for rid in rids:
+            for t in ("sourcing_route_line", "sourcing_route_proc", "sourcing_route_weld", "sourcing_profile", "route_edges", "route_alloc"):
+                cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE route_id=?", rid)
+        rm["sourcing_route"] = _del("DELETE FROM nx.sourcing_route WHERE item_code=?", item) if rids else 0
+        for t in ("route_alloc",):
+            cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
+    # 5) 마스터
+    rm["item"] = _del("DELETE FROM nx.item WHERE item_code=?", item)
+    return rm
+
+
 @router.post("/api/bom/delete")
 def bom_delete(payload: dict = Body(...)):
     """품번 삭제 — 레거시 방식(하위 구성 제거 후 품번 삭제). BOM구성(자식관계)·용접공정·서브테이블 제거 후 nx.item에서 품번 삭제.
@@ -785,30 +855,19 @@ def bom_delete(payload: dict = Body(...)):
         cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", item)
         if not cur.fetchone():
             return {"ok": False, "errors": [f"미등록 품번 ({item})"]}
-        # ★가드: 다른 BOM이 이 품번을 자식으로 사용 → 삭제불가(상위에서 먼저 제거해야 함)
-        cur.execute("""SELECT DISTINCT TOP 20 h.item_code FROM nx.bom_line l
-                       JOIN nx.bom_header h ON h.bom_id=l.bom_id WHERE l.child_item=?""", item)
-        used = [r[0] for r in cur.fetchall()]
-        if used:
-            more = "..." if len(used) >= 20 else ""
-            return {"ok": False, "errors": [
-                f"삭제 불가 — 이 품번을 자식(구성)으로 사용하는 BOM {len(used)}건이 있습니다. 상위 BOM에서 먼저 제거하세요:",
-                ", ".join(used[:15]) + more]}
-        # 삭제: 하위 구성(bom_line) → 헤더 → 용접공정 → 서브테이블 → 품번(마스터)
-        nline = 0
-        cur.execute("SELECT bom_id FROM nx.bom_header WHERE item_code=?", item)
-        h = cur.fetchone()
-        if h:
-            cur.execute("DELETE FROM nx.bom_line WHERE bom_id=?", h[0]); nline = cur.rowcount
-            cur.execute("DELETE FROM nx.bom_header WHERE bom_id=?", h[0])
-        cur.execute("IF OBJECT_ID('nx.proc_weld','U') IS NOT NULL DELETE FROM nx.proc_weld WHERE parent_item=?", item)
-        for t in ("item_sub", "item_valve", "routing", "item_weld"):
-            cur.execute(f"IF OBJECT_ID('nx.{t}','U') IS NOT NULL DELETE FROM nx.{t} WHERE item_code=?", item)
-        cur.execute("DELETE FROM nx.item WHERE item_code=?", item)
-        nitem = cur.rowcount
+        # ★★사용처 전수 가드(사용자 하드룰 2026-08-31): BOM 또는 R01을 쓰는 곳이 하나라도 있으면 삭제 절대 차단.
+        blk = _usage_blockers(cur, item)
+        if blk:
+            return {"ok": False, "blocked": True, "usage": blk,
+                    "errors": ["삭제 불가 — 이 품번(BOM/R01)을 사용하는 곳이 있습니다. 아래를 먼저 정리하세요:"]
+                              + [f"· {b['where']}: {b['detail']}" for b in blk]}
+        # ★통제된 완전 삭제(공용 _purge_item) — 파생 데이터 전부 정리 → 조달경로 R01·생산정보 잔존 방지.
+        rm = _purge_item(cur, item)
         cn.commit()
         _reset_cost_engine()   # 구성·품목 삭제 → 원가엔진 캐시 무효화
-        return {"ok": True, "item": item, "lines_removed": nline, "item_removed": nitem}
+        _removed = {k: v for k, v in rm.items() if v}
+        return {"ok": True, "item": item, "lines_removed": rm.get("bom_line", 0), "item_removed": rm.get("item", 0), "removed": _removed,
+                "summary": "삭제 완료 — " + (", ".join(f"{k} {v}" for k, v in _removed.items()) or "구성 없음")}
     finally:
         cn.close()
 

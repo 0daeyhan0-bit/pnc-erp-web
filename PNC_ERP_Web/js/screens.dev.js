@@ -2581,11 +2581,11 @@ SCREEN.unifybom=(c,ro)=>{
     // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
     const dbtn=c.querySelector('#bm-del');if(dbtn)dbtn.onclick=async()=>{
       if(!item)return;
-      if(!confirm(`품번 [${item}] ${name||''} 삭제할까요?\n\n· 구성(자식 ${lines.length}건) 관계 제거\n· 품번을 품목마스터에서 삭제\n· 다른 BOM이 이 품번을 자식으로 쓰면 삭제 안 됨\n\n되돌릴 수 없습니다.`))return;
+      if(!confirm(`품번 [${item}] ${name||''} 삭제할까요?\n\n★사용처 전수 확인 후 삭제(통제):\n· BOM 자식·모델BOM·조달경로·생산계획·자재소요·주문 중 하나라도 쓰면 삭제 차단\n· 미사용이면 파생 전부 정리(BOM·평면·원가공정·생산정보·조달경로 R01/R02)\n\n되돌릴 수 없습니다.`))return;
       try{const r=await fetch(`${API}/api/bom/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item})});
         const j=await r.json();
-        if(!j.ok){alert('삭제 불가:\n'+(j.errors||['오류']).join('\n'));return;}
-        alert(`삭제 완료 — 품번 ${j.item} (구성 ${j.lines_removed||0}건 제거)`);
+        if(!j.ok){alert('삭제 불가 — 사용 중입니다:\n\n'+(j.errors||['오류']).join('\n')+'\n\n위 사용처를 먼저 정리한 뒤 삭제하세요.');return;}
+        alert(`삭제 완료 — ${j.item}\n${j.summary||('구성 '+(j.lines_removed||0)+'건 제거')}`);
         item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';results=[];query='';draw();
       }catch(e){alert('삭제 실패: '+e.message);}};
     // 역전개(where-used) 버튼·모달

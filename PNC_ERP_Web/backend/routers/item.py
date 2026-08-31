@@ -337,23 +337,26 @@ def itemmaster_save(payload: dict = Body(...)):
 
 @router.post("/api/itemmaster/delete")
 def itemmaster_delete(payload: dict = Body(...)):
-    """삭제 — BOM 무결성 게이트: 단일BOM(nx.bom_header 모 / nx.bom_line 자) 참조 있으면 거부.
-    ★단일BOM 통일(2026-08-13): 레거시 PR_M_ITEM_BOM 별도체크 제거(nx.bom_line이 정본)."""
+    """삭제 — ★통제된 완전삭제(사용자 하드룰 2026-08-31): bom_delete와 동일 로직 공용.
+    ①사용처 전수 가드(_usage_blockers): BOM 자식·모델BOM·타 조달경로·생산계획·자재소요·주문 중 하나라도 쓰면 차단.
+    ②아니면 파생 데이터 전부 정리(_purge_item): BOM·평면·원가공정·생산정보·조달경로·마스터."""
     codes = [str(x).strip() for x in (payload.get("codes", []) or []) if str(x).strip()]
     if not codes: return {"ok": True, "deleted": 0}
+    from routers.bom import _usage_blockers, _purge_item   # 공용 가드/정리(순환import 회피 위해 지연import)
     nx = _nx(); cur = nx.cursor()
     try:
-        blocked = []
+        deleted = []; blocked = []
         for code in codes:
-            cur.execute("SELECT 1 FROM nx.bom_header WHERE item_code=?", code); a = cur.fetchone()
-            cur.execute("SELECT 1 FROM nx.bom_line WHERE child_item=?", code); b = cur.fetchone()
-            if a or b: blocked.append(code)
+            blk = _usage_blockers(cur, code)
+            if blk:
+                blocked.append({"code": code, "usage": blk}); continue
+            _purge_item(cur, code)
+            deleted.append(code)
+        nx.commit()
+        _reset_cost_engine()
         if blocked:
-            return {"ok": False, "errors": [f"{c} : BOM에 사용중이라 삭제할 수 없습니다." for c in blocked]}
-        for code in codes:
-            cur.execute("DELETE FROM nx.item_sub WHERE item_code=?", code)
-            cur.execute("DELETE FROM nx.item_valve WHERE item_code=?", code)
-            cur.execute("DELETE FROM nx.item WHERE item_code=?", code)
-        return {"ok": True, "deleted": len(codes)}
+            errs = [f"{b['code']} : 사용중이라 삭제 불가 — " + ", ".join(f"{u['where']}({u['detail']})" for u in b['usage']) for b in blocked]
+            return {"ok": len(deleted) > 0, "deleted": len(deleted), "deleted_codes": deleted, "blocked": blocked, "errors": errs}
+        return {"ok": True, "deleted": len(deleted), "deleted_codes": deleted}
     finally:
         nx.close()
