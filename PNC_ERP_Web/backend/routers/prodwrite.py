@@ -225,7 +225,7 @@ def stockmaint_delete(payload: dict = Body(...)):
     ids = [str(x) for x in (payload.get("ids", []) or []) if str(x).strip()]
     if not ids:
         return {"ok": True, "deleted": 0}
-    nx = _nx(); cur = nx.cursor()
+    nx = _nx_tx(); cur = nx.cursor()   # ★원자화(2026-08-31): 배치 삭제(원장+미러) 전체 원자. autocommit이면 건별/미러 중간실패 시 부분삭제 커밋→재고 불일치.
     try:
         dl = 0
         for x in ids:
@@ -241,7 +241,10 @@ def stockmaint_delete(payload: dict = Body(...)):
             cur.execute("DELETE FROM nx.stock_ledger WHERE STOCK_POINT='PRD' AND MAINT_YMD=? AND MAINT_SEQ=?", y, sq)
             dl += cur.rowcount
             if _o: _prd_mirror_del(cur, y, str(_o[0]).strip(), str(_o[1]).strip(), str(_o[2]).strip(), float(_o[3] or 0))
+        nx.commit()
         return {"ok": True, "deleted": dl}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 

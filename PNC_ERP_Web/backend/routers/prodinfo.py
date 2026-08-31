@@ -58,11 +58,40 @@ def prodinfo_search(q: str = Query("")):
     finally:
         cn.close()
 
-def _pi_proc_rows(cur, item, use_nx):
-    """생산공정순서 행 조회(use_nx=True→nx.prodinfo_proc, False→레거시). 마스터 조인으로 표시명·회수율 포함."""
-    src = ("nx.prodinfo_proc a" if use_nx
-           else "PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG a")
-    C = (lambda c: c.lower()) if use_nx else (lambda c: c)  # nx는 소문자 컬럼
+# ── P4 route별 생산정보(생산 ST축의 route 확장) ──────────────────────────────
+#   ★두 축 분리(사용자 확정 2026-08-31): 생산 ST(PR_M_ITEM_PROC_GAGONG·품번키)와
+#     개발 원가 공정(nx.sourcing_route_proc)은 별개. R02 생산정보는 생산 ST축을 route별로 확장.
+#   R01(route_no≤1/현행)=기존 품번키 경로(prodinfo_proc→PR_M_ITEM_PROC_GAGONG) 무접촉 = STEP6 diff0 보장.
+#   R02+(route_no>1)=신규 nx.route_proc_gagong(route_id+품번+proc_seq 키). 옆에짓기.
+def _ensure_route_proc(cur):
+    """route별 생산공정순서 테이블 멱등 생성(생산 ST축 컬럼 = prodinfo_proc + route_id)."""
+    cur.execute("""IF OBJECT_ID('nx.route_proc_gagong') IS NULL CREATE TABLE nx.route_proc_gagong(
+        route_id INT, item_code varchar(20), proc_seq tinyint, work_code varchar(10), gagong_proc_code varchar(10),
+        s_work_code smallint, mach_code varchar(10), work_qty decimal(18,5), std_size varchar(100), mix_gagong tinyint,
+        gagong_proc_flag varchar(1), gagong_proc_seq tinyint, ready_st decimal(18,5), mach_ct decimal(18,5), inwon tinyint,
+        human_st decimal(18,5), tot_st decimal(18,5), jp_proc_method varchar(1), lt_hr decimal(18,5), key_id int,
+        upd_user varchar(30), upd_at datetime DEFAULT getdate(),
+        CONSTRAINT pk_route_proc_gagong PRIMARY KEY(route_id, item_code, proc_seq))""")
+
+def _route_no_of(cur, route_id):
+    """route_id → route_no(1=R01/현행, >1=R02+). 0/미존재=1(현행 취급)."""
+    rid = int(route_id or 0)
+    if rid <= 0: return 1
+    cur.execute("SELECT ISNULL(route_no,1) FROM nx.sourcing_route WHERE route_id=?", rid)
+    r = cur.fetchone()
+    return int(r[0]) if r else 1
+
+def _pi_proc_rows(cur, item, use_nx, route_id=0):
+    """생산공정순서 행 조회. 마스터 조인으로 표시명·회수율 포함.
+       route_id가 R02+(route_no>1)면 nx.route_proc_gagong(route 스코프), 아니면 use_nx=True→nx.prodinfo_proc / False→레거시."""
+    use_route = _route_no_of(cur, route_id) > 1
+    if use_route:
+        _ensure_route_proc(cur)
+        src = "nx.route_proc_gagong a"; C = (lambda c: c.lower())
+    else:
+        src = ("nx.prodinfo_proc a" if use_nx
+               else "PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG a")
+        C = (lambda c: c.lower()) if use_nx else (lambda c: c)  # nx는 소문자 컬럼
     cur.execute(f"""
         SELECT a.{C('PROC_SEQ')}, ISNULL(a.{C('WORK_CODE')},'') , ISNULL(a.{C('GAGONG_PROC_CODE')},''),
                ISNULL(a.{C('S_WORK_CODE')},0), ISNULL(a.{C('MACH_CODE')},''), ISNULL(a.{C('WORK_QTY')},0),
@@ -76,7 +105,8 @@ def _pi_proc_rows(cur, item, use_nx):
         LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g ON g.GAGONG_PROC_CODE = a.{C('GAGONG_PROC_CODE')}
         LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK_SINGLE s ON s.S_WORK_CODE      = a.{C('S_WORK_CODE')}
         LEFT JOIN PARTNER_ERP_TEST3.nx.QA_M_MACHINE     m ON m.MACH_CODE        = a.{C('MACH_CODE')}
-        WHERE a.{C('ITEM_CODE')}=? ORDER BY a.{C('PROC_SEQ')}""", item)
+        WHERE a.{C('ITEM_CODE')}=? {('AND a.route_id=?' if use_route else '')} ORDER BY a.{C('PROC_SEQ')}""",
+        *([item, int(route_id)] if use_route else [item]))
     out = []
     for r in cur.fetchall():
         out.append({"proc_seq": int(r[0]), "work_code": str(r[1]).strip(), "gagong_proc_code": str(r[2]).strip(),
@@ -89,8 +119,8 @@ def _pi_proc_rows(cur, item, use_nx):
     return out
 
 @router.get("/api/prodinfo/get")
-def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
-    """품번의 3패널 + 하단 탭 데이터 로드(nx우선 병합)."""
+def prodinfo_get(item: str = Query(...), assyall: int = Query(0), route_id: int = Query(0)):
+    """품번의 3패널 + 하단 탭 데이터 로드(nx우선 병합). route_id>0이 R02+면 패널③ 생산공정순서를 route 스코프로."""
     item = item.strip()
     cn = _nx(); cur = cn.cursor()
     try:
@@ -146,11 +176,22 @@ def prodinfo_get(item: str = Query(...), assyall: int = Query(0)):
                 d[k] = (None if v is None else round(float(v), 3))
             single.append(d)
 
-        # ── 패널③ 생산공정순서(nx우선 by item) ──
-        cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
-        use_nx = cur.fetchone()[0] > 0
-        proc = _pi_proc_rows(cur, item, use_nx)
-        proc_src = "nx" if use_nx else "legacy"
+        # ── 패널③ 생산공정순서(nx우선 by item, R02+면 route 스코프) ──
+        if _route_no_of(cur, route_id) > 1:
+            _ensure_route_proc(cur)
+            cur.execute("SELECT COUNT(*) FROM nx.route_proc_gagong WHERE route_id=? AND item_code=?", int(route_id), item)
+            if cur.fetchone()[0] > 0:
+                proc = _pi_proc_rows(cur, item, True, route_id=int(route_id)); proc_src = "route"
+            else:
+                # R02 미등록 → R01/품번키(생산 ST축)에서 시드 템플릿 제공(저장 전엔 route_proc_gagong 미기록)
+                cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
+                seed_nx = cur.fetchone()[0] > 0
+                proc = _pi_proc_rows(cur, item, seed_nx); proc_src = "route_seed"
+        else:
+            cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", item)
+            use_nx = cur.fetchone()[0] > 0
+            proc = _pi_proc_rows(cur, item, use_nx)
+            proc_src = "nx" if use_nx else "legacy"
 
         # ── 하단 탭: LOB(item_st, nx우선) ──
         cur.execute("""SELECT prod_gubun, ISNULL(member_qty,0), ISNULL(capa_qty,0), 'nx'
@@ -240,11 +281,13 @@ def prodinfo_opts(work_code: str = Query("")):
 
 @router.post("/api/prodinfo/proc/save")
 def prodinfo_proc_save(payload: dict = Body(...)):
-    """생산공정순서 저장(nx.prodinfo_proc replace-all by item). 편집=nx만."""
+    """생산공정순서 저장. route_id>0이 R02+면 nx.route_proc_gagong(route 스코프) replace-all,
+       아니면 현행 nx.prodinfo_proc(품번키) replace-all. 편집=nx만."""
     item = str(payload.get("item", "")).strip()
     if not item: return {"ok": False, "detail": "품번 필수"}
     rows = payload.get("rows", []) or []
     user = (payload.get("user") or "웹")[:30]
+    rid = int(payload.get("route_id") or 0)
     cn = _nx(); cur = cn.cursor()
     try:
         seqs = set()
@@ -253,24 +296,40 @@ def prodinfo_proc_save(payload: dict = Body(...)):
             if s <= 0: return {"ok": False, "detail": "공정SEQ는 1 이상 필수"}
             if s in seqs: return {"ok": False, "detail": f"공정SEQ 중복: {s}"}
             seqs.add(s)
-        cur.execute("DELETE FROM nx.prodinfo_proc WHERE item_code=?", item)
         def n(r, k, d=0):
             v = r.get(k)
             try: return float(v) if v not in (None, "") else d
             except: return d
-        for r in rows:
-            cur.execute("""INSERT INTO nx.prodinfo_proc
-                (item_code, proc_seq, work_code, gagong_proc_code, s_work_code, mach_code, work_qty, std_size,
-                 mix_gagong, gagong_proc_flag, gagong_proc_seq, ready_st, mach_ct, inwon, human_st, tot_st,
-                 jp_proc_method, lt_hr, key_id, upd_user, upd_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,getdate())""",
-                item, int(r.get("proc_seq")), (r.get("work_code") or "")[:4], (r.get("gagong_proc_code") or "")[:10],
-                int(n(r, "s_work_code")), (r.get("mach_code") or "")[:10], n(r, "work_qty"), (r.get("std_size") or "")[:100],
-                int(n(r, "mix_gagong")), (r.get("gagong_proc_flag") or "")[:1], int(n(r, "gagong_proc_seq", 1)),
-                n(r, "ready_st"), n(r, "mach_ct"), int(n(r, "inwon")), n(r, "human_st"), n(r, "tot_st"),
-                (r.get("jp_proc_method") or "J")[:1], n(r, "lt_hr"), int(n(r, "key_id")), user)
+        use_route = _route_no_of(cur, rid) > 1
+        if use_route:
+            _ensure_route_proc(cur)
+            cur.execute("DELETE FROM nx.route_proc_gagong WHERE route_id=? AND item_code=?", rid, item)
+            for r in rows:
+                cur.execute("""INSERT INTO nx.route_proc_gagong
+                    (route_id, item_code, proc_seq, work_code, gagong_proc_code, s_work_code, mach_code, work_qty, std_size,
+                     mix_gagong, gagong_proc_flag, gagong_proc_seq, ready_st, mach_ct, inwon, human_st, tot_st,
+                     jp_proc_method, lt_hr, key_id, upd_user, upd_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,getdate())""",
+                    rid, item, int(r.get("proc_seq")), (r.get("work_code") or "")[:4], (r.get("gagong_proc_code") or "")[:10],
+                    int(n(r, "s_work_code")), (r.get("mach_code") or "")[:10], n(r, "work_qty"), (r.get("std_size") or "")[:100],
+                    int(n(r, "mix_gagong")), (r.get("gagong_proc_flag") or "")[:1], int(n(r, "gagong_proc_seq", 1)),
+                    n(r, "ready_st"), n(r, "mach_ct"), int(n(r, "inwon")), n(r, "human_st"), n(r, "tot_st"),
+                    (r.get("jp_proc_method") or "J")[:1], n(r, "lt_hr"), int(n(r, "key_id")), user)
+        else:
+            cur.execute("DELETE FROM nx.prodinfo_proc WHERE item_code=?", item)
+            for r in rows:
+                cur.execute("""INSERT INTO nx.prodinfo_proc
+                    (item_code, proc_seq, work_code, gagong_proc_code, s_work_code, mach_code, work_qty, std_size,
+                     mix_gagong, gagong_proc_flag, gagong_proc_seq, ready_st, mach_ct, inwon, human_st, tot_st,
+                     jp_proc_method, lt_hr, key_id, upd_user, upd_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,getdate())""",
+                    item, int(r.get("proc_seq")), (r.get("work_code") or "")[:4], (r.get("gagong_proc_code") or "")[:10],
+                    int(n(r, "s_work_code")), (r.get("mach_code") or "")[:10], n(r, "work_qty"), (r.get("std_size") or "")[:100],
+                    int(n(r, "mix_gagong")), (r.get("gagong_proc_flag") or "")[:1], int(n(r, "gagong_proc_seq", 1)),
+                    n(r, "ready_st"), n(r, "mach_ct"), int(n(r, "inwon")), n(r, "human_st"), n(r, "tot_st"),
+                    (r.get("jp_proc_method") or "J")[:1], n(r, "lt_hr"), int(n(r, "key_id")), user)
         cn.commit()
-        return {"ok": True, "saved": len(rows)}
+        return {"ok": True, "saved": len(rows), "scope": ("route" if use_route else "item"), "route_id": rid}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:200]}
     finally:

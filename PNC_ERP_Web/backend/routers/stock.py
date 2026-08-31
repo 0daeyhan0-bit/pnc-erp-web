@@ -1033,8 +1033,8 @@ def stock_delete(payload: dict = Body(...)):
         seq = int(payload.get("MAINT_SEQ"))
     except (TypeError, ValueError):
         raise HTTPException(400, "MAINT_SEQ 오류")
-    cn = _nx(); cur = cn.cursor()
-    try:
+    cn = _nx_tx(); cur = cn.cursor()   # ★원자화(2026-08-31 데이터손실 사고 후속): 원장삭제+미러잔액 되돌림을 원자로.
+    try:                                #   autocommit이면 미러 되돌림 중간실패 시 원장만 삭제·커밋돼 재고 영구 어긋남.
         cur.execute("SELECT MAT_CODE, MAINT_QTY, ISNULL(CUST_CODE,''), ISNULL(GAGONG_PROC_CODE,''), ISNULL(MAINT_TAG,'') FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
         row = cur.fetchone()
         if not row:
@@ -1053,9 +1053,13 @@ def stock_delete(payload: dict = Body(...)):
         if errs:
             return {"ok": False, "errors": errs}
         cur.execute("DELETE FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAINT_SEQ=?", ymd, seq)
+        n = cur.rowcount
         # ★F1: 삭제도 자재수불장·자재재고(조회정본) 동반 반영(save가 남긴 web행 삭제 + 잔액 되돌림)
         _mat_mirror_edit(cur, ymd, mat, old_cc, old_gp, old_tag, old_stored, 0.0, "stockdelete")
+        cn.commit()
         stock_changed("stock_delete")         # ★재고 변경 → 수불장 캐시 버림
-        return {"ok": True, "deleted": cur.rowcount}
+        return {"ok": True, "deleted": n}
+    except Exception:
+        cn.rollback(); raise   # ★원장삭제+미러 중 하나라도 실패 = 전체 롤백
     finally:
         cn.close()

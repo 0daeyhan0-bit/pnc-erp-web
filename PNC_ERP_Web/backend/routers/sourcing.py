@@ -740,8 +740,13 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
         for r in routes:
             r["vendor_name"] = vmap.get(r["vendor_code"], r["vendor_code"])
             for l in r["lines"]: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
-        cur.execute("SELECT ISNULL(item_name,'') FROM nx.item WHERE item_code=?", item)
-        r = cur.fetchone(); nm = r[0] if r else ""
+        # ★nx_new = 웹 신규 등록 품목(nx.item.src='web') → R01(현행)이 레거시 미러가 아니라 우리 신규 → 수정 허용.
+        cur.execute("IF COL_LENGTH('nx.item','src') IS NULL ALTER TABLE nx.item ADD src varchar(10) NULL")
+        cur.execute("SELECT ISNULL(item_name,''), ISNULL(src,'') FROM nx.item WHERE item_code=?", item)
+        _ir = cur.fetchone(); nm = _ir[0] if _ir else ""; _nxnew = (((_ir[1] if _ir else "") or "").strip() == "web")
+        for _r2 in routes:   # R01(baseline·route_no=1)에 nx_new 부착
+            if _r2.get("baseline") or _r2.get("route_no") == 1:
+                _r2["nx_new"] = _nxnew
         # 조달프로파일용 필터: 승인분만(선택적으로 미승인 회색포함)
         if for_profile:
             def keep(r):
@@ -750,7 +755,7 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
             fr = [dict(r, readonly=(not r["approve_flag"])) for r in routes if keep(r)]
             routes = fr
         next_no = _peek_route_no(cur, item)   # 단조증가 다음 번호(자동라벨 표시용)
-        return {"item": item, "item_name": nm, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
+        return {"item": item, "item_name": nm, "nx_new": _nxnew, "gubun_opts": _ROUTE_GUBUN, "line_gubun_opts": _LINE_GUBUN,
                 "routes": routes, "next_route_no": next_no}
     finally:
         nx.close()
@@ -1290,7 +1295,7 @@ def sourcing_line_delete(payload: dict = Body(...)):
     lid = int(payload.get("line_id") or 0)
     if lid <= 0: raise HTTPException(400, "line_id 필요")
     usr = (str(payload.get("user", "")).strip() or "웹사용자")[:30]
-    nx = _nx(); cur = nx.cursor()
+    nx = _nx_tx(); cur = nx.cursor()   # ★원자화(2026-08-31): DELETE+UPDATE 원자(중간실패=롤백)
     try:
         _ensure_route_tbl(cur)
         cur.execute("SELECT route_id FROM nx.sourcing_route_line WHERE line_id=?", lid)
@@ -1299,7 +1304,10 @@ def sourcing_line_delete(payload: dict = Body(...)):
         rid = int(r[0])
         cur.execute("DELETE FROM nx.sourcing_route_line WHERE line_id=?", lid)
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=0, upd_user=?, upd_dt=getdate() WHERE route_id=?", usr, rid)
+        nx.commit()
         return {"ok": True, "deleted": lid}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
 

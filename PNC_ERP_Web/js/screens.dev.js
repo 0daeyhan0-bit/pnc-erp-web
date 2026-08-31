@@ -1508,7 +1508,9 @@ SCREEN.unifybom=(c,ro)=>{
   let naeProcLoading=false;         // 조립공정 팝업 로딩(사외망 DB 지연 대비 즉시 표시)
   const loadFasten=async(node)=>{ node=(node||item||'').trim(); if(!node)return;
     try{const r=await fetch(`${API}/api/assywork/get?item=${encodeURIComponent(node)}`);fastenD=await r.json();fastenFor=node;}catch(e){fastenD={rows:[],error:e.message};} };
-  const saveFasten=async()=>{ if(!fastenD)return; const it=fastenFor||item;
+  const saveFasten=async()=>{ if(!fastenD)return;
+    if(isNew&&copySource){alert('복사 편집 중입니다. 팝업에서 직접 저장하지 마세요.\n상단 [저장]으로 신규 품번을 등록하면 체결 공정도 함께 복사됩니다.\n(취소/닫으면 등록되지 않습니다)');return;}  // ★copy 모드=조기등록·원본오염 차단
+    const it=fastenFor||item;
     const rows=(fastenD.rows||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
     try{const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item:it,rows,user:'웹'})});
       const j=await r.json(); if(!j.ok){alert('체결 저장 실패');return;}
@@ -1536,7 +1538,9 @@ SCREEN.unifybom=(c,ro)=>{
           <tr><td style="text-align:left;font-weight:700;color:#8a5a1a">내부ST</td>${rows.map(r=>`<td class="num" style="color:#8a5a1a">${(+r.qty||0)?won(Math.round((+r.qty||0)*(+r.std_st||0))):''}</td>`).join('')}<td class="num" style="color:#8a5a1a"><b>${won(Math.round(tSt))}</b></td></tr>
         </tbody></table></div></div>`;
   };
-  let naeModal=false;   // 공정 수정 팝업(모달) 표시
+  let naeModal=false;   // 원가 공정 수정 팝업(모달) 표시
+  let iprodModal=false, iprodD=null;   // ★생산정보(생산 ST축) 팝업 — 원가(naeModal)와 별개 축
+  let iprodEdit=null;   // ★복사모드 생산정보 편집분(메모리) — 최종 [저장] 때 새 품번으로 등록(취소하면 무등록). {proc,assy}
   const _prevYm=(()=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);return `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}`;})();  // 직전 완성월 YYMM(사급 리시빙월 기본)
   let silD=null, silFor='', silLoad=false, silView='company', silSagYm=_prevYm;
   // ★조달경로 후보 연동(현행 R01 + 승인 후보 R02..) — BOM구성·실원가 탭 공용 선택기. routeSel=0=현행(마스터), >0=후보 route_id.
@@ -1608,6 +1612,7 @@ SCREEN.unifybom=(c,ro)=>{
   let newReg=null;              // {method} 모달 표시
   let isNew=false;             // 신규등록 편집 세션(저장시 마스터 생성)
   let newMaster={lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};  // ★신규등록 제품(top) 마스터속성. 대분류=가공비 필터핵심(미설정시 부품공정 누락)
+  let copySource='';   // ★복사→평면 신규등록 시 원본품번(저장 후 생산정보=공정·용접 복사에 사용). LG/빈폼=''
   let weldRows=[];             // [{weld_item,pipe_diam,weld_qty}] 관경별 용접점
   // ★관경 마스터 상수 fallback(weld_diam 정본 14관경) — API 미로드/지연에도 매트릭스 항상 채워지게(빈칸 방지)
   const WELD_DIAMS_DEFAULT=[{pipe_diam:4.76,std_use_qty:0.0007,std_st:10},{pipe_diam:5.00,std_use_qty:0.0007,std_st:10},{pipe_diam:6.35,std_use_qty:0.0008,std_st:10},{pipe_diam:7.94,std_use_qty:0.0008,std_st:10},{pipe_diam:9.52,std_use_qty:0.0008,std_st:10},{pipe_diam:12.70,std_use_qty:0.0010,std_st:15},{pipe_diam:15.88,std_use_qty:0.0012,std_st:15},{pipe_diam:19.05,std_use_qty:0.0022,std_st:23},{pipe_diam:22.00,std_use_qty:0.0028,std_st:23},{pipe_diam:25.40,std_use_qty:0.0038,std_st:29},{pipe_diam:28.00,std_use_qty:0.0047,std_st:29},{pipe_diam:31.75,std_use_qty:0.0057,std_st:29},{pipe_diam:34.90,std_use_qty:0.0066,std_st:29},{pipe_diam:38.10,std_use_qty:0.0076,std_st:29}];
@@ -1651,9 +1656,21 @@ SCREEN.unifybom=(c,ro)=>{
     loadRoutes();   // 조달경로 후보 목록(현행+승인후보) 비동기 로드
     if(enterEdit && !RO && (typeof PERM==='undefined'||PERM.canEdit('unifybom'))){editMode=true;viewTree=false;}
     loading=false;results=[];draw();};
+  // ★신규(_isnew) 자식 필수필드 검증(정본 하드필수: 공통 품명·단위 / 단품·원소재 +재질). 위반이면 저장차단·입력요청.
+  const _reqNew=()=>{const bad=[];
+    lines.forEach((l,i)=>{if(!l._isnew)return;const ch=(l.child_item||'').trim();if(!ch)return;
+      const miss=[];
+      if(!(l.item_name||'').trim())miss.push('품명');
+      if(!(l.unit||'').trim())miss.push('단위');
+      if(!(l.lgroup||'').trim())miss.push('대분류');
+      const sg=(l.sgroup||'').trim();
+      if(['130','210','220','230'].includes(sg)&&!(l.metal_gubun||'').trim())miss.push('재질');
+      if(miss.length)bad.push(`${i+1}행 신규 ${ch}: ${miss.join('·')} 미입력`);});
+    return bad;};
   const save=async()=>{const seen={},errs=[];
     lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(!ch)errs.push(`${i+1}행: 품번 필요`);
       if(ch&&ch===item)errs.push(`${i+1}행: 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행: 중복 ${ch}`);if(ch)seen[ch]=1;});
+    const bn=_reqNew();if(bn.length){alert('신규 품목 필수입력 누락 — 저장 불가:\n'+bn.join('\n')+'\n\n해당 행에 입력 후 다시 저장하세요.');return;}
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
     const mrows=lines.filter(l=>(l.child_item||'').trim()).map(l=>({item_code:l.child_item,item_name:l.item_name,
       item_spec:l.spec,metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,
@@ -1667,25 +1684,35 @@ SCREEN.unifybom=(c,ro)=>{
   const addRow=()=>{const t=Date.now();if(t-_lastAdd<600)return;_lastAdd=t;  // ★rapid-click 가드(렌더 지연에 연타→중복행 방지)
     lines.push({child_item:'',item_name:'(저장 후 표시)',spec:'',qty:1,node_type:'부품',cs_calc_except:false,sagub_default:false,
     kitting:false,set_except:false,vir_item:false,lme_except:false,gagong_proc:'',cust_name:'',remarks:''});draw();};
+  // ★복사=등록이 아니라 '수정(편집)창'으로 진입(사용자 확정 2026-08-31): 원본을 평면 leaf로 펼쳐 편집세션.
+  //   저장(상단 [저장])을 눌러야만 등록 · 취소/닫으면 무등록. copyNew(신규등록›복사)와 동일 경로로 통일(즉시저장 /api/bom/copy 폐기).
   const doCopy=async()=>{
-    const tgt=(prompt(`「${item}」의 BOM을 복사할 새 품번을 입력하세요.\n(유사공정 협력사 변형 등 — 신규 품번은 nx에만 저장)`,'')||'').trim().toUpperCase();
+    const tgt=(prompt(`「${item}」의 BOM을 복사해 새 품번으로 수정 등록합니다.\n새 품번(대상)을 입력하세요.\n(원본을 평면 leaf로 펼쳐 편집창 진입 · 저장을 눌러야 등록 · 취소하면 무등록)`,'')||'').trim().toUpperCase();
     if(!tgt)return; if(tgt===item){alert('원본과 다른 품번을 입력하세요.');return;}
-    try{const r=await fetch(`${API}/api/bom/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:item,target:tgt})});
-      const j=await r.json(); if(!j.ok){alert('복사 실패: '+(j.error||(j.errors||[]).join('\n')));return;}
-      alert(`복사 완료 — ${tgt} 에 ${j.count}구성 저장.${j.warn?'\n\n⚠ '+j.warn:''}`); load(tgt);
+    try{const r=await fetch(`${API}/api/bom/flatget?item=${encodeURIComponent(item)}`);
+      if(!r.ok){alert(`원본 ${item} 평면전개 실패: HTTP ${r.status}\n(nx.bom_flat 미적재면 [기준정보]에서 평면전개 필요)`);return;}
+      const j=await r.json(); const leafLines=(j.lines||[]);
+      if(!leafLines.length){alert(`원본 ${item} 평면 leaf 없음(nx.bom_flat 미적재).`);return;}
+      const srcMaster={lgroup:j.lgroup||'',sgroup:j.sgroup||'',make_type:j.make_type||'',cost_gubun:j.cost_gubun||''};
+      enterNew(tgt, j.name||name||'', leafLines, [], srcMaster, item);   // ★평면 leaf·마스터 pre-fill·편집모드·무저장(저장 시에만 등록)
     }catch(e){alert('복사 오류: '+e.message);}};
   // ============ 신규 BOM 등록 (방식 ①LG업로드 ②복사 ③새로) ============
   const openNew=()=>{newReg={method:''};draw();};
   const closeNew=()=>{newReg=null;draw();};
   // 공통: 신규 편집 세션 진입(품번·구성·용접후보 세팅)
-  const enterNew=async(topItem,topName,newLines,weldCand)=>{
+  const enterNew=async(topItem,topName,newLines,weldCand,srcMaster,srcCopy)=>{
     if(!codes.metal)await loadCodes(); await loadWeldDiams();
-    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null;
-    newMaster={lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};   // 제품 마스터속성 초기화(사용자 입력)
+    item=(topItem||'').trim().toUpperCase(); name=topName||''; isNew=true; editMode=true; viewTree=false; newReg=null; copySource=(srcCopy||'').trim().toUpperCase();
+    iprodEdit=null;   // ★새 복사세션 시작 → 이전 생산정보 편집분 초기화
+    // ★복사=원본 제품마스터 pre-fill(대분류 등)·신규(LG/빈폼)=기본값
+    newMaster=srcMaster?{lgroup:srcMaster.lgroup||'',sgroup:srcMaster.sgroup||'',make_type:srcMaster.make_type||'3',cost_gubun:srcMaster.cost_gubun||''}
+                       :{lgroup:'',sgroup:'',make_type:'3',cost_gubun:''};
     results=[]; tree=[]; treeMax=0; naeFor=''; silFor='';
-    lines=(newLines||[]).map(l=>({child_item:(l.child_item||'').toUpperCase(),item_name:l.item_name||'',spec:l.item_spec||'',
-      qty:(l.qty!=null?+l.qty:1),unit:l.unit||'EA',node_type:'부품',cs_calc_except:false,sagub_default:false,kitting:false,
-      set_except:false,vir_item:false,lme_except:false,gagong_proc:'',in_cust:'',cust_name:'',remarks:(l.supply_type?('LG:'+l.supply_type):'')}));
+    // ★자식 전 필드 보존(복사=원본 자식 마스터 그대로·신규 형태로 정리, 기존 자식 마스터 안 깨짐). LG로드=supply_type→remarks.
+    lines=(newLines||[]).map(l=>({node_type:'부품',cs_calc_except:false,sagub_default:false,kitting:false,set_except:false,
+      vir_item:false,lme_except:false,gagong_proc:'',in_cust:'',cust_name:'',remarks:'', ...l,
+      child_item:(l.child_item||'').toUpperCase(),item_name:l.item_name||'',spec:(l.item_spec||l.spec||''),
+      qty:(l.qty!=null?+l.qty:1),unit:l.unit||'EA',remarks:(l.supply_type?('LG:'+l.supply_type):(l.remarks||''))}));
     // 용접봉 후보 → 용접공정 행(관경·점수는 직원입력, 기본 빈행)
     weldRows=[];
     (weldCand||[]).forEach(w=>{weldRows.push({weld_item:(w.child_item||w.weld_item||'').toUpperCase(),pipe_diam:'',weld_qty:''});});
@@ -1709,19 +1736,48 @@ SCREEN.unifybom=(c,ro)=>{
       let direct=rows.filter(x=>String(x.parent_code||'').trim()===model);
       if(!direct.length) direct=rows.filter(x=>(+x.stufe===1));
       const seen={},lines=[],weld=[];
+      // ★LG child_spec 치수 파싱(비존재=신규 품목용). 포맷 제각각 → 최선노력(OD/Ø·T·L·재질).
+      const _lgdim=(spec)=>{const s=String(spec||'');
+        const mOD=s.match(/(?:\bOD|Ø|∅|외경)\s*([0-9]+(?:\.[0-9]+)?)/i);
+        const mT =s.match(/(?:\bT|두께)\s*([0-9]+(?:\.[0-9]+)?)/i);
+        const mL =s.match(/(?:\bL|길이)\s*([0-9]+(?:\.[0-9]+)?)/i);
+        // ★재질: 'CUTTING'(공정어)에 CU 오탐 방지 — 소재코드/명으로만. C1220=동합금, STS/SUS=스텐.
+        let m='';if(/C1220|copper|brass|황동/i.test(s))m='CU';else if(/STS|SUS|stainless|스텐/i.test(s))m='SUS';else if(/aluminum|알루미/i.test(s))m='AL';
+        return {diam:mOD?+mOD[1]:0, thick:mT?+mT[1]:0, length:mL?+mL[1]:0, metal:m};};
       direct.forEach(x=>{const ch=String(x.child_code||'').trim();if(!ch||seen[ch])return;seen[ch]=1;
-        const rec={child_item:ch,item_name:x.child_desc||x.nx_desc||'',item_spec:x.child_spec||'',qty:(x.qty!=null?+x.qty:1),unit:x.unit||'EA',supply_type:x.supply_type||''};
+        // ★nx.item 값 우선, 비어있으면 LG child_spec 치수로 폴백(존재/신규 무관). nx.item에 없는 품번만 신규 표시.
+        const ex=(+x.nx_exists===1);
+        const dm=_lgdim(x.child_spec);   // 항상 파싱(폴백용)
+        const rec={child_item:ch,
+          item_name:(ex?(x.nx_desc||x.child_desc):(x.child_desc||x.nx_desc))||'',
+          item_spec:(ex?(x.nx_spec||x.child_spec):x.child_spec)||'',
+          qty:(x.qty!=null?+x.qty:1),
+          unit:(ex&&x.nx_unit)?x.nx_unit:(x.unit||'EA'),
+          supply_type:x.supply_type||'',
+          diam:(ex&&+x.nx_diam)?+x.nx_diam:dm.diam,        // nx값 있으면 그것, 0/빈값이면 LG 파싱
+          thick:(ex&&+x.nx_thick)?+x.nx_thick:dm.thick,
+          length:(ex&&+x.nx_length)?+x.nx_length:dm.length,
+          metal_gubun:(ex&&x.nx_metal)?x.nx_metal:dm.metal,
+          net_weight:ex?(x.nx_weight||null):null,
+          lgroup:ex?(x.nx_lgroup||''):'', sgroup:ex?(x.nx_sgroup||''):'',
+          make_type:ex?(x.nx_make||''):'', cost_gubun:ex?(x.nx_cost||''):'', in_cust:ex?(x.nx_incust||''):'',
+          _isnew:!ex};   // ★nx.item에 없는 품번=신규 자식(초록 배지·필수검증)
         (ch.toUpperCase().startsWith('RAC')?weld:lines).push(rec);});
       alert(`LG BOM 불러오기 — 상위 ${model} · 구성 ${lines.length} · 용접봉 ${weld.length} (전개 ${rows.length}행, nx.lg_bom)`);
       enterNew(model, j.modelnm||'', lines, weld);
     }catch(e){alert('LG BOM 불러오기 오류: '+e.message);}
   };
-  // ②기존 복사
+  // ②기존 복사 → ★평면(leaf) 신규등록. 원본을 nx.bom_flat leaf로 완전히 펼쳐(SUB 없이) 편집세션 진입. 저장하면 새 품번=클린 flat BOM.
   const copyNew=async()=>{const src=(prompt('복사할 기존 품번(원본)을 입력','')||'').trim().toUpperCase();if(!src)return;
-    const tgt=(prompt(`「${src}」→ 새 품번(대상)을 입력`,'')||'').trim().toUpperCase();if(!tgt||tgt===src){alert('원본과 다른 새 품번 필요');return;}
-    try{const r=await fetch(`${API}/api/bom/copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:src,target:tgt})});
-      const j=await r.json();if(!j.ok){alert('복사 실패: '+(j.error||(j.errors||[]).join('\n')));return;}
-      alert(`복사 완료 — ${tgt} 에 ${j.count}구성.${j.warn?'\n⚠ '+j.warn:''}`);newReg=null;isNew=false;load(tgt);
+    const tgt=(prompt(`「${src}」→ 새 품번(대상)을 입력\n원본을 평면(leaf)으로 완전히 펼쳐 새 품번으로 등록합니다.\n(SUB 없이 leaf 구성 · 제품마스터 pre-fill · 저장 후 R01·생산정보 등록)`,'')||'').trim().toUpperCase();
+    if(!tgt||tgt===src){alert('원본과 다른 새 품번 필요');return;}
+    try{const r=await fetch(`${API}/api/bom/flatget?item=${encodeURIComponent(src)}`);
+      if(!r.ok){alert(`원본 ${src} 평면전개 실패: HTTP ${r.status}\n(nx.bom_flat에 없으면 [기준정보]에서 평면전개 필요)`);return;}
+      const j=await r.json();
+      const leafLines=(j.lines||[]);
+      if(!leafLines.length){alert(`원본 ${src} 평면 leaf 없음(nx.bom_flat 미적재).`);return;}
+      const srcMaster={lgroup:j.lgroup||'',sgroup:j.sgroup||'',make_type:j.make_type||'',cost_gubun:j.cost_gubun||''};
+      enterNew(tgt, j.name||'', leafLines, [], srcMaster, src);   // ★평면 leaf·마스터 pre-fill·원본(src)=생산정보 복사원본(원자적 세팅)
     }catch(e){alert('복사 오류: '+e.message);}};
   // ③완전 새로
   const blankNew=async()=>{const it=(prompt('신규 품번을 입력(nx에만 저장)','')||'').trim().toUpperCase();if(!it)return;
@@ -1764,29 +1820,53 @@ SCREEN.unifybom=(c,ro)=>{
     if(!newMaster.lgroup){alert('제품 대분류를 선택하세요.\n(대분류 미설정 시 부품 가공비가 원가에서 누락됩니다 — 공정 필터가 대분류 기준)');return;}
     const seen={},errs=[];
     lines.forEach((l,i)=>{const ch=(l.child_item||'').trim();if(ch&&ch===item)errs.push(`${i+1}행 자기참조`);if(ch&&seen[ch])errs.push(`${i+1}행 중복 ${ch}`);if(ch)seen[ch]=1;});
+    const bn=_reqNew();if(bn.length){alert('신규 품목 필수입력 누락 — 저장 불가:\n'+bn.join('\n')+'\n\n해당 행에 입력 후 다시 저장하세요.');return;}
     if(errs.length){alert('저장 불가:\n'+errs.join('\n'));return;}
+    // ★저장중 오버레이(마스터+BOM+공정+생산정보 복사로 수 초 소요) — 완료/오류 시 finally에서 제거
+    const _sv=document.createElement('div');
+    _sv.style.cssText='position:fixed;inset:0;z-index:2000;background:rgba(20,30,50,.45);display:flex;align-items:center;justify-content:center';
+    _sv.innerHTML='<div style="background:#fff;border-radius:12px;padding:22px 34px;box-shadow:0 10px 40px rgba(0,0,0,.35);text-align:center;font-size:15px;color:#1c3a6e;font-weight:700"><div style="width:34px;height:34px;border:4px solid #dbe6f5;border-top-color:#1c47a0;border-radius:50%;margin:0 auto 12px;animation:svspin 0.8s linear infinite"></div>저장 중입니다…<div style="font-size:11px;color:#8a94a6;font-weight:400;margin-top:6px">마스터·BOM·공정·생산정보 등록 중 (잠시만요)</div></div><style>@keyframes svspin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(_sv);
+    try{
     // 1) 마스터 — ★제품(top) 자신 + 신규품번 포함 자식들. 제품 대분류/소분류/생산구분/단가구분 저장(가공비 필터 정상화)
     const mrows=[{item_code:item,item_name:name||item,lgroup:newMaster.lgroup,sgroup:newMaster.sgroup,
-      make_type:newMaster.make_type,cost_gubun:newMaster.cost_gubun,status:'사용'}];
+      make_type:newMaster.make_type,cost_gubun:newMaster.cost_gubun,status:'사용',src:'web'}];   // ★src=web → 조달경로 R01 수정가능(레거시 미러 아님)
     lines.filter(l=>(l.child_item||'').trim()).forEach(l=>mrows.push({item_code:l.child_item,item_name:l.item_name,item_spec:l.spec,
       metal_gubun:l.metal_gubun,diam:l.diam,thick:l.thick,length:l.length,net_weight:l.net_weight,unit:l.unit,in_cust:l.in_cust,
       sgroup:l.sgroup,lgroup:l.lgroup,make_type:l.make_type,cost_gubun:l.cost_gubun,status:l.status}));
     try{if(mrows.length)await fetch(`${API}/api/item/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:mrows})});}catch(e){alert('마스터 저장 실패: '+e.message);return;}
     // 2) BOM 구성(RAC는 백엔드가 proc_weld로 라우팅) — 신규품번 헤더 자동생성(target_name)
-    try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines})});
+    try{const r=await fetch(`${API}/api/bom/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,target_name:name||item,lines,new_only:true})});   // ★신규등록=new_only(동일품번 중복등록 차단)
       const j=await r.json();if(!j.ok){alert('BOM 저장 거부:\n'+(j.errors||[]).join('\n'));return;}}catch(e){alert('BOM 저장 실패: '+e.message);return;}
-    // 3) 용접공정(관경별 횟수) → item_weld+proc_weld+routing 파생 (용접봉별 그룹)
-    const grp={}; weldRows.forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
-    let wsum=0;
-    try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
-      const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
-    // ★체결 매트릭스 저장(신규등록 시 함께) — nx.item_fasten
-    let fcnt=0;
-    try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
-      const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
-      const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
-    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정`);
-    isNew=false; load(item);
+    // ★2-b) 생산정보(공정·용접·관경) 복사 — 원본에서(복사→평면 신규등록 P3). weldRows 비어(copy)라 아래 weld/save와 무충돌.
+    let pcopy=null;
+    if(copySource && copySource!==item){
+      try{const r=await fetch(`${API}/api/bom/copyproc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:copySource,target:item})});
+        const j=await r.json();if(j.ok)pcopy=j.copied;else console.warn('생산정보 복사 실패',j);}catch(e){console.warn('생산정보 복사 오류',e);}
+    }
+    // ★2-c) 복사모드 생산정보 편집분(iprodEdit)이 있으면 새 품번에 등록 — 자동복사분(2-b) override. 없으면 자동복사 유지.
+    if(iprodEdit){
+      try{const eproc=(iprodEdit.proc||[]).filter(r=>(+r.proc_seq||0)>0);
+        await fetch(`${API}/api/prodinfo/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,route_id:0,rows:eproc,user:'웹'})});
+        await fetch(`${API}/api/prodinfo/assy/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,user:'웹',rows:(iprodEdit.assy||[]).map(x=>({a_work_code:x.a_work_code,work_qty:x.work_qty}))})});
+        pcopy=Object.assign({},pcopy||{},{prodinfo_edit:(iprodEdit.proc||[]).length});
+      }catch(e){console.warn('생산정보 편집분 저장 오류',e);}
+    }
+    // 3) 용접공정(관경별 횟수) → item_weld+proc_weld+routing 파생. ★복사모드는 copyproc(2-b)가 용접·체결·공정 전담 → step3~4 스킵(빈값으로 copyproc 복사분 덮어쓰기 방지)
+    const grp={}; let wsum=0, fcnt=0;
+    if(!copySource){
+      weldRows.forEach(w=>{if((+w.weld_qty>0)&&w.pipe_diam&&w.weld_item){(grp[w.weld_item]=grp[w.weld_item]||[]).push({pipe_diam:+w.pipe_diam,weld_qty:+w.weld_qty});}});
+      try{for(const wi in grp){const r=await fetch(`${API}/api/weld/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node:item,weld_item:wi,rows:grp[wi]})});
+        const j=await r.json();if(j.ok)wsum+=j.use_qty;}}catch(e){alert('용접공정 저장 실패: '+e.message);return;}
+      // 체결 매트릭스 저장(nx.routing FS)
+      try{const frows=((fastenD&&fastenD.rows)||[]).filter(x=>(+x.qty)>0).map(x=>({fcode:x.fcode,qty:+x.qty}));
+        const r=await fetch(`${API}/api/assywork/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,rows:frows,user:'웹'})});
+        const j=await r.json();if(j.ok)fcnt=j.count;}catch(e){}
+    }
+    const pmsg=pcopy?`\n★생산정보 복사(${copySource}→): 공정 ${pcopy.routing} · 용접봉 ${pcopy.proc_weld} · 관경 ${pcopy.item_weld}`:'';
+    alert(`신규 BOM 등록 완료\n품번 ${item} · 구성 ${lines.filter(l=>(l.child_item||'').trim()).length}\n용접봉 ${Object.keys(grp).length}종 · Σ소요량 ${wsum.toFixed(5)} · 체결 ${fcnt}공정${pmsg}`);
+    isNew=false; copySource=''; iprodEdit=null; load(item);
+    }finally{ if(_sv&&_sv.parentNode)_sv.parentNode.removeChild(_sv); }   // ★저장중 오버레이 제거(성공/오류/중단 모두)
   };
   // ============ 탭바 ============
   // ★내부원가·실원가 탭은 개발 전용 — 품목 BOM 조회(RO)에서는 숨김(BOM구성만 노출)
@@ -1976,6 +2056,115 @@ SCREEN.unifybom=(c,ro)=>{
       if(!r.ok)throw new Error('HTTP '+r.status);naeD=await r.json();naeFor=item;}
     catch(e){naeD={error:e.message};}naeLoad=false;draw();};
   // ★carrier-aware 공정입력: /api/cost/proc/get → 가공(own) + 용접봉 carrier별 조립공정(용접/체결/포장). carrier별 in-place(통합/이동 금지).
+  // ===== ★생산정보(생산 ST축) 팝업 — 원가 공정(loadNaeProc)과 별개 축. 품번키(route_id=0) 생산공정순서. =====
+  //   복사모드(isNew&&copySource)=원본(copySource) 미리보기(읽기전용·최종저장 때 _copy_prodinfo가 복사). 기존품번=편집·저장.
+  const openItemProd=async()=>{const copyMode=!!(isNew&&copySource); const node=copyMode?copySource:item; if(!node){alert('품번을 먼저 선택/입력하세요');return;}
+    // 복사모드: 편집분(iprodEdit) 있으면 재편집, 없으면 원본 로드해 편집분 초기화. 표시품번=새 품번(item).
+    if(copyMode&&iprodEdit){iprodD={node:item,loading:false,proc:iprodEdit.proc,assy:iprodEdit.assy,opts:iprodEdit.opts,src:'복사 편집분',copyMode:true};iprodModal=true;draw();return;}
+    iprodD={node:copyMode?item:node,loading:true,proc:[],assy:[],opts:null,src:'',copyMode};iprodModal=true;draw();
+    try{const [gj,oj]=await Promise.all([
+        fetch(`${API}/api/prodinfo/get?item=${encodeURIComponent(node)}&route_id=0`).then(r=>r.json()),
+        fetch(`${API}/api/prodinfo/opts`).then(r=>r.json())]);
+      iprodD={node:copyMode?item:node,loading:false,proc:(gj.proc||[]),assy:(gj.assy||[]),opts:oj,src:copyMode?('원본 '+node+' 복사'):(gj.proc_src||''),copyMode};
+      if(copyMode)iprodEdit={proc:iprodD.proc,assy:iprodD.assy,opts:oj};   // 원본 로드분 = 편집 시작값(이후 편집이 여기 반영)
+    }catch(e){iprodD={node,loading:false,proc:[],assy:[],opts:null,src:'',error:e.message,copyMode};}
+    draw();};
+  const itemProdModal=()=>{const np=iprodD;if(!np)return '';
+    const RO=false; const CM=np.copyMode;   // ★항상 편집 가능(복사모드 포함). CM=복사모드(저장=메모리 반영)
+    const srcNm={route:'route',route_seed:'R01시드',nx:'nx편집본',legacy:'라이브 PR_M_ITEM_PROC_GAGONG'}[np.src]||np.src;
+    const O=np.opts||{works:[],parts:[],singles:[],machs:[],jp_methods:{}};
+    const opt=(list,val,disp)=>`<option value="">-</option>`+(list||[]).map(o=>`<option value="${esc(''+o.code)}"${(''+o.code)===(''+val)?' selected':''}>${esc(disp(o))}</option>`).join('');
+    const partsFor=wc=>(O.parts||[]).filter(p=>!wc||!p.work_code||p.work_code===wc);
+    const singlesFor=wc=>(O.singles||[]).filter(s=>!wc||!s.work_code||s.work_code===wc);
+    const machsFor=wc=>(O.machs||[]).filter(m=>!wc||!m.work_code||m.work_code===wc);
+    const nf=(v,d=3)=>{const n=+v;return isNaN(n)?(v==null?'':v):n.toLocaleString(undefined,{maximumFractionDigits:d});};
+    // ── ① 생산공정순서 (전체 컬럼) ──
+    const pcols=['','공정SEQ','작업처','파트','가공공정','가공설비','공정횟수','준비(초)','설비CT','인원','TT(초)','ST(초)','LT(Hr)','전표'];
+    const totSt=(np.proc||[]).reduce((a,r)=>a+(+r.tot_st||0),0);
+    const cell=(r,i,k,w=44,step='0.001')=>RO?nf(r[k]):`<input class="ipf" data-i="${i}" data-k="${k}" type="number" step="${step}" value="${r[k]==null?'':r[k]}" style="width:${w}px;text-align:right;padding:1px 3px">`;
+    const procGrid=`<div style="font-weight:700;color:#0f766e;margin:2px 0 4px">① 생산공정순서 <span style="font-size:11px;color:#8a94a6;font-weight:400">(생산계획 편성이 소비 · 단품공정=STEP6 키)</span></div>
+      <div style="max-height:300px;overflow:auto;border:1px solid #d6e6e2;border-radius:6px"><table style="width:100%;font-size:11px;white-space:nowrap;border-collapse:collapse">
+      <thead><tr style="background:#e6f2f0">${pcols.map(h=>`<th style="padding:2px 4px">${h}</th>`).join('')}</tr></thead>
+      <tbody>${(np.proc||[]).length?np.proc.map((r,i)=>{const wc=r.work_code;return `<tr>
+        <td class="center">${RO?'':`<span class="ip-pdel" data-i="${i}" style="color:#c0392b;cursor:pointer">🗑</span>`}</td>
+        <td class="num">${RO?esc(''+r.proc_seq):`<input class="ipf" data-i="${i}" data-k="proc_seq" type="number" value="${r.proc_seq}" style="width:40px;text-align:right">`}</td>
+        <td>${RO?esc((wc?wc+' ':'')+(r.work_desc||'')):`<select class="ipwc" data-i="${i}" style="min-width:60px">${opt(O.works,wc,o=>o.code+' '+o.name)}</select>`}</td>
+        <td>${RO?esc(r.part_desc||''):`<select class="ipf" data-i="${i}" data-k="gagong_proc_code" style="font-size:10px">${opt(partsFor(wc),r.gagong_proc_code,o=>o.name)}</select>`}</td>
+        <td>${RO?esc(r.s_work_desc||''):`<select class="ipf" data-i="${i}" data-k="s_work_code" style="font-size:10px">${opt(singlesFor(wc),r.s_work_code,o=>o.name)}</select>`}</td>
+        <td>${RO?esc(r.mach_desc||''):`<select class="ipf" data-i="${i}" data-k="mach_code" style="font-size:10px">${opt(machsFor(wc),r.mach_code,o=>o.name)}</select>`}</td>
+        <td class="num">${cell(r,i,'work_qty',40,'0.1')}</td>
+        <td class="num">${cell(r,i,'ready_st')}</td><td class="num">${cell(r,i,'mach_ct')}</td>
+        <td class="num">${RO?esc(''+r.inwon):`<input class="ipf" data-i="${i}" data-k="inwon" type="number" value="${r.inwon==null?'':r.inwon}" style="width:34px;text-align:right">`}</td>
+        <td class="num">${cell(r,i,'human_st')}</td><td class="num" style="background:#f3f8ff">${cell(r,i,'tot_st',48)}</td>
+        <td class="num">${cell(r,i,'lt_hr')}</td>
+        <td>${RO?esc((O.jp_methods||{})[r.jp_proc_method]||r.jp_proc_method||''):`<select class="ipf" data-i="${i}" data-k="jp_proc_method" style="min-width:74px">${Object.entries(O.jp_methods||{}).map(([k,v])=>`<option value="${k}"${r.jp_proc_method===k?' selected':''}>${esc(v)}</option>`).join('')}</select>`}</td>
+        </tr>`;}).join(''):`<tr><td colspan="14" style="text-align:center;color:#888;padding:10px">생산공정순서 없음${RO?'':' — ＋행추가'}</td></tr>`}</tbody>
+      <tfoot><tr style="background:#eef4f3;font-weight:700"><td colspan="11" style="text-align:center">공정 ${(np.proc||[]).length}행 · ST(초) 합계</td><td class="num">${nf(totSt)}</td><td colspan="2"></td></tr></tfoot></table></div>
+      ${RO?'':`<div style="margin-top:5px"><button class="btn" id="ip-add" style="font-size:11px">＋ 행추가</button></div>`}`;
+    // ── ② 조립(공정수) ──
+    const grp=x=>x==='1'?'weld':(x==='2'||x==='21')?'check':(x==='3'||x==='31')?'assy':'etc';
+    let aQ={weld:0,check:0,assy:0,etc:0},aS={weld:0,check:0,assy:0,etc:0};
+    (np.assy||[]).forEach(r=>{const q=+r.work_qty||0,s=q*(+r.work_st||0);const k=grp(r.proc_gubun);aQ[k]+=q;aS[k]+=s;});
+    const aQt=aQ.weld+aQ.check+aQ.assy+aQ.etc, aSt=aS.weld+aS.check+aS.assy+aS.etc;
+    const assyGrid=`<div style="font-weight:700;color:#8e44ad;margin:12px 0 4px">② 조립(공정수) <span style="font-size:11px;color:#8a94a6;font-weight:400">(조립 공정별 공정수·ST)</span></div>
+      <div style="max-height:220px;overflow:auto;border:1px solid #e2d6ee;border-radius:6px"><table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr style="background:#f3eefa"><th style="text-align:left;padding:2px 4px">공정명</th><th class="num">공정수</th><th class="num">표준ST</th><th class="num">ST</th><th class="center">구분</th></tr></thead>
+      <tbody>${(np.assy||[]).length?np.assy.map((r,i)=>`<tr>
+        <td>${esc(r.work_desc||'')}</td>
+        <td class="num">${RO?nf(r.work_qty,0):`<input class="ipaq" data-i="${i}" type="number" value="${r.work_qty==null?'':r.work_qty}" style="width:44px;text-align:right">`}</td>
+        <td class="num">${nf(r.work_st,2)}</td><td class="num ipast" data-i="${i}">${nf((+r.work_qty||0)*(+r.work_st||0))}</td>
+        <td class="center">${esc(r.proc_gubun_nm||'')}</td></tr>`).join(''):`<tr><td colspan="5" style="text-align:center;color:#888;padding:10px">조립공정 없음</td></tr>`}</tbody>
+      <tfoot><tr style="background:#efe6f7;font-weight:800"><td class="center">총계</td><td class="num">${nf(aQt,0)}</td><td></td><td class="num">${nf(aSt)}</td><td></td></tr></tfoot></table></div>`;
+    const body=np.loading?`<div style="padding:30px;text-align:center;color:#888">로딩중…</div>`:(procGrid+assyGrid);
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1300;display:flex;align-items:center;justify-content:center" id="iprod-bg">
+      <div style="background:#fff;border-radius:10px;padding:16px;width:min(980px,96vw);max-height:90vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.3)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <b style="font-size:14px">생산정보 — ${esc(np.node)}</b>
+          <span style="font-size:10px;background:#0f766e;color:#fff;border-radius:8px;padding:1px 7px">생산 ST축${srcNm?' · '+esc(srcNm):''}</span>
+          ${CM?'<span style="font-size:10px;background:#b8860b;color:#fff;border-radius:8px;padding:1px 7px">복사 편집 · 최종저장 때 등록</span>':''}
+          <div style="flex:1"></div><span class="ip-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
+        <div style="font-size:11px;color:#0f766e;background:#e6f2f0;border:1px solid #b7ddd6;border-radius:6px;padding:5px 8px;margin-bottom:8px">
+          생산 ST축(생산계획 편성이 소비 · 원가 공정과 별개). 라우팅 원천 <b>PR_M_ITEM_PROC_GAGONG</b> · 저장=nx.${CM?' <b>복사 편집 모드</b> — 원본을 불러와 <b>수정 가능</b>. [편집 반영] 후 상단 [저장]으로 새 품번에 등록됩니다(취소하면 무등록).':''}</div>
+        ${body}
+        <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+          <button class="btn ip-x" style="padding:4px 14px">닫기</button>
+          <button class="btn" id="ip-save" style="padding:4px 16px;background:#0f766e;color:#fff">${CM?'편집 반영':'저장'}</button></div>
+      </div></div>`;};
+  const saveItemProd=async()=>{const np=iprodD;if(!np)return;
+    const proc=(np.proc||[]).filter(r=>(+r.proc_seq||0)>0);
+    const seqs=new Set();for(const r of proc){const s=+r.proc_seq;if(seqs.has(s)){alert('공정 순서 중복: '+s);return;}seqs.add(s);
+      if(!(+r.s_work_code)){alert('단품공정은 필수입니다(STEP6 편성 키). 순서 '+s);return;}}
+    if(np.copyMode){   // ★복사모드=메모리 반영(서버 저장 안 함). 최종 [저장](saveNew) 때 새 품번으로 등록.
+      iprodEdit={proc:np.proc,assy:np.assy,opts:np.opts};
+      iprodModal=false;iprodD=null;alert(`생산정보 편집 반영 ✔ (생산공정순서 ${proc.length}행)\n상단 [저장]으로 새 품번에 등록됩니다.`);draw();return;}
+    try{const r=await fetch(`${API}/api/prodinfo/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({item:np.node,route_id:0,rows:proc,user:'웹'})});
+      const j=await r.json();if(!j.ok){alert('생산공정순서 저장 실패: '+(j.detail||''));return;}
+      let amsg='';
+      try{const ar=await fetch(`${API}/api/prodinfo/assy/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({item:np.node,user:'웹',rows:(np.assy||[]).map(x=>({a_work_code:x.a_work_code,work_qty:x.work_qty}))})});
+        const aj=await ar.json();if(aj.ok)amsg=` · 조립 ${aj.saved}건`;}catch(e){}
+      iprodModal=false;iprodD=null;alert(`생산정보 저장 ✔ ${np.node} · 생산공정순서 ${j.saved}행${amsg}`);draw();
+    }catch(e){alert('저장 오류: '+e.message);}};
+  const bindItemProd=()=>{if(!iprodModal||!iprodD)return;const np=iprodD;const g=id=>c.querySelector(id);   // ★g는 draw 로컬이라 여기 로컬 정의(ReferenceError 방지)
+    // 생산공정순서 셀(텍스트/숫자/셀렉트): state만 갱신(재렌더X → 포커스 유지)
+    c.querySelectorAll('#iprod-bg .ipf').forEach(el=>{el.oninput=el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(!np.proc[i])return;
+      let v=el.value; if(el.type==='number')v=(v===''?null:v); np.proc[i][k]=v;};});
+    // 작업처 변경 → 캐스케이드(파트/공정/설비 재필터·무효값 초기화) → 재렌더
+    c.querySelectorAll('#iprod-bg .ipwc').forEach(el=>{el.onchange=()=>{const i=+el.dataset.i;const wc=el.value;const r=np.proc[i];if(!r)return;
+      r.work_code=wc; const O=np.opts||{parts:[],singles:[],machs:[]};
+      if(wc){if(!(O.parts||[]).some(p=>p.code===r.gagong_proc_code&&(!p.work_code||p.work_code===wc)))r.gagong_proc_code='';
+        if(!(O.singles||[]).some(s=>(''+s.code)===(''+r.s_work_code)&&(!s.work_code||s.work_code===wc)))r.s_work_code=0;
+        if(!(O.machs||[]).some(m=>m.code===r.mach_code&&(!m.work_code||m.work_code===wc)))r.mach_code='';}
+      draw();};});
+    c.querySelectorAll('#iprod-bg .ip-pdel').forEach(el=>el.onclick=()=>{np.proc.splice(+el.dataset.i,1);draw();});
+    // 조립 공정수 입력 → ST 셀 즉시 갱신(재렌더X)
+    c.querySelectorAll('#iprod-bg .ipaq').forEach(el=>{el.oninput=()=>{const i=+el.dataset.i;if(!np.assy[i])return;np.assy[i].work_qty=el.value;
+      const st2=c.querySelector(`#iprod-bg .ipast[data-i="${i}"]`);if(st2)st2.textContent=((+el.value||0)*(+np.assy[i].work_st||0)).toLocaleString(undefined,{maximumFractionDigits:3});};});
+    c.querySelectorAll('#iprod-bg .ip-x').forEach(el=>el.onclick=()=>{iprodModal=false;iprodD=null;draw();});
+    {const a=g('#ip-add');if(a)a.onclick=()=>{const mx=(np.proc||[]).reduce((m,r)=>Math.max(m,+r.proc_seq||0),0);np.proc.push({proc_seq:mx+1,work_code:'P2',gagong_proc_code:'',s_work_code:0,mach_code:'',work_qty:1,ready_st:0,mach_ct:0,inwon:0,human_st:0,tot_st:0,jp_proc_method:'J',lt_hr:0,gagong_proc_seq:1,work_desc:'',part_desc:'',s_work_desc:'',mach_desc:''});draw();};}
+    {const s=g('#ip-save');if(s)s.onclick=saveItemProd;}
+    {const bg=g('#iprod-bg');if(bg)bg.onclick=e=>{if(e.target===bg){iprodModal=false;iprodD=null;draw();}};}};
   const loadNaeProc=async(node,openModal)=>{naeSel=node;naeProcD=null;naeProcLoading=true;if(openModal)naeModal=true;draw();  // ★즉시 로딩모달 표시(사외망 지연 대비)
     const enc=encodeURIComponent(node);
     // ★4개 fetch 순차(≈9초)→병렬(≈3초). 사외망 DB 지연시 체감 크게 개선
@@ -2023,6 +2212,7 @@ SCREEN.unifybom=(c,ro)=>{
       if(openModal)naeModal=true;
     }catch(e){naeProcD={node,own:[],carriers:[],isAssy:false,weldPoints:[],error:e.message};}draw();};
   const saveNaeProc=async()=>{if(!naeSel||!naeProcD)return;
+    if(isNew&&copySource){alert('복사 편집 중입니다. 팝업에서 직접 저장하지 마세요.\n상단 [저장]으로 신규 품번을 등록하면 원본의 공정·용접·관경이 새 품번으로 함께 복사됩니다.\n(취소/닫으면 아무것도 등록되지 않습니다)');return;}  // ★copy 모드=조기등록·원본오염 차단. 최종저장(copyproc)만 기록.
     const pick=arr=>arr.filter(p=>(+p.work_qty)>0).map(p=>({proc_code:p.proc_code,work_qty:+p.work_qty,prod_uph:+p.prod_uph,calc_gubun:p.calc_gubun||'3'}));
     const payload={node:naeSel,own_procs:pick(naeProcD.own||[]),carriers:(naeProcD.carriers||[]).map(cr=>({weld_item:cr.weld_item,loss_factor:+cr.loss_factor||1.5,procs:pick(cr.rows||[])}))};
     try{const r=await fetch(`${API}/api/cost/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -2337,7 +2527,7 @@ SCREEN.unifybom=(c,ro)=>{
       if(isSel)return `<td><select class="ce cesel" data-i="${i}" data-k="${k}" style="width:78px" title="${esc(codeName(grp,v))}"><option value="">-</option>${(codes[grp]||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==v?'selected':''}>${esc(o.name)}</option>`).join('')}</select></td>`;
       if(t==='vendor')return `<td><input class="ce cevendor" list="bm-vendordl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="${esc(l.cust_name||'코드/명')}" style="width:88px" title="${esc(l.cust_name||'')}"></td>`;
       if(t==='proc')return `<td><select class="ce cesel" data-i="${i}" data-k="${k}" style="width:58px" title="${esc(procMap[v]||v||'')}"><option value="">-</option>${procs.map(p=>`<option value="${esc(p.code)}" ${p.code===v?'selected':''}>${esc(p.name)}</option>`).join('')}</select></td>`;
-      if(t==='item')return `<td><input class="ce ceitem" list="bm-itemdl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="검색·선택" style="width:120px"></td>`;
+      if(t==='item')return `<td style="white-space:nowrap"><input class="ce ceitem" list="bm-itemdl" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" placeholder="검색·선택" style="width:110px">${l._isnew?'<span style="background:#1c7c3a;color:#fff;font-size:9px;padding:1px 4px;border-radius:3px;margin-left:2px" title="신규 품목 — 저장 시 품목마스터에 등록">신규</span>':''}</td>`;
       return `<td><input class="ce" data-i="${i}" data-k="${k}" value="${esc(''+(v==null?'':v))}" style="width:90px"></td>`;};
     c.innerHTML=`<div class="bmv-root" style="display:flex;flex-direction:column;height:100%">
      <div class="bmv-head" style="flex:0 0 auto">
@@ -2377,6 +2567,8 @@ SCREEN.unifybom=(c,ro)=>{
      ${(editMode&&isNew)?`<div class="page-sub" style="color:#1c7c3a;font-weight:700">＋ 신규 등록 편집: 품번 <b>${esc(item)}</b> · ${esc(name||'(품명 미입력)')} — 구성 그리드 + 아래 용접공정 입력 후 [저장]</div>
      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 8px;margin:2px 0 4px;background:#f2fbf4;border:1px solid #bfe6c8;border-radius:8px;font-size:12px">
        <b style="color:#1c7c3a">📋 제품 마스터</b>
+       <label class="tl">품번<span style="color:#c0392b">*</span></label><input class="nm-item" value="${esc(item)}" placeholder="새 품번(신규 BOM 번호)" style="width:160px;font-weight:700;color:#1c47a0" title="새로 등록할 품번 — 여기에 신규 품번을 입력하세요">
+       <label class="tl">품명</label><input class="nm-name" value="${esc(name)}" placeholder="품명" style="width:170px">
        <label class="tl">대분류<span style="color:#c0392b">*</span></label><select class="nm-fld" data-k="lgroup" style="width:130px"><option value="">-</option>${(codes.lgroup||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.lgroup?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
        <label class="tl">소분류</label><select class="nm-fld" data-k="sgroup" style="width:130px"><option value="">-</option>${(codes.sgroup||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.sgroup?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
        <label class="tl">생산구분</label><select class="nm-fld" data-k="make_type" style="width:110px"><option value="">-</option>${(codes.make_type||[]).map(o=>`<option value="${esc(o.code)}" ${o.code==newMaster.make_type?'selected':''}>${esc(o.name)}</option>`).join('')}</select>
@@ -2392,9 +2584,12 @@ SCREEN.unifybom=(c,ro)=>{
      ${item&&!loading?((viewTree&&!editMode)?`
        ${routeSel>0?routeTreeTable():bmFlat()}`
      :`<div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto"><table class="tbl bm-tbl"><thead><tr><th>#</th>${COLS.map(cc=>`<th>${cc[1]}</th>`).join('')}${editMode?'<th>삭제</th>':''}</tr></thead>
-       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${editMode?`<div style="margin-top:10px;padding:9px;border:1px dashed #8e44ad;border-radius:8px;background:#faf7ff"><button class="btn" id="bm-assyproc" style="background:#8e44ad;color:#fff">✎ 조립공정 입력 (관경별 용접봉 %유형·다종 · 공정 · 체결)</button> <span style="font-size:11px;color:var(--muted)">내부원가와 동일한 매트릭스 팝업에서 입력·저장 (용접봉=nx.proc_weld, 공정=nx.routing). ${isNew?'신규 등록':'이 품번의 공정·용접봉 편집'}</span></div>`:''}`):''}
+       <tbody>${lines.map((l,i)=>(isW(l.item_name)&&!showWeld)?'':`<tr${isW(l.item_name)?' style="background:#f3eefa"':''}><td class="center mut">${i+1}</td>${COLS.map(col=>cell(l,i,col)).join('')}${editMode?`<td class="center"><span class="bm-del" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span></td>`:''}</tr>`).join('')||`<tr><td colspan="${COLS.length+(editMode?2:1)}" class="empty">구성 없음${editMode?' — ＋행추가로 등록':''}</td></tr>`}</tbody></table></div>${editMode?`<div style="margin-top:10px;padding:9px;border:1px dashed #8e44ad;border-radius:8px;background:#faf7ff;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+       <button class="btn" id="bm-assyproc" style="background:#8e44ad;color:#fff" title="용접봉 재료비 + 가공비(작업ST×임율) + 체결 = 원가(가공비). 저장처 nx.proc_weld·nx.routing">✎ 원가 공정 (용접봉·가공비·체결)</button>
+       <button class="btn" id="bm-itemprod" style="background:#0f766e;color:#fff" title="생산공정순서·표준ST — 생산계획 편성(STEP6)이 소비하는 생산 ST축. 저장처 nx.prodinfo_proc(품번키). 원가와 별개">✎ 생산정보 (생산공정순서·ST)</button>
+       <span style="font-size:11px;color:var(--muted)">★두 축 분리 — <b style="color:#8e44ad">원가</b>=가공비 산정 / <b style="color:#0f766e">생산정보</b>=편성용 생산 ST. ${isNew?'신규 등록(복사=원본 미리보기·최종저장 때 복사)':'이 품번 편집'}</span></div>`:''}`):''}
      </div>
-     ${naeModal?naeProcModal():''}
+     ${naeModal?naeProcModal():''}${iprodModal?itemProdModal():''}
      ${(wuBusy||wuData)?wuModalHtml():''}
      ${bomCss()}</div>`;
     const qi=c.querySelector('#bm-q');
@@ -2409,17 +2604,19 @@ SCREEN.unifybom=(c,ro)=>{
     {const w2=c.querySelector('#nae-weld');if(w2)w2.onclick=()=>{showWeld=!showWeld;draw();};}  // 평면표(=내부원가) 용접봉 토글
     // 평면표 [✎] = 공정입력 팝업(제품=조립공정 용접/포장/체결 · 절삭부품=가공공정) — 내부원가와 공유
     c.querySelectorAll('.nae-edit-btn').forEach(el=>el.onclick=e=>{e.stopPropagation();loadNaeProc(el.dataset.node,true);});
-    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 조립공정 여는 중…';loadNaeProc(item,true);};}  // ★신규등록 조립공정 = 내부원가와 동일 팝업(클릭 즉시 피드백)
+    {const ap=c.querySelector('#bm-assyproc');if(ap)ap.onclick=()=>{ap.disabled=true;ap.textContent='⏳ 원가 공정 여는 중…';loadNaeProc((isNew&&copySource)?copySource:item,true);};}  // ★원가 공정 팝업. 복사모드=원본 공정·용접 표시(읽기전용·최종저장 때 복사)
+    {const ip=c.querySelector('#bm-itemprod');if(ip)ip.onclick=()=>{ip.disabled=true;ip.textContent='⏳ 생산정보 여는 중…';openItemProd();};}  // ★생산정보(생산 ST) 팝업. 복사모드=원본 미리보기
     if(naeModal)wireProcModal();
+    if(iprodModal)bindItemProd();
     const cp=c.querySelector('#bm-copy');if(cp)cp.onclick=doCopy;
     // 품번삭제 — 레거시 방식(구성 제거 후 품번 삭제). 자식으로 사용중이면 백엔드가 차단.
     const dbtn=c.querySelector('#bm-del');if(dbtn)dbtn.onclick=async()=>{
       if(!item)return;
-      if(!confirm(`품번 [${item}] ${name||''} 삭제할까요?\n\n· 구성(자식 ${lines.length}건) 관계 제거\n· 품번을 품목마스터에서 삭제\n· 다른 BOM이 이 품번을 자식으로 쓰면 삭제 안 됨\n\n되돌릴 수 없습니다.`))return;
+      if(!confirm(`품번 [${item}] ${name||''} 삭제할까요?\n\n★사용처 전수 확인 후 삭제(통제):\n· BOM 자식·모델BOM·조달경로·생산계획·자재소요·주문 중 하나라도 쓰면 삭제 차단\n· 미사용이면 파생 전부 정리(BOM·평면·원가공정·생산정보·조달경로 R01/R02)\n\n되돌릴 수 없습니다.`))return;
       try{const r=await fetch(`${API}/api/bom/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item})});
         const j=await r.json();
-        if(!j.ok){alert('삭제 불가:\n'+(j.errors||['오류']).join('\n'));return;}
-        alert(`삭제 완료 — 품번 ${j.item} (구성 ${j.lines_removed||0}건 제거)`);
+        if(!j.ok){alert('삭제 불가 — 사용 중입니다:\n\n'+(j.errors||['오류']).join('\n')+'\n\n위 사용처를 먼저 정리한 뒤 삭제하세요.');return;}
+        alert(`삭제 완료 — ${j.item}\n${j.summary||('구성 '+(j.lines_removed||0)+'건 제거')}`);
         item='';name='';lines=[];editMode=false;naeD=null;naeFor='';silD=null;silFor='';results=[];query='';draw();
       }catch(e){alert('삭제 실패: '+e.message);}};
     // 역전개(where-used) 버튼·모달
@@ -2437,6 +2634,8 @@ SCREEN.unifybom=(c,ro)=>{
     if(editMode&&isNew)bindWeld();
     c.querySelectorAll('.fq').forEach(el=>el.oninput=()=>{const i=+el.dataset.i;if(fastenD&&fastenD.rows[i])fastenD.rows[i].qty=+el.value||0;});  // 신규등록 체결 횟수 입력
     c.querySelectorAll('.nm-fld').forEach(el=>el.onchange=()=>{newMaster[el.dataset.k]=el.value;});  // 제품 마스터속성 write-back
+    {const ni=c.querySelector('.nm-item');if(ni)ni.oninput=()=>{item=ni.value.trim().toUpperCase();};}  // ★새 품번 직접 입력/수정(신규 BOM 번호)
+    {const nn=c.querySelector('.nm-name');if(nn)nn.oninput=()=>{name=nn.value;};}                       // 품명 직접 입력
     const bk=c.querySelector('#bm-back');if(bk)bk.onclick=()=>{const p=navStack.pop();if(p)load(p);};
     c.querySelectorAll('.bm-trow').forEach(el=>el.onclick=()=>{if(item)navStack.push(item);load(el.dataset.sub);});
     const ed=c.querySelector('#bm-edit');if(ed)ed.onclick=()=>{editMode=true;viewTree=false;draw();};
@@ -2444,7 +2643,7 @@ SCREEN.unifybom=(c,ro)=>{
       try{const r=await fetch(`${API}/api/item/cutgubun`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_code:item,cut_gubun:v})});const j=await r.json();
         if(j&&(j.ok||j.updated>=0)){itemCut=v;const rc=c.querySelector('.rowcount');if(rc&&item)rc.innerHTML=`<b>${esc(item)}</b> · ${esc(name)} · ${lines.length}구성${itemCut?` · <b style="color:#1c47a0">${esc(itemCut)}</b>`:''}`;}
         else alert('구분 저장 실패');}catch(e){alert('구분 저장 오류: '+e.message);}};}
-    const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{if(isNew){isNew=false;item='';name='';lines=[];weldRows=[];editMode=false;draw();}else load(item);};
+    const cx=c.querySelector('#bm-cancel');if(cx)cx.onclick=()=>{if(isNew){isNew=false;item='';name='';lines=[];weldRows=[];iprodEdit=null;editMode=false;draw();}else load(item);};   // ★취소=생산정보 편집분도 버림(무등록)
     const add=c.querySelector('#bm-add');if(add)add.onclick=addRow;
     const sv=c.querySelector('#bm-save');if(sv)sv.onclick=(isNew?saveNew:save);
     const xls=c.querySelector('#bm-xls');if(xls)xls.onclick=()=>{
@@ -2484,8 +2683,13 @@ SCREEN.unifybom=(c,ro)=>{
             MK.forEach(k=>{L[k]=(d[k]==null?'':d[k]);});                 // 있으면 값·없으면 '' (잔류 방지)
             if(d.in_cust){L.in_cust=d.in_cust;L.cust_name=d.cust_name||'';}else{L.in_cust='';L.cust_name='';}
             if(L.net_weight===''||L.net_weight==null){const w=calcWeight(L);if(w!=null)L.net_weight=w;}  // 마스터 중량 없고 동관 치수 있으면 자동계산
-          }else{  // 마스터 미등록 신규 품번 → 스펙 초기화(이전 품번 값 잔류 방지)
-            L.item_name=itemNames[code]||'';L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';
+          }else{  // 마스터 미등록 신규 품번 → ★인라인 신규 등록 제안(P2)
+            const known=itemNames[code]||'';
+            L.spec='';MK.forEach(k=>L[k]='');L.in_cust='';L.cust_name='';L._isnew=false;
+            if(known){L.item_name=known;}   // 검색목록엔 있으나 iteminfo 미발견(휴면 등) → 이름만
+            else if(confirm(`「${code}」는 등록되지 않은 신규 품번입니다.\n신규 품목으로 등록하시겠습니까?\n(확인 후 품명·재질·치수·단위·대분류 등을 이 행에서 직접 입력 → 저장 시 품목마스터에 등록)`)){
+              L.item_name=''; L._isnew=true; L.unit=L.unit||'EA';   // ★배지만 표시·품명 등은 그리드에서 직접 입력
+            }else{ L.child_item=''; L.item_name=''; el.value=''; }   // 취소=코드 비움(오입력)
           }
           draw();
         }catch(e){}};
@@ -2594,7 +2798,7 @@ SCREEN.subvariant=(c)=>{
       if(j.error){st.matErr=j.error;st.mat=[];}else{st.mat=j.rows||[];if(!st.selNm)st.selNm=j.item||'';}}catch(e){st.matErr='내부원가 조회 실패';st.mat=[];}
     st.routeTarget=item;st.routeTargetNm=st.selNm;await loadRoutes();st.loading=false;draw();};
   const loadRoutes=async()=>{try{const r=await fetch(`${API}/api/sourcing/routes?item=${encodeURIComponent(st.routeTarget)}&show_unapproved=1&for_profile=0`);
-      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;}catch(e){st.routes=[];}};
+      const j=await r.json();st.routes=j.routes||[];st.gopts=j.gubun_opts||[];st.lgopts=j.line_gubun_opts||[];st.nextNo=j.next_route_no||null;st.nxNew=!!j.nx_new;}catch(e){st.routes=[];}};   // ★nxNew=웹 신규 품목 → R01 수정가능
   const vSearch=t=>{clearTimeout(st.acT);st.acT=setTimeout(async()=>{try{const r=await fetch(`${API}/api/item/vendorsearch?q=${encodeURIComponent(t)}`);
       st.vopts=(await r.json()).rows||[];const dl=c.querySelector('#sv-vdl');if(dl)dl.innerHTML=st.vopts.map(v=>`<option value="${esc(v.code)}">${esc(v.code)} · ${esc(v.name)}</option>`).join('');}catch(e){}},180);};
   const routeById=id=>st.routes.find(r=>r.route_id===id)||(id===0?st.routes.find(r=>r.baseline):null);
@@ -2629,7 +2833,7 @@ SCREEN.subvariant=(c)=>{
       ${r.baseline?'<span style="color:#8aa0bd;font-size:10px">기준선</span>':(cur?'<span style="background:#1c7c3a;color:#fff;border-radius:8px;padding:0 7px;font-size:10px">현행</span>':apBadge(r))}
       <div style="flex:1"></div>
       ${cur
-        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${canW?` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff">수정</button>`:''}`
+        ? `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="view" style="padding:1px 8px;font-size:11px">상세</button>${(canW&&st.nxNew)?` <button class="btn sv-editcur" style="padding:1px 8px;font-size:11px;background:#1c47a0;color:#fff" title="웹 신규 품목의 R01 — 수정 가능">수정</button>`:(cur&&!st.nxNew?`<span style="color:#8aa0bd;font-size:10px" title="레거시 실사용 BOM 파생 — 보호(읽기전용)">🔒 현행 보호</span>`:'')}`
         : `<button class="btn sv-open" data-rid="${r.route_id}" data-mode="${canW?'edit':'view'}" style="padding:1px 8px;font-size:11px">${canW?'수정':'상세'}</button>${canW?` <button class="btn sv-appr" data-rid="${r.route_id}" data-on="${r.approve_flag?0:1}" style="padding:1px 8px;font-size:11px;${r.approve_flag?'':'background:#1c7c3a;color:#fff'}">${r.approve_flag?'승인취소':'승인'}</button> <button class="btn sv-rdel" data-rid="${r.route_id}" style="padding:1px 8px;font-size:11px;color:#c0392b">삭제</button>`:''}`}
     </div>`;};
   const routesPanel=()=>{
@@ -2716,7 +2920,8 @@ SCREEN.subvariant=(c)=>{
       return `<div class="sp-drop" data-sub="${dsub}" style="border:1px dashed ${color}66;border-radius:7px;padding:5px 7px;margin:0 0 6px ${(depth||0)*16}px;background:#fff">
         <div style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap"><b style="color:${color};white-space:nowrap">${esc(label)}</b><span style="color:#8a94a6;font-size:10px;white-space:nowrap">노드공수 ${nfq(ng)}</span>${dsub>0?`<span style="color:#8a94a6;font-size:10px;margin-left:4px">SUB 구분</span>${gubunSel(subs.find(s=>s.line_id===dsub)||{line_id:dsub,gubun:''})}`:''}<div style="flex:1"></div>
           ${dsub>0?`<button class="btn sp-ndissolve" data-sub="${dsub}" title="이 SUB 해체 — 하위부품 ASSY(레벨0) 복귀 · 비종속 공정/용접은 ASSY 이관(공수합 보존)" style="padding:0 8px;font-size:10px;background:#c0392b;color:#fff;white-space:nowrap;flex-shrink:0">해체</button>`:''}
-          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff;white-space:nowrap;flex-shrink:0">${dsub>0?'SUB':'ASSY'} 공정수정</button></div>
+          <button class="btn sp-nedit" data-node="${esc(node)}" data-sub="${dsub}" title="${dsub>0?'SUB':'ASSY'} 노드 원가 공정편집 — 관경별 용접 + 공정별 작업ST 팝업(노드 스코프·개발 원가축 sourcing_route_proc)" style="padding:1px 9px;font-size:10px;background:${color};color:#fff;white-space:nowrap;flex-shrink:0">원가 공정</button>
+          <button class="btn sp-nprod" data-node="${esc(node)}" title="${dsub>0?'SUB':'ASSY'} 노드 생산정보 편집 — 생산공정순서·ST(생산 ST축 route_proc_gagong · 생산계획 편성이 소비). R02 필수 게이트." style="padding:1px 9px;font-size:10px;background:#0f766e;color:#fff;white-space:nowrap;flex-shrink:0">생산정보</button></div>
         ${np2.map(p=>`<div draggable="true" class="sp-drag" data-lid="${p.line_id}" style="font-size:11.5px;padding:2px 0 2px 14px;color:#33507d;cursor:grab;display:flex;align-items:center;gap:4px" title="드래그: 왼쪽 보관함 또는 다른 SUB로 이동"><span style="color:#b9c2d0">⠿</span>${esc(p.child_item)} <span style="color:#8a94a6;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.child_name||'')}</span>${cutBadge(p.child_item)}<span style="flex:1"></span>${gubunSel(p)}</div>`).join('')||(kids.length?'':'<div style="color:#8a94a6;font-size:10.5px;padding-left:14px">부품 없음 — 왼쪽 보관함에서 드래그</div>')}
         <div class="sp-newsub" data-parentsub="${dsub}" style="border:${dsub>0?'1px':'2px'} dashed #a678d0;border-radius:${dsub>0?'5px':'8px'};padding:${dsub>0?'4px 8px':'10px 8px'};text-align:center;color:#8e44ad;font-size:${dsub>0?'10px':'12.5px'};font-weight:600;background:#f6f0fc;cursor:copy;margin:6px 0;${dsub>0?'':'min-height:38px;display:flex;align-items:center;justify-content:center'}">${dsub>0?'➕ 서브 안에 중첩 SUB로 묶기':'➕ 부품을 여기로 드래그 → 새 SUB로 묶기 (레벨1)'}</div>
         ${kids.map(s=>nodeBox((s.sub_item||s.child_item),'▸ SUB '+(s.sub_item||s.child_item),'#8e44ad',s.line_id,memb(s.line_id),(depth||0)+1)).join('')}
@@ -2818,7 +3023,7 @@ SCREEN.subvariant=(c)=>{
     const fresh=ed&&!!d.fresh;   // 신규 미커밋 드래프트(가져오기로 방금 생성, [등록] 전) — 닫기=등록취소(롤백)
     const isCur=!R.baseline&&(R.current_flag||R.route_no===1);
     const footL=R.baseline
-      ? (canW?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff">현행 수정</button> <button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">이 현행으로 새 후보 만들기</button>`:'')
+      ? (canW?`${st.nxNew?`<button class="btn" id="dt-editcur" style="background:#1c47a0;color:#fff" title="웹 신규 품목 — R01 직접 수정 가능">현행 수정</button> `:'<span style="color:#8aa0bd;font-size:11px">🔒 레거시 실사용 BOM 파생 — 현행 보호(읽기전용). 대안은 새 후보로 →</span> '}<button class="btn" id="dt-newfromcur" style="background:#1c7c3a;color:#fff">이 현행으로 새 후보 만들기</button>`:'')
       : (fresh
           ? '<span style="color:#8aa0bd;font-size:11px">[등록]해야 후보가 확정됩니다 · 닫기/취소 = 등록 취소</span>'
           : (canW?(isCur
@@ -2829,8 +3034,8 @@ SCREEN.subvariant=(c)=>{
       ? `<button class="btn" id="dt-close">닫기</button>`
       : (fresh
           ? `<button class="btn" id="dt-cancel" style="color:#c0392b">✖ 취소</button> <button class="btn" id="dt-register" style="background:#1c7c3a;color:#fff">✔ 등록</button>`
-          : (isCur   // ★R01(현행) 편집=저장 없음(닫기만·실사용 BOM 자체라 저장 대상 아님) / Rnn 대안후보 수정=저장 유지
-              ? `<button class="btn" id="dt-close">닫기</button>`
+          : (isCur   // ★R01(현행): 레거시 미러=저장 없음(닫기만·실사용 BOM 보호) / 웹 신규 품목(nxNew)=저장 허용(우리가 만든 R01)
+              ? `${(canW&&ed&&st.nxNew)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff" title="웹 신규 품목의 R01 — 수정·저장 가능">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`
               : `${(canW&&ed)?`<button class="btn" id="dt-hsave2" style="background:#1b6ec2;color:#fff">💾 저장</button> `:''}<button class="btn" id="dt-close">닫기</button>`));
     return `<div class="pmodal-bg" style="position:fixed;inset:0;background:rgba(20,40,80,.42);z-index:9990;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1.5vh 10px">
       <div style="background:#fff;border-radius:12px;width:1320px;max-width:98vw;height:97vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(10,25,55,.4)">
@@ -2900,7 +3105,7 @@ SCREEN.subvariant=(c)=>{
      </div>
      ${st.msg?`<div class="page-sub" style="flex:0 0 auto;color:#1c7c3a">${esc(st.msg)}</div>`:''}
      </div>
-     ${newModal()}${detailModal()}${lineModal()}${weldModal()}${nodeProcModal()}
+     ${newModal()}${detailModal()}${lineModal()}${weldModal()}${nodeProcModal()}${nodeProdModal()}
      ${PROC_MODAL_CSS}
      <style>.sv-row.sel{background:#e8f0ff}.sv-row:hover{background:#eef4ff}.sv-mrow:hover{background:#f4f8ff}.sv-mrow.sel{outline:2px solid #1c7c3a;outline-offset:-2px;background:#eafaef}.sv-card:hover{filter:brightness(.985);box-shadow:0 2px 8px rgba(30,45,70,.08)}</style>`;
     const g=id=>c.querySelector(id);
@@ -2910,7 +3115,7 @@ SCREEN.subvariant=(c)=>{
     g('#sv-q').onchange=e=>{const v=e.target.value.trim();if(v&&st.slist.some(s=>s.item===v))open(v);};
     c.querySelectorAll('.sv-row').forEach(el=>el.onclick=()=>open(el.dataset.i));
     bindTree();bindBottom();
-    bindNewModal();bindDetailModal();bindLineModal();bindWeldModal();bindNodeProc();
+    bindNewModal();bindDetailModal();bindLineModal();bindWeldModal();bindNodeProc();bindNodeProd();
     fillDL();
   };
   const paintTree=()=>{const box=c.querySelector('#sv-tree');if(box){box.innerHTML=matTbl();bindTree();}};
@@ -2994,6 +3199,7 @@ SCREEN.subvariant=(c)=>{
       }catch(err){alert('드롭 오류: '+err.message);}};
     // 노드 [수정] → 관경별 용접 + 공정별 작업ST 팝업(노드 스코프: 레벨0=ASSY값 / 신규SUB=빈값)
     c.querySelectorAll('.sp-nedit').forEach(b=>b.onclick=e=>{e.stopPropagation();openNodeProc(b.dataset.node,b.dataset.sub==='0');});
+    c.querySelectorAll('.sp-nprod').forEach(b=>b.onclick=e=>{e.stopPropagation();openNodeProd(b.dataset.node);});
     // ★부품/SUB 구분(제작/매입/사급) 변경 → 저장(승인 리셋) → 패널 갱신
     c.querySelectorAll('.sp-gb').forEach(el=>{el.onmousedown=e=>e.stopPropagation();el.onclick=e=>e.stopPropagation();
       el.onchange=async e=>{e.stopPropagation();const lid=+el.dataset.lid,gb=el.value;
@@ -3106,6 +3312,66 @@ SCREEN.subvariant=(c)=>{
       onWeldCount:(d,v)=>{const val=+v||0;if(val>0)np.weldCounts[d]=val;else delete np.weldCounts[d];draw();},
       onWeldType:(v)=>{np.weldItem=v;},
     });};
+  // ===== ★생산정보(생산 ST축) route별 편집 모달 = prodinfo 생산공정순서(route_proc_gagong) · 원가 공정과 분리 =====
+  //   생산계획 편성(STEP6)이 소비. R02 생산정보 필수 게이트. route_id 스코프. 개발 원가 공정(sp-nedit)과 별개 버튼.
+  const openNodeProd=async(node)=>{const rid=(st.rd&&st.rd.route_id)||0;
+    st.nprod={node,rid,loading:true,rows:[],opts:null,src:''};draw();
+    try{
+      const [gj,oj]=await Promise.all([
+        fetch(`${API}/api/prodinfo/get?item=${encodeURIComponent(node)}&route_id=${rid}`).then(r=>r.json()),
+        fetch(`${API}/api/prodinfo/opts`).then(r=>r.json())]);
+      const rows=(gj.proc||[]).map(p=>({proc_seq:p.proc_seq,work_code:p.work_code||'',gagong_proc_code:p.gagong_proc_code||'',
+        s_work_code:p.s_work_code||0,tot_st:p.tot_st||0,lt_hr:p.lt_hr||0,gagong_proc_seq:p.gagong_proc_seq||1}));
+      st.nprod={node,rid,loading:false,rows,opts:oj,src:gj.proc_src||''};
+    }catch(e){st.nprod={node,rid,loading:false,rows:[],opts:null,src:'',error:e.message};}
+    draw();};
+  const nodeProdModal=()=>{const np=st.nprod;if(!np)return '';
+    const srcNm={route:'R02 저장됨',route_seed:'R01 시드(미저장)',nx:'품번키(nx)',legacy:'품번키(레거시)'}[np.src]||np.src;
+    const opts=np.opts||{works:[],parts:[],singles:[]};
+    const optH=(arr,val)=>`<option value="">-</option>`+(arr||[]).map(o=>`<option value="${esc(String(o.code))}" ${String(o.code)===String(val)?'selected':''}>${esc(o.name||o.code)}</option>`).join('');
+    const body=np.loading?`<div style="padding:30px;text-align:center;color:#888">로딩중…</div>`:
+      `<table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead><tr style="background:#e6f2f0"><th style="width:44px">순서</th><th>작업처</th><th>가공공정(파트)</th><th>단품공정 <span style="color:#c0392b">*</span></th><th style="width:66px">표준ST</th><th style="width:60px">LT(hr)</th><th style="width:30px"></th></tr></thead>
+        <tbody>${np.rows.map((r,i)=>`<tr>
+          <td><input class="npf" data-i="${i}" data-k="proc_seq" value="${esc(String(r.proc_seq))}" style="width:38px;text-align:center"></td>
+          <td><select class="npf" data-i="${i}" data-k="work_code" style="width:100%">${optH(opts.works,r.work_code)}</select></td>
+          <td><select class="npf" data-i="${i}" data-k="gagong_proc_code" style="width:100%">${optH(opts.parts,r.gagong_proc_code)}</select></td>
+          <td><select class="npf" data-i="${i}" data-k="s_work_code" style="width:100%">${optH(opts.singles,r.s_work_code)}</select></td>
+          <td><input class="npf" data-i="${i}" data-k="tot_st" value="${esc(String(r.tot_st))}" style="width:60px;text-align:right"></td>
+          <td><input class="npf" data-i="${i}" data-k="lt_hr" value="${esc(String(r.lt_hr))}" style="width:54px;text-align:right"></td>
+          <td><span class="np-del" data-i="${i}" style="color:#c0392b;cursor:pointer">✖</span></td></tr>`).join('')||`<tr><td colspan="7" style="text-align:center;color:#888;padding:12px">공정 없음 — ＋행추가</td></tr>`}</tbody></table>
+        <div style="margin-top:6px"><button class="btn" id="np-add" style="font-size:11px">＋ 행추가</button></div>`;
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1300;display:flex;align-items:center;justify-content:center" id="nprod-bg">
+      <div style="background:#fff;border-radius:10px;padding:16px;width:min(760px,94vw);max-height:88vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.3)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <b style="font-size:14px">생산정보 (생산공정순서·ST) — ${esc(np.node)}</b>
+          <span style="font-size:10px;background:#0f766e;color:#fff;border-radius:8px;padding:1px 7px">route ${np.rid}${srcNm?' · '+esc(srcNm):''}</span>
+          <div style="flex:1"></div><span class="np-x" style="cursor:pointer;font-size:18px;color:#888">✕</span></div>
+        <div style="font-size:11px;color:#0f766e;background:#e6f2f0;border:1px solid #b7ddd6;border-radius:6px;padding:5px 8px;margin-bottom:8px">
+          생산 ST축(생산계획 편성이 소비 · 개발 원가 공정과 별개). <b>단품공정</b>이 STEP6 편성 핵심키. R02는 이 생산정보가 있어야 편성됩니다.${np.src==='route_seed'?' <b>(R01 시드 — 저장 시 이 route로 등록)</b>':''}</div>
+        ${body}
+        <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+          <button class="btn np-x" style="padding:4px 14px">닫기</button>
+          <button class="btn" id="np-save" style="padding:4px 16px;background:#0f766e;color:#fff">저장</button></div>
+      </div></div>`;};
+  const saveNodeProd=async()=>{const np=st.nprod;if(!np)return;
+    const rows=(np.rows||[]).map(r=>({proc_seq:+r.proc_seq||0,work_code:r.work_code||'',gagong_proc_code:r.gagong_proc_code||'',
+      s_work_code:+r.s_work_code||0,tot_st:+r.tot_st||0,lt_hr:+r.lt_hr||0,gagong_proc_seq:+r.gagong_proc_seq||1})).filter(r=>r.proc_seq>0);
+    const seqs=new Set();for(const r of rows){if(seqs.has(r.proc_seq)){alert('공정 순서 중복: '+r.proc_seq);return;}seqs.add(r.proc_seq);
+      if(!r.s_work_code){alert('단품공정은 필수입니다(STEP6 편성 키). 순서 '+r.proc_seq);return;}}
+    try{const r=await fetch(`${API}/api/prodinfo/proc/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({item:np.node,route_id:np.rid,rows,user:'웹'})});
+      const j=await r.json();if(!j.ok){alert('생산정보 저장 실패: '+(j.detail||''));return;}
+      st.nprod=null;st.msg=`생산정보 저장 ✔ ${np.node} (${j.scope==='route'?'R02 route '+j.route_id:'품번키'}) ${j.saved}공정`;
+      if(st.rd&&st.rd.route_id)await loadRD(st.rd.route_id);else draw();
+    }catch(e){alert('저장 오류: '+e.message);}};
+  const bindNodeProd=()=>{if(!st.nprod)return;const np=st.nprod;const g=id=>c.querySelector(id);   // ★g는 draw 로컬이라 여기 로컬 정의(ReferenceError 방지)
+    c.querySelectorAll('#nprod-bg .npf').forEach(el=>{el.onchange=()=>{const i=+el.dataset.i,k=el.dataset.k;if(np.rows[i])np.rows[i][k]=el.value;};});
+    c.querySelectorAll('#nprod-bg .np-del').forEach(el=>el.onclick=()=>{np.rows.splice(+el.dataset.i,1);draw();});
+    c.querySelectorAll('#nprod-bg .np-x').forEach(el=>el.onclick=()=>{st.nprod=null;draw();});
+    {const a=g('#np-add');if(a)a.onclick=()=>{const mx=np.rows.reduce((m,r)=>Math.max(m,+r.proc_seq||0),0);np.rows.push({proc_seq:mx+1,work_code:'',gagong_proc_code:'',s_work_code:0,tot_st:0,lt_hr:0,gagong_proc_seq:1});draw();};}
+    {const s=g('#np-save');if(s)s.onclick=saveNodeProd;}
+    {const bg=g('#nprod-bg');if(bg)bg.onclick=e=>{if(e.target===bg){st.nprod=null;draw();}};}};
   // 🔍 BOM 검증 = 검증만(commit:0 → 롤백, 저장 안 함). 공수합=BASE·부품수=BASE·구성 확인. SUB 중복검사/재사용은 하지 않음(저장 시에만).
   const validateRoute=async(rid)=>{const item=st.routeTarget;
     try{

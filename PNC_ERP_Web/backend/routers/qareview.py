@@ -17,7 +17,7 @@
 from datetime import datetime
 from fastapi import APIRouter, Query, Body, HTTPException
 
-from common import _conn, _nx, _d6
+from common import _conn, _nx, _nx_tx, _d6
 
 router = APIRouter()
 
@@ -224,7 +224,7 @@ def qareview_delete(payload: dict = Body(...)):
     if not tgt:
         return {"ok": False, "deleted": 0, "skipped": skipped,
                 "msg": "레거시에서 작성된 일지는 웹에서 삭제할 수 없습니다."}
-    cn = _nx(); cur = cn.cursor()
+    cn = _nx_tx(); cur = cn.cursor()   # ★원자화(2026-08-31): 첨부(자식)+본문(부모) 2테이블 삭제 원자. 기존 rollback은 _nx(autocommit)라 무효였음(함정) — _nx_tx라야 실제 롤백.
     try:
         ph = ",".join("?" * len(tgt))
         cur.execute(f"DELETE FROM nx.PR_T_DAILY_ISSUE_REVIEW_FILE WHERE ISSUE_SEQ IN ({ph})", *tgt)

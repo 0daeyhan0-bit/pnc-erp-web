@@ -18,6 +18,9 @@
 2-a. **★성능 인덱스 재보장(2026-08-26 추가)** — 싱크 후 `_migration/sub_norm/nx_perf_maintain.py commit`(★경로 주의 — `_harness/` 아님. 2026-08-29 실행 중 헤맴) + `_migration/sub_norm/r_add_indexes.py --commit`(둘 다 멱등, 수초) 재실행. **거래=윈도우(DELETE+INSERT)라 인덱스 생존, 마스터=DROP+SELECT INTO면 유실** → 재보장으로 콜드조회 지연 방지. (실측 2026-08-26: 대부분 생존·plan_part_mat만 재생성. Phase3에서 sync에 결선 예정.)
 2-b. **★SUB 접미사 품명병기 재실행(2026-08-26 추가)** — 싱크 후 `_migration/sub_norm/r_sub_desc_suffix.py --commit`(멱등, 수초) 재실행. **마스터=전체재복사라 매 sync가 nx.PR_M_ITEM 품명을 라이브로 덮음** → 이 스크립트가 SUB(자도번) 품명 앞에 `[-{접미사}]` 재병기(원품명=라이브 직독, 프리픽스 누적 없음). 실측: 1,975건 병기·재실행 변경0. 사용자 확정=기존 서브품번 익숙(§D-1). **병행운영 중 유지**(레거시 신규 유입분 매일 재병기). ★양쪽 마스터(nx.PR_M_ITEM+nx.item) 대상. ⚠**컷오버 후엔 이 배치 중단**(레거시 신규 안 옴) → 신규 SUB은 nx 앱 생성 → **CRUD 저장경로가 접미사 자동부착해야 함**(§B-1 3-a, 미구현). 중량(_geom_weight)은 이미 CRUD 이사됨·접미사만 남음.
 2-c. **★nx.item 최신화 + 중량 재계산(2026-08-26 추가·순서 필수)** — 싱크 후 **① `r_item_sync.py --commit`**(nx.item 치수·재질·cost필드 ← 라이브 PR_M_ITEM·멱등) → **② `r_geom_weight.py --commit`**(net_weight=재질별 기하중량=레거시 f_get_weight3·cg='3'·멱등). **순서 필수**(치수 갱신 후 중량 재계산). nx.item(클린)은 미러 재복사 대상 아니라 별도 → 라이브 수정 자동반영 안 됨, 이 2단계가 병행운영 중 최신유지. **컷오버 이후엔 CRUD(item.py itemmaster_save·bom.py item_save)가 저장 시 net_weight 자동 재계산**(같은 공식 `common._geom_weight`)이라 편집분도 stale 없음. 실측: r_item_sync 79건·r_geom_weight 61건 갱신 후 재실행 0/0.
+2-d. **★백데이트 픽업(2026-08-31 신설 — 윈도우 밖 수정분)** — 싱크 후 `_migration/sub_norm/r_backdate_pickup.py --commit`(DRY 기본·멱등·PK 스코프). **`r_delta_sync` 는 최근 30일 윈도우만 재복사하므로 그보다 오래된 전표를 라이브에서 고치면 nx 에 영원히 안 들어온다.** `do_window` 의 자가치유는 **행수만** 비교해서 내용만 바뀐 경우를 못 잡는다(§ 매일유의 2번이 경고한 바로 그 케이스).
+     **실측 2026-08-31**: `PU_T_STOCK_MAINT` 2607 구간 **25행** 어긋나 recon RED — 11:26 김미진 님이 `w_pu_sale_010` 에서 7/30 전표를 손봤고 그중 **2건은 단가 정정(2,373.50→2,412.00)**, 나머지 23건은 감사컬럼만. **금액이 걸린 진짜 수정이라 놓치면 안 된다.** 픽업 후 recon GREEN(52/52).
+     전 거래테이블 DRY 스캔 = 11개 3,031행이 후보이나 recon RED 는 이 1개뿐이었다(나머지는 이미 일치) → **RED 난 테이블만 `--only` 로 최소침습** 반영. 한계: UPDATE_DATETIME/PK 없는 테이블은 스킵(보고함)·라이브 **삭제**분은 못 잡음(그건 recon 행수가 잡는다) → **최종 판정은 언제나 recon**.
 3. **다시 recon → GREEN 확인.** GREEN이면 그날 마이그 끝.
 4. **로그 남김** (recon 결과·타임스탬프).
 
@@ -25,10 +28,20 @@
 - ★**우리 편성 테이블 보호**: r_delta_sync는 **소문자 nx.plan_\*(우리 계획엔진 산출) 미접촉** — 계획 미러(대문자 PR_T_PLAN_\*)가 우리 nx.plan_* 덮어써 계획분 소실되지 않게. (위험: [[newerp-cutover-mirror-topology]] "nx>라이브 계획엔진분 덮어쓰기 소실".)
 - ★**행수 같아도 내용 다를 수 있음**(UPDATE 미반영): 건수 비교만으론 놓침 → **CHECKSUM_AGG로 감지**(PR/PU_T_MAT_STOCK_WH 사례).
 - ★**우연 일치 주의**: 특정 파라미터 엔드포인트가 "일치"여도 **테이블단위 대조가 진짜 lag를 드러냄**(planstatus 260817+ 창 우연일치 vs PART_MAT 실제 −2328행).
+- ★★**웹 입력분 소실 위험(2026-08-31 발견·현재 피해 0)**: `do_window` 는 최근 30일 구간을 **DELETE 후 라이브로 덮는다**. 그런데 백엔드는 `nx.PU_T_STOCK_MAINT` 에 **직접 INSERT/UPDATE** 한다(`stock.py`·`ready.py`·`procbc.py`·`prodsheet.py`·`dragprod.py`). ⟹ **웹으로 자재출고·생산실적을 쓰면 다음 아침 싱크가 그 행을 지운다**(MAINT_YMD 가 최근 30일 안이라 100% 걸린다).
+  **실측: 지금은 nx 에만 있는 행 0건 · web 표식 행 0건** = 아직 아무도 웹으로 안 넣어서 피해가 없을 뿐이다. 쓰기를 개시하는 순간 조용히 사라진다. ⟹ **웹 쓰기 개시 전에 반드시** ①제외(EXCLUDE) 편입 또는 ②웹 입력분 표식(INSERT_USER_ID='web') 보존 로직을 `do_window` 에 넣을 것. (§B-1 의 `do_full` TRUNCATE 위험과 같은 계열이나, 그쪽은 **컷오버 후** 위험이고 **이건 지금 매일** 돈다.)
+  ※`r_backdate_pickup` 은 안전하다 — 라이브와 JOIN 된 PK 만 지우므로 라이브에 없는 웹 입력분은 건드리지 않는다.
 - 원장(stock_ledger) 무삭제([[feedback-nx-ledger-no-mass-delete]]).
 
 ---
 
+## A-log. 매일 마이그 실행 로그
+
+| 일시 | 결과 | 비고 |
+|---|---|---|
+| 2026-08-31 20:2x (라이브 정지 후 야간) | **GREEN 52/52** | 6단계 완주. delta_sync 성공 96·차이 0·실패 0 · perf_maintain 생성 2/이미28/컬럼없어스킵 3 · sub_desc_suffix 1,975건 재병기(nx.item 변경 0) · r_item_sync 원가필드 32건+신규 1건 · r_geom_weight 11건. ★1차 recon 후 `PU_T_STOCK_MAINT` 만 RED(2607 25행) → **2-d 백데이트 픽업 신설**로 해소. ★부수 발견 = 웹 입력분 소실 위험(매일유의 참조·현재 피해 0). |
+
+---
 ## B. 컷오버할 때 꼭 해야 하는 것 (하드 전환 필수)
 
 > 트랜잭션 읽기는 병행운영 중 **라이브 유지**(사용자 1:1 대조용), 하드컷오버 시점에 **일괄 nx 미러전환**. 아래는 그 전환 전/시점에 반드시.
