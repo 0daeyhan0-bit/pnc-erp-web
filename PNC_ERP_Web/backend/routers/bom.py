@@ -850,7 +850,9 @@ def bom_delete(payload: dict = Body(...)):
     item = str(payload.get("item", "")).strip()
     if not item:
         raise HTTPException(400, "item(품번) 필요")
-    cn = _nx(); cur = cn.cursor()
+    # ★★원자성(데이터손실 사고 2026-08-31): 트랜잭션으로 전부-또는-전무. autocommit이면 _purge_item 중간실패 시
+    #   부분삭제가 커밋돼 마스터는 남고 BOM만 소실(실사고). 반드시 원자.
+    cn = _nx_tx(); cur = cn.cursor()
     try:
         cur.execute("SELECT 1 FROM nx.item WHERE item_code=?", item)
         if not cur.fetchone():
@@ -868,6 +870,8 @@ def bom_delete(payload: dict = Body(...)):
         _removed = {k: v for k, v in rm.items() if v}
         return {"ok": True, "item": item, "lines_removed": rm.get("bom_line", 0), "item_removed": rm.get("item", 0), "removed": _removed,
                 "summary": "삭제 완료 — " + (", ".join(f"{k} {v}" for k, v in _removed.items()) or "구성 없음")}
+    except Exception:
+        cn.rollback(); raise   # ★중간 실패 = 전체 롤백(부분삭제 방지)
     finally:
         cn.close()
 

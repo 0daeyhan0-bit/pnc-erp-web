@@ -343,7 +343,7 @@ def itemmaster_delete(payload: dict = Body(...)):
     codes = [str(x).strip() for x in (payload.get("codes", []) or []) if str(x).strip()]
     if not codes: return {"ok": True, "deleted": 0}
     from routers.bom import _usage_blockers, _purge_item   # 공용 가드/정리(순환import 회피 위해 지연import)
-    nx = _nx(); cur = nx.cursor()
+    nx = _nx_tx(); cur = nx.cursor()   # ★원자성(데이터손실 사고 2026-08-31): 트랜잭션. 중간실패=전체 롤백(부분삭제 방지)
     try:
         deleted = []; blocked = []
         for code in codes:
@@ -358,5 +358,7 @@ def itemmaster_delete(payload: dict = Body(...)):
             errs = [f"{b['code']} : 사용중이라 삭제 불가 — " + ", ".join(f"{u['where']}({u['detail']})" for u in b['usage']) for b in blocked]
             return {"ok": len(deleted) > 0, "deleted": len(deleted), "deleted_codes": deleted, "blocked": blocked, "errors": errs}
         return {"ok": True, "deleted": len(deleted), "deleted_codes": deleted}
+    except Exception:
+        nx.rollback(); raise
     finally:
         nx.close()
