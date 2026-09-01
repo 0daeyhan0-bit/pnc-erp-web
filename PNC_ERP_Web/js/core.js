@@ -2530,8 +2530,8 @@ const _mkMagam=(CFG)=>(c)=>{
        .sm-dlg-h .x{margin-left:auto;cursor:pointer;font-size:20px;opacity:.9}
        .sm-dlg-b{padding:14px 18px;overflow:auto;flex:1}
        .sm-dlg-f{padding:11px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;background:#fafcff}
-       .sm-it{font-size:12px;width:100%;border-collapse:separate;border-spacing:0}.sm-it th,.sm-it td{padding:3px 7px;border-bottom:1px solid var(--line);white-space:nowrap}.sm-it th{background:#f4f7fc;text-align:right}.sm-it th:nth-child(-n+3){text-align:left}
-       .sm-it thead th{position:sticky;top:0;z-index:3;box-shadow:inset 0 -1px 0 var(--line)}.sm-it tfoot td{position:sticky;bottom:0;background:var(--bg2,#f4f6fb);z-index:2}
+       .sm-it{font-size:12px;width:100%;border-collapse:separate;border-spacing:0}.sm-it th,.sm-it td{padding:3px 7px;border-bottom:1px solid #e3e9f2;border-right:1px solid #e9edf4;white-space:nowrap}.sm-it th:first-child,.sm-it td:first-child{border-left:1px solid #e9edf4}
+       .sm-it thead th{position:sticky;top:0;z-index:3;background:#eef3fb;text-align:center;font-weight:700;border-bottom:2px solid #9db4d4;box-shadow:0 1px 0 #9db4d4}.sm-it tfoot td{position:sticky;bottom:0;background:var(--bg2,#f4f6fb);z-index:2}
        .sm-it td.num{text-align:right;font-variant-numeric:tabular-nums}.sm-it input{width:90px;text-align:right;border:1px solid var(--line);border-radius:4px;padding:2px 5px}
        .sm-it tr.chg input{border-color:#2f6db3;background:#eef4ff;font-weight:700}.sm-it td.dpos{color:#1f8a5a}.sm-it td.dneg{color:#c0392b}
        .sm-adj{margin-top:14px;border:1px solid #cfe0ff;border-radius:8px;padding:10px 12px;background:#fbfdff}
@@ -2663,6 +2663,11 @@ const _mkMagam=(CFG)=>(c)=>{
   const topSection=()=>{
     const items=(detail&&detail.items)||[];const rdis=mClosed?'disabled':'';const _ck=crClick();
     const byMat={};items.forEach(it=>byMat[it.mat]=it);
+    // 인라인 변경사유(수정한 행 아래) — pEdit(품목)/dEdit(일자)에 rc/rd 바인딩
+    const _rsn=(t,mat,d,rc,rd)=>`<td></td>${t==='D'?'<td></td>':''}<td colspan="${t==='D'?7:8}" style="background:#fcfdff;padding:2px 7px 4px 20px">
+      <span class="mut" style="font-size:11px">↳ 변경사유</span>
+      <select class="inp sm-rc" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" style="width:auto;height:23px;font-size:12px;vertical-align:middle" ${rdis}><option value="">사유 선택</option>${reasons.map(r=>`<option value="${esc(r.code)}" ${r.code===(rc||'')?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
+      <input class="inp sm-rd" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" value="${esc(rd||'')}" placeholder="세부 사유(선택)" style="width:230px;height:23px;vertical-align:middle" ${rdis}></td>`;
     let rows='';
     if(view2==='item'){
       items.forEach(it=>{const fd=fdays(it);if(!fd.length)return;
@@ -2678,7 +2683,8 @@ const _mkMagam=(CFG)=>(c)=>{
           <td class="center">${esc(it.unit)||''}</td><td class="num">${num(qty)}</td><td class="num">${num(it.cost)}</td>
           <td class="num">${carried?'<span class="mut">-</span>':`<input class="tp-pc" data-mat="${esc(it.mat)}" type="number" step="any" value="${nc}" placeholder="${num(it.cost)}" ${rdis}>`}</td>
           <td class="num ${delta>0?'dpos':delta<0?'dneg':''}">${delta?won0(delta):''}</td>
-          <td class="num">${carried?'<b style="color:#b5651d">0</b>':won0(amt0)}</td></tr>`;});
+          <td class="num">${carried?'<b style="color:#b5651d">0</b>':won0(amt0)}</td></tr>`;
+        if(!carried&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost)rows+=`<tr class="sm-rsn">${_rsn('I',it.mat,'',pe.rc,pe.rd)}</tr>`;});
     }else{
       const flat=[];items.forEach(it=>(it.byday||[]).forEach(bd=>{if(inRange(bd.ymd))flat.push([it,bd]);}));
       flat.sort((a,b)=>a[1].d-b[1].d||Math.abs(b[1].amt)-Math.abs(a[1].amt));
@@ -2690,7 +2696,8 @@ const _mkMagam=(CFG)=>(c)=>{
           <td class="num">${num(bd.qty)}</td><td class="num">${num(bd.cost)}</td>
           <td class="num">${bd.carry?'<span class="mut">-</span>':`<input class="tp-dc" data-mat="${esc(it.mat)}" data-d="${bd.d}" type="number" step="any" value="${(de.nc!=null&&de.nc!=='')?de.nc:''}" placeholder="${num(bd.cost)}" style="width:78px" ${rdis}>`}</td>
           <td class="num ${e.delta>0?'dpos':e.delta<0?'dneg':''}">${e.delta?won0(e.delta):''}</td>
-          <td class="num">${bd.carry?'<b style="color:#b5651d">0</b>':won0(bd.amt)}</td></tr>`;});
+          <td class="num">${bd.carry?'<b style="color:#b5651d">0</b>':won0(bd.amt)}</td></tr>`;
+        if(!bd.carry&&de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost)rows+=`<tr class="sm-rsn">${_rsn('D',it.mat,bd.d,de.rc,de.rd)}</tr>`;});
     }
     const cols=view2==='item'
       ?`<th class="center" style="width:24px"></th><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`
@@ -2728,6 +2735,10 @@ const _mkMagam=(CFG)=>(c)=>{
       if(v===''){if(pEdit[mat]){delete pEdit[mat].nc;if(!pEdit[mat].nc)delete pEdit[mat];}}else{pEdit[mat]=Object.assign(pEdit[mat]||{rc:'',rd:''},{nc:+v});}drawModal();});
     m.querySelectorAll('.tp-dc').forEach(el=>el.onchange=()=>{const k=dkey(el.dataset.mat,+el.dataset.d),v=el.value.trim();dEdit[k]=dEdit[k]||{nc:'',nq:'',rc:'',rd:''};dEdit[k].nc=(v===''?'':+v);
       if((dEdit[k].nc===''||dEdit[k].nc==null)&&!dEdit[k].rc&&!(dEdit[k].rd||'').trim())delete dEdit[k];drawModal();});
+    // 인라인 변경사유(재렌더 없이 상태만 — 포커스·스크롤 유지)
+    const _rt=el=>el.dataset.t==='D'?dEdit[dkey(el.dataset.mat,+el.dataset.d)]:pEdit[el.dataset.mat];
+    m.querySelectorAll('.sm-rc').forEach(el=>el.onchange=()=>{const t=_rt(el);if(t)t.rc=el.value;});
+    m.querySelectorAll('.sm-rd').forEach(el=>el.oninput=()=>{const t=_rt(el);if(t)t.rd=el.value;});
     applyNameFilter(m);   // 재렌더 후 검색어 필터 재적용
   };
 
@@ -2761,9 +2772,8 @@ const _mkMagam=(CFG)=>(c)=>{
       <div class="sm-dlg-h"><b>${esc(mc.nm)}</b> <span style="opacity:.85">(${esc(mc.cc)}) · 마감 ${esc(ymToInput(ym))}</span>${mClosed?'<span class="sm-badge on" style="background:#fff;color:#2e7d32">🔒 마감완료</span>':''}<span class="x" id="sm-x">✖</span></div>
       <div class="sm-dlg-b">
         ${topSection()}
-        <div class="sm-adj">
-          <div style="font-weight:700;margin-bottom:4px">조정내역 <span style="color:var(--muted);font-weight:400;font-size:12px">(품목단가/일자별 단가·수량/총액 증감 · 사유 필수)</span></div>
-          ${adjRows||'<div class="mut" style="font-size:12px">단가·수량을 바꾸면 여기에 사유 입력란이 생깁니다.</div>'}
+        <div class="sm-adj" style="padding:6px 8px">
+          <div class="mut" style="font-size:11.5px;margin-bottom:3px">단가·수량은 위 표에서 변경하고, 변경한 행 아래 <b>변경사유</b>를 입력하세요.</div>
           ${amtAdjRows}
           ${(mClosed||!canW)?'':'<button class="btn sm-mini" id="sm-add-amt">＋ 총액 증감/차감(품목무관)</button>'}
         </div>
