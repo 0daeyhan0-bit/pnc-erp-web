@@ -3541,7 +3541,11 @@ SCREEN.lgsagub=(c)=>{
     const usedBiz=st.upBiz;
     try{const fd=new FormData();fd.append('file',file);
       const r=await fetch(`${API}/api/lgsagub/upload?biz=${encodeURIComponent(st.upBiz)}`,{method:'POST',body:fd});const j=await r.json();
-      if(!j.ok){st.msg='❌ '+(j.error||'실패')+(j.header_row?(' · 감지헤더: '+j.header_row.join(' | ')):'');}
+      // ★서버가 막은 이유를 그대로 보여준다(2026-09-01). 종전엔 j.ok 만 보고 '❌ 실패' 한 줄만 떴다 —
+      //   HTTPException 은 {detail:"..."} 로 오는데 j.ok 가 undefined 라 사유가 통째로 묻혔다.
+      //   사업부 오선택 차단이 근거(RAC품목 n·SAC품목 n)까지 담아 보내는데 화면엔 안 보였다.
+      if(r.status>=400){st.msg='❌ '+(j.detail||j.error||('요청 거부 HTTP '+r.status));}
+      else if(!j.ok){st.msg='❌ '+(j.error||'실패')+(j.header_row?(' · 감지헤더: '+j.header_row.join(' | ')):'');}
       else{const det=Object.entries(j.detected||{}).map(([k,v])=>`${k}=${v}`).join(', ');
         const ym=(j.by_ym||[]).map(x=>`${x.ym}:${wonI(x.amt)}원(${x.rows})`).join('  ');
         st.msg=`✅ [${usedBiz}] ${file.name} · ${j.rows}행 · 감지[${det}] · ${ym}`;}
