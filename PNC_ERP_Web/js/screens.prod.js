@@ -660,9 +660,17 @@ SCREEN.planupload=(c)=>{
     if(!upfile){alert('업로드할 엑셀 파일을 선택하세요.');return;}
     msg='업로드 중...';draw();
     const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(upfile);});
-    try{const r=await fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cr:upcr,b64})});
-      const j=await r.json();
-      if(j.ok){alert(`생산계획 UPLOAD 완료\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} · 총 ${nf(j.total)} (WO,일자) (구분 ${j.cr})`);upfile=null;load();return;}
+    // ★fname 을 함께 보낸다 — 서버가 `lg_xxx_MMDD` 날짜와 파일 안 일자축을 대조,
+    //   불일치면 **저장 전 409**. 사용자가 확인하면 force 로 재요청(2026-09-01).
+    const _post=(force)=>fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force})});
+    try{let r=await _post(false); let j=await r.json();
+      if(r.status===409){
+        if(!confirm('⚠ '+(j.detail||'업로드 날짜가 상이합니다.'))){msg='업로드를 취소했습니다 — 파일을 다시 확인하세요.';draw();return;}
+        r=await _post(true); j=await r.json();
+      }
+      if(j.ok){
+        alert(`생산계획 UPLOAD 완료${j.forced?'  (날짜 경고 무시)':''}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} · 총 ${nf(j.total)} (WO,일자) (구분 ${j.cr})`);upfile=null;load();return;}
       alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('업로드 실패: '+e);}
     msg='';draw();};

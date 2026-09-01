@@ -205,12 +205,48 @@ def _ensure_bom_snap(cur):
       INCLUDE(mat_code, USE_QTY_PR, except_flag, vir_item_flag)""")
 
 
+def _routing_edge_sync(cur):
+    """routing_edge 생산처(wc) 시드/싱크 — soyo.py:709 복사분(SQL 원문 동일).
+
+    모델: wc_live = 마스터(work_code || in_cust) 시드 · wc_user = 사용자 편집(NULL=미편집)
+          유효 wc = COALESCE(wc_user, wc_live)
+    ⟹ 미편집 엣지는 마스터 자동 추종, **편집 엣지는 보존**. 신규 엣지는 마스터 기준 INSERT.
+       그래서 편성마다 호출해도 사용자가 지정한 조달경로는 덮이지 않는다."""
+    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
+    cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
+    # ★2026-09-01: 실제 컬럼은 7개(parent_item·child_item·seq·route_id·wc·wc_live·wc_user)다.
+    #   종전 원본은 gubun·vendor_seed·src_except·src_sagub 를 넣어 500(42S22)이 났다
+    #   (함수가 만들어진 뒤 테이블이 슬림화됐는데 함수는 그대로였다).
+    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,route_id,wc_live,wc)
+      SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ, 1,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END,
+        CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END
+      FROM nx.v_pr_bom b
+      LEFT JOIN nx.item ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+      WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
+        AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
+    new_cnt = cur.rowcount
+    cur.execute("""UPDATE re SET re.wc_live = CASE WHEN it.work_code>'' THEN it.work_code ELSE ISNULL(it.in_cust,'') END
+      FROM nx.routing_edge re JOIN nx.item it ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item""")
+    cur.execute("UPDATE nx.routing_edge SET wc = ISNULL(NULLIF(LTRIM(RTRIM(wc_user)),''), wc_live)")
+    return int(new_cnt or 0)
+
+
 def _step7_sql(cur):
     P = _P
     _ensure_bom_snap(cur)          # ★BOM 물질화(뷰 반복평가 제거)
+    # ★★2026-09-01: routing_edge 를 **읽기 직전에 갱신**한다.
+    #   종전엔 `compose는 읽기만 — 시드/싱크는 별도` 였는데, 그 '별도'를 부르는 곳이
+    #   어디에도 없었다(`/api/routing/sync` 는 정의만 되고 호출 0건 · 화면 버튼도 없음).
+    #   결과: 마스터에서 작업처를 바꿔도 편성은 **옛 업체로 계속 발주**했다.
+    #     실측 — MJU62916122 등 11종 39행: 품목마스터·품목조회·조달프로파일·레거시는
+    #            전부 2096(미래정밀)인데 웹 소요만 2266(케이비)로 나갔다.
+    #   싱크는 `wc = COALESCE(wc_user, wc_live)` 라 **사용자 편집(wc_user)은 보존**하고
+    #   미편집분만 마스터를 추종하므로, 편성마다 돌려도 안전하다(설계 원래 의도).
+    _routing_edge_sync(cur)
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
-    #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
+    #   routing_edge 미등록 아이템은 마스터 폴백.
     #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
     cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust_code, c.prod_rate,
@@ -1529,6 +1565,15 @@ def _ensure_line_pull(cur):
     #   (SP 앞부분에서 ORG_* 를 PLAN_*/OUTPUT_* 로 백업해 두고 항상 원본에서 재계산)
     # ★라인마스터도 SP 와 동일하게 **APPLY_YMD <= ORG_PLAN_YMD 중 가장 이른 행**을 쓴다
     #   (SP: TOP 1 ... WHERE APPLY_YMD <= ORG_PLAN_YMD ORDER BY APPLY_YMD).
+    # ★★그레인 주의 (2026-09-01 재확인 — 이 설계를 바꾸지 말 것)
+    #   웹 plan_dtl 은 (제번,일자) 그레인이라 한 제번이 여러 날에 걸치면 2~3행이 된다
+    #   (실측 4,484제번 중 189개가 멀티행). 여기서는 **그 전 행을 각각 계산해 맵에 넣고**,
+    #   소비하는 쪽(_stepL_pull 등)이 `ROW_NUMBER() ... ORDER BY org` 의 rn=1 로
+    #   **가장 이른 계획일 것만** 골라 쓴다. 레거시 PR_T_PLAN_DTL 은 제번당 1행이라
+    #   그 ORG_PLAN_YMD 가 곧 웹 MIN(PLAN_YMD) 이다(실측 189/189 일치).
+    #   ⟹ plan_line_pull 을 레거시 PLAN_YMD 와 **행 단위로 직접 대조하면 안 된다.**
+    #      MAX 쪽 행이 섞여 "181건 불일치"처럼 보이지만, 소비 시점에는 걸러진다.
+    #      대조하려면 rn=1 로 좁힌 뒤 비교할 것.
     cur.execute("""SELECT d.WORK_ORDER, ISNULL(NULLIF(d.ORG_PLAN_YMD,''), d.PLAN_YMD),
              ISNULL(NULLIF(d.ORG_OUTPUT_HM,''), ISNULL(NULLIF(d.START_HM,''),'0800')),
              ISNULL(l.MAINT_DAY,0), ISNULL(l.MAINT_HHMM,''), RTRIM(ISNULL(d.LINE_NO,''))
