@@ -58,7 +58,10 @@ def purmagam_list(ym: str = Query("")):
 def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
     """매입 마감상세: 당월+이월 전 품목(품목×입고일 byday) + carry 표시 + 조정. 이월 일자 carry=1(프론트 금액 0)."""
     y = _dig4(ym) or _cur_ym()
-    phys = f"A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99'"
+    _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
+    if _pm == 0: _pm = 12; _py -= 1
+    prevym = f"{_py:02d}{_pm:02d}"
+    phys = f"A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99'"   # 전월~당월(이월-in 포함 = 목록 마감기준 일치)
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
@@ -75,7 +78,9 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
     nx = _nx(); nc = nx.cursor()
     try:
         nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, y)
-        r = nc.fetchone(); cut = (str(r[0]).strip().zfill(2) if r else '31')
+        r = nc.fetchone(); cutY = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, prevym)
+        r = nc.fetchone(); cutP = (str(r[0]).strip().zfill(2) if r else '31')
         nc.execute("SELECT mat_code,maint_ymd,assign_ym FROM nx.magam_carry_ovr WHERE kind='PUR' AND cust_code=?", cc)
         ovr = {(str(a).strip(), str(b).strip()): str(c).strip() for a, b, c in nc.fetchall()}
         nc.execute("""SELECT adj_seq,adj_type,scope,mat_code,target_ymd,old_cost,new_cost,old_qty,new_qty,delta_amt,reason_code,reason_detail
@@ -88,13 +93,19 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
         cr = nc.fetchone(); closed = int(cr[0]) if cr else 0
     finally:
         nx.close()
-    items = {}; days = set()
+    items = {}; days = set(); nxt = {prevym: y, y: nym}
     for r in raw:
-        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip(); d = int(ymd[4:6]); days.add(d)
-        carry = 1 if ovr.get((mat, ymd), (nym if (ymd[4:6] > cut) else y)) != y else 0
+        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip(); month = ymd[:4]; dd = ymd[4:6]
+        cut = cutY if month == y else (cutP if month == prevym else '31')
+        nat = month if dd <= cut else nxt.get(month, month)
+        eff = ovr.get((mat, ymd), nat)
+        if eff != y and month != y:
+            continue
+        carry = 1 if eff != y else 0
+        days.add(int(ymd))
         qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
         it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "_bd": {}, "_mx": -1.0})
-        bd = it["_bd"].setdefault(d, {"d": d, "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
+        bd = it["_bd"].setdefault(ymd, {"d": int(ymd), "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
         bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv; bd["carry"] = carry
         if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv
     for it in items.values():
@@ -267,7 +278,7 @@ def purmagam_save(payload: dict = Body(...)):
                    y, cc, base, adj_sum, base+adj_sum, (1 if do_close else 0), ("web" if do_close else None), None)
         if do_close:
             nc.execute("UPDATE nx.pur_close SET close_flag=1, close_user='web', close_dt=GETDATE() WHERE ym=? AND cust_code=?", y, cc)
-        return {"ok": True, "closed": do_close, "adj_sum": adj_sum}
+        return {"ok": True, "closed": do_close, "adj_sum": adj_sum, "final_amt": round(base + adj_sum, 2)}
     finally:
         nx.close()
 

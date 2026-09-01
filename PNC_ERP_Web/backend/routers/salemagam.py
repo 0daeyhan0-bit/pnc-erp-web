@@ -71,13 +71,16 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
     """업체 마감상세: 당월+이월 전 품목(품목×입고일 byday) + carry 표시 + 조정내역.
        이월 일자는 carry=1(프론트에서 매출금액 0). 단가변경(품목/일자)은 프론트 pEdit/dEdit."""
     y = _dig4(ym) or _cur_ym()
+    _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
+    if _pm == 0: _pm = 12; _py -= 1
+    prevym = f"{_py:02d}{_pm:02d}"   # 전월(이월-in 포함 위해 전월~당월 스캔 = 목록 마감기준과 일치)
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT A.MAT_CODE mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.UNIT) unit, A.MAINT_COST cost,
             A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99'
+          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99'
           GROUP BY A.MAT_CODE, A.MAINT_COST, A.MAINT_YMD""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
@@ -86,7 +89,9 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
     nx = _nx(); nc = nx.cursor()
     try:
         nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, y)
-        r = nc.fetchone(); cut = (str(r[0]).strip().zfill(2) if r else '31')
+        r = nc.fetchone(); cutY = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, prevym)
+        r = nc.fetchone(); cutP = (str(r[0]).strip().zfill(2) if r else '31')
         nc.execute("SELECT mat_code,maint_ymd,assign_ym FROM nx.magam_carry_ovr WHERE kind='SALE' AND cust_code=?", cc)
         ovr = {(str(a).strip(), str(b).strip()): str(c).strip() for a, b, c in nc.fetchall()}
         nc.execute("""SELECT adj_seq,adj_type,scope,mat_code,target_ymd,old_cost,new_cost,old_qty,new_qty,delta_amt,reason_code,reason_detail
@@ -99,15 +104,21 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
         cr = nc.fetchone(); closed = int(cr[0]) if cr else 0
     finally:
         nx.close()
-    items = {}; days = set()
+    items = {}; days = set(); nxt = {prevym: y, y: nym}
     for r in raw:
-        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip(); d = int(ymd[4:6]); days.add(d)
-        carry = 1 if ovr.get((mat, ymd), (nym if (ymd[4:6] > cut) else y)) != y else 0
+        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip(); month = ymd[:4]; dd = ymd[4:6]
+        cut = cutY if month == y else (cutP if month == prevym else '31')
+        nat = month if dd <= cut else nxt.get(month, month)          # 자연 귀속월
+        eff = ovr.get((mat, ymd), nat)                               # 유효 귀속월
+        if eff != y and month != y:                                 # 전월 마감분(당월 아님)은 제외
+            continue
+        carry = 1 if eff != y else 0                                 # 당월귀속=0 / 당월물리·차월귀속(이월-out)=1
+        days.add(int(ymd))
         qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
         it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "_bd": {}, "_mx": -1.0})
-        bd = it["_bd"].setdefault(d, {"d": d, "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
+        bd = it["_bd"].setdefault(ymd, {"d": int(ymd), "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
         bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv; bd["carry"] = carry
-        if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv    # 대표단가 = 금액 최대 일자
+        if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv          # 대표단가 = 금액 최대 일자
     for it in items.values():
         bl = sorted(it.pop("_bd").values(), key=lambda x: x["d"]); it.pop("_mx", None)
         it["byday"] = bl; it["dayN"] = len(bl); it["carryN"] = sum(1 for b in bl if b["carry"])
