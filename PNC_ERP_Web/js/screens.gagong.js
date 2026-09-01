@@ -886,18 +886,25 @@ SCREEN.gagongmove580=(c)=>{
     let tNeed=0,tMoved=0,tSale=0,tAssy=0,tPrint=0,tPrior=0;const dSum={};dates.forEach(d=>dSum[d]=0);
     st.rows.forEach(r=>{tNeed+=+r.need||0;tMoved+=+r.moved||0;tSale+=+r.sale||0;tAssy+=+r.assy_stock||0;tPrint+=+r.jp_print||0;tPrior+=+r.prior||0;
       dates.forEach(d=>{dSum[d]+=(r.days&&r.days[d])||0;});});
-    const NC=16;   // ★2026-08-24 자재재고·생산재고·도번고정재고 3컬럼 추가
+    // 고정컬럼수 = 앞 8(SEQ·최종납품처·ASSY도번·도번·자도번LIST·PART일자·INPUT·Line)
+    //            + 3(이동전표발행·이동필요·당일이전) + 뒤 5(출하·ASSY재고·자재재고·생산재고·도번고정)
+    const NC=16;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none;text-align:center"><thead><tr>
-       <th>SEQ</th><th>최종납품처</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
-       <th>이동전표발행</th><th>이동필요</th><th>출하</th><th>ASSY재고</th>
-       <th>자재재고</th><th>생산재고</th><th>도번고정</th><th>당일이전</th>
-       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
+       <!-- ★ASSY도번 추가(2026-09-01 요청) — 레거시 580 에 있는 컬럼.
+            '도번'은 가공품번(예 AJR74942626-고압)이라 ASSY 원본과 다르다. 둘 다 보여야 추적된다. -->
+       <th>SEQ</th><th>최종납품처</th><th>ASSY도번</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
+       <th>이동전표발행</th><th>이동필요</th><th>당일이전</th>
+       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}
+       <!-- ★재고류 5종을 일자 뒤로(2026-09-01 요청) — 계획·일자를 먼저 보고 재고는 참고로 -->
+       <th>출하</th><th>ASSY재고</th><th>자재재고</th><th>생산재고</th><th>도번고정</th></tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${i+1}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.dest)}</td>
+        <!-- ★ASSY도번(2026-09-01) — 가공품번(도번)과 달리 ASSY 원본. 레거시 580 동일 -->
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer" title="${esc(r.assy)}">${esc(r.assy)}</td>
         ${(()=>{const on=st.itemSel===i;   // ★도번칸 = 별도 선택상태(키팅 itemSel 패턴). 재클릭=해제
           const sty=on?'background:#dbeafe;color:#123a6b;font-weight:700;outline:2px solid #4a86e8;outline-offset:-2px':'';
           // ★도번 = 가공품번(item, 예 AJR74942626-고압) — 레거시 580 도번컬럼과 동일(2026-08-28).
@@ -910,11 +917,6 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.line)}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.jp_print?'':';color:#dfe6ef'}">${r.jp_print?nf(r.jp_print):'·'}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef'}">${r.need>0?nf(r.need):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td>
         ${(()=>{const on=st.sel.has(`${i}:P`);   // 당일이전(plan_qty_00)도 선택 대상 — 키는 '행:P'
           if(!r.prior)return `<td class="center" style="color:#dfe6ef">·</td>`;
           const bg=r.prior_color||'';
@@ -922,12 +924,24 @@ SCREEN.gagongmove580=(c)=>{
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,bg=(r.colorday&&r.colorday[d])||'';
           if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const key=`${i}:${d}`, on=st.sel.has(key);
-          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}</tr>
+          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}
+        <!-- ★재고류 5종 — 일자 뒤(2026-09-01 요청) -->
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td></tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334;text-align:left">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody>
-      ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="7">합계 (${nf(st.cnt)}행)</td>
-        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td><td class="center">${nf(tPrior)}</td>
-        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
+      ${(()=>{if(!st.rows.length)return '';
+        // ★재고류를 일자 뒤로 옮겼으므로 합계행도 같은 순서로(2026-09-01).
+        let tStock=0,tPr=0,tFix=0;
+        st.rows.forEach(r=>{tStock+=+r.stock||0;tPr+=+r.pr_stock||0;tFix+=+r.fix_stock||0;});
+        return `<tfoot><tr class="grandtot"><td colspan="8">합계 (${nf(st.cnt)}행)</td>
+        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tPrior)}</td>
+        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}
+        <td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td>
+        <td class="center">${nf(tStock)}</td><td class="center">${nf(tPr)}</td><td class="center">${nf(tFix)}</td></tr></tfoot>`;})()}
       </table></div>`;
   };
   // ★"이동전표" 모드 — MAINT_GROUP_SEQ(전표) 단위 발행목록. 확정여부(입고확인)와 각 전표 재출력 버튼.
@@ -1213,18 +1227,25 @@ function openMoveModal(st,dates,onIssued){
         <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:70px;min-width:0">
         <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:70px;min-width:0">
         <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:110px;min-width:0" placeholder="최종납품처">
-        <div class="spacer"></div><button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
+        <div class="spacer"></div>
+        <button class="btn" id="mm-delrow" style="padding:3px 10px">➖ 빈행삭제</button>
+        <button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
       </div>
       <div id="mm-msg" style="padding:0 12px;min-height:15px;font-size:12px"></div>
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 12px">
         <table class="tbl fit mm-tbl" style="font-size:12px;text-align:center;width:100%;table-layout:fixed"><thead><tr>
           <th style="width:32px">SEQ</th><th style="width:150px">생산품번</th><th style="width:150px">가공품번</th><th>품명</th>
+          <!-- ★재고수량 = 출고가공창고(P0001 등) 재고. 레거시 586 그리드와 동일(2026-09-01) -->
+          <th style="width:74px">재고수량</th>
           <th style="width:58px">SET</th><th style="width:52px">사용</th><th style="width:78px">출고수량</th><th style="width:110px">비고</th></tr></thead>
         <tbody>${state.rows.map((r,i)=>`<tr>
           <td class="center">${i+1}</td>
           <td><input class="inp mm-f" data-i="${i}" data-k="item_code" value="${esc(r.item_code)}" style="text-align:center" placeholder="도번"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="mat_code" value="${esc(r.mat_code)}" style="text-align:center" placeholder="자도번"></td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item_desc)}">${esc(r.item_desc)}</td>
+          <!-- ★재고수량(가공창고) — 출고수량보다 적으면 빨강으로 경고 -->
+          <td class="center" style="${(r.stock!=null&&(+r.maint_qty||0)>(+r.stock||0))?'color:#c0392b;font-weight:700':'color:#333'}"
+              title="${esc(state.out_wh)} 창고 재고">${r.stock==null?'':nf(r.stock)}</td>
           <td><input class="inp mm-f" data-i="${i}" data-k="set_qty" type="number" value="${r.set_qty||''}" style="text-align:center"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="use_qty" type="number" value="${r.use_qty||''}" style="text-align:center"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="maint_qty" type="number" value="${r.maint_qty||''}" style="text-align:center;font-weight:700;background:#fffbe6" title="직접 수정 가능(SET×사용 자동계산값을 덮어씀)"></td>
@@ -1248,6 +1269,18 @@ function openMoveModal(st,dates,onIssued){
     q('#mm-inwh').onchange=e=>state.in_wh=e.target.value.trim();
     q('#mm-dest').onchange=e=>state.dest=e.target.value.trim();
     q('#mm-addrow').onclick=()=>{for(let k=0;k<5;k++)state.rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});render();};
+    // ★빈행삭제(2026-09-01 요청) — 도번·자도번이 모두 빈 행만 지운다.
+    //   입력된 행은 실수로 사라지면 안 되므로 절대 건드리지 않는다.
+    //   전부 지워지면 입력할 칸이 없어지므로 최소 1행은 남긴다.
+    q('#mm-delrow').onclick=()=>{
+      const isEmpty=r=>!String(r.item_code||'').trim()&&!String(r.mat_code||'').trim();
+      const keep=state.rows.filter(r=>!isEmpty(r));
+      const removed=state.rows.length-keep.length;
+      if(!removed){q('#mm-msg').innerHTML='<span style="color:#c0392b">지울 빈 행이 없습니다.</span>';return;}
+      state.rows=keep.length?keep:[{item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''}];
+      render();
+      q('#mm-msg').innerHTML=`<span style="color:#1f7a3d">빈 행 ${removed}개를 삭제했습니다.</span>`;
+    };
     // ★출고수량(maint_qty)은 직접 입력 가능. SET/사용 수정 시에만 자동계산으로 덮어쓴다.
     //   재렌더하면 입력 중 포커스가 날아가므로 state만 갱신(품명 등 표시는 다음 렌더에 반영).
     ov.querySelectorAll('.mm-f').forEach(el=>el.onchange=()=>{
@@ -1256,7 +1289,35 @@ function openMoveModal(st,dates,onIssued){
       if(k==='set_qty'||k==='use_qty'){
         r.maint_qty=(r.set_qty||0)*(r.use_qty||0);
         const t=ov.querySelector(`.mm-f[data-i="${i}"][data-k="maint_qty"]`); if(t)t.value=r.maint_qty||'';
-      }});
+      }
+      // ★자도번을 넣으면 품명 + 가공창고 재고를 조회해 채운다(2026-09-01).
+      //   재렌더하면 입력 포커스가 날아가므로 해당 셀만 직접 갱신한다.
+      if(k==='mat_code')loadMatInfo(i);
+    });
+    // 자도번 → 품명·재고 조회. 출고가공창고(state.out_wh) 기준.
+    const loadMatInfo=async(i)=>{
+      const r=state.rows[i], m=String(r.mat_code||'').trim();
+      if(!m){r.item_desc='';r.stock=null;paintRow(i);return;}
+      try{
+        const d=await(await fetch(`${API}/api/gagong/move580/matinfo?mat=${encodeURIComponent(m)}`
+                                  +`&wh=${encodeURIComponent(state.out_wh||'P0001')}`)).json();
+        r.item_desc=d.nm||''; r.stock=(d.stock==null?null:+d.stock);
+        if(!d.found)r.item_desc='(품목마스터에 없음)';
+      }catch(e){ r.stock=null; }
+      paintRow(i);
+    };
+    // 그 행의 품명·재고 칸만 다시 그린다(전체 재렌더 금지 — 입력 중 포커스 보존).
+    const paintRow=(i)=>{
+      const tr=ov.querySelectorAll('.mm-tbl tbody tr')[i]; if(!tr)return;
+      const r=state.rows[i], tds=tr.children;
+      if(tds[3]){tds[3].textContent=r.item_desc||'';tds[3].title=r.item_desc||'';}
+      if(tds[4]){
+        tds[4].textContent=(r.stock==null?'':nf(r.stock));
+        const over=(r.stock!=null&&(+r.maint_qty||0)>(+r.stock||0));
+        tds[4].style.color=over?'#c0392b':'#333';
+        tds[4].style.fontWeight=over?'700':'400';
+      }
+    };
     q('#mm-save').onclick=async()=>{
       const valid=state.rows.filter(r=>r.mat_code&&r.item_code&&(r.maint_qty>0));
       if(!valid.length){msg('출고수량이 있는 행이 없습니다(자도번·수량 확인).',false);return;}
@@ -1289,6 +1350,20 @@ function openMoveModal(st,dates,onIssued){
     };
   };
   render(); document.body.appendChild(ov);
+  // ★자동채움된 행(선택셀에서 넘어온 것)들의 가공창고 재고를 처음 한 번 채운다(2026-09-01).
+  //   순차 호출 — 행이 많아야 수십 개라 부담 없고, 동시요청으로 커넥션을 물지 않는다.
+  (async()=>{
+    for(let i=0;i<state.rows.length;i++){
+      const m=String(state.rows[i].mat_code||'').trim(); if(!m)continue;
+      try{
+        const d=await(await fetch(`${API}/api/gagong/move580/matinfo?mat=${encodeURIComponent(m)}`
+                                  +`&wh=${encodeURIComponent(state.out_wh||'P0001')}`)).json();
+        state.rows[i].stock=(d.stock==null?null:+d.stock);
+        if(!state.rows[i].item_desc)state.rows[i].item_desc=d.nm||'';
+      }catch(e){}
+    }
+    if(document.body.contains(ov))render();
+  })();
 }
 
 /* 부품납품표(개별카드)+부품확인/납품표(그룹묶음 8행/페이지) 인쇄 — dw_pr_input_586_p1/p2 재현.

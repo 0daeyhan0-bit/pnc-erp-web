@@ -647,9 +647,18 @@ def _step7_sql(cur):
         "정본 = routers/planrev.py · 화면 「생산계획업로드[검토]」")
 
     P = _P
+    # ★★2026-09-01: routing_edge 를 **읽기 직전에 갱신**한다.
+    #   종전엔 `compose는 읽기만 — 시드/싱크는 별도` 였는데, 그 '별도'를 부르는 곳이
+    #   어디에도 없었다(`/api/routing/sync` 정의만 있고 호출 0건 · 화면 버튼도 없음).
+    #   결과: 마스터에서 작업처를 바꿔도 편성은 **옛 업체로 계속 발주**했다.
+    #     실측 — MJU62916122 등 11종 39행: 품목마스터·품목조회·조달프로파일·레거시는
+    #            전부 2096(미래정밀)인데 웹 소요만 2266(케이비)로 나갔다.
+    #   싱크는 `wc = COALESCE(wc_user, wc_live)` 라 **사용자 편집(wc_user)은 보존**하고
+    #   미편집분만 마스터를 추종하므로, 편성마다 돌려도 안전하다(설계 원래 의도).
+    _routing_edge_sync(cur)
     # ★routing_edge 생산처 오버라이드(2026-08-20): STEP7 work_center(생산처)를 마스터 대신
     #   routing_edge.wc(편집가능 정본)에서 읽음. ov_wc=ISNULL(routing_edge.wc, 마스터 default).
-    #   routing_edge 미등록 아이템은 마스터 폴백. compose는 읽기만(편집 보존) — 시드/싱크는 별도.
+    #   routing_edge 미등록 아이템은 마스터 폴백.
     #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
     cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust, c.prod_rate,
@@ -715,19 +724,18 @@ def _routing_edge_sync(cur):
     # 1) 편집추적 컬럼 보장
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_live') IS NULL ALTER TABLE nx.routing_edge ADD wc_live varchar(20)")
     cur.execute("IF COL_LENGTH('nx.routing_edge','wc_user') IS NULL ALTER TABLE nx.routing_edge ADD wc_user varchar(20)")
-    # 2) 신규 엣지 INSERT (v_pr_bom엔 있고 routing_edge엔 없는 것) — 라이브 마스터 기준 시드, wc_user=NULL
-    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,gubun,vendor_seed,route_id,src_except,src_sagub,wc_live,wc)
-      SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN N'전개제외'
-             WHEN ISNULL(b.SAGUB_FLAG,'0')='1' THEN N'사급'
-             WHEN ISNULL(ci.make_type,'')='1' THEN N'제작' ELSE N'매입' END,
-        CASE WHEN ISNULL(b.EXCEPT_FLAG,'0')='1' THEN ISNULL(pi.in_cust,'') ELSE ISNULL(ci.in_cust,'') END,
-        1, ISNULL(b.EXCEPT_FLAG,'0'), ISNULL(b.SAGUB_FLAG,'0'),
+    # 2) 신규 엣지 INSERT (v_pr_bom엔 있고 routing_edge엔 없는 것) — 마스터 기준 시드, wc_user=NULL
+    # ★2026-09-01 수정: 종전 INSERT 는 gubun·vendor_seed·src_except·src_sagub 4컬럼을 넣었는데
+    #   테이블이 7컬럼으로 슬림화되면서 **그 컬럼들이 사라져 500(42S22)** 이 났다.
+    #   함수가 만들어진 뒤 스키마만 바뀌고 함수는 따라가지 못한 채 방치돼 있었다
+    #   (호출처가 자기 API 하나뿐이라 아무도 실행하지 않아 드러나지 않았다).
+    #   ⟹ 실제 컬럼(parent_item·child_item·seq·route_id·wc·wc_live·wc_user)만 넣는다.
+    cur.execute("""INSERT INTO nx.routing_edge(parent_item,child_item,seq,route_id,wc_live,wc)
+      SELECT UPPER(LTRIM(RTRIM(b.item_code))), UPPER(LTRIM(RTRIM(b.mat_code))), b.BOM_SEQ, 1,
         CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END,
         CASE WHEN ci.work_code>'' THEN ci.work_code ELSE ISNULL(ci.in_cust,'') END
       FROM nx.v_pr_bom b
       LEFT JOIN nx.item ci ON UPPER(LTRIM(RTRIM(ci.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
-      LEFT JOIN nx.item pi ON UPPER(LTRIM(RTRIM(pi.item_code)))=UPPER(LTRIM(RTRIM(b.item_code)))
       WHERE NOT EXISTS(SELECT 1 FROM nx.routing_edge re WHERE re.parent_item=UPPER(LTRIM(RTRIM(b.item_code)))
         AND re.child_item=UPPER(LTRIM(RTRIM(b.mat_code))) AND re.seq=b.BOM_SEQ)""")
     new_cnt = cur.rowcount
