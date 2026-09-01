@@ -2209,6 +2209,7 @@ const _mkMagam=(CFG)=>(c)=>{
   const shiftYm=(y,delta)=>{y=(''+(y||'')).trim();if(y.length<4)return y;const tot=(+y.slice(0,2))*12+(+y.slice(2,4)-1)+delta;const ny=Math.floor(tot/12),nm=(tot%12)+1;return String(ny).padStart(2,'0')+String(nm).padStart(2,'0');};
   const canW=(typeof PERM!=='undefined')?PERM.canEdit(CFG.base):true;   // 수정권한 게이트(규칙#16)
   let ym='', rows=[], loading=false, msg='', reasons=[], q='', wmap={}, realRaw=25000, sagubRaw=20000;
+  let listSel=new Set();   // 거래처 다중선택(체크박스) — 툴바 처리버튼(마감확정)이 대상
   let sortKey='', sortDir=1, ctf='';   // 정렬키·방향(1오름/-1내림)·분류필터
   // ★2026-08-23 P/No 펼침(레거시 w_pu_sale_010) — 집계를 자도번 단위로 풀어서 본다.
   //   view='sum'(기존 거래처집계, 마감/계산서) | 'line'(P/No 상세)
@@ -2429,20 +2430,21 @@ const _mkMagam=(CFG)=>(c)=>{
     const NC=CFG.weight?18:10, amtl=CFG.amtlbl;
     const THEAD=CFG.weight?`<thead>
        <tr>
+         <th rowspan="2" class="center" style="width:24px"><input type="checkbox" id="sm-vall"></th>
          <th rowspan="2" data-sk="cc">코드${sa('cc')}</th><th rowspan="2" data-sk="nm">거래처명${sa('nm')}</th><th rowspan="2" data-sk="chg">담당자${sa('chg')}</th><th rowspan="2" data-sk="ct">분류${sa('ct')}</th>
          <th rowspan="2" class="num" data-sk="qty">수량${sa('qty')}</th><th rowspan="2" class="num" data-sk="amt">${amtl}${sa('amt')}</th>
          <th colspan="3" class="center wcol">원소재 <small>kg</small></th>
          <th colspan="3" class="center wcol2">용접봉 <small>kg</small></th>
          <th colspan="3" class="center acol">조정 <small>원</small></th>
          <th rowspan="2" class="num" data-sk="finw">최종금액${sa('finw')}</th>
-         <th rowspan="2" class="center" data-sk="close_flag">상태${sa('close_flag')}</th><th rowspan="2" class="center">처리</th>
+         <th rowspan="2" class="center" data-sk="close_flag">상태${sa('close_flag')}</th>
        </tr>
        <tr>
          <th class="num wcol" data-sk="raw_out">출고${sa('raw_out')}</th><th class="num wcol" data-sk="raw_in">소요${sa('raw_in')}</th><th class="num wcol" data-sk="raw_diff">차액${sa('raw_diff')}</th>
          <th class="num wcol2" data-sk="weld_out">출고${sa('weld_out')}</th><th class="num wcol2" data-sk="weld_in">소요${sa('weld_in')}</th><th class="num wcol2" data-sk="weld_diff">차액${sa('weld_diff')}</th>
          <th class="num acol" data-sk="adj_amt">단가조정${sa('adj_amt')}</th><th class="num acol" data-sk="raw_amt">원소재정산${sa('raw_amt')}</th><th class="num acol" data-sk="weld_amt">용접봉정산${sa('weld_amt')}</th>
        </tr></thead>`:`<thead><tr>
-         <th data-sk="cc">코드${sa('cc')}</th><th data-sk="nm">거래처명${sa('nm')}</th><th data-sk="chg">담당자${sa('chg')}</th><th data-sk="ct">분류${sa('ct')}</th><th class="num" data-sk="qty">수량${sa('qty')}</th><th class="num" data-sk="amt">${amtl}${sa('amt')}</th><th class="num" data-sk="adj_amt">조정${sa('adj_amt')}</th><th class="num" data-sk="finw">최종금액${sa('finw')}</th><th class="center" data-sk="close_flag">상태${sa('close_flag')}</th><th class="center">처리</th>
+         <th class="center" style="width:24px"><input type="checkbox" id="sm-vall"></th><th data-sk="cc">코드${sa('cc')}</th><th data-sk="nm">거래처명${sa('nm')}</th><th data-sk="chg">담당자${sa('chg')}</th><th data-sk="ct">분류${sa('ct')}</th><th class="num" data-sk="qty">수량${sa('qty')}</th><th class="num" data-sk="amt">${amtl}${sa('amt')}</th><th class="num" data-sk="adj_amt">조정${sa('adj_amt')}</th><th class="num" data-sk="finw">최종금액${sa('finw')}</th><th class="center" data-sk="close_flag">상태${sa('close_flag')}</th>
        </tr></thead>`;
     const rowMid=(r)=>CFG.weight?`${wc(r.cc)}${ac(r)}<td class="num"><b>${won0(finw(r))}</b></td>`:`<td class="num ${r.adj_amt<0?'neg':''}">${r.adj_amt?won0(r.adj_amt):''}</td><td class="num"><b>${won0(r.final_amt)}</b></td>`;
     const gtMid=CFG.weight?`<td class="num">${num(wTot.out)}</td><td class="num">${num(wTot.in)}</td><td class="num ${wTot.diff<0?'neg':''}">${num(wTot.diff)}</td><td class="num wcol2">${num(wTot.wo)}</td><td class="num wcol2">${num(wTot.wi)}</td><td class="num wcol2 ${wTot.wd<0?'neg':''}">${num(wTot.wd)}</td><td class="num">${won0(tAdj)}</td><td class="num ${wTot.amt<0?'neg':''}"><b>${won0(wTot.amt)}</b></td><td class="num acol ${wTot.wa<0?'neg':''}">${wTot.wa?won0(wTot.wa):''}</td><td class="num"><b>${won0(tFin+wTot.amt+wTot.wa)}</b></td>`:`<td class="num">${won0(tAdj)}</td><td class="num"><b>${won0(tFin)}</b></td>`;
@@ -2466,8 +2468,9 @@ const _mkMagam=(CFG)=>(c)=>{
        `}
        <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명${view==='line'?'':'/담당자'}" style="width:180px">
        ${view==='sum'?`<label class="tl">분류</label><select class="inp" id="sm-ct" style="width:auto"><option value="">전체</option>${cts.map(t=>`<option value="${esc(t)}" ${ctf===t?'selected':''}>${esc(t)}</option>`).join('')}</select>`:''}
-       <button class="btn" id="sm-go">🔍 조회</button>
-       <button class="btn xls" id="sm-xls">📥 엑셀</button>
+       <button class="btn" id="sm-go">조회</button>
+       ${view==='sum'?`<button class="btn" id="sm-bulk-close" ${canW?'':'disabled'} style="${canW?'background:#1c7a37;color:#fff;border-color:#1c7a37':''}">마감/해제</button><button class="btn ghost" id="sm-bulk-bill">계산서</button>`:''}
+       <button class="btn xls" id="sm-xls">엑셀</button>
        <!-- ★단가 재계산(레거시 w_pu_sale_010/020 'cost_calc' 이식) — 체크한 행만 처리.
             P/No 상세에서만 노출. 매입=확정입고(9/S)·매출=협력사판매(5). 2026-08-28 -->
        ${(view==='line'&&CFG.recalc&&canW)
@@ -2481,16 +2484,13 @@ const _mkMagam=(CFG)=>(c)=>{
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      ${view==='line'?drawLines():`
      <div class="grid-wrap sm-wrap"><table class="tbl sm-tbl">${THEAD}
-     <tbody>${loading?spinRow(NC):(cur.length?cur.map(r=>`<tr class="${r.close_flag?'sm-closed':''}">
+     <tbody>${loading?spinRow(NC):(cur.length?cur.map(r=>`<tr class="${r.close_flag?'sm-closed':''} ml-row" data-cc="${esc(r.cc)}" data-nm="${esc(r.nm)}" style="cursor:pointer" title="행 클릭 = 마감상세/조정">
+       <td class="center"><input type="checkbox" class="sm-vck" data-cc="${esc(r.cc)}" ${listSel.has(r.cc)?'checked':''}></td>
        <td><b>${esc(r.cc)}</b></td><td class="bcap" title="${esc(r.nm)}">${esc(r.nm)}</td>
        <td class="center">${esc(r.chg)||'-'}</td><td>${esc(ctN(r.ct))}</td>
        <td class="num">${num(r.qty)}</td><td class="num">${won0(r.amt)}</td>
        ${rowMid(r)}
-       <td class="center">${r.close_flag?'<span class="sm-badge on">🔒 마감</span>':'<span class="sm-badge">미마감</span>'}</td>
-       <td class="center" style="white-space:nowrap">
-         <button class="btn sm-mini sm-open" data-cc="${esc(r.cc)}" data-nm="${esc(r.nm)}">${(r.close_flag||!canW)?'상세':'✎ 마감'}</button>
-         <button class="btn sm-mini ghost" title="계산서 발행(추후 구현)" disabled>🧾 계산서</button>
-       </td></tr>`).join('')+`<tr class="grandtot"><td colspan="4" class="right">총계 (${cur.length}업체)</td><td class="num">${num(cur.reduce((a,b)=>a+(+b.qty||0),0))}</td><td class="num">${won0(tAmt)}</td>${gtMid}<td colspan="2"></td></tr>`:`<tr><td colspan="${NC}" class="empty">해당 마감월 ${CFG.verb} 없음</td></tr>`)}</tbody></table></div>`}
+       <td class="center">${r.close_flag?'<span class="sm-badge on">마감</span>':'<span class="sm-badge">미마감</span>'}</td></tr>`).join('')+`<tr class="grandtot"><td></td><td colspan="4" class="right">총계 (${cur.length}업체)</td><td class="num">${num(cur.reduce((a,b)=>a+(+b.qty||0),0))}</td><td class="num">${won0(tAmt)}</td>${gtMid}<td></td></tr>`:`<tr><td colspan="${NC}" class="empty">해당 마감월 ${CFG.verb} 없음</td></tr>`)}</tbody></table></div>`}
      </div>
      <div id="sm-modal"></div>
      <style>
@@ -2507,7 +2507,8 @@ const _mkMagam=(CFG)=>(c)=>{
        .ml-tbl tfoot tr.grandtot td{position:sticky;bottom:0;background:#c7d8ef;font-weight:800;border-top:2px solid #7f9dc4;z-index:2}
        .ml-tbl td.mld,.ml-tbl th.mld{min-width:54px;color:#5a6b82}
        .ml-tbl td.bcap{max-width:190px;overflow:hidden;text-overflow:ellipsis}
-       .sm-tbl{font-size:11.5px;width:100%;table-layout:auto}.sm-tbl th,.sm-tbl td{padding:3px 5px;white-space:nowrap}
+       .sm-tbl{font-size:11.5px;width:100%;table-layout:auto}.sm-tbl th,.sm-tbl td{padding:1px 6px;white-space:nowrap;line-height:1.4}
+       .sm-tbl tbody tr.ml-row:hover td{background:#eaf2fd}.sm-tbl .sm-badge{padding:0 5px}
        .sm-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2;cursor:pointer;user-select:none;text-align:center}.sm-tbl thead tr:nth-child(2) th{top:26px}.sm-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
        .sm-tbl thead th[data-sk]:hover{background:#e4ecf8}.sm-ar{font-size:9px;color:#2f6db3;margin-left:2px}
        .sm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}.sm-tbl td.neg{color:#c0392b}.sm-tbl .center{text-align:center}
@@ -2568,8 +2569,29 @@ const _mkMagam=(CFG)=>(c)=>{
     ckLbl();
     const cts_=c.querySelector('#sm-ct');if(cts_)cts_.onchange=e=>{ctf=e.target.value;draw();};   // 분류 필터
     c.querySelectorAll('.sm-tbl thead th[data-sk]').forEach(th=>{th.onclick=()=>{const k=th.dataset.sk;if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}draw();};});   // 헤더 클릭 정렬(THEAD 재생성=구조동일, 스크롤만 상단복귀)
-    c.querySelectorAll('.sm-open').forEach(b=>b.onclick=()=>openModal(b.dataset.cc,b.dataset.nm));
+    // 거래처 행 클릭 = 마감상세/조정 모달 (개별 버튼 제거)
+    c.querySelectorAll('.ml-row').forEach(tr=>tr.onclick=e=>{if(e.target.closest('.sm-vck'))return;openModal(tr.dataset.cc,tr.dataset.nm);});
+    // 거래처 다중선택 체크박스
+    c.querySelectorAll('.sm-vck').forEach(el=>el.onclick=e=>{e.stopPropagation();if(el.checked)listSel.add(el.dataset.cc);else listSel.delete(el.dataset.cc);
+      const va=c.querySelector('#sm-vall');if(va){const n=c.querySelectorAll('.sm-vck').length;va.checked=(listSel.size>=n&&n>0);}});
+    const vall=c.querySelector('#sm-vall');if(vall)vall.onchange=()=>{c.querySelectorAll('.sm-vck').forEach(x=>{x.checked=vall.checked;if(vall.checked)listSel.add(x.dataset.cc);else listSel.delete(x.dataset.cc);});};
+    // 툴바 처리버튼: 마감/해제(선택 거래처 토글) · 계산서(추후)
+    const bc=c.querySelector('#sm-bulk-close');if(bc)bc.onclick=bulkClose;
+    const bb=c.querySelector('#sm-bulk-bill');if(bb)bb.onclick=()=>alert('계산서 발행은 추후 구현 예정입니다.');
     if(mc)drawModal();
+  };
+  // 선택 거래처 일괄 마감/해제(미마감→마감확정, 마감→마감취소). 조정은 행 클릭 모달에서.
+  const bulkClose=async()=>{
+    const sel=[...listSel];if(!sel.length){alert('거래처를 선택하세요.');return;}
+    const bymap={};rows.forEach(r=>bymap[r.cc]=r);
+    const toClose=sel.filter(cc=>bymap[cc]&&!bymap[cc].close_flag), toOpen=sel.filter(cc=>bymap[cc]&&bymap[cc].close_flag);
+    if(!confirm(`선택 ${sel.length}개 업체 처리:\n마감확정 ${toClose.length} · 마감취소 ${toOpen.length}\n(조정이 필요하면 취소하고 행을 클릭해 상세에서 확정하세요)`))return;
+    try{
+      for(const cc of toClose){const r=bymap[cc];await fetch(`${API}/api/${CFG.base}/save`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ym,cust_code:cc,base_amt:+r.amt||0,adjustments:[],close:true})});}
+      for(const cc of toOpen){await fetch(`${API}/api/${CFG.base}/reopen`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym,cust_code:cc})});}
+      listSel.clear();alert(`처리 완료 — 마감 ${toClose.length} · 취소 ${toOpen.length}`);load(ym);
+    }catch(e){alert('처리 실패: '+e.message);}
   };
 
   const openModal=async(cc,nm)=>{mc={cc,nm};detail=null;pEdit={};dEdit={};amtAdjs=[];expanded=new Set();
