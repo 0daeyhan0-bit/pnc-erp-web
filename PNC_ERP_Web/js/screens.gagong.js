@@ -1802,3 +1802,133 @@ function openSetAdjModal(st,onSaved){
   render(); document.body.appendChild(ov);
   if(state.cust)refreshCur();
 }
+
+
+/* ===== 가공: 4주간 가공계획현황(제번) (w_pr_outside_070 「가공자재계획현황」) =====
+   ★2026-09-01 신설. 레거시는 산식 참고, 데이터는 nx 웹 정본(계획원본 → 모델BOM → 소요엔진).
+   집계 = 제번·라인·ASM도번 그레인 / 상세 = 거기에 자도번(P2 자재) 한 단 더.
+   일자칸 01~31 = 기준일 + 0~30. 백엔드 /api/gagong/matplan070. */
+SCREEN.gagongmatplan070=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const nf3=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:3});
+  const _DW=['일','월','화','수','목','금','토'];
+  const dcol=s=>{s=''+(s||'');if(s.length!==6)return s;
+    const d=new Date(2000+ +s.slice(0,2), +s.slice(2,4)-1, +s.slice(4,6));
+    return `${+s.slice(4,6)}(${_DW[d.getDay()]})`;};
+  const dow=s=>{s=''+(s||'');if(s.length!==6)return -1;
+    return new Date(2000+ +s.slice(0,2), +s.slice(2,4)-1, +s.slice(4,6)).getDay();};
+  const ymd2date=s=>(s&&(''+s).length===6)?`20${(''+s).slice(0,2)}-${(''+s).slice(2,4)}-${(''+s).slice(4,6)}`:'';
+  const date2ymd=s=>(s||'').replace(/-/g,'').slice(2);
+
+  const st={ymd:date2ymd(planBaseIso()),mode:'sum',wc:'P2',line:'',wo:'',asm:'',item:'',
+            dates:[],rows:[],cnt:0,qty:0,loading:false,msg:''};
+
+  const load=async()=>{st.loading=true;draw();
+    const qs=new URLSearchParams({ymd:st.ymd,mode:st.mode,wc:st.wc,line:st.line,
+                                 wo:st.wo,asm:st.asm,item:st.item,limit:20000});
+    try{const d=await(await fetch(`${API}/api/gagong/matplan070?${qs}`)).json();
+      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.qty=d.qty||0;st.msg='';}
+    catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.rows=[];st.cnt=0;st.qty=0;}
+    st.loading=false;draw();};
+
+  const draw=()=>{
+    const dates=st.dates, DTL=(st.mode==='dtl');
+    // 오토컴플리트 후보(조회결과에서 추출)
+    const lnS=new Set(),woS=new Set(),asS=new Set(),mtS=new Set();
+    st.rows.forEach(r=>{if(r.line)lnS.add(r.line);if(r.wo)woS.add(r.wo);
+      if(r.asm)asS.add(r.asm);if(r.mat)mtS.add(r.mat);});
+    const opt=s=>[...s].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
+    // 합계
+    let tLot=0,tQty=0;const dSum=dates.map(()=>0);
+    st.rows.forEach(r=>{tLot+=+r.lot||0;tQty+=+r.qty||0;
+      (r.d||[]).forEach((v,i)=>{dSum[i]+=+v||0;});});
+    const NC=DTL?8:7;   // 고정컬럼수
+    const hbg=i=>{const w=dow(dates[i]);return w===0?'background:#ffe3e3':(w===6?'background:#e3ecff':'');};
+    const cell=(v,i)=>v?`<td class="num"${dow(dates[i])===0?' style="background:#fff5f5"':(dow(dates[i])===6?' style="background:#f5f8ff"':'')}>${nf(v)}</td>`
+                       :`<td class="num" style="color:#dfe6ef${dow(dates[i])===0?';background:#fff5f5':(dow(dates[i])===6?';background:#f5f8ff':'')}">·</td>`;
+
+    c.innerHTML=`
+     <style>
+      /* §3 페이지 본문 세로스크롤 금지 — 루트 flex, 표만 내부 스크롤 */
+      .mp7-root{display:flex;flex-direction:column;height:100%}
+      .mp7-root .toolbar{flex-wrap:nowrap;overflow-x:auto}
+      .mp7-grid{flex:0 1 auto;max-height:100%;min-height:0;overflow:auto;background:#fff;
+                border:1px solid var(--line-2,#c9d3e0);border-radius:8px}
+      .mp7-grid thead th{position:sticky;top:0;z-index:2;background:#eef3fa;text-align:center}
+      .mp7-grid tfoot td{position:sticky;bottom:0;z-index:2;background:#f4f7fb;font-weight:600}
+     </style>
+     <div class="mp7-root">
+      <div class="page-title" style="flex:0 0 auto">4주간 가공계획현황(제번)
+        <span style="font-size:12px;color:var(--muted);font-weight:400">제번×라인×ASM도번 · 기준일부터 31일</span></div>
+      <div class="page-sub" style="flex:0 0 auto">생산계획(<code>nx.plan_dtl</code>) → 모델BOM → <b>통일 소요엔진</b> 전개로 가공(${esc(st.wc)}) 자재 소요를 낸다.
+        수량 = ceiling(계획수량 × 모델BOM사용수 × 생산율) × BOM누적사용수. 모델BOM 유효기간·BOM 전개제외(except) 반영 = 웹 편성(파트별계획)과 같은 기준.</div>
+      <div class="toolbar" style="flex:0 0 auto">
+        <label class="tl">기준일자</label><input class="inp" type="date" id="m7-ymd" value="${ymd2date(st.ymd)}" style="width:140px">
+        <label class="tl">작업처</label><select class="inp" id="m7-wc" style="width:96px">
+          <option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option>
+          <option value="P1"${st.wc==='P1'?' selected':''}>P1 용접</option></select>
+        <label class="tl">보기</label><select class="inp" id="m7-mode" style="width:88px">
+          <option value="sum"${!DTL?' selected':''}>집계</option>
+          <option value="dtl"${DTL?' selected':''}>상세</option></select>
+        <label class="tl">라인</label><input class="inp" id="m7-line" list="m7-linel" value="${esc(st.line)}" style="width:70px" autocomplete="off"><datalist id="m7-linel">${opt(lnS)}</datalist>
+        <label class="tl">제번</label><input class="inp" id="m7-wo" list="m7-wol" value="${esc(st.wo)}" style="width:110px" autocomplete="off"><datalist id="m7-wol">${opt(woS)}</datalist>
+        <label class="tl">ASM도번</label><input class="inp" id="m7-asm" list="m7-asml" value="${esc(st.asm)}" style="width:130px" autocomplete="off"><datalist id="m7-asml">${opt(asS)}</datalist>
+        <label class="tl">자도번</label><input class="inp" id="m7-item" list="m7-iteml" value="${esc(st.item)}" style="width:130px" autocomplete="off"><datalist id="m7-iteml">${opt(mtS)}</datalist>
+        <button class="btn" id="m7-search">조회</button>
+        <button class="btn" id="m7-xls">엑셀</button>
+        <div class="spacer"></div>
+        <span class="rowcount">행 <b>${nf(st.cnt)}</b> · 수량합 <b>${nf(st.qty)}</b> · 일자 ${dates.length}개</span>
+      </div>
+      ${st.msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(st.msg)}</div>`:''}
+      <div class="mp7-grid">
+       <table class="tbl fit" style="font-size:11px"><thead><tr>
+        <th>SEQ</th><th>작업처</th><th>라인</th><th>제번</th><th>모델</th><th>ASM도번</th>
+        ${DTL?'<th>자도번</th><th class="num">사용수</th>':'<th class="num">LOT수량</th>'}
+        <th class="num">계획수량</th>
+        ${dates.map((d,i)=>`<th class="num" style="${hbg(i)}">${dcol(d)}</th>`).join('')}</tr></thead>
+       <tbody>${st.loading?spinRow(NC+2+dates.length):(st.rows.length?st.rows.map((r,i)=>`
+        <tr>
+         <td class="num">${i+1}</td>
+         <td class="center">${esc(r.wcnm||r.wc)}</td>
+         <td class="center">${esc(r.line)}</td>
+         <td>${esc(r.wo)}</td>
+         <td class="bcap" title="${esc(r.model)}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.model)}</td>
+         <td><b>${esc(r.asm)}</b></td>
+         ${DTL?`<td>${esc(r.mat)}</td><td class="num">${nf3(r.use)}</td>`
+              :`<td class="num">${nf(r.lot)}</td>`}
+         <td class="num"><b>${nf(r.qty)}</b></td>
+         ${(r.d||[]).map((v,j)=>cell(v,j)).join('')}</tr>`).join('')
+        :`<tr><td colspan="${NC+2+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
+       ${st.rows.length?`<tfoot><tr class="grandtot">
+         <td colspan="6">합계 (${nf(st.cnt)}행)</td>
+         ${DTL?'<td></td><td></td>':`<td class="num">${nf(tLot)}</td>`}
+         <td class="num">${nf(tQty)}</td>
+         ${dSum.map(v=>`<td class="num">${nf(v)}</td>`).join('')}</tr></tfoot>`:''}
+       </table></div>
+     </div>`;
+
+    const g=id=>c.querySelector(id);
+    const apply=()=>{st.ymd=date2ymd(g('#m7-ymd').value)||st.ymd;st.wc=g('#m7-wc').value;
+      st.mode=g('#m7-mode').value;st.line=g('#m7-line').value.trim();st.wo=g('#m7-wo').value.trim();
+      st.asm=g('#m7-asm').value.trim();st.item=g('#m7-item').value.trim();load();};
+    g('#m7-search').onclick=apply;
+    ['#m7-wc','#m7-mode'].forEach(id=>g(id).onchange=apply);
+    ['#m7-line','#m7-wo','#m7-asm','#m7-item'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')apply();});
+    g('#m7-xls').onclick=()=>{
+      if(!st.rows.length){alert('조회 결과가 없습니다.');return;}
+      const cols=[{k:'wcnm',t:'작업처'},{k:'line',t:'라인'},{k:'wo',t:'제번'},{k:'model',t:'모델'},{k:'asm',t:'ASM도번'}]
+        .concat(DTL?[{k:'mat',t:'자도번'},{k:'use',t:'사용수',n:1}]:[{k:'lot',t:'LOT수량',n:1}])
+        .concat([{k:'qty',t:'계획수량',n:1}])
+        .concat(dates.map((d,i)=>({k:'d'+i,t:dcol(d),n:1})));
+      const rows=st.rows.map(r=>{const o={...r};(r.d||[]).forEach((v,i)=>{o['d'+i]=v;});return o;});
+      downloadXLS(`가공계획현황_${st.ymd}_${DTL?'상세':'집계'}`,cols,rows);};
+
+    // 헤더 더블클릭 정렬(고정컬럼) — 일자컬럼은 정렬 대상 아님
+    const keys=['','wcnm','line','wo','model','asm'].concat(DTL?['mat','use']:['lot']).concat(['qty']);
+    enableSort(c,keys,()=>st.rows,()=>draw());
+  };
+
+  // 기준일 = 마지막 계획업로드 일자축 첫날(planBase 캐시 반영 후 조회)
+  planBase().then(b=>{if(b&&b.iso)st.ymd=date2ymd(b.iso);}).catch(()=>{}).then(load);
+};

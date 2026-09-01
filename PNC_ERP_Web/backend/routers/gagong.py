@@ -932,3 +932,195 @@ def gagong_sheet_delete(payload: dict = Body(...)):
         cn.rollback(); raise
     finally:
         cn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 4주간 가공계획현황(제번) — 레거시 w_pr_outside_070 「가공자재계획현황」
+#   ★2026-09-01 신설. 레거시는 **산식 참고**로만 쓰고 데이터는 nx 웹 정본에서 뽑는다
+#     (대표 지시 "레거시 참고해서 우리 기준 NX로"). 컷오버 후에도 그대로 돈다(§1-9-1).
+#
+# ── 레거시 dw_pr_outside_070_t2 원문 구조 (사용자 제공 전문, 2026-09-01) ──
+#   ★소스는 자재소요결과(PR_T_PLAN_PART_MAT)가 **아니다**. 계획원본에서 그 자리에서 전개한다:
+#     pr_t_plan_dtl a ⋈ pr_m_model_bom b ⋈ pr_m_item c(시작품번)
+#                     ⋈ pr_m_item_bom b1..b5(다단) ⋈ pr_m_item m(최종자재)
+#   수량 = ceiling(plan_qty × b.use_qty × isnull(c.prod_rate,100)/100) × b1..bn.use_qty
+#          ↑ceiling 은 **시작품번 단계에서 1회만**. 하위 use_qty 는 곱만(반올림 없음).
+#   필터  m.work_code IN ('P2')  · c.work_code NOT IN ('P2')
+#         m1..m(n-1).work_code NOT IN ('P2')  ← ★P2 도달 시 전개 중단(중복계상 방지)
+#   ＋ /*시작품번검색*/ 유니온 = 시작품번 c 자신이 P2 인 경우(use_qty=1, 다단 없음)
+#   grain  m.work_code, split_work_order, line_no, model_no, output_hm, b.c_item_code, m.item_code
+#   집계t1 = t2 를 (work_code, split_work_order, line_no, item_code) 로 접고
+#            lot_qty=min(plan_qty) · plan_qty=sum(plan_qty)
+#
+# ── ★BOM 전개는 소요엔진으로만 (CLAUDE.md §1-10) ──
+#   레거시의 b1..b5 다단조인 + m1..m4 NOT P2 = `nx_soyo_engine.sagub_parts_soyo(eng, 시작품번,
+#   stop_set)` 와 같은 구조다(stop_set 도달 시 계상 후 정지). ad-hoc 재귀는 금지 대상이므로
+#   엔진에 위임한다. stop_set = nx.item.work_code = 대상작업처(P2).
+#   ★실측 대조 2026-09-01: 표본 15종 중 14종 per-unit 완전일치.
+#     유일 차이 ACQ30605001→MJU66954402-1-1 은 엣지 except_flag='1'(BOM 전개제외)이라
+#     **엔진이 제외한 것이 맞고 레거시 생조인이 이중계상**이다(§1-10 변형SUB 함정 그대로).
+#   ★레거시는 5단에서 끊기지만 엔진은 깊이 25 + 사이클가드 → 더 깊은 BOM 도 정확.
+#
+# ── nx 매핑 ──
+#   pr_t_plan_dtl    → nx.plan_dtl            (PLAN_YMD·WORK_ORDER·MODEL_NO·LINE_NO·
+#                                              PLAN_QTY·TOTAL_QTY·START_HM)
+#   pr_m_model_bom   → nx.PR_M_MODEL_BOM(미러) ∪ nx.model_bom(웹 신규등록)
+#                      ★planrev.py:469-471 이 쓰는 편성 정본과 동일 합집합.
+#   pr_m_item_bom    → 소요엔진(nx.v_pr_bom)
+#   pr_m_item        → nx.item (work_code · prod_rate)
+#   pr_m_work        → nx.PR_M_WORK (P1 용접 · P2 가공)
+#   split_work_order → nx.plan_dtl 에 없음 → WORK_ORDER 사용(웹 제번 = 분할 후 단위)
+#   sina_flag(other_item_gubun) → ★nx.item 에 없다. 도번 접미(item_code+sina_flag)를
+#                      재현하지 않고 도번만 표시한다(없는 값을 지어내지 않음, §1-9-1).
+# ═══════════════════════════════════════════════════════════════════════
+
+def _mp070_modelbom(cur):
+    """모델BOM = nx.PR_M_MODEL_BOM(미러) ∪ nx.model_bom(웹 신규등록).
+    반환 {model_no: [(c_item_code, use_qty, apply_from, apply_to)]}  ※planrev.py:469-471 동일."""
+    mb = {}
+    cur.execute("""SELECT RTRIM(MODEL_NO), RTRIM(C_ITEM_CODE), ISNULL(USE_QTY,1),
+                          RTRIM(ISNULL(MAKE_YMD,'')), RTRIM(ISNULL(TO_APPLY_YMD,''))
+                     FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM WITH(NOLOCK)""")
+    for r in cur.fetchall():
+        mb.setdefault(r[0], []).append((r[1], float(r[2] or 1), r[3], r[4]))
+    cur.execute("""SELECT RTRIM(MODEL_NO), RTRIM(C_ITEM_CODE), ISNULL(USE_QTY,1),
+                          RTRIM(ISNULL(APPLY_FROM,'')), RTRIM(ISNULL(APPLY_TO,''))
+                     FROM nx.model_bom WITH(NOLOCK)""")
+    for r in cur.fetchall():
+        mb.setdefault(r[0], []).append((r[1], float(r[2] or 1), r[3], r[4]))
+    return mb
+
+
+@router.get("/api/gagong/matplan070")
+def gagong_matplan070(ymd: str = Query(""), line: str = Query(""), item: str = Query(""),
+                      asm: str = Query(""), wo: str = Query(""), mode: str = Query("sum"),
+                      wc: str = Query("P2"), limit: int = Query(4000)):
+    """4주간 가공계획현황(제번) — 레거시 w_pr_outside_070. mode: sum=집계 / dtl=상세.
+
+    ymd = 기준일(YYMMDD). 일자칸 01~31 = 기준일 + 0~30 (레거시 as_from_ymd + n).
+    wc  = 대상 작업처(기본 P2 가공). 이 작업처 품목에 도달하면 전개를 멈추고 계상한다.
+    """
+    import datetime as _dt
+    import nx_soyo_engine as _nse       # sys.path 는 common.py 가 _harness 로 잡아둔다
+
+    d6 = _d6(ymd) if ymd else _dt.date.today().strftime('%y%m%d')
+    da = _dt.date(2000 + int(d6[:2]), int(d6[2:4]), int(d6[4:6]))
+    dates = [(da + _dt.timedelta(days=i)).strftime('%y%m%d') for i in range(31)]
+    dend = dates[-1]
+    didx = {d: i for i, d in enumerate(dates)}
+    wcp = (wc or "").strip().upper() or "P2"
+    fl, fi, fa, fw = (line.strip().upper(), item.strip().upper(),
+                      asm.strip().upper(), wo.strip().upper())
+
+    cn = _nx(); cur = cn.cursor()
+    try:
+        # ── 마스터 ──
+        cur.execute("""SELECT UPPER(RTRIM(item_code)), RTRIM(ISNULL(work_code,'')),
+                              ISNULL(prod_rate,100) FROM nx.item WITH(NOLOCK)""")
+        # prod_rate: 레거시 isnull(c.prod_rate,100) — NULL만 100. 0 은 0 그대로(수량 0).
+        imap = {r[0]: (str(r[1]).strip(), float(r[2] if r[2] is not None else 100))
+                for r in cur.fetchall()}
+        stop = set(k for k, v in imap.items() if v[0] == wcp)     # ★전개 정지집합
+        cur.execute("""SELECT RTRIM(WORK_CODE), RTRIM(ISNULL(WORK_DESC,''))
+                         FROM nx.PR_M_WORK WITH(NOLOCK)""")
+        wmap = {r[0]: r[1] for r in cur.fetchall()}
+        mb = _mp070_modelbom(cur)
+
+        # ── 계획 (레거시 a.plan_ymd between as_from and as_to) ──
+        cur.execute("""SELECT RTRIM(ISNULL(PLAN_YMD,'')), RTRIM(WORK_ORDER),
+                              RTRIM(ISNULL(MODEL_NO,'')), RTRIM(ISNULL(LINE_NO,'')),
+                              CAST(ISNULL(PLAN_QTY,0) AS float),
+                              RTRIM(ISNULL(START_HM,''))
+                         FROM nx.plan_dtl WITH(NOLOCK)
+                        WHERE PLAN_YMD BETWEEN ? AND ?""", d6, dend)
+        plans = cur.fetchall()
+
+        # ── 소요엔진 (BOM 전개는 여기서만) ──
+        eng = NxCostEngine(cur)
+        try:
+            _nse.warm_vpr(eng)
+        except Exception:
+            pass
+        memo = {}
+        ucache = {}     # 시작품번 → {P2자재: per-unit 소요}
+
+        def unit_soyo(start):
+            u = start.upper()
+            if u not in ucache:
+                if u in stop:
+                    ucache[u] = {u: 1.0}          # ★/*시작품번검색*/ 유니온 = 자신이 P2
+                else:
+                    ucache[u] = {k: v for k, v in
+                                 _nse.sagub_parts_soyo(eng, u, stop, memo).items() if v > 0}
+            return ucache[u]
+
+        # ── 전개 ──
+        acc = {}
+        for pymd, work_order, model_no, line_no, plan_qty, start_hm in plans:
+            if fw and fw not in work_order.upper():
+                continue
+            if fl and fl not in line_no.upper():
+                continue
+            cands = mb.get(model_no)
+            if not cands:
+                continue
+            di = didx.get(pymd)
+            if di is None:
+                continue
+            ohm = (start_hm or "")[:4]
+            for c_item, m_use, afrom, ato in cands:
+                cu = c_item.upper()
+                if fa and fa not in cu:
+                    continue
+                info = imap.get(cu)
+                if not info:
+                    continue                       # 품목마스터 미등록(유령 ASSY) — 레거시도 조인탈락
+                cwc, prate = info
+                if cwc == wcp and cu not in stop:
+                    continue
+                # 모델BOM 유효기간 (레거시 070 원문엔 없으나 nx 정본 규칙 — 계획일자 기준)
+                if (afrom and afrom > pymd) or (ato and ato < pymd):
+                    continue
+                # ★ceiling 은 시작품번 단계에서 1회만 (레거시 원문 동일)
+                base = math.ceil(float(plan_qty) * m_use * prate / 100.0)
+                if base <= 0:
+                    continue
+                for mat, per in unit_soyo(cu).items():
+                    if fi and fi not in mat:
+                        continue
+                    q = base * per
+                    if q <= 0:
+                        continue
+                    k = ((work_order, line_no, cu, mat) if mode == "dtl"
+                         else (work_order, line_no, cu))
+                    g = acc.get(k)
+                    if g is None:
+                        g = acc[k] = {"wc": wcp, "wcnm": wmap.get(wcp, ""),
+                                      "wo": work_order, "line": line_no, "model": model_no,
+                                      "asm": c_item, "ohm": ohm,
+                                      "use": (round(per, 4) if mode == "dtl" else 0),
+                                      "lot": None, "qty": 0.0, "d": [0.0] * 31}
+                        if mode == "dtl":
+                            g["mat"] = mat
+                    g["qty"] += q
+                    g["d"][di] += q
+                    # lot_qty = min(plan_qty) · output_hm = min (레거시 t1 집계)
+                    g["lot"] = base if g["lot"] is None else min(g["lot"], base)
+                    if ohm and (not g["ohm"] or ohm < g["ohm"]):
+                        g["ohm"] = ohm
+
+        rows = list(acc.values())
+        for g in rows:
+            if g["lot"] is None:
+                g["lot"] = 0.0
+            g["qty"] = round(g["qty"], 3)
+            g["d"] = [round(x, 3) for x in g["d"]]
+        # 레거시 sort: work_desc · line_no · work_order · item_code
+        rows.sort(key=lambda x: (x.get("wcnm") or "", x.get("line") or "",
+                                 x.get("wo") or "", x.get("asm") or "", x.get("mat") or ""))
+        cut = max(1, min(int(limit or 4000), 20000))
+        return {"ok": True, "mode": mode, "ymd": d6, "dates": dates, "wc": wcp,
+                "rows": rows[:cut], "cnt": len(rows),
+                "qty": round(sum(x["qty"] for x in rows), 3)}
+    finally:
+        cn.close()
