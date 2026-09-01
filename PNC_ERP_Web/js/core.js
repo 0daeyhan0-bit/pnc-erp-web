@@ -2699,13 +2699,12 @@ const _mkMagam=(CFG)=>(c)=>{
     const btnLbl=selN?`이월/해제 (${selN}건)`:'이월/해제';
     const carN=items.filter(it=>{const fd=fdays(it);return fd.length&&fd.every(bd=>bd.carry);}).length;
     const toolbar=`<div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
-      <b style="white-space:nowrap">품목별 매출</b>
-      <select class="inp" id="tp-view" style="width:auto"><option value="item" ${view2==='item'?'selected':''}>품목별</option><option value="day" ${view2==='day'?'selected':''}>일자별</option></select>
-      <label class="tl">기간</label><input type="date" class="inp" id="tp-from" value="${esc(fromDt)}" style="width:140px"><span class="mut">~</span><input type="date" class="inp" id="tp-to" value="${esc(toDt)}" style="width:140px">
-      <label class="tl">품명</label><input class="inp" id="tp-q" list="tp-items" value="${esc(qName)}" placeholder="품명/품번" style="width:118px" autocomplete="off"><datalist id="tp-items">${items.map(it=>`<option value="${esc(it.nm||it.mat)}">${esc(it.mat)}</option>`).join('')}</datalist>
-      <button class="btn" id="tp-search">검색</button>
-      ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px">저장중…</span>':''}`:''}
-      <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 금액0 · 차월(${_ynm(carryNextYm)})</span></div>`;
+      <b style="white-space:nowrap;flex:0 0 auto">품목별 매출</b>
+      <select class="inp" id="tp-view" style="width:auto;flex:0 0 auto"><option value="item" ${view2==='item'?'selected':''}>품목별</option><option value="day" ${view2==='day'?'selected':''}>일자별</option></select>
+      <label class="tl" style="white-space:nowrap;flex:0 0 auto">기간</label><input type="date" class="inp" id="tp-from" value="${esc(fromDt)}" style="width:118px;flex:0 0 auto"><span class="mut" style="flex:0 0 auto">~</span><input type="date" class="inp" id="tp-to" value="${esc(toDt)}" style="width:118px;flex:0 0 auto">
+      <label class="tl" style="white-space:nowrap;flex:0 0 auto">품명</label><input class="inp" id="tp-q" list="tp-items" value="${esc(qName)}" placeholder="품명/품번" style="width:110px;flex:0 0 auto" autocomplete="off"><datalist id="tp-items">${items.map(it=>`<option value="${esc(it.nm||it.mat)}">${esc(it.mat)}</option>`).join('')}</datalist>
+      <button class="btn" id="tp-search" style="white-space:nowrap;flex:0 0 auto">검색</button>
+      ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap;flex:0 0 auto">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px;flex:0 0 auto">저장중…</span>':''}`:''}</div>`;
     return toolbar+`<div id="tp-scroll" style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
   };
   // 이월 버튼만 갱신(체크박스 클릭 시 전체 재렌더 금지 — 스크롤 리셋 방지 §3)
