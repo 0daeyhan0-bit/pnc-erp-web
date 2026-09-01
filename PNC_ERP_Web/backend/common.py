@@ -556,6 +556,34 @@ def _carry_ovr_set(kind, ym, cc, mat, ymd, carry, usr="web"):
     finally:
         cn.close()
 
+def _carry_ovr_set_bulk(kind, ym, cc, pairs, carry, usr="web"):
+    """여러 (mat, ymd) 재배정을 한 트랜잭션에. pairs=[(mat,ymd),...]. carry True=이월(차월)/False=당월. 자연상태면 삭제."""
+    _ensure_carry_ovr()
+    ym = str(ym); cc = str(cc)
+    yy = int(ym[:2]); nm = int(ym[2:]) + 1; nyy = yy
+    if nm == 13: nm = 1; nyy += 1
+    nym = f"{nyy:02d}{nm:02d}"; target = nym if carry else ym
+    cn = _nx_tx(); c = cn.cursor(); n = 0; cutc = {}
+    try:
+        for mat, ymd in pairs:
+            mat = str(mat).strip(); ymd = "".join(ch for ch in str(ymd) if ch.isdigit())
+            if not mat or len(ymd) != 6: continue
+            mo = ymd[:4]
+            if mo not in cutc:
+                c.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, mo)
+                rr = c.fetchone(); cutc[mo] = (str(rr[0]).strip().zfill(2) if rr else '31')
+            nat = nym if (ymd[4:6] > cutc[mo]) else ym
+            c.execute("DELETE FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr WHERE kind=? AND cust_code=? AND mat_code=? AND maint_ymd=?", kind, cc, mat, ymd)
+            if target != nat:
+                c.execute("INSERT INTO PARTNER_ERP_TEST3.nx.magam_carry_ovr(kind,cust_code,mat_code,maint_ymd,assign_ym,ins_user) VALUES(?,?,?,?,?,?)", kind, cc, mat, ymd, target, usr)
+            n += 1
+        cn.commit()
+        return {"ok": True, "n": n, "carry": bool(carry), "assign_ym": target}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
+
 
 # ── ★2026-08-25 웹 전용 SEQ 대역 (라이브와 키 충돌 방지) ──────────────────
 #   문제: MAINT_SEQ 는 일자별 채번인데 라이브·nx 가 독립 증가한다.

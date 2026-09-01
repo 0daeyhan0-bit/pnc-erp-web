@@ -2223,9 +2223,9 @@ const _mkMagam=(CFG)=>(c)=>{
   const _d2=s=>{s=''+(s||'');return s.length===6?`${s.slice(2,4)}/${s.slice(4,6)}`:s;};   // 260801 → 08/01
   // 모달 상태
   let mc=null, detail=null, mLoading=false, mClosed=false, pEdit={}, dEdit={}, amtAdjs=[], expanded=new Set();
-  // ★일자별 조회·이월 관리 — 2026-09-01. daylist = 당월+이월 한 표(품목×입고일), carry=1이 이월.
-  //   행 클릭 = 이월/이월해제(carry_set) → 마감 금액 즉시 반영. carryView='date'(입고일자별)|'item'(품목별).
-  let dayRows=[], carryNextYm='', showCarry=false, carryView='date', carryBusy=false;
+  // ★상단 품목별/일자별 통합 — 2026-09-01. detail.items[].byday[].carry(1=이월,매출금액0).
+  //   view2='item'(품목별)|'day'(일자별 평면). 체크박스 선택 → 이월 버튼 1개로 이월/이월해제.
+  let carryNextYm='', carryBusy=false, view2='item', selRows=new Set(), fromDt='', toDt='';
   const dkey=(mat,d)=>mat+'|'+d;
   const ymd6=d=>(''+ym).slice(0,4)+String(d).padStart(2,'0');
   const num=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -2573,12 +2573,10 @@ const _mkMagam=(CFG)=>(c)=>{
   };
 
   const openModal=async(cc,nm)=>{mc={cc,nm};detail=null;pEdit={};dEdit={};amtAdjs=[];expanded=new Set();
-    dayRows=[];carryNextYm='';showCarry=false;carryBusy=false;
+    carryNextYm='';carryBusy=false;view2='item';selRows=new Set();fromDt='';toDt='';
     mLoading=true;await ensureReasons();drawModal();
-    // 일자별 조회(daylist) 로드
-    loadDay(cc).then(()=>{if(mc&&mc.cc===cc)drawModal();});
     try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      detail=await r.json();mClosed=!!detail.close_flag;
+      detail=await r.json();mClosed=!!detail.close_flag;carryNextYm=detail.next_ym||'';
       (detail.adjustments||[]).forEach(a=>{
         if(a.adj_type==='AMT_UP'||a.adj_type==='AMT_DN'||a.adj_type==='ITEM_ADJ'){amtAdjs.push({amt:a.delta_amt,rc:a.reason_code||'',rd:a.reason_detail||''});}
         else if(a.scope==='DATE'&&a.mat_code&&a.target_ymd){const d=+(''+a.target_ymd).slice(4,6);expanded.add(a.mat_code);
@@ -2587,79 +2585,105 @@ const _mkMagam=(CFG)=>(c)=>{
     catch(e){detail=null;}
     mLoading=false;drawModal();};
   const closeModal=()=>{mc=null;detail=null;const m=c.querySelector('#sm-modal');if(m)m.innerHTML='';};
-  const loadDay=async(cc)=>{try{const r=await fetch(`${API}/api/${CFG.base}/daylist?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);const j=await r.json();dayRows=j.rows||[];carryNextYm=j.next_ym||'';}catch(e){dayRows=[];}};
-  const reloadDetail=async(cc)=>{try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);const j=await r.json();detail=j;mClosed=!!j.close_flag;}catch(e){}};
+  const reloadDetail=async(cc)=>{try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);const j=await r.json();detail=j;mClosed=!!j.close_flag;carryNextYm=j.next_ym||'';}catch(e){}};
 
-  // 일자별 유효단가/수량(날짜조정>품목단가>원본), 조정합 계산
-  const effDay=(it,bd)=>{const de=dEdit[dkey(it.mat,bd.d)];let ec=+bd.cost, eq=+bd.qty;
-    if(de){if(de.nc!=null&&de.nc!=='')ec=+de.nc;}
+  // 일자별 유효단가/수량(날짜조정>품목단가>원본). 이월(carry) 일자는 매출 0(마감 제외).
+  const effDay=(it,bd)=>{if(bd.carry)return {ec:+bd.cost,eq:+bd.qty,base:0,delta:0,carry:1};
+    const de=dEdit[dkey(it.mat,bd.d)];let ec=+bd.cost;
+    if(de&&de.nc!=null&&de.nc!=='')ec=+de.nc;
     else{const pe=pEdit[it.mat];if(pe&&pe.nc!=null&&pe.nc!=='')ec=+pe.nc;}
-    return {ec,eq,delta:ec*eq-(+bd.cost)*(+bd.qty)};};
-  const calc=()=>{const items=(detail&&detail.items)||[];let pd=0;
-    items.forEach(it=>(it.byday||[]).forEach(bd=>{pd+=effDay(it,bd).delta;}));
+    return {ec,eq:+bd.qty,base:+bd.amt,delta:ec*(+bd.qty)-(+bd.cost)*(+bd.qty),carry:0};};
+  const calc=()=>{const items=(detail&&detail.items)||[];let base=0,pd=0;
+    items.forEach(it=>(it.byday||[]).forEach(bd=>{const e=effDay(it,bd);base+=e.base;pd+=e.delta;}));
     const ad=amtAdjs.reduce((a,b)=>a+(+b.amt||0),0);
-    const base=items.reduce((a,b)=>a+(+b.amt||0),0);
     return {base,pd,ad,adj:pd+ad,final:base+pd+ad};};
 
-  // ── 이월(정산귀속·표시) 섹션 ──
+  // ── 일자 필터·이월 유틸 ──
   const _dlab=ymd=>{ymd=''+(ymd||'');return ymd.length>=6?`${ymd.slice(0,2)}/${ymd.slice(2,4)}/${ymd.slice(4,6)}`:ymd;};
   const _ynm=y=>{y=''+(y||'');return y.length>=4?`20${y.slice(0,2)}.${y.slice(2,4)}`:y;};
-  const crClick=()=>canW&&!mClosed;   // 재배정 가능(권한 + 미마감) — 렌더 시점마다 평가
-  const crHtml=()=>{
-    const _crClick=crClick();
-    const carryN=dayRows.filter(r=>r.carry).length, curN=dayRows.length-carryN;
-    const carAmt=dayRows.filter(r=>r.carry).reduce((a,r)=>a+(+r.amt||0),0);
-    const curAmt=dayRows.filter(r=>!r.carry).reduce((a,r)=>a+(+r.amt||0),0);
-    const _foot=`<tfoot><tr style="position:sticky;bottom:0;background:var(--bg2,#f4f6fb);font-weight:700">
-      <td colspan="4" class="center">당월 ${won0(curAmt)} · 이월 ${won0(carAmt)}</td>
-      <td class="num">${num(dayRows.reduce((a,r)=>a+(+r.qty||0),0))}</td><td class="num">${won0(curAmt+carAmt)}</td></tr></tfoot>`;
-    const _badge=r=>r.carry?`<span style="background:#ffe0b2;color:#b5651d;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700;margin-left:5px">이월</span>`:'';
-    const _rowAttr=r=>_crClick?` class="cr-row" data-mat="${esc(r.mat)}" data-ymd="${esc(r.ymd)}" data-carry="${r.carry}" style="cursor:pointer${r.carry?';background:#fff6ec':''}" title="클릭: ${r.carry?'이월해제(당월로)':'이월(차월로)'}"`:` style="${r.carry?'background:#fff6ec':''}"`;
-    let body='';
-    if(carryView==='item'){
-      const mp={};dayRows.forEach(r=>{const it=mp[r.mat]||(mp[r.mat]={mat:r.mat,nm:r.nm,unit:r.unit,qty:0,amt:0,cN:0,tot:0});it.qty+=+r.qty||0;it.amt+=+r.amt||0;it.tot++;if(r.carry)it.cN++;});
-      const its=Object.values(mp).sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));
-      const rws=its.map(it=>{const st=it.cN===0?'당월':it.cN===it.tot?'이월':'일부이월';const cl=it.cN===0?'#789':it.cN===it.tot?'#b5651d':'#c77';
-        return `<tr style="${it.cN?'background:#fff6ec':''}"><td><b>${esc(it.mat)}</b></td><td class="bcap" title="${esc(it.nm||'')}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
-        <td class="center">${esc(it.unit||'')}</td><td class="center" style="color:${cl};font-weight:700;font-size:11px">${st}</td><td class="num">${num(it.qty)}</td><td class="num">${won0(it.amt)}</td></tr>`;}).join('');
-      body=`<table class="sm-it"><thead><tr><th>품번</th><th>품명</th><th class="center">단위</th><th class="center">구분</th><th>수량</th><th>금액</th></tr></thead>
-        <tbody>${rws||'<tr><td colspan="6" class="empty">입고 없음</td></tr>'}</tbody>${its.length?_foot:''}</table>
-        <div class="mut" style="font-size:11px;padding:3px 2px">※ 이월/당월 전환은 입고일자별 보기에서 행을 클릭하세요(전환은 입고일 단위).</div>`;
-    }else{
-      const dg={};dayRows.forEach(r=>{(dg[''+r.ymd]||(dg[''+r.ymd]=[])).push(r);});
-      const dks=Object.keys(dg).sort();
-      let rws='';
-      dks.forEach(dk=>{const g=dg[dk];const da=g.reduce((a,r)=>a+(+r.amt||0),0);const gc=g.filter(r=>r.carry).length;
-        rws+=`<tr style="background:var(--bg2,#f4f6fb)"><td colspan="4"><b>${_dlab(dk)}</b> <span class="mut">${g.length}품목${gc?` · 이월 ${gc}`:''}</span></td><td></td><td class="num"><b>${won0(da)}</b></td></tr>`;
-        g.sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt)).forEach(r=>{rws+=`<tr${_rowAttr(r)}><td style="padding-left:20px"><b>${esc(r.mat)}</b>${_badge(r)}</td>
-          <td class="bcap" title="${esc(r.nm||'')}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
-          <td class="center">${esc(r.unit||'')}</td><td></td><td class="num">${num(r.qty)}</td><td class="num">${won0(r.amt)}</td></tr>`;});});
-      body=`<table class="sm-it"><thead><tr><th>입고일 / 품번</th><th>품명</th><th class="center">단위</th><th></th><th>수량</th><th>금액</th></tr></thead>
-        <tbody>${rws||'<tr><td colspan="6" class="empty">입고 없음</td></tr>'}</tbody>${dks.length?_foot:''}</table>`;
-    }
-    const tgl=`<span style="font-weight:400;font-size:12px;margin-left:8px">
-      <a href="javascript:void(0)" id="sm-cv-date" style="text-decoration:${carryView==='date'?'none':'underline'};color:${carryView==='date'?'#1c47a0':'#789'};font-weight:${carryView==='date'?'700':'400'}">입고일자별</a> ·
-      <a href="javascript:void(0)" id="sm-cv-item" style="text-decoration:${carryView==='item'?'none':'underline'};color:${carryView==='item'?'#1c47a0':'#789'};font-weight:${carryView==='item'?'700':'400'}">품목별</a></span>`;
-    return `<div class="sm-adj" style="margin-top:10px">
-      <div style="font-weight:700;margin-bottom:4px"><span id="sm-carry-h" style="cursor:pointer">${showCarry?'▾':'▸'} 일자별 조회 · 이월 관리</span>
-        <span style="color:var(--muted);font-weight:400;font-size:12px">(당월+이월 한 표 · ${_crClick?'행 클릭=이월/이월해제 · ':''}이월분 → ${_ynm(carryNextYm)} 마감)</span>
-        <span style="font-weight:400;color:#b5651d">· 이월 ${carryN}건 ${won0(carAmt)}원</span>${showCarry?tgl:''}${carryBusy?'<span class="mut" style="font-size:11px;margin-left:6px">저장 중…</span>':''}</div>
-      ${showCarry?`<div style="max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:6px">${body}</div>`:''}
-    </div>`;
-  };
-  const carrySet=async(mat,ymd,carry)=>{
-    if(carryBusy||!crClick())return;carryBusy=true;drawModal();
+  const crClick=()=>canW&&!mClosed;   // 재배정 가능(권한 + 미마감)
+  const _monPfx=()=>`20${(''+ym).slice(0,2)}-${(''+ym).slice(2,4)}`;
+  const _dayOf=dt=>{const m=/^\d{4}-\d{2}-(\d{2})$/.exec(''+(dt||''));return m?+m[1]:0;};
+  const inRange=d=>{const f=_dayOf(fromDt),t=_dayOf(toDt);return (!f||d>=f)&&(!t||d<=t);};
+  const IBADGE=`<span style="background:#ffe0b2;color:#b5651d;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700;margin-left:5px">이월</span>`;
+  const fdays=it=>(it.byday||[]).filter(bd=>inRange(bd.d));    // 필터 적용된 일자
+  // 선택키(I:mat / D:mat|d) 현재 이월상태
+  const selKeyCarried=(k,byMat)=>{if(k.startsWith('I:')){const it=byMat[k.slice(2)];return it&&fdays(it).length&&fdays(it).every(bd=>bd.carry);}
+    const p=k.slice(2).split('|');const it=byMat[p[0]];const bd=it&&(it.byday||[]).find(x=>x.d==+p[1]);return bd&&bd.carry;};
+  const carryApply=async()=>{
+    if(carryBusy||!selRows.size)return;
+    const items=(detail&&detail.items)||[];const byMat={};items.forEach(it=>byMat[it.mat]=it);
+    const pairs=[];let allCarry=true;
+    selRows.forEach(k=>{if(k.startsWith('I:')){const it=byMat[k.slice(2)];if(it)fdays(it).forEach(bd=>{pairs.push({mat_code:it.mat,maint_ymd:bd.ymd});if(!bd.carry)allCarry=false;});}
+      else{const p=k.slice(2).split('|');const it=byMat[p[0]];const bd=it&&(it.byday||[]).find(x=>x.d==+p[1]);if(bd){pairs.push({mat_code:it.mat,maint_ymd:bd.ymd});if(!bd.carry)allCarry=false;}}});
+    if(!pairs.length)return;
+    const carry=!allCarry;   // 전부 이월이면 해제, 아니면 이월
+    carryBusy=true;drawModal();
     try{const r=await fetch(`${API}/api/${CFG.base}/carry_set`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ym,cust_code:mc.cc,mat_code:mat,maint_ymd:ymd,carry})});
+        body:JSON.stringify({ym,cust_code:mc.cc,carry,pairs})});
       const j=await r.json();if(!j.ok){alert('이월 전환 실패:\n'+(j.detail||JSON.stringify(j)));}
-      await reloadDetail(mc.cc);await loadDay(mc.cc);
+      selRows.clear();await reloadDetail(mc.cc);
     }catch(e){alert('이월 전환 실패: '+e.message);}
     carryBusy=false;drawModal();};
-  const wireCR=(m)=>{
-    const ch=m.querySelector('#sm-carry-h');if(ch)ch.onclick=()=>{showCarry=!showCarry;drawModal();};
-    const cd=m.querySelector('#sm-cv-date');if(cd)cd.onclick=()=>{carryView='date';drawModal();};
-    const ci=m.querySelector('#sm-cv-item');if(ci)ci.onclick=()=>{carryView='item';drawModal();};
-    m.querySelectorAll('.cr-row').forEach(el=>el.onclick=()=>carrySet(el.dataset.mat,el.dataset.ymd,el.dataset.carry!=='1'));
+
+  // 상단 품목별/일자별 표(체크박스·이월·단가편집)
+  const topSection=()=>{
+    const items=(detail&&detail.items)||[];const rdis=mClosed?'disabled':'';const _ck=crClick();
+    const byMat={};items.forEach(it=>byMat[it.mat]=it);
+    let rows='';
+    if(view2==='item'){
+      items.forEach(it=>{const fd=fdays(it);if(!fd.length)return;
+        const carried=fd.every(bd=>bd.carry),anyC=fd.some(bd=>bd.carry);
+        const qty=fd.reduce((a,bd)=>a+(+bd.qty),0);
+        const amt0=fd.filter(bd=>!bd.carry).reduce((a,bd)=>a+(+bd.amt),0);
+        const delta=fd.reduce((a,bd)=>a+effDay(it,bd).delta,0);
+        const pe=pEdit[it.mat]||{};const nc=(pe.nc!=null&&pe.nc!=='')?+pe.nc:'';const k='I:'+it.mat;
+        rows+=`<tr class="${delta?'chg':''}" style="${anyC?'background:#fff6ec':''}">
+          <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
+          <td><b>${esc(it.mat)}</b>${carried?IBADGE:''}</td>
+          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+          <td class="center">${esc(it.unit)||''}</td><td class="num">${num(qty)}</td><td class="num">${num(it.cost)}</td>
+          <td class="num">${carried?'<span class="mut">-</span>':`<input class="tp-pc" data-mat="${esc(it.mat)}" type="number" step="any" value="${nc}" placeholder="${num(it.cost)}" ${rdis}>`}</td>
+          <td class="num ${delta>0?'dpos':delta<0?'dneg':''}">${delta?won0(delta):''}</td>
+          <td class="num">${carried?'<b style="color:#b5651d">0</b>':won0(amt0)}</td></tr>`;});
+    }else{
+      const flat=[];items.forEach(it=>(it.byday||[]).forEach(bd=>{if(inRange(bd.d))flat.push([it,bd]);}));
+      flat.sort((a,b)=>a[1].d-b[1].d||Math.abs(b[1].amt)-Math.abs(a[1].amt));
+      flat.forEach(([it,bd])=>{const de=dEdit[dkey(it.mat,bd.d)]||{};const e=effDay(it,bd);const k='D:'+it.mat+'|'+bd.d;
+        rows+=`<tr class="${e.delta?'chg':''}" style="${bd.carry?'background:#fff6ec':''}">
+          <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
+          <td class="center">${_dlab(bd.ymd)}</td><td><b>${esc(it.mat)}</b>${bd.carry?IBADGE:''}</td>
+          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+          <td class="num">${num(bd.qty)}</td><td class="num">${num(bd.cost)}</td>
+          <td class="num">${bd.carry?'<span class="mut">-</span>':`<input class="tp-dc" data-mat="${esc(it.mat)}" data-d="${bd.d}" type="number" step="any" value="${(de.nc!=null&&de.nc!=='')?de.nc:''}" placeholder="${num(bd.cost)}" style="width:78px" ${rdis}>`}</td>
+          <td class="num ${e.delta>0?'dpos':e.delta<0?'dneg':''}">${e.delta?won0(e.delta):''}</td>
+          <td class="num">${bd.carry?'<b style="color:#b5651d">0</b>':won0(bd.amt)}</td></tr>`;});
+    }
+    const cols=view2==='item'
+      ?`<th class="center" style="width:24px"></th><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`
+      :`<th class="center" style="width:24px"></th><th class="center">입고일</th><th>품번</th><th>품명</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`;
+    const selN=selRows.size;let dir=true;
+    if(selN){dir=![...selRows].every(k=>selKeyCarried(k,byMat));}
+    const btnLbl=selN?(dir?`선택 ${selN}건 이월`:`선택 ${selN}건 이월해제`):'이월';
+    const carN=items.filter(it=>{const fd=fdays(it);return fd.length&&fd.every(bd=>bd.carry);}).length;
+    const toolbar=`<div style="display:flex;align-items:center;gap:7px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
+      <b style="white-space:nowrap">품목별 매출</b>
+      <select class="inp" id="tp-view" style="width:auto"><option value="item" ${view2==='item'?'selected':''}>품목별</option><option value="day" ${view2==='day'?'selected':''}>일자별</option></select>
+      <label class="tl">기간</label><input type="date" class="inp" id="tp-from" value="${esc(fromDt||_monPfx()+'-01')}" style="width:138px"><span class="mut">~</span><input type="date" class="inp" id="tp-to" value="${esc(toDt||_monPfx()+'-31')}" style="width:138px">
+      ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px">저장중…</span>':''}`:''}
+      <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 매출금액 0 · 차월(${_ynm(carryNextYm)}) 마감</span></div>`;
+    return toolbar+`<div style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
+  };
+  const wireTop=(m)=>{
+    const vs=m.querySelector('#tp-view');if(vs)vs.onchange=e=>{view2=e.target.value;selRows.clear();drawModal();};
+    const ff=m.querySelector('#tp-from');if(ff)ff.onchange=e=>{fromDt=e.target.value;drawModal();};
+    const ft=m.querySelector('#tp-to');if(ft)ft.onchange=e=>{toDt=e.target.value;drawModal();};
+    m.querySelectorAll('.tp-ck').forEach(el=>el.onchange=()=>{if(el.checked)selRows.add(el.dataset.k);else selRows.delete(el.dataset.k);drawModal();});
+    const cb=m.querySelector('#tp-carry');if(cb)cb.onclick=carryApply;
+    m.querySelectorAll('.tp-pc').forEach(el=>el.onchange=()=>{const mat=el.dataset.mat,v=el.value.trim();
+      if(v===''){if(pEdit[mat]){delete pEdit[mat].nc;if(!pEdit[mat].nc)delete pEdit[mat];}}else{pEdit[mat]=Object.assign(pEdit[mat]||{rc:'',rd:''},{nc:+v});}drawModal();});
+    m.querySelectorAll('.tp-dc').forEach(el=>el.onchange=()=>{const k=dkey(el.dataset.mat,+el.dataset.d),v=el.value.trim();dEdit[k]=dEdit[k]||{nc:'',nq:'',rc:'',rd:''};dEdit[k].nc=(v===''?'':+v);
+      if((dEdit[k].nc===''||dEdit[k].nc==null)&&!dEdit[k].rc&&!(dEdit[k].rd||'').trim())delete dEdit[k];drawModal();});
   };
 
   const drawModal=()=>{
@@ -2672,22 +2696,10 @@ const _mkMagam=(CFG)=>(c)=>{
     const s=calc();
     const mmdd=d=>String(d).padStart(2,'0');
     const rdis=mClosed?'disabled':'';
-    const itemRows=items.map(it=>{const pe=pEdit[it.mat]||{};const nc=(pe.nc!=null&&pe.nc!=='')?+pe.nc:'';
-      const idelta=(it.byday||[]).reduce((a,bd)=>a+effDay(it,bd).delta,0);const exp=expanded.has(it.mat);
-      let html=`<tr class="${idelta?'chg':''}"><td><span class="sm-exp" data-mat="${esc(it.mat)}" style="cursor:pointer;color:#2f6db3;font-weight:700">${exp?'▾':'▸'}</span> <b>${esc(it.mat)}</b></td>
-        <td class="bcap" title="${esc(it.nm)}" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm)}</td><td class="center">${esc(it.unit)||''}</td>
-        <td class="num">${num(it.qty)}</td><td class="num">${num(it.cost)}</td>
-        <td class="num"><input class="sm-pc" data-mat="${esc(it.mat)}" type="number" step="any" value="${nc}" placeholder="${num(it.cost)}" ${rdis}></td>
-        <td class="num ${idelta>0?'dpos':idelta<0?'dneg':''}">${idelta?won0(idelta):''}</td><td class="num">${won0(it.amt)}</td></tr>`;
-      if(exp)(it.byday||[]).forEach(bd=>{const de=dEdit[dkey(it.mat,bd.d)]||{};const e=effDay(it,bd);
-        html+=`<tr class="sm-day"><td style="padding-left:24px" class="mut">└ ${mmdd(bd.d)}일</td><td class="mut">일자 매출</td><td></td>
-          <td class="num mut">${num(bd.qty)}</td>
-          <td class="num"><input class="sm-dc" data-mat="${esc(it.mat)}" data-d="${bd.d}" type="number" step="any" value="${(de.nc!=null&&de.nc!=='')?de.nc:''}" placeholder="${num(bd.cost)}" style="width:76px" ${rdis}></td>
-          <td></td><td class="num ${e.delta>0?'dpos':e.delta<0?'dneg':''}">${e.delta?won0(e.delta):''}</td><td class="num mut">${won0(bd.amt)}</td></tr>`;});
-      return html;}).join('');
+    // 상단 표 = topSection()(품목별/일자별·기간필터·체크박스·이월·단가편집)
     let adjRows='';
     items.forEach(it=>{const pe=pEdit[it.mat];
-      if(pe&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost){const dd=(it.byday||[]).reduce((a,bd)=>a+(dEdit[dkey(it.mat,bd.d)]?0:(+pe.nc-+bd.cost)*(+bd.qty)),0);
+      if(pe&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost){const dd=(it.byday||[]).reduce((a,bd)=>a+((dEdit[dkey(it.mat,bd.d)]||bd.carry)?0:(+pe.nc-+bd.cost)*(+bd.qty)),0);
         if(dd!==0)adjRows+=`<div class="sm-adj-row"><span style="min-width:180px"><b>품목단가</b> ${esc(it.mat)} ${num(it.cost)}→${num(pe.nc)} <span class="mut">(${won0(dd)})</span></span>
           <select class="sel rsel sm-prc" data-mat="${esc(it.mat)}" ${rdis}>${rsOpt(pe.rc)}</select>
           <input class="inp rdet sm-prd" data-mat="${esc(it.mat)}" value="${esc(pe.rd||'')}" placeholder="세부 사유(선택)" ${rdis}></div>`;}
@@ -2702,15 +2714,13 @@ const _mkMagam=(CFG)=>(c)=>{
     m.innerHTML=`<div class="sm-ov"><div class="sm-dlg">
       <div class="sm-dlg-h"><b>${esc(mc.nm)}</b> <span style="opacity:.85">(${esc(mc.cc)}) · 마감 ${esc(ymToInput(ym))}</span>${mClosed?'<span class="sm-badge on" style="background:#fff;color:#2e7d32">🔒 마감완료</span>':''}<span class="x" id="sm-x">✖</span></div>
       <div class="sm-dlg-b">
-        <div style="font-weight:700;margin-bottom:6px">품목별 매출 <span style="color:var(--muted);font-weight:400;font-size:12px">(${items.length}품목 · ▸펼치면 일자별 단가·수량 수정)</span></div>
-        <div style="max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th></tr></thead><tbody>${itemRows||`<tr><td colspan="8" class="empty">품목 없음</td></tr>`}</tbody></table></div>
+        ${topSection()}
         <div class="sm-adj">
           <div style="font-weight:700;margin-bottom:4px">조정내역 <span style="color:var(--muted);font-weight:400;font-size:12px">(품목단가/일자별 단가·수량/총액 증감 · 사유 필수)</span></div>
           ${adjRows||'<div class="mut" style="font-size:12px">단가·수량을 바꾸면 여기에 사유 입력란이 생깁니다.</div>'}
           ${amtAdjRows}
           ${(mClosed||!canW)?'':'<button class="btn sm-mini" id="sm-add-amt">＋ 총액 증감/차감(품목무관)</button>'}
         </div>
-        ${crHtml()}
       </div>
       <div class="sm-dlg-f">
         <div class="sm-sum"><span>원매출 <b>${won0(s.base)}</b></span>
@@ -2725,12 +2735,7 @@ const _mkMagam=(CFG)=>(c)=>{
     </div></div>`;
     m.querySelector('#sm-x').onclick=closeModal;
     const c2=m.querySelector('#sm-close2');if(c2)c2.onclick=closeModal;
-    m.querySelectorAll('.sm-exp').forEach(el=>el.onclick=()=>{const mat=el.dataset.mat;if(expanded.has(mat))expanded.delete(mat);else expanded.add(mat);drawModal();});
-    m.querySelectorAll('.sm-pc').forEach(el=>el.onchange=()=>{const mat=el.dataset.mat,v=el.value.trim();
-      if(v===''){if(pEdit[mat]){delete pEdit[mat].nc;if(!pEdit[mat].nc)delete pEdit[mat];}}else{pEdit[mat]=Object.assign(pEdit[mat]||{rc:'',rd:''},{nc:+v});}drawModal();});
-    const dedit=(el,f)=>{const k=dkey(el.dataset.mat,+el.dataset.d),v=el.value.trim();dEdit[k]=dEdit[k]||{nc:'',nq:'',rc:'',rd:''};dEdit[k][f]=(v===''?'':+v);
-      if((dEdit[k].nc===''||dEdit[k].nc==null)&&(dEdit[k].nq===''||dEdit[k].nq==null)&&!dEdit[k].rc&&!(dEdit[k].rd||'').trim())delete dEdit[k];drawModal();};
-    m.querySelectorAll('.sm-dc').forEach(el=>el.onchange=()=>dedit(el,'nc'));
+    wireTop(m);   // 품목별/일자별 표: 뷰토글·기간필터·체크박스·이월버튼·단가편집
     m.querySelectorAll('.sm-prc').forEach(el=>el.onchange=()=>{const e=pEdit[el.dataset.mat];if(e)e.rc=el.value;});
     m.querySelectorAll('.sm-prd').forEach(el=>el.oninput=()=>{const e=pEdit[el.dataset.mat];if(e)e.rd=el.value;});
     m.querySelectorAll('.sm-drc').forEach(el=>el.onchange=()=>{const e=dEdit[dkey(el.dataset.mat,+el.dataset.d)];if(e)e.rc=el.value;});
@@ -2743,17 +2748,16 @@ const _mkMagam=(CFG)=>(c)=>{
     const sv=m.querySelector('#sm-save');if(sv)sv.onclick=()=>save(false);
     const cf=m.querySelector('#sm-confirm');if(cf)cf.onclick=()=>{if(confirm(`${mc.nm} ${CFG.verb}을 마감확정할까요?\n최종금액 ${won0(calc().final)}원`))save(true);};
     const ro=m.querySelector('#sm-reopen');if(ro)ro.onclick=reopen;
-    wireCR(m);   // 이월·반품 섹션 이벤트
   };
 
   const buildAdjustments=()=>{const items=(detail&&detail.items)||[];const out=[];const errs=[];
     items.forEach(it=>{
-      (it.byday||[]).forEach(bd=>{const de=dEdit[dkey(it.mat,bd.d)];if(!de)return;const ncC=de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost;if(!ncC)return;
+      (it.byday||[]).forEach(bd=>{if(bd.carry)return;const de=dEdit[dkey(it.mat,bd.d)];if(!de)return;const ncC=de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost;if(!ncC)return;
         const nc=+de.nc;const delta=nc*(+bd.qty)-(+bd.cost)*(+bd.qty);
         if(!(de.rc||(de.rd||'').trim()))errs.push(`${it.mat} ${bd.d}일: 사유 필요`);
-        out.push({adj_type:'PRICE',scope:'DATE',mat_code:it.mat,target_ymd:ymd6(bd.d),old_cost:+bd.cost,new_cost:nc,old_qty:+bd.qty,new_qty:+bd.qty,delta_amt:delta,reason_code:de.rc||null,reason_detail:de.rd||null});});
+        out.push({adj_type:'PRICE',scope:'DATE',mat_code:it.mat,target_ymd:bd.ymd||ymd6(bd.d),old_cost:+bd.cost,new_cost:nc,old_qty:+bd.qty,new_qty:+bd.qty,delta_amt:delta,reason_code:de.rc||null,reason_detail:de.rd||null});});
       const pe=pEdit[it.mat];
-      if(pe&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost){let delta=0;(it.byday||[]).forEach(bd=>{if(dEdit[dkey(it.mat,bd.d)])return;delta+=(+pe.nc-+bd.cost)*(+bd.qty);});
+      if(pe&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost){let delta=0;(it.byday||[]).forEach(bd=>{if(bd.carry||dEdit[dkey(it.mat,bd.d)])return;delta+=(+pe.nc-+bd.cost)*(+bd.qty);});
         if(delta!==0){if(!(pe.rc||(pe.rd||'').trim()))errs.push(`${it.mat} 품목단가: 사유 필요`);
           out.push({adj_type:'PRICE',scope:'ITEM',mat_code:it.mat,target_ymd:null,old_cost:+it.cost,new_cost:+pe.nc,old_qty:null,new_qty:null,delta_amt:delta,reason_code:pe.rc||null,reason_detail:pe.rd||null});}}});
     amtAdjs.forEach((a,i)=>{if(+a.amt!==0){if(!(a.rc||(a.rd||'').trim()))errs.push(`총액조정 ${i+1}행: 사유 필요`);

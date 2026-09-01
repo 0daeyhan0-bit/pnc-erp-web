@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _carry_win,
-                    _sale_win_ovr, _carry_win_ovr, _ensure_carry_ovr, _carry_ovr_set)
+                    _sale_win_ovr, _carry_win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
 
 router = APIRouter()
 _ensure_carry_ovr()   # 이월 재배정 override 테이블 보장(1회)
@@ -56,32 +56,28 @@ def purmagam_list(ym: str = Query("")):
 
 @router.get("/api/purmagam/detail")
 def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
-    """매입 거래처 마감상세: 품목×일자 + 저장된 조정."""
+    """매입 마감상세: 당월+이월 전 품목(품목×입고일 byday) + carry 표시 + 조정. 이월 일자 carry=1(프론트 금액 0)."""
     y = _dig4(ym) or _cur_ym()
+    phys = f"A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99'"
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit, S.cost cost,
-            CAST(RIGHT(S.ymd,2) AS INT) d, SUM(S.qty) q, SUM(S.amt) amt
-          FROM ({_pur_src(_sale_win_ovr('PUR').format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
-          WHERE S.cc=? GROUP BY S.mat, S.cost, CAST(RIGHT(S.ymd,2) AS INT)""", cc)
+            S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt
+          FROM ({_pur_src(phys)}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
+          WHERE S.cc=? GROUP BY S.mat, S.cost, S.ymd""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
         cn.close()
-    items = {}; days = set()
-    for r in raw:
-        mat = str(r["mat"]).strip(); d = int(r["d"] or 0); days.add(d)
-        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"],
-                                    "cost": float(r["cost"] or 0), "qty": 0.0, "amt": 0.0, "_bd": {}})
-        qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
-        it["qty"] += qv; it["amt"] += av
-        bd = it["_bd"].setdefault(d, {"d": d, "qty": 0.0, "amt": 0.0, "cost": cv})
-        bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv
-    for it in items.values():
-        it["byday"] = sorted(it.pop("_bd").values(), key=lambda x: x["d"])
-    items_list = sorted(items.values(), key=lambda x: -abs(x["amt"]))
+    yy = int(y[:2]); nm = int(y[2:]) + 1; nyy = yy
+    if nm == 13: nm = 1; nyy += 1
+    nym = f"{nyy:02d}{nm:02d}"
     nx = _nx(); nc = nx.cursor()
     try:
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, y)
+        r = nc.fetchone(); cut = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT mat_code,maint_ymd,assign_ym FROM nx.magam_carry_ovr WHERE kind='PUR' AND cust_code=?", cc)
+        ovr = {(str(a).strip(), str(b).strip()): str(c).strip() for a, b, c in nc.fetchall()}
         nc.execute("""SELECT adj_seq,adj_type,scope,mat_code,target_ymd,old_cost,new_cost,old_qty,new_qty,delta_amt,reason_code,reason_detail
                       FROM nx.pur_adjust WHERE ym=? AND cust_code=? ORDER BY adj_seq""", y, cc)
         adjs = [{"adj_type": r[1], "scope": r[2], "mat_code": r[3], "target_ymd": r[4],
@@ -92,7 +88,21 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
         cr = nc.fetchone(); closed = int(cr[0]) if cr else 0
     finally:
         nx.close()
-    return {"ym": y, "cc": cc, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
+    items = {}; days = set()
+    for r in raw:
+        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip(); d = int(ymd[4:6]); days.add(d)
+        carry = 1 if ovr.get((mat, ymd), (nym if (ymd[4:6] > cut) else y)) != y else 0
+        qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
+        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "_bd": {}, "_mx": -1.0})
+        bd = it["_bd"].setdefault(d, {"d": d, "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
+        bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv; bd["carry"] = carry
+        if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv
+    for it in items.values():
+        bl = sorted(it.pop("_bd").values(), key=lambda x: x["d"]); it.pop("_mx", None)
+        it["byday"] = bl; it["dayN"] = len(bl); it["carryN"] = sum(1 for b in bl if b["carry"])
+    items_list = sorted(items.values(), key=lambda it: (1 if it["carryN"] == it["dayN"] else 0,
+                        -abs(sum(b["amt"] for b in it["byday"] if not b["carry"]))))
+    return {"ym": y, "cc": cc, "next_ym": nym, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
 
 # ===== 이월·오픈일자·반품 (2026-09-01) — 이월=정산귀속·표시 / 반품=수불장 전표(매입반품=-재고출고) =====
 @router.get("/api/purmagam/carryover")
@@ -166,11 +176,13 @@ def purmagam_daylist(ym: str = Query(""), cc: str = Query(...)):
 
 @router.post("/api/purmagam/carry_set")
 def purmagam_carry_set(payload: dict = Body(...)):
-    """이월 재배정(매입): {ym,cust_code,mat_code,maint_ymd,carry(bool)}."""
-    return _carry_ovr_set("PUR", _dig4(payload.get("ym")) or _cur_ym(),
-                          str(payload.get("cust_code", "")).strip(), str(payload.get("mat_code", "")).strip(),
-                          "".join(ch for ch in str(payload.get("maint_ymd", "")) if ch.isdigit()),
-                          bool(payload.get("carry")))
+    """이월 재배정(매입): {ym,cust_code,carry, (mat_code,maint_ymd)|pairs:[...]}."""
+    y = _dig4(payload.get("ym")) or _cur_ym(); cc = str(payload.get("cust_code", "")).strip(); carry = bool(payload.get("carry"))
+    pairs = payload.get("pairs")
+    if pairs is not None:
+        return _carry_ovr_set_bulk("PUR", y, cc, [(p.get("mat_code"), p.get("maint_ymd")) for p in pairs], carry)
+    return _carry_ovr_set("PUR", y, cc, str(payload.get("mat_code", "")).strip(),
+                          "".join(ch for ch in str(payload.get("maint_ymd", "")) if ch.isdigit()), carry)
 
 def _pur_src_moda(win):
     """_pur_src 와 동일 원천 + 모도번(ITEM_CODE) 컬럼 추가 — P/No 펼침 전용.

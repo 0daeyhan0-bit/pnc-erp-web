@@ -93,7 +93,8 @@ rec("이월/당월 둘 다 존재", len(c1)>0 and len(c0)>0, f"carry1 {len(c1)},
 
 # 당월/이월 합 스냅샷(엔드포인트)
 def det_total():
-    j=get(f"/api/salemagam/detail?ym={YM}&cc={CC}"); return round(sum(float(i['amt']) for i in j.get('items',[])),0)
+    j=get(f"/api/salemagam/detail?ym={YM}&cc={CC}")
+    return round(sum(float(bd['amt']) for i in j.get('items',[]) for bd in i.get('byday',[]) if not bd.get('carry')),0)
 def car_total():
     j=get(f"/api/salemagam/carryover?ym={YM}&cc={CC}"); return round(sum(float(r['amt']) for r in j.get('rows',[])),0)
 d0=det_total(); k0=car_total(); tot0=d0+k0
