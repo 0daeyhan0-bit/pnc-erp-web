@@ -2530,7 +2530,7 @@ const _mkMagam=(CFG)=>(c)=>{
        .sm-dlg-h .x{margin-left:auto;cursor:pointer;font-size:20px;opacity:.9}
        .sm-dlg-b{padding:14px 18px;overflow:auto;flex:1}
        .sm-dlg-f{padding:11px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;background:#fafcff}
-       .sm-it{font-size:12px;width:100%;border-collapse:separate;border-spacing:0}.sm-it th,.sm-it td{padding:3px 7px;border-bottom:1px solid #e3e9f2;border-right:1px solid #e9edf4;white-space:nowrap}.sm-it th:first-child,.sm-it td:first-child{border-left:1px solid #e9edf4}
+       .sm-it{font-size:12px;width:100%;border-collapse:separate;border-spacing:0}.sm-it th,.sm-it td{padding:3px 7px;border-bottom:1px solid #e3e9f2;border-right:1px solid #e9edf4;white-space:nowrap}.sm-it th:first-child,.sm-it td:first-child{border-left:1px solid #e9edf4;padding-left:3px;padding-right:3px;width:22px;text-align:center}
        .sm-it thead th{position:sticky;top:0;z-index:3;background:#eef3fb;text-align:center;font-weight:700;border-bottom:2px solid #9db4d4;box-shadow:0 1px 0 #9db4d4}.sm-it tfoot td{position:sticky;bottom:0;background:var(--bg2,#f4f6fb);z-index:2}
        .sm-it td.num{text-align:right;font-variant-numeric:tabular-nums}.sm-it input{width:90px;text-align:right;border:1px solid var(--line);border-radius:4px;padding:2px 5px}
        .sm-it tr.chg input{border-color:#2f6db3;background:#eef4ff;font-weight:700}.sm-it td.dpos{color:#1f8a5a}.sm-it td.dneg{color:#c0392b}
@@ -2663,11 +2663,10 @@ const _mkMagam=(CFG)=>(c)=>{
   const topSection=()=>{
     const items=(detail&&detail.items)||[];const rdis=mClosed?'disabled':'';const _ck=crClick();
     const byMat={};items.forEach(it=>byMat[it.mat]=it);
-    // 인라인 변경사유(수정한 행 아래) — pEdit(품목)/dEdit(일자)에 rc/rd 바인딩
-    const _rsn=(t,mat,d,rc,rd)=>`<td></td>${t==='D'?'<td></td>':''}<td colspan="${t==='D'?7:8}" style="background:#fcfdff;padding:2px 7px 4px 20px">
-      <span class="mut" style="font-size:11px">↳ 변경사유</span>
-      <select class="inp sm-rc" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" style="width:auto;height:23px;font-size:12px;vertical-align:middle" ${rdis}><option value="">사유 선택</option>${reasons.map(r=>`<option value="${esc(r.code)}" ${r.code===(rc||'')?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
-      <input class="inp sm-rd" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" value="${esc(rd||'')}" placeholder="세부 사유(선택)" style="width:230px;height:23px;vertical-align:middle" ${rdis}></td>`;
+    // 인라인 변경사유 셀(같은 행) — 변경사유(select) + 세부사유(input). 세부사유 컬럼이 남는 폭 흡수.
+    const _rcell=(ed,t,mat,d,rc,rd)=>ed
+      ?`<td class="center"><select class="inp sm-rc" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" style="width:112px;height:22px;font-size:11.5px" ${rdis}><option value="">사유</option>${reasons.map(r=>`<option value="${esc(r.code)}" ${r.code===(rc||'')?'selected':''}>${esc(r.name)}</option>`).join('')}</select></td><td style="width:100%"><input class="inp sm-rd" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" value="${esc(rd||'')}" placeholder="세부사유(선택)" style="width:98%;height:22px;text-align:left" ${rdis}></td>`
+      :`<td></td><td style="width:100%"></td>`;
     let rows='';
     if(view2==='item'){
       items.forEach(it=>{const fd=fdays(it);if(!fd.length)return;
@@ -2679,12 +2678,11 @@ const _mkMagam=(CFG)=>(c)=>{
         rows+=`<tr class="${delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${carried?'background:#fff6ec':''}">
           <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
           <td><b>${esc(it.mat)}</b>${carried?IBADGE:''}</td>
-          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
           <td class="center">${esc(it.unit)||''}</td><td class="num">${num(qty)}</td><td class="num">${num(it.cost)}</td>
           <td class="num">${carried?'<span class="mut">-</span>':`<input class="tp-pc" data-mat="${esc(it.mat)}" type="number" step="any" value="${nc}" placeholder="${num(it.cost)}" ${rdis}>`}</td>
           <td class="num ${delta>0?'dpos':delta<0?'dneg':''}">${delta?won0(delta):''}</td>
-          <td class="num">${carried?'<b style="color:#b5651d">0</b>':won0(amt0)}</td></tr>`;
-        if(!carried&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost)rows+=`<tr class="sm-rsn">${_rsn('I',it.mat,'',pe.rc,pe.rd)}</tr>`;});
+          <td class="num">${carried?'<b style="color:#b5651d">0</b>':won0(amt0)}</td>${_rcell(!carried&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost,'I',it.mat,'',pe.rc,pe.rd)}</tr>`;});
     }else{
       const flat=[];items.forEach(it=>(it.byday||[]).forEach(bd=>{if(inRange(bd.ymd))flat.push([it,bd]);}));
       flat.sort((a,b)=>a[1].d-b[1].d||Math.abs(b[1].amt)-Math.abs(a[1].amt));
@@ -2692,16 +2690,16 @@ const _mkMagam=(CFG)=>(c)=>{
         rows+=`<tr class="${e.delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${bd.carry?'background:#fff6ec':''}">
           <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
           <td class="center">${_dlab(bd.ymd)}</td><td><b>${esc(it.mat)}</b>${bd.carry?IBADGE:''}</td>
-          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
           <td class="num">${num(bd.qty)}</td><td class="num">${num(bd.cost)}</td>
           <td class="num">${bd.carry?'<span class="mut">-</span>':`<input class="tp-dc" data-mat="${esc(it.mat)}" data-d="${bd.d}" type="number" step="any" value="${(de.nc!=null&&de.nc!=='')?de.nc:''}" placeholder="${num(bd.cost)}" style="width:78px" ${rdis}>`}</td>
           <td class="num ${e.delta>0?'dpos':e.delta<0?'dneg':''}">${e.delta?won0(e.delta):''}</td>
-          <td class="num">${bd.carry?'<b style="color:#b5651d">0</b>':won0(bd.amt)}</td></tr>`;
-        if(!bd.carry&&de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost)rows+=`<tr class="sm-rsn">${_rsn('D',it.mat,bd.d,de.rc,de.rd)}</tr>`;});
+          <td class="num">${bd.carry?'<b style="color:#b5651d">0</b>':won0(bd.amt)}</td>${_rcell(!bd.carry&&de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost,'D',it.mat,bd.d,de.rc,de.rd)}</tr>`;});
     }
+    const _rh=`<th></th><th style="width:100%"></th>`;   // 매출금액 우측 변경사유/세부사유(빈 헤더, 수정 시만 채워짐)
     const cols=view2==='item'
-      ?`<th class="center" style="width:24px"></th><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`
-      :`<th class="center" style="width:24px"></th><th class="center">입고일</th><th>품번</th><th>품명</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`;
+      ?`<th class="center" style="width:22px"></th><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>${_rh}`
+      :`<th class="center" style="width:22px"></th><th class="center">입고일</th><th>품번</th><th>품명</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>${_rh}`;
     const selN=selRows.size;
     const btnLbl=selN?`이월/해제 (${selN}건)`:'이월/해제';
     const carN=items.filter(it=>{const fd=fdays(it);return fd.length&&fd.every(bd=>bd.carry);}).length;
@@ -2712,7 +2710,7 @@ const _mkMagam=(CFG)=>(c)=>{
       <label class="tl" style="white-space:nowrap;flex:0 0 auto">품명</label><input class="inp" id="tp-q" list="tp-items" value="${esc(qName)}" placeholder="품명/품번" style="width:110px;flex:0 0 auto" autocomplete="off"><datalist id="tp-items">${items.map(it=>`<option value="${esc(it.nm||it.mat)}">${esc(it.mat)}</option>`).join('')}</datalist>
       <button class="btn" id="tp-search" style="white-space:nowrap;flex:0 0 auto">검색</button>
       ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap;flex:0 0 auto">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px;flex:0 0 auto">저장중…</span>':''}`:''}</div>`;
-    return toolbar+`<div id="tp-scroll" style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
+    return toolbar+`<div id="tp-scroll" style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="11" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
   };
   // 이월 버튼만 갱신(체크박스 클릭 시 전체 재렌더 금지 — 스크롤 리셋 방지 §3)
   const updCarryBtn=(m)=>{const cb=m.querySelector('#tp-carry');if(!cb)return;
@@ -2773,7 +2771,7 @@ const _mkMagam=(CFG)=>(c)=>{
       <div class="sm-dlg-b">
         ${topSection()}
         <div class="sm-adj" style="padding:6px 8px">
-          <div class="mut" style="font-size:11.5px;margin-bottom:3px">단가·수량은 위 표에서 변경하고, 변경한 행 아래 <b>변경사유</b>를 입력하세요.</div>
+          <div class="mut" style="font-size:11.5px;margin-bottom:3px">단가·수량은 위 표에서 변경하고, 변경한 행 오른쪽에 나오는 <b>변경사유</b>를 입력하세요.</div>
           ${amtAdjRows}
           ${(mClosed||!canW)?'':'<button class="btn sm-mini" id="sm-add-amt">＋ 총액 증감/차감(품목무관)</button>'}
         </div>
