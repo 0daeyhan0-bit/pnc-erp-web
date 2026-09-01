@@ -303,6 +303,9 @@ def main():
           f" · 마감 {ctx.get('closed_ptype','-')}/{ctx.get('closed_period','-')}"
           f" · 생산품 {ctx.get('prod_item','-')}\n")
 
+    # ★재생 총합 대조용 시작 기준점 — 케이스를 하나도 실행하기 전에 잡는다
+    BASE0 = probe() if os.environ.get('REPLAY_YMD') else None
+
     last_kind = None
     for c in cases:
         if c["kind"] != last_kind:
@@ -381,6 +384,25 @@ def main():
         else:
             rec("R", c["name"], "FAIL",
                 f"★캐시 stale — 쓰기 후에도 캐시히트({hit:.2f}s → {after:.2f}s). 무효화 미연결")
+
+    # ── 재생 총합 대조 (롤백 **전**에 읽어야 보인다) ──────────────────
+    #   케이스별 probe 는 그 케이스가 직접 만든 값만 본다. 그런데 재생의 진짜 질문은
+    #   "우리가 사람 입력(①)을 넣었을 때 시스템이 파생(②)을 레거시만큼 만들어내는가" 다.
+    #   ②는 케이스에 없으므로(재생 금지 대상) 여기서 **총합으로** 대조한다.
+    #   ★롤백하면 사라지므로 반드시 롤백 전에.
+    if os.environ.get('REPLAY_YMD'):
+        try:
+            from replay_cases import expected_totals
+            exp = expected_totals(os.environ['REPLAY_YMD'])
+            got = delta(BASE0, probe()) if BASE0 else {}
+            print("── 재생 총합 대조 (레거시 파생 vs 우리 결과) " + "─" * 18)
+            for k, want in exp.items():
+                have = float(got.get(k, 0) or 0)
+                ok = abs(have - want) < max(abs(want) * 0.001, 0.5)
+                print("   %s %-12s 레거시 %12.1f / 우리 %12.1f  차 %+.1f"
+                      % ("✅" if ok else "★차이", k, want, have, have - want))
+        except Exception as _e:
+            print("   재생 총합 대조 생략 — %s" % str(_e)[:120])
 
     # ── 롤백 + 오염 0 ────────────────────────────────────────────────
     print("── 롤백 & 오염 0 증명 " + "─" * 40)
