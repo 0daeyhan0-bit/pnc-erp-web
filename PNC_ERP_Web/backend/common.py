@@ -483,6 +483,75 @@ def _cur_ym():
 def _sale_win():
     return "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
 
+# ===== 마감 이월·반품 공용 (2026-09-01) — 매출마감(salemagam)/매입마감(purmagam) 공용 =====
+#   설계: 이월=정산 귀속·표시만(수불장 전표 없음, 재고 실일자 그대로) / 반품=수불장 전표(오픈일자 선택).
+#   근거: 재고(수불장)와 정산(마감)은 별개 축. 이월전표를 만들면 안 움직인 재고를 장부상 이중이동(하드룰 위반).
+def _carry_win():
+    """이월 대상 창(YYMM ym) = 당월 마감일 이후 ~ 당월 말일. 이 입고분은 이번 마감에서 빠져 차월로 이월된다.
+       (표시·확인용. 수불장 전표는 만들지 않는다 — 재고는 이미 실일자로 정확)."""
+    return "A.MAINT_YMD > '{ym}'+mg.MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+'31'"
+
+def _open_days(ym, months=2, domain="MAT"):
+    """ym(YYMM)부터 months개월의 '일마감(월마감) 안 된' 일자(YYMMDD 오름차순). 반품 반영 대상일.
+       판정 = nx.period_close(domain, ptype 'D'/'M', close_flag). 월마감이면 그 달 통째 제외."""
+    import calendar as _cal
+    ym = str(ym or "").strip()
+    if len(ym) < 4:
+        return []
+    yy, mm = int(ym[:2]), int(ym[2:4])
+    cn = _nx(); cur = cn.cursor()
+    out = []
+    try:
+        for k in range(max(1, months)):
+            m0 = mm - 1 + k
+            yr = yy + m0 // 12
+            mo = m0 % 12 + 1
+            per = f"{yr % 100:02d}{mo:02d}"
+            cur.execute("SELECT close_flag FROM nx.period_close WHERE domain=? AND ptype='M' AND period=?", domain, per)
+            r = cur.fetchone()
+            if r and r[0]:
+                continue   # 월마감 → 그 달 전부 제외
+            cur.execute("SELECT period FROM nx.period_close WHERE domain=? AND ptype='D' AND close_flag=1 AND period LIKE ?",
+                        domain, per + "%")
+            closed = {row[0] for row in cur.fetchall()}
+            for d in range(1, _cal.monthrange(2000 + (yr % 100), mo)[1] + 1):
+                ymd = f"{per}{d:02d}"
+                if ymd not in closed:
+                    out.append(ymd)
+        return out
+    finally:
+        cn.close()
+
+def _ledger_return(cur, ymd, mat_code, qty_signed, *, cost=0.0, cust_code=None, remarks=None, sheet_no=None, usr="web"):
+    """마감 반품 → nx.stock_ledger 단일 전표(MAINT_TAG='RT') + PU_T_MAT_STOCK_WH 잔액 반영.
+       qty_signed 부호 그대로 저장(매출반품=+ 재고복귀 / 매입반품=- 재고출고).
+       stock.py stock_save 와 동일 패턴(seq UPDLOCK, 금액=|수량|×단가, 부가세 10%).
+       ★마감잠금은 호출측이 _closed 로 사전검증(오픈일자만). 재고 버킷키=자재창고 기본(Z99990/IS0001)."""
+    ymd = str(ymd or "").strip()
+    mc = str(mat_code or "").strip()
+    q = float(qty_signed or 0)
+    cost = float(cost or 0)
+    amt = round(abs(q) * cost)
+    vat = round(amt * 0.1)
+    cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WITH(UPDLOCK, HOLDLOCK) WHERE MAINT_YMD=?", ymd)
+    seq = cur.fetchone()[0]
+    cur.execute("""INSERT INTO nx.stock_ledger
+        (STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,MAINT_VAT,REMARKS,SHEET_NO,INSERT_USER_ID,INSERT_DATETIME)
+        VALUES('MAT',?,?,'RT',?,?,?,?,?,?,?,?,?,GETDATE())""",
+        ymd, seq, (cust_code or None), mc, q, cost, amt, vat, (remarks or None), (sheet_no or None), usr)
+    # 자재창고 재고 버킷(기본 Z99990/IS0001) — 물리 재고 복귀(+)/출고(-)
+    try:
+        cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                          UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='magamreturn'
+                        WHERE MAT_CODE=? AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'""", q, mc)
+        if cur.rowcount == 0:
+            cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,STOCK_QTY,
+                              UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                            VALUES(?,'Z99990','IS0001',?,'web',GETDATE(),'magamreturn')""", mc, q)
+    except Exception:
+        pass
+    return seq
+
 
 # ── ★2026-08-25 웹 전용 SEQ 대역 (라이브와 키 충돌 방지) ──────────────────
 #   문제: MAINT_SEQ 는 일자별 채번인데 라이브·nx 가 독립 증가한다.

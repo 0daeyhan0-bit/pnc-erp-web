@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _open_days, _ledger_return, _closed, _carry_win)
 
 import weight_calc
 router = APIRouter()
@@ -108,6 +108,88 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
     finally:
         nx.close()
     return {"ym": y, "cc": cc, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
+
+# ===== 이월·오픈일자·반품 (2026-09-01) — 이월=정산귀속·표시 / 반품=수불장 전표(매출반품=+재고복귀) =====
+@router.get("/api/salemagam/carryover")
+def salemagam_carryover(ym: str = Query(""), cc: str = Query("")):
+    """이월 대상 = 협력사 마감일 이후~당월 말일 입고분(tag5). 이번 마감에서 빠져 차월로 이월(표시·확인용).
+       cc 지정 시 품목별, 미지정 시 업체별 집계. 수불장 전표는 만들지 않는다(재고는 실일자로 이미 정확)."""
+    y = _dig4(ym) or _cur_ym()
+    cn = _conn(); cur = cn.cursor()
+    carry = _carry_win().format(ym=y)
+    try:
+        if str(cc).strip():
+            cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+              SELECT A.MAT_CODE mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.UNIT) unit,
+                A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, MAX(A.MAINT_COST) cost
+              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+              WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99' AND {carry}
+              GROUP BY A.MAT_CODE, A.MAINT_YMD HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY A.MAINT_YMD, A.MAT_CODE""", cc)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            for r in rows:
+                r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["cost"] = float(r["cost"] or 0)
+        else:
+            cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+              SELECT A.CUST_CODE cc, MAX(C.CUST_DESC) nm, SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, COUNT(DISTINCT A.MAT_CODE) items
+              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+              WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99' AND {carry}
+              GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            for r in rows:
+                r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["items"] = int(r["items"] or 0)
+    finally:
+        cn.close()
+    return {"ym": y, "cc": cc, "next_ym": _next_ym(y), "rows": rows}
+
+@router.get("/api/salemagam/opendays")
+def salemagam_opendays(ym: str = Query(""), months: int = Query(2)):
+    """반품 반영 대상일 = 일마감(월마감) 안 된 일자(YYMMDD). ym부터 months개월."""
+    y = _dig4(ym) or _cur_ym()
+    return {"ym": y, "days": _open_days(y, months, "MAT")}
+
+@router.post("/api/salemagam/return_save")
+def salemagam_return_save(payload: dict = Body(...)):
+    """매출반품 → 수불장 전표(MAINT_TAG='RT', +재고복귀). 선택 오픈일자(일마감 안 된 날)에 기록.
+       payload: {ym, cust_code, ymd(YYMMDD), lines:[{mat_code, qty, cost, remarks}]}"""
+    return _return_save(payload, sign=+1)   # 매출반품 = 재고 되돌아옴(+)
+
+# 매출/매입 공용 반품 저장(부호만 다름) — sign +1=매출반품(재고복귀) / -1=매입반품(재고출고)
+def _return_save(payload, *, sign):
+    cc = str(payload.get("cust_code", "")).strip()
+    ymd = "".join(ch for ch in str(payload.get("ymd", "")) if ch.isdigit())
+    lines = payload.get("lines", []) or []
+    if len(ymd) != 6:
+        raise HTTPException(400, "반영일자(YYMMDD) 필요")
+    if not lines:
+        raise HTTPException(400, "반품 품목 필요")
+    nx = _nx_tx(); nc = nx.cursor()
+    try:
+        if _closed(nc, ymd, "MAT"):
+            return {"ok": False, "errors": [f"{ymd[2:4]}/{ymd[4:6]} 은 마감된 일자 — 마감 안 된 일자를 선택하세요"]}
+        saved = 0; errs = []
+        for i, ln in enumerate(lines, 1):
+            mat = str(ln.get("mat_code", "")).strip()
+            qty = abs(float(ln.get("qty") or 0))
+            if not mat or qty <= 0:
+                errs.append(f"{i}행: 품목·수량 필요"); continue
+            _ledger_return(nc, ymd, mat, sign * qty, cost=float(ln.get("cost") or 0),
+                           cust_code=(cc or None), remarks=(str(ln.get("remarks") or "").strip() or ("매출반품" if sign > 0 else "매입반품")))
+            saved += 1
+        if errs:
+            nx.rollback(); return {"ok": False, "errors": errs}
+        nx.commit()
+        return {"ok": True, "saved": saved, "ymd": ymd}
+    except Exception as e:
+        nx.rollback(); raise HTTPException(500, f"반품 저장 실패: {e}")
+    finally:
+        nx.close()
+
+def _next_ym(y):
+    yy = int(y[:2]); mm = int(y[2:]) + 1
+    if mm == 13: mm = 1; yy += 1
+    return f"{yy:02d}{mm:02d}"
 
 @router.get("/api/salemagam/lines")
 def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
