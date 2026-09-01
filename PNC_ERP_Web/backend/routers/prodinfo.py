@@ -801,11 +801,16 @@ def linecal_save(payload: dict = Body(...)):
     LG 엑셀은 8개 라인만 들어오므로 나머지(CC·CD·RQ·PA·SG…)는 수기로 채워야
     라인당김 근무일 계산이 정확해진다.
     ★LG 업로드 라인(src='LG')도 수정 가능하다(2026-08-27 사용자 요청).
-      단 work_code(LG 가동시간)는 **보존**하고 work_stats(근무유형 코드)만 갱신한다 —
-      두 컬럼은 서로 다른 정보이고, 근무일 판정의 정본은 work_stats 다.
-      (특근처럼 LG 엑셀에 없는 정보를 라인 셀에 직접 찍을 수 있어야 편성이 맞는다)
-      items: [{line_no, ymd(YYYY-MM-DD 또는 YYMMDD), ws(1~7), note?}]
-      ws 를 비우면 그 (라인,일자)의 수기 코드만 지운다(가동시간은 유지).
+      items: [{line_no, ymd(YYYY-MM-DD 또는 YYMMDD), ws(1~7), hrs?, note?}]
+
+    ★★가동시간(work_code)도 수정·삭제할 수 있다(2026-08-31 사용자 요청).
+      배경: 근무일 판정의 정본이 **가동시간**으로 바뀌었다(planrev._wd_of).
+        가동시간 있음 → 근무 / 없으면 라인 work_stats → 없으면 공통.
+      그래서 가동시간을 못 지우면 화면에서 '휴무'를 골라도 편성은 계속 근무로 계산한다
+      (9/12 C1: 화면 휴무 저장했는데 work_code=8 이 남아 근무로 편성 — 실사용 지적).
+      · hrs 를 주면 그 값으로 갱신. hrs='' 이면 **가동시간을 지운다**(→ 그 날 휴무 처리).
+      · hrs 를 아예 안 주면(키 없음) 종전대로 가동시간을 보존한다(기존 호출 호환).
+      ws 를 비우면 그 (라인,일자)의 수기 코드만 지운다.
     """
     items = payload.get("items") or []
     if not items:
@@ -826,28 +831,38 @@ def linecal_save(payload: dict = Body(...)):
             if ws and ws not in ok:
                 skipped += 1; continue
             note = str(it.get("note", "") or "").strip()[:50] or None
-            # ★기존 행이 있으면 UPDATE — work_code(LG 가동시간)는 건드리지 않는다.
+            # ★가동시간(work_code) — 키가 오면 갱신/삭제, 안 오면 보존(기존 호출 호환)
+            _has_hrs = ('hrs' in it) or ('work_code' in it)
+            _hrs = str(it.get("hrs", it.get("work_code", "")) or "").strip()[:20]
             cur.execute("SELECT ISNULL(work_code,'') FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
             r = cur.fetchone()
             if r is not None:
-                has_wc = str(r[0] or '').strip() != ''
-                if not ws and not has_wc:
-                    # 코드도 비우고 가동시간도 없으면 행 자체를 지운다
+                # 갱신 후 남게 될 가동시간 — 행 삭제 판단에 쓴다
+                _wc_after = _hrs if _has_hrs else str(r[0] or '').strip()
+                if not ws and not _wc_after:
+                    # 근무유형도 없고 가동시간도 없으면 행 자체를 지운다(= 그 날 공통 달력을 따름)
                     cur.execute("DELETE FROM nx.line_calendar WHERE line_no=? AND cal_ymd=?", ln, ymd)
                     deleted += 1; continue
-                cur.execute("""UPDATE nx.line_calendar
-                                  SET work_stats=?, note=?, upd_dt=getdate(),
-                                      src=CASE WHEN ISNULL(work_code,'')<>'' THEN 'LG' ELSE 'MANUAL' END
-                                WHERE line_no=? AND cal_ymd=?""",
-                            (ws or None), note, ln, ymd)
-                if ws: saved += 1
-                else:  deleted += 1
+                if _has_hrs:
+                    cur.execute("""UPDATE nx.line_calendar
+                                      SET work_code=?, work_stats=?, note=?, upd_dt=getdate(),
+                                          src=CASE WHEN ?<>'' THEN 'LG' ELSE 'MANUAL' END
+                                    WHERE line_no=? AND cal_ymd=?""",
+                                (_hrs or None), (ws or None), note, _hrs, ln, ymd)
+                else:
+                    cur.execute("""UPDATE nx.line_calendar
+                                      SET work_stats=?, note=?, upd_dt=getdate(),
+                                          src=CASE WHEN ISNULL(work_code,'')<>'' THEN 'LG' ELSE 'MANUAL' END
+                                    WHERE line_no=? AND cal_ymd=?""",
+                                (ws or None), note, ln, ymd)
+                if ws or _wc_after: saved += 1
+                else:               deleted += 1
                 continue
-            if not ws:
+            if not ws and not _hrs:
                 deleted += 1; continue
             cur.execute("""INSERT INTO nx.line_calendar(line_no,cal_ymd,work_code,work_stats,note,src,upd_dt)
-                           VALUES(?,?,NULL,?,?,'MANUAL',getdate())""",
-                        ln, ymd, ws, note)
+                           VALUES(?,?,?,?,?,?,getdate())""",
+                        ln, ymd, (_hrs or None), (ws or None), note, ('LG' if _hrs else 'MANUAL'))
             saved += 1
         return {"ok": True, "saved": saved, "deleted": deleted, "skipped": skipped,
                 "note": f"저장 {saved} · 삭제 {deleted}" + (f" · 무시 {skipped}" if skipped else "")}

@@ -729,6 +729,9 @@ SCREEN.deliv420=(c)=>{
   //   ※입고일자(inymd)는 실제 입고일이므로 당일 그대로 둔다.
   let F={cust:'',from:planBaseIso(),days:2,dnp:2,inymd:iso(T),gubun:'order',item:'',part:'',sort:'doban',
          deliv:{},pack:{},serial:{},heat:{},chk:{}}, data={dates:[],rows:[],cnt:0,sum:{}}, custs=[], loading=false, busy=false, msg='';
+  // ★헤더 더블클릭 정렬 + 마우스 컬럼폭 기억(2026-08-31 사용자 요청).
+  //   colw[컬럼인덱스]=px — draw() 로 다시 그려도 사용자가 조절한 폭이 유지된다.
+  let st={sortKey:'',sortDir:1,colw:{}};
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   // ── 스티커/프린터 설정(localStorage 저장) — 레거시 스티커설정=라벨규격·프린터설정=프린터선택 대응 ──
   const LBLKEY='deliv420_label';
@@ -914,8 +917,20 @@ SCREEN.deliv420=(c)=>{
     const dates=data.dates||[];
     let rows=(data.rows||[]).slice();
     // 정렬 토글: 도번별 / 시간별(라인→도번)
-    if(F.sort==='time') rows.sort((a,b)=>String(a.line||'').localeCompare(String(b.line||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
-    else rows.sort((a,b)=>String(a.workcenter||'').localeCompare(String(b.workcenter||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    // ★세트제외(공용품)는 **어떤 정렬에서도 맨 위**(2026-08-31 · 레거시 동일).
+    const _se=(a,b)=>((a.setexc?0:1)-(b.setexc?0:1));
+    // ★헤더 더블클릭 정렬이 있으면 그게 최우선(2026-08-31). 없으면 기존 토글.
+    if(st.sortKey){
+      const k=st.sortKey, d=st.sortDir||1;
+      rows.sort((a,b)=>_se(a,b)||(()=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);
+        if(x!=null&&y!=null&&x!==''&&y!==''&&!isNaN(nx)&&!isNaN(ny))return (nx-ny)*d;
+        return String(x==null?'':x).localeCompare(String(y==null?'':y),'ko')*d;})());
+    }
+    // ★기본 = **도번별**(2026-08-31 사용자 요청). 종전 'doban' 은 작업처 우선이라
+    //   같은 도번이 화면 곳곳에 흩어져 보였다.
+    else if(F.sort==='time') rows.sort((a,b)=>_se(a,b)||String(a.line||'').localeCompare(String(b.line||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    else if(F.sort==='wc')   rows.sort((a,b)=>_se(a,b)||String(a.workcenter||'').localeCompare(String(b.workcenter||''),'ko')||String(a.assy).localeCompare(String(b.assy),'ko'));
+    else rows.sort((a,b)=>_se(a,b)||String(a.assy||'').localeCompare(String(b.assy||''),'ko')||String(a.line||'').localeCompare(String(b.line||''),'ko'));
     const custOpts=custs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
     const custName=(custs.find(w=>w.cc===F.cust)||{}).nm||'';
     const itS=new Map(); rows.forEach(r=>{if(r.assy&&!itS.has(r.assy))itS.set(r.assy,r.nm||'');});
@@ -924,8 +939,9 @@ SCREEN.deliv420=(c)=>{
     const partOpts=[...ptS].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
     // 고정컬럼 수(빈 결과 colspan용) = 앞 16 + 일자 뒤 5 = 21.
     //   앞 16: SEQ·작업처·도번·LineNo·구분·자도번LIST·사급·LOT·자재·완료·요청·[체크]·납품·포장·검사·상태
-    //   뒤  5: 입고대기·세트재고·생산실적·ASSY재고·출하실적 (2026-08-28 일자 뒤로 이동)
-    const FIX=21;
+    //   뒤  6: 입고대기·세트재고·★단품재고·생산실적·ASSY재고·출하실적
+    //          (2026-08-28 일자 뒤로 이동 · 2026-08-31 단품재고 신설)
+    const FIX=22;
     const S=data.sum||{};
     const badge=s=>`<span style="padding:1px 5px;border-radius:3px;font-size:10px;background:${STC[s]||'#8aa0bd'};color:#fff">${ST[s]||s}</span>`;
     // 일자셀=완료/계획+색: 생산완료 노랑·출하완료 주황·세트재고(+입고대기) 회색
@@ -952,12 +968,16 @@ SCREEN.deliv420=(c)=>{
     //     앞(고정 16) = SEQ·작업처·도번·LineNo·구분·자도번LIST·사급·LOT·자재·완료·요청
     //                   ·[체크]·납품·포장·검사(38→52)·상태
     //     뒤(일자 뒤 5) = 입고대기·세트재고·생산실적·ASSY재고·출하실적
-    const CW=[40,110,96,62,56,300,38,52,52,52,52,  30,  62,52,  52,52], DW=48;
-    const TW=[54,54,54,64,54];                       // 일자 뒤 5개 폭
-    const totalW=CW.reduce((a,b)=>a+b,0)+dates.length*DW+TW.reduce((a,b)=>a+b,0);
-    const colg=`<colgroup>${CW.map(w=>`<col style="width:${w}px">`).join('')}`
-      +`${dates.map(()=>`<col style="width:${DW}px">`).join('')}`
-      +`${TW.map(w=>`<col style="width:${w}px">`).join('')}</colgroup>`;
+    //   ★2026-08-31: 자도번LIST 300→420 확대(여러 자도번이 잘려 툴팁 없이는 못 읽었다).
+    const CW=[40,110,96,62,56,420,38,52,52,52,52,  30,  62,52,  52,52], DW=48;
+    // 일자 뒤: 입고대기·세트재고·★단품재고(2026-08-31 신설)·생산실적·ASSY재고·출하실적
+    const TW=[54,54,66,54,64,54];
+    // ★사용자가 마우스로 조절한 폭을 기억한다(2026-08-31). 화면을 다시 그려도 유지.
+    //   키 = 컬럼 인덱스. addResizer 가 <col> 을 직접 늘리므로 그 값을 st 에 저장해 복원한다.
+    const _cw=(i,def)=>Number(st.colw&&st.colw[i])||def;
+    const _allW=[...CW, ...dates.map(()=>DW), ...TW].map((w,i)=>_cw(i,w));
+    const totalW=_allW.reduce((a,b)=>a+b,0);
+    const colg=`<colgroup>${_allW.map(w=>`<col style="width:${w}px">`).join('')}</colgroup>`;
     // 합계행(2026-08-28 재배치 반영):
     //   계(1)+건수(2~7=6칸) + LOT·자재·완료·요청(8~11) + 체크(12) + 납품·포장(13~14) + 검사·상태(15~16)
     //   + 일자 + 입고대기·세트재고·생산실적·ASSY재고·출하실적(5)
@@ -972,6 +992,10 @@ SCREEN.deliv420=(c)=>{
           return s?nf(s):'';})()}</b></td><td colspan="3"></td>`
       +`${dates.map(d=>`<td class="num" style="text-align:center;white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gPlan[d]||0)}</b></td>`).join('')}`
       +`<td class="center"><b>${nf(_sumBy('ireq'))}</b></td><td class="center"><b>${nf(_sumBy('iset_stk'))}</b></td>`
+      // ★단품재고 합계 = 세트제외 행만(중복 방지 — 같은 자재가 라인별로 여러 행이라 자재당 1회)
+      +`<td class="center" style="color:#c0392b"><b>${(()=>{const seen={};let s=0;
+          rows.forEach(r=>{if(r.setexc&&!seen[r.assy]){seen[r.assy]=1;s+=Number(r.input_mat)||0;}});
+          return s?nf(s):'';})()}</b></td>`
       +`<td class="center" style="color:#8e44ad"><b>${nf(_sumBy('prod'))}</b></td>`
       +`<td class="center"><b>${nf(_sumBy('assy_stock'))}</b></td>`
       +`<td class="center" style="color:#2e86de"><b>${nf(_sumBy('sale'))}</b></td></tr>`:'';
@@ -980,7 +1004,7 @@ SCREEN.deliv420=(c)=>{
     c.style.cssText='display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden';
     c.innerHTML=`
      <div class="page-title" style="flex:0 0 auto">🧾 거래명세서 발행 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_outside_420 · 웹편성(nx) 직독 · 발행=nx</span></div>
-     <div class="page-sub" style="flex:0 0 auto;margin-bottom:6px">완료된 도번 <b>체크 → 납품/포장 입력 → [납품처리]</b>(발행은 <b>nx.deliv_issue</b>에만 기록). 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). 요청수량=계획−완료−발행분.
+     <div class="page-sub" style="flex:0 0 auto;margin-bottom:6px">완료된 도번 <b>체크 → 납품/포장 입력 → [납품처리]</b>(발행은 <b>nx.deliv_issue</b>에만 기록). 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번 공유풀). <b>요청수량=계획−완료</b>(발행분은 세트입고대기로 완료에 이미 포함).
        <span style="margin-left:6px;font-size:11px">일자셀=<b>완료/계획</b> · <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span> <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span> <span style="background:#c0c0c0;padding:0 5px;border-radius:3px" title="세트재고 + 입고대기 물량이 배분된 칸 (협력사는 키팅과 무관)">세트재고</span></span>${data.note?'<br>ℹ '+esc(data.note):''}</div>
      <!-- ★레거시 w_pr_outside_420 배치(2026-08-27): 출력버튼줄 / 조건 2줄.
           기간=납품일자 기준 조회일수, 직납=직납품 별도 일수(레거시 동일 개념). -->
@@ -1004,6 +1028,14 @@ SCREEN.deliv420=(c)=>{
       .d4-r .tl{background:#eaf0f8;border:1px solid #cdd9e8;border-radius:4px;
         padding:3px 8px;font-size:12px;color:#33507d;font-weight:600;text-align:center;
         white-space:nowrap;min-width:66px}
+      /* ★표 머리글 고정(2026-08-31 · CLAUDE.md §3) — 세로 스크롤해도 항상 보이게.
+         종전엔 sticky 규칙이 없어 헤더가 같이 밀려 올라갔다.
+         배경색 필수(투명하면 아래 행이 비쳐 보인다). */
+      .d4-grid thead th{position:sticky;top:0;z-index:5;background:#eef2f8;
+        box-shadow:inset 0 -1px 0 var(--line-2,#c9d3e0)}
+      /* 합계행은 하단 고정 */
+      .d4-grid tr.grandtot td{position:sticky;bottom:0;z-index:4;background:#eaf1fb;
+        box-shadow:inset 0 1px 0 #cdd9ef}
      </style>
      <div class="toolbar d4-r">
        <label class="tl">기준일자</label>${legacyDateHTML('d4-base',F.from)}
@@ -1025,24 +1057,37 @@ SCREEN.deliv420=(c)=>{
        <button class="btn" id="d4-custfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>
        <input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:150px;min-width:150px;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="d4l-cust">${custOpts}</datalist>
        <button class="btn" id="d4-search" style="margin-left:4px">🔍 조회</button>
+       <!-- ★정렬 선택(2026-08-31) — 기본 도번별. 헤더 더블클릭 정렬이 있으면 그쪽이 우선. -->
+       <label class="tl" style="margin-left:8px">정렬</label>
+       <select class="inp" id="d4-sort" style="width:96px;min-width:96px" title="헤더를 더블클릭해도 그 컬럼으로 정렬됩니다">
+         <option value="doban" ${F.sort==='doban'?'selected':''}>도번별</option>
+         <option value="wc" ${F.sort==='wc'?'selected':''}>작업처별</option>
+         <option value="time" ${F.sort==='time'?'selected':''}>라인별</option>
+       </select>
+       ${st.sortKey?`<button class="btn ghost" id="d4-sortclr" title="헤더 정렬 해제" style="padding:0 8px">정렬해제</button>`:''}
        <div class="spacer"></div>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <!-- ★flex:0 1 auto + max-height:100% (4787a13 확정) — 고정 max-height 는 표 아래 여백을 남긴다. -->
      <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
+      <table class="tbl d4-grid" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
        <!-- ★품명·자도번작업처 제거 · 헤더 전부 가운데 정렬(2026-08-27 사용자 요청)
             자도번작업처와 작업처가 같은 값이라 작업처만 남기고 폭을 넓혔다. -->
-       <th class="center">SEQ</th><th class="center">작업처</th><th class="center">도번</th><th class="center">Line No</th><th class="center">구분</th><th class="center">자도번LIST</th><th class="center">사급</th>
-       <th class="center">LOT수량</th><th class="center">자재수량</th><th class="center">완료수량</th><th class="center">요청수량</th>
+       <!-- ★헤더 더블클릭 정렬(2026-08-31 · CLAUDE.md §3 공통규칙). data-key = 행 필드명 -->
+       <th class="center">SEQ</th><th class="center" data-key="workcenter">작업처</th><th class="center" data-key="assy">도번</th><th class="center" data-key="line">Line No</th><th class="center" data-key="gubun">구분</th><th class="center" data-key="mat_list">자도번LIST</th><th class="center" data-key="sagub_list">사급</th>
+       <th class="center" data-key="lot">LOT수량</th><th class="center" data-key="plan">자재수량</th><th class="center" data-key="done">완료수량</th><th class="center" data-key="req">요청수량</th>
        <th class="center"><input type="checkbox" id="d4-all"></th>
        <!-- ★SERIAL-NO·HEAT-NO·품목정보 제거(2026-08-27 사용자 요청) -->
        <th class="center">납품수량</th><th class="center">포장수량</th>
-       <th class="center">검사</th><th class="center">상태</th>
+       <th class="center" data-key="insp">검사</th><th class="center" data-key="status">상태</th>
        ${dates.map(d=>`<th class="center"${wkbg(d)}>${esc(wlab(d))}</th>`).join('')}
        <!-- ★실적/재고 5종은 **일자 뒤로** 이동(2026-08-28 사용자요청).
             순서 = 입고대기 · 세트재고 · 생산실적 · ASSY재고 · 출하실적 -->
-       <th class="center">입고대기</th><th class="center">세트재고</th><th class="center">생산실적</th><th class="center">ASSY재고</th><th class="center">출하실적</th>
+       <th class="center" data-key="ireq">입고대기</th><th class="center" data-key="iset_stk">세트재고</th>
+       <!-- ★단품재고(2026-08-31 신설) — 세트제외(공용품) 행만 값이 있다.
+            세트별 재고관리를 하지 않는 공용품이라 자재+생산+영업 창고 합으로 본다. -->
+       <th class="center" data-key="input_mat" title="세트제외(공용품) 품목의 자재+생산+영업 창고 재고합계">단품재고</th>
+       <th class="center" data-key="prod">생산실적</th><th class="center" data-key="assy_stock">ASSY재고</th><th class="center" data-key="sale">출하실적</th>
        </tr></thead>
       <tbody>${loading?spinRow(FIX+dates.length):(rows.length?(rows.map((r,ri)=>{const ed=(r.status!=='90'&&Number(r.req)>0);
         // ★납품수량은 **체크했을 때만** 채운다(2026-08-28 사용자요청).
@@ -1051,11 +1096,15 @@ SCREEN.deliv420=(c)=>{
         //   사용자가 직접 고친 값(F.deliv)은 그대로 유지한다.
         const ckd=!!F.chk[r.assy];
         const dv=ckd?(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv):'';
-        const pk=ckd?(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack):'';return `<tr>
+        const pk=ckd?(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack):'';
+        // ★세트제외 구간(맨 위)과 그 아래를 굵은 선으로 구분(2026-08-31)
+        const _last=(r.setexc&&rows[ri+1]&&!rows[ri+1].setexc);
+        return `<tr${_last?' style="border-bottom:2px solid #c0392b"':''}>
         <td class="num" style="color:#8aa0bd">${ri+1}</td>
         <td class="center"><b>${esc(r.workcenter||r.work_center||r.in_cust||'')}</b></td>
         <td class="center"><b>${esc(r.assy)}</b></td><td class="center">${esc(r.line||'')}</td>
-        <td class="center">${esc(r.gubun||'')}</td>
+        <!-- ★세트제외(공용품)는 레거시처럼 빨간 글씨로 구분(2026-08-31) -->
+        <td class="center"${r.setexc?' style="color:#c0392b;font-weight:700"':''} ${r.setexc?'title="공용품 — 세트별 재고관리를 하지 않고 단품재고로 본다"':''}>${esc(r.gubun||'')}</td>
         <td><div style="width:100%;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.mat_list||'')}">${esc(r.mat_list||'')}</div></td>
         <td class="center">${r.sagub_list?'<span class="bdg sagub" style="font-size:10px" title="'+esc(r.sagub_list)+'">사급</span>':''}</td>
         <td class="num">${nf(r.lot)}</td><td class="num">${nf(r.plan)}</td>
@@ -1075,6 +1124,8 @@ SCREEN.deliv420=(c)=>{
         <!-- ★실적/재고 5종 = 일자 뒤 · 입고대기·세트재고·생산실적·ASSY재고·출하실적 · 전부 가운데정렬 -->
         <td class="center">${nf(r.ireq)}</td>
         <td class="center">${nf(r.iset_stk)}</td>
+        <!-- ★단품재고 — 세트제외(공용품) 행만 값이 있다(2026-08-31) -->
+        <td class="center" style="color:#c0392b;font-weight:${r.setexc?'700':'400'}">${r.setexc?nf(r.input_mat):''}</td>
         <td class="center" style="color:#8e44ad">${nf(r.prod)}</td>
         <td class="center">${nf(r.assy_stock)}</td>
         <td class="center" style="color:#2e86de">${nf(r.sale)}</td>
@@ -1092,7 +1143,9 @@ SCREEN.deliv420=(c)=>{
     bindLegacyDate(c,'d4-in',()=>F.inymd,(v)=>{F.inymd=v;});
     g('#d4-search').onclick=()=>{sync();load();};
     ['#d4-gb-g','#d4-gb-o'].forEach(id=>{const el=g(id);if(el)el.onchange=()=>{sync();load();};});
-    const so=g('#d4-sort');if(so)so.onchange=()=>{sync();draw();};
+    // 정렬 드롭다운을 바꾸면 헤더 정렬은 해제한다(둘이 겹치면 헷갈린다)
+    const so=g('#d4-sort');if(so)so.onchange=()=>{st.sortKey='';sync();draw();};
+    const sc=g('#d4-sortclr');if(sc)sc.onclick=()=>{st.sortKey='';draw();};
     ['#d4-cust','#d4-custcode','#d4-item','#d4-part','#d4-days','#d4-dnp'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
     // 코드 ↔ 업체명 양방향 채움
     const cCode=g('#d4-custcode');
@@ -1162,7 +1215,45 @@ SCREEN.deliv420=(c)=>{
     c.querySelectorAll('.d4-pk').forEach(x=>x.oninput=e=>{F.pack[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('.d4-sn').forEach(x=>x.oninput=e=>{F.serial[e.target.dataset.k]=e.target.value;});
     c.querySelectorAll('.d4-hn').forEach(x=>x.oninput=e=>{F.heat[e.target.dataset.k]=e.target.value;});
-    c.querySelectorAll('thead th').forEach(th=>addResizer(th));
+    // ★컬럼 너비 드래그 + 헤더 더블클릭 정렬(2026-08-31 사용자 요청).
+    //   이 표는 table-layout:fixed + <colgroup> 이라 공용 addResizer(th.style.width)가 먹지 않는다
+    //   — <col> 의 width 가 우선이므로 col 을 직접 조절하고 그 값을 st.colw 에 기억한다.
+    (()=>{
+      const tb=c.querySelector('.grid-wrap table.d4-grid');if(!tb)return;
+      const cols=tb.querySelectorAll('colgroup col');
+      tb.querySelectorAll('thead th').forEach((th,i)=>{
+        const col=cols[i];if(!col)return;
+        // ⚠position:relative 를 주면 CSS 의 sticky(헤더 고정)가 덮어써진다.
+        //   sticky 요소도 자식 absolute 의 기준이 되므로 그대로 둔다(2026-08-31).
+        // 정렬(더블클릭) — data-key 있는 헤더만
+        const k=th.dataset.key;
+        if(k){
+          th.style.cursor='pointer';
+          th.title='더블클릭 정렬 · 우측 경계 드래그로 너비조절';
+          if(st.sortKey===k)th.insertAdjacentHTML('beforeend',
+            `<span style="font-size:9px;margin-left:2px">${st.sortDir===1?'▲':'▼'}</span>`);
+          th.ondblclick=e=>{if(e.target.classList.contains('d4-rz'))return;
+            st.sortDir=(st.sortKey===k&&st.sortDir===1)?-1:1;st.sortKey=k;draw();};
+        }
+        // 너비 드래그 핸들
+        const rz=document.createElement('div');
+        rz.className='d4-rz';
+        rz.style.cssText='position:absolute;top:0;right:0;width:6px;height:100%;'
+          +'cursor:col-resize;user-select:none;z-index:3';
+        rz.onmousedown=e=>{e.preventDefault();e.stopPropagation();
+          const sx=e.pageX, sw=col.offsetWidth||parseInt(col.style.width)||60;
+          const mv=ev=>{const w=Math.max(24,sw+ev.pageX-sx);
+            col.style.width=w+'px';st.colw[i]=w;};
+          const up=()=>{document.removeEventListener('mousemove',mv);
+            document.removeEventListener('mouseup',up);
+            // 표 전체폭도 다시 계산(가로스크롤 유지)
+            let t=0;cols.forEach(x=>t+=parseInt(x.style.width)||0);
+            if(t)tb.style.width=t+'px';};
+          document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);};
+        rz.ondblclick=e=>{e.stopPropagation();delete st.colw[i];draw();};   // 폭 초기화
+        th.appendChild(rz);
+      });
+    })();
   };
   // ★계획 기준일(마지막 업로드 일자축 첫날) 반영 후 그린다 — 2026-08-28
   planBase().then(b=>{if(b&&b.iso)F.from=b.iso;}).catch(()=>{})
@@ -2242,7 +2333,9 @@ SCREEN.dailypurissue=(c)=>{
              ${mrow('추가매출(절삭)',F.maechul.chuga_cut)}
              ${mrow('추가매출(설치)',F.maechul.chuga_seol)}
              ${mrow('총예상매출',F.maechul.chong,true)}
-             ${mrow('사급-원재료',F.maechul.sagub_raw,false,T.sagub_raw)}
+             ${mrow('사급-원재료(실적)',F.maechul.sagub_raw,false,T.sagub_raw)}
+             ${mrow('사급-원재료(예상)',F.maechul.sagub_raw_fc)}
+             ${mrow('사급-원재료(합계)',F.maechul.sagub_raw_sum,true)}
              ${mrow('사급-부품(실적)',F.maechul.sagub_part,false,T.sagub_part)}
              ${mrow('추가-사급부품(예상)',F.maechul.sagub_part_fc)}
              ${mrow('사급-부품(합계)',F.maechul.sagub_part_sum,true)}
@@ -2274,7 +2367,7 @@ SCREEN.dailypurissue=(c)=>{
         if(F.maechul){const M=F.maechul;const mr=(lb,k)=>{const v=M[k]||{};rows.push(['매출요약',lb,v.h1,v.h2,v.tot]);};
           mr('현매출(절삭)','hyeon_cut');mr('현매출(설치)','hyeon_seol');mr('현매출(기타)','hyeon_etc');mr('현매출(합계)','hyeon_hab');
           mr('추가매출(절삭)','chuga_cut');mr('추가매출(설치)','chuga_seol');mr('총예상매출','chong');
-          mr('사급-원재료','sagub_raw');mr('사급-부품(실적)','sagub_part');mr('추가-사급부품(예상)','sagub_part_fc');
+          mr('사급-원재료(실적)','sagub_raw');mr('사급-원재료(예상)','sagub_raw_fc');mr('사급-원재료(합계)','sagub_raw_sum');mr('사급-부품(실적)','sagub_part');mr('추가-사급부품(예상)','sagub_part_fc');
           mr('사급-부품(합계)','sagub_part_sum');mr('사급-합계','sagub_hab');mr('LG수금금액','lg_sugum');}}
       downloadCSV(`일일영업매입현황_${F.date}.csv`,hd,rows);};
   };

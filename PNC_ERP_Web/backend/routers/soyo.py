@@ -633,8 +633,10 @@ def _route_setup(cur):
         INTO nx.plan_route_active FROM nx.sourcing_route h
         JOIN nx.route_alloc ra ON ra.route_id=h.route_id AND ISNULL(ra.is_active,0)=1
         WHERE ISNULL(h.route_no,1)>1
-          AND """ + _ROUTE_GATE_SQL + """
+          AND EXISTS(SELECT 1 FROM nx.route_edges re WHERE re.route_id=h.route_id)
         GROUP BY UPPER(LTRIM(RTRIM(h.item_code)))""")
+        # ★완비검증(승인·업체·단가·생산정보)은 편성이 아니라 ★활성화(조달프로파일 택1=alloc/save)에서 강제(2026-09-01 사용자 확정).
+        #   생산계획은 사내 계획 → 활성 R02는 구조(route_edges)만 있으면 항상 반영. 업체·단가 미비로 계획을 막지 않는다.
     cur.execute("IF OBJECT_ID('nx.plan_route_active','U') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM sys.indexes WHERE name='ix_pra') CREATE INDEX ix_pra ON nx.plan_route_active(assy_item_code)")
 
 def _step7_sql(cur):

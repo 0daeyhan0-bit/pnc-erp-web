@@ -742,11 +742,15 @@ def sourcing_routes(item: str = Query(...), show_unapproved: int = Query(1), for
             for l in r["lines"]: l["vendor_name"] = vmap.get(l["vendor_code"], l["vendor_code"])
         # ★nx_new = 웹 신규 등록 품목(nx.item.src='web') → R01(현행)이 레거시 미러가 아니라 우리 신규 → 수정 허용.
         cur.execute("IF COL_LENGTH('nx.item','src') IS NULL ALTER TABLE nx.item ADD src varchar(10) NULL")
-        cur.execute("SELECT ISNULL(item_name,''), ISNULL(src,'') FROM nx.item WHERE item_code=?", item)
+        cur.execute("IF COL_LENGTH('nx.item','approved') IS NULL ALTER TABLE nx.item ADD approved BIT NULL")
+        cur.execute("SELECT ISNULL(item_name,''), ISNULL(src,''), approved FROM nx.item WHERE item_code=?", item)
         _ir = cur.fetchone(); nm = _ir[0] if _ir else ""; _nxnew = (((_ir[1] if _ir else "") or "").strip() == "web")
+        _appr01 = (_ir[2] if _ir else None)
         for _r2 in routes:   # R01(baseline·route_no=1)에 nx_new 부착
             if _r2.get("baseline") or _r2.get("route_no") == 1:
                 _r2["nx_new"] = _nxnew
+                if _nxnew:   # ★신규 R01 = item.approved 반영(0=미승인·자동승인 아님). 레거시는 현행이라 승인 유지.
+                    _r2["approve_flag"] = (_appr01 != 0)
         # 조달프로파일용 필터: 승인분만(선택적으로 미승인 회색포함)
         if for_profile:
             def keep(r):
@@ -1185,7 +1189,31 @@ def sourcing_route_delete(payload: dict = Body(...)):
 def sourcing_route_approve(payload: dict = Body(...)):
     """개발 승인 토글(approve_flag). =1 이라야 조달프로파일 후보로 노출. 현행 baseline(route_id=0)은 항상 승인상태."""
     rid = int(payload.get("route_id") or 0)
-    if rid <= 0: return {"ok": True, "approve_flag": True}   # baseline 자동승인
+    if rid <= 0:
+        # ★신규 BOM R01 승인(2026-09-01): src='web' 미승인 품목은 자동승인 안 됨 → 완비 게이트 통과해야 approved=1.
+        item0 = str(payload.get("item_code", "")).strip()
+        ap0 = 1 if payload.get("approve") else 0
+        if item0:
+            nx0 = _nx_tx(); cur0 = nx0.cursor()
+            try:
+                cur0.execute("IF COL_LENGTH('nx.item','approved') IS NULL ALTER TABLE nx.item ADD approved BIT NULL")
+                cur0.execute("SELECT ISNULL(src,''), approved FROM nx.item WHERE item_code=?", item0)
+                ir = cur0.fetchone()
+                if ir and str(ir[0]).strip() == 'web':   # 신규(웹등록)만 승인대상. 레거시는 항상 승인(현행).
+                    if ap0 == 1:
+                        miss = _r01_new_incomplete(cur0, item0)
+                        if miss:
+                            nx0.rollback()
+                            return {"ok": False, "gate": "APPROVE_INCOMPLETE_R01",
+                                    "errors": ["신규 R01 승인 불가 — 완비 후 승인하세요:"] + miss}
+                        cur0.execute("UPDATE nx.item SET approved=1 WHERE item_code=?", item0)
+                    else:
+                        cur0.execute("UPDATE nx.item SET approved=0 WHERE item_code=?", item0)
+                    nx0.commit()
+                    return {"ok": True, "approve_flag": bool(ap0), "r01_new": True}
+            finally:
+                nx0.close()
+        return {"ok": True, "approve_flag": True}   # 레거시 baseline 자동승인(현행)
     ap = 1 if payload.get("approve") else 0
     usr = (str(payload.get("user", "")).strip() or "개발")[:30]
     nx = _nx_tx(); cur = nx.cursor()
@@ -1194,6 +1222,45 @@ def sourcing_route_approve(payload: dict = Body(...)):
         cur.execute("SELECT item_code, route_no FROM nx.sourcing_route WHERE route_id=?", rid)
         r0 = cur.fetchone()
         if not r0: raise HTTPException(404, "대상 없음")
+        # ★★승인 게이트(2026-09-01 사용자 확정): 대안경로(R02+)는 매입/사급 부품에 업체·단가 확정돼야 승인 가능.
+        #   업체 지정(발주업체 지정=route_order/vendor)이 마스터 매입가를 buy_price/sagub_price로 캡처하므로 승인 전 확정 가능.
+        #   제작(자체)=내부라 업체 불필요. RAC(용접봉)=공정종속 제외. 미확정이면 승인 거부(어느 부품이 빠졌는지 통지).
+        if ap == 1 and int(r0[1] or 0) > 1:
+            cur.execute("""SELECT LTRIM(RTRIM(child_item)) FROM nx.sourcing_route_line
+                WHERE route_id=? AND node_kind<>'SUB' AND ISNULL(staged,0)=0 AND ISNULL(gubun,'') IN (N'매입', N'사급')
+                  AND UPPER(LTRIM(RTRIM(child_item))) NOT LIKE 'RAC%'""", rid)
+            _parts = [str(x[0]).strip() for x in cur.fetchall() if str(x[0]).strip()]
+            if _parts:
+                _ph = ",".join("?" * len(_parts))
+                cur.execute(f"""SELECT LTRIM(RTRIM(item_code)) FROM nx.sourcing_profile
+                    WHERE route_id=? AND ISNULL(vendor_code,'')<>'' AND (buy_price IS NOT NULL OR sagub_price IS NOT NULL)
+                      AND LTRIM(RTRIM(item_code)) IN ({_ph})""", rid, *_parts)
+                _done = {str(x[0]).strip() for x in cur.fetchall()}
+                _miss = [p for p in _parts if p not in _done]
+                if _miss:
+                    nx.rollback()
+                    return {"ok": False, "gate": "APPROVE_INCOMPLETE",
+                            "errors": [f"승인 불가 — 업체·단가 미확정 부품 {len(_miss)}건: {', '.join(_miss[:6])}{'…' if len(_miss) > 6 else ''}. 발주업체 지정에서 매입처를 확정하세요(매입가 자동 확정)."]}
+            # ★생산라인(생산정보) 게이트(2026-09-01 사용자): 제작(자체)·조립·SUB에 생산정보(공정순서·ST) 미지정이면 승인 거부.
+            _mk = [str(r0[0]).strip()]   # 조립품 자신(사내제작)
+            cur.execute("""SELECT DISTINCT LTRIM(RTRIM(ISNULL(sub_item,child_item)))
+                FROM nx.sourcing_route_line WHERE route_id=? AND ISNULL(staged,0)=0
+                  AND (ISNULL(gubun,'') IN (N'제작', N'자체') OR node_kind='SUB')
+                  AND ISNULL(child_item,'')<>'' AND UPPER(LTRIM(RTRIM(child_item))) NOT LIKE 'RAC%'""", rid)
+            _mk += [str(x[0]).strip() for x in cur.fetchall() if str(x[0]).strip()]
+            _noprod = _prodinfo_missing(cur, _mk, rid)
+            if _noprod:
+                nx.rollback()
+                return {"ok": False, "gate": "APPROVE_NOPROD",
+                        "errors": [f"승인 불가 — 생산라인(생산정보·공정순서) 미지정 {len(_noprod)}건: {', '.join(_noprod[:6])}{'…' if len(_noprod) > 6 else ''}. 품목 BOM관리 > 생산정보에서 등록하세요."]}
+            # ★A·B·C 완비 감사(신규 후보 강화): 단가구분·원소재 치수·가공비 공정 — 품목별 정확한 누락 통지.
+            cur.execute("SELECT DISTINCT LTRIM(RTRIM(ISNULL(sub_item,child_item))) FROM nx.sourcing_route_line WHERE route_id=? AND ISNULL(staged,0)=0 AND ISNULL(child_item,'')<>''", rid)
+            _allit = [str(r0[0]).strip()] + [str(x[0]).strip() for x in cur.fetchall() if str(x[0]).strip()]
+            _bmiss = _bom_item_missing(cur, _allit)
+            if _bmiss:
+                nx.rollback()
+                return {"ok": False, "gate": "APPROVE_BOM_INCOMPLETE",
+                        "errors": ["승인 불가 — 아래 품목의 완비정보(단가구분·원소재 치수·가공비 공정)가 빠졌습니다:"] + _bmiss}
         cur.execute("UPDATE nx.sourcing_route SET approve_flag=?, upd_user=?, upd_dt=getdate() WHERE route_id=?", ap, usr, rid)
         minted = []
         if ap == 1:   # ★승인 시에만 route_seq high-water bump(그 번호 소진→재사용 금지). 미승인은 미변경(삭제 시 재사용).
@@ -2619,12 +2686,18 @@ def sourcing_route_order_vendor(payload: dict = Body(...)):
         gr = cur.fetchone(); sg = '2' if (gr and str(gr[0]).strip() == '사급') else '3'   # 2=외주(유상사급)·3=매입
         cur.execute("DELETE FROM nx.sourcing_profile WHERE route_id=? AND LTRIM(RTRIM(item_code))=?", rid, item_code)   # 근거키 스코프 전체교체
         n = len(norm)
+        asofd = datetime.now().strftime("%y%m%d")
         for vc, rt in norm.items():
             r = rt if rt is not None else (100 if n == 1 else None)
+            # ★업체 지정=단가 확정(2026-09-01): 매입=업체 매입가, 사급=LG COSP 사급가(price_item vendor='LG') 캡처
+            if sg == '3':   # 매입
+                bp = _master_price(item_code, vc, asofd); sp = None
+            else:           # 사급(sg='2') — 사급가 = LG COSP 사급가
+                sp = _master_price(item_code, 'LG', asofd); bp = None
             cur.execute("""INSERT INTO nx.sourcing_profile(item_code,profile_name,supply_gubun,vendor_code,lme_flag,
                   apply_from,apply_to,is_active,is_internal,alloc_ratio,priority,route_id,buy_price,sagub_price)
-                VALUES(?,?,?,?,0,'2000-01-01',NULL,1,0,?,NULL,?,NULL,NULL)""",
-                item_code, (vc + " 매핑")[:100], sg, vc, r, rid)
+                VALUES(?,?,?,?,0,'2000-01-01',NULL,1,0,?,NULL,?,?,?)""",
+                item_code, (vc + " 매핑")[:100], sg, vc, r, rid, bp, sp)
         nx.commit()
         return {"ok": True, "route_id": rid, "item_code": item_code, "vendors": n, "cleared": (n == 0)}
     except HTTPException:
@@ -2654,6 +2727,108 @@ def _priced_vendors(item_code, vendors, asof=None):
                 WHERE price_type='매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL""", item_code, asof)
             if cur.fetchone(): priced.add(cur_vc)
         return priced
+    finally:
+        cn.close()
+
+
+def _bom_item_missing(cur, items):
+    """★신규 승인 완비 감사(2026-09-01·신규 등록 한정 강화) — 품목별 정확한 누락 메시지 리스트.
+       B 단가구분(cost_gubun) · A cost_gubun='3'(원소재)면 재질·외경·두께·길이 · C 제작(make_type='1')이면 가공비 공정(nx.routing) 존재."""
+    items = [str(i).strip() for i in dict.fromkeys(items) if str(i).strip() and not str(i).upper().startswith('RAC')]
+    if not items: return []
+    errs = []
+    has_rt = int(cur.execute("SELECT CASE WHEN OBJECT_ID('nx.routing') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
+    for i0 in range(0, len(items), 200):
+        ch = items[i0:i0 + 200]; ph = ",".join("?" * len(ch))
+        cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,''), ISNULL(make_type,''), ISNULL(cost_gubun,''),
+            ISNULL(metal_gubun,''), diam, thick, length FROM nx.item WHERE UPPER(LTRIM(RTRIM(item_code))) IN ({ph})""", *ch)
+        meta = {str(r[0]).strip(): (str(r[1]).strip(), str(r[2]).strip(), str(r[3]).strip(), str(r[4]).strip(), r[5], r[6], r[7]) for r in cur.fetchall()}
+        for it in ch:
+            m = meta.get(it)
+            if not m:
+                errs.append(f"{it}: 품목마스터 없음"); continue
+            nm, mk, cg, mg, d, t, l = m
+            lbl = f"{it}({nm[:10]})" if nm else it
+            if not cg:
+                errs.append(f"{lbl}: 단가구분 미지정")
+            if cg == '3':   # 원소재(소재단가)
+                dm = []
+                if not mg: dm.append("재질")
+                for k, v in (("외경", d), ("두께", t), ("길이", l)):
+                    try: fv = float(v) if v is not None else 0
+                    except Exception: fv = 0
+                    if fv <= 0: dm.append(k)
+                if dm: errs.append(f"{lbl}: 원소재 {'·'.join(dm)} 미입력")
+            if mk == '1' and has_rt:   # 제작(자체) = 가공비 공정(원가) 필요
+                if not int(cur.execute("SELECT COUNT(*) FROM nx.routing WHERE UPPER(LTRIM(RTRIM(item_code)))=?", it).fetchone()[0] or 0):
+                    errs.append(f"{lbl}: 가공비 공정(원가) 미등록")
+    return errs
+
+
+def _r01_new_incomplete(cur, item):
+    """★신규 R01(현행 실사용 BOM) 승인 게이트(2026-09-01) — 완비 미충족 사유 목록.
+       BOM 직하위(v_pr_bom active) 기준: 매입/사급 부품 = 매입처(IN_CUST)+마스터단가 · 제작(자체) 부품·조립품 = 생산라인(생산정보).
+       R02와 달리 업체·단가는 마스터(IN_CUST·price_item)에서 확인(R01은 현행이라 조달프로파일 배분 아님)."""
+    item = str(item).strip()
+    cur.execute("""SELECT UPPER(LTRIM(RTRIM(b.mat_code))), ISNULL(i.make_type,''), LTRIM(RTRIM(ISNULL(i.in_cust,'')))
+        FROM nx.v_pr_bom b LEFT JOIN nx.item i ON UPPER(LTRIM(RTRIM(i.item_code)))=UPPER(LTRIM(RTRIM(b.mat_code)))
+        WHERE UPPER(LTRIM(RTRIM(b.item_code)))=? AND ISNULL(b.except_flag,0)<>1""", item.upper())
+    parts = [(str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip()) for r in cur.fetchall() if str(r[0]).strip() and not str(r[0]).upper().startswith('RAC')]
+    novend = []; noprice = []
+    for mat, mk, inc in parts:
+        if mk in ('3', '4'):   # 매입(3)/사급(4)
+            if not inc:
+                novend.append(mat)
+            elif _master_price(mat, inc if mk == '3' else 'LG') is None:
+                noprice.append(mat)
+    mkitems = [item] + [mat for (mat, mk, _) in parts if mk in ('1', '')]
+    noprod = _prodinfo_missing(cur, mkitems)
+    errs = []
+    if novend: errs.append(f"매입처 미지정 {len(novend)}건: {', '.join(novend[:6])}{'…' if len(novend) > 6 else ''}")
+    if noprice: errs.append(f"단가 미등록 {len(noprice)}건: {', '.join(noprice[:6])}{'…' if len(noprice) > 6 else ''}")
+    if noprod: errs.append(f"생산라인(생산정보) 미지정 {len(noprod)}건: {', '.join(noprod[:6])}{'…' if len(noprod) > 6 else ''}")
+    errs += _bom_item_missing(cur, [item] + [mat for (mat, mk, _) in parts])   # ★A·B·C 완비(단가구분·원소재치수·가공비)
+    return errs
+
+
+def _prodinfo_missing(cur, items, route_id=0):
+    """생산정보(생산공정순서·ST) 없는 품목 반환 — 제작/자체품 승인 게이트용.
+       소스 3단: route_proc_gagong(route스코프) → nx.prodinfo_proc(품목) → PR_M_ITEM_PROC_GAGONG(레거시 마스터)."""
+    items = [str(i).strip() for i in dict.fromkeys(items) if str(i).strip()]
+    if not items: return []
+    has_rp = int(cur.execute("SELECT CASE WHEN OBJECT_ID('nx.route_proc_gagong') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
+    has_pp = int(cur.execute("SELECT CASE WHEN OBJECT_ID('nx.prodinfo_proc') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
+    miss = []
+    for it in items:
+        ok = False
+        if route_id and has_rp and int(cur.execute("SELECT COUNT(*) FROM nx.route_proc_gagong WHERE route_id=? AND item_code=?", route_id, it).fetchone()[0] or 0): ok = True
+        if not ok and has_pp and int(cur.execute("SELECT COUNT(*) FROM nx.prodinfo_proc WHERE item_code=?", it).fetchone()[0] or 0): ok = True
+        if not ok and int(cur.execute("SELECT COUNT(*) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM_PROC_GAGONG WHERE item_code=?", it).fetchone()[0] or 0): ok = True
+        if not ok: miss.append(it)
+    return miss
+
+
+def _master_price(item_code, vendor, asof=None):
+    """(품목,업체) 최신 매입 마스터단가 값(as-of·읽기전용). 업체 지정 시 단가 확정용으로 캡처.
+       (품목,업체) 직접가 우선 → 없으면 현행 매입처(in_cust)면 품목 대표 매입가 fallback. 미등록=None."""
+    item_code = str(item_code).strip(); vendor = str(vendor).strip()
+    if not item_code or not vendor: return None
+    asof = _d6(asof) if asof else datetime.now().strftime("%y%m%d")
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+            WHERE price_type=N'매입' AND LTRIM(RTRIM(item_code))=? AND LTRIM(RTRIM(ISNULL(vendor_code,'')))=?
+              AND apply_ymd<=? AND price IS NOT NULL ORDER BY apply_ymd DESC""", item_code, vendor, asof)
+        r = cur.fetchone()
+        if r and r[0] is not None: return float(r[0])
+        cur.execute("SELECT LTRIM(RTRIM(ISNULL(in_cust,''))) FROM PARTNER_ERP_TEST3.nx.item WHERE ITEM_CODE=?", item_code)
+        rr = cur.fetchone()
+        if rr and str(rr[0]).strip() == vendor:
+            cur.execute("""SELECT TOP 1 price FROM PARTNER_ERP_TEST3.nx.price_item
+                WHERE price_type=N'매입' AND LTRIM(RTRIM(item_code))=? AND apply_ymd<=? AND price IS NOT NULL ORDER BY apply_ymd DESC""", item_code, asof)
+            r2 = cur.fetchone()
+            if r2 and r2[0] is not None: return float(r2[0])
+        return None
     finally:
         cn.close()
 
@@ -3223,6 +3398,30 @@ def sourcing_route_alloc_save(payload: dict = Body(...)):
                 vendor_errs.append(f"R{str(rno).zfill(2) if rno is not None else '?'} 경로 활성 저장 불가 — 매입처 미지정 부품 {len(missing)}건: {', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}. 업체 지정(✎ 수정)에서 매입처를 배정하세요.")
         if vendor_errs:
             nx.rollback(); return {"ok": False, "gate": "VENDOR", "errors": vendor_errs}
+        # ★★활성화 완비 게이트(2026-09-01 사용자 확정): 미완비 R02는 ★여기(활성화=조달프로파일 택1)에서 거부한다.
+        #   생산·협력사 계획은 활성이면 항상 나와야 하므로 편성단계 차단은 폐기 → 완비강제를 활성화 시점으로 이관.
+        #   ①승인=위 approved 게이트 ②업체=위 VENDOR 게이트. 여기 +③구조(route_edges) ④단가(buy_price/sagub_price) ⑤생산정보(route_proc).
+        has_rp = int(cur.execute("SELECT CASE WHEN OBJECT_ID('nx.route_proc_gagong') IS NULL THEN 0 ELSE 1 END").fetchone()[0] or 0)
+        comp_errs = []
+        for (rid, af, at, iact, ratio) in norm:
+            if not iact or rid <= 0:
+                continue
+            info = approved.get(rid)
+            if not info or info.get("current_flag") or info.get("route_no") == 1:
+                continue
+            miss = []
+            if not int(cur.execute("SELECT COUNT(*) FROM nx.route_edges WHERE route_id=?", rid).fetchone()[0] or 0):
+                miss.append("구조 미저장(조달경로 통합검토에서 전체저장/finalize)")
+            if not int(cur.execute("SELECT COUNT(*) FROM nx.sourcing_profile WHERE route_id=? AND (buy_price IS NOT NULL OR sagub_price IS NOT NULL)", rid).fetchone()[0] or 0):
+                miss.append("단가 미지정(조달프로파일에서 매입가/사급가 등록)")
+            nproc = int(cur.execute("SELECT COUNT(*) FROM nx.route_proc_gagong WHERE route_id=?", rid).fetchone()[0] or 0) if has_rp else 0
+            if not nproc:
+                miss.append("생산정보 미등록(품목별 공정관리에서 route 생산정보 등록)")
+            if miss:
+                rno = info.get("route_no")
+                comp_errs.append(f"R{str(rno).zfill(2) if rno is not None else '?'} 경로 활성 불가 — {', '.join(miss)}.")
+        if comp_errs:
+            nx.rollback(); return {"ok": False, "gate": "INCOMPLETE", "errors": comp_errs}
         for (rid, af, at, iact, ratio) in norm:   # 근거키 스코프 upsert(대량삭제 금지)
             cur.execute("DELETE FROM nx.route_alloc WHERE item_code=? AND route_id=?", item, rid)
             cur.execute("""INSERT INTO nx.route_alloc(item_code,route_id,apply_from,apply_to,is_active,alloc_ratio,upd_dt)

@@ -240,9 +240,12 @@ def item_save(payload: dict = Body(...)):
             else:
                 # ★src = 생성출처(신규등록 시만). 'web'=웹 신규 BOM 등록(→조달경로 R01 수정가능). UPDATE는 미접촉=보존.
                 cur.execute("IF COL_LENGTH('nx.item','src') IS NULL ALTER TABLE nx.item ADD src varchar(10) NULL")
+                # ★approved(2026-09-01): 신규 웹등록 R01은 자동승인 금지. NULL=레거시(승인간주)·0=신규미승인·1=승인.
+                cur.execute("IF COL_LENGTH('nx.item','approved') IS NULL ALTER TABLE nx.item ADD approved BIT NULL")
+                _src = s("src"); _appr = 0 if (_src == 'web') else None
                 cur.execute("""INSERT INTO nx.item(item_code,item_name,item_spec,metal_gubun,diam,thick,length,
-                    net_weight,unit,in_cust,sgroup,lgroup,make_type,cost_gubun,status,item_type,src)
-                    VALUES(?,?,?,?,?,?,?,?,ISNULL(?,'EA'),?,?,?,?,?,ISNULL(?,'사용'),'부품',?)""", code, *vals, s("src"))
+                    net_weight,unit,in_cust,sgroup,lgroup,make_type,cost_gubun,status,item_type,src,approved)
+                    VALUES(?,?,?,?,?,?,?,?,ISNULL(?,'EA'),?,?,?,?,?,ISNULL(?,'사용'),'부품',?,?)""", code, *vals, _src, _appr)
             saved += 1
         _reset_cost_engine()   # 스펙(치수·재질·중량·조달) 변경 → 원가엔진 캐시 무효화
         return {"ok": True, "count": saved, "errors": errs}
