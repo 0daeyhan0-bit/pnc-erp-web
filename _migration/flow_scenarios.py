@@ -173,6 +173,18 @@ def run_flow(c, ctx):
         rec("F", c["name"], "SKIP", "엔드포인트 없음 — 이 브랜치에 해당 기능이 아직 없다(404)"); return
     if st != 200 or (isinstance(res, dict) and res.get("ok") is False):
         detail = res.get("errors") or res.get("detail") or res.get("_err") or res
+        # ★allow_reject: "프로그램이 정상 작동하는가" 관점의 케이스(재생 등).
+        #   재고부족·마감 같은 **정당한 거부는 프로그램이 제 일을 한 것**이므로 FAIL 이 아니다.
+        #   진짜 문제는 500(터짐)·연결실패·거부하면서 DB 에 쓰는 것이다.
+        #   (2026-09-01 대표: "프로그램이 정상적으로 작동을 하는지, 그 관점에서 접근했으면 좋겠어")
+        if c.get("allow_reject") and 400 <= st < 500:
+            wrote = any(abs(v) > 0.001 for v in d.values())
+            if wrote:
+                rec("F", c["name"], "FAIL",
+                    f"★거부했는데 DB 에 기록됨 — {[k for k, v in d.items() if abs(v) > 0.001]}")
+            else:
+                rec("F", c["name"], "PASS", f"정상 거부({st}) · 무기록 — {str(detail)[:110]}")
+            return
         rec("F", c["name"], "FAIL", f"호출 거부 {st} — {str(detail)[:130]}"); return
     led = d.get(c["probe"], 0)
     if abs(led - c["delta"]) > 0.001:
@@ -393,7 +405,7 @@ def main():
     if os.environ.get('REPLAY_YMD'):
         try:
             from replay_cases import expected_totals
-            exp = expected_totals(os.environ['REPLAY_YMD'])
+            exp = expected_totals(os.environ['REPLAY_YMD'], os.environ.get('REPLAY_ITEM') or None)
             got = delta(BASE0, probe()) if BASE0 else {}
             print("── 재생 총합 대조 (레거시 파생 vs 우리 결과) " + "─" * 18)
             for k, want in exp.items():
