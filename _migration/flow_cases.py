@@ -625,8 +625,14 @@ CASES += AUTH_CASES + SETIN_CASES
 import os as _os
 if _os.environ.get('REPLAY_YMD'):
     try:
-        from replay_cases import build_replay_cases as _brc
-        CASES += _brc(_os.environ['REPLAY_YMD'])
+        # REPLAY_ITEM 이 있으면 **그 품번의 하루 흐름**만 재현한다(시드 → 키팅 → 생산 → 출하).
+        # 없으면 종전대로 그날 전체를 유형별로 재생한다.
+        if _os.environ.get('REPLAY_ITEM'):
+            from replay_cases import build_flow_cases as _bfc
+            CASES += _bfc(_os.environ['REPLAY_YMD'], _os.environ['REPLAY_ITEM'].strip())
+        else:
+            from replay_cases import build_replay_cases as _brc
+            CASES += _brc(_os.environ['REPLAY_YMD'])
     except Exception as _e:
         print('  ★재생 케이스 로드 실패: %s' % _e)
 

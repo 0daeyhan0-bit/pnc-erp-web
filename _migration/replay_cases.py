@@ -263,7 +263,7 @@ def build_replay_cases(ymd):
     return cases
 
 
-def expected_totals(ymd):
+def expected_totals(ymd, item=None):
     """레거시가 그날 만든 **순변화** = 우리가 내야 할 값(채점 기준).
 
        ★왜 순합인가 — 우리는 사람 입력(①)만 재생하지만, 그걸 받은 우리 시스템은
@@ -274,7 +274,9 @@ def expected_totals(ymd):
          우리 파생 계산이 레거시와 다르다는 뜻이다. 어느 쪽인지는 사람이 판단한다.
     """
     cur = _cur()
-    inl = _inl(ymd)
+    # ★흐름 모드(품번 1종)면 그 품번만 센다 — 전체를 세고 한 품번만 재생해 놓고
+    #   "차이" 라고 읽으면 오진이다(2026-09-01 실측 교훈의 재발).
+    inl = ("'" + item + "'") if item else _inl(ymd)
     out = {}
 
     def one(sql):
@@ -298,4 +300,114 @@ def expected_totals(ymd):
     out["공정실적수량"] = one("""SELECT ISNULL(SUM(CAST(PROD_QTY AS float)),0)
                               FROM PARTNER_ERP.dbo.PR_T_PROD_DTL
                              WHERE PROD_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ★흐름 재생 — 한 품번의 하루를 통째로 재현한다 (2026-09-01 대표)
+#
+#   "레거시에 일어나는 트랜잭션을 신규 ERP 에서도 동일한 작동을 하는지 흐름을 보기로 했잖아"
+#
+#   개별 케이스 PASS 는 '동작'이지 '흐름'이 아니다. 흐름은
+#     ①키팅확인 → ②자재차감 / ①생산실적 → ②키팅소진·생산입고·생산자재소비 / ①출하
+#   가 **이어서** 도는 것이고, 검증 대상은 **①을 넣었을 때 ②가 같은 값으로 생기는가** 다.
+#
+#   ★막히는 문제: 우리 nx 에는 레거시가 이미 갖고 있던 재고가 없다 → 생산이 게이트에 막혀
+#     ② 자체가 안 생긴다. 그래서 **출발 재고를 맞춰야** 흐름을 볼 수 있다.
+#   ★맞추는 방법도 프로그램으로 — 레거시가 그날 실제로 소비한 자재(PR_T_STOCK_MAINT_MAT tag 4)를
+#     **우리 자재입고 화면(`/api/stock/save` receipt)** 으로 먼저 넣는다. 직접 INSERT 하지 않는다.
+#     이건 '거래 재생'이 아니라 **테스트 픽스처**이므로 이름을 `재생⓪시드` 로 구분한다.
+# ══════════════════════════════════════════════════════════════════════
+def build_flow_cases(ymd, item):
+    """품번 하나의 하루 흐름 = ⓪시드(자재입고) → ①키팅 → ①생산 → ①출하."""
+    cur = _cur()
+    out = []
+
+    # ⓪ 시드 — 레거시가 그날 소비한 자재를 우리 입고화면으로 먼저 넣는다(부족분 메우기)
+    # ★자재입고 화면은 **거래처(매입처)가 필수**다(우리 유효성 검증이 제대로 막는다).
+    #   자재별 매입처는 그 자재의 **가장 최근 입고 거래처**를 쓴다 — 실제로 그 자재를 넣던 곳이다.
+    cur.execute("""SELECT LTRIM(RTRIM(m.MAT_CODE)), SUM(ABS(CAST(m.MAINT_QTY AS float))),
+                          MAX(x.CUST_CODE)
+                     FROM PARTNER_ERP.dbo.PR_T_STOCK_MAINT_MAT m
+                     OUTER APPLY (SELECT TOP 1 LTRIM(RTRIM(p.CUST_CODE)) CUST_CODE
+                                    FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT p
+                                   WHERE LTRIM(RTRIM(p.MAT_CODE))=LTRIM(RTRIM(m.MAT_CODE))
+                                     AND ISNULL(p.CUST_CODE,'')<>'' AND ISNULL(p.MAINT_TAG,'') IN ('9','C')
+                                   ORDER BY p.MAINT_YMD DESC) x
+                    WHERE m.MAINT_YMD=? AND LTRIM(RTRIM(m.ITEM_CODE))=? AND ISNULL(m.MAINT_TAG,'')='4'
+                    GROUP BY LTRIM(RTRIM(m.MAT_CODE))""", ymd, item)
+    seeds, nocust = [], []
+    for m, q, cust in cur.fetchall():
+        if not m or not q:
+            continue
+        if not cust:
+            nocust.append(m)      # ★매입처를 모르면 **넣지 않는다**(추측 금지). 목록만 보고한다.
+            continue
+        seeds.append((m, float(q), str(cust).strip()))
+    for mat, q, cust in seeds:
+        out.append(dict(
+            kind="F", allow_reject=True, name="흐름⓪시드 자재입고 %s +%g" % (mat, q),
+            method="POST", path="/api/stock/save",
+            # ★mirror=False — 하네스의 '자재재고' 프로브는 **스코프 품번 1개**만 본다
+            #   (flow_server.PROBES_MAT = MAT_CODE=? 단건). 우리가 넣는 자재는 그것과 다르므로
+            #   3곳 일치를 요구하면 **거짓 FAIL** 이 난다(2026-09-01 실측: 재고 +0 으로 12건 FAIL).
+            probe="원장MAT", delta=q, mirror=False,
+            body={"screen": "receipt", "user": "replay",
+                  "rows": [{"MAINT_YMD": ymd, "MAT_CODE": mat, "qty": q, "CUST_CODE": cust}]}))
+
+    # ① 사람 입력 — 시각순(키팅 → 생산 → 출하가 실제 순서대로 섞인다)
+    tl = []
+    cur.execute("""SELECT CONVERT(varchar(8),INSERT_DATETIME,108), ISNULL(MAINT_TAG,''), MAINT_QTY,
+                          ISNULL(WORK_ORDER,''), ISNULL(SPLIT_WORK_ORDER,''), ISNULL(PROC_GUBUN,'')
+                     FROM PARTNER_ERP.dbo.PU_T_READY_STOCK_MAINT
+                    WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE))=? AND MAINT_TAG IN ('1','2')""", ymd, item)
+    for h, t, q, wo, swo, gpc in cur.fetchall():
+        qf = float(q or 0)
+        tl.append((_hms(h), dict(
+            kind="F", allow_reject=True, name="흐름①키팅%s %s %+g" % ("확인" if t == '1' else "취소", item, qf),
+            method="POST",
+            path="/api/kitting/cell-confirm" if t == '1' else "/api/kitting/cell-cancel",
+            probe="원장RDY", delta=qf, mirror=False,
+            body={"item": item, "wo": str(wo).strip(), "swo": str(swo).strip(),
+                  "gpc": str(gpc).strip(), "ymd": ymd, "qty": abs(qf), "user": "replay"})))
+
+    cur.execute("""SELECT PROD_HMS, PROD_QTY, ISNULL(WORK_ORDER,''), ISNULL(SPLIT_WORK_ORDER,''),
+                          ISNULL(LINE_NO,''), ISNULL(WORK_CODE,''), ISNULL(PART_CODE,''),
+                          ISNULL(S_WORK_CODE,0), ISNULL(FINISH_FLAG,'0')
+                     FROM PARTNER_ERP.dbo.PR_T_PROD_DTL
+                    WHERE PROD_YMD=? AND LTRIM(RTRIM(ITEM_CODE))=?""", ymd, item)
+    for h, q, wo, swo, ln, wc, pc, sw, fin in cur.fetchall():
+        qi = int(float(q or 0))
+        tl.append((_hms(h), dict(
+            kind="F", allow_reject=True, name="흐름①생산 %s x%d" % (item, qi),
+            method="POST", path="/api/procreg/save",
+            probe="공정실적수량", delta=qi, mirror=False,
+            body={"prod_ymd": ymd, "prod_hms": str(h or "").strip(), "item_code": item,
+                  "work_order": str(wo).strip(), "split_work_order": str(swo).strip(),
+                  "line_no": str(ln).strip(), "work_code": str(wc).strip(),
+                  "part_code": str(pc).strip(), "s_work_code": sw,
+                  "finish_flag": str(fin).strip(), "prod_qty": qi, "user": "replay"})))
+
+    cur.execute("""SELECT CONVERT(varchar(8),INSERT_DATETIME,108), MAINT_QTY, ISNULL(WORK_ORDER,''),
+                          ISNULL(SPLIT_WORK_ORDER,''), ISNULL(REMARKS,'')
+                     FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT
+                    WHERE MAINT_YMD=? AND MAINT_TAG='J' AND LTRIM(RTRIM(ITEM_CODE))=?""", ymd, item)
+    for h, q, wo, swo, rm in cur.fetchall():
+        qa = abs(float(q or 0))
+        if qa == 0 or not str(wo).strip():
+            continue
+        tl.append((_hms(h), dict(
+            kind="F", allow_reject=True, name="흐름①출하 %s x%g" % (item, qa),
+            method="POST", path="/api/lgsale/save",
+            probe="원장ASY", delta=-qa, mirror=False,
+            body={"work_order": str(wo).strip(), "split_work_order": str(swo).strip(),
+                  "item_code": item, "sale_qty": qa, "remarks": (str(rm).strip() or "흐름재생")[:100]})))
+
+    tl.sort(key=lambda x: x[0])
+    out += [c for _, c in tl]
+    print("  흐름 재생 %s: 시드 %d건 + 입력 %d건 (키팅·생산·출하 시각순)"
+          % (item, len(seeds), len(tl)))
+    if nocust:
+        print("     ※시드 제외 %d건 - 매입처 이력 없음(추측하지 않는다): %s"
+              % (len(nocust), ", ".join(nocust[:6])))
     return out

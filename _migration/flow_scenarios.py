@@ -382,7 +382,7 @@ def main():
     if os.environ.get('REPLAY_YMD'):
         try:
             from replay_cases import expected_totals
-            exp = expected_totals(os.environ['REPLAY_YMD'])
+            exp = expected_totals(os.environ['REPLAY_YMD'], os.environ.get('REPLAY_ITEM') or None)
             got = delta(BASE0, probe()) if BASE0 else {}
             print("── 재생 총합 대조 (레거시 파생 vs 우리 결과) " + "─" * 18)
             for k, want in exp.items():
