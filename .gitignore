@@ -83,3 +83,5 @@ PNC_ERP_Web/_files/
 # 하네스 자격증명 — 절대 커밋 금지 (2026-08-29)
 _migration/.flow_secrets.json
 협력사포털_계정_*.csv
+_migration/replay_loop_log.txt
+_migration/replay_pilot_state.json
