@@ -2524,7 +2524,8 @@ const _mkMagam=(CFG)=>(c)=>{
        .sm-dlg-h .x{margin-left:auto;cursor:pointer;font-size:20px;opacity:.9}
        .sm-dlg-b{padding:14px 18px;overflow:auto;flex:1}
        .sm-dlg-f{padding:11px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;background:#fafcff}
-       .sm-it{font-size:12px;width:100%}.sm-it th,.sm-it td{padding:3px 7px;border-bottom:1px solid var(--line);white-space:nowrap}.sm-it th{background:#f4f7fc;text-align:right}.sm-it th:nth-child(-n+3){text-align:left}
+       .sm-it{font-size:12px;width:100%;border-collapse:separate;border-spacing:0}.sm-it th,.sm-it td{padding:3px 7px;border-bottom:1px solid var(--line);white-space:nowrap}.sm-it th{background:#f4f7fc;text-align:right}.sm-it th:nth-child(-n+3){text-align:left}
+       .sm-it thead th{position:sticky;top:0;z-index:3;box-shadow:inset 0 -1px 0 var(--line)}.sm-it tfoot td{position:sticky;bottom:0;background:var(--bg2,#f4f6fb);z-index:2}
        .sm-it td.num{text-align:right;font-variant-numeric:tabular-nums}.sm-it input{width:90px;text-align:right;border:1px solid var(--line);border-radius:4px;padding:2px 5px}
        .sm-it tr.chg input{border-color:#2f6db3;background:#eef4ff;font-weight:700}.sm-it td.dpos{color:#1f8a5a}.sm-it td.dneg{color:#c0392b}
        .sm-adj{margin-top:14px;border:1px solid #cfe0ff;border-radius:8px;padding:10px 12px;background:#fbfdff}
@@ -2688,12 +2689,10 @@ const _mkMagam=(CFG)=>(c)=>{
     const selN=selRows.size;
     const btnLbl=selN?`이월/해제 (${selN}건)`:'이월/해제';
     const carN=items.filter(it=>{const fd=fdays(it);return fd.length&&fd.every(bd=>bd.carry);}).length;
-    const _days=(detail&&detail.days)||[];
-    const dOpts=(sel,z)=>`<option value="0">${z}</option>`+_days.map(d=>`<option value="${d}" ${+sel===d?'selected':''}>${d}일</option>`).join('');
     const toolbar=`<div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
       <b style="white-space:nowrap">품목별 매출</b>
       <select class="inp" id="tp-view" style="width:auto"><option value="item" ${view2==='item'?'selected':''}>품목별</option><option value="day" ${view2==='day'?'selected':''}>일자별</option></select>
-      <label class="tl">기간</label><select class="inp" id="tp-from" style="width:auto">${dOpts(fromD,'처음')}</select><span class="mut">~</span><select class="inp" id="tp-to" style="width:auto">${dOpts(toD,'끝')}</select>
+      <label class="tl">기간</label><input type="number" class="inp" id="tp-from" min="1" max="31" value="${fromD||''}" placeholder="일" style="width:50px;text-align:center"><span class="mut">~</span><input type="number" class="inp" id="tp-to" min="1" max="31" value="${toD||''}" placeholder="일" style="width:50px;text-align:center"><span class="mut" style="font-size:11px">일</span>
       <label class="tl">품명</label><input class="inp" id="tp-q" list="tp-items" value="${esc(qName)}" placeholder="품명/품번" style="width:118px" autocomplete="off"><datalist id="tp-items">${items.map(it=>`<option value="${esc(it.nm||it.mat)}">${esc(it.mat)}</option>`).join('')}</datalist>
       ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px">저장중…</span>':''}`:''}
       <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 금액0 · 차월(${_ynm(carryNextYm)})</span></div>`;
