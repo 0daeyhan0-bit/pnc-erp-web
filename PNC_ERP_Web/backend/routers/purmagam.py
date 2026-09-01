@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _open_days, _ledger_return, _carry_win)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _carry_win)
 
 router = APIRouter()
 
@@ -125,45 +125,6 @@ def purmagam_carryover(ym: str = Query(""), cc: str = Query("")):
     yy = int(y[:2]); mm = int(y[2:]) + 1
     if mm == 13: mm = 1; yy += 1
     return {"ym": y, "cc": cc, "next_ym": f"{yy:02d}{mm:02d}", "rows": rows}
-
-@router.get("/api/purmagam/opendays")
-def purmagam_opendays(ym: str = Query(""), months: int = Query(2)):
-    """반품 반영 대상일 = 일마감(월마감) 안 된 일자(YYMMDD). ym부터 months개월."""
-    y = _dig4(ym) or _cur_ym()
-    return {"ym": y, "days": _open_days(y, months, "MAT")}
-
-@router.post("/api/purmagam/return_save")
-def purmagam_return_save(payload: dict = Body(...)):
-    """매입반품 → 수불장 전표(MAINT_TAG='RT', -재고출고). 선택 오픈일자에 기록.
-       payload: {ym, cust_code, ymd(YYMMDD), lines:[{mat_code, qty, cost, remarks}]}"""
-    cc = str(payload.get("cust_code", "")).strip()
-    ymd = "".join(ch for ch in str(payload.get("ymd", "")) if ch.isdigit())
-    lines = payload.get("lines", []) or []
-    if len(ymd) != 6:
-        raise HTTPException(400, "반영일자(YYMMDD) 필요")
-    if not lines:
-        raise HTTPException(400, "반품 품목 필요")
-    nx = _nx_tx(); nc = nx.cursor()
-    try:
-        if _closed(nc, ymd, "MAT"):
-            return {"ok": False, "errors": [f"{ymd[2:4]}/{ymd[4:6]} 은 마감된 일자 — 마감 안 된 일자를 선택하세요"]}
-        saved = 0; errs = []
-        for i, ln in enumerate(lines, 1):
-            mat = str(ln.get("mat_code", "")).strip()
-            qty = abs(float(ln.get("qty") or 0))
-            if not mat or qty <= 0:
-                errs.append(f"{i}행: 품목·수량 필요"); continue
-            _ledger_return(nc, ymd, mat, -qty, cost=float(ln.get("cost") or 0),   # 매입반품 = 재고 나감(-)
-                           cust_code=(cc or None), remarks=(str(ln.get("remarks") or "").strip() or "매입반품"))
-            saved += 1
-        if errs:
-            nx.rollback(); return {"ok": False, "errors": errs}
-        nx.commit()
-        return {"ok": True, "saved": saved, "ymd": ymd}
-    except Exception as e:
-        nx.rollback(); raise HTTPException(500, f"반품 저장 실패: {e}")
-    finally:
-        nx.close()
 
 def _pur_src_moda(win):
     """_pur_src 와 동일 원천 + 모도번(ITEM_CODE) 컬럼 추가 — P/No 펼침 전용.

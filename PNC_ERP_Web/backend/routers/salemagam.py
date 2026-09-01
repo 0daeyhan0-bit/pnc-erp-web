@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _open_days, _ledger_return, _closed, _carry_win)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _carry_win)
 
 import weight_calc
 router = APIRouter()
@@ -142,49 +142,6 @@ def salemagam_carryover(ym: str = Query(""), cc: str = Query("")):
     finally:
         cn.close()
     return {"ym": y, "cc": cc, "next_ym": _next_ym(y), "rows": rows}
-
-@router.get("/api/salemagam/opendays")
-def salemagam_opendays(ym: str = Query(""), months: int = Query(2)):
-    """반품 반영 대상일 = 일마감(월마감) 안 된 일자(YYMMDD). ym부터 months개월."""
-    y = _dig4(ym) or _cur_ym()
-    return {"ym": y, "days": _open_days(y, months, "MAT")}
-
-@router.post("/api/salemagam/return_save")
-def salemagam_return_save(payload: dict = Body(...)):
-    """매출반품 → 수불장 전표(MAINT_TAG='RT', +재고복귀). 선택 오픈일자(일마감 안 된 날)에 기록.
-       payload: {ym, cust_code, ymd(YYMMDD), lines:[{mat_code, qty, cost, remarks}]}"""
-    return _return_save(payload, sign=+1)   # 매출반품 = 재고 되돌아옴(+)
-
-# 매출/매입 공용 반품 저장(부호만 다름) — sign +1=매출반품(재고복귀) / -1=매입반품(재고출고)
-def _return_save(payload, *, sign):
-    cc = str(payload.get("cust_code", "")).strip()
-    ymd = "".join(ch for ch in str(payload.get("ymd", "")) if ch.isdigit())
-    lines = payload.get("lines", []) or []
-    if len(ymd) != 6:
-        raise HTTPException(400, "반영일자(YYMMDD) 필요")
-    if not lines:
-        raise HTTPException(400, "반품 품목 필요")
-    nx = _nx_tx(); nc = nx.cursor()
-    try:
-        if _closed(nc, ymd, "MAT"):
-            return {"ok": False, "errors": [f"{ymd[2:4]}/{ymd[4:6]} 은 마감된 일자 — 마감 안 된 일자를 선택하세요"]}
-        saved = 0; errs = []
-        for i, ln in enumerate(lines, 1):
-            mat = str(ln.get("mat_code", "")).strip()
-            qty = abs(float(ln.get("qty") or 0))
-            if not mat or qty <= 0:
-                errs.append(f"{i}행: 품목·수량 필요"); continue
-            _ledger_return(nc, ymd, mat, sign * qty, cost=float(ln.get("cost") or 0),
-                           cust_code=(cc or None), remarks=(str(ln.get("remarks") or "").strip() or ("매출반품" if sign > 0 else "매입반품")))
-            saved += 1
-        if errs:
-            nx.rollback(); return {"ok": False, "errors": errs}
-        nx.commit()
-        return {"ok": True, "saved": saved, "ymd": ymd}
-    except Exception as e:
-        nx.rollback(); raise HTTPException(500, f"반품 저장 실패: {e}")
-    finally:
-        nx.close()
 
 def _next_ym(y):
     yy = int(y[:2]); mm = int(y[2:]) + 1

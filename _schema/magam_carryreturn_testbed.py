@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""★마감 이월·반품 테스트베드 (2026-09-01) — 매출마감(salemagam)/매입마감(purmagam).
-검증: 이월 목록(정산귀속·표시, 수불장 무전표) · 오픈일자(일마감 제외) · 반품 수불장 전표(+/-)·오픈일자 게이트.
+"""★마감 이월 테스트베드 (2026-09-01) — 매출마감(salemagam)/매입마감(purmagam).
+검증: 이월 목록(정산 귀속·표시, 수불장 무전표) · 업체별/품목별 · 입고일자 다일자(일자별 토글용).
 방식: FLOW식 no-commit + uvicorn + 실인증, 실제 엔드포인트, 전부 롤백·오염0.
-설계 = 사용자 확정(이월=귀속·표시 / 반품=수불장 전표·오픈일자 선택). 협력사별 마감일 CM_M_CUST_MAGAM.
+설계: 이월=정산 귀속·표시만(수불장 전표 없음). 반품 기능은 사용자 요청으로 제거(2026-09-01).
 """
 import sys, os, io, threading, time as _t, json as _json, urllib.request, urllib.error, socket
 BE = r'd:/피앤씨인더스트리/100_AI_AGENT/Projects/_wt_order/PNC_ERP_Web/backend'
@@ -57,105 +57,56 @@ def q(sql,*a):
     c=RAW.cursor()
     try: c.execute(sql,*a); return c.fetchall()
     finally: c.close()
-def rollback(): RAW.rollback(); login()
 PASS=[];FAIL=[]
 def rec(n,ok,d=""): (PASS if ok else FAIL).append(n); print(f"  [{'PASS' if ok else 'FAIL'}] {n}{('  — '+d) if d else ''}")
 print("로그인:", "OK" if login() else "FAIL")
-
 YM="2608"
 
-# ── 1. 오픈일자(일마감 제외) ──
-print("\n[1] 오픈일자 (일마감 안 된 일자)")
-od=get(f"/api/salemagam/opendays?ym={YM}")
-days=od.get("days",[])
-rec("opendays 반환", len(days)>0, f"{len(days)}일 {days[:2]}..{days[-2:] if days else []}")
-# 8월 초(예:260810)는 일마감이라 목록에 없어야, 9월(260910)은 열려 있어야
-closed_sample = "260810"
-open_sample = next((d for d in days if d.startswith("2609")), None)
-rec("일마감된 8월초 제외", closed_sample not in days, f"{closed_sample} 미포함")
-rec("9월 오픈일 포함", open_sample is not None, f"{open_sample}")
-# period_close 실측 대조
-cl=set(r[0] for r in q("SELECT period FROM nx.period_close WHERE domain='MAT' AND ptype='D' AND close_flag=1 AND period LIKE '2608%'"))
-bad=[d for d in days if d in cl]
-rec("반환일자에 마감일 없음(원장 대조)", not bad, f"침범 {len(bad)}")
-
-# ── 2. 이월 목록(정산귀속·표시) ──
-print("\n[2] 이월 목록 = 마감일 이후~말일 입고분(차월 이월)")
+# ── 1. 이월 업체별 ──
+print("\n[1] 이월 업체별 집계")
 co=get(f"/api/salemagam/carryover?ym={YM}")
 rows=co.get("rows",[])
-rec("이월 업체별 반환", len(rows)>0, f"{len(rows)}개 업체, next_ym={co.get('next_ym')}")
-# 특정 업체(대원산업 2148) 품목별
+rec("이월 업체별 반환", len(rows)>0, f"{len(rows)}개 업체 · next_ym={co.get('next_ym')}")
+rec("next_ym = 차월", co.get("next_ym")=="2609", f"{co.get('next_ym')}")
+
+# ── 2. 이월 품목·일자별(2148 대원산업) ──
+print("\n[2] 이월 품목별/입고일자별 (2148)")
 cc="2148"
 cod=get(f"/api/salemagam/carryover?ym={YM}&cc={cc}")
 crows=cod.get("rows",[])
-rec(f"이월 품목별({cc})", len(crows)>0, f"{len(crows)}행")
-# 이월 대상은 마감일 이후 일자만(각 행 ymd > 그 업체 MAGAM_DAY). 대원 마감일 확인
+rec("품목×입고일 행 반환", len(crows)>0, f"{len(crows)}행")
+# 마감일 이후만
 mgd=q("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, YM)
 mgd=(mgd[0][0] if mgd else "31")
 after=[r for r in crows if str(r["ymd"])[4:6] > str(mgd)]
-rec(f"이월행이 마감일({mgd}) 이후만", len(after)==len(crows), f"{len(after)}/{len(crows)} (마감일 이후)")
-# ★수불장 무전표 확인 = carryover 호출로 stock_ledger magamreturn 전표 생성 안 됨
-n_before=q("SELECT COUNT(*) FROM nx.stock_ledger WHERE UPDATE_WINDOW IS NULL AND 1=0")  # noop
-rt0=q("SELECT COUNT(*) FROM nx.stock_ledger WHERE MAINT_TAG='RT' AND REMARKS IN ('매출반품','매입반품')")[0][0]
-rec("이월 조회는 수불장 전표 안 만듦", True, f"RT(반품)전표 {rt0}건 (조회로 불변)")
+rec(f"전 행이 마감일({mgd}) 이후", len(after)==len(crows), f"{len(after)}/{len(crows)}")
+# 일자별 토글 = 여러 입고일 존재
+udays=sorted(set(str(r["ymd"]) for r in crows))
+rec("입고일 다일자(일자별 토글용)", len(udays)>=2, f"입고일 {len(udays)}종 {udays[:5]}")
+# 품목별 집계 = 품번 유니크수
+umat=set(str(r["mat"]) for r in crows)
+rec("품목별 집계 가능", len(umat)>0, f"품번 {len(umat)}종")
+# 금액 합 일치(업체별 총액 vs 품목별 합)
+tot_cc=next((r["amt"] for r in rows if str(r["cc"])==cc), None)
+tot_it=round(sum(+r["amt"] for r in crows),0)
+rec("업체총액 ≈ 품목합", tot_cc is not None and abs(round(tot_cc,0)-tot_it)<1.0, f"업체 {round(tot_cc or 0):,} vs 품목합 {int(tot_it):,}")
 
-# ── 3. 반품 수불장 전표 (매출반품=+ 재고복귀) ──
-print("\n[3] 매출반품 → 수불장 전표(+), 오픈일자")
-# 실재 품목 하나 확보(이월 품목별에서)
-mat = str(crows[0]["mat"]).strip() if crows else None
-if not mat:
-    mat = str(q("SELECT TOP 1 MAT_CODE FROM nx.stock_ledger WHERE MAINT_TAG='5' AND MAT_CODE IS NOT NULL")[0][0]).strip()
-oymd = open_sample or (days[-1] if days else "260910")
-def rt_rows(ymd,mat):
-    return q("SELECT MAINT_QTY, MAINT_TAG, REMARKS FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAT_CODE=? AND MAINT_TAG='RT'", ymd, mat)
-def wh_qty(mat):
-    r=q("SELECT STOCK_QTY FROM nx.PU_T_MAT_STOCK_WH WHERE MAT_CODE=? AND CUST_CODE='Z99990' AND ISNULL(GAGONG_PROC_CODE,'')='IS0001'", mat)
-    return float(r[0][0]) if r and r[0][0] is not None else 0.0
-b_wh=wh_qty(mat); b_rt=len(rt_rows(oymd,mat))
-r=post("/api/salemagam/return_save",{"ym":YM,"cust_code":cc,"ymd":oymd,"lines":[{"mat_code":mat,"qty":5,"cost":1000,"remarks":"매출반품"}]})
-a_rt=rt_rows(oymd,mat); a_wh=wh_qty(mat)
-rec("매출반품 저장 ok", r.get("ok") and r.get("saved")==1, f"{r}")
-newq=[float(x[0]) for x in a_rt][ -1] if a_rt else None
-rec("수불장 RT 전표 +부호(재고복귀)", len(a_rt)==b_rt+1 and newq==5.0, f"MAINT_QTY={newq}")
-rec("자재창고 버킷 +5 반영", abs((a_wh-b_wh)-5.0)<1e-6, f"{b_wh}→{a_wh}")
-rollback()   # 오염0
+# ── 3. 수불장 무전표(조회는 원장 불변) ──
+print("\n[3] 이월 조회는 수불장 전표 안 만듦")
+b=q("SELECT COUNT(*) FROM nx.stock_ledger WHERE UPDATE_WINDOW='magamreturn'")[0][0]
+get(f"/api/salemagam/carryover?ym={YM}&cc={cc}"); get(f"/api/purmagam/carryover?ym={YM}")
+a=q("SELECT COUNT(*) FROM nx.stock_ledger WHERE UPDATE_WINDOW='magamreturn'")[0][0]
+rec("magamreturn 전표 불변(0)", a==b==0, f"before {b} after {a}")
 
-# ── 4. 매입반품 = -부호(재고출고) ──
-print("\n[4] 매입반품 → 수불장 전표(-)")
-pod=get(f"/api/purmagam/opendays?ym={YM}"); pdays=pod.get("days",[])
+# ── 4. 매입마감 이월 ──
+print("\n[4] 매입마감 이월")
 pco=get(f"/api/purmagam/carryover?ym={YM}"); prows=pco.get("rows",[])
-rec("매입 opendays/carryover", len(pdays)>0 and isinstance(prows,list), f"open {len(pdays)}일 · 이월 {len(prows)}업체")
-pmat=None
+rec("매입 업체별 이월", isinstance(prows,list) and len(prows)>0, f"{len(prows)}업체 next_ym={pco.get('next_ym')}")
 if prows:
     pcc=str(prows[0]["cc"]).strip()
     pd=get(f"/api/purmagam/carryover?ym={YM}&cc={pcc}").get("rows",[])
-    pmat=str(pd[0]["mat"]).strip() if pd else None
-if not pmat:
-    pmat=str(q("SELECT TOP 1 MAT_CODE FROM nx.stock_ledger WHERE MAINT_TAG='9' AND MAT_CODE IS NOT NULL")[0][0]).strip()
-poymd=next((d for d in pdays if d.startswith("2609")), (pdays[-1] if pdays else "260910"))
-pb=wh_qty(pmat)
-r2=post("/api/purmagam/return_save",{"ym":YM,"cust_code":(pcc if prows else ""),"ymd":poymd,"lines":[{"mat_code":pmat,"qty":3,"cost":2000}]})
-pa=q("SELECT MAINT_QTY FROM nx.stock_ledger WHERE MAINT_YMD=? AND MAT_CODE=? AND MAINT_TAG='RT'", poymd, pmat)
-paw=wh_qty(pmat)
-rec("매입반품 저장 ok", r2.get("ok") and r2.get("saved")==1, f"{r2}")
-lastq=float(pa[-1][0]) if pa else None
-rec("수불장 RT 전표 -부호(재고출고)", lastq==-3.0, f"MAINT_QTY={lastq}")
-rec("자재창고 버킷 -3 반영", abs((paw-pb)+3.0)<1e-6, f"{pb}→{paw}")
-rollback()
-
-# ── 5. 마감된 일자 반품 차단 ──
-print("\n[5] 마감(일마감) 일자 반품 차단")
-r3=post("/api/salemagam/return_save",{"ym":YM,"cust_code":cc,"ymd":closed_sample,"lines":[{"mat_code":mat,"qty":1}]})
-rec("마감일자 반품 거부", (not r3.get("ok")) and any("마감" in e for e in r3.get("errors",[])), f"{r3.get('errors')}")
-rollback()
-
-# ── 6. 입력 검증 ──
-print("\n[6] 입력 검증")
-r4=post("/api/salemagam/return_save",{"ym":YM,"cust_code":cc,"ymd":oymd,"lines":[]})
-rec("빈 품목 거부", not r4.get("ok"), f"{r4.get('_http') or r4.get('detail') or r4.get('errors')}")
-r5=post("/api/salemagam/return_save",{"ym":YM,"cust_code":cc,"ymd":"99","lines":[{"mat_code":mat,"qty":1}]})
-rec("잘못된 일자 거부", not r5.get("ok"), f"{r5.get('_http') or r5.get('detail')}")
-rollback()
+    pud=sorted(set(str(r["ymd"]) for r in pd))
+    rec(f"매입 품목×입고일({pcc})", len(pd)>0, f"{len(pd)}행 · 입고일 {len(pud)}종")
 
 RAW.rollback()
 print(f"\n===== 결과: PASS {len(PASS)} / FAIL {len(FAIL)} =====")
