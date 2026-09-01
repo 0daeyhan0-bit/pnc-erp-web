@@ -2809,13 +2809,13 @@ const _mkMagam=(CFG)=>(c)=>{
     items.forEach(it=>{
       (it.byday||[]).forEach(bd=>{if(bd.carry)return;const de=dEdit[dkey(it.mat,bd.d)];if(!de)return;const ncC=de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost;if(!ncC)return;
         const nc=+de.nc;const delta=nc*(+bd.qty)-(+bd.cost)*(+bd.qty);
-        if(!(de.rc||(de.rd||'').trim()))errs.push(`${it.mat} ${bd.d}일: 사유 필요`);
+        if(!de.rc)errs.push(`${it.mat} ${bd.d}일: 사유 선택 필요`);if(!(de.rd||'').trim())errs.push(`${it.mat} ${bd.d}일: 세부사유 입력 필요`);
         out.push({adj_type:'PRICE',scope:'DATE',mat_code:it.mat,target_ymd:bd.ymd||ymd6(bd.d),old_cost:+bd.cost,new_cost:nc,old_qty:+bd.qty,new_qty:+bd.qty,delta_amt:delta,reason_code:de.rc||null,reason_detail:de.rd||null});});
       const pe=pEdit[it.mat];
       if(pe&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost){let delta=0;(it.byday||[]).forEach(bd=>{if(bd.carry||dEdit[dkey(it.mat,bd.d)])return;delta+=(+pe.nc-+bd.cost)*(+bd.qty);});
-        if(delta!==0){if(!(pe.rc||(pe.rd||'').trim()))errs.push(`${it.mat} 품목단가: 사유 필요`);
+        if(delta!==0){if(!pe.rc)errs.push(`${it.mat} 품목단가: 사유 선택 필요`);if(!(pe.rd||'').trim())errs.push(`${it.mat} 품목단가: 세부사유 입력 필요`);
           out.push({adj_type:'PRICE',scope:'ITEM',mat_code:it.mat,target_ymd:null,old_cost:+it.cost,new_cost:+pe.nc,old_qty:null,new_qty:null,delta_amt:delta,reason_code:pe.rc||null,reason_detail:pe.rd||null});}}});
-    amtAdjs.forEach((a,i)=>{if(+a.amt!==0){if(!(a.rc||(a.rd||'').trim()))errs.push(`총액조정 ${i+1}행: 사유 필요`);
+    amtAdjs.forEach((a,i)=>{if(+a.amt!==0){if(!a.rc)errs.push(`총액조정 ${i+1}행: 사유 선택 필요`);if(!(a.rd||'').trim())errs.push(`총액조정 ${i+1}행: 세부사유 입력 필요`);
       out.push({adj_type:(+a.amt>=0?'AMT_UP':'AMT_DN'),scope:null,mat_code:null,target_ymd:null,old_cost:null,new_cost:null,old_qty:null,new_qty:null,delta_amt:+a.amt,reason_code:a.rc||null,reason_detail:a.rd||null});}});
     return {out,errs};};
 
