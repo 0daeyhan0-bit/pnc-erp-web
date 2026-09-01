@@ -440,11 +440,13 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
                        NULLIF(LTRIM(RTRIM(u.PR_PART_CODE)),''),
                        NULLIF(LTRIM(RTRIM(cc.CUST_DESC)),''), '') line,
               u.ITEM_CODE, u.MAT_CODE, ISNULL(su.RACK_NO,'') rack, u.MAINT_QTY
+            -- ★★2026-09-01: UNION ALL 제거 — 같은 테이블(nx)을 두 번 읽어 **전 행이 2배**였다.
+            --   증상: 부품납품표 카드가 2장씩, 부품확인/납품표에도 같은 행이 2줄.
+            --   실측 group 199103 → nx 1행인데 UNION 결과 2행(전 전표 동일).
+            --   원래 라이브+nx 를 합치려던 자리로 보이나 양쪽 다 PARTNER_ERP_TEST3.nx 였다.
+            --   ⟹ 사용자 확정(2026-09-01): **nx 단일 소스**로 읽는다.
+            --      (CLAUDE.md §1-9-1 — 한 개념에 소스는 하나. 폴백·UNION 금지)
             FROM (
-              SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY
-                FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
-               WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
-              UNION ALL
               SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY
                 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
                WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
@@ -452,7 +454,7 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
-            ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt, group_from, gt)
+            ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt)
         cols = [d[0] for d in cur.description]
         raw = [dict(zip(cols, r)) for r in cur.fetchall()]
         groups = {}
