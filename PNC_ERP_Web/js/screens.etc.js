@@ -1532,7 +1532,7 @@ SCREEN.setstock=(c)=>{
     const inf=st.info;
     c.innerHTML=`
      <div class="page-title">📦 자재세트입고관리</div>
-     <div class="page-sub">협력사 세트 <b>SET바코드 스캔/장부입고</b> → 세트입고 실적 + 입고완료분 <b>자도번 재고파생</b>(TAG='S') · 검사품=입고대기 · 레거시 <code>w_pu_stock_140</code></div>
+     <div class="page-sub">협력사 세트 <b>SET바코드 스캔/장부입고</b> → 세트입고 실적 + 입고완료분 <b>자도번 재고파생</b>(TAG='S') · 검사품=입고대기 · <b>직납품은 영업창고로 자동출고</b> · 레거시 <code>w_pu_stock_140</code></div>
      <div class="panel" style="border:2px solid #2e86de"><div class="panel-h">세트 입고처리</div><div class="panel-b">
        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
          <label class="tl" style="font-weight:600">SET바코드</label>
@@ -1555,15 +1555,20 @@ SCREEN.setstock=(c)=>{
          <button class="btn" id="f-go">🔍 조회</button></div>
        <div class="grid-wrap" style="max-height:440px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th data-key="maint_ymd">입고일자</th><th class="num" data-key="maint_seq">SEQ</th><th data-key="custnm">협력사</th><th data-key="item_code">도번</th><th data-key="itemnm">품명</th>
-         <th class="num" data-key="maint_qty">입고수량</th><th data-key="sheet_no">SET바코드</th><th class="center" data-key="status">상태</th><th class="center" data-key="derived_flag">재고파생</th><th>구분</th></tr></thead>
+         <th class="num" data-key="maint_qty">입고수량</th><th data-key="sheet_no">SET바코드</th><th class="center" data-key="status">상태</th><th class="center" data-key="derived_flag">재고파생</th><th class="center" data-key="direct_cust">직납출고</th><th>구분</th></tr></thead>
        <tbody>${st.rows.map(r=>{const ret=(+r.maint_qty<0);return `<tr>
          <td>${esc(r.maint_ymd)}</td><td class="num">${r.maint_seq}</td><td>${esc(r.custnm||r.cust_code)}</td>
          <td><b>${esc(r.item_code)}</b></td><td class="cap" style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.itemnm||"")}">${esc(r.itemnm||"")}</td>
          <td class="num qty" style="color:${ret?"#c0392b":"#1f7a3d"}">${won(r.maint_qty)}</td>
          <td>${r.sheet_no?"SET"+esc(r.sheet_no):(r.manual_sheet_no?esc(r.manual_sheet_no)+"(수동)":"")}</td>
          <td class="center" style="color:${scol(r.status)}">${STAT[r.status]||r.status}</td>
-         <td class="center">${r.derived_flag==='1'?'✅':'—'}</td><td>${r.maint_tag==='3'?'장부':r.maint_tag==='2'?'바코드':ret?'반품':esc(r.maint_tag)}</td></tr>`;}).join("")||'<tr><td colspan="10" style="padding:16px;color:var(--muted)">입고 실적 없음</td></tr>'}
-       <tr class="grandtot"><td colspan="5" class="center">합계 ${st.rows.length}건</td><td class="num">${won(totq)}</td><td colspan="4"></td></tr>
+         <td class="center">${r.derived_flag==='1'?'✅':'—'}</td>
+         <td class="center" title="${r.direct_cust?`직납처 ${esc(r.direct_nm||r.direct_cust)} — 영업창고로 출고됨`:''}">${
+           !r.direct_cust ? '<span style="color:#c9d1dc">-</span>'
+           : (+r.direct_qty>0 ? `<span style="color:#1f7a3d">직납 ${won(r.direct_qty)}</span>`
+                              : '<span style="color:#c67d00">직납 대기</span>')}</td>
+         <td>${r.maint_tag==='3'?'장부':r.maint_tag==='2'?'바코드':ret?'반품':esc(r.maint_tag)}</td></tr>`;}).join("")||'<tr><td colspan="11" style="padding:16px;color:var(--muted)">입고 실적 없음</td></tr>'}
+       <tr class="grandtot"><td colspan="5" class="center">합계 ${st.rows.length}건</td><td class="num">${won(totq)}</td><td colspan="5"></td></tr>
        </tbody></table></div></div></div>`;
     const g=id=>c.querySelector(id);
     {const b=g("#sc-bc");b.oninput=x=>st.scan=x.target.value;b.onkeydown=x=>{if(x.key==="Enter")doScan();};}
