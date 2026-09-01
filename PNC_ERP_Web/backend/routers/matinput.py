@@ -93,7 +93,14 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
         if jadoban.strip():
             w.append("m.mat_code LIKE ?"); p.append(f"%{jadoban.strip()}%")
         if line.strip() and line.strip() != "%":
-            w.append("RTRIM(ISNULL(d.line_no,''))=?"); p.append(line.strip())
+            # ★plan_part_dtl 조인을 제거했으므로 EXISTS 로 판정(행 복제 없음).
+            w.append("""EXISTS(SELECT 1 FROM nx.plan_part_dtl d2 WITH(NOLOCK)
+                          WHERE d2.work_order=m.work_order
+                            AND d2.split_work_order=m.split_work_order
+                            AND d2.assy_item_code=m.assy_item_code
+                            AND d2.item_code=m.item_code
+                            AND RTRIM(ISNULL(d2.line_no,''))=?)""")
+            p.append(line.strip())
 
         # 제번 상세 — 소요(plan_part_mat) ⋈ 계획(plan_part_dtl, 라인·시각·LOT)
         cur.execute(f"""SELECT TOP {max(1, min(int(limit), 20000))}
@@ -102,12 +109,37 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
               m.part_plan_ymd, ISNULL(m.part_output_hm,'') hm,
               ISNULL(m.plan_ymd,'') plan_ymd,
               CAST(ISNULL(m.part_plan_qty,0) AS float) qty,
-              RTRIM(ISNULL(d.line_no,'')) line_no, ISNULL(d.output_hm,'') lg_hm,
-              CAST(ISNULL(d.lot_qty,0) AS float) lot_qty,
+              -- ★라인·LG시각·LOT = 일자 일치행 우선, 없으면 같은 (제번·도번·품목)의 다른 일자행.
+              --   일자까지 맞춘 조인(d)만 쓰면 일자가 어긋난 소요는 빈칸이 된다(실측 채움률
+              --   94%→56%). 값 자체는 일자와 무관한 속성이라 폴백해도 안전하고, 서브쿼리라
+              --   행 복제도 없다. ※d 는 수량 팬아웃 방지를 위해 일자까지 맞춘 그대로 둔다.
+              ISNULL((SELECT TOP 1 RTRIM(ISNULL(d2.line_no,'')) FROM nx.plan_part_dtl d2 WITH(NOLOCK)
+                       WHERE d2.work_order=m.work_order AND d2.split_work_order=m.split_work_order
+                         AND d2.assy_item_code=m.assy_item_code AND d2.item_code=m.item_code
+                         AND RTRIM(ISNULL(d2.line_no,''))<>''
+                       ORDER BY CASE WHEN d2.part_plan_ymd=m.part_plan_ymd THEN 0 ELSE 1 END,
+                                d2.part_plan_ymd),'') line_no,
+              ISNULL((SELECT TOP 1 ISNULL(d2.output_hm,'') FROM nx.plan_part_dtl d2 WITH(NOLOCK)
+                       WHERE d2.work_order=m.work_order AND d2.split_work_order=m.split_work_order
+                         AND d2.assy_item_code=m.assy_item_code AND d2.item_code=m.item_code
+                       ORDER BY CASE WHEN d2.part_plan_ymd=m.part_plan_ymd THEN 0 ELSE 1 END,
+                                d2.part_plan_ymd),'') lg_hm,
+              CAST(ISNULL((SELECT TOP 1 ISNULL(d2.lot_qty,0) FROM nx.plan_part_dtl d2 WITH(NOLOCK)
+                       WHERE d2.work_order=m.work_order AND d2.split_work_order=m.split_work_order
+                         AND d2.assy_item_code=m.assy_item_code AND d2.item_code=m.item_code
+                       ORDER BY CASE WHEN d2.part_plan_ymd=m.part_plan_ymd THEN 0 ELSE 1 END,
+                                d2.part_plan_ymd),0) AS float) lot_qty,
               ISNULL(i1.item_name,'') dnm, ISNULL(i2.item_name,'') jnm,
               ISNULL(c.CUST_DESC,'') cnm, ISNULL(m.bom_level,'') lv,
               -- ★2차 컬럼: 모델 / 치수·중량 / 단가  (자도번 기준, 없으면 bom_dim 폴백)
-              ISNULL(pd.MODEL_NO,'') model,
+              -- ★모델은 **스칼라 서브쿼리**로 뽑는다(JOIN 금지).
+              --   nx.plan_dtl 은 제번당 1행이 아니다 — 같은 제번이 여러 일자로 분할 편성되면
+              --   (예 6I2M03S1 = 260904:197 + 260907:3) LEFT JOIN 이 소요행을 그 수만큼
+              --   복제해 **수량이 배가 된다**(2026-09-01 실측: 400 → 800). 모델은 제번당
+              --   하나이므로 TOP 1 로 같은 값을 얻으면서 팬아웃이 없다.
+              ISNULL((SELECT TOP 1 RTRIM(ISNULL(p2.MODEL_NO,'')) FROM nx.plan_dtl p2 WITH(NOLOCK)
+                       WHERE p2.WORK_ORDER=m.work_order
+                       ORDER BY p2.PLAN_YMD),'') model,
               CAST(ISNULL(NULLIF(i2.diam,0),   ISNULL(bd.fin_diam,0))   AS float) dia,
               CAST(ISNULL(NULLIF(i2.thick,0),  ISNULL(bd.fin_thick,0))  AS float) thk,
               CAST(ISNULL(NULLIF(i2.length,0), ISNULL(bd.fin_length,0)) AS float) len,
@@ -122,11 +154,13 @@ def matinput_list(base_ymd: str = Query(""), days: int = Query(4),
                               AND pi.apply_ymd<=m.part_plan_ymd
                             ORDER BY pi.apply_ymd DESC),0) AS float) cost
             FROM nx.plan_part_mat m WITH(NOLOCK)
-            LEFT JOIN nx.plan_dtl pd WITH(NOLOCK) ON pd.WORK_ORDER=m.work_order
+            -- ★nx.plan_dtl 은 JOIN 하지 않는다(모델은 위 스칼라 서브쿼리로 뽑음).
+            --   제번당 1행이 아니라 분할편성이면 여러 행 → 소요행 복제 = 수량 배수.
             LEFT JOIN nx.bom_dim bd WITH(NOLOCK) ON bd.item_code=m.mat_code
-            LEFT JOIN nx.plan_part_dtl d WITH(NOLOCK)
-              ON d.work_order=m.work_order AND d.split_work_order=m.split_work_order
-             AND d.assy_item_code=m.assy_item_code AND d.item_code=m.item_code
+            -- ★nx.plan_part_dtl 도 JOIN 하지 않는다(라인·LG시각·LOT은 위 스칼라 서브쿼리).
+            --   (제번·분할제번·도번·품목) 4키는 **유일키가 아니다** — 같은 도번이 여러 일자로
+            --   계획되면(예 6H3M0033 AJR73965505 = 260902·260904) 소요 1행에 계획 2행이 붙어
+            --   **수량이 배수로 부풀었다**(2026-09-01 실측 432→832).
             LEFT JOIN nx.item i1 WITH(NOLOCK) ON i1.item_code=m.assy_item_code
             LEFT JOIN nx.item i2 WITH(NOLOCK) ON i2.item_code=m.mat_code
             LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON c.CUST_CODE=RTRIM(m.mat_work_center_code)
