@@ -2333,7 +2333,9 @@ SCREEN.dailypurissue=(c)=>{
              ${mrow('추가매출(절삭)',F.maechul.chuga_cut)}
              ${mrow('추가매출(설치)',F.maechul.chuga_seol)}
              ${mrow('총예상매출',F.maechul.chong,true)}
-             ${mrow('사급-원재료',F.maechul.sagub_raw,false,T.sagub_raw)}
+             ${mrow('사급-원재료(실적)',F.maechul.sagub_raw,false,T.sagub_raw)}
+             ${mrow('사급-원재료(예상)',F.maechul.sagub_raw_fc)}
+             ${mrow('사급-원재료(합계)',F.maechul.sagub_raw_sum,true)}
              ${mrow('사급-부품(실적)',F.maechul.sagub_part,false,T.sagub_part)}
              ${mrow('추가-사급부품(예상)',F.maechul.sagub_part_fc)}
              ${mrow('사급-부품(합계)',F.maechul.sagub_part_sum,true)}
@@ -2365,7 +2367,7 @@ SCREEN.dailypurissue=(c)=>{
         if(F.maechul){const M=F.maechul;const mr=(lb,k)=>{const v=M[k]||{};rows.push(['매출요약',lb,v.h1,v.h2,v.tot]);};
           mr('현매출(절삭)','hyeon_cut');mr('현매출(설치)','hyeon_seol');mr('현매출(기타)','hyeon_etc');mr('현매출(합계)','hyeon_hab');
           mr('추가매출(절삭)','chuga_cut');mr('추가매출(설치)','chuga_seol');mr('총예상매출','chong');
-          mr('사급-원재료','sagub_raw');mr('사급-부품(실적)','sagub_part');mr('추가-사급부품(예상)','sagub_part_fc');
+          mr('사급-원재료(실적)','sagub_raw');mr('사급-원재료(예상)','sagub_raw_fc');mr('사급-원재료(합계)','sagub_raw_sum');mr('사급-부품(실적)','sagub_part');mr('추가-사급부품(예상)','sagub_part_fc');
           mr('사급-부품(합계)','sagub_part_sum');mr('사급-합계','sagub_hab');mr('LG수금금액','lg_sugum');}}
       downloadCSV(`일일영업매입현황_${F.date}.csv`,hd,rows);};
   };
