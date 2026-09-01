@@ -1213,7 +1213,9 @@ function openMoveModal(st,dates,onIssued){
         <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:70px;min-width:0">
         <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:70px;min-width:0">
         <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:110px;min-width:0" placeholder="최종납품처">
-        <div class="spacer"></div><button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
+        <div class="spacer"></div>
+        <button class="btn" id="mm-delrow" style="padding:3px 10px">➖ 빈행삭제</button>
+        <button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
       </div>
       <div id="mm-msg" style="padding:0 12px;min-height:15px;font-size:12px"></div>
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 12px">
@@ -1248,6 +1250,18 @@ function openMoveModal(st,dates,onIssued){
     q('#mm-inwh').onchange=e=>state.in_wh=e.target.value.trim();
     q('#mm-dest').onchange=e=>state.dest=e.target.value.trim();
     q('#mm-addrow').onclick=()=>{for(let k=0;k<5;k++)state.rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});render();};
+    // ★빈행삭제(2026-09-01 요청) — 도번·자도번이 모두 빈 행만 지운다.
+    //   입력된 행은 실수로 사라지면 안 되므로 절대 건드리지 않는다.
+    //   전부 지워지면 입력할 칸이 없어지므로 최소 1행은 남긴다.
+    q('#mm-delrow').onclick=()=>{
+      const isEmpty=r=>!String(r.item_code||'').trim()&&!String(r.mat_code||'').trim();
+      const keep=state.rows.filter(r=>!isEmpty(r));
+      const removed=state.rows.length-keep.length;
+      if(!removed){q('#mm-msg').innerHTML='<span style="color:#c0392b">지울 빈 행이 없습니다.</span>';return;}
+      state.rows=keep.length?keep:[{item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''}];
+      render();
+      q('#mm-msg').innerHTML=`<span style="color:#1f7a3d">빈 행 ${removed}개를 삭제했습니다.</span>`;
+    };
     // ★출고수량(maint_qty)은 직접 입력 가능. SET/사용 수정 시에만 자동계산으로 덮어쓴다.
     //   재렌더하면 입력 중 포커스가 날아가므로 state만 갱신(품명 등 표시는 다음 렌더에 반영).
     ov.querySelectorAll('.mm-f').forEach(el=>el.onchange=()=>{
