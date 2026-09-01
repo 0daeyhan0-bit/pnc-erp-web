@@ -110,10 +110,21 @@ def forget_token(uid):
     _TOKENS.pop(uid, None)
 
 
+_T0 = [None]        # 현재 케이스 시작시각(느린 케이스를 눈에 보이게)
+
+
 def rec(kind, name, verdict, note=""):
     RESULTS.append((kind, name, verdict, note))
     icon = {"PASS": "✅", "FAIL": "★FAIL", "미구현": "☐미구현", "SKIP": "–"}[verdict]
-    print(f"   {icon:7s} [{kind}] {name}")
+    # ★소요시간을 함께 찍는다 — 스위트가 멈추면 **어느 케이스가 무거운지**를 알아야
+    #   순서를 고칠 수 있다(§9: 무거운 조회는 앞으로 모은다). 3초 넘는 것만 표시.
+    _el = ""
+    if _T0[0] is not None:
+        import time as _t
+        _d = _t.time() - _T0[0]
+        if _d >= 3.0:
+            _el = f"  ({_d:.1f}s)"
+    print(f"   {icon:7s} [{kind}] {name}{_el}")
     if note:
         print(f"           {note}")
 
@@ -223,7 +234,16 @@ def run_secure(c, ctx):
     uid = c["as_"] if "as_" in c else getattr(FC, "DEFAULT_AS", None)
     tok = token_for(uid)
     if uid and not tok:
-        rec("S", c["name"], "SKIP", f"하네스가 {uid} 로 로그인하지 못함"); return
+        # ★SKIP 사유를 구분한다 — '자격증명이 없다'와 '로그인이 실패했다'는 전혀 다른 일이다.
+        #   비번을 repo 에 두지 않는 설계(flow_cases._secret)라 미제공이 정상 상태일 수 있는데,
+        #   "로그인하지 못함"만 찍히면 결함처럼 읽혀 다음 사람이 헛수고한다(2026-09-01).
+        if FC.ACCOUNTS.get(uid) is None:
+            rec("S", c["name"], "SKIP",
+                f"{uid} 자격증명 미제공 — repo 밖 `_migration/.flow_secrets.json` 에 "
+                f'{{"{uid}": "<비번>"}} 를 넣거나 환경변수로 주면 실행된다(결함 아님)')
+        else:
+            rec("S", c["name"], "SKIP", f"★하네스가 {uid} 로 로그인하지 못함 — 비번이 틀렸거나 계정 잠김")
+        return
     b = probe()
     st, res = call(c["method"], path_of(c, ctx), body_of(c, ctx), token=tok)
     a = probe()
@@ -318,10 +338,13 @@ def main():
             if not rows:
                 rec(c["kind"], c["name"], "SKIP", "선행 입고행을 못 찾음"); continue
             ctx["_kymd"], ctx["_kseq"] = str(rows[0][0]).strip(), int(rows[0][1])
+        import time as _tm
+        _T0[0] = _tm.time()
         try:
             {"F": run_flow, "R": run_rule, "S": run_secure}[c["kind"]](c, ctx)
         except Exception as e:
             rec(c["kind"], c["name"], "FAIL", f"케이스 실행 오류 — {type(e).__name__}: {str(e)[:90]}")
+        _T0[0] = None
 
     # 사유 고지 검사 (규칙 A-0-1) — 차단 메시지가 '왜 안 되는지' 를 담고 있는가
     if not ARG.kind or ARG.kind == "R":

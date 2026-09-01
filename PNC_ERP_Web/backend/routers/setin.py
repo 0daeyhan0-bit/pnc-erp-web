@@ -202,9 +202,21 @@ def setstock_list(request: Request, fr: str = Query(""), to: str = Query(""), cu
         if cust: w.append("m.cust_code=?"); p.append(cust)
         if item: w.append("m.item_code LIKE ?"); p.append(f"%{item}%")
         if tag: w.append("m.maint_tag=?"); p.append(tag)
+        # ★직납 표시(2026-09-01) — nx.item.in_cust 가 있으면 직납품.
+        #   직납품은 영업창고에서만 출하하므로 입고 시 자동으로 자재출고→영업창고입고 된다
+        #   (_direct_out). 화면에서 그 처리 여부를 눈으로 확인할 수 있게 컬럼을 준다.
+        #   direct_qty = 실제로 나간 수량(원장 TAG 'B' 직납출고분, 음수를 양수로).
         cur.execute(f"""SELECT TOP {int(limit)} m.maint_ymd, m.maint_seq, m.maint_tag, m.in_tag, m.cust_code,
               ISNULL(c.CUST_DESC,'') custnm, m.item_code, ISNULL(i.item_name,'') itemnm, m.maint_qty, m.sheet_no,
-              m.manual_sheet_no, m.status, ISNULL(m.derived_flag,'0') derived_flag, m.insert_datetime
+              m.manual_sheet_no, m.status, ISNULL(m.derived_flag,'0') derived_flag, m.insert_datetime,
+              ISNULL(RTRIM(i.in_cust),'') direct_cust,
+              ISNULL((SELECT RTRIM(dc.CUST_DESC) FROM PARTNER_ERP_TEST3.nx.CM_M_CUST dc
+                       WHERE RTRIM(dc.CUST_CODE)=RTRIM(i.in_cust)),'') direct_nm,
+              ISNULL((SELECT -SUM(CAST(l.MAINT_QTY AS float)) FROM nx.stock_ledger l WITH(NOLOCK)
+                       WHERE l.MAINT_YMD=m.maint_ymd AND l.MAINT_TAG='B'
+                         AND RTRIM(l.MAT_CODE)=RTRIM(m.item_code)
+                         AND ISNULL(RTRIM(l.OUT_WH_GUBUN),'')='2'
+                         AND l.REMARKS=N'직납품 영업창고 출고'),0) direct_qty
             FROM nx.set_stock_maint m
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST c ON c.CUST_CODE=m.cust_code
             LEFT JOIN PARTNER_ERP_TEST3.nx.item i ON i.item_code=m.item_code
@@ -495,7 +507,20 @@ def setstock_manual_prep(cust: str = Query(""), item: str = Query("")):
                          FROM nx.set_stock_maint WITH(NOLOCK)
                         WHERE ISNULL(manual_sheet_no,'')<>''""")
         nextno = int((cur.fetchone() or [1])[0] or 1)
-        return {"rows": rows, "next_no": nextno}
+        # ★거래처 목록을 함께 준다(2026-09-01) — 종전 화면은 `/api/base/partners` 를
+        #   불렀는데 **그 엔드포인트가 없어 404** 였다. custMap 이 통째로 비어
+        #   어떤 거래처를 넣어도 "일치하는 거래처가 없습니다"가 떴다(실측: 케이비/2266).
+        custs = []
+        try:
+            cur.execute("""SELECT RTRIM(CUST_CODE), RTRIM(CUST_DESC)
+                             FROM nx.CM_M_CUST WITH(NOLOCK)
+                            WHERE ISNULL(RTRIM(CUST_DESC),'')<>''
+                            ORDER BY CUST_DESC""")
+            custs = [{"code": str(r[0]).strip(), "nm": str(r[1]).strip()}
+                     for r in cur.fetchall()]
+        except Exception:
+            custs = []
+        return {"rows": rows, "next_no": nextno, "custs": custs}
     finally:
         cn.close()
 
@@ -509,11 +534,20 @@ def setstock_manual(payload: dict = Body(...)):
          · MAINT_TAG='1' · MANUAL_SHEET_NO 채움 · SHEET_NO 는 비움
          · MANUAL_SHEET_NO = 날짜무관 연속채번, **1회 저장분은 같은 번호 공유**
            (예: 260819 no=734 에 3행 / 731~738 연속)
-       payload: {ymd, cust, rows:[{item_code, qty, remark, direct}], user}
+       payload: {ymd, cust, rows:[{item_code, qty, remark, direct}], user, scope}
+
+       ★scope (2026-09-01 신설, 사용자 요청) — 재고 반영 범위
+         'set'  세트재고만  : ①세트원장만 기록. 하위 자도번 재고는 **건드리지 않는다**
+         'all'  하위재고반영: ①+② 종전 동작(세트 + 자도번 파생). 미지정 기본값
+       왜: 세트만 장부로 잡고 하위 단품재고는 그대로 두어야 하는 경우가 있다.
+           종전엔 항상 ②까지 돌아 하위 재고가 함께 움직였다.
     """
     ymd = _d6(str(payload.get("ymd") or "")) or datetime.now().strftime("%y%m%d")
     cust = str(payload.get("cust") or "").strip()
     user = str(payload.get("user") or "웹")[:20]
+    scope = str(payload.get("scope") or "all").strip().lower()
+    if scope not in ("set", "all"):
+        scope = "all"
     rows = payload.get("rows") or []
     if not cust:
         raise HTTPException(400, "거래처를 선택하세요.")
@@ -571,11 +605,13 @@ def setstock_manual(payload: dict = Body(...)):
             #    거래처가 대는 자도번만 · qty×use_qty · Z99990/IS0001 하드코딩(원문 동일)
             #    ※검사품(insp S/F) 게이트는 이번 범위에서 제외(사용자 지시 2026-08-30) —
             #      원문은 재고반영을 건너뛰지만 지금은 전량 즉시 반영한다.
+            #    ★scope='set' 이면 자도번 파생을 통째로 건너뛴다(하위 단품재고 무영향).
             jado = []
-            try:
-                jado = _set_bom_expand(cur, ic, cust, ymd)
-            except Exception:
-                jado = []
+            if scope != "set":
+                try:
+                    jado = _set_bom_expand(cur, ic, cust, ymd)
+                except Exception:
+                    jado = []
             for b in jado:
                 lseq += 1
                 jq = q * (b["use_qty"] or 0)
@@ -596,6 +632,7 @@ def setstock_manual(payload: dict = Body(...)):
                          "direct": direct, "jado": len(jado)})
 
         # ── ④⑤ 사급 처리 (레거시 원문 — 세트입고로 들어온 자도번이 쓴 사급품 소진)
+        #    ★scope='set' 이면 sagub_src 가 비어 있어 자연히 아무것도 안 한다.
         sagub = 0
         try:
             sagub = _apply_sagub(cur, ymd, cust, sagub_src, user, "w_pu_stock_146",
@@ -607,7 +644,7 @@ def setstock_manual(payload: dict = Body(...)):
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "manual_no": manual_no, "ymd": ymd,
                 "cust": cust, "count": len(made), "ledger_posted": posted,
-                "sagub_posted": sagub, "rows": made}
+                "sagub_posted": sagub, "scope": scope, "rows": made}
     except HTTPException:
         try: cn.rollback()
         except Exception: pass
@@ -824,6 +861,195 @@ def setadj_delete(payload: dict = Body(...)):
         cn.close()
 
 
+def _mirror_ins(cur, ymd, tag, mat, qty, cust=None, item=None, out_wh=None,
+                remarks=None, screen="setin"):
+    """수불이력 미러(nx.PU_T_STOCK_MAINT) 기입 — ★자재 입출고현황·수불장이 읽는 테이블.
+
+    ★왜 필요한가 (2026-09-01 실측으로 확인)
+      웹 재고 쓰기는 **3군데**를 채워야 화면까지 이어진다(stock.py:390/418/488 패턴):
+        ① nx.stock_ledger        원장(웹 정본)
+        ② nx.PU_T_MAT_STOCK_WH   잔량 스냅샷      ← _upd_mat_wh
+        ③ nx.PU_T_STOCK_MAINT    수불이력         ← 이 함수
+      세트입고 경로에는 ③이 없어서, 원장·잔량은 맞는데
+      「자재 입출고현황」·「제품입출고현황」에 **입고 이력이 통째로 안 보였다**.
+      (자재조정·자재출고는 stock.py 가 ③까지 쓰므로 정상 표시된다.)
+
+    ★SEQ 대역 분리 — 20000 이상만 쓴다(common.py:496 WEB_SEQ_BASE 규약).
+      레거시 일일싱크가 자기 대역을 덮어써도 웹 입력분이 살아남게 하기 위함.
+    ★MAINT_TAG 는 CHAR(1) — 2글자를 넣으면 잘림오류로 조용히 누락된다(stock.py:502 이력).
+    ★버킷 = WH_CUST_CODE 'Z99990' + GAGONG_PROC_CODE 'IS0001' — 조회 WHERE 와 같아야 보인다.
+    """
+    try:
+        cur.execute("""SELECT ISNULL(MAX(MAINT_SEQ),19999)+1 FROM nx.PU_T_STOCK_MAINT
+                        WHERE MAINT_YMD=? AND MAINT_SEQ>=20000""", ymd)
+        sq = int(cur.fetchone()[0] or 20000)
+        cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT
+                (MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
+                 WH_CUST_CODE,GAGONG_PROC_CODE,OUT_WH_GUBUN,ITEM_CODE,
+                 INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,
+                 UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                VALUES(?,?,?,?,?,?,?,'Z99990','IS0001',?,?,'web',GETDATE(),?,'web',GETDATE(),?)""",
+            ymd, sq, str(tag)[:1], (str(cust).strip() if cust else None), mat, qty,
+            remarks, out_wh, item, screen, screen)
+        return sq
+    except Exception:
+        return 0        # 미러 실패해도 원장은 남긴다(이력 우선, stock.py:503 동일)
+
+
+def _upd_mat_wh(cur, mat, dq, cc="Z99990", gp="IS0001"):
+    """자재창고 재고 증감 — nx.PU_T_MAT_STOCK_WH + nx.PU_T_MAT_STOCK.
+
+    레거시 `f_pu_set_mat_stock_wh` / `f_pu_set_mat_stock` 대응.
+    ★버킷키 = 창고 소유주 'Z99990' 고정 + 가공처 'IS0001'(입고창고) — 원장과 동일.
+      매입처를 버킷키에 쓰면 같은 창고에 유령 버킷이 생긴다(2026-09-01 기존 사고).
+    ★없으면 INSERT, 있으면 누적 UPDATE. 실패해도 원장은 남긴다(이력 우선, stock.py:427 동일).
+    """
+    if not mat or not dq:
+        return
+    for wh in (True, False):          # True=창고별(WH) · False=자재합계
+        try:
+            if wh:
+                cur.execute("""UPDATE nx.PU_T_MAT_STOCK_WH SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                                  UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='setinsp'
+                                WHERE MAT_CODE=? AND CUST_CODE=? AND ISNULL(GAGONG_PROC_CODE,'')=?""",
+                            dq, mat, cc, gp)
+                if cur.rowcount == 0:
+                    cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK_WH(MAT_CODE,CUST_CODE,GAGONG_PROC_CODE,
+                                      STOCK_QTY,UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                    VALUES(?,?,?,?,'web',GETDATE(),'setinsp')""", mat, cc, gp, dq)
+            else:
+                cur.execute("""UPDATE nx.PU_T_MAT_STOCK SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                                  UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='setinsp'
+                                WHERE MAT_CODE=? AND CUST_CODE=?""", dq, mat, cc)
+                if cur.rowcount == 0:
+                    cur.execute("""INSERT INTO nx.PU_T_MAT_STOCK(MAT_CODE,CUST_CODE,STOCK_QTY,
+                                      UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                                    VALUES(?,?,?,'web',GETDATE(),'setinsp')""", mat, cc, dq)
+        except Exception:
+            pass
+
+
+def _derive_set_stock(cur, cust, doban, qty, sheet, bc, mseq, today):
+    """세트입고 '입고완료(90)' 시 자도번 재고파생 + 협력사 사급소진.
+
+    ★입고 시점(setstock_receive)과 검사완료 시점(setinsp_complete)이 **같은 처리**를 해야 한다.
+      그래서 블록을 함수로 뺐다 — 한쪽만 고치면 검사품과 무검사품의 재고가 갈린다.
+      (2026-09-01 자재입고검사관리 신설 시 분리. 로직은 종전 원문 그대로.)
+
+    반환 = 원장에 넣은 행수.
+    """
+    cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=?", today)
+    lseq = int(cur.fetchone()[0])
+    # ★레거시 135(dw_pr_input_135_5) 원문: 세트입고요청 명세(_DTL)를 그대로 읽는다.
+    #   단가 = pr_m_item_cost(cost_tag='1', 거래처별, 입고일 이하 최신). 입고창고 'IS0001' 하드코딩.
+    #   ※웹 명세(set_input_req_dtl)가 비어 있으면 미러(_DTL)를 원천으로 쓴다.
+    cur.execute("""SELECT d.mat_code, d.use_qty,
+                          ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
+                                   WHERE c.item_code=d.mat_code AND c.cust_code=?
+                                     AND c.cost_tag='1' AND c.currency='KRW'
+                                     AND c.cost_apply_ymd<=? ORDER BY c.cost_apply_ymd DESC),0) cost
+                     FROM nx.set_input_req_dtl d WITH(NOLOCK)
+                    WHERE d.sheet_no=?""", cust, today, sheet)
+    dtl = cur.fetchall()
+    if not dtl:
+        cur.execute("""SELECT d.MAT_CODE, d.USE_QTY,
+                              ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
+                                       WHERE c.item_code=d.MAT_CODE AND c.cust_code=?
+                                         AND c.cost_tag='1' AND c.currency='KRW'
+                                         AND c.cost_apply_ymd<=? ORDER BY c.cost_apply_ymd DESC),0) cost
+                         FROM nx.PU_T_SET_INPUT_REQ_DTL d WITH(NOLOCK)
+                        WHERE d.SHEET_NO=? AND ISNULL(d.ITEM_GUBUN,'1')='1'""", cust, today, sheet)
+        dtl = cur.fetchall()
+    posted = 0
+    bcn = int(bc) if str(bc).isdigit() else None
+    for mat, uq, cost in dtl:
+        lseq += 1
+        jqty = float(qty) * float(uq or 1)
+        cst = float(cost or 0)
+        cur.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,SHEET_NO,
+              CUST_CODE,WH_CUST_CODE,GAGONG_PROC_CODE,MAT_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,
+              ITEM_CODE,SET_MAINT_YMD,SET_MAINT_SEQ,INPUT_YMD,ITEM_GUBUN,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
+            VALUES('MAT',?,?,'S',?,?,'Z99990','IS0001',?,?,?,?,?,?,?,?,'1','세트입고','web',getdate())""",
+            today, lseq, bcn, cust, str(mat).strip(), jqty, cst, int(jqty * cst),
+            doban, today, mseq, today)
+        # ★★자재창고 재고 반영 (2026-09-01 추가) — 원장만 넣으면 「자재 입출고현황」에 안 잡힌다.
+        #   레거시 w_qa_input_160 `ue_save` 가 f_pu_set_mat_stock / f_pu_set_mat_stock_wh 를
+        #   부르는 자리다. 실측: 검사완료 후 원장 +6 인데 PU_T_MAT_STOCK_WH 는 0 그대로였다.
+        #   ⟹ 세트재고(set_stock_maint)만 늘고 자재재고가 안 늘어 두 화면이 어긋났다.
+        #   버킷키 = 창고 소유주 'Z99990' + 입고창고 'IS0001' (원장과 동일, stock.py:417-427 패턴).
+        _upd_mat_wh(cur, str(mat).strip(), jqty)
+        # ③ 수불이력 미러 — 이게 있어야 「자재 입출고현황」에 입고로 뜬다(stock.py:488 동일 패턴).
+        _mirror_ins(cur, today, 'S', str(mat).strip(), jqty, cust=cust,
+                    item=doban, remarks='세트입고', screen='setstock')
+        posted += 1
+    cur.execute("UPDATE nx.set_stock_maint SET derived_flag='1' WHERE maint_ymd=? AND maint_seq=?",
+                today, mseq)
+    # ★협력사출고(사급소진) — 완제품 doban×qty 만큼 협력사 사급재고 차감(nx.sagub_maint tag S, −). 소요엔진(§10).
+    #   _apply_sagub(수동입고 146 경로)와 나란히 두지 말 것 — 같은 소진이 두 번 잡힌다.
+    _post_sagub_out(cur, cust, doban, qty, today, mseq)
+    _direct_out(cur, doban, qty, today)      # ★직납품 자동출고(아래)
+    return posted
+
+
+def _direct_out(cur, doban, qty, today):
+    """★직납품 자동출고 — 자재창고 출고 → 영업창고 입고 (2026-09-01 신설).
+
+    업무규칙(대표 확정): **직납품은 영업창고에서만 출하할 수 있다.**
+      세트입고(단품입고) → 자재출고 → 영업창고 입고  까지 자동으로 흘러야 한다.
+      바코드 입고(무검사=즉시90) · 검사완료(30→90) **두 경로 모두** 적용된다
+      (이 함수가 _derive_set_stock 안에 있으므로 자동).
+
+    직납 판정 = `nx.item.in_cust <> ''` (레거시 pr_m_item.in_cust_code)
+      = 그 도번을 만들어 주는 업체가 지정돼 있다 = 우리가 받아서 그대로 넘기는 물건.
+      실측 2026-09-01: AJJ76418725 → in_cust 2148(대원산업) · 직납 도번 221종.
+
+    레거시 w_qa_input_160 `ue_save` 원문 대응:
+        insert PU_T_STOCK_MAINT (maint_tag 'B', gagong_proc_code 'IS0001', work_code 'P1',
+                                 cust_code=direct_cust_code, mat_code=item_code(모도번),
+                                 maint_qty = qty * -1, out_wh_gubun '2')
+        f_pu_set_mat_stock    (…,'Z99990', -qty)      자재재고   −
+        f_pu_set_mat_stock_wh (…,'Z99990','IS0001', -qty)  자재창고 −
+        f_sa_set_item_stock   (…, +qty)               영업창고   +
+      ★출고 대상은 **자도번(mat_code)이 아니라 세트도번(doban)** 이다 — 원문 그대로.
+      실측 레거시(오늘): tag 'B' · out_wh_gubun '2' · 음수 · cust=직납처 8건 확인.
+
+    ※멱등 아님 — 호출부(_derive_set_stock)가 '90 전환 시 1회'만 부르는 것에 의존한다.
+      검사완료 재실행 가드(이미 90이면 skip)가 곧 이 함수의 중복 방지다.
+    """
+    d = str(doban or "").strip()
+    q = float(qty or 0)
+    if not d or not q:
+        return 0
+    cur.execute("SELECT ISNULL(RTRIM(in_cust),'') FROM nx.item WITH(NOLOCK) WHERE RTRIM(item_code)=?", d)
+    r = cur.fetchone()
+    dcust = str(r[0]).strip() if r else ""
+    if not dcust:
+        return 0                       # 직납품 아님 — 자재창고에 그대로 둔다
+    cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0)+1 FROM nx.stock_ledger WHERE MAINT_YMD=?", today)
+    lseq = int(cur.fetchone()[0] or 1)
+    cur.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,
+          CUST_CODE,WH_CUST_CODE,GAGONG_PROC_CODE,WORK_CODE,MAT_CODE,MAINT_QTY,
+          ITEM_CODE,OUT_WH_GUBUN,INPUT_YMD,ITEM_GUBUN,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
+        VALUES('MAT',?,?,'B',?,'Z99990','IS0001','P1',?,?,?,'2',?,'1',N'직납품 영업창고 출고','web',getdate())""",
+        today, lseq, dcust, d, -q, d, today)
+    _upd_mat_wh(cur, d, -q)                      # 자재재고·자재창고 −
+    # 수불이력 미러 — 자재 입출고현황에 '영업창고출고'(tag B, out_wh_gubun 2)로 뜬다.
+    _mirror_ins(cur, today, 'B', d, -q, cust=dcust, item=d, out_wh='2',
+                remarks='직납품 영업창고 출고', screen='setinsp')
+    # 영업창고 + (레거시 f_sa_set_item_stock). 키 = ITEM_CODE 단일.
+    try:
+        cur.execute("""UPDATE nx.SA_T_ITEM_STOCK SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                          UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(), UPDATE_WINDOW='setinsp'
+                        WHERE RTRIM(ITEM_CODE)=?""", q, d)
+        if cur.rowcount == 0:
+            cur.execute("""INSERT INTO nx.SA_T_ITEM_STOCK(ITEM_CODE,STOCK_QTY,
+                              UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
+                            VALUES(?,?,'web',GETDATE(),'setinsp')""", d, q)
+    except Exception:
+        pass                                     # 재고 반영 실패해도 원장은 남긴다(이력 우선)
+    return 1
+
+
 @router.post("/api/setstock/receive")
 def setstock_receive(request: Request, payload: dict = Body(...)):
     _u = staff_only(request, "세트입고")   # ★협력사 계정 거부 - 우리가 받는 행위다
@@ -893,56 +1119,11 @@ def setstock_receive(request: Request, payload: dict = Body(...)):
                 mseq, tag, cust, doban, qty, bc, manual, newstat)
             cur.execute("UPDATE nx.set_input_req SET status=?, status_dt=GETDATE() WHERE sheet_no=? AND barcode_no=?", newstat, sheet, bc)
             recv += 1
-            if newstat == "90":  # 입고완료 → 자도번 재고파생
-                cur.execute("SELECT ISNULL(MAX(MAINT_SEQ),0) FROM nx.stock_ledger WHERE MAINT_YMD=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)")
-                lseq = int(cur.fetchone()[0])
-                # ★레거시 135(dw_pr_input_135_5) 원문: 세트입고요청 명세(_DTL)를 그대로 읽는다.
-                #   146(수동)의 BOM 재귀전개와 달리, 바코드는 이미 확정된 mat_code/use_qty 사용.
-                #   단가 = pr_m_item_cost(cost_tag='1', 거래처별, 입고일 이하 최신) — 원문 동일.
-                #   입고창고는 원문에서 'IS0001' 하드코딩(계산값 미사용).
-                #   ※웹 명세(set_input_req_dtl)가 비어 있으면 미러(_DTL)를 원천으로 쓴다.
-                cur.execute("""SELECT d.mat_code, d.use_qty,
-                                      ISNULL(s.insp_flag,'N') insp,
-                                      ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
-                                               WHERE c.item_code=d.mat_code AND c.cust_code=?
-                                                 AND c.cost_tag='1' AND c.currency='KRW'
-                                                 AND c.cost_apply_ymd<=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)
-                                               ORDER BY c.cost_apply_ymd DESC),0) cost
-                                 FROM nx.set_input_req_dtl d WITH(NOLOCK)
-                                 LEFT JOIN nx.pr_m_item_sub s WITH(NOLOCK) ON s.item_code=d.mat_code
-                                WHERE d.sheet_no=?""", cust, sheet)
-                dtl = cur.fetchall()
-                if not dtl:
-                    cur.execute("""SELECT d.MAT_CODE, d.USE_QTY,
-                                          ISNULL(s.insp_flag,'N') insp,
-                                          ISNULL((SELECT TOP 1 c.item_cost FROM nx.pr_m_item_cost c WITH(NOLOCK)
-                                                   WHERE c.item_code=d.MAT_CODE AND c.cust_code=?
-                                                     AND c.cost_tag='1' AND c.currency='KRW'
-                                                     AND c.cost_apply_ymd<=RIGHT(CONVERT(varchar(8),GETDATE(),112),6)
-                                                   ORDER BY c.cost_apply_ymd DESC),0) cost
-                                     FROM nx.PU_T_SET_INPUT_REQ_DTL d WITH(NOLOCK)
-                                     LEFT JOIN nx.pr_m_item_sub s WITH(NOLOCK) ON s.item_code=d.MAT_CODE
-                                    WHERE d.SHEET_NO=? AND ISNULL(d.ITEM_GUBUN,'1')='1'""", cust, sheet)
-                    dtl = cur.fetchall()
-                for mat, uq, _insp, cost in dtl:
-                    lseq += 1
-                    jqty = qty * float(uq or 1)
-                    cst = float(cost or 0)
-                    bcn = int(bc) if bc.isdigit() else None
-                    cur.execute("""INSERT INTO nx.stock_ledger(STOCK_POINT,MAINT_YMD,MAINT_SEQ,MAINT_TAG,SHEET_NO,
-                          CUST_CODE,WH_CUST_CODE,GAGONG_PROC_CODE,MAT_CODE,MAINT_QTY,MAINT_COST,MAINT_AMT,
-                          ITEM_CODE,SET_MAINT_YMD,SET_MAINT_SEQ,INPUT_YMD,ITEM_GUBUN,REMARKS,INSERT_USER_ID,INSERT_DATETIME)
-                        VALUES('MAT',RIGHT(CONVERT(varchar(8),GETDATE(),112),6),?,'S',?,?,'Z99990','IS0001',?,?,?,?,?,
-                               RIGHT(CONVERT(varchar(8),GETDATE(),112),6),?,RIGHT(CONVERT(varchar(8),GETDATE(),112),6),
-                               '1','세트입고','web',getdate())""",
-                        lseq, bcn, cust, str(mat).strip(), jqty, cst, int(jqty * cst), doban, mseq)
-                    posted += 1
-                cur.execute("UPDATE nx.set_stock_maint SET derived_flag='1' WHERE maint_ymd=RIGHT(CONVERT(varchar(8),GETDATE(),112),6) AND maint_seq=?", mseq)
-                # ★협력사출고(사급소진) — 완제품 doban×qty 만큼 협력사 사급재고 차감(nx.sagub_maint tag S, −). 소요엔진(§10).
-                # ★2026-08-30 병합: 내 브랜치의 _apply_sagub(레거시 135 방식)를 여기 함께 두지 않는다.
-                #   둘 다 사급 원장에 쓰므로 나란히 두면 같은 소진이 두 번 잡힌다(이중차감).
-                #   통일 소요엔진을 쓰는 이 _post_sagub_out 이 정본. _apply_sagub 는 수동입고(146) 경로에서만 쓴다.
-                _post_sagub_out(cur, cust, doban, qty, _today, mseq)
+            if newstat == "90":  # 입고완료 → 자도번 재고파생 + 사급소진
+                # ★2026-09-01 블록을 _derive_set_stock 으로 분리(로직 무변경).
+                #   검사완료(자재입고검사관리)에서 **같은 함수**를 부른다 —
+                #   한쪽만 고치면 검사품과 무검사품의 재고 결과가 갈린다.
+                posted += _derive_set_stock(cur, cust, doban, qty, sheet, bc, mseq, _today)
         cn.commit()
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림(캐시 stale 금지)
         return {"ok": True, "received": recv, "ledger_posted": posted,
@@ -974,6 +1155,233 @@ def setstock_cancel_preview(request: Request, barcode: str = Query(...)):
         return {"barcode": bc, "recv": recv, "recv_cnt": len(recv),
                 "ledger": led, "ledger_cnt": len(led),
                 "ledger_qty": sum(x["qty"] for x in led)}
+    finally:
+        cn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 자재입고검사관리 (IQC) — 레거시 w_qa_input_160  ★2026-09-01 신설
+#
+# 업무흐름 (레거시 PBL `ue_save` 원문 + 실측으로 확정)
+#   바코드 입고 → 검사품(insp_flag='1')은 **입고대기(30)** 로 멈춘다.
+#                 이때 재고파생도 사급소진도 **하지 않는다**(setin.py 의 90 분기 밖).
+#   IQC 검사완료 → 30→90 + 재고파생 + 사급소진   = 무검사품이 입고 즉시 하던 것과 동일
+#
+#   ★레거시는 원장(PU_T_STOCK_MAINT) 한 테이블에서 insp_proc_flag 로만 갈리지만,
+#     웹 세트입고는 status(30/90) 로 갈린다. 개념은 같다(행은 있고 재고만 보류).
+#     실측 2026-09-01: status 30 = 15건 derived 0 · 사급 0 / status 90 = 52건 derived 52 · 사급 8/8
+#
+#   ★재고 반영은 **_derive_set_stock 한 함수**로 통일한다(입고 시점과 동일 처리).
+#     레거시가 f_pu_set_mat_stock / f_pu_set_mat_stock_wh 를 부르는 자리에 해당한다.
+#
+# 범위: 세트입고(TAG 'S')만. 개별 자재입고(TAG '9')는 사용자 지시로 이번 제외.
+# 분석 정본 = _legacy_analysis/QA_INPUT_160_IQC_ANALYSIS.md
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/api/setinsp/list")
+def setinsp_list(request: Request, frm: str = Query(""), to: str = Query(""),
+                 cust: str = Query(""), item: str = Query(""),
+                 stat: str = Query("30"), limit: int = Query(500)):
+    """검사대상 목록. stat: 30=입고대기(기본) · 90=검사완료 · ''=전체.
+
+    레거시 160 대응 컬럼(입고일자·입고SEQ·입고구분·거래처·자도번·입고수량·검사구분·상태)을 채운다.
+    ★거래처·품명은 LEFT JOIN — 레거시는 cm_m_cust INNER 라 미등록 거래처가 통째로 누락된다(§1-7 결함).
+    """
+    staff_only(request, "자재입고검사")
+    f6, t6 = _d6(frm), _d6(to)
+    w, p = ["m.in_tag='1'"], []
+    if f6: w.append("m.maint_ymd>=?"); p.append(f6)
+    if t6: w.append("m.maint_ymd<=?"); p.append(t6)
+    s = str(stat or "").strip()
+    if s: w.append("RTRIM(ISNULL(m.status,''))=?"); p.append(s)
+    if cust.strip():
+        w.append("(RTRIM(ISNULL(m.cust_code,'')) LIKE ? OR ISNULL(c.CUST_DESC,'') LIKE ?)")
+        p += ["%" + cust.strip() + "%"] * 2
+    if item.strip():
+        w.append("RTRIM(ISNULL(m.item_code,'')) LIKE ?"); p.append("%" + item.strip() + "%")
+    cn = _nx(); cur = cn.cursor()
+    try:
+        cur.execute("""SELECT TOP {} m.maint_ymd, m.maint_seq, RTRIM(ISNULL(m.maint_tag,'')),
+                  RTRIM(ISNULL(m.cust_code,'')), ISNULL(RTRIM(c.CUST_DESC),''),
+                  RTRIM(ISNULL(m.item_code,'')), ISNULL(RTRIM(i.ITEM_DESC),''),
+                  CAST(ISNULL(m.maint_qty,0) AS float), RTRIM(ISNULL(m.sheet_no,'')),
+                  RTRIM(ISNULL(m.status,'')), RTRIM(ISNULL(m.derived_flag,'0')),
+                  CONVERT(varchar(19), m.insert_datetime, 120),
+                  ISNULL(RTRIM(q.insp_flag),'0'), RTRIM(ISNULL(q.sheet_no,'')),
+                  CONVERT(varchar(19), q.status_dt, 120), ISNULL(RTRIM(q.status_user),'')
+             FROM nx.set_stock_maint m WITH(NOLOCK)
+             LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=RTRIM(m.cust_code)
+             LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON RTRIM(i.ITEM_CODE)=RTRIM(m.item_code)
+             LEFT JOIN nx.set_input_req q WITH(NOLOCK)
+                    ON RTRIM(ISNULL(q.barcode_no,''))=RTRIM(ISNULL(m.sheet_no,''))
+                   AND RTRIM(ISNULL(q.item_code,''))=RTRIM(ISNULL(m.item_code,''))
+            WHERE {} ORDER BY m.maint_ymd DESC, m.maint_seq DESC""".format(
+            max(1, min(int(limit or 500), 3000)), " AND ".join(w)), *p)
+        rows = [{"ymd": str(r[0]).strip(), "seq": int(r[1] or 0), "tag": r[2],
+                 "cust": r[3], "cust_nm": r[4], "item": r[5], "item_nm": r[6],
+                 "qty": float(r[7] or 0), "sheet": r[8], "stat": r[9],
+                 "derived": r[10], "in_dt": r[11], "insp": r[12], "req_sheet": r[13],
+                 "insp_dt": r[14], "insp_user": r[15]} for r in cur.fetchall()]
+        return {"ok": True, "rows": rows, "cnt": len(rows),
+                "qty": sum(x["qty"] for x in rows)}
+    finally:
+        cn.close()
+
+
+@router.post("/api/setinsp/complete")
+def setinsp_complete(request: Request, payload: dict = Body(...)):
+    """★검사완료 — 선택건 30→90 + 재고파생 + 사급소진.
+
+    레거시 `ue_save` case 'I' 대응. 입고 시점의 90 분기와 **같은 함수**(_derive_set_stock)를 쓴다.
+    ★이미 90 이면 건너뛴다 — 레거시도 `if insp_proc_flag='1' then (아무것도 안 함)` 이다.
+      이 가드가 곧 이중 재고파생 방지 장치다(멱등이 아니므로 반드시 유지).
+    """
+    u = staff_only(request, "검사완료")
+    items = payload.get("items") or []
+    if not items:
+        raise HTTPException(400, "검사완료할 항목을 선택하세요.")
+    who = str((u or {}).get("nm") or (u or {}).get("id") or "web")[:20]
+    cn = _nx(); cur = cn.cursor()
+    try:
+        done = 0; posted = 0; skipped = []
+        for it in items:
+            ymd = str(it.get("ymd", "") or "").strip()
+            seq = int(it.get("seq") or 0)
+            if not ymd or not seq:
+                continue
+            cur.execute("""SELECT RTRIM(ISNULL(status,'')), RTRIM(ISNULL(cust_code,'')),
+                                  RTRIM(ISNULL(item_code,'')), CAST(ISNULL(maint_qty,0) AS float),
+                                  RTRIM(ISNULL(sheet_no,''))
+                             FROM nx.set_stock_maint WHERE maint_ymd=? AND maint_seq=?""", ymd, seq)
+            r = cur.fetchone()
+            if not r:
+                skipped.append(f"{ymd}-{seq}: 입고내역 없음"); continue
+            st, cust, doban, qty, bc = r[0], r[1], r[2], float(r[3] or 0), r[4]
+            if st == "90":
+                skipped.append(f"{ymd}-{seq} {doban}: 이미 검사완료"); continue
+            if st != "30":
+                skipped.append(f"{ymd}-{seq} {doban}: 입고대기(30) 아님(현재 {st})"); continue
+            # ★★sheet_no 와 barcode_no 는 다르다 (2026-09-01 실측으로 확인)
+            #     set_stock_maint.sheet_no  = SET바코드   (setin.py 입고 시 bc 를 넣는다)
+            #     set_input_req.sheet_no    = 송장번호     ← 명세(set_input_req_dtl)의 키
+            #     set_input_req.barcode_no  = SET바코드
+            #   _derive_set_stock 은 **송장번호**를 받아야 명세를 찾는다.
+            #   바코드를 그대로 넘기면 명세 0행 → 재고가 한 행도 안 생긴다(실측으로 잡음).
+            cur.execute("""SELECT TOP 1 RTRIM(ISNULL(sheet_no,'')) FROM nx.set_input_req
+                            WHERE RTRIM(ISNULL(barcode_no,''))=? AND RTRIM(ISNULL(item_code,''))=?
+                            ORDER BY CASE WHEN RTRIM(ISNULL(status,''))='30' THEN 0 ELSE 1 END, id DESC""",
+                        bc, doban)
+            _s = cur.fetchone()
+            sheet = str(_s[0]).strip() if _s else ""
+            if not sheet:
+                skipped.append(f"{ymd}-{seq} {doban}: 송장(set_input_req)을 찾을 수 없음 — 바코드 {bc}")
+                continue
+            _assert_open(cur, ymd, "MAT", "검사완료")      # ★마감잠금
+            # ① 상태 전환
+            cur.execute("""UPDATE nx.set_stock_maint SET status='90'
+                            WHERE maint_ymd=? AND maint_seq=?""", ymd, seq)
+            cur.execute("""UPDATE nx.set_input_req SET status='90', status_dt=GETDATE(), status_user=?
+                            WHERE RTRIM(ISNULL(sheet_no,''))=? AND RTRIM(ISNULL(status,''))='30'""",
+                        who, sheet)
+            # ② 재고파생 + 사급소진 (입고 시점과 동일 함수)
+            #    ★원장 일자는 **입고일(ymd)** 로 맞춘다 — 검사일로 넣으면 입고와 재고가 다른 날에 잡힌다.
+            posted += _derive_set_stock(cur, cust, doban, qty, sheet, bc, seq, ymd)
+            done += 1
+        cn.commit()
+        stock_changed()          # ★재고 변경 → 수불장 캐시 버림
+        return {"ok": True, "done": done, "ledger_posted": posted,
+                "skipped": skipped, "by": who}
+    finally:
+        cn.close()
+
+
+@router.post("/api/setinsp/cancel")
+def setinsp_cancel(request: Request, payload: dict = Body(...)):
+    """검사취소 — 90→30 + 재고파생/사급 되돌림. 레거시 `ue_save` case 'D' 대응.
+
+    ★되돌림은 **행 삭제**가 아니라 근거키 스코프 삭제다(§1-3):
+      원장은 (MAINT_YMD, MAINT_TAG='S', SET_MAINT_SEQ=해당 입고seq) 로만 지운다.
+      사급은 remarks_src='setstock:<seq>' 로만 지운다. 태그 기반 대량삭제 금지.
+    """
+    u = staff_only(request, "검사취소")
+    items = payload.get("items") or []
+    if not items:
+        raise HTTPException(400, "검사취소할 항목을 선택하세요.")
+    who = str((u or {}).get("nm") or (u or {}).get("id") or "web")[:20]
+    cn = _nx(); cur = cn.cursor()
+    try:
+        done = 0; removed = 0; skipped = []
+        for it in items:
+            ymd = str(it.get("ymd", "") or "").strip()
+            seq = int(it.get("seq") or 0)
+            if not ymd or not seq:
+                continue
+            cur.execute("""SELECT RTRIM(ISNULL(status,'')), RTRIM(ISNULL(item_code,'')),
+                                  RTRIM(ISNULL(sheet_no,''))
+                             FROM nx.set_stock_maint WHERE maint_ymd=? AND maint_seq=?""", ymd, seq)
+            r = cur.fetchone()
+            if not r:
+                skipped.append(f"{ymd}-{seq}: 입고내역 없음"); continue
+            st, doban, bc = r[0], r[1], r[2]
+            if st != "90":
+                skipped.append(f"{ymd}-{seq} {doban}: 검사완료 상태가 아님(현재 {st})"); continue
+            _assert_open(cur, ymd, "MAT", "검사취소")
+            # ★창고재고도 되돌린다 — 원장만 지우면 「자재 입출고현황」에 수량이 남는다.
+            #   지울 행의 수량을 먼저 읽어 반대부호로 창고에 반영한 뒤 원장을 지운다.
+            cur.execute("""SELECT RTRIM(MAT_CODE), CAST(MAINT_QTY AS float) FROM nx.stock_ledger
+                            WHERE MAINT_YMD=? AND MAINT_TAG='S' AND SET_MAINT_SEQ=?""", ymd, seq)
+            for _m, _q in cur.fetchall():
+                _upd_mat_wh(cur, str(_m).strip(), -float(_q or 0))
+            cur.execute("""DELETE FROM nx.stock_ledger
+                            WHERE MAINT_YMD=? AND MAINT_TAG='S' AND SET_MAINT_SEQ=?""", ymd, seq)
+            removed += int(cur.rowcount or 0)
+            # ★수불이력 미러도 지운다 — 안 지우면 입출고현황에 유령 입고가 남는다.
+            #   근거키 스코프: 그 날짜 · 웹 대역(SEQ>=20000) · 그 도번의 세트입고분만(§1-3).
+            try:
+                cur.execute("""DELETE FROM nx.PU_T_STOCK_MAINT
+                                WHERE MAINT_YMD=? AND MAINT_SEQ>=20000 AND MAINT_TAG='S'
+                                  AND RTRIM(ISNULL(ITEM_CODE,''))=? AND REMARKS=N'세트입고'""",
+                            ymd, doban)
+            except Exception:
+                pass
+            # ★직납품 자동출고도 되돌린다 — 안 지우면 영업창고가 부풀어 남는다.
+            #   근거키 = (일자, TAG 'B', 그 세트도번, 직납 remarks). 태그 기반 대량삭제 금지(§1-3).
+            cur.execute("""SELECT MAINT_SEQ, CAST(MAINT_QTY AS float) FROM nx.stock_ledger
+                            WHERE MAINT_YMD=? AND MAINT_TAG='B' AND RTRIM(MAT_CODE)=?
+                              AND ISNULL(RTRIM(OUT_WH_GUBUN),'')='2'
+                              AND REMARKS=N'직납품 영업창고 출고'""", ymd, doban)
+            for _s, _q in cur.fetchall():
+                _q = float(_q or 0)                       # 출고분(음수)
+                _upd_mat_wh(cur, doban, -_q)              # 자재창고 원복(+)
+                try:                                      # 영업창고 원복(−)
+                    cur.execute("""UPDATE nx.SA_T_ITEM_STOCK SET STOCK_QTY=ISNULL(STOCK_QTY,0)+?,
+                                      UPDATE_USER_ID='web', UPDATE_DATETIME=GETDATE(),
+                                      UPDATE_WINDOW='setinsp' WHERE RTRIM(ITEM_CODE)=?""", _q, doban)
+                except Exception:
+                    pass
+                cur.execute("""DELETE FROM nx.stock_ledger
+                                WHERE MAINT_YMD=? AND MAINT_SEQ=? AND MAINT_TAG='B'""", ymd, int(_s))
+                removed += int(cur.rowcount or 0)
+                try:            # 직납출고 수불이력 미러도 제거(근거키 스코프)
+                    cur.execute("""DELETE FROM nx.PU_T_STOCK_MAINT
+                                    WHERE MAINT_YMD=? AND MAINT_SEQ>=20000 AND MAINT_TAG='B'
+                                      AND RTRIM(MAT_CODE)=? AND REMARKS=N'직납품 영업창고 출고'""",
+                                ymd, doban)
+                except Exception:
+                    pass
+            cur.execute("""DELETE FROM nx.sagub_maint
+                            WHERE RTRIM(maint_ymd)=? AND RTRIM(ISNULL(remarks_src,''))=?""",
+                        ymd, "setstock:" + str(seq))
+            cur.execute("""UPDATE nx.set_stock_maint SET status='30', derived_flag='0'
+                            WHERE maint_ymd=? AND maint_seq=?""", ymd, seq)
+            cur.execute("""UPDATE nx.set_input_req SET status='30', status_dt=GETDATE(), status_user=?
+                            WHERE RTRIM(ISNULL(barcode_no,''))=? AND RTRIM(ISNULL(item_code,''))=?
+                              AND RTRIM(ISNULL(status,''))='90'""", who, bc, doban)
+            done += 1
+        cn.commit()
+        stock_changed()
+        return {"ok": True, "done": done, "ledger_removed": removed,
+                "skipped": skipped, "by": who}
     finally:
         cn.close()
 

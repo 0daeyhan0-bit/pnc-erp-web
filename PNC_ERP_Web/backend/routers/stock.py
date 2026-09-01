@@ -903,7 +903,16 @@ def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
        ★F2: PU_T_STOCK_MAINT.MAINT_TAG=CHAR(1) → 반품 'RT'(2글자)는 'T'(자재창고반품)로 매핑(truncation 방지)."""
     mat = str(mat or "").strip()
     if not mat: return
-    cc = (str(cc or "").strip() or "Z99990")
+    # ★★자재재고 버킷의 CUST_CODE 는 **창고 소유주**('Z99990' 고정)이지 원장의 거래처(매입처)가 아니다.
+    #   실측(2026-09-01): 라이브 PU_T_MAT_STOCK_WH 7,762행이 **전부** Z99990 단일값이다.
+    #   종전엔 원장 CUST_CODE 를 그대로 버킷키로 썼다 → UPDATE 가 기존 행(Z99990)을 못 찾아
+    #   rowcount=0 → **매입처 코드로 새 행을 INSERT** → 같은 (자재,창고)에 2행이 생겼다.
+    #     AJR77144307-STS : [Z99990·IS0001 = 92] + [2005·IS0001 = **-4**]  ← 음수 유령행
+    #   재고조회는 창고 합을 보므로 값이 조용히 틀어지고, 음수차단 규칙도 이 행은 못 막는다.
+    #   save 경로는 이미 같은 이유로 issue 에서 Z99990 을 고정하고 있었다(line 415) —
+    #   update/delete 에만 그 처리가 빠져 있었다. 버킷키는 여기서 일원화한다.
+    _led_cc = (str(cc or "").strip() or "Z99990")   # 수불장 전표에 남길 거래처(원장 값 유지)
+    cc = "Z99990"                                    # 재고 버킷키 = 창고 소유주 고정
     gp = (str(gp or "").strip() or "IS0001")
     mtag = "T" if str(tag).strip() == "RT" else (str(tag or "").strip()[:1] or "2")
     dq = new_q - old_q
@@ -921,7 +930,7 @@ def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
         cur.execute("""SELECT TOP 1 MAINT_YMD,MAINT_SEQ FROM nx.PU_T_STOCK_MAINT
               WHERE MAINT_YMD=? AND MAT_CODE=? AND ABS(MAINT_QTY-?)<0.0001 AND MAINT_TAG=?
                 AND ISNULL(WH_CUST_CODE,'')=? AND ISNULL(GAGONG_PROC_CODE,'')=? AND INSERT_WINDOW='stockadjust'
-              ORDER BY MAINT_SEQ DESC""", ymd, mat, old_q, mtag, cc, gp)
+              ORDER BY MAINT_SEQ DESC""", ymd, mat, old_q, mtag, _led_cc, gp)
         hit = cur.fetchone()
         if hit and abs(new_q) < 1e-9:            # 삭제 → 그 web행 삭제(내역서 사라짐)
             cur.execute("DELETE FROM nx.PU_T_STOCK_MAINT WHERE MAINT_YMD=? AND MAINT_SEQ=?", hit[0], hit[1])
@@ -934,7 +943,7 @@ def _mat_mirror_edit(cur, ymd, mat, cc, gp, tag, old_q, new_q, window):
             cur.execute("""INSERT INTO nx.PU_T_STOCK_MAINT(MAINT_YMD,MAINT_SEQ,MAINT_TAG,CUST_CODE,MAT_CODE,MAINT_QTY,REMARKS,
                   WH_CUST_CODE,GAGONG_PROC_CODE,INSERT_USER_ID,INSERT_DATETIME,INSERT_WINDOW,UPDATE_USER_ID,UPDATE_DATETIME,UPDATE_WINDOW)
                   VALUES(?,?,?,?,?,?,?,?,?,'web',GETDATE(),?,'web',GETDATE(),?)""",
-                ymd, nsq, mtag, cc, mat, dq, "원장수정보정", cc, gp, window, window)
+                ymd, nsq, mtag, _led_cc, mat, dq, "원장수정보정", _led_cc, gp, window, window)
     except Exception: pass
 
 @router.post("/api/stock/update")

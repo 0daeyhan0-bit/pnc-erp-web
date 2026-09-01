@@ -462,10 +462,18 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
         #   ★2026-08-23 lgh(LG OUTPUT시간) 추가 = work_order 앞. PART INPUT(inhm)이 같은 행이
         #     여럿일 때 제번 문자열순으로 갈려 레거시와 순서가 달랐다(0004→000D→0026 vs 0026→002V→000D→0004).
         #     최종납기=LG OUTPUT시간이라 이른 건이 먼저. 파트별생산계획(410) 표시순서와도 동일해진다.
+        #   ★★2026-09-01 line 을 inhm 앞으로 — 집계행이 라인별로 하나가 되게.
+        #     프론트 집계는 **연속된 같은 (도번,라인)** 을 한 블록으로 묶는데(screens.prod.js:2480),
+        #     종전엔 시각(inhm)이 라인보다 먼저라 C1 0800 → SVC 1700 → C1 1700 순으로 나왔고
+        #     SVC 가 사이에 끼어 **C1 이 두 블록으로 갈렸다**(실측 AJR73965505: 211/105 로 분리).
+        #     파트별계획(410)은 블록키가 gpc+item+line 뿐이라 316 한 행으로 나오는데
+        #     키팅만 달라 보였다. 라인을 앞으로 올리면 같은 라인이 붙어 410 과 같아진다.
+        #     ※대표 확정 규칙 = "추가계획(SVC) 라인만 나누고 나머지는 합계".
         rows.sort(key=lambda x: (x["gpc"] or "",
                                  x["part_ymd"] or "",
                                  _bmin.get((x["gpc"] or "", x["part_ymd"] or "", x["item"] or ""), ""),
                                  x["item"] or "",
+                                 x.get("line") or "",
                                  x["inhm"] or "",
                                  x["plan_ymd"] or "", x.get("lgh") or "", x["wo"] or "", x["swo"] or ""))
         note = f"⚠ 상위 {limit}건 초과 — 투입파트·작업처·도번으로 필터하세요." if capped else ""
@@ -985,10 +993,13 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
             v = x["inhm"] or ""
             if k not in _bmin4 or v < _bmin4[k]:
                 _bmin4[k] = v
+        # ★2026-09-01 line 을 inhm 앞으로 — 키팅(/api/kitting/grid)과 동일 규칙.
+        #   프론트 집계 블록키가 (도번,라인)이라 시각이 먼저면 SVC 가 끼어 같은 라인이 갈린다.
         rows.sort(key=lambda x: ((x["pgc"] or ""),
                                  (x["part_ymd"] or ""),
                                  _bmin4.get((x["pgc"] or "", x["part_ymd"] or "", x["item"] or ""), ""),
                                  (x["item"] or ""),
+                                 (x.get("line") or ""),
                                  (x["inhm"] or ""),
                                  (x["plan_ymd"] or ""), (x["output_hm"] or ""), (x["lgh"] or ""),
                                  (x["wo"] or ""), (x["swo"] or "")))

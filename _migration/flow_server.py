@@ -231,8 +231,16 @@ def _flow_sql(payload: dict = Body(default={})):
        별도 커넥션으로는 미커밋 행이 안 보여 수정/삭제 스텝을 검증할 수 없다(2026-08-28 교훈).
        SELECT 만 허용(쓰기는 화면 API 를 통해서만 — 하네스가 우회하면 검증 의미가 없다)."""
     q = str(payload.get("sql") or "").strip()
-    if not q.lower().startswith("select"):
-        return {"ok": False, "detail": "SELECT 만 허용"}
+    # ★CTE(`WITH ... SELECT`)도 읽기다. 종전엔 startswith("select") 만 봐서
+    #   레거시 대사 같은 정당한 조회가 막혔다(2026-09-01 실측 — E10/E11).
+    #   막아야 할 것은 **쓰기**이므로, 시작 토큰(select|with)과 DML 키워드를 함께 본다.
+    _ql = q.lower()
+    _head_ok = _ql.startswith("select") or _ql.startswith("with")
+    _dml = ("insert ", "update ", "delete ", "merge ", "drop ", "truncate ",
+            "alter ", "create ", "exec ", "execute ", "grant ", "revoke ")
+    _has_dml = any((" " + k) in (" " + _ql) for k in _dml)
+    if not _head_ok or _has_dml:
+        return {"ok": False, "detail": "SELECT/WITH(읽기) 만 허용 — 쓰기는 화면 API 로만"}
     cur = RAW.cursor()
     try:
         cur.execute(q, *(payload.get("args") or []))

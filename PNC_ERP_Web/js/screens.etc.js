@@ -1298,7 +1298,8 @@ SCREEN.setstock=(c)=>{
     document.body.appendChild(ov);
     const close=()=>ov.remove();
 
-    let mst={ymd:iso(new Date()),cust:'',custnm:'',rows:[],busy:false,nextno:''};
+    // scope: 'set'=세트재고만(하위 무영향) · 'all'=하위재고반영(종전 동작)
+    let mst={ymd:iso(new Date()),cust:'',custnm:'',rows:[],busy:false,nextno:'',scope:'all'};
     for(let i=0;i<30;i++) mst.rows.push({item_code:'',itemnm:'',stock:null,qty:'',remark:'',direct:''});
 
     let custMap={};
@@ -1322,6 +1323,18 @@ SCREEN.setstock=(c)=>{
           <datalist id="mn-custs"></datalist>
           <span id="mn-cc" style="font-size:12px;${mst.cust?'color:#1f7a3d':'color:#c0392b'}">
             ${mst.cust?('✔ '+esc(mst.custnm)+' ('+esc(mst.cust)+')'):'거래처를 먼저 선택하세요'}</span>
+          <!-- ★재고 반영 범위 (2026-09-01) — 둘 중 하나만 선택(같은 name 그룹).
+               세트재고만 : 세트원장만 기록, 하위 자도번 재고는 건드리지 않는다
+               하위재고반영: 세트 + 자도번 파생까지(종전 동작) -->
+          <span style="margin-left:auto;display:inline-flex;gap:14px;align-items:center;
+                       border:1px solid #dfe6ee;border-radius:6px;padding:5px 12px">
+            <label style="cursor:pointer;white-space:nowrap">
+              <input type="radio" name="mn-scope" value="set"
+                     ${mst.scope==='set'?'checked':''}> 세트재고만 반영</label>
+            <label style="cursor:pointer;white-space:nowrap">
+              <input type="radio" name="mn-scope" value="all"
+                     ${mst.scope==='all'?'checked':''}> 하위재고 반영</label>
+          </span>
         </div>
         <div style="flex:1;min-height:0;overflow:auto;padding:0 16px">
           <table class="tbl" style="width:100%;white-space:nowrap"><thead><tr>
@@ -1360,6 +1373,10 @@ SCREEN.setstock=(c)=>{
       const q=id=>ov.querySelector(id);
       const msg=t=>{const m=q('#mn-msg');if(m)m.textContent=t||'';};
       q('#mn-ymd').onchange=e=>{mst.ymd=e.target.value;};
+      // ★재고 반영 범위 — 라디오는 같은 name 이라 둘 중 하나만 선택된다.
+      //   재렌더 없이 상태만 바꾼다(입력 중인 그리드가 초기화되지 않게).
+      ov.querySelectorAll('input[name=mn-scope]').forEach(rb=>{
+        rb.onchange=()=>{if(rb.checked)mst.scope=rb.value;};});
       /* 거래처 — 부분검색. '대원' → '대원산업' 자동확정(후보 1건이면) */
       const pickCust=v=>{
         const nm=String(v||'').trim();
@@ -1468,11 +1485,16 @@ SCREEN.setstock=(c)=>{
       const neg=rows.find(r=>+r.qty<0);
       if(neg)return alert('세트입고수량을 (-)로 처리할 수 없습니다.\n\n[자재세트재고조정] 메뉴에서 (-)로 조정하세요.');
       const tot=rows.reduce((a,r)=>a+(+r.qty||0),0);
+      // ★반영 범위를 확인창에 명시 — 하위재고가 움직이는지 여부는 되돌리기 어려운 차이다.
+      const setOnly=(mst.scope==='set');
       if(!window.confirm(`${mst.custnm} · ${rows.length}건 / 합계 ${won(tot)}\n\n`
-                        +`수동입고 처리 → 세트재고 + 자도번 재고파생 + 사급소진. 진행?`))return;
+                        +(setOnly
+                          ? `[세트재고만 반영]\n세트재고만 기록합니다. 하위 자도번 재고는 변하지 않습니다. 진행?`
+                          : `[하위재고 반영]\n세트재고 + 자도번 재고파생 + 사급소진. 진행?`)))return;
       mst.busy=true;paint();
       try{
         const body={ymd:mst.ymd.slice(2).replace(/-/g,''),cust:mst.cust,
+                    scope:mst.scope,
                     user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹'),
                     rows:rows.map(r=>({item_code:r.item_code,qty:+r.qty,remark:r.remark}))};
         const res=await fetch(`${API}/api/setstock/manual`,{method:'POST',
@@ -1480,23 +1502,25 @@ SCREEN.setstock=(c)=>{
         const j=await res.json();
         if(!res.ok||!j.ok)throw new Error(j.detail||JSON.stringify(j).slice(0,200));
         alert(`수동입고 완료 — 수동입고NO ${j.manual_no}\n\n`
+             +`· 반영범위 ${j.scope==='set'?'세트재고만':'하위재고 반영'}\n`
              +`· 세트입고 ${j.count}건\n· 자도번 재고파생 ${j.ledger_posted}행\n`
              +`· 사급 소진 ${j.sagub_posted<0?'(오류)':j.sagub_posted+'행'}`);
         close(); await load();
       }catch(e){ alert('수동입고 실패: '+e.message); mst.busy=false; paint(); }
     };
 
-    /* 세트거래처 목록 (레거시: set_in_flag='1' 인 거래처만) */
-    fetch(`${API}/api/base/partners?limit=3000`).then(r=>r.json()).then(d=>{
-      (d.rows||d.list||d||[]).forEach(x=>{
-        const nm=(x.cust_name||x.name||'').trim(), cd=(x.cust_code||x.code||'').trim();
+    /* ★거래처 목록 + 수동입고NO 를 prep 한 번에서 받는다(2026-09-01).
+       종전엔 `/api/base/partners` 를 불렀는데 **그런 엔드포인트가 없어 404** 였고,
+       custMap 이 통째로 비어 어떤 거래처를 입력해도 "일치하는 거래처가 없습니다"가 떴다
+       (실측: 케이비/2266 — DB·nx.partner 에는 정상 존재). */
+    fetch(`${API}/api/setstock/manual/prep`).then(r=>r.json()).then(d=>{
+      mst.nextno=d.next_no||'';
+      (d.custs||[]).forEach(x=>{
+        const nm=String(x.nm||'').trim(), cd=String(x.code||'').trim();
         if(nm&&cd)custMap[nm]=cd;
       });
       paint();
     }).catch(()=>paint());
-
-    fetch(`${API}/api/setstock/manual/prep`).then(r=>r.json())
-      .then(d=>{mst.nextno=d.next_no||'';paint();}).catch(()=>{});
 
     ov.onclick=e=>{if(e.target===ov)close();};
     paint();
@@ -1508,7 +1532,7 @@ SCREEN.setstock=(c)=>{
     const inf=st.info;
     c.innerHTML=`
      <div class="page-title">📦 자재세트입고관리</div>
-     <div class="page-sub">협력사 세트 <b>SET바코드 스캔/장부입고</b> → 세트입고 실적 + 입고완료분 <b>자도번 재고파생</b>(TAG='S') · 검사품=입고대기 · 레거시 <code>w_pu_stock_140</code></div>
+     <div class="page-sub">협력사 세트 <b>SET바코드 스캔/장부입고</b> → 세트입고 실적 + 입고완료분 <b>자도번 재고파생</b>(TAG='S') · 검사품=입고대기 · <b>직납품은 영업창고로 자동출고</b> · 레거시 <code>w_pu_stock_140</code></div>
      <div class="panel" style="border:2px solid #2e86de"><div class="panel-h">세트 입고처리</div><div class="panel-b">
        <div class="toolbar" style="flex-wrap:wrap;gap:8px">
          <label class="tl" style="font-weight:600">SET바코드</label>
@@ -1531,15 +1555,20 @@ SCREEN.setstock=(c)=>{
          <button class="btn" id="f-go">🔍 조회</button></div>
        <div class="grid-wrap" style="max-height:440px;overflow:auto"><table class="tbl" style="white-space:nowrap"><thead><tr>
          <th data-key="maint_ymd">입고일자</th><th class="num" data-key="maint_seq">SEQ</th><th data-key="custnm">협력사</th><th data-key="item_code">도번</th><th data-key="itemnm">품명</th>
-         <th class="num" data-key="maint_qty">입고수량</th><th data-key="sheet_no">SET바코드</th><th class="center" data-key="status">상태</th><th class="center" data-key="derived_flag">재고파생</th><th>구분</th></tr></thead>
+         <th class="num" data-key="maint_qty">입고수량</th><th data-key="sheet_no">SET바코드</th><th class="center" data-key="status">상태</th><th class="center" data-key="derived_flag">재고파생</th><th class="center" data-key="direct_cust">직납출고</th><th>구분</th></tr></thead>
        <tbody>${st.rows.map(r=>{const ret=(+r.maint_qty<0);return `<tr>
          <td>${esc(r.maint_ymd)}</td><td class="num">${r.maint_seq}</td><td>${esc(r.custnm||r.cust_code)}</td>
          <td><b>${esc(r.item_code)}</b></td><td class="cap" style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.itemnm||"")}">${esc(r.itemnm||"")}</td>
          <td class="num qty" style="color:${ret?"#c0392b":"#1f7a3d"}">${won(r.maint_qty)}</td>
          <td>${r.sheet_no?"SET"+esc(r.sheet_no):(r.manual_sheet_no?esc(r.manual_sheet_no)+"(수동)":"")}</td>
          <td class="center" style="color:${scol(r.status)}">${STAT[r.status]||r.status}</td>
-         <td class="center">${r.derived_flag==='1'?'✅':'—'}</td><td>${r.maint_tag==='3'?'장부':r.maint_tag==='2'?'바코드':ret?'반품':esc(r.maint_tag)}</td></tr>`;}).join("")||'<tr><td colspan="10" style="padding:16px;color:var(--muted)">입고 실적 없음</td></tr>'}
-       <tr class="grandtot"><td colspan="5" class="center">합계 ${st.rows.length}건</td><td class="num">${won(totq)}</td><td colspan="4"></td></tr>
+         <td class="center">${r.derived_flag==='1'?'✅':'—'}</td>
+         <td class="center" title="${r.direct_cust?`직납처 ${esc(r.direct_nm||r.direct_cust)} — 영업창고로 출고됨`:''}">${
+           !r.direct_cust ? '<span style="color:#c9d1dc">-</span>'
+           : (+r.direct_qty>0 ? `<span style="color:#1f7a3d">직납 ${won(r.direct_qty)}</span>`
+                              : '<span style="color:#c67d00">직납 대기</span>')}</td>
+         <td>${r.maint_tag==='3'?'장부':r.maint_tag==='2'?'바코드':ret?'반품':esc(r.maint_tag)}</td></tr>`;}).join("")||'<tr><td colspan="11" style="padding:16px;color:var(--muted)">입고 실적 없음</td></tr>'}
+       <tr class="grandtot"><td colspan="5" class="center">합계 ${st.rows.length}건</td><td class="num">${won(totq)}</td><td colspan="5"></td></tr>
        </tbody></table></div></div></div>`;
     const g=id=>c.querySelector(id);
     {const b=g("#sc-bc");b.oninput=x=>st.scan=x.target.value;b.onkeydown=x=>{if(x.key==="Enter")doScan();};}

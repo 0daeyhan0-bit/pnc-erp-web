@@ -65,6 +65,51 @@ def _plan_rows(rows, cr):
                     agg[k] = (ymd, wo, model, buyer, line, sg, q, tot, rem, sh, tool[:40], fs[:20], ts[:20], cr)
     return list(agg.values()), axis_from
 
+def _fname_axis_warn(fname, axis_from, cr):
+    """파일명 날짜 ↔ 계획 일자축 대조 → 경고문(없으면 "").
+
+    ★양식 = `lg_<구분>_<MMDD>` 고정 (사용자 확정 2026-09-01)
+        lg_rac_0901 생산계획(편집).xlsx
+        LG_SAC_0901.xlsx
+      → `lg_` 다음 세 번째 토큰의 4자리를 날짜로 읽는다. 파일명 아무 데나 있는
+        4자리 숫자를 줍지 않으므로 오탐이 없다(제번·모델명에도 숫자가 많다).
+      규칙에 안 맞는 이름이면 판단하지 않고 조용히 통과한다.
+
+    ★왜 필요한가 (2026-09-01 실사고)
+      9/1 에 8/28 자 파일을 올려 편성이 통째로 어긋났다.
+      웹 계획원본 260829~ / 레거시 260901~ · 업체별 대사 불일치 15쌍 → 1,934쌍.
+      화면·로그 어디에도 "옛 파일을 올렸다"는 신호가 없어 원인 찾는 데 오래 걸렸다.
+
+    ★차단하지 않고 경고만 한다 — 과거분 재업로드가 정상 업무일 수 있다.
+      파일명에 날짜가 없으면(규칙 밖 이름) 아무 말도 하지 않는다.
+    """
+    import re as _re
+    f = str(fname or "").strip()
+    a = "".join(ch for ch in str(axis_from or "") if ch.isdigit())
+    if not f or len(a) != 6:
+        return ""
+    base = f.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    base = _re.sub(r'\.(xlsx|xlsm|xls|csv)$', '', base, flags=_re.I)
+    # ★`lg_<구분>_<MMDD>` 의 세 번째 토큰만 본다. 뒤에 무엇이 붙든(공백·한글·괄호) 무관.
+    m = _re.match(r'\s*lg[_\-\s]+[A-Za-z]+[_\-\s]+(\d{4})(?!\d)', base, _re.I)
+    if not m:
+        return ""                       # 규칙 밖 이름 = 판단 불가, 조용히 통과
+    fn = m.group(1)
+    mm, dd = int(fn[:2]), int(fn[2:])
+    if not (1 <= mm <= 12 and 1 <= dd <= 31):
+        return ""                       # 날짜가 아닌 4자리
+    ax_md = a[2:]                       # YYMMDD → MMDD
+    if fn == ax_md:
+        return ""                       # 일치
+    _f = f"{fn[:2]}월 {fn[2:]}일"
+    _a = f"{ax_md[:2]}월 {ax_md[2:]}일"
+    return (f"업로드 날짜가 상이합니다.\n\n"
+            f"    파일명 날짜   {_f}   ({base})\n"
+            f"    계획 시작일   {_a}   (파일 안의 일자축 첫날)\n\n"
+            f"다른 날짜의 파일을 올리셨을 수 있습니다.\n"
+            f"맞는 파일인지 확인하세요 — 옛 파일로 편성하면 계획이 통째로 어긋납니다.")
+
+
 def _load_xlsx(b64):
     import base64, io as _io, openpyxl
     raw = base64.b64decode(str(b64).split(',')[-1])
@@ -176,6 +221,13 @@ def plan_upload(payload: dict = Body(...)):
     recs, axis_from = _plan_rows(rows, cr)
     if not recs:
         return {"ok": True, "inserted": 0, "updated": 0, "total": 0, "cr": cr}
+    # ★★날짜 대조는 **저장 전에** 한다 — 경고만 띄우면 이미 덮어쓴 뒤라 되돌릴 수 없다.
+    #   (2026-09-01 사용자 지적: "오류가 나도 업로드가 되어버리네")
+    #   기존 계획을 CR별로 전량 삭제·재적재하므로, 잘못 올리면 직전 계획이 사라진다.
+    #   ⟹ 불일치면 **저장하지 않고 409**. 사용자가 확인 후 force=true 로 다시 올리면 진행.
+    _w = _fname_axis_warn(str(payload.get("fname") or ""), axis_from, cr)
+    if _w and not bool(payload.get("force")):
+        raise HTTPException(409, _w + "\n\n※ 이 파일이 맞다면 [확인]을 눌러 그대로 업로드할 수 있습니다.")
     nx = _nx(); cur = nx.cursor()
     try:  # recs t=(PLAN_YMD,WORK_ORDER,MODEL_NO,BUYER_MODEL,LINE_NO,SCHED_GROUP,PLAN_QTY,TOTAL_QTY,REMAIN_QTY,START_HM,TOOL,FROM_SEQ,TO_SEQ,CR_FLAG)
         cur.execute("IF OBJECT_ID('tempdb..#p') IS NOT NULL DROP TABLE #p")
@@ -207,8 +259,10 @@ def plan_upload(payload: dict = Body(...)):
             if cur.rowcount == 0:
                 cur.execute("INSERT INTO nx.plan_upload_axis(cr_flag,axis_from) VALUES(?,?)", cr, axis_from)
         # full-replace(cr별): 기존 upd행 삭제 후 recs행 재적재
+        #   ※날짜 대조는 이 위(저장 전)에서 이미 끝났다 — 여기 오면 통과했거나 force 다.
         return {"ok": True, "inserted": len(recs), "replaced": upd, "total": len(recs), "cr": cr,
-                "from_ymd": fmin, "axis_from": axis_from}
+                "from_ymd": fmin, "axis_from": axis_from,
+                "forced": bool(payload.get("force"))}
     finally:
         nx.close()
 
