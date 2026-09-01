@@ -2611,17 +2611,19 @@ const _mkMagam=(CFG)=>(c)=>{
   const selKeyCarried=(k,byMat)=>{if(k.startsWith('I:')){const it=byMat[k.slice(2)];return it&&fdays(it).length&&fdays(it).every(bd=>bd.carry);}
     const p=k.slice(2).split('|');const it=byMat[p[0]];const bd=it&&(it.byday||[]).find(x=>x.d==+p[1]);return bd&&bd.carry;};
   const carryApply=async()=>{
+    // 선택 각 행을 개별 토글: 이월 안된 것→이월(금액0) / 이월된 것→해제(금액복원)
     if(carryBusy||!selRows.size)return;
     const items=(detail&&detail.items)||[];const byMat={};items.forEach(it=>byMat[it.mat]=it);
-    const pairs=[];let allCarry=true;
-    selRows.forEach(k=>{if(k.startsWith('I:')){const it=byMat[k.slice(2)];if(it)fdays(it).forEach(bd=>{pairs.push({mat_code:it.mat,maint_ymd:bd.ymd});if(!bd.carry)allCarry=false;});}
-      else{const p=k.slice(2).split('|');const it=byMat[p[0]];const bd=it&&(it.byday||[]).find(x=>x.d==+p[1]);if(bd){pairs.push({mat_code:it.mat,maint_ymd:bd.ymd});if(!bd.carry)allCarry=false;}}});
-    if(!pairs.length)return;
-    const carry=!allCarry;   // 전부 이월이면 해제, 아니면 이월
+    const toCarry=[],toUnc=[];
+    const add=(mat,bds)=>bds.forEach(bd=>{(bd.carry?toUnc:toCarry).push({mat_code:mat,maint_ymd:bd.ymd});});
+    selRows.forEach(k=>{if(k.startsWith('I:')){const it=byMat[k.slice(2)];if(it)add(it.mat,fdays(it));}
+      else{const p=k.slice(2).split('|');const it=byMat[p[0]];const bd=it&&(it.byday||[]).find(x=>x.d==+p[1]);if(bd)add(it.mat,[bd]);}});
+    if(!toCarry.length&&!toUnc.length)return;
     carryBusy=true;drawModal();
-    try{const r=await fetch(`${API}/api/${CFG.base}/carry_set`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({ym,cust_code:mc.cc,carry,pairs})});
-      const j=await r.json();if(!j.ok){alert('이월 전환 실패:\n'+(j.detail||JSON.stringify(j)));}
+    try{const post=(carry,pairs)=>fetch(`${API}/api/${CFG.base}/carry_set`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ym,cust_code:mc.cc,carry,pairs})}).then(r=>r.json());
+      if(toCarry.length){const j=await post(true,toCarry);if(!j.ok)throw new Error(j.detail||'이월');}
+      if(toUnc.length){const j=await post(false,toUnc);if(!j.ok)throw new Error(j.detail||'해제');}
       selRows.clear();await reloadDetail(mc.cc);
     }catch(e){alert('이월 전환 실패: '+e.message);}
     carryBusy=false;drawModal();};
@@ -2662,9 +2664,8 @@ const _mkMagam=(CFG)=>(c)=>{
     const cols=view2==='item'
       ?`<th class="center" style="width:24px"></th><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`
       :`<th class="center" style="width:24px"></th><th class="center">입고일</th><th>품번</th><th>품명</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`;
-    const selN=selRows.size;let dir=true;
-    if(selN){dir=![...selRows].every(k=>selKeyCarried(k,byMat));}
-    const btnLbl=selN?(dir?`선택 ${selN}건 이월`:`선택 ${selN}건 이월해제`):'이월';
+    const selN=selRows.size;
+    const btnLbl=selN?`선택 ${selN}건 이월/해제`:'이월';
     const carN=items.filter(it=>{const fd=fdays(it);return fd.length&&fd.every(bd=>bd.carry);}).length;
     const toolbar=`<div style="display:flex;align-items:center;gap:7px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
       <b style="white-space:nowrap">품목별 매출</b>
@@ -2672,13 +2673,18 @@ const _mkMagam=(CFG)=>(c)=>{
       <label class="tl">기간</label><input type="date" class="inp" id="tp-from" value="${esc(fromDt||_monPfx()+'-01')}" style="width:138px"><span class="mut">~</span><input type="date" class="inp" id="tp-to" value="${esc(toDt||_monPfx()+'-31')}" style="width:138px">
       ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px">저장중…</span>':''}`:''}
       <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 매출금액 0 · 차월(${_ynm(carryNextYm)}) 마감</span></div>`;
-    return toolbar+`<div style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
+    return toolbar+`<div id="tp-scroll" style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
   };
+  // 이월 버튼만 갱신(체크박스 클릭 시 전체 재렌더 금지 — 스크롤 리셋 방지 §3)
+  const updCarryBtn=(m)=>{const cb=m.querySelector('#tp-carry');if(!cb)return;
+    const items=(detail&&detail.items)||[];const byMat={};items.forEach(it=>byMat[it.mat]=it);
+    const selN=selRows.size;cb.disabled=!selN;cb.style.background=selN?'#b5651d':'';cb.style.color=selN?'#fff':'';
+    cb.textContent=selN?`선택 ${selN}건 이월/해제`:'이월';};
   const wireTop=(m)=>{
     const vs=m.querySelector('#tp-view');if(vs)vs.onchange=e=>{view2=e.target.value;selRows.clear();drawModal();};
     const ff=m.querySelector('#tp-from');if(ff)ff.onchange=e=>{fromDt=e.target.value;drawModal();};
     const ft=m.querySelector('#tp-to');if(ft)ft.onchange=e=>{toDt=e.target.value;drawModal();};
-    m.querySelectorAll('.tp-ck').forEach(el=>el.onchange=()=>{if(el.checked)selRows.add(el.dataset.k);else selRows.delete(el.dataset.k);drawModal();});
+    m.querySelectorAll('.tp-ck').forEach(el=>el.onchange=()=>{if(el.checked)selRows.add(el.dataset.k);else selRows.delete(el.dataset.k);updCarryBtn(m);});
     const cb=m.querySelector('#tp-carry');if(cb)cb.onclick=carryApply;
     m.querySelectorAll('.tp-pc').forEach(el=>el.onchange=()=>{const mat=el.dataset.mat,v=el.value.trim();
       if(v===''){if(pEdit[mat]){delete pEdit[mat].nc;if(!pEdit[mat].nc)delete pEdit[mat];}}else{pEdit[mat]=Object.assign(pEdit[mat]||{rc:'',rd:''},{nc:+v});}drawModal();});
@@ -2689,6 +2695,7 @@ const _mkMagam=(CFG)=>(c)=>{
   const drawModal=()=>{
     const m=c.querySelector('#sm-modal');if(!m)return;
     if(!mc){m.innerHTML='';return;}
+    const _sc=m.querySelector('#tp-scroll');const _scTop=_sc?_sc.scrollTop:0;   // 재렌더 후 스크롤 위치 복원(§3)
     const rsOpt=(sel)=>`<option value="">사유 선택</option>`+reasons.map(r=>`<option value="${esc(r.code)}" ${r.code===sel?'selected':''}>${esc(r.name)}</option>`).join('');
     if(mLoading||!detail){m.innerHTML=`<div class="sm-ov"><div class="sm-dlg"><div class="sm-dlg-h"><b>${esc(mc.nm)}</b> 마감상세 <span class="x" id="sm-x">✖</span></div><div class="sm-dlg-b"><div class="empty">${SPIN}불러오는 중…</div></div></div></div>`;
       const x=m.querySelector('#sm-x');if(x)x.onclick=closeModal;return;}
@@ -2748,6 +2755,7 @@ const _mkMagam=(CFG)=>(c)=>{
     const sv=m.querySelector('#sm-save');if(sv)sv.onclick=()=>save(false);
     const cf=m.querySelector('#sm-confirm');if(cf)cf.onclick=()=>{if(confirm(`${mc.nm} ${CFG.verb}을 마감확정할까요?\n최종금액 ${won0(calc().final)}원`))save(true);};
     const ro=m.querySelector('#sm-reopen');if(ro)ro.onclick=reopen;
+    const _sc2=m.querySelector('#tp-scroll');if(_sc2&&_scTop)_sc2.scrollTop=_scTop;   // 스크롤 위치 복원
   };
 
   const buildAdjustments=()=>{const items=(detail&&detail.items)||[];const out=[];const errs=[];
