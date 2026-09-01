@@ -281,15 +281,20 @@ def expected_totals(ymd):
         cur.execute(sql, ymd)
         return float(cur.fetchone()[0] or 0)
 
+    # ★재생과 **같은 구간**을 세야 한다. SINCE 로 자르고 재생했으면 기준값도 그 구간이다.
+    #   (2026-09-01 실측 교훈: 전체를 세고 일부만 재생해 놓고 "차이" 라고 읽으면 오진이다.)
+    sc = _since("INSERT_DATETIME")
     out["원장RDY"] = one("""SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0)
                               FROM PARTNER_ERP.dbo.PU_T_READY_STOCK_MAINT
-                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)%s""" % (inl, sc))
     out["원장MAT"] = one("""SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0)
                               FROM PARTNER_ERP.dbo.PU_T_STOCK_MAINT
-                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)%s""" % (inl, sc))
     out["원장ASY"] = one("""SELECT ISNULL(SUM(CAST(MAINT_QTY AS float)),0)
                               FROM PARTNER_ERP.dbo.SA_T_STOCK_MAINT
-                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
+                             WHERE MAINT_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)%s""" % (inl, sc))
+    # ★생산실적에는 INSERT_DATETIME 이 없다(UPDATE_DATETIME·PROD_HMS 뿐) → 구간 절단 불가.
+    #   재생도 같은 이유로 전량을 넣으므로 여기서도 전량을 센다(축이 어긋나지 않는다).
     out["공정실적수량"] = one("""SELECT ISNULL(SUM(CAST(PROD_QTY AS float)),0)
                               FROM PARTNER_ERP.dbo.PR_T_PROD_DTL
                              WHERE PROD_YMD=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)""" % inl)
