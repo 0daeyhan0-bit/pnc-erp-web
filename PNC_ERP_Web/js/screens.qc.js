@@ -544,42 +544,12 @@ SCREEN.qcspec=(c)=>{
   specView(c.querySelector('#qcspec-body'), {src:'all', editable:true});
 };
 
-/* 품질 ③: 수입검사(IQC)조회 (w_qa_cust_iqc) — QA_T_CUST_IQC_HEAD/DTL 읽기전용 */
-SCREEN.qciqc=(c)=>{
-  const API=API_BASE;
-  c.innerHTML=`<div class="page-title">🔬 수입검사(IQC)조회 <span style="font-size:12px;color:var(--muted);font-weight:400">거래처 수입검사 결과·측정치수</span></div>
-   <div class="page-sub">협력사 납품품 수입검사 헤더·상세치수 조회(읽기전용). 원본=<code>QA_T_CUST_IQC_HEAD/DTL</code>. 행을 클릭하면 규격·측정값 상세가 표시됩니다.</div>
-   <div id="iqc-body"></div>`;
-  qcRead(c.querySelector('#iqc-body'),{
-    listEp:'/api/qc/iqc/list', dateLabel:'검사기간', days:120,
-    filters:[{k:'item',label:'품번',width:120},{k:'cust',label:'거래처',width:80}],
-    buildQS:F=>({from_ymd:F.from,to_ymd:F.to,item:F.item||'',cust:F.cust||''}),
-    cols:[
-      {h:'검사일자',cls:'center',fmt:r=>_wymd(r.oqc_ymd)},
-      {h:'SEQ',k:'oqc_seq',cls:'num'},
-      {h:'품번',fmt:r=>`<b>${esc(r.item_code)}</b>`},
-      {h:'품명',k:'nm',cap:1,title:'nm'},
-      {h:'자재',k:'mat'},
-      {h:'거래처',fmt:r=>esc(r.cust_nm||r.cust)},
-      {h:'라인',k:'line',cls:'center'},
-      {h:'검사수량',cls:'num',fmt:r=>_wnf(r.insp_qty)},
-      {h:'판정',cls:'center',fmt:r=>r.ok?'<span style="color:#1c7c3a">합격</span>':'<span style="color:#c0392b">불합격</span>'},
-      {h:'불량내용',k:'err_text',cap:1,title:'err_text'},
-    ],
-    onRow:async(r)=>{const q=new URLSearchParams({ymd:r.oqc_ymd,seq:r.oqc_seq});
-      const res=await fetch(`${API}/api/qc/iqc/detail?${q}`);return await res.json();},
-    subView:(sub,sel)=>{
-      const rows=sub.rows||[];
-      return `<div style="background:#f7fafd;border:1px solid #cddaea;border-radius:8px;padding:8px">
-        <div style="font-weight:600;margin-bottom:6px">📐 ${esc(sel.item_code)} · ${_wymd(sel.oqc_ymd)} SEQ${sel.oqc_seq} 측정상세 (${rows.length}항목)</div>
-        <div class="grid-wrap" style="max-height:300px;overflow:auto;background:#fff;border:1px solid #dce4ee;border-radius:6px">
-        <table class="tbl" style="font-size:11px"><thead><tr><th>순번</th><th>규격</th><th>규격2</th><th class="num">측정1</th><th class="num">측정2</th><th class="num">측정3</th><th class="num">측정4</th><th class="num">측정5</th><th class="num">불량</th><th class="center">판정</th></tr></thead>
-        <tbody>${rows.length?rows.map(d=>`<tr><td class="center">${esc(d.SPEC_SEQ)}</td><td><b>${esc(d.spec1)}</b></td><td>${esc(d.spec2)}</td>
-          <td class="num">${esc(d.v1)}</td><td class="num">${esc(d.v2)}</td><td class="num">${esc(d.v3)}</td><td class="num">${esc(d.v4)}</td><td class="num">${esc(d.v5)}</td>
-          <td class="num">${_wnf(d.err)}</td><td class="center">${d.ok?'✔':'✘'}</td></tr>`).join(''):`<tr><td colspan="10" class="empty">측정상세 없음</td></tr>`}</tbody></table></div></div>`;
-    },
-  });
-};
+/* 품질 ③: 수입검사(IQC)조회 — 레거시 w_qa_input_160(자재입고검사관리)
+   ★2026-09-01 교체: 종전 이 화면은 w_qa_cust_iqc(QA_T_CUST_IQC_HEAD/DTL) 읽기전용이었으나
+     실제로 쓰는 것은 **자재입고검사**(유검사품 입고대기 → 검사완료 → 입고확정)라
+     대표 지시로 이 메뉴에 담는다. 구 조회화면·API(/api/qc/iqc/*)는 사용처가 없어졌다.
+   구현 = SCREEN.matinsp (아래) 위임. */
+SCREEN.qciqc=(c)=>SCREEN.matinsp(c);
 
 /* ===== 가공스크랩관리 (w_qa_raw_input_100) — 조회 라이브 QA_T_RAW_ERROR ∪ nx.scrap_raw / 쓰기 nx만 ===== */
 SCREEN.scrapraw=(host)=>{
@@ -698,5 +668,152 @@ SCREEN.scrapraw=(host)=>{
       const j=await r.json();if(r.ok&&j.ok){st.msg='📋 복사완료 → '+esc(j.id)+' (신규 nx). 필요시 수정하세요.';await load();}else alert('복사 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('복사 오류: '+e);}
   };
+  load();
+};
+
+
+/* ===== 자재입고검사관리 (레거시 w_qa_input_160) — 2026-09-01 신설 =====
+   유검사품은 세트입고 시 '입고대기(30)' 로 멈추고 재고파생·사급소진이 보류된다.
+   여기서 [검사완료] 하면 30→90 + 재고파생 + 사급소진(입고 시점과 동일 처리).
+   ★분석 정본 = _legacy_analysis/QA_INPUT_160_IQC_ANALYSIS.md
+   ※UI 는 CLAUDE.md §3 준수 — 아이콘 없음 · 헤더 가운데정렬 · 툴바 한 줄 · 표만 내부스크롤 */
+SCREEN.matinsp=(host)=>{
+  const API=API_BASE;
+  const d2s=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const date2ymd=s=>{s=String(s||'');return s.length===10?s.slice(2).replace(/-/g,''):'';};   // YYYY-MM-DD→YYMMDD
+  const ymd2disp=s=>{s=String(s||'');return s.length===6?`${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`:(s||'');};
+  const nfq=v=>(v==null||v==='')?'':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const TAG={'2':'바코드','3':'장부'};
+  const ST={'30':'입고대기','40':'검사중','90':'검사완료','99':'반품'};
+  const st={rows:[],sel:new Set(),msg:'',busy:false,sortK:'',sortA:false};
+
+  const today=new Date(); const from=new Date();      // ★기본 = 당일(레거시 160 동일)
+  host.innerHTML=`
+  <div style="display:flex;flex-direction:column;height:100%">
+    <div style="flex:0 0 auto">
+      <div class="page-title">수입검사(IQC)
+        <span style="font-size:12px;color:var(--muted);font-weight:400">유검사품 입고대기 → 검사완료 → 자재 입고확정</span></div>
+      <div class="page-sub">세트입고 <b>유검사품</b>은 입고 시 <b>입고대기</b>로 멈추고 재고에 잡히지 않습니다.
+        여기서 <b>검사완료</b>해야 자도번 재고파생·협력사 사급소진이 반영됩니다. 레거시 <code>w_qa_input_160</code></div>
+      <div class="toolbar" style="display:flex;flex-wrap:nowrap;align-items:center;gap:6px;overflow-x:auto">
+        <label style="white-space:nowrap">입고기간</label>
+        <input type="date" id="mi-f" class="inp" style="width:140px;min-width:140px" value="${d2s(from)}">
+        <span>~</span>
+        <input type="date" id="mi-t" class="inp" style="width:140px;min-width:140px" value="${d2s(today)}">
+        <label style="white-space:nowrap;margin-left:4px">거래처</label>
+        <input id="mi-c" class="inp" style="width:110px;min-width:110px" placeholder="코드/이름">
+        <label style="white-space:nowrap">자도번</label>
+        <input id="mi-i" class="inp" style="width:120px;min-width:120px" placeholder="도번">
+        <label style="white-space:nowrap">검사여부</label>
+        <select id="mi-s" class="inp" style="width:100px;min-width:100px">
+          <option value="30" selected>입고대기</option>
+          <option value="90">검사완료</option>
+          <option value="">전체</option>
+        </select>
+        <button class="btn" id="mi-q">조회</button>
+        <button class="btn primary" id="mi-ok">검사완료</button>
+        <button class="btn" id="mi-no">검사취소</button>
+        <span id="mi-msg" style="margin-left:8px;font-size:12px;color:var(--muted);white-space:nowrap"></span>
+      </div>
+    </div>
+    <div class="grid-wrap" style="flex:1;min-height:0;overflow:auto;margin-top:6px">
+      <table class="tbl" id="mi-tbl">
+        <thead><tr>
+          <th style="width:34px" class="center"><input type="checkbox" id="mi-all"></th>
+          <th class="center">상태</th><th class="center">검사일시</th><th class="center">검사자</th>
+          <th class="center">입고일자</th><th class="center">입고SEQ</th><th class="center">입고구분</th>
+          <th class="center">거래처</th><th class="center">자도번</th><th class="center">품명</th>
+          <th class="center">입고수량</th><th class="center">SET바코드</th><th class="center">재고파생</th>
+        </tr></thead>
+        <tbody id="mi-b"><tr><td colspan="13" class="empty">조회를 누르세요.</td></tr></tbody>
+        <tfoot><tr style="position:sticky;bottom:0;background:#eef3fa;font-weight:600">
+          <td colspan="10" class="center">합계</td>
+          <td class="num" id="mi-sum"></td><td colspan="2" class="center" id="mi-cnt"></td>
+        </tr></tfoot>
+      </table>
+    </div>
+  </div>`;
+
+  const $=s=>host.querySelector(s);
+  const key=r=>r.ymd+'|'+r.seq;
+
+  const draw=()=>{
+    const b=$('#mi-b');
+    if(!st.rows.length){b.innerHTML=`<tr><td colspan="13" class="empty">조회 결과 없음</td></tr>`;
+      $('#mi-sum').textContent='';$('#mi-cnt').textContent='';return;}
+    b.innerHTML=st.rows.map(r=>{
+      const k=key(r), on=st.sel.has(k), done=r.stat==='90';
+      return `<tr data-k="${esc(k)}" style="${on?'background:#eaf3ff':''}">
+        <td class="center"><input type="checkbox" class="mi-ck" data-k="${esc(k)}"${on?' checked':''}></td>
+        <td class="center" style="color:${done?'#1c7c3a':'#c0392b'};font-weight:600">${esc(ST[r.stat]||r.stat)}</td>
+        <td class="center">${esc(r.insp_dt||'')}</td>
+        <td class="center">${esc(r.insp_user||'')}</td>
+        <td class="center">${esc(ymd2disp(r.ymd))}</td>
+        <td class="num">${esc(r.seq)}</td>
+        <td class="center">${esc(TAG[r.tag]||r.tag)}</td>
+        <td title="${esc(r.cust)}">${esc(r.cust_nm||r.cust)}</td>
+        <td><b>${esc(r.item)}</b></td>
+        <td title="${esc(r.item_nm)}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.item_nm)}</td>
+        <td class="num">${nfq(r.qty)}</td>
+        <td class="center">${esc(r.sheet)}</td>
+        <td class="center">${r.derived==='1'?'<span style="color:#1c7c3a">O</span>':'<span style="color:#999">—</span>'}</td>
+      </tr>`;}).join('');
+    $('#mi-sum').textContent=nfq(st.rows.reduce((s,r)=>s+Number(r.qty||0),0));
+    $('#mi-cnt').textContent=`${st.rows.length}건 (선택 ${st.sel.size})`;
+    b.querySelectorAll('.mi-ck').forEach(el=>el.onclick=e=>{
+      const k=e.target.dataset.k;
+      if(e.target.checked)st.sel.add(k);else st.sel.delete(k);
+      const tr=b.querySelector(`tr[data-k="${CSS.escape(k)}"]`);
+      if(tr)tr.style.background=e.target.checked?'#eaf3ff':'';     // ★부분갱신(재렌더 금지 — §3 스크롤 리셋 방지)
+      $('#mi-cnt').textContent=`${st.rows.length}건 (선택 ${st.sel.size})`;
+    });
+  };
+
+  const load=async()=>{
+    const q=new URLSearchParams({frm:date2ymd($('#mi-f').value),to:date2ymd($('#mi-t').value),
+      cust:$('#mi-c').value.trim(),item:$('#mi-i').value.trim(),stat:$('#mi-s').value});
+    $('#mi-msg').textContent='조회중…';
+    try{
+      const r=await fetch(`${API}/api/setinsp/list?${q}`);
+      const j=await r.json();
+      if(!r.ok){$('#mi-msg').textContent='조회 실패: '+(j.detail||r.status);return;}
+      st.rows=j.rows||[];st.sel.clear();draw();
+      $('#mi-msg').textContent=st.msg||'';st.msg='';
+    }catch(e){$('#mi-msg').textContent='조회 오류: '+e;}
+  };
+
+  const act=async(mode)=>{
+    if(st.busy)return;
+    const items=st.rows.filter(r=>st.sel.has(key(r))).map(r=>({ymd:r.ymd,seq:r.seq}));
+    if(!items.length){alert('처리할 항목을 선택하세요.');return;}
+    const nm=mode==='complete'?'검사완료':'검사취소';
+    const warn=mode==='complete'
+      ? `선택 ${items.length}건을 검사완료 처리합니다.\n자도번 재고가 생기고 협력사 사급이 차감됩니다.\n진행할까요?`
+      : `선택 ${items.length}건을 검사취소합니다.\n생성된 재고·사급 기록이 제거되고 입고대기로 돌아갑니다.\n진행할까요?`;
+    if(!confirm(warn))return;
+    st.busy=true;$('#mi-msg').textContent=nm+' 처리중…';
+    try{
+      const r=await fetch(`${API}/api/setinsp/${mode}`,{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+      const j=await r.json();
+      if(!r.ok){alert(nm+' 실패: '+(j.detail||JSON.stringify(j)));return;}
+      const sk=(j.skipped||[]);
+      st.msg=`${nm} ${j.done}건`+(mode==='complete'?` · 재고 ${j.ledger_posted}행`:` · 재고 ${j.ledger_removed}행 제거`)
+             +(sk.length?` · 건너뜀 ${sk.length}건`:'');
+      if(sk.length)alert('처리하지 못한 항목:\n'+sk.join('\n'));
+      await load();
+    }catch(e){alert(nm+' 오류: '+e);}
+    finally{st.busy=false;}
+  };
+
+  $('#mi-q').onclick=load;
+  $('#mi-ok').onclick=()=>act('complete');
+  $('#mi-no').onclick=()=>act('cancel');
+  $('#mi-all').onclick=e=>{
+    st.sel.clear();
+    if(e.target.checked)st.rows.forEach(r=>st.sel.add(key(r)));
+    draw();
+  };
+  host.querySelectorAll('#mi-c,#mi-i').forEach(el=>el.addEventListener('keydown',ev=>{if(ev.key==='Enter')load();}));
   load();
 };

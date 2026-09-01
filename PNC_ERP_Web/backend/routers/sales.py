@@ -1394,25 +1394,38 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         prm += [d1, _s040_shift(d2, 10)] + p1
 
         # ---- b2 예외생산 (분할제번 컬럼 없음 → work_order) ----
-        w2, p2 = _flt("a.ITEM_CODE", "a.WORK_ORDER", "a.WORK_ORDER", "a.LINE_NO")
-        parts.append(f"""
-            SELECT '0' del_flag,
-                   CASE WHEN ISNULL(a.PROD_TAG,'')='PO' THEN '3' ELSE '2' END data_gubun,
-                   a.WORK_ORDER wo, a.WORK_ORDER swo, a.ITEM_CODE item,
-                   ISNULL(a.LINE_NO,'') line_no, '' model_no,
-                   '' tools, ISNULL(c.WORK_CODE,'') work_code,
-                   {WCTR('a.ITEM_CODE')} work_center,
-                   ISNULL(a.REMARKS,'') rmk1, 0 fseq, 0 tseq,
-                   ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
-                   ISNULL(a.PLAN_QTY,0) lot,
-                   1 use_qty, 100 prod_rate,
-                   '' change_day,
-                   ISNULL(a.PLAN_QTY,0) planq
-              FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
-              JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
-             WHERE a.PLAN_YMD BETWEEN ? AND ?
-               AND {TGT('a.ITEM_CODE')}{w2}""")
-        prm += [d1, d2] + p2
+        # ★★src='new'(웹계획) 에서는 b2 를 넣지 않는다 (2026-09-01 이중계상 수정).
+        #   웹 편성 STEP5-AS 가 예외생산(PR_T_PLAN_INPUT)을 **nx.plan_item_dtl 에 이미 넣는다**
+        #   (A/S 자재소요를 잡기 위해 — 그게 STEP5-AS 의 목적이다).
+        #   b1 뷰(v_plan_item_dtl_new)가 그 plan_item_dtl 을 그대로 노출하므로,
+        #   여기서 PR_T_PLAN_INPUT 을 또 UNION 하면 **같은 계획이 두 번** 잡힌다.
+        #     실측 2026-09-01 — WO1092231CR AJR73910201: LOT 120 인데 계획 240(정확히 2배).
+        #                       b1·b2 양쪽에 있는 제번 731개.
+        #     레거시는 안 겹친다: SA_T_PLAN_ITEM_DTL·PR_T_PLAN_ITEM_DTL 의 WO 제번 = 0행
+        #                       (레거시는 '편성용'과 '040용' 테이블이 분리돼 있다).
+        #   ★b2 는 미러(nx.PR_T_PLAN_INPUT) 직독이라 컷오버에 죽는 코드이기도 하다(§1-9-1).
+        #     웹 정본(plan_item_dtl)이 이미 담고 있으니 새 소스에서는 뺀다.
+        #   ※src='live'(레거시 직독 대사용)는 b1 이 SA_T_PLAN_ITEM_DTL 이라 안 겹치므로 그대로 둔다.
+        if _src != "new":
+            w2, p2 = _flt("a.ITEM_CODE", "a.WORK_ORDER", "a.WORK_ORDER", "a.LINE_NO")
+            parts.append(f"""
+                SELECT '0' del_flag,
+                       CASE WHEN ISNULL(a.PROD_TAG,'')='PO' THEN '3' ELSE '2' END data_gubun,
+                       a.WORK_ORDER wo, a.WORK_ORDER swo, a.ITEM_CODE item,
+                       ISNULL(a.LINE_NO,'') line_no, '' model_no,
+                       '' tools, ISNULL(c.WORK_CODE,'') work_code,
+                       {WCTR('a.ITEM_CODE')} work_center,
+                       ISNULL(a.REMARKS,'') rmk1, 0 fseq, 0 tseq,
+                       ISNULL(a.OUTPUT_HM,'') ohm, a.PLAN_YMD ymd,
+                       ISNULL(a.PLAN_QTY,0) lot,
+                       1 use_qty, 100 prod_rate,
+                       '' change_day,
+                       ISNULL(a.PLAN_QTY,0) planq
+                  FROM {{SCH}}.PR_T_PLAN_INPUT a WITH(NOLOCK)
+                  JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON a.ITEM_CODE=c.ITEM_CODE
+                 WHERE a.PLAN_YMD BETWEEN ? AND ?
+                   AND {TGT('a.ITEM_CODE')}{w2}""")
+            prm += [d1, d2] + p2
 
         # ---- b3 전일계획 잔여(삭제된계획) — live 전용 ----
         if has_daily:
