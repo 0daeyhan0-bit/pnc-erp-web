@@ -4,9 +4,11 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _carry_win)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _carry_win,
+                    _sale_win_ovr, _carry_win_ovr, _ensure_carry_ovr, _carry_ovr_set)
 
 router = APIRouter()
+_ensure_carry_ovr()   # 이월 재배정 override 테이블 보장(1회)
 
 # ================= 매입마감처리 (구매/자재, w_pu_sale_010) — 거래처별, 확정입고(매입) =================
 def _pur_src(win):
@@ -31,7 +33,7 @@ def purmagam_list(ym: str = Query("")):
           SELECT S.cc cc, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
             SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items
-          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+          FROM ({_pur_src(_sale_win_ovr('PUR').format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
           GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -61,7 +63,7 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit, S.cost cost,
             CAST(RIGHT(S.ymd,2) AS INT) d, SUM(S.qty) q, SUM(S.amt) amt
-          FROM ({_pur_src(_sale_win().format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
+          FROM ({_pur_src(_sale_win_ovr('PUR').format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
           WHERE S.cc=? GROUP BY S.mat, S.cost, CAST(RIGHT(S.ymd,2) AS INT)""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
@@ -98,7 +100,7 @@ def purmagam_carryover(ym: str = Query(""), cc: str = Query("")):
     """이월 대상 = 거래처 마감일 이후~당월 말일 확정입고분. 이번 마감에서 빠져 차월로 이월(표시·확인용).
        cc 지정 시 품목·일자별, 미지정 시 거래처별 집계. 수불장 전표는 만들지 않는다."""
     y = _dig4(ym) or _cur_ym()
-    carry = _carry_win().format(ym=y)
+    carry = _carry_win_ovr('PUR').format(ym=y)
     cn = _conn(); cur = cn.cursor()
     try:
         if str(cc).strip():
@@ -125,6 +127,50 @@ def purmagam_carryover(ym: str = Query(""), cc: str = Query("")):
     yy = int(y[:2]); mm = int(y[2:]) + 1
     if mm == 13: mm = 1; yy += 1
     return {"ym": y, "cc": cc, "next_ym": f"{yy:02d}{mm:02d}", "rows": rows}
+
+@router.get("/api/purmagam/daylist")
+def purmagam_daylist(ym: str = Query(""), cc: str = Query(...)):
+    """일자별 조회 = 당월(달력월) 확정입고를 (품목×입고일)로 나열 + 이월 표시(carry). 당월분·이월분 한 표."""
+    y = _dig4(ym) or _cur_ym()
+    phys = f"A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99'"
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit,
+            S.ymd ymd, SUM(S.qty) qty, SUM(S.amt) amt, MAX(S.cost) cost
+          FROM ({_pur_src(phys)}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
+          WHERE S.cc=? GROUP BY S.mat, S.ymd HAVING SUM(S.amt)<>0 ORDER BY S.ymd, S.mat""", cc)
+        cols = [d[0] for d in cur.description]; rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        cn.close()
+    nx = _nx(); nc = nx.cursor()
+    try:
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, y)
+        r = nc.fetchone(); cut = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT mat_code,maint_ymd,assign_ym FROM nx.magam_carry_ovr WHERE kind='PUR' AND cust_code=?", cc)
+        ovr = {(str(a).strip(), str(b).strip()): str(c).strip() for a, b, c in nc.fetchall()}
+    finally:
+        nx.close()
+    yy = int(y[:2]); nm = int(y[2:]) + 1; nyy = yy
+    if nm == 13: nm = 1; nyy += 1
+    nym = f"{nyy:02d}{nm:02d}"
+    out = []
+    for r in rows:
+        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip()
+        natural = nym if (ymd[4:6] > cut) else y
+        eff = ovr.get((mat, ymd), natural)
+        out.append({"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "ymd": ymd,
+                    "qty": float(r["qty"] or 0), "amt": float(r["amt"] or 0), "cost": float(r["cost"] or 0),
+                    "carry": 1 if eff != y else 0})
+    return {"ym": y, "cc": cc, "next_ym": nym, "rows": out}
+
+@router.post("/api/purmagam/carry_set")
+def purmagam_carry_set(payload: dict = Body(...)):
+    """이월 재배정(매입): {ym,cust_code,mat_code,maint_ymd,carry(bool)}."""
+    return _carry_ovr_set("PUR", _dig4(payload.get("ym")) or _cur_ym(),
+                          str(payload.get("cust_code", "")).strip(), str(payload.get("mat_code", "")).strip(),
+                          "".join(ch for ch in str(payload.get("maint_ymd", "")) if ch.isdigit()),
+                          bool(payload.get("carry")))
 
 def _pur_src_moda(win):
     """_pur_src 와 동일 원천 + 모도번(ITEM_CODE) 컬럼 추가 — P/No 펼침 전용.
@@ -153,7 +199,7 @@ def purmagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Q
             raise HTTPException(400, "입고기준은 fr/to(YYMMDD) 필요")
         win = f"A.MAINT_YMD>='{f6}' AND A.MAINT_YMD<='{t6}'"
     else:
-        win = _sale_win().format(ym=y)
+        win = _sale_win_ovr('PUR').format(ym=y)
     where = ["1=1"]; pf = []
     if cust_code.strip():
         where.append("S.cc=?"); pf.append(cust_code.strip())

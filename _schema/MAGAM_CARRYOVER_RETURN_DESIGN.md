@@ -1,38 +1,43 @@
-# 마감 이월·반품 설계 (MAGAM_CARRYOVER_RETURN_DESIGN)
+# 마감 이월·일자별 재배정 설계 (MAGAM_CARRYOVER_DESIGN)
 
 > 2026-09-01 사용자 확정. 브랜치 `feat/magam-edit`(dev·미배포). 매출마감(salemagam)·매입마감(purmagam) 공용.
-> 코드: `common.py`(_carry_win·_open_days·_ledger_return) · `routers/salemagam.py`·`routers/purmagam.py`(carryover·opendays·return_save) · `js/core.js`(_mkMagam 모달).
+> 코드: `common.py`(_carry_win·_sale_win_ovr·_carry_win_ovr·_ensure_carry_ovr·_carry_ovr_set) · `salemagam.py`/`purmagam.py`(carryover·daylist·carry_set) · `js/core.js`(_mkMagam 모달).
+> ★반품 기능은 초기 구현 후 사용자 요청으로 **제거**(2026-09-01). 이월/재배정만 유지.
 
-## 0. 원칙 (사용자 확정 + 회계 표준)
-- **재고(수불장)와 정산(마감)은 별개 축.** 협력사별 마감일(25일/말일 = `nx.CM_M_CUST_MAGAM.MAGAM_DAY`)은 **정산 컷오프**지 재고 컷오프가 아님.
-- **이월 = 정산기간 재귀속(표시만).** 마감일 이후 입고분은 이번 마감에서 자동 제외(`_sale_win`)되어 차월 마감에 자동 포함 → 재고는 실일자로 이미 정확. **수불장 전표를 만들지 않는다**(안 움직인 재고를 장부상 이중이동하는 오류 방지 = 하드룰 원장 이중계상 금지).
-- **반품 = 실제 재고 이동 → 수불장 전표.** 매출반품=재고 복귀(+), 매입반품=재고 출고(−). **사용자가 고른, 일마감 안 된 오픈일자**에 기록.
-- 25일 마감 협력사 = **26일 입고분부터 전량 이월**(사용자 실무). 매출·매입 마감 둘 다 동일.
+## 0. 원칙
+- **재고(수불장)와 정산(마감)은 별개 축.** 협력사별 마감일(25일/말일=`nx.CM_M_CUST_MAGAM.MAGAM_DAY`)은 정산 컷오프.
+- **이월 = 정산 귀속·표시.** 마감일 이후 입고분은 이번 마감에서 제외 → 차월 마감 자동 포함. 25일 마감 협력사=26일부터 이월.
+- **일자별 재배정(override)**: 사용자가 일자별 조회에서 특정 (품목·입고일)을 **이월↔당월** 전환. 마감 정산 금액에 즉시 반영.
 
-## 1. 백엔드
-### 공용(common.py)
-- `_carry_win()` = `A.MAINT_YMD > '{ym}'+mg.MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+'31'` (당월 마감일 이후~말일 = 이월 대상 창).
-- `_open_days(ym, months=2, domain='MAT')` = ym부터 months개월의 **일마감(월마감) 안 된** 일자(YYMMDD). 판정=`nx.period_close(domain, ptype 'D'/'M', close_flag)`. 월마감이면 그 달 통째 제외.
-- `_ledger_return(cur, ymd, mat, qty_signed, cost, cust_code, remarks)` = `nx.stock_ledger` 단일 전표(MAINT_TAG='RT', 부호 그대로) + `PU_T_MAT_STOCK_WH`(Z99990/IS0001) 잔액 반영. stock_save와 동일 패턴(seq UPDLOCK·금액=|수량|×단가·부가세 10%).
+## 1. 이월 재배정 모델 (교차월 이중계상 없음 · diff0)
+- **테이블 `nx.magam_carry_ovr`**(kind SALE/PUR, cust_code, mat_code, maint_ymd, assign_ym, ins_user, ins_dt · PK 4키). 거래의 **귀속 마감월**을 저장.
+- **유효 귀속월** = override(assign_ym) 있으면 그 값, 없으면 마감일 자동판정(natural). 모든 달의 마감이 `유효귀속월==그달`로 판정 → **override 0건이면 현행 _sale_win/_carry_win 과 완전 diff0**, PULL(당월로 당김)한 거래는 차월에서도 자동 제외(이중계상 없음).
+- **성능**: 자연판정은 이미 조인된 마감일 CTE(mg.MAGAM_DAY/JUN_MAGAM_DAY)로, override는 **PK 인덱스 단일 EXISTS**만 추가. (초기 per-row 서브쿼리안은 2분+ → CTE+단일EXISTS로 <1s.)
+  - `_sale_win_ovr(kind)` = (자연당월 AND NOT 밀림) OR (자연이월 AND 당김).  `_carry_win_ovr(kind)` = (자연이월 AND NOT 당김) OR (당월달력 마감일이내 AND 밀림).
+- **`_carry_ovr_set`**: carry=True→차월(assign ym+1) / False→당월(assign ym). **자연상태와 같으면 override 삭제**(diff0 유지).
 
-### 엔드포인트(양 라우터 대칭)
+## 2. 엔드포인트 (매출/매입 대칭)
 | 경로 | 동작 |
 |---|---|
-| `GET /api/{base}/carryover?ym=&cc=` | 이월 대상. cc 지정=품목·일자별, 미지정=업체별 집계. next_ym 포함. 조회만(무전표). |
-| `GET /api/{base}/opendays?ym=&months=` | 일마감 안 된 일자 목록(반품 대상일). |
-| `POST /api/{base}/return_save` | `{ym,cust_code,ymd,lines:[{mat_code,qty,cost,remarks}]}` → 수불장 RT 전표. 매출=+·매입=−. **오픈일자 게이트**(_closed 재검증), 입력검증. |
+| `GET /{base}/carryover?ym=&cc=` | 이월 대상(마감일 이후분). override 반영. |
+| `GET /{base}/daylist?ym=&cc=` | 일자별 조회 = 당월 달력월 입고 (품목×입고일) + `carry` 표시(1=이월). 당월+이월 한 표. carry는 마감일+override로 Python 판정(집계 안 서브쿼리 불가). |
+| `POST /{base}/carry_set` | `{ym,cust_code,mat_code,maint_ymd,carry}` → 재배정 저장(이월↔당월). |
+| list·detail·lines | `_sale_win()`→`_sale_win_ovr(kind)` 스왑 → 마감 집계가 override 반영. |
 
-## 2. 프론트(core.js _mkMagam 모달)
-- 모달 열 때 carryover·opendays 병렬 로드. **이월 품목** 섹션(접이식·읽기전용·합계·"→ 차월 이월, 수불장 전표 없음" 명시) + **반품 처리** 섹션(오픈일자 드롭다운=일마감 안 된 일자·품목행 자도번 datalist·수량·단가·비고·저장).
-- 반품 저장 = `/return_save` → 성공 시 알림·행 초기화. 매입/매출 부호 안내(재고 출고−/복귀+).
-- 월 입력 버그 별도 수정: 네이티브 월 입력 연도-먼저 → 연도 가드 + ◀▶ 월 이동 버튼(_mkMagam 툴바).
+## 3. 프론트 (core.js _mkMagam 모달)
+- **일자별 조회·이월 관리** 섹션(접이식): daylist 로드, 당월+이월 한 표. **입고일자별(기본)/품목별 토글**.
+- 입고일자별: 입고일 그룹 + 품목행. **이월 행 = 주황 배경 + '이월' 배지**. **행 클릭 = 이월/이월해제**(carry_set) → 상세(마감 금액)+daylist 재로드. (권한 있고 미마감일 때만.)
+- 품목별: 품번 집계 + 구분(당월/이월/일부이월) 표시(읽기). 전환은 입고일자별에서.
+- 월 입력 버그: 네이티브 월 입력 연도-먼저 → 연도 가드 + ◀▶ 월 이동.
 
-## 3. 검증 (magam_carryreturn_testbed.py) — FLOW식 no-commit·실엔드포인트·롤백·오염0
-**PASS 18 / FAIL 0**: opendays(8월초 일마감 제외·9월 포함·원장 대조 침범0) · carryover(업체별 10·대원산업2148 품목별 101행 전부 마감일25 이후·조회 무전표) · 매출반품(+5 복귀·RT전표·버킷 304→309) · 매입반품(−3 출고·RT전표·버킷 71→68) · 마감일자 반품 차단 · 입력검증(빈품목·잘못된일자).
+## 4. 검증 (오염0·롤백, FLOW식 no-commit)
+- `magam_carryreturn_testbed.py` — 이월 목록/토글 데이터 **10/10 PASS**.
+- `magam_carryovr_testbed.py` — 재배정 override **14/14 PASS**: override 0건 diff0(당월 422,096,411·이월 87,137,799 old==new) · daylist 531=이월101+당월430 · 이월→당월 +1,398,600/−1,398,600 총합불변 · 복귀=자연상태 override삭제 diff0복원 · 당월→이월 밀기 · 매입 daylist.
+  · ★하네스 주의: 마감 조회가 `_conn`(라이브)로 읽으므로 override 쓰기(_nx)를 보려면 테스트에서 `_conn`도 공유 RAW로 패치(마감 쿼리 전부 PARTNER_ERP_TEST3.nx.* 라 가능). 실서버는 정상.
 
-## 4. 남은 것
-- **브라우저 실동작 눈확인**(사용자) → 승인 후 배포(PR). CLAUDE.md §6.
-- (검토) 매출/매입 반품이 **정산액(마감 금액)에도** 반영돼야 하는가? 현재는 수불장 전용(사용자 명시 범위). 필요 시 반품월 sale_adjust/pur_adjust 연동(중복계상 주의).
+## 5. 남은 것
+- 브라우저 실동작 눈확인(사용자)→승인 후 배포(PR). CLAUDE.md §6.
+- lines(P/No 뷰)도 _sale_win_ovr 스왑됨(override 반영). 검증은 list/detail 중심으로 완료.
 
 ## 변경 이력
-- 2026-09-01: 초안·구현·검증완(dev). 이월=귀속표시/반품=수불장전표·오픈일자. 월입력 버그 수정 동반.
+- 2026-09-01: 이월(정산귀속)+월버그 → 반품 추가 → 반품 제거 → 일자별 재배정(override) 추가. 최종=이월 표시/재배정.

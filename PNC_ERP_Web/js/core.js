@@ -2223,9 +2223,9 @@ const _mkMagam=(CFG)=>(c)=>{
   const _d2=s=>{s=''+(s||'');return s.length===6?`${s.slice(2,4)}/${s.slice(4,6)}`:s;};   // 260801 → 08/01
   // 모달 상태
   let mc=null, detail=null, mLoading=false, mClosed=false, pEdit={}, dEdit={}, amtAdjs=[], expanded=new Set();
-  // ★이월(정산귀속·표시) — 2026-09-01. 마감일 이후 입고분 = 차월 이월(수불장 무전표).
-  //   carryView='date'(입고일자별, 기본) | 'item'(품목별). carryRows는 (품목×입고일) 단위.
-  let carryRows=[], carryNextYm='', showCarry=false, carryView='date';
+  // ★일자별 조회·이월 관리 — 2026-09-01. daylist = 당월+이월 한 표(품목×입고일), carry=1이 이월.
+  //   행 클릭 = 이월/이월해제(carry_set) → 마감 금액 즉시 반영. carryView='date'(입고일자별)|'item'(품목별).
+  let dayRows=[], carryNextYm='', showCarry=false, carryView='date', carryBusy=false;
   const dkey=(mat,d)=>mat+'|'+d;
   const ymd6=d=>(''+ym).slice(0,4)+String(d).padStart(2,'0');
   const num=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -2573,11 +2573,10 @@ const _mkMagam=(CFG)=>(c)=>{
   };
 
   const openModal=async(cc,nm)=>{mc={cc,nm};detail=null;pEdit={};dEdit={};amtAdjs=[];expanded=new Set();
-    carryRows=[];carryNextYm='';showCarry=false;
+    dayRows=[];carryNextYm='';showCarry=false;carryBusy=false;
     mLoading=true;await ensureReasons();drawModal();
-    // 이월 목록 로드(모달 열릴 때 1회)
-    (async()=>{try{const cr=await fetch(`${API}/api/${CFG.base}/carryover?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);const cj=await cr.json();carryRows=cj.rows||[];carryNextYm=cj.next_ym||'';}catch(e){carryRows=[];}
-      if(mc&&mc.cc===cc)drawModal();})();
+    // 일자별 조회(daylist) 로드
+    loadDay(cc).then(()=>{if(mc&&mc.cc===cc)drawModal();});
     try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       detail=await r.json();mClosed=!!detail.close_flag;
       (detail.adjustments||[]).forEach(a=>{
@@ -2588,6 +2587,8 @@ const _mkMagam=(CFG)=>(c)=>{
     catch(e){detail=null;}
     mLoading=false;drawModal();};
   const closeModal=()=>{mc=null;detail=null;const m=c.querySelector('#sm-modal');if(m)m.innerHTML='';};
+  const loadDay=async(cc)=>{try{const r=await fetch(`${API}/api/${CFG.base}/daylist?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);const j=await r.json();dayRows=j.rows||[];carryNextYm=j.next_ym||'';}catch(e){dayRows=[];}};
+  const reloadDetail=async(cc)=>{try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);const j=await r.json();detail=j;mClosed=!!j.close_flag;}catch(e){}};
 
   // 일자별 유효단가/수량(날짜조정>품목단가>원본), 조정합 계산
   const effDay=(it,bd)=>{const de=dEdit[dkey(it.mat,bd.d)];let ec=+bd.cost, eq=+bd.qty;
@@ -2603,45 +2604,62 @@ const _mkMagam=(CFG)=>(c)=>{
   // ── 이월(정산귀속·표시) 섹션 ──
   const _dlab=ymd=>{ymd=''+(ymd||'');return ymd.length>=6?`${ymd.slice(0,2)}/${ymd.slice(2,4)}/${ymd.slice(4,6)}`:ymd;};
   const _ynm=y=>{y=''+(y||'');return y.length>=4?`20${y.slice(0,2)}.${y.slice(2,4)}`:y;};
+  const crClick=()=>canW&&!mClosed;   // 재배정 가능(권한 + 미마감) — 렌더 시점마다 평가
   const crHtml=()=>{
-    const cTot=carryRows.reduce((a,r)=>a+(+r.amt||0),0), cQ=carryRows.reduce((a,r)=>a+(+r.qty||0),0);
-    const _foot=`<tfoot><tr style="position:sticky;bottom:0;background:var(--bg2,#f4f6fb);font-weight:700"><td colspan="4" class="center">합계</td><td class="num">${num(cQ)}</td><td class="num">${won0(cTot)}</td></tr></tfoot>`;
+    const _crClick=crClick();
+    const carryN=dayRows.filter(r=>r.carry).length, curN=dayRows.length-carryN;
+    const carAmt=dayRows.filter(r=>r.carry).reduce((a,r)=>a+(+r.amt||0),0);
+    const curAmt=dayRows.filter(r=>!r.carry).reduce((a,r)=>a+(+r.amt||0),0);
+    const _foot=`<tfoot><tr style="position:sticky;bottom:0;background:var(--bg2,#f4f6fb);font-weight:700">
+      <td colspan="4" class="center">당월 ${won0(curAmt)} · 이월 ${won0(carAmt)}</td>
+      <td class="num">${num(dayRows.reduce((a,r)=>a+(+r.qty||0),0))}</td><td class="num">${won0(curAmt+carAmt)}</td></tr></tfoot>`;
+    const _badge=r=>r.carry?`<span style="background:#ffe0b2;color:#b5651d;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700;margin-left:5px">이월</span>`:'';
+    const _rowAttr=r=>_crClick?` class="cr-row" data-mat="${esc(r.mat)}" data-ymd="${esc(r.ymd)}" data-carry="${r.carry}" style="cursor:pointer${r.carry?';background:#fff6ec':''}" title="클릭: ${r.carry?'이월해제(당월로)':'이월(차월로)'}"`:` style="${r.carry?'background:#fff6ec':''}"`;
     let body='';
     if(carryView==='item'){
-      // 품목별: (품목×일자)를 품번 단위로 집계
-      const mp={};carryRows.forEach(r=>{const k=r.mat;const it=mp[k]||(mp[k]={mat:r.mat,nm:r.nm,unit:r.unit,qty:0,amt:0});it.qty+=+r.qty||0;it.amt+=+r.amt||0;});
+      const mp={};dayRows.forEach(r=>{const it=mp[r.mat]||(mp[r.mat]={mat:r.mat,nm:r.nm,unit:r.unit,qty:0,amt:0,cN:0,tot:0});it.qty+=+r.qty||0;it.amt+=+r.amt||0;it.tot++;if(r.carry)it.cN++;});
       const its=Object.values(mp).sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));
-      const rws=its.map(it=>`<tr><td><b>${esc(it.mat)}</b></td><td class="bcap" title="${esc(it.nm||'')}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
-        <td class="center">${esc(it.unit||'')}</td><td></td><td class="num">${num(it.qty)}</td><td class="num">${won0(it.amt)}</td></tr>`).join('');
-      body=`<table class="sm-it"><thead><tr><th>품번</th><th>품명</th><th class="center">단위</th><th></th><th>수량</th><th>금액</th></tr></thead>
-        <tbody>${rws||'<tr><td colspan="6" class="empty">이월 대상 없음(마감일까지 전량 마감)</td></tr>'}</tbody>${its.length?_foot:''}</table>`;
+      const rws=its.map(it=>{const st=it.cN===0?'당월':it.cN===it.tot?'이월':'일부이월';const cl=it.cN===0?'#789':it.cN===it.tot?'#b5651d':'#c77';
+        return `<tr style="${it.cN?'background:#fff6ec':''}"><td><b>${esc(it.mat)}</b></td><td class="bcap" title="${esc(it.nm||'')}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+        <td class="center">${esc(it.unit||'')}</td><td class="center" style="color:${cl};font-weight:700;font-size:11px">${st}</td><td class="num">${num(it.qty)}</td><td class="num">${won0(it.amt)}</td></tr>`;}).join('');
+      body=`<table class="sm-it"><thead><tr><th>품번</th><th>품명</th><th class="center">단위</th><th class="center">구분</th><th>수량</th><th>금액</th></tr></thead>
+        <tbody>${rws||'<tr><td colspan="6" class="empty">입고 없음</td></tr>'}</tbody>${its.length?_foot:''}</table>
+        <div class="mut" style="font-size:11px;padding:3px 2px">※ 이월/당월 전환은 입고일자별 보기에서 행을 클릭하세요(전환은 입고일 단위).</div>`;
     }else{
-      // 입고일자별: 입고일 그룹 헤더 + 품목행 + 일자 소계
-      const dg={};carryRows.forEach(r=>{const k=''+r.ymd;(dg[k]||(dg[k]=[])).push(r);});
+      const dg={};dayRows.forEach(r=>{(dg[''+r.ymd]||(dg[''+r.ymd]=[])).push(r);});
       const dks=Object.keys(dg).sort();
       let rws='';
-      dks.forEach(dk=>{const g=dg[dk];const dq=g.reduce((a,r)=>a+(+r.qty||0),0),da=g.reduce((a,r)=>a+(+r.amt||0),0);
-        rws+=`<tr style="background:var(--bg2,#f4f6fb)"><td colspan="4"><b>${_dlab(dk)}</b> <span class="mut">입고 ${g.length}품목</span></td><td class="num"><b>${num(dq)}</b></td><td class="num"><b>${won0(da)}</b></td></tr>`;
-        g.sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt)).forEach(r=>{rws+=`<tr><td style="padding-left:20px"><b>${esc(r.mat)}</b></td>
-          <td class="bcap" title="${esc(r.nm||'')}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
+      dks.forEach(dk=>{const g=dg[dk];const da=g.reduce((a,r)=>a+(+r.amt||0),0);const gc=g.filter(r=>r.carry).length;
+        rws+=`<tr style="background:var(--bg2,#f4f6fb)"><td colspan="4"><b>${_dlab(dk)}</b> <span class="mut">${g.length}품목${gc?` · 이월 ${gc}`:''}</span></td><td></td><td class="num"><b>${won0(da)}</b></td></tr>`;
+        g.sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt)).forEach(r=>{rws+=`<tr${_rowAttr(r)}><td style="padding-left:20px"><b>${esc(r.mat)}</b>${_badge(r)}</td>
+          <td class="bcap" title="${esc(r.nm||'')}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">${esc(r.nm||'')}</td>
           <td class="center">${esc(r.unit||'')}</td><td></td><td class="num">${num(r.qty)}</td><td class="num">${won0(r.amt)}</td></tr>`;});});
       body=`<table class="sm-it"><thead><tr><th>입고일 / 품번</th><th>품명</th><th class="center">단위</th><th></th><th>수량</th><th>금액</th></tr></thead>
-        <tbody>${rws||'<tr><td colspan="6" class="empty">이월 대상 없음(마감일까지 전량 마감)</td></tr>'}</tbody>${dks.length?_foot:''}</table>`;
+        <tbody>${rws||'<tr><td colspan="6" class="empty">입고 없음</td></tr>'}</tbody>${dks.length?_foot:''}</table>`;
     }
     const tgl=`<span style="font-weight:400;font-size:12px;margin-left:8px">
       <a href="javascript:void(0)" id="sm-cv-date" style="text-decoration:${carryView==='date'?'none':'underline'};color:${carryView==='date'?'#1c47a0':'#789'};font-weight:${carryView==='date'?'700':'400'}">입고일자별</a> ·
       <a href="javascript:void(0)" id="sm-cv-item" style="text-decoration:${carryView==='item'?'none':'underline'};color:${carryView==='item'?'#1c47a0':'#789'};font-weight:${carryView==='item'?'700':'400'}">품목별</a></span>`;
     return `<div class="sm-adj" style="margin-top:10px">
-      <div style="font-weight:700;margin-bottom:4px"><span id="sm-carry-h" style="cursor:pointer">${showCarry?'▾':'▸'} 이월 품목</span>
-        <span style="color:var(--muted);font-weight:400;font-size:12px">(마감일 이후 입고분 → ${_ynm(carryNextYm)} 이월 · 수불장 전표 없음, 정산 귀속만)</span>
-        <span style="font-weight:400;color:#1c47a0">· ${won0(cTot)}원</span>${showCarry?tgl:''}</div>
-      ${showCarry?`<div style="max-height:26vh;overflow:auto;border:1px solid var(--line);border-radius:6px">${body}</div>`:''}
+      <div style="font-weight:700;margin-bottom:4px"><span id="sm-carry-h" style="cursor:pointer">${showCarry?'▾':'▸'} 일자별 조회 · 이월 관리</span>
+        <span style="color:var(--muted);font-weight:400;font-size:12px">(당월+이월 한 표 · ${_crClick?'행 클릭=이월/이월해제 · ':''}이월분 → ${_ynm(carryNextYm)} 마감)</span>
+        <span style="font-weight:400;color:#b5651d">· 이월 ${carryN}건 ${won0(carAmt)}원</span>${showCarry?tgl:''}${carryBusy?'<span class="mut" style="font-size:11px;margin-left:6px">저장 중…</span>':''}</div>
+      ${showCarry?`<div style="max-height:30vh;overflow:auto;border:1px solid var(--line);border-radius:6px">${body}</div>`:''}
     </div>`;
   };
+  const carrySet=async(mat,ymd,carry)=>{
+    if(carryBusy||!crClick())return;carryBusy=true;drawModal();
+    try{const r=await fetch(`${API}/api/${CFG.base}/carry_set`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ym,cust_code:mc.cc,mat_code:mat,maint_ymd:ymd,carry})});
+      const j=await r.json();if(!j.ok){alert('이월 전환 실패:\n'+(j.detail||JSON.stringify(j)));}
+      await reloadDetail(mc.cc);await loadDay(mc.cc);
+    }catch(e){alert('이월 전환 실패: '+e.message);}
+    carryBusy=false;drawModal();};
   const wireCR=(m)=>{
     const ch=m.querySelector('#sm-carry-h');if(ch)ch.onclick=()=>{showCarry=!showCarry;drawModal();};
     const cd=m.querySelector('#sm-cv-date');if(cd)cd.onclick=()=>{carryView='date';drawModal();};
     const ci=m.querySelector('#sm-cv-item');if(ci)ci.onclick=()=>{carryView='item';drawModal();};
+    m.querySelectorAll('.cr-row').forEach(el=>el.onclick=()=>carrySet(el.dataset.mat,el.dataset.ymd,el.dataset.carry!=='1'));
   };
 
   const drawModal=()=>{
