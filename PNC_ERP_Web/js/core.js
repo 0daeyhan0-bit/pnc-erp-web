@@ -2224,8 +2224,8 @@ const _mkMagam=(CFG)=>(c)=>{
   // 모달 상태
   let mc=null, detail=null, mLoading=false, mClosed=false, pEdit={}, dEdit={}, amtAdjs=[], expanded=new Set();
   // ★상단 품목별/일자별 통합 — 2026-09-01. detail.items[].byday[].carry(1=이월,매출금액0).
-  //   view2='item'(품목별)|'day'(일자별 평면). 체크박스 선택 → 이월 버튼 1개로 이월/이월해제.
-  let carryNextYm='', carryBusy=false, view2='item', selRows=new Set(), fromDt='', toDt='';
+  //   view2='item'(품목별)|'day'(일자별 평면). 체크박스 선택 → 이월 버튼(행별 토글). 기간=일(日) 드롭다운, 품명검색.
+  let carryNextYm='', carryBusy=false, view2='day', selRows=new Set(), fromD=0, toD=0, qName='';
   const dkey=(mat,d)=>mat+'|'+d;
   const ymd6=d=>(''+ym).slice(0,4)+String(d).padStart(2,'0');
   const num=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -2573,7 +2573,7 @@ const _mkMagam=(CFG)=>(c)=>{
   };
 
   const openModal=async(cc,nm)=>{mc={cc,nm};detail=null;pEdit={};dEdit={};amtAdjs=[];expanded=new Set();
-    carryNextYm='';carryBusy=false;view2='item';selRows=new Set();fromDt='';toDt='';
+    carryNextYm='';carryBusy=false;view2='day';selRows=new Set();fromD=0;toD=0;qName='';
     mLoading=true;await ensureReasons();drawModal();
     try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       detail=await r.json();mClosed=!!detail.close_flag;carryNextYm=detail.next_ym||'';
@@ -2602,9 +2602,8 @@ const _mkMagam=(CFG)=>(c)=>{
   const _dlab=ymd=>{ymd=''+(ymd||'');return ymd.length>=6?`${ymd.slice(0,2)}/${ymd.slice(2,4)}/${ymd.slice(4,6)}`:ymd;};
   const _ynm=y=>{y=''+(y||'');return y.length>=4?`20${y.slice(0,2)}.${y.slice(2,4)}`:y;};
   const crClick=()=>canW&&!mClosed;   // 재배정 가능(권한 + 미마감)
-  const _monPfx=()=>`20${(''+ym).slice(0,2)}-${(''+ym).slice(2,4)}`;
-  const _dayOf=dt=>{const m=/^\d{4}-\d{2}-(\d{2})$/.exec(''+(dt||''));return m?+m[1]:0;};
-  const inRange=d=>{const f=_dayOf(fromDt),t=_dayOf(toDt);return (!f||d>=f)&&(!t||d<=t);};
+  const inRange=d=>(!fromD||d>=fromD)&&(!toD||d<=toD);   // 일(日) 범위 필터
+  const nameOk=it=>{const q=(qName||'').trim().toUpperCase();return !q||(''+it.mat).toUpperCase().includes(q)||(''+(it.nm||'')).toUpperCase().includes(q);};
   const IBADGE=`<span style="background:#ffe0b2;color:#b5651d;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700;margin-left:5px">이월</span>`;
   const fdays=it=>(it.byday||[]).filter(bd=>inRange(bd.d));    // 필터 적용된 일자
   // 선택키(I:mat / D:mat|d) 현재 이월상태
@@ -2640,7 +2639,7 @@ const _mkMagam=(CFG)=>(c)=>{
         const amt0=fd.filter(bd=>!bd.carry).reduce((a,bd)=>a+(+bd.amt),0);
         const delta=fd.reduce((a,bd)=>a+effDay(it,bd).delta,0);
         const pe=pEdit[it.mat]||{};const nc=(pe.nc!=null&&pe.nc!=='')?+pe.nc:'';const k='I:'+it.mat;
-        rows+=`<tr class="${delta?'chg':''}" style="${anyC?'background:#fff6ec':''}">
+        rows+=`<tr class="${delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${carried?'background:#fff6ec':''}">
           <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
           <td><b>${esc(it.mat)}</b>${carried?IBADGE:''}</td>
           <td class="bcap" title="${esc(it.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
@@ -2652,7 +2651,7 @@ const _mkMagam=(CFG)=>(c)=>{
       const flat=[];items.forEach(it=>(it.byday||[]).forEach(bd=>{if(inRange(bd.d))flat.push([it,bd]);}));
       flat.sort((a,b)=>a[1].d-b[1].d||Math.abs(b[1].amt)-Math.abs(a[1].amt));
       flat.forEach(([it,bd])=>{const de=dEdit[dkey(it.mat,bd.d)]||{};const e=effDay(it,bd);const k='D:'+it.mat+'|'+bd.d;
-        rows+=`<tr class="${e.delta?'chg':''}" style="${bd.carry?'background:#fff6ec':''}">
+        rows+=`<tr class="${e.delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${bd.carry?'background:#fff6ec':''}">
           <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
           <td class="center">${_dlab(bd.ymd)}</td><td><b>${esc(it.mat)}</b>${bd.carry?IBADGE:''}</td>
           <td class="bcap" title="${esc(it.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
@@ -2665,31 +2664,39 @@ const _mkMagam=(CFG)=>(c)=>{
       ?`<th class="center" style="width:24px"></th><th>품번</th><th>품명</th><th class="center">단위</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`
       :`<th class="center" style="width:24px"></th><th class="center">입고일</th><th>품번</th><th>품명</th><th>수량</th><th>현단가</th><th>변경단가</th><th>금액변동</th><th>매출금액</th>`;
     const selN=selRows.size;
-    const btnLbl=selN?`선택 ${selN}건 이월/해제`:'이월';
+    const btnLbl=selN?`이월/해제 (${selN}건)`:'이월/해제';
     const carN=items.filter(it=>{const fd=fdays(it);return fd.length&&fd.every(bd=>bd.carry);}).length;
-    const toolbar=`<div style="display:flex;align-items:center;gap:7px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
+    const _days=(detail&&detail.days)||[];
+    const dOpts=(sel,z)=>`<option value="0">${z}</option>`+_days.map(d=>`<option value="${d}" ${+sel===d?'selected':''}>${d}일</option>`).join('');
+    const toolbar=`<div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
       <b style="white-space:nowrap">품목별 매출</b>
       <select class="inp" id="tp-view" style="width:auto"><option value="item" ${view2==='item'?'selected':''}>품목별</option><option value="day" ${view2==='day'?'selected':''}>일자별</option></select>
-      <label class="tl">기간</label><input type="date" class="inp" id="tp-from" value="${esc(fromDt||_monPfx()+'-01')}" style="width:138px"><span class="mut">~</span><input type="date" class="inp" id="tp-to" value="${esc(toDt||_monPfx()+'-31')}" style="width:138px">
+      <label class="tl">기간</label><select class="inp" id="tp-from" style="width:auto">${dOpts(fromD,'처음')}</select><span class="mut">~</span><select class="inp" id="tp-to" style="width:auto">${dOpts(toD,'끝')}</select>
+      <label class="tl">품명</label><input class="inp" id="tp-q" list="tp-items" value="${esc(qName)}" placeholder="품명/품번" style="width:118px" autocomplete="off"><datalist id="tp-items">${items.map(it=>`<option value="${esc(it.nm||it.mat)}">${esc(it.mat)}</option>`).join('')}</datalist>
       ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px">저장중…</span>':''}`:''}
-      <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 매출금액 0 · 차월(${_ynm(carryNextYm)}) 마감</span></div>`;
+      <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 금액0 · 차월(${_ynm(carryNextYm)})</span></div>`;
     return toolbar+`<div id="tp-scroll" style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
   };
   // 이월 버튼만 갱신(체크박스 클릭 시 전체 재렌더 금지 — 스크롤 리셋 방지 §3)
   const updCarryBtn=(m)=>{const cb=m.querySelector('#tp-carry');if(!cb)return;
     const items=(detail&&detail.items)||[];const byMat={};items.forEach(it=>byMat[it.mat]=it);
     const selN=selRows.size;cb.disabled=!selN;cb.style.background=selN?'#b5651d':'';cb.style.color=selN?'#fff':'';
-    cb.textContent=selN?`선택 ${selN}건 이월/해제`:'이월';};
+    cb.textContent=selN?`이월/해제 (${selN}건)`:'이월/해제';};
+  // 품명/품번 검색 = 재렌더 없이 행 숨김(포커스·스크롤 유지)
+  const applyNameFilter=(m)=>{const q=(qName||'').trim().toUpperCase();
+    m.querySelectorAll('#tp-scroll tbody tr').forEach(tr=>{const s=tr.dataset.s;if(s===undefined)return;tr.hidden=!!q&&s.indexOf(q)<0;});};
   const wireTop=(m)=>{
     const vs=m.querySelector('#tp-view');if(vs)vs.onchange=e=>{view2=e.target.value;selRows.clear();drawModal();};
-    const ff=m.querySelector('#tp-from');if(ff)ff.onchange=e=>{fromDt=e.target.value;drawModal();};
-    const ft=m.querySelector('#tp-to');if(ft)ft.onchange=e=>{toDt=e.target.value;drawModal();};
+    const ff=m.querySelector('#tp-from');if(ff)ff.onchange=e=>{fromD=+e.target.value||0;drawModal();};
+    const ft=m.querySelector('#tp-to');if(ft)ft.onchange=e=>{toD=+e.target.value||0;drawModal();};
+    const qi=m.querySelector('#tp-q');if(qi)qi.oninput=e=>{qName=e.target.value;applyNameFilter(m);};
     m.querySelectorAll('.tp-ck').forEach(el=>el.onchange=()=>{if(el.checked)selRows.add(el.dataset.k);else selRows.delete(el.dataset.k);updCarryBtn(m);});
     const cb=m.querySelector('#tp-carry');if(cb)cb.onclick=carryApply;
     m.querySelectorAll('.tp-pc').forEach(el=>el.onchange=()=>{const mat=el.dataset.mat,v=el.value.trim();
       if(v===''){if(pEdit[mat]){delete pEdit[mat].nc;if(!pEdit[mat].nc)delete pEdit[mat];}}else{pEdit[mat]=Object.assign(pEdit[mat]||{rc:'',rd:''},{nc:+v});}drawModal();});
     m.querySelectorAll('.tp-dc').forEach(el=>el.onchange=()=>{const k=dkey(el.dataset.mat,+el.dataset.d),v=el.value.trim();dEdit[k]=dEdit[k]||{nc:'',nq:'',rc:'',rd:''};dEdit[k].nc=(v===''?'':+v);
       if((dEdit[k].nc===''||dEdit[k].nc==null)&&!dEdit[k].rc&&!(dEdit[k].rd||'').trim())delete dEdit[k];drawModal();});
+    applyNameFilter(m);   // 재렌더 후 검색어 필터 재적용
   };
 
   const drawModal=()=>{
