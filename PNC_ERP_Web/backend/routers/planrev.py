@@ -484,6 +484,14 @@ def _step5_item(cur):
     prate = {}
     cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
     for ic, pr in cur.fetchall(): prate[str(ic).strip()] = float(pr or 100)
+    # ★2026-09-01 유령 ASSY 차단 — 모델BOM 에는 있으나 품목마스터에 없는 도번.
+    #   레거시는 전개할 때 품목마스터를 조인해 이런 행을 자동으로 떨어뜨린다(실측 품목별계획 0행).
+    #   웹은 모델BOM 을 단독으로 읽어 그대로 넣어 왔다 → 레거시에 없는 도번이 계획에 생긴다.
+    #   실측 2026-09-01 — 모델BOM 유령 179종 중 AJR30133610(09:19 라이브 신규, 21개 모델,
+    #     주문 0건·BOM 0건·품목마스터 미등록)이 plan_item_dtl 6행으로 유입,
+    #     8제번이 레거시와 어긋났다. BOM 이 없어 파트별·자재소요로는 안 내려가 수량차는 0이었다.
+    #   ※prate 는 이미 PR_M_ITEM 전건을 담고 있으므로 그 키를 등록여부 판정에 그대로 쓴다.
+    _known = set(prate)
     cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
         PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
         USE_QTY decimal(18,5),LOT_QTY int,PLAN_QTY int,ORG_PLAN_YMD varchar(6),LINE_NO varchar(6),OUTPUT_HM varchar(4),PROD_RATE numeric(9,2))""")
@@ -500,29 +508,41 @@ def _step5_item(cur):
         #     LINE_NO  — 레거시 PART.LINE_NO 는 계획라인이 채워져 있다(웹은 전량 빈값이었음).
         #     LOT_QTY  — 레거시 DTL.LOT_QTY = 웹 plan_dtl.REMAIN_QTY 가 100.0% 일치.
         #                (기존 MAX(PLAN_QTY) 방식은 분할제번에서 어긋났다 — 실측 92.7%)
+        # ★마지막 컬럼 = 당김 **전** 원본일자(mymd). 모델BOM 유효기간 판정에만 쓴다 — 아래 주석.
         cur.execute("""SELECT d.WORK_ORDER, d.MODEL_NO, SUM(CAST(d.PLAN_QTY AS int)),
                  MIN(ISNULL(p.pulled, d.PLAN_YMD)),
                  MIN(ISNULL(NULLIF(p.pulled_hm,''), ISNULL(NULLIF(d.START_HM,''),'0800'))),
-                 MIN(RTRIM(ISNULL(d.LINE_NO,''))), MAX(CAST(ISNULL(d.REMAIN_QTY,0) AS int))
+                 MIN(RTRIM(ISNULL(d.LINE_NO,''))), MAX(CAST(ISNULL(d.REMAIN_QTY,0) AS int)),
+                 MIN(d.PLAN_YMD)
             FROM nx.plan_dtl d
             LEFT JOIN nx.plan_line_pull p ON p.wo=d.WORK_ORDER AND p.org=d.PLAN_YMD
            WHERE d.PLAN_QTY>0 GROUP BY d.WORK_ORDER, d.MODEL_NO""")
     else:
         cur.execute("""SELECT WORK_ORDER,MODEL_NO,SUM(CAST(PLAN_QTY AS int)),MIN(PLAN_YMD),
                  MIN(ISNULL(NULLIF(START_HM,''),'0800')), MIN(RTRIM(ISNULL(LINE_NO,''))),
-                 MAX(CAST(ISNULL(REMAIN_QTY,0) AS int))
+                 MAX(CAST(ISNULL(REMAIN_QTY,0) AS int)), MIN(PLAN_YMD)
             FROM nx.plan_dtl WHERE PLAN_QTY>0 GROUP BY WORK_ORDER,MODEL_NO""")
     irows = []; lot = _dd(int)
-    for wo, model, pq, ymd, ohm, lno, rq in cur.fetchall():
+    for wo, model, pq, ymd, ohm, lno, rq, oymd in cur.fetchall():
         wos = str(wo).strip(); mk = str(model).strip(); pq = int(pq or 0); ymd = str(ymd).strip()
         ohm = (str(ohm or '').strip() or '0800')     # ★라인당김 적용된 시각
         lno = str(lno or '').strip()                 # ★계획라인
         rq = int(rq or 0)                            # ★LOT 수량(REMAIN_QTY)
+        # ★2026-09-01 모델BOM 유효기간은 **당김 전 원본일자**로 판정한다(레거시 동일).
+        #   계획일자(ymd)는 당김 후 값이지만, 어느 ASSY 도번을 쓸지는 원본일자가 정한다.
+        #   당김이 유효기간 경계를 넘어가면 둘이 갈린다 — 그때 웹만 옛 도번을 달았다.
+        #   실측 2026-09-01 — 6JMGM03B/6JMGM031: 원본 260918, 당김후 260917.
+        #     모델 ZRUM140/160LTE6.EWGBLEU 의 경계가 260917|260918 이라
+        #     웹은 구도번(AJR30027702·AJR77224517·AJR77263007),
+        #     레거시는 신도번(AJR30125601·AJR30133302·AJR30133701)을 골랐다.
+        #   전수검증: 원본일자 판정 시 2,802 제번 **불일치 0**(당김후 판정은 2건), 깨짐 0.
+        mymd = (str(oymd or '').strip() or ymd)
         cand = mbom.get(mk); assys = None
         if cand:
             best = {}
             for a, mq, my, ty in cand:
-                if (not my or my <= ymd) and (not ty or ty >= ymd):
+                if a not in _known: continue          # ★유령 ASSY 차단(품목마스터 미등록)
+                if (not my or my <= mymd) and (not ty or ty >= mymd):
                     if a not in best or my > best[a][1]: best[a] = (mq, my)
             assys = [(a, best[a][0]) for a in best]
         if not assys:
