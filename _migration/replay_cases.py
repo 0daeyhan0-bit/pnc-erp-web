@@ -153,7 +153,7 @@ def _mat(cur, ymd):
         if cust:
             row["CUST_CODE"] = str(cust).strip()
         out.append((_hms(hms), dict(
-            kind="F", name="재생①자재 %s %s %+g" % (scr, mat, q),
+            kind="F", allow_reject=True, name="재생①자재 %s %s %+g" % (scr, mat, q),
             method="POST", path="/api/stock/save",
             probe="원장MAT", delta=q, mirror=True,
             body={"screen": scr, "user": "replay", "rows": [row]})))
@@ -181,7 +181,7 @@ def _kit(cur, ymd):
             continue
         path = "/api/kitting/cell-confirm" if tg == KIT_CONFIRM else "/api/kitting/cell-cancel"
         out.append((_hms(hms), dict(
-            kind="F", name="재생②키팅 %s %+g" % (item, q),
+            kind="F", allow_reject=True, name="재생②키팅 %s %+g" % (item, q),
             method="POST", path=path,
             probe="원장RDY", delta=q, mirror=False,
             body={"item": item, "wo": str(wo or "").strip(), "swo": str(swo or "").strip(),
@@ -201,7 +201,7 @@ def _prod(cur, ymd):
         if q == 0:
             continue
         out.append((_hms(phms), dict(
-            kind="F", name="재생③생산 %s x%d" % (item, q),
+            kind="F", allow_reject=True, name="재생③생산 %s x%d" % (item, q),
             method="POST", path="/api/procreg/save",
             probe="공정실적수량", delta=q, mirror=False,
             body={"prod_ymd": str(pymd or "").strip(), "prod_hms": str(phms or "").strip(),
@@ -227,7 +227,7 @@ def _ship(cur, ymd):
         if q == 0 or not str(wo or "").strip():
             continue                       # 제번 없으면 API 가 거부한다(필수)
         out.append((_hms(hms), dict(
-            kind="F", name="재생④출하 %s x%g" % (item, q),
+            kind="F", allow_reject=True, name="재생④출하 %s x%g" % (item, q),
             method="POST", path="/api/lgsale/save",
             probe="원장ASY", delta=-q, mirror=False,
             body={"work_order": str(wo).strip(), "split_work_order": str(swo or "").strip(),
