@@ -418,7 +418,7 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
             m[g] = m.get(g, 0.0) + float(r.get('kamt') or 0)   # ★KRW환산(외화 거래처=원통화 아님). 리포트=금액(KRW)
         return m
     win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"
-    dc_cum = win + f" AND A.MAINT_YMD >= '{frm6}' AND A.MAINT_YMD < '{d6}'"   # 누적=시작일~전일
+    dc_cum = win + f" AND A.MAINT_YMD < '{d6}'"      # 누적=마감창~전일(마감기준, 전월 이월-in 포함 = 집계표와 동일)
     dc_day = win + f" AND A.MAINT_YMD = '{d6}'"      # 당일=종료일
     pur_cum, pur_day = agg(_receipt(dc_cum, ym)), agg(_receipt(dc_day, ym))
     out_cum, out_day = agg(_dispatch(dc_cum, ym)), agg(_dispatch(dc_day, ym))
