@@ -267,14 +267,15 @@ def _def_range(dfrom, dto):
     f = _digits(dfrom, 6) or (_scalar("SELECT FORMAT(GETDATE(),'yyMM')") + "01")
     return f, t
 
-def _dispatch_inner(dc):
+def _dispatch_inner(dc, dc5=None):
+    dc5 = dc5 or dc   # ★tag5(판매출고)만 매출마감 override(SALE) 적용. 반품(SA·MAT_CODE없음)·수입(Q)은 원 dc 유지.
     return f"""
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC) CUST_DESC, C2.CUST_TYPE, A.MAT_CODE, A.MAINT_COST, A.MAINT_COST KRW_MAINT_COST, A.ITEM_CODE,
      MAX(M.item_name) ITEM_DESC, MAX(M.ITEM_SPEC) ITEM_SPEC, MAX(M.UNIT) UNIT, M.lgroup ITEM_LGROUP, M.sgroup ITEM_SGROUP,
      SUM(-A.MAINT_QTY) MAINT_QTY, SUM(-A.MAINT_AMT) MAINT_AMT, SUM(-A.MAINT_AMT) KRW_MAINT_AMT, SUM(-A.MAINT_VAT) MAINT_VAT, SUM(-A.MAINT_VAT) KRW_MAINT_VAT,
      1 EXCHANGE_RATE, MAX(M.in_cust) IN_CUST_CODE, 'KRW' CURRENCY, MAX(M.ITEM_WEIGHT) ITEM_WEIGHT
     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C2 ON A.CUST_CODE=C2.CUST_CODE join MAGAM mg on a.cust_code=mg.cust_code
-    WHERE {dc} AND A.MAINT_TAG IN ('5')
+    WHERE {dc5} AND A.MAINT_TAG IN ('5')
     GROUP BY A.CUST_CODE,A.MAINT_TAG,A.GAGONG_PROC_CODE,A.MAT_CODE,A.ITEM_CODE,C2.CUST_TYPE,A.MAINT_COST,M.lgroup,M.sgroup
    UNION ALL
    SELECT A.CUST_CODE, MAX(C2.CUST_DESC), C2.CUST_TYPE, A.ITEM_CODE, A.MAINT_COST, A.MAINT_COST, '',
@@ -291,7 +292,7 @@ def _dispatch_inner(dc):
     WHERE {dc} AND A.DIVISION='Q'
     GROUP BY A.CUST_CODE,A.MAINT_TAG,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,C2.CUST_TYPE,A.EXCHANGE_RATE,M.lgroup,M.sgroup,A.CURRENCY"""
 
-def _dispatch(dc, ref_ym):
+def _dispatch(dc, ref_ym, dc5=None):
     magam = f"""WITH MAGAM (CUST_CODE, JUN_YYMM, JUN_MAGAM_DAY, MAGAM_DAY) AS (
       SELECT CUST_CODE
         ,format(dateadd(MONTH,-1,convert(date,'{ref_ym}'+'01',12)),'yyMM') jun_yymm
@@ -304,7 +305,7 @@ def _dispatch(dc, ref_ym):
       T.MAINT_COST cost, T.KRW_MAINT_COST kcost, T.EXCHANGE_RATE rate, T.CURRENCY cur,
       (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=MAX(T.IN_CUST_CODE)) incust, isnull(MAX(T.ITEM_WEIGHT),0) wt,
       SUM(T.MAINT_QTY) qty, SUM(T.MAINT_AMT) amt, SUM(T.MAINT_VAT) vat, SUM(T.KRW_MAINT_AMT) kamt, SUM(T.KRW_MAINT_VAT) kvat
-    FROM ({_dispatch_inner(dc)}) T
+    FROM ({_dispatch_inner(dc, dc5)}) T
     GROUP BY T.CUST_CODE,T.CUST_TYPE,T.ITEM_CODE,T.MAT_CODE,T.ITEM_LGROUP,T.ITEM_SGROUP,T.MAINT_COST,T.KRW_MAINT_COST,T.EXCHANGE_RATE,T.CURRENCY"""
     _cols, rows = _rows(sql)
     return rows
@@ -320,9 +321,26 @@ def dispatch(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Quer
         return {"gijun": "issue", "dfrom": f, "dto": t, "count": len(rows), "rows": rows}
     else:
         y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")  # 마감기준 기본=현재월(진행 중 마감)
-        dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
-        rows = _dispatch(dc, y)
+        dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"   # 반품(SA)·수입(Q)=원 마감창
+        rows = _dispatch(dc, y, _win_ovr('SALE', y))   # ★tag5(판매출고)만 매출마감 수동이월(SALE) 반영
         return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows}
+
+# ★마감창 + 수동 이월(nx.magam_carry_ovr) 반영 — 마감 프로그램(매입=PUR/매출=SALE)의 이월/해제를 집계표·일일현황에도 동일 적용.
+#   효과: 거래의 유효 귀속월==y(=마감창 자연판정 ± override). override 0건이면 원 마감창과 완전 동일(diff0).
+#   ★A(대상 테이블)에 MAT_CODE·CUST_CODE·MAINT_YMD 가 있어야 함(SA_T_STOCK_MAINT는 MAT_CODE 없음 → tag5 파트에만 사용).
+def _win_ovr(kind, y):
+    # 유효 귀속월==y 판정: override 있으면 assign_ym==y, 없으면 자연 마감창(nat_cur). override 0건이면 nat_cur 과 동일(diff0).
+    # ★차월로 당겨진(pull-in) 항목도 assign=y 로 포함(물리 전월이어도). 스캔은 전월~당월로 한정(인덱스·성능).
+    yy = int(y[:2]); mm = int(y[2:]) - 1; py = yy
+    if mm == 0: mm = 12; py -= 1
+    prevym = f"{py:02d}{mm:02d}"
+    _o = ("SELECT 1 FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr o WHERE o.kind='" + kind +
+          "' AND o.cust_code=A.CUST_CODE AND o.mat_code=A.MAT_CODE AND o.maint_ymd=A.MAINT_YMD")
+    ex_eq = f"EXISTS({_o} AND o.assign_ym='{y}')"   # y 로 배정된 것(당겨온 것 포함)
+    ex_any = f"EXISTS({_o})"                         # override 존재
+    nat_cur = f"(A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day)"   # 자연 마감창
+    bound = f"A.MAINT_YMD >= '{prevym}00' AND A.MAINT_YMD <= '{y}99'"   # 전월~당월 스캔 한정
+    return f"({bound} AND ({ex_eq} OR (NOT {ex_any} AND {nat_cur})))"
 
 # ================= 확정입고집계표 (구매/자재, dw_pu_input_120) =================
 # 확정입고(검사통과 9/S/C/G/H) + 수입(PU_T_STOCK_MAINT_C DIVISION='P'). grain=(cc,ic,mat). patch_receipt.py 이식.
@@ -369,7 +387,7 @@ def receipt(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Query
         return {"gijun": "issue", "dfrom": f, "dto": t, "count": len(rows), "rows": rows}
     else:
         y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
-        dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
+        dc = _win_ovr('PUR', y)   # ★마감창 + 매입마감 수동이월(PUR) 반영
         rows = _receipt(dc, y)
         return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows}
 
@@ -417,11 +435,12 @@ def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Qu
             g = gb(r.get('cc'), r.get('ct'))
             m[g] = m.get(g, 0.0) + float(r.get('kamt') or 0)   # ★KRW환산(외화 거래처=원통화 아님). 리포트=금액(KRW)
         return m
-    win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"
-    dc_cum = win + f" AND A.MAINT_YMD < '{d6}'"      # 누적=마감창~전일(마감기준, 전월 이월-in 포함 = 집계표와 동일)
-    dc_day = win + f" AND A.MAINT_YMD = '{d6}'"      # 당일=종료일
-    pur_cum, pur_day = agg(_receipt(dc_cum, ym)), agg(_receipt(dc_day, ym))
-    out_cum, out_day = agg(_dispatch(dc_cum, ym)), agg(_dispatch(dc_day, ym))
+    # ★마감창 + 수동이월 반영(집계표와 동일). 매입=PUR override(전 파트 MAT_CODE) · 불출=SALE override는 tag5만(반품SA·수입Q는 원 마감창).
+    win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"   # 원 마감창(반품/수입용)
+    winP = _win_ovr('PUR', ym); winS = _win_ovr('SALE', ym)
+    _cd = lambda w, op: w + f" AND A.MAINT_YMD {op} '{d6}'"
+    pur_cum, pur_day = agg(_receipt(_cd(winP, '<'), ym)), agg(_receipt(_cd(winP, '='), ym))   # 누적=마감창~전일, 당일=종료일
+    out_cum, out_day = agg(_dispatch(_cd(win, '<'), ym, _cd(winS, '<'))), agg(_dispatch(_cd(win, '='), ym, _cd(winS, '=')))
     gubuns = list(_GUBUN_ORDER)
     for ex in sorted(set(list(pur_cum) + list(out_cum) + list(pur_day) + list(out_day)) - set(gubuns)):
         gubuns.append(ex)
@@ -682,19 +701,20 @@ def receiptdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str =
         y = _ym4(ym) or _scalar("SELECT FORMAT(GETDATE(),'yyMM')")
         if source == "nx":
             r = _nx_screen("MAT", y + "01", y + "31"); r["gijun"] = "close"; r["ym"] = y; return r
-        dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
+        dc = _win_ovr('PUR', y)   # ★마감창 + 매입마감 수동이월(PUR) 반영
         rows = _receiptdetail(dc, y, q)
         return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows, "q": q}
 
 # ================= 자재불출명세서 (구매/자재, dw_pu_input_130) — 라인단위 =================
-def _dispatchdetail(dc, ref_ym):
+def _dispatchdetail(dc, ref_ym, dc5=None):
+    dc5 = dc5 or dc   # ★PU tag5 파트만 매출마감 override(SALE). SA(MAT_CODE없음)·수입(Q)=원 dc.
     sql = f"""{_MAGAM(ref_ym)}
 SELECT A.MAINT_YMD ymd, A.MAINT_SEQ seq, A.CUST_CODE cc, C.CUST_DESC cnm, C.CUST_TYPE ct,
   A.MAT_CODE mat, A.ITEM_CODE ic, (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust) incust,
   M.lgroup lg, M.sgroup sg, M.ITEM_WEIGHT wt, M.UNIT unit, M.item_name nm, M.ITEM_SPEC spec,
   -A.MAINT_QTY qty, 'KRW' cur, 1.0 rate, A.MAINT_COST cost, A.MAINT_COST kcost, -A.MAINT_AMT amt, -A.MAINT_AMT kamt, -A.MAINT_VAT vat
  FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE join MAGAM mg on a.cust_code=mg.cust_code join PARTNER_ERP_TEST3.nx.cm_m_cust C on A.CUST_CODE=C.CUST_CODE
- WHERE {dc} AND A.MAINT_TAG IN ('5')
+ WHERE {dc5} AND A.MAINT_TAG IN ('5')
 UNION ALL
 SELECT A.MAINT_YMD, A.MAINT_SEQ, A.CUST_CODE, C.CUST_DESC, C.CUST_TYPE,
   A.ITEM_CODE, '', (SELECT CUST_DESC FROM PARTNER_ERP_TEST3.nx.CM_M_CUST WHERE CUST_CODE=M.in_cust),
@@ -728,7 +748,7 @@ def dispatchdetail(gijun: str = Query("close"), ym: str = Query(""), dfrom: str 
         if source == "nx":
             r = _nx_screen("MAT", y + "01", y + "31"); r["gijun"] = "close"; r["ym"] = y; return r
         dc = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day"
-        rows = _dispatchdetail(dc, y)
+        rows = _dispatchdetail(dc, y, _win_ovr('SALE', y))   # ★tag5(판매) 매출마감 이월 반영
         return {"gijun": "close", "ym": y, "count": len(rows), "rows": rows}
 
 # ================= 자재입출고현황 (구매/자재, dw_pu_stock_060) — 마스터-디테일 =================
