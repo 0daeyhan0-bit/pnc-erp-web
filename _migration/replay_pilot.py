@@ -37,9 +37,9 @@ from common import _conn                                    # noqa: E402
 
 STATE = os.path.join(HERE, 'replay_pilot_state.json')
 
-# 대표 확정 10종 (2026-08-31 실측: 생산+출하 거래건수 상위 완제품)
-ITEMS = ["MJU63357501", "AJJ75838625", "AJR73965506", "AJR73965505", "AJR73965606",
-         "AJR73965607", "AJR30004702", "AJR30077403", "AJR76582506", "AJR76582505"]
+# 재생 대상 = 고정 10종 + 그날 도는 품번 (정의는 replay_cases 가 소유 — 한 곳에서만 정한다)
+sys.path.insert(0, HERE)
+from replay_cases import items_for as _items_for, FIXED as ITEMS   # noqa: E402
 
 # (테이블, PK컬럼들, 일자컬럼, 수량컬럼, 설명)  ※전부 ITEM_CODE 보유 확인함
 SRC = [
@@ -71,7 +71,7 @@ def _save(st):
 
 
 def _fetch(cur, tab, pk, dc, qty, ymd):
-    inl = ",".join("'" + x + "'" for x in ITEMS)
+    inl = ",".join("'" + x + "'" for x in _items_for(ymd))
     cols = ",".join(pk) + ",ITEM_CODE," + qty
     cur.execute("SELECT %s FROM PARTNER_ERP.dbo.%s WHERE %s=? AND LTRIM(RTRIM(ITEM_CODE)) IN (%s)"
                 % (cols, tab, dc, inl), ymd)
@@ -145,7 +145,7 @@ def summary():
             b[1] += q
     print()
     print("  --- 품번별 ---")
-    for it in ITEMS:
+    for it in _items_for(ymd):
         d = grand.get(it)
         if not d:
             print("    %-14s (거래 없음)" % it)
