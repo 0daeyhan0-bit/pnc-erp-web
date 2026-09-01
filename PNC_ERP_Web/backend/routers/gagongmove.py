@@ -24,6 +24,34 @@ def gagong_move580_opts():
     finally:
         cn.close()
 
+
+@router.get("/api/gagong/move580/matinfo")
+def gagong_move580_matinfo(mat: str = Query(...), wh: str = Query("P0001")):
+    """가공자재 이동처리 팝업 — 자도번의 품명 + **가공창고 재고**(2026-09-01 신설).
+
+    레거시 w_pr_input_586 그리드의 '재고수량' 칸. 레거시 재고현황 화면과 같은 소스다:
+      nx.PR_T_MAT_STOCK_WH 의 PART_CODE = 출고가공창고(P0001 등) 행의 STOCK_QTY
+      (실측 대조 — 4A00742A P0001 = 80 → 레거시 화면 80 일치)
+    ※PU_T_MAT_STOCK_WH 는 **자재창고**(IS0001 등)라 여기서 쓰지 않는다. 축이 다르다.
+    """
+    m = str(mat or "").strip()
+    w = str(wh or "P0001").strip() or "P0001"
+    if not m:
+        return {"mat": "", "nm": "", "stock": 0}
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT TOP 1 ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WITH(NOLOCK)
+                        WHERE RTRIM(item_code)=?""", m)
+        r = cur.fetchone()
+        nm = (r[0] if r else "") or ""
+        cur.execute("""SELECT ISNULL(SUM(CAST(STOCK_QTY AS float)),0)
+                         FROM PARTNER_ERP_TEST3.nx.PR_T_MAT_STOCK_WH WITH(NOLOCK)
+                        WHERE RTRIM(MAT_CODE)=? AND RTRIM(ISNULL(PART_CODE,''))=?""", m, w)
+        stock = float((cur.fetchone() or [0])[0] or 0)
+        return {"mat": m, "nm": nm, "stock": stock, "wh": w, "found": bool(r)}
+    finally:
+        nx.close()
+
 # ================= 가공창고 이동계획 (w_pr_input_580) =================
 # ★2026-08-22 전환: 역설계 중단 → 레거시 SP 를 그대로 호출한다.
 #   SP 본문은 암호화(WITH ENCRYPTION)라 못 읽지만 EXEC 는 되고 174컬럼을 그대로 반환한다(실측 384행).
