@@ -2507,9 +2507,15 @@ const _mkMagam=(CFG)=>(c)=>{
        .ml-tbl tfoot tr.grandtot td{position:sticky;bottom:0;background:#c7d8ef;font-weight:800;border-top:2px solid #7f9dc4;z-index:2}
        .ml-tbl td.mld,.ml-tbl th.mld{min-width:54px;color:#5a6b82}
        .ml-tbl td.bcap{max-width:190px;overflow:hidden;text-overflow:ellipsis}
-       .sm-tbl{font-size:11.5px;width:100%;table-layout:auto}.sm-tbl th,.sm-tbl td{padding:1px 6px;white-space:nowrap;line-height:1.4}
+       .sm-tbl{font-size:11.5px;width:100%;table-layout:auto;border-collapse:separate;border-spacing:0}
+       .sm-tbl th,.sm-tbl td{padding:2px 7px;white-space:nowrap;border-bottom:1px solid #eef1f6;border-right:1px solid #f2f4f8}
+       .sm-tbl tbody td{padding:4px 7px;line-height:1.45}
        .sm-tbl tbody tr.ml-row:hover td{background:#eaf2fd}.sm-tbl .sm-badge{padding:0 5px}
-       .sm-tbl thead th{position:sticky;top:0;background:#f4f7fc;z-index:2;cursor:pointer;user-select:none;text-align:center}.sm-tbl thead tr:nth-child(2) th{top:26px}.sm-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+       .sm-tbl thead th{position:sticky;top:0;background:#eef3fb;z-index:2;cursor:pointer;user-select:none;text-align:center;padding:4px 7px;border-bottom:1px solid #c3d2e8;border-right:1px solid #d7e0ee;box-shadow:0 1px 0 #c3d2e8}
+       .sm-tbl thead tr:first-child th{height:24px}
+       .sm-tbl thead tr:nth-child(2) th{top:24px}
+       .sm-tbl thead tr:last-child th{border-bottom:2px solid #9db4d4}
+       .sm-tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
        .sm-tbl thead th[data-sk]:hover{background:#e4ecf8}.sm-ar{font-size:9px;color:#2f6db3;margin-left:2px}
        .sm-tbl td.bcap{max-width:150px;overflow:hidden;text-overflow:ellipsis}.sm-tbl td.neg{color:#c0392b}.sm-tbl .center{text-align:center}
        .sm-tbl tr.sm-closed{background:#f3f8f3}
