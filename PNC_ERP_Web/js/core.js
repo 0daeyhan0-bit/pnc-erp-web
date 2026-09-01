@@ -276,6 +276,7 @@ const MODULES=[
  {id:'gagong',nm:'가공',ic:'⚙️',subs:[
    {id:'gagongprog420',ic:'🏭',nm:'가공생산진척관리(전표발행)'},
    {id:'gagongplan4w',ic:'📋',nm:'4주간 가공계획현황'},
+   {id:'gagongmatplan070',ic:'📋',nm:'4주간 가공계획현황(제번)'},
    {id:'gagongjeohist',ic:'🧾',nm:'가공전표이력현황'},
    {id:'gagongmove580',ic:'🚚',nm:'가공창고 이동계획'},
    {id:'gagongset280',ic:'📦',nm:'가공세트재고관리'},
