@@ -1491,5 +1491,617 @@ def _e8_setexc(res, ctx):
                          f" (전체 {len(rows)}행)")
 
 
-# ★E 그룹은 **CASES 앞**에 놓는다 — 무거운 조회를 먼저(§9 순서 규칙).
-CASES = E_CASES + CASES
+# ═══════════════════════════════════════════════════════════════════════
+# [F] 전체 프로세스 — 대표 지시(2026-09-01) 흐름 그대로 한 줄로 검증
+#
+#   ①생산계획편성 → ②자재발주(개별·세트) → ③바코드입고
+#      ├─ 무검사 → 자동입고
+#      └─ 유검사 → 검사대기 → 검사완료 → 재고입고
+#      └─ 직납품 → 자재입고와 **동시에** 영업창고 출고
+#   → ④생산준비등록 → ⑤키팅실적 → ⑥자재창고→생산창고 이동
+#   → ⑦생산바코드 실적등록 → ⑧자재재고 차감
+#   → ⑨상위품 행선지 분기: 자재면 자재창고 · 파트면 파트창고 · 본인이면 영업창고
+#   → ⑩출하 → ⑪완제품 재고 차감
+#
+# ★E 그룹이 ①~②·마감을 보고, F 그룹이 **③~⑪ 물류/재고 흐름**을 본다.
+#   판정 원칙(E 와 동일):
+#     - 200 이 아니라 "다음 단계가 쓸 수 있는 값이 나왔는가"
+#     - 쓰기(입고·출고·실적)는 **실행하지 않는다** — 롤백 모드라도 공유 트랜잭션이
+#       잠기고, 재고 파생이 3테이블에 걸쳐 있어 부분 실패 시 판정이 오염된다.
+#       ⟹ **직전 실데이터를 읽어 각 단계의 연결·정합을 본다.**
+#     - 레거시가 있는 지표는 절대값이 아니라 **레거시 대비**로 본다.
+#
+# 재고 3계층 (common.py 실측)
+#   자재창고  PU_T_STOCK_MAINT   입고 TAG 9/S/C/G/H · 출고 B · 반품 T
+#   생산/파트 PR_T_STOCK_MAINT_MAT (+ PU TAG B 의 TO_GAGONG_PROC_CODE)
+#   영업      SA_T_STOCK_MAINT / SA_T_ITEM_STOCK
+#   준비(키팅) PU_T_READY_STOCK(잔액) · PU_T_READY_STOCK_MAINT(이력) · ready_ledger(웹)
+# ═══════════════════════════════════════════════════════════════════════
+
+def _f_sql(sql):
+    """SQL 판정 케이스의 body 를 만든다(가독성)."""
+    return {"sql": sql, "args": []}
+
+
+def _f_row(res):
+    """SQL 케이스의 첫 행. 거부/빈결과를 구분해 (None, 사유) 로 돌려준다."""
+    if _refused(res):
+        return None, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return None, "★조회 실패 — 결과가 비어 있다"
+    return rows[0], ""
+
+
+def _f1_order(res, ctx):
+    """②발주 — 소요가 발주(세트요청)로 이어졌는가."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    src, req, req_dtl = (int(r[i] or 0) for i in range(3))
+    if src == 0:
+        return True, "조달소요가 비어 있다 — 아직 편성 전(결함 아님)"
+    if req == 0:
+        return False, (f"★조달소요 {src:,}행인데 세트요청 0건 — "
+                       "②발주 구간이 끊겼다(소요는 났는데 발주가 안 나간다)")
+    return True, f"조달소요 {src:,} → 세트요청 {req:,}건 · 명세 {req_dtl:,}행"
+
+
+def _f2_barcode_in(res, ctx):
+    """③바코드입고 — 세트입고가 재고 3곳에 모두 파생됐는가.
+       ★stock.py 패턴상 쓰기는 원장·잔량·수불이력 3곳이다. 하나라도 빠지면
+         '저장은 됐는데 화면에 안 나온다'가 된다(반복 실사용 버그)."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    setin, ledger, wh, maint = (int(r[i] or 0) for i in range(4))
+    if setin == 0:
+        return True, "세트입고 이력이 없다 — 이 구간 미사용(결함 아님)"
+    miss = []
+    if ledger == 0:
+        miss.append("원장")
+    if wh == 0:
+        miss.append("잔량")
+    if maint == 0:
+        miss.append("수불이력")
+    tail = f"세트입고 {setin:,}건 · 원장 {ledger:,} · 잔량 {wh:,} · 수불이력 {maint:,}"
+    if miss:
+        return False, f"★{tail} — {'·'.join(miss)}가 비었다(3곳 중 일부만 기입)"
+    return True, tail + "  = 3곳 모두 기입"
+
+
+def _f3_insp(res, ctx):
+    """③-a 검사 분기 — 무검사는 바로, 유검사는 검사완료라야 재고가 선다.
+       ★게이트 = NOT(insp_flag IN('S','F') AND insp_proc_flag<>'1')  (common.py:536)
+         검사대기분이 재고로 잡히면 **아직 안 받은 물건을 쓸 수 있게** 된다."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    wait, done, none_, leak = (int(r[i] or 0) for i in range(4))
+    tail = f"무검사 {none_:,} · 검사완료 {done:,} · 검사대기 {wait:,}"
+    if wait == 0:
+        return True, tail + " (대기 0 — 게이트 검증 대상 없음)"
+    if leak > 0:
+        return False, (f"★{tail} — 검사대기분이 생산창고 재고로 {leak:,}행 샜다. "
+                       "검사 게이트가 뚫렸다(미검사품을 생산이 쓴다)")
+    return True, tail + " · 대기분 재고 누출 0  = 게이트 정상"
+
+
+def _f4_direct(res, ctx):
+    """③-b 직납품 — 자재입고와 **동시에** 영업창고 출고가 났는가.
+       대표 지시: 직납은 영업창고에서만 출하 가능 → 입고 즉시 출고가 따라야 한다.
+       ★판정은 '입고 건수 = 출고 건수'가 아니라 **입고분에 짝이 있는가**로 본다
+         (과거 입고분은 수정 전이라 짝이 없다 — 그건 기존 데이터지 결함이 아니다)."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    dcnt, din, dout = (int(r[i] or 0) for i in range(3))
+    if din == 0:
+        return True, f"직납품목 {dcnt:,}종 · 최근 직납 입고 없음(검증 대상 없음)"
+    if dout == 0:
+        return False, (f"★직납 입고 {din:,}건인데 영업창고 출고 0건 — "
+                       "직납 자동출고가 안 걸렸다(영업창고에서 출하 못 한다)")
+    return True, f"직납품목 {dcnt:,}종 · 최근 입고 {din:,}건 → 영업출고 {dout:,}건"
+
+
+def _f5_ready(res, ctx):
+    """④생산준비등록 ⑤키팅실적 — 준비 재고가 서고 이력이 남는가."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    stock, hist, web = (int(r[i] or 0) for i in range(3))
+    if hist == 0:
+        return False, "★준비(키팅) 이력이 0 — ④⑤ 구간이 통째로 비어 있다"
+    tail = f"준비잔액 {stock:,}행 · 이력 {hist:,}행 · 웹원장 {web:,}행"
+    if stock == 0:
+        return False, f"★{tail} — 이력은 있는데 잔액이 0(파생이 끊겼다)"
+    return True, tail
+
+
+def _f6_move(res, ctx):
+    """⑥자재창고 → 생산창고 이동 — 출고에 행선지(파트)가 붙는가.
+       ★TO_GAGONG_PROC_CODE 가 비면 **어느 창고로 갔는지 모르는 출고**가 된다.
+         생산창고 재고 계산이 그 컬럼을 쓰므로(common.py:546) 비면 재고가 안 선다."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    out, dest = (int(r[i] or 0) for i in range(2))
+    if out == 0:
+        return True, "자재 출고(TAG B) 이력 없음 — 이 구간 미사용"
+    rate = 100.0 * dest / out
+    tail = f"자재출고 {out:,}행 · 행선지 있음 {dest:,} ({rate:.1f}%)"
+    if rate < 90.0:
+        return False, (f"★{tail} — 행선지 없는 출고가 {out-dest:,}행. "
+                       "그만큼 생산창고 재고가 안 선다")
+    return True, tail
+
+
+def _f7_prod(res, ctx):
+    """⑦생산바코드 실적 → ⑧자재재고 차감 — 실적에 자재사용이 따라붙는가.
+       ★생산은 났는데 차감이 없으면 재고가 영원히 안 준다(대표가 지적한 구간)."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    prod, use = (int(r[i] or 0) for i in range(2))
+    if prod == 0:
+        return True, "생산실적 없음 — 이 구간 미사용"
+    if use == 0:
+        return False, (f"★생산실적 {prod:,}행인데 자재사용(TAG 4) 0행 — "
+                       "생산은 나는데 자재가 안 빠진다(재고가 계속 남는다)")
+    return True, f"생산실적 {prod:,}행 → 자재사용 {use:,}행"
+
+
+def _f8_route(res, ctx):
+    """⑨상위품 행선지 분기 — 자재/파트/영업 세 갈래가 다 살아 있는가.
+       대표 지시: 상위가 자재면 자재창고 · 파트면 파트창고 · 본인이면 영업창고.
+       ★한 갈래라도 0 이면 그 유형의 생산품 재고가 통째로 증발한다."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    to_part, to_sale, to_mat = (int(r[i] or 0) for i in range(3))
+    tail = f"파트창고 {to_part:,} · 영업창고 {to_sale:,} · 자재창고 {to_mat:,}"
+    dead = [n for n, v in (("파트", to_part), ("영업", to_sale)) if v == 0]
+    if dead:
+        return False, f"★{tail} — {'·'.join(dead)} 갈래가 0행(그 유형 생산품 재고가 안 선다)"
+    return True, tail + "  = 세 갈래 모두 생존"
+
+
+def _f9_ship(res, ctx):
+    """⑩출하 → ⑪완제품 재고 차감 — 출하가 영업재고를 실제로 줄이는가."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    sale, minus, stock = (int(r[i] or 0) for i in range(3))
+    if sale == 0:
+        return True, "출하 이력 없음 — 이 구간 미사용"
+    if minus == 0:
+        return False, (f"★출하 {sale:,}행인데 영업 차감(음수 수불) 0행 — "
+                       "출하해도 완제품 재고가 안 준다")
+    return True, f"출하 {sale:,}행 · 영업차감 {minus:,}행 · 영업재고 {stock:,}행"
+
+
+def _f10_chain(res, ctx):
+    """★전 구간 한 줄 — 각 단계가 **동시에** 살아 있는가(끊긴 마디 찾기).
+       단계별로 따로 보면 다 통과하는데 줄로 보면 끊겨 있는 게 이 TestBed 의 존재 이유다."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    names = ["①계획", "②소요", "③입고", "④준비", "⑥이동", "⑦생산", "⑧차감", "⑩출하"]
+    vals = [int(r[i] or 0) for i in range(len(names))]
+    dead = [n for n, v in zip(names, vals) if v == 0]
+    tail = " · ".join(f"{n} {v:,}" for n, v in zip(names, vals))
+    if dead:
+        return False, f"★줄이 끊겼다 — {'·'.join(dead)} 가 0. ({tail})"
+    return True, f"전 구간 연결 OK — {tail}"
+
+
+F_CASES = [
+    # ── F1. ②자재발주 — 소요가 발주로 이어지는가 ────────────────────
+    dict(kind="S", name="[전구간] F1 ②발주 — 소요가 세트요청으로 이어지는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.plan_mat_source WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.set_input_req WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_SET_INPUT_REQ_DTL WITH(NOLOCK))"""),
+         check=_f1_order),
+
+    # ── F2. ③바코드입고 — 재고 3곳(원장·잔량·수불이력)에 다 갔는가 ───
+    #    ★반복 실사용 버그: 3곳 중 일부만 기입해 "저장은 됐는데 화면에 안 나옴".
+    dict(kind="S", name="[전구간] F2 ★③바코드입고 — 재고 3곳에 모두 기입되는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.set_stock_maint WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.stock_ledger WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE INSERT_USER_ID='web')"""),
+         check=_f2_barcode_in),
+
+    # ── F3. ③-a 검사 분기 — 검사대기분이 재고로 새지 않는가 ──────────
+    #    게이트 = common.py:536. 뚫리면 미검사품을 생산이 쓴다.
+    dict(kind="S", name="[전구간] F3 ★검사 게이트 — 대기분이 재고로 새지 않는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE ISNULL(insp_flag,'N') IN ('S','F')
+                        AND ISNULL(insp_proc_flag,'0')<>'1'),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE ISNULL(insp_flag,'N') IN ('S','F')
+                        AND ISNULL(insp_proc_flag,'0')='1'),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE ISNULL(insp_flag,'N') NOT IN ('S','F')),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT a WITH(NOLOCK)
+                      WHERE a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1'
+                        AND ISNULL(a.TO_GAGONG_PROC_CODE,'')>''
+                        AND ISNULL(a.insp_flag,'N') IN ('S','F')
+                        AND ISNULL(a.insp_proc_flag,'0')<>'1')"""),
+         check=_f3_insp),
+
+    # ── F4. ③-b 직납품 — 입고와 동시에 영업창고 출고 ─────────────────
+    #    대표 지시: 직납은 영업창고에서만 출하 가능.
+    dict(kind="S", name="[전구간] F4 ★직납 — 자재입고와 동시에 영업창고 출고되는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.item WITH(NOLOCK)
+                      WHERE RTRIM(ISNULL(in_cust,''))<>''),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT s WITH(NOLOCK)
+                      WHERE s.INSERT_USER_ID='web' AND s.maint_tag IN ('9','S')
+                        AND EXISTS(SELECT 1 FROM nx.item i WITH(NOLOCK)
+                                    WHERE RTRIM(i.item_code)=RTRIM(s.MAT_CODE)
+                                      AND RTRIM(ISNULL(i.in_cust,''))<>'')),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE INSERT_USER_ID='web' AND maint_tag='B'
+                        AND ISNULL(out_wh_gubun,'')='2')"""),
+         check=_f4_direct),
+
+    # ── F5. ④생산준비등록 ⑤키팅실적 ─────────────────────────────────
+    dict(kind="S", name="[전구간] F5 ④준비·⑤키팅 — 준비재고가 서는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.PU_T_READY_STOCK WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_READY_STOCK_MAINT WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.ready_ledger WITH(NOLOCK))"""),
+         check=_f5_ready),
+
+    # ── F6. ⑥자재창고 → 생산창고 이동 ───────────────────────────────
+    #    행선지(TO_GAGONG_PROC_CODE)가 없으면 생산창고 재고가 안 선다(common.py:546).
+    dict(kind="S", name="[전구간] F6 ⑥자재→생산창고 이동 — 행선지가 붙는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE maint_tag='B'),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE maint_tag='B' AND ISNULL(TO_GAGONG_PROC_CODE,'')>'')"""),
+         check=_f6_move),
+
+    # ── F7. ⑦생산실적 → ⑧자재재고 차감 ─────────────────────────────
+    dict(kind="S", name="[전구간] F7 ★⑦생산실적 → ⑧자재차감이 따라붙는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.PR_T_PROD_DTL WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PR_T_STOCK_MAINT_MAT WITH(NOLOCK)
+                      WHERE MAINT_TAG='4')"""),
+         check=_f7_prod),
+
+    # ── F8. ⑨상위품 행선지 분기 (자재/파트/영업 세 갈래) ─────────────
+    #    대표 지시: 상위가 자재면 자재창고 · 파트면 파트창고 · 본인이면 영업창고.
+    dict(kind="S", name="[전구간] F8 ★⑨상위품 행선지 — 파트·영업·자재 세 갈래가 사는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.PR_T_PROD_DTL WITH(NOLOCK)
+                      WHERE ISNULL(STOCK_PART_CODE,'')>''),
+                    (SELECT COUNT(*) FROM nx.SA_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE maint_tag='P' AND ISNULL(IN_PART_CODE,'')=''),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE maint_tag IN ('C','G','H'))"""),
+         check=_f8_route),
+
+    # ── F9. ⑩출하 → ⑪완제품(영업) 재고 차감 ────────────────────────
+    dict(kind="S", name="[전구간] F9 ⑩출하 → ⑪완제품 재고가 줄어드는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.sale_dtl WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.SA_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE MAINT_QTY<0),
+                    (SELECT COUNT(*) FROM nx.SA_T_ITEM_STOCK WITH(NOLOCK))"""),
+         check=_f9_ship),
+
+    # ── F10. ★전 구간 한 줄 — 끊긴 마디 찾기 ────────────────────────
+    #    단계별로 보면 다 통과하는데 줄로 보면 끊겨 있는 것을 잡는 게 목적.
+    dict(kind="S", name="[전구간] F10 ★★전 구간 한 줄 — 끊긴 마디가 없는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.plan_dtl WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.plan_part_mat WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE maint_tag IN ('9','S','C','G','H')),
+                    (SELECT COUNT(*) FROM nx.PU_T_READY_STOCK_MAINT WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)
+                      WHERE maint_tag='B'),
+                    (SELECT COUNT(*) FROM nx.PR_T_PROD_DTL WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PR_T_STOCK_MAINT_MAT WITH(NOLOCK)
+                      WHERE MAINT_TAG='4'),
+                    (SELECT COUNT(*) FROM nx.sale_dtl WITH(NOLOCK))"""),
+         check=_f10_chain),
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# [G] 전체 프로세스 — **실제 쓰기 API 를 태워** 프로세스가 도는지 본다
+#
+#   ★F 그룹은 "데이터가 있는가"(읽기·SQL 대사)를 본다. G 그룹은 한 걸음 더 가서
+#     **실제 엔드포인트를 호출**한다. 롤백 모드라 DB 는 확정되지 않는다(오염 0).
+#
+#   왜 필요한가: E·F 는 전부 읽기라 "어제까지 돌던 흔적"만 본다. 오늘 코드가
+#   깨져 있어도 어제 데이터가 있으면 PASS 가 난다. 쓰기를 태워야 **지금 도는지**
+#   알 수 있다 — 이게 대표 지시("전체 프로세스로 해줘")의 핵심이다.
+#
+#   ★안전 규칙
+#     - 편성(①④⑤)은 여기서도 **실행하지 않는다** — DROP+재생성 수백초, 공유
+#       트랜잭션이 잠긴다(E 그룹 설계 주석과 동일 이유).
+#     - 재료가 없으면 **skip_if 로 건너뛴다.** 없는 걸 만들어 넣지 않는다.
+#     - 판정은 "200 이 떴는가"가 아니라 **"다음 단계가 쓸 값이 돌아왔는가"**.
+#
+#   실측 확정(2026-09-01)
+#     세트요청 nx.set_input_req : insp_flag 0/1 · status 00→10→30(검사대기)→90
+#                                 검사대기 64건 · 검사완료 245건
+#     자재수불 PU_T_STOCK_MAINT : insp_flag N/S/F (별개 체계 — F3 이 봄)
+#     발주 3계열               : autoorder(auto_po) · manorder(manual_order) · 세트요청
+# ═══════════════════════════════════════════════════════════════════════
+
+def _g_pick_wait(ctx):
+    """검사대기(status=30) 1건을 골라 ctx 에 넣는다. 없으면 None."""
+    return ctx.get("g_wait")
+
+
+def _g0_seed(res, ctx):
+    """G 그룹 재료 확보 — 검사완료 API 가 받을 실물 (ymd, seq) 를 ctx 에 심는다.
+       ★대상 테이블은 **nx.set_stock_maint**(입고내역, status 30)다.
+         set_input_req 가 아니다 — API 가 maint_ymd·maint_seq 로 찾는다(setin.py:1255).
+       ★게다가 _derive_set_stock 은 **송장번호**를 필요로 하므로, 짝이 되는
+         set_input_req(barcode_no=sheet_no·item_code) 가 있는 건만 골라야 한다.
+         없으면 API 가 'skipped' 로 넘기고 done=0 이 된다(실측 함정, setin.py:1277)."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    ymd = str(r[0] or "").strip()
+    seq = int(r[1] or 0)
+    item = str(r[2] or "").strip()
+    n30 = int(r[3] or 0)
+    n90 = int(r[4] or 0)
+    if ymd and seq:
+        ctx["g_wait_ymd"] = ymd
+        ctx["g_wait_seq"] = seq
+        ctx["g_wait_item"] = item
+    tail = f"입고내역 검사대기 {n30:,}건 · 완료 {n90:,}건"
+    if not (ymd and seq):
+        return True, tail + " · 송장 짝 있는 대기건 없음 → 쓰기 케이스 skip"
+    return True, tail + f" · 시료 {ymd}-{seq} ({item})"
+
+
+def _g0b_nodtl(res, ctx):
+    """명세(set_input_req_dtl · 미러 _DTL) 가 없는 미완료 세트요청.
+       ★이 건은 검사완료를 눌러도 `_derive_set_stock` 이 읽을 재료가 없어 **원장 0행**이 된다
+         (setin.py:946-962 — 웹 명세 → 미러 폴백, 둘 다 없으면 dtl=[]).
+         화면은 '완료'라고 하는데 재고가 안 서므로 조용히 새는 유형이다."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    tot, miss = int(r[0] or 0), int(r[1] or 0)
+    if tot == 0:
+        return True, "미완료 세트요청 없음"
+    rate = 100.0 * miss / tot
+    tail = f"미완료 세트요청 {tot:,}건 중 명세 없음 {miss:,}건 ({rate:.1f}%)"
+    if miss == 0:
+        return True, tail + " = 전건 파생 가능"
+    # 소수 예외는 경고로 남기되 FAIL 로 올린다 — 그대로 두면 재고가 샌다.
+    return False, ("★" + tail + " — 이 건들은 검사완료해도 원장 0행이 된다"
+                   "(발행 경로가 명세를 안 만들었다)")
+
+
+def _g1_iqc_list(res, ctx):
+    """⑤-a IQC 검사대기 화면이 실물을 읽는가 (실제 GET)."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, ("★검사대기 목록이 0행 — DB 에는 대기분이 있는데 화면이 못 읽는다"
+                       if ctx.get("g_wait_bc") else "검사대기 없음(결함 아님)")
+    ctx["g_iqc_rows"] = len(rows)
+    return True, f"검사대기 {len(rows)}행 — 화면이 실물을 읽는다"
+
+
+def _g2_iqc_complete(res, ctx):
+    """⑤-b ★검사완료를 **실제로 실행**한다(롤백됨).
+       유검사품이 검사완료로 넘어가면서 재고 파생(_derive_set_stock)까지 도는가.
+       ★이게 도는지가 '유검사 → 검사대기 → 검사완료 → 재고입고' 구간의 실체다."""
+    if _refused(res):
+        return False, f"★검사완료 거부 — {res.get('detail')}"
+    if not isinstance(res, dict):
+        return False, "★응답 형식 이상"
+    if res.get("ok") is False:
+        return False, f"★검사완료 실패 — {res.get('detail') or res.get('msg')}"
+    done = int(res.get("done") or 0)
+    posted = int(res.get("ledger_posted") or 0)
+    skipped = res.get("skipped") or []
+    if not done:
+        # ★skipped 사유를 그대로 보여준다 — '왜 안 됐는지'가 판정보다 중요하다.
+        why = "; ".join(str(x) for x in skipped[:3]) or str(res)[:120]
+        return False, f"★검사완료 0건 처리 — {why}"
+    ctx["g_posted"] = posted
+    tail = f"검사완료 {done}건 · 원장기입 {posted}행 (롤백됨) — 유검사 경로가 돈다"
+    if posted == 0:
+        return False, "★" + tail.replace("돈다", "도는데 원장이 0행(재고 파생이 끊겼다)")
+    return True, tail
+
+
+def _g3_derive(res, ctx):
+    """⑤-c 검사완료 **직후** 재고가 실제로 섰는가 (같은 트랜잭션 안에서 확인).
+       ★쓰기 API 가 200 을 줘도 재고가 안 서면 의미가 없다 — 그걸 잡는 케이스."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    led, wh, maint = (int(r[i] or 0) for i in range(3))
+    base = ctx.get("g_base_stock") or (0, 0, 0)
+    d = (led - base[0], wh - base[1], maint - base[2])
+    tail = f"원장 {d[0]:+,} · 잔량 {d[1]:+,} · 수불이력 {d[2]:+,} (검사완료 직후 증분)"
+    if d[0] <= 0 and d[2] <= 0:
+        return False, "★" + tail + " — 검사완료는 됐는데 재고가 안 섰다(파생 끊김)"
+    return True, tail
+
+
+def _g_base_stock(res, ctx):
+    """쓰기 **전** 재고 3곳 기준선을 ctx 에 저장(증분 판정용)."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    ctx["g_base_stock"] = tuple(int(r[i] or 0) for i in range(3))
+    return True, ("기준선 — 원장 %s · 잔량 %s · 수불이력 %s"
+                  % tuple(format(v, ",") for v in ctx["g_base_stock"]))
+
+
+def _g4_order3(res, ctx):
+    """②발주 3계열 — autoorder · manorder · 세트요청이 각각 사는가.
+       ★F1 은 세트요청만 봤다(계열 축소 오류). 실제 축은 3개다."""
+    r, why = _f_row(res)
+    if r is None:
+        return False, why
+    src, apo, apol, mo, req = (int(r[i] or 0) for i in range(5))
+    if src == 0:
+        return True, "조달소요 비어 있음 — 아직 편성 전(결함 아님)"
+    tail = (f"조달소요 {src:,} → 자동발주 {apo:,}건({apol:,}행) · "
+            f"수동발주 {mo:,}건 · 세트요청 {req:,}건")
+    if apo == 0 and mo == 0 and req == 0:
+        return False, "★" + tail + " — 세 계열 모두 0(소요는 났는데 발주가 아예 안 나간다)"
+    return True, tail
+
+
+def _g5_stock_screens(res, ctx):
+    """재고 4화면(자재·파트·영업·세트)이 각각 값을 내는가 — 실제 GET 로 확인.
+       ★한 화면이라도 0 이면 그 창고 재고를 아무도 못 본다."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    return True, f"{len(_rows(res))}행"
+
+
+G_CASES = [
+    # ── G0. 재료 확보 (검사대기 실물 1건) ───────────────────────────
+    #    ★★시료 선정 기준이 판정을 좌우한다(2026-09-01 실측 교훈).
+    #      처음엔 '송장(set_input_req) 짝이 있는 건'만 걸렀는데, 재고파생의 실제 재료는
+    #      **명세(set_input_req_dtl)** 다. 명세 없는 예외 7건 중 하나가 뽑혀 G3 이 FAIL 났고
+    #      그건 코드 결함이 아니라 **케이스가 나쁜 시료를 고른 것**이었다.
+    #      ⟹ 명세까지 있는 건만 시료로 삼는다. 명세 없는 건은 G0b 가 따로 드러낸다.
+    dict(kind="S", name="[전구간] G0 재료 확보 — 검사대기 실물이 있는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             WITH c AS (
+               SELECT TOP 1 RTRIM(ISNULL(m.maint_ymd,'')) ymd, m.maint_seq seq,
+                      RTRIM(ISNULL(m.item_code,'')) item
+                 FROM nx.set_stock_maint m WITH(NOLOCK)
+                WHERE RTRIM(ISNULL(m.status,''))='30'
+                  AND EXISTS(
+                      SELECT 1 FROM nx.set_input_req r WITH(NOLOCK)
+                       WHERE RTRIM(ISNULL(r.barcode_no,''))=RTRIM(ISNULL(m.sheet_no,''))
+                         AND RTRIM(ISNULL(r.item_code,''))=RTRIM(ISNULL(m.item_code,''))
+                         AND (EXISTS(SELECT 1 FROM nx.set_input_req_dtl d WITH(NOLOCK)
+                                      WHERE RTRIM(ISNULL(d.sheet_no,''))=RTRIM(ISNULL(r.sheet_no,'')))
+                           OR EXISTS(SELECT 1 FROM nx.PU_T_SET_INPUT_REQ_DTL d2 WITH(NOLOCK)
+                                      WHERE RTRIM(ISNULL(d2.SHEET_NO,''))=RTRIM(ISNULL(r.sheet_no,'')))))
+                ORDER BY m.maint_ymd DESC, m.maint_seq DESC)
+             SELECT (SELECT ymd FROM c), (SELECT seq FROM c), (SELECT item FROM c),
+                    (SELECT COUNT(*) FROM nx.set_stock_maint WITH(NOLOCK)
+                      WHERE RTRIM(ISNULL(status,''))='30'),
+                    (SELECT COUNT(*) FROM nx.set_stock_maint WITH(NOLOCK)
+                      WHERE RTRIM(ISNULL(status,''))='90')"""),
+         check=_g0_seed),
+
+    # ── G0b. ★명세 없는 세트요청 — 검사완료해도 재고가 안 서는 건 ────
+    #    실측 7/1,511건(0.5%). 이 건들은 검사완료를 눌러도 원장 0행이 된다.
+    #    발행 경로가 명세를 못 만든 것이므로 **드러내야 한다**(조용히 넘기면 재고가 샌다).
+    dict(kind="S", name="[전구간] G0b ★명세 없는 세트요청 — 검사완료해도 재고가 안 선다",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT COUNT(*) tot, SUM(miss) miss FROM (
+               SELECT CASE WHEN EXISTS(SELECT 1 FROM nx.set_input_req_dtl d WITH(NOLOCK)
+                              WHERE RTRIM(ISNULL(d.sheet_no,''))=RTRIM(ISNULL(r.sheet_no,'')))
+                        OR EXISTS(SELECT 1 FROM nx.PU_T_SET_INPUT_REQ_DTL d2 WITH(NOLOCK)
+                              WHERE RTRIM(ISNULL(d2.SHEET_NO,''))=RTRIM(ISNULL(r.sheet_no,'')))
+                           THEN 0 ELSE 1 END miss
+                 FROM nx.set_input_req r WITH(NOLOCK)
+                WHERE RTRIM(ISNULL(r.status,'')) IN ('00','10','30')) z"""),
+         check=_g0b_nodtl),
+
+    # ── G1. ⑤-a IQC 검사대기 화면이 실물을 읽는가 (실제 GET) ────────
+    dict(kind="S", name="[전구간] G1 유검사 → 검사대기 목록이 보이는가",
+         method="GET", path="/api/setinsp/list?stat=30&limit=50",
+         as_="super", expect=200, check=_g1_iqc_list),
+
+    # ── G2. 쓰기 전 재고 기준선 ─────────────────────────────────────
+    dict(kind="S", name="[전구간] G2 재고 기준선 (검사완료 전)",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.stock_ledger WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK))"""),
+         check=_g_base_stock),
+
+    # ── G5~G9 를 **G3(쓰기) 앞**에 둔다 ★락 경합 회피 ──────────────
+    #    2026-09-01 실측: G3 검사완료가 `_direct_out` 으로 nx.SA_T_ITEM_STOCK 을 UPDATE 하고
+    #    (setin.py:1041), 하네스는 autocommit=False 라 롤백 시점까지 그 락을 쥔다.
+    #    그 뒤에 둔 G8(영업재고 조회)이 락을 기다려 **600초 타임아웃**으로 FAIL 났다.
+    #    ⟹ 코드 결함이 아니라 **케이스 순서 문제**다(실측: 같은 조회를 실코드로 부르면 2.7초).
+    #    규칙: 쓰기 케이스가 건드리는 테이블을 읽는 케이스는 **쓰기보다 앞**에 배치한다.
+    dict(kind="S", name="[전구간] G5 ②발주 3계열 — 자동·수동·세트요청이 사는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.plan_mat_source WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.auto_po WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.auto_po_line WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.manual_order WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.set_input_req WITH(NOLOCK))"""),
+         check=_g4_order3),
+
+    # ── G6~G9. 재고 4화면이 실제로 값을 내는가 (실제 GET) ────────────
+    #    ★쓰기가 아무리 잘 돌아도 화면이 못 읽으면 운영이 안 된다.
+    dict(kind="S", name="[전구간] G6 재고화면 — 자재재고가 보이는가",
+         method="GET", path=lambda ctx: f"/api/stock/kanban?ymd={YMD}&limit=50",
+         as_="super", expect=200, check=_g5_stock_screens),
+
+    dict(kind="S", name="[전구간] G7 재고화면 — 생산(파트)재고가 보이는가",
+         method="GET", path="/api/live/prodstock?source=nx&limit=50",
+         as_="super", expect=200, check=_g5_stock_screens),
+
+    #    ★limit 파라미터는 없다(salesstock(dfrom,dto,source,zero)) — 붙여도 무시된다.
+    dict(kind="S", name="[전구간] G8 재고화면 — 영업(완제품)재고가 보이는가",
+         method="GET", path="/api/live/salesstock", as_="super", expect=200,
+         check=_g5_stock_screens),
+
+    dict(kind="S", name="[전구간] G9 재고화면 — 세트재고가 보이는가",
+         method="GET", path="/api/setstockio/list?limit=50",
+         as_="super", expect=200, check=_g5_stock_screens),
+
+    # ── G3. ★⑤-b 검사완료를 **실제로 실행** (롤백됨) ★맨 뒤에 둔다 ──
+    #    유검사 → 검사대기 → 검사완료 → 재고입고 구간의 실체.
+    #    ★payload = {"items":[{"ymd","seq"}]} (setin.py:1240·1248-1249)
+    dict(kind="S", name="[전구간] G3 ★★검사완료 실행 — 유검사 경로가 실제로 도는가",
+         method="POST", path="/api/setinsp/complete", as_="super", expect=200,
+         skip_if=lambda ctx: not ctx.get("g_wait_ymd"),
+         body=lambda ctx: {"items": [{"ymd": ctx.get("g_wait_ymd", ""),
+                                      "seq": ctx.get("g_wait_seq", 0)}]},
+         check=_g2_iqc_complete),
+
+    # ── G4. ★⑤-c 검사완료 직후 재고가 실제로 섰는가 ─────────────────
+    dict(kind="S", name="[전구간] G4 ★검사완료 직후 — 재고가 실제로 서는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         skip_if=lambda ctx: not ctx.get("g_wait_ymd"),
+         body=_f_sql("""
+             SELECT (SELECT COUNT(*) FROM nx.stock_ledger WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK))"""),
+         check=_g3_derive),
+]
+
+
+# ★E·F·G 그룹은 **CASES 앞**에 놓는다 — 무거운 조회를 먼저(§9 순서 규칙).
+#   G 는 쓰기를 태우므로 F(읽기 대사) 뒤에 둔다 — 기준선을 먼저 잡아야 증분이 의미를 갖는다.
+CASES = E_CASES + F_CASES + G_CASES + CASES
