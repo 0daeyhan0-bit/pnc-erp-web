@@ -886,15 +886,18 @@ SCREEN.gagongmove580=(c)=>{
     let tNeed=0,tMoved=0,tSale=0,tAssy=0,tPrint=0,tPrior=0;const dSum={};dates.forEach(d=>dSum[d]=0);
     st.rows.forEach(r=>{tNeed+=+r.need||0;tMoved+=+r.moved||0;tSale+=+r.sale||0;tAssy+=+r.assy_stock||0;tPrint+=+r.jp_print||0;tPrior+=+r.prior||0;
       dates.forEach(d=>{dSum[d]+=(r.days&&r.days[d])||0;});});
-    const NC=17;   // ★2026-08-24 자재재고·생산재고·도번고정재고 3컬럼 / 2026-09-01 ASSY도번 추가
+    // 고정컬럼수 = 앞 8(SEQ·최종납품처·ASSY도번·도번·자도번LIST·PART일자·INPUT·Line)
+    //            + 3(이동전표발행·이동필요·당일이전) + 뒤 5(출하·ASSY재고·자재재고·생산재고·도번고정)
+    const NC=16;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none;text-align:center"><thead><tr>
        <!-- ★ASSY도번 추가(2026-09-01 요청) — 레거시 580 에 있는 컬럼.
             '도번'은 가공품번(예 AJR74942626-고압)이라 ASSY 원본과 다르다. 둘 다 보여야 추적된다. -->
        <th>SEQ</th><th>최종납품처</th><th>ASSY도번</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
-       <th>이동전표발행</th><th>이동필요</th><th>출하</th><th>ASSY재고</th>
-       <th>자재재고</th><th>생산재고</th><th>도번고정</th><th>당일이전</th>
-       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
+       <th>이동전표발행</th><th>이동필요</th><th>당일이전</th>
+       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}
+       <!-- ★재고류 5종을 일자 뒤로(2026-09-01 요청) — 계획·일자를 먼저 보고 재고는 참고로 -->
+       <th>출하</th><th>ASSY재고</th><th>자재재고</th><th>생산재고</th><th>도번고정</th></tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
@@ -914,11 +917,6 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.line)}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.jp_print?'':';color:#dfe6ef'}">${r.jp_print?nf(r.jp_print):'·'}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef'}">${r.need>0?nf(r.need):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td>
         ${(()=>{const on=st.sel.has(`${i}:P`);   // 당일이전(plan_qty_00)도 선택 대상 — 키는 '행:P'
           if(!r.prior)return `<td class="center" style="color:#dfe6ef">·</td>`;
           const bg=r.prior_color||'';
@@ -926,12 +924,24 @@ SCREEN.gagongmove580=(c)=>{
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,bg=(r.colorday&&r.colorday[d])||'';
           if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const key=`${i}:${d}`, on=st.sel.has(key);
-          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}</tr>
+          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}
+        <!-- ★재고류 5종 — 일자 뒤(2026-09-01 요청) -->
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td></tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334;text-align:left">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody>
-      ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="8">합계 (${nf(st.cnt)}행)</td>
-        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td><td class="center">${nf(tPrior)}</td>
-        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
+      ${(()=>{if(!st.rows.length)return '';
+        // ★재고류를 일자 뒤로 옮겼으므로 합계행도 같은 순서로(2026-09-01).
+        let tStock=0,tPr=0,tFix=0;
+        st.rows.forEach(r=>{tStock+=+r.stock||0;tPr+=+r.pr_stock||0;tFix+=+r.fix_stock||0;});
+        return `<tfoot><tr class="grandtot"><td colspan="8">합계 (${nf(st.cnt)}행)</td>
+        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tPrior)}</td>
+        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}
+        <td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td>
+        <td class="center">${nf(tStock)}</td><td class="center">${nf(tPr)}</td><td class="center">${nf(tFix)}</td></tr></tfoot>`;})()}
       </table></div>`;
   };
   // ★"이동전표" 모드 — MAINT_GROUP_SEQ(전표) 단위 발행목록. 확정여부(입고확인)와 각 전표 재출력 버튼.
