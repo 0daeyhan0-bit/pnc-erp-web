@@ -2665,7 +2665,7 @@ const _mkMagam=(CFG)=>(c)=>{
     const byMat={};items.forEach(it=>byMat[it.mat]=it);
     // 인라인 변경사유 셀(같은 행) — 변경사유(select) + 세부사유(input). 세부사유 컬럼이 남는 폭 흡수.
     const _rcell=(ed,t,mat,d,rc,rd)=>ed
-      ?`<td class="center"><select class="inp sm-rc" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" style="width:112px;height:22px;font-size:11.5px" ${rdis}><option value="">사유</option>${reasons.map(r=>`<option value="${esc(r.code)}" ${r.code===(rc||'')?'selected':''}>${esc(r.name)}</option>`).join('')}</select></td><td style="width:100%"><input class="inp sm-rd" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" value="${esc(rd||'')}" placeholder="세부사유(선택)" style="width:98%;height:22px;text-align:left" ${rdis}></td>`
+      ?`<td class="center"><select class="inp sm-rc" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" style="width:112px;height:22px;font-size:11.5px" ${rdis}><option value="">사유</option>${reasons.map(r=>`<option value="${esc(r.code)}" ${r.code===(rc||'')?'selected':''}>${esc(r.name)}</option>`).join('')}</select></td><td style="width:100%"><input class="inp sm-rd" data-t="${t}" data-mat="${esc(mat)}" data-d="${d}" value="${esc(rd||'')}" placeholder="세부사유(필수)" style="width:98%;height:22px;text-align:left" ${rdis}></td>`
       :`<td></td><td style="width:100%"></td>`;
     let rows='';
     if(view2==='item'){
@@ -2757,15 +2757,15 @@ const _mkMagam=(CFG)=>(c)=>{
       if(pe&&pe.nc!=null&&pe.nc!==''&&+pe.nc!==+it.cost){const dd=(it.byday||[]).reduce((a,bd)=>a+((dEdit[dkey(it.mat,bd.d)]||bd.carry)?0:(+pe.nc-+bd.cost)*(+bd.qty)),0);
         if(dd!==0)adjRows+=`<div class="sm-adj-row"><span style="min-width:180px"><b>품목단가</b> ${esc(it.mat)} ${num(it.cost)}→${num(pe.nc)} <span class="mut">(${won0(dd)})</span></span>
           <select class="sel rsel sm-prc" data-mat="${esc(it.mat)}" ${rdis}>${rsOpt(pe.rc)}</select>
-          <input class="inp rdet sm-prd" data-mat="${esc(it.mat)}" value="${esc(pe.rd||'')}" placeholder="세부 사유(선택)" ${rdis}></div>`;}
+          <input class="inp rdet sm-prd" data-mat="${esc(it.mat)}" value="${esc(pe.rd||'')}" placeholder="세부 사유(필수)" ${rdis}></div>`;}
       (it.byday||[]).forEach(bd=>{const de=dEdit[dkey(it.mat,bd.d)];if(!de)return;const ncC=de.nc!=null&&de.nc!==''&&+de.nc!==+bd.cost;if(!ncC)return;const e=effDay(it,bd);
         const lbl=`단가 ${num(bd.cost)}→${num(de.nc)}`;
         adjRows+=`<div class="sm-adj-row"><span style="min-width:180px"><b>${mmdd(bd.d)}일</b> ${esc(it.mat)} ${lbl} <span class="mut">(${won0(e.delta)})</span></span>
           <select class="sel rsel sm-drc" data-mat="${esc(it.mat)}" data-d="${bd.d}" ${rdis}>${rsOpt(de.rc)}</select>
-          <input class="inp rdet sm-drd" data-mat="${esc(it.mat)}" data-d="${bd.d}" value="${esc(de.rd||'')}" placeholder="세부 사유(선택)" ${rdis}></div>`;});});
+          <input class="inp rdet sm-drd" data-mat="${esc(it.mat)}" data-d="${bd.d}" value="${esc(de.rd||'')}" placeholder="세부 사유(필수)" ${rdis}></div>`;});});
     const amtAdjRows=amtAdjs.map((a,i)=>`<div class="sm-adj-row"><input type="number" step="any" class="inp sm-aamt" data-i="${i}" value="${a.amt}" placeholder="증액(+)/차감(-)" ${rdis}>
         <select class="sel rsel sm-arc" data-i="${i}" ${rdis}>${rsOpt(a.rc)}</select>
-        <input class="inp rdet sm-ard" data-i="${i}" value="${esc(a.rd||'')}" placeholder="세부 사유(선택)" ${rdis}>${mClosed?'':`<span class="sm-adel" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span>`}</div>`).join('');
+        <input class="inp rdet sm-ard" data-i="${i}" value="${esc(a.rd||'')}" placeholder="세부 사유(필수)" ${rdis}>${mClosed?'':`<span class="sm-adel" data-i="${i}" style="cursor:pointer;color:#c0392b">✖</span>`}</div>`).join('');
     m.innerHTML=`<div class="sm-ov"><div class="sm-dlg">
       <div class="sm-dlg-h"><b>${esc(mc.nm)}</b> <span style="opacity:.85">(${esc(mc.cc)}) · 마감 ${esc(ymToInput(ym))}</span>${mClosed?'<span class="sm-badge on" style="background:#fff;color:#2e7d32">🔒 마감완료</span>':''}<span class="x" id="sm-x">✖</span></div>
       <div class="sm-dlg-b">
