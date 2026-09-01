@@ -394,15 +394,18 @@ import time as _time
 _DPI_CACHE = {}   # dailypurissue: d6 -> (expiry_ts, result). 무거운 재고조정 3쿼리(_prodstock 등) → 날짜별 캐시(재조회 즉시)
 
 @live_router.get("/dailypurissue")
-def dailypurissue(date: str = Query(""), nocache: str = Query("")):
+def dailypurissue(date: str = Query(""), frm: str = Query(""), nocache: str = Query("")):
     """일일 영업/매입 현황 ① 매입/불출/실매입 by 구분(CUST_TYPE + 사급원소재 오버라이드).
-       date=조회일(YYMMDD). 마감기준: 누적=마감월초~전일, 당일=조회일, 총=누적+당일. 금액=공급가(MAINT_AMT, VAT제외).
-       ★날짜별 결과 캐시(TTL 180초). nocache=1로 강제 재계산."""
+       date=종료일(YYMMDD·조회일), frm=시작일(YYMMDD, 기본=종료일 달의 1일). 기간=[frm, date].
+       누적=시작~전일, 당일=종료일, 총=누적+당일. 기초재고=종료일 달 기준. 금액=공급가(MAINT_AMT, VAT제외).
+       ★기간별 결과 캐시(TTL 180초). nocache=1로 강제 재계산."""
     d6 = _digits(date, 6) or _scalar("SELECT FORMAT(GETDATE(),'yyMMdd')")
     ym = d6[:4]
+    frm6 = _digits(frm, 6) or (ym + '01')   # 시작일(기본=종료일 달의 1일)
     _now = _time.time()
+    _ckey = d6 + '_' + frm6
     if not str(nocache).strip():
-        _hit = _DPI_CACHE.get(d6)
+        _hit = _DPI_CACHE.get(_ckey)
         if _hit and _hit[0] > _now:
             return _hit[1]
     ov = _vgubun()
@@ -415,8 +418,8 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
             m[g] = m.get(g, 0.0) + float(r.get('kamt') or 0)   # ★KRW환산(외화 거래처=원통화 아님). 리포트=금액(KRW)
         return m
     win = f"A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{ym}'+mg.magam_day"
-    dc_cum = win + f" AND A.MAINT_YMD < '{d6}'"      # 누적=마감월초~전일
-    dc_day = win + f" AND A.MAINT_YMD = '{d6}'"      # 당일=조회일
+    dc_cum = win + f" AND A.MAINT_YMD >= '{frm6}' AND A.MAINT_YMD < '{d6}'"   # 누적=시작일~전일
+    dc_day = win + f" AND A.MAINT_YMD = '{d6}'"      # 당일=종료일
     pur_cum, pur_day = agg(_receipt(dc_cum, ym)), agg(_receipt(dc_day, ym))
     out_cum, out_day = agg(_dispatch(dc_cum, ym)), agg(_dispatch(dc_day, ym))
     gubuns = list(_GUBUN_ORDER)
@@ -434,7 +437,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     def tot(rs): return {"cum": sum(r['cum'] for r in rs), "day": sum(r['day'] for r in rs), "tot": sum(r['tot'] for r in rs)}
     pur_t, out_t, net_t = tot(pur), tot(out), tot(net)
 
-    m0 = ym + '01'   # 월초(YYMMDD)
+    m0 = frm6   # 기간 시작일(기본=종료일 달의 1일). 리시빙/사급/매출요약 집계 시작.
     # ⑤ 현매출 = 리시빙(월초~조회일) × 품목구분(nx.item.cut_gubun). ★LG리시빙관리 소스와 동일: SUM(recv_amt) 그대로(GUBUN C−R 빼지 않음).
     _c, rr = _rows(f"""SELECT ISNULL(i.cut_gubun,'') cg, SUM(ISNULL(r.RECV_AMT,0)) amt
       FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL r  -- ★리시빙 기준=라이브(nx미러 stale로 최근입고 누락 → LG리시빙관리와 불일치 수정)
@@ -595,7 +598,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _tsg = {r['t']: float(r['a'] or 0) for r in _rot}
     t_raw, t_part = round(_tsg.get('raw', 0)), round(_tsg.get('part', 0))
 
-    _res = {"date": d6, "ym": ym,
+    _res = {"date": d6, "frm": frm6, "ym": ym,
             "pur": pur, "pur_tot": pur_t, "out": out, "out_tot": out_t, "net": net, "net_tot": net_t,
             # ⑥ 당일 실적(조회일) — 매출(절삭/설치/기타/합계) + 사급(원소재/부품/합계)
             "today": {"hyeon_cut": t_cut, "hyeon_seol": t_seol, "hyeon_etc": t_etc, "sales_hab": t_cut + t_seol + t_etc,
@@ -619,7 +622,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
                     "lg_raw": osp_raw, "lg_part": osp_part, "dangsa_raw": dangsa_raw, "dangsa_part": dangsa_part},
             # ⑤ 매출요약 (상반기 h1 / 하반기 h2 / 합계 tot · 원화). 현매출=실적, 추가매출=예상, 사급=원재료(예상0)/부품, LG수금=(내수−사급)×10%+유상제외
             "maechul": maechul}
-    _DPI_CACHE[d6] = (_time.time() + 180, _res)   # ★180초 캐시(재조회 즉시). 오늘자도 3분 이내 재계산 안 함.
+    _DPI_CACHE[_ckey] = (_time.time() + 180, _res)   # ★180초 캐시(기간별). 재조회 즉시.
     return _res
 
 # ================= 확정입고명세서 (구매/자재, dw_pu_input_110) — 라인단위 =================

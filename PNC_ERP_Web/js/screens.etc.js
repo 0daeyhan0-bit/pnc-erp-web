@@ -2324,11 +2324,13 @@ SCREEN.dailypurissue=(c)=>{
   const API=API_BASE;
   const _ymd=(d)=>{const p=n=>(''+n).padStart(2,'0');return `${(''+d.getFullYear()).slice(2)}${p(d.getMonth()+1)}${p(d.getDate())}`;};
   const _yst=(()=>{const d=new Date();d.setDate(d.getDate()-1);return _ymd(d);})();   // ★전일(어제)
-  let F=null, loading=false, day=_yst;   // ★조회일 기본=전일. 실행 시 자동조회.
+  const _m01=_yst.slice(0,4)+'01';   // ★전일이 속한 달의 1일
+  let F=null, loading=false, day=_yst, frm=_m01;   // ★기간 기본 = (전일의 달)1일 ~ 전일. 실행 시 자동조회.
   const y2d=y=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';   // YYMMDD→date
   const d2y=d=>d?d.slice(2).replace(/-/g,''):'';                                             // date→YYMMDD
-  const load=async(d)=>{loading=true;draw();
-    try{const r=await fetch(`${API}/api/live/dailypurissue${d?('?date='+d):''}`);F=await r.json();day=F.date||d||'';}
+  const load=async(f,t)=>{loading=true;draw();
+    try{const q=[];if(f)q.push('frm='+f);if(t)q.push('date='+t);
+      const r=await fetch(`${API}/api/live/dailypurissue${q.length?('?'+q.join('&')):''}`);F=await r.json();day=F.date||t||day;frm=F.frm||f||frm;}
     catch(e){F=null;}
     loading=false;draw();};
   const sec=(rows,tot,lbl,color)=>{
@@ -2341,12 +2343,12 @@ SCREEN.dailypurissue=(c)=>{
     const mrow=(lbl,o,bold,day)=>{const d=o||{h1:0,h2:0,tot:0};const z=v=>v?wonI(v):'-';return `<tr${bold?' style="font-weight:700"':''}><td>${lbl}</td><td class="num" style="background:#f2faf4">${day===undefined?'':(day?wonI(day):'-')}</td><td class="num">${z(d.h1)}</td><td class="num">${z(d.h2)}</td><td class="num">${z(d.tot)}</td></tr>`;};
     c.innerHTML=`
      <div class="page-title">📋 일일 영업/매입 현황 <span style="font-size:12px;color:var(--muted);font-weight:400">확정입고·불출 마감기준 · 구분별 누적/당일/총 · 단위 원(공급가, VAT제외)</span></div>
-     <div class="page-sub">조회일 선택 → 마감월초~전일=<b>누적</b>, 조회일=<b>당일</b>, 누적+당일=<b>총</b>. 매입=확정입고(CUST_TYPE+사급원소재), 불출=자재불출, 실매입=매입−불출.</div>
+     <div class="page-sub">기간(그달 1일 ~ 전일) 선택 → 시작~전일=<b>누적</b>, 종료일=<b>당일</b>, 누적+당일=<b>총</b>. 기초재고=종료일 달 기준. 매입=확정입고(CUST_TYPE+사급원소재), 불출=자재불출, 실매입=매입−불출.</div>
      <div class="toolbar">
-       <label class="tl">조회일</label><input type="date" class="inp" id="dp-d" value="${y2d(day)}" style="width:150px">
-       <button class="btn" id="dp-go">🔍 조회</button>
+       <label class="tl">기간</label><input type="date" class="inp" id="dp-f" value="${y2d(frm)}" style="width:148px"><span class="mut">~</span><input type="date" class="inp" id="dp-d" value="${y2d(day)}" style="width:148px">
+       <button class="btn" id="dp-go">조회</button>
        <div class="spacer"></div>
-       ${F?`<span class="rowcount">${esc(F.date||'')} 기준</span>`:''}
+       ${F?`<span class="rowcount">${esc(F.frm||'')}~${esc(F.date||'')} 기준</span>`:''}
        <button class="btn xls" id="dp-xls">📥 엑셀</button>
      </div>
      ${loading?`<div style="padding:20px;color:#b8860b">불러오는 중…</div>`:(F?`
@@ -2412,8 +2414,11 @@ SCREEN.dailypurissue=(c)=>{
        </div>`})():''}
        </div>`:`<div style="padding:20px;color:#8aa0bd">조회일을 선택하고 [조회]를 누르세요.</div>`)}`;
     const gd=()=>d2y(c.querySelector('#dp-d').value);
-    c.querySelector('#dp-go').onclick=()=>load(gd());
-    c.querySelector('#dp-d').onkeyup=e=>{if(e.key==='Enter')load(gd());};   // Enter로도 조회
+    const gf=()=>d2y(c.querySelector('#dp-f').value);
+    c.querySelector('#dp-go').onclick=()=>load(gf(),gd());
+    c.querySelector('#dp-d').onchange=e=>{const t=d2y(e.target.value);if(t){const f=c.querySelector('#dp-f');if(f)f.value=y2d(t.slice(0,4)+'01');}};  // 종료일 바뀌면 시작일=그달 1일
+    c.querySelector('#dp-d').onkeyup=e=>{if(e.key==='Enter')load(gf(),gd());};   // Enter로도 조회
+    c.querySelector('#dp-f').onkeyup=e=>{if(e.key==='Enter')load(gf(),gd());};
     c.querySelector('#dp-xls').onclick=()=>{
       if(!F)return;
       const hd=['섹션','구분','누적','당일','총'];
@@ -2438,7 +2443,7 @@ SCREEN.dailypurissue=(c)=>{
           mr('사급-부품(합계)','sagub_part_sum');mr('사급-합계','sagub_hab');mr('LG수금금액','lg_sugum');}}
       downloadCSV(`일일영업매입현황_${F.date}.csv`,hd,rows);};
   };
-  load(day);   // ★실행 시 전일자로 자동조회
+  load(frm,day);   // ★실행 시 (전일 달)1일~전일 자동조회
 };
 
 
