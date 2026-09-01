@@ -495,7 +495,20 @@ def setstock_manual_prep(cust: str = Query(""), item: str = Query("")):
                          FROM nx.set_stock_maint WITH(NOLOCK)
                         WHERE ISNULL(manual_sheet_no,'')<>''""")
         nextno = int((cur.fetchone() or [1])[0] or 1)
-        return {"rows": rows, "next_no": nextno}
+        # ★거래처 목록을 함께 준다(2026-09-01) — 종전 화면은 `/api/base/partners` 를
+        #   불렀는데 **그 엔드포인트가 없어 404** 였다. custMap 이 통째로 비어
+        #   어떤 거래처를 넣어도 "일치하는 거래처가 없습니다"가 떴다(실측: 케이비/2266).
+        custs = []
+        try:
+            cur.execute("""SELECT RTRIM(CUST_CODE), RTRIM(CUST_DESC)
+                             FROM nx.CM_M_CUST WITH(NOLOCK)
+                            WHERE ISNULL(RTRIM(CUST_DESC),'')<>''
+                            ORDER BY CUST_DESC""")
+            custs = [{"code": str(r[0]).strip(), "nm": str(r[1]).strip()}
+                     for r in cur.fetchall()]
+        except Exception:
+            custs = []
+        return {"rows": rows, "next_no": nextno, "custs": custs}
     finally:
         cn.close()
 
@@ -509,11 +522,20 @@ def setstock_manual(payload: dict = Body(...)):
          · MAINT_TAG='1' · MANUAL_SHEET_NO 채움 · SHEET_NO 는 비움
          · MANUAL_SHEET_NO = 날짜무관 연속채번, **1회 저장분은 같은 번호 공유**
            (예: 260819 no=734 에 3행 / 731~738 연속)
-       payload: {ymd, cust, rows:[{item_code, qty, remark, direct}], user}
+       payload: {ymd, cust, rows:[{item_code, qty, remark, direct}], user, scope}
+
+       ★scope (2026-09-01 신설, 사용자 요청) — 재고 반영 범위
+         'set'  세트재고만  : ①세트원장만 기록. 하위 자도번 재고는 **건드리지 않는다**
+         'all'  하위재고반영: ①+② 종전 동작(세트 + 자도번 파생). 미지정 기본값
+       왜: 세트만 장부로 잡고 하위 단품재고는 그대로 두어야 하는 경우가 있다.
+           종전엔 항상 ②까지 돌아 하위 재고가 함께 움직였다.
     """
     ymd = _d6(str(payload.get("ymd") or "")) or datetime.now().strftime("%y%m%d")
     cust = str(payload.get("cust") or "").strip()
     user = str(payload.get("user") or "웹")[:20]
+    scope = str(payload.get("scope") or "all").strip().lower()
+    if scope not in ("set", "all"):
+        scope = "all"
     rows = payload.get("rows") or []
     if not cust:
         raise HTTPException(400, "거래처를 선택하세요.")
@@ -571,11 +593,13 @@ def setstock_manual(payload: dict = Body(...)):
             #    거래처가 대는 자도번만 · qty×use_qty · Z99990/IS0001 하드코딩(원문 동일)
             #    ※검사품(insp S/F) 게이트는 이번 범위에서 제외(사용자 지시 2026-08-30) —
             #      원문은 재고반영을 건너뛰지만 지금은 전량 즉시 반영한다.
+            #    ★scope='set' 이면 자도번 파생을 통째로 건너뛴다(하위 단품재고 무영향).
             jado = []
-            try:
-                jado = _set_bom_expand(cur, ic, cust, ymd)
-            except Exception:
-                jado = []
+            if scope != "set":
+                try:
+                    jado = _set_bom_expand(cur, ic, cust, ymd)
+                except Exception:
+                    jado = []
             for b in jado:
                 lseq += 1
                 jq = q * (b["use_qty"] or 0)
@@ -596,6 +620,7 @@ def setstock_manual(payload: dict = Body(...)):
                          "direct": direct, "jado": len(jado)})
 
         # ── ④⑤ 사급 처리 (레거시 원문 — 세트입고로 들어온 자도번이 쓴 사급품 소진)
+        #    ★scope='set' 이면 sagub_src 가 비어 있어 자연히 아무것도 안 한다.
         sagub = 0
         try:
             sagub = _apply_sagub(cur, ymd, cust, sagub_src, user, "w_pu_stock_146",
@@ -607,7 +632,7 @@ def setstock_manual(payload: dict = Body(...)):
         stock_changed()      # ★재고 변경 → 수불장 캐시 버림
         return {"ok": True, "manual_no": manual_no, "ymd": ymd,
                 "cust": cust, "count": len(made), "ledger_posted": posted,
-                "sagub_posted": sagub, "rows": made}
+                "sagub_posted": sagub, "scope": scope, "rows": made}
     except HTTPException:
         try: cn.rollback()
         except Exception: pass
