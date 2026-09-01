@@ -2226,7 +2226,7 @@ const _mkMagam=(CFG)=>(c)=>{
   let mc=null, detail=null, mLoading=false, mClosed=false, pEdit={}, dEdit={}, amtAdjs=[], expanded=new Set();
   // ★상단 품목별/일자별 통합 — 2026-09-01. detail.items[].byday[].carry(1=이월,매출금액0).
   //   view2='item'(품목별)|'day'(일자별 평면). 체크박스 선택 → 이월 버튼(행별 토글). 기간=일(日) 드롭다운, 품명검색.
-  let carryNextYm='', carryBusy=false, view2='day', selRows=new Set(), fromD=0, toD=0, qName='';
+  let carryNextYm='', carryBusy=false, view2='day', selRows=new Set(), fromDt='', toDt='', qName='';
   const dkey=(mat,d)=>mat+'|'+d;
   const ymd6=d=>(''+ym).slice(0,4)+String(d).padStart(2,'0');
   const num=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:2});
@@ -2602,7 +2602,9 @@ const _mkMagam=(CFG)=>(c)=>{
   };
 
   const openModal=async(cc,nm)=>{mc={cc,nm};detail=null;pEdit={};dEdit={};amtAdjs=[];expanded=new Set();
-    carryNextYm='';carryBusy=false;view2='day';selRows=new Set();fromD=0;toD=0;qName='';
+    carryNextYm='';carryBusy=false;view2='day';selRows=new Set();qName='';
+    {const _p=`20${(''+ym).slice(0,2)}-${(''+ym).slice(2,4)}`,_l=new Date(2000+ +(''+ym).slice(0,2),+(''+ym).slice(2,4),0).getDate();
+      fromDt=_p+'-01';toDt=_p+'-'+String(_l).padStart(2,'0');}   // 기간 기본 = 마감월 전체(연·월 미리 채움)
     mLoading=true;await ensureReasons();drawModal();
     try{const r=await fetch(`${API}/api/${CFG.base}/detail?ym=${encodeURIComponent(ym)}&cc=${encodeURIComponent(cc)}`);if(!r.ok)throw new Error('HTTP '+r.status);
       detail=await r.json();mClosed=!!detail.close_flag;carryNextYm=detail.next_ym||'';
@@ -2631,10 +2633,11 @@ const _mkMagam=(CFG)=>(c)=>{
   const _dlab=ymd=>{ymd=''+(ymd||'');return ymd.length>=6?`${ymd.slice(0,2)}/${ymd.slice(2,4)}/${ymd.slice(4,6)}`:ymd;};
   const _ynm=y=>{y=''+(y||'');return y.length>=4?`20${y.slice(0,2)}.${y.slice(2,4)}`:y;};
   const crClick=()=>canW&&!mClosed;   // 재배정 가능(권한 + 미마감)
-  const inRange=d=>(!fromD||d>=fromD)&&(!toD||d<=toD);   // 일(日) 범위 필터
+  const _d6=dt=>{const m=/^\d{2}(\d{2})-(\d{2})-(\d{2})$/.exec(''+(dt||''));return m?m[1]+m[2]+m[3]:'';};   // 2026-08-13 → 260813
+  const inRange=ymd=>{const f=_d6(fromDt),t=_d6(toDt);ymd=''+(ymd||'');return (!f||ymd>=f)&&(!t||ymd<=t);};   // 실제 날짜 범위
   const nameOk=it=>{const q=(qName||'').trim().toUpperCase();return !q||(''+it.mat).toUpperCase().includes(q)||(''+(it.nm||'')).toUpperCase().includes(q);};
   const IBADGE=`<span style="background:#ffe0b2;color:#b5651d;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700;margin-left:5px">이월</span>`;
-  const fdays=it=>(it.byday||[]).filter(bd=>inRange(bd.d));    // 필터 적용된 일자
+  const fdays=it=>(it.byday||[]).filter(bd=>inRange(bd.ymd));    // 기간(날짜) 필터 적용된 일자
   // 선택키(I:mat / D:mat|d) 현재 이월상태
   const selKeyCarried=(k,byMat)=>{if(k.startsWith('I:')){const it=byMat[k.slice(2)];return it&&fdays(it).length&&fdays(it).every(bd=>bd.carry);}
     const p=k.slice(2).split('|');const it=byMat[p[0]];const bd=it&&(it.byday||[]).find(x=>x.d==+p[1]);return bd&&bd.carry;};
@@ -2677,7 +2680,7 @@ const _mkMagam=(CFG)=>(c)=>{
           <td class="num ${delta>0?'dpos':delta<0?'dneg':''}">${delta?won0(delta):''}</td>
           <td class="num">${carried?'<b style="color:#b5651d">0</b>':won0(amt0)}</td></tr>`;});
     }else{
-      const flat=[];items.forEach(it=>(it.byday||[]).forEach(bd=>{if(inRange(bd.d))flat.push([it,bd]);}));
+      const flat=[];items.forEach(it=>(it.byday||[]).forEach(bd=>{if(inRange(bd.ymd))flat.push([it,bd]);}));
       flat.sort((a,b)=>a[1].d-b[1].d||Math.abs(b[1].amt)-Math.abs(a[1].amt));
       flat.forEach(([it,bd])=>{const de=dEdit[dkey(it.mat,bd.d)]||{};const e=effDay(it,bd);const k='D:'+it.mat+'|'+bd.d;
         rows+=`<tr class="${e.delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${bd.carry?'background:#fff6ec':''}">
@@ -2698,8 +2701,9 @@ const _mkMagam=(CFG)=>(c)=>{
     const toolbar=`<div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;overflow-x:auto">
       <b style="white-space:nowrap">품목별 매출</b>
       <select class="inp" id="tp-view" style="width:auto"><option value="item" ${view2==='item'?'selected':''}>품목별</option><option value="day" ${view2==='day'?'selected':''}>일자별</option></select>
-      <label class="tl">기간</label><input type="number" class="inp" id="tp-from" min="1" max="31" value="${fromD||''}" placeholder="일" style="width:50px;text-align:center"><span class="mut">~</span><input type="number" class="inp" id="tp-to" min="1" max="31" value="${toD||''}" placeholder="일" style="width:50px;text-align:center"><span class="mut" style="font-size:11px">일</span>
+      <label class="tl">기간</label><input type="date" class="inp" id="tp-from" value="${esc(fromDt)}" style="width:140px"><span class="mut">~</span><input type="date" class="inp" id="tp-to" value="${esc(toDt)}" style="width:140px">
       <label class="tl">품명</label><input class="inp" id="tp-q" list="tp-items" value="${esc(qName)}" placeholder="품명/품번" style="width:118px" autocomplete="off"><datalist id="tp-items">${items.map(it=>`<option value="${esc(it.nm||it.mat)}">${esc(it.mat)}</option>`).join('')}</datalist>
+      <button class="btn" id="tp-search">검색</button>
       ${_ck?`<button class="btn" id="tp-carry" ${selN?'':'disabled'} style="${selN?'background:#b5651d;color:#fff;':''}white-space:nowrap">${btnLbl}</button>${carryBusy?'<span class="mut" style="font-size:11px">저장중…</span>':''}`:''}
       <span class="mut" style="font-size:11px;margin-left:auto;white-space:nowrap">이월 ${carN}품목 · 금액0 · 차월(${_ynm(carryNextYm)})</span></div>`;
     return toolbar+`<div id="tp-scroll" style="max-height:42vh;overflow:auto;border:1px solid var(--line);border-radius:6px"><table class="sm-it"><thead><tr>${cols}</tr></thead><tbody>${rows||`<tr><td colspan="9" class="empty">해당 기간 품목 없음</td></tr>`}</tbody></table></div>`;
@@ -2714,9 +2718,11 @@ const _mkMagam=(CFG)=>(c)=>{
     m.querySelectorAll('#tp-scroll tbody tr').forEach(tr=>{const s=tr.dataset.s;if(s===undefined)return;tr.hidden=!!q&&s.indexOf(q)<0;});};
   const wireTop=(m)=>{
     const vs=m.querySelector('#tp-view');if(vs)vs.onchange=e=>{view2=e.target.value;selRows.clear();drawModal();};
-    const ff=m.querySelector('#tp-from');if(ff)ff.onchange=e=>{fromD=+e.target.value||0;drawModal();};
-    const ft=m.querySelector('#tp-to');if(ft)ft.onchange=e=>{toD=+e.target.value||0;drawModal();};
-    const qi=m.querySelector('#tp-q');if(qi)qi.oninput=e=>{qName=e.target.value;applyNameFilter(m);};
+    // ★날짜/품명은 '검색' 버튼(또는 Enter)으로만 적용 — 날짜 입력 중 재렌더 없음(2자리 유실 버그 방지).
+    const doSearch=()=>{const ff=m.querySelector('#tp-from'),ft=m.querySelector('#tp-to'),qi=m.querySelector('#tp-q');
+      if(ff)fromDt=ff.value;if(ft)toDt=ft.value;if(qi)qName=qi.value;drawModal();};
+    const sb=m.querySelector('#tp-search');if(sb)sb.onclick=doSearch;
+    m.querySelectorAll('#tp-from,#tp-to,#tp-q').forEach(el=>el.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();doSearch();}});
     m.querySelectorAll('.tp-ck').forEach(el=>el.onchange=()=>{if(el.checked)selRows.add(el.dataset.k);else selRows.delete(el.dataset.k);updCarryBtn(m);});
     const cb=m.querySelector('#tp-carry');if(cb)cb.onclick=carryApply;
     m.querySelectorAll('.tp-pc').forEach(el=>el.onchange=()=>{const mat=el.dataset.mat,v=el.value.trim();
