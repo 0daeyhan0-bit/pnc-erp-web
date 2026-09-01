@@ -2525,7 +2525,7 @@ const _mkMagam=(CFG)=>(c)=>{
        .sm-badge{font-size:11px;padding:1px 8px;border-radius:10px;background:#eee;color:#777}.sm-badge.on{background:#e5f3e8;color:#2e7d32;font-weight:700}
        .sm-mini{padding:2px 8px;font-size:11px}
        .sm-ov{position:fixed;inset:0;background:rgba(20,30,50,.45);z-index:9998;display:flex;align-items:center;justify-content:center}
-       .sm-dlg{background:#fff;width:min(1180px,96vw);max-height:92vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+       .sm-dlg{background:#fff;width:min(1360px,97vw);max-height:92vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.3)}
        .sm-dlg-h{padding:12px 18px;background:linear-gradient(90deg,#1c47a0,#2f6db3);color:#fff;display:flex;align-items:center;gap:12px}
        .sm-dlg-h .x{margin-left:auto;cursor:pointer;font-size:20px;opacity:.9}
        .sm-dlg-b{padding:14px 18px;overflow:auto;flex:1}
@@ -2679,7 +2679,7 @@ const _mkMagam=(CFG)=>(c)=>{
         rows+=`<tr class="${delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${carried?'background:#fff6ec':''}">
           <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
           <td><b>${esc(it.mat)}</b>${carried?IBADGE:''}</td>
-          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
           <td class="center">${esc(it.unit)||''}</td><td class="num">${num(qty)}</td><td class="num">${num(it.cost)}</td>
           <td class="num">${carried?'<span class="mut">-</span>':`<input class="tp-pc" data-mat="${esc(it.mat)}" type="number" step="any" value="${nc}" placeholder="${num(it.cost)}" ${rdis}>`}</td>
           <td class="num ${delta>0?'dpos':delta<0?'dneg':''}">${delta?won0(delta):''}</td>
@@ -2692,7 +2692,7 @@ const _mkMagam=(CFG)=>(c)=>{
         rows+=`<tr class="${e.delta?'chg':''}" data-s="${esc(((it.mat||'')+' '+(it.nm||'')).toUpperCase())}" style="${bd.carry?'background:#fff6ec':''}">
           <td class="center">${_ck?`<input type="checkbox" class="tp-ck" data-k="${esc(k)}" ${selRows.has(k)?'checked':''}>`:''}</td>
           <td class="center">${_dlab(bd.ymd)}</td><td><b>${esc(it.mat)}</b>${bd.carry?IBADGE:''}</td>
-          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
+          <td class="bcap" title="${esc(it.nm||'')}" style="max-width:0;width:100%;overflow:hidden;text-overflow:ellipsis">${esc(it.nm||'')}</td>
           <td class="num">${num(bd.qty)}</td><td class="num">${num(bd.cost)}</td>
           <td class="num">${bd.carry?'<span class="mut">-</span>':`<input class="tp-dc" data-mat="${esc(it.mat)}" data-d="${bd.d}" type="number" step="any" value="${(de.nc!=null&&de.nc!=='')?de.nc:''}" placeholder="${num(bd.cost)}" style="width:78px" ${rdis}>`}</td>
           <td class="num ${e.delta>0?'dpos':e.delta<0?'dneg':''}">${e.delta?won0(e.delta):''}</td>
