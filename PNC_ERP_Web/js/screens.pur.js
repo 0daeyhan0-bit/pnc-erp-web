@@ -114,8 +114,8 @@ SCREEN.matinout=(c)=>{
   c.querySelector('#qbuy').onkeyup=()=>renderLeft();
   c.querySelector('#qsell').onkeyup=()=>renderLeft();
   c.querySelector('#gubun').onchange=renderLeft;
-  bindDate(c.querySelector('#dfrom'),()=>load());
-  bindDate(c.querySelector('#dto'),()=>load());
+  
+  
   c.querySelector('#whcust').onchange=()=>load();
   c.querySelector('#partwh').onchange=()=>load();
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#qbuy').value='';c.querySelector('#qsell').value='';c.querySelector('#gubun').value='all';c.querySelector('#partwh').value='IS0001';c.querySelector('#whcust').value='Z99990';c.querySelector('#dfrom').value=m1Iso();c.querySelector('#dto').value=todayIso();sel=null;load();};
@@ -829,7 +829,7 @@ SCREEN.matledger=(c)=>{
     c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
     // ★날짜칸은 디바운스로 받는다 — 즉시 조회·재렌더하면 입력칸이 갈아치워져
     //   28일을 치려고 '2' 를 누른 순간 2일로 굳는다(core.js bindDate).
-    bindDate(c.querySelector('#dfrom'),go);bindDate(c.querySelector('#dto'),go);
+    
     c.querySelector('#sg').onchange=apply;c.querySelector('#cust').onchange=apply;c.querySelector('#gubun').onchange=apply;
     c.querySelector('#longstk').onchange=apply;
     c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#sg').value='';c.querySelector('#cust').value='';c.querySelector('#gubun').value='all';c.querySelector('#longstk').checked=false;apply();};
@@ -1657,7 +1657,7 @@ SCREEN.matprice=(c)=>{
     c.innerHTML=`
      <div class="page-title">💲 원소재/용접봉 월별 시세 <span style="font-size:12px;color:var(--muted);font-weight:400">무게정산 단가</span></div>
      <div class="page-sub">월별 시세·사급가 입력. 매출마감 무게정산 = 차액중량 × (시세 − 사급가). 원소재·용접봉 각각.</div>
-     <div class="toolbar"><label class="tl">적용월</label><input type="month" class="inp" id="mp-ym" value="${esc(ymToInput(ym))}" style="min-width:120px">${ed?'<button class="btn" id="mp-save">💾 저장</button>':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}</div>
+     <div class="toolbar"><label class="tl">적용월</label><input type="month" class="inp" id="mp-ym" value="${esc(ymToInput(ym))}" style="min-width:120px"><button class="btn" id="mp-go">조회</button>${ed?'<button class="btn" id="mp-save">💾 저장</button>':`<span style="color:#c0392b;font-size:12px">🔒 수정권한 없음 (${esc(PERM.label())})</span>`}</div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <div class="grid-wrap" style="max-width:660px;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
      <table class="tbl" style="width:100%"><thead><tr><th>구분</th><th class="num">사급가(원/kg)</th><th class="num">시세(원/kg)</th><th class="num">차액단가(시세−사급)</th></tr></thead>
@@ -1667,7 +1667,9 @@ SCREEN.matprice=(c)=>{
          <td class="num"><input class="mp-in" data-cat="${cat}" data-f="real_price" type="number" step="any" value="${si}" placeholder="시세 입력" style="width:120px;text-align:right" ${ed?'':'disabled'}></td>
          <td class="num mp-diff" data-cat="${cat}" style="font-weight:700;color:${df==null?'#aaa':(df<0?'#c0392b':'#1c7c3a')}">${df==null?'-':nf(df)}</td></tr>`;}).join('')}</tbody></table></div>
      <div class="page-sub" style="margin-top:8px;color:#8aa0bd">※ 원소재 사급가는 관경별(CU 20,000/고강도 22,000)이나 정산은 대표값. 용접봉 사급가 기본 21,100. 시세 미입력 시 정산금액 0.</div>`;
-    bindDate(c.querySelector('#mp-ym'),e=>load(inYm(e.target.value)));
+    // ★조회는 버튼으로만(2026-09-01). 월만 바꿔도 자동으로 불러오던 것을 뺐다 —
+    //   이 화면은 입력·저장 화면이라 월이 조용히 바뀌면 입력 중인 값과 다른 달이 섞인다.
+    {const gb=c.querySelector('#mp-go');if(gb)gb.onclick=()=>load(inYm(c.querySelector('#mp-ym').value));}
     if(ed){const sb=c.querySelector('#mp-save');if(sb)sb.onclick=save;
       c.querySelectorAll('.mp-in').forEach(el=>el.oninput=()=>{edit[el.dataset.cat+'|'+el.dataset.f]=el.value;upDiff(el.dataset.cat);});}
   };
@@ -3541,7 +3543,11 @@ SCREEN.lgsagub=(c)=>{
     const usedBiz=st.upBiz;
     try{const fd=new FormData();fd.append('file',file);
       const r=await fetch(`${API}/api/lgsagub/upload?biz=${encodeURIComponent(st.upBiz)}`,{method:'POST',body:fd});const j=await r.json();
-      if(!j.ok){st.msg='❌ '+(j.error||'실패')+(j.header_row?(' · 감지헤더: '+j.header_row.join(' | ')):'');}
+      // ★서버가 막은 이유를 그대로 보여준다(2026-09-01). 종전엔 j.ok 만 보고 '❌ 실패' 한 줄만 떴다 —
+      //   HTTPException 은 {detail:"..."} 로 오는데 j.ok 가 undefined 라 사유가 통째로 묻혔다.
+      //   사업부 오선택 차단이 근거(RAC품목 n·SAC품목 n)까지 담아 보내는데 화면엔 안 보였다.
+      if(r.status>=400){st.msg='❌ '+(j.detail||j.error||('요청 거부 HTTP '+r.status));}
+      else if(!j.ok){st.msg='❌ '+(j.error||'실패')+(j.header_row?(' · 감지헤더: '+j.header_row.join(' | ')):'');}
       else{const det=Object.entries(j.detected||{}).map(([k,v])=>`${k}=${v}`).join(', ');
         const ym=(j.by_ym||[]).map(x=>`${x.ym}:${wonI(x.amt)}원(${x.rows})`).join('  ');
         st.msg=`✅ [${usedBiz}] ${file.name} · ${j.rows}행 · 감지[${det}] · ${ym}`;}

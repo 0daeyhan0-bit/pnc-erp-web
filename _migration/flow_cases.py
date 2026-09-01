@@ -105,6 +105,15 @@ FIXTURES = [
                       WHERE ISNULL(i.make_type,'') = '1'
                       GROUP BY b.parent_code HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC""",
      lambda ctx, r: ctx.update(prod_item=str(r[0]).strip())),
+
+    # ★[E] 전 구간용 — **자재소요가 실제로 걸린** 업체를 고른다.
+    #   아무 협력사나 고르면 계획 0행이 나와 "화면이 못 읽는다"고 오판한다.
+    #   ⟹ plan_part_mat 에 행이 가장 많은 작업처 = 검증 가치가 가장 높은 업체.
+    ("e_wc", """SELECT TOP 1 LTRIM(RTRIM(mat_work_center_code)), COUNT(*)
+                  FROM nx.plan_part_mat WITH(NOLOCK)
+                 WHERE ISNULL(mat_work_center_code,'')<>''
+                 GROUP BY LTRIM(RTRIM(mat_work_center_code)) ORDER BY COUNT(*) DESC""",
+     lambda ctx, r: ctx.update(e_wc=str(r[0]).strip(), e_wc_rows=int(r[1] or 0))),
 ]
 
 
@@ -419,9 +428,13 @@ AUTH_CASES = [
                                  f"응답 = {res.get('detail')}")),
     dict(kind="S", name="무토큰 — 내 정보 조회", method="GET", path="/api/auth/me",
          as_=None, expect=401),
+    # ★자격증명이 없으면 SKIP — 비번을 repo 에 두지 않는 설계(_secret)라 미제공이 정상 상태다.
+    #   FAIL 로 두면 "로그인 기능이 깨졌다"로 읽혀 다음 사람이 헛수고한다(2026-09-01).
+    #   as_ 를 쓰는 뒤 케이스들은 러너가 알아서 SKIP 하는데, 이 케이스만 body 로 직접
+    #   비번을 실어 보내 401 → FAIL 이 됐다.
     dict(kind="S", name="협력사 로그인 — 거래처코드가 실려 오는가", method="POST",
          path="/api/auth/login", body={"id": "flowcoop", "pw": ACCOUNTS["flowcoop"]},
-         as_=None, expect=200,
+         as_=None, expect=200, skip_if=lambda ctx: ACCOUNTS.get("flowcoop") is None,
          check=lambda res, ctx: (res.get("user", {}).get("partner_code") == COOP_CUST,
                                  f"{res.get('user',{}).get('nm')} · 유형 {res.get('user',{}).get('utype')}"
                                  f" · 거래처코드 {res.get('user',{}).get('partner_code')}")),
@@ -625,8 +638,14 @@ CASES += AUTH_CASES + SETIN_CASES
 import os as _os
 if _os.environ.get('REPLAY_YMD'):
     try:
-        from replay_cases import build_replay_cases as _brc
-        CASES += _brc(_os.environ['REPLAY_YMD'])
+        # REPLAY_ITEM 이 있으면 **그 품번의 하루 흐름**만 재현한다(시드 → 키팅 → 생산 → 출하).
+        # 없으면 종전대로 그날 전체를 유형별로 재생한다.
+        if _os.environ.get('REPLAY_ITEM'):
+            from replay_cases import build_flow_cases as _bfc
+            CASES += _bfc(_os.environ['REPLAY_YMD'], _os.environ['REPLAY_ITEM'].strip())
+        else:
+            from replay_cases import build_replay_cases as _brc
+            CASES += _brc(_os.environ['REPLAY_YMD'])
     except Exception as _e:
         print('  ★재생 케이스 로드 실패: %s' % _e)
 
@@ -940,3 +959,537 @@ def _cmp_screen(res, ctx, key, fld, only_ledger=False):
 
 
 CASES += IDEM_CASES
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  [E] 전 구간 프로세스 — 계획업로드부터 마감까지 한 줄로 (2026-09-01 신설)
+# ══════════════════════════════════════════════════════════════════════
+#  왜 만들었나
+#    기존 케이스는 도메인별 조각이다(재고·마감·포털·인증). 전부 PASS 여도
+#    **"계획을 올려서 → 소요를 뽑아 → 발주하고 → 받아서 → 만들고 → 팔고 → 마감한다"**
+#    는 한 줄이 실제로 이어지는지는 아무도 안 봤다.
+#    2026-08-31 에 실사용 버그 3건(자재입고 500·삭제버튼·요청수량 이중차감)이
+#    한꺼번에 터진 곳이 정확히 이 구간이다 — 조각검증은 통과했는데 줄이 끊겼던 것이다.
+#
+#  ★이 그룹의 판정 원칙 — "다음 단계가 쓸 수 있는 값이 나왔는가"
+#    단순히 200 이 아니라, **앞 단계 산출물이 뒷 단계의 입력으로 실제 연결되는지**를 본다.
+#    예: ④파트별이 만든 제번을 ⑤자재소요가 쓰는가 / ⑤가 만든 소요를 협력사 계획이 보는가.
+#    끊긴 곳이 있으면 그 지점이 정확히 드러난다.
+#
+#  ★순서 — 읽기 먼저, 쓰기 나중 (§9 하드룰)
+#    E1~E9 는 조회·집계 위주라 **CASES 앞**에 놓는다(무거운 조회를 앞에 모은다).
+#    쓰기가 쌓인 뒤에 계획 조회를 돌리면 45초+ 로 느려져 스위트가 무너진다.
+#
+#  ★편성 단계(①④⑤)를 여기서 **실행하지 않는다** — 이유
+#    STEP6/STEP7 은 `DROP TABLE` 후 재생성이고 수백초가 걸린다. 공유 트랜잭션 하나에
+#    그걸 태우면 뒤 케이스가 전부 잠금 대기에 걸린다(§6-2 와 같은 함정).
+#    ⟹ **직전 편성 결과를 읽어 연결을 검증**한다. 편성 자체의 정합은 별도 대사 스크립트 몫.
+
+def _rows(res):
+    return (res.get("rows") if isinstance(res, dict) else None) or []
+
+
+def _refused(res):
+    """조회가 **거부**됐는가. 빈 결과와 구분해야 한다 —
+       거부를 '데이터 없음'으로 읽으면 거짓 PASS 가 난다(2026-09-01 실측)."""
+    return isinstance(res, dict) and res.get("ok") is False and res.get("detail")
+
+
+def _keep(ctx, key, val):
+    ctx[key] = val
+    return val
+
+
+E_CASES = [
+    # ── E1. 계획 원본이 있는가 (파이프라인의 입구) ──────────────────
+    dict(kind="S", name="[전구간] E1 계획업로드 — 원본이 있는가", method="GET",
+         path="/api/plan/list?limit=5", as_="super", expect=200,
+         check=lambda res, ctx: (
+             len(_rows(res)) > 0,
+             f"계획원본 {len(_rows(res))}행" if _rows(res)
+             else "★계획 원본이 비어 있다 — 뒤 단계가 전부 무의미해진다")),
+
+    # ── E2. 단계 실행 로그 — 어디까지 돌았는지 알 수 있는가 ──────────
+    #    레거시는 버튼 아래 완료시각이 있다. 웹도 그게 보여야 운영이 된다.
+    dict(kind="S", name="[전구간] E2 편성 단계 로그 — 어디까지 돌았나", method="GET",
+         path="/api/planrev/job/status", as_="super", expect=200,
+         check=lambda res, ctx: _e2_steps(res, ctx)),
+
+    # ── E3. ④파트별계획 산출 — 다음 단계가 쓸 제번이 있는가 ──────────
+    dict(kind="S", name="[전구간] E3 ④파트별계획 — 제번이 나왔는가", method="GET",
+         path="/api/planrev/job/log?limit=200", as_="super", expect=200,
+         check=lambda res, ctx: _e3_part(res, ctx)),
+
+    # ── E4. ★④ → ⑤ 연결 — 파트별 제번을 자재소요가 실제로 쓰는가 ────
+    #    2026-08-31 정합작업의 핵심 축. 여기가 끊기면 발주를 못 낸다.
+    #    ★판정은 **레거시 대비**로 한다. 절대값으로 보면 안 된다 —
+    #      `plan_part_mat` 에는 파트별계획을 거치지 않는 계열(WO=수주·직납품 등)이
+    #      **설계상 정상적으로** 들어간다. 2026-09-01 첫 실행에서 이걸 "고아 4,478행,
+    #      근거 없는 발주"로 오판했는데, 레거시에도 4,484행이 똑같이 있었다.
+    #      ⟹ 우리만 있는 고아(=진짜 결함)와 양쪽 다 있는 고아(=정상 계열)를 갈라서 본다.
+    dict(kind="S", name="[전구간] E4 ★④→⑤ 연결 — 자재소요 제번이 레거시와 같은가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             SELECT (SELECT COUNT(DISTINCT RTRIM(work_order)) FROM nx.plan_part_dtl WITH(NOLOCK)),
+                    (SELECT COUNT(DISTINCT RTRIM(work_order)) FROM nx.plan_part_mat WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.plan_part_mat m WITH(NOLOCK)
+                      WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WITH(NOLOCK)
+                                        WHERE RTRIM(d.work_order)=RTRIM(m.work_order))),
+                    (SELECT COUNT(*) FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT m WITH(NOLOCK)
+                      WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL d WITH(NOLOCK)
+                                        WHERE RTRIM(d.WORK_ORDER)=RTRIM(m.WORK_ORDER)))""", "args": []},
+         check=lambda res, ctx: _e4_link(res, ctx)),
+
+    # ── E5. ⑤자재소요 → 협력사계획 연결 (업체별로 갈라지는가) ────────
+    #    대표 지시(2026-09-01): 자재계획은 **업체별로** 봐야 원인이 드러난다.
+    dict(kind="S", name="[전구간] E5 ⑤→협력사 — 업체별로 소요가 갈라지는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             SELECT COUNT(DISTINCT LTRIM(RTRIM(ISNULL(mat_work_center_code,'')))),
+                    SUM(CASE WHEN ISNULL(mat_work_center_code,'')='' THEN 1 ELSE 0 END),
+                    COUNT(*)
+               FROM nx.plan_part_mat WITH(NOLOCK)""", "args": []},
+         check=lambda res, ctx: _e5_vendor(res, ctx)),
+
+    # ── E6. 협력사 계획현황 화면이 그 값을 보는가 (API 레벨) ──────────
+    dict(kind="S", name="[전구간] E6 협력사 계획현황 — 화면이 소요를 읽는가", method="GET",
+         path=lambda ctx: f"/api/partner/planstatus?wc={ctx.get('e_wc','')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("e_wc"),
+         check=lambda res, ctx: (
+             len(_rows(res)) > 0,
+             f"업체 {ctx.get('e_wc')} · {len(_rows(res))}행" if _rows(res)
+             else f"★업체 {ctx.get('e_wc')} 계획이 0행 — ⑤는 있는데 화면이 못 읽는다")),
+
+    # ── E7. ★거래명세서 요청수량 — 발행분 이중차감이 없는가 ──────────
+    #    2026-08-31 실사용 버그. 발행분은 set_input_req→iset_stk 로 이미 done 에 들어가는데
+    #    req 에서 또 빼서 요청수량이 0 이 됐다 → 중복 발행이 났다.
+    dict(kind="S", name="[전구간] E7 ★거래명세서 — 요청수량 이중차감이 없는가", method="GET",
+         path=lambda ctx: f"/api/partner/deliv420?cust={ctx.get('e_wc','')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("e_wc"),
+         check=lambda res, ctx: _e7_req(res, ctx)),
+
+    # ── E8. 세트제외(공용품) 행이 맨 위에 오는가 ─────────────────────
+    #    레거시와 같은 배치. 2026-08-31 신설분의 회귀 방지.
+    dict(kind="S", name="[전구간] E8 거래명세서 — 세트제외가 맨 위에 오는가", method="GET",
+         path=lambda ctx: f"/api/partner/deliv420?cust={ctx.get('e_wc','')}",
+         as_="super", expect=200, skip_if=lambda ctx: not ctx.get("e_wc"),
+         check=lambda res, ctx: _e8_setexc(res, ctx)),
+
+    # ── E9. 자재입고 화면이 계획을 읽는가 (발주→입고 구간) ───────────
+    # ★파라미터는 `base_ymd`+`days`(기준일 + 영업일수)다. `ymd_from/to` 가 아니다 —
+    #   2026-09-01 첫 실행에서 400 "기준일자가 필요합니다" 로 걸렸다(케이스 오류였다).
+    dict(kind="S", name="[전구간] E9 자재입고진행현황 — 계획이 보이는가", method="GET",
+         path=lambda ctx: f"/api/matinput/list?base_ymd={YMD}&days=4&gubun=all",
+         as_="super", expect=200,
+         check=lambda res, ctx: (
+             True, f"{len(_rows(res))}행 (0행이면 해당 기간 입고계획 없음 — 결함 아님)")),
+
+    # ── E10. ★★업체별 자재계획 대사 — 레거시와 얼마나 맞는가 ─────────
+    #    대표 지시(2026-09-01): "자재계획쪽은 업체별로 계획을 분석해보면 될 거 같네".
+    #    자재 단위로만 보면 어느 협력사가 틀어졌는지 안 보인다. 업체별로 먼저 갈라
+    #    문제 협력사를 특정하고, 그 안에서만 자재를 판다.
+    #    ★용접봉(RAC*)은 공정 분리라 설계상 차이 — 제외하고 센다(CLAUDE.md §1-10).
+    dict(kind="S", name="[전구간] E10 ★★업체별 자재계획 — 레거시와 대사", method="POST",
+         path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             WITH W AS (SELECT LTRIM(RTRIM(mat_work_center_code)) wc,
+                               LTRIM(RTRIM(mat_code)) mat, SUM(CAST(part_plan_qty AS float)) q
+                          FROM nx.plan_part_mat WITH(NOLOCK)
+                         WHERE ISNULL(mat_work_center_code,'')<>''
+                           AND LTRIM(RTRIM(mat_code)) NOT LIKE 'RAC%'
+                         GROUP BY LTRIM(RTRIM(mat_work_center_code)), LTRIM(RTRIM(mat_code))),
+                  L AS (SELECT LTRIM(RTRIM(MAT_WORK_CENTER_CODE)) wc,
+                               LTRIM(RTRIM(MAT_CODE)) mat, SUM(CAST(PART_PLAN_QTY AS float)) q
+                          FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT WITH(NOLOCK)
+                         WHERE ISNULL(MAT_WORK_CENTER_CODE,'')<>''
+                           AND LTRIM(RTRIM(MAT_CODE)) NOT LIKE 'RAC%'
+                         GROUP BY LTRIM(RTRIM(MAT_WORK_CENTER_CODE)), LTRIM(RTRIM(MAT_CODE))),
+                  J AS (SELECT ISNULL(w.wc,l.wc) wc, ISNULL(w.mat,l.mat) mat,
+                               ISNULL(w.q,0) wq, ISNULL(l.q,0) lq
+                          FROM W w FULL OUTER JOIN L l ON l.wc=w.wc AND l.mat=w.mat)
+             SELECT COUNT(DISTINCT wc), COUNT(*),
+                    SUM(CASE WHEN ABS(wq-lq)>0.5 THEN 1 ELSE 0 END),
+                    COUNT(DISTINCT CASE WHEN ABS(wq-lq)>0.5 THEN wc END),
+                    SUM(CASE WHEN wq>lq+0.5 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN lq>wq+0.5 THEN 1 ELSE 0 END)
+               FROM J""", "args": []},
+         check=lambda res, ctx: _e10_vendor_diff(res, ctx)),
+
+    # ── E11. 차이 큰 업체 TOP — 내일 아침 어디부터 볼지 ──────────────
+    dict(kind="S", name="[전구간] E11 차이 큰 업체 TOP10 — 어디부터 볼까", method="POST",
+         path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             WITH W AS (SELECT LTRIM(RTRIM(mat_work_center_code)) wc,
+                               LTRIM(RTRIM(mat_code)) mat, SUM(CAST(part_plan_qty AS float)) q
+                          FROM nx.plan_part_mat WITH(NOLOCK)
+                         WHERE ISNULL(mat_work_center_code,'')<>''
+                           AND LTRIM(RTRIM(mat_code)) NOT LIKE 'RAC%'
+                         GROUP BY LTRIM(RTRIM(mat_work_center_code)), LTRIM(RTRIM(mat_code))),
+                  L AS (SELECT LTRIM(RTRIM(MAT_WORK_CENTER_CODE)) wc,
+                               LTRIM(RTRIM(MAT_CODE)) mat, SUM(CAST(PART_PLAN_QTY AS float)) q
+                          FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_MAT WITH(NOLOCK)
+                         WHERE ISNULL(MAT_WORK_CENTER_CODE,'')<>''
+                           AND LTRIM(RTRIM(MAT_CODE)) NOT LIKE 'RAC%'
+                         GROUP BY LTRIM(RTRIM(MAT_WORK_CENTER_CODE)), LTRIM(RTRIM(MAT_CODE))),
+                  J AS (SELECT ISNULL(w.wc,l.wc) wc, ISNULL(w.mat,l.mat) mat,
+                               ISNULL(w.q,0) wq, ISNULL(l.q,0) lq
+                          FROM W w FULL OUTER JOIN L l ON l.wc=w.wc AND l.mat=w.mat)
+             SELECT TOP 10 j.wc, ISNULL(RTRIM(c.CUST_DESC),'') nm,
+                    COUNT(*) n_mat, SUM(CASE WHEN ABS(wq-lq)>0.5 THEN 1 ELSE 0 END) n_diff,
+                    SUM(wq-lq) qdiff
+               FROM J j LEFT JOIN nx.CM_M_CUST c WITH(NOLOCK) ON RTRIM(c.CUST_CODE)=j.wc
+              GROUP BY j.wc, ISNULL(RTRIM(c.CUST_DESC),'')
+             HAVING SUM(CASE WHEN ABS(wq-lq)>0.5 THEN 1 ELSE 0 END) > 0
+              ORDER BY SUM(CASE WHEN ABS(wq-lq)>0.5 THEN 1 ELSE 0 END) DESC""", "args": []},
+         check=lambda res, ctx: _e11_top(res, ctx)),
+
+    # ── E12. ★★작업처 오버라이드가 낡지 않았는가 (E10 불일치의 실제 원인) ──
+    #    2026-09-01 최초 발견 경위:
+    #      E10 이 "미래정밀(2096) −96,768 / 케이비(2266) +96,768" 을 잡았다.
+    #      수량 합계는 정확히 일치하고 **업체 배정만 뒤바뀌어** 있었다.
+    #      추적하니 소요의 작업처는 BOM 이 아니라 `nx.routing_edge.wc` 에서 온다
+    #      (planrev._step7_sql: ov_wc = ISNULL(routing_edge.wc, 마스터)).
+    #      `wc = COALESCE(wc_user, wc_live)` 이고 `wc_live` 는 `nx.item` 에서 시드되는데,
+    #      **시드 이후 마스터가 바뀌면 routing_edge 가 옛 업체를 계속 물고 있다.**
+    #      실측: nx.item 은 라이브와 불일치 0(최신)인데 wc_live 는 39행이 stale.
+    #      ⟹ `POST /api/routing/sync` 한 번이면 해소된다.
+    #
+    #    ★이건 "계획이 틀렸다"로 보이지만 실제로는 **마스터 변경이 반영 안 된 것**이다.
+    #      업체가 바뀌면 발주가 엉뚱한 협력사로 나가므로 조용히 두면 안 된다.
+    dict(kind="S", name="[전구간] E12 ★작업처 오버라이드(routing_edge)가 최신인가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             SELECT (SELECT COUNT(*) FROM nx.routing_edge WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.routing_edge re WITH(NOLOCK)
+                       JOIN nx.item it WITH(NOLOCK)
+                         ON UPPER(LTRIM(RTRIM(it.item_code)))=re.child_item
+                      WHERE ISNULL(RTRIM(re.wc_live),'') <>
+                            CASE WHEN RTRIM(ISNULL(it.work_code,''))>'' THEN RTRIM(it.work_code)
+                                 ELSE RTRIM(ISNULL(it.in_cust,'')) END),
+                    (SELECT COUNT(*) FROM nx.routing_edge WITH(NOLOCK)
+                      WHERE ISNULL(RTRIM(wc_user),'')<>'')""", "args": []},
+         check=lambda res, ctx: _e12_routing(res, ctx)),
+
+    # ── E13. 협력사 입고 → 재고 반영 (받은 것이 재고가 되는가) ────────
+    #    앞 구간(계획→발주→명세서)과 뒷 구간(재고→생산→출하)을 잇는 이음매.
+    #    ★파생 위치 = `set_stock_maint.derived_flag` + `nx.PU_T_SET_MAT_STOCK` 이다.
+    #      2026-09-01 첫 케이스는 `stock_ledger.STOCK_POINT='S'` 를 봤는데 그런 값은 없다
+    #      (실측 분포: MAT 172,683 · RDY 19 · ASY 7 · PRD 1). 세트는 별도 재고 계열이다.
+    dict(kind="S", name="[전구간] E13 세트입고 → 재고 파생이 이어지는가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             SELECT (SELECT COUNT(*) FROM nx.set_stock_maint WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.set_stock_maint WITH(NOLOCK)
+                      WHERE ISNULL(RTRIM(derived_flag),'')='1'),
+                    (SELECT COUNT(DISTINCT sheet_no) FROM nx.set_stock_maint WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_SET_MAT_STOCK WITH(NOLOCK))""",
+               "args": []},
+         check=lambda res, ctx: _e13_setin(res, ctx)),
+
+    # ── E14. 재고 3곳 정합 — 원장·수불장·재고가 같은 값인가 ───────────
+    #    [F] 케이스는 '쓸 때 3곳이 같이 움직이는가'를 본다.
+    #    여기서는 **지금 이 순간 이미 쌓여 있는 데이터**가 정합한지를 본다.
+    dict(kind="S", name="[전구간] E14 ★재고 3곳(원장·수불장·재고) 정합",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+    #    ★음수재고는 **레거시에도 있는 것**과 **웹에서만 생긴 것**을 갈라야 한다.
+    #      2026-09-01 실측: 2행 중 5210A22409A(−17,279)는 레거시에도 그대로 있고
+    #      (담당자 백플러시 소비로 원래부터 음수), AJR77144307-STS(−4)만 웹에서 생겼다.
+    #      전자를 결함으로 세면 고칠 수 없는 FAIL 이 영구히 남아 하네스를 못 믿게 된다.
+         body={"sql": """
+             SELECT (SELECT COUNT(*) FROM nx.stock_ledger WITH(NOLOCK) WHERE STOCK_POINT='MAT'),
+                    (SELECT COUNT(*) FROM nx.PU_T_STOCK_MAINT WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                      WHERE CAST(ISNULL(STOCK_QTY,0) AS float) < 0),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH w WITH(NOLOCK)
+                      WHERE CAST(ISNULL(w.STOCK_QTY,0) AS float) < 0
+                        AND NOT EXISTS(SELECT 1 FROM PARTNER_ERP.dbo.PU_T_MAT_STOCK_WH l WITH(NOLOCK)
+                                        WHERE RTRIM(l.MAT_CODE)=RTRIM(w.MAT_CODE)
+                                          AND ISNULL(RTRIM(l.GAGONG_PROC_CODE),'')
+                                              =ISNULL(RTRIM(w.GAGONG_PROC_CODE),'')
+                                          AND CAST(ISNULL(l.STOCK_QTY,0) AS float) < 0))""", "args": []},
+         check=lambda res, ctx: _e14_stock3(res, ctx)),
+
+    # ── E14b. ★재고 버킷이 창고당 1행인가 (유령행 재발 방지) ─────────
+    #    2026-09-01 E14 가 음수재고를 잡아 추적하다 발견한 진짜 버그:
+    #      자재재고 버킷키의 CUST_CODE 는 **창고 소유주 'Z99990' 고정**인데
+    #      (라이브 7,762행 전부 Z99990), stock_update/delete 가 원장의 거래처(매입처)를
+    #      버킷키로 써서 UPDATE 가 기존 행을 못 찾고 **새 행을 INSERT** 했다.
+    #        AJR77144307-STS: [Z99990·IS0001=92] + [2005·IS0001=**-4**]
+    #      → 같은 창고에 2행. 재고조회는 합을 보므로 값이 조용히 틀어진다.
+    #    수정 = stock.py `_mat_mirror_edit` 에서 버킷키를 Z99990 으로 일원화.
+    dict(kind="S", name="[전구간] E14b ★재고 버킷이 창고당 1행인가",
+         method="POST", path="/api/_flow/sql", as_="super", expect=200,
+         body={"sql": """
+             SELECT (SELECT COUNT(*) FROM (
+                       SELECT RTRIM(MAT_CODE) m, ISNULL(RTRIM(GAGONG_PROC_CODE),'') g
+                         FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                        GROUP BY RTRIM(MAT_CODE), ISNULL(RTRIM(GAGONG_PROC_CODE),'')
+                       HAVING COUNT(*) > 1) t),
+                    (SELECT COUNT(DISTINCT ISNULL(RTRIM(CUST_CODE),''))
+                       FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)),
+                    (SELECT COUNT(*) FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                      WHERE ISNULL(RTRIM(CUST_CODE),'') <> 'Z99990')""", "args": []},
+         check=lambda res, ctx: _e14b_bucket(res, ctx)),
+
+    # ── E15. 마감이 그 재고를 평가하는가 (파이프라인의 종점) ──────────
+    dict(kind="S", name="[전구간] E15 마감 — 수불장이 값을 내는가", method="GET",
+         path=lambda ctx: f"/api/close/ledger?domain=MAT&d_from={_ym_first()}&d_to={YMD}",
+         as_="super", expect=200,
+         check=lambda res, ctx: _e15_close(res, ctx)),
+]
+
+
+# ── E 그룹 판정 함수 ──────────────────────────────────────────────────
+def _ym_first():
+    """이번 달 1일 YYMMDD."""
+    import datetime as _d
+    t = _d.date.today()
+    return t.replace(day=1).strftime("%y%m%d")
+
+
+def _e2_steps(res, ctx):
+    """단계 로그 — 어느 단계가 언제 돌았는지 사람이 읽을 수 있게."""
+    steps = (res or {}).get("steps") or {}
+    if not steps:
+        return True, "단계 로그 없음 — 아직 검토본으로 편성한 적이 없다(결함 아님)"
+    lab = {"M": "①모델", "H": "②확정", "L": "③라인시간",
+           "I": "④품목", "K": "④파트별", "T": "⑤자재소요", "S": "⑥협력사"}
+    seen = []
+    for k, v in steps.items():
+        if not isinstance(v, dict):
+            continue
+        seen.append(f"{lab.get(k, k)}={v.get('status', '?')}"
+                    f"({v.get('row_count') if v.get('row_count') is not None else '-'}행)")
+    bad = [k for k, v in steps.items() if isinstance(v, dict) and v.get("status") == "ERR"]
+    return (not bad), (" · ".join(seen) if not bad
+                       else f"★실패단계 {bad} — {' · '.join(seen)}")
+
+
+def _e3_part(res, ctx):
+    """④단계가 실제로 완료된 적이 있는가."""
+    rows = _rows(res)
+    if not rows:
+        return True, "편성 로그 없음 — 검토본 미실행(결함 아님)"
+    ks = [r for r in rows if str((r.get("job_code") if isinstance(r, dict) else "")).strip() in ("K", "T")]
+    if not ks:
+        return True, f"로그 {len(rows)}건 · ④⑤ 기록 없음"
+    ok = [r for r in ks if str(r.get("status", "")).strip() == "OK"]
+    return (len(ok) > 0), (f"④⑤ 실행 {len(ks)}건 중 성공 {len(ok)}건"
+                           if ok else "★④⑤ 가 한 번도 성공한 적이 없다")
+
+
+def _e4_link(res, ctx):
+    """④ → ⑤ 연결. **레거시 대비**로 본다.
+
+       ★파트별계획을 안 거치는 제번(WO=수주·직납품 등)은 레거시에도 있다 —
+         절대값 0 을 요구하면 정상 구조를 결함으로 오판한다(2026-09-01 실측).
+         레거시와의 **차이**가 벌어질 때만 우리 편성이 틀어진 것이다."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패 — 산출 테이블을 못 읽었다"
+    part_wo, mat_wo, web_orphan, leg_orphan = (int(rows[0][i] or 0) for i in range(4))
+    if part_wo == 0:
+        return True, "④ 산출이 비어 있다 — 아직 편성 전(결함 아님)"
+    d = web_orphan - leg_orphan
+    tol = max(50, int(leg_orphan * 0.05))          # 레거시 대비 5% 또는 50행
+    tail = (f"④ {part_wo:,}제번 → ⑤ {mat_wo:,}제번 · "
+            f"파트별外 소요 웹 {web_orphan:,} / 레거시 {leg_orphan:,} ({d:+,})")
+    if abs(d) <= tol:
+        return True, tail + "  = 레거시와 같은 구조(수주·직납품 계열)"
+    return False, ("★" + tail + f"  — 레거시와 {d:+,}행 차이(허용 ±{tol:,}). "
+                   "우리 편성만 제번이 남거나 빠졌다")
+
+
+def _e10_vendor_diff(res, ctx):
+    """업체×자재 단위로 레거시와 대사. **어느 업체가 틀어졌는지**가 핵심 산출물."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패"
+    nwc, npair, ndiff, nwc_diff, n_over, n_short = (int(rows[0][i] or 0) for i in range(6))
+    if npair == 0:
+        return True, "⑤ 산출이 비어 있다 — 아직 편성 전(결함 아님)"
+    ctx["e10_ndiff"] = ndiff
+    pct = ndiff * 100.0 / npair
+    tail = (f"업체 {nwc}곳 · 업체×자재 {npair:,}쌍 · 불일치 {ndiff:,}쌍({pct:.2f}%) "
+            f"· 문제업체 {nwc_diff}곳 · 과다 {n_over:,} / 부족 {n_short:,}")
+    # 어제(2026-08-31) 정합 후 기준선 = 부족 18 · 과다 0. 크게 벌어지면 회귀다.
+    return (ndiff <= 200), (tail if ndiff <= 200
+                            else "★" + tail + "  — 어제 기준선(부족18·과다0) 대비 회귀 의심")
+
+
+def _e13_setin(res, ctx):
+    """협력사에게 받은 세트가 재고로 파생되는가.
+       파생 = set_stock_maint.derived_flag='1' + nx.PU_T_SET_MAT_STOCK 잔액."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패"
+    n_in, n_drv, n_sheet, n_stk = (int(rows[0][i] or 0) for i in range(4))
+    if n_in == 0:
+        return True, "세트입고 없음 — 아직 받은 것이 없다(결함 아님)"
+    pct = n_drv * 100.0 / n_in
+    tail = (f"세트입고 {n_in:,}건({n_sheet:,}송장) · 파생완료 {n_drv:,}건({pct:.1f}%) "
+            f"· 세트재고 {n_stk:,}행")
+    if n_drv == 0:
+        return False, f"★입고 {n_in:,}건인데 파생 0건 — 받았는데 재고가 안 늘었다"
+    if n_stk == 0:
+        return False, f"★{tail} — 파생 표시는 됐는데 세트재고가 비어 있다"
+    return True, tail
+
+
+def _e14_stock3(res, ctx):
+    """원장·수불장·재고 3곳이 다 살아 있고 음수재고가 없는가."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패"
+    n_led, n_maint, n_wh, n_neg, n_neg_web = (int(rows[0][i] or 0) for i in range(5))
+    empty = [n for n, v in (("원장", n_led), ("수불장", n_maint), ("재고", n_wh)) if v == 0]
+    if empty:
+        return False, f"★{'/'.join(empty)} 가 비어 있다 — 3곳 정합을 잴 수 없다"
+    tail = f"원장(MAT) {n_led:,} · 수불장 {n_maint:,} · 재고 {n_wh:,}"
+    if n_neg == 0:
+        return True, tail + " · 음수재고 0"
+    # 레거시에도 있는 음수는 우리가 만든 것이 아니다 — 참고로만 알린다.
+    n_legacy = n_neg - n_neg_web
+    if n_neg_web == 0:
+        return True, (tail + f" · 음수재고 {n_neg}행(전부 레거시에도 있음 — 기존 데이터)")
+    return False, (f"★{tail} · **웹에서 생긴 음수재고 {n_neg_web}행**"
+                   f"(레거시 유래 {n_legacy}행은 제외) — 음수차단 규칙을 우회한 경로가 있다")
+
+
+def _e14b_bucket(res, ctx):
+    """자재재고 버킷이 (자재,창고)당 1행인가 + CUST_CODE 가 Z99990 단일인가."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패"
+    dup, n_cc, n_notz = (int(rows[0][i] or 0) for i in range(3))
+    if dup == 0 and n_notz == 0:
+        return True, f"중복 버킷 0 · CUST_CODE {n_cc}종(전부 Z99990)"
+    msg = []
+    if dup:
+        msg.append(f"★(자재,창고) 중복 {dup}건 — 같은 창고에 2행, 재고 합계가 틀어진다")
+    if n_notz:
+        msg.append(f"★CUST_CODE≠Z99990 {n_notz}행 — 버킷키에 거래처가 섞였다")
+    return False, " / ".join(msg) + "  조치: stock.py _mat_mirror_edit 버킷키 확인 + 유령행 정리"
+
+
+def _e15_close(res, ctx):
+    """마감(수불장)이 실제로 값을 내는가 = 파이프라인 종점이 살아 있는가."""
+    rows = _rows(res)
+    if not rows:
+        return True, "수불장 행 없음 — 해당 기간 거래 없음(결함 아님)"
+    def _n(r, *ks):
+        for k in ks:
+            if isinstance(r, dict) and r.get(k) is not None:
+                try:
+                    return float(r[k] or 0)
+                except Exception:
+                    return 0.0
+        return 0.0
+    ea = sum(_n(r, "ea", "end_amt", "ta") for r in rows)
+    return True, f"자재 수불장 {len(rows):,}행 · 기말금액 {ea:,.0f}"
+
+
+def _e12_routing(res, ctx):
+    """routing_edge 의 라이브 시드(wc_live)가 마스터를 따라가고 있는가.
+
+       ★사용자 편집(wc_user)은 **의도된 오버라이드**라 stale 이 아니다 — 세지 않는다.
+         stale 은 '아무도 손대지 않았는데 옛 업체가 남아 있는' 것이다."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패"
+    total, stale, edited = (int(rows[0][i] or 0) for i in range(3))
+    if total == 0:
+        return True, "routing_edge 비어 있음 — 아직 시드 전"
+    tail = f"엣지 {total:,}행 · 사용자편집 {edited:,}행 · 라이브시드 stale {stale:,}행"
+    if stale == 0:
+        return True, tail + "  = 마스터와 동기 상태"
+    return False, ("★" + tail + "  — 마스터가 바뀌었는데 반영이 안 됐다. "
+                   "이 자재는 **엉뚱한 협력사로 발주가 나간다**. "
+                   "조치: POST /api/routing/sync 실행")
+
+
+def _e11_top(res, ctx):
+    """차이 큰 업체 TOP10 — 내일 아침 어디부터 볼지 그대로 읽히게 출력한다."""
+    # ★조회 자체가 거부되면 '차이 없음'이 아니다. 2026-09-01 실측: SQL 가드에 막혀
+    #   rows 가 비었는데 "전 업체 일치"로 PASS 가 났다. 거짓 PASS 는 진짜 실패보다 나쁘다.
+    if isinstance(res, dict) and res.get("ok") is False:
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return True, "차이나는 업체 없음 — 전 업체 레거시와 일치"
+    out = []
+    for r in rows[:10]:
+        wc, nm, n_mat, n_diff, qdiff = r[0], r[1], int(r[2] or 0), int(r[3] or 0), float(r[4] or 0)
+        out.append(f"{wc}({nm or '?'}) 불일치 {n_diff}/{n_mat}쌍 수량차 {qdiff:+,.0f}")
+    return True, "차이 업체 — " + " · ".join(out)
+
+
+def _e5_vendor(res, ctx):
+    """업체별로 소요가 갈라지는가. 작업처 없는 행은 **발주를 낼 수 없는 행**이다."""
+    if _refused(res):
+        return False, f"★조회 거부 — {res.get('detail')}"
+    rows = _rows(res)
+    if not rows:
+        return False, "★조회 실패"
+    nvendor, noblank, total = (int(rows[0][i] or 0) for i in range(3))
+    if total == 0:
+        return True, "⑤ 산출이 비어 있다 — 아직 편성 전(결함 아님)"
+    pct = noblank * 100.0 / total
+    return (pct < 5.0), (f"업체 {nvendor}곳 · {total:,}행 · 작업처없음 {noblank:,}행({pct:.1f}%)"
+                         + ("" if pct < 5.0 else "  ★작업처 미매핑이 많다 — 이 행은 발주가 안 나간다"))
+
+
+def _e7_req(res, ctx):
+    """요청수량 = 계획 − 완료 여야 한다. 발행분을 또 빼면 음수이거나 0 이 된다.
+
+       ★판정: 계획>완료 인데 요청이 0 인 행이 다수면 이중차감을 의심한다.
+         (정상적으로 0 인 행도 있으므로 '전부 0' 일 때만 결함으로 본다)"""
+    rows = _rows(res)
+    if not rows:
+        return True, "행 없음 — 해당 업체 계획 없음"
+    def _f(r, *ks):
+        for k in ks:
+            if r.get(k) is not None:
+                try:
+                    return float(r.get(k) or 0)
+                except Exception:
+                    return 0.0
+        return 0.0
+    neg = [r for r in rows if _f(r, "req", "req_qty") < 0]
+    live = [r for r in rows if _f(r, "plan", "plan_qty") > _f(r, "done", "fin_qty")]
+    zero = [r for r in live if _f(r, "req", "req_qty") <= 0]
+    if neg:
+        return False, f"★요청수량 음수 {len(neg)}행 — 이중차감"
+    if live and len(zero) == len(live):
+        return False, (f"★잔여가 있는 {len(live)}행 전부 요청수량 0 — 이중차감 의심 "
+                       f"(발행분을 done 과 req 양쪽에서 빼고 있다)")
+    return True, (f"{len(rows)}행 · 잔여있는 행 {len(live)} 중 요청0 {len(zero)}행 "
+                  f"(음수 0 · 전부0 아님 = 정상)")
+
+
+def _e8_setexc(res, ctx):
+    """세트제외(공용품)는 레거시처럼 맨 위에 모여야 한다."""
+    rows = _rows(res)
+    se = [i for i, r in enumerate(rows) if r.get("setexc")]
+    if not se:
+        return True, f"{len(rows)}행 · 세트제외 없음(이 업체는 해당 없음)"
+    top = list(range(len(se)))
+    return (se == top), (f"세트제외 {len(se)}행 · 맨 위 배치 {'정상' if se == top else '★어긋남 %s' % se[:6]}"
+                         f" (전체 {len(rows)}행)")
+
+
+# ★E 그룹은 **CASES 앞**에 놓는다 — 무거운 조회를 먼저(§9 순서 규칙).
+CASES = E_CASES + CASES

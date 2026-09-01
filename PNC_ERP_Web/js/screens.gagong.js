@@ -886,18 +886,25 @@ SCREEN.gagongmove580=(c)=>{
     let tNeed=0,tMoved=0,tSale=0,tAssy=0,tPrint=0,tPrior=0;const dSum={};dates.forEach(d=>dSum[d]=0);
     st.rows.forEach(r=>{tNeed+=+r.need||0;tMoved+=+r.moved||0;tSale+=+r.sale||0;tAssy+=+r.assy_stock||0;tPrint+=+r.jp_print||0;tPrior+=+r.prior||0;
       dates.forEach(d=>{dSum[d]+=(r.days&&r.days[d])||0;});});
-    const NC=16;   // ★2026-08-24 자재재고·생산재고·도번고정재고 3컬럼 추가
+    // 고정컬럼수 = 앞 8(SEQ·최종납품처·ASSY도번·도번·자도번LIST·PART일자·INPUT·Line)
+    //            + 3(이동전표발행·이동필요·당일이전) + 뒤 5(출하·ASSY재고·자재재고·생산재고·도번고정)
+    const NC=16;
     return `<div class="grid-wrap" style="max-height:calc(100vh - 340px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit mv-tbl" style="font-size:11px;user-select:none;text-align:center"><thead><tr>
-       <th>SEQ</th><th>최종납품처</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
-       <th>이동전표발행</th><th>이동필요</th><th>출하</th><th>ASSY재고</th>
-       <th>자재재고</th><th>생산재고</th><th>도번고정</th><th>당일이전</th>
-       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}</tr></thead>
+       <!-- ★ASSY도번 추가(2026-09-01 요청) — 레거시 580 에 있는 컬럼.
+            '도번'은 가공품번(예 AJR74942626-고압)이라 ASSY 원본과 다르다. 둘 다 보여야 추적된다. -->
+       <th>SEQ</th><th>최종납품처</th><th>ASSY도번</th><th>도번</th><th>자도번LIST</th><th>PART일자</th><th>INPUT</th><th>Line</th>
+       <th>이동전표발행</th><th>이동필요</th><th>당일이전</th>
+       ${dates.map(d=>`<th style="${wke(d)};${wkbg(d)}">${wlab(d)}</th>`).join('')}
+       <!-- ★재고류 5종을 일자 뒤로(2026-09-01 요청) — 계획·일자를 먼저 보고 재고는 참고로 -->
+       <th>출하</th><th>ASSY재고</th><th>자재재고</th><th>생산재고</th><th>도번고정</th></tr></thead>
       <tbody>${st.loading?spinRow(NC+dates.length):(st.rows.length?st.rows.map((r,i)=>{
         const jshort=(r.jado||'').length>40?(r.jado.slice(0,40)+'…'):(r.jado||'');const ex=st.exp.has(i);
         return `<tr>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${i+1}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.dest)}</td>
+        <!-- ★ASSY도번(2026-09-01) — 가공품번(도번)과 달리 ASSY 원본. 레거시 580 동일 -->
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer" title="${esc(r.assy)}">${esc(r.assy)}</td>
         ${(()=>{const on=st.itemSel===i;   // ★도번칸 = 별도 선택상태(키팅 itemSel 패턴). 재클릭=해제
           const sty=on?'background:#dbeafe;color:#123a6b;font-weight:700;outline:2px solid #4a86e8;outline-offset:-2px':'';
           // ★도번 = 가공품번(item, 예 AJR74942626-고압) — 레거시 580 도번컬럼과 동일(2026-08-28).
@@ -910,11 +917,6 @@ SCREEN.gagongmove580=(c)=>{
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer">${esc(r.line)}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.jp_print?'':';color:#dfe6ef'}">${r.jp_print?nf(r.jp_print):'·'}</td>
         <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.need>0?';color:#c0392b;font-weight:600':';color:#dfe6ef'}">${r.need>0?nf(r.need):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
-        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td>
         ${(()=>{const on=st.sel.has(`${i}:P`);   // 당일이전(plan_qty_00)도 선택 대상 — 키는 '행:P'
           if(!r.prior)return `<td class="center" style="color:#dfe6ef">·</td>`;
           const bg=r.prior_color||'';
@@ -922,12 +924,24 @@ SCREEN.gagongmove580=(c)=>{
         ${dates.map(d=>{const plan=(r.days&&r.days[d])||0,done=(r.doneday&&r.doneday[d])||0,bg=(r.colorday&&r.colorday[d])||'';
           if(!plan)return `<td class="center mv-cell" data-i="${i}" data-d="${d}" style="color:#dfe6ef;${wkbg(d)}">·</td>`;
           const key=`${i}:${d}`, on=st.sel.has(key);
-          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}</tr>
+          return `<td class="center mv-cell" data-i="${i}" data-d="${d}" data-key="${key}" style="cursor:pointer;${bg?`background:${bg};${fgOn(bg)}`:wkbg(d)};font-weight:700${on?';outline:2px solid #4a86e8;outline-offset:-2px;background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))':''}">${nf(done)}/${nf(plan)}</td>`;}).join('')}
+        <!-- ★재고류 5종 — 일자 뒤(2026-09-01 요청) -->
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.sale?'':';color:#dfe6ef'}">${r.sale?nf(r.sale):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.assy_stock?'':';color:#dfe6ef'}">${r.assy_stock?nf(r.assy_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.stock?'':';color:#dfe6ef'}">${r.stock?nf(r.stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.pr_stock?'':';color:#dfe6ef'}">${r.pr_stock?nf(r.pr_stock):'·'}</td>
+        <td class="center mv-rowsel" data-i="${i}" style="cursor:pointer${r.fix_stock?'':';color:#dfe6ef'}">${r.fix_stock?nf(r.fix_stock):'·'}</td></tr>
         ${ex?`<tr class="jado-exp"><td></td><td colspan="${NC-1+dates.length}" style="background:#f2f7ff;white-space:normal;padding:4px 8px;font-size:11px;color:#334;text-align:left">📦 자도번 ${r.matcnt}종: ${esc(r.jado).replace(/,/g,'&nbsp;· ')}</td></tr>`:''}`;
       }).join(''):`<tr><td colspan="${NC+dates.length}" class="empty">${st.loaded?'조회 결과 없음':'조건을 지정한 뒤 <b>🔍 조회</b> 버튼을 누르세요.'}</td></tr>`)}</tbody>
-      ${st.rows.length?`<tfoot><tr class="grandtot"><td colspan="7">합계 (${nf(st.cnt)}행)</td>
-        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td><td class="center">${nf(tPrior)}</td>
-        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}</tr></tfoot>`:''}
+      ${(()=>{if(!st.rows.length)return '';
+        // ★재고류를 일자 뒤로 옮겼으므로 합계행도 같은 순서로(2026-09-01).
+        let tStock=0,tPr=0,tFix=0;
+        st.rows.forEach(r=>{tStock+=+r.stock||0;tPr+=+r.pr_stock||0;tFix+=+r.fix_stock||0;});
+        return `<tfoot><tr class="grandtot"><td colspan="8">합계 (${nf(st.cnt)}행)</td>
+        <td class="center">${nf(tPrint)}</td><td class="center" style="color:#c0392b">${nf(tNeed)}</td><td class="center">${nf(tPrior)}</td>
+        ${dates.map(d=>`<td class="center">${nf(dSum[d])}</td>`).join('')}
+        <td class="center">${nf(tSale)}</td><td class="center">${nf(tAssy)}</td>
+        <td class="center">${nf(tStock)}</td><td class="center">${nf(tPr)}</td><td class="center">${nf(tFix)}</td></tr></tfoot>`;})()}
       </table></div>`;
   };
   // ★"이동전표" 모드 — MAINT_GROUP_SEQ(전표) 단위 발행목록. 확정여부(입고확인)와 각 전표 재출력 버튼.
@@ -1213,18 +1227,25 @@ function openMoveModal(st,dates,onIssued){
         <label class="tl">출고가공창고</label><input class="inp" id="mm-outwh" value="${esc(state.out_wh)}" style="width:70px;min-width:0">
         <label class="tl">입고자재창고</label><input class="inp" id="mm-inwh" value="${esc(state.in_wh)}" style="width:70px;min-width:0">
         <label class="tl">출고처</label><input class="inp" id="mm-dest" value="${esc(state.dest)}" style="width:110px;min-width:0" placeholder="최종납품처">
-        <div class="spacer"></div><button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
+        <div class="spacer"></div>
+        <button class="btn" id="mm-delrow" style="padding:3px 10px">➖ 빈행삭제</button>
+        <button class="btn" id="mm-addrow" style="padding:3px 10px">➕ 행추가</button>
       </div>
       <div id="mm-msg" style="padding:0 12px;min-height:15px;font-size:12px"></div>
       <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 12px">
         <table class="tbl fit mm-tbl" style="font-size:12px;text-align:center;width:100%;table-layout:fixed"><thead><tr>
           <th style="width:32px">SEQ</th><th style="width:150px">생산품번</th><th style="width:150px">가공품번</th><th>품명</th>
+          <!-- ★재고수량 = 출고가공창고(P0001 등) 재고. 레거시 586 그리드와 동일(2026-09-01) -->
+          <th style="width:74px">재고수량</th>
           <th style="width:58px">SET</th><th style="width:52px">사용</th><th style="width:78px">출고수량</th><th style="width:110px">비고</th></tr></thead>
         <tbody>${state.rows.map((r,i)=>`<tr>
           <td class="center">${i+1}</td>
           <td><input class="inp mm-f" data-i="${i}" data-k="item_code" value="${esc(r.item_code)}" style="text-align:center" placeholder="도번"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="mat_code" value="${esc(r.mat_code)}" style="text-align:center" placeholder="자도번"></td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item_desc)}">${esc(r.item_desc)}</td>
+          <!-- ★재고수량(가공창고) — 출고수량보다 적으면 빨강으로 경고 -->
+          <td class="center" style="${(r.stock!=null&&(+r.maint_qty||0)>(+r.stock||0))?'color:#c0392b;font-weight:700':'color:#333'}"
+              title="${esc(state.out_wh)} 창고 재고">${r.stock==null?'':nf(r.stock)}</td>
           <td><input class="inp mm-f" data-i="${i}" data-k="set_qty" type="number" value="${r.set_qty||''}" style="text-align:center"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="use_qty" type="number" value="${r.use_qty||''}" style="text-align:center"></td>
           <td><input class="inp mm-f" data-i="${i}" data-k="maint_qty" type="number" value="${r.maint_qty||''}" style="text-align:center;font-weight:700;background:#fffbe6" title="직접 수정 가능(SET×사용 자동계산값을 덮어씀)"></td>
@@ -1248,6 +1269,18 @@ function openMoveModal(st,dates,onIssued){
     q('#mm-inwh').onchange=e=>state.in_wh=e.target.value.trim();
     q('#mm-dest').onchange=e=>state.dest=e.target.value.trim();
     q('#mm-addrow').onclick=()=>{for(let k=0;k<5;k++)state.rows.push({item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''});render();};
+    // ★빈행삭제(2026-09-01 요청) — 도번·자도번이 모두 빈 행만 지운다.
+    //   입력된 행은 실수로 사라지면 안 되므로 절대 건드리지 않는다.
+    //   전부 지워지면 입력할 칸이 없어지므로 최소 1행은 남긴다.
+    q('#mm-delrow').onclick=()=>{
+      const isEmpty=r=>!String(r.item_code||'').trim()&&!String(r.mat_code||'').trim();
+      const keep=state.rows.filter(r=>!isEmpty(r));
+      const removed=state.rows.length-keep.length;
+      if(!removed){q('#mm-msg').innerHTML='<span style="color:#c0392b">지울 빈 행이 없습니다.</span>';return;}
+      state.rows=keep.length?keep:[{item_code:'',mat_code:'',item_desc:'',set_qty:0,use_qty:0,maint_qty:0,remarks:''}];
+      render();
+      q('#mm-msg').innerHTML=`<span style="color:#1f7a3d">빈 행 ${removed}개를 삭제했습니다.</span>`;
+    };
     // ★출고수량(maint_qty)은 직접 입력 가능. SET/사용 수정 시에만 자동계산으로 덮어쓴다.
     //   재렌더하면 입력 중 포커스가 날아가므로 state만 갱신(품명 등 표시는 다음 렌더에 반영).
     ov.querySelectorAll('.mm-f').forEach(el=>el.onchange=()=>{
@@ -1256,7 +1289,35 @@ function openMoveModal(st,dates,onIssued){
       if(k==='set_qty'||k==='use_qty'){
         r.maint_qty=(r.set_qty||0)*(r.use_qty||0);
         const t=ov.querySelector(`.mm-f[data-i="${i}"][data-k="maint_qty"]`); if(t)t.value=r.maint_qty||'';
-      }});
+      }
+      // ★자도번을 넣으면 품명 + 가공창고 재고를 조회해 채운다(2026-09-01).
+      //   재렌더하면 입력 포커스가 날아가므로 해당 셀만 직접 갱신한다.
+      if(k==='mat_code')loadMatInfo(i);
+    });
+    // 자도번 → 품명·재고 조회. 출고가공창고(state.out_wh) 기준.
+    const loadMatInfo=async(i)=>{
+      const r=state.rows[i], m=String(r.mat_code||'').trim();
+      if(!m){r.item_desc='';r.stock=null;paintRow(i);return;}
+      try{
+        const d=await(await fetch(`${API}/api/gagong/move580/matinfo?mat=${encodeURIComponent(m)}`
+                                  +`&wh=${encodeURIComponent(state.out_wh||'P0001')}`)).json();
+        r.item_desc=d.nm||''; r.stock=(d.stock==null?null:+d.stock);
+        if(!d.found)r.item_desc='(품목마스터에 없음)';
+      }catch(e){ r.stock=null; }
+      paintRow(i);
+    };
+    // 그 행의 품명·재고 칸만 다시 그린다(전체 재렌더 금지 — 입력 중 포커스 보존).
+    const paintRow=(i)=>{
+      const tr=ov.querySelectorAll('.mm-tbl tbody tr')[i]; if(!tr)return;
+      const r=state.rows[i], tds=tr.children;
+      if(tds[3]){tds[3].textContent=r.item_desc||'';tds[3].title=r.item_desc||'';}
+      if(tds[4]){
+        tds[4].textContent=(r.stock==null?'':nf(r.stock));
+        const over=(r.stock!=null&&(+r.maint_qty||0)>(+r.stock||0));
+        tds[4].style.color=over?'#c0392b':'#333';
+        tds[4].style.fontWeight=over?'700':'400';
+      }
+    };
     q('#mm-save').onclick=async()=>{
       const valid=state.rows.filter(r=>r.mat_code&&r.item_code&&(r.maint_qty>0));
       if(!valid.length){msg('출고수량이 있는 행이 없습니다(자도번·수량 확인).',false);return;}
@@ -1289,6 +1350,20 @@ function openMoveModal(st,dates,onIssued){
     };
   };
   render(); document.body.appendChild(ov);
+  // ★자동채움된 행(선택셀에서 넘어온 것)들의 가공창고 재고를 처음 한 번 채운다(2026-09-01).
+  //   순차 호출 — 행이 많아야 수십 개라 부담 없고, 동시요청으로 커넥션을 물지 않는다.
+  (async()=>{
+    for(let i=0;i<state.rows.length;i++){
+      const m=String(state.rows[i].mat_code||'').trim(); if(!m)continue;
+      try{
+        const d=await(await fetch(`${API}/api/gagong/move580/matinfo?mat=${encodeURIComponent(m)}`
+                                  +`&wh=${encodeURIComponent(state.out_wh||'P0001')}`)).json();
+        state.rows[i].stock=(d.stock==null?null:+d.stock);
+        if(!state.rows[i].item_desc)state.rows[i].item_desc=d.nm||'';
+      }catch(e){}
+    }
+    if(document.body.contains(ov))render();
+  })();
 }
 
 /* 부품납품표(개별카드)+부품확인/납품표(그룹묶음 8행/페이지) 인쇄 — dw_pr_input_586_p1/p2 재현.
@@ -1727,3 +1802,133 @@ function openSetAdjModal(st,onSaved){
   render(); document.body.appendChild(ov);
   if(state.cust)refreshCur();
 }
+
+
+/* ===== 가공: 4주간 가공계획현황(제번) (w_pr_outside_070 「가공자재계획현황」) =====
+   ★2026-09-01 신설. 레거시는 산식 참고, 데이터는 nx 웹 정본(계획원본 → 모델BOM → 소요엔진).
+   집계 = 제번·라인·ASM도번 그레인 / 상세 = 거기에 자도번(P2 자재) 한 단 더.
+   일자칸 01~31 = 기준일 + 0~30. 백엔드 /api/gagong/matplan070. */
+SCREEN.gagongmatplan070=(c)=>{
+  const API=API_BASE;
+  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
+  const nf3=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:3});
+  const _DW=['일','월','화','수','목','금','토'];
+  const dcol=s=>{s=''+(s||'');if(s.length!==6)return s;
+    const d=new Date(2000+ +s.slice(0,2), +s.slice(2,4)-1, +s.slice(4,6));
+    return `${+s.slice(4,6)}(${_DW[d.getDay()]})`;};
+  const dow=s=>{s=''+(s||'');if(s.length!==6)return -1;
+    return new Date(2000+ +s.slice(0,2), +s.slice(2,4)-1, +s.slice(4,6)).getDay();};
+  const ymd2date=s=>(s&&(''+s).length===6)?`20${(''+s).slice(0,2)}-${(''+s).slice(2,4)}-${(''+s).slice(4,6)}`:'';
+  const date2ymd=s=>(s||'').replace(/-/g,'').slice(2);
+
+  const st={ymd:date2ymd(planBaseIso()),mode:'sum',wc:'P2',line:'',wo:'',asm:'',item:'',
+            dates:[],rows:[],cnt:0,qty:0,loading:false,msg:''};
+
+  const load=async()=>{st.loading=true;draw();
+    const qs=new URLSearchParams({ymd:st.ymd,mode:st.mode,wc:st.wc,line:st.line,
+                                 wo:st.wo,asm:st.asm,item:st.item,limit:20000});
+    try{const d=await(await fetch(`${API}/api/gagong/matplan070?${qs}`)).json();
+      st.dates=d.dates||[];st.rows=d.rows||[];st.cnt=d.cnt||0;st.qty=d.qty||0;st.msg='';}
+    catch(e){st.msg='백엔드 연결 실패';st.dates=[];st.rows=[];st.cnt=0;st.qty=0;}
+    st.loading=false;draw();};
+
+  const draw=()=>{
+    const dates=st.dates, DTL=(st.mode==='dtl');
+    // 오토컴플리트 후보(조회결과에서 추출)
+    const lnS=new Set(),woS=new Set(),asS=new Set(),mtS=new Set();
+    st.rows.forEach(r=>{if(r.line)lnS.add(r.line);if(r.wo)woS.add(r.wo);
+      if(r.asm)asS.add(r.asm);if(r.mat)mtS.add(r.mat);});
+    const opt=s=>[...s].sort().slice(0,500).map(v=>`<option value="${esc(v)}"></option>`).join('');
+    // 합계
+    let tLot=0,tQty=0;const dSum=dates.map(()=>0);
+    st.rows.forEach(r=>{tLot+=+r.lot||0;tQty+=+r.qty||0;
+      (r.d||[]).forEach((v,i)=>{dSum[i]+=+v||0;});});
+    const NC=DTL?8:7;   // 고정컬럼수
+    const hbg=i=>{const w=dow(dates[i]);return w===0?'background:#ffe3e3':(w===6?'background:#e3ecff':'');};
+    const cell=(v,i)=>v?`<td class="num"${dow(dates[i])===0?' style="background:#fff5f5"':(dow(dates[i])===6?' style="background:#f5f8ff"':'')}>${nf(v)}</td>`
+                       :`<td class="num" style="color:#dfe6ef${dow(dates[i])===0?';background:#fff5f5':(dow(dates[i])===6?';background:#f5f8ff':'')}">·</td>`;
+
+    c.innerHTML=`
+     <style>
+      /* §3 페이지 본문 세로스크롤 금지 — 루트 flex, 표만 내부 스크롤 */
+      .mp7-root{display:flex;flex-direction:column;height:100%}
+      .mp7-root .toolbar{flex-wrap:nowrap;overflow-x:auto}
+      .mp7-grid{flex:0 1 auto;max-height:100%;min-height:0;overflow:auto;background:#fff;
+                border:1px solid var(--line-2,#c9d3e0);border-radius:8px}
+      .mp7-grid thead th{position:sticky;top:0;z-index:2;background:#eef3fa;text-align:center}
+      .mp7-grid tfoot td{position:sticky;bottom:0;z-index:2;background:#f4f7fb;font-weight:600}
+     </style>
+     <div class="mp7-root">
+      <div class="page-title" style="flex:0 0 auto">4주간 가공계획현황(제번)
+        <span style="font-size:12px;color:var(--muted);font-weight:400">제번×라인×ASM도번 · 기준일부터 31일</span></div>
+      <div class="page-sub" style="flex:0 0 auto">생산계획(<code>nx.plan_dtl</code>) → 모델BOM → <b>통일 소요엔진</b> 전개로 가공(${esc(st.wc)}) 자재 소요를 낸다.
+        수량 = ceiling(계획수량 × 모델BOM사용수 × 생산율) × BOM누적사용수. 모델BOM 유효기간·BOM 전개제외(except) 반영 = 웹 편성(파트별계획)과 같은 기준.</div>
+      <div class="toolbar" style="flex:0 0 auto">
+        <label class="tl">기준일자</label><input class="inp" type="date" id="m7-ymd" value="${ymd2date(st.ymd)}" style="width:140px">
+        <label class="tl">작업처</label><select class="inp" id="m7-wc" style="width:96px">
+          <option value="P2"${st.wc==='P2'?' selected':''}>P2 가공</option>
+          <option value="P1"${st.wc==='P1'?' selected':''}>P1 용접</option></select>
+        <label class="tl">보기</label><select class="inp" id="m7-mode" style="width:88px">
+          <option value="sum"${!DTL?' selected':''}>집계</option>
+          <option value="dtl"${DTL?' selected':''}>상세</option></select>
+        <label class="tl">라인</label><input class="inp" id="m7-line" list="m7-linel" value="${esc(st.line)}" style="width:70px" autocomplete="off"><datalist id="m7-linel">${opt(lnS)}</datalist>
+        <label class="tl">제번</label><input class="inp" id="m7-wo" list="m7-wol" value="${esc(st.wo)}" style="width:110px" autocomplete="off"><datalist id="m7-wol">${opt(woS)}</datalist>
+        <label class="tl">ASM도번</label><input class="inp" id="m7-asm" list="m7-asml" value="${esc(st.asm)}" style="width:130px" autocomplete="off"><datalist id="m7-asml">${opt(asS)}</datalist>
+        <label class="tl">자도번</label><input class="inp" id="m7-item" list="m7-iteml" value="${esc(st.item)}" style="width:130px" autocomplete="off"><datalist id="m7-iteml">${opt(mtS)}</datalist>
+        <button class="btn" id="m7-search">조회</button>
+        <button class="btn" id="m7-xls">엑셀</button>
+        <div class="spacer"></div>
+        <span class="rowcount">행 <b>${nf(st.cnt)}</b> · 수량합 <b>${nf(st.qty)}</b> · 일자 ${dates.length}개</span>
+      </div>
+      ${st.msg?`<div class="page-sub" style="color:#c0392b;flex:0 0 auto">${esc(st.msg)}</div>`:''}
+      <div class="mp7-grid">
+       <table class="tbl fit" style="font-size:11px"><thead><tr>
+        <th>SEQ</th><th>작업처</th><th>라인</th><th>제번</th><th>모델</th><th>ASM도번</th>
+        ${DTL?'<th>자도번</th><th class="num">사용수</th>':'<th class="num">LOT수량</th>'}
+        <th class="num">계획수량</th>
+        ${dates.map((d,i)=>`<th class="num" style="${hbg(i)}">${dcol(d)}</th>`).join('')}</tr></thead>
+       <tbody>${st.loading?spinRow(NC+2+dates.length):(st.rows.length?st.rows.map((r,i)=>`
+        <tr>
+         <td class="num">${i+1}</td>
+         <td class="center">${esc(r.wcnm||r.wc)}</td>
+         <td class="center">${esc(r.line)}</td>
+         <td>${esc(r.wo)}</td>
+         <td class="bcap" title="${esc(r.model)}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.model)}</td>
+         <td><b>${esc(r.asm)}</b></td>
+         ${DTL?`<td>${esc(r.mat)}</td><td class="num">${nf3(r.use)}</td>`
+              :`<td class="num">${nf(r.lot)}</td>`}
+         <td class="num"><b>${nf(r.qty)}</b></td>
+         ${(r.d||[]).map((v,j)=>cell(v,j)).join('')}</tr>`).join('')
+        :`<tr><td colspan="${NC+2+dates.length}" class="empty">조회 결과 없음</td></tr>`)}</tbody>
+       ${st.rows.length?`<tfoot><tr class="grandtot">
+         <td colspan="6">합계 (${nf(st.cnt)}행)</td>
+         ${DTL?'<td></td><td></td>':`<td class="num">${nf(tLot)}</td>`}
+         <td class="num">${nf(tQty)}</td>
+         ${dSum.map(v=>`<td class="num">${nf(v)}</td>`).join('')}</tr></tfoot>`:''}
+       </table></div>
+     </div>`;
+
+    const g=id=>c.querySelector(id);
+    const apply=()=>{st.ymd=date2ymd(g('#m7-ymd').value)||st.ymd;st.wc=g('#m7-wc').value;
+      st.mode=g('#m7-mode').value;st.line=g('#m7-line').value.trim();st.wo=g('#m7-wo').value.trim();
+      st.asm=g('#m7-asm').value.trim();st.item=g('#m7-item').value.trim();load();};
+    g('#m7-search').onclick=apply;
+    ['#m7-wc','#m7-mode'].forEach(id=>g(id).onchange=apply);
+    ['#m7-line','#m7-wo','#m7-asm','#m7-item'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')apply();});
+    g('#m7-xls').onclick=()=>{
+      if(!st.rows.length){alert('조회 결과가 없습니다.');return;}
+      const cols=[{k:'wcnm',t:'작업처'},{k:'line',t:'라인'},{k:'wo',t:'제번'},{k:'model',t:'모델'},{k:'asm',t:'ASM도번'}]
+        .concat(DTL?[{k:'mat',t:'자도번'},{k:'use',t:'사용수',n:1}]:[{k:'lot',t:'LOT수량',n:1}])
+        .concat([{k:'qty',t:'계획수량',n:1}])
+        .concat(dates.map((d,i)=>({k:'d'+i,t:dcol(d),n:1})));
+      const rows=st.rows.map(r=>{const o={...r};(r.d||[]).forEach((v,i)=>{o['d'+i]=v;});return o;});
+      downloadXLS(`가공계획현황_${st.ymd}_${DTL?'상세':'집계'}`,cols,rows);};
+
+    // 헤더 더블클릭 정렬(고정컬럼) — 일자컬럼은 정렬 대상 아님
+    const keys=['','wcnm','line','wo','model','asm'].concat(DTL?['mat','use']:['lot']).concat(['qty']);
+    enableSort(c,keys,()=>st.rows,()=>draw());
+  };
+
+  // 기준일 = 마지막 계획업로드 일자축 첫날(planBase 캐시 반영 후 조회)
+  planBase().then(b=>{if(b&&b.iso)st.ymd=date2ymd(b.iso);}).catch(()=>{}).then(load);
+};

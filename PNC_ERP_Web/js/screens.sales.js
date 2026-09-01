@@ -78,7 +78,7 @@ SCREEN.prodinvout=(c)=>{
   c.querySelector('#go').onclick=_reload;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')renderLeft();};
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#work').onchange=renderLeft;
-  bindDate(c.querySelector('#frm'),_reload);bindDate(c.querySelector('#to'),_reload);
+  
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#work').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.querySelector('#xls').onclick=()=>downloadCSV('제품입출고현황.csv',['P/N','품명','재고','작업처'],curL.map(r=>[r[0],r[1],r[3],r[2]]));
   load();
@@ -278,7 +278,7 @@ SCREEN.lgrecv=(c)=>{
     };
     const go=()=>{const f=inYmd(c.querySelector('#fr').value)||curFr,t=inYmd(c.querySelector('#to').value)||curTo;load(f,t);};
     c.querySelector('#go').onclick=go;
-    bindDate(c.querySelector('#fr'),go);bindDate(c.querySelector('#to'),go);
+    
     c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#reset').onclick=()=>{metric='amt';mkt='';c.querySelector('#iq').value='';render();};
     c.querySelector('#xls').onclick=()=>{
@@ -467,7 +467,7 @@ SCREEN.shipment=(c)=>{
     };
     const go=()=>{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);load();};
     c.querySelector('#go').onclick=go;c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
-    bindDate(c.querySelector('#dfrom'),go);bindDate(c.querySelector('#dto'),go);
+    
     c.querySelector('#reset').onclick=()=>{mode='detail';curFrom='';curTo='';load();};
     c.querySelector('#xls').onclick=()=>{let hd,rows;
       if(mode==='detail'){hd=['출하일자','Work Order','Split W/O','도번','출하수량','출하단가','출하금액','마스터단가','처리담당자','처리시각','작업처','비고'];
@@ -533,7 +533,7 @@ SCREEN.salesstock=(c)=>{
   const go=()=>{curFrom=inD(c.querySelector('#dfrom').value);curTo=inD(c.querySelector('#dto').value);load();};
   c.querySelector('#go').onclick=go;c.querySelector('#q').onkeyup=e=>{if(e.key==='Enter')apply();};
   c.querySelector('#nxsrc').onclick=()=>{source='nx';load();};   // ★Phase5 nx 파생 보기
-  bindDate(c.querySelector('#dfrom'),go);bindDate(c.querySelector('#dto'),go);
+  
   c.querySelector('#zero').onchange=e=>{incZero=e.target.checked;load();};   // 0재고 포함=서버 재조회(레거시 gross 대조)
   c.querySelector('#wc').onchange=apply;c.querySelector('#gubun').onchange=apply;
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#wc').value='';c.querySelector('#gubun').value='all';curFrom='';curTo='';load();};

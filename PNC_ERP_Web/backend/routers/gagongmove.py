@@ -24,6 +24,34 @@ def gagong_move580_opts():
     finally:
         cn.close()
 
+
+@router.get("/api/gagong/move580/matinfo")
+def gagong_move580_matinfo(mat: str = Query(...), wh: str = Query("P0001")):
+    """가공자재 이동처리 팝업 — 자도번의 품명 + **가공창고 재고**(2026-09-01 신설).
+
+    레거시 w_pr_input_586 그리드의 '재고수량' 칸. 레거시 재고현황 화면과 같은 소스다:
+      nx.PR_T_MAT_STOCK_WH 의 PART_CODE = 출고가공창고(P0001 등) 행의 STOCK_QTY
+      (실측 대조 — 4A00742A P0001 = 80 → 레거시 화면 80 일치)
+    ※PU_T_MAT_STOCK_WH 는 **자재창고**(IS0001 등)라 여기서 쓰지 않는다. 축이 다르다.
+    """
+    m = str(mat or "").strip()
+    w = str(wh or "P0001").strip() or "P0001"
+    if not m:
+        return {"mat": "", "nm": "", "stock": 0}
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("""SELECT TOP 1 ISNULL(item_name,'') FROM PARTNER_ERP_TEST3.nx.item WITH(NOLOCK)
+                        WHERE RTRIM(item_code)=?""", m)
+        r = cur.fetchone()
+        nm = (r[0] if r else "") or ""
+        cur.execute("""SELECT ISNULL(SUM(CAST(STOCK_QTY AS float)),0)
+                         FROM PARTNER_ERP_TEST3.nx.PR_T_MAT_STOCK_WH WITH(NOLOCK)
+                        WHERE RTRIM(MAT_CODE)=? AND RTRIM(ISNULL(PART_CODE,''))=?""", m, w)
+        stock = float((cur.fetchone() or [0])[0] or 0)
+        return {"mat": m, "nm": nm, "stock": stock, "wh": w, "found": bool(r)}
+    finally:
+        nx.close()
+
 # ================= 가공창고 이동계획 (w_pr_input_580) =================
 # ★2026-08-22 전환: 역설계 중단 → 레거시 SP 를 그대로 호출한다.
 #   SP 본문은 암호화(WITH ENCRYPTION)라 못 읽지만 EXEC 는 되고 174컬럼을 그대로 반환한다(실측 384행).
@@ -440,11 +468,13 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
                        NULLIF(LTRIM(RTRIM(u.PR_PART_CODE)),''),
                        NULLIF(LTRIM(RTRIM(cc.CUST_DESC)),''), '') line,
               u.ITEM_CODE, u.MAT_CODE, ISNULL(su.RACK_NO,'') rack, u.MAINT_QTY
+            -- ★★2026-09-01: UNION ALL 제거 — 같은 테이블(nx)을 두 번 읽어 **전 행이 2배**였다.
+            --   증상: 부품납품표 카드가 2장씩, 부품확인/납품표에도 같은 행이 2줄.
+            --   실측 group 199103 → nx 1행인데 UNION 결과 2행(전 전표 동일).
+            --   원래 라이브+nx 를 합치려던 자리로 보이나 양쪽 다 PARTNER_ERP_TEST3.nx 였다.
+            --   ⟹ 사용자 확정(2026-09-01): **nx 단일 소스**로 읽는다.
+            --      (CLAUDE.md §1-9-1 — 한 개념에 소스는 하나. 폴백·UNION 금지)
             FROM (
-              SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY
-                FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
-               WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
-              UNION ALL
               SELECT m.MAINT_YMD,m.MAINT_GROUP_SEQ,m.MAINT_SEQ,m.PR_PART_CODE,m.SAGUB_CUST_CODE,m.ITEM_CODE,m.MAT_CODE,m.MAINT_QTY
                 FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_GAGONG_MOVE m
                WHERE m.MAINT_GROUP_SEQ BETWEEN ? AND ? AND m.MAINT_TAG='B'
@@ -452,7 +482,7 @@ def gagong_move580_print(group_from: int = Query(...), group_to: int = Query(Non
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM_SUB su ON su.ITEM_CODE=u.MAT_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG pg ON pg.GAGONG_PROC_CODE=u.PR_PART_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cc ON cc.CUST_CODE=u.SAGUB_CUST_CODE
-            ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt, group_from, gt)
+            ORDER BY u.MAINT_GROUP_SEQ, u.MAINT_SEQ""", group_from, gt)
         cols = [d[0] for d in cur.description]
         raw = [dict(zip(cols, r)) for r in cur.fetchall()]
         groups = {}

@@ -413,7 +413,7 @@ SCREEN.prodinout=(c)=>{
   // ★0재고 표시 토글 — 서버 필터라 재조회한다(2026-08-28)
   {const z=c.querySelector('#zero');if(z)z.onchange=e=>{incZero=e.target.checked;load();};}
   c.querySelector('#gubun').onchange=renderLeft;c.querySelector('#part').onchange=renderLeft;
-  bindDate(c.querySelector('#frm'),_reload);bindDate(c.querySelector('#to'),_reload);
+  
   c.querySelector('#reset').onclick=()=>{c.querySelector('#q').value='';c.querySelector('#gubun').value='all';c.querySelector('#part').value='';sel=null;renderLeft();c.querySelector('#rbody').innerHTML='';c.querySelector('#rhead').innerHTML='<div class="s-item">← 좌측에서 품목을 클릭하세요</div>';};
   c.querySelector('#xls').onclick=()=>downloadCSV('생산재고입출고.csv',['파트','자도번','품명','규격','소분류','재고'],curL.map(r=>[pName(r[0]),r[1],r[2],r[3],r[4],r[5]]));
   load();
@@ -660,9 +660,17 @@ SCREEN.planupload=(c)=>{
     if(!upfile){alert('업로드할 엑셀 파일을 선택하세요.');return;}
     msg='업로드 중...';draw();
     const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(upfile);});
-    try{const r=await fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cr:upcr,b64})});
-      const j=await r.json();
-      if(j.ok){alert(`생산계획 UPLOAD 완료\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} · 총 ${nf(j.total)} (WO,일자) (구분 ${j.cr})`);upfile=null;load();return;}
+    // ★fname 을 함께 보낸다 — 서버가 `lg_xxx_MMDD` 날짜와 파일 안 일자축을 대조,
+    //   불일치면 **저장 전 409**. 사용자가 확인하면 force 로 재요청(2026-09-01).
+    const _post=(force)=>fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force})});
+    try{let r=await _post(false); let j=await r.json();
+      if(r.status===409){
+        if(!confirm('⚠ '+(j.detail||'업로드 날짜가 상이합니다.'))){msg='업로드를 취소했습니다 — 파일을 다시 확인하세요.';draw();return;}
+        r=await _post(true); j=await r.json();
+      }
+      if(j.ok){
+        alert(`생산계획 UPLOAD 완료${j.forced?'  (날짜 경고 무시)':''}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} · 총 ${nf(j.total)} (WO,일자) (구분 ${j.cr})`);upfile=null;load();return;}
       alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}
     catch(e){alert('업로드 실패: '+e);}
     msg='';draw();};
@@ -2469,10 +2477,15 @@ SCREEN.kitting=(host)=>{
       // ★파트별 생산계획과 동일: "연속된 같은 도번" 블록 단위로 집계행 생성(전역 Map이면 상세와 순서가 어긋남).
       //   집계행 = 청록 배경 + 클릭시 상세 드릴다운(상세는 집계행 "위"에 표시). 색상은 rollF(관련색 우선) 사용.
       for(let i=0;i<passed.length;){
-        const bk=x=>(x.r.item||'')+'\x01'+(x.r.line||'');
+        // ★2026-09-01 블록키를 파트별생산계획(410)과 동일하게 — gpc+도번+라인+PART일자.
+        //   종전 (도번+라인) 만 쓰면 같은 라인이라도 PART일자가 다르면 한 행으로 합쳐지고,
+        //   반대로 정렬상 SVC 가 사이에 끼면 같은 라인이 두 블록으로 갈렸다.
+        //   410 은 (gpc,item,line) 블록 + 일자별 행이라 08/24 C1 316 · 08/25 C1 102 처럼 나온다.
+        //   대표 확정: "준비등록을 파트별생산계획처럼" · "추가계획(SVC) 라인만 분리".
+        const bk=x=>(x.r.gpc||'')+'\x01'+(x.r.item||'')+'\x01'+(x.r.line||'')+'\x01'+(x.r.part_ymd||'');
         const it=bk(passed[i]); let j=i; const blk=[];
         while(j<passed.length&&bk(passed[j])===it){blk.push(passed[j]);j++;}
-        const r0=blk[0].r, gk=it.replace('\x01','|')+'@'+i, open=st.fold.has(gk);
+        const r0=blk[0].r, gk=it.replace(/\x01/g,'|')+'@'+i, open=st.fold.has(gk);
         const g={item:r0.item,gpc:r0.gpc,gpcnm:r0.gpcnm,line:r0.line,inhm:r0.inhm,part_ymd:r0.part_ymd,wo:'',swo:'',assy:r0.assy,
                  use_qty:r0.use_qty,days:{},dcov:{},dfin:{},drdy:{},
                  prior_plan:0,prior_cover:0,prior_ready:0,prior_fin:'0',plan_qty:0,finish:0,ready_qty:0,
@@ -2497,10 +2510,11 @@ SCREEN.kitting=(host)=>{
       // ★상세뷰: 파트별 생산계획처럼 "연속된 같은 도번" 블록마다 청록 소계행(t:'s') 추가 + 블록 접기 지원.
       if(st.view==='상세'){
         for(let i=0;i<passed.length;){
-          const bk=x=>(x.r.item||'')+'\x01'+(x.r.line||'');
+          // ★집계뷰와 같은 블록키(410 동일) — 소계행도 같은 단위로 묶여야 두 뷰가 어긋나지 않는다.
+          const bk=x=>(x.r.gpc||'')+'\x01'+(x.r.item||'')+'\x01'+(x.r.line||'')+'\x01'+(x.r.part_ymd||'');
         const it=bk(passed[i]); let j=i; const blk=[];
           while(j<passed.length&&bk(passed[j])===it){blk.push(passed[j]);j++;}
-          const gk=it.replace('\x01','|')+'@'+i, folded=st.fold.has(gk);
+          const gk=it.replace(/\x01/g,'|')+'@'+i, folded=st.fold.has(gk);
           if(!folded) blk.forEach(({r,i:ri})=>{seq++;flat.push({t:'m',r,idxs:[ri],seq});});
           flat.push({t:'s',blk:blk.map(o=>o.r),gk,folded});
           i=j;

@@ -222,10 +222,23 @@ SCREEN.planuploadrev=(c)=>{
     if(!upfile){alert('업로드할 엑셀 파일을 선택하세요.');return;}
     pgOpen('생산계획UPLOAD 처리 중', 0);
     const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(upfile);});
-    try{const r=await fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cr:upcr,b64})});
-      const j=await r.json();
+    // ★fname 을 함께 보낸다 — 서버가 `lg_xxx_MMDD` 날짜와 파일 안 일자축을 대조한다.
+    //   불일치면 **저장 전에 409** 로 막고, 사용자가 확인하면 force 로 다시 보낸다
+    //   (2026-09-01. 경고만 띄우면 이미 덮어쓴 뒤라 직전 계획이 사라진다).
+    const _post=(force)=>fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force})});
+    try{let r=await _post(false); let j=await r.json();
+      if(r.status===409){
+        pgClose();
+        if(!confirm('⚠ '+(j.detail||'업로드 날짜가 상이합니다.'))){
+          msg='업로드를 취소했습니다 — 파일을 다시 확인하세요.';draw();return;}
+        pgOpen('생산계획UPLOAD 처리 중', 0);
+        r=await _post(true); j=await r.json();
+      }
       pgClose();
-      if(j.ok){alert(`생산계획 UPLOAD 작업을 완료했습니다.\n\nUPLOAD 건수=${nf(j.total)}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} (구분 ${j.cr})`);
+      if(j.ok){
+        alert(`생산계획 UPLOAD 작업을 완료했습니다.${j.forced?'  (날짜 경고 무시)':''}\n\nUPLOAD 건수=${nf(j.total)}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} (구분 ${j.cr})`
+          +(j.axis_from?`\n계획 시작일 ${String(j.axis_from).slice(2,4)}/${String(j.axis_from).slice(4,6)}`:''));
         // ★input.value 를 비워야 같은 파일 재선택 시에도 onchange 가 다시 뜬다(자동업로드 전제).
         upfile=null;const _fi=c.querySelector('#p-file');if(_fi)_fi.value='';
         // ★그리드 자동조회 안 함(2026-08-26 요청) — 조회는 [🔍 조회] 버튼을 누를 때만.

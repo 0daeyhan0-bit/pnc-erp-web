@@ -573,7 +573,7 @@ def dailypurissue(date: str = Query(""), nocache: str = Query("")):
     _sagub_hab = {h: _sagub_raw_sum[h] + _sagub_part_sum[h] for h in ('H1', 'H2')}
     _chong = {h: _hyeon_hab[h] + MS['chuga_cut'][h] + MS['chuga_seol'][h] for h in ('H1', 'H2')}   # 총예상매출 = 현매출+추가매출
     _yusang = {h: _chong[h] - _sagub_hab[h] for h in ('H1', 'H2')}   # 유상제외(숨김) = LG매출(총매출)−사급금액
-    _lgsu = {h: _chong[h] - _sagub_hab[h] + MS['naesu'][h] * 0.1 for h in ('H1', 'H2')}   # ★LG수금 = LG매출 − 사급금액 + 내수매출×10%
+    _lgsu = {h: _chong[h] - _sagub_hab[h] - _sagub_hab[h] * 0.1 + MS['naesu'][h] * 0.1 for h in ('H1', 'H2')}   # ★LG수금 = 총매출 − 사급합계 − 사급합계×10%(사급 부가세) + 내수×10% (2026-09-01 대표 확정·사급VAT 차감 누락 수정)
     maechul = {"hyeon_cut": _r3(MS['hyeon_cut']), "hyeon_seol": _r3(MS['hyeon_seol']), "hyeon_etc": _r3(MS['hyeon_etc']), "hyeon_hab": _r3(_hyeon_hab),
                "chuga_cut": _r3(MS['chuga_cut']), "chuga_seol": _r3(MS['chuga_seol']), "chong": _r3(_chong),
                "sagub_raw": _r3(MS['sagub_raw']), "sagub_raw_fc": _r3(MS['sagub_raw_fc']), "sagub_raw_sum": _r3(_sagub_raw_sum),
@@ -734,6 +734,13 @@ def _prev_ym(ym):
     yy, mm = int(ym[:2]), int(ym[2:4])
     return f"{(yy-1):02d}12" if mm == 1 else f"{yy:02d}{(mm-1):02d}"
 
+# ※2026-09-01 시도했다가 되돌림 — 웹원장(nx.stock_ledger)을 이 화면에 UNION 하려 했으나
+#   **중복계상**이 확인되어 중단했다. 같은 물량이 양쪽 원장에 모두 있다:
+#     실측 8월 이후 웹원장 957행 중 693행이 미러에도 동일 (자재·일자·TAG·수량 일치)
+#     예) 260831 AJR77225602-20-1 4개 — 웹 seq272(web) / 미러 seq372(김병기 13:32)
+#   즉 8/31 은 웹·레거시 양쪽에서 같은 송장을 입고했다(병행운영 기간).
+#   ⟹ 단순 UNION 은 재고를 2배로 만든다. 합치려면 **중복 판정 키**를 먼저 정해야 한다
+#     (레거시 은퇴 시점 또는 웹 입고분 식별자). 별도 과제.
 def _matinout(from6, to6, stock_cust="Z99990", part_wh="IS0001", q="", src="nx"):
     # ★2026-08-25 src 인자 수용(현재는 원천이 nx 중심 = 라이브 미러 + 웹실적이라
     #   nx/live 모두 동일 결과). 시그니처만 맞춰 호출부와 어긋나지 않게 한다.
