@@ -547,7 +547,9 @@ def _prod_stock_sql():
  SELECT mat, part, SUM(q) q FROM (
    -- 2502 마감 스냅샷
    SELECT UPPER(a.mat_code) mat, a.gagong_proc_code part, a.stock_qty q
-     FROM PARTNER_ERP.dbo.PR_T_MONTH_STOCK_WH a WITH(NOLOCK) WHERE a.stock_yymm='2502'
+     -- ★2026-09-02 nx 로 전환. 라이브 직독은 컷오버에 죽는다(§1-9-1).
+     --   실측: nx.PR_T_MONTH_STOCK_WH(2502) 1,700행 = 라이브 1,700행.
+     FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH a WITH(NOLOCK) WHERE a.stock_yymm='2502'
    -- 자재창고→생산창고 입고 (maint_qty 가 음수로 적재되어 부호 반전)
    UNION ALL
    SELECT UPPER(a.mat_code), a.TO_GAGONG_PROC_CODE, a.maint_qty*-1

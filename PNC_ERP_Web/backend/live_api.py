@@ -935,12 +935,17 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
  UNION ALL SELECT a.part_code, UPPER(a.mat_code), a.maint_ymd, 0, a.maint_qty*-1,0,'생산사용',{CUST} FROM {_PRSM} a WHERE a.maint_ymd>='{y01}' AND a.maint_ymd<='{y99}' AND a.part_code>'' AND a.maint_tag='4' AND a.maint_qty<>0
 """
     BFT = f"'{y01}'"
-    # ★2026-08-25 기초재고(BF)는 nx 모드에서도 '라이브' 를 쓴다.
-    #   BF 는 2502 마감 + 그 이후~기간시작 전까지의 누적이라, 웹 실적이 끼어들 여지가 없는
-    #   과거 구간이다. nx 를 쓰면 미러 정지분만큼 통째로 비어 재고가 어긋난다
-    #   (실측 AJR30027704-SUB6: BF 는 라이브·nx 모두 -550 로 동일 → 라이브 고정이 안전).
-    #   기간 안 이동(CUR)만 nx 로 봐야 웹 실적이 얹힌다.
-    _B = "PARTNER_ERP.dbo"
+    # ★2026-09-02 기초재고(BF)도 **source 를 따른다**(nx 모드면 nx).
+    #   종전에는 "미러 정지분만큼 비어 재고가 어긋난다"는 이유로 라이브 고정이었으나,
+    #   그건 미러가 덜 채워졌던 시절 이야기다. 실측(2026-09-02)으로 미러가 따라잡았다:
+    #     PR_T_MONTH_STOCK_WH 1,700=1,700 · pr_t_prod_dtl 171,306=171,306
+    #     sa_t_stock_maint 296,129=296,129 · PR_T_STOCK_MAINT_MAT 654,378=654,378
+    #     BF 총량 라이브 -1,767,957 / nx -1,768,376  (차 -419 = 0.02%)
+    #     └ 라이브에만 230행(8/31 레거시 입력, 미러 지연) · nx 에만 48행(web 실적)
+    #   ⟹ nx 가 오히려 **웹 실적까지 포함**해 정확하다.
+    #   ★그리고 라이브 고정은 **컷오버에 죽는 코드**다(CLAUDE.md §1-9-1) —
+    #     레거시가 은퇴하면 PARTNER_ERP.dbo 자체가 없어진다. 지금 클린으로 짠다.
+    _B = "PARTNER_ERP.dbo" if _live else "PARTNER_ERP_TEST3.nx"
     BF = f"""
  SELECT a.gagong_proc_code part, UPPER(a.mat_code) mat, a.stock_qty sq FROM {_B}.PR_T_MONTH_STOCK_WH a WHERE a.stock_yymm='2502'
  UNION ALL SELECT a.TO_GAGONG_PROC_CODE, UPPER(a.mat_code), a.maint_qty*-1 FROM {_B}.PU_T_STOCK_MAINT a WHERE a.maint_ymd>'250299' AND a.maint_ymd<{BFT} AND a.maint_tag='B' AND ISNULL(a.out_wh_gubun,'1')='1' AND {INSP} AND a.TO_GAGONG_PROC_CODE>''
