@@ -483,6 +483,107 @@ def _cur_ym():
 def _sale_win():
     return "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
 
+# ===== 마감 이월 공용 (2026-09-01) — 매출마감(salemagam)/매입마감(purmagam) 공용 =====
+#   이월 = 정산 귀속·표시만(수불장 전표 없음, 재고 실일자 그대로). 마감일 이후 입고분이 차월로 넘어감을 표시.
+def _carry_win():
+    """이월 대상 창(YYMM ym) = 당월 마감일 이후 ~ 당월 말일. 이 입고분은 이번 마감에서 빠져 차월로 이월된다.
+       (표시·확인용. 수불장 전표는 만들지 않는다 — 재고는 이미 실일자로 정확)."""
+    return "A.MAINT_YMD > '{ym}'+mg.MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+'31'"
+
+# ===== 이월 재배정(당월↔이월 override) — 2026-09-01 =====
+#   각 거래(kind·거래처·품목·입고일)의 '귀속 마감월'(assign_ym)을 저장. 없으면 마감일로 자동판정(natural).
+#   모든 달의 마감이 '귀속월==그달'로 판정 → override 없으면 현행 _sale_win/_carry_win 과 완전 diff0(교차월 이중계상 없음).
+#   kind = 'SALE'(매출마감) / 'PUR'(매입마감).
+_CARRY_OVR_READY = [False]
+def _ensure_carry_ovr():
+    if _CARRY_OVR_READY[0]:
+        return
+    try:
+        cn = _nx()
+        try: cn.autocommit = True
+        except Exception: pass
+        c = cn.cursor()
+        c.execute("""IF OBJECT_ID('PARTNER_ERP_TEST3.nx.magam_carry_ovr') IS NULL
+          CREATE TABLE PARTNER_ERP_TEST3.nx.magam_carry_ovr(
+            kind VARCHAR(4) NOT NULL, cust_code VARCHAR(20) NOT NULL, mat_code VARCHAR(40) NOT NULL,
+            maint_ymd CHAR(6) NOT NULL, assign_ym CHAR(4) NOT NULL,
+            ins_user VARCHAR(30) NULL, ins_dt DATETIME NULL CONSTRAINT DF_mco_dt DEFAULT GETDATE(),
+            CONSTRAINT PK_magam_carry_ovr PRIMARY KEY(kind,cust_code,mat_code,maint_ymd))""")
+        cn.close()
+        _CARRY_OVR_READY[0] = True
+    except Exception:
+        pass
+
+# ★성능: 자연 귀속판정은 이미 조인된 마감일 CTE(mg.MAGAM_DAY / mg.JUN_MAGAM_DAY)로 = 기존 _sale_win 과 동일(diff0).
+#   override 반영은 magam_carry_ovr 단일 EXISTS(PK 인덱스)만 추가 → 빠름(per-row 서브쿼리 없음).
+def _ovr_ex(kind, op):
+    """override 존재검사(상관 EXISTS). op='<>' (당월 밖으로 밀림) / '=' (당월로 당김)."""
+    return ("EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr o "
+            "WHERE o.kind='" + kind + "' AND o.cust_code=A.CUST_CODE AND o.mat_code=A.MAT_CODE "
+            "AND o.maint_ymd=A.MAINT_YMD AND o.assign_ym" + op + "'{ym}')")
+_NAT_CUR   = "(A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY)"  # 자연 당월귀속(=기존 _sale_win)
+_NAT_CARRY = "(A.MAINT_YMD > '{ym}'+mg.MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+'31')"                    # 자연 이월(당월달력·마감일 이후)
+_WITHIN_CUR = "(A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY)"                                                 # 당월달력 마감일 이내(외부스코프가 당월 한정)
+def _sale_win_ovr(kind):
+    """당월 마감 유효 멤버십 = (자연당월 AND NOT 밀림) OR (자연이월 AND 당김). override 0건이면 _sale_win 과 diff0."""
+    return "((" + _NAT_CUR + " AND NOT " + _ovr_ex(kind, '<>') + ") OR (" + _NAT_CARRY + " AND " + _ovr_ex(kind, '=') + "))"
+def _carry_win_ovr(kind):
+    """이월(물리적 당월에서 차월로 나감) = (자연이월 AND NOT 당김) OR (당월달력 마감일이내 AND 밀림). override 0건이면 _carry_win 과 diff0."""
+    return "((" + _NAT_CARRY + " AND NOT " + _ovr_ex(kind, '=') + ") OR (" + _WITHIN_CUR + " AND " + _ovr_ex(kind, '<>') + "))"
+
+def _carry_ovr_set(kind, ym, cc, mat, ymd, carry, usr="web"):
+    """이월 재배정 저장(당월↔차월). carry=True→차월 이월(assign ym+1) / False→당월(assign ym).
+       자연상태(마감일 자동판정)와 같으면 override 삭제 → override 0건이면 현행과 diff0 유지."""
+    _ensure_carry_ovr()
+    ym = str(ym); cc = str(cc); mat = str(mat); ymd = str(ymd)
+    yy = int(ym[:2]); nm = int(ym[2:]) + 1; nyy = yy
+    if nm == 13: nm = 1; nyy += 1
+    nym = f"{nyy:02d}{nm:02d}"          # 차월
+    target = nym if carry else ym       # 이월=차월 / 당월
+    cn = _nx_tx(); c = cn.cursor()
+    try:
+        c.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, ymd[:4])
+        r = c.fetchone(); cut = (str(r[0]).strip().zfill(2) if r else '31')
+        nat = nym if (ymd[4:6] > cut) else ym    # 자연 귀속월
+        c.execute("DELETE FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr WHERE kind=? AND cust_code=? AND mat_code=? AND maint_ymd=?", kind, cc, mat, ymd)
+        if target != nat:
+            c.execute("INSERT INTO PARTNER_ERP_TEST3.nx.magam_carry_ovr(kind,cust_code,mat_code,maint_ymd,assign_ym,ins_user) VALUES(?,?,?,?,?,?)",
+                      kind, cc, mat, ymd, target, usr)
+        cn.commit()
+        return {"ok": True, "carry": bool(carry), "assign_ym": target, "override": target != nat}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
+
+def _carry_ovr_set_bulk(kind, ym, cc, pairs, carry, usr="web"):
+    """여러 (mat, ymd) 재배정을 한 트랜잭션에. pairs=[(mat,ymd),...]. carry True=이월(차월)/False=당월. 자연상태면 삭제."""
+    _ensure_carry_ovr()
+    ym = str(ym); cc = str(cc)
+    yy = int(ym[:2]); nm = int(ym[2:]) + 1; nyy = yy
+    if nm == 13: nm = 1; nyy += 1
+    nym = f"{nyy:02d}{nm:02d}"; target = nym if carry else ym
+    cn = _nx_tx(); c = cn.cursor(); n = 0; cutc = {}
+    try:
+        for mat, ymd in pairs:
+            mat = str(mat).strip(); ymd = "".join(ch for ch in str(ymd) if ch.isdigit())
+            if not mat or len(ymd) != 6: continue
+            mo = ymd[:4]
+            if mo not in cutc:
+                c.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, mo)
+                rr = c.fetchone(); cutc[mo] = (str(rr[0]).strip().zfill(2) if rr else '31')
+            nat = nym if (ymd[4:6] > cutc[mo]) else ym
+            c.execute("DELETE FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr WHERE kind=? AND cust_code=? AND mat_code=? AND maint_ymd=?", kind, cc, mat, ymd)
+            if target != nat:
+                c.execute("INSERT INTO PARTNER_ERP_TEST3.nx.magam_carry_ovr(kind,cust_code,mat_code,maint_ymd,assign_ym,ins_user) VALUES(?,?,?,?,?,?)", kind, cc, mat, ymd, target, usr)
+            n += 1
+        cn.commit()
+        return {"ok": True, "n": n, "carry": bool(carry), "assign_ym": target}
+    except Exception:
+        cn.rollback(); raise
+    finally:
+        cn.close()
+
 
 # ── ★2026-08-25 웹 전용 SEQ 대역 (라이브와 키 충돌 방지) ──────────────────
 #   문제: MAINT_SEQ 는 일자별 채번인데 라이브·nx 가 독립 증가한다.

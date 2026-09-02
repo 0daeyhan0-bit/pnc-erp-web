@@ -4,10 +4,11 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _carry_win, _sale_win_ovr, _carry_win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
 
 import weight_calc
 router = APIRouter()
+_ensure_carry_ovr()   # 이월 재배정 override 테이블 보장(1회)
 
 # ================= 매출마감처리 (w_pu_sale_020 재설계) — 협력사 매출(tag5) 업체별 마감·조정·사유 =================
 def _dig4(s):
@@ -44,7 +45,7 @@ def salemagam_list(ym: str = Query("")):
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
             SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, SUM(-A.MAINT_VAT) vat, COUNT(DISTINCT A.MAT_CODE) items
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win().format(ym=y)}
+          WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win_ovr('SALE').format(ym=y)}
           GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -67,36 +68,32 @@ def salemagam_list(ym: str = Query("")):
 
 @router.get("/api/salemagam/detail")
 def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
-    """업체 마감상세: 품목×일자 피벗 + 저장된 조정내역."""
+    """업체 마감상세: 당월+이월 전 품목(품목×입고일 byday) + carry 표시 + 조정내역.
+       이월 일자는 carry=1(프론트에서 매출금액 0). 단가변경(품목/일자)은 프론트 pEdit/dEdit."""
     y = _dig4(ym) or _cur_ym()
     _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
     if _pm == 0: _pm = 12; _py -= 1
-    prevym = f"{_py:02d}{_pm:02d}"   # ★조대 하한(전월)
+    prevym = f"{_py:02d}{_pm:02d}"   # 전월(이월-in 포함 위해 전월~당월 스캔 = 목록 마감기준과 일치)
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT A.MAT_CODE mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.UNIT) unit, A.MAINT_COST cost,
-            CAST(RIGHT(A.MAINT_YMD,2) AS INT) d, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
+            A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) q, SUM(-A.MAINT_AMT) amt
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win().format(ym=y)}
-          GROUP BY A.MAT_CODE, A.MAINT_COST, CAST(RIGHT(A.MAINT_YMD,2) AS INT)""", cc)
+          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99'
+          GROUP BY A.MAT_CODE, A.MAINT_COST, A.MAINT_YMD""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
     finally:
         cn.close()
-    items = {}; days = set()
-    for r in raw:
-        mat = str(r["mat"]).strip(); d = int(r["d"] or 0); days.add(d)
-        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"],
-                                    "cost": float(r["cost"] or 0), "qty": 0.0, "amt": 0.0, "_bd": {}})
-        qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
-        it["qty"] += qv; it["amt"] += av
-        bd = it["_bd"].setdefault(d, {"d": d, "qty": 0.0, "amt": 0.0, "cost": cv})
-        bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv
-    for it in items.values():
-        it["byday"] = sorted(it.pop("_bd").values(), key=lambda x: x["d"])
-    items_list = sorted(items.values(), key=lambda x: -abs(x["amt"]))
+    nym = _next_ym(y)
     nx = _nx(); nc = nx.cursor()
     try:
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, y)
+        r = nc.fetchone(); cutY = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, prevym)
+        r = nc.fetchone(); cutP = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT mat_code,maint_ymd,assign_ym FROM nx.magam_carry_ovr WHERE kind='SALE' AND cust_code=?", cc)
+        ovr = {(str(a).strip(), str(b).strip()): str(c).strip() for a, b, c in nc.fetchall()}
         nc.execute("""SELECT adj_seq,adj_type,scope,mat_code,target_ymd,old_cost,new_cost,old_qty,new_qty,delta_amt,reason_code,reason_detail
                       FROM nx.sale_adjust WHERE ym=? AND cust_code=? ORDER BY adj_seq""", y, cc)
         adjs = [{"adj_type": r[1], "scope": r[2], "mat_code": r[3], "target_ymd": r[4],
@@ -107,7 +104,113 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
         cr = nc.fetchone(); closed = int(cr[0]) if cr else 0
     finally:
         nx.close()
-    return {"ym": y, "cc": cc, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
+    items = {}; days = set(); nxt = {prevym: y, y: nym}
+    for r in raw:
+        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip(); month = ymd[:4]; dd = ymd[4:6]
+        cut = cutY if month == y else (cutP if month == prevym else '31')
+        nat = month if dd <= cut else nxt.get(month, month)          # 자연 귀속월
+        eff = ovr.get((mat, ymd), nat)                               # 유효 귀속월
+        if eff != y and month != y:                                 # 전월 마감분(당월 아님)은 제외
+            continue
+        carry = 1 if eff != y else 0                                 # 당월귀속=0 / 당월물리·차월귀속(이월-out)=1
+        days.add(int(ymd))
+        qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
+        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "_bd": {}, "_mx": -1.0})
+        bd = it["_bd"].setdefault(ymd, {"d": int(ymd), "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
+        bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv; bd["carry"] = carry
+        if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv          # 대표단가 = 금액 최대 일자
+    for it in items.values():
+        bl = sorted(it.pop("_bd").values(), key=lambda x: x["d"]); it.pop("_mx", None)
+        it["byday"] = bl; it["dayN"] = len(bl); it["carryN"] = sum(1 for b in bl if b["carry"])
+    items_list = sorted(items.values(), key=lambda it: (1 if it["carryN"] == it["dayN"] else 0,
+                        -abs(sum(b["amt"] for b in it["byday"] if not b["carry"]))))
+    return {"ym": y, "cc": cc, "next_ym": nym, "days": sorted(days), "items": items_list, "adjustments": adjs, "close_flag": closed}
+
+# ===== 이월·오픈일자·반품 (2026-09-01) — 이월=정산귀속·표시 / 반품=수불장 전표(매출반품=+재고복귀) =====
+@router.get("/api/salemagam/carryover")
+def salemagam_carryover(ym: str = Query(""), cc: str = Query("")):
+    """이월 대상 = 협력사 마감일 이후~당월 말일 입고분(tag5). 이번 마감에서 빠져 차월로 이월(표시·확인용).
+       cc 지정 시 품목별, 미지정 시 업체별 집계. 수불장 전표는 만들지 않는다(재고는 실일자로 이미 정확)."""
+    y = _dig4(ym) or _cur_ym()
+    cn = _conn(); cur = cn.cursor()
+    carry = _carry_win_ovr('SALE').format(ym=y)
+    try:
+        if str(cc).strip():
+            cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+              SELECT A.MAT_CODE mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.UNIT) unit,
+                A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, MAX(A.MAINT_COST) cost
+              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+              WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99' AND {carry}
+              GROUP BY A.MAT_CODE, A.MAINT_YMD HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY A.MAINT_YMD, A.MAT_CODE""", cc)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            for r in rows:
+                r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["cost"] = float(r["cost"] or 0)
+        else:
+            cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+              SELECT A.CUST_CODE cc, MAX(C.CUST_DESC) nm, SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, COUNT(DISTINCT A.MAT_CODE) items
+              FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+              WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99' AND {carry}
+              GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            for r in rows:
+                r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["items"] = int(r["items"] or 0)
+    finally:
+        cn.close()
+    return {"ym": y, "cc": cc, "next_ym": _next_ym(y), "rows": rows}
+
+def _next_ym(y):
+    yy = int(y[:2]); mm = int(y[2:]) + 1
+    if mm == 13: mm = 1; yy += 1
+    return f"{yy:02d}{mm:02d}"
+
+@router.get("/api/salemagam/daylist")
+def salemagam_daylist(ym: str = Query(""), cc: str = Query(...)):
+    """일자별 조회 = 당월(달력월) 입고를 (품목×입고일)로 나열 + 이월 표시(carry). 당월분·이월분 한 표.
+       carry=1 = 이월(귀속월≠당월). 행 클릭으로 carry_set 토글."""
+    y = _dig4(ym) or _cur_ym()
+    cn = _conn(); cur = cn.cursor()
+    try:
+        cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT A.MAT_CODE mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.UNIT) unit,
+            A.MAINT_YMD ymd, SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, MAX(A.MAINT_COST) cost
+          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.item M ON A.MAT_CODE=M.ITEM_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+          WHERE A.MAINT_TAG='5' AND A.CUST_CODE=? AND A.MAINT_YMD>='{y}00' AND A.MAINT_YMD<='{y}99'
+          GROUP BY A.MAT_CODE, A.MAINT_YMD HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY A.MAINT_YMD, A.MAT_CODE""", cc)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        cn.close()
+    # carry 판정(Python) = 마감일 자동판정 + override. 집계 안에 서브쿼리 불가라 여기서 계산.
+    nx = _nx(); nc = nx.cursor()
+    try:
+        nc.execute("SELECT TOP 1 MAGAM_DAY FROM PARTNER_ERP_TEST3.nx.CM_M_CUST_MAGAM WHERE CUST_CODE=? AND APPLY_YYMM<=? ORDER BY APPLY_YYMM DESC", cc, y)
+        r = nc.fetchone(); cut = (str(r[0]).strip().zfill(2) if r else '31')
+        nc.execute("SELECT mat_code,maint_ymd,assign_ym FROM nx.magam_carry_ovr WHERE kind='SALE' AND cust_code=?", cc)
+        ovr = {(str(a).strip(), str(b).strip()): str(c).strip() for a, b, c in nc.fetchall()}
+    finally:
+        nx.close()
+    out = []
+    for r in rows:
+        mat = str(r["mat"]).strip(); ymd = str(r["ymd"]).strip()
+        natural = _next_ym(y) if (ymd[4:6] > cut) else y
+        eff = ovr.get((mat, ymd), natural)
+        out.append({"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "ymd": ymd,
+                    "qty": float(r["qty"] or 0), "amt": float(r["amt"] or 0), "cost": float(r["cost"] or 0),
+                    "carry": 1 if eff != y else 0})
+    return {"ym": y, "cc": cc, "next_ym": _next_ym(y), "rows": out}
+
+@router.post("/api/salemagam/carry_set")
+def salemagam_carry_set(payload: dict = Body(...)):
+    """이월 재배정: {ym,cust_code,carry(bool), (mat_code,maint_ymd) | pairs:[{mat_code,maint_ymd}]}.
+       carry=True 이월(차월)/False 당월. pairs=여러 건 일괄."""
+    y = _dig4(payload.get("ym")) or _cur_ym(); cc = str(payload.get("cust_code", "")).strip(); carry = bool(payload.get("carry"))
+    pairs = payload.get("pairs")
+    if pairs is not None:
+        return _carry_ovr_set_bulk("SALE", y, cc, [(p.get("mat_code"), p.get("maint_ymd")) for p in pairs], carry)
+    return _carry_ovr_set("SALE", y, cc, str(payload.get("mat_code", "")).strip(),
+                          "".join(ch for ch in str(payload.get("maint_ymd", "")) if ch.isdigit()), carry)
 
 @router.get("/api/salemagam/lines")
 def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Query(""), to: str = Query(""),
@@ -126,7 +229,7 @@ def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = 
     else:
         _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
         if _pm == 0: _pm = 12; _py -= 1
-        win = _sale_win().format(ym=y)
+        win = _sale_win_ovr('SALE').format(ym=y)
         lo, hi = f"{_py:02d}{_pm:02d}00", f"{y}99"
     where = [f"A.MAINT_TAG='5'", f"A.MAINT_YMD>='{lo}'", f"A.MAINT_YMD<='{hi}'", win]
     pf = []
