@@ -617,8 +617,17 @@ def _web_seq(cur, table, ymd, col="MAINT_SEQ", ymd_col="MAINT_YMD"):
 #   ※반드시 (MAT_CODE, PART_CODE) 파트 단위로 집계할 것. 파트를 빼고 합치면 값이 무너진다.
 
 def _u_tbl(tbl, keys):
-    """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는 인라인뷰."""
-    on = " AND ".join(f"ISNULL(l.{k},'')=ISNULL(n.{k},'')" for k in keys)
+    """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는 인라인뷰.
+
+    ★키 비교는 **문자로 캐스팅**해서 한다(2026-09-02 실측 버그).
+      `ISNULL(수량컬럼,'')` 은 decimal 에 빈 문자열을 넣는 꼴이라
+      "varchar을 numeric으로 변환하는 중 오류"(8114)로 **쿼리 전체가 죽는다.**
+      int(MAINT_SEQ)는 ''→0 암묵변환으로 통과하지만 decimal(MAINT_QTY)은 실패한다.
+      ⟹ 생산입출고현황이 조회 0건이 됐다(화면은 오류를 삼키고 빈 표를 보여준다).
+      CAST(... AS varchar(50)) 로 맞추면 타입과 무관하게 안전하다."""
+    on = " AND ".join(
+        f"ISNULL(CAST(l.{k} AS varchar(50)),'')=ISNULL(CAST(n.{k} AS varchar(50)),'')"
+        for k in keys)
     return (f"(SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
             f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.{tbl} l WHERE {on}))")
 
@@ -639,7 +648,9 @@ def _prod_stock_sql():
  SELECT mat, part, SUM(q) q FROM (
    -- 2502 마감 스냅샷
    SELECT UPPER(a.mat_code) mat, a.gagong_proc_code part, a.stock_qty q
-     FROM PARTNER_ERP.dbo.PR_T_MONTH_STOCK_WH a WITH(NOLOCK) WHERE a.stock_yymm='2502'
+     -- ★2026-09-02 nx 로 전환. 라이브 직독은 컷오버에 죽는다(§1-9-1).
+     --   실측: nx.PR_T_MONTH_STOCK_WH(2502) 1,700행 = 라이브 1,700행.
+     FROM PARTNER_ERP_TEST3.nx.PR_T_MONTH_STOCK_WH a WITH(NOLOCK) WHERE a.stock_yymm='2502'
    -- 자재창고→생산창고 입고 (maint_qty 가 음수로 적재되어 부호 반전)
    UNION ALL
    SELECT UPPER(a.mat_code), a.TO_GAGONG_PROC_CODE, a.maint_qty*-1

@@ -16,6 +16,7 @@ _migration/sub_norm/*
 # 흐름 TestBed 하네스는 추적 — _migration/* 제외에 걸려 untracked 로 두면
 #   과거 scratchpad 하네스 소실 사고와 같은 조건이 된다(2026-08-28).
 !_migration/flow_*.py
+!_migration/run_testbed.ps1
 # ★컷오버 도구는 전부 추적한다(2026-08-28). flow_*.py 만 예외로 뒀더니
 #   create_period_close.py(마감 스키마 DDL) · alter_snapshot_loc.py(loc 축 DDL) ·
 #   verify_close_prd_sal.py(마감 검증) · legacy_total_avg_verify.py 4개가 untracked 로 빠져 있었다.
@@ -85,3 +86,6 @@ _migration/.flow_secrets.json
 협력사포털_계정_*.csv
 _migration/replay_loop_log.txt
 _migration/replay_pilot_state.json
+
+# TestBed 실행 로그는 매 실행마다 쌓인다 — 요약(TESTBED_FULLFLOW_*.md)만 추적한다.
+_schema/TESTBED_RESULT_*.txt
