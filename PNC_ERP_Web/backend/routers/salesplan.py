@@ -62,13 +62,33 @@ def salesplan(from_ymd: str = Query(...), days: int = Query(7), gubun: str = Que
         #   → nx 모드에서는 각 테이블 앞에 PARTNER_ERP_TEST3.nx. 를 붙인다.
         #   ※nx.PR_V_MODEL_BOM 은 라이브 뷰가 WITH ENCRYPTION 이라 복제 불가 →
         #     같은 컬럼셋으로 nx 에 새로 만들었다(PR_M_MODEL_BOM 기반, 62,897행 일치).
+        #   ★★2026-09-02 계획 2테이블은 **미러가 아니라 웹 정본**을 본다.
+        #     종전엔 nx.sa_t_plan_dtl·nx.sa_t_plan_item_dtl(레거시 미러)를 읽었는데
+        #     미러는 r_delta_sync 가 라이브에서 복사하는 것이라 **편성을 돌려도 갱신되지 않는다.**
+        #       실측 2026-09-02 — 미러 vs 라이브 시각일치 338/4,200 (8.0%) · 일자 2,457 (58.5%).
+        #       6J4M0019: 미러 1040 / 라이브 1139 / 웹정본 1139 (엑셀 Start Time 11:39:03).
+        #       → 화면이 낡은 시각을 보여줬다. 컷오버 후엔 얼어붙은 옛값이 된다(§1-9-1).
+        #     대체 뷰는 미러와 **컬럼셋이 완전 동일**해 SQL 은 한 글자도 안 고친다.
+        #       nx.v_sale_plan_050      ← nx.sale_plan      (당김 전 원본일자)
+        #       nx.v_sale_plan_item_050 ← nx.sale_plan_item (040 과 같은 원천)
+        #     ⚠미러는 누적이력(343,659행), 웹정본은 현재 편성분(8,581행) —
+        #       웹 편성 이전 과거일자는 조회되지 않는다(값 없음으로 드러낸다, 폴백 금지 §1-9-1).
+        #     nx.v_plan_input_050     ← nx.prod_plan_input (추가계획 웹 정본)
+        #       ★2026-09-02 추가 — 종전엔 미러 nx.PR_T_PLAN_INPUT 을 읽어
+        #         웹에서 등록·수정한 추가계획이 화면에 안 나왔다(미러 15,524 / 정본 15,188).
+        #         050 의 '추가계획' 갈래(data_gubun=2)와 비고(remarks)가 여기서 온다.
+        _REPOINT = {"sa_t_plan_item_dtl": "PARTNER_ERP_TEST3.nx.v_sale_plan_item_050",
+                    "sa_t_plan_dtl":      "PARTNER_ERP_TEST3.nx.v_sale_plan_050",
+                    "pr_t_plan_input":    "PARTNER_ERP_TEST3.nx.v_plan_input_050"}
         if not _live:
             import re as _re
-            for _t in ("sa_t_plan_dtl", "sa_t_plan_item_dtl", "pr_t_plan_input",
+            # ★긴 이름 먼저 — sa_t_plan_item_dtl 이 sa_t_plan_dtl 을 접두사로 품지는 않지만
+            #   순서를 명시해 둔다(치환 사고 방지).
+            for _t in ("sa_t_plan_item_dtl", "sa_t_plan_dtl", "pr_t_plan_input",
                        "pr_v_model_bom", "pr_m_item", "pr_m_work", "cm_m_cust",
                        "PR_M_ITEM_PROC_GAGONG", "PR_M_PROC_GAGONG"):
                 sql = _re.sub(r"(?i)(?<![\w\.\[])" + _t + r"(?![\w\]])",
-                              "PARTNER_ERP_TEST3.nx." + _t, sql)
+                              _REPOINT.get(_t, "PARTNER_ERP_TEST3.nx." + _t), sql)
         # ★성능(2026-08-21 실측): 바깥에서 컬럼을 명시하고 ISNULL 로 감싸면 SQL Server 가
         #   실행계획을 다시 짜면서 3.4초가 걸린다. SELECT * 로 그대로 받으면 0.6초.
         #   (같은 결과, 5배 차이) → NULL 처리·정렬은 파이썬에서 한다.

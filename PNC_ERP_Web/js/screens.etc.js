@@ -1106,8 +1106,17 @@ SCREEN.deliv420=(c)=>{
        <div class="spacer"></div>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     <!-- ★flex:0 1 auto + max-height:100% (4787a13 확정) — 고정 max-height 는 표 아래 여백을 남긴다. -->
-     <div class="grid-wrap" style="flex:0 1 auto;min-height:0;max-height:100%;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
+     <!-- ★flex:1 1 auto (2026-09-02 수정) — 종전 "flex:0 1 auto + max-height:100%" 는 스크롤이 죽었다.
+          ※이 주석은 템플릿 리터럴 안이다 — 역따옴표 문자를 쓰면 문자열이 끊겨 파일 전체가 죽는다.
+          이유: 부모 .content 는 "flex:1;overflow:auto" 로 **명시적 height 가 없다**(app.css:100).
+            → 루트 c 의 height:100% 가 해석되지 않아 max-height:100% 도 무효,
+              flex:0 1 auto 라 컨테이너가 내용만큼 늘어나 자체 스크롤이 생기지 않는다.
+              게다가 c 에 overflow:hidden 이 걸려 바깥(.content) 스크롤까지 막혀
+              **아래쪽 행을 아예 볼 수 없었다**(사용자 지적).
+          flex:1 1 auto 면 flex 컨테이너의 남은 공간을 차지하고 min-height:0 과 함께
+          자체 스크롤이 정상 동작한다. 표 아래 여백 문제(4787a13)는 flex-grow 로
+          공간을 다 채우므로 발생하지 않는다. -->
+     <div class="grid-wrap" style="flex:1 1 auto;min-height:0;max-height:none;overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl d4-grid" style="font-size:11px;white-space:nowrap;table-layout:fixed;width:${totalW}px">${colg}<thead><tr>
        <!-- ★품명·자도번작업처 제거 · 헤더 전부 가운데 정렬(2026-08-27 사용자 요청)
             자도번작업처와 작업처가 같은 값이라 작업처만 남기고 폭을 넓혔다. -->

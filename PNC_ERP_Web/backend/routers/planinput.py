@@ -2,10 +2,30 @@
 """생산계획추가입력(planinput)+준비재고조회(readystock) 도메인 라우터 — 수동 생산계획 CRUD·매트릭스.
    app.py에서 분리. 공유헬퍼는 common.py(_ITEM_WORK 포함)."""
 from datetime import datetime
-from fastapi import APIRouter, Query, Body, HTTPException
+from fastapi import APIRouter, Query, Body, HTTPException, Request
 from common import _conn, _nx, _nx_tx, _b, _d6, _num, _ITEM_WORK
+from routers.auth import require_user
 
 router = APIRouter()
+
+
+# ★2026-09-02 등록자/수정자 기록 — 종전엔 upd_user 에 'web' 하드코딩이라
+#   "누가 넣었는지"가 안 남았다. 로그인 사용자로 남기고 등록자 컬럼도 만든다.
+def _who(request):
+    """로그인 사용자 표시명. 미인증이면 'web'(기존 동작 유지)."""
+    try:
+        u = require_user(request) or {}
+        return str(u.get("nm") or u.get("id") or "web")[:20]
+    except Exception:
+        return "web"
+
+
+def _ensure_ppi_cols(cur):
+    """등록자·등록일시 컬럼 보강(멱등 DDL — 이 코드베이스 확립 패턴)."""
+    cur.execute("""IF COL_LENGTH('nx.prod_plan_input','ins_user') IS NULL
+                     ALTER TABLE nx.prod_plan_input ADD ins_user nvarchar(20) NULL""")
+    cur.execute("""IF COL_LENGTH('nx.prod_plan_input','ins_dt') IS NULL
+                     ALTER TABLE nx.prod_plan_input ADD ins_dt datetime NULL""")
 
 # ===================== 생산계획추가입력 CRUD (nx.prod_plan_input ← PR_T_PLAN_INPUT) =====================
 # 근거: w_pr_plan_060 / dw_pr_plan_060_1. 수동 추가 생산계획. work_code→이름(_ITEM_WORK).
@@ -36,8 +56,31 @@ def planinput_list(q: str = Query(""), line: str = Query(""), from_ymd: str = Qu
     finally:
         nx.close()
 
+@router.post("/api/planinput/itemnames")
+def planinput_itemnames(payload: dict = Body(...)):
+    """품번 → 품명 일괄조회(붙여넣기 후 화면에 품명을 채우려고 쓴다). 조회 전용."""
+    codes = [str(x).strip().upper() for x in (payload.get("codes") or []) if str(x).strip()]
+    if not codes:
+        return {"ok": True, "names": {}}
+    codes = codes[:2000]
+    nx = _nx(); cur = nx.cursor()
+    try:
+        out = {}
+        for i in range(0, len(codes), 900):
+            ch = codes[i:i + 900]
+            ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT UPPER(LTRIM(RTRIM(item_code))), ISNULL(item_name,'')
+                              FROM nx.item WITH(NOLOCK)
+                             WHERE UPPER(LTRIM(RTRIM(item_code))) IN ({ph})""", *ch)
+            for a, b in cur.fetchall():
+                out[str(a).strip()] = str(b or "").strip()
+        return {"ok": True, "names": out}
+    finally:
+        nx.close()
+
+
 @router.post("/api/planinput/save")
-def planinput_save(payload: dict = Body(...)):
+def planinput_save(request: Request, payload: dict = Body(...)):
     """등록/수정. 검증: 일자 YYMMDD(6자리 숫자)·시각 HHMM·라인/품번 필수·수량>0."""
     p = payload
     ymd = str(p.get("plan_ymd", "") or "").strip()
@@ -57,20 +100,26 @@ def planinput_save(payload: dict = Body(...)):
     def s(k): v = p.get(k); return None if v in (None, "") else str(v).strip()
     vals = (ymd, line, item, (hm or "2100"), qty, s("work_order"), s("work_code"), s("prod_tag"), s("remarks"))
     pid = p.get("ppi_id")
+    who = _who(request)          # ★등록자/수정자 = 로그인 사용자
     nx = _nx(); cur = nx.cursor()
     try:
+        _ensure_ppi_cols(cur)
         if pid:
+            # ★제번(work_order)은 수정 대상에서 뺀다 — 자동채번 값이라 바뀌면 추적이 끊긴다.
             cur.execute("""UPDATE nx.prod_plan_input SET plan_ymd=?,line_no=?,item_code=?,output_hm=?,plan_qty=?,
-                work_order=?,work_code=?,prod_tag=?,remarks=?,upd_user='web',upd_dt=GETDATE() WHERE ppi_id=?""", *vals, int(pid))
-            return {"ok": True, "mode": "update", "ppi_id": int(pid)}
+                work_code=?,prod_tag=?,remarks=?,upd_user=?,upd_dt=GETDATE() WHERE ppi_id=?""",
+                        vals[0], vals[1], vals[2], vals[3], vals[4],
+                        vals[6], vals[7], vals[8], who, int(pid))
+            return {"ok": True, "mode": "update", "ppi_id": int(pid), "by": who}
         # ★신규 등록은 제번 자동채번(2026-08-31) — 사용자가 준 값이 있으면 그대로 존중한다.
         _v = list(vals)
         if not _v[5]:
             _v[5] = _next_wo(cur, line, 1)[0]
         cur.execute("""INSERT INTO nx.prod_plan_input(plan_ymd,line_no,item_code,output_hm,plan_qty,work_order,
-            work_code,prod_tag,remarks,src,upd_user,upd_dt) OUTPUT INSERTED.ppi_id
-            VALUES(?,?,?,?,?,?,?,?,?,'web','web',GETDATE())""", *_v)
-        return {"ok": True, "mode": "insert", "ppi_id": int(cur.fetchone()[0]), "work_order": _v[5]}
+            work_code,prod_tag,remarks,src,ins_user,ins_dt,upd_user,upd_dt) OUTPUT INSERTED.ppi_id
+            VALUES(?,?,?,?,?,?,?,?,?,'web',?,GETDATE(),?,GETDATE())""", *_v, who, who)
+        return {"ok": True, "mode": "insert", "ppi_id": int(cur.fetchone()[0]),
+                "work_order": _v[5], "by": who}
     finally:
         nx.close()
 
@@ -162,7 +211,7 @@ def _next_wo(cur, line, n=1):
 
 
 @router.post("/api/planinput/bulk")
-def planinput_bulk(payload: dict = Body(...)):
+def planinput_bulk(request: Request, payload: dict = Body(...)):
     """엑셀 붙여넣기 일괄 등록. 공통값(기본 계획일자·라인·산출시각·생산구분·공정) + 행별(계획일자·품번·수량·제번·비고).
     ★계획일자: 행별 우선(엑셀 날짜열 붙여넣기), 없으면 공통 기본일자. 둘 다 없으면 skip.
     검증: 일자 YYMMDD(yyyymmdd 8자리는 앞2자리 절삭)·시각 HHMM·라인 필수, 각 행 품번 필수·수량>0. 유효행만 INSERT."""
@@ -196,16 +245,19 @@ def planinput_bulk(payload: dict = Body(...)):
         recs.append([rymd, line, item, hm, qty, None, wcode, tag, rm])
     if not recs:
         return {"ok": True, "inserted": 0, "skipped": skipped}
+    who = _who(request)          # ★등록자 = 로그인 사용자
     nx = _nx(); cur = nx.cursor()
     try:
+        _ensure_ppi_cols(cur)
         wos = _next_wo(cur, line, len(recs))          # 필요한 개수만큼 한 번에 확보
         for i, rec in enumerate(recs):
             rec[5] = wos[i]
         cur.executemany("""INSERT INTO nx.prod_plan_input(plan_ymd,line_no,item_code,output_hm,plan_qty,work_order,
-            work_code,prod_tag,remarks,src,upd_user,upd_dt)
-            VALUES(?,?,?,?,?,?,?,?,?,'web-bulk','web',GETDATE())""", [tuple(r) for r in recs])
+            work_code,prod_tag,remarks,src,ins_user,ins_dt,upd_user,upd_dt)
+            VALUES(?,?,?,?,?,?,?,?,?,'web-bulk',?,GETDATE(),?,GETDATE())""",
+            [tuple(r) + (who, who) for r in recs])
         return {"ok": True, "inserted": len(recs), "skipped": skipped,
-                "work_orders": wos[:len(recs)]}
+                "work_orders": wos[:len(recs)], "by": who}
     finally:
         nx.close()
 
@@ -216,8 +268,10 @@ def planinput_get(ppi_id: int = Query(...)):
     """단건 조회(매트릭스 셀 클릭 수정 프리필용). nx.prod_plan_input 1행."""
     nx = _nx(); cur = nx.cursor()
     try:
+        _ensure_ppi_cols(cur)          # ★등록자 컬럼 없으면 만들고 조회(첫 호출 대비)
         cur.execute("""SELECT i.ppi_id,i.plan_ymd,i.line_no,i.item_code,ISNULL(m.item_name,'') nm,
-              i.output_hm,i.plan_qty,i.work_order,i.work_code,i.prod_tag,i.remarks
+              i.output_hm,i.plan_qty,i.work_order,i.work_code,i.prod_tag,i.remarks,
+              ISNULL(i.ins_user,''), i.ins_dt, ISNULL(i.upd_user,''), i.upd_dt
             FROM nx.prod_plan_input i LEFT JOIN nx.item m ON m.item_code=i.item_code
             WHERE i.ppi_id=?""", int(ppi_id))
         r = cur.fetchone()
@@ -226,7 +280,9 @@ def planinput_get(ppi_id: int = Query(...)):
         g = lambda k: str(r[k] if r[k] is not None else "").strip()
         return {"ppi_id": r[0], "plan_ymd": g(1), "line_no": g(2), "item_code": g(3), "nm": g(4),
                 "output_hm": g(5), "plan_qty": r[6], "work_order": g(7),
-                "work_code": g(8), "prod_tag": g(9), "remarks": g(10)}
+                "work_code": g(8), "prod_tag": g(9), "remarks": g(10),
+                # ★등록자/수정자 — 수정 팝업 하단에 표시(누가 언제 손댔는지)
+                "ins_user": g(11), "ins_dt": g(12), "upd_user": g(13), "upd_dt": g(14)}
     finally:
         nx.close()
 
