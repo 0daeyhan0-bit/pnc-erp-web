@@ -4,7 +4,7 @@ import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
-from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _carry_win, _sale_win_ovr, _carry_win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
+from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _carry_win, _sale_win_ovr, _carry_win_ovr, _win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
 
 import weight_calc
 router = APIRouter()
@@ -45,7 +45,7 @@ def salemagam_list(ym: str = Query("")):
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
             SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, SUM(-A.MAINT_VAT) vat, COUNT(DISTINCT A.MAT_CODE) items
           FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND A.MAINT_YMD>='{prevym}00' AND A.MAINT_YMD<='{y}99' AND {_sale_win_ovr('SALE').format(ym=y)}
+          WHERE A.MAINT_TAG='5' AND {_win_ovr('SALE', y)}
           GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -229,7 +229,7 @@ def salemagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = 
     else:
         _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
         if _pm == 0: _pm = 12; _py -= 1
-        win = _sale_win_ovr('SALE').format(ym=y)
+        win = _win_ovr('SALE', y)
         lo, hi = f"{_py:02d}{_pm:02d}00", f"{y}99"
     where = [f"A.MAINT_TAG='5'", f"A.MAINT_YMD>='{lo}'", f"A.MAINT_YMD<='{hi}'", win]
     pf = []

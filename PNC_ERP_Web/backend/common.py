@@ -531,6 +531,23 @@ def _carry_win_ovr(kind):
     """이월(물리적 당월에서 차월로 나감) = (자연이월 AND NOT 당김) OR (당월달력 마감일이내 AND 밀림). override 0건이면 _carry_win 과 diff0."""
     return "((" + _NAT_CARRY + " AND NOT " + _ovr_ex(kind, '=') + ") OR (" + _WITHIN_CUR + " AND " + _ovr_ex(kind, '<>') + "))"
 
+def _win_ovr(kind, y):
+    """당월 마감 유효 멤버십(유효 귀속월==y). 집계표·마감목록·일일현황 **공용 단일창**(2026-09-03 통일).
+       override 있으면 assign_ym==y, 없으면 자연 마감창(nat_cur). ★물리 전월에서 당월로 당겨진(pull-in)
+       항목도 assign=y 로 **도착월에 포함**(스캔=전월~당월 bound). override 0건이면 nat_cur 과 diff0.
+       ★_sale_win_ovr(구 마감목록 창)은 pull-in을 도착월에서 누락 → 집계표와 갈렸던 버그를 이 창으로 통일해 해소.
+       A(대상)에 CUST_CODE·MAT_CODE·MAINT_YMD 필요. SA_T_STOCK_MAINT(MAT_CODE 없음)는 tag5 파트에만 사용."""
+    y = str(y); yy = int(y[:2]); mm = int(y[2:]) - 1; py = yy
+    if mm == 0: mm = 12; py -= 1
+    prevym = f"{py:02d}{mm:02d}"
+    _o = ("SELECT 1 FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr o WHERE o.kind='" + kind +
+          "' AND o.cust_code=A.CUST_CODE AND o.mat_code=A.MAT_CODE AND o.maint_ymd=A.MAINT_YMD")
+    ex_eq = f"EXISTS({_o} AND o.assign_ym='{y}')"   # y 로 배정된 것(당겨온 것 포함)
+    ex_any = f"EXISTS({_o})"                         # override 존재
+    nat_cur = f"(A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day)"   # 자연 마감창
+    bound = f"A.MAINT_YMD >= '{prevym}00' AND A.MAINT_YMD <= '{y}99'"   # 전월~당월 스캔 한정
+    return f"({bound} AND ({ex_eq} OR (NOT {ex_any} AND {nat_cur})))"
+
 def _carry_ovr_set(kind, ym, cc, mat, ymd, carry, usr="web"):
     """이월 재배정 저장(당월↔차월). carry=True→차월 이월(assign ym+1) / False→당월(assign ym).
        자연상태(마감일 자동판정)와 같으면 override 삭제 → override 0건이면 현행과 diff0 유지."""
