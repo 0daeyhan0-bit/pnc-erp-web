@@ -18,9 +18,28 @@
 import io as _io
 import datetime as _dt
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from common import _nx_tx
+from common import _nx_tx, _nx
 
 router = APIRouter()
+
+
+def _existing_counts(groups):
+    """적재 대상(nx)에 이미 있는 행수(구분별·일자범위) = 삭제-교체될 기존분. 중복 방지가 눈에 보이게."""
+    out = {}
+    try:
+        cn = _nx(); cur = cn.cursor()
+        try:
+            for g, d in groups.items():
+                cur.execute(
+                    "SELECT COUNT(*) FROM nx.SA_T_LG_RECEIVING_DTL "
+                    "WHERE RECEIVING_YMD BETWEEN ? AND ? AND GUBUN=?",
+                    d["ymd_from"], d["ymd_to"], g)
+                out[g] = int(cur.fetchone()[0] or 0)
+        finally:
+            cn.close()
+    except Exception:
+        pass   # 조회 실패해도 업로드 자체엔 지장 없음(표시만 생략)
+    return out
 
 # GR Status 헤더명 → 우리 필드. (레거시 리네임 LG리시빙2 헤더가 아니라 LG 원본 GR Status 헤더를 직접 매핑)
 _H = {
@@ -175,12 +194,14 @@ def _parse_gr_status(content, filename=""):
 _GLABEL = {"C": "SAC", "R": "RAC"}   # 표시 라벨(DMZ=SAC·구 CAC / DGZ=RAC). 저장 GUBUN 은 'C'/'R' 유지.
 
 
-def _summary(groups, meta, filename):
+def _summary(groups, meta, filename, exist=None):
+    exist = exist or {}
     by = []
     for g, d in sorted(groups.items()):
         by.append({"gubun": g, "label": _GLABEL.get(g, g),
                    "ymd_from": d["ymd_from"], "ymd_to": d["ymd_to"],
-                   "rows": len(d["recs"]), "qty": d["qty"], "amt": round(d["amt"], 2)})
+                   "rows": len(d["recs"]), "qty": d["qty"], "amt": round(d["amt"], 2),
+                   "exist": int(exist.get(g, 0))})   # 이 범위에 이미 있는 기존분(삭제-교체됨). 중복 안 쌓임.
     return {"file": filename, "total_rows": meta["total_rows"], "skipped": meta["skipped"],
             "warnings": meta["warnings"], "by_gubun": by,
             "preview": [{**r, "label": _GLABEL.get(r["gubun"], r["gubun"])} for r in meta["preview"]]}
@@ -191,7 +212,7 @@ async def lgrecv_parse(file: UploadFile = File(...)):
     """GR Status 엑셀 업로드 → 파싱·검증만(미저장). 미리보기·구분별 요약·경고 반환."""
     content = await file.read()
     groups, meta = _parse_gr_status(content, file.filename or "")
-    out = _summary(groups, meta, file.filename or "")
+    out = _summary(groups, meta, file.filename or "", _existing_counts(groups))
     out["ok"] = True
     out["committed"] = False
     return out
@@ -213,6 +234,7 @@ async def lgrecv_upload(file: UploadFile = File(...), user: str = Form(default="
     uid = (user or "웹업로드")[:20]
     IP, COMP, WIN = "", "WEB", "lgrecv_upload"
 
+    replaced = {}   # 구분별 기존분(삭제-교체) — 중복 방지 근거
     cn = _nx_tx(); cur = cn.cursor()
     try:
         deleted = 0
@@ -222,7 +244,9 @@ async def lgrecv_upload(file: UploadFile = File(...), user: str = Form(default="
             cur.execute(
                 "DELETE FROM nx.SA_T_LG_RECEIVING_DTL WHERE RECEIVING_YMD BETWEEN ? AND ? AND GUBUN=?",
                 d["ymd_from"], d["ymd_to"], g)
-            deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            _dc = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            replaced[g] = _dc
+            deleted += _dc
             # seq 는 일자별 1..n (레거시 동일: 일자 바뀌면 리셋). 일자 오름차순 + 파일순 안정정렬.
             recs = sorted(d["recs"], key=lambda x: x["receiving_ymd"])
             seq_by_ymd = {}
@@ -244,7 +268,7 @@ async def lgrecv_upload(file: UploadFile = File(...), user: str = Form(default="
     finally:
         cn.close()
 
-    out = _summary(groups, meta, file.filename or "")
+    out = _summary(groups, meta, file.filename or "", replaced)
     out["ok"] = True
     out["committed"] = True
     out["inserted"] = len(params)

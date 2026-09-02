@@ -295,7 +295,7 @@ SCREEN.lgrecv=(c)=>{
     const openUploadModal=(file,j)=>{
       const ov=document.createElement('div');ov.className='ovl';
       ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1200;display:flex;align-items:center;justify-content:center';
-      const byg=(j.by_gubun||[]).map(g=>`<tr><td><b>${esc(g.label)}</b> <span style="color:#888">(${esc(g.gubun)})</span></td><td>${esc(ymdToInput(g.ymd_from))} ~ ${esc(ymdToInput(g.ymd_to))}</td><td class="num">${won(g.rows)}</td><td class="num">${won(g.qty)}</td><td class="num">${wonI(g.amt)}</td></tr>`).join('');
+      const byg=(j.by_gubun||[]).map(g=>`<tr><td><b>${esc(g.label)}</b> <span style="color:#888">(${esc(g.gubun)})</span></td><td>${esc(ymdToInput(g.ymd_from))} ~ ${esc(ymdToInput(g.ymd_to))}</td><td class="num">${won(g.rows)}</td><td class="num">${won(g.qty)}</td><td class="num">${wonI(g.amt)}</td><td class="num" style="color:${g.exist?'#c0392b':'#888'}">${g.exist?('기존 '+won(g.exist)+'건 교체'):'신규'}</td></tr>`).join('');
       const warn=(j.warnings||[]).length?`<div style="margin:8px 0;color:#c0392b;font-size:12px">${j.warnings.map(esc).join('<br>')}</div>`:'';
       const pv=(j.preview||[]).slice(0,15).map(r=>`<tr><td>${esc(ymdToInput(r.receiving_ymd))}</td><td>${esc(r.label)}</td><td><b>${esc(r.item_code)}</b></td><td>${esc(r.work_order)}</td><td class="num">${won(r.recv_qty)}</td><td class="num">${wonI(r.recv_amt)}</td><td>${esc({'1':'수출','2':'내수'}[r.mkt]||r.mkt||'')}</td><td title="${esc(r.departure_no)}">${esc((r.departure_no||'').slice(0,12))}</td></tr>`).join('');
       ov.innerHTML=`<div style="background:#fff;border-radius:8px;width:900px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.3)">
@@ -303,7 +303,8 @@ SCREEN.lgrecv=(c)=>{
         <div style="padding:14px 18px;overflow:auto">
           <div style="font-size:13px;margin-bottom:6px">유효 <b>${won(j.total_rows)}</b>행 · 제외 ${won(j.skipped)}행 · <b style="color:#1f7a3d">nx.SA_T_LG_RECEIVING_DTL</b> 에 <b>구분별 삭제-교체</b> 적재됩니다.</div>
           ${warn}
-          <table class="tbl" style="width:100%;margin-bottom:12px"><thead><tr><th>구분</th><th>일자범위</th><th class="num">행수</th><th class="num">수량</th><th class="num">금액</th></tr></thead><tbody>${byg}</tbody></table>
+          <table class="tbl" style="width:100%;margin-bottom:12px"><thead><tr><th>구분</th><th>일자범위</th><th class="num">행수</th><th class="num">수량</th><th class="num">금액</th><th class="num">중복처리</th></tr></thead><tbody>${byg}</tbody></table>
+          <div style="font-size:11px;color:#888;margin:-6px 0 10px">같은 일자·구분을 다시 올리면 <b>기존분을 지우고 교체</b>합니다(삭제-교체) — 같은 파일을 여러 번 올려도 중복 누적되지 않습니다.</div>
           <div style="font-size:12px;color:#666;margin:6px 0">미리보기(상위 15행)</div>
           <div style="overflow:auto;max-height:38vh"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>일자</th><th>구분</th><th>도번</th><th>WorkOrder</th><th class="num">수량</th><th class="num">금액</th><th>수출/내수</th><th>Departure</th></tr></thead><tbody>${pv}</tbody></table></div>
         </div>
