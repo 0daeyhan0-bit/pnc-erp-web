@@ -601,7 +601,14 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
         # ★기간필터는 소요일자(PART_PLAN_YMD) 기준 — 상위 계획일자(PLAN_YMD)가 아니다(2026-08-27).
         #   PART_PLAN_YMD = 웹 편성이 리드타임 당김을 반영해 계산한 실제 자재 소요일. 대원산업 실측 2,325건 중
         #   PLAN_YMD 와 같은 건 827건뿐(36%) → PLAN_YMD 로 걸면 당김분이 기간 밖으로 새거나 잘못 들어온다.
-        if from_ymd: w.append("pp.PART_PLAN_YMD>=?"); p.append(_d6(from_ymd))
+        # ★★기간 하한(from_ymd)은 걸지 않는다 — 레거시 갈래(_planstatus_legacy L379)와 동일.
+        #   기준일 **이전의 미완료 소요**는 사라지는 게 아니라 **첫날 칸에 이월**돼야 한다
+        #   (레거시 w_pr_outside_410 의 '당일이전' 개념 · _bucket()).
+        #   협력사는 아직 못 만든 이전 물량을 봐야 하므로 빠지면 발주가 누락된다.
+        #     실측 2026-09-02 대원산업(2148) : 09/01분 37행·17도번·526 이 통째로 빠져
+        #       LOT 21,858 → 21,332 · 도번 112 → 111 (AJJ76559015 실종) 이 됐다.
+        #       예) AJJ30041902 레거시 1,157 vs 웹 1,028 (= 09/01 의 129).
+        #   ⟹ 상한만 걸고, 아래 버킷팅에서 기준일 이전을 첫날로 클램프한다.
         if to_ymd:   w.append("pp.PART_PLAN_YMD<=?"); p.append(_d6(to_ymd))
         if wc.strip():   w.append("pp.MAT_WORK_CENTER_CODE=?"); p.append(wc.strip())
         if part.strip(): w.append("pp.MAT_CODE LIKE ?"); p.append(f"%{part.strip()}%")
@@ -677,8 +684,10 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
         #   → 기준일 28일에 계획이 0건이면 28일 컬럼이 통째로 사라져 29일부터 시작되고,
         #     중간의 계획 없는 날(일요일 등)도 빠져 달력이 끊긴다(레거시는 휴무일도 컬럼을 깐다).
         #   레거시 소스 경로(_planstatus_legacy, line 508)와 동일하게 축을 고정한다.
-        dates = sorted({r["PART_PLAN_YMD"] for r in raw})
         _f6, _t6 = (_d6(from_ymd) if from_ymd else ""), (_d6(to_ymd) if to_ymd else "")
+        # ★기준일 이전 일자는 축에 넣지 않는다 — 아래에서 첫날로 이월되기 때문(레거시 동일).
+        dates = sorted({(_f6 if (_f6 and r["PART_PLAN_YMD"] and r["PART_PLAN_YMD"] < _f6)
+                         else r["PART_PLAN_YMD"]) for r in raw})
         if _f6:
             try:
                 _fb = datetime.strptime(_f6, "%y%m%d")
@@ -703,7 +712,12 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
                      "line": r["line"], "model": r["model"], "workcenter": r.get("workcenter") or "",
                      "lot": 0.0, "_mset": set(), "_wos": set(), "days": {}, "tot": 0}
                 keyed[k] = g
-            q = float(r["q"] or 0); g["days"][r["PART_PLAN_YMD"]] = g["days"].get(r["PART_PLAN_YMD"], 0) + q; g["tot"] += q
+            # ★기준일 이전 소요는 첫날 칸으로 이월(레거시 _bucket() 과 동일).
+            #   하한 필터를 뺐으므로(위 주석) 여기서 클램프하지 않으면 축 밖 일자가 되어
+            #   행은 생기는데 일자셀이 비고 합계만 늘어난다.
+            _ppy = r["PART_PLAN_YMD"]
+            if _f6 and _ppy and _ppy < _f6: _ppy = _f6
+            q = float(r["q"] or 0); g["days"][_ppy] = g["days"].get(_ppy, 0) + q; g["tot"] += q
             g["lot"] += float(r.get("lot") or 0)
             g["_wos"].add(str(r["WORK_ORDER"]).strip())
             g["_mset"].update(m for m in (r.get("mats") or "").split(",") if m)
@@ -993,8 +1007,14 @@ def _deliv420_rows(cust, from_ymd, to_ymd, item="%", matcode="%"):
                     "done": _qint(sum(x["done"] for x in out)), "req": _qint(sum(x["req"] for x in out)),
                     "issued": _qint(sum(x["issued"] for x in out))}}
 
-def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
+def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm, ycol="plan_ymd", ncol=31):
     """★세트제외(공용품) 행 — 레거시 420 의 item_gubun='2' 행에 대응(2026-08-31 신설).
+
+    ★자재세트입고현황(130)도 이 함수를 그대로 쓴다(2026-09-02).
+      두 화면은 같은 계획을 보여야 한다(사용자 확인) — 세트제외 판정·합산 규칙을
+      각자 짜면 반드시 갈라진다. 130 은 일자축이 다르므로 인자로만 바꿔 준다:
+        ycol : 일자 컬럼. 420=plan_ymd(기본, 현행 무변경) / 130=part_plan_ymd
+        ncol : 일자 칸 수.  420=31(기본)               / 130=조회 근무일수
 
     세트제외 자재는 세트별 재고관리를 하지 않고 **단품재고 하나**로 본다(사용자 확인).
     레거시는 도번 행과 별개로 이 자재를 자기 행으로 insert 한다
@@ -1016,18 +1036,19 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
     cn = _nx(); cur = cn.cursor()
     try:
         # ① 이 협력사 소요 중 (자재, 상위도번라인) 별 계획합 · 상위도번 목록 · 일자별
-        cur.execute("""
+        _yc = "part_plan_ymd" if str(ycol) == "part_plan_ymd" else "plan_ymd"   # ★화이트리스트(SQL 주입 차단)
+        cur.execute(f"""
             SELECT LTRIM(RTRIM(m.mat_code)) mat,
                    LTRIM(RTRIM(ISNULL(i.line_no,''))) ln,
-                   m.plan_ymd,
+                   m.{_yc},
                    LTRIM(RTRIM(m.assy_item_code)) assy,
                    SUM(CAST(m.part_plan_qty AS float)) q
               FROM nx.plan_part_mat m WITH(NOLOCK)
               LEFT JOIN nx.plan_item_dtl i WITH(NOLOCK)
                      ON i.work_order=m.work_order AND i.c_item_code=m.assy_item_code
              WHERE LTRIM(RTRIM(m.mat_work_center_code))=?
-               AND m.plan_ymd BETWEEN ? AND ?
-             GROUP BY m.mat_code, i.line_no, m.plan_ymd, m.assy_item_code""",
+               AND m.{_yc} BETWEEN ? AND ?
+             GROUP BY m.mat_code, i.line_no, m.{_yc}, m.assy_item_code""",
             cust, from_ymd, to_ymd)
         raw = cur.fetchall()
         if not raw:
@@ -1052,7 +1073,7 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
                                  LTRIM(RTRIM(upper_item_code)) up
                             FROM nx.plan_part_mat WITH(NOLOCK)
                            WHERE LTRIM(RTRIM(mat_work_center_code))=?
-                             AND plan_ymd BETWEEN ? AND ?) p
+                             AND {_yc} BETWEEN ? AND ?) p
                       ON p.mat=LTRIM(RTRIM(b0.MAT_CODE)) AND p.up=LTRIM(RTRIM(b0.ITEM_CODE))
                    WHERE b0.MAT_CODE IN ({ph})
                    GROUP BY b0.MAT_CODE) b
@@ -1089,6 +1110,7 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
         #   레거시 화면도 Line No 칸에 SVC 만 표시하고 나머지는 공란으로 한 행에 묶는다.
         #   (작업처도 대표 하나만 쓰고 라인으로는 나누지 않는다)
         didx = {y: i for i, y in enumerate(dates)}
+        _N = max(int(ncol or 31), len(dates))    # ★일자칸 수(420=31 / 130=조회 근무일수)
         grp = {}
         for mat, ln, ymd, assy, q in raw:
             mat = str(mat).strip()
@@ -1099,12 +1121,12 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
             g = grp.get(k)
             if not g:
                 g = {"mat": mat, "line": _ln, "plan": 0.0,
-                     "assys": set(), "days": [0.0] * 31}
+                     "assys": set(), "days": [0.0] * _N}
                 grp[k] = g
             g["plan"] += float(q or 0)
             g["assys"].add(str(assy).strip())
             i = didx.get(str(ymd).strip())
-            if i is not None and i < 31:
+            if i is not None and i < _N:
                 g["days"][i] += float(q or 0)
 
         # ★재고 충당 — 단품재고는 **자재 단위로 하나**다(사용자 확인).
@@ -1123,10 +1145,10 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
             done = _qint(_give)
             # ★일자별 완료배분 — 재고 충당분을 일자 순으로 채운다(회색=세트재고 색, _TAGCOLOR[50]).
             #   종전엔 donedays 가 비어 일자셀이 「0/34」로 보였다(2026-08-31).
-            _dd = [0.0] * 31; _cl = {}
+            _dd = [0.0] * _N; _cl = {}
             _rest = _give
             for _y, _i in sorted(didx.items(), key=lambda x: x[1]):
-                if _i >= 31 or _rest <= 0 or not g["days"][_i]:
+                if _i >= _N or _rest <= 0 or not g["days"][_i]:
                     continue
                 _t = min(_rest, g["days"][_i])
                 _dd[_i] = _t; _rest -= _t
@@ -1147,8 +1169,8 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm):
                 "iset_stk": 0, "ireq": 0,               # ★공용품은 세트로 관리하지 않는다
                 "input_mat": _qint(stk), "setexc": 1,   # ★단품재고
                 "pack": 0, "insp": "0", "deliv": _qint(max(0.0, g["plan"] - done)),
-                "days": {y: _qint(g["days"][i]) for y, i in didx.items() if i < 31 and g["days"][i]},
-                "donedays": {y: _qint(_dd[i]) for y, i in didx.items() if i < 31 and _dd[i]},
+                "days": {y: _qint(g["days"][i]) for y, i in didx.items() if i < _N and g["days"][i]},
+                "donedays": {y: _qint(_dd[i]) for y, i in didx.items() if i < _N and _dd[i]},
                 "colors": _cl})
         return rows
     finally:

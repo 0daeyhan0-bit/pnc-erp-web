@@ -1309,7 +1309,19 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
     #     → 화면에서 'LG계획 부분만' 웹편성으로 갈아끼워 레거시와 대조하는 용도.
     _src = str(src).strip()
     SCH = "PARTNER_ERP.dbo" if _src == "live" else "PARTNER_ERP_TEST3.nx"
-    PLAN_B1 = ("PARTNER_ERP_TEST3.nx.v_plan_item_dtl_new" if _src == "new"
+    # ★★040 전용 뷰를 쓴다(2026-09-02 교정). v_plan_item_dtl_new 를 쓰면 안 된다.
+    #   경위 — 040 은 **당김 전 원본계획일자**가 필요해서 v_plan_item_dtl_new 의 원천을
+    #   nx.plan_item_dtl(당김 후) → nx.sale_plan_item(원본)으로 바꿨었다. 그런데 그 뷰는
+    #   **가공창고 이동계획(580) 복제 SP 도 함께 쓰는 공용 뷰**였다.
+    #     580 은 당김 후 일자가 맞다 → 원본일자로 바뀌자 계획이 통째로 밀렸다.
+    #     실측 AJJ76617501 : 라이브 PLAN_YMD=260903 / ORG_PLAN_YMD=260907.
+    #       580 은 260903(당김 후)을 봐야 하는데 뷰가 260907 을 주어 조회기간(0902~0903)
+    #       밖으로 나가 **행이 통째로 사라졌다**(레거시 320행 / 웹 319행).
+    #   ⟹ 레거시는 PLAN_YMD(당김 후)·ORG_PLAN_YMD(원본)를 한 테이블에 다 갖고 있어
+    #     040 은 ORG_, 580 은 PLAN_YMD 를 각자 읽는다. 웹도 뷰를 화면별로 분리한다.
+    #     · 040·050 → nx.v_sale_plan_item_050 (원천 nx.sale_plan_item = 당김 전 원본)
+    #     · 580     → nx.v_plan_item_dtl_new  (원천 nx.plan_item_dtl  = 당김 후, 원복)
+    PLAN_B1 = ("PARTNER_ERP_TEST3.nx.v_sale_plan_item_050" if _src == "new"
                else "{SCH}.SA_T_PLAN_ITEM_DTL")
     cn = _conn() if _src == "live" else _nx()
     cur = cn.cursor()
@@ -1394,19 +1406,39 @@ def sale040_grid(from_ymd: str = Query(""), gigan: int = Query(4), line: str = Q
         prm += [d1, _s040_shift(d2, 10)] + p1
 
         # ---- b2 예외생산 (분할제번 컬럼 없음 → work_order) ----
-        # ★★src='new'(웹계획) 에서는 b2 를 넣지 않는다 (2026-09-01 이중계상 수정).
-        #   웹 편성 STEP5-AS 가 예외생산(PR_T_PLAN_INPUT)을 **nx.plan_item_dtl 에 이미 넣는다**
-        #   (A/S 자재소요를 잡기 위해 — 그게 STEP5-AS 의 목적이다).
-        #   b1 뷰(v_plan_item_dtl_new)가 그 plan_item_dtl 을 그대로 노출하므로,
-        #   여기서 PR_T_PLAN_INPUT 을 또 UNION 하면 **같은 계획이 두 번** 잡힌다.
-        #     실측 2026-09-01 — WO1092231CR AJR73910201: LOT 120 인데 계획 240(정확히 2배).
-        #                       b1·b2 양쪽에 있는 제번 731개.
-        #     레거시는 안 겹친다: SA_T_PLAN_ITEM_DTL·PR_T_PLAN_ITEM_DTL 의 WO 제번 = 0행
-        #                       (레거시는 '편성용'과 '040용' 테이블이 분리돼 있다).
-        #   ★b2 는 미러(nx.PR_T_PLAN_INPUT) 직독이라 컷오버에 죽는 코드이기도 하다(§1-9-1).
-        #     웹 정본(plan_item_dtl)이 이미 담고 있으니 새 소스에서는 뺀다.
-        #   ※src='live'(레거시 직독 대사용)는 b1 이 SA_T_PLAN_ITEM_DTL 이라 안 겹치므로 그대로 둔다.
-        if _src != "new":
+        # ★★2026-09-02: src='new' 에서도 b2 를 **다시 넣는다**(레거시 구조로 복귀).
+        #   경위 — 2026-09-01 에는 이중계상 때문에 뺐었다. 당시 b1(v_plan_item_dtl_new)이
+        #   STEP5 산출(nx.plan_item_dtl)을 노출했고, STEP5-AS 가 예외생산을 거기 넣으므로
+        #   b2 를 또 UNION 하면 같은 계획이 두 번 잡혔다(WO1092231CR: LOT 120 · 계획 240).
+        #   ⟹ 2026-09-02 에 b1 원천을 바꿨다. 이제 040 원천은 nx.sale_plan_item 이고,
+        #      그건 nx.sale_plan(=엑셀 원본 LG계획)에서 모델BOM 을 직접 전개한 것이라
+        #      **A/S(WO 제번)를 담지 않는다** — 레거시 SA_T_PLAN_ITEM_DTL 과 같은 성격.
+        #      따라서 b2 와 겹치지 않고, b2 가 없으면 오히려 A/S 가 화면에서 통째로 빠진다
+        #      (실측 2026-09-02: 레거시 b2 = 337행 · LOT 52,294 · 계획 52,294).
+        #   ★소스는 미러(PR_T_PLAN_INPUT)가 아니라 **웹 정본 nx.prod_plan_input** 을 쓴다
+        #     (§1-9-1 — 미러 직독은 컷오버에 죽는다. 정본은 소문자 컬럼).
+        #   ※src='live'(레거시 직독 대사용)는 종전대로 미러/라이브를 읽는다.
+        if _src == "new":
+            w2, p2 = _flt("a.item_code", "a.work_order", "a.work_order", "a.line_no")
+            parts.append(f"""
+                SELECT '0' del_flag,
+                       CASE WHEN ISNULL(a.prod_tag,'')='PO' THEN '3' ELSE '2' END data_gubun,
+                       a.work_order wo, a.work_order swo, a.item_code item,
+                       ISNULL(a.line_no,'') line_no, '' model_no,
+                       '' tools, ISNULL(c.WORK_CODE,'') work_code,
+                       {WCTR('a.item_code')} work_center,
+                       ISNULL(a.remarks,'') rmk1, 0 fseq, 0 tseq,
+                       ISNULL(a.output_hm,'') ohm, a.plan_ymd ymd,
+                       ISNULL(a.plan_qty,0) lot,
+                       1 use_qty, 100 prod_rate,
+                       '' change_day,
+                       ISNULL(a.plan_qty,0) planq
+                  FROM PARTNER_ERP_TEST3.nx.prod_plan_input a WITH(NOLOCK)
+                  JOIN PARTNER_ERP_TEST3.nx.item c WITH(NOLOCK) ON a.item_code=c.ITEM_CODE
+                 WHERE a.plan_ymd BETWEEN ? AND ?
+                   AND {TGT('a.item_code')}{w2}""")
+            prm += [d1, d2] + p2
+        else:
             w2, p2 = _flt("a.ITEM_CODE", "a.WORK_ORDER", "a.WORK_ORDER", "a.LINE_NO")
             parts.append(f"""
                 SELECT '0' del_flag,

@@ -21,8 +21,12 @@
   · 라이브는 **읽기만** 한다(CLAUDE.md §1-1). 쓰기는 nx 뿐이다.
   · `--apply` 없이는 **조회만** 한다(기본 dry-run).
   · 삭제는 라이브에 없는 행에 한해 **근거키(work_order) 스코프**로만(§1-3).
-  · 사용자가 웹에서 직접 넣은 행(`src='web'`)은 **건드리지 않는다** —
+  · 사용자가 웹에서 넣은 행(`src` 가 **web 으로 시작**하는 것 전부)은 **건드리지 않는다** —
     레거시에 없다고 지우면 웹 입력분이 날아간다.
+    ★2026-09-02 수정: 종전 조건이 `src <> 'web'` 이라 **일괄등록분(`src='web-bulk'`)이
+      보호를 못 받았다.** 실제로 그날 등록한 2건(WO1094609KS 1,440개 ·
+      WO1094622KS 60개)이 삭제 대상에 잡혀 있었다 — 돌렸으면 조용히 날아갔다.
+      ⟹ `NOT LIKE 'web%'` 로 바꿔 web·web-bulk 를 모두 보호한다.
 
 사용
     python _schema/sync_prod_plan_input_refresh.py            # 조회만(기본)
@@ -82,7 +86,7 @@ n_ins = n1(f"""SELECT COUNT(*) FROM {LIVE} l WITH(NOLOCK)
                                   WHERE RTRIM(w.work_order)=RTRIM(l.WORK_ORDER))""")
 # ★웹 입력분(src='web')은 삭제 대상에서 뺀다 — 레거시에 없는 게 정상이다
 n_del = n1(f"""SELECT COUNT(*) FROM nx.prod_plan_input w
-                WHERE ISNULL(RTRIM(w.src),'') <> 'web'
+                WHERE ISNULL(RTRIM(w.src),'') NOT LIKE 'web%'
                   AND NOT EXISTS(SELECT 1 FROM {LIVE} l WITH(NOLOCK)
                                   WHERE RTRIM(l.WORK_ORDER)=RTRIM(w.work_order))""")
 n_web_only = n1("""SELECT COUNT(*) FROM nx.prod_plan_input WITH(NOLOCK)
@@ -139,7 +143,7 @@ cur.execute(f"""INSERT INTO nx.prod_plan_input
 print(f'    신규   {cur.rowcount:,}행')
 
 cur.execute(f"""DELETE w FROM nx.prod_plan_input w
-                 WHERE ISNULL(RTRIM(w.src),'') <> 'web'
+                 WHERE ISNULL(RTRIM(w.src),'') NOT LIKE 'web%'
                    AND NOT EXISTS(SELECT 1 FROM {LIVE} l WITH(NOLOCK)
                                    WHERE RTRIM(l.WORK_ORDER)=RTRIM(w.work_order))""")
 print(f'    삭제   {cur.rowcount:,}행  (웹 직접입력분 제외)')

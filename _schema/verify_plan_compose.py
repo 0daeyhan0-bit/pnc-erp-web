@@ -214,6 +214,51 @@ cmp_grain('[6] ⑤자재소요 — 업체×자재 (발주가 어디로 나가나
           'part_plan_qty', 'PART_PLAN_QTY',
           where_w=f"plan_ymd>='{DF}'", where_l=_WPY)
 
+# ── 6b. ★당김(part_plan_ymd) 대사 ─────────────────────────────────
+#    ★2026-09-02 신설. [4] 는 plan_ymd(생산계획일) 축이라 **당김 차이를 못 잡는다** —
+#      총량이 같아도 날짜 배분이 다르면 화면(410 파트별 생산계획)의 일자별 계획이 어긋난다.
+#      실측: 총량 차 +20 인데 09/03 +270 · 09/04 +630 · 09/07 −531 로 벌어졌다.
+#      화면이 보는 축은 **part_plan_ymd**(당김 적용된 파트 착수일)다.
+print('\n[6b] ★당김 일자(part_plan_ymd) — 화면이 보는 축')
+try:
+    cur.execute(f"""
+    SELECT w.d, ISNULL(w.q,0), ISNULL(l.q,0), ISNULL(w.q,0)-ISNULL(l.q,0)
+      FROM (SELECT RTRIM(ISNULL(part_plan_ymd,'')) d, SUM(CAST(ISNULL(part_plan_qty,0) AS float)) q
+              FROM nx.plan_part_dtl WITH(NOLOCK) WHERE part_plan_ymd>='{DF}'
+             GROUP BY RTRIM(ISNULL(part_plan_ymd,''))) w
+      FULL OUTER JOIN
+           (SELECT RTRIM(ISNULL(PART_PLAN_YMD,'')) d, SUM(CAST(ISNULL(PART_PLAN_QTY,0) AS float)) q
+              FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL WITH(NOLOCK) WHERE PART_PLAN_YMD>='{DF}'
+             GROUP BY RTRIM(ISNULL(PART_PLAN_YMD,''))) l ON l.d=w.d
+     ORDER BY ISNULL(w.d,l.d)""")
+    rows = cur.fetchall()
+    bad = [r for r in rows if abs(float(r[3] or 0)) > 0.001]
+    print(f'    일자 {len(rows)}개 · 수량 다른 일자 {len(bad)}개')
+    for r in rows[:12]:
+        d = float(r[3] or 0)
+        print('      %s  웹 %10s / 레거 %10s  %s' % (
+            r[0], format(float(r[1]), ',.0f'), format(float(r[2]), ',.0f'),
+            (format(d, '+,.0f') if abs(d) > 0.001 else '=')))
+    # 같은 키에서 당김일이 다른 건 (원인 특정용)
+    cur.execute(f"""
+    SELECT COUNT(*) FROM
+      (SELECT RTRIM(work_order) wo, RTRIM(assy_item_code) a, RTRIM(ISNULL(item_code,'')) i,
+              MIN(RTRIM(ISNULL(part_plan_ymd,''))) d
+         FROM nx.plan_part_dtl WITH(NOLOCK) WHERE plan_ymd>='{DF}'
+        GROUP BY RTRIM(work_order), RTRIM(assy_item_code), RTRIM(ISNULL(item_code,''))) w
+      JOIN
+      (SELECT RTRIM(WORK_ORDER) wo, RTRIM(ASSY_ITEM_CODE) a, RTRIM(ISNULL(ITEM_CODE,'')) i,
+              MIN(RTRIM(ISNULL(PART_PLAN_YMD,''))) d
+         FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL WITH(NOLOCK) WHERE PLAN_YMD>='{DF}'
+        GROUP BY RTRIM(WORK_ORDER), RTRIM(ASSY_ITEM_CODE), RTRIM(ISNULL(ITEM_CODE,''))) l
+        ON l.wo=w.wo AND l.a=w.a AND l.i=w.i
+     WHERE w.d<>l.d""")
+    n = int(cur.fetchone()[0] or 0)
+    print(f'    ★같은 키인데 당김일이 다른 건: {n:,}건'
+          + ('  = 당김 규칙 차이(총량이 같아도 화면 일자칸이 어긋난다)' if n else '  ✅'))
+except Exception as e:
+    print(f'    ★조회 실패 — {str(e)[:110]}')
+
 # ── 7. 조달 오버레이 (웹 전용) ─────────────────────────────────────
 print('\n[7] ⑤조달 오버레이 (웹 전용 — 레거시 대응 없음)')
 n = n1("SELECT COUNT(*) FROM nx.plan_mat_source WITH(NOLOCK)")

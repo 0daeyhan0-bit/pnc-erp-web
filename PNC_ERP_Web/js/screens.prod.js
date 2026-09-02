@@ -986,14 +986,21 @@ SCREEN.partplan=(c)=>{
     //   무색('0'=미키팅/전표)은 판정 대상에서 제외. 색이 하나도 없으면 무색. (소계행·집계뷰 공통)
     const rollFin=(fs)=>{const v=fs.filter(f=>f&&f!=='0');if(!v.length)return '0';
       return v.slice().sort((a,b)=>aggRank(a)-aggRank(b))[0];};
-    // ★2026-08-25 소계 색상 = "하위행이 전부 같은 색일 때만" 그 색(사용자 규칙).
-    //   구버전은 cover>=plan 을 요구했는데, 백엔드가 prior_fin='3'(키팅완료)로 이미 판정한
-    //   행이라도 prior_cover=0 이면 무색이 되어 상세(녹)와 소계(무색)가 어긋났다.
-    //   판정기준을 상세행과 통일 — fin 값 자체로만 본다. 하나라도 다르면(무색 포함) 무색.
-    const rollFinQ=(fs)=>{const v=fs.map(f=>f||'0');
-      if(!v.length)return '0';
-      const a=v[0];
-      return v.every(f=>f===a)?(a==='0'?'0':a):'0';};
+    // ★2026-09-02 소계 색상 = 레거시 규칙으로 환원(= rollFin 과 동일 판정).
+    //   레거시 원본: g1_plan_qty_NN.Background = c_color( min(if(plan>0, fin)) )
+    //     (_legacy_analysis/GAGONG_4PROGRAMS_ANALYSIS.md:309 · w_pr_input_420_new.srw:444)
+    //   = "계획 있는 행들의 fin 중 **가장 진행이 덜 된 것**" 이지 "전부 같을 때만"이 아니다.
+    //
+    //   ※종전(2026-08-25)은 "하위행이 전부 같은 색일 때만" 이었는데, 실제 데이터가
+    //     한 도번 안에서 파트(S5 용접 / S5-2 조립)로 갈리고 제번마다 진행도가 달라
+    //     **색이 거의 항상 섞인다** → 소계가 사실상 늘 무색이었다.
+    //     실측 2026-09-02 AJR73965505(96행): fin = 6×10 · 7×4 · 0×4 → 종전 무색,
+    //     레거시는 진주황('7'). 사용자 확인 = 진주황이 맞다.
+    //
+    //   무색('0')은 판정에서 제외한다 — 계획만 있고 아직 아무 진행이 없는 행까지
+    //   min 에 넣으면 한 건만 미착수여도 전체가 무색이 되어 같은 문제가 재발한다.
+    //   색이 하나도 없으면 그때만 무색. 우선순위 = aggRank(녹3>노랑4>주황7>살구6>자재2).
+    const rollFinQ=rollFin;
     // ── 구분(view): 집계=도번(item)단위 롤업 / 전체·제번=제번(WO)단위 상세 ──
     let disp=base;
     if(st.view==='집계'){
@@ -1801,9 +1808,17 @@ SCREEN.planinput=(host)=>{
   const ymdNorm=v=>{ let s=String(v==null?'':v).replace(/[^\d]/g,''); if(s.length===8)s=s.slice(2); return /^\d{6}$/.test(s)?s:String(v==null?'':v).trim(); };
   const st={mx:{dates:[],rows:[],grandtot:{},total:0,cnt:0,note:''},q:'',line:'',base:iso(new Date()),
             prevDay:false,lines:[],form:null,bulk:null,sel:new Set(),msg:''};
-  const F=[['plan_ymd','계획일자(YYMMDD)','req'],['line_no','라인','req'],['item_code','품번','req'],
-    ['output_hm','산출시각(HHMM)','text'],['plan_qty','계획수량','num'],['work_order','제번','text'],
-    ['work_code','공정(P1용접/P2가공)','text'],['prod_tag','생산구분(1양산/2셀)','text'],['remarks','비고','text']];
+  /* ★수정 팝업 필드(2026-09-02 사용자 확정)
+       · 계획일자 = 달력(date) — 날짜 이동이 잦다(UI표준 §3)
+       · 제번 = **읽기전용** — 저장 시 자동채번된 값이라 고치면 안 된다
+       · 공정·생산구분 = 제거(기본값 고정)
+       · 비고 = 넓게(wide) */
+  const F=[['plan_ymd','계획일자','date'],['line_no','라인','req'],['item_code','품번','req'],
+    ['output_hm','산출시각','time'],['plan_qty','계획수량','num'],['work_order','제번','ro'],
+    ['remarks','비고','wide']];
+  // HHMM ↔ HH:MM (time input 왕복용). 내부 저장은 계속 HHMM 4자리.
+  const hm2t=s=>/^\d{4}$/.test(String(s||''))?`${s.slice(0,2)}:${s.slice(2)}`:'';
+  const t2hm=s=>String(s||'').replace(/[^\d]/g,'').slice(0,4);
   // 라인 표기 = "코드 명칭"(레거시 dddw 형식). 명칭 없거나 코드=명칭이면 코드만.
   const lineLabel=l=>{ const c=String(l.code),n=String(l.nm||'').trim(); return (n&&n!==c)?`${c} ${n}`:c; };
   const lineNm=code=>{ const l=st.lines.find(x=>String(x.code)===String(code)); return l?lineLabel(l):(code||''); };
@@ -1822,18 +1837,30 @@ SCREEN.planinput=(host)=>{
   };
   // ── 수정 모달(기존 레코드 단건) ──
   const editHtml=(f)=>`<div class="wr-modal" style="position:fixed;inset:0;z-index:110;background:rgba(20,30,50,.38);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px 10px">
-     <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:520px;max-width:96vw">
+     <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.32);width:600px;max-width:96vw">
        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 16px;background:#1c47a0;color:#fff;border-radius:10px 10px 0 0">
          <b>생산계획 수정</b><span id="pi-x" style="cursor:pointer;font-size:17px">✕</span></div>
        <div style="padding:12px 16px;max-height:calc(100vh - 170px);overflow:auto">
          <table style="border-collapse:collapse;width:100%"><tbody>${F.map(fd=>`<tr>
-           <td style="padding:5px 8px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:120px">${fd[1]}${fd[2]==='req'?'<span style="color:#c0392b">*</span>':''}</td>
-           <td style="padding:4px 0">${fd[0]==='line_no'
+           <td style="padding:5px 8px 5px 0;white-space:nowrap;color:#33507d;font-weight:600;font-size:12px;text-align:right;width:110px">${fd[1]}${(fd[2]==='req'||fd[2]==='date')?'<span style="color:#c0392b">*</span>':''}</td>
+           <td style="padding:4px 0">${
+              fd[0]==='line_no'
               ?`<select class="inp pf" data-k="line_no" style="width:${lineW()}">${lineOpts(f.line_no,false)}</select>`
-              :`<input class="inp pf" data-k="${fd[0]}" value="${esc(f[fd[0]]||'')}" ${fd[2]==='num'?'type="number"':''} style="width:${fd[2]==='num'?100:200}px" autocomplete="off">`}</td></tr>`).join('')}</tbody></table>
+              :fd[2]==='date'
+              ?`<input class="inp pf" data-k="plan_ymd" type="date" value="${esc(ymd2iso(f.plan_ymd))}" style="width:150px">`
+              :fd[2]==='time'
+              /* ★2100 → 21:00 로 보이게(네이티브 시계 피커). 저장값은 HHMM 유지 */
+              ?`<input class="inp pf" data-k="output_hm" type="time" value="${esc(hm2t(f.output_hm))}" style="width:120px">`
+              :fd[2]==='ro'
+              /* ★제번은 자동채번 값 — 읽기전용(고치면 계획 추적이 끊긴다) */
+              ?`<input class="inp" value="${esc(f[fd[0]]||'')}" readonly style="width:200px;background:#f2f5f9;color:#5b6b80" title="저장 시 자동채번된 값이라 수정할 수 없습니다">`
+              :`<input class="inp pf" data-k="${fd[0]}" value="${esc(f[fd[0]]||'')}" ${fd[2]==='num'?'type="number"':''} style="width:${fd[2]==='num'?100:(fd[2]==='wide'?420:200)}px;max-width:100%" autocomplete="off">`}</td></tr>`).join('')}
+           ${(f.ins_user||f.upd_user)?`<tr><td style="padding:5px 8px 5px 0;text-align:right;color:#8aa0bd;font-size:11px">기록</td>
+             <td style="padding:4px 0;color:#8aa0bd;font-size:11px">${f.ins_user?`등록 ${esc(f.ins_user)}${f.ins_dt?` (${esc(String(f.ins_dt).slice(0,16))})`:''}`:''}${(f.ins_user&&f.upd_user)?' · ':''}${f.upd_user?`수정 ${esc(f.upd_user)}${f.upd_dt?` (${esc(String(f.upd_dt).slice(0,16))})`:''}`:''}</td></tr>`:''}
+         </tbody></table>
        </div>
        <div style="padding:11px 16px;border-top:1px solid #e2e8f2;display:flex;justify-content:space-between;align-items:center">
-         <span style="color:#c0392b;font-size:11px">* 계획일자(YYMMDD)·라인·품번·수량 필수. 시각은 HHMM.</span>
+         <span style="color:#c0392b;font-size:11px">* 계획일자·라인·품번·수량 필수. 시각은 HHMM. 제번은 자동채번(수정 불가).</span>
          <span><button class="btn" id="pi-save" style="background:#1b6ec2;color:#fff">💾 저장</button> <button class="btn" id="pi-cancel">닫기</button></span></div>
      </div></div>`;
   const render=()=>{
@@ -1904,7 +1931,12 @@ SCREEN.planinput=(host)=>{
     if(editing){
       g('#pi-cancel').onclick=g('#pi-x').onclick=()=>{st.form=null;render();};
       g('#pi-save').onclick=save;
-      host.querySelectorAll('.pf').forEach(el=>{const h=()=>{st.form[el.dataset.k]=el.value;};el.oninput=h;el.onchange=h;});
+      // ★date/time 입력은 내부포맷(YYMMDD·HHMM)으로 되돌려 저장한다
+      host.querySelectorAll('.pf').forEach(el=>{
+        const k=el.dataset.k, t=el.type;
+        const h=()=>{ st.form[k] = t==='date'?ymd6(el.value) : (t==='time'?t2hm(el.value) : el.value); };
+        el.oninput=h; el.onchange=h;
+      });
     }
     if(bulking) wireBulk();
   };
@@ -1921,6 +1953,35 @@ SCREEN.planinput=(host)=>{
        · 제번(work_order) = **입력칸 없음** — 저장할 때 백엔드가 자동채번한다
          (레거시 w_pr_plan_060 도 신규행 WORK-ORDER 칸이 비어 있고 저장 시 채워진다). */
   const blankRows=(n,ymd)=>Array.from({length:n},()=>({plan_ymd:ymd||'',item_code:'',plan_qty:'',remarks:''}));
+  // YYMMDD ↔ yyyy-mm-dd (달력 input 왕복용)
+  const ymd2iso=s=>/^\d{6}$/.test(String(s||''))?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';
+  /* ★품번 오토컴플리트(2026-09-02) — 입력한 글자로 서버검색해 datalist 를 채운다.
+       전 품목을 미리 받지 않는다(수만 건). 200ms 디바운스 + 같은 질의 재요청 안 함. */
+  let _bsT=null, _bsQ='';
+  const bulkSearch=(q)=>{
+    q=String(q||'').trim(); if(q.length<2||q===_bsQ)return;
+    clearTimeout(_bsT);
+    _bsT=setTimeout(async()=>{ _bsQ=q;
+      try{const r=await fetch(`${API}/api/itemmaster/list?q=${encodeURIComponent(q)}&limit=50`);
+        const j=await r.json();
+        st.bulkItems=(j.rows||[]).map(x=>({code:String(x.item_code||'').trim(),
+                                           name:String(x.item_name||'').trim()})).filter(x=>x.code);
+        const dl=host.querySelector('#pb-itemdl');
+        if(dl)dl.innerHTML=st.bulkItems.map(x=>`<option value="${esc(x.code)}">${esc(x.name)}</option>`).join('');
+      }catch(e){}
+    },200);
+  };
+  // 붙여넣기 직후: 화면의 품번들 품명을 한 번에 조회해 채운다
+  const fillNames=async()=>{ const b=st.bulk; if(!b)return;
+    const codes=[...new Set(b.rows.map(r=>String(r.item_code||'').trim().toUpperCase()).filter(Boolean))];
+    if(!codes.length)return;
+    try{const r=await fetch(`${API}/api/planinput/itemnames`,{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({codes})});
+      const j=await r.json(); const m=j.names||{};
+      b.rows.forEach(x=>{x.item_name=m[String(x.item_code||'').trim().toUpperCase()]||'';});
+      render();
+    }catch(e){}
+  };
   const bulkHtml=()=>{ const b=st.bulk;
     return `<div class="wr-modal" style="position:fixed;inset:0;z-index:120;background:rgba(20,30,50,.42);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:18px 10px">
      <div style="background:#fff;border-radius:10px;box-shadow:0 22px 64px rgba(0,0,0,.34);width:1060px;max-width:94vw">
@@ -1928,24 +1989,35 @@ SCREEN.planinput=(host)=>{
          <b>➕ 생산계획 추가 — 엑셀 붙여넣기(날짜·품번·수량)</b><span id="pb-x" style="cursor:pointer;font-size:17px">✕</span></div>
        <div style="padding:12px 16px">
          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;font-size:12px">
-           <label class="tl">기본 계획일자</label><input class="inp" id="pb-ymd" value="${esc(b.plan_ymd)}" placeholder="YYMMDD" style="width:8ch" autocomplete="off" title="행별 계획일자가 비면 이 값으로 채웁니다">
+           <!-- ★계획일자 = 네이티브 달력(UI표준 §3 "모든 일자 입력은 type=date").
+                내부포맷 YYMMDD 는 ymd6/iso 헬퍼로 왕복한다. 전 행이 이 일자로 편성된다. -->
+           <label class="tl">계획일자</label><input class="inp" type="date" id="pb-ymd" value="${esc(ymd2iso(b.plan_ymd))}" style="width:150px" title="이 일자로 전 행이 편성됩니다">
            <label class="tl">라인</label><select class="inp" id="pb-line" style="width:${lineW()}">${lineOpts(b.line_no,false)}</select>
-           <label class="tl">산출시각</label><input class="inp" id="pb-hm" value="${esc(b.output_hm)}" placeholder="HHMM" style="width:5ch;min-width:0;flex:none" autocomplete="off">
-           <label class="tl">생산구분</label><select class="inp" id="pb-tag" style="width:auto;min-width:0;flex:none" title="1양산/2셀"><option value="1" ${b.prod_tag==='1'?'selected':''}>1 양산</option><option value="2" ${b.prod_tag==='2'?'selected':''}>2 셀</option></select>
-           <label class="tl">공정</label><input class="inp" id="pb-wc" value="${esc(b.work_code)}" placeholder="P1/P2" style="width:6ch;min-width:0;flex:none" autocomplete="off">
+           <!-- ★산출시각 5ch 는 '2100'이 잘렸다 → 7ch (2026-09-02) -->
+           <label class="tl">산출시각</label><input class="inp" id="pb-hm" value="${esc(b.output_hm)}" placeholder="HHMM" style="width:7ch;min-width:0;flex:none;text-align:center" autocomplete="off">
+           <!-- ★생산구분(1양산)·공정은 기본값 고정이라 화면에서 뺐다(2026-09-02 사용자 요청).
+                값은 st.bulk 에 그대로 남아 저장 시 함께 전송된다. -->
          </div>
          <div style="font-size:11px;color:#1c7c3a;margin-bottom:6px">💡 엑셀에서 <b>계획일자⇥품번⇥수량</b> (또는 품번만/품번⇥수량) 열을 복사해 아래 해당 칸에 <b>붙여넣기</b>하면 여러 행에 자동 분배됩니다. 계획일자는 <b>기본 계획일자</b>로 미리 채워지며 행마다 고칠 수 있습니다. <b>제번(WORK-ORDER)은 저장 시 자동 생성</b>됩니다.</div>
          <div style="max-height:calc(100vh - 330px);overflow-y:auto;overflow-x:hidden;border:1px solid #d7dfea;border-radius:6px">
+           <!-- ★2026-09-02 행별 계획일자 열 제거(사용자 요청) — 상단 계획일자 하나로 전 행 편성.
+                정렬·폭 정리: 헤더 가운데(UI표준) · 계획수량 폭 확대 · 품번 오토컴플리트 -->
            <table class="tbl" style="font-size:11px;width:100%;table-layout:fixed"><thead><tr>
              <!-- ★제번 열 제거(2026-08-31) — 저장 시 자동채번(WO+7자리연번+라인). 레거시 동일. -->
-             <th style="width:30px">#</th><th style="width:96px">계획일자</th><th>품번 <span style="color:#1c7c3a">(붙여넣기)</span></th><th class="num" style="width:84px">계획수량</th><th>비고</th><th style="width:30px"></th></tr></thead>
+             <th style="width:34px;text-align:center">#</th>
+             <th style="text-align:center">품번 <span style="color:#1c7c3a">(붙여넣기·검색)</span></th>
+             <th style="width:200px;text-align:center">품명</th>
+             <th style="width:110px;text-align:center">계획수량</th>
+             <th style="text-align:center">비고</th>
+             <th style="width:30px"></th></tr></thead>
            <tbody>${b.rows.map((r,i)=>`<tr>
              <td class="center" style="color:#8aa0bd">${i+1}</td>
-             <td><input class="inp pb-ymd" data-i="${i}" value="${esc(r.plan_ymd)}" placeholder="YYMMDD" style="width:9ch" autocomplete="off" title="기본 계획일자로 채워집니다 — 행마다 다르면 여기서 고치거나 엑셀 날짜열을 붙여넣으세요"></td>
-             <td><input class="inp pb-item" data-i="${i}" value="${esc(r.item_code)}" style="width:96%" autocomplete="off"></td>
-             <td><input class="inp pb-qty" data-i="${i}" value="${esc(r.plan_qty)}" type="number" style="width:74px" autocomplete="off"></td>
-             <td><input class="inp pb-rm" data-i="${i}" value="${esc(r.remarks)}" style="width:96%" autocomplete="off"></td>
+             <td><input class="inp pb-item" data-i="${i}" value="${esc(r.item_code)}" list="pb-itemdl" style="width:100%;min-width:0" autocomplete="off" placeholder="품번 입력·검색"></td>
+             <td class="pb-nm" data-i="${i}" style="color:#5b6b80;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item_name||'')}">${esc(r.item_name||'')}</td>
+             <td><input class="inp pb-qty" data-i="${i}" value="${esc(r.plan_qty)}" type="number" style="width:100%;min-width:0;text-align:right" autocomplete="off"></td>
+             <td><input class="inp pb-rm" data-i="${i}" value="${esc(r.remarks)}" style="width:100%;min-width:0" autocomplete="off"></td>
              <td class="center"><span class="pb-rmrow" data-i="${i}" style="cursor:pointer;color:#c0392b" title="행삭제">✕</span></td></tr>`).join('')}</tbody></table>
+           <datalist id="pb-itemdl">${(st.bulkItems||[]).map(x=>`<option value="${esc(x.code)}">${esc(x.name)}</option>`).join('')}</datalist>
          </div>
          <div style="margin-top:6px"><button class="btn" id="pb-addrow">＋ 행추가(5)</button>
            <span style="color:#8aa0bd;font-size:11px;margin-left:8px">품번·수량(>0)·계획일자 있는 행만 저장됩니다.</span></div>
@@ -1973,35 +2045,54 @@ SCREEN.planinput=(host)=>{
   const wireBulk=()=>{ const g=id=>host.querySelector(id), b=st.bulk;
     g('#pb-x').onclick=g('#pb-cancel').onclick=()=>{st.bulk=null;render();};
     g('#pb-save').onclick=bulkSave;
-    g('#pb-ymd').oninput=e=>b.plan_ymd=e.target.value;
+    // ★달력(type=date) → 내부포맷 YYMMDD 로 저장
+    g('#pb-ymd').onchange=e=>{b.plan_ymd=ymd6(e.target.value);};
     g('#pb-line').onchange=e=>b.line_no=e.target.value;
     g('#pb-hm').oninput=e=>b.output_hm=e.target.value;
-    g('#pb-tag').oninput=e=>b.prod_tag=e.target.value;
-    g('#pb-wc').oninput=e=>b.work_code=e.target.value;
+    // ★생산구분·공정 입력칸은 제거됨(기본값 고정) — 없는 노드에 핸들러를 걸면 죽는다.
+    //   값은 st.bulk 에 남아 저장 시 그대로 전송된다.
     g('#pb-addrow').onclick=()=>{b.rows=b.rows.concat(blankRows(5,b.plan_ymd));render();};
-    // 계획일자 열: 단일=날짜, 다열=날짜⇥품번⇥수량⇥비고 (제번은 자동채번이라 붙여넣기 대상 아님)
-    host.querySelectorAll('.pb-ymd').forEach(el=>{
-      el.oninput=e=>{b.rows[+e.target.dataset.i].plan_ymd=e.target.value;};
-      el.onblur=e=>{const i=+e.target.dataset.i;b.rows[i].plan_ymd=ymdNorm(b.rows[i].plan_ymd);e.target.value=b.rows[i].plan_ymd;};
-      el.onpaste=e=>{
-        const txt=(e.clipboardData||window.clipboardData).getData('text');
-        if(!/[\n\t]/.test(txt)){const i=+e.target.dataset.i;e.preventDefault();b.rows[i].plan_ymd=ymdNorm(txt);render();return;}
-        e.preventDefault();
-        applyPaste(b,+e.target.dataset.i,txt,['plan_ymd','item_code','plan_qty','remarks']);render();
-      };
-    });
-    // 품번 열: 단일=품번, 다열=품번⇥수량⇥제번
+    // 품번 열: 단일=품번(수기·검색), 다열=품번⇥수량⇥비고
     host.querySelectorAll('.pb-item').forEach(el=>{
-      el.oninput=e=>{b.rows[+e.target.dataset.i].item_code=e.target.value;};
+      el.oninput=e=>{
+        const i=+e.target.dataset.i, v=e.target.value;
+        b.rows[i].item_code=v;
+        bulkSearch(v);                      // 입력할수록 후보 좁힘(디바운스)
+        // 이미 아는 품번이면 품명을 즉시 채운다(재렌더 없이 셀만 — 포커스 유지)
+        const hit=(st.bulkItems||[]).find(x=>x.code===v.trim().toUpperCase());
+        b.rows[i].item_name=hit?hit.name:'';
+        const nm=host.querySelector(`.pb-nm[data-i="${i}"]`);
+        if(nm){nm.textContent=b.rows[i].item_name;nm.title=b.rows[i].item_name;}
+      };
       el.onpaste=e=>{
         const txt=(e.clipboardData||window.clipboardData).getData('text');
         if(!/[\n\t]/.test(txt))return;               // 단일값이면 기본 붙여넣기
         e.preventDefault();
-        applyPaste(b,+e.target.dataset.i,txt,['item_code','plan_qty','remarks']);render();
+        applyPaste(b,+e.target.dataset.i,txt,['item_code','plan_qty','remarks']);
+        render(); fillNames();                       // 붙여넣은 품번들의 품명 조회
       };
     });
-    host.querySelectorAll('.pb-qty').forEach(el=>el.oninput=e=>{b.rows[+e.target.dataset.i].plan_qty=e.target.value;});
-    host.querySelectorAll('.pb-rm').forEach(el=>el.oninput=e=>{b.rows[+e.target.dataset.i].remarks=e.target.value;});
+    // ★계획수량·비고 열도 붙여넣기 지원(2026-09-02). 종전엔 onpaste 가 없어
+    //   엑셀 한 열을 복사하면 **한 칸에 전부 들어갔다**(값이 위로 몰림).
+    //   계획수량 칸에서 붙여넣으면 수량⇥비고, 비고 칸에서는 비고만 채운다.
+    host.querySelectorAll('.pb-qty').forEach(el=>{
+      el.oninput=e=>{b.rows[+e.target.dataset.i].plan_qty=e.target.value;};
+      el.onpaste=e=>{
+        const txt=(e.clipboardData||window.clipboardData).getData('text');
+        if(!/[\n\t]/.test(txt))return;               // 단일값이면 기본 붙여넣기
+        e.preventDefault();
+        applyPaste(b,+e.target.dataset.i,txt,['plan_qty','remarks']);render();
+      };
+    });
+    host.querySelectorAll('.pb-rm').forEach(el=>{
+      el.oninput=e=>{b.rows[+e.target.dataset.i].remarks=e.target.value;};
+      el.onpaste=e=>{
+        const txt=(e.clipboardData||window.clipboardData).getData('text');
+        if(!/[\n\t]/.test(txt))return;
+        e.preventDefault();
+        applyPaste(b,+e.target.dataset.i,txt,['remarks']);render();
+      };
+    });
     host.querySelectorAll('.pb-rmrow').forEach(el=>el.onclick=()=>{b.rows.splice(+el.dataset.i,1);if(!b.rows.length)b.rows=blankRows(3,b.plan_ymd);render();});
   };
   const bulkSave=async()=>{ const b=st.bulk;

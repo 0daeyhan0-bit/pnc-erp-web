@@ -744,43 +744,72 @@ def _stepH_history(cur, base_ymd=""):
         cur.execute("SELECT ISNULL(MIN(PLAN_YMD),CONVERT(varchar(6),GETDATE(),12)) FROM nx.plan_dtl")
         base_ymd = str(cur.fetchone()[0] or "").strip()
     # ── LG계획: 전량 재생성(레거시 sa_t_plan_dtl 동일). ★ORG_ 우선 = 당김 전 원본일자 ──
+    #   ★LOT 수량 = REMAIN_QTY 다(2026-09-02 수정). TOTAL_QTY 가 아니다.
+    #     실측(분할 없는 4,234 제번): REMAIN_QTY = 레거시 LOT_QTY 4,234/4,234 (100.0%),
+    #       TOTAL_QTY 는 4,209 (99.4%) — 25건이 틀린다.
+    #       예) 6I2M03TA : 웹 TOTAL_QTY 200 · REMAIN_QTY 1 / 레거시 LOT_QTY 1
+    #           6IPRG078 : 웹 TOTAL_QTY 150 · REMAIN_QTY 6 / 레거시 LOT_QTY 6
+    #     TOTAL_QTY 를 쓰면 040 화면 LOT합이 +3,237 부풀었다(84,569 → 87,806).
+    #     같은 대응이 STEP5 에도 기록돼 있다(planrev.py:510 — "DTL.LOT_QTY = REMAIN_QTY 100%").
     cur.execute("DELETE FROM nx.sale_plan")
     cur.execute("""INSERT INTO nx.sale_plan(plan_ymd, work_order, split_work_order, model_no, line_no,
             output_hm, lot_qty, plan_qty, cr_flag, from_seq, to_seq, tool, org_plan_ymd, org_output_hm)
         SELECT ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD), WORK_ORDER, WORK_ORDER, MODEL_NO, LINE_NO,
                ISNULL(NULLIF(ORG_OUTPUT_HM,''),ISNULL(NULLIF(START_HM,''),'0800')),
-               TOTAL_QTY, PLAN_QTY, CR_FLAG, FROM_SEQ, TO_SEQ, TOOL,
+               REMAIN_QTY, PLAN_QTY, CR_FLAG, FROM_SEQ, TO_SEQ, TOOL,
                ISNULL(NULLIF(ORG_PLAN_YMD,''),PLAN_YMD),
                ISNULL(NULLIF(ORG_OUTPUT_HM,''),ISNULL(NULLIF(START_HM,''),'0800'))
           FROM nx.plan_dtl""")
     cur.execute("SELECT COUNT(*) FROM nx.sale_plan")
     n_sale = int(cur.fetchone()[0] or 0)
-    # ── ★도번단위 LG계획(040 원천) — STEP5 산출(nx.plan_item_dtl)에서 전개 ──
-    #   레거시 SA_T_PLAN_ITEM_DTL 대응. 040 의 b1 이 이 그레인을 읽는다.
-    #   ★★OUTPUT_HM 은 **당김 전 원본시각**(ORG_OUTPUT_HM)이다 — 실측 확정.
-    #     레거시 SA_T_PLAN_ITEM_DTL 은 OUTPUT_HM = ORG_OUTPUT_HM 로 동일하게 채워져 있다
-    #     (당김 후 시각을 넣으면 0.72% 로 떨어짐). 영업계획은 당겨지기 전 원래 시각으로 잡힌다.
+    # ── ★도번단위 LG계획(040·050 원천) — nx.sale_plan 에서 **모델BOM 직접 전개** ──
+    #   레거시 SA_T_PLAN_ITEM_DTL 대응. 040 의 b1, 050 이 이 그레인을 읽는다.
+    #
+    #   ★★★소스는 STEP5(nx.plan_item_dtl)가 아니라 nx.sale_plan 이다(2026-09-02 수정).
+    #     레거시는 **두 테이블을 각각 따로** 만든다(w_pr_plan_020 I단계 원문):
+    #         pr_t_plan_item_dtl  ← pr_t_plan_dtl   (생산용 · 파트별로 이어짐)
+    #         sa_t_plan_item_dtl  ← sa_t_plan_dtl   (040·050용 · **엑셀 원본 그대로**)
+    #     웹은 종전에 040 원천을 STEP5 산출물에서 복사했는데, STEP5 는
+    #         GROUP BY d.WORK_ORDER, d.MODEL_NO   (planrev.py:520 — 일자가 그룹키에 없음)
+    #     로 제번을 합치므로 **엑셀의 일자 분할이 사라진다.**
+    #       실측 6JPRG005 : 엑셀·plan_dtl·sale_plan 은 260907(130) + 260908(265),
+    #         레거시 SA_T_PLAN_ITEM_DTL 도 두 행. 그런데 웹 STEP5 는 260902 에 395 한 행.
+    #         → 050 화면이 07월 790 / 08화 0 (레거시 260 / 530). 040 계획합 +1,270.
+    #     ⟹ 040·050 은 엑셀 원본대로 나와야 하므로 nx.sale_plan(=plan_dtl 행 그대로,
+    #        4,621행 · 분할 유지 · 레거시 sa_t_plan_dtl 과 일자·수량 동일)에서 전개한다.
+    #     ★STEP5 는 건드리지 않는다 — 파트별(nx.plan_part_dtl)은 지금 레거시와 일치한다
+    #       (실측 6JPRG005 파트별 웹·레거시 동일). 생산용과 영업용의 그레인이 원래 다르다.
+    #
+    #   ★일자·시각은 **당김 전 원본**이다.
+    #     H단계가 nx.sale_plan 을 만들 때 이미 ISNULL(ORG_*, ...) 로 되돌려 넣었으므로
+    #     여기서는 sale_plan 값을 그대로 쓰면 된다(레거시 I단계도 sa_t_plan_dtl 직독).
+    #
+    #   ★모델BOM 유효기간 판정 = a.plan_ymd(=원본일자) between make_ymd and to_apply_ymd,
+    #     그리고 make_ymd = 그 조건을 만족하는 최신본(레거시 원문의 max(make_ymd) 서브쿼리).
     n_item = 0
-    cur.execute("SELECT CASE WHEN OBJECT_ID('nx.plan_item_dtl','U') IS NULL THEN 0 ELSE 1 END")
+    cur.execute("SELECT CASE WHEN OBJECT_ID('nx.sale_plan','U') IS NULL THEN 0 ELSE 1 END")
     if int(cur.fetchone()[0] or 0):
         cur.execute("DELETE FROM nx.sale_plan_item")
         cur.execute("""INSERT INTO nx.sale_plan_item(PLAN_YMD, WORK_ORDER, SPLIT_WORK_ORDER, C_ITEM_CODE,
                 MODEL_NO, LINE_NO, OUTPUT_HM, USE_QTY, LOT_QTY, PLAN_QTY,
                 FROM_SEQ, TO_SEQ, TOOLS_DESC, CHANGE_DAY, CR_FLAG, ORG_PLAN_YMD, ORG_OUTPUT_HM)
-            SELECT i.PLAN_YMD, i.WORK_ORDER, ISNULL(NULLIF(i.SPLIT_WORK_ORDER,''), i.WORK_ORDER),
-                   i.C_ITEM_CODE, d.MODEL_NO, ISNULL(NULLIF(i.LINE_NO,''), d.LINE_NO),
-                   ISNULL(NULLIF(d.ORG_OUTPUT_HM,''), ISNULL(NULLIF(d.START_HM,''),'0800')),
-                   i.USE_QTY, i.LOT_QTY, i.PLAN_QTY,
-                   d.FROM_SEQ, d.TO_SEQ, d.TOOL, NULL, d.CR_FLAG,
-                   ISNULL(NULLIF(i.ORG_PLAN_YMD,''), i.PLAN_YMD),
-                   ISNULL(NULLIF(d.ORG_OUTPUT_HM,''), ISNULL(NULLIF(d.START_HM,''),'0800'))
-              FROM nx.plan_item_dtl i
-              LEFT JOIN (SELECT WORK_ORDER, MIN(MODEL_NO) MODEL_NO, MIN(LINE_NO) LINE_NO,
-                                MIN(FROM_SEQ) FROM_SEQ, MIN(TO_SEQ) TO_SEQ, MIN(TOOL) TOOL,
-                                MIN(CR_FLAG) CR_FLAG, MIN(START_HM) START_HM,
-                                MIN(ORG_OUTPUT_HM) ORG_OUTPUT_HM
-                           FROM nx.plan_dtl GROUP BY WORK_ORDER) d
-                     ON RTRIM(d.WORK_ORDER)=RTRIM(i.WORK_ORDER)""")
+            SELECT a.plan_ymd,
+                   a.work_order, ISNULL(NULLIF(RTRIM(a.split_work_order),''), a.work_order),
+                   RTRIM(b.C_ITEM_CODE), a.model_no, a.line_no,
+                   ISNULL(NULLIF(RTRIM(a.output_hm),''),'0800'),
+                   b.USE_QTY, a.lot_qty, a.plan_qty,
+                   a.from_seq, a.to_seq, a.tool, NULL, a.cr_flag,
+                   ISNULL(NULLIF(RTRIM(a.org_plan_ymd),''), a.plan_ymd),
+                   ISNULL(NULLIF(RTRIM(a.org_output_hm),''),
+                          ISNULL(NULLIF(RTRIM(a.output_hm),''),'0800'))
+              FROM nx.sale_plan a
+              JOIN nx.PR_M_MODEL_BOM b WITH(NOLOCK)
+                     ON RTRIM(b.MODEL_NO)=RTRIM(a.model_no)
+                    AND a.plan_ymd BETWEEN RTRIM(b.MAKE_YMD) AND RTRIM(b.TO_APPLY_YMD)
+             WHERE b.MAKE_YMD = (SELECT MAX(t.MAKE_YMD) FROM nx.PR_M_MODEL_BOM t WITH(NOLOCK)
+                                  WHERE RTRIM(t.MODEL_NO)=RTRIM(a.model_no)
+                                    AND RTRIM(t.C_ITEM_CODE)=RTRIM(b.C_ITEM_CODE)
+                                    AND a.plan_ymd BETWEEN RTRIM(t.MAKE_YMD) AND RTRIM(t.TO_APPLY_YMD))""")
         cur.execute("SELECT COUNT(*) FROM nx.sale_plan_item")
         n_item = int(cur.fetchone()[0] or 0)
     # ── 이력 스냅샷: 당일 재실행 멱등 ──
