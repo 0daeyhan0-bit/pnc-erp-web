@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
 from fastapi import APIRouter, Query, Body, HTTPException, Response, UploadFile, File, Form
 from common import (_conn, _num, _run_sp, _shape, _nx, _nx_tx, _b, _d6, _ym, _ITEM_WORK, _get_cost_engine, _reset_cost_engine, _COST_LOCK, SP_SIL, SP_NAE, NxCostEngine, _HERE, _closed, _validate_alloc, _ensure_modelbom, _pur_src, _custnm_map, _kindmap, _dig4, _cur_ym, _sale_win, _SALE_MAGAM, DOC_STORAGE_PATH, _hashlib, _mimetypes, _carry_win,
-                    _sale_win_ovr, _carry_win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
+                    _sale_win_ovr, _carry_win_ovr, _win_ovr, _ensure_carry_ovr, _carry_ovr_set, _carry_ovr_set_bulk)
 
 router = APIRouter()
 _ensure_carry_ovr()   # 이월 재배정 override 테이블 보장(1회)
@@ -33,7 +33,7 @@ def purmagam_list(ym: str = Query("")):
           SELECT S.cc cc, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
             SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items
-          FROM ({_pur_src(_sale_win_ovr('PUR').format(ym=y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+          FROM ({_pur_src(_win_ovr('PUR', y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
           GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -222,7 +222,7 @@ def purmagam_lines(ym: str = Query(""), basis: str = Query("magam"), fr: str = Q
             raise HTTPException(400, "입고기준은 fr/to(YYMMDD) 필요")
         win = f"A.MAINT_YMD>='{f6}' AND A.MAINT_YMD<='{t6}'"
     else:
-        win = _sale_win_ovr('PUR').format(ym=y)
+        win = _win_ovr('PUR', y)
     where = ["1=1"]; pf = []
     if cust_code.strip():
         where.append("S.cc=?"); pf.append(cust_code.strip())
