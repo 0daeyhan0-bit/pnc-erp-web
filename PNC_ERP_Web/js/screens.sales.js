@@ -248,7 +248,7 @@ SCREEN.lgrecv=(c)=>{
        <select class="sel" id="mkt"><option value="" ${mkt===''?'selected':''}>전체</option><option value="2" ${mkt==='2'?'selected':''}>내수</option><option value="1" ${mkt==='1'?'selected':''}>수출</option></select>
        <input class="inp" id="iq" placeholder="도번/작업처" style="width:120px">
        <button class="btn" id="go">검색</button><button class="btn ghost" id="reset">초기화</button>
-       <button class="btn" id="upl" style="background:#1f7a3d;color:#fff">리시빙파일 업로드</button>
+       <span id="upl" title="GR Status 엑셀을 여기로 끌어다 놓거나 클릭하세요" style="border:2px dashed #1c7c3a;border-radius:8px;padding:6px 16px;background:#eaf7ef;color:#1c7c3a;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer">리시빙파일 드래그&드롭 또는 클릭</span>
        <input type="file" id="uplf" accept=".xlsx,.xls" style="display:none">
        <div class="spacer"></div><button class="btn xls" id="xls">📥 엑셀 다운로드</button>
      </div>
@@ -283,15 +283,20 @@ SCREEN.lgrecv=(c)=>{
     
     c.querySelector('#iq').onkeyup=e=>{if(e.key==='Enter')render();};
     c.querySelector('#reset').onclick=()=>{metric='amt';mkt='';c.querySelector('#iq').value='';render();};
-    // ── 리시빙파일 업로드(GR Status → nx.SA_T_LG_RECEIVING_DTL). 파싱 미리보기 → 확정. ──
-    const uplf=c.querySelector('#uplf');
-    c.querySelector('#upl').onclick=()=>{uplf.value='';uplf.click();};
-    uplf.onchange=async()=>{const f=uplf.files&&uplf.files[0];if(!f)return;
+    // ── 리시빙파일 업로드(GR Status → nx.SA_T_LG_RECEIVING_DTL). 드래그&드롭/클릭 → 파싱 미리보기 → 확정. ──
+    const uplf=c.querySelector('#uplf'), dz=c.querySelector('#upl');
+    const startUpload=async(f)=>{if(!f)return;
       let j;try{const fd=new FormData();fd.append('file',f);
         const r=await fetch(`${API}/api/lgrecv/parse`,{method:'POST',body:fd});
         j=await r.json();if(!r.ok)throw new Error((j&&j.detail)||('HTTP '+r.status));}
       catch(e){alert('파싱 실패: '+(e.message||e));return;}
       openUploadModal(f,j);};
+    dz.onclick=()=>{uplf.value='';uplf.click();};
+    uplf.onchange=()=>{const f=uplf.files&&uplf.files[0];if(f)startUpload(f);};
+    dz.ondragover=e=>{e.preventDefault();dz.style.background='#d5f0de';dz.style.borderColor='#0f5d29';};
+    dz.ondragleave=()=>{dz.style.background='#eaf7ef';dz.style.borderColor='#1c7c3a';};
+    dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';dz.style.borderColor='#1c7c3a';
+      const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f)startUpload(f);};
     const openUploadModal=(file,j)=>{
       const ov=document.createElement('div');ov.className='ovl';
       ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1200;display:flex;align-items:center;justify-content:center';
