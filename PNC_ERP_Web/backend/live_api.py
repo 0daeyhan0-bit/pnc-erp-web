@@ -1222,7 +1222,7 @@ def lgrecv(ym: str = Query(""), fr: str = Query(""), to: str = Query("")):
     _c1, cells = _rows(f"""
 SELECT a.item_code item, ISNULL(a.mkt,'') mkt, a.receiving_ymd d,
   SUM(a.recv_qty) q, SUM(a.recv_amt) amt
-FROM sa_t_lg_receiving_dtl a
+FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL a  -- ★컷오버 flip 대상(→nx). 업로드=nx 쓰기(routers/lgrecv.py)
 WHERE a.receiving_ymd BETWEEN '{fr6}' AND '{to6}'
 GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
@@ -1231,7 +1231,7 @@ SELECT m.item_code item,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc
 FROM PARTNER_ERP_TEST3.nx.item m
-WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
+WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
     return {"fr": fr6, "to": to6, "ym": fr6[:4], "cells": cells, "items": items}
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
