@@ -902,7 +902,12 @@ def _prodinout(ym, frm=None, to=None, src="nx", inc_zero=False):
         """라이브 ∪ nx — nx 행 중 라이브에 같은 키가 없는 것만 얹는다."""
         if _live:
             return "PARTNER_ERP.dbo." + tbl
-        on = " AND ".join(f"ISNULL(l.{k},'')=ISNULL(n.{k},'')" for k in keys)
+        # ★키 비교는 문자 캐스팅으로(2026-09-02 실측 버그). `ISNULL(수량,'')` 은
+        #   decimal 에 빈 문자열을 넣는 꼴이라 8114(varchar→numeric) 로 쿼리가 죽고
+        #   화면이 조회 0건이 된다. common._u_tbl 과 같은 처리.
+        on = " AND ".join(
+            f"ISNULL(CAST(l.{k} AS varchar(50)),'')=ISNULL(CAST(n.{k} AS varchar(50)),'')"
+            for k in keys)
         return (f"(SELECT * FROM PARTNER_ERP_TEST3.nx.{tbl} UNION ALL SELECT n.* FROM PARTNER_ERP_TEST3.nx.{tbl} n"
                 f" WHERE NOT EXISTS(SELECT 1 FROM PARTNER_ERP_TEST3.nx.{tbl} l WHERE {on}))")
 
