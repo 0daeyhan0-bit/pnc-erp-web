@@ -29,11 +29,51 @@
    - ⟹ **지금 짜는 코드가 컷오버 후 그대로 돌아야 한다.** "그때 가서 바꾸자"는 없다.
      미러를 읽고 있으면 그건 **컷오버에 죽는 코드**다. 클린 단일 소스로 지금 짠다.
    - 유일 소스표·경위 = `_schema/DO_NOT_USE_FIELDS.md` §18.
-     단가=`nx.price_item`(사급가·LG판가)/`nx.price_metal`(원소재) · 품목=`nx.item` · BOM=`nx.bom` · 재고=단일원장/확정스냅샷.
+     단가=`nx.price_item`(사급가·LG판가)/`nx.price_metal`(원소재) · 품목=`nx.item` · **BOM=`nx.bom_header`+`nx.bom_line`** · 재고=단일원장/확정스냅샷.
+
+9-2. **★★★`nx.bom` 사용 금지 — 은퇴 대상(대표 확정 2026-09-03).**
+   - **`nx.bom` 과 `nx.bom_line` 은 이름만 비슷할 뿐 출처가 다른 별개 계보다.**
+     | 테이블 | 출처 | 지위 |
+     |---|---|---|
+     | **`nx.bom_header`+`nx.bom_line`** | 라이브 `PR_M_ITEM_BOM`/`CS_M_ITEM_BOM` | **★정본 — 편성·소요·원가 전부 이것을 읽는다** |
+     | `nx.bom` (`parent_code`·`child_code`·`bulk_valid_from`) | **LG PU-SCS 다운로드**(`nx.lg_bom` 파생) | **과거 데이터. 신규 사용 금지** |
+   - `nx.bom` 은 **2026-07-27/08-14 스냅샷에서 멈춘 과거본**이고, 적재 스크립트조차 scratchpad 에 있다 유실됐다.
+     `bulk_valid_from` 은 LG 다운로드 일자이지 PR_M_ITEM_BOM 동기화 일자가 **아니다**.
+   - ⟹ **신규·수정 코드는 `nx.bom` 을 읽지 않는다.** BOM 이 필요하면 `nx.bom_line`+`nx.bom_header`
+     (또는 뷰 `nx.v_pr_bom`), 소요/원가는 §1-10대로 **엔진 호출**.
+   - **왜 금지인가 = 실제로 계속 사고를 냈다**
+     · `backflush.py` L135 — nx.bom 트리가 bom_line에만 있는 SUB의 봉을 놓침(**실측 704/2697품목·7.79kg 누락**)
+     · `close.py` L1082 · `_migration/resnap_prd_sal.py` L5 — 필터는 `nx.bom` 인데 엔진은 `nx.bom_header` → 교정
+     · 2026-09-03 계획 대사 — `nx.bom` 으로 드리프트를 재 "일치율 47.6%" 라는 **무의미한 수치**를 냈다
+       (정본 `nx.bom_line` 으로 재니 87.9%·계획기간 90.5%). 비교 축이 틀리면 결론 전체가 틀린다.
+   - **조회 시 주의:** `bom_line` 에는 부모 컬럼이 없다 — `bom_id` 로 `bom_header` 를 조인해야
+     부모(`h.item_code`)가 나온다. 조인 없이 `child_item` 만 보면 "부모가 자기 자신"으로 오독한다(실제 오독 이력).
+   - **잔존 직독(은퇴 예정, 신규 추가 금지)**: `backflush.py` L169·L206·L251(원소재 중량축·최종제품 판정 —
+     용접봉/용접링은 이미 bom_line 으로 우회 완료) · `item.py` L233 품번변경 연쇄 · `_migration/*`(일회성).
+     전환은 **옆에 짓고 diff0 확인 후 교체**(재고 소비량이 바뀔 수 있음).
+   - 백업 = `nx.bk_bom_retire_260903_1656`(40,620행). 원본 `nx.bom` 은 잔존 직독 전환 전까지 유지.
+
+9-3. **★★★마스터 sync 는 "레거시 대사(분석)" 전용이다 — 운영 방식이 아니다** (대표 확정 2026-09-03).
+   - **레거시가 BOM 을 계속 바꾸므로 웹이 실시간으로 따라갈 수는 없다.** 그건 당연하고, 목표도 아니다.
+     지금 돌리는 마스터 동기화(BOM 링크·except_flag·품목속성·공정마스터)의 목적은 단 하나 —
+     **"레거시와 같은 입력을 주면 같은 계획이 나오는가"** 를 검증하기 위해 대사 직전에 두 쪽을 맞추는 것.
+   - **컷오버 후에는 sync 자체가 없다**(§1-9-1). 레거시가 은퇴하면 맞출 대상이 사라진다.
+     BOM·품목·공정의 **등록·수정·삭제는 웹에서 직접** 한다. 입력 경로가 웹 하나뿐이므로
+     아래 4종 결함은 **구조적으로 발생하지 않는다**.
+   - ⟹ **sync 를 정교하게 만드는 방향은 틀렸다.** 올바른 방향 =
+     **웹의 BOM/품목/공정 등록·수정·삭제 기능을 완성**하는 것.
+   - **편성 전 사전점검 = `_schema/precheck_compose.py`**(2026-09-03 신설, 순수 조회·쓰기 없음).
+     편성을 돌리기 **전에** 걸릴 것을 한 번에 전수 검출한다 — ①BOM 링크 ②except_flag
+     ③품목마스터(누락·속성빈값) ④공정마스터 ⑤유령 ASSY. 항목마다 고칠 명령을 함께 출력한다.
+   - **왜 만들었나(2026-09-02~03 실측)**: 같은 패턴을 **네 번** 반복했다 —
+     BOM링크 고침 → 편성 → 대사 → 품목속성 발견 → 편성 → 대사 → 공정마스터 발견 → 편성 → 대사
+     → except_flag 발견 → 편성. **매번 편성을 돌린 뒤에야 다음 결함이 드러나** 왕복이 4회 났다.
+     결함 종류는 4가지뿐인데 점검 도구가 흩어져 한 번에 볼 수가 없었던 것이 원인.
+     ⟹ **대사 전에는 반드시 `precheck_compose.py` 로 ✅ 를 확인하고 편성한다.**
 
 10. **★소요는 통일 소요엔진으로만(사용자 하드룰 2026-08-29).** BOM 소요/전개 계산은 **검증된 소요 엔진**으로만 = ①**우리 BOM** `_harness/nx_soyo_engine.py` walker(material·prod_soyo·**sagub_parts_soyo**·weight_explode 등)·`NxCostEngine`·자재소요 `nx.plan_part_mat`·동중량 `nx.bom_flat` ②**LG BOM(별도 엔진)** `_harness/nx_lgbom_engine.py`(lg_ap_all·lg_ap_split, LG Assembly Pull 롤업). **직접(ad-hoc) BOM 재귀·CTE로 소요 재현 금지**(`CS_M_ITEM_BOM`/`nx.bom_line`/`nx.lg_bom`/`v_pr_bom` 직접전개 금지). 이유=BOM 변형SUB 평탄화 함정을 ad-hoc가 이중계상(실측: lgsagub `_explode_parts`가 EBF64570401 2배). 엔진 한곳 고치면 전 프로그램 동시정확. **소요 엔진 안 쓰는 프로그램이 없어야 함.** 위반=엔진 마이그레이션(옆에짓고 diff0). **★규칙 정본·엔진 API·우회 인벤토리·정확도 주의 = `_schema/SOYO_ENGINE_RULE.md`(필독).** 상세 [[feedback-soyo-engine-only]]. §1-9의 강화.
    - **현재상태(2026-08-29 확인)**: item 통합됨(leaf=`nx.item`, item_weight≡PR_M_ITEM 불일치0 — 엔진 PR_M_ITEM 직독은 nx.item으로 리포인트 완료·전수 diff0) · proc_weld 분리됨(용접=공정 `nx.proc_weld`, BOM 재귀로 용접 계산 금지) · except_flag=BOM 전개제외 역할은 유효(생산처 라우팅만 `nx.routing_edge`로 이관).
-   - **★정확도 주의: "레거시와 diff0"≠"정답".** 현 엔진은 `nx.bom_line` 미러 부채(변형SUB 평탄화)를 상속하나, 라이브 출력은 필터(cs_calc_except·except_flag·dedup)로 정확 유지 확인(생산계획 54 2배=중복엣지+stale·원가 diff0, 변형SUB 대수술 불요). 근본 클린화=엔진 전개소스 nx.bom(추후·유지보수).
+   - **★정확도 주의: "레거시와 diff0"≠"정답".** 현 엔진은 `nx.bom_line` 미러 부채(변형SUB 평탄화)를 상속하나, 라이브 출력은 필터(cs_calc_except·except_flag·dedup)로 정확 유지 확인(생산계획 54 2배=중복엣지+stale·원가 diff0, 변형SUB 대수술 불요). 근본 클린화=`nx.bom_line` 의 변형SUB 정규화(추후·유지보수). ~~nx.bom 전환~~ = **폐기**(§1-9-2 은퇴 대상, 과거 스냅샷).
 
 ---
 

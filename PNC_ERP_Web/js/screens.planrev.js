@@ -22,6 +22,8 @@ SCREEN.planuploadrev=(c)=>{
   // line·sched 는 화면에서 뺐지만(불필요) 서버 파라미터는 빈값으로 유지 — /api/plan/list 무변경
   let F={from:iso(T),to:iso(new Date(T.getTime()+30*864e5)),line:'',sched:'',wo:'',model:'',cr:''};
   let data={dates:[],rows:[],wo_count:0,sum_qty:0,__init:1}, loading=false, msg='', upcr='C', upfile=null;
+  // ★제번 합치기 — 레거시와 같게 기본 ON. 끄면 종전처럼 엑셀 날짜칸대로 쪼개 올린다.
+  let upmerge=true;
 
   // ── 진행 팝업 (레거시 w_progress 재현) ───────────────────────────────────
   //   레거시: 「생산계획UPLOAD 오류체크 중…1236/4193 / 잠시만 기다려 주십시요…」 + 진행바 2줄
@@ -196,27 +198,84 @@ SCREEN.planuploadrev=(c)=>{
     // 예상시간 = 각 단계 과거 소요의 합(없으면 0 → 흐르는 바)
     const estAll=['M','H','L','K','T'].reduce((a,c)=>a+estOf(c),0);
     pgOpen('생산계획 일괄작업 진행 중', estAll);
-    // ★일괄은 단계별 확인창을 띄우지 않는다(레거시 동일). 대신 팝업 문구로 현재 단계를 알린다.
-    //   서버가 한 요청으로 처리하므로 실제 단계 전환은 job/status 폴링으로 감지한다.
-    let poll=setInterval(async()=>{
-      try{const q=await fetch(`${API}/api/planrev/job/status`);const st=(await q.json()).steps||{};
-        const cur=['T','K','L','H','M'].find(c=>st[c]&&st[c].status==='OK'&&st[c].ok_dt);
-        const nextNm={M:'② 생산계획이력생성',H:'③ 라인별 투입시간조정',L:'④ 파트별 계획생성',
-                      K:'⑤ 자재소요·조달 편성'}[cur];
-        if(nextNm)pgText('일괄작업 — '+nextNm+' 진행 중');
-      }catch(e){}
-    },5000);
-    try{
-      const r=await fetch(`${API}/api/planrev/compose_all`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({by:(typeof PERM!=='undefined'&&PERM.userId)?PERM.userId:'web'})});
-      const j=await r.json();
-      clearInterval(poll); pgClose();
-      if(!r.ok) alert('❌ 일괄작업 중단\n\n'+(j.detail||JSON.stringify(j)));
-      else alert(`생산계획 일괄작업을 완료했습니다.\n\n`
-        +(j.steps||[]).map(s=>`  ${s.name}   ${s.done_hms}   ${pgHms(s.elapsed)}`).join('\n')
-        +`\n\n품목 ${nf(j.item_lines)} · 파트 ${nf(j.part_lines)} · 자재 ${nf(j.mat_lines)} · 조달 ${nf(j.sourcing_lines)}`
-        +`\n총 소요 ${pgHms(j.elapsed)}`);
-    }catch(e){clearInterval(poll);pgClose();alert('❌ 일괄작업 실패: '+e);}
+
+    /* ★응답을 기다리지 않고 job/status 폴링으로 완료를 판정한다 (2026-09-04).
+         왜 — 일괄작업은 **항상 2분을 넘는다**(실측 129~137초, 8회 전부).
+         운영은 리버스프록시를 거치는데 프록시 read timeout(≈120초)이 먼저 끊어
+         nginx 504 **HTML** 이 돌아왔고, r.json() 이 그걸 파싱하다 터졌다:
+           "SyntaxError: Unexpected token '<', "<!DOCTYPE"... is not valid JSON"
+         서버는 정상 완료(Z status=OK)였는데 화면만 실패로 보였고,
+         사용자가 실패로 알고 **다시 돌리는** 2차 피해가 있었다.
+         (로컬 8011 직결은 프록시가 없어 재현되지 않는다 — 그래서 개발에선 안 보였다.)
+       ⟹ POST 는 띄워만 두고(fire), 완료 판정은 **Z(일괄) 기록이 새로 생겼는지**로 한다.
+          프록시가 중간에 끊어도 서버 작업은 계속 돌고 화면은 정상 완료로 마무리된다.
+       ※근본 해결은 프록시 timeout 상향(proxy_read_timeout 600s)이다. 이건 그 전까지의
+         방어이자, 설정을 못 바꾸는 환경에서도 동작하게 하는 장치다. */
+    const t0=Date.now();
+    const jobStatus=async()=>{
+      const q=await fetch(`${API}/api/planrev/job/status`);
+      return await q.json();
+    };
+    // 시작 전 상태를 기억 — Z 시각이 바뀌면 이번 실행이 끝난 것.
+    //   ※단계별 시각도 함께 기억한다. job/status 는 코드별 '마지막' 기록만 주므로
+    //     **지난 실행의 오래된 FAIL** 을 이번 실패로 오인하지 않으려면 시각 비교가 필요하다.
+    let zBefore='', before={};
+    try{ const s0=(await jobStatus()).steps||{};
+      zBefore=(s0.Z&&s0.Z.ok_dt)||'';
+      Object.keys(s0).forEach(c=>{ before[c]=(s0[c]&&(s0[c].ok_dt||s0[c].hms))||''; });
+    }catch(e){}
+
+    /* POST 는 띄워만 두고 응답을 기다리지 않는다.
+       서버가 409(다른 편성 실행 중) 같은 **즉시 거절**을 주면 그건 알려야 하므로 그것만 잡는다.
+       그 외(프록시 절단·타임아웃)는 서버가 계속 도는 중이므로 폴링에 맡긴다. */
+    let reject='';
+    fetch(`${API}/api/planrev/compose_all`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({by:(typeof PERM!=='undefined'&&PERM.userId)?PERM.userId:'web'})})
+      .then(async r=>{
+        if(r.ok) return;
+        // JSON 이면 서버가 준 거절(409 등) — HTML(프록시 오류)이면 무시하고 폴링 계속
+        const ct=(r.headers.get('content-type')||'');
+        if(ct.indexOf('json')>=0){ try{ const j=await r.json(); reject=j.detail||('HTTP '+r.status); }catch(_){ } }
+      })
+      .catch(()=>{ /* 프록시가 끊었을 뿐 서버는 계속 돈다 */ });
+
+    const STEP_NM={M:'② 생산계획이력생성',H:'③ 라인별 투입시간조정',L:'④ 파트별 계획생성',
+                   K:'⑤ 자재소요·조달 편성'};
+    let fin=null, stop=false;
+    while(!stop){
+      await new Promise(s=>setTimeout(s,5000));
+      // 서버가 즉시 거절한 경우(409 등) — 작업이 시작도 안 됐으니 여기서 끝낸다
+      if(reject){ pgClose(); alert('❌ 일괄작업 시작 실패\n\n'+reject); stop=true; break; }
+      let st={};
+      try{ st=(await jobStatus()).steps||{}; }catch(e){ continue; }   // 일시적 네트워크 오류는 무시
+      // 완료 판정 — Z 가 새로 기록됐나
+      const z=st.Z;
+      if(z && z.ok_dt && z.ok_dt!==zBefore){ fin=z; stop=true; break; }
+      // 중간 실패 — **이번 실행에서** 새로 생긴 FAIL 만 잡는다(지난 실행의 잔여 FAIL 무시)
+      const bad=Object.keys(st).find(c=>{
+        const x=st[c]; if(!x||!x.status||x.status==='OK') return false;
+        const now=(x.ok_dt||x.hms)||'';
+        return now && now!==(before[c]||'');
+      });
+      if(bad){ pgClose();
+        alert('❌ 일괄작업 중단\n\n'+(st[bad].name||bad)+'\n'+(st[bad].err||'')); stop=true; break; }
+      // 진행 표시
+      const cur=['T','K','L','H','M'].find(c=>st[c]&&st[c].status==='OK'&&st[c].ok_dt);
+      if(STEP_NM[cur]) pgText('일괄작업 — '+STEP_NM[cur]+' 진행 중');
+      // 안전장치 — 20분을 넘기면 폴링을 멈춘다(무한 대기 방지)
+      if(Date.now()-t0>20*60*1000){ pgClose();
+        alert('일괄작업이 20분을 넘겨 화면 대기를 종료합니다.\n'
+             +'서버에서는 계속 진행 중일 수 있습니다 — 단계별 완료시각을 확인해 주세요.');
+        stop=true; break; }
+    }
+    if(fin){ pgClose();
+      const s=await jobStatus().catch(()=>({}));
+      const S=s.steps||{};
+      const line=c=>S[c]?`  ${S[c].name}   ${S[c].hms||''}   ${pgHms(S[c].elapsed||0)}`:'';
+      alert('생산계획 일괄작업을 완료했습니다.\n\n'
+        +['M','H','L','K','L2','H2','T'].map(line).filter(Boolean).join('\n')
+        +`\n\n총 소요 ${pgHms(fin.elapsed||0)}`);
+    }
     running=''; await loadJobs(); draw();
   };
 
@@ -227,8 +286,14 @@ SCREEN.planuploadrev=(c)=>{
     // ★fname 을 함께 보낸다 — 서버가 `lg_xxx_MMDD` 날짜와 파일 안 일자축을 대조한다.
     //   불일치면 **저장 전에 409** 로 막고, 사용자가 확인하면 force 로 다시 보낸다
     //   (2026-09-01. 경고만 띄우면 이미 덮어쓴 뒤라 직전 계획이 사라진다).
+    /* ★제번 합치기(merge) — 레거시 w_pr_plan_020 과 같은 처리(2026-09-03 신설).
+         레거시는 업로드 때 한 제번을 **한 행(최소일)** 으로 합치고 수량을 더한다.
+         웹은 엑셀 날짜칸대로 쪼개 두어 185제번이 여러 일자로 흩어져 있었다
+         (실측: 웹 4,392행 → 합치면 4,203행 = 레거시와 정확히 동일, 수량차 0).
+       ★체크박스로 켜고 끈다 — 기본 ON(레거시와 같게).
+         끄면 종전처럼 쪼개진 채 올라간다. 합치기 전 원본은 서버가 백업한다. */
     const _post=(force)=>fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force})});
+      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force,merge:upmerge})});
     try{let r=await _post(false); let j=await r.json();
       if(r.status===409){
         pgClose();
@@ -240,7 +305,12 @@ SCREEN.planuploadrev=(c)=>{
       pgClose();
       if(j.ok){
         alert(`생산계획 UPLOAD 작업을 완료했습니다.${j.forced?'  (날짜 경고 무시)':''}\n\nUPLOAD 건수=${nf(j.total)}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} (구분 ${j.cr})`
-          +(j.axis_from?`\n계획 시작일 ${String(j.axis_from).slice(2,4)}/${String(j.axis_from).slice(4,6)}`:''));
+          +(j.axis_from?`\n계획 시작일 ${String(j.axis_from).slice(2,4)}/${String(j.axis_from).slice(4,6)}`:'')
+          // ★제번 합치기 결과 — 몇 행이 몇 행으로 줄었는지, 원복용 백업이 어디인지 알린다
+          +(j.merged?`\n\n[제번 합치기] ${nf(j.merged_wo)}개 제번을 합침`
+                     +`\n  ${nf(j.rows_before)}행 → ${nf(j.rows_after)}행`
+                     +(j.backup?`\n  원본 백업: ${j.backup}`:'')
+                   :`\n\n[제번 합치기] 사용 안 함(엑셀 날짜칸 그대로)`));
         // ★input.value 를 비워야 같은 파일 재선택 시에도 onchange 가 다시 뜬다(자동업로드 전제).
         upfile=null;const _fi=c.querySelector('#p-file');if(_fi)_fi.value='';
         // ★그리드 자동조회 안 함(2026-08-26 요청) — 조회는 [🔍 조회] 버튼을 누를 때만.
@@ -273,6 +343,9 @@ SCREEN.planuploadrev=(c)=>{
        <label class="tl">업로드</label><select class="inp" id="p-upcr"><option value="C"${upcr==='C'?' selected':''}>C(SAC)</option><option value="R"${upcr==='R'?' selected':''}>R(RAC)</option></select>
        <input type="file" id="p-file" accept=".xls,.xlsx" style="width:190px" title="파일명에 sac/rac 가 있으면 구분이 자동 선택됩니다">
        <button class="btn" id="p-upload" style="background:#1c47a0;color:#fff"${running?' disabled':''}>📅 생산계획UPLOAD</button>
+       <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap"
+              title="레거시와 같게 한 제번을 한 행(가장 빠른 계획일)으로 합치고 수량을 더합니다.&#10;끄면 엑셀 날짜칸대로 쪼개져 올라갑니다(종전 방식).">
+         <input type="checkbox" id="p-merge"${upmerge?' checked':''}> 제번 합치기</label>
        ${srcBox()}
        <div class="spacer"></div>
        <span class="rowcount" style="font-size:11px">계획원본 <b>${nf(planRows)}</b>행</span>
@@ -317,6 +390,7 @@ SCREEN.planuploadrev=(c)=>{
     const pf=g('#p-from'); if(pf)pf.onchange=async e=>{F.from=e.target.value;await loadJobs();draw();};
     if(canW){
       const uc=g('#p-upcr'); if(uc)uc.onchange=e=>upcr=e.target.value;
+      const um=g('#p-merge'); if(um)um.onchange=e=>upmerge=e.target.checked;
       const uf=g('#p-file'); if(uf)uf.onchange=e=>{
         upfile=e.target.files[0]||null;
         if(!upfile)return;

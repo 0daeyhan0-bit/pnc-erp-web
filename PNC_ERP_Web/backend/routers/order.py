@@ -259,6 +259,53 @@ def plan_upload(payload: dict = Body(...)):
             TOOL varchar(40),FROM_SEQ varchar(20),TO_SEQ varchar(20),CR_FLAG varchar(1))""")
         cur.fast_executemany = True
         cur.executemany("INSERT INTO #p VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", recs)
+
+        # ★제번 합치기 (2026-09-03 신설 — 레거시 w_pr_plan_020 동일) ─────────────
+        #   레거시는 엑셀 업로드 때 **한 제번을 한 행으로 합친다**.
+        #     update pr_t_plan_dtl set plan_qty = a.plan_qty + b.plan_qty
+        #       from pr_t_plan_dtl a join pr_t_plan_dtl_upload b ...
+        #   웹은 이걸 안 해서 엑셀의 날짜 칸대로 제번이 흩어져 있었다.
+        #     실측 2026-09-03 (260903~261002):
+        #       제번수     웹 4,203 = 레거 4,203   (완전 일치)
+        #       제번별총량 차이 0건                  (수량은 맞다)
+        #       일자분포   웹 1일=4,018·2일=181·3일=4  /  레거 **1일=4,203 전부**
+        #       예) 6J1M0BQN 웹 260910:15+260911:54+260914:71 → 레거 260909:140
+        #   ⟹ 계획은 같은데 **배치만 쪼개져 있었다.**
+        # ★남기는 일자 = **최소일**. 근거: 레거시 ORG_PLAN_YMD(당김 전 원본) = 웹 MIN(PLAN_YMD).
+        #   레거 PLAN_YMD 가 그보다 앞선 건 합친 뒤 **당김 계산**이 돌아서다
+        #   (당김 없는 902건은 ORG=PLAN 동일 — 4,203 중 902가 정확히 그 수).
+        # ⚠★기본 OFF (merge=true 를 명시해야 합친다) — 2026-09-03 사용자 지적:
+        #   "파트별 생산계획은 계속 일치했고 자재가 문제였다".
+        #   합치기는 계획 배치를 바꾸므로 **이미 맞던 파트별을 깨뜨릴 수 있다.**
+        #   반드시 켜서 올린 뒤 ④파트별이 여전히 차0 인지 확인하고, 깨지면 되돌린다.
+        # ★원복 — 합치기 직전 원본을 nx.bk_plandtl_raw_<CR>_<시각> 에 백업한다.
+        #   되돌리려면 merge 없이 같은 파일을 다시 올리면 된다(full-replace 구조).
+        do_merge = bool(payload.get("merge"))
+        merged_n = 0; merge_bk = ""
+        if do_merge:
+            import datetime as _dt
+            merge_bk = f"nx.bk_plandtl_raw_{cr}_{_dt.datetime.now():%y%m%d_%H%M%S}"
+            cur.execute(f"SELECT * INTO {merge_bk} FROM #p")   # ★합치기 전 원본 보존
+            cur.execute("""SELECT COUNT(*) FROM (SELECT WORK_ORDER FROM #p
+                            GROUP BY WORK_ORDER HAVING COUNT(DISTINCT PLAN_YMD)>1) x""")
+            merged_n = cur.fetchone()[0]
+            # 제번별 최소일로 몰아넣고 수량 합산. 나머지 값은 그 최소일 행의 것을 쓴다
+            # (레거시도 '처음 행'의 model/line/hm 을 유지한다 — f_set_addnumber 는 수량만 더한다).
+            cur.execute("""
+                IF OBJECT_ID('tempdb..#pm') IS NOT NULL DROP TABLE #pm;
+                WITH mn AS (SELECT WORK_ORDER, MIN(PLAN_YMD) mnp FROM #p GROUP BY WORK_ORDER),
+                     hd AS (SELECT p.*, ROW_NUMBER() OVER(PARTITION BY p.WORK_ORDER
+                                       ORDER BY p.PLAN_YMD, p.LINE_NO) rn
+                              FROM #p p JOIN mn ON mn.WORK_ORDER=p.WORK_ORDER AND mn.mnp=p.PLAN_YMD),
+                     sq AS (SELECT WORK_ORDER, SUM(PLAN_QTY) q FROM #p GROUP BY WORK_ORDER)
+                SELECT hd.PLAN_YMD, hd.WORK_ORDER, hd.MODEL_NO, hd.BUYER_MODEL, hd.LINE_NO,
+                       hd.SCHED_GROUP, sq.q PLAN_QTY, hd.TOTAL_QTY, hd.REMAIN_QTY, hd.START_HM,
+                       hd.TOOL, hd.FROM_SEQ, hd.TO_SEQ, hd.CR_FLAG
+                  INTO #pm
+                  FROM hd JOIN sq ON sq.WORK_ORDER=hd.WORK_ORDER
+                 WHERE hd.rn=1;
+                TRUNCATE TABLE #p;
+                INSERT INTO #p SELECT * FROM #pm;""")
         # 레거시 STEP0: "cr별 삭제 후 재적재"(full replace). 업로드 파일 = 해당 CR의 완전한 현재 계획.
         # ★해당 CR 전체 삭제(과거일자 포함) → 재적재. 계획일자 이동/재업로드 시 stale행 누적(2배)·
         #   과거일자 잔재(compose_mat 부풀림) 방지. 과거 이력은 별도 _daily 백업 대상(현 미구현).
@@ -283,9 +330,14 @@ def plan_upload(payload: dict = Body(...)):
                 cur.execute("INSERT INTO nx.plan_upload_axis(cr_flag,axis_from) VALUES(?,?)", cr, axis_from)
         # full-replace(cr별): 기존 upd행 삭제 후 recs행 재적재
         #   ※날짜 대조는 이 위(저장 전)에서 이미 끝났다 — 여기 오면 통과했거나 force 다.
-        return {"ok": True, "inserted": len(recs), "replaced": upd, "total": len(recs), "cr": cr,
+        # ★합치기를 했으면 실제 저장행이 recs 보다 적다 — 저장된 수를 그대로 센다
+        saved = cur.execute("SELECT COUNT(*) FROM nx.plan_dtl WHERE CR_FLAG=?", cr).fetchone()[0]
+        return {"ok": True, "inserted": saved, "replaced": upd, "total": len(recs), "cr": cr,
                 "from_ymd": fmin, "axis_from": axis_from,
-                "forced": bool(payload.get("force"))}
+                "forced": bool(payload.get("force")),
+                # 제번 합치기 결과 — merged_wo=여러 일자에 걸쳐 있던 제번 수, backup=원복용 테이블
+                "merged": bool(do_merge), "merged_wo": merged_n, "backup": merge_bk,
+                "rows_before": len(recs), "rows_after": saved}
     finally:
         nx.close()
 

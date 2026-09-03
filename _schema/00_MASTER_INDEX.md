@@ -9,17 +9,21 @@
 
 ## §0. ★★★ 데이터 소스 선택 하드룰 (신규·수정 프로그램 착수 시 필수 — 위반이 반복사고)
 
-> **왜 이 규칙**: nx 테이블은 설계상 두 갈래 — **(a) 레거시 미러**(라이브 dbo 복제, 매일 sync가 덮음: `PR_M_ITEM`·`CM_M_CUST`·`bom_line`·`PR_M_ITEM_COST`·`PU_T_STOCK_MAINT` 등) / **(b) 재구축 클린**(`nx.item`·`nx.partner`·`nx.bom`·`nx.lg_bom`·`nx.price_*`·단일원장). 프로그램마다 어느 쪽을 읽는지 갈려서 값이 드리프트하고, **컷오버 때 미러 직독 코드는 전부 수정 대상**이 된다. 상세 현황=`MIRROR_CLEAN_DUAL_TABLE_AUDIT.md`.
+> **왜 이 규칙**: nx 테이블은 설계상 두 갈래 — **(a) 레거시 미러**(라이브 dbo 복제, 매일 sync가 덮음: `PR_M_ITEM`·`CM_M_CUST`·`PR_M_ITEM_COST`·`PU_T_STOCK_MAINT` 등) / **(b) 재구축 클린**(`nx.item`·`nx.partner`·`nx.lg_bom`·`nx.price_*`·단일원장). 프로그램마다 어느 쪽을 읽는지 갈려서 값이 드리프트하고, **컷오버 때 미러 직독 코드는 전부 수정 대상**이 된다. 상세 현황=`MIRROR_CLEAN_DUAL_TABLE_AUDIT.md`.
+>
+> **★★★BOM 은 이 두 갈래 구도에 넣지 말 것(2026-09-03 교정).** `nx.bom` 은 클린본이 아니라 **LG PU-SCS 다운로드 스냅샷**(20260727 에서 멈춤·적재 스크립트 유실)이고, **`nx.bom_header`+`nx.bom_line` 이 BOM 정본**이다 — 편성(`nx.v_pr_bom`)·소요엔진·원가엔진이 전부 이것을 읽는다. 과거 이 문서가 "BOM구조→nx.bom, bom_line=미러(직독금지)" 라고 **반대로** 적어 실제 오도 사고를 냈다(2026-09-03 계획 대사에서 nx.bom 으로 드리프트를 재 "47.6%" 라는 무의미한 수치 산출 → 정본 bom_line 은 87.9%). **`nx.bom` = 사용 금지·은퇴 대상** = `CLAUDE.md` §1-9-2 · `DO_NOT_USE_FIELDS.md` §19.
 
 **규칙 (예외는 §0-끝 하나뿐):**
-1. **조회·표시·마스터 읽기 = nx 클린만.** 품목→`nx.item`, 거래처→`nx.partner`, BOM구조→`nx.bom`(LG원본 필요시 `nx.lg_bom`), 단가→`nx.price_*`, 재고→단일원장/일마감. **미러 직독(SELECT … FROM nx.PR_M_ITEM/CM_M_CUST/bom_line/PR_M_ITEM_COST/PU_T_STOCK_MAINT) 신규 금지.**
+1. **조회·표시·마스터 읽기 = nx 클린만.** 품목→`nx.item`, 거래처→`nx.partner`, **BOM구조→`nx.bom_header`+`nx.bom_line`**(뷰 `nx.v_pr_bom`. LG원본이 필요한 경우만 `nx.lg_bom`. **`nx.bom` 금지**=§1-9-2 은퇴), 단가→`nx.price_*`, 재고→단일원장/일마감. **미러 직독(SELECT … FROM nx.PR_M_ITEM/CM_M_CUST/PR_M_ITEM_COST/PU_T_STOCK_MAINT) 신규 금지.**
 2. **계산값(원가·소요·중량)은 엔진 함수로만 얻는다.** `NxCostEngine`(원가) / `nx_soyo_engine`(소요·중량·copper_by_spec) **호출**. 미러를 직접 읽어 값을 재현하지 말 것. → 엔진이 내부적으로 diff0 위해 미러를 읽는 건 **캡슐화된 예외**이고, 신규 프로그램은 엔진만 부르면 클린이다.
 3. **한 화면/한 엔드포인트에서 미러+클린 혼독 금지.** (예: `PR_M_ITEM LEFT JOIN nx.item` = 값 갈림 위험. 과거 561 FAIL·SUB 접미사 누락의 원인.)
 4. **효과**: 이렇게 하면 컷오버 시 **엔진 2개(원가·소요)만** 클린으로 재지향하면 되고, 개별 프로그램은 안 고쳐도 된다. 미러 직독 신규는 그 자체가 컷오버 부채 증가.
 
 **유일한 예외**: 레거시 SP를 그대로 EXEC/재현해야 diff0가 되는 경우(pncind RO)만. 이때도 **명시 주석 + 이 §0 하단 표에 등록**(사유·해당 파일). 현재 등록된 예외: `nx_soyo_engine`/`nx_cost_engine` 내부의 `nx.PR_M_ITEM`(중량·in_cust)·`nx.bom_line`(구조) 직독 = diff0용, **엔진 내부에 캡슐화**(외부는 엔진 함수로만 접근).
 
-**착수 자문 1문장**: "내가 지금 미러(PR_M_ITEM/CM_M_CUST/bom_line/…)를 직접 SELECT하고 있나? 그렇다면 멈추고 nx.item/nx.partner/nx.bom 또는 엔진 함수로 바꾼다."
+**착수 자문 2문장**:
+① "내가 지금 미러(PR_M_ITEM/CM_M_CUST/PR_M_ITEM_COST/…)를 직접 SELECT하고 있나? 그렇다면 멈추고 nx.item/nx.partner 또는 엔진 함수로 바꾼다."
+② "**내가 지금 `nx.bom` 을 읽고 있나? 그렇다면 멈춘다** — 과거 스냅샷이다. BOM 은 `nx.bom_header`+`nx.bom_line`(뷰 `nx.v_pr_bom`), 계산값은 엔진."
 
 ---
 
@@ -109,7 +113,7 @@
 | ROUTE_DIMENSION_INVENTORY_PL_DESIGN | 08-12 | ◻⚠ | route차원 유효, faceless노드 폐기 |
 | BOM_EXPLOSION_RULES | 07-24 | ★ | 소요전개 8규칙. 규칙7(910)만 교정됨 |
 | R01_REBUILD_DESIGN | 08-12 | ⚠ | Phase R2 완료기록 유효, 저장본은 §9-5 재분류 |
-| NX_BOM_SCHEMA | 07-27 | ⚠ | lg_bom/nx.bom 적재만. set_profile 폐기 |
+| NX_BOM_SCHEMA | 07-27 | ⚠⚠ | **폐기** — lg_bom/`nx.bom` 적재 기록(스크립트 유실). `nx.bom`=은퇴 대상(§1-9-2). set_profile 폐기 |
 | BOM_MGMT_TASKS | 07-26 | ✓ | 일회성 작업지시(이력) |
 
 ### C-2. 원가/원가분석 (11)

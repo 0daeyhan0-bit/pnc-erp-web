@@ -2272,7 +2272,8 @@ SCREEN.planinput=(host)=>{
     if(ed){
       g('#pi-add').onclick=async()=>{ if(!st.lines.length)await loadLines();   // 라인 드롭다운 보장(로드 실패/레이스 방어)
         const _y0=ymd6(st.base);
-        st.bulk={plan_ymd:_y0,line_no:st.line||(st.lines[0]&&st.lines[0].code)||'',output_hm:'2100',prod_tag:'1',work_code:'',rows:blankRows(10,_y0)};render();};
+        // 행의 일자는 비워 둔다 — 상단 계획일자를 바꾸면 그 값이 그대로 반영된다(2026-09-03)
+        st.bulk={plan_ymd:_y0,line_no:st.line||(st.lines[0]&&st.lines[0].code)||'',output_hm:'2100',prod_tag:'1',work_code:'',rows:blankRows(10)};render();};
       g('#pi-del').onclick=()=>del();
       host.querySelectorAll('.pi-chk').forEach(ch=>ch.onclick=()=>{const i=+ch.dataset.idx;ch.checked?st.sel.add(i):st.sel.delete(i);});
       host.querySelectorAll('[data-edit]').forEach(td=>td.onclick=()=>editCell(+td.dataset.edit));
@@ -2302,7 +2303,13 @@ SCREEN.planinput=(host)=>{
          엑셀 날짜열을 붙여넣으면 덮어쓴다. 종전엔 전부 빈칸이라 매번 입력해야 했다.
        · 제번(work_order) = **입력칸 없음** — 저장할 때 백엔드가 자동채번한다
          (레거시 w_pr_plan_060 도 신규행 WORK-ORDER 칸이 비어 있고 저장 시 채워진다). */
-  const blankRows=(n,ymd)=>Array.from({length:n},()=>({plan_ymd:ymd||'',item_code:'',plan_qty:'',remarks:''}));
+  /* ★새 행의 계획일자는 **비워 둔다**(2026-09-03 교정).
+       종전엔 만들 때의 기본일자를 박아 넣었다. 그러면 사용자가 나중에 상단 계획일자를 바꿔도
+       이미 만들어진 행은 **옛 날짜를 그대로 들고 있어** 그 값으로 저장된다
+       (실제 증상: 9/5 로 고쳤는데 모달을 열 때의 당일 9/3 으로 저장됨).
+       비워 두면 저장 시 eff() 가 상단 기본일자를 쓰므로 늘 최신 값이 반영된다.
+       행마다 다른 날짜가 필요하면 그 행의 달력에서 직접 고르면 된다(그 값이 우선). */
+  const blankRows=(n)=>Array.from({length:n},()=>({plan_ymd:'',item_code:'',plan_qty:'',remarks:''}));
   // YYMMDD ↔ yyyy-mm-dd (달력 input 왕복용)
   const ymd2iso=s=>/^\d{6}$/.test(String(s||''))?`20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`:'';
   /* ★품번 오토컴플리트(2026-09-02) — 입력한 글자로 서버검색해 datalist 를 채운다.
@@ -2341,27 +2348,34 @@ SCREEN.planinput=(host)=>{
          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;font-size:12px">
            <!-- ★계획일자 = 네이티브 달력(UI표준 §3 "모든 일자 입력은 type=date").
                 내부포맷 YYMMDD 는 ymd6/iso 헬퍼로 왕복한다. 전 행이 이 일자로 편성된다. -->
-           <label class="tl">계획일자</label><input class="inp" type="date" id="pb-ymd" value="${esc(ymd2iso(b.plan_ymd))}" style="width:150px" title="이 일자로 전 행이 편성됩니다">
+           <label class="tl">계획일자</label><input class="inp" type="date" id="pb-ymd" value="${esc(ymd2iso(b.plan_ymd))}" style="width:150px" title="기본 계획일자 — 행에 일자가 비어 있으면 이 값으로 저장됩니다(행별 일자가 우선)">
            <label class="tl">라인</label><select class="inp" id="pb-line" style="width:${lineW()}">${lineOpts(b.line_no,false)}</select>
            <!-- ★산출시각 5ch 는 '2100'이 잘렸다 → 7ch (2026-09-02) -->
            <label class="tl">산출시각</label><input class="inp" id="pb-hm" value="${esc(b.output_hm)}" placeholder="HHMM" style="width:7ch;min-width:0;flex:none;text-align:center" autocomplete="off">
            <!-- ★생산구분(1양산)·공정은 기본값 고정이라 화면에서 뺐다(2026-09-02 사용자 요청).
                 값은 st.bulk 에 그대로 남아 저장 시 함께 전송된다. -->
          </div>
-         <div style="font-size:11px;color:#1c7c3a;margin-bottom:6px">💡 엑셀에서 <b>계획일자⇥품번⇥수량</b> (또는 품번만/품번⇥수량) 열을 복사해 아래 해당 칸에 <b>붙여넣기</b>하면 여러 행에 자동 분배됩니다. 계획일자는 <b>기본 계획일자</b>로 미리 채워지며 행마다 고칠 수 있습니다. <b>제번(WORK-ORDER)은 저장 시 자동 생성</b>됩니다.</div>
+         <div style="font-size:11px;color:#1c7c3a;margin-bottom:6px">💡 엑셀에서 <b>계획일자⇥품번⇥수량⇥비고</b> 열을 복사해 <b>계획일자 칸</b>에 붙여넣으면 여러 행에 자동 분배됩니다. (품번만 / 품번⇥수량 도 가능 — 그 경우 품번 칸에 붙여넣기)<br>
+           행별 <b>계획일자</b>는 달력으로 골라도 되고, <b>비우면 위의 기본 계획일자</b>로 저장됩니다. <b>제번(WORK-ORDER)은 저장 시 자동 생성</b>됩니다.</div>
          <div style="max-height:calc(100vh - 330px);overflow-y:auto;overflow-x:hidden;border:1px solid #d7dfea;border-radius:6px">
-           <!-- ★2026-09-02 행별 계획일자 열 제거(사용자 요청) — 상단 계획일자 하나로 전 행 편성.
-                정렬·폭 정리: 헤더 가운데(UI표준) · 계획수량 폭 확대 · 품번 오토컴플리트 -->
+           <!-- ★행별 계획일자 열 **복원**(2026-09-03 사용자 요청 — "계획일자도 선택 또는 붙여넣을 수 있게").
+                경위: 2026-09-02 에 열만 지웠는데 저장 로직(eff/base6)은 그대로 남아 있었다.
+                      그래서 행마다 다른 날짜로 편성할 방법이 없었다.
+                · 날짜칸은 UI표준 §3 대로 <input type="date">(달력 피커)
+                · 엑셀에서 「날짜⇥품번⇥수량」을 붙여넣으면 이 칸부터 자동 분배된다(pbPaste 의 fields 순서)
+                정렬·폭: 헤더 가운데(UI표준) · 품번 오토컴플리트 -->
            <table class="tbl" style="font-size:11px;width:100%;table-layout:fixed"><thead><tr>
              <!-- ★제번 열 제거(2026-08-31) — 저장 시 자동채번(WO+7자리연번+라인). 레거시 동일. -->
              <th style="width:34px;text-align:center">#</th>
+             <th style="width:132px;text-align:center">계획일자 <span style="color:#1c7c3a">(비우면 상단일자)</span></th>
              <th style="text-align:center">품번 <span style="color:#1c7c3a">(붙여넣기·검색)</span></th>
-             <th style="width:200px;text-align:center">품명</th>
-             <th style="width:110px;text-align:center">계획수량</th>
+             <th style="width:180px;text-align:center">품명</th>
+             <th style="width:100px;text-align:center">계획수량</th>
              <th style="text-align:center">비고</th>
              <th style="width:30px"></th></tr></thead>
            <tbody>${b.rows.map((r,i)=>`<tr>
              <td class="center" style="color:#8aa0bd">${i+1}</td>
+             <td><input class="inp pb-ymd" data-i="${i}" type="date" value="${esc(ymd2iso(r.plan_ymd))}" style="width:100%;min-width:0" title="비우면 상단 계획일자로 저장됩니다"></td>
              <td><input class="inp pb-item" data-i="${i}" value="${esc(r.item_code)}" list="pb-itemdl" style="width:100%;min-width:0" autocomplete="off" placeholder="품번 입력·검색"></td>
              <td class="pb-nm" data-i="${i}" style="color:#5b6b80;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.item_name||'')}">${esc(r.item_name||'')}</td>
              <td><input class="inp pb-qty" data-i="${i}" value="${esc(r.plan_qty)}" type="number" style="width:100%;min-width:0;text-align:right" autocomplete="off"></td>
@@ -2383,7 +2397,8 @@ SCREEN.planinput=(host)=>{
     while(lines.length&&lines[lines.length-1]==='')lines.pop();  // 꼬리 빈줄 제거
     lines.forEach((ln,k)=>{
       const cells=ln.split('\t'), ri=start+k;
-      while(b.rows.length<=ri)b.rows.push({plan_ymd:b.plan_ymd||'',item_code:'',plan_qty:'',remarks:''});
+      // 일자는 비워 둔다 — 붙여넣기 값이 있으면 아래에서 채워지고, 없으면 상단 기본일자가 쓰인다
+      while(b.rows.length<=ri)b.rows.push({plan_ymd:'',item_code:'',plan_qty:'',remarks:''});
       fields.forEach((f,ci)=>{
         if(ci>=cells.length)return;
         let v=(cells[ci]||'').trim(); if(v==='')return;
@@ -2395,13 +2410,32 @@ SCREEN.planinput=(host)=>{
   const wireBulk=()=>{ const g=id=>host.querySelector(id), b=st.bulk;
     g('#pb-x').onclick=g('#pb-cancel').onclick=()=>{st.bulk=null;render();};
     g('#pb-save').onclick=bulkSave;
-    // ★달력(type=date) → 내부포맷 YYMMDD 로 저장
-    g('#pb-ymd').onchange=e=>{b.plan_ymd=ymd6(e.target.value);};
+    /* ★달력(type=date) → 내부포맷 YYMMDD 로 저장.
+       ⚠oninput 도 함께 건다 — onchange 만 있으면 키보드로 직접 입력한 뒤
+         포커스를 잃지 않고 바로 [일괄저장]을 누를 때 값이 반영되지 않는다
+         (실제 증상: 9/5 로 고쳤는데 당일 9/3 으로 저장). */
+    { const e0=g('#pb-ymd');
+      if(e0){ e0.onchange=e0.oninput=e=>{b.plan_ymd=ymd6(e.target.value);}; } }
     g('#pb-line').onchange=e=>b.line_no=e.target.value;
     g('#pb-hm').oninput=e=>b.output_hm=e.target.value;
+    /* ★행별 계획일자 칸(2026-09-03 복원) — 달력 선택 + 엑셀 붙여넣기 둘 다 지원.
+         붙여넣기는 이 칸부터 [날짜⇥품번⇥수량⇥비고] 순으로 자동 분배된다. */
+    host.querySelectorAll('.pb-ymd').forEach(el=>{
+      el.onchange=el.oninput=e=>{
+        const i=+e.target.dataset.i;
+        b.rows[i].plan_ymd=ymd6(e.target.value);      // 빈 값이면 '' → 저장 시 상단일자 사용
+      };
+      el.onpaste=e=>{
+        const txt=(e.clipboardData||window.clipboardData).getData('text');
+        if(!/[\n\t]/.test(txt))return;                // 단일값이면 브라우저 기본 처리
+        e.preventDefault();
+        applyPaste(b, +e.target.dataset.i, txt, ['plan_ymd','item_code','plan_qty','remarks']);
+        render(); fillNames();
+      };
+    });
     // ★생산구분·공정 입력칸은 제거됨(기본값 고정) — 없는 노드에 핸들러를 걸면 죽는다.
     //   값은 st.bulk 에 남아 저장 시 그대로 전송된다.
-    g('#pb-addrow').onclick=()=>{b.rows=b.rows.concat(blankRows(5,b.plan_ymd));render();};
+    g('#pb-addrow').onclick=()=>{b.rows=b.rows.concat(blankRows(5));render();};   // 일자는 비움(=상단일자 사용)
     // 품번 열: 단일=품번(수기·검색), 다열=품번⇥수량⇥비고
     host.querySelectorAll('.pb-item').forEach(el=>{
       el.oninput=e=>{
@@ -2443,7 +2477,7 @@ SCREEN.planinput=(host)=>{
         applyPaste(b,+e.target.dataset.i,txt,['remarks']);render();
       };
     });
-    host.querySelectorAll('.pb-rmrow').forEach(el=>el.onclick=()=>{b.rows.splice(+el.dataset.i,1);if(!b.rows.length)b.rows=blankRows(3,b.plan_ymd);render();});
+    host.querySelectorAll('.pb-rmrow').forEach(el=>el.onclick=()=>{b.rows.splice(+el.dataset.i,1);if(!b.rows.length)b.rows=blankRows(3);render();});
   };
   const bulkSave=async()=>{ const b=st.bulk;
     if(!String(b.line_no||'').trim()){alert('라인을 선택하세요');return;}
