@@ -43,7 +43,7 @@
   header button{background:rgba(255,255,255,.16);color:#fff;border:0;border-radius:8px;
     padding:6px 10px;font-size:12px;font-weight:700}
 
-  /* ── 하단 탭 ── */
+  /* ── 하단 탭 (모바일) ── */
   nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);
     display:flex;padding-bottom:env(safe-area-inset-bottom)}
   nav button{flex:1;background:none;border:0;padding:9px 2px 8px;color:var(--sub);
@@ -52,6 +52,55 @@
   nav button.on{color:var(--brand)}
 
   main{padding:12px 12px 6px;max-width:720px;margin:0 auto}
+
+  /* ══ PC 모드 (2026-09-03) — 레거시 PartnerERP 처럼 상단 가로 메뉴바 ══
+     ★모바일 마크업은 그대로 두고 CSS 로 갈아끼운다(나중에 모바일 전환 대비).
+       body.pc  = PC 레이아웃(가로메뉴 + 넓은 그리드) · 없으면 종전 모바일. */
+  /* ★nav 가 HTML 상 main 뒤에 있다(모바일=하단탭). PC 에선 flex order 로 헤더 바로 밑에 올린다
+       — HTML 순서를 바꾸지 않아야 모바일 레이아웃이 그대로 산다. */
+  body.pc{padding-bottom:0;background:#eef1f6;display:flex;flex-direction:column;min-height:100vh}
+  body.pc header{order:1}
+  body.pc nav   {order:2}
+  body.pc main  {order:3;flex:1 1 auto}
+  body.pc #login{order:0;flex:1 1 auto}   /* 로그인 화면은 PC 에서도 화면 채움 */
+  /* 레거시 PartnerERP 메뉴줄 모양 — 작은 글씨·촘촘·회색바탕·구분선 없음 */
+  body.pc nav{position:sticky;top:0;z-index:29;border-top:0;border-bottom:1px solid #b9bfc9;
+    background:#f0f0f0;padding:0 2px;overflow-x:auto;white-space:nowrap}
+  body.pc nav button{flex:0 0 auto;flex-direction:row;gap:4px;padding:5px 11px;
+    font-size:12.5px;font-weight:500;color:#1f2937;border:0;border-radius:0;line-height:1.5}
+  /* ★PC 는 글자만 — 레거시 메뉴줄과 동일. (CLAUDE §3 아이콘 금지) 모바일 탭은 아이콘 유지 */
+  body.pc nav button .i{display:none}
+  body.pc nav button:hover{background:#dde7f5}
+  body.pc nav button.on{background:var(--brand);color:#fff;font-weight:700}
+  body.pc main{max-width:none;padding:8px 10px 14px;margin:0}
+  /* 상단 제목줄 — 레거시 타이틀바처럼 얇게 */
+  body.pc header{padding:5px 12px;background:var(--brand)}
+  body.pc header .t{font-size:13.5px}
+  body.pc header .c{font-size:11.5px}
+
+  /* PC 그리드 — 내부 ERP(app.css .tbl)와 같은 모양 */
+  .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;
+    font-variant-numeric:tabular-nums;background:#fff}
+  .tbl th,.tbl td{border-bottom:1px solid #e6ebf3;border-right:1px solid #eef1f6;
+    padding:4px 6px;text-align:center;white-space:nowrap}
+  .tbl thead th{position:sticky;top:0;z-index:3;background:#eef2f8;color:#33415c;
+    font-weight:700;border-bottom:1px solid #c9d6e8}
+  .tbl tbody tr:hover td{background:#f3f8ff}
+  .tbl td.l{text-align:left} .tbl td.r{text-align:right}
+  .tbl tr.grandtot td{position:sticky;bottom:0;z-index:2;background:#eaf1fb;font-weight:700;
+    border-top:1px solid #c9d6e8}
+  .gwrap{overflow:auto;border:1px solid #d6dEE9;border-radius:6px;background:#fff;
+    max-height:calc(100vh - 210px)}
+  .tbar{display:flex;flex-wrap:nowrap;align-items:center;gap:7px;padding:8px 2px;
+    overflow-x:auto;font-size:12.5px}
+  .tbar label{color:#5b6b85;font-weight:600;white-space:nowrap}
+  .tbar input,.tbar select{border:1px solid #c9d3e0;border-radius:5px;padding:4px 7px;
+    font-size:12.5px;background:#fff;color:var(--ink)}
+  .tbar .go{background:var(--brand);color:#fff;border:0;border-radius:5px;
+    padding:5px 13px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .tbar .sp{margin-left:auto;color:var(--sub);font-size:12px;white-space:nowrap}
+  .ttl{font-size:15px;font-weight:800;margin:2px 0 4px;display:flex;align-items:center;gap:8px}
+  .ttl small{font-size:11.5px;color:var(--sub);font-weight:400}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
     box-shadow:var(--sh);padding:13px;margin-bottom:11px}
   .card h3{margin:0 0 9px;font-size:13.5px;color:var(--sub);font-weight:700;
@@ -204,16 +253,34 @@ async function doLogin(){
 /* ───────── 화면 ───────── */
 let VIEW='home', DATA=null;
 let ORDER=null, ORDER_LOADING=false;   // 발주현황(coopporder) 지연로드 캐시
+// ★사급 탭(2026-09-03) — 내부 ERP「협력사사급재고관리 + 사급 수불장」을 모바일로.
+//   서버가 scope_cust 로 자기 거래처만 준다(auth.scope_cust) — 프론트는 그대로 그린다.
+let SAGUB=null, SAGUB_LOADING=false;   // 사급재고(holding) + 수불장(ledger) 합본 캐시
+let SGDET=null;                        // 수불장 상세(드릴다운) — {mat, rows} 또는 null
+// ★거래명세표 수정(2026-09-03) — 아직 보내기 전(요청·발행)만 고칠 수 있다.
+//   서버 _guard(coop=True) 가 출발(20)·입고대기(30) 이후를 409 로 막는다.
+let EDIT=null, EDIT_LOADING=false;     // 명세표 목록 캐시
 
 async function start(){
   const u=T.me||{};
   $('#hcust').textContent = u.nm || u.id || '';
   $('#huser').textContent = u.partner_code ? ('거래처 '+u.partner_code) : '';
   ['#hd','#app','#nav'].forEach(s=>$(s).classList.remove('hide'));
+  // ★PC 모드(2026-09-03) — 레거시 PartnerERP 식 상단 가로메뉴 + 넓은 그리드.
+  //   좁은 화면(폰)은 종전 모바일 레이아웃 유지. 나중에 사용자 토글로 뺄 수 있다.
+  document.body.classList.toggle('pc', window.innerWidth >= 900);
+  window.addEventListener('resize', ()=>{
+    const pc = window.innerWidth >= 900;
+    if(pc !== document.body.classList.contains('pc')){
+      document.body.classList.toggle('pc', pc); if(DATA) render();
+    }
+  });
   await load();
 }
 async function load(){
   ORDER=null; ORDER_LOADING=false;   // 재로그인/새로고침 시 발주현황 캐시 초기화
+  SAGUB=null; SAGUB_LOADING=false; SGDET=null;   // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
+  EDIT=null;  EDIT_LOADING=false;
   $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
   try{ DATA = await api('/api/partner/my?days=14'); }
   catch(e){ if(e.message!=='401') $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
@@ -223,17 +290,24 @@ async function load(){
 /* ★유형별 분기 — 세트입고를 안 쓰는 협력사에는 송장 탭을 숨긴다.
      실측(2026-08-29): 세트입고 송장이 있는 곳 = 절삭-협력사 9/11 · 나머지 1/76.
      같은 화면을 전원에게 주면 대부분이 **빈 송장 화면**을 본다. */
+/* ★2026-09-03 — 레거시 PartnerERP 식 상단 가로 메뉴바로 전환(PC 우선).
+     내부 ERP 「협력사」 폴더 6메뉴를 그대로 옮긴다. 모바일 전환은 나중에(body.pc 토글). */
 function tabs(){
   const staff = (T.me||{}).utype !== '협력사';
-  const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
-  const t=[{v:'home',i:'🏠',n:'홈'},{v:'plan',i:'📅',n:'내 계획'}];
-  // ★소속 거래처가 있는 협력사 중 '일반협력사'만 발주현황(일반) 노출.
-  //   국내 절삭협력사(is_cutting, auth.CUTTING_COOP_CODES 11곳)는 '협력사 계획현황'을 사용하므로 숨김.
   const isPartner = !!((T.me||{}).partner_code);
   const isCutting = !!((T.me||{}).is_cutting);
-  if(isPartner && !isCutting) t.push({v:'order',i:'📦',n:'발주현황(일반)'});
-  if(useInv) t.push({v:'inv',i:'📄',n:'내 송장'});
-  if(staff)  t.push({v:'scan',i:'📷',n:'입고'});
+  const t=[{v:'home',i:'🏠',n:'홈'}];
+  t.push({v:'pplan', i:'📋', n:'협력사 계획현황'});
+  // ★일반협력사만 발주현황(일반). 절삭협력사(is_cutting)는 계획현황을 쓴다.
+  if(isPartner && !isCutting) t.push({v:'order', i:'📦', n:'협력사 발주현황(일반)'});
+  t.push({v:'deliv', i:'🧾', n:'거래명세서 발행'});
+  t.push({v:'dedit', i:'✎',  n:'거래명세표 수정'});
+  t.push({v:'sagub', i:'📊', n:'협력사사급재고관리'});
+  t.push({v:'sledg', i:'📒', n:'사급 수불장'});
+  // 기존 모바일 화면 — 송장 발행은 여기서만 되므로 남긴다(거래명세서 발행과 별개 흐름).
+  const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
+  if(useInv) t.push({v:'inv', i:'📄', n:'내 송장'});
+  if(staff)  t.push({v:'scan', i:'📷', n:'입고'});
   return t;
 }
 function render(){
@@ -244,10 +318,11 @@ function render(){
     <span class="i">${x.i}</span>${x.n}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach(b=>b.onclick=()=>{
     VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
-  $('#app').innerHTML = VIEW==='home' ? viewHome()
-                      : VIEW==='plan' ? viewPlan()
-                      : VIEW==='order'? viewOrder()
-                      : VIEW==='scan' ? viewScan() : viewInv();
+  // ★탭이 늘어 삼항체인 대신 맵(2026-09-03). 값=렌더함수(HTML 문자열 반환).
+  const V={home:viewHome, plan:viewPlan, order:viewOrder, scan:viewScan, inv:viewInv,
+           pplan:viewPPlan, deliv:viewDeliv, dedit:viewDedit,
+           sagub:viewSagub, sledg:viewSledg};
+  $('#app').innerHTML = (V[VIEW]||viewHome)();
   wire();
 }
 
@@ -298,6 +373,103 @@ function viewPlan(){
           <td class="n" style="font-weight:800">${num(r.qty)}</td></tr>`).join('')}</tbody></table>`;
     }).join('')}</div>` : `<div class="empty">기간 안에 계획이 없습니다.</div>`}
   </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   협력사 계획현황 — 내부 ERP SCREEN.partnerplan(screens.etc.js:2083) 이식
+   ★서버가 scope_cust 로 자기 거래처만 준다(coopplan.py). wc 는 내 partner_code 고정.
+   ═══════════════════════════════════════════════════════════════════════ */
+let PP=null, PP_LOADING=false;
+const PPF={from:'', days:31, assy:'', part:''};
+
+const _iso=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const _isoAdd=(iso,n)=>{const [y,m,d]=String(iso).split('-').map(Number);
+  const t=new Date(y,(m||1)-1,(d||1)+n); return _iso(t);};
+/* 일자 헤더 라벨 — 내부 ERP wlab(): 일2자리+요일 (예 27목). 주말은 빨강 */
+const _WD=['일','월','화','수','목','금','토'];
+const _dinfo=(y6)=>{const s=String(y6||'');
+  if(s.length!==6) return {lab:s, wk:false};
+  const dt=new Date(2000+ +s.slice(0,2), +s.slice(2,4)-1, +s.slice(4,6));
+  const w=dt.getDay();
+  return {lab:s.slice(4,6)+_WD[w], wk:(w===0||w===6)};};
+
+function loadPP(){
+  if(PP_LOADING) return;
+  const wc=String((T.me||{}).partner_code||'').trim();
+  if(!wc){ PP={need:1}; return; }
+  if(!PPF.from) PPF.from=_iso(new Date());
+  PP_LOADING=true;
+  const to=_isoAdd(PPF.from, Math.max(1,+PPF.days||31)-1);
+  const q=new URLSearchParams({from_ymd:PPF.from,to_ymd:to,wc:wc,
+    part:PPF.part||'',assy:PPF.assy||'',line:'',gubun:'외주',src:'nx'});
+  api('/api/partner/planstatus?'+q)
+    .then(j=>{ PP=j; })
+    .catch(e=>{ if(e.message!=='401') PP={error:e.message}; })
+    .then(()=>{ PP_LOADING=false; if(VIEW==='pplan') render(); });
+}
+
+function viewPPlan(){
+  if(!PP){ loadPP(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
+  if(PP.need)  return `<div class="card"><div class="empty">소속 거래처가 지정되지 않았습니다. 담당자에게 문의하세요.</div></div>`;
+  if(PP.error) return `<div class="msg e">${esc(PP.error)}</div>`;
+  const ds=PP.dates||[], rows=(PP.rows||[]).map(r=>Object.assign({},r,{
+    jado: r.mats||r.part||'', matq: (r.matq!=null?r.matq:r.tot)}));
+  const frac = PP.frac!==false;
+  const to=_isoAdd(PPF.from, Math.max(1,+PPF.days||31)-1);
+  const cell=(r,d)=>{
+    const pl=+((r.days||{})[d]||0), dn=+((r.donedays||{})[d]||0);
+    const bg=((r.colors||{})[d])||'';
+    const empty = frac ? (!pl&&!dn) : !pl;
+    const txt = empty ? '·' : (frac ? `${num(dn)}/${num(pl)}` : num(pl));
+    return `<td${bg?` style="background:${esc(bg)}"`:(empty?' style="color:#dfe6ef"':'')}>${txt}</td>`;
+  };
+  const sum=(f)=>rows.reduce((a,r)=>a+(+r[f]||0),0);
+  const dsum=(d,k)=>rows.reduce((a,r)=>a+(+((r[k]||{})[d])||0),0);
+  return `
+  <div class="ttl">협력사 계획현황 <small>레거시 w_pr_outside_040 · 내 거래처(${esc((T.me||{}).partner_code||'')}) 자동</small></div>
+  <div class="tbar">
+    <label>기준일자</label><input type="date" id="pp-from" value="${esc(PPF.from)}">
+    <label>기간</label><input type="text" id="pp-days" value="${esc(PPF.days)}" style="width:46px;text-align:center">일
+    <label>도번</label><input type="text" id="pp-assy" value="${esc(PPF.assy)}" style="width:120px">
+    <label>자도번</label><input type="text" id="pp-part" value="${esc(PPF.part)}" style="width:120px">
+    <button class="go" id="pp-go">조회</button>
+    <span class="sp">${num(PP.cnt||rows.length)}건 · 자재수량합 ${num(PP.sum_qty)} · ${esc(PPF.from)}~${esc(to)}</span>
+  </div>
+  <div class="gwrap"><table class="tbl">
+    <thead><tr>
+      <th style="width:40px">SEQ</th><th style="width:100px">자도번작업처</th>
+      <th style="width:44px">라인</th><th style="width:64px">작업처</th>
+      <th style="width:110px">도번</th><th style="width:300px">자도번LIST</th>
+      <th style="width:42px">사급</th><th style="width:56px">LOT수량</th>
+      <th style="width:62px">자재수량</th><th style="width:62px">완료수량</th><th style="width:62px">요청수량</th>
+      ${ds.map(d=>{const i=_dinfo(d);
+        return `<th style="width:46px${i.wk?';color:#c0392b':''}">${esc(i.lab)}</th>`;}).join('')}
+    </tr></thead>
+    <tbody>
+      ${rows.length ? rows.map((r,i)=>`<tr>
+        <td style="color:#8aa0bd">${i+1}</td>
+        <td><b>${esc(r.wcnm||r.wc||'')}</b></td>
+        <td>${esc(r.line||'')}</td>
+        <td>${esc(r.workcenter||'')}</td>
+        <td><b>${esc(r.assy||'')}</b></td>
+        <td class="l" title="${esc(r.jado)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis">
+          ${(+r.matn>1)?`<span style="background:#eef2f7;color:#5b6b85;border-radius:3px;padding:0 4px;font-size:10.5px;margin-right:3px">${num(r.matn)}종</span>`:''}${esc(r.jado)}</td>
+        <td>${r.sagub?`<span style="background:#fff3d6;color:#8a6100;border-radius:3px;padding:0 4px;font-size:10.5px">사급</span>`:''}</td>
+        <td>${r.lot==null?'-':num(r.lot)}</td>
+        <td><b>${num(r.matq)}</b></td>
+        <td style="color:#1c7c3a">${num(r.doneq)}</td>
+        <td>${num(r.reqq)}</td>
+        ${ds.map(d=>cell(r,d)).join('')}
+      </tr>`).join('') : `<tr><td colspan="${11+ds.length}" class="empty" style="padding:22px">조회 결과가 없습니다.</td></tr>`}
+    </tbody>
+    ${rows.length?`<tfoot><tr class="grandtot">
+      <td>계</td><td>${num(rows.length)}건</td><td colspan="6"></td>
+      <td>${num(sum('matq'))}</td><td>${num(sum('doneq'))}</td><td>${num(sum('reqq'))}</td>
+      ${ds.map(d=>`<td>${frac?`${num(dsum(d,'donedays'))}/${num(dsum(d,'days'))}`:num(dsum(d,'days'))}</td>`).join('')}
+    </tr></tfoot>`:''}
+  </table></div>
+  <div class="foot" style="padding:8px 2px;font-size:11.5px;color:var(--sub)">
+    노랑=생산완료 · 살구=출하완료 · 회색=세트재고 (완료가 계획 이상일 때만 색)</div>`;
 }
 
 /* ───────── 발주현황 : 순소요(계획−재고−기발주) ───────── */
@@ -535,7 +707,35 @@ async function useCamera(){
   }catch(e){ close(); alert('카메라를 열 수 없습니다 — '+e.message); }
 }
 
+/* ───────── 나머지 4화면 — 준비중 (계획현황 확정 후 같은 틀로 이식) ─────────
+   거래명세서 발행 / 거래명세표 수정 / 협력사사급재고관리 / 사급 수불장.
+   백엔드 API·소속강제는 이미 열어 뒀다(auth.COOP_ALLOW). 화면만 남았다. */
+const _soon=(nm,api)=>`
+  <div class="ttl">${esc(nm)} <small>준비중</small></div>
+  <div class="card"><div class="empty" style="padding:26px;line-height:1.9">
+    이 화면은 아직 만드는 중입니다.<br>
+    <span style="color:var(--sub);font-size:12.5px">내부 ERP 「협력사」 폴더의 같은 화면을 이 포털로 옮기는 작업입니다.
+    서버(${esc(api)})는 이미 열려 있고 자기 거래처만 보이도록 돼 있습니다.</span>
+  </div></div>`;
+const viewDeliv=()=>_soon('거래명세서 발행','/api/partner/deliv420');
+const viewDedit=()=>_soon('거래명세표 수정','/api/delivedit/list');
+const viewSagub=()=>_soon('협력사사급재고관리','/api/sagub/holding/list');
+const viewSledg=()=>_soon('사급 수불장','/api/sagubledger/list');
+
 function wire(){
+  // ★협력사 계획현황 툴바(2026-09-03)
+  const pg=$('#pp-go');
+  if(pg) pg.onclick=()=>{
+    PPF.from = ($('#pp-from')||{}).value || PPF.from;
+    PPF.days = ($('#pp-days')||{}).value || PPF.days;
+    PPF.assy = (($('#pp-assy')||{}).value||'').trim();
+    PPF.part = (($('#pp-part')||{}).value||'').trim();
+    PP=null; render();
+  };
+  ['pp-from','pp-days','pp-assy','pp-part'].forEach(id=>{
+    const el=$('#'+id); if(el) el.onkeyup=e=>{ if(e.key==='Enter') pg&&pg.click(); };
+  });
+
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
   document.querySelectorAll('[data-sheet]').forEach(cb=>cb.onchange=()=>{
     const sh=cb.dataset.sheet, q=document.querySelector(`[data-q="${sh}"]`);

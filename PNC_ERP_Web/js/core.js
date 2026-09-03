@@ -519,14 +519,13 @@ const SEED_USERS=[
   {id:'TEST4',nm:'테스트4(개발)',type:'내부',dept:'원가개발',pos:'',roles:['원가개발'],partner:'',email:'',tel:'',status:'사용'},
 ];
 // 역할 → 편집권 부여 모듈(그룹). 시스템관리자=전권(별도). 미설정 모듈=조회만.
-// ★'협력사' 추가(2026-09-03) — 종전엔 이 키가 없어 협력사 계정이 내부 ERP 로 들어오면
-//   COMMON_VIEW(기준정보)만 보이는 반쪽 화면이 됐다. 이제 「협력사」 폴더가 보인다.
-//   ※메뉴가 보이는 것과 데이터가 보이는 것은 별개다 — 실제 차단은 서버가 한다:
-//     ① auth.COOP_ALLOW 화이트리스트(deny by default) ② scope_cust() 소속강제(자기 거래처만).
-//     프론트는 '어느 메뉴를 그릴지'만 정한다.
-const ROLE_MOD={'구매/자재':['pur','partner'],'생산':['prod','gagong'],'원가개발':['dev'],'영업':['sales'],'품질':['qc'],'경영':['mgmt'],'협력사':['partner']};
+// ★'협력사' 키는 두지 않는다(2026-09-03 결정) — 협력사는 **협력사 포털(partner.html)** 만 쓴다.
+//   내부 ERP(index.html)는 직원용 PC 화면이고, 협력사가 여기 들어와도 메뉴가 안 보이는 게 맞다.
+//   (백엔드 방어는 그대로 유효 — auth.COOP_ALLOW 화이트리스트 + scope_cust() 소속강제.
+//    포털이 같은 API 를 쓰므로 그 보호는 계속 필요하다.)
+const ROLE_MOD={'구매/자재':['pur','partner'],'생산':['prod','gagong'],'원가개발':['dev'],'영업':['sales'],'품질':['qc'],'경영':['mgmt']};
 const COMMON_VIEW=['base'];   // 전부서 공통 '조회' 모듈(기준정보=품목·BOM·도면 조회). 수정은 역할/관리자만(직원 읽기전용).
-// ★협력사는 COMMON_VIEW(기준정보) 제외 — 우리 품목·BOM·도면 마스터를 볼 이유가 없다.
+// ★협력사는 COMMON_VIEW(기준정보)에서도 제외 — 우리 품목·BOM·도면 마스터를 볼 이유가 없다.
 //   utype 은 서버가 준 값(app_user.utype)이며 roles 와 별개다.
 const _isCoop=(u)=>((u&&u.utype)==='협력사')||((u&&u.roles||[]).includes('협력사'));
 /* ★모르는 sid 는 조용히 넘기지 않고 콘솔에 경고한다(2026-09-03 신설).

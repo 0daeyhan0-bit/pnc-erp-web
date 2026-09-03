@@ -223,6 +223,15 @@ SCREEN.perm=(c)=>{
       box.querySelector('#plogin').onclick=()=>{PERM.setUser(selUid);try{buildTree();updateHeaderUser();}catch(_){}renderList();renderDetail();};
       if(!admin){
         box.querySelector('#psave').onclick=async(ev)=>{const bt=ev.target;const t0=bt.textContent;bt.textContent='저장중…';bt.disabled=true;
+          /* ★저장 전 '화면에 보이는 값'을 전 프로그램에 대해 확정 기록한다(2026-09-03 신설).
+             왜 — 종전엔 **클릭한 항목만** pm 에 들어갔다. 역할 기본값·공통조회로 켜지거나 꺼져
+             보이던 항목은 pm 에 없어 전송되지 않았고, 서버는 DELETE 후 받은 것만 INSERT 하므로
+             **화면과 DB 가 어긋났다**. 실제 증상: modelbomhist 조회를 꺼도 DB 에 행이 안 생겨
+             can() 이 COMMON_VIEW(기준정보 공통조회) 로 흘러 **메뉴가 계속 보였다**.
+             이제 화면에 보이는 그대로가 DB 에 저장된다 = 체크하면 되고, 풀면 막힌다.
+             역할은 '신규 사용자의 초기 표시값'으로만 남고 판정 정본은 DB 단일 소스가 된다. */
+          const snap=progs.map(p=>({id:p.id,view:effView(p.id),edit:effEdit(p.id)}));   // ★먼저 전부 읽고
+          snap.forEach(s=>{pm[s.id]={view:s.view,edit:s.edit};});                        //   그 다음 기록(중간갱신 오염 방지)
           let ok=false;try{const r=await PERM.savePerms();ok=!r||r.ok!==false&&(r.status?r.ok:true);}catch(_){ok=false;}
           if(PERM.userId===selUid){try{buildTree();}catch(_){}}bt.textContent=t0;bt.disabled=false;
           alert(ok?u.nm+' 권한 저장 완료 — 서버 반영(전 PC 동일 적용).':u.nm+' 권한 로컬 저장됨(서버 저장 실패 — 네트워크 확인).');};
