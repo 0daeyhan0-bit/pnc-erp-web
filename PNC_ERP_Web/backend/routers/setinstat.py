@@ -290,12 +290,21 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                       FROM nx.plan_part_dtl pd WITH(NOLOCK)
                      WHERE {' AND '.join(w)}
                      GROUP BY work_order, item_code, part_plan_ymd) pd
-              CROSS APPLY (SELECT MAX(RTRIM(z.mat_code)) mat_code,
+              -- ★CROSS APPLY → OUTER APPLY + 행 전개(2026-09-03 교정).
+              --   종전엔 MAX(mat_code) 로 **자도번 하나만** 뽑았다. 그런데 한 (제번,도번)에
+              --   자도번이 여럿이다(실측 AJJ76617501: 41제번 전부 12개씩).
+              --   그래서 자도번LIST 가 한 건만 나오고, 그 MAX 값이 도번 자신인 경우
+              --   **도번 = 자도번LIST** 로 같아 보였다(레거시는 실제 자도번을 보여준다).
+              --   → 자도번을 행으로 펴서 내보내고, 목록화는 파이썬 쪽 jados 집합이 한다.
+              --   ※수량(pd.q)은 도번 기준이라 자도번 수만큼 부풀면 안 된다 —
+              --     아래 det 병합에서 (제번·도번·일자) MAX 로 잡으므로 배수가 되지 않는다.
+              OUTER APPLY (SELECT RTRIM(z.mat_code) mat_code,
                                   MAX(RTRIM(ISNULL(z.mat_work_center_code,''))) jcust
                              FROM nx.plan_part_mat z WITH(NOLOCK)
                             WHERE z.work_order=pd.work_order
                               AND ISNULL(NULLIF(z.assy_item_code,''),z.item_code)=pd.item_code
-                              {"AND RTRIM(ISNULL(z.mat_work_center_code,''))=?" if jcust else ""}) x
+                              {"AND RTRIM(ISNULL(z.mat_work_center_code,''))=?" if jcust else ""}
+                            GROUP BY RTRIM(z.mat_code)) x
              WHERE x.mat_code IS NOT NULL
             UNION ALL
             -- ② 직납품 계획 (파트공정 없음)
@@ -490,15 +499,77 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         except Exception:
             pass
 
-        # 모델 — 도번
-        model = {}
+        # ★★작업처(2026-09-03) — 협력사 계획현황(coopplan.py:665)과 **같은 산식**을 쓴다.
+        #   레거시 화면 실측: 「01라인(용접)」·「02라인」·「000」·「대원산업」이 이 컬럼이다.
+        #     COALESCE(가공파트명, 도번 work_code 명칭, 도번 in_cust 거래처명, 코드원문, '')
+        #   ⛔도번 마스터 work_code 를 **먼저** 보면 P1→「용접」이 나와 레거시와 다르다
+        #     (PR_M_WORK 에는 라인이 없다). 파트명(PR_M_PROC_GAGONG)이 1순위다.
+        #     ※이 함정은 coopplan.py 주석에 이미 기록돼 있었다 — 같은 실수를 두 번 하지 않는다.
+        #   파트코드 = ④파트별계획의 최상위행(bom_level=0). 직납품은 그 행이 없어
+        #   다음 순위로 내려가 결국 **협력사명**이 찍힌다(레거시와 동일: 자도번LIST 빈칸인 행).
+        wcnm = {}
         for i in range(0, len(dobans), 400):
             ch = dobans[i:i + 400]; ph = ",".join("?" * len(ch))
             try:
-                cur.execute(f"""SELECT item_code, ISNULL(model_no,'') FROM nx.item WITH(NOLOCK)
-                                 WHERE item_code IN ({ph})""", *ch)
+                cur.execute(f"""
+                  SELECT RTRIM(i.ITEM_CODE),
+                         COALESCE(NULLIF(RTRIM(ISNULL(pg.GAGONG_PROC_DESC,'')),''),
+                                  NULLIF(RTRIM(ISNULL(wi.WORK_DESC,'')),''),
+                                  NULLIF(RTRIM(ISNULL(ci.CUST_DESC,'')),''),
+                                  NULLIF(RTRIM(ISNULL(i.work_code,'')),''),
+                                  NULLIF(RTRIM(ISNULL(i.in_cust,'')),''), '')
+                    FROM nx.item i WITH(NOLOCK)
+                    LEFT JOIN (SELECT assy_item_code, MIN(RTRIM(gagong_proc_code)) pc
+                                 FROM nx.plan_part_dtl WITH(NOLOCK)
+                                WHERE bom_level=0 AND ISNULL(gagong_proc_code,'')<>''
+                                GROUP BY assy_item_code) ap
+                           ON RTRIM(ap.assy_item_code)=RTRIM(i.ITEM_CODE)
+                    LEFT JOIN nx.PR_M_PROC_GAGONG pg WITH(NOLOCK)
+                           ON RTRIM(pg.GAGONG_PROC_CODE)=RTRIM(ap.pc)
+                    LEFT JOIN nx.PR_M_WORK wi WITH(NOLOCK)
+                           ON RTRIM(wi.WORK_CODE)=RTRIM(ISNULL(i.work_code,''))
+                    LEFT JOIN nx.CM_M_CUST ci WITH(NOLOCK)
+                           ON RTRIM(ci.CUST_CODE)=RTRIM(ISNULL(i.in_cust,''))
+                   WHERE i.ITEM_CODE IN ({ph})""", *ch)
                 for a, b in cur.fetchall():
-                    model[str(a).strip()] = (b or "").strip()
+                    wcnm[str(a).strip()] = (b or "").strip()
+            except Exception:
+                pass
+
+        # ★모델 = **계획(제번) 정보**다 — nx.plan_dtl.MODEL_NO (2026-09-03 교정).
+        #   ⚠종전엔 nx.item.model_no 를 읽었는데 **그 컬럼이 아예 없다**(nx.item 은 품목
+        #     마스터라 품번·품명·규격·재질만 있고 모델은 없다). try/except 로 감싸 둔 탓에
+        #     예외가 조용히 삼켜져 모델 칸이 통째로 빈칸이었다(사용자 지적).
+        #   모델은 도번 속성이 아니라 "그 제번을 어느 완제품 모델로 만드는가"이므로
+        #   계획원본에서 제번 단위로 가져온다. 레거시 화면값(RPUW202X9T.AKM2 등)과 같은 축.
+        wos = sorted({x["wo"] for x in raw if x["wo"]})
+        model = {}
+        for i in range(0, len(wos), 400):
+            ch = wos[i:i + 400]; ph = ",".join("?" * len(ch))
+            cur.execute(f"""SELECT RTRIM(WORK_ORDER), MAX(RTRIM(ISNULL(MODEL_NO,'')))
+                              FROM nx.plan_dtl WITH(NOLOCK)
+                             WHERE RTRIM(WORK_ORDER) IN ({ph})
+                             GROUP BY RTRIM(WORK_ORDER)""", *ch)
+            for a, b in cur.fetchall():
+                model[str(a).strip()] = (b or "").strip()
+
+        # ★입고구분 — nx.set_input_req.item_gubun (세트입고 요청의 구분).
+        #   실측 분포: '1'=세트입고(웹 1,533건·라이브 139,211건) / '2'=393건(라이브만).
+        #   레거시 화면은 이 자리에 「세트입고」를 찍는다. 코드→명칭 마스터가 없으므로
+        #   실측된 값만 매핑하고, 모르는 값은 코드 그대로 둔다(추측해서 이름 붙이지 않는다).
+        GUBUN_NM = {"1": "세트입고", "2": "직납입고"}
+        gubun = {}
+        for i in range(0, len(dobans), 400):
+            ch = dobans[i:i + 400]; ph = ",".join("?" * len(ch))
+            try:
+                cur.execute(f"""SELECT RTRIM(item_code), MAX(RTRIM(ISNULL(item_gubun,'')))
+                                  FROM nx.set_input_req WITH(NOLOCK)
+                                 WHERE RTRIM(item_code) IN ({ph})
+                                 GROUP BY RTRIM(item_code)""", *ch)
+                for a, b in cur.fetchall():
+                    g = (b or "").strip()
+                    if g:
+                        gubun[str(a).strip()] = GUBUN_NM.get(g, g)
             except Exception:
                 pass
 
@@ -554,7 +625,12 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
     rows = []
     for (wo, doban), d in det.items():
         pl = plan.get((wo, doban), {})
-        jl = sorted(d["jados"])
+        # ★자도번LIST 에서 '도번 자신'은 뺀다(2026-09-03 레거시 화면 실측).
+        #   직납품은 plan_part_mat 에 item_code=mat_code 로 들어간다(자기 자신이 자재).
+        #   레거시는 그 행의 자도번LIST 를 **빈칸**으로 둔다 — 작업처에 협력사명(대원산업)이
+        #   찍히는 행이 정확히 그것이다. 실측 AJJ76617501: 대원산업 자도번 1종이 자기 자신뿐.
+        #   자기 자신을 자도번이라 표시하면 "도번=자도번LIST" 로 보여 오해를 부른다.
+        jl = sorted(x for x in d["jados"] if x != doban)
         # 자재수량 = 그 제번×도번의 자도번 소요 합(일자축 내)
         matq = sum(d["day"].values())
         rows.append({
@@ -565,9 +641,16 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             "line": pl.get("line", ""), "hm": pl.get("hm", ""),
             "lot": pl.get("lot", 0), "pymd": pl.get("pymd", ""),
             "gpc": pl.get("gpc", ""),                          # 작업처 코드(툴팁·필터용)
-            "gpc_nm": gmap.get(pl.get("gpc", ""), pl.get("gpc", "")),   # ★작업처 명칭
+            # ★작업처 = 협력사 계획현황과 같은 산식(wcnm). 파트명(01라인·02라인)이 1순위,
+            #   직납품처럼 파트공정이 없으면 협력사명(대원산업)으로 내려간다 — 레거시 동일.
+            #   ※폴백으로 남긴 gmap 은 파트코드→이름 단순매핑(wcnm 이 비었을 때만).
+            "gpc_nm": wcnm.get(doban, "") or gmap.get(pl.get("gpc", ""), pl.get("gpc", "")),
             "pull": pl.get("pull", 0),                         # 당김,변경
-            "sagub": sum(sagub.get(j, 0.0) for j in jl),       # 사급
+            # ★사급 = 수량 컬럼이 아니다(2026-09-03 사용자 확정). 레거시에서 이 자리엔
+            #   다른 데이터가 들어간다 — 무엇인지 확정되기 전까지 **비워 둔다**.
+            #   종전엔 BOM 사급품 use_qty 합(4.002·8.003 …)을 넣어 수량처럼 보였는데,
+            #   근거 없는 값을 채우면 사용자가 그걸 사급수량으로 읽는다. 빈칸이 정직하다.
+            "sagub": "",                                       # 사급(미확정 — 빈칸)
             # ── 일자 뒤 컬럼 (레거시 순서)
             "mat_qty": matq,                                   # 자재수량
             "mat_in": sum(jin.get(j, 0.0) for j in jl),        # 자재입고
@@ -584,7 +667,8 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             #     단품재고 칸을 채우지 않는다(실측: 자기행 13제번 전부 공란) — 동일하게 0.
             "dan_stock": 0.0,
             "assy_stock": st_assy.get(doban, 0.0),             # ASSY재고
-            "model": model.get(doban, ""),                     # 모델
+            "model": model.get(wo, ""),                        # ★모델 = 제번 단위(계획정보)
+            "in_gubun": gubun.get(doban, ""),                  # 입고구분(세트입고 등)
             "day": d["day"],
             "total": matq,
         })

@@ -136,14 +136,14 @@ def _step6_sql(cur):
     cur.execute("IF OBJECT_ID('nx.plan_part_temp') IS NOT NULL DROP TABLE nx.plan_part_temp")
     cur.execute(("""
     WITH CTE_BOM(assy_item_code, level_no, item_code, p_item_code, mat_code, cum_use_qty, in_cust_code, vir_item_flag, cum_item_code) AS (
-      SELECT DISTINCT a.c_item_code,0,a.c_item_code,a.c_item_code,a.c_item_code,CONVERT(decimal(18,5),1),ISNULL(c.in_cust_code,''),'0',CONVERT(varchar(500),'{'+a.c_item_code+'}')
-      FROM nx.plan_item_dtl a JOIN {P}PR_M_ITEM c ON a.c_item_code=c.item_code
+      SELECT DISTINCT a.c_item_code,0,a.c_item_code,a.c_item_code,a.c_item_code,CONVERT(decimal(18,5),1),ISNULL(c.in_cust,''),'0',CONVERT(varchar(500),'{'+a.c_item_code+'}')
+      FROM nx.plan_item_dtl a JOIN {P}item c ON a.c_item_code=c.item_code
       WHERE NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=a.c_item_code)
       UNION ALL
       SELECT cb.assy_item_code,cb.level_no+1,b.item_code,CASE cb.vir_item_flag WHEN '1' THEN cb.p_item_code ELSE b.item_code END,
-             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust_code,''),
+             b.mat_code,CONVERT(decimal(18,5),cb.cum_use_qty*b.USE_QTY_PR),ISNULL(c.in_cust,''),
              CASE b.vir_item_flag WHEN '1' THEN '1' ELSE '0' END,CONVERT(varchar(500),cb.cum_item_code+'{'+b.mat_code+'}')
-      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}PR_M_ITEM c ON b.mat_code=c.item_code
+      FROM CTE_BOM cb JOIN {P}v_pr_bom b ON cb.mat_code=b.item_code JOIN {P}item c ON b.mat_code=c.item_code
       WHERE ISNULL(b.except_flag,'0')<>'1' AND cb.level_no<10 AND NOT EXISTS(SELECT 1 FROM {P}PR_M_MAT WHERE mat_code=b.mat_code))
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
@@ -167,7 +167,7 @@ def _step6_sql(cur):
     #   검증 = _schema/route_step6_p6_diff0_testbed.py (T1 identity · T2 오버라이드 · T2b 국소성)
     #
     #   ※SELECT 리스트·PR_M_WORK_SINGLE/PR_M_PROC_GAGONG 조인·WHERE 는 **lt_hr CAST 외에 그대로**.
-    #     soyo 는 마스터를 nx.item 으로 쓰지만 여기(planrev)는 PR_M_ITEM 축이므로 표기 유지.
+    #     ★2026-09-03: planrev 도 마스터를 nx.item(클린)으로 전환 — soyo 와 축 일치.
     #
     #   ★lt_hr 명시 CAST(18,3) 이유 — 두 소스의 타입이 다르다:
     #       PR_M_ITEM_PROC_GAGONG.lt_hr  decimal(18,3)
@@ -232,7 +232,7 @@ def _step6_sql(cur):
     cur.execute(("""SELECT b.plan_ymd,b.work_order,b.split_work_order,a.assy_item_code,a.level_no AS bom_level,a.item_code AS upper_item_code,a.mat_code AS item_code,a.p_item_code,a.proc_seq,a.gc_gubun,
       b.line_no,a.cum_use_qty AS use_qty,b.lot_qty,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100) AS plan_qty,
       a.gagong_proc_code,a.gagong_proc_seq,a.s_work_code,a.lt_hr,ISNULL(a.cum_lt_hr,0) AS cum_lt_hr,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100)*a.cum_use_qty AS part_plan_qty
-    INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}PR_M_ITEM c ON a.assy_item_code=c.item_code""").replace("{P}", P))
+    INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}item c ON a.assy_item_code=c.item_code""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_dtl') IS NOT NULL DROP TABLE nx.plan_part_dtl")
     cur.execute("""SELECT a.* INTO nx.plan_part_dtl FROM nx.plan_part_swork a
       WHERE a.gagong_proc_code <> ISNULL((SELECT TOP 1 b.gagong_proc_code FROM nx.plan_part_swork b
@@ -316,9 +316,9 @@ def _step7_sql(cur):
     #   routing_edge 미등록 아이템은 마스터 폴백.
     #   재귀 CTE는 TOP/outer join 금지 → 오버라이드 테이블 nx.item_ov를 inner join으로 갈아끼움.
     cur.execute("IF OBJECT_ID('nx.item_ov') IS NOT NULL DROP TABLE nx.item_ov")
-    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust_code, c.prod_rate,
-        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust_code,'') END) AS ov_wc
-      INTO nx.item_ov FROM {P}PR_M_ITEM c
+    cur.execute(("""SELECT c.item_code, c.work_code, c.in_cust AS in_cust_code, c.prod_rate,
+        ISNULL(NULLIF(re.wc,''), CASE WHEN c.work_code>'' THEN c.work_code ELSE ISNULL(c.in_cust,'') END) AS ov_wc
+      INTO nx.item_ov FROM {P}item c
       LEFT JOIN (SELECT child_item, MAX(wc) wc FROM nx.routing_edge GROUP BY child_item) re
         ON re.child_item=UPPER(LTRIM(RTRIM(c.item_code)))""").replace("{P}", P))
     cur.execute("CREATE INDEX ix_item_ov ON nx.item_ov(item_code)")
@@ -490,7 +490,7 @@ def _step7_sql(cur):
            ON dpx.work_order=RTRIM(a.work_order)
          AND a.bom_level=0 AND a.bom_mat_code=a.assy_item_code""".replace("{B}", _mat_base) + """
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
-      AND NOT EXISTS(SELECT 1 FROM {P}PR_M_ITEM wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_desc,'') NOT LIKE N'%용접링%')
+      AND NOT EXISTS(SELECT 1 FROM {P}item wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_name,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
 
 
@@ -541,7 +541,10 @@ def _step5_item(cur):
     cur.execute("SELECT DISTINCT WORK_ORDER,ITEM_CODE FROM PARTNER_ERP_TEST3.nx.SA_T_RECV_DTL WHERE WORK_ORDER>''")
     for wo, ic in cur.fetchall(): recvmap[str(wo).strip()].add(str(ic).strip())
     prate = {}
-    cur.execute("SELECT ITEM_CODE, ISNULL(PROD_RATE,100) FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+    # ★소스 = nx.item(클린 정본). 종전 nx.PR_M_ITEM(미러) → 전환(2026-09-03, CLAUDE.md §1-9/§1-9-1).
+    #   실측: 미러가 라이브보다 낡아 라이브 신규 7품목이 미러에만 없었고(MJU00777214/215·MJU00892201 등),
+    #   그 품목들이 _known 에서 빠져 '유령'으로 걸러지며 파트별계획에 0행이 됐다(레거시엔 79행씩 존재).
+    cur.execute("SELECT item_code, ISNULL(prod_rate,100) FROM PARTNER_ERP_TEST3.nx.item")
     for ic, pr in cur.fetchall(): prate[str(ic).strip()] = float(pr or 100)
     # ★2026-09-01 유령 ASSY 차단 — 모델BOM 에는 있으나 품목마스터에 없는 도번.
     #   레거시는 전개할 때 품목마스터를 조인해 이런 행을 자동으로 떨어뜨린다(실측 품목별계획 0행).
@@ -549,8 +552,17 @@ def _step5_item(cur):
     #   실측 2026-09-01 — 모델BOM 유령 179종 중 AJR30133610(09:19 라이브 신규, 21개 모델,
     #     주문 0건·BOM 0건·품목마스터 미등록)이 plan_item_dtl 6행으로 유입,
     #     8제번이 레거시와 어긋났다. BOM 이 없어 파트별·자재소요로는 안 내려가 수량차는 0이었다.
-    #   ※prate 는 이미 PR_M_ITEM 전건을 담고 있으므로 그 키를 등록여부 판정에 그대로 쓴다.
-    _known = set(prate)
+    #
+    # ★★_known 은 prate(=nx.item) 와 분리한다(2026-09-03) — 둘은 목적이 다르다.
+    #   · prate  = 수율 조회         → nx.item(클린 정본)이 맞다.
+    #   · _known = "레거시가 계획에 넣는 품목인가" 판정 → **라이브 품목마스터**가 기준이다.
+    #   nx.item 은 웹 자체 등록분(src='web')을 포함한 **상위집합**이라(25,391 vs 라이브 24,136)
+    #   그대로 쓰면 유령 ASSY 차단이 풀린다. 실측 2026-09-03 — _known 을 nx.item 으로 바꿨더니
+    #   AJR30133610(웹 등록·라이브 미등록·모델/주문정보 없음)이 되살아나
+    #   plan_item_dtl 15행 → plan_part_dtl 60행 → plan_part_mat **315키**로 번졌다.
+    #   ⟹ 등록여부는 라이브에서 직접 읽는다(라이브는 읽기전용 §1-1, 조회는 허용).
+    cur.execute("SELECT ITEM_CODE FROM PARTNER_ERP.dbo.PR_M_ITEM")
+    _known = set(str(r[0]).strip() for r in cur.fetchall())
     cur.execute("""IF OBJECT_ID('nx.plan_item_dtl') IS NULL CREATE TABLE nx.plan_item_dtl(
         PLAN_YMD varchar(6),WORK_ORDER varchar(20),SPLIT_WORK_ORDER varchar(30),C_ITEM_CODE varchar(20),
         USE_QTY decimal(18,5),LOT_QTY int,PLAN_QTY int,ORG_PLAN_YMD varchar(6),LINE_NO varchar(6),OUTPUT_HM varchar(4),PROD_RATE numeric(9,2))""")
@@ -689,7 +701,8 @@ def _step_source(cur):
         QTY decimal(18,3),SOURCE varchar(10),COMPOSE_DT datetime DEFAULT getdate())""")
     cur.execute("DELETE FROM nx.plan_mat_source")
     MKF = {}; INCF = {}
-    cur.execute("SELECT ITEM_CODE, ISNULL(MAKE_TYPE,''), ISNULL(IN_CUST_CODE,'') FROM PARTNER_ERP_TEST3.nx.PR_M_ITEM")
+    # ★소스 = nx.item(클린 정본). 종전 nx.PR_M_ITEM(미러) → 전환(2026-09-03, §1-9-1).
+    cur.execute("SELECT item_code, ISNULL(make_type,''), ISNULL(in_cust,'') FROM PARTNER_ERP_TEST3.nx.item")
     for ic, mkt, inc in cur.fetchall(): ic = str(ic).strip(); MKF[ic] = str(mkt).strip(); INCF[ic] = str(inc).strip()
     PRF = {}       # 현행경로(route_id 0/무관) 프로파일: item -> [(sg,v,al)]
     PRF_ALT = {}   # 대안경로(route_id>0) 프로파일: (route_id,item) -> [(sg,v,al)]
@@ -1262,13 +1275,13 @@ def planrev_modelbom_hist(ymd: str = Query(""), model: str = Query(""), item: st
         if item.strip():  w.append("a.C_ITEM_CODE LIKE ?"); p.append("%" + item.strip() + "%")
         wh = (" WHERE " + " AND ".join(w)) if w else ""
         cur.execute("""SELECT TOP {} RTRIM(a.MODEL_NO), RTRIM(a.C_ITEM_CODE), a.MAKE_YMD, a.TO_APPLY_YMD,
-              a.USE_QTY, ISNULL(RTRIM(w.WORK_DESC),ISNULL(RTRIM(cu.CUST_DESC),ISNULL(RTRIM(i.WORK_CODE),''))) wc,
+              a.USE_QTY, ISNULL(RTRIM(w.WORK_DESC),ISNULL(RTRIM(cu.CUST_DESC),ISNULL(RTRIM(i.work_code),''))) wc,
               ISNULL(a.INSERT_USER_ID,''), CONVERT(varchar(19),a.INSERT_DATETIME,120),
               ISNULL(a.INSERT_IP,''), ISNULL(a.INSERT_COMPUTER,''), ISNULL(a.INSERT_WINDOW,''),
               ISNULL(a.UPDATE_USER_ID,''), CONVERT(varchar(19),a.UPDATE_DATETIME,120),
-              ISNULL(RTRIM(i.ITEM_DESC),'')
+              ISNULL(RTRIM(i.item_name),'')
             FROM PARTNER_ERP_TEST3.nx.PR_M_MODEL_BOM a WITH(NOLOCK)
-            LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=a.C_ITEM_CODE
+            LEFT JOIN PARTNER_ERP_TEST3.nx.item i WITH(NOLOCK) ON i.item_code=a.C_ITEM_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_WORK w WITH(NOLOCK) ON w.WORK_CODE=i.WORK_CODE
             LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu WITH(NOLOCK) ON cu.CUST_CODE=i.IN_CUST_CODE
             {} ORDER BY a.INSERT_DATETIME DESC, a.MODEL_NO, a.C_ITEM_CODE""".format(
@@ -1310,9 +1323,9 @@ def planrev_modelbom_except(model: str = Query(""), item: str = Query(""), limit
         cur.execute("""SELECT TOP {} RTRIM(a.MODEL_NO), RTRIM(a.C_ITEM_CODE),
               ISNULL(a.INSERT_USER_ID,''), CONVERT(varchar(19),a.INSERT_DATETIME,120),
               ISNULL(a.INSERT_IP,''), ISNULL(a.INSERT_COMPUTER,''), ISNULL(a.INSERT_WINDOW,''),
-              ISNULL(RTRIM(i.ITEM_DESC),'')
+              ISNULL(RTRIM(i.item_name),'')
             FROM nx.PR_M_MODEL_BOM_EXCEPT a WITH(NOLOCK)
-            LEFT JOIN nx.PR_M_ITEM i WITH(NOLOCK) ON i.ITEM_CODE=a.C_ITEM_CODE
+            LEFT JOIN nx.item i WITH(NOLOCK) ON i.item_code=a.C_ITEM_CODE
             {} ORDER BY a.MODEL_NO, a.C_ITEM_CODE""".format(
             max(1, min(int(limit or 1000), 5000)), wh), *p)
         rows = [{"model": r[0], "item": r[1], "by": r[2], "dt": r[3], "ip": r[4],

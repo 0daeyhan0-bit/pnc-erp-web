@@ -14,6 +14,7 @@
 | 1 | `CS_T_ITEM_WELD`(그리드), `PR_M_ITEM_BOM.use_qty` | **`CS_M_ITEM_BOM.USE_QTY`** (RAC, CS_CALC_EXCEPT_FLAG≠'1') | 용접봉/재료 원가 |
 | 2 | `PR_M_ITEM_BOM` | **`CS_M_ITEM_BOM`** (유효일자·CS_CALC_EXCEPT_FLAG) | 재료비 전개 전반 |
 | 14 | `nx.PR_M_ITEM`(품목 미러) | **`nx.item`(정본)** | 품목 마스터 조회 전반 |
+| **19** | **`nx.bom`**(LG 다운로드 스냅샷·20260727 멈춤) | **`nx.bom_header`+`nx.bom_line`**(뷰 `nx.v_pr_bom`) / 소요·원가는 **엔진** | **BOM 전개 전반** |
 | 15 | `nx.partner`(4컬럼 stub·저adoption) | **`nx.CM_M_CUST`(기존 거래처)** | 거래처명 조회 |
 | 16 | `nx.stock_ledger` MAT(미동기) · **`nx.mat_stock_daily`(수동빌더·stale)** | **실시간 자재정본 = 확정스냅샷+이후전표** (`common._mat_avail()`) | 자재 가용판정 (RDY/SAG/PRD/ASY는 ledger 정당) |
 | 3 | `EXCEPT_FLAG` | **`CS_CALC_EXCEPT_FLAG`** | BOM 전개 필터 |
@@ -129,6 +130,28 @@
 - **예외(보존)**: `PARTNER_ERP.dbo.PR_M_ITEM`(라이브 직독, soyo STEP7 routing_edge 등)은 미러 아님 → 은퇴 대상 아님.
 - **최종 drop**: 컷오버 시 `nx.PR_M_ITEM` 테이블 삭제(전형태 코드잔여 0 확인됨).
 - **근거**: `NX_ITEM_READER_MIGRATION.md`(교훈10). [[newerp-nxitem-reader-migration]] [[newerp-mirror-clean-dual-table-audit]].
+
+## 19. ★BOM — `nx.bom`(LG 다운로드본) 은퇴, 정본은 `nx.bom_header`+`nx.bom_line` (대표 확정 2026-09-03)
+
+- **금지**: 신규·수정 프로그램에서 `nx.bom`(`parent_code`·`child_code`·`qty`·`role`·`is_lowest`·`jadoban`·`bulk_valid_from`) 읽기.
+- **왜 — 이름만 비슷할 뿐 출처가 다른 별개 계보다**
+
+  | 테이블 | 컬럼 | 출처 | 지위 |
+  |---|---|---|---|
+  | **`nx.bom_header`+`nx.bom_line`** | `bom_id`·`seq`·`child_item`·`qty`·`except_flag` | 라이브 `PR_M_ITEM_BOM`/`CS_M_ITEM_BOM` | **★정본**(편성 `nx.v_pr_bom`·`nx_soyo_engine`·`NxCostEngine` 전부 이것) |
+  | `nx.bom` | `parent_code`·`child_code`·`bulk_valid_from` | **LG PU-SCS 다운로드**(`nx.lg_bom` 파생) | **과거 스냅샷. 사용 금지** |
+
+  `nx.bom` 은 **2026-07-27/08-14 적재에서 멈춘 과거본**이고 적재 스크립트도 scratchpad 에 있다 유실됐다.
+  `bulk_valid_from` 은 **LG 다운로드 일자**이지 PR_M_ITEM_BOM 동기화 일자가 아니다.
+- **실제 사고 이력(= 금지 근거)**
+  · `backflush.py` L135 — nx.bom 트리가 bom_line에만 있는 SUB의 봉을 놓침(**실측 704/2697품목·7.79kg 누락**) → 용접봉/용접링은 bom_line 우회 완료
+  · `close.py` L1082 · `_migration/resnap_prd_sal.py` L5 — 필터는 `nx.bom` 인데 엔진은 `nx.bom_header` → 교정
+  · 2026-09-03 계획 대사 — `nx.bom` 으로 드리프트를 재 **"일치율 47.6%"** 라는 무의미한 수치를 냄(정본 `nx.bom_line` 은 87.9%·계획기간 90.5%). 비교 축이 틀리면 결론 전체가 틀린다.
+- **올바른 대체**: `nx.bom_header`+`nx.bom_line`(또는 뷰 `nx.v_pr_bom`). **소요·원가·중량은 §1-10대로 엔진 호출**(`nx_soyo_engine`·`NxCostEngine`) — ad-hoc 전개 금지.
+- **★조회 주의**: `bom_line` 에는 부모 컬럼이 없다 — `bom_id` 로 `bom_header` 를 조인해야 부모(`h.item_code`)가 나온다. 조인 없이 `child_item` 만 보면 **"부모가 자기 자신"으로 오독**한다(2026-09-03 실제 오독).
+- **잔존 직독(은퇴 예정, 신규 추가 금지)**: `backflush.py` L169·L206·L251(원소재 중량축·최종제품 판정) · `item.py` L233(품번변경 연쇄) · `_migration/*`(일회성 도구). 전환은 **옆에 짓고 diff0 확인 후 교체**(재고 소비량이 바뀔 수 있음).
+- **백업**: `nx.bk_bom_retire_260903_1656`(40,620행). 원본 `nx.bom` 은 잔존 직독 전환 완료 전까지 유지, 이후 drop.
+- **근거**: `CLAUDE.md` §1-9-2. [[bom-table-lineage]] [[bom-delta-sync-web-item]].
 
 ## 15. 거래처 — `nx.partner`(클린 stub) 은퇴, 조회는 `CM_M_CUST` (2026-08-26)
 

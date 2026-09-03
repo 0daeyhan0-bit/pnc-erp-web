@@ -22,6 +22,8 @@ SCREEN.planuploadrev=(c)=>{
   // line·sched 는 화면에서 뺐지만(불필요) 서버 파라미터는 빈값으로 유지 — /api/plan/list 무변경
   let F={from:iso(T),to:iso(new Date(T.getTime()+30*864e5)),line:'',sched:'',wo:'',model:'',cr:''};
   let data={dates:[],rows:[],wo_count:0,sum_qty:0,__init:1}, loading=false, msg='', upcr='C', upfile=null;
+  // ★제번 합치기 — 레거시와 같게 기본 ON. 끄면 종전처럼 엑셀 날짜칸대로 쪼개 올린다.
+  let upmerge=true;
 
   // ── 진행 팝업 (레거시 w_progress 재현) ───────────────────────────────────
   //   레거시: 「생산계획UPLOAD 오류체크 중…1236/4193 / 잠시만 기다려 주십시요…」 + 진행바 2줄
@@ -227,8 +229,14 @@ SCREEN.planuploadrev=(c)=>{
     // ★fname 을 함께 보낸다 — 서버가 `lg_xxx_MMDD` 날짜와 파일 안 일자축을 대조한다.
     //   불일치면 **저장 전에 409** 로 막고, 사용자가 확인하면 force 로 다시 보낸다
     //   (2026-09-01. 경고만 띄우면 이미 덮어쓴 뒤라 직전 계획이 사라진다).
+    /* ★제번 합치기(merge) — 레거시 w_pr_plan_020 과 같은 처리(2026-09-03 신설).
+         레거시는 업로드 때 한 제번을 **한 행(최소일)** 으로 합치고 수량을 더한다.
+         웹은 엑셀 날짜칸대로 쪼개 두어 185제번이 여러 일자로 흩어져 있었다
+         (실측: 웹 4,392행 → 합치면 4,203행 = 레거시와 정확히 동일, 수량차 0).
+       ★체크박스로 켜고 끈다 — 기본 ON(레거시와 같게).
+         끄면 종전처럼 쪼개진 채 올라간다. 합치기 전 원본은 서버가 백업한다. */
     const _post=(force)=>fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force})});
+      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force,merge:upmerge})});
     try{let r=await _post(false); let j=await r.json();
       if(r.status===409){
         pgClose();
@@ -240,7 +248,12 @@ SCREEN.planuploadrev=(c)=>{
       pgClose();
       if(j.ok){
         alert(`생산계획 UPLOAD 작업을 완료했습니다.${j.forced?'  (날짜 경고 무시)':''}\n\nUPLOAD 건수=${nf(j.total)}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} (구분 ${j.cr})`
-          +(j.axis_from?`\n계획 시작일 ${String(j.axis_from).slice(2,4)}/${String(j.axis_from).slice(4,6)}`:''));
+          +(j.axis_from?`\n계획 시작일 ${String(j.axis_from).slice(2,4)}/${String(j.axis_from).slice(4,6)}`:'')
+          // ★제번 합치기 결과 — 몇 행이 몇 행으로 줄었는지, 원복용 백업이 어디인지 알린다
+          +(j.merged?`\n\n[제번 합치기] ${nf(j.merged_wo)}개 제번을 합침`
+                     +`\n  ${nf(j.rows_before)}행 → ${nf(j.rows_after)}행`
+                     +(j.backup?`\n  원본 백업: ${j.backup}`:'')
+                   :`\n\n[제번 합치기] 사용 안 함(엑셀 날짜칸 그대로)`));
         // ★input.value 를 비워야 같은 파일 재선택 시에도 onchange 가 다시 뜬다(자동업로드 전제).
         upfile=null;const _fi=c.querySelector('#p-file');if(_fi)_fi.value='';
         // ★그리드 자동조회 안 함(2026-08-26 요청) — 조회는 [🔍 조회] 버튼을 누를 때만.
@@ -273,6 +286,9 @@ SCREEN.planuploadrev=(c)=>{
        <label class="tl">업로드</label><select class="inp" id="p-upcr"><option value="C"${upcr==='C'?' selected':''}>C(SAC)</option><option value="R"${upcr==='R'?' selected':''}>R(RAC)</option></select>
        <input type="file" id="p-file" accept=".xls,.xlsx" style="width:190px" title="파일명에 sac/rac 가 있으면 구분이 자동 선택됩니다">
        <button class="btn" id="p-upload" style="background:#1c47a0;color:#fff"${running?' disabled':''}>📅 생산계획UPLOAD</button>
+       <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap"
+              title="레거시와 같게 한 제번을 한 행(가장 빠른 계획일)으로 합치고 수량을 더합니다.&#10;끄면 엑셀 날짜칸대로 쪼개져 올라갑니다(종전 방식).">
+         <input type="checkbox" id="p-merge"${upmerge?' checked':''}> 제번 합치기</label>
        ${srcBox()}
        <div class="spacer"></div>
        <span class="rowcount" style="font-size:11px">계획원본 <b>${nf(planRows)}</b>행</span>
@@ -317,6 +333,7 @@ SCREEN.planuploadrev=(c)=>{
     const pf=g('#p-from'); if(pf)pf.onchange=async e=>{F.from=e.target.value;await loadJobs();draw();};
     if(canW){
       const uc=g('#p-upcr'); if(uc)uc.onchange=e=>upcr=e.target.value;
+      const um=g('#p-merge'); if(um)um.onchange=e=>upmerge=e.target.checked;
       const uf=g('#p-file'); if(uf)uf.onchange=e=>{
         upfile=e.target.files[0]||null;
         if(!upfile)return;

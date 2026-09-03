@@ -76,14 +76,33 @@
        body.pc  = PC 레이아웃(가로메뉴 + 넓은 그리드) · 없으면 종전 모바일. */
   /* ★nav 가 HTML 상 main 뒤에 있다(모바일=하단탭). PC 에선 flex order 로 헤더 바로 밑에 올린다
        — HTML 순서를 바꾸지 않아야 모바일 레이아웃이 그대로 산다. */
-  body.pc{padding-bottom:0;background:#eef1f6;display:flex;flex-direction:column;min-height:100vh}
-  body.pc header{order:1}
-  body.pc nav   {order:2}
-  body.pc main  {order:3;flex:1 1 auto}   /* #app·#erp 둘 다 — 헤더/메뉴 아래를 채운다 */
+  /* ★가로 넘침 차단(2026-09-03 사용자 지적 "홈에서 메뉴 크기가 준다").
+       증상: 홈에서만 헤더·메뉴바가 화면 절반에서 끊기고, 내부 ERP 화면에선 멀쩡하다.
+       원인: body 가 세로 flex 컨테이너인데 **자기 폭 제약이 없어**, 자식(#app) 안의 넓은
+             내용이 body 를 통째로 늘려 버린다. 그러면 width:auto 인 header·nav 는
+             뷰포트 폭(=100%)만 차지해 늘어난 body 안에서 절반만 덮은 것처럼 보인다.
+             ※자식에 max-width:100% 만 줘도 소용없다 — 그 100% 의 기준인 body 가 이미 늘어났다.
+       ⟹ body 폭을 뷰포트에 **고정**하고(width:100vw 아님 — 스크롤바 폭 때문에 가로스크롤이 생긴다),
+          자식은 min-width:0 으로 넘침을 막는다. 넓은 내용은 자기 안에서 가로스크롤. */
+  body.pc{padding-bottom:0;background:#eef1f6;display:flex;flex-direction:column;
+    min-height:100vh;width:100%;max-width:100%}
+  body.pc>*{min-width:0;max-width:100%}
+  /* ★header·nav 를 **명시적으로** 컨테이너 폭 전체로(2026-09-03).
+       flex 컨테이너의 자식은 교차축(가로)에서 stretch 가 기본이지만,
+       header 는 position:sticky + display:flex 라 자체 폭 계산이 들어가고,
+       nav 는 white-space:nowrap + overflow-x:auto 라 내용(버튼 6개) 폭만 차지한다.
+       → 둘 다 화면 절반에서 끊겨 보였다(사용자 지적). width:100% 로 못박는다. */
+  body.pc header{order:1;width:100%;flex:0 0 auto;box-sizing:border-box}
+  body.pc nav   {order:2;width:100%;flex:0 0 auto;box-sizing:border-box}
+  body.pc main  {order:3;flex:1 1 auto;min-width:0}   /* #app·#erp 둘 다 — 헤더/메뉴 아래를 채운다 */
   body.pc #login{order:0;flex:1 1 auto}   /* 로그인 화면은 PC 에서도 화면 채움 */
-  /* 레거시 PartnerERP 메뉴줄 모양 — 작은 글씨·촘촘·회색바탕·구분선 없음 */
-  body.pc nav{position:sticky;top:0;z-index:29;border-top:0;border-bottom:1px solid #b9bfc9;
-    background:#f0f0f0;padding:0 2px;overflow-x:auto;white-space:nowrap}
+  /* 레거시 PartnerERP 메뉴줄 모양 — 작은 글씨·촘촘·회색바탕·구분선 없음
+     ★left/right/bottom 을 명시적으로 지운다 — 모바일 nav 는 position:fixed 라
+       left:0;right:0;bottom:0 이 걸려 있고, PC 에서 sticky 로 바꿔도 그 값이 남아
+       폭·위치 계산이 어긋난다(메뉴바가 화면 절반에서 끊기던 원인 후보). */
+  body.pc nav{position:sticky;top:0;left:auto;right:auto;bottom:auto;
+    z-index:29;border-top:0;border-bottom:1px solid #b9bfc9;
+    background:#f0f0f0;padding:0 2px;overflow-x:auto;white-space:nowrap;width:100%}
   body.pc nav button{flex:0 0 auto;flex-direction:row;gap:4px;padding:5px 11px;
     font-size:12.5px;font-weight:500;color:#1f2937;border:0;border-radius:0;line-height:1.5}
   /* ★PC 는 글자만 — 레거시 메뉴줄과 동일. (CLAUDE §3 아이콘 금지) 모바일 탭은 아이콘 유지 */
@@ -115,12 +134,15 @@
     display:flex;align-items:center;gap:6px}
   #app .card h3 .n{margin-left:auto;color:var(--brand);font-size:16px;font-weight:800}
 
-  #app .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}
+  /* minmax(0,1fr) — 기본 1fr 은 min-width:auto 라 내용이 크면 칸이 늘어나 표를 밀어낸다 */
+  #app .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:11px}
   #app .kpi div{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
     padding:11px 8px;text-align:center;box-shadow:var(--sh)}
   #app .kpi b{display:block;font-size:21px;font-weight:800;color:var(--brand);line-height:1.15}
   #app .kpi span{font-size:11.5px;color:var(--sub)}
 
+  /* ★카드가 넘치면 그 안에서만 가로스크롤 — 페이지 본문은 가로로 밀리지 않는다(CLAUDE §3) */
+  #app .card{overflow-x:auto}
   #app table{width:100%;border-collapse:collapse;font-size:13.5px}
   #app th,#app td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
   #app th{font-size:11.5px;color:var(--sub);font-weight:700;background:#fafbfd;
@@ -262,7 +284,7 @@
             stock:[], lineNames:{}, custTypeNames:{}};
 </script>
 <script src="js/core.js?v=260903magamgubun"></script>
-<script src="js/screens.etc.js?v=260903print2"></script>
+<script src="js/screens.etc.js?v=260903uni"></script>
 
 <script>
 /* ★포털 스크립트 전체를 IIFE 로 감싼다(2026-09-03).
@@ -449,10 +471,11 @@ function tabs(){
   // ★「협력사사급재고관리」는 뺐다(2026-09-03) — 사급 수불장과 같은 원장(nx.sagub_maint)을
   //   보는 중복 화면이고, 수불장이 상위(입고·출고·잔량 + 일자별 이력)라 잔량 컬럼으로 갈음된다.
   t.push({v:'sledg', n:'사급 수불장',          scr:'sagubledger'});
-  // 기존 모바일 화면 — 송장 발행은 여기서만 되므로 남긴다(거래명세서 발행과 별개 흐름).
-  const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
-  if(useInv) t.push({v:'inv', n:'내 송장'});
-  if(staff)  t.push({v:'scan', n:'입고'});
+  /* ★「내 송장」 제거(2026-09-03 사용자 요청 — 화면이 깨졌다).
+       내가 모바일용으로 짠 자체화면인데, PC 전환·내부 ERP 재사용으로 구조가 바뀌면서
+       레이아웃이 맞지 않게 됐다. 세트입고 송장 발행은 「거래명세서 발행」(SCREEN.deliv420)이
+       레거시 흐름 그대로 처리하므로 기능 공백도 없다. 관련 코드(viewInv·doIssue·showQR·recalc)도 함께 삭제. */
+  if(staff)  t.push({v:'scan', n:'입고'});   // 내부 직원 전용 모바일 바코드 스캔
   return t;
 }
 
@@ -515,8 +538,8 @@ function render(){
   document.body.classList.remove('erpview');
   $('#erp').classList.add('hide'); $('#erp').innerHTML=''; ERP_CUR='';   // 떠났으니 다음엔 새로 그린다
   $('#app').classList.remove('hide');
-  // 포털 자체 화면(홈·발주현황·송장·입고) — 모바일 흐름 그대로.
-  const V={home:viewHome, plan:viewPlan, order:viewOrder, scan:viewScan, inv:viewInv};
+  // 포털 자체 화면(홈·발주현황·입고) — 모바일 흐름 그대로. ※'inv'(내 송장)는 제거됨(2026-09-03)
+  const V={home:viewHome, plan:viewPlan, order:viewOrder, scan:viewScan};
   $('#app').innerHTML = (V[VIEW]||viewHome)();
   wire();
 }
@@ -531,7 +554,10 @@ function viewHome(){
     <div><b>${num(t.items)}</b><span>품목</span></div>
     <div><b>${num(DATA.ready_cnt)}</b><span>발행할 송장</span></div>
   </div>
-  ${DATA.ready_cnt ? `<div class="msg k">납품하실 송장 <b>${DATA.ready_cnt}건</b>이 대기 중입니다. [내 송장]에서 발행하세요.</div>` : ''}
+  <!-- ★안내 문구 교체(2026-09-03) — 「내 송장」을 없앴으므로 발행은 「거래명세서 발행」으로 유도한다.
+       버튼을 누르면 바로 그 화면으로 넘어간다(data-go 는 wire() 가 배선). -->
+  ${DATA.ready_cnt ? `<div class="msg k">납품하실 송장 <b>${DATA.ready_cnt}건</b>이 대기 중입니다.
+     <button class="btn g" style="margin-top:8px" data-go="deliv">거래명세서 발행으로 가기</button></div>` : ''}
   <div class="card">
     <h3>가까운 납기<span class="n">${num((DATA.plan||[]).length)}</span></h3>
     ${soon.length ? `<table><tbody>${soon.map(r=>`
@@ -634,115 +660,6 @@ function viewOrder(){
   <div class="foot">피앤씨인더스트리 · 계획·물동은 생산관리 기준</div>`;
 }
 
-/* ───────── 내 송장 : 발행 → QR → 출발 ───────── */
-let SEL = {};          // sheet -> qty
-
-function viewInv(){
-  const inv=DATA.inv||[], ready=DATA.ready||[];
-  const issued=(DATA.issued||[]);
-  return `
-  <div class="card">
-    <h3>발행할 송장<span class="n">${num(ready.length)}</span></h3>
-    ${ready.length ? `
-      <div class="s" style="color:var(--sub);font-size:12.5px;margin-bottom:6px">
-        오늘 납품할 것을 고르고 수량을 확인한 뒤 발행하세요. 발행하면 QR 이 나옵니다.</div>
-      <div class="scroll">${ready.map(r=>`
-        <div class="row">
-          <input type="checkbox" data-sheet="${esc(r.sheet)}" ${SEL[r.sheet]!=null?'checked':''}>
-          <div class="g"><span class="part">${esc(r.item)}</span>
-            <span class="nm">요청 ${esc(ymd(r.ymd))} · 요청수량 ${num(r.qty)}</span></div>
-          <input class="q" type="number" inputmode="numeric" min="0" max="${r.qty}"
-                 data-q="${esc(r.sheet)}" value="${SEL[r.sheet]!=null?SEL[r.sheet]:r.qty}">
-        </div>`).join('')}</div>
-      <div class="sum">
-        <div><b id="selc">0</b><span>선택 도번</span></div>
-        <div><b id="selq">0</b><span>납품수량</span></div>
-      </div>
-      <button class="btn" id="issue" disabled>선택한 송장 발행</button>`
-    : `<div class="empty">발행 대기 중인 송장이 없습니다.</div>`}
-  </div>
-
-  ${issued.length ? `<div class="card">
-    <h3>발행한 송장<span class="n">${num(issued.length)}</span></h3>
-    <div class="scroll">${issued.map(b=>`
-      <div class="row">
-        <div class="g"><span class="part">SET${esc(b.barcode)}</span>
-          <span class="nm">${esc(ymd(b.ymd))} · 도번 ${num(b.cnt)}종 · ${num(b.qty)}개</span></div>
-        <span class="pill p${esc(b.status)}">${esc(ST[b.status]||b.status)}</span>
-        <button class="btn g" style="width:auto;padding:8px 11px;font-size:13px"
-                data-qr="${esc(b.barcode)}">QR</button>
-      </div>`).join('')}</div>
-  </div>` : ''}
-
-  <div class="card">
-    <h3>상태별 현황</h3>
-    ${inv.length ? `<table><tbody>${inv.map(x=>`
-      <tr><td><span class="pill p${esc(x.status)}">${esc(x.nm)}</span></td>
-          <td class="n">${num(x.cnt)}건</td><td class="n">${num(x.qty)}</td></tr>`).join('')}
-      </tbody></table>` : `<div class="empty">송장이 없습니다.</div>`}
-  </div>`;
-}
-
-function recalc(){
-  const c=Object.keys(SEL).length;
-  const q=Object.values(SEL).reduce((a,b)=>a+(Number(b)||0),0);
-  const ec=$('#selc'), eq=$('#selq'), b=$('#issue');
-  if(ec) ec.textContent=num(c);
-  if(eq) eq.textContent=num(q);
-  if(b) b.disabled = !(c>0 && q>0);
-}
-
-async function doIssue(){
-  const items=Object.entries(SEL).map(([sheet,qty])=>({sheet,qty:Number(qty)||0}))
-                                 .filter(x=>x.qty>0);
-  if(!items.length) return;
-  const b=$('#issue'); b.disabled=true; b.textContent='발행 중…';
-  try{
-    const j=await api('/api/setin/issue',{method:'POST',body:JSON.stringify({items})});
-    SEL={};
-    await load();
-    if(j&&j.barcode) showQR(j.barcode, `송장 ${j.count}건을 발행했습니다.`);
-  }catch(e){ alert(e.message); b.disabled=false; b.textContent='선택한 송장 발행'; }
-}
-
-async function showQR(bc, note){
-  const m=document.createElement('div'); m.className='modal';
-  m.innerHTML=`<div class="sheet">
-    <h4>SET${esc(bc)}</h4>
-    <div class="s">${esc(note||'상자에 붙이고, 담당자가 이 QR 을 찍어 입고합니다.')}</div>
-    <div class="qr" id="qrbox">불러오는 중…</div>
-    <div class="qrv">SET${esc(bc)}</div>
-    <div style="display:flex;gap:9px;margin-top:14px">
-      <button class="btn g" id="qrprint">인쇄</button>
-      <button class="btn g" id="qrdepart">출발 처리</button>
-      <button class="btn" id="qrclose">닫기</button>
-    </div></div>`;
-  document.body.appendChild(m);
-  m.querySelector('#qrclose').onclick=()=>m.remove();
-  m.onclick=e=>{ if(e.target===m) m.remove(); };
-  m.querySelector('#qrprint').onclick=()=>{
-    const w=window.open('','_blank');
-    if(!w) return alert('팝업이 차단되었습니다. 브라우저 설정을 확인하세요.');
-    w.document.write(`<title>SET${bc}</title><body style="text-align:center;font-family:sans-serif;padding:24px">
-      ${m.querySelector('#qrbox').innerHTML}
-      <div style="font-size:26px;font-weight:800;letter-spacing:2px;margin-top:10px">SET${bc}</div>
-      </body>`);
-    w.document.close(); w.focus(); setTimeout(()=>w.print(),300);
-  };
-  m.querySelector('#qrdepart').onclick=async()=>{
-    if(!confirm(`SET${bc} 을(를) 출발 처리할까요?`)) return;
-    try{ const j=await api('/api/partner/depart',{method:'POST',body:JSON.stringify({barcode:bc})});
-      alert(j.msg||'출발 처리했습니다.'); m.remove(); load();
-    }catch(e){ alert(e.message); }
-  };
-  try{
-    const r=await fetch(API+'/api/partner/qr?barcode='+encodeURIComponent(bc),
-      {headers:{'Authorization':'Bearer '+T.tok}});
-    m.querySelector('#qrbox').innerHTML = r.ok ? await r.text()
-      : '<div class="msg e">QR 을 만들지 못했습니다.</div>';
-  }catch(e){ m.querySelector('#qrbox').innerHTML='<div class="msg e">QR 오류</div>'; }
-}
-
 /* ───────── 입고 스캔 (담당자 전용) ───────── */
 let SCAN=null;
 function viewScan(){
@@ -832,25 +749,15 @@ async function useCamera(){
   }catch(e){ close(); alert('카메라를 열 수 없습니다 — '+e.message); }
 }
 
-/* ★포털 자체화면(홈·발주현황·송장·입고)의 배선만 남는다(2026-09-03).
+/* ★포털 자체화면(홈·발주현황·입고)의 배선만 남는다(2026-09-03).
      계획현황·거래명세서 발행/수정·사급 수불장은 내부 ERP SCREEN 이 자기 배선을 스스로 한다 —
-     renderErp() 가 SCREEN.xxx(#erp) 를 부르면 그 안에서 이벤트까지 붙는다. */
+     renderErp() 가 SCREEN.xxx(#erp) 를 부르면 그 안에서 이벤트까지 붙는다.
+     ※「내 송장」 제거로 송장 배선(data-sheet·data-q·data-qr·issue·recalc)도 함께 삭제. */
 function wire(){
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
-  document.querySelectorAll('[data-sheet]').forEach(cb=>cb.onchange=()=>{
-    const sh=cb.dataset.sheet, q=document.querySelector(`[data-q="${sh}"]`);
-    if(cb.checked) SEL[sh]=Number(q&&q.value)||0; else delete SEL[sh];
-    recalc();
-  });
-  document.querySelectorAll('[data-q]').forEach(q=>q.oninput=()=>{
-    const sh=q.dataset.q; if(SEL[sh]!=null) SEL[sh]=Number(q.value)||0; recalc();
-  });
-  document.querySelectorAll('[data-qr]').forEach(b=>b.onclick=()=>showQR(b.dataset.qr));
-  const is=$('#issue'); if(is) is.onclick=doIssue;
   const g=$('#go'); if(g) g.onclick=doScan;
   const c=$('#cam'); if(c) c.onclick=useCamera;
   const sc=$('#sc'); if(sc){ sc.focus(); sc.onkeyup=e=>{ if(e.key==='Enter') doScan(); }; }
-  recalc();
 }
 
 /* ───────── 시작 ───────── */

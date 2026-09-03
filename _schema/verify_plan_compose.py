@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.join(_HERE, '..', '..', 'New_ERP'))
 
 AP = argparse.ArgumentParser()
 AP.add_argument('--from', dest='dfrom', default='', help='기준일 YYMMDD(기본=계획 최소일)')
+AP.add_argument('--to', dest='dto', default='', help='종료일 YYMMDD(기본=웹 계획 최대일)')
 AP.add_argument('--top', type=int, default=15, help='차이 상세 출력 건수')
 ARG = AP.parse_args()
 
@@ -65,13 +66,20 @@ def f1(q, *a):
 
 # ── 기준일 ─────────────────────────────────────────────────────────
 DF = ARG.dfrom.strip()
-if not DF:
-    cur.execute("SELECT MIN(RTRIM(ISNULL(PLAN_YMD,''))) FROM nx.plan_dtl WITH(NOLOCK)")
+DT = ARG.dto.strip()
+if not DF or not DT:
+    # ★기본 = **웹 계획 기간**(이상치 제외). 레거시 PR_T_PLAN_* 는 1년 넘게 누적돼 있어
+    #   상한을 안 걸면 "레거시에만 N키"가 수천 건 나온다 — 비교축 오류다(2026-09-03 실측:
+    #   레거 일자 349개 vs 웹 25개). 같은 창으로 잘라야 편성 차이가 보인다.
+    cur.execute("""SELECT MIN(RTRIM(ISNULL(PLAN_YMD,''))), MAX(RTRIM(ISNULL(PLAN_YMD,'')))
+                     FROM nx.plan_dtl WITH(NOLOCK)
+                    WHERE PLAN_YMD BETWEEN '200101' AND '991231'""")
     r = cur.fetchone()
-    DF = (str(r[0]).strip() if r and r[0] else '260901')
+    DF = DF or (str(r[0]).strip() if r and r[0] else '260901')
+    DT = DT or (str(r[1]).strip() if r and r[1] else '991231')
 
 print(BAR)
-print(f' 생산계획 편성 검증 — 웹 ↔ 레거시 대사   (기준일 {DF} 이후)')
+print(f' 생산계획 편성 검증 — 웹 ↔ 레거시 대사   (계획기간 {DF} ~ {DT})')
 print(BAR)
 
 # ── 0. 편성 시점 확인 ★가장 먼저 볼 것 ─────────────────────────────
@@ -96,10 +104,10 @@ for lbl, q in (
 
 # ── 1. 계획 원본 ───────────────────────────────────────────────────
 print('\n[1] 계획 원본 (①의 입구)')
-w = n1("SELECT COUNT(*) FROM nx.plan_dtl WITH(NOLOCK) WHERE PLAN_YMD>=?", DF)
-l = n1("SELECT COUNT(*) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WITH(NOLOCK) WHERE PLAN_YMD>=?", DF)
-wq = f1("SELECT SUM(CAST(PLAN_QTY AS float)) FROM nx.plan_dtl WITH(NOLOCK) WHERE PLAN_YMD>=?", DF)
-lq = f1("SELECT SUM(CAST(PLAN_QTY AS float)) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WITH(NOLOCK) WHERE PLAN_YMD>=?", DF)
+w = n1("SELECT COUNT(*) FROM nx.plan_dtl WITH(NOLOCK) WHERE PLAN_YMD BETWEEN ? AND ?", DF, DT)
+l = n1("SELECT COUNT(*) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WITH(NOLOCK) WHERE PLAN_YMD BETWEEN ? AND ?", DF, DT)
+wq = f1("SELECT SUM(CAST(PLAN_QTY AS float)) FROM nx.plan_dtl WITH(NOLOCK) WHERE PLAN_YMD BETWEEN ? AND ?", DF, DT)
+lq = f1("SELECT SUM(CAST(PLAN_QTY AS float)) FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WITH(NOLOCK) WHERE PLAN_YMD BETWEEN ? AND ?", DF, DT)
 print(f'    행수  웹 {w:,} / 레거 {l:,}   ({w-l:+,})')
 print(f'    수량  웹 {wq:,.0f} / 레거 {lq:,.0f}   ({wq-lq:+,.0f})')
 
@@ -182,7 +190,7 @@ def cmp_grain(title, wtbl, ltbl, wcols, lcols, qty_w, qty_l, where_w='', where_l
 #    ★★기간 필터 필수. 레거시 PR_T_PLAN_ITEM_DTL 은 **전 기간 누적**(110,813키)이고
 #      웹 nx.plan_item_dtl 은 **현재 편성분만**(8,550키) 담는다. 필터 없이 비교하면
 #      "레거시만 102,592키"라는 무의미한 숫자가 나온다(2026-09-02 실측 오판).
-_WPY = f"PLAN_YMD>='{DF}'"
+_WPY = f"PLAN_YMD BETWEEN '{DF}' AND '{DT}'"
 cmp_grain('[3] ④품목별계획 — 그레인 (제번, 품목)',
           'nx.plan_item_dtl', 'PARTNER_ERP.dbo.PR_T_PLAN_ITEM_DTL',
           ['WORK_ORDER', 'C_ITEM_CODE'], ['WORK_ORDER', 'C_ITEM_CODE'],
@@ -196,7 +204,7 @@ cmp_grain('[4] ④파트별계획 — 그레인 (제번, ASSY도번, 품목)',
           ['work_order', 'assy_item_code', 'item_code'],
           ['WORK_ORDER', 'ASSY_ITEM_CODE', 'ITEM_CODE'],
           'part_plan_qty', 'PART_PLAN_QTY',
-          where_w=f"plan_ymd>='{DF}'", where_l=_WPY)
+          where_w=f"PLAN_YMD BETWEEN '{DF}' AND '{DT}'", where_l=_WPY)
 
 # ── 5. ⑤자재소요 ★최소 그레인 ─────────────────────────────────────
 cmp_grain('[5] ⑤자재소요 — ★최소 그레인 (제번, ASSY도번, 자재)',
@@ -204,7 +212,7 @@ cmp_grain('[5] ⑤자재소요 — ★최소 그레인 (제번, ASSY도번, 자�
           ['work_order', 'assy_item_code', 'mat_code'],
           ['WORK_ORDER', 'ASSY_ITEM_CODE', 'MAT_CODE'],
           'part_plan_qty', 'PART_PLAN_QTY',
-          where_w=f"plan_ymd>='{DF}'", where_l=_WPY)
+          where_w=f"PLAN_YMD BETWEEN '{DF}' AND '{DT}'", where_l=_WPY)
 
 # ── 6. ⑤자재소요 — 업체별(운영 관점) ──────────────────────────────
 cmp_grain('[6] ⑤자재소요 — 업체×자재 (발주가 어디로 나가나)',
@@ -212,7 +220,7 @@ cmp_grain('[6] ⑤자재소요 — 업체×자재 (발주가 어디로 나가나
           ['mat_work_center_code', 'mat_code'],
           ['MAT_WORK_CENTER_CODE', 'MAT_CODE'],
           'part_plan_qty', 'PART_PLAN_QTY',
-          where_w=f"plan_ymd>='{DF}'", where_l=_WPY)
+          where_w=f"PLAN_YMD BETWEEN '{DF}' AND '{DT}'", where_l=_WPY)
 
 # ── 6b. ★당김(part_plan_ymd) 대사 ─────────────────────────────────
 #    ★2026-09-02 신설. [4] 는 plan_ymd(생산계획일) 축이라 **당김 차이를 못 잡는다** —
@@ -224,11 +232,11 @@ try:
     cur.execute(f"""
     SELECT w.d, ISNULL(w.q,0), ISNULL(l.q,0), ISNULL(w.q,0)-ISNULL(l.q,0)
       FROM (SELECT RTRIM(ISNULL(part_plan_ymd,'')) d, SUM(CAST(ISNULL(part_plan_qty,0) AS float)) q
-              FROM nx.plan_part_dtl WITH(NOLOCK) WHERE part_plan_ymd>='{DF}'
+              FROM nx.plan_part_dtl WITH(NOLOCK) WHERE part_PLAN_YMD BETWEEN '{DF}' AND '{DT}'
              GROUP BY RTRIM(ISNULL(part_plan_ymd,''))) w
       FULL OUTER JOIN
            (SELECT RTRIM(ISNULL(PART_PLAN_YMD,'')) d, SUM(CAST(ISNULL(PART_PLAN_QTY,0) AS float)) q
-              FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL WITH(NOLOCK) WHERE PART_PLAN_YMD>='{DF}'
+              FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL WITH(NOLOCK) WHERE PART_PLAN_YMD BETWEEN '{DF}' AND '{DT}'
              GROUP BY RTRIM(ISNULL(PART_PLAN_YMD,''))) l ON l.d=w.d
      ORDER BY ISNULL(w.d,l.d)""")
     rows = cur.fetchall()
@@ -244,12 +252,12 @@ try:
     SELECT COUNT(*) FROM
       (SELECT RTRIM(work_order) wo, RTRIM(assy_item_code) a, RTRIM(ISNULL(item_code,'')) i,
               MIN(RTRIM(ISNULL(part_plan_ymd,''))) d
-         FROM nx.plan_part_dtl WITH(NOLOCK) WHERE plan_ymd>='{DF}'
+         FROM nx.plan_part_dtl WITH(NOLOCK) WHERE PLAN_YMD BETWEEN '{DF}' AND '{DT}'
         GROUP BY RTRIM(work_order), RTRIM(assy_item_code), RTRIM(ISNULL(item_code,''))) w
       JOIN
       (SELECT RTRIM(WORK_ORDER) wo, RTRIM(ASSY_ITEM_CODE) a, RTRIM(ISNULL(ITEM_CODE,'')) i,
               MIN(RTRIM(ISNULL(PART_PLAN_YMD,''))) d
-         FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL WITH(NOLOCK) WHERE PLAN_YMD>='{DF}'
+         FROM PARTNER_ERP.dbo.PR_T_PLAN_PART_DTL WITH(NOLOCK) WHERE PLAN_YMD BETWEEN '{DF}' AND '{DT}'
         GROUP BY RTRIM(WORK_ORDER), RTRIM(ASSY_ITEM_CODE), RTRIM(ISNULL(ITEM_CODE,''))) l
         ON l.wo=w.wo AND l.a=w.a AND l.i=w.i
      WHERE w.d<>l.d""")

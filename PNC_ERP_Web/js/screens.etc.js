@@ -484,10 +484,12 @@ const openDelivInvoice=(iv)=>{
   const bodyOf=(pg,pi)=>{
     const out=[];
     pg.forEach((x,i)=>{
+      // ★.pn = 품번칸(ellipsis 끔) — 레거시처럼 품번은 잘리지 않고 전부 보여야 한다(2026-09-03)
+      // ★수량은 **가운데 정렬**(2026-09-03 사용자 요청) — 종전 class="r"(우측)에서 변경
       out.push(`<tr><td>${pi*ROWN+i+1}</td>`
-        +`<td title="${esc(x.doban)}">${esc(x.doban)}</td>`
-        +`<td class="l" title="${esc(x.sub||'')}">${esc(x.sub||'')}</td>`
-        +`<td class="l" title="${esc(x.nm)}">${esc(x.nm)}</td><td class="r">${_fmNf(x.qty)}</td>`
+        +`<td class="pn" title="${esc(x.doban)}">${esc(x.doban)}</td>`
+        +`<td class="l pn" title="${esc(x.sub||'')}">${esc(x.sub||'')}</td>`
+        +`<td class="l" title="${esc(x.nm)}">${esc(x.nm)}</td><td>${_fmNf(x.qty)}</td>`
         +`<td>${esc(x.insp||'')}</td><td>${esc(x.note||'')}</td></tr>`);
     });
     for(let i=pg.length;i<ROWN;i++)
@@ -510,22 +512,45 @@ const openDelivInvoice=(iv)=>{
            ⟹ ①패딩을 좌우 2px 로 줄이고(=4px 절약) ②헤더 글자를 줄이고('수 량'→'수량')
               ③잘리던 3칸에 실제 필요폭을 준다.
 
-         인쇄 523px 기준 배분: No 6%(31px→내용 25px, '10','20' 여유) ·
-           Assy 20% · 하위 22% · 품명(나머지 ≈29%) · 수량 8.5%(44→38px) ·
-           검사 6%(31→25px, 헤더'검사'+값'유') · 비고 8.5%
-         품명은 무지정(<col>)이라 나머지를 갖고, 넘치면 ellipsis+title 툴팁(레거시도 잘린다). -->
-    <table class="it"><colgroup><col style="width:6%"><col style="width:20%"><col style="width:22%"><col><col style="width:8.5%"><col style="width:6%"><col style="width:8.5%"></colgroup>
+         ★★★6차(2026-09-03) — **레거시 실물 대조로 확정**. 사용자 지적 "레거시처럼 다 보여야 한다".
+           5차까지의 잘못: 헤더 글자만 재고 **데이터 값**을 안 쟀다. 그래서 헤더는 들어가는데
+           하위 P/No. 의 'AJR30078601-12-1'(16자)이 ... 로 잘렸다.
+           레거시 w_preview 실물에서는 이 16자가 **한 줄에 온전히** 나온다.
+
+           실측 계산(한 단 532px · 10.5px 폰트 · 영숫자 5.78px/자 · 한글 10.5px/자 · 셀손실 6px):
+             No 2자=17.6px · Assy 11자=69.5 · 하위 16자=98.4 · 품명 18자=110 ·
+             수량 5자=34.9 · 검사 한글3자('유검사')=37.5 · 비고 한글3자('직납품')=37.5
+             합 405px < 532px  → 전부 한 줄에 들어간다. 남는 127px 는 품번·품명에 여유로 배분.
+         ★★★8차(2026-09-03) — **최종**. 앞선 6·7차는 칸을 하나씩 손보다 매번 다른 칸을 깨뜨렸다.
+           전 항목(헤더+데이터)의 최장값을 한 번에 계산해 배분한다.
+
+           실측(한 단 539px · 10.5px · 자간 -0.2 · 셀손실 6px) — 각 칸의 최장값:
+             No.'No.'22.7 · Assy'AJR30027701'67.3 · 하위'AJR30027701-12-3'95.2 ·
+             품명'대원 SUB(01/05작업)'108.5 · 수량'1,234'33.9 · 검사'유검사'36.9 · 비고'직납품'36.9
+             최소합 401px → **여유 138px**. 즉 폰트를 줄일 필요가 없었다(비율 배분이 문제였다).
+           ★9차(2026-09-03 최종) — 8차도 'AJR30027701-12-1' 뒷자리가 잘렸다.
+             원인: 영숫자 폭을 0.55×fs 로 추정했는데 맑은고딕 실제는 **0.62×fs** 다.
+             보수적 추정(0.62) + 안전여유 10% 로 재계산 → 최소합 479px / 539px, 여유 60px.
+           최종: No 5.5% · Assy 17.5% · 하위 23% · 품명(30.1%) · 수량 7.6% · 검사 8.1% · 비고 8.1%
+         ★그리고 **추정에 의존하지 않도록** 렌더 후 실제 폭을 재서 넘치는 칸만 자동 축소한다
+           (아래 fitCells 스크립트). 계산이 빗나가도 인쇄물에서는 잘리지 않는다.
+         ★품번 2칸은 ellipsis 를 끈다(.it td.pn) — 레거시처럼 전부 보여야 한다. -->
+    <table class="it"><colgroup><col style="width:5.5%"><col style="width:17.5%"><col style="width:23%"><col><col style="width:7.6%"><col style="width:8.1%"><col style="width:8.1%"></colgroup>
     <thead><tr><th>No.</th><th>Assy P/No.</th><th>하위 P/No.</th><th>품명</th><th>수량</th><th>검사</th><th>비고</th></tr></thead>
-    <tbody>${bodyOf(pg,pi)}<tr class="tot"><td colspan="4" class="r">합계</td><td class="r">${_fmNf(iv.total)}</td><td colspan="2"></td></tr></tbody></table>
+    <tbody>${bodyOf(pg,pi)}<tr class="tot"><td colspan="4" class="r">합계</td><td>${_fmNf(iv.total)}</td><td colspan="2"></td></tr></tbody></table>
     <div class="ft"><div class="bc"><div class="bt">${esc(iv.barcode)}</div><img src="${bc}"></div>
       <table class="sp"><tr><td>자재팀</td><td>품질팀</td></tr><tr><td class="bx"></td><td class="bx"></td></tr></table></div></div>`;
   const w=window.open('','_blank','width=1240,height=900');
   if(!w)return alert('팝업 차단됨 — 팝업 허용 후 다시 시도하세요.');
   w.document.write(`<html><head><title>거래명세표${iv.svcmark?' ['+esc(iv.svcmark)+']':''} ${esc(iv.barcode)}</title><meta charset="utf-8"><style>
-    @page{size:A4 landscape;margin:6mm}
+    /* ★★★여백 최소화(2026-09-03) — 칸을 조금씩 조정해선 계속 다른 곳이 터진다.
+         근본 원인은 **가용폭 부족**이었다. 실측: A4가로 1122px 에서 여백이 77px 를 먹어
+         한 단 522px 뿐이었다. 여백을 줄여 한 단을 539px 로 넓힌다(+17px).
+         @page 6→4mm · body 6→0px · gap 12→6px  (레거시 실물도 여백이 거의 없다) */
+    @page{size:A4 landscape;margin:4mm}
     .svcm{color:#c00;font-weight:700}
-    body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;margin:6px;font-size:10.5px;color:#000}
-    .wrap{display:flex;gap:12px}.cp{flex:1;padding:2px}
+    body{font-family:'맑은 고딕',Malgun Gothic,sans-serif;margin:0;font-size:10.5px;color:#000}
+    .wrap{display:flex;gap:6px}.cp{flex:1;padding:2px;min-width:0}
     .tt{text-align:center;font-size:19px;font-weight:700;letter-spacing:3px;text-decoration:underline}
     .sb{text-align:center;font-size:11px;margin:2px 0 4px}
     .mt{display:flex;justify-content:space-between;font-size:10.5px;margin:2px 0}
@@ -536,36 +561,117 @@ const openDelivInvoice=(iv)=>{
     .pi td{border:1px solid #000;padding:0;vertical-align:middle}
     .pi>tbody>tr>td:nth-child(2),.pi>tbody>tr>td:nth-child(4){width:calc(50% - 15px)}
     .vl{width:15px;text-align:center;font-weight:600;font-size:10px;line-height:1.15}
-    .pt{border:none;table-layout:fixed}.pt td{border:1px solid #000;padding:2px 4px;height:19px}
-    .pt .k{width:56px;text-align:center;white-space:nowrap;font-size:10px}
+    /* ★상단 정보표(2026-09-03 교정) — '(주)피앤씨인더스...' 가 잘리고 주소가 3줄로 깨졌다.
+         한 단 539px → .pi 값칸 = (539-30)/2 ≈ 254px, 거기서 라벨 k 를 빼면 값칸이 남는다.
+         라벨 56px 은 과하다('등록번호' 4자 = 42px + padding 8 = 50px). 48px 로 줄여 값칸을 넓힌다.
+         padding 도 4px→3px (칸당 2px 절약). 상호는 ellipsis 를 끄고 자간으로 담는다. */
+    .pt{border:none;table-layout:fixed}.pt td{border:1px solid #000;padding:2px 3px;height:19px}
+    .pt .k{width:48px;text-align:center;white-space:nowrap;font-size:9.5px;letter-spacing:-.4px}
     /* 주소는 두 줄까지 허용(레거시 동일), 나머지는 한 줄 고정 */
-    .pt td:not(.k){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .pt tr:nth-child(4) td:not(.k){white-space:normal;line-height:1.25;height:30px}
+    .pt td:not(.k){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.2px}
+    /* ★상호(2행)는 자르지 않는다 — '(주)피앤씨인더스트리'(11자)가 다 보여야 한다 */
+    .pt tr:nth-child(2) td:not(.k){text-overflow:clip;font-size:10px;letter-spacing:-.35px}
+    /* 주소(4행)는 2줄 허용 — 3줄로 깨지지 않게 높이를 넉넉히 */
+    .pt tr:nth-child(4) td:not(.k){white-space:normal;line-height:1.2;height:32px;
+      font-size:9.5px;letter-spacing:-.3px;text-overflow:clip}
     /* ★padding 좌우 3px→2px (2026-09-03) — 셀마다 6px+테두리2px 가 내용 폭에서 빠져
          좁은 칸(No.·수량·검사)의 헤더가 잘렸다. 2px 로 줄여 칸당 2px 를 되돌린다. */
     .it th,.it td{border:1px solid #000;padding:1px 2px;text-align:center;height:18px;
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .it .l{text-align:left}.it .r{text-align:right}
-    /* ★좁은 칸은 글자를 살짝 좁혀 확실히 담는다(가독성은 유지되는 범위).
-         No.(1) · 수량(5) · 검사(6) · 비고(7) — 품번·품명은 건드리지 않는다. */
-    .it th:nth-child(1),.it td:nth-child(1),
-    .it th:nth-child(5),.it td:nth-child(5),
-    .it th:nth-child(6),.it td:nth-child(6),
-    .it th:nth-child(7),.it td:nth-child(7){letter-spacing:-.3px}
+    /* ★★★8차 확정(2026-09-03) — 칸 폭을 전 항목 최장값 기준으로 배분했으므로(위 colgroup)
+         **글자를 줄이지 않는다.** 6·7차에서 데이터만/헤더만 축소했다가 서로 어긋나
+         한쪽이 계속 잘렸다(N.. / Assy P... / 합계 5...). 이제 폰트는 전부 10.5px 통일,
+         자간만 -0.2px 로 계산과 맞춘다. 품번칸은 ellipsis 만 끈다(레거시처럼 전부 보이게). */
+    .it th,.it td{letter-spacing:-.2px}
+    .it td.pn{text-overflow:clip}
     .it thead th{font-weight:700}
     /* 헤더는 어떤 칸이든 줄바꿈 없이 한 줄 — 좁아도 잘림 표시(…)로만 */
     .it thead th{white-space:nowrap}
     .tot td{font-weight:700}
-    .ft{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}
+    /* ★바코드·결재란은 품목표 **바로 아래**에 붙는다(레거시 실물 2026-09-03) */
+    .ft{display:flex;justify-content:space-between;align-items:flex-start;margin-top:2px}
     .bc{border:1.5px solid #000;padding:3px 6px;min-width:210px}
     .bc img{height:34px;display:block;width:100%}
     .bt{font-family:'맑은 고딕',monospace;font-size:12px;font-weight:700;margin-bottom:2px}
     .sp{width:200px}.sp td{border:1px solid #000;text-align:center;padding:2px;font-size:10.5px}
     .sp .bx{height:34px}
-    @media print{.noprint{display:none}}</style></head>
+    /* ★★★한 장(제목+정보표+품목표+바코드/결재란)은 절대 쪼개지지 않는다(2026-09-03 사용자 지적).
+         증상: 바코드·결재란만 표에서 떨어져 아래로 밀렸다 = 페이지 경계에서 .cp 가 쪼개진 것.
+         .wrap(2단) 과 .cp(한 단) 둘 다 avoid 를 걸고, 표·하단부도 각각 묶는다. */
+    .wrap{page-break-inside:avoid;break-inside:avoid}
+    .cp{page-break-inside:avoid;break-inside:avoid}
+    .it{page-break-inside:avoid;break-inside:avoid}
+    .ft{page-break-inside:avoid;break-inside:avoid}
+    @media print{
+      .noprint{display:none}
+      /* 인쇄에서도 동일 — 브라우저별로 break-inside 해석이 달라 양쪽 다 준다 */
+      .wrap,.cp,.it,.ft{page-break-inside:avoid;break-inside:avoid}
+    }</style></head>
     <body><div class="noprint" style="margin-bottom:6px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button>
       <span style="margin-left:8px;color:#555;font-size:11px">${esc(iv.barcode)} · ${_rows.length}건 · ${PN}페이지</span></div>
-    ${pages.map((pg,pi)=>`<div class="wrap"${pi?' style="page-break-before:always"':''}>${copy('공급자',pg,pi)}${copy('공급받는자',pg,pi)}</div>`).join('')}</body></html>`);
+    ${pages.map((pg,pi)=>`<div class="wrap"${pi?' style="page-break-before:always"':''}>${copy('공급자',pg,pi)}${copy('공급받는자',pg,pi)}</div>`).join('')}
+    <script>
+    /* ★★★자동 맞춤(2026-09-03) — 잘림을 **추정 계산에 맡기지 않는다**.
+         경위: 칸 폭을 6차에 걸쳐 계산으로 조정했지만 매번 어딘가 잘렸다.
+               원인은 폰트 advance width 추정치가 실제와 달랐던 것(0.55 vs 실제 0.62).
+         해결: 렌더 후 브라우저가 **실제 폭**(scrollWidth vs clientWidth)을 재서
+               넘치는 칸만 글자를 줄인다. 계산이 빗나가도 인쇄물은 잘리지 않는다.
+         · 헤더/본문 모두 대상. 셀 단위가 아니라 **컬럼 단위**로 같은 크기를 적용해
+           같은 열이 들쭉날쭉해지지 않게 한다(레거시처럼 균일).
+         · 축소는 자간(-0.2 → -0.8) → 폰트(10.5 → 최소 7.5px) 순.
+       ⚠실행 시점이 중요하다 — document.write 직후엔 폰트·레이아웃이 아직 확정되지 않아
+         scrollWidth 가 clientWidth 와 같게 나온다(=넘침을 못 잡는다).
+         onload(폰트 로딩 완료) + requestAnimationFrame(레이아웃 확정) 뒤에 잰다. */
+    (function(){
+      /* ★★★글자 크기는 **표 전체에서 하나로 통일**한다(2026-09-03 사용자 요청).
+           종전엔 컬럼별로 따로 줄여서, 어떤 칸은 크고 어떤 칸은 작아 보기 나빴다.
+           (게다가 좌/우 두 장이 서로 다르게 줄어 짝이 안 맞았다)
+         ⟹ ①모든 칸이 담길 때까지 표 전체를 같이 줄인다
+            ②같은 인쇄물의 모든 표(공급자·공급받는자)에 **같은 최종값**을 적용한다. */
+      function shrinkAll(tables){
+        var cells=[];
+        for(var t=0;t<tables.length;t++){
+          var rows=tables[t].rows;
+          for(var r=0;r<rows.length;r++)
+            for(var c=0;c<rows[r].cells.length;c++){
+              var cell=rows[r].cells[c];
+              if(cell.colSpan>1)continue;
+              cells.push(cell);
+            }
+        }
+        if(!cells.length)return;
+        function overflowing(){
+          for(var i=0;i<cells.length;i++)
+            if(cells[i].scrollWidth>cells[i].clientWidth+1)return true;
+          return false;
+        }
+        if(!overflowing())return;
+        var base=parseFloat(getComputedStyle(cells[0]).fontSize)||10.5;
+        var ls=-0.2, fs=base, guard=0;
+        while(overflowing()&&guard++<24){
+          if(ls>-0.8){ ls-=0.1; }
+          else if(fs>7.5){ fs-=0.25; }
+          else break;
+          for(var k=0;k<cells.length;k++){
+            cells[k].style.letterSpacing=ls+'px';
+            cells[k].style.fontSize=fs+'px';
+          }
+        }
+      }
+      function run(){
+        // 품목표끼리 · 정보표끼리 각각 통일(둘은 원래 글자 크기가 다르다)
+        shrinkAll(document.querySelectorAll('table.it'));
+        shrinkAll(document.querySelectorAll('table.pt'));
+      }
+      // 폰트 로딩까지 기다린 뒤 두 번 잰다(첫 회에 못 잡는 잔여 넘침 대비)
+      function go(){ requestAnimationFrame(function(){ run(); requestAnimationFrame(run); }); }
+      if(document.fonts&&document.fonts.ready) document.fonts.ready.then(go); else go();
+      window.addEventListener('load', go);
+      window.addEventListener('beforeprint', run);   // 인쇄 직전에도 한 번 더
+    })();
+    <\/script>
+    </body></html>`);
   w.document.close();
 };
 // ★거래명세표 양식 공유(2026-08-31) — 「거래명세표 수정」의 재출력도 같은 서식을 써야 한다.
@@ -677,11 +783,15 @@ const openInspSheet=(iv)=>{
     subs.forEach(s=>list.push(Object.assign({}, x, {_sub:String(s||'').split('(')[0]||x.doban})));
   });
   if(!list.length)return;
+  /* ★상단 줄 = [좌측 기입란] [제목] [결제란]  — 레거시 실물과 동일(2026-09-03 사용자 요청).
+       레거시에는 제목 **왼쪽에도 빈 박스**(수기 기입란)가 있고, 결제란은 4면 테두리가 다 있는
+       완전한 표다. 종전 웹은 좌측 박스가 없고 결제란 우측이 열려 있었다. */
   const sheet=(x)=>`
     <table class="is">
-      <tr><td class="tt" colspan="10">출 하 검 사 성 적 서${iv.svcmark?` <span class="svcm">[${esc(iv.svcmark)}]</span>`:''}</td>
-          <th class="gj" rowspan="2">결<br>제</th><th>담당</th><th>Q.A팀장</th></tr>
-      <tr><td class="bx"></td><td class="bx"></td></tr>
+      <tr><td class="lbx" rowspan="2"></td>
+          <td class="tt">출 하 검 사 성 적 서${iv.svcmark?` <span class="svcm">[${esc(iv.svcmark)}]</span>`:''}</td>
+          <th class="gj" rowspan="2">결<br>제</th><th class="gh">담당</th><th class="gh">Q.A팀장</th></tr>
+      <tr><td class="tt2"></td><td class="bx"></td><td class="bx"></td></tr>
     </table>
     <table class="is2">
       <!-- ★열 폭(레거시 실물 비율): 라벨칸은 좁게, P/NO 값칸은 품번 19자가 들어가게 넓게 -->
@@ -716,7 +826,12 @@ const openInspSheet=(iv)=>{
              &nbsp;&nbsp;&nbsp;&nbsp; → 합지 세척관리 확인<br>&nbsp;&nbsp; Pipe 내·외관 찍힘, 눌림, 스크래치 없을 것.</td>
           <td></td><td></td></tr>
     </table>`;
-  const PG=[]; for(let i=0;i<list.length;i+=2) PG.push(list.slice(i,i+2));
+  /* ★★★한 페이지 = **같은 품번 2장**(2026-09-03 사용자 확정).
+       용도: 잘라서 위는 피앤씨, 아래는 협력사가 보관한다(거래명세표의 공급자/공급받는자와 같은 구조).
+       ⚠종전 `list.slice(i,i+2)` 는 **서로 다른 품번 2개**를 한 장에 넣었다(내 오해).
+         그러면 잘랐을 때 양쪽이 다른 품번이 되어 보관용으로 쓸 수 없다.
+       ⟹ 품번 1개당 페이지 1장, 그 안에 같은 성적서를 2번 그린다. */
+  const PG=list.map(x=>[x, x]);
   const w=window.open('','_blank','width=900,height=1100');
   if(!w)return alert('팝업 차단됨 — 팝업 허용 후 다시 시도하세요.');
   w.document.write(`<html><head><title>출하검사성적서${iv.svcmark?' ['+esc(iv.svcmark)+']':''} ${esc(iv.barcode)}</title><meta charset="utf-8"><style>
@@ -738,27 +853,102 @@ const openInspSheet=(iv)=>{
     .is td,.is th,.is2 td,.is2 th,.is3 td,.is3 th,.is4 th{white-space:nowrap;overflow:hidden}
     /* 폭이 빠듯한 칸은 글자를 조금 좁혀 확실히 담는다(레거시도 작은 글씨다) */
     .is2 td,.is3 td{letter-spacing:-.2px}
-    .tt{font-size:17px;font-weight:700;letter-spacing:6px;height:34px;border:none;border-bottom:none}
-    .is{border:none}.is td.tt{border:none}
-    /* ★결제란 — 'Q.A팀장'(6자)이 안 들어가 세로로 깨졌다. 폭을 주고 글자를 줄인다. */
-    .gj{width:22px;font-size:10px;line-height:1.2;white-space:normal}
-    .is th{font-weight:700}
-    .is>tbody>tr>th:not(.gj){width:58px;font-size:9.5px;letter-spacing:-.3px}
-    .bx{height:26px}
-    .is2 th{width:64px;font-size:10px}
-    /* ★단품 P/NO 값 — 'AJR76462634-12-1'(16자)이 두 줄로 깨졌다. 한 줄에 맞춰 축소. */
-    .is2 td{font-size:10.5px}
-    .is3 th{font-size:10px}.is3 .v{font-weight:700}
-    /* ★검사수준 '유외치분석'(5자) 전용 — 11% 칸에 한 줄로 들어가게 */
-    .is3 td{font-size:10px}
+    /* ★상단 줄(2026-09-03 레거시 대조) — [좌측 기입란][제목][결제 표]
+         · .is 는 표 자체 테두리 없음. 제목칸만 테두리를 지우고 나머지는 4면 다 그린다.
+         · 종전엔 결제란 우측이 열려 있었다(td 개수와 colspan 이 안 맞았다). */
+    .is{border:none;table-layout:fixed}
+    .is td,.is th{border:1px solid #000}
+    .is td.tt,.is td.tt2{border:none;text-align:center}
+    .tt{font-size:17px;font-weight:700;letter-spacing:6px;height:22px}
+    .tt2{height:12px}
+    /* 좌측 기입란 — 레거시에 있는 빈 박스(수기용) */
+    .lbx{width:120px}
+    /* 결제란 — '결제' 세로 2자 + [담당][Q.A팀장] */
+    .gj{width:20px;font-size:10px;line-height:1.15;white-space:normal;text-align:center;font-weight:700}
+    .gh{width:62px;font-size:9.5px;letter-spacing:-.3px;text-align:center;font-weight:700;height:16px}
+    .bx{height:22px}
+    /* ★폰트 통일(2026-09-03 사용자 요청) — 헤더 10px / 본문 10.5px 로 섞여 있어
+         "어떤 건 크고 어떤 건 작다"는 지적이 나왔다. 표 안은 한 크기로 맞춘다.
+         (더 줄여야 하면 아래 shrinkAll 이 **표 전체를 같이** 줄인다) */
+    .is2 th{width:64px}
+    .is2 th,.is2 td{font-size:10px}
+    .is3 th,.is3 td{font-size:10px}
+    .is3 .v{font-weight:700}
     .is4 th{height:20px}.is4 .l{text-align:left;vertical-align:top;height:70px}
     .sm{font-size:9.5px;line-height:1.45;white-space:normal}
-    @media print{.np{display:none}}
+    /* ★A4 1장 = 성적서 2장. page-break 는 **인쇄에만** 적용돼 미리보기에선 경계가 안 보인다
+         → 화면에서는 페이지를 종이처럼 그려 "2장씩 한 페이지"를 눈으로 확인할 수 있게 한다
+         (2026-09-03 사용자 확인 요청). 인쇄할 땐 이 장식을 전부 끈다. */
+    /* ⚠width:210mm + padding 을 주면 표가 A4 안쪽 폭을 넘어 우측(판정·검사원)이 잘린다
+         (2026-09-03 실제 증상). @page margin 8mm 과 **같은 여백**을 쓰고 box-sizing 으로
+         전체가 210mm 를 넘지 않게 한다. */
+    .pg{background:#fff;padding:8mm;margin:0 auto 14px;width:210mm;box-sizing:border-box;
+        box-shadow:0 2px 10px rgba(0,0,0,.18);position:relative}
+    .pgno{position:absolute;top:2mm;right:4mm;font-size:9px;color:#999}
+    body{background:#e9edf3}
+    @media print{
+      .np{display:none}
+      body{background:#fff}
+      .pg{background:none;padding:0;margin:0;width:auto;box-shadow:none}
+      .pgno{display:none}
+      .pg+.pg{page-break-before:always}
+    }
   </style></head><body>
     <div class="np" style="margin:0 0 10px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button>
-      <span style="margin-left:8px;color:#555;font-size:11px">출하검사성적서 · 검사품 ${list.length}건 · ${PG.length}페이지</span></div>
-    ${PG.map((pg,pi)=>`<div${pi?' style="page-break-before:always"':''}>
+      <span style="margin-left:8px;color:#555;font-size:11px">출하검사성적서 · 검사품 ${list.length}건 · ${PG.length}페이지 · <b>페이지당 같은 성적서 2장</b>(점선에서 잘라 위=피앤씨 / 아래=협력사)</span></div>
+    ${PG.map((pg,pi)=>`<div class="pg"><span class="pgno">${pi+1}/${PG.length}</span>
        ${pg.map(x=>`<div class="sh">${sheet(x)}</div>`).join('')}</div>`).join('')}
+    <script>
+    /* ★자동 맞춤 — 거래명세표와 같은 방식·같은 실행시점(2026-09-03).
+         칸 폭을 추정으로 잡지 않고, 렌더 후 **실제 폭**을 재서 넘치는 칸만 글자를 줄인다.
+         ⚠document.write 직후엔 폰트·레이아웃이 미확정이라 scrollWidth 가 안 잡힌다.
+           document.fonts.ready + requestAnimationFrame 뒤에 재야 한다. */
+    (function(){
+      /* ★글자 크기는 같은 종류의 표끼리 **하나로 통일**한다(거래명세표와 동일 규칙).
+           컬럼별로 따로 줄이면 칸마다 크기가 달라 보기 나쁘고, 위/아래 2장이 짝이 안 맞는다. */
+      function shrinkAll(tables){
+        var cells=[];
+        for(var t=0;t<tables.length;t++){
+          var rows=tables[t].rows;
+          for(var r=0;r<rows.length;r++)
+            for(var c=0;c<rows[r].cells.length;c++){
+              var cell=rows[r].cells[c];
+              if(cell.colSpan>1||cell.rowSpan>1)continue;
+              cells.push(cell);
+            }
+        }
+        if(!cells.length)return;
+        function over(){
+          for(var i=0;i<cells.length;i++)
+            if(cells[i].scrollWidth>cells[i].clientWidth+1)return true;
+          return false;
+        }
+        if(!over())return;
+        var base=parseFloat(getComputedStyle(cells[0]).fontSize)||10;
+        var ls=-0.2, fs=base, guard=0;
+        while(over()&&guard++<24){
+          if(ls>-0.8){ ls-=0.1; }
+          else if(fs>7){ fs-=0.25; }
+          else break;
+          for(var k=0;k<cells.length;k++){
+            cells[k].style.letterSpacing=ls+'px';
+            cells[k].style.fontSize=fs+'px';
+          }
+        }
+      }
+      function run(){
+        // 표 종류별로 각각 통일(원래 글자 크기가 다르다)
+        shrinkAll(document.querySelectorAll('table.is'));
+        shrinkAll(document.querySelectorAll('table.is2'));
+        shrinkAll(document.querySelectorAll('table.is3'));
+        shrinkAll(document.querySelectorAll('table.is4'));
+      }
+      function go(){ requestAnimationFrame(function(){ run(); requestAnimationFrame(run); }); }
+      if(document.fonts&&document.fonts.ready) document.fonts.ready.then(go); else go();
+      window.addEventListener('load', go);
+      window.addEventListener('beforeprint', run);
+    })();
+    <\/script>
     </body></html>`);
   w.document.close();
 };
@@ -1108,8 +1298,11 @@ SCREEN.deliv420=(c)=>{
        <button class="btn" id="d4-prt">🖨️ 자재부품표</button>
        <button class="btn" id="d4-blank">빈양식</button>
        <button class="btn" id="d4-issue" style="background:#2e86de;color:#fff" ${busy?'disabled':''}>📦 납품처리 (${chkn})</button>
-       <button class="btn" id="d4-sticker" title="발행번호로 스티커(바코드) 재출력">🏷️ 스티커</button>
-       <button class="btn" id="d4-invoice" title="발행번호로 거래명세표 재출력">🧾 거래명세표</button>
+       <!-- ★[스티커]·[거래명세표] 재출력 버튼 제거(2026-09-03 사용자 요청 — 사용하지 않음).
+              둘 다 '발행번호(바코드)를 prompt 로 물어 재출력'하는 보조 기능이었다.
+              발행 시에는 printSet() 이 3종(거래명세표·납품표·검사성적서)을 자동 출력하고,
+              지난 건 재출력은 「거래명세표 수정」 화면의 [출력] 버튼이 담당하므로 공백 없음.
+              인쇄 함수(openDelivInvoice·labelPrint 등)는 그쪽에서 쓰므로 그대로 둔다. -->
        <button class="btn" id="d4-cancel">발행취소</button>
        <div class="spacer"></div>
        <span class="rowcount">${nf(data.cnt||0)}건 · 완료 <b>${nf(S.done||0)}</b>/계획 ${nf(S.plan||0)} · 발행 ${nf(S.issued||0)}</span>
@@ -1429,13 +1622,11 @@ SCREEN.deliv420=(c)=>{
     g('#d4-cancel').onclick=cancelIssue;
     g('#d4-prt').onclick=()=>printView(rows,false);
     g('#d4-blank').onclick=()=>printView(rows,true);
-    g('#d4-invoice').onclick=()=>reprint('invoice');
-    // ★스티커설정·프린터설정 버튼은 툴바에서 뺐다(레거시 대조·2026-08-27). 기능은 유지 —
-    //   스티커 버튼 우클릭 = 라벨규격/매수 설정, Shift+클릭 = 프린터 설정.
-    const stk=g('#d4-sticker');
-    if(stk){ stk.onclick=e=>{ if(e.shiftKey)openPrinterSetup(); else reprint('sticker'); };
-             stk.oncontextmenu=e=>{ e.preventDefault(); openLabelSetup(); };
-             stk.title='발행번호로 스티커 재출력 · 우클릭=스티커설정 · Shift+클릭=프린터설정'; }
+    /* ★[스티커]·[거래명세표] 버튼 제거에 따라 그 배선도 삭제(2026-09-03).
+         ⚠종전 d4-invoice 배선은 **null 가드가 없었다** — 버튼만 지우면 TypeError 로
+           화면 전체가 죽는다. 버튼을 뺄 때는 배선까지 같이 지울 것.
+         ※reprint()·openLabelSetup()·openPrinterSetup() 함수 자체는 남겨둔다 —
+           스티커 라벨 설정(LBL)은 발행 시 자동 인쇄 경로에서 계속 쓰인다. */
     // ★전체선택 — 켤 땐 대상행(요청>0)만, 끌 땐 **체크된 것 전부** 해제한다.
     //   (해제 때도 ed 조건을 걸면 요청이 0으로 바뀐 행이 체크된 채 남는다)
     const all=g('#d4-all');
@@ -1956,14 +2147,25 @@ SCREEN.sagubadjust=(c)=>{
 
 /* ===== 협력사: 사급 수불장 (탭: 사급부품·원소재·용접봉) ===== */
 SCREEN.sagubledger=(c)=>{
+  /* ★협력사 로그인이면 「사급부품」 탭만 보인다(2026-09-03).
+       원소재(/api/rawmatledger/*)·용접봉(/api/weldledger/*)은 COOP_ALLOW 화이트리스트에
+       없어 협력사가 누르면 403 이 난다 — 눌러야 막히는 탭을 보여줄 이유가 없다.
+       판정은 로그인 사용자 유형으로 한다(AUTH.user.utype). 서버가 최종 차단하므로
+       이건 UI 정리일 뿐 보안 경계가 아니다. */
+  const isCoop=()=>{try{
+    const u=(typeof AUTH!=='undefined')&&AUTH.user;
+    return !!(u&&(u.utype==='협력사'||u.partner_code));
+  }catch(e){return false;}};
+  const TABS=isCoop()?[['part','사급부품']]:[['part','사급부품'],['raw','원소재'],['weld','용접봉']];
   let tab=(c.__satab||'part');
+  if(!TABS.some(([k])=>k===tab)) tab='part';          // 협력사가 옛 탭 상태로 들어와도 사급부품
   const set=t=>{tab=t;c.__satab=t;draw();};
   const draw=()=>{
     c.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
-      <div style="flex:0 0 auto;display:flex;gap:2px;border-bottom:2px solid var(--line);padding:4px 2px 0">
-        ${[['part','사급부품'],['raw','원소재'],['weld','용접봉']].map(([k,n])=>
+      ${TABS.length>1?`<div style="flex:0 0 auto;display:flex;gap:2px;border-bottom:2px solid var(--line);padding:4px 2px 0">
+        ${TABS.map(([k,n])=>
           `<button class="btn ${tab===k?'':'ghost'}" data-t="${k}" style="border-radius:6px 6px 0 0;${tab===k?'background:#1c7c3a;color:#fff':''}">${n}</button>`).join('')}
-      </div>
+      </div>`:''}
       <div id="sa-sub" style="flex:1;min-height:0"></div></div>`;
     c.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>set(b.dataset.t));
     const sub=c.querySelector('#sa-sub');
@@ -1982,9 +2184,16 @@ const _tabPart=(c)=>{
   let st={rows:[],custs:[],tot:{},cust:"",mat:"",sign:"",scope:"sent",
           fr:"2026-07-01",to:iso(now),sortKey:"",sortDir:1,loading:false,
           sel:null,detail:[],dfinal:0,dloading:false};
+  const SLSEL={rows:null};   // ★행 드래그 선택 범위(Ctrl+C 복사 대상) — 2026-09-03
+  /* ★협력사 판정 = 서버가 준 거래처 목록이 1건뿐(2026-09-03, 다른 협력사 화면과 같은 방식).
+       auth.scope_cust() 가 협력사에겐 자기 거래처 1건만 준다 → 고를 게 없으니 고정한다.
+       내부 직원은 18건이 와서 거짓 = 종전대로 골라서 조회(빈칸=전체). */
+  const isSolo=()=>(st.custs||[]).length===1;
+  const soloFix=()=>{ if(isSolo() && st.cust!==st.custs[0].code) st.cust=st.custs[0].code||''; };
   const load=async()=>{st.loading=true;st.sel=null;draw();
     try{const r=await fetch(`${API}/api/sagubledger/list?cust=${encodeURIComponent(st.cust)}&mat=${encodeURIComponent(st.mat)}&fr=${yy(st.fr)}&to=${yy(st.to)}&sign=${st.sign}&scope=${st.scope}`);
       const j=await r.json();st.rows=j.rows||[];st.custs=j.custs||[];st.tot=j.tot||{};}catch(e){st.rows=[];}
+    soloFix();                      // 협력사면 자기 거래처로 고정(표시·재조회 일관성)
     st.loading=false;draw();};
   const loadDetail=async(row)=>{st.sel=row;st.dloading=true;drawDetail();
     try{const r=await fetch(`${API}/api/sagubledger/detail?cust=${encodeURIComponent(row.cust_code)}&mat=${encodeURIComponent(row.mat_code)}&fr=${yy(st.fr)}&to=${yy(st.to)}`);
@@ -2008,21 +2217,38 @@ const _tabPart=(c)=>{
   const draw=()=>{
     if(st.sortKey){const k=st.sortKey,dr=st.sortDir||1;st.rows.sort((a,b)=>{const x=a[k],y=b[k],nx=parseFloat(x),ny=parseFloat(y);if(x!=null&&y!=null&&!isNaN(nx)&&!isNaN(ny))return(nx-ny)*dr;return String(x==null?"":x).localeCompare(String(y==null?"":y),"ko")*dr;});}
     const t=st.tot||{};
+    const solo=isSolo();   // ★협력사 = 거래처 선택지가 자기 1건뿐 → 협력사칸 고정(수정 불가)
     c.innerHTML=`
+     <style>
+       /* ★행 드래그 선택(2026-09-03) — 소계행(.sl-sub)은 대상이 아니다.
+            행 클릭(상세 조회)은 그대로 살아 있어야 하므로 커서는 pointer 유지.
+          ★outline 을 쓴다 — 행 클릭 핸들러가 tr.style.background 로 **인라인** 배경을 칠하는데,
+            background 단축속성이 background-image 를 덮어써 선택막이 안 보인다
+            (410 파트별생산계획에서 같은 문제를 겪었다). outline 은 다른 속성이라 안 밀리고
+            배경색도 가리지 않는다. !important 는 인라인보다 우선하기 위한 것. */
+       .sl-row.sl-sel>td{outline:2px solid #64748b !important;outline-offset:-2px}
+       .sl-sub{user-select:none;-webkit-user-select:none}
+       .sl-row{user-select:none;-webkit-user-select:none}
+     </style>
      <div style="display:flex;flex-direction:column;height:100%">
       <div style="flex:0 0 auto">
        <div class="page-title">사급부품 수불장</div>
        <div class="page-sub">협력사 관점 <b>협력사입고(우리 창고 출고) − 협력사출고(세트입고로 재입고) = 잔량</b>. 기초 0(2026-01~) · 용접봉/은납 별도 트랙 제외 · 소진은 통일 소요엔진 산출.</div>
        <div class="toolbar" style="flex-wrap:nowrap;overflow-x:auto">
          <label class="tl">기간</label><input class="inp" type="date" id="sl-fr" value="${esc(st.fr)}" style="width:140px"> ~ <input class="inp" type="date" id="sl-to" value="${esc(st.to)}" style="width:140px">
-         <label class="tl" style="margin-left:8px">협력사</label><input class="inp" id="sl-cust" list="sl-custlist" value="${esc((st.custs.find(o=>o.code===st.cust)||{}).nm||"")}" placeholder="협력사명(빈칸=전체)" style="width:150px">
-         <datalist id="sl-custlist">${st.custs.map(o=>`<option value="${esc(o.nm||o.code)}">`).join("")}</datalist>
+         <!-- ★협력사(solo=선택지 1건)면 자기 거래처로 고정·수정불가(2026-09-03) -->
+         <label class="tl" style="margin-left:8px">협력사</label><input class="inp" id="sl-cust" ${solo?'readonly tabindex="-1"':'list="sl-custlist"'} value="${esc((st.custs.find(o=>o.code===st.cust)||{}).nm||"")}" placeholder="${solo?'':'협력사명(빈칸=전체)'}" title="${solo?'내 거래처로 고정됩니다':'협력사명(빈칸=전체)'}" style="width:150px${solo?';background:#eef1f5;border:2px solid #cbd3de;color:#33507d;font-weight:600;cursor:default':''}">
+         ${solo?'':`<datalist id="sl-custlist">${st.custs.map(o=>`<option value="${esc(o.nm||o.code)}">`).join("")}</datalist>`}
          <label class="tl" style="margin-left:8px">자도번</label><input class="inp" id="sl-mat" value="${esc(st.mat)}" placeholder="자도번/품명" style="width:140px">
          <label class="tl" style="margin-left:8px">잔량</label>
          <select class="inp" id="sl-sign"><option value="">전체</option><option value="1" ${st.sign==="1"?"selected":""}>(+)보유</option><option value="-1" ${st.sign==="-1"?"selected":""}>(−)마이너스</option><option value="0" ${st.sign==="0"?"selected":""}>0</option></select>
          <label class="tl" style="margin-left:8px">범위</label>
          <select class="inp" id="sl-scope"><option value="sent" ${st.scope==="sent"?"selected":""}>우리가 보낸 부품</option><option value="all" ${st.scope==="all"?"selected":""}>전체(소진만 포함)</option></select>
          <button class="btn" id="sl-go" style="margin-left:8px">조회</button>
+         <!-- ★엑셀 — 좌측 목록(소계·합계 포함) + 선택된 수불이력을 색상 그대로(2026-09-03) -->
+         <button class="btn" id="sl-xls" title="목록(소계·합계)과 선택한 수불이력을 색상 그대로 엑셀로 내려받습니다" ${st.rows.length?'':'disabled'}>엑셀</button>
+         <div class="spacer"></div>
+         <span id="sl-selinfo" style="font-size:11.5px;color:#33507d;white-space:nowrap"><span style="color:#8aa0bd">행을 드래그 → Ctrl+C 복사</span></span>
        </div>
       </div>
       <div style="flex:1;min-height:0;display:flex;gap:8px;margin-top:8px">
@@ -2034,7 +2260,8 @@ const _tabPart=(c)=>{
          <tbody>${(()=>{
            if(!st.rows.length)return `<tr><td colspan="6" style="padding:16px;color:var(--muted)">${st.loading?"":"데이터 없음 — 기간/필터를 확인하세요."}</td></tr>`;
            let o='',pc=null,s={sent:0,used:0,bal:0};
-           const flush=()=>{if(pc!==null)o+=`<tr style="background:#eef2f7;font-weight:600"><td colspan="3">${esc(pc)} 소계</td><td class="num" style="color:#1f7a3d">${won(s.sent)}</td><td class="num" style="color:#c0392b">${won(s.used)}</td><td class="num"><b style="color:${s.bal<0?'#c0392b':'#1f2d3d'}">${won(s.bal)}</b></td></tr>`;};
+           /* ★소계행에 .sl-sub — 드래그 선택·복사 대상에서 제외하기 위한 표식(2026-09-03) */
+           const flush=()=>{if(pc!==null)o+=`<tr class="sl-sub" style="background:#eef2f7;font-weight:600"><td colspan="3">${esc(pc)} 소계</td><td class="num" style="color:#1f7a3d">${won(s.sent)}</td><td class="num" style="color:#c0392b">${won(s.used)}</td><td class="num"><b style="color:${s.bal<0?'#c0392b':'#1f2d3d'}">${won(s.bal)}</b></td></tr>`;};
            st.rows.forEach((r,i)=>{const cn=r.custnm||r.cust_code;if(cn!==pc){flush();pc=cn;s={sent:0,used:0,bal:0};}
              o+=`<tr class="sl-row" data-i="${i}" style="cursor:pointer;${st.sel&&st.sel.cust_code===r.cust_code&&st.sel.mat_code===r.mat_code?'background:#eef4ff':''}"><td>${esc(r.custnm||r.cust_code)}</td><td><b>${esc(r.mat_code)}</b></td><td class="cap" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.matnm||"")}">${esc(r.matnm||"")}</td><td class="num" style="color:#1f7a3d">${won(r.sent)}</td><td class="num" style="color:#c0392b">${won(r.used)}</td><td class="num qty" style="color:${(+r.bal<0)?'#c0392b':'#1f2d3d'}"><b>${won(r.bal)}</b></td></tr>`;
              s.sent+=+r.sent||0;s.used+=+r.used||0;s.bal+=+r.bal||0;});
@@ -2049,8 +2276,125 @@ const _tabPart=(c)=>{
       </div>
      </div>`;
     const g=id=>c.querySelector(id);
+
+    /* ══ 엑셀 내보내기 (2026-09-03 사용자 요청 — 색상 그대로) ══
+         ★좌측 목록은 협력사별 **소계행**이 데이터 사이에 끼어 있다. DOM 을 훑으면 소계가 섞이므로
+           st.rows 에서 직접 만들고 소계·합계를 같은 규칙으로 다시 계산한다(화면과 동일한 값).
+         ★수불이력(우측)은 선택된 것이 있을 때만 두 번째 시트 대신 **이어서** 붙인다
+           (downloadXLS 는 시트 1개라, 빈 줄로 구분해 한 시트에 담는다). */
+    const _n=v=>(v==null||v==='')?'':Number(v);
+    const exportXlsx=()=>{
+      if(!st.rows.length){alert('조회 결과가 없습니다.');return;}
+      const cols=[{h:'협력사'},{h:'자도번'},{h:'품명'},
+                  {h:'협력사입고'},{h:'협력사출고'},{h:'잔량'}];
+      const xr=[]; let pc=null, sub={sent:0,used:0,bal:0};
+      const flush=()=>{ if(pc===null)return;
+        xr.push([{v:pc+' 소계',al:'left',b:1,bg:'#EEF2F7'},{v:'',bg:'#EEF2F7'},{v:'',bg:'#EEF2F7'},
+                 {v:sub.sent,al:'center',b:1,bg:'#EEF2F7',fg:'#1F7A3D'},
+                 {v:sub.used,al:'center',b:1,bg:'#EEF2F7',fg:'#C0392B'},
+                 {v:sub.bal, al:'center',b:1,bg:'#EEF2F7',fg:sub.bal<0?'#C0392B':'#1F2D3D'}]); };
+      st.rows.forEach(r=>{
+        const cn=r.custnm||r.cust_code;
+        if(cn!==pc){ flush(); pc=cn; sub={sent:0,used:0,bal:0}; }
+        xr.push([{v:cn||'',al:'left'},{v:r.mat_code||'',al:'center',b:1},{v:r.matnm||'',al:'left'},
+                 {v:_n(r.sent),al:'center',fg:'#1F7A3D'},
+                 {v:_n(r.used),al:'center',fg:'#C0392B'},
+                 {v:_n(r.bal), al:'center',b:1,fg:(+r.bal<0)?'#C0392B':'#1F2D3D'}]);
+        sub.sent+=+r.sent||0; sub.used+=+r.used||0; sub.bal+=+r.bal||0;
+      });
+      flush();
+      const foot=[[{v:`합계 ${st.rows.length}건`,al:'center',b:1},{v:''},{v:''},
+                   {v:_n(t.sent),al:'center',b:1},{v:_n(t.used),al:'center',b:1},
+                   {v:_n(t.bal), al:'center',b:1,fg:(+t.bal<0)?'#C0392B':'#1F7A3D'}]];
+      // 선택된 (협력사×자도번)의 수불이력을 아래에 이어 붙인다
+      if(st.sel && st.detail.length){
+        xr.push([{v:''},{v:''},{v:''},{v:''},{v:''},{v:''}]);
+        xr.push([{v:`◆ 수불이력 — ${st.sel.custnm||st.sel.cust_code} · ${st.sel.mat_code} ${st.sel.matnm||''}`,
+                  al:'left',b:1,bg:'#DCE6F1'},{v:'',bg:'#DCE6F1'},{v:'',bg:'#DCE6F1'},
+                 {v:'',bg:'#DCE6F1'},{v:'',bg:'#DCE6F1'},{v:'',bg:'#DCE6F1'}]);
+        xr.push([{v:'일자',al:'center',b:1,bg:'#F2F2F2'},{v:'구분',al:'center',b:1,bg:'#F2F2F2'},
+                 {v:'전일잔량',al:'center',b:1,bg:'#F2F2F2'},{v:'협력사입고',al:'center',b:1,bg:'#F2F2F2'},
+                 {v:'협력사출고',al:'center',b:1,bg:'#F2F2F2'},{v:'잔량',al:'center',b:1,bg:'#F2F2F2'}]);
+        st.detail.forEach(r=>xr.push([
+          {v:r.maint_ymd||'',al:'center'},{v:r.tagnm||'',al:'center'},
+          {v:_n(r.prev_qty),al:'center',fg:'#8A94A6'},
+          {v:r.in_qty?_n(r.in_qty):'',al:'center',fg:'#1F7A3D'},
+          {v:r.out_qty?_n(r.out_qty):'',al:'center',fg:'#C0392B'},
+          {v:_n(r.stock_qty),al:'center',b:1,fg:(+r.stock_qty<0)?'#C0392B':'#1F2D3D'}]));
+        xr.push([{v:'최종 잔량',al:'center',b:1,bg:'#EAF1FB'},{v:'',bg:'#EAF1FB'},{v:'',bg:'#EAF1FB'},
+                 {v:'',bg:'#EAF1FB'},{v:'',bg:'#EAF1FB'},
+                 {v:_n(st.dfinal),al:'center',b:1,bg:'#EAF1FB',fg:(+st.dfinal<0)?'#C0392B':'#1F7A3D'}]);
+      }
+      const T2=new Date(),p2=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+        +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
+      const cnm=(st.custs.find(o=>o.code===st.cust)||{}).nm||'전체';
+      downloadXLS(`사급부품수불장_${cnm}_${stamp}`, cols, xr, {
+        sheet:'사급부품수불장', foot,
+        title:`사급부품 수불장 — ${cnm}`,
+        sub:`기간 ${st.fr} ~ ${st.to} · ${st.rows.length}건`
+            + ` · 협력사입고 ${t.sent||0} / 협력사출고 ${t.used||0} / 잔량 ${t.bal||0}`
+            + ` · 초록=협력사입고, 빨강=협력사출고·마이너스잔량`});
+    };
+    { const xb=g('#sl-xls'); if(xb) xb.onclick=exportXlsx; }
+
+    /* ══ 행 드래그 선택 + Ctrl+C (좌측 목록) ══
+         소계행(.sl-sub)은 건너뛰고 데이터행(.sl-row)만 고른다 — 복사본에 소계가 섞이지 않게. */
+    (()=>{
+      const gw=c.querySelector('.grid-wrap'); if(!gw)return;
+      const info=()=>c.querySelector('#sl-selinfo');
+      const dataTr=()=>[...gw.querySelectorAll('tr.sl-row')];
+      let _a=null,_on=false;
+      const mark=b=>{
+        if(_a==null||b==null)return;
+        const r1=Math.min(_a,b), r2=Math.max(_a,b);
+        SLSEL.rows=[r1,r2];
+        dataTr().forEach((tr,i)=>tr.classList.toggle('sl-sel', i>=r1&&i<=r2));
+        const el=info();
+        if(el)el.innerHTML=`선택 <b>${r2-r1+1}</b>행 · <b>Ctrl+C</b> 복사`
+          +` <span id="sl-selclr" style="cursor:pointer;color:#1c47a0;text-decoration:underline;margin-left:6px">해제</span>`;
+        const cl=c.querySelector('#sl-selclr');
+        if(cl)cl.onclick=()=>{SLSEL.rows=null;
+          dataTr().forEach(tr=>tr.classList.remove('sl-sel'));
+          const e2=info(); if(e2)e2.innerHTML='<span style="color:#8aa0bd">행을 드래그 → Ctrl+C 복사</span>';};
+      };
+      gw.onmousedown=ev=>{
+        if(ev.button!==0)return;
+        if(ev.target.closest('input,select,textarea,button,label,a'))return;
+        const tr=ev.target.closest?ev.target.closest('tr.sl-row'):null; if(!tr)return;
+        // ★행 클릭(상세 조회)은 살려야 하므로 preventDefault 는 하되 click 은 막지 않는다
+        ev.preventDefault(); _on=true; _a=dataTr().indexOf(tr); mark(_a);
+      };
+      gw.onmousemove=ev=>{if(!_on)return;
+        const e=document.elementFromPoint(ev.clientX,ev.clientY);
+        const tr=e&&e.closest?e.closest('tr.sl-row'):null;
+        if(tr)mark(dataTr().indexOf(tr));};
+      if(!gw._slUp){gw._slUp=1;document.addEventListener('mouseup',()=>{_on=false;});}
+      if(!gw._slCopy){gw._slCopy=1;
+        document.addEventListener('copy',ev=>{
+          if(!c.isConnected||!SLSEL.rows)return;
+          const sel=window.getSelection&&window.getSelection();
+          if(sel&&String(sel).trim())return;
+          const [r1,r2]=SLSEL.rows;
+          const out=['협력사\t자도번\t품명\t협력사입고\t협력사출고\t잔량'];
+          st.rows.forEach((r,i)=>{ if(i<r1||i>r2)return;
+            out.push([r.custnm||r.cust_code||'',r.mat_code||'',r.matnm||'',
+                      r.sent==null?'':r.sent, r.used==null?'':r.used,
+                      r.bal==null?'':r.bal].join('\t')); });
+          if(out.length<2)return;
+          const s=out.join('\n');
+          if(ev.clipboardData){ev.clipboardData.setData('text/plain',s);ev.preventDefault();}
+          else if(navigator.clipboard){navigator.clipboard.writeText(s).catch(()=>{});}
+          const el=info();
+          if(el){const b=document.createElement('span');
+            b.textContent=` 복사됨(${out.length-1}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
+            el.appendChild(b);setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
+        });}
+    })();
+
     g("#sl-fr").onchange=x=>st.fr=x.target.value; g("#sl-to").onchange=x=>st.to=x.target.value;
-    g("#sl-cust").onchange=x=>{const v=x.target.value.trim();const m=st.custs.find(o=>(o.nm||o.code)===v);st.cust=m?m.code:"";};
+    // ★협력사(solo)는 거래처를 못 바꾼다 — 이벤트를 걸지 않는다
+    if(!solo) g("#sl-cust").onchange=x=>{const v=x.target.value.trim();const m=st.custs.find(o=>(o.nm||o.code)===v);st.cust=m?m.code:"";};
     g("#sl-mat").oninput=x=>st.mat=x.target.value;
     g("#sl-sign").onchange=x=>st.sign=x.target.value; g("#sl-scope").onchange=x=>st.scope=x.target.value;
     g("#sl-go").onclick=load;
@@ -3280,6 +3624,12 @@ SCREEN.setinstat=(c)=>{
   const iso=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
   const d2y=v=>v?v.slice(2).replace(/-/g,''):'';
   const DOW=['일','월','화','수','목','금','토'];
+  /* ★시간 표기 — 1300 → 13:00 (2026-09-03 사용자 요청).
+       원자료는 HHMM 4자리 문자열(앞자리 0 이 잘려 3자리로 오는 경우도 있어 padStart).
+       숫자가 아니거나 빈 값이면 원문 그대로 둔다(정체불명 값을 시간으로 꾸미지 않는다). */
+  const hhmm=s=>{s=(''+(s==null?'':s)).trim();
+    if(!s||!/^\d{1,4}$/.test(s))return s;
+    s=s.padStart(4,'0'); return s.slice(0,2)+':'+s.slice(2);};
   const dlabel=y=>{
     const dt=new Date(+('20'+y.slice(0,2)),+y.slice(2,4)-1,+y.slice(4,6));
     return y.slice(4,6)+DOW[dt.getDay()];
@@ -3291,17 +3641,406 @@ SCREEN.setinstat=(c)=>{
           axis:[],all:[],rows:[],open:{},loading:false,tot:{}};
   let custMap={};
 
+  /* ══ 항목보기 · 범위선택 복사 (2026-09-03 — 410·키팅과 동일 규칙) ═══════════
+       컬럼이 5곳(헤더·상세·소계·합계)에 하드코딩돼 있어 정의배열로 갈아엎지 않고
+       **열 인덱스만 정의**해 CSS(display:none)로 숨긴다. 렌더 코드를 안 건드리므로
+       색상·소계 로직이 그대로 유지된다. 일자컬럼은 조회조건(기간)이 정하므로 대상 아님. */
+  const S2_HEAD=[  // 일자축 앞 (0부터)
+    {i:0,t:'SEQ'},{i:1,t:'자도번작업처'},{i:2,t:'라인'},{i:3,t:'LG INPUT'},
+    {i:4,t:'제번'},{i:5,t:'작업처'},{i:6,t:'도번'},{i:7,t:'자도번LIST'},
+    {i:8,t:'사급'},{i:9,t:'제번정보'},{i:10,t:'품목정보'},{i:11,t:'당김,변경'},{i:12,t:'비고1'},
+  ];
+  const S2_TAIL=[  // 일자축 뒤 (오프셋)
+    {o:0,t:'LOT수량'},{o:1,t:'자재수량'},{o:2,t:'자재입고'},{o:3,t:'요청수량'},
+    {o:4,t:'생산실적'},{o:5,t:'출하실적'},{o:6,t:'세트재고'},{o:7,t:'단품재고'},
+    {o:8,t:'ASSY재고'},{o:9,t:'모델'},{o:10,t:'입고구분'},
+  ];
+  const S2_SCOPE='setinstat130';
+  let S2PREF=null;
+  const s2PrefLoad=async()=>{try{const r=await fetch(`${API}/api/pref?scope=${S2_SCOPE}`);
+      if(!r.ok)return false; const j=await r.json();
+      if(j&&j.prefs){S2PREF=j.prefs;return true;}}catch(e){} return false;};
+  const s2PrefSave=async(o)=>{
+    S2PREF=Object.assign({},S2PREF||{},o);
+    try{Object.keys(o).forEach(k=>{if(o[k]==null)localStorage.removeItem('si130_'+k);
+      else localStorage.setItem('si130_'+k,JSON.stringify(o[k]));});}catch(_){}
+    try{const r=await fetch(`${API}/api/pref`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({scope:S2_SCOPE,prefs:o})});return r.ok;}catch(e){return false;}};
+  const s2Hidden=()=>{try{const s=(S2PREF&&S2PREF.hide!==undefined)?S2PREF.hide
+                          :JSON.parse(localStorage.getItem('si130_hide')||'null');
+      return new Set(Array.isArray(s)?s:[]);}catch(e){return new Set();}};
+  /* 기본 컬럼(원래 순서) — key 가 곧 '표에서의 원래 위치'다.
+     ★순서 변경은 원래 위치(idx)를 바꾸지 않고 **DOM 에서 셀을 옮겨** 구현한다.
+       그래야 숨김(idx 기준)·엑셀(헤더 순회)·폭저장(헤더 텍스트)이 전부 그대로 맞는다. */
+  const s2ColsBase=()=>{const nd=(st.axis||[]).length;
+    return S2_HEAD.map(x=>({key:'h'+x.i,idx:x.i,t:x.t}))
+      .concat(S2_TAIL.map(x=>({key:'t'+x.o,idx:13+nd+x.o,t:x.t})));};
+  const s2Order=()=>{try{const s=(S2PREF&&S2PREF.ord!==undefined)?S2PREF.ord
+                         :JSON.parse(localStorage.getItem('si130_ord')||'null');
+      return Array.isArray(s)?s:null;}catch(e){return null;}};
+  // 저장된 순서를 적용한 목록(없거나 깨졌으면 기본). 신규 컬럼은 뒤에 자동 보충.
+  const s2Cols=()=>{
+    const base=s2ColsBase(), ord=s2Order();
+    if(!ord||!ord.length)return base;
+    const m=new Map(base.map(x=>[x.key,x]));
+    const out=[]; ord.forEach(k=>{if(m.has(k)){out.push(m.get(k));m.delete(k);}});
+    m.forEach(v=>out.push(v));            // 저장에 없던 컬럼은 뒤에
+    return out;};
+  const s2ApplyHide=()=>{
+    const hide=s2Hidden(), hi=new Set(s2Cols().filter(x=>hide.has(x.key)).map(x=>x.idx));
+    const tbl=c.querySelector('#si2 table.grid'); if(!tbl)return;
+    const doRow=row=>{const cs=row.cells; if(cs.length<=2)return;   // colspan 안내·합계행 보호
+      for(let i=0;i<cs.length;i++)cs[i].style.display=hi.has(i)?'none':'';};
+    if(tbl.tHead)[...tbl.tHead.rows].forEach(doRow);
+    for(const tb of tbl.tBodies)for(const r of tb.rows)doRow(r);
+  };
+  /* ★컬럼 순서 적용 — 저장된 순서대로 DOM 의 셀을 옮긴다(2026-09-03 신설).
+       원래 위치(idx)는 그대로 두고 화면 배치만 바꾸므로 숨김·엑셀·폭저장이 안 깨진다.
+     ★성능: 525행 × 24컬럼에서 셀을 하나씩 옮기면 매번 레이아웃이 무효화된다.
+       표를 DOM 에서 잠시 떼었다 붙여 계산을 1회로 합친다(410 컬럼이동과 같은 기법). */
+  const s2ApplyOrder=()=>{
+    const ord=s2Order(); if(!ord||!ord.length)return;
+    const tbl=c.querySelector('#si2 table.grid'); if(!tbl||!tbl.tHead)return;
+    const base=s2ColsBase(), want=s2Cols();
+    const target=want.map(x=>x.idx);                       // 원래 인덱스의 새 배열순서
+    const same=target.every((v,i)=>v===base[i].idx);
+    if(same)return;                                        // 기본순서면 할 일 없음
+    const nd=(st.axis||[]).length;
+    // 일자컬럼(13..13+nd-1)은 그 자리에 고정 — 순서변경 대상이 아니다
+    const dayIdx=[]; for(let i=13;i<13+nd;i++)dayIdx.push(i);
+    const finalIdx=target.filter(i=>i<13).concat(dayIdx, target.filter(i=>i>=13));
+    const holder=tbl.parentNode, next=tbl.nextSibling;
+    const sy=holder?holder.scrollTop:0, sx=holder?holder.scrollLeft:0;
+    if(holder){holder.style.minHeight=tbl.offsetHeight+'px'; tbl.remove();}
+    try{
+      const move=row=>{const cs=[...row.cells];
+        if(cs.length!==finalIdx.length)return;              // colspan 행은 건너뜀
+        finalIdx.forEach(i=>row.appendChild(cs[i]));};      // 순서대로 다시 붙이면 재배치
+      [...tbl.tHead.rows].forEach(move);
+      for(const tb of tbl.tBodies)for(const r of tb.rows)move(r);
+    }finally{
+      if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
+        holder.scrollTop=sy; holder.scrollLeft=sx;}
+    }
+  };
+  // 항목보기 모달
+  const s2ColPick=()=>{
+    const old=document.getElementById('s2-colpick'); if(old)old.remove();
+    const cols=s2Cols(); let hide=new Set(s2Hidden());
+    const nd=(st.axis||[]).length;
+    const ov=document.createElement('div'); ov.className='ppcol-ov'; ov.id='s2-colpick';
+    ov.innerHTML=`<div class="ppcol-bx">
+      <div class="ppcol-h">항목보기<span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 일자컬럼은 조회조건 '기간'이 정합니다</span></div>
+      <div class="ppcol-b" id="s2col-list"></div>
+      <div class="ppcol-f"><button class="btn ghost" id="s2col-reset">초기화</button>
+        <div style="flex:1"></div>
+        <button class="btn ghost" id="s2col-no">취소</button>
+        <button class="btn" id="s2col-ok" style="background:#1c47a0;color:#fff">확인</button></div></div>`;
+    document.body.appendChild(ov);                 // ★§3 — .content 안 fixed 는 잘린다
+    /* ★순서 변경 — 행을 끌거나 ▲▼ 로(2026-09-03 신설, 410 과 동일).
+         HTML5 draggable 은 쓰지 않는다 — 텍스트 선택이 먼저 잡혀 드래그가 시작되지 않는다.
+         mousedown/mousemove/mouseup 으로 직접 처리하고, 5px 이상 움직여야 드래그로 본다
+         (그냥 누르면 체크 토글, 끌면 이동 — 한 행에서 둘 다 된다). */
+    let work=cols.slice();          // 이 모달 안에서만 바뀌는 작업본
+    let dragK=null, moved=false;
+    const listEl=()=>ov.querySelector('#s2col-list');
+    const paint=()=>{
+      // 일자 구분선 = 앞그룹(h*)이 끝나는 자리
+      const firstTail=work.findIndex(x=>x.key[0]==='t');
+      listEl().innerHTML=work.map((x,i)=>
+        (i===firstTail?`<div class="ppcol-sep">일자 컬럼 ${nd}개 (조회조건 '기간')</div>`:'')
+        +`<div class="ppcol-r" data-k="${x.key}"><span class="ppcol-n">${i+1}</span>
+            <input type="checkbox" ${hide.has(x.key)?'':'checked'}>
+            <span class="ppcol-t">${esc(x.t)}</span>
+            <span class="ppcol-mv">
+              <button data-mv="up"   title="위로"   ${i===0?'disabled':''}>▲</button>
+              <button data-mv="down" title="아래로" ${i===work.length-1?'disabled':''}>▼</button>
+            </span></div>`).join('')
+        +(firstTail<0?`<div class="ppcol-sep">일자 컬럼 ${nd}개 (조회조건 '기간')</div>`:'');
+      ov.querySelectorAll('.ppcol-r').forEach(row=>{
+        const k=row.dataset.k, cb=row.querySelector('input');
+        cb.onchange=()=>{if(cb.checked)hide.delete(k);else hide.add(k);};
+        row.querySelectorAll('[data-mv]').forEach(b=>b.onclick=ev=>{
+          ev.stopPropagation();
+          const i=work.findIndex(x=>x.key===k);
+          const j=(b.dataset.mv==='up')?i-1:i+1;
+          if(j<0||j>=work.length)return;
+          const t=work[i]; work[i]=work[j]; work[j]=t; paint();});
+      });};
+    const rowAtY=y=>{
+      const rows=[...listEl().querySelectorAll('.ppcol-r')];
+      if(!rows.length)return null;
+      for(const r of rows){const b=r.getBoundingClientRect();
+        if(y>=b.top&&y<=b.bottom)return r;}
+      let best=rows[0],bd=1e9;                 // 구분선 위 등 — 가장 가까운 행
+      for(const r of rows){const b=r.getBoundingClientRect();
+        const d=(y<b.top)?(b.top-y):((y>b.bottom)?(y-b.bottom):0);
+        if(d<bd){bd=d;best=r;}}
+      return best;};
+    ov.addEventListener('mousedown',ev=>{
+      const row=ev.target.closest&&ev.target.closest('.ppcol-r'); if(!row)return;
+      if(ev.target.tagName==='INPUT')return;              // 체크박스는 브라우저가 처리
+      if(ev.target.closest('.ppcol-mv'))return;           // ▲▼ 는 클릭
+      ev.preventDefault();                                // 텍스트 선택 차단(드래그 방해 요인)
+      dragK=row.dataset.k; moved=false; row.classList.add('drag');});
+    document.addEventListener('mousemove',function s2Mv(ev){
+      if(!dragK)return;
+      if(!ov.isConnected){dragK=null;document.removeEventListener('mousemove',s2Mv);return;}
+      moved=true;
+      const over=rowAtY(ev.clientY);
+      listEl().querySelectorAll('.ppcol-r.over').forEach(x=>{if(x!==over)x.classList.remove('over');});
+      if(over&&over.dataset.k!==dragK)over.classList.add('over');});
+    document.addEventListener('mouseup',function s2Up(ev){
+      if(!dragK)return;
+      if(!ov.isConnected){dragK=null;document.removeEventListener('mouseup',s2Up);return;}
+      const k=dragK; dragK=null;
+      listEl().querySelectorAll('.ppcol-r.drag,.ppcol-r.over')
+              .forEach(x=>x.classList.remove('drag','over'));
+      if(!moved){                                          // 안 움직였으면 = 클릭 → 체크 토글
+        const row=[...listEl().querySelectorAll('.ppcol-r')].find(r=>r.dataset.k===k);
+        if(row){const cb=row.querySelector('input');
+          cb.checked=!cb.checked; if(cb.checked)hide.delete(k);else hide.add(k);}
+        return;}
+      const over=rowAtY(ev.clientY);
+      if(!over||over.dataset.k===k)return;
+      const fi=work.findIndex(x=>x.key===k), item=work[fi];
+      work.splice(fi,1);
+      const ti=work.findIndex(x=>x.key===over.dataset.k);
+      work.splice(ti<0?work.length:ti,0,item);
+      paint();});
+    paint();
+    const close=()=>ov.remove();
+    ov.onclick=e=>{if(e.target===ov)close();};
+    ov.querySelector('#s2col-no').onclick=close;
+    // 초기화 = 숨김 해제 + 순서 + 컬럼 폭까지 전부 기본값으로
+    ov.querySelector('#s2col-reset').onclick=()=>{
+      hide=new Set(); work=s2ColsBase(); paint();
+      const tbl=c.querySelector('#si2 table.grid');
+      if(tbl&&tbl.tHead&&tbl.tHead.rows[0])
+        [...tbl.tHead.rows[0].cells].forEach(th=>{th.style.width=th.style.minWidth=th.style.maxWidth='';});
+      s2PrefSave({w:{},ord:null});};
+    ov.querySelector('#s2col-ok').onclick=()=>{
+      // ★순서를 바꿨으면 표를 다시 그린다 — DOM 재배치는 원본 순서에서 출발해야 정확하다
+      const prev=(s2Order()||[]).join(','), now=work.map(x=>x.key).join(',');
+      s2PrefSave({hide:[...hide], ord:work.map(x=>x.key)});
+      close();
+      if(prev!==now)draw(); else s2ApplyHide();};
+  };
+  /* 범위선택(복사) + 우클릭 메뉴 + Ctrl+C — 소계·합계행은 제외한다(레거시 동일). */
+  let s2Painted=[];
+  const s2Clip=(txt,what)=>{
+    if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+    const done=()=>{const el=c.querySelector('#s2-msg');
+      if(el){const o=el.textContent;el.textContent=what+' 복사됨';setTimeout(()=>{el.textContent=o;},1400);}};
+    const fb=()=>{const ta=document.createElement('textarea');ta.value=txt;
+      ta.style.cssText='position:fixed;left:-9999px;top:0';document.body.appendChild(ta);ta.select();
+      try{document.execCommand('copy');done();}catch(_){alert('복사 실패');} ta.remove();};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(done,fb);
+    else fb();};
+  const s2CopySel=()=>{
+    if(!s2Painted.length){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+    const m=new Map();
+    s2Painted.forEach(td=>{const r=td.parentElement.rowIndex;
+      if(!m.has(r))m.set(r,[]); m.get(r).push([td.cellIndex,(td.innerText||'').trim()]);});
+    s2Clip([...m.keys()].sort((a,b)=>a-b)
+      .map(r=>m.get(r).sort((a,b)=>a[0]-b[0]).map(x=>x[1]).join('\t')).join('\n'),'선택영역');};
+  const s2CopyAll=()=>{
+    const tbl=c.querySelector('#si2 table.grid'); if(!tbl)return;
+    const out=[];
+    if(tbl.tHead)for(const r of tbl.tHead.rows)out.push([...r.cells].map(x=>(x.innerText||'').trim()).join('\t'));
+    for(const tb of tbl.tBodies)for(const r of tb.rows)out.push([...r.cells].map(x=>(x.innerText||'').trim()).join('\t'));
+    s2Clip(out.join('\n'),`전체 ${num(out.length-1)}행`);};
+  /* ★컬럼 폭 — 사용자가 끈 폭을 계정별로 기억한다(2026-09-03).
+       공용 addResizer(core.js)를 쓰되, 끝난 뒤 폭을 읽어 저장한다.
+       키 = 헤더 텍스트(일자칸은 날짜가 바뀌므로 'D' 하나로 묶는다 — 폭만 같으면 된다). */
+  const s2WKey=(th,i)=>{const nd=(st.axis||[]).length;
+    return (i>=13&&i<13+nd)?'D':(th.textContent||'').trim().replace(/\s+/g,' ')||('c'+i);};
+  const s2Widths=()=>{try{const s=(S2PREF&&S2PREF.w!==undefined)?S2PREF.w
+                          :JSON.parse(localStorage.getItem('si130_w')||'null');
+      return (s&&typeof s==='object')?s:{};}catch(e){return {};}};
+  /* 저장된 폭 복원. 표는 상시 table-layout:fixed 라 여기서는 값만 얹으면 된다
+     (헤더 th 의 width 가 곧 열 폭이다 — 측정이 필요없다). */
+  const s2ApplyW=()=>{
+    const W=s2Widths(), tbl=c.querySelector('#si2 table.grid');
+    if(!tbl||!tbl.tHead||!tbl.tHead.rows[0])return;
+    if(!Object.keys(W).length)return;
+    [...tbl.tHead.rows[0].cells].forEach((th,i)=>{
+      const w=W[s2WKey(th,i)];
+      if(w)th.style.width=th.style.minWidth=th.style.maxWidth=w+'px';});
+  };
+  /* ★폭 조절 — 공용 addResizer 를 쓰지 않고 직접 구현한다(2026-09-03).
+       왜 — 이 표는 table-layout:auto 라 th 폭을 바꿀 때마다 브라우저가 **전 행(525×24셀)을
+       재측정**한다. 공용 헬퍼는 mousemove 마다 폭을 쓰므로 그대로 쓰면 끌 때 심하게 버벅인다.
+       → ①끄는 동안 table-layout:fixed 로 전환(재측정 차단) ②rAF 로 프레임당 1회만 적용
+         ③손을 뗄 때 auto 로 되돌리고 그때 한 번 저장.
+       fixed 로 전환하려면 각 열의 현재 폭을 먼저 고정해야 레이아웃이 튀지 않는다. */
+  const s2WireResize=()=>{
+    const tbl=c.querySelector('#si2 table.grid');
+    if(!tbl||!tbl.tHead||!tbl.tHead.rows[0])return;
+    const ths=[...tbl.tHead.rows[0].cells];
+    ths.forEach((th,i)=>{
+      if(th.querySelector('.col-resizer'))return;      // 이미 붙임
+      // ⚠th.style.position='relative' 를 주면 안 된다 — 인라인이 CSS 의 sticky 를 이겨
+      //   헤더 고정이 깨진다(2026-09-03 실제로 그렇게 깨뜨렸다). sticky 가 이미
+      //   위치지정 컨텍스트라 absolute 핸들은 그대로 배치된다.
+      const rz=document.createElement('div');
+      rz.className='col-resizer';
+      /* ★가이드 선 방식(2026-09-03 재작업) — 엑셀과 같은 거동.
+           왜 — 끄는 동안 실제 폭을 바꾸면 그 열의 **모든 셀**(616행)을 다시 그린다.
+           화면엔 30행만 보이는데도 전부 paint 하므로 table-layout:fixed 로 재측정을
+           막아도 무겁다(실측 17,864셀). 표는 그대로 두고 **세로 선 하나만** 움직이면
+           paint 대상이 1개다. 손을 뗄 때 한 번만 실제 폭을 적용한다. */
+      rz.addEventListener('mousedown',e=>{
+        e.preventDefault(); e.stopPropagation();
+        const wrap=c.querySelector('#si2 .gwrap'); if(!wrap)return;
+        const sx=e.pageX, sw=th.offsetWidth;
+        const wr=wrap.getBoundingClientRect();
+        const thr=th.getBoundingClientRect();
+        // 가이드 선 — wrap 기준 absolute. 표를 건드리지 않는다.
+        if(getComputedStyle(wrap).position==='static')wrap.style.position='relative';
+        const gl=document.createElement('div');
+        gl.style.cssText='position:absolute;top:0;bottom:0;width:2px;background:#2563eb;'
+          +'z-index:9;pointer-events:none;box-shadow:0 0 0 1px rgba(37,99,235,.25)';
+        const x0=thr.right-wr.left+wrap.scrollLeft;      // 현재 경계선 위치
+        gl.style.left=x0+'px';
+        wrap.appendChild(gl);
+        document.body.style.cursor='col-resize';
+        let want=sw, raf=0;
+        const mv=ev=>{
+          want=Math.max(24,sw+ev.pageX-sx);
+          if(raf)return;
+          raf=requestAnimationFrame(()=>{raf=0;
+            gl.style.left=(x0+(want-sw))+'px';});          // 선만 움직인다(paint 1개)
+        };
+        const up=()=>{
+          document.removeEventListener('mousemove',mv);
+          document.removeEventListener('mouseup',up);
+          if(raf){cancelAnimationFrame(raf);raf=0;}
+          gl.remove(); document.body.style.cursor='';
+          /* ★폭 적용 — 표는 이미 table-layout:fixed 이고 화면 밖 행은
+               content-visibility 로 렌더를 건너뛴다. 그래서 이 한 줄은
+               '보이는 30행 남짓'만 다시 그린다(616행 전체가 아니다). */
+          th.style.width=th.style.minWidth=th.style.maxWidth=want+'px';
+          // ★저장은 화면 반영 뒤로 미룬다 — localStorage 쓰기+fetch 가 같은 프레임에서
+          //   돌면 폭이 바뀌는 순간이 그만큼 늦어 보인다("놓고 좀 있다가 움직인다").
+          const W=Object.assign({},s2Widths()); W[s2WKey(th,i)]=want;
+          setTimeout(()=>s2PrefSave({w:W}),0);
+        };
+        document.addEventListener('mousemove',mv);
+        document.addEventListener('mouseup',up);
+      });
+      rz.addEventListener('dblclick',e=>{                // 핸들 더블클릭 = 그 컬럼 폭 초기화
+        e.stopPropagation();
+        // 폭 초기화 = 그 컬럼만 기본값으로(표는 계속 fixed — 헤더 width 가 기본폭이다)
+        th.style.width=th.style.minWidth=th.style.maxWidth='';
+        const W=Object.assign({},s2Widths()); delete W[s2WKey(th,i)];
+        setTimeout(()=>s2PrefSave({w:W}),0);});
+      th.appendChild(rz);
+    });
+    s2ApplyW();
+  };
+  const s2Wire=()=>{
+    s2ApplyHide();       // ★숨김이 먼저 — 원래 인덱스 기준이라 재배치 전에 걸어야 한다
+    s2ApplyOrder();      // ★그 다음 순서 재배치(셀을 옮기므로 인덱스가 바뀐다)
+    s2WireResize();      // ★컬럼 폭 조절 핸들 + 저장된 폭 복원
+    const wrap=c.querySelector('#si2 .gwrap')||c.querySelector('#si2');
+    if(!wrap||wrap.dataset.s2sel)return;
+    wrap.dataset.s2sel='1';
+    let a0=null,on=false,raf=0,last=null;
+    const rc=td=>({r:td.parentElement?td.parentElement.rowIndex:-1,c:td.cellIndex});
+    const clr=()=>{for(const x of s2Painted)x.classList.remove('s2-cp'); s2Painted=[];};
+    const paint=(b)=>{
+      if(!a0)return;
+      const r1=Math.min(a0.r,b.r),r2=Math.max(a0.r,b.r);
+      const c1=Math.min(a0.c,b.c),c2=Math.max(a0.c,b.c);
+      clr();
+      const tbl=wrap.querySelector('table.grid'); if(!tbl)return;
+      for(const tb of tbl.tBodies)for(const row of tb.rows){
+        const ri=row.rowIndex; if(ri<r1||ri>r2)continue;
+        if(row.classList.contains('sum'))continue;      // ★소계행 제외
+        const cs=row.cells;
+        for(let j=c1;j<=c2&&j<cs.length;j++){cs[j].classList.add('s2-cp');s2Painted.push(cs[j]);}}
+    };
+    wrap.addEventListener('mousedown',ev=>{
+      if(ev.button!==0)return;
+      const td=ev.target.closest&&ev.target.closest('td'); if(!td||!td.parentElement)return;
+      if(td.parentElement.classList.contains('sum')){clr();return;}   // 소계행에서는 시작 안 함
+      clr(); a0=rc(td); on=true; paint(a0); ev.preventDefault();});
+    wrap.addEventListener('mousemove',ev=>{
+      if(!on)return;
+      const td=ev.target.closest&&ev.target.closest('td'); if(!td||!td.parentElement)return;
+      const b=rc(td); if(last&&last.r===b.r&&last.c===b.c)return;      // 같은 칸 무시
+      last=b; if(raf)return;
+      raf=requestAnimationFrame(()=>{raf=0; if(on&&last)paint(last);});});  // 프레임당 1회
+    document.addEventListener('mouseup',()=>{
+      if(raf){cancelAnimationFrame(raf);raf=0;}
+      if(on&&last)paint(last); on=false; last=null;});
+    wrap.oncontextmenu=ev=>{
+      ev.preventDefault();
+      const old=document.querySelector('.pp-ctx'); if(old)old.remove();
+      const m=document.createElement('div'); m.className='pp-ctx';
+      m.innerHTML='<div data-a="col">항목보기</div><div data-a="copy">선택영역 복사</div><div data-a="all">전체 복사</div>';
+      m.style.left=Math.min(ev.clientX,innerWidth-170)+'px';
+      m.style.top=Math.min(ev.clientY,innerHeight-110)+'px';
+      document.body.appendChild(m);
+      // ★mousedown 에서 실행 — click 이면 바깥클릭 닫기가 먼저 떠 메뉴가 사라진다
+      const kill=()=>{m.remove();document.removeEventListener('mousedown',out,true);};
+      const out=e=>{if(!m.contains(e.target))kill();};
+      setTimeout(()=>document.addEventListener('mousedown',out,true),0);
+      m.addEventListener('mousedown',e=>{
+        e.preventDefault(); e.stopPropagation();
+        const t=e.target.closest&&e.target.closest('[data-a]'); if(!t)return;
+        const a=t.getAttribute('data-a'); kill();
+        if(a==='col')s2ColPick(); else if(a==='copy')s2CopySel(); else s2CopyAll();});
+    };
+    if(!c.dataset.s2key){
+      c.dataset.s2key='1'; c.setAttribute('tabindex','-1'); c.style.outline='none';
+      c.addEventListener('keydown',ev=>{
+        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+          if(!s2Painted.length)return; ev.preventDefault(); s2CopySel();}});
+    }
+  };
+
   c.innerHTML=`
    <style>
-    #si2 table.grid{border-collapse:collapse;table-layout:auto}
+    /* ★헤더 고정(2026-09-03 교정) — border-collapse:collapse 에서는 sticky th 의 테두리가
+         셀에 병합돼 헤더가 같이 밀려 올라간다(스크롤하면 컬럼명이 사라지던 원인).
+         → separate 로 바꾸고 테두리는 각 셀의 우/하단만 그린다(겹선 방지). */
+    /* ★table-layout:fixed 고정(2026-09-03) — content-visibility 와 짝이다.
+         auto 는 "전 행을 훑어 열 폭을 정하는" 방식이라 content-visibility 로 행을
+         건너뛰면 폭이 흔들리고, 폭을 바꿀 때마다 전 셀을 재측정해 무겁다.
+         fixed 는 헤더(첫 행)의 width 만 보고 정하므로 행수와 무관하게 일정하다.
+         → 각 th 에 width 를 명시해 두었으므로(아래 헤더 렌더) 레이아웃이 그대로 나온다. */
+    #si2 table.grid{border-collapse:separate;border-spacing:0;table-layout:fixed;width:max-content;min-width:100%}
     #si2 table.grid th,#si2 table.grid td{
-      text-align:center;border:1px solid #b9c8da;padding:2px 5px;white-space:nowrap}
+      text-align:center;border-right:1px solid #b9c8da;border-bottom:1px solid #b9c8da;
+      padding:2px 5px;white-space:nowrap}
+    #si2 table.grid th:first-child,#si2 table.grid td:first-child{border-left:1px solid #b9c8da}
+    #si2 table.grid thead th{border-top:1px solid #b9c8da}
     #si2 table.grid thead th{background:#dce9f7;color:#24405f;font-weight:600;
-      position:sticky;top:0;z-index:2;border-bottom:2px solid #8fa9c6}
+      position:sticky;top:0;z-index:3;border-bottom:2px solid #8fa9c6;
+      background-clip:padding-box}   /* 배경 필수 — 투명하면 아래 행이 비친다 */
     #si2 table.grid tbody tr:nth-child(even){background:#fafcfe}
+    /* ★★화면 밖 행은 렌더를 건너뛴다(2026-09-03) — 폭조절·스크롤 버벅임의 근본 해법.
+         이 표는 616행 × 29컬럼 = 17,864셀이다. 폭이 하나 바뀌면 브라우저는 **보이지 않는
+         행까지 전부** 다시 계산·그린다. table-layout:fixed 로 재측정을 막아도 paint 비용은
+         그대로 남아, 놓는 순간 멈추는 증상이 계속됐다.
+         content-visibility:auto = 뷰포트 밖 행의 레이아웃·페인트를 통째로 생략한다.
+         contain-intrinsic-size 로 예상 높이를 주어 스크롤바가 튀지 않게 한다(행높이 ≈22px).
+         ⟹ 실제 작업 대상이 616행 → 화면에 보이는 30행 남짓으로 줄어든다. */
+    #si2 table.grid tbody tr{content-visibility:auto;contain-intrinsic-size:auto 22px}
+    /* ★합계행 하단 고정 — td 에 걸어야 separate 모드에서 붙는다(배경 필수) */
+    #si2 table.grid tfoot td{position:sticky;bottom:0;z-index:3;
+      background:#dbe7f5;font-weight:600;border-top:2px solid #8fa9c6}
     #si2 .num{font-variant-numeric:tabular-nums;text-align:right}
-    #si2 .sum{background:#dbe7f5 !important;font-weight:600;cursor:pointer}
-    #si2 .sum:hover{background:#cfe0f3 !important}
+    /* ★소계행 — 레거시처럼 뚜렷한 파란 띠로(2026-09-03 교정).
+         종전 #dbe7f5 는 짝수행(#fafcfe)과 대비가 약해 상세와 구분이 안 됐다.
+         td 에 직접 걸어야 nth-child(even) 규칙에 안 밀린다(tr 배경은 td 가 덮는다). */
+    #si2 tr.sum>td{background:#cfe0f3 !important;font-weight:700;cursor:pointer;
+                   border-top:1px solid #9fb9d8;border-bottom:1px solid #9fb9d8}
+    #si2 tr.sum:hover>td{background:#bed6ef !important}
+    /* 소계행의 도번·자도번LIST 는 좀 더 진하게 — 어느 묶음의 합인지 바로 읽히게 */
+    #si2 tr.sum>td{color:#12385f}
     /* ★근무일 칸에 배경색을 주지 않는다 — 충당 색상(살/노랑/회색)과 혼동된다.
        색은 오직 충당 결과로만 붙는다(2026-08-30 교정). */
     #si2 .day{}
@@ -3312,6 +4051,12 @@ SCREEN.setinstat=(c)=>{
          gl_color_mat_all    rgb(192,192,192)  밝은회색
          gl_color_prod_ready rgb(102,153,0)    진초록  ★130 전용
        ※gl_color_mat_part(진회색)은 010 전용 — 130 소스에 등장 0회. 쓰지 않는다. */
+    /* ★충당색은 소계행에서도 보여야 한다(레거시 동일) — tr.sum>td 보다 특이도를 높여
+         소계 배경(#cfe0f3)에 묻히지 않게 한다. 소계 색 롤업 결과가 이 색으로 찍힌다. */
+    #si2 tr.sum>td.c-sale {background:#fac090 !important}
+    #si2 tr.sum>td.c-prod {background:#ffff00 !important}
+    #si2 tr.sum>td.c-mat  {background:#c0c0c0 !important}
+    #si2 tr.sum>td.c-ready{background:#669900 !important;color:#fff}
     #si2 .c-sale {background:#fac090 !important;font-weight:700}  /* 출하 */
     #si2 .c-prod {background:#ffff00 !important;font-weight:700}  /* ASSY(생산) */
     #si2 .c-mat  {background:#c0c0c0 !important;font-weight:600}  /* 세트·자재 */
@@ -3320,13 +4065,63 @@ SCREEN.setinstat=(c)=>{
     /* 자도번작업처 = 이 화면의 주 조건 컬럼 — 옅게 강조 */
     #si2 .jc-col{background:#f2f7fd;color:#1c4e80;font-weight:600}
     #si2 .cap{max-width:260px;overflow:hidden;text-overflow:ellipsis}
+    /* ★컬럼 폭 조절(2026-09-03) — 헤더 우측 경계를 끌어 조절, 핸들 더블클릭=초기화.
+       ⚠th 에 position:relative 를 주면 안 된다 — 위의 position:sticky 를 덮어
+         헤더 고정이 통째로 깨진다(같은 선택자·같은 특이도라 뒤가 이긴다).
+         실제로 그렇게 해서 "스크롤하면 컬럼명이 사라진다"를 만들었다(2026-09-03).
+       → sticky 자체가 위치지정 컨텍스트라 relative 가 애초에 필요없다.
+         absolute 인 핸들은 sticky 인 th 를 기준으로 정상 배치된다. */
+    #si2 table.grid thead th .col-resizer{position:absolute;top:0;right:0;
+      width:7px;height:100%;cursor:col-resize;user-select:none;z-index:2}
+    /* ★복사용 범위선택(2026-09-03) — 충당색(살/노랑/회색)이 인라인·!important 라
+       background 로는 표시가 묻힌다. outline 은 background 계열이 아니라 안 밀린다. */
+    #si2 td.s2-cp{outline:2px solid #64748b !important;outline-offset:-2px;
+                  background-image:linear-gradient(rgba(148,163,184,.30),rgba(148,163,184,.30))}
+    #si2 tr.sum td.s2-cp{outline:none !important;background-image:none}
+    #si2 tr.sum td{user-select:none;-webkit-user-select:none}
+    /* 항목보기 모달·컨텍스트메뉴 — 이 화면만 열어도 보이도록 자체 정의 */
+    .ppcol-ov{position:fixed;inset:0;z-index:1250;background:rgba(15,23,42,.38);display:flex;align-items:center;justify-content:center}
+    .ppcol-bx{background:#fff;border-radius:10px;box-shadow:0 18px 48px rgba(10,25,55,.4);width:420px;max-width:94vw;display:flex;flex-direction:column;max-height:82vh}
+    .ppcol-h{padding:11px 14px;border-bottom:1px solid #dbe3ee;font-weight:700;display:flex;align-items:center;gap:8px}
+    .ppcol-b{flex:1;min-height:0;overflow:auto;padding:4px 0}
+    .ppcol-f{padding:9px 14px;border-top:1px solid #dbe3ee;display:flex;gap:6px;justify-content:flex-end}
+    .ppcol-r{display:flex;align-items:center;gap:9px;padding:5px 14px;cursor:pointer;border-bottom:1px solid #f1f5f9;user-select:none}
+    .ppcol-r:hover{background:#f5f8fd}
+    .ppcol-n{width:26px;color:#94a3b8;font-size:11px;text-align:right}
+    .ppcol-t{flex:1}
+    .ppcol-r.drag{opacity:.45;background:#e8effb}
+    .ppcol-r.over{box-shadow:inset 0 3px 0 #2563eb;background:#f0f6ff}
+    .ppcol-mv{display:flex;gap:2px;opacity:.25;transition:opacity .12s}
+    .ppcol-r:hover .ppcol-mv{opacity:1}
+    .ppcol-mv button{width:20px;height:18px;padding:0;line-height:1;font-size:9px;cursor:pointer;
+      border:1px solid #cbd5e1;background:#fff;border-radius:3px;color:#475569}
+    .ppcol-mv button:hover:not(:disabled){background:#e8effb;border-color:#2563eb;color:#1c47a0}
+    .ppcol-mv button:disabled{opacity:.3;cursor:default}
+    .ppcol-sep{display:flex;align-items:center;gap:8px;padding:5px 14px;margin:2px 0;
+      background:repeating-linear-gradient(45deg,#eef4fd,#eef4fd 6px,#e3ecfa 6px,#e3ecfa 12px);
+      border-top:2px solid #2563eb;border-bottom:2px solid #2563eb;color:#1c47a0;font-size:11px;font-weight:700;user-select:none}
+    .pp-ctx{position:fixed;z-index:1300;background:#fff;border:1px solid #cbd5e1;border-radius:7px;
+      box-shadow:0 10px 30px rgba(10,25,55,.3);padding:4px 0;min-width:150px;font-size:13px}
+    .pp-ctx div{padding:6px 15px;cursor:pointer;white-space:nowrap}
+    .pp-ctx div:hover{background:#eff4fd}
    </style>
-   <div id="si2" style="display:flex;flex-direction:column;height:100%;min-height:0">
-    <div class="page-title">📋 자재세트입고현황
+   <!-- ★높이 체인(2026-09-03 교정 · CLAUDE.md §3) — 헤더가 스크롤에 밀려 사라지던 원인.
+        .content 는 flex:1;overflow:auto 라 **스크롤 주체가 .content** 다. 그런데 #si2 가
+        height:100% 만 갖고 있으면 부모에 확정 높이가 없어 100% 가 해석되지 않고,
+        내용만큼 늘어나 .gwrap 의 내부 스크롤이 생기지 않는다 → .content 가 통째로
+        스크롤되며 표 헤더(sticky)가 같이 밀려 올라간다(툴바는 남고 헤더만 사라진 이유).
+        → 자기 높이를 뷰포트 기준으로 확정하고(.content 패딩 제외), 페이지 스크롤은 막는다.
+          그러면 .gwrap 만 스크롤하고 sticky 헤더·sticky 합계행이 제자리에 붙는다. -->
+   <div id="si2" style="display:flex;flex-direction:column;height:calc(100vh - 150px);min-height:320px;overflow:hidden">
+    <div class="page-title" style="flex:0 0 auto">📋 자재세트입고현황
       <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_input_130_part · 세트재고 기준</span></div>
 
     <div class="toolbar" style="flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label>기준일자 <input type="date" class="inp" id="s2-ymd" value="${st.ymd}" style="width:145px"></label>
+      <!-- ★날짜칸 폭 축소 — type=date 는 브라우저 기본 패딩·달력아이콘 여백이 커서
+           width 만 줄이면 값이 잘린다. 패딩을 줄이고 width:auto(내용폭)로 둔다.
+           네이티브 세그먼트 편집·달력 피커는 그대로(CLAUDE.md §3). -->
+      <label>기준일자 <input type="date" class="inp" id="s2-ymd" value="${st.ymd}"
+             style="width:auto;min-width:0;padding:2px 2px 2px 4px"></label>
       <label>기간 <select class="inp" id="s2-days" style="width:80px">
         ${[1,2,3,4,5,6,7,10,14].map(n=>`<option value="${n}"${n===4?' selected':''}>${n}일</option>`).join('')}
       </select></label>
@@ -3344,6 +4139,12 @@ SCREEN.setinstat=(c)=>{
                placeholder="거래처명 일부(예: 대원)" style="width:180px;min-width:0"></label>
       <datalist id="s2-custs"></datalist>
       <span id="s2-cc" style="font-size:12px;font-weight:600;color:#5a6b82"></span>
+    </div>
+
+    <!-- ★2줄 구성(2026-09-03) — 1줄=조회조건(서버 재조회) / 2줄=텍스트 필터(즉시).
+         종전엔 제번·도번이 오른쪽 끝에 밀려 자도번(아래줄)과 떨어져 있었다. 성격이 같은
+         세 칸을 한 줄에 모으고, 기준일자 폭도 줄여 첫 줄이 넉넉하게 들어가게 한다. -->
+    <div class="toolbar" style="flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px">
       <label>제번 <input class="inp" id="s2-wo" placeholder="제번" style="width:110px"></label>
       <label>도번 <input class="inp" id="s2-db" placeholder="도번" style="width:120px"></label>
       <label>자도번 <input class="inp" id="s2-jd" placeholder="자도번" style="width:120px"></label>
@@ -3353,7 +4154,7 @@ SCREEN.setinstat=(c)=>{
       <span id="s2-msg" style="color:var(--muted);font-size:12px"></span>
     </div>
 
-    <div style="flex:1;min-height:0;overflow:auto;margin-top:8px;background:#fff;
+    <div class="gwrap" style="flex:1 1 auto;min-height:0;overflow:auto;margin-top:8px;background:#fff;
                 border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="grid" id="s2-t" style="width:100%">
         <thead id="s2-h"></thead><tbody id="s2-b"></tbody><tfoot id="s2-f"></tfoot></table>
@@ -3411,7 +4212,12 @@ SCREEN.setinstat=(c)=>{
 
   const draw=()=>{
     const A=st.axis||[];
-    const dayTh=A.map(a=>`<th style="width:66px" class="${a.work?'day':'day0'}">${dlabel(a.ymd)}</th>`).join('');
+    /* ★토·일 헤더는 빨간 글자(2026-09-03, 파트별 생산계획 410 과 동일 표기).
+         근무/휴무 회색만으로는 주말이 한눈에 안 들어온다는 지적. */
+    const isWk=y=>{if(!y||(''+y).length<6)return false;
+      const s=''+y, d=new Date(2000+ +s.slice(0,2),+s.slice(2,4)-1,+s.slice(4,6)).getDay();
+      return d===0||d===6;};
+    const dayTh=A.map(a=>`<th style="width:66px${isWk(a.ymd)?';color:#c0392b':''}" class="${a.work?'day':'day0'}">${dlabel(a.ymd)}</th>`).join('');
     $('#s2-h').innerHTML=`<tr>
       <th style="width:40px">SEQ</th><th style="width:110px">자도번작업처</th>
       <th style="width:60px">라인</th><th style="width:70px">LG INPUT</th>
@@ -3425,10 +4231,11 @@ SCREEN.setinstat=(c)=>{
       <th style="width:70px">자재입고</th><th style="width:70px">요청수량</th>
       <th style="width:70px">생산실적</th><th style="width:70px">출하실적</th>
       <th style="width:78px">세트재고</th><th style="width:70px">단품재고</th>
-      <th style="width:70px">ASSY재고</th><th style="width:150px">모델</th></tr>`;
+      <th style="width:70px">ASSY재고</th><th style="width:150px">모델</th>
+      <th style="width:80px">입고구분</th></tr>`;
 
     if(!st.rows.length){
-      $('#s2-b').innerHTML=`<tr><td colspan="${24+A.length}" style="padding:24px;color:#8aa0bd">
+      $('#s2-b').innerHTML=`<tr><td colspan="${25+A.length}" style="padding:24px;color:#8aa0bd">
         ${st.loading?'조회중…':'조회된 자료가 없습니다.'}</td></tr>`;
       $('#s2-f').innerHTML=''; return;
     }
@@ -3443,7 +4250,7 @@ SCREEN.setinstat=(c)=>{
       A.forEach(a=>{g.day[a.ymd]=(g.day[a.ymd]||0)+(r.day[a.ymd]||0);});
       g.lot+=+r.lot||0; g.mat+=+r.mat_qty||0; g.min+=+r.mat_in||0;
       g.req+=+r.req||0; g.prod+=+r.prod||0; g.sale+=+r.sale||0;
-      g.sagub=(g.sagub||0)+(+r.sagub||0);
+      // ★사급은 수량이 아니다(2026-09-03) — 합산하지 않는다. 소계도 빈칸.
     });
 
     /* ★색상 — 자재입고진행현황(010)과 동일 규칙.
@@ -3518,13 +4325,12 @@ SCREEN.setinstat=(c)=>{
       return `<td class="num ${f.cls||(a.work?'':'day0')}">${txt}</td>`;
     };
     const cell=cellOf;
-    /* ★재고는 도번당 하나 — 같은 도번이 여러 행이면 첫 행에만 표시한다.
-       (행마다 반복 찍히면 재고가 여러 개인 것처럼 보인다) */
-    const seenStock=new Set();
+    /* ★재고(세트·단품·ASSY)는 도번 단위 값이라 같은 도번의 모든 행에 **같은 값이 반복**된다.
+       ⚠2026-09-03 교정 — 종전엔 "여러 개처럼 보인다"는 이유로 첫 행에만 찍었는데,
+         **레거시는 전 행에 반복 표시**한다(실측: 세트재고 152 가 도번의 모든 상세행에 찍히고
+         소계행도 152.0000). 스크롤로 중간부터 보면 재고가 빈칸이라 "재고가 없다"고 읽히는
+         것이 더 큰 문제다. 레거시와 같게 되돌린다. */
     const tail=(r,isSum)=>{
-      const k=r.doban;
-      let show=true;
-      if(!isSum){ if(seenStock.has(k))show=false; else seenStock.add(k); }
       return `
       <td class="num">${r.lot?num(r.lot):''}</td>
       <td class="num">${r.mat_qty?num(r.mat_qty):''}</td>
@@ -3532,21 +4338,29 @@ SCREEN.setinstat=(c)=>{
       <td class="num">${r.req?num(r.req):''}</td>
       <td class="num">${r.prod?num(r.prod):''}</td>
       <td class="num">${r.sale?num(r.sale):''}</td>
-      <td class="num" style="color:${r.set_stock<0?'#c0392b':'#1f7a3d'};font-weight:600">${(show&&r.set_stock)?num(r.set_stock):''}</td>
-      <td class="num">${(show&&r.dan_stock)?num(r.dan_stock):''}</td>
-      <td class="num">${(show&&r.assy_stock)?num(r.assy_stock):''}</td>
-      <td class="lft cap" title="${esc(r.model||'')}">${esc(r.model||'')}</td>`;
+      <td class="num" style="color:${r.set_stock<0?'#c0392b':'#1f7a3d'};font-weight:600">${r.set_stock?num(r.set_stock):''}</td>
+      <td class="num">${r.dan_stock?num(r.dan_stock):''}</td>
+      <td class="num">${r.assy_stock?num(r.assy_stock):''}</td>
+      <td class="lft cap" title="${esc(r.model||'')}">${esc(r.model||'')}</td>
+      <td>${esc(r.in_gubun||'')}</td>`;
     };
 
     let h=''; let seq=0;
     grp.forEach(g=>{
-      const r=g.head, op=(st.gubun==='all')&&(st.open[g.key]!==false);
+      /* ★펼침 상태 — 2026-09-03 교정.
+           전체(all) = 기본 펼침(open[key]!==false)
+           집계(sum) = 기본 접힘. 더블클릭하면 그 묶음만 펼친다(open[key]===true).
+             종전엔 집계에서 펼침 자체가 막혀 있어 더블클릭해도 아무 일이 없었다.
+             집계는 '접어서 보는 화면'이지 '못 펼치는 화면'이 아니다(사용자 지적). */
+      const op = (st.gubun==='all') ? (st.open[g.key]!==false)
+               : (st.gubun==='sum') ? (st.open[g.key]===true) : false;
+      const r=g.head;
       // ★레거시 동일 — 상세가 먼저, 소계는 그 '아래'(클릭하면 위로 펼쳐진다)
-      if(st.gubun==='wo'||(st.gubun==='all'&&op)){
+      if(st.gubun==='wo'||((st.gubun==='all'||st.gubun==='sum')&&op)){
         g.kids.forEach(k=>{
           seq++;
           h+=`<tr><td>${seq}</td><td class="lft jc-col">${esc(k.jcust_nm)}</td>
-            <td>${esc(k.line)}</td><td>${esc(k.hm)}</td><td>${esc(k.wo)}</td>
+            <td>${esc(k.line)}</td><td>${esc(hhmm(k.hm))}</td><td>${esc(k.wo)}</td>
             <td title="${esc(k.gpc)}">${esc(k.gpc_nm||k.gpc)}</td><td>${esc(k.doban)}</td>
             <td class="lft cap" title="${esc(k.jadolist)}">${esc(k.jadolist)}</td>
             <td>${k.sagub?num(k.sagub):''}</td><td></td><td></td>
@@ -3583,24 +4397,35 @@ SCREEN.setinstat=(c)=>{
           <td class="num" style="color:${r.set_stock<0?'#c0392b':'#1f7a3d'};font-weight:600">${r.set_stock?num(r.set_stock):''}</td>
           <td class="num">${r.dan_stock?num(r.dan_stock):''}</td>
           <td class="num">${r.assy_stock?num(r.assy_stock):''}</td>
-          <td class="lft cap" title="${esc(r.model||'')}">${esc(r.model||'')}</td></tr>`;   /* 소계는 항상 표시 */
+          <td class="lft cap" title="${esc(r.model||'')}">${esc(r.model||'')}</td>
+          <td>${esc(r.in_gubun||'')}</td></tr>`;   /* 소계는 항상 표시 */
       }
     });
     $('#s2-b').innerHTML=h;
 
     const T=st.tot||{};
-    $('#s2-f').innerHTML=`<tr style="background:#dbe7f5;font-weight:600;position:sticky;bottom:0">
+    // ★합계행 고정은 CSS(#si2 tfoot td)에서 — tr 에 걸면 border-collapse:separate 에서 안 붙는다
+    $('#s2-f').innerHTML=`<tr>
       <td colspan="13">합계 ${num(st.rows.length)}건 · 집계 ${num(grp.size)}</td>
       ${A.map(a=>`<td class="num">${num((T.day||{})[a.ymd]||0)}</td>`).join('')}
       <td class="num">${num(T.lot||0)}</td><td class="num">${num(T.mat||0)}</td>
       <td colspan="2"></td>
       <td class="num">${num(T.prod||0)}</td><td class="num">${num(T.sale||0)}</td>
-      <td colspan="4"></td></tr>`;
+      <td colspan="5"></td></tr>`;   // 세트·단품·ASSY·모델·입고구분
 
+    /* ★펼침/접힘 = 더블클릭(2026-09-03, 410·키팅과 동일).
+         한 번 클릭이면 그 행을 복사용으로 긁거나 스치기만 해도 접혔다 펴져 화면이 튄다. */
     c.querySelectorAll('#s2-b tr.sum').forEach(tr=>{
-      tr.onclick=()=>{ if(st.gubun!=='all')return;
-        const k=tr.dataset.k; st.open[k]=(st.open[k]===false); draw(); };
+      tr.title='더블클릭 = 상세 펼침/접힘';
+      /* ★전체·집계 둘 다 펼침 가능(2026-09-03) — 종전엔 집계에서 return 해서
+           더블클릭해도 아무 일이 없었다. 제번(wo)은 애초에 소계행이 없다.
+           전체=기본 펼침 / 집계=기본 접힘 이라 토글 기준값이 다르다. */
+      tr.ondblclick=()=>{ if(st.gubun==='wo')return;
+        const k=tr.dataset.k;
+        st.open[k] = (st.gubun==='all') ? (st.open[k]===false) : !(st.open[k]===true);
+        draw(); };
     });
+    s2Wire();      // ★범위선택·항목보기 배선(표를 다시 그릴 때마다)
   };
 
   const load=async()=>{
@@ -3663,8 +4488,51 @@ SCREEN.setinstat=(c)=>{
       if(st.all&&st.all.length)applyLocal(); else load();}};
   });
   $('#s2-go').onclick=load;
+  /* ★엑셀 = 화면 그대로(색상 포함) — 2026-09-03 CSV→xlsx 교체.
+       종전 CSV 는 충당색(살구/노랑/회색/진초록)이 통째로 버려져 "어느 칸이 충당됐는지"를
+       파일에서 알 수 없었다. 이 화면은 색이 곧 정보다.
+     ★DOM 에서 읽는다 — 데이터로 다시 만들면 항목보기(숨김)·집계/제번 구분·펼침상태를
+       전부 재현해야 하고 화면과 어긋날 여지가 생긴다. 숨긴 컬럼은 자동으로 빠진다. */
   $('#s2-xl').onclick=()=>{
-    if(!st.rows.length)return alert('조회된 자료가 없습니다.');   // 화면에 보이는 것만
+    if(!st.rows.length)return alert('조회된 자료가 없습니다.');
+    const tbl=c.querySelector('#si2 table.grid');
+    if(tbl&&typeof downloadXLS==='function'){
+      // 투명(rgba alpha=0)을 걸러야 한다 — 안 그러면 색 없는 셀이 전부 검정이 된다
+      const hex=s=>{const m=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(s||'');
+        if(!m)return ''; if(m[4]!==undefined&&parseFloat(m[4])===0)return '';
+        const h=(+m[1]<<16|+m[2]<<8|+m[3]).toString(16).padStart(6,'0').toUpperCase();
+        return h==='FFFFFF'?'':'#'+h;};
+      const vis=td=>getComputedStyle(td).display!=='none';
+      const cell=td=>{const cs=getComputedStyle(td);
+        const t=(td.innerText||'').trim().replace(/^[▲▼▶]\s*/,'');
+        const n=(t!==''&&/^-?[\d,]+(\.\d+)?$/.test(t))?Number(t.replace(/,/g,'')):null;
+        const fg=hex(cs.color);
+        return {v:(n===null||isNaN(n))?t:n, bg:hex(cs.backgroundColor)||'',
+                fg:(fg&&fg!=='#000000')?fg:'', b:(+cs.fontWeight>=600)?1:0, al:'center'};};
+      const hr=tbl.tHead&&tbl.tHead.rows[0];
+      if(hr){
+        const keep=[...hr.cells].map((th,i)=>vis(th)?i:-1).filter(i=>i>=0);
+        const cols=keep.map(i=>({h:(hr.cells[i].innerText||'').trim(),
+                                 w:Math.max(60,Math.round(hr.cells[i].getBoundingClientRect().width))}));
+        const rows=[];
+        for(const tb of tbl.tBodies)for(const r of tb.rows){
+          if(r.cells.length<=2)continue;                    // colspan 안내행
+          rows.push(keep.filter(i=>i<r.cells.length).map(i=>cell(r.cells[i])));}
+        const foot=[];
+        if(tbl.tFoot)for(const r of tbl.tFoot.rows){
+          if(r.cells.length)foot.push([...r.cells].map(cell));}
+        const T=new Date(), q=n=>String(n).padStart(2,'0');
+        const stamp=`${String(T.getFullYear()).slice(2)}${q(T.getMonth()+1)}${q(T.getDate())}${q(T.getHours())}${q(T.getMinutes())}`;
+        downloadXLS(`자재세트입고현황_${stamp}`,cols,rows,
+          {sheet:'자재세트입고현황',
+           title:`자재세트입고현황 — 기준 ${st.ymd} · 기간 ${st.days}일`
+                 +(st.jcustnm?` · ${st.jcustnm}(${st.jcust})`:''),
+           sub:`${num(st.rows.length)}건 · 구분 ${({all:'전체',sum:'집계',wo:'제번'})[st.gubun]||st.gubun}`,
+           foot});
+        return;
+      }
+    }
+    // 폴백(구형) — downloadXLS 가 없으면 종전 CSV
     const A=st.axis||[];
     const hd=['자도번작업처','라인','LG INPUT','제번','작업처','도번','자도번LIST','사급',
               ...A.map(a=>dlabel(a.ymd)),'LOT수량','자재수량','자재입고','요청수량',
@@ -3678,6 +4546,9 @@ SCREEN.setinstat=(c)=>{
     a.download='자재세트입고현황.csv'; a.click();
   };
 
+  // ★내 항목보기 설정(계정별, nx.user_pref)을 먼저 받아둔다 — 늦게 오면 컬럼이 깜빡인다
+  s2PrefLoad().then(()=>{ try{s2ApplyHide();}catch(_){} });
+
   fetch(`${API}/api/setinstat/opts`).then(r=>r.json()).then(d=>{
     let h='';
     (d.custs||[]).forEach(x=>{ if(x.name&&x.code){custMap[x.name]=x.code;
@@ -3690,8 +4561,11 @@ SCREEN.setinstat=(c)=>{
       st.ymd='20'+b.slice(0,2)+'-'+b.slice(2,4)+'-'+b.slice(4,6);
       const el=$('#s2-ymd'); if(el)el.value=st.ymd;
     }
-    load();                         // 기준일자 확정 후 최초 조회
-  }).catch(()=>{ load(); });        // opts 실패해도 오늘 기준으로 조회
+    /* ★자동조회 안 함(2026-09-03 사용자 요청, 410·키팅과 동일).
+         진입할 때마다 무거운 조회가 먼저 걸려 느리고, 조건(기준일자·기간·업체)을
+         바꾸기도 전에 한 번 돌아 버린다. [조회] 를 눌러야 조회한다. */
+    msg('조건을 고르고 [조회] 를 누르세요.'); draw();
+  }).catch(()=>{ msg('조건을 고르고 [조회] 를 누르세요.'); });
 
   // ★초기 조회는 opts 가 기준일자(계획 업로드일)를 준 뒤에 한다 — 중복조회 방지
   showCust(''); draw();
