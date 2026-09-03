@@ -98,6 +98,8 @@ from routers import procbc as _r_procbc
 app.include_router(_r_procbc.router)
 from routers import purmagam as _r_purmagam
 app.include_router(_r_purmagam.router)
+from routers import lgrecv as _r_lgrecv
+app.include_router(_r_lgrecv.router)
 from routers import manorder as _r_manorder
 app.include_router(_r_manorder.router)
 from routers import order as _r_order

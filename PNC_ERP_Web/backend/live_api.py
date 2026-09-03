@@ -328,19 +328,8 @@ def dispatch(gijun: str = Query("close"), ym: str = Query(""), dfrom: str = Quer
 # ★마감창 + 수동 이월(nx.magam_carry_ovr) 반영 — 마감 프로그램(매입=PUR/매출=SALE)의 이월/해제를 집계표·일일현황에도 동일 적용.
 #   효과: 거래의 유효 귀속월==y(=마감창 자연판정 ± override). override 0건이면 원 마감창과 완전 동일(diff0).
 #   ★A(대상 테이블)에 MAT_CODE·CUST_CODE·MAINT_YMD 가 있어야 함(SA_T_STOCK_MAINT는 MAT_CODE 없음 → tag5 파트에만 사용).
-def _win_ovr(kind, y):
-    # 유효 귀속월==y 판정: override 있으면 assign_ym==y, 없으면 자연 마감창(nat_cur). override 0건이면 nat_cur 과 동일(diff0).
-    # ★차월로 당겨진(pull-in) 항목도 assign=y 로 포함(물리 전월이어도). 스캔은 전월~당월로 한정(인덱스·성능).
-    yy = int(y[:2]); mm = int(y[2:]) - 1; py = yy
-    if mm == 0: mm = 12; py -= 1
-    prevym = f"{py:02d}{mm:02d}"
-    _o = ("SELECT 1 FROM PARTNER_ERP_TEST3.nx.magam_carry_ovr o WHERE o.kind='" + kind +
-          "' AND o.cust_code=A.CUST_CODE AND o.mat_code=A.MAT_CODE AND o.maint_ymd=A.MAINT_YMD")
-    ex_eq = f"EXISTS({_o} AND o.assign_ym='{y}')"   # y 로 배정된 것(당겨온 것 포함)
-    ex_any = f"EXISTS({_o})"                         # override 존재
-    nat_cur = f"(A.MAINT_YMD > mg.jun_yymm+mg.jun_magam_day AND A.MAINT_YMD <= '{y}'+mg.magam_day)"   # 자연 마감창
-    bound = f"A.MAINT_YMD >= '{prevym}00' AND A.MAINT_YMD <= '{y}99'"   # 전월~당월 스캔 한정
-    return f"({bound} AND ({ex_eq} OR (NOT {ex_any} AND {nat_cur})))"
+# _win_ovr = 마감 공용 단일창(common). 집계표·마감목록·일일현황이 같은 창을 쓴다(2026-09-03 통일).
+from common import _win_ovr
 
 # ================= 확정입고집계표 (구매/자재, dw_pu_input_120) =================
 # 확정입고(검사통과 9/S/C/G/H) + 수입(PU_T_STOCK_MAINT_C DIVISION='P'). grain=(cc,ic,mat). patch_receipt.py 이식.
@@ -1222,7 +1211,7 @@ def lgrecv(ym: str = Query(""), fr: str = Query(""), to: str = Query("")):
     _c1, cells = _rows(f"""
 SELECT a.item_code item, ISNULL(a.mkt,'') mkt, a.receiving_ymd d,
   SUM(a.recv_qty) q, SUM(a.recv_amt) amt
-FROM sa_t_lg_receiving_dtl a
+FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL a  -- ★컷오버 flip 대상(→nx). 업로드=nx 쓰기(routers/lgrecv.py)
 WHERE a.receiving_ymd BETWEEN '{fr6}' AND '{to6}'
 GROUP BY a.item_code, ISNULL(a.mkt,''), a.receiving_ymd""")
     _c2, items = _rows(f"""
@@ -1231,7 +1220,7 @@ SELECT m.item_code item,
   CASE WHEN m.work_code>'' THEN (SELECT work_desc FROM PARTNER_ERP_TEST3.nx.pr_m_work WHERE work_code=m.work_code)
        ELSE (SELECT cust_desc FROM PARTNER_ERP_TEST3.nx.cm_m_cust WHERE cust_code=M.in_cust) END wc
 FROM PARTNER_ERP_TEST3.nx.item m
-WHERE m.item_code IN (SELECT DISTINCT item_code FROM sa_t_lg_receiving_dtl WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
+WHERE m.item_code IN (SELECT DISTINCT item_code FROM PARTNER_ERP.dbo.SA_T_LG_RECEIVING_DTL WHERE receiving_ymd BETWEEN '{fr6}' AND '{to6}')""")
     return {"fr": fr6, "to": to6, "ym": fr6[:4], "cells": cells, "items": items}
 
 # ================= 생산재고조회 (생산, dw_pr_stock_040/480) — 가공(P0001)/용접(그외) 라인재고 =================
