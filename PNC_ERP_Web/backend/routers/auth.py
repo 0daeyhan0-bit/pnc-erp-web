@@ -169,10 +169,12 @@ COOP_ALLOW = {
     # ── 내부 ERP 「협력사」 폴더 개방 (2026-09-03) ──────────────────────────────
     #   협력사 계정이 index.html 로 들어와 자기 것만 보게 한다(core.js ROLE_MOD['협력사']).
     #   ★전부 scope_cust() 로 소속강제됨 — 자기 거래처 외 데이터는 못 본다.
+    "/api/plan/basedate",                 # 계획 공통 기준일(=마지막 업로드 일자축 첫날). 거래처 정보 없음·읽기전용
     "/api/partner/workcenters",           # 작업처 드롭다운 — ★소속강제 넣고 개방(자기 1건만)
     "/api/sagubledger/list",              # 사급 수불장 — 목록 (읽기)
     "/api/sagubledger/detail",            # 〃 상세 (읽기)
-    "/api/delivedit/custs",               # 거래명세표 수정 — 거래처(자기 1건)
+    "/api/delivedit/list",                # 거래명세표 수정 — 목록 (읽기·scope_cust 강제)
+    "/api/delivedit/custs",               # 〃 거래처(자기 1건)
     "/api/delivedit/items",               # 〃 도번·자도번 목록
     "/api/delivedit/update",              # 〃 수량수정 (쓰기·_guard 가 출발20 이후 차단)
     "/api/delivedit/delete",              # 〃 삭제   (쓰기·동상)

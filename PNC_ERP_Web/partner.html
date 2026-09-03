@@ -277,14 +277,41 @@ async function start(){
   });
   await load();
 }
+/* ★홈 로딩 체감 개선(2026-09-03)
+     서버 쿼리 자체는 웜에서 0.2~0.3초로 빠르다(콜드 첫 호출만 7초). 느리게 느껴지던 건
+     새로고침할 때마다 흰 '불러오는 중…' 을 보고 응답을 기다렸기 때문이다.
+     → 직전 응답을 sessionStorage 에 캐시해 **즉시 그리고**, 뒤에서 갱신한다(stale-while-revalidate).
+     캐시는 이 탭·이 세션에서만 살고(sessionStorage), 계정이 다르면 버린다. */
+const _MYK='pnc_my_cache';
+function _myCacheGet(){
+  try{
+    const s=sessionStorage.getItem(_MYK); if(!s) return null;
+    const j=JSON.parse(s);
+    if(!j || j.uid!==((T.me||{}).id||'') ) return null;      // 다른 계정 캐시는 버린다
+    if(Date.now()-(j.at||0) > 10*60*1000) return null;        // 10분 지나면 버린다
+    return j.d||null;
+  }catch(e){ return null; }
+}
+function _myCacheSet(d){
+  try{ sessionStorage.setItem(_MYK, JSON.stringify(
+        {uid:((T.me||{}).id||''), at:Date.now(), d:d})); }catch(e){}
+}
+
 async function load(){
   ORDER=null; ORDER_LOADING=false;   // 재로그인/새로고침 시 발주현황 캐시 초기화
   SLEDG=null; SLEDG_LOADING=false; SGDET=null;   // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
   EDIT=null;  EDIT_LOADING=false;
   PP=null;    PP_LOADING=false;
-  $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
-  try{ DATA = await api('/api/partner/my?days=14'); }
-  catch(e){ if(e.message!=='401') $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
+  loadPlanBase();                                  // ★계획 기준일(비동기·화면 안 막음)
+  const cached=_myCacheGet();
+  if(cached){ DATA=cached; render(); }             // 있으면 먼저 그린다(대기 없음)
+  else $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
+  try{ DATA = await api('/api/partner/my?days=14'); _myCacheSet(DATA); }
+  catch(e){
+    if(e.message==='401') return;
+    if(!cached){ $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
+    return;                                        // 캐시가 있으면 그대로 두고 조용히 끝낸다
+  }
   render();
 }
 
@@ -383,6 +410,21 @@ function viewPlan(){
 let PP=null, PP_LOADING=false;
 const PPF={from:'', days:31, assy:'', part:''};
 
+/* ★계획 공통 기준일 = 마지막 계획업로드 파일의 일자축 첫날(2026-09-03).
+     오늘(today)이 아니다 — 업로드 후 미출하분이 재편성되면서 재고 충당이 그쪽으로 옮겨가
+     옛 날짜로 조회하면 재고가 실제보다 많이 채워져 보인다(order.py:295 근거).
+     내부 ERP 의 planBase() 와 같은 소스(/api/plan/basedate)를 쓴다. */
+let PLAN_BASE='';
+async function loadPlanBase(){
+  try{
+    const j=await api('/api/plan/basedate');      // {base_iso, base_ymd, src, upload_dt}
+    const iso=(j&&j.base_iso)||'', y6=(j&&j.base_ymd)||'';
+    PLAN_BASE = iso || (String(y6).length===6
+      ? `20${y6.slice(0,2)}-${y6.slice(2,4)}-${y6.slice(4,6)}` : '');
+  }catch(e){ PLAN_BASE=''; }
+  if(!PPF.from) PPF.from = PLAN_BASE || _iso(new Date());
+}
+
 const _iso=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const _isoAdd=(iso,n)=>{const [y,m,d]=String(iso).split('-').map(Number);
   const t=new Date(y,(m||1)-1,(d||1)+n); return _iso(t);};
@@ -398,9 +440,10 @@ function loadPP(){
   if(PP_LOADING) return;
   const wc=String((T.me||{}).partner_code||'').trim();
   if(!wc){ PP={need:1}; return; }
-  if(!PPF.from) PPF.from=_iso(new Date());
+  if(!PPF.from) PPF.from = PLAN_BASE || _iso(new Date());   // ★계획 최신 업로드일 기준
   PP_LOADING=true;
   const to=_isoAdd(PPF.from, Math.max(1,+PPF.days||31)-1);
+  // ★src 는 항상 nx(우리 편성) — 레거시 토글은 두지 않는다(2026-09-03 확정).
   const q=new URLSearchParams({from_ymd:PPF.from,to_ymd:to,wc:wc,
     part:PPF.part||'',assy:PPF.assy||'',line:'',gubun:'외주',src:'nx'});
   api('/api/partner/planstatus?'+q)
@@ -410,12 +453,14 @@ function loadPP(){
 }
 
 function viewPPlan(){
-  if(!PP){ loadPP(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
-  if(PP.need)  return `<div class="card"><div class="empty">소속 거래처가 지정되지 않았습니다. 담당자에게 문의하세요.</div></div>`;
-  if(PP.error) return `<div class="msg e">${esc(PP.error)}</div>`;
-  const ds=PP.dates||[], rows=(PP.rows||[]).map(r=>Object.assign({},r,{
+  // ★자동조회 하지 않는다 — 조회 버튼을 눌러야 조회(내부 ERP 와 동일, 2026-09-03).
+  //   PP===null 이면 '조회 전', PP_LOADING 이면 '불러오는 중'.
+  if(PP && PP.need)  return `<div class="card"><div class="empty">소속 거래처가 지정되지 않았습니다. 담당자에게 문의하세요.</div></div>`;
+  if(PP && PP.error) return `<div class="msg e">${esc(PP.error)}</div>`;
+  if(!PPF.from) PPF.from = PLAN_BASE || _iso(new Date());   // ★기준일자 = 계획 최신 업로드일
+  const ds=(PP&&PP.dates)||[], rows=((PP&&PP.rows)||[]).map(r=>Object.assign({},r,{
     jado: r.mats||r.part||'', matq: (r.matq!=null?r.matq:r.tot)}));
-  const frac = PP.frac!==false;
+  const frac = !PP || PP.frac!==false;
   const to=_isoAdd(PPF.from, Math.max(1,+PPF.days||31)-1);
   const cell=(r,d)=>{
     const pl=+((r.days||{})[d]||0), dn=+((r.donedays||{})[d]||0);
@@ -427,15 +472,23 @@ function viewPPlan(){
   const sum=(f)=>rows.reduce((a,r)=>a+(+r[f]||0),0);
   const dsum=(d,k)=>rows.reduce((a,r)=>a+(+((r[k]||{})[d])||0),0);
   return `
-  <div class="ttl">협력사 계획현황 <small>레거시 w_pr_outside_040 · 내 거래처(${esc((T.me||{}).partner_code||'')}) 자동</small></div>
+  <div class="ttl">협력사계획현황 <small>4주간 계획수량 — 도번·자도번LIST·일자별 (당김 반영)</small></div>
   <div class="tbar">
     <label>기준일자</label><input type="date" id="pp-from" value="${esc(PPF.from)}">
     <label>기간</label><input type="text" id="pp-days" value="${esc(PPF.days)}" style="width:46px;text-align:center">일
-    <label>도번</label><input type="text" id="pp-assy" value="${esc(PPF.assy)}" style="width:120px">
-    <label>자도번</label><input type="text" id="pp-part" value="${esc(PPF.part)}" style="width:120px">
-    <button class="go" id="pp-go">조회</button>
-    <span class="sp">${num(PP.cnt||rows.length)}건 · 자재수량합 ${num(PP.sum_qty)} · ${esc(PPF.from)}~${esc(to)}</span>
+    <label>도번</label><input type="text" id="pp-assy" value="${esc(PPF.assy)}" placeholder="도번(ASSY)" style="width:120px">
+    <label>자도번</label><input type="text" id="pp-part" value="${esc(PPF.part)}" placeholder="자도번" style="width:120px">
+    <button class="go" id="pp-go"${PP_LOADING?' disabled':''}>${PP_LOADING?'조회 중…':'조회'}</button>
+    <span class="sp">${PP ? `${num(PP.cnt||rows.length)}건 · 자재수량합 ${num(PP.sum_qty)} · ${esc(PPF.from)}~${esc(to)}`
+                          : `${esc(PPF.from)}~${esc(to)}`}</span>
   </div>
+  ${frac?`<div style="font-size:11px;color:#5b6b85;margin:0 2px 5px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
+    <span>일자셀=<b>완료/계획</b></span>
+    <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span>
+    <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span>
+    <span style="background:#c0c0c0;padding:0 5px;border-radius:3px" title="세트재고 + 입고대기 물량이 배분된 칸">세트재고</span>
+    <span style="color:#8aa0bd">· 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번단위)</span>
+  </div>`:''}
   <div class="gwrap"><table class="tbl">
     <thead><tr>
       <th style="width:40px">SEQ</th><th style="width:100px">자도번작업처</th>
@@ -444,24 +497,27 @@ function viewPPlan(){
       <th style="width:42px">사급</th><th style="width:56px">LOT수량</th>
       <th style="width:62px">자재수량</th><th style="width:62px">완료수량</th><th style="width:62px">요청수량</th>
       ${ds.map(d=>{const i=_dinfo(d);
-        return `<th style="width:46px${i.wk?';color:#c0392b':''}">${esc(i.lab)}</th>`;}).join('')}
+        return `<th style="width:46px${i.wk?';color:#c0392b;background:#ffe9d6':''}">${esc(i.lab)}</th>`;}).join('')}
     </tr></thead>
     <tbody>
       ${rows.length ? rows.map((r,i)=>`<tr>
-        <td style="color:#8aa0bd">${i+1}</td>
+        <td style="color:#8aa0bd">${esc(r.seq!=null?r.seq:(i+1))}</td>
         <td><b>${esc(r.wcnm||r.wc||'')}</b></td>
         <td>${esc(r.line||'')}</td>
         <td>${esc(r.workcenter||'')}</td>
         <td><b>${esc(r.assy||'')}</b></td>
         <td class="l" title="${esc(r.jado)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis">
-          ${(+r.matn>1)?`<span style="background:#eef2f7;color:#5b6b85;border-radius:3px;padding:0 4px;font-size:10.5px;margin-right:3px">${num(r.matn)}종</span>`:''}${esc(r.jado)}</td>
+          ${(+r.matn>1)?`<span style="background:#e8f0fe;color:#1c47a0;border-radius:3px;padding:0 4px;font-size:10.5px;font-weight:700;margin-right:3px">${num(r.matn)}종</span>`:''}${esc(r.jado)}</td>
         <td>${r.sagub?`<span style="background:#fff3d6;color:#8a6100;border-radius:3px;padding:0 4px;font-size:10.5px">사급</span>`:''}</td>
         <td>${r.lot==null?'-':num(r.lot)}</td>
         <td><b>${num(r.matq)}</b></td>
         <td style="color:#1c7c3a">${num(r.doneq)}</td>
         <td>${num(r.reqq)}</td>
         ${ds.map(d=>cell(r,d)).join('')}
-      </tr>`).join('') : `<tr><td colspan="${11+ds.length}" class="empty" style="padding:22px">조회 결과가 없습니다.</td></tr>`}
+      </tr>`).join('') : `<tr><td colspan="${11+ds.length}" class="empty" style="padding:22px">${
+        PP_LOADING ? '불러오는 중…'
+        : (!PP ? '조회 버튼을 누르세요 — 기준일자·기간을 정하고 [조회]'
+               : '조회 결과 없음 — 기준일자/기간을 확인하세요.')}</td></tr>`}
     </tbody>
     ${rows.length?`<tfoot><tr class="grandtot">
       <td>계</td><td>${num(rows.length)}건</td><td colspan="6"></td>
@@ -823,7 +879,7 @@ function wire(){
     PPF.days = ($('#pp-days')||{}).value || PPF.days;
     PPF.assy = (($('#pp-assy')||{}).value||'').trim();
     PPF.part = (($('#pp-part')||{}).value||'').trim();
-    PP=null; render();
+    PP=null; loadPP(); render();       // ★조회는 버튼으로만(자동조회 없음)
   };
   ['pp-from','pp-days','pp-assy','pp-part'].forEach(id=>{
     const el=$('#'+id); if(el) el.onkeyup=e=>{ if(e.key==='Enter') pg&&pg.click(); };
