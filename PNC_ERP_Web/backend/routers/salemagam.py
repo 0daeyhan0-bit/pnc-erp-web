@@ -31,22 +31,55 @@ _SALE_MAGAM = """WITH MAGAM(CUST_CODE,JUN_YYMM,JUN_MAGAM_DAY,MAGAM_DAY) AS (
 def _sale_win():
     return "A.MAINT_YMD > mg.JUN_YYMM+mg.JUN_MAGAM_DAY AND A.MAINT_YMD <= '{ym}'+mg.MAGAM_DAY"
 
+# ===== 매출마감 원천(거래구분 3종) — 자재불출집계표(dispatch)와 동일 구성 =====
+#   판매(tag5, PU_T_STOCK_MAINT)=이월(SALE override) 반영(dc5) · 반품(R, SA_T_STOCK_MAINT)·수출(Q, _C DIV=Q)=자연 마감창(dc).
+#   총액 = dispatch(불출집계표)와 diff0. gubun 컬럼으로 구분 필터/표시.
+_SALE_GUBUNS = ["판매", "반품", "수출"]
+def _sale_src(dc, dc5):
+    return f"""
+    SELECT A.CUST_CODE cc, A.MAT_CODE mat, ISNULL(A.ITEM_CODE,'') ic, A.MAINT_COST cost, A.MAINT_YMD ymd,
+      SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, SUM(-A.MAINT_VAT) vat, N'판매' gubun
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {dc5} AND A.MAINT_TAG='5'
+     GROUP BY A.CUST_CODE,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,A.MAINT_YMD
+    UNION ALL
+    SELECT A.CUST_CODE, A.ITEM_CODE, '', A.MAINT_COST, A.MAINT_YMD,
+      SUM(-A.MAINT_QTY), SUM(-A.MAINT_AMT), SUM(-A.MAINT_VAT), N'반품'
+     FROM PARTNER_ERP_TEST3.nx.SA_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {dc} AND A.MAINT_TAG='R'
+     GROUP BY A.CUST_CODE,A.ITEM_CODE,A.MAINT_COST,A.MAINT_YMD
+    UNION ALL
+    SELECT A.CUST_CODE, A.MAT_CODE, ISNULL(A.ITEM_CODE,''), A.MAINT_COST, A.MAINT_YMD,
+      SUM(A.MAINT_QTY), SUM(ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1)), 0, N'수출'
+     FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
+     WHERE {dc} AND A.DIVISION='Q'
+     GROUP BY A.CUST_CODE,A.MAT_CODE,A.ITEM_CODE,A.MAINT_COST,A.MAINT_YMD"""
+
+def _gubun_filter(gubun, allowed):
+    g = (gubun or "").strip()
+    return "" if (not g or g in ("전체", "all", "ALL")) else (g if g in allowed else None)
+
 @router.get("/api/salemagam/list")
-def salemagam_list(ym: str = Query("")):
-    """매출마감 업체별 집계(협력사판매 tag5, 마감기준) + nx 마감상태·조정합."""
+def salemagam_list(ym: str = Query(""), gubun: str = Query("")):
+    """매출마감 업체별 집계(판매 tag5 + 반품 + 수출, 마감기준) + nx 마감상태·조정합.
+       gubun='' /전체=3구분 합(=자재불출집계표 총액) · '판매'/'반품'/'수출'=해당 구분만. 판매=이월 반영."""
     y = _dig4(ym) or _cur_ym()
-    _yy = int(y[:2]); _mm = int(y[2:]); _pm = _mm - 1; _py = _yy
-    if _pm == 0: _pm = 12; _py -= 1
-    prevym = f"{_py:02d}{_pm:02d}"   # ★조대 하한(전월) — 거래처별 마감일 범위는 전월~당월이므로 이 범위 밖은 스캔 불필요(MAINT_YMD 인덱스 프루닝)
+    gf = _gubun_filter(gubun, _SALE_GUBUNS)
+    if gf is None:
+        raise HTTPException(400, "gubun 은 전체/판매/반품/수출 중 하나")
+    dc = _sale_win().format(ym=y); dc5 = _win_ovr('SALE', y)
+    gwhere = f" WHERE S.gubun=N'{gf}'" if gf else ""
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
-          SELECT A.CUST_CODE cc, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
+          SELECT S.cc cc, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
-            SUM(-A.MAINT_QTY) qty, SUM(-A.MAINT_AMT) amt, SUM(-A.MAINT_VAT) vat, COUNT(DISTINCT A.MAT_CODE) items
-          FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON A.CUST_CODE=C.CUST_CODE JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
-          WHERE A.MAINT_TAG='5' AND {_win_ovr('SALE', y)}
-          GROUP BY A.CUST_CODE HAVING SUM(-A.MAINT_AMT)<>0 ORDER BY SUM(-A.MAINT_AMT) DESC""")
+            SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items,
+            SUM(CASE WHEN S.gubun=N'판매' THEN S.amt ELSE 0 END) amt_sale,
+            SUM(CASE WHEN S.gubun=N'반품' THEN S.amt ELSE 0 END) amt_return,
+            SUM(CASE WHEN S.gubun=N'수출' THEN S.amt ELSE 0 END) amt_export
+          FROM ({_sale_src(dc, dc5)}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE{gwhere}
+          GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     finally:
@@ -62,9 +95,10 @@ def salemagam_list(ym: str = Query("")):
     for r in rows:
         cc = r["cc"]; s = st.get(cc, (0, 0))
         r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["vat"] = float(r["vat"] or 0); r["items"] = int(r["items"] or 0)
+        r["amt_sale"] = float(r.get("amt_sale") or 0); r["amt_return"] = float(r.get("amt_return") or 0); r["amt_export"] = float(r.get("amt_export") or 0)
         r["close_flag"] = s[0]; r["bill_flag"] = s[1]
         r["adj_amt"] = adj.get(cc, 0.0); r["final_amt"] = round(r["amt"] + adj.get(cc, 0.0), 2)
-    return {"ym": y, "rows": rows}
+    return {"ym": y, "rows": rows, "gubun": gf, "gubuns": _SALE_GUBUNS}
 
 @router.get("/api/salemagam/detail")
 def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
@@ -115,10 +149,30 @@ def salemagam_detail(ym: str = Query(""), cc: str = Query(...)):
         carry = 1 if eff != y else 0                                 # 당월귀속=0 / 당월물리·차월귀속(이월-out)=1
         days.add(int(ymd))
         qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
-        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "_bd": {}, "_mx": -1.0})
+        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "gubun": "판매", "_bd": {}, "_mx": -1.0})
         bd = it["_bd"].setdefault(ymd, {"d": int(ymd), "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
         bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv; bd["carry"] = carry
         if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv          # 대표단가 = 금액 최대 일자
+    # ★수출(Q)·반품(R) = 자연 마감창(이월 없음, carry=0), 구분 태그. 목록 총액과 상세 총액 정합(매입의 수입과 대칭).
+    dc_nat = _sale_win().format(ym=y)
+    cur2 = _conn().cursor()
+    try:
+        cur2.execute(f"""{_SALE_MAGAM.format(ym=y)}
+          SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit, S.cost cost, S.ymd ymd,
+            SUM(S.qty) q, SUM(S.amt) amt, MAX(S.gubun) gubun
+          FROM ({_sale_src(dc_nat, dc_nat)}) S LEFT JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
+          WHERE S.cc=? AND S.gubun IN (N'반품',N'수출') GROUP BY S.mat, S.cost, S.ymd""", cc)
+        for r in cur2.fetchall():
+            d = dict(zip([dd[0] for dd in cur2.description], r))
+            mat = str(d["mat"]).strip(); ymd = str(d["ymd"]).strip(); gb = str(d["gubun"]).strip()
+            days.add(int(ymd)); qv = float(d["q"] or 0); av = float(d["amt"] or 0); cv = float(d["cost"] or 0)
+            key = gb + "\t" + mat   # 판매 mat 과 키 충돌 방지
+            it = items.setdefault(key, {"mat": mat, "nm": d["nm"], "spec": d["spec"], "unit": d["unit"], "cost": cv, "gubun": gb, "_bd": {}, "_mx": -1.0})
+            bd = it["_bd"].setdefault(ymd, {"d": int(ymd), "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": 0})
+            bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv
+            if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv
+    finally:
+        cur2.connection.close()
     for it in items.values():
         bl = sorted(it.pop("_bd").values(), key=lambda x: x["d"]); it.pop("_mx", None)
         it["byday"] = bl; it["dayN"] = len(bl); it["carryN"] = sum(1 for b in bl if b["carry"])

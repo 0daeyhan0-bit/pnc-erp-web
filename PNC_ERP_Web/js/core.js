@@ -2212,6 +2212,8 @@ const _mkMagam=(CFG)=>(c)=>{
   let ym='', rows=[], loading=false, msg='', reasons=[], q='', wmap={}, realRaw=25000, sagubRaw=20000;
   let listSel=new Set();   // 거래처 다중선택(체크박스) — 툴바 처리버튼(마감확정)이 대상
   let sortKey='', sortDir=1, ctf='';   // 정렬키·방향(1오름/-1내림)·분류필터
+  let gsel='', gubunOpts=[];   // 거래구분 필터(전체/판매·반품·수출 / 매입·수입) + 옵션(백엔드 j.gubuns)
+  const GBAMT={'판매':'amt_sale','반품':'amt_return','수출':'amt_export','매입':'amt_purchase','수입':'amt_import'};   // 구분→행 세부금액 필드
   // ★2026-08-23 P/No 펼침(레거시 w_pu_sale_010) — 집계를 자도번 단위로 풀어서 본다.
   //   view='sum'(기존 거래처집계, 마감/계산서) | 'line'(P/No 상세)
   //   basis='magam'(거래처별 마감일 창) | 'input'(입고기간 fr~to, 기본 당월1일~오늘)
@@ -2235,7 +2237,7 @@ const _mkMagam=(CFG)=>(c)=>{
 
   const load=async(y)=>{loading=true;msg='';draw();
     try{const r=await fetch(`${API}/api/${CFG.base}/list?ym=${encodeURIComponent(y||'')}`);if(!r.ok)throw new Error('HTTP '+r.status);
-      const j=await r.json();rows=j.rows||[];ym=j.ym||y||'';
+      const j=await r.json();rows=j.rows||[];ym=j.ym||y||'';gubunOpts=j.gubuns||[];
       if(CFG.weight){try{const rw=await fetch(`${API}/api/${CFG.base}/weight_quote?ym=${encodeURIComponent(ym)}`);const jw=await rw.json();wmap={};(jw.rows||[]).forEach(w=>{wmap[w.cc]={raw_out:w.raw_out,raw_in:w.raw_in,raw_diff:w.raw_diff,raw_amt:w.settle_amt,weld_out:w.weld_out,weld_in:w.weld_in,weld_diff:w.weld_diff,weld_amt:w.weld_amt,specs:w.specs,unmapped_out:w.unmapped_out};});}catch(e){wmap={};}}}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';rows=[];}
     loading=false;draw();};
@@ -2254,7 +2256,11 @@ const _mkMagam=(CFG)=>(c)=>{
     catch(e){msg='조회 실패 — '+e.message;lrows=[];ldays=[];lcnt=0;ltotq=0;ltota=0;}
     lLoading=false;draw();};
 
-  const filt=()=>{const k=q.trim().toLowerCase();return rows.filter(r=>(!k||(''+r.cc).toLowerCase().includes(k)||(''+r.nm).toLowerCase().includes(k)||(''+r.chg).toLowerCase().includes(k))&&(!ctf||ctN(r.ct)===ctf));};
+  const filt=()=>{const k=q.trim().toLowerCase();
+    let base=rows.filter(r=>(!k||(''+r.cc).toLowerCase().includes(k)||(''+r.nm).toLowerCase().includes(k)||(''+r.chg).toLowerCase().includes(k))&&(!ctf||ctN(r.ct)===ctf));
+    // 거래구분 필터: 특정 구분 선택 시 그 구분 금액만 표시(조정·최종은 총액축이라 뷰전용). 전체=원본(조정·확정 포함).
+    if(gsel&&GBAMT[gsel]){const f=GBAMT[gsel];base=base.filter(r=>Math.abs(+(r[f]||0))>0.5).map(r=>({...r,amt:+(r[f]||0),final_amt:+(r[f]||0),adj_amt:0,_gv:gsel}));}
+    return base;};
   const finw0=(r)=>(+r.final_amt||0)+((wmap[r.cc]||{}).raw_amt||0)+((wmap[r.cc]||{}).weld_amt||0);
   const SVAL=(r,key)=>{const w=wmap[r.cc]||{};switch(key){   // 정렬값 접근자(문자=코드/명/담당/분류, 그외 숫자)
     case 'cc':return (''+r.cc); case 'nm':return (''+r.nm); case 'chg':return (''+r.chg); case 'ct':return ctN(r.ct);
@@ -2469,6 +2475,7 @@ const _mkMagam=(CFG)=>(c)=>{
        `}
        <label class="tl">거래처</label><input class="inp" id="sm-q" value="${esc(q)}" placeholder="코드/거래처명${view==='line'?'':'/담당자'}" style="width:180px">
        ${view==='sum'?`<label class="tl">분류</label><select class="inp" id="sm-ct" style="width:auto"><option value="">전체</option>${cts.map(t=>`<option value="${esc(t)}" ${ctf===t?'selected':''}>${esc(t)}</option>`).join('')}</select>`:''}
+       ${view==='sum'&&gubunOpts.length?`<label class="tl">거래구분</label><select class="inp" id="sm-gb" style="width:auto"><option value="">전체</option>${gubunOpts.map(g=>`<option value="${esc(g)}" ${gsel===g?'selected':''}>${esc(g)}</option>`).join('')}</select>`:''}
        <button class="btn" id="sm-go">조회</button>
        ${view==='sum'?`<button class="btn" id="sm-bulk-close" ${canW?'':'disabled'} style="${canW?'background:#1c7a37;color:#fff;border-color:#1c7a37':''}">마감/해제</button><button class="btn ghost" id="sm-bulk-bill">계산서</button>`:''}
        <button class="btn xls" id="sm-xls">엑셀</button>
@@ -2576,6 +2583,7 @@ const _mkMagam=(CFG)=>(c)=>{
       ckLbl();};
     ckLbl();
     const cts_=c.querySelector('#sm-ct');if(cts_)cts_.onchange=e=>{ctf=e.target.value;draw();};   // 분류 필터
+    const gbs_=c.querySelector('#sm-gb');if(gbs_)gbs_.onchange=e=>{gsel=e.target.value;draw();};   // 거래구분 필터
     c.querySelectorAll('.sm-tbl thead th[data-sk]').forEach(th=>{th.onclick=()=>{const k=th.dataset.sk;if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}draw();};});   // 헤더 클릭 정렬(THEAD 재생성=구조동일, 스크롤만 상단복귀)
     // 거래처 행 클릭 = 마감상세/조정 모달 (개별 버튼 제거)
     c.querySelectorAll('.ml-row').forEach(tr=>tr.onclick=e=>{if(e.target.closest('.sm-vck'))return;openModal(tr.dataset.cc,tr.dataset.nm);});
