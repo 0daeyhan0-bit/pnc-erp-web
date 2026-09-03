@@ -498,17 +498,24 @@ const openDelivInvoice=(iv)=>{
   const copy=(title,pg,pi)=>`<div class="cp"><div class="tt">거래명세표${_sv}</div><div class="sb">${title}</div>
     <div class="mt"><span>출고일자 : ${esc(iv.ymd)}</span><span>PAGE:${pi+1}/${PN}</span></div>
     <table class="pi"><tr><td class="vl">공<br>급<br>자</td><td>${party(iv.supplier)}</td><td class="vl">공<br>급<br>받<br>는<br>자</td><td>${party(iv.buyer)}</td></tr></table>
-    <!-- ★칸 폭(2026-08-31 3차 — 실측 계산으로 확정). table-layout:fixed + width:100% 라
-         colgroup 의 px 는 **비율 힌트**로만 쓰이고 실제 폭은 단 폭에 압축된다
-         (창 1240 → 한 단 ≈600px · **인쇄 A4가로 ≈523px** ← 이쪽이 빡빡하므로 인쇄 기준).
-         경위: 1차 품번에 23/24% 몰아줌 → 헤더 '수 량·검사·비고'와 행번호 10 이상이 잘림.
-               2차 우측 칸 확대 → 이번엔 인쇄에서 품번이 부족(화면만 OK).
-         3차 = 검사표기를 '유/체' **한 글자**로 줄여(사용자 확정) 확보한 여유를 품번에 준다.
-         인쇄 523px 기준 필요폭 실측: No.17 · Assy 104 · 하위 115(19자 한글포함) ·
-           수량 29 · 검사 21(한글1자+헤더'검사') · 비고 32 → 고정합 ≈345px, 품명 178px.
+    <!-- ★칸 폭(2026-09-03 4차 — 사용자 지적 "글자가 잘린다" 반영). table-layout:fixed + width:100% 라
+         colgroup 의 % 가 실제 폭이 되고, 넘치면 ellipsis 로 잘린다.
+         (창 1240 → 한 단 ≈600px · **인쇄 A4가로 ≈523px** ← 이쪽이 빡빡하므로 인쇄 기준)
+
+         ★4차에서 고친 것 — 3차까지 놓친 원인은 **셀 패딩·테두리**다.
+            ※이 주석은 템플릿 리터럴 안이다 — 역따옴표를 쓰면 문자열이 끊겨 파일 전체가 죽는다.
+            .it th,.it td 의 padding:1px 3px + border:1px → 셀마다 좌우 6px + 테두리 2px = **8px** 이
+           내용 폭에서 빠진다. No. 5%(=26px)면 실제로 쓸 수 있는 건 18px 뿐이라
+           헤더 'No.' 조차 안 들어갔다(실제 증상: N.. / 수... / 검...).
+           ⟹ ①패딩을 좌우 2px 로 줄이고(=4px 절약) ②헤더 글자를 줄이고('수 량'→'수량')
+              ③잘리던 3칸에 실제 필요폭을 준다.
+
+         인쇄 523px 기준 배분: No 6%(31px→내용 25px, '10','20' 여유) ·
+           Assy 20% · 하위 22% · 품명(나머지 ≈29%) · 수량 8.5%(44→38px) ·
+           검사 6%(31→25px, 헤더'검사'+값'유') · 비고 8.5%
          품명은 무지정(<col>)이라 나머지를 갖고, 넘치면 ellipsis+title 툴팁(레거시도 잘린다). -->
-    <table class="it"><colgroup><col style="width:5%"><col style="width:21.5%"><col style="width:23.5%"><col><col style="width:7.5%"><col style="width:6.5%"><col style="width:8%"></colgroup>
-    <thead><tr><th>No.</th><th>Assy P/No.</th><th>하위 P/No.</th><th>품명</th><th>수 량</th><th>검사</th><th>비고</th></tr></thead>
+    <table class="it"><colgroup><col style="width:6%"><col style="width:20%"><col style="width:22%"><col><col style="width:8.5%"><col style="width:6%"><col style="width:8.5%"></colgroup>
+    <thead><tr><th>No.</th><th>Assy P/No.</th><th>하위 P/No.</th><th>품명</th><th>수량</th><th>검사</th><th>비고</th></tr></thead>
     <tbody>${bodyOf(pg,pi)}<tr class="tot"><td colspan="4" class="r">합계</td><td class="r">${_fmNf(iv.total)}</td><td colspan="2"></td></tr></tbody></table>
     <div class="ft"><div class="bc"><div class="bt">${esc(iv.barcode)}</div><img src="${bc}"></div>
       <table class="sp"><tr><td>자재팀</td><td>품질팀</td></tr><tr><td class="bx"></td><td class="bx"></td></tr></table></div></div>`;
@@ -534,10 +541,20 @@ const openDelivInvoice=(iv)=>{
     /* 주소는 두 줄까지 허용(레거시 동일), 나머지는 한 줄 고정 */
     .pt td:not(.k){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .pt tr:nth-child(4) td:not(.k){white-space:normal;line-height:1.25;height:30px}
-    .it th,.it td{border:1px solid #000;padding:1px 3px;text-align:center;height:18px;
+    /* ★padding 좌우 3px→2px (2026-09-03) — 셀마다 6px+테두리2px 가 내용 폭에서 빠져
+         좁은 칸(No.·수량·검사)의 헤더가 잘렸다. 2px 로 줄여 칸당 2px 를 되돌린다. */
+    .it th,.it td{border:1px solid #000;padding:1px 2px;text-align:center;height:18px;
       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .it .l{text-align:left}.it .r{text-align:right}
+    /* ★좁은 칸은 글자를 살짝 좁혀 확실히 담는다(가독성은 유지되는 범위).
+         No.(1) · 수량(5) · 검사(6) · 비고(7) — 품번·품명은 건드리지 않는다. */
+    .it th:nth-child(1),.it td:nth-child(1),
+    .it th:nth-child(5),.it td:nth-child(5),
+    .it th:nth-child(6),.it td:nth-child(6),
+    .it th:nth-child(7),.it td:nth-child(7){letter-spacing:-.3px}
     .it thead th{font-weight:700}
+    /* 헤더는 어떤 칸이든 줄바꿈 없이 한 줄 — 좁아도 잘림 표시(…)로만 */
+    .it thead th{white-space:nowrap}
     .tot td{font-weight:700}
     .ft{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}
     .bc{border:1.5px solid #000;padding:3px 6px;min-width:210px}
@@ -712,16 +729,30 @@ const openInspSheet=(iv)=>{
     .sh{page-break-inside:avoid}
     .sh+.sh{margin-top:16px;padding-top:16px;border-top:1px dashed #666}
     table{border-collapse:collapse;width:100%;table-layout:fixed}
-    .is td,.is th,.is2 td,.is2 th,.is3 td,.is3 th,.is4 td,.is4 th{border:1px solid #000;padding:2px 4px;height:19px;text-align:center}
+    .is td,.is th,.is2 td,.is2 th,.is3 td,.is3 th,.is4 td,.is4 th{border:1px solid #000;padding:2px 3px;height:19px;text-align:center}
+    /* ★★★한 줄 고정(2026-09-03 사용자 지적 "글자가 커서 아래로 내려왔다").
+         table-layout:fixed 인데 nowrap 이 없어 칸보다 긴 값이 **두 줄로 깨지며 행이 높아졌다**.
+         실제 증상: '유외치분석'→'유외치분/석' · 'AJR76462634-12-1'→2줄 · 'Q.A팀장'→'Q.A팀/장'.
+         레거시는 전부 한 줄이다(행 높이 균일). ⟹ 줄바꿈 금지 + 넘치면 살짝 축소.
+         ※하단 확인내용·특이사항(.sm)은 원래 여러 줄이라 예외로 둔다. */
+    .is td,.is th,.is2 td,.is2 th,.is3 td,.is3 th,.is4 th{white-space:nowrap;overflow:hidden}
+    /* 폭이 빠듯한 칸은 글자를 조금 좁혀 확실히 담는다(레거시도 작은 글씨다) */
+    .is2 td,.is3 td{letter-spacing:-.2px}
     .tt{font-size:17px;font-weight:700;letter-spacing:6px;height:34px;border:none;border-bottom:none}
     .is{border:none}.is td.tt{border:none}
-    .gj{width:22px;font-size:10px;line-height:1.2}
+    /* ★결제란 — 'Q.A팀장'(6자)이 안 들어가 세로로 깨졌다. 폭을 주고 글자를 줄인다. */
+    .gj{width:22px;font-size:10px;line-height:1.2;white-space:normal}
     .is th{font-weight:700}
+    .is>tbody>tr>th:not(.gj){width:58px;font-size:9.5px;letter-spacing:-.3px}
     .bx{height:26px}
     .is2 th{width:64px;font-size:10px}
+    /* ★단품 P/NO 값 — 'AJR76462634-12-1'(16자)이 두 줄로 깨졌다. 한 줄에 맞춰 축소. */
+    .is2 td{font-size:10.5px}
     .is3 th{font-size:10px}.is3 .v{font-weight:700}
+    /* ★검사수준 '유외치분석'(5자) 전용 — 11% 칸에 한 줄로 들어가게 */
+    .is3 td{font-size:10px}
     .is4 th{height:20px}.is4 .l{text-align:left;vertical-align:top;height:70px}
-    .sm{font-size:9.5px;line-height:1.45}
+    .sm{font-size:9.5px;line-height:1.45;white-space:normal}
     @media print{.np{display:none}}
   </style></head><body>
     <div class="np" style="margin:0 0 10px"><button onclick="window.print()">🖨️ 인쇄</button> <button onclick="window.close()">닫기</button>
@@ -779,6 +810,7 @@ SCREEN.deliv420=(c)=>{
   // ★헤더 더블클릭 정렬 + 마우스 컬럼폭 기억(2026-08-31 사용자 요청).
   //   colw[컬럼인덱스]=px — draw() 로 다시 그려도 사용자가 조절한 폭이 유지된다.
   let st={sortKey:'',sortDir:1,colw:{}};
+  const D4={rect:null};   // ★드래그 사각범위(Ctrl+C 복사 대상) — 2026-09-03
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||5))-1);
   // ── 스티커/프린터 설정(localStorage 저장) — 레거시 스티커설정=라벨규격·프린터설정=프린터선택 대응 ──
   const LBLKEY='deliv420_label';
@@ -789,9 +821,25 @@ SCREEN.deliv420=(c)=>{
     const r=await fetch(`${API}/api/partner/deliv420/invoice?barcode=${encodeURIComponent(bc)}`);
     if(!r.ok){let m='발행 명세 조회 실패';try{m=(await r.json()).detail||m;}catch(e){}throw new Error(m);}
     return r.json();};
-  const loadCusts=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);custs=(await r.json()).rows||[];}catch(e){custs=[];}};
+  /* ★협력사 판정 = 서버가 준 작업처 목록이 1건뿐(2026-09-03, 협력사계획현황과 같은 방식).
+       auth.scope_cust() 가 협력사에겐 자기 거래처 1건만 준다 → 고를 게 없으니 자동으로 넣는다.
+       내부 직원은 여러 건이라 거짓 = 종전대로 골라서 조회. */
+  const isSolo=()=>custs.length===1;
+  const soloFix=()=>{ if(isSolo() && F.cust!==custs[0].cc) F.cust = custs[0].cc || ''; };
+  let custErr='';
+  const loadCusts=async()=>{
+    custErr='';
+    try{
+      const r=await fetch(`${API}/api/partner/workcenters?src=legacy`);
+      if(!r.ok){ custErr=`작업처 목록 조회 실패 (HTTP ${r.status})`; custs=[]; }
+      else { custs=(await r.json()).rows||[]; }
+    }catch(e){ custErr='작업처 목록 조회 실패 — '+(e&&e.message||e); custs=[]; }
+    soloFix();                     // 협력사면 자기 업체를 넣는다
+    if(custErr) msg=custErr;       // 실패를 삼키지 않는다(원인 추적용)
+  };
   const load=async()=>{
     if(loading)return;                              // 중복요청 가드
+    soloFix();                                      // ★협력사는 어느 경로로 들어와도 자기 업체로 조회
     if(!F.cust){msg='협력사(자도번작업처)를 먼저 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
     loading=true;msg='';draw();
     // ★gigan = 근무일 기준 기간(백엔드가 to_ymd 를 근무일로 재계산·휴무만큼 자동연장). to_ymd 는 하위호환.
@@ -980,6 +1028,7 @@ SCREEN.deliv420=(c)=>{
     else rows.sort((a,b)=>_se(a,b)||String(a.assy||'').localeCompare(String(b.assy||''),'ko')||String(a.line||'').localeCompare(String(b.line||''),'ko'));
     const custOpts=custs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
     const custName=(custs.find(w=>w.cc===F.cust)||{}).nm||'';
+    const solo=isSolo();   // ★협력사 = 작업처 선택지가 자기 1건뿐 → 작업처칸 고정(수정 불가)
     const itS=new Map(); rows.forEach(r=>{if(r.assy&&!itS.has(r.assy))itS.set(r.assy,r.nm||'');});
     const itemOpts=[...itS].slice(0,500).map(([v,n])=>`<option value="${esc(v)}">${esc(n)}</option>`).join('');
     const ptS=new Set(); rows.forEach(r=>(r.mat_list||'').split(/[,\r\n]/).forEach(x=>{const m=x.split('{')[0].split('[')[0].trim();if(m)ptS.add(m);}));
@@ -1083,6 +1132,13 @@ SCREEN.deliv420=(c)=>{
       /* 합계행은 하단 고정 */
       .d4-grid tr.grandtot td{position:sticky;bottom:0;z-index:4;background:#eaf1fb;
         box-shadow:inset 0 1px 0 #cdd9ef}
+      /* ★드래그 범위선택(2026-09-03) — 계획현황과 같은 조작감. Ctrl+C 로 복사된다. */
+      .d4-grid tbody td{cursor:cell}
+      .d4-grid tbody td input{cursor:auto}   /* 입력칸 위에서는 평소 커서(값 편집 우선) */
+      .d4-grid td.d4-sel{background-image:linear-gradient(rgba(219,234,254,.55),rgba(219,234,254,.55))}
+      /* 드래그 중 텍스트가 파랗게 끌리는 것 방지 — 단 입력칸 안은 그대로 둔다 */
+      .d4-grid tbody{user-select:none;-webkit-user-select:none}
+      .d4-grid tbody input{user-select:text;-webkit-user-select:text}
      </style>
      <div class="toolbar d4-r">
        <label class="tl">기준일자</label>${legacyDateHTML('d4-base',F.from)}
@@ -1098,11 +1154,13 @@ SCREEN.deliv420=(c)=>{
      <div class="toolbar d4-r">
        <label class="tl">도번</label><input class="inp" id="d4-item" list="d4l-item" value="${esc(F.item)}" style="width:130px;min-width:130px" placeholder="도번(ASSY)/품명" autocomplete="off"><datalist id="d4l-item">${itemOpts}</datalist>
        <label class="tl">자도번</label><input class="inp" id="d4-part" list="d4l-part" value="${esc(F.part)}" style="width:130px;min-width:130px" placeholder="자도번" autocomplete="off"><datalist id="d4l-part">${partOpts}</datalist>
-       <!-- ★자도번작업처 = 레거시처럼 [코드][🔍][업체명] — 필수라 강조 -->
+       <!-- ★자도번작업처 = 레거시처럼 [코드][🔍][업체명] — 필수라 강조
+            ★협력사 로그인(solo=선택지 1건)이면 **고정·수정불가**(2026-09-03, 계획현황과 동일).
+              바꿔봐야 서버 scope_cust 가 자기 코드로 되돌린다. -->
        <label class="tl" style="color:#1c47a0;background:#dceaff;border-color:#9dc0ea;min-width:88px">자도번작업처</label>
-       <input class="inp" id="d4-custcode" value="${esc(F.cust)}" placeholder="코드" autocomplete="off" title="자도번작업처 코드 — 직접 입력 후 Enter" style="width:74px;min-width:74px;text-align:center;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:700">
-       <button class="btn" id="d4-custfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>
-       <input class="inp" id="d4-cust" list="d4l-cust" value="${esc(custName)}" placeholder="거래처명" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:150px;min-width:150px;background:${F.cust?'#eaf3ff':'#fff7e6'};border:2px solid ${F.cust?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="d4l-cust">${custOpts}</datalist>
+       <input class="inp" id="d4-custcode" value="${esc(F.cust)}" placeholder="코드" autocomplete="off" ${solo?'readonly tabindex="-1"':''} title="${solo?'내 거래처로 고정됩니다':'자도번작업처 코드 — 직접 입력 후 Enter'}" style="width:74px;min-width:74px;text-align:center;background:${solo?'#eef1f5':(F.cust?'#eaf3ff':'#fff7e6')};border:2px solid ${solo?'#cbd3de':(F.cust?'#7fa8e8':'#f0b429')};font-weight:700${solo?';color:#5a6b80;cursor:default':''}">
+       ${solo?'':`<button class="btn" id="d4-custfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>`}
+       <input class="inp" id="d4-cust" ${solo?'':'list="d4l-cust"'} value="${esc(custName)}" placeholder="거래처명" autocomplete="off" ${solo?'readonly tabindex="-1"':''} title="${solo?'내 거래처로 고정됩니다':'필수 — 협력사를 선택해야 조회됩니다'}" style="width:150px;min-width:150px;background:${solo?'#eef1f5':(F.cust?'#eaf3ff':'#fff7e6')};border:2px solid ${solo?'#cbd3de':(F.cust?'#7fa8e8':'#f0b429')};font-weight:600${solo?';color:#33507d;cursor:default':''}">${solo?'':`<datalist id="d4l-cust">${custOpts}</datalist>`}
        <button class="btn" id="d4-search" style="margin-left:4px">🔍 조회</button>
        <!-- ★정렬 선택(2026-08-31) — 기본 도번별. 헤더 더블클릭 정렬이 있으면 그쪽이 우선. -->
        <label class="tl" style="margin-left:8px">정렬</label>
@@ -1112,7 +1170,11 @@ SCREEN.deliv420=(c)=>{
          <option value="time" ${F.sort==='time'?'selected':''}>라인별</option>
        </select>
        ${st.sortKey?`<button class="btn ghost" id="d4-sortclr" title="헤더 정렬 해제" style="padding:0 8px">정렬해제</button>`:''}
+       <!-- ★엑셀 — 화면 색상(생산완료 노랑·출하완료 살구·세트재고 회색) 그대로 진짜 xlsx 로 -->
+       <button class="btn" id="d4-xls" title="화면에 보이는 그대로(색상 포함) 엑셀로 내려받습니다" ${rows.length?'':'disabled'} style="margin-left:4px">엑셀</button>
        <div class="spacer"></div>
+       <!-- ★드래그 선택 안내 · 복사 결과 표시(2026-09-03) -->
+       <span id="d4-selinfo" style="font-size:11.5px;color:#33507d;white-space:nowrap"><span style="color:#8aa0bd">드래그로 범위 선택 · Ctrl+C 복사</span></span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
      <!-- ★flex:1 1 auto (2026-09-02 수정) — 종전 "flex:0 1 auto + max-height:100%" 는 스크롤이 죽었다.
@@ -1187,10 +1249,162 @@ SCREEN.deliv420=(c)=>{
         <td class="center" style="color:#2e86de">${nf(r.sale)}</td>
         </tr>`;}).join('')+grand):`<tr><td colspan="${FIX+dates.length}" class="empty">협력사·기준일자 선택 후 조회하세요.</td></tr>`)}</tbody></table></div>`;
     const g=id=>c.querySelector(id);
+
+    /* ══ 엑셀 내보내기 (2026-09-03 사용자 요청 — 화면 색상 그대로) ══
+         ★HTML→.xls 는 엑셀이 "형식·확장명 불일치" 경고를 띄우고 **서식(색)을 버린다**.
+           core.js 의 downloadXLS 로 진짜 xlsx 를 만든다(계획현황·가공창고이동계획과 같은 방식).
+         ★일자셀 색 = 서버가 준 r.colors[d] 를 그대로 → 화면과 100% 동일. */
+    const _xfg=bg=>{const m=/^#([0-9a-f]{6})$/i.exec(bg||'');if(!m)return '';
+      const n=parseInt(m[1],16),L=(((n>>16)&255)*0.299+((n>>8)&255)*0.587+(n&255)*0.114);
+      return L<150?'#ffffff':'#222222';};
+    const exportXlsx=()=>{
+      if(!rows.length){alert('조회 결과가 없습니다.');return;}
+      const cols=[{h:'SEQ'},{h:'작업처'},{h:'도번'},{h:'Line No'},{h:'구분'},{h:'자도번LIST'},{h:'사급'},
+                  {h:'LOT수량'},{h:'자재수량'},{h:'완료수량'},{h:'요청수량'},
+                  {h:'체크'},{h:'납품수량'},{h:'포장수량'},{h:'검사'},{h:'상태'}]
+        .concat(dates.map(d=>({h:wlab(d), bg:wkbg(d)?'#FDE9E9':undefined})))   // 주말 헤더 옅은 적색
+        .concat([{h:'입고대기'},{h:'세트재고'},{h:'단품재고'},{h:'생산실적'},{h:'ASSY재고'},{h:'출하실적'}]);
+      const xr=rows.map((r,ri)=>{
+        const ckd=!!F.chk[r.assy];
+        const dv=ckd?(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv):'';
+        const pk=ckd?(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack):'';
+        // 세트제외(공용품)는 화면과 같이 빨간 글씨
+        const exc=r.setexc?{fg:'#c0392b',b:1}:{};
+        const base=[{v:ri+1,al:'center'},
+          {v:r.workcenter||r.work_center||r.in_cust||'',al:'center'},
+          {v:r.assy||'',al:'center'},{v:r.line||'',al:'center'},
+          Object.assign({v:r.gubun||'',al:'center'},exc),
+          {v:r.mat_list||'',al:'left'},
+          {v:r.sagub_list?'사급':'',al:'center'},
+          {v:r.lot==null?'':Number(r.lot),al:'center'},
+          {v:r.plan==null?'':Number(r.plan),al:'center'},
+          {v:r.done==null?'':Number(r.done),al:'center',fg:'#1c7c3a'},
+          {v:r.req==null?'':Number(r.req),al:'center',b:1},
+          {v:ckd?'V':'',al:'center'},
+          {v:dv===''?'':Number(dv),al:'center',bg:ckd?'#EAFAEA':''},
+          {v:pk===''?'':Number(pk),al:'center',bg:ckd?'#EAFAEA':''},
+          {v:r.insp==='1'?'검사':'',al:'center'},
+          {v:Number(r.req)>0?(ST[r.status]||r.status||''):'',al:'center'}];
+        dates.forEach(d=>{
+          const pl=Number((r.days&&r.days[d])||0),dn=Number((r.donedays&&r.donedays[d])||0);
+          if(!pl&&!dn){base.push({v:'',al:'center'});return;}
+          const bg=(r.colors&&r.colors[d])||'';
+          // ★'20/20' 이 날짜로 자동변환되지 않게 문자열(downloadXLS 가 x:str 처리)
+          base.push({v:`${nf(dn)}/${nf(pl)}`,al:'center',bg,fg:_xfg(bg)});
+        });
+        base.push({v:r.ireq==null?'':Number(r.ireq),al:'center'});
+        base.push({v:r.iset_stk==null?'':Number(r.iset_stk),al:'center'});
+        base.push({v:r.setexc?Number(r.input_mat||0):'',al:'center',fg:'#c0392b',b:r.setexc?1:0});
+        base.push({v:r.prod==null?'':Number(r.prod),al:'center',fg:'#8e44ad'});
+        base.push({v:r.assy_stock==null?'':Number(r.assy_stock),al:'center'});
+        base.push({v:r.sale==null?'':Number(r.sale),al:'center',fg:'#2e86de'});
+        return base;
+      });
+      const T2=new Date(),p2=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+        +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
+      const cnm=(custs.find(w=>w.cc===F.cust)||{}).nm||F.cust||'전체';
+      downloadXLS(`거래명세서발행_${cnm}_${stamp}`, cols, xr, {
+        sheet:'거래명세서발행',
+        title:`거래명세서 발행 — ${cnm}`,
+        sub:`기준일자 ${F.from} · 기간 ${F.days}일 · ${nf(rows.length)}건`
+            + ` · 일자셀=완료/계획 (노랑=생산완료, 살구=출하완료, 회색=세트재고)`
+            + ` · 빨간 구분/단품재고 = 세트제외(공용품)`});
+    };
+
+    /* ══ 드래그 범위선택 + Ctrl+C 복사 (2026-09-03 사용자 요청 — 협력사계획현황과 동일) ══
+         ★이 화면은 셀 안에 **입력칸(체크박스·납품/포장수량)** 이 있다.
+           그 위에서 드래그를 가로채면 값을 못 고치므로, input/label 에서 시작한 드래그는 무시한다. */
+    (()=>{
+      const gw=c.querySelector('.grid-wrap'); if(!gw)return;
+      const rcOf=td=>{const tr=td.parentElement;return {r:tr?tr.rowIndex:-1,c:td.cellIndex};};
+      let _a=null,_all=[],_on=false;
+      const applyRect=td=>{
+        if(!_a)return;
+        const b=rcOf(td);
+        const r1=Math.min(_a.r,b.r),r2=Math.max(_a.r,b.r);
+        const c1=Math.min(_a.c,b.c),c2=Math.max(_a.c,b.c);
+        D4.rect={r1,r2,c1,c2};
+        for(const it of _all) it.td.classList.toggle('d4-sel',
+          it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2);
+        const el=c.querySelector('#d4-selinfo');
+        if(el){const n=(r2-r1+1)*(c2-c1+1);
+          el.innerHTML=`선택 <b>${n}</b>칸 · <b>Ctrl+C</b> 복사`
+            +` <span id="d4-selclr" style="cursor:pointer;color:#1c47a0;text-decoration:underline;margin-left:6px">해제</span>`;
+          const cl=c.querySelector('#d4-selclr');
+          if(cl)cl.onclick=()=>{D4.rect=null;
+            c.querySelectorAll('.d4-sel').forEach(x=>x.classList.remove('d4-sel'));
+            el.innerHTML='<span style="color:#8aa0bd">드래그로 범위 선택 · Ctrl+C 복사</span>';};}
+      };
+      gw.onmousedown=ev=>{
+        if(ev.button!==0)return;
+        // ★입력칸에서 시작한 드래그는 그대로 둔다(값 편집·체크 방해 금지)
+        if(ev.target.closest('input,select,textarea,button,label,a'))return;
+        const st0=ev.target.closest?ev.target.closest('tbody td'):null; if(!st0)return;
+        if(st0.closest('tr.grandtot'))return;
+        ev.preventDefault();
+        if(!ev.ctrlKey&&!ev.metaKey) c.querySelectorAll('.d4-sel').forEach(x=>x.classList.remove('d4-sel'));
+        _on=true;
+        _all=[...c.querySelectorAll('tbody tr:not(.grandtot) td')].map(x=>{const p=rcOf(x);
+          return {td:x,r:p.r,c:p.c};});
+        _a=rcOf(st0); applyRect(st0);
+      };
+      gw.onmousemove=ev=>{if(!_on)return;
+        const e=document.elementFromPoint(ev.clientX,ev.clientY);
+        const td=e&&e.closest?e.closest('tbody td'):null;
+        if(td&&!td.closest('tr.grandtot'))applyRect(td);};
+      if(!gw._d4Up){gw._d4Up=1;document.addEventListener('mouseup',()=>{_on=false;});}
+
+      /* Ctrl+C → 선택 사각범위를 탭 구분 텍스트로(엑셀 붙여넣기 표준) */
+      const copySel=(ev)=>{
+        const R=D4.rect; if(!R)return false;
+        const tbl=gw.querySelector('table'); if(!tbl)return false;
+        // 입력칸이 든 셀은 그 값(value)을 쓴다 — textContent 로는 빈 문자열이 나온다
+        const cellTxt=td=>{
+          if(!td)return '';
+          const ip=td.querySelector('input');
+          if(ip) return ip.type==='checkbox' ? (ip.checked?'V':'') : String(ip.value||'');
+          const s=String(td.textContent||'').replace(/\s+/g,' ').trim();
+          return s==='·'?'':s;
+        };
+        const out=[];
+        const th=[...tbl.querySelectorAll('thead tr:last-child th')];
+        if(th.length){const hs=[];
+          for(let ci=R.c1;ci<=R.c2;ci++){const t=th[ci];
+            hs.push(t?String(t.textContent||'').replace(/\s+/g,' ').trim():'');}
+          out.push(hs.join('\t'));}
+        for(const tr of tbl.querySelectorAll('tbody tr:not(.grandtot)')){
+          if(tr.rowIndex<R.r1||tr.rowIndex>R.r2)continue;
+          const tds=[...tr.cells],line=[];
+          for(let ci=R.c1;ci<=R.c2;ci++) line.push(cellTxt(tds[ci]));
+          out.push(line.join('\t'));
+        }
+        const s=out.join('\n'); if(!s)return false;
+        if(ev&&ev.clipboardData){ev.clipboardData.setData('text/plain',s);ev.preventDefault();}
+        else if(navigator.clipboard){navigator.clipboard.writeText(s).catch(()=>{});}
+        const el=c.querySelector('#d4-selinfo');
+        if(el){const b=document.createElement('span');
+          b.textContent=` 복사됨(${out.length-1}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
+          el.appendChild(b);setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
+        return true;
+      };
+      if(!gw._d4Copy){gw._d4Copy=1;
+        document.addEventListener('copy',ev=>{
+          if(!c.isConnected)return;
+          if(!D4.rect)return;
+          const sel=window.getSelection&&window.getSelection();
+          if(sel&&String(sel).trim())return;   // 직접 텍스트를 끌었으면 그쪽 우선
+          copySel(ev);
+        });}
+    })();
+
     // ★자도번작업처 = [코드][🔍][업체명] 연동(2026-08-27 레거시 동일).
     const sync=()=>{const cn=g('#d4-cust').value.trim(), ccd=(g('#d4-custcode')||{value:''}).value.trim();
       const byNm=custs.find(w=>(w.nm||w.cc)===cn);
-      if(byNm) F.cust=byNm.cc; else if(ccd) F.cust=ccd; else if(!cn) F.cust='';
+      /* ★협력사(선택지가 자기 1건뿐)는 여기서 지우지 않는다 — 2026-09-03.
+         종전엔 업체명 칸이 비면 무조건 F.cust='' 였다. [조회]·기간변경 때마다 sync 가 돌며
+         자동입력된 값을 도로 지워 조회가 0건이 됐다(계획현황에서 실제로 겪은 버그). */
+      if(byNm) F.cust=byNm.cc; else if(ccd) F.cust=ccd; else if(!cn && !isSolo()) F.cust='';
       F.days=g('#d4-days').value||2;F.item=g('#d4-item').value.trim();F.part=g('#d4-part').value.trim();
       const dn=g('#d4-dnp');if(dn)F.dnp=dn.value||2;
       const gg=g('#d4-gb-g');F.gubun=(gg&&gg.checked)?'ganpan':'order';
@@ -1198,6 +1412,7 @@ SCREEN.deliv420=(c)=>{
     bindLegacyDate(c,'d4-base',()=>F.from,(v)=>{F.from=v;});
     bindLegacyDate(c,'d4-in',()=>F.inymd,(v)=>{F.inymd=v;});
     g('#d4-search').onclick=()=>{sync();load();};
+    { const xb=g('#d4-xls'); if(xb) xb.onclick=exportXlsx; }   // ★엑셀(색상 포함)
     ['#d4-gb-g','#d4-gb-o'].forEach(id=>{const el=g(id);if(el)el.onchange=()=>{sync();load();};});
     // 정렬 드롭다운을 바꾸면 헤더 정렬은 해제한다(둘이 겹치면 헷갈린다)
     const so=g('#d4-sort');if(so)so.onchange=()=>{st.sortKey='';sync();draw();};
@@ -2107,16 +2322,38 @@ SCREEN.partnerplan=(c)=>{
      조회 전용 화면이므로 쓰기는 없다. 고른 칸의 잔여(계획−완료) 합계를 배지에 보여준다.
      단순 mousemove 로 '지나간 셀'만 담으면 빠르게 끌 때 이벤트가 유실돼 중간이 빠지므로,
      시작셀~현재셀의 (행,열) 사각범위를 매 move 마다 통째로 계산한다(엑셀 감각). */
-  const PN={sel:new Map()};
+  const PN={sel:new Map(), rect:null};   // rect = 드래그 사각범위(Ctrl+C 복사 대상)
   let rowsCur=[];   // ★헤더 더블클릭 정렬용 영속 행배열(enableSort가 in-place 정렬, tbody만 재렌더)
   const toOf=()=>_isoAddDays(F.from,Math.max(1,(+F.days||31))-1);
-  const loadWc=async()=>{try{const r=await fetch(`${API}/api/partner/workcenters?src=${F.src}`);wcs=(await r.json()).rows||[];}catch(e){wcs=[];}};
+  /* ★협력사 판정 = 서버가 준 작업처 목록이 1건뿐(2026-09-03).
+       서버(coopplan.partner_workcenters)가 scope_cust 로 협력사에겐 **자기 1건만** 준다.
+       내부 직원에겐 103건이 오므로 이 함수는 거짓 = 종전대로 골라서 조회(전체 조회는 무겁다).
+       화면이 utype 을 몰라도 되게 '선택지가 하나뿐이냐'로만 판단한다. */
+  const isSolo=()=>wcs.length===1;
+  const soloFix=()=>{ if(isSolo() && F.wc!==wcs[0].cc) F.wc = wcs[0].cc || ''; };
+
+  /* ★실패를 삼키지 않는다(2026-09-03) — 종전엔 catch 에서 wcs=[] 로 조용히 넘겨,
+       인증오류든 네트워크오류든 화면엔 똑같이 '작업처 비어 있음'으로만 보였다(원인 추적 불가). */
+  let wcErr='';
+  const loadWc=async()=>{
+    wcErr='';
+    try{
+      const r=await fetch(`${API}/api/partner/workcenters?src=${F.src}`);
+      if(!r.ok){ wcErr=`작업처 목록 조회 실패 (HTTP ${r.status})`; wcs=[]; }
+      else { const j=await r.json(); wcs=j.rows||[]; }
+    }catch(e){ wcErr='작업처 목록 조회 실패 — '+(e&&e.message||e); wcs=[]; }
+    soloFix();                // 협력사면 자기 업체를 넣는다(고를 게 하나뿐이다)
+    if(wcErr) msg=wcErr;      // 화면 상단 경고줄에 그대로 띄운다
+  };
   const load=async()=>{
     if(loading)return;                              // 중복요청 가드
+    soloFix();                                      // ★협력사는 어느 경로로 들어와도 자기 업체로 조회
     if(!F.wc){msg='협력사(자도번작업처)를 먼저 선택하세요. (전체 조회는 무거워 협력사 지정 후 조회합니다)';data={dates:[],rows:[],cnt:0,sum_qty:0,note:''};draw();return;}
     loading=true;msg='';draw();
     const qs=new URLSearchParams({from_ymd:F.from,to_ymd:toOf(),wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun,src:F.src});
-    try{const r=await fetch(`${API}/api/partner/planstatus?${qs}`);data=await r.json();msg='';}
+    try{console.log('[partnerplan] 조회',qs.toString());}catch(e){}
+    try{const r=await fetch(`${API}/api/partner/planstatus?${qs}`);data=await r.json();msg='';
+        try{console.log('[partnerplan] 결과 cnt=',data&&data.cnt,'rows=',(data&&data.rows||[]).length);}catch(e){}}
     catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],cnt:0,sum_qty:0};}
     loading=false;draw();};
   // 레거시 도번-level(자도번LIST) / nx 자도번-level 를 동일 컬럼으로 정규화
@@ -2138,6 +2375,7 @@ SCREEN.partnerplan=(c)=>{
     const pnPartOpts=[...pnPart].slice(0,400).map(v=>`<option value="${esc(v)}"></option>`).join('');
     const wcOpts=wcs.map(w=>`<option value="${esc(w.nm||w.cc)}"></option>`).join('');
     const wcName=(wcs.find(w=>w.cc===F.wc)||{}).nm||'';
+    const solo=isSolo();   // ★협력사 = 작업처 선택지가 자기 1건뿐 → 작업처칸 고정(수정 불가)
     const nn=v=>(v==null?'-':nf(v));
     // 합계행
     const frac=!!data.frac;   // 협력사 지정 시 일자셀=완료/계획+색(가공4주간 동일)
@@ -2198,6 +2436,13 @@ SCREEN.partnerplan=(c)=>{
       table.tbl.pn-grid td.pn-c:hover{outline:2px solid #9dc0e8;outline-offset:-2px}
       table.tbl.pn-grid td.pn-on{outline:2px solid #4a86e8;outline-offset:-2px;font-weight:700;
         background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))}
+      /* ★전 컬럼 드래그선택(2026-09-03) — 어느 칸이든 끌면 잡히고 Ctrl+C 로 복사된다.
+           .pn-on(일자칸·잔여합계 대상)보다 옅게 칠해 둘을 구분한다. */
+      table.tbl.pn-grid tbody td{cursor:cell}
+      table.tbl.pn-grid td.pn-sel{background-image:linear-gradient(rgba(219,234,254,.55),rgba(219,234,254,.55))}
+      table.tbl.pn-grid td.pn-sel.pn-on{background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))}
+      /* 드래그 중 텍스트가 파랗게 끌려 선택되는 것 방지(사각선택과 충돌) */
+      table.tbl.pn-grid tbody{user-select:none;-webkit-user-select:none}
     </style>
      <div class="pn-head" style="flex:0 0 auto">
      <div class="page-title" style="margin-bottom:4px">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 도번·자도번LIST·일자별 (당김 반영)</span>
@@ -2223,12 +2468,16 @@ SCREEN.partnerplan=(c)=>{
      <div class="toolbar pn-r">
        <label class="tl">도번</label><input class="inp" id="pn-assy" list="pnl-assy" value="${esc(F.assy)}" style="width:130px;min-width:130px" placeholder="도번(ASSY)" autocomplete="off"><datalist id="pnl-assy">${pnAssyOpts}</datalist>
        <label class="tl">자도번</label><input class="inp" id="pn-part" list="pnl-part" value="${esc(F.part)}" style="width:130px;min-width:130px" placeholder="자도번" autocomplete="off"><datalist id="pnl-part">${pnPartOpts}</datalist>
-       <!-- ★자도번작업처 = 레거시처럼 [코드][🔍][업체명] — 필수 입력이라 강조 -->
+       <!-- ★자도번작업처 = 레거시처럼 [코드][🔍][업체명] — 필수 입력이라 강조
+            ★협력사 로그인(isSolo=선택지 1건)이면 **고정·수정불가**(2026-09-03 사용자 요청).
+              바꿔봐야 서버 scope_cust 가 자기 코드로 되돌리므로, 바꿀 수 있는 것처럼 보이는 게 오해다. -->
        <label class="tl" style="color:#1c47a0;background:#dceaff;border-color:#9dc0ea;min-width:88px">자도번작업처</label>
-       <input class="inp" id="pn-wccode" value="${esc(F.wc)}" placeholder="코드" autocomplete="off" title="자도번작업처 코드 — 직접 입력 후 Enter" style="width:74px;min-width:74px;text-align:center;background:${F.wc?'#eaf3ff':'#fff7e6'};border:2px solid ${F.wc?'#7fa8e8':'#f0b429'};font-weight:700">
-       <button class="btn" id="pn-wcfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>
-       <input class="inp" id="pn-wc" list="pnl-wc" value="${esc(wcName)}" placeholder="거래처명" autocomplete="off" title="필수 — 협력사를 선택해야 조회됩니다" style="width:150px;min-width:150px;background:${F.wc?'#eaf3ff':'#fff7e6'};border:2px solid ${F.wc?'#7fa8e8':'#f0b429'};font-weight:600"><datalist id="pnl-wc">${wcOpts}</datalist>
+       <input class="inp" id="pn-wccode" value="${esc(F.wc)}" placeholder="코드" autocomplete="off" ${solo?'readonly tabindex="-1"':''} title="${solo?'내 거래처로 고정됩니다':'자도번작업처 코드 — 직접 입력 후 Enter'}" style="width:74px;min-width:74px;text-align:center;background:${solo?'#eef1f5':(F.wc?'#eaf3ff':'#fff7e6')};border:2px solid ${solo?'#cbd3de':(F.wc?'#7fa8e8':'#f0b429')};font-weight:700${solo?';color:#5a6b80;cursor:default':''}">
+       ${solo?'':`<button class="btn" id="pn-wcfind" title="업체 찾기" style="padding:0 7px;min-width:28px">🔍</button>`}
+       <input class="inp" id="pn-wc" ${solo?'':'list="pnl-wc"'} value="${esc(wcName)}" placeholder="거래처명" autocomplete="off" ${solo?'readonly tabindex="-1"':''} title="${solo?'내 거래처로 고정됩니다':'필수 — 협력사를 선택해야 조회됩니다'}" style="width:150px;min-width:150px;background:${solo?'#eef1f5':(F.wc?'#eaf3ff':'#fff7e6')};border:2px solid ${solo?'#cbd3de':(F.wc?'#7fa8e8':'#f0b429')};font-weight:600${solo?';color:#33507d;cursor:default':''}">${solo?'':`<datalist id="pnl-wc">${wcOpts}</datalist>`}
        <button class="btn" id="pn-search" style="margin-left:4px">🔍 조회</button>
+       <!-- ★엑셀 — 화면 색상(생산완료 노랑·출하완료 살구·세트재고 회색) 그대로 살려 진짜 xlsx 로 -->
+       <button class="btn" id="pn-xls" title="화면에 보이는 그대로(색상 포함) 엑셀로 내려받습니다" ${rows.length?'':'disabled'} style="margin-left:4px">엑셀</button>
        <div class="spacer"></div>
        <!-- ★드래그 선택 잔여합계(2026-08-31 요청) -->
        <span id="pn-selinfo" style="font-size:11.5px;color:#33507d;white-space:nowrap"></span>
@@ -2249,6 +2498,52 @@ SCREEN.partnerplan=(c)=>{
     </div>`;
     const g=id=>c.querySelector(id);
 
+    /* ==== 엑셀 내보내기(2026-09-03 사용자 요청) — 화면 색상 그대로 ====
+         ★HTML→.xls 방식은 엑셀이 "형식·확장명 불일치" 경고를 띄우고 **서식(색)을 버린다**.
+           core.js 의 downloadXLS 로 **진짜 xlsx** 를 만든다(가공창고이동계획과 같은 방식).
+         ★일자셀 색 = 서버가 준 r.colors[d] 를 그대로 쓴다 = 화면과 100% 같은 색.
+           (노랑=생산완료 · 살구=출하완료 · 회색=세트재고) */
+    const _xfg=bg=>{const m=/^#([0-9a-f]{6})$/i.exec(bg||'');if(!m)return '';
+      const n=parseInt(m[1],16), L=(((n>>16)&255)*0.299+((n>>8)&255)*0.587+(n&255)*0.114);
+      return L<150?'#ffffff':'#222222';};   // 어두운 배경이면 흰 글자(가독성)
+    const exportXlsx=()=>{
+      if(!rowsCur.length){ alert('조회 결과가 없습니다.'); return; }
+      const cols=[{h:'SEQ'},{h:'자도번작업처'},{h:'라인'},{h:'작업처'},{h:'도번'},{h:'자도번LIST'},
+                  {h:'사급'},{h:'LOT수량'},{h:'자재수량'},{h:'완료수량'},{h:'요청수량'}]
+        .concat(dates.map(d=>({h:wlab(d), bg:isWkend(d)?'#FDE9E9':undefined})));   // 주말 헤더 옅은 적색
+      const xr=rowsCur.map((r,i)=>{
+        const base=[{v:i+1,al:'center'},{v:r.wcnm||'',al:'center'},{v:r.line||'',al:'center'},
+          {v:r.workcenter||'',al:'center'},{v:r.assy||'',al:'center'},
+          {v:r.jado||'',al:'left'},
+          {v:r.sagub?'사급':'',al:'center'},
+          {v:r.lot==null?'':Number(r.lot),al:'center'},
+          {v:r.matq==null?'':Number(r.matq),al:'center',b:1},
+          {v:r.doneq==null?'':Number(r.doneq),al:'center',fg:'#1c7c3a'},
+          {v:r.reqq==null?'':Number(r.reqq),al:'center'}];
+        dates.forEach(d=>{
+          const pl=Number((r.days&&r.days[d])||0), dn=Number((r.donedays&&r.donedays[d])||0);
+          if(!pl&&!dn){ base.push({v:'',al:'center'}); return; }   // 계획 없는 날 = 공백(화면의 '·')
+          const bg=(r.colors&&r.colors[d])||'';
+          // ★'20/20' 이 날짜로 자동변환되지 않게 문자열로 — downloadXLS 가 x:str 처리
+          base.push(frac?{v:`${nf(dn)}/${nf(pl)}`,al:'center',bg,fg:_xfg(bg)}
+                        :{v:pl,al:'center',bg,fg:_xfg(bg)});
+        });
+        return base;
+      });
+      // 합계행 — 화면 grandtot 과 같은 값
+      const foot=[['계',`${nf(data.cnt||rowsCur.length)}건`,'','','','','','',nf(sMat),'-',nf(sReq)]
+        .concat(dates.map(d=>frac?`${nf(gDone[d]||0)}/${nf(gDay[d]||0)}`:nf(gDay[d]||0)))];
+      const T2=new Date(), p2=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+        +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
+      const wcnm=(wcs.find(w=>w.cc===F.wc)||{}).nm||F.wc||'전체';
+      downloadXLS(`협력사계획현황_${wcnm}_${stamp}`, cols, xr, {
+        sheet:'협력사계획현황', foot,
+        title:`협력사계획현황 — ${wcnm}`,
+        sub:`기준일자 ${F.from} · 기간 ${F.days}일 (${F.from}~${toOf()}) · ${nf(data.cnt||rowsCur.length)}건`
+            + (frac?' · 일자셀=완료/계획 (노랑=생산완료, 살구=출하완료, 회색=세트재고)':'')});
+    };
+
     /* ==== 일자셀 드래그 선택 — 키팅과 동일한 '사각범위' 방식(2026-08-31) ==== */
     (()=>{
       const gw=c.querySelector('.grid-wrap'); if(!gw)return;
@@ -2265,40 +2560,106 @@ SCREEN.partnerplan=(c)=>{
           ? `선택 <b>${n}</b>칸 · 잔여 <b style="color:#c0392b">${nf(rem)}</b>`
             + ` <span style="color:#8aa0bd">(완료 ${nf(dn)} / 계획 ${nf(pl)})</span>`
             + ` <span id="pn-selclr" style="cursor:pointer;color:#1c47a0;text-decoration:underline;margin-left:6px">해제</span>`
-          : `<span style="color:#8aa0bd">일자칸을 드래그하면 잔여수량 합계가 표시됩니다</span>`;
+          : `<span style="color:#8aa0bd">드래그로 범위 선택 · Ctrl+C 복사(엑셀 붙여넣기) · 일자칸은 잔여합계 표시</span>`;
         const cl=c.querySelector('#pn-selclr');
-        if(cl)cl.onclick=()=>{PN.sel.clear();
-          c.querySelectorAll('.pn-on').forEach(x=>x.classList.remove('pn-on'));paint();};
+        if(cl)cl.onclick=()=>{PN.sel.clear(); PN.rect=null;
+          c.querySelectorAll('.pn-on').forEach(x=>x.classList.remove('pn-on'));
+          c.querySelectorAll('.pn-sel').forEach(x=>x.classList.remove('pn-sel'));paint();};
       };
-      let _a=null,_cells=null,_own=null,_on=false;
+      let _a=null,_cells=null,_own=null,_on=false,_all=[];
       const applyRect=td=>{
         if(!_a||!_cells)return;
         const b=rcOf(td);
         const r1=Math.min(_a.r,b.r),r2=Math.max(_a.r,b.r);
         const c1=Math.min(_a.c,b.c),c2=Math.max(_a.c,b.c);
+        PN.rect={r1,r2,c1,c2};                      // ★복사용 사각범위 보관
         for(const it of _cells){
           const inR=it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2;
           const has=PN.sel.has(it.k);
           if(inR&&!has){PN.sel.set(it.k,it.v);it.td.classList.add('pn-on');_own.add(it.k);}
           else if(!inR&&has&&_own.has(it.k)){PN.sel.delete(it.k);it.td.classList.remove('pn-on');}
         }
+        /* ★전 컬럼 하이라이트(2026-09-03 사용자 요청) — 잔여합계는 일자칸(.pn-c)만 세지만,
+             선택 표시·복사는 **모든 컬럼**(도번·자도번LIST·수량 등)에 걸린다. */
+        for(const it of _all){
+          const inR=it.r>=r1&&it.r<=r2&&it.c>=c1&&it.c<=c2;
+          it.td.classList.toggle('pn-sel', inR);
+        }
         paint();};
       gw.onmousedown=ev=>{
-        const st0=ev.target.closest?ev.target.closest('.pn-c'):null; if(!st0)return;
+        // ★시작셀 = 모든 데이터칸(종전엔 일자칸만). 합계행(grandtot)은 제외.
+        const st0=ev.target.closest?ev.target.closest('tbody td'):null; if(!st0)return;
+        if(st0.closest('tr.grandtot'))return;
         if(ev.button!==0)return;
         ev.preventDefault();
         if(!ev.ctrlKey&&!ev.metaKey){
-          PN.sel.clear(); c.querySelectorAll('.pn-on').forEach(x=>x.classList.remove('pn-on'));
+          PN.sel.clear();
+          c.querySelectorAll('.pn-on').forEach(x=>x.classList.remove('pn-on'));
+          c.querySelectorAll('.pn-sel').forEach(x=>x.classList.remove('pn-sel'));
         }
         _on=true; _own=new Set();
         _cells=[...c.querySelectorAll('.pn-c[data-k]')].map(x=>{const p=rcOf(x);
           return {td:x,r:p.r,c:p.c,k:x.dataset.k,
                   v:{rem:+x.dataset.rem||0,pl:+x.dataset.pl||0,dn:+x.dataset.dn||0,
                      assy:x.dataset.assy||'',ymd:x.dataset.ymd||''}};});
+        _all=[...c.querySelectorAll('tbody tr:not(.grandtot) td')].map(x=>{const p=rcOf(x);
+          return {td:x,r:p.r,c:p.c};});
         _a=rcOf(st0); applyRect(st0);
       };
-      gw.onmousemove=ev=>{if(!_on)return;const td=cellAt(ev.clientX,ev.clientY);if(td)applyRect(td);};
+      // 드래그 중엔 어느 칸 위든 사각범위를 넓힌다(일자칸 밖도 포함)
+      gw.onmousemove=ev=>{if(!_on)return;
+        const e=document.elementFromPoint(ev.clientX,ev.clientY);
+        const td=e&&e.closest?e.closest('tbody td'):null;
+        if(td&&!td.closest('tr.grandtot'))applyRect(td);};
       if(!gw._pnUp){gw._pnUp=1;document.addEventListener('mouseup',()=>{_on=false;});}
+
+      /* ★Ctrl+C 복사(2026-09-03 사용자 요청) — 선택 사각범위를 **탭 구분 텍스트**로.
+           엑셀·시트에 그대로 붙여넣어지는 표준 형식이다(줄=행, 탭=열).
+           헤더도 함께 넣어 어느 컬럼인지 알 수 있게 한다. */
+      const copySel=(ev)=>{
+        const R=PN.rect; if(!R||!_all.length)return false;
+        const tbl=gw.querySelector('table'); if(!tbl)return false;
+        const txt=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+        const out=[];
+        // 헤더행 — 선택된 열 범위만
+        const th=[...tbl.querySelectorAll('thead tr:last-child th')];
+        if(th.length){
+          const hs=[];
+          for(let ci=R.c1;ci<=R.c2;ci++){ const t=th[ci]; hs.push(t?txt(t.textContent):''); }
+          out.push(hs.join('\t'));
+        }
+        // 데이터행
+        const trs=[...tbl.querySelectorAll('tbody tr:not(.grandtot)')];
+        for(const tr of trs){
+          if(tr.rowIndex<R.r1||tr.rowIndex>R.r2)continue;
+          const tds=[...tr.cells], line=[];
+          for(let ci=R.c1;ci<=R.c2;ci++){
+            const td=tds[ci];
+            // '·'(빈칸 표시)는 복사할 때 빈 값으로 — 붙여넣은 표에 점이 남지 않게
+            const s=td?txt(td.textContent):''; line.push(s==='·'?'':s);
+          }
+          out.push(line.join('\t'));
+        }
+        const s=out.join('\n');
+        if(!s)return false;
+        if(ev&&ev.clipboardData){ ev.clipboardData.setData('text/plain',s); ev.preventDefault(); }
+        else if(navigator.clipboard){ navigator.clipboard.writeText(s).catch(()=>{}); }
+        const el=c.querySelector('#pn-selinfo');
+        if(el){const b=document.createElement('span');
+          b.textContent=` 복사됨(${out.length-1}행)`; b.style.cssText='color:#1c7c3a;font-weight:700';
+          el.appendChild(b); setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
+        return true;
+      };
+      // 그리드 안에서만 가로챈다 — 다른 곳의 복사는 방해하지 않는다.
+      if(!gw._pnCopy){ gw._pnCopy=1;
+        document.addEventListener('copy',ev=>{
+          if(!c.isConnected)return;                       // 화면이 닫혔으면 무시
+          if(!PN.sel.size && !(PN.rect))return;           // 선택이 없으면 기본 동작
+          const sel=window.getSelection && window.getSelection();
+          if(sel && String(sel).trim())return;            // 사용자가 텍스트를 직접 드래그했으면 그쪽 우선
+          copySel(ev);
+        });
+      }
       paint();
     })();
     // ★자도번작업처 = [코드][🔍][업체명] 2칸 연동(2026-08-27 레거시 동일).
@@ -2308,7 +2669,11 @@ SCREEN.partnerplan=(c)=>{
       const byNm=wcs.find(w=>(w.nm||w.cc)===wn);
       if(byNm) F.wc=byNm.cc;
       else if(wcd) F.wc=wcd;                       // 코드 직접 입력
-      else if(!wn) F.wc='';
+      /* ★협력사(선택지가 자기 1건뿐)는 여기서 지우지 않는다 — 2026-09-03.
+         종전엔 업체명 칸이 비면 무조건 F.wc='' 였다. 협력사는 고를 대상이 하나뿐이라
+         칸이 잠깐 비어도 작업처는 늘 자기 자신이어야 하는데, [조회]·기간변경 때마다
+         syncInputs 가 돌며 자동입력된 값을 도로 지워 조회가 0건이 됐다. */
+      else if(!wn && !isSolo()) F.wc='';
       F.days=g('#pn-days').value||31;F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;};
     // 코드 입력 → 업체명 자동 채움
     const wcCode=g('#pn-wccode');
@@ -2320,11 +2685,13 @@ SCREEN.partnerplan=(c)=>{
       if(w&&wcCode)wcCode.value=w.cc;};
     const wcFind=g('#pn-wcfind');
     if(wcFind)wcFind.onclick=()=>{const el=g('#pn-wc');if(el){el.focus();el.select();}};
+    // 소스 변경 → 작업처 목록을 다시 받는다. (협력사는 loadWc 안의 soloFix 가 자기 업체를 도로 넣는다)
     const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};
     // 레거시 기준일자 위젯: 전일/익일/달력 → 자동 재조회
     bindLegacyDate(c,'pn-base',()=>F.from,(v)=>{F.from=v;syncInputs();load();});
     g('#pn-days').onchange=()=>{syncInputs();load();};
     g('#pn-search').onclick=()=>{syncInputs();load();};
+    { const xb=g('#pn-xls'); if(xb) xb.onclick=exportXlsx; }   // ★엑셀(색상 포함)
     ['#pn-part','#pn-assy','#pn-wc','#pn-wccode'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
     // ★헤더 더블클릭 정렬(고정 12컬럼 + 일자 피벗) — tbody만 재렌더로 화살표·리사이저 보존. 합계행은 bodyHTML이 항상 맨끝에 붙임.
     if(!loading&&rowsCur.length){
@@ -2333,8 +2700,11 @@ SCREEN.partnerplan=(c)=>{
     }
   };
   // ★계획 기준일이 아직 캐시에 없으면(첫 진입) 받아서 반영한 뒤 그린다 — 2026-08-28.
+  /* ★진입 시 자동조회 하지 않는다 — 조회는 항상 [조회] 버튼으로(2026-09-03 사용자 요청).
+       협력사도 작업처만 자동으로 채워두고(loadWc 의 soloFix), 조회는 사용자가 누른다.
+       (기간·기준일자를 먼저 고른 뒤 조회하는 게 정상 흐름이고, 무거운 쿼리를 진입만으로 돌리지 않는다.) */
   planBase().then(b=>{if(b&&b.iso)F.from=b.iso;}).catch(()=>{})
-    .then(()=>loadWc()).then(draw);   // ★자동 전체조회 금지 — 협력사 선택 후 [조회]
+    .then(()=>loadWc()).then(draw);
 };
 
 /* ===== 일일 영업/매입 현황 (경영) — 조회화면(엑셀형). ① 매입/불출/실매입 by 구분 · 마감기준 · 공급가(원) ===== */
@@ -2486,10 +2856,17 @@ SCREEN.delivedit=(c)=>{
   let rows=[], loading=false, msg='', cnt=0, heads=0, sheets=0, editable=0;
   let outStmt=true, outTag=true, outInsp=true;
   let custs=[], dobans=[], jados=[];
+  const DE={rows:null};   // ★행 드래그 선택 범위(Ctrl+C 복사 대상) — 2026-09-03
 
+  /* ★협력사 판정 = 서버가 준 거래처 목록이 1건뿐(2026-09-03, 계획현황·발행화면과 같은 방식).
+       auth.scope_cust() 가 협력사에겐 자기 거래처 1건만 준다 → 고를 게 없으니 자동으로 넣는다.
+       내부 직원은 여러 건이라 거짓 = 종전대로 골라서 조회. */
+  const isSolo=()=>custs.length===1;
+  const soloFix=()=>{ if(isSolo()){ const n=custs[0].nm||custs[0].cc||''; if(cust!==n) cust=n; } };
   const loadCusts=async()=>{try{
     const r=await fetch(`${API}/api/delivedit/custs`);const j=await r.json();
-    custs=j.rows||[];}catch(e){custs=[];}};
+    custs=j.rows||[];}catch(e){custs=[];}
+    soloFix();};   // 협력사면 자기 거래처를 넣는다
 
   // ★도번·자도번 오토컴플리트(§3) — 실제 납품내역에 있는 것만.
   //   기간·거래처가 바뀌면 후보도 그 범위로 좁혀 다시 채운다.
@@ -2503,7 +2880,7 @@ SCREEN.delivedit=(c)=>{
     }catch(e){dobans=[];jados=[];}
   };
 
-  const load=async()=>{loading=true;msg='';draw();
+  const load=async()=>{loading=true;msg='';soloFix();draw();   // ★협력사는 항상 자기 거래처로
     try{
       const u=`${API}/api/delivedit/list?from_ymd=${y6(fr)}&to_ymd=${y6(to)}`
         +`&cust=${encodeURIComponent(cust.trim())}&doban=${encodeURIComponent(doban.trim())}`
@@ -2636,6 +3013,7 @@ SCREEN.delivedit=(c)=>{
     </tr></tfoot></table></div>`;
 
   const draw=()=>{
+    const solo=isSolo();   // ★협력사 = 거래처 선택지가 자기 1건뿐 → 거래처칸 고정(수정 불가)
     c.innerHTML=`
      <div style="display:flex;flex-direction:column;height:100%;min-height:0">
      <div class="page-title">📝 거래명세표 수정 <span style="font-size:12px;color:var(--muted);font-weight:400">세트납품 내역 수정·삭제·재출력 · nx</span></div>
@@ -2645,9 +3023,11 @@ SCREEN.delivedit=(c)=>{
        <input type="date" class="inp" id="de-fr" value="${esc(fr)}" style="width:150px">
        <span class="mut">~</span>
        <input type="date" class="inp" id="de-to" value="${esc(to)}" style="width:150px">
+       <!-- ★협력사(solo=선택지 1건)면 자기 거래처로 **고정·수정불가**(2026-09-03).
+              바꿔봐야 서버 scope_cust 가 자기 것으로 되돌린다. -->
        <label class="tl">자도번작업처</label>
-       <input class="inp" id="de-cu" list="de-cul" value="${esc(cust)}" placeholder="거래처명/코드" style="width:170px">
-       <datalist id="de-cul">${custs.map(x=>`<option value="${esc(x.nm)}">${esc(x.cc)}</option>`).join('')}</datalist>
+       <input class="inp" id="de-cu" ${solo?'readonly tabindex="-1"':'list="de-cul"'} value="${esc(cust)}" placeholder="거래처명/코드" title="${solo?'내 거래처로 고정됩니다':'거래처명 또는 코드'}" style="width:170px${solo?';background:#eef1f5;border:2px solid #cbd3de;color:#33507d;font-weight:600;cursor:default':''}">
+       ${solo?'':`<datalist id="de-cul">${custs.map(x=>`<option value="${esc(x.nm)}">${esc(x.cc)}</option>`).join('')}</datalist>`}
        <label class="tl">도번</label>
        <input class="inp" id="de-do" list="de-dol" value="${esc(doban)}" placeholder="도번/품명" style="width:140px">
        <datalist id="de-dol">${dobans.map(x=>`<option value="${esc(x.code)}">${esc(x.nm||'')}</option>`).join('')}</datalist>
@@ -2662,7 +3042,10 @@ SCREEN.delivedit=(c)=>{
        <label class="ck"><input type="checkbox" id="de-o1" ${outStmt?'checked':''}> 거래명세서</label>
        <label class="ck"><input type="checkbox" id="de-o2" ${outTag?'checked':''}> 입고태그</label>
        <label class="ck"><input type="checkbox" id="de-o3" ${outInsp?'checked':''}> 출하검사성적서</label>
+       <!-- ★엑셀 — 화면 색상(입고완료 회색·수정가능 흰색) 그대로 진짜 xlsx 로 (2026-09-03) -->
+       <button class="btn" id="de-xls" title="화면에 보이는 그대로(색상 포함) 엑셀로 내려받습니다" ${rows.length?'':'disabled'}>엑셀</button>
        <div class="spacer"></div>
+       <span id="de-selinfo" style="font-size:11.5px;color:#33507d;white-space:nowrap;margin-right:8px"><span style="color:#8aa0bd">행을 드래그 → Ctrl+C 복사</span></span>
        <span class="rowcount">${cnt}건 · 납품서 ${sheets} · 수정가능 <b>${editable}</b></span>
      </div>
      ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
@@ -2725,8 +3108,119 @@ SCREEN.delivedit=(c)=>{
        .de-tbl .de-pr:hover:not(:disabled){background:#e6eaf0}
        .de-tbl .de-mini:disabled{background:#f5f6f8;border-color:#dde2e8;color:#b8c0cc;font-weight:400}
        .ck{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#445;margin-right:2px}
+       /* ★행 드래그 선택(2026-09-03) — 병합 그리드라 행 단위. Ctrl+C 로 복사된다. */
+       .de-tbl tbody tr{cursor:cell}
+       .de-tbl tbody tr.de-sel>td{background-image:linear-gradient(rgba(219,234,254,.55),rgba(219,234,254,.55))}
+       .de-tbl tbody{user-select:none;-webkit-user-select:none}
+       .de-tbl tbody input{user-select:text;-webkit-user-select:text;cursor:auto}
      </style>`;
     const g=(id)=>c.querySelector(id);
+
+    /* ══ 엑셀 내보내기 + 행 선택/복사 (2026-09-03 사용자 요청) ══
+         ★이 그리드는 **rowspan 병합**을 쓴다(납품서 1건 = 여러 자도번 행).
+           그래서 계획현황식 '사각범위' 선택은 맞지 않는다(행마다 cellIndex 가 달라진다).
+           ⟹ **행 단위**로 고르고, 복사·엑셀은 병합을 편 평탄한 표로 내보낸다.
+         ★엑셀은 core.js downloadXLS = 진짜 xlsx(HTML→.xls 는 색을 버린다). */
+    const exportXlsx=()=>{
+      if(!rows.length){alert('조회 결과가 없습니다.');return;}
+      const cols=[{h:'납품일자'},{h:'납품일시'},{h:'세트납품서번호'},{h:'바코드번호'},{h:'업체'},
+                  {h:'도번'},{h:'품명'},{h:'세트수량'},{h:'입고완료'},{h:'당일'},
+                  {h:'자도번'},{h:'자도번품명'},{h:'사용수량'},{h:'자재수량'}];
+      // ★병합을 편다 — 각 행에 납품서 정보를 채워 넣어야 엑셀에서 필터·피벗이 된다.
+      let head=null;
+      const xr=rows.map(r=>{
+        if(r.first) head=r;
+        const h=head||r, done=r.cf==='1';
+        const g0=done?{bg:'#F0F0F0',fg:'#666666'}:{};   // 입고완료 = 회색(수정 불가)
+        return [
+          Object.assign({v:d6(h.ymd),al:'center'},g0),
+          Object.assign({v:hm(h.hms),al:'center'},g0),
+          Object.assign({v:String(h.sheet_no||''),al:'center'},g0),
+          Object.assign({v:h.barcode?'SET'+h.barcode:'',al:'center',b:1},g0),
+          Object.assign({v:h.cnm||h.cc||'',al:'left'},g0),
+          Object.assign({v:h.doban||'',al:'center',b:1},g0),
+          Object.assign({v:h.dnm||'',al:'left'},g0),
+          Object.assign({v:h.set_qty==null?'':Number(h.set_qty),al:'center'},g0),
+          Object.assign({v:done?'입고완료':'미입고',al:'center',
+                         fg:done?'#666666':'#1c7c3a',b:1},done?{bg:'#F0F0F0'}:{}),
+          Object.assign({v:r.am_pm||'',al:'center'},g0),
+          Object.assign({v:r.jadoban||'',al:'left'},g0),
+          Object.assign({v:r.jnm||'',al:'left'},g0),
+          Object.assign({v:r.use_qty==null?'':Number(r.use_qty),al:'center'},g0),
+          Object.assign({v:r.mat_qty==null?'':Number(r.mat_qty),al:'center'},g0),
+        ];
+      });
+      const T2=new Date(),p2=n=>String(n).padStart(2,'0');
+      const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
+        +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
+      downloadXLS(`거래명세표수정_${(cust||'전체')}_${stamp}`, cols, xr, {
+        sheet:'거래명세표', title:`거래명세표 — ${cust||'전체'}`,
+        sub:`납품기간 ${fr} ~ ${to} · ${cnt}건 · 납품서 ${sheets} · 수정가능 ${editable}`
+            + ` · 회색 = 입고완료(수정·삭제 불가)`});
+    };
+
+    /* 행 드래그 선택 + Ctrl+C — 병합 그리드라 행 단위로 고른다 */
+    (()=>{
+      const gw=c.querySelector('.grid-wrap'); if(!gw)return;
+      const info=()=>c.querySelector('#de-selinfo');
+      let _a=null,_on=false;
+      const trs=()=>[...gw.querySelectorAll('tbody tr')];
+      const mark=(b)=>{
+        if(_a==null||b==null)return;
+        const r1=Math.min(_a,b), r2=Math.max(_a,b);
+        DE.rows=[r1,r2];
+        trs().forEach((tr,i)=>tr.classList.toggle('de-sel', i>=r1&&i<=r2));
+        const el=info();
+        if(el)el.innerHTML=`선택 <b>${r2-r1+1}</b>행 · <b>Ctrl+C</b> 복사`
+          +` <span id="de-selclr" style="cursor:pointer;color:#1c47a0;text-decoration:underline;margin-left:6px">해제</span>`;
+        const cl=c.querySelector('#de-selclr');
+        if(cl)cl.onclick=()=>{DE.rows=null;
+          trs().forEach(tr=>tr.classList.remove('de-sel'));
+          const e2=info(); if(e2)e2.innerHTML='<span style="color:#8aa0bd">행을 드래그 → Ctrl+C 복사</span>';};
+      };
+      gw.onmousedown=ev=>{
+        if(ev.button!==0)return;
+        if(ev.target.closest('input,select,textarea,button,label,a'))return;   // 처리 버튼 방해 금지
+        const tr=ev.target.closest?ev.target.closest('tbody tr'):null; if(!tr)return;
+        ev.preventDefault(); _on=true;
+        _a=trs().indexOf(tr); mark(_a);
+      };
+      gw.onmousemove=ev=>{if(!_on)return;
+        const e=document.elementFromPoint(ev.clientX,ev.clientY);
+        const tr=e&&e.closest?e.closest('tbody tr'):null;
+        if(tr)mark(trs().indexOf(tr));};
+      if(!gw._deUp){gw._deUp=1;document.addEventListener('mouseup',()=>{_on=false;});}
+
+      if(!gw._deCopy){gw._deCopy=1;
+        document.addEventListener('copy',ev=>{
+          if(!c.isConnected||!DE.rows)return;
+          const sel=window.getSelection&&window.getSelection();
+          if(sel&&String(sel).trim())return;
+          const [r1,r2]=DE.rows;
+          const HD=['납품일자','납품일시','세트납품서번호','바코드번호','업체','도번','세트수량',
+                    '입고완료','당일','자도번','사용수량','자재수량'];
+          const out=[HD.join('\t')];
+          let head=null;
+          rows.forEach((r,i)=>{
+            if(r.first) head=r;
+            if(i<r1||i>r2)return;
+            const h=head||r;
+            out.push([d6(h.ymd),hm(h.hms),h.sheet_no||'',h.barcode?'SET'+h.barcode:'',
+                      h.cnm||h.cc||'',h.doban||'',h.set_qty==null?'':h.set_qty,
+                      r.cf==='1'?'입고완료':'미입고',r.am_pm||'',r.jadoban||'',
+                      r.use_qty==null?'':r.use_qty,r.mat_qty==null?'':r.mat_qty].join('\t'));
+          });
+          const s=out.join('\n'); if(out.length<2)return;
+          if(ev.clipboardData){ev.clipboardData.setData('text/plain',s);ev.preventDefault();}
+          else if(navigator.clipboard){navigator.clipboard.writeText(s).catch(()=>{});}
+          const el=info();
+          if(el){const b=document.createElement('span');
+            b.textContent=` 복사됨(${out.length-1}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
+            el.appendChild(b);setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
+        });}
+    })();
+    { const xb=g('#de-xls'); if(xb) xb.onclick=exportXlsx; }
+
     // 기간·거래처가 바뀌면 도번/자도번 후보를 그 범위로 다시 채운다(포커스 유지 위해 부분갱신)
     const refill=async()=>{await loadItems();
       const dl=g('#de-dol'), jl=g('#de-jal');
@@ -2735,8 +3229,11 @@ SCREEN.delivedit=(c)=>{
     g('#de-fr').onchange=e=>{fr=e.target.value;refill();};
     g('#de-to').onchange=e=>{to=e.target.value;refill();};
     const cu=g('#de-cu');
-    cu.oninput=e=>{cust=e.target.value;};
-    cu.onchange=e=>{cust=e.target.value;refill();};   // 목록에서 고르면 후보 재구성
+    // ★협력사(solo)는 거래처를 못 바꾼다 — 입력 이벤트를 아예 걸지 않는다.
+    if(!solo){
+      cu.oninput=e=>{cust=e.target.value;};
+      cu.onchange=e=>{cust=e.target.value;refill();};   // 목록에서 고르면 후보 재구성
+    }
     cu.onkeyup=e=>{if(e.key==='Enter')load();};
     const dv=g('#de-do');dv.oninput=e=>{doban=e.target.value;};
     dv.onchange=e=>{doban=e.target.value;};

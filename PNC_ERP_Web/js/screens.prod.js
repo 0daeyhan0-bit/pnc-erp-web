@@ -732,7 +732,53 @@ SCREEN.partplan=(c)=>{
       +'.dp-on{outline:2px solid #4a86e8 !important;outline-offset:-2px;font-weight:700;'
       +'background-image:linear-gradient(rgba(219,234,254,.72),rgba(219,234,254,.72))}'
       // ★일자 헤더·셀 가운데정렬 강제 — .center 가 다른 규칙에 밀리는 경우 대비
-      +'.pp-tbl th.center,.pp-tbl td.center{text-align:center !important}';
+      +'.pp-tbl th.center,.pp-tbl td.center{text-align:center !important}'
+      /* ★범위선택(복사용) — 일자칸 외 전 컬럼. 실적선택(.dp-on)과 색을 달리해 헷갈리지 않게.
+           실적=파랑 / 복사선택=회청색. 배경'색'(완료색)은 살리려고 background-image 막만 덧씌운다.
+         ★2026-09-03: 색칠된 셀(녹/노랑/주황)은 인라인 style="background:#..." 로 칠해지는데,
+           background 단축속성이 background-image 를 **덮어써서** 선택막이 안 보였다(사용자 지적).
+           → outline 을 함께 준다. outline 은 background 와 다른 속성이라 인라인에 안 밀리고,
+             테두리라 배경색도 가리지 않는다. !important 는 인라인보다 우선하기 위한 것. */
+      +'.pp-sel{background-image:linear-gradient(rgba(148,163,184,.34),rgba(148,163,184,.34));'
+      +'outline:2px solid #64748b !important;outline-offset:-2px}'
+      // 실적선택이 우선 — 두 클래스가 겹치면 파란 테두리를 보인다(실적이 더 중요한 상태)
+      +'.pp-sel.dp-on{outline:2px solid #4a86e8 !important}'
+      +'.pp-tbl.pp-copying{cursor:cell}'
+      /* ★소계/집계행 = 펼침(더블클릭) 전용. 선택 대상이 아니므로 표시가 붙어도 무시하고,
+           더블클릭 시 텍스트가 파랗게 잡히는 것도 막는다(레거시 동일 거동). */
+      +'.pp-tbl tr.pp-agg td{user-select:none;-webkit-user-select:none}'
+      +'.pp-tbl tr.pp-agg td.pp-sel{background-image:none;outline:none !important}'
+      /* 항목보기(컬럼 선택) 모달 */
+      +'.ppcol-ov{position:fixed;inset:0;z-index:1250;background:rgba(15,23,42,.38);display:flex;align-items:center;justify-content:center}'
+      +'.ppcol-bx{background:#fff;border-radius:10px;box-shadow:0 18px 48px rgba(10,25,55,.4);width:420px;max-width:94vw;display:flex;flex-direction:column;max-height:82vh}'
+      +'.ppcol-h{padding:11px 14px;border-bottom:1px solid #dbe3ee;font-weight:700;display:flex;align-items:center;gap:8px}'
+      +'.ppcol-b{flex:1;min-height:0;overflow:auto;padding:4px 0}'
+      +'.ppcol-f{padding:9px 14px;border-top:1px solid #dbe3ee;display:flex;gap:6px;justify-content:flex-end}'
+      // ★user-select:none — 행을 끌 때 텍스트가 파랗게 잡히면 드래그가 안 된다(2026-09-03)
+      +'.ppcol-r{display:flex;align-items:center;gap:9px;padding:5px 14px;cursor:grab;'
+      +'border-bottom:1px solid #f1f5f9;user-select:none;-webkit-user-select:none}'
+      +'.ppcol-r:hover{background:#f5f8fd}'
+      +'.ppcol-r.drag{opacity:.45;background:#e8effb}'
+      +'.ppcol-r.over{box-shadow:inset 0 3px 0 #2563eb;background:#f0f6ff}'
+      +'.ppcol-n{width:26px;color:#94a3b8;font-size:11px;text-align:right}'
+      +'.ppcol-t{flex:1}'
+      // ▲▼ 순서이동 버튼 — 평소엔 흐리게, 행에 올리면 또렷하게
+      +'.ppcol-mv{display:flex;gap:2px;opacity:.25;transition:opacity .12s}'
+      +'.ppcol-r:hover .ppcol-mv{opacity:1}'
+      +'.ppcol-mv button{width:20px;height:18px;padding:0;line-height:1;font-size:9px;cursor:pointer;'
+      +'border:1px solid #cbd5e1;background:#fff;border-radius:3px;color:#475569}'
+      +'.ppcol-mv button:hover:not(:disabled){background:#e8effb;border-color:#2563eb;color:#1c47a0}'
+      +'.ppcol-mv button:disabled{opacity:.3;cursor:default}'
+      /* 일자컬럼 경계 — 표에서 이 자리에 날짜 컬럼들이 들어간다. 위=앞, 아래=뒤 */
+      +'.ppcol-sep{display:flex;align-items:center;gap:8px;padding:5px 14px;margin:2px 0;'
+      +'background:repeating-linear-gradient(45deg,#eef4fd,#eef4fd 6px,#e3ecfa 6px,#e3ecfa 12px);'
+      +'border-top:2px solid #2563eb;border-bottom:2px solid #2563eb;'
+      +'color:#1c47a0;font-size:11px;font-weight:700;user-select:none}'
+      /* 우클릭 컨텍스트 메뉴 */
+      +'.pp-ctx{position:fixed;z-index:1300;background:#fff;border:1px solid #cbd5e1;border-radius:7px;'
+      +'box-shadow:0 10px 30px rgba(10,25,55,.3);padding:4px 0;min-width:150px;font-size:13px}'
+      +'.pp-ctx div{padding:6px 15px;cursor:pointer;white-space:nowrap}'
+      +'.pp-ctx div:hover{background:#eff4fd}';
     document.head.appendChild(stl);
   }
   const finFg=f=>(f==='3'||f==='7')?'#ffffff':'';   // 진한 녹·주황 배경엔 흰 글자(가독)
@@ -863,7 +909,10 @@ SCREEN.partplan=(c)=>{
     render(true);
     const n=c.querySelector('.grid-wrap');if(n){n.scrollTop=sy;n.scrollLeft=sx;}};
   // ★집계행 클릭 = 상세 펼침/접힘 토글. tbody만 교체해도 다시 연결돼야 하므로 분리.
-  const wireRows=()=>{c.querySelectorAll('tr.pp-agg').forEach(tr=>tr.onclick=()=>{
+  /* ★펼침/접힘 = 더블클릭(2026-09-03 사용자 요청).
+       종전엔 한 번 클릭이었는데, 같은 행을 복사용으로 긁거나 셀을 짚기만 해도
+       접혔다 펴져 화면이 튀었다. 더블클릭이면 의도적으로만 열린다. */
+  const wireRows=()=>{c.querySelectorAll('tr.pp-agg').forEach(tr=>tr.ondblclick=()=>{
     const k=tr.getAttribute('data-gk');if(!k)return;
     if(st.expand.has(k))st.expand.delete(k);else st.expand.add(k);
     redrawBody();});};
@@ -871,11 +920,38 @@ SCREEN.partplan=(c)=>{
   //   처음 PP_PAGE 행만 DOM 에 올리고, 스크롤 끝에서 이어붙인다.
   const PP_PAGE=400;
   let ppRest=null;                 // 아직 안 붙인 <tr> 조각들
+  /* ★표 본문 '세대'(2026-09-03) — tbody 가 새로 만들어질 때마다 +1.
+       드래그 실적선택이 캐시한 셀 목록(_cells)이 아직 유효한지 이걸로 판정한다.
+       세대 비교 없이 캐시하면 재렌더 뒤 죽은 DOM 을 잡고 있어 선택이 안 먹는다. */
+  let _bodyGen=0;
+  /* ★사용자별 화면설정(2026-09-03) — 정본 = 서버 nx.user_pref, 로그인 계정에 붙는다.
+       왜 서버인가 — localStorage 만 쓰면 ①다른 PC 로 가면 기본값 ②캐시를 지우면 사라짐
+       ③한 PC 를 여러 명이 쓰면 설정이 섞인다. 계정 설정이므로 계정을 따라다녀야 한다.
+       localStorage 는 '서버응답 도착 전 임시표시'용으로만 남긴다(깜빡임 방지). */
+  const PREF_SCOPE='pp410';
+  let PREF=null;                    // null=아직 서버에서 안 옴 → localStorage 임시값 사용
+  const prefLoad=async()=>{
+    try{const r=await fetch(`${API}/api/pref?scope=${PREF_SCOPE}`);
+      if(!r.ok)return false; const j=await r.json();
+      if(j&&j.prefs){PREF=j.prefs; return true;}
+    }catch(e){}
+    return false;};
+  const prefSave=async(obj)=>{
+    // 화면은 즉시 반영하고(낙관적), 서버 저장은 뒤따른다. 실패해도 화면이 멈추지 않는다.
+    PREF=Object.assign({},PREF||{},obj);
+    try{Object.keys(obj).forEach(k=>{
+      if(obj[k]==null)localStorage.removeItem('pp410_'+k);
+      else localStorage.setItem('pp410_'+k,JSON.stringify(obj[k]));});}catch(_){}
+    try{const r=await fetch(`${API}/api/pref`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({scope:PREF_SCOPE,prefs:obj})});
+      return r.ok;}catch(e){return false;}};
   const ppAppend=()=>{
     if(!ppRest||!ppRest.length)return;
     const tb=c.querySelector('tbody'); if(!tb){ppRest=null;return;}
     const take=ppRest.slice(0,PP_PAGE); ppRest=ppRest.slice(PP_PAGE);
     tb.insertAdjacentHTML('beforeend',take.join(''));
+    _bodyGen++;                    // ★행이 늘었다 → 실적선택 셀 캐시 무효화(안 하면 새 행이 선택 안 됨)
     wireRows();                    // 새로 붙은 집계행에도 클릭 연결
     const cnt=c.querySelector('#pp-cnt');
     if(cnt&&ppRest.length)cnt.textContent=cnt.textContent.replace(/^\S+건/,
@@ -1026,17 +1102,43 @@ SCREEN.partplan=(c)=>{
     const ALLDEF=Object.assign({},HEADDEF,TAILDEF);
     const HEAD_DEFAULT=['gpc','assy','upper','item','line','part_ymd','inhm','pull','st','plan_qty','prior'];
     const TAIL_DEFAULT=['plan_ymd','output_hm','wo','lgh','prev_proc','cur_proc','mat_stock','prod_stock','sagub_stock','fix_stock','assy_stock','sale_qty','ready_stock'];
-    const HEAD_LSKEY='pp410_headorder', TAIL_LSKEY='pp410_tailorder';
+    const HEAD_LSKEY='headorder', TAIL_LSKEY='tailorder';
     // 유저별 저장순서 로드(없거나 깨졌으면 기본). 신규 컬럼을 정의에 추가하면 저장순서 뒤에 자동 보충 → 기존 사용자도 안 깨짐.
     const loadOrder=(lskey,def,defs)=>{
-      try{const s=JSON.parse(localStorage.getItem(lskey)||'null');
+      // ★정본 = 서버(nx.user_pref, 로그인 계정별). localStorage 는 서버응답 도착 전 임시표시용.
+      //   서버가 응답하면 PREF 가 채워지고 재렌더된다(prefLoad).
+      try{const s=(PREF&&PREF[lskey]!==undefined)?PREF[lskey]
+                 :JSON.parse(localStorage.getItem('pp410_'+lskey)||'null');
         if(Array.isArray(s)&&s.length){const v=s.filter(k=>defs[k]);def.forEach(k=>{if(!v.includes(k))v.push(k);});return v;}
       }catch(e){}
       return def.slice();};
-    const headOrder=loadOrder(HEAD_LSKEY,HEAD_DEFAULT,HEADDEF);
-    const tailOrder=loadOrder(TAIL_LSKEY,TAIL_DEFAULT,TAILDEF);
+    // ★defs=ALLDEF — 앞↔뒤 그룹 이동을 허용하므로 저장된 키가 반대 그룹 것일 수 있다.
+    //   그룹별 정의로 거르면 옮긴 컬럼이 저장에서 탈락해 원위치로 돌아간다.
+    const headOrderAll=loadOrder(HEAD_LSKEY,HEAD_DEFAULT,ALLDEF);
+    let tailOrderAll=loadOrder(TAIL_LSKEY,TAIL_DEFAULT,ALLDEF);
+    /* ★한 컬럼이 양쪽 그룹에 동시에 있으면 표에 두 번 나온다.
+         loadOrder 는 "저장에 없는 기본컬럼을 뒤에 보충"하는데, 앞으로 옮긴 컬럼은
+         tail 저장목록에서 빠졌으므로 TAIL_DEFAULT 보충 때 되살아난다.
+         → head 가 이미 가진 키는 tail 에서 뺀다(head 우선). */
+    tailOrderAll=tailOrderAll.filter(k=>!headOrderAll.includes(k));
+    /* ★항목보기(2026-09-03) — 레거시 '항목보기'와 동일: 체크 해제한 컬럼은 표에서 사라진다.
+         숨김목록만 저장한다(표시목록이 아니라). 그래야 나중에 컬럼을 추가해도
+         기존 사용자에게 자동으로 보인다(저장목록에 없다고 사라지지 않는다).
+         일자컬럼은 대상 아님 — 조회조건(적용일수)이 정하므로 여기서 숨기면 설정이 어긋난다. */
+    const HIDE_LSKEY='hidecols';
+    const loadHide=()=>{try{const s=(PREF&&PREF[HIDE_LSKEY]!==undefined)?PREF[HIDE_LSKEY]
+                            :JSON.parse(localStorage.getItem('pp410_'+HIDE_LSKEY)||'null');
+      return new Set(Array.isArray(s)?s.filter(k=>ALLDEF[k]):[]);}catch(e){return new Set();}};
+    const hideSet=loadHide();
+    const headOrder=headOrderAll.filter(k=>!hideSet.has(k));
+    const tailOrder=tailOrderAll.filter(k=>!hideSet.has(k));
     // th/td 생성 공통 — data-tk(컬럼키)·data-grp(head|tail)로 드래그 그룹 구분(그룹 내에서만 이동).
-    const mkTh=(ks,defs,grp)=>ks.map(k=>`<th class="center" draggable="true" data-tk="${k}" data-grp="${grp}" title="드래그해서 순서 변경(내 브라우저에 저장)" style="cursor:grab">${defs[k].t}</th>`).join('');
+    /* ★헤더 드래그 이동은 은퇴(2026-09-03 사용자 요청).
+         8,500행이 붙은 표에서 열을 통째로 옮기면 저사양 PC 가 눈에 띄게 버벅였다.
+         순서 변경은 '항목보기'(우클릭) 목록에서 한다 — 표를 안 건드리므로 즉각 반응하고,
+         숨김·순서를 한 자리에서 정리한 뒤 [확인] 한 번에 반영된다.
+         data-tk 는 남긴다(컬럼 식별에 계속 쓰인다). */
+    const mkTh=(ks,defs,grp)=>ks.map(k=>`<th class="center" data-tk="${k}" data-grp="${grp}" title="우클릭 = 항목보기(순서·숨김)">${defs[k].t}</th>`).join('');
     const mkTd=(ks,defs,r,fg)=>ks.map(k=>{const c=defs[k];   // data-tk = 컬럼이동시 열 식별용
       const b=c.bg?c.bg(r):null;
       const stl=(c.st||'')+(c.sf?c.sf(r):'')+(b?`background:${b.b};font-weight:700${b.f?';color:'+b.f:''}`:'');
@@ -1047,10 +1149,12 @@ SCREEN.partplan=(c)=>{
                   +` data-wo="${esc(dp.wo)}" data-line="${esc(dp.line)}" data-rem="${dp.rem}"`
                  :` class="${c.cls}"`;
       return `<td${dpa}${stl?` style="${stl}"`:''}>${c.v(r,fg)}</td>`;}).join('');
-    const headTh=()=>mkTh(headOrder,HEADDEF,'head');
-    const tailTh=()=>mkTh(tailOrder,TAILDEF,'tail');
-    const headTd=(r,fg)=>mkTd(headOrder,HEADDEF,r,fg);
-    const tailTd=(r)=>mkTd(tailOrder,TAILDEF,r,true);
+    // ★ALLDEF 로 조회한다 — 항목보기에서 컬럼을 앞↔뒤 그룹으로 옮길 수 있으므로
+    //   headOrder 에 원래 tail 이던 키가 들어올 수 있다(HEADDEF 만 보면 undefined 로 깨진다).
+    const headTh=()=>mkTh(headOrder,ALLDEF,'head');
+    const tailTh=()=>mkTh(tailOrder,ALLDEF,'tail');
+    const headTd=(r,fg)=>mkTd(headOrder,ALLDEF,r,fg);
+    const tailTd=(r)=>mkTd(tailOrder,ALLDEF,r,true);
     const tailBlank=()=>tailOrder.map(()=>'<td></td>').join('');
     const rowHtml=(r,seq,firstInGrp,gkey,open,childOf)=>{const pf=r.prior_fin||'0';
       // ★집계행(gkey) = 청록 배경 + 클릭시 펼침/접힘. 펼쳐진 상세행(childOf) = 흰 배경이지만 클릭시 같이 접힘.
@@ -1094,7 +1198,7 @@ SCREEN.partplan=(c)=>{
                  mat_stock:r0.mat_stock,prod_stock:r0.prod_stock,sagub_stock:r0.sagub_stock,fix_stock:r0.fix_stock,
                  assy_stock:r0.assy_stock,sale_qty:r0.sale_qty,ready_stock:r0.ready_stock,
                  prev_proc:r0.prev_proc,cur_proc:r0.cur_proc};
-      return `<tr${gkey!==undefined?` class="pp-agg" data-gk="${esc(gkey)}"`:''} style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8${gkey!==undefined?';cursor:pointer':''}">
+      return `<tr${gkey!==undefined?` class="pp-agg" data-gk="${esc(gkey)}" title="더블클릭 = 상세 펼침/접힘"`:''} style="background:#cdeef7;font-weight:600;border-bottom:1px solid #9fb3c8${gkey!==undefined?';cursor:pointer':''}">
         <td class="center mut">${gkey!==undefined?`<span style="color:#456">${folded?'▶':'▼'}</span>`:''}</td>${headTd(sub,true)}
         ${d.map(x=>{const pl=blk.reduce((s,r)=>s+((r.days&&r.days[x])||0),0),cv=blk.reduce((s,r)=>s+((r.dcov&&r.dcov[x])||0),0);
           const cf=rollFinQ(blk.filter(r=>((r.days&&r.days[x])||0)>0).map(r=>(r.dfin&&r.dfin[x])||'0'));
@@ -1138,6 +1242,7 @@ SCREEN.partplan=(c)=>{
     //   저사양 PC에서 최초렌더·컬럼이동·스크롤이 모두 멈춘다("응답 없음").
     //   → 완성된 tbody HTML 을 <tr> 단위로 잘라 처음 PP_PAGE 개만 붙이고,
     //     스크롤이 끝에 가까워지면 이어붙인다. 행 생성 로직(집계/상세/블록접기)은 그대로.
+    _bodyGen++;                    // ★표가 새로 만들어진다 → 실적선택 셀 캐시 무효화(_cellsGen 비교)
     const _fullBody=st.loading?spinRow(NCOL+d.length):bodyHtml();
     const _chunks=(()=>{if(st.loading)return null;
       const parts=_fullBody.split(/(?=<tr)/);          // <tr 앞에서 분할(행 경계 보존)
@@ -1205,6 +1310,8 @@ SCREEN.partplan=(c)=>{
        <label class="tl">제번</label><input class="inp" id="pp-wo" value="${esc(st.wo)}" style="width:90px" placeholder="제번" autocomplete="off">
        <label class="tl">ASSY도번</label><input class="inp" id="pp-dono" value="${esc(st.dono)}" style="width:100px" placeholder="ASSY도번" autocomplete="off">
        <label class="tl">도번</label><input class="inp" id="pp-jado" value="${esc(st.jado)}" style="width:100px" placeholder="도번(item)" autocomplete="off">
+       <div class="spacer"></div>
+       <button class="btn xls" id="pp-xls" title="화면에 보이는 그대로(색상 포함) 엑셀로 내려받습니다">엑셀</button>
      </div>
      ${st.msg?(st.msg.includes('실패')||st.msg.includes('오류')
         ?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(st.msg)}</div>`
@@ -1236,22 +1343,45 @@ SCREEN.partplan=(c)=>{
          시작셀~현재셀의 (행,열) 사각범위를 매 move 마다 통째로 계산한다(엑셀 감각). */
     const gw=c.querySelector('.grid-wrap');
     if(gw&&dpOn()){
-      gw.style.userSelect='none'; gw.style.webkitUserSelect='none';
-      gw.onselectstart=()=>false;
+      /* ★userSelect 는 일자칸(.dp-c)에만 건다(2026-09-03).
+           종전엔 grid-wrap 전체에 걸어 **표 어디서도 텍스트를 못 긁었다** — 복사 불가의 원인.
+           일자칸만 막으면 실적 드래그 중 파란 텍스트선택이 끼는 것만 없어지고,
+           나머지 컬럼은 우리 범위선택(.pp-sel)이 담당한다. (CSS .dp-c 에 이미 user-select:none) */
+      gw.style.userSelect=''; gw.style.webkitUserSelect='';
+      gw.onselectstart=e=>{const t=e.target;
+        return !(t&&t.closest&&t.closest('.dp-c'));};
       const rcOf=td=>{const tr=td.parentElement;return {r:tr?tr.rowIndex:-1,c:td.cellIndex};};
+      /* ★성능(2026-09-03): 종전엔 커서가 일자칸 밖일 때 그 행의 모든 .dp-c 에
+           getBoundingClientRect() 를 돌려 '가장 가까운 칸'을 찾았다. rect 읽기는 강제 리플로우라
+           mousemove 마다 열 개수만큼 발생 → 드래그가 무거웠다.
+           → 열 위치는 드래그 중 변하지 않으므로 **헤더에서 한 번만 재서** 캐시한다(_colX).
+             그 다음부터는 산술 비교만 한다. */
+      let _colX=null,_colXGen=-1,_colXsx=-1;
+      const colXCache=()=>{
+        // 가로스크롤하면 화면좌표가 통째로 밀린다 → 스크롤 위치도 캐시키에 넣는다
+        const sx=gw.scrollLeft;
+        if(_colX&&_colXGen===_bodyGen&&_colXsx===sx)return _colX;
+        _colXsx=sx;
+        const row=gw.querySelector('tr.pp-agg,tbody tr'); _colX=[];
+        if(row)for(const td of row.cells){
+          if(td.classList.contains('dp-c')){const b=td.getBoundingClientRect();
+            _colX.push({i:td.cellIndex,l:b.left,r:b.right});}}
+        _colXGen=_bodyGen; return _colX;};
       const cellAt=(x,y)=>{
         const e=document.elementFromPoint(x,y); if(!e)return null;
         const td=e.closest('.dp-c'); if(td)return td;
         const tr=e.closest('tr');
-        if(tr){let best=null,bd=1e9;
-          tr.querySelectorAll('.dp-c').forEach(q=>{const b=q.getBoundingClientRect();
-            const d=(x<b.left)?(b.left-x):((x>b.right)?(x-b.right):0);
-            if(d<bd){bd=d;best=q;}});
-          if(best)return best;}
+        if(tr){
+          const cols=colXCache(); let best=-1,bd=1e9;
+          for(const cx of cols){                       // rect 읽기 없음 — 캐시된 좌표로 비교만
+            const d=(x<cx.l)?(cx.l-x):((x>cx.r)?(x-cx.r):0);
+            if(d<bd){bd=d;best=cx.i;}}
+          if(best>=0&&best<tr.cells.length){const q=tr.cells[best];
+            if(q&&q.classList.contains('dp-c'))return q;}}
         return e.closest('td');};
       const paintCnt=()=>{const el=c.querySelector('#pp-dp-cnt');
         if(el)el.textContent=st.dpSel.size+'건';};
-      let _a=null,_cells=null,_own=null,_on=false;
+      let _a=null,_cells=null,_own=null,_on=false,_cellsGen=-1;
       const applyRect=td=>{
         if(!_a||!_cells)return;
         const b=rcOf(td);
@@ -1266,17 +1396,26 @@ SCREEN.partplan=(c)=>{
         paintCnt();};
       gw.onmousedown=ev=>{
         if(ev.button!==0)return;
-        const any=ev.target.closest('td'); if(!any||!any.closest('tr'))return;
+        // ★실적선택은 **일자칸(.dp-c)에서 시작할 때만**(2026-09-03 사용자 확정).
+        //   그 외 셀의 드래그는 '복사용 범위선택'이 가져간다 — 종전엔 아무 td 에서나
+        //   시작돼 도번·품명을 끌어도 실적이 잡혔고, 텍스트 복사가 아예 불가능했다.
+        const any=ev.target.closest('td.dp-c'); if(!any||!any.closest('tr'))return;
         ev.preventDefault();
         if(!ev.ctrlKey&&!ev.metaKey){
           st.dpSel.clear();
           c.querySelectorAll('.dp-on').forEach(x=>x.classList.remove('dp-on'));
         }
         _on=true; _own=new Set();
-        _cells=[...c.querySelectorAll('.dp-c')].map(x=>{const p=rcOf(x);
-          return {td:x,r:p.r,c:p.c,k:x.dataset.dp,
-                  v:{part:x.dataset.part,item:x.dataset.item,wo:x.dataset.wo,
-                     line:x.dataset.line,qty:+x.dataset.rem||0}};});
+        // ★성능(2026-09-03): mousedown 마다 전 셀을 훑고 rcOf() 를 부르면
+        //   8,500행 × 일자컬럼에서 수만 번 DOM 접근이 일어나 클릭이 눈에 띄게 늦었다.
+        //   → 캐시하고, 표가 다시 그려질 때만 무효화한다(_cellsGen 으로 세대 비교).
+        if(!_cells||_cellsGen!==_bodyGen){
+          _cells=[...c.querySelectorAll('.dp-c')].map(x=>{const p=rcOf(x);
+            return {td:x,r:p.r,c:p.c,k:x.dataset.dp,
+                    v:{part:x.dataset.part,item:x.dataset.item,wo:x.dataset.wo,
+                       line:x.dataset.line,qty:+x.dataset.rem||0}};});
+          _cellsGen=_bodyGen;
+        }
         _a=rcOf(any);
         applyRect(any);
       };
@@ -1388,6 +1527,15 @@ SCREEN.partplan=(c)=>{
         const hr=document.createElement('div');
         hr.style.cssText='height:1px;background:#e3e9f0;margin:4px 0'; m.appendChild(hr);
         row('전체 해제','',()=>{st.dpSel.clear();render();},!n);
+        /* ★항목보기·복사를 이 메뉴에도 넣는다(2026-09-03).
+             드래그 실적모드(dpOn)에서는 .grid-wrap 의 이 핸들러가 표의 우클릭을 먼저 가져가
+             **항목보기 메뉴가 아예 안 떴다**(사용자 보고). 메뉴를 하나로 합쳐 어느 모드에서도
+             같은 자리에서 쓰게 한다. */
+        const hr2=document.createElement('div');
+        hr2.style.cssText='height:1px;background:#e3e9f0;margin:4px 0'; m.appendChild(hr2);
+        row('항목보기','',()=>openColPick(),false);
+        row('선택영역 복사','',()=>copySel(),false);
+        row('전체 복사','',()=>copyAll(),false);
         document.body.appendChild(m);
         // ★바깥 클릭으로 닫기는 반드시 'click' 으로 건다(040 동일).
         //   'mousedown' 으로 걸면 메뉴 항목을 누르는 순간 mousedown 이 먼저 떠서
@@ -1406,71 +1554,11 @@ SCREEN.partplan=(c)=>{
       });
     }
     g('#pp-line').onchange=()=>{st.line=g('#pp-line').value;redrawBody();};
-    // ★컬럼 헤더 드래그앤드롭 = 유저별 컬럼순서 변경(localStorage에 저장).
-    //   사람마다 보고 싶은 순서가 달라서 각자 브라우저에 저장 — 서버/DB 미사용(다른 PC로 가면 기본순서).
-    //   앞쪽그룹(head: 파트~당일이전계획)과 후행그룹(tail: LG INPUT~생산준비재고)은 각각의 그룹 안에서만 이동.
-    //   (일자 컬럼이 두 그룹 사이에 끼어 있어 그룹을 넘나드는 이동은 불가)
-    //   드래그한 컬럼을 놓은 위치 "앞"에 삽입. 저장 후 재렌더(스크롤 유지).
-    let _dragTk=null,_dragGrp=null;
-    c.querySelectorAll('th[data-tk]').forEach(th=>{
-      th.ondragstart=e=>{_dragTk=th.getAttribute('data-tk');_dragGrp=th.getAttribute('data-grp');th.style.opacity='.4';
-        try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',_dragTk);}catch(_){}};
-      // 표시가 남은 th 만 되돌린다(전체 훑기 대신 style 속성 선택자로 한정)
-      th.ondragend=()=>{th.style.opacity='';
-        c.querySelectorAll('th[data-tk][style*="border-left"]').forEach(x=>x.style.borderLeft='');};
-      th.ondragover=e=>{if(th.getAttribute('data-grp')!==_dragGrp)return;   // 같은 그룹끼리만
-        e.preventDefault();
-        // dragover 는 초당 수십회 발생 — 이미 표시돼 있으면 건드리지 않는다(리페인트 절감)
-        if(_dragTk&&_dragTk!==th.getAttribute('data-tk')&&!th.style.borderLeft)
-          th.style.borderLeft='3px solid #2563eb';};
-      th.ondragleave=()=>{th.style.borderLeft='';};
-      th.ondrop=e=>{th.style.borderLeft='';
-        if(th.getAttribute('data-grp')!==_dragGrp)return;
-        e.preventDefault();
-        const to=th.getAttribute('data-tk');const from=_dragTk;const grp=_dragGrp;_dragTk=null;_dragGrp=null;
-        if(!from||from===to)return;
-        const cur=(grp==='head')?headOrder:tailOrder, lskey=(grp==='head')?HEAD_LSKEY:TAIL_LSKEY;
-        const arr=cur.filter(k=>k!==from);
-        const at=arr.indexOf(to); arr.splice(at<0?arr.length:at,0,from);
-        try{localStorage.setItem(lskey,JSON.stringify(arr));}catch(_){}
-        cur.length=0; arr.forEach(k=>cur.push(k));   // headOrder/tailOrder 참조 유지
-        // ★성능(2026-08-20): 드롭마다 render() 로 2,900행 전체를 다시 그려 심하게 버벅였다.
-        //   → DOM 에서 해당 열의 th/td 만 제자리 이동(재렌더 없음). 스크롤·포커스도 그대로.
-        const tbl=th.closest('table'); if(!tbl)return;
-        const idxOf=(row,k)=>{const cs=row.children;
-          for(let i=0;i<cs.length;i++)if(cs[i].getAttribute&&cs[i].getAttribute('data-tk')===k)return i;
-          return -1;};
-        const hr=tbl.tHead?tbl.tHead.rows[0]:null; if(!hr)return;
-        const fi=idxOf(hr,from), ti=idxOf(hr,to); if(fi<0||ti<0)return;
-        const move=(row)=>{const cs=row.children; if(fi>=cs.length||ti>=cs.length)return;
-          const cell=cs[fi]; row.insertBefore(cell, cs[ti]);};
-        // ★성능(2026-08-21): 4,782행 × insertBefore 를 붙어있는 표에 하면 행마다 레이아웃이
-        //   무효화돼 저사양 PC에서 수 초씩 멈춘다. 표를 잠시 DOM 에서 떼어내고 옮긴 뒤
-        //   되돌리면 레이아웃 계산이 1회로 합쳐진다(스크롤 위치는 직접 보존).
-        const holder=tbl.parentNode, next=tbl.nextSibling;
-        const sy=holder&&holder.scrollTop||0, sx=holder&&holder.scrollLeft||0;
-        const ph=tbl.offsetHeight;                     // 떼는 동안 스크롤 튐 방지
-        if(holder){holder.style.minHeight=ph+'px'; tbl.remove();}
-        try{
-          move(hr);
-          const bodies=[...tbl.tBodies, ...(tbl.tFoot?[tbl.tFoot]:[])];
-          const n=hr.children.length;
-          bodies.forEach(tb=>{const rs=tb.rows;
-            for(let i=0;i<rs.length;i++){const row=rs[i];
-              if(row.children.length===n)move(row);}});   // colspan 행(소계 등)은 건너뜀
-        }finally{
-          if(holder){holder.insertBefore(tbl,next); holder.style.minHeight='';
-            holder.scrollTop=sy; holder.scrollLeft=sx;}
-        }
-        // 아직 DOM 에 안 붙은 나머지 행 조각들은 새 컬럼순서로 다시 만들어야 어긋나지 않는다.
-        //   (headOrder/tailOrder 는 위에서 이미 갱신됨 → bodyHtml() 을 새 순서로 재생성)
-        if(ppRest&&ppRest.length){
-          const shownRows=(tbl.tBodies[0]?tbl.tBodies[0].rows.length:0);
-          const parts=bodyHtml().split(/(?=<tr)/);
-          ppRest=parts.slice(shownRows);
-        }
-      };
-    });
+    /* ★컬럼 헤더 드래그 이동은 제거했다(2026-09-03 사용자 요청).
+         왜 — 8,500행이 붙은 표에서 열을 옮기면 헤더+전 행의 셀을 하나씩 insertBefore 해야 해서
+         표를 DOM 에서 떼었다 붙이는 최적화를 넣고도 저사양 PC 에서 버벅였다("탭이동은 버벅").
+         순서 변경은 **항목보기**(헤더 우클릭)에서 한다 — 목록 행만 움직이므로 표를 전혀
+         건드리지 않아 즉각 반응하고, 숨김·순서를 한 자리에서 정리해 [확인] 한 번에 반영된다. */
     wireRows();   // 집계행 클릭(펼침/접힘) — 표만 다시 그릴 때도 재연결 필요해서 별도 함수로 분리
     ppWireLazy(); // 스크롤 이어붙이기(점진 렌더) — 전체 렌더 경로
     g('#pp-prev').onclick=()=>shiftDay(-1);g('#pp-next').onclick=()=>shiftDay(1);
@@ -1479,6 +1567,345 @@ SCREEN.partplan=(c)=>{
     [['#pp-dono','dono'],['#pp-jado','jado'],['#pp-wo','wo']].forEach(([id,key])=>{const e=g(id);if(!e)return;
       e.oninput=()=>{clearTimeout(_typeT);const v=e.value.trim();
         _typeT=setTimeout(()=>{st[key]=v;redrawBody();},180);};});
+
+    /* ══ 항목보기 (레거시 '항목보기' 이식, 2026-09-03) ══════════════════════
+       헤더 우클릭 → 컬럼 체크박스 목록. 해제하면 표에서 숨김. 순번대로 나오고
+       목록 자체를 드래그해 순서도 바꾼다(헤더 드래그와 같은 저장소를 쓴다).
+       일자컬럼은 조회조건(적용일수)이 정하므로 대상에서 뺀다. */
+    const openColPick=()=>{
+      const old=document.getElementById('pp-colpick'); if(old)old.remove();
+      // 표시순서 = 저장된 전체순서(head 그룹 → tail 그룹). 숨긴 것도 목록엔 나온다(체크만 해제).
+      const list=[...headOrderAll.map(k=>[k,'head']),...tailOrderAll.map(k=>[k,'tail'])];
+      const ov=document.createElement('div'); ov.className='ppcol-ov'; ov.id='pp-colpick';
+      ov.innerHTML=`<div class="ppcol-bx">
+        <div class="ppcol-h">항목보기<span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 행을 끌거나 ▲▼ 로 순서 변경</span></div>
+        <div class="ppcol-b" id="ppcol-list"></div>
+        <div class="ppcol-f">
+          <button class="btn ghost" id="ppcol-reset">초기화</button>
+          <div style="flex:1"></div>
+          <button class="btn ghost" id="ppcol-no">취소</button>
+          <button class="btn" id="ppcol-ok" style="background:#1c47a0;color:#fff">확인</button>
+        </div></div>`;
+      document.body.appendChild(ov);           // ★§3 — .content 안에 fixed 를 넣으면 잘린다
+      let work=list.slice(), hide=new Set(hideSet);
+      /* ★순서 변경 = 마우스 이벤트로 직접 구현(2026-09-03 재작업).
+           HTML5 draggable 은 여기서 신뢰할 수 없었다 — 텍스트 선택이 먼저 잡혀
+           파란 블록만 생기고 드래그가 시작되지 않았다(사용자 보고).
+           mousedown/mousemove/mouseup 으로 직접 처리하면 브라우저 기본동작에
+           의존하지 않아 확실하다. 5px 이상 움직여야 드래그로 보므로 '클릭=체크토글'과
+           충돌하지 않는다(그냥 누르면 체크, 끌면 이동). */
+      let dragK=null, dragFrom=0, moved=false;
+      const paint=()=>{
+        /* ★일자컬럼 경계선(2026-09-03) — '앞/뒤' 글자만으로는 어디가 경계인지 애매했다.
+             표는 [앞그룹][일자컬럼][뒷그룹] 이므로, 목록에서도 그 자리에 일자컬럼을
+             한 줄로 그려 넣는다. 이 줄 위로 옮기면 일자 앞, 아래면 일자 뒤가 된다. */
+        const firstTail=work.findIndex(x=>x[1]==='tail');
+        ov.querySelector('#ppcol-list').innerHTML=work.map(([k,grp],i)=>
+          (i===firstTail?`<div class="ppcol-sep">일자 컬럼 (조회조건 '적용일수'로 결정)</div>`:'')
+          +`<div class="ppcol-r" data-k="${k}" data-grp="${grp}" data-i="${i}">
+             <span class="ppcol-n">${i+1}</span>
+             <input type="checkbox" ${hide.has(k)?'':'checked'}>
+             <span class="ppcol-t">${esc(ALLDEF[k].t)}</span>
+             <span class="ppcol-g" style="color:#c3cbd6;font-size:10px">${grp==='head'?'앞':'뒤'}</span>
+             <span class="ppcol-mv">
+               <button data-mv="up"   title="위로"   ${i===0?'disabled':''}>▲</button>
+               <button data-mv="down" title="아래로" ${i===work.length-1?'disabled':''}>▼</button>
+             </span>
+           </div>`).join('')
+          +(firstTail<0?`<div class="ppcol-sep">일자 컬럼 (조회조건 '적용일수'로 결정)</div>`:'');
+        ov.querySelectorAll('.ppcol-r').forEach(row=>{
+          const k=row.dataset.k;
+          const cb=row.querySelector('input');
+          cb.onchange=()=>{if(cb.checked)hide.delete(k);else hide.add(k);};
+          /* ★▲▼ 버튼 — 드래그가 어려운 환경(터치패드 등)을 위한 확실한 수단.
+               한 칸 옮기고, 그룹 경계를 넘으면 그 자리의 그룹을 물려받는다. */
+          row.querySelectorAll('[data-mv]').forEach(b=>b.onclick=ev=>{
+            ev.stopPropagation();
+            const i=work.findIndex(x=>x[0]===k);
+            const j=(b.dataset.mv==='up')?i-1:i+1;
+            if(j<0||j>=work.length)return;
+            const item=work[i];
+            item[1]=work[j][1];                 // 지나간 자리의 그룹을 따른다
+            work[i]=work[j]; work[j]=item;
+            paint();});
+        });
+      };
+      const listEl=ov.querySelector('#ppcol-list');
+      const rowAtY=(y)=>{                      // 커서 아래 행 찾기(경계 밖이면 맨위/맨아래)
+        const rows=[...listEl.querySelectorAll('.ppcol-r')];
+        if(!rows.length)return null;
+        for(const r of rows){const b=r.getBoundingClientRect();
+          if(y>=b.top&&y<=b.bottom)return r;}
+        // ★일자 구분선 위에 놓은 경우 — 가장 가까운 행으로 붙인다(그 줄 자체는 행이 아니다).
+        //   이러면 "경계에 걸쳐 놓기"가 자연스럽게 앞/뒤 중 가까운 쪽으로 정해진다.
+        let best=rows[0],bd=1e9;
+        for(const r of rows){const b=r.getBoundingClientRect();
+          const dist=(y<b.top)?(b.top-y):((y>b.bottom)?(y-b.bottom):0);
+          if(dist<bd){bd=dist;best=r;}}
+        return best;
+      };
+      listEl.addEventListener('mousedown',ev=>{
+        const row=ev.target.closest&&ev.target.closest('.ppcol-r'); if(!row)return;
+        if(ev.target.tagName==='INPUT')return;    // 체크박스는 브라우저가 처리
+        if(ev.target.closest('.ppcol-mv'))return; // ▲▼ 버튼은 클릭으로 처리(드래그 아님)
+        ev.preventDefault();                     // ★텍스트 선택 차단 — 파란 블록의 원인
+        dragK=row.dataset.k; dragFrom=+row.dataset.i; moved=false;
+        row.classList.add('drag');
+      });
+      document.addEventListener('mousemove',function ppcolMove(ev){
+        if(!dragK)return;
+        if(!ov.isConnected){dragK=null;document.removeEventListener('mousemove',ppcolMove);return;}
+        moved=true;
+        const over=rowAtY(ev.clientY);
+        listEl.querySelectorAll('.ppcol-r.over').forEach(x=>{if(x!==over)x.classList.remove('over');});
+        if(over&&over.dataset.k!==dragK)over.classList.add('over');
+      });
+      document.addEventListener('mouseup',function ppcolUp(ev){
+        if(!dragK){return;}
+        if(!ov.isConnected){dragK=null;document.removeEventListener('mouseup',ppcolUp);return;}
+        const k=dragK; dragK=null;
+        listEl.querySelectorAll('.ppcol-r.drag,.ppcol-r.over')
+              .forEach(x=>x.classList.remove('drag','over'));
+        const srcRow=[...listEl.querySelectorAll('.ppcol-r')].find(r=>r.dataset.k===k);
+        if(!moved){                              // 안 움직였으면 = 클릭 → 체크 토글
+          if(srcRow){const cb=srcRow.querySelector('input');
+            cb.checked=!cb.checked; if(cb.checked)hide.delete(k);else hide.add(k);}
+          return;
+        }
+        const over=rowAtY(ev.clientY);
+        if(!over||over.dataset.k===k)return;
+        /* ★그룹(앞/뒤) 경계를 넘는 이동 허용(사용자 요청).
+             표는 [SEQ][앞그룹][일자컬럼][뒷그룹] 구조라 일자컬럼이 사이에 끼어 있다.
+             놓은 자리의 그룹을 물려받는다 = 일자컬럼 기준 어느 편에 설지가 정해진다. */
+        const fi=work.findIndex(x=>x[0]===k); const item=work[fi];
+        work.splice(fi,1);
+        const ti=work.findIndex(x=>x[0]===over.dataset.k);
+        item[1]=over.dataset.grp;
+        work.splice(ti<0?work.length:ti,0,item);
+        paint();
+      });
+      paint();
+      const close=()=>ov.remove();
+      ov.onclick=e=>{if(e.target===ov)close();};
+      ov.querySelector('#ppcol-no').onclick=close;
+      ov.querySelector('#ppcol-reset').onclick=()=>{
+        work=[...HEAD_DEFAULT.map(k=>[k,'head']),...TAIL_DEFAULT.map(k=>[k,'tail'])];
+        hide=new Set(); paint();};
+      ov.querySelector('#ppcol-ok').onclick=()=>{
+        const h=work.filter(x=>x[1]==='head').map(x=>x[0]);
+        const t=work.filter(x=>x[1]==='tail').map(x=>x[0]);
+        prefSave({[HEAD_LSKEY]:h,[TAIL_LSKEY]:t,[HIDE_LSKEY]:[...hide]});   // ★계정별 서버 저장
+        close();
+        /* ★redrawBody() 는 tbody/tfoot 만 교체하고 <thead> 는 그대로 둔다 →
+             컬럼 구성이 바뀌어도 헤더가 안 바뀌어 "확인을 눌러도 그대로"였다(2026-09-03).
+             컬럼 구성 변경은 헤더까지 다시 그려야 하므로 전체 렌더로 간다(스크롤은 직접 보존). */
+        const w=c.querySelector('.grid-wrap'); const sy=w?w.scrollTop:0, sx=w?w.scrollLeft:0;
+        render();
+        const n=c.querySelector('.grid-wrap'); if(n){n.scrollTop=sy;n.scrollLeft=sx;}};
+    };
+    // 헤더 우클릭 = 항목보기 (레거시와 동일 진입). 표 어디서 눌러도 뜨게 tbody 도 받는다.
+    const tblEl=c.querySelector('table.pp-tbl')||c.querySelector('table');
+    if(tblEl)tblEl.oncontextmenu=ev=>{
+      ev.preventDefault();
+      const old=document.querySelector('.pp-ctx'); if(old)old.remove();
+      const m=document.createElement('div'); m.className='pp-ctx';
+      m.innerHTML='<div data-a="col">항목보기</div><div data-a="copy">선택영역 복사</div><div data-a="all">전체 복사</div>';
+      m.style.left=Math.min(ev.clientX,innerWidth-170)+'px';
+      m.style.top=Math.min(ev.clientY,innerHeight-110)+'px';
+      document.body.appendChild(m);
+      /* ★바깥클릭 닫기와 항목실행의 순서 문제(2026-09-03 수정).
+           종전엔 document 의 mousedown 으로 닫고 메뉴는 click 으로 실행했다.
+           mousedown 이 click 보다 **먼저** 오므로 메뉴가 이미 remove 된 뒤라
+           click 이 죽은 노드에서 발생 → **항목보기를 눌러도 아무 일도 안 일어났다**.
+           → 메뉴 실행도 mousedown 에서 처리하고, 바깥클릭 닫기는 메뉴 안을 제외한다. */
+      const kill=()=>{m.remove();document.removeEventListener('mousedown',outside,true);};
+      const outside=e=>{if(!m.contains(e.target))kill();};
+      setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+      m.addEventListener('mousedown',e=>{
+        e.preventDefault(); e.stopPropagation();          // 표의 범위선택 mousedown 으로 새지 않게
+        const t=e.target.closest&&e.target.closest('[data-a]'); if(!t)return;
+        const a=t.getAttribute('data-a'); kill();
+        if(a==='col')openColPick(); else if(a==='copy')copySel(); else if(a==='all')copyAll();
+      });
+    };
+
+    /* ══ 범위선택 + Ctrl+C 복사 (2026-09-03) ══════════════════════════════
+       일자칸(.dp-c)은 드래그=실적선택으로 이미 쓰이므로 건드리지 않는다.
+       그 외 셀에서 끌면 엑셀식 사각범위가 잡히고 Ctrl+C 로 탭구분 텍스트가 복사된다
+       (엑셀에 그대로 붙는다). 선택색은 실적선택(파랑)과 구분되게 회청색. */
+    const gw2=c.querySelector('.grid-wrap');
+    if(gw2&&!gw2.dataset.cpsel){
+      gw2.dataset.cpsel='1';
+      let a0=null,on=false;
+      const rc=td=>({r:td.parentElement?td.parentElement.rowIndex:-1,c:td.cellIndex});
+      /* ★칠한 셀을 직접 들고 있는다(2026-09-03) — clearSel 이 매번 querySelectorAll('.pp-sel')로
+           문서를 훑으면 드래그 중 프레임마다 전체 스캔이 된다. 배열로 기억하면 지울 것만 지운다.
+           (표가 재렌더되면 죽은 노드가 남을 수 있으나 classList 조작은 무해하고, 새 표에는 안 붙는다) */
+      let painted=[];
+      const clearSel=()=>{for(const x of painted)x.classList.remove('pp-sel'); painted=[];};
+      const paintRange=(b)=>{
+        if(!a0)return;
+        const r1=Math.min(a0.r,b.r),r2=Math.max(a0.r,b.r);
+        const c1=Math.min(a0.c,b.c),c2=Math.max(a0.c,b.c);
+        clearSel();
+        const tbl=gw2.querySelector('table'); if(!tbl)return;
+        // ★행 전체를 훑되 rows/cells 직접 인덱싱 — querySelectorAll 반복보다 훨씬 싸다
+        const bodies=[...tbl.tBodies];
+        bodies.forEach(tb=>{const rs=tb.rows;
+          for(let i=0;i<rs.length;i++){const row=rs[i]; const ri=row.rowIndex;
+            if(ri<r1||ri>r2)continue;
+            // ★소계/집계행(청록 .pp-agg)은 선택 대상이 아니다 — 레거시도 그렇다(2026-09-03).
+            //   이 행은 '펼침/접힘'만 하는 자리다. 선택모양이 뜨면 그 행도 복사되는 줄 알게 된다.
+            if(row.classList.contains('pp-agg'))continue;
+            const cs=row.cells;
+            // ★실적칸(.dp-c)은 복사선택에서 제외 — 두 선택이 겹쳐 "표시가 2개" 로 보였다(2026-09-03).
+            //   일자칸은 실적선택(파랑) 전용, 나머지는 복사선택(회청) 전용으로 완전히 가른다.
+            for(let j=c1;j<=c2&&j<cs.length;j++){
+              const cell=cs[j];
+              if(!cell.classList.contains('dp-c')){cell.classList.add('pp-sel');painted.push(cell);}}}});
+      };
+      gw2.addEventListener('mousedown',ev=>{
+        if(ev.button!==0)return;
+        const td=ev.target.closest&&ev.target.closest('td');
+        if(!td||!td.parentElement)return;
+        if(td.classList.contains('dp-c'))return;      // ★일자칸=실적선택 영역, 건드리지 않음
+        // ★소계/집계행에서는 선택을 시작하지도 않는다 — 그 자리는 더블클릭(펼침) 전용.
+        if(td.parentElement.classList.contains('pp-agg')){clearSel();return;}
+        // ★실적선택이 남아 있으면 지운다 — 한 화면에 선택이 두 종류 보이면 헷갈린다.
+        if(st.dpSel&&st.dpSel.size){st.dpSel.clear();
+          c.querySelectorAll('.dp-on').forEach(x=>x.classList.remove('dp-on'));
+          const el=c.querySelector('#pp-dp-cnt'); if(el)el.textContent='0건';}
+        clearSel(); a0=rc(td); on=true; paintRange(a0);
+        ev.preventDefault();                          // 브라우저 기본 텍스트선택과 겹치지 않게
+      });
+      /* ★성능(2026-09-03): mousemove 는 초당 수십~수백 회 온다.
+           매번 paintRange 를 돌리면 clearSel(전체 훑기)+전 행 재칠하기가 반복돼
+           대각선으로 길게 끌 때 눈에 띄게 끊겼다.
+           ①같은 셀 위에서 움직이면 무시(대부분의 이벤트가 여기서 걸러진다)
+           ②실제 칠하기는 rAF 로 프레임당 1회 — 화면 갱신 주기보다 자주 칠할 이유가 없다. */
+      let lastB=null,rafId=0;
+      gw2.addEventListener('mousemove',ev=>{
+        if(!on)return;
+        const td=ev.target.closest&&ev.target.closest('td');
+        if(!td||!td.parentElement)return;
+        const b=rc(td);
+        if(lastB&&lastB.r===b.r&&lastB.c===b.c)return;    // ① 같은 칸 → 할 일 없음
+        lastB=b;
+        if(rafId)return;
+        rafId=requestAnimationFrame(()=>{rafId=0; if(on&&lastB)paintRange(lastB);});  // ② 프레임당 1회
+      });
+      document.addEventListener('mouseup',()=>{
+        if(rafId){cancelAnimationFrame(rafId);rafId=0;}
+        if(on&&lastB)paintRange(lastB);                   // 마지막 위치는 확실히 반영
+        on=false; lastB=null;});
+    }
+    // 선택영역 → 탭구분 텍스트(엑셀 붙여넣기 호환)
+    const selText=()=>{
+      const cells=[...c.querySelectorAll('.pp-sel')];
+      if(!cells.length)return '';
+      const map=new Map();
+      cells.forEach(td=>{const r=td.parentElement.rowIndex;
+        if(!map.has(r))map.set(r,[]);
+        map.get(r).push([td.cellIndex,(td.innerText||'').trim()]);});
+      return [...map.keys()].sort((x,y)=>x-y)
+        .map(r=>map.get(r).sort((x,y)=>x[0]-y[0]).map(x=>x[1]).join('\t')).join('\n');
+    };
+    const toClip=(txt,what)=>{
+      if(!txt){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+      const done=()=>{const el=c.querySelector('#pp-cnt');
+        if(el){const o=el.textContent;el.textContent=what+' 복사됨';setTimeout(()=>{el.textContent=o;},1400);}};
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(txt).then(done,()=>fallback());
+      }else fallback();
+      function fallback(){   // 비보안 컨텍스트(http)에서는 clipboard API 가 막힌다
+        const ta=document.createElement('textarea'); ta.value=txt;
+        ta.style.cssText='position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
+        ta.remove();}
+    };
+    const copySel=()=>toClip(selText(),'선택영역');
+    const copyAll=()=>{
+      const tbl=c.querySelector('.grid-wrap table'); if(!tbl)return;
+      const out=[];
+      const hr=tbl.tHead&&tbl.tHead.rows[0];
+      if(hr)out.push([...hr.cells].map(th=>(th.innerText||'').trim()).join('\t'));
+      [...tbl.tBodies].forEach(tb=>{const rs=tb.rows;
+        for(let i=0;i<rs.length;i++)out.push([...rs[i].cells].map(td=>(td.innerText||'').trim()).join('\t'));});
+      toClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
+    };
+    // Ctrl+C — 이 화면이 열려 있을 때만. 표 안에 선택영역이 있으면 그걸 가로챈다.
+    if(!c.dataset.cpkey){
+      c.dataset.cpkey='1';
+      c.addEventListener('keydown',ev=>{
+        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+          if(!c.querySelector('.pp-sel'))return;      // 선택 없으면 브라우저 기본 동작
+          ev.preventDefault(); copySel();}
+      });
+      c.setAttribute('tabindex','-1');                // keydown 을 받으려면 포커스 가능해야 한다
+      c.style.outline='none';
+    }
+    /* ══ 엑셀 다운로드 — 화면 그대로(색상 포함) ══════════════════════════
+       ★DOM 에서 읽는다. 데이터에서 다시 만들면 항목보기(숨김·순서)·집계/상세 뷰·
+         펼침상태를 전부 재현해야 하고, 그러면 화면과 어긋날 여지가 생긴다.
+         "보이는 대로 받는다"가 사용자가 기대하는 동작이다.
+       ★점진 렌더 때문에 화면에는 일부 행만 붙어 있으므로, **전 행을 임시로 붙였다가**
+         뽑고 되돌린다(안 그러면 400행만 받는다).
+       ★색상은 셀의 실제 배경색(computed)을 그대로 쓴다 = 레거시 색규칙을 재구현할 필요 없음. */
+    const g2=id=>c.querySelector(id);
+    const xlsBtn=g2('#pp-xls');
+    if(xlsBtn)xlsBtn.onclick=()=>{
+      const tbl=c.querySelector('.grid-wrap table'); if(!tbl)return;
+      if(!disp.length){alert('조회 결과가 없습니다.');return;}
+      const restore=ppRest;                       // 점진렌더 잔여분 백업
+      const tb=tbl.tBodies[0];
+      const added=[];
+      if(ppRest&&ppRest.length){                  // 전 행을 임시로 붙인다
+        const before=tb.rows.length;
+        tb.insertAdjacentHTML('beforeend',ppRest.join(''));
+        for(let i=before;i<tb.rows.length;i++)added.push(tb.rows[i]);
+      }
+      try{
+        /* ★alpha=0(투명)을 반드시 걸러야 한다 — 색이 안 칠해진 셀의 backgroundColor 는
+             'rgba(0, 0, 0, 0)' 이라 그냥 파싱하면 **#000000(검정)** 이 되어
+             표 전체가 새까맣게 나온다. 흰색도 서식 없음으로 보내 파일을 가볍게 한다. */
+        const rgb2hex=s=>{const m=/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(s||'');
+          if(!m)return '';
+          if(m[4]!==undefined&&parseFloat(m[4])===0)return '';    // 투명 = 색 없음
+          const h=(+m[1]<<16|+m[2]<<8|+m[3]).toString(16).padStart(6,'0').toUpperCase();
+          return (h==='FFFFFF')?'':'#'+h;};
+        const hr=tbl.tHead.rows[0];
+        const cols=[...hr.cells].map(th=>({h:(th.innerText||'').trim(),
+                                           w:Math.max(60,Math.round(th.getBoundingClientRect().width))}));
+        const cellOf=td=>{
+          const cs=getComputedStyle(td);
+          const t=(td.innerText||'').trim().replace(/^[▼▶]\s*/,'');   // 펼침 마커는 뺀다
+          const bg=rgb2hex(cs.backgroundColor), fg=rgb2hex(cs.color);
+          const num=(t!==''&&/^-?[\d,]+(\.\d+)?$/.test(t))?Number(t.replace(/,/g,'')):null;
+          return {v:(num===null||isNaN(num))?t:num,
+                  bg:bg||'', fg:(fg&&fg!=='#000000')?fg:'',
+                  b:(+cs.fontWeight>=600)?1:0, al:'center'};
+        };
+        const rows=[];
+        for(const tr of tb.rows){
+          if(tr.querySelector('td.empty'))continue;
+          rows.push([...tr.cells].map(cellOf));
+        }
+        const foot=tbl.tFoot?[...tbl.tFoot.rows].map(tr=>[...tr.cells].map(cellOf)):[];
+        const T=new Date(),p=n=>String(n).padStart(2,'0');
+        const stamp=`${String(T.getFullYear()).slice(2)}${p(T.getMonth()+1)}${p(T.getDate())}`
+                   +`${p(T.getHours())}${p(T.getMinutes())}`;
+        const partNm=st.part?(PART_FIX.find(x=>x[0]===st.part)||['',''])[1]:'전체';
+        downloadXLS(`파트별생산계획_${stamp}`,cols,rows,
+          {sheet:'파트별 생산계획',
+           title:`파트별 생산계획 — 기준일자 ${st.base} · 파트 ${partNm} · ${st.view}`,
+           sub:`${nf(disp.length)}건 · 적용일수 ${st.gigan}일 · ${st.unfin}`,
+           foot});
+      }finally{
+        added.forEach(tr=>tr.remove());           // ★임시로 붙인 행은 반드시 되돌린다
+        ppRest=restore;
+      }
+    };
     if(typeof attachResizers==='function')attachResizers(c);
   };
   // ★계획 기준일(마지막 업로드 일자축 첫날)만 잡고 화면을 그린다 — 2026-08-28
@@ -1486,6 +1913,7 @@ SCREEN.partplan=(c)=>{
   //     느리고, 조건을 바꾸기도 전에 먼저 도는 게 불편하다. [조회] 를 눌러야 조회.
   (async()=>{try{const b=await planBase();if(b&&b.iso)st.base=b.iso;}catch(_){}
              await loadLines();
+             await prefLoad();          // ★내 항목보기 설정(계정별) — 표를 그리기 전에 받아둔다
              st.msg='조건을 고르고 [🔍 조회] 를 누르세요.';
              render();})();
 };
@@ -2077,15 +2505,99 @@ SCREEN.kitting=(host)=>{
   const wlab=y=>{if(!y||y.length<6)return dcol(y);const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));const dow='일월화수목금토'[dt.getDay()];return `${y.slice(4,6)}${dow}`;};   // 레거시 라벨: 일자+요일 (예 19월)
   const isWkend=y=>{if(!y||y.length<6)return false;const dt=new Date(2000+ +y.slice(0,2),+y.slice(2,4)-1,+y.slice(4,6));return dt.getDay()===0||dt.getDay()===6;};
   const T=new Date();
+  /* ★복사용 범위선택 스타일(2026-09-03, 410 과 동일 규칙).
+       실적선택(.kt-sel, 파랑)과 색을 달리해 회청색으로. 색칠된 셀은 인라인 background 가
+       background-image 를 덮으므로 표시는 outline 으로 준다(인라인에 안 밀리게 !important). */
+  if(!document.getElementById('kt-cpsel-style')){
+    const s=document.createElement('style'); s.id='kt-cpsel-style';
+    s.textContent='.kt-cp{background-image:linear-gradient(rgba(148,163,184,.34),rgba(148,163,184,.34));'
+      +'outline:2px solid #64748b !important;outline-offset:-2px}'
+      // 소계/집계행은 선택 대상이 아니다 — 표시가 붙어도 무시(펼침 전용 자리)
+      +'tr.kt-subtot td.kt-cp,tr.kt-agg td.kt-cp{background-image:none;outline:none !important}'
+      +'tr.kt-subtot td,tr.kt-agg td{user-select:none;-webkit-user-select:none}'
+      // ★소계/집계행의 도번칸 = BOM 선택 대상 아님. 어떤 선택표시도 내지 않는다(2026-09-03)
+      +'tr.kt-subtot .kt-item,tr.kt-agg .kt-item{outline:none !important;box-shadow:none !important}'
+      /* ★항목보기 모달·컨텍스트메뉴 CSS(2026-09-03).
+           종전엔 이 스타일이 SCREEN.partplan(410) 안에서만 주입돼, 키팅만 열면
+           클래스가 없어 **모달이 화면에 안 보였다**(팝업이 안 뜨는 것처럼). 여기에도 정의한다.
+           같은 이름이라 410 을 먼저 열었든 아니든 동작이 같다. */
+      +'.ppcol-ov{position:fixed;inset:0;z-index:1250;background:rgba(15,23,42,.38);display:flex;align-items:center;justify-content:center}'
+      +'.ppcol-bx{background:#fff;border-radius:10px;box-shadow:0 18px 48px rgba(10,25,55,.4);width:420px;max-width:94vw;display:flex;flex-direction:column;max-height:82vh}'
+      +'.ppcol-h{padding:11px 14px;border-bottom:1px solid #dbe3ee;font-weight:700;display:flex;align-items:center;gap:8px}'
+      +'.ppcol-b{flex:1;min-height:0;overflow:auto;padding:4px 0}'
+      +'.ppcol-f{padding:9px 14px;border-top:1px solid #dbe3ee;display:flex;gap:6px;justify-content:flex-end}'
+      +'.ppcol-r{display:flex;align-items:center;gap:9px;padding:5px 14px;cursor:pointer;'
+      +'border-bottom:1px solid #f1f5f9;user-select:none;-webkit-user-select:none}'
+      +'.ppcol-r:hover{background:#f5f8fd}'
+      +'.ppcol-n{width:26px;color:#94a3b8;font-size:11px;text-align:right}'
+      +'.ppcol-t{flex:1}'
+      +'.ppcol-sep{display:flex;align-items:center;gap:8px;padding:5px 14px;margin:2px 0;'
+      +'background:repeating-linear-gradient(45deg,#eef4fd,#eef4fd 6px,#e3ecfa 6px,#e3ecfa 12px);'
+      +'border-top:2px solid #2563eb;border-bottom:2px solid #2563eb;'
+      +'color:#1c47a0;font-size:11px;font-weight:700;user-select:none}'
+      +'.pp-ctx{position:fixed;z-index:1300;background:#fff;border:1px solid #cbd5e1;border-radius:7px;'
+      +'box-shadow:0 10px 30px rgba(10,25,55,.3);padding:4px 0;min-width:150px;font-size:13px}'
+      +'.pp-ctx div{padding:6px 15px;cursor:pointer;white-space:nowrap}'
+      +'.pp-ctx div:hover{background:#eff4fd}';
+    document.head.appendChild(s);
+  }
+  /* ★항목보기(2026-09-03) — 컬럼 숨김/순서.
+       이 화면은 헤더·본행·소계행·집계행·합계행 5곳이 각자 <td> 를 직접 쓰기 때문에
+       410 처럼 정의배열로 갈아엎으면 손댈 곳이 많고 실적등록 로직까지 흔들린다.
+       → **열 번호(고정컬럼)만 정의**해 두고, 숨김은 CSS(nth-child)로, 순서는 DOM 열 이동으로 한다.
+         렌더 코드를 건드리지 않으므로 실적 등록·취소 경로가 그대로 유지된다.
+       일자컬럼(가변)은 대상 아님 — 조회조건 '기간'이 정한다. */
+  const KT_FIXED=[   // {i:열인덱스(0=체크박스), t:이름}  ※일자컬럼 앞 8개 + 뒤 11개
+    {i:1,t:'SEQ'},{i:2,t:'파트'},{i:3,t:'도번'},{i:4,t:'PART일자'},
+    {i:5,t:'PART INPUT'},{i:6,t:'Line No'},{i:7,t:'당일이전'},
+  ];
+  const KT_TAIL=[    // 일자컬럼 뒤(오프셋은 일자 개수에 따라 계산)
+    {o:0,t:'준비재고'},{o:1,t:'완료수량'},{o:2,t:'준비수량'},{o:3,t:'생산재고'},
+    {o:4,t:'ASSY재고'},{o:5,t:'출하'},{o:6,t:'자재사용량'},{o:7,t:'Work Order'},
+    {o:8,t:'Split Work Order'},{o:9,t:'ASSY도번'},
+  ];
+  const KT_SCOPE='kt460';
+  let KTPREF=null;                       // 서버(nx.user_pref)에서 온 설정
+  const ktPrefLoad=async()=>{try{const r=await fetch(`${API}/api/pref?scope=${KT_SCOPE}`);
+      if(!r.ok)return false; const j=await r.json();
+      if(j&&j.prefs){KTPREF=j.prefs;return true;}}catch(e){}
+    return false;};
+  const ktPrefSave=async(obj)=>{
+    KTPREF=Object.assign({},KTPREF||{},obj);
+    try{Object.keys(obj).forEach(k=>{if(obj[k]==null)localStorage.removeItem('kt460_'+k);
+      else localStorage.setItem('kt460_'+k,JSON.stringify(obj[k]));});}catch(_){}
+    try{const r=await fetch(`${API}/api/pref`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({scope:KT_SCOPE,prefs:obj})});return r.ok;}catch(e){return false;}};
+  const ktHidden=()=>{try{const s=(KTPREF&&KTPREF.hide!==undefined)?KTPREF.hide
+                         :JSON.parse(localStorage.getItem('kt460_hide')||'null');
+      return new Set(Array.isArray(s)?s:[]);}catch(e){return new Set();}};
   // ★기본 소스 = 신규DB(웹편성). 레거시 대조는 소스를 nx/라이브로 바꿔서 본다(2026-08-26).
   const st={dates:[],rows:[],cnt:0,plan_sum:0,ready_sum:0,note:'',base:iso(T),gigan:2,src:'new',wc:'',wh:'',part:'',pgroup:'',line:'',dono:'',jado:'',wo:'',unfin:'미생산',view:'상세',sel:new Set(),fold:new Set(),cellSel:new Set(),itemSel:null,loading:false,msg:''};
-  const load=async()=>{st.loading=true;render();
+  /* load(quiet) — quiet=true 면 **표만 조용히 갱신**한다(2026-09-03).
+       왜 — 실적 등록/취소 뒤 매번 render() 전체를 돌려 화면이 통째로 새로 그려졌다.
+       스크롤이 맨 위로 튀고 펼쳐둔 블록이 접히고, 8천행에서는 눈에 띄게 멈췄다
+       ("실적 잡을 때·취소할 때 새로고침" 증상). 데이터는 다시 받아야 정확하지만
+       **그리는 건 tbody/tfoot 만** 바꾸면 된다 — 스크롤·펼침·조건이 그대로 유지된다. */
+  let ktQueried=false;   // ★[조회] 를 눌렀는가 — 빈 표 안내문구 구분(자동조회 안 하므로 필요)
+  const load=async(quiet)=>{
+    ktQueried=true;                      // 이후 빈 결과는 '조회 결과 없음'으로 안내
+    const gw0=host.querySelector('.grid-wrap');
+    const sy=gw0?gw0.scrollTop:0, sx=gw0?gw0.scrollLeft:0;
+    if(!quiet){st.loading=true;render();}
     // ★항상 전체로 1회 fetch → 캐시. 파트·제번·도번·미생산·구분은 클라에서 즉시 필터(재조회 없음).
     //   서버 재조회 = 기준일자·자도번작업처·기간 변경시만. (파트별 생산계획과 동일 정책)
     const qs=new URLSearchParams({from_ymd:st.base,gigan:st.gigan,wc:st.wc,pgroup:st.pgroup,line:st.line,view:'상세',unfin:'전체',src:(st.src||'nx'),limit:6000});
-    try{const r=await fetch(`${API}/api/kitting/grid?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.ready_sum=j.ready_sum||0;st.note=j.note||'';st.msg='';}
+    try{const r=await fetch(`${API}/api/kitting/grid?${qs}`);const j=await r.json();st.dates=j.dates||[];st.rows=j.rows||[];st.cnt=j.cnt||0;st.plan_sum=j.plan_sum||0;st.ready_sum=j.ready_sum||0;st.note=j.note||'';if(!quiet)st.msg='';}
     catch(e){st.msg='백엔드 연결 실패';st.rows=[];st.dates=[];}
-    st.loading=false;st.sel.clear();render();};
+    st.loading=false;st.sel.clear();
+    if(quiet){
+      st.cellSel.clear();                 // 처리된 셀 선택은 해제(값이 바뀌었다)
+      render(true);                       // 표(tbody/tfoot)만 교체 — 툴바·스크롤·펼침 유지
+      const gw1=host.querySelector('.grid-wrap');
+      if(gw1){gw1.scrollTop=sy;gw1.scrollLeft=sx;}
+      const mb=host.querySelector('#kt-msg'); if(mb)mb.textContent=st.msg||'';
+    }else render();
+  };
   const shiftDay=n=>{const d=new Date(st.base);d.setDate(d.getDate()+n);st.base=iso(d);load();};
   const act=async(mode)=>{
     const rows=st.rows.filter((r,i)=>st.sel.has(i)).map(r=>({item_code:r.item,work_order:r.wo,gpc:r.gpc,plan_ymd:r.part_ymd,work_center:r.wc,qty:(mode==='cancel'?r.ready_qty:r.need_qty)})).filter(r=>r.qty>0);
@@ -2093,7 +2605,7 @@ SCREEN.kitting=(host)=>{
     const knm=mode==='cancel'?'준비취소':'확인(준비등록)';
     if(!confirm(`${rows.length}건 ${knm}?\n(자재 무차감 · 준비재고+READY 마킹, 자재차감은 생산실적)`))return;
     try{const r=await fetch(`${API}/api/ready/register`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,rows,user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})});
-      const j=await r.json();if(j.ok){st.msg=`✅ ${knm} ${j.count}건 완료${j.skipped?` (제외 ${j.skipped})`:''}`;await load();}else alert(knm+' 실패');}
+      const j=await r.json();if(j.ok){st.msg=`✅ ${knm} ${j.count}건 완료${j.skipped?` (제외 ${j.skipped})`:''}`;await load(true);}else alert(knm+' 실패');}
     catch(e){alert(knm+' 오류: '+e);}};
   // ★셀단위 확인/취소(우클릭) — flag-only(자재무차감). 확인=그 셀 잔량 준비등록, 취소=되돌림.
   const cellAct=async(mode,m)=>{
@@ -2110,14 +2622,14 @@ SCREEN.kitting=(host)=>{
                                ymd:(m.ymd==='P'?'':m.ymd),wo:m.wo,
                                user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')})});
         const j=await r.json();
-        if(j.ok){st.msg=`⏪ 준비취소 완료 — ${esc(m.item)} ${nf(q)}세트 원복`;await load();}
+        if(j.ok){st.msg=`⏪ 준비취소 완료 — ${esc(m.item)} ${nf(q)}세트 원복`;await load(true);}
         else alert('취소 불가: '+(j.detail||''));
       }catch(e){alert('취소 오류: '+e);}
       return;
     }
     const body={item:m.item,wo:m.wo,swo:m.swo,gpc:m.gpc,ymd:m.ymd,qty:+m.qty,assy:m.assy,user:(typeof PERM!=='undefined'?PERM.currentUser().nm:'웹')};
     try{const r=await fetch(`${API}/api/kitting/cell-confirm`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();
-      if(j.ok){st.msg=`✅ 준비확인 ${nf(j.qty||0)} (${esc(m.item)} · ${dcol(m.ymd)})`;await load();}
+      if(j.ok){st.msg=`✅ 준비확인 ${nf(j.qty||0)} (${esc(m.item)} · ${dcol(m.ymd)})`;await load(true);}
       else alert('확인 불가: '+(j.detail||''));}
     catch(e){alert('셀 확인 오류: '+e);}};
   // fin 우선순위. ★파트별 생산계획(SCREEN.partplan)과 동일 색체계로 통일(2026-08-18):
@@ -2340,11 +2852,15 @@ SCREEN.kitting=(host)=>{
       const a=host.querySelector('#kt-all');if(a)a.checked=false;upd();});
     // 청록 소계행(상세뷰)·집계행(집계뷰) 클릭 = 그 도번 블록 접기/펼치기
     //   ※ 체크박스 클릭은 토글되면 안 되므로 이벤트 전파 차단
-    host.querySelectorAll('tr.kt-subtot, tr.kt-agg').forEach(tr=>tr.onclick=(ev)=>{
-      if(ev.target && ev.target.classList && ev.target.classList.contains('kt-chk'))return;
-      const k=tr.getAttribute('data-gk');if(!k)return;
-      if(st.fold.has(k))st.fold.delete(k);else st.fold.add(k);
-      redrawBody();});
+    /* ★펼침/접힘 = 더블클릭(2026-09-03, 410 과 동일).
+         한 번 클릭이면 그 행을 스치거나 복사용으로 긁기만 해도 접혔다 펴져 화면이 튄다. */
+    host.querySelectorAll('tr.kt-subtot, tr.kt-agg').forEach(tr=>{
+      tr.title='더블클릭 = 상세 펼침/접힘';
+      tr.ondblclick=(ev)=>{
+        if(ev.target && ev.target.classList && ev.target.classList.contains('kt-chk'))return;
+        const k=tr.getAttribute('data-gk');if(!k)return;
+        if(st.fold.has(k))st.fold.delete(k);else st.fold.add(k);
+        redrawBody();};});
     // ★셀 드래그선택(레거시 방식): 좌클릭을 "누르고 있는 동안"만 드래그 확장.
     //   ev.buttons(비트마스크)로 실제 버튼 눌림 여부를 매 이동마다 확인 → 그냥 마우스만 지나가면 선택 안 됨.
     //   Ctrl/⌘ 누르고 시작하면 기존 선택 유지(추가선택).
@@ -2372,17 +2888,32 @@ SCREEN.kitting=(host)=>{
         return {r:tr?tr.rowIndex:-1, c:td.cellIndex};};
       // 커서 아래 kt-cell. 셀이 아니면(빈칸·고정컬럼·행간격) 같은 y 에서 가로로 훑어
       // 가장 가까운 kt-cell 을 찾아 좌표만 얻는다 → 드래그가 중간에 끊기지 않음.
+      /* ★성능(2026-09-03): 종전엔 행마다 모든 .kt-cell 에 getBoundingClientRect() 를 돌려
+           '가장 가까운 칸'을 찾았다. rect 읽기는 강제 리플로우라 mousemove 마다 열 수만큼
+           발생 → 드래그가 무거웠다. 열의 가로위치는 드래그 중 변하지 않으므로 한 번만 재서
+           캐시한다(가로스크롤·표 재렌더 시에만 갱신). */
+      let _kcolX=null,_kcolXsx=-1,_kcolXn=-1;
+      const kcolX=()=>{
+        const sx=gwSel.scrollLeft, n=host.querySelectorAll('.kt-cell').length;
+        if(_kcolX&&_kcolXsx===sx&&_kcolXn===n)return _kcolX;
+        _kcolXsx=sx; _kcolXn=n; _kcolX=[];
+        const row=host.querySelector('tr.kt-main'); // 한 행만 재면 전 열 위치를 안다
+        if(row)for(const td of row.cells){
+          if(td.classList.contains('kt-cell')){const b=td.getBoundingClientRect();
+            _kcolX.push({i:td.cellIndex,l:b.left,r:b.right});}}
+        return _kcolX;};
       const cellAt=(x,y)=>{
         let e=document.elementFromPoint(x,y);
         let td=e?e.closest('.kt-cell'):null;
         if(td)return td;
         const tr=e?e.closest('tr'):null;               // 같은 행에서 x 에 가장 가까운 셀
-        if(tr){let best=null,bd=1e9;
-          tr.querySelectorAll('.kt-cell').forEach(c=>{
-            const r=c.getBoundingClientRect();
-            const d=(x<r.left)?(r.left-x):((x>r.right)?(x-r.right):0);
-            if(d<bd){bd=d;best=c;}});
-          if(best)return best;}
+        if(tr){
+          const cols=kcolX(); let best=-1,bd=1e9;
+          for(const cx of cols){                       // rect 읽기 없음 — 캐시 좌표로 비교만
+            const d=(x<cx.l)?(cx.l-x):((x>cx.r)?(x-cx.r):0);
+            if(d<bd){bd=d;best=cx.i;}}
+          if(best>=0&&best<tr.cells.length){const q=tr.cells[best];
+            if(q&&q.classList.contains('kt-cell'))return q;}}
         // ★빈칸 위를 지날 때도 좌표를 잃지 않도록 일반 td 로 폴백(2026-08-20).
         //   선택은 _cells(=숫자칸)만 대상이라 빈칸이 켜지지는 않는다.
         return e?e.closest('td'):null;};
@@ -2401,7 +2932,14 @@ SCREEN.kitting=(host)=>{
         paintCnt();};
       gwSel.onmousedown=(ev)=>{
         if(ev.button!==0)return;                       // 좌클릭만(우클릭=컨텍스트메뉴)
+        /* ★실적선택을 시작하면 복사선택(회청)을 지운다(2026-09-03).
+             둘이 동시에 켜져 있으면 "클릭표시가 양쪽 다" 보여 무엇이 선택된 건지 알 수 없다.
+             한 화면에 선택은 한 종류만 — 반대 방향(복사→실적 해제)도 아래 gwCp 에서 처리한다. */
+        if(host._ktClearCp)host._ktClearCp();
         const it=ev.target.closest('.kt-item');        // 도번 칸 클릭 = 도번 선택(BOM출력 대상)
+        // ★소계/집계행에서는 선택표시를 내지 않는다(2026-09-03, 410 과 동일 · 레거시도 그렇다).
+        //   그 행은 '펼침(더블클릭)' 전용 자리다 — 파란 테두리가 뜨면 선택된 줄 알게 된다.
+        if(it&&it.closest('tr.kt-subtot,tr.kt-agg')){ev.preventDefault();return;}
         if(it){ev.preventDefault();itemPick(it);return;}
         // ★빈칸(수량 없는 셀)에서 시작한 드래그도 사각범위 선택으로(2026-08-20 사용자요청).
         //   선택 자체는 숫자칸만 — 빈칸은 기준점 역할만 하고 켜지지 않는다.
@@ -2440,13 +2978,131 @@ SCREEN.kitting=(host)=>{
         _cells=[...host.querySelectorAll('.kt-cell')].filter(selectable)
                  .map(x=>{const p=rcOf(x);return {td:x,r:p.r,c:p.c,k:cellKey(x)};});
         _a=rcOf(td);_lastTd=td;selAdd(td);_rectOwn.add(cellKey(td));};
+      /* ★성능(2026-09-03): mousemove 는 초당 수십~수백 회 온다. 매번 applyRect 로
+           전 셀(_cells)을 훑으면 대각선으로 길게 끌 때 프레임이 밀린다.
+           ①같은 칸 위 이동은 무시 ②실제 칠하기는 rAF 로 프레임당 1회. */
+      let _kRaf=0,_kLastRC=null;
       gwSel.onmousemove=(ev)=>{
         if(!_ktDrag)return;
-        if(!(ev.buttons&1)){_ktDrag=false;_a=null;_cells=null;_lastTd=null;return;}  // 손 뗐으면 종료
-        const td=cellAt(ev.clientX,ev.clientY)||_lastTd;   // 셀을 못 찾으면 직전 위치 유지
-        if(td){_lastTd=td;applyRect(td);}};
-      gwSel.onmouseup=()=>{_ktDrag=false;_a=null;_cells=null;_lastTd=null;};
+        if(!(ev.buttons&1)){                                    // 손 뗐으면 종료
+          _ktDrag=false;_a=null;_cells=null;_lastTd=null;
+          if(_kRaf){cancelAnimationFrame(_kRaf);_kRaf=0;} _kLastRC=null; return;}
+        const td=cellAt(ev.clientX,ev.clientY)||_lastTd;        // 셀을 못 찾으면 직전 위치 유지
+        if(!td)return;
+        _lastTd=td;
+        const p=rcOf(td);
+        if(_kLastRC&&_kLastRC.r===p.r&&_kLastRC.c===p.c)return; // ① 같은 칸 → 할 일 없음
+        _kLastRC=p;
+        if(_kRaf)return;
+        _kRaf=requestAnimationFrame(()=>{_kRaf=0; if(_ktDrag&&_lastTd)applyRect(_lastTd);});  // ②
+      };
+      gwSel.onmouseup=()=>{
+        if(_kRaf){cancelAnimationFrame(_kRaf);_kRaf=0;}
+        if(_ktDrag&&_lastTd)applyRect(_lastTd);                 // 마지막 위치는 확실히 반영
+        _ktDrag=false;_a=null;_cells=null;_lastTd=null;_kLastRC=null;};
     }
+    /* ══ 복사용 범위선택 + Ctrl+C (2026-09-03, 410 과 동일) ══════════════════
+         .kt-cell(일자·당일이전)=실적선택 전용이므로 건드리지 않는다.
+         그 외 셀(도번·파트·재고·WorkOrder…)을 끌면 회청색 사각범위가 잡히고
+         Ctrl+C 로 탭구분 텍스트가 복사된다(엑셀 붙여넣기 호환). 소계/집계행은 제외. */
+    const gwCp=host.querySelector('.grid-wrap');
+    if(gwCp&&!gwCp.dataset.cpsel){
+      gwCp.dataset.cpsel='1';
+      let cpA=null,cpOn=false,cpPainted=[],cpRaf=0,cpLast=null;
+      const cpRc=td=>({r:td.parentElement?td.parentElement.rowIndex:-1,c:td.cellIndex});
+      const cpClear=()=>{for(const x of cpPainted)x.classList.remove('kt-cp'); cpPainted=[];};
+      host._ktClearCp=cpClear;        // ★실적선택 시작 시 호출 — 두 선택이 겹쳐 보이지 않게
+      const cpPaint=(b)=>{
+        if(!cpA)return;
+        const r1=Math.min(cpA.r,b.r),r2=Math.max(cpA.r,b.r);
+        const c1=Math.min(cpA.c,b.c),c2=Math.max(cpA.c,b.c);
+        cpClear();
+        const tbl=gwCp.querySelector('table'); if(!tbl)return;
+        for(const tb of tbl.tBodies){const rs=tb.rows;
+          for(let i=0;i<rs.length;i++){const row=rs[i]; const ri=row.rowIndex;
+            if(ri<r1||ri>r2)continue;
+            if(row.classList.contains('kt-subtot')||row.classList.contains('kt-agg'))continue;  // 소계 제외
+            const cs=row.cells;
+            for(let j=c1;j<=c2&&j<cs.length;j++){
+              const cell=cs[j];
+              if(cell.classList.contains('kt-cell'))continue;      // 실적칸 제외(두 선택 겹침 방지)
+              cell.classList.add('kt-cp'); cpPainted.push(cell);}}}
+      };
+      gwCp.addEventListener('mousedown',ev=>{
+        if(ev.button!==0)return;
+        const td=ev.target.closest&&ev.target.closest('td');
+        if(!td||!td.parentElement)return;
+        if(td.classList.contains('kt-cell'))return;                // 실적선택 영역
+        if(ev.target.closest('.kt-item'))return;                   // 도번칸=BOM 대상 선택
+        if(ev.target.tagName==='INPUT')return;                     // 체크박스
+        const tr=td.parentElement;
+        if(tr.classList.contains('kt-subtot')||tr.classList.contains('kt-agg')){cpClear();return;}
+        // ★반대 방향 — 복사선택을 시작하면 실적선택(파랑)을 지운다. 한 화면에 선택은 한 종류만.
+        if(st.cellSel&&st.cellSel.size){selClear();paintCnt();}
+        if(st.itemSel){st.itemSel=null;paintItem();}
+        cpClear(); cpA=cpRc(td); cpOn=true; cpPaint(cpA);
+        ev.preventDefault();
+      });
+      gwCp.addEventListener('mousemove',ev=>{
+        if(!cpOn)return;
+        const td=ev.target.closest&&ev.target.closest('td');
+        if(!td||!td.parentElement)return;
+        const b=cpRc(td);
+        if(cpLast&&cpLast.r===b.r&&cpLast.c===b.c)return;          // 같은 칸 → 무시
+        cpLast=b;
+        if(cpRaf)return;
+        cpRaf=requestAnimationFrame(()=>{cpRaf=0; if(cpOn&&cpLast)cpPaint(cpLast);});
+      });
+      document.addEventListener('mouseup',()=>{
+        if(cpRaf){cancelAnimationFrame(cpRaf);cpRaf=0;}
+        if(cpOn&&cpLast)cpPaint(cpLast);
+        cpOn=false; cpLast=null;});
+      // 선택영역 → 탭구분 텍스트
+      host._ktCopySel=()=>{
+        if(!cpPainted.length){alert('복사할 영역을 먼저 끌어서 선택하세요.');return;}
+        const map=new Map();
+        cpPainted.forEach(td=>{const r=td.parentElement.rowIndex;
+          if(!map.has(r))map.set(r,[]);
+          map.get(r).push([td.cellIndex,(td.innerText||'').trim()]);});
+        const txt=[...map.keys()].sort((x,y)=>x-y)
+          .map(r=>map.get(r).sort((x,y)=>x[0]-y[0]).map(x=>x[1]).join('\t')).join('\n');
+        ktToClip(txt,'선택영역');
+      };
+      host._ktCopyAll=()=>{
+        const tbl=gwCp.querySelector('table'); if(!tbl)return;
+        const out=[];
+        const hr=tbl.tHead&&tbl.tHead.rows[0];
+        if(hr)out.push([...hr.cells].map(th=>(th.innerText||'').trim()).join('\t'));
+        for(const tb of tbl.tBodies){const rs=tb.rows;
+          for(let i=0;i<rs.length;i++)out.push([...rs[i].cells].map(td=>(td.innerText||'').trim()).join('\t'));}
+        ktToClip(out.join('\n'),`전체 ${nf(out.length-1)}행`);
+      };
+    }
+    const ktToClip=(txt,what)=>{
+      if(!txt)return;
+      const done=()=>{const el=host.querySelector('#kt-cnt');
+        if(el){const o=el.textContent;el.textContent=what+' 복사됨';setTimeout(()=>{el.textContent=o;},1400);}};
+      const fb=()=>{const ta=document.createElement('textarea'); ta.value=txt;
+        ta.style.cssText='position:fixed;left:-9999px;top:0';
+        document.body.appendChild(ta); ta.select();
+        try{document.execCommand('copy');done();}catch(_){alert('복사에 실패했습니다.');}
+        ta.remove();};
+      if(navigator.clipboard&&navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(done,fb);
+      else fb();
+    };
+    // Ctrl+C — 표 안에 복사선택이 있을 때만 가로챈다
+    if(!host.dataset.cpkey){
+      host.dataset.cpkey='1';
+      host.setAttribute('tabindex','-1'); host.style.outline='none';
+      host.addEventListener('keydown',ev=>{
+        if((ev.ctrlKey||ev.metaKey)&&(ev.key==='c'||ev.key==='C')){
+          if(!host.querySelector('.kt-cp'))return;
+          ev.preventDefault(); if(host._ktCopySel)host._ktCopySel();}
+      });
+    }
+    ktApplyHide();      // ★항목보기 숨김 반영(표를 다시 그릴 때마다)
+    ktWireLazy();       // ★점진 렌더 — 스크롤 끝에서 이어붙이기
     // 커서/툴팁만 셀별로(1회, 이벤트 부착 아님)
     host.querySelectorAll('.kt-cell').forEach(td=>{
       if(!selectable(td)){td.style.cursor='default';return;}
@@ -2454,9 +3110,131 @@ SCREEN.kitting=(host)=>{
       td.title=((+td.dataset.qty||0)>0)
         ?'클릭/드래그: 선택 · 우클릭: 확인/취소'
         :`준비완료 ${td.dataset.done} — 클릭: 선택 · 우클릭: 준비취소`;});
-    host.querySelectorAll('.kt-item').forEach(td=>{td.style.cursor='pointer';});
+    // ★소계/집계행의 도번칸은 클릭 대상이 아니다 — 커서도 기본으로(2026-09-03)
+    host.querySelectorAll('.kt-item').forEach(td=>{
+      td.style.cursor=td.closest('tr.kt-subtot,tr.kt-agg')?'pointer':'pointer';
+      if(td.closest('tr.kt-subtot,tr.kt-agg'))td.title='더블클릭 = 상세 펼침/접힘';});
     paintSel();paintItem();};
-  const NCOL=19;   // 고정컬럼수(체크박스+SEQ..ASSY도번) — colspan/스피너 계산용. ★2026-08-19: 회수율·Item St(회수율반영) 삭제로 21→19
+  /* ══ 항목보기 — 숨김 적용 · 목록 모달 · 일반 우클릭메뉴 (2026-09-03) ══════════
+       숨김은 열 인덱스로 지운다. 렌더 코드를 안 건드리므로 실적등록 경로가 그대로다.
+       ★열 인덱스는 '일자 개수'에 따라 뒤쪽이 밀리므로 st.dates.length 로 계산한다. */
+  const ktColList=()=>{
+    const nd=(st.dates||[]).length;
+    return KT_FIXED.map(x=>({key:'f'+x.i,idx:x.i,t:x.t}))
+      .concat(KT_TAIL.map(x=>({key:'t'+x.o,idx:8+nd+x.o,t:x.t})));
+  };
+  const ktApplyHide=()=>{
+    const hide=ktHidden(), cols=ktColList();
+    const tbl=host.querySelector('.grid-wrap table'); if(!tbl)return;
+    const hideIdx=new Set(cols.filter(c=>hide.has(c.key)).map(c=>c.idx));
+    // 모든 행에서 해당 열의 셀을 숨긴다(colspan 쓰는 '결과없음' 행은 건드리지 않는다)
+    const doRow=row=>{const cs=row.cells;
+      if(cs.length<=2)return;                       // colspan 안내행
+      for(let i=0;i<cs.length;i++)cs[i].style.display=hideIdx.has(i)?'none':'';};
+    if(tbl.tHead)[...tbl.tHead.rows].forEach(doRow);
+    for(const tb of tbl.tBodies)for(const r of tb.rows)doRow(r);
+    if(tbl.tFoot)[...tbl.tFoot.rows].forEach(doRow);
+  };
+  const ktColPick=()=>{
+    const old=document.getElementById('kt-colpick'); if(old)old.remove();
+    const cols=ktColList(); let hide=new Set(ktHidden());
+    const ov=document.createElement('div'); ov.className='ppcol-ov'; ov.id='kt-colpick';
+    ov.innerHTML=`<div class="ppcol-bx">
+      <div class="ppcol-h">항목보기<span style="font-weight:400;font-size:11px;color:#7b8aa0">체크 해제 = 숨김 · 일자컬럼은 조회조건 '기간'이 정합니다</span></div>
+      <div class="ppcol-b" id="ktcol-list"></div>
+      <div class="ppcol-f">
+        <button class="btn ghost" id="ktcol-reset">초기화</button><div style="flex:1"></div>
+        <button class="btn ghost" id="ktcol-no">취소</button>
+        <button class="btn" id="ktcol-ok" style="background:#1c47a0;color:#fff">확인</button>
+      </div></div>`;
+    document.body.appendChild(ov);                  // ★§3 — .content 안 fixed 는 잘린다
+    const nd=(st.dates||[]).length;
+    const paint=()=>{
+      ov.querySelector('#ktcol-list').innerHTML=cols.map((c,i)=>
+        (i===KT_FIXED.length?`<div class="ppcol-sep">일자 컬럼 ${nd}개 (조회조건 '기간')</div>`:'')
+        +`<div class="ppcol-r" data-k="${c.key}">
+            <span class="ppcol-n">${i+1}</span>
+            <input type="checkbox" ${hide.has(c.key)?'':'checked'}>
+            <span class="ppcol-t">${esc(c.t)}</span>
+          </div>`).join('');
+      ov.querySelectorAll('.ppcol-r').forEach(row=>{
+        const k=row.dataset.k, cb=row.querySelector('input');
+        cb.onchange=()=>{if(cb.checked)hide.delete(k);else hide.add(k);};
+        row.onclick=e=>{if(e.target===cb)return;
+          cb.checked=!cb.checked; if(cb.checked)hide.delete(k);else hide.add(k);};
+      });
+    };
+    paint();
+    const close=()=>ov.remove();
+    ov.onclick=e=>{if(e.target===ov)close();};
+    ov.querySelector('#ktcol-no').onclick=close;
+    ov.querySelector('#ktcol-reset').onclick=()=>{hide=new Set();paint();};
+    ov.querySelector('#ktcol-ok').onclick=()=>{
+      ktPrefSave({hide:[...hide]}); close(); ktApplyHide();};
+  };
+  // 실적칸이 아닌 곳의 우클릭 = 항목보기 · 복사
+  const ktPlainMenu=(ev)=>{
+    ev.preventDefault();
+    const old=document.querySelector('.pp-ctx'); if(old)old.remove();
+    const m=document.createElement('div'); m.className='pp-ctx';
+    m.innerHTML='<div data-a="col">항목보기</div><div data-a="copy">선택영역 복사</div><div data-a="all">전체 복사</div>';
+    m.style.left=Math.min(ev.clientX,innerWidth-170)+'px';
+    m.style.top=Math.min(ev.clientY,innerHeight-110)+'px';
+    document.body.appendChild(m);
+    // ★mousedown 에서 실행 — click 으로 하면 바깥클릭 닫기가 먼저 떠 메뉴가 사라진다(410 동일 이슈)
+    const kill=()=>{m.remove();document.removeEventListener('mousedown',outside,true);};
+    const outside=e=>{if(!m.contains(e.target))kill();};
+    setTimeout(()=>document.addEventListener('mousedown',outside,true),0);
+    m.addEventListener('mousedown',e=>{
+      e.preventDefault(); e.stopPropagation();
+      const t=e.target.closest&&e.target.closest('[data-a]'); if(!t)return;
+      const a=t.getAttribute('data-a'); kill();
+      if(a==='col')ktColPick();
+      else if(a==='copy'){if(host._ktCopySel)host._ktCopySel();}
+      else if(a==='all'){if(host._ktCopyAll)host._ktCopyAll();}
+    });
+  };
+  /* 고정컬럼수(체크박스+SEQ..ASSY도번) — colspan/스피너 계산용.
+     ★2026-08-19: 회수율·Item St(회수율반영) 삭제로 21→19
+     ★2026-09-03: 실측 재확인 = 체크1 + 앞7(SEQ·파트·도번·PART일자·PART INPUT·Line No·당일이전)
+       + 뒤10(준비재고~ASSY도번) = **18**. 19 는 1 초과였다(빈결과 안내행 colspan 이 한 칸
+       넘쳐도 화면상 티가 안 나 남아 있었다). 헤더 실측 대조로 교정. */
+  const NCOL=18;
+  /* ══ 점진 렌더(2026-09-03 신설) ═══════════════════════════════════════════
+       왜 — 이 화면은 최대 6,000행 × 20컬럼 = 12만 셀을 **한 번에** DOM 에 올렸다.
+       저사양 PC 에서 최초 렌더·스크롤·드래그가 모두 멈춘다("엄청 버벅거린다").
+       → 처음 KT_PAGE 행만 붙이고 스크롤이 끝에 가까워지면 이어붙인다.
+         행 생성 로직(mainRow/aggRow/subTotalRow)은 그대로 — 완성된 HTML 을 <tr> 단위로 자를 뿐.
+       ※합계(tfoot)·건수는 전체 기준 그대로라 숫자가 달라지지 않는다. (410 과 동일 방식) */
+  const KT_PAGE=300;
+  let ktRest=null;                       // 아직 안 붙인 <tr> 조각들
+  /* ★행 생성기(mainRow/aggRow/subTotalRow)는 render() 안에 있으므로
+       ktBody 는 그것들을 인자(mk)로 받는다 — 스코프를 넘겨 쓰지 않는다. */
+  const ktBody=(flat,d,mk)=>{
+    if(!flat.length)return `<tr><td colspan="${NCOL+d.length}" class="empty">`
+      +(ktQueried?'조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요'
+                 :'조건을 고르고 [조회] 를 누르세요.')+`</td></tr>`;
+    const full=flat.map(mk).join('');
+    const parts=full.split(/(?=<tr)/);
+    if(parts.length<=KT_PAGE){ktRest=null;return full;}
+    ktRest=parts.slice(KT_PAGE);
+    return parts.slice(0,KT_PAGE).join('');
+  };
+  const ktAppend=()=>{
+    if(!ktRest||!ktRest.length)return;
+    const tb=host.querySelector('.grid-wrap tbody'); if(!tb){ktRest=null;return;}
+    const take=ktRest.slice(0,KT_PAGE); ktRest=ktRest.slice(KT_PAGE);
+    tb.insertAdjacentHTML('beforeend',take.join(''));
+    wireKtRows();                        // 새로 붙은 행에도 핸들러·숨김 반영
+  };
+  const ktWireLazy=()=>{
+    const w=host.querySelector('.grid-wrap');
+    if(!w||w.dataset.ktlazy)return;
+    w.dataset.ktlazy='1';
+    w.addEventListener('scroll',()=>{
+      if(ktRest&&ktRest.length&&w.scrollTop+w.clientHeight>=w.scrollHeight-400)ktAppend();
+    },{passive:true});
+  };
   const render=(bodyOnly)=>{
     const ed=(typeof PERM!=='undefined')?PERM.canEdit('kitting'):true;
     const d=st.dates;
@@ -2581,6 +3359,10 @@ SCREEN.kitting=(host)=>{
         <td class="center">${nf(r.prod_stock)}</td><td class="center">${nf(r.assy_stock)}</td>
         <td class="center">${nf(r.sale)}</td><td class="center">${nf(r.use_qty)}</td>
         <td class="center"></td><td class="center"></td><td class="center">${esc(r.assy)}</td></tr>`;};
+    /* ★점진 렌더에 넘길 행 생성기 — 세 종류(본행·집계·소계)를 하나로 묶는다.
+         function 선언이라 호이스팅된다 = 아래 tbody 렌더보다 뒤에 써도 안전하다
+         (const 로 두면 TDZ 로 "Cannot access before initialization" 이 난다). */
+    function ktMk(o){return o.t==='m'?mainRow(o):(o.t==='g'?aggRow(o):subTotalRow(o));}
     const subTotalRow=(o)=>{const blk=o.blk,r0=blk[0];
       const sum=k=>blk.reduce((s,r)=>s+(+r[k]||0),0);
       const sPrP=sum('prior_plan'), sPrC=sum('prior_cover');
@@ -2602,7 +3384,7 @@ SCREEN.kitting=(host)=>{
     // ★bodyOnly=true면 표(tbody/tfoot)·건수만 교체(툴바 유지) — 필터 조작시 버벅임 제거. 파트별 생산계획과 동일 패턴.
     if(bodyOnly){
       const tb=host.querySelector('tbody'), tf=host.querySelector('tfoot'), cnt=host.querySelector('#kt-cnt');
-      if(tb)tb.innerHTML=st.loading?spinRow(NCOL+d.length):(flat.length?flat.map(o=>o.t==='m'?mainRow(o):(o.t==='g'?aggRow(o):subTotalRow(o))).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`);
+      if(tb)tb.innerHTML=st.loading?spinRow(NCOL+d.length):ktBody(flat,d,ktMk);
       if(tf)tf.innerHTML=flat.length?`<tr class="grandtot" style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td></td><td class="center">합계</td><td></td><td></td><td></td><td></td><td></td><td class="center"></td>${d.map(x=>`<td class="center">${nf(fpass.reduce((s,r)=>s+((r.days&&r.days[x])||0),0))}</td>`).join('')}
         <td class="center">${nf(fpass.reduce((s,r)=>s+(r.ready_stock||0),0))}</td><td class="center">${nf(fpass.reduce((s,r)=>s+(r.finish||0),0))}</td><td class="center">${nf(fready)}</td>
@@ -2653,7 +3435,7 @@ SCREEN.kitting=(host)=>{
      <div class="grid-wrap" style="max-height:calc(100vh - 300px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr><th style="width:22px"><input type="checkbox" id="kt-all"></th>
         <th class="center">SEQ</th><th class="center">파트</th><th class="center">도번</th><th class="center">PART일자</th><th class="center">PART INPUT</th><th class="center">Line No</th><th class="center">당일이전</th>${d.map(x=>`<th class="center"${isWkend(x)?' style="color:#c0392b"':''}>${esc(wlab(x))}</th>`).join('')}<th class="center">준비재고</th><th class="center">완료수량</th><th class="center">준비수량</th><th class="center">생산재고</th><th class="center">ASSY재고</th><th class="center">출하</th><th class="center">자재사용량</th><th class="center">Work Order</th><th class="center">Split Work Order</th><th class="center">ASSY도번</th></tr></thead>
-      <tbody>${st.loading?spinRow(NCOL+d.length):(flat.length?flat.map(o=>o.t==='m'?mainRow(o):(o.t==='g'?aggRow(o):subTotalRow(o))).join(''):`<tr><td colspan="${NCOL+d.length}" class="empty">조회 결과 없음 — 기준일자/작업처/파트/도번을 조정하세요</td></tr>`)}</tbody>
+      <tbody>${st.loading?spinRow(NCOL+d.length):ktBody(flat,d,ktMk)}</tbody>
       <tfoot>${flat.length?`<tr class="grandtot" style="position:sticky;bottom:0;background:#eef2f7;font-weight:700;border-top:2px solid #b8c4d4">
         <td></td><td class="center">합계</td><td></td><td></td><td></td><td></td><td></td><td class="center"></td>${d.map(x=>`<td class="center">${nf(fpass.reduce((s,r)=>s+((r.days&&r.days[x])||0),0))}</td>`).join('')}
         <td class="center">${nf(fpass.reduce((s,r)=>s+(r.ready_stock||0),0))}</td><td class="center">${nf(fpass.reduce((s,r)=>s+(r.finish||0),0))}</td><td class="center">${nf(fready)}</td>
@@ -2727,7 +3509,8 @@ SCREEN.kitting=(host)=>{
     if(ed){
       const gw=host.querySelector('.grid-wrap');
       if(gw)gw.oncontextmenu=(ev)=>{
-        const td=ev.target.closest('.kt-cell'); if(!td)return;
+        const td=ev.target.closest('.kt-cell');
+        if(!td){ktPlainMenu(ev);return;}                 // ★실적칸 밖 = 항목보기·복사 메뉴
         ev.preventDefault();
         // ★우클릭한 셀을 즉시 선택표시(2026-08-19) — 어느 칸에 메뉴를 띄웠는지 보이지 않아
         //   녹색(완료) 셀에서 특히 헷갈렸음. 이미 드래그선택에 포함된 셀이면 그 선택은 유지.
@@ -2740,9 +3523,14 @@ SCREEN.kitting=(host)=>{
         mn.style.cssText=`position:fixed;left:${ev.clientX}px;top:${ev.clientY}px;z-index:99999;background:#fff;border:1px solid #b8c4d4;border-radius:6px;box-shadow:0 3px 10px rgba(0,0,0,.25);font-size:12px;min-width:150px;overflow:hidden`;
         mn.innerHTML=`<div style="padding:5px 12px;background:#f2f6fb;color:#456;border-bottom:1px solid #e3e9f0">${esc(m.item)} · ${esc(dcol(m.ymd))} · 취소가능 ${nf(m.done)} / 잔량 ${nf(m.qty)}</div>`+
           `<div class="ktm" data-a="confirm" style="padding:7px 12px;cursor:${canC?'pointer':'not-allowed'};color:${canC?'#1c7c3a':'#c0c8d2'};font-weight:600">✅ 확인(준비등록) ${m.qty>0?nf(m.qty):''}</div>`+
-          `<div class="ktm" data-a="cancel" style="padding:7px 12px;cursor:${canX?'pointer':'not-allowed'};color:${canX?'#c0392b':'#c0c8d2'};border-top:1px solid #eee">⏪ 준비취소 ${m.done>0?nf(m.done):''}</div>`;
+          `<div class="ktm" data-a="cancel" style="padding:7px 12px;cursor:${canX?'pointer':'not-allowed'};color:${canX?'#c0392b':'#c0c8d2'};border-top:1px solid #eee">⏪ 준비취소 ${m.done>0?nf(m.done):''}</div>`+
+          // ★항목보기·복사도 같은 메뉴에(2026-09-03) — 실적칸 위에서 우클릭해도 쓸 수 있게
+          `<div class="ktm" data-a="col" style="padding:7px 12px;cursor:pointer;border-top:1px solid #ddd">항목보기</div>`+
+          `<div class="ktm" data-a="copyall" style="padding:7px 12px;cursor:pointer">전체 복사</div>`;
         document.body.appendChild(mn);
         mn.querySelectorAll('.ktm').forEach(el=>el.onclick=()=>{const a=el.dataset.a;
+          if(a==='col'){mn.remove();ktColPick();return;}
+          if(a==='copyall'){mn.remove();if(host._ktCopyAll)host._ktCopyAll();return;}
           if((a==='confirm'&&!canC)||(a==='cancel'&&!canX))return; mn.remove();
           // ★확인 = 세트가능수량 팝업을 반드시 경유(자재 부족이면 실적 안 잡힘 + 이른날짜부터 순차충당).
           //   우클릭한 셀이 드래그선택에 포함돼 있으면 그 선택 전체를, 아니면 그 셀 하나만 대상으로 팝업.
@@ -2756,7 +3544,13 @@ SCREEN.kitting=(host)=>{
     }
     attachResizers(host);
   };
-  render();load();
+  /* ★자동조회 안 함(2026-09-03 사용자 요청, 410 과 동일).
+       왜 — 진입할 때마다 6,000행 조회가 먼저 걸려 느리고, 조건(기준일자·파트·기간)을
+       바꾸기도 전에 한 번 돌아 버린다. [조회] 를 눌러야 조회한다.
+     ★항목보기 설정(계정별)은 먼저 받아둔다 — 늦게 오면 컬럼이 깜빡인다. */
+  (async()=>{ await ktPrefLoad();
+              st.msg='조건을 고르고 [조회] 를 누르세요.';
+              render(); })();
 };
 
 /* ===== 생산전표출력관리 — 전표(J)/간판(G)/라벨(L) 조회·발행(nx.sheet_issue)·인쇄 ===== */

@@ -16,13 +16,26 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="format-detection" content="telephone=no">
 <!--
-  협력사 포털 (모바일 웹앱) — 2026-08-29
-  ★내부 ERP(index.html)와 **분리된 페이지**다. 이유:
-    · 협력사에게 내부 메뉴 트리를 보여줄 이유가 없다(ROLE_MOD 에 '협력사'가 없어 어차피 빈 화면)
-    · 폰에서 쓰는 화면은 레이아웃이 근본적으로 다르다(한 손·세로·큰 터치영역)
-    · 백엔드는 COOP_ALLOW 화이트리스트로 이미 막혀 있다 — 이 페이지는 그 안에서만 논다
+  협력사 포털 — 2026-08-29 신설 / ★2026-09-03 「내부 ERP 화면 직접 재사용」으로 전환
+
+  ★★★ 이 페이지는 협력사 화면을 **새로 그리지 않는다.**
+       내부 ERP(index.html)가 쓰는 css/app.css · js/core.js · js/screens.etc.js 를 **그대로 로드**하고
+       SCREEN.partnerplan / SCREEN.deliv420 / SCREEN.delivedit / SCREEN.sagubledger 를 직접 호출한다.
+       ⟹ 화면이 한 벌만 존재한다. 내부 ERP 를 고치면 포털도 같이 고쳐진다.
+
+       (경위) 처음엔 포털에 같은 화면을 다시 짰다(viewPPlan·viewDeliv·viewSledg).
+       화면이 두 벌이 되어 한쪽만 고쳐지면 갈라진다 — 사용자 지적으로 전부 폐기하고 재사용으로 바꿨다.
+
+  · boot.js 는 로드하지 않는다 = 내부 메뉴 트리·탭 UI 가 안 딸려온다(포털 자체 상단 메뉴를 쓴다).
+  · core.js 의 즉시실행 4곳은 전부 안전(fetch 토큰래퍼·스피너CSS·오토컴플리트·컬럼리사이저).
+    index.html 전용 DOM 을 찾지 않는다(조사 확인 2026-09-03).
+  · 소속 제한은 **서버가** 한다 — auth.scope_cust() 가 협력사면 partner_code 로 강제하고,
+    내부 직원이면 전 거래처를 준다. 레거시와 같은 방식이라 화면은 손대지 않는다.
+  · 백엔드는 COOP_ALLOW 화이트리스트로 이미 막혀 있다 — 이 페이지는 그 안에서만 논다.
   정본 = _schema/PARTNER_PORTAL_DESIGN.md §3
 -->
+<!-- ★내부 ERP 자산 — 화면 재사용의 전부. index.html 과 같은 파일·같은 캐시버전을 쓴다. -->
+<link rel="stylesheet" href="css/app.css?v=260903print2">
 <style>
   :root{
     --bg:#f4f6fa; --card:#fff; --line:#e3e8f0; --ink:#16305c; --sub:#7c8aa5;
@@ -51,7 +64,12 @@
   nav button .i{font-size:19px;line-height:1}
   nav button.on{color:var(--brand)}
 
-  main{padding:12px 12px 6px;max-width:720px;margin:0 auto}
+  /* ★#app 만 — #erp 도 <main> 이라 그냥 `main` 으로 쓰면 내부 화면이 720px 로 잘린다 */
+  main#app{padding:12px 12px 6px;max-width:720px;margin:0 auto}
+  /* ★app.css 에 `html,body,#app{height:100%}` 가 있다 — 내부 ERP 에선 #app 이 최상위 셸이지만
+       포털에선 #app 이 **자체화면 컨테이너**라 이름만 겹친다. 100% 를 그대로 받으면 flex 배치가
+       어긋나므로 되돌린다(포털의 #app 은 내용만큼만 차지하고 남는 높이는 flex 가 준다). */
+  main#app{height:auto}
 
   /* ══ PC 모드 (2026-09-03) — 레거시 PartnerERP 처럼 상단 가로 메뉴바 ══
      ★모바일 마크업은 그대로 두고 CSS 로 갈아끼운다(나중에 모바일 전환 대비).
@@ -61,7 +79,7 @@
   body.pc{padding-bottom:0;background:#eef1f6;display:flex;flex-direction:column;min-height:100vh}
   body.pc header{order:1}
   body.pc nav   {order:2}
-  body.pc main  {order:3;flex:1 1 auto}
+  body.pc main  {order:3;flex:1 1 auto}   /* #app·#erp 둘 다 — 헤더/메뉴 아래를 채운다 */
   body.pc #login{order:0;flex:1 1 auto}   /* 로그인 화면은 PC 에서도 화면 채움 */
   /* 레거시 PartnerERP 메뉴줄 모양 — 작은 글씨·촘촘·회색바탕·구분선 없음 */
   body.pc nav{position:sticky;top:0;z-index:29;border-top:0;border-bottom:1px solid #b9bfc9;
@@ -72,70 +90,66 @@
   body.pc nav button .i{display:none}
   body.pc nav button:hover{background:#dde7f5}
   body.pc nav button.on{background:var(--brand);color:#fff;font-weight:700}
-  body.pc main{max-width:none;padding:8px 10px 14px;margin:0}
+  body.pc main#app{max-width:none;padding:8px 10px 14px;margin:0}
+  body.pc #erp{padding:0}   /* 내부 화면은 자기 여백을 쓴다 — 바깥에서 padding 을 주지 않는다 */
   /* 상단 제목줄 — 레거시 타이틀바처럼 얇게 */
   body.pc header{padding:5px 12px;background:var(--brand)}
   body.pc header .t{font-size:13.5px}
   body.pc header .c{font-size:11.5px}
 
-  /* PC 그리드 — 내부 ERP(app.css .tbl)와 같은 모양 */
-  .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;
-    font-variant-numeric:tabular-nums;background:#fff}
-  .tbl th,.tbl td{border-bottom:1px solid #e6ebf3;border-right:1px solid #eef1f6;
-    padding:4px 6px;text-align:center;white-space:nowrap}
-  .tbl thead th{position:sticky;top:0;z-index:3;background:#eef2f8;color:#33415c;
-    font-weight:700;border-bottom:1px solid #c9d6e8}
-  .tbl tbody tr:hover td{background:#f3f8ff}
-  .tbl td.l{text-align:left} .tbl td.r{text-align:right}
-  .tbl tr.grandtot td{position:sticky;bottom:0;z-index:2;background:#eaf1fb;font-weight:700;
-    border-top:1px solid #c9d6e8}
-  .gwrap{overflow:auto;border:1px solid #d6dEE9;border-radius:6px;background:#fff;
-    max-height:calc(100vh - 210px)}
-  .tbar{display:flex;flex-wrap:nowrap;align-items:center;gap:7px;padding:8px 2px;
-    overflow-x:auto;font-size:12.5px}
-  .tbar label{color:#5b6b85;font-weight:600;white-space:nowrap}
-  .tbar input,.tbar select{border:1px solid #c9d3e0;border-radius:5px;padding:4px 7px;
-    font-size:12.5px;background:#fff;color:var(--ink)}
-  .tbar .go{background:var(--brand);color:#fff;border:0;border-radius:5px;
-    padding:5px 13px;font-weight:700;cursor:pointer;white-space:nowrap}
-  .tbar .sp{margin-left:auto;color:var(--sub);font-size:12px;white-space:nowrap}
-  .ttl{font-size:15px;font-weight:800;margin:2px 0 4px;display:flex;align-items:center;gap:8px}
-  .ttl small{font-size:11.5px;color:var(--sub);font-weight:400}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  /* ★.tbl / .tbar / .gwrap / .ttl 규칙을 전부 삭제했다(2026-09-03).
+       내가 포털에 사본 화면(viewPPlan·viewDeliv·viewSledg)을 만들 때 넣은 것인데,
+       사본을 폐기하고 내부 ERP 화면을 직접 부르게 되면서 **포털은 이 클래스를 하나도 안 쓴다**.
+       그런데 포털 <style> 이 app.css 뒤에 있어 우선순위가 높아, 남겨두면 #erp 안의
+       내부 화면 그리드·툴바만 덮어써 레이아웃을 깨뜨린다(실제로 거래명세서 발행 화면이
+       툴바 세로쏟음 + 버튼 가로 100% 로 깨졌다). 그리드 스타일 정본 = css/app.css 하나뿐이다. */
+  /* ═══ 포털 자체화면 전용 (홈·발주현황·송장·입고) ═══
+     ★모든 선택자에 #app 스코프 필수(2026-09-03).
+       .btn·.card·table·th,td·.msg·.empty 는 내부 ERP(app.css)도 쓰는 이름이다.
+       스코프 없이 쓰면 포털 <style> 이 app.css 뒤에 있어 우선순위로 이겨,
+       #erp 안의 내부 화면까지 덮어써 레이아웃이 깨진다(.btn{width:100%} 이 특히 치명적이었다).
+       새 규칙을 넣을 때도 반드시 `#app` 으로 시작할 것. */
+  #app .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
     box-shadow:var(--sh);padding:13px;margin-bottom:11px}
-  .card h3{margin:0 0 9px;font-size:13.5px;color:var(--sub);font-weight:700;
+  #app .card h3{margin:0 0 9px;font-size:13.5px;color:var(--sub);font-weight:700;
     display:flex;align-items:center;gap:6px}
-  .card h3 .n{margin-left:auto;color:var(--brand);font-size:16px;font-weight:800}
+  #app .card h3 .n{margin-left:auto;color:var(--brand);font-size:16px;font-weight:800}
 
-  .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}
-  .kpi div{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  #app .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:11px}
+  #app .kpi div{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
     padding:11px 8px;text-align:center;box-shadow:var(--sh)}
-  .kpi b{display:block;font-size:21px;font-weight:800;color:var(--brand);line-height:1.15}
-  .kpi span{font-size:11.5px;color:var(--sub)}
+  #app .kpi b{display:block;font-size:21px;font-weight:800;color:var(--brand);line-height:1.15}
+  #app .kpi span{font-size:11.5px;color:var(--sub)}
 
-  table{width:100%;border-collapse:collapse;font-size:13.5px}
-  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-  th{font-size:11.5px;color:var(--sub);font-weight:700;background:#fafbfd;
+  #app table{width:100%;border-collapse:collapse;font-size:13.5px}
+  #app th,#app td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  #app th{font-size:11.5px;color:var(--sub);font-weight:700;background:#fafbfd;
     position:sticky;top:0}
-  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
-  .scroll{max-height:62vh;overflow:auto;margin:0 -13px;padding:0 13px}
-  .empty{padding:26px 10px;text-align:center;color:var(--sub);font-size:13.5px}
-  .part{font-weight:700;letter-spacing:-.2px}
-  .nm{color:var(--sub);font-size:11.5px;display:block;margin-top:1px}
+  #app td.n,#app th.n{text-align:right;font-variant-numeric:tabular-nums}
+  #app .scroll{max-height:62vh;overflow:auto;margin:0 -13px;padding:0 13px}
+  #app .empty{padding:26px 10px;text-align:center;color:var(--sub);font-size:13.5px}
+  #app .part{font-weight:700;letter-spacing:-.2px}
+  #app .nm{color:var(--sub);font-size:11.5px;display:block;margin-top:1px}
 
-  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800}
-  .p00{background:#fdf3e2;color:var(--warn)}   .p10{background:#e7effb;color:var(--brand2)}
-  .p20{background:#e6f2ff;color:#2a6fb0}       .p30{background:#fff2e0;color:var(--warn)}
-  .p40{background:#f0e9fb;color:#6b4bb5}       .p90{background:#e4f5ec;color:var(--ok)}
-  .p99{background:#fdecec;color:var(--bad)}
+  #app .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800}
+  #app .p00{background:#fdf3e2;color:var(--warn)}   #app .p10{background:#e7effb;color:var(--brand2)}
+  #app .p20{background:#e6f2ff;color:#2a6fb0}       #app .p30{background:#fff2e0;color:var(--warn)}
+  #app .p40{background:#f0e9fb;color:#6b4bb5}       #app .p90{background:#e4f5ec;color:var(--ok)}
+  #app .p99{background:#fdecec;color:var(--bad)}
 
-  .btn{width:100%;padding:12px;border:0;border-radius:11px;background:var(--brand);color:#fff;
+  #app .btn{width:100%;padding:12px;border:0;border-radius:11px;background:var(--brand);color:#fff;
     font-size:15px;font-weight:800}
-  .btn:disabled{background:#b9c4d6}
-  .btn.g{background:#fff;color:var(--brand);border:1.5px solid var(--brand)}
-  .msg{padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:11px;font-weight:600}
-  .msg.e{background:#fdecec;color:var(--bad);border:1px solid #f3c9c9}
-  .msg.k{background:#e4f5ec;color:var(--ok);border:1px solid #bfe6d1}
+  #app .btn:disabled{background:#b9c4d6}
+  #app .btn.g{background:#fff;color:var(--brand);border:1.5px solid var(--brand)}
+  #app .msg{padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:11px;font-weight:600}
+  #app .msg.e{background:#fdecec;color:var(--bad);border:1px solid #f3c9c9}
+  #app .msg.k{background:#e4f5ec;color:var(--ok);border:1px solid #bfe6d1}
+  /* 로그인 박스 버튼은 #app 밖이라 별도(포털 전용, 내부 화면과 무관) */
+  #login .btn{width:100%;padding:12px;border:0;border-radius:11px;background:var(--brand);
+    color:#fff;font-size:15px;font-weight:800}
+  #login .btn:disabled{background:#b9c4d6}
+  #login .msg{padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:11px;font-weight:600}
+  #login .msg.e{background:#fdecec;color:var(--bad);border:1px solid #f3c9c9}
 
   /* ── 로그인 ── */
   #login{position:fixed;inset:0;z-index:60;background:linear-gradient(160deg,#1c47a0,#2f6db3);
@@ -147,32 +161,63 @@
   #login input{width:100%;padding:12px;font-size:16px;border:1.5px solid #d7dfea;border-radius:10px;
     margin-bottom:13px}
   #login input:focus{outline:0;border-color:var(--brand2)}
-  .foot{text-align:center;font-size:11.5px;color:var(--sub);padding:14px 10px 4px}
+  #app .foot,#login .foot{text-align:center;font-size:11.5px;color:var(--sub);padding:14px 10px 4px}
 
-  /* 발행 · 스캔 */
-  .row{display:flex;align-items:center;gap:9px;padding:10px 2px;border-bottom:1px solid var(--line)}
-  .row input[type=checkbox]{width:21px;height:21px;flex:0 0 auto}
-  .row .g{flex:1;min-width:0}
-  .row .q{width:78px;padding:8px;font-size:15px;text-align:right;border:1.5px solid #d7dfea;
+  /* 발행 · 스캔 — ★전부 #app 스코프(.row·.sum·.big 은 내부 ERP 도 쓸 법한 흔한 이름이다) */
+  #app .row{display:flex;align-items:center;gap:9px;padding:10px 2px;border-bottom:1px solid var(--line)}
+  #app .row input[type=checkbox]{width:21px;height:21px;flex:0 0 auto}
+  #app .row .g{flex:1;min-width:0}
+  #app .row .q{width:78px;padding:8px;font-size:15px;text-align:right;border:1.5px solid #d7dfea;
     border-radius:8px;font-variant-numeric:tabular-nums}
-  .qr{text-align:center;padding:6px 0 2px}
-  .qr svg{width:min(64vw,240px);height:auto;display:block;margin:0 auto}
-  .qrv{font-size:20px;font-weight:800;letter-spacing:1px;margin-top:8px;font-variant-numeric:tabular-nums}
-  .big{width:100%;padding:14px;font-size:19px;text-align:center;border:2px solid var(--brand);
+  #app .qr{text-align:center;padding:6px 0 2px}
+  #app .qr svg{width:min(64vw,240px);height:auto;display:block;margin:0 auto}
+  #app .qrv{font-size:20px;font-weight:800;letter-spacing:1px;margin-top:8px;font-variant-numeric:tabular-nums}
+  #app .big{width:100%;padding:14px;font-size:19px;text-align:center;border:2px solid var(--brand);
     border-radius:11px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums}
-  .sum{display:flex;gap:9px;margin:10px 0}
-  .sum div{flex:1;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;
+  #app .sum{display:flex;gap:9px;margin:10px 0}
+  #app .sum div{flex:1;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;
     padding:9px;text-align:center}
-  .sum b{display:block;font-size:18px;font-weight:800;color:var(--brand)}
-  .sum span{font-size:11px;color:var(--sub)}
-  .warnbox{background:#fdf3e2;border:1px solid #f0d6a8;color:#8a5600;padding:11px;
+  #app .sum b{display:block;font-size:18px;font-weight:800;color:var(--brand)}
+  #app .sum span{font-size:11px;color:var(--sub)}
+  #app .warnbox{background:#fdf3e2;border:1px solid #f0d6a8;color:#8a5600;padding:11px;
     border-radius:10px;font-size:13px;font-weight:700;margin-bottom:11px;line-height:1.5}
-  .modal{position:fixed;inset:0;z-index:70;background:rgba(16,32,60,.55);display:flex;
+  /* 포털 모달은 body 직속으로 뜬다(#app 밖) — 포털 전용 id 를 함께 걸어 내부 화면과 겹치지 않게 */
+  .pmodal{position:fixed;inset:0;z-index:70;background:rgba(16,32,60,.55);display:flex;
     align-items:flex-end;justify-content:center;padding:0}
-  .modal .sheet{background:#fff;width:100%;max-width:560px;border-radius:16px 16px 0 0;
+  .pmodal .sheet{background:#fff;width:100%;max-width:560px;border-radius:16px 16px 0 0;
     padding:18px 15px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
-  .modal h4{margin:0 0 4px;font-size:17px;font-weight:800}
-  .modal .s{color:var(--sub);font-size:12.5px;margin-bottom:13px}
+  .pmodal h4{margin:0 0 4px;font-size:17px;font-weight:800}
+  .pmodal .s{color:var(--sub);font-size:12.5px;margin-bottom:13px}
+
+  /* ───────── 내부 ERP 화면을 그대로 심는 자리 ─────────
+     SCREEN.xxx(container) 가 그린 결과는 app.css 규칙으로 스타일된다.
+     포털은 그 바깥(헤더·메뉴바)만 책임진다. */
+  /* ★#erp 안(내부 ERP 화면)에는 포털 CSS 가 개입하지 않는다.
+       컨테이너의 크기·표시만 정하고, 내용의 레이아웃은 전부 app.css 와 화면 코드에 맡긴다.
+       (앞서 `#erp > div{flex-direction:column}` 을 넣었다가 내부 툴바가 세로로 쏟아졌다 —
+        내부 화면 루트는 자기 구조가 있으므로 바깥에서 flex 를 강제하면 안 된다.) */
+  #erp{display:none;padding:0}
+  body.erpview #app{display:none}
+  /* ★내부 ERP 의 `.content`(flex:1;overflow:auto;min-height:0)와 **같게** 만든다.
+       화면 코드가 그 환경을 전제로 짜여 있으므로, 다르게 주면 화면마다 다른 방식으로 깨진다.
+       (헤더·메뉴가 잘리던 문제는 body.pc.erpview 를 100vh 로 가두고 sticky 를 static 으로
+        바꿔 해결했다 — #erp 의 스크롤을 없애는 방식이 아니었다.) */
+  body.erpview #erp{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:auto}
+  /* ★#erp 의 자식에 height 를 강제하지 않는다(2026-09-03).
+       화면마다 루트 구조가 다르다:
+         · partnerplan → 단일 래퍼 <div class="pn-root" style="height:100%"> 하나
+         · deliv420    → 래퍼 없이 .page-title / .page-sub / .toolbar / 그리드가 **형제로 나열**
+       `#erp>*{height:100%}` 를 주면 후자에서 **제목 하나가 화면 전체를 차지**해
+       툴바·그리드가 화면 밖으로 밀린다(실제 증상: 제목만 하단에 덩그러니).
+       ⟹ #erp 는 flex 컨테이너 역할만 하고, 높이 배분은 각 화면의 flex 값(0 0 auto / 1)에 맡긴다.
+          내부 ERP(index.html)의 .content(flex:1;overflow:auto;min-height:0)와 같은 방식이다. */
+  body.erpview #erp>*{min-height:0}
+  /* 단일 래퍼로 감싼 화면(.pn-root 처럼 height:100% 를 쓰는 것)만 실제 높이를 받는다. */
+  body.erpview #erp>.pn-root{height:100%;flex:1 1 auto}
+  /* PC 에선 페이지 전체가 100vh 안에 갇힌다 = 헤더·메뉴는 항상 제자리, 스크롤은 그리드 안에서만.
+     (CLAUDE §3 「페이지 본문 세로 스크롤 금지」와 같은 규칙) */
+  body.pc.erpview{height:100vh;min-height:0;overflow:hidden}
+  body.pc.erpview header,body.pc.erpview nav{flex:0 0 auto;position:static}
 </style>
 </head>
 <body>
@@ -198,16 +243,49 @@
 </header>
 
 <main class="hide" id="app"></main>
+<!-- ★내부 ERP 화면(SCREEN.xxx)이 그려지는 자리. 포털 자체화면(#app)과 배타적으로 보인다. -->
+<main class="hide" id="erp"></main>
 
 <nav class="hide" id="nav"></nav>
 
+<!-- ★내부 ERP 화면 재사용 — index.html 과 동일한 파일들.
+     · boot.js 는 뺐다 — 메뉴트리·로그인화면이 딸려오면 포털과 충돌한다.
+     · data.js(25.9MB!) 도 뺐다 — 내부 ERP 의 **데모 시드데이터**다.
+       실측(2026-09-03): screens.etc.js 는 DB 를 한 번도 안 쓴다(8건 전부 주석/'s2-db' 변수명).
+       core.js 도 협력사와 무관한 데모 함수(itemPicker·priceHist·stockPicker)에서만 쓴다.
+       포털에서 25.9MB 를 매번 받으면 홈이 그만큼 느려진다 → 빈 스텁으로 대체한다.
+       ※내부 ERP(index.html)는 종전대로 진짜 data.js 를 쓴다 — 그쪽은 안 건드렸다. -->
 <script>
+  /* data.js 대신 넣는 최소 스텁. core.js 가 가드 없이 DB.xxx 를 읽는 자리를 빈 값으로 채운다.
+     협력사 화면(partnerplan·deliv420·delivedit·sagubledger)은 전부 서버 API 로만 돈다. */
+  var DB = {items:[], itemDetail:{}, priceItems:[], priceBuyHist:{}, priceSaleHist:{},
+            stock:[], lineNames:{}, custTypeNames:{}};
+</script>
+<script src="js/core.js?v=260903print2"></script>
+<script src="js/screens.etc.js?v=260903print2"></script>
+
+<script>
+/* ★포털 스크립트 전체를 IIFE 로 감싼다(2026-09-03).
+   core.js 도 esc·tabs·_y6 를 전역으로 선언한다 — 같은 이름을 최상위에서 두 번 `const` 하면
+   **페이지 전체가 SyntaxError 로 죽는다.** 감싸면 포털 것이 함수 스코프에 들어가 충돌이 사라지고,
+   내부 화면은 core.js 원본 전역을 그대로 쓴다. */
+(function(){
 const API = location.origin;
+/* ★토큰은 두 곳에 함께 쓴다(2026-09-03).
+     포털 자체 api() 는 ptok 을, core.js 의 fetch 래퍼는 auth_token 을 읽는다.
+     내부 ERP 화면(SCREEN.xxx)이 부르는 API 는 core.js 래퍼를 타므로 auth_token 이 없으면 401 이 난다.
+     ⟹ set 할 때 양쪽 다 쓰고, 로그아웃할 때 양쪽 다 지운다. */
 const T = {
   get tok(){ try{return localStorage.getItem('ptok')||''}catch(e){return ''} },
-  set tok(v){ try{ v?localStorage.setItem('ptok',v):localStorage.removeItem('ptok') }catch(e){} },
+  set tok(v){ try{
+      if(v){ localStorage.setItem('ptok',v);  localStorage.setItem('auth_token',v); }
+      else { localStorage.removeItem('ptok'); localStorage.removeItem('auth_token'); }
+    }catch(e){} },
   get me(){ try{return JSON.parse(localStorage.getItem('pme')||'null')}catch(e){return null} },
-  set me(v){ try{ v?localStorage.setItem('pme',JSON.stringify(v)):localStorage.removeItem('pme') }catch(e){} },
+  set me(v){ try{
+      if(v){ localStorage.setItem('pme',JSON.stringify(v));  localStorage.setItem('auth_user',JSON.stringify(v)); }
+      else { localStorage.removeItem('pme'); localStorage.removeItem('auth_user'); }
+    }catch(e){} },
 };
 const $ = s => document.querySelector(s);
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -253,16 +331,39 @@ async function doLogin(){
 /* ───────── 화면 ───────── */
 let VIEW='home', DATA=null;
 let ORDER=null, ORDER_LOADING=false;   // 발주현황(coopporder) 지연로드 캐시
-// ★사급 탭(2026-09-03) — 내부 ERP「협력사사급재고관리 + 사급 수불장」을 모바일로.
-//   서버가 scope_cust 로 자기 거래처만 준다(auth.scope_cust) — 프론트는 그대로 그린다.
-let SLEDG=null, SLEDG_LOADING=false;   // 사급 수불장(ledger) 캐시
-let SGDET=null;                        // 수불장 상세(드릴다운) — {mat, rows} 또는 null
-// ★거래명세표 수정(2026-09-03) — 아직 보내기 전(요청·발행)만 고칠 수 있다.
-//   서버 _guard(coop=True) 가 출발(20)·입고대기(30) 이후를 409 로 막는다.
-let EDIT=null, EDIT_LOADING=false;     // 명세표 목록 캐시
+// ※계획현황·거래명세서 발행/수정·사급 수불장의 캐시 변수는 없앴다(2026-09-03).
+//   그 화면들은 내부 ERP SCREEN 이 그리고, 상태도 그쪽이 자기 안에서 관리한다.
+
+/* ★내부 ERP 런타임(core.js)을 포털 계정으로 맞춘다(2026-09-03).
+     PERM.userId 는 localStorage.perm_userId 를 읽고 **없으면 'admin'** 으로 떨어진다(core.js:545).
+     그대로 두면 isAdmin()=true 라 협력사에게 편집버튼이 다 보이고, 눌러야 서버가 403 을 준다.
+     보안 구멍은 아니지만(차단은 서버 COOP_ALLOW 가 한다) 보이면 안 될 버튼이 보이는 건 버그다.
+     ⟹ 실제 로그인 계정으로 세팅해 core.js 가 제 권한으로 판정하게 한다. */
+function syncErpRuntime(){
+  const u = T.me || {};
+  try{
+    /* ★★★토큰 동기화가 먼저다(2026-09-03 — 업체 자동입력이 안 되던 진짜 원인).
+         내부 화면(SCREEN.xxx)의 fetch 는 core.js 래퍼를 타고, 그 래퍼는 `AUTH.token`
+         = localStorage.auth_token 을 읽는다. 포털은 ptok 에 저장하면서 T.tok setter 에서
+         auth_token 도 같이 쓰지만, **이미 로그인된 세션은 setter 가 다시 안 불린다.**
+         그러면 auth_token 이 빈 채로 요청이 나가 서버가 '비로그인'으로 처리하고,
+         scope_cust 가 협력사 강제를 못 해 workcenters 가 103건(직원 전체)으로 돌아온다.
+         → wcs.length===1 이 거짓 = 자동선택 실패. HTTP 는 200 이라 경고도 안 뜬다(추적이 어려웠다).
+         ⟹ 시작할 때마다 무조건 맞춘다. */
+    if(typeof AUTH !== 'undefined'){
+      if(T.tok && AUTH.token !== T.tok) AUTH.token = T.tok;
+      AUTH.user = u;                            // PERM.currentUser() 가 이걸 우선한다
+    }
+    if(typeof PERM !== 'undefined' && u.id){
+      PERM.setUser(u.id);
+      PERM.loadFromServer().catch(()=>{});     // 서버 권한표(정본)를 받아온다. 실패해도 화면은 돈다
+    }
+  }catch(e){}
+}
 
 async function start(){
   const u=T.me||{};
+  syncErpRuntime();
   $('#hcust').textContent = u.nm || u.id || '';
   $('#huser').textContent = u.partner_code ? ('거래처 '+u.partner_code) : '';
   ['#hd','#app','#nav'].forEach(s=>$(s).classList.remove('hide'));
@@ -299,19 +400,27 @@ function _myCacheSet(d){
 
 async function load(){
   ORDER=null; ORDER_LOADING=false;   // 재로그인/새로고침 시 발주현황 캐시 초기화
-  SLEDG=null; SLEDG_LOADING=false; SGDET=null;   // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
-  EDIT=null;  EDIT_LOADING=false;
-  PP=null;    PP_LOADING=false;
   loadPlanBase();                                  // ★계획 기준일(비동기·화면 안 막음)
   const cached=_myCacheGet();
   if(cached){ DATA=cached; render(); }             // 있으면 먼저 그린다(대기 없음)
-  else $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
+  else {
+    /* ★첫 로그인 체감속도(2026-09-03 사용자 지적 "최초 로그인시 많이 느려").
+       실측: /api/partner/my 는 콜드 7.9초 · 웜 0.2초 — DB 커넥션 워밍이라 화면으로는 못 줄인다.
+       그런데 종전엔 그 7.9초 동안 **메뉴바조차 안 나왔다**(render 가 `if(!DATA) return`).
+       메뉴는 로그인 정보(T.me)만으로 그릴 수 있다 → 먼저 그려서 바로 다른 화면으로 갈 수 있게 한다.
+       홈 카드만 '불러오는 중…' 으로 남는다. */
+    drawNav();
+    $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
+  }
   try{ DATA = await api('/api/partner/my?days=14'); _myCacheSet(DATA); }
   catch(e){
     if(e.message==='401') return;
     if(!cached){ $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
     return;                                        // 캐시가 있으면 그대로 두고 조용히 끝낸다
   }
+  /* ★내부 ERP 화면을 보는 중이면 그 화면은 건드리지 않는다 — 메뉴만 갱신.
+       (홈 응답이 늦게 도착해 사용자가 이미 다른 화면에서 작업 중일 수 있다.) */
+  if(document.body.classList.contains('erpview')){ drawNav(); return; }
   render();
 }
 
@@ -320,36 +429,94 @@ async function load(){
      같은 화면을 전원에게 주면 대부분이 **빈 송장 화면**을 본다. */
 /* ★2026-09-03 — 레거시 PartnerERP 식 상단 가로 메뉴바로 전환(PC 우선).
      내부 ERP 「협력사」 폴더 6메뉴를 그대로 옮긴다. 모바일 전환은 나중에(body.pc 토글). */
+/* ★2026-09-03 — 메뉴 항목의 `scr` = **내부 ERP SCREEN id**.
+     scr 가 있으면 포털이 화면을 그리지 않고 SCREEN.<scr>(#erp) 를 그대로 호출한다.
+     ⟹ 협력사 계획현황·거래명세서 발행·수정·사급 수불장은 내부 ERP 와 **같은 코드 한 벌**이다.
+     내부 ERP 원본 = js/screens.etc.js (partnerplan:2092 · deliv420:762 · delivedit:2475 · sagubledger:1743)
+
+     소속 제한은 서버가 한다 — auth.scope_cust() 가 협력사면 partner_code 로 강제,
+     내부 직원이면 전 거래처 조회. 레거시와 같은 방식이라 화면은 손대지 않는다. */
 function tabs(){
   const staff = (T.me||{}).utype !== '협력사';
   const isPartner = !!((T.me||{}).partner_code);
   const isCutting = !!((T.me||{}).is_cutting);
-  const t=[{v:'home',i:'🏠',n:'홈'}];
-  t.push({v:'pplan', i:'📋', n:'협력사 계획현황'});
+  const t=[{v:'home',n:'홈'}];
+  t.push({v:'pplan', n:'협력사 계획현황',      scr:'partnerplan'});
   // ★일반협력사만 발주현황(일반). 절삭협력사(is_cutting)는 계획현황을 쓴다.
-  if(isPartner && !isCutting) t.push({v:'order', i:'📦', n:'협력사 발주현황(일반)'});
-  t.push({v:'deliv', i:'🧾', n:'거래명세서 발행'});
-  t.push({v:'dedit', i:'✎',  n:'거래명세표 수정'});
+  if(isPartner && !isCutting) t.push({v:'order', n:'협력사 발주현황(일반)'});
+  t.push({v:'deliv', n:'거래명세서 발행',      scr:'deliv420'});
+  t.push({v:'dedit', n:'거래명세표 수정',      scr:'delivedit'});
   // ★「협력사사급재고관리」는 뺐다(2026-09-03) — 사급 수불장과 같은 원장(nx.sagub_maint)을
   //   보는 중복 화면이고, 수불장이 상위(입고·출고·잔량 + 일자별 이력)라 잔량 컬럼으로 갈음된다.
-  t.push({v:'sledg', i:'📒', n:'사급 수불장'});
+  t.push({v:'sledg', n:'사급 수불장',          scr:'sagubledger'});
   // 기존 모바일 화면 — 송장 발행은 여기서만 되므로 남긴다(거래명세서 발행과 별개 흐름).
   const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
-  if(useInv) t.push({v:'inv', i:'📄', n:'내 송장'});
-  if(staff)  t.push({v:'scan', i:'📷', n:'입고'});
+  if(useInv) t.push({v:'inv', n:'내 송장'});
+  if(staff)  t.push({v:'scan', n:'입고'});
   return t;
 }
-function render(){
-  if(!DATA) return;
+
+/* 내부 ERP 화면을 #erp 에 그린다. 실패해도 포털이 죽지 않게 감싼다.
+   ★★★같은 화면이면 **다시 그리지 않는다**(2026-09-03 — 「첫 조회는 빈 결과, 두 번째만 나옴」의 원인).
+      경위: load() 가 /api/partner/my 응답을 받으면 render() 를 부르고, render() 는 renderErp() 를
+      다시 불러 #erp 를 innerHTML='' 로 비우고 화면을 통째로 재생성했다. 그 API 는 첫 로그인에
+      콜드 7.9초가 걸리므로, 사용자가 그 사이에 [조회]를 누르면 **결과가 그려진 직후 화면이 날아갔다.**
+      두 번째 조회는 홈 응답이 이미 끝난 뒤라 멀쩡했다 — 증상이 정확히 이 순서였다.
+      ⟹ 이미 그 화면이 떠 있으면 컨테이너만 보이게 하고 화면 코드는 건드리지 않는다. */
+/* ★내부 화면은 대부분 **비동기**다 — SCREEN.xxx(box) 를 부르면 planBase()·목록조회 등이 끝난 뒤에야
+     box.innerHTML 을 채운다. 그래서 "box 가 비었으니 아직 안 그려졌다"로 판단하면 안 된다.
+     그리는 중에 또 호출하면 먼저 시작한 비동기가 나중에 끝나며 서로 덮어써 **빈 화면**이 된다.
+     ⟹ 「현재 화면 이름」만으로 판단하고, 호출은 화면당 한 번만 한다. */
+let ERP_CUR='';
+function renderErp(sid){
+  const box=$('#erp');
+  document.body.classList.add('erpview');
+  box.classList.remove('hide');
+  if(ERP_CUR===sid) return;        // ★이미 이 화면 = 그리는 중이든 다 그렸든 건드리지 않는다
+  ERP_CUR=sid;                     // ★먼저 잠근다(비동기 렌더 중 재진입 차단)
+  box.innerHTML='';
+  const fn = (typeof SCREEN!=='undefined') && SCREEN[sid];
+  if(typeof fn!=='function'){
+    ERP_CUR='';
+    box.innerHTML = `<div class="msg e" style="margin:14px">화면(${esc(sid)})을 불러오지 못했습니다.`
+                  + ` 새로고침(Ctrl+F5) 후에도 같으면 전산담당에게 알려 주세요.</div>`;
+    return;
+  }
+  try{ fn(box); }
+  catch(e){
+    ERP_CUR='';
+    box.innerHTML = `<div class="msg e" style="margin:14px">화면 오류: ${esc(e.message||e)}</div>`;
+  }
+}
+
+/* 메뉴바만 그린다 — DATA 없이도 된다(로그인 정보만 쓴다).
+   ★첫 로그인의 홈 응답(콜드 7.9초)을 기다리는 동안에도 메뉴는 눌러야 한다. */
+function drawNav(){
   const T2=tabs();
   if(!T2.some(x=>x.v===VIEW)) VIEW='home';
-  $('#nav').innerHTML = T2.map(x=>`<button data-v="${x.v}" class="${x.v===VIEW?'on':''}">
-    <span class="i">${x.i}</span>${x.n}</button>`).join('');
+  $('#nav').innerHTML = T2.map(x=>`<button data-v="${x.v}" class="${x.v===VIEW?'on':''}">${x.n}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach(b=>b.onclick=()=>{
-    VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
-  // ★탭이 늘어 삼항체인 대신 맵(2026-09-03). 값=렌더함수(HTML 문자열 반환).
-  const V={home:viewHome, plan:viewPlan, order:viewOrder, scan:viewScan, inv:viewInv,
-           pplan:viewPPlan, deliv:viewDeliv, dedit:viewDedit, sledg:viewSledg};
+    VIEW=b.dataset.v;
+    // 홈은 DATA 가 있어야 그린다. 아직 안 왔으면 메뉴 하이라이트만 바꾸고 기다린다.
+    if(VIEW==='home' && !DATA){ drawNav(); return; }
+    render(); window.scrollTo(0,0); });
+  return T2;
+}
+
+function render(){
+  const T2=drawNav();
+
+  // ★내부 ERP 화면이면 여기서 끝 — 포털은 그리지 않는다(DATA 없이도 열린다).
+  const cur = T2.find(x=>x.v===VIEW);
+  if(cur && cur.scr){ $('#app').classList.add('hide'); renderErp(cur.scr); return; }
+
+  if(!DATA) return;   // 포털 자체화면은 DATA 가 있어야 그린다
+
+  document.body.classList.remove('erpview');
+  $('#erp').classList.add('hide'); $('#erp').innerHTML=''; ERP_CUR='';   // 떠났으니 다음엔 새로 그린다
+  $('#app').classList.remove('hide');
+  // 포털 자체 화면(홈·발주현황·송장·입고) — 모바일 흐름 그대로.
+  const V={home:viewHome, plan:viewPlan, order:viewOrder, scan:viewScan, inv:viewInv};
   $('#app').innerHTML = (V[VIEW]||viewHome)();
   wire();
 }
@@ -403,17 +570,12 @@ function viewPlan(){
   </div>`;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   협력사 계획현황 — 내부 ERP SCREEN.partnerplan(screens.etc.js:2083) 이식
-   ★서버가 scope_cust 로 자기 거래처만 준다(coopplan.py). wc 는 내 partner_code 고정.
-   ═══════════════════════════════════════════════════════════════════════ */
-let PP=null, PP_LOADING=false;
-const PPF={from:'', days:31, assy:'', part:''};
-
 /* ★계획 공통 기준일 = 마지막 계획업로드 파일의 일자축 첫날(2026-09-03).
      오늘(today)이 아니다 — 업로드 후 미출하분이 재편성되면서 재고 충당이 그쪽으로 옮겨가
      옛 날짜로 조회하면 재고가 실제보다 많이 채워져 보인다(order.py:295 근거).
-     내부 ERP 의 planBase() 와 같은 소스(/api/plan/basedate)를 쓴다. */
+     내부 ERP 의 planBase() 와 같은 소스(/api/plan/basedate)를 쓴다.
+     ※계획현황 화면 자체는 내부 ERP SCREEN.partnerplan 이 제 planBase() 로 처리한다 —
+       여기 값은 포털 홈 카드의 기준일 표시용으로만 남긴다. */
 let PLAN_BASE='';
 async function loadPlanBase(){
   try{
@@ -422,7 +584,6 @@ async function loadPlanBase(){
     PLAN_BASE = iso || (String(y6).length===6
       ? `20${y6.slice(0,2)}-${y6.slice(2,4)}-${y6.slice(4,6)}` : '');
   }catch(e){ PLAN_BASE=''; }
-  if(!PPF.from) PPF.from = PLAN_BASE || _iso(new Date());
 }
 
 const _iso=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -435,99 +596,6 @@ const _dinfo=(y6)=>{const s=String(y6||'');
   const dt=new Date(2000+ +s.slice(0,2), +s.slice(2,4)-1, +s.slice(4,6));
   const w=dt.getDay();
   return {lab:s.slice(4,6)+_WD[w], wk:(w===0||w===6)};};
-
-function loadPP(){
-  if(PP_LOADING) return;
-  const wc=String((T.me||{}).partner_code||'').trim();
-  if(!wc){ PP={need:1}; return; }
-  if(!PPF.from) PPF.from = PLAN_BASE || _iso(new Date());   // ★계획 최신 업로드일 기준
-  PP_LOADING=true;
-  const to=_isoAdd(PPF.from, Math.max(1,+PPF.days||31)-1);
-  // ★src 는 항상 nx(우리 편성) — 레거시 토글은 두지 않는다(2026-09-03 확정).
-  const q=new URLSearchParams({from_ymd:PPF.from,to_ymd:to,wc:wc,
-    part:PPF.part||'',assy:PPF.assy||'',line:'',gubun:'외주',src:'nx'});
-  api('/api/partner/planstatus?'+q)
-    .then(j=>{ PP=j; })
-    .catch(e=>{ if(e.message!=='401') PP={error:e.message}; })
-    .then(()=>{ PP_LOADING=false; if(VIEW==='pplan') render(); });
-}
-
-function viewPPlan(){
-  // ★자동조회 하지 않는다 — 조회 버튼을 눌러야 조회(내부 ERP 와 동일, 2026-09-03).
-  //   PP===null 이면 '조회 전', PP_LOADING 이면 '불러오는 중'.
-  if(PP && PP.need)  return `<div class="card"><div class="empty">소속 거래처가 지정되지 않았습니다. 담당자에게 문의하세요.</div></div>`;
-  if(PP && PP.error) return `<div class="msg e">${esc(PP.error)}</div>`;
-  if(!PPF.from) PPF.from = PLAN_BASE || _iso(new Date());   // ★기준일자 = 계획 최신 업로드일
-  const ds=(PP&&PP.dates)||[], rows=((PP&&PP.rows)||[]).map(r=>Object.assign({},r,{
-    jado: r.mats||r.part||'', matq: (r.matq!=null?r.matq:r.tot)}));
-  const frac = !PP || PP.frac!==false;
-  const to=_isoAdd(PPF.from, Math.max(1,+PPF.days||31)-1);
-  const cell=(r,d)=>{
-    const pl=+((r.days||{})[d]||0), dn=+((r.donedays||{})[d]||0);
-    const bg=((r.colors||{})[d])||'';
-    const empty = frac ? (!pl&&!dn) : !pl;
-    const txt = empty ? '·' : (frac ? `${num(dn)}/${num(pl)}` : num(pl));
-    return `<td${bg?` style="background:${esc(bg)}"`:(empty?' style="color:#dfe6ef"':'')}>${txt}</td>`;
-  };
-  const sum=(f)=>rows.reduce((a,r)=>a+(+r[f]||0),0);
-  const dsum=(d,k)=>rows.reduce((a,r)=>a+(+((r[k]||{})[d])||0),0);
-  return `
-  <div class="ttl">협력사계획현황 <small>4주간 계획수량 — 도번·자도번LIST·일자별 (당김 반영)</small></div>
-  <div class="tbar">
-    <label>기준일자</label><input type="date" id="pp-from" value="${esc(PPF.from)}">
-    <label>기간</label><input type="text" id="pp-days" value="${esc(PPF.days)}" style="width:46px;text-align:center">일
-    <label>도번</label><input type="text" id="pp-assy" value="${esc(PPF.assy)}" placeholder="도번(ASSY)" style="width:120px">
-    <label>자도번</label><input type="text" id="pp-part" value="${esc(PPF.part)}" placeholder="자도번" style="width:120px">
-    <button class="go" id="pp-go"${PP_LOADING?' disabled':''}>${PP_LOADING?'조회 중…':'조회'}</button>
-    <span class="sp">${PP ? `${num(PP.cnt||rows.length)}건 · 자재수량합 ${num(PP.sum_qty)} · ${esc(PPF.from)}~${esc(to)}`
-                          : `${esc(PPF.from)}~${esc(to)}`}</span>
-  </div>
-  ${frac?`<div style="font-size:11px;color:#5b6b85;margin:0 2px 5px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
-    <span>일자셀=<b>완료/계획</b></span>
-    <span style="background:#ffff00;padding:0 5px;border-radius:3px">생산완료</span>
-    <span style="background:#fac090;padding:0 5px;border-radius:3px">출하완료</span>
-    <span style="background:#c0c0c0;padding:0 5px;border-radius:3px" title="세트재고 + 입고대기 물량이 배분된 칸">세트재고</span>
-    <span style="color:#8aa0bd">· 완료수량=출하+완제품재고+세트/입고대기 재고배분(도번단위)</span>
-  </div>`:''}
-  <div class="gwrap"><table class="tbl">
-    <thead><tr>
-      <th style="width:40px">SEQ</th><th style="width:100px">자도번작업처</th>
-      <th style="width:44px">라인</th><th style="width:64px">작업처</th>
-      <th style="width:110px">도번</th><th style="width:300px">자도번LIST</th>
-      <th style="width:42px">사급</th><th style="width:56px">LOT수량</th>
-      <th style="width:62px">자재수량</th><th style="width:62px">완료수량</th><th style="width:62px">요청수량</th>
-      ${ds.map(d=>{const i=_dinfo(d);
-        return `<th style="width:46px${i.wk?';color:#c0392b;background:#ffe9d6':''}">${esc(i.lab)}</th>`;}).join('')}
-    </tr></thead>
-    <tbody>
-      ${rows.length ? rows.map((r,i)=>`<tr>
-        <td style="color:#8aa0bd">${esc(r.seq!=null?r.seq:(i+1))}</td>
-        <td><b>${esc(r.wcnm||r.wc||'')}</b></td>
-        <td>${esc(r.line||'')}</td>
-        <td>${esc(r.workcenter||'')}</td>
-        <td><b>${esc(r.assy||'')}</b></td>
-        <td class="l" title="${esc(r.jado)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis">
-          ${(+r.matn>1)?`<span style="background:#e8f0fe;color:#1c47a0;border-radius:3px;padding:0 4px;font-size:10.5px;font-weight:700;margin-right:3px">${num(r.matn)}종</span>`:''}${esc(r.jado)}</td>
-        <td>${r.sagub?`<span style="background:#fff3d6;color:#8a6100;border-radius:3px;padding:0 4px;font-size:10.5px">사급</span>`:''}</td>
-        <td>${r.lot==null?'-':num(r.lot)}</td>
-        <td><b>${num(r.matq)}</b></td>
-        <td style="color:#1c7c3a">${num(r.doneq)}</td>
-        <td>${num(r.reqq)}</td>
-        ${ds.map(d=>cell(r,d)).join('')}
-      </tr>`).join('') : `<tr><td colspan="${11+ds.length}" class="empty" style="padding:22px">${
-        PP_LOADING ? '불러오는 중…'
-        : (!PP ? '조회 버튼을 누르세요 — 기준일자·기간을 정하고 [조회]'
-               : '조회 결과 없음 — 기준일자/기간을 확인하세요.')}</td></tr>`}
-    </tbody>
-    ${rows.length?`<tfoot><tr class="grandtot">
-      <td>계</td><td>${num(rows.length)}건</td><td colspan="6"></td>
-      <td>${num(sum('matq'))}</td><td>${num(sum('doneq'))}</td><td>${num(sum('reqq'))}</td>
-      ${ds.map(d=>`<td>${frac?`${num(dsum(d,'donedays'))}/${num(dsum(d,'days'))}`:num(dsum(d,'days'))}</td>`).join('')}
-    </tr></tfoot>`:''}
-  </table></div>
-  <div class="foot" style="padding:8px 2px;font-size:11.5px;color:var(--sub)">
-    노랑=생산완료 · 살구=출하완료 · 회색=세트재고 (완료가 계획 이상일 때만 색)</div>`;
-}
 
 /* ───────── 발주현황 : 순소요(계획−재고−기발주) ───────── */
 function loadOrder(){
@@ -764,142 +832,10 @@ async function useCamera(){
   }catch(e){ close(); alert('카메라를 열 수 없습니다 — '+e.message); }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   사급 수불장 — 내부 ERP SCREEN.sagubledger 탭①(사급부품) 이식
-   좌측 목록 → 행 클릭 → 우측 수불이력. PC 라 2분할, 좁으면 세로로 쌓임.
-   ═══════════════════════════════════════════════════════════════════════ */
-const SLF={fr:'', to:'', mat:'', sign:'', scope:'sent'};
-const _y6=(iso)=>{const s=String(iso||'').replace(/-/g,''); return s.length===8?s.slice(2):s;};
-function loadSledg(){
-  if(SLEDG_LOADING) return;
-  if(!SLF.fr){ const d=new Date(); SLF.fr=_iso(new Date(d.getFullYear(),d.getMonth()-2,1)); }
-  if(!SLF.to) SLF.to=_iso(new Date());
-  SLEDG_LOADING=true;
-  const q=new URLSearchParams({cust:'', mat:SLF.mat||'', fr:_y6(SLF.fr), to:_y6(SLF.to),
-                              sign:SLF.sign||'', scope:SLF.scope||'sent'});
-  api('/api/sagubledger/list?'+q)
-    .then(j=>{ SLEDG=j; })
-    .catch(e=>{ if(e.message!=='401') SLEDG={error:e.message}; })
-    .then(()=>{ SLEDG_LOADING=false; if(VIEW==='sledg') render(); });
-}
-function loadSgDet(r){
-  SGDET={mat:r.mat_code, custnm:r.custnm||r.cust_code, matnm:r.matnm, rows:null};
-  render();
-  const q=new URLSearchParams({cust:r.cust_code, mat:r.mat_code, fr:_y6(SLF.fr), to:_y6(SLF.to)});
-  api('/api/sagubledger/detail?'+q)
-    .then(j=>{ if(SGDET&&SGDET.mat===r.mat_code){ SGDET.rows=j.rows||[]; SGDET.final=j.final_qty; } })
-    .catch(e=>{ if(SGDET) SGDET.err=e.message; })
-    .then(()=>{ if(VIEW==='sledg') render(); });
-}
-function viewSledg(){
-  if(!SLEDG){ loadSledg(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
-  if(SLEDG.error) return `<div class="msg e">${esc(SLEDG.error)}</div>`;
-  const rows=SLEDG.rows||[], t=SLEDG.tot||{};
-  const bal=(v)=>{const n=+v||0; return `<td class="r"><b style="color:${n<0?'#c0392b':'#1f2d3d'}">${num(n)}</b></td>`;};
-  const det=SGDET;
-  return `
-  <div class="ttl">사급 수불장 <small>내가 받은 사급부품의 입고·출고·잔량</small></div>
-  <div class="tbar">
-    <label>기간</label><input type="date" id="sl-fr" value="${esc(SLF.fr)}">~<input type="date" id="sl-to" value="${esc(SLF.to)}">
-    <label>자도번</label><input type="text" id="sl-mat" value="${esc(SLF.mat)}" placeholder="자도번/품명" style="width:130px">
-    <label>잔량</label>
-    <select id="sl-sign">
-      <option value=""${SLF.sign===''?' selected':''}>전체</option>
-      <option value="1"${SLF.sign==='1'?' selected':''}>(+) 보유</option>
-      <option value="-1"${SLF.sign==='-1'?' selected':''}>(−) 마이너스</option>
-      <option value="0"${SLF.sign==='0'?' selected':''}>0</option>
-    </select>
-    <label>범위</label>
-    <select id="sl-scope">
-      <option value="sent"${SLF.scope==='sent'?' selected':''}>받은 부품</option>
-      <option value="all"${SLF.scope==='all'?' selected':''}>전체(소진만 포함)</option>
-    </select>
-    <button class="go" id="sl-go">조회</button>
-    <span class="sp">${num(rows.length)}건 · 입고 ${num(t.sent)} / 출고 ${num(t.used)} / 잔량 ${num(t.bal)}</span>
-  </div>
-  <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
-    <div style="flex:1.3 1 420px;min-width:340px">
-      <div class="gwrap" style="max-height:calc(100vh - 250px)"><table class="tbl">
-        <thead><tr><th style="width:130px">자도번</th><th style="width:190px">품명</th>
-          <th style="width:80px">입고</th><th style="width:80px">출고</th><th style="width:80px">잔량</th></tr></thead>
-        <tbody>${rows.length ? rows.map((r,i)=>`<tr class="sl-row" data-i="${i}" style="cursor:pointer${
-            det&&det.mat===r.mat_code?';background:#eef4ff':''}">
-          <td class="l"><b>${esc(r.mat_code||'')}</b></td>
-          <td class="l" title="${esc(r.matnm||'')}" style="max-width:190px;overflow:hidden;text-overflow:ellipsis">${esc(r.matnm||'')}</td>
-          <td class="r" style="color:#1f7a3d">${num(r.sent)}</td>
-          <td class="r" style="color:#c0392b">${num(r.used)}</td>
-          ${bal(r.bal)}
-        </tr>`).join('') : `<tr><td colspan="5" class="empty" style="padding:22px">수불 내역 없음</td></tr>`}</tbody>
-        ${rows.length?`<tfoot><tr class="grandtot"><td colspan="2">합계 ${num(rows.length)}건</td>
-          <td class="r">${num(t.sent)}</td><td class="r">${num(t.used)}</td>${bal(t.bal)}</tr></tfoot>`:''}
-      </table></div>
-    </div>
-    <div style="flex:1 1 360px;min-width:320px">
-      <div class="gwrap" style="max-height:calc(100vh - 250px)">
-        ${!det ? `<div class="empty" style="padding:28px">왼쪽에서 자도번을 선택하면 수불이력이 나옵니다.</div>`
-        : det.err ? `<div class="msg e" style="margin:10px">${esc(det.err)}</div>`
-        : !det.rows ? `<div class="empty" style="padding:28px">불러오는 중…</div>`
-        : `<table class="tbl">
-            <thead><tr><th colspan="6" style="text-align:left;background:#f5f8fd">
-              <b>${esc(det.mat)}</b> ${esc(det.matnm||'')}</th></tr>
-            <tr><th style="width:70px">일자</th><th style="width:80px">구분</th>
-              <th style="width:72px">전일잔량</th><th style="width:66px">입고</th>
-              <th style="width:66px">출고</th><th style="width:72px">잔량</th></tr></thead>
-            <tbody>${(det.rows||[]).length ? det.rows.map(x=>`<tr>
-              <td>${esc(x.maint_ymd||'')}</td><td>${esc(x.tagnm||'')}</td>
-              <td class="r" style="color:var(--sub)">${num(x.prev_qty)}</td>
-              <td class="r" style="color:#1f7a3d">${(+x.in_qty)?num(x.in_qty):''}</td>
-              <td class="r" style="color:#c0392b">${(+x.out_qty)?num(x.out_qty):''}</td>
-              ${bal(x.stock_qty)}
-            </tr>`).join('') : `<tr><td colspan="6" class="empty" style="padding:20px">이력 없음</td></tr>`}</tbody>
-            <tfoot><tr class="grandtot"><td colspan="5">최종 잔량</td>${bal(det.final)}</tr></tfoot>
-          </table>`}
-      </div>
-    </div>
-  </div>`;
-}
-
-/* ───────── 나머지 2화면 — 준비중 ─────────
-   거래명세서 발행 / 거래명세표 수정. 발행·인쇄·모달이 있어 분량이 크다. */
-const _soon=(nm,api)=>`
-  <div class="ttl">${esc(nm)} <small>준비중</small></div>
-  <div class="card"><div class="empty" style="padding:26px;line-height:1.9">
-    이 화면은 아직 만드는 중입니다.<br>
-    <span style="color:var(--sub);font-size:12.5px">내부 ERP 「협력사」 폴더의 같은 화면을 이 포털로 옮기는 작업입니다.
-    서버(${esc(api)})는 이미 열려 있고 자기 거래처만 보이도록 돼 있습니다.</span>
-  </div></div>`;
-const viewDeliv=()=>_soon('거래명세서 발행','/api/partner/deliv420');
-const viewDedit=()=>_soon('거래명세표 수정','/api/delivedit/list');
-
+/* ★포털 자체화면(홈·발주현황·송장·입고)의 배선만 남는다(2026-09-03).
+     계획현황·거래명세서 발행/수정·사급 수불장은 내부 ERP SCREEN 이 자기 배선을 스스로 한다 —
+     renderErp() 가 SCREEN.xxx(#erp) 를 부르면 그 안에서 이벤트까지 붙는다. */
 function wire(){
-  // ★협력사 계획현황 툴바(2026-09-03)
-  const pg=$('#pp-go');
-  if(pg) pg.onclick=()=>{
-    PPF.from = ($('#pp-from')||{}).value || PPF.from;
-    PPF.days = ($('#pp-days')||{}).value || PPF.days;
-    PPF.assy = (($('#pp-assy')||{}).value||'').trim();
-    PPF.part = (($('#pp-part')||{}).value||'').trim();
-    PP=null; loadPP(); render();       // ★조회는 버튼으로만(자동조회 없음)
-  };
-  ['pp-from','pp-days','pp-assy','pp-part'].forEach(id=>{
-    const el=$('#'+id); if(el) el.onkeyup=e=>{ if(e.key==='Enter') pg&&pg.click(); };
-  });
-
-  // ★사급 수불장 — 조회 + 행클릭 드릴다운
-  const slg=$('#sl-go');
-  if(slg) slg.onclick=()=>{
-    SLF.fr=($('#sl-fr')||{}).value||SLF.fr;
-    SLF.to=($('#sl-to')||{}).value||SLF.to;
-    SLF.mat=(($('#sl-mat')||{}).value||'').trim();
-    SLF.sign=(($('#sl-sign')||{}).value||'');
-    SLF.scope=(($('#sl-scope')||{}).value||'sent');
-    SLEDG=null; SGDET=null; render();
-  };
-  const slm=$('#sl-mat'); if(slm) slm.onkeyup=e=>{ if(e.key==='Enter') slg&&slg.click(); };
-  document.querySelectorAll('.sl-row').forEach(tr=>tr.onclick=()=>{
-    const r=((SLEDG||{}).rows||[])[+tr.dataset.i]; if(r) loadSgDet(r);
-  });
-
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
   document.querySelectorAll('[data-sheet]').forEach(cb=>cb.onchange=()=>{
     const sh=cb.dataset.sheet, q=document.querySelector(`[data-q="${sh}"]`);
@@ -930,6 +866,7 @@ $('#out').onclick = async()=>{
   try{ const j = await api('/api/auth/me'); T.me = j.user; $('#login').classList.add('hide'); start(); }
   catch(e){ showLogin(); }
 })();
+})();   /* ← 포털 스크립트 IIFE 끝 */
 </script>
 </body>
 </html>
