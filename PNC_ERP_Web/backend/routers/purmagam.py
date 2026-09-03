@@ -11,29 +11,39 @@ router = APIRouter()
 _ensure_carry_ovr()   # 이월 재배정 override 테이블 보장(1회)
 
 # ================= 매입마감처리 (구매/자재, w_pu_sale_010) — 거래처별, 확정입고(매입) =================
+_PUR_GUBUNS = ["매입", "수입"]
 def _pur_src(win):
-    """확정입고(매입) 원천: 9/S/C/G/H(검사통과) + 수입(_C DIVISION=P). 금액 양수. win=마감기준 조건(mg 참조)."""
+    """확정입고(매입) 원천: 9/S/C/G/H(검사통과)=매입 + 수입(_C DIVISION=P). 금액 양수. win=마감기준 조건(mg 참조).
+       gubun 컬럼(매입/수입)으로 거래구분 필터/표시(매출마감의 판매/반품/수출과 대칭)."""
     return f"""
-    SELECT A.CUST_CODE cc, A.MAT_CODE mat, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat
+    SELECT A.CUST_CODE cc, A.MAT_CODE mat, A.MAINT_COST cost, A.MAINT_YMD ymd, A.MAINT_QTY qty, A.MAINT_AMT amt, A.MAINT_VAT vat, N'매입' gubun
      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.MAINT_TAG IN ('9','S','C','G','H')
        AND ((ISNULL(A.INSP_FLAG,'N') IN ('','N')) OR (ISNULL(A.INSP_FLAG,'N') IN ('S','F') AND A.INSP_PROC_YMD >= ''))
     UNION ALL
-    SELECT A.CUST_CODE, A.MAT_CODE, ROUND(A.MAINT_COST*A.EXCHANGE_RATE,0,1), A.MAINT_YMD, A.MAINT_QTY, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), ISNULL(A.TAXPAYERS,0)
+    SELECT A.CUST_CODE, A.MAT_CODE, ROUND(A.MAINT_COST*A.EXCHANGE_RATE,0,1), A.MAINT_YMD, A.MAINT_QTY, ROUND(A.MAINT_AMT*A.EXCHANGE_RATE,0,1), ISNULL(A.TAXPAYERS,0), N'수입'
      FROM PARTNER_ERP_TEST3.nx.PU_T_STOCK_MAINT_C A JOIN MAGAM mg ON A.CUST_CODE=mg.CUST_CODE
      WHERE {win} AND A.DIVISION='P'"""
 
 @router.get("/api/purmagam/list")
-def purmagam_list(ym: str = Query("")):
-    """매입마감 거래처별 집계(확정입고, 마감기준) + nx 마감상태·조정합."""
+def purmagam_list(ym: str = Query(""), gubun: str = Query("")):
+    """매입마감 거래처별 집계(확정입고=매입 + 수입, 마감기준) + nx 마감상태·조정합.
+       gubun='' /전체=매입+수입(=자재입고집계표 총액) · '매입'/'수입'=해당 구분만."""
     y = _dig4(ym) or _cur_ym()
+    g = (gubun or "").strip()
+    gf = "" if (not g or g in ("전체", "all", "ALL")) else g
+    if gf and gf not in _PUR_GUBUNS:
+        raise HTTPException(400, "gubun 은 전체/매입/수입 중 하나")
+    gwhere = f" WHERE S.gubun=N'{gf}'" if gf else ""
     cn = _conn(); cur = cn.cursor()
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT S.cc cc, MAX(C.CUST_DESC) nm, MAX(C.CUST_TYPE) ct,
             MAX(LTRIM(RTRIM(ISNULL(NULLIF(C.CHARGE_USER_ID,''),ISNULL(C.CHARGE_NAME,''))))) chg,
-            SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items
-          FROM ({_pur_src(_win_ovr('PUR', y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE
+            SUM(S.qty) qty, SUM(S.amt) amt, SUM(S.vat) vat, COUNT(DISTINCT S.mat) items,
+            SUM(CASE WHEN S.gubun=N'매입' THEN S.amt ELSE 0 END) amt_purchase,
+            SUM(CASE WHEN S.gubun=N'수입' THEN S.amt ELSE 0 END) amt_import
+          FROM ({_pur_src(_win_ovr('PUR', y))}) S JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST C ON S.cc=C.CUST_CODE{gwhere}
           GROUP BY S.cc HAVING SUM(S.amt)<>0 ORDER BY SUM(S.amt) DESC""")
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -50,9 +60,10 @@ def purmagam_list(ym: str = Query("")):
     for r in rows:
         cc = r["cc"]; s = st.get(cc, (0, 0))
         r["qty"] = float(r["qty"] or 0); r["amt"] = float(r["amt"] or 0); r["vat"] = float(r["vat"] or 0); r["items"] = int(r["items"] or 0)
+        r["amt_purchase"] = float(r.get("amt_purchase") or 0); r["amt_import"] = float(r.get("amt_import") or 0)
         r["close_flag"] = s[0]; r["bill_flag"] = s[1]
         r["adj_amt"] = adj.get(cc, 0.0); r["final_amt"] = round(r["amt"] + adj.get(cc, 0.0), 2)
-    return {"ym": y, "rows": rows}
+    return {"ym": y, "rows": rows, "gubun": gf, "gubuns": _PUR_GUBUNS}
 
 @router.get("/api/purmagam/detail")
 def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
@@ -66,7 +77,7 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
     try:
         cur.execute(f"""{_SALE_MAGAM.format(ym=y)}
           SELECT S.mat mat, MAX(M.item_name) nm, MAX(M.item_spec) spec, MAX(M.unit) unit, S.cost cost,
-            S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt
+            S.ymd ymd, SUM(S.qty) q, SUM(S.amt) amt, MAX(S.gubun) gubun
           FROM ({_pur_src(phys)}) S JOIN PARTNER_ERP_TEST3.nx.item M ON S.mat=M.item_code
           WHERE S.cc=? GROUP BY S.mat, S.cost, S.ymd""", cc)
         raw = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
@@ -104,7 +115,7 @@ def purmagam_detail(ym: str = Query(""), cc: str = Query(...)):
         carry = 1 if eff != y else 0
         days.add(int(ymd))
         qv = float(r["q"] or 0); av = float(r["amt"] or 0); cv = float(r["cost"] or 0)
-        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "_bd": {}, "_mx": -1.0})
+        it = items.setdefault(mat, {"mat": mat, "nm": r["nm"], "spec": r["spec"], "unit": r["unit"], "cost": cv, "gubun": str(r.get("gubun") or "매입").strip(), "_bd": {}, "_mx": -1.0})
         bd = it["_bd"].setdefault(ymd, {"d": int(ymd), "ymd": ymd, "qty": 0.0, "amt": 0.0, "cost": cv, "carry": carry})
         bd["qty"] += qv; bd["amt"] += av; bd["cost"] = cv; bd["carry"] = carry
         if av > it["_mx"]: it["_mx"] = av; it["cost"] = cv
