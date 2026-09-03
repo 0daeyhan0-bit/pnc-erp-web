@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""생산계획업로드(검토) 전용 라우터 — 레거시 w_pr_plan_020 식 단계별 실행.
+"""생산계획업로드 전용 라우터 — 레거시 w_pr_plan_020 식 단계별 실행.
 
 ★★설계 원칙 (2026-08-26)
   1) soyo.py 는 한 글자도 고치지 않는다. 현행 화면(생산계획업로드)은 그대로 돌아간다.
@@ -44,6 +44,24 @@ def _ensure_profile_price(cur):
     cur.execute("IF OBJECT_ID('nx.sourcing_profile','U') IS NOT NULL AND COL_LENGTH('nx.sourcing_profile','sagub_price') IS NULL ALTER TABLE nx.sourcing_profile ADD sagub_price FLOAT NULL")
 
 
+def _ensure_route_proc(cur):
+    """★route별 생산정보(공정순서·표준작업·LT) 멱등 DDL — STEP6 route-aware 조인이 참조(2026-09-03 신설).
+
+       ★스키마는 정본(prodinfo.py `_ensure_route_proc` = 품목BOM관리>생산정보 저장측)의
+         **글자 그대로 사본**이다. 여기서 임의로 줄이거나 타입을 바꾸면 두 정의가 갈려
+         먼저 도는 쪽이 테이블을 만들고 나중 쪽이 컬럼을 못 찾는 사고가 난다
+         (soyo↔planrev 의 plan_part_dtl 19↔27컬럼 사고와 같은 유형).
+       ★없으면 STEP6 의 SELECT INTO 가 **실행 전 파싱 단계에서 42S02 로 죽는다**(편성 전체 500).
+       신선 nx·테이블 미생성 상태 대비 파싱 안전용. 있으면 no-op."""
+    cur.execute("""IF OBJECT_ID('nx.route_proc_gagong') IS NULL CREATE TABLE nx.route_proc_gagong(
+        route_id INT, item_code varchar(20), proc_seq tinyint, work_code varchar(10), gagong_proc_code varchar(10),
+        s_work_code smallint, mach_code varchar(10), work_qty decimal(18,5), std_size varchar(100), mix_gagong tinyint,
+        gagong_proc_flag varchar(1), gagong_proc_seq tinyint, ready_st decimal(18,5), mach_ct decimal(18,5), inwon tinyint,
+        human_st decimal(18,5), tot_st decimal(18,5), jp_proc_method varchar(1), lt_hr decimal(18,5), key_id int,
+        upd_user varchar(30), upd_at datetime DEFAULT getdate(),
+        CONSTRAINT pk_route_proc_gagong PRIMARY KEY(route_id, item_code, proc_seq))""")
+
+
 def _route_gate_incomplete(cur):
     """★D 사전검증(§19-D): 활성 지정된 Rnn(route_alloc.is_active=1·route_no>1) 중 게이트(§19-C) 미충족 목록+사유.
        ★활성지정 단일소스 = nx.route_alloc.is_active(조달프로파일 택1) — _route_setup과 동일 스위치(2026-08-31 통일).
@@ -80,8 +98,11 @@ def _route_setup(cur):
     - nx.plan_route_active(assy_item_code,route_id): ★활성 게이트(§19-C) 통과한 Rnn만.
       ★활성지정 단일소스 = nx.route_alloc.is_active(조달프로파일 택1 라디오·2026-08-31 통일). 구조축(여기)·배분축(plan_mat_source) 동일 스위치.
       route_no>1 + 게이트(승인·route_edges·업체·단가) 통과분만. 기본 비어있음=전 제품 v_pr_bom(현행)=R01 diff0(가산적).
-      ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%)."""
+      ★안전=활성경로 없으면 STEP7 출력 현행과 byte동일(검증 300WO 100.000%).
+    - nx.route_proc_gagong: STEP6 route-aware 조인이 참조(2026-09-03). 여기서 멱등 보장 →
+      STEP6·STEP7 둘 다 자동 보호(어느 단계를 단독 실행해도 파싱 안전)."""
     _ensure_profile_price(cur)
+    _ensure_route_proc(cur)      # ★STEP6 route-aware 조인의 파싱 안전(2026-09-03)
     cur.execute("""IF OBJECT_ID('nx.route_alloc','U') IS NULL CREATE TABLE nx.route_alloc(
         item_code NVARCHAR(60) NOT NULL, route_id INT NOT NULL, apply_from DATE NULL, apply_to DATE NULL,
         is_active BIT DEFAULT 0, alloc_ratio FLOAT NULL, upd_dt datetime DEFAULT getdate(),
@@ -103,6 +124,12 @@ def _route_setup(cur):
 
 def _step6_sql(cur):
     P = _P
+    # ★route-aware 준비(2026-09-03): 활성 R02(plan_route_active)를 STEP6 **진입에서** 만든다.
+    #   왜 여기서 또 부르나 — STEP6 은 STEP7 보다 **먼저** 돈다(compose_all: M→H→L→K(STEP5+6)→L2→H2→T).
+    #   STEP7 의 _route_setup(:264)에만 의존하면 ① 전날 편성의 낡은 plan_route_active 를 읽거나
+    #   ② 신선 nx 에선 테이블이 없어 파싱 실패한다. ④ 파트별만 단독 실행하는 화면 동선에서는
+    #   STEP7 이 아예 안 돈다. _route_setup 은 DROP+SELECT INTO 라 멱등 — 두 번 불러도 결과 동일.
+    _route_setup(cur)
     # ★STEP6 는 v_pr_bom(뷰) 그대로 — 스냅을 적용했더니 47초→193초로 **느려졌다**(2026-08-27 실측).
     #   STEP6 재귀는 level_no<10 으로 얕고 PR_M_ITEM/PR_M_MAT 조인이 함께 걸려
     #   옵티마이저가 뷰 쪽에서 더 나은 계획을 잡는다. STEP7 과 반대이므로 건드리지 않는다.
@@ -121,9 +148,47 @@ def _step6_sql(cur):
     SELECT assy_item_code,level_no,item_code,MAX(p_item_code) p_item_code,mat_code,SUM(cum_use_qty) cum_use_qty,MAX(in_cust_code) in_cust_code,MAX(vir_item_flag) vir_item_flag
     INTO nx.plan_part_temp FROM CTE_BOM GROUP BY assy_item_code,level_no,item_code,mat_code OPTION(MAXRECURSION 0)""").replace("{P}", P))
     cur.execute("IF OBJECT_ID('nx.plan_part_gagong') IS NOT NULL DROP TABLE nx.plan_part_gagong")
-    cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,ISNULL(b.lt_hr,0) lt_hr
+    # ★★공정 route-aware(2026-09-03 이식 — 출처 soyo.py:522-539 조인블록만).
+    #   무엇을 하나 = 활성 R02(plan_route_active)를 가진 ASSY 의 부품이 **그 route 전용 생산정보**
+    #   (nx.route_proc_gagong = 공정순서·표준작업·LT_HR)를 보유하면 그것을 쓰고, 없으면 현행
+    #   PR_M_ITEM_PROC_GAGONG(R01) 로 자동 폴백한다.
+    #
+    #   왜 필요한가 — STEP7(자재 전개)은 **이미 route-aware** 다(:360-372 route_edges 브랜치).
+    #   그런데 STEP6(공정·리드타임)은 R01 만 봤다 → **BOM 은 R02 인데 공정·LT 는 R01** 인 반쪽 상태.
+    #   lt_hr → cum_lt_hr → _stepL_pull 의 pull_day/pull_hr → part_plan_ymd 로 **당김 일자까지**
+    #   전파되므로 조용한 오차가 된다. 그 반쪽을 봉합하는 것이 이 변경의 전부다.
+    #
+    #   ★identity-safe — 활성 R02 가 없으면(plan_route_active 비면) pra.route_id IS NULL →
+    #   CASE=0 → b.route_id=0 → UNION ALL **위쪽 브랜치(PR_M_ITEM_PROC_GAGONG)만** 매칭된다.
+    #   route_proc_gagong 행은 전부 route_id>0 이라 절대 안 걸린다. LEFT JOIN 이고
+    #   plan_route_active 는 assy 당 1행(_route_setup 의 MIN+GROUP BY 보장)이라 행 증식도 없다.
+    #   ⟹ 활성 R02 0건이면 **현행과 byte 동일**. 2026-09-03 이식 시점 실측: 활성 R02 0건 ·
+    #      plan_route_active 0행 · UNION 5컬럼 타입 전부 일치(승격 없음).
+    #   검증 = _schema/route_step6_p6_diff0_testbed.py (T1 identity · T2 오버라이드 · T2b 국소성)
+    #
+    #   ※SELECT 리스트·PR_M_WORK_SINGLE/PR_M_PROC_GAGONG 조인·WHERE 는 **lt_hr CAST 외에 그대로**.
+    #     soyo 는 마스터를 nx.item 으로 쓰지만 여기(planrev)는 PR_M_ITEM 축이므로 표기 유지.
+    #
+    #   ★lt_hr 명시 CAST(18,3) 이유 — 두 소스의 타입이 다르다:
+    #       PR_M_ITEM_PROC_GAGONG.lt_hr  decimal(18,3)
+    #       route_proc_gagong.lt_hr      decimal(18,5)
+    #     UNION ALL 은 더 큰 쪽으로 **승격**하므로 그대로 두면 plan_part_gagong.lt_hr 가
+    #     decimal(20,5) 가 되고, 그 타입이 plan_part_swork → plan_part_dtl 까지 흘러
+    #     **산출물 스키마가 조용히 바뀐다**(2026-09-03 실측 확인).
+    #     값은 같아도(EXCEPT 0건) 스키마 드리프트는 뷰·하류에 사고를 만든다
+    #     (soyo↔planrev 19↔27컬럼 사고와 같은 유형) → 원래 타입으로 고정한다.
+    cur.execute(("""SELECT a.assy_item_code,a.level_no,a.item_code,a.mat_code,a.p_item_code,a.vir_item_flag,b.proc_seq,g.gc_gubun,a.cum_use_qty,s.gagong_proc_code,b.gagong_proc_seq,b.s_work_code,CAST(ISNULL(b.lt_hr,0) AS decimal(18,3)) lt_hr
     INTO nx.plan_part_gagong FROM nx.plan_part_temp a
-    JOIN {P}PR_M_ITEM_PROC_GAGONG b ON a.mat_code=b.item_code JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
+    LEFT JOIN nx.plan_route_active pra ON pra.assy_item_code=a.assy_item_code
+    JOIN (
+        SELECT item_code, CAST(0 AS INT) route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM {P}PR_M_ITEM_PROC_GAGONG
+        UNION ALL
+        SELECT item_code, route_id, proc_seq, s_work_code, gagong_proc_seq, lt_hr FROM nx.route_proc_gagong
+    ) b ON a.mat_code=b.item_code
+       AND b.route_id = CASE WHEN pra.route_id IS NOT NULL
+             AND EXISTS(SELECT 1 FROM nx.route_proc_gagong x WHERE x.route_id=pra.route_id AND x.item_code=a.mat_code)
+           THEN pra.route_id ELSE 0 END
+    JOIN {P}PR_M_WORK_SINGLE s ON b.s_work_code=s.s_work_code JOIN {P}PR_M_PROC_GAGONG g ON s.gagong_proc_code=g.gagong_proc_code
     WHERE a.vir_item_flag='0' AND ISNULL(a.in_cust_code,'') IN ('','2228')""").replace("{P}", P))
     # ★검토본 변경(2026-08-26): 레거시 SP 원문대로 **가상품목도 행으로 넣는다**(PROC_SEQ=0·LT_HR=0).
     #   그래야 SUB-1/SUB-2 같은 가상 중간노드가 남아 CUM_LT_HR 누적 경로가 이어진다.

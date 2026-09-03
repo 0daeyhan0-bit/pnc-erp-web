@@ -1,15 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// 생산계획업로드(검토) — 레거시 w_pr_plan_020 식 단계별 실행 화면
+// 생산계획업로드 — 레거시 w_pr_plan_020 식 단계별 실행 화면 (★정본·유일)
 //
-// ★현행 「생산계획업로드」(screens.prod.js:639 SCREEN.planupload)는 무변경.
-//   이 화면은 사본이며 백엔드도 별도(/api/planrev/*, backend/routers/planrev.py).
-//   조회·필터·업로드는 현행과 같은 API(/api/plan/list·/api/plan/upload)를 쓴다.
+// ★2026-09-03: 구 화면(screens.prod.js SCREEN.planupload)이 삭제되어 이제 이것 하나다.
+//   구 화면이 쓰던 soyo 편성경로는 2026-08-31 은퇴(nx.plan_part_dtl 을 19컬럼으로
+//   재생성해 뷰가 깨지는 사고), soyo 에만 있던 route-aware STEP6 도 planrev 로
+//   이식 완료 → 보존 이유 소멸. 백엔드 = backend/routers/planrev.py (/api/planrev/*).
+//   조회·필터·업로드는 종전과 같은 API(/api/plan/list · /api/plan/upload).
 //
 // 레거시 모양: 단계 버튼을 순서대로 누르고, 각 버튼 아래 녹색박스에 완료시각(HH:MM:SS).
 //   별도 「생산계획일괄작업」 버튼이 전 단계를 자동 실행.
 // 웹 확장: 실패=빨강(툴팁에 사유) · 선행이 더 최신=주황(다시 실행 권장) · 실행중=파랑.
 //
-// ⚠ 두 화면이 같은 nx 산출테이블에 쓴다 → 백엔드 applock 이 동시실행을 막는다(409).
+// ⚠ 편성은 nx 산출테이블을 DROP+재생성한다 → 백엔드 applock 이 동시실행을 막는다(409).
 // ═══════════════════════════════════════════════════════════════════════════
 SCREEN.planuploadrev=(c)=>{
   const API=API_BASE;
@@ -253,7 +255,7 @@ SCREEN.planuploadrev=(c)=>{
     const dates=data.dates||[];
     const canW=(typeof PERM!=='undefined')?PERM.canEdit('planupload'):true;
     c.innerHTML=`
-     <div class="page-title">🧪 생산계획업로드(검토) <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_plan_020 식 단계별 실행 — 검토용</span></div>
+     <div class="page-title">생산계획업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_plan_020 식 단계별 실행</span></div>
      <div class="page-sub">현행 「생산계획업로드」와 <b>병행 운영</b>합니다. 편성 로직은 동일(사본)이고 <b>실행 방식만</b> 단계별로 바꾼 화면입니다.
        단계 버튼을 순서대로 누르면 각 버튼 아래 <b>완료시각</b>이 표시됩니다. BOM이 바뀌면 <b>④→⑤</b>만 다시 실행하면 됩니다.
        <span style="color:#c0392b">⚠ 현행 화면과 <b>동시에</b> 편성하지 마세요(같은 테이블 사용 — 서버가 차단합니다).</span></div>

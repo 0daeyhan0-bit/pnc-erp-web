@@ -642,96 +642,18 @@ SCREEN.orderupload=(c)=>{
   load();
 };
 
-/* ===== 생산: 생산계획업로드 (w_pr_plan_020) — LG Production Plan Status → nx.plan_dtl ===== */
-SCREEN.planupload=(c)=>{
-  const API=API_BASE;
-  const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  const dcol=s=>(s&&(''+s).length===6)?`${(''+s).slice(2,4)}/${(''+s).slice(4,6)}`:s;
-  const iso=x=>`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
-  const T=new Date();
-  let F={from:iso(T),to:iso(new Date(T.getTime()+30*864e5)),line:'',sched:'',wo:'',model:'',cr:''};
-  let data={dates:[],rows:[],wo_count:0,sum_qty:0}, loading=false, msg='', upcr='C', upfile=null;
-  const load=async()=>{loading=true;draw();
-    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:F.to,line:F.line,sched:F.sched,wo:F.wo,model:F.model,cr:F.cr});
-    try{const r=await fetch(`${API}/api/plan/list?${qs}`);data=await r.json();msg='';}
-    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],wo_count:0,sum_qty:0};}
-    loading=false;draw();};
-  const doUpload=async()=>{
-    if(!upfile){alert('업로드할 엑셀 파일을 선택하세요.');return;}
-    msg='업로드 중...';draw();
-    const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(upfile);});
-    // ★fname 을 함께 보낸다 — 서버가 `lg_xxx_MMDD` 날짜와 파일 안 일자축을 대조,
-    //   불일치면 **저장 전 409**. 사용자가 확인하면 force 로 재요청(2026-09-01).
-    const _post=(force)=>fetch(`${API}/api/plan/upload`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({cr:upcr,b64,fname:(upfile&&upfile.name)||'',force:!!force})});
-    try{let r=await _post(false); let j=await r.json();
-      if(r.status===409){
-        if(!confirm('⚠ '+(j.detail||'업로드 날짜가 상이합니다.'))){msg='업로드를 취소했습니다 — 파일을 다시 확인하세요.';draw();return;}
-        r=await _post(true); j=await r.json();
-      }
-      if(j.ok){
-        alert(`생산계획 UPLOAD 완료${j.forced?'  (날짜 경고 무시)':''}\n신규 ${nf(j.inserted)} · 갱신 ${nf(j.updated)} · 총 ${nf(j.total)} (WO,일자) (구분 ${j.cr})`);upfile=null;load();return;}
-      alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}
-    catch(e){alert('업로드 실패: '+e);}
-    msg='';draw();};
-  const draw=()=>{
-    const dates=data.dates||[];
-    const canW=(typeof PERM!=='undefined')?PERM.canEdit('planupload'):true;   // 수정권한 게이트(규칙#16)
-    c.innerHTML=`
-     <div class="page-title">📅 생산계획업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">LG PU-SCS Production Plan Status → 생산계획</span></div>
-     <div class="page-sub">LG 생산계획 엑셀(Line·P/S Order·Material·일자별 수량)을 업로드합니다. 일별 컬럼을 (제번,일자)로 전개. 저장 <code>nx.plan_dtl</code> · 레거시 w_pr_plan_020 실검증(WO총량 100% 일치)</div>
-     <div class="toolbar">
-       <label class="tl">계획기간</label><input class="inp" type="date" id="p-from" value="${F.from}"> ~ <input class="inp" type="date" id="p-to" value="${F.to}">
-       <label class="tl">라인</label><input class="inp" id="p-line" value="${esc(F.line)}" style="width:70px">
-       <label class="tl">그룹</label><input class="inp" id="p-sched" value="${esc(F.sched)}" style="width:60px">
-       <label class="tl">W/O</label><input class="inp" id="p-wo" value="${esc(F.wo)}" style="width:100px">
-       <label class="tl">모델</label><input class="inp" id="p-model" value="${esc(F.model)}" style="width:120px">
-       <label class="tl">구분</label><select class="inp" id="p-cr"><option value=""${F.cr===''?' selected':''}>전체</option><option value="C"${F.cr==='C'?' selected':''}>C</option><option value="R"${F.cr==='R'?' selected':''}>R</option></select>
-       <button class="btn" id="p-search">🔍 조회</button>
-     </div>
-     <div class="toolbar" style="margin-top:2px">
-       <div class="spacer"></div>
-       ${canW?`<label class="tl">업로드</label><select class="inp" id="p-upcr"><option value="C"${upcr==='C'?' selected':''}>C(SAC)</option><option value="R"${upcr==='R'?' selected':''}>R(RAC)</option></select>
-       <input type="file" id="p-file" accept=".xls,.xlsx" style="width:200px">
-       <button class="btn" id="p-upload" style="background:#1c47a0;color:#fff">📅 생산계획UPLOAD</button>
-       <button class="btn" id="p-compmat" style="background:#7a4ca0;color:#fff" title="레거시 STEP5→6→7 충실이식 정본 자재소요 + 조달 프로파일 오버레이 (수량100% 검증)">🧾 자재소요·조달 편성</button>`:`<span style="color:#c0392b;font-size:12px">🔒 업로드 권한 없음 (${esc((typeof PERM!=='undefined')?PERM.label():'')})</span>`}
-     </div>
-     ${msg?`<div class="page-sub" style="color:#c0392b">⚠ ${esc(msg)}</div>`:''}
-     <div class="toolbar" style="margin-top:2px"><span class="rowcount">WO <b>${nf(data.wo_count)}</b> · 계획수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}개</span></div>
-     <div class="grid-wrap" style="max-height:calc(100vh - 330px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
-      <table class="tbl" style="font-size:11px"><thead><tr>
-       <th>라인</th><th>WORK-ORDER</th><th>모델</th><th>그룹</th><th class="num">Total</th><th class="num">잔량</th>${dates.map(d=>`<th class="num">${dcol(d)}</th>`).join('')}</tr></thead>
-      <tbody>${loading?spinRow(6+dates.length):((data.rows&&data.rows.length)?data.rows.map(r=>`<tr>
-        <td class="center">${esc(r.line)}</td><td><b>${esc(r.wo)}</b></td>
-        <td class="bcap" title="${esc(r.model)}" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(r.model)}</td>
-        <td class="center">${esc(r.sched)}</td><td class="num">${nf(r.total)}</td><td class="num">${nf(r.remain)}</td>
-        ${dates.map(d=>{const v=(r.days&&r.days[d])||0;return `<td class="num"${v?'':' style="color:#dfe6ef"'}>${v?nf(v):'·'}</td>`;}).join('')}</tr>`).join(''):`<tr><td colspan="${6+dates.length}" class="empty">조회 결과 없음 — 조건을 바꾸거나 엑셀을 업로드하세요.</td></tr>`)}</tbody></table></div>`;
-    const g=id=>c.querySelector(id);
-    g('#p-search').onclick=()=>{F.from=g('#p-from').value;F.to=g('#p-to').value;F.line=g('#p-line').value;F.sched=g('#p-sched').value;F.wo=g('#p-wo').value;F.model=g('#p-model').value;F.cr=g('#p-cr').value;load();};
-    if(canW){g('#p-upcr').onchange=e=>upcr=e.target.value;
-      g('#p-file').onchange=e=>upfile=e.target.files[0]||null;
-      g('#p-upload').onclick=doUpload;}
-    // ★2026-08-23 소요전개기 #3 retire(PLAN_PROGRAM_MASTER §P1): 구 '협력사계획 편성'(/api/plan/compose→死 nx.plan_part) 버튼 제거.
-    //   정본 소요=아래 '자재소요·조달 편성'(compose_mat→nx.plan_part_mat, STEP M 포함 상위집합).
-    // ★2026-08-31 이 편성 경로는 은퇴했다(서버도 410 으로 막음).
-    //   soyo 편성은 nx.plan_part_dtl 을 19개 컬럼으로 재생성해 뷰 v_plan_part_copy_new 를 깨뜨린다
-    //   → 파트별 생산계획·키팅·가공생산진척 조회 불가. 정본 = 「생산계획업로드[검토]」(planrev).
-    const cm=g('#p-compmat');if(cm)cm.onclick=async()=>{
-      alert('이 편성 경로는 은퇴했습니다.\n\n「생산계획업로드[검토]」 화면에서 단계별로 편성하세요.\n'
-           +'(이 경로로 편성하면 파트별 생산계획·키팅 화면이 조회 불가가 됩니다)');
-      return;};
-    const _cmOld=async()=>{if(!confirm('업로드된 생산계획으로 정본 자재소요(레거시 STEP5→6→7)를 산출하고\n조달 프로파일을 오버레이해 조달 소요를 편성합니다.\n(수량 100% 검증본)\n진행할까요?'))return;
-      cm.disabled=true;cm.textContent='편성 중…';
-      try{const r=await fetch(`${API}/api/plan/compose_mat`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const jj=await r.json();
-        if(jj.ok)alert(`자재소요·조달 편성 완료\n품목계획 ${nf(jj.item_lines)} · 자재소요 ${nf(jj.mat_lines)}(제번 ${nf(jj.mat_work_orders)}) · 조달소요 ${nf(jj.sourcing_lines)}\n\n→ 「자재소요·조달 조회」 화면에서 확인`);
-        else alert('편성 실패: '+(jj.error||jj.detail||JSON.stringify(jj)));}
-      catch(e){alert('편성 실패: '+e);}
-      cm.disabled=false;cm.textContent='🧾 자재소요·조달 편성';};
-    void _cmOld;   // 은퇴 보관용(되살리려면 위 alert 를 지우고 cm.onclick=_cmOld 로)
-    ['#p-wo','#p-model','#p-line'].forEach(id=>g(id).onkeyup=e=>{if(e.key==='Enter')g('#p-search').click();});
-  };
-  load();
-};
+/* ===== 생산: 생산계획업로드 (w_pr_plan_020) — ★2026-09-03 삭제 =====
+   구 SCREEN.planupload 는 제거했다. 정본 = 「생산계획업로드」(js/screens.planrev.js
+   SCREEN.planuploadrev, 백엔드 routers/planrev.py).
+
+   왜 지웠나 — 이 화면의 「자재소요·조달 편성」이 부르던 soyo 편성경로는 2026-08-31 에
+   은퇴했다(nx.plan_part_dtl 을 19컬럼으로 재생성해 뷰 v_plan_part_copy_new 가 깨지고
+   410·키팅·420 조회가 막히는 사고). 그 뒤 화면은 메뉴에서 숨겨진 채 죽은 코드로 남아
+   있었고, soyo 에만 있던 route-aware STEP6 도 2026-09-03 에 planrev 로 이식을 마쳐
+   더 이상 보존할 이유가 없다.
+
+   ※조회·업로드는 신 화면이 **같은 API**(/api/plan/list · /api/plan/upload)를 쓴다.
+   ※권한 키 'planupload' 는 신 화면도 그대로 사용한다(screens.planrev.js:254) — 유지. */
 
 /* ★파트별생산계획 드래그실적 — 확인/취소 버튼은 파일 로드시 문서에 딱 한 번 캡처단계로 건다.
    화면함수(SCREEN.partplan) 안에서 걸면, 이미 열려 있던 탭은 그 함수가 다시 실행되지 않아

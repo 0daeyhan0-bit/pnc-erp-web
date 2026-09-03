@@ -239,10 +239,10 @@ const MODULES=[
    {id:'prodinout',ic:'🔁',nm:'생산입출고현황'},
    {sep:true},
    {id:'orderupload',ic:'📥',nm:'주문업로드'},
-   // {id:'planupload',ic:'📅',nm:'생산계획업로드'},   // ★2026-08-28 메뉴 숨김(요청) — 검토본으로 일원화. SCREEN.planupload 는 유지
-   // ★검토용(2026-08-26) — 레거시식 단계별 실행. 편성로직은 사본(동일), 실행방식만 다름. 기존분과 병행.
-   //   tag:'검토' = 사이드바에 주황 배지 + 글자색으로 구분(검토중 메뉴임을 한눈에).
-   {id:'planuploadrev',ic:'🧪',nm:'생산계획업로드',tag:'검토'},
+   // ★생산계획업로드 = 단계별 실행(planrev). 구 SCREEN.planupload 는 2026-09-03 삭제 —
+   //   그 화면이 쓰던 soyo 편성경로가 은퇴했고(2026-08-31), route-aware STEP6 이식까지
+   //   끝나 보존 이유가 없어졌다. 이제 편성 화면은 이것 하나뿐이다.
+   {id:'planuploadrev',ic:'📅',nm:'생산계획업로드'},
    {id:'planinput',ic:'➕',nm:'생산계획추가입력'},
    {id:'prodsheet',ic:'🖨️',nm:'생산전표출력관리'},
    {id:'partplan',ic:'🧩',nm:'파트별 생산계획'},
@@ -3700,8 +3700,17 @@ function updateHeaderUser(){
     +`<button id="btnLogout" class="btn" style="padding:2px 10px;font-size:12px">로그아웃</button>`;
   const lo=el.querySelector('#btnLogout'); if(lo)lo.onclick=doLogout;
 }
-function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
-  sessionStorage.removeItem('perm_authed'); location.reload(); }
+/* ★로그아웃 — 서버 세션 폐기 + 토큰 삭제까지 한다(2026-09-03 수정).
+     종전엔 sessionStorage.perm_authed 만 지우고 리로드했는데, 진짜 세션키는
+     **localStorage.auth_token** 이라 리로드 후 boot.js 의 AUTH.me() 가 200 을 받고
+     perm_authed 를 다시 써넣어 **같은 계정으로 되돌아왔다** — 사용자 눈엔 "버튼이 안 먹힘".
+     AUTH.logout()(POST /api/auth/logout → nx.app_session.revoked=1) + AUTH.clear()
+     는 이미 구현돼 있었고 호출만 빠져 있었다.
+   ※perm_userId 도 지운다 — 안 지우면 다른 계정으로 재로그인해도 이전 사용자 캐시가 남는다. */
+async function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
+  try{ await AUTH.logout(); }catch(e){ try{AUTH.clear();}catch(_){} }
+  try{ localStorage.removeItem('perm_userId'); }catch(e){}
+  location.reload(); }
 
 /* ================= 사이드바 숨김/열기 (2026-08-27) =================
    넓은 그리드 화면(협력사계획현황 등)에서 본문 폭 확보용.

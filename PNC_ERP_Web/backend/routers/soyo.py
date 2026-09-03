@@ -1,5 +1,35 @@
 # -*- coding: utf-8 -*-
-"""soyo 도메인 라우터 — app.py에서 분리. 공유헬퍼는 common.py."""
+"""soyo 도메인 라우터 — app.py에서 분리. 공유헬퍼는 common.py.
+
+★★★편성 경로는 은퇴했다 — 쓰지 않는다(2026-08-31 차단 · 2026-09-03 명시).
+
+  【쓰지 않는 것 = 편성 3종】
+    · plan_compose_mat  (/api/plan/compose_mat)  → HTTP 410
+    · _step6_sql                                  → RuntimeError
+    · _step7_sql                                  → RuntimeError
+  이 셋은 **본문을 보관만** 하고 진입에서 막는다. 되살리지 말 것.
+
+  왜 막았나 — soyo 와 planrev 는 같은 nx.plan_part_dtl 에 쓰는데 컬럼 구성이 다르다.
+    soyo    19컬럼
+    planrev 27컬럼 (+OUTPUT_HM·AMPM·CUM_LT_HR·PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM·PULL_*)
+  편성이 테이블을 DROP 후 재생성하므로 soyo 를 한 번 돌리면 컬럼이 사라지고,
+  그 컬럼을 참조하는 뷰 nx.v_plan_part_copy_new 가 깨져
+  **파트별 생산계획(410)·준비실적처리(키팅)·가공생산진척(420) 조회가 통째로 막힌다.**
+  (2026-08-31 실측 사고. planrev 재편성으로 복구)
+
+  ★정본 = routers/planrev.py (/api/planrev/step/* · /compose_all)
+    화면 = 「생산계획업로드」(js/screens.planrev.js). 구 화면은 2026-09-03 삭제.
+
+  ★이 파일에 있던 route-aware STEP6(활성 R02 의 생산정보 소비)은
+    2026-09-03 에 planrev._step6_sql 로 이식 완료(조인 블록만). diff0 검증 통과.
+    ⟹ soyo 에서 가져올 편성 로직은 **더 이상 없다.**
+
+  【살아있는 것 = 조회·영업 API】 이 파일이 통째로 죽은 것은 아니다. 아래는 정상 동작한다.
+    · /api/plan/sourcing       조달 소요 조회
+    · /api/plan/part           파트별 조회
+    · /api/sales/forecast      영업예상매출
+    · forecast_sagub / rebuild LG사급 캐시
+"""
 import os, math, json, base64, time, hashlib, mimetypes
 from datetime import datetime, timedelta
 from urllib.parse import quote as _urlquote
@@ -31,14 +61,14 @@ def plan_compose_mat(payload: dict = Body(...)):
          → 파트별 생산계획(410)·준비실적처리(키팅)·가공생산진척(420) 조회 불가.
          (2026-08-31 실측: 이 함수를 직접 호출해 410 이 "백엔드 연결 실패"로 막혔다)
 
-       정본 = 생산계획업로드[검토] 화면 → planrev.py (/api/planrev/step/*, /compose_all).
+       정본 = 생산계획업로드 화면 → planrev.py (/api/planrev/step/*, /compose_all).
        화면도 2026-08-28 에 메뉴에서 숨겨졌다(core.js: SCREEN.planupload).
 
        되살리려면: 아래 raise 를 지우기 전에 STEP6 이 위 6개 컬럼을 함께 만들도록
                    맞추고, v_plan_part_copy_new 로 검증할 것.
     """
     raise HTTPException(410,
-        "은퇴한 편성 경로입니다 — 「생산계획업로드[검토]」 화면을 사용하세요.\n\n"
+        "은퇴한 편성 경로입니다 — 「생산계획업로드」 화면을 사용하세요.\n\n"
         "이 경로로 편성하면 nx.plan_part_dtl 의 컬럼 6개(OUTPUT_HM·AMPM·CUM_LT_HR·"
         "PART_PLAN_YMD·PART_OUTPUT_HM·PART_AMPM)가 사라져 뷰 v_plan_part_copy_new 가 깨지고, "
         "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회가 막힙니다.")
@@ -496,12 +526,20 @@ def _step6_sql(cur):
        (편성 로그를 남기지 않는 = 웹 편성 화면이 아닌 경로로 불렸다는 뜻).
        → 함수 진입에서 막는다. 정본은 planrev._step6_sql(27컬럼).
 
+       ★★★route-aware 공정(활성 R02 생산정보 소비)은 **planrev 로 이관 완료**(2026-09-03).
+          아래 :527-539 의 `LEFT JOIN plan_route_active` + `(R01 UNION ALL route_proc_gagong)`
+          + `CASE b.route_id` 조인블록이 이식 원본이고, planrev._step6_sql 에 그대로 들어갔다.
+          (planrev 는 CUM_LT_HR 누적·가상품목·당김까지 하므로 조인블록만 옮겼다.
+           검증: 활성 R02 0건 상태에서 plan_part_dtl 27컬럼 양방향 EXCEPT 0건 = diff0,
+                 합성 R02 롤백 테스트에서 R01 658/8.0 → R02 385/9.0 반영 확인)
+          ⟹ **이 파일에서 planrev 로 가져갈 편성 로직은 더 이상 없다.**
+
        ※같은 이유로 _step7_sql 도 planrev 쪽을 쓸 것."""
     raise RuntimeError(
         "은퇴한 편성 함수입니다(soyo._step6_sql) — planrev 를 쓰세요.\n"
         "이 함수는 nx.plan_part_dtl 을 19컬럼으로 재생성해 뷰 v_plan_part_copy_new 를 깨뜨리고, "
         "파트별 생산계획·준비실적처리(키팅)·가공생산진척 조회를 막습니다.\n"
-        "정본 = routers/planrev.py 의 _step6_sql (27컬럼) · 화면 「생산계획업로드[검토]」")
+        "정본 = routers/planrev.py 의 _step6_sql (27컬럼·route-aware 이관완료) · 화면 「생산계획업로드」")
 
     P = _P
     _route_setup(cur)   # ★P6: plan_route_active(활성 R02) 준비 — 공정 route-aware 오버레이용. STEP7도 재호출(멱등·동일결과)
@@ -644,7 +682,7 @@ def _step7_sql(cur):
        정본 = routers/planrev.py 의 _step7_sql."""
     raise RuntimeError(
         "은퇴한 편성 함수입니다(soyo._step7_sql) — planrev 를 쓰세요.\n"
-        "정본 = routers/planrev.py · 화면 「생산계획업로드[검토]」")
+        "정본 = routers/planrev.py · 화면 「생산계획업로드」")
 
     P = _P
     # ★★2026-09-01: routing_edge 를 **읽기 직전에 갱신**한다.
