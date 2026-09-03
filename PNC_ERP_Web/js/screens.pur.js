@@ -2203,7 +2203,9 @@ SCREEN.coopquote=(host)=>{
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const won2=v=>(v==null||v==='')?'-':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const nf=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote'):true;
+  // ★권한 sid = 메뉴 sid 'coopquote2'(협력사견적관리) — 2026-09-03 교정.
+  //   'coopquote' 는 MODULES 에 없어 권한관리에서 켤 수 없었다(관리자 외 전원 false).
+  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote2'):true;
   const loadVendors=async()=>{try{const r=await fetch(`${API}/api/coopquote/vendors`);const j=await r.json();st.vendors=j.rows||[];}catch(e){}};
   const load=async()=>{st.loading=true;if(!st.ym)st.ym=new Date().toISOString().slice(0,7);render();
     try{const r=await fetch(`${API}/api/coopquote/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.filterMode==='active'?1:0}&newonly=${st.filterMode==='new'?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
@@ -2710,7 +2712,9 @@ SCREEN.coopquote2=(host)=>{
   const won=v=>(v==null||v==='')?'<span style="color:#c9d1dc">-</span>':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const won2=v=>(v==null||v==='')?'-':Number(v).toLocaleString('ko-KR',{maximumFractionDigits:2});
   const nf=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
-  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote'):true;
+  // ★권한 sid = 메뉴 sid 'coopquote2'(협력사견적관리) — 2026-09-03 교정.
+  //   'coopquote' 는 MODULES 에 없어 권한관리에서 켤 수 없었다(관리자 외 전원 false).
+  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote2'):true;
   const loadVendors=async()=>{try{const r=await fetch(`${API}/api/coopquote2/vendors`);const j=await r.json();st.vendors=j.rows||[];}catch(e){}};
   const load=async()=>{st.loading=true;if(!st.ym)st.ym=new Date().toISOString().slice(0,7);render();
     try{const r=await fetch(`${API}/api/coopquote2/list?vendor=${encodeURIComponent(st.vendor)}&q=${encodeURIComponent(st.q)}&active_only=${st.filterMode==='active'?1:0}&newonly=${st.filterMode==='new'?1:0}&fixonly=${st.filterMode==='fix'?1:0}&ym=${encodeURIComponent(st.ym||'')}`);
@@ -3224,7 +3228,9 @@ SCREEN.coopquoteinput=(host)=>{
   const st={item:'',data:null,loading:false,msg:'',vendor:'',grade:'일반CU',sagub:20000,proc:0,vendors:[],edits:{},sagubEdits:{}};
   const nf=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const nf4=v=>Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:4});
-  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote'):true;
+  // ★권한 sid = 메뉴 sid 'coopquote2'(협력사견적관리) — 2026-09-03 교정.
+  //   'coopquote' 는 MODULES 에 없어 권한관리에서 켤 수 없었다(관리자 외 전원 false).
+  const ed=()=>(typeof PERM!=='undefined')?PERM.canEdit('coopquote2'):true;
   const geom=(d,t,L)=>(d&&t&&L)?Math.PI*(d-t)*t*L*8.94/1e6:0;
   const loadVendors=async()=>{try{const r=await fetch(`${API}/api/coopquote/vendors`);const j=await r.json();st.vendors=j.rows||[];}catch(e){}};
   const load=async()=>{const it=st.item.trim();if(!it)return;st.loading=true;st.edits={};st.msg='';render();
@@ -3401,7 +3407,9 @@ SCREEN.autoorder=(c)=>{
   const API=API_BASE;
   const nf=n=>Number(n||0).toLocaleString('ko-KR',{maximumFractionDigits:0});
   const won=n=>'₩'+nf(n);
-  const canW=(typeof PERM!=='undefined')?PERM.canEdit('autoorder'):true;
+  // ★권한 sid = 메뉴 sid 'manorder'(수동발주) — 2026-09-03 교정. 자동발주는 아직 메뉴 미연결이라
+  //   자체 sid 가 MODULES 에 없다(있으면 항상 false). 발주 권한으로 함께 통제한다.
+  const canW=(typeof PERM!=='undefined')?PERM.canEdit('manorder'):true;
   const GB={'매입':'#1c47a0','유상사급':'#7a4ca0','외주가공':'#b8860b','외주완성':'#8a6d00','미지정':'#c0392b'};
   let tab='preview', F={line:'',cr:'',vendor:'',item:'',gubun:'',ymd:''};
   let pos=[], summary=null, loading=false, msg='', sel=new Set(), open=new Set();

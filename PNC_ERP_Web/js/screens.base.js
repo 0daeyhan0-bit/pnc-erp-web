@@ -253,7 +253,10 @@ SCREEN.drawingdoc=(host)=>{
     catch(e){alert('삭제 오류: '+e);}
   };
   const render=()=>{
-    const ed=(typeof PERM!=='undefined')?PERM.canEdit('drawingdoc'):true;
+    // ★권한 sid = 메뉴 sid 'docmgr' (2026-09-03 교정). 종전 'drawingdoc' 은 MODULES 에 없는 sid 라
+    //   권한관리 화면에 체크박스가 아예 없었다 → _sid2mod 가 '' 를 돌려줘 **관리자 외 전원 false**.
+    //   도면/시방은 같은 화면의 두 탭이므로 한 권한(docmgr)으로 통제한다(사용자 확정).
+    const ed=(typeof PERM!=='undefined')?PERM.canEdit('docmgr'):true;
     host.innerHTML=`
      <div class="page-title">설계도면조회 <span style="font-size:12px;color:var(--muted);font-weight:400">도면 파일 조회·다운로드·업로드 · w_pr_master_200</span></div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
@@ -321,7 +324,8 @@ SCREEN.itemspec=(host)=>{
     catch(e){alert('삭제 오류: '+e);}
   };
   const render=()=>{
-    const ed=(typeof PERM!=='undefined')?PERM.canEdit('itemspec'):true;
+    // ★권한 sid = 메뉴 sid 'docmgr' (2026-09-03 교정, 위 drawingdoc 과 동일 사유·같은 화면의 탭)
+    const ed=(typeof PERM!=='undefined')?PERM.canEdit('docmgr'):true;
     host.innerHTML=`
      <div class="page-title">품목시방관리 <span style="font-size:12px;color:var(--muted);font-weight:400">품목 시방(PPT)·첨부문서 · w_pr_master_210</span></div>
      <div class="toolbar" style="flex-wrap:wrap;gap:4px">
@@ -500,7 +504,9 @@ SCREEN.partmaster=(c)=>{
       const j=await r.json();if(j.ok){st.wmode='view';st.wdraft=null;st.msg=`✅ 작업자 저장(추가 ${j.ins}·수정 ${j.upd}·삭제 ${j.del})`;await loadWorkers(st.sel);}else alert('저장 실패: '+(j.detail||''));}
     catch(e){alert('저장 오류: '+e);}};
   const draw=()=>{
-    const ed=(typeof PERM!=='undefined')?PERM.canEdit('partmaster'):true;
+    // ★권한 sid = 메뉴 sid 'basemaster' (2026-09-03 교정). 파트마스터는 '기준 마스터 관리' 안에서
+    //   열리는 서브화면이라 자체 메뉴가 없다 — 'partmaster' 는 MODULES 에 없어 항상 false 였다.
+    const ed=(typeof PERM!=='undefined')?PERM.canEdit('basemaster'):true;
     c.innerHTML=`
      <div class="page-title">🔧 파트 마스터 <span style="font-size:12px;color:var(--muted);font-weight:400">PR_M_PROC_GAGONG · 생산효율(=키팅 회수율)</span></div>
      <div class="page-sub">파트별 <b>생산효율(회수율)</b>·연동창고·정렬키·<b>실적처리방법</b> 관리. 원가·계획·키팅이 공유하는 마스터(nx 편집). <span style="color:#b8860b">노란=생산효율≠100</span></div>

@@ -14,9 +14,22 @@ router = APIRouter()
 
 # ================= 협력사 ①: 협력사계획현황 (w_pr_outside_040) — nx.plan_part 편성결과 =================
 @router.get("/api/partner/workcenters")
-def partner_workcenters(src: str = Query("nx")):
+def partner_workcenters(request: Request, src: str = Query("nx")):
     """자도번작업처(협력사/내부공정) 목록. src=legacy → 라이브 PR_T_PLAN_PART_MAT(레거시 협력사계획, 당김 반영).
-       src=nx(기본) → 우리 편성 nx.plan_part_mat."""
+       src=nx(기본) → 우리 편성 nx.plan_part_mat.
+
+       ★소속 강제(2026-09-03 신설) — 협력사 계정은 **자기 거래처 1건만** 받는다.
+         종전엔 request 파라미터조차 없어 인증을 걸 수 없는 구조였고, 반환값이
+         전 협력사의 코드·이름·계획건수(n = 물량 규모)라 그대로 열면 경쟁사 목록이 샌다.
+         내부 ERP 「협력사」 폴더를 협력사에게 열면서(core.js ROLE_MOD) 이 API 도 필요해져
+         소속강제를 넣고 화이트리스트에 올렸다. 직원은 종전대로 전체를 본다."""
+    _mine = scope_cust(require_user(request), "")   # 협력사=partner_code / 직원=""(전체)
+    def _flt(rows):
+        if not _mine:                                # 직원 — 전체
+            return rows
+        if _mine == "__NONE__":                      # 거래처 미지정 협력사 — 아무것도 안 보여준다
+            return []
+        return [x for x in rows if str(x.get("cc") or "").strip() == _mine]
     if src == "legacy":
         cn = _conn(); cur = cn.cursor()
         try:
@@ -26,7 +39,7 @@ def partner_workcenters(src: str = Query("nx")):
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE=pp.MAT_WORK_CENTER_CODE
                 WHERE pp.MAT_WORK_CENTER_CODE>'' GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE)
                 ORDER BY COUNT(*) DESC""")
-            return {"rows": [{"cc": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()]}
+            return {"rows": _flt([{"cc": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()])}
         finally:
             cn.close()
     nx = _nx(); cur = nx.cursor()
@@ -40,7 +53,7 @@ def partner_workcenters(src: str = Query("nx")):
                 LEFT JOIN PARTNER_ERP_TEST3.nx.CM_M_CUST cu ON cu.CUST_CODE{C}=pp.MAT_WORK_CENTER_CODE{C}
                 WHERE pp.MAT_WORK_CENTER_CODE>'' GROUP BY pp.MAT_WORK_CENTER_CODE, COALESCE(w.WORK_DESC, cu.CUST_DESC, pp.MAT_WORK_CENTER_CODE)
                 ORDER BY COUNT(*) DESC""")
-            return {"rows": [{"cc": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()]}
+            return {"rows": _flt([{"cc": r[0], "nm": r[1], "n": r[2]} for r in cur.fetchall()])}
         except Exception:
             return {"rows": []}
     finally:

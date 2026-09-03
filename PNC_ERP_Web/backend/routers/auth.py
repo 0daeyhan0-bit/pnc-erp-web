@@ -165,7 +165,31 @@ COOP_ALLOW = {
     "/api/setin/issue", "/api/setin/invoice",
     "/api/setstock/list",                 # 내 납품이 입고됐는지 확인(읽기전용·소속강제됨)
     "/api/coopporder/items",              # 협력사 발주현황(내 계획·재고·기발주·순소요, 읽기전용·소속강제됨)
-}                                          # ※ scan/receive/cancel 은 staff_only — 담당자만
+
+    # ── 내부 ERP 「협력사」 폴더 개방 (2026-09-03) ──────────────────────────────
+    #   협력사 계정이 index.html 로 들어와 자기 것만 보게 한다(core.js ROLE_MOD['협력사']).
+    #   ★전부 scope_cust() 로 소속강제됨 — 자기 거래처 외 데이터는 못 본다.
+    "/api/partner/workcenters",           # 작업처 드롭다운 — ★소속강제 넣고 개방(자기 1건만)
+    "/api/sagub/holding/list",            # 협력사사급재고관리 — 보유재고 (읽기)
+    "/api/sagub/adjust/list",             # 〃 조정이력 (읽기)
+    "/api/sagubledger/list",              # 사급 수불장 — 목록 (읽기)
+    "/api/sagubledger/detail",            # 〃 상세 (읽기)
+    "/api/delivedit/custs",               # 거래명세표 수정 — 거래처(자기 1건)
+    "/api/delivedit/items",               # 〃 도번·자도번 목록
+    "/api/delivedit/update",              # 〃 수량수정 (쓰기·_guard 가 출발20 이후 차단)
+    "/api/delivedit/delete",              # 〃 삭제   (쓰기·동상)
+}
+# ★★협력사에게 **열지 않은 것** — 뺀 이유를 남긴다(나중에 무심코 추가하지 않도록).
+#   · /api/sagub/adjust/save · /api/sagub/adjust/delete
+#       사급 원장(nx.sagub_maint)에 maint_tag='B' 를 직접 넣고 **음수를 허용**한다.
+#       협력사가 "실사 보정"으로 분실·과소비한 사급자재를 스스로 장부에서 지울 수 있다.
+#       아무도 실물을 확인하지 않는다 → staff_only() 의 논리와 정확히 같은 상황이라 제외.
+#       (조회 2종만 열었으므로 협력사는 자기 재고·조정이력을 '보기'만 한다)
+#   ※/api/partner/workcenters 는 **소속강제를 넣은 뒤** 열었다(위 목록).
+#     종전엔 request 파라미터조차 없어 인증을 걸 수 없었고 전 협력사 코드·이름·계획물량(n)을
+#     그대로 줬다 — 그 상태로 열었으면 경쟁사 목록이 샜다. coopplan.py 에서 scope_cust 로
+#     자기 1건만 남기도록 고친 뒤 개방. 직원은 종전대로 전체.
+#   ※ scan/receive/cancel 은 staff_only — 담당자만
 
 
 def path_policy(path):

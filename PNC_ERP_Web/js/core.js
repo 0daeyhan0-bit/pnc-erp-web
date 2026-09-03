@@ -519,9 +519,28 @@ const SEED_USERS=[
   {id:'TEST4',nm:'테스트4(개발)',type:'내부',dept:'원가개발',pos:'',roles:['원가개발'],partner:'',email:'',tel:'',status:'사용'},
 ];
 // 역할 → 편집권 부여 모듈(그룹). 시스템관리자=전권(별도). 미설정 모듈=조회만.
-const ROLE_MOD={'구매/자재':['pur','partner'],'생산':['prod','gagong'],'원가개발':['dev'],'영업':['sales'],'품질':['qc'],'경영':['mgmt']};
+// ★'협력사' 추가(2026-09-03) — 종전엔 이 키가 없어 협력사 계정이 내부 ERP 로 들어오면
+//   COMMON_VIEW(기준정보)만 보이는 반쪽 화면이 됐다. 이제 「협력사」 폴더가 보인다.
+//   ※메뉴가 보이는 것과 데이터가 보이는 것은 별개다 — 실제 차단은 서버가 한다:
+//     ① auth.COOP_ALLOW 화이트리스트(deny by default) ② scope_cust() 소속강제(자기 거래처만).
+//     프론트는 '어느 메뉴를 그릴지'만 정한다.
+const ROLE_MOD={'구매/자재':['pur','partner'],'생산':['prod','gagong'],'원가개발':['dev'],'영업':['sales'],'품질':['qc'],'경영':['mgmt'],'협력사':['partner']};
 const COMMON_VIEW=['base'];   // 전부서 공통 '조회' 모듈(기준정보=품목·BOM·도면 조회). 수정은 역할/관리자만(직원 읽기전용).
-const _sid2mod=(sid)=>{for(const m of MODULES){for(const s of (m.subs||[])){if(s.id===sid)return m.id;}}return '';};
+// ★협력사는 COMMON_VIEW(기준정보) 제외 — 우리 품목·BOM·도면 마스터를 볼 이유가 없다.
+//   utype 은 서버가 준 값(app_user.utype)이며 roles 와 별개다.
+const _isCoop=(u)=>((u&&u.utype)==='협력사')||((u&&u.roles||[]).includes('협력사'));
+/* ★모르는 sid 는 조용히 넘기지 않고 콘솔에 경고한다(2026-09-03 신설).
+     왜 — MODULES 에 없는 sid 로 PERM.canEdit() 을 물으면 여기서 '' 가 나오고,
+     어떤 역할에도 '' 모듈은 없으므로 **관리자 외 전원 영구 false** 가 된다.
+     권한관리 화면엔 그 sid 의 체크박스조차 없어 **켤 방법이 없다**.
+     실제로 8곳이 이 상태였다(drawingdoc·itemspec·partmaster·planupload·coopquote·
+     autoorder·esticost·routeapprove) — 개발팀이 도면 업로드에서 막혀 발견(2026-09-03).
+     조용히 false 를 돌려주는 게 원인 규명을 8곳이나 지연시켰다. 이제 즉시 드러난다. */
+const _SID_WARNED=new Set();
+const _sid2mod=(sid)=>{for(const m of MODULES){for(const s of (m.subs||[])){if(s.id===sid)return m.id;}}
+  if(sid&&!_SID_WARNED.has(sid)){_SID_WARNED.add(sid);
+    try{console.warn(`[PERM] 알 수 없는 화면 sid '${sid}' — MODULES 에 없어 권한관리에서 켤 수 없습니다(관리자 외 항상 거부). 메뉴 sid 로 교정하세요.`);}catch(e){}}
+  return '';};
 const getUsers=()=>{try{const s=localStorage.getItem('perm_users');if(s)return JSON.parse(s);}catch(e){}return JSON.parse(JSON.stringify(SEED_USERS));};
 const PERM={
   userId: localStorage.getItem('perm_userId')||'admin',
@@ -545,8 +564,9 @@ const PERM={
   can(sid,act){ if(this.isAdmin())return true;   // TEST1(시스템관리자)=전권
     const pm=(this.perms[this.userId]||{})[sid];
     if(pm){ if(act==='view')return pm.view!==false; return !!pm.edit; }   // ★TEST1이 개별 부여한 권한 우선(override)
-    const roles=this.currentUser().roles||[], mod=_sid2mod(sid);
-    if(act==='view' && COMMON_VIEW.includes(mod)) return true;   // 기준정보=전부서 공통 조회
+    const u=this.currentUser(), roles=u.roles||[], mod=_sid2mod(sid);
+    // ★협력사는 기준정보 공통조회에서 제외 — 우리 품목·BOM·도면을 볼 이유가 없다(2026-09-03).
+    if(act==='view' && COMMON_VIEW.includes(mod)) return !_isCoop(u);
     return roles.some(r=>(ROLE_MOD[r]||[]).includes(mod)); },   // 기본=본인 부서 모듈만 조회·수정(자재는 자재것만). 나머지 부서=숨김
   canView(sid){return this.can(sid,'view');},
   canEdit(sid){return this.can(sid,'edit');},

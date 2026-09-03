@@ -253,7 +253,9 @@ SCREEN.planuploadrev=(c)=>{
 
   const draw=()=>{
     const dates=data.dates||[];
-    const canW=(typeof PERM!=='undefined')?PERM.canEdit('planupload'):true;
+    // ★권한 sid = 메뉴 sid 'planuploadrev' (2026-09-03 교정). 'planupload' 는 MODULES 에 없어
+    //   권한관리에서 켤 수 없었다 → 관리자 외 전원 실행 불가였다.
+    const canW=(typeof PERM!=='undefined')?PERM.canEdit('planuploadrev'):true;
     c.innerHTML=`
      <div class="page-title">생산계획업로드 <span style="font-size:12px;color:var(--muted);font-weight:400">레거시 w_pr_plan_020 식 단계별 실행</span></div>
      <div class="page-sub">현행 「생산계획업로드」와 <b>병행 운영</b>합니다. 편성 로직은 동일(사본)이고 <b>실행 방식만</b> 단계별로 바꾼 화면입니다.
