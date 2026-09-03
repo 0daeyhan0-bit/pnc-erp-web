@@ -1057,7 +1057,9 @@ SCREEN.costanalysis=(c)=>{
 
 SCREEN.esticost=(c)=>{
   const API=API_BASE;
-  const canW=(typeof PERM!=='undefined')?PERM.canEdit('esticost'):true;
+  // ★권한 sid = 메뉴 sid 'costanalysis'(품목별 원가분석) — 2026-09-03 교정.
+  //   'esticost' 는 MODULES 에 없어 권한관리에서 켤 수 없었다.
+  const canW=(typeof PERM!=='undefined')?PERM.canEdit('costanalysis'):true;
   const ymd2date=y=>(y&&y.length===6)?`20${y.slice(0,2)}-${y.slice(2,4)}-${y.slice(4,6)}`:'';
   const date2ymd=d=>d?d.slice(2).replace(/-/g,''):'';
   const nfq=v=>{v=Number(v||0);return v%1===0?v.toLocaleString('ko-KR'):v.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');};
@@ -3885,7 +3887,9 @@ SCREEN.rawmat=(host)=>{
 /* ===== 개발: 조달후보 승인관리 — 미승인(approve_flag=0) 목록·상세·개별/일괄 승인·반려 (nx.sourcing_route) ===== */
 SCREEN.routeapprove=(host)=>{
   const API=API_BASE;
-  const canW=(typeof PERM!=='undefined')?PERM.canEdit('routeapprove'):true;
+  // ★권한 sid = 메뉴 sid 'subvariant'(조달경로 통합검토) — 2026-09-03 교정.
+  //   'routeapprove' 는 MODULES 에 없어 권한관리에서 켤 수 없었다.
+  const canW=(typeof PERM!=='undefined')?PERM.canEdit('subvariant'):true;
   const nfq=v=>{v=Number(v||0);return v%1===0?v.toLocaleString('ko-KR'):v.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');};
   const st={rows:[],cnt:0,item:'',gubun:'',user:'',from:'',to:'',incRej:false,gopts:[],sel:new Set(),detail:null,rejForm:null,msg:'',loading:false};
   const load=async()=>{st.loading=true;render();

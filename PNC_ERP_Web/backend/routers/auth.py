@@ -153,6 +153,7 @@ OPEN_PREFIX = (
 COOP_ALLOW = {
     "/api/auth/me", "/api/auth/logout", "/api/auth/password",
     "/api/perm/users",                    # GET=본인 1건 / POST 는 라우터가 403
+    "/api/pref",                          # 내 화면설정(항목보기 등) — 본인 것만(user_id 파라미터 없음)
     "/api/partner/my",                    # 홈 요약(내 계획·내 송장·할 일)
     "/api/partner/qr",                    # 내 송장 QR (자기 것만)
     "/api/partner/depart",                # 송장 출발 처리(10→20)
@@ -165,7 +166,33 @@ COOP_ALLOW = {
     "/api/setin/issue", "/api/setin/invoice",
     "/api/setstock/list",                 # 내 납품이 입고됐는지 확인(읽기전용·소속강제됨)
     "/api/coopporder/items",              # 협력사 발주현황(내 계획·재고·기발주·순소요, 읽기전용·소속강제됨)
-}                                          # ※ scan/receive/cancel 은 staff_only — 담당자만
+
+    # ── 내부 ERP 「협력사」 폴더 개방 (2026-09-03) ──────────────────────────────
+    #   협력사 계정이 index.html 로 들어와 자기 것만 보게 한다(core.js ROLE_MOD['협력사']).
+    #   ★전부 scope_cust() 로 소속강제됨 — 자기 거래처 외 데이터는 못 본다.
+    "/api/plan/basedate",                 # 계획 공통 기준일(=마지막 업로드 일자축 첫날). 거래처 정보 없음·읽기전용
+    "/api/partner/workcenters",           # 작업처 드롭다운 — ★소속강제 넣고 개방(자기 1건만)
+    "/api/sagubledger/list",              # 사급 수불장 — 목록 (읽기)
+    "/api/sagubledger/detail",            # 〃 상세 (읽기)
+    "/api/delivedit/list",                # 거래명세표 수정 — 목록 (읽기·scope_cust 강제)
+    "/api/delivedit/custs",               # 〃 거래처(자기 1건)
+    "/api/delivedit/items",               # 〃 도번·자도번 목록
+    "/api/delivedit/update",              # 〃 수량수정 (쓰기·_guard 가 출발20 이후 차단)
+    "/api/delivedit/delete",              # 〃 삭제   (쓰기·동상)
+}
+# ★★협력사에게 **열지 않은 것** — 뺀 이유를 남긴다(나중에 무심코 추가하지 않도록).
+#   · /api/sagub/* 전부 (holding/list · adjust/list · adjust/save · adjust/delete)
+#       사급은 **사급 수불장(/api/sagubledger/*)** 하나로 본다 — 같은 원장(nx.sagub_maint)을
+#       보는 중복 화면이라 포털에서 「협력사사급재고관리」를 뺐다(2026-09-03).
+#       특히 adjust/save·delete 는 열면 안 된다: 원장에 maint_tag='B' 를 직접 넣고
+#       **음수를 허용**해, 협력사가 "실사 보정"으로 분실·과소비한 사급자재를 스스로
+#       장부에서 지울 수 있다. 아무도 실물을 확인하지 않는다
+#       → staff_only() 의 논리와 정확히 같은 상황.
+#   ※/api/partner/workcenters 는 **소속강제를 넣은 뒤** 열었다(위 목록).
+#     종전엔 request 파라미터조차 없어 인증을 걸 수 없었고 전 협력사 코드·이름·계획물량(n)을
+#     그대로 줬다 — 그 상태로 열었으면 경쟁사 목록이 샜다. coopplan.py 에서 scope_cust 로
+#     자기 1건만 남기도록 고친 뒤 개방. 직원은 종전대로 전체.
+#   ※ scan/receive/cancel 은 staff_only — 담당자만
 
 
 def path_policy(path):
@@ -311,6 +338,78 @@ def auth_logout(request: Request):
         cn.commit()
         _tok_forget(tok)                  # ★캐시에 남아 있으면 끊은 세션이 계속 산다
         return {"ok": True, "revoked": n}
+    finally:
+        cn.close()
+
+
+# ===================== ★사용자별 화면설정 (nx.user_pref, 2026-09-03) =====================
+# 왜 — 항목보기(컬럼 순서·숨김) 같은 개인 설정을 브라우저 localStorage 에만 두면
+#      ① 다른 PC 로 가면 기본값 ② 캐시를 지우면 사라짐 ③ 한 PC 를 여러 명이 쓰면 섞임.
+#      로그인 계정에 붙여 서버에 둔다. 화면이 늘어나도 scope 만 다르게 쓰면 되는 범용 저장소.
+# 구조 — (user_id, scope, pref_key) → pref_val(JSON 문자열).
+#      예) ('TEST4','pp410','hidecols') → '["upper","lgh"]'
+# ★본인 것만 읽고 쓴다 — user_id 를 파라미터로 받지 않는다(남의 설정을 건드릴 수 없다).
+
+
+@router.get("/api/pref")
+def pref_get(request: Request, scope: str = ""):
+    """내 화면설정 조회. scope 미지정이면 전체. → {prefs:{key:파싱된값}}"""
+    u = require_user(request)
+    sc = (scope or "").strip()
+    cn = _nx()
+    cur = cn.cursor()
+    try:
+        if sc:
+            cur.execute("""SELECT pref_key, pref_val FROM nx.user_pref
+                            WHERE user_id=? AND scope=?""", u["id"], sc)
+        else:
+            cur.execute("""SELECT pref_key, pref_val FROM nx.user_pref
+                            WHERE user_id=?""", u["id"])
+        out = {}
+        for k, v in cur.fetchall():
+            try:
+                out[str(k).strip()] = json.loads(v) if v else None
+            except Exception:
+                out[str(k).strip()] = v          # JSON 이 아니면 원문 그대로
+        return {"ok": True, "prefs": out}
+    finally:
+        cn.close()
+
+
+@router.post("/api/pref")
+def pref_save(request: Request, payload: dict = Body(...)):
+    """내 화면설정 저장. body {scope:'pp410', prefs:{key:value,...}}
+       ★value=null 이면 그 키를 삭제한다(기본값으로 되돌리기 = '초기화')."""
+    u = require_user(request)
+    sc = str(payload.get("scope", "")).strip()
+    if not sc:
+        raise HTTPException(400, "scope 가 필요합니다.")
+    prefs = payload.get("prefs")
+    if not isinstance(prefs, dict):
+        raise HTTPException(400, "prefs 는 객체여야 합니다.")
+    cn = _nx()
+    cur = cn.cursor()
+    try:
+        n = 0
+        for k, v in prefs.items():
+            k = str(k).strip()[:60]
+            if not k:
+                continue
+            if v is None:
+                cur.execute("""DELETE FROM nx.user_pref
+                                WHERE user_id=? AND scope=? AND pref_key=?""", u["id"], sc, k)
+            else:
+                val = json.dumps(v, ensure_ascii=False)
+                # MERGE 대신 UPDATE→없으면 INSERT (드라이버 호환·가독)
+                cur.execute("""UPDATE nx.user_pref SET pref_val=?, upd_dt=GETDATE()
+                                WHERE user_id=? AND scope=? AND pref_key=?""",
+                            val, u["id"], sc, k)
+                if cur.rowcount == 0:
+                    cur.execute("""INSERT INTO nx.user_pref(user_id,scope,pref_key,pref_val,upd_dt)
+                                   VALUES(?,?,?,?,GETDATE())""", u["id"], sc, k, val)
+            n += 1
+        cn.commit()
+        return {"ok": True, "saved": n}
     finally:
         cn.close()
 

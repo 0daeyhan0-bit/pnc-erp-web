@@ -77,7 +77,12 @@ def sagubledger_list(request: Request, cust: str = Query(""), mat: str = Query("
             for k in ("sent", "used", "bal"): d[k] = round(float(d[k] or 0), 2)
             d["cust_code"] = str(d["cust_code"]).strip()
             allrows.append(d)
-        custs = sorted({(r["cust_code"], (r["custnm"] or r["cust_code"]).strip()) for r in allrows}, key=lambda x: x[1])
+        # ★거래처 드롭다운 목록도 소속을 강제한다(2026-09-03).
+        #   종전엔 cust 필터 **이전**의 allrows 에서 뽑아, 협력사 계정이 호출해도
+        #   응답 JSON 에 **전 협력사 코드·이름**이 실려 나갔다(rows 는 막히는데 목록만 샘).
+        #   같은 계열인 sales.py 의 sagub/holding/list 는 생성 시점에 필터를 걸어 문제가 없다 — 그와 맞춘다.
+        custs = sorted({(r["cust_code"], (r["custnm"] or r["cust_code"]).strip())
+                        for r in allrows if not cust or r["cust_code"] == cust}, key=lambda x: x[1])
         rows = []
         for r in allrows:
             if cust and r["cust_code"] != cust: continue

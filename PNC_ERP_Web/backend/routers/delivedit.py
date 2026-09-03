@@ -139,11 +139,24 @@ def delivedit_list(request: Request, from_ymd: str = Query(""), to_ymd: str = Qu
         nx.close()
 
 
-def _guard(cur, sn, cc, doban, hms):
+_ST_NM = {'00': '요청', '10': '발행', '20': '출발', '30': '입고대기',
+          '40': '검사중', '90': '입고완료', '99': '반품'}
+
+
+def _guard(cur, sn, cc, doban, hms, coop=False):
     """입고완료 판정 — 입고된 건은 수정·삭제 거부(레거시 CONFIRM_FLAG='1' 대응).
        ★웹 소스(nx.set_input_req)의 status 로 판정(2026-08-31):
            00 요청 · 10 발행 · 20 출발 · 30 입고대기 → 수정·삭제 가능
            40 검사중 · 90 입고완료 · 99 반품        → 거부(재고가 이미 움직였다)
+
+       ★★협력사 계정은 **출발(20) 이후 전부 거부**한다(coop=True, 2026-09-03 신설).
+         왜 더 좁히나 — 20(출발)·30(입고대기)은 **물건이 이미 협력사 손을 떠나 우리 쪽에 있는**
+         상태다. 여기서 전표만 고칠 수 있으면 실물 100개를 보내고 전표를 120개로 바꿔도
+         통과하고, 검사 담당자가 전표를 믿고 넘기면 20개가 그대로 매입에 잡힌다.
+         게다가 update 는 자재수량(세트수량×use_qty)까지 재계산해 **사급 소진량**이 함께
+         움직인다 — 수량을 낮추면 자기 사급 잔량이 늘어난다(무상지급 자재 = 금액 영향).
+         ⟹ 협력사가 고칠 수 있는 건 아직 보내기 전(00 요청·10 발행)뿐이다.
+         직원(coop=False)은 종전대로 30 까지 가능 — 현장에서 받아 적는 보정이 필요하다.
        반환 = (현재 세트수량, barcode_no) — 삭제 시 발행이력 정리에 쓴다."""
     cur.execute("""SELECT ISNULL(status,''), ISNULL(deliver_qty, input_req_qty),
                           ISNULL(barcode_no,'')
@@ -154,8 +167,13 @@ def _guard(cur, sn, cc, doban, hms):
     if not r:
         raise HTTPException(404, f"납품내역을 찾을 수 없습니다. (SET{sn} / {doban})")
     st = str(r[0] or "").strip()
-    if st in ('40', '90', '99'):
-        _nm = {'40': '검사중', '90': '입고완료', '99': '반품'}.get(st, st)
+    _bad = ('20', '30', '40', '90', '99') if coop else ('40', '90', '99')
+    if st in _bad:
+        _nm = _ST_NM.get(st, st)
+        if coop and st in ('20', '30'):
+            raise HTTPException(409,
+                f"{_nm} 건은 수정할 수 없습니다 — 이미 납품 출발한 건입니다. "
+                f"담당자에게 문의하세요. (SET{sn} / {doban})")
         raise HTTPException(409, f"{_nm} 건은 조회만 가능합니다. (SET{sn} / {doban})")
     return float(r[1] or 0), str(r[2] or "").strip()
 
@@ -167,7 +185,9 @@ def delivedit_update(request: Request, payload: dict = Body(...)):
          한 트랜잭션에서 같이 맞춘다 — 하나만 고치면 인쇄·입고·잔량이 어긋난다."""
     sn = str(payload.get("sheet_no", "")).strip()
     cc = str(payload.get("cc", "")).strip()
-    cc = scope_cust(require_user(request), cc)          # ★협력사=자기 거래처 강제(남의 명세표 수정 차단)
+    _u = require_user(request)
+    cc = scope_cust(_u, cc)                             # ★협력사=자기 거래처 강제(남의 명세표 수정 차단)
+    _coop = (_u or {}).get("utype") == "협력사"          # ★협력사면 _guard 가 출발(20) 이후를 막는다
     if cc == "__NONE__":
         raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     doban = str(payload.get("doban", "")).strip()
@@ -182,7 +202,7 @@ def delivedit_update(request: Request, payload: dict = Body(...)):
         raise HTTPException(400, "납품수량은 0보다 커야 합니다.")
     nx = _nx_tx(); cur = nx.cursor()
     try:
-        old, bc = _guard(cur, sn, cc, doban, hms)
+        old, bc = _guard(cur, sn, cc, doban, hms, coop=_coop)
         # ★수정은 세 곳을 함께 맞춘다(2026-08-31) — 하나만 고치면 인쇄·입고·발행이력이 어긋난다.
         #   ① 헤더 nx.set_input_req   : 세트수량
         #   ② 상세 nx.set_input_req_dtl: 자재수량 = 세트수량 × 사용수량(재계산)
@@ -219,14 +239,16 @@ def delivedit_delete(request: Request, payload: dict = Body(...)):
     cc = str(payload.get("cc", "")).strip()
     doban = str(payload.get("doban", "")).strip()
     hms = str(payload.get("hms", "")).strip()
-    cc = scope_cust(require_user(request), cc)          # ★협력사=자기 거래처 강제(남의 명세표 삭제 차단)
+    _u = require_user(request)
+    cc = scope_cust(_u, cc)                             # ★협력사=자기 거래처 강제(남의 명세표 삭제 차단)
+    _coop = (_u or {}).get("utype") == "협력사"          # ★협력사면 _guard 가 출발(20) 이후를 막는다
     if cc == "__NONE__":
         raise HTTPException(403, "거래처코드가 없는 협력사 계정입니다.")
     if not (sn and cc and doban and hms):
         raise HTTPException(400, "세트납품서번호/거래처/도번/납품일시가 필요합니다.")
     nx = _nx_tx(); cur = nx.cursor()
     try:
-        _old, bc = _guard(cur, sn, cc, doban, hms)   # 입고된 건이면 여기서 409
+        _old, bc = _guard(cur, sn, cc, doban, hms, coop=_coop)   # 입고된 건이면 여기서 409
         # ★삭제도 세 곳(2026-08-31, 대표 확정: "입고처리 안 됐으면 발행이력도 삭제").
         #   입고완료(90)·검사중(40)·반품(99)은 _guard 가 이미 막았으므로 여기 오는 건
         #   전부 미입고분이다 → 발행이력까지 지워 흔적을 남기지 않는다.

@@ -239,10 +239,10 @@ const MODULES=[
    {id:'prodinout',ic:'🔁',nm:'생산입출고현황'},
    {sep:true},
    {id:'orderupload',ic:'📥',nm:'주문업로드'},
-   // {id:'planupload',ic:'📅',nm:'생산계획업로드'},   // ★2026-08-28 메뉴 숨김(요청) — 검토본으로 일원화. SCREEN.planupload 는 유지
-   // ★검토용(2026-08-26) — 레거시식 단계별 실행. 편성로직은 사본(동일), 실행방식만 다름. 기존분과 병행.
-   //   tag:'검토' = 사이드바에 주황 배지 + 글자색으로 구분(검토중 메뉴임을 한눈에).
-   {id:'planuploadrev',ic:'🧪',nm:'생산계획업로드',tag:'검토'},
+   // ★생산계획업로드 = 단계별 실행(planrev). 구 SCREEN.planupload 는 2026-09-03 삭제 —
+   //   그 화면이 쓰던 soyo 편성경로가 은퇴했고(2026-08-31), route-aware STEP6 이식까지
+   //   끝나 보존 이유가 없어졌다. 이제 편성 화면은 이것 하나뿐이다.
+   {id:'planuploadrev',ic:'📅',nm:'생산계획업로드'},
    {id:'planinput',ic:'➕',nm:'생산계획추가입력'},
    {id:'prodsheet',ic:'🖨️',nm:'생산전표출력관리'},
    {id:'partplan',ic:'🧩',nm:'파트별 생산계획'},
@@ -519,9 +519,27 @@ const SEED_USERS=[
   {id:'TEST4',nm:'테스트4(개발)',type:'내부',dept:'원가개발',pos:'',roles:['원가개발'],partner:'',email:'',tel:'',status:'사용'},
 ];
 // 역할 → 편집권 부여 모듈(그룹). 시스템관리자=전권(별도). 미설정 모듈=조회만.
+// ★'협력사' 키는 두지 않는다(2026-09-03 결정) — 협력사는 **협력사 포털(partner.html)** 만 쓴다.
+//   내부 ERP(index.html)는 직원용 PC 화면이고, 협력사가 여기 들어와도 메뉴가 안 보이는 게 맞다.
+//   (백엔드 방어는 그대로 유효 — auth.COOP_ALLOW 화이트리스트 + scope_cust() 소속강제.
+//    포털이 같은 API 를 쓰므로 그 보호는 계속 필요하다.)
 const ROLE_MOD={'구매/자재':['pur','partner'],'생산':['prod','gagong'],'원가개발':['dev'],'영업':['sales'],'품질':['qc'],'경영':['mgmt']};
 const COMMON_VIEW=['base'];   // 전부서 공통 '조회' 모듈(기준정보=품목·BOM·도면 조회). 수정은 역할/관리자만(직원 읽기전용).
-const _sid2mod=(sid)=>{for(const m of MODULES){for(const s of (m.subs||[])){if(s.id===sid)return m.id;}}return '';};
+// ★협력사는 COMMON_VIEW(기준정보)에서도 제외 — 우리 품목·BOM·도면 마스터를 볼 이유가 없다.
+//   utype 은 서버가 준 값(app_user.utype)이며 roles 와 별개다.
+const _isCoop=(u)=>((u&&u.utype)==='협력사')||((u&&u.roles||[]).includes('협력사'));
+/* ★모르는 sid 는 조용히 넘기지 않고 콘솔에 경고한다(2026-09-03 신설).
+     왜 — MODULES 에 없는 sid 로 PERM.canEdit() 을 물으면 여기서 '' 가 나오고,
+     어떤 역할에도 '' 모듈은 없으므로 **관리자 외 전원 영구 false** 가 된다.
+     권한관리 화면엔 그 sid 의 체크박스조차 없어 **켤 방법이 없다**.
+     실제로 8곳이 이 상태였다(drawingdoc·itemspec·partmaster·planupload·coopquote·
+     autoorder·esticost·routeapprove) — 개발팀이 도면 업로드에서 막혀 발견(2026-09-03).
+     조용히 false 를 돌려주는 게 원인 규명을 8곳이나 지연시켰다. 이제 즉시 드러난다. */
+const _SID_WARNED=new Set();
+const _sid2mod=(sid)=>{for(const m of MODULES){for(const s of (m.subs||[])){if(s.id===sid)return m.id;}}
+  if(sid&&!_SID_WARNED.has(sid)){_SID_WARNED.add(sid);
+    try{console.warn(`[PERM] 알 수 없는 화면 sid '${sid}' — MODULES 에 없어 권한관리에서 켤 수 없습니다(관리자 외 항상 거부). 메뉴 sid 로 교정하세요.`);}catch(e){}}
+  return '';};
 const getUsers=()=>{try{const s=localStorage.getItem('perm_users');if(s)return JSON.parse(s);}catch(e){}return JSON.parse(JSON.stringify(SEED_USERS));};
 const PERM={
   userId: localStorage.getItem('perm_userId')||'admin',
@@ -545,8 +563,9 @@ const PERM={
   can(sid,act){ if(this.isAdmin())return true;   // TEST1(시스템관리자)=전권
     const pm=(this.perms[this.userId]||{})[sid];
     if(pm){ if(act==='view')return pm.view!==false; return !!pm.edit; }   // ★TEST1이 개별 부여한 권한 우선(override)
-    const roles=this.currentUser().roles||[], mod=_sid2mod(sid);
-    if(act==='view' && COMMON_VIEW.includes(mod)) return true;   // 기준정보=전부서 공통 조회
+    const u=this.currentUser(), roles=u.roles||[], mod=_sid2mod(sid);
+    // ★협력사는 기준정보 공통조회에서 제외 — 우리 품목·BOM·도면을 볼 이유가 없다(2026-09-03).
+    if(act==='view' && COMMON_VIEW.includes(mod)) return !_isCoop(u);
     return roles.some(r=>(ROLE_MOD[r]||[]).includes(mod)); },   // 기본=본인 부서 모듈만 조회·수정(자재는 자재것만). 나머지 부서=숨김
   canView(sid){return this.can(sid,'view');},
   canEdit(sid){return this.can(sid,'edit');},
@@ -3708,8 +3727,17 @@ function updateHeaderUser(){
     +`<button id="btnLogout" class="btn" style="padding:2px 10px;font-size:12px">로그아웃</button>`;
   const lo=el.querySelector('#btnLogout'); if(lo)lo.onclick=doLogout;
 }
-function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
-  sessionStorage.removeItem('perm_authed'); location.reload(); }
+/* ★로그아웃 — 서버 세션 폐기 + 토큰 삭제까지 한다(2026-09-03 수정).
+     종전엔 sessionStorage.perm_authed 만 지우고 리로드했는데, 진짜 세션키는
+     **localStorage.auth_token** 이라 리로드 후 boot.js 의 AUTH.me() 가 200 을 받고
+     perm_authed 를 다시 써넣어 **같은 계정으로 되돌아왔다** — 사용자 눈엔 "버튼이 안 먹힘".
+     AUTH.logout()(POST /api/auth/logout → nx.app_session.revoked=1) + AUTH.clear()
+     는 이미 구현돼 있었고 호출만 빠져 있었다.
+   ※perm_userId 도 지운다 — 안 지우면 다른 계정으로 재로그인해도 이전 사용자 캐시가 남는다. */
+async function doLogout(){ if(!confirm('로그아웃 하시겠습니까?'))return;
+  try{ await AUTH.logout(); }catch(e){ try{AUTH.clear();}catch(_){} }
+  try{ localStorage.removeItem('perm_userId'); }catch(e){}
+  location.reload(); }
 
 /* ================= 사이드바 숨김/열기 (2026-08-27) =================
    넓은 그리드 화면(협력사계획현황 등)에서 본문 폭 확보용.
