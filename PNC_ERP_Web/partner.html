@@ -255,7 +255,8 @@ let VIEW='home', DATA=null;
 let ORDER=null, ORDER_LOADING=false;   // 발주현황(coopporder) 지연로드 캐시
 // ★사급 탭(2026-09-03) — 내부 ERP「협력사사급재고관리 + 사급 수불장」을 모바일로.
 //   서버가 scope_cust 로 자기 거래처만 준다(auth.scope_cust) — 프론트는 그대로 그린다.
-let SAGUB=null, SAGUB_LOADING=false;   // 사급재고(holding) + 수불장(ledger) 합본 캐시
+let SAGUB=null, SAGUB_LOADING=false;   // 사급재고관리(holding) 캐시
+let SLEDG=null, SLEDG_LOADING=false;   // 사급 수불장(ledger) 캐시 — ★별도. 같이 쓰면 탭 오갈 때 덮어쓴다
 let SGDET=null;                        // 수불장 상세(드릴다운) — {mat, rows} 또는 null
 // ★거래명세표 수정(2026-09-03) — 아직 보내기 전(요청·발행)만 고칠 수 있다.
 //   서버 _guard(coop=True) 가 출발(20)·입고대기(30) 이후를 409 로 막는다.
@@ -279,8 +280,10 @@ async function start(){
 }
 async function load(){
   ORDER=null; ORDER_LOADING=false;   // 재로그인/새로고침 시 발주현황 캐시 초기화
-  SAGUB=null; SAGUB_LOADING=false; SGDET=null;   // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
+  SAGUB=null; SAGUB_LOADING=false;               // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
+  SLEDG=null; SLEDG_LOADING=false; SGDET=null;
   EDIT=null;  EDIT_LOADING=false;
+  PP=null;    PP_LOADING=false;
   $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
   try{ DATA = await api('/api/partner/my?days=14'); }
   catch(e){ if(e.message!=='401') $('#app').innerHTML=`<div class="msg e">${esc(e.message)}</div>`; return; }
@@ -707,9 +710,160 @@ async function useCamera(){
   }catch(e){ close(); alert('카메라를 열 수 없습니다 — '+e.message); }
 }
 
-/* ───────── 나머지 4화면 — 준비중 (계획현황 확정 후 같은 틀로 이식) ─────────
-   거래명세서 발행 / 거래명세표 수정 / 협력사사급재고관리 / 사급 수불장.
-   백엔드 API·소속강제는 이미 열어 뒀다(auth.COOP_ALLOW). 화면만 남았다. */
+/* ═══════════════════════════════════════════════════════════════════════
+   협력사사급재고관리 — 내부 ERP SCREEN.sagubadjust(screens.etc.js:1630) 이식
+   ★조회 전용. 「조정 저장/삭제」는 협력사에게 열지 않았다(auth.COOP_ALLOW 주석 참고)
+     — 음수 조정으로 분실 사급재를 스스로 장부에서 지울 수 있기 때문.
+   ═══════════════════════════════════════════════════════════════════════ */
+const SGF={mat:'', sign:''};
+function loadSagub(){
+  if(SAGUB_LOADING) return;
+  SAGUB_LOADING=true;
+  const q=new URLSearchParams({cust:'', mat:SGF.mat||'', sign:SGF.sign||''});
+  api('/api/sagub/holding/list?'+q)
+    .then(j=>{ SAGUB=j; })
+    .catch(e=>{ if(e.message!=='401') SAGUB={error:e.message}; })
+    .then(()=>{ SAGUB_LOADING=false; if(VIEW==='sagub') render(); });
+}
+function viewSagub(){
+  if(!SAGUB){ loadSagub(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
+  if(SAGUB.error) return `<div class="msg e">${esc(SAGUB.error)}</div>`;
+  const rows=SAGUB.rows||[];
+  const tot=rows.reduce((a,r)=>a+(+r.STOCK_QTY||0),0);
+  const q=(v)=>{const n=+v||0; return `<td class="r" style="color:${n<0?'#c0392b':'#1f7a3d'};font-weight:700">${num(n)}</td>`;};
+  return `
+  <div class="ttl">협력사사급재고관리 <small>내 보유 사급재고 · 읽기전용</small></div>
+  <div class="tbar">
+    <label>자도번</label><input type="text" id="sg-mat" value="${esc(SGF.mat)}" placeholder="자도번/품명" style="width:150px">
+    <label>보유수량</label>
+    <select id="sg-sign">
+      <option value=""${SGF.sign===''?' selected':''}>전체</option>
+      <option value="1"${SGF.sign==='1'?' selected':''}>(+) 보유</option>
+      <option value="-1"${SGF.sign==='-1'?' selected':''}>(−) 마이너스</option>
+      <option value="0"${SGF.sign==='0'?' selected':''}>0</option>
+    </select>
+    <button class="go" id="sg-go">조회</button>
+    <span class="sp">${num(rows.length)}건 · 보유합 ${num(tot)}</span>
+  </div>
+  <div class="gwrap"><table class="tbl">
+    <thead><tr>
+      <th style="width:110px">사급업체</th><th style="width:130px">자도번</th><th style="width:180px">품명</th>
+      <th style="width:70px">구분</th><th style="width:80px">보유재고</th>
+      <th style="width:100px">최종수정자</th><th style="width:140px">최종수정일시</th>
+    </tr></thead>
+    <tbody>${rows.length ? rows.map(r=>`<tr>
+      <td class="l">${esc(r.custnm||r.CUST_CODE||'')}</td>
+      <td class="l"><b>${esc(r.MAT_CODE||'')}</b></td>
+      <td class="l" title="${esc(r.matnm||'')}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(r.matnm||'')}</td>
+      <td>${r.item_class==='J'?'관리(중량)':'일반'}</td>
+      ${q(r.STOCK_QTY)}
+      <td class="l">${esc(r.upd_user||'')}</td>
+      <td class="l">${esc(String(r.upd_dt||'').slice(0,19).replace('T',' '))}</td>
+    </tr>`).join('') : `<tr><td colspan="7" class="empty" style="padding:22px">보유 사급재고 없음</td></tr>`}</tbody>
+    ${rows.length?`<tfoot><tr class="grandtot"><td colspan="4">합계 ${num(rows.length)}건</td>
+      ${q(tot)}<td colspan="2"></td></tr></tfoot>`:''}
+  </table></div>
+  <div style="padding:8px 2px;font-size:11.5px;color:var(--sub)">
+    재고 조정(실사 보정)은 담당자에게 요청하세요 — 이 화면은 조회 전용입니다.</div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   사급 수불장 — 내부 ERP SCREEN.sagubledger 탭①(사급부품) 이식
+   좌측 목록 → 행 클릭 → 우측 수불이력. PC 라 2분할, 좁으면 세로로 쌓임.
+   ═══════════════════════════════════════════════════════════════════════ */
+const SLF={fr:'', to:'', mat:'', sign:'', scope:'sent'};
+const _y6=(iso)=>{const s=String(iso||'').replace(/-/g,''); return s.length===8?s.slice(2):s;};
+function loadSledg(){
+  if(SLEDG_LOADING) return;
+  if(!SLF.fr){ const d=new Date(); SLF.fr=_iso(new Date(d.getFullYear(),d.getMonth()-2,1)); }
+  if(!SLF.to) SLF.to=_iso(new Date());
+  SLEDG_LOADING=true;
+  const q=new URLSearchParams({cust:'', mat:SLF.mat||'', fr:_y6(SLF.fr), to:_y6(SLF.to),
+                              sign:SLF.sign||'', scope:SLF.scope||'sent'});
+  api('/api/sagubledger/list?'+q)
+    .then(j=>{ SLEDG=j; })
+    .catch(e=>{ if(e.message!=='401') SLEDG={error:e.message}; })
+    .then(()=>{ SLEDG_LOADING=false; if(VIEW==='sledg') render(); });
+}
+function loadSgDet(r){
+  SGDET={mat:r.mat_code, custnm:r.custnm||r.cust_code, matnm:r.matnm, rows:null};
+  render();
+  const q=new URLSearchParams({cust:r.cust_code, mat:r.mat_code, fr:_y6(SLF.fr), to:_y6(SLF.to)});
+  api('/api/sagubledger/detail?'+q)
+    .then(j=>{ if(SGDET&&SGDET.mat===r.mat_code){ SGDET.rows=j.rows||[]; SGDET.final=j.final_qty; } })
+    .catch(e=>{ if(SGDET) SGDET.err=e.message; })
+    .then(()=>{ if(VIEW==='sledg') render(); });
+}
+function viewSledg(){
+  if(!SLEDG){ loadSledg(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
+  if(SLEDG.error) return `<div class="msg e">${esc(SLEDG.error)}</div>`;
+  const rows=SLEDG.rows||[], t=SLEDG.tot||{};
+  const bal=(v)=>{const n=+v||0; return `<td class="r"><b style="color:${n<0?'#c0392b':'#1f2d3d'}">${num(n)}</b></td>`;};
+  const det=SGDET;
+  return `
+  <div class="ttl">사급 수불장 <small>내가 받은 사급부품의 입고·출고·잔량</small></div>
+  <div class="tbar">
+    <label>기간</label><input type="date" id="sl-fr" value="${esc(SLF.fr)}">~<input type="date" id="sl-to" value="${esc(SLF.to)}">
+    <label>자도번</label><input type="text" id="sl-mat" value="${esc(SLF.mat)}" placeholder="자도번/품명" style="width:130px">
+    <label>잔량</label>
+    <select id="sl-sign">
+      <option value=""${SLF.sign===''?' selected':''}>전체</option>
+      <option value="1"${SLF.sign==='1'?' selected':''}>(+) 보유</option>
+      <option value="-1"${SLF.sign==='-1'?' selected':''}>(−) 마이너스</option>
+      <option value="0"${SLF.sign==='0'?' selected':''}>0</option>
+    </select>
+    <label>범위</label>
+    <select id="sl-scope">
+      <option value="sent"${SLF.scope==='sent'?' selected':''}>받은 부품</option>
+      <option value="all"${SLF.scope==='all'?' selected':''}>전체(소진만 포함)</option>
+    </select>
+    <button class="go" id="sl-go">조회</button>
+    <span class="sp">${num(rows.length)}건 · 입고 ${num(t.sent)} / 출고 ${num(t.used)} / 잔량 ${num(t.bal)}</span>
+  </div>
+  <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+    <div style="flex:1.3 1 420px;min-width:340px">
+      <div class="gwrap" style="max-height:calc(100vh - 250px)"><table class="tbl">
+        <thead><tr><th style="width:130px">자도번</th><th style="width:190px">품명</th>
+          <th style="width:80px">입고</th><th style="width:80px">출고</th><th style="width:80px">잔량</th></tr></thead>
+        <tbody>${rows.length ? rows.map((r,i)=>`<tr class="sl-row" data-i="${i}" style="cursor:pointer${
+            det&&det.mat===r.mat_code?';background:#eef4ff':''}">
+          <td class="l"><b>${esc(r.mat_code||'')}</b></td>
+          <td class="l" title="${esc(r.matnm||'')}" style="max-width:190px;overflow:hidden;text-overflow:ellipsis">${esc(r.matnm||'')}</td>
+          <td class="r" style="color:#1f7a3d">${num(r.sent)}</td>
+          <td class="r" style="color:#c0392b">${num(r.used)}</td>
+          ${bal(r.bal)}
+        </tr>`).join('') : `<tr><td colspan="5" class="empty" style="padding:22px">수불 내역 없음</td></tr>`}</tbody>
+        ${rows.length?`<tfoot><tr class="grandtot"><td colspan="2">합계 ${num(rows.length)}건</td>
+          <td class="r">${num(t.sent)}</td><td class="r">${num(t.used)}</td>${bal(t.bal)}</tr></tfoot>`:''}
+      </table></div>
+    </div>
+    <div style="flex:1 1 360px;min-width:320px">
+      <div class="gwrap" style="max-height:calc(100vh - 250px)">
+        ${!det ? `<div class="empty" style="padding:28px">왼쪽에서 자도번을 선택하면 수불이력이 나옵니다.</div>`
+        : det.err ? `<div class="msg e" style="margin:10px">${esc(det.err)}</div>`
+        : !det.rows ? `<div class="empty" style="padding:28px">불러오는 중…</div>`
+        : `<table class="tbl">
+            <thead><tr><th colspan="6" style="text-align:left;background:#f5f8fd">
+              <b>${esc(det.mat)}</b> ${esc(det.matnm||'')}</th></tr>
+            <tr><th style="width:70px">일자</th><th style="width:80px">구분</th>
+              <th style="width:72px">전일잔량</th><th style="width:66px">입고</th>
+              <th style="width:66px">출고</th><th style="width:72px">잔량</th></tr></thead>
+            <tbody>${(det.rows||[]).length ? det.rows.map(x=>`<tr>
+              <td>${esc(x.maint_ymd||'')}</td><td>${esc(x.tagnm||'')}</td>
+              <td class="r" style="color:var(--sub)">${num(x.prev_qty)}</td>
+              <td class="r" style="color:#1f7a3d">${(+x.in_qty)?num(x.in_qty):''}</td>
+              <td class="r" style="color:#c0392b">${(+x.out_qty)?num(x.out_qty):''}</td>
+              ${bal(x.stock_qty)}
+            </tr>`).join('') : `<tr><td colspan="6" class="empty" style="padding:20px">이력 없음</td></tr>`}</tbody>
+            <tfoot><tr class="grandtot"><td colspan="5">최종 잔량</td>${bal(det.final)}</tr></tfoot>
+          </table>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ───────── 나머지 2화면 — 준비중 ─────────
+   거래명세서 발행 / 거래명세표 수정. 발행·인쇄·모달이 있어 분량이 크다. */
 const _soon=(nm,api)=>`
   <div class="ttl">${esc(nm)} <small>준비중</small></div>
   <div class="card"><div class="empty" style="padding:26px;line-height:1.9">
@@ -719,8 +873,6 @@ const _soon=(nm,api)=>`
   </div></div>`;
 const viewDeliv=()=>_soon('거래명세서 발행','/api/partner/deliv420');
 const viewDedit=()=>_soon('거래명세표 수정','/api/delivedit/list');
-const viewSagub=()=>_soon('협력사사급재고관리','/api/sagub/holding/list');
-const viewSledg=()=>_soon('사급 수불장','/api/sagubledger/list');
 
 function wire(){
   // ★협력사 계획현황 툴바(2026-09-03)
@@ -734,6 +886,30 @@ function wire(){
   };
   ['pp-from','pp-days','pp-assy','pp-part'].forEach(id=>{
     const el=$('#'+id); if(el) el.onkeyup=e=>{ if(e.key==='Enter') pg&&pg.click(); };
+  });
+
+  // ★사급재고관리
+  const sgg=$('#sg-go');
+  if(sgg) sgg.onclick=()=>{
+    SGF.mat=(($('#sg-mat')||{}).value||'').trim();
+    SGF.sign=(($('#sg-sign')||{}).value||'');
+    SAGUB=null; render();
+  };
+  const sgm=$('#sg-mat'); if(sgm) sgm.onkeyup=e=>{ if(e.key==='Enter') sgg&&sgg.click(); };
+
+  // ★사급 수불장 — 조회 + 행클릭 드릴다운
+  const slg=$('#sl-go');
+  if(slg) slg.onclick=()=>{
+    SLF.fr=($('#sl-fr')||{}).value||SLF.fr;
+    SLF.to=($('#sl-to')||{}).value||SLF.to;
+    SLF.mat=(($('#sl-mat')||{}).value||'').trim();
+    SLF.sign=(($('#sl-sign')||{}).value||'');
+    SLF.scope=(($('#sl-scope')||{}).value||'sent');
+    SLEDG=null; SGDET=null; render();
+  };
+  const slm=$('#sl-mat'); if(slm) slm.onkeyup=e=>{ if(e.key==='Enter') slg&&slg.click(); };
+  document.querySelectorAll('.sl-row').forEach(tr=>tr.onclick=()=>{
+    const r=((SLEDG||{}).rows||[])[+tr.dataset.i]; if(r) loadSgDet(r);
   });
 
   document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{ VIEW=b.dataset.go; render(); window.scrollTo(0,0); });
