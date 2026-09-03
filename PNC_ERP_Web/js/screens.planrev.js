@@ -198,27 +198,84 @@ SCREEN.planuploadrev=(c)=>{
     // 예상시간 = 각 단계 과거 소요의 합(없으면 0 → 흐르는 바)
     const estAll=['M','H','L','K','T'].reduce((a,c)=>a+estOf(c),0);
     pgOpen('생산계획 일괄작업 진행 중', estAll);
-    // ★일괄은 단계별 확인창을 띄우지 않는다(레거시 동일). 대신 팝업 문구로 현재 단계를 알린다.
-    //   서버가 한 요청으로 처리하므로 실제 단계 전환은 job/status 폴링으로 감지한다.
-    let poll=setInterval(async()=>{
-      try{const q=await fetch(`${API}/api/planrev/job/status`);const st=(await q.json()).steps||{};
-        const cur=['T','K','L','H','M'].find(c=>st[c]&&st[c].status==='OK'&&st[c].ok_dt);
-        const nextNm={M:'② 생산계획이력생성',H:'③ 라인별 투입시간조정',L:'④ 파트별 계획생성',
-                      K:'⑤ 자재소요·조달 편성'}[cur];
-        if(nextNm)pgText('일괄작업 — '+nextNm+' 진행 중');
-      }catch(e){}
-    },5000);
-    try{
-      const r=await fetch(`${API}/api/planrev/compose_all`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({by:(typeof PERM!=='undefined'&&PERM.userId)?PERM.userId:'web'})});
-      const j=await r.json();
-      clearInterval(poll); pgClose();
-      if(!r.ok) alert('❌ 일괄작업 중단\n\n'+(j.detail||JSON.stringify(j)));
-      else alert(`생산계획 일괄작업을 완료했습니다.\n\n`
-        +(j.steps||[]).map(s=>`  ${s.name}   ${s.done_hms}   ${pgHms(s.elapsed)}`).join('\n')
-        +`\n\n품목 ${nf(j.item_lines)} · 파트 ${nf(j.part_lines)} · 자재 ${nf(j.mat_lines)} · 조달 ${nf(j.sourcing_lines)}`
-        +`\n총 소요 ${pgHms(j.elapsed)}`);
-    }catch(e){clearInterval(poll);pgClose();alert('❌ 일괄작업 실패: '+e);}
+
+    /* ★응답을 기다리지 않고 job/status 폴링으로 완료를 판정한다 (2026-09-04).
+         왜 — 일괄작업은 **항상 2분을 넘는다**(실측 129~137초, 8회 전부).
+         운영은 리버스프록시를 거치는데 프록시 read timeout(≈120초)이 먼저 끊어
+         nginx 504 **HTML** 이 돌아왔고, r.json() 이 그걸 파싱하다 터졌다:
+           "SyntaxError: Unexpected token '<', "<!DOCTYPE"... is not valid JSON"
+         서버는 정상 완료(Z status=OK)였는데 화면만 실패로 보였고,
+         사용자가 실패로 알고 **다시 돌리는** 2차 피해가 있었다.
+         (로컬 8011 직결은 프록시가 없어 재현되지 않는다 — 그래서 개발에선 안 보였다.)
+       ⟹ POST 는 띄워만 두고(fire), 완료 판정은 **Z(일괄) 기록이 새로 생겼는지**로 한다.
+          프록시가 중간에 끊어도 서버 작업은 계속 돌고 화면은 정상 완료로 마무리된다.
+       ※근본 해결은 프록시 timeout 상향(proxy_read_timeout 600s)이다. 이건 그 전까지의
+         방어이자, 설정을 못 바꾸는 환경에서도 동작하게 하는 장치다. */
+    const t0=Date.now();
+    const jobStatus=async()=>{
+      const q=await fetch(`${API}/api/planrev/job/status`);
+      return await q.json();
+    };
+    // 시작 전 상태를 기억 — Z 시각이 바뀌면 이번 실행이 끝난 것.
+    //   ※단계별 시각도 함께 기억한다. job/status 는 코드별 '마지막' 기록만 주므로
+    //     **지난 실행의 오래된 FAIL** 을 이번 실패로 오인하지 않으려면 시각 비교가 필요하다.
+    let zBefore='', before={};
+    try{ const s0=(await jobStatus()).steps||{};
+      zBefore=(s0.Z&&s0.Z.ok_dt)||'';
+      Object.keys(s0).forEach(c=>{ before[c]=(s0[c]&&(s0[c].ok_dt||s0[c].hms))||''; });
+    }catch(e){}
+
+    /* POST 는 띄워만 두고 응답을 기다리지 않는다.
+       서버가 409(다른 편성 실행 중) 같은 **즉시 거절**을 주면 그건 알려야 하므로 그것만 잡는다.
+       그 외(프록시 절단·타임아웃)는 서버가 계속 도는 중이므로 폴링에 맡긴다. */
+    let reject='';
+    fetch(`${API}/api/planrev/compose_all`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({by:(typeof PERM!=='undefined'&&PERM.userId)?PERM.userId:'web'})})
+      .then(async r=>{
+        if(r.ok) return;
+        // JSON 이면 서버가 준 거절(409 등) — HTML(프록시 오류)이면 무시하고 폴링 계속
+        const ct=(r.headers.get('content-type')||'');
+        if(ct.indexOf('json')>=0){ try{ const j=await r.json(); reject=j.detail||('HTTP '+r.status); }catch(_){ } }
+      })
+      .catch(()=>{ /* 프록시가 끊었을 뿐 서버는 계속 돈다 */ });
+
+    const STEP_NM={M:'② 생산계획이력생성',H:'③ 라인별 투입시간조정',L:'④ 파트별 계획생성',
+                   K:'⑤ 자재소요·조달 편성'};
+    let fin=null, stop=false;
+    while(!stop){
+      await new Promise(s=>setTimeout(s,5000));
+      // 서버가 즉시 거절한 경우(409 등) — 작업이 시작도 안 됐으니 여기서 끝낸다
+      if(reject){ pgClose(); alert('❌ 일괄작업 시작 실패\n\n'+reject); stop=true; break; }
+      let st={};
+      try{ st=(await jobStatus()).steps||{}; }catch(e){ continue; }   // 일시적 네트워크 오류는 무시
+      // 완료 판정 — Z 가 새로 기록됐나
+      const z=st.Z;
+      if(z && z.ok_dt && z.ok_dt!==zBefore){ fin=z; stop=true; break; }
+      // 중간 실패 — **이번 실행에서** 새로 생긴 FAIL 만 잡는다(지난 실행의 잔여 FAIL 무시)
+      const bad=Object.keys(st).find(c=>{
+        const x=st[c]; if(!x||!x.status||x.status==='OK') return false;
+        const now=(x.ok_dt||x.hms)||'';
+        return now && now!==(before[c]||'');
+      });
+      if(bad){ pgClose();
+        alert('❌ 일괄작업 중단\n\n'+(st[bad].name||bad)+'\n'+(st[bad].err||'')); stop=true; break; }
+      // 진행 표시
+      const cur=['T','K','L','H','M'].find(c=>st[c]&&st[c].status==='OK'&&st[c].ok_dt);
+      if(STEP_NM[cur]) pgText('일괄작업 — '+STEP_NM[cur]+' 진행 중');
+      // 안전장치 — 20분을 넘기면 폴링을 멈춘다(무한 대기 방지)
+      if(Date.now()-t0>20*60*1000){ pgClose();
+        alert('일괄작업이 20분을 넘겨 화면 대기를 종료합니다.\n'
+             +'서버에서는 계속 진행 중일 수 있습니다 — 단계별 완료시각을 확인해 주세요.');
+        stop=true; break; }
+    }
+    if(fin){ pgClose();
+      const s=await jobStatus().catch(()=>({}));
+      const S=s.steps||{};
+      const line=c=>S[c]?`  ${S[c].name}   ${S[c].hms||''}   ${pgHms(S[c].elapsed||0)}`:'';
+      alert('생산계획 일괄작업을 완료했습니다.\n\n'
+        +['M','H','L','K','L2','H2','T'].map(line).filter(Boolean).join('\n')
+        +`\n\n총 소요 ${pgHms(fin.elapsed||0)}`);
+    }
     running=''; await loadJobs(); draw();
   };
 
