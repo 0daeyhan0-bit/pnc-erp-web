@@ -255,8 +255,7 @@ let VIEW='home', DATA=null;
 let ORDER=null, ORDER_LOADING=false;   // 발주현황(coopporder) 지연로드 캐시
 // ★사급 탭(2026-09-03) — 내부 ERP「협력사사급재고관리 + 사급 수불장」을 모바일로.
 //   서버가 scope_cust 로 자기 거래처만 준다(auth.scope_cust) — 프론트는 그대로 그린다.
-let SAGUB=null, SAGUB_LOADING=false;   // 사급재고관리(holding) 캐시
-let SLEDG=null, SLEDG_LOADING=false;   // 사급 수불장(ledger) 캐시 — ★별도. 같이 쓰면 탭 오갈 때 덮어쓴다
+let SLEDG=null, SLEDG_LOADING=false;   // 사급 수불장(ledger) 캐시
 let SGDET=null;                        // 수불장 상세(드릴다운) — {mat, rows} 또는 null
 // ★거래명세표 수정(2026-09-03) — 아직 보내기 전(요청·발행)만 고칠 수 있다.
 //   서버 _guard(coop=True) 가 출발(20)·입고대기(30) 이후를 409 로 막는다.
@@ -280,8 +279,7 @@ async function start(){
 }
 async function load(){
   ORDER=null; ORDER_LOADING=false;   // 재로그인/새로고침 시 발주현황 캐시 초기화
-  SAGUB=null; SAGUB_LOADING=false;               // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
-  SLEDG=null; SLEDG_LOADING=false; SGDET=null;
+  SLEDG=null; SLEDG_LOADING=false; SGDET=null;   // ★사급 캐시도 함께(다른 계정 데이터 잔존 방지)
   EDIT=null;  EDIT_LOADING=false;
   PP=null;    PP_LOADING=false;
   $('#app').innerHTML = '<div class="card"><div class="empty">불러오는 중…</div></div>';
@@ -305,7 +303,8 @@ function tabs(){
   if(isPartner && !isCutting) t.push({v:'order', i:'📦', n:'협력사 발주현황(일반)'});
   t.push({v:'deliv', i:'🧾', n:'거래명세서 발행'});
   t.push({v:'dedit', i:'✎',  n:'거래명세표 수정'});
-  t.push({v:'sagub', i:'📊', n:'협력사사급재고관리'});
+  // ★「협력사사급재고관리」는 뺐다(2026-09-03) — 사급 수불장과 같은 원장(nx.sagub_maint)을
+  //   보는 중복 화면이고, 수불장이 상위(입고·출고·잔량 + 일자별 이력)라 잔량 컬럼으로 갈음된다.
   t.push({v:'sledg', i:'📒', n:'사급 수불장'});
   // 기존 모바일 화면 — 송장 발행은 여기서만 되므로 남긴다(거래명세서 발행과 별개 흐름).
   const useInv = staff || ((DATA && ((DATA.ready_cnt>0) || (DATA.inv||[]).length>0)) || false);
@@ -323,8 +322,7 @@ function render(){
     VIEW=b.dataset.v; render(); window.scrollTo(0,0); });
   // ★탭이 늘어 삼항체인 대신 맵(2026-09-03). 값=렌더함수(HTML 문자열 반환).
   const V={home:viewHome, plan:viewPlan, order:viewOrder, scan:viewScan, inv:viewInv,
-           pplan:viewPPlan, deliv:viewDeliv, dedit:viewDedit,
-           sagub:viewSagub, sledg:viewSledg};
+           pplan:viewPPlan, deliv:viewDeliv, dedit:viewDedit, sledg:viewSledg};
   $('#app').innerHTML = (V[VIEW]||viewHome)();
   wire();
 }
@@ -711,63 +709,6 @@ async function useCamera(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   협력사사급재고관리 — 내부 ERP SCREEN.sagubadjust(screens.etc.js:1630) 이식
-   ★조회 전용. 「조정 저장/삭제」는 협력사에게 열지 않았다(auth.COOP_ALLOW 주석 참고)
-     — 음수 조정으로 분실 사급재를 스스로 장부에서 지울 수 있기 때문.
-   ═══════════════════════════════════════════════════════════════════════ */
-const SGF={mat:'', sign:''};
-function loadSagub(){
-  if(SAGUB_LOADING) return;
-  SAGUB_LOADING=true;
-  const q=new URLSearchParams({cust:'', mat:SGF.mat||'', sign:SGF.sign||''});
-  api('/api/sagub/holding/list?'+q)
-    .then(j=>{ SAGUB=j; })
-    .catch(e=>{ if(e.message!=='401') SAGUB={error:e.message}; })
-    .then(()=>{ SAGUB_LOADING=false; if(VIEW==='sagub') render(); });
-}
-function viewSagub(){
-  if(!SAGUB){ loadSagub(); return `<div class="card"><div class="empty">불러오는 중…</div></div>`; }
-  if(SAGUB.error) return `<div class="msg e">${esc(SAGUB.error)}</div>`;
-  const rows=SAGUB.rows||[];
-  const tot=rows.reduce((a,r)=>a+(+r.STOCK_QTY||0),0);
-  const q=(v)=>{const n=+v||0; return `<td class="r" style="color:${n<0?'#c0392b':'#1f7a3d'};font-weight:700">${num(n)}</td>`;};
-  return `
-  <div class="ttl">협력사사급재고관리 <small>내 보유 사급재고 · 읽기전용</small></div>
-  <div class="tbar">
-    <label>자도번</label><input type="text" id="sg-mat" value="${esc(SGF.mat)}" placeholder="자도번/품명" style="width:150px">
-    <label>보유수량</label>
-    <select id="sg-sign">
-      <option value=""${SGF.sign===''?' selected':''}>전체</option>
-      <option value="1"${SGF.sign==='1'?' selected':''}>(+) 보유</option>
-      <option value="-1"${SGF.sign==='-1'?' selected':''}>(−) 마이너스</option>
-      <option value="0"${SGF.sign==='0'?' selected':''}>0</option>
-    </select>
-    <button class="go" id="sg-go">조회</button>
-    <span class="sp">${num(rows.length)}건 · 보유합 ${num(tot)}</span>
-  </div>
-  <div class="gwrap"><table class="tbl">
-    <thead><tr>
-      <th style="width:110px">사급업체</th><th style="width:130px">자도번</th><th style="width:180px">품명</th>
-      <th style="width:70px">구분</th><th style="width:80px">보유재고</th>
-      <th style="width:100px">최종수정자</th><th style="width:140px">최종수정일시</th>
-    </tr></thead>
-    <tbody>${rows.length ? rows.map(r=>`<tr>
-      <td class="l">${esc(r.custnm||r.CUST_CODE||'')}</td>
-      <td class="l"><b>${esc(r.MAT_CODE||'')}</b></td>
-      <td class="l" title="${esc(r.matnm||'')}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${esc(r.matnm||'')}</td>
-      <td>${r.item_class==='J'?'관리(중량)':'일반'}</td>
-      ${q(r.STOCK_QTY)}
-      <td class="l">${esc(r.upd_user||'')}</td>
-      <td class="l">${esc(String(r.upd_dt||'').slice(0,19).replace('T',' '))}</td>
-    </tr>`).join('') : `<tr><td colspan="7" class="empty" style="padding:22px">보유 사급재고 없음</td></tr>`}</tbody>
-    ${rows.length?`<tfoot><tr class="grandtot"><td colspan="4">합계 ${num(rows.length)}건</td>
-      ${q(tot)}<td colspan="2"></td></tr></tfoot>`:''}
-  </table></div>
-  <div style="padding:8px 2px;font-size:11.5px;color:var(--sub)">
-    재고 조정(실사 보정)은 담당자에게 요청하세요 — 이 화면은 조회 전용입니다.</div>`;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
    사급 수불장 — 내부 ERP SCREEN.sagubledger 탭①(사급부품) 이식
    좌측 목록 → 행 클릭 → 우측 수불이력. PC 라 2분할, 좁으면 세로로 쌓임.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -887,15 +828,6 @@ function wire(){
   ['pp-from','pp-days','pp-assy','pp-part'].forEach(id=>{
     const el=$('#'+id); if(el) el.onkeyup=e=>{ if(e.key==='Enter') pg&&pg.click(); };
   });
-
-  // ★사급재고관리
-  const sgg=$('#sg-go');
-  if(sgg) sgg.onclick=()=>{
-    SGF.mat=(($('#sg-mat')||{}).value||'').trim();
-    SGF.sign=(($('#sg-sign')||{}).value||'');
-    SAGUB=null; render();
-  };
-  const sgm=$('#sg-mat'); if(sgm) sgm.onkeyup=e=>{ if(e.key==='Enter') sgg&&sgg.click(); };
 
   // ★사급 수불장 — 조회 + 행클릭 드릴다운
   const slg=$('#sl-go');
