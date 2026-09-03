@@ -3689,10 +3689,35 @@ SCREEN.setinstat=(c)=>{
   const s2ApplyHide=()=>{
     const hide=s2Hidden(), hi=new Set(s2Cols().filter(x=>hide.has(x.key)).map(x=>x.idx));
     const tbl=c.querySelector('#si2 table.grid'); if(!tbl)return;
-    const doRow=row=>{const cs=row.cells; if(cs.length<=2)return;   // colspan 안내·합계행 보호
+    // ★colspan 이 섞인 행(안내행·합계행)은 셀 인덱스가 컬럼 인덱스와 1:1 이 아니다.
+    //   길이로만 걸러내면(종전 cs.length<=2) 합계행이 통과해 **일자 합계칸이 엉뚱하게 숨겨졌다**
+    //   (2026-09-03 실측: 3,081/836 이 LOT수량·자재수량 칸으로 밀려 보였다).
+    //   ⟹ 셀 수가 전체 컬럼 수와 다르면 건드리지 않는다(s2ApplyOrder 와 같은 판정).
+    //   ※s2Cols() 는 일자컬럼을 안 담는다(헤더13+꼬리11=24). 실제 표는 13+일자수+11.
+    const ncol=13+((st.axis||[]).length)+S2_TAIL.length;
+    const doRow=row=>{const cs=row.cells;
+      if(cs.length<=2 || cs.length!==ncol)return;
       for(let i=0;i<cs.length;i++)cs[i].style.display=hi.has(i)?'none':'';};
     if(tbl.tHead)[...tbl.tHead.rows].forEach(doRow);
     for(const tb of tbl.tBodies)for(const r of tb.rows)doRow(r);
+    // 합계행(tfoot)은 colspan 구조라 위 로직 대상이 아니다 — 숨김 컬럼 수만큼 colspan 을 줄인다.
+    if(tbl.tFoot)[...tbl.tFoot.rows].forEach(row=>{
+      const cs=[...row.cells]; if(!cs.length)return;
+      let col=0;
+      for(const td of cs){
+        // ★원래 colspan 을 보존해 둔다 — 줄인 값에서 또 줄이면 되돌릴 수 없다
+        if(td.dataset.cs===undefined) td.dataset.cs=String(td.colSpan||1);
+        const sp=+td.dataset.cs||1;
+        if(sp===1){ td.style.display=hi.has(col)?'none':''; }
+        else {
+          // colspan 구간 — 그 안에서 살아있는 컬럼 수로 다시 잡는다(0이면 통째 숨김)
+          let keep=0; for(let i=col;i<col+sp;i++) if(!hi.has(i))keep++;
+          if(keep<=0){ td.style.display='none'; }
+          else { td.style.display=''; td.colSpan=keep; }
+        }
+        col+=sp;
+      }
+    });
   };
   /* ★컬럼 순서 적용 — 저장된 순서대로 DOM 의 셀을 옮긴다(2026-09-03 신설).
        원래 위치(idx)는 그대로 두고 화면 배치만 바꾸므로 숨김·엑셀·폭저장이 안 깨진다.

@@ -188,12 +188,27 @@ WITH l AS (SELECT RTRIM(ITEM_CODE) ic, COUNT(*) c FROM PARTNER_ERP.dbo.PR_M_ITEM
      n AS (SELECT RTRIM(item_code) ic, COUNT(*) c FROM {NX}PR_M_ITEM_PROC_GAGONG WITH(NOLOCK) GROUP BY RTRIM(item_code))
 SELECT l.ic, n.c, l.c FROM l JOIN n ON n.ic=l.ic WHERE l.c<>n.c""")
 diff = cur.fetchall()
-if miss or diff:
+# ★값 비교 — 행수가 같아도 LT_HR 등 값이 다르면 당김일자가 하루씩 어긋난다.
+#   실측 2026-09-03: AJR32674714 seq=1 이 라이브 12h / 미러 8h 였고,
+#   행수는 같아 위 두 검사에 안 걸렸다. 그 1행 때문에 410 화면 당일이전계획이 37 어긋났다.
+cur.execute(f"""
+SELECT RTRIM(l.ITEM_CODE), l.PROC_SEQ,
+       CAST(l.LT_HR AS float), CAST(n.lt_hr AS float)
+  FROM PARTNER_ERP.dbo.PR_M_ITEM_PROC_GAGONG l WITH(NOLOCK)
+  JOIN {NX}PR_M_ITEM_PROC_GAGONG n WITH(NOLOCK)
+    ON RTRIM(n.item_code)=RTRIM(l.ITEM_CODE) AND n.proc_seq=l.PROC_SEQ
+ WHERE ISNULL(CAST(l.LT_HR AS float),0) <> ISNULL(CAST(n.lt_hr AS float),0)
+    OR RTRIM(ISNULL(CAST(l.S_WORK_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.s_work_code AS varchar(40)),''))
+    OR RTRIM(ISNULL(CAST(l.GAGONG_PROC_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.gagong_proc_code AS varchar(40)),''))
+ ORDER BY ABS(ISNULL(CAST(l.LT_HR AS float),0)-ISNULL(CAST(n.lt_hr AS float),0)) DESC""")
+val = cur.fetchall()
+if miss or diff or val:
     for x in miss[:10]: print(f'      + {x[0]:26} 공정 {x[1]:>3}행 (미러에 없음)')
-    for x in diff[:10]: print(f'      ~ {x[0]:26} 미러 {x[1]:>3} → 라이브 {x[2]:>3}')
-    TOT += len(miss) + len(diff)
-    print(f'   ★ 누락 {len(miss)}품목 · 불일치 {len(diff)}품목')
-    FIX.append(('공정마스터', '(공정 미러 델타 동기화 후 r_has_gagong_sync.py --commit)'))
+    for x in diff[:10]: print(f'      ~ {x[0]:26} 미러 {x[1]:>3} → 라이브 {x[2]:>3} (행수)')
+    for x in val[:10]:  print(f'      ! {x[0]:26} seq={x[1]} LT_HR 라이브 {x[2]:>6.2f} / 미러 {x[3]:>6.2f}  ★당김일자 어긋남')
+    TOT += len(miss) + len(diff) + len(val)
+    print(f'   ★ 누락 {len(miss)}품목 · 행수불일치 {len(diff)}품목 · ★값불일치 {len(val)}행')
+    FIX.append(('공정마스터', '(공정 미러 델타 동기화 + LT_HR 값 갱신 → r_has_gagong_sync.py --commit)'))
 else:
     print('   ✅ 없음')
 

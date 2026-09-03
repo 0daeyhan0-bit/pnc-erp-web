@@ -77,6 +77,7 @@ function showLogin(){
       const u=await AUTH.login(id,pw);
       sessionStorage.setItem('perm_authed',id);
       PERM.setUser(id);
+      if(gotoPortalIfCoop(u)) return;      // ★협력사 = 포털로(내부 화면 진입 금지)
       ov.remove();
       bootApp();
     }catch(e){
@@ -92,6 +93,23 @@ function showLogin(){
   setTimeout(()=>{const f=g('#lg-id');if(f)f.focus();},30);
 }
 
+/* ★협력사 계정이면 협력사 포털(partner.html)로 보낸다 (2026-09-04).
+     협력사는 내부 ERP 화면을 쓰지 않는다(core.js §MODULES 주석 — '협력사' 모듈키를 두지 않는 이유).
+     종전엔 로그인 후 그대로 index.html 이 열려 내부 메뉴가 노출됐다.
+   ※무한 리다이렉트 방지 — partner.html 에서 이 파일이 로드돼도 이미 포털이면 아무것도 안 한다.
+     (판정은 서버가 준 utype/roles 로만. core.js _isCoop 과 같은 규칙이되 여기선 자체 판정한다
+      — boot.js 가 core.js 보다 먼저 평가되는 경우에도 안전하게.) */
+function gotoPortalIfCoop(u){
+  try{
+    const coop = !!u && ((String(u.utype||'').trim()==='협력사')
+                      || (Array.isArray(u.roles) && u.roles.includes('협력사')));
+    if(!coop) return false;
+    if(/partner\.html$/i.test(location.pathname)) return false;   // 이미 포털
+    location.replace('partner.html');
+    return true;
+  }catch(e){ return false; }
+}
+
 /* ---- init ---- */
 (async function(){
   ensureSuperAccount();                         // 슈퍼 계정 항상 보장
@@ -100,7 +118,9 @@ function showLogin(){
   // ★자동 진입도 서버에 물어본다 — sessionStorage 만 믿으면 토큰이 만료돼도 화면이 열린다.
   //   (열려 봐야 API 가 전부 401 이라 빈 화면이 된다. 그럴 바엔 로그인 화면이 낫다.)
   const me=await AUTH.me();
-  if(me){ PERM.setUser(me.id); sessionStorage.setItem('perm_authed',me.id); bootApp(); return; }
+  if(me){ PERM.setUser(me.id); sessionStorage.setItem('perm_authed',me.id);
+          if(gotoPortalIfCoop(me)) return;   // ★협력사 = 포털로
+          bootApp(); return; }
   AUTH.clear();
   // ★개발용 자동 로그인 — 로그인 화면 없이 슈퍼 계정으로 바로 진입해 메뉴 확인
   // ★DEV 자동로그인은 은퇴 — 비밀번호가 프론트에 없어서(있어서도 안 되고) 서버 대조를 건너뛸 방법이 없다.

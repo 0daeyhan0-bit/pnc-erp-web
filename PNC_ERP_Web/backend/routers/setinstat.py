@@ -673,16 +673,36 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             "total": matq,
         })
 
-    # ★정렬 — 작업처 → 라인 → 도번 → **생산계획일 → LG INPUT 시각** → 제번.
-    #   제번 문자열로 정렬하면 시각이 뒤섞인다(실측: 1053→0915→0933→1042).
-    #   같은 도번 안에서는 계획일·투입시각 순이어야 현장 흐름과 맞는다.
+    # ★정렬 — **LG INPUT(계획일+투입시각) 오름차순, 단 도번 그룹은 깨지 않는다**
+    #   (2026-09-03 레거시 w_pr_input_130_part 대조로 교정).
+    #   레거시는 LG Input Ymd 가 '2609021330' 처럼 날짜+시각 한 값으로 연속 오름차순이고,
+    #   같은 도번은 붙어 나온다. 즉 정렬키는 **도번 그룹의 가장 이른 투입시각**이다.
+    #
+    #   ※주의 — 행 단위로 (계획일, 시각) 을 최우선에 두면 화면 집계(작업처+라인+도번)가
+    #     쪼개져 소계가 여러 번 생긴다(실측 2026-09-03: 그룹 308회 분절).
+    #     그래서 **그룹 대표값으로 정렬**하고, 그룹 안에서만 시각순으로 둔다.
+    #   ※제번 문자열을 시각보다 앞에 두면 안 된다(실측: 1053→0915→0933→1042 로 뒤섞임).
     def _firstday(r):
         d = [k for k, v in (r.get("day") or {}).items() if v]
         return min(d) if d else "999999"
 
-    rows.sort(key=lambda r: (r["jcust_nm"], r["line"], r["doban"],
-                             r.get("pymd") or _firstday(r),
-                             (r.get("hm") or "9999"), r["wo"]))
+    def _lginput(r):
+        """LG INPUT = 계획일(6) + 투입시각(4). 레거시 정렬값과 같은 축."""
+        return (r.get("pymd") or _firstday(r)) + (r.get("hm") or "9999")
+
+    # 그룹(작업처+라인+도번) 대표 = 그 그룹에서 가장 이른 LG INPUT
+    _gmin: dict = {}
+    for r in rows:
+        k = (r.get("jcust_nm") or "", r.get("line") or "", r.get("doban") or "")
+        v = _lginput(r)
+        if k not in _gmin or v < _gmin[k]:
+            _gmin[k] = v
+
+    def _key(r):
+        k = (r.get("jcust_nm") or "", r.get("line") or "", r.get("doban") or "")
+        return (_gmin[k], k[0], k[1], k[2], _lginput(r), r["wo"])
+
+    rows.sort(key=_key)
     tot_day = {a["ymd"]: round(sum(r["day"].get(a["ymd"], 0.0) for r in rows), 2)
                for a in axis}
     return {"axis": axis, "rows": rows, "base": base, "cnt": len(rows),
