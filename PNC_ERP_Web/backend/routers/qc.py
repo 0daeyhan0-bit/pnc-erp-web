@@ -246,8 +246,14 @@ async def qc_error_file_upload(file: UploadFile = File(...), id: int = Form(...)
     try:
         _os.makedirs(d, exist_ok=True)
     except Exception as e:
-        raise HTTPException(500, f"저장경로 생성 실패({DOC_STORAGE_PATH}): {e}")
-    safe = f"{slot}_{sha[:12]}_{fname}"
+        raise HTTPException(500,
+            f"저장경로 생성 실패({DOC_STORAGE_PATH}): {e} — "
+            f"서버 환경변수 DOC_STORAGE_PATH 를 확인하세요"
+            f"(한글이 깨졌거나 없는 드라이브면 저장이 안 됩니다).")
+    # ★파일명에 윈도우 금지문자·제어문자가 있으면 못 쓴다(한글은 그대로 둔다).
+    #   업로드 파일명은 브라우저가 준 값이라 무엇이든 올 수 있다.
+    _fn = "".join(("_" if (ch in '\\/:*?"<>|' or ord(ch) < 32) else ch) for ch in fname)[:120] or "file"
+    safe = f"{slot}_{sha[:12]}_{_fn}"
     with open(_os.path.join(d, safe), "wb") as fp: fp.write(raw)
     rel = _os.path.join(sub, safe)
     nx = _nx(); cur = nx.cursor()

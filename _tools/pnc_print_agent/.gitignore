@@ -1,0 +1,6 @@
+# 빌드 산출물 — 커밋하지 않는다(exe 67MB).
+# 배포는 build.ps1 로 만든 dist\PNC프린터에이전트.exe 를 파일로 전달한다.
+build/
+dist/
+*.spec
+__pycache__/

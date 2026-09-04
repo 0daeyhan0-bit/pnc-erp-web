@@ -233,11 +233,20 @@ def _step6_sql(cur):
       b.line_no,a.cum_use_qty AS use_qty,b.lot_qty,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100) AS plan_qty,
       a.gagong_proc_code,a.gagong_proc_seq,a.s_work_code,a.lt_hr,ISNULL(a.cum_lt_hr,0) AS cum_lt_hr,CEILING(CONVERT(float,b.plan_qty)*ISNULL(b.use_qty,1)*ISNULL(CASE WHEN b.work_order LIKE 'WO%' THEN 100 ELSE c.prod_rate END,100)/100)*a.cum_use_qty AS part_plan_qty
     INTO nx.plan_part_swork FROM nx.plan_part_gagong a JOIN nx.plan_item_dtl b ON a.assy_item_code=b.c_item_code JOIN {P}item c ON a.assy_item_code=c.item_code""").replace("{P}", P))
-    cur.execute("IF OBJECT_ID('nx.plan_part_dtl') IS NOT NULL DROP TABLE nx.plan_part_dtl")
-    cur.execute("""SELECT a.* INTO nx.plan_part_dtl FROM nx.plan_part_swork a
+    # ★무중단 교체(2026-09-04) — 종전엔 DROP 후 SELECT INTO 라 **49초 동안 테이블이 없었다**.
+    #   그 사이 다른 사용자가 파트별계획(410)을 조회하면 'Invalid object name' 오류가 났다.
+    #   ⟹ 새 이름으로 다 만든 뒤 **이름만 바꾼다**(sp_rename, 초 단위). 공백이 사라진다.
+    #   ※뷰 nx.v_plan_part_copy_new 는 이름으로 바인딩하므로 교체 후에도 그대로 유효하다.
+    cur.execute("IF OBJECT_ID('nx.plan_part_dtl_new') IS NOT NULL DROP TABLE nx.plan_part_dtl_new")
+    cur.execute("""SELECT a.* INTO nx.plan_part_dtl_new FROM nx.plan_part_swork a
       WHERE a.gagong_proc_code <> ISNULL((SELECT TOP 1 b.gagong_proc_code FROM nx.plan_part_swork b
         WHERE b.plan_ymd=a.plan_ymd AND b.work_order=a.work_order AND b.split_work_order=a.split_work_order AND b.assy_item_code=a.assy_item_code
           AND b.bom_level=a.bom_level AND b.upper_item_code=a.upper_item_code AND b.item_code=a.item_code AND b.proc_seq<a.proc_seq ORDER BY b.proc_seq DESC),'')""")
+    cur.execute("IF OBJECT_ID('nx.plan_part_dtl_old') IS NOT NULL DROP TABLE nx.plan_part_dtl_old")
+    cur.execute("""IF OBJECT_ID('nx.plan_part_dtl') IS NOT NULL
+                     EXEC sp_rename 'nx.plan_part_dtl', 'plan_part_dtl_old'""")
+    cur.execute("EXEC sp_rename 'nx.plan_part_dtl_new', 'plan_part_dtl'")
+    cur.execute("IF OBJECT_ID('nx.plan_part_dtl_old') IS NOT NULL DROP TABLE nx.plan_part_dtl_old")
 
 def _ensure_bom_snap(cur):
     """★nx.v_pr_bom(뷰) 물질화 — STEP7 재귀 CTE 성능(2026-08-27).
@@ -437,7 +446,8 @@ def _step7_sql(cur):
             AND d.assy_item_code=cb.assy_item_code AND d.bom_level=cb.bom_level+1 AND d.upper_item_code=b.item_code AND d.item_code=b.mat_code)))
     SELECT * INTO nx.plan_part_mat_tmp FROM CTE_BOM
     WHERE CHARINDEX('||'+mat_work_center_code+'||',cum_in_cust_code)=0 AND NOT (cust_flag='0' AND gc_gubun='P') OPTION(MAXRECURSION 0)""").replace("{P}", P))
-    cur.execute("IF OBJECT_ID('nx.plan_part_mat') IS NOT NULL DROP TABLE nx.plan_part_mat")
+    # ★무중단 교체(2026-09-04) — plan_part_dtl 과 같은 이유. 종전 DROP 방식은 29초 공백을 만들었다.
+    cur.execute("IF OBJECT_ID('nx.plan_part_mat_new') IS NOT NULL DROP TABLE nx.plan_part_mat_new")
     # 최하위집계 + ★용접봉(RAC, proc_weld 별도)만 제외. ★2026-08-19 교정: 레거시 SP엔 sgroup910 제외 없음 →
     #   910 일괄제외는 우리 오추가(4930 등 910 오분류 실 매입부품까지 제외). RAC(용접봉)만 공정처리로 제외, 용접링은 사급으로 유지(RACX 일치).
     #   ★part_plan_ymd/part_output_hm 도 함께 집계(최소값 = 가장 이른 소요일시).
@@ -484,7 +494,7 @@ def _step7_sql(cur):
              ELSE MIN(a.part_plan_ymd) END AS part_plan_ymd,
         CASE WHEN MIN(a.part_plan_ymd) < '{B}' AND MAX(dpx.pull_ymd) IS NULL THEN '0750'
              ELSE MIN(a.part_output_hm) END AS part_output_hm
-    INTO nx.plan_part_mat FROM nx.plan_part_mat_tmp a
+    INTO nx.plan_part_mat_new FROM nx.plan_part_mat_tmp a
     LEFT JOIN (SELECT RTRIM(work_order) AS work_order, MIN(pull_ymd) AS pull_ymd
                  FROM nx.plan_direct_pull GROUP BY RTRIM(work_order)) dpx
            ON dpx.work_order=RTRIM(a.work_order)
@@ -492,6 +502,12 @@ def _step7_sql(cur):
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}item wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_name,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
+    # ★이름 교체(무중단) — 여기까지 조회는 계속 옛 테이블을 읽고 있었다.
+    cur.execute("IF OBJECT_ID('nx.plan_part_mat_old') IS NOT NULL DROP TABLE nx.plan_part_mat_old")
+    cur.execute("""IF OBJECT_ID('nx.plan_part_mat') IS NOT NULL
+                     EXEC sp_rename 'nx.plan_part_mat', 'plan_part_mat_old'""")
+    cur.execute("EXEC sp_rename 'nx.plan_part_mat_new', 'plan_part_mat'")
+    cur.execute("IF OBJECT_ID('nx.plan_part_mat_old') IS NOT NULL DROP TABLE nx.plan_part_mat_old")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -979,6 +995,122 @@ def _dep_or_raise(cur, code):
 _LOCK_RES = "nx_plan_compose"
 
 
+# ══ 편성 진행 표시 (2026-09-04 신설) ═══════════════════════════════════
+#   왜 — 편성은 nx.plan_part_dtl 등을 재생성한다(K 49초 · T 29초).
+#   그 사이 다른 사람이 파트별계획·자재소요를 조회하면 **옛 데이터**를 보거나
+#   (종전 DROP 방식에서는) 테이블이 없어 오류가 났다.
+#   applock 은 편성끼리만 막고 조회는 못 막는다 → 상태를 DB 에 남겨 조회쪽이 읽게 한다.
+#   ※세션 applock 과 달리 이 표시는 **프로세스가 죽어도 남는다** → stale 판정을 함께 둔다.
+_BUSY_T = "nx.plan_compose_busy"
+# ★조회 커넥션(_conn)은 기본 DB 가 **PARTNER_ERP** 다 → 'nx.xxx' 로는 못 찾는다.
+#   읽기는 반드시 DB 풀네임으로 한다(2026-09-04 실측: OBJECT_ID('nx.…')=0, 풀네임=1).
+_BUSY_FQ = "PARTNER_ERP_TEST3.nx.plan_compose_busy"
+_BUSY_STALE_SEC = 1800          # 30분 넘으면 죽은 표시로 보고 무시
+
+
+def _ensure_busy(cur):
+    cur.execute("""IF OBJECT_ID('nx.plan_compose_busy') IS NULL
+        CREATE TABLE nx.plan_compose_busy(
+            id int NOT NULL PRIMARY KEY DEFAULT(1),
+            step_code varchar(4), step_name nvarchar(60),
+            by_user nvarchar(40), started_dt datetime, beat_dt datetime)""")
+
+
+def _busy_mark(code, user):
+    """편성 시작 표시 — ★자기 커넥션에서 즉시 커밋한다.
+       편성 트랜잭션 안에서 쓰면 끝날 때까지 다른 세션에 안 보여 의미가 없다."""
+    try:
+        bn = _nx(); bc = bn.cursor()
+        _ensure_busy(bc)
+        bc.execute(f"DELETE FROM {_BUSY_T}")
+        bc.execute(f"""INSERT INTO {_BUSY_T}(id, step_code, step_name, by_user, started_dt, beat_dt)
+                       VALUES(1, ?, ?, ?, GETDATE(), GETDATE())""",
+                   code, _JOB_NAME.get(code, code), user or "")
+        bn.commit(); bn.close()
+    except Exception:
+        pass
+
+
+def _busy_done():
+    """편성 종료 표시 해제 — 성공·실패 모두에서 부른다(finally)."""
+    try:
+        bn = _nx(); bc = bn.cursor()
+        _ensure_busy(bc)
+        bc.execute(f"DELETE FROM {_BUSY_T}")
+        bn.commit(); bn.close()
+    except Exception:
+        pass
+
+
+def plan_busy(cur):
+    """편성 진행중이면 {step, name, by, sec} 를, 아니면 None.
+       ★조회 API 들이 이걸 보고 '계획 업로드 중' 안내를 낸다.
+
+       ※호출자는 대개 **조회 커넥션(_conn, RO 가드)** 이다 → 여기서 DDL 을 하면 안 된다.
+         테이블이 없으면 '편성 중 아님'으로 본다(표시는 편성쪽 _busy_mark 가 만든다).
+         종전엔 _ensure_busy 를 불러 RO 가드에 막히고, 그 예외가 통째로 삼켜져
+         **항상 None** 이 나왔다(2026-09-04 실측)."""
+    try:
+        cur.execute(f"SELECT CASE WHEN OBJECT_ID('{_BUSY_FQ}') IS NULL THEN 0 ELSE 1 END")
+        if not int(cur.fetchone()[0] or 0):
+            return None
+        cur.execute(f"""SELECT step_code, step_name, by_user,
+                               DATEDIFF(second, started_dt, GETDATE())
+                          FROM {_BUSY_FQ} WHERE id=1""")
+        r = cur.fetchone()
+        if not r:
+            return None
+        sec = int(r[3] or 0)
+        if sec > _BUSY_STALE_SEC:
+            # 죽은 표시(프로세스가 비정상 종료된 경우) — 없는 것으로 본다.
+            # ※청소는 여기서 하지 않는다(조회 커넥션은 RO). 다음 편성의 _busy_mark 가 지운다.
+            return None
+        return {"step": str(r[0] or "").strip(), "name": str(r[1] or "").strip(),
+                "by": str(r[2] or "").strip(), "sec": sec}
+    except Exception:
+        return None
+
+
+# 단계별 '무엇이 다시 만들어지는 중인지' — 사용자에게 이유를 설명하기 위한 표
+_BUSY_WHY = {
+    "M":  ("모델 마스터", "신규 모델·도번을 등록하는 중입니다."),
+    "H":  ("생산계획 이력", "제번별 계획 이력을 다시 만드는 중입니다."),
+    "L":  ("라인 투입시간", "라인별 투입시간을 조정하는 중입니다."),
+    "I":  ("품목별 계획", "품목별 계획을 다시 만드는 중입니다."),
+    "K":  ("파트별 계획", "파트별 계획표를 통째로 다시 만드는 중입니다."),
+    "L2": ("리드타임 당김", "당김 일자를 다시 계산하는 중입니다."),
+    "H2": ("LG계획 확정", "출하 원천 계획을 확정하는 중입니다."),
+    "T":  ("자재소요·조달", "자재소요와 조달처를 다시 만드는 중입니다."),
+    "Z":  ("생산계획 일괄작업", "①~⑤ 전 단계를 순서대로 실행하는 중입니다."),
+}
+
+
+def busy_message(b, screen=""):
+    """편성 중 조회 차단 안내문 — **왜 막혔는지**까지 설명한다.
+
+    화면마다 같은 문구를 쓰도록 여기 한 곳에서 만든다.
+    ※사용자 요청(2026-09-04): "오류 메시지도 어떤 부분 때문에 오류가 났는지 설명해 달라"
+    """
+    if not b:
+        return ""
+    code = str(b.get("step") or "").strip()
+    what, why = _BUSY_WHY.get(code, (b.get("name") or code or "편성", "계획을 다시 만드는 중입니다."))
+    sec = int(b.get("sec") or 0)
+    el = f"{sec // 60}분 {sec % 60}초" if sec >= 60 else f"{sec}초"
+    head = f"[{screen}] 지금은 조회할 수 없습니다." if screen else "지금은 조회할 수 없습니다."
+    return (
+        f"{head}\n\n"
+        f"■ 이유 — 다른 사용자가 **계획 업로드(편성)** 를 실행 중입니다.\n"
+        f"   현재 단계 : {code} {b.get('name') or what}\n"
+        f"   하는 일   : {why}\n"
+        + (f"   실행자    : {b['by']}\n" if b.get("by") else "")
+        + f"   경과      : {el}\n\n"
+        f"■ 왜 막는가 — 이 단계는 계획 테이블을 **통째로 다시 만듭니다**.\n"
+        f"   지금 조회하면 만들다 만 숫자나 옛 숫자가 나와 잘못 판단하게 됩니다.\n\n"
+        f"■ 어떻게 — 편성은 보통 2~3분 걸립니다. 끝난 뒤 다시 조회해 주세요."
+    )
+
+
 def _lock_or_raise(cur):
     """★동시실행 금지 — 단계들이 DROP TABLE 을 쓰므로 두 사람이 동시에 누르면 깨진다.
        기존 화면(/api/plan/compose_mat)과 검토 화면이 같은 nx 테이블을 쓰는 것도 여기서 막는다.
@@ -1008,6 +1140,10 @@ def _run_step(code, fn, user, batch=None):
     try:
         warns = _dep_or_raise(cur, code)
         got = _lock_or_raise(cur)
+        # ★진행중 표시 — 조회 API 가 '계획 업로드 중' 안내를 내기 위한 소스(2026-09-04).
+        #   ※반드시 **별도 커넥션에서 즉시 커밋**해야 다른 세션이 볼 수 있다.
+        #     이 트랜잭션 안에서 쓰면 편성이 끝날 때까지 아무도 못 본다.
+        _busy_mark(code, user)
         out = fn(cur) or {}
         el = int(time.time() - t0)
         rows = next((out[k] for k in ("part_lines", "mat_lines", "item_lines", "sourcing_lines",
@@ -1024,7 +1160,9 @@ def _run_step(code, fn, user, batch=None):
         except Exception: pass
         raise HTTPException(500, "{} 실패 — {}".format(_JOB_NAME.get(code, code), str(e)[:300]))
     finally:
-        if got: _unlock(cur)        # ★락 해제 필수 — 안 풀면 커넥션 풀 재사용 시 영구 점유
+        if got:
+            _unlock(cur)            # ★락 해제 필수 — 안 풀면 커넥션 풀 재사용 시 영구 점유
+            _busy_done()            # ★진행중 표시도 반드시 해제(실패해도)
         nx.close()
 
 
@@ -1488,6 +1626,10 @@ def _ensure_line_pull(cur):
         cur.execute("""SELECT SUBSTRING(calendar_yymd,3,6), work_stats FROM nx.HR_M_CALENDAR
                         WHERE work_team='A' AND time_type='A' ORDER BY calendar_yymd""")
         _co = [(r[0], r[1]) for r in cur.fetchall()]
+    # ※근무달력(HR_M_CALENDAR) 반영은 **여기가 아니다**(2026-09-04 사용자 확인).
+    #   레거시 프로세스 = ①라인별 당김 → ②라인별 휴무 반영 → ③파트별계획 당김 → ④근무달력 반영.
+    #   즉 근무달력은 파트별 당김 **뒤에** 별도로 적용된다. 라인당김 단계(여기)에서
+    #   교집합을 걸면 순서가 틀려 다른 결과가 나온다.
     # ★정본 = nx.line_calendar (웹 자체). 레거시 미러 nx.PR_M_LINE_CALENDAR 는 여기로 이관됨
     #   (_schema/nx_line_calendar_merge.sql · 2026-08-27 · 18,247행 이관 → 총 18,897행·37라인).
     #   CLAUDE.md §1-9 "마스터 정본 = 재구축 클린본, 레거시 미러 아님".

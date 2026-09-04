@@ -534,7 +534,9 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             g["doneq"] = None   # ⚠ 완료수량: 레거시 라이브 실적조인 원천 미확정 → 담당확인(추측채움 금지)
             g["days"] = {k2: _qint(v2) for k2, v2 in g["days"].items()}; g["tot"] = _qint(g["tot"])
             g.pop("parts", None)
-        rows.sort(key=lambda x: (x["wcnm"] or "", x["line"], x["assy"]))
+        # ★정렬 = 도번 기준(2026-09-04 사용자 지시). 종전엔 작업처·라인이 앞에 있어
+        #   라인이 바뀔 때마다 도번이 되돌아갔다(CA→KS→CM 구간마다 재시작).
+        rows.sort(key=lambda x: (x["assy"] or "", x["wcnm"] or "", x["line"]))
         for i, g in enumerate(rows, 1): g["seq"] = i
         note = "레거시 4주간 계획수량(w_pr_outside_410)·라이브 PR_T_PLAN_PART_MAT 직독(당김반영). 묶기=" + ("도번(절삭협력사)" if gmode == 'assy' else "자도번(부자재/기타)") + "."
         dates_out = dates; frac = False
@@ -585,6 +587,42 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         else:
             note += " 완료수량=협력사(외주) 지정 시 표시(레거시는 협력사별 화면)."
         if capped: note = f"⚠ 부품 {CAP_PARTS:,}행 상한 — 자도번작업처/제번으로 좁히세요. " + note
+        # ★세트제외(공용품) 행 추가 — 거래명세서발행(420)·자재세트입고현황(130)과 같은 규칙
+        #   (2026-09-04 사용자 지적: "여기는 세트제외가 있는데 협력사 계획현황은 그대로").
+        #   레거시는 도번 행과 **별개로** 세트제외 자재를 자기 행(도번=자재 자신)으로 만든다.
+        #   410 은 행 구조가 달라 그대로 못 붙이므로 이 화면 키로 옮겨 담는다.
+        #   ★도번(assy)을 지정해 조회하면 제외행을 만들지 않는다 — 레거시 원문 주석:
+        #     "도번으로 조회할 경우 공용품때문에 세트입고제외품을 별도 표시하지 않는다"
+        #     (w_pr_outside_410 ue_retrieve: if trim(dw_c1.getitemstring(1,'item_code'))='' then).
+        if gmode == 'assy' and wc.strip() and not assy.strip():
+            try:
+                _se = _setexc_rows(wc.strip(), d6f or base, d6t, dates_out,
+                                   (rows[0]["wcnm"] if rows else wc.strip()),
+                                   "part_plan_ymd", len(dates_out) or 31)
+                for _r in _se:
+                    _q = float(_r.get("plan") or 0)
+                    rows.append({
+                        "seq": 0, "wc": wc.strip(),
+                        "wcnm": _r.get("custnm") or (rows[0]["wcnm"] if rows else wc.strip()),
+                        "line": _r.get("line") or "", "workcenter": _r.get("workcenter") or "",
+                        "assy": _r.get("assy") or "", "nm": _r.get("nm") or "",
+                        "spec": _r.get("spec") or "",
+                        "part": _r.get("mat_list") or "",      # 자도번LIST = "상위도번:A,…"
+                        "jcnt": 0, "wo": "", "sagub": False,
+                        "lot": _qint(_r.get("lot") or 0),
+                        "matq": _qint(_q), "tot": _qint(_q),
+                        "doneq": _qint(_r.get("done") or 0),
+                        "reqq": _qint(_r.get("req") or 0),
+                        "days": _r.get("days") or {}, "donedays": _r.get("donedays") or {},
+                        "colors": _r.get("colors") or {}, "lookup": "",
+                        "setexc": 1})
+                if _se:
+                    # 세트제외를 맨 위로(420·130 동일)
+                    rows.sort(key=lambda x: (0 if x.get("setexc") else 1,
+                                             x["assy"] or "", x["wcnm"] or "", x["line"]))
+                    for i, g in enumerate(rows, 1): g["seq"] = i
+            except Exception as _e:
+                note += f" ⚠세트제외 행 생성 오류: {str(_e)[:80]}"
         return {"dates": dates_out, "rows": rows, "cnt": len(rows), "frac": frac,
                 "sum_qty": _qint(sum(g["matq"] for g in rows)), "note": note}
     finally:
@@ -832,9 +870,10 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
                 note += f" ⚠완료수량 계산 오류: {str(e)[:90]}"
         else:
             note += " 완료수량=협력사(외주) 지정 시 표시."
-        # ★도번순 정렬(2026-08-28 사용자 요청) — 작업처 안에서 도번(ASSY) 오름차순.
+        # ★도번순 정렬(2026-08-28 사용자 요청 → 2026-09-04 도번 최우선으로 교정).
         #   SQL ORDER BY 는 WORK_ORDER 가 먼저라 같은 도번이 제번별로 흩어져 보였다.
-        rows.sort(key=lambda x: ((x.get("workcenter") or ""), (x.get("assy") or "")))
+        #   작업처를 앞에 두면 작업처가 바뀔 때마다 도번이 되돌아가므로 도번을 앞에 둔다.
+        rows.sort(key=lambda x: ((x.get("assy") or ""), (x.get("workcenter") or "")))
         for i, r in enumerate(rows, 1):
             r.pop("_mats", None)                 # 내부 계산용 키 제거
             r["lot"] = _qint(r.get("lot") or 0); r["tot"] = _qint(r["tot"]); r["seq"] = i
@@ -1055,43 +1094,53 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm, ycol="plan_ymd", ncol=31
                    LTRIM(RTRIM(ISNULL(i.line_no,''))) ln,
                    m.{_yc},
                    LTRIM(RTRIM(m.assy_item_code)) assy,
-                   SUM(CAST(m.part_plan_qty AS float)) q
+                   SUM(CAST(m.part_plan_qty AS float)) q,
+                   LTRIM(RTRIM(ISNULL(m.upper_item_code,''))) up,
+                   LTRIM(RTRIM(ISNULL(m.item_code,''))) it
               FROM nx.plan_part_mat m WITH(NOLOCK)
               LEFT JOIN nx.plan_item_dtl i WITH(NOLOCK)
                      ON i.work_order=m.work_order AND i.c_item_code=m.assy_item_code
              WHERE LTRIM(RTRIM(m.mat_work_center_code))=?
                AND m.{_yc} BETWEEN ? AND ?
-             GROUP BY m.mat_code, i.line_no, m.{_yc}, m.assy_item_code""",
+             GROUP BY m.mat_code, i.line_no, m.{_yc}, m.assy_item_code,
+                      m.upper_item_code, m.item_code""",
             cust, from_ymd, to_ymd)
         raw = cur.fetchall()
         if not raw:
             return []
         mats = sorted({str(r[0]).strip() for r in raw})
 
-        # ② 세트제외 판정 — ★그 협력사가 실제로 대는 **경로(상위도번) 링크만** 보고
-        #   전부 SET_EXCEPT_FLAG='1' 이면 세트제외로 본다(2026-08-31 실측 확정).
-        #   ⛔전체 링크로 판정하면 안 된다: 5210A23376A 는 전체 210링크 중 203만 제외라
-        #     탈락하지만, 2266 경로 11링크는 11/11 전부 제외 → 레거시 화면엔 나온다.
-        #     (다른 협력사 경로에서는 세트로 쓰이므로 전체 기준으로는 판정 불가)
-        setexc = set()
-        for ch in _chunks(mats):
-            ph = ",".join("?" * len(ch))
-            cur.execute(f"""
-                SELECT b.mat FROM (
-                  SELECT LTRIM(RTRIM(b0.MAT_CODE)) mat,
-                         MIN(CASE WHEN ISNULL(b0.SET_EXCEPT_FLAG,'0')='1' THEN 1 ELSE 0 END) allexc,
-                         COUNT(*) n
-                    FROM nx.PR_M_ITEM_BOM b0
-                    JOIN (SELECT DISTINCT LTRIM(RTRIM(mat_code)) mat,
-                                 LTRIM(RTRIM(upper_item_code)) up
-                            FROM nx.plan_part_mat WITH(NOLOCK)
-                           WHERE LTRIM(RTRIM(mat_work_center_code))=?
-                             AND {_yc} BETWEEN ? AND ?) p
-                      ON p.mat=LTRIM(RTRIM(b0.MAT_CODE)) AND p.up=LTRIM(RTRIM(b0.ITEM_CODE))
-                   WHERE b0.MAT_CODE IN ({ph})
-                   GROUP BY b0.MAT_CODE) b
-                 WHERE b.allexc=1 AND b.n>0""", cust, from_ymd, to_ymd, *ch)
-            for r in cur.fetchall(): setexc.add(str(r[0]).strip())
+        # ② 세트제외 판정 — ★경로 재귀(2026-09-04 교정). 자재세트입고현황과 **같은 규칙**이다.
+        #   정본 = nx.bom_line + nx.bom_header (CLAUDE.md §1-9-2). 종전엔 미러
+        #   nx.PR_M_ITEM_BOM 을 **직접 조인**했는데 두 가지가 틀렸다:
+        #     ⑴ 미러 직독 = §1-9-2 위반(컷오버에 죽는 코드)
+        #     ⑵ 소요의 upper_item_code 는 **가상노드가 평탄화된 최상위**라 BOM 부모와
+        #        집합이 다르다. 플래그는 중간노드(-J4 등)에 붙어 있어 직접조인이 못 잡는다.
+        #        실측 2026-09-04 : MJU66478801 의 소요 upper 12종 중 직접조인은 1건만 걸림
+        #        (AJR77224501 ↔ AJR77224501-J4 처럼 이름이 어긋난다).
+        #   ⟹ setinstat._se_pairs 와 동일한 (상위도번, 자재) 경로쌍으로 판정한다.
+        #     ★"전 경로 제외"가 아니라 **경로별**로 갈린다 — 같은 자재가 어떤 상위도번
+        #       밑에서는 제외, 다른 상위도번 밑에서는 세트다(레거시 실측: MJU66478801 이
+        #       AJR77224xxx 밑에선 제외, AJR30125601/602/603 밑에선 세트).
+        from routers.setinstat import _se_pairs as _se_pairs_fn
+        _pairs = _se_pairs_fn(cur)
+        cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(mat_code)),
+                               LTRIM(RTRIM(ISNULL(upper_item_code,''))),
+                               LTRIM(RTRIM(ISNULL(item_code,'')))
+                          FROM nx.plan_part_mat WITH(NOLOCK)
+                         WHERE LTRIM(RTRIM(mat_work_center_code))=?
+                           AND {_yc} BETWEEN ? AND ?""", cust, from_ymd, to_ymd)
+        #   ★_exc_up = {자재: {제외인 상위도번…}} — 자재 단위가 아니라 **경로 단위**로 담는다.
+        #     레거시 실측(2026-09-04, 미래정밀 MJU66478801):
+        #       세트제외 행 LOT 782 = AJR77224xxx 경로만
+        #       AJR30125601(1,727)·602(551)·603(325) 은 **세트 갈래로 따로** 나온다.
+        #     자재 단위로 합치면 3,383 이 되어 레거시(782)와 안 맞는다.
+        _exc_up: dict = {}
+        for r in cur.fetchall():
+            mat, up, it = str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip()
+            if (up, mat) in _pairs or (it, mat) in _pairs:
+                _exc_up.setdefault(mat, set()).add(up)
+        setexc = set(_exc_up)
         if not setexc:
             return []
 
@@ -1125,9 +1174,12 @@ def _setexc_rows(cust, from_ymd, to_ymd, dates, custnm, ycol="plan_ymd", ncol=31
         didx = {y: i for i, y in enumerate(dates)}
         _N = max(int(ncol or 31), len(dates))    # ★일자칸 수(420=31 / 130=조회 근무일수)
         grp = {}
-        for mat, ln, ymd, assy, q in raw:
+        for mat, ln, ymd, assy, q, _up, _it in raw:
             mat = str(mat).strip()
-            if mat not in setexc:
+            # ★경로 단위 필터 — 그 상위도번 밑에서 제외인 소요행만 담는다(자재 단위 아님).
+            #   레거시는 세트 갈래(AJR30125601 등)를 이 행에 넣지 않는다.
+            _up = str(_up or "").strip(); _it = str(_it or "").strip()
+            if not ((_up, mat) in _pairs or (_it, mat) in _pairs):
                 continue
             _ln = 'SVC' if str(ln).strip() == 'SVC' else ''
             k = (mat, _ln)

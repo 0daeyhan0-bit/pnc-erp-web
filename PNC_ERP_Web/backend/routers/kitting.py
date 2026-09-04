@@ -536,6 +536,22 @@ def plan_part410(from_ymd: str = Query(""), gigan: int = Query(2), wc: str = Que
               else f"{SCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
     try:
+        # ★편성(계획 업로드) 중이면 조회를 막고 **이유까지** 안내한다 (2026-09-04).
+        #   편성은 nx.plan_part_dtl 을 재생성한다(K 49초 · T 29초). 그 사이 조회하면
+        #   반쯤 만들어진/옛 데이터를 보게 되어 "숫자가 이상하다"는 오해가 난다.
+        #   applock 은 편성끼리만 막으므로 조회쪽은 이 표시를 직접 본다.
+        if _src == "new":
+            _b = _msg = None
+            try:
+                from routers.planrev import plan_busy as _pb, busy_message as _bm
+                _b = _pb(cur)
+                if _b: _msg = _bm(_b, "파트별 생산계획")
+            except HTTPException:
+                raise
+            except Exception:
+                _b = None
+            if _b:
+                raise HTTPException(409, _msg or "계획 업로드(편성) 중입니다 — 잠시 후 다시 조회해 주세요.")
         d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
         # ★날짜 지평 = 레거시 srw ue_retrieve 산식 완전이식: to_ymd = base(기준일) 초과 (기간-1)번째 근무일.
         #   근무일 = HR_M_CALENDAR(work_team='A', time_type='A', work_stats in 1/2/5/6) ∩ pr_m_line_calendar(work_stats<>4). dates=base~to 전체 달력일(주말/휴일도 컬럼).

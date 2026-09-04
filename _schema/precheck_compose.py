@@ -176,6 +176,38 @@ if rows:
 else:
     print('   ✅ 없음')
 
+# ── [3b] 품목마스터 값(매입처·작업처) ────────────────────────────────
+#   ★in_cust(매입처)는 **파트별 편성 판정에 직접 쓰인다**
+#     (planrev.py `WHERE ... in_cust_code IN ('','2228')` — 매입처가 있으면 사내 파트별이 아니라
+#      업체 자재소요로 간다). work_code 는 발주처를 정한다.
+#   실측 2026-09-04 — MJU00777202 가 라이브에서 매입처 2142(세광산업)로 바뀌었는데
+#   nx.item 은 빈값이라 웹이 사내 파트별로 편성했다(레거시는 업체로 보냄).
+#   존재·make_type 만 보던 [3] 으로는 못 잡는다 → 값 비교 축을 따로 둔다.
+print('\n[3b] 품목마스터 값 — 매입처·작업처가 라이브와 다른가 (편성 판정·발주처가 바뀐다)')
+cur.execute(f"""
+SELECT RTRIM(i.item_code),
+       RTRIM(ISNULL(i.in_cust,'')) w_in,  RTRIM(ISNULL(m.IN_CUST_CODE,'')) l_in,
+       RTRIM(ISNULL(i.work_code,'')) w_wc, RTRIM(ISNULL(m.WORK_CODE,'')) l_wc
+  FROM {NX}item i WITH(NOLOCK)
+  JOIN PARTNER_ERP.dbo.PR_M_ITEM m WITH(NOLOCK) ON RTRIM(m.ITEM_CODE)=RTRIM(i.item_code)
+ WHERE RTRIM(ISNULL(i.in_cust,''))   <> RTRIM(ISNULL(m.IN_CUST_CODE,''))
+    OR RTRIM(ISNULL(i.work_code,'')) <> RTRIM(ISNULL(m.WORK_CODE,''))
+ ORDER BY i.item_code""")
+iv = cur.fetchall()
+if iv:
+    for x in iv[:15]:
+        d = []
+        if x[1] != x[2]: d.append(f"매입처 웹'{x[1] or '-'}' → 라이브'{x[2] or '-'}'")
+        if x[3] != x[4]: d.append(f"작업처 웹'{x[3] or '-'}' → 라이브'{x[4] or '-'}'")
+        print(f'      ! {x[0]:24} ' + ' · '.join(d))
+    if len(iv) > 15: print(f'      … 외 {len(iv)-15}개')
+    TOT += len(iv)
+    print(f'   ★ {len(iv)}개 품목')
+    FIX.append(('품목 매입처·작업처',
+                'python _migration/sub_norm/r_item_sync.py --commit   (리더 컬럼 동기화)'))
+else:
+    print('   ✅ 없음')
+
 # ── [4] 공정마스터 ────────────────────────────────────────────────────
 print('\n[4] 공정마스터 — 미러가 라이브보다 낡음 (공정 조인에서 행이 사라진다)')
 cur.execute(f"""
@@ -191,24 +223,88 @@ diff = cur.fetchall()
 # ★값 비교 — 행수가 같아도 LT_HR 등 값이 다르면 당김일자가 하루씩 어긋난다.
 #   실측 2026-09-03: AJR32674714 seq=1 이 라이브 12h / 미러 8h 였고,
 #   행수는 같아 위 두 검사에 안 걸렸다. 그 1행 때문에 410 화면 당일이전계획이 37 어긋났다.
+#   ※어느 컬럼이 다른지 함께 보여준다 — 종전엔 전부 'LT_HR' 로 찍어
+#     "라이브 16.00 / 미러 16.00" 처럼 같은 값이 불일치로 보였다(2026-09-04 교정).
 cur.execute(f"""
 SELECT RTRIM(l.ITEM_CODE), l.PROC_SEQ,
-       CAST(l.LT_HR AS float), CAST(n.lt_hr AS float)
+       CASE WHEN ISNULL(CAST(l.LT_HR AS float),0) <> ISNULL(CAST(n.lt_hr AS float),0)
+              THEN 'LT_HR '  + CAST(CAST(l.LT_HR AS decimal(9,2)) AS varchar(20)) + ' / ' + CAST(CAST(n.lt_hr AS decimal(9,2)) AS varchar(20))
+            WHEN RTRIM(ISNULL(CAST(l.GAGONG_PROC_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.gagong_proc_code AS varchar(40)),''))
+              THEN 'GAGONG_PROC_CODE ' + RTRIM(ISNULL(CAST(l.GAGONG_PROC_CODE AS varchar(40)),'~')) + ' / ' + RTRIM(ISNULL(CAST(n.gagong_proc_code AS varchar(40)),'~'))
+            WHEN RTRIM(ISNULL(CAST(l.S_WORK_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.s_work_code AS varchar(40)),''))
+              THEN 'S_WORK_CODE ' + RTRIM(ISNULL(CAST(l.S_WORK_CODE AS varchar(40)),'~')) + ' / ' + RTRIM(ISNULL(CAST(n.s_work_code AS varchar(40)),'~'))
+            ELSE 'MACH_CODE ' + RTRIM(ISNULL(CAST(l.MACH_CODE AS varchar(40)),'~')) + ' / ' + RTRIM(ISNULL(CAST(n.mach_code AS varchar(40)),'~'))
+       END AS what
   FROM PARTNER_ERP.dbo.PR_M_ITEM_PROC_GAGONG l WITH(NOLOCK)
   JOIN {NX}PR_M_ITEM_PROC_GAGONG n WITH(NOLOCK)
     ON RTRIM(n.item_code)=RTRIM(l.ITEM_CODE) AND n.proc_seq=l.PROC_SEQ
  WHERE ISNULL(CAST(l.LT_HR AS float),0) <> ISNULL(CAST(n.lt_hr AS float),0)
     OR RTRIM(ISNULL(CAST(l.S_WORK_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.s_work_code AS varchar(40)),''))
     OR RTRIM(ISNULL(CAST(l.GAGONG_PROC_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.gagong_proc_code AS varchar(40)),''))
- ORDER BY ABS(ISNULL(CAST(l.LT_HR AS float),0)-ISNULL(CAST(n.lt_hr AS float),0)) DESC""")
+    OR RTRIM(ISNULL(CAST(l.MACH_CODE AS varchar(40)),'')) <> RTRIM(ISNULL(CAST(n.mach_code AS varchar(40)),''))
+ ORDER BY l.ITEM_CODE, l.PROC_SEQ""")
 val = cur.fetchall()
 if miss or diff or val:
     for x in miss[:10]: print(f'      + {x[0]:26} 공정 {x[1]:>3}행 (미러에 없음)')
     for x in diff[:10]: print(f'      ~ {x[0]:26} 미러 {x[1]:>3} → 라이브 {x[2]:>3} (행수)')
-    for x in val[:10]:  print(f'      ! {x[0]:26} seq={x[1]} LT_HR 라이브 {x[2]:>6.2f} / 미러 {x[3]:>6.2f}  ★당김일자 어긋남')
+    for x in val[:10]:  print(f'      ! {x[0]:26} seq={x[1]}  {x[2]}   (라이브 / 미러)')
     TOT += len(miss) + len(diff) + len(val)
     print(f'   ★ 누락 {len(miss)}품목 · 행수불일치 {len(diff)}품목 · ★값불일치 {len(val)}행')
     FIX.append(('공정마스터', '(공정 미러 델타 동기화 + LT_HR 값 갱신 → r_has_gagong_sync.py --commit)'))
+else:
+    print('   ✅ 없음')
+
+# ── [4b] 근무달력 ─────────────────────────────────────────────────────
+#   ★당김일자가 통째로 밀리는 원인. 리드타임이 같아도 근무일 수가 다르면 결과가 달라진다.
+#   실측 2026-09-04: 라이브가 9/24·9/25 를 휴무(WORK_STATS=4)로 바꿨는데 미러는 근무(1) 였고,
+#   그 2건 때문에 당김이 **정확히 2일씩** 어긋난 행이 1,007건 났다(파트별 986키).
+print('\n[4b] 근무달력 — 미러가 라이브와 다른가 (당김일자가 통째로 밀린다)')
+cur.execute(f"""
+SELECT RTRIM(l.WORK_TEAM), RTRIM(l.CALENDAR_YYMD),
+       RTRIM(ISNULL(l.WORK_STATS,'')), RTRIM(ISNULL(n.WORK_STATS,''))
+  FROM PARTNER_ERP.dbo.HR_M_CALENDAR l WITH(NOLOCK)
+  JOIN {NX}HR_M_CALENDAR n WITH(NOLOCK)
+    ON RTRIM(n.WORK_TEAM)=RTRIM(l.WORK_TEAM) AND RTRIM(n.CALENDAR_YYMD)=RTRIM(l.CALENDAR_YYMD)
+ WHERE RTRIM(ISNULL(l.WORK_STATS,'')) <> RTRIM(ISNULL(n.WORK_STATS,''))
+ ORDER BY l.CALENDAR_YYMD""")
+cal = cur.fetchall()
+cur.execute(f"""
+SELECT COUNT(*) FROM PARTNER_ERP.dbo.PR_M_LINE_CALENDAR l WITH(NOLOCK)
+ WHERE NOT EXISTS(SELECT 1 FROM {NX}PR_M_LINE_CALENDAR n
+    WHERE RTRIM(n.LINE_NO)=RTRIM(l.LINE_NO) AND RTRIM(n.CALENDAR_YMD)=RTRIM(l.CALENDAR_YMD))""")
+lc = cur.fetchone()[0]
+# ★★근무달력과 라인달력이 다른 것은 **정상이다**(2026-09-04 교정).
+#   레거시 규칙 = 근무일은 두 달력의 **교집합** — 둘 다 근무여야 근무일이다
+#   (kitting.py:557 「HR_M_CALENDAR(1/2/5/6) ∩ pr_m_line_calendar(<>4)」, coopplan·gagong 동일).
+#   실측: 추석 9/24·9/25 는 HR=4(휴무)·라인=1(근무)이고 **라이브 양쪽 다 그렇다**.
+#   레거시 파트별은 그 이틀에 0행 → 교집합으로 휴무 처리하는 것이 맞다.
+#   ⟹ 달력 값을 억지로 맞추지 말 것. 편성이 교집합으로 판정하면 그대로 맞는다.
+#     (planrev.py `_stepL_pull` 이 2026-09-04 부터 교집합을 적용한다)
+#   여기서는 **양쪽 다 라이브와 같은지**만 본다 — 서로 다른 건 검출 대상이 아니다.
+cur.execute(f"""
+SELECT CONVERT(varchar(6),n.cal_ymd,12) y, ISNULL(n.work_stats,'') w, RTRIM(ISNULL(l.WORK_STATS,'')) hh
+  FROM {NX}line_calendar n WITH(NOLOCK)
+  JOIN PARTNER_ERP.dbo.PR_M_LINE_CALENDAR l WITH(NOLOCK)
+    ON RTRIM(l.LINE_NO)=RTRIM(n.line_no)
+   AND RTRIM(l.CALENDAR_YMD)=CONVERT(varchar(6),n.cal_ymd,12)
+ WHERE ISNULL(n.work_stats,'') <> RTRIM(ISNULL(l.WORK_STATS,''))
+   AND CONVERT(varchar(6),n.cal_ymd,12) BETWEEN ? AND ?
+ ORDER BY n.cal_ymd, n.line_no""", LO, HI)
+src = cur.fetchall()
+if cal or lc or src:
+    _ST = {'1': '근무', '2': '근무', '4': '휴무', '5': '근무', '6': '근무'}
+    for x in cal[:12]:
+        print(f'      ! {x[1]} team={x[0]:3} 라이브={x[2]}({_ST.get(x[2],"?")}) / 미러={x[3]}({_ST.get(x[3],"?")})')
+    if len(cal) > 12: print(f'      … 외 {len(cal)-12}건')
+    if lc: print(f'      + 라인달력(PR_M_LINE_CALENDAR) 라이브에만 {lc}건')
+    for x in src[:12]:
+        print(f'      ★{x[0]} 정본 line_calendar={x[1]}({_ST.get(x[1],"?")})'
+              f' / 라이브={x[2]}({_ST.get(x[2],"?")})  ← 편성이 읽는 소스가 라이브와 다르다')
+    if len(src) > 12: print(f'      … 외 {len(src)-12}건')
+    TOT += len(cal) + lc + len(src)
+    print(f'   ★ 근무달력 {len(cal)}건 · 라인달력(미러) {lc}건 · ★정본 line_calendar {len(src)}건')
+    FIX.append(('달력', '(정본 nx.line_calendar 를 **라이브와 같게** 둘 것. '
+                        '근무달력과 라인달력이 서로 다른 건 정상 — 편성이 교집합으로 판정한다)'))
 else:
     print('   ✅ 없음')
 

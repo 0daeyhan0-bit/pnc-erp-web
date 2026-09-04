@@ -1033,10 +1033,24 @@ SCREEN.deliv420=(c)=>{
     if(!F.cust){msg='협력사(자도번작업처)를 먼저 선택하세요.';data={dates:[],rows:[],cnt:0,sum:{}};draw();return;}
     loading=true;msg='';draw();
     // ★gigan = 근무일 기준 기간(백엔드가 to_ymd 를 근무일로 재계산·휴무만큼 자동연장). to_ymd 는 하위호환.
-    const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),item:F.item,matcode:F.part,gigan:Math.max(1,+F.days||2)});
-    try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();F.deliv={};F.pack={};F.serial={};F.heat={};F.chk={};}
-    catch(e){msg='백엔드 연결 실패';data={dates:[],rows:[],cnt:0,sum:{}};}
-    loading=false;draw();};
+    /* ★도번·자도번은 서버에 보내지 않는다 — 전체를 받아 로컬에서 즉시 필터(2026-09-04).
+       전체품번을 다 칠 필요 없이 숫자 일부만 넣어도 걸린다. */
+    const qs=new URLSearchParams({cust:F.cust,from_ymd:F.from,to_ymd:toOf(),gigan:Math.max(1,+F.days||2)});
+    try{const r=await fetch(`${API}/api/partner/deliv420?${qs}`);data=await r.json();
+        all=(data&&data.rows)||[];F.deliv={};F.pack={};F.serial={};F.heat={};F.chk={};}
+    catch(e){msg='백엔드 연결 실패';data={dates:[],rows:[],cnt:0,sum:{}};all=[];}
+    loading=false;applyLocal();};
+
+  /* ★로컬 필터 — 도번(ASSY)/품명, 자도번을 부분일치로 거른다.
+     자도번은 그 행의 자재목록(mats/part/jado) 문자열 안에서 찾는다. */
+  let all=[];
+  const applyLocal=()=>{
+    const a=(F.item||'').trim().toUpperCase(), p=(F.part||'').trim().toUpperCase();
+    let rs=all;
+    if(a) rs=rs.filter(r=>(String(r.assy||'')+' '+String(r.nm||'')).toUpperCase().includes(a));
+    if(p) rs=rs.filter(r=>String(r.mats||r.part||r.jado||'').toUpperCase().includes(p));
+    data=Object.assign({},data,{rows:rs,cnt:rs.length});
+    draw();};
   // 선택행(체크·납품수량>0) 수집
   const collect=(rows)=>{const items=[];rows.forEach(r=>{if(F.chk[r.assy]){const dv=Number(F.deliv[r.assy]!=null?F.deliv[r.assy]:r.deliv)||0;
     items.push({assy:r.assy,deliver_qty:dv,pack_qty:Number(F.pack[r.assy]!=null?F.pack[r.assy]:r.pack)||0,serial_no:F.serial[r.assy]||'',heat_no:F.heat[r.assy]||''});}});return items;};
@@ -1610,7 +1624,14 @@ SCREEN.deliv420=(c)=>{
     // 정렬 드롭다운을 바꾸면 헤더 정렬은 해제한다(둘이 겹치면 헷갈린다)
     const so=g('#d4-sort');if(so)so.onchange=()=>{st.sortKey='';sync();draw();};
     const sc=g('#d4-sortclr');if(sc)sc.onclick=()=>{st.sortKey='';draw();};
-    ['#d4-cust','#d4-custcode','#d4-item','#d4-part','#d4-days','#d4-dnp'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
+    /* ★도번·자도번은 타이핑 즉시 로컬 필터(150ms 디바운스) — 조회 버튼 불필요. */
+    let _ft=null;
+    ['#d4-item','#d4-part'].forEach(id=>{const el=g(id);if(!el)return;
+      el.oninput=()=>{clearTimeout(_ft);_ft=setTimeout(()=>{
+        F.item=g('#d4-item').value.trim();F.part=g('#d4-part').value.trim();applyLocal();},150);};
+      el.onkeyup=e=>{if(e.key==='Enter'){clearTimeout(_ft);
+        F.item=g('#d4-item').value.trim();F.part=g('#d4-part').value.trim();applyLocal();}};});
+    ['#d4-cust','#d4-custcode','#d4-days','#d4-dnp'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter'){sync();load();}};});
     // 코드 ↔ 업체명 양방향 채움
     const cCode=g('#d4-custcode');
     if(cCode)cCode.onchange=()=>{const w=custs.find(x=>x.cc===cCode.value.trim());if(w)g('#d4-cust').value=w.nm||w.cc;};
@@ -2694,12 +2715,30 @@ SCREEN.partnerplan=(c)=>{
     soloFix();                                      // ★협력사는 어느 경로로 들어와도 자기 업체로 조회
     if(!F.wc){msg='협력사(자도번작업처)를 먼저 선택하세요. (전체 조회는 무거워 협력사 지정 후 조회합니다)';data={dates:[],rows:[],cnt:0,sum_qty:0,note:''};draw();return;}
     loading=true;msg='';draw();
-    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:toOf(),wc:F.wc,part:F.part,assy:F.assy,line:F.line,gubun:F.gubun,src:F.src});
+    /* ★도번·자도번은 서버에 보내지 않는다 — 전체를 받아 로컬에서 즉시 필터(2026-09-04).
+       종전엔 서버 파라미터라 한 글자 고칠 때마다 10초짜리 재조회를 눌러야 했다.
+       자재세트입고현황(SCREEN.setinstat2)과 같은 방식. */
+    const qs=new URLSearchParams({from_ymd:F.from,to_ymd:toOf(),wc:F.wc,line:F.line,gubun:F.gubun,src:F.src});
     try{console.log('[partnerplan] 조회',qs.toString());}catch(e){}
     try{const r=await fetch(`${API}/api/partner/planstatus?${qs}`);data=await r.json();msg='';
-        try{console.log('[partnerplan] 결과 cnt=',data&&data.cnt,'rows=',(data&&data.rows||[]).length);}catch(e){}}
-    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],cnt:0,sum_qty:0};}
-    loading=false;draw();};
+        all=(data&&data.rows)||[];
+        try{console.log('[partnerplan] 결과 cnt=',data&&data.cnt,'rows=',all.length);}catch(e){}}
+    catch(e){msg='백엔드 연결 실패 — uvicorn app:app --port 8010 실행 필요';data={dates:[],rows:[],cnt:0,sum_qty:0};all=[];}
+    loading=false;applyLocal();};
+
+  /* ★로컬 필터 — 도번(ASSY)·자도번을 부분일치로 거른다. 숫자 일부만 넣어도 걸린다.
+     자도번은 그 행의 자재목록(mats/part) 문자열 안에서 찾는다. */
+  let all=[];
+  const applyLocal=()=>{
+    const a=(F.assy||'').trim().toUpperCase(), p=(F.part||'').trim().toUpperCase();
+    let rs=all;
+    /* ★도번을 지정하면 세트제외 행은 감춘다 — 레거시 동일
+         "도번으로 조회할 경우 공용품때문에 세트입고제외품을 별도 표시하지 않는다"
+         (w_pr_outside_410 ue_retrieve). 공용품이라 도번별로 보면 중복으로 읽힌다. */
+    if(a) rs=rs.filter(r=>!r.setexc&&String(r.assy||'').toUpperCase().includes(a));
+    if(p) rs=rs.filter(r=>String(r.mats||r.part||'').toUpperCase().includes(p));
+    data=Object.assign({},data,{rows:rs,cnt:rs.length});
+    draw();};
   // 레거시 도번-level(자도번LIST) / nx 자도번-level 를 동일 컬럼으로 정규화
   const norm=(r,i)=>({seq:r.seq||i+1, wc:r.wc, wcnm:r.wcnm||r.wc, line:r.line||'', workcenter:r.workcenter||'',
      // ★nx 소스도 레거시와 같은 그레인(도번=assy 1행) → 자도번LIST 는 그 행의 자재목록(mats). 없으면 종전 part.
@@ -3036,7 +3075,15 @@ SCREEN.partnerplan=(c)=>{
     g('#pn-days').onchange=()=>{syncInputs();load();};
     g('#pn-search').onclick=()=>{syncInputs();load();};
     { const xb=g('#pn-xls'); if(xb) xb.onclick=exportXlsx; }   // ★엑셀(색상 포함)
-    ['#pn-part','#pn-assy','#pn-wc','#pn-wccode'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
+    /* ★도번·자도번은 타이핑 즉시 로컬 필터(150ms 디바운스) — 조회 버튼 불필요.
+         전체품번을 다 칠 필요 없이 숫자 일부만 넣어도 걸린다(2026-09-04 사용자 요청). */
+    let _ft=null;
+    ['#pn-part','#pn-assy'].forEach(id=>{const el=g(id);if(!el)return;
+      el.oninput=()=>{clearTimeout(_ft);_ft=setTimeout(()=>{
+        F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;applyLocal();},150);};
+      el.onkeyup=e=>{if(e.key==='Enter'){clearTimeout(_ft);
+        F.part=g('#pn-part').value;F.assy=g('#pn-assy').value;applyLocal();}};});
+    ['#pn-wc','#pn-wccode'].forEach(id=>{const el=g(id);if(el)el.onkeyup=e=>{if(e.key==='Enter')g('#pn-search').click();};});
     // ★헤더 더블클릭 정렬(고정 12컬럼 + 일자 피벗) — tbody만 재렌더로 화살표·리사이저 보존. 합계행은 bodyHTML이 항상 맨끝에 붙임.
     if(!loading&&rowsCur.length){
       const KEYS=['seq','wcnm','line','workcenter','assy','jado','sagub','lot','matq','doneq','reqq'].concat(dates.map(d=>'d_'+d));
@@ -4257,7 +4304,7 @@ SCREEN.setinstat=(c)=>{
       <th style="width:70px">생산실적</th><th style="width:70px">출하실적</th>
       <th style="width:78px">세트재고</th><th style="width:70px">단품재고</th>
       <th style="width:70px">ASSY재고</th><th style="width:150px">모델</th>
-      <th style="width:80px">입고구분</th></tr>`;
+      <th style="width:104px">입고구분</th></tr>`;
 
     if(!st.rows.length){
       $('#s2-b').innerHTML=`<tr><td colspan="${25+A.length}" style="padding:24px;color:#8aa0bd">
@@ -4355,6 +4402,15 @@ SCREEN.setinstat=(c)=>{
          **레거시는 전 행에 반복 표시**한다(실측: 세트재고 152 가 도번의 모든 상세행에 찍히고
          소계행도 152.0000). 스크롤로 중간부터 보면 재고가 빈칸이라 "재고가 없다"고 읽히는
          것이 더 큰 문제다. 레거시와 같게 되돌린다. */
+    /* ★입고구분 — 세트입고제외만 빨간색, 나머지는 전부 '세트입고'(2026-09-04 사용자 확정).
+         세트입고제외 = 단품자재로 움직이고, 그 외는 세트재고로 본다.
+         빈칸이 보이면 안 된다(서버가 전부 채우지만 옛 응답 대비 여기서도 기본값). */
+    const gubunTd=(v)=>{
+      const s=(v||'').trim()||'세트입고';
+      return s==='세트입고제외'
+        ? `<td style="color:#c0392b;font-weight:700">${esc(s)}</td>`
+        : `<td>${esc(s)}</td>`;
+    };
     const tail=(r,isSum)=>{
       return `
       <td class="num">${r.lot?num(r.lot):''}</td>
@@ -4367,7 +4423,7 @@ SCREEN.setinstat=(c)=>{
       <td class="num">${r.dan_stock?num(r.dan_stock):''}</td>
       <td class="num">${r.assy_stock?num(r.assy_stock):''}</td>
       <td class="lft cap" title="${esc(r.model||'')}">${esc(r.model||'')}</td>
-      <td>${esc(r.in_gubun||'')}</td>`;
+      ${gubunTd(r.in_gubun)}`;
     };
 
     let h=''; let seq=0;
@@ -4423,7 +4479,8 @@ SCREEN.setinstat=(c)=>{
           <td class="num">${r.dan_stock?num(r.dan_stock):''}</td>
           <td class="num">${r.assy_stock?num(r.assy_stock):''}</td>
           <td class="lft cap" title="${esc(r.model||'')}">${esc(r.model||'')}</td>
-          <td>${esc(r.in_gubun||'')}</td></tr>`;   /* 소계는 항상 표시 */
+          ${gubunTd(g.kids.some(k=>k.in_gubun==='세트입고제외')
+                    ?'세트입고제외':r.in_gubun)}</tr>`;   /* 소계는 항상 표시 */
       }
     });
     $('#s2-b').innerHTML=h;

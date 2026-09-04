@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """자재세트입고현황 — 레거시 w_pr_input_130_part 이식.
 
 ★자재입고진행현황(w_pr_input_010_part / matinput.py)과 **같은 구조**다.
@@ -20,10 +20,66 @@
    · 세트재고 = nx.set_stock_maint 잔액 SUM (도번×거래처)
   ※「자재세트바코드입고」 버튼은 넣지 않는다 — 입고관리 화면에 이미 있음(사용자 지정).
 """
+import time as _time
+
 from fastapi import APIRouter, Query
 from common import _nx, _d6
 
 router = APIRouter()
+
+# ★세트입고제외 경로 캐시(2026-09-04) — (상위도번, 자재) 집합.
+#   BOM 재귀 전개는 무겁다(매 조회 30초+). BOM 은 편성 주기로만 바뀌므로 캐시가 안전하다.
+#   nx.bom_line 행수를 지문으로 써서 BOM 이 바뀌면 자동 무효화한다.
+#   ★TTL 은 길게 잡는다(2026-09-04). 실측 콜드 29.4초 / 캐시 14ms —
+#   10분 TTL 이면 10분마다 조회가 30초씩 멎어 "조회 버튼을 눌러도 안 된다"로 보인다.
+#   무효화는 TTL 이 아니라 위 지문(bom_line 행수)이 담당하므로 TTL 을 늘려도
+#   낡은 값을 볼 위험은 늘지 않는다.
+_SE_CACHE = {"pairs": None, "sig": None, "ts": 0.0}
+_SE_TTL = 43200.0          # 12시간
+
+
+def _se_pairs(cur):
+    """세트입고제외 (상위도번, 자재) 쌍 집합. 캐시 우선."""
+    cur.execute("SELECT COUNT(*) FROM nx.bom_line WITH(NOLOCK)")
+    sig = int(cur.fetchone()[0] or 0)
+    now = _time.time()
+    c = _SE_CACHE
+    if c["pairs"] is not None and c["sig"] == sig and (now - c["ts"]) < _SE_TTL:
+        return c["pairs"]
+    # ★set_except=1 링크(씨앗)에서 위·아래로만 뻗는다 — 전 BOM 전개는 너무 느리다.
+    #   ① 씨앗   = set_except=1 인 (부모→자식)
+    #   ② 아래로 = 그 자식의 하위(제외 자재가 SUB 밑에 더 있을 수 있다)
+    #   ③ 위로   = 그 부모의 조상(소요의 item_code 는 가상노드 평탄화로 최상위다)
+    # ★엣지를 먼저 임시테이블로 물질화하고 양방향 인덱스를 건다(2026-09-04).
+    #   종전엔 e 를 CTE 로 두어 재귀 단계마다 bom_line×bom_header 조인을 통째로
+    #   다시 스캔했다 — 그래서 3,546쌍을 얻는 데 29.4초가 걸렸다.
+    cur.execute("""
+    IF OBJECT_ID('tempdb..#e') IS NOT NULL DROP TABLE #e;
+    SELECT CAST(RTRIM(h.item_code) AS varchar(40)) p,
+           CAST(RTRIM(bl.child_item) AS varchar(40)) c,
+           CAST(ISNULL(bl.set_except,0) AS int) se
+      INTO #e
+      FROM nx.bom_line bl WITH(NOLOCK)
+      JOIN nx.bom_header h WITH(NOLOCK) ON h.bom_id=bl.bom_id;
+    CREATE INDEX ix_e_p ON #e(p) INCLUDE(c);
+    CREATE INDEX ix_e_c ON #e(c) INCLUDE(p);""")
+    cur.execute("""
+    WITH seed AS (SELECT DISTINCT p, c FROM #e WHERE se=1),
+    down AS (
+      SELECT p AS seedp, c AS mat, 1 AS lv FROM seed
+      UNION ALL
+      SELECT d.seedp, e.c, d.lv+1 FROM down d JOIN #e e ON e.p=d.mat WHERE d.lv < 5
+    ),
+    up AS (
+      SELECT DISTINCT p AS anc, p AS seedp, 0 AS lv FROM seed
+      UNION ALL
+      SELECT e.p, u.seedp, u.lv+1 FROM up u JOIN #e e ON e.c=u.anc WHERE u.lv < 5
+    )
+    SELECT DISTINCT u.anc, d.mat FROM up u JOIN down d ON d.seedp = u.seedp
+    OPTION(MAXRECURSION 0)""")
+    pairs = {(str(a).strip(), str(b).strip()) for a, b in cur.fetchall()}
+    c.update({"pairs": pairs, "sig": sig, "ts": now})
+    return pairs
 
 
 def _workdays(cur, base, days):
@@ -124,6 +180,30 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         base = _d6(base_ymd) or _base_ymd(cur)   # ★기본 = 계획 마지막 업로드 일자
         axis = _workdays(cur, base, days)
         d_from, d_to = axis[0]["ymd"], axis[-1]["ymd"]
+
+        # ★세트입고제외 판정용 BOM 경로 전개(2026-09-04) — 아래 ③갈래가 쓴다.
+        #   (root=상위도번, cur=자재) 경로에 set_except=1 이 하나라도 있으면 se=1.
+        #   ※소요의 upper_item_code 는 가상노드 평탄화로 최상위가 되어 직접 조인이 안 된다
+        #     → BOM 을 재귀로 훑어야 한다(상세 근거는 ③갈래 주석).
+        #
+        #   ★성능 — **set_except=1 인 링크에서 위·아래로만** 좁혀 전개한다.
+        #     전 BOM(6.4만 경로)을 매번 펴면 조회가 6.7초 → 60~97초가 된다(실측).
+        #     제외품은 전체의 5.3% 뿐이라 그 씨앗에서만 뻗으면 충분하다.
+        #       ① 씨앗   = set_except=1 인 (부모→자식) 링크
+        #       ② 아래로 = 그 자식의 하위 전개(제외 자재가 SUB 밑에 더 있을 수 있다)
+        #       ③ 위로   = 그 부모의 상위 조상(소요의 item_code 는 최상위이므로 반드시 필요)
+        #   ★캐시된 쌍을 #se 로 적재한다 — 재귀는 _se_pairs 안에서 한 번만(600초 캐시).
+        _pairs = _se_pairs(cur)
+        cur.execute("""IF OBJECT_ID('tempdb..#se') IS NOT NULL DROP TABLE #se;
+                       CREATE TABLE #se(root varchar(40), cur varchar(40),
+                                        PRIMARY KEY(root, cur))""")
+        if _pairs:
+            _lst = list(_pairs)
+            for _i in range(0, len(_lst), 900):
+                _ch = _lst[_i:_i + 900]
+                cur.execute("INSERT INTO #se(root,cur) VALUES "
+                            + ",".join(["(?,?)"] * len(_ch)),
+                            *[v for pr in _ch for v in pr])
 
         # ★★★주 테이블 = nx.plan_part_dtl (**파트별 생산계획**) — 2026-09-02 확정.
         #   이 화면은 "파트별 생산계획을 푼 것 + 직납품 계획"이다(사용자 정의).
@@ -261,21 +341,37 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         #
         # ※NOT EXISTS 안에도 같은 기간 제한을 건다. 안 걸면 기간 밖(과거) 상위계획까지
         #   매칭돼 조건이 전건을 지운다(실측: 안 걸면 60행 → 0행).
-        _SETEXC_ON = False        # ★판별조건 확정 전까지 OFF
+        # ★★판별조건 확정(2026-09-04) — 레거시 소스(w_pr_input_130_part ue_retrieve)로 규명.
+        #
+        #   레거시는 DataWindow SQL 이 자도번LIST(mat_list)를 만들 때 제외품에 '[N배수' 마커를
+        #   박아 넘기고, PowerBuilder 가 그 마커를 보고 행을 쪼갠다:
+        #       if pos(ls_mat_list,'[N')>0 → 그 자재를 mat_list 에서 빼고
+        #                                     item_gubun='2'(세트입고제외) 행을 따로 insert
+        #                                     c_item_code=제외품번 자신 · mat_list='상위도번:'+원도번
+        #   ⟹ 웹은 그 마커 대신 **BOM 경로의 set_except 를 직접 재귀로 찾는다**(같은 결과).
+        #
+        #   ★왜 upper_item_code 로는 못 찾나(2026-09-02 에 막혔던 지점) —
+        #     가상노드(-J4·-3-1)가 평탄화되어 소요의 upper 가 최상위로 바뀐다.
+        #     실측: MJU66478801 의 BOM 부모는 AJR77224503-3-1 인데 소요 upper 는 AJR77224517.
+        #     그래서 (upper→mat) 직접 조인은 NULL 이 되고 "두 집합이 똑같아 보였다".
+        #
+        #   ★확정 규칙 = (item_code → … → mat_code) **경로상 set_except=1 이 하나라도 있으면 제외품**
+        #     검증(2026-09-04, MJU66478801):
+        #       AJR30125601·602·603      se=0 → 세트(상위도번 행) 232건
+        #       AJR772245xx-S1-2 계열    se=1 → 제외(자기도번 행) 137건
+        #     레거시 화면(SEQ 13~26)이 정확히 이 집합을 '세트입고제외'로 표시한다.
+        #     계획기간 전체 규모: 제외품 소요 4,914행 · 자재 187종 · 제번 1,133개(전체의 5.3%).
+        #
+        #   ※도번칸에 값을 넣고 조회하면 이 갈래를 만들지 않는다 — 레거시 동일
+        #     ("도번으로 조회할 경우 공용품때문에 세트입고제외품을 별도 표시하지 않는다").
+        _SETEXC_ON = not bool(doban)
         w3 = ["m.part_plan_ymd <= ?",
               "1=0" if not _SETEXC_ON else "1=1",
               "RTRIM(m.item_code)<>RTRIM(m.mat_code)",   # 직납(②)과 겹치지 않게
-              # 상위도번이 파트별계획에 없을 것 = 단품화 조건
-              """NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WITH(NOLOCK)
-                             WHERE d.work_order=m.work_order
-                               AND RTRIM(d.item_code)=RTRIM(m.upper_item_code)
-                               AND d.proc_seq=1 AND d.part_plan_ymd<=?)""",
-              # 자재 자신도 파트별계획에 없을 것(있으면 ①에서 이미 나온다)
-              """NOT EXISTS(SELECT 1 FROM nx.plan_part_dtl d WITH(NOLOCK)
-                             WHERE d.work_order=m.work_order
-                               AND RTRIM(d.item_code)=RTRIM(m.mat_code)
-                               AND d.proc_seq=1 AND d.part_plan_ymd<=?)"""]
-        p3 = [d_to, d_to, d_to]
+              # ★BOM 경로에 set_except=1 이 있는가 (= 세트에서 빠져 단품이 된 품번)
+              "EXISTS(SELECT 1 FROM #se s WHERE s.root=RTRIM(m.item_code)"
+              "                             AND s.cur=RTRIM(m.mat_code))"]
+        p3 = [d_to]
         if jcust:   w3.append("RTRIM(ISNULL(m.mat_work_center_code,''))=?"); p3.append(jcust)
         if wo:      w3.append("m.work_order LIKE ?");  p3.append("%" + wo + "%")
         if doban:   w3.append("m.mat_code LIKE ?");    p3.append("%" + doban + "%")
@@ -284,7 +380,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         cur.execute(f"""
             -- ① 파트별 생산계획을 푼 것
             SELECT pd.work_order, pd.item_code doban, x.mat_code, pd.part_plan_ymd ymd,
-                   pd.q qty, x.jcust, pd.item_code assy
+                   pd.q qty, x.jcust, pd.item_code assy, 0 setexc
               FROM (SELECT work_order, item_code, part_plan_ymd,
                            SUM(CAST(part_plan_qty AS float)) q   -- ★레거시 420 과 동일: proc_seq=1 로 거르고 SUM
                       FROM nx.plan_part_dtl pd WITH(NOLOCK)
@@ -311,7 +407,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             SELECT m.work_order, m.item_code doban, m.mat_code, m.part_plan_ymd ymd,
                    MAX(ISNULL(i.q, m.part_plan_qty)) qty,
                    MAX(RTRIM(ISNULL(m.mat_work_center_code,''))) jcust,
-                   MAX(ISNULL(m.assy_item_code,'')) assy
+                   MAX(ISNULL(m.assy_item_code,'')) assy, 0 setexc
               FROM nx.plan_part_mat m WITH(NOLOCK)
               OUTER APPLY (SELECT MAX(CEILING(CONVERT(float,d.PLAN_QTY)
                                     *ISNULL(d.USE_QTY,1)*ISNULL(d.PROD_RATE,100)/100.0)) q
@@ -326,7 +422,7 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             SELECT m.work_order, m.mat_code doban, '' mat_code, m.part_plan_ymd ymd,
                    SUM(CAST(m.part_plan_qty AS float)) qty,
                    MAX(RTRIM(ISNULL(m.mat_work_center_code,''))) jcust,
-                   MAX(RTRIM(ISNULL(m.upper_item_code,''))) assy
+                   MAX(RTRIM(ISNULL(m.upper_item_code,''))) assy, 1 setexc
               FROM nx.plan_part_mat m WITH(NOLOCK)
              WHERE {' AND '.join(w3)}
              GROUP BY m.work_order, m.mat_code, m.part_plan_ymd""",
@@ -334,7 +430,8 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         raw = [{"wo": str(r[0]).strip(), "doban": str(r[1]).strip(),
                 "jado": str(r[2] or "").strip(), "ymd": str(r[3]).strip(),
                 "qty": float(r[4] or 0), "jcust": str(r[5] or "").strip(),
-                "assy": str(r[6] or "").strip()} for r in cur.fetchall()]
+                "assy": str(r[6] or "").strip(),
+                "setexc": int(r[7] or 0)} for r in cur.fetchall()]
         if not raw:
             return {"axis": axis, "rows": [], "base": base}
 
@@ -401,6 +498,25 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                     "lot": int(r[4] or 0), "pymd": (r[5] or "").strip(),
                     "gpc": "", "pull": 0}
 
+        # ★정렬키 LG INPUT 일시 = PR_T_PLAN_DTL.LG_INPUT_YMD + LG_INPUT_HM (제번 단위).
+        #   레거시 엑셀 AL 'Lg Input Ymd Hm' 과 같은 축이고, 130 화면 정렬이 이 값 오름차순이다.
+        #   ※ part_plan_ymd(계획일)로는 재현 불가 — 조회 기준일 이전(9/2·9/3)을 담기 때문.
+        #     실측 2026-09-04 : 6J3M0012→2609021700 · 6I1M0BKG→2609031810 · 6I1M08GS→2609031930
+        #   nx.plan_part_dtl 에는 이 두 컬럼이 없어 라이브에서 직접 읽는다(조회 전용).
+        lgin: dict = {}
+        _wos = sorted({k[0] for k in keys if k[0]})
+        for i in range(0, len(_wos), 900):
+            ch = _wos[i:i + 900]
+            cur.execute("""SELECT RTRIM(WORK_ORDER),
+                                  MAX(ISNULL(LG_INPUT_YMD,'')) + MAX(ISNULL(LG_INPUT_HM,''))
+                             FROM PARTNER_ERP.dbo.PR_T_PLAN_DTL WITH(NOLOCK)
+                            WHERE RTRIM(WORK_ORDER) IN (%s)
+                            GROUP BY RTRIM(WORK_ORDER)""" % ",".join("?" * len(ch)), *ch)
+            for a, b in cur.fetchall():
+                v = (b or "").strip()
+                if v:
+                    lgin[str(a).strip()] = v
+
         # ── 일자 뒤 컬럼들 (레거시 화면 순서, matinput 과 동일 원천)
         #    LOT수량·자재수량·자재입고·요청수량·생산준비·생산실적·검사실적·출하실적
         #    ·세트재고·단품재고·ASSY재고·모델 …
@@ -429,9 +545,22 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                                FROM nx.set_stock_maint WITH(NOLOCK)
                               WHERE item_code IN ({ph}) GROUP BY item_code""", stock)
 
-        st_dan = {}     # 단품재고 — 자도번(자재창고)
-        _fill(jados, """SELECT MAT_CODE, SUM(ISNULL(STOCK_QTY,0)) FROM nx.PU_T_MAT_STOCK_WH
-                         WITH(NOLOCK) WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE""", st_dan)
+        # 단품재고 — 자도번(자재창고) + ★세트입고제외품은 **도번(=자재 자신)** 으로도 구한다.
+        #   레거시 ue_retrieve 가 제외품 행에 넣는 값과 같은 소스:
+        #     input_mat_qty = f_pu_get_mat_stock_wh(자재,'Z99990','IS0001')  … 자재창고재고
+        #                   + dw_mat_pr_stock.pr_stock_qty                  … 생산재고
+        #   ⟹ 제외품은 세트가 아니라 단품으로 관리되므로 이 칸이 채워져야 한다(사용자 지적 2026-09-04).
+        _dan_keys = sorted(set(jados) | {x["doban"] for x in raw if x.get("setexc")})
+        st_dan = {}
+        _fill(_dan_keys, """SELECT MAT_CODE, SUM(ISNULL(STOCK_QTY,0)) FROM nx.PU_T_MAT_STOCK_WH
+                             WITH(NOLOCK) WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE""", st_dan)
+        # 생산재고(파트별 재공) — 레거시 dw_mat_pr_stock 과 같은 축.
+        #   ★키는 MAT_CODE 다(item_code 아님). 종전 item_code 로 조회해 _fill 이 예외를
+        #     삼키는 바람에 생산재고가 통째로 0 이었다(2026-09-04 실측: MJU66478801 75 누락).
+        st_prd = {}
+        _fill(_dan_keys, """SELECT MAT_CODE, SUM(ISNULL(STOCK_QTY,0))
+                              FROM nx.PR_T_MAT_STOCK_WH WITH(NOLOCK)
+                             WHERE MAT_CODE IN ({ph}) GROUP BY MAT_CODE""", st_prd)
 
         st_assy = {}    # ASSY재고 — 도번(영업창고)
         _fill(dobans, """SELECT ITEM_CODE, SUM(ISNULL(STOCK_QTY,0)) FROM nx.SA_T_ITEM_STOCK
@@ -554,10 +683,12 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
                 model[str(a).strip()] = (b or "").strip()
 
         # ★입고구분 — nx.set_input_req.item_gubun (세트입고 요청의 구분).
-        #   실측 분포: '1'=세트입고(웹 1,533건·라이브 139,211건) / '2'=393건(라이브만).
-        #   레거시 화면은 이 자리에 「세트입고」를 찍는다. 코드→명칭 마스터가 없으므로
-        #   실측된 값만 매핑하고, 모르는 값은 코드 그대로 둔다(추측해서 이름 붙이지 않는다).
-        GUBUN_NM = {"1": "세트입고", "2": "직납입고"}
+        #   ★코드 의미 확정(2026-09-04) — 레거시 소스 w_pr_input_130_part ue_retrieve 주석:
+        #       this.setitem(ll_irow,'item_gubun','2')   //1=세트입고, 2=세트입고제외, 3=자재추가계획
+        #     종전엔 '2'를 「직납입고」로 추측해 두었는데 **틀렸다**. 세트입고제외다.
+        #   ※레거시는 이 값을 테이블에서 읽는 게 아니라 화면에서 계산해 넣는다
+        #     (제외품 행을 insert 하면서 '2' 를 세팅). 웹도 ③갈래 행은 아래에서 강제로 붙인다.
+        GUBUN_NM = {"1": "세트입고", "2": "세트입고제외", "3": "자재추가계획"}
         gubun = {}
         for i in range(0, len(dobans), 400):
             ch = dobans[i:i + 400]; ph = ",".join("?" * len(ch))
@@ -601,7 +732,10 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         d = det.setdefault(k, {
             "wo": x["wo"], "doban": x["doban"], "assy": x["assy"],
             "jcust": x["jcust"], "jados": set(), "day": {},
+            "setexc": 0,
         })
+        if x.get("setexc"):
+            d["setexc"] = 1          # ★세트입고제외 행(③갈래)
         if x["jado"]:
             d["jados"].add(x["jado"])
         # ★기준일 이전 계획(미처리분)은 첫 칸에 합산 — 레거시 동일
@@ -640,6 +774,8 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             "jadolist": ",".join(jl), "jado_cnt": len(jl),
             "line": pl.get("line", ""), "hm": pl.get("hm", ""),
             "lot": pl.get("lot", 0), "pymd": pl.get("pymd", ""),
+            # 레거시 엑셀 AL 'Lg Input Ymd Hm' — 정렬 전용(화면 LG INPUT 은 hm 그대로)
+            "lgin": lgin.get(wo, ""),
             "gpc": pl.get("gpc", ""),                          # 작업처 코드(툴팁·필터용)
             # ★작업처 = 협력사 계획현황과 같은 산식(wcnm). 파트명(01라인·02라인)이 1순위,
             #   직납품처럼 파트공정이 없으면 협력사명(대원산업)으로 내려간다 — 레거시 동일.
@@ -659,16 +795,26 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
             "prod": prd.get(doban, 0.0),                       # 생산실적
             "insp": 0.0,                                       # 검사실적(2차)
             "sale": sal.get((wo, doban), 0.0),                 # 출하실적
-            "set_stock": stock.get(doban, 0.0),                # ★세트재고
-            # ★단품재고 = 0 고정 (대표 확정 2026-08-30).
-            #   이 화면은 **세트재고 기준**이라 단품(자재창고) 재고를 끌어오지 않는다.
-            #   ASSY 도번이면 하위가 하나여도 단품재고가 오면 안 된다.
-            #   ※세트입고제외품(UNION ③)은 정의상 단품재고로 관리하지만, 레거시 화면도
-            #     단품재고 칸을 채우지 않는다(실측: 자기행 13제번 전부 공란) — 동일하게 0.
-            "dan_stock": 0.0,
+            # ★세트재고 — 세트입고제외품은 **0**이다(2026-09-04 사용자 지적).
+            #   제외 = 세트에서 빼내 단품화한 것이므로 세트재고로 관리하지 않는다.
+            #   종전엔 도번(=자재 자신)으로 set_stock_maint 를 조회해 엉뚱한 값이 붙었다
+            #   (실측: MJU63357501 세트재고 -36,774 가 제외행에 그대로 표시).
+            "set_stock": (0.0 if d.get("setexc") else stock.get(doban, 0.0)),
+            # ★단품재고 — 세트품은 0(이 화면은 세트재고 기준, 대표 확정 2026-08-30),
+            #   ★세트입고제외품만 채운다 = 자재창고재고 + 생산재고.
+            #     레거시 ue_retrieve 가 제외품 행에 넣는 값과 같은 소스:
+            #       input_mat_qty = f_pu_get_mat_stock_wh(자재,'Z99990','IS0001') + pr_stock_qty
+            "dan_stock": ((st_dan.get(doban, 0.0) + st_prd.get(doban, 0.0))
+                          if d.get("setexc") else 0.0),
             "assy_stock": st_assy.get(doban, 0.0),             # ASSY재고
             "model": model.get(wo, ""),                        # ★모델 = 제번 단위(계획정보)
-            "in_gubun": gubun.get(doban, ""),                  # 입고구분(세트입고 등)
+            # ★입고구분 — ③갈래(세트입고제외) 행은 강제로 그 값을 쓴다.
+            #   레거시도 테이블 값이 아니라 화면에서 계산해 넣는다(item_gubun='2').
+            # ★세트입고제외가 아니면 전부 '세트입고'다(2026-09-04 사용자 확정).
+            #   직납품(MJU63357501 처럼 BOM 부모 0개)도 세트입고로 본다 — 종전엔
+            #   set_input_req 에 행이 없으면 빈칸이 나와 레거시와 달랐다.
+            "in_gubun": ("세트입고제외" if d.get("setexc")
+                         else gubun.get(doban, "") or "세트입고"),
             "day": d["day"],
             "total": matq,
         })
@@ -687,8 +833,12 @@ def setinstat_list(base_ymd: str = Query(""), days: int = Query(4),
         return min(d) if d else "999999"
 
     def _lginput(r):
-        """LG INPUT = 계획일(6) + 투입시각(4). 레거시 정렬값과 같은 축."""
-        return (r.get("pymd") or _firstday(r)) + (r.get("hm") or "9999")
+        """레거시 엑셀 AL 'Lg Input Ymd Hm' = PR_T_PLAN_DTL.LG_INPUT_YMD+LG_INPUT_HM.
+           130 화면 정렬이 이 값 오름차순이다(실측 2026-09-04, 9/9건 일치).
+           ※계획일(pymd)+hm 으로는 재현 불가 — pymd 는 조회 기준일로 뭉개져
+             9/2·9/3 투입건이 전부 9/4 로 밀린다. 없을 때만 종전 축으로 폴백."""
+        return (r.get("lgin")
+                or (r.get("pymd") or _firstday(r)) + (r.get("hm") or "9999"))
 
     # 그룹(작업처+라인+도번) 대표 = 그 그룹에서 가장 이른 LG INPUT
     _gmin: dict = {}
