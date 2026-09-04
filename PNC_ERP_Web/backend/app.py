@@ -437,6 +437,20 @@ async def _no_cache_front(request, call_next):
         ct = resp.headers.get("content-type", "")
         if ct and "charset" not in ct.lower():
             resp.headers["Content-Type"] = ct.split(";")[0] + "; charset=utf-8"
+    # ★조회 API 응답도 브라우저 캐시 금지(2026-09-04).
+    #   증상: 준비등록/취소 직후 화면이 재조회를 하는데도 옛 숫자가 그대로 남고,
+    #        Ctrl+F5(강제 새로고침) 를 해야 반영됐다.
+    #   원인: /api/kitting/grid 같은 GET 은 **매번 URL 이 똑같다**(조건이 같으면 쿼리스트링도 같다).
+    #        응답에 캐시 헤더가 없으면 브라우저가 heuristic 하게 캐시해 두고 같은 URL 재요청 시
+    #        서버에 묻지도 않고 옛 응답을 그대로 준다 → 재조회가 무의미해진다.
+    #        (위 no-store 는 .html/.js/.css 만 대상이라 /api 는 무방비였다.)
+    #   ⟹ /api 응답 전부 no-store. 데이터 조회는 항상 서버에 물어야 한다.
+    #   ※파일 다운로드(첨부·이미지)처럼 일부러 max-age 를 준 응답은 덮지 않는다.
+    elif p.startswith("/api"):
+        if not resp.headers.get("cache-control"):
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
     return resp
 
 _FRONT_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))   # backend의 상위 = PNC_ERP_Web

@@ -908,3 +908,16 @@ def stock_changed(reason=""):
         _ledger_cache_clear()
     except Exception:
         pass
+    # ★키팅/파트별계획 그리드의 재고롤업 캐시(90초 TTL)도 함께 버린다(2026-09-04).
+    #   왜 — 준비취소/준비등록은 파트창고(pr_t_mat_stock_wh)·자재창고(pu_t_mat_stock_wh)를
+    #   움직이는데, 그 값이 바로 이 롤업의 재료다. 안 버리면 취소 직후 재조회가
+    #   **최대 90초 동안 취소 전 숫자**를 돌려준다 — 화면은 정상 갱신을 했는데도 값이 그대로라
+    #   "새로고침해야 반영된다"로 보였다(실제 증상, 2026-09-04 사용자 보고).
+    try:
+        from routers.kitting import kitting_grid as _kg, plan_part410 as _pp
+        try: _kg._rollup_cache = None
+        except Exception: pass
+        try: _pp._stk_cache = {}
+        except Exception: pass
+    except Exception:
+        pass

@@ -223,6 +223,104 @@ SCREEN.docmgr=(c)=>{
   draw();
 };
 
+/* ★도면/문서 바로보기 모달 (2026-09-04 사용자 요청 "다운받아서 봐야 되어 불편").
+     설계도면·품목시방 두 탭이 함께 쓴다 — 같은 /api/doc/download 를 disp=inline 으로 연다.
+     · PDF·이미지 = <iframe>/<img> 로 그대로 렌더(백엔드가 올바른 MIME + Content-Disposition:inline 을 준다)
+     · 그 외(ppt/dwg/xls 등) = 브라우저가 못 여는 형식이라 [다운로드]로 안내(억지로 열지 않는다)
+     ※모달은 document.body 에 붙인다 — .content 안이면 조상 transform/overflow 로 잘린다(UI규칙 §3).
+     dlFn = 이 화면의 다운로드 함수(모달 안 [다운로드] 버튼이 그대로 쓴다). */
+/* ★문서 다운로드 — fetch → Blob 저장(2026-09-04).
+     <a href="/api/doc/download"> 로 직결하면 **인증 헤더가 안 실려 401** 이다
+     (core.js 가 fetch 를 감싸 Authorization: Bearer 를 붙이는 구조).
+     받은 Blob 을 a.download 로 저장하면 파일명도 그대로 유지된다. */
+async function docDownload(API, r){
+  const url=`${API}/api/doc/download?src=${encodeURIComponent(r.src)}`
+           +`&key=${encodeURIComponent(r.key)}&disp=attach`;
+  try{
+    const resp=await fetch(url);
+    if(!resp.ok)throw new Error(`${resp.status} ${resp.statusText}`);
+    const b=await resp.blob(), u=URL.createObjectURL(b);
+    const a=document.createElement('a'); a.href=u; a.download=r.filename||'file';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{a.remove();try{URL.revokeObjectURL(u);}catch(e){}},1500);
+  }catch(e){ alert('다운로드 실패: '+(e.message||e)); }
+}
+/* ★새 탭으로 열기 — 레거시 더블클릭(로컬 PDF뷰어/이미지뷰어) 대응(2026-09-04).
+     레거시 w_pr_master_200 은 행을 더블클릭하면 파일을 받아 연결프로그램으로 띄운다.
+     웹은 그 자리를 **브라우저 기본 뷰어(새 탭)** 가 대신한다 — PDF/이미지는 탭에서 바로 보인다.
+     여기서도 fetch→Blob 이 필요하다(직접 URL 은 인증 헤더가 안 실려 401, docView 주석 참조).
+     ※Blob URL 은 탭이 살아있는 동안 유효해야 하므로 revoke 를 길게 잡는다. */
+async function docOpenTab(API, r){
+  const url=`${API}/api/doc/download?src=${encodeURIComponent(r.src)}`
+           +`&key=${encodeURIComponent(r.key)}&disp=inline`;
+  const w=window.open('', '_blank');            // ★먼저 연다(팝업차단 회피 — 사용자 제스처 안에서)
+  try{
+    const resp=await fetch(url);
+    if(!resp.ok)throw new Error(`${resp.status} ${resp.statusText}`);
+    const b=await resp.blob(), u=URL.createObjectURL(b);
+    if(w){ w.location=u; setTimeout(()=>{try{URL.revokeObjectURL(u);}catch(e){}}, 60000); }
+    else { window.open(u,'_blank'); }           // 팝업이 막혔으면 한 번 더 시도
+  }catch(e){
+    if(w)try{w.close();}catch(_){}
+    alert('파일을 열지 못했습니다: '+(e.message||e));
+  }
+}
+async function docView(API, r, dlFn){
+  const fn=String(r.filename||''), ext=(fn.split('.').pop()||'').toLowerCase();
+  const isPdf=ext==='pdf', isImg=['jpg','jpeg','png','gif','bmp','webp','svg'].includes(ext);
+  const url=`${API}/api/doc/download?src=${encodeURIComponent(r.src)}`
+           +`&key=${encodeURIComponent(r.key)}&disp=inline`;
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+  ov.innerHTML=`<div style="background:#fff;border-radius:8px;width:92vw;height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.4)">
+    <div style="flex:0 0 auto;padding:8px 12px;border-bottom:1px solid #e3e9f0;display:flex;align-items:center;gap:10px">
+      <b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(fn)}</b>
+      <span class="mut" style="font-size:11px">${esc(r.kind_nm||'')}${r.spec_no?' · '+esc(r.spec_no):''}</span>
+      <span style="flex:1"></span>
+      <button class="btn ghost" id="dv-new" style="padding:2px 10px">새 탭</button>
+      <button class="btn" id="dv-dl" style="padding:2px 10px">다운로드</button>
+      <button class="btn ghost" id="dv-x" style="padding:2px 10px">✕</button></div>
+    <div id="dv-body" style="flex:1;min-height:0"><div style="padding:40px;text-align:center;color:#789">불러오는 중…</div></div></div>`;
+  document.body.appendChild(ov);
+  let burl='';
+  const esckey=e=>{if(e.key==='Escape')close();};
+  /* 닫을 때 Blob URL 해제 — 단, [새 탭]으로 연 창이 아직 그 URL 을 쓰고 있을 수 있어
+     즉시 revoke 하면 그 탭이 빈 화면이 된다. 여유를 두고 해제한다. */
+  const close=()=>{ov.remove();document.removeEventListener('keydown',esckey);
+    if(burl){const u=burl;burl='';setTimeout(()=>{try{URL.revokeObjectURL(u);}catch(e){}},60000);}};
+  document.addEventListener('keydown',esckey);
+  ov.onclick=e=>{if(e.target===ov)close();};
+  ov.querySelector('#dv-x').onclick=close;
+  ov.querySelector('#dv-dl').onclick=()=>{if(dlFn)dlFn(r);};
+  // 이미 받아둔 blob 이 있으면 그것을, 아직이면 새로 받아 연다(로딩 중에도 눌리게)
+  ov.querySelector('#dv-new').onclick=()=>{burl?window.open(burl,'_blank'):docOpenTab(API,r);};
+  const bd=ov.querySelector('#dv-body');
+  /* ★파일은 반드시 fetch 로 받는다(2026-09-04).
+       인증이 **Authorization: Bearer 헤더** 방식이라(core.js 의 fetch 래퍼가 붙인다)
+       <iframe src>·window.open·<a href> 는 헤더를 실을 수 없어 전부 401 이 난다
+       (실제 증상: 보기 창에 {"detail":"로그인이 필요합니다."} 가 그대로 표시됨).
+       fetch 로 받아 Blob URL 로 바꾸면 헤더가 붙고, 그 URL 은 인증 없이도 렌더된다. */
+  try{
+    const resp=await fetch(url);
+    if(!resp.ok)throw new Error(`${resp.status} ${resp.statusText}`);
+    const blob=await resp.blob();
+    burl=URL.createObjectURL(blob);
+    if(isPdf)
+      bd.innerHTML=`<iframe src="${burl}" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
+    else if(isImg)
+      bd.innerHTML=`<div style="width:100%;height:100%;overflow:auto;background:#333;display:flex;align-items:center;justify-content:center">
+        <img src="${burl}" alt="${esc(fn)}" style="max-width:100%;max-height:100%;object-fit:contain"></div>`;
+    else
+      bd.innerHTML=`<div style="padding:40px;text-align:center;color:#5a6b82">
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">브라우저에서 바로 볼 수 없는 형식입니다 (.${esc(ext||'?')})</div>
+        <div style="font-size:12px">위 [다운로드]로 받아서 열어주세요.</div></div>`;
+  }catch(e){
+    bd.innerHTML=`<div style="padding:40px;text-align:center;color:#c0392b">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">파일을 열지 못했습니다</div>
+      <div style="font-size:12px">${esc(String(e.message||e))}</div></div>`;
+  }
+}
+
 /* ===== 설계도면조회 (w_pr_master_200) — 도면 조회·다운로드·업로드. nx.doc+레거시blob ===== */
 SCREEN.drawingdoc=(host)=>{
   const API=API_BASE;
@@ -244,9 +342,11 @@ SCREEN.drawingdoc=(host)=>{
       if(j.ok){st.msg=`✅ 일반도면 업로드 완료 (${fmt(j.size)})`;st.file=null;await load();}else{st.msg='';alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}}
     catch(e){st.msg='';alert('업로드 오류: '+e);}
   };
-  const dl=(r)=>{const base=`${API}/api/doc/download?src=${encodeURIComponent(r.src)}&key=${encodeURIComponent(r.key)}`;
-    window.open(base+'&disp=inline','_blank');   // 열기(브라우저 뷰)
-    const a=document.createElement('a');a.href=base+'&disp=attach';a.download=r.filename||'';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500);};  // 다운로드 동시
+  /* ★다운로드 = 저장만(2026-09-04). 종전엔 새 탭 열기 + 다운로드를 **동시에** 해서
+       보기만 하려 해도 파일이 매번 받아졌다("다운받아서 봐야 되어 불편"). 보기는 [보기]로 분리.
+     ★fetch → Blob 로 받는다 — 인증이 Authorization 헤더 방식이라 <a href> 직결은 401 이 난다(docView 주석 참조). */
+  const dl=(r)=>docDownload(API,r);
+  const view=(r)=>docView(API,r,dl);
   const del=async(r)=>{if(!confirm(r.filename+' 를 삭제할까요?'))return;
     try{const rr=await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+r.key})});const j=await rr.json();
       if(j.ok){st.msg='🗑 삭제완료';await load();}else alert('삭제 불가:\n'+(j.errors||[]).join('\n'));}
@@ -267,14 +367,15 @@ SCREEN.drawingdoc=(host)=>{
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
-        <th>구분</th><th>파일명</th><th>시방관리번호</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
-      <tbody>${st.loading?spinRow(ed?8:7):(st.rows.length?st.rows.map((r,i)=>`<tr>
+        <th>구분</th><th>파일명</th><th>시방관리번호</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">보기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
+      <tbody>${st.loading?spinRow(ed?9:8):(st.rows.length?st.rows.map((r,i)=>`<tr class="dd-row" data-i="${i}" title="더블클릭: PDF 뷰어로 열기 · [보기]: 화면에서 바로 보기 · [⬇]: 파일로 저장" style="cursor:pointer">
         <td><span class="bdg ${r.kind==='GENERAL_DWG'?'ok':'off'}">${esc(r.kind_nm)}</span></td>
-        <td class="cap" title="${esc(r.filename)}" style="max-width:260px;overflow:hidden;text-overflow:ellipsis"><b>${esc(r.filename)}</b></td>
+        <td class="cap" title="더블클릭: PDF 뷰어로 열기 — ${esc(r.filename)}" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;color:#1c47a0"><b>${esc(r.filename)}</b></td>
         <td>${esc(r.spec_no||r.rev||'')}</td><td>${esc(r.user)}</td><td class="mut">${esc(String(r.dt||'').slice(0,19).replace('T',' '))}</td>
         <td class="num">${fmt(r.size)}</td>
+        <td class="center"><button class="btn ghost dd-vw" data-i="${i}" style="padding:1px 8px" title="다운로드 없이 화면에서 바로 보기">보기</button></td>
         <td class="center"><button class="btn dd-dl" data-i="${i}" style="padding:1px 8px">⬇</button></td>
-        ${ed?`<td class="center">${r.editable?`<button class="btn dd-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="시방도면은 시방변경관리에서 삭제">시방</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?8:7}" class="empty">${st.item.trim()?'검색 결과 없음':'🔍 조회를 누르면 최근 파일이 표시됩니다 (품번·파일명으로 검색)'}</td></tr>`)}</tbody></table></div>`;
+        ${ed?`<td class="center">${r.editable?`<button class="btn dd-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="시방도면은 시방변경관리에서 삭제">시방</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?9:8}" class="empty">${st.item.trim()?'검색 결과 없음':'🔍 조회를 누르면 최근 파일이 표시됩니다 (품번·파일명으로 검색)'}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#dd-go').onclick=()=>{st.item=g('#dd-item').value;load();};
     g('#dd-item').onkeyup=e=>{if(e.key==='Enter')g('#dd-go').click();};
@@ -287,6 +388,16 @@ SCREEN.drawingdoc=(host)=>{
         dz.ondragleave=()=>{dz.style.background='#eaf7ef';};
         dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;upload();}};}   // 드롭 즉시 업로드
     }
+    /* ★행 더블클릭 = PDF 뷰어로 열기(새 탭) — 레거시 w_pr_master_200 동작(2026-09-04 사용자 확정).
+         레거시는 더블클릭하면 임시폴더에 받아 **PDF 뷰어로 띄우고** 닫으면 그 파일을 지운다.
+         웹에서는 **브라우저 PDF 뷰어(새 탭)** 가 그 자리다 — Blob 으로 열기 때문에
+         디스크에 파일이 남지 않아 레거시의 "닫으면 삭제"와 결과가 같다.
+         ([보기]는 화면 안 모달 = 창 전환 없이 훑어보는 용도. 두 동작을 나눠 둔다.)
+         버튼(보기/⬇/🗑) 위에서 시작한 더블클릭은 제외 — 그 버튼의 동작이 우선. */
+    host.querySelectorAll('.dd-row').forEach(tr=>tr.ondblclick=e=>{
+      if(e.target.closest('button'))return;
+      docOpenTab(API, st.rows[+tr.dataset.i]);});
+    host.querySelectorAll('.dd-vw').forEach(b=>b.onclick=()=>view(st.rows[+b.dataset.i]));
     host.querySelectorAll('.dd-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
     host.querySelectorAll('.dd-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));
     attachResizers(host);
@@ -315,9 +426,9 @@ SCREEN.itemspec=(host)=>{
       if(j.ok){st.msg=`✅ 첨부 업로드 완료 (${fmt(j.size)})`;st.file=null;await load();}else{st.msg='';alert('업로드 실패: '+(j.detail||JSON.stringify(j)));}}
     catch(e){st.msg='';alert('업로드 오류: '+e);}
   };
-  const dl=(r)=>{const base=`${API}/api/doc/download?src=${encodeURIComponent(r.src)}&key=${encodeURIComponent(r.key)}`;
-    window.open(base+'&disp=inline','_blank');
-    const a=document.createElement('a');a.href=base+'&disp=attach';a.download=r.filename||'';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1500);};
+  // ★설계도면 탭과 동일 — 다운로드는 저장만, 보기는 모달(2026-09-04). 공용 docDownload/docView 사용.
+  const dl=(r)=>docDownload(API,r);
+  const view=(r)=>docView(API,r,dl);
   const del=async(r)=>{if(!confirm(r.filename+' 를 삭제할까요?'))return;
     try{const rr=await fetch(`${API}/api/doc/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({doc_id:+r.key})});const j=await rr.json();
       if(j.ok){st.msg='🗑 삭제완료';await load();}else alert('삭제 불가:\n'+(j.errors||[]).join('\n'));}
@@ -336,14 +447,15 @@ SCREEN.itemspec=(host)=>{
      ${st.msg?`<div class="page-sub" style="color:${st.msg.includes('실패')||st.msg.includes('오류')?'#c0392b':'#1c7c3a'};font-weight:600">${esc(st.msg)}</div>`:''}
      <div class="grid-wrap" style="max-height:calc(100vh - 320px);overflow:auto;background:#fff;border:1px solid var(--line-2,#c9d3e0);border-radius:8px">
       <table class="tbl fit" style="font-size:11px"><thead><tr>
-        <th>첨부유형</th><th>파일명</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
-      <tbody>${st.loading?spinRow(ed?7:6):(st.rows.length?st.rows.map((r,i)=>`<tr>
+        <th>첨부유형</th><th>파일명</th><th>수정자</th><th>파일일시</th><th class="num">크기</th><th class="center">보기</th><th class="center">다운로드</th>${ed?'<th class="center">삭제</th>':''}</tr></thead>
+      <tbody>${st.loading?spinRow(ed?8:7):(st.rows.length?st.rows.map((r,i)=>`<tr class="is-row" data-i="${i}" title="더블클릭: PDF 뷰어로 열기 · [보기]: 화면에서 바로 보기 · [⬇]: 파일로 저장" style="cursor:pointer">
         <td><span class="bdg ${r.editable?'ok':'off'}">${esc(r.atype_nm)}</span></td>
-        <td class="cap" title="${esc(r.filename)}" style="max-width:280px;overflow:hidden;text-overflow:ellipsis"><b>${esc(r.filename)}</b></td>
+        <td class="cap" title="더블클릭: PDF 뷰어로 열기 — ${esc(r.filename)}" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;color:#1c47a0"><b>${esc(r.filename)}</b></td>
         <td>${esc(r.user)}</td><td class="mut">${esc(String(r.dt||'').slice(0,19).replace('T',' '))}</td>
         <td class="num">${fmt(r.size)}</td>
+        <td class="center"><button class="btn ghost is-vw" data-i="${i}" style="padding:1px 8px" title="다운로드 없이 화면에서 바로 보기">보기</button></td>
         <td class="center"><button class="btn is-dl" data-i="${i}" style="padding:1px 8px">⬇</button></td>
-        ${ed?`<td class="center">${r.editable?`<button class="btn is-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="레거시 첨부는 레거시에서 관리">레거시</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?7:6}" class="empty">${st.item.trim()?'첨부 없음':'품목번호를 조회하세요'}</td></tr>`)}</tbody></table></div>`;
+        ${ed?`<td class="center">${r.editable?`<button class="btn is-del" data-i="${i}" style="padding:1px 6px;color:#c0392b">🗑</button>`:'<span class="mut" style="font-size:10px" title="레거시 첨부는 레거시에서 관리">레거시</span>'}</td>`:''}</tr>`).join(''):`<tr><td colspan="${ed?8:7}" class="empty">${st.item.trim()?'첨부 없음':'품목번호를 조회하세요'}</td></tr>`)}</tbody></table></div>`;
     const g=id=>host.querySelector(id);
     g('#is-go').onclick=()=>{st.item=g('#is-item').value;load();};
     g('#is-item').onkeyup=e=>{if(e.key==='Enter')g('#is-go').click();};
@@ -357,6 +469,11 @@ SCREEN.itemspec=(host)=>{
         dz.ondrop=e=>{e.preventDefault();dz.style.background='#eaf7ef';const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){st.file=f;upload();}};}   // 드롭 즉시 업로드
     }
     host.querySelectorAll('.is-dl').forEach(b=>b.onclick=()=>dl(st.rows[+b.dataset.i]));
+    // ★행 더블클릭 = PDF 뷰어로 열기(새 탭) — 설계도면 탭과 동일(레거시 동작)
+    host.querySelectorAll('.is-row').forEach(tr=>tr.ondblclick=e=>{
+      if(e.target.closest('button'))return;
+      docOpenTab(API, st.rows[+tr.dataset.i]);});
+    host.querySelectorAll('.is-vw').forEach(b=>b.onclick=()=>view(st.rows[+b.dataset.i]));
     host.querySelectorAll('.is-del').forEach(b=>b.onclick=()=>del(st.rows[+b.dataset.i]));
     attachResizers(host);
   };

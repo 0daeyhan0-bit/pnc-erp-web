@@ -306,6 +306,11 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                         "fixst": round(fixm.get((g["upper"], g["item"]), 0.0), 0), "ing": round(ing.get(g["item"], 0.0), 0),
                         "prior_pl": round(pc["plan"], 0) if pc else 0, "prior_fn": round(pc["fin"] + pc["ready"], 0) if pc else 0,
                         "prior_bg": (('background:' + _TAGCLR[pc["tag"]]) if pc and _TAGCLR.get(pc["tag"]) else ''),
+                        # ★정렬용 시간축(2026-09-04) — 프론트가 레거시 커서순서
+                        #   (plan_ymd→part_output_hm→output_hm→wo, 위 _cur 참조)로 정렬하려면
+                        #   이 값들이 응답에 있어야 한다. 종전엔 wo 만 내려가 시간 정렬이 불가능했다.
+                        "plan_ymd": g.get("plan_ymd") or '', "phm": g.get("phm") or '',
+                        "ohm": g.get("ohm") or '',
                         "wo": g.get("wo") or '', "days": days, "done": done, "colors": colors})
         # ★재고 충당(2026-08-20) — 레거시 w_pr_input_580 방식 이식.
         #   재고 '컬럼값'은 현재 보유량이라 깎지 않는다(그대로 표시).
@@ -396,6 +401,18 @@ def gagong_prog420nx(from_ymd: str = Query(""), gigan: int = Query(2), wc: str =
                                     + sum(float(v or 0) for v in (r.get("done") or {}).values()), 0)
         uf = unfin.strip()
         if uf == "미생산": out = [r for r in out if r["finish"] < r["plan_qty"]]
+        # ★출력 정렬(2026-09-04 사용자 요청 — 레거시 실물과 행 순서를 맞춘다).
+        #   종전엔 정렬이 없어(위 재고충당 루프의 sorted 는 그 루프 안에서만 쓰인다)
+        #   같은 ASSY 안에서 도번이 뒤섞였다 — -20-1 과 본도번이 번갈아 나왔다.
+        #   레거시 실측(AJR30012009):
+        #     AJR30012009      / 04라인 / MJU65966711·66774601·66774602·66774701
+        #     AJR30012009-20-1 / 썬텍   / MJU65966706·65966716
+        #   ⟹ ASSY → **도번(upper)** → 자도번. 출고처는 도번에 종속되므로 자연히 묶인다.
+        #   ※출고처를 정렬키로 쓰면 안 된다 — 위 예시가 우연히 맞아 보일 뿐(04라인<썬텍),
+        #     이름 순서가 반대인 조합에서는 부모 도번이 쪼개진다.
+        #   ※소계행(assy 합계)은 프론트가 ASSY 경계에서 그리므로 이 정렬과 충돌하지 않는다.
+        out.sort(key=lambda x: ((x.get("assy") or ""), (x.get("upper") or ""),
+                                (x.get("item") or "")))
         out = out[:int(limit)]
                 # ★ASSY생산파트 드롭다운(2026-08-20) — 레거시 '전체/01라인(용접)/02라인/…' 과 동일 목록.
         #   결과에 실제로 쓰인 gpc 만 코드순으로.

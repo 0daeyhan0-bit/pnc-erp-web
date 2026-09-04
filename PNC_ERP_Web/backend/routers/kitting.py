@@ -43,8 +43,43 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
     cn = _conn(); cur = cn.cursor()
     try:
         d6a = _d6(from_ymd) or _dt.now().strftime('%y%m%d')
-        d6b = _d6(to_ymd) or _yadd(d6a, max(0, int(gigan) - 1))   # to = from + (기간-1) 달력일
-        dates = [_yadd(d6a, i) for i in range(max(1, int(gigan)))]  # 지평 일자셀(달력일)
+        # ★날짜 지평 = 파트별 생산계획(410)과 동일 — 레거시 srw ue_retrieve 산식(2026-09-04 통일).
+        #   종전엔 to = from + (기간-1) '달력일' 이라, 토/일·휴일이 끼면 그만큼 근무일 컬럼이 줄었다
+        #   (예: 기준 09/04(금)·기간 2일 → 04금·05토 만 나오고 정작 다음 근무일 07월 이 안 보임).
+        #   ⟹ to_ymd = base 초과 (기간-1)번째 **근무일**. 표시 컬럼은 base~to 전체 달력일(휴일도 컬럼으로는 나옴).
+        #   근무일 = HR_M_CALENDAR(work_team='A', time_type='A', work_stats in 1/2/5/6)
+        #            ∩ pr_m_line_calendar(work_stats<>4).  ※달력 정본 = line_calendar(미러 아님).
+        gigan_n = max(1, int(gigan)); dates = []; d6b = d6a
+        if gigan_n > 1:
+            try:
+                cur.execute("""SELECT SUBSTRING(MAX(calendar_yymd),3,6) FROM
+                    (SELECT ROW_NUMBER() OVER (ORDER BY calendar_yymd) rn, calendar_yymd
+                       FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR a WITH(NOLOCK)
+                      WHERE work_team='A' AND calendar_yymd > ? AND time_type='A' AND work_stats IN ('1','2','5','6')
+                        AND EXISTS (SELECT 1 FROM PARTNER_ERP_TEST3.nx.pr_m_line_calendar b WITH(NOLOCK)
+                                    WHERE b.calendar_ymd=SUBSTRING(a.calendar_yymd,3,6) AND b.work_stats<>'4')) t
+                    WHERE rn = ?""", '20' + d6a, gigan_n - 1)
+                _r = cur.fetchone()
+                if _r and _r[0]: d6b = str(_r[0])
+            except Exception: pass
+        try:   # 표시 컬럼 = base~to 전체 달력일(주말/휴일 포함)
+            cur.execute("""SELECT CALENDAR_YYMD FROM PARTNER_ERP_TEST3.nx.HR_M_CALENDAR
+                WHERE WORK_TEAM='A' AND CALENDAR_YYMD>=? AND CALENDAR_YYMD<=? ORDER BY CALENDAR_YYMD""", '20' + d6a, '20' + d6b)
+            for (_cy,) in cur.fetchall(): dates.append(str(_cy)[2:])
+        except Exception: pass
+        if not dates:   # 캘린더 미조회시 달력일 fallback(종전 동작)
+            i = 0
+            while _yadd(d6a, i) <= d6b and i < 60: dates.append(_yadd(d6a, i)); i += 1
+            if not dates: dates = [d6a]
+        d6b = dates[-1]
+        # ★to_ymd 파라미터가 명시로 들어오면 그것을 우선(하위호환) — 지평을 다시 그 범위로 맞춘다.
+        _to = _d6(to_ymd)
+        if _to:
+            d6b = _to
+            dates = [x for x in dates if x <= d6b] or [d6a]
+            i = 0   # 캘린더가 짧으면 달력일로 연장
+            while dates[-1] < d6b and i < 60: dates.append(_yadd(dates[-1], 1)); i += 1
+            d6b = dates[-1]
         whp = (wh_part.strip() or 'IS0001')
         # ★성능: SP #TEMP_CTE(투입파트 재귀BOM)를 메인쿼리 JOIN에서 분리 → KEYS set 선(先)조회 후 파이썬 필터
         #   (재귀CTE를 메인 GROUP 조인에 인라인하면 재구체화로 ~5초. 분리 시 ~1.5초. 값·색 로직 불변)
@@ -488,17 +523,47 @@ def kitting_grid(from_ymd: str = Query(""), to_ymd: str = Query(""), wc: str = Q
 @router.get("/api/plan/part410/lines")
 def plan_part410_lines(src: str = Query("new")):
     """파트별 생산계획 라인(LINE_NO) 드롭다운 — 실사용값(PR_T_PLAN_PART_COPY.LINE_NO) distinct.
-       ★/api/planinput/lines(PR003 주문구분: 설치/이지링크/CKD 등)와는 다른 코드체계이므로 별도 소스 필요.
-       CA/CM/GR 등 part410 그리드의 실제 Line No 컬럼값 그대로."""
+       CA/CM/GR 등 part410 그리드의 실제 Line No 컬럼값 그대로.
+
+       ★2026-09-04 명칭 보완(사용자 요청 "추가계획은 명칭도 추가"):
+         레거시 410 라인 dddw 는 **한 목록에 두 부류**가 섞여 있다(실측 스크린샷 일치).
+           ①양산 라인코드 — C1/CA/CD/CE/CG/CH/CJ/CK/CM/CP2/PA/RF2/RQ/SG (14개)
+             = PR003 코드마스터에 없다 → 명칭이 없으므로 **코드만** 표시(레거시도 코드만 보인다).
+           ②추가계획(주문구분) — AA=설치 · EZ=이지링크 · SVC=서비스 · KS=CKD(SAC) · KR=CKD(RAC)
+             · DHZ=LG 콤프 · NG=불량대응 · GR=그린산업 · JI=Jig 제작 … (실사용 12~13개)
+             = `CM_M_MASTER_DETAIL` KIND_CODE='PR003' 에 명칭이 있다 → **"코드 명칭"** 으로 표시.
+         종전엔 nm=code 로 내보내 추가계획도 'AA'·'SVC' 처럼 코드만 보였다 → 무엇인지 알 수 없었다.
+         ※명칭 원천은 /api/planinput/lines 와 같은 PR003. 코드체계가 다른 게 아니라 **겹친다**
+           (라인칸에 양산라인과 주문구분이 함께 들어오는 구조).
+       정렬 = 레거시 목록 순서와 같게 ①코드순 → ②PR003 SORT_SEQ 순."""
     _s = str(src).strip()
     SCH = "PARTNER_ERP.dbo" if _s == "live" else "PARTNER_ERP_TEST3.nx"
     _t = ("PARTNER_ERP_TEST3.nx.v_plan_part_copy_new" if _s == "new"
           else f"{SCH}.PR_T_PLAN_PART_COPY")
     cn = _conn(); cur = cn.cursor()
     try:
+        # 명칭마스터(PR003) — 없거나 조회 실패해도 코드만으로 동작(드롭다운이 비지 않게)
+        nm_map = {}; seq_map = {}
+        try:
+            cur.execute("""SELECT DETAIL_CODE, DETAIL_DESC, SORT_SEQ
+                             FROM PARTNER_ERP_TEST3.nx.CM_M_MASTER_DETAIL WITH(NOLOCK)
+                            WHERE KIND_CODE='PR003' AND ISNULL(USE_FLAG,'1')<>'0'""")
+            for _c, _d, _q in cur.fetchall():
+                _c = str(_c or "").strip()
+                if not _c: continue
+                _d = str(_d or "").strip()
+                if _d and _d != _c: nm_map[_c] = _d
+                try: seq_map[_c] = int(_q or 0)
+                except Exception: seq_map[_c] = 0
+        except Exception: pass
         cur.execute(f"""SELECT DISTINCT LTRIM(RTRIM(LINE_NO)) v FROM {_t} WITH(NOLOCK)
                         WHERE ISNULL(LTRIM(RTRIM(LINE_NO)),'')<>'' ORDER BY v""")
-        rows = [{"code": r[0], "nm": r[0]} for r in cur.fetchall()]
+        used = [str(r[0]).strip() for r in cur.fetchall() if str(r[0] or "").strip()]
+        plain = [c for c in used if c not in nm_map]                  # ①양산 라인 = 코드만
+        extra = sorted([c for c in used if c in nm_map],              # ②추가계획 = 코드 + 명칭
+                       key=lambda c: (seq_map.get(c, 0), c))
+        rows = ([{"code": c, "nm": c, "svc": False} for c in plain]
+                + [{"code": c, "nm": f"{c} {nm_map[c]}", "desc": nm_map[c], "svc": True} for c in extra])
         return {"rows": rows}
     finally:
         cn.close()
