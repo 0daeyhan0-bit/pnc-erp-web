@@ -284,7 +284,7 @@
             stock:[], lineNames:{}, custTypeNames:{}};
 </script>
 <script src="js/core.js?v=260903magamgubun"></script>
-<script src="js/screens.etc.js?v=260903uni"></script>
+<script src="js/screens.etc.js?v=260903sumfoot"></script>
 
 <script>
 /* ★포털 스크립트 전체를 IIFE 로 감싼다(2026-09-03).
@@ -344,6 +344,7 @@ async function doLogin(){
     const j = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(j.detail||'로그인에 실패했습니다.');
     T.tok=j.token; T.me=j.user;
+    if(gotoMainIfStaff(T.me)) return;      // ★내부 계정 = 포털이 아니라 내부 ERP 로
     $('#login').classList.add('hide');
     start();
   }catch(e){ showLogin(e.message); }
@@ -768,9 +769,26 @@ $('#out').onclick = async()=>{
   T.tok=null; T.me=null; showLogin();
 };
 
+/* ★내부 계정이 포털에 들어오면 내부 ERP(index.html)로 되돌린다 (2026-09-04).
+     포털은 협력사 전용이다 — 내부 계정은 partner_code 가 없어 화면이 "거래처를 지정하세요"
+     에서 멈춘다(실측). boot.js 의 gotoPortalIfCoop() 과 짝이 되는 반대방향 방어.
+   ※판정은 서버가 준 utype/roles 로만. 경로 검사로 무한 리다이렉트를 막는다. */
+function gotoMainIfStaff(u){
+  try{
+    const coop = !!u && ((String(u.utype||'').trim()==='협력사')
+                      || (Array.isArray(u.roles) && u.roles.includes('협력사')));
+    if(coop) return false;                                        // 협력사 = 포털이 맞다
+    if(/index\.html$/i.test(location.pathname)) return false;      // 이미 내부(방어)
+    location.replace('index.html');
+    return true;
+  }catch(e){ return false; }
+}
+
 (async function(){
   if(!T.tok) return showLogin();
-  try{ const j = await api('/api/auth/me'); T.me = j.user; $('#login').classList.add('hide'); start(); }
+  try{ const j = await api('/api/auth/me'); T.me = j.user;
+       if(gotoMainIfStaff(T.me)) return;                           // ★내부 계정 → 내부 ERP
+       $('#login').classList.add('hide'); start(); }
   catch(e){ showLogin(); }
 })();
 })();   /* ← 포털 스크립트 IIFE 끝 */

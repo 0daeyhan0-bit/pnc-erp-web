@@ -44,6 +44,43 @@ window.openPrintWin=(kind,name,feat)=>new Promise(resolve=>{
   setTimeout(fin,1500);   // 안전장치(로드 이벤트를 놓쳐도 진행)
 });
 
+/* ===== 로컬 프린터 에이전트 연동 — ★최상위 공용 =====
+   웹은 보안상 "어느 프린터로 보낼지"를 지정할 수 없어 인쇄창에서 매번 골라야 했다.
+   가간판(A4)·라벨(40×20)이 서로 다른 USB 프린터에 물린 현장에서는 오출력 위험이 크다.
+   → 작업 PC 에 트레이 상주 프로그램(_tools/pnc_print_agent)을 두고, 웹은 kind(가간판/라벨)만
+     보낸다. 실제 물리 프린터는 그 PC 의 설정이 정하므로 PC 마다 구성이 달라도 웹 코드는 하나.
+
+   ★에이전트가 없으면 기존 인쇄창 방식으로 자동 폴백한다(현장이 멈추지 않게).
+   ★127.0.0.1 로만 통신 — 외부에서 이 PC 프린터를 쓸 수 없다. */
+window.PRN_AGENT = (() => {
+  const BASE = 'http://127.0.0.1:17650';
+  let cache = null, at = 0;
+  const ping = async (force) => {
+    // 30초 캐시 — 발행 때마다 왕복하면 느리다. 에이전트를 껐다 켠 경우 force 로 갱신.
+    if (!force && cache && Date.now() - at < 30000) return cache;
+    try {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 1200);   // 미설치 PC 에서 오래 기다리지 않게
+      const r = await fetch(BASE + '/ping', { signal: c.signal });
+      clearTimeout(t);
+      cache = r.ok ? await r.json() : null;
+    } catch (e) { cache = null; }
+    at = Date.now();
+    return cache;
+  };
+  // kind='kanban'|'label'  job={pdf|tspl, doc, copies}
+  const send = async (kind, job) => {
+    const r = await fetch(BASE + '/print', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ kind }, job))
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) { const e = new Error(j.detail || '출력 실패'); e.need_setup = j.need_setup; throw e; }
+    return j;
+  };
+  return { BASE, ping, send };
+})();
+
 /* ===== Spec Sheet(BOM) 출력 — ★최상위 공용 함수 =====
    준비실적처리(키팅) [🖨 BOM출력] → A4 가로 미리보기 → 인쇄.
    레거시 w_pr_input_460 Print미리보기 양식 재현(2026-08-19):
@@ -3600,45 +3637,70 @@ SCREEN.prodsheet=(host)=>{
   const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const T=new Date(), today=iso(T);
   const st={rows:[],cnt:0,sumQty:0,from:today,to:today,part:'',item:'',sheetNo:'',boxNo:'',labelNo:'',
-            fin:'N',parts:[],printers:[],sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
+            fin:'N',parts:[],agent:null,sel:new Set(),cur:null,det:null,loading:false,detLoading:false,msg:''};
   // ★프린터 2대 운용(레거시 w_pr_input_490 동일) — 제품스티커=라벨프린터 / 가간판·전표=A4프린터.
-  //   웹은 보안상 프린터를 코드로 지정할 수 없다. 대신
-  //   (a) 출력물마다 용지규격을 다르게 두고(40×20 / 210×110 / A4)
-  //   (b) 인쇄창(window.open)의 '창이름'을 분리해 브라우저가 각 창의 마지막 프린터를 따로 기억하게 하고
-  //   (c) 어느 프린터로 보낼지 이름을 화면·인쇄창에 표시한다.
-  //   → 직원이 출력물별로 처음 1회만 프린터를 고르면 이후 자동 선택된다.
-  const PRN_LS='ps490_printers';
-  const PRN=(()=>{try{return Object.assign({label:'',kanban:''},
-      JSON.parse(localStorage.getItem(PRN_LS)||'{}'));}catch(e){return {label:'',kanban:''};}})();
-  const savePrn=()=>{try{localStorage.setItem(PRN_LS,JSON.stringify(PRN));}catch(e){}};
-  // 서버(ERP 184)에 설치된 프린터 목록 — 현장 프린터는 대개 네트워크 공유라 서버에도 잡힌다.
-  const loadPrinters=async(refresh)=>{
-    try{const r=await fetch(`${API}/api/prodsheet/printers${refresh?'?refresh=1':''}`);
-      const j=await r.json(); st.printers=j.rows||[];}
-    catch(e){st.printers=[];}};
-  // 프린터 선택칩 — ★select 드롭다운(언제든 다시 열어 바꿀 수 있음).
-  //   datalist 는 값이 채워지면 그 값으로 목록이 필터링돼 다른 프린터가 안 보였다(2026-08-21 수정).
-  //   목록에 없는 프린터는 '✏ 직접입력…' 을 고르면 입력칸으로 전환된다.
-  const prnPick=(k,tit,sz,val,bg,bd,c1,c2,w)=>{
-    const list=st.printers||[];
-    const known=list.some(p=>p.name===val);
-    const custom=!!val&&!known;      // 목록에 없는 값 = 직접입력 상태
-    return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
-                  background:${bg};border:1px solid ${bd};border-radius:14px">
-      <b style="font-size:11px;color:${c1}">${tit}</b>
-      <span style="font-size:10px;color:${c2}">${sz}</span>
-      <select class="sel" id="ps-prn-${k}" style="min-width:0;width:${w}px;height:24px;font-size:12px"
-              title="${esc(tit)} 출력에 쓸 프린터 (언제든 다시 선택 가능)">
-        <option value=""${val?'':' selected'}>— 선택 안 함 —</option>
-        ${list.map(p=>`<option value="${esc(p.name)}"${p.name===val?' selected':''}>${esc(p.name)}</option>`).join('')}
-        <option value="__custom__"${custom?' selected':''}>✏ 직접입력…</option>
-      </select>
-      <input class="inp" id="ps-prn-${k}-tx" value="${esc(custom?val:'')}" placeholder="프린터명 직접입력"
-             style="min-width:0;width:${w}px;height:24px;font-size:12px;${custom?'':'display:none'}"
-             autocomplete="off">
-      ${val?`<span id="ps-prn-${k}-ok" title="지정됨" style="font-size:11px;color:#1c7c3a">✔</span>`:''}
-    </span>`;};
+  //   웹은 보안상 프린터를 코드로 지정할 수 없다 → 작업 PC 에 트레이 에이전트를 두고
+  //   웹은 kind(가간판/라벨)만 보낸다. 실제 프린터는 **그 PC 의 에이전트 설정**이 정한다.
+  //   (종전엔 여기서 ERP서버 프린터 목록을 골랐지만, 현장 프린터는 각 PC 에 USB 로 물려 있어
+  //    서버 목록은 애초에 대상이 아니었다 — 게다가 '메모용'이라 실제 출력엔 영향이 없었다.)
+  //   에이전트 미설치 PC 는 기존 인쇄창 방식으로 자동 폴백된다.
+  const agentChip=()=>{
+    const a=st.agent;
+    if(a===null||a===undefined)
+      return `<span style="font-size:11px;color:#8a94a6">프린터 에이전트 확인 중…</span>`;
+    if(a===false)
+      // ★미설치 PC — 여기서 바로 받게 한다(USB 로 돌리면 반드시 빠지는 PC 가 생긴다).
+      return `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;
+                    background:#fff3f0;border:1px solid #ffbfae;border-radius:14px">
+          <b style="font-size:11px;color:#c0392b">자동출력 꺼짐</b>
+          <span style="font-size:11px;color:#8a5b52">이 PC 에 프린터 에이전트가 없어 <b>인쇄창</b>으로 출력합니다.</span>
+        </span>
+        <button class="btn" id="ps-agent-dl" style="height:24px;padding:0 10px;font-size:11px;
+                background:#1c7c3a;color:#fff;border-color:#1c7c3a"
+                title="설치파일을 받아 더블클릭하면 자동으로 설치됩니다">설치파일 받기</button>
+        <span id="ps-agent-dlmsg" style="font-size:11px;color:#8a94a6"></span>`;
+    const one=(tit,sz,nm,bg,bd,c1)=>`<span style="display:inline-flex;align-items:center;gap:5px;
+          padding:3px 9px;background:${bg};border:1px solid ${bd};border-radius:14px">
+        <b style="font-size:11px;color:${c1}">${tit}</b>
+        <span style="font-size:10px;color:#7b8794">${sz}</span>
+        <span style="font-size:11px;font-weight:700;color:${nm?'#1c7c3a':'#c0392b'}">
+          ${nm?esc(nm):'미지정'}</span></span>`;
+    return one('제품스티커','40×20',a.label_printer,'#fff7e6','#ffd591','#a06a00')
+         + one('가간판·전표','210×110 / A4',a.kanban_printer,'#e6f7ff','#91d5ff','#0d6b9a')
+         + `<span style="font-size:11px;color:#8a94a6">발행하면 <b>인쇄창 없이</b> 위 프린터로 바로 나갑니다
+              — 변경은 작업표시줄의 <b>PNC 프린터 에이전트 → 설정</b>.</span>
+            <a href="#" id="ps-agent-dl" style="font-size:11px;color:#5b7fa6"
+               title="다른 PC 에 설치하거나 새 버전으로 갱신할 때">설치파일</a>
+            <span id="ps-agent-dlmsg" style="font-size:11px;color:#8a94a6"></span>`;};
+  const loadAgent=async(force)=>{
+    const a=await PRN_AGENT.ping(force); st.agent=a||false;};
   const qsv=o=>new URLSearchParams(Object.entries(o).filter(([,v])=>v!==''&&v!=null)).toString();
+  // ★자동출력 시도 — 성공하면 true(호출측은 즉시 return, 인쇄창 안 뜸).
+  //   에이전트가 없거나 실패하면 false → 호출측이 기존 인쇄창 방식으로 계속 진행한다.
+  //   urlFn(agent) = 서버에서 인쇄물(PDF/TSPL)을 받아올 URL.
+  const tryAgent=async(kind,urlFn)=>{
+    const ag=await PRN_AGENT.ping();
+    if(!ag)return false;                       // 미설치 PC = 조용히 기존 방식
+    const ready=kind==='label'?ag.ready_label:ag.ready_kanban;
+    if(!ready){
+      // 설치는 됐는데 프린터를 안 골랐다 — 알려주고 기존 방식으로 진행.
+      st.msg=`${kind==='label'?'라벨':'가간판'} 프린터가 지정되지 않아 인쇄창으로 출력합니다 `
+            +`(트레이의 "PNC 프린터 에이전트 → 설정"에서 지정).`;
+      render();return false;
+    }
+    try{
+      const r=await fetch(urlFn(ag));
+      const j=await r.json();
+      if(!j||!j.ok)throw new Error((j&&j.detail)||'인쇄물 생성 실패');
+      const res=await PRN_AGENT.send(kind,{pdf:j.pdf,tspl:j.tspl,doc:j.doc});
+      st.msg=`${j.doc} → ${res.printer} 로 출력했습니다.`;render();
+      return true;
+    }catch(e){
+      // 실패해도 현장이 멈추면 안 된다 — 기존 인쇄창으로 넘긴다.
+      st.msg=`자동출력 실패(${e.message}) — 인쇄창으로 출력합니다.`;render();
+      return false;
+    }
+  };
   const loadParts=async()=>{try{const r=await fetch(`${API}/api/prodsheet/parts`);const j=await r.json();st.parts=j.rows||[];}catch(e){st.parts=[];}};
   const load=async()=>{st.loading=true;st.cur=null;st.det=null;render();
     const qs=qsv({from_ymd:st.from,to_ymd:st.to,part:st.part,item:st.item,
@@ -4010,6 +4072,12 @@ SCREEN.prodsheet=(host)=>{
     if(o.end)qs.set('end_no',o.end);
     if(o.worker)qs.set('worker',o.worker);
     if(o.inspector)qs.set('inspector',o.inspector);
+    // ★에이전트가 살아있으면 인쇄창 없이 라벨프린터로 바로 출력.
+    //   출력방식(TSPL 직송/PDF)은 그 PC 의 에이전트 설정을 따른다.
+    if(await tryAgent('label',ag=>{
+        const q=new URLSearchParams(qs);
+        q.set('mode',(ag&&ag.label_mode)==='tspl'?'tspl':'pdf');
+        return `${API}/api/print/label?${q}`;}))return;
     try{const r=await fetch(`${API}/api/prodsheet/label-print?${qs}`);j=await r.json();}
     catch(e){alert('라벨 조회 실패: '+e);return;}
     if(!j||!j.ok){alert('라벨 조회 실패: '+((j&&j.detail)||''));return;}
@@ -4051,8 +4119,9 @@ SCREEN.prodsheet=(host)=>{
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
       <span style="font-size:12px;color:#555;margin-left:8px">제품스티커 ${j.qty}장 · 라벨번호 ${j.print_seq} · QR3 · 40×20mm</span>
       <div style="margin-top:6px;padding:6px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:4px;font-size:12px">
-        🖨 <b>프린터: ${esc(PRN.label||'(라벨프린터 미지정)')}</b>
-        <span style="color:#8c6d1f">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
+        <b>라벨프린터(40×20)를 인쇄창에서 고르세요.</b>
+        <span style="color:#8c6d1f">— 한 번 고르면 다음부터 자동 선택됩니다.
+          이 PC 에 <b>PNC 프린터 에이전트</b>를 설치하면 인쇄창 없이 바로 출력됩니다.</span>
       </div></div>
     ${(j.labels||[]).map(one).join('')}
     <script>
@@ -4176,6 +4245,8 @@ SCREEN.prodsheet=(host)=>{
   const printKanban=async(boxNos)=>{
     const list=(boxNos||[]).filter(Boolean);
     if(!list.length)return;
+    // ★에이전트가 살아있으면 인쇄창 없이 지정 프린터로 바로 출력한다.
+    if(await tryAgent('kanban',()=>`${API}/api/print/kanban?box_no=${encodeURIComponent(list.join(','))}`))return;
     const cards=[];
     for(const bn of list){
       try{const r=await fetch(`${API}/api/prodsheet/kanban-print?box_no=${encodeURIComponent(bn)}`);
@@ -4266,8 +4337,9 @@ SCREEN.prodsheet=(host)=>{
       <button onclick="window.close()" style="padding:6px 16px;font-size:13px">닫기</button>
       <span style="font-size:12px;color:#555;margin-left:8px">가간판 ${cards.length}장 · 210×110mm (A4 3등분) — 인쇄창에서 <b>여백 없음</b>·<b>배율 100%</b> 확인</span>
       <div style="margin-top:6px;padding:6px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;font-size:12px">
-        🖨 <b>프린터: ${esc(PRN.kanban||'(가간판 프린터 미지정)')}</b>
-        <span style="color:#1a6a99">— 인쇄창에서 이 프린터를 고르세요. 한 번 고르면 다음부터 자동 선택됩니다.</span>
+        <b>가간판 프린터(210×110 / A4)를 인쇄창에서 고르세요.</b>
+        <span style="color:#1a6a99">— 한 번 고르면 다음부터 자동 선택됩니다.
+          이 PC 에 <b>PNC 프린터 에이전트</b>를 설치하면 인쇄창 없이 바로 출력됩니다.</span>
       </div></div>
     ${cards.map(card).join('')}
     <script>
@@ -4302,16 +4374,10 @@ SCREEN.prodsheet=(host)=>{
      <div style="flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px;
                  margin:0 0 6px;padding:7px 10px;border:1px solid #d6dee8;border-left:4px solid #5b7fa6;
                  border-radius:6px;background:linear-gradient(180deg,#fbfdff,#f1f5fa)">
-       <span style="font-size:12px;font-weight:700;color:#41546b">🖨 프린터 설정</span>
-       ${prnPick('l','🔖 제품스티커','40×20',PRN.label,'#fff7e6','#ffd591','#a06a00','#b08a4a',178)}
-       ${prnPick('k','🏷 가간판·전표','210×110 / A4',PRN.kanban,'#e6f7ff','#91d5ff','#0d6b9a','#4a92b5',200)}
+       <span style="font-size:12px;font-weight:700;color:#41546b">프린터 설정</span>
+       ${agentChip()}
        <button class="btn" id="ps-prn-r" style="height:24px;padding:0 8px;font-size:11px"
-               title="ERP서버에 설치된 프린터 목록을 다시 읽습니다">🔄 목록</button>
-       <span id="ps-prn-msg" style="font-size:11px;color:#8a94a6">${
-         st.printers&&st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
-         :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.'}</span>
-       <span style="font-size:11px;color:#8a94a6">※ 위 칸은 <b>메모용</b>(자동지정 아님) — 실제 선택은
-         출력물별로 <b>인쇄창에서 처음 1회만</b> 고르면 그 뒤로는 자동으로 그 프린터가 잡힙니다.</span>
+               title="이 PC 의 프린터 에이전트 상태를 다시 확인합니다">상태 새로고침</button>
      </div>
      <div class="page-sub" style="flex:0 0 auto">출력기간=전표 <code>PRINT_DATETIME</code> · 전표처리방법 <b>J:전표</b>(용접전표 바코드로 실적) / <b>G:가간판</b>(간판 바코드로 실적) · 포장정보=<code>PR_M_ITEM_SUB</code>.</div>
      <div class="toolbar" style="flex:0 0 auto;flex-wrap:wrap;gap:4px">
@@ -4366,40 +4432,40 @@ SCREEN.prodsheet=(host)=>{
     g('#ps-all').onclick=e=>{st.sel.clear();if(e.target.checked)st.rows.forEach((r,i)=>st.sel.add(i));
       host.querySelectorAll('.ps-chk').forEach(ch=>ch.checked=e.target.checked);
       const c=g('#ps-selcnt');if(c)c.textContent=st.sel.size;};
-    // 프린터 선택 — select 로 언제든 재선택 가능. '직접입력' 고르면 옆 입력칸으로 전환.
-    //   재렌더하지 않고 DOM 만 토글(입력 중 포커스·스크롤 유지)
-    {const wire=(k,key)=>{
-       const sel=g('#ps-prn-'+k), tx=g('#ps-prn-'+k+'-tx');
-       if(!sel||!tx)return;
-       const mark=v=>{const o=g('#ps-prn-'+k+'-ok');
-         if(v&&!o){const s=document.createElement('span');s.id='ps-prn-'+k+'-ok';
-           s.title='지정됨';s.style.cssText='font-size:11px;color:#1c7c3a';s.textContent='✔';
-           sel.parentElement.appendChild(s);}
-         else if(!v&&o)o.remove();};
-       sel.onchange=()=>{
-         if(sel.value==='__custom__'){tx.style.display='';tx.focus();
-           PRN[key]=tx.value.trim();savePrn();mark(PRN[key]);return;}
-         tx.style.display='none';
-         PRN[key]=sel.value;savePrn();mark(PRN[key]);};
-       tx.oninput=()=>{PRN[key]=tx.value.trim();savePrn();mark(PRN[key]);};};
-     wire('l','label'); wire('k','kanban');
-     const pr=g('#ps-prn-r'),pm=g('#ps-prn-msg');
-     if(pr)pr.onclick=async()=>{pr.disabled=true;if(pm)pm.textContent='목록 읽는 중…';
-       await loadPrinters(true);
-       // 목록이 바뀌었으므로 선택칩만 다시 그린다(현재 지정값은 PRN 에 보존됨)
-       ['l','k'].forEach(k=>{const s=g('#ps-prn-'+k);if(!s)return;
-         const cur=(k==='l')?PRN.label:PRN.kanban;
-         const known=(st.printers||[]).some(p=>p.name===cur);
-         s.innerHTML=`<option value="">— 선택 안 함 —</option>`
-           +(st.printers||[]).map(p=>`<option value="${esc(p.name)}"${p.name===cur?' selected':''}>${esc(p.name)}</option>`).join('')
-           +`<option value="__custom__"${(cur&&!known)?' selected':''}>✏ 직접입력…</option>`;});
-       if(pm)pm.textContent=st.printers.length?`서버 프린터 ${st.printers.length}대 — 없으면 [직접입력]`
-                                              :'목록을 못 읽었습니다 — [직접입력]을 쓰세요.';
-       pr.disabled=false;};}
+    // 프린터 에이전트 상태 새로고침 — 에이전트를 켜거나 프린터를 바꾼 뒤 누른다.
+    {const pr=g('#ps-prn-r');
+     if(pr)pr.onclick=async()=>{pr.disabled=true;pr.textContent='확인 중…';
+       await loadAgent(true);render();};}
+    // 설치파일 받기 — 받아서 더블클릭하면 자가설치된다(관리자권한 불필요).
+    {const dl=g('#ps-agent-dl'),dm=g('#ps-agent-dlmsg');
+     if(dl)dl.onclick=async(ev)=>{
+       ev.preventDefault();
+       if(dm)dm.textContent='설치파일 확인 중…';
+       let inf=null;
+       try{const r=await fetch(`${API}/api/print/agent-info`);inf=await r.json();}catch(e){}
+       if(!inf||!inf.available){
+         if(dm)dm.textContent='';
+         alert('설치파일이 서버에 없습니다.\n관리자에게 문의하세요.');return;}
+       if(dm)dm.textContent=`내려받는 중… (${inf.size_mb}MB)`;
+       // ★그냥 location 이동을 쓰면 로그인 토큰이 안 실려 401 이 난다 → fetch 로 받아 저장.
+       try{
+         const r=await fetch(`${API}/api/print/agent-download`);
+         if(!r.ok)throw new Error('HTTP '+r.status);
+         const blob=await r.blob();
+         const u=URL.createObjectURL(blob);
+         const a2=document.createElement('a');
+         a2.href=u;a2.download='PNC프린터에이전트.exe';
+         document.body.appendChild(a2);a2.click();a2.remove();
+         setTimeout(()=>URL.revokeObjectURL(u),10000);
+         if(dm)dm.textContent=`받았습니다 (${inf.size_mb}MB) — 더블클릭하면 설치됩니다.`;
+       }catch(e){
+         if(dm)dm.textContent='';
+         alert('설치파일 다운로드 실패: '+e.message);}
+     };}
     if(ed){g('#ps-pj').onclick=printSheets;g('#ps-ig').onclick=openKanban;g('#ps-il').onclick=openLabel;}
     wireLeft();paintDetail();attachResizers(host);
   };
-  Promise.all([loadParts(),loadPrinters(false)]).then(()=>{render();load();});
+  Promise.all([loadParts(),loadAgent(false)]).then(()=>{render();load();});
 };
 
 /* ===== 공정별 바코드생산실적 (w_pr_input_520) — 스캔→자동채움→등록/취소(nx.proc_barcode) ===== */

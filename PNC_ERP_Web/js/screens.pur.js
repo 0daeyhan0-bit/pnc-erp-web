@@ -1067,14 +1067,17 @@ function openMatIssuePopup(opt){
      </style>`;
     wire();};
 
+  /* ★재고수량 = FROM파트창고 기준(2026-09-04). 창고를 보내야 그 창고 실재고가 온다.
+     캐시 키에도 창고를 넣는다 — 안 그러면 창고를 바꿔도 옛 창고 재고가 남는다. */
   const trace=async(codes)=>{
-    codes=[...new Set(codes.map(x=>(x||'').trim().toUpperCase()).filter(Boolean))].filter(x=>info[x]===undefined);
+    codes=[...new Set(codes.map(x=>(x||'').trim().toUpperCase()).filter(Boolean))]
+          .filter(x=>info[fromWh+'#'+x]===undefined);
     if(!codes.length)return;
     try{const r=await fetch(`${API}/api/stock/matinfo`,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({codes})});
-      ((await r.json()).rows||[]).forEach(x=>{info[(x.mat||'').toUpperCase()]=x;});}catch(e){}};
+        body:JSON.stringify({codes,wh:fromWh})});
+      ((await r.json()).rows||[]).forEach(x=>{info[fromWh+'#'+(x.mat||'').toUpperCase()]=x;});}catch(e){}};
   const applyInfo=()=>{rows.forEach(r=>{const k=(r.mat||'').trim().toUpperCase();if(!k)return;
-    const v=info[k];if(!v)return;
+    const v=info[fromWh+'#'+k];if(!v)return;
     r.nm=v.nm||'';r.spec=v.spec||'';r.unit=v.unit||'';r.stock=v.stock;r.bad=v.unknown?1:0;});};
 
   function wireRows(){
@@ -1116,7 +1119,9 @@ function openMatIssuePopup(opt){
     const shift=d=>{const t=new Date(ymd);t.setDate(t.getDate()+d);
       ymd=`${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`;draw();};
     g('#mi-prev').onclick=()=>shift(-1);g('#mi-next').onclick=()=>shift(1);
-    g('#mi-fw').onchange=e=>{fromWh=e.target.value;};
+    /* ★창고를 바꾸면 재고수량을 그 창고 기준으로 다시 읽는다(2026-09-04). */
+    g('#mi-fw').onchange=async e=>{fromWh=e.target.value;
+      await trace(rows.map(r=>r.mat).filter(Boolean));applyInfo();redrawBody();};
     // ★영업창고는 파트창고가 없어 TO파트를 쓰지 않는다(2026-08-28 사용자 확정)
     g('#mi-og').onchange=e=>{outGubun=e.target.value;
       if(outGubun==='2') toWh='';

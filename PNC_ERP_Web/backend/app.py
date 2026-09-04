@@ -194,6 +194,10 @@ app.include_router(_r_auth.router)
 # 자재예상매입(MRP성 조달계획, 조회전용) — MAT_EXPECTED_PURCHASE_DESIGN.md [[newerp-matexpect-initiative]]
 from routers import matexpect as _r_matexpect
 app.include_router(_r_matexpect.router)
+# 생산전표출력관리(490) 무음 자동출력 — 가간판/라벨 PDF·TSPL 생성.
+#   작업 PC 트레이 에이전트(_tools/pnc_print_agent)가 받아 지정 프린터로 바로 출력한다.
+from routers import printjob as _r_printjob
+app.include_router(_r_printjob.router)
 
 
 # ★★내부 API 전면 인증 게이트 (2026-08-29) — PARTNER_PORTAL_DESIGN.md §13

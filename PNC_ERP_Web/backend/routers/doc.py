@@ -18,11 +18,37 @@ DOC_STORAGE_PATH = _os.getenv("DOC_STORAGE_PATH", r"F:\NEW_ERP_FILES")   # 배�
 # ★로컬 개발 폴백(2026-08-26) — 지정 경로의 드라이브가 아예 없으면(개발 PC에 F: 없음)
 #   레포 옆 _files 로 떨어뜨린다. 운영(F: 존재)에서는 아무 영향 없음.
 #   ※환경변수 DOC_STORAGE_PATH 가 설정돼 있으면 폴백하지 않는다(명시 설정 우선).
-if not _os.getenv("DOC_STORAGE_PATH"):
-    _drv = _os.path.splitdrive(DOC_STORAGE_PATH)[0]
-    if _drv and not _os.path.isdir(_drv + "\\"):
-        DOC_STORAGE_PATH = _os.path.join(
-            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "_files")
+#   ⚠2026-09-04 보강 — 종전엔 「환경변수가 있으면 무조건 그대로」였다. 그런데 운영에서
+#     그 값이 **깨진 채로** 들어오면(콘솔 코드페이지/서비스 등록 시 CP949↔UTF-8 오독)
+#     그대로 mkdir 을 시도해 업로드가 통째로 실패한다.
+#     실측 2026-09-04(운영 184): 'D:\ERP\꿈(₩)' → WinError 123 (구문이 잘못된 경로).
+#   ⟹ 환경변수라도 **쓸 수 있는 경로인지 검사**하고, 못 쓰면 폴백한다.
+def _bad_path(p: str) -> bool:
+    """윈도우에서 만들 수 없는 경로인가(깨진 문자·금지문자·없는 드라이브)."""
+    if not p or not p.strip():
+        return True
+    try:
+        # 드라이브 문자 뒤(경로 본문)에 윈도우 금지문자가 있으면 못 만든다
+        _drv, _rest = _os.path.splitdrive(p)
+        if any(ch in _rest for ch in '<>:"|?*') or any(ord(ch) < 32 for ch in _rest):
+            return True
+        # 인코딩이 깨져 왕복이 안 되는 문자열(U+FFFD 등)
+        if "\ufffd" in p:
+            return True
+        if _drv and not _os.path.isdir(_drv + "\\"):
+            return True
+    except Exception:
+        return True
+    return False
+
+_FALLBACK_DOC_DIR = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "_files")
+if _bad_path(DOC_STORAGE_PATH):
+    try:
+        print(f"[doc] ⚠DOC_STORAGE_PATH 사용불가({DOC_STORAGE_PATH!r}) → 폴백 {_FALLBACK_DOC_DIR}")
+    except Exception:
+        pass
+    DOC_STORAGE_PATH = _FALLBACK_DOC_DIR
 _DOC_KIND = {"GENERAL_DWG": "일반도면", "SPEC_DWG": "시방도면", "SPEC_SHEET": "시방서", "ITEM_ATTACH": "품목첨부"}
 
 @router.get("/api/doc/list")

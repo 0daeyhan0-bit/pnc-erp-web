@@ -137,7 +137,7 @@ def stock_assybom(assy: str = Query(...), setqty: float = Query(1)):
     ⚠자재출고관리(w_pu_stock_156)에서는 **쓰지 않는다** — 그 화면은 단품을 다른 창고로
       내보내는 것이라 BOM 전개가 필요 없다(2026-08-28 사용자 확정).
       세트 단위 출고가 필요한 다른 화면을 위해 남겨둔다.
-    ★웹 정본만 읽는다: nx.v_pr_bom · nx.item · nx.mat_stock_daily(현재고).
+    ★웹 정본만 읽는다: nx.v_pr_bom · nx.item · _mat_avail_map(현재고=실시간 정본).
       except_flag='1' 제외(편성과 동일 규칙). 같은 자재 여러 행이면 소요량 합산.
     """
     assy = str(assy or "").strip().upper()
@@ -161,17 +161,21 @@ def stock_assybom(assy: str = Query(...), setqty: float = Query(1)):
              ORDER BY RTRIM(b.MAT_CODE)""", assy)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        # 현재고 배치조회(정본 nx.mat_stock_daily 최신일)
+        # 현재고 = ★창고(파트창고) 기준 실재고 — nx.PU_T_MAT_STOCK_WH.
+        #   ⚠2026-09-04 교정 — mat_stock_daily 는 일마감 스냅샷이라 마감 뒤 입고분이
+        #     빠진다(실측 MJU66166623: 실제 2인데 스냅샷은 260819 에 멈춰 0).
+        #   /api/stock/matinfo 와 같은 축(CUST_CODE=Z99990 자사 · GAGONG_PROC_CODE=창고).
         mats = [r["mat"] for r in rows if r["mat"]]
         stk = {}
         for i in range(0, len(mats), 900):
             ch = mats[i:i+900]; ph = ",".join("?" * len(ch))
             try:
-                cur.execute(f"""SELECT UPPER(d.mat_code), d.stock_qty FROM (
-                        SELECT mat_code, stock_qty,
-                               ROW_NUMBER() OVER(PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
-                          FROM nx.mat_stock_daily WHERE UPPER(mat_code) IN ({ph})) d
-                     WHERE d.rn=1""", *ch)
+                cur.execute(f"""SELECT UPPER(RTRIM(MAT_CODE)),
+                                       SUM(CAST(ISNULL(STOCK_QTY,0) AS float))
+                                  FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                                 WHERE RTRIM(MAT_CODE) IN ({ph})
+                                   AND RTRIM(ISNULL(CUST_CODE,''))='Z99990'
+                                 GROUP BY UPPER(RTRIM(MAT_CODE))""", *ch)
                 for r in cur.fetchall():
                     stk[str(r[0]).strip().upper()] = float(r[1] or 0)
             except Exception:
@@ -239,16 +243,33 @@ def stock_matinfo(payload: dict = Body(...)):
             for r in cur.fetchall():
                 out[str(r[0]).strip().upper()] = {"mat": str(r[0]).strip(), "nm": r[1], "spec": r[2],
                                                   "unit": r[3], "stock": 0}
-        # 현재고(참고표시) — 정본 nx.mat_stock_daily 최신일(common._mat_avail 과 동일 기준).
-        #   행마다 _mat_avail 을 부르면 수백행에서 느려서 배치 1회로 뽑는다.
+        # 현재고 = ★**창고(파트창고) 기준 실재고**(2026-09-04 사용자 확정).
+        #   이 팝업은 FROM파트창고(IS0001 자재창고 / IS0002 부자재창고)에서 빼내는
+        #   화면이므로, 재고도 그 창고에 실제로 있는 수량이어야 한다.
+        #   정본 = nx.PU_T_MAT_STOCK_WH (CUST_CODE=보유주체, GAGONG_PROC_CODE=파트창고)
+        #        = 레거시 f_pu_get_mat_stock_wh(자재,'Z99990','IS0001') 과 같은 축.
+        #   ⚠교정 이력
+        #     ① 종전 nx.mat_stock_daily(일마감 스냅샷) → 마감 뒤 입고분이 빠져 0 이 나왔다
+        #        (실측 MJU66166623: 실제 2 인데 스냅샷은 260819 에 멈춰 0).
+        #     ② _mat_avail_map(전사 실시간)도 아니다 — 창고 구분이 없어 과대계상된다
+        #        (실측 MJU66166605: 자재창고 269 인데 전사 1,347).
+        #   wh 미지정이면 창고 구분 없이 그 자재의 전 창고 합(=종전 표시와 호환).
+        _wh = str(payload.get("wh") or payload.get("from_wh") or "").strip().upper()
+        _cc = str(payload.get("stock_cust") or "Z99990").strip().upper()
         try:
             for i in range(0, len(codes), 900):
                 ch = codes[i:i+900]; ph = ",".join("?" * len(ch))
-                cur.execute(f"""SELECT UPPER(d.mat_code), d.stock_qty
-                      FROM (SELECT mat_code, stock_qty,
-                                   ROW_NUMBER() OVER(PARTITION BY UPPER(mat_code) ORDER BY ymd DESC) rn
-                              FROM nx.mat_stock_daily WHERE UPPER(mat_code) IN ({ph})) d
-                     WHERE d.rn=1""", *ch)
+                _w = ["RTRIM(MAT_CODE) IN (%s)" % ph]
+                _p = list(ch)
+                if _cc:
+                    _w.append("RTRIM(ISNULL(CUST_CODE,''))=?"); _p.append(_cc)
+                if _wh:
+                    _w.append("RTRIM(ISNULL(GAGONG_PROC_CODE,''))=?"); _p.append(_wh)
+                cur.execute("""SELECT UPPER(RTRIM(MAT_CODE)),
+                                      SUM(CAST(ISNULL(STOCK_QTY,0) AS float))
+                                 FROM nx.PU_T_MAT_STOCK_WH WITH(NOLOCK)
+                                WHERE %s GROUP BY UPPER(RTRIM(MAT_CODE))"""
+                            % " AND ".join(_w), *_p)
                 for r in cur.fetchall():
                     k = str(r[0]).strip().upper()
                     if k in out:
