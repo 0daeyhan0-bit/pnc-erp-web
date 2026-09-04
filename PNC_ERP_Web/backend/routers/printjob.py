@@ -277,9 +277,17 @@ def build_kanban_pdf(cards: list[dict]) -> bytes:
         h1 = 22.0
         w_line, w_item = W * 0.12, W * 0.58
         w_qty = W - w_line - w_item
-        d.cell(ML, y, w_line, h1, c.get("line", ""), size=15, bold=True)
-        d.cell(ML + w_line, y, w_item, h1, c.get("item", ""), size=27, bold=True)
-        d.cell(ML + w_line + w_item, y, w_qty, h1, _nf(c.get("qty")), size=27, bold=True)
+        # ★도번·수량 확대(2026-09-04 사용자 요청 — 레거시 실물이 이 비율이다).
+        #   화면(screens.prod.js)과 반드시 같은 크기를 유지할 것. 여기만 27pt 로 남으면
+        #   에이전트 설치 PC 의 인쇄물만 작게 나온다.
+        #   도번은 길이가 제각각(11~17자)이라 고정 pt 로 키우면 긴 도번이 셀을 넘친다.
+        #   굵은 글꼴 글자폭 ≈ 0.62em → 셀폭(w_item mm)에 맞는 pt 를 역산하고 24~37pt 로 제한.
+        _it = str(c.get("item", "") or "")
+        _sz = 48.0 if not _it else max(26.0, min(48.0, (w_item - 4) * MM / (len(_it) * 0.60)))
+        # ★라인 — 화면(screens.prod.js) 38px 과 같은 급. 굵게.
+        d.cell(ML, y, w_line, h1, c.get("line", ""), size=26, bold=True)
+        d.cell(ML + w_line, y, w_item, h1, _it, size=_sz, bold=True)
+        d.cell(ML + w_line + w_item, y, w_qty, h1, _nf(c.get("qty")), size=48, bold=True)
         y += h1
 
         # ── 2행: (빈칸) 박스종류 / 표준포장수 / 바코드 (h=11mm)
@@ -298,8 +306,12 @@ def build_kanban_pdf(cards: list[dict]) -> bytes:
         bar = str(c.get("barcode") or "")
         if bar:
             try:
-                d.image(x + 2, y + 1.0, w_bc - 4, h2 - 4.2, _c128_png(bar))
-                d.text(x, y + h2 - 3.2, bar, size=6, align="center", w=w_bc)
+                # ★바코드 + 번호 — 셀 11mm 안에 겹치지 않게 세로로 나눈다(2026-09-04).
+                #   종전 8.0mm 바코드 + y+h2-2.9 텍스트는 서로 겹쳤다(사용자 지적).
+                #   바코드 0.8~7.0mm(6.2mm) / 번호 baseline 9.6mm → 사이 2.6mm 여유.
+                #   번호는 7.5pt 굵게 — 바코드 줄무늬와 구분되게(사용자 요청).
+                d.image(x + 1.5, y + 0.8, w_bc - 3, 6.2, _c128_png(bar))
+                d.text(x, y + 9.6, bar, size=7.5, bold=True, align="center", w=w_bc)
             except Exception:
                 d.text(x, y + 4, bar, size=7, align="center", w=w_bc)
         y += h2
@@ -367,13 +379,16 @@ def build_label_pdf(j: dict) -> bytes:
     for L in labels:
         page = _newpage(doc)
         d = Pen(page, doc)
-        # 좌측 QR 17mm (화면 .lb .qr 와 동일)
+        # 좌측 QR 13mm (화면 .lb .qr 와 동일 — 2026-09-04 사용자 요청으로 17→13mm 축소).
+        #   ★화면 CSS 와 반드시 같은 값을 유지할 것. 여기(에이전트 PDF 경로)만 17mm 로 남으면
+        #     "화면에서는 줄었는데 실제 인쇄물은 그대로"가 된다(에이전트 설치 PC 는 이쪽으로 출력).
+        #   세로 중앙정렬 — 라벨 높이 20mm 기준 (20-13)/2 = 3.5mm.
         try:
-            d.image(1.2, 1.5, 17.0, 17.0, _qr_png(L.get("qr", ""), scale=6, border=1))
+            d.image(1.2, 3.5, 13.0, 13.0, _qr_png(L.get("qr", ""), scale=6, border=1))
         except Exception:
             d.text(1.2, 8, "QR?", size=5)
-        # 우측 텍스트 — 화면 .tx 의 5줄
-        tx, tw = 19.0, 20.0
+        # 우측 텍스트 — 화면 .tx 의 5줄. QR 이 4mm 줄어든 만큼 왼쪽으로 당기고 폭을 넓힌다.
+        tx, tw = 15.0, 24.0
         d.text(tx, 2.0, "PNC Industry", size=4.4, bold=True, align="center", w=tw)
         d.text(tx, 5.4, str(L.get("disp", "")), size=4.0, align="center", w=tw)
         d.text(tx, 8.8, f"{L.get('n','')} / {tot}", size=4.4, bold=True, align="center", w=tw)
@@ -405,13 +420,15 @@ def build_label_tspl(j: dict, darkness: int = 8, speed: int = 3) -> str:
             "DIRECTION 1",
             "CODEPAGE UTF-8",
             "CLS",
-            # 좌측 QR — cell width 4 ≈ 17mm 상당
-            f'QRCODE 10,12,M,4,A,0,"{L.get("qr","")}"',
-            f'TEXT 155,14,"2",0,1,1,"PNC Industry"',
-            f'TEXT 155,42,"1",0,1,1,"{L.get("disp","")}"',
-            f'TEXT 155,66,"2",0,1,1,"{L.get("n","")} / {tot}"',
-            f'TEXT 155,96,"3",0,1,1,"{item}"',
-            f'TEXT 155,130,"1",0,1,1,"{wi}"',
+            # 좌측 QR — cell width 3 ≈ 13mm 상당(2026-09-04 축소, 화면·PDF 와 동일 크기).
+            #   종전 4 ≈ 17mm. 세로 중앙정렬로 y=12→28dot(=3.5mm×8).
+            f'QRCODE 10,28,M,3,A,0,"{L.get("qr","")}"',
+            # 텍스트 시작 x — QR 이 32dot(4mm) 줄어든 만큼 왼쪽으로(155→120dot=15mm).
+            f'TEXT 120,14,"2",0,1,1,"PNC Industry"',
+            f'TEXT 120,42,"1",0,1,1,"{L.get("disp","")}"',
+            f'TEXT 120,66,"2",0,1,1,"{L.get("n","")} / {tot}"',
+            f'TEXT 120,96,"3",0,1,1,"{item}"',
+            f'TEXT 120,130,"1",0,1,1,"{wi}"',
             "PRINT 1,1",
         ]
     return "\r\n".join(out) + "\r\n"

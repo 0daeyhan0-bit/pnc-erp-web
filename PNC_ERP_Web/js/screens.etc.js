@@ -1575,23 +1575,32 @@ SCREEN.deliv420=(c)=>{
           return s==='·'?'':s;
         };
         const out=[];
+        /* ★한 칸만 고르면 그 값만 — 머리글을 붙이지 않는다(2026-09-04 사용자 요청).
+             도번 한 칸을 복사했는데 컬럼명까지 따라와 "도번\nACQ30605001" 이 됐다.
+             여러 칸(2칸 이상 또는 2행 이상)일 때만 머리글을 붙인다. */
+        const one=(R.c1===R.c2 && R.r1===R.r2);
         const th=[...tbl.querySelectorAll('thead tr:last-child th')];
-        if(th.length){const hs=[];
+        if(th.length && !one){const hs=[];
           for(let ci=R.c1;ci<=R.c2;ci++){const t=th[ci];
             hs.push(t?String(t.textContent||'').replace(/\s+/g,' ').trim():'');}
           out.push(hs.join('\t'));}
+        let nrow=0;
         for(const tr of tbl.querySelectorAll('tbody tr:not(.grandtot)')){
           if(tr.rowIndex<R.r1||tr.rowIndex>R.r2)continue;
           const tds=[...tr.cells],line=[];
           for(let ci=R.c1;ci<=R.c2;ci++) line.push(cellTxt(tds[ci]));
-          out.push(line.join('\t'));
+          out.push(line.join('\t')); nrow++;
         }
         const s=out.join('\n'); if(!s)return false;
         if(ev&&ev.clipboardData){ev.clipboardData.setData('text/plain',s);ev.preventDefault();}
         else if(navigator.clipboard){navigator.clipboard.writeText(s).catch(()=>{});}
+        /* ★안내는 **한 개만** 남긴다 — 종전엔 appendChild 라 복사할 때마다 쌓여
+             "복사됨(1행) 복사됨(1행) …" 이 줄줄이 붙었다(2026-09-04 사용자 지적). */
         const el=c.querySelector('#d4-selinfo');
-        if(el){const b=document.createElement('span');
-          b.textContent=` 복사됨(${out.length-1}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
+        if(el){el.querySelectorAll('.cp-ok').forEach(x=>{try{x.remove();}catch(e){}});
+          const b=document.createElement('span');
+          b.className='cp-ok';
+          b.textContent=` 복사됨(${nrow}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
           el.appendChild(b);setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
         return true;
       };
@@ -2407,7 +2416,9 @@ const _tabPart=(c)=>{
           if(ev.clipboardData){ev.clipboardData.setData('text/plain',s);ev.preventDefault();}
           else if(navigator.clipboard){navigator.clipboard.writeText(s).catch(()=>{});}
           const el=info();
-          if(el){const b=document.createElement('span');
+          if(el){el.querySelectorAll('.cp-ok').forEach(x=>{try{x.remove();}catch(e){}});
+            const b=document.createElement('span');
+            b.className='cp-ok';
             b.textContent=` 복사됨(${out.length-1}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
             el.appendChild(b);setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
         });}
@@ -2732,10 +2743,12 @@ SCREEN.partnerplan=(c)=>{
   const applyLocal=()=>{
     const a=(F.assy||'').trim().toUpperCase(), p=(F.part||'').trim().toUpperCase();
     let rs=all;
-    /* ★도번을 지정하면 세트제외 행은 감춘다 — 레거시 동일
-         "도번으로 조회할 경우 공용품때문에 세트입고제외품을 별도 표시하지 않는다"
-         (w_pr_outside_410 ue_retrieve). 공용품이라 도번별로 보면 중복으로 읽힌다. */
-    if(a) rs=rs.filter(r=>!r.setexc&&String(r.assy||'').toUpperCase().includes(a));
+    /* ★도번 필터는 단순 부분일치. 세트제외 행도 그 도번(=자재 자신)으로 찾으면 나와야 한다.
+         ⚠2026-09-04 — 종전엔 레거시 주석("도번 조회 시 세트입고제외품 미표시")을 여기에
+           적용해 !r.setexc 로 걸렀는데, MJU66478801 처럼 **자기 자신이 세트제외 행**인
+           도번을 검색하면 0건이 됐다(사용자 지적). 그 규칙은 서버가 세트제외 행을
+           '만들지 않는' 단계에서 이미 적용된다 — 화면 필터에서 또 걸 이유가 없다. */
+    if(a) rs=rs.filter(r=>String(r.assy||'').toUpperCase().includes(a));
     if(p) rs=rs.filter(r=>String(r.mats||r.part||'').toUpperCase().includes(p));
     data=Object.assign({},data,{rows:rs,cnt:rs.length});
     draw();};
@@ -2774,19 +2787,23 @@ SCREEN.partnerplan=(c)=>{
       return `<td class="num pn-c${on}" data-k="${esc(key)}" data-rem="${rem}" data-pl="${pl}" data-dn="${dn}"`
            + ` data-assy="${esc(r.assy||'')}" data-ymd="${d}"`
            + ` style="white-space:nowrap${bg?';background:'+bg:''}">${nf(dn)}/${nf(pl)}</td>`;};
-    const FIX=11;   // ★품목정보 컬럼 제거(2026-08-27 사용자 요청) — 12 → 11
+    const FIX=13;   // ★품목정보 제거로 12→11, 모델·입고구분 추가로 11→13(2026-09-04)
     const gcell=d=>frac?`<td class="num" style="white-space:nowrap"><b>${nf(gDone[d]||0)}/${nf(gDay[d]||0)}</b></td>`:`<td class="num"><b>${nf(gDay[d]||0)}</b></td>`;
-    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td>${dates.map(d=>gcell(d)).join('')}</tr>`:'';
+    const grandRow=rows.length?`<tr class="grandtot"><td class="center"><b>계</b></td><td class="center" style="color:#33507d">${nf(data.cnt||rows.length)}건</td><td colspan="6"></td><td class="num"><b>${nf(sMat)}</b></td><td class="num">-</td><td class="num"><b>${nf(sReq)}</b></td>${dates.map(d=>gcell(d)).join('')}<td colspan="2"></td></tr>`:'';   /* 모델·입고구분 */
     const rowTr=r=>`<tr>
         <td class="num" style="color:#8aa0bd">${r.seq}</td>
         <td><b>${esc(r.wcnm)}</b>${r.alloc_note?` <span class="bdg" style="font-size:9px;background:#eaf3ff;color:#1c47a0;border:1px solid #bcd;border-radius:6px;padding:0 4px" title="조달 프로파일 발주업체 배분 반영">${esc(r.alloc_note)}</span>`:''}</td><td class="center">${esc(r.line)}</td><td>${esc(r.workcenter)}</td>
         <td><b>${esc(r.assy)}</b></td>
-        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.jado)}">${r.matn>1?`<span class="bdg" style="font-size:9px;background:#f2f6fc;color:#41597e;border:1px solid #d3dceb;border-radius:6px;padding:0 4px;margin-right:3px" title="이 도번에 걸린 자재 ${r.matn}종${r.wocnt?` · 제번 ${r.wocnt}건 합산`:''} (수량은 도번 계획수량)">${r.matn}종</span>`:''}${esc(r.jado)}</div></td>
+        <td><div style="width:400px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center" title="${esc(r.jado)}">${r.matn>1?`<span class="bdg" style="font-size:9px;background:#f2f6fc;color:#41597e;border:1px solid #d3dceb;border-radius:6px;padding:0 4px;margin-right:3px" title="이 도번에 걸린 자재 ${r.matn}종${r.wocnt?` · 제번 ${r.wocnt}건 합산`:''} (수량은 도번 계획수량)">${r.matn}종</span>`:''}${esc(r.jado)}</div></td>
         <td class="center">${r.sagub?'<span class="bdg sagub" style="font-size:10px">사급</span>':''}</td>
         <td class="num">${nn(r.lot)}</td><td class="num"><b>${nn(r.matq)}</b></td>
         <td class="num" style="color:#1c7c3a" title="완료수량 = 출하실적 + 완제품재고 배분 + 세트/입고대기 재고배분 (레거시 SP+510창, 도번 공유풀). 협력사(외주) 지정 시 표시.">${nn(r.doneq)}</td>
         <td class="num">${nn(r.reqq)}</td>
-        ${dates.map(d=>dcell(r,d)).join('')}</tr>`;
+        ${dates.map(d=>dcell(r,d)).join('')}
+        <td class="lft" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${esc(r.model||'')}">${esc(r.model||'')}</td>
+        ${(r.in_gubun==='세트입고제외')
+            ? `<td style="color:#c0392b;font-weight:700">세트입고제외</td>`
+            : `<td>${esc(r.in_gubun||'세트입고')}</td>`}</tr>`;
     const bodyHTML=()=>loading?spinRow(FIX+dates.length):(rowsCur.length?(rowsCur.map(rowTr).join('')+grandRow):`<tr><td colspan="${FIX+dates.length}" class="empty">조회 결과 없음 — 자도번작업처/기준일자/기간을 확인하세요.</td></tr>`);
     // ★<style> 은 반드시 .pn-root 안에 둔다 — 탭 컨테이너(#pg-*, height:100%)의 형제로 두면
     //   블록 박스 하나가 더 쌓여 .pn-root 의 height:100% 와 합쳐져 넘치고, 그만큼 아래가 빈다.
@@ -2812,7 +2829,7 @@ SCREEN.partnerplan=(c)=>{
       /* ★nth-child(12) 제거(2026-08-31) — 품목정보 컬럼을 뺀 뒤(FIX 12→11) 12번째가
          '첫 일자칸(31월)'이 되어 그 칸만 좌측 정렬로 남아 있었다. */
       table.tbl.pn-grid th, table.tbl.pn-grid td{text-align:center}
-      table.tbl.pn-grid th:nth-child(6),  table.tbl.pn-grid tbody tr:not(.grandtot) td:nth-child(6){text-align:left}
+      /* ★자도번LIST(6열)도 가운데 정렬(2026-09-04 사용자 요청) — 종전 좌측 유지 규칙 제거 */
       table.tbl.pn-grid .num{font-variant-numeric:tabular-nums}
       /* ★일자셀 드래그 선택 — 키팅과 동일한 파스텔 표시(배경색은 살리고 막만 덧씌움) */
       table.tbl.pn-grid td.pn-c{cursor:cell}
@@ -2829,7 +2846,7 @@ SCREEN.partnerplan=(c)=>{
     </style>
      <div class="pn-head" style="flex:0 0 auto">
      <div class="page-title" style="margin-bottom:4px">📋 협력사계획현황 <span style="font-size:12px;color:var(--muted);font-weight:400">4주간 계획수량 — 도번·자도번LIST·일자별 (당김 반영)</span>
-       <span style="font-size:11px;font-weight:400;margin-left:8px" title="${F.src==='legacy'?'레거시 라이브 PR_T_PLAN_PART_MAT 직독. 당김=PR_M_LINE_NO.CUST_MAINT_DAY(회사근무일).':'웹 편성 결과만 사용(라이브 미참조): 계획업로드→④파트별→⑤자재소요. 기간=소요일자(part_plan_ymd·당김반영), 수량=도번 계획수량(plan_item_dtl). 그레인=레거시 w_pr_outside_410 동일(도번 1행·제번 합산).'}">${F.src==='legacy'?'🔴 <b>레거시 라이브</b>':'🟢 <b>우리편성(nx)</b>'}</span></div>
+       <span style="font-size:11px;font-weight:400;margin-left:8px" title="웹 편성 결과만 사용(라이브 미참조): 계획업로드→④파트별→⑤자재소요. 기간=소요일자(part_plan_ymd·당김반영), 수량=도번 계획수량(plan_item_dtl). 그레인=레거시 w_pr_outside_410 동일(도번 1행·제번 합산)."><b>우리편성(nx)</b></span></div>
      <!-- ★조건문 2줄 배치(2026-08-27 사용자 요청 — 레거시 w_pr_outside_410 동일).
             1줄 = 소스 · 기준일자 · 기간   /   2줄 = 도번 · 자도번 · 자도번작업처 · 라인 + 조회
             레거시는 라벨을 회색칸에 넣어 폭을 맞춘다 → .tl 을 고정폭으로 정렬. -->
@@ -2840,10 +2857,8 @@ SCREEN.partnerplan=(c)=>{
         white-space:nowrap;min-width:74px}
      </style>
      <div class="toolbar pn-r" style="margin-top:2px">
-       <label class="tl">소스</label>
-       <select class="inp" id="pn-src" style="width:auto;min-width:158px">
-         <option value="nx" ${F.src==='nx'?'selected':''}>우리편성 (nx)</option>
-         <option value="legacy" ${F.src==='legacy'?'selected':''}>레거시 라이브 (당김반영)</option></select>
+       <!-- ★소스 선택 제거(2026-09-04 사용자 확정) — 우리편성(nx) 단일.
+            레거시 라이브 갈래는 대조용이었고 이제 쓰지 않는다. -->
        <label class="tl">기준일자</label>${legacyDateHTML('pn-base',F.from)}
        <label class="tl">기간</label><input class="inp" id="pn-days" value="${esc(F.days)}" style="width:52px;min-width:52px;text-align:center" title="조회 기간(일). 레거시 4주간 화면 기본=31일"><span style="font-size:12px;color:#5a6b80">일</span>
        <div class="spacer"></div><span class="rowcount">${nf(data.cnt)}건 · 자재수량합 <b>${nf(data.sum_qty)}</b> · 일자 ${dates.length}</span>
@@ -2876,7 +2891,8 @@ SCREEN.partnerplan=(c)=>{
       <table class="tbl pn-grid" style="font-size:11px;white-space:nowrap"><thead><tr>
        <th class="num">SEQ</th><th>자도번작업처</th><th>라인</th><th>작업처</th><th>도번</th><th style="min-width:400px;width:400px">자도번LIST</th><th class="center">사급</th>
        <th class="num">LOT수량</th><th class="num">자재수량</th><th class="num">완료수량</th><th class="num">요청수량</th>
-       ${dates.map(d=>`<th class="center"${isWkend(d)?' style="color:#c0392b"':''}>${esc(wlab(d))}</th>`).join('')}</tr></thead>
+       ${dates.map(d=>`<th class="center"${isWkend(d)?' style="color:#c0392b"':''}>${esc(wlab(d))}</th>`).join('')}
+       <th style="min-width:150px">모델</th><th style="width:104px">입고구분</th></tr></thead>
       <tbody>${bodyHTML()}</tbody></table></div>
     </div>`;
     const g=id=>c.querySelector(id);
@@ -2893,7 +2909,8 @@ SCREEN.partnerplan=(c)=>{
       if(!rowsCur.length){ alert('조회 결과가 없습니다.'); return; }
       const cols=[{h:'SEQ'},{h:'자도번작업처'},{h:'라인'},{h:'작업처'},{h:'도번'},{h:'자도번LIST'},
                   {h:'사급'},{h:'LOT수량'},{h:'자재수량'},{h:'완료수량'},{h:'요청수량'}]
-        .concat(dates.map(d=>({h:wlab(d), bg:isWkend(d)?'#FDE9E9':undefined})));   // 주말 헤더 옅은 적색
+        .concat(dates.map(d=>({h:wlab(d), bg:isWkend(d)?'#FDE9E9':undefined})))   // 주말 헤더 옅은 적색
+        .concat([{h:'모델'},{h:'입고구분'}]);
       const xr=rowsCur.map((r,i)=>{
         const base=[{v:i+1,al:'center'},{v:r.wcnm||'',al:'center'},{v:r.line||'',al:'center'},
           {v:r.workcenter||'',al:'center'},{v:r.assy||'',al:'center'},
@@ -2911,11 +2928,16 @@ SCREEN.partnerplan=(c)=>{
           base.push(frac?{v:`${nf(dn)}/${nf(pl)}`,al:'center',bg,fg:_xfg(bg)}
                         :{v:pl,al:'center',bg,fg:_xfg(bg)});
         });
+        base.push({v:r.model||'',al:'left'});
+        base.push(r.in_gubun==='세트입고제외'
+                  ? {v:'세트입고제외',al:'center',fg:'#c0392b',b:1}
+                  : {v:r.in_gubun||'세트입고',al:'center'});
         return base;
       });
       // 합계행 — 화면 grandtot 과 같은 값
       const foot=[['계',`${nf(data.cnt||rowsCur.length)}건`,'','','','','','',nf(sMat),'-',nf(sReq)]
-        .concat(dates.map(d=>frac?`${nf(gDone[d]||0)}/${nf(gDay[d]||0)}`:nf(gDay[d]||0)))];
+        .concat(dates.map(d=>frac?`${nf(gDone[d]||0)}/${nf(gDay[d]||0)}`:nf(gDay[d]||0)))
+        .concat(['',''])];
       const T2=new Date(), p2=n=>String(n).padStart(2,'0');
       const stamp=`${String(T2.getFullYear()).slice(2)}${p2(T2.getMonth()+1)}${p2(T2.getDate())}`
         +`${p2(T2.getHours())}${p2(T2.getMinutes())}${p2(T2.getSeconds())}`;
@@ -3004,14 +3026,18 @@ SCREEN.partnerplan=(c)=>{
         const tbl=gw.querySelector('table'); if(!tbl)return false;
         const txt=v=>String(v==null?'':v).replace(/\s+/g,' ').trim();
         const out=[];
-        // 헤더행 — 선택된 열 범위만
+        /* ★한 칸만 고르면 그 값만 — 머리글을 붙이지 않는다(2026-09-04 사용자 요청).
+             도번 한 칸을 복사했는데 컬럼명("도번")까지 따라왔다. */
+        const one=(R.c1===R.c2 && R.r1===R.r2);
+        // 헤더행 — 선택된 열 범위만 (여러 칸일 때만)
         const th=[...tbl.querySelectorAll('thead tr:last-child th')];
-        if(th.length){
+        if(th.length && !one){
           const hs=[];
           for(let ci=R.c1;ci<=R.c2;ci++){ const t=th[ci]; hs.push(t?txt(t.textContent):''); }
           out.push(hs.join('\t'));
         }
         // 데이터행
+        let nrow=0;
         const trs=[...tbl.querySelectorAll('tbody tr:not(.grandtot)')];
         for(const tr of trs){
           if(tr.rowIndex<R.r1||tr.rowIndex>R.r2)continue;
@@ -3021,15 +3047,18 @@ SCREEN.partnerplan=(c)=>{
             // '·'(빈칸 표시)는 복사할 때 빈 값으로 — 붙여넣은 표에 점이 남지 않게
             const s=td?txt(td.textContent):''; line.push(s==='·'?'':s);
           }
-          out.push(line.join('\t'));
+          out.push(line.join('\t')); nrow++;
         }
         const s=out.join('\n');
         if(!s)return false;
         if(ev&&ev.clipboardData){ ev.clipboardData.setData('text/plain',s); ev.preventDefault(); }
         else if(navigator.clipboard){ navigator.clipboard.writeText(s).catch(()=>{}); }
+        /* 안내는 한 개만 — 종전엔 쌓여서 "복사됨(1행) 복사됨(1행) …" 이 됐다. */
         const el=c.querySelector('#pn-selinfo');
-        if(el){const b=document.createElement('span');
-          b.textContent=` 복사됨(${out.length-1}행)`; b.style.cssText='color:#1c7c3a;font-weight:700';
+        if(el){el.querySelectorAll('.cp-ok').forEach(x=>{try{x.remove();}catch(e){}});
+          const b=document.createElement('span');
+          b.className='cp-ok';
+          b.textContent=` 복사됨(${nrow}행)`; b.style.cssText='color:#1c7c3a;font-weight:700';
           el.appendChild(b); setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
         return true;
       };
@@ -3068,8 +3097,7 @@ SCREEN.partnerplan=(c)=>{
       if(w&&wcCode)wcCode.value=w.cc;};
     const wcFind=g('#pn-wcfind');
     if(wcFind)wcFind.onclick=()=>{const el=g('#pn-wc');if(el){el.focus();el.select();}};
-    // 소스 변경 → 작업처 목록을 다시 받는다. (협력사는 loadWc 안의 soloFix 가 자기 업체를 도로 넣는다)
-    const ssel=g('#pn-src');if(ssel)ssel.onchange=e=>{F.src=e.target.value;F.wc='';loadWc().then(draw);};
+    /* 소스 선택은 제거됐다(우리편성 nx 고정) — 핸들러도 남기지 않는다. */
     // 레거시 기준일자 위젯: 전일/익일/달력 → 자동 재조회
     bindLegacyDate(c,'pn-base',()=>F.from,(v)=>{F.from=v;syncInputs();load();});
     g('#pn-days').onchange=()=>{syncInputs();load();};
@@ -3605,7 +3633,9 @@ SCREEN.delivedit=(c)=>{
           if(ev.clipboardData){ev.clipboardData.setData('text/plain',s);ev.preventDefault();}
           else if(navigator.clipboard){navigator.clipboard.writeText(s).catch(()=>{});}
           const el=info();
-          if(el){const b=document.createElement('span');
+          if(el){el.querySelectorAll('.cp-ok').forEach(x=>{try{x.remove();}catch(e){}});
+            const b=document.createElement('span');
+            b.className='cp-ok';
             b.textContent=` 복사됨(${out.length-1}행)`;b.style.cssText='color:#1c7c3a;font-weight:700';
             el.appendChild(b);setTimeout(()=>{try{b.remove();}catch(e){}},1800);}
         });}
@@ -4011,6 +4041,14 @@ SCREEN.setinstat=(c)=>{
     });
     s2ApplyW();
   };
+  /* ⚠좌측 열 틀고정 — 넣었다가 제거(2026-09-04 사용자 판단).
+       position:sticky 는 가로스크롤마다 (보이는 행수 × 고정열수)만큼 위치를
+       다시 계산한다. 이 표는 1,043행 × 33컬럼이라 스크롤이 심하게 버벅였다.
+       인라인 → CSS 규칙, contain:paint, content-visibility 유지까지 시도했지만
+       체감이 나아지지 않았다. 행 수를 줄이는 쪽(집계 모드 기본화·기간 축소)이
+       먼저이고, 그 뒤에 다시 판단한다.
+       ※core.js 의 freezeCols 공통함수는 남겨둔다 — 행이 적은 화면에서는 쓸 만하다. */
+
   const s2Wire=()=>{
     s2ApplyHide();       // ★숨김이 먼저 — 원래 인덱스 기준이라 재배치 전에 걸어야 한다
     s2ApplyOrder();      // ★그 다음 순서 재배치(셀을 옮기므로 인덱스가 바뀐다)
@@ -4050,6 +4088,9 @@ SCREEN.setinstat=(c)=>{
     wrap.oncontextmenu=ev=>{
       ev.preventDefault();
       const old=document.querySelector('.pp-ctx'); if(old)old.remove();
+      /* ⚠틀고정은 넣었다가 뺐다(2026-09-04). position:sticky 가 가로스크롤마다
+           (행수 × 고정열수)만큼 위치를 다시 계산해 1,000행에서 심하게 버벅였다.
+           행 수를 줄이는 쪽(집계 모드·기간 축소)이 먼저다. 재검토 후 다시 판단. */
       const m=document.createElement('div'); m.className='pp-ctx';
       m.innerHTML='<div data-a="col">항목보기</div><div data-a="copy">선택영역 복사</div><div data-a="all">전체 복사</div>';
       m.style.left=Math.min(ev.clientX,innerWidth-170)+'px';
@@ -4277,34 +4318,91 @@ SCREEN.setinstat=(c)=>{
       (st.axis||[]).forEach(a=>{T.day[a.ymd]+=(r.day[a.ymd]||0);});
       T.lot+=+r.lot||0; T.mat+=+r.mat_qty||0; T.prod+=+r.prod||0; T.sale+=+r.sale||0;
     });
-    st.tot=T; st.open={};
+    st.tot=T; st.open={}; st._sorted=null; st._fillKey=null;   // 행이 갈렸으니 정렬·충당 캐시 무효화
     draw();
     msg(num(st.rows.length)+'건'+((fw||fd||fj)?` / 전체 ${num((st.all||[]).length)}`:''));
   };
 
+  /* ★헤더 더블클릭 정렬(2026-09-04 사용자 요청) — CLAUDE.md §3.
+       이 화면은 (작업처+라인+도번) 그룹에 소계행이 붙으므로 **그룹 대표값**으로 정렬한다.
+       행 단위로 흩으면 소계가 쪼개진다(2026-09-03 실측: 그룹 308회 분절). */
+  const sArrow=(k)=>(st.sortKey===k?(st.sortAsc?' <span style="color:#1c47a0">▲</span>':' <span style="color:#1c47a0">▼</span>'):'');
+  const sortVal=(r,k)=>{
+    if(!k) return '';
+    if(k.slice(0,2)==='d:') return +((r.day||{})[k.slice(2)]||0);
+    const v=r[k];
+    if(v==null) return '';
+    return (typeof v==='number')?v:String(v);
+  };
+  /* 헤더 더블클릭 → 그 컬럼으로 정렬(재클릭 시 오름/내림 토글).
+     리사이저 dblclick(너비초기화)과 겹치지 않게 stopPropagation. */
+  const bindHeadSort=(thead)=>{
+    thead.querySelectorAll('th[data-sk]').forEach(th=>{
+      th.style.cursor='pointer';
+      if(!th.title) th.title='더블클릭하여 정렬';
+      th.ondblclick=(e)=>{
+        e.stopPropagation();
+        const k=th.dataset.sk;
+        if(st.sortKey===k) st.sortAsc=!st.sortAsc;
+        else { st.sortKey=k; st.sortAsc=true; }
+        draw();
+      };
+    });
+  };
+  const applySort=()=>{
+    if(!st.sortKey) return;
+    const k=st.sortKey, sgn=st.sortAsc?1:-1;
+    /* 그룹 대표값 = 그 그룹에서 (숫자면 합, 문자면 최소값) */
+    const gk=r=>(r.jcust_nm||'')+''+(r.line||'')+''+(r.doban||'');
+    const rep={};
+    st.rows.forEach(r=>{
+      const g=gk(r), v=sortVal(r,k);
+      if(rep[g]===undefined) rep[g]=v;
+      else if(typeof v==='number') rep[g]=(+rep[g]||0)+v;
+      else if(String(v)<String(rep[g])) rep[g]=v;
+    });
+    const cmp=(a,b)=>{
+      if(typeof a==='number'&&typeof b==='number') return a-b;
+      return String(a).localeCompare(String(b),'ko');
+    };
+    st.rows.sort((x,y)=>{
+      const gx=gk(x), gy=gk(y);
+      if(gx!==gy){ const d=cmp(rep[gx],rep[gy]); if(d) return d*sgn; return gx<gy?-1:1; }
+      const d=cmp(sortVal(x,k),sortVal(y,k)); if(d) return d*sgn;
+      return String(x.wo||'')<String(y.wo||'')?-1:1;
+    });
+  };
+
   const draw=()=>{
+    /* ★정렬은 키가 바뀌었을 때만 — 매 draw 마다 1,000행을 다시 정렬하면 버벅인다.
+         st._sorted 에 마지막 적용 상태를 남겨 중복 정렬을 건너뛴다.
+         (조회로 st.rows 가 갈리면 load 에서 _sorted 를 비운다) */
+    const _sk=(st.sortKey||'')+'|'+(st.sortAsc?'1':'0');
+    if(st.sortKey && st._sorted!==_sk){ applySort(); st._sorted=_sk; }
     const A=st.axis||[];
     /* ★토·일 헤더는 빨간 글자(2026-09-03, 파트별 생산계획 410 과 동일 표기).
          근무/휴무 회색만으로는 주말이 한눈에 안 들어온다는 지적. */
     const isWk=y=>{if(!y||(''+y).length<6)return false;
       const s=''+y, d=new Date(2000+ +s.slice(0,2),+s.slice(2,4)-1,+s.slice(4,6)).getDay();
       return d===0||d===6;};
-    const dayTh=A.map(a=>`<th style="width:66px${isWk(a.ymd)?';color:#c0392b':''}" class="${a.work?'day':'day0'}">${dlabel(a.ymd)}</th>`).join('');
+    const dayTh=A.map(a=>`<th data-sk="d:${a.ymd}" style="width:66px${isWk(a.ymd)?';color:#c0392b':''}" class="${a.work?'day':'day0'}">${dlabel(a.ymd)}${sArrow('d:'+a.ymd)}</th>`).join('');
+    /* ★헤더 더블클릭 = 그 컬럼 정렬(재클릭 시 오름/내림 토글, ▲/▼ 표시) — CLAUDE.md §3.
+         일자칸은 data-sk="d:<ymd>" 로 그날 수량을 정렬키로 쓴다. */
     $('#s2-h').innerHTML=`<tr>
-      <th style="width:40px">SEQ</th><th style="width:110px">자도번작업처</th>
-      <th style="width:60px">라인</th><th style="width:70px">LG INPUT</th>
-      <th style="width:100px">제번</th><th style="width:110px">작업처</th>
-      <th style="width:130px">도번</th><th style="width:240px">자도번LIST</th>
+      <th style="width:40px">SEQ</th><th data-sk="jcust_nm" style="width:110px">자도번작업처${sArrow('jcust_nm')}</th>
+      <th data-sk="line" style="width:60px">라인${sArrow('line')}</th><th data-sk="hm" style="width:70px">LG INPUT${sArrow('hm')}</th>
+      <th data-sk="wo" style="width:100px">제번${sArrow('wo')}</th><th data-sk="gpc_nm" style="width:110px">작업처${sArrow('gpc_nm')}</th>
+      <th data-sk="doban" style="width:130px">도번${sArrow('doban')}</th><th data-sk="jadolist" style="width:240px">자도번LIST${sArrow('jadolist')}</th>
       <th style="width:60px">사급</th><th style="width:80px">제번정보</th>
-      <th style="width:80px">품목정보</th><th style="width:70px">당김,변경</th>
+      <th style="width:80px">품목정보</th><th data-sk="pull" style="width:70px">당김,변경${sArrow('pull')}</th>
       <th style="width:70px">비고1</th>
       ${dayTh}
-      <th style="width:70px">LOT수량</th><th style="width:70px">자재수량</th>
-      <th style="width:70px">자재입고</th><th style="width:70px">요청수량</th>
-      <th style="width:70px">생산실적</th><th style="width:70px">출하실적</th>
-      <th style="width:78px">세트재고</th><th style="width:70px">단품재고</th>
-      <th style="width:70px">ASSY재고</th><th style="width:150px">모델</th>
-      <th style="width:104px">입고구분</th></tr>`;
+      <th data-sk="lot" style="width:70px">LOT수량${sArrow('lot')}</th><th data-sk="mat_qty" style="width:70px">자재수량${sArrow('mat_qty')}</th>
+      <th data-sk="mat_in" style="width:70px">자재입고${sArrow('mat_in')}</th><th data-sk="req" style="width:70px">요청수량${sArrow('req')}</th>
+      <th data-sk="prod" style="width:70px">생산실적${sArrow('prod')}</th><th data-sk="sale" style="width:70px">출하실적${sArrow('sale')}</th>
+      <th data-sk="set_stock" style="width:78px">세트재고${sArrow('set_stock')}</th><th data-sk="dan_stock" style="width:70px">단품재고${sArrow('dan_stock')}</th>
+      <th data-sk="assy_stock" style="width:70px">ASSY재고${sArrow('assy_stock')}</th><th data-sk="model" style="width:150px">모델${sArrow('model')}</th>
+      <th data-sk="in_gubun" style="width:104px">입고구분${sArrow('in_gubun')}</th></tr>`;
 
     if(!st.rows.length){
       $('#s2-b').innerHTML=`<tr><td colspan="${25+A.length}" style="padding:24px;color:#8aa0bd">
@@ -4338,7 +4436,13 @@ SCREEN.setinstat=(c)=>{
          ⑤ 생산준비 ready    전량 & 기존 fin='1' → ★진초록(fin 1→2 승격)  ※130 전용
        ⛔gl_color_mat_part(진회색, 010 의 '자재 일부충당' 색)은 130 소스에 0회 — 쓰지 않는다.
        셀 텍스트 = (input_qty+finish_qty)/plan_qty, 충당 0 이면 계획수량만. */
+    /* ★결과 캐시(2026-09-04) — 충당계산은 전 행×전 일자를 훑는다(1,043×6=6천회).
+         행 집합·정렬이 그대로면 결과도 같으므로 다시 돌 이유가 없다.
+         펼침/접힘·틀고정으로 draw 가 불릴 때마다 재계산하던 것이 버벅임 원인 중 하나. */
     const calcFill=()=>{
+      const _ck=(st.rows.length)+'|'+(st._sorted||'')+'|'+((st.axis||[]).length)
+              +'|'+(st.rows.length?(st.rows[0].wo+st.rows[0].doban):'');
+      if(st._fillKey===_ck && st._fill) return st._fill;
       const P={sale:{},assy:{},set:{},mat:{},ready:{}};
       st.rows.forEach(x=>{
         const ks=x.wo+'|'+x.doban;
@@ -4371,8 +4475,15 @@ SCREEN.setinstat=(c)=>{
             if(P.set[kd]>=left){P.set[kd]-=left;done+=left;left=0;cls='c-mat';fin='2';}
             else{done+=P.set[kd];left-=P.set[kd];P.set[kd]=0;fin='1';}
           }
-          // ④ 자재재고 — 이 화면은 세트재고 기준이라 단품재고 0 고정(대표 확정).
-          //    레거시 130 의 '세트입고제외품 자재재고' 단계는 제외조건 확정 후 붙인다.
+          /* ④ 자재(단품)재고 — ★세트입고제외품 충당(2026-09-04 활성화).
+               세트제외품은 세트재고가 0 이고 단품재고로 움직인다(사용자 확정).
+               종전엔 '제외조건 확정 후 붙인다'며 막아둬, 단품재고가 187 있어도
+               일자셀이 안 채워졌다(사용자 지적).
+               규칙은 ③ 세트재고와 같다 — 전량이면 밝은회색(fin 2), 일부면 색 없음(fin 1). */
+          if(left>0 && (P.mat[kd]||0)>0){
+            if(P.mat[kd]>=left){P.mat[kd]-=left;done+=left;left=0;cls='c-mat';fin='2';}
+            else{done+=P.mat[kd];left-=P.mat[kd];P.mat[kd]=0;fin='1';}
+          }
           // ⑤ ★생산준비 — fin='1'(일부충당) 상태에서 그날 계획을 전량 커버하면 진초록
           if(fin==='1' && (P.ready[kd]||0)>=need){
             P.ready[kd]-=need; cls='c-ready'; fin='2';
@@ -4380,6 +4491,7 @@ SCREEN.setinstat=(c)=>{
           fill[key]={done,need,cls};
         });
       });
+      st._fillKey=_ck; st._fill=fill;
       return fill;
     };
     // 소계 색 등급(낮을수록 상위) — 살구 > 노랑 > 진초록 > 밝은회색
@@ -4494,6 +4606,12 @@ SCREEN.setinstat=(c)=>{
       <td colspan="2"></td>
       <td class="num">${num(T.prod||0)}</td><td class="num">${num(T.sale||0)}</td>
       <td colspan="5"></td></tr>`;   // 세트·단품·ASSY·모델·입고구분
+
+    /* ★헤더 더블클릭 정렬(2026-09-04 사용자 요청). */
+    try{
+      const _th=c.querySelector('#s2-h');
+      if(_th) bindHeadSort(_th);
+    }catch(_){}
 
     /* ★펼침/접힘 = 더블클릭(2026-09-03, 410·키팅과 동일).
          한 번 클릭이면 그 행을 복사용으로 긁거나 스치기만 해도 접혔다 펴져 화면이 튄다. */

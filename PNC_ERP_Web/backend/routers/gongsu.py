@@ -194,3 +194,146 @@ def gongsu_delete(payload: dict = Body(...)):
         return {"ok": True, "deleted": cur.rowcount}
     finally:
         nx.close()
+
+
+# ============ 지원공수등록 (레거시 w_pr_support_time_010) ============
+# ★"어디 파트 사람이 어디 라인으로 지원 갔다" 를 기록한다(2026-09-04 신설).
+#   레거시 실측(HR_M_WORK_INFO, WORK_YMD=260902, SUPPORT_SHEET_NO=6841)에서 확인한 구조 =
+#   지원 1건이 **두 행**으로 저장되고, 같은 SUPPORT_SHEET_NO 로 묶인다.
+#
+#     ① 받은파트 행 : dept_code=지원파트(S4)  1430~1700  work_hr=+2.50  support_line=원소속(RAC)
+#     ② 원소속 행   : dept_code=원소속(RAC)   0000~0000  work_hr=0
+#                     support_line=지원파트(S4) support_start/end=1430/1700 support_hr=2.50
+#
+#   의미 — 받은 파트는 그만큼 **공수가 올라가고**(①), 원소속은 그 시간만큼 자기 근무에서
+#   **빠져나간 것으로 기록된다**(②, 조회화면이 이 support_hr 를 차감으로 표시).
+#   휴게(rest)도 양쪽에 같은 값이 붙는다(실측 0.16).
+def _sup_rest(hr):
+    """지원 구간의 휴게공수 — 레거시 실측 2.50h → 0.16. 시간비례(2.50*0.064)로 재현한다.
+       ※정확한 레거시 산식이 확인되면 여기만 고치면 된다(호출측 불변)."""
+    try: h = float(hr or 0)
+    except Exception: h = 0.0
+    return round(h * 0.064, 2) if h > 0 else 0.0
+
+
+@router.get("/api/gongsu/worker_parts")
+def gongsu_worker_parts(worker: str = Query("", description="작업자명(부분일치)")):
+    """지원자 → 소속파트 조회. 레거시는 지원자를 넣으면 파트가 자동으로 채워진다.
+       ★한 사람이 여러 파트에 등록될 수 있어(실측 19명) 목록으로 준다 — 화면은 첫 값을
+         자동선택하되 드롭다운으로 바꿀 수 있게 한다(레거시 파트칸이 드롭다운인 이유)."""
+    w = (worker or "").strip()
+    cn = _conn(); cur = cn.cursor()
+    try:
+        sql = """SELECT wk.WORKER_CODE, wk.GAGONG_PROC_CODE, ISNULL(g.GAGONG_PROC_DESC,''),
+                        ISNULL(wk.WORK_FLAG,'')
+                   FROM PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG_WORKER wk
+                   LEFT JOIN PARTNER_ERP_TEST3.nx.PR_M_PROC_GAGONG g
+                          ON g.GAGONG_PROC_CODE=wk.GAGONG_PROC_CODE"""
+        p = []
+        if w:
+            sql += " WHERE wk.WORKER_CODE LIKE ?"; p.append("%" + w + "%")
+        sql += " ORDER BY wk.WORKER_CODE, wk.WORK_FLAG DESC, wk.GAGONG_PROC_CODE"
+        cur.execute(sql, *p)
+        rows = [{"worker": str(r[0]).strip(), "part": str(r[1]).strip(),
+                 "part_nm": str(r[2]).strip(), "real": str(r[3]).strip() == '1'}
+                for r in cur.fetchall()]
+        return {"rows": rows, "cnt": len(rows)}
+    finally:
+        cn.close()
+
+
+@router.post("/api/gongsu/support_save")
+def gongsu_support_save(payload: dict = Body(...)):
+    """지원공수 저장 — 행마다 2행(받은파트 +공수 / 원소속 지원기록)을 같은 sheet_no 로 INSERT.
+       body {work_ymd, support_part, rows:[{part, worker, start, end, remarks}], uuser}
+         · support_part = 지원받는 파트(팝업 상단, 전 행 공통)
+         · part         = 지원자의 원소속 파트(행별)
+       ★쓰기는 nx 만(§1-1). 라이브 HR_M_WORK_INFO 는 건드리지 않는다."""
+    ymd = _d6(str(payload.get("work_ymd", "")))
+    sup_part = str(payload.get("support_part", "")).strip()[:20]
+    uuser = str(payload.get("uuser") or "웹사용자")[:40]
+    rows = payload.get("rows") or []
+    if not ymd: return {"ok": False, "detail": "기준일자가 없습니다."}
+    if not sup_part: return {"ok": False, "detail": "지원파트를 선택하세요."}
+
+    def _hm(v):
+        s = "".join(ch for ch in str(v or "") if ch.isdigit())
+        return s.zfill(4)[:4] if s else ""
+
+    def _hr(st, et):
+        """시작~종료 → 공수(h). 점심 12:00~13:00 · 저녁 17:00~17:30 공제, 15분 단위.
+           프론트 calcHr 과 같은 규칙(화면 표시와 저장값이 어긋나지 않게)."""
+        a, b = _hm(st), _hm(et)
+        if len(a) < 4 or len(b) < 4: return 0.0
+        am = int(a[:2]) * 60 + int(a[2:]); bm = int(b[:2]) * 60 + int(b[2:])
+        if bm <= am: return 0.0
+        mi = bm - am
+        for p, q in ((12 * 60, 13 * 60), (17 * 60, 17 * 60 + 30)):
+            mi -= max(0, min(bm, q) - max(am, p))
+        return max(0.0, round(mi / 15.0) / 4.0)
+
+    valid = []
+    for r in rows:
+        wkr = str(r.get("worker", "")).strip()[:40]
+        org = str(r.get("part", "")).strip()[:20]
+        st, et = _hm(r.get("start")), _hm(r.get("end"))
+        if not wkr or not org or not st or not et: continue
+        hr = _hr(st, et)
+        if hr <= 0: continue
+        valid.append({"worker": wkr, "org": org, "st": st, "et": et, "hr": hr,
+                      "rest": _sup_rest(hr), "remarks": str(r.get("remarks", "")).strip()[:200]})
+    if not valid: return {"ok": False, "detail": "저장할 행이 없습니다(지원자·파트·시간 확인)."}
+
+    nx = _nx(); cur = nx.cursor()
+    try:
+        # sheet_no 채번 — nx 안에서만 증가(라이브와 번호가 겹쳐도 무방: 조인하지 않는다)
+        cur.execute("SELECT ISNULL(MAX(support_sheet_no),0) FROM nx.hr_work_info")
+        sheet = int(cur.fetchone()[0] or 0) + 1
+        ins = 0
+        for v in valid:
+            # ① 받은파트 행 — 그 파트의 공수가 올라간다
+            cur.execute("""INSERT INTO nx.hr_work_info
+                (gubun,work_ymd,dept_code,user_id,line,start_time,end_time,work_hr,
+                 support_line,support_start,support_end,support_hr,hr_check,remarks,upd_user,
+                 support_sheet_no,org_work_code,rest_work_hr,support_rest_hr)
+                VALUES('지원',?,?,?,?,?,?,?,?,'','',0,'0',?,?,?,?,?,0)""",
+                ymd, sup_part, v["worker"], sup_part, v["st"], v["et"], v["hr"],
+                v["org"], v["remarks"], uuser, sheet, v["org"], v["rest"])
+            # ② 원소속 행 — 지원 나간 만큼이 여기 기록된다(조회화면이 차감으로 표시)
+            cur.execute("""INSERT INTO nx.hr_work_info
+                (gubun,work_ymd,dept_code,user_id,line,start_time,end_time,work_hr,
+                 support_line,support_start,support_end,support_hr,hr_check,remarks,upd_user,
+                 support_sheet_no,org_work_code,rest_work_hr,support_rest_hr)
+                VALUES('지원',?,?,?,?,'0000','0000',0,?,?,?,?,'0',?,?,?,?,0,?)""",
+                ymd, v["org"], v["worker"], v["org"],
+                sup_part, v["st"], v["et"], v["hr"], v["remarks"], uuser, sheet, v["org"], v["rest"])
+            ins += 2
+        nx.commit()
+        return {"ok": True, "ins": ins, "pairs": len(valid), "sheet_no": sheet}
+    except Exception as e:
+        try: nx.rollback()
+        except Exception: pass
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        nx.close()
+
+
+@router.post("/api/gongsu/support_delete")
+def gongsu_support_delete(payload: dict = Body(...)):
+    """지원 1건 삭제 — sheet_no 로 **짝 2행을 함께** 지운다.
+       ★한쪽만 지우면 받은파트 공수와 원소속 차감이 어긋난 채 남는다."""
+    sheet = payload.get("sheet_no")
+    try: sheet = int(sheet)
+    except Exception: return {"ok": False, "detail": "sheet_no 가 필요합니다."}
+    nx = _nx(); cur = nx.cursor()
+    try:
+        cur.execute("DELETE FROM nx.hr_work_info WHERE support_sheet_no=?", sheet)
+        n = cur.rowcount
+        nx.commit()
+        return {"ok": True, "deleted": n}
+    except Exception as e:
+        try: nx.rollback()
+        except Exception: pass
+        return {"ok": False, "detail": str(e)[:200]}
+    finally:
+        nx.close()

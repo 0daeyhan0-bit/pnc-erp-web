@@ -166,6 +166,13 @@ def doc_download(src: str = Query(...), key: str = Query(...), disp: str = Query
         raise HTTPException(400, "src 오류")
     mime = _mimetypes.guess_type(fname)[0] or "application/octet-stream"
     cd = "inline" if str(disp).lower() == "inline" else "attachment"
+    # ★바로보기(2026-09-04) — 텍스트류는 guess_type 이 못 알아보는 확장자가 많다(.md/.log/.csv…).
+    #   octet-stream 으로 나가면 브라우저가 무조건 다운로드해서 미리보기가 안 된다.
+    #   inline 요청일 때만 text/plain 으로 보정한다(다운로드 동작은 건드리지 않는다).
+    if cd == "inline" and mime == "application/octet-stream":
+        if (fname.rsplit(".", 1)[-1] if "." in fname else "").lower() in (
+                "md", "txt", "log", "csv", "json", "xml", "ini", "sql", "yml", "yaml"):
+            mime = "text/plain; charset=utf-8"
     return Response(content=data, media_type=mime,
                     headers={"Content-Disposition": f"{cd}; filename*=UTF-8''{_urlquote(fname)}"})
 

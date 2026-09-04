@@ -175,6 +175,109 @@ function enableSort(c, keys, getRows, render){
   });
 }
 
+/* ══ 그리드 공통: 헤더 더블클릭 정렬 + 좌측 열 틀고정 (2026-09-04 신설) ═══════════
+   기존 enableSort 는 단순 그리드용이라 ① 소계행이 있는 그룹 구조 ② 일자 피벗칸
+   ③ 틀고정을 다루지 못한다. 그 세 가지를 함께 지원하는 공통함수.
+
+   gridSort(st, opt) — 정렬 상태 관리
+     st  : 화면 상태 객체. st.rows(정렬 대상) · st.sortKey · st.sortAsc 를 쓴다.
+     opt.group : (row)=>string   그룹키. 주면 **그룹 대표값**으로 정렬해
+                                 소계행이 쪼개지지 않는다. 없으면 행 단위 정렬.
+     opt.value : (row,key)=>any  정렬값. 기본은 row[key],
+                                 key 가 'd:<ymd>' 면 row.day[ymd] 숫자.
+   반환 { arrow(key), apply(), bind(theadEl, redraw) }
+
+   freezeCols(tableEl, n, opt) — 왼쪽 n개 열을 가로스크롤에 고정
+     헤더는 화면별 CSS(position:sticky;top:0)가 이미 세로고정을 하므로
+     여기서는 left 만 계산해 붙인다(세로고정과 겹쳐도 안전).
+     opt.zBody/zHead 로 z-index 조정, opt.bg 로 배경색 지정(투명하면 글자가 겹친다). */
+function gridSort(st, opt){
+  opt = opt || {};
+  const val = opt.value || ((r,k)=>{
+    if(!k) return '';
+    if(k.slice(0,2)==='d:') return +((r.day||{})[k.slice(2)]||0);
+    const v = r[k];
+    return v==null ? '' : v;
+  });
+  const cmp = (a,b)=>{
+    const na=parseFloat(a), nb=parseFloat(b);
+    const aNum = (a!==''&&a!=null&&!isNaN(na)), bNum = (b!==''&&b!=null&&!isNaN(nb));
+    if(aNum&&bNum) return na-nb;
+    return String(a==null?'':a).localeCompare(String(b==null?'':b),'ko');
+  };
+  const arrow = (k)=> st.sortKey===k
+      ? (st.sortAsc?' <span style="color:#1c47a0">▲</span>':' <span style="color:#1c47a0">▼</span>')
+      : '';
+  const apply = ()=>{
+    const k = st.sortKey; if(!k || !st.rows || !st.rows.length) return;
+    const sgn = st.sortAsc ? 1 : -1;
+    if(!opt.group){ st.rows.sort((x,y)=>cmp(val(x,k),val(y,k))*sgn); return; }
+    /* 그룹 대표값 — 숫자면 합, 문자면 최소값 */
+    const rep = {};
+    st.rows.forEach(r=>{
+      const g = opt.group(r), v = val(r,k);
+      if(rep[g]===undefined) rep[g] = v;
+      else if(typeof v==='number') rep[g] = (+rep[g]||0) + v;
+      else if(String(v) < String(rep[g])) rep[g] = v;
+    });
+    st.rows.sort((x,y)=>{
+      const gx=opt.group(x), gy=opt.group(y);
+      if(gx!==gy){ const d=cmp(rep[gx],rep[gy]); if(d) return d*sgn; return gx<gy?-1:1; }
+      const d=cmp(val(x,k),val(y,k)); if(d) return d*sgn;
+      return 0;
+    });
+  };
+  const bind = (thead, redraw)=>{
+    if(!thead) return;
+    thead.querySelectorAll('th[data-sk]').forEach(th=>{
+      th.style.cursor='pointer';
+      if(!th.title) th.title='더블클릭하여 정렬';
+      th.ondblclick=(e)=>{
+        e.stopPropagation();                      // 리사이저 dblclick(너비초기화)과 충돌 방지
+        const k=th.dataset.sk;
+        if(st.sortKey===k) st.sortAsc=!st.sortAsc;
+        else { st.sortKey=k; st.sortAsc=true; }
+        redraw();
+      };
+    });
+  };
+  return { arrow, apply, bind };
+}
+
+function freezeCols(tbl, n, opt){
+  if(!tbl || !n) return;
+  opt = opt || {};
+  const bg = opt.bg || '#fff', bgh = opt.bgh || '#eef2f8';
+  const zb = opt.zBody||4, zh = opt.zHead||6;
+  const put=(cell,left,isHead)=>{
+    cell.style.position='sticky';
+    cell.style.left=left+'px';
+    cell.style.zIndex=(isHead?zh:zb);
+    if(!cell.style.background) cell.style.background=(isHead?bgh:bg);
+  };
+  const head=tbl.tHead && tbl.tHead.rows[0];
+  if(!head) return;
+  // 폭은 실제 렌더 폭으로 잰다(고정폭 style 이 없어도 정확)
+  const w=[]; for(let i=0;i<n && i<head.cells.length;i++) w.push(head.cells[i].offsetWidth);
+  let acc=0; const lefts=w.map(x=>{const v=acc; acc+=x; return v;});
+  for(let i=0;i<w.length;i++) put(head.cells[i], lefts[i], true);
+  [...tbl.tBodies].forEach(tb=>{
+    [...tb.rows].forEach(tr=>{
+      for(let i=0;i<w.length && i<tr.cells.length;i++){
+        // colspan 행(빈행·안내행)은 건드리지 않는다
+        if(tr.cells[i].colSpan>1) break;
+        put(tr.cells[i], lefts[i], false);
+      }
+    });
+  });
+  if(tbl.tFoot) [...tbl.tFoot.rows].forEach(tr=>{
+    for(let i=0;i<w.length && i<tr.cells.length;i++){
+      if(tr.cells[i].colSpan>1) break;
+      put(tr.cells[i], lefts[i], false);
+    }
+  });
+}
+
 /* ---- 모듈(상단) → 하위메뉴(좌측) 구성 ---- */
 const MODULES=[
  {id:'base',nm:'기준정보 관리',ic:'📦',subs:[
@@ -202,7 +305,7 @@ const MODULES=[
    {sep:true},
    {id:'stockreceipt',ic:'📥',nm:'자재입고관리'},
    {id:'matinput',ic:'📈',nm:'자재입고진행현황'},
-   {id:'matreceive',ic:'📦',nm:'자재입고(발주분)'},
+   {id:'matreceive',ic:'📦',nm:'자재입고(발주분)',hide:true},   // ★메뉴에서만 숨김(2026-09-04 사용자 요청 "나중에 사용") — 화면·API 는 그대로. 되살리려면 hide:true 만 제거.
    {id:'stockissue',ic:'📤',nm:'자재출고관리'},
    {id:'stockadjust',ic:'🛠️',nm:'자재재고조정'},
    {id:'saguboutput',ic:'📤',nm:'사급출고관리'},
@@ -258,6 +361,12 @@ const MODULES=[
    // {id:'prodresult',ic:'📊',nm:'생산실적현황'},
    {id:'gongsu',ic:'⏱️',nm:'공수등록(근무/지원)'},
    {sep:true},
+   // ★2026-09-04 품질 → 생산으로 이동(사용자 요청). 실제로 쓰는 부서가 생산이라
+   //   공수등록 아래에 구분선으로 묶어 둔다. 화면(SCREEN.scrapraw/meeting)은
+   //   screens.qc.js 에 그대로 있고 여기서 소속 메뉴만 옮긴 것이다.
+   {id:'scrapraw',ic:'🗑',nm:'가공스크랩관리'},
+   {id:'meeting',ic:'📝',nm:'품질 반성회의록'},
+   {sep:true},
    {id:'partstockadj',ic:'🛠️',nm:'생산파트재고조정'},
    {id:'partissue',ic:'📤',nm:'생산자재출고관리'},
  ]},
@@ -283,10 +392,9 @@ const MODULES=[
  ]},
  {id:'qc',nm:'품질',ic:'🔎',subs:[
    {id:'qcerror',ic:'🚫',nm:'품질불량관리'},
-   {id:'scrapraw',ic:'🗑',nm:'가공스크랩관리'},
    {id:'qcspec',ic:'📐',nm:'시방변경관리'},
    {id:'qciqc',ic:'🔬',nm:'수입검사(IQC)조회'},
-   {id:'meeting',ic:'📝',nm:'품질 반성회의록'},
+   // ★가공스크랩관리·품질 반성회의록 = 2026-09-04 생산 메뉴로 이동(위 prod subs 참조).
  ]},
  {id:'dev',nm:'개발',ic:'🧪',subs:[
    {id:'devmaster',ic:'🛠️',nm:'원가/BOM 기준정보'},

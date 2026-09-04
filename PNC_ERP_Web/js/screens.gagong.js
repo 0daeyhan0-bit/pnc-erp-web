@@ -198,8 +198,24 @@ SCREEN.gagongprog420=(c)=>{
     rowsP.forEach(r=>{tPlan+=+r.plan_qty||0;tFin+=+r.finish||0;tSale+=+r.sale||0;tPrs+=+r.prs||0;tPFn+=+r.prior_fn||0;tPPl+=+r.prior_pl||0;
       dates.forEach(d=>{dSum[d].dn+=(r.done&&r.done[d])||0;dSum[d].pl+=(r.days&&r.days[d])||0;});});
     const NC=23;  // 고정컬럼(Assy..당일이전 7 + 완료·출하·가공전표발행·가공창고·자재재고·도번고정·ASSY재고·자재사용량·자도번작업처·WO 11)
-    // ★정렬: assy(도번)→jado(가공컴포넌트) / assy 그룹별 청록 소계행(레거시 group trailer)
-    const disp=rowsP.slice().sort((a,b)=>(a.assy||'').localeCompare(b.assy||'')||(a.jado||'').localeCompare(b.jado||''));
+    /* ★정렬(2026-09-04 교정) — 레거시 순서에 맞춘다.
+         [종전] assy → jado 만 봐서 **도번(upper)이 정렬키에 없었다**.
+                그래서 같은 ASSY 안에서 AJR30012009 와 AJR30012009-20-1 이 자도번 순으로
+                뒤섞였다(65966706·65966711·65966716…). 백엔드에 정렬을 넣어도
+                여기서 다시 정렬해 **덮어써 버려** 화면이 그대로였다.
+         [현재] assy → upper(도번) → 시간 → jado.
+                · upper = 부모 도번. 이게 있어야 -20-1 하위가 부모 밑에 묶인다.
+                · 시간  = 레거시 커서순서(plan_ymd→part_output_hm→output_hm→wo,
+                          backend gagong.py:255 참조). 같은 도번 안은 INPUT 시간 순.
+         ※assy 그룹별 청록 소계행(레거시 group trailer)은 assy 경계에서 그리므로 영향 없음. */
+    const _s=v=>(v==null?'':String(v));
+    const disp=rowsP.slice().sort((a,b)=>
+        _s(a.assy).localeCompare(_s(b.assy))
+     || _s(a.upper).localeCompare(_s(b.upper))
+     || _s(a.plan_ymd).localeCompare(_s(b.plan_ymd))
+     || _s(a.phm).localeCompare(_s(b.phm))
+     || _s(a.ohm).localeCompare(_s(b.ohm))
+     || _s(a.jado).localeCompare(_s(b.jado)));
     const dcap=(v)=>v?nf(v):'';
     // ★행 선택(드래그) — 레거시 420: 계획셀 드래그로 여러건 고른 뒤 [전표발행] (2026-08-20)
     const rkey=(r)=>`${r.assy}|${r.jado}`;
@@ -1388,9 +1404,11 @@ async function printMoveSheets(groupFrom,groupTo,opt){
   }
   if(!groups.length){alert('인쇄할 전표 내역이 없습니다.');return;}
   const ymdw=s=>{s=(''+(s||'')).trim();if(s.length<6)return s;return `${s.slice(0,2)}/${s.slice(2,4)}/${s.slice(4,6)}`;};
+  /* ★바코드 확대(2026-09-04) — 제목을 키운 만큼 바코드도 같이 커져야 균형이 맞고,
+       스캐너 판독에도 유리하다. 생성 scale 2→3(인쇄 해상도), 표시 높이 22→34px. */
   const bc=(txt)=>`<div style="text-align:center;line-height:1">
-      <img src="${API}/api/barcode/code128?text=${encodeURIComponent(txt)}&h=40&scale=2"
-           style="height:22px;max-width:100%;image-rendering:pixelated" alt="${esc(txt)}">
+      <img src="${API}/api/barcode/code128?text=${encodeURIComponent(txt)}&h=60&scale=3"
+           style="height:34px;max-width:100%;image-rendering:pixelated" alt="${esc(txt)}">
       </div>`;
   // 카드1장 = 그룹 내 1개 item(자도번) — 레거시 p1: 그룹의 각 행이 개별 카드.
   const cards=[];
@@ -1461,13 +1479,17 @@ async function printMoveSheets(groupFrom,groupTo,opt){
         .mvc{border:2px solid #000;page-break-inside:avoid;break-inside:avoid;overflow:hidden;
              height:90mm;display:flex;flex-direction:column;margin-bottom:4mm}
         .mvc:last-child{margin-bottom:0}
-        .mvc-title{text-align:center;font-size:20px;font-weight:800;padding:5px;border-bottom:2px solid #000;position:relative;flex:0 0 auto}
-        .mvc-no{position:absolute;right:6px;top:8px;font-size:10px;color:#666;font-weight:400}
+        /* ★전체 확대(2026-09-04 사용자 요청) — 레거시 실물 대비 작았다.
+             카드 높이(90mm)·1장 3매 구성은 그대로 두고 글자만 키운다.
+             제목 20→32px · 값 19→28px · 라벨 12→17px · 일반셀 14→20px.
+             ※부품 품번은 최장 MJU66526302(11자) 정도라 28px 로도 셀을 넘지 않는다. */
+        .mvc-title{text-align:center;font-size:32px;font-weight:800;padding:6px;border-bottom:2px solid #000;position:relative;flex:0 0 auto;letter-spacing:3px}
+        .mvc-no{position:absolute;right:6px;top:12px;font-size:12px;color:#666;font-weight:400;letter-spacing:0}
         .mvc table{border-collapse:collapse;width:100%;flex:1 1 auto}
-        .mvc td{border:1px solid #000;padding:4px 8px;font-size:14px}
-        .mvc .lb{font-weight:700;background:#f5f5f5;width:20%;font-size:12px}
-        .mvc .big{font-size:19px;font-weight:800}
-        .mvc-ft{text-align:center;font-size:10px;padding:3px;border-top:1px solid #000;flex:0 0 auto}
+        .mvc td{border:1px solid #000;padding:6px 8px;font-size:20px;font-weight:700}
+        .mvc .lb{font-weight:700;background:#f5f5f5;width:20%;font-size:17px}
+        .mvc .big{font-size:28px;font-weight:800}
+        .mvc-ft{text-align:center;font-size:11px;padding:4px;border-top:1px solid #000;flex:0 0 auto}
         @media print{.noprint{display:none}}
       </style></head><body>
       ${TOOLBAR(`부품납품표 ${cards.length}장 · A4 세로(1장에 3매) · ${Math.ceil(cards.length/3)}쪽`)}
@@ -1484,19 +1506,25 @@ async function printMoveSheets(groupFrom,groupTo,opt){
       <style>
         @page{size:A4 portrait;margin:8mm}
         *{box-sizing:border-box}
+        /* ★전체 확대(2026-09-04 사용자 요청 "레거시 대비 크기가 작다").
+             레거시 실물은 제목이 페이지 폭을 가득 채우고 표 글자도 굵고 크다.
+             A4 한 장에 8행뿐이라 세로 여유가 많다 — 행 높이를 키워 그 공간을 쓴다.
+             제목 26→44px · 표 12→19px · 헤더행 14→20px · 확인칸 14→20px.
+             ※행수(8)·페이지 구성은 레거시 mod(cnt,8) 그대로 — 크기만 키운다. */
         body{margin:0;font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:11px;color:#000}
         .mvl{page-break-inside:avoid}
         .mvl+.mvl{page-break-before:always}     /* 마지막 쪽 뒤에 빈 페이지가 안 생기게 */
-        .mvl-title{font-size:26px;font-weight:800;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #000;padding-bottom:4px}
+        .mvl-title{font-size:44px;font-weight:800;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #000;padding-bottom:4px;letter-spacing:2px}
         /* ★2026-08-24 바코드 아래 전표번호 + 쪽수(n/N) 표시 */
         .mvl-bc{display:block;text-align:right}
-        .mvl-sn{display:flex;justify-content:space-between;gap:14px;font-size:11px;font-weight:400;
+        .mvl-sn{display:flex;justify-content:space-between;gap:14px;font-size:13px;font-weight:400;
                 letter-spacing:.5px;margin-top:1px;padding:0 2px}
-        .mvl-hd{display:flex;gap:20px;font-size:14px;padding:4px 0;border-bottom:1px solid #000}
-        .mvl table{border-collapse:collapse;width:100%;margin-top:2px}
-        .mvl th,.mvl td{border:1px solid #000;padding:4px 6px;font-size:12px;text-align:center}
-        .mvl .chk span{display:inline-block;width:14px;height:14px;border:1px solid #000}
-        .mvl-ft{text-align:center;font-size:9px;padding:4px;border-top:1px solid #000;margin-top:2px}
+        .mvl-hd{display:flex;gap:20px;font-size:22px;font-weight:700;padding:7px 0;border-bottom:1px solid #000}
+        .mvl table{border-collapse:collapse;width:100%;margin-top:3px}
+        .mvl th,.mvl td{border:1px solid #000;padding:9px 6px;font-size:19px;font-weight:700;text-align:center}
+        .mvl thead th{font-size:20px}
+        .mvl .chk span{display:inline-block;width:20px;height:20px;border:1px solid #000}
+        .mvl-ft{text-align:center;font-size:11px;padding:5px;border-top:1px solid #000;margin-top:3px}
         @media print{.noprint{display:none}}
       </style></head><body>
       ${TOOLBAR(`부품확인/납품표 ${listPages.length}쪽 · A4`)}

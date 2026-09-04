@@ -425,7 +425,16 @@ def gagong_move580_sheets(from_ymd: str = Query(""), to_ymd: str = Query(""),
         wsql = ' AND '.join(w)
         cur.execute(f"""SELECT TOP {max(1,min(int(limit),3000))}
               u.MAINT_YMD, u.MAINT_SEQ, u.MAINT_GROUP_SEQ, u.CHECK_LIST_SEQ,
-              COALESCE(pg.GAGONG_PROC_DESC, u.PR_PART_CODE, cc.CUST_DESC, '') dest,
+              -- ★출고처 — 빈 문자열까지 건너뛰게 NULLIF 로 감싼다(2026-09-04 교정).
+              --   종전 COALESCE(pg.GAGONG_PROC_DESC, u.PR_PART_CODE, cc.CUST_DESC, '') 는
+              --   COALESCE 가 **NULL 만** 건너뛰므로, PR_PART_CODE 가 빈 문자열('')인 행에서
+              --   거기 멈춰 뒤의 CUST_DESC(사급업체명)에 도달하지 못했다.
+              --   ⟹ 업체 납품 행만 출고처가 빈칸으로 보였다(사용자 실측: 전표 185,903 등).
+              --   같은 파일의 인쇄용 쿼리(아래 line 컬럼)는 이미 NULLIF 방식이라 정상이었고,
+              --   그래서 "출력물에는 썬텍코리아주식회사가 찍히는데 그리드만 빈칸"이었다.
+              COALESCE(NULLIF(LTRIM(RTRIM(pg.GAGONG_PROC_DESC)),''),
+                       NULLIF(LTRIM(RTRIM(cc.CUST_DESC)),''),
+                       NULLIF(LTRIM(RTRIM(u.PR_PART_CODE)),''), '') dest,
               u.ITEM_CODE, u.MAT_CODE, ISNULL(mi.item_name,'') nm, ISNULL(su.RACK_NO,'') rack,
               u.MAINT_QTY, u.IN_CONFIRM_FLAG, ISNULL(u.IN_CONFIRM_DATETIME,'') confirm_dt,
               ISNULL(u.IN_CONFIRM_USER_ID,'') confirm_user

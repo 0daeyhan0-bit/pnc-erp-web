@@ -457,6 +457,11 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                 # ★자재수량=도번 계획수량(Σ제번 plan_qty) — 레거시 410 정의. 자도번 part_plan_qty 합(과다) 아님.
                 g["matq"] = sum(g.pop("_woreq").values()); g["reqq"] = g["matq"]
                 g["line"] = ",".join(sorted(g.pop("_lines"))) or ""
+                # ⚠직납품(자도번LIST 가 자기 자신뿐) 자재수량 — 규칙 미확정(2026-09-04).
+                #   레거시 MJU63357501 2,309 / AJR73324501 42 인데
+                #   웹 소요합·days합은 6,363 / 84 로 약 2.7배다(일자별로도 397 vs 229).
+                #   LOT(953/21) 도 아니고 소요합도 아니다 — 무엇을 세는지 확정 전까지
+                #   기존 축(Σ제번 plan_qty)을 유지한다. 추측으로 채우면 다른 도번이 깨진다.
         else:
             # ★부자재/기타 = 자도번(mat) 단위 롤업 — 여러 도번/제번에 걸친 같은 자도번 합침. 도번컬럼=속한 도번들.
             for r in raw:
@@ -528,11 +533,24 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
             else:
                 g["nm"] = ""; g["workcenter"] = ""; g["spec"] = ""
             items = sorted(g["parts"].items())
-            g["part"] = ", ".join(f"{mc}{{{_qint(q)}}}" for mc, q in items)  # 자도번LIST(도번{수량})
+            # ★괄호값 = **개당 소요량**(BOM 계수) — 레거시와 같은 표기(2026-09-04 사용자 지시).
+            #   레거시: ACQ30605001-4-1{1} / MJU62326612{1},…  ← 1개 만들 때 몇 개 드는가
+            #   종전 웹: {14}, {5} …  = 총 소요량(개당×LOT) 이라 숫자가 크게 나왔다.
+            #   총량 ÷ LOT 으로 되돌린다. LOT 이 0 이면 총량 그대로 둔다(나눌 수 없다).
+            _lotv = float(g.get("lot") or 0)
+            def _per(q):
+                if _lotv > 0:
+                    v = float(q) / _lotv
+                    return _qint(v) if abs(v - round(v)) < 1e-6 else round(v, 2)
+                return _qint(q)
+            g["part"] = ", ".join(f"{mc}{{{_per(q)}}}" for mc, q in items)  # 자도번LIST(도번{개당소요})
             g["jcnt"] = len(items)
             g["lot"] = _qint(g["lot"]); g["reqq"] = _qint(g["reqq"]); g["matq"] = _qint(g["matq"])
             g["doneq"] = None   # ⚠ 완료수량: 레거시 라이브 실적조인 원천 미확정 → 담당확인(추측채움 금지)
             g["days"] = {k2: _qint(v2) for k2, v2 in g["days"].items()}; g["tot"] = _qint(g["tot"])
+            # 직납품 표시(자도번LIST 가 자기 자신뿐 = BOM 하위 없음) — 자재수량 보정은
+            # days 가 최종 확정된 뒤(아래 fulfillment 이후)에 한다.
+            g["_direct"] = (len(items) == 1 and items[0][0] == str(g["assy"]).strip())
             g.pop("parts", None)
         # ★정렬 = 도번 기준(2026-09-04 사용자 지시). 종전엔 작업처·라인이 앞에 있어
         #   라인이 바뀔 때마다 도번이 되돌아갔다(CA→KS→CM 구간마다 재시작).
@@ -587,6 +605,8 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
         else:
             note += " 완료수량=협력사(외주) 지정 시 표시(레거시는 협력사별 화면)."
         if capped: note = f"⚠ 부품 {CAP_PARTS:,}행 상한 — 자도번작업처/제번으로 좁히세요. " + note
+        # (모델·입고구분은 세트제외 행을 붙인 **뒤**에 채운다 — 아래 return 직전.
+        #  여기서 채우면 그 뒤 rows 재구성에 날아간다.)
         # ★세트제외(공용품) 행 추가 — 거래명세서발행(420)·자재세트입고현황(130)과 같은 규칙
         #   (2026-09-04 사용자 지적: "여기는 세트제외가 있는데 협력사 계획현황은 그대로").
         #   레거시는 도번 행과 **별개로** 세트제외 자재를 자기 행(도번=자재 자신)으로 만든다.
@@ -617,12 +637,92 @@ def _planstatus_legacy(from_ymd, to_ymd, wc, part, assy, line, gubun):
                         "colors": _r.get("colors") or {}, "lookup": "",
                         "setexc": 1})
                 if _se:
+                    # ★원본 행 정리 — 제외로 뽑아낸 자재만 남은 상위도번 행은 화면에서
+                    #   지운다(레거시 deleterow). 단 **자재수량은 총계에 남긴다**.
+                    #   레거시 ue_retrieve 는 자도번LIST 정리(=deleterow) 를 자재수량
+                    #   집계 뒤에 하므로, 화면 행은 사라져도 합계에는 그 값이 남는다.
+                    #   실측 2026-09-04(미래정밀 2096 · 31일):
+                    #     삭제 O → LOT 42,078(레거시 일치) · 자재 40,777(-1,365)
+                    #     삭제 X → LOT 42,860(+782)        · 자재 41,559(-583)
+                    #   ⟹ LOT 은 삭제 후가 맞고 자재수량은 삭제 전이 맞다 = 아래처럼
+                    #     행은 빼되 그 자재수량을 세트제외 행에 얹는다.
+                    import re as _re
+                    _excpair = set()
+                    for _r in _se:
+                        _m = _r.get("assy") or ""
+                        for _tok in str(_r.get("mat_list") or "").split(","):
+                            _tok = _tok.strip()
+                            if _tok.startswith("상위도번:"):
+                                _excpair.add((_tok[5:].strip(), _m))
+                    #   ※세트제외 행에 얹지는 않는다 — 그러면 그 행 자재수량이
+                    #     782 → 1,564 로 두 배가 되어 레거시(782)와 어긋난다(실측).
+                    _keep, _carry = [], 0
+                    for g in rows:
+                        if g.get("setexc"):
+                            _keep.append(g); continue
+                        _lst = str(g.get("part") or "")
+                        if not _lst:
+                            _keep.append(g); continue
+                        _out = []
+                        for _tok in _lst.split(","):
+                            _t = _tok.strip()
+                            if not _t:
+                                continue
+                            _code = _re.split(r"[\{\[]", _t, 1)[0].strip()   # "MJU…{41}" → 코드
+                            if (g.get("assy") or "", _code) in _excpair:
+                                continue
+                            _out.append(_t)
+                        if _out:
+                            g["part"] = ", ".join(_out); g["jcnt"] = len(_out)
+                            _keep.append(g)
+                        else:
+                            _carry += int(g.get("matq") or 0)   # 지운 행의 자재수량은 보존
+                    rows = _keep
                     # 세트제외를 맨 위로(420·130 동일)
                     rows.sort(key=lambda x: (0 if x.get("setexc") else 1,
                                              x["assy"] or "", x["wcnm"] or "", x["line"]))
                     for i, g in enumerate(rows, 1): g["seq"] = i
             except Exception as _e:
                 note += f" ⚠세트제외 행 생성 오류: {str(_e)[:80]}"
+        # ★직납품 자재수량 = **일자셀 합계**(2026-09-04 사용자 확정).
+        #   실측 MJU63357501 : 레거시 자재 2,309 = 일자셀 16칸 합 = 웹 days 합(일치 확인).
+        #                      종전엔 LOT 953 을 넣어 -1,356 오차였다.
+        #   AJR73324501 도 같은 축(레거시 42 · LOT 21).
+        #   ※fulfillment 가 days 를 다시 쓰므로 **최종 확정 뒤**에 계산해야 한다
+        #     (앞에서 하면 롤업 전 값이라 6,363 처럼 부푼다).
+        for g in rows:
+            if g.pop("_direct", False):
+                g["matq"] = _qint(sum((g.get("days") or {}).values()))
+        # ★모델 — 레거시 4주간계획수량 화면에도 있는 컬럼(2026-09-04 사용자 요청).
+        #   도번의 제번이 붙은 모델명(nx.plan_dtl.MODEL_NO). 여러 개면 대표 1개.
+        #   자재세트입고현황(130)도 같은 nx.plan_dtl.MODEL_NO 를 쓴다(제번 기준).
+        #   여기선 도번 단위 행이라 plan_item_dtl(도번↔제번)로 이어 붙인다.
+        try:
+            _ac = sorted({str(g.get("assy") or "").strip() for g in rows if g.get("assy")})
+            _mdl = {}
+            for i in range(0, len(_ac), 900):
+                ch = _ac[i:i + 900]; ph = ",".join("?" * len(ch))
+                # ★이 함수는 RO 커넥션(_conn)이라 기본DB가 PARTNER_ERP 다.
+                #   'nx.…' 로 쓰면 개체를 못 찾는다 — 전체 이름(P)을 쓴다.
+                cur.execute(f"""SELECT RTRIM(d.C_ITEM_CODE), MAX(RTRIM(ISNULL(p.MODEL_NO,'')))
+                                  FROM PARTNER_ERP_TEST3.nx.plan_item_dtl d WITH(NOLOCK)
+                                  JOIN PARTNER_ERP_TEST3.nx.plan_dtl p WITH(NOLOCK)
+                                       ON RTRIM(p.WORK_ORDER)=RTRIM(d.WORK_ORDER)
+                                 WHERE RTRIM(d.C_ITEM_CODE) IN ({ph})
+                                 GROUP BY RTRIM(d.C_ITEM_CODE)""", *ch)
+                for a, b in cur.fetchall():
+                    v = (b or "").strip()
+                    if v:
+                        _mdl[str(a).strip()] = v
+            for g in rows:
+                g["model"] = _mdl.get(str(g.get("assy") or "").strip(), "")
+        except Exception as _e:
+            for g in rows:
+                g.setdefault("model", "")
+            note += f" ⚠모델 조회 오류: {str(_e)[:90]}"
+        # ★입고구분 — 세트제외가 아니면 전부 '세트입고'(130·420 과 같은 규칙).
+        for g in rows:
+            g["in_gubun"] = "세트입고제외" if g.get("setexc") else "세트입고"
         return {"dates": dates_out, "rows": rows, "cnt": len(rows), "frac": frac,
                 "sum_qty": _qint(sum(g["matq"] for g in rows)), "note": note}
     finally:
@@ -873,11 +973,70 @@ def partner_planstatus(request: Request, from_ymd: str = Query(""), to_ymd: str 
         # ★도번순 정렬(2026-08-28 사용자 요청 → 2026-09-04 도번 최우선으로 교정).
         #   SQL ORDER BY 는 WORK_ORDER 가 먼저라 같은 도번이 제번별로 흩어져 보였다.
         #   작업처를 앞에 두면 작업처가 바뀔 때마다 도번이 되돌아가므로 도번을 앞에 둔다.
-        rows.sort(key=lambda x: ((x.get("assy") or ""), (x.get("workcenter") or "")))
+        # ★세트제외(공용품) 행 — 자재세트입고현황(130)·거래명세서발행(420)과 같은 규칙.
+        #   레거시 w_pr_outside_410 은 도번 행과 별개로 세트제외 자재를 자기 행으로 만들고,
+        #   그 자재만 남은 상위도번 행은 자도번LIST 에서 빼서 빈 행이면 지운다.
+        #   ★도번(assy)을 지정해 조회하면 만들지 않는다 — 레거시 원문 주석
+        #     "도번으로 조회할 경우 공용품때문에 세트입고제외품을 별도 표시하지 않는다".
+        if gubun == "외주" and wc.strip() and not assy.strip():
+            try:
+                import re as _re
+                _se = _setexc_rows(wc.strip(), _f6 or (dates[0] if dates else ""),
+                                   _t6 or (dates[-1] if dates else ""), dates,
+                                   (rows[0].get("wcnm") if rows else wc.strip()),
+                                   "part_plan_ymd", len(dates) or 31)
+                for _r in _se:
+                    _q = float(_r.get("plan") or 0)
+                    rows.append({
+                        "wc": wc.strip(),
+                        "wcnm": _r.get("custnm") or (rows[0].get("wcnm") if rows else wc.strip()),
+                        "wo": "", "assy": _r.get("assy") or "",
+                        "part": _r.get("mat_list") or "",   # 자도번LIST = "상위도번:A,…"
+                        "nm": _r.get("nm") or "", "spec": _r.get("spec") or "",
+                        "line": _r.get("line") or "", "model": "",
+                        "workcenter": _r.get("workcenter") or "",
+                        "lot": _qint(_r.get("lot") or 0),
+                        "days": _r.get("days") or {}, "tot": _qint(_q),
+                        "donedays": _r.get("donedays") or {}, "colors": _r.get("colors") or {},
+                        "doneq": _qint(_r.get("done") or 0), "reqq": _qint(_r.get("req") or 0),
+                        "mats": "", "matn": 0, "wocnt": 0,
+                        "setexc": 1})
+                if _se:
+                    # 제외로 뽑아낸 자재를 상위도번 행의 자도번LIST 에서 빼고, 비면 그 행을 지운다.
+                    _excpair = set()
+                    for _r in _se:
+                        _m = _r.get("assy") or ""
+                        for _tok in str(_r.get("mat_list") or "").split(","):
+                            _tok = _tok.strip()
+                            if _tok.startswith("상위도번:"):
+                                _excpair.add((_tok[5:].strip(), _m))
+                    _keep = []
+                    for g in rows:
+                        if g.get("setexc"):
+                            _keep.append(g); continue
+                        _lst = str(g.get("mats") or "")
+                        if not _lst:
+                            _keep.append(g); continue
+                        _out = [t.strip() for t in _lst.split(",") if t.strip()
+                                and (g.get("assy") or "",
+                                     _re.split(r"[\{\[]", t.strip(), 1)[0].strip()) not in _excpair]
+                        if _out:
+                            g["mats"] = ", ".join(_out); g["matn"] = len(_out)
+                            _keep.append(g)
+                    rows = _keep
+            except Exception as _e:
+                note += f" ⚠세트제외 행 생성 오류: {str(_e)[:80]}"
+        # ★세트제외를 맨 위로, 그 다음 도번순(2026-09-04 사용자 지시).
+        #   종전엔 작업처·라인이 앞이라 라인이 바뀔 때마다 도번이 되돌아갔다.
+        rows.sort(key=lambda x: (0 if x.get("setexc") else 1,
+                                 (x.get("assy") or ""), (x.get("workcenter") or "")))
         for i, r in enumerate(rows, 1):
             r.pop("_mats", None)                 # 내부 계산용 키 제거
             r["lot"] = _qint(r.get("lot") or 0); r["tot"] = _qint(r["tot"]); r["seq"] = i
             r["days"] = {k2: _qint(v2) for k2, v2 in r["days"].items()}
+            # ★입고구분 — 세트제외가 아니면 전부 '세트입고'(130·420 과 같은 규칙).
+            r["in_gubun"] = "세트입고제외" if r.get("setexc") else "세트입고"
+            r.setdefault("model", "")
         return {"dates": dates, "rows": rows, "cnt": len(rows), "frac": frac,
                 "sum_qty": sum(r["tot"] for r in rows), "note": note}
     finally:

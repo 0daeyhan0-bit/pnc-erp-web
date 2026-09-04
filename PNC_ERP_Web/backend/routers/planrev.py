@@ -498,7 +498,17 @@ def _step7_sql(cur):
     LEFT JOIN (SELECT RTRIM(work_order) AS work_order, MIN(pull_ymd) AS pull_ymd
                  FROM nx.plan_direct_pull GROUP BY RTRIM(work_order)) dpx
            ON dpx.work_order=RTRIM(a.work_order)
-         AND a.bom_level=0 AND a.bom_mat_code=a.assy_item_code""".replace("{B}", _mat_base) + """
+         AND a.bom_level=0
+         -- ★2026-09-04 — 클램프 예외를 **-SUB 까지** 넓힌다.
+         --   종전엔 `bom_mat_code=assy_item_code` 뿐이라 사내 SUB 만 조인에 실패했다.
+         --   그러면 직납당김이 있는 제번인데도 SUB 행만 기준일로 클램프돼 하루 밀린다.
+         --   실측 6I2M03R7 : plan_direct_pull 에 260903 이 있는데
+         --     AJJ30041901 260903(조인성립) / AJJ30041901-SUB 260904(조인실패).
+         --   사용자 확정 "-SUB 는 상위 계산 다음에 이어서 계산되고 시간차가 낮아"
+         --     → 상위와 같은 날. P1 실측 50건 전부 웹=레거시+1일 이었다.
+         --   ⚠조건을 통째로 빼면 안 된다 — 일반자재 4,505행까지 하루 당겨져
+         --     레거시(260904)와 오히려 어긋난다(시뮬 0/20). SUB 로 한정한다.
+         AND (a.bom_mat_code=a.assy_item_code OR a.bom_mat_code LIKE '%-SUB')""".replace("{B}", _mat_base) + """
     WHERE NOT EXISTS(SELECT 1 FROM nx.plan_part_mat_tmp d WHERE d.work_order=a.work_order AND d.split_work_order=a.split_work_order AND d.assy_item_code=a.assy_item_code AND d.bom_level>a.bom_level AND d.bom_mat_code=a.bom_mat_code)
       AND NOT EXISTS(SELECT 1 FROM {P}item wj WHERE wj.item_code=a.bom_mat_code AND wj.item_code LIKE 'RAC%' AND ISNULL(wj.item_name,'') NOT LIKE N'%용접링%')
     GROUP BY a.plan_ymd,a.work_order,a.split_work_order,a.assy_item_code,a.bom_level,a.upper_item_code,a.item_code,a.proc_seq,a.bom_mat_code""").replace("{P}", P))
