@@ -112,7 +112,13 @@ def setstock_list(cust: str = Query(""), item: str = Query(""), gubun: str = Que
 @router.get("/api/gagongset/hist")
 def setstock_hist(item: str = Query(""), cust: str = Query(""),
                   from_ymd: str = Query(""), to_ymd: str = Query(""), limit: int = Query(500)):
-    """세트재고 조정이력 — 라이브(레거시 조정분) + nx(웹 조정분) 합산 조회."""
+    """세트재고 조정이력 — ★nx 단일소스(2026-09-07).
+
+       종전엔 라이브 UNION ALL nx 라 **같은 이력이 두 줄씩** 나왔다(반성회일지와 같은 결함).
+       실측: 라이브 92,384행 / nx 92,377행 · **nx 에만 있는 건 0** (nx 는 라이브 미러 복사본).
+             라이브에만 7건은 미러 동기화 시차분(nx 최신 260904 / 라이브 260907)이라
+             다음 동기화에 따라온다 — 두 소스를 합칠 이유가 되지 못한다.
+       CLAUDE.md §1-9-1(한 개념에 소스는 하나) 준수."""
     d6a = _d6(from_ymd) if from_ymd else ""
     d6b = _d6(to_ymd) if to_ymd else ""
     w = ["1=1"]; p = []
@@ -128,14 +134,10 @@ def setstock_hist(item: str = Query(""), cust: str = Query(""),
               u.MAINT_QTY, ISNULL(u.REMARKS,''), ISNULL(u.INSERT_USER_ID,''), u.INSERT_DATETIME, u.SRC
             FROM (
               SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_TAG,m.CUST_CODE,m.ITEM_CODE,m.MAINT_QTY,
-                     m.REMARKS,m.INSERT_USER_ID,m.INSERT_DATETIME,'라이브' SRC
-                FROM {LIVE}.PU_T_SET_STOCK_MAINT_GAGONG m WHERE {wsql}
-              UNION ALL
-              SELECT m.MAINT_YMD,m.MAINT_SEQ,m.MAINT_TAG,m.CUST_CODE,m.ITEM_CODE,m.MAINT_QTY,
                      m.REMARKS,m.INSERT_USER_ID,m.INSERT_DATETIME,'nx' SRC
                 FROM {NX}.PU_T_SET_STOCK_MAINT_GAGONG m WHERE {wsql}
             ) u
-            ORDER BY u.MAINT_YMD DESC, u.MAINT_SEQ DESC""", *(p + p))
+            ORDER BY u.MAINT_YMD DESC, u.MAINT_SEQ DESC""", *p)
         rows = [{"ymd": r[0], "seq": r[1], "tag": r[2], "cust": r[3], "item": r[4],
                  "qty": _f(r[5]), "remarks": r[6], "user": r[7],
                  "dt": str(r[8] or "")[:19], "src": r[9]} for r in cur.fetchall()]
